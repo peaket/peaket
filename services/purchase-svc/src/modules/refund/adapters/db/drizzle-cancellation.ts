@@ -5,7 +5,7 @@ import { DATABASE, type Database } from '@peaket/platform';
 import { and, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { SeatMap, SeatSales } from '../../../inventory/index.js';
 import type { CancellationOrderView, CancellationReason, CancellationRecord, CancellationWriteOutcome, DueRefund } from '../../domain/cancellation.js';
-import type { CancellationConfigs, CancellationOrders, CancellationWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
+import type { CancellationClaims, CancellationConfigs, CancellationOrders, CancellationWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
 import { DrizzleOrderStore, orderCancellation, orderItem, purchaseOrder } from '../../../booking/index.js';
 
 /** 주문·항목·회차 설정을 읽는 어댑터. 티켓 ID로 주문 한 장을 찾는다 */
@@ -68,7 +68,7 @@ export class DrizzleCancellationOrders implements CancellationOrders {
 
 /** order_cancellation 쓰기. 같은 취소 ID는 REPLAYED, 같은 티켓의 다른 진행 중 취소는 CONFLICT다 */
 @Injectable()
-export class DrizzleCancellationWrites implements CancellationWrites {
+export class DrizzleCancellationWrites implements CancellationWrites, CancellationClaims {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     @Inject('REFUND_ORDER_STORE') private readonly orders: DrizzleOrderStore,
@@ -227,6 +227,16 @@ export class DrizzleCancellationWrites implements CancellationWrites {
       status: r.status as 'REQUESTED' | 'REFUND_PENDING',
       attempts: r.attempts,
     }));
+  }
+
+  /** 보류 취소 조건부 집기(BAT-420 GAT-090 A2, 빈 뼈대) */
+  async claimDue(_cancellationId: string, _nowMs: number): Promise<boolean> {
+    throw new Error('아직 없음');
+  }
+
+  /** 입장 기록이 나온 보류 취소에 entry_recorded_at을 쓰고 refund_due_at을 비운다(BAT-420 P-T19 ①, 빈 뼈대) */
+  async markEntryRecorded(_cancellationId: string, _enteredAtMs: number, _nowMs: number): Promise<boolean> {
+    throw new Error('아직 없음');
   }
 }
 

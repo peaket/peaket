@@ -73,6 +73,8 @@ let ticketCancels: GrpcTicketCancellations | undefined;
 let paymentCancels: GrpcPaymentCancellations | undefined;
 let saga: CancelTicket;
 let quote: QuoteCancellation;
+/** BAT-420 A3: 결제사 대역이 답하기 직전에 부를 끼어들기(그사이 CS가 취소를 무효로 바꾼 경우를 흉내 낸다) */
+let beforeGatewayAnswer: (() => Promise<void>) | undefined;
 let writes: DrizzleCancellationWrites;
 let gatewayOutcome: CancelResult['outcome'] = 'CANCELLED';
 let gatewayCalls: Parameters<PaymentGatewayPort['cancel']>[0][] = [];
@@ -127,6 +129,7 @@ beforeAll(async () => {
     pg: 'TOSS',
     cancel: async (c: Parameters<PaymentGatewayPort['cancel']>[0]) => {
       gatewayCalls.push(c);
+      if (beforeGatewayAnswer) await beforeGatewayAnswer();
       return { outcome: gatewayOutcome };
     },
   } as unknown as PaymentGatewayPort;
@@ -450,8 +453,8 @@ describe('견적·취소 Saga', () => {
     // ticket-svc는 공연 시작 전이라 REFUND_NOW를 주지만, 견적이 입장 시작 뒤라고 했으므로 환급을 미룬다
     expect(await ticketRow(w.ticketId)).toMatchObject({ status: 'REFUNDED' });
 
-    const later = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => w.eventStartsAtMs + 50 * HOUR + 1 });
-    await expect(later.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0 });
+    const later = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => w.eventStartsAtMs + 50 * HOUR + 1 });
+    await expect(later.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_amount: 10_000 });
     expect(gatewayCalls).toHaveLength(1);
     expect(gatewayCalls[0]).toMatchObject({ amount: 10_000, idemKey: `cancel-${cancellationId}` });
@@ -490,11 +493,11 @@ describe('견적·취소 Saga', () => {
 
     // 다음 재시도 시각(두 번째 실패 뒤 5분)이 지나면 실행기가 같은 멱등키로 다시 부른다
     gatewayOutcome = 'CANCELLED';
-    const early = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 5 * 60_000 - 1 });
-    await expect(early.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0 });
+    const early = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 5 * 60_000 - 1 });
+    await expect(early.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
     expect(gatewayCalls).toHaveLength(2);
-    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 5 * 60_000 });
-    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0 });
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 5 * 60_000 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
     expect(gatewayCalls).toHaveLength(3);
     expect(gatewayCalls[2]).toMatchObject({ amount: 90_000, idemKey: `cancel-${cancellationId}` });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempts: 2, next_refund_at: null, refund_failed_at: null });
@@ -516,8 +519,8 @@ describe('견적·취소 Saga', () => {
     expect(gatewayCalls).toHaveLength(1);
 
     gatewayOutcome = 'CANCELLED';
-    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 24 * HOUR });
-    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0 });
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 24 * HOUR });
+    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
     expect(gatewayCalls).toHaveLength(1);
   });
 
@@ -528,8 +531,8 @@ describe('견적·취소 Saga', () => {
     const cancellationId = randomUUID();
     await cancelOf(w, cancellationId);
     await admin.pool.query('update order_cancellation set refund_attempts = 4, next_refund_at = $2 where id = $1', [cancellationId, new Date(NOW + 60_000)]);
-    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 60_001 });
-    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1 });
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 60_001 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0 });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempts: 5, next_refund_at: null, refund_last_error: 'UNKNOWN' });
     expect((await cancellationRow(cancellationId))!.refund_failed_at).not.toBeNull();
     expect(gatewayCalls).toHaveLength(2);
@@ -642,4 +645,132 @@ describe('GAT-080 S2 앞 시도가 티켓 단계만 마친 팬 취소 잇기 [�
     expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('SOLD');
     expect(gatewayCalls).toHaveLength(0);
   });
+});
+
+// ---- BAT-420(시험 담당, 구현 전에 씀): 마감 뒤 환급 전 입장 기록 대조(P-T19 ①③)·조건부 집기 경합(A2)·무효 덮기 막기(A3) ----
+// 입장 기록은 실제 ticket-svc DB의 scan_event이고, 실행기는 실제 ticket-svc gRPC GetEntryRecords로 묻는다(ticketCancels).
+// 정본 값: 마감 = 공연 시작 + 50시간(180,000,000ms), 들어감·통과만 입장, 권면 33,333원의 공연 당일 90% 공제 → 공제 29,999·환급 3,334.
+describe('BAT-420 마감 뒤 환급의 입장 기록 대조 [실제 ticket-svc·payment-svc]', () => {
+  let scanSeq = 5_000_000;
+  const scan = (w: World, direction: 'IN' | 'OUT', result: 'PASS' | 'REJECT', atMs: number) =>
+    ticketDb.pool.query(
+      `insert into scan_event (id, event_id, ticket_id, scanner_device_id, direction, method, result, scanned_at_device, known_seq, device_seq, received_at)
+       values ($1, $2, $3, $4, $5, 'QR', $6, $7, 0, $8, $9)`,
+      [randomUUID(), w.eventId, w.ticketId, randomUUID(), direction, result, new Date(atMs), ++scanSeq, new Date(atMs + 1_000)],
+    );
+  /** 입장 시작 뒤 팬 취소로 REQUESTED(마감 뒤 환급)를 만든다 */
+  const heldCancellation = async () => {
+    const w = await world({ eventStartsAtMs: NOW + 2 * HOUR, entryOpensAtMs: NOW - HOUR, ticketPrice: 33_333 });
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    const cancellationId = randomUUID();
+    await expect(cancelOf(w, cancellationId)).resolves.toMatchObject({ status: 'ACCEPTED', cancellationId, refundAmount: 3_334, refundAfterEntryClose: true });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REQUESTED', deduction_amount: 29_999, refund_amount: 3_334 });
+    return { w, cancellationId, dueMs: w.eventStartsAtMs + 180_000_000 };
+  };
+  const counting = () => {
+    const seen = { lookups: 0 };
+    return { seen, entries: { lookup: (ids: readonly string[], deadlineMs: number) => (seen.lookups++, ticketCancels!.lookup(ids, deadlineMs)) } };
+  };
+  const logSink = () => {
+    const lines: { level: 'warn' | 'error'; o: object; msg: string }[] = [];
+    return { lines, log: { warn: (o: object, msg: string) => void lines.push({ level: 'warn', o, msg }), error: (o: object, msg: string) => void lines.push({ level: 'error', o, msg }) } };
+  };
+  const entryRecordedAt = async (cancellationId: string) =>
+    (await admin.pool.query<{ entry_recorded_at: Date | null; refund_due_at: Date | null }>('select entry_recorded_at, refund_due_at from order_cancellation where id = $1', [cancellationId])).rows[0]!;
+
+  test('P-T19 ① 마감 뒤 실행기가 들어감·통과 기록을 찾으면 결제사를 부르지 않고 가장 이른 입장 시각을 남겨 이상 표시를 한 번 열며 다시 돌려도 묻지 않는다', async () => {
+    const { w, cancellationId, dueMs } = await heldCancellation();
+    await scan(w, 'IN', 'PASS', w.eventStartsAtMs + 5 * 60_000);
+    await scan(w, 'IN', 'PASS', w.eventStartsAtMs + 60_000);
+    const flags: Record<string, unknown>[] = [];
+    const c = counting();
+    const runner = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: c.entries, claims: writes, flags: { open: async (q) => void flags.push({ ...q }) }, nowMs: () => dueMs });
+    await expect(runner.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 1, unverified: 0 });
+    expect(gatewayCalls).toHaveLength(0);
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REQUESTED', refund_attempts: 0, refund_failed_at: null });
+    const recorded = await entryRecordedAt(cancellationId);
+    expect(recorded.entry_recorded_at?.getTime()).toBe(w.eventStartsAtMs + 60_000);
+    expect(recorded.refund_due_at).toBeNull();
+    expect(flags).toEqual([{ cancellationId, orderId: w.orderId, ticketId: w.ticketId, enteredAtMs: w.eventStartsAtMs + 60_000, nowMs: dueMs }]);
+
+    await expect(runner.run()).resolves.toMatchObject({ entryRecorded: 0, refunded: 0 });
+    expect(c.seen.lookups).toBe(1);
+    expect(gatewayCalls).toHaveLength(0);
+    expect(flags).toHaveLength(1);
+  });
+
+  test('P-T19 ③ 입장 기록이 거절(IN, REJECT)·나감(OUT, PASS)뿐이면 마감 뒤 한 번만 3,334원을 환급하고 다시 돌려도 그대로다', async () => {
+    const { w, cancellationId, dueMs } = await heldCancellation();
+    await scan(w, 'IN', 'REJECT', w.eventStartsAtMs + 60_000);
+    await scan(w, 'OUT', 'PASS', w.eventStartsAtMs + 2 * 60_000);
+    const runner = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => dueMs });
+    await expect(runner.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
+    expect(gatewayCalls).toHaveLength(1);
+    expect(gatewayCalls[0]).toMatchObject({ amount: 3_334, idemKey: `cancel-${cancellationId}` });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_amount: 3_334 });
+    expect((await entryRecordedAt(cancellationId)).entry_recorded_at).toBeNull();
+    await runner.run();
+    expect(gatewayCalls).toHaveLength(1);
+  });
+
+  test('P-T19 ③ 마감 시각 1ms 전(공연 시작 + 179,999,999ms)에는 묻지도 집지도 않고 정각(+ 180,000,000ms)에 집는다', async () => {
+    const { w, dueMs } = await heldCancellation();
+    expect(dueMs).toBe(w.eventStartsAtMs + 180_000_000);
+    const early = counting();
+    await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: early.entries, claims: writes, nowMs: () => w.eventStartsAtMs + 179_999_999 }).run();
+    expect(early.seen.lookups).toBe(0);
+    expect(gatewayCalls).toHaveLength(0);
+    const onTime = counting();
+    await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: onTime.entries, claims: writes, nowMs: () => w.eventStartsAtMs + 180_000_000 }).run();
+    expect(onTime.seen.lookups).toBe(1);
+    expect(gatewayCalls).toHaveLength(1);
+  });
+
+  test('GAT-090 A2 보류 취소 집기는 조건부라 실행기 둘이 겹쳐도 결제사 호출은 한 번이다(두 실행기 모두 조회까지 간 것을 본 뒤)', async () => {
+    const { cancellationId, dueMs } = await heldCancellation();
+    let arrived = 0;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => (release = resolve));
+    const entries = {
+      lookup: async (ids: readonly string[], deadlineMs: number) => {
+        arrived++;
+        if (arrived === 2) release();
+        await barrier;
+        return ticketCancels!.lookup(ids, deadlineMs);
+      },
+    };
+    const a = new RefundAfterEntry({ writes, payments: paymentCancels!, entries, claims: writes, nowMs: () => dueMs });
+    const b = new RefundAfterEntry({ writes, payments: paymentCancels!, entries, claims: writes, nowMs: () => dueMs });
+    await Promise.all([a.run(), b.run()]);
+    expect(arrived).toBe(2);
+    expect(gatewayCalls).toHaveLength(1);
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempts: 0 });
+  });
+
+  test.each(['CANCELLED', 'UNKNOWN', 'REJECTED'] as const)(
+    'GAT-090 A3 결제사 답 %s 직전에 CS가 취소를 무효로 끝냈으면 실행기는 환급·재시도·실패 표시로 VOIDED를 덮지 않는다',
+    async (outcome) => {
+      const { w, cancellationId, dueMs } = await heldCancellation();
+      const orderBefore = (await admin.pool.query('select status from purchase_order where id = $1', [w.orderId])).rows[0].status as string;
+      gatewayOutcome = outcome;
+      beforeGatewayAnswer = async () => {
+        await admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = $1", [cancellationId]);
+      };
+      const sink = logSink();
+      try {
+        await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, log: sink.log, nowMs: () => dueMs }).run();
+      } finally {
+        beforeGatewayAnswer = undefined;
+        gatewayOutcome = 'CANCELLED';
+      }
+      // 끼어든 사례가 실제로 있었다: 결제사를 한 번 불렀고 그 뒤 행은 VOIDED다
+      expect(gatewayCalls).toHaveLength(1);
+      expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'VOIDED', next_refund_at: null, refund_failed_at: null });
+      expect((await admin.pool.query('select status from purchase_order where id = $1', [w.orderId])).rows[0].status).toBe(orderBefore);
+      const voidErrors = sink.lines.filter((l) => l.level === 'error' && JSON.stringify(l).includes('cancellation-refunded-after-void'));
+      expect(voidErrors).toHaveLength(outcome === 'CANCELLED' ? 1 : 0);
+      if (outcome === 'CANCELLED') expect(JSON.stringify(voidErrors[0])).toContain(cancellationId);
+    },
+  );
 });

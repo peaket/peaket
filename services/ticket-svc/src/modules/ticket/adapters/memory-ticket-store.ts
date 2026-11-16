@@ -4,6 +4,9 @@ import type { TicketStore, IssueStoreInput } from '../domain/ports.js';
 import {
   type CancelTicketOutcome,
   type CancelTicketsInput,
+  type EntryRecord,
+  type EventCancelInput,
+  type EventCancelOutcome,
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
@@ -120,6 +123,21 @@ export class MemoryTicketStore implements TicketStore {
       this.operatorCancellations.set(operatorKey(input.approvalId, target.ticketId), outcome);
       return outcome;
     });
+  }
+
+  /** 회차 취소 표 끝내기(BAT-420 GAT-110 E, 빈 뼈대) */
+  async eventCancel(_input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
+    throw new Error('아직 없음');
+  }
+
+  /** 입장 기록 대조(BAT-420 GAT-090 A, 빈 뼈대) */
+  async entryRecords(_ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
+    throw new Error('아직 없음');
+  }
+
+  /** 시험 씨앗(BAT-420 GAT-090 A, 빈 뼈대): 그 표에 스캔 한 건(방향·결과·시각)을 남긴다(scan_event의 대역) */
+  recordScan(_ticketId: string, _direction: 'IN' | 'OUT', _result: 'PASS' | 'REJECT', _atMs: number): void {
+    throw new Error('아직 없음');
   }
 
   /** 시험 씨앗: 그 표에 들어감(IN)·통과(PASS) 스캔 기록이 있는 것으로 둔다(운영자 취소의 SKIPPED_ENTRY_RECORDED) */

@@ -68,3 +68,18 @@ describe('BAT-465 sale_control 실제 DB', () => {
     expect(await store.find(eventId)).toMatchObject({ suspended: false, revision: 20 });
   });
 });
+
+// ---- BAT-420(시험 담당): 회차 취소 확정 때 ops-svc가 보내는 판매 중지(GAT-110 H, R-T37 ④, ADR-0280 결정 1). 받는 쪽은 이미 있는 동작이다 ----
+describe('BAT-420 회차 취소 확정 때 판매 멈춤의 받는 쪽 [PostgreSQL]', () => {
+  test('R-T37 ④ 회차 취소 요청 ID를 명령 ID·중지 참조로 보낸 판매 중지는 판매 중지 표시를 걸고 같은 요청 ID로 다시 보내도 판을 올리지 않는다(이미 있는 동작)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const f = fixture();
+    const first = await f.service.run({ eventId, action: 'SUSPEND', commandId: requestId, reason: 'EVENT_CANCELLATION', suspensionRef: requestId, nowMs: NOW });
+    expect(first).toEqual({ eventId, suspended: true, revision: 1, changed: true });
+    expect(await store.find(eventId)).toMatchObject({ suspended: true, revision: 1, commandId: requestId, suspensionRef: requestId });
+    expect(f.copies.written.get(eventId)).toMatchObject({ suspended: '1', rev: '1', cmd: requestId, suspRef: requestId });
+    const again = await f.service.run({ eventId, action: 'SUSPEND', commandId: requestId, reason: 'EVENT_CANCELLATION', suspensionRef: requestId, nowMs: NOW + 60_000 });
+    expect(again).toMatchObject({ suspended: true, revision: 1, changed: false });
+  });
+});

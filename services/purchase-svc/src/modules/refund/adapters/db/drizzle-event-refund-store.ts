@@ -14,7 +14,7 @@ import {
   type EventRefundStatus,
   type RefundPgProvider,
 } from '../../domain/event-refund.js';
-import type { EventRefundOutboxMessage, EventRefundStore } from '../../domain/event-refund-ports.js';
+import type { EventRefundItemAdder, EventRefundOutboxMessage, EventRefundStore } from '../../domain/event-refund-ports.js';
 
 interface RequestRow {
   id: string;
@@ -90,7 +90,7 @@ const toItem = (r: ItemRow): EventRefundItem => {
 };
 
 @Injectable()
-export class DrizzleEventRefundStore implements EventRefundStore {
+export class DrizzleEventRefundStore implements EventRefundStore, EventRefundItemAdder {
   private readonly clock: Clock;
 
   constructor(
@@ -168,6 +168,11 @@ export class DrizzleEventRefundStore implements EventRefundStore {
        where id = ${request.requestId}::uuid and status in ('RUNNING', 'REFUND_WINDOW')
        returning id`);
     return r.rows.length > 0;
+  }
+
+  /** 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H, 빈 뼈대). 없는 (요청, 표)만 PENDING으로 더한다(cancellation_id 유일) */
+  async addItems(_requestId: string, _items: readonly EventRefundItem[], _outbox?: readonly EventRefundOutboxMessage[]): Promise<readonly EventRefundItem[]> {
+    throw new Error('아직 없음');
   }
 
   async items(requestId: string): Promise<readonly EventRefundItem[]> {

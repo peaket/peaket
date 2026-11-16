@@ -1,4 +1,7 @@
 // 환급 실행기(GAT-080·GAT-090): 입장 기록 마감 뒤 REQUESTED와 재시도할 REFUND_PENDING을 결제사 취소로 이어 간다.
+// BAT-420(2026-11-16, 시험 담당): 정본(transfer-refund §3.1 '입장 기록 대조와 환급 집기')이 바뀌어 REQUESTED는 입장 기록 대조(입장 없음)와
+// 조건부 집기를 거친 뒤에만 결제사를 부른다. 그래서 이 파일의 대역에 입장 조회(모두 입장 없음)·집기(늘 집음)를 꽂고, 결과에 entryRecorded·unverified를 더했다.
+// 입장 기록이 나온 경우·조회 실패·집기 경합은 test/refund-entry-check.test.ts가 본다.
 import { describe, expect, test } from 'vitest';
 import { REFUND_RETRY_MAX_ATTEMPTS, RefundAfterEntry, refundRetryDelayMs } from '../src/modules/refund/index.js';
 
@@ -7,6 +10,7 @@ const NOW = Date.parse('2026-11-21T00:00:00Z');
 interface Row {
   cancellationId: string;
   orderId: string;
+  ticketId: string;
   amount: number;
   reason: 'USER';
   status: 'REQUESTED' | 'REFUND_PENDING';
@@ -34,16 +38,18 @@ function fixture(rows: Row[], outcomes: Record<string, 'CANCELLED' | 'PENDING' |
       },
     },
     failureNotice: { open: async (q: { cancellationId: string; attempts: number; lastError: string }) => void notices.push(q) },
+    entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+    claims: { claimDue: async () => true, markEntryRecorded: async () => true },
   });
   return { refund, updates, retries, failures, notices, calls };
 }
 
-const row = (id: string, status: Row['status'], attempts = 0, amount = 10_000): Row => ({ cancellationId: id, orderId: `o-${id}`, amount, reason: 'USER', status, attempts });
+const row = (id: string, status: Row['status'], attempts = 0, amount = 10_000): Row => ({ cancellationId: id, orderId: `o-${id}`, ticketId: `t-${id}`, amount, reason: 'USER', status, attempts });
 
 describe('환급 실행기', () => {
   test('GAT080_환급시각이_지난_REQUESTED를_결제사취소하고_모름은_다음재시도를_적는다', async () => {
     const f = fixture([row('c1', 'REQUESTED'), row('c2', 'REQUESTED', 0, 20_000)], { c1: 'CANCELLED', c2: 'UNKNOWN' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 1, failed: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 1, pending: 1, failed: 0, entryRecorded: 0, unverified: 0 });
     expect(f.calls).toEqual([
       { cancellationId: 'c1', amount: 10_000 },
       { cancellationId: 'c2', amount: 20_000 },
@@ -55,13 +61,13 @@ describe('환급 실행기', () => {
 
   test('GAT090_REFUND_PENDING은_재시도하고_시도횟수에_맞는_간격으로_미룬다', async () => {
     const f = fixture([row('c1', 'REFUND_PENDING', 2)], { c1: 'PENDING' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 1, failed: 0 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 1, failed: 0, entryRecorded: 0, unverified: 0 });
     expect(f.retries[0]).toMatchObject({ cancellationId: 'c1', attempts: 3, nextRetryAtMs: NOW + refundRetryDelayMs(3), lastError: 'PENDING' });
   });
 
   test('GAT090_업무거절은_바로_CS처리함_대상으로_남긴다', async () => {
     const f = fixture([row('c1', 'REFUND_PENDING', 1)], { c1: 'REJECTED' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0 });
     expect(f.failures[0]).toMatchObject({ cancellationId: 'c1', attempts: 2, lastError: 'REJECTED' });
     expect(f.notices[0]).toMatchObject({ cancellationId: 'c1', attempts: 2, lastError: 'REJECTED' });
     expect(f.retries).toHaveLength(0);
@@ -69,7 +75,7 @@ describe('환급 실행기', () => {
 
   test('GAT090_재시도_상한을_넘으면_CS처리함_대상으로_남긴다', async () => {
     const f = fixture([row('c1', 'REFUND_PENDING', REFUND_RETRY_MAX_ATTEMPTS - 1)], { c1: 'UNKNOWN' });
-    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1 });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 1, entryRecorded: 0, unverified: 0 });
     expect(f.failures[0]).toMatchObject({ cancellationId: 'c1', attempts: REFUND_RETRY_MAX_ATTEMPTS, lastError: 'UNKNOWN' });
     expect(f.notices).toHaveLength(1);
   });

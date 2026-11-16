@@ -5,6 +5,7 @@ import { MemoryEventRefundStore } from '../src/modules/refund/adapters/memory-ev
 import { EventRefundService } from '../src/modules/refund/application/event-refund-service.js';
 import { compensationAmount, eventRefundCancellationId, progressOf, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { EventRefundCanceller, EventRefundFailureNotice, EventRefundStartInput, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
+import { EventTicketCanceller, MemoryEventRefundAttemptStore, WeekendBusinessCalendar, eventRefundPreviewOf } from '../src/modules/refund/index.js';
 
 const NOW = Date.parse('2026-11-14T05:00:00.000Z');
 const REQUEST = '0193a000-0000-7000-8000-000000000001';
@@ -61,10 +62,12 @@ const start = (service: EventRefundService, over: Partial<EventRefundStartInput>
 
 describe('회차 취소 일괄 환불', () => {
   test('GAT120_미리보기는_대상_환급액과_결제사별_건수·예상시간을_센다', async () => {
+    // BAT-420(2026-11-16, 시험 담당): 정본(transfer-refund §5 '판정·미리보기·확정의 차례')이 주문 단위로 바뀌었다.
+    // 이 대역의 두 표는 같은 주문(ORDER)이라 대상 주문 1, 배상은 주문의 표 권면 합 43,333원의 10% 올림 4,334원 한 번이다.
     const f = fixture();
     const p = await f.service.preview({ eventId: EVENT, fault: 'ORGANIZER' });
-    expect(p).toMatchObject({ targetOrders: 2, refundTotal: 43_333, compensationTargets: 2, compensationTotal: 3_334 + 1_000 });
-    expect(p.perPg).toEqual([
+    expect(p).toMatchObject({ targetOrders: 1, refundTotal: 43_333, compensationTargets: 1, compensationTotal: 4_334 });
+    expect([...p.perPg].sort((a, b) => a.pg.localeCompare(b.pg))).toEqual([
       { pg: 'PORTONE', orders: 1, estimatedSeconds: 1 },
       { pg: 'TOSS', orders: 1, estimatedSeconds: 1 },
     ]);
@@ -165,5 +168,151 @@ describe('회차 취소 일괄 환불', () => {
     expect(first.status).toBe('REFUND_WINDOW');
     await expect(start(f.service, { requestId: randomUUID() })).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(f.store.requests.size).toBe(1);
+  });
+});
+
+// ---- BAT-420(시험 담당, 구현 전에 씀): 주문 단위 미리보기(E6, R-T37 ①), 보류 취소 항목의 취소 ID(E1), 즉시 실패 까닭(E1·E2), 티켓 단계 실패(E7) ----
+describe('회차 취소 일괄 환불 BAT-420 [GAT-110 E]', () => {
+  const ORDER_A = '0194c100-0000-7000-8000-00000000000a';
+  const ORDER_B = '0194c100-0000-7000-8000-00000000000b';
+  const ORDER_C = '0194c100-0000-7000-8000-00000000000c';
+  /** 정본 R-T37 ①의 회차: 표 둘인 주문 하나(TOSS)와 표 하나인 주문 둘(PORTONE), 권면 33,333원 */
+  const rt37 = () => [
+    target({ orderId: ORDER_A, ticketId: '0194c100-0000-7000-8000-0000000000a1', pg: 'TOSS' }),
+    target({ orderId: ORDER_A, ticketId: '0194c100-0000-7000-8000-0000000000a2', pg: 'TOSS' }),
+    target({ orderId: ORDER_B, ticketId: '0194c100-0000-7000-8000-0000000000b1', pg: 'PORTONE' }),
+    target({ orderId: ORDER_C, ticketId: '0194c100-0000-7000-8000-0000000000c1', pg: 'PORTONE' }),
+  ];
+  const sortedPg = (p: { perPg: readonly { pg: string }[] }) => [...p.perPg].sort((a, b) => a.pg.localeCompare(b.pg));
+
+  test('GAT-110 E6 R-T37 ① 미리보기는 주문 단위로 세고 배상은 주문마다 대상 표 권면 합에 한 번 올림한다', () => {
+    const organizer = eventRefundPreviewOf(rt37(), 'ORGANIZER');
+    expect(organizer).toMatchObject({ targetOrders: 3, refundTotal: 133_332, compensationTargets: 3, compensationTotal: 13_335 });
+    expect(sortedPg(organizer)).toEqual([
+      { pg: 'PORTONE', orders: 2, estimatedSeconds: 1 },
+      { pg: 'TOSS', orders: 1, estimatedSeconds: 1 },
+    ]);
+    expect(eventRefundPreviewOf(rt37(), 'CONTENT_CHANGE')).toMatchObject({ compensationTargets: 3, compensationTotal: 13_335 });
+    expect(eventRefundPreviewOf(rt37(), 'FORCE_MAJEURE')).toMatchObject({ targetOrders: 3, refundTotal: 133_332, compensationTargets: 0, compensationTotal: 0 });
+    expect(eventRefundPreviewOf([], 'ORGANIZER')).toEqual({ targetOrders: 0, refundTotal: 0, compensationTargets: 0, compensationTotal: 0, perPg: [] });
+  });
+
+  test('GAT-110 E6 예상 시간은 그 결제사의 대상 표 수 ÷ 초당 300건 올림이다(300장 1초·301장 2초, 주문 수로 나누지 않는다)', () => {
+    const tickets = (n: number) => Array.from({ length: n }, (_, i) => target({ orderId: ORDER_A, ticketId: `0194c200-0000-7000-8000-${String(i).padStart(12, '0')}`, pg: 'TOSS' }));
+    expect(eventRefundPreviewOf(tickets(300), 'FORCE_MAJEURE').perPg).toEqual([{ pg: 'TOSS', orders: 1, estimatedSeconds: 1 }]);
+    expect(eventRefundPreviewOf(tickets(301), 'FORCE_MAJEURE').perPg).toEqual([{ pg: 'TOSS', orders: 1, estimatedSeconds: 2 }]);
+    expect(eventRefundPreviewOf(tickets(1), 'FORCE_MAJEURE').perPg).toEqual([{ pg: 'TOSS', orders: 1, estimatedSeconds: 1 }]);
+  });
+
+  test('GAT-110 E6 서비스의 미리보기와 시작이 저장한 합계가 같은 주문 단위 셈이다', async () => {
+    const store = new MemoryEventRefundStore();
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => rt37() },
+      canceller: { cancel: async () => ({ status: 'REFUNDED' }) },
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    expect(await service.preview({ eventId: EVENT, fault: 'ORGANIZER' })).toMatchObject({ targetOrders: 3, compensationTargets: 3, compensationTotal: 13_335 });
+    const started = await start(service);
+    expect(started).toMatchObject({ targetOrders: 3, refundTotal: 133_332, compensationTargets: 3, compensationTotal: 13_335 });
+  });
+
+  test('GAT-110 E1 보류 취소가 있는 표의 항목 취소 ID는 그 취소 행 ID이고 나머지는 요청·표로 정해진 값이다', async () => {
+    const pendingId = '0194c100-0000-7000-8000-0000000000f1';
+    const calls: string[] = [];
+    const store = new MemoryEventRefundStore();
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [target({ pendingCancellationId: pendingId }), target({ ticketId: TICKET2, orderId: ORDER_B })] },
+      canceller: { cancel: async (t, q) => (calls.push(`${t.ticketId}:${q.cancellationId}`), { status: 'REFUNDED' }) },
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    await start(service);
+    const items = new Map((await store.items(REQUEST)).map((i) => [i.ticketId, i.cancellationId]));
+    expect(items.get(TICKET)).toBe(pendingId);
+    expect(items.get(TICKET2)).toBe(eventRefundCancellationId(REQUEST, TICKET2));
+    expect(calls.sort()).toEqual([`${TICKET}:${pendingId}`, `${TICKET2}:${eventRefundCancellationId(REQUEST, TICKET2)}`].sort());
+  });
+
+  test.each(['cancellation-in-progress', 'ticket-already-ended', 'cancellation-conflict'])(
+    'GAT-110 E1 즉시 실패 까닭 %s는 재시도 없이 FAILED로 끝내고 CS 일괄 환불 실패를 한 번 연다',
+    async (error) => {
+      const store = new MemoryEventRefundStore();
+      const notices: Parameters<EventRefundFailureNotice['open']>[0][] = [];
+      let calls = 0;
+      const service = new EventRefundService({
+        store,
+        targets: { list: async () => [target()] },
+        canceller: { cancel: async () => (calls++, { status: 'FAILED', error }) },
+        notice: { open: async (q) => void notices.push(q) },
+        nowMs: () => NOW,
+        deadlineMs: () => NOW + 5_000,
+      });
+      await start(service);
+      const [item] = await store.items(REQUEST);
+      expect(item).toMatchObject({ status: 'FAILED', lastError: error });
+      expect(item!.nextAttemptAtMs).toBeUndefined();
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({ ticketId: TICKET, lastError: error });
+      await service.runDue();
+      expect(calls).toBe(1);
+    },
+  );
+
+  test('GAT-110 E7 티켓 단계 실패(ticket-svc 무응답)는 결제사 호출로 세지 않아 20번 연속이어도 자동 정지가 없고 5회를 넘기면 FAILED다', async () => {
+    let now = NOW;
+    const store = new MemoryEventRefundStore();
+    const attempts = new MemoryEventRefundAttemptStore();
+    const alerts: string[] = [];
+    const notices: string[] = [];
+    let ticketCalls = 0;
+    let payCalls = 0;
+    const targets = Array.from({ length: 20 }, (_, i) =>
+      target({ orderId: `0194c300-0000-7000-8000-${String(i).padStart(12, '0')}`, ticketId: `0194c301-0000-7000-8000-${String(i).padStart(12, '0')}`, pg: 'TOSS' }),
+    );
+    const canceller = new EventTicketCanceller({
+      tickets: {
+        eventCancel: async () => {
+          ticketCalls++;
+          throw new Error('ticket-svc 14 UNAVAILABLE');
+        },
+      },
+      conversions: { convert: async () => 'CONVERTED' },
+      orders: { findByTicket: async () => undefined, findCancellation: async () => undefined },
+      writes: { create: async () => ({ status: 'CREATED' }) } as never,
+      payments: { cancel: async () => (payCalls++, 'CANCELLED') },
+      calendar: new WeekendBusinessCalendar(),
+    });
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => targets },
+      canceller,
+      attempts,
+      alert: { raise: async (q) => void alerts.push(q.reason) },
+      notice: { open: async (q) => void notices.push(q.ticketId) },
+      nowMs: () => now,
+      deadlineMs: () => now + 5_000,
+      concurrency: 4,
+    });
+    const started = await start(service);
+    expect(ticketCalls).toBe(20);
+    expect(payCalls).toBe(0);
+    expect(attempts.attempts).toEqual([]);
+    expect(alerts).toEqual([]);
+    expect(started.status).toBe('RUNNING');
+    const items = await store.items(REQUEST);
+    expect(items.every((i) => i.status === 'UNKNOWN' && i.attempts === 1 && i.nextAttemptAtMs === NOW + 60_000)).toBe(true);
+    // 재시도 간격을 지나며 네 번 더(1분·5분·15분·1시간 뒤) 부르면 시도 5회로 FAILED다
+    for (const wait of [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000]) {
+      now += wait;
+      await service.runDue();
+    }
+    expect(attempts.attempts).toEqual([]);
+    expect(alerts).toEqual([]);
+    const after = await store.items(REQUEST);
+    expect(after.every((i) => i.status === 'FAILED' && i.attempts === 5)).toBe(true);
+    expect(notices).toHaveLength(20);
   });
 });

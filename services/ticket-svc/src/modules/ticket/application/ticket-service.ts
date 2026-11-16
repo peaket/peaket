@@ -5,6 +5,9 @@ import type { TicketStore } from '../domain/ports.js';
 import {
   type CancelTicketOutcome,
   type CancelTicketsInput,
+  type EntryRecord,
+  type EventCancelInput,
+  type EventCancelOutcome,
   type IssueTicketsInput,
   type IssueTicketsResult,
   issueFingerprint,
@@ -73,6 +76,16 @@ export class TicketService {
   /** 부정 예매 운영자 취소(BAT-415 몫 F): 입력 검사 뒤 저장소가 행 잠금 안에서 표마다 가른다. @throws TicketInputError */
   async operatorCancel(input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
     return this.deps.store.operatorCancel(normalizeOperatorCancelInput(input));
+  }
+
+  /** 회차 취소 표 끝내기(BAT-420 GAT-110 E, 빈 뼈대). @throws TicketInputError */
+  async eventCancel(_input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
+    throw new Error('아직 없음');
+  }
+
+  /** 입장 기록 대조(BAT-420 GAT-090 A, 빈 뼈대). @throws TicketInputError */
+  async entryRecords(_ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
+    throw new Error('아직 없음');
   }
 
   /** 계정의 월렛 목록(최신 발권순). */

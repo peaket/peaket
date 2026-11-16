@@ -1,8 +1,8 @@
 // 회차 취소 일괄 환불의 메모리 저장소(단위 시험·로컬 대역).
 import { EventRefundActiveConflict, type EventCancellationRequest, type EventRefundAttempt, type EventRefundItem, type EventRefundWindowStats, type RefundPgProvider } from '../domain/event-refund.js';
-import type { EventRefundAttemptStore, EventRefundOutboxMessage, EventRefundStore } from '../domain/event-refund-ports.js';
+import type { EventRefundAttemptStore, EventRefundItemAdder, EventRefundOutboxMessage, EventRefundStore } from '../domain/event-refund-ports.js';
 
-export class MemoryEventRefundStore implements EventRefundStore {
+export class MemoryEventRefundStore implements EventRefundStore, EventRefundItemAdder {
   readonly requests = new Map<string, EventCancellationRequest>();
   readonly byRequest = new Map<string, Map<string, EventRefundItem>>();
   readonly outbox: EventRefundOutboxMessage[] = [];
@@ -38,6 +38,11 @@ export class MemoryEventRefundStore implements EventRefundStore {
 
   async items(requestId: string): Promise<readonly EventRefundItem[]> {
     return [...(this.byRequest.get(requestId)?.values() ?? [])];
+  }
+
+  /** 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H, 빈 뼈대). 없는 (요청, 표)만 더한다 */
+  async addItems(_requestId: string, _items: readonly EventRefundItem[], _outbox?: readonly EventRefundOutboxMessage[]): Promise<readonly EventRefundItem[]> {
+    throw new Error('아직 없음');
   }
 
   async updateItem(item: EventRefundItem, outbox: readonly EventRefundOutboxMessage[] = []): Promise<void> {

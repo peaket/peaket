@@ -752,3 +752,20 @@ describe('0022 fraud_cancellation_request·fraud_cancellation_ticket', () => {
     await expect(putTicket(id())).rejects.toMatchObject({ code: '23503' });
   });
 });
+
+// ---- BAT-420(시험 담당, 구현 전에 씀): 0023 order_cancellation.entry_recorded_at(GAT-090 A7, docs/data.md order_cancellation) ----
+describe('0023 입장 기록 대조 칸 [BAT-420]', () => {
+  test('GAT-090 A7 0023은 order_cancellation.entry_recorded_at을 빈 값 허용 timestamptz로 더하고 기록에 남으며 다시 돌려도 같다', async () => {
+    const col = await q<{ data_type: string; is_nullable: string; column_default: string | null }>(
+      "select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'order_cancellation' and column_name = 'entry_recorded_at'",
+    );
+    expect(col.rows).toEqual([{ data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null }]);
+    expect(journal.entries.map((e) => e.tag).some((t) => t.startsWith('0023_'))).toBe(true);
+    // 0023 앞에 있던 행처럼 칸을 비워 넣은 행은 NULL이다
+    const before = await q<{ n: string }>('select count(*) as n from order_cancellation where entry_recorded_at is not null');
+    expect(Number(before.rows[0]!.n)).toBe(0);
+    await migratePurchase(url);
+    const again = await q<{ data_type: string }>("select data_type from information_schema.columns where table_schema = 'public' and table_name = 'order_cancellation' and column_name = 'entry_recorded_at'");
+    expect(again.rows).toHaveLength(1);
+  });
+});

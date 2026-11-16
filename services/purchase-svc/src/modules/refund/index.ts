@@ -139,3 +139,12 @@ export { OutboxEventRefundFanNotifier, TRADE_ORDERS_TOPIC, eventRefundNoticeKey 
 export { EVENT_REFUND_TICK_MS, EventRefundLoop, type EventRefundLoopDeps, type EventRefundTick } from './application/event-refund-loop.js';
 export { EventRefundController } from './inbound/event-refund.controller.js';
 export { EventRefundGrpcController, eventRefundPackage, eventRefundServiceHandlers, type EventRefundGrpcUseCases } from './inbound/event-refund.grpc.js';
+// BAT-420 GAT-090 A·GAT-110 E·H(빈 뼈대)
+export { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type EntryFlagNotice, type EntryRecords, type EntryRecordView } from './domain/ports.js';
+export { EVENT_REFUND_ESTIMATE_TPS, eventRefundPreviewOf, isEventOrderOpen } from './domain/event-refund.js';
+export type { EventOpenOrders, EventRefundItemAdder, EventTicketCancellations, PendingCancellationConversions } from './domain/event-refund-ports.js';
+export { EventTicketCanceller, type EventTicketCancellerDeps } from './application/event-ticket-canceller.js';
+export { EventRefundCancellerRouter } from './application/event-refund-canceller-router.js';
+export { HttpEntryFlagNotice } from './adapters/http-entry-flag-notice.js';
+export { DrizzlePendingCancellationConversions } from './adapters/db/drizzle-pending-cancellation-conversions.js';
+export { DrizzleEventOpenOrders } from './adapters/db/drizzle-event-open-orders.js';

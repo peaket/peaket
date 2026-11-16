@@ -5,7 +5,8 @@ import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { type CircuitBreaker, createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import type { TicketCancelAnswer, TicketCancelOutcome } from '../domain/cancellation.js';
-import type { OperatorTicketCancellations, OperatorTicketOutcome, OperatorTicketResult, TicketCancellations } from '../domain/ports.js';
+import type { EntryRecords, EntryRecordView, OperatorTicketCancellations, OperatorTicketOutcome, OperatorTicketResult, TicketCancellations } from '../domain/ports.js';
+import type { EventTicketCancellations } from '../domain/event-refund-ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
@@ -38,7 +39,7 @@ export interface GrpcTicketCancellationsOptions {
   internalToken?: string;
 }
 
-export class GrpcTicketCancellations implements TicketCancellations, OperatorTicketCancellations {
+export class GrpcTicketCancellations implements TicketCancellations, OperatorTicketCancellations, EntryRecords, EventTicketCancellations {
   readonly #client: grpc.Client & { CancelTickets: Unary; OperatorCancelTickets: Unary };
 
   constructor(o: GrpcTicketCancellationsOptions) {
@@ -118,6 +119,16 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
       if (!o) throw new Error('ticket-svc OperatorCancelTickets 답에 빠진 표가 있다');
       return o;
     });
+  }
+
+  /** ticket-svc GetEntryRecords(BAT-420 GAT-090 A, 데드라인 2초 [가정], 빈 뼈대). 실패·시간 초과는 던진다 */
+  async lookup(_ticketIds: readonly string[], _deadlineMs: number): Promise<ReadonlyMap<string, EntryRecordView>> {
+    throw new Error('아직 없음');
+  }
+
+  /** ticket-svc EventCancelTickets(BAT-420 GAT-110 E, 빈 뼈대). 답은 요청 차례, 실패·시간 초과는 던진다 */
+  async eventCancel(_q: Parameters<EventTicketCancellations['eventCancel']>[0]): ReturnType<EventTicketCancellations['eventCancel']> {
+    throw new Error('아직 없음');
   }
 
   close(): void {

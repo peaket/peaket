@@ -119,6 +119,36 @@ export interface EventRefundServiceDeps {
   readonly firstBatch?: number;
   /** 백그라운드 실행기가 한 요청에서 한 번에 처리하는 최대 건수. 기본 200 [가정] */
   readonly batchSize?: number;
+  // BAT-420 GAT-110 H(빈 뼈대, 아직 쓰지 않는다): 확정 뒤 끝난 주문 쓸어 담기와 완료 보류
+  readonly items?: EventRefundItemAdder;
+  readonly openOrders?: EventOpenOrders;
+}
+
+// ---- BAT-420 GAT-110 E·H(빈 뼈대): 회차 취소 전용 표 취소·보류 취소 전환·쓸어 담기·끝나지 않은 주문 ----
+
+/** ticket-svc EventCancelTickets. 실패·시간 초과는 던진다 */
+export interface EventTicketCancellations {
+  eventCancel(q: {
+    readonly cancellationRequestId: string;
+    readonly eventId: string;
+    readonly targets: readonly { readonly ticketId: string; readonly cancellationId: string }[];
+    readonly deadlineMs: number;
+  }): Promise<readonly { readonly ticketId: string; readonly result: 'CANCELED' | 'ALREADY_ENDED'; readonly orderId: string; readonly holderAccountId: string; readonly transferWithdrawn: boolean }[]>;
+}
+
+/** 주문 행 잠금 안에서 status = 'REQUESTED'인 그 행만: reason EVENT_CANCELLED, deduction 0, refund = refundAmount, event_cancellation_request_id, refund_due_at 빔, REFUND_PENDING */
+export interface PendingCancellationConversions {
+  convert(q: { readonly cancellationId: string; readonly eventCancellationRequestId: string; readonly refundAmount: number; readonly nowMs: number }): Promise<'CONVERTED' | 'NOT_REQUESTED'>;
+}
+
+/** 없는 (요청, 표)만 PENDING으로 더한다(cancellation_id 유일). 더한 항목을 돌려준다 */
+export interface EventRefundItemAdder {
+  addItems(requestId: string, items: readonly EventRefundItem[], outbox?: readonly EventRefundOutboxMessage[]): Promise<readonly EventRefundItem[]>;
+}
+
+/** 그 회차의 끝나지 않은 주문 수(CREATED·AUTHENTICATED·ACCEPTED·RESERVED·AWAITING_DEPOSIT·APPROVED·UNKNOWN) */
+export interface EventOpenOrders {
+  count(eventId: string): Promise<number>;
 }
 
 export interface EventRefundPreviewInput {

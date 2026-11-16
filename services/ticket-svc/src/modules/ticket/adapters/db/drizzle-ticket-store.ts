@@ -6,6 +6,9 @@ import type { IssueStoreInput, TicketStore } from '../../domain/ports.js';
 import {
   type CancelTicketOutcome,
   type CancelTicketsInput,
+  type EntryRecord,
+  type EventCancelInput,
+  type EventCancelOutcome,
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
@@ -263,6 +266,16 @@ export class DrizzleTicketStore implements TicketStore {
       await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId: row.id, status, version: row.version + 1 });
       await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId: row.id, keyId: revokedKeyId ? Buffer.from(revokedKeyId).toString('base64url') : null });
     }
+  }
+
+  /** 회차 취소 표 끝내기(BAT-420 GAT-110 E, 빈 뼈대) */
+  async eventCancel(_input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
+    throw new Error('아직 없음');
+  }
+
+  /** 입장 기록 대조(BAT-420 GAT-090 A, 빈 뼈대). scanner 스키마의 scan_event를 읽는다 */
+  async entryRecords(_ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
+    throw new Error('아직 없음');
   }
 
   async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {

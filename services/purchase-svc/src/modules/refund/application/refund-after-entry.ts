@@ -4,7 +4,7 @@
 // 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기가 처리하지 못한다(CS 알림 대상).
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs } from '../domain/cancellation.js';
-import type { CancellationWrites, PaymentCancellations, RefundFailureNotice } from '../domain/ports.js';
+import type { CancellationClaims, CancellationWrites, EntryFlagNotice, EntryRecords, PaymentCancellations, RefundFailureNotice } from '../domain/ports.js';
 
 export interface RefundAfterEntryDeps {
   writes: CancellationWrites;
@@ -12,6 +12,11 @@ export interface RefundAfterEntryDeps {
   nowMs(): number;
   /** 재시도 소진·업무 거절을 CS 처리함에 잇는 포트. 없으면 refund_failed_at만 남긴다(ops-svc 계약 전) */
   failureNotice?: RefundFailureNotice;
+  // BAT-420 GAT-090 A(빈 뼈대, 아직 쓰지 않는다): 마감 뒤 환급 전 입장 기록 대조·조건부 집기·이상 표시·로그
+  entries?: EntryRecords;
+  claims?: CancellationClaims;
+  flags?: EntryFlagNotice;
+  log?: { warn(o: object, msg: string): void; error(o: object, msg: string): void };
 }
 
 /** 한 번에 처리하는 취소 수 [가정] */

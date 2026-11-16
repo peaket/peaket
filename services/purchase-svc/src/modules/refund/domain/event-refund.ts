@@ -71,6 +71,27 @@ export interface EventRefundTarget {
   readonly saleEndsAtMs: number;
   readonly entryOpensAtMs?: number;
   readonly pg: RefundPgProvider;
+  /** 진행 중 취소가 입장 시작 뒤 보류(REQUESTED)면 그 취소 행 ID(BAT-420 GAT-110 E, 보류 취소 전환) */
+  readonly pendingCancellationId?: string;
+}
+
+/** 미리보기 예상 시간의 결제사 처리 한도 초당 300건 [가정](BAT-420 GAT-110 W) */
+export const EVENT_REFUND_ESTIMATE_TPS = 300;
+
+/**
+ * 주문 단위 미리보기(BAT-420 GAT-110 W, R-T37 ①, 빈 뼈대): 대상 주문 수 = 주문 수, 배상 = 주문마다 대상 표 권면 합의 compensationAmount,
+ * 결제사별 주문 수·예상 시간 ceil(표 수 / 300)
+ */
+export function eventRefundPreviewOf(_targets: readonly EventRefundTarget[], _fault: EventRefundFault): EventRefundPreview {
+  throw new Error('아직 없음');
+}
+
+/**
+ * 회차 취소 요청을 끝내지 못하게 막는 '끝나지 않은 주문' 상태인가(BAT-420 GAT-110 H, R-T37 ⑥, ADR-0280 결정 5, 빈 뼈대).
+ * 정본: CREATED·AUTHENTICATED·ACCEPTED·RESERVED·AWAITING_DEPOSIT·APPROVED·UNKNOWN
+ */
+export function isEventOrderOpen(_status: string): boolean {
+  throw new Error('아직 없음');
 }
 
 export interface EventRefundItem {

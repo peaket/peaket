@@ -4,11 +4,11 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createDatabase, type Database } from '@peaket/platform';
+import { createDatabase, ensureOutboxPartitions, fakeClock, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
-import { DrizzleEventRefundAttempts, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService } from '../src/modules/refund/index.js';
+import { DrizzleEventOpenOrders, DrizzleEventRefundAttempts, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService, OutboxEventRefundFanNotifier } from '../src/modules/refund/index.js';
 import { eventRefundCancellationId, type EventCancellationRequest, type EventRefundItem, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { EventRefundAlert, EventRefundAttemptStore, EventRefundCanceller, EventRefundFailureNotice, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -275,5 +275,143 @@ describe('0016 회차 취소 일괄 환불', () => {
     expect(resumed.status).toBe('COMPLETED');
     expect(resumed.progress).toMatchObject({ done: 1, failed: 0 });
     expect(f.calls.at(-1)![1].cancellationId).toBe(eventRefundCancellationId(requestId, target.ticketId));
+  });
+});
+
+// ---- BAT-420(시험 담당, 구현 전에 씀): 회차 취소 대상 고르기(GAT-110 E5)·확정 뒤 끝난 주문 쓸어 담기(R-T37 ⑥)·끝나지 않은 주문 상태 목록 ----
+describe('BAT-420 대상 고르기·쓸어 담기 [PostgreSQL]', () => {
+  beforeAll(async () => {
+    await ensureOutboxPartitions(db, fakeClock({ now: NOW }));
+  });
+
+  const addCancellation = (o: { orderId: string; ticketId: string; status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; reason?: 'USER' | 'FRAUD' }) => {
+    const id = randomUUID();
+    return q(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, refund_due_at, created_at, status_changed_at)
+       values ($1, $2, $3, $4, 0, false, 9000, 29999, 3334, $5, $6, now(), now())`,
+      [id, o.orderId, o.ticketId, o.reason ?? 'USER', o.status, o.status === 'REQUESTED' ? new Date(NOW + 2 * DAY) : null],
+    ).then(() => id);
+  };
+  /** 끝나지 않은(또는 원하는) 상태의 주문 하나. 표는 아직 발권되지 않았다(order_item.ticket_id 빔) */
+  const seedRawOrder = async (eventId: string, status: string): Promise<{ orderId: string }> => {
+    const orderId = randomUUID();
+    await q('begin');
+    try {
+      await q(
+        `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+         values ($1, $2, $3, $4, 33333, 1, $5, 'v1', 'PICK', now(), $6, $7)`,
+        [orderId, randomUUID(), eventId, status, `idem-${orderId}`, randomUUID(), randomUUID()],
+      );
+      await q("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, $2, 'T1', 'system:test', now())", [orderId, status]);
+      await q("insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id) values ($1, 1, $2, 'VIP', 'A', 33333, null)", [orderId, randomUUID()]);
+      await q('commit');
+    } catch (err) {
+      await q('rollback').catch(() => undefined);
+      throw err;
+    }
+    return { orderId };
+  };
+  /** 확정 직전에 결제를 접수한 주문이 확정 뒤 결제를 마치고 발권된 것처럼 바꾼다 */
+  const confirmLate = async (orderId: string, from: string): Promise<{ ticketId: string }> => {
+    const ticketId = randomUUID();
+    await q('begin');
+    try {
+      await q("update purchase_order set status = 'CONFIRMED', event_seq = 2 where id = $1", [orderId]);
+      await q("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 2, $2, 'CONFIRMED', 'T18', 'system:test', now())", [orderId, from]);
+      await q('update order_item set ticket_id = $2 where order_id = $1', [orderId, ticketId]);
+      await q("insert into payment_attempt (id, order_id, pg, status, created_at) values ($1, $1, 'TOSS', 'ACCEPTED', now())", [orderId]);
+      await q('commit');
+    } catch (err) {
+      await q('rollback').catch(() => undefined);
+      throw err;
+    }
+    return { ticketId };
+  };
+  const service = (calls: string[]) =>
+    new EventRefundService({
+      store: new DrizzleEventRefundStore(db, fakeClock({ now: NOW })),
+      targets: new DrizzleEventRefundTargets(db, configs),
+      canceller: { cancel: async (t, x) => (calls.push(`${t.ticketId}:${x.cancellationId}`), { status: 'REFUNDED' }) },
+      items: new DrizzleEventRefundStore(db, fakeClock({ now: NOW })),
+      openOrders: new DrizzleEventOpenOrders(db),
+      fanNotifier: new OutboxEventRefundFanNotifier(),
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 30_000,
+      concurrency: 2,
+    });
+
+  test('GAT-110 E5 회차 취소 대상은 진행 중 취소 없음·보류(REQUESTED)·무효만 있는 표이고 REFUND_PENDING(USER·FRAUD)·REFUNDED 표는 뺀다', async () => {
+    const eventId = randomUUID();
+    const none = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'TOSS' });
+    const held = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'TOSS' });
+    const userPending = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'TOSS' });
+    const fraudPending = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'PORTONE' });
+    const refunded = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'PORTONE' });
+    const voidedOnly = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'PORTONE' });
+    const heldId = await addCancellation({ ...held, status: 'REQUESTED' });
+    await addCancellation({ ...userPending, status: 'REFUND_PENDING' });
+    await addCancellation({ ...fraudPending, status: 'REFUND_PENDING', reason: 'FRAUD' });
+    await addCancellation({ ...refunded, status: 'REFUNDED' });
+    await addCancellation({ ...voidedOnly, status: 'VOIDED' });
+    const targets = await new DrizzleEventRefundTargets(db, configs).list(eventId);
+    expect(targets.map((t) => t.ticketId).sort()).toEqual([none.ticketId, held.ticketId, voidedOnly.ticketId].sort());
+    const byTicket = new Map(targets.map((t) => [t.ticketId, t]));
+    expect(byTicket.get(held.ticketId)!.pendingCancellationId).toBe(heldId);
+    expect(byTicket.get(none.ticketId)!.pendingCancellationId).toBeUndefined();
+    expect(byTicket.get(voidedOnly.ticketId)!.pendingCancellationId).toBeUndefined();
+  });
+
+  test('GAT-110 E5 연기(POSTPONE) 대상에는 보류(REQUESTED) 표가 없다', async () => {
+    const eventId = randomUUID();
+    const none = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'TOSS' });
+    const held = await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'TOSS' });
+    await addCancellation({ ...held, status: 'REQUESTED' });
+    const requestId = randomUUID();
+    await service([]).start({ eventId, requestId, fault: 'CONTENT_CHANGE', ruledBy: 'commander-1', confirmedBy: 'operator-2', kind: 'POSTPONE', postponedToMs: NOW + 10 * DAY });
+    const items = await q<{ ticket_id: string }>('select ticket_id from event_refund_item where request_id = $1', [requestId]);
+    expect(items.rows.map((r) => r.ticket_id)).toEqual([none.ticketId]);
+  });
+
+  test('R-T37 ⑥ 확정 뒤 결제가 끝난 주문도 환급하고 그 주문이 끝나기 전에는 COMPLETED가 아니며 다시 돌려도 항목이 늘지 않는다', async () => {
+    const eventId = randomUUID();
+    await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'TOSS' });
+    await seedOrder({ eventId, accountId: randomUUID(), amount: 33_333, pg: 'TOSS' });
+    const late = await seedRawOrder(eventId, 'RESERVED');
+    const calls: string[] = [];
+    const s = service(calls);
+    const requestId = randomUUID();
+    const started = await s.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect(started.progress).toMatchObject({ total: 2, done: 2 });
+    expect(started.status).toBe('RUNNING');
+    expect(await count("select count(*) as n from event_cancellation_request where id = $1 and status = 'RUNNING'", [requestId])).toBe(1);
+
+    const { ticketId } = await confirmLate(late.orderId, 'RESERVED');
+    await s.runDue();
+    const items = await q<{ ticket_id: string; cancellation_id: string; status: string }>('select ticket_id, cancellation_id, status from event_refund_item where request_id = $1', [requestId]);
+    expect(items.rows).toHaveLength(3);
+    expect(items.rows.find((r) => r.ticket_id === ticketId)).toMatchObject({ cancellation_id: eventRefundCancellationId(requestId, ticketId), status: 'REFUNDED' });
+    expect(calls.filter((c) => c.startsWith(ticketId))).toEqual([`${ticketId}:${eventRefundCancellationId(requestId, ticketId)}`]);
+    const confirmed = await q<{ payload: Buffer }>('select payload from outbox where msg_key = $1', [eventId]);
+    const lateConfirmed = confirmed.rows.map((r) => JSON.parse(Buffer.from(r.payload).toString('utf8')) as { type: string; orderId: string }).filter((p) => p.type === 'EVENT_CANCELLATION_CONFIRMED' && p.orderId === late.orderId);
+    expect(lateConfirmed).toHaveLength(1);
+    expect(await count("select count(*) as n from event_cancellation_request where id = $1 and status = 'COMPLETED'", [requestId])).toBe(1);
+
+    await s.runDue();
+    expect(await count('select count(*) as n from event_refund_item where request_id = $1', [requestId])).toBe(3);
+    expect(calls).toHaveLength(3);
+  });
+
+  test('R-T37 ⑥ 끝나지 않은 주문 수는 일곱 상태만 세고 여섯 끝난 상태는 세지 않는다(실제 SQL 목록)', async () => {
+    const open = ['CREATED', 'AUTHENTICATED', 'ACCEPTED', 'RESERVED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN'];
+    const ended = ['CONFIRMED', 'FAILED', 'COMPENSATED', 'PARTIALLY_REFUNDED', 'REFUNDED', 'EXPIRED'];
+    const counter = new DrizzleEventOpenOrders(db);
+    for (const status of [...open, ...ended]) {
+      const eventId = randomUUID();
+      await seedRawOrder(eventId, status);
+      expect(await counter.count(eventId), status).toBe(open.includes(status) ? 1 : 0);
+    }
+    const mixed = randomUUID();
+    for (const status of [...open, ...ended]) await seedRawOrder(mixed, status);
+    expect(await counter.count(mixed)).toBe(7);
   });
 });

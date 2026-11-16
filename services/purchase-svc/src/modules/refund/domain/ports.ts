@@ -104,6 +104,30 @@ export interface SeatReturns {
   }): Promise<number>;
 }
 
+// ---- 입장 기록 대조와 환급 집기(BAT-420 GAT-090 A, docs/features/transfer-refund.md §3.1 '입장 기록 대조와 환급 집기'). 빈 뼈대 ----
+
+/** ticket-svc GetEntryRecords 한 번의 데드라인 2초 [가정] */
+export const ENTRY_LOOKUP_DEADLINE_MS = 2_000;
+export interface EntryRecordView {
+  readonly found: boolean;
+  readonly entered: boolean;
+  readonly firstEnteredAtMs?: number;
+}
+/** ticket-svc GetEntryRecords. 실패·시간 초과는 던진다 */
+export interface EntryRecords {
+  lookup(ticketIds: readonly string[], deadlineMs: number): Promise<ReadonlyMap<string, EntryRecordView>>;
+}
+export interface CancellationClaims {
+  /** REQUESTED이고 entry_recorded_at이 빈 행만 REFUND_PENDING(next_refund_at 빔)으로. 바꿨으면 true */
+  claimDue(cancellationId: string, nowMs: number): Promise<boolean>;
+  /** REQUESTED 행에 entry_recorded_at을 쓰고 refund_due_at을 비운다. 바꿨으면 true */
+  markEntryRecorded(cancellationId: string, enteredAtMs: number, nowMs: number): Promise<boolean>;
+}
+/** ops CS 처리함 FLAGGED(category ENTRY_AFTER_CANCEL, sourceId = 취소 ID, eventKey = `entry-after-cancel:${cancellationId}`). best effort */
+export interface EntryFlagNotice {
+  open(q: { readonly cancellationId: string; readonly orderId: string; readonly ticketId: string; readonly enteredAtMs: number; readonly nowMs: number }): Promise<void>;
+}
+
 /** 좌석 Redis 비트맵을 끄고 구역 델타를 내는 포트(취소표 즉시 재판매) */
 export interface SeatReturnNotices {
   returnSold(q: {

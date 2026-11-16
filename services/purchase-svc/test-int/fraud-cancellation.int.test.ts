@@ -327,8 +327,8 @@ describe('GAT-080 몫 F 부정 예매 운영자 취소 [실제 DB·ticket-svc·p
     }
     expect(await orderStatus(w.orderId)).toBe('PARTIALLY_REFUNDED');
 
-    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 60_001 });
-    await expect(retry.run()).resolves.toEqual({ refunded: 2, pending: 0, failed: 0 });
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 60_001 });
+    await expect(retry.run()).resolves.toEqual({ refunded: 2, pending: 0, failed: 0, entryRecorded: 0, unverified: 0 });
     expect(gatewayCalls).toHaveLength(2);
     expect(gatewayCalls.map((c) => c.idemKey).sort()).toEqual(w.tickets.map((t) => `cancel-${fraudCancellationId(approvalId, t.ticketId)}`).sort());
     expect(gatewayCalls.every((c) => c.paymentRef === `ref-${w.orderId}` && c.reason === 'FRAUD')).toBe(true);
@@ -370,7 +370,7 @@ describe('GAT-080 몫 F 부정 예매 운영자 취소 [실제 DB·ticket-svc·p
     const opRows = await ticketDb.pool.query<{ n: number }>('select count(*)::int as n from ticket_operator_cancellation where approval_id = $1 group by ticket_id', [approvalId]);
     expect(opRows.rows.map((r) => r.n)).toEqual([1, 1]);
 
-    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, nowMs: () => NOW + 60_001 });
+    const retry = new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + 60_001 });
     await retry.run();
     const forThisOrder = gatewayCalls.filter((c) => c.paymentRef === `ref-${w.orderId}`);
     expect(forThisOrder.map((c) => c.idemKey).sort()).toEqual(w.tickets.map((t) => `cancel-${fraudCancellationId(approvalId, t.ticketId)}`).sort());

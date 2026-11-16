@@ -441,3 +441,145 @@ describe('GAT-080 S3 첫 팬 취소 칸 [PostgreSQL]', () => {
     }
   });
 });
+
+// ---- BAT-420(시험 담당, 구현 전에 씀): 입장 기록 대조 GetEntryRecords(GAT-090 A5)와 회차 취소 EventCancelTickets(GAT-110 E2·E3·E4) ----
+// 입장 시각은 scan_event.scanned_at_device(기기가 찍은 시각)이고, 받은 시각(received_at)은 1초 늦게 둔다(둘을 섞으면 드러나게).
+describe('BAT-420 입장 기록 대조·회차 취소 [PostgreSQL]', () => {
+  let ecStore: DrizzleTicketStore;
+  let ecService: TicketService;
+  let deviceSeq = 1_000_000;
+  const RECIPIENT = '0190f3a1-7c2e-7a00-8000-0000000000f2';
+
+  beforeAll(() => {
+    ecStore = new DrizzleTicketStore({ database, changes: new DrizzleScannerGateStore(database) });
+    ecService = new TicketService({ store: ecStore, clock });
+  });
+
+  const fresh = async (n = 1, eventId = randomUUID()) => {
+    const orderId = randomUUID();
+    const r = await ecService.issue({ orderId, eventId, payerAccountId: ACCOUNT, seatIds: Array.from({ length: n }, () => randomUUID()), issueGeneration: 0 });
+    return { eventId, orderId, tickets: r.tickets.map((t) => t.ticketId) };
+  };
+  const scanAt = (eventId: string, ticketId: string, direction: 'IN' | 'OUT', result: 'PASS' | 'REJECT' | 'CHECK', atMs: number) =>
+    database.pool.query(
+      `insert into scan_event (id, event_id, ticket_id, scanner_device_id, direction, method, result, scanned_at_device, known_seq, device_seq, received_at)
+       values ($1, $2, $3, $4, $5, 'QR', $6, $7, 0, $8, $9)`,
+      [randomUUID(), eventId, ticketId, randomUUID(), direction, result, new Date(atMs), ++deviceSeq, new Date(atMs + 1_000)],
+    );
+  const row = async (ticketId: string) =>
+    (await database.pool.query('select status, account_id, transfer_pending, key_revoked_at, version from ticket where id = $1', [ticketId])).rows[0] as {
+      status: string;
+      account_id: string;
+      transfer_pending: boolean;
+      key_revoked_at: Date | null;
+      version: number;
+    };
+  const lastSeq = async (eventId: string): Promise<number> => Number((await database.pool.query('select coalesce(max(seq), 0) as n from scanner_change where event_id = $1', [eventId])).rows[0].n);
+  const changesAfter = async (eventId: string, seq: number) =>
+    (await database.pool.query<{ kind: string; ticket_id: string }>("select kind, payload->>'ticketId' as ticket_id from scanner_change where event_id = $1 and seq > $2 order by seq", [eventId, seq])).rows;
+  const ec = (eventId: string, targets: { ticketId: string; cancellationId: string }[], nowMs = NOW) => ecService.eventCancel({ cancellationRequestId: randomUUID(), eventId, targets, nowMs });
+  const t = (ticketId: string, cancellationId: string = randomUUID()) => ({ ticketId, cancellationId });
+
+  test('GAT-090 A5 GetEntryRecords는 실제 scan_event에서 들어감·통과만 입장으로 세고 가장 이른 기기 시각을 준다', async () => {
+    const w = await fresh(5);
+    const [twice, rejected, checked, exited, none] = w.tickets as [string, string, string, string, string];
+    const at1001 = NOW + 60_000;
+    const at1005 = NOW + 5 * 60_000;
+    await scanAt(w.eventId, twice, 'IN', 'PASS', at1005);
+    await scanAt(w.eventId, twice, 'IN', 'PASS', at1001);
+    await scanAt(w.eventId, twice, 'IN', 'REJECT', at1001 - 60_000);
+    await scanAt(w.eventId, rejected, 'IN', 'REJECT', at1001);
+    await scanAt(w.eventId, checked, 'IN', 'CHECK', at1001);
+    await scanAt(w.eventId, exited, 'OUT', 'PASS', at1001);
+    const unknown = randomUUID();
+    expect(await ecService.entryRecords([none, unknown, twice, rejected, checked, exited])).toEqual([
+      { ticketId: none, found: true, entered: false },
+      { ticketId: unknown, found: false, entered: false },
+      { ticketId: twice, found: true, entered: true, firstEnteredAtMs: at1001 },
+      { ticketId: rejected, found: true, entered: false },
+      { ticketId: checked, found: true, entered: false },
+      { ticketId: exited, found: true, entered: false },
+    ]);
+  });
+
+  test('GAT-110 E2 실제 DB에서 끝낼 상태 다섯은 CANCELED·키 폐기·환급·판 번호 + 1·양도 표시 끔과 스캐너 변경분 둘씩, 끝난 상태 둘은 그대로다', async () => {
+    const w = await fresh(7);
+    const statuses = ['ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'FLAGGED', 'REFUNDED', 'VOIDED'] as const;
+    for (const [i, status] of statuses.entries()) await database.pool.query('update ticket set status = $2, version = 9 where id = $1', [w.tickets[i], status]);
+    await database.pool.query('update ticket set account_id = $2, transfer_pending = true where id = $1', [w.tickets[0], RECIPIENT]);
+    const before = await Promise.all(w.tickets.slice(5).map(row));
+    const seq = await lastSeq(w.eventId);
+    const out = await ec(w.eventId, w.tickets.map((id) => t(id)));
+    expect(out.map((o) => [o.result, o.transferWithdrawn])).toEqual([
+      ['CANCELED', true],
+      ['CANCELED', false],
+      ['CANCELED', true],
+      ['CANCELED', false],
+      ['CANCELED', false],
+      ['ALREADY_ENDED', false],
+      ['ALREADY_ENDED', false],
+    ]);
+    expect(out[0]).toMatchObject({ holderAccountId: RECIPIENT, orderId: w.orderId });
+    for (const id of w.tickets.slice(0, 5)) expect(await row(id)).toMatchObject({ status: 'REFUNDED', transfer_pending: false, key_revoked_at: new Date(NOW), version: 10 });
+    expect(await Promise.all(w.tickets.slice(5).map(row))).toEqual(before);
+    const changes = await changesAfter(w.eventId, seq);
+    for (const id of w.tickets.slice(0, 5)) expect(changes.filter((c) => c.ticket_id === id).map((c) => c.kind).sort(), id).toEqual(['KEY_REVOKED', 'TICKET_STATUS']);
+    expect(changes.filter((c) => w.tickets.slice(5).includes(c.ticket_id))).toEqual([]);
+    const recorded = await database.pool.query<{ ticket_id: string; result: string }>('select ticket_id, result from ticket_cancellation where ticket_id = any($1::uuid[])', [w.tickets]);
+    expect(recorded.rows.map((r) => r.result).sort()).toEqual(Array(5).fill('EVENT_CANCELED'));
+  });
+
+  test('GAT-110 E3 같은 취소 ID로 다시 부르면 CANCELED이고 판 번호·스캐너 변경분이 그대로이며, 틀린 요청은 앞 표까지 되돌린다', async () => {
+    const w = await fresh(1);
+    const [id] = w.tickets as [string];
+    const cancellationId = randomUUID();
+    expect((await ec(w.eventId, [t(id, cancellationId)]))[0]!.result).toBe('CANCELED');
+    const after = await row(id);
+    const seq = await lastSeq(w.eventId);
+    expect((await ec(w.eventId, [t(id, cancellationId)], NOW + 60_000))[0]!.result).toBe('CANCELED');
+    expect(await row(id)).toEqual(after);
+    expect(await lastSeq(w.eventId)).toBe(seq);
+    expect(Number((await database.pool.query('select count(*)::int as n from ticket_cancellation where cancellation_id = $1', [cancellationId])).rows[0].n)).toBe(1);
+
+    const fresh2 = await fresh(1);
+    const other = await fresh(1);
+    const [ok] = fresh2.tickets as [string];
+    for (const bad of [randomUUID(), other.tickets[0]!]) {
+      await expect(ec(fresh2.eventId, [t(ok), t(bad)])).rejects.toBeInstanceOf(TicketInputError);
+      expect(await row(ok)).toMatchObject({ status: 'ISSUED', key_revoked_at: null, version: 0 });
+    }
+    const many = await fresh(200);
+    expect(await ec(many.eventId, many.tickets.map((x) => t(x)))).toHaveLength(200);
+  });
+
+  test('GAT-110 E4 팬 취소와 회차 취소가 같은 표를 동시에 노리면(50회) 매번 하나만 키를 폐기하고 두 차례가 모두 나온다', async () => {
+    let fanFirst = 0;
+    let eventFirst = 0;
+    for (let i = 0; i < 50; i++) {
+      const w = await fresh(1);
+      const [ticketId] = w.tickets as [string];
+      const fan = () => ecService.cancel({ orderId: w.orderId, ticketIds: [ticketId], requestedByAccountId: ACCOUNT, cancellationId: randomUUID(), nowMs: NOW });
+      const evt = () => ec(w.eventId, [t(ticketId)]);
+      const [fanOut, evtOut] =
+        i % 2 === 0
+          ? await Promise.all([fan(), evt()])
+          : await (async () => {
+              const e = evt();
+              const f = fan();
+              const [re, rf] = await Promise.all([e, f]);
+              return [rf, re] as const;
+            })();
+      if (fanOut[0]!.result === 'REFUND_NOW') {
+        expect(evtOut[0]!.result, `회차 ${i}`).toBe('ALREADY_ENDED');
+        fanFirst++;
+      } else {
+        expect(fanOut[0]!.result, `회차 ${i}`).toBe('ALREADY_CANCELLED');
+        expect(evtOut[0]!.result, `회차 ${i}`).toBe('CANCELED');
+        eventFirst++;
+      }
+      expect(await row(ticketId), `회차 ${i}`).toMatchObject({ status: 'REFUNDED', version: 1 });
+    }
+    expect(fanFirst, '팬 취소가 먼저 잡은 경우').toBeGreaterThan(0);
+    expect(eventFirst, '회차 취소가 먼저 잡은 경우').toBeGreaterThan(0);
+  });
+});

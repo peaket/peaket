@@ -138,6 +138,52 @@ export function operatorCancelResultOf(t: Pick<TicketRecord, 'status' | 'account
   return 'CANCELED';
 }
 
+// ---- 회차 취소 표 끝내기(ticket.proto EventCancelTickets, BAT-420 GAT-110 E)·입장 기록 대조(GetEntryRecords, GAT-090 A). 빈 뼈대 ----
+
+/** 한 번에 회차 취소로 끝내는 표 상한 200장 [가정](ticket.proto EventCancelTicketsRequest) */
+export const EVENT_CANCEL_MAX_TARGETS = 200;
+/** 한 번에 입장 기록을 묻는 표 상한 100장 [가정](ticket.proto GetEntryRecordsRequest) */
+export const ENTRY_RECORDS_MAX_TICKETS = 100;
+export type EventCancelResult = 'CANCELED' | 'ALREADY_ENDED';
+export interface EventCancelTarget {
+  readonly ticketId: string;
+  /** purchase-svc가 정한 취소 ID(ticket_cancellation의 멱등 키) */
+  readonly cancellationId: string;
+}
+export interface EventCancelInput {
+  readonly cancellationRequestId: string;
+  readonly eventId: string;
+  readonly targets: readonly EventCancelTarget[];
+  readonly nowMs: number;
+}
+export interface EventCancelOutcome {
+  readonly ticketId: string;
+  readonly result: EventCancelResult;
+  readonly orderId: string;
+  /** 지금 보유자(결제자와 다를 수 있다) */
+  readonly holderAccountId: string;
+  /** 진행 중 양도 표시를 이번 호출이 껐는가 */
+  readonly transferWithdrawn: boolean;
+}
+export interface EntryRecord {
+  readonly ticketId: string;
+  readonly found: boolean;
+  /** 들어감(IN)·통과(PASS) 스캔이 하나라도 있는가 */
+  readonly entered: boolean;
+  /** entered일 때 가장 이른 들어감·통과 시각 */
+  readonly firstEnteredAtMs?: number;
+}
+
+/** 소문자 UUID, 대상 1~200, 같은 표 두 번 금지. @throws TicketInputError (BAT-420 빈 뼈대) */
+export function normalizeEventCancelInput(_i: EventCancelInput): EventCancelInput {
+  throw new Error('아직 없음');
+}
+
+/** 소문자 UUID, 1~100, 중복 금지. @throws TicketInputError (BAT-420 빈 뼈대) */
+export function normalizeEntryRecordsInput(_ticketIds: readonly string[]): readonly string[] {
+  throw new Error('아직 없음');
+}
+
 export interface ListTicketsInput {
   readonly accountId: string;
   readonly cursor?: string;
