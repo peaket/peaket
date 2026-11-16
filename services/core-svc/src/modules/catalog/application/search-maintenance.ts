@@ -60,6 +60,10 @@ export class SearchReadModelTimers {
   #since: Date;
   #busy = new Set<string>();
   #drift = 0;
+  /** 이 파드가 뜬 시각(따라잡기를 처음 시도한 때). 그 뒤에 끝까지 마친 따라잡기가 있어야 따라잡기를 마친 것으로 본다 */
+  #startedAt: Date | undefined;
+  /** 이 파드가 따라잡기를 마쳤거나 다른 파드가 마친 것을 보았다(start 전에는 할 일이 없다) */
+  #reconciled = true;
 
   constructor(
     private readonly o: {
@@ -114,6 +118,8 @@ export class SearchReadModelTimers {
   /** 1분 정리 한 번: 지난 정리 뒤 오픈·판매 종료 시각이 지난 공연을 다시 동기화하고, 하루 지난 지운 표시를 지운다 */
   async tidy(): Promise<{ version: number | null; productions: number; purged: number }> {
     const at = new Date(this.o.clock.now());
+    // 시작 따라잡기를 마치지 못했으면(실패, 다른 파드가 쥐고 있었음) 정리 앞에 다시 본다(ADR-0271 결정 12 보탬, 리뷰 R165-14)
+    if (!this.#reconciled) await this.#catchUp(at);
     const timed = await this.o.sync.syncTimed(at, this.#since);
     const purged = await this.o.sync.purgeRemovals(at);
     // 정리가 다 성공했을 때만 창을 앞으로 옮긴다(실패하면 다음 정리가 같은 창부터 다시 본다, ADR-0271 결정 12)
@@ -133,12 +139,9 @@ export class SearchReadModelTimers {
   async start(): Promise<void> {
     const at = new Date(this.o.clock.now());
     this.#since = at;
-    try {
-      const r = await this.o.sync.reconcileAll(at);
-      safe(() => this.o.logger?.info({ event: 'search_reconciled', ran: r.ran, productions: r.productions, searchVersion: r.version }, '검색 읽기 모델 시작 따라잡기'));
-    } catch (e) {
-      safe(() => this.o.logger?.warn({ event: 'search_maintenance_failed', task: 'search-reconcile', err: e instanceof Error ? e.name : 'unknown' }, '검색 읽기 모델 시작 따라잡기가 실패했다(1분 정리가 이어 간다)'));
-    }
+    this.#startedAt = at;
+    this.#reconciled = false;
+    await this.#reconcile(at);
     if (this.o.dictionary) {
       try {
         await this.o.dictionary.refresh();
@@ -147,6 +150,31 @@ export class SearchReadModelTimers {
       }
     }
     this.#arm();
+  }
+
+  /** 따라잡기를 한 번 부른다. 끝까지 마쳤으면 기억한다. 실패는 기록만 한다(다음 정리 주기에 다시 한다) */
+  async #reconcile(at: Date): Promise<void> {
+    try {
+      const r = await this.o.sync.reconcileAll(at);
+      if (r.ran) this.#reconciled = true;
+      safe(() => this.o.logger?.info({ event: 'search_reconciled', ran: r.ran, productions: r.productions, chunks: r.chunks, searchVersion: r.version }, '검색 읽기 모델 따라잡기'));
+    } catch (e) {
+      safe(() => this.o.logger?.warn({ event: 'search_maintenance_failed', task: 'search-reconcile', err: e instanceof Error ? e.name : 'unknown' }, '검색 읽기 모델 따라잡기가 실패했다(다음 정리 주기에 다시 한다)'));
+    }
+  }
+
+  /** 다른 파드가 이 파드가 뜬 뒤에 따라잡기를 마쳤으면(같은 시각 포함) 그것으로 친다. 아니면 다시 한다 */
+  async #catchUp(at: Date): Promise<void> {
+    try {
+      const last = await this.o.sync.lastReconciledAt();
+      if (last && this.#startedAt && last.getTime() >= this.#startedAt.getTime()) {
+        this.#reconciled = true;
+        return;
+      }
+    } catch (e) {
+      safe(() => this.o.logger?.warn({ event: 'search_maintenance_failed', task: 'search-reconcile-check', err: e instanceof Error ? e.name : 'unknown' }, '따라잡기를 마쳤는지 보지 못했다'));
+    }
+    await this.#reconcile(at);
   }
 
   #arm(): void {

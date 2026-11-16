@@ -25,7 +25,11 @@ const KINDS = ['콘서트', '투어', '뮤지컬', '팬미팅', '페스티벌', 
 const GENRES = ['콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타'];
 const PLACES = 200;
 const ARTISTS = 2_000;
-/** 정해진 ID(같은 값으로 다시 돌리면 같은 줄) */
+/**
+ * 정해진 ID(같은 값으로 다시 돌리면 같은 줄)
+ * @param {string} prefix
+ * @param {number} n
+ */
 const id = (prefix, n) => `${prefix}-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const PROMOTER = id('4f000000', 1);
 const ACTOR = id('4f000000', 2);
@@ -83,7 +87,9 @@ try {
 
 // 읽기 모델은 서버와 같은 동기화 코드로 채운다(시작 따라잡기, ADR-0271 결정 12)
 const { createDatabase } = await import('@peaket/platform');
-const { DrizzleSearchReadModel } = await import('../dist/modules/catalog/index.js');
+// 빌드 결과(dist)는 이 스크립트를 돌리기 직전에 만든다. 타입 검사가 빌드 전 dist를 읽지 않게 경로를 값으로 넘긴다
+const catalogModule = '../dist/modules/catalog/index.js';
+const { DrizzleSearchReadModel } = /** @type {{ DrizzleSearchReadModel: new (db: unknown) => { reconcileAll(at: Date): Promise<{ ran: boolean; productions: number; version: number | null }> } }} */ (await import(catalogModule));
 const database = createDatabase({ url, applicationName: 'core-svc-fill-search', max: 2 });
 try {
   const started = Date.now();

@@ -7,6 +7,7 @@
 // - read·version: 사전 원천(운영은 읽기 전용 복제본 연결). 한 읽기 전용 REPEATABLE READ 트랜잭션에서 판을 먼저 읽는다.
 import type { Database, DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import { termRowsOf, type DictionarySnapshot, type SearchDictionarySource, type SearchReadModelSync, type SearchTermRow } from '../../domain/search.js';
 import { documentOfRow, rowsOf, termOfRow, type DocumentRow, type TermRow } from './search-rows.js';
 
@@ -15,6 +16,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const SEARCH_REMOVAL_KEEP_MS = 86_400_000;
 /** 시작 따라잡기의 끊음 크기(ADR-0271 결정 12, 500개 [가정]) */
 export const RECONCILE_CHUNK = 500;
+/** 이름 줄을 한 문장에 넣는 줄 수(줄마다 매개변수 10개, PostgreSQL 매개변수 상한 65,535 안) */
+const TERM_BATCH = 500;
 /** 정리 작업 권고 잠금 키(여러 파드 중 하나만 돈다) */
 const TIDY_LOCK = 2_710_165;
 /** 표와 원천을 견주는 칸(관심도·판 제외). 고정 글이다(sql.raw에는 값을 넣지 않는다) */
@@ -49,10 +52,10 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
     return { version: r.version, removed: r.removed };
   }
 
-  /** bump: 바뀐 것이 없어도 판을 올린다(시작 따라잡기의 끊음마다 판 1, ADR-0271 결정 12) */
-  async #apply(tx: DbTransaction, productionIds: readonly string[], at: Date, bump = false): Promise<{ version: number; changed: boolean; removed: string[] }> {
+  /** 원천과 표가 같으면 판·지운 표시를 건드리지 않는다(판은 실제로 바꾼 트랜잭션마다 1, ADR-0271 결정 12 보탬) */
+  async #apply(tx: DbTransaction, productionIds: readonly string[], at: Date): Promise<{ version: number; changed: boolean; removed: string[] }> {
     const ids = [...new Set(productionIds)];
-    if (ids.length === 0 && !bump) return { version: await currentVersion(tx), changed: false, removed: [] };
+    if (ids.length === 0) return { version: await currentVersion(tx), changed: false, removed: [] };
     const arr = uuidArray(ids);
     const atIso = at.toISOString();
     const source = rowsOf<SourceRow>(
@@ -87,7 +90,7 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
       return !c || c.kind !== t.kind || c.target_id !== t.targetId || c.display_name !== t.displayName || (c.alias_of ?? null) !== t.aliasOf;
     });
 
-    if (!bump && changedDocs.length === 0 && removedDocs.length === 0 && removedTerms.length === 0 && changedTerms.length === 0) {
+    if (changedDocs.length === 0 && removedDocs.length === 0 && removedTerms.length === 0 && changedTerms.length === 0) {
       return { version: await currentVersion(tx), changed: false, removed: [] };
     }
     // 판은 트랜잭션마다 한 번(이 트랜잭션이 끝날 때까지 이 줄을 잠근다, data.md search_version)
@@ -110,10 +113,14 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
       await tx.execute(sql`delete from search_term where id = any(${rm}::uuid[])`);
       await tx.execute(sql`insert into search_removal (version, kind, target_id, removed_at) select ${version}, 'TERM', unnest(${rm}::uuid[]), ${atIso}::timestamptz`);
     }
-    for (const t of changedTerms) {
+    // 이름 줄은 여러 줄을 한 문장으로 넣는다(줄마다 왕복하지 않게). 매개변수 상한을 넘지 않게 500줄씩
+    for (let i = 0; i < changedTerms.length; i += TERM_BATCH) {
+      const values = changedTerms
+        .slice(i, i + TERM_BATCH)
+        .map((t) => sql`(${t.id}::uuid, ${t.kind}, ${t.targetId}::uuid, ${t.displayName}, ${t.aliasOf}, ${t.norm}, ${t.normNospace}, ${t.jamo}, ${t.chosung}, ${version})`);
       await tx.execute(sql`
         insert into search_term (id, kind, target_id, display_name, alias_of, norm, norm_nospace, jamo, chosung, updated_version)
-        values (${t.id}::uuid, ${t.kind}, ${t.targetId}::uuid, ${t.displayName}, ${t.aliasOf}, ${t.norm}, ${t.normNospace}, ${t.jamo}, ${t.chosung}, ${version})
+        values ${sql.join(values, sql`, `)}
         on conflict (id) do update set kind = excluded.kind, target_id = excluded.target_id, display_name = excluded.display_name, alias_of = excluded.alias_of,
           norm = excluded.norm, norm_nospace = excluded.norm_nospace, jamo = excluded.jamo, chosung = excluded.chosung, updated_version = excluded.updated_version`);
     }
@@ -152,29 +159,63 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
   }
 
   /**
-   * 시작 따라잡기(ADR-0271 결정 12, 리뷰 R165-1): 1분 정리와 같은 권고 잠금 안에서 원천에 있는 공연과 표에 있는 공연을 합친 모든 공연을
-   * 500개 [가정]씩 끊어 다시 동기화한다(끊음마다 판 1). 원천에 없는 표 줄은 지우고 지운 표시를 적는다. 잠금을 못 잡으면 건너뛴다
+   * 시작 따라잡기(ADR-0271 결정 12와 보탬, 리뷰 R165-1·R165-14): 따라잡기 전용 연결 하나에서 세션 권고 잠금(1분 정리와 같은 열쇠)을 잡고,
+   * 원천에 있는 공연과 표에 있는 공연을 합친 모든 공연을 chunkSize(기본 500 [가정])개씩 끊어 끊음마다 트랜잭션 하나로 동기화하고 커밋한다.
+   * 그래서 그동안 판매 승인·포스터 동기화는 따라잡기 끝을 기다리지 않는다. 원천과 표가 같은 끊음은 판·지운 표시를 건드리지 않는다.
+   * 첫 끊음에서 search_version.reconciled_at을 비우고, 끝까지 마치면 마지막 끊음에서 시작 시각(at)을 적는다(도중에 죽으면 빈 채로 남아 다른 파드가 다시 한다).
+   * 잠금을 못 잡으면 건너뛴다(ran: false)
    */
-  // chunkSize·chunks는 리뷰 R165-14(계획 BAT-165 '### 14')의 새 모양이다. BAT-165 시험 담당이 모양만 맞췄고(chunkSize는 아직 쓰지 않고 chunks는 -1) 구현 담당이 채운다
-  async reconcileAll(at: Date, _o: { chunkSize?: number } = {}): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number }> {
-    return this.db.transaction(async (tx) => {
-      const [lock] = rowsOf<{ ok: boolean }>(await tx.execute(sql`select pg_try_advisory_xact_lock(${TIDY_LOCK}) as ok`));
-      if (!lock?.ok) return { ran: false, productions: 0, version: null, chunks: -1 };
-      const ids = rowsOf<{ production_id: string }>(
-        await tx.execute(sql`
-          select production_id from search_document_source_at(${at.toISOString()}::timestamptz)
-          union select production_id from search_document
-          order by production_id`),
-      ).map((r) => r.production_id);
+  async reconcileAll(at: Date, o: { chunkSize?: number } = {}): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number }> {
+    const size = o.chunkSize ?? RECONCILE_CHUNK;
+    if (!Number.isInteger(size) || size < 1) throw new RangeError(`chunkSize는 1 이상의 정수다: ${size}`);
+    const client = await this.db.pool.connect();
+    let broken: unknown;
+    let locked = false;
+    // 빌려 쓰는 동안 연결이 서버 쪽에서 끊기면(파드 종료·관리자 명령) 그 오류는 연결의 error 사건으로 온다. 받지 않으면 프로세스를 죽이므로 받아 두고, 다음 질의가 실패하게 둔다
+    const onError = (e: unknown) => {
+      broken ??= e;
+    };
+    client.on('error', onError);
+    try {
+      const lock = await client.query<{ ok: boolean }>('select pg_try_advisory_lock($1) as ok', [TIDY_LOCK]);
+      if (!lock.rows[0]?.ok) return { ran: false, productions: 0, version: null, chunks: 0 };
+      locked = true;
+      const atIso = at.toISOString();
+      const ids = (
+        await client.query<{ production_id: string }>(
+          'select production_id from search_document_source_at($1::timestamptz) union select production_id from search_document order by production_id',
+          [atIso],
+        )
+      ).rows.map((r) => r.production_id);
+      const own = drizzle({ client });
+      const chunks = Math.max(1, Math.ceil(ids.length / size));
       let version: number | null = null;
-      for (let i = 0; i < ids.length; i += RECONCILE_CHUNK) version = (await this.#apply(tx, ids.slice(i, i + RECONCILE_CHUNK), at, true)).version;
-      return { ran: true, productions: ids.length, version, chunks: -1 };
-    });
+      for (let c = 0; c < chunks; c++) {
+        const part = ids.slice(c * size, (c + 1) * size);
+        version = await own.transaction(async (tx) => {
+          if (c === 0 && chunks > 1) await tx.execute(sql`update search_version set reconciled_at = null where id = 1`);
+          const r = await this.#apply(tx, part, at);
+          if (c === chunks - 1) await tx.execute(sql`update search_version set reconciled_at = ${atIso}::timestamptz where id = 1`);
+          return r.version;
+        });
+      }
+      return { ran: true, productions: ids.length, version, chunks: ids.length === 0 ? 0 : chunks };
+    } catch (e) {
+      broken = e;
+      throw e;
+    } finally {
+      if (locked && broken === undefined) await client.query('select pg_advisory_unlock($1)', [TIDY_LOCK]).catch(() => undefined);
+      client.off('error', onError);
+      // 연결이 끊겼거나 도중에 실패했으면 그 연결을 버린다(세션 잠금도 함께 풀린다)
+      client.release(broken === undefined ? undefined : true);
+    }
   }
 
-  /** 리뷰 R165-14. BAT-165 시험 담당이 둔 빈 뼈대 */
+  /** 마지막으로 끝까지 마친 따라잡기의 시작 시각(search_version.reconciled_at). 없으면 null */
   async lastReconciledAt(): Promise<Date | null> {
-    throw new Error('아직 없음');
+    const [r] = rowsOf<{ reconciled_at: string | Date | null }>(await this.db.db.execute(sql`select reconciled_at from search_version where id = 1`));
+    const v = r?.reconciled_at ?? null;
+    return v === null ? null : new Date(v);
   }
 
   async purgeRemovals(at: Date): Promise<number> {
