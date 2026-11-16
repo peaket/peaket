@@ -17,6 +17,8 @@ import {
   type WebShellStaffInfo,
 } from '@peaket/ds/WebShell';
 import { shellUserOf, useFanSession, type MeSummary } from '@/entities/me';
+// 셸 묶음에는 작은 로더만 든다(월렛 등록이 있을 때만 토스트 모듈을 늦게 불러온다, HOT-390)
+import { WalletUpdateLoader } from '@/features/wallet-device-key/ui/WalletUpdateLoader';
 import { GENRES, searchHref } from '@/shared/config/genres';
 import { ToastProvider } from '@/shared/ui/toast';
 import { useRecentSearches, useSuggestionSource } from './search-source';
@@ -130,6 +132,8 @@ export function AppShell({
       >
         {children}
       </WebShell>
+      {/* 실제 월렛 워커 갱신 안내. 미리보기(updateAvailable)가 켜져 있으면 셸이 이미 그린다 */}
+      {updateAvailable ? null : <WalletUpdateLoader />}
     </ToastProvider>
   );
 }

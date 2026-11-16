@@ -88,6 +88,8 @@ export function SeatMapEditorCanvas({
       className={["card-flat center", className].filter(Boolean).join(" ")}
       style={{ position: "relative", flex: 1, padding, overflow: "hidden", ...gridBg, ...style }}
       aria-hidden="true"
+      // 좌석맵 에디터 바탕은 두 방향으로 미는 예외 상자다(FE-T31, docs/frontend.md §5.17 '예외 상자')
+      data-reflow-exception=""
     >
       <div style={{ position: "relative", width: "100%", maxWidth, aspectRatio: `${vw}/${vh}` }}>
         <svg

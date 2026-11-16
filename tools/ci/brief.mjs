@@ -291,12 +291,14 @@ export const JOBS = {
   'web / seed-css': { file: 'ci-web.yml', what: 'SEED CSS 층(FE-T36, 앱 다섯 PoC 빌드)' },
   'web / budgets': { file: 'ci-web.yml', what: '운영 빌드의 경로별 첫 JS 예산·Lighthouse·대기실 FE-T1·CSP(FE-T35·FE-T30)·정적 자산, @peaket/config 정본 대조' },
   'web / seatmap-pkg': { file: 'ci-web.yml', what: '좌석맵 패키지 세 엔진' },
+  'web / reflow': { file: 'ci-web.yml', what: '재배치·초점 가림(FE-T31·FE-T18)·인앱 브라우저 안내(SCR-058)·월렛 워커(HOT-390) 세 엔진, web·partner·console 운영 빌드' },
   'security-scan / dependencies': { file: 'security-scan.yml', what: 'pnpm 내장 의존성 취약점·라이선스 검사와 조치 기한·예외 만료 판정(tools/ci/vuln-deadline.mjs, BAS-010 ①)' },
 };
 
 /** ci-node.yml이 통합 시험(pnpm --filter @peaket/<이름> test:integration)을 따로 도는 패키지 */
 // bundle: 한 프로세스 합본의 시작 파일 시험, invariant-checker: 측정 판정이 쓰는 불변식 SQL(BUILD_ORDER PRF-215, ci-node.yml)
-export const INT_PACKAGES = ['platform', 'identity-svc', 'core-svc', 'payment-svc', 'queue-svc', 'trust-svc', 'admission-ctrl', 'purchase-svc', 'bundle', 'invariant-checker'];
+// web: 소비자 웹 공유 캐시 처리기(Valkey, BUILD_ORDER HOT-390)
+export const INT_PACKAGES = ['platform', 'identity-svc', 'core-svc', 'payment-svc', 'queue-svc', 'trust-svc', 'admission-ctrl', 'purchase-svc', 'bundle', 'invariant-checker', 'web'];
 
 /** 영역 이름: 경로의 앞 두 마디(둘째 마디가 파일이면 첫 마디. services/README.md → services) */
 const top2 = (p) => {

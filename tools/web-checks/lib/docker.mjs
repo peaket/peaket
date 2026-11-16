@@ -8,6 +8,8 @@
 //   node lib/docker.mjs seatmap-pkg                   @peaket/seatmap 세 엔진 검사(HOT-120). 시연 페이지는 먼저 `pnpm --filter @peaket/seatmap demo:build`
 //   node lib/docker.mjs rich-text                     공연 설명 편집기(FE-T41, ADR-0247) 세 엔진. 파트너 서버(4122)는 이 PC에서 먼저 띄운다(README)
 //   node lib/docker.mjs purchase                      구매 세션 서명기(FE-T7, HOT-360 ①) 세 엔진. 빌드가 없다(원본을 타입만 지워 낸다)
+//   node lib/docker.mjs reflow                        재배치·초점 가림(FE-T31·FE-T18)·인앱 안내(SCR-058)·월렛 워커(HOT-390) 세 엔진(BAT-170).
+//                                                     서버(web·partner·console 운영 빌드와 가짜 API)는 이 PC에서 `node seed-css/serve-all.mjs --budgets`로 먼저 띄운다
 // 기준 이미지는 CI와 같은 이 이미지에서만 찍는다(브라우저 그리기는 OS·판·글꼴에 따라 다르다, d2 §1).
 // 컨테이너는 이 패키지를 node_modules 없이 옮겨 리눅스용으로 다시 설치한다. 결과는 reports/docker-<mode>/에 둔다.
 import { spawnSync } from 'node:child_process';
@@ -37,8 +39,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
 
 function main() {
   const [mode, ...rest] = process.argv.slice(2);
-  if (!['visual', 'layers', 'seatmap', 'budgets', 'seatmap-pkg', 'ds', 'csp', 'rich-text', 'purchase'].includes(mode)) {
-    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg | ds | csp | rich-text | purchase');
+  if (!['visual', 'layers', 'seatmap', 'budgets', 'seatmap-pkg', 'ds', 'csp', 'rich-text', 'purchase', 'reflow'].includes(mode)) {
+    console.error('쓰는 법: node lib/docker.mjs visual [--update-snapshots] | layers | seatmap | budgets | seatmap-pkg | ds | csp | rich-text | purchase | reflow');
     process.exit(2);
   }
   // --update-snapshots(모두 다시) 또는 --update-snapshots=missing(새 이야기처럼 없는 것만 만들고 나머지는 견준다)
@@ -103,6 +105,8 @@ function main() {
     'rich-text': 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.rich-text.config.mjs',
     // 구매 세션 서명기(HOT-360 ①): 서버는 컨테이너 안에서 띄운다(타입 지우기는 Node 22.13 이상)
     purchase: 'pnpm exec playwright test -c playwright.purchase.config.mjs',
+    // 재배치·초점 가림·인앱 안내·월렛 워커(BAT-170): 서버는 이 PC의 운영 빌드(serve-all --budgets). CI 화면 잡 reflow와 같은 이미지
+    reflow: 'PEAKET_WEB_CHECKS_HOST=host.docker.internal PEAKET_WEB_CHECKS_SERVERS=external pnpm exec playwright test -c playwright.reflow.config.mjs',
   }[mode];
   const script = [
     'set -e',

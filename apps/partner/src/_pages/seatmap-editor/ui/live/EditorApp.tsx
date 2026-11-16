@@ -384,7 +384,7 @@ function Workspace({ store, productionId, onNotFound }: { store: EditorStore; pr
           <Tree store={store} />
         </section>
         <section className="card col" id="canvas-panel" role="tabpanel" aria-label={['배치 그리기', '좌석 채우기', '좌석 다듬기', '미리보기'][step - 1]} style={{ padding: 10, gap: 8, minWidth: 0 }}>
-          {step === 4 ? <Preview store={store} /> : <div ref={canvasEl} data-testid="seatmap-canvas" style={{ width: '100%', height: 560, borderRadius: 8, overflow: 'hidden', background: '#f2f3f5', touchAction: 'none' }} />}
+          {step === 4 ? <Preview store={store} /> : <div ref={canvasEl} data-testid="seatmap-canvas" data-reflow-exception="" style={{ width: '100%', height: 560, borderRadius: 8, overflow: 'hidden', background: '#f2f3f5', touchAction: 'none' }} />}
         </section>
         <section className="card col" style={{ padding: '14px 12px', gap: 12, minWidth: 0 }} aria-label="속성">
           <PropsArea store={store} onMessage={setMessage} onConfirmRefill={(n, go) => setRefill({ n, go })} />

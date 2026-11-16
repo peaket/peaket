@@ -103,7 +103,13 @@ export function serverCommand(app, build) {
     const env = { PEAKET_NEXT_DIST: b.nextDist, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: CHECK_KEY };
     // 소비자 웹은 가짜 API를 서버 쪽 원본으로 부르고, 가짜 API의 이미지 주소를 CSP img-src에 넣는다. 브라우저의 팬 API는 빌드에 넣은 운영 기본 출처라
     // connect-src(api)는 바꾸지 않는다(검사 브라우저의 개인 값 요청은 닿지 않아 비로그인으로 그린다)
-    if (app.name === 'web') return { command: `node ../../${app.dir}/server/start.mjs --port ${port} --inner-port ${port + 1000}`, env: { ...env, PEAKET_API_ORIGIN: MOCK_API_ORIGIN, PEAKET_CSP_ORIGINS: JSON.stringify({ img: MOCK_API_ORIGIN }) } };
+    // PEAKET_ENV=ci: 시작 파일은 local·ci·demo가 아니면 공유 캐시 주소(PEAKET_WEB_CACHE_REDIS_URL) 없이 뜨지 않는다(docs/frontend.md §5.18, HOT-390).
+    // 검사 서버는 Redis 없이 Next.js 기본 캐시 처리기로 돈다
+    if (app.name === 'web')
+      return {
+        command: `node ../../${app.dir}/server/start.mjs --port ${port} --inner-port ${port + 1000}`,
+        env: { ...env, PEAKET_ENV: 'ci', PEAKET_API_ORIGIN: MOCK_API_ORIGIN, PEAKET_CSP_ORIGINS: JSON.stringify({ img: MOCK_API_ORIGIN }) },
+      };
     return { command: `pnpm --dir ../../${app.dir} exec next start -p ${port}`, env };
   }
   // 없는 경로에 줄 대체 파일: 운영 빌드는 index.html, Vite·webpack PoC 빌드(dist-poc)는 탐침 페이지 하나만 있으므로 탐침 페이지다

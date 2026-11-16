@@ -565,7 +565,8 @@ export function SeatsLive({ eventId }: { eventId: string }) {
               {seatLevel ? <SeatLegend statuses={SEAT_LEGEND} /> : <ZoneLegend size="sm" />}
             </div>
             <div className="col" style={{ gap: 8 }}>
-              <div className="relative">
+              {/* 좌석맵은 두 방향으로 미는 예외 상자다(FE-T31, docs/frontend.md §5.17 '예외 상자') */}
+              <div className="relative" data-reflow-exception="">
                 <div ref={hostRef} className="card-flat relative h-[420px] overflow-hidden md:h-[560px] lg:h-[600px]" />
                 {listOpen ? (
                   // 지도는 밑에 그대로 둔다(크기가 0이 되면 Worker가 다시 그릴 값을 잃는다)

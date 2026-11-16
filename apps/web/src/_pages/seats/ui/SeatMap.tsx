@@ -190,7 +190,8 @@ export interface SeatMapProps {
 
 export function SeatMap({ level, scene, popover, lost, recent, zoom }: SeatMapProps) {
   return (
-    <div className="relative mx-2 md:mx-0">
+    // 좌석맵은 두 방향으로 미는 예외 상자다(FE-T31, docs/frontend.md §5.17 '예외 상자')
+    <div className="relative mx-2 md:mx-0" data-reflow-exception="">
       <div className="card-flat relative h-[420px] overflow-hidden md:h-[560px] lg:h-[600px]" aria-hidden="true">
         <Patterns />
         <Background bp="m" level={level} />

@@ -92,7 +92,8 @@ export function LinkGraph({ graph, selectedId, onSelect, height = 380 }: LinkGra
   const kinds = new Set(graph.nodes.filter((n) => n.kind !== 'ACCOUNT').map((n) => NODE_KIND_LABEL[n.kind]));
   const summary = `계정 ${accounts.filter((a) => a.inCluster !== false).length}개(묶음 밖 ${accounts.filter((a) => a.inCluster === false).length}개)가 ${[...kinds].join('·')} 연결 값에 이어진 그림입니다. 같은 내용을 표로 보기에서 볼 수 있습니다.`;
   return (
-    <svg className="chart" viewBox={`0 0 ${w} ${h}`} role="img" aria-labelledby={`${uid}-t ${uid}-d`} style={{ height: 'auto', maxHeight: h }}>
+    // 연결 그래프는 예외 상자다(FE-T31, docs/frontend.md §5.17 '예외 상자')
+    <svg className="chart" data-reflow-exception="" viewBox={`0 0 ${w} ${h}`} role="img" aria-labelledby={`${uid}-t ${uid}-d`} style={{ height: 'auto', maxHeight: h }}>
       <title id={`${uid}-t`}>연결 그래프</title>
       <desc id={`${uid}-d`}>{summary}</desc>
       {graph.edges.map((e, i) => {

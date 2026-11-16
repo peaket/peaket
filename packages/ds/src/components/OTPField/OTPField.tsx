@@ -1,7 +1,9 @@
 'use client';
-// CMP-007 OTPField. 인증 앱 코드 6자리. 입력 칸 하나(.otp-input, maxlength 6)를 키트가 여섯 칸 모양으로 그린다(d2 CMP-007, 칸을 나누지 않는다).
+// CMP-007 OTPField. 인증 앱 코드 6자리. 입력 칸 하나(.otp-input)를 키트가 여섯 칸 모양으로 그린다(d2 CMP-007, 칸을 나누지 않는다).
 // 보드 마크업: <input class="otp-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*">
-// - 여섯 자리를 한 번에 붙여넣거나 자동으로 채울 수 있다(WCAG 3.3.8). 숫자 아닌 글자는 넣는 즉시 뺀다.
+// - 여섯 자리를 한 번에 붙여넣거나 자동으로 채울 수 있다(WCAG 3.3.8). 숫자 아닌 글자는 넣는 즉시 빼고 앞 여섯 숫자만 남긴다.
+//   보드의 maxlength 6은 두지 않는다: 브라우저가 붙여넣은 '123 456'(7글자)을 빈칸을 빼기 전에 '123 45'로 잘라 숫자가 다섯이 된다
+//   (BAT-170 FE-T18 붙여넣기, docs/design/d4 #25). 여섯 자리 상한은 아래 처리기가 지킨다.
 // - 라벨 기본은 '인증 앱 코드 6자리'. 오류면 aria-invalid와 오류 칸 무늬(.is-error).
 import { forwardRef, type ChangeEvent, type InputHTMLAttributes, type ReactNode } from 'react';
 import { cx } from '../../lib/cx';
@@ -56,7 +58,6 @@ export const OTPField = forwardRef<HTMLInputElement, OTPFieldProps>(function OTP
         type="text"
         inputMode="numeric"
         autoComplete="one-time-code"
-        maxLength={6}
         pattern="[0-9]*"
         onChange={handleChange}
         {...aria}

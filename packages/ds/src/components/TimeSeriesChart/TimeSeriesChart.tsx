@@ -283,7 +283,8 @@ export function TimeSeriesChart({
     );
   } else {
     body = (
-      <div style={{ position: 'relative', height }}>
+      // 그래프는 두 방향으로 미는 예외 상자다(FE-T31, docs/frontend.md §5.17 '예외 상자')
+      <div style={{ position: 'relative', height }} data-reflow-exception="">
         <canvas ref={canvasRef} role="img" aria-label={summary} />
       </div>
     );

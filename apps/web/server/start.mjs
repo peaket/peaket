@@ -12,8 +12,18 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { assertCacheEnv } from './cache-env.mjs';
 import { createCspHashServer, reactRuntimeScripts } from './csp-hash-server.mjs';
 import { prepareStandalone, standaloneServerPath } from './standalone.mjs';
+
+// 공유 캐시 주소 확인이 맨 처음이다: PEAKET_ENV가 local·ci·demo가 아니면(운영으로 본다) PEAKET_WEB_CACHE_REDIS_URL이 없을 때
+// Next.js를 띄우지 않고 멈춘다(docs/frontend.md §5.18 '공유 캐시 처리기 세부', HOT-390)
+try {
+  assertCacheEnv();
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
+  process.exit(1);
+}
 
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { values } = parseArgs({ options: { port: { type: 'string', default: process.env.PORT ?? '3000' }, 'inner-port': { type: 'string' }, host: { type: 'string', default: '127.0.0.1' } } });

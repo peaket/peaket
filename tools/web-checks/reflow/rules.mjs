@@ -1,5 +1,7 @@
 // FE-T31 재배치·확대·글자 간격 시험의 공용 값(docs/frontend.md §5.11·§5.17, WCAG 1.4.10·1.4.4·1.4.12).
-// 브라우저 시험은 tools/web-checks/reflow/reflow.spec.mjs가 하고, 이 파일은 순수 값·판정만 둔다.
+// 브라우저 시험은 tools/web-checks/reflow/reflow.spec.mjs·keyboard.spec.mjs가 하고, 이 파일은 순수 값·판정만 둔다.
+// 판정 기준은 docs/frontend.md §5.17 '화면 매트릭스와 FE-T31·FE-T18 자동 몫의 세부'(BAT-170 웨이브 7)다.
+import { lighthousePages } from '../budgets/pages.mjs';
 
 /** 1280×1024를 400% 확대한 것과 같은 320×256, 1280×800을 200% 확대한 것과 같은 640×400 [가정] */
 export const REFLOW_VIEWPORTS = [
@@ -20,17 +22,33 @@ export const TEXT_SPACING_CSS =
   '*{line-height:1.5 !important;letter-spacing:0.12em !important;word-spacing:0.16em !important}' +
   'p,li,dd,dt,figcaption,blockquote{margin-block-end:2em !important}';
 
-/** 두 방향 스크롤을 허용하는 상자(표·좌석맵·좌석맵 에디터·그래프). 이 안에서만 민다 */
-export const EXCEPTION_SELECTORS = ['table', 'pre', 'code', '[data-reflow-exception]', '.seatmap', '.seatmap-editor', '.graph', '.chart'];
+/**
+ * 두 방향 스크롤을 허용하는 상자: 표, 표를 감싼 .table-wrap, data-reflow-exception 속성을 단 상자(좌석맵·좌석맵 에디터·그래프 부품의 바깥 상자).
+ * 예외는 이 셋뿐이다. pre·code나 클래스 이름으로 넓히면 그 안의 재배치 결함이 가려진다(docs/frontend.md §5.17 '예외 상자')
+ */
+export const EXCEPTION_SELECTORS = ['table', '.table-wrap', '[data-reflow-exception]'];
 
 /** 문서 전체 가로 스크롤이 생겼는지. 예외 상자 밖에서만 본다 */
 export function hasPageOverflow(metrics) {
   return Number(metrics?.scrollWidth ?? 0) > Number(metrics?.clientWidth ?? 0) + 1;
 }
 
-/** 글자를 담은 상자가 잘렸는지. overflow가 보이는 상자는 넘쳐도 잘린 것이 아니다 */
+/** 그 방향을 잘라 보이지 않게 하는 overflow 값(auto·scroll은 밀어서 볼 수 있어 잘림이 아니다) */
+const CLIPS = new Set(['hidden', 'clip']);
+
+/**
+ * 글자를 바로 담은 상자가 잘렸는지: overflow-x나 overflow-y가 hidden·clip인 방향에서 그 방향의 scroll 크기가 보이는 크기보다 1px 넘게 크다.
+ * text-overflow: ellipsis로 줄인 상자는 세지 않는다(전체 글을 볼 수 있는지는 수동, docs/design/d4 #20)
+ */
 export function clippedTextFindings(items) {
-  return (items ?? []).filter((x) => x && x.text === true && x.overflow !== 'visible' && (x.scrollWidth > x.clientWidth + 1 || x.scrollHeight > x.clientHeight + 1));
+  return (items ?? []).filter((x) => {
+    if (!x || x.text !== true || x.textOverflow === 'ellipsis') return false;
+    const ox = x.overflowX ?? x.overflow;
+    const oy = x.overflowY ?? x.overflow;
+    const clippedX = CLIPS.has(ox) && Number(x.scrollWidth) > Number(x.clientWidth) + 1;
+    const clippedY = CLIPS.has(oy) && Number(x.scrollHeight) > Number(x.clientHeight) + 1;
+    return clippedX || clippedY;
+  });
 }
 
 /**
@@ -39,8 +57,8 @@ export function clippedTextFindings(items) {
  * 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 웨이브 7). 판정은 구현 담당이 쓴다.
  */
 export function unreachableFindings(items, viewportWidth) {
-  void items, viewportWidth;
-  throw new Error('아직 없음');
+  const vw = Number(viewportWidth);
+  return (items ?? []).filter((x) => !(Number(x.left) >= 0 && Number(x.right) <= vw && Number(x.width) > 0 && Number(x.height) > 0 && x.hit === true));
 }
 
 /**
@@ -49,8 +67,8 @@ export function unreachableFindings(items, viewportWidth) {
  * 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 웨이브 7). 판정은 구현 담당이 쓴다.
  */
 export function obscuredFocusFindings(steps) {
-  void steps;
-  throw new Error('아직 없음');
+  const covers = (f, t) => f.left <= t.left && f.top <= t.top && f.left + f.width >= t.left + t.width && f.top + f.height >= t.top + t.height;
+  return (steps ?? []).filter((s) => s?.target && (s.fixed ?? []).some((f) => f.id !== s.target.id && covers(f, s.target)));
 }
 
 /**
@@ -58,16 +76,28 @@ export function obscuredFocusFindings(steps) {
  * 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 웨이브 7). 판정은 구현 담당이 쓴다.
  */
 export function emptyMeasurement({ requestedPath, finalPath, textCount, controlCount }) {
-  void requestedPath, finalPath, textCount, controlCount;
-  throw new Error('아직 없음');
+  if (finalPath !== requestedPath) return `도착 경로가 다르다: ${requestedPath} → ${finalPath}`;
+  if (!(Number(textCount) > 0)) return '잰 글자 상자가 0개다';
+  if (!(Number(controlCount) > 0)) return '잰 조작 요소가 0개다';
+  return null;
 }
 
-/** 시험할 주요 흐름. 소비자 웹·파트너·관제의 대표 화면만 돈다(전 화면은 출시 후보) */
+/** 좌석 화면은 운영 빌드 그대로, 성능 예산 검사의 좌석 화면 데모와 같은 경로·입장 저장값으로 연다(docs/frontend.md §5.17 '빈 결과') */
+const seatDemo = lighthousePages('127.0.0.1').find((x) => x.name === '좌석 화면 데모');
+if (!seatDemo?.sessionStorage) throw new Error('budgets/pages.mjs에 좌석 화면 데모(입장 저장값)가 없다');
+
+/**
+ * 시험할 주요 흐름. 소비자 웹·파트너·관제의 대표 화면만 돈다(전 화면은 출시 후보). 항목은 { app, path, locale, sessionStorage? }.
+ * - 소비자 웹 en은 주소 접두 /en으로 돈다(§5.12). en 접두 경로가 있는 화면만(지금은 공연 상세) en을 싣는다. 파트너·관제는 ko만이다.
+ * - sessionStorage(키 → 문자열)는 reflow.spec이 페이지 스크립트보다 먼저 넣는다. 운영 빌드는 ?state=를 무시하므로 미리보기로 열지 않는다
+ */
 export const REFLOW_PAGES = [
-  { app: 'web', path: '/' },
-  { app: 'web', path: '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01' },
-  { app: 'web', path: '/my/tickets' },
-  { app: 'web', path: '/search' },
-  { app: 'partner', path: '/events' },
-  { app: 'console', path: '/' },
+  { app: 'web', locale: 'ko', path: '/' },
+  { app: 'web', locale: 'ko', path: '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01' },
+  { app: 'web', locale: 'en', path: '/en/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01' },
+  { app: 'web', locale: 'ko', path: new URL(seatDemo.url).pathname, sessionStorage: { ...seatDemo.sessionStorage } },
+  { app: 'web', locale: 'ko', path: '/my/tickets' },
+  { app: 'web', locale: 'ko', path: '/search' },
+  { app: 'partner', locale: 'ko', path: '/events' },
+  { app: 'console', locale: 'ko', path: '/' },
 ];

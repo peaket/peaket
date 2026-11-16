@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { NextConfig } from 'next';
 import { withSerwist } from '@serwist/turbopack';
 import { seedLayeredAlias } from '@peaket/ds/seed-layered-alias';
+import { cacheConfig } from './server/cache-env.mjs';
 import { deploymentIdOf } from './server/deployment-id.mjs';
 import { hideSourceMaps } from './scripts/hide-source-maps.mjs';
 import { writeSeatPreload } from './scripts/seat-preload.mjs';
@@ -26,6 +27,9 @@ const config: NextConfig = {
   output: 'standalone',
   // 출시 후보 커밋 SHA를 배포 식별자로 쓴다(화면·서버 배포 식별자가 다르면 새로고침, HOT-390).
   deploymentId: deploymentIdOf(),
+  // 공유 캐시 처리기(docs/frontend.md §5.18 '공유 캐시 처리기 세부', HOT-390): PEAKET_WEB_CACHE_REDIS_URL이 있을 때만 미리 그린 화면 캐시(cacheHandler)와
+  // 'use cache'(cacheHandlers.default)를 같은 Redis에 두고 메모리 캐시를 0으로 한다. 값이 없으면 Next.js 기본 처리기(로컬·CI 검사)
+  ...cacheConfig(),
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)
   turbopack: { root: path.join(import.meta.dirname, '../..'), resolveAlias: { ...seedLayeredAlias(import.meta.dirname), 'peaket-pg-simulator-window': simulatorWindowModule } },

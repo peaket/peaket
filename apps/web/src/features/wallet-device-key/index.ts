@@ -45,5 +45,9 @@ export {
   type StoredDeviceKey,
   type WalletTicketSnapshot,
 } from './store';
+export { isNetworkOnlyPath, isSkipWaitingMessage, isWalletDocumentPath, rejectNoStore } from './sw-rules';
+export { applyWaitingUpdate, holdQrLock, isUpdateHoldScreen, qrLockHeld, QR_LOCK_NAME, shouldOfferUpdate, WALLET_SCOPE_URL } from './update-hold';
 export { DeviceQr, type DeviceQrProps, type DeviceQrSnapshot } from './ui/DeviceQr';
 export { OfflineBanner, type OfflineBannerProps } from './ui/OfflineBanner';
+// 갱신 토스트(ui/WalletUpdateToast)는 로더가 늦게 불러오므로 여기서 내보내지 않는다(첫 JS에 들지 않게)
+export { WalletUpdateLoader } from './ui/WalletUpdateLoader';

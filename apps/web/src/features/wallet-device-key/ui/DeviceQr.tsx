@@ -5,6 +5,7 @@
 // - 15초마다 그 순간의 보정 시각(browserClock)으로 QR v1(93바이트)을 다시 서명하고 base45 140자를 QR로 그린다.
 //   화면이 다시 보이면(visibilitychange) 그 순간에도 다시 서명한다. 네트워크와 무관하다.
 // - 티켓 스냅샷과 마지막 동기화 시각을 IndexedDB에 남겨 서비스 워커가 셸을 연 뒤 오프라인에서도 같은 화면을 그린다.
+// - 붙어 있는 동안 Web Lock `peaket.wallet.qr`(공유)을 쥐어 월렛 워커 갱신을 미룬다(docs/frontend.md §5.4 '갱신' ②, HOT-390).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { QrPattern, QrStatus, useScreenWakeLock } from '@peaket/ds/RotatingQR';
 import { browserClock } from '@/shared/lib/clock';
@@ -23,6 +24,7 @@ import {
   type StoredDeviceKey,
   type WalletTicketSnapshot,
 } from '../store';
+import { holdQrLock } from '../update-hold';
 
 type Phase = 'loading' | 'no-key' | 'registering' | 'ready' | 'error';
 
@@ -56,6 +58,9 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
   const mounted = useRef(true);
 
   useScreenWakeLock(phase === 'ready');
+
+  // 이 부품이 화면에 붙어 있는 동안 QR 잠금(공유)을 쥔다. 다른 탭은 잠금이 빌 때까지 새 월렛 워커를 활성화하지 않는다(HOT-390)
+  useEffect(() => holdQrLock(typeof navigator === 'undefined' ? undefined : navigator.locks), []);
 
   const boot = useCallback(async () => {
     setPhase('loading');
