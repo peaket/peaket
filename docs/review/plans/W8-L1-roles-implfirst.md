@@ -13,6 +13,7 @@
 
 1. **알아보는 법: 꼬리말로 밝힌다 (ADR-0281 결정 5)**: 정방향 묶음은 그 묶음의 `plan` 커밋 가운데 하나 이상이 꼬리말 `Batch-Order: impl-first`를 단다. 커밋 내용이나 차례로 짐작하지 않는다(구현이 시험보다 먼저 왔다고 정방향으로 보면 시험 먼저 묶음의 차례 위반이 조용히 통과한다). 꼬리말이 없는 코드 묶음은 지금처럼 시험 먼저로 본다.
    - 꼬리말 규칙(①, `[꼬리말]`) (추천 적용, 2026-11-16): 키는 대소문자까지 그대로 `Batch-Order`, 값은 정확히 `impl-first`(앞뒤 공백은 지움). 한 커밋에 하나만, `plan` 커밋에만 단다. 다른 역할 커밋(리뷰 반영·기록·작성 포함)에 달거나, 값이 다르거나(`test-first`도 받지 않는다. 시험 먼저는 꼬리말이 없는 것으로 나타낸다), 둘이면 실패다. 키 대소문자가 다른 `batch-order:`는 없는 꼬리말로 본다(지금 `Role` 키와 같은 선).
+   - **`[꼬리말]` 실패가 난 꼬리말은 밝힌 것으로 세지 않는다 (추천 적용, 2026-11-16, 감독 질문으로 정함)**: plan 밖 커밋의 `Batch-Order`, 값이 틀린 것, 한 커밋에 둘인 것은 그 커밋이 정방향을 밝힌 것으로 보지 않는다. 그 묶음의 다른 plan 커밋에 바른 꼬리말이 없으면 시험 먼저 코드 묶음으로 보고, 그래서 구현이 시험보다 먼저면 `[차례] <묶음> <첫 impl 해시> 첫 impl 커밋이 첫 test 커밋보다 먼저 왔다` 줄도 함께 나오며 묶음 줄 종류는 `코드`다. 아래 2(시험만·문서 묶음과의 충돌)와 '밝히는 때'도 바른 꼬리말만 센다. 까닭: `Batch-Kind`의 같은 경우(plan 밖·값 틀림·둘이면 시험만으로 보지 않음, W7-L1-roles-testonly 1의 1)와 같은 선이고, 틀린 꼬리말로 차례 검사를 느슨하게 할 수 없게 한다.
    - **여럿이면** (추천 적용, 2026-11-16): 묶음의 plan 커밋 가운데 하나라도 달면 정방향이다(첫 plan 커밋에만 다는 것으로 보지 않는다. `Batch-Kind`와 같은 선). 같은 꼬리말을 여러 plan 커밋에 달아도 된다.
    - **밝히는 때 (추천 적용, 2026-11-16)**: `Batch-Order`를 단 plan 커밋 가운데 가장 이른 것이 그 묶음의 첫 `impl` 커밋과 첫 `test` 커밋보다 앞에 있어야 한다. 아니면 `[차례] <묶음> <Batch-Order를 단 가장 이른 plan 커밋 해시> Batch-Order를 단 plan 커밋이 첫 impl·test 커밋보다 늦다`(까닭 문장은 '늦다'와 `Batch-Order`가 들면 된다). 까닭: 시험 먼저로 시작해 구현이 먼저 와 버린 묶음이 뒤의 plan 커밋 하나로 차례 위반을 지우지 못하게 한다(ADR-0281 결정 4 '이미 시험 먼저로 계획·시험 커밋이 있는 묶음은 그 차례대로 끝낸다'). 이 실패가 나도 그 묶음은 정방향으로 보고 나머지 검사를 한다.
    - 계획 파일 머리에도 사람이 읽게 '정방향 묶음'이라고 적는다(검사하지 않는다).
@@ -88,11 +89,11 @@
 | 시험 | 사건(좋은 정방향 묶음에서 바꾼 곳) | 단언 |
 | --- | --- | --- |
 | RC-73 ③⑩ 좋은 정방향 묶음은 구현이 시험보다 먼저여도 통과한다 | BAT-960 그대로 / impl → test → impl(시험 결과 고침, `Role: impl`, `services/a/src/x.ts`) → test(시험 이의 고침, `Role: test`) → review → verify / 시험이 구현보다 먼저(plan → test → impl → review → verify, test는 시험 파일만) / `Batch-Order`가 첫 plan에는 없고 둘째 plan 커밋(첫 impl·test 앞)에만 있음 / 두 plan 커밋 모두에 있음 / `Batch-Order:  impl-first `(앞뒤 공백) | 0, 묶음 줄 종류 `코드(정방향)` |
-| RC-74 ③ 꼬리말이 없으면 지금처럼 시험 먼저로 본다 | BAT-960에서 `Batch-Order`만 뺌 / 키 대소문자가 다른 `batch-order: impl-first`만 있음 | 1, `[차례] BAT-960 <첫 test 해시>`(까닭에 test·impl), 묶음 줄 종류 `코드`. 처음부터 통과 예상(이미 있는 동작) |
-| RC-75 ③ 정방향 묶음의 첫 리뷰는 첫 시험 뒤다 | plan → impl → review → test → verify / plan → impl → review → verify → test → review(둘째 리뷰가 시험 뒤라도 첫 리뷰가 앞) | 1, `[차례] BAT-960 <첫 review 해시>`(까닭에 review·test) 한 줄. plan → impl → test → review → verify는 0 |
+| RC-74 ③ 꼬리말이 없으면 지금처럼 시험 먼저로 본다 | BAT-960에서 `Batch-Order`만 뺌 / 키 대소문자가 다른 `batch-order: impl-first`만 있음 | 1, `[차례] BAT-960 <첫 impl 해시>`(까닭에 impl·test), 묶음 줄 종류 `코드`. 처음부터 통과 예상(이미 있는 동작). 해시는 지금 규칙대로 너무 일찍 온 쪽(첫 impl)이다(바로잡음 2026-11-16: 처음 표의 '첫 test 해시'는 지금 `[차례]` 줄 꼴과 맞지 않았다) |
+| RC-75 ③ 정방향 묶음의 첫 리뷰는 첫 시험 뒤다 | plan → impl → review → test → verify / plan → impl → review → test → review → verify(둘째 리뷰가 시험 뒤라도 첫 리뷰가 앞) / plan → impl → review → verify → test → review → verify(첫 리뷰와 첫 검증이 모두 시험 앞) | 앞의 두 사례는 1, `[차례] BAT-960 <첫 review 해시>`(까닭에 review·test) 한 줄. 셋째 사례는 1, `[차례]` 두 줄: `<첫 review 해시>`(까닭에 review·test)와 `<첫 verify 해시>`(까닭에 verify·test). plan → impl → test → review → verify는 0. 바로잡음(2026-11-16, 감독 질문): 처음 표의 둘째 사례(plan → impl → review → verify → test → review)는 계획 1의 3의 3('첫 verify는 첫 test 뒤')으로 첫 verify 줄도 나오므로 '한 줄'이 틀렸다. 그래서 첫 review만 보는 사례는 verify를 시험 뒤로 옮기고, 둘 다 앞인 사례는 두 줄로 따로 둔다 |
 | RC-76 ⑥ 정방향 묶음의 시험 쪽 커밋은 시험 파일과 문서 밖을 못 바꾼다 | test 커밋이 `services/a/src/y.ts`(빈 뼈대)를 더함 / `services/a/src/x.ts`를 고침 / 지움 / `services/a/vitest.config.mjs`·`package.json`·`pnpm-lock.yaml`·`deploy/a.yaml`·`loadtest/a.mjs`·`specs/a.tla`를 더함·고침(사례마다) / 시험 파일을 `services/a/src/x-test.ts`로 옮김(새 경로가 막힘) / 제품 파일 `services/a/src/x.ts`를 `services/a/test/x.test.ts`로 옮김(옛 경로가 막힘) / `Fix-By: test` 리뷰 반영이 `tools/ci/x.mjs`를 고침 / 지난 계획 ⑤의 비슷한 경로(`services/contest/a.ts`·`src/testing.ts`) / 시험이 구현보다 먼저인 정방향 묶음에서 test 커밋이 빈 뼈대를 더함 | 1, `[코드 경로] BAT-960 <그 커밋 해시>`, 까닭에 '정방향'과 그 경로 |
-| RC-77 ⑥ 정방향 묶음의 시험 쪽 커밋이 시험 파일·문서만 바꾸면 통과한다 | 시험 파일 꼴마다(`a.spec.tsx`·`x/test-int/a.ts`·`x/test-sim/a.ts`·`x/__tests__/a.ts`·`apps/web/e2e/a.ts`·`loadtest/test/a.mjs`·`services/q/py/test_a.py`) / test 커밋이 시험 파일과 `docs/PROGRESS.md`·계획 파일을 함께 고침 / 시험 파일을 다른 시험 파일 경로로 옮김 / `Fix-By: test`가 시험 파일과 `docs/review/notes/a.md`를 고침 | 0 |
-| RC-78 ① Batch-Order 꼬리말 | test·impl·review·verify·record·review-fix·doc 커밋에 `Batch-Order: impl-first`(사례마다) / 값 `Impl-first`·`impl_first`·`implfirst`·`test-first`·빈 값 / plan 커밋에 `Batch-Order` 둘 | 1, `[꼬리말] BAT-960 <그 커밋 해시>`(doc 사례는 문서 묶음 BAT-902) |
+| RC-77 ⑥ 정방향 묶음의 시험 쪽 커밋이 시험 파일·문서만 바꾸면 통과한다 | 시험 파일 꼴마다(`a.spec.tsx`·`x/test-int/a.ts`·`x/test-sim/a.ts`·`x/__tests__/a.ts`·`apps/web/e2e/a.ts`·`loadtest/test/a.mjs`·`services/q/py/test_a.py`) / test 커밋이 시험 파일과 `docs/PROGRESS.md`·계획 파일을 함께 고침 / 시험 파일을 다른 시험 파일 경로로 옮김 / `Fix-By: test`가 시험 파일과 `notes/a.md`(코드 경로 밖의 `.md`)를 고침 | 0 |
+| RC-78 ① Batch-Order 꼬리말 | test·impl·review·verify·record·review-fix·doc 커밋에 `Batch-Order: impl-first`(사례마다) / 값 `Impl-first`·`impl_first`·`implfirst`·`test-first`·빈 값 / plan 커밋에 `Batch-Order` 둘 | 1, `[꼬리말] BAT-960 <그 커밋 해시>`(doc 사례는 문서 묶음 BAT-902). plan 밖 커밋 사례는 BAT-960의 plan 커밋에 바른 꼬리말이 그대로 있어 `[꼬리말]` 한 줄뿐이고 묶음 줄 종류는 `코드(정방향)`다. 값이 틀린 사례와 둘인 사례는 BAT-960의 plan 커밋 꼬리말을 그것으로 바꾸므로 정방향을 밝힌 것으로 세지 않아(계획 1의 1 '`[꼬리말]` 실패가 난 꼬리말은 밝힌 것으로 세지 않는다') `[차례] BAT-960 <첫 impl 해시>`(까닭에 impl·test) 줄도 함께 나오고 묶음 줄 종류는 `코드`다. 바로잡음(2026-11-16, 감독 질문): 처음 표는 이 경우의 `[차례]` 줄과 종류를 정하지 않았다. `Batch-Kind`의 같은 경우와 같은 선으로 정했다 |
 | RC-79 ④ Batch-Order는 코드 묶음에만 단다 | 시험만 묶음 BAT-950의 plan 커밋에 `Batch-Kind`와 `Batch-Order`를 함께 / BAT-950의 다른 plan 커밋에 `Batch-Order` / 문서 묶음 BAT-902의 plan 커밋에 `Batch-Order` | 1, `[구성] BAT-950 -`·`[구성] BAT-902 -`, 까닭에 `Batch-Order`. 묶음 줄 종류는 `시험만`·`문서` |
 | RC-80 ③ 정방향을 늦게 밝히면 실패한다 | `Batch-Order`가 첫 impl 뒤의 plan 커밋에만 있음(첫 test 앞) / 첫 test 뒤·첫 impl 앞의 plan 커밋에만 있음(시험이 먼저인 묶음) / 첫 review 뒤의 plan 커밋에만 있음 | 1, `[차례] BAT-960 <Batch-Order를 단 가장 이른 plan 해시>`, 까닭에 `Batch-Order`. 늦게 밝혀도 정방향으로 보므로 impl이 test보다 먼저인 데서 나오는 `[차례] … 첫 impl …` 줄은 없다 |
 | RC-81 ③ 정방향 묶음에서도 그대로인 차례 | impl이 첫 plan 앞 / test가 첫 plan 앞 / verify가 첫 test 앞(plan → impl → verify → test → review → verify) / verify가 첫 impl 앞(plan → test → verify → impl → review → verify) / 리뷰 전 시험 결과 고침을 `review-fix`+`Fix-By: impl`로 남김(첫 review·verify 앞) / `Fix-By: impl`(RV-01) 앞에 같은 지적의 `Fix-By: test`가 없음 / 마지막 verify 뒤에 impl 커밋(코드)만 오고 다시 verify 없음 | 1, 사례마다 `[차례] BAT-960 <해시>` 한 줄(해시는 지금 규칙의 그 커밋). `.md`만 바꾼 `Fix-By: impl`은 앞 시험 쪽 없이도 0 |
@@ -154,6 +155,7 @@
 | M-23 | ⑩ | 정방향 묶음의 묶음 줄 종류를 `코드`로 찍는다 | RC-73, RC-83 |
 | M-24 | ⑤ | 정방향 묶음에서 구현 쪽 커밋의 시험 파일 검사를 뺀다 | RC-82 |
 | M-25 | ⑧ | 정방향 묶음은 계획 파일 '실패 확인' 절을 보지 않는다 | RC-84 |
+| M-26 | ① | `[꼬리말]` 실패가 난 `Batch-Order`(값 틀림·둘)도 정방향을 밝힌 것으로 센다 | RC-78 |
 
 ## 검증
 
@@ -161,5 +163,5 @@
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | w8l1-rcimpl-plan-635ea4f6 | claude-opus-5-5 | 2026-11-16T16:52+09:00 | 2026-11-16T17:05+09:00 |
+| plan | w8l1-rcimpl-plan-635ea4f6 | claude-opus-5-5 | 2026-11-16T16:52+09:00 | 2026-11-16T17:30+09:00 |
 | impl | w8l1-rcimpl-impl-6831a80f | claude-opus-5-5 | 2026-11-16T17:03+09:00 | 2026-11-16T17:26+09:00 |
