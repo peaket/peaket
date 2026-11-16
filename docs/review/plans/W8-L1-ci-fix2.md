@@ -135,6 +135,24 @@
 
 ## 리뷰
 
+리뷰 담당(w8l1-cifix2-review-7a7b511f, 2026-11-16, 한 바퀴 짧은 대조). 받은 것: `git diff origin/develop...HEAD`, `git log origin/develop..HEAD`(HEAD `720830f6`), 이 계획 파일, 정본 줄(docs/frontend.md §5.18 '앱 서버 실행', docs/devops.md §3 `loadtest-check.yml` 행). 리뷰를 쓰는 사이 검증 커밋 `dab0671e`가 올라와 그 '검증' 절도 읽었다(발견이 겹치는 곳은 아래에 적었다).
+
+- **세 실패가 고쳐졌나**
+  - `web / budgets`: `apps/web/next.config.ts` 41줄에 `serverExternalPackages` 키가 하나이고 일곱(redis 여섯 → `@peaket/platform`)이 한 배열이다. 정본 §5.18('키 하나, 소비자 웹은 한 배열, 파트너는 platform 하나')과 맞고 `apps/partner/next.config.ts` 19줄은 그대로 하나다. 운영 빌드 시험(R-2)은 이 PC에서 돌리지 않았다(최종 근거는 CI).
+  - `loadtest-check / loadtest`: 추가한 두 단계가 `tools-check.yml` 23~28줄과 글자까지 같은 꼴(packageManager 판 확인 → `npm install --global` → 뿌리 `pnpm install --frozen-lockfile`)이고 `node --test` 앞이다. 정본 devops §3 행('tools-check처럼 잠금 파일대로 설치한 뒤 시험')과 맞는다. 설치 단계가 다른 잡과 어긋나는 곳은 없다(`--ignore-scripts`는 `security-scan`만 쓰고 `tools-check`·`ci.yml` lint·`contract-check`도 쓰지 않는다). `node tools/ci/check-workflows.mjs` → '통과: 워크플로 19개'.
+  - `node / node`: parity 시험이 `gw-fan.yaml`·`gw-fan.routes.yaml` 둘을 이름으로 읽는다. 두 파일의 HTTPRoute 이름이 겹치지 않음(3개 / 7개, 겹침 0)과 생성 파일이 api 호스트 HTTPRoute만 담음을 `yaml`로 확인했다. 생성 파일이 없을 때 조용히 통과하는 길은 없다: 세 시험 모두 단언 전에 `routeNameFor`→`defs()`를 부르고 `defs()`가 `existsSync` 단언으로 실패한다(실패하면 `loaded`가 비어 다음 시험도 다시 실패). 파일이 비어 있으면 '라우트가 없다'로 실패한다. 검증 M-25·M-26과 같은 결론이다.
+- **커밋 경계**: 구현 커밋 `c3811a03`은 `next.config.ts`·`loadtest-check.yml`·`changes.mjs`·이 계획 파일(담당 표 한 줄)만 바꿨고 시험 파일을 건드리지 않았다. 시험 커밋 `720830f6`은 시험 파일 넷과 이 계획 파일만 바꿨다. 독립 시험이 구현을 옮겨 적지 않았다: CF2-02의 일곱은 정본 §5.18·계획 2의 1에서 오고, CF2-03은 구현의 셸 줄을 베끼지 않고 'packageManager를 읽어 pnpm을 받는 run(또는 corepack·`pnpm/action-setup`)'처럼 계획 3의 공개 인터페이스 글자만 단언한다.
+- **실행(이 리뷰 담당)**: `node --test tools/ci/check-workflows.test.mjs tools/ci/changes.test.mjs` → 86, 통과 85, 건너뜀 1(CI 전용), 실패 0. `node --test apps/web/server/server-external.test.mjs` → 2, 통과 2. `cd apps/web && node --test scripts/local-fan-gateway-parity.test.mjs` → 4, 통과 4. `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`(HEAD `720830f6`) → 실패 셋, 모두 '아직 오지 않은 차례'(review·verify 커밋 없음, '리뷰'·'검증' 절 빔). 구성·꼬리말·경계 실패는 없다. 검증·이 리뷰 커밋 뒤에 다시 돌려야 한다.
+
+| 번호 | 심각도 | 파일:줄 | 발견 | 고칠 쪽 |
+| --- | --- | --- | --- | --- |
+| RV-1 | 중간(통과 기준) | `apps/web/server/server-external.test.mjs:14` | `configSource()`가 블록 주석을 먼저 정규식 `/\/\*[\s\S]*?\*\//g`로 지운다. 그런데 `next.config.ts` 67줄의 **줄 주석** 안에 이미 `/_q/*` 글자가 있어, 그 뒤 어디든 `*/` 글자(예: 주석이나 문자열의 `'src/**/*.tsx'`의 `**/`)가 생기면 67줄부터 그 글자까지의 진짜 코드가 지워진다. 그 사이에 둘째 `serverExternalPackages:`가 들어가면 CF2-01이 '1번'으로 **조용히 통과**한다. 이 리뷰 담당이 임시 문자열로 재현했다(67줄 뒤에 `serverExternalPackages: ['@peaket/platform'],`와 `// 예: 'src/**/*.tsx'` 두 줄을 넣은 소스: 실제 키 2, `configSource()` 뒤 센 수 1). CF2-02도 첫 배열만 보므로 함께 빠져나간다. 계획 5 CF2-01 단언('주석 줄 제외하고 정확히 한 번')을 지키지 못하는 길이라 통과 기준 지적으로 본다. 지금 파일에는 67줄 뒤 `*/`가 없어 오늘 결과는 맞다 | **이 묶음에서 고침**(시험, `Fix-By: test`). 블록 주석 지우기를 빼고(지금 `next.config.ts`에 블록 주석이 없다) 줄 단위로 센다: 앞머리가 `//`인 줄을 버린 뒤 `^\s*['"]?serverExternalPackages['"]?\s*:`를 줄마다 센다. 따옴표 꼴까지 세면 검증 M-33도 함께 잡는다. 블록 주석을 남겨 둘 거면 왼쪽부터 한 번 훑으며 `//`·`/*`·문자열을 가리는 작은 훑기로 바꾼다. 고친 뒤 위 재현 두 줄과 M-33으로 실패를 본다 |
+| RV-2 | 낮음 | `.github/workflows/loadtest-check.yml:24~29`, `tools/ci/check-workflows.test.mjs:707` 근처(CF2-03) | 검증 M-30·M-31(설치 단계 `if: false`·`continue-on-error: true`)과 같은 구멍을 리뷰로도 봤다. CF2-03이 ⓐ·ⓑ 단계에 `if`·`continue-on-error` 키가 없음을 보지 않는다. 일부러 써야 생기는 꼴이라 낮음 | 시험(검증 절 제안대로 `steps[i].keys.has('if')`·`'continue-on-error'` 단언). 이 묶음에서 RV-1과 함께 고치면 싸다. 감독이 정한다 |
+| RV-3 | 낮음 | `tools/ci/changes.mjs:50` | `loadtest` 범위는 이제 설치에 기대는데 `package.json`(packageManager 판)·`pnpm-lock.yaml`(`yaml` 판)·`.nvmrc`를 보지 않는다. 그것만 바뀐 가지에서 `loadtest-check`가 돌지 않는다. 다만 같은 변경은 `ci-node`·`tools-check` 등 `--frozen-lockfile` 잡이 먼저 돌아 설치 자체의 고장은 거기서 드러나므로 낮음. 범위 정규식은 그 밖에는 너무 넓거나 좁지 않다: 뿌리 고정 `^(...)`에 대안마다 `$`가 있고, `loadtest/run.mjs`→`tools/local/`의 가져오기 닫힘(cluster·gateway-objects·tools·v0-token·v1-stage·v1-objects)을 이번에 모두 덮는다(이 리뷰 담당이 `import` 줄로 확인) | 구간 끝 정리 후보(계획 6의 2 '가져오기 그래프로 보는 시험'에 묶는다). 이 묶음에서 하지 않는다 |
+
+- 높음은 없다. 통과 기준 지적은 RV-1 하나이고 이 묶음에서 고친다.
+- **같은 모델 새 맥락 사실**: 이 리뷰는 계획·구현·시험·검증 담당과 같은 모델(claude-opus-5-5)이 그들의 대화 맥락 없이 새 세션에서 했다(ADR-0270 결정 6, 다른 모델을 쓸 수 없음). 받은 것은 감독이 준 공통 규칙, 위 diff·log, 이 계획 파일, 정본 두 줄뿐이고 다른 담당의 보고는 받지 않았다(검증 절은 리뷰 도중 git에 올라온 것을 읽었다). 코드는 고치지 않았다.
+
 ## 틀린 구현 목록
 
 검증 담당이 하나씩 넣고 위 5의 시험(과 R-1)이 실패하는지 본다(B등급 표본). 번호는 이 묶음의 것이다. 묶음이 작아 표본이 26개다. M-25·M-26은 생성 파일을 검증 사본에서만 바꾼다(커밋하지 않는다).
@@ -252,3 +270,4 @@
 | impl | w8l1-cifix2-impl-a624bfe3 | claude-opus-5-5 | 2026-11-16T21:44+09:00 | 2026-11-16T21:53+09:00 |
 | test | w8l1-cifix2-test-6b66f6f0 | claude-opus-5-5 | 2026-11-16T21:54+09:00 | 2026-11-16T22:07+09:00 |
 | verify | w8l1-cifix2-verify-6e13c0cb | claude-opus-5-5 | 2026-11-16T22:06+09:00 | 2026-11-16T22:13+09:00 |
+| review | w8l1-cifix2-review-7a7b511f | claude-opus-5-5 | 2026-11-16T22:07+09:00 | 2026-11-16T22:24+09:00 |
