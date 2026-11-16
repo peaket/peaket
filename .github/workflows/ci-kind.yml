@@ -50,7 +50,9 @@ jobs:
       - run: node tools/local/cluster.mjs v0
       - run: node --test tools/local/e2e/v0-deploy.e2e.mjs
       # 게이트웨이 다섯(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400): v0를 내려 자리를 낸 뒤 Envoy Gateway·대역 백엔드·
-      # 정의(로컬 덧씌우기)를 올리고, 포트 전달을 뒤에서 띄운 채 kind 시험과 브라우저 셋(Q-T41) 시험을 돈다
+      # 정의(로컬 덧씌우기)를 올리고 kind 시험과 브라우저 셋(Q-T41) 시험을 돈다. 시험은 kubectl 포트 전달 없이 kind 포트 매핑(up이 건다)과
+      # 로컬 전용 NodePort Service로 이은 127.0.0.1:18441~18445에 붙는다. 포트 전달은 Envoy가 연결 하나를 RST로 끊으면 통째로 끝나 그 뒤 시험이
+      # 모두 연결 거절로 실패했다(2026-11-16, docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법'). gateways가 다섯 포트의 TLS 응답까지 기다린다
       - run: |
           k=$(node tools/local/tools.mjs kubectl | cut -d' ' -f2)
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket delete namespace v0 --ignore-not-found --wait=false
@@ -60,10 +62,6 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
         working-directory: tools/web-checks
       - run: |
-          node tools/local/cluster.mjs gateways-forward > gateways-forward.log 2>&1 &
-          for p in 18441 18442 18443 18444 18445; do
-            for i in $(seq 60); do (echo > /dev/tcp/127.0.0.1/$p) 2>/dev/null && break; sleep 1; done
-          done
           node --test --test-timeout=300000 tools/local/e2e/gateways.e2e.mjs
           node --test --test-timeout=300000 tools/local/e2e/queue-cors.e2e.mjs
           # 경로별 메서드·전역 한도·웹훅 IP 한도·게이트웨이 오류(BUILD_ORDER HOT-410, D-T42·D-T43·D-T50). 레이트 리밋 서비스 복제를 0으로 줄였다 되돌리는
@@ -81,10 +79,11 @@ jobs:
           # 배치되지 못한 파드의 까닭과 노드의 자원 배정(요청 합계)
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket get events -A --field-selector reason=FailedScheduling || true
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket describe nodes | sed -n '/Allocatable/,/Events/p' || true
-          # 게이트웨이: 정의의 조건, 컨트롤러·프록시 로그, 포트 전달 기록
+          # 게이트웨이: 정의의 조건, 컨트롤러·프록시 로그, 로컬 전용 NodePort Service와 kind 노드의 이 PC 포트 공개
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system get gateways,httproutes,securitypolicies,clienttrafficpolicies,backendtrafficpolicies,envoyextensionpolicies,pods -o wide || true
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system logs deploy/envoy-gateway --tail=200 || true
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system logs deploy/envoy-ratelimit --tail=100 || true
-          cat gateways-forward.log || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system get svc -o wide || true
+          docker port peaket-control-plane || true
       - if: ${{ always() }}
         run: node tools/local/cluster.mjs down || true

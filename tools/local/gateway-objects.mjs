@@ -16,8 +16,17 @@ export const GATEWAY_ECHO_IMAGE = 'node:24.18.0-bookworm-slim';
 export const GATEWAY_PROXY_IMAGE = 'docker.io/envoyproxy/envoy:distroless-v1.40.2';
 /** 설치 파일의 컨트롤러·인증서 잡 이미지 */
 export const GATEWAY_CONTROLLER_IMAGE = 'envoyproxy/gateway:v1.10.0';
-/** 이 PC 포트(127.0.0.1)의 기본 시작 값. 게이트웨이마다 1씩 더한다(PEAKET_GATEWAY_BASE_PORT로 바꾼다) */
+/**
+ * 이 PC 포트(127.0.0.1)의 기본 시작 값. 게이트웨이마다 1씩 더한다(PEAKET_GATEWAY_BASE_PORT로 바꾼다). 클러스터를 만들 때(cluster.mjs up)
+ * kind 포트 매핑으로 정해지므로, 바꾸려면 down 뒤 up을 다시 한다(docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법')
+ */
 export const GATEWAY_BASE_PORT = 18441;
+/**
+ * 게이트웨이마다 로컬 전용 NodePort Service가 받는 노드의 고정 포트(쿠버네티스 NodePort 범위 30000~32767 안, GATEWAY_NAMES 차례).
+ * kind 노드의 포트 매핑이 이 PC의 127.0.0.1:<시작 값 + 차례>를 이 포트로 넘긴다. kubectl 포트 전달은 쓰지 않는다: Envoy가 연결 하나를 RST로 끊으면
+ * 전달 전체가 'lost connection to pod'로 끝났다(2026-11-16 develop CI kind 잡, 계획 docs/review/plans/W8-L1-ci-fix3.md)
+ */
+export const GATEWAY_NODE_PORTS = Object.freeze({ 'gw-queue': 30441, 'gw-fan': 30442, 'gw-partner': 30443, 'gw-ops': 30444, 'gw-scanner': 30445 });
 /** 시험 발급자(정의의 issuer와 같다) */
 export const GATEWAY_ISSUER = 'https://identity.peaket.example';
 /**
@@ -166,7 +175,8 @@ const echoUrl = (path) => `http://${GATEWAY_ECHO.name}.${GATEWAY_NAMESPACE}.svc.
  * 로컬 덧씌우기: 정의는 그대로 두고 로컬에 없는 것만 바꾼다.
  * - 라우트·공개키 묶음·추적의 백엔드 → 대역 백엔드(공개키 묶음 주소의 경로는 그대로)
  * - ReferenceGrant는 뺀다(대역 백엔드가 같은 네임스페이스이고, 운영 네임스페이스가 로컬에 없다)
- * - EnvoyProxy: 프록시 Service는 ClusterIP(kind에 부하 분산기가 없다. 이 PC로는 gateways-forward가 잇는다), 이미지는 미리 실은 태그
+ * - EnvoyProxy: 프록시 Service는 ClusterIP(kind에 부하 분산기가 없다. 이 PC로는 게이트웨이마다 따로 만드는 gatewayNodePortService와 kind 포트 매핑이 잇는다.
+ *   EnvoyProxy는 게이트웨이 넷이 함께 쓰므로 여기서 NodePort로 바꾸면 노드 포트를 게이트웨이마다 고정할 수 없다), 이미지는 미리 실은 태그
  * @param {Array<Record<string, any>>} objects
  */
 export function localGatewayObjects(objects) {
@@ -278,11 +288,12 @@ export function echoObjects(o) {
 /**
  * 시험이 읽는 접속 정보(tools/local/e2e/gateway-client.mjs 머리 주석의 약속. 레이트 리밋 칸 rateLimit·rateLimitRedis·stats와 replicas의 gw-partner는
  * tools/local/e2e/gateway-limits.e2e.mjs 머리 주석의 약속, BAT-060). 개인키가 들어 있어 이 PC의 .cache에만 둔다
- * @param {{ basePort: number, hosts: Record<string, string>, originVerify: string, keys: Record<string, unknown>, caPem: string, replicas?: Record<string, number> }} o
+ * ports는 kind 노드의 실제 포트 공개에서 읽은 값이다(gatewayHostPorts. 시작 값으로 계산하지 않는다)
+ * @param {{ ports: Record<string, number>, hosts: Record<string, string>, originVerify: string, keys: Record<string, unknown>, caPem: string, replicas?: Record<string, number> }} o
  */
 export function gatewayContract(o) {
   return {
-    ports: Object.fromEntries(GATEWAY_NAMES.map((gw, i) => [gw, o.basePort + i])),
+    ports: Object.fromEntries(GATEWAY_NAMES.map((gw) => [gw, o.ports[gw]])),
     hosts: o.hosts,
     origins: GATEWAY_ORIGINS,
     originVerify: o.originVerify,
@@ -305,7 +316,54 @@ export function gatewayContract(o) {
   };
 }
 
-/** 게이트웨이 프록시 Service를 이 PC 포트로 잇는 kubectl 인자(서비스 이름은 Envoy Gateway가 만든다) */
-export function gatewayForwardArgs(service, port) {
-  return ['-n', GATEWAY_NAMESPACE, 'port-forward', '--address', '127.0.0.1', `svc/${service}`, `${port}:443`];
+/**
+ * kind 노드의 포트 매핑 다섯(GATEWAY_NAMES 차례): 이 PC의 127.0.0.1:<시작 값 + 차례> → 노드의 GATEWAY_NODE_PORTS. 이 PC 밖에는 열지 않는다
+ * @param {number} basePort
+ * @returns {Array<{ containerPort: number, hostPort: number, listenAddress: '127.0.0.1', protocol: 'TCP' }>}
+ */
+export function gatewayPortMappings(basePort) {
+  if (!Number.isInteger(basePort) || basePort < 1 || basePort + GATEWAY_NAMES.length - 1 > 65535) throw new Error(`게이트웨이 시작 포트가 맞지 않다: ${basePort}(PEAKET_GATEWAY_BASE_PORT, 1~${65536 - GATEWAY_NAMES.length})`);
+  return GATEWAY_NAMES.map((gw, i) => ({ containerPort: GATEWAY_NODE_PORTS[gw], hostPort: basePort + i, listenAddress: '127.0.0.1', protocol: 'TCP' }));
+}
+
+/**
+ * 게이트웨이 하나의 로컬 전용 NodePort Service(peaket-local-<게이트웨이>). 그 게이트웨이의 프록시 파드만 고르고(접속 정보 logs.selector와 같은 라벨),
+ * 443을 프록시 컨테이너의 HTTPS 포트(targetPort: Envoy Gateway가 만든 그 게이트웨이 Service의 443 포트 targetPort)로 넘기며, 노드 포트는 GATEWAY_NODE_PORTS로 고정한다
+ * @param {string} gw @param {number} targetPort
+ */
+export function gatewayNodePortService(gw, targetPort) {
+  if (!(gw in GATEWAY_NODE_PORTS)) throw new Error(`모르는 게이트웨이: ${gw}`);
+  return {
+    apiVersion: 'v1',
+    kind: 'Service',
+    metadata: { name: `peaket-local-${gw}`, namespace: GATEWAY_NAMESPACE, labels: { 'app.kubernetes.io/part-of': 'peaket-local', 'app.kubernetes.io/component': 'gateway-node-port' } },
+    spec: {
+      type: 'NodePort',
+      selector: { 'gateway.envoyproxy.io/owning-gateway-name': gw },
+      ports: [{ name: 'https', protocol: 'TCP', port: 443, targetPort, nodePort: GATEWAY_NODE_PORTS[gw] }],
+    },
+  };
+}
+
+/**
+ * kind 노드 컨테이너의 포트 공개(docker inspect의 HostConfig.PortBindings)에서 게이트웨이마다 이 PC 포트를 읽는다(접속 정보의 ports).
+ * 하나라도 없으면(포트 매핑 없이 만든 클러스터) 또는 127.0.0.1 밖(0.0.0.0·빈 값 = 모든 주소)에 열렸으면 다시 만들라는 말과 함께 던진다
+ * @param {Record<string, Array<{ HostIp?: string, HostPort?: string }> | null> | null | undefined} portBindings
+ * @returns {Record<string, number>}
+ */
+export function gatewayHostPorts(portBindings) {
+  const again = '`node tools/local/cluster.mjs down` 뒤 `up`으로 클러스터를 다시 만든다';
+  const out = {};
+  for (const gw of GATEWAY_NAMES) {
+    const key = `${GATEWAY_NODE_PORTS[gw]}/tcp`;
+    const bindings = portBindings?.[key];
+    if (!Array.isArray(bindings) || bindings.length === 0) throw new Error(`${gw}의 노드 포트 ${key}가 이 PC에 공개되지 않았다: 이 클러스터는 게이트웨이 포트 매핑 없이 만들었다. ${again}`);
+    for (const b of bindings) {
+      if (b?.HostIp !== '127.0.0.1') throw new Error(`${gw}의 노드 포트 ${key}가 127.0.0.1이 아닌 주소(${b?.HostIp || '모든 주소'})에 공개되었다: 이 PC 밖에 열지 않는다. ${again}`);
+    }
+    const port = Number(bindings[0].HostPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${gw}의 노드 포트 ${key}의 이 PC 포트가 맞지 않다: ${bindings[0].HostPort}. ${again}`);
+    out[gw] = port;
+  }
+  return out;
 }
