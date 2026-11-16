@@ -62,6 +62,11 @@ export interface CancelTicketsInput {
   readonly requestedByAccountId: string;
   readonly cancellationId: string;
   readonly nowMs: number;
+  /**
+   * 아무 행도 바꾸지 않는 확인(ticket.proto CancelTicketsRequest.replay_only, 리뷰 B2 보충, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우').
+   * BAT-415 리뷰 반영 빈 뼈대: 구현 담당이 채운다
+   */
+  readonly replayOnly?: boolean;
 }
 
 export interface CancelTicketOutcome {

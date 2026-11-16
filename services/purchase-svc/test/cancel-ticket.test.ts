@@ -392,3 +392,59 @@ describe('GAT-080 S2 앞 시도가 티켓 단계만 마친 팬 취소 잇기', (
     expect(f.payments.calls).toHaveLength(0);
   });
 });
+
+// ---- BAT-415 리뷰 반영 B2 보충(계획 §11 보충, 2ab218ad, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우') ----
+describe('GAT-080 S4 공연 시작 뒤 다시 누른 팬 취소', () => {
+  const K1 = '01900000-0000-4000-8000-0000000000b1';
+  const K2 = '01900000-0000-4000-8000-0000000000b2';
+  /** 공연 2026-11-20 19:00 시작 1분 뒤에 다시 누른다. 첫 키 폐기는 공연 4일 전(공제 20%) */
+  const AFTER_START = kst('2026-11-20T19:01:00');
+  const FIRST_AT = kst('2026-11-16T10:00:00');
+  const make = (answer: TicketCancelAnswer) => {
+    const tickets = new Tickets(answer);
+    const payments = new Payments('CANCELLED');
+    const writes = new Writes();
+    const seats = new Seats();
+    const svc = new CancelTicket({ orders: new Orders(order()), calendar, tickets, payments, writes, seats });
+    return { svc, tickets, payments, writes, seats };
+  };
+
+  test('GAT-080 S4 공연 전에 키만 폐기된 팬 취소는 공연 시작 뒤 다시 눌러도 replayOnly 확인으로 첫 취소를 받아 첫 시각의 공제율로 환급을 마친다', async () => {
+    const f = make({ result: 'ALREADY_CANCELLED', firstCancellationId: K1, firstResult: 'REFUND_NOW', firstCancelledAtMs: FIRST_AT });
+    const r = await f.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: AFTER_START, deadlineMs: 2000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: K1, refundAmount: 26_667, refundAfterEntryClose: false });
+    expect(f.tickets.calls).toHaveLength(1);
+    expect(f.tickets.calls[0]).toMatchObject({ orderId: ORDER, ticketIds: [TICKET], requestedByAccountId: ACCOUNT, cancellationId: K2, replayOnly: true });
+    expect(f.seats.calls).toHaveLength(1);
+    expect(f.writes.created).toHaveLength(1);
+    expect(f.writes.created[0]).toMatchObject({ cancellationId: K1, daysBefore: 4, deductionBp: 2_000, deductionAmount: 6_666, refundAmount: 26_667, status: 'REFUND_PENDING' });
+    expect(f.payments.calls).toEqual([expect.objectContaining({ cancellationId: K1, amount: 26_667 })]);
+  });
+
+  test.each<[string, TicketCancelAnswer]>([
+    ['아직 유효한 표(확인 답 EVENT_STARTED)', 'EVENT_STARTED'],
+    ['첫 칸 없는 ALREADY_CANCELLED(운영자 취소·무효)', 'ALREADY_CANCELLED'],
+    ['남이 보유', 'NOT_PAYER_HOLDER'],
+  ])('GAT-080 S4 공연 시작 뒤 %s는 replayOnly로 확인만 하고 EVENT_STARTED이며 아무것도 쓰지 않는다', async (_name, answer) => {
+    const f = make(answer);
+    expect(await f.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: AFTER_START, deadlineMs: 2000 })).toEqual({ status: 'EVENT_STARTED' });
+    expect(f.tickets.calls).toHaveLength(1);
+    expect(f.tickets.calls[0]!.replayOnly).toBe(true);
+    expect(f.seats.calls).toHaveLength(0);
+    expect(f.writes.created).toHaveLength(0);
+    expect(f.payments.calls).toHaveLength(0);
+  });
+
+  test('GAT-080 S4 첫 키 폐기 시각도 공연 시작 뒤면 EVENT_STARTED이고 아무것도 쓰지 않는다', async () => {
+    const f = make({ result: 'ALREADY_CANCELLED', firstCancellationId: K1, firstResult: 'REFUND_AFTER_CLOSE', firstCancelledAtMs: kst('2026-11-20T19:00:30') });
+    expect(await f.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: AFTER_START, deadlineMs: 2000 })).toEqual({ status: 'EVENT_STARTED' });
+    expect(f.writes.created).toHaveLength(0);
+    expect(f.payments.calls).toHaveLength(0);
+  });
+
+  test('GAT-080 S4 공연 시작 전의 취소는 확인 호출이 아니다(replayOnly를 싣지 않는다)', async () => {
+    const f = make('REFUND_NOW');
+    await f.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: FIRST_AT, deadlineMs: 2000 });
+    expect(f.tickets.calls[0]!.replayOnly ?? false).toBe(false);
+  });
+});

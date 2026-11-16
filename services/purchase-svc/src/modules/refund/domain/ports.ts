@@ -29,6 +29,8 @@ export interface TicketCancellations {
     readonly requestedByAccountId: string;
     readonly cancellationId: string;
     readonly deadlineMs: number;
+    /** 아무 행도 바꾸지 않는 확인(ticket.proto replay_only, 리뷰 B2 보충). 공연 시작 뒤 다시 누른 팬 취소를 첫 취소로 잇는 데만 쓴다 */
+    readonly replayOnly?: boolean;
   }): Promise<TicketCancelAnswer>;
 }
 

@@ -148,3 +148,41 @@ describe('GAT-080 F22 OperatorCancelTickets 호출자 검사(리뷰 B6)', () => 
     expect(source.slice(at, at + 600)).toMatch(/internalToken\s*:\s*internalGrpcToken/);
   });
 });
+
+// ---- BAT-415 리뷰 반영 B2 보충(계획 §11 보충, 2ab218ad): CancelTickets replay_only 확인 ----
+describe('GAT-080 S4 CancelTickets의 replayOnly 확인', () => {
+  const replay = (t: { orderId: string; ticketId: string }, cancellationId: string) =>
+    ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId, nowMs: NOW + 3_600_000, replayOnly: true });
+
+  test('GAT-080 S4 replayOnly면 유효한 표는 EVENT_STARTED이고 행·취소 기록을 바꾸지 않는다', async () => {
+    const t = await issued();
+    const before = { ...store.tickets.get(t.ticketId)! };
+    const records = store.cancellations.size;
+    expect(await replay(t, randomUUID())).toEqual([{ ticketId: t.ticketId, result: 'EVENT_STARTED' }]);
+    expect(store.tickets.get(t.ticketId)).toEqual(before);
+    expect(store.cancellations.size).toBe(records);
+  });
+
+  test('GAT-080 S4 replayOnly면 팬 취소 기록이 있는 표는 새 키든 같은 키든 ALREADY_CANCELLED와 첫 칸 셋이고, 운영자 취소 표는 첫 칸이 없다', async () => {
+    const t = await issued();
+    const k1 = randomUUID();
+    expect((await ticket.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: PAYER, cancellationId: k1, nowMs: NOW })).map((o) => o.result)).toEqual(['REFUND_NOW']);
+    const first = { cancellationId: k1, result: 'REFUND_NOW', cancelledAtMs: NOW };
+    expect(await replay(t, randomUUID())).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first }]);
+    expect(await replay(t, k1)).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first }]);
+
+    const op = await issued();
+    await ticket.operatorCancel({ approvalId: randomUUID(), fraudCaseId: randomUUID(), eventId: EVENT, targets: [{ ticketId: op.ticketId, expectedHolderAccountId: PAYER }], nowMs: NOW });
+    const out = await replay(op, randomUUID());
+    expect(out.map((o) => o.result)).toEqual(['ALREADY_CANCELLED']);
+    expect(out[0]!.first).toBeUndefined();
+  });
+
+  test('GAT-080 S4 gRPC replay_only를 읽어 유효한 표를 취소하지 않는다(EVENT_STARTED)', async () => {
+    const t = await issued();
+    const before = { ...store.tickets.get(t.ticketId)! };
+    const out = (await call(openClient, 'CancelTickets', { order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: PAYER, cancellation_id: randomUUID(), replay_only: true })).outcomes as Reply[];
+    expect(out[0]).toMatchObject({ ticket_id: t.ticketId, result: 'CANCEL_TICKET_RESULT_EVENT_STARTED' });
+    expect(store.tickets.get(t.ticketId)).toEqual(before);
+  });
+});

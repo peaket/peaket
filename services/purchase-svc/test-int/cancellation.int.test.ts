@@ -774,3 +774,69 @@ describe('BAT-420 마감 뒤 환급의 입장 기록 대조 [실제 ticket-svc·
     },
   );
 });
+
+// ---- BAT-415 리뷰 반영 B2 보충(계획 §11 보충, 2ab218ad, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우') ----
+describe('GAT-080 S4 공연 시작 뒤 다시 누른 팬 취소 [실제 ticket-svc·payment-svc]', () => {
+  // 이 파일의 ticket-svc는 키 폐기 시각을 NOW(2026-11-13 10:00 KST)로 적는다. 공연을 2026-11-17 19:00(+09:00)에 두면 첫 키 폐기는 공연 4일 전(공제 20%)이다
+  const EVENT_AT = Date.parse('2026-11-17T19:00:00+09:00');
+  const AFTER_START = EVENT_AT + 60_000;
+  /** 첫 시도 K1이 ticket-svc 키 폐기를 커밋한 뒤 좌석 되돌리기에서 한 번 던진다 */
+  const firstFails = async () => {
+    const w = await world({ eventStartsAtMs: EVENT_AT, ticketPrice: 33_333 });
+    const real = new DrizzleSeatReturns(sales, seatMap, new RedisSeatReturnNotices(redis));
+    let failures = 0;
+    const seats: SeatReturns = {
+      returnSold: async (q) => {
+        if (failures === 0) {
+          failures++;
+          throw new Error('좌석 되돌리기 실패(시험의 장애 주입)');
+        }
+        return real.returnSold(q);
+      },
+    };
+    const s2 = new CancelTicket({ orders: new DrizzleCancellationOrders(purchaseDb, seatMap), calendar, tickets: ticketCancels!, payments: paymentCancels!, writes, seats });
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    const k1 = randomUUID();
+    await expect(s2.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId: k1, reason: 'USER', nowMs: NOW, deadlineMs: 5_000 })).rejects.toThrow();
+    expect(failures).toBe(1);
+    expect(await ticketRow(w.ticketId)).toMatchObject({ status: 'REFUNDED' });
+    return { w, k1, saga: s2 };
+  };
+  const finished = async (w: World, k1: string) => {
+    const rows = await admin.pool.query('select id, deduction_bp, deduction_amount, refund_amount, status from order_cancellation where ticket_id = $1', [w.ticketId]);
+    expect(rows.rows).toEqual([{ id: k1, deduction_bp: 2_000, deduction_amount: 6_666, refund_amount: 26_667, status: 'REFUNDED' }]);
+    expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('RETURNED');
+    expect(gatewayCalls).toHaveLength(1);
+    expect(gatewayCalls[0]).toMatchObject({ paymentRef: `ref-${w.orderId}`, amount: 26_667, idemKey: `cancel-${k1}` });
+    const tc = await ticketDb.pool.query('select cancellation_id, result from ticket_cancellation where ticket_id = $1', [w.ticketId]);
+    expect(tc.rows).toEqual([{ cancellation_id: k1, result: 'REFUND_NOW' }]);
+  };
+
+  test('GAT-080 S4 공연 전에 키만 폐기된 팬 취소는 공연 시작 뒤 새 키로 다시 눌러도 첫 시각의 공제율로 환급을 마친다', async () => {
+    const { w, k1, saga: s2 } = await firstFails();
+    const r = await s2.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId: randomUUID(), reason: 'USER', nowMs: AFTER_START, deadlineMs: 5_000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: k1, refundAmount: 26_667, refundAfterEntryClose: false });
+    await finished(w, k1);
+  });
+
+  test('GAT-080 S4 같은 키(K1)로 공연 시작 뒤 다시 눌러도 첫 시각의 공제율로 환급을 마친다', async () => {
+    const { w, k1, saga: s2 } = await firstFails();
+    const r = await s2.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId: k1, reason: 'USER', nowMs: AFTER_START, deadlineMs: 5_000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: k1, refundAmount: 26_667, refundAfterEntryClose: false });
+    await finished(w, k1);
+  });
+
+  test('GAT-080 S4 대조: 아직 유효한 표를 공연 시작 뒤 누르면 EVENT_STARTED이고 ticket 행·취소 기록·결제사가 그대로다', async () => {
+    const w = await world({ eventStartsAtMs: EVENT_AT, ticketPrice: 33_333 });
+    const before = (await ticketDb.pool.query('select status, key_revoked_at, version from ticket where id = $1', [w.ticketId])).rows[0];
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    await expect(cancelOf(w, randomUUID(), 'USER', AFTER_START)).resolves.toEqual({ status: 'EVENT_STARTED' });
+    expect((await ticketDb.pool.query('select status, key_revoked_at, version from ticket where id = $1', [w.ticketId])).rows[0]).toEqual(before);
+    expect((await ticketDb.pool.query('select count(*)::int as n from ticket_cancellation where ticket_id = $1', [w.ticketId])).rows[0].n).toBe(0);
+    expect((await admin.pool.query('select count(*)::int as n from order_cancellation where ticket_id = $1', [w.ticketId])).rows[0].n).toBe(0);
+    expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('SOLD');
+    expect(gatewayCalls).toHaveLength(0);
+  });
+});

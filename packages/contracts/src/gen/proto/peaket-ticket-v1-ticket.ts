@@ -174,6 +174,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "cancellation_id": {
                       "type": "string",
                       "id": 4
+                    },
+                    "replay_only": {
+                      "type": "bool",
+                      "id": 5
                     }
                   }
                 },
