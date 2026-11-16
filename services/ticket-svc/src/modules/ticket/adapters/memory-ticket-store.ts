@@ -13,6 +13,7 @@ import {
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   operatorCancelResultOf,
+  replayOnlyResultOf,
   type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
@@ -60,6 +61,14 @@ export class MemoryTicketStore implements TicketStore {
   }
 
   async cancel(input: CancelTicketsInput): Promise<readonly CancelTicketOutcome[]> {
+    // 확인만(replayOnly): 행·취소 기록을 바꾸지 않고 같은 취소 ID의 기록도 보지 않는다(리뷰 B2 보충)
+    if (input.replayOnly) {
+      return input.ticketIds.map((ticketId) => {
+        const result = replayOnlyResultOf(this.tickets.get(ticketId), input);
+        const first = result === 'ALREADY_CANCELLED' ? this.fanCancels.get(ticketId) : undefined;
+        return { ticketId, result, ...(first ? { first } : {}) };
+      });
+    }
     const out: CancelTicketOutcome[] = [];
     for (const ticketId of input.ticketIds) {
       const recorded = this.cancellations.get(cancelKey(input.cancellationId, ticketId));

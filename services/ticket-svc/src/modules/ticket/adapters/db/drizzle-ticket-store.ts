@@ -16,6 +16,7 @@ import {
   type OperatorCancelOutcome,
   type OperatorCancelResult,
   operatorCancelResultOf,
+  replayOnlyResultOf,
   type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
@@ -130,6 +131,19 @@ export class DrizzleTicketStore implements TicketStore {
   }
 
   async cancel(input: CancelTicketsInput): Promise<readonly CancelTicketOutcome[]> {
+    // 확인만(replayOnly): 행을 잠그거나 바꾸지 않고 같은 취소 ID의 기록도 보지 않는다. 끝난 표는 팬 취소 기록을 첫 칸으로 싣는다(리뷰 B2 보충)
+    if (input.replayOnly) {
+      return this.o.database.transaction(async (tx) => {
+        const out: CancelTicketOutcome[] = [];
+        for (const ticketId of input.ticketIds) {
+          const [row] = await tx.select().from(ticket).where(eq(ticket.id, ticketId)).limit(1);
+          const result = replayOnlyResultOf(row ? { orderId: row.orderId, payerAccountId: row.payerAccountId, status: statusOf(row.status) } : undefined, input);
+          const first = result === 'ALREADY_CANCELLED' ? await this.#firstFanCancel(tx, ticketId) : undefined;
+          out.push({ ticketId, result, ...(first ? { first } : {}) });
+        }
+        return out;
+      });
+    }
     return this.o.database.transaction(async (tx) => {
       const out: CancelTicketOutcome[] = [];
       for (const ticketId of input.ticketIds) {

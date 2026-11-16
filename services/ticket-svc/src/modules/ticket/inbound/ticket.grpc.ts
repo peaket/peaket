@@ -95,6 +95,8 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
           requestedByAccountId: text(req.requested_by_account_id),
           cancellationId: text(req.cancellation_id),
           nowMs: useCases.nowMs?.() ?? Date.now(),
+          // 공연 시작 뒤 다시 누른 팬 취소의 확인(행을 바꾸지 않는다, 리뷰 B2 보충)
+          ...(req.replay_only === true ? { replayOnly: true } : {}),
         })
         .then((outcomes) => {
           cb(null, {

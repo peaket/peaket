@@ -64,7 +64,7 @@ export interface CancelTicketsInput {
   readonly nowMs: number;
   /**
    * 아무 행도 바꾸지 않는 확인(ticket.proto CancelTicketsRequest.replay_only, 리뷰 B2 보충, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우').
-   * BAT-415 리뷰 반영 빈 뼈대: 구현 담당이 채운다
+   * 참이면 티켓 행·취소 기록을 바꾸지 않고, 끝난 표는 ALREADY_CANCELLED(팬 취소 기록이 있으면 첫 칸), 유효한 표는 EVENT_STARTED다
    */
   readonly replayOnly?: boolean;
 }
@@ -371,7 +371,17 @@ export function normalizeCancelInput(i: CancelTicketsInput): CancelTicketsInput 
   const ticketIds = [...new Set(i.ticketIds.map((t) => requireUuid('ticketId', t)))];
   if (ticketIds.length === 0) throw new TicketInputError('ticketIds가 비었다');
   if (!Number.isFinite(i.nowMs) || i.nowMs < 0) throw new TicketInputError('nowMs가 올바르지 않다');
-  return { orderId, ticketIds, requestedByAccountId, cancellationId, nowMs: i.nowMs };
+  return { orderId, ticketIds, requestedByAccountId, cancellationId, nowMs: i.nowMs, ...(i.replayOnly === true ? { replayOnly: true } : {}) };
+}
+
+/**
+ * replayOnly 확인의 표 하나 결과(행을 바꾸지 않는다, 리뷰 B2 보충). 없는 표·다른 주문·결제자가 아닌 요청은 NOT_PAYER_HOLDER(첫 팬 취소를 남에게 알려 주지 않는다),
+ * 끝난 표(환급·무효·취소 접수·부정 표시)는 ALREADY_CANCELLED(부른 쪽이 팬 취소 기록을 첫 칸으로 붙인다), 아직 유효한 표는 EVENT_STARTED다(공연 시작 뒤 새 취소는 없다)
+ */
+export function replayOnlyResultOf(t: Pick<TicketRecord, 'orderId' | 'payerAccountId' | 'status'> | undefined, input: Pick<CancelTicketsInput, 'orderId' | 'requestedByAccountId'>): 'NOT_PAYER_HOLDER' | 'ALREADY_CANCELLED' | 'EVENT_STARTED' {
+  if (!t || t.orderId !== input.orderId || t.payerAccountId !== input.requestedByAccountId) return 'NOT_PAYER_HOLDER';
+  if (t.status === 'REFUNDED' || t.status === 'VOIDED' || t.status === 'CANCEL_REQUESTED' || t.status === 'FLAGGED') return 'ALREADY_CANCELLED';
+  return 'EVENT_STARTED';
 }
 
 /** 월렛 목록에 싣는 값만 고른다(키 원문·해시는 싣지 않는다). */

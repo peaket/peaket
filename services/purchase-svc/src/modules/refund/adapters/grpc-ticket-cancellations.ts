@@ -62,7 +62,14 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
     const once = (): Promise<Record<string, unknown>> =>
       new Promise((resolve, reject) => {
         this.#client.CancelTickets(
-          { order_id: q.orderId, ticket_ids: [...q.ticketIds], requested_by_account_id: q.requestedByAccountId, cancellation_id: q.cancellationId },
+          {
+            order_id: q.orderId,
+            ticket_ids: [...q.ticketIds],
+            requested_by_account_id: q.requestedByAccountId,
+            cancellation_id: q.cancellationId,
+            // 공연 시작 뒤 다시 누른 팬 취소의 확인(ticket-svc가 행을 바꾸지 않는다, 리뷰 B2 보충)
+            ...(q.replayOnly === true ? { replay_only: true } : {}),
+          },
           new grpc.Metadata(),
           { deadline: new Date(Date.now() + ms) },
           (e, v) => (e ? reject(e) : resolve(v ?? {})),

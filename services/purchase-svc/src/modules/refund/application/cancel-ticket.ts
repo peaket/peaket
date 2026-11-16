@@ -3,7 +3,7 @@
 // ticket-svc가 멈추면 아무것도 쓰지 않는다. 결제사가 결과 모름이면 REFUND_PENDING으로 두고 재시도 큐가 이어 간다.
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type CancellationReason, type CancellationStatus, type CancelTicketResult, type RefundAccount } from '../domain/cancellation.js';
 import type { CancellationOrders, CancellationWrites, PaymentCancellations, SeatReturns, TicketCancellations } from '../domain/ports.js';
-import type { BusinessCalendar } from '../domain/refund-policy.js';
+import type { BusinessCalendar, RefundQuote } from '../domain/refund-policy.js';
 import { quoteRefund } from '../domain/refund-policy.js';
 import { eventStartsAtOf } from './quote-cancellation.js';
 
@@ -64,8 +64,10 @@ export class CancelTicket {
       zeroDeduction: zeroDeductionFor(i.reason),
       ...(order.entryOpensAtMs !== undefined ? { entryOpensAtMs: order.entryOpensAtMs } : {}),
     });
-    if (q.status === 'EVENT_STARTED') return { status: 'EVENT_STARTED' };
     if (q.status === 'INVALID_AMOUNT') return { status: 'ALREADY_ENDED' };
+    // 지금 시각으로 공연이 시작됐으면 새 취소는 없다. 다만 앞 시도가 공연 전에 키만 폐기했을 수 있어, ticket-svc를 행을 바꾸지 않는 확인(replayOnly)으로 불러
+    // 팬 취소 기록이 있으면 그 첫 취소로 잇는다(리뷰 B2 보충, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우')
+    const replayOnly = q.status === 'EVENT_STARTED';
 
     // ticket-svc가 행 잠금 안에서 결제자·보유자·진행 중 양도·공연 시작을 다시 본다. 거절이면 아무것도 쓰지 않는다.
     const ticket = await this.o.tickets.cancel({
@@ -74,10 +76,13 @@ export class CancelTicket {
       requestedByAccountId: i.accountId,
       cancellationId: i.cancellationId,
       deadlineMs: i.deadlineMs,
+      ...(replayOnly ? { replayOnly: true } : {}),
     });
+    // 확인에서 첫 팬 취소가 없으면(유효한 표·다른 길로 끝난 표·남이 보유) 지금처럼 공연 시작이고 아무것도 쓰지 않는다
+    if (replayOnly && typeof ticket !== 'object') return { status: 'EVENT_STARTED' };
     // 이어 갈 취소(run)·견적·티켓 단계 결과. 앞 시도가 티켓 단계만 마친 팬 취소를 새 키로 다시 누른 것이면 첫 취소 ID로 잇는다(아래)
     let run: CancelTicketInput = i;
-    let quote = q.quote;
+    let quote: RefundQuote;
     let ticketResult: 'REFUND_NOW' | 'REFUND_AFTER_CLOSE';
     if (typeof ticket === 'object') {
       // 리뷰 B2(docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기'): ticket-svc가 그 표의 키를 폐기한 팬 취소(K1)를 알려 왔다.
@@ -102,6 +107,8 @@ export class CancelTicket {
       quote = atFirst.quote;
       ticketResult = ticket.firstResult;
     } else {
+      if (q.status !== 'OK') return { status: 'EVENT_STARTED' };
+      quote = q.quote;
       if (ticket === 'NOT_PAYER_HOLDER') return { status: 'TICKET_NOT_HELD' };
       if (ticket === 'TRANSFER_PENDING') return { status: 'TRANSFER_PENDING' };
       if (ticket === 'EVENT_STARTED') return { status: 'EVENT_STARTED' };
