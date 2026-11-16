@@ -322,6 +322,38 @@
 - **V-19**: kind로 돌리지 않았다. `gateways`가 `gatewayHostPorts`에서 '`down` 뒤 `up`' 오류로 멈출 것이라는 것은 코드 읽기다.
 - **뒤처리**: 띄운 PID 9904(과 그 자식 kubectl 다섯)만 `taskkill /PID 9904 /T /F`로 끝냈다. `lane1-cf3v`는 바퀴마다 `down`으로 지웠고, 끝에 `kind get clusters`는 '없음', `docker ps -a`에 `lane1-` 컨테이너가 없고, 18441~18445·18451~18455에서 듣는 프로세스가 없다. `D:/ticketpass-lane1-pre`의 `kind-lane1-cf3v.yaml`·`kubeconfig-lane1-cf3v`는 지웠고 `git status --short`가 비었다. 잠금 폴더(`D:/ticketpass-locks/docker`)는 감독이 쥐고 있어 건드리지 않았다.
 
+### 검증 반영 뒤 마지막 검증
+
+검증 담당(같은 세션 w8l1-cifix3-verify-8f2a5c19, 같은 모델 새 맥락 그대로, 2026-11-17). 대상은 검증 반영 커밋 `66a0a7ad`(V-09)와 `43032e32`(V-12·V-17·V-20, 새 CF3-08)를 더한 HEAD `43032e32`다. 감독이 Docker 잠금을 놓아서 Docker·kind는 쓰지 않았고, 단위 시험과 워크플로 시험만으로 보았다. 틀린 꼴은 `D:/ticketpass-lane1-pre`를 `43032e32`(분리 HEAD)로 옮겨 넣었다. 틀린 꼴마다 `git checkout`으로 되돌렸고, 끝에 `git status --short`가 비었다. 기록은 검증 담당 scratchpad의 `final.py`·`final-out.txt`다.
+
+- **구현 위**: `node --test "tools/local/*.test.mjs"`는 141개 가운데 통과 140, 실패 0, 건너뜀 1이다. `node --test tools/ci/check-workflows.test.mjs`는 47개 가운데 통과 46, 실패 0, 건너뜀 1이다. `node tools/ci/check-workflows.mjs`는 '통과: 워크플로 19개'다.
+- **돌리는 법**: 코드 꼴은 `node --test "tools/local/*.test.mjs"` 전체로 돌렸다. 워크플로 꼴은 `--test-name-pattern=CF3-03 tools/ci/check-workflows.test.mjs`로 돌렸다.
+
+| 번호 | 넣은 것 | 잡은 시험(실패 메시지 요지) |
+| --- | --- | --- |
+| V-09 | 공개가 여럿일 때 첫째의 `HostIp`만 봄(`bindings.slice(0, 1)`) | CF3-05(ⓔ: 던지지 않았다) |
+| V-12 | `HostPort`가 수가 아니어도 던지지 않음 | CF3-05(ⓕ: 던지지 않았다) |
+| V-17 | `gateways()`가 `gatewayHostPorts(nodePortBindings())` 대신 `gatewayBasePort() + 차례`로 포트를 계산 | CF3-08(gateways()가 gatewayHostPorts(<공개 읽기>())의 결과를 변수에 받지 않는다) |
+| V-20 | e2e 넷 단계에 `continue-on-error: true` | CF3-03(e2e 단계에 continue-on-error가 있다) |
+| V-21 | 공개 확인을 kubectl 뒤로: `const ports = gatewayHostPorts(…)`와 그 출력 줄을 Envoy Gateway 설치 `kubectl apply` 뒤로 옮김 | CF3-08(공개 확인이 첫 kubectl 부르기보다 뒤다) |
+| V-17b | 공개는 읽되 `gatewayContract`에는 `ports: … 18441 + i`를 넘김 | CF3-08(gatewayContract의 ports가 gatewayHostPorts 결과(ports)가 아니다) |
+| V-20b | e2e 넷 `run` 블록 첫 줄에 `set +e` | CF3-03(e2e 단계의 run에 set +e가 있다) |
+| V-20c | e2e 넷 단계에 `if: ${{ always() }}` | CF3-03(e2e 단계에 if가 있다) |
+| V-20d | `cluster.mjs gateways` 단계에 `continue-on-error: true` | CF3-03(cluster.mjs gateways 단계에 continue-on-error가 있다) |
+| V-18 | `gatewayNodePortService(gw, 443)`(targetPort를 손으로 적음) | 단위로는 여전히 안 잡힌다(140 통과). 아래 분류대로 이 묶음 밖이다 |
+| V-19 | `ensureCluster`가 매핑 없는 `deploy/local/kind.yaml`로 클러스터를 만듦 | 단위로는 여전히 안 잡힌다(140 통과). 아래 분류대로 이 묶음 밖이다 |
+| 지난 표본 11개 | M-01 ⓐ, M-04, M-07, M-09, M-10, M-11, M-12, V-01, V-05, V-07, V-08을 그대로 다시 넣음 | 모두 지난번과 같은 시험이 잡았다. CF3-01(M-01 ⓐ·M-04), CF3-02(M-07·M-09·V-05), CF3-04(M-10·V-07), CF3-05(M-11·M-12·V-07·V-08), CF3-07(M-10·V-01·V-07) |
+
+- **합계**: 22개를 넣어 20개를 잡았다(새 단언을 노린 꼴 9/9, 지난 표본 11/11). 안 잡힌 둘(V-18·V-19)은 보안 꼬리표가 없다고 가린 꼴이라, 이번 반영의 대상이 아니다.
+- **놓친 다섯의 분류(감독 세션 조건: ASVS 꼬리표가 달렸거나 보안 판정(인증·출처·한도·포트 노출)을 보는 시험의 틀린 구현이면 이 묶음에서 시험으로 고친다)**:
+  - V-09: 이 묶음에서 고침. ASVS 13.4.5 꼬리표가 달린 CF3-05의 빈틈이고(밖에 열린 둘째 공개를 놓침), CF3-05 ⓔ가 더해져 이제 잡힌다(`66a0a7ad`).
+  - V-12: 이 묶음에서 고침. ASVS 13.4.5 꼬리표가 달린 CF3-05가 맡는 `gatewayHostPorts`의 거르기다(포트 노출 자체는 바뀌지 않음). CF3-05 ⓕ가 더해져 이제 잡힌다(`43032e32`).
+  - V-17: 이 묶음에서 고침. 포트 노출 판정이다. 이 꼴은 실행 길에서 `gatewayHostPorts`를 아예 부르지 않아, 127.0.0.1 밖 공개 검사와 매핑 없음 검사가 함께 빠진다. 새 CF3-08(ASVS 13.4.5)이 더해져 V-17·V-17b·V-21이 이제 잡힌다(`43032e32`).
+  - V-20: 이 묶음에서 고침. 보안 판정 시험이다. 그 단계의 e2e 넷이 게이트웨이의 인증·출처·한도·403을 판정하는데, 이 꼴이면 그 실패가 CI를 막지 못한다. CF3-03에 `if`·`continue-on-error`·`set +e`·`|| true` 없음이 더해져 V-20·V-20b~d가 이제 잡힌다(`43032e32`).
+  - V-18: 보안 꼬리표 없음. 까닭: 클러스터 안 연결이 되느냐만 바뀌고, 이 PC 밖 노출·인증·출처·한도와는 상관없다. 고장은 닫히는 쪽이며, kind에서 `gateways`의 TLS 기다림이 멈추는 것으로 잡혔다(위 V-18 kind).
+  - V-19: 보안 꼬리표 없음. 까닭: 매핑이 없어 이 PC에 여는 포트가 오히려 줄어든다(닫히는 쪽). `gateways`가 `gatewayHostPorts`에서 '`down` 뒤 `up`'으로 멈춘다. 이 멈춤이 실행 길에 남는다는 것은 이제 CF3-08이 지킨다. kind로는 돌리지 않았다(코드 읽기).
+- **흉내만 낸 것**: 이번에는 없다(Docker·kind를 쓰지 않음). CF3-08은 `cluster.mjs`의 글자를 읽는 시험이다. 그래서 이름을 바꾸거나 다른 함수로 감싸 같은 뜻을 지키는 꼴은 통과할 수 있고, 거꾸로 같은 뜻을 다른 글자로 어기는 꼴은 놓칠 수 있다. 이번에 넣은 꼴(V-17·V-17b·V-21)은 모두 잡았다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -331,3 +363,4 @@
 | test | w8l1-cifix3-test-9d4e27b5 | claude-opus-5-5 | 2026-11-16T22:25+09:00 | 2026-11-16T23:45+09:00 |
 | review | w8l1-cifix3-review-4b8e61d2 | claude-opus-5-5 | 2026-11-16T23:49+09:00 | 2026-11-17T00:02+09:00 |
 | verify | w8l1-cifix3-verify-8f2a5c19 | claude-opus-5-5 | 2026-11-17T00:07+09:00 | 2026-11-17T00:32+09:00 |
+| verify | w8l1-cifix3-verify-8f2a5c19 | claude-opus-5-5 | 2026-11-17T00:37+09:00 | 2026-11-17T00:50+09:00 |
