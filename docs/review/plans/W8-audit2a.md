@@ -405,6 +405,35 @@ export interface ReviewStore {
 - §2 ⓐ 처리 시각 기준 → 단위 ④(03:16 대 03:19). ⓑ 15분·`<` → 단위 ④ 경계 정각, 통합 ⑤ 정각 예약. ⓒ 다른 트랜잭션 → 통합 ④ 한 트랜잭션(반복이 가리는 겹친 가드를 이것만 따로 잡는다). ⓓ 이른 시각으로 덮음 → 단위 ④·통합 ④ 늦은 쪽. ⓔ 예약 안 지움 → 단위 ④·⑤, 통합 ⑤. ⓕ SKIP LOCKED 빠짐 → 통합 ⑤ 잠근 행 건너뛰기. ⓖ 실패하면 멈춤 → 단위 ⑤ 반복. ⓗ 반복 안 켬 → 단위 ⑤ 시작과 멈춤, Kafka 통합 ④.
 - §4 ⓘ notice 남김 → 단위 ①·⑥. ⓙ `/anonymize` 남음·가드 없음 → 단위 ③ 내부 경로. ⓚ 로그에 계정 ID → 단위 ①·④ 처리기. ⓛ min 없음 → 단위 ④ 미래 탈퇴 시각. ⓜ 100개 채워도 쉼 → 단위 ⑤ 반복. ⓝ 다른 역할 권한·넓은 UPDATE → 단위 ⑦ 원문, 통합 ⑦.
 
+### 리뷰 반영(시험 쪽, 계획 §8의 A1·A2·A3, 2026-11-16)
+
+- **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 리뷰 `737f3960`·계획 보탬 `790dbaf7` 위(구현 `7f32f584` 뒤). Docker 없이 돌렸다.
+- **뼈대(동작 없음)**: `consumers/review-recheck.ts`의 `ReviewRecheckLoopOptions.clock?` 칸(A1), `ReviewStore.purgeLegacyRows` 포트와 메모리·Drizzle 저장소의 '아직 없음'(A2), `reviewMaintenanceTasks(store, clock, o?: { batch? })` 셋째 인자(A2, 지금은 쓰지 않는다). 정비 일 `review-purge-legacy`, `CORE_MAINTENANCE_TASK_NAMES`, 0026의 정비 역할 GRANT, 실패 수·마지막 성공 지표는 구현 담당 몫이다.
+- **단위**: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test` 시험 465개 가운데 **7개 실패, 458개 통과**(파일 70개 가운데 3개 실패). 실패 7개는 모두 아래 새 시험이다. typecheck 오류 0, 닿은 `src` 경로 eslint 오류 0.
+
+| 지적 | 파일 | 시험 | 결과 | 실패 까닭 |
+| --- | --- | --- | --- | --- |
+| A1 | `test/review-recheck.test.ts`(더함) | I-T83 ⑤ 반복이 실패해도 밀린 시간 지표를 새 값으로 고치고 실패 수를 센다 | 실패 | 단언: 마지막 성공 지표 `review_withdrawal_recheck_last_success_timestamp_seconds{service="core-svc"}`가 없다. 가짜 시계 `1_794_000_000_000`ms에서 성공(밀린 시간 0, 마지막 성공 `1794000000`) → 30분 − 1ms 뒤 실패(밀린 시간 정확히 5일 = `432000`초, 실패 수 1) → 2ms 뒤 실패(5일 + 1ms = `432000.001`초, 실패 수 2, 마지막 성공 그대로 — 30분 경계 직후) → 실패하고 밀린 시간 읽기도 실패(밀린 시간 그대로, 실패 수 3, 반복은 멈추지 않음) → 31분에 성공(밀린 시간 0, 마지막 성공 `1794001860`, 실패 수 3 그대로). 실패한 한 번마다 경고 한 줄(셋), 글에 UUID 모양 없음. 간격 1,234ms·묶음 7(상수와 다르게) |
+| A1 | 〃 | I-T83 ⑤ 같은 등록부에 반복을 두 번 켜도 지표를 새로 만들다 실패하지 않는다 | 실패 | 단언: `review_withdrawal_recheck_failures_total`이 등록부에 없다(세 지표 이름마다 등록이 하나여야 한다) |
+| A2 | 새 `test/review-purge-legacy.test.ts` | I-T83 ⑧ 정비 일은 이전 판이 남긴 두 꼴만 파기 칸으로 고친다 | 실패 | 정비 일 `review-purge-legacy`가 아직 없다. 행 일곱: 계획의 다섯(ⓐ 옛 작성자 지우기, ⓑⓒ 옛 익명화 보이는·가린 후기, ⓓ 제대로 파기된 행, ⓔ 다른 계정 후기)에 ⓕ 지문만 남은 DELETED·ⓖ 계정만 남은 DELETED를 더해(별점만 보는 틀린 구현 A2 ⓑ를 잡게) `{ purged: 5 }`. ⓓⓔ는 갱신 시각까지 그대로, ⓑ가 요약 대상에서 빠진다 |
+| A2 | 〃 | I-T83 ⑧ 정비 일을 다시 돌리면 0행이고 묶음 경계에서 빠지는 행이 없다 | 실패 | 〃. 묶음 2, id 차례와 다르게 넣은 이전 판 행 다섯 사이에 살아 있는 후기 둘. 저장소 호출의 `limit` `[2,2,2,2]`, 커서 `after` `[없음, 둘째 id, 넷째 id, 다섯째 id]`(마지막 호출이 0건·커서 없음이라 멈춘다), 다시 돌리면 `{ purged: 0 }`·행 그대로 |
+| A2 | 〃 | I-T83 ⑧ 정비 일은 묶음 사이에 멈춤 신호를 보고 다음 실행이 나머지를 고친다 | 실패 | 〃. 첫 묶음 뒤 멈춤 → `{ purged: 2 }`·저장소 호출 1번, 다음 실행 `{ purged: 3 }` |
+| A2 | 〃 | I-T83 ⑧ 정비 일은 정비 시간 일이고 정비 일 목록에 있으며 한 묶음은 기본 1,000행이다 | 실패 | 〃. `when` `'window'`, 기본 `limit` 1,000·`nowMs` = 시계, `CORE_MAINTENANCE_TASK_NAMES`와 relay 조립 `coreMaintenanceTasks(…)`에 있다 |
+| A2 | `test/review-purge-migration.test.ts`(더함) | I-T83 ⑦⑧ 0026은 정비 역할에 본문 읽기를 주지 않는다 | 실패 | 단언: 0026에 `core_maintenance` GRANT가 없다. 기대: `review` SELECT [account_id, content_fingerprint, deleted_at, rating]와 UPDATE [account_id, author_display, basis_order_id, body, content_fingerprint, deleted_at, rating] 두 줄뿐, `body` 읽기·INSERT·DELETE·표 전체 권한·다른 표 권한 없음 |
+| A2 | 〃(고침) | I-T83 ⑦ 마이그레이션은 별점·지문 NULL을 허용하고… / I-T83 ⑦ 예약 표 권한은… | **처음부터 통과(이미 있는 동작)** 2 | 'review에 새 GRANT 없음'을 '정비 역할 밖의 review GRANT 없음'으로, 예약 표 권한 검사를 예약 표 문만으로 좁혔다(A2의 정비 역할 GRANT가 이 둘을 깨지 않게) |
+
+- **통합(도커 대기 — 돌리지 않았다)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts`. 새 시험은 기준 시각을 DB 서버 시각(`select now()`)에서 잡는다.
+
+| 지적 | 파일 | 시험 | 지금(구현 전) 예상 | 까닭 |
+| --- | --- | --- | --- | --- |
+| A2 | 새 `test-int/review-purge-legacy.int.test.ts` | I-T83 ⑧ 정비 역할로 이전 판 행을 고치고 그 뒤 파기 행 CHECK를 VALIDATE할 수 있다 | 실패 | 정비 일이 없다. 대조군으로 정비 일 전 VALIDATE가 23514인지 먼저 본다. 그 뒤 `core_maintenance` 로그인·묶음 2로 `{ purged: 5 }`, 다섯 행 칸이 ①과 같고(이미 지운 행의 지운 시각 그대로) 다른 두 행은 그대로, 다시 돌리면 0, 관리자 트랜잭션의 파기 행 CHECK `NOT VALID` + 두 `VALIDATE`가 성공(되돌림) |
+| A2 | 〃 | I-T83 ⑧ 정비 일은 잠긴 행을 건너뛰고 기다리지 않으며 다음 실행이 고친다 | 실패 | 〃. 관리자 연결이 한 행을 `FOR UPDATE`로 쥔 채 3초 안에 나머지 둘만 고친다(SKIP LOCKED. 잠금 대기 2초 [가정]로 실패해도 안 된다), 풀린 뒤 다음 실행이 1 |
+| A2 | `test-int/review-grants.int.test.ts`(더함) | I-T83 ⑦⑧ 0026은 정비 역할에 본문 읽기를 주지 않는다 | 실패 | 허용 쪽 대조군(찾기 칸 읽기, 파기 칸 고치기 한 문장)이 42501이다. 거부 쪽: `body`·`author_display`·`basis_order_id` 읽기, 표 전체 읽기, `event_id`·`created_at`·`edited` 고치기, 지우기, 넣기가 모두 42501 |
+| A3 | `test-int/review-recheck.int.test.ts`(더함) | I-T83 ④ 파기가 실패하면 다시 정리 예약도 남지 않는다 | 처음부터 통과 예상 | 구현은 이미 한 트랜잭션이다. `REVOKE UPDATE (rating) ON review FROM core_app` 동안 거절 1건(42501), 예약 행 0, 후기 VISIBLE 그대로, 권한을 돌린 뒤 파기와 예약이 둘 다 있다. 검증 담당이 '예약 먼저 따로 커밋'하는 틀린 구현으로 한 번 실패를 본다 |
+
+- **틀린 구현 표본과 잡을 시험(예상)**: A1 ⓐ 실패 때 밀린 시간 안 고침·ⓑ 0으로 둠 → A1 첫 시험의 둘째·셋째 단계. ⓒ 성공 때도 실패 수 올림 → 다섯째 단계(3 그대로). ⓓ 실패 때 마지막 성공 고침 → 둘째~넷째 단계(가짜 시계를 30분 넘게 옮긴다). ⓔ 밀린 시간 읽기가 던지면 멈춤 → 다섯째 단계가 돈다. A2 ⓐ 둘째 꼴 빠뜨림 → ⑧ 첫 시험 ⓑⓒ. ⓑ 별점만 봄 → ⓕⓖ. ⓒ 커서 `>=`·커서 없음 → 둘째 시험의 커서·호출 수. ⓓ 제대로 파기된 행 고침 → ⓓ 갱신 시각. ⓔ 지운 시각 덮음 → ⓐⓕⓖ의 지운 시각. ⓕ `daily` → 넷째 시험. ⓖ 정비 역할에 표 전체 UPDATE → ⑦⑧ 원문·통합 거부 쪽. A3 '예약 먼저 따로 커밋' → 통합 ④ 새 시험, '파기 먼저 따로 커밋' → 기존 ④.
+- **시험 담당이 정한 것**: 메모리 `purgeLegacyRows`의 커서는 '그 묶음에서 고친 마지막 id'이고 0건이면 커서가 없다. 정비 일은 커서가 없을 때까지 이어 부른다(고친 수가 묶음보다 적어도 한 번 더 불러 0건을 본다, SKIP LOCKED로 덜 잡혀도 끝으로 보지 않게). 실패 수·마지막 성공 지표의 칸은 `service="core-svc"` 하나다.
+
 ## 시험 이의
 
 - **누가·언제**: 구현 담당(세션 `l3w8-a2a-impl`), 2026-11-16. 시험 파일은 고치지 않았다.

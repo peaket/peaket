@@ -313,6 +313,11 @@ export class DrizzleReviewStore implements ReviewStore {
     return Math.max(0, nowMs - Math.round(Number(raw)));
   }
 
+  /** 뼈대(W8-audit2a 리뷰 A2 시험 단계): 구현 담당이 채운다(purgeSet을 같이 쓴다, docs/data.md §2 '이전 판이 남긴 행 고치기') */
+  async purgeLegacyRows(_o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
+    throw new Error('아직 없음');
+  }
+
   async insertTakedown(t: TakedownRecord): Promise<void> {
     await this.database.db.insert(takedownAction).values(valuesOfTakedown(t));
   }

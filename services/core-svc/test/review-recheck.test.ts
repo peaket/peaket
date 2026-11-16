@@ -3,6 +3,8 @@
 // 정본: docs/features/identity.md §8 '다시 정리'·§12 I-T83, docs/streaming.md §2.6 'core-svc 소비자', docs/data.md §2 '다시 정리 예약'.
 // 단언 값은 정본에서 적는다(16분 = 15분 + 여유 1분 [가정], 간격 60초 [가정], 한 번에 100개 [가정]). 코드 상수를 가져오지 않는다.
 // 시간 값은 상수와 다르게 고른다: 탈퇴 시각과 처리 시각을 3분 어긋나게, 예약 경계는 −1ms·0ms.
+// 리뷰 A1(W8-audit2a §8.1, docs/observability.md 운영 확인 '탈퇴 후기 다시 정리' 행): 반복이 실패해도 밀린 시간 지표를 새 값으로 고치고, 실패 수를 세며,
+// 마지막 성공 시각은 성공한 한 번에서만 고친다. 경보 기준(밀린 시간 5일 [가정] 넘음, 마지막 성공 30분 [가정] 넘게 없음)의 경계 직전·직후를 가짜 시계로 만든다.
 import { type ConsumedMessage, fakeClock, PlatformMetrics, type Registry } from '@peaket/platform';
 import { DrizzleQueryError } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -407,5 +409,122 @@ describe('I-T83 다시 정리 반복', () => {
     }
     await pause(30);
     expect(calls).toHaveLength(3);
+  });
+});
+
+/** 지표 한 줄의 값(이름과 칸이 모두 맞는 줄). 지표나 줄이 없으면 undefined */
+async function metricValue(registry: Registry, name: string, labels: Record<string, string>): Promise<number | undefined> {
+  let text: string;
+  try {
+    text = await registry.getSingleMetricAsString(name);
+  } catch {
+    return undefined;
+  }
+  const line = text
+    .split('\n')
+    .find((l) => (l.startsWith(`${name}{`) || l.startsWith(`${name} `)) && Object.entries(labels).every(([k, v]) => l.includes(`${k}="${v}"`)));
+  return line === undefined ? undefined : Number(line.slice(line.lastIndexOf(' ') + 1));
+}
+
+describe('I-T83 다시 정리 반복의 실패 지표(리뷰 A1)', () => {
+  /** 정본 값: 밀린 시간 경보 5일 [가정], 마지막 성공 경보 30분 [가정](docs/observability.md 운영 확인 '탈퇴 후기 다시 정리' 행) */
+  const FIVE_DAYS_MS = 5 * 86_400_000;
+  const THIRTY_MIN_MS = 30 * MIN;
+  const FAILURES = 'review_withdrawal_recheck_failures_total';
+  const LAST_SUCCESS = 'review_withdrawal_recheck_last_success_timestamp_seconds';
+  const OVERDUE = 'maintenance_retention_overdue_seconds';
+  const UUID_LIKE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+  test('I-T83 ⑤ 반복이 실패해도 밀린 시간 지표를 새 값으로 고치고 실패 수를 센다', async () => {
+    const T = 1_794_000_000_000;
+    const clock = fakeClock({ now: T });
+    let runs = 0;
+    // 한 번마다: 성공 → 실패(밀린 시간 정확히 5일) → 실패(5일 + 1ms) → 실패(밀린 시간 읽기도 실패) → 성공(밀린 시간 0)
+    const reviews = {
+      runWithdrawalRechecks: async () => {
+        runs += 1;
+        if (runs === 1) return { accounts: 3, purged: 4 };
+        if (runs === 2) throw new DrizzleQueryError('select account_id from review_withdrawal_recheck where due_at <= $1 order by due_at limit $2 for update skip locked', [A, 7], Object.assign(new Error('permission denied for table review_withdrawal_recheck'), { code: '42501' }));
+        if (runs === 3) throw new Error('canceling statement due to statement timeout');
+        if (runs === 4) throw new Error('Connection terminated unexpectedly');
+        return { accounts: 0, purged: 0 };
+      },
+      oldestOverdueRecheckMs: async () => {
+        if (runs === 2) return FIVE_DAYS_MS;
+        if (runs === 3) return FIVE_DAYS_MS + 1;
+        if (runs === 4) throw new Error('Connection terminated unexpectedly');
+        return 0;
+      },
+    };
+    const s = fakeSleep();
+    const warns: [object, string | undefined][] = [];
+    const registry = new PlatformMetrics('core-svc').registry;
+    const overdue = () => metricValue(registry, OVERDUE, { service: 'core-svc', table: 'review_withdrawal_recheck' });
+    const failures = async () => (await metricValue(registry, FAILURES, { service: 'core-svc' })) ?? 0;
+    const lastSuccess = () => metricValue(registry, LAST_SUCCESS, { service: 'core-svc' });
+    // 간격·묶음 크기는 상수(60초·100개)와 다르게
+    const loop = startReviewRecheckLoop({ reviews, registry, clock, everyMs: 1_234, limit: 7, sleep: s.sleep, logger: { warn: (o, msg) => void warns.push([o, msg]) } });
+    try {
+      // 1번째(성공): 밀린 시간 0, 마지막 성공 = 가짜 시계(초), 실패 0
+      await until(() => runs === 1 && s.waits().length === 1, '첫 번째 돎');
+      expect(await overdue()).toBe(0);
+      expect(await lastSuccess()).toBe(1_794_000_000);
+      expect(await failures()).toBe(0);
+      expect(warns).toEqual([]);
+
+      // 2번째(실패): 마지막 성공에서 30분 − 1ms 뒤(경보 경계 직전). 밀린 시간은 실패해도 새 값(정확히 5일 = 432,000초)
+      clock.advance(THIRTY_MIN_MS - 1);
+      s.wake();
+      await until(() => runs === 2 && s.waits().length === 2, '두 번째 돎');
+      expect(await overdue()).toBe(FIVE_DAYS_MS / 1000);
+      expect(await failures()).toBe(1);
+      expect(await lastSuccess()).toBe(1_794_000_000);
+
+      // 3번째(실패): 30분 + 1ms 뒤(경보 경계 직후). 밀린 시간 5일 + 1ms(경보 경계 직후), 마지막 성공은 그대로
+      clock.advance(2);
+      s.wake();
+      await until(() => runs === 3 && s.waits().length === 3, '세 번째 돎');
+      expect(await overdue()).toBe((FIVE_DAYS_MS + 1) / 1000);
+      expect(await failures()).toBe(2);
+      expect(await lastSuccess()).toBe(1_794_000_000);
+
+      // 4번째(실패, 밀린 시간 읽기도 실패): 밀린 시간은 그대로, 실패 수는 는다. 반복은 멈추지 않는다
+      s.wake();
+      await until(() => runs === 4 && s.waits().length === 4, '네 번째 돎');
+      expect(await overdue()).toBe((FIVE_DAYS_MS + 1) / 1000);
+      expect(await failures()).toBe(3);
+      expect(await lastSuccess()).toBe(1_794_000_000);
+
+      // 5번째(성공): 시작에서 31분 뒤. 밀린 시간 0, 마지막 성공을 그때로 고치고 실패 수는 그대로
+      clock.advance(T + 31 * MIN - clock.now());
+      s.wake();
+      await until(() => runs === 5 && s.waits().length === 5, '다섯 번째 돎');
+      expect(await overdue()).toBe(0);
+      expect(await lastSuccess()).toBe(1_794_001_860);
+      expect(await failures()).toBe(3);
+
+      // 실패한 한 번마다 경고 한 줄, 글에 계정 ID 모양(UUID) 글자가 없다
+      expect(warns).toHaveLength(3);
+      expect(JSON.stringify(warns)).not.toMatch(UUID_LIKE);
+    } finally {
+      await loop.stop();
+    }
+  });
+
+  test('I-T83 ⑤ 같은 등록부에 반복을 두 번 켜도 지표를 새로 만들다 실패하지 않는다', async () => {
+    const registry = new PlatformMetrics('core-svc').registry;
+    const reviews = { runWithdrawalRechecks: async () => ({ accounts: 0, purged: 0 }), oldestOverdueRecheckMs: async () => 0 };
+    const s1 = fakeSleep();
+    const s2 = fakeSleep();
+    const loops: { stop(): Promise<void> }[] = [];
+    try {
+      loops.push(startReviewRecheckLoop({ reviews, registry, clock: fakeClock({ now: 1_794_000_000_000 }), sleep: s1.sleep, logger: { warn: () => undefined } }));
+      loops.push(startReviewRecheckLoop({ reviews, registry, clock: fakeClock({ now: 1_794_000_000_000 }), sleep: s2.sleep, logger: { warn: () => undefined } }));
+      await until(() => s1.waits().length === 1 && s2.waits().length === 1, '두 반복이 한 번씩 돎');
+      const names = (await registry.getMetricsAsJSON()).map((m) => m.name);
+      for (const name of [OVERDUE, FAILURES, LAST_SUCCESS]) expect(names.filter((n) => n === name), name).toHaveLength(1);
+    } finally {
+      for (const l of loops) await l.stop();
+    }
   });
 });

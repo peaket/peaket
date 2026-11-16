@@ -116,6 +116,36 @@ describe('I-T83 다시 정리 예약(실제 DB)', () => {
     expect(created).toEqual(new Date(nowMs));
   });
 
+  test('I-T83 ④ 파기가 실패하면 다시 정리 예약도 남지 않는다', async () => {
+    // 리뷰 A3: 구현은 '예약 upsert → 파기' 차례다. 위 시험(예약 넣기를 막음)의 반대쪽으로, 둘째 문장(파기)만 실패하게 해 첫 문장(예약)도 되돌려지는지 본다.
+    // 두 문장을 따로 자동 커밋하는 틀린 구현(예약 먼저)은 예약 행이 남아 여기서 잡힌다. 기준 시각은 DB 서버 시각에서 잡는다
+    const A = randomUUID();
+    const r1 = await seedReview(A);
+    const store = new DrizzleReviewStore(app);
+    const nowMs = Math.floor(Number((await admin.pool.query('select (extract(epoch from now()) * 1000)::float8 as ms')).rows[0].ms));
+    const recheckAtMs = nowMs + 13 * MIN;
+
+    // 파기만 실패하게 한다: 관리자 연결로 core_app의 review.rating 고치기를 잠시 거둔다(예약 표 권한은 그대로)
+    await admin.pool.query('revoke update (rating) on review from core_app');
+    const rejected: unknown[] = [];
+    try {
+      await store.purgeWithdrawnAccount(A, { nowMs, recheckAtMs }).catch((err: unknown) => void rejected.push(err));
+    } finally {
+      await admin.pool.query('grant update (rating) on review to core_app');
+    }
+    // 끊긴 사례가 실제로 있었다(거절 1건, 권한 오류)
+    expect(rejected).toHaveLength(1);
+    expect(pgCode(rejected[0])).toBe('42501');
+    // 파기가 실패했으니 예약도 없고 후기는 그대로다
+    expect(await rechecks()).toEqual([]);
+    expect(await statusOf(r1)).toEqual({ status: 'VISIBLE', rating: 5, account_id: A });
+
+    // 권한을 돌린 뒤 다시 하면 파기와 예약이 둘 다 있다
+    expect(await store.purgeWithdrawnAccount(A, { nowMs, recheckAtMs })).toBe(1);
+    expect(await statusOf(r1)).toEqual({ status: 'DELETED', rating: null, account_id: r1 });
+    expect(await rechecks()).toEqual([{ account_id: A, due_at: new Date(recheckAtMs) }]);
+  });
+
   test('I-T83 ④ 같은 계정 예약은 늦은 쪽을 남긴다', async () => {
     const A = randomUUID();
     const store = new DrizzleReviewStore(app);

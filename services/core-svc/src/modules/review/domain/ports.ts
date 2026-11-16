@@ -65,6 +65,12 @@ export interface ReviewStore {
   runDueRechecks(nowMs: number, limit: number): Promise<{ accounts: number; purged: number }>;
   /** 가장 오래 밀린 예약이 예약 시각을 넘긴 시간(ms). 없거나 밀리지 않았으면 0 */
   oldestOverdueRecheckMs(nowMs: number): Promise<number>;
+  /**
+   * 이전 판이 남긴 두 꼴(docs/data.md §2 '이전 판이 남긴 행 고치기')을 id가 after보다 큰 것부터 limit개 잡아 파기 칸으로 고친다(한 트랜잭션, SKIP LOCKED).
+   * 고친 행 수와 마지막으로 본 id(다음 묶음의 커서, 없으면 undefined).
+   * 뼈대(W8-audit2a 리뷰 A2 시험 단계): 구현 담당이 채운다
+   */
+  purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }>;
 }
 
 export const REVIEW_STORE = Symbol('REVIEW_STORE');

@@ -164,4 +164,39 @@ describe('COV2-06 보충 후기·보류 표 운영 역할 권한(실제 DB)', ()
       ),
     ).toBe('42501');
   });
+
+  test('I-T83 ⑦⑧ 0026은 정비 역할에 본문 읽기를 주지 않는다', async () => {
+    // 리뷰 A2(계획 §8.2): 정비 일 review-purge-legacy가 찾고 고치는 칸만 더했다(docs/data.md §2 '후기 표의 DB 권한')
+    const reviewId = await seedReview({ status: 'DELETED' });
+    // 대조군(허용 쪽): 이전 판 행 찾기와 파기 칸 고치기 한 문장
+    expect(await codeOf(maint, 'select id, status, rating, content_fingerprint, account_id, deleted_at from review where id = $1', [reviewId]), '찾기 칸 읽기').toBe('OK');
+    expect(
+      await codeOf(
+        maint,
+        `update review set status = 'DELETED', body = '', rating = null, content_fingerprint = null, author_display = '', notice = null, notice_until = null,
+           account_id = id, basis_order_id = id, deleted_at = coalesce(deleted_at, $2), updated_at = $2
+         where id = $1`,
+        [reviewId, new Date(NOW)],
+      ),
+      '파기 칸 고치기',
+    ).toBe('OK');
+    // 거부 쪽: 본문·작성자 표시·주문 참조 읽기, 표 전체 읽기, 고정 칸 고치기, 넣기·지우기
+    const denied: [string, string, unknown[]][] = [
+      ['body 읽기', 'select body from review where id = $1', [reviewId]],
+      ['author_display 읽기', 'select author_display from review where id = $1', [reviewId]],
+      ['basis_order_id 읽기', 'select basis_order_id from review where id = $1', [reviewId]],
+      ['표 전체 읽기', 'select * from review where id = $1', [reviewId]],
+      ['event_id 고치기', 'update review set event_id = $1 where id = $2', [randomUUID(), reviewId]],
+      ['created_at 고치기', 'update review set created_at = $1 where id = $2', [new Date(NOW), reviewId]],
+      ['edited 고치기', 'update review set edited = true where id = $1', [reviewId]],
+      ['review 지우기', 'delete from review where id = $1', [reviewId]],
+      [
+        'review 넣기',
+        `insert into review (id, event_id, account_id, basis_order_id, rating, body, status, content_fingerprint, author_display, edited, created_at, updated_at)
+         values ($1, $2, $3, $4, 5, '정비 역할이 쓰려는 후기입니다.', 'VISIBLE', 'fp-maint-2', '***', false, $5, $5)`,
+        [randomUUID(), randomUUID(), randomUUID(), randomUUID(), new Date(NOW)],
+      ],
+    ];
+    for (const [what, text, params] of denied) expect(await codeOf(maint, text, params), what).toBe('42501');
+  });
 });

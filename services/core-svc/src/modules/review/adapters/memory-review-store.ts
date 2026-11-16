@@ -187,6 +187,11 @@ export class MemoryReviewStore implements ReviewStore {
     return oldest === undefined ? 0 : Math.max(0, nowMs - oldest);
   }
 
+  /** 뼈대(W8-audit2a 리뷰 A2 시험 단계): 구현 담당이 채운다 */
+  async purgeLegacyRows(_o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
+    throw new Error('아직 없음');
+  }
+
   async insertTakedown(t: TakedownRecord): Promise<void> {
     this.takedowns.set(t.takedownId, { ...t });
   }

@@ -2,6 +2,8 @@
 // 정본: docs/data.md §2 '후기 파기'(마이그레이션 나눔)·'다시 정리 예약'·'후기 표의 DB 권한', 계획 docs/review/plans/W8-audit2a.md §1·§2 '마이그레이션'.
 // 이번 출시는 넓히기만 한다: 별점·지문의 NOT NULL을 풀고, 살아 있는 행 CHECK를 NOT VALID로 더하며, 예약 표와 core_app 권한을 만든다.
 // 파기 행 CHECK와 VALIDATE는 다음 출시 몫이라 없어야 한다(docs/devops.md §7.1 원칙 2·3). 실제 거절은 test-int/review-purge.int.test.ts·review-recheck.int.test.ts가 본다.
+// 리뷰 A2(계획 §8.2): 0026은 정비 일 review-purge-legacy를 위해 core_maintenance에 review의 칸 권한 두 줄만 더한다. 본문(body) 읽기는 주지 않는다
+// (docs/data.md §2 '후기 표의 DB 권한'). core_app의 review 권한은 바꾸지 않는다(0022의 칸 목록이 파기 칸을 모두 덮는다).
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,8 +97,9 @@ describe('I-T83 마이그레이션 0026', () => {
     // 다음 출시 몫은 없다: 파기 행 CHECK, VALIDATE CONSTRAINT, 그 밖의 CHECK
     expect(statements.filter((s) => /\bvalidate constraint\b/.test(s))).toEqual([]);
     expect(statements.filter((s) => /\bcheck\b/.test(s) && !s.startsWith('alter table review add constraint review_live_complete_check '))).toEqual([]);
-    // review에는 새 GRANT·REVOKE가 없다(0022의 칸 목록이 파기 칸을 모두 덮는다)
-    expect(statements.filter((s) => /^(grant|revoke)\b/.test(s) && / on (table )?review( |$|,)/.test(s))).toEqual([]);
+    // review의 새 GRANT는 정비 역할 것뿐이다(core_app은 0022의 칸 목록이 파기 칸을 모두 덮는다. 정비 역할 칸은 아래 '⑦⑧' 시험)
+    const reviewGrants = grantsOf(statements.filter((s) => /^grant\b/.test(s) && / on (table )?review( |$|,)/.test(s)));
+    expect(reviewGrants.filter((g) => !g.startsWith('core_maintenance review ')), '정비 역할 밖의 review GRANT').toEqual([]);
     expect(statements.filter((s) => /^revoke\b/.test(s))).toEqual([]);
 
     // 그 밖의 문은 예약 표·색인·권한뿐이다
@@ -135,7 +138,8 @@ describe('I-T83 마이그레이션 0026', () => {
     ]);
 
     // 권한: core_app에 읽기·넣기·지우기와 due_at 고치기만. core_partner·core_maintenance·core_ops에는 주지 않는다
-    expect(grantsOf(statements)).toEqual(
+    const recheckStatements = statements.filter((s) => /^(grant|revoke)\b/.test(s) && s.includes('review_withdrawal_recheck'));
+    expect(grantsOf(recheckStatements)).toEqual(
       [
         'core_app review_withdrawal_recheck SELECT',
         'core_app review_withdrawal_recheck INSERT',
@@ -143,6 +147,30 @@ describe('I-T83 마이그레이션 0026', () => {
         'core_app review_withdrawal_recheck UPDATE [due_at]',
       ].sort(),
     );
-    for (const role of ['core_partner', 'core_maintenance', 'core_ops']) expect(statements.filter((s) => s.startsWith('grant ') && s.includes(role)), role).toEqual([]);
+    for (const role of ['core_partner', 'core_maintenance', 'core_ops']) expect(recheckStatements.filter((s) => s.includes(role)), role).toEqual([]);
+  });
+
+  test('I-T83 ⑦⑧ 0026은 정비 역할에 본문 읽기를 주지 않는다', () => {
+    // 리뷰 A2: 정비 일 review-purge-legacy(이전 판이 남긴 행 고치기)가 찾고(읽기) 파기 칸으로 고치는(고치기) 칸만 더한다.
+    // 0022가 준 id·status·notice·notice_until 읽기와 status·notice·notice_until·updated_at 고치기는 그대로다(그것은 0022 시험이 본다)
+    const file = migrationFile();
+    expect(file, 'migrations/0026_*.sql').toBeDefined();
+    const statements = statementsOf(readFileSync(join(MIGRATIONS, file!), 'utf8'));
+    const maint = grantsOf(statements.filter((s) => /^grant\b/.test(s) && s.includes('core_maintenance')));
+    const cols = (...c: string[]): string => `[${[...c].sort().join(',')}]`;
+    expect(maint).toEqual(
+      [
+        `core_maintenance review SELECT ${cols('rating', 'content_fingerprint', 'account_id', 'deleted_at')}`,
+        `core_maintenance review UPDATE ${cols('body', 'rating', 'content_fingerprint', 'author_display', 'account_id', 'basis_order_id', 'deleted_at')}`,
+      ].sort(),
+    );
+    // 거부 쪽을 따로: 본문 읽기, 표 전체 읽기·고치기, 넣기·지우기·비우기가 없다
+    for (const g of maint) {
+      expect(g, g).not.toMatch(/ (INSERT|DELETE|TRUNCATE|ALL)\b/);
+      expect(g, g).toMatch(/ (SELECT|UPDATE) \[/);
+      if (/ SELECT /.test(g)) expect(g.slice(g.indexOf('[') + 1, -1).split(','), g).not.toContain('body');
+    }
+    // 정비 역할의 다른 표 권한·REVOKE도 없다
+    expect(statements.filter((s) => s.includes('core_maintenance') && !(/^grant\b/.test(s) && / on (table )?review( |$|,)/.test(s)))).toEqual([]);
   });
 });

@@ -22,6 +22,11 @@ export interface ReviewRecheckLoopOptions {
   logger?: { warn(o: object, msg?: string): void; info?(o: object, msg?: string): void };
   /** 시험이 바꾼다. 멈춤 신호가 오면 바로 풀려야 한다 */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /**
+   * 마지막 성공 시각(review_withdrawal_recheck_last_success_timestamp_seconds)에 쓴다. 기본 systemClock.
+   * 뼈대(W8-audit2a 리뷰 A1 시험 단계): 칸만 더했다. 실패 수·마지막 성공 지표와 실패 경로의 밀린 시간 고치기는 구현 담당 몫이다
+   */
+  clock?: { now(): number };
 }
 
 /** 멈춤 신호가 오면 바로 풀리는 쉼 */
