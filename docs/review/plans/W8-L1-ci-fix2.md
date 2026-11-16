@@ -110,7 +110,28 @@
 
 ## 실패 확인
 
+시험 담당(w8l1-cifix2-test-6b66f6f0, 2026-11-16). 구현 전 트리는 감독이 꺼내 둔 `D:/ticketpass-lane1-pre`(분리 HEAD `8b26b842`, 계획 커밋. 제품 파일은 출발점 `3256c93f`과 같다. `node_modules` 없음)다. 네 시험 파일을 그 폴더 같은 자리에 복사해 돌리고 `git -C D:/ticketpass-lane1-pre checkout -- .`로 되돌렸다(되돌린 뒤 `status` 빈 것 확인).
+
+- **CF2-01·CF2-02**: `node --test apps/web/server/server-external.test.mjs`(node 내장만 씀) → 시험 2, 실패 2. CF2-01은 '키가 2번 나온다', CF2-02는 첫 배열이 redis 여섯뿐이라 일곱과 다르다.
+- **CF2-03·CF2-04**: `node --test --test-name-pattern="CF2-0[34]|tools-check는" tools/ci/check-workflows.test.mjs tools/ci/changes.test.mjs`(node 내장과 git만 씀. CF2-03은 글자로 읽어 `yaml`이 없어도 건너뛰지 않는다) → 시험 3, 실패 2, 통과 1(기존 tools-check 시험). CF2-03은 'packageManager 판으로 pnpm을 받는 단계가 없다', CF2-04는 `tools/local/gateway-objects.mjs`가 `loadtest`를 고르지 않는다.
+- **CF2-05~07**: 이 시험은 `jose`·`yaml`을 가져오므로 `node_modules`가 없는 `-pre`에서는 읽기부터 실패한다(`Cannot find package 'jose'`). 그래서 `-pre`에서는 돌리지 않았다. 대신 `git diff --stat 3256c93f c3811a03 -- apps/web/scripts deploy apps/web/package.json package.json pnpm-lock.yaml`가 빈 것(이 시험이 읽는 제품 쪽·정의 파일·의존성이 구현 전과 같다)을 보고 `D:/ticketpass-lane1`에서 견줬다.
+  - ⓐ 고치기 전 시험(`git show 8b26b842:apps/web/scripts/local-fan-gateway-parity.test.mjs`를 같은 폴더의 임시 이름으로 두고 `cd apps/web && node --test …`, 돌린 뒤 지움) → 시험 4, 실패 3, 통과 1. 실패 셋 모두 'gw-fan api에 POST /v1/events/e2e-id-10/holds 라우트가 없다'(계획 1의 3과 같다).
+  - ⓑ 고친 시험(두 파일을 읽음) → 시험 4, 통과 4.
+- **R-1(커밋하지 않는 재현)**: `node_modules`가 없는 이 PC 임시 폴더(그 위의 폴더들에도 `node_modules`가 없음을 확인)에 `git archive 8b26b842 | tar -x`로 풀고 `DOCKER_HOST=tcp://127.0.0.1:9 node --test "loadtest/test/*.test.mjs"` → 시험 443, 실패 3, 통과 440. 실패 셋은 PRF215 셋이고 모두 `Cannot find package 'yaml' imported from …/tools/local/gateway-objects.mjs`(계획 1의 2와 같다).
+
 ## 시험 결과
+
+구현 위(`D:/ticketpass-lane1`, 구현 커밋 `c3811a03` + 이 시험 커밋의 시험 파일). 구현 차이는 보지 않았다(ADR-0281 결정 2).
+
+- `node --test apps/web/server/server-external.test.mjs apps/web/scripts/local-fan-gateway-parity.test.mjs`(`apps/web`에서) → 시험 6, 통과 6(CF2-01·02·05·06·07과 기존 '가짜 API는 사전 요청의 요청 머리를 …').
+- `node --test --test-name-pattern="CF2-0[34]|tools-check는" tools/ci/check-workflows.test.mjs tools/ci/changes.test.mjs` → 시험 3, 통과 3.
+- 두 파일 전체 `node --test tools/ci/check-workflows.test.mjs tools/ci/changes.test.mjs` → 시험 86, 통과 85, 건너뜀 1(CI에서만 도는 'CI에서는_yaml패키지가있어_…'), 실패 0.
+- web 서버 단위 시험 전체 `cd apps/web && node --test "server/**/*.test.mjs"` → 시험 66, 통과 66.
+- R-1 구현 뒤: `git archive c3811a03`를 같은 꼴로 푼 폴더에 `D:/ticketpass-lane1/node_modules`를 가리키는 연결(junction)을 두고(설치한 상태 대신) 같은 명령 → 시험 443, 통과 443, 실패 0. 돌린 뒤 연결만 먼저 지우고(진짜 `node_modules`는 그대로) 폴더를 지웠다.
+- R-2(운영 빌드가 필요한 'HOT-390 첫 JS 예산: redis는 서버 묶음 밖에 …')는 이 PC에서 돌리지 않았다(운영 빌드가 무겁고 계획 4가 CI `web / budgets` 몫으로 둔다). 최종 근거는 CI 잡이다.
+- 고친 시험 네 파일은 뿌리 ESLint(`node node_modules/eslint/bin/eslint.js <파일>`)에 걸리는 것이 없다.
+- 구현이 틀렸다고 볼 것은 찾지 못했다(시험이 보는 공개 인터페이스 범위 안에서).
+- 시험을 쓰며 고른 것: CF2-01·02는 블록 주석과 줄 주석(`https://`의 `//`는 남김)을 지운 소스에서 센다(주석 줄 안의 `serverExternalPackages:`를 세지 않는다). CF2-03은 `yaml` 없이 steps 목록을 글자로 읽어 ⓐ `packageManager`를 읽어 pnpm을 받는 `run`(또는 `pnpm/action-setup` 액션) ⓑ 값이 정확히 `pnpm install --frozen-lockfile`인 `run`(그 단계에 `working-directory` 없음, 파일에 `defaults:` 없음) ⓒ 값이 정확히 `node --test "loadtest/test/*.test.mjs"`인 `run`을 찾아 ⓐ < ⓑ < ⓒ를 본다. CF2-05~07은 두 정의 파일을 이름으로 적고, 하나라도 없으면 '정의 파일이 없다'로 그 시험이 실패한다(파일 읽기를 시험 안으로 늦춰 가짜 API 시험은 따로 돈다).
 
 ## 리뷰
 
@@ -157,3 +178,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w8l1-cifix2-plan-d3f0cd33 | claude-opus-5-5 | 2026-11-16T21:15+09:00 | 2026-11-16T21:44+09:00 |
 | impl | w8l1-cifix2-impl-a624bfe3 | claude-opus-5-5 | 2026-11-16T21:44+09:00 | 2026-11-16T21:53+09:00 |
+| test | w8l1-cifix2-test-6b66f6f0 | claude-opus-5-5 | 2026-11-16T21:54+09:00 | 2026-11-16T22:07+09:00 |

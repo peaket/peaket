@@ -352,6 +352,12 @@ test('BSL060_부하시험·그시험이견주는서버·검사기·장부·로�
   }
 });
 
+// 2026-11-16 develop CI에서 찾음: 실행 도구(loadtest/run.mjs → tools/local/cluster.mjs)가 가져오는 gateway-objects.mjs만 바뀐 가지에서는
+// loadtest-check가 돌지 않았다(계획 docs/review/plans/W8-L1-ci-fix2.md §2의 3, W8-L1-ci-fix2 시험 담당)
+test('CF2-04 BSL-060 로컬 클러스터 도구 gateway-objects.mjs를 바꾸면 loadtest를 고른다', () => {
+  assert.ok(scopes({ 'tools/local/gateway-objects.mjs': '바꿈\n' }).includes('loadtest'), 'tools/local/gateway-objects.mjs');
+});
+
 test('BSL060_loadtest가함께고르는범위는_그파일의다른규칙그대로다', () => {
   // 범위 순서는 changes.mjs의 SCOPES 순서다(loadtest는 deploy 뒤, tools 앞)
   assert.deepEqual(scopes({ 'loadtest/runner/args.mjs': 'x\n' }), ['loadtest']);

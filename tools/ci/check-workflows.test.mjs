@@ -650,6 +650,62 @@ test('tools-check는_잠금파일대로_의존성을설치한뒤에_시험을돈
   assert.ok(install < text.indexOf('node --test'), '설치가 시험보다 뒤에 있다');
 });
 
+/**
+ * 워크플로 글자에서 첫 steps 목록의 단계를 차례대로 읽는다(yaml 패키지 없이. 설치 없는 잡을 막는 시험이라 yaml이 없을 때도 건너뛰지 않는다).
+ * 주석 줄과 줄 끝 주석은 뺀다. 단계마다 { uses, run, keys }: run은 한 줄 값이거나 `|` 아래 줄들을 다듬어 줄바꿈으로 이은 것
+ */
+function workflowSteps(text) {
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/^\s*#.*$/, '').replace(/\s+#.*$/, ''));
+  const start = lines.findIndex((l) => /^\s*steps:\s*$/.test(l));
+  assert.ok(start >= 0, 'steps 목록이 없다');
+  const blocks = [];
+  let indent = null;
+  for (const line of lines.slice(start + 1)) {
+    if (!line.trim()) continue;
+    const ind = line.length - line.trimStart().length;
+    indent ??= ind;
+    if (ind < indent || (ind === indent && !line.trimStart().startsWith('- '))) break;
+    if (ind === indent) blocks.push([`${' '.repeat(ind + 2)}${line.trimStart().slice(2)}`]);
+    else blocks.at(-1).push(line);
+  }
+  return blocks.map((block) => {
+    const step = { keys: new Set() };
+    let key = null;
+    for (const line of block) {
+      const ind = line.length - line.trimStart().length;
+      const kv = ind === indent + 2 && /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line.trimStart());
+      if (kv) {
+        key = kv[1];
+        step.keys.add(key);
+        step[key] = /^[|>][-+]?$/.test(kv[2]) ? '' : kv[2];
+      } else if (key) step[key] = step[key] ? `${step[key]}\n${line.trim()}` : line.trim();
+    }
+    return step;
+  });
+}
+
+// 2026-11-16 develop CI에서 찾음: loadtest-check가 설치 없이 돌아 실행 도구가 가져오는 yaml(tools/local/gateway-objects.mjs)을 찾지 못했다.
+// 단언 값은 docs/devops.md §3 loadtest-check.yml 행과 계획 docs/review/plans/W8-L1-ci-fix2.md §2의 2·§3에서 가져왔다(W8-L1-ci-fix2 시험 담당)
+test('CF2-03 BSL-060 loadtest-check는 잠금 파일대로 의존성을 설치한 뒤에 시험을 돈다', () => {
+  const text = readFileSync(join(REPO, '.github', 'workflows', 'loadtest-check.yml'), 'utf8');
+  const steps = workflowSteps(text);
+  // ⓐ package.json의 packageManager 판으로 pnpm을 받는 단계(tools-check.yml과 같은 꼴, 또는 그 값을 읽는 pnpm 받기 액션)
+  const getPnpm = steps.findIndex(
+    (s) => (/packageManager/.test(s.run ?? '') && /npm (install|i) (--global|-g)|corepack/.test(s.run ?? '')) || /^pnpm\/action-setup@/.test(s.uses ?? ''),
+  );
+  // ⓑ 뿌리에서 도는 잠금 파일대로의 설치(--dir·--filter·working-directory 없음. 뿌리 개발 의존성 yaml이 필요하다)
+  const install = steps.findIndex((s) => (s.run ?? '').trim() === 'pnpm install --frozen-lockfile');
+  // ⓒ 부하 시험 점검의 시험 명령(글자 그대로)
+  const run = steps.findIndex((s) => (s.run ?? '').trim() === 'node --test "loadtest/test/*.test.mjs"');
+  assert.ok(getPnpm >= 0, 'packageManager 판으로 pnpm을 받는 단계가 없다');
+  assert.ok(install >= 0, '뿌리에서 도는 `pnpm install --frozen-lockfile` 단계가 없다');
+  assert.ok(run >= 0, '`node --test "loadtest/test/*.test.mjs"` 단계가 없다');
+  assert.ok(!steps[install].keys.has('working-directory'), '설치 단계가 뿌리가 아닌 폴더에서 돈다');
+  assert.doesNotMatch(text, /^\s*defaults:/m, '잡·워크플로 기본값(defaults)이 설치 폴더를 바꿀 수 있다');
+  assert.ok(getPnpm < install, 'pnpm 받기가 설치보다 뒤에 있다');
+  assert.ok(install < run, '설치가 시험보다 뒤에 있다');
+});
+
 test('CI에서는_yaml패키지가있어_YAML시험을건너뛰지않는다', { skip: !process.env.CI && 'CI 밖(로컬은 pnpm install 전이면 건너뛴다)' }, () => {
   assert.ok(YAML, 'CI에서 yaml 패키지를 읽지 못했다');
 });

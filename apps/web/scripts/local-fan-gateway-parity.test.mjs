@@ -1,9 +1,11 @@
 // 로컬 gw-fan 대역(local-fan-gateway.mjs)과 가짜 API(mock-api.mjs)가 진짜 gw-fan보다 넓지 않은지(웨이브 끝 리뷰 W7-WIR-06, BUILD_ORDER HOT-400).
 // 화면 시험은 gw-fan 대신 이 대역을 쓰므로, 대역이 사전 요청에서 더 많은 머리를 허용하거나 ticket:buy를 보지 않으면 운영에서 막힐 요청이 로컬·CI에서는 통과한다.
-// 기준은 deploy/gateways/gw-fan.yaml의 api 호스트 정책 값이다(그 YAML을 읽어 견준다. 값을 시험에 옮겨 적지 않는다).
+// 기준은 deploy/gateways/gw-fan.yaml(SecurityPolicy 등 손으로 쓴 정의)과 deploy/gateways/gw-fan.routes.yaml(생성기가 만든 api 호스트 HTTPRoute,
+// docs/infra.md §4.1 '경로별 메서드 생성기', HOT-410)의 api 호스트 정책 값이다(두 YAML을 함께 읽어 견준다. 값을 시험에 옮겨 적지 않는다).
+// W8-L1-ci-fix2 시험 담당이 두 파일을 읽게 고쳤다(CF2-05~07). 두 파일은 이름으로 적고 둘 다 있어야 한다(글롭으로 넓히지 않는다).
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
@@ -13,18 +15,26 @@ import { startMockApi } from './mock-api.mjs';
 
 const WEB = 'http://localhost:3000';
 const ISSUER = 'https://identity.peaket.test';
-const GW_FAN = fileURLToPath(new URL('../../../deploy/gateways/gw-fan.yaml', import.meta.url));
-const docs = parseAllDocuments(readFileSync(GW_FAN, 'utf8'))
-  .map((d) => d.toJS())
-  .filter(Boolean);
+const GW_FAN_FILES = ['gw-fan.yaml', 'gw-fan.routes.yaml'].map((f) => fileURLToPath(new URL(`../../../deploy/gateways/${f}`, import.meta.url)));
+let loaded;
+/** 두 정의 파일의 객체를 모은다. 하나라도 없으면 그 시험이 실패한다 */
+function defs() {
+  if (loaded) return loaded;
+  const all = [];
+  for (const file of GW_FAN_FILES) {
+    assert.ok(existsSync(file), `정의 파일이 없다: ${file}`);
+    all.push(...parseAllDocuments(readFileSync(file, 'utf8')).map((d) => d.toJS()).filter(Boolean));
+  }
+  return (loaded = all);
+}
 const lc = (s) => String(s).toLowerCase();
 const set = (list) => new Set((list ?? []).map(lc));
-const route = (name) => docs.find((o) => o.kind === 'HTTPRoute' && o.metadata?.name === name);
+const route = (name) => defs().find((o) => o.kind === 'HTTPRoute' && o.metadata?.name === name);
 /** 그 라우트를 겨눈 SecurityPolicy */
-const security = (name) => docs.find((o) => o.kind === 'SecurityPolicy' && (o.spec?.targetRefs ?? []).some((t) => t.kind === 'HTTPRoute' && t.name === name));
+const security = (name) => defs().find((o) => o.kind === 'SecurityPolicy' && (o.spec?.targetRefs ?? []).some((t) => t.kind === 'HTTPRoute' && t.name === name));
 /** 경로를 받는 api 호스트 라우트 이름(정의의 경로 매치로 찾는다) */
 function routeNameFor(method, path) {
-  const candidates = docs.filter((o) => o.kind === 'HTTPRoute' && (o.spec?.hostnames ?? []).includes('api.peaket.example'));
+  const candidates = defs().filter((o) => o.kind === 'HTTPRoute' && (o.spec?.hostnames ?? []).includes('api.peaket.example'));
   let best;
   for (const r of candidates)
     for (const rule of r.spec?.rules ?? []) {
@@ -88,7 +98,7 @@ const CASES = [
   ['POST', '/v1/identity/access-tokens'],
 ];
 
-test('W7-WIR-06 로컬 gw-fan 대역의 사전 요청 허용 머리·Max-Age가 deploy/gateways/gw-fan.yaml의 그 라우트 정책 값과 같다', async () => {
+test('CF2-05 W7-WIR-06 로컬 gw-fan 대역의 사전 요청 허용 머리·Max-Age가 gw-fan.yaml·gw-fan.routes.yaml 정의의 그 라우트 정책 값과 같다', async () => {
   for (const [method, path] of CASES) {
     const cors = security(routeNameFor(method, path))?.spec?.cors;
     assert.ok(cors, `${method} ${path}: 정의에 CORS가 없다`);
@@ -100,7 +110,7 @@ test('W7-WIR-06 로컬 gw-fan 대역의 사전 요청 허용 머리·Max-Age가 
   }
 });
 
-test('W7-WIR-06 로컬 gw-fan 대역의 노출 머리가 deploy/gateways/gw-fan.yaml의 그 라우트 정책 값과 같다', async () => {
+test('CF2-06 W7-WIR-06 로컬 gw-fan 대역의 노출 머리가 gw-fan.yaml·gw-fan.routes.yaml 정의의 그 라우트 정책 값과 같다', async () => {
   const at = await token('ticket:buy');
   for (const [method, path] of CASES) {
     const cors = security(routeNameFor(method, path))?.spec?.cors;
@@ -110,7 +120,7 @@ test('W7-WIR-06 로컬 gw-fan 대역의 노출 머리가 deploy/gateways/gw-fan.
   }
 });
 
-test('W7-WIR-06 로컬 gw-fan 대역도 구매 경로에서 ticket:buy가 없으면 403이고 purchase로 넘기지 않는다(gw-fan-buy 인가와 같다)', async () => {
+test('CF2-07 W7-WIR-06 로컬 gw-fan 대역도 구매 경로에서 ticket:buy가 없으면 403이고 purchase로 넘기지 않는다(gw-fan-buy 인가와 같다)', async () => {
   const buy = security(routeNameFor('POST', '/v1/events/e2e-id-10/holds'));
   // 정의가 구매 경로에 ticket:buy를 요구하는지 먼저 본다(이 시험의 기준)
   assert.match(JSON.stringify(buy?.spec?.authorization ?? {}), /ticket:buy/);
