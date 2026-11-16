@@ -4,7 +4,7 @@ import { INTERNAL_TOKEN, InternalTokenGuard } from '@peaket/platform';
 import { CancelTicket } from './application/cancel-ticket.js';
 import { EventRefundService } from './application/event-refund-service.js';
 import { QuoteCancellation } from './application/quote-cancellation.js';
-import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type PaymentCancellations, type ReauthGate, type SeatReturns, type TicketCancellations } from './domain/ports.js';
+import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type EventCancellationLookup, type PaymentCancellations, type ReauthGate, type SeatReturns, type TicketCancellations } from './domain/ports.js';
 import type { BusinessCalendar } from './domain/refund-policy.js';
 import { EventRefundController } from './inbound/event-refund.controller.js';
 import { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
@@ -19,6 +19,8 @@ export interface RefundModuleDeps {
   reauth?: ReauthGate;
   /** 회차 취소 일괄 환불(BAT-425). 없으면 내부 HTTP 경로를 열지 않는다 */
   eventRefund?: EventRefundService;
+  /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 확정된 회차의 팬 취소·견적은 409 event-cancelled */
+  eventCancellations?: EventCancellationLookup;
 }
 
 @Module({})

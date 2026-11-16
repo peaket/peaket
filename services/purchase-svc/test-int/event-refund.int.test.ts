@@ -8,7 +8,7 @@ import { createDatabase, ensureOutboxPartitions, fakeClock, type Database } from
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
-import { DrizzleEventOpenOrders, DrizzleEventRefundAttempts, DrizzleEventRefundHolds, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService, OutboxEventRefundFanNotifier } from '../src/modules/refund/index.js';
+import { DrizzleEventCancellationLookup, DrizzleEventOpenOrders, DrizzleEventRefundAttempts, DrizzleEventRefundHolds, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService, OutboxEventRefundFanNotifier } from '../src/modules/refund/index.js';
 import { eventRefundCancellationId, type EventCancellationRequest, type EventRefundItem, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { EventRefundAlert, EventRefundAttemptStore, EventRefundCanceller, EventRefundFailureNotice, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -478,5 +478,91 @@ describe('환급 미룸 저장소 [BAT-420 몫 D]', () => {
     const fresh = randomUUID();
     await expect(holds.set({ eventId: stale, cancellationRequestId: fresh, held: true, expiresAtMs: EXPIRES, nowMs: NOW + 1_000 })).resolves.toEqual({ held: true, expiresAtMs: EXPIRES });
     expect((await holdOf(stale))[0]).toMatchObject({ cancellation_request_id: fresh, released_at: null });
+  });
+});
+
+// ---- BAT-420 리뷰 D3(시험 담당, 구현 전에 씀, 계획 §11 보충 3, transfer-refund §5 '미룸 풀기', refund.proto SetEventRefundHold 주석) ----
+describe('확정이 커밋된 요청의 다시 걸기 [BAT-420 리뷰 D3]', () => {
+  const EXPIRES = NOW + 259_200_000;
+  const putRequest = (id: string, eventId: string, status: string) =>
+    q(
+      `insert into event_cancellation_request (id, event_id, kind, status, fault, ruled_by, confirmed_by, created_at, updated_at)
+       values ($1, $2, 'CANCEL', $3, 'ORGANIZER', 'commander-1', 'operator-2', $4, $4)`,
+      [id, eventId, status, new Date(NOW)],
+    );
+  const holdOf = async (eventId: string) =>
+    (await q<{ cancellation_request_id: string; expires_at: Date; released_at: Date | null }>('select cancellation_request_id, expires_at, released_at from event_refund_hold where event_id = $1', [eventId])).rows[0];
+
+  test('GAT-110 R3 그 요청 ID의 일괄 환불 요청이 이미 있으면(확정 커밋 뒤 다시 확정) 걸기·늘리기가 미룸을 다시 열지 않고 held 거짓이며 released_at 그대로, 기한이 지나도 풀 미룸이 없다', async () => {
+    const holds = new DrizzleEventRefundHolds(db);
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    await holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES, nowMs: NOW });
+    // StartEventRefund가 요청 행을 만들고 같은 트랜잭션에서 미룸을 풀었다(ops는 답을 잃어 PENDING_APPROVAL로 되돌림)
+    await putRequest(requestId, eventId, 'RUNNING');
+    await holds.set({ eventId, cancellationRequestId: requestId, held: false, nowMs: NOW + 1_000 });
+    const released = await holdOf(eventId);
+    expect(released?.released_at).toEqual(new Date(NOW + 1_000));
+    // 다시 확정: ops가 같은 요청 ID로 늘리기를 부른다
+    await expect(holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES + 60_000, nowMs: NOW + 60_000 })).resolves.toMatchObject({ held: false });
+    expect(await holdOf(eventId)).toEqual(released);
+    // 72시간 뒤에도 풀 미룸이 없다(거짓 SEV2 event-refund-hold-expired가 나지 않는다)
+    const expired = await holds.releaseExpired(EXPIRES + 60_000 + 1, 500);
+    expect(expired.filter((r) => r.eventId === eventId)).toEqual([]);
+    // 요청 상태가 끝났어도(COMPLETED) 같은 요청 ID면 열지 않는다
+    await q("update event_cancellation_request set status = 'COMPLETED' where id = $1", [requestId]);
+    await expect(holds.set({ eventId, cancellationRequestId: requestId, held: true, expiresAtMs: EXPIRES + 120_000, nowMs: NOW + 120_000 })).resolves.toMatchObject({ held: false });
+    expect(await holdOf(eventId)).toEqual(released);
+  });
+
+  test('GAT-110 R3 대조: 같은 회차에 끝난(COMPLETED) 다른 요청 ID가 있어도 새 요청 ID의 걸기는 열린다(회차가 아니라 요청 ID로 본다)', async () => {
+    const holds = new DrizzleEventRefundHolds(db);
+    const eventId = randomUUID();
+    const old = randomUUID();
+    await putRequest(old, eventId, 'COMPLETED');
+    const fresh = randomUUID();
+    await expect(holds.set({ eventId, cancellationRequestId: fresh, held: true, expiresAtMs: EXPIRES, nowMs: NOW })).resolves.toEqual({ held: true, expiresAtMs: EXPIRES });
+    expect(await holdOf(eventId)).toMatchObject({ cancellation_request_id: fresh, released_at: null });
+  });
+});
+
+// ---- BAT-420 리뷰 D5(시험 담당, 구현 전에 씀, 계획 §11 보충 3, transfer-refund §5 '확정 뒤 팬 취소') ----
+describe('확정된 회차 취소 찾기 [BAT-420 리뷰 D5]', () => {
+  const put = (eventId: string, kind: 'CANCEL' | 'POSTPONE', status: string) =>
+    q(
+      `insert into event_cancellation_request (id, event_id, kind, status, fault, ruled_by, confirmed_by, postponed_to, refund_window_closes_at, created_at, updated_at)
+       values ($1, $2, $3, $4, 'ORGANIZER', 'commander-1', 'operator-2', $5, $6, $7, $7)`,
+      [randomUUID(), eventId, kind, status, kind === 'POSTPONE' ? new Date(NOW + 7 * DAY) : null, kind === 'POSTPONE' ? new Date(NOW + 3 * DAY) : null, new Date(NOW)],
+    );
+
+  test.each(['RUNNING', 'PAUSED', 'COMPLETED'])('GAT-110 R5 회차 취소(CANCEL)가 %s인 회차는 확정됐다(참)', async (status) => {
+    const eventId = randomUUID();
+    await put(eventId, 'CANCEL', status);
+    await expect(new DrizzleEventCancellationLookup(db).confirmed(eventId)).resolves.toBe(true);
+    // 다른 회차는 거짓(회차로 거른다)
+    await expect(new DrizzleEventCancellationLookup(db).confirmed(randomUUID())).resolves.toBe(false);
+  });
+
+  test.each([
+    ['CANCEL', 'REQUESTED'],
+    ['CANCEL', 'JUDGED'],
+    ['CANCEL', 'PENDING_APPROVAL'],
+    ['CANCEL', 'APPROVED'],
+    ['CANCEL', 'REJECTED'],
+    ['POSTPONE', 'RUNNING'],
+    ['POSTPONE', 'REFUND_WINDOW'],
+    ['POSTPONE', 'COMPLETED'],
+  ] as const)('GAT-110 R5 %s %s뿐인 회차는 확정되지 않았다(거짓, 판정 중 보류 취소는 지금처럼 남고 연기는 막지 않는다)', async (kind, status) => {
+    const eventId = randomUUID();
+    await put(eventId, kind, status);
+    await expect(new DrizzleEventCancellationLookup(db).confirmed(eventId)).resolves.toBe(false);
+  });
+
+  test('GAT-110 R5 반려된 옛 요청 뒤에 새 요청이 확정되면 참이다(요청이 여럿이어도 하나라도 확정이면)', async () => {
+    const eventId = randomUUID();
+    await put(eventId, 'CANCEL', 'REJECTED');
+    await expect(new DrizzleEventCancellationLookup(db).confirmed(eventId)).resolves.toBe(false);
+    await put(eventId, 'CANCEL', 'RUNNING');
+    await expect(new DrizzleEventCancellationLookup(db).confirmed(eventId)).resolves.toBe(true);
   });
 });

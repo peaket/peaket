@@ -2,7 +2,7 @@
 // 차례: 주문·결제자 확인 → 견적(공제) → ticket-svc 키 폐기·취소표·양도 확인 → order_cancellation → payment-svc 부분 취소 → 상태.
 // ticket-svc가 멈추면 아무것도 쓰지 않는다. 결제사가 결과 모름이면 REFUND_PENDING으로 두고 재시도 큐가 이어 간다.
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type CancellationReason, type CancellationStatus, type CancelTicketResult, type RefundAccount } from '../domain/cancellation.js';
-import type { CancellationOrders, CancellationWrites, PaymentCancellations, SeatReturns, TicketCancellations } from '../domain/ports.js';
+import type { CancellationOrders, CancellationWrites, EventCancellationLookup, PaymentCancellations, SeatReturns, TicketCancellations } from '../domain/ports.js';
 import type { BusinessCalendar, RefundQuote } from '../domain/refund-policy.js';
 import { quoteRefund } from '../domain/refund-policy.js';
 import { eventStartsAtOf } from './quote-cancellation.js';
@@ -41,6 +41,8 @@ export class CancelTicket {
       readonly payments: PaymentCancellations;
       readonly writes: CancellationWrites;
       readonly seats?: SeatReturns;
+      /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 주문을 찾은 뒤·티켓 단계 앞에서 확정된 회차면 EVENT_CANCELLED */
+      readonly eventCancellations?: EventCancellationLookup;
     },
   ) {}
 

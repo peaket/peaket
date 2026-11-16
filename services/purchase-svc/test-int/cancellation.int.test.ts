@@ -1065,3 +1065,41 @@ describe('BAT-420 몫 D 회차 취소 요청 중 환급 미룸 [실제 ticket-sv
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED' });
   });
 });
+
+// ---- BAT-420 리뷰 D1(시험 담당, 구현 전에 씀, 계획 §11 보충 3, transfer-refund §3.1 ⑤): 다른 길이 먼저 끝낸 행의 0행 쓰기 ----
+describe('BAT-420 리뷰 D1 결제사 환급 뒤 0행 쓰기 [실제 ticket-svc·payment-svc]', () => {
+  test('GAT-090 R1 실행기가 결제사 답을 기다리는 동안 다른 길이 같은 행을 REFUNDED로 끝내면 SEV1 없이 환급으로 센다(끼어든 사례를 확인한 뒤)', async () => {
+    const w = await world({ eventStartsAtMs: NOW + 2 * HOUR, entryOpensAtMs: NOW - HOUR, ticketPrice: 33_333 });
+    gatewayOutcome = 'CANCELLED';
+    const cancellationId = randomUUID();
+    await expect(cancelOf(w, cancellationId)).resolves.toMatchObject({ status: 'ACCEPTED', cancellationId, refundAmount: 3_334, refundAfterEntryClose: true });
+    const dueMs = w.eventStartsAtMs + 180_000_000;
+    gatewayCalls = [];
+    let intervened = false;
+    // 같은 cancel-{ID}로 다른 길(예매 취소 즉시 환급·회차 취소 전용 취소기)이 먼저 끝냈다
+    beforeGatewayAnswer = async () => {
+      const r = await admin.pool.query("update order_cancellation set status = 'REFUNDED', status_changed_at = now() where id = $1 and status = 'REFUND_PENDING'", [cancellationId]);
+      intervened = r.rowCount === 1;
+    };
+    const lines: { level: string; o: object; msg: string }[] = [];
+    try {
+      const runner = new RefundAfterEntry({
+        writes,
+        payments: paymentCancels!,
+        entries: ticketCancels!,
+        claims: writes,
+        orders: new DrizzleCancellationOrders(purchaseDb, seatMap),
+        log: { warn: (o, msg) => void lines.push({ level: 'warn', o, msg }), error: (o, msg) => void lines.push({ level: 'error', o, msg }) },
+        nowMs: () => dueMs,
+      });
+      await expect(runner.run()).resolves.toMatchObject({ refunded: 1 });
+    } finally {
+      beforeGatewayAnswer = undefined;
+    }
+    expect(intervened).toBe(true);
+    expect(gatewayCalls).toHaveLength(1);
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED' });
+    expect(lines.filter((l) => JSON.stringify(l).includes('cancellation-refunded-after-void'))).toEqual([]);
+    expect(lines.filter((l) => JSON.stringify(l).includes('cancellation-refund-state-unexpected'))).toEqual([]);
+  });
+});

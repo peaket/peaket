@@ -95,6 +95,14 @@ export interface RefundFailureNotice {
   open(q: { readonly cancellationId: string; readonly orderId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<void>;
 }
 
+/**
+ * BAT-420 리뷰 D5(빈 뼈대): 그 회차의 회차 취소(CANCEL)가 확정됐는가(event_cancellation_request kind CANCEL·status RUNNING·PAUSED·COMPLETED가 있다).
+ * 참이면 팬 취소·견적은 티켓 단계 앞에서 409 event-cancelled다(transfer-refund §5 '확정 뒤 팬 취소'). 연기(POSTPONE)·판정 중 요청은 거짓이다
+ */
+export interface EventCancellationLookup {
+  confirmed(eventId: string): Promise<boolean>;
+}
+
 /** 취소 견적·Saga가 읽는 회차 판매 설정(좌석맵 판의 saleEndsAt·entryOpensAt) */
 export interface CancellationConfigs {
   config(eventId: string): Promise<{ readonly saleEndsAtMs: number; readonly entryOpensAtMs?: number } | undefined>;
@@ -162,6 +170,8 @@ export interface RefundDeps {
   readonly seats?: SeatReturns;
   /** 없으면 재인증 토큰을 확인하지 못해 취소를 403으로 닫는다 */
   readonly reauth?: ReauthGate;
+  /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 확정된 회차의 팬 취소·견적은 409 event-cancelled */
+  readonly eventCancellations?: EventCancellationLookup;
 }
 
 // ---- 부정 예매 운영자 취소(BAT-415 몫 F, fraud_cancellation.proto, docs/features/transfer-refund.md §7.4) ----

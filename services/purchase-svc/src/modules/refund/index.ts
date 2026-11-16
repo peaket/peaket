@@ -32,6 +32,7 @@ export {
 export type {
   CancellationConfigs,
   CancellationOrders,
+  EventCancellationLookup,
   CancellationWrites,
   FraudCancellationRequestRecord,
   FraudCancellationStore,
@@ -153,5 +154,6 @@ export { EVENT_REFUND_HOLD_MAX_MS, EventRefundHoldError, parseEventRefundHold, t
 export type { DeductionGapCancellations, DeductionGapNotice, EventRefundHolds } from './domain/event-refund-ports.js';
 export { DrizzleEventRefundHolds } from './adapters/db/drizzle-event-refund-holds.js';
 export { DrizzleDeductionGapCancellations } from './adapters/db/drizzle-deduction-gap-cancellations.js';
+export { DrizzleEventCancellationLookup } from './adapters/db/drizzle-event-cancellation-lookup.js';
 export { HttpDeductionGapNotice } from './adapters/http-deduction-gap-notice.js';
 export type { EventRefundGrpcOptions } from './inbound/event-refund.grpc.js';

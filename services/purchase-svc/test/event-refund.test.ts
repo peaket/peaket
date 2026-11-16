@@ -432,3 +432,53 @@ describe('회차 취소 확정 때 남는 공제 차액 CS 건 [BAT-420 몫 D, O
     expect(gapOpens).toHaveLength(opened);
   });
 });
+
+// ---- BAT-420 리뷰 D5(시험 담당, 구현 전에 씀, 계획 §11 보충 3, transfer-refund §5 '확정 뒤 팬 취소') ----
+describe('확정과 겹친 팬 공제 환급의 차액 건 [BAT-420 리뷰 D5]', () => {
+  const FAN = '0194c700-0000-7000-8000-0000000000f1';
+  type GapOpen = Parameters<NonNullable<ConstructorParameters<typeof EventRefundService>[0]['gapNotice']>['open']>[0];
+  const overlap = async (error: 'ticket-already-ended' | 'cancellation-conflict', fan: { deductionAmount: number } | undefined) => {
+    const store = new MemoryEventRefundStore();
+    const gapOpens: GapOpen[] = [];
+    const notices: Parameters<EventRefundFailureNotice['open']>[0][] = [];
+    const asked: string[] = [];
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [target()] },
+      // 확정 뒤 그 표를 처리하기 전에 팬 취소가 끼어들어 끝냈다(키 폐기·공제 환급)
+      canceller: { cancel: async () => ({ status: 'FAILED', error }) },
+      notice: { open: async (q) => void notices.push(q) },
+      gaps: {
+        list: async () => [],
+        forTicket: async (ticketId) => (asked.push(ticketId), fan ? { cancellationId: FAN, orderId: ORDER, ticketId, deductionAmount: fan.deductionAmount } : undefined),
+      },
+      gapNotice: { open: async (q) => void gapOpens.push(q) },
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    await start(service);
+    return { store, gapOpens, notices, asked };
+  };
+
+  test.each(['ticket-already-ended', 'cancellation-conflict'] as const)(
+    'GAT-110 R5 항목이 %s로 끝나고 그 표에 공제 3,333원인 진행 중 팬 취소(USER)가 있으면 일반 실패 대신 그 취소의 차액 건 하나다',
+    async (error) => {
+      const r = await overlap(error, { deductionAmount: 3_333 });
+      expect(r.asked).toContain(TICKET);
+      expect(r.notices).toEqual([]);
+      expect(r.gapOpens.length).toBeGreaterThanOrEqual(1);
+      for (const g of r.gapOpens) expect(g).toEqual({ cancellationId: FAN, orderId: ORDER, deductionAmount: 3_333, requestId: REQUEST, nowMs: NOW });
+      const [item] = await r.store.items(REQUEST);
+      expect(item).toMatchObject({ status: 'FAILED', lastError: error });
+    },
+  );
+
+  test('GAT-110 R5 대조: 그 표의 팬 취소가 공제 0원이거나 없으면 차액 건 없이 지금처럼 일반 일괄 환불 실패 하나다(경계: 공제 > 0만)', async () => {
+    for (const fan of [{ deductionAmount: 0 }, undefined]) {
+      const r = await overlap('ticket-already-ended', fan);
+      expect(r.gapOpens, JSON.stringify(fan)).toEqual([]);
+      expect(r.notices, JSON.stringify(fan)).toHaveLength(1);
+      expect(r.notices[0]).toMatchObject({ ticketId: TICKET, lastError: 'ticket-already-ended' });
+    }
+  });
+});

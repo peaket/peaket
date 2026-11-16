@@ -147,6 +147,8 @@ export function fixture(o: FixtureOptions = {}) {
     releaseFails: false,
     /** 걸기가 ALREADY_EXISTS(어댑터가 EventRefundHoldConflict로 던짐)로 끝난다 */
     holdConflict: false,
+    /** 걸기의 답 held(리뷰 D3: 그 요청 ID의 일괄 환불 요청이 이미 있으면 purchase가 거짓을 준다). 없으면 참 */
+    holdAnswer: undefined as boolean | undefined,
     /** 걸기 직전에 부른다(그사이 다른 요청이 저장된 차례를 만든다) */
     onHold: undefined as ((q: { eventId: string; requestId: string; held: boolean }) => Promise<void>) | undefined,
     /** 미룸을 거는 순간 그 회차의 요청 행이 저장소에 있었는가(요청 저장 전에 거는지 본다) */
@@ -227,7 +229,7 @@ export function fixture(o: FixtureOptions = {}) {
       if (q.held && behaviour.holdFails) throw new Error('purchase-svc 14 UNAVAILABLE');
       if (q.held && behaviour.holdConflict) throw new EventRefundHoldConflict();
       if (!q.held && behaviour.releaseFails) throw new Error('purchase-svc 4 DEADLINE_EXCEEDED');
-      return { held: q.held };
+      return { held: q.held ? (behaviour.holdAnswer ?? true) : false };
     },
   };
   const without = new Set(o.without ?? []);

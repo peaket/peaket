@@ -248,3 +248,25 @@ async function pendingApproval2(f: Fixture): Promise<string> {
   return r.requestId;
 }
 
+
+// ---- BAT-420 리뷰 D3(시험 담당, 구현 전에 씀, 계획 §11 보충 3, transfer-refund §5 '미룸 풀기') ----
+describe('확정이 커밋된 뒤 다시 확정 [BAT-420 리뷰 D3]', () => {
+  test('GAT-110 R3 확정 다시 부르기에서 늘리기가 held 거짓(그 요청 ID의 일괄 환불 요청이 이미 있음)을 주어도 확정은 이어 간다(503 아님)', async () => {
+    const f = fixture();
+    const requestId = await pendingApproval2(f);
+    f.behaviour.holdAnswer = false;
+    await expect(approveBy(f, requestId)).resolves.toBeDefined();
+    expect(f.holdCalls.at(-1)).toMatchObject({ requestId, held: true });
+    expect(f.startCalls.map((c) => c.requestId)).toEqual([requestId]);
+    expect(f.store.rows.get(requestId)!.status).not.toBe('PENDING_APPROVAL');
+  });
+
+  test('GAT-110 R3 판정 다시 부르기에서도 held 거짓은 실패가 아니다(JUDGED·미리보기로 이어 간다)', async () => {
+    const f = fixture();
+    const r = await requested(f);
+    f.behaviour.holdAnswer = false;
+    await f.app.judge(r.requestId, { ...JUDGEMENT }, COMMANDER_A);
+    expect(f.previewCalls.map((c) => c.requestId)).toEqual([r.requestId]);
+    expect(f.store.rows.get(r.requestId)!.status).toBe('PENDING_APPROVAL');
+  });
+});

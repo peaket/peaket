@@ -121,4 +121,6 @@ export type CancelTicketResult =
   | { readonly status: 'CONFLICT' }
   | { readonly status: 'TICKET_NOT_HELD' }
   | { readonly status: 'TRANSFER_PENDING' }
-  | { readonly status: 'EVENT_STARTED' };
+  | { readonly status: 'EVENT_STARTED' }
+  /** BAT-420 리뷰 D5(빈 뼈대): 그 회차의 회차 취소가 확정됐다(409 event-cancelled, 티켓 단계를 부르지 않는다) */
+  | { readonly status: 'EVENT_CANCELLED' };

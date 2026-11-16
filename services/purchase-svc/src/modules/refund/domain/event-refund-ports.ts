@@ -167,6 +167,11 @@ export interface EventRefundHolds {
 export interface DeductionGapCancellations {
   /** 그 회차에서 입장 시작 뒤에 접수돼 공제하고 결제사로 보낸 취소: reason USER, deduction_amount > 0, created_at ≥ entryOpensAt, status REFUND_PENDING·REFUNDED */
   list(eventId: string, entryOpensAtMs: number): Promise<readonly { cancellationId: string; orderId: string; ticketId: string; deductionAmount: number }[]>;
+  /**
+   * BAT-420 리뷰 D5(빈 뼈대): 그 표의 진행 중(REFUND_PENDING·REFUNDED) 사용자 취소(USER) 하나. 항목이 ticket-already-ended·cancellation-conflict로 끝날 때
+   * 공제 > 0이면 일반 실패 대신 차액 건으로 보낸다(확정과 겹친 팬 공제 환급). 없으면 undefined
+   */
+  forTicket?(ticketId: string): Promise<{ cancellationId: string; orderId: string; ticketId: string; deductionAmount: number } | undefined>;
 }
 
 export interface DeductionGapNotice {

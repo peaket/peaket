@@ -1,6 +1,6 @@
 // 예매 취소 견적(GET /v1/tickets/{ticketId}/cancellation-quote, POL-032, BUILD_ORDER GAT-070).
 // 결제자만 견적을 본다. 보유자·양도 상태는 ticket-svc가 취소할 때 다시 보고, 견적은 주문·판매 설정만 읽는다.
-import type { CancellationOrders } from '../domain/ports.js';
+import type { CancellationOrders, EventCancellationLookup } from '../domain/ports.js';
 import type { BusinessCalendar, RefundQuote } from '../domain/refund-policy.js';
 import { quoteRefund } from '../domain/refund-policy.js';
 
@@ -22,7 +22,9 @@ export type QuoteCancellationResult =
   | { readonly status: 'NOT_PAYER' }
   | { readonly status: 'ALREADY_ENDED' }
   | { readonly status: 'EVENT_STARTED' }
-  | { readonly status: 'INVALID_AMOUNT' };
+  | { readonly status: 'INVALID_AMOUNT' }
+  /** BAT-420 리뷰 D5(빈 뼈대): 그 회차의 회차 취소가 확정됐다(409 event-cancelled) */
+  | { readonly status: 'EVENT_CANCELLED' };
 
 const EVENT_START_OFFSET_MS = 24 * 60 * 60 * 1000;
 
@@ -32,7 +34,14 @@ export function eventStartsAtOf(saleEndsAtMs: number): number {
 }
 
 export class QuoteCancellation {
-  constructor(private readonly o: { readonly orders: CancellationOrders; readonly calendar: BusinessCalendar }) {}
+  constructor(
+    private readonly o: {
+      readonly orders: CancellationOrders;
+      readonly calendar: BusinessCalendar;
+      /** BAT-420 리뷰 D5(빈 뼈대, 아직 쓰지 않는다): 확정된 회차면 EVENT_CANCELLED */
+      readonly eventCancellations?: EventCancellationLookup;
+    },
+  ) {}
 
   async execute(i: QuoteCancellationInput): Promise<QuoteCancellationResult> {
     const order = await this.o.orders.findByTicket(i.ticketId);

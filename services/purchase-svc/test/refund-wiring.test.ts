@@ -78,4 +78,26 @@ describe('환급 시작 조립 [BAT-420]', () => {
     expect(at).toBeGreaterThan(-1);
     expect(start.slice(at, at + 300)).toMatch(/internalToken/);
   });
+
+  // BAT-420 리뷰 반영(계획 §11 보충 3): 시작 파일 조립을 따로 띄워 본다
+  test('GAT-090 R1 relay-app.ts의 환급 실행기는 0행 쓰기 뒤 다시 읽을 취소 조회(orders)를 꽂는다', () => {
+    const relay = source('relay-app.ts');
+    const block = relay.slice(relay.indexOf('new RefundAfterEntry('), relay.indexOf('new RefundAfterEntry(') + 800);
+    expect(block).toMatch(/\borders\s*[:,}]/);
+  });
+
+  test('GAT-110 R4 [ASVS v5.0.0-8.2.1] relay-app.ts·start.ts는 ticket-svc 클라이언트에 내부 gRPC 토큰을 실어 호출자 purchase-svc로 부른다', () => {
+    for (const file of ['relay-app.ts', 'start.ts']) {
+      const text = source(file);
+      const at = text.indexOf('new GrpcTicketCancellations(');
+      expect(at, file).toBeGreaterThan(-1);
+      expect(text.slice(at, text.indexOf(';', at)), file).toMatch(/internalToken/);
+    }
+  });
+
+  test('GAT-110 R5 start.ts는 확정된 회차 찾기(DrizzleEventCancellationLookup)를 예매 취소 모듈(eventCancellations)에 꽂는다', () => {
+    const start = source('start.ts');
+    expect(start).toContain('new DrizzleEventCancellationLookup(');
+    expect(start).toMatch(/\beventCancellations\s*[:,}]/);
+  });
 });

@@ -2,21 +2,21 @@
 // ops CS 처리함 이상 표시 어댑터(HttpEntryFlagNotice). 받는 쪽은 계약 설명자(@peaket/contracts/proto)로 만든 시험 gRPC 서버이고 받은 요청을 기록한다(Docker 없음).
 // 정본 값: GetEntryRecords 데드라인 2초 [가정], 답의 Timestamp를 ms로, 요청 차례, 빠진 표·모르는 결과는 던짐(모름은 환급하지 않는다).
 // 시험 담당이 구현 전에 썼다(ADR-0270).
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
-import type { ExternalRequest } from '@peaket/platform';
+import { INTERNAL_GRPC_CALLER_HEADER, INTERNAL_GRPC_TOKEN_HEADER, type ExternalRequest } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { startPurchaseGrpcServer } from '../src/grpc-server.js';
-import { GrpcTicketCancellations, HttpEntryFlagNotice } from '../src/modules/refund/index.js';
+import { GrpcTicketCancellations, HttpDeductionGapNotice, HttpEntryFlagNotice } from '../src/modules/refund/index.js';
 
 const LOAD: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 const pkg = (grpc.loadPackageDefinition(protoLoader.fromJSON(ticketV1Ticket as Parameters<typeof protoLoader.fromJSON>[0], LOAD)) as unknown as {
   peaket: { ticket: { v1: { TicketService: grpc.ServiceClientConstructor } } };
 }).peaket.ticket.v1;
 
-const received: { method: string; req: Record<string, unknown>; deadlineMs: number }[] = [];
+const received: { method: string; req: Record<string, unknown>; deadlineMs: number; caller?: unknown; token?: unknown }[] = [];
 let entryAnswer: (req: Record<string, unknown>) => Record<string, unknown> = () => ({ records: [] });
 let cancelAnswer: (req: Record<string, unknown>) => Record<string, unknown> = () => ({ outcomes: [] });
 let server: { port: number; close(): Promise<void> };
@@ -35,11 +35,11 @@ beforeAll(async () => {
         definition: pkg.TicketService.service,
         handlers: {
           GetEntryRecords: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
-            received.push({ method: 'GetEntryRecords', req: call.request, deadlineMs: deadlineOf(call) });
+            received.push({ method: 'GetEntryRecords', req: call.request, deadlineMs: deadlineOf(call), caller: call.metadata.get(INTERNAL_GRPC_CALLER_HEADER)[0], token: call.metadata.get(INTERNAL_GRPC_TOKEN_HEADER)[0] });
             cb(null, entryAnswer(call.request));
           },
           EventCancelTickets: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
-            received.push({ method: 'EventCancelTickets', req: call.request, deadlineMs: deadlineOf(call) });
+            received.push({ method: 'EventCancelTickets', req: call.request, deadlineMs: deadlineOf(call), caller: call.metadata.get(INTERNAL_GRPC_CALLER_HEADER)[0], token: call.metadata.get(INTERNAL_GRPC_TOKEN_HEADER)[0] });
             cb(null, cancelAnswer(call.request));
           },
         },
@@ -134,6 +134,12 @@ describe('EventCancelTickets 어댑터 [BAT-420 GAT-110 E]', () => {
   });
 });
 
+/** `${접두어}:${취소 ID}`의 SHA-256 앞 16바이트를 8-4-4-4-12 UUID로(시험이 직접 계산한다, transfer-refund §3.1 ②·asyncapi CaseRequested.eventKey format uuid) */
+const keyOf = (prefix: string, id: string) => {
+  const h = createHash('sha256').update(`${prefix}:${id}`).digest('hex').slice(0, 32);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+};
+
 describe('이상 표시 CS 건 어댑터 [BAT-420 GAT-090 A]', () => {
   test('GAT-090 A4 이상 표시는 ops CS 처리함에 FLAGGED·ENTRY_AFTER_CANCEL 본문과 내부 토큰으로 5,000ms 안에 보내고 실패는 삼킨다', async () => {
     const sent: ExternalRequest[] = [];
@@ -143,9 +149,48 @@ describe('이상 표시 CS 건 어댑터 [BAT-420 GAT-090 A]', () => {
     await ok.open({ cancellationId, orderId: randomUUID(), ticketId: randomUUID(), enteredAtMs: nowMs - 86_400_000, nowMs });
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ method: 'POST', path: '/internal/v1/cs-cases', timeoutCapMs: 5_000, headers: expect.objectContaining({ 'x-peaket-internal-token': 'it-token' }) });
-    expect(JSON.parse(String(sent[0]!.body))).toEqual({ eventKey: `entry-after-cancel:${cancellationId}`, kind: 'FLAGGED', sourceId: cancellationId, category: 'ENTRY_AFTER_CANCEL', createdAt: new Date(nowMs).toISOString() });
+    // 리뷰 D2: eventKey는 글자 그대로가 아니라 `entry-after-cancel:{취소 ID}`의 SHA-256 앞 16바이트 UUID다
+    expect(JSON.parse(String(sent[0]!.body))).toEqual({ eventKey: keyOf('entry-after-cancel', cancellationId), kind: 'FLAGGED', sourceId: cancellationId, category: 'ENTRY_AFTER_CANCEL', createdAt: new Date(nowMs).toISOString() });
 
     const down = new HttpEntryFlagNotice({ request: async () => Promise.reject(new Error('ops down')) }, 'it-token');
     await expect(down.open({ cancellationId, orderId: randomUUID(), ticketId: randomUUID(), enteredAtMs: nowMs, nowMs })).resolves.toBeUndefined();
+  });
+});
+
+describe('이상 표시 건과 차액 건의 eventKey [BAT-420 리뷰 D2]', () => {
+  test('GAT-090 R2 이상 표시 건의 eventKey는 UUID 모양이고 같은 취소 ID의 차액 건 키와 다르다(두 건이 한 키로 합쳐지지 않는다)', async () => {
+    const bodies: { eventKey: string; kind: string }[] = [];
+    const client = { request: async (r: ExternalRequest) => (bodies.push(JSON.parse(String(r.body)) as { eventKey: string; kind: string }), new Response('{"accepted":true}', { status: 202 })) };
+    const cancellationId = randomUUID();
+    const nowMs = Date.parse('2026-11-23T01:00:00.000Z');
+    await new HttpEntryFlagNotice(client, 'it-token').open({ cancellationId, orderId: randomUUID(), ticketId: randomUUID(), enteredAtMs: nowMs - 60_000, nowMs });
+    await new HttpDeductionGapNotice(client, 'it-token').open({ cancellationId, orderId: randomUUID(), deductionAmount: 29_999, requestId: randomUUID(), nowMs });
+    const [flag, gap] = bodies as [{ eventKey: string; kind: string }, { eventKey: string; kind: string }];
+    expect(flag.eventKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(flag.eventKey).toBe(keyOf('entry-after-cancel', cancellationId));
+    expect(gap.eventKey).toBe(keyOf('deduction-gap', cancellationId));
+    expect(flag.eventKey).not.toBe(gap.eventKey);
+    // 같은 취소의 이상 표시는 다시 보내도 같은 키다(ops가 한 건으로 모은다)
+    await new HttpEntryFlagNotice(client, 'it-token').open({ cancellationId, orderId: randomUUID(), ticketId: randomUUID(), enteredAtMs: nowMs - 60_000, nowMs: nowMs + 1 });
+    expect(bodies[2]!.eventKey).toBe(flag.eventKey);
+  });
+});
+
+describe('ticket-svc 호출의 내부 토큰·호출자 머리 [BAT-420 리뷰 D4]', () => {
+  test('GAT-110 R4 [ASVS v5.0.0-8.2.1] 내부 토큰을 준 어댑터는 GetEntryRecords·EventCancelTickets에 토큰과 호출자 purchase-svc 머리를 싣는다', async () => {
+    const withToken = new GrpcTicketCancellations({ address: `127.0.0.1:${server.port}`, internalToken: 'it-grpc-token' });
+    try {
+      const t1 = randomUUID();
+      entryAnswer = () => ({ records: [{ ticket_id: t1, found: true, entered: false }] });
+      await withToken.lookup([t1], 2_000);
+      cancelAnswer = () => ({ outcomes: [{ ticket_id: t1, result: 'EVENT_CANCEL_RESULT_CANCELED', order_id: randomUUID(), holder_account_id: randomUUID(), transfer_withdrawn: false }] });
+      await withToken.eventCancel({ cancellationRequestId: randomUUID(), eventId: randomUUID(), targets: [{ ticketId: t1, cancellationId: randomUUID() }], deadlineMs: 5_000 });
+      expect(received.map((r) => [r.method, r.caller, r.token])).toEqual([
+        ['GetEntryRecords', 'purchase-svc', 'it-grpc-token'],
+        ['EventCancelTickets', 'purchase-svc', 'it-grpc-token'],
+      ]);
+    } finally {
+      withToken.close();
+    }
   });
 });

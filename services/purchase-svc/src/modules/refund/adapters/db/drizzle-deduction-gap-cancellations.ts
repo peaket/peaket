@@ -8,6 +8,11 @@ import type { DeductionGapCancellations } from '../../domain/event-refund-ports.
 export class DrizzleDeductionGapCancellations implements DeductionGapCancellations {
   constructor(private readonly database: Database) {}
 
+  /** BAT-420 리뷰 D5(빈 뼈대) */
+  async forTicket(_ticketId: string): Promise<{ cancellationId: string; orderId: string; ticketId: string; deductionAmount: number } | undefined> {
+    throw new Error('아직 없음');
+  }
+
   async list(eventId: string, entryOpensAtMs: number): ReturnType<DeductionGapCancellations['list']> {
     const r = await this.database.db.execute(sql`
       select c.id, c.order_id, c.ticket_id, c.deduction_amount

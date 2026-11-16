@@ -10,7 +10,7 @@
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type DueRefund } from '../domain/cancellation.js';
 import type { EventRefundHolds } from '../domain/event-refund-ports.js';
-import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
+import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationOrders, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
 
 export interface RefundAfterEntryDeps {
   writes: CancellationWrites;
@@ -27,6 +27,11 @@ export interface RefundAfterEntryDeps {
   log?: { warn(o: object, msg: string): void; error(o: object, msg: string): void };
   /** 기한이 지난 미룸 풀기(BAT-420 몫 D). 틱 맨 앞에 부르고 풀린 줄마다 SEV2 로그를 남긴다. 없으면 풀기를 건너뛴다(기한 판단은 집기 SQL이 한다) */
   holds?: Pick<EventRefundHolds, 'releaseExpired'>;
+  /**
+   * BAT-420 리뷰 D1(빈 뼈대, 아직 쓰지 않는다): 결제사 CANCELLED 뒤 REFUNDED 쓰기가 0행이면 그 행을 다시 읽는다.
+   * VOIDED일 때만 SEV1 cancellation-refunded-after-void, REFUNDED면 환급으로 센다, 그 밖은 경고 cancellation-refund-state-unexpected
+   */
+  orders?: Pick<CancellationOrders, 'findCancellation'>;
 }
 
 /** 한 번에 처리하는 취소 수 [가정] */

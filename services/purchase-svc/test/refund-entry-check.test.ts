@@ -163,3 +163,62 @@ describe('입장 기록 대조와 환급 집기 [BAT-420 GAT-090 A]', () => {
     expect(f.writes).toEqual([]);
   });
 });
+
+// ---- BAT-420 리뷰 D1(시험 담당, 구현 전에 씀, 계획 §11 보충 3, transfer-refund §3.1 ⑤): REFUNDED 쓰기가 0행이면 그 행을 다시 읽는다 ----
+describe('결제사 환급 뒤 0행 쓰기의 다시 읽기 [BAT-420 리뷰 D1]', () => {
+  type State = 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED';
+  /** 실행기가 집은 행 하나. 결제사는 CANCELLED, REFUNDED 쓰기는 0행(다른 길이 먼저 끝냈거나 무효가 됐다), 다시 읽으면 reread 상태 */
+  const run0 = async (o: { status: 'REQUESTED' | 'REFUND_PENDING'; reread: State | undefined }) => {
+    const lines: { level: 'warn' | 'error'; o: object; msg: string }[] = [];
+    const finds: string[] = [];
+    const pays: string[] = [];
+    const runner = new RefundAfterEntry({
+      nowMs: () => NOW,
+      writes: {
+        dueRefunds: async () => [{ cancellationId: 'c-1', orderId: 'o-1', ticketId: 't-1', amount: 7_000, reason: 'USER', status: o.status, attempts: o.status === 'REQUESTED' ? 0 : 1 }],
+        updateStatus: async () => false,
+        scheduleRefundRetry: async () => true,
+        markRefundFailed: async () => true,
+      } as never,
+      payments: { cancel: async (q) => (pays.push(q.cancellationId), 'CANCELLED') },
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: { claimDue: async () => true, markEntryRecorded: async () => true },
+      orders: {
+        findCancellation: async (id: string) => {
+          finds.push(id);
+          return o.reread === undefined ? undefined : { cancellationId: id, orderId: 'o-1', ticketId: 't-1', refundAmount: 7_000, state: o.reread, refundAttempts: 1 };
+        },
+      },
+      log: { warn: (x, msg) => void lines.push({ level: 'warn', o: x, msg }), error: (x, msg) => void lines.push({ level: 'error', o: x, msg }) },
+    });
+    const result = await runner.run();
+    const named = (name: string, level?: 'warn' | 'error') => lines.filter((l) => (level === undefined || l.level === level) && JSON.stringify(l).includes(name));
+    return { result, lines, named, finds, pays };
+  };
+
+  test.each(['REFUND_PENDING', 'REQUESTED'] as const)('GAT-090 R1 다른 길이 먼저 REFUNDED로 끝낸 행(%s로 집음)은 SEV1 없이 환급으로 센다', async (status) => {
+    const r = await run0({ status, reread: 'REFUNDED' });
+    expect(r.pays).toEqual(['c-1']);
+    expect(r.finds).toEqual(['c-1']);
+    expect(r.result).toMatchObject({ refunded: 1, pending: 0, failed: 0 });
+    expect(r.named('cancellation-refunded-after-void')).toEqual([]);
+    expect(r.named('cancellation-refund-state-unexpected')).toEqual([]);
+  });
+
+  test('GAT-090 R1 다시 읽어 VOIDED면(무효 뒤 환급) SEV1 cancellation-refunded-after-void가 그 취소 ID로 한 번이고 환급으로 세지 않는다', async () => {
+    const r = await run0({ status: 'REFUND_PENDING', reread: 'VOIDED' });
+    const sev1 = r.named('cancellation-refunded-after-void', 'error');
+    expect(sev1).toHaveLength(1);
+    expect(JSON.stringify(sev1[0])).toContain('c-1');
+    expect(r.result).toMatchObject({ refunded: 0 });
+  });
+
+  test.each([['REQUESTED'], ['REFUND_PENDING'], [undefined]] as const)('GAT-090 R1 다시 읽어 %s(그 밖)이면 SEV1이 아니라 경고 cancellation-refund-state-unexpected 한 번이고 환급으로 세지 않는다', async (reread) => {
+    const r = await run0({ status: 'REFUND_PENDING', reread });
+    expect(r.named('cancellation-refunded-after-void')).toEqual([]);
+    const warned = r.named('cancellation-refund-state-unexpected', 'warn');
+    expect(warned).toHaveLength(1);
+    expect(JSON.stringify(warned[0])).toContain('c-1');
+    expect(r.result).toMatchObject({ refunded: 0 });
+  });
+});
