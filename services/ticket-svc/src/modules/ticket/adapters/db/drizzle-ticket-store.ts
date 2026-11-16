@@ -16,6 +16,7 @@ import {
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   type OperatorCancelResult,
+  FAN_CANCEL_REASON,
   operatorCancelResultOf,
   replayOnlyResultOf,
   type ReviewEligibilityTicket,
@@ -185,12 +186,13 @@ export class DrizzleTicketStore implements TicketStore {
    */
   async #firstFanCancel(tx: DbTransaction, ticketId: string): Promise<CancelTicketOutcome['first']> {
     const [row] = await tx
-      .select({ cancellationId: ticketCancellation.cancellationId, result: ticketCancellation.result, cancelledAt: ticketCancellation.cancelledAt })
+      .select({ cancellationId: ticketCancellation.cancellationId, result: ticketCancellation.result, reason: ticketCancellation.reason, cancelledAt: ticketCancellation.cancelledAt })
       .from(ticketCancellation)
       .where(and(eq(ticketCancellation.ticketId, ticketId), inArray(ticketCancellation.result, ['REFUND_NOW', 'REFUND_AFTER_CLOSE'])))
       .orderBy(asc(ticketCancellation.cancelledAt), asc(ticketCancellation.cancellationId))
       .limit(1);
-    if (!row || (row.result !== 'REFUND_NOW' && row.result !== 'REFUND_AFTER_CLOSE')) return undefined;
+    // 그 표를 끝낸 기록이 팬 취소(사유 USER)일 때만 잇는다. 일괄 환불 항목·사유 없는 옛 기록은 비운다(다시 보기 R1)
+    if (!row || (row.result !== 'REFUND_NOW' && row.result !== 'REFUND_AFTER_CLOSE') || row.reason !== FAN_CANCEL_REASON) return undefined;
     return { cancellationId: row.cancellationId, result: row.result, cancelledAtMs: row.cancelledAt.getTime() };
   }
 
@@ -212,6 +214,8 @@ export class DrizzleTicketStore implements TicketStore {
       ticketId,
       orderId: input.orderId,
       result,
+      // 그 취소의 사유(다시 보기 R1). 첫 팬 취소 칸은 USER 기록만 싣는다
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
       cancelledAt: new Date(input.nowMs),
     });
     if (this.o.changes) {

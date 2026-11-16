@@ -76,6 +76,8 @@ export class CancelTicket {
       requestedByAccountId: i.accountId,
       cancellationId: i.cancellationId,
       deadlineMs: i.deadlineMs,
+      // 취소 사유를 싣는다. ticket-svc는 첫 기록에 남기고, 다른 취소 ID에 첫 팬 취소로 이어 주는 것은 사유 USER 기록뿐이다(다시 보기 R1)
+      reason: i.reason,
       ...(replayOnly ? { replayOnly: true } : {}),
     });
     // 확인에서 첫 팬 취소가 없으면(유효한 표·다른 길로 끝난 표·남이 보유) 지금처럼 공연 시작이고 아무것도 쓰지 않는다

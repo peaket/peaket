@@ -72,6 +72,8 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
             cancellation_id: q.cancellationId,
             // 공연 시작 뒤 다시 누른 팬 취소의 확인(ticket-svc가 행을 바꾸지 않는다, 리뷰 B2 보충)
             ...(q.replayOnly === true ? { replay_only: true } : {}),
+            // 취소 사유(다시 보기 R1). 첫 팬 취소 칸은 ticket-svc가 사유 USER 기록만 싣는다
+            ...(q.reason !== undefined ? { reason: q.reason } : {}),
           },
           new grpc.Metadata(),
           { deadline: new Date(Date.now() + ms) },

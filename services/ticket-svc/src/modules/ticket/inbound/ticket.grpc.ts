@@ -97,6 +97,8 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
           nowMs: useCases.nowMs?.() ?? Date.now(),
           // 공연 시작 뒤 다시 누른 팬 취소의 확인(행을 바꾸지 않는다, 리뷰 B2 보충)
           ...(req.replay_only === true ? { replayOnly: true } : {}),
+          // 취소 사유(다시 보기 R1). 비우면 사유 없는 기록이다
+          ...(text(req.reason) !== '' ? { reason: text(req.reason) } : {}),
         })
         .then((outcomes) => {
           cb(null, {

@@ -89,9 +89,15 @@ export const ticketCancellation = pgTable(
     ticketId: uuid('ticket_id').notNull(),
     orderId: uuid('order_id').notNull(),
     result: text('result').notNull(),
+    /** CancelTickets 요청의 취소 사유(0009, 다시 보기 R1). USER인 기록만 첫 팬 취소로 싣는다. 널 허용 */
+    reason: text('reason'),
     cancelledAt: at('cancelled_at').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.cancellationId, t.ticketId] }), index('ticket_cancellation_ticket_idx').on(t.ticketId)],
+  (t) => [
+    primaryKey({ columns: [t.cancellationId, t.ticketId] }),
+    index('ticket_cancellation_ticket_idx').on(t.ticketId),
+    check('ticket_cancellation_reason_check', sql`${t.reason} IS NULL OR ${t.reason} IN ('USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL')`),
+  ],
 );
 
 /** 부정 예매 운영자 취소의 표별 결과(0008, BUILD_ORDER GAT-080, docs/data.md ticket_operator_cancellation). (approval_id, ticket_id)로 멱등하다. 건너뜀도 남긴다 */

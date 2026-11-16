@@ -14,6 +14,7 @@ import {
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   operatorCancelResultOf,
+  FAN_CANCEL_REASON,
   replayOnlyResultOf,
   type ReviewEligibilityTicket,
   type TicketRecord,
@@ -44,7 +45,7 @@ export class MemoryTicketStore implements TicketStore {
   /** (approval_id, ticket_id) → 운영자 취소 결과(ticket_operator_cancellation) */
   readonly operatorCancellations = new Map<string, OperatorCancelOutcome>();
   /** 표마다 키를 폐기한 팬 취소(ticket_cancellation의 REFUND_NOW·REFUND_AFTER_CLOSE 대역). ALREADY_CANCELLED 답의 첫 칸이다(리뷰 B2) */
-  readonly fanCancels = new Map<string, NonNullable<CancelTicketOutcome['first']>>();
+  readonly fanCancels = new Map<string, NonNullable<CancelTicketOutcome['first']> & { readonly reason?: string }>();
   /** 들어감·통과 스캔 기록이 있는 표(scan_event IN·PASS의 대역) */
   readonly entries = new Set<string>();
   /** 표마다 스캔 기록(scan_event의 대역: 방향·결과·기기 시각) */
@@ -70,7 +71,7 @@ export class MemoryTicketStore implements TicketStore {
     if (input.replayOnly) {
       return input.ticketIds.map((ticketId) => {
         const result = replayOnlyResultOf(this.tickets.get(ticketId), input);
-        const first = result === 'ALREADY_CANCELLED' ? this.fanCancels.get(ticketId) : undefined;
+        const first = result === 'ALREADY_CANCELLED' ? this.#firstFanCancel(ticketId) : undefined;
         return { ticketId, result, ...(first ? { first } : {}) };
       });
     }
@@ -83,7 +84,7 @@ export class MemoryTicketStore implements TicketStore {
       }
       const t = this.tickets.get(ticketId);
       const result = this.#cancelOne(input, t);
-      const first = result === 'ALREADY_CANCELLED' ? this.fanCancels.get(ticketId) : undefined;
+      const first = result === 'ALREADY_CANCELLED' ? this.#firstFanCancel(ticketId) : undefined;
       const outcome: CancelTicketOutcome = { ticketId, result, ...(first ? { first } : {}) };
       this.cancellations.set(cancelKey(input.cancellationId, ticketId), outcome);
       out.push(outcome);
@@ -105,8 +106,14 @@ export class MemoryTicketStore implements TicketStore {
     };
     this.#put(next);
     const result = started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
-    this.fanCancels.set(t.ticketId, { cancellationId: input.cancellationId, result, cancelledAtMs: input.nowMs });
+    this.fanCancels.set(t.ticketId, { cancellationId: input.cancellationId, result, cancelledAtMs: input.nowMs, ...(input.reason !== undefined ? { reason: input.reason } : {}) });
     return result;
+  }
+
+  /** 그 표를 끝낸 취소 기록이 팬 취소(사유 USER)일 때만 첫 칸(다시 보기 R1) */
+  #firstFanCancel(ticketId: string): CancelTicketOutcome['first'] {
+    const rec = this.fanCancels.get(ticketId);
+    return rec && rec.reason === FAN_CANCEL_REASON ? { cancellationId: rec.cancellationId, result: rec.result, cancelledAtMs: rec.cancelledAtMs } : undefined;
   }
 
   /** 티켓 행과 발권 기록의 사본을 함께 바꾼다 */

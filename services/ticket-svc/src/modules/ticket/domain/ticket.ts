@@ -69,7 +69,7 @@ export interface CancelTicketsInput {
   readonly replayOnly?: boolean;
   /**
    * 취소 사유(ticket.proto CancelTicketsRequest.reason, 다시 보기 R1). 처음 커밋하는 기록에 남기고, 첫 팬 취소 칸은 사유 USER인 기록만 싣는다.
-   * 비면 사유 없는 기록, 목록 밖이면 TicketInputError. BAT-415 리뷰 반영 빈 뼈대: 구현 담당이 채운다
+   * 비면 사유 없는 기록, 목록 밖이면 TicketInputError
    */
   readonly reason?: string;
 }
@@ -398,8 +398,22 @@ export function normalizeCancelInput(i: CancelTicketsInput): CancelTicketsInput 
   const ticketIds = [...new Set(i.ticketIds.map((t) => requireUuid('ticketId', t)))];
   if (ticketIds.length === 0) throw new TicketInputError('ticketIds가 비었다');
   if (!Number.isFinite(i.nowMs) || i.nowMs < 0) throw new TicketInputError('nowMs가 올바르지 않다');
-  return { orderId, ticketIds, requestedByAccountId, cancellationId, nowMs: i.nowMs, ...(i.replayOnly === true ? { replayOnly: true } : {}) };
+  if (i.reason !== undefined && i.reason !== '' && !CANCEL_REASONS.has(i.reason)) throw new TicketInputError('reason이 목록 밖의 값이다');
+  return {
+    orderId,
+    ticketIds,
+    requestedByAccountId,
+    cancellationId,
+    nowMs: i.nowMs,
+    ...(i.replayOnly === true ? { replayOnly: true } : {}),
+    ...(i.reason !== undefined && i.reason !== '' ? { reason: i.reason } : {}),
+  };
 }
+
+/** CancelTickets 사유(purchase-svc order_cancellation.reason과 같은 값, ticket.proto CancelTicketsRequest.reason) */
+const CANCEL_REASONS: ReadonlySet<string> = new Set(['USER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'ACCOUNT_WITHDRAWAL', 'EXCEPTION', 'MINOR_CONTRACT_CANCEL']);
+/** 다른 취소 ID의 ALREADY_CANCELLED에 첫 팬 취소로 이어 줄 수 있는 기록의 사유(다시 보기 R1: 일괄 환불 항목·사유 없는 기록은 잇지 않는다) */
+export const FAN_CANCEL_REASON = 'USER';
 
 /**
  * replayOnly 확인의 표 하나 결과(행을 바꾸지 않는다, 리뷰 B2 보충). 없는 표·다른 주문·결제자가 아닌 요청은 NOT_PAYER_HOLDER(첫 팬 취소를 남에게 알려 주지 않는다),
