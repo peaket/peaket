@@ -237,6 +237,91 @@
 
 ## 검증
 
+검증 담당(w8l1-cifix3-verify-8f2a5c19, 2026-11-17). 틀린 구현은 `D:/ticketpass-lane1-pre`(분리 HEAD `2a52bce4`, 커밋하지 않음)에 하나씩 넣고 매번 `git checkout`으로 되돌렸으며, 끝날 때마다 `git status --short`가 비었다. 기록은 검증 담당 scratchpad의 `mutate.mjs`·`mutate-out.txt`·`k1-*`·`k2-*`·`k3-*.log`다.
+
+- **같은 모델 새 맥락 사실**: 이 검증은 계획·구현·시험·리뷰 담당과 같은 모델(claude-opus-5-5)이 그들의 대화 맥락 없이 새 세션에서 했다(ADR-0270 결정 6, OPEN[40]: 다른 모델을 쓸 수 없음). 받은 것은 감독이 준 공통 규칙과 지시, 이 계획 파일, 저장소뿐이다. '리뷰' 절은 아래 결과를 다 쓴 뒤 겹침을 맞추는 데만 읽었다.
+- **구현 위 출발점(`2a52bce4`)**: `node --test "tools/local/*.test.mjs"` 140개, 통과 139, 실패 0, 건너뜀 1(Windows 파일 권한). `node --test tools/ci/check-workflows.test.mjs` 47개, 통과 46, 실패 0, 건너뜀 1. `node tools/ci/check-workflows.mjs` '통과: 워크플로 19개'.
+- **단위 쪽 돌리는 법**: 틀린 꼴 하나마다 `node --test --test-name-pattern="CF3-0[123457]" tools/local/cluster.test.mjs`(워크플로 꼴은 `--test-name-pattern=CF3-03 tools/ci/check-workflows.test.mjs`). `cluster.mjs` 안을 바꾼 꼴(V-17~V-19)과 단위에서 놓친 꼴(V-09·V-12)은 `node --test "tools/local/*.test.mjs"` 전체로 다시 돌려 다른 시험도 못 잡는 것을 보았다(셋 모두 139 통과, 실패 0).
+- **kind 쪽 돌리는 법**: 감독이 쥔 Docker 잠금 안에서 `PEAKET_CLUSTER=lane1-cf3v`, 틀린 꼴마다 클러스터를 새로 만들고(`up --v0-only` → `gateways`) CF3-06만 이름으로(`--test-timeout=300000 --test-name-pattern="CF3-06"`) 돌린 뒤 `down`했다.
+
+### 계획의 틀린 구현 목록(M-01~M-14)
+
+| 번호 | 넣은 것 | 잡은 시험(실패 메시지 요지) | 같이 통과한 시험 |
+| --- | --- | --- | --- |
+| M-01 ⓐ | `gatewayPortMappings`의 `listenAddress`를 `'0.0.0.0'`으로 | CF3-01(18441: 매핑이 … 다섯이 아니다) | CF3-02·04·05·07 |
+| M-01 ⓑ | `listenAddress`를 뺌 | CF3-01(같은 메시지) | CF3-02·04·05·07 |
+| M-02 | gw-queue·gw-fan의 `hostPort`를 바꿔 넣음 | CF3-01 | CF3-02·04·05·07 |
+| M-03 | 매핑에서 gw-scanner를 뺌(넷) | CF3-01 | CF3-02·04·05·07 |
+| M-04 | `hostPort`를 늘 `18441 + i` | CF3-01(20001: 매핑이 … 20001~20005 다섯이 아니다) | CF3-02·04·05·07 |
+| M-05 | `protocol: 'UDP'` | CF3-01 | CF3-02·04·05·07 |
+| M-06 | Service `type: 'ClusterIP'` | CF3-02(gw-queue: 종류) | CF3-01·04·05·07 |
+| M-07 | gw-fan Service의 고르개를 gw-queue로 | CF3-02(gw-fan: 고르개) | CF3-01·04·05·07 |
+| M-08 | `targetPort`를 인자 대신 443 | CF3-02(gw-queue: targetPort는 받은 값이다) | CF3-01·04·05·07 |
+| M-09 | gw-fan Service에 gw-queue의 `nodePort`(겹침) | CF3-02(gw-fan: 노드 포트) | CF3-01·04·05·07 |
+| M-10 | `gatewayHostPorts`가 공개 값 대신 `18441 + 차례` | CF3-04, CF3-07(deep-equal 실패) | CF3-01·02·05 |
+| M-11 | 빠진 공개를 `18441 + 차례`로 채우고 던지지 않음 | CF3-05(ⓐ 빈 객체: 던지지 않았다) | CF3-01·02·04·07 |
+| M-12 | `HostIp`를 보지 않음 | CF3-05(ⓒ HostIp 0.0.0.0: 던지지 않았다) | CF3-01·02·04·07 |
+| M-13 워크플로 | `ci-kind.yml`의 `cluster.mjs gateways` 단계 뒤에 `gateways-forward … &` 단계를 다시 넣음 | CF3-03(ci-kind.yml에 gateways-forward가 있다) | (그 파일의 CF3 시험은 CF3-03 하나) |
+| M-13 kind | 고친 트리로 클러스터를 만들고 `gateways`가 '준비됨'까지 간 뒤(00:20:59), 구현 전 `gatewaysForward`와 같은 꼴의 포트 전달 다섯(`kubectl port-forward --address 127.0.0.1 svc/<프록시 Service> <포트>:443`, 끝나면 1초 뒤 다시 띄움, PID 9904)을 127.0.0.1:18451~18455에 띄우고 접속 정보 사본의 `ports`를 그 포트로 바꿈(`PEAKET_GATEWAYS_E2E`) | CF3-06 **두 번 다 실패**(00:22:53·00:23:01, 각 약 3.8초): `네트워크 오류 2건(ⓐ 상태별 수: {"200":200})`, `ⓒ gw-partner: ECONNREFUSED … 127.0.0.1:18453`, `ⓒ gw-ops: ECONNREFUSED … 127.0.0.1:18454`. 포트 전달 기록의 'lost connection to pod'는 한 번에 다섯씩 모두 10줄 | 대조: 같은 클러스터에서 포트 전달 없이(노드 포트 길) 먼저 돌린 CF3-06은 통과(00:21:29, 3.7초) |
+| M-14 kind | `gateways`에서 로컬 전용 Service를 만드는 `kubectl apply`를 뺌(매핑은 있음) | ① `gateways` 자신이 멈춤(종료 1, 00:17:29): '게이트웨이 포트가 60초 안에 TLS로 답하지 않았다: gw-queue 127.0.0.1:18441(Client network socket disconnected before secure TLS connection was established), …' 다섯 모두. ② 접속 정보 파일은 그 앞에서 써지므로 그 파일로 CF3-06을 돌리니 **실패**(00:17:46, 4ms): `ECONNRESET` 127.0.0.1:18441, TLS 맺기 전 끊김 | (CF3-06만 돌림) |
+
+### 목록 밖(검증 담당이 더한 것)
+
+| 번호 | 넣은 것 | 잡은 시험 |
+| --- | --- | --- |
+| V-01 | (CF3-07이 노리는 꼴) `gatewayContract`의 `ports`를 받은 값 대신 `GATEWAY_BASE_PORT + 차례`로 계산 | CF3-07(접속 정보의 ports가 받은 값과 다르다). CF3-01·02·04·05는 통과 |
+| V-02 | `kindClusterConfig`가 `basePort` 대신 `GATEWAY_BASE_PORT`로 매핑 | CF3-01(20001 사례) |
+| V-03 | `kindClusterConfig`가 control-plane 노드를 매핑만 든 새 노드로 바꿈(노드 이미지 고정이 빠짐) | CF3-01(노드 이미지가 deploy/local/kind.yaml과 다르다) |
+| V-04 | `GATEWAY_NODE_PORTS`에서 gw-ops·gw-scanner의 값을 맞바꿈(매핑과 Service가 같이 바뀌어 길은 이어지지만 고정 값이 계획과 다름) | CF3-01·02·04·07(CF3-05만 통과) |
+| V-05 | 노드 포트 하나를 엇갈리게: gw-ops Service만 `nodePort` 30445(매핑은 30444 그대로라 gw-ops가 gw-scanner 노드 포트로 감) | CF3-02(gw-ops: 노드 포트) |
+| V-06 | 다섯 Service 고르개를 모두 gw-fan으로 | CF3-02(gw-queue: 고르개) |
+| V-07 | `gatewayHostPorts`가 gw-fan 공개를 gw-queue 노드 포트 키(30441/tcp)에서 읽음 | CF3-04·05·07 |
+| V-08 | `HostIp` 빈 값만 막고 `0.0.0.0`은 받음 | CF3-05(ⓒ HostIp 0.0.0.0: 던지지 않았다) |
+| V-09 | 공개가 여럿일 때 첫째의 `HostIp`만 봄(`[127.0.0.1, 0.0.0.0]` 꼴을 받음) | **놓침**(CF3 다섯 모두 통과, 단위 전체 139 통과) |
+| V-10 | 오류 메시지에서 `down`·`up` 안내를 뺌 | CF3-05(ⓐ: 메시지에 down이 없다) |
+| V-11 | Service 네임스페이스를 `default`로 | CF3-02(gw-queue: 네임스페이스) |
+| V-12 | `HostPort`가 수가 아니어도(빈 값 → `NaN`·0) 던지지 않음 | **놓침**(단위 전체 139 통과) |
+| V-13 | `gateway-routes.e2e.mjs` 줄에서 `--test-timeout=300000`을 뺌 | CF3-03(gateway-routes.e2e.mjs에 --test-timeout=300000이 없다) |
+| V-14 | `queue-cors.e2e.mjs`를 `gateway-routes` 뒤로 옮김 | CF3-03(queue-cors → gateway-limits 차례가 아니다) |
+| V-15 | `cluster.mjs gateways` 단계를 맨 끝 `down` 단계 뒤로 옮김 | CF3-03(gateways.e2e.mjs가 cluster.mjs gateways 단계보다 앞이다) |
+| V-16 | `ci-kind.yml`에 주석 `# 예비: kubectl port-forward 로 잇기`만 더함 | CF3-03(ci-kind.yml에 port-forward가 있다) |
+| V-17 | `cluster.mjs gateways`가 `gatewayHostPorts(nodePortBindings())` 대신 `gatewayBasePort() + 차례`로 접속 정보 포트를 계산(계획 2 '나'의 5를 어김) | **놓침**(단위 전체 139 통과. kind도 `up`과 `gateways`의 `PEAKET_GATEWAY_BASE_PORT`가 같으면 값이 같아 통과한다) |
+| V-18 | `cluster.mjs gateways`가 `gatewayHttpsTargetPort` 대신 `gatewayNodePortService(gw, 443)`(M-08의 잇는 곳 꼴) | 단위는 **놓침**(139 통과). kind(클러스터 새로, 00:23:48~00:27:05)에서 ① `gateways`가 TLS 기다림에서 멈춤(종료 1, 다섯 모두 'Client network socket disconnected before secure TLS connection was established'), ② CF3-06 실패(00:28:00, 4ms, 같은 ECONNRESET). kind로 잡음 |
+| V-19 | `ensureCluster`가 매핑을 더한 설정 대신 `deploy/local/kind.yaml`을 그대로 써 클러스터를 만듦 | **놓침**(단위 전체 139 통과). kind에서는 돌리지 않았다(아래 '흉내만 낸 것') |
+| V-20 | e2e 넷 단계에 `continue-on-error: true`를 붙임 | **놓침**(CF3-03 통과, `check-workflows.mjs`에도 그 규칙이 없다. 리뷰 RV-7과 같은 꼴) |
+
+### 합계
+
+- **계획 목록**: 14항목, 넣은 꼴 16(M-01 둘, M-13 워크플로·kind 둘) → **16/16 잡음**.
+- **목록 밖**: 20 넣음 → 15 잡음(단위 14, kind 1: V-18), **놓침 5**(V-09·V-12·V-17·V-19·V-20).
+- **전체**: **31/36 잡음**. 계획이 정한 '잡아야 할 시험' 칸은 모두 그 시험이 실패했다(M-10은 CF3-07도 함께 실패).
+
+### 처음부터 통과하던 시험의 실패 확인
+
+- 구현 전 트리에서 '실행이 안 되는 실패'라 세지 않았던 CF3-01·02·04·05와 리뷰 뒤에 더한 CF3-07이 모두 단언 실패를 보였다: CF3-01(M-01~M-05, V-02~V-04), CF3-02(M-06~M-09, V-04~V-06, V-11), CF3-04(M-10, V-04, V-07), CF3-05(M-11, M-12, V-07, V-08, V-10), CF3-07(M-10, V-01, V-04, V-07). 실패는 모두 '함수 없음'이 아니라 값 단언(deep-equal·`던지지 않았다`·메시지)이다.
+- CF3-03·CF3-06은 구현 전 트리에서 이미 실패를 보였고(위 '실패 확인'), 여기서도 M-13·V-13~V-16(CF3-03), M-13·M-14·V-18(CF3-06)로 다시 실패를 보였다.
+
+### 놓친 것과 처리 제안
+
+| 놓친 것 | 위험 | 제안 |
+| --- | --- | --- |
+| V-09 공개가 여럿일 때 첫째만 보기 | 낮음. 구현은 맞다(공개 하나하나를 본다). kind의 매핑은 `listenAddress` 하나라 지금은 공개가 하나뿐이지만, 같은 노드 포트를 손으로 더 공개하면 밖에 열린 것을 못 막는 꼴을 시험이 못 본다. CF3-05는 ASVS 13.4.5 태그가 달린 시험이다 | **이 묶음에서 시험 한 줄**(`Fix-By: test`)을 권한다: CF3-05에 'ⓔ `30442/tcp`에 `[{127.0.0.1}, {0.0.0.0}]` 둘' 꼴을 더해 던지는지 본다. 감독이 미루면 구간 끝 정리 목록 후보 |
+| V-12 `HostPort`가 수가 아님 | 낮음. 그래도 `gateways`의 TLS 기다림이 60초 뒤 멈춘다 | 구간 끝 정리 목록 후보(시험): CF3-05에 `HostPort: ''` 꼴 |
+| V-17·V-18·V-19 `cluster.mjs`의 잇는 곳(`gateways`·`ensureCluster`) | V-18은 kind에서 `gateways` TLS 기다림이 잡았다. V-19는 `gateways`가 `gatewayHostPorts`에서 던질 것이다(돌리지 않음). V-17은 `up`과 `gateways`의 시작 값이 같으면 결과가 같아 해가 없고, 다르면 TLS 기다림이 잡는다. 다만 '포트는 실제 공개에서 읽는다'(계획 2 '나'의 5)를 어겨도 어떤 시험도 실패하지 않는다. 리뷰 RV-3(CF3-07로 `gatewayContract`는 막음)·RV-6(환경 값과 실제 공개가 달라도 알리지 않음)과 이어진다 | 구간 끝 정리 목록 후보(구현 → 시험): 공개를 읽어 접속 정보 포트를 만드는 줄을 순수 함수로 빼서 단위로 보거나, RV-6의 '환경 값과 실제 공개가 다르면 경고'와 함께 kind에서 시작 값을 바꾼 한 바퀴를 둔다 |
+| V-20 e2e 단계 `continue-on-error` | 낮음. 일부러 써야 생긴다 | 리뷰 RV-7과 같다(구간 끝 정리 목록 후보). 따로 더할 것은 없다 |
+
+### 그 밖에 본 것
+
+- **RV-2와 겹침**: M-13 kind에서 ⓑ′는 지금 판에서 포트 전달 다섯을 모두 끝냈다(한 번에 'lost connection to pod' 다섯, 두 번 10줄). 자극이 듣는다는 것은 이번에도 확인됐다. 자극이 듣는지를 시험이 스스로 단언하지 않는다는 RV-2의 빈틈은 그대로다.
+- **CF3-06의 실패 꼴(M-14·V-18)**: 노드 포트에 받는 것이 없을 때 CF3-06은 자기 오류 목록(`errors`) 단언이 아니라 잡히지 않은 TLS 소켓 오류(`ECONNRESET` 127.0.0.1:18441)로 4ms 만에 끝났다. 실패는 맞지만 ⓐ·ⓑ·ⓑ′·ⓒ 가운데 어디서 샜는지 메시지에 없다. 구간 끝 정리 목록 후보(시험): 그 단계들의 소켓에 오류 처리기를 먼저 달아 오류 목록으로 모은다.
+
+### 흉내만 낸 것
+
+- **M-13 kind**: `gateways-forward` 명령과 `gatewayForwardArgs`는 구현이 지워서 그대로 되살리지 않았다. 대신 검증 담당 scratchpad의 `m13-forward.mjs`가 구현 전 트리(`3256c93f`)의 `gatewaysForward`와 같은 인자·같은 '1초 뒤 다시 띄움'으로 포트 전달을 띄웠고, 접속 정보는 사본(`PEAKET_GATEWAYS_E2E`)의 `ports`만 바꿨다. 포트는 노드 매핑이 18441~18445를 쥐고 있어 18451~18455를 썼다. 워크플로 쪽은 M-13 워크플로(CF3-03)로 따로 보았다.
+- **M-14·V-18**: `gateways`가 TLS 기다림에서 멈춘 뒤 이미 써진 접속 정보로 CF3-06만 돌렸다. 계획 칸의 '기존 e2e도 실패'는 돌리지 않았다(지시대로 잡혀야 할 시험만 이름으로).
+- **V-19**: kind로 돌리지 않았다. `gateways`가 `gatewayHostPorts`에서 '`down` 뒤 `up`' 오류로 멈출 것이라는 것은 코드 읽기다.
+- **뒤처리**: 띄운 PID 9904(과 그 자식 kubectl 다섯)만 `taskkill /PID 9904 /T /F`로 끝냈다. `lane1-cf3v`는 바퀴마다 `down`으로 지웠고, 끝에 `kind get clusters`는 '없음', `docker ps -a`에 `lane1-` 컨테이너가 없고, 18441~18445·18451~18455에서 듣는 프로세스가 없다. `D:/ticketpass-lane1-pre`의 `kind-lane1-cf3v.yaml`·`kubeconfig-lane1-cf3v`는 지웠고 `git status --short`가 비었다. 잠금 폴더(`D:/ticketpass-locks/docker`)는 감독이 쥐고 있어 건드리지 않았다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -245,3 +330,4 @@
 | impl | w8l1-cifix3-impl-3c81f0a2 | claude-opus-5-5 | 2026-11-16T22:26+09:00 | 2026-11-16T22:55+09:00 |
 | test | w8l1-cifix3-test-9d4e27b5 | claude-opus-5-5 | 2026-11-16T22:25+09:00 | 2026-11-16T23:45+09:00 |
 | review | w8l1-cifix3-review-4b8e61d2 | claude-opus-5-5 | 2026-11-16T23:49+09:00 | 2026-11-17T00:02+09:00 |
+| verify | w8l1-cifix3-verify-8f2a5c19 | claude-opus-5-5 | 2026-11-17T00:07+09:00 | 2026-11-17T00:32+09:00 |
