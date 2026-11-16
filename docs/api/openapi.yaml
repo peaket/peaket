@@ -4113,6 +4113,7 @@ paths:
       operationId: createQueueEntry
       tags: [queue]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 대기열 진입(오픈 후, 대기표 발급)
       description: "FR-006. 사전 검증 토큰 + 구매 권한 + pid 중복 확인 → INCR 순번. 오픈 직후 동시 도착 구간(2초 [가정])에 오픈 전 발급 토큰으로 도착하면 202 BATCHING + 결과 파일 경로(묶음 무작위, ADR-0041). T=0 피크 20만 RPS(NFR-001). PREQUEUE_SHUFFLE 공연(로비 셔플 켬·오픈 직후 묶음 끔, ADR-0118)도 오픈 뒤 진입을 받고 동시 도착 묶음 없이 로비 참가자 전원 뒤에 도착 순으로 번호를 준다(오픈 뒤 410 거절을 없앰, 소유자 결정 2026-10-14, ADR-0064). 202 BATCHING은 openBatch를 켠 회차에서만 나온다. 그 회차의 판매 종료(공연 시작 24시간 전) 뒤에는 모든 정렬 방식에서 410 sale-ended"
       security: [{ fanCookie: [] }]
@@ -4193,6 +4194,7 @@ paths:
       operationId: createQueueAdmission
       tags: [queue]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 입장 확정(첫 예매 요청, 입장 토큰 발급)
       description: "FR-008, POL-008·009. 대기표(또는 참가 토큰) 서명, 내 번호 ≤ serving, 빠진 번호(추가 검증 통과로 복귀한 대기표는 예외)·15분 만료 확인(복귀한 대기표는 차례와 통과 중 늦은 때부터, ADR-0062), 1인 1순번 재확인(사람별 입장 키, ADR-0056). 자리 없으면 SOON + retryAfterSeconds이고, 그 번호를 곧 입장 대기열에 넣는다. 자리는 '빈자리 수 > 곧 입장 대기열에서 내 번호보다 작은 번호의 수'일 때만 주므로 낮은 번호부터 들어간다. 곧 입장 대기열에 있는 동안은 15분 만료를 세지 않는다(추천 적용 2026-10-28, ADR-0104). 입장 자리 점수 = 첫 사용 기한 5분. 좌석 자동 배정 공연의 차례 직전 직접 확인(ADR-0043)에서 내 번호 > serving이면 NOT_YET + retryAfterMs(게이트웨이 레이트 리밋 적용)"
       security: [{ fanCookie: [] }]
@@ -4247,6 +4249,7 @@ paths:
       operationId: getEventSeatmapSnapshot
       tags: [seats]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 좌석 비트맵 스냅샷(압축 바이트). 입장 토큰의 첫 사용 → 구매 세션 시작
       description: "FR-009. 첫 사용 요청이 구매 세션을 연다. 헤지 요청은 첫 요청과 재요청 모두 쓰지 않는다(ADR-0117). 재요청이 늦거나 503이면 브라우저가 Retry-After와 지터를 지켜 다시 묻고, 같은 구역은 한 번에 하나만 묻는다. realtime-gw WebSocket은 asyncapi.yaml"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4269,6 +4272,7 @@ paths:
       operationId: createEventHold
       tags: [seats]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 좌석 홀드(다중 좌석, 1인 한도 같은 Lua)
       description: "FR-010, POL-011·012, NFR-003 p99 50ms. 경합 패배는 409 + suggestedSeats(정상 응답으로 집계). 한도 초과 422. 구매 세션 요청 서명(X-Purchase-Seq·X-Purchase-Mac) 필수, 서명 불일치·일련번호 재사용은 401. 자동 배정 공연(POL-035, FR-050, ADR-0043)은 seatIds 대신 auto(희망 조건)를 보내고 서버가 1순위 연석, 분리 허용 시 1순위 분리, 2순위 순으로 골라 같은 Lua로 홀드한다. 모두 실패하면 아무 좌석도 홀드하지 않고 409 manual-selection-required. 자동 배정 공연은 이 요청이 입장 토큰의 첫 사용(구매 세션 시작)"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4291,6 +4295,7 @@ paths:
       operationId: deleteEventPurchaseSession
       tags: [seats]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 구매 세션 나가기(구매 화면을 나갈 때 세션을 끝냄)
       description: "FR-010, POL-009, 구매 세션 상태 기계 T9·T11(docs/planning/03 §2.2). 구매 세션 요청 서명 필수(X-Purchase-Seq·X-Purchase-Mac, 입장 토큰 머리). 그 구매 세션을 LEFT로 끝내고(세션 상태를 지우고 입장 토큰의 재사용 차단 표지는 남긴다) PurchaseSessionEnded를 낸다. 브라우저는 화면을 나갈 때 fetch keepalive로 서명해 보낸다(sendBeacon은 머리를 달 수 없다). 이미 끝난 세션의 요청은 구매 세션 확인에서 401이다. 같은 처리에서 그 세션의 홀드를 푼다(묶인 홀드는 빼고. 추천 적용 2026-11-09, ADR-0254). 추천 적용 2026-11-04, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4305,6 +4310,7 @@ paths:
       operationId: getHold
       tags: [seats]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 홀드 다시 읽기(새로고침, 좌석 ↔ 결제 화면을 오갈 때)
       description: "FR-010(docs/design/d5 §1.6 26번, docs/frontend.md §6.2 29번, BUILD_ORDER BAS-042). 읽기라 구매 세션 요청 서명은 없고 입장 토큰 머리만 받는다(docs/frontend.md §4.1 '구매 세션'). purchase-svc는 요청한 구매 세션에 적힌 holdId에서만 찾는다(남의 holdId와 없는 holdId는 같은 404). 만료된 홀드는 404다(좌석은 이미 놓였다). 읽기는 구매 세션의 무활동 시간을 늘리지 않는다(서명 없는 요청으로 세션을 살려 두지 못하게). Cache-Control: no-store"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4314,6 +4320,7 @@ paths:
       operationId: deleteHold
       tags: [seats]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 홀드 해제
       description: "FR-010, FR-042. 구매 세션 요청 서명 필수. purchase-svc는 요청한 구매 세션 상태에 적힌 그 세션의 holdId 목록에서만 찾고, 해제 Lua는 좌석 홀드 Hash의 holdId와 소유 계정이 요청과 같을 때만 바꾼다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3). 놓은 좌석은 같은 계정이 30초 [가정] 동안 다시 잡지 못한다(홀드 409 seat-recently-released, 소유자 결정 2026-10-30, open-items 67번, docs/features/seat-hold.md §5)"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4324,6 +4331,7 @@ paths:
       operationId: createHoldExtension
       tags: [seats]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 홀드 1회 연장(접근성 배려)
       description: "POL-012, NFR-020. 홀드 시간 제한은 WCAG 2.2.1의 실시간 예외로 판단(ADR-0060). 구매 세션 요청 서명 필수. 해제와 같이 그 구매 세션의 holdId만 찾고, 연장 Lua가 holdId와 소유 계정을 다시 대조한다(추천 적용 2026-10-30, docs/features/seat-hold.md §3, ADR-0159 결정 3)"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4334,6 +4342,7 @@ paths:
       operationId: createOrder
       tags: [orders]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 주문 생성(금액 서버 계산, 예매자 정보, 제3자 제공 동의)
       description: "FR-011, POL-013·023. 본인확인 상태 재확인(POL-001). 구매 세션 요청 서명 필수. 그 회차의 판매 종료(공연 시작 24시간 전) 뒤에는 판매 종료 전에 만든 유효한 홀드의 주문만 받고 그 밖은 410 sale-ended다. 그 주문의 결제 시도·접수는 홀드·결제 시간 안에서 지금처럼 받는다(추천 적용 2026-10-14, ADR-0064). 409 hold-already-ordered는 그 주문이 같은 계정·같은 구매 세션의 것일 때 확장 칸 orderId를 싣는다(ADR-0255)"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4358,6 +4367,7 @@ paths:
       operationId: createOrderPayment
       tags: [orders]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 결제 시도 시작(결제사 선택, 결제창 값 발급)
       description: "FR-011, POL-036, ADR-0044. 결제창을 열기 직전에 부른다. 선택 순서는 결제사 전환, 공연 지정, 플랫폼 기본. 접수 전의 이전 시도는 SUPERSEDED. 승인 요청을 보낸 주문은 409. 고른 결제사 채널이 서버 승인을 지원하지 않거나 비활성이면, 또 결제사 장애·채널 호출 상한으로 새 결제 진입을 멈춘 동안이면 503(새 결제 일시 정지, payment §2.2·§9. 이 동안 주문을 만들고 결제 접수 전인 홀드의 남은 시간은 멈춘다, ADR-0085). 같은 멱등 키의 재생은 처음 시도의 결제사로 결제창 값을 다시 만든다(추천 적용 2026-11-09, BUILD_ORDER PRF-191, guidelines §4). 구매 세션 요청 서명 필수"
       security: [{ fanCookie: [], admissionToken: [] }]
@@ -4369,6 +4379,7 @@ paths:
       operationId: createOrderPaymentAcceptance
       tags: [orders]
       x-peaket-roles: [fan]
+      x-peaket-scopes: [ticket:buy]
       summary: 결제 접수(202). 결제사별 본문(토스 paymentKey·amount, 포트원 paymentId·paymentToken·txId)
       description: "FR-011, NFR-005 p99 150ms. pg와 활성 결제 시도의 결제사 대조(다르면 409) → 토스는 amount 대조, 포트원은 paymentId 대조 → 결제 참조 저장 → Saga 시작. 결제사 호출은 응답 밖(ADR-0015). 접수 뒤 주문은 그 결제사에 고정(ADR-0044). 구매 세션 요청 서명 필수"
       security: [{ fanCookie: [], admissionToken: [] }]
