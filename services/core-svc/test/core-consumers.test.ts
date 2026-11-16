@@ -238,11 +238,14 @@ describe('COV2-06 시작 파일 조립', () => {
     } as unknown as Database;
     const handler = new ReviewAccountWithdrawnHandler({ anonymizeAccount: async () => ({ anonymized: 0 }) });
     vi.mocked(runKeyedConsumer).mockClear();
-    const run = startCoreConsumers({ env: 'ci', brokers: ['127.0.0.1:9092'], clientId: 'core-svc-ci-test', database: pool, handler, registry: new PlatformMetrics('core-svc').registry });
+    const registry = new PlatformMetrics('core-svc').registry;
+    const run = startCoreConsumers({ env: 'ci', brokers: ['127.0.0.1:9092'], clientId: 'core-svc-ci-test', database: pool, handler, registry });
     expect(vi.mocked(runKeyedConsumer)).toHaveBeenCalledTimes(1);
     const opts = vi.mocked(runKeyedConsumer).mock.calls[0]![0];
     expect(opts).toMatchObject({ service: 'core-svc', groupId: 'peaket.core-svc.ci', topics: ['identity.accounts-withdrawn'], maxKeys: 2, partitionsConcurrently: 1 });
     expect(opts.handler).toBe(handler);
+    // 검증 3단계 P04: 받은 지표 저장소를 그대로 넘긴다(넘기지 않으면 소비자 지표·보류 수가 main.ts의 /metrics에 실리지 않는다)
+    expect(opts.registry).toBe(registry);
     // 보류 저장소와 보류 수 세기가 받은 풀을 쓴다
     await opts.held.isHeld('identity.accounts-withdrawn', 'k');
     expect(executed).toHaveLength(1);

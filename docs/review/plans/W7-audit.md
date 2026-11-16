@@ -646,6 +646,7 @@ export function attendeeSourceUnavailable(detail: string): ExportProblem;
   | COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다(K9: 지표 저장소를 넘김) | `startCoreConsumers`가 `registry`를 받으면 그것과 `heldCounts: () => heldEventCounts(database)`를 `runKeyedConsumer`에 넘긴다(`9b26a579`). `core_app`의 `held_event` 읽기는 0004의 전체 읽기 권한으로도 된다 | `startCoreConsumers`가 `heldCounts`(또는 `registry`)를 `runKeyedConsumer`에 넘기지 않는다(`consumer_held_events`가 1이 되지 않는다) |
 
 - **검증 2단계 살아남음 N07(시험 추가)**: `test/core-consumers.test.ts`에 `COV2-06 K2 N07 소비자의 익명화 저장소도 소비자 전용 풀을 쓴다`를 더했다(main.ts 원문: 처리기에 넘기는 `Reviews`의 `store: new DrizzleReviewStore(풀)`의 풀이 `startCoreConsumers`의 `database` 칸과 같고 `database`·`partnerDatabase`·`opsDatabase`가 아니다). core-svc 폴더 `npx vitest run test/core-consumers.test.ts`: 지금 코드에서 통과(9/9). 손 확인: 그 저장소를 `new DrizzleReviewStore(database)`(N07 꼴)로 바꾸면 이 시험만 실패하고, 되돌린 뒤 `git diff`로 `main.ts`가 깨끗한 것을 봤다. typecheck 오류 0.
+- **검증 3단계 살아남음 P04(단언 추가)**: 단위 `COV2-06 K2 소비자는 따로 둔 core_app 풀과 파티션 1·키 2로 돈다`(`test/core-consumers.test.ts`)에 `runKeyedConsumer`에 넘긴 `registry`가 `startCoreConsumers`에 준 그 지표 저장소와 같은 객체인지(`toBe`)를 더했다. core-svc 폴더 `npx vitest run test/core-consumers.test.ts`: 지금 코드에서 통과(9/9). 손 확인: `consumers/start.ts`에서 `registry: o.registry,` 줄을 빼면(P04 꼴) 이 시험이 실패하고, 되돌린 뒤 `git diff`로 제품 코드가 깨끗한 것을 봤다. typecheck 오류 0.
 
 ## 시험 이의
 
