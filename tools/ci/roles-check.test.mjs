@@ -1000,3 +1000,22 @@ test('RC-47 ⑥ test 커밋은 시험 파일 밖의 코드 파일(빈 뼈대)을
   const { r } = check(addFiles(codeBatch(), 'test', skeleton));
   expectPass(r, 'RC-47', 1, 8);
 });
+
+// ---- 검증 지적 VF-01과 감독 결정의 차례 뜻(계획 9, 2026-11-16) ----
+
+test('RC-48 ⑧⑨ 문서 묶음의 계획 파일 절과 담당 표', () => {
+  const p = docPlan('BAT-902');
+  const REVIEW = '## 리뷰\n\n높음 0.\n\n';
+  const TABLE = `## 담당 표\n\n${HEADER}\n${SEP}\n${docRows().join('\n')}\n`;
+  const late = (text) => [...docBatch(), spec('planFix', 'plan', 'BAT-902', S.plan, { 'docs/review/plans/BAT-902.md': text })];
+  for (const [name, text, check_] of [
+    ['리뷰 절 없음', swap(p, REVIEW, ''), '계획 파일'],
+    ['## 리뷰 밑에 빈 줄만', swap(p, REVIEW, '## 리뷰\n\n\n\n'), '계획 파일'],
+    ['담당 표 절 없음', swap(p, TABLE, ''), '계획 파일'],
+    ['담당 표 머리 차례 바뀜', swap(p, HEADER, '| 역할 | 세션 ID | 모델 | 끝 | 시작 |'), '담당 표'],
+    ['s-doc 줄 없음', docPlan('BAT-902', docRows().filter((l) => !l.includes(S.doc))), '담당 표'],
+  ]) {
+    const { r } = check(late(text));
+    expectFail(r, `RC-48 ${name}`, check_, 'BAT-902', null);
+  }
+});
