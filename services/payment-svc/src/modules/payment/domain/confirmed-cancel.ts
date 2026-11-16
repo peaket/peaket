@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import { isLowerUuid, PaymentInputError, type PaymentLedgerStatus } from './confirm-command.js';
 import type { PgName } from './payment-gateway.js';
 
-const CANCELLATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** 취소 ID: 영문자·숫자·_·- 9~64자. 결제사 멱등키 cancel-{취소 ID}가 포트원 규격(16자 이상)에 맞게 한다(docs/features/payment.md §4.1 '취소 ID의 길이') */
+const CANCELLATION_ID = /^[A-Za-z0-9_-]{9,64}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 /** 취소 사유 길이 상한 200자 [가정](토스 cancelReason 상한과 같다) */
 export const CONFIRMED_CANCEL_REASON_MAX = 200;
