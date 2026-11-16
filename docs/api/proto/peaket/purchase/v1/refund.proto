@@ -40,6 +40,7 @@ service EventRefundService {
   // docs/features/transfer-refund.md §5 '회차 취소 요청 중 보류 취소의 환급 미룸'). ops-svc가 요청을 받기 전에 걸고, 판정·확정 시도 때 다시 걸어 기한을 늘리며,
   // 반려하면 푼다. 확정 뒤에는 StartEventRefund가 같은 트랜잭션에서 푼다(그 뒤로는 진행 중인 일괄 환불이 미룬다).
   // (event_id, cancellation_request_id)로 멱등하다. 풀기는 지금 걸린 요청 ID가 같을 때만 한다.
+  // 그 요청 ID의 일괄 환불 요청이 이미 있으면(확정 커밋 뒤 답을 잃은 다시 확정) 걸기·늘리기는 미룸을 열지 않고 held 거짓을 준다(추천 적용 2026-11-16, BAT-420 리뷰 D3).
   rpc SetEventRefundHold(SetEventRefundHoldRequest) returns (SetEventRefundHoldResponse);
 }
 

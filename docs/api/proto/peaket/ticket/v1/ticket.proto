@@ -41,10 +41,12 @@ service TicketService {
   // 결제자·보유자·진행 중 양도 요청·입장 상태·공연 시작과 무관하다(docs/features/transfer-refund.md §3.1 '회차 취소 일괄 환급' 행, §5 '대상 선택과 보류 취소 전환').
   // 표마다 행 잠금 안에서 이미 환급·무효인 표는 그대로 두고, 나머지는 진행 중 양도 표시를 끄고 키를 바로 폐기해(스캐너에는 1분 변경분으로 간다) 환급 상태로 둔다.
   // (cancellation_id, ticket_id)로 멱등하다. 없는 표·다른 회차 표가 하나라도 있으면 INVALID_ARGUMENT이고 아무것도 바꾸지 않는다.
+  // 내부 토큰이 설정된 환경에서 토큰이 없거나 틀리거나 호출자 머리가 purchase-svc가 아니면 PERMISSION_DENIED이고 아무것도 바꾸지 않는다(OperatorCancelTickets와 같다, 추천 적용 2026-11-16, BAT-420 리뷰 D4).
   rpc EventCancelTickets(EventCancelTicketsRequest) returns (EventCancelTicketsResponse);
 
   // 입장 기록 대조(부르는 쪽: purchase-svc 환급 실행기, 추천 적용 2026-11-16, BUILD_ORDER GAT-090, P-T19). 읽기만 한다.
   // 입장 시작 뒤 취소의 환급을 입장 기록 마감 뒤에 실행하기 전에, 그 표에 들어감·통과 스캔이 있는지 본다(docs/features/transfer-refund.md §3.1 '입장 기록 대조').
+  // 부르는 쪽 검사는 EventCancelTickets와 같다(호출자 purchase-svc, 아니면 PERMISSION_DENIED).
   rpc GetEntryRecords(GetEntryRecordsRequest) returns (GetEntryRecordsResponse);
 
   // 관람 후기 작성 자격. core-svc review가 쓸 때마다 부른다(논리 DB 사이 조인을 하지 않는다).
