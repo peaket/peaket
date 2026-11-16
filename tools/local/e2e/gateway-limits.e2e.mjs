@@ -417,93 +417,87 @@ const clean = (o) => {
   if (x.metadata?.annotations) delete x.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration'];
   return x;
 };
-/** gw-scanner 게이트웨이에 건 responseOverride 정책(PoC는 이 하나만 바꾼다) */
-async function scannerOverridePolicy() {
+/**
+ * gw-fan 게이트웨이에 건 응답 고치기 정책(PoC는 이 하나만 잠깐 바꾼다). 대상은 토큰 없는 요청의 429 갈래(요청 머리 X-User-Id 조건이 없는 429 항목,
+ * 검색 IP 한도가 낸다). 404는 직접 응답 필터로 옮겨 응답 고치기를 지나지 않는다(계획 '판단: 둘째 보기의 RV-15·RV-17·RV-18')
+ */
+async function fanOverridePolicy() {
   const list = JSON.parse(await kubectl(['-n', NS(), 'get', 'backendtrafficpolicies', '-o', 'json'], { quiet: true, timeout: 30_000 }));
-  const hits = list.items.filter((p) => (p.spec?.responseOverride ?? []).length && [...(p.spec?.targetRefs ?? []), ...(p.spec?.targetRef ? [p.spec.targetRef] : [])].some((t) => t.kind === 'Gateway' && t.name === 'gw-scanner'));
-  assert.equal(hits.length, 1, `gw-scanner에 건 responseOverride 정책이 하나가 아니다(${hits.length})`);
+  const hits = list.items.filter((p) => (p.spec?.responseOverride ?? []).length && [...(p.spec?.targetRefs ?? []), ...(p.spec?.targetRef ? [p.spec.targetRef] : [])].some((t) => t.kind === 'Gateway' && t.name === 'gw-fan'));
+  assert.equal(hits.length, 1, `gw-fan에 건 responseOverride 정책이 하나가 아니다(${hits.length})`);
   return hits[0];
 }
-/** 없는 경로 404를 받아 본문 traceId가 X-Trace-Id와 같아질 때까지 기다린다(정책이 퍼지는 데 몇 초 걸린다) */
-async function bodyTraceMatches(label, timeoutMs = 45_000) {
+/** 토큰 없는 쪽 429 항목(요청 머리 조건이 없는 429) */
+const anonymous429 = (policy) => {
+  const es = (policy.spec?.responseOverride ?? []).filter((o) => (o.match?.statusCodes ?? []).some((s) => Number(s.value) === 429) && !(o.match?.requestHeaders ?? []).length);
+  assert.equal(es.length, 1, `토큰 없는 쪽 429 응답 고치기 항목이 하나가 아니다(${es.length})`);
+  return es[0];
+};
+/**
+ * 한 IP로 검색 한도(초당 50건)를 넘겨 첫 429를 받는다. 정책을 바꾸면 Windows kubectl 포트 전달이 끊길 수 있어(2026-11-16 kind 실측)
+ * 연결 오류는 '아직'으로 보고 기다린다. 연결 오류는 결과가 되지 않는다(429 응답이 와야 한다)
+ */
+async function anonymous429Response(ip, accept, timeoutMs = 45_000) {
   const until = Date.now() + timeoutMs;
-  let last = { status: 0, headers: {}, text: '(응답 없음)' };
+  let last = null;
+  let n = 0;
   for (;;) {
-    // 정책을 바꾸면 Envoy 설정이 바뀌어 Windows kubectl 포트 전달이 끊기고 포트 전달 도구가 1초 뒤 다시 띄운다(2026-11-16 kind 실측).
-    // 그동안의 연결 오류는 '아직'으로 보고 기다린다. 연결 오류는 통과가 되지 않는다(본문이 맞아야만 통과)
-    const r = await sendOrConnError('scanner-api', { path: `/v1/zz-poc-${RUN}`, headers: { 'x-forwarded-for': '203.0.113.48' } });
-    if (r.connError) {
-      last = { status: 0, headers: {}, text: `(연결 오류 ${r.connError.code ?? r.connError.message})` };
-      if (Date.now() > until) return { ok: false, last, label };
-      await sleep(2000);
-      continue;
-    }
-    last = r;
-    let body = {};
-    try {
-      body = JSON.parse(last.text);
-    } catch {
-      // 본문이 JSON이 아니면 다시 본다
-    }
-    if (HEX32.test(String(body.traceId ?? '')) && body.traceId === last.headers['x-trace-id']) return { ok: true, last };
-    if (Date.now() > until) return { ok: false, last, label };
+    const rs = [];
+    let next = 0;
+    const count = 80;
+    await Promise.all(
+      Array.from({ length: 10 }, async () => {
+        while (next < count) {
+          next++;
+          rs.push(await sendOrConnError('api', { path: `/v1/search?q=poc${RUN}${n++}`, headers: edge(c, ip) }));
+        }
+      }),
+    );
+    const limited = rs.filter((r) => !r.connError && r.status === 429);
+    if (limited.length) last = limited[0];
+    const hit = limited.find(accept);
+    if (hit) return { ok: true, last: hit };
+    if (Date.now() > until) return { ok: false, last };
     await sleep(2000);
   }
 }
-
-test('D-T43 ④ PoC: responseOverride 본문의 %TRACE_ID%(안 되면 EnvoyPatchPolicy 판)가 그 요청의 X-Trace-Id와 같은 값으로 채워진다', async (t) => {
-  const original = clean(await scannerOverridePolicy());
-  const results = {};
-  // 판 1: responseOverride 404 본문에 %TRACE_ID%
-  const v1 = structuredClone(original);
-  for (const o of v1.spec.responseOverride) {
-    const codes = (o.match?.statusCodes ?? []).map((s) => Number(s.value));
-    if (codes.includes(404) && o.response?.body?.inline) o.response.body.inline = JSON.stringify({ ...JSON.parse(o.response.body.inline), traceId: '%TRACE_ID%' });
-  }
+const bodyTraceId = (r) => {
   try {
-    await applyObject(v1);
-    const r = await bodyTraceMatches('responseOverride');
-    results.responseOverride = r.ok;
-    t.diagnostic(`판 1(responseOverride %TRACE_ID%): ${r.ok ? '채워짐' : `안 됨, 마지막 본문 ${r.last.text.slice(0, 200)} / X-Trace-Id ${r.last.headers['x-trace-id']}`}`);
+    return JSON.parse(r.text).traceId;
+  } catch {
+    return undefined;
+  }
+};
+
+test('D-T43 ④ RV-15 PoC: 토큰 없는 검색 IP 한도 429의 응답 고치기 본문에 %TRACE_ID%를 넣은 사본을 걸면 본문 traceId가 32자리 16진수이고 같은 응답의 X-Trace-Id와 같다(끝에 되돌린다)', async (t) => {
+  const original = clean(await fanOverridePolicy());
+  const originalInline = anonymous429(original).response?.body?.inline;
+  assert.ok(typeof originalInline === 'string', '429 항목에 고정 본문이 없다');
+  // 바탕: 지금 정책에서 토큰 없는 429에 X-Trace-Id 머리가 붙는다(없으면 견줄 값이 없어 PoC 바탕 모자람)
+  const base = await anonymous429Response('198.51.100.81', () => true);
+  assert.ok(base.ok, `PoC 바탕 모자람: 검색 IP 한도 429를 받지 못했다(${base.last?.status ?? '응답 없음'})`);
+  assert.match(String(base.last.headers['x-trace-id'] ?? ''), HEX32, `PoC 바탕 모자람: 429에 X-Trace-Id 머리가 없다(${base.last.headers['x-trace-id']})`);
+  assert.equal(bodyTraceId(base.last), undefined, '바꾸기 전 429 본문에 이미 traceId가 있다');
+  const poc = structuredClone(original);
+  const entry = anonymous429(poc);
+  entry.response.body.inline = JSON.stringify({ ...JSON.parse(entry.response.body.inline), traceId: '%TRACE_ID%' });
+  let result;
+  try {
+    await applyObject(poc);
+    result = await anonymous429Response('198.51.100.82', (r) => bodyTraceId(r) !== undefined);
+    t.diagnostic(`PoC 429: 본문 ${result.last?.text?.slice(0, 200) ?? '(없음)'} / X-Trace-Id ${result.last?.headers?.['x-trace-id']}`);
   } finally {
     await applyObject(original);
   }
-  if (!results.responseOverride) {
-    // 판 2: EnvoyPatchPolicy로 리스너의 local_reply_config에 trace-id를 넣는다(리스너 이름은 Envoy Gateway의 '<네임스페이스>/<게이트웨이>/<리스너>' 꼴 [확인 필요])
-    const patch = {
-      apiVersion: 'gateway.envoyproxy.io/v1alpha1',
-      kind: 'EnvoyPatchPolicy',
-      metadata: { name: `zz-poc-trace-${RUN}`, namespace: NS() },
-      spec: {
-        targetRef: { group: 'gateway.networking.k8s.io', kind: 'Gateway', name: 'gw-scanner' },
-        type: 'JSONPatch',
-        jsonPatches: [
-          {
-            type: 'type.googleapis.com/envoy.config.listener.v3.Listener',
-            name: `${NS()}/gw-scanner/scanner-api`,
-            operation: { op: 'add', path: '/filter_chains/0/filters/0/typed_config/local_reply_config', value: { body_format: { json_format: { type: 'about:blank', title: 'Not Found', status: 404, traceId: '%TRACE_ID%' }, content_type: 'application/problem+json' } } },
-          },
-        ],
-      },
-    };
-    try {
-      await applyObject(patch);
-      const r = await bodyTraceMatches('EnvoyPatchPolicy');
-      results.envoyPatchPolicy = r.ok;
-      t.diagnostic(`판 2(EnvoyPatchPolicy local_reply_config): ${r.ok ? '채워짐' : `안 됨, 마지막 본문 ${r.last.text.slice(0, 200)}`}`);
-    } finally {
-      await kubectl(['-n', NS(), 'delete', 'envoypatchpolicy', patch.metadata.name, '--ignore-not-found'], { quiet: true, timeout: 60_000 });
-    }
-  }
-  // 되돌린 뒤 기본 본문(traceId 없음)으로 돌아온다
-  // 되돌린 적용도 포트 전달을 끊을 수 있어 연결 오류면 잠깐 기다려 다시 본다(기록만 한다)
-  let back = { connError: true };
-  for (let i = 0; i < 15 && back.connError; i++) {
-    back = await sendOrConnError('scanner-api', { path: `/v1/zz-poc-${RUN}-after`, headers: { 'x-forwarded-for': '203.0.113.49' } });
-    if (back.connError) await sleep(2000);
-  }
-  t.diagnostic(`되돌린 뒤 본문: ${back.connError ? '(연결 오류가 이어졌다)' : back.text.slice(0, 200)}`);
-  assert.ok(results.responseOverride || results.envoyPatchPolicy, `두 판 모두 본문에 trace-id가 실리지 않았다(${JSON.stringify(results)}). 계획 '시험 이의'에 적는다`);
+  // 되돌린 것을 단언한다: 정책의 429 본문이 원래 글이고, 받은 429 본문에 traceId가 다시 없다
+  assert.equal(anonymous429(clean(await fanOverridePolicy())).response?.body?.inline, originalInline, '정책을 되돌리지 못했다');
+  const back = await anonymous429Response('198.51.100.83', (r) => bodyTraceId(r) === undefined);
+  assert.ok(back.ok, `되돌린 뒤에도 429 본문에 traceId가 남았다: ${back.last?.text?.slice(0, 200)}`);
+  // 판정(마지막에 둬 되돌리기가 먼저 끝나게 한다)
+  assert.ok(result?.ok, `PoC 사본의 429 본문에 traceId가 실리지 않았다: ${result?.last?.text?.slice(0, 200)}`);
+  const traceId = bodyTraceId(result.last);
+  assert.match(String(traceId), HEX32, `본문 traceId가 32자리 16진수가 아니다: ${traceId}`);
+  assert.equal(traceId, result.last.headers['x-trace-id'], '본문 traceId와 X-Trace-Id 머리가 다르다');
 });
 
 // ===================== 열림(D-T50 ③, 맨 끝) =====================
