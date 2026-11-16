@@ -410,6 +410,13 @@ test('HOT360_구매세션서명기원본이나시험벡터를바꾸면_web을고
   assert.ok(!scopes({ 'packages/api-client/src/client.ts': '바꿈\n' }).includes('web'));
 });
 
+// 앱 서버 시작 확인(boot 시험, web / budgets 잡)이 읽는 platform 모듈: 앱 서버 텔레메트리 입구와 그것이 가져오는 SDK 시작(리뷰 RV-25, BAS-220·HOT-400)
+test('HOT-400 RV-25 앱 서버 시작 확인이 읽는 packages/platform 파일(telemetry-app-server.ts·telemetry-sdk.ts)만 바꿔도 web을 고른다', () => {
+  for (const f of ['packages/platform/src/telemetry-app-server.ts', 'packages/platform/src/telemetry-sdk.ts']) {
+    assert.ok(scopes({ [f]: '바꿈\n' }).includes('web'), f);
+  }
+});
+
 test('BAS170_서비스·플랫폼·다른문서·다른도구만바꾸면_web을고르지않는다', () => {
   for (const f of ['services/queue-svc/src/main.ts', 'packages/platform/x.ts', 'docs/design/d5-screen-blueprint.md', 'docs/a.md', 'tools/ci/x.mjs', 'tools/poc/login-compare/x.mjs']) {
     assert.ok(!scopes({ [f]: '바꿈\n' }).includes('web'), f);
