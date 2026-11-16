@@ -18,6 +18,7 @@ import { request as httpsRequest } from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import { createLocalJWKSet, createRemoteJWKSet, jwtVerify } from 'jose';
+import { GW_FAN_API_CORS } from './gateway-cors.mjs';
 
 const ACCESS_COOKIE = '__Secure-peaket_at';
 const REFRESH_PATH = '/v1/identity/access-tokens';
@@ -157,14 +158,15 @@ export async function startLocalFanGateway(o) {
     /** @type {Record<string, string>} */
     // Date는 gw-fan처럼 노출한다(화면의 보정 시계가 캐시하지 않는 응답의 Date를 표본으로 쓴다, docs/frontend.md §3.3)
     const cors = allowed
-      ? { 'access-control-allow-origin': webOrigin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': 'Date, Retry-After', vary: 'Origin' }
+      ? { 'access-control-allow-origin': webOrigin, 'access-control-allow-credentials': 'true', 'access-control-expose-headers': GW_FAN_API_CORS.exposeHeaders.join(', '), vary: 'Origin' }
       : { vary: 'Origin' };
     const method = req.method ?? 'GET';
     if (method === 'OPTIONS') {
       if (!allowed) return problem(403, 'Forbidden', cors);
       return {
         status: 204,
-        headers: { ...cors, 'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE', 'access-control-allow-headers': 'content-type, idempotency-key, x-reauth-token, x-admission-token, x-purchase-seq, x-purchase-mac, x-client-ephemeral-key', 'access-control-max-age': '600', 'cache-control': 'no-store' },
+        // 허용·노출 머리와 Max-Age는 gw-fan api 정책과 같다(gateway-cors.mjs, 웨이브 끝 리뷰 W7-WIR-06)
+        headers: { ...cors, 'access-control-allow-methods': GW_FAN_API_CORS.allowMethods.join(', '), 'access-control-allow-headers': GW_FAN_API_CORS.allowHeaders.map((h) => h.toLowerCase()).join(', '), 'access-control-max-age': String(GW_FAN_API_CORS.maxAgeSeconds), 'cache-control': 'no-store' },
         body: Buffer.alloc(0),
       };
     }
@@ -191,7 +193,10 @@ export async function startLocalFanGateway(o) {
     }
     if (url.pathname === REFRESH_PATH && req.headers.cookie) headers.cookie = req.headers.cookie;
     // 신원 머리는 위에서 지웠다. 쿠키가 없고 대역 신원을 켰으면 그 값을 싣는다(local·ci 전용)
-    Object.assign(headers, (await identityOf(cookieOf(req.headers.cookie, ACCESS_COOKIE))) ?? o.devIdentity ?? {});
+    const verified = await identityOf(cookieOf(req.headers.cookie, ACCESS_COOKIE));
+    // 구매 경로는 gw-fan-buy처럼 스코프 ticket:buy를 요구한다(검증한 토큰에 없으면 403, 넘기지 않는다. 대역 신원은 개발 편의라 보지 않는다, W7-WIR-06)
+    if (verified && upstream.href === (o.purchaseUrl ? new URL(o.purchaseUrl).href : undefined) && !String(verified['x-user-scope'] ?? '').split(' ').includes('ticket:buy')) return problem(403, 'Forbidden', cors);
+    Object.assign(headers, verified ?? o.devIdentity ?? {});
     let res;
     try {
       // 넘길 곳의 hostname·port는 설정(upstream)에서만 온다. 요청 URL은 path에만 쓴다(CodeQL js/request-forgery)

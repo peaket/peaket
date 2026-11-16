@@ -34,6 +34,10 @@ import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
 import { createPartnerMock } from './mock-api/partner.mjs';
 import { createPurchaseMock } from './mock-api/purchase.mjs';
 import { SEATMAP_VERSIONS, seatmapLayoutV, seatSnapshot } from './mock-api/seatmap.mjs';
+import { GW_FAN_API_CORS, GW_PARTNER_API_ALLOW_HEADERS } from './gateway-cors.mjs';
+
+/** 사전 요청에서 허용하는 머리: gw-fan·gw-partner API 정책의 합(소비자 웹·대기실·파트너 콘솔 출처에 함께 답한다) */
+const MOCK_ALLOW_HEADERS = [...new Set([...GW_FAN_API_CORS.allowHeaders, ...GW_PARTNER_API_ALLOW_HEADERS].map((h) => h.toLowerCase()))].join(', ');
 
 const CARDS = JSON.parse(readFileSync(new URL('./mock-api/cards.json', import.meta.url), 'utf8'));
 const KST = 9 * 60 * 60_000;
@@ -690,7 +694,8 @@ export function startMockApi({
     if (req.method === 'OPTIONS') {
       send(204, undefined, undefined, {
         'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE',
-        'access-control-allow-headers': req.headers['access-control-request-headers'] ?? 'content-type',
+        // 요청 머리를 그대로 허용하지 않고 게이트웨이 정책의 목록만 낸다(웨이브 끝 리뷰 W7-WIR-06)
+        'access-control-allow-headers': MOCK_ALLOW_HEADERS,
         'access-control-max-age': '60',
       });
       return;
