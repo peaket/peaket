@@ -291,6 +291,12 @@ jobs:
         working-directory: tools/web-checks
         env:
           PEAKET_BUILDS: prod
+      # 운영 빌드만 쓰는 웹 컨테이너 시험(*.build.test.mjs: standalone 점 파일·소스 관리 폴더·redis 묶음 밖, 시작 파일의 빌드 설정 확인, Docker 없음).
+      # Valkey가 필요한 *.int.test.mjs는 ci-node, 둘 다 필요한 *.heavy.test.mjs는 로컬 무거운 게이트가 돈다(docs/devops.md §3.1, BAT-170 W7L2-W1·§17 G-6).
+      # JUnit 보고서를 남긴다(W7L2-W5)
+      - run: pnpm --filter @peaket/web test:build
+        env:
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-report-build.xml
       - run: pnpm --filter @peaket/queue-room build
       # FE-T1: 대기실 경량 페이지 JS 50KB 이하·CSS 10KB 미만(gzip)
       - run: pnpm --filter @peaket/queue-room size
@@ -365,49 +371,5 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: seatmap-pkg-reports
-          path: tools/web-checks/reports/
-          retention-days: 7
-
-  # 재배치·확대·글자 간격과 초점 가림(FE-T31·FE-T18 자동 몫), 인앱 브라우저 안내(SCR-058), 월렛 워커 캐시 거르기·갱신 보류(HOT-390, ASVS 14.3.2)
-  # (docs/frontend.md §5.17 '화면 매트릭스와 FE-T31·FE-T18 자동 몫의 세부', BUILD_ORDER HOT-380·HOT-390, BAT-170). 운영 빌드(web·partner·console)를
-  # 세 엔진 × 320×256·640×400·기본 폭에서 돈다. 소비자 웹 서버는 PEAKET_ENV=ci로 뜬다(seed-css/apps.mjs). 두 공유 캐시 처리기는 늘 걸리고,
-  # 주소가 없어 처리기가 프로세스 메모리 저장소를 쓴다(docs/frontend.md §5.18, BAT-170 R170-1). 운영 빌드만 필요한 웹 컨테이너 시험(*.build.test.mjs:
-  # standalone 점 파일·소스 관리 폴더, 시작 파일의 빌드 설정 확인)도 빌드 뒤 여기서 돈다(BAT-170 W7L2-W1·W6)
-  reflow:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
-      options: --ipc=host
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-      - run: |
-          pm=$(node -p "require('./package.json').packageManager")
-          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
-          npm install --global "$pm"
-      - run: >-
-          pnpm install --frozen-lockfile
-          --filter "@peaket/web..." --filter "@peaket/partner..." --filter "@peaket/console-host..."
-      - run: node seed-css/build.mjs web partner console
-        working-directory: tools/web-checks
-        env:
-          PEAKET_BUILDS: prod
-      # 운영 빌드만 쓰는 웹 컨테이너 시험(Docker 없음). Valkey가 필요한 것은 ci-node, 둘 다 필요한 것은 로컬 무거운 게이트
-      - run: pnpm --filter @peaket/web test:build
-      - run: pnpm install --frozen-lockfile
-        working-directory: tools/web-checks
-      - run: pnpm run reflow
-        working-directory: tools/web-checks
-        env:
-          HOME: /root
-      - if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: reflow-reports
           path: tools/web-checks/reports/
           retention-days: 7
