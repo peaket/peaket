@@ -34,6 +34,9 @@ const NO_CODE = new Set(['plan', 'review', 'verify', 'record', 'doc']);
 const TEST_DIRS = new Set(['test', 'test-int', 'test-sim', '__tests__', 'e2e']);
 const TEST_NAME = /^(?:.+\.(test|spec)\..+|test_.+\.py)$/;
 const CODE_ORDER = ['plan', 'test', 'impl', 'review', 'verify'];
+// 시험만 묶음(plan 커밋의 Batch-Kind: test-only로 밝힘, 계획 W7-L1-roles-testonly 1): 구현 없이 계획 < 시험 < 리뷰 < 검증
+const TEST_ONLY_ORDER = ['plan', 'test', 'review', 'verify'];
+const TEST_ONLY = 'test-only';
 const DOC_ORDER = ['plan', 'doc', 'review'];
 const CODE_SECTIONS = ['실패 확인', '리뷰', '검증', '담당 표'];
 const DOC_SECTIONS = ['리뷰', '담당 표'];
@@ -196,9 +199,16 @@ function readTrailers(c) {
       else problems.push(`Finding 값 '${f}'의 꼴이 틀렸다(Batch와 같은 꼴)`);
     }
   } else if (found.length) problems.push(`Finding은 review-fix 커밋에만 단다(이 커밋은 ${role ?? '역할 모름'})`);
+  // Batch-Kind: plan 커밋에만 하나, 값은 그대로 test-only(시험만 묶음을 밝힌다)
+  const kinds = values('Batch-Kind');
+  let testOnly = false;
+  if (kinds.length && role !== 'plan') problems.push(`Batch-Kind는 plan 커밋에만 단다(이 커밋은 ${role ?? '역할 모름'})`);
+  else if (kinds.length > 1) problems.push(`꼬리말 Batch-Kind가 ${kinds.length}개다`);
+  else if (kinds.length === 1 && kinds[0] !== TEST_ONLY) problems.push(`Batch-Kind 값 '${kinds[0]}'은 ${TEST_ONLY}가 아니다`);
+  else testOnly = kinds.length === 1;
   // 세션·담당 표에서 세는 역할: 리뷰 반영은 Fix-By 쪽 역할이다(모르면 세지 않는다)
   const acting = role === 'review-fix' ? fixBy : role;
-  return { batch, role, session, fixBy, acting, findings, problems };
+  return { batch, role, session, fixBy, acting, findings, testOnly, problems };
 }
 
 // ---- 경로 ----
@@ -365,7 +375,14 @@ function check(opt) {
   const summaries = [];
   for (const [id, list] of batches) {
     const roles = list.map((c) => c.role).filter(Boolean);
-    const kind = roles.includes('doc') ? '문서' : roles.length > 0 && roles.every((r) => r === 'record') ? '기록만' : '코드';
+    // 종류: Batch-Kind: test-only를 단 plan 커밋 → 시험만, doc 커밋 → 문서, record만 → 기록만, 그 밖 → 코드
+    const kind = list.some((c) => c.testOnly)
+      ? '시험만'
+      : roles.includes('doc')
+        ? '문서'
+        : roles.length > 0 && roles.every((r) => r === 'record')
+          ? '기록만'
+          : '코드';
     const count = (r) => list.filter((c) => c.role === r).length;
     summaries.push(`묶음 ${id}: ${kind} 커밋 ${list.length}개(${ROLES.map((r) => `${r} ${count(r)}`).join('·')})`);
     if (kind === '기록만') continue;
@@ -373,14 +390,14 @@ function check(opt) {
     const first = new Map();
     for (const c of list) if (c.role && !first.has(c.role)) first.set(c.role, c);
     // 차례: 뒤에 와야 할 역할이 앞 역할보다 먼저 나오면 그 먼저 나온 커밋의 실패다
-    const order = kind === '코드' ? CODE_ORDER : DOC_ORDER;
+    const order = kind === '코드' ? CODE_ORDER : kind === '시험만' ? TEST_ONLY_ORDER : DOC_ORDER;
     order.forEach((r, j) => {
       const c = first.get(r);
       if (!c) return;
       const later = order.slice(0, j).filter((q) => first.has(q) && first.get(q).index > c.index);
       if (later.length) fail('차례', id, c.sha, `첫 ${r} 커밋이 첫 ${later.join('·')} 커밋보다 먼저 왔다`);
     });
-    if (kind === '코드' && first.has('review-fix')) {
+    if (kind !== '문서' && first.has('review-fix')) {
       const fix = first.get('review-fix');
       const gate = ['review', 'verify'].filter((q) => first.has(q)).map((q) => first.get(q));
       if (gate.length && fix.index < Math.min(...gate.map((c) => c.index))) {
@@ -399,9 +416,18 @@ function check(opt) {
     }
 
     // 구성
-    const need = kind === '코드' ? CODE_ORDER : DOC_ORDER;
-    const missing = need.filter((r) => !first.has(r));
+    const missing = order.filter((r) => !first.has(r));
     if (missing.length) fail('구성', id, null, `${kind} 묶음에 ${missing.join('·')} 커밋이 없다`);
+    if (kind === '시험만') {
+      const extra = [...new Set(list.filter((c) => c.role === 'impl' || c.role === 'doc' || (c.role === 'review-fix' && c.fixBy === 'impl')).map((c) => (c.role === 'review-fix' ? 'Fix-By: impl' : c.role)))];
+      if (extra.length) fail('구성', id, null, `시험만 묶음에 ${extra.join('·')} 커밋이 섞였다(구현이 있으면 Batch-Kind를 빼고 코드 묶음으로 한다)`);
+      // 시험 쪽 커밋(test, Fix-By: test)은 시험 파일과 문서 경로만 바꾼다
+      for (const c of list.filter((x) => x.acting === 'test')) {
+        for (const p of c.files.filter((f) => !isTestPath(f) && !isDocPath(f))) {
+          fail('코드 경로', id, c.sha, `시험만 묶음의 시험 쪽 커밋이 시험 파일·문서 밖 경로 ${p}를 바꿨다`);
+        }
+      }
+    }
     if (kind === '문서') {
       const extra = ['test', 'impl', 'review-fix', 'verify'].filter((r) => first.has(r));
       if (extra.length) fail('구성', id, null, `문서 묶음에 ${extra.join('·')} 커밋이 섞였다`);
@@ -417,7 +443,7 @@ function check(opt) {
     const lines = blob.out.toString('utf8').replace(/\r\n/g, '\n').split('\n');
     const hs = headings(lines);
     let tableRange = null;
-    for (const name of kind === '코드' ? CODE_SECTIONS : DOC_SECTIONS) {
+    for (const name of kind === '문서' ? DOC_SECTIONS : CODE_SECTIONS) {
       const found = sections(lines, hs, name);
       if (found.length === 0) fail('계획 파일', id, null, `${path}에 '${name}' 절(## 또는 ###)이 없다`);
       else if (!found.some((r) => sectionFilled(lines, hs, r))) fail('계획 파일', id, null, `${path}의 '${name}' 절이 비었다`);
