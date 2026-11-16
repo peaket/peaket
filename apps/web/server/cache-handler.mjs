@@ -8,7 +8,7 @@
 // - TTL: cacheControl.expire와 30일 [가정] 가운데 짧은 쪽(만료가 없으면 30일). 1MB [가정]가 넘는 화면은 쓰지 않는다.
 // - Redis가 늦거나 끊기면 get은 null(원본으로 그린다), set·revalidateTag는 버린다. 던지지 않는다.
 import { assertBuildTag } from './cache-env.mjs';
-import { selectRuntime } from './cache-store.mjs';
+import { createMemoryStore, POD_MEMORY_MAX_ENTRIES, POD_MEMORY_TTL_SECONDS, selectRuntime } from './cache-store.mjs';
 
 /** Next.js 캐시 태그 머리(next/dist/lib/constants NEXT_CACHE_TAGS_HEADER) */
 const TAGS_HEADER = 'x-next-cache-tags';
@@ -37,16 +37,24 @@ function tagsOfValue(data) {
   return [];
 }
 
+/** 파드 메모리 저장소(공유하지 않을 화면: 상태가 200이 아닌 것, 1,000개·60초 [가정]) */
+export const createPodStore = (now = () => Date.now()) => createMemoryStore({ now, maxEntries: POD_MEMORY_MAX_ENTRIES, maxTtlSeconds: POD_MEMORY_TTL_SECONDS });
+
+/** 공유 캐시에 넣을 화면인지: 상태 칸이 200이거나 없을 때만(404·410·5xx는 파드 메모리에만, docs/frontend.md §5.18 '키 수 막기' ②) */
+const shareable = (data) => data?.status === undefined || data?.status === null || data.status === 200;
+
 /**
  * 미리 그린 화면 처리기: get·set·revalidateTag·resetRequestCache. isr 값 키 칸은 `<build>:<캐시 키>`다.
- * @param {{ store: ReturnType<typeof createCacheStore>, build: string, now?: () => number, revalidatedTags?: readonly string[] }} o
+ * Next.js 16.4는 상태와 관계없이 그린 화면을 넘기므로, 상태가 200이 아닌 화면은 공유 캐시 대신 파드 메모리(local)에 둔다(W7L2-S1).
+ * 읽을 때는 파드 메모리를 먼저 본다. local은 파드마다 하나를 나눠 쓴다(기본 내보내기 클래스는 요청마다 새로 만들어진다).
+ * @param {{ store: ReturnType<typeof createCacheStore>, build: string, now?: () => number, revalidatedTags?: readonly string[], local?: ReturnType<typeof createMemoryStore> }} o
  */
-export function createCacheHandler({ store, build, now = Date.now, revalidatedTags = [] }) {
+export function createCacheHandler({ store, build, now = () => Date.now(), revalidatedTags = [], local = createPodStore(now) }) {
   assertBuildTag(build);
   const keyOf = (cacheKey) => `${build}:${cacheKey}`;
   return {
     async get(cacheKey, ctx) {
-      const raw = await store.getEntry('isr', keyOf(cacheKey));
+      const raw = (await local.getEntry('isr', keyOf(cacheKey))) ?? (await store.getEntry('isr', keyOf(cacheKey)));
       if (raw == null) return null;
       let entry;
       try {
@@ -70,7 +78,9 @@ export function createCacheHandler({ store, build, now = Date.now, revalidatedTa
         const tags = [...new Set([...tagsOfValue(data), ...(Array.isArray(ctx?.tags) ? ctx.tags : [])])];
         const entry = { lastModified: now(), cacheControl, tags, value: data ?? null };
         const expire = cacheControl?.expire ?? (typeof ctx?.revalidate === 'number' ? ctx.revalidate : undefined);
-        await store.setEntry('isr', keyOf(cacheKey), JSON.stringify(entry, replacer), expire);
+        const revalidate = typeof cacheControl?.revalidate === 'number' ? cacheControl.revalidate : undefined;
+        const target = shareable(data) ? store : local;
+        await target.setEntry('isr', keyOf(cacheKey), JSON.stringify(entry, replacer), expire, revalidate);
       } catch {
         // 담을 수 없는 값이면 버린다(원본으로 다시 그린다)
       }
@@ -88,13 +98,16 @@ export function createCacheHandler({ store, build, now = Date.now, revalidatedTa
 }
 
 const runtime = selectRuntime();
+// 처음 연결은 불러올 때 연결 시간 한도(1초)까지 기다린다. 붙지 못해도 던지지 않고, 그동안의 요청은 없음·버림이다
+await runtime.store.ready?.();
+const podStore = createPodStore();
 
 export default class CacheHandler {
   /** @param {{ revalidatedTags?: string[] }} ctx */
   constructor(ctx) {
     /** 이 요청 안에서 무효화한 태그(Next.js가 넘긴다). 읽을 때 바로 없는 것으로 본다 */
     const revalidatedTags = Array.isArray(ctx?.revalidatedTags) ? ctx.revalidatedTags : [];
-    this.handler = createCacheHandler({ ...runtime, revalidatedTags });
+    this.handler = createCacheHandler({ ...runtime, revalidatedTags, local: podStore });
   }
 
   get(cacheKey, ctx) {

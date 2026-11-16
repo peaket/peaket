@@ -137,9 +137,13 @@ jobs:
         env:
           PEAKET_TEST_REPORT: test-report-int.json
           PEAKET_START_FILES_PREBUILT: '1'
-      # 소비자 웹 공유 캐시 처리기를 실제 Valkey로: 처리기 인스턴스 둘(다른 파드처럼)이 같은 Valkey를 나눠 쓰고 태그 무효화를 서로 보는지,
-      # 쓴 키마다 TTL이 있는지, Valkey가 멈추거나 끊기면 읽기는 없음·쓰기는 버림인지(BUILD_ORDER HOT-390, docs/frontend.md §5.18, BAT-170 T14)
+      # 소비자 웹 공유 캐시 처리기를 실제 Valkey 클러스터로: 처리기 인스턴스 둘(다른 파드처럼)이 같은 클러스터를 나눠 쓰고 태그 무효화를 서로 보는지,
+      # 쓴 키마다 TTL이 있는지, 멈춤·장애 조치·끊김에서 회복하는지(BUILD_ORDER HOT-390, docs/frontend.md §5.18, BAT-170 T14·W7L2-K1·K2).
+      # 이 단계는 Valkey만 쓰는 *.int.test.mjs만 돈다. 운영 빌드가 필요한 *.build.test.mjs는 ci-web reflow 잡이, 둘 다 필요한 *.heavy.test.mjs는
+      # 로컬 무거운 게이트가 돈다(docs/devops.md §3.1, BAT-170 W7L2-W1). JUnit 보고서를 남긴다(W7L2-W5)
       - run: pnpm --filter @peaket/web test:integration
+        env:
+          NODE_OPTIONS: --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-report-int.xml
       # ASVS 추적 시험 태그 리포트(tools/ci/asvs-report.mjs, docs/architecture.md §8.2 4번, BOT-162): 위 시험들이 남긴 보고서를 모아
       # ASVS 추적 표의 행마다 결과를 작업 요약에 쓴다. 판정은 시험 자체가 하므로 이 단계는 막지 않는다
       - if: always()

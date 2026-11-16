@@ -4,6 +4,9 @@
 // - 404(승인 이력이 없는 회차·없는 회차)와 410(한 번 공개된 뒤 판매 중지)은 그 값으로 돌려준다. 그 밖의 실패는 던진다:
 //   ISR 다시 만들기라면 Next.js가 마지막 정상 화면을 계속 낸다(POL-029 stale-if-error와 같은 뜻). 첫 그리기라면 오류 화면이다.
 // - 서버 API 주소(PEAKET_API_ORIGIN)가 없으면(CI 빌드처럼 원본이 없는 곳) 부르지 않고 '없음'이다.
+// - 키 수 막기(docs/frontend.md §5.18, BAT-170 웨이브 끝 리뷰 W7L2-S1): 회차 ID 꼴은 캐시 함수 밖(화면)에서 isEventId로 먼저 본다.
+//   캐시 함수 안에서 보면 꼴 밖 글자마다 캐시 항목이 생긴다. 없음·중지 결과에는 태그 web-transient를 달아 공유 캐시에 넣지 않는다
+//   (처리기가 파드 메모리에만 60초 둔다).
 import { getEvent, getHome } from '@peaket/api-client/endpoints/catalog';
 import { cacheLife, cacheTag } from 'next/cache';
 import { ensureServerApi } from '@/shared/api';
@@ -19,29 +22,38 @@ function statusOf(e: unknown): number | undefined {
   return typeof s === 'number' ? s : undefined;
 }
 
-/** 회차 ID 꼴 확인(W7L2-S1 ①, 계획 §14). 화면이 loadEvent보다 먼저 부른다. 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3) */
+/** 공유하지 않을 결과의 태그. apps/web/server/cache-store.mjs의 TRANSIENT_TAG와 같은 값이다(서버 묶음에 redis를 끌어오지 않게 글자로 둔다) */
+const TRANSIENT_TAG = 'web-transient';
+
+/** 회차 ID 꼴 확인(UUID, W7L2-S1 ①). 화면이 loadEvent보다 먼저 부르고, 꼴 밖이면 캐시 함수를 부르지 않고 404다 */
 export function isEventId(id: string): boolean {
-  void id;
-  throw new Error('아직 없음');
+  return typeof id === 'string' && ID_SHAPE.test(id);
 }
 
 export async function loadEvent(id: string): Promise<LoadedEvent> {
   'use cache';
   cacheLife({ revalidate: 300 });
   cacheTag(`event:${id.toLowerCase()}`);
-  if (!ID_SHAPE.test(id) || id === PLACEHOLDER_EVENT_ID || !ensureServerApi()) return { kind: 'missing' };
+  // 꼴 밖은 화면이 먼저 막는다. 여기 닿아도 공유 캐시에는 넣지 않는다
+  if (!ID_SHAPE.test(id) || id === PLACEHOLDER_EVENT_ID || !ensureServerApi()) return transient({ kind: 'missing' });
   try {
     const r = await getEvent(id);
     const detail = toEventDetail(r.data);
-    if (!detail) return { kind: 'missing' };
+    if (!detail) return transient({ kind: 'missing' });
     cacheTag(`production:${detail.productionId.toLowerCase()}`);
     return { kind: 'found', detail, fetchedAtMs: Date.now() };
   } catch (e) {
     const s = statusOf(e);
-    if (s === 404) return { kind: 'missing' };
-    if (s === 410) return { kind: 'suspended' };
+    if (s === 404) return transient({ kind: 'missing' });
+    if (s === 410) return transient({ kind: 'suspended' });
     throw e;
   }
+}
+
+/** 없음·중지 결과: 태그 web-transient를 달아 돌려준다('use cache' 함수 안에서만 부른다) */
+function transient<T extends LoadedEvent>(r: T): T {
+  cacheTag(TRANSIENT_TAG);
+  return r;
 }
 
 /** 어느 회차도 미리 그리지 않을 때의 자리 ID(Cache Components는 generateStaticParams가 하나 이상 내야 한다. 이 ID는 404다) */

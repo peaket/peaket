@@ -20,7 +20,7 @@ import { hiddenLink } from '@/shared/ui/hidden-link';
 import { derivativeUrl } from '@/shared/lib/image-loader';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
 import { AppShell } from '@/widgets/app-shell';
-import { loadEvent, popularEventIds } from '../api/load-event';
+import { isEventId, loadEvent, popularEventIds } from '../api/load-event';
 import { AUTO_SEAT_NOTE, brokerNotice, LEGAL_RESALE_NOTICE, SORT_NOTICE } from '../model/content';
 import { jsonLdText, offerAvailability, type EventDetail } from '../model/detail';
 import { BookingBar, BookingFacts, BookingPanelCta, BookingPreverifyCard, BookingProvider, type BookingData } from './Booking';
@@ -41,6 +41,8 @@ export async function generateStaticParams(): Promise<{ id: string }[]> {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
+  // 꼴 밖 ID는 캐시 함수를 부르지 않는다(키 수 막기, docs/frontend.md §5.18)
+  if (!isEventId(id)) return { title: '페이지를 찾을 수 없습니다', robots: { index: false, follow: false } };
   const r = await loadEvent(id);
   if (r.kind === 'suspended') return { title: '판매가 중지된 공연입니다', robots: { index: false, follow: false } };
   if (r.kind === 'missing') return { title: '페이지를 찾을 수 없습니다', robots: { index: false, follow: false } };
@@ -55,6 +57,8 @@ const SEC = 'col scroll-mt-14 px-4 py-7 md:px-6 lg:px-0 lg:py-9';
 
 export async function EventDetailPage({ params, locale }: Props & { locale?: Locale }) {
   const { id } = await params;
+  // 꼴 밖 ID는 캐시 함수를 부르지 않고 바로 404다(키 수 막기, docs/frontend.md §5.18. 로케일 경로도 이 함수를 거친다)
+  if (!isEventId(id)) notFound();
   const r = await loadEvent(id);
   if (r.kind === 'missing') notFound();
   if (r.kind === 'suspended') return <SuspendedNotice />;

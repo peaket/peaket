@@ -7,7 +7,7 @@
 // - Redis가 늦거나 끊기면 읽기는 없음, 쓰기는 버림이다(저장소가 정한다). 개인 값을 읽는 함수에는 'use cache'를 쓰지 않는다(ASVS 14.2.2).
 // 저장소는 불러올 때 고른다(BAT-170 리뷰 R170-1): 주소가 있으면 Redis(빌드 칸이 맞지 않으면 던진다), 없으면 메모리. 미리 그린 화면 처리기와 같은 규칙이다.
 // 'use cache' 값 키(web:data:)에는 빌드 칸을 붙이지 않는다(Next.js가 캐시 키에 빌드 ID를 넣는다, R170-2)
-import { selectRuntime } from './cache-store.mjs';
+import { createMemoryStore, POD_MEMORY_MAX_ENTRIES, POD_MEMORY_TTL_SECONDS, selectRuntime, TRANSIENT_TAG } from './cache-store.mjs';
 
 /** 받은 흐름을 끝까지 읽어 한 덩어리로 */
 async function streamToBuffer(stream) {
@@ -27,17 +27,19 @@ function streamFrom(bytes) {
 }
 
 /**
- * @param {{ store: ReturnType<typeof import('./cache-store.mjs').createCacheStore>, now?: () => number }} o
+ * 공유하지 않을 항목(태그 web-transient: 없는·중지 회차 등)은 공유 캐시에 쓰지 않고 파드 메모리 저장소(1,000개·60초 [가정])에만 둔다
+ * (docs/frontend.md §5.18 '키 수 막기' ②, BAT-170 웨이브 끝 리뷰 W7L2-S1). 읽을 때는 파드 메모리를 먼저 본다.
+ * @param {{ store: ReturnType<typeof import('./cache-store.mjs').createCacheStore>, now?: () => number, local?: ReturnType<typeof createMemoryStore> }} o
  * @returns {import('next/dist/server/lib/cache-handlers/types').CacheHandler}
  */
-export function createUseCacheHandler({ store, now = Date.now }) {
+export function createUseCacheHandler({ store, now = () => Date.now(), local = createMemoryStore({ now, maxEntries: POD_MEMORY_MAX_ENTRIES, maxTtlSeconds: POD_MEMORY_TTL_SECONDS }) }) {
   /** 같은 키를 쓰는 중이면 get이 그 쓰기를 기다린다(Next.js 처리기 규칙). 요청이 끝나면 지운다 */
   const pending = new Map();
   return {
     async get(cacheKey) {
       const writing = pending.get(cacheKey);
       if (writing) await writing;
-      const raw = await store.getEntry('data', cacheKey);
+      const raw = (await local.getEntry('data', cacheKey)) ?? (await store.getEntry('data', cacheKey));
       if (raw == null) return undefined;
       let meta;
       try {
@@ -76,7 +78,9 @@ export function createUseCacheHandler({ store, now = Date.now }) {
         if (!process.env.__NEXT_DEV_SERVER && entry.expire === 0) return;
         const body = await streamToBuffer(entry.value);
         const meta = { tags: entry.tags, stale: entry.stale, timestamp: entry.timestamp, expire: entry.expire, revalidate: entry.revalidate, value: body.toString('base64') };
-        await store.setEntry('data', cacheKey, JSON.stringify(meta), entry.expire);
+        const target = Array.isArray(entry.tags) && entry.tags.includes(TRANSIENT_TAG) ? local : store;
+        // 값 TTL은 만료·간격의 12배·상한 가운데 가장 짧은 쪽이라 간격도 넘긴다(만료를 주지 않으면 Next.js는 무한을 넘긴다)
+        await target.setEntry('data', cacheKey, JSON.stringify(meta), entry.expire, entry.revalidate);
       } catch {
         // 흐름이 깨지면 그 항목은 버린다
       } finally {
@@ -104,6 +108,10 @@ export function createUseCacheHandler({ store, now = Date.now }) {
   };
 }
 
+const runtime = selectRuntime();
+// 처음 연결은 불러올 때 연결 시간 한도(1초)까지 기다린다. 붙지 못해도 던지지 않고, 그동안의 요청은 없음·버림이다
+await runtime.store.ready?.();
+
 /** @type {import('next/dist/server/lib/cache-handlers/types').CacheHandler} */
-const handler = createUseCacheHandler({ store: selectRuntime().store });
+const handler = createUseCacheHandler({ store: runtime.store });
 export default handler;

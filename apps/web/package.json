@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test \"src/**/*.test.mjs\" \"server/**/*.test.mjs\" \"scripts/**/*.test.mjs\" \"queue-room/test/*.test.mjs\"",
     "test:integration": "node --test \"test-int/*.int.test.mjs\"",
+    "test:build": "node --test \"test-int/*.build.test.mjs\"",
+    "test:heavy": "node --test \"test-int/*.heavy.test.mjs\"",
     "color-mode": "node scripts/build-color-mode.mjs",
     "mock-api": "node scripts/mock-api.mjs"
   },
