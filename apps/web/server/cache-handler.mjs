@@ -1,10 +1,14 @@
 // 미리 그린 화면 캐시용 Next.js cacheHandler(docs/frontend.md §5.18 '공유 캐시 처리기 세부', BUILD_ORDER HOT-390).
-// PEAKET_WEB_CACHE_REDIS_URL의 Redis(Valkey)에 `web:isr:<캐시 키>`로 두고, 태그 무효화 시각은 'use cache' 처리기와 같은 키
-// (`web:{tag}:<태그>`)를 쓴다. 그래서 어느 파드가 revalidateTag를 불러도 다른 파드가 그 시각보다 먼저 만든 화면을 없는 것으로 본다.
+// 값은 `web:isr:<빌드 칸>:<캐시 키>`로 두고, 태그 무효화 시각은 'use cache' 처리기와 같은 키(`web:{tag}:<태그>`)를 쓴다.
+// 그래서 어느 파드가 revalidateTag를 불러도 다른 파드가 그 시각보다 먼저 만든 화면을 없는 것으로 보고(태그는 판을 넘는다),
+// 빌드 칸이 다른 판은 서로의 HTML·RSC를 읽지 않는다(BAT-170 리뷰 R170-2).
+// - 저장소는 불러올 때 고른다(R170-1): PEAKET_WEB_CACHE_REDIS_URL이 있으면 Redis(Valkey)이고 빌드 칸(PEAKET_WEB_CACHE_BUILD, start.mjs가 산출물에서
+//   읽어 넘긴다)이 꼴 밖이거나 없으면 던진다. 주소가 없으면 프로세스 메모리 저장소(local·ci·demo 전용)이고 빌드 칸이 없으면 `dev`(next dev)다.
 // - 값: { lastModified, cacheControl, tags, value } JSON. Buffer·Uint8Array·Map(RSC 조각)은 글자로 바꿔 담고 읽을 때 되돌린다.
 // - TTL: cacheControl.expire와 30일 [가정] 가운데 짧은 쪽(만료가 없으면 30일). 1MB [가정]가 넘는 화면은 쓰지 않는다.
 // - Redis가 늦거나 끊기면 get은 null(원본으로 그린다), set·revalidateTag는 버린다. 던지지 않는다.
-import { createCacheStore, createLazyRedis, CACHE_URL_ENV } from './cache-store.mjs';
+import { assertBuildTag } from './cache-env.mjs';
+import { selectRuntime } from './cache-store.mjs';
 
 /** Next.js 캐시 태그 머리(next/dist/lib/constants NEXT_CACHE_TAGS_HEADER) */
 const TAGS_HEADER = 'x-next-cache-tags';
@@ -33,66 +37,76 @@ function tagsOfValue(data) {
   return [];
 }
 
-/** 모듈마다 저장소 하나(파드 하나). 주소가 없으면 null(캐시 없이 원본) */
-const url = process.env[CACHE_URL_ENV]?.trim();
-const store = url ? createCacheStore({ client: createLazyRedis(url) }) : null;
-
 /**
- * 미리 그린 화면 처리기(BAT-170 리뷰 R170-1·R170-2, 계획 §12): get·set·revalidateTag·resetRequestCache를 가진 객체. isr 값 키 칸은 `<build>:<캐시 키>`다.
- * 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 기본 내보내기 클래스가 이것을 쓰게 하는 일은 구현 담당이 한다.
- * @param {{ store: object, build: string, now?: () => number }} o
+ * 미리 그린 화면 처리기: get·set·revalidateTag·resetRequestCache. isr 값 키 칸은 `<build>:<캐시 키>`다.
+ * @param {{ store: ReturnType<typeof createCacheStore>, build: string, now?: () => number, revalidatedTags?: readonly string[] }} o
  */
-export function createCacheHandler(o) {
-  void o;
-  throw new Error('아직 없음');
+export function createCacheHandler({ store, build, now = Date.now, revalidatedTags = [] }) {
+  assertBuildTag(build);
+  const keyOf = (cacheKey) => `${build}:${cacheKey}`;
+  return {
+    async get(cacheKey, ctx) {
+      const raw = await store.getEntry('isr', keyOf(cacheKey));
+      if (raw == null) return null;
+      let entry;
+      try {
+        entry = JSON.parse(Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw), reviver);
+      } catch {
+        return null;
+      }
+      const tags = [...new Set([...(entry.tags ?? []), ...(Array.isArray(ctx?.tags) ? ctx.tags : []), ...(Array.isArray(ctx?.softTags) ? ctx.softTags : [])])];
+      if (tags.length > 0) {
+        if (tags.some((t) => revalidatedTags.includes(t))) return null;
+        const times = await store.tagTimes(tags);
+        if (times === null) return null;
+        for (const t of tags) if ((times.get(t) ?? 0) > entry.lastModified) return null;
+      }
+      return { lastModified: entry.lastModified, value: entry.value ?? null, ...(entry.cacheControl ? { cacheControl: entry.cacheControl } : {}) };
+    },
+
+    async set(cacheKey, data, ctx) {
+      try {
+        const cacheControl = ctx?.fetchCache ? undefined : ctx?.cacheControl;
+        const tags = [...new Set([...tagsOfValue(data), ...(Array.isArray(ctx?.tags) ? ctx.tags : [])])];
+        const entry = { lastModified: now(), cacheControl, tags, value: data ?? null };
+        const expire = cacheControl?.expire ?? (typeof ctx?.revalidate === 'number' ? ctx.revalidate : undefined);
+        await store.setEntry('isr', keyOf(cacheKey), JSON.stringify(entry, replacer), expire);
+      } catch {
+        // 담을 수 없는 값이면 버린다(원본으로 다시 그린다)
+      }
+    },
+
+    async revalidateTag(tags, _durations) {
+      const list = (typeof tags === 'string' ? [tags] : (tags ?? [])).filter((t) => typeof t === 'string' && t !== '');
+      if (list.length === 0) return;
+      // durations(stale-while-revalidate)는 쓰지 않고 바로 만료로 본다('use cache' 처리기와 같다). 태그 키에는 빌드 칸이 없어 모든 판에 닿는다
+      await store.markTags(list, now());
+    },
+
+    resetRequestCache() {},
+  };
 }
+
+const runtime = selectRuntime();
 
 export default class CacheHandler {
   /** @param {{ revalidatedTags?: string[] }} ctx */
   constructor(ctx) {
     /** 이 요청 안에서 무효화한 태그(Next.js가 넘긴다). 읽을 때 바로 없는 것으로 본다 */
-    this.revalidatedTags = Array.isArray(ctx?.revalidatedTags) ? ctx.revalidatedTags : [];
+    const revalidatedTags = Array.isArray(ctx?.revalidatedTags) ? ctx.revalidatedTags : [];
+    this.handler = createCacheHandler({ ...runtime, revalidatedTags });
   }
 
-  async get(cacheKey, ctx) {
-    if (!store) return null;
-    const raw = await store.getEntry('isr', cacheKey);
-    if (raw == null) return null;
-    let entry;
-    try {
-      entry = JSON.parse(Buffer.isBuffer(raw) ? raw.toString('utf8') : String(raw), reviver);
-    } catch {
-      return null;
-    }
-    const tags = [...new Set([...(entry.tags ?? []), ...(Array.isArray(ctx?.tags) ? ctx.tags : []), ...(Array.isArray(ctx?.softTags) ? ctx.softTags : [])])];
-    if (tags.length > 0) {
-      if (tags.some((t) => this.revalidatedTags.includes(t))) return null;
-      const times = await store.tagTimes(tags);
-      if (times === null) return null;
-      for (const t of tags) if ((times.get(t) ?? 0) > entry.lastModified) return null;
-    }
-    return { lastModified: entry.lastModified, value: entry.value ?? null, ...(entry.cacheControl ? { cacheControl: entry.cacheControl } : {}) };
+  get(cacheKey, ctx) {
+    return this.handler.get(cacheKey, ctx);
   }
 
-  async set(cacheKey, data, ctx) {
-    if (!store) return;
-    try {
-      const cacheControl = ctx?.fetchCache ? undefined : ctx?.cacheControl;
-      const tags = [...new Set([...tagsOfValue(data), ...(Array.isArray(ctx?.tags) ? ctx.tags : [])])];
-      const entry = { lastModified: Date.now(), cacheControl, tags, value: data ?? null };
-      const expire = cacheControl?.expire ?? (typeof ctx?.revalidate === 'number' ? ctx.revalidate : undefined);
-      await store.setEntry('isr', cacheKey, JSON.stringify(entry, replacer), expire);
-    } catch {
-      // 담을 수 없는 값이면 버린다(원본으로 다시 그린다)
-    }
+  set(cacheKey, data, ctx) {
+    return this.handler.set(cacheKey, data, ctx);
   }
 
-  async revalidateTag(tags, _durations) {
-    if (!store) return;
-    const list = (typeof tags === 'string' ? [tags] : (tags ?? [])).filter((t) => typeof t === 'string' && t !== '');
-    if (list.length === 0) return;
-    // durations(stale-while-revalidate)는 쓰지 않고 바로 만료로 본다('use cache' 처리기와 같다)
-    await store.markTags(list, Date.now());
+  revalidateTag(tags, durations) {
+    return this.handler.revalidateTag(tags, durations);
   }
 
   resetRequestCache() {}

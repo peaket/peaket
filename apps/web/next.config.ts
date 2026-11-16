@@ -27,8 +27,10 @@ const config: NextConfig = {
   output: 'standalone',
   // 출시 후보 커밋 SHA를 배포 식별자로 쓴다(화면·서버 배포 식별자가 다르면 새로고침, HOT-390).
   deploymentId: deploymentIdOf(),
-  // 공유 캐시 처리기(docs/frontend.md §5.18 '공유 캐시 처리기 세부', HOT-390): PEAKET_WEB_CACHE_REDIS_URL이 있을 때만 미리 그린 화면 캐시(cacheHandler)와
-  // 'use cache'(cacheHandlers.default)를 같은 Redis에 두고 메모리 캐시를 0으로 한다. 값이 없으면 Next.js 기본 처리기(로컬·CI 검사)
+  // 공유 캐시 처리기(docs/frontend.md §5.18 '공유 캐시 처리기 세부', HOT-390): 환경 값과 관계없이 늘 미리 그린 화면 캐시(cacheHandler)와
+  // 'use cache'(cacheHandlers.default)를 걸고 메모리 캐시를 0으로 한다. standalone server.js는 이 설정을 빌드 때 굳히므로 걸지 말지를 환경으로 정하지 않는다
+  // (BAT-170 리뷰 R170-1). 저장소는 처리기가 실행 때 고른다: PEAKET_WEB_CACHE_REDIS_URL이 있으면 Redis, 없으면 프로세스 메모리(local·ci·demo).
+  // server/start.mjs가 산출물의 required-server-files.json을 보고 두 처리기·메모리 0이 아니면 뜨지 않는다. 두 처리기 파일과 redis는 Next.js가 standalone에 추적해 싣는다
   ...cacheConfig(),
   transpilePackages: ['@peaket/ds', '@peaket/api-client', '@peaket/seatmap'],
   // SEED recipe를 층 판(@layer seed-components)으로 돌린다. Turbopack은 내보내기 조건 seed-layered를 고르지 못해서다(d2 §1, FE-T36)

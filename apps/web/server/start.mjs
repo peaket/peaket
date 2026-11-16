@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { assertCacheEnv } from './cache-env.mjs';
+import { assertBuiltCacheConfig, assertCacheEnv, CACHE_BUILD_ENV, readBuildTag } from './cache-env.mjs';
 import { createCspHashServer, reactRuntimeScripts } from './csp-hash-server.mjs';
 import { prepareStandalone, standaloneServerPath } from './standalone.mjs';
 
@@ -32,6 +32,18 @@ const inner = Number(values['inner-port'] ?? port + 1);
 if (!Number.isInteger(port) || !Number.isInteger(inner) || port === inner) throw new Error(`--port·--inner-port가 틀렸다: ${values.port}, ${values['inner-port']}`);
 
 const dist = process.env.PEAKET_NEXT_DIST ?? '.next';
+
+// 빌드 설정과 빌드 칸 확인(BAT-170 리뷰 R170-1·R170-2, docs/frontend.md §5.18). standalone server.js를 불러오기 전에, 환경과 관계없이 한다.
+// ① 산출물의 required-server-files.json이 두 처리기·메모리 캐시 0이 아니면 멈춘다(처리기를 걸지가 빌드 때 굳어 조용히 빠지는 것 막기).
+// ② 빌드 칸(deploymentId, 없으면 BUILD_ID)을 읽어 두 처리기에 넘긴다. 미리 그린 화면 키 web:isr:<빌드 칸>:<캐시 키>가 판을 가린다
+try {
+  assertBuiltCacheConfig(resolve(appDir, dist));
+  process.env[CACHE_BUILD_ENV] = readBuildTag(resolve(appDir, dist));
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
+  process.exit(1);
+}
+
 // standalone server.js가 있으면 .next/static과 public을 그 안으로 복사한다(없으면 next start 길).
 prepareStandalone(appDir, dist);
 const standalone = standaloneServerPath(appDir, dist);

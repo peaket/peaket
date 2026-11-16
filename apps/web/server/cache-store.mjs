@@ -9,6 +9,7 @@ import { createClient } from 'redis';
 
 // 환경 확인·next.config 설정은 Redis 없이 읽는 cache-env.mjs에 두고 여기서 함께 내보낸다(server/start.mjs·next.config.ts가 가볍게 부른다)
 export { assertCacheEnv, cacheConfig, CACHE_URL_ENV } from './cache-env.mjs';
+import { assertBuildTag, CACHE_BUILD_ENV, CACHE_URL_ENV } from './cache-env.mjs';
 
 /** 값·태그 시각 TTL 상한: 30일 [가정](docs/frontend.md §5.18) */
 export const DEFAULT_MAX_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -133,12 +134,52 @@ export function createLazyRedis(url) {
   };
 }
 
+/** 메모리 저장소 항목 수 상한: 1,000개 [가정](docs/frontend.md §5.18). 넘으면 먼저 넣은 것부터 지운다 */
+export const DEFAULT_MEMORY_MAX_ENTRIES = 1_000;
+
 /**
- * 프로세스 메모리 저장소(BAT-170 리뷰 R170-1, 계획 §12): createCacheStore와 같은 네 메서드, 같은 키 꼴·TTL 규칙, 상한을 넘으면 먼저 넣은 것부터 지운다.
- * 시험 담당이 먼저 둔 빈 뼈대다(ADR-0270 결정 3). 동작은 구현 담당이 쓴다.
+ * 프로세스 메모리 저장소(BAT-170 리뷰 R170-1, docs/frontend.md §5.18): 주소가 없는 local·ci·demo에서 두 처리기가 쓴다.
+ * createCacheStore와 같은 네 메서드·같은 키 꼴·TTL 규칙이다. 안쪽은 Redis 대신 Map이고, 만료는 읽을 때 now()로 본다.
+ * 항목(값·태그 시각 모두)이 상한을 넘으면 먼저 넣은 것부터 지운다(같은 키를 다시 쓰면 맨 뒤로 간다)
  * @param {{ now?: () => number, maxTtlSeconds?: number, maxEntries?: number }} [o]
  */
-export function createMemoryStore(o) {
-  void o;
-  throw new Error('아직 없음');
+export function createMemoryStore({ now = Date.now, maxTtlSeconds = DEFAULT_MAX_TTL_SECONDS, maxEntries = DEFAULT_MEMORY_MAX_ENTRIES } = {}) {
+  /** @type {Map<string, { value: string, expiresAt: number }>} */
+  const data = new Map();
+  const read = (k) => {
+    const e = data.get(k);
+    if (!e) return null;
+    if (now() >= e.expiresAt) {
+      data.delete(k);
+      return null;
+    }
+    return e.value;
+  };
+  const client = {
+    get: async (k) => read(k),
+    mGet: async (keys) => keys.map(read),
+    set: async (k, v, o) => {
+      const seconds = Number(o?.expiration?.value ?? maxTtlSeconds);
+      data.delete(k);
+      data.set(k, { value: String(v), expiresAt: now() + seconds * 1000 });
+      while (data.size > maxEntries) data.delete(data.keys().next().value);
+      return 'OK';
+    },
+  };
+  return createCacheStore({ client, now, maxTtlSeconds });
+}
+
+/**
+ * 처리기 모듈이 불러올 때 저장소와 빌드 칸을 고른다(파드마다 하나, BAT-170 리뷰 R170-1·R170-2, docs/frontend.md §5.18).
+ * 주소가 있으면 Redis이고 빌드 칸(PEAKET_WEB_CACHE_BUILD)이 꼴 밖이거나 없으면 던진다(조용히 빌드 칸 없이 쓰지 않는다).
+ * 주소가 없으면 메모리 저장소이고 빌드 칸이 없으면 `dev`다(`next dev`는 start.mjs를 거치지 않는다)
+ */
+export function selectRuntime(env = process.env) {
+  const url = env[CACHE_URL_ENV]?.trim();
+  const given = env[CACHE_BUILD_ENV];
+  if (url) {
+    const build = assertBuildTag(given, `${CACHE_BUILD_ENV}(공유 캐시 주소가 있을 때 빌드 칸)`);
+    return { store: createCacheStore({ client: createLazyRedis(url) }), build };
+  }
+  return { store: createMemoryStore(), build: given === undefined ? 'dev' : assertBuildTag(given, CACHE_BUILD_ENV) };
 }

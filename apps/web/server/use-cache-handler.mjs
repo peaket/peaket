@@ -5,7 +5,9 @@
 // - 태그를 무효화하면(updateTags) 그 시각을 `web:{tag}:<태그>`에 쓴다. 읽을 때(get) 항목의 태그 시각을 한 번에 읽어 그보다 먼저 만든
 //   값은 없는 것으로 본다. 다른 파드도 같은 키를 읽으므로 refreshTags는 할 일이 없고 getExpiration은 Redis의 시각을 그대로 준다.
 // - Redis가 늦거나 끊기면 읽기는 없음, 쓰기는 버림이다(저장소가 정한다). 개인 값을 읽는 함수에는 'use cache'를 쓰지 않는다(ASVS 14.2.2).
-import { createCacheStore, createLazyRedis, CACHE_URL_ENV } from './cache-store.mjs';
+// 저장소는 불러올 때 고른다(BAT-170 리뷰 R170-1): 주소가 있으면 Redis(빌드 칸이 맞지 않으면 던진다), 없으면 메모리. 미리 그린 화면 처리기와 같은 규칙이다.
+// 'use cache' 값 키(web:data:)에는 빌드 칸을 붙이지 않는다(Next.js가 캐시 키에 빌드 ID를 넣는다, R170-2)
+import { selectRuntime } from './cache-store.mjs';
 
 /** 받은 흐름을 끝까지 읽어 한 덩어리로 */
 async function streamToBuffer(stream) {
@@ -102,17 +104,6 @@ export function createUseCacheHandler({ store, now = Date.now }) {
   };
 }
 
-const url = process.env[CACHE_URL_ENV]?.trim();
-
 /** @type {import('next/dist/server/lib/cache-handlers/types').CacheHandler} */
-const handler = url
-  ? createUseCacheHandler({ store: createCacheStore({ client: createLazyRedis(url) }) })
-  : {
-      // 주소 없이 이 모듈을 불렀다(설정 실수). 캐시 없이 원본으로 그린다
-      get: async () => undefined,
-      set: async () => {},
-      refreshTags: async () => {},
-      getExpiration: async () => 0,
-      updateTags: async () => {},
-    };
+const handler = createUseCacheHandler({ store: selectRuntime().store });
 export default handler;
