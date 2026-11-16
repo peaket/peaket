@@ -195,3 +195,20 @@ export function deniedWindow(phases: DetailSalePhase[], openAtMs: number, readAt
 export function deniedHashCleanUrl(loc: { pathname: string; search: string; hash: string }): string | null {
   return isDeniedHash(loc.hash) ? `${loc.pathname}${loc.search}` : null;
 }
+
+/**
+ * 명단 밖 알림을 켤지(ADR-0272 결정 4 '출처 확인', 보안 리뷰 W7L2-S2 뒤): 대기실이 같은 탭 저장소에 쓴 표시와 주소 조각의 짝이 맞을 때만 켠다.
+ * 표시는 늘 읽고 지우며, 조각은 어느 경우든 지운 주소(cleanUrl)를 돌려준다. 시험 담당이 만든 빈 뼈대이고(ADR-0270 결정 1·2), 동작은 구현 담당이 채운다
+ */
+export function takeDeniedMarker(i: {
+  kv: { getItem(k: string): string | null; removeItem(k: string): void } | null;
+  eventId: string;
+  loc: { pathname: string; search: string; hash: string };
+  deviceNowMs: number;
+  phases: DetailSalePhase[];
+  openAtMs: number;
+  readAtMs?: number;
+}): { cleanUrl: string | null; denied: { untilMs?: number } | null } {
+  void i;
+  throw new Error('아직 없음');
+}

@@ -21,18 +21,34 @@ test('[R040-1] 공연 상세 화면 코드는 상태 파일 가게의 start()·o
   assert.match(stripComments(readFileSync(join(dir, 'sale-live.ts'), 'utf8')), /\bcreateLiveSaleDriver\b/, 'sale-live.ts가 받기 운전자를 쓴다');
 });
 
-test('[V040-28] useDeniedMarker는 deniedHashCleanUrl의 값으로 history.replaceState를 부른다', () => {
-  // 계획 '검증 뒤 정한 것' VV4, ADR-0272 결정 4 'history.replaceState로 주소 조각만 지운다'. 실제 주소는 브라우저 확인 B5가 본다
+/** 주석 뺀 sale-live.ts의 useDeniedMarker 본문 */
+function deniedMarkerBody() {
   const dir = fileURLToPath(new URL('.', import.meta.url));
   const src = stripComments(readFileSync(join(dir, 'sale-live.ts'), 'utf8'));
   const at = src.indexOf('export function useDeniedMarker');
   assert.ok(at >= 0, 'useDeniedMarker가 있다');
   const rest = src.slice(at + 1);
   const next = rest.search(/\nexport /);
-  const body = next < 0 ? rest : rest.slice(0, next);
-  const made = /(?:const|let)\s+(\w+)\s*=\s*deniedHashCleanUrl\(/.exec(body);
-  assert.ok(made, 'deniedHashCleanUrl(의 결과를 이름에 담는다');
-  const call = /history\.replaceState\(\s*[^,()]+(?:\([^()]*\))?[^,()]*,\s*[^,()]+,\s*(\w+)\s*\)/.exec(body);
+  return next < 0 ? rest : rest.slice(0, next);
+}
+
+test('[V040-28] useDeniedMarker는 takeDeniedMarker가 돌려준 cleanUrl(deniedHashCleanUrl의 값)로 history.replaceState를 부른다', () => {
+  // 계획 '검증 뒤 정한 것' VV4를 '웨이브 끝 리뷰 뒤 정한 것'(W7L2-S2)에 맞춰 바꿈. ADR-0272 결정 4 'history.replaceState로 주소 조각만 지운다'. 실제 주소는 브라우저 확인 B5가 본다
+  const body = deniedMarkerBody();
+  const call = /history\.replaceState\(\s*[^,()]+(?:\([^()]*\))?[^,()]*,\s*[^,()]+,\s*([\w.]+)\s*\)/.exec(body);
   assert.ok(call, 'history.replaceState(를 부른다');
-  assert.equal(call[1], made[1], 'replaceState의 셋째 인자가 deniedHashCleanUrl의 결과다');
+  const arg = call[1];
+  // 두 모양: const r = takeDeniedMarker(…) → r.cleanUrl, 또는 const { cleanUrl, … } = takeDeniedMarker(…) → cleanUrl
+  const named = /(?:const|let)\s+(\w+)\s*=\s*takeDeniedMarker\(/.exec(body);
+  const destructured = /(?:const|let)\s*\{[^}]*\bcleanUrl\b(?:\s*:\s*(\w+))?[^}]*\}\s*=\s*takeDeniedMarker\(/.exec(body);
+  const ok = (named && arg === `${named[1]}.cleanUrl`) || (destructured && arg === (destructured[1] ?? 'cleanUrl'));
+  assert.ok(ok, `replaceState의 셋째 인자(${arg})가 takeDeniedMarker 결과의 cleanUrl이다`);
+});
+
+test('[W7L2-S2] useDeniedMarker는 takeDeniedMarker에 sessionStorage를 넘기고, 조각만으로 켜지 않는다', () => {
+  // 계획 '웨이브 끝 리뷰 뒤 정한 것' WS6, ADR-0272 결정 4 '출처 확인': 켤지는 대기실 표시와 조각의 짝으로 takeDeniedMarker만 정한다
+  const body = deniedMarkerBody();
+  assert.match(body, /\btakeDeniedMarker\(/, 'takeDeniedMarker(를 부른다');
+  assert.match(body, /\bsessionStorage\b/, 'sessionStorage를 넘긴다');
+  for (const direct of ['deniedWindow(', 'isDeniedHash(', 'deniedHashCleanUrl(']) assert.ok(!body.includes(direct), `${direct}를 직접 부르지 않는다(조각만 보고 켜는 길이 없다)`);
 });

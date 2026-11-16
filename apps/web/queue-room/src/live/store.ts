@@ -120,6 +120,8 @@ export interface Store {
   deviceId(): string | undefined;
   /** 이 회차의 희망 조건(peaket.autoassign.{eventId})을 지운다(판매 종료) */
   clearAutoAssign(): void;
+  /** 명단 밖 403의 출처 표시 sessionStorage peaket.queue.{eventId}.eligDenied(ADR-0272 결정 4 '출처 확인'). 시험 담당의 빈 뼈대이고 구현 담당이 채운다 */
+  markEligibilityDenied(): void;
 }
 
 export function createStore(eventId: string, local: KV | null, session: KV | null, now: () => number, randomBytes: (n: number) => Uint8Array): Store {
@@ -183,6 +185,9 @@ export function createStore(eventId: string, local: KV | null, session: KV | nul
     },
     clearAutoAssign() {
       safe(() => local?.removeItem(`peaket.autoassign.${eventId}`), undefined);
+    },
+    markEligibilityDenied() {
+      throw new Error('아직 없음');
     },
     deviceId() {
       const v = safe(() => local?.getItem('peaket.device') ?? null, null);

@@ -13,6 +13,7 @@ import {
   needsEligibility,
   presaleNotice,
   saleBoundaryAfter,
+  takeDeniedMarker,
   toFanEligibility,
   toSalePhases,
 } from './sale.ts';
@@ -320,6 +321,116 @@ test('[V040-28][Q-T36 ⑧] 명단 밖 조각을 지운 주소는 경로와 쿼�
   assert.equal(deniedHashCleanUrl({ pathname: '/events/e1', search: '', hash: H }), '/events/e1');
   for (const hash of ['#Sale-eligibility-required', '#SALE-ELIGIBILITY-REQUIRED', '#sale-eligibility-required-x', '#sale-eligibility-required ', '#sale-eligibility-required&x=1', 'sale-eligibility-required', '#sale-eligibility', '#', '']) {
     assert.equal(deniedHashCleanUrl({ pathname: '/events/e1', search: '?ref=a', hash }), null, JSON.stringify(hash));
+  }
+});
+
+// ── 웨이브 끝 보안 리뷰 W7L2-S2 재현(계획 '웨이브 끝 리뷰 뒤 정한 것' WS1~WS4, ADR-0272 결정 4 '출처 확인') ──
+// 단언 값은 정본 값(표시 나이 60초 이하 · 미래 5초 이하)을 적는다. 코드 상수를 가져오지 않는다
+const KEY = `peaket.queue.${EV}.eligDenied`;
+const HASH = '#sale-eligibility-required';
+const LOC = { pathname: `/events/${EV}`, search: '?ref=a', hash: HASH };
+/** 탭 저장소 대역(읽기·지우기 횟수를 센다) */
+function kvOf(init = {}) {
+  const m = new Map(Object.entries(init));
+  const kv = {
+    reads: 0,
+    removes: 0,
+    getItem: (k) => (kv.reads++, m.has(k) ? m.get(k) : null),
+    removeItem: (k) => (kv.removes++, void m.delete(k)),
+    has: (k) => m.has(k),
+  };
+  return kv;
+}
+const marker = (at, o = {}) => JSON.stringify({ v: 1, at, ...o });
+const take = (o = {}) => takeDeniedMarker({ kv: kvOf(), eventId: EV, loc: LOC, deviceNowMs: OPEN - 10 * 60_000, readAtMs: OPEN - 10 * 60_000, phases: PHASES, openAtMs: OPEN, ...o });
+const cta = (o = {}) =>
+  bookingCta({ phase: 'queue', data: CTA_DATA, now: OPEN + 60_000, personal: null, restricted: null, eligibility: null, live: { status: 'known', saleStatus: 'ON_SALE', soldOutTiers: [] }, queueHref: 'https://queue.peaket.example/e1', ...o });
+
+test('[W7L2-S2] 대기실 표시 없이 조각만 붙인 링크는 명단 밖 알림을 켜지 않는다: 명단 팬·비회원·선예매 없는 회차의 예매 버튼은 평소 모양이다', () => {
+  const r = take();
+  assert.deepEqual(r, { cleanUrl: `/events/${EV}?ref=a`, denied: null }, '조각은 지우고 알림은 켜지 않는다');
+  // 명단 팬(eligible true): queue는 [대기열 들어가기], lobby는 [로비 입장] 링크
+  const q = gate({ phase: 'queue', nowMs: OPEN + 60_000, fan: fan(true), denied: r.denied });
+  assert.equal(q, null);
+  assert.deepEqual(cta({ eligibility: q }).primary, { type: 'enter', label: '대기열 들어가기' });
+  const l = gate({ phase: 'lobby', fan: fan(true), denied: r.denied });
+  assert.equal(l, null);
+  assert.deepEqual(cta({ phase: 'lobby', now: OPEN - 5 * 60_000, eligibility: l, live: { status: 'loading' } }).primary, { type: 'link', label: '로비 입장', href: 'https://queue.peaket.example/e1' });
+  // 비회원: 비활성이 아니라 로그인 버튼
+  const g = gate({ phase: 'queue', session: { status: 'guest' }, nowMs: OPEN + 60_000, fan: { status: 'idle' }, denied: r.denied });
+  assert.equal(g, null);
+  assert.deepEqual(cta({ personal: 'login', eligibility: g }).primary, { type: 'link', label: '로그인하고 입장', href: '/login' });
+  // 선예매 없는 회차(공개 조각 없음)
+  const none = take({ phases: [] });
+  assert.equal(none.denied, null);
+  const n = gate({ phase: 'queue', phases: [], nowMs: OPEN + 60_000, fan: { status: 'idle' }, denied: none.denied });
+  assert.equal(n, null);
+  assert.deepEqual(cta({ eligibility: n }).primary, { type: 'enter', label: '대기열 들어가기' });
+});
+
+test('[W7L2-S2] 짝이 맞지 않는 표시는 켜지 않는다(JSON 아님·v 2·at 글자·다른 회차 키·지금 − 60,001ms·지금 + 5,001ms·표시만 있고 조각 없음), 경계 지금 − 60,000ms·지금 + 5,000ms는 켠다', () => {
+  const now = OPEN - 10 * 60_000;
+  const bad = [
+    ['JSON 아님', { [KEY]: 'not json' }, LOC],
+    ['v 2', { [KEY]: JSON.stringify({ v: 2, at: now - 1000 }) }, LOC],
+    ['at 글자', { [KEY]: JSON.stringify({ v: 1, at: String(now - 1000) }) }, LOC],
+    ['at 정수 아님', { [KEY]: JSON.stringify({ v: 1, at: now - 1000.5 }) }, LOC],
+    ['at 없음', { [KEY]: JSON.stringify({ v: 1 }) }, LOC],
+    ['다른 회차 키', { 'peaket.queue.other-event.eligDenied': marker(now - 1000) }, LOC],
+    ['지금 − 60,001ms', { [KEY]: marker(now - 60_001) }, LOC],
+    ['지금 + 5,001ms', { [KEY]: marker(now + 5_001) }, LOC],
+    ['표시만 있고 조각 없음', { [KEY]: marker(now - 1000) }, { ...LOC, hash: '' }],
+    ['표시와 다른 조각', { [KEY]: marker(now - 1000) }, { ...LOC, hash: '#Sale-eligibility-required' }],
+  ];
+  for (const [why, init, loc] of bad) {
+    const kv = kvOf(init);
+    const r = takeDeniedMarker({ kv, eventId: EV, loc, deviceNowMs: now, readAtMs: now, phases: PHASES, openAtMs: OPEN });
+    assert.equal(r.denied, null, why);
+    assert.equal(kv.has(KEY), false, `${why}: 이 회차의 표시가 남지 않는다`);
+  }
+  for (const [why, at] of [['지금 − 60,000ms', now - 60_000], ['지금 + 5,000ms', now + 5_000]]) {
+    const kv = kvOf({ [KEY]: marker(at) });
+    const r = takeDeniedMarker({ kv, eventId: EV, loc: LOC, deviceNowMs: now, readAtMs: now, phases: PHASES, openAtMs: OPEN });
+    assert.notEqual(r.denied, null, why);
+    assert.equal(kv.has(KEY), false, `${why}: 읽은 뒤 지운다`);
+  }
+});
+
+test('[W7L2-S2][Q-T36 ⑧] 대기실에서 돌아온 것(조각 + 이 회차 표시, at = 지금 − 1초)은 켜고, 창과 버튼은 결정 4대로다', () => {
+  const now = OPEN - 10 * 60_000;
+  const kv = kvOf({ [KEY]: marker(now - 1000) });
+  const r = takeDeniedMarker({ kv, eventId: EV, loc: LOC, deviceNowMs: now, readAtMs: now, phases: PHASES, openAtMs: OPEN });
+  assert.deepEqual(r, { cleanUrl: `/events/${EV}?ref=a`, denied: { untilMs: GEN } }, '창은 오픈 시각이 든 PRESALE의 끝(RV6의 G)');
+  assert.equal(kv.has(KEY), false);
+  // 팬 자격이 대상이어도 창 안이면 자격 없음 → 비활성 '대기열 들어가기'와 이유 글
+  assert.deepEqual(gate({ phase: 'lobby', fan: fan(true), denied: r.denied, nowMs: OPEN - 60_000 }), { reason: REASON });
+  const e = gate({ phase: 'queue', fan: fan(true), denied: r.denied, nowMs: GEN - 1 });
+  const m = cta({ now: GEN - 1, eligibility: e });
+  assert.deepEqual([m.primary, m.desc], [{ type: 'disabled', label: '대기열 들어가기' }, REASON]);
+});
+
+test('[W7L2-S2] 표시는 한 번만 켠다: 켠 뒤 같은 KV로 다시 부르면(새로고침·다시 열기) 켜지지 않는다', () => {
+  const now = OPEN - 10 * 60_000;
+  const kv = kvOf({ [KEY]: marker(now - 1000) });
+  const i = { kv, eventId: EV, loc: LOC, deviceNowMs: now, readAtMs: now, phases: PHASES, openAtMs: OPEN };
+  assert.notEqual(takeDeniedMarker(i).denied, null, '처음은 켠다');
+  assert.equal(takeDeniedMarker(i).denied, null, '다시 부르면 켜지지 않는다');
+  // 조각이 없어도 표시는 늘 읽고 지운다
+  const kv2 = kvOf({ [KEY]: marker(now - 1000) });
+  takeDeniedMarker({ ...i, kv: kv2, loc: { ...LOC, hash: '' } });
+  assert.equal(kv2.has(KEY), false);
+  assert.equal(takeDeniedMarker({ ...i, kv: kv2 }).denied, null, '조각 없이 연 뒤에는 표시가 없다');
+});
+
+test('[W7L2-S2] KV 읽기가 던지면·지우기가 던지면·KV가 없으면 켜지지 않고 던지지 않는다', () => {
+  const now = OPEN - 10 * 60_000;
+  const value = marker(now - 1000);
+  const throwsRead = { getItem: () => { throw new Error('SecurityError'); }, removeItem: () => {} };
+  const throwsRemove = { getItem: (k) => (k === KEY ? value : null), removeItem: () => { throw new Error('SecurityError'); } };
+  for (const [why, kv] of [['읽기가 던짐', throwsRead], ['지우기가 던짐(한 번만 쓰는 표시가 남는다)', throwsRemove], ['KV 없음', null]]) {
+    let r;
+    assert.doesNotThrow(() => (r = takeDeniedMarker({ kv, eventId: EV, loc: LOC, deviceNowMs: now, readAtMs: now, phases: PHASES, openAtMs: OPEN })), why);
+    assert.deepEqual(r, { cleanUrl: `/events/${EV}?ref=a`, denied: null }, `${why}: 조각은 지우고 켜지 않는다`);
   }
 });
 

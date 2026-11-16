@@ -382,3 +382,35 @@ test('[Q-T36 ⑧] SCR-008 진입 403 sale-eligibility-required는 진입 저장 
     assert.equal(x.store.read()?.entry, undefined, `${problem} 진입 저장 값`);
   }
 });
+
+test('[W7L2-S2][Q-T36 ⑧] 진입 403 sale-eligibility-required는 이동 전에 탭 저장소 peaket.queue.{회차}.eligDenied에 {v:1, at: 기기 시각}을 한 번 쓰고, 다른 403(preverify-invalid·identity-verification-required)은 쓰지 않는다', async () => {
+  // 계획 '웨이브 끝 리뷰 뒤 정한 것' WS5, ADR-0272 결정 4 '출처 확인'
+  let at;
+  const h = harness({ rec: { preverifyToken: 'pv' }, handler: ({ m, now }) => (m === 'POST' ? ((at = now), reply(403, {}, { problem: 'sale-eligibility-required' })) : reply(500)) });
+  const writes = [];
+  const set = h.session.setItem;
+  h.session.setItem = (k, v) => {
+    if (k === 'peaket.queue.e1.eligDenied') writes.push([v, h.navs.length]);
+    set(k, v);
+  };
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1#sale-eligibility-required']);
+  assert.deepEqual(writes, [[JSON.stringify({ v: 1, at }), 0]], '이동 전에 한 번, 값은 글자 그대로');
+  for (const problem of ['preverify-invalid', 'identity-verification-required', 'sale-eligibility-required-x']) {
+    const x = harness({ rec: { preverifyToken: 'pv' }, handler: ({ m }) => (m === 'POST' ? reply(403, {}, { problem }) : reply(500)) });
+    await x.start();
+    assert.equal(x.session.getItem('peaket.queue.e1.eligDenied'), null, problem);
+  }
+});
+
+test('[W7L2-S2] 진입 403 sale-eligibility-required에서 탭 저장소 쓰기가 던져도 같은 주소로 간다', async () => {
+  const h = harness({ rec: { preverifyToken: 'pv' }, handler: ({ m }) => (m === 'POST' ? reply(403, {}, { problem: 'sale-eligibility-required' }) : reply(500)) });
+  const set = h.session.setItem;
+  h.session.setItem = (k, v) => {
+    if (k === 'peaket.queue.e1.eligDenied') throw new Error('QuotaExceededError');
+    set(k, v);
+  };
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1#sale-eligibility-required']);
+  assert.equal(h.store.read()?.entry, undefined, '진입 저장 값은 그대로 지운다');
+});

@@ -320,3 +320,37 @@ test('[Q-T36 ⑧] SCR-007 로비 참가 403 sale-eligibility-required는 사람 
     assert.deepEqual([h.last().state, h.last().phase, h.navs], ['lobby-join', 'failed', []], problem);
   }
 });
+
+test('[W7L2-S2][Q-T36 ⑧] 로비 참가 403 sale-eligibility-required는 이동 전에 탭 저장소 peaket.queue.{회차}.eligDenied에 {v:1, at: 기기 시각}을 한 번 쓴다', async () => {
+  // 계획 '웨이브 끝 리뷰 뒤 정한 것' WS5, ADR-0272 결정 4 '출처 확인'
+  const sched = { openAtMs: START + 10 * 60_000, lobbyOpensAtMs: START - 60_000 };
+  let at;
+  const h = harness({ schedule: sched, handler: ({ m, now }) => (m === 'POSTJSON' ? ((at = now), reply(403, {}, { problem: 'sale-eligibility-required' })) : reply(500)) });
+  const writes = [];
+  const set = h.session.setItem;
+  h.session.setItem = (k, v) => {
+    if (k === 'peaket.queue.e1.eligDenied') writes.push([v, h.navs.length]);
+    set(k, v);
+  };
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1#sale-eligibility-required']);
+  assert.deepEqual(writes, [[JSON.stringify({ v: 1, at }), 0]], '이동 전에 한 번, 값은 글자 그대로');
+  assert.equal(h.session.getItem('peaket.queue.e1.eligDenied'), JSON.stringify({ v: 1, at }));
+});
+
+test('[W7L2-S2] 로비 참가의 다른 403(human-check-failed·identity-verification-required)은 출처 표시를 쓰지 않고, 탭 저장소 쓰기가 던져도 같은 주소로 간다', async () => {
+  const sched = { openAtMs: START + 10 * 60_000, lobbyOpensAtMs: START - 60_000 };
+  for (const problem of ['human-check-failed', 'identity-verification-required', 'Sale-Eligibility-Required']) {
+    const h = harness({ schedule: sched, handler: ({ m }) => (m === 'POSTJSON' ? reply(403, {}, { problem }) : reply(500)) });
+    await h.start();
+    assert.equal(h.session.getItem('peaket.queue.e1.eligDenied'), null, problem);
+  }
+  const h = harness({ schedule: sched, handler: ({ m }) => (m === 'POSTJSON' ? reply(403, {}, { problem: 'sale-eligibility-required' }) : reply(500)) });
+  const set = h.session.setItem;
+  h.session.setItem = (k, v) => {
+    if (k === 'peaket.queue.e1.eligDenied') throw new Error('QuotaExceededError');
+    set(k, v);
+  };
+  await h.start();
+  assert.deepEqual(h.navs, ['/events/e1#sale-eligibility-required'], '쓰기가 던져도 이동은 그대로');
+});
