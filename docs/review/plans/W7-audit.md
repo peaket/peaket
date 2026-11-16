@@ -628,13 +628,13 @@ export function attendeeSourceUnavailable(detail: string): ExportProblem;
 | K2 | COV2-06 K2 소비자는 따로 둔 core_app 풀과 파티션 1·키 2로 돈다 | `test/core-consumers.test.ts`(가짜 `runKeyedConsumer` + main.ts 원문) | 실패 | 단언: `maxKeys`·`partitionsConcurrently`를 넘기지 않는다(main.ts는 API의 `database`를 넘긴다) |
 | M28 | COV2-06 ⑰ main.ts의 소비자 시작은 조건 없이 돈다 | `test/core-consumers.test.ts` | **처음부터 통과(이미 있는 동작)** | 손 확인: `consumers = undefined && startCoreConsumers({`(검증 M28)로 바꾸면 실패하고(기존 ⑩은 그래도 통과), 되돌린 뒤 통과. 계획의 통합(선택: 빌드한 `dist/main.js`를 닿지 않는 브로커로 띄우기)은 DB 주소 등 시작 필수 값이 많아 이번에 쓰지 않았다 |
 | M33 | COV2-06 ⑱ SIGTERM은 소비자 stop()이 끝난 뒤에 서비스와 연결을 닫는다 | `test/core-consumers.test.ts` | **처음부터 통과(이미 있는 동작)** | 손 확인: `await consumers?.stop()`을 `void consumers?.stop()`(검증 M33)으로 바꾸면 실패하고, 되돌린 뒤 통과. 두 손 확인 뒤 `git diff`로 `main.ts`가 깨끗한 것을 봤다 |
-| K1 | A2-19 R2 K1 0021 뒤 접속지 없는 새 행도 DB는 받고(이전 판 호환), IP 모양이 아닌 값은 inet이 거절한다 | `test-int/export-audit.int.test.ts`(R2 통합 시험의 이름과 첫 단언을 뒤집음) | 아직 안 돌림(도커 잠금 대기) | 지금 0021에서는 접속지 없는 넣기가 23514라 실패해야 한다 |
-| K1 | A2-19 K1 0021 뒤에도 이전 판(N-1) 코드의 내려받기 기록 모양이 들어간다 | 〃 | 아직 안 돌림(도커 잠금 대기) | core_partner로 853758eb 판의 넣기 문장. 지금은 23514로 실패해야 한다 |
-| K1·K6 | A2-19 K6 0019 행이 있는 DB에 0021·0022를 적용해도 실패하지 않고 옛 행은 그대로다 | 〃 | 아직 안 돌림(도커 잠금 대기) | 같은 컨테이너에 새 DB를 만들어 0020까지(임시 폴더의 잘린 journal)만 적용하고 0019 모양 행을 넣은 뒤 `migrateCore`로 나머지를 적용한다. 지금은 CHECK 둘이 검증된 상태(`convalidated` true)라 실패해야 한다 |
-| K2 | COV2-06 K2 탈퇴 익명화는 review_account_idx로 찾는다 | `test-int/review-withdrawn.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | `enable_seqscan = off` 뒤 익명화 문장의 `EXPLAIN (FORMAT JSON)`에 `review_account_idx`. 지금은 색인이 없어 실패해야 한다 |
-| K9 | COV2-06 ⑫ …(고침: 지표 저장소를 넘기고 `consumer_held_events`가 탈퇴 토픽에서 1이 되는지 본다) | `test-int/review-withdrawn-consumer.int.test.ts` | 아직 안 돌림(도커 잠금 대기) | 보류 수 세기는 core_app으로 `held_event`를 읽는다(0022의 SELECT). 지금 코드에서 통과할 것으로 보인다(처음부터 통과 예상) |
+| K1 | A2-19 R2 K1 0021 뒤 접속지 없는 새 행도 DB는 받고(이전 판 호환), IP 모양이 아닌 값은 inet이 거절한다 | `test-int/export-audit.int.test.ts`(R2 통합 시험의 이름과 첫 단언을 뒤집음) | 실패 | 접속지 없는 넣기가 23514(지금 0021의 `source_ip` CHECK) |
+| K1 | A2-19 K1 0021 뒤에도 이전 판(N-1) 코드의 내려받기 기록 모양이 들어간다 | 〃 | 실패 | core_partner로 853758eb 판의 넣기 문장이 23514 |
+| K1·K6 | A2-19 K6 0019 행이 있는 DB에 0021·0022를 적용해도 실패하지 않고 옛 행은 그대로다 | 〃 | 실패 | 적용과 옛 행 값은 맞지만 `attendee_export_audit_action_check`의 `convalidated`가 true다(NOT VALID 아님). 같은 컨테이너에 새 DB를 만들어 0020까지(임시 폴더의 잘린 journal)만 적용하고 0019 모양 행을 넣은 뒤 `migrateCore`로 나머지를 적용한다 |
+| K2 | COV2-06 K2 탈퇴 익명화는 review_account_idx로 찾는다 | `test-int/review-withdrawn.int.test.ts` | 실패 | 실행 계획에 `review_account_idx`가 없다(색인 없음). `enable_seqscan = off` 뒤 익명화 문장의 `EXPLAIN (FORMAT JSON)`을 본다 |
+| K9 | COV2-06 ⑫ …(고침: 지표 저장소를 넘기고 `consumer_held_events`가 탈퇴 토픽에서 1이 되는지 본다) | `test-int/review-withdrawn-consumer.int.test.ts` | **처음부터 통과(이미 있는 동작)** | 보류 수 세기는 core_app으로 `held_event`를 읽는다(0022의 SELECT). 검증 담당이 틀린 구현(예: `registry`를 넘기지 않거나 보류 수 세기에 다른 DB)으로 한 번 실패를 본다 |
 
-- **돌릴 통합 시험(도커 잠금 대기)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 것은 Kafka 컨테이너가 필요하다).
+- **통합 시험 결과(11:49 KST 도커 잠금 아래, 구현 전 트리)**: 시험 커밋 `eec8779c`만 꺼낸 작업 폴더 `D:/ticketpass-lane3-t`의 core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`를 돌렸다. 시험 9개 가운데 실패 4(K1 둘·K6·K2 색인), 통과 5(⑥ 롤백, ⑤⑥ CHECK, core_partner 권한, ⑪, ⑫·K9). 처음 돌릴 때 그 폴더에 공용 패키지 빌드(`@peaket/search-normalize` 등 dist)가 없어 후기 두 파일이 읽히지 않았으므로(실패로 세지 않는다) `packages/platform`·`contracts`·`search-normalize`·`validation`을 빌드한 뒤 두 파일을 다시 돌렸다. 그 폴더의 추적 파일은 바꾸지 않았다. 이 갈래 시험 컨테이너는 남지 않았다(`docker ps -a`).
 
 ## 시험 이의
 
