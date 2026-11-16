@@ -361,3 +361,20 @@ export interface CoreConsumersOptions { /* … 지금 칸 … */ recheck: Review
   - `test/review-withdrawn.test.ts` I-T83 ①: `a2Fingerprint = contentFingerprint(hiddenBody)`(a2 만들기·조치 증적에 씀), `a1Fingerprint = contentFingerprint(a1.body)`(차단 목록 넣기와 `hasHiddenFingerprint` 단언의 인자). `expect` 줄은 인자 이름만 바뀌었다.
   - `test/review.test.ts` '끝 시각이 지난 임시조치는…': 조치 증적 지문을 `contentFingerprint(r.body)`로(`record()`가 넣은 값과 같다).
 - 돌린 것: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc typecheck` 오류 0. `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test` 시험 458개 모두 통과(파일 69개).
+
+## 리뷰
+
+- **누가·언제**: 리뷰 담당(세션 `l3w8-a2a-review`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, `c3b0935c..5a46763e`(스냅숏 JSON·계약 생성물은 건너뜀)를 계획·정본(docs/features/identity.md §8·§12 I-T83, docs/data.md §2 '후기 파기'·'후기 표의 DB 권한'·§5.1 '탈퇴 파기'·§6, docs/security/data-classification.md 두 행, docs/streaming.md §2.6, docs/security/asvs/catalog-review.md 14.2.7, ADR-0278)과 견줬다. 코드는 고치지 않았고 시험은 돌리지 않았다.
+- **맞는 것(짧게)**: 계획 §1·§2의 공개 인터페이스와 손댈 파일이 모두 구현됐다(`review/index.ts`는 바꿀 것이 없었다). 구현 커밋 `7f32f584`는 시험 파일을 건드리지 않았다. 파기 칸(본문·별점·지문·작성자 표시·통보 칸·계정/주문 참조·처음 지운 시각)이 메모리(`purgedReview`)·Drizzle(`purgeSet`)·작성자 지우기에서 같고, 그 계정 모든 상태의 행만 바꾸며 다시 하면 0건이다. 예약 경계는 `<=`, 같은 계정은 `greatest`, 처리한 예약은 같은 트랜잭션에서 지운다. 잠금 차례(예약 → 후기)는 사건 다시 받기와 반복이 겹쳐도 교착이 없게 맞다. 0026은 넓히기·`NOT VALID`만 하고 예약 표 권한은 `core_app`의 읽기·넣기·지우기·`due_at` 고치기뿐이다. 반복은 시작하자마자 돌고(재시작 뒤 놓친 예약도 표에 남아 바로 잡힌다) 멈출 때 소비자보다 먼저 멈춘다. 예약 표·로그에 pid와 계정 ID가 없다.
+
+| 번호 | 심각도 | 파일:줄 | 근거 | 고칠 쪽 |
+| --- | --- | --- | --- | --- |
+| A1 | 중간 | `services/core-svc/src/consumers/review-recheck.ts:60-69` | 밀린 시간 지표(`overdue.set`)를 `runWithdrawalRechecks`가 성공했을 때만 고친다. 반복이 계속 실패하면(권한 회귀, 문장 시간 초과 등) 지표가 마지막 값(보통 0)에 머물고, 이 반복은 실패 수·마지막 성공 시각 지표도 내지 않는다. 그러면 정본의 '밀리면 지표가 보이고 5일 [가정] 넘으면 SEV2 legal'(data-classification '탈퇴 후기 다시 정리 예약', streaming §2.6)이 바로 그 실패 때 울리지 않고, 남는 신호는 경고 로그뿐이다(법정 파기 의무의 감시가 비는 자리) | 구현: 실패 경로에서도 `oldestOverdueRecheckMs`를 따로 읽어 지표를 고친다(읽기도 실패하면 그대로 둔다). 실패 수 지표를 더할지는 구현 담당 판단. 시험: 단위 ⑤에 '실패한 한 번 뒤 지표가 새 밀린 시간으로 바뀐다'를 더한다. 기록 담당: docs/observability.md:199 '정비 잡' 행에 이 지표가 소비자를 켠 API 파드에서 난다는 것을 한 줄 보탤지 본다(시험 이의 '정본 빈칸'과 같은 거리) |
+| A2 | 중간 | `docs/data.md:2423`('후기 파기' 마이그레이션 나눔) | 다음 출시의 파기 행 CHECK·`VALIDATE` 전에 이전 판이 남긴 행을 파기 칸으로 고치는 한 번짜리 갱신이 정본·계획에 없다. ⓐ 이 출시 전과 배포 창 동안 이전 판 작성자 지우기가 남긴 DELETED 행은 별점·지문·계정 ID·주문 ID를 그대로 가진다(ADR-0086 ⑧ 위반이 남고, 탈퇴하지 않은 작성자의 행은 아무 길로도 다시 파기되지 않는다). 이런 행이 하나라도 있으면 다음 출시 `VALIDATE`가 실패한다. ⓑ 배포 창 동안 이전 판 소비자가 옛 익명화로 처리한 탈퇴 사건의 후기는 `account_id = id`·'탈퇴한 사용자'·VISIBLE로 남고, 새 코드가 계정 ID로 찾지 못하며 다시 정리 예약도 없다 | 정본(계획 담당·감독): data.md §2 '후기 파기'에 '배포 창이 끝난 뒤 한 번짜리 갱신(DELETED인데 별점·지문이 남은 행, 옛 익명화 표시 행 → 파기 칸) → 파기 행 CHECK → VALIDATE' 차례를 적는다. 기록 담당: 구간 끝 정리 목록. 확인 필요: 옛 익명화(W7-audit) 판이 돈 환경이 있는지. 운영 전이라 운영 행은 없다 |
+| A3 | 낮음 | `services/core-svc/test-int/review-recheck.int.test.ts:89-115`, `services/core-svc/src/modules/review/adapters/db/drizzle-review-store.ts:277-286` | 구현이 차례를 '예약 upsert → 파기'로 바꿨다(시험 이의 '구현 담당이 정한 것' 1, 교착을 피하려는 것이라 맞다). 그래서 `REVOKE INSERT`로 첫 문장을 막는 '④ 파기와 예약은 한 트랜잭션이다'는 두 문장을 따로 자동 커밋하는 틀린 구현(예약 먼저)도 통과시킨다. 계획 §4 '겹친 가드'가 이 시험에 맡긴 §2 ⓒ 가운데 '파기 먼저·따로 커밋'만 잡는다. 놓치는 꼴은 파기가 실패해도 예약이 남아 결국 다시 파기되므로 해는 작지만, 시험 이름의 성질(한 트랜잭션)을 이 시험만으로는 보이지 못한다(정본 I-T83 ④의 '예약 쓰기가 실패하면 파기도 없다' 한쪽만 본다) | 시험: 반대쪽을 더한다(관리자 연결로 `REVOKE UPDATE ("rating") ON review FROM core_app`을 잠시 걸어 파기만 실패하게 한 뒤 거절 1건과 예약 행 없음을 단언하고, 권한을 돌린다). 검증 담당: §2 ⓒ 틀린 구현을 두 차례(파기 먼저·예약 먼저) 모두로 만들어 본다 |
+
+- **확인 필요(지적 아님)**:
+  - 통합 시험 여섯 파일은 아직 돌리지 않았다(Docker 대기). `sql.param(ids)`의 `::uuid[]`, `extract(epoch …)`의 float8, `on conflict … greatest`의 권한(`due_at` UPDATE·`account_id` SELECT)은 통합에서만 실제로 확인된다.
+  - journal의 0026은 `idx` 26·`when` 1794811994338이다. 갈래 2의 0023 등과 합칠 때 `when` 차례를 감독이 맞춘다(Drizzle 이주기는 마지막으로 적용한 `when`보다 큰 것만 돌리므로, 0026이 먼저 적용된 DB에서는 `when`이 더 작은 뒤 번호가 건너뛰어진다).
+  - 후기 사진(`review_image`)이 생기는 단계가 파기 칸에 사진 키와 실제 파일 지우기를 더해야 한다(정본 data.md §2 '후기 파기'에 적혀 있다). 지금 코드는 사진을 받지 않아(422 `review-images-unavailable`) 해당 없다.
+- **높음**: 없다.
