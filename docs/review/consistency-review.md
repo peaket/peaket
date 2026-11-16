@@ -761,6 +761,7 @@
 | R-663 | BAT-165 웨이브 7 기록·갈래 2 웨이브 보고서 | BUILD_ORDER·lane2·ledger-notes·coverage·장부·계획 담당 표·W7-lane2-wave | 기록 커밋 | 끝 |
 | R-664 | 계획 파일 밖 리뷰·검증 문서 잇기 | plans/BAT-165·170·040 | 감독 기록 | 끝 |
 | R-665 | 게이트웨이(HOT-400)가 저장소에 없어 머리 지우기·토큰 확인·경로 인가·CORS·출처 확인·응답 보안 머리·접근 로그 칸·앱 서버 추적 입구를 볼 곳이 없었다 | deploy/gateways/(게이트웨이 다섯), packages/platform 추적 경계, apps/web·partner 계측, tools/local·ci-kind, 정본 infra §4.1·observability §7·guidelines §9, 계획 BAT-055 | 역할 분리·시험 먼저, 정적 47·kind 42/43·브라우저 18, 틀린 구현 169개 넣어 그 층에서 127 잡음, SR-T13 ② kind는 BAT-060 kind 셋째 통과·CI에서 다시 | 적용, BAT-060과 함께 합침 |
+| R-666 | 게이트웨이 라우트를 손으로 나눠 openapi의 메서드·인증 종류·처리 서비스와 어긋났고(BAT-055 웨이브 끝 높음 W7-WIR-01 등), 전역 레이트 리밋·웹훅 출발지 한도·게이트웨이 Problem의 `X-Trace-Id`가 없었다 | tools/ci/gateway-routes.mjs, deploy/gateways/(routes/·생성 라우트·controller/), tools/local·ci-kind, 정본 infra §4.1·devops §14·guidelines §2, 계획 BAT-060, 보고서 W7-L1-wave | 역할 분리·시험 먼저, 정·단 157·kind 23과 BAT-055 되돌림 38 통과, 틀린 구현 83판 넣어 그 층에서 77 잡음, roles-check 감독 예외 둘 | 적용, BAT-055와 함께 합침 |
 
 ## 4. 숫자 일치표
 
