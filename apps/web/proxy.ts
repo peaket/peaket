@@ -6,14 +6,14 @@
 //    채워 단다(응답 때 해시, ADR-0193). CDN은 본문과 그 CSP를 함께 캐시한다.
 //    개발 서버(next dev)는 HMR이 인라인·eval 스크립트를 쓰므로 CSP를 보고 모드로만 단다.
 // ② 본인확인 복귀 화면의 서버 처리기(docs/features/identity.md §5 '복귀 화면의 서버 처리기', BUILD_ORDER BOT-010).
-// ③ 공연 상세(`/events/{id}`)의 없는 회차를 그리기 전에 거른다(ADR-0201 결정 3, BUILD_ORDER HOT-311, src/_app/routing/event-gate.ts):
+// ③ 공연 상세(`/events/{id}`)와 로케일 상세(`/{locale}/events/{id}`)의 없는 회차를 그리기 전에 거른다(ADR-0201 결정 3, BUILD_ORDER HOT-311, src/_app/routing/event-gate.ts):
 //    어느 경로에도 맞지 않는 내부 주소로 재작성해 Next.js의 404 화면을 낸다. 회차 주소마다 ISR 항목이 생기지 않는다.
 //    판매 중지(410)는 화면이 안내와 상태 표시를 그리고 앞 서버가 상태를 맞춘다(server/csp-hash-server.mjs).
 // ④ 캐시 화면의 경로 조각을 정규 주소 하나로 모은다(docs/frontend.md §5.18 '정규 주소 하나로 모은다', BAT-170 W7L2-S10,
 //    src/_app/routing/route-normalize.ts): 경로 일곱의 조각이 대소문자·퍼센트 감싸기만 다르면 정본 주소로 308(쿼리 그대로), 꼴 밖이면 404.
 //    같은 자료를 가리키는 여러 글자가 저마다 공유 캐시 키를 만들지 않게 한다. 화면도 같은 규칙을 겹쳐 지킨다.
 import { NextResponse, type NextRequest } from 'next/server';
-import { createEventGate, eventCacheTags, eventIdFromPath } from './src/_app/routing/event-gate.ts';
+import { createEventGate, eventCacheTags, gatedEventIdFromPath } from './src/_app/routing/event-gate.ts';
 import { normalizeRoute } from './src/_app/routing/route-normalize.ts';
 import { NONCE_HEADER, cachedCsp, cspOriginsFromEnv, matchRoute, newNonce, pageHeaders } from './src/_app/security/page-headers.ts';
 import { verifyReturnProxy } from './src/features/identity-verify/server/return-post.ts';
@@ -93,7 +93,8 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
         return applyHeaders(NextResponse.rewrite(url, { request: { headers: requestHeaders } }), headers);
       }
     }
-    const eventId = readOnly ? eventIdFromPath(pathname) : undefined;
+    // 없는 회차 앞 거르기는 공연 상세와 로케일 상세 모두에 건다(정규화 뒤라 로케일·ID는 정본 꼴이다, BAT-170 계획 §17 G-1)
+    const eventId = readOnly ? gatedEventIdFromPath(pathname) : undefined;
     if (eventId !== undefined) {
       const gate = await eventGate.check(eventId);
       if (gate.kind === 'missing') {

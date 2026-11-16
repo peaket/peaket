@@ -9,6 +9,8 @@
 
 const ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DETAIL_PATH = /^\/events\/([^/]+)$/;
+/** 로케일 상세(`/{locale}/events/{id}`). 정규화(route-normalize.ts) 뒤의 소문자 로케일만 본다 */
+const LOCALE_DETAIL_PATH = /^\/(?:en|ja|zh)\/events\/([^/]+)$/;
 
 export interface GateResult {
   kind: 'pass' | 'missing';
@@ -19,6 +21,14 @@ export interface GateResult {
 /** `/events/{id}`의 id(상세 주소만). 아래 경로(`/events/{id}/shuffle-proof`)는 거르지 않는다 */
 export function eventIdFromPath(pathname: string): string | undefined {
   return DETAIL_PATH.exec(pathname)?.[1];
+}
+
+/**
+ * 없는 회차 앞 거르기를 걸 회차 ID: 공연 상세 `/events/{id}`와 로케일 상세 `/{locale}/events/{id}`(en·ja·zh 소문자)의 id.
+ * 없는 회차는 두 주소 모두 404다(docs/frontend.md §5.18 '정규 주소 하나로 모은다', BAT-170 계획 §17 G-1)
+ */
+export function gatedEventIdFromPath(pathname: string): string | undefined {
+  return DETAIL_PATH.exec(pathname)?.[1] ?? LOCALE_DETAIL_PATH.exec(pathname)?.[1];
 }
 
 /** 대문자가 섞인 회차 ID의 상세 주소면 소문자 주소. 그 밖은 undefined */
