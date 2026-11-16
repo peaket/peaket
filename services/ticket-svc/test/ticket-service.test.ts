@@ -64,7 +64,10 @@ describe('TicketService [HOT-160] [P-T15]', () => {
     expect(w.store.tickets.get(id)).toMatchObject({ status: 'REFUNDED', keyRevokedAtMs: NOW, version: 1 });
     expect(w.store.cancellations.size).toBe(1);
     expect(await w.service.cancel(cancel({ ticketIds: [id] }))).toEqual([{ ticketId: id, result: 'REFUND_NOW' }]);
-    expect(await w.service.cancel(cancel({ ticketIds: [id], cancellationId: CANCEL_2 }))).toEqual([{ ticketId: id, result: 'ALREADY_CANCELLED' }]);
+    // 다른 취소 ID는 ALREADY_CANCELLED이고, 먼저 취소한 팬 취소(첫 취소 ID·결과·키 폐기 시각)를 함께 준다(리뷰 B2, docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기')
+    expect(await w.service.cancel(cancel({ ticketIds: [id], cancellationId: CANCEL_2 }))).toEqual([
+      { ticketId: id, result: 'ALREADY_CANCELLED', first: { cancellationId: CANCEL, result: 'REFUND_NOW', cancelledAtMs: NOW } },
+    ]);
   });
 
   test('요청자가 결제자·보유자가 아니면 NOT_PAYER_HOLDER이고, 양도 요청이 있으면 TRANSFER_PENDING이다', async () => {

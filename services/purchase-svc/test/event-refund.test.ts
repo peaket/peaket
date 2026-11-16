@@ -106,14 +106,19 @@ describe('회차 취소 일괄 환불', () => {
   });
 
   test('GAT130_결과_모름은_재개에서_같은_멱등키로_다시_시도한다', async () => {
+    // 두 표는 같은 주문(ORDER)이다. 앞 표가 결과 모름이면 그 주문의 나머지는 이번 실행에서 미룬다(리뷰 B4, docs/data.md §5 '같은 주문', docs/features/payment.md §4.1 '한 번에 하나씩')
     const f = fixture(['REFUND_PENDING', 'REFUNDED', 'REFUNDED']);
     const a = await start(f.service);
-    expect(a.progress).toMatchObject({ total: 2, done: 1 });
+    expect(a.progress).toMatchObject({ total: 2, done: 0 });
     expect(a.status).toBe('RUNNING');
+    expect(f.calls.map(([t]) => t.ticketId)).toEqual([TICKET]);
     const b = await f.service.resume({ requestId: REQUEST });
     expect(b.progress).toMatchObject({ total: 2, done: 2 });
     expect(b.status).toBe('COMPLETED');
-    expect(f.calls[2]![1].cancellationId).toBe(eventRefundCancellationId(REQUEST, TICKET));
+    // 재개는 앞 표를 같은 멱등키로 먼저 다시 하고, 끝난 뒤에 같은 주문의 둘째 표를 한다
+    expect(f.calls.map(([t]) => t.ticketId)).toEqual([TICKET, TICKET, TICKET2]);
+    expect(f.calls[1]![1].cancellationId).toBe(eventRefundCancellationId(REQUEST, TICKET));
+    expect(f.calls[1]![1].cancellationId).toBe(f.calls[0]![1].cancellationId);
   });
 
   test('GAT130_수동_일시정지와_재개는_결제사_몫_상태와_사유를_남긴다', async () => {
