@@ -33,29 +33,50 @@ let urls;
 const paused = new Set();
 const stores = [];
 
-/** 그 키 슬롯의 주 노드와 복제(컨테이너 이름) */
-function ownerOf(key) {
-  const slot = Number(cli(NAMES[0], 'CLUSTER', 'KEYSLOT', key));
+/** Valkey 키 슬롯(CRC16 XMODEM % 16384, 해시 태그 {…}가 있으면 그 안만). docker exec 없이 이 프로세스에서 센다 */
+function keySlot(key) {
+  const open = key.indexOf('{');
+  if (open >= 0) {
+    const close = key.indexOf('}', open + 1);
+    if (close > open + 1) key = key.slice(open + 1, close);
+  }
+  let crc = 0;
+  for (const b of Buffer.from(key)) {
+    crc ^= b << 8;
+    for (let i = 0; i < 8; i++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc % 16384;
+}
+
+/** 지금 슬롯 표(CLUSTER NODES 한 번): 주 노드마다 슬롯 범위와 그 복제 */
+function slotTable() {
   const text = NAMES.filter((n) => !paused.has(n)).map((n) => tryDocker('exec', n, 'valkey-cli', 'CLUSTER', 'NODES')).find((x) => x) ?? '';
   const rows = text.split('\n').map((l) => l.trim().split(' '));
   const hostOf = (r) => (r[1] ?? '').split(',')[1] ?? '';
-  const master = rows.find(
-    (r) =>
-      r[2]?.includes('master') &&
-      !r[2]?.includes('fail') &&
-      r.slice(8).some((s) => {
-        const [x, y] = s.split('-').map(Number);
-        return y === undefined ? x === slot : slot >= x && slot <= y;
-      }),
-  );
-  if (!master) throw new Error(`슬롯 ${slot}의 주 노드를 찾지 못했다`);
-  const replica = rows.find((r) => r[3] === master[0] && r[2]?.includes('slave') && !r[2]?.includes('fail'));
-  return { master: hostOf(master), replica: replica ? hostOf(replica) : null };
+  return rows
+    .filter((r) => r[2]?.includes('master') && !r[2]?.includes('fail'))
+    .map((m) => {
+      const replica = rows.find((r) => r[3] === m[0] && r[2]?.includes('slave') && !r[2]?.includes('fail'));
+      const ranges = m.slice(8).map((x) => x.split('-').map(Number)).map(([a, b]) => [a, b ?? a]);
+      return { master: hostOf(m), replica: replica ? hostOf(replica) : null, ranges };
+    });
 }
 
-const newStore = () => {
+/** 그 키 슬롯의 주 노드와 복제(컨테이너 이름). 표를 주지 않으면 새로 읽는다 */
+function ownerOf(key, table = slotTable()) {
+  const slot = keySlot(key);
+  const row = table.find((t) => t.ranges.some(([a, b]) => slot >= a && slot <= b));
+  if (!row) throw new Error(`슬롯 ${slot}의 주 노드를 찾지 못했다`);
+  return { master: row.master, replica: row.replica };
+}
+
+// 시험 이의 O-1(계획 '## 시험 이의', 정본 docs/frontend.md §5.18 ⓓ '붙는 동안의 요청은 기다리지 않고 없음·버림'): 막 만든 저장소는 처음 연결이 끝날 때까지
+// 요청을 버리므로, 처리기 모듈이 불러올 때 하듯 ready()로 처음 연결을 기다린 뒤 쓴다. 슬롯 주인은 이 프로세스에서 센 슬롯과 CLUSTER NODES 한 번으로 저장소를 만들기 전에 구해
+// 이벤트 루프를 막아 연결 시간 한도가 넘어가지 않게 한다.
+const newStore = async () => {
   const s = createCacheStore({ urls, nodeAddressMap, maxTtlSeconds: DAYS_30_S });
   stores.push(s);
+  assert.equal(await s.ready(), true, '클러스터에 처음 연결하지 못했다');
   return s;
 };
 
@@ -101,12 +122,13 @@ after(async () => {
 const keys = Array.from({ length: 100 }, (_, i) => `spread-${i}`);
 
 test('HOT-390 W7L2-K1 세 샤드에 흩어진 값 100개를 A가 쓰고 B가 모두 읽는다', async () => {
-  const a = newStore();
-  const b = newStore();
   // 쓴 키의 슬롯 주인이 세 주 노드 모두 나와야 한다(빈 결과 막기)
-  const owners = new Set(keys.map((k) => ownerOf(`web:data:${k}`).master));
+  const table = slotTable();
+  const owners = new Set(keys.map((k) => ownerOf(`web:data:${k}`, table).master));
   assert.equal(owners.size, 3, `슬롯 주인 ${[...owners].join(', ')}`);
-  for (const k of keys) await a.setEntry('data', k, `v-${k}`, 300);
+  const a = await newStore();
+  const b = await newStore();
+  for (const k of keys) await a.setEntry('data', k, `v-${k}`, 3_000);
   let read = 0;
   for (const k of keys) if (String((await b.getEntry('data', k)) ?? '') === `v-${k}`) read += 1;
   assert.equal(read, 100, `B가 ${read}/100개만 읽었다`);
@@ -126,8 +148,10 @@ test('HOT-390 W7L2-K1 세 샤드에 흩어진 값 100개를 A가 쓰고 B가 모
 });
 
 test('HOT-390 W7L2-K1 태그 무효화가 다른 처리기에 닿고 쓴 키는 모두 TTL이 있다', async () => {
-  const hA = createUseCacheHandler({ store: newStore() });
-  const hB = createUseCacheHandler({ store: newStore() });
+  const table = slotTable();
+  const masters = new Set(keys.map((k) => ownerOf(`web:data:${k}`, table).master));
+  const hA = createUseCacheHandler({ store: await newStore() });
+  const hB = createUseCacheHandler({ store: await newStore() });
   const entry = { value: new Blob(['tagged']).stream(), tags: ['events'], stale: 30, timestamp: Date.now() - 10, expire: 300, revalidate: 60 };
   await hA.set('cluster-tagged', Promise.resolve(entry));
   const got = await hB.get('cluster-tagged', []);
@@ -137,7 +161,6 @@ test('HOT-390 W7L2-K1 태그 무효화가 다른 처리기에 닿고 쓴 키는 
   await hB.refreshTags();
   assert.equal(await hB.get('cluster-tagged', []), undefined, 'A의 태그 무효화가 B에 닿지 않았다');
   // 세 주 노드의 키를 모두 훑어 TTL을 본다
-  const masters = new Set(keys.map((k) => ownerOf(`web:data:${k}`).master));
   let seen = 0;
   for (const m of masters) {
     for (const k of cli(m, '--scan').split('\n').filter(Boolean)) {
@@ -151,9 +174,9 @@ test('HOT-390 W7L2-K1 태그 무효화가 다른 처리기에 닿고 쓴 키는 
 });
 
 test('HOT-390 W7L2-K2 장애 조치 뒤 다시 쓰기·무효화가 된다', async () => {
-  const a = newStore();
-  const b = newStore();
   const { replica } = ownerOf('web:{tag}:events');
+  const a = await newStore();
+  const b = await newStore();
   assert.ok(replica, '태그 키 슬롯의 복제가 없다');
   cli(replica, 'CLUSTER', 'FAILOVER');
   const until = Date.now() + 10_000;
@@ -173,9 +196,10 @@ test('HOT-390 W7L2-K2 장애 조치 뒤 다시 쓰기·무효화가 된다', asy
 });
 
 test('HOT-390 W7L2-K2 멈춘 주 노드에는 명령이 쌓이지 않고 연결을 버린다', async () => {
-  const store = newStore();
-  const target = ownerOf(`web:data:${keys[0]}`).master;
-  const onTarget = keys.filter((k) => ownerOf(`web:data:${k}`).master === target);
+  const table = slotTable();
+  const target = ownerOf(`web:data:${keys[0]}`, table).master;
+  const onTarget = keys.filter((k) => ownerOf(`web:data:${k}`, table).master === target);
+  const store = await newStore();
   assert.ok(onTarget.length > 0);
   assert.equal(String(await store.getEntry('data', onTarget[0])), `v-${onTarget[0]}`, '멈추기 전 대조군');
   docker('pause', target);
@@ -212,7 +236,7 @@ test('HOT-390 W7L2-K2 멈춘 주 노드에는 명령이 쌓이지 않고 연결�
 });
 
 test('HOT-390 W7L2-K2 클러스터가 내려간 동안 연결 시도가 간격대로만 나간다', async () => {
-  const store = newStore();
+  const store = await newStore();
   await store.getEntry('data', keys[0]);
   for (const n of NAMES) {
     docker('pause', n);

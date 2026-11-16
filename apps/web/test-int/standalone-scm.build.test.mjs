@@ -17,11 +17,29 @@ const DIST = '.next';
 /** 소스 관리 메타데이터 폴더(ASVS 13.4.1: .git·.svn 같은 것) */
 const SCM = new Set(['.git', '.svn', '.hg']);
 
+/** 훑는 사이 사라진 항목(ENOENT)이면 null. 같은 묶음의 다른 시험 파일(start-cache.build)이 동시에 public을 다시 복사해 잠깐 사라질 수 있다 */
+const statOrNull = (p) => {
+  try {
+    return lstatSync(p);
+  } catch (e) {
+    if (e?.code === 'ENOENT') return null;
+    throw e;
+  }
+};
+
 /** 폴더를 끝까지 훑는다(링크는 따라가지 않는다) */
 function walk(dir, out = { files: 0, scm: [] }) {
-  for (const name of readdirSync(dir)) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (e) {
+    if (e?.code === 'ENOENT') return out;
+    throw e;
+  }
+  for (const name of names) {
     const p = join(dir, name);
-    const st = lstatSync(p);
+    const st = statOrNull(p);
+    if (!st) continue;
     if (SCM.has(name)) out.scm.push(p);
     if (st.isDirectory()) walk(p, out);
     else out.files += 1;

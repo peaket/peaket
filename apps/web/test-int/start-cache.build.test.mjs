@@ -17,12 +17,17 @@ const DIST = '.next';
 const PORT = 39500 + (process.pid % 200) * 3;
 let out = '';
 
-async function waitUp(url, ms) {
+/**
+ * 서버가 뜰 때까지 기다린다. anyStatus면 상태와 관계없이 HTTP 답이 오면(연결 거부가 아니면) 뜬 것으로 본다.
+ * 시험 이의 O-2(정본 docs/frontend.md §5.18 ②′): Next.js 16.4는 없는 주소의 404 화면도 미리 그린 화면 캐시에서 읽어, 거절하는 저장소로 뜬
+ * bare 서버에서는 그 주소도 5xx다. 그래서 bare 쪽은 답이 오는지만 본다. 대조군 ci 쪽은 500 미만이어야 뜬 것으로 본다.
+ */
+async function waitUp(url, ms, { anyStatus = false } = {}) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
     try {
       const r = await fetch(url, { method: 'HEAD' });
-      if (r.status < 500) return;
+      if (anyStatus || r.status < 500) return;
     } catch {
       // 아직 뜨는 중
     }
@@ -56,8 +61,8 @@ describe('R170-8 start.mjs를 거치지 않은 standalone server.js', () => {
       procs.push(p);
       p.stdout.on('data', (d) => (logs[name] += d));
       p.stderr.on('data', (d) => (logs[name] += d));
-      // 준비 확인은 캐시를 쓰지 않는 없는 주소(404)로 한다(캐시 화면은 bare에서 5xx라 준비로 볼 수 없다)
-      await waitUp(`http://127.0.0.1:${port}/__bat170-ready`, 90_000);
+      // 준비 확인은 없는 주소(404)로 한다. bare는 그 주소도 미리 그린 화면 캐시를 읽어 5xx라 답이 오는지만 본다(시험 이의 O-2)
+      await waitUp(`http://127.0.0.1:${port}/__bat170-ready`, 90_000, { anyStatus: name === 'bare' });
     }
   });
   after(() => {
