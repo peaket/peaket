@@ -635,6 +635,16 @@ export function attendeeSourceUnavailable(detail: string): ExportProblem;
 | K9 | COV2-06 ⑫ …(고침: 지표 저장소를 넘기고 `consumer_held_events`가 탈퇴 토픽에서 1이 되는지 본다) | `test-int/review-withdrawn-consumer.int.test.ts` | **처음부터 통과(이미 있는 동작)** | 보류 수 세기는 core_app으로 `held_event`를 읽는다(0022의 SELECT). 검증 담당이 틀린 구현(예: `registry`를 넘기지 않거나 보류 수 세기에 다른 DB)으로 한 번 실패를 본다 |
 
 - **통합 시험 결과(11:49 KST 도커 잠금 아래, 구현 전 트리)**: 시험 커밋 `eec8779c`만 꺼낸 작업 폴더 `D:/ticketpass-lane3-t`의 core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`를 돌렸다. 시험 9개 가운데 실패 4(K1 둘·K6·K2 색인), 통과 5(⑥ 롤백, ⑤⑥ CHECK, core_partner 권한, ⑪, ⑫·K9). 처음 돌릴 때 그 폴더에 공용 패키지 빌드(`@peaket/search-normalize` 등 dist)가 없어 후기 두 파일이 읽히지 않았으므로(실패로 세지 않는다) `packages/platform`·`contracts`·`search-normalize`·`validation`을 빌드한 뒤 두 파일을 다시 돌렸다. 그 폴더의 추적 파일은 바꾸지 않았다. 이 갈래 시험 컨테이너는 남지 않았다(`docker ps -a`).
+- **구현 전 트리에서 통과한 통합 시험 다섯(처음부터 통과, 이미 있는 동작)**: 웨이브 끝 리뷰 반영이 바꾸지 않는 동작을 묶는 시험이다. 검증 담당이 아래 틀린 구현으로 한 번은 실패를 본다.
+
+  | 시험 | 묶는 이미 있는 동작 | 이 시험을 실패시킬 틀린 구현 |
+  | --- | --- | --- |
+  | A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 attendee_export도 남지 않는다 | `DrizzleAttendeeExportStore.recordExport`가 이력과 DOWNLOAD 접속기록을 트랜잭션 하나에 넣는다(A2-19 구현 `91d11bd9`). K1·K6은 칸·CHECK만 바꾼다 | `recordExport`가 `attendee_export`를 자기 트랜잭션으로 먼저 커밋한 뒤 접속기록을 따로 넣는다 |
+  | A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD 행이 들어가고 모양이 틀리면 CHECK가 거절한다 | 0021의 `action`·모양 CHECK 둘(A2-19 구현). `NOT VALID`여도 새 행은 검사한다 | 0021에서 모양 CHECK를 빼거나 `action in ('LIST','DOWNLOAD')`만 남긴다(사유 있는 LIST가 들어간다) |
+  | A2-19 core_partner는 접속기록을 고치거나 지우지 못하고 다른 테넌트 행을 읽지 못한다 [ASVS v5.0.0-8.4.1] | 0019의 `core_partner`에 `SELECT, INSERT`만 주는 GRANT와 테넌트 행 보안 정책. 0021·0022는 건드리지 않는다 | 0021이나 0022에 `GRANT UPDATE, DELETE ON attendee_export_audit TO core_partner`를 더하거나 그 표의 행 보안을 끈다 |
+  | COV2-06 ⑪ Drizzle 익명화는 그 계정 행만 바꾸고 다시 해도 0건이다 | 0022의 `core_app` 후기 UPDATE 칸 권한(`e727395a`)과 `anonymizeByAccount`의 `where account_id = …`. K2 색인은 속도만 바꾼다 | 0022의 `core_app` `review` UPDATE 칸 목록에서 `account_id`·`basis_order_id`를 뺀다(42501), 또는 `anonymizeByAccount`가 `where`를 빠뜨린다 |
+  | COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다(K9: 지표 저장소를 넘김) | `startCoreConsumers`가 `registry`를 받으면 그것과 `heldCounts: () => heldEventCounts(database)`를 `runKeyedConsumer`에 넘긴다(`9b26a579`). `core_app`의 `held_event` 읽기는 0004의 전체 읽기 권한으로도 된다 | `startCoreConsumers`가 `heldCounts`(또는 `registry`)를 `runKeyedConsumer`에 넘기지 않는다(`consumer_held_events`가 1이 되지 않는다) |
+
 - **검증 2단계 살아남음 N07(시험 추가)**: `test/core-consumers.test.ts`에 `COV2-06 K2 N07 소비자의 익명화 저장소도 소비자 전용 풀을 쓴다`를 더했다(main.ts 원문: 처리기에 넘기는 `Reviews`의 `store: new DrizzleReviewStore(풀)`의 풀이 `startCoreConsumers`의 `database` 칸과 같고 `database`·`partnerDatabase`·`opsDatabase`가 아니다). core-svc 폴더 `npx vitest run test/core-consumers.test.ts`: 지금 코드에서 통과(9/9). 손 확인: 그 저장소를 `new DrizzleReviewStore(database)`(N07 꼴)로 바꾸면 이 시험만 실패하고, 되돌린 뒤 `git diff`로 `main.ts`가 깨끗한 것을 봤다. typecheck 오류 0.
 
 ## 시험 이의
