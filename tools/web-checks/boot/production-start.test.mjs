@@ -3,7 +3,8 @@
 // 그래서 계측 진입점(instrumentation.ts register)이 환경 객체로 NEXT_RUNTIME을 보면 서버 액션 키 확인·텔레메트리 시작이 조용히 건너뛰어졌다.
 // 이 시험은 운영 빌드 산출물을 NEXT_RUNTIME 환경 값 없이 띄워 본다(단위 시험은 환경 값을 직접 넣으므로 이 버그를 재현하지 못한다).
 // - web: `<distDir>/standalone/apps/web/server.js`(운영 이미지의 진입, output: 'standalone')
-// - partner: 운영 시작 명령 `next start`(partner는 standalone 출력을 쓰지 않는다)
+// - partner: `<distDir>/standalone/apps/partner/server.js`. 정본은 두 앱 서버 이미지를 모두 output: 'standalone'으로 만든다(docs/frontend.md 'Next.js 앱 서버 실행', ADR-0079 결정 27).
+//   그래서 `next start`가 아니라 standalone으로 띄운다(계획 §14 VF-11. `next start`는 NEXT_RUNTIME을 되살려 되돌림을 가린다)
 // '뜨지 않는다'는 프로세스가 0이 아닌 코드로 끝나고 요청에 답하지 않는다는 뜻이다(모든 요청에 500으로 답하며 남아 있는 것도 뜬 것으로 센다).
 // 먼저 운영 빌드가 있어야 한다(CI `web / budgets` 잡의 `node seed-css/build.mjs`(PEAKET_BUILDS=prod) 뒤). 산출물이 없으면 실패한다(건너뛰지 않는다).
 // 실행(tools/web-checks): node --test "boot/*.test.mjs"
@@ -22,7 +23,7 @@ const KEY_ENV = 'NEXT_SERVER_ACTIONS_ENCRYPTION_KEY';
 
 const APPS = {
   web: { cwd: join(REPO, 'apps', 'web', DIST, 'standalone', 'apps', 'web'), args: (port) => ['server.js'], portEnv: true, need: () => join(REPO, 'apps', 'web', DIST, 'standalone', 'apps', 'web', 'server.js') },
-  partner: { cwd: join(REPO, 'apps', 'partner'), args: (port) => [join(REPO, 'apps', 'partner', 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '--port', String(port), '--hostname', '127.0.0.1'], portEnv: false, need: () => join(REPO, 'apps', 'partner', DIST, 'BUILD_ID') },
+  partner: { cwd: join(REPO, 'apps', 'partner', DIST, 'standalone', 'apps', 'partner'), args: (port) => ['server.js'], portEnv: true, need: () => join(REPO, 'apps', 'partner', DIST, 'standalone', 'apps', 'partner', 'server.js') },
 };
 
 const freePort = () =>
