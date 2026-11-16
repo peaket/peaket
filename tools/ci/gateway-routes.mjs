@@ -8,7 +8,10 @@
 // 입력: <root>/docs/api/openapi.yaml, 라우트 원천 <root>/deploy/gateways/routes/<게이트웨이>.yaml
 // 끝 코드: 0 같음·씀, 1 --check에서 다름, 2 멈춤(docs/infra.md §4.1 '생성기가 멈추는 경우', 까닭을 한 줄씩)·인자 오류
 //
-// 원천 규칙의 맞춤(matches)에는 경로만 적는다(메서드 없음). 경로 값은 openapi의 꼴(틀 {이름} 그대로)이다.
+// 원천 규칙의 맞춤(matches)에는 경로를 적고, 한 경로의 작업이 인증 종류가 달라 다른 라우트로 가야 할 때만 method도 적는다(그 메서드의 작업만 맡는다).
+// 겹침은 경로·메서드 짝으로 본다. 경로 값은 openapi의 꼴(틀 {이름} 그대로)이다.
+// 원천 라우트마다 이름표 peaket.io/auth(public·optional·token·token-buy)를 달고, 맡은 작업의 openapi security·x-peaket-scopes로 정한 인증 종류와
+// 다르면 멈춘다(docs/infra.md §4.1 '인증 종류 대조'). 원천 규칙의 timeouts 같은 칸은 생성 규칙에 그대로 옮긴다('경로별 시간 상한').
 //   PathPrefix: 그 경로와 그 아래(빗금으로 이어지는) 계약 경로를 맡는다. Exact: 그 계약 경로 하나만 맡는다
 //   (같은 앞부분 아래를 백엔드·정책이 다른 라우트로 나눌 때 쓴다. 예: /v1/events/{eventId}는 core-svc, 그 아래 holds는 purchase-svc).
 // 생성 규칙은 원천 규칙마다 '그 앞부분 아래이면서 그 호스트가 받는 계약 경로'의 (경로, 메서드) 짝과 경로마다의 OPTIONS다.
@@ -27,6 +30,30 @@ const METHOD_ORDER = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'
 export const LIMITS = { rulesPerRoute: 16, matchesPerRule: 64, matchesPerRoute: 128 };
 /** 생성 라우트의 원천 이름표(나뉜 라우트가 어느 원천에서 왔는지) */
 export const ROUTE_LABEL = 'peaket.io/route';
+/** 원천 라우트의 인증 종류 이름표와 그 값(docs/infra.md §4.1 '인증 종류 대조') */
+export const AUTH_LABEL = 'peaket.io/auth';
+export const AUTH_KINDS = ['public', 'optional', 'token', 'token-buy'];
+/** 게이트웨이가 확인하는 액세스 토큰 방식(openapi securitySchemes 이름) */
+const ACCESS_SCHEMES = ['fanCookie', 'partnerCookie', 'opsCookie', 'staffToken'];
+
+/**
+ * 작업의 인증 종류(docs/infra.md §4.1 '인증 종류 대조'): security의 갈래마다 액세스 토큰 방식이 있는지와 x-peaket-scopes.
+ * 구매 경로(모든 갈래에 admissionToken)인데 x-peaket-scopes에 ticket:buy가 없으면 문제다(겹친 가드)
+ * @param {Record<string, any>} op @param {Record<string, any>} openapi
+ * @returns {{ kind?: string, problem?: string }}
+ */
+export function authKindOf(op, openapi) {
+  const sec = op?.security ?? openapi?.security ?? [];
+  const scopes = op?.['x-peaket-scopes'] ?? [];
+  const buy = Array.isArray(scopes) && scopes.includes('ticket:buy');
+  const purchase = sec.length > 0 && sec.every((alt) => alt && 'admissionToken' in alt);
+  if (purchase && !buy) return { problem: '구매 경로(모든 갈래에 admissionToken)인데 x-peaket-scopes에 ticket:buy가 없다' };
+  if (!sec.length) return { kind: 'public' };
+  const has = sec.map((alt) => ACCESS_SCHEMES.some((a) => alt && a in alt));
+  if (has.every(Boolean)) return { kind: buy ? 'token-buy' : 'token' };
+  if (!has.some(Boolean)) return { kind: 'public' };
+  return { kind: 'optional' };
+}
 /** TRACE 405 직접 응답 필터(deploy/gateways/00-common.yaml) */
 const TRACE_FILTER = { type: 'ExtensionRef', extensionRef: { group: 'gateway.envoyproxy.io', kind: 'HTTPRouteFilter', name: 'peaket-trace-not-allowed' } };
 /** 응답에 그 요청의 trace-id를 붙인다(Envoy 치환 명령, docs/infra.md §4.1 '추적 머리') */
@@ -217,15 +244,22 @@ export function generateRoutes(input) {
     if (!hosts.size) problems.push(`${gw}: 원천 라우트에 호스트가 없다`);
     const onHost = (p) => hostsOf(openapi, p).some((h) => hosts.has(h));
 
-    // 원천 규칙마다 맡는 계약 경로
-    /** @type {Array<{ route: any, index: number, rule: any, paths: string[] }>} */
+    // 원천 라우트의 인증 종류 이름표(peaket.io/auth)
+    for (const r of routes) {
+      const label = r?.metadata?.labels?.[AUTH_LABEL];
+      if (label === undefined) problems.push(`${where(r)}: 이름표 ${AUTH_LABEL}(${AUTH_KINDS.join('·')})가 없다`);
+      else if (!AUTH_KINDS.includes(label)) problems.push(`${where(r)}: 이름표 ${AUTH_LABEL}=${label}는 ${AUTH_KINDS.join('·')}가 아니다`);
+    }
+
+    // 원천 규칙마다 맡는 계약 작업(경로·메서드 짝). 맞춤에 method가 있으면 그 메서드의 작업만 맡는다
+    /** @type {Array<{ route: any, index: number, rule: any, ops: Array<{ path: string, method: string }> }>} */
     const ruleClaims = [];
     for (const r of routes) {
       (r?.spec?.rules ?? []).forEach((rule, index) => {
         const at = `${where(r)} 규칙 ${index + 1}`;
         const ms = rule.matches ?? [];
         if (!ms.length) problems.push(`${at}: 맞춤(앞부분)이 없다`);
-        const paths = new Set();
+        const ops = new Map();
         for (const m of ms) {
           const v = m.path?.value;
           const type = m.path?.type ?? 'PathPrefix';
@@ -234,23 +268,35 @@ export function generateRoutes(input) {
             continue;
           }
           if (!['PathPrefix', 'Exact'].includes(type)) problems.push(`${at}: 원천 맞춤은 PathPrefix·Exact만 적는다(${type} ${v})`);
-          if (m.method || m.headers || m.queryParams) problems.push(`${at}: 원천 맞춤에는 경로만 적는다(메서드는 계약이 정한다): ${v}`);
+          if (m.headers || m.queryParams) problems.push(`${at}: 원천 맞춤에는 경로와 메서드만 적는다: ${v}`);
+          if (m.method !== undefined && !METHOD_ORDER.includes(m.method)) problems.push(`${at}: 모르는 메서드 ${m.method}(${v})`);
           if (v.toLowerCase().startsWith('/internal')) problems.push(`${where(r)}: /internal/로 시작하는 경로를 맡는다(${v}). 어느 게이트웨이도 라우트하지 않는다`);
-          const mine = contractPaths.filter((p) => onHost(p) && claims(type, v, p));
-          if (!mine.length) problems.push(`${where(r)}: 앞부분 ${v}가 맡는 계약 경로가 하나도 없다`);
-          for (const p of mine) paths.add(p);
+          const mine = [];
+          for (const p of contractPaths)
+            if (onHost(p) && claims(type, v, p)) for (const o of operationsOf(openapi.paths[p])) if (m.method === undefined || o.method === m.method) mine.push({ path: p, method: o.method });
+          if (!mine.length) problems.push(`${where(r)}: 앞부분 ${v}${m.method ? `(${m.method})` : ''}가 맡는 계약 작업이 하나도 없다`);
+          for (const o of mine) ops.set(`${o.method} ${o.path}`, o);
         }
-        for (const f of rule.filters ?? []) if (f.type === 'ResponseHeaderModifier') problems.push(`${at}: 원천 규칙에 ResponseHeaderModifier를 두지 않는다(생성기가 X-Trace-Id를 붙인다)`);
-        ruleClaims.push({ route: r, index, rule, paths: [...paths].sort(byText) });
+        for (const fl of rule.filters ?? []) if (fl.type === 'ResponseHeaderModifier') problems.push(`${at}: 원천 규칙에 ResponseHeaderModifier를 두지 않는다(생성기가 X-Trace-Id를 붙인다)`);
+        ruleClaims.push({ route: r, index, rule, ops: [...ops.values()] });
       });
     }
-    // 그 호스트가 받는 계약 경로마다 맡는 규칙이 정확히 하나
+    // 그 호스트가 받는 계약 작업마다 맡는 규칙이 정확히 하나이고, 그 라우트의 인증 종류 이름표가 작업의 인증 종류와 같다
     for (const p of contractPaths) {
-      if (!onHost(p) || operationsOf(openapi.paths[p]).length === 0) continue;
-      const owners = ruleClaims.filter((c) => c.paths.includes(p));
-      if (p.toLowerCase().startsWith('/internal/') && owners.length) problems.push(`${gw}: /internal/로 시작하는 경로를 맡는다(${p})`);
-      if (owners.length === 0) problems.push(`${gw}: 계약 경로 ${p}를 맡는 원천 규칙이 없다(호스트 ${[...hosts].join(',')})`);
-      if (owners.length > 1) problems.push(`${gw}: 계약 경로 ${p}를 두 규칙이 함께 맡는다(${owners.map((o) => `${o.route.metadata?.name} 규칙 ${o.index + 1}`).join(', ')})`);
+      if (!onHost(p)) continue;
+      for (const o of operationsOf(openapi.paths[p])) {
+        const key = `${o.method} ${p}`;
+        const owners = ruleClaims.filter((c) => c.ops.some((x) => x.path === p && x.method === o.method));
+        if (p.toLowerCase().startsWith('/internal/') && owners.length) problems.push(`${gw}: /internal/로 시작하는 경로를 맡는다(${p})`);
+        if (owners.length === 0) problems.push(`${gw}: 계약 작업 ${key}를 맡는 원천 규칙이 없다(호스트 ${[...hosts].join(',')})`);
+        if (owners.length > 1) problems.push(`${gw}: 계약 작업 ${key}를 두 규칙이 함께 맡는다(${owners.map((x) => `${x.route.metadata?.name} 규칙 ${x.index + 1}`).join(', ')})`);
+        const kind = authKindOf(openapi.paths[p][o.method.toLowerCase()], openapi);
+        if (kind.problem) problems.push(`${gw}: ${key}: ${kind.problem}`);
+        for (const x of owners) {
+          const label = x.route.metadata?.labels?.[AUTH_LABEL];
+          if (label !== undefined && kind.kind && label !== kind.kind) problems.push(`${gw}: ${key}의 인증 종류 ${kind.kind}가 맡은 라우트 ${x.route.metadata?.name}의 이름표 ${AUTH_LABEL}=${label}와 다르다(docs/infra.md §4.1 '인증 종류 대조')`);
+        }
+      }
     }
     if (problems.length) continue;
 
@@ -261,12 +307,16 @@ export function generateRoutes(input) {
       for (const c of ruleClaims.filter((x) => x.route === r)) {
         const other = [];
         const cdn = [];
-        for (const p of c.paths) {
-          const ops = operationsOf(openapi.paths[p]);
-          if (!ops.length) continue;
+        const byPath = new Map();
+        for (const o of c.ops) {
+          if (!byPath.has(o.path)) byPath.set(o.path, new Set());
+          byPath.get(o.path).add(o.method);
+        }
+        for (const p of [...byPath.keys()].sort(byText)) {
+          const ops = operationsOf(openapi.paths[p]).filter((o) => byPath.get(p).has(o.method));
           const pm = pathMatchOf(p);
           for (const o of ops) (o.cdn ? cdn : other).push({ path: { ...pm }, method: o.method });
-          // 사전 요청(OPTIONS)은 경로마다 하나. 캐시하지 않는 작업이 있으면 그 규칙에 둔다
+          // 사전 요청(OPTIONS)은 이 규칙이 맡은 경로마다 하나. 캐시하지 않는 작업이 있으면 그 규칙에 둔다
           (ops.some((o) => !o.cdn) ? other : cdn).push({ path: { ...pm }, method: 'OPTIONS' });
         }
         if (other.length) generated.push(...rulesFrom(c.rule, sortMatches(other), true, ''));
