@@ -13,7 +13,6 @@ import {
   type ConfirmedCancelResult,
   type ConfirmedCancelTarget,
   parseConfirmedCancel,
-  settleByBalance,
 } from '../domain/confirmed-cancel.js';
 import { PaymentCancelStateError } from '../domain/deposit-cancel.js';
 import type { CancelResult, PaymentGatewayPort, QueryResult } from '../domain/payment-gateway.js';
@@ -82,8 +81,8 @@ export class CancelConfirmedPayment {
       case 'DONE':
         return { result: 'CANCELLED', cancelledAmount: begun.cancelledAmount };
       case 'REJECTED':
-        // 리뷰 B3 빈 뼈대(BAT-415 리뷰 반영): 거절로 끝난 건의 재요청. 구현 담당이 채운다
-        throw new Error('아직 없음');
+        // 거절로 끝난 건의 재요청: 결제사를 부르지 않고 거절을 다시 준다(리뷰 B3. 다시 환급하려면 새 취소 ID로 한다)
+        return { result: 'REJECTED', cancelledAmount: target.cancelledAmount };
       case 'BUSY':
         // 같은 결제의 다른 취소가 10분 안에 진행 중이다: 보내지 않고 결과 모름(부른 쪽이 다시 시도한다)
         return unknownOf(target);
@@ -102,10 +101,11 @@ export class CancelConfirmedPayment {
     if (replay && clock.now() - record.createdAtMs >= CONFIRMED_CANCEL_QUERY_AFTER_MS) {
       const query = await this.#query(gateway, target, leftMs());
       if (query.kind !== 'FOUND') return unknownOf(target);
-      const settled = settleByBalance(record, query.balanceAmount);
-      if (settled === 'APPLIED') return this.#finish(target, parsed.cancellationId, budget);
-      if (settled === 'UNKNOWN') return unknownOf(target);
-      // 기대 잔액 그대로: 아직 반영되지 않았다. 같은 본문으로 다시 보낸다
+      // 가르기는 결제 행 잠금 안의 저장소가 한다: 지금 원장 잔액 = 기대 잔액이고 다른 진행 중 행이 없을 때만(리뷰 B1)
+      const settled = await store.settleConfirmedCancelByQuery(target, parsed.cancellationId, query.balanceAmount, budget);
+      if (settled.status === 'APPLIED') return { result: 'CANCELLED', cancelledAmount: settled.cancelledAmount };
+      if (settled.status === 'UNDECIDABLE') return unknownOf(target);
+      // RESEND(기대 잔액 그대로): 아직 반영되지 않았다. 같은 본문으로 다시 보낸다
       if (leftMs() < MIN_CALL_REMAINING_MS || !guard.tryTakeToken()) return unknownOf(target);
     }
 

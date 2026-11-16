@@ -82,8 +82,8 @@ export function settleByBalance(record: Pick<ConfirmedCancelRecord, 'amount' | '
  * 3시간 지난 재시도에서 잔액으로 이 취소의 반영을 가를 수 있는가(리뷰 B1, docs/features/payment.md §4.1 '잔액으로 가르는 조건').
  * 지금 원장의 남은 금액이 저장한 기대 잔액과 같고, 같은 결제에 이 행 말고 진행 중 행이 없을 때만 참이다. BAT-415 리뷰 반영 빈 뼈대
  */
-export function canSettleByBalance(_q: { readonly ledgerRemaining: number; readonly expectedBalance: number; readonly otherInFlight: number }): boolean {
-  throw new Error('아직 없음');
+export function canSettleByBalance(q: { readonly ledgerRemaining: number; readonly expectedBalance: number; readonly otherInFlight: number }): boolean {
+  return q.ledgerRemaining === q.expectedBalance && q.otherInFlight === 0;
 }
 
 /** CancelPaymentResponse.result의 앞머리를 뗀 값 */

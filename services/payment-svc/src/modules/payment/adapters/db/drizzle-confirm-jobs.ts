@@ -27,6 +27,7 @@ import type { PgName } from '../../domain/payment-gateway.js';
 import { depositNextQueryAtMs } from '../../domain/virtual-account.js';
 import { DEPOSIT_CANCEL_SENT_EVENT_TYPE, type DepositCancelBegin, depositCancelEventKey, type DepositCancelTarget } from '../../domain/deposit-cancel.js';
 import {
+  canSettleByBalance,
   CONFIRMED_CANCEL_BUSY_WINDOW_MS,
   CONFIRMED_CANCEL_SENT_EVENT_TYPE,
   type ConfirmedCancelBegin,
@@ -36,6 +37,7 @@ import {
   type ConfirmedCancelTarget,
   isConfirmedStatus,
   type PaymentCancelStatus,
+  settleByBalance,
 } from '../../domain/confirmed-cancel.js';
 import type { CallBudget, FinishConfirmResult, MarkConfirmSentResult, PaymentConfirmJobs, PaymentDepositCancels, PaymentConfirmedCancels, PaymentEventCodec, PaymentUnknownQueries, ResolveUnknownResult } from '../../domain/ports.js';
 import { buildResolvedEvent, RESOLVED_EVENT_TYPE, type ResolvedFinish, UNKNOWN_OVERDUE_MS, UNKNOWN_QUERY_BASE_MS, unknownQueryClaimHoldMs, type UnknownQueryJob } from '../../domain/unknown-resolver.js';
@@ -620,8 +622,8 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
   /**
    * 0021 payment_cancel 행 만들기·찾기(docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액', BAT-415 몫 P).
    * 잠금 차례는 payment 행 → payment_cancel 행이다(finish와 같다). 같은 취소 ID의 겹친 재시도는 payment 행 잠금으로 줄을 서서 한 행만 만든다.
-   * 구현에서 정한 것: 이미 있는 행의 재시도(replay)에도 같은 결제의 다른 진행 중 행이 10분 안이면 BUSY다(한 번에 하나씩, 3시간 뒤 잔액 대조의 전제).
-   * FAILED 행을 다시 부르면 진행 중(REQUESTED)으로 되돌리고, 그동안 다른 취소가 쓴 금액을 넘으면 OVER_REMAINING이다(FAILED는 진행 중 합에 들지 않았다)
+   * 이미 있는 행의 재시도(replay)에도 같은 결제의 다른 진행 중 행이 10분 안이면 BUSY다(한 번에 하나씩, 3시간 뒤 잔액 대조의 전제).
+   * 차례: CANCELED → DONE, FAILED → REJECTED(되살리지 않는다, 리뷰 B3), 그다음 금액·BUSY 검사
    */
   async beginConfirmedCancel(target: ConfirmedCancelTarget, q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string }, budget?: CallBudget): Promise<ConfirmedCancelBegin> {
     const idemKey = confirmedCancelIdemKey(q.cancellationId);
@@ -630,6 +632,8 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       if (ledger === undefined) return { status: 'NOT_CONFIRMED' };
       const own = await readCancelRow(tx, target.paymentId, idemKey);
       if (own?.status === 'CANCELED') return { status: 'DONE', cancelledAmount: ledger.cancelledAmount };
+      // 거절(FAILED)은 그 건의 끝이다. 되살리지 않고 BUSY·금액 검사보다 먼저 거절을 다시 준다(리뷰 B3)
+      if (own?.status === 'FAILED') return { status: 'REJECTED' };
       if (own !== undefined && q.amount !== undefined && q.amount !== own.amount) return { status: 'AMOUNT_MISMATCH' };
       if (!isConfirmedStatus(ledger.status)) return { status: 'NOT_CONFIRMED' };
       const now = this.o.clock.now();
@@ -641,13 +645,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       if (pending.some((p) => now - p.createdAtMs < CONFIRMED_CANCEL_BUSY_WINDOW_MS)) return { status: 'BUSY' };
       const remaining = ledger.amount - ledger.cancelledAmount;
       const room = remaining - pending.reduce((sum, p) => sum + p.amount, 0);
-      if (own !== undefined) {
-        if (own.status === 'FAILED') {
-          if (own.amount > room) return { status: 'OVER_REMAINING' };
-          await tx.execute(sql`update payment_cancel set status = 'REQUESTED' where id = ${own.id}::uuid and status = 'FAILED'`);
-        }
-        return { status: 'BEGUN', record: { ...recordOf(own), status: own.status === 'FAILED' ? 'REQUESTED' : own.status }, replay: true };
-      }
+      if (own !== undefined) return { status: 'BEGUN', record: recordOf(own), replay: true };
       if (remaining <= 0) return { status: 'NO_BALANCE' };
       let amount: number;
       if (q.amount === undefined) {
@@ -686,33 +684,66 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       if (own === undefined) return { status: 'STALE', cancelledAmount: ledger.cancelledAmount };
       // 겹친 재시도가 먼저 반영했다: 다시 더하지 않는다
       if (own.status === 'CANCELED') return { status: 'APPLIED', cancelledAmount: ledger.cancelledAmount };
-      if (!isConfirmedStatus(ledger.status) || ledger.cancelledAmount + own.amount > ledger.amount) return { status: 'STALE', cancelledAmount: ledger.cancelledAmount };
-      const now = new Date(this.o.clock.now());
-      const r = await tx.execute(sql`
-        update payment
-        set cancelled_amount = cancelled_amount + ${own.amount},
-            status = case when cancelled_amount + ${own.amount} >= amount then 'CANCELED' else 'PARTIAL_CANCELED' end,
-            status_changed_at = ${now}::timestamptz
-        where id = ${target.paymentId}::uuid and status in ('APPROVED', 'PARTIAL_CANCELED')
-        returning cancelled_amount`);
-      const row = r.rows[0] as { cancelled_amount: number | string } | undefined;
-      if (!row) return { status: 'STALE', cancelledAmount: ledger.cancelledAmount };
-      await tx.execute(sql`update payment_cancel set status = 'CANCELED', canceled_at = ${now}::timestamptz where id = ${own.id}::uuid`);
-      return { status: 'APPLIED', cancelledAmount: Number(row.cancelled_amount) };
+      return this.#applyCancelRow(tx, target.paymentId, ledger, own);
     }, budget);
   }
 
-  /** 결제사 비동기 처리·업무 거절을 그 행에 남긴다. 끝난(CANCELED) 행은 바꾸지 않는다(겹친 재시도가 먼저 반영했을 수 있다). 원장은 그대로다 */
-  /** 리뷰 B1 빈 뼈대(BAT-415 리뷰 반영). 구현 담당이 채운다 */
+  /**
+   * 3시간 지난 재시도의 조회 결과를 결제 행 잠금 안에서 가른다(리뷰 B1, docs/features/payment.md §4.1 '잔액으로 가르는 조건').
+   * 차례: 행이 진행 중인지(CANCELED면 이미 반영, 그 밖은 가르지 않음) → canSettleByBalance(지금 원장 잔액 = 기대 잔액, 다른 진행 중 행 0) → settleByBalance.
+   * APPLIED면 같은 트랜잭션에서 finishConfirmedCancel처럼 반영한다. 검사와 반영 사이에 다른 반영이 끼지 못한다(같은 잠금)
+   */
   async settleConfirmedCancelByQuery(
-    _target: ConfirmedCancelTarget,
-    _cancellationId: string,
-    _balanceAmount: number,
-    _budget?: CallBudget,
+    target: ConfirmedCancelTarget,
+    cancellationId: string,
+    balanceAmount: number,
+    budget?: CallBudget,
   ): Promise<{ readonly status: 'APPLIED'; readonly cancelledAmount: number } | { readonly status: 'RESEND' } | { readonly status: 'UNDECIDABLE' }> {
-    throw new Error('아직 없음');
+    const idemKey = confirmedCancelIdemKey(cancellationId);
+    return this.#tx(async (tx): Promise<{ readonly status: 'APPLIED'; readonly cancelledAmount: number } | { readonly status: 'RESEND' } | { readonly status: 'UNDECIDABLE' }> => {
+      const ledger = await lockLedger(tx, target.paymentId);
+      if (ledger === undefined) return { status: 'UNDECIDABLE' };
+      const own = await readCancelRow(tx, target.paymentId, idemKey, true);
+      if (own === undefined) return { status: 'UNDECIDABLE' };
+      if (own.status === 'CANCELED') return { status: 'APPLIED', cancelledAmount: ledger.cancelledAmount };
+      if ((own.status !== 'REQUESTED' && own.status !== 'CANCEL_PENDING') || !isConfirmedStatus(ledger.status)) return { status: 'UNDECIDABLE' };
+      const others = await tx.execute(sql`
+        select count(*)::int as n from payment_cancel
+        where payment_id = ${target.paymentId}::uuid and status in ('REQUESTED', 'CANCEL_PENDING') and idempotency_key <> ${idemKey}`);
+      const otherInFlight = Number((others.rows[0] as { n: number | string }).n);
+      const record = recordOf(own);
+      if (!canSettleByBalance({ ledgerRemaining: ledger.amount - ledger.cancelledAmount, expectedBalance: record.expectedBalance, otherInFlight })) return { status: 'UNDECIDABLE' };
+      const settled = settleByBalance(record, balanceAmount);
+      if (settled === 'NOT_APPLIED') return { status: 'RESEND' };
+      if (settled === 'UNKNOWN') return { status: 'UNDECIDABLE' };
+      const applied = await this.#applyCancelRow(tx, target.paymentId, ledger, own);
+      return applied.status === 'APPLIED' ? { status: 'APPLIED', cancelledAmount: applied.cancelledAmount } : { status: 'UNDECIDABLE' };
+    }, budget);
   }
 
+  /** 잠금 안에서 그 취소 건의 금액을 한 번 더하고 행을 CANCELED로 바꾼다. 원장이 일반 취소 상태가 아니거나 결제 금액을 넘으면 STALE */
+  async #applyCancelRow(
+    tx: DbTransaction,
+    paymentId: string,
+    ledger: { status: PaymentLedgerStatus; amount: number; cancelledAmount: number },
+    own: CancelRow,
+  ): Promise<{ status: 'APPLIED' | 'STALE'; cancelledAmount: number }> {
+    if (!isConfirmedStatus(ledger.status) || ledger.cancelledAmount + own.amount > ledger.amount) return { status: 'STALE', cancelledAmount: ledger.cancelledAmount };
+    const now = new Date(this.o.clock.now());
+    const r = await tx.execute(sql`
+      update payment
+      set cancelled_amount = cancelled_amount + ${own.amount},
+          status = case when cancelled_amount + ${own.amount} >= amount then 'CANCELED' else 'PARTIAL_CANCELED' end,
+          status_changed_at = ${now}::timestamptz
+      where id = ${paymentId}::uuid and status in ('APPROVED', 'PARTIAL_CANCELED')
+      returning cancelled_amount`);
+    const row = r.rows[0] as { cancelled_amount: number | string } | undefined;
+    if (!row) return { status: 'STALE', cancelledAmount: ledger.cancelledAmount };
+    await tx.execute(sql`update payment_cancel set status = 'CANCELED', canceled_at = ${now}::timestamptz where id = ${own.id}::uuid`);
+    return { status: 'APPLIED', cancelledAmount: Number(row.cancelled_amount) };
+  }
+
+  /** 결제사 비동기 처리·업무 거절을 그 행에 남긴다. 끝난(CANCELED) 행은 바꾸지 않는다(겹친 재시도가 먼저 반영했을 수 있다). 원장은 그대로다 */
   async markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget): Promise<void> {
     const idemKey = confirmedCancelIdemKey(cancellationId);
     await this.#tx(
