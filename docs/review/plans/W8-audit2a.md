@@ -524,3 +524,140 @@ export interface ReviewStore {
 
 - **확인 필요(지적 아님)**: 리뷰 반영의 통합 시험 세 파일(`review-purge-legacy`·`review-recheck`·`review-grants`)과 처음 여섯 파일은 아직 돌리지 않았다(Docker 대기). 정비 일은 다음 출시에서 지울 때까지 정비 시간마다 표를 한 번 훑는다. 두 꼴을 찾는 조건에는 색인이 없지만 운영 전이라 문제 없는 크기다.
 - **높음·중간**: 없다.
+
+## 검증
+
+- **누가·언제**: 검증 담당(세션 `l3w8-a2a-verify`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, 끝 `3e81c89a` 위. 계획·시험·구현·리뷰에 관여하지 않았다. 바뀐 부분 `c3b0935c..3e81c89a`(스냅숏 JSON·계약 생성물 건너뜀)를 보고 틀린 구현을 하나씩 넣었다. Docker 없이 돌렸다.
+- **방법**: 변이 하나마다 제품 코드(또는 0026 원문) 한 곳을 바꾸고 → core-svc 폴더에서 `npx vitest run test/review-withdrawn.test.ts test/review-purge.test.ts test/review-recheck.test.ts test/review-purge-legacy.test.ts test/review-purge-migration.test.ts test/core-consumers.test.ts test/review.test.ts test/review.http.test.ts test/review-grants.test.ts`(시험 58개, 바꾸기 전 모두 통과) → 결과 → `git checkout -- <파일>`. M62·M63은 닿는 파일만 돌렸다.
+- **수**: 넣은 63, 잡힌 61, 살아남은 2(M49·M58). 꼭 넣을 것(계획 §4: §1 ⓐⓑⓒⓓ, §2 ⓐⓒⓔ, ⓘⓚ) 가운데 단위로 넣을 수 있는 것은 모두 넣었고 모두 잡혔다. §2 ⓒ(파기와 예약이 다른 트랜잭션)의 두 차례와 Drizzle SQL·SKIP LOCKED·실제 권한은 아래 Docker 대기 목록으로 넘긴다.
+
+### 변이 표(단위, Docker 없음)
+
+| ID | 계획 표본 | 틀린 구현(파일) | 결과 | 잡은 시험(대표) |
+| --- | --- | --- | --- | --- |
+| M01 | §1 ⓐ | 파기가 별점을 남김(`domain/review.ts` `purgedReview`) | 잡힘 | ⑥ 작성자 지우기, ⑧ 이전 판, ④ 예약 시각에 파기 등 8 |
+| M02 | §1 ⓐ | 파기가 내용 지문을 남김(〃) | 잡힘 | ⑥, ⑧, ④ 등 8 |
+| M03 | §1 ⓑ | 상태를 DELETED 대신 그대로 둠(집계·공개 목록에 남음, 〃) | 잡힘 | ② 목록·요약·상세에서 빠짐, ⑥, ⑧, ④ 등 10 |
+| M04 | 파기 칸 | 본문을 남김(〃) | 잡힘 | ①, ③ 내부 경로, ⑥, ⑧ 등 6 |
+| M05 | 파기 칸 | 작성자 표시를 남김(〃) | 잡힘 | ①, ③ 내부 경로, ⑥, ⑧ 등 6 |
+| M06 | ⓘ | `notice`·`noticeUntilMs`를 남김(〃) | 잡힘 | ①, ③ 내부 경로, ⑥, ⑧ |
+| M07 | §1 ⓔ | 지운 시각을 늘 지금으로 덮음(〃) | 잡힘 | ①, ⑧ 첫 시험 |
+| M08 | 파기 칸 | 계정 참조를 끊지 않음(〃) | 잡힘 | ⑧ 셋, ⑥, ③, ④ 등 10 |
+| M09 | 파기 칸 | 주문 참조를 끊지 않음(〃) | 잡힘 | ①, ③ 내부 경로, ⑥, ⑧ 등 6 |
+| M10 | §1 ⓒ | 계정 조건 없이 모든 행 파기(다른 계정 행 건드림, 메모리 `purgeByAccount`) | 잡힘 | ①(B 행 그대로), ②, ④, ⑤ 등 8 |
+| M11 | §1 ⓓ | 이미 지운 DELETED 행은 건너뜀(〃) | 잡힘 | ① |
+| M12 | §1 ⓕ | 작성자 지우기가 옛 칸(본문·작성자 표시)만 비움(메모리 `softDeleteReview`) | 잡힘 | ⑥ |
+| M13 | §1 ⓖ·예약 빼먹기 | 처리기가 `purgeWithdrawn` 대신 예약 없는 `purgeAccount`를 부름(`account-withdrawn.handler.ts`) | 잡힘 | ④ 셋, ①, ③ 같은 사건 |
+| M14 | §2 ⓐ | 예약 시각을 처리 시각 + 16분으로(`withdrawalRecheckAt`) | 잡힘 | ④ min 시험 등 7 |
+| M15 | ⓛ | 미래 탈퇴 시각을 그대로 씀(min 없음) | 잡힘 | ④ min 시험, ④ 함께 쓴다 |
+| M16 | §2 ⓑ | 15분(여유 1분 없음) | 잡힘 | ④·⑤ 등 7 |
+| M17 | §2 ⓑ | 예약 경계 `<=` → `<`(정각에 건너뜀, 메모리 `runDueRechecks`) | 잡힘 | ④ 예약 시각 전에는 다시 정리하지 않고 그 시각에 파기한다 |
+| M18 | §2 ⓓ | 같은 계정 예약을 이른 시각으로 덮음(메모리 `purgeWithdrawnAccount`) | 잡힘 | ④ 함께 쓴다 |
+| M19 | §2 ⓔ | 처리한 예약을 지우지 않음(메모리 `runDueRechecks`) | 잡힘 | ④ 예약 시각, ⑤ 100개씩 |
+| M20 | §2 ⓖ | 반복이 한 번 실패하면 멈춤(`review-recheck.ts`) | 잡힘 | ⑤ 반복, ⑤ 실패 지표 |
+| M21 | ⓜ | 100개를 채워도 곧바로 다시 돌지 않음 | 잡힘 | ⑤ 반복 둘 |
+| M22 | §2 ⓗ | `start.ts`가 반복을 켜지 않음 | 잡힘 | ⑤ 소비자를 켜면 반복도 켜지고… |
+| M23 | 종료 때 안 멈춤 | `stop()`이 반복을 멈추지 않음(`start.ts`) | 잡힘 | 〃 |
+| M24 | 멈춤 차례 | 소비자를 먼저 멈추고 반복을 뒤에 멈춤(`start.ts`) | 잡힘 | 〃 |
+| M25 | A1 ⓐ | 실패한 한 번에는 밀린 시간을 고치지 않음 | 잡힘 | ⑤ 반복이 실패해도 밀린 시간 지표를… |
+| M26 | A1 ⓑ | 실패한 한 번에는 밀린 시간을 0으로 | 잡힘 | 〃 |
+| M27 | A1 ⓒ | 성공 때도 실패 수를 올림 | 잡힘 | 〃 |
+| M28 | A1 ⓓ | 실패 때 마지막 성공 시각을 고침 | 잡힘 | 〃 |
+| M29 | A1 ⓔ | 밀린 시간 읽기가 던지면 반복이 멈춤 | 잡힘 | 〃 |
+| M30 | A2 ⓐ | 정비 일 대상에서 둘째 꼴(`account_id = id`인 살아 있는 후기)을 뺌(메모리 `isLegacyRow`) | 잡힘 | ⑧ 첫·둘째 시험 |
+| M31 | A2 ⓑ | 첫째 꼴을 별점만으로 찾음(〃) | 잡힘 | ⑧ 첫 시험(지문만·계정만 남은 행) |
+| M32 | A2 ⓒ | 정비 일이 커서 없이 처음부터 다시 읽음(`review-maintenance.ts`) | 잡힘 | ⑧ 묶음 경계 |
+| M33 | A2 ⓓ·남의 후기 | 제대로 파기된 DELETED 행도 다시 고침(갱신 시각 바뀜, 메모리 `isLegacyRow`) | 잡힘 | ⑧ 셋 |
+| M34 | A2 ⓕ | `when: 'daily'` | 잡힘 | ⑧ 정비 시간 일 |
+| M35 | 묶음 크기 | 기본 묶음 1,000 → 100 | 잡힘 | 〃 |
+| M36 | 멈춤 신호 | 정비 일이 묶음 사이 멈춤 신호를 보지 않음 | 잡힘 | ⑧ 멈춤 신호 |
+| M37 | A2 ⓖ·0026 넓히기 | 정비 역할에 `review` 표 전체 UPDATE(0026) | 잡힘 | ⑦⑧ 0026은 정비 역할에 본문 읽기를 주지 않는다 |
+| M38 | 0026 넓히기 | 정비 역할 SELECT에 `body`를 더함 | 잡힘 | 〃 |
+| M39 | ⓝ·0026 넓히기 | 예약 표 권한을 `core_partner`에도 | 잡힘 | ⑦ 예약 표 권한 |
+| M40 | ⓝ·0026 넓히기 | 예약 표 UPDATE를 칸 없이 넓게 | 잡힘 | 〃 |
+| M41 | 0026 좁히기 | 예약 표 `core_app`에서 DELETE를 뺌 | 잡힘 | 〃 |
+| M42 | NOT VALID 빼기 | 살아 있는 행 CHECK에서 `NOT VALID`를 뺌 | 잡힘 | ⑦ 마이그레이션은 별점·지문 NULL을… |
+| M43 | 0026 좁히기 | 내용 지문 `DROP NOT NULL`을 뺌 | 잡힘 | 〃 |
+| M44 | ⓚ | 처리기 로그에 계정 ID를 실음 | 잡힘 | ①, ④ 처리기 |
+| M45 | 로그 새기 | 반복 경고에 오류 요약 대신 원래 오류(매개변수의 계정 ID)를 실음 | 잡힘 | ⑤ 반복, ⑤ 실패 지표 |
+| M46 | ⓙ | 내부 경로에서 내부 토큰 가드를 뺌 | 잡힘 | ③ 내부 파기 경로 |
+| M47 | 내부 경로 | 내부 경로 `purgeAccount`가 다시 정리 예약을 만듦 | 잡힘 | ③ 둘 |
+| M48 | 입력 확인 | `purgeWithdrawn`이 계정 ID UUID 확인을 뺌 | 잡힘 | ④ 탈퇴 시각을 읽지 못하거나 계정 ID가 틀리면… |
+| M49 | 입력 확인 | `withdrawalRecheckAt`이 date-time 모양 확인 없이 `Date.parse`만(날짜만 있는 `2026-11-16`도 받음) | **살아남음** | — |
+| M50 | 예약 차례 | 때가 된 예약을 늦은 것부터 잡음(메모리) | 잡힘 | ⑤ 100개씩 예약 시각 차례로 |
+| M51 | 밀린 시간 | 밀리지 않은 예약에 음수 밀린 시간(`Math.max(0, …)` 뺌, 메모리) | 잡힘 | ⑤ 밀린 시간은 정각에 0 |
+| M52 | 장애 삼킴 | 처리기가 저장소 실패를 삼키고 0건으로 넘어감 | 잡힘 | ④ 처리기는 … 저장소가 실패하면 함께 실패한다 |
+| M53 | 묶음 크기 | 반복이 받은 묶음 크기를 넘기지 않음 | 잡힘 | ⑤ 반복 둘 |
+| M54 | 시작 | 반복이 켜자마자 돌지 않고 한 간격 쉰 뒤 돎 | 잡힘 | ⑤ 반복 셋 |
+| M55 | §2 ⓒ의 단위 몫·예약 빼먹기 | `purgeWithdrawn`이 예약 없는 `purgeByAccount`를 부름 | 잡힘 | ④·⑤ 등 6 |
+| M56 | 정비 일 목록 | `CORE_MAINTENANCE_TASK_NAMES`에서 `review-purge-legacy`를 뺌 | 잡힘 | ⑧ 정비 일 목록 |
+| M57 | 조립 | `main.ts`가 반복에 처리기와 다른 Reviews(`reviews`)를 넘김 | 잡힘 | ⑤ 소비자를 켜면…(원문 대조) |
+| M58 | 예약 고치기 | 같은 계정 예약을 고칠 때 만든 시각도 지금으로 덮음(메모리 `purgeWithdrawnAccount`) | **살아남음** | — |
+| M59 | 묶음 크기 | 메모리 `runDueRechecks`가 `limit`을 보지 않음 | 잡힘 | ⑤ 100개씩 |
+| M60 | 처음부터 통과(COV2-06 ③) | decode가 계정 ID를 소문자로 바꾸지 않음 | 잡힘 | COV2-06 ③ |
+| M61 | 처음부터 통과(COV2-06 ④) | 모양이 틀린 사건을 빈 사건으로 넘김 | 잡힘 | COV2-06 ④ |
+| M62 | 처음부터 통과(COV2-06 ⑤) | `eventKeyOf`가 계정 ID를 줌 | 잡힘 | COV2-06 ⑤ |
+| M63 | A1 등록 | 실패 수 지표를 등록부에 있어도 새로 만듦 | 잡힘 | ⑤ 같은 등록부에 반복을 두 번 켜도… |
+
+- **같은 뜻이라 넣지 않은 것**: 정비 일 커서 `id > after` → `>=`(A2 ⓒ 앞쪽). 앞 묶음의 마지막 행은 이미 파기 칸이라 대상 조건에 다시 걸리지 않아 결과가 같다(메모리·Drizzle 모두). 해가 없는 변이라 표본에서 뺐다.
+
+### 살아남은 것(시험 담당에게 넘김)
+
+| ID | 무엇이 빈가 | 위험 | 넘김 |
+| --- | --- | --- | --- |
+| M49 | `I-T83 ④ 예약 시각은 min(탈퇴 시각, 처리 시각) + 16분이고 탈퇴 시각을 읽지 못하면 실패한다`의 거절 목록(`'어제'`·`''`·`'2026-13-45T99:00:00Z'`)에 날짜만 있는 글(`2026-11-16`)이나 시간대 없는 글(`2026-11-16T03:00:00`)이 없다. 구현 담당이 정한 것 5(계약 date-time 모양을 먼저 본다)를 지키는 단언이 없어 모양 확인을 빼도 통과한다 | 낮음. 사건 경로는 decode가 계약 Zod(`iso.datetime({ offset: true })`)로 먼저 거른다. 시간대 없는 글을 `Date.parse`가 지역 시각으로 읽어 예약이 서버 시간대만큼 어긋나는 일은 직접 부르는 길에서만 생긴다 | **시험 담당에게 넘김** |
+| M58 | 메모리 저장소에서 같은 계정 예약을 고칠 때 '만든 시각은 처음 값'을 보는 단위 단언이 없다(시험 담당이 정한 것 2가 일부러 단언하지 않았다). 단위 시험은 메모리 대역만 보므로 대역이 정본과 어긋나도 모른다 | 낮음. 실제 저장소는 `core_app`이 `due_at`만 고칠 수 있어(0026) 만든 시각을 덮으면 42501로 실패하고, 통합 `I-T83 ④ 같은 계정 예약은 늦은 쪽을 남긴다`가 Docker에서 그것을 볼 수 있다(아래 D11) | **시험 담당에게 넘김**(단위에 만든 시각 단언 하나를 더하거나, 대역의 뜻이라 두기로 정하면 그렇게 적는다) |
+
+### Docker 대기 목록(돌리지 않았다, 감독이 도커 잠금을 잡은 뒤)
+
+- 먼저 바꾸지 않은 코드로 아래 통합 일곱 파일이 모두 통과하는지 본다(통합은 이 묶음에서 아직 한 번도 돌지 않았다). core-svc 폴더에서: `npx vitest run --config vitest.integration.config.mjs test-int/review-purge.int.test.ts test-int/review-recheck.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review-purge-legacy.int.test.ts test-int/sale-eligibility.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막은 Kafka 컨테이너. 이 PC에서 네이티브 Kafka 모듈이 막히면 CI에서만).
+- 그다음 변이마다 한 곳을 바꾸고 → 표의 파일만 `npx vitest run --config vitest.integration.config.mjs <파일>` → `git -C D:/ticketpass-lane3-w8b checkout -- <바꾼 파일>`. 0026을 바꾸는 변이는 시험 DB가 마이그레이션을 처음부터 다시 돌리는지 확인한다.
+
+| ID | 틀린 구현(`services/core-svc/` 아래) | 돌릴 파일(`test-int/`) | 잡아야 할 시험 |
+| --- | --- | --- | --- |
+| D01 | `drizzle-review-store.ts` `purgeSet`에서 `rating = null` 빼기(§1 ⓐ) | `review-withdrawn.int.test.ts`, `review-purge.int.test.ts` | ①⑥ Drizzle 파기, ⑥ 작성자 지우기 |
+| D02 | `purgeSet`에서 `content_fingerprint = null` 빼기(§1 ⓐ) | 〃 | 〃 |
+| D03 | `purgeSet`에서 `notice = null, notice_until = null` 빼기(ⓘ) | `review-withdrawn.int.test.ts` | ①⑥(통보로 가린 행) |
+| D04 | `deleted_at = coalesce(deleted_at, …)` → `deleted_at = …`(§1 ⓔ) | `review-withdrawn.int.test.ts`, `review-purge-legacy.int.test.ts` | ①⑥ 지운 시각 그대로, ⑧ |
+| D05 | `purgeAccountRows`의 `where account_id = …` → `where id = …`(§1 ⓒ) | `review-withdrawn.int.test.ts` | ①⑥ |
+| D06 | `purgeAccountRows`에 `and status <> 'DELETED'` 더하기(§1 ⓓ) | 〃 | ①⑥(이미 지운 행) |
+| D07 | `purgeWithdrawnAccount`: 예약 upsert를 `this.database.db`로 트랜잭션 밖에서 먼저 따로 커밋(§2 ⓒ, 예약 먼저) | `review-recheck.int.test.ts` | ④ 파기가 실패하면 다시 정리 예약도 남지 않는다(A3, 처음부터 통과 예상 시험) |
+| D08 | `purgeWithdrawnAccount`: 파기를 `this.database.db`로 먼저 따로 커밋한 뒤 예약(§2 ⓒ, 파기 먼저) | 〃 | ④ 파기와 예약은 한 트랜잭션이다 |
+| D09 | 잠금 차례 뒤집기: 같은 트랜잭션에서 파기 → 예약 upsert | `review-recheck.int.test.ts`, `review-withdrawn-consumer.int.test.ts` | 예상: 살아남음(교착 40P01을 일으키는 시험이 없다). 살아남으면 시험 담당에게 넘김 |
+| D10 | `greatest(review_withdrawal_recheck.due_at, excluded.due_at)` → `excluded.due_at`(§2 ⓓ) | `review-recheck.int.test.ts` | ④ 같은 계정 예약은 늦은 쪽을 남긴다 |
+| D11 | `do update set due_at = …, created_at = excluded.created_at`(M58의 실제 저장소 쪽) | 〃 | ④ 같은 계정 예약은 늦은 쪽(42501 예상) |
+| D12 | `runDueRechecks`의 `due_at <=` → `<`(§2 ⓑ) | 〃 | ⑤ 두 반복이 겹쳐도…(정각 예약) |
+| D13 | `runDueRechecks`에서 `for update skip locked` 빼기(§2 ⓕ) | 〃 | ⑤ 다른 연결이 잠근 예약은 건너뛰고 기다리지 않는다 |
+| D14 | `runDueRechecks`에서 예약 `delete` 빼기(§2 ⓔ) | 〃 | ⑤ 두 반복이 겹쳐도… 처리한 예약은 지운다 |
+| D15 | `runDueRechecks`에서 `order by due_at` 빼기 | 〃 | 예상이 불분명(살아남으면 넘김) |
+| D16 | `oldestOverdueRecheckMs`의 `Math.max(0, …)` 빼기 | 〃 | ⑤ 가장 오래 밀린 예약의 지난 시간 |
+| D17 | `purgeLegacyRows` 대상에서 `or (status <> 'DELETED' and account_id = id)` 빼기(A2 ⓐ) | `review-purge-legacy.int.test.ts` | ⑧ 정비 역할로 이전 판 행을… |
+| D18 | `purgeLegacyRows` 첫째 꼴을 `rating is not null`만으로(A2 ⓑ) | 〃 | 〃 |
+| D19 | `purgeLegacyRows`에서 `for update skip locked` 빼기 | 〃 | ⑧ 잠긴 행을 건너뛰고 기다리지 않으며… |
+| D20 | `purgeLegacyRows`에서 `lock_timeout` 설정 빼기 | 〃 | 예상: 살아남음(SKIP LOCKED라 행 잠금은 기다리지 않아 거의 같은 뜻). 기록만 |
+| D21 | `softDeleteReview`를 옛 칸(`status`·`body`·`author_display`·`updated_at`)만으로(§1 ⓕ) | `review-purge.int.test.ts` | ⑥ 작성자가 지운 후기도 같은 칸을 비우고… |
+| D22 | 0026 정비 역할 UPDATE에서 `"deleted_at"` 빼기(좁히기) | `review-purge-legacy.int.test.ts`, `review-grants.int.test.ts` | ⑧(42501), ⑦⑧ 허용 쪽 대조군 |
+| D23 | 0026 `review_live_complete_check`에서 `content_fingerprint is not null` 빼기 | `review-purge.int.test.ts` | ⑦ 살아 있는 후기는 별점·지문 없이 넣을 수 없다 |
+| D24 | `purgeAccountRows`의 `where account_id = $1::uuid` → `where account_id::text = $1`(색인을 못 씀) | `review-withdrawn.int.test.ts` | ① 탈퇴 파기는 review_account_idx로 찾는다(COV2-06 K2, 처음부터 통과 예상 시험) |
+| D25 | `coreMaintenanceTasks`의 후기 정비 일 차례를 바꾸거나 `review-purge-legacy`를 뺌 | `sale-eligibility.int.test.ts` | 정비 일 조립 단언(시험 이의 2로 기대를 고친 것) |
+| D26 | `start.ts`가 반복을 켜지 않음(M22의 실제 쪽, §2 ⓗ) | `review-withdrawn-consumer.int.test.ts` | ④ 실제 Kafka 탈퇴 사건 뒤 예약 행이 생기고 반복이 그 시각에 다시 파기한다 |
+| D27 | 0026 예약 표 `core_app`의 `UPDATE ("due_at")`를 칸 없는 `UPDATE`로(ⓝ) | `review-recheck.int.test.ts` | ⑦ 예약 표 권한(`core_app`의 `account_id` 고치기 42501) |
+
+- 처음부터 통과로 적힌 통합 시험 가운데 A3은 D07로, COV2-06 K2는 D24로 실패를 한 번 본다. COV2-06 ⑮⑯과 `review.int.test.ts` 다섯은 이 묶음이 바꾸지 않은 동작이라 바꾸지 않은 코드로 통과하는지만 본다.
+
+### 판정 기준 대조(docs/features/identity.md §12 I-T83 세부 ①~⑧)
+
+| 세부 | 정본 기준 | 단언하는 시험 | 대조 |
+| --- | --- | --- | --- |
+| ① | A의 후기 모두 '후기 파기' 칸대로 비우고 DELETED, 이미 지운 후기의 지운 시각 그대로, B 그대로 | 단위 ①(review-withdrawn), 통합 ①⑥ | 맞음. 칸 하나씩 남기는 변이(M01~M09)와 계정·상태 변이(M10·M11)가 모두 단위 ①·⑥·⑧에서 잡혔다 |
+| ② | 목록·요약(평균 별점·후기 수)에서 빠지고 상세 404 | 단위 ②(review-purge) | 맞음. 처리 전 대조군(3건·3.3)이 있고 M03·M10에서 실패했다 |
+| ③ | 같은 사건·`/purge`를 다시 해도 0건, 행 그대로 | 단위 ③ 셋 | 맞음. 가드(M46)·예약(M47)·옛 경로 404까지 본다 |
+| ④ | 같은 트랜잭션에 탈퇴 시각 + 16분 예약(미래면 처리 시각 + 16분), −1ms에 남고 정각에 파기, 예약 쓰기가 실패하면 파기도 없다 | 단위 ④ 다섯, 통합 ④ 셋 | 시간·경계는 맞음(M14~M18 잡힘). '한 트랜잭션'은 통합에서만 본다(D07·D08 대기). 날짜 모양 거절은 기준 밖의 빈자리(M49) |
+| ⑤ | 마친 예약 지움, 두 파드가 겹쳐도 한 번, 밀린 시간 지표, 실패해도 밀린 시간 새 값·실패 수 증가·마지막 성공 그대로 | 단위 ⑤ 일곱, 통합 ⑤ 셋 | 맞음(M19~M29·M50~M54·M63 잡힘). '두 파드'는 통합에서만(D13·D14 대기) |
+| ⑥ | 작성자 지우기도 같은 칸, 같은 회차에 새 후기 | 단위 ⑥, 통합 ⑥ 둘, `review.http.test.ts` 다시 쓰기 | 맞음(M12 잡힘) |
+| ⑦ | 살아 있는 후기는 별점·지문 없이 못 넣음, 예약 표는 앱 역할의 읽기·넣기·지우기·예약 시각 고치기만 | 단위 ⑦ 둘(SQL 원문), 통합 ⑦ 둘 | 원문 쪽은 맞음(M39~M43 잡힘). 실제 CHECK·권한 거절은 통합에서만(D23·D27 대기) |
+| ⑧ | 이전 판 두 꼴만 고치고 제대로 파기된 행·다른 살아 있는 후기 그대로, 다시 하면 0, 그 뒤 VALIDATE 가능 | 단위 ⑧ 넷, ⑦⑧ 원문, 통합 ⑧ 둘, ⑦⑧ 권한 | 맞음(M30~M38·M56 잡힘). VALIDATE는 통합에서만 |
+
+- **이름만 단 시험**: 찾지 못했다. 단위 I-T83 시험 25개와 처음부터 통과로 적힌 단위 시험(COV2-06 ③④⑤, 0026 원문 ⑦ 둘)은 모두 위 변이 가운데 하나 이상에서 실패했다. `I-T83 ⑤ 소비자를 켜면 반복도 켜지고…`는 원문 대조를 섞지만 동작 쪽(반복이 돈다·멈춤 차례)도 단언해 M22~M24에서 동작으로 실패했다.
+- **구현 뒤에 맞춘 기대**: `sale-eligibility.int.test.ts`의 정비 일 목록(시험 이의 2)은 Docker 대기 D25로 실패를 본다. 단위에서는 같은 목록 상수(M56)가 실패를 냈다.
+- **되돌림 확인**: 모든 변이 뒤 `git checkout -- <파일>`. 끝난 뒤 `git -C D:/ticketpass-lane3-w8b status --short`·`git diff`에 제품 코드 바뀜이 없다(이 절을 쓰기 전 확인).
