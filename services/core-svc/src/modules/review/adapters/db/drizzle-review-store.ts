@@ -316,6 +316,16 @@ export class DrizzleReviewStore implements ReviewStore {
     return Math.max(0, nowMs - Math.round(Number(raw)));
   }
 
+  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 구현 담당이 채운다 */
+  async purgeHeldWithdrawal(_accountId: string, _o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
+    throw new Error('아직 없음');
+  }
+
+  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 C2 시험 단계): 구현 담당이 채운다 */
+  async countLegacyRows(): Promise<number> {
+    throw new Error('아직 없음');
+  }
+
   async purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {
     // 정비 일 review-purge-legacy(정비 역할 core_maintenance, W8-audit2a 리뷰 A2): 묶음 하나를 한 트랜잭션으로. 잠긴 행은 건너뛰고(SKIP LOCKED) 잠금 대기는 2초 [가정]까지.
     // 찾기는 0022·0026이 정비 역할에 준 칸(id·status·rating·content_fingerprint·account_id)만 읽고, 고치기(purgeSet)가 읽는 칸은 id·deleted_at뿐이다(본문은 읽지 않는다)

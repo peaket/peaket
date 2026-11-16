@@ -1,4 +1,4 @@
-// I-T83 ①⑥(W8-audit2a, 소유자 결정 2026-11-16 OPEN[42], ADR-0278)·COV2-06 ⑪(W7-audit): 탈퇴 계정 후기 파기(DrizzleReviewStore.purgeByAccount)를
+// I-T83 ①⑥(W8-audit2a, 소유자 결정 2026-11-16 OPEN[42], ADR-0278)·COV2-06 ⑪(W7-audit): 탈퇴 계정 후기 파기(DrizzleReviewStore.purgeWithdrawnAccount의 파기 몫. 손 처리 purgeByAccount는 웨이브 끝 리뷰 S1로 없어질 수 있어 사건 처리 길로 부른다)를
 // 실제 PostgreSQL 18에서 운영과 같은 DB 역할(core_app)로 본다. 그 계정의 모든 행(보이는 것, 통보로 가린 것, 작성자가 이미 지운 것)을 docs/data.md §2 '후기 파기'의
 // 칸대로 비우고, 다른 계정 행·법정 조치 증적(takedown_action)·같은 내용 차단 목록(review_hidden_fingerprint)은 그대로 두며, 다시 해도 0건이다.
 // 확인은 저장소를 거치지 않고 관리자 풀의 직접 SQL로 읽는다. W7-audit의 익명화(계정·주문 참조만 끊음) 단언은 파기 단언으로 바꿨다.
@@ -108,7 +108,7 @@ describe('I-T83 후기 파기(실제 DB)', () => {
     const bBefore = await rowsOf([b1]);
 
     const store = new DrizzleReviewStore(app);
-    expect(await store.purgeByAccount(A, NOW)).toBe(3);
+    expect(await store.purgeWithdrawnAccount(A, { nowMs: NOW, recheckAtMs: NOW + 16 * 60_000 })).toBe(3);
 
     const after = await rowsOf([a1, a2, a3]);
     expect(after).toHaveLength(3);
@@ -140,7 +140,7 @@ describe('I-T83 후기 파기(실제 DB)', () => {
 
     // 다시 해도 0건이고 행이 그대로다
     const once = await rowsOf([a1, a2, a3, b1]);
-    expect(await store.purgeByAccount(A, NOW + 60_000)).toBe(0);
+    expect(await store.purgeWithdrawnAccount(A, { nowMs: NOW + 60_000, recheckAtMs: NOW + 17 * 60_000 })).toBe(0);
     expect(await rowsOf([a1, a2, a3, b1])).toEqual(once);
 
     // 회차·계정 부분 유일 색인: 같은 회차에 새 후기를 넣을 수 있다(파기한 행은 그 계정으로 더 세지 않는다)

@@ -55,6 +55,15 @@ const compare = (a: ReviewRecord, b: ReviewRecord, sort: ReviewSort): number => 
   return b.createdAtMs - a.createdAtMs || b.reviewId.localeCompare(a.reviewId);
 };
 
+/** 시험용 보류 사건 한 행(held_event의 칸 가운데 손으로 처리에 쓰는 것) */
+export interface MemoryHeldEvent {
+  topic: string;
+  eventKey: string | null;
+  businessKey: string;
+  msgKey: string | null;
+  reprocessedAtMs?: number;
+}
+
 export class MemoryReviewStore implements ReviewStore {
   readonly reviews = new Map<string, ReviewRecord>();
   readonly reports = new Map<string, ReportRecord>();
@@ -62,6 +71,8 @@ export class MemoryReviewStore implements ReviewStore {
   readonly hiddenFingerprints = new Set<string>();
   /** 다시 정리 예약(review_withdrawal_recheck): 계정 ID → 예약 시각·만든 시각(docs/data.md §2 '다시 정리 예약') */
   readonly rechecks = new Map<string, { dueAtMs: number; createdAtMs: number }>();
+  /** 시험용 보류 사건(core DB held_event의 대역). 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 칸만 더했다 */
+  readonly heldEvents: MemoryHeldEvent[] = [];
 
   async insertReview(r: ReviewRecord): Promise<void> {
     this.reviews.set(r.reviewId, { ...r });
@@ -192,6 +203,16 @@ export class MemoryReviewStore implements ReviewStore {
     let oldest: number | undefined;
     for (const v of this.rechecks.values()) if (oldest === undefined || v.dueAtMs < oldest) oldest = v.dueAtMs;
     return oldest === undefined ? 0 : Math.max(0, nowMs - oldest);
+  }
+
+  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 구현 담당이 채운다 */
+  async purgeHeldWithdrawal(_accountId: string, _o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
+    throw new Error('아직 없음');
+  }
+
+  /** 뼈대(W8-audit2a 웨이브 끝 리뷰 C2 시험 단계): 구현 담당이 채운다 */
+  async countLegacyRows(): Promise<number> {
+    throw new Error('아직 없음');
   }
 
   async purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }> {

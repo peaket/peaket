@@ -326,6 +326,16 @@ export class Reviews {
    * 손으로 다시 하는 길(내부 경로 POST /internal/v1/reviews/accounts/{accountId}/purge). 다시 정리 예약은 만들지 않는다(사건을 잃었을 때 나중에 하는 길이다).
    * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
    */
+  /**
+   * 손으로 처리(보류된 탈퇴 사건이 있는 계정만). recheckAtMs = 지금 + 16분.
+   * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
+   * @throws ReviewProblem('withdrawal-not-held', 409) 그 계정의 보류된 탈퇴 사건이 없음
+   * 뼈대(W8-audit2a 웨이브 끝 리뷰 S1 시험 단계): 구현 담당이 채우고 purgeAccount를 뺀다
+   */
+  async purgeHeldWithdrawal(_accountId: string, _by: { reason: string; requestedBy: string }): Promise<{ purged: number; heldEvents: number }> {
+    throw new Error('아직 없음');
+  }
+
   async purgeAccount(accountId: string): Promise<{ purged: number }> {
     if (!UUID.test(accountId)) throw invalidAccount();
     const purged = await this.d.store.purgeByAccount(accountId.toLowerCase(), this.d.clock.now());

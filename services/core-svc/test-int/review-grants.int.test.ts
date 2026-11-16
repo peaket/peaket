@@ -101,7 +101,9 @@ describe('COV2-06 보충 후기·보류 표 운영 역할 권한(실제 DB)', ()
       ['review 지우기', 'delete from review where id = $1', [reviewId]],
       ['content_report 지우기', 'delete from content_report where id = $1', [reportId]],
       ['takedown_action 지우기', 'delete from takedown_action where id = $1', [takedownId]],
-      ['held_event 다시 처리 표시', 'update held_event set reprocessed_at = now() where id = $1', [heldId]],
+      // 웨이브 끝 보안 리뷰 S1: 0026이 core_app에 reprocessed_at 고치기를 준다(손으로 하는 파기). 그 밖의 칸 고치기·지우기는 여전히 거부다
+      ['held_event 오류 글 고치기', "update held_event set error = 'x' where id = $1", [heldId]],
+      ['held_event 지우기', 'delete from held_event where id = $1', [heldId]],
     ];
     for (const [what, text, params] of denied) expect(await codeOf(app, text, params), what).toBe('42501');
 

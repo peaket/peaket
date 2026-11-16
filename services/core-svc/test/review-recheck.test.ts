@@ -251,22 +251,60 @@ describe('I-T83 다시 정리 예약', () => {
     expect(store.rechecks.size).toBe(0);
   });
 
-  test('I-T83 ④ 탈퇴 시각을 읽지 못하거나 계정 ID가 틀리면 파기도 예약도 하지 않는다', async () => {
+  test('I-T83 ④ 계정 ID가 틀리면 파기도 예약도 하지 않는다', async () => {
+    // 웨이브 끝 정확성 리뷰 C1 뒤: 탈퇴 시각을 읽지 못하는 경우는 아래 '예약 셈이 읽지 못한…'으로 옮겼다(파기를 한다). 계정 ID가 틀리면 그대로 거절이다
     const { store, reviews } = setup('2026-11-16T03:03:00.000Z');
     const a1 = review(A, at('2026-11-15T10:00:00.000Z'));
     await store.insertReview(a1);
-    const bad = [
-      { accountId: 'not-a-uuid', withdrawnAt: '2026-11-16T03:00:00.000Z' },
-      { accountId: A, withdrawnAt: '어제' },
-      { accountId: A, withdrawnAt: '' },
-    ];
-    for (const e of bad) await expect(reviews.purgeWithdrawn(e), JSON.stringify(e)).rejects.toThrow();
+    for (const accountId of ['not-a-uuid', '', `${A}x`]) await expect(reviews.purgeWithdrawn({ accountId, withdrawnAt: '2026-11-16T03:00:00.000Z' }), accountId).rejects.toMatchObject({ status: 422 });
     expect(await store.findReview(a1.reviewId)).toEqual(a1);
     expect(store.rechecks.size).toBe(0);
 
     // 대조군: 맞는 사건은 파기와 예약을 함께 쓴다
     expect(await reviews.purgeWithdrawn({ accountId: A, withdrawnAt: '2026-11-16T03:00:00.000Z' })).toEqual({ purged: 1 });
     expect(store.rechecks.get(A)?.dueAtMs).toBe(at('2026-11-16T03:16:00.000Z'));
+  });
+
+  test('I-T83 ④ 예약 셈이 읽지 못한 탈퇴 시각이어도 파기하고 처리 시각 + 16분으로 예약한다', async () => {
+    // 웨이브 끝 정확성 리뷰 C1(계획 §9.2, 정본 docs/features/identity.md §8 '다시 정리'): 예약 셈이 던지면 법정 파기까지 빠지지 않게 처리 시각 + 16분으로 대체한다
+    for (const withdrawnAt of ['2026-11-16T03:00Z', '2026-11-16T03:00:00', '어제', '']) {
+      const { store, reviews } = setup('2026-11-16T03:03:00.000Z');
+      const a1 = review(A, at('2026-11-15T10:00:00.000Z'));
+      const b1 = review(B, at('2026-11-15T10:00:00.000Z'));
+      for (const r of [a1, b1]) await store.insertReview(r);
+      expect(await reviews.purgeWithdrawn({ accountId: A, withdrawnAt }), withdrawnAt).toMatchObject({ purged: 1 });
+      expect(await store.findReview(a1.reviewId), withdrawnAt).toEqual(purgedOf(a1, { nowMs: at('2026-11-16T03:03:00.000Z'), deletedAtMs: at('2026-11-16T03:03:00.000Z') }));
+      expect(await store.findReview(b1.reviewId), withdrawnAt).toEqual(b1);
+      // 처리 시각(03:03) + 16분. NaN이나 탈퇴 시각 기준 값이 아니다
+      expect(store.rechecks.get(A)?.dueAtMs, withdrawnAt).toBe(at('2026-11-16T03:19:00.000Z'));
+    }
+    // 처리기 경로(해독을 거친 뒤 예약 셈만 읽지 못한 경우를 handle에 바로 넣는다): 던지지 않고 파기하며, 로그(경고 포함)에 그 값이 실리지 않는다
+    const { store, reviews } = setup('2026-11-16T03:03:00.000Z');
+    const a1 = review(A, at('2026-11-15T10:00:00.000Z'));
+    await store.insertReview(a1);
+    const logs: unknown[] = [];
+    const logger = { info: (o: object, msg?: string) => void logs.push(['info', o, msg]), warn: (o: object, msg?: string) => void logs.push(['warn', o, msg]) };
+    const handler = new ReviewAccountWithdrawnHandler(reviews, undefined, { logger });
+    await handler.handle({ eventKey: randomUUID(), accountId: A, withdrawnAt: '2026-11-16T03:00Z' });
+    expect((await store.findReview(a1.reviewId))?.status).toBe('DELETED');
+    expect(store.rechecks.get(A)?.dueAtMs).toBe(at('2026-11-16T03:19:00.000Z'));
+    expect(JSON.stringify(logs)).not.toContain('2026-11-16T03:00Z');
+    expect(JSON.stringify(logs)).not.toContain(A);
+  });
+
+  test('I-T83 ④ 계약이 받는 탈퇴 시각마다 예약 시각이 나온다', async () => {
+    // 웨이브 끝 정확성 리뷰 C1: 처리기 해독(계약 Zod)이 받는 글은 예약 셈도 읽어야 한다(대체 시각이 아니라 각자의 탈퇴 시각 + 16분)
+    const cases: [string, string][] = [
+      ['2026-11-16T03:00:00Z', '2026-11-16T03:16:00.000Z'],
+      ['2026-11-16T03:00:00.5Z', '2026-11-16T03:16:00.500Z'],
+      ['2026-11-16T03:00:00.123456789+09:00', '2026-11-15T18:16:00.123Z'],
+      ['2026-11-16T12:00:00+09:00', '2026-11-16T03:16:00.000Z'],
+    ];
+    for (const [withdrawnAt, due] of cases) {
+      const { store, deliver } = setup('2026-11-16T03:03:00.000Z');
+      await deliver(A, withdrawnAt);
+      expect(store.rechecks.get(A)?.dueAtMs, withdrawnAt).toBe(at(due));
+    }
   });
 
   test('I-T83 ④ 처리기는 탈퇴 시각을 그대로 넘기고 저장소가 실패하면 함께 실패한다', async () => {

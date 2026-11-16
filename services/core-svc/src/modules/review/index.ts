@@ -1,7 +1,7 @@
 export { ReviewModule, type DatabaseReviewWiring, type MemoryReviewWiring } from './review.module.js';
 export { Reviews } from './application/reviews.js';
 export { reviewMaintenanceTasks } from './application/review-maintenance.js';
-export { MemoryReviewStore } from './adapters/memory-review-store.js';
+export { type MemoryHeldEvent, MemoryReviewStore } from './adapters/memory-review-store.js';
 export { DrizzleReviewStore } from './adapters/db/drizzle-review-store.js';
 export { MemoryReviewEligibility } from './adapters/memory-review-eligibility.js';
 export { UnavailableReviewEligibility } from './adapters/unavailable-review-eligibility.js';

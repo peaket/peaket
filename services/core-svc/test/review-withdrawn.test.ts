@@ -21,7 +21,7 @@ import {
   Reviews,
   type TakedownRecord,
 } from '../src/modules/review/index.js';
-import { FakeIdentity, quiet } from './support.js';
+import { FakeIdentity, logSinkUnit } from './support.js';
 
 const TOPIC = 'identity.accounts-withdrawn';
 const T0 = Date.parse('2026-11-16T03:00:00.000Z');
@@ -227,20 +227,41 @@ describe('I-T83 탈퇴 사건으로 후기 파기', () => {
   });
 });
 
-describe('I-T83 내부 파기 경로', () => {
+describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만)', () => {
+  // 웨이브 끝 보안 리뷰 S1(계획 §9.1, 정본 docs/features/identity.md §8 '손으로 처리'): 내부 경로는 그 계정의 처리 안 한 탈퇴 보류 사건이 있을 때만 파기하고,
+  // 요청자·사유를 받아 운영 줄에 남긴다(계정 ID 없음). 같은 트랜잭션에서 다시 정리 예약(지금 + 16분)을 쓰고 보류 행을 다시 처리로 표시한다
   const TOKEN = 'review-purge-internal-token-1';
+  const TOPIC_W = 'identity.accounts-withdrawn';
+  const C = '0190f3a1-7c2e-7a00-8000-00000000c001';
+  const D = '0190f3a1-7c2e-7a00-8000-00000000d001';
+  const E = '0190f3a1-7c2e-7a00-8000-00000000e001';
   const store = new MemoryReviewStore();
   const clock = fakeClock({ now: T0 });
+  const sink = logSinkUnit();
   const a1 = review({ reviewId: randomUUID(), accountId: A });
   const a2 = review({ reviewId: randomUUID(), accountId: A, status: 'HIDDEN', notice: 'POLICY' });
   const b1 = review({ reviewId: randomUUID(), accountId: B });
+  const c1 = review({ reviewId: randomUUID(), accountId: C });
+  const d1 = review({ reviewId: randomUUID(), accountId: D });
+  const e1 = review({ reviewId: randomUUID(), accountId: E });
+  const KEY_A1 = '0190f3a1-7c2e-7a00-8000-0000000e0a01';
+  const KEY_A2 = '0190f3a1-7c2e-7a00-8000-0000000e0a02';
   let svc: Awaited<ReturnType<typeof createService>>;
   let previous: string | undefined;
 
   beforeAll(async () => {
     previous = process.env.PEAKET_INTERNAL_TOKEN;
     process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
-    for (const r of [a1, a2, b1]) await store.insertReview(r);
+    for (const r of [a1, a2, b1, c1, d1, e1]) await store.insertReview(r);
+    store.heldEvents.push(
+      // A: 업무 키가 그 계정인 보류 하나와, 값을 읽지 못해 Kafka 키(대문자)만 그 계정인 보류 하나
+      { topic: TOPIC_W, eventKey: KEY_A1, businessKey: A, msgKey: A },
+      { topic: TOPIC_W, eventKey: KEY_A2, businessKey: 'unreadable-0', msgKey: A.toUpperCase() },
+      // C: 이미 다시 처리한 보류뿐, D: 다른 토픽의 보류뿐, E: 보류가 없고 다른 계정(F)의 보류만 있다. B는 보류가 아예 없다
+      { topic: TOPIC_W, eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0c01', businessKey: C, msgKey: C, reprocessedAtMs: T0 - DAY },
+      { topic: 'trade.orders', eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0d01', businessKey: D, msgKey: D },
+      { topic: TOPIC_W, eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0f01', businessKey: '0190f3a1-7c2e-7a00-8000-00000000f001', msgKey: null },
+    );
     svc = await createService({
       name: 'core-svc',
       module: AppModule.register({
@@ -249,7 +270,7 @@ describe('I-T83 내부 파기 경로', () => {
       }),
       env: { PEAKET_ENV: 'ci' },
       clock,
-      logDestination: quiet(),
+      logDestination: sink.stream,
       adminAuthz: new FakeIdentity(),
     });
   });
@@ -259,35 +280,90 @@ describe('I-T83 내부 파기 경로', () => {
     else process.env.PEAKET_INTERNAL_TOKEN = previous;
   });
 
-  const call = (accountId: string, token?: string, action = 'purge') =>
-    svc.http.inject({ method: 'POST', url: `/internal/v1/reviews/accounts/${accountId}/${action}`, ...(token === undefined ? {} : { headers: { 'x-peaket-internal-token': token } }) });
-  const ofA = () => [...store.reviews.values()].filter((r) => r.accountId === A);
+  const BODY = { reason: '보류된 탈퇴 사건을 손으로 처리한다(CS-1234)', requestedBy: 'ops-kim' };
+  const call = (accountId: string, o: { token?: string | null; body?: unknown; action?: string } = {}) => {
+    const token = o.token === undefined ? TOKEN : o.token;
+    const body = 'body' in o ? o.body : BODY;
+    return svc.http.inject({
+      method: 'POST',
+      url: `/internal/v1/reviews/accounts/${accountId}/${o.action ?? 'purge'}`,
+      headers: { ...(token === null ? {} : { 'x-peaket-internal-token': token }), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      ...(body === undefined ? {} : { payload: JSON.stringify(body) }),
+    });
+  };
+  const snapshot = () => ({ reviews: [...store.reviews.values()].map((r) => ({ ...r })), held: store.heldEvents.map((h) => ({ ...h })), rechecks: [...store.rechecks] });
 
-  test('I-T83 ③ 내부 파기 경로는 토큰이 없거나 틀리면 403이고 맞으면 파기한 건수를 주며 다시 불러도 0건이다 (COV2-06 ⑨)', async () => {
-    expect((await call(A)).statusCode).toBe(403);
-    expect((await call(A, `${TOKEN.slice(0, -1)}x`)).statusCode).toBe(403);
-    expect(ofA()).toHaveLength(2);
-    expect((await call('not-a-uuid', TOKEN)).statusCode).toBe(400);
-    // 옛 경로 /anonymize는 없앴다: 토큰이 맞아도 404이고 아무것도 바꾸지 않는다
-    expect((await call(A, TOKEN, 'anonymize')).statusCode).toBe(404);
-    expect(ofA()).toHaveLength(2);
+  test('I-T83 ⑨ 보류된 탈퇴 사건이 없는 계정은 손으로 파기할 수 없다', async () => {
+    const before = snapshot();
+    // B: 보류 없음(탈퇴하지 않은 팬), C: 이미 다시 처리한 보류뿐, D: 다른 토픽의 보류뿐, E: 다른 계정의 보류만 있다
+    for (const who of [B, C, D, E]) {
+      const r = await call(who);
+      expect(r.statusCode, who).toBe(409);
+      expect(JSON.parse(r.payload), who).toMatchObject({ type: expect.stringMatching(/withdrawal-not-held$/) });
+    }
+    // 유스케이스도 같다(계정 ID가 UUID가 아니면 422)
+    const reviews = svc.app.get(Reviews);
+    await expect(reviews.purgeHeldWithdrawal(B, BODY)).rejects.toMatchObject({ status: 409 });
+    await expect(reviews.purgeHeldWithdrawal('not-a-uuid', BODY)).rejects.toMatchObject({ status: 422 });
+    // 아무것도 바뀌지 않았다(후기·보류 행·예약 없음)
+    expect(snapshot()).toEqual(before);
+    expect(store.rechecks.size).toBe(0);
+  });
 
-    clock.advance(60_000);
-    const NOW = T0 + 60_000;
-    const ok = await call(A, TOKEN);
+  test('I-T83 ⑨ 사유·요청자 없이는 부를 수 없고 처리하면 운영 줄에 남는다', async () => {
+    const before = snapshot();
+    // 토큰 없음·틀림 403
+    expect((await call(A, { token: null })).statusCode).toBe(403);
+    expect((await call(A, { token: `${TOKEN.slice(0, -1)}x` })).statusCode).toBe(403);
+    // 빠진 칸·경계 밖은 400: 본문 없음, 사유 9자·501자, 요청자 ''·65자, 모르는 칸, 칸 빠짐
+    const bad: [string, unknown][] = [
+      ['본문 없음', undefined],
+      ['사유 9자', { reason: '가'.repeat(9), requestedBy: 'ops-kim' }],
+      ['사유 501자', { reason: '가'.repeat(501), requestedBy: 'ops-kim' }],
+      ['요청자 빈 글자', { reason: BODY.reason, requestedBy: '' }],
+      ['요청자 65자', { reason: BODY.reason, requestedBy: 'o'.repeat(65) }],
+      ['모르는 칸', { ...BODY, accountId: A }],
+      ['사유 빠짐', { requestedBy: 'ops-kim' }],
+      ['요청자 빠짐', { reason: BODY.reason }],
+    ];
+    for (const [what, body] of bad) expect((await call(A, { body })).statusCode, what).toBe(400);
+    // 옛 경로 /anonymize는 404, UUID 아닌 계정은 400
+    expect((await call(A, { action: 'anonymize' })).statusCode).toBe(404);
+    expect((await call('not-a-uuid')).statusCode).toBe(400);
+    expect(snapshot()).toEqual(before);
+  });
+
+  test('I-T83 ⑨ 보류된 탈퇴 사건이 있으면 파기하고 보류 행을 다시 처리로 표시하며 예약을 쓴다', async () => {
+    // 경계 안쪽 끝 값(사유 10자, 요청자 64자)으로 부른다. 대문자 계정 ID로 불러도 같은 계정이다
+    clock.advance(3 * 60_000);
+    const NOW = T0 + 3 * 60_000;
+    const body = { reason: '가'.repeat(10), requestedBy: 'r'.repeat(64) };
+    const before = sink.lines().length;
+    const ok = await call(A.toUpperCase(), { body });
     expect(ok.statusCode).toBe(200);
-    expect(JSON.parse(ok.payload)).toEqual({ purged: 2 });
-    for (const before of [a1, a2]) expect(await store.findReview(before.reviewId)).toEqual(purgedOf(before, { nowMs: NOW, deletedAtMs: NOW }));
-    expect(await store.findReview(b1.reviewId)).toEqual(b1);
-    // 내부 경로는 다시 정리 예약을 만들지 않는다(docs/features/identity.md §8 '다시 정리')
-    expect(store.rechecks.size).toBe(0);
+    expect(JSON.parse(ok.payload)).toEqual({ purged: 2, heldEvents: 2 });
+    for (const r of [a1, a2]) expect(await store.findReview(r.reviewId)).toEqual(purgedOf(r, { nowMs: NOW, deletedAtMs: NOW }));
+    for (const r of [b1, c1, d1, e1]) expect(await store.findReview(r.reviewId)).toEqual(r);
+    // A의 두 보류 행은 다시 처리(지금), 다른 보류 행은 그대로
+    expect(store.heldEvents.filter((h) => h.eventKey === KEY_A1 || h.eventKey === KEY_A2).map((h) => h.reprocessedAtMs)).toEqual([NOW, NOW]);
+    expect(store.heldEvents.filter((h) => h.eventKey !== KEY_A1 && h.eventKey !== KEY_A2).map((h) => h.reprocessedAtMs)).toEqual([T0 - DAY, undefined, undefined]);
+    // 다시 정리 예약 = 지금 + 16분(처리 시각 기준)
+    expect(store.rechecks.get(A)?.dueAtMs).toBe(NOW + 16 * 60_000);
+    expect(store.rechecks.size).toBe(1);
 
-    const once = [...store.reviews.values()].map((r) => ({ ...r }));
+    // 운영 줄 하나: 누가·왜·어느 보류 사건·몇 건. 계정 ID는 없다
+    const manual = sink.lines().slice(before).filter((l) => l.kind === 'review-purge-manual');
+    expect(manual).toHaveLength(1);
+    expect(manual[0]).toMatchObject({ requestedBy: body.requestedBy, reason: body.reason, purged: 2 });
+    expect([...(manual[0]!.heldEventKeys as string[])].sort()).toEqual([KEY_A1, KEY_A2].sort());
+    const text = JSON.stringify(manual[0]);
+    for (const secret of [A, A.toUpperCase()]) expect(text).not.toContain(secret);
+
+    // 다시 부르면 처리할 보류가 없어 409이고 바뀌는 것이 없다
+    const once = snapshot();
     clock.advance(60_000);
-    const again = await call(A, TOKEN);
-    expect(again.statusCode).toBe(200);
-    expect(JSON.parse(again.payload)).toEqual({ purged: 0 });
-    expect([...store.reviews.values()]).toEqual(once);
-    expect(store.rechecks.size).toBe(0);
+    const again = await call(A, { body });
+    expect(again.statusCode).toBe(409);
+    expect(snapshot()).toEqual(once);
   });
 });

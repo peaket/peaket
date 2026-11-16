@@ -1,4 +1,4 @@
-// I-T83 ⑧(W8-audit2a 리뷰 A2, 계획 §8.2): 정비 일 review-purge-legacy가 이전 판이 남긴 두 꼴만 파기 칸으로 고친다.
+// I-T83 ⑧(W8-audit2a 리뷰 A2, 계획 §8.2·웨이브 끝 리뷰 C2 §9.3 남은 대상 수): 정비 일 review-purge-legacy가 이전 판이 남긴 두 꼴만 파기 칸으로 고친다.
 // ① 작성자가 지웠는데 별점·지문·계정 ID가 남은 행(status = 'DELETED' AND (rating IS NOT NULL OR content_fingerprint IS NOT NULL OR account_id <> id))
 // ② 옛 익명화로 참조만 끊긴 살아 있는 후기(status <> 'DELETED' AND account_id = id).
 // 정본: docs/data.md §2 '후기 파기'의 '이전 판이 남긴 행 고치기'(id 순 커서, 1,000행 [가정] 묶음, 묶음마다 커밋, 멈춤 신호는 묶음 사이, 정비 시간 일),
@@ -104,7 +104,7 @@ describe('I-T83 이전 판이 남긴 행 고치기(리뷰 A2)', () => {
     for (const r of [e, c, g, a, d, f, b]) await store.insertReview(r);
     expect((await store.listVisibleByProduction(PRODUCTION)).map((r) => r.reviewId).sort()).toEqual([b.reviewId, e.reviewId].sort());
 
-    expect(await legacyTask(store, clock).run(new AbortController().signal)).toEqual({ purged: 5 });
+    expect(await legacyTask(store, clock).run(new AbortController().signal)).toEqual({ purged: 5, remaining: 0 });
 
     // 고친 행: ①의 칸. 이미 지운 행의 지운 시각은 처음 값 그대로
     expect(await store.findReview(a.reviewId)).toEqual(purgedOf(a, { nowMs: T0, deletedAtMs: OLD_DELETED }));
@@ -132,7 +132,7 @@ describe('I-T83 이전 판이 남긴 행 고치기(리뷰 A2)', () => {
 
     // 묶음 2: 저장소 호출은 [2, 2, 1, 0]건, 커서는 앞 묶음의 마지막 id
     const rec = recording(store);
-    expect(await legacyTask(rec.store, clock, { batch: 2 }).run(new AbortController().signal)).toEqual({ purged: 5 });
+    expect(await legacyTask(rec.store, clock, { batch: 2 }).run(new AbortController().signal)).toEqual({ purged: 5, remaining: 0 });
     expect(rec.calls.map((c) => c.limit)).toEqual([2, 2, 2, 2]);
     const sorted = legacy.map((r) => r.reviewId).sort();
     expect(rec.calls.map((c) => c.after)).toEqual([undefined, sorted[1], sorted[3], sorted[4]]);
@@ -142,7 +142,7 @@ describe('I-T83 이전 판이 남긴 행 고치기(리뷰 A2)', () => {
     // 다시 돌리면 0행이고 행이 그대로다
     const once = [...store.reviews.values()].map((r) => ({ ...r }));
     clock.advance(DAY);
-    expect(await legacyTask(store, clock, { batch: 2 }).run(new AbortController().signal)).toEqual({ purged: 0 });
+    expect(await legacyTask(store, clock, { batch: 2 }).run(new AbortController().signal)).toEqual({ purged: 0, remaining: 0 });
     expect([...store.reviews.values()]).toEqual(once);
   });
 
@@ -157,13 +157,13 @@ describe('I-T83 이전 판이 남긴 행 고치기(리뷰 A2)', () => {
     const rec = recording(store, (n) => {
       if (n === 1) ac.abort();
     });
-    expect(await legacyTask(rec.store, clock, { batch: 2 }).run(ac.signal)).toEqual({ purged: 2 });
+    expect(await legacyTask(rec.store, clock, { batch: 2 }).run(ac.signal)).toEqual({ purged: 2, remaining: 3 });
     expect(rec.calls).toHaveLength(1);
     expect(legacy.filter((r) => store.reviews.get(r.reviewId)?.rating !== null).map((r) => r.reviewId)).toEqual([id(25), id(27), id(29)]);
 
     // 다음 실행(다음 정비 시간)이 나머지 셋을 고친다
     clock.advance(DAY);
-    expect(await legacyTask(store, clock, { batch: 2 }).run(new AbortController().signal)).toEqual({ purged: 3 });
+    expect(await legacyTask(store, clock, { batch: 2 }).run(new AbortController().signal)).toEqual({ purged: 3, remaining: 0 });
     for (const r of legacy) expect((await store.findReview(r.reviewId))?.rating, r.reviewId).toBeNull();
   });
 
@@ -173,7 +173,7 @@ describe('I-T83 이전 판이 남긴 행 고치기(리뷰 A2)', () => {
     const task = legacyTask(rec.store, clock);
     // 정비 시간(04:00~06:00 KST) 안에서 하루 한 번. 매일 일이 아니다(큰 표를 정비 시간 밖에 훑지 않는다)
     expect(task.when).toBe('window');
-    expect(await task.run(new AbortController().signal)).toEqual({ purged: 0 });
+    expect(await task.run(new AbortController().signal)).toEqual({ purged: 0, remaining: 0 });
     expect(rec.calls).toEqual([{ nowMs: T0, limit: DEFAULT_BATCH }]);
 
     // relay 정비 일 목록과 조립
@@ -181,5 +181,38 @@ describe('I-T83 이전 판이 남긴 행 고치기(리뷰 A2)', () => {
     const fakeDb = { db: { execute: async () => ({ rows: [] }) }, transaction: async () => undefined } as unknown as Database;
     const { tasks } = coreMaintenanceTasks(fakeDb, clock, { PEAKET_ENV: 'local' });
     expect(tasks.filter((t) => t.name === 'review-purge-legacy').map((t) => t.when)).toEqual(['window']);
+  });
+
+  test('I-T83 ⑧ 남은 대상 수는 고치기와 같은 조건으로 센다', async () => {
+    // 웨이브 끝 정확성 리뷰 C2(계획 §9.3, 정본 docs/data.md §2 '이전 판이 남긴 행 고치기'): 정비 일은 끝에 남은 대상 수를 같이 보고한다(다음 출시 조건은 남은 0건)
+    const clock = fakeClock({ now: T0 });
+    const store = new MemoryReviewStore();
+    const legacy = [
+      live(id(31), { status: 'DELETED', body: '', rating: 2, authorDisplay: '***', deletedAtMs: T0 - DAY, updatedAtMs: T0 - DAY }),
+      live(id(33), { status: 'DELETED', body: '', authorDisplay: '', rating: null, deletedAtMs: T0 - DAY, updatedAtMs: T0 - DAY }),
+      live(id(35), { status: 'DELETED', body: '', authorDisplay: '', rating: null, contentFingerprint: null, basisOrderId: id(35), deletedAtMs: T0 - DAY, updatedAtMs: T0 - DAY }),
+      live(id(37), { accountId: id(37), basisOrderId: id(37), authorDisplay: '탈퇴한 사용자' }),
+      live(id(39), { accountId: id(39), basisOrderId: id(39), authorDisplay: '탈퇴한 사용자', status: 'HIDDEN', notice: 'POLICY' }),
+    ];
+    const others = [
+      live(id(32), { status: 'DELETED', body: '', rating: null, contentFingerprint: null, authorDisplay: '', accountId: id(32), basisOrderId: id(32), deletedAtMs: T0 - DAY, updatedAtMs: T0 - DAY }),
+      live(id(34), { accountId: B }),
+      live(id(36), { accountId: A, status: 'HIDDEN', notice: 'RIGHTS_TEMP' }),
+    ];
+    for (const r of [...others, ...legacy]) await store.insertReview(r);
+    // 실행 전: 대상 두 꼴만 정확히 센다(대상이 아닌 행은 세지 않는다)
+    expect(await store.countLegacyRows()).toBe(5);
+
+    // 멈춤 신호로 첫 묶음(2) 뒤에 멈추면 남은 수 3을 보고한다
+    const ac = new AbortController();
+    const rec = recording(store, (n) => {
+      if (n === 1) ac.abort();
+    });
+    expect(await legacyTask(rec.store, clock, { batch: 2 }).run(ac.signal)).toEqual({ purged: 2, remaining: 3 });
+    expect(await store.countLegacyRows()).toBe(3);
+    // 끝까지 돌면 남은 0
+    expect(await legacyTask(store, clock, { batch: 2 }).run(new AbortController().signal)).toEqual({ purged: 3, remaining: 0 });
+    expect(await store.countLegacyRows()).toBe(0);
+    for (const r of others) expect(await store.findReview(r.reviewId)).toEqual(r);
   });
 });

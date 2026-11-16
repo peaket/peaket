@@ -70,6 +70,15 @@ export interface ReviewStore {
    * 고친 행 수와 그 묶음에서 고친 마지막 id(다음 묶음의 커서). 0건이면 커서가 없다(정비 일은 커서가 없을 때까지 이어 부른다)
    */
   purgeLegacyRows(o: { nowMs: number; limit: number; after?: string }): Promise<{ purged: number; last?: string }>;
+
+  // 뼈대(W8-audit2a 웨이브 끝 리뷰 S1·C2 시험 단계): 아래 둘은 구현 담당이 채운다
+  /**
+   * 그 계정의 보류된 탈퇴 사건(held_event, 토픽 identity.accounts-withdrawn, lower(business_key) 또는 lower(msg_key)가 그 계정, reprocessed_at IS NULL)이 있으면
+   * 한 트랜잭션에서: 보류 행 잠금 → 다시 정리 예약(recheckAtMs) → 파기 → 보류 행 reprocessed_at = nowMs. 보류된 사건이 없으면 아무것도 바꾸지 않고 undefined
+   */
+  purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined>;
+  /** 이전 판이 남긴 두 꼴(purgeLegacyRows와 같은 조건)의 행 수. 잠그지 않는다 */
+  countLegacyRows(): Promise<number>;
 }
 
 export const REVIEW_STORE = Symbol('REVIEW_STORE');

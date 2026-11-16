@@ -173,4 +173,19 @@ describe('I-T83 마이그레이션 0026', () => {
     // 정비 역할의 다른 표 권한·REVOKE도 없다
     expect(statements.filter((s) => s.includes('core_maintenance') && !(/^grant\b/.test(s) && / on (table )?review( |$|,)/.test(s)))).toEqual([]);
   });
+
+  test('I-T83 ⑦⑨ 0026은 core_app에 held_event의 reprocessed_at 고치기만 더 준다', () => {
+    // 웨이브 끝 보안 리뷰 S1(계획 §9.1): 손으로 하는 파기가 보류된 탈퇴 사건을 다시 처리로 표시한다. core_app의 held_event 읽기·넣기는 0022 그대로다
+    const file = migrationFile();
+    expect(file, 'migrations/0026_*.sql').toBeDefined();
+    const statements = statementsOf(readFileSync(join(MIGRATIONS, file!), 'utf8'));
+    const held = statements.filter((s) => /^(grant|revoke)\b/.test(s) && / on (table )?held_event( |$|,)/.test(s));
+    expect(grantsOf(held)).toEqual(['core_app held_event UPDATE [reprocessed_at]']);
+    // 거부 쪽을 따로: 지우기·다른 칸·표 전체 고치기, 다른 역할, REVOKE가 없다
+    for (const st of held) {
+      expect(st, st).toMatch(/^grant /);
+      expect(st, st).not.toMatch(/\b(delete|truncate|all|insert|select)\b/);
+      for (const role of ['core_partner', 'core_maintenance', 'core_ops']) expect(st, st).not.toContain(role);
+    }
+  });
 });

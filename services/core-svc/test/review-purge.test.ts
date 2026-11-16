@@ -1,5 +1,5 @@
 // I-T83 ②③⑥(W8-audit2a, 소유자 결정 2026-11-16 OPEN[42], ADR-0278, ADR-0086 ⑧): 파기한 후기는 공연 후기 목록·요약·상세에서 빠지고,
-// 작성자가 지운 후기도 탈퇴 파기와 같은 칸을 비운다. 손으로 다시 하는 purgeAccount는 다시 정리 예약을 만들지 않는다.
+// 작성자가 지운 후기도 탈퇴 파기와 같은 칸을 비운다. 손으로 하는 파기(purgeHeldWithdrawal)는 보류된 탈퇴 사건이 있을 때만 하고 다시 정리 예약을 쓴다(웨이브 끝 리뷰 S1).
 // 정본: docs/features/identity.md §8 '후기 파기'·§12 I-T83, docs/data.md §2 '후기 파기'·§6 '관람 후기'. 단언 값은 정본에서 적고 코드 상수를 가져오지 않는다.
 import { fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -160,20 +160,26 @@ describe('I-T83 파기한 후기는 공개 경로에서 빠진다', () => {
     expect((await store.findReview(mine.reviewId))?.status).toBe('DELETED');
   });
 
-  test('I-T83 ③ purgeAccount는 계정 ID가 UUID가 아니면 거절하고 다시 정리 예약을 만들지 않는다', async () => {
+  test('I-T83 ⑨ 손으로 하는 파기는 계정 ID가 UUID가 아니면 거절하고 보류 사건을 처리하면 지금 + 16분 예약을 쓴다', async () => {
+    // 웨이브 끝 보안 리뷰 S1: 옛 purgeAccount(어떤 계정이든 파기, 예약 없음)를 purgeHeldWithdrawal(보류된 탈퇴 사건이 있을 때만, 예약 씀)로 바꿨다
     const { clock, store, reviews, e1, record } = world();
     const a1 = record({ eventId: e1, accountId: A });
     const b1 = record({ eventId: e1, accountId: B });
     for (const r of [a1, b1]) await store.insertReview(r);
+    store.heldEvents.push({ topic: 'identity.accounts-withdrawn', eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0b02', businessKey: A, msgKey: A });
+    const by = { reason: '보류된 탈퇴 사건 손 처리 시험', requestedBy: 'ops-lee' };
 
-    for (const bad of ['not-a-uuid', '', `${A}x`]) await expect(reviews.purgeAccount(bad), bad).rejects.toMatchObject({ type: 'review-invalid', status: 422 });
+    for (const bad of ['not-a-uuid', '', `${A}x`]) await expect(reviews.purgeHeldWithdrawal(bad, by), bad).rejects.toMatchObject({ type: 'review-invalid', status: 422 });
     expect(await store.findReview(a1.reviewId)).toEqual(a1);
+    expect(store.rechecks.size).toBe(0);
 
     clock.advance(11 * 60_000);
-    expect(await reviews.purgeAccount(A)).toEqual({ purged: 1 });
-    expect(await store.findReview(a1.reviewId)).toEqual(purgedOf(a1, { nowMs: T0 + 11 * 60_000, deletedAtMs: T0 + 11 * 60_000 }));
+    const NOW = T0 + 11 * 60_000;
+    expect(await reviews.purgeHeldWithdrawal(A, by)).toEqual({ purged: 1, heldEvents: 1 });
+    expect(await store.findReview(a1.reviewId)).toEqual(purgedOf(a1, { nowMs: NOW, deletedAtMs: NOW }));
     expect(await store.findReview(b1.reviewId)).toEqual(b1);
-    expect(store.rechecks.size).toBe(0);
-    expect(await reviews.purgeAccount(A)).toEqual({ purged: 0 });
+    expect(store.rechecks.get(A)?.dueAtMs).toBe(NOW + 16 * 60_000);
+    expect(store.heldEvents[0]?.reprocessedAtMs).toBe(NOW);
+    await expect(reviews.purgeHeldWithdrawal(A, by)).rejects.toMatchObject({ type: expect.stringMatching(/withdrawal-not-held$/), status: 409 });
   });
 });

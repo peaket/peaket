@@ -140,7 +140,7 @@ describe('I-T83 이전 판 행 고치기(실제 DB, 리뷰 A2)', () => {
     expect(await validateNextRelease()).toBe('23514');
 
     // 묶음 2(경계가 여러 번 생기게)로 정비 역할 연결에서 돌린다
-    expect(await legacyTask(NOW, 2).run(new AbortController().signal)).toEqual({ purged: 5 });
+    expect(await legacyTask(NOW, 2).run(new AbortController().signal)).toEqual({ purged: 5, remaining: 0 });
     for (const id of legacy) {
       const was = before.get(id)!;
       expect(await rowOf(id), id).toEqual({
@@ -166,14 +166,14 @@ describe('I-T83 이전 판 행 고치기(실제 DB, 리뷰 A2)', () => {
     // 다시 돌리면 0행이고 행이 그대로다
     const once = new Map<string, Row>();
     for (const id of [...legacy, d, e]) once.set(id, await rowOf(id));
-    expect(await legacyTask(NOW + DAY).run(new AbortController().signal)).toEqual({ purged: 0 });
+    expect(await legacyTask(NOW + DAY).run(new AbortController().signal)).toEqual({ purged: 0, remaining: 0 });
     for (const id of [...legacy, d, e]) expect(await rowOf(id), id).toEqual(once.get(id));
 
     // 다음 출시의 전제: 파기 행 CHECK와 두 VALIDATE가 성공한다(되돌린다)
     expect(await validateNextRelease()).toBe('OK');
   });
 
-  test('I-T83 ⑧ 정비 일은 잠긴 행을 건너뛰고 기다리지 않으며 다음 실행이 고친다', async () => {
+  test('I-T83 ⑧ 다른 트랜잭션이 잡은 이전 판 행은 남은 대상으로 센다', async () => {
     const ids = [] as string[];
     for (let i = 0; i < 3; i += 1) ids.push(await seed({ status: 'DELETED', rating: 4, fingerprint: `fp-locked-${i}`, body: '', authorDisplay: '***', deletedAt: new Date(NOW - DAY) }));
     const [locked, ...rest] = ids as [string, ...string[]];
@@ -185,7 +185,7 @@ describe('I-T83 이전 판 행 고치기(실제 DB, 리뷰 A2)', () => {
       const run = legacyTask(NOW).run(new AbortController().signal);
       const timeout = new Promise<'기다림'>((r) => setTimeout(() => r('기다림'), 3_000));
       // SKIP LOCKED: 잠긴 행을 건너뛰고 나머지만 곧바로 고친다(잠금 대기 한도 2초 [가정]로 실패하지도 않는다)
-      expect(await Promise.race([run, timeout])).toEqual({ purged: rest.length });
+      expect(await Promise.race([run, timeout])).toEqual({ purged: 2, remaining: 1 });
       expect((await rowOf(locked)).rating).toBe(4);
       for (const id of rest) expect((await rowOf(id)).rating, id).toBeNull();
     } finally {
@@ -193,7 +193,7 @@ describe('I-T83 이전 판 행 고치기(실제 DB, 리뷰 A2)', () => {
       holder.release();
     }
     // 잠금이 풀린 다음 실행이 고친다
-    expect(await legacyTask(NOW + DAY).run(new AbortController().signal)).toEqual({ purged: 1 });
+    expect(await legacyTask(NOW + DAY).run(new AbortController().signal)).toEqual({ purged: 1, remaining: 0 });
     expect((await rowOf(locked)).rating).toBeNull();
   });
 });

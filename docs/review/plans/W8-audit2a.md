@@ -524,6 +524,29 @@ export interface ReviewStore {
 
 - **검증 살아남음 M49·M58(시험 쪽, 2026-11-16)**: `test/review-recheck.test.ts`에 `I-T83 ④ 예약 시각은 날짜만 있거나 시간대가 없는 탈퇴 시각을 받지 않는다`(`2026-11-16`·`2026-11-16T03:00:00`·`…T03:00:00.000`·`…T03:00` 거절, 시간대 단 글 대조군)와 `I-T83 ④ 같은 계정 예약을 고쳐도 만든 시각은 처음 값이다`(메모리 대역, 늦은 쪽·이른 쪽 고치기 모두 `createdAtMs` 03:03 그대로)를 더했다. 지금 코드에서는 **처음부터 통과(이미 있는 동작)**라서 변이를 손으로 넣어 실패를 봤다: M49(`ISO_DATE_TIME` 확인을 빼고 `Date.parse`만) → `2026-11-16`에서 실패, M58(고칠 때 `createdAtMs: o.nowMs`) → 실패. 두 변이는 되돌렸고 `git diff`로 제품 코드가 깨끗함을 봤다. 단위 467개 모두 통과, typecheck 오류 0.
 
+### 웨이브 끝 리뷰 반영(시험 쪽, 계획 §9의 S1·C1·C2, 2026-11-16)
+
+- **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 계획 보탬 `3b02a0a5` 위. Docker 없이 돌렸다.
+- **뼈대(동작 없음)**: `ReviewStore.purgeHeldWithdrawal`·`countLegacyRows` 포트와 메모리·Drizzle 저장소의 '아직 없음', `Reviews.purgeHeldWithdrawal` '아직 없음', 메모리 저장소의 시험용 보류 사건 칸 `heldEvents: MemoryHeldEvent[]`(`topic`·`eventKey`·`businessKey`·`msgKey`·`reprocessedAtMs?`, `review/index.ts`에서 형을 내보냄). 내부 경로의 본문·409, `purgeWithdrawn`의 대체 예약 시각, 정비 일의 `remaining`, 0026 GRANT는 구현 담당 몫이다.
+- **기존 시험을 고친 것(정본이 바뀌어)**: 옛 내부 경로 시험(본문 없이 어떤 계정이든 파기, 예약 없음)을 S1 시험으로 바꿨다(`review-withdrawn.test.ts`, `review-purge.test.ts`의 `purgeAccount` 시험 → `purgeHeldWithdrawal`). `review-recheck.test.ts`의 '탈퇴 시각을 읽지 못하면 파기도 예약도 하지 않는다'는 C1과 반대라 '계정 ID가 틀리면…'으로 좁히고 탈퇴 시각 쪽을 C1 시험으로 옮겼다. `review-purge-legacy`(단위·통합)의 결과 단언에 `remaining`을 더했다. 통합 `review-grants.int.test.ts` ⑮의 거부 목록에서 'held_event 다시 처리 표시'를 빼고 `error` 고치기·지우기 거부를 넣었다(S1이 그 칸 고치기를 준다). 통합 `review-withdrawn.int.test.ts` ①⑥은 없어질 수 있는 `purgeByAccount` 대신 `purgeWithdrawnAccount`로 부른다(단언 그대로).
+- **단위**: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test` 시험 473개 가운데 **11개 실패, 462개 통과**. typecheck 오류 0.
+
+| 지적 | 파일 | 시험 | 결과 | 실패 까닭 |
+| --- | --- | --- | --- | --- |
+| S1 | `test/review-withdrawn.test.ts`(바꿈) | I-T83 ⑨ 보류된 탈퇴 사건이 없는 계정은 손으로 파기할 수 없다 | 실패 | 단언: 보류 없음(B)이 409가 아니라 200(지금 경로는 어떤 계정이든 파기). 보류 없음·이미 다시 처리한 보류뿐·다른 토픽의 보류뿐·다른 계정의 보류만 있음 각각 409 `withdrawal-not-held`, 유스케이스 409·UUID 아님 422, 후기·보류 행·예약이 그대로 |
+| S1 | 〃 | I-T83 ⑨ 사유·요청자 없이는 부를 수 없고 처리하면 운영 줄에 남는다 | 실패 | 단언: '본문 없음'이 400이 아니라 200. 토큰 없음·틀림 403, 본문 없음·사유 9자·501자·요청자 ''·65자·모르는 칸·칸 빠짐 각각 400, 옛 `/anonymize` 404, UUID 아님 400, 바뀐 것 없음 |
+| S1 | 〃 | I-T83 ⑨ 보류된 탈퇴 사건이 있으면 파기하고 보류 행을 다시 처리로 표시하며 예약을 쓴다 | 실패 | 단언: 응답이 `{ purged: 0 }`(앞 시험에서 이미 지운 뒤 옛 모양). 경계 안쪽 값(사유 10자·요청자 64자), 대문자 계정 ID, 보류 둘(업무 키·Kafka 키만) → 200 `{ purged: 2, heldEvents: 2 }`, 두 보류 행 `reprocessedAtMs` = 지금·다른 보류 그대로, 예약 = 지금 + 16분, 운영 줄 `review-purge-manual` 하나(요청자·사유·`heldEventKeys`·`purged`, 계정 ID 없음), 다시 부르면 409 |
+| S1 | `test/review-purge.test.ts`(바꿈) | I-T83 ⑨ 손으로 하는 파기는 계정 ID가 UUID가 아니면 거절하고 보류 사건을 처리하면 지금 + 16분 예약을 쓴다 | 실패 | 뼈대 '아직 없음'(`purgeHeldWithdrawal`) |
+| S1 | `test/review-purge-migration.test.ts`(더함) | I-T83 ⑦⑨ 0026은 core_app에 held_event의 reprocessed_at 고치기만 더 준다 | 실패 | 단언: 0026에 `held_event` GRANT가 없다. 기대 `core_app held_event UPDATE [reprocessed_at]` 하나, 지우기·넣기·읽기·표 전체·다른 역할·REVOKE 없음 |
+| C1 | `test/review-recheck.test.ts`(더함) | I-T83 ④ 예약 셈이 읽지 못한 탈퇴 시각이어도 파기하고 처리 시각 + 16분으로 예약한다 | 실패 | 지금은 `탈퇴 시각(withdrawnAt)을 읽지 못했다`로 던진다. `…T03:00Z`(초 없음)·`…T03:00:00`(시간대 없음)·`어제`·'' 각각 파기(①의 칸)·다른 계정 그대로·예약 03:19(처리 03:03 + 16분), 처리기 `handle`에 바로 넣어도 던지지 않고 로그(경고 포함)에 그 값·계정 ID가 없다 |
+| C1 | 〃 | I-T83 ④ 계약이 받는 탈퇴 시각마다 예약 시각이 나온다 | **처음부터 통과(이미 있는 동작)** | 계약 Zod가 받는 넷(`Z`, `.5Z`, `.123456789+09:00`, `+09:00`)을 `decode` → `handle`로 넣어 각자의 시각 + 16분. 검증 담당이 'C1 ⓓ 대체를 늘 씀' 틀린 구현으로 실패를 본다 |
+| C1 | 〃(좁힘) | I-T83 ④ 계정 ID가 틀리면 파기도 예약도 하지 않는다 | **처음부터 통과(이미 있는 동작)** | 계정 ID 셋(UUID 아님·''·한 글자 더) 각각 422, 후기·예약 그대로 |
+| C2 | `test/review-purge-legacy.test.ts`(고침·더함) | I-T83 ⑧ 기존 넷(결과에 `remaining`) | 실패 4 | 단언: 결과에 `remaining`이 없다(`{ purged: 5 }` 등). 끝까지 돌면 `remaining: 0`, 첫 묶음 뒤 멈추면 `remaining: 3` |
+| C2 | 〃 | I-T83 ⑧ 남은 대상 수는 고치기와 같은 조건으로 센다 | 실패 | 뼈대 '아직 없음'(`countLegacyRows`). 대상 다섯(두 꼴, 지문만·계정만 남은 DELETED 포함)과 대상 아닌 셋(제대로 파기된 행, 계정 B 후기, 가린 살아 있는 후기)에서 실행 전 5, 멈춤 뒤 `{ purged: 2, remaining: 3 }`·3, 끝까지 `{ purged: 3, remaining: 0 }`·0, 대상 아닌 행 그대로 |
+
+- **통합(도커 대기 — 돌리지 않았다)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-manual.int.test.ts test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/review-withdrawn.int.test.ts`(파일 하나씩 돌린다). 새 `test-int/review-purge-manual.int.test.ts`(S1, 기준 시각은 DB 서버 시각): '⑨ 보류된 탈퇴 사건이 없으면 아무것도 바꾸지 않는다'(보류 없음·다시 처리한 보류뿐·다른 토픽 → `undefined`, 예약 없음), '⑨ …파기하고 보류 행을 다시 처리로 표시하며 예약을 쓴다'(업무 키·대문자 Kafka 키 보류 둘, 다른 계정 보류 그대로), '⑨ 보류 행 표시가 실패하면 파기·예약도 남지 않는다'(`REVOKE UPDATE (reprocessed_at) ON held_event FROM core_app` 동안 거절 1건 42501, 후기·예약·보류 행 그대로, 돌린 뒤 셋 다 있음), '⑦⑨ 0026은 core_app에 held_event의 reprocessed_at 고치기만 더 준다'(대조군 OK, `error`·`value`·`business_key` 고치기·지우기·비우기 42501). 고침 `test-int/review-purge-legacy.int.test.ts`(C2): 잠긴 행 시험을 'I-T83 ⑧ 다른 트랜잭션이 잡은 이전 판 행은 남은 대상으로 센다'로 바꿔 `{ purged: 2, remaining: 1 }` → 풀린 뒤 `{ purged: 1, remaining: 0 }`, 첫 시험도 `remaining: 0`. 구현 전에는 모두 실패할 것으로 본다(review-grants ⑮·review-withdrawn ①⑥은 지금 구현으로 통과 예상).
+- **틀린 구현 표본과 잡을 시험(예상)**: S1 ⓐ 보류를 안 봄 → ⑨ 첫 시험. ⓑ 다시 처리한 보류 인정 → C 계정. ⓒ 다른 토픽 인정 → D 계정. ⓓ Kafka 키를 안 봄 → 대문자 Kafka 키 보류(`heldEvents: 2`). ⓔ 표시를 다른 트랜잭션 → 통합 '보류 행 표시가 실패하면'. ⓕ 409에서 예약 → 첫 시험 예약 0. ⓖ 운영 줄에 계정 ID → 셋째 시험. ⓗ 본문 검사 빠짐 → 둘째 시험. C1 ⓐ 던짐·ⓑ NaN·ⓒ 파기 건너뜀 → C1 첫 시험, ⓓ 대체를 늘 씀 → '계약이 받는 탈퇴 시각마다'. C2 ⓐ `remaining` 없음·ⓑ `purged`로 셈·ⓓ 한 꼴만 셈 → 새 단위 시험, ⓒ 셀 때 SKIP LOCKED → 통합 '다른 트랜잭션이 잡은…'(`remaining: 1`).
+
 ### 시험 담당이 정한 것(계획에 없던 세부, 구현 담당·검증 담당 참고)
 
 1. `ReviewRecord.deletedAtMs?`를 더했다. 단위 ①의 '이미 지운 행의 지운 시각은 처음 값 그대로'를 메모리 저장소에서 보려면 필요하다.
