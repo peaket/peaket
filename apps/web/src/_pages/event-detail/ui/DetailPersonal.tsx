@@ -4,12 +4,15 @@
 // - 찜 상태: `GET /v1/wishes?productionIds=`(찜한 것만), 알림 상태: `GET /v1/subscriptions?eventIds=`. 401(갱신 뒤에도)이면 비로그인이다.
 // - 상태를 받기 전·못 받았으면 토글을 누를 수 없다(모르는 상태에서 켜면 이미 있던 신청을 덮어쓴다, HOT-300과 같다).
 // - 알림 상태 응답(캐시하지 않음)의 Date로 서버 시각 보정 표본을 더한다(docs/frontend.md §3.3 '그 밖의 화면').
-// - 본인확인·예매 제한·선예매 같은 다른 개인 상태는 HOT-321·340이 얹는다. api-client는 늦게 가져온다(첫 화면 JS 예산, §5.8).
+// - 취소표 알림(매진의 [ 취소표 알림 받기 ], ADR-0272 결정 2)은 같은 알림 상태 응답의 cancellationStatus가 ACTIVE일 때 켜짐이다.
+//   켜기 POST {kind: CANCELLATION}, 끄기 DELETE ?kind=CANCELLATION이고 실패 글은 알림 종류로 고른다(features/open-alert/failure.ts)
+// - 본인확인·예매 제한·선예매 같은 다른 개인 상태는 HOT-321·340·346이 얹는다. api-client는 늦게 가져온다(첫 화면 JS 예산, §5.8).
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { alertFailureText, OpenAlertProvider } from '@/features/open-alert';
 import { isRefreshUnavailableError, isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
+import { subscriptionFlags } from '../model/subscriptions';
 
 type Status = 'loading' | 'guest' | 'ready';
 
@@ -18,6 +21,9 @@ interface PersonalValue {
   alertKnown: boolean;
   alertOn: boolean;
   setAlert: (on: boolean) => Promise<true | string>;
+  /** 취소표 알림 신청 상태(알림 상태를 받았는지는 alertKnown과 같다) */
+  cancelOn: boolean;
+  setCancel: (on: boolean) => Promise<true | string>;
   wishKnown: boolean;
   wished: boolean;
   setWish: (on: boolean) => Promise<true | string>;
@@ -28,6 +34,8 @@ const PersonalContext = createContext<PersonalValue>({
   alertKnown: false,
   alertOn: false,
   setAlert: async () => '',
+  cancelOn: false,
+  setCancel: async () => '',
   wishKnown: false,
   wished: false,
   setWish: async () => '',
@@ -47,6 +55,7 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
   const [status, setStatus] = useState<Status>('loading');
   const [alertKnown, setAlertKnown] = useState(false);
   const [alertOn, setAlertOn] = useState(false);
+  const [cancelOn, setCancelOn] = useState(false);
   const [wishKnown, setWishKnown] = useState(false);
   const [wished, setWished] = useState(false);
 
@@ -69,7 +78,9 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
       .then(({ s, sent, received }) => {
         if (!live) return;
         browserClock().addDateHeader(s.headers.get('date'), sent, received);
-        setAlertOn((s.data.items ?? []).some((x) => x.eventId === eventId && x.open));
+        const flags = subscriptionFlags(s.data.items, eventId);
+        setAlertOn(flags.open);
+        setCancelOn(flags.cancel);
         setAlertKnown(true);
         setStatus('ready');
       })
@@ -103,6 +114,21 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
     [eventId],
   );
 
+  const setCancel = useCallback(
+    async (on: boolean): Promise<true | string> => {
+      try {
+        const { withFanRefresh, createEventSubscription, deleteEventSubscriptions } = await loadApi();
+        await withFanRefresh<unknown>(() => (on ? createEventSubscription(eventId, { kind: 'CANCELLATION' }) : deleteEventSubscriptions(eventId, { kind: 'CANCELLATION' })));
+        setCancelOn(on);
+        return true;
+      } catch (e) {
+        if (isUnauthorized(e)) setStatus('guest');
+        return alertFailureText(e, on, 'cancel');
+      }
+    },
+    [eventId],
+  );
+
   const setWish = useCallback(
     async (on: boolean): Promise<true | string> => {
       try {
@@ -119,7 +145,7 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
   );
 
   return (
-    <PersonalContext.Provider value={{ status, alertKnown, alertOn, setAlert, wishKnown, wished, setWish }}>
+    <PersonalContext.Provider value={{ status, alertKnown, alertOn, setAlert, cancelOn, setCancel, wishKnown, wished, setWish }}>
       <OpenAlertProvider guest={status === 'guest'} loginHref={loginHref}>
         {children}
       </OpenAlertProvider>

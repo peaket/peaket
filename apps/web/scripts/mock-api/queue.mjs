@@ -33,7 +33,7 @@ export const QUEUE_DEFAULTS = Object.freeze({
   queueRemoved: '0',
   queueBanner: '',
   queueSeats: '',
-  /** 로비 참가: normal|verify|other-device|identity|human-fail|busy|down|unauthorized */
+  /** 로비 참가: normal|verify|other-device|identity|sale-eligibility(판매 자격 명단 밖 403, ADR-0272 결정 4)|human-fail|busy|down|unauthorized */
   queueLobby: 'normal',
   /** 셔플 결과 파일: normal(오픈 3초 뒤 게시)|late(43초 뒤)|never|missing(내 참가 토큰이 목록에 없음) */
   queueShuffle: 'normal',
@@ -186,6 +186,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           const mode = state.queueLobby;
           if (mode === 'unauthorized') return send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
           if (mode === 'identity') return problem(403, 'identity-verification-required', '휴대폰 본인확인을 먼저 해 주세요');
+          if (mode === 'sale-eligibility') return problem(403, 'sale-eligibility-required', '이 판매 단계의 예매 대상이 아닙니다');
           if (mode === 'human-fail') return problem(428, 'human-check-required', '사람 확인을 마친 뒤 다시 시도해 주세요');
           // 혼잡·장애는 사람 확인 토큰마다 한 번만(다시 보내면 지나간다)
           if ((mode === 'busy' || mode === 'down') && !e.once.has(`lobby:${b.humanCheckToken}`)) {
@@ -306,6 +307,7 @@ export function createQueueMock({ now, state, schedule = () => null }) {
           if (mode === 'already-admitted') return problem(409, 'already-admitted', '이미 입장했습니다');
           if (mode === 'not-open') return problem(409, 'queue-not-open', '아직 대기열이 열리지 않았습니다');
           if (mode === 'preverify-invalid') return problem(403, 'preverify-invalid', '사전 확인이 만료됐습니다');
+          if (mode === 'sale-eligibility') return problem(403, 'sale-eligibility-required', '이 판매 단계의 예매 대상이 아닙니다');
           if (mode === 'sold-out') return problem(410, 'sold-out', '매진입니다');
           if (mode === 'ended') return problem(410, 'sale-ended', '판매가 끝났습니다');
           advance(e);

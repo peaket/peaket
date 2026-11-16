@@ -2,9 +2,9 @@
 // 서버가 아직 없는 화면 경로를 고정 자료(scripts/mock-api/cards.json)로 답한다. 응답이 계약 Zod를 지나는지는 mock-api.test.mjs가 본다.
 // - 127.0.0.1에만 묶는다. 소비자 웹 출처 하나에만 자격 증명 포함 CORS를 연다(PEAKET_WEB_ORIGIN, 기본 http://localhost:3000)
 // - 상태 바꾸기: GET /__mock/state?home=normal|empty&ranking=normal|stale|old|missing&fan=member|unverified|pending|closing|guest&detail=normal|suspended&verify=popup|redirect|down (화면 상태를 보려고)
-//   대기열(ADR-0207): queue=on-sale|paused|all-held|sold-out|ended, queueEntry=normal|batching|busy|down|other-device|already-admitted|not-open|preverify-invalid|sold-out|ended|verify,
+//   대기열(ADR-0207): queue=on-sale|paused|all-held|sold-out|ended, queueEntry=normal|batching|busy|down|other-device|already-admitted|not-open|preverify-invalid|sale-eligibility|sold-out|ended|verify,
 //   queueAdmit=normal|soon|verifying|restricted|unauthorized|duplicate|expired|expired-final|removed|sold-out|ended|down, queueAhead(처음 앞 인원)·queueRate(1초에 지나는 번호)·queueRemoved(빠진 번호 수)·queueBanner·queueSeats, queueReset=1
-//   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|human-fail|busy|down|unauthorized,
+//   로비(ADR-0208): queueOpenIn(오픈까지 남은 초, 정한 순간에 고정한다. 빈 값이면 고정 자료 일정), queueLobby=normal|verify|other-device|identity|sale-eligibility|human-fail|busy|down|unauthorized,
 //   queueShuffle=normal|late|never|missing, 셔플 검증 정보의 공시(ADR-0239) queueProof=normal|matched|emergency|disguised|redisclosed|invalid-emergency|invalid-redisclosures, 사전 검증(ADR-0211) queuePreverify=normal|identity|not-found|down|unauthorized, 매진 등급(ADR-0212) queueSoldOutTiers=tier-r,…
 //   검사 기록(ADR-0217): GET /__mock/requests(메서드·경로·출처·시각·끊긴 시각), logReset=1, 진입 멈춤 queueEntry=hang, 200 상태 파일 Retry-After queueStateRetryAfter=<초>
 //   추가 검증(SCR-009, ADR-0259) GET·POST /v1/queues/{회차}/verification: queueVerify=verifying|accepted|accepted-after|rejected|not-verifying|none|identity,
@@ -13,6 +13,9 @@
 //   홀드·구매 세션 나가기(ADR-0225): 서명을 실제로 확인한다. hold=normal|race|recent|limit|paused|ended|down|no-match|session-ended|signature-invalid|admission-invalid|seq-reused. 주문(ADR-0228): GET /v1/holds/{id}, POST /v1/orders, order=normal|no-id|restricted|hold-gone|other-tab|paused|sale-ended|consent-outdated|down. 접수(ADR-0229): POST /v1/orders/{id}/payment-acceptance, accept=normal|mismatch|already|attempt|expired|down. 결과(ADR-0230): GET /v1/orders/{id}/payment-status, GET /v1/tickets, pay=normal|checking|issuing|unknown|compensated|declined|taken|deposit|expired|gone|unauthorized
 //   좌석 스냅샷(ADR-0224) GET /v1/events/{회차}/seatmap-snapshot: 입장 토큰 필수, 첫 사용에 임시 공개키 필수. seatSnapshot=expired(이름 있는 401)|cookie(이름 없는 401)|down(503)|newer(판 3)
 //   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
+//   판매 단계(ADR-0272 결정 3, HOT-346) detailSale=none|presale-before|presale-now: 공연 상세 salePhases가 없음 · 오픈부터 1시간 PRESALE 뒤 GENERAL ·
+//   지금이 든 PRESALE(정한 순간부터 1시간 뒤까지) 뒤 GENERAL. 팬별 판매 자격 GET /v1/events/{회차}/sale-eligibility eligibility=eligible|ineligible|down
+//   (eligible은 PRESALE도 대상, ineligible은 PRESALE만 대상 아님, down은 503. 비로그인 fan=guest면 401). 명단 밖 403은 queueLobby·queueEntry=sale-eligibility
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
@@ -37,6 +40,7 @@ const KST = 9 * 60 * 60_000;
 /** 검사 기록에 남기는 요청 수 */
 const REQUEST_LOG_MAX = 5000;
 const DAY = 24 * 60 * 60_000;
+const HOUR_MS = 60 * 60_000;
 
 /** 고정 자료의 {MOCK} 자리를 가짜 API 주소로 */
 function withOrigin(value, origin) {
@@ -589,7 +593,30 @@ export function startMockApi({
   now = Date.now,
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  const state = { pay: 'normal', ticketEvent: '', accept: 'normal', order: 'normal', hold: 'normal', holdAction: 'normal', payments: 'normal', seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  const state = { pay: 'normal', ticketEvent: '', accept: 'normal', order: 'normal', hold: 'normal', holdAction: 'normal', payments: 'normal', seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', detailSale: 'none', eligibility: 'eligible', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  /** detailSale=presale-now를 정한 순간 + 1시간(지금이 든 PRESALE 조각의 끝). 고정해 공연 상세와 판매 자격이 같은 조각을 준다 */
+  let presaleNowEndsAt = 0;
+  /** 공연 상세의 판매 단계(openapi SalePhase[]). 없음이면 undefined */
+  const salePhasesOf = (d) => {
+    if (state.detailSale !== 'presale-before' && state.detailSale !== 'presale-now') return undefined;
+    const openAt = Date.parse(d.openAt);
+    const end = state.detailSale === 'presale-now' ? presaleNowEndsAt : openAt + HOUR_MS;
+    const start = state.detailSale === 'presale-now' ? Math.min(openAt, end - HOUR_MS) : openAt;
+    return [
+      { kind: 'PRESALE', startsAt: iso(start), endsAt: iso(end), limitPerPerson: 2 },
+      { kind: 'GENERAL', startsAt: iso(end), endsAt: d.saleEndsAt, limitPerPerson: 4 },
+    ];
+  };
+  /** 팬별 판매 자격(openapi FanSaleEligibility). 판매 단계가 없으면 판매 기간 전체 GENERAL 하나 */
+  const fanEligibility = (d) => {
+    const eligible = state.eligibility === 'eligible';
+    const phases = salePhasesOf(d) ?? [{ kind: 'GENERAL', startsAt: d.openAt, endsAt: d.saleEndsAt, limitPerPerson: 4 }];
+    return {
+      eventId: d.eventId,
+      phases: phases.map((x) => ({ ...x, eligible: x.kind === 'GENERAL' || eligible })),
+      lists: eligible ? [{ name: '팬클럽 선예매', destroyAt: iso(Date.parse(d.saleEndsAt) + DAY) }] : [],
+    };
+  };
   /** queueOpenIn을 정한 순간에 고정한 오픈 시각(밀리초). 없으면 고정 자료 일정 */
   let openAtOverride;
   const scheduleOf = (eventId) => {
@@ -671,7 +698,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'holdAction', 'payments', 'order', 'accept', 'pay', 'ticketEvent', 'partner', 'partnerImage', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'detailSale', 'eligibility', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'holdAction', 'payments', 'order', 'accept', 'pay', 'ticketEvent', 'partner', 'partnerImage', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'fanEnded' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }
@@ -679,6 +706,7 @@ export function startMockApi({
         const sec = Number(state.queueOpenIn);
         openAtOverride = state.queueOpenIn !== '' && Number.isFinite(sec) ? now() + sec * 1000 : undefined;
       }
+      if (url.searchParams.get('detailSale') === 'presale-now') presaleNowEndsAt = now() + HOUR_MS;
       if (url.searchParams.get('queueReset')) queue.reset();
       if (url.searchParams.get('logReset')) requestLog.length = 0;
       if (url.searchParams.get('fan')) {
@@ -722,9 +750,20 @@ export function startMockApi({
       const d = ID.test(ev[1]) ? eventDetail(origin, ev[1], new Date(now()), openAtOverride) : undefined;
       if (d && state.detail === 'suspended') return send(410, { type: 'https://peaket.example/problems/event-suspended', title: '판매가 중지된 공연입니다', status: 410 }, 'application/problem+json');
       if (d && state.detail === 'rich') d.description = RICH_DESCRIPTION;
+      const phases = d ? salePhasesOf(d) : undefined;
+      if (d && phases) d.salePhases = phases;
       // 캐시 태그는 회차·공연 둘이고 소문자다(core-svc event-summary.controller.ts와 같다, ADR-0200 결정 5)
       const tags = d ? `event:${d.eventId.toLowerCase()},production:${d.productionId.toLowerCase()}` : '';
       return d ? send(200, d, undefined, { 'cache-control': 'public, max-age=300, stale-if-error=86400', 'x-peaket-cache-tag': tags }) : send(404, { type: 'https://peaket.example/problems/not-found', title: '찾을 수 없습니다', status: 404 }, 'application/problem+json');
+    }
+    // 팬별 판매 자격(ADR-0261 결정 5·ADR-0272 결정 3): 없는 회차 404, 비로그인 401, down 503. 개인 값이라 저장하지 않는다
+    const elig = /^\/v1\/events\/([^/]+)\/sale-eligibility$/.exec(p);
+    if (elig && req.method === 'GET') {
+      const d = ID.test(elig[1]) ? eventDetail(origin, elig[1], new Date(now()), openAtOverride) : undefined;
+      if (!d) return send(404, { type: 'https://peaket.example/problems/not-found', title: '찾을 수 없습니다', status: 404 }, 'application/problem+json');
+      if (state.fan === 'guest') return unauthorized();
+      if (state.eligibility === 'down') return send(503, { type: 'https://peaket.example/problems/dependency-unavailable', title: '잠시 후 다시 시도해 주세요', status: 503 }, 'application/problem+json', { 'retry-after': '1' });
+      return send(200, fanEligibility(d), 'application/json; charset=utf-8', { 'cache-control': 'private, no-store' });
     }
     if (p === '/v1/identity/me' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();

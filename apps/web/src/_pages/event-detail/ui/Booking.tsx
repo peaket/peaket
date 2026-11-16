@@ -9,7 +9,9 @@
 // 비로그인 [[ 로그인하고 입장 ]], 본인확인 전 [[ 휴대폰 본인확인 ]](이 화면 위 기관 창, SCR-006), 가입을 마치지 않음 [[ 가입을 마치고 입장 ]] [가정].
 // 요약을 받기 전은 뼈대, 모르면(5xx) 덮지 않는다(진입 경로가 다시 막는다).
 // 예매 제한(ADR-0213 결정 2): 회원 팬이면 제한 상태를 받아, 살 수 있는 때(오픈 전·로비·대기열)의 ⑦을 "예매가 제한되어 있습니다 · 소명 기한" ( 소명하기 › )로 덮는다.
-// 가입 마무리·본인확인보다 먼저이고(제한된 팬은 그것을 해도 예매하지 못한다), 판매 종료·취소 회차가 제한보다 앞선다. 선예매·판매 정책 표시는 HOT-346.
+// 가입 마무리·본인확인보다 먼저이고(제한된 팬은 그것을 해도 예매하지 못한다), 판매 종료·취소 회차가 제한보다 앞선다.
+// 선예매·판매 정책·매진(ADR-0272, HOT-346): 판매 중에는 대기 상태 파일 구간 0으로 등급·회차 매진을 얹고([ 취소표 알림 받기 ]), 회원 팬이면 팬별 판매 자격으로
+// 선예매 대상 안내와 이유 있는 비활성 버튼을 그린다. 버튼 차례는 model/cta.ts의 bookingCta가 고르고, 조각 경계에 다시 고른다.
 // 오픈 뒤 [대기열 들어가기]는 사전 검증 토큰을 거친다(Preverify.tsx, ADR-0211): 유효한 토큰이 있으면 바로, 없으면 사람 확인 뒤 대기실로 간다.
 import Link from 'next/link';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -27,22 +29,20 @@ import { deviceId } from '@/shared/lib/device-id';
 import { entryHref } from '@/shared/lib/in-app-browser';
 import { lobbyUnlockDelayMs } from '@/shared/lib/lobby-unlock';
 import { renderNextLink } from '@/shared/lib/next-link';
-import { VERIFY_PURPOSE } from '../model/content';
+import { bookingCta, type CtaData, type CtaModel, type Primary } from '../model/cta';
 import { bookingPhase, roundBadge, tierBadge, type BookingPhase, type DetailRound, type EventDetail } from '../model/detail';
+import type { LiveSale } from '../model/live-sale';
+import { eligibilityGate, needsEligibility, presaleNotice, saleBoundaryAfter, type EligibilityGate, type FanEligibilityState } from '../model/sale';
 import { useDetailPersonal } from './DetailPersonal';
 import { PreverifyCard, usePreverify } from './Preverify';
+import { useDeniedMarker, useLiveSale, useSaleEligibility } from './sale-live';
 import { VerifyButtonLazy } from './VerifyButtonLazy';
 
-/** 브라우저로 넘기는 값(서버 → 클라이언트, 평평한 값만) */
-export type BookingData = Pick<
-  EventDetail,
-  'eventId' | 'title' | 'roundLabel' | 'status' | 'openAtMs' | 'lobbyOpensAtMs' | 'saleEndsAtMs' | 'openText' | 'lobbyText' | 'openTimeText' | 'rounds' | 'tiers'
-> & {
-  otherRoundFallbackHref: string;
-  /** 로그인 화면(돌아갈 주소는 이 회차) */
-  loginHref: string;
-  /** 가입 완료 화면(SCR-005, 돌아갈 주소는 이 회차) */
-  signupHref: string;
+/**
+ * 브라우저로 넘기는 값(서버 → 클라이언트, 평평한 값만). 버튼을 고르는 값(CtaData: 로그인·가입·다른 회차 주소와 로비 여부 hasLobby)을 넓힌다
+ */
+export type BookingData = CtaData &
+  Pick<EventDetail, 'title' | 'status' | 'openAtMs' | 'lobbyOpensAtMs' | 'saleEndsAtMs' | 'openText' | 'tiers' | 'salePhases' | 'sellerName'> & {
   /** en·ja·zh 화면의 구매 조건 알림(POL-001, docs/frontend.md §5.12) */
   domesticPhoneNotice?: string;
   /** 현재 화면 로케일. 한국어는 없다 */
@@ -55,20 +55,32 @@ interface BookingState {
   unlockAt?: number;
   /** 클라이언트가 붙은 뒤의 User-Agent. 인앱 브라우저면 대기실 대신 SCR-058을 먼저 연다 */
   ua?: string;
+  /** 등급별 실시간 판매 상태(대기 상태 파일 구간 0, 오픈 뒤 진입에서만 받는다) */
+  live: LiveSale;
+  /** 팬별 판매 자격(회원 팬이고 끝나지 않은 PRESALE 조각이 있을 때만 받는다) */
+  fan: FanEligibilityState;
+  /** ⑦을 판매 자격으로 덮을 값(받는 중·자격 없음 이유) */
+  eligibility: EligibilityGate;
 }
 
-const BookingContext = createContext<BookingState>({});
+const BookingContext = createContext<BookingState>({ live: { status: 'loading' }, fan: { status: 'idle' }, eligibility: null });
 
 /** 시각이 바뀌지 않아도 이만큼마다 다시 고른다(시계 보정 표본이 늦게 와도 따라가게) [가정] */
 const RECHECK_MS = 15_000;
 
 export function BookingProvider({ data, children }: { data: BookingData; children: ReactNode }) {
-  const [state, setState] = useState<BookingState>({});
+  const [state, setState] = useState<{ phase?: BookingPhase; now?: number; unlockAt?: number }>({});
   const [unlockAt, setUnlockAt] = useState<number | undefined>(undefined);
   const [ua, setUa] = useState<string | undefined>(undefined);
   const [announce, setAnnounce] = useState('');
   const prev = useRef<BookingPhase | undefined>(undefined);
-  const { eventId, status, openAtMs, lobbyOpensAtMs, saleEndsAtMs } = data;
+  const { eventId, status, openAtMs, lobbyOpensAtMs, saleEndsAtMs, salePhases } = data;
+  const session = useFanSession();
+  const live = useLiveSale(eventId, state.phase === 'queue');
+  // 부를지는 첫 효과 뒤의 시각으로 본다(그리는 중에 시계를 읽지 않는다)
+  const fan = useSaleEligibility(eventId, state.now !== undefined && needsEligibility(salePhases, session, state.now));
+  const denied = useDeniedMarker(salePhases);
+  const eligibility = state.now === undefined ? null : eligibilityGate({ phase: state.phase, session, phases: salePhases, fan, denied, openAtMs, nowMs: state.now });
 
   // 인앱 브라우저 감지는 클라이언트가 붙은 뒤에만 한다(서버 첫 그리기와 하이드레이션을 맞춘다, SCR-058)
   useEffect(() => {
@@ -99,7 +111,10 @@ export function BookingProvider({ data, children }: { data: BookingData; childre
       const now = browserClock().now();
       const r = bookingPhase(times, now, unlockAt);
       setState({ phase: r.phase, now, ...(unlockAt !== undefined ? { unlockAt } : {}) });
-      if (r.nextAt !== undefined) timer = setTimeout(tick, Math.min(Math.max(r.nextAt - now, 0) + 50, RECHECK_MS));
+      // 판매 단계 조각 경계에도 다시 고른다(일반 예매 시작 시각에 버튼이 돌아온다, ADR-0272 결정 3 '다시 고르는 때')
+      const boundary = saleBoundaryAfter(salePhases, now);
+      const nextAt = r.nextAt === undefined ? boundary : boundary === undefined ? r.nextAt : Math.min(r.nextAt, boundary);
+      if (nextAt !== undefined) timer = setTimeout(tick, Math.min(Math.max(nextAt - now, 0) + 50, RECHECK_MS));
     };
     tick();
     const onVisible = () => {
@@ -112,10 +127,10 @@ export function BookingProvider({ data, children }: { data: BookingData; childre
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [status, openAtMs, lobbyOpensAtMs, saleEndsAtMs, unlockAt]);
+  }, [status, openAtMs, lobbyOpensAtMs, saleEndsAtMs, unlockAt, salePhases]);
 
   return (
-    <BookingContext.Provider value={{ ...state, ua }}>
+    <BookingContext.Provider value={{ ...state, ua, live, fan, eligibility }}>
       {children}
       <p className="sr-only" aria-live="polite">
         {announce}
@@ -129,7 +144,12 @@ function useBooking(): BookingState {
 }
 
 export function BookingFacts({ prefix, data, dividers = false, className }: { prefix: string; data: BookingData; dividers?: boolean; className?: string }) {
-  const { phase, now } = useBooking();
+  const { phase, now, live, fan } = useBooking();
+  const session = useFanSession();
+  const restricted = useRestrictedCta(phase, session, now);
+  // 선예매 대상 안내(ADR-0272 결정 3): 판매 종료·취소·매진·예매 제한이면 보이지 않는다. 휴대폰 아래 고정 띠에는 싣지 않는다(이 묶음에만 있다)
+  const closed = phase === undefined || phase === 'ended' || phase === 'cancelled' || (live.status === 'known' && (live.saleStatus === 'SOLD_OUT' || live.saleStatus === 'ENDED'));
+  const presale = now === undefined || closed || restricted !== null ? null : presaleNotice({ fan, sellerName: data.sellerName, nowMs: now });
   const rounds = data.rounds.map((r: DetailRound) => ({
     id: r.eventId,
     label: r.label,
@@ -137,7 +157,7 @@ export function BookingFacts({ prefix, data, dividers = false, className }: { pr
     current: r.current,
     ...(now !== undefined ? { status: roundBadge(r, now) } : {}),
   }));
-  const badge = tierBadge(phase);
+  const badges = data.tiers.map((t) => tierBadge(phase, live, t.id));
   const gap = dividers ? 18 : 20;
   return (
     <div className={cx('col', className)} style={{ gap }}>
@@ -160,14 +180,23 @@ export function BookingFacts({ prefix, data, dividers = false, className }: { pr
           ) : null}
         </p>
       </div>
+      {presale ? (
+        <div className="col" style={{ gap: 4 }}>
+          <h2 className="eyebrow">선예매</h2>
+          <p className="t-md">{presale.lead}</p>
+          <p className="t-sm muted">{presale.notice}</p>
+        </div>
+      ) : null}
       {dividers ? <div className="divider" /> : null}
       {data.tiers.length > 0 ? (
         <div className="col" style={{ gap: 2 }}>
           <h2 className="eyebrow" id={`${prefix}-h-tier`}>
             좌석 등급
           </h2>
-          <ul aria-labelledby={`${prefix}-h-tier`} aria-busy={badge ? undefined : true}>
-            {data.tiers.map((t) => (
+          <ul aria-labelledby={`${prefix}-h-tier`} aria-busy={badges.every(Boolean) ? undefined : true}>
+            {data.tiers.map((t, i) => {
+              const badge = badges[i];
+              return (
               <li key={t.id} className="row between" style={{ minHeight: 48, borderBottom: '1px solid var(--border)' }}>
                 <span className="row" style={{ gap: 12 }}>
                   <strong className="t-md fw-b">{t.name}</strong> <span className="t-md num">{formatWon(t.price)}</span>
@@ -180,7 +209,8 @@ export function BookingFacts({ prefix, data, dividers = false, className }: { pr
                   <span className={badge.tone === 'primary' ? 'badge badge-primary' : 'badge'}>{badge.text}</span>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       ) : null}
@@ -211,26 +241,6 @@ function LobbyCountdown({ unlockAt, describedBy, className }: { unlockAt: number
   );
 }
 
-type Primary = { type: 'link'; label: string; href: string } | { type: 'enter'; label: string } | { type: 'disabled'; label: string } | { type: 'countdown' } | { type: 'verify'; label: string };
-
-interface CtaModel {
-  desc?: ReactNode;
-  meta?: string;
-  alert?: { iconOnlyBelowMd?: boolean };
-  primary?: Primary;
-  minW?: 160 | 200 | 240;
-  more?: { label: string; href: string };
-  special?: 'ended' | 'load';
-  endedText?: string;
-}
-
-const SAME_ORDER = '로비 안에서는 언제 들어와도 순번이 같습니다';
-
-function otherRoundHref(data: BookingData, now: number | undefined): string {
-  const next = data.rounds.find((r) => !r.current && r.status !== 'CANCELLED' && (now === undefined || r.saleEndsAtMs === undefined || r.saleEndsAtMs > now));
-  return next?.href ?? data.otherRoundFallbackHref;
-}
-
 /** ⑦을 예매 제한으로 덮을 값: 받는 중이면 'loading', 제한이면 글·소명 링크, 아니면 null */
 type RestrictedCta = 'loading' | { text: string; appealHref?: string } | null;
 
@@ -243,49 +253,13 @@ function useRestrictedCta(phase: BookingPhase | undefined, session: FanSession, 
   return restrictionCta(r, now, appealHref);
 }
 
-function ctaModel(phase: BookingPhase | undefined, data: BookingData, now: number | undefined, personal: ReturnType<typeof personalCta>, restricted: RestrictedCta, ua: string | undefined): CtaModel {
-  const queue = entryHref(queueRoomHref(data.eventId), ua);
-  const lobbyMeta = `${data.roundLabel}${data.lobbyText && phase !== 'queue' ? ` · 로비 ${data.lobbyText}부터` : ''}`;
-  // 개인 상태가 먼저다(d5 §5.2 '비로그인'·'본인확인 필요'). 오픈 알림 토글은 오픈 전에만 둔다(오픈 뒤 진입 버튼에는 없다)
-  const openAlert = phase === 'queue' ? undefined : {};
-  if (personal === 'loading') return { special: 'load', meta: data.roundLabel };
-  if (personal === 'login') return { meta: lobbyMeta, alert: openAlert, primary: { type: 'link', label: '로그인하고 입장', href: data.loginHref }, minW: 200 };
-  // 예매 제한은 가입 마무리·본인확인보다 먼저다(d5 §5.2 '예매 제한 중', 판매 종료 줄과 같은 모양: 글 + ( 소명하기 › ))
-  if (restricted === 'loading') return { special: 'load', meta: data.roundLabel };
-  if (restricted) {
-    return {
-      special: 'ended',
-      endedText: restricted.text,
-      meta: `${data.roundLabel} · ${restricted.text}`,
-      ...(restricted.appealHref ? { more: { label: '소명하기', href: restricted.appealHref } } : {}),
-    };
-  }
-  switch (personal) {
-    case 'signup':
-      return { meta: lobbyMeta, alert: openAlert, primary: { type: 'link', label: '가입을 마치고 입장', href: data.signupHref }, minW: 200 };
-    case 'verify':
-      return { desc: VERIFY_PURPOSE, alert: openAlert && { iconOnlyBelowMd: true }, primary: { type: 'verify', label: '휴대폰 본인확인' }, minW: 200 };
-    default:
-      break;
-  }
-  switch (phase) {
-    case 'closed':
-      return { desc: `로비는 ${data.lobbyText ?? ''}에 열립니다`, alert: {}, primary: { type: 'disabled', label: '로비 입장' }, minW: 200 };
-    case 'notYet':
-      return { desc: SAME_ORDER, alert: { iconOnlyBelowMd: true }, primary: { type: 'countdown' }, minW: 240 };
-    case 'lobby':
-      return { desc: SAME_ORDER, alert: {}, primary: { type: 'link', label: '로비 입장', href: queue }, minW: 200 };
-    case 'fifo':
-      return { desc: `대기열은 ${data.openTimeText}에 열립니다`, alert: {}, primary: { type: 'disabled', label: '대기열 들어가기' }, minW: 200 };
-    case 'queue':
-      return { meta: `${data.roundLabel} · 판매 중`, primary: { type: 'enter', label: '대기열 들어가기' }, minW: 240 };
-    case 'ended':
-      return { special: 'ended', endedText: '판매가 끝난 회차입니다', meta: `${data.roundLabel} · 판매가 끝난 회차입니다`, more: { label: '다른 회차', href: otherRoundHref(data, now) } };
-    case 'cancelled':
-      return { special: 'ended', endedText: '취소된 회차입니다', meta: `${data.roundLabel} · 취소된 회차입니다`, more: { label: '다른 회차', href: otherRoundHref(data, now) } };
-    default:
-      return { special: 'load', meta: data.roundLabel };
-  }
+/** ⑦ 모양: 차례는 model/cta.ts(ADR-0272 결정 2·3 '차례') */
+function useCta(data: BookingData): { m: CtaModel; phase: BookingPhase | undefined; unlockAt: number | undefined } {
+  const { phase, now, unlockAt, ua, live, eligibility } = useBooking();
+  const session = useFanSession();
+  const restricted = useRestrictedCta(phase, session, now);
+  const m = bookingCta({ phase, data, now, personal: personalCta(phase, session), restricted, eligibility, live, queueHref: entryHref(queueRoomHref(data.eventId), ua) });
+  return { m, phase, unlockAt };
 }
 
 const MIN_W: Record<NonNullable<CtaModel['minW']>, string> = { 160: 'md:min-w-[160px]', 200: 'md:min-w-[200px]', 240: 'md:min-w-[240px]' };
@@ -340,6 +314,12 @@ function MoreLink({ more }: { more: { label: string; href: string } }) {
   );
 }
 
+/** 매진의 [ 취소표 알림 받기 ](ADR-0272 결정 2): 신청 상태는 그 회차의 cancellationStatus ACTIVE. 토글 규칙은 오픈 알림과 같다 */
+function CancelAlertToggle({ title, className }: { title: string; className: string }) {
+  const { status, alertKnown, cancelOn, setCancel } = useDetailPersonal();
+  return <OpenAlertToggle title={title} variant="button" kind="cancel" pressed={cancelOn} onToggle={setCancel} disabled={status !== 'guest' && !alertKnown} className={className} />;
+}
+
 /** ⑥ 오픈 알림 토글: 신청 상태는 서버 값(listSubscriptions). 상태를 받기 전에는 누를 수 없다 */
 function AlertToggle({ title, className, iconOnlyBelowMd }: { title: string; className: string; iconOnlyBelowMd?: boolean }) {
   const { status, alertKnown, alertOn, setAlert } = useDetailPersonal();
@@ -359,9 +339,7 @@ function AlertToggle({ title, className, iconOnlyBelowMd }: { title: string; cla
 
 /** 휴대폰·태블릿 화면 아래 고정 띠(보드 SCR-002-m·t의 .bottom-bar). 데스크톱(lg)에서는 숨긴다 */
 export function BookingBar({ data }: { data: BookingData }) {
-  const { phase, now, unlockAt, ua } = useBooking();
-  const session = useFanSession();
-  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now), ua);
+  const { m, phase, unlockAt } = useCta(data);
   const descId = m.desc ? `bar-${phase ?? 'load'}-why` : undefined;
   let body: ReactNode;
   if (m.special === 'load') {
@@ -385,6 +363,20 @@ export function BookingBar({ data }: { data: BookingData }) {
           <span className="t-sm muted hidden md:block">{m.meta}</span>
         </div>
         {m.more ? <MoreLink more={m.more} /> : null}
+      </div>
+    );
+  } else if (m.special === 'soldOut') {
+    // 매진: [ 취소표 알림 받기 ] · ( 다른 회차 › )(d5 §5.2 '매진')
+    body = (
+      <div className="row between gap-4">
+        <div className="col hidden min-w-0 md:flex" style={{ gap: 2 }}>
+          <strong className="t-md fw-b ellipsis">{data.title}</strong>
+          <span className="t-sm muted">{m.meta}</span>
+        </div>
+        <div className="row grow gap-3 md:grow-0">
+          <CancelAlertToggle title={data.title} className="btn-lg grow md:grow-0" />
+          {m.more ? <MoreLink more={m.more} /> : null}
+        </div>
       </div>
     );
   } else {
@@ -429,9 +421,7 @@ export function BookingBar({ data }: { data: BookingData }) {
 
 /** 데스크톱 오른쪽 고정 예매 패널의 버튼 묶음(보드 SCR-002-d aside) */
 export function BookingPanelCta({ data }: { data: BookingData }) {
-  const { phase, now, unlockAt, ua } = useBooking();
-  const session = useFanSession();
-  const m = ctaModel(phase, data, now, personalCta(phase, session), useRestrictedCta(phase, session, now), ua);
+  const { m, phase, unlockAt } = useCta(data);
   const descId = m.desc ? `pnl-${phase ?? 'load'}-why` : undefined;
   if (m.special === 'load') {
     return (
@@ -446,6 +436,14 @@ export function BookingPanelCta({ data }: { data: BookingData }) {
     return (
       <div className="col items-center" style={{ gap: 12 }}>
         <p className="t-md fw-b">{m.endedText}</p>
+        {m.more ? <MoreLink more={m.more} /> : null}
+      </div>
+    );
+  }
+  if (m.special === 'soldOut') {
+    return (
+      <div className="col items-center" style={{ gap: 12 }}>
+        <CancelAlertToggle title={data.title} className="btn-lg btn-block" />
         {m.more ? <MoreLink more={m.more} /> : null}
       </div>
     );

@@ -11,6 +11,9 @@ import { resultRetryDelayMs, spreadDelayMs } from './net.ts';
 import { seatmapPath } from './preload.ts';
 import { aheadCount, etaSeconds, MonotonicReader, nextDelayMs, parseQueueState, purchaseUnlikely, segmentOf, turnAtOf, type QueueState } from './queue-file.ts';
 import type { Batching, Lobby, Store, Ticket } from './store.ts';
+
+/** 공연 상세가 '명단 밖 알림'으로 읽는 주소 조각(ADR-0272 결정 4). 공연 상세 model/sale.ts의 같은 값과 글자가 같아야 한다 */
+const SALE_ELIGIBILITY_DENIED_HASH = '#sale-eligibility-required';
 import { singleTab, type ResultState, type TabMessage, type Tabs } from './tabs.ts';
 
 export type LiveState =
@@ -182,6 +185,12 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
     show({ state: 'leaving' });
     env.navigate(url);
   };
+  /**
+   * 판매 자격 명단 밖(로비 참가·진입 403 sale-eligibility-required, Q-T36 ⑧): 사람 확인 실패가 아니라 공연 상세의 '자격 없음' 안내로 간다.
+   * 주소 조각은 서버·CDN에 가지 않아 ISR 캐시 키가 갈리지 않고 개인 값이 없다(ADR-0272 결정 4, docs/frontend.md §3.4)
+   */
+  const deniedEvent = () => `${urls.event}${SALE_ELIGIBILITY_DENIED_HASH}`;
+  const isSaleDenied = (reply: Reply | null | undefined) => reply?.status === 403 && reply.problem === 'sale-eligibility-required';
   /** 보정 시계 시각 → 이 기기 시계 시각(화면 카운트다운은 이 기기 시계로 센다) */
   const toDevice = (serverMs: number) => serverMs - (clock.now() - env.deviceNow());
   /** 서버 하한 위로만 0~20%(§4.1, 중간-038) */
@@ -341,7 +350,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
         clearEntryMine();
         // 사전 검증 토큰이 맞지 않으면 그 토큰도 지운다. 남기면 공연 상세가 그 토큰으로 다시 보내 두 화면을 오간다(ADR-0211 결정 4)
         if (reply.problem === 'preverify-invalid') store.write({ preverifyToken: undefined, preverifyIssuedAt: undefined, preverifyExpiresAt: undefined });
-        return leave(urls.event, sig);
+        return leave(isSaleDenied(reply) ? deniedEvent() : urls.event, sig);
       }
       failures++;
       if (!env.online()) show({ state: 'offline' });
@@ -430,6 +439,7 @@ export function startQueue(env: Env, onView: (v: QueueView) => void): Controller
         return end('login-expired');
       }
       if (reply?.status === 403 && reply.problem === 'identity-verification-required') return leave(urls.event, sig);
+      if (isSaleDenied(reply)) return leave(deniedEvent(), sig);
       if (reply?.status === 403 || reply?.status === 428) return show(joinView('failed'));
       if (reply?.status === 409) {
         const again = store.read();

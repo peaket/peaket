@@ -5,7 +5,7 @@ import type { EventPublicSummary } from '@peaket/api-client/model';
 import { dateTimeText, parseTime, timeText } from '../../../shared/lib/kst.ts';
 import { toDescriptionBlocks, type DescriptionBlock } from './description.ts';
 import type { LiveSale } from './live-sale.ts';
-import type { DetailSalePhase } from './sale.ts';
+import { toSalePhases, type DetailSalePhase } from './sale.ts';
 
 export type SortMode = 'HYBRID' | 'PREQUEUE_SHUFFLE' | 'FIFO';
 export type SeatMode = 'PICK' | 'AUTO';
@@ -63,8 +63,8 @@ export interface EventDetail {
   reentryAllowed: boolean;
   /** 판매 정보 배지에 선예매가 있는가 */
   presale: boolean;
-  /** 판매 단계 조각(ADR-0272 결정 3). 시험 담당의 뼈대라 아직 선택 칸이고 toEventDetail이 채우지 않는다(구현 담당이 채운다) */
-  salePhases?: DetailSalePhase[];
+  /** 판매 단계 조각(시각 순, ADR-0272 결정 3). 공개 요약에 없으면 빈 목록 */
+  salePhases: DetailSalePhase[];
   rounds: DetailRound[];
   tiers: { id: string; name: string; price: number }[];
   /** 판매자 상호(판매자 줄과 중개자 고지) */
@@ -179,6 +179,7 @@ export function toEventDetail(e: EventPublicSummary): EventDetail | undefined {
     perPersonLimit: e.perPersonLimit ?? 4,
     reentryAllowed: e.reentryAllowed ?? false,
     presale: (e.badges ?? []).includes('PRESALE'),
+    salePhases: toSalePhases(e.salePhases),
     rounds: rounds.map((r) => r.round),
     tiers: (e.priceTiers ?? []).flatMap((t) => (t.tierId && t.name && typeof t.price === 'number' ? [{ id: t.tierId, name: t.name, price: t.price }] : [])),
     sellerName: s?.legalName ?? e.sellerName ?? '',
@@ -215,17 +216,19 @@ export function bookingPhase(
 }
 
 /**
- * 등급 배지. 판매 중의 등급별 매진은 실시간 출처(HOT-010)가 정해지기 전이라 고정 글 '판매 중'(POL-029 원본 장애 때와 같은 모양)이다.
- * 상태를 아직 모르면(첫 그리기) 없음: 화면이 뼈대를 둔다.
+ * 등급 배지(d5 §5.2 '매진'·'판매 종료'·'잔여석 조회 실패'·'로딩', ADR-0272 결정 1). 판매 중은 대기 상태 파일 구간 0의 값으로 고른다:
+ * 받기 전은 없음(뼈대), 모름(실패)은 고정 글 '판매 중'(POL-029), SOLD_OUT은 모든 등급 <매진>, ENDED는 <판매 종료>,
+ * 그 밖은 soldOutTiers에 든 등급만 <매진>(tierId 글자 그대로)이다. 상태를 아직 모르면(첫 그리기) 없음: 화면이 뼈대를 둔다.
  */
-// 시험 담당의 뼈대(ADR-0270 결정 1): live·tierId(ADR-0272 결정 1)는 받기만 하고 아직 쓰지 않는다. 구현 담당이 채운다
-export function tierBadge(phase: BookingPhase | undefined, live?: LiveSale, tierId?: string): { text: string; kind: 'badge'; tone: 'primary' | 'neutral' } | { text: string; kind: 'muted' } | undefined {
-  void live;
-  void tierId;
+export function tierBadge(phase: BookingPhase | undefined, live: LiveSale, tierId: string): { text: string; kind: 'badge'; tone: 'primary' | 'neutral' } | { text: string; kind: 'muted' } | undefined {
   if (!phase) return undefined;
-  if (phase === 'queue') return { text: '판매 중', kind: 'muted' };
   if (phase === 'ended' || phase === 'cancelled') return { text: '판매 종료', kind: 'badge', tone: 'neutral' };
-  return { text: '오픈 예정', kind: 'badge', tone: 'primary' };
+  if (phase !== 'queue') return { text: '오픈 예정', kind: 'badge', tone: 'primary' };
+  if (live.status === 'loading') return undefined;
+  if (live.status === 'unknown') return { text: '판매 중', kind: 'muted' };
+  if (live.saleStatus === 'ENDED') return { text: '판매 종료', kind: 'badge', tone: 'neutral' };
+  if (live.saleStatus === 'SOLD_OUT' || live.soldOutTiers.includes(tierId)) return { text: '매진', kind: 'badge', tone: 'neutral' };
+  return { text: '판매 중', kind: 'muted' };
 }
 
 /** 회차 칩 배지: 회차마다 그 회차의 오픈·판매 종료로 고른다(d5 §5.2 '판매 종료' 행) */
@@ -243,7 +246,8 @@ export function jsonLdText(data: unknown): string {
 
 /**
  * 구조화 데이터의 판매 상태(schema.org Offer availability, docs/frontend.md '회차 상세의 정규 주소'의 '판매 상태'). 그린 때(ISR, 300초)의 시각으로
- * 정한다: 오픈 전 PreOrder, 판매 중 InStock, 판매 종료·취소 뒤 Discontinued. 등급별 실시간 매진은 HOT-010의 출처가 정해지면 SoldOut을 더한다.
+ * 정한다: 오픈 전 PreOrder, 판매 중 InStock, 판매 종료·취소 뒤 Discontinued. 실시간 매진(대기 상태 파일)은 브라우저만 읽으므로 SoldOut을 더하지 않는다
+ * (ISR이 그린 때의 시각 그대로, ADR-0272 결정 1 '남는 한계').
  */
 export function offerAvailability(d: Pick<EventDetail, 'status' | 'openAtMs' | 'saleEndsAtMs'>, nowMs: number): string {
   if (d.status === 'CANCELLED' || nowMs >= d.saleEndsAtMs) return 'https://schema.org/Discontinued';
