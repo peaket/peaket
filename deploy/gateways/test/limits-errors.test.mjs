@@ -365,9 +365,19 @@ test("HOT-410 infra §4.1 '웹훅 경로' 웹훅 두 경로는 gw-partner partne
     assert.equal(hit.match.method, 'POST', `${path}: 메서드`);
     assert.deepEqual((hit.rule.backendRefs ?? []).map((b) => [b.name, b.port]), [['payment-svc', 8080]], `${path}: 백엔드`);
     assert.deepEqual(hit.route.spec?.hostnames, ['partner-api.peaket.example'], `${path}: 호스트`);
-    // 웹훅 경로에 GET은 없다(계약 메서드만)
-    const get = routeFor('gw-partner', 'partner-api.peaket.example', 'GET', path);
-    assert.ok(!get || get.route.metadata?.name === 'gw-partner-trace', `${path}: GET이 ${get?.route.metadata?.name}에 맞는다`);
+    // 계약 밖 메서드(GET·PUT·DELETE 각각)는 서비스에 닿지 않고 게이트웨이 404로 끝난다(infra §4.1 '메서드가 맞지 않는 요청', '호스트와 내부 경로'의
+    // <게이트웨이>-not-found, BAT-060 시험 이의 1 판단): 맞는 규칙이 없거나, 맞은 규칙에 백엔드가 없고 그 필터가 404 Problem 직접 응답이다
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      const other = routeFor('gw-partner', 'partner-api.peaket.example', method, path);
+      if (!other) continue;
+      const where = `${method} ${path}(${other.route.metadata?.name})`;
+      assert.deepEqual(other.rule.backendRefs ?? [], [], `${where}: 계약 밖 메서드가 백엔드로 간다`);
+      const direct = (other.rule.filters ?? []).filter((f) => f.type === 'ExtensionRef' && f.extensionRef?.kind === 'HTTPRouteFilter').map((f) => named('HTTPRouteFilter', f.extensionRef.name)?.spec?.directResponse);
+      assert.equal(direct.length, 1, `${where}: 직접 응답 필터가 하나가 아니다(${direct.length})`);
+      assert.equal(Number(direct[0]?.statusCode), 404, `${where}: 직접 응답 상태`);
+      assert.equal(direct[0]?.contentType, 'application/problem+json', `${where}: 직접 응답 형식`);
+      assert.deepEqual(JSON.parse(findKey(direct[0]?.body ?? {}, 'inline')[0] ?? 'null'), { type: 'about:blank', title: 'Not Found', status: 404 }, `${where}: 직접 응답 본문`);
+    }
   }
   // 웹훅 라우트는 웹훅 두 경로만 받는다
   for (const r of routesFrom(WEBHOOK_ROUTE))

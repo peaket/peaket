@@ -425,6 +425,59 @@ test("HOT-410 infra §4.1 '생성기가 멈추는 경우' 두 규칙이 한 경�
   assertStops(openapi, sources, '/v1/partner/events/{eventId}');
 });
 
+/** 원천 규칙 맞춤 하나를 Exact로 바꾼다(경로 값은 openapi 꼴, BAT-060 시험 이의 2 판단) */
+function exactSource(route, ruleIndex = 0) {
+  const r = structuredClone(route);
+  r.spec.rules[ruleIndex].matches = r.spec.rules[ruleIndex].matches.map((m) => ({ path: { type: 'Exact', value: m.path.value } }));
+  return r;
+}
+
+test("HOT-410 infra §4.1 '경로별 메서드 생성기' Exact 원천 맞춤은 그 계약 경로 하나만 맡고 그 아래 경로는 다른 라우트가 맡는다(openapi 꼴 경로 값)", () => {
+  const openapi = openapiOf({
+    '/v1/events/{eventId}': 'GET',
+    '/v1/events/{eventId}/holds': 'POST',
+    '/v1/events/{eventId}/seatmap-snapshot': 'GET',
+  });
+  const sources = {
+    'gw-fan': [
+      exactSource(sourceRoute('gw-fan', 'gw-fan-api', [{ prefixes: ['/v1/events/{eventId}'], backend: 'core-svc' }])),
+      sourceRoute('gw-fan', 'gw-fan-buy', [{ prefixes: ['/v1/events/{eventId}/holds', '/v1/events/{eventId}/seatmap-snapshot'], backend: 'purchase-svc' }]),
+    ],
+  };
+  const routes = apiRoutes(routesByGateway(generated(openapi, sources).files)['gw-fan'], 'gw-fan');
+  const from = (name) => routes.filter((r) => r.metadata?.labels?.[ROUTE_LABEL] === name);
+  const host = 'api.peaket.example';
+  assert.deepEqual([...allowedByRoutes(from('gw-fan-api'), host, '/v1/events/e1')].sort(), ['GET', 'OPTIONS'], 'gw-fan-api가 /v1/events/{eventId}를 맡는다');
+  for (const p of ['/v1/events/e1/holds', '/v1/events/e1/seatmap-snapshot', '/v1/events/e1/x']) assert.equal(allowedByRoutes(from('gw-fan-api'), host, p).size, 0, `Exact 원천(gw-fan-api)이 그 아래 ${p}를 맡는다`);
+  assert.deepEqual([...allowedByRoutes(from('gw-fan-buy'), host, '/v1/events/e1/holds')].sort(), ['OPTIONS', 'POST'], 'gw-fan-buy가 holds를 맡는다');
+  assert.equal(allowedByRoutes(from('gw-fan-buy'), host, '/v1/events/e1').size, 0, 'gw-fan-buy가 /v1/events/{eventId}를 맡는다');
+  for (const r of from('gw-fan-api')) for (const rule of rulesOf(r)) assert.deepEqual(rule.backendRefs, [{ name: 'core-svc', port: 8080 }]);
+  for (const r of from('gw-fan-buy')) for (const rule of rulesOf(r)) assert.deepEqual(rule.backendRefs, [{ name: 'purchase-svc', port: 8080 }]);
+  assertMethodsExact(openapi, routesByGateway(generated(openapi, sources).files)['gw-fan'], 'gw-fan');
+});
+
+test("HOT-410 infra §4.1 '생성기가 멈추는 경우' Exact 원천 맞춤과 PathPrefix 원천 맞춤이 한 경로를 함께 맡으면 2로 끝나고 그 경로를 보인다", () => {
+  const openapi = openapiOf({ '/v1/events/{eventId}': 'GET', '/v1/events/{eventId}/holds': 'POST' });
+  const sources = {
+    'gw-fan': [
+      exactSource(sourceRoute('gw-fan', 'gw-fan-api', [{ prefixes: ['/v1/events/{eventId}'], backend: 'core-svc' }])),
+      sourceRoute('gw-fan', 'gw-fan-buy', [{ prefixes: ['/v1/events'], backend: 'purchase-svc' }]),
+    ],
+  };
+  assertStops(openapi, sources, '/v1/events/{eventId}');
+});
+
+test("HOT-410 infra §4.1 '생성기가 멈추는 경우' Exact 원천 맞춤이 계약 경로가 아니면(맡는 경로가 없으면) 2로 끝나고 그 경로를 보인다", () => {
+  const openapi = openapiOf({ '/v1/events/{eventId}': 'GET' });
+  const sources = {
+    'gw-fan': [
+      sourceRoute('gw-fan', 'gw-fan-api', [{ prefixes: ['/v1/events/{eventId}'], backend: 'core-svc' }]),
+      exactSource(sourceRoute('gw-fan', 'gw-fan-buy', [{ prefixes: ['/v1/events/{eventId}/no-such'], backend: 'purchase-svc' }])),
+    ],
+  };
+  assertStops(openapi, sources, '/v1/events/{eventId}/no-such');
+});
+
 test("HOT-410 infra §4.1 '생성기가 멈추는 경우' /internal/로 시작하는 경로를 맡으면 2로 끝난다", () => {
   const openapi = openapiOf({ '/v1/partner/events/{eventId}': 'PATCH', '/internal/jwks/admin.json': { methods: 'GET', servers: ['https://partner-api.peaket.example'] } });
   const sources = {

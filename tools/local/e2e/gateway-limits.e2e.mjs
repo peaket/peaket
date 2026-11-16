@@ -34,6 +34,26 @@ let c;
 let n = 0;
 const nextSub = () => `lim-${RUN}-${++n}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** 포트 전달이 끊긴 꼴의 연결 오류(Windows kubectl 포트 전달, 2026-11-16 kind 실측) */
+const CONN_ERROR = /ECONNREFUSED|ECONNRESET|EPIPE|socket hang up|시간 넘김/;
+/**
+ * 시험이 설정을 바꾼 뒤(정책 적용·복제 줄이기)에만 쓴다: 연결 오류를 던지지 않고 { connError }로 돌려준다.
+ * 부르는 쪽은 연결 오류를 통과로 세지 않고 '아직'으로 보고 기다린다. 판정 요청(한도 넘기기 등)에는 쓰지 않는다(BAT-055 시험 이의 (라) 판단)
+ */
+async function sendOrConnError(hostKey, req) {
+  try {
+    return await send(c, hostKey, req);
+  } catch (e) {
+    if (CONN_ERROR.test(`${e?.code ?? ''} ${e?.message ?? ''}`)) return { connError: e };
+    throw e;
+  }
+}
+/**
+ * 한도를 넘기는 몰아 보내기의 동시 수. BAT-055 시험 이의 (라) 판단대로 정본 판정 값(초당 100건, 400건)은 두고 동시 수만 50에서 줄였다
+ * (동시 50에서 포트 전달이 ECONNRESET으로 끊겼다, 2026-11-16 실측). 4로는 초당 100건을 넘기지 못해(요청 하나 약 0.1초) 429가 나지 않으므로 20이다.
+ * 끊기면 다시 보내지 않고 ECONNRESET으로 실패한다(끊김이 통과로 새지 않게)
+ */
+const FLOOD_WIDTH = 20;
 const HEX32 = /^[0-9a-f]{32}$/;
 const NS = () => c.logs?.namespace ?? 'envoy-gateway-system';
 
@@ -126,7 +146,7 @@ test('D-T43 ① 없는 경로 404(다섯 게이트웨이 각각)·본문 상한 
   const big = await send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/portone', headers: edge(c, '203.0.113.44', { 'content-type': 'application/json' }), body: 'a'.repeat(WEBHOOK_BODY_BYTES + 1) });
   assertGatewayProblem(big, 413, '웹훅 65,537바이트');
   // 429: 한 IP로 웹훅에 한도를 넘겨 보낸다
-  const flood = await pool(400, 50, () => send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/toss', headers: edge(c, '198.51.100.93', { 'content-type': 'application/json' }), body: '{}' }));
+  const flood = await pool(400, FLOOD_WIDTH, () => send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/toss', headers: edge(c, '198.51.100.93', { 'content-type': 'application/json' }), body: '{}' }));
   const limited = flood.filter((r) => r.status === 429);
   assert.ok(limited.length > 0, '웹훅 400건에 429가 없다');
   assertGatewayProblem(limited[0], 429, '웹훅 IP 한도 429');
@@ -173,7 +193,7 @@ test('D-T50 ⑥ 한 IP로 /v1/webhooks/toss에 초당 100건을 넘기면 429이
     ['2001:db8:91::1', '2001:db8:92::1'],
   ]) {
     const t0 = Date.now();
-    const results = await pool(400, 50, () => send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/toss', headers: edge(c, ip, { 'content-type': 'application/json' }), body: '{}' }));
+    const results = await pool(400, FLOOD_WIDTH, () => send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/toss', headers: edge(c, ip, { 'content-type': 'application/json' }), body: '{}' }));
     const seconds = (Date.now() - t0) / 1000;
     const passed = results.filter((r) => r.status !== 429);
     const limited = results.filter((r) => r.status === 429);
@@ -292,11 +312,20 @@ async function scannerOverridePolicy() {
   return hits[0];
 }
 /** 없는 경로 404를 받아 본문 traceId가 X-Trace-Id와 같아질 때까지 기다린다(정책이 퍼지는 데 몇 초 걸린다) */
-async function bodyTraceMatches(label, timeoutMs = 30_000) {
+async function bodyTraceMatches(label, timeoutMs = 45_000) {
   const until = Date.now() + timeoutMs;
-  let last;
+  let last = { status: 0, headers: {}, text: '(응답 없음)' };
   for (;;) {
-    last = await send(c, 'scanner-api', { path: `/v1/zz-poc-${RUN}`, headers: { 'x-forwarded-for': '203.0.113.48' } });
+    // 정책을 바꾸면 Envoy 설정이 바뀌어 Windows kubectl 포트 전달이 끊기고 포트 전달 도구가 1초 뒤 다시 띄운다(2026-11-16 kind 실측).
+    // 그동안의 연결 오류는 '아직'으로 보고 기다린다. 연결 오류는 통과가 되지 않는다(본문이 맞아야만 통과)
+    const r = await sendOrConnError('scanner-api', { path: `/v1/zz-poc-${RUN}`, headers: { 'x-forwarded-for': '203.0.113.48' } });
+    if (r.connError) {
+      last = { status: 0, headers: {}, text: `(연결 오류 ${r.connError.code ?? r.connError.message})` };
+      if (Date.now() > until) return { ok: false, last, label };
+      await sleep(2000);
+      continue;
+    }
+    last = r;
     let body = {};
     try {
       body = JSON.parse(last.text);
@@ -354,8 +383,13 @@ test('D-T43 ④ PoC: responseOverride 본문의 %TRACE_ID%(안 되면 EnvoyPatch
     }
   }
   // 되돌린 뒤 기본 본문(traceId 없음)으로 돌아온다
-  const back = await send(c, 'scanner-api', { path: `/v1/zz-poc-${RUN}-after`, headers: { 'x-forwarded-for': '203.0.113.49' } });
-  t.diagnostic(`되돌린 뒤 본문: ${back.text.slice(0, 200)}`);
+  // 되돌린 적용도 포트 전달을 끊을 수 있어 연결 오류면 잠깐 기다려 다시 본다(기록만 한다)
+  let back = { connError: true };
+  for (let i = 0; i < 15 && back.connError; i++) {
+    back = await sendOrConnError('scanner-api', { path: `/v1/zz-poc-${RUN}-after`, headers: { 'x-forwarded-for': '203.0.113.49' } });
+    if (back.connError) await sleep(2000);
+  }
+  t.diagnostic(`되돌린 뒤 본문: ${back.connError ? '(연결 오류가 이어졌다)' : back.text.slice(0, 200)}`);
   assert.ok(results.responseOverride || results.envoyPatchPolicy, `두 판 모두 본문에 trace-id가 실리지 않았다(${JSON.stringify(results)}). 계획 '시험 이의'에 적는다`);
 });
 
@@ -399,11 +433,12 @@ test('D-T50 ③ 레이트 리밋 서비스 복제를 0으로 줄이면 같은 �
       assert.ok(Date.now() < until, '레이트 리밋 서비스 파드가 40초 안에 내려가지 않았다');
       await sleep(1000);
     }
-    // 판정을 받지 못하면 통과한다(열림). 파드가 빠진 뒤 연결이 끊기기까지 몇 번 더 보낸다
+    // 판정을 받지 못하면 통과한다(열림). 파드가 빠진 뒤 연결이 끊기기까지 몇 번 더 보낸다.
+    // 이 사이 포트 전달 연결 오류는 '아직'으로 보고 다시 보낸다(연결 오류는 통과로 세지 않는다. 통과는 대역 백엔드 응답일 때만)
     let passed = null;
     for (let i = 0; i < 10 && !passed; i++) {
-      const r = await send(c, 'api', { path: FAN_IDENTITY_PATH, headers: fanHeaders(sub, '198.51.100.96') });
-      if (r.status < 400) passed = r;
+      const r = await sendOrConnError('api', { path: FAN_IDENTITY_PATH, headers: fanHeaders(sub, '198.51.100.96') });
+      if (!r.connError && r.status < 400) passed = r;
       else await sleep(1000);
     }
     assert.equal(minuteOf(), minute, '분 창 경계를 넘었다(새 창이라 통과한 것과 가를 수 없다. 다시 하지 않고 실패로 본다)');
