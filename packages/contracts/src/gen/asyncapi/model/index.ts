@@ -10,6 +10,7 @@ export * from './accountWithdrawn.zod.js';
 export * from './behaviorSignal.zod.js';
 export * from './caseRequested.zod.js';
 export * from './commandAck.zod.js';
+export * from './dataAccessed.zod.js';
 export * from './eventSaleChanged.zod.js';
 export * from './holdAttempt.zod.js';
 export * from './investigationRequest.zod.js';

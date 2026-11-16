@@ -24,12 +24,15 @@ import {
   type TakedownRecord,
   validateReport,
   validateReviewWrite,
+  withdrawalRecheckAt,
 } from '../domain/review.js';
 import type { FanProfile, ReviewCaseSink, ReviewEligibility, ReviewEvent, ReviewEventDirectory, ReviewNotifier, ReviewStore } from '../domain/ports.js';
 import { ReviewEligibilityUnavailable } from '../domain/ports.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** 탈퇴 후기 다시 정리 한 번에 잡는 예약 수 100개 [가정](docs/features/identity.md §8 '다시 정리') */
+const WITHDRAWAL_RECHECK_BATCH = 100;
 
 export interface ReviewServiceDeps {
   readonly store: ReviewStore;
@@ -64,6 +67,13 @@ const reportLimited = (retryAfterSeconds: number) => new ProblemError({ type: 'r
 const eligibilityUnavailable = () => new ProblemError({ type: 'review-eligibility-unavailable', status: 503, title: '후기 자격을 잠시 확인할 수 없습니다', retryAfterSeconds: 5 });
 const hiddenByNotice = () => new ProblemError({ type: 'review-hidden-by-notice', status: 409, title: '통보로 가린 후기는 고칠 수 없습니다' });
 const eventNotFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
+const invalidAccount = () => new ReviewProblem('review-invalid', 422, '계정 ID가 올바르지 않습니다');
+
+/** 살아 있는 후기(VISIBLE·HIDDEN)의 별점·지문. 파기한 행(DELETED)에서만 null이라 여기서 null이면 없는 후기로 본다(review_live_complete_check) */
+const live = (r: ReviewRecord): { rating: number; contentFingerprint: string } => {
+  if (r.status === 'DELETED' || r.rating === null || r.contentFingerprint === null) throw notFound();
+  return { rating: r.rating, contentFingerprint: r.contentFingerprint };
+};
 
 type EventInfo = Omit<ReviewEvent, 'rounds'> & { readonly rounds: ReadonlyMap<string, number> };
 
@@ -201,6 +211,7 @@ export class Reviews {
       const r = await this.d.store.findReview(reviewId);
       if (!r || r.status !== 'VISIBLE') throw notFound();
       if (r.accountId === reporterAccountId) throw selfReport();
+      const { contentFingerprint: fingerprint } = live(r);
       const v = validateReport(input);
       if (await this.d.store.findReportByTargetReporter(reviewId, reporterAccountId)) throw alreadyReported();
       const now = this.d.clock.now();
@@ -219,7 +230,7 @@ export class Reviews {
         createdAtMs: now,
         purgeAtMs: now + 365 * DAY_MS,
       };
-      const hide = v.category === 'ILLEGAL_FILMING' ? { status: 'HIDDEN' as const, takedown: this.#takedown(reviewId, 'FILMING_HOLD', r.contentFingerprint, now) } : undefined;
+      const hide = v.category === 'ILLEGAL_FILMING' ? { status: 'HIDDEN' as const, takedown: this.#takedown(reviewId, 'FILMING_HOLD', fingerprint, now) } : undefined;
       try {
         await this.d.store.insertReport(report, hide);
       } catch (e) {
@@ -239,19 +250,20 @@ export class Reviews {
       if (!UUID.test(reviewId)) throw notFound();
       const r = await this.d.store.findReview(reviewId);
       if (!r || r.status === 'DELETED') throw notFound();
+      const { contentFingerprint: fingerprint } = live(r);
       const now = this.d.clock.now();
       const effect = moderationEffect(input, now);
       await this.d.store.moderate(reviewId, {
         ...(effect.status !== undefined ? { status: effect.status } : {}),
         ...(effect.notice !== undefined ? { notice: effect.notice } : {}),
         ...(effect.noticeUntilMs !== undefined ? { noticeUntilMs: effect.noticeUntilMs } : {}),
-        ...(effect.takedown ? { takedown: this.#takedown(reviewId, effect.takedown.reason, r.contentFingerprint, now, effect.takedown.endsAtMs) } : {}),
+        ...(effect.takedown ? { takedown: this.#takedown(reviewId, effect.takedown.reason, fingerprint, now, effect.takedown.endsAtMs) } : {}),
         restoreTakedowns: effect.restoreTakedowns,
         outcome: effect.outcome,
         nowMs: now,
       });
       // 같은 지문에 다른 통보가 살아 있으면 지문을 지우지 않는다(하나를 풀었다고 같은 내용 차단이 풀리면 안 된다)
-      if (effect.restoreTakedowns && !(await this.d.store.hasActiveNoticeFingerprint(r.contentFingerprint))) await this.d.store.removeHiddenFingerprint(r.contentFingerprint);
+      if (effect.restoreTakedowns && !(await this.d.store.hasActiveNoticeFingerprint(fingerprint))) await this.d.store.removeHiddenFingerprint(fingerprint);
       const updated = (await this.d.store.findReview(reviewId))!;
       await this.d.notifier.moderationApplied(updated, input.action, input.reason);
       return { applied: true };
@@ -281,6 +293,7 @@ export class Reviews {
       if (!UUID.test(reviewId)) throw notFound();
       const r = await this.d.store.findReview(reviewId);
       if (!r || r.status === 'DELETED') throw notFound();
+      const { rating } = live(r);
       const reports = await this.d.store.reportsByTarget(reviewId);
       const byCategory: Record<string, number> = {};
       for (const x of reports) byCategory[x.category] = (byCategory[x.category] ?? 0) + 1;
@@ -288,7 +301,7 @@ export class Reviews {
         review: {
           reviewId: r.reviewId,
           eventId: r.eventId,
-          rating: r.rating,
+          rating,
           body: r.body,
           status: r.status,
           ...(r.notice !== undefined ? { notice: r.notice } : {}),
@@ -306,32 +319,41 @@ export class Reviews {
     });
   }
 
-  /** 탈퇴·파기 계정의 후기에서 계정·주문 참조를 익명화한다(법정 보존이 필요한 본문·평점은 남긴다) */
-  async anonymizeAccount(accountId: string): Promise<{ anonymized: number }> {
-    if (!UUID.test(accountId)) throw new ReviewProblem('review-invalid', 422, '계정 ID가 올바르지 않습니다');
-    const anonymized = await this.d.store.anonymizeByAccount(accountId, this.d.clock.now());
-    return { anonymized };
+  // 탈퇴 후기 파기와 다시 정리(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278, docs/features/identity.md §8 '후기 파기'·'다시 정리').
+  // 파기 칸은 docs/data.md §2 '후기 파기'다(본문·별점·내용 지문을 비우고 DELETED, 계정·주문 참조는 후기 ID로). 상태가 DELETED라 목록·요약·상세에서 빠진다.
+
+  /**
+   * 손으로 다시 하는 길(내부 경로 POST /internal/v1/reviews/accounts/{accountId}/purge). 다시 정리 예약은 만들지 않는다(사건을 잃었을 때 나중에 하는 길이다).
+   * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
+   */
+  async purgeAccount(accountId: string): Promise<{ purged: number }> {
+    if (!UUID.test(accountId)) throw invalidAccount();
+    const purged = await this.d.store.purgeByAccount(accountId.toLowerCase(), this.d.clock.now());
+    return { purged };
   }
 
-  // 뼈대(W8-audit2a 시험 단계): 아래 넷은 이름과 모양만 더했다. 구현 담당이 채우고 anonymizeAccount를 뺀다(docs/features/identity.md §8 '후기 파기').
-  /** 손으로 다시 하는 길(내부 경로). UUID가 아니면 ReviewProblem('review-invalid', 422). 다시 정리 예약은 만들지 않는다 */
-  async purgeAccount(_accountId: string): Promise<{ purged: number }> {
-    throw new Error('아직 없음');
+  /**
+   * 탈퇴 사건 처리: 그 계정 후기를 파기하고, 같은 트랜잭션에 다시 정리 예약(min(withdrawnAt, 지금) + 16분)을 쓴다.
+   * 탈퇴 전에 받은 액세스 토큰(최대 15분)으로 그 뒤에 쓴 후기를 예약 시각에 다시 파기하려는 것이다.
+   * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
+   * @throws Error 탈퇴 시각을 읽지 못함(파기도 예약도 하지 않는다)
+   */
+  async purgeWithdrawn(e: { accountId: string; withdrawnAt: string }): Promise<{ purged: number }> {
+    if (!UUID.test(e.accountId)) throw invalidAccount();
+    const nowMs = this.d.clock.now();
+    const recheckAtMs = withdrawalRecheckAt(e.withdrawnAt, nowMs);
+    const purged = await this.d.store.purgeWithdrawnAccount(e.accountId.toLowerCase(), { nowMs, recheckAtMs });
+    return { purged };
   }
 
-  /** 탈퇴 사건 처리: UUID 확인 → purgeWithdrawnAccount(accountId, { nowMs, recheckAtMs: withdrawalRecheckAt(withdrawnAt, nowMs) }) */
-  async purgeWithdrawn(_e: { accountId: string; withdrawnAt: string }): Promise<{ purged: number }> {
-    throw new Error('아직 없음');
+  /** 다시 정리 반복 한 번의 몸통: 때가 된 예약을 limit개(기본 100 [가정])까지 잡아 그 계정을 다시 파기하고 예약을 지운다 */
+  async runWithdrawalRechecks(limit: number = WITHDRAWAL_RECHECK_BATCH): Promise<{ accounts: number; purged: number }> {
+    return this.d.store.runDueRechecks(this.d.clock.now(), limit);
   }
 
-  /** 다시 정리 반복 한 번의 몸통(기본 100개 [가정]) */
-  async runWithdrawalRechecks(_limit?: number): Promise<{ accounts: number; purged: number }> {
-    throw new Error('아직 없음');
-  }
-
-  /** 가장 오래 밀린 다시 정리 예약의 지난 시간(ms) */
+  /** 가장 오래 밀린 다시 정리 예약이 예약 시각을 넘긴 시간(ms). 없거나 밀리지 않았으면 0 */
   async oldestOverdueRecheckMs(): Promise<number> {
-    throw new Error('아직 없음');
+    return this.d.store.oldestOverdueRecheckMs(this.d.clock.now());
   }
 
   async #event(eventId: string): Promise<EventInfo> {

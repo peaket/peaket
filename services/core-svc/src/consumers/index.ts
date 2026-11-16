@@ -18,7 +18,7 @@ export type CoreKafkaConfig = { enabled: false; warning: string } | { enabled: t
 
 /**
  * PEAKET_KAFKA_BROKERS가 없거나 빈칸뿐이면 local·ci만 꺼진 설정, 그 밖(값 없음 포함)은 PlatformConfigError. 틀린 조각은 몇 번째인지만 알린다(queue-svc와 같은 규칙).
- * 운영에서 소비자 없이 뜨면 탈퇴한 계정의 후기가 조용히 익명화되지 않는다(법정 파기 의무, docs/features/identity.md §8)
+ * 운영에서 소비자 없이 뜨면 탈퇴한 계정의 후기가 조용히 파기되지 않는다(법정 파기 의무, docs/features/identity.md §8)
  * @throws PlatformConfigError 위의 시작 실패, kafkaAuthFromEnv의 오류
  */
 export function kafkaConsumersFromEnv(env: Record<string, string | undefined>): CoreKafkaConfig {
@@ -26,7 +26,7 @@ export function kafkaConsumersFromEnv(env: Record<string, string | undefined>): 
   const peaketEnv = env.PEAKET_ENV;
   if (!raw) {
     if (peaketEnv !== undefined && KAFKA_OPTIONAL_ENVS.includes(peaketEnv)) {
-      return { enabled: false, warning: `PEAKET_KAFKA_BROKERS가 없어 Kafka 소비자(탈퇴 사건의 후기 익명화)를 켜지 않았다(PEAKET_ENV=${peaketEnv}에서만 허락한다)` };
+      return { enabled: false, warning: `PEAKET_KAFKA_BROKERS가 없어 Kafka 소비자(탈퇴 사건의 후기 파기)를 켜지 않았다(PEAKET_ENV=${peaketEnv}에서만 허락한다)` };
     }
     throw new PlatformConfigError(`PEAKET_KAFKA_BROKERS가 없다(PEAKET_ENV=${peaketEnv || '(없음)'}에서는 Kafka 소비자가 있어야 한다. local·ci만 없이 뜬다)`);
   }

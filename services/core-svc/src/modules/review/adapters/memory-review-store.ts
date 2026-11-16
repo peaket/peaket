@@ -1,6 +1,6 @@
 // 메모리 후기 저장소(단위 시험). 운영은 adapters/db/drizzle-review-store.ts를 쓴다.
 import { randomUUID } from 'node:crypto';
-import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from '../domain/review.js';
+import { purgedReview, type ReportRecord, type ReviewRecord, type ReviewSort, type TakedownRecord } from '../domain/review.js';
 import type { ReportSummary, ReviewListInput, ReviewListResult, ReviewStore } from '../domain/ports.js';
 
 interface Cursor {
@@ -9,7 +9,9 @@ interface Cursor {
   readonly r: number;
 }
 
-const encodeCursor = (r: ReviewRecord): string => Buffer.from(JSON.stringify({ t: r.createdAtMs, i: r.reviewId, r: r.rating }), 'utf8').toString('base64url');
+// 별점이 null인 행(파기한 행, DELETED)은 목록에 오지 않는다. 0으로 셈하는 것은 타입을 맞추려는 것뿐이다
+const ratingOf = (r: ReviewRecord): number => r.rating ?? 0;
+const encodeCursor = (r: ReviewRecord): string => Buffer.from(JSON.stringify({ t: r.createdAtMs, i: r.reviewId, r: ratingOf(r) }), 'utf8').toString('base64url');
 const decodeCursor = (raw: string | undefined): Cursor | undefined => {
   if (!raw) return undefined;
   try {
@@ -33,16 +35,16 @@ const afterCursor = (r: ReviewRecord, c: Cursor | undefined, sort: ReviewSort): 
   if (!c) return true;
   if (sort === 'LATEST') return r.createdAtMs < c.t || (r.createdAtMs === c.t && r.reviewId < c.i);
   if (sort === 'RATING_DESC') {
-    if (r.rating !== c.r) return r.rating < c.r;
+    if (ratingOf(r) !== c.r) return ratingOf(r) < c.r;
     return r.createdAtMs < c.t || (r.createdAtMs === c.t && r.reviewId < c.i);
   }
-  if (r.rating !== c.r) return r.rating > c.r;
+  if (ratingOf(r) !== c.r) return ratingOf(r) > c.r;
   return r.createdAtMs < c.t || (r.createdAtMs === c.t && r.reviewId < c.i);
 };
 
 const compare = (a: ReviewRecord, b: ReviewRecord, sort: ReviewSort): number => {
-  if (sort === 'RATING_DESC' && a.rating !== b.rating) return b.rating - a.rating;
-  if (sort === 'RATING_ASC' && a.rating !== b.rating) return a.rating - b.rating;
+  if (sort === 'RATING_DESC' && ratingOf(a) !== ratingOf(b)) return ratingOf(b) - ratingOf(a);
+  if (sort === 'RATING_ASC' && ratingOf(a) !== ratingOf(b)) return ratingOf(a) - ratingOf(b);
   return b.createdAtMs - a.createdAtMs || b.reviewId.localeCompare(a.reviewId);
 };
 
@@ -51,7 +53,7 @@ export class MemoryReviewStore implements ReviewStore {
   readonly reports = new Map<string, ReportRecord>();
   readonly takedowns = new Map<string, TakedownRecord>();
   readonly hiddenFingerprints = new Set<string>();
-  /** 다시 정리 예약(review_withdrawal_recheck): 계정 ID → 예약 시각·만든 시각. 뼈대(W8-audit2a 시험 단계): 칸만 더했다 */
+  /** 다시 정리 예약(review_withdrawal_recheck): 계정 ID → 예약 시각·만든 시각(docs/data.md §2 '다시 정리 예약') */
   readonly rechecks = new Map<string, { dueAtMs: number; createdAtMs: number }>();
 
   async insertReview(r: ReviewRecord): Promise<void> {
@@ -77,7 +79,8 @@ export class MemoryReviewStore implements ReviewStore {
   async softDeleteReview(reviewId: string, nowMs: number): Promise<void> {
     const r = this.reviews.get(reviewId);
     if (!r) return;
-    this.reviews.set(reviewId, { ...r, status: 'DELETED', body: '', rating: 0, authorDisplay: '***', updatedAtMs: nowMs });
+    // 작성자 지우기도 탈퇴 파기와 같은 칸을 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧)
+    this.reviews.set(reviewId, purgedReview(r, nowMs));
   }
 
   async listReviews(input: ReviewListInput): Promise<ReviewListResult> {
@@ -133,43 +136,55 @@ export class MemoryReviewStore implements ReviewStore {
     let applied = 0;
     for (const reviewId of i.reviewIds) {
       const r = this.reviews.get(reviewId);
-      if (!r || r.status === 'DELETED') continue;
+      if (!r || r.status === 'DELETED' || r.contentFingerprint === null) continue;
+      const fingerprint = r.contentFingerprint;
       const already = [...this.takedowns.values()].some((t) => t.noticeId === i.noticeId && t.reviewId === reviewId && t.restoredAtMs === undefined);
       if (already) continue;
       const takedownId = randomUUID();
       this.reviews.set(reviewId, { ...r, status: 'HIDDEN', notice: undefined, noticeUntilMs: undefined, updatedAtMs: i.nowMs });
-      this.takedowns.set(takedownId, { takedownId, noticeId: i.noticeId, reviewId, reason: 'NOTICE', contentFingerprint: r.contentFingerprint, hiddenAtMs: i.nowMs });
-      this.hiddenFingerprints.add(r.contentFingerprint);
+      this.takedowns.set(takedownId, { takedownId, noticeId: i.noticeId, reviewId, reason: 'NOTICE', contentFingerprint: fingerprint, hiddenAtMs: i.nowMs });
+      this.hiddenFingerprints.add(fingerprint);
       applied += 1;
     }
     return { applied };
   }
 
-  async anonymizeByAccount(accountId: string, nowMs: number): Promise<number> {
-    let anonymized = 0;
+  async purgeByAccount(accountId: string, nowMs: number): Promise<number> {
+    let purged = 0;
     for (const [id, r] of this.reviews) {
       if (r.accountId !== accountId) continue;
-      this.reviews.set(id, { ...r, accountId: r.reviewId, basisOrderId: r.reviewId, authorDisplay: '탈퇴한 사용자', updatedAtMs: nowMs });
-      anonymized += 1;
+      this.reviews.set(id, purgedReview(r, nowMs));
+      purged += 1;
     }
-    return anonymized;
+    return purged;
   }
 
-  // 뼈대(W8-audit2a 시험 단계): 아래 넷은 구현 담당이 채운다
-  async purgeByAccount(_accountId: string, _nowMs: number): Promise<number> {
-    throw new Error('아직 없음');
+  async purgeWithdrawnAccount(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<number> {
+    const purged = await this.purgeByAccount(accountId, o.nowMs);
+    // 같은 계정 예약이 있으면 늦은 예약 시각을 남긴다(만든 시각은 처음 값)
+    const before = this.rechecks.get(accountId);
+    this.rechecks.set(accountId, before ? { ...before, dueAtMs: Math.max(before.dueAtMs, o.recheckAtMs) } : { dueAtMs: o.recheckAtMs, createdAtMs: o.nowMs });
+    return purged;
   }
 
-  async purgeWithdrawnAccount(_accountId: string, _o: { nowMs: number; recheckAtMs: number }): Promise<number> {
-    throw new Error('아직 없음');
+  async runDueRechecks(nowMs: number, limit: number): Promise<{ accounts: number; purged: number }> {
+    // 예약 시각 차례(docs/data.md §5.1 'ORDER BY due_at'), 예약 시각 정각도 때가 됐다
+    const due = [...this.rechecks.entries()]
+      .filter(([, v]) => v.dueAtMs <= nowMs)
+      .sort((a, b) => a[1].dueAtMs - b[1].dueAtMs || a[0].localeCompare(b[0]))
+      .slice(0, limit);
+    let purged = 0;
+    for (const [accountId] of due) {
+      purged += await this.purgeByAccount(accountId, nowMs);
+      this.rechecks.delete(accountId);
+    }
+    return { accounts: due.length, purged };
   }
 
-  async runDueRechecks(_nowMs: number, _limit: number): Promise<{ accounts: number; purged: number }> {
-    throw new Error('아직 없음');
-  }
-
-  async oldestOverdueRecheckMs(_nowMs: number): Promise<number> {
-    throw new Error('아직 없음');
+  async oldestOverdueRecheckMs(nowMs: number): Promise<number> {
+    let oldest: number | undefined;
+    for (const v of this.rechecks.values()) if (oldest === undefined || v.dueAtMs < oldest) oldest = v.dueAtMs;
+    return oldest === undefined ? 0 : Math.max(0, nowMs - oldest);
   }
 
   async insertTakedown(t: TakedownRecord): Promise<void> {

@@ -169,6 +169,13 @@
       "when": 1794789200000,
       "tag": "0023_search_read_model_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794811994338,
+      "tag": "0026_review_purge_recheck",
+      "breakpoints": true
     }
   ]
 }

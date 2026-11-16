@@ -1,5 +1,5 @@
-// identity.accounts-withdrawn 사건 처리기: 탈퇴한 계정의 후기에서 계정·주문 참조를 끊는다(W7-audit COV2-06, docs/features/identity.md §8 '후기 익명화',
-// docs/streaming.md §2.6 'core-svc 소비자', asyncapi consumeAccountWithdrawn). 플랫폼 키 단위 소비자(KeyedHandler)에 꽂는 면이다.
+// identity.accounts-withdrawn 사건 처리기: 탈퇴한 계정의 후기를 파기하고 탈퇴 시각 + 16분의 다시 정리 예약을 쓴다(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278,
+// docs/features/identity.md §8 '후기 파기'·'다시 정리', docs/streaming.md §2.6 'core-svc 소비자', asyncapi consumeAccountWithdrawn). 플랫폼 키 단위 소비자(KeyedHandler)에 꽂는 면이다.
 // 업무 키는 계정 ID, 중복 제거 키는 eventKey다. core는 eventKey·accountId·withdrawnAt만 읽고 pid·purgeBy는 읽지 않는다(data-classification '탈퇴 사건의 pid 사본').
 // 값 해독은 AccountWithdrawnCodec이다: Avro(Confluent 형식)는 BAS-030이 만든다. 지금은 JSON 대역뿐이다. Kafka 구독 실행은 src/consumers다.
 import { AccountWithdrawn } from '@peaket/contracts/asyncapi';
@@ -72,12 +72,11 @@ export class ReviewAccountWithdrawnHandler implements KeyedHandler<ReviewWithdra
   }
 
   /**
-   * reviews.purgeWithdrawn({ accountId, withdrawnAt })를 기다린다. 로그에는 eventKey와 purged 수만(계정 ID 없음). 저장소 일시 장애는 그대로 던져 파티션을 멈춘다.
-   * 뼈대(W8-audit2a 시험 단계): 구현 담당이 채운다(docs/features/identity.md §8 '후기 파기'·'다시 정리')
+   * reviews.purgeWithdrawn({ accountId, withdrawnAt })를 기다린다(예약 시각은 처리 시각이 아니라 사건의 탈퇴 시각 기준). 로그에는 eventKey와 purged 수만(계정 ID 없음).
+   * 저장소 일시 장애는 그대로 던져 파티션을 멈춘다(조용히 넘기면 플랫폼이 처리한 것으로 커밋한다)
    */
-  async handle(_e: ReviewWithdrawnEvent): Promise<void> {
-    void this.reviews;
-    void this.o;
-    throw new Error('아직 없음');
+  async handle(e: ReviewWithdrawnEvent): Promise<void> {
+    const { purged } = await this.reviews.purgeWithdrawn({ accountId: e.accountId, withdrawnAt: e.withdrawnAt });
+    this.o.logger?.info({ kind: 'review-withdrawn-purge', eventKey: e.eventKey, purged }, '탈퇴 계정 후기를 파기하고 다시 정리를 예약했다');
   }
 }

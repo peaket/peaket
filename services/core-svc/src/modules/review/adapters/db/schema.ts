@@ -1,5 +1,6 @@
 // review 모듈 표(BUILD_ORDER BAT-585, docs/data.md `review`·`content_report`·`takedown_action`, ADR-0066).
 // 스키마 원본은 migrations/0013_review.sql이다. 후기 사진(review_image)은 사진 올리기 단계가 더한다.
+// 0026(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278): 파기한 행의 별점·내용 지문 NULL, 살아 있는 행 CHECK(NOT VALID), 다시 정리 예약 표.
 import { sql } from 'drizzle-orm';
 import { boolean, check, index, pgTable, smallint, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
@@ -12,14 +13,15 @@ export const review = pgTable(
     eventId: uuid('event_id').notNull(),
     accountId: uuid('account_id').notNull(),
     basisOrderId: uuid('basis_order_id').notNull(),
-    rating: smallint('rating').notNull(),
+    /** 파기한 행(DELETED)에서만 NULL(docs/data.md §2 '후기 파기'). 살아 있는 행은 review_live_complete_check가 막는다 */
+    rating: smallint('rating'),
     body: text('body').notNull(),
     status: text('status').notNull().default('VISIBLE'),
     /** 신고 처리로 가린 경우에만 RIGHTS_TEMP·POLICY. 통보·같은 내용·불법 촬영물 가림은 NULL이다 */
     notice: text('notice'),
     noticeUntil: at('notice_until'),
-    /** NFKC 뒤 공백·문장부호를 지운 본문의 SHA-256(같은 내용 자동 가림, POL-024 2호 마목) */
-    contentFingerprint: text('content_fingerprint').notNull(),
+    /** NFKC 뒤 공백·문장부호를 지운 본문의 SHA-256(같은 내용 자동 가림, POL-024 2호 마목). 파기한 행(DELETED)에서만 NULL */
+    contentFingerprint: text('content_fingerprint'),
     /** 작성자 표시(닉네임 첫 글자 + '**'). identity 팬 프로필 조회가 생기기 전에는 '***'다 */
     authorDisplay: text('author_display').notNull(),
     /** 팬이 고친 적이 있으면 true. 운영자 조치와 구분한다 */
@@ -32,12 +34,14 @@ export const review = pgTable(
     check('review_rating_check', sql`${t.rating} between 1 and 5`),
     check('review_status_check', sql`${t.status} in ('VISIBLE', 'HIDDEN', 'DELETED')`),
     check('review_notice_check', sql`${t.notice} is null or ${t.notice} in ('RIGHTS_TEMP', 'POLICY')`),
+    // 살아 있는 행은 별점·지문이 있다(0026에서 NOT VALID로 더함. VALIDATE는 다음 출시, docs/data.md §2 '후기 파기' 마이그레이션 나눔)
+    check('review_live_complete_check', sql`${t.status} = 'DELETED' or (${t.rating} is not null and ${t.contentFingerprint} is not null)`),
     // 지운 후기는 같은 회차에 다시 쓸 수 있으므로 부분 유일 인덱스다(POL-042 ②)
     uniqueIndex('review_event_account_uq').on(t.eventId, t.accountId).where(sql`${t.status} <> 'DELETED'`),
     index('review_event_idx').on(t.eventId),
     index('review_fingerprint_idx').on(t.contentFingerprint),
     index('review_created_idx').on(t.createdAt, t.id),
-    // 탈퇴 익명화(update … where account_id = …)가 표 전체를 훑지 않게(0022, docs/data.md §5.1 '탈퇴 익명화', W7-audit 리뷰 K2)
+    // 탈퇴 파기(update … where account_id = …)가 표 전체를 훑지 않게(0022, docs/data.md §5.1 '탈퇴 파기', W7-audit 리뷰 K2)
     index('review_account_idx').on(t.accountId),
   ],
 );
@@ -98,3 +102,17 @@ export const reviewHiddenFingerprint = pgTable('review_hidden_fingerprint', {
   noticeId: uuid('notice_id'),
   createdAt: at('created_at').notNull(),
 });
+
+/**
+ * 탈퇴 후기 다시 정리 예약(소유자 결정 2026-11-16 OPEN[44], ADR-0278, docs/data.md §2 '다시 정리 예약'). 계정 ID·예약 시각·만든 시각만 둔다(pid·후기 내용 없음).
+ * 탈퇴 사건 처리 트랜잭션이 파기와 함께 넣고, core-svc 소비자 파드의 반복이 예약 시각에 다시 파기하며 지운다
+ */
+export const reviewWithdrawalRecheck = pgTable(
+  'review_withdrawal_recheck',
+  {
+    accountId: uuid('account_id').primaryKey(),
+    dueAt: at('due_at').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('review_withdrawal_recheck_due_idx').on(t.dueAt)],
+);

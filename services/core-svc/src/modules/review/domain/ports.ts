@@ -26,6 +26,7 @@ export interface ReviewStore {
   findReview(reviewId: string): Promise<ReviewRecord | undefined>;
   findReviewByEventAccount(eventId: string, accountId: string): Promise<ReviewRecord | undefined>;
   updateReview(reviewId: string, patch: Partial<Pick<ReviewRecord, 'rating' | 'body' | 'status' | 'notice' | 'noticeUntilMs' | 'contentFingerprint' | 'updatedAtMs' | 'edited'>>): Promise<void>;
+  /** 작성자 지우기. 그 후기 한 행을 파기 칸대로 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧). 지운 시각은 처음 지운 시각(이미 있으면 그대로) */
   softDeleteReview(reviewId: string, nowMs: number): Promise<void>;
   listReviews(input: ReviewListInput): Promise<ReviewListResult>;
   /** 같은 공연의 보이는 후기 전부(요약용). 후기 수가 많지 않은 첫 구현에서 쓴다 */
@@ -42,8 +43,6 @@ export interface ReviewStore {
 
   /** 법정 통보 하나를 후기들에 한 트랜잭션으로 적용한다. 같은 noticeId·reviewId는 다시 적용하지 않는다(멱등) */
   applyNoticeTakedown(input: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }>;
-  /** 탈퇴·파기 계정의 후기에서 계정·주문 참조를 익명화한다. 법정 보존이 필요한 본문·평점은 남긴다 */
-  anonymizeByAccount(accountId: string, nowMs: number): Promise<number>;
   insertTakedown(t: TakedownRecord): Promise<void>;
   takedownsByReview(reviewId: string): Promise<readonly TakedownRecord[]>;
   restoreTakedowns(reviewId: string, nowMs: number): Promise<void>;
@@ -57,7 +56,7 @@ export interface ReviewStore {
   /** 후기 조치·조치 기록·신고 처리 완료를 한 트랜잭션으로 반영한다(ASVS 2.3.3) */
   moderate(reviewId: string, o: { status?: ReviewRecord['status']; notice?: ReviewRecord['notice']; noticeUntilMs?: number; takedown?: TakedownRecord; restoreTakedowns: boolean; removeFingerprint?: string; outcome: ReportRecord['outcome']; nowMs: number }): Promise<void>;
 
-  // 뼈대(W8-audit2a 시험 단계): 아래 넷은 이름과 모양만 더했다. 구현 담당이 채우고, 부르는 곳이 없어지면 anonymizeByAccount를 뺀다.
+  // 탈퇴 후기 파기와 다시 정리(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278, docs/features/identity.md §8 '후기 파기'·'다시 정리')
   /** 그 계정의 후기를 상태와 관계없이 모두 파기 칸대로 비운다(docs/data.md §2 '후기 파기'). 바꾼 행 수. 이미 바꾼 행은 그 계정 ID로 더 찾히지 않아 다시 하면 0 */
   purgeByAccount(accountId: string, nowMs: number): Promise<number>;
   /** 파기(purgeByAccount와 같은 칸)와 다시 정리 예약 쓰기를 한 트랜잭션에. 예약이 있으면 늦은 시각을 남긴다. 둘 중 하나라도 실패하면 둘 다 없다 */

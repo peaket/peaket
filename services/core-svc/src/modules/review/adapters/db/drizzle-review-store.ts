@@ -1,5 +1,6 @@
 // 운영 후기 저장소(BUILD_ORDER BAT-585). 후기 목록은 event를 조인해 공연 단위로 모으고,
 // 신고 저장·불법 촬영물 즉시 가림은 한 트랜잭션으로 한다(ASVS 2.3.3).
+// 작성자 지우기·탈퇴 파기는 docs/data.md §2 '후기 파기'의 칸을 한 문장으로 비우고, 탈퇴 사건은 파기와 다시 정리 예약을 한 트랜잭션에 쓴다(ADR-0278).
 import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
@@ -17,7 +18,8 @@ interface Cursor {
   readonly i: string;
   readonly r: number;
 }
-const encodeCursor = (r: ReviewRecord): string => Buffer.from(JSON.stringify({ t: r.createdAtMs, i: r.reviewId, r: r.rating }), 'utf8').toString('base64url');
+// 별점이 null인 행(파기한 행, DELETED)은 목록에 오지 않는다. 0은 타입을 맞추려는 것뿐이다
+const encodeCursor = (r: ReviewRecord): string => Buffer.from(JSON.stringify({ t: r.createdAtMs, i: r.reviewId, r: r.rating ?? 0 }), 'utf8').toString('base64url');
 const decodeCursor = (raw: string | undefined): Cursor | undefined => {
   if (!raw) return undefined;
   try {
@@ -47,7 +49,22 @@ const recordOf = (r: ReviewRow): ReviewRecord => ({
   createdAtMs: r.createdAt.getTime(),
   updatedAtMs: r.updatedAt.getTime(),
   edited: r.edited,
+  ...(r.deletedAt ? { deletedAtMs: r.deletedAt.getTime() } : {}),
 });
+
+/**
+ * docs/data.md §2 '후기 파기'의 칸(작성자 지우기·탈퇴 파기가 같이 쓴다). 지운 시각은 처음 지운 시각(이미 있으면 그대로)이다.
+ * 계정·주문 참조는 그 후기 ID로 바꿔 끊는다(NOT NULL과 회차·계정 부분 유일 색인을 그대로 둔다). 0022의 core_app UPDATE 칸 목록이 이 칸을 모두 덮는다
+ */
+const purgeSet = (nowMs: number) => sql`
+  status = 'DELETED', body = '', rating = null, content_fingerprint = null, author_display = '', notice = null, notice_until = null,
+  account_id = id, basis_order_id = id, deleted_at = coalesce(deleted_at, ${new Date(nowMs)}::timestamptz), updated_at = ${new Date(nowMs)}::timestamptz`;
+
+/** 그 계정의 후기를 상태와 관계없이 모두 파기한다(색인 review_account_idx). 바꾼 행 수 */
+async function purgeAccountRows(db: Db, accountId: string, nowMs: number): Promise<number> {
+  const r = await db.execute(sql`update review set ${purgeSet(nowMs)} where account_id = ${accountId}::uuid returning id`);
+  return r.rows.length;
+}
 
 const reportOf = (r: ReportRow): ReportRecord => ({
   reportId: r.id,
@@ -142,7 +159,8 @@ export class DrizzleReviewStore implements ReviewStore {
   }
 
   async softDeleteReview(reviewId: string, nowMs: number): Promise<void> {
-    await this.database.db.update(review).set({ status: 'DELETED', body: '', authorDisplay: '***', deletedAt: new Date(nowMs), updatedAt: new Date(nowMs) }).where(eq(review.id, reviewId));
+    // 작성자 지우기도 탈퇴 파기와 같은 칸을 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧)
+    await this.database.db.execute(sql`update review set ${purgeSet(nowMs)} where id = ${reviewId}::uuid`);
   }
 
   async listReviews(input: ReviewListInput): Promise<ReviewListResult> {
@@ -232,8 +250,9 @@ export class DrizzleReviewStore implements ReviewStore {
       let applied = 0;
       for (const reviewId of i.reviewIds) {
         const found = await tx.execute(sql`select id, content_fingerprint from review where id = ${reviewId}::uuid and status <> 'DELETED' for update`);
-        const r = found.rows[0] as { id: string; content_fingerprint: string } | undefined;
-        if (!r) continue;
+        const r = found.rows[0] as { id: string; content_fingerprint: string | null } | undefined;
+        // 살아 있는 행은 지문이 있다(review_live_complete_check). 없으면 가릴 내용도 없다
+        if (!r || r.content_fingerprint === null) continue;
         const dup = await tx.execute(sql`select 1 from takedown_action where notice_id = ${i.noticeId}::uuid and review_id = ${reviewId}::uuid and restored_at is null limit 1`);
         if (dup.rows[0]) continue;
         await tx.execute(sql`update review set status = 'HIDDEN', notice = null, notice_until = null, updated_at = ${new Date(i.nowMs)}::timestamptz where id = ${reviewId}::uuid`);
@@ -251,29 +270,47 @@ export class DrizzleReviewStore implements ReviewStore {
     });
   }
 
-  // 뼈대(W8-audit2a 시험 단계): 아래 넷은 구현 담당이 채운다(docs/data.md §2 '후기 파기'·'다시 정리 예약', 마이그레이션 0026)
-  async purgeByAccount(_accountId: string, _nowMs: number): Promise<number> {
-    throw new Error('아직 없음');
+  async purgeByAccount(accountId: string, nowMs: number): Promise<number> {
+    return purgeAccountRows(this.database.db, accountId, nowMs);
   }
 
-  async purgeWithdrawnAccount(_accountId: string, _o: { nowMs: number; recheckAtMs: number }): Promise<number> {
-    throw new Error('아직 없음');
+  async purgeWithdrawnAccount(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<number> {
+    // 파기와 다시 정리 예약을 한 트랜잭션에 쓴다: 예약 쓰기가 실패하면 파기도 되돌려 사건을 다시 받게 한다(docs/features/identity.md §8 '다시 정리')
+    return this.database.transaction(async (tx) => {
+      // 같은 계정 예약이 있으면 늦은 예약 시각을 남긴다(만든 시각은 처음 값. core_app은 due_at만 고칠 수 있다).
+      // 예약 행을 후기보다 먼저 잡는다: 다시 정리 반복(runDueRechecks)도 예약 행 → 후기 차례로 잠가, 같은 계정을 겹쳐 처리해도 서로 기다리다 막히지(교착) 않는다
+      await tx.execute(sql`
+        insert into review_withdrawal_recheck (account_id, due_at, created_at)
+        values (${accountId}::uuid, ${new Date(o.recheckAtMs)}::timestamptz, ${new Date(o.nowMs)}::timestamptz)
+        on conflict (account_id) do update set due_at = greatest(review_withdrawal_recheck.due_at, excluded.due_at)`);
+      return purgeAccountRows(tx, accountId, o.nowMs);
+    });
   }
 
-  async runDueRechecks(_nowMs: number, _limit: number): Promise<{ accounts: number; purged: number }> {
-    throw new Error('아직 없음');
+  async runDueRechecks(nowMs: number, limit: number): Promise<{ accounts: number; purged: number }> {
+    return this.database.transaction(async (tx) => {
+      // 때가 된 예약을 예약 시각 차례로 잠근다. 다른 반복이 잠근 행은 건너뛴다(겹쳐 돌아도 한 예약은 한 번만, docs/data.md §5.1 '탈퇴 파기')
+      const due = await tx.execute(sql`
+        select account_id from review_withdrawal_recheck
+         where due_at <= ${new Date(nowMs)}::timestamptz
+         order by due_at
+         limit ${limit}::int
+         for update skip locked`);
+      const ids = (due.rows as { account_id: string }[]).map((r) => r.account_id);
+      if (ids.length === 0) return { accounts: 0, purged: 0 };
+      const purgedRows = await tx.execute(sql`update review set ${purgeSet(nowMs)} where account_id = any(${sql.param(ids)}::uuid[]) returning id`);
+      // 처리한 예약은 지운다(계정 ID가 남지 않게)
+      await tx.execute(sql`delete from review_withdrawal_recheck where account_id = any(${sql.param(ids)}::uuid[])`);
+      return { accounts: ids.length, purged: purgedRows.rows.length };
+    });
   }
 
-  async oldestOverdueRecheckMs(_nowMs: number): Promise<number> {
-    throw new Error('아직 없음');
-  }
-
-  async anonymizeByAccount(accountId: string, nowMs: number): Promise<number> {
-    const r = await this.database.db.execute(sql`
-      update review set account_id = id, basis_order_id = id, author_display = '탈퇴한 사용자', updated_at = ${new Date(nowMs)}::timestamptz
-       where account_id = ${accountId}::uuid
-       returning id`);
-    return r.rows.length;
+  async oldestOverdueRecheckMs(nowMs: number): Promise<number> {
+    // 가장 이른 예약 시각을 유닉스 ms로 읽는다(색인 review_withdrawal_recheck_due_idx). 시각 글자 모양에 기대지 않으려고 DB에서 숫자로 바꾼다
+    const r = await this.database.db.execute(sql`select (extract(epoch from min(due_at)) * 1000)::float8 as due_ms from review_withdrawal_recheck`);
+    const raw = (r.rows[0] as { due_ms: number | string | null } | undefined)?.due_ms ?? null;
+    if (raw === null) return 0;
+    return Math.max(0, nowMs - Math.round(Number(raw)));
   }
 
   async insertTakedown(t: TakedownRecord): Promise<void> {

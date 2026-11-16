@@ -27,22 +27,41 @@ export interface ReviewRecord {
   readonly productionId: string;
   readonly accountId: string;
   readonly basisOrderId: string;
-  readonly rating: number;
+  /** 파기한 행(status DELETED)에서만 null(docs/data.md §2 '후기 파기') */
+  readonly rating: number | null;
   readonly body: string;
   readonly status: ReviewStatus;
   readonly notice?: ReviewNotice;
   readonly noticeUntilMs?: number;
-  readonly contentFingerprint: string;
+  /** 파기한 행(status DELETED)에서만 null(docs/data.md §2 '후기 파기') */
+  readonly contentFingerprint: string | null;
   readonly authorDisplay: string;
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
   readonly edited: boolean;
-  /**
-   * 처음 지운 시각(DELETED에서만). 파기는 이미 있으면 그대로 둔다(docs/data.md §2 '후기 파기').
-   * 뼈대(W8-audit2a 시험 단계): 칸만 더했다. 메모리·Drizzle 저장소가 채우는 것은 구현 담당 몫이다.
-   * `rating`·`contentFingerprint`의 null 허용(파기한 행에서만 null)도 구현 담당이 바꾼다(제품 코드 여러 곳이 함께 바뀐다)
-   */
+  /** 처음 지운 시각(DELETED에서만). 파기는 이미 있으면 그대로 둔다(docs/data.md §2 '후기 파기') */
   readonly deletedAtMs?: number;
+}
+
+/**
+ * 후기 파기(작성자 지우기·회원 탈퇴, 소유자 결정 2026-11-16 OPEN[42], ADR-0278, ADR-0086 ⑧): docs/data.md §2 '후기 파기'의 칸대로 비운 행.
+ * 남는 칸은 후기 ID·회차·상태·고침 여부·만든 시각·갱신 시각·지운 시각이다. 계정·주문 참조는 그 후기 ID로 바꿔 끊는다(NOT NULL과 회차·계정 부분 유일 색인을 그대로 둔다).
+ * 지운 시각은 처음 지운 시각(이미 있으면 그대로)이다. 메모리 저장소가 쓰고, Drizzle 저장소는 같은 칸을 SQL 한 문장으로 쓴다
+ */
+export function purgedReview(r: ReviewRecord, nowMs: number): ReviewRecord {
+  const { notice: _notice, noticeUntilMs: _noticeUntil, ...rest } = r;
+  return {
+    ...rest,
+    accountId: r.reviewId,
+    basisOrderId: r.reviewId,
+    rating: null,
+    body: '',
+    status: 'DELETED',
+    contentFingerprint: null,
+    authorDisplay: '',
+    updatedAtMs: nowMs,
+    deletedAtMs: r.deletedAtMs ?? nowMs,
+  };
 }
 
 export interface ReportRecord {
@@ -187,13 +206,21 @@ export function maskAuthor(nickname: string | undefined): string {
   return first ? `${first}**` : '***';
 }
 
+/** 액세스 토큰 최대 15분 + 처리 중이던 쓰기 요청의 여유 1분 [가정](docs/features/identity.md §8 '다시 정리', 소유자 결정 2026-11-16 OPEN[44], ADR-0278) */
+export const WITHDRAWAL_RECHECK_DELAY_MS = (15 + 1) * 60_000;
+
+/** 계약의 date-time(시간대 표기 필수). Date.parse만으로는 '2026-11-16'처럼 날짜만 있는 글도 읽혀서 모양을 먼저 본다 */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
 /**
- * 탈퇴 후기 다시 정리 예약 시각: min(withdrawnAt, nowMs) + 16분(액세스 토큰 최대 15분 + 처리 중이던 쓰기 요청의 여유 1분 [가정],
- * docs/features/identity.md §8 '다시 정리'). withdrawnAt을 읽지 못하면 Error.
- * 뼈대(W8-audit2a 시험 단계): 구현 담당이 채운다(상수 WITHDRAWAL_RECHECK_DELAY_MS도 그때 더한다)
+ * 탈퇴 후기 다시 정리 예약 시각: min(withdrawnAt, nowMs) + 16분(docs/features/identity.md §8 '다시 정리').
+ * withdrawnAt이 시계 어긋남으로 미래여도 처리 시각 + 16분을 넘지 않는다.
+ * @throws Error withdrawnAt을 읽지 못함(글에 값을 싣지 않는다)
  */
-export function withdrawalRecheckAt(_withdrawnAtIso: string, _nowMs: number): number {
-  throw new Error('아직 없음');
+export function withdrawalRecheckAt(withdrawnAtIso: string, nowMs: number): number {
+  const withdrawnAtMs = ISO_DATE_TIME.test(withdrawnAtIso) ? Date.parse(withdrawnAtIso) : Number.NaN;
+  if (!Number.isFinite(withdrawnAtMs)) throw new Error('탈퇴 시각(withdrawnAt)을 읽지 못했다');
+  return Math.min(withdrawnAtMs, nowMs) + WITHDRAWAL_RECHECK_DELAY_MS;
 }
 
 export function noticeDeadlineMs(receivedAtMs: number, kind: NoticeKind): number {
@@ -243,7 +270,8 @@ export function reviewView(r: ReviewRecord, viewerAccountId: string | undefined,
     eventId: r.eventId,
     authorDisplay: r.authorDisplay,
     attendedStartsAt,
-    rating: r.rating,
+    // 별점이 null인 행은 파기한 행(DELETED)뿐이고 위에서 뺐다. null을 화면 모양으로 옮기지 않는다
+    ...(r.rating !== null ? { rating: r.rating } : {}),
     body: r.body,
     createdAt: new Date(r.createdAtMs).toISOString(),
     edited: r.edited,
@@ -256,7 +284,8 @@ export function reviewView(r: ReviewRecord, viewerAccountId: string | undefined,
 }
 
 export function summaryOf(items: readonly ReviewRecord[]): { averageRating: number | null; count: number } {
-  const visible = items.filter((r) => r.status === 'VISIBLE');
+  // 파기한 행(별점 null)은 DELETED라 여기 오지 않는다. 별점 없는 행은 세지 않는다
+  const visible = items.filter((r): r is ReviewRecord & { rating: number } => r.status === 'VISIBLE' && r.rating !== null);
   if (visible.length === 0) return { averageRating: null, count: 0 };
   const avg = visible.reduce((s, r) => s + r.rating, 0) / visible.length;
   return { averageRating: Math.round(avg * 10) / 10, count: visible.length };

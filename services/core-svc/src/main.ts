@@ -1,6 +1,6 @@
 // 서비스 시작. 실행 명령: node --import @peaket/platform/telemetry/register dist/main.js
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
-// 듣기 시작한 뒤 Kafka 소비자(탈퇴 사건의 후기 익명화, W7-audit COV2-06, docs/streaming.md §2.6 'core-svc 소비자')를 켠다. 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면
+// 듣기 시작한 뒤 Kafka 소비자(탈퇴 사건의 후기 파기와 16분 뒤 다시 정리, W7-audit COV2-06·ADR-0278, docs/streaming.md §2.6 'core-svc 소비자')를 켠다. 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면
 // local·ci만 경고 한 줄로 소비자 없이 뜨고 그 밖의 환경은 시작하지 않는다. 소비자를 켜지 못하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1을 둔다.
 import { fileURLToPath } from 'node:url';
 import { assertInternalGrpcToken, createDatabase, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
@@ -101,7 +101,7 @@ if (!ticketGrpc) console.warn(JSON.stringify({ level: 'warn', kind: 'review-elig
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
-// Kafka 소비자(탈퇴 익명화·보류 표) 전용 core_app 풀. 사건이 몰려도 팬·관제 HTTP 경로의 연결을 빼앗지 않게 따로 작게 둔다(최대 2개 [가정], docs/streaming.md §2.6, 리뷰 K2)
+// Kafka 소비자(탈퇴 파기·다시 정리 예약·보류 표) 전용 core_app 풀. 사건이 몰려도 팬·관제 HTTP 경로의 연결을 빼앗지 않게 따로 작게 둔다(최대 2개 [가정], docs/streaming.md §2.6, 리뷰 K2)
 const consumerDatabase = createDatabase({ url, applicationName: `${SERVICE}-consumer`, max: 2 });
 // 검색 전용 연결 묶음(ADR-0271 결정 5·18, docs/features/search.md §7.2: 연결 10개·대기 100ms [가정]). 운영은 읽기 전용 복제본 주소(PEAKET_SEARCH_DATABASE_URL).
 // 다 차면 검색만 503이고 다른 경로의 연결을 빼앗지 않는다
@@ -157,7 +157,7 @@ const webhookWorker =
     : new WebhookWorker(new WebhookDispatcher({ store: new DrizzleWebhookStore(database), transport: new HttpsWebhookTransport(), clock: systemClock }), systemClock);
 webhookWorker?.start();
 
-// 탈퇴 사건 소비자(그룹 peaket.core-svc.<환경>). DB는 소비자 전용 core_app 풀이다(후기 익명화와 보류 표 held_event, 리뷰 K2)
+// 탈퇴 사건 소비자(그룹 peaket.core-svc.<환경>)와 다시 정리 반복. DB는 소비자 전용 core_app 풀이다(후기 파기·다시 정리 예약과 보류 표 held_event, 리뷰 K2)
 let consumers: CoreConsumers | undefined;
 let closing: Promise<void> | undefined;
 if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
@@ -165,7 +165,7 @@ else {
   // 네이티브 Kafka 모듈은 켤 때만 싣는다(local·ci에서 브로커 없이 뜰 때는 싣지 않는다)
   const { startCoreConsumers } = await import('./consumers/start.js');
   const pod = (process.env.PEAKET_POD ?? process.env.HOSTNAME ?? 'local').slice(0, 64);
-  // 익명화 UPDATE도 소비자 풀로 쓴다. 후기 유스케이스의 나머지 의존은 서비스 조립의 것을 그대로 쓴다
+  // 파기 UPDATE·다시 정리 예약도 소비자 풀로 쓴다(처리기와 반복이 같은 Reviews). 후기 유스케이스의 나머지 의존은 서비스 조립의 것을 그대로 쓴다
   const consumerReviews = new Reviews({
     store: new DrizzleReviewStore(consumerDatabase),
     events: service.app.get(REVIEW_EVENT_DIRECTORY),
@@ -182,6 +182,7 @@ else {
     auth: kafka.auth,
     database: consumerDatabase,
     handler: new ReviewAccountWithdrawnHandler(consumerReviews, undefined, { logger: service.logger }),
+    recheck: consumerReviews,
     registry: service.metrics.registry,
     logger: service.logger,
   });
