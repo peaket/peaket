@@ -9,7 +9,7 @@ import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { PaymentEvent } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
-import { payment, paymentConfirmJob, paymentEvent, reconciliationDiff, reconciliationRun, reconciliationSeen, webhookReceipt, pgSwitch, eventPgConfig, paymentEntryPause, paymentEntryTrial, paymentChannelLimit, paymentPgChannelObserved } from '../src/modules/payment/adapters/db/schema.js';
+import { payment, paymentCancel, paymentConfirmJob, paymentEvent, reconciliationDiff, reconciliationRun, reconciliationSeen, webhookReceipt, pgSwitch, eventPgConfig, paymentEntryPause, paymentEntryTrial, paymentChannelLimit, paymentPgChannelObserved } from '../src/modules/payment/adapters/db/schema.js';
 import { PAYMENT_LEDGER_STATUSES } from '../src/modules/payment/domain/confirm-command.js';
 
 const SERVICE = fileURLToPath(new URL('..', import.meta.url));
@@ -35,6 +35,8 @@ const TAG_0017 = '0017_settlement_guards';
 const TAG_0018 = '0018_payment_pg_store';
 const TAG_0019 = '0019_settlement_kyc_holder_names';
 const TAG_0020 = '0020_settlement_statement_audit';
+/** 결제 후 일반 취소 한 건 payment_cancel(BUILD_ORDER GAT-080, BAT-415 몫 P, docs/data.md payment_cancel) */
+const TAG_0021 = '0021_payment_cancel';
 const ADDED_COLUMN_0012 = 'virtual_account_allowed';
 const ADDED_COLUMN_0014 = 'cancelled_amount';
 const ADDED_CHECK_0014 = 'payment_cancelled_amount_check';
@@ -80,6 +82,7 @@ const reconShapes = [shapeOf(reconciliationRun), shapeOf(reconciliationSeen), sh
 const selectionShapes = [shapeOf(pgSwitch), shapeOf(eventPgConfig)];
 const entryShapes = [shapeOf(paymentEntryPause), shapeOf(paymentEntryTrial)];
 const limitShapes = [shapeOf(paymentChannelLimit), shapeOf(paymentPgChannelObserved)];
+const cancelShape = shapeOf(paymentCancel);
 const TABLES = [payment, paymentEvent, paymentConfirmJob];
 const SHAPES = [paymentShape, eventShape, jobShape];
 const cols = (s: ReturnType<typeof shapeOf>): [string, string, boolean][] => s.columns.map((c) => [c.name, c.type, c.notNull]);
@@ -557,7 +560,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const thirteenth = snapshotOf('0012_snapshot.json');
   const latest13 = snapshotOf('0013_snapshot.json');
   const latest = snapshotOf('0014_snapshot.json');
-  const latestAll = snapshotOf('0020_snapshot.json');
+  const before0021 = snapshotOf('0020_snapshot.json');
+  const latestAll = snapshotOf('0021_snapshot.json');
 
   test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
     expect(twelfth.prevId).toBe(eleventh.id);
@@ -607,7 +611,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     ]);
   });
 
-  test('PRF182_PRF183_기록은 0000~0020 차례이고 SQL 파일과 맞는다', () => {
+  test('PRF182_PRF183_기록은 0000~0021 차례이고 SQL 파일과 맞는다(0021은 GAT-080 payment_cancel)', () => {
     expect(journal.dialect).toBe('postgresql');
     expect(journal.entries.map((e) => [e.idx, e.tag])).toEqual([
       [0, TAG],
@@ -631,6 +635,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [18, TAG_0018],
       [19, TAG_0019],
       [20, TAG_0020],
+      [21, TAG_0021],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -656,11 +661,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[18]!.when).toBeGreaterThan(journal.entries[17]!.when);
     expect(journal.entries[19]!.when).toBeGreaterThan(journal.entries[18]!.when);
     expect(journal.entries[20]!.when).toBeGreaterThan(journal.entries[19]!.when);
+    expect(journal.entries[21]!.when).toBeGreaterThan(journal.entries[20]!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`, `${TAG_0021}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json'))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json', '0021_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {
@@ -749,7 +755,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('PRF181_마지막 스냅샷의 표·열·기본 키·check가 schema.ts와 같다(Outbox는 손으로 쓴 SQL이라 스냅샷에 없다)', () => {
-    const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes, ...entryShapes, ...limitShapes];
+    const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes, ...entryShapes, ...limitShapes, cancelShape];
     expect(Object.keys(latestAll.tables).filter((t) => shapes.some((s) => `public.${s.name}` === t)).sort()).toEqual(shapes.map((s) => `public.${s.name}`).sort());
     for (const s of shapes) {
       const t = latestAll.tables[`public.${s.name}`]!;
@@ -766,5 +772,47 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       const t = latestAll.tables[`public.${SHAPES[i]!.name}`]!;
       expect(Object.keys(t.foreignKeys), SHAPES[i]!.name).toEqual(getTableConfig(table).foreignKeys.map((f) => f.getName()));
     });
+    expect(Object.keys(latestAll.tables['public.payment_cancel']!.foreignKeys)).toEqual(getTableConfig(paymentCancel).foreignKeys.map((f) => f.getName()));
+  });
+
+  test('GAT-080 P8 0021 스냅샷의 앞은 0020 스냅샷이고, SQL은 payment_cancel 표·결제 외래 키·유일 색인·진행 중 부분 색인만 더한다', () => {
+    expect(latestAll.prevId).toBe(before0021.id);
+    expect(Object.keys(before0021.tables)).not.toContain('public.payment_cancel');
+    expect(Object.keys(latestAll.tables).filter((t) => !Object.keys(before0021.tables).includes(t))).toEqual(['public.payment_cancel']);
+    const sqlOf = readFileSync(join(MIGRATIONS, `${TAG_0021}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(sqlOf).not.toMatch(/\b(DROP|TRUNCATE|DELETE FROM|UPDATE "|RENAME)\b/);
+    const statements = sqlOf.replace(/^-- .*$/gm, '').split(BREAKPOINT).map((x) => canon(x)).filter((x) => x !== '');
+    expect(statements).toHaveLength(4);
+    expect(statements[0]).toMatch(/^create table payment_cancel\(/);
+    expect(statements[1]).toBe('alter table payment_cancel add constraint payment_cancel_payment_id_payment_id_fk foreign key(payment_id)references payment(id)on delete no action on update no action;');
+    expect(statements[2]).toBe('create unique index payment_cancel_payment_idempotency_key on payment_cancel using btree(payment_id,idempotency_key);');
+    expect(statements[3]).toBe("create index payment_cancel_in_progress_idx on payment_cancel using btree(payment_id)where status in('REQUESTED','CANCEL_PENDING');");
+    for (const c of cancelShape.columns) expect(statements[0], c.name).toContain(`${c.name} ${c.type}${c.primary ? ' primary key' : ''}${c.notNull ? ' not null' : ''}`);
+    for (const k of cancelShape.checks) expect(statements[0], k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+  });
+
+  test('GAT-080 P8 schema.ts의 payment_cancel은 정본 칸·검사·색인이다(docs/data.md payment_cancel, 계획 §3)', () => {
+    expect(cols(cancelShape)).toEqual([
+      ['id', 'uuid', true],
+      ['payment_id', 'uuid', true],
+      ['idempotency_key', 'text', true],
+      ['amount', 'integer', true],
+      ['reason', 'text', true],
+      ['full_cancel', 'boolean', true],
+      ['expected_balance', 'integer', true],
+      ['status', 'text', true],
+      ['created_at', TZ, true],
+      ['canceled_at', TZ, false],
+    ]);
+    expect(cancelShape.columns.filter((c) => c.primary).map((c) => c.name)).toEqual(['id']);
+    expect(checkOf(cancelShape, 'payment_cancel_amount_check')).toBe('amount > 0');
+    expect(checkOf(cancelShape, 'payment_cancel_expected_balance_check')).toBe('expected_balance >= amount');
+    expect(literalsOf(checkOf(cancelShape, 'payment_cancel_status_check'))).toEqual(['REQUESTED', 'CANCEL_PENDING', 'CANCELED', 'FAILED']);
+    expect(cancelShape.indexes).toEqual([
+      { name: 'payment_cancel_payment_idempotency_key', unique: true, columns: ['payment_id', 'idempotency_key'] },
+      { name: 'payment_cancel_in_progress_idx', unique: false, columns: ['payment_id'] },
+    ]);
+    const fk = getTableConfig(paymentCancel).foreignKeys.map((f) => f.reference());
+    expect(fk.map((r) => [r.columns.map((x) => x.name), getTableConfig(r.foreignTable).name, r.foreignColumns.map((x) => x.name)])).toEqual([[['payment_id'], 'payment', ['id']]]);
   });
 });

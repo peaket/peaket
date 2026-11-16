@@ -32,7 +32,7 @@ import { orderCancellation, orderEvent, orderIdempotency, orderItem, orderSagaJo
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { priorityGrant } from '../src/modules/priority/adapters/db/schema.js';
-import { eventCancellationRequest, eventRefundAttempt, eventRefundItem } from '../src/modules/refund/adapters/db/schema.js';
+import { eventCancellationRequest, eventRefundAttempt, eventRefundItem, fraudCancellationRequest, fraudCancellationTicket } from '../src/modules/refund/adapters/db/schema.js';
 import { saleControl } from '../src/modules/sale-control/adapters/db/schema.js';
 import { SALE_STATUSES } from '../src/modules/inventory/domain/sale-state.js';
 import { SEAT_SALE_STATUSES } from '../src/modules/inventory/domain/seat-sale.js';
@@ -79,6 +79,8 @@ const WINDOW_TAG = '0018_event_refund_window_runner';
 const SALE_CONTROL_TAG = '0019_sale_control';
 const PRIORITY_GUARD_TAG = '0020_priority_grant_guard';
 const PRIORITY_ACTED_TAG = '0021_priority_grant_acted_by';
+/** 부정 예매 운영자 취소의 요청·표별 결과 표 둘(BUILD_ORDER GAT-080, BAT-415 몫 F, docs/data.md fraud_cancellation_request·fraud_cancellation_ticket) */
+const FRAUD_TAG = '0022_fraud_cancellation';
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -138,6 +140,7 @@ const eventSaleShape = shapeOf(eventSale);
 /** 0017의 우선 구매 권리 표(GAT-135) */
 const priorityShape = shapeOf(priorityGrant);
 const saleControlShape = shapeOf(saleControl);
+const fraudShapes = [shapeOf(fraudCancellationRequest), shapeOf(fraudCancellationTicket)];
 
 const TZ = 'timestamp with time zone';
 /** [열 이름, 종류, 널 불허] */
@@ -433,6 +436,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [19, SALE_CONTROL_TAG],
       [20, PRIORITY_GUARD_TAG],
       [21, PRIORITY_ACTED_TAG],
+      [22, FRAUD_TAG],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -467,6 +471,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${SALE_CONTROL_TAG}.sql`,
       `${PRIORITY_GUARD_TAG}.sql`,
       `${PRIORITY_ACTED_TAG}.sql`,
+      `${FRAUD_TAG}.sql`,
     ]);
   });
 
@@ -511,6 +516,67 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     .sort();
   const snapshotOf = (f: string) => JSON.parse(readFileSync(join(MIGRATIONS, 'meta', f), 'utf8')) as Snapshot;
 
+  test('GAT-080 F19 0022 SQL은 부정 예매 운영자 취소 표 둘과 결과 표의 요청 외래 키만 만들고, 칸·기본 키·check가 schema.ts와 같다', () => {
+    const sqlOf = readFileSync(join(MIGRATIONS, `${FRAUD_TAG}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(sqlOf).not.toMatch(/\b(DROP|TRUNCATE|DELETE FROM|UPDATE "|RENAME)\b/);
+    const text = canon(sqlOf.replace(/^-- .*$/gm, ''));
+    expect(text.match(/create table/gi)).toHaveLength(2);
+    expect(text).toContain('create table fraud_cancellation_request(');
+    expect(text).toContain('create table fraud_cancellation_ticket(');
+    expect(text.match(/alter table/gi)).toHaveLength(1);
+    expect(text).toContain(
+      'alter table fraud_cancellation_ticket add constraint fraud_cancellation_ticket_approval_id_fraud_cancellation_request_approval_id_fk foreign key(approval_id)references fraud_cancellation_request(approval_id)on delete no action on update no action;',
+    );
+    expect(text).toContain('constraint fraud_cancellation_ticket_approval_id_ticket_id_pk primary key(approval_id,ticket_id)');
+    for (const s of fraudShapes) {
+      for (const c of s.columns) expect(text, `${s.name}.${c.name}`).toContain(`${c.name} ${c.type}${c.primary ? ' primary key' : ''}${c.notNull ? ' not null' : ''}`);
+      for (const k of s.checks) expect(text, k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+    }
+  });
+
+  test('GAT-080 F19 schema.ts의 부정 예매 운영자 취소 표 둘은 계획 §3·docs/data.md의 칸·기본 키·검사·외래 키다', () => {
+    const [request, ticket] = fraudShapes as [Shape, Shape];
+    expect(cols(request)).toEqual([
+      ['approval_id', 'uuid', true],
+      ['fraud_case_id', 'uuid', true],
+      ['event_id', 'uuid', true],
+      ['targets_hash', 'text', true],
+      ['requested_by', 'text', true],
+      ['approved_by', 'text', true],
+      ['approved_at', 'timestamp with time zone', false],
+      ['created_at', 'timestamp with time zone', true],
+    ]);
+    expect(request.columns.filter((c) => c.primary).map((c) => c.name)).toEqual(['approval_id']);
+    expect(request.checks).toEqual([{ name: 'fraud_cancellation_request_actors_check', expr: 'requested_by <> approved_by' }]);
+    expect(cols(ticket)).toEqual([
+      ['approval_id', 'uuid', true],
+      ['ticket_id', 'uuid', true],
+      ['expected_holder_account_id', 'uuid', true],
+      ['outcome', 'text', true],
+      ['cancellation_id', 'uuid', false],
+      ['refund_amount', 'integer', false],
+      ['withdrawn_transfer_offer_id', 'text', false],
+      ['failure_code', 'text', false],
+      ['updated_at', 'timestamp with time zone', true],
+    ]);
+    expect(ticket.primaryKeys).toEqual([{ name: 'fraud_cancellation_ticket_approval_id_ticket_id_pk', columns: ['approval_id', 'ticket_id'] }]);
+    const check = (name: string): string => ticket.checks.find((k) => k.name === name)!.expr;
+    expect(ticket.checks.map((k) => k.name)).toEqual([
+      'fraud_cancellation_ticket_outcome_check',
+      'fraud_cancellation_ticket_failure_code_check',
+      'fraud_cancellation_ticket_refund_amount_check',
+      'fraud_cancellation_ticket_accepted_check',
+      'fraud_cancellation_ticket_failed_check',
+    ]);
+    expect(literalsOf(check('fraud_cancellation_ticket_outcome_check'))).toEqual(['ACCEPTED', 'SKIPPED_ALREADY_ENDED', 'SKIPPED_ENTRY_STARTED', 'SKIPPED_HOLDER_CHANGED', 'FAILED']);
+    expect(literalsOf(check('fraud_cancellation_ticket_failure_code_check'))).toEqual(['TICKET_UNAVAILABLE', 'SEAT_RETURN_FAILED', 'CANCELLATION_CONFLICT', 'ORDER_STATE', 'INTERNAL']);
+    expect(check('fraud_cancellation_ticket_refund_amount_check')).toBe('refund_amount >= 0');
+    expect(check('fraud_cancellation_ticket_accepted_check')).toBe("(outcome = 'ACCEPTED')=(cancellation_id is not null)");
+    expect(check('fraud_cancellation_ticket_failed_check')).toBe("(outcome = 'FAILED')=(failure_code is not null)");
+    const fk = getTableConfig(fraudCancellationTicket).foreignKeys.map((f) => f.reference());
+    expect(fk.map((r) => [r.columns.map((x) => x.name), getTableConfig(r.foreignTable).name, r.foreignColumns.map((x) => x.name)])).toEqual([[['approval_id'], 'fraud_cancellation_request', ['approval_id']]]);
+  });
+
   test('스냅샷은 기록마다 하나이고 prevId로 이어진다(0000 → 0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013)', () => {
     expect(snapshotFiles).toEqual(journal.entries.map((e) => `${String(e.idx).padStart(4, '0')}_snapshot.json`));
     let prev = '00000000-0000-0000-0000-000000000000';
@@ -526,16 +592,29 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
 
-  test('마지막 스냅샷(0021_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0021_snapshot.json');
+  test('마지막 스냅샷(0022_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0022_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape].map((s) => `public.${s.name}`).sort());
-    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape]) {
+    expect(Object.keys(snap.tables).sort()).toEqual([...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes].map((s) => `public.${s.name}`).sort());
+    for (const s of [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes]) {
       const t = snap.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), `${s.name} 열 기본 키`).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
       expect(Object.keys(t.checkConstraints ?? {}), `${s.name} check`).toEqual(s.checks.map((k) => k.name));
     }
+  });
+
+  test('GAT-080 F19 0022 스냅샷의 앞은 0021 스냅샷이고, 부정 예매 표 둘만 더하며 기본 키·외래 키 이름이 schema.ts와 같다', () => {
+    const before = snapshotOf('0021_snapshot.json');
+    const after = snapshotOf('0022_snapshot.json');
+    expect(after.prevId).toBe(before.id);
+    expect(Object.keys(after.tables).filter((t) => !Object.keys(before.tables).includes(t)).sort()).toEqual(['public.fraud_cancellation_request', 'public.fraud_cancellation_ticket']);
+    [fraudCancellationRequest, fraudCancellationTicket].forEach((table, i) => {
+      const s = fraudShapes[i]!;
+      const t = after.tables[`public.${s.name}`]!;
+      expect(Object.values(t.compositePrimaryKeys ?? {}).map((x) => [x.name, x.columns]), `${s.name} 기본 키`).toEqual(s.primaryKeys.map((x) => [x.name, x.columns]));
+      expect(Object.keys(t.foreignKeys ?? {}), `${s.name} 외래 키`).toEqual(getTableConfig(table).foreignKeys.map((f) => f.getName()));
+    });
   });
 
   test('마지막 스냅샷의 주문 표 일곱은 여러 열 기본 키·외래 키·인덱스의 이름(과 기본 키 열 차례, 유일 여부)도 schema.ts와 같다(PRF-160, 0004의 purchase_order_hold_key는 PRF-161, 0005의 order_saga_job은 PRF-162, 0007의 ticket_issue_job은 PRF-163, 0009·0010은 인덱스를 더하지 않는다 PRF-170·PRF-171, 0011의 purchase_order_session_idx는 PRF-172) [ASVS v5.0.0-2.3.4]', () => {
