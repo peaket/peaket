@@ -35,6 +35,12 @@ service EventRefundService {
 
   // 연기(POSTPONE)의 신청 창을 지금 닫는다(commander, 사유 필수). 신청하지 않은 티켓은 환급하지 않고 NOT_APPLIED로 끝난다.
   rpc CloseEventRefundWindow(CloseEventRefundWindowRequest) returns (CloseEventRefundWindowResponse);
+
+  // 회차 취소(CANCEL) 요청이 판정 중인 회차의 입장 시작 뒤 보류 취소(REQUESTED)의 마감 뒤 환급을 미룬다(소유자 결정 2026-11-16 OPEN[45],
+  // docs/features/transfer-refund.md §5 '회차 취소 요청 중 보류 취소의 환급 미룸'). ops-svc가 요청을 받기 전에 걸고, 판정·확정 시도 때 다시 걸어 기한을 늘리며,
+  // 반려하면 푼다. 확정 뒤에는 StartEventRefund가 같은 트랜잭션에서 푼다(그 뒤로는 진행 중인 일괄 환불이 미룬다).
+  // (event_id, cancellation_request_id)로 멱등하다. 풀기는 지금 걸린 요청 ID가 같을 때만 한다.
+  rpc SetEventRefundHold(SetEventRefundHoldRequest) returns (SetEventRefundHoldResponse);
 }
 
 // 회차 취소·연기 종류.
@@ -215,4 +221,20 @@ message CloseEventRefundWindowRequest {
 message CloseEventRefundWindowResponse {
   RefundJobState state = 1;
   int32 not_applied_orders = 2;
+}
+
+message SetEventRefundHoldRequest {
+  string event_id = 1;
+  // ops-svc 회차 취소 요청 ID. 같은 회차에 다른 요청의 미룸이 걸려 있으면 거는 쪽은 ALREADY_EXISTS다(진행 중 요청은 회차마다 하나)
+  string cancellation_request_id = 2;
+  // 참이면 걸거나 기한을 늘리고, 거짓이면 푼다
+  bool held = 3;
+  // 걸 때만. 이 시각이 지나면 미룸이 저절로 풀린다(지금 + 72시간 [가정]). 지금보다 이르거나 지금 + 7일 [가정]보다 늦으면 INVALID_ARGUMENT
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message SetEventRefundHoldResponse {
+  // 호출 뒤 그 회차에 미룸이 걸려 있는가
+  bool held = 1;
+  google.protobuf.Timestamp expires_at = 2;
 }

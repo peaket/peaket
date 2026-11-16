@@ -1015,6 +1015,13 @@ erDiagram
         text last_error "마지막 실패 결과 코드. 계좌·결제 참조는 싣지 않는다"
         timestamptz updated_at
     }
+    event_refund_hold {
+        uuid event_id PK "회차 취소(CANCEL) 요청이 판정 중인 회차. 걸려 있으면 환급 실행기가 그 회차의 보류 취소(REQUESTED)를 집지 않는다(소유자 결정 2026-11-16 OPEN[45], 세부 추천 적용 2026-11-16, BUILD_ORDER GAT-090·GAT-110, docs/features/transfer-refund.md §5 '회차 취소 요청 중 보류 취소의 환급 미룸')"
+        uuid cancellation_request_id "건 ops-svc 요청 ID. 풀기는 같은 요청 ID일 때만"
+        timestamptz held_at
+        timestamptz expires_at "지금 + 72시간 [가정]. ops가 판정·확정 시도 때 늘린다. 지나면 저절로 풀린다"
+        timestamptz released_at "반려·확정(StartEventRefund)·기한 지남으로 푼 시각. 비면 걸려 있다(기한 안일 때)"
+    }
     compensation {
         uuid id PK
         uuid order_id
@@ -2854,6 +2861,7 @@ erDiagram
 | 입장 시작 뒤 보류 취소(`REQUESTED`)를 환급 실행기와 회차 취소 전환이 동시에 집음, 실행기가 CS 무효(`VOIDED`)를 덮음 | 둘 다 조건부 갱신(`status = 'REQUESTED'`)으로 바꾼 쪽만 이어 간다. 실행기는 바꾼 행만 결제사로 보내고, 전환은 바꾼 행만 공제 0의 일괄 환불 항목으로 쓴다(진 쪽은 건너뛰거나 항목 `FAILED`). 실행기의 환급 성공·재시도 예약·실패 표시도 `REFUND_PENDING`일 때만 써서 무효 행을 바꾸지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-090·GAT-110, docs/features/transfer-refund.md §3.1 '입장 기록 대조'·§5 '대상 선택과 보류 취소 전환') | purchase 통합 시험(GAT-090 A·R-T24) |
 | 회차 취소 표 취소가 팬 취소·양도·스캔·부정 예매 취소와 같은 표에 겹침 | ticket-svc `EventCancelTickets`가 같은 티켓 행 잠금 안에서 상태만 다시 보고 이미 환급·무효인 표는 그대로 둔다. (취소 ID, 표) 기록으로 다시 부르기에 처음 결과를 준다. purchase는 진행 중 취소 1건 유일(§2)로 같은 표의 둘째 취소 행을 막는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110) | ticket·purchase 통합 시험(R-T24, GAT-110 E) |
 | 회차 취소 확정과 진행 중 결제(대상을 고른 뒤에 결제가 끝난 주문) | 확정이 일괄 환불 시작 전에 판매를 멈춰(새 홀드·결제 접수 423) 새 주문을 막고, 실행기가 틱마다 대상을 다시 골라 늦게 끝난 주문의 표를 더하며(요청·표에서 정해지는 취소 ID라 하나만), 그 회차에 끝나지 않은 주문이 남아 있으면 COMPLETED로 가지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, ADR-0280) | purchase·ops 통합 시험(R-T37 ④⑥) |
+| 회차 취소 요청이 판정 중인데 환급 실행기가 그 회차의 보류 취소를 공제한 금액으로 집음(소유자 결정 2026-11-16 OPEN[45]) | ops-svc가 요청을 저장하기 전에 purchase-svc `event_refund_hold`를 건다(걸지 못하면 요청을 받지 않는다). 실행기의 집기 조건부 갱신이 미룸·진행 중 일괄 환불이 없음을 같은 문장에서 보아, 확인과 집기 사이에 걸린 미룸도 지킨다. 미룸 전에 이미 나간 공제 환급과 전환에서 진 항목은 확정 때 CS 차액 건(`DEDUCTION_GAP`)으로 간다. 풀기를 놓친 미룸은 72시간 [가정]에 저절로 풀린다(세부 추천 적용 2026-11-16, BUILD_ORDER GAT-090·GAT-110, docs/features/transfer-refund.md §5) | purchase·ops 통합 시험(R-T38) |
 | 같은 승인 업무에 승인 두 번, 요청자 본인 승인 | 자식 표 `approval_vote`의 `UNIQUE (request_id, approver_id)`와 `CHECK (approver_id <> requester_id)`(§2, ADR-0086), 상태 전이에 버전을 쓴다 | R-T7(요청자 본인 승인). 같은 승인자 두 번은 `approval_vote` 유일 제약 |
 | 같은 미수금을 두 정산서가 동시에 상계, 같은 정산서의 지급 요청 중복 | `partner_receivable` 행 잠금(`FOR UPDATE`) 안에서 남은 금액을 확인하고 상계한다. 상계는 같은 트랜잭션에서 `receivable_movement`에 한 행을 덧붙이고 `remaining`을 '금액 − 이동 기록 합'으로 고친다(추천 적용 2026-10-28, 기술 검토 중간-043). 정산서당 지급 묶음은 하나이고 `ref_payout_id`에 유일 제약을 건다. 결제사 멱등키는 고정한다 | J-T5·J-T11·J-T24 |
 | 오프라인 단절 상황에서 복제 티켓의 중복 입장 시도 | 티켓별로 지정한 게이트 구역으로 통제한다(사전 예방). 변경분으로 입장 상태를 공유한다(온라인 스캐너는 두 번째 입장을 거부한다). 업로드된 뒤 서버 판정 표로 중복 입장에 이상 표시를 한다. 올라오지 않은 기록은 찾지 못한다(ADR-0051) | K10 오프라인 정합성 검증 (O-T2, O-T23) |
