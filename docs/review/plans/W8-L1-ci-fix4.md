@@ -202,6 +202,57 @@
 
 ## 검증
 
+검증 담당(w8l1-cifix4-verify-c48e1f06)이 2026-11-17에 적었다. B 등급 틀린 구현 표본(§8.6의 3)이다.
+
+- **방법**: 틀린 구현은 `D:/ticketpass-lane1-cf4base`(분리 HEAD `a4ab2785`, 구현·시험과 같은 트리)의 제품 파일에만 문자열 바꾸기로 하나씩 넣었다. 빌드가 필요한 꼴은 `tools/web-checks`에서 `PEAKET_BUILDS=prod node seed-css/build.mjs web`(한 번에 20~40초, 경고 0)로 운영 빌드한 뒤 `apps/web`에서 `node --test server/server-external.test.mjs "test-int/*.build.test.mjs"`(CF2-01, CF4-01~04, 기존 빌드 시험 셋)를 돌렸다. 빌드가 필요 없는 꼴(판 글자, 의존성 칸, 배열 글자)은 소스 시험만 돌렸다. 빌드는 꼴마다 따로 했다(묶지 않았다). 첫 JS(R-1)는 scratchpad `cf4\measure.mjs`(js.spec과 같은 `scriptSrcs`·gzip, web 운영 서버 + 가짜 API)로, 시작 확인(R-2)은 `tools/web-checks`의 `node --test --test-name-pattern="web 운영" boot/production-start.test.mjs`로 봤다. 하나 끝날 때마다 `git checkout HEAD -- <바꾼 파일>` 뒤 `git status --short`가 빈 것을 봤다. Docker는 쓰지 않았다.
+- **의존성을 바꾼 차례**: 처음 `cf4base`의 `node_modules`는 구현 전 잠금 파일의 설치였다(`apps/web/node_modules/@opentelemetry` 없음). 그래서 M-01은 시험 담당이 00:28에 만든 구현 전 빌드(제품 파일이 `108f029a`와 같음, 텔레메트리 덩어리 `[root-of-the-server]__1_1qtb_4dz47o._.js` 606,251바이트로 계획 1과 같다)를 그대로 쓰고, M-02는 `package.json`·`pnpm-lock.yaml`을 `108f029a` 것으로 둔 채 새로 빌드했다. 그 뒤 `HEAD` 잠금 파일로 `pnpm install --offline --frozen-lockfile`을 하고 나머지를 넣었다. 끝에 다시 `pnpm install --offline --frozen-lockfile`(바뀐 것 없음)과 구현 그대로의 운영 빌드(01:14)를 해 두었다.
+- **구현 위 확인(`D:/ticketpass-lane1-cf4`, 구현 담당의 운영 빌드 00:16)**: `node --test server/server-external.test.mjs` 통과 3(CF2-01·CF4-01·CF4-02). web 서버 단위 시험 `node --test "server/**/*.test.mjs"` 67 통과, 실패 0. `node --test "test-int/*.build.test.mjs"` 5 통과(CF4-03·04, ASVS 13.4.1, HOT-390 redis, R170-8). R-2 통과 2. R-1 `web /` **175.6** ≤ 175.7, `web /my/tickets` **161.5** ≤ 161.6(`/events/0b8f…4e01` 193.0, `/search` 167.2, `/login` 159.4). `cf4base`에서 구현 그대로 새로 빌드해도 같은 결과(빌드 시험 8 통과, 텔레메트리 덩어리 `[root-of-the-server]__0r8xl9k644kau._.js` 18,203바이트)였다.
+
+| 번호 | 넣은 틀린 구현(바꾼 곳) | 빌드 | 돌린 시험 | 결과 | 실패한 시험과 처음 실패한 단언 |
+| --- | --- | --- | --- | --- | --- |
+| M-01 | 구현 전(`next.config.ts`·`package.json`·`pnpm-lock.yaml`을 `108f029a`로) | 구현 전 빌드 | CF 전부, 빌드 시험, R-1 | 잡음 | CF4-01(일곱), CF4-02(`@opentelemetry/` 이름이 하나도 없다), CF4-03(여섯 모두 밖 부르기 없음), CF4-04(여섯 모두 못 풂). R-1 `web /` 176.1 > 175.7, `/my/tickets` 161.9 > 161.6 |
+| M-02 | `next.config.ts`는 구현, `package.json`·잠금 파일은 구현 전(web 직접 의존성 없음, `apps/web/node_modules/@opentelemetry` 없음) | 새로 | CF 전부, 빌드 시험, R-1, R-2 | 잡음(CF4-02만) | CF4-02 '`@opentelemetry/api`이 apps/web/package.json dependencies에 없다'. **CF4-03·04는 통과**했다. 텔레메트리 덩어리 이름이 구현과 같은 `__0r8xl9k644kau`이고 여섯을 `.y("@opentelemetry/<이름>-<해시>")`로 부르며, standalone에 해시 연결 여섯이 실린다. R-1 175.6·161.5, R-2 통과 2 |
+| M-03 | `package.json`은 구현, `next.config.ts`는 구현 전 | 새로 | CF 전부, 빌드 시험, R-1 | 잡음 | CF4-01(일곱), CF4-02(이름 없음), CF4-03(여섯, 606,251바이트 덩어리), CF4-04(여섯). R-1 176.1·161.9 |
+| M-04 | 배열에서 `@opentelemetry/sdk-node` 줄을 뺌 | 새로 | CF 전부, 빌드 시험, R-1 | 잡음 | CF4-01(열둘), CF4-03 '`[root-of-the-server]__003ksbxjuqb41._.js`이 밖 모듈로 부르지 않는 OTel 패키지' `['sdk-node']`(덩어리 582,640바이트), CF4-04 `['@opentelemetry/sdk-node']`. R-1은 175.6·161.5로 **통과**(아래 '보탬 관찰' 1) |
+| M-05 | 배열에서 `@opentelemetry/api` 줄을 뺌 | 새로 | CF 전부, 빌드 시험, R-1 | 잡음 | CF4-01(열둘), CF4-03 `['api']`(`__1gy-l0oi1z45o`), CF4-04 `['@opentelemetry/api']`. R-1 175.6·161.5로 통과 |
+| M-06 | web `@opentelemetry/sdk-node`를 `^0.300.0` | 없음 | 소스 시험 | 잡음 | CF4-02 '`@opentelemetry/sdk-node` 판 적기가 다르다: web ^0.300.0, platform 0.300.0' |
+| M-07 | 여섯을 `dependencies`에서 `devDependencies`로 옮김 | 없음 | 소스 시험 | 잡음 | CF4-02 '`@opentelemetry/api`이 apps/web/package.json dependencies에 없다' |
+| M-08 | 여섯을 `serverExternalPackages`에서 빼 `transpilePackages`에 더함 | 새로 | CF 전부, 빌드 시험 | 잡음 | CF4-01(일곱), CF4-02(이름 없음), CF4-03(여섯, 606,251바이트), CF4-04(여섯) |
+| M-09 | 여섯을 배열에서 빼 둘째 `serverExternalPackages:` 키(여섯)로 `transpilePackages` 앞에 둠 | 새로 | CF 전부, 빌드 시험 | 잡음 | CF2-01 '키가 2번 나온다', CF4-01·02 '키가 하나가 아니라 첫 배열을 실제 값으로 볼 수 없다', 기존 **HOT-390 redis 시험** '`@redis/client`가 서버 묶음에 들어 있다'(뒤 키가 앞을 덮어 redis가 묶였다). CF4-03·04는 통과(뒤 키가 여섯이라 OTel은 밖) |
+| M-10 | 배열에서 `'@peaket/platform'` 줄을 뺌 | 새로 | CF 전부, 빌드 시험 | 잡음 | CF4-01(열둘). 빌드 시험은 모두 통과(덩어리가 구현과 같다. 이 이름은 산출물에 몫이 없다는 계획 1의 3과 맞는다) |
+| M-11 | `instrumentation.ts`의 두 `import()`에 `/* turbopackIgnore: true */`, 설정은 구현 | 새로 | CF 전부, 빌드 시험, R-2 | 잡음 | CF4-03 '`.next/server` 아래에 startAppServerTelemetry를 정의한 덩어리가 없다', CF4-04 `core`·`exporter-trace-otlp-proto`·`resources`·`sdk-node`·`sdk-trace`(`api`는 standalone에 따로 실려 풀렸다). **R-2는 통과 2**(아래 '놓친 것' 2) |
+| M-12 | 구현 전 제품 파일 + `js-baseline.json`의 `web /` 175.2, `web /my/tickets` 160.9 | 구현 전 빌드 | CF 전부, R-1 한도 계산 | 잡음 | CF4-01~04 모두(M-01과 같은 단언). R-1은 `limits.mjs`의 `jsLimit`로 한도가 176.2·161.9가 되어 잰 값 176.1·161.9가 **통과**한다(길 마가 첫 JS 검사를 가린다는 뜻. Playwright로 돌리지 않고 계산했다) |
+| M-13 | 구현 빌드의 `standalone/apps/web/.next/node_modules/@opentelemetry/sdk-node-<해시>` 연결을 지움 | 구현 빌드 | 빌드 시험, R-2 | 잡음 | CF4-04 `['@opentelemetry/sdk-node']`. **R-2는 통과 2**(아래 '놓친 것' 2) |
+| X-01 | (보탬) 따옴표 붙은 둘째 키를 앞에: `'serverExternalPackages': [여섯],` 뒤에 원래 키(일곱) | 없음 | 소스 시험 | 잡음 | CF2-01 '키가 2번', CF4-01·02 '키가 하나가 아니라' |
+| X-02 | (보탬) platform 쪽만 `@opentelemetry/sdk-trace`를 `3.0.1`로 올림 | 없음 | 소스 시험 | 잡음 | CF4-02 '`@opentelemetry/sdk-trace` 판 적기가 다르다: web 3.0.0, platform 3.0.1' |
+| X-03 | (보탬) web 쪽만 `@opentelemetry/core`를 `^3.0.0`으로 | 없음 | 소스 시험 | 잡음 | CF4-02 '`@opentelemetry/core` 판 적기가 다르다' |
+| X-04 | (보탬) web 직접 의존성에서 `@opentelemetry/resources` 하나만 뺌(배열은 그대로) | 없음 | 소스 시험 | 잡음 | CF4-02 '`@opentelemetry/resources`이 apps/web/package.json dependencies에 없다'. 빌드는 하지 않았다(M-02로 보아 산출물은 구현과 같을 것으로 본다) |
+| X-05 | (보탬) 배열 이름 오타 `@opentelemetry/sdk-traces` | 없음 | 소스 시험 | 잡음 | CF4-01(다름), CF4-02 '`@opentelemetry/sdk-traces`이 packages/platform/package.json dependencies에 없다' |
+| X-06 | (보탬) 배열에 `@opentelemetry/sdk-node`를 두 번 | 없음 | 소스 시험 | 잡음 | CF4-01(정렬 비교가 겹침을 센다). CF4-02는 통과 |
+| X-07 | (보탬) 배열에 목록 밖 `@opentelemetry/sdk-metrics`를 더함 | 없음 | 소스 시험 | 잡음 | CF4-01(열넷), CF4-02 '`@opentelemetry/sdk-metrics`이 packages/platform/package.json dependencies에 없다' |
+| X-08 | (보탬) platform 텔레메트리 길(`telemetry-sdk.ts`)이 목록 밖 `@opentelemetry/instrumentation-http`를 가져와 `telemetry-app-server.ts`가 다시 내보냄(배열·의존성은 구현 그대로) | 새로 | CF 전부, 빌드 시험, R-1 | **CF4-01~04 놓침**, 기존 R170-8이 잡음 | CF4-01~04 통과(덩어리 50,176바이트 < 100kB, 여섯은 그대로 밖 부르기, `HttpInstrumentation`은 묶임). 묶인 `instrumentation-http`가 하위 의존성 `forwarded-parse`를 찾지 못해 운영 서버가 계측 훅을 싣지 못하고 모든 화면에 500으로 답해, R170-8('캐시 화면 요청이 5xx이고 로그에 까닭')이 92초 끝에 실패하고 R-1 측정 서버도 뜨지 않았다(아래 '놓친 것' 3) |
+| X-09 | (보탬, M-13의 까닭 확인) M-13에 더해 standalone 밖 `apps/web/.next/node_modules/@opentelemetry/sdk-node-<해시>`도 지움 | 구현 빌드 | R-2 | 잡음 | R-2 둘 다 실패: 'web 키 없음: 서버가 떠서 요청에 답했다', 'web: mesh로 떠서 요청에 답했다'. 로그는 `Failed to load external module @opentelemetry/sdk-node-573f…: ERR_MODULE_NOT_FOUND`. 같은 상태에서 키 없이 손으로 띄우니 서버가 떠 있고 `/`·`/login` 모두 500이었다 |
+
+- **합계**: 넣은 22개(목록 M-01~M-13 열셋, 보탬 X-01~X-09 아홉), 잡은 22개(어느 시험이든 하나 이상 실패). 이 묶음의 시험 CF4-01~04가 잡은 것은 21개이고, X-08 하나는 CF4-01~04가 모두 놓치고 기존 R170-8이 우연히 잡았다. 목록 M-01~M-13은 13개 모두 이 묶음의 시험이 잡았다.
+- **계획이 적은 '잡아야 할 시험'과 어긋난 것**(꼴은 다른 시험이 잡아 표본 판정은 바뀌지 않는다): M-02의 CF4-03(통과, 아래 '놓친 것' 1), M-11·M-13의 R-2(통과, 아래 '놓친 것' 2). 계획 M-12의 CF4-01~04는 제품 파일이 구현 전이라서 잡은 것이고, 기준선을 올린 것 자체를 보는 시험은 없다(R-1이 통과하는 것이 길 마의 성질이다).
+- **처음부터 통과하던 시험의 실패를 본 번호**(ADR-0281 결정 3): CF2-01은 M-09·X-01. 기존 HOT-390 redis 빌드 시험은 M-09. 기존 R170-8은 X-08. R-2(BAS-220 RV-08, V-T31 ② RV-08)는 X-09. CF4-01~04는 '실패 확인' 절의 구현 전 트리에 더해 여기서도 M-01·M-03·M-08로 넷 모두 다시 봤다. ASVS 13.4.1 소스 관리 폴더 시험은 이 묶음의 꼴과 닿지 않아 실패하게 하지 않았다(모든 빌드에서 통과).
+- **보탬 관찰**:
+  1. R-1(첫 JS)은 여섯 가운데 하나만 다시 묶이는 꼴(M-04 `sdk-node` 582kB가 묶여도, M-05 `api`)을 잡지 못한다. 모듈 번호가 여섯 자리로 넘어가지 않아 175.6·161.5 그대로다. 그래서 부분 되돌림은 CF4-03이 홀로 막는다(계획 6의 1과 같은 결: 첫 JS는 번호 문턱을 넘을 때만 움직인다).
+  2. M-09는 뒤 키가 앞을 덮어 OTel은 밖에 두어지고 redis가 묶였다. 키 하나 규칙(CF2-01)이 없으면 CF4-03·04만으로는 이 꼴을 못 막는다(HOT-390 redis 시험이 함께 막는다).
+
+### 놓친 것과 판정
+
+1. **M-02(직접 의존성 없이 배열에만 여섯)를 산출물 시험이 잡지 않는다**: 이 PC에서는 web 직접 의존성이 없어도 Turbopack이 여섯을 밖에 두고(덩어리 이름·크기가 구현과 같다) standalone에도 싣는다. platform이 가져올 때 platform 쪽 `node_modules`의 실제 경로로 풀리기 때문으로 본다(추정). 첫 JS·시작 확인도 구현과 같다. 그래서 계획 M-02의 '앱 폴더에서 찾지 못해 다시 묶는다'와 구현 커밋 주석의 직접 의존성 까닭은 이 빌드에서 확인되지 않았고, 이 꼴을 막는 것은 정본 문장을 지키는 CF4-02뿐이다.
+   - **판정: 보안 꼬리표 없음.** 까닭: 틀린 동작이 없다(산출물·첫 JS·시작이 구현과 같다). CF4-02는 정본(§5.18 'SDK 여섯을 직접 의존성으로')을 지키므로 시험은 그대로 둔다. 정본이 든 까닭(직접 의존성이 있어야 밖에 둔다)을 고칠지, 판 맞추기 쪽 까닭만 남길지는 계획 담당이 구간 끝에 RV-3과 함께 본다(감독이 정리 목록 후보로 올릴지 정한다).
+2. **M-11·M-13을 R-2(시작 확인)가 잡지 않는다**: `boot/production-start.test.mjs`는 standalone `server.js`를 저장소 안 자리(`apps/web/.next/standalone/apps/web`)에서 띄운다. 그래서 standalone에 없는 모듈이 위로 올라가 `apps/web/.next/node_modules/@opentelemetry/<이름>-<해시>`(standalone 밖 빌드 산출물)나 `apps/web/node_modules/@peaket/platform`(개발 설치)으로 풀려 서버가 그대로 뜬다(CF4-04가 standalone 안만 세는 것과 같은 까닭). X-09처럼 밖의 연결까지 지워야 R-2가 실패한다. CI도 같은 자리에서 띄우므로 같다. 계획 5의 R-2 문장과 리뷰 '운영 실행' 점의 'SDK 모듈을 읽지 못하면(모듈 없음 오류) 실패한다'는 이 자리에서는 맞지 않는다.
+   - **판정: 보안 꼬리표 없음.** 까닭: R-2는 서버 액션 키·추적 신뢰 판정을 보는 시험이지만, 그 판정 자체를 보는 힘은 줄지 않았다(구현 위에서 키 틀림·mesh를 그대로 가른다). 빠진 것은 짐 싣기이고, 이 묶음은 그것을 CF4-03·04로 막아 M-11·M-13을 잡았다. 실제 이미지에서 모듈이 빠져도 서버는 계측 훅을 싣지 못하고 모든 요청에 500으로 답해 키 확인 없이 화면을 내주지 않는다(X-09, 다만 프로세스가 끝나지 않고 떠 있다). 구간 끝 정리 후보로 'R-2를 standalone 밖이 보이지 않는 자리(복사본이나 `NODE_PATH` 없는 임시 폴더)에서 띄울지'와 '계측 훅 싣기 실패 때도 프로세스를 끝낼지'를 적는다. 이 때문에 standalone 짐 싣기는 CF4-04가 홀로 지키므로 리뷰 RV-1(CF4-04가 이름 그대로도 센다)의 무게가 조금 커진다(감독 판단 몫).
+3. **X-08(텔레메트리 길이 목록 밖 OTel 패키지를 가져옴)을 CF4-01~04가 잡지 않는다**: CF4-03이 고정 여섯의 밖 부르기와 100kB만 보아, 새로 묶인 작은 패키지(덩어리 50kB)는 통과한다. 이번 꼴은 그 패키지의 하위 의존성이 묶음에서 풀리지 않아 R170-8이 우연히 잡았을 뿐, 깨끗이 묶이는 패키지면 첫 JS 번호 문턱을 넘기 전까지 아무 시험도 잡지 않는다.
+   - **판정: 보안 꼬리표 없음.** 까닭: CF4-01~04는 ASVS 꼬리표가 없고 첫 JS·짐 싣기를 보는 시험이며, 놓친 꼴은 첫 JS 예산이나 시작 실패로 늦게 드러날 뿐 인증·출처·한도·포트 판정을 건너뛰게 하지 않는다. 리뷰 RV-2 ⓐ와 같은 빈틈이다(아래 겹침).
+- **흉내만 낸 것**: M-12의 R-1은 Playwright(`js.spec`)로 돌리지 않고 `jsLimit`로 한도만 계산해 잰 값과 견줬다. M-13·X-09는 빌드 산출물의 연결을 손으로 지운 것이다(구현 빌드로 다시 만들어 되돌렸다). M-06·M-07·X-02~X-07은 소스 시험만 돌렸다(M-06은 잠금 파일과 어긋나 `--frozen-lockfile` 설치가 되지 않는 꼴이라 빌드하지 않았다). R-1은 CI 명령(`pnpm run budgets`, 앱 다섯) 대신 web 하나를 띄운 scratchpad 측정이다. 최종 근거는 CI `web / budgets` 잡이다.
+- **리뷰와의 겹침**(위 결과를 다 쓴 뒤 맞췄다): 놓친 것 3은 RV-2 ⓐ와 같고, 이 검증이 빌드로 재현했다(덩어리 50,176바이트, 여섯은 그대로 밖). RV-1(이름 그대로의 사본)·RV-2 ⓑ(잠금 파일의 실제 판)·RV-3·RV-4는 넣어 보지 않았다. 놓친 것 1(직접 의존성 없이도 밖에 둔다)과 놓친 것 2(R-2가 standalone 밖으로 풀려 모듈 빠짐을 못 본다)는 리뷰에 없는 새 발견이다. 놓친 것 2는 리뷰 '운영 실행' 점의 문장과 어긋난다.
+- **같은 모델 새 맥락 사실**: 이 검증은 계획·구현·시험·리뷰 담당과 같은 모델(claude-opus-5-5)이 그들의 대화 맥락 없이 새 세션에서 했다(ADR-0270 결정 6, 소유자 결정 OPEN[40]). 받은 것은 감독이 준 공통 규칙, 이 계획 파일, 두 폴더와 scratchpad 측정 스크립트뿐이고 다른 담당의 보고는 받지 않았다. 계획 파일을 처음에 통째로 읽어 '리뷰' 절도 그때 눈에 들어왔으나, 꼴 고르기와 판정은 이 검증의 실행 결과로만 했고 겹침은 결과를 다 쓴 뒤 맞췄다.
+- **`cf4base` 정리**: 끝에 `git status --short`가 비었다(HEAD `a4ab2785` 그대로). `node_modules`는 `HEAD` 잠금 파일로 `pnpm install --offline --frozen-lockfile`한 상태(처음의 구현 전 설치에서 web 가져오기 항목 여섯이 더해졌다), `apps/web/.next`는 구현 그대로의 운영 빌드(01:14, 빌드 시험 8 통과·R-2 통과 2)다. 띄운 서버는 자기 PID만 끝냈고 남은 듣기 포트는 없다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -210,3 +261,4 @@
 | impl | w8l1-cifix4-impl-d61b0a37 | claude-opus-5-5 | 2026-11-17T00:15+09:00 | 2026-11-17T00:25+09:00 |
 | test | w8l1-cifix4-test-0e7c93a4 | claude-opus-5-5 | 2026-11-17T00:25+09:00 | 2026-11-17T00:40+09:00 |
 | review | w8l1-cifix4-review-5a93e2c7 | claude-opus-5-5 | 2026-11-17T00:41+09:00 | 2026-11-17T00:46+09:00 |
+| verify | w8l1-cifix4-verify-c48e1f06 | claude-opus-5-5 | 2026-11-17T00:47+09:00 | 2026-11-17T01:20+09:00 |
