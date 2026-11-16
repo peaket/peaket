@@ -152,6 +152,8 @@ export interface WebShellProps {
   peekSearchSuggestions?: (query: string) => readonly WebSearchSuggestion[] | null | undefined;
   /** 최근 검색어가 바뀌었을 때(앱이 저장한다) */
   onRecentSearchesChange?: (recent: string[]) => void;
+  /** 머리 검색창에 초점이 오거나 처음 글자를 칠 때(자동완성 모듈을 늦게 가져오기 시작한다, docs/frontend.md §5.8) */
+  onSearchActivate?: () => void;
   /** 머리 검색창의 처음 모양 */
   search?: WebShellSearch;
   /** 검색 모드 머리의 [취소]. 없으면 일반 머리로 돌아간다 */
@@ -192,6 +194,7 @@ export function WebShell({
   loadSearchSuggestions,
   peekSearchSuggestions,
   onRecentSearchesChange,
+  onSearchActivate,
   search,
   onSearchCancel,
   focus,
@@ -233,6 +236,7 @@ export function WebShell({
       getSuggestions={getSearchSuggestions}
       {...(loadSearchSuggestions ? { loadSuggestions: loadSearchSuggestions } : {})}
       {...(peekSearchSuggestions ? { peekSuggestions: peekSearchSuggestions } : {})}
+      {...(onSearchActivate ? { onActivate: onSearchActivate } : {})}
       {...(onRecentSearchesChange ? { onRecentChange: onRecentSearchesChange } : {})}
       queryFromUrl={search?.queryFromUrl ?? false}
       defaultValue={search?.defaultValue}

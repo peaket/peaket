@@ -110,6 +110,7 @@ export function AppShell({
         genres={SHELL_GENRES}
         loadSearchSuggestions={suggestSource.load}
         peekSearchSuggestions={suggestSource.peek}
+        onSearchActivate={suggestSource.warm}
         onRecentSearchesChange={save}
         search={{
           defaultValue: search?.defaultValue,

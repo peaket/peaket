@@ -65,6 +65,8 @@ export interface WebSearchBoxProps {
   loadSuggestions?: (query: string, signal: AbortSignal) => Promise<readonly WebSearchSuggestion[] | null>;
   /** 기다리지 않고 바로 답할 수 있으면 그 답(후보·null 창 없음), 요청해야 하면 undefined. 뼈대가 깜빡이지 않게 한다 */
   peekSuggestions?: (query: string) => readonly WebSearchSuggestion[] | null | undefined;
+  /** 입력에 초점이 오거나 처음 글자를 칠 때(앱이 자동완성 모듈을 늦게 가져오기 시작한다, docs/frontend.md §5.8). 여러 번 불릴 수 있다 */
+  onActivate?: () => void;
   /** 비동기 출처를 부르기 전에 기다리는 시간(ms, 기본 300 [가정]) */
   debounceMs?: number;
   /** 최근 검색어가 바뀌었을 때(앱이 저장한다) */
@@ -127,6 +129,7 @@ export function WebSearchBox({
   getSuggestions,
   loadSuggestions,
   peekSuggestions,
+  onActivate,
   debounceMs = 300,
   onRecentChange,
   queryFromUrl = false,
@@ -356,12 +359,16 @@ export function WebSearchBox({
           placeholder="공연, 아티스트, 공연장 검색"
           value={value}
           onChange={(e) => {
+            onActivate?.();
             setValue(e.target.value);
             setPreview(null);
             setOpen(true);
             setActive(-1);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            onActivate?.();
+            setOpen(true);
+          }}
           onKeyDown={onKeyDown}
         />
         {value ? (
