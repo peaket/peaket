@@ -65,3 +65,27 @@ test('자동완성 모듈을 받지 못하면 창을 띄우지 않고 던지지 
   assert.equal(out, null);
   assert.deepEqual(h.calls.server, []);
 });
+
+test('자동완성 후보를 고르면 선택 사건(종류·보인 목록의 1부터 위치)을 세고 곧바로 한 번 보낸다(BAT-165 첫 JS, V165-L9)', async () => {
+  // 고르면 화면을 옮기므로 떠날 때 보내기에 기대지 않고 바로 보낸다(ADR-0271 결정 16·20)
+  const log = [];
+  const fakeQuality = { suggestShown: () => log.push('shown'), suggestSelected: (kind, position) => log.push(`selected:${kind}:${position}`), flush: async () => log.push('flush'), resultsShown: () => {}, resultClick: () => {} };
+  const src = createSuggestionSource({
+    importAutocomplete: () => import('./autocomplete.ts'),
+    fetchSuggestions: async () => items('루멘 콘서트', '루멘 팬미팅', '루멘 앙코르'),
+    now: () => T0,
+    quality: (fn) => fn(fakeQuality),
+  });
+  src.warm();
+  const shown = await src.load('루멘', new AbortController().signal);
+  assert.equal(shown.length, 3);
+  log.length = 0;
+  src.selected(shown[2].href);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(log, ['selected:PRODUCTION:3', 'flush']);
+  // 보인 목록에 없는 주소는 세지도 보내지도 않는다
+  log.length = 0;
+  src.selected('/search?q=x');
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(log, []);
+});

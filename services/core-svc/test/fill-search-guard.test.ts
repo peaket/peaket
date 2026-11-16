@@ -40,6 +40,8 @@ describe('채우기 스크립트 환경 확인', () => {
       'postgres://u:p@127.0.0.1:1/peaket?host=10.0.0.5',
       'postgres://u:p@127.0.0.1:1/peaket?host=/var/run/postgresql',
       'postgres://u:p@:1/peaket',
+      // 여러 호스트(쉼표): 첫 호스트가 로컬이어도 멈춘다(ADR-0271 결정 21 '여럿이면 멈춘다', V165-L3)
+      'postgres://u:p@127.0.0.1:1/peaket?host=127.0.0.1,db.internal',
     ]) {
       const r = run({ PEAKET_ENV: 'local', PEAKET_DATABASE_URL: url });
       expect({ url, stopped: r.code !== 0, why: /호스트|host/i.test(r.text), attempted: attempted.test(r.text) }).toEqual({ url, stopped: true, why: true, attempted: false });
