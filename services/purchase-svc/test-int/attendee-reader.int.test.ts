@@ -1,14 +1,15 @@
 // A2-17 J-T26 ④(W7-audit): purchase 예매자 명단 원천(DrizzleAttendeeReader)은 SOLD 좌석이 없는 주문을 걸러서 한 페이지가 limit보다 적거나 0건이어도
 // 정확한 nextCursor를 준다. 끝은 nextCursor가 null일 때뿐이다(docs/api/guidelines.md §3, docs/features/settlement.md §9). 실제 PostgreSQL 18.
-// 주문·좌석 행은 저장소를 거치지 않고 표에 직접 넣는다(이 시험은 읽기 쪽만 본다).
+// 주문·좌석 행은 저장소를 거치지 않고 표에 직접 넣는다(이 시험은 읽기 쪽만 본다). 주문 행은 상태 이력 지연 제약(order_status_has_event, 0003)을
+// 지키려고 같은 트랜잭션에 이력 행(번호 = event_seq, 도착 = status)을 함께 넣는다.
 import { randomUUID } from 'node:crypto';
 import { createDatabase, fakeClock, type Database } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
 import { DrizzleAttendeeReader } from '../src/modules/booking/adapters/db/drizzle-attendee-reader.js';
-import { orderItem, purchaseOrder } from '../src/modules/booking/adapters/db/schema.js';
+import { orderEvent, orderItem, purchaseOrder } from '../src/modules/booking/adapters/db/schema.js';
 import { seatSale } from '../src/modules/inventory/index.js';
-import { BASE_MS, newOrderInput } from './order-fixtures.js';
+import { BASE_MS, newOrderInput, SAGA } from './order-fixtures.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 
 let server: PostgresContainer;
@@ -21,21 +22,24 @@ async function paidOrder(eventId: string, seat: 'SOLD' | 'RETURNED'): Promise<st
   clock.advance(1_000); // 주문 ID(UUIDv7)가 넣은 차례로 커지게 한다
   const o = newOrderInput(clock, { eventId, items: [{ seatId: randomUUID(), tierId: 'R', sectionId: 'SEC-A', unitPrice: 99_000 }] });
   const it = o.items[0]!;
-  await admin.db.insert(purchaseOrder).values({
-    id: o.id,
-    accountId: o.accountId,
-    eventId,
-    status: 'CONFIRMED',
-    amount: o.amount,
-    eventSeq: 1,
-    buyerName: o.buyerName,
-    buyerPhone: o.buyerPhone,
-    idempotencyKey: o.idempotencyKey,
-    consentVersion: o.consentVersion,
-    seatAssignment: o.seatAssignment,
-    createdAt: new Date(clock.now()),
-    holdId: o.holdId,
-    purchaseSessionId: o.purchaseSessionId,
+  await admin.transaction(async (tx) => {
+    await tx.insert(purchaseOrder).values({
+      id: o.id,
+      accountId: o.accountId,
+      eventId,
+      status: 'CONFIRMED',
+      amount: o.amount,
+      eventSeq: 1,
+      buyerName: o.buyerName,
+      buyerPhone: o.buyerPhone,
+      idempotencyKey: o.idempotencyKey,
+      consentVersion: o.consentVersion,
+      seatAssignment: o.seatAssignment,
+      createdAt: new Date(clock.now()),
+      holdId: o.holdId,
+      purchaseSessionId: o.purchaseSessionId,
+    });
+    await tx.insert(orderEvent).values({ orderId: o.id, seq: 1, fromStatus: null, toStatus: 'CONFIRMED', cause: 'T18', actor: SAGA, occurredAt: new Date(clock.now()) });
   });
   await admin.db.insert(orderItem).values({ orderId: o.id, lineNo: 1, seatId: it.seatId, tier: it.tierId, sectionId: it.sectionId, unitPrice: it.unitPrice });
   await admin.db.insert(seatSale).values({ eventId, seatId: it.seatId, orderId: o.id, accountId: o.accountId, status: seat });

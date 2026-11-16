@@ -375,18 +375,24 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 - 요약: 새로 쓰거나 고쳐 쓴 시험 36개 가운데 실패 29개(뼈대 '아직 없음' 11, 마이그레이션 파일 없음 1, 단언 17), 처음부터 통과 7개(A2-19 ⑤ 404·410, COV2-06 ⑨, SEC-06R ①~⑤).
 - `node tools/ci/trace-check.mjs --ids "J-T26,SEC-06R,COV2-06,A2-17,A2-19" --report <core 단위 JSON 보고서>`는 통과(0)였다. 세부 번호가 아니라 ID만 세므로 이 단계에서는 뜻이 없다. 구현 뒤 게이트에서 다시 본다.
 
-### 통합 시험: 아직 안 돌림(도커 잠금 대기)
+### 통합 시험(도커 잠금 아래 2026-11-16 08:52 KST부터 돌림)
 
-| 시험 | 돌릴 명령 | 필요한 것 | 예상 |
-| --- | --- | --- | --- |
-| A2-17 J-T26 ④ purchase 명단 원천은 SOLD 좌석이 없는 주문을 걸러도 다음 커서를 준다 | `pnpm --dir D:/ticketpass-lane3/services/purchase-svc test:integration -- test-int/attendee-reader.int.test.ts` | Docker(PostgreSQL) | 처음부터 통과(코드를 읽어 본 예상) |
-| A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 attendee_export도 남지 않는다 · A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD 행이 들어가고 모양이 틀리면 CHECK가 거절한다 · A2-19 core_partner는 접속기록을 고치거나 지우지 못하고 다른 테넌트 행을 읽지 못한다 [ASVS v5.0.0-8.4.1] | `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/export-audit.int.test.ts` | Docker(PostgreSQL) | 앞의 둘은 실패(뼈대·0021 없음), 셋째는 `recordView` 뼈대 때문에 실패 |
-| COV2-06 ⑪ Drizzle 익명화는 그 계정 행만 바꾸고 다시 해도 0건이다 | `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/review-withdrawn.int.test.ts` | Docker(PostgreSQL) | 아래 '확인할 것 1' 때문에 실패할 것으로 보인다 |
-| COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다 | `pnpm --dir D:/ticketpass-lane3/services/core-svc test:integration -- test-int/review-withdrawn-consumer.int.test.ts` | Docker(PostgreSQL + Kafka 컨테이너), 네이티브 Kafka 모듈(이 PC에서 막히면 CI만) | 실패(`startCoreConsumers` 뼈대) |
+명령은 각 패키지 폴더에서 `npx vitest run --config vitest.integration.config.mjs <파일>`이다. **주의**: 계획에 적은 `pnpm … test:integration -- <파일>`은 vitest에 `-- <파일>`로 넘어가 파일 거르기가 먹지 않고 그 패키지의 통합 시험 전체가 돌았다(purchase-svc에서 그 파일이 띄우지 않는 Valkey 컨테이너까지 떠서 알았다. 멈추고 남은 시험 컨테이너를 지웠다).
+
+| 시험 | 명령(패키지 폴더) | 필요한 것 | 결과 | 까닭 |
+| --- | --- | --- | --- | --- |
+| A2-17 J-T26 ④ purchase 명단 원천은 SOLD 좌석이 없는 주문을 걸러도 다음 커서를 준다 | purchase-svc `npx vitest run --config vitest.integration.config.mjs test-int/attendee-reader.int.test.ts` | Docker(PostgreSQL) | **처음부터 통과(이미 있는 동작)** 1/1 | 처음 돌릴 때는 시험 준비가 상태 이력 지연 제약(`order_status_has_event`, 0003)에 걸려 23514였다. 시험 쪽만 고쳐(주문 행과 이력 행을 한 트랜잭션에 넣음) 다시 돌렸다 |
+| A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 attendee_export도 남지 않는다 | core-svc `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts` | Docker(PostgreSQL) | 실패 | 뼈대 '아직 없음'(`recordExport`). 먼저 넣는 충돌 행은 core_partner로 들어갔다 |
+| A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD 행이 들어가고 모양이 틀리면 CHECK가 거절한다 | 〃 | 〃 | 실패 | 뼈대 '아직 없음'(`recordView`). 0021도 아직 없다 |
+| A2-19 core_partner는 접속기록을 고치거나 지우지 못하고 다른 테넌트 행을 읽지 못한다 [ASVS v5.0.0-8.4.1] | 〃 | 〃 | 실패 | 뼈대 '아직 없음'(`recordView`로 행을 만드는 첫 줄) |
+| COV2-06 ⑪ Drizzle 익명화는 그 계정 행만 바꾸고 다시 해도 0건이다 | core-svc `npx vitest run --config vitest.integration.config.mjs test-int/review-withdrawn.int.test.ts` | Docker(PostgreSQL) | 실패 | 단언 밖 DB 오류 42501(권한 없음): core_app이 `review`를 UPDATE하지 못한다. 계획은 '처음부터 통과 예상'이었다. 아래 '확인할 것 1'이 맞았다 |
+| COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다 | core-svc `npx vitest run --config vitest.integration.config.mjs test-int/review-withdrawn-consumer.int.test.ts` | Docker(PostgreSQL + Kafka), 네이티브 Kafka 모듈 | 실패 | 뼈대 '아직 없음'(`startCoreConsumers`). 이 PC에서 네이티브 Kafka 모듈이 막히지 않았다(Kafka 컨테이너·토픽·생산자 연결까지 됐다). 처음에는 소비자를 `beforeAll`에서 켜 시험이 '건너뜀'으로 보였으므로 켜기를 시험 안으로 옮겨 이 시험의 실패로 남겼다(시험 쪽만 고침). 구현 뒤에도 '확인할 것 1'(review UPDATE·held_event INSERT 권한)에 걸릴 것이다 |
+
+- 통합 합계: 6개 가운데 실패 5(뼈대 4, 권한 42501 1), 처음부터 통과 1. 돌린 뒤 이 갈래 시험 컨테이너는 남지 않았다(`docker ps`).
 
 - 시험 도우미: 새 `services/core-svc/test-int/kafka.ts`(queue-svc의 것에서 `startKafka`·`until`만 옮김).
 
 ### 확인할 것(계획 담당·감독에게)
 
-1. **core_app에는 review·held_event 쓰기 권한이 없다.** 0004가 `GRANT SELECT ON ALL TABLES … TO core_app`만 주고, 0013(review)·0000(held_event)과 그 뒤 마이그레이션에 core_app 쓰기 권한이 없다(`grep -n GRANT services/core-svc/migrations/*.sql`). 계획 §4의 `CoreConsumersOptions.database`는 core_app이고 `main.ts`도 core_app으로 붙으므로, ⑪(계획은 '처음부터 통과 예상')과 ⑫는 운영과 같은 core_app 로그인으로 써 두었다. 그대로면 `UPDATE review`와 `INSERT held_event`가 42501로 실패할 것이다. 계획 §4는 '마이그레이션 없음'이라 구현 담당이 막힌다. 권한 마이그레이션(예: core_app에 review의 익명화 칸 UPDATE, held_event 넣기·다시 처리 권한)을 계획에 더할지 정해야 한다. 같은 까닭으로 지금의 후기 쓰기 경로(`POST /v1/events/{id}/reviews`)도 운영 역할에서는 실패할 수 있다(기존 `test-int/review.int.test.ts`는 슈퍼유저로 붙어 드러나지 않았다). 이 묶음 범위 밖이면 따로 적어 둔다.
+1. **core_app에는 review·held_event 쓰기 권한이 없다(통합 시험 ⑪이 42501로 확인, 2026-11-16).** 0004가 `GRANT SELECT ON ALL TABLES … TO core_app`만 주고, 0013(review)·0000(held_event)과 그 뒤 마이그레이션에 core_app 쓰기 권한이 없다(`grep -n GRANT services/core-svc/migrations/*.sql`). 계획 §4의 `CoreConsumersOptions.database`는 core_app이고 `main.ts`도 core_app으로 붙으므로, ⑪(계획은 '처음부터 통과 예상')과 ⑫는 운영과 같은 core_app 로그인으로 써 두었다. 그대로면 `UPDATE review`와 `INSERT held_event`가 42501로 실패할 것이다. 계획 §4는 '마이그레이션 없음'이라 구현 담당이 막힌다. 권한 마이그레이션(예: core_app에 review의 익명화 칸 UPDATE, held_event 넣기·다시 처리 권한)을 계획에 더할지 정해야 한다. 같은 까닭으로 지금의 후기 쓰기 경로(`POST /v1/events/{id}/reviews`)도 운영 역할에서는 실패할 수 있다(기존 `test-int/review.int.test.ts`는 슈퍼유저로 붙어 드러나지 않았다). 이 묶음 범위 밖이면 따로 적어 둔다.
 2. 0021 시험은 CHECK 글을 표 이름 접두·따옴표·공백을 지운 뒤 계획의 글(`action in ('LIST','DOWNLOAD')`, `(action = 'DOWNLOAD' and export_id is not null and reason is not null and format is not null) or (action = 'LIST' and export_id is null and reason is null and format is null)`)로 견준다. 뜻이 같은 다른 글로 쓰면 '시험 이의'로 알려 달라.

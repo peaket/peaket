@@ -37,7 +37,8 @@ let pg: PostgresContainer;
 let admin: Database;
 let app: Database;
 let producer: KafkaProducer;
-let consumers: CoreConsumers;
+let reviews: Reviews;
+let consumers: CoreConsumers | undefined;
 
 beforeAll(async () => {
   [kafka, pg] = await Promise.all([startKafka(), startPostgres()]);
@@ -47,7 +48,7 @@ beforeAll(async () => {
   await kafka.createTopic(TOPIC, 1);
   producer = createKafkaProducer({ brokers: kafka.brokers, clientId: 'it-producer', kind: 'default' });
   await producer.connect();
-  const reviews = new Reviews({
+  reviews = new Reviews({
     store: new DrizzleReviewStore(app),
     events: new MemoryReviewEventDirectory(new MemoryCatalogRepository()),
     eligibility: new MemoryReviewEligibility(),
@@ -56,16 +57,6 @@ beforeAll(async () => {
     cases: new MemoryReviewCaseSink(),
     clock: systemClock,
   });
-  consumers = startCoreConsumers({
-    env: ENV,
-    brokers: kafka.brokers,
-    clientId: 'core-svc-ci-it',
-    database: app,
-    handler: new ReviewAccountWithdrawnHandler(reviews),
-    commitEveryMs: 200,
-    measureHeldEveryMs: 200,
-  });
-  await consumers.started;
 }, 180_000);
 
 afterAll(async () => {
@@ -102,6 +93,18 @@ describe('COV2-06 core 탈퇴 소비자(실제 Kafka)', () => {
   test(
     'COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다',
     async () => {
+      // 소비자는 시험 안에서 켠다(켜기가 실패하면 이 시험의 실패로 남게)
+      consumers = startCoreConsumers({
+        env: ENV,
+        brokers: kafka.brokers,
+        clientId: 'core-svc-ci-it',
+        database: app,
+        handler: new ReviewAccountWithdrawnHandler(reviews),
+        commitEveryMs: 200,
+        measureHeldEveryMs: 200,
+      });
+      await consumers.started;
+
       const A = randomUUID();
       const reviewId = await seedReview(A);
       const withdrawnAt = new Date().toISOString();
