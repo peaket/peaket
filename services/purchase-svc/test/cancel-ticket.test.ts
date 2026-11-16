@@ -257,10 +257,13 @@ describe('취소 Saga', () => {
   });
 
   test('GAT080_티켓이_REFUND_AFTER_CLOSE여도_공연_시작_뒤면_견적이_EVENT_STARTED로_먼저_거절한다', async () => {
-    // 티켓의 after-close 근거가 공연 시작 거절을 덮어쓰면 안 된다(키 폐기·좌석 반환도 하지 않는다)
+    // 티켓의 after-close 근거가 공연 시작 거절을 덮어쓰면 안 된다(키 폐기·좌석 반환도 하지 않는다).
+    // 공연 시작 뒤에는 ticket-svc를 아무 행도 바꾸지 않는 확인(replay_only)으로 한 번만 부른다(리뷰 B2 보충, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우').
+    // 첫 팬 취소 칸이 없는 답은 잇지 않는다
     const { svc, tickets, payments, writes, seats } = saga({ ticket: 'REFUND_AFTER_CLOSE' });
     expect(await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: EVENT, deadlineMs: 2000 })).toEqual({ status: 'EVENT_STARTED' });
-    expect(tickets.calls).toHaveLength(0);
+    expect(tickets.calls).toHaveLength(1);
+    expect(tickets.calls[0]).toMatchObject({ cancellationId: CANCEL, replayOnly: true });
     expect(seats.calls).toHaveLength(0);
     expect(writes.created).toHaveLength(0);
     expect(payments.calls).toHaveLength(0);
