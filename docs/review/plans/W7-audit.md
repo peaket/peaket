@@ -527,6 +527,14 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 
 - **통합 시험 결과(10:22 KST 도커 잠금 아래)**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts` 시험 4개 가운데 실패 3, 통과 1. 위 R2 시험 말고도 둘이 실패한다. 'A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 …'은 준비의 직접 넣기가 `source_ip` 칸 없음(42703)이다. 'A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD …'는 저장소로 넣은 두 행은 맞게 읽혔지만, 틀린 모양 넣기에서 23514 대신 42703이 난다. 셋 다 0021에 `source_ip`가 생기면 풀려야 한다. 'A2-19 core_partner는 …'은 통과했다. 이 갈래 시험 컨테이너는 남지 않았다(`docker ps -a`).
 
+## 시험 이의
+
+- **누가·언제**: 구현 담당(세션 `l3w7-audit-impl`), 2026-11-16. 리뷰 반영 R2(계획 §2 'R2 보충')를 구현하다 찾았다.
+
+| 시험 | 파일:줄 | 무엇이 틀렸나 | 근거 | 바라는 고침(시험 담당 몫) | 멈춘 것 |
+| --- | --- | --- | --- | --- | --- |
+| `A2-19 R2 J-T26 ⑥ 내려받기 접속기록에도 접속지를 남기고 이력 응답에는 싣지 않는다 — POST·GET …/attendee-exports`, 그리고 같은 파일의 기존 `J-T26 ① 사유가 없으면 거절되고, 사유·건수는 이력에 남는다`·`J-T26 ② XLSX는 ZIP 머리로 시작하고 파일 이름이 붙는다` | `services/core-svc/test/export.test.ts` 22~28줄(시험 도우미 `FailableExportStore`) | 도우미의 `override async recordExport(record)`가 둘째 인자(접속지)를 받지 않고 `super.recordExport(record)`로 버린다. 그래서 메모리 저장소가 DOWNLOAD 접속기록에 접속지를 붙일 수 없고(R2 ⑥ HTTP 단언 `audits.at(-1).clientIp`가 될 수 없다), 계획대로 둘째 인자를 필수로 하면 `access`가 `undefined`라 내려받기가 500이 되어 기존 ①②도 실패한다. typecheck도 이 줄에서 `TS2554: Expected 2 arguments, but got 1`이다(뼈대가 둘째 인자를 선택으로 두어 시험 단계에서는 드러나지 않았다) | 계획 §2 'R2 보충' 공개 인터페이스 `recordExport(record, access: { clientIp: string })`(필수), 메모리 저장소 `audits`에 받은 접속지를 붙인다 | 도우미가 둘째 인자를 받아 넘긴다: `override async recordExport(record: AttendeeExportRecord, access: { clientIp: string }): Promise<void> { if (this.failExport) throw new Error('audit-down'); return super.recordExport(record, access); }` | 이 세 시험만 실패로 남는다. 제품 코드는 계획 인터페이스대로(둘째 인자 필수) 두었다. 둘째 인자를 선택으로 되돌려 시험을 맞추지 않았다(빠진 접속지가 fail-open이 된다) |
+
 ## 리뷰
 
 - **누가·언제**: 리뷰 담당(세션 `l3w7-audit-review`), 2026-11-16. 짧은 대조 리뷰(docs/architecture.md §8.6 4의 5). 본 것: 지시서, 이 파일의 `## 계획`·`## 실패 확인`, `git diff 853758eb..e727395a`(drizzle 스냅숏 제외), 커밋 꼬리말, 계획이 가리킨 정본 줄(settlement.md §9·J-T26, data.md §2·§6, guidelines.md §3, streaming.md §2.6, identity.md §8, asvs 두 표, data-classification). 구현 담당의 설명은 받지 않았다. 시험은 돌리지 않았다(통합 시험 결과는 검증 담당 몫).
