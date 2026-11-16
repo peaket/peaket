@@ -143,7 +143,7 @@ export function operatorCancelResultOf(t: Pick<TicketRecord, 'status' | 'account
   return 'CANCELED';
 }
 
-// ---- 회차 취소 표 끝내기(ticket.proto EventCancelTickets, BAT-420 GAT-110 E)·입장 기록 대조(GetEntryRecords, GAT-090 A). 빈 뼈대 ----
+// ---- 회차 취소 표 끝내기(ticket.proto EventCancelTickets, BAT-420 GAT-110 E)·입장 기록 대조(GetEntryRecords, GAT-090 A) ----
 
 /** 한 번에 회차 취소로 끝내는 표 상한 200장 [가정](ticket.proto EventCancelTicketsRequest) */
 export const EVENT_CANCEL_MAX_TARGETS = 200;
@@ -179,14 +179,36 @@ export interface EntryRecord {
   readonly firstEnteredAtMs?: number;
 }
 
-/** 소문자 UUID, 대상 1~200, 같은 표 두 번 금지. @throws TicketInputError (BAT-420 빈 뼈대) */
-export function normalizeEventCancelInput(_i: EventCancelInput): EventCancelInput {
-  throw new Error('아직 없음');
+/** 회차 취소가 그대로 두는 이미 끝난 상태(환급·무효). 나머지 다섯(ISSUED·ACTIVE·TRANSFER_PENDING·CANCEL_REQUESTED·FLAGGED)은 끝낸다 */
+export const EVENT_CANCEL_ENDED_STATUSES: ReadonlySet<TicketStatus> = new Set(['REFUNDED', 'VOIDED']);
+
+/** 소문자 UUID, 대상 1~200, 같은 표 두 번 금지. @throws TicketInputError */
+export function normalizeEventCancelInput(i: EventCancelInput): EventCancelInput {
+  const cancellationRequestId = requireLowerUuid('cancellationRequestId', i.cancellationRequestId);
+  const eventId = requireLowerUuid('eventId', i.eventId);
+  if (!Array.isArray(i.targets) || i.targets.length < 1 || i.targets.length > EVENT_CANCEL_MAX_TARGETS) throw new TicketInputError(`targets는 1~${EVENT_CANCEL_MAX_TARGETS}장이어야 한다`);
+  const seen = new Set<string>();
+  const targets = i.targets.map((t) => {
+    const ticketId = requireLowerUuid('ticketId', t.ticketId);
+    const cancellationId = requireLowerUuid('cancellationId', t.cancellationId);
+    if (seen.has(ticketId)) throw new TicketInputError('같은 표를 두 번 줄 수 없다');
+    seen.add(ticketId);
+    return { ticketId, cancellationId };
+  });
+  if (!Number.isFinite(i.nowMs) || i.nowMs < 0) throw new TicketInputError('nowMs가 올바르지 않다');
+  return { cancellationRequestId, eventId, targets, nowMs: i.nowMs };
 }
 
-/** 소문자 UUID, 1~100, 중복 금지. @throws TicketInputError (BAT-420 빈 뼈대) */
-export function normalizeEntryRecordsInput(_ticketIds: readonly string[]): readonly string[] {
-  throw new Error('아직 없음');
+/** 소문자 UUID, 1~100, 중복 금지. @throws TicketInputError */
+export function normalizeEntryRecordsInput(ticketIds: readonly string[]): readonly string[] {
+  if (!Array.isArray(ticketIds) || ticketIds.length < 1 || ticketIds.length > ENTRY_RECORDS_MAX_TICKETS) throw new TicketInputError(`ticketIds는 1~${ENTRY_RECORDS_MAX_TICKETS}장이어야 한다`);
+  const seen = new Set<string>();
+  return ticketIds.map((v) => {
+    const ticketId = requireLowerUuid('ticketId', v);
+    if (seen.has(ticketId)) throw new TicketInputError('같은 표를 두 번 줄 수 없다');
+    seen.add(ticketId);
+    return ticketId;
+  });
 }
 
 export interface ListTicketsInput {

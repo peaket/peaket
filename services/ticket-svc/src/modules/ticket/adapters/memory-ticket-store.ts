@@ -7,6 +7,7 @@ import {
   type EntryRecord,
   type EventCancelInput,
   type EventCancelOutcome,
+  EVENT_CANCEL_ENDED_STATUSES,
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
@@ -46,6 +47,10 @@ export class MemoryTicketStore implements TicketStore {
   readonly fanCancels = new Map<string, NonNullable<CancelTicketOutcome['first']>>();
   /** 들어감·통과 스캔 기록이 있는 표(scan_event IN·PASS의 대역) */
   readonly entries = new Set<string>();
+  /** 표마다 스캔 기록(scan_event의 대역: 방향·결과·기기 시각) */
+  readonly scans = new Map<string, { direction: 'IN' | 'OUT'; result: 'PASS' | 'REJECT'; atMs: number }[]>();
+  /** (cancellation_id, ticket_id) → 회차 취소 결과(ticket_cancellation의 EVENT_CANCELED 대역). 끝낸 표만 남긴다 */
+  readonly eventCancellations = new Map<string, EventCancelOutcome>();
 
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
     const key = issueKey(input.orderId, input.issueGeneration);
@@ -134,19 +139,42 @@ export class MemoryTicketStore implements TicketStore {
     });
   }
 
-  /** 회차 취소 표 끝내기(BAT-420 GAT-110 E, 빈 뼈대) */
-  async eventCancel(_input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
-    throw new Error('아직 없음');
+  /**
+   * 회차 취소 표 끝내기(BAT-420 GAT-110 E). 없는 표·다른 회차 표가 하나라도 있으면 아무것도 바꾸지 않고 던진다(DB 트랜잭션째 되돌림과 같다).
+   * (cancellation_id, ticket_id) 기록이 있으면 처음 결과를 준다. 환급·무효인 표는 그대로 두고 기록하지 않는다
+   */
+  async eventCancel(input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
+    for (const target of input.targets) {
+      const t = this.tickets.get(target.ticketId);
+      if (!t || t.eventId !== input.eventId) throw new TicketInputError('없는 표이거나 다른 회차의 표다');
+    }
+    return input.targets.map((target) => {
+      const recorded = this.eventCancellations.get(cancelKey(target.cancellationId, target.ticketId));
+      if (recorded) return recorded;
+      const t = this.tickets.get(target.ticketId)!;
+      if (EVENT_CANCEL_ENDED_STATUSES.has(t.status)) return { ticketId: t.ticketId, result: 'ALREADY_ENDED', orderId: t.orderId, holderAccountId: t.accountId, transferWithdrawn: false };
+      const transferWithdrawn = t.transferPending || t.status === 'TRANSFER_PENDING';
+      this.#put({ ...t, status: 'REFUNDED', transferPending: false, keyRevokedAtMs: input.nowMs, version: t.version + 1 });
+      const outcome: EventCancelOutcome = { ticketId: t.ticketId, result: 'CANCELED', orderId: t.orderId, holderAccountId: t.accountId, transferWithdrawn };
+      this.eventCancellations.set(cancelKey(target.cancellationId, target.ticketId), outcome);
+      return outcome;
+    });
   }
 
-  /** 입장 기록 대조(BAT-420 GAT-090 A, 빈 뼈대) */
-  async entryRecords(_ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
-    throw new Error('아직 없음');
+  /** 입장 기록 대조(BAT-420 GAT-090 A): 들어감(IN)·통과(PASS) 스캔만 입장으로 센다. 읽기만, 요청 차례 */
+  async entryRecords(ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
+    return ticketIds.map((ticketId) => {
+      if (!this.tickets.has(ticketId)) return { ticketId, found: false, entered: false };
+      const passes = (this.scans.get(ticketId) ?? []).filter((s) => s.direction === 'IN' && s.result === 'PASS').map((s) => s.atMs);
+      if (passes.length === 0) return { ticketId, found: true, entered: false };
+      return { ticketId, found: true, entered: true, firstEnteredAtMs: Math.min(...passes) };
+    });
   }
 
-  /** 시험 씨앗(BAT-420 GAT-090 A, 빈 뼈대): 그 표에 스캔 한 건(방향·결과·시각)을 남긴다(scan_event의 대역) */
-  recordScan(_ticketId: string, _direction: 'IN' | 'OUT', _result: 'PASS' | 'REJECT', _atMs: number): void {
-    throw new Error('아직 없음');
+  /** 시험 씨앗(BAT-420 GAT-090 A): 그 표에 스캔 한 건(방향·결과·시각)을 남긴다(scan_event의 대역). 들어감·통과면 운영자 취소의 입장 기록도 된다 */
+  recordScan(ticketId: string, direction: 'IN' | 'OUT', result: 'PASS' | 'REJECT', atMs: number): void {
+    this.scans.set(ticketId, [...(this.scans.get(ticketId) ?? []), { direction, result, atMs }]);
+    if (direction === 'IN' && result === 'PASS') this.entries.add(ticketId);
   }
 
   /** 시험 씨앗: 그 표에 들어감(IN)·통과(PASS) 스캔 기록이 있는 것으로 둔다(운영자 취소의 SKIPPED_ENTRY_RECORDED) */

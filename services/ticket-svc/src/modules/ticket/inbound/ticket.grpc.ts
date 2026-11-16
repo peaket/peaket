@@ -1,5 +1,5 @@
 // 받는 쪽: gRPC TicketService(docs/api/proto/peaket/ticket/v1/ticket.proto)의 최소 처리기(BUILD_ORDER HOT-160).
-// IssueTickets·CancelTickets·ListTickets만 채운다. 나머지 RPC는 grpc-js가 UNIMPLEMENTED로 답한다.
+// IssueTickets·CancelTickets·OperatorCancelTickets·EventCancelTickets·GetEntryRecords·CheckReviewEligibility·ListTickets를 채운다. 나머지 RPC는 grpc-js가 UNIMPLEMENTED로 답한다.
 // 오류: TicketInputError → INVALID_ARGUMENT, TicketConflictError → FAILED_PRECONDITION, 그 밖 → INTERNAL.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
@@ -140,6 +140,49 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
           });
         })
         .catch((err: unknown) => fail('OperatorCancelTickets', err, undefined, cb, onError));
+    },
+
+    // 회차 취소 일괄 환불의 티켓 단계(BAT-420 GAT-110 E, R-T24). 오류는 TicketInputError → INVALID_ARGUMENT. 답은 요청 차례다
+    EventCancelTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      const req = call.request;
+      const targets = Array.isArray(req.targets) ? (req.targets as Req[]) : [];
+      useCases.ticket
+        .eventCancel({
+          cancellationRequestId: text(req.cancellation_request_id),
+          eventId: text(req.event_id),
+          targets: targets.map((t) => ({ ticketId: text(t.ticket_id), cancellationId: text(t.cancellation_id) })),
+          nowMs: useCases.nowMs?.() ?? Date.now(),
+        })
+        .then((outcomes) => {
+          cb(null, {
+            outcomes: outcomes.map((x) => ({
+              ticket_id: x.ticketId,
+              result: `EVENT_CANCEL_RESULT_${x.result}`,
+              order_id: x.orderId,
+              holder_account_id: x.holderAccountId,
+              transfer_withdrawn: x.transferWithdrawn,
+            })),
+          });
+        })
+        .catch((err: unknown) => fail('EventCancelTickets', err, undefined, cb, onError));
+    },
+
+    // 입장 기록 대조(BAT-420 GAT-090 A, P-T19). 읽기만 한다. 답은 요청 차례이고 입장이 없으면 first_entered_at을 비운다
+    GetEntryRecords: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      const req = call.request;
+      useCases.ticket
+        .entryRecords(Array.isArray(req.ticket_ids) ? req.ticket_ids.map(text) : [])
+        .then((records) => {
+          cb(null, {
+            records: records.map((x) => ({
+              ticket_id: x.ticketId,
+              found: x.found,
+              entered: x.entered,
+              ...(x.firstEnteredAtMs !== undefined ? { first_entered_at: timestampOf(x.firstEnteredAtMs) } : {}),
+            })),
+          });
+        })
+        .catch((err: unknown) => fail('GetEntryRecords', err, undefined, cb, onError));
     },
 
     CheckReviewEligibility: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {

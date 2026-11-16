@@ -9,6 +9,7 @@ import {
   type EntryRecord,
   type EventCancelInput,
   type EventCancelOutcome,
+  EVENT_CANCEL_ENDED_STATUSES,
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
@@ -44,6 +45,9 @@ export interface DrizzleTicketStoreOptions {
   /** 없으면 기기 키를 폐기하지 않는다(단위 시험·구성 전) */
   readonly deviceKeys?: DeviceKeyRevoker;
 }
+
+/** ticket_cancellation.result의 회차 취소 값(팬 취소의 REFUND_NOW·REFUND_AFTER_CLOSE와 따로 센다) */
+const EVENT_CANCELED = 'EVENT_CANCELED';
 
 const statusOf = (v: string): TicketStatus => {
   if (v === 'ISSUED' || v === 'ACTIVE' || v === 'TRANSFER_PENDING' || v === 'CANCEL_REQUESTED' || v === 'REFUNDED' || v === 'FLAGGED' || v === 'VOIDED') return v;
@@ -282,14 +286,76 @@ export class DrizzleTicketStore implements TicketStore {
     }
   }
 
-  /** 회차 취소 표 끝내기(BAT-420 GAT-110 E, 빈 뼈대) */
-  async eventCancel(_input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
-    throw new Error('아직 없음');
+  /**
+   * 회차 취소 표 끝내기(BAT-420 GAT-110 E, R-T24, docs/features/transfer-refund.md §5 '대상 선택과 보류 취소 전환').
+   * 한 트랜잭션에서 대상 표의 행을 모두 잠그고(FOR UPDATE, 표 ID 차례) 요청 차례로 가른다. 없는 표·다른 회차 표가 있으면 TicketInputError로
+   * 트랜잭션째 되돌린다. (cancellation_id, ticket_id) 기록이 있으면 처음 결과다(잠금 뒤에 본다). 환급·무효인 표는 아무것도 쓰지 않고,
+   * 나머지는 진행 중 양도 표시를 끄고 키를 폐기해 환급 상태로 두며 ticket_cancellation(EVENT_CANCELED)을 남긴다. 결제자·보유자·입장·공연 시작은 보지 않는다.
+   * 팬 취소(cancel)와 같은 행 잠금을 잡으므로 같은 표를 동시에 노려도 하나만 키를 폐기한다
+   */
+  async eventCancel(input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
+    return this.o.database.transaction(async (tx) => {
+      const locked = await tx
+        .select()
+        .from(ticket)
+        .where(inArray(ticket.id, input.targets.map((t) => t.ticketId)))
+        .orderBy(ticket.id)
+        .for('update');
+      const byId = new Map(locked.map((r) => [r.id, r]));
+      for (const target of input.targets) {
+        const row = byId.get(target.ticketId);
+        if (!row || row.eventId !== input.eventId) throw new TicketInputError('없는 표이거나 다른 회차의 표다');
+      }
+      const out: EventCancelOutcome[] = [];
+      for (const target of input.targets) {
+        const row = byId.get(target.ticketId)!;
+        const base = { ticketId: row.id, orderId: row.orderId, holderAccountId: row.accountId };
+        const recorded = await tx
+          .select({ result: ticketCancellation.result })
+          .from(ticketCancellation)
+          .where(and(eq(ticketCancellation.cancellationId, target.cancellationId), eq(ticketCancellation.ticketId, target.ticketId)))
+          .limit(1);
+        if (recorded[0]) {
+          // 다시 부르기: 처음 끝낸 결과다(양도 표시는 그때 껐으므로 이번 호출은 끄지 않았다)
+          out.push({ ...base, result: recorded[0].result === EVENT_CANCELED ? 'CANCELED' : 'ALREADY_ENDED', transferWithdrawn: false });
+          continue;
+        }
+        const status = statusOf(row.status);
+        if (EVENT_CANCEL_ENDED_STATUSES.has(status)) {
+          out.push({ ...base, result: 'ALREADY_ENDED', transferWithdrawn: false });
+          continue;
+        }
+        const transferWithdrawn = row.transferPending || status === 'TRANSFER_PENDING';
+        await this.#operatorCancelOne(tx, row, input.nowMs);
+        await tx.insert(ticketCancellation).values({ cancellationId: target.cancellationId, ticketId: row.id, orderId: row.orderId, result: EVENT_CANCELED, cancelledAt: new Date(input.nowMs) });
+        out.push({ ...base, result: 'CANCELED', transferWithdrawn });
+      }
+      return out;
+    });
   }
 
-  /** 입장 기록 대조(BAT-420 GAT-090 A, 빈 뼈대). scanner 스키마의 scan_event를 읽는다 */
-  async entryRecords(_ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
-    throw new Error('아직 없음');
+  /**
+   * 입장 기록 대조(BAT-420 GAT-090 A, P-T19). scan_event의 들어감(IN)·통과(PASS)만 입장으로 세고, 입장 시각은 기기가 찍은 시각(scanned_at_device)의
+   * 가장 이른 값이다. 거절·확인·나감은 입장이 아니다. 읽기만 하고 요청 차례로 준다
+   */
+  async entryRecords(ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
+    const ids = sql.join(
+      ticketIds.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    );
+    const r = await this.o.database.db.execute(sql`
+      select t.id as ticket_id, min(s.scanned_at_device) as first_in
+      from ticket t
+      left join scan_event s on s.ticket_id = t.id and s.event_id = t.event_id and s.direction = 'IN' and s.result = 'PASS'
+      where t.id in (${ids})
+      group by t.id`);
+    const found = new Map((r.rows as { ticket_id: string; first_in: Date | string | null }[]).map((x) => [x.ticket_id, x.first_in]));
+    return ticketIds.map((ticketId) => {
+      if (!found.has(ticketId)) return { ticketId, found: false, entered: false };
+      const firstIn = found.get(ticketId);
+      if (firstIn === null || firstIn === undefined) return { ticketId, found: true, entered: false };
+      return { ticketId, found: true, entered: true, firstEnteredAtMs: new Date(firstIn).getTime() };
+    });
   }
 
   async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {

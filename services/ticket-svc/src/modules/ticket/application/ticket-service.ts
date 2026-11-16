@@ -17,6 +17,8 @@ import {
   type OperatorCancelOutcome,
   newTicketKey,
   normalizeCancelInput,
+  normalizeEntryRecordsInput,
+  normalizeEventCancelInput,
   normalizeIssueInput,
   normalizeListInput,
   normalizeOperatorCancelInput,
@@ -78,14 +80,17 @@ export class TicketService {
     return this.deps.store.operatorCancel(normalizeOperatorCancelInput(input));
   }
 
-  /** 회차 취소 표 끝내기(BAT-420 GAT-110 E, 빈 뼈대). @throws TicketInputError */
-  async eventCancel(_input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
-    throw new Error('아직 없음');
+  /**
+   * 회차 취소 표 끝내기(BAT-420 GAT-110 E, R-T24). 결제자·보유자·양도·입장·공연 시작은 보지 않고, 환급·무효인 표는 그대로 둔다.
+   * (cancellation_id, ticket_id)로 멱등하다. 없는 표·다른 회차 표가 하나라도 있으면 아무것도 바꾸지 않는다. @throws TicketInputError
+   */
+  async eventCancel(input: EventCancelInput): Promise<readonly EventCancelOutcome[]> {
+    return this.deps.store.eventCancel(normalizeEventCancelInput(input));
   }
 
-  /** 입장 기록 대조(BAT-420 GAT-090 A, 빈 뼈대). @throws TicketInputError */
-  async entryRecords(_ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
-    throw new Error('아직 없음');
+  /** 입장 기록 대조(BAT-420 GAT-090 A, P-T19). 들어감·통과 스캔만 입장이고 읽기만 한다. 요청 차례. @throws TicketInputError */
+  async entryRecords(ticketIds: readonly string[]): Promise<readonly EntryRecord[]> {
+    return this.deps.store.entryRecords(normalizeEntryRecordsInput(ticketIds));
   }
 
   /** 계정의 월렛 목록(최신 발권순). */
