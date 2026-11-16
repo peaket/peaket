@@ -14,6 +14,8 @@
 //   {"type":"https://peaket.example/problems/e2e-backend","title":"E2E Backend","status":<상태>,"traceId":<받은 traceparent의 trace-id>}를 돌려준다
 //   (서비스 템플릿 Problem의 traceId와 같은 규칙, docs/api/guidelines.md §2. 경로는 가리지 않는다: 생성 라우트는 계약 경로만 넘기므로 시험만의 경로를 두지 않는다).
 // 시험 계정의 토큰은 접속 정보의 시험 키로 시험이 만든다(토큰 칸은 쓰지 않는다).
+// D-T50 ⑥은 대역 백엔드 파드(이름표 app.kubernetes.io/name=gateway-echo, 컨테이너 echo, Node 있음) 안에서 `kubectl exec … node -e`로
+//   gw-partner 프록시 Service(이름표 gateway.envoyproxy.io/owning-gateway-name=gw-partner, 포트 443)에 보낸다(포트 전달을 거치지 않는다).
 //
 // 차례: 파일의 시험 차례대로 돈다. 1분 창 시험(D-T50 ①②④)은 분의 50초가 지났으면 다음 분까지 기다렸다 시작하고, 창 경계를 넘으면 다시 하지 않고 실패로 본다.
 // 레이트 리밋 서비스 복제 0(D-T50 ③)은 맨 끝이고 끝나면 복제를 되돌린다. PoC(D-T43 ④)는 정책을 잠깐 바꿨다 되돌린다.
@@ -27,7 +29,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { kubectl } from '../cluster.mjs';
-import { accessToken, echoed, edge, loadContract, pool, send } from './gateway-client.mjs';
+import { accessToken, echoed, edge, loadContract, send } from './gateway-client.mjs';
 
 const RUN = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
 let c;
@@ -48,12 +50,8 @@ async function sendOrConnError(hostKey, req) {
     throw e;
   }
 }
-/**
- * 한도를 넘기는 몰아 보내기의 동시 수. BAT-055 시험 이의 (라) 판단대로 정본 판정 값(초당 100건, 400건)은 두고 동시 수만 50에서 줄였다
- * (동시 50에서 포트 전달이 ECONNRESET으로 끊겼다, 2026-11-16 실측). 4로는 초당 100건을 넘기지 못해(요청 하나 약 0.1초) 429가 나지 않으므로 20이다.
- * 끊기면 다시 보내지 않고 ECONNRESET으로 실패한다(끊김이 통과로 새지 않게)
- */
-const FLOOD_WIDTH = 20;
+// 웹훅 IP 한도를 넘기는 몰아 보내기는 포트 전달을 거치지 않고 클러스터 안에서 한다(아래 inClusterFlood, BAT-060 '판단: 구현 kind 확인의 남은 것' 2).
+// 포트 전달로는 동시 20에서 초당 약 93건이라 초당 100건을 넘기지 못했고, 동시 50에서는 끊겼다(2026-11-16 kind 실측)
 const HEX32 = /^[0-9a-f]{32}$/;
 const NS = () => c.logs?.namespace ?? 'envoy-gateway-system';
 
@@ -145,12 +143,15 @@ test('D-T43 ① 없는 경로 404(다섯 게이트웨이 각각)·본문 상한 
   // 413: 웹훅 본문 65,536 + 1바이트
   const big = await send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/portone', headers: edge(c, '203.0.113.44', { 'content-type': 'application/json' }), body: 'a'.repeat(WEBHOOK_BODY_BYTES + 1) });
   assertGatewayProblem(big, 413, '웹훅 65,537바이트');
-  // 429: 한 IP로 웹훅에 한도를 넘겨 보낸다
-  const flood = await pool(400, FLOOD_WIDTH, () => send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/toss', headers: edge(c, '198.51.100.93', { 'content-type': 'application/json' }), body: '{}' }));
-  const limited = flood.filter((r) => r.status === 429);
-  assert.ok(limited.length > 0, '웹훅 400건에 429가 없다');
-  assertGatewayProblem(limited[0], 429, '웹훅 IP 한도 429');
-  assert.match(String(limited[0].headers['retry-after'] ?? ''), /^\d+$/, '429의 Retry-After');
+  // 429: 한 계정이 분 창에 61번 부른다(전역 한도). 포트 전달로는 웹훅 IP 한도(초당 100건)를 넘길 만큼 빨리 보내지 못한다
+  // (2026-11-16 kind 실측 초당 약 93건, BAT-060 '판단: 구현 kind 확인의 남은 것' 2). 웹훅 IP 한도의 429 본문은 D-T50 ⑥이 클러스터 안에서 본다
+  const minute = await windowStart();
+  const sub = nextSub();
+  let last;
+  for (let i = 0; i <= FAN_LIMIT_PER_MINUTE; i++) last = await send(c, 'api', { path: i % 2 ? FAN_IDENTITY_PATH : FAN_API_PATH, headers: fanHeaders(sub, '203.0.113.50') });
+  assert.equal(minuteOf(), minute, '분 창 경계를 넘었다(다시 하지 않고 실패로 본다)');
+  assertGatewayProblem(last, 429, '전역 한도 429(61번째)');
+  assert.match(String(last.headers['retry-after'] ?? ''), /^\d+$/, '429의 Retry-After');
 });
 
 test('D-T43 ② 대역 백엔드가 낸 409는 본문 그대로이고 본문 traceId와 X-Trace-Id가 같으며, 백엔드가 낸 404·429·503 Problem도 게이트웨이 본문으로 덮이지 않는다', async () => {
@@ -186,29 +187,123 @@ test('D-T43 ③ CDN 캐시 공개 읽기(홈·검색·자동완성)를 두 번 �
 
 // ===================== 웹훅 출발지 한도(D-T50 ⑥)와 본문 상한 =====================
 
-test('D-T50 ⑥ 한 IP로 /v1/webhooks/toss에 초당 100건을 넘기면 429이고 대역 백엔드는 넘은 요청을 받지 않으며 다른 IP는 통과한다(IPv4·IPv6 각각)', async () => {
+/**
+ * 클러스터 안 보내기(BAT-060 '판단: 구현 kind 확인의 남은 것' 2): 대역 백엔드 파드(Node가 있다) 안에서 gw-partner 프록시 Service로 보낸다.
+ * 이 함수의 원문을 `kubectl exec … -- node -e`의 인자로 넘긴다(파일을 싣지 않으므로 kubectl cp·표준 입력이 필요 없다. 대역 파드는 읽기 전용 루트라
+ * cp할 자리도 없다). 그래서 이 함수는 바깥 이름을 쓰지 않는다. 배치마다 { ip, sent, ms, s429, echo, errors, statuses, retryAfterOk, problem429 }를 JSON 한 줄로 찍는다.
+ */
+async function inClusterFlood(o) {
+  const https = require('node:https');
+  const agent = new https.Agent({ keepAlive: true, maxSockets: o.width });
+  const one = (ip) =>
+    new Promise((resolve) => {
+      const req = https.request(
+        {
+          host: o.service,
+          port: o.port,
+          servername: o.host,
+          method: 'POST',
+          path: o.path,
+          agent,
+          ...(o.ca ? { ca: o.ca } : { rejectUnauthorized: false }),
+          timeout: 10000,
+          headers: { host: o.host, 'content-type': 'application/json', 'content-length': '2', 'x-forwarded-for': ip, 'x-peaket-origin-verify': o.originVerify },
+        },
+        (res) => {
+          let b = '';
+          res.on('data', (d) => (b += d));
+          res.on('end', () => {
+            let echo = false;
+            try {
+              const j = JSON.parse(b);
+              echo = j !== null && typeof j === 'object' && typeof j.method === 'string' && typeof j.path === 'string' && j.headers !== null && typeof j.headers === 'object';
+            } catch {
+              echo = false;
+            }
+            resolve({ status: res.statusCode, echo, retryAfter: res.headers['retry-after'], contentType: res.headers['content-type'], body: echo ? '' : b.slice(0, 200) });
+          });
+        },
+      );
+      req.on('timeout', () => req.destroy(new Error('timeout')));
+      req.on('error', (e) => resolve({ status: 0, error: String(e.code || e.message) }));
+      req.end('{}');
+    });
+  const out = [];
+  for (const { ip, count } of o.batches) {
+    const rs = new Array(count);
+    let next = 0;
+    const t0 = Date.now();
+    await Promise.all(
+      Array.from({ length: Math.min(o.width, count) }, async () => {
+        while (next < count) {
+          const i = next++;
+          rs[i] = await one(ip);
+        }
+      }),
+    );
+    const ms = Date.now() - t0;
+    const statuses = {};
+    for (const r of rs) statuses[r.status] = (statuses[r.status] || 0) + 1;
+    const limited = rs.filter((r) => r.status === 429);
+    out.push({
+      ip,
+      sent: count,
+      ms,
+      s429: limited.length,
+      echo: rs.filter((r) => r.echo && r.status < 400).length,
+      echo429: limited.filter((r) => r.echo).length,
+      errors: rs.filter((r) => r.status === 0).length,
+      statuses,
+      retryAfterOk: limited.every((r) => /^\d+$/.test(String(r.retryAfter || ''))),
+      problem429: limited.length ? { contentType: limited[0].contentType, body: limited[0].body } : null,
+    });
+  }
+  agent.destroy();
+  console.log(JSON.stringify(out));
+}
+
+/** 클러스터 안에서 보낸다: 대역 파드 이름·gw-partner 프록시 Service를 찾아 inClusterFlood를 돌린다 */
+async function floodInCluster(batches) {
+  const echoPod = (await kubectl(['-n', NS(), 'get', 'pods', '-l', 'app.kubernetes.io/name=gateway-echo', '-o', 'jsonpath={.items[0].metadata.name}'], { quiet: true, timeout: 30_000 })).trim();
+  assert.ok(echoPod, '대역 백엔드 파드가 없다');
+  const svc = (await kubectl(['-n', NS(), 'get', 'svc', '-l', 'gateway.envoyproxy.io/owning-gateway-name=gw-partner', '-o', 'jsonpath={.items[0].metadata.name}'], { quiet: true, timeout: 30_000 })).trim();
+  assert.ok(svc, 'gw-partner 프록시 Service가 없다');
+  const args = { service: `${svc}.${NS()}.svc.cluster.local`, port: 443, host: c.hosts['partner-api'], path: '/v1/webhooks/toss', originVerify: c.originVerify, ca: c.caPem, width: 50, batches };
+  // 원문을 base64로 싸서 넘긴다(Windows 명령줄의 따옴표·역슬래시 바꿈을 피한다). eval은 -e 모듈 안이라 require를 쓴다
+  const script = `(${inClusterFlood.toString()})(${JSON.stringify(args)}).catch((e) => { console.error(e); process.exit(1); })`;
+  const b64 = Buffer.from(script, 'utf8').toString('base64');
+  const out = await kubectl(['-n', NS(), 'exec', echoPod, '-c', 'echo', '--', 'node', '-e', `eval(Buffer.from('${b64}', 'base64').toString('utf8'))`], { quiet: true, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+  return JSON.parse(out.trim().split('\n').pop());
+}
+
+test('D-T50 ⑥ 한 IP로 /v1/webhooks/toss에 초당 100건을 넘기면 429이고 대역 백엔드는 넘은 요청을 받지 않으며 다른 IP는 통과한다(IPv4·IPv6 각각, 클러스터 안에서 보냄)', async () => {
   const replicas = Number(c.replicas?.['gw-partner'] ?? 1);
   for (const [ip, other] of [
     ['198.51.100.91', '198.51.100.92'],
     ['2001:db8:91::1', '2001:db8:92::1'],
   ]) {
-    const t0 = Date.now();
-    const results = await pool(400, FLOOD_WIDTH, () => send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/toss', headers: edge(c, ip, { 'content-type': 'application/json' }), body: '{}' }));
-    const seconds = (Date.now() - t0) / 1000;
-    const passed = results.filter((r) => r.status !== 429);
-    const limited = results.filter((r) => r.status === 429);
-    assert.ok(limited.length > 0, `${ip}: 400건(${seconds.toFixed(1)}초)에 429가 없다`);
-    for (const r of limited) assert.throws(() => echoed(r), `${ip}: 429가 대역 백엔드 응답이다`);
-    for (const r of passed) {
-      assert.ok(r.status < 400, `${ip}: 한도 안 요청이 ${r.status}`);
-      assert.equal(echoed(r).path, '/v1/webhooks/toss', `${ip}: 한도 안 요청이 백엔드에 닿지 않았다`);
-    }
-    // 처음 모아 둔 100건 + 지난 시간만큼 채운 초당 100건(올림)을 파드마다 넘겨 통과하지 않는다
-    assert.ok(passed.length <= WEBHOOK_PER_SECOND * (1 + Math.ceil(seconds)) * replicas, `${ip}: 통과 ${passed.length}건 > 100 × (1 + ${Math.ceil(seconds)}) × ${replicas}`);
-    assert.ok(passed.length >= WEBHOOK_PER_SECOND, `${ip}: 초당 100건보다 적게 통과했다(${passed.length})`);
-    const o = await send(c, 'partner-api', { method: 'POST', path: '/v1/webhooks/toss', headers: edge(c, other, { 'content-type': 'application/json' }), body: '{}' });
-    assert.ok(o.status < 400, `${other}: 다른 IP까지 막았다(${o.status})`);
-    echoed(o);
+    // 한 IP에 400건(동시 50, 1초 창에 300건 이상을 노린다 [가정]), 이어 같은 창에서 다른 IP로 한 건
+    const [flood, o] = await floodInCluster([
+      { ip, count: 400 },
+      { ip: other, count: 1 },
+    ]);
+    const seconds = flood.ms / 1000;
+    const rate = flood.sent / Math.max(seconds, 0.001);
+    // 시험 바탕이 판정 조건을 만들지 못한 경우를 한도 단언 실패와 가른다(빈 결과가 통과로 새지 않게)
+    assert.equal(flood.errors, 0, `${ip}: 시험 바탕 모자람(연결 오류 ${flood.errors}건, ${JSON.stringify(flood.statuses)})`);
+    assert.ok(rate > WEBHOOK_PER_SECOND, `${ip}: 시험 바탕 모자람(보낸 속도 초당 ${rate.toFixed(0)}건, ${flood.sent}건 ${seconds.toFixed(2)}초)`);
+    assert.ok(flood.s429 > 0, `${ip}: ${flood.sent}건(${seconds.toFixed(2)}초, 초당 ${rate.toFixed(0)}건)에 429가 없다 ${JSON.stringify(flood.statuses)}`);
+    assert.equal(flood.echo429, 0, `${ip}: 429가 대역 백엔드 응답이다`);
+    assert.ok(flood.retryAfterOk, `${ip}: 429에 Retry-After가 없다`);
+    assert.match(String(flood.problem429?.contentType ?? ''), /^application\/problem\+json\b/, `${ip}: 429 형식`);
+    assert.deepEqual(JSON.parse(flood.problem429?.body || 'null'), { type: 'about:blank', title: 'Too Many Requests', status: 429 }, `${ip}: 429 본문`);
+    // 429가 아닌 응답은 모두 대역 백엔드가 받은 것이다(다른 상태가 섞이지 않는다)
+    assert.equal(flood.s429 + flood.echo, flood.sent, `${ip}: 429도 대역 응답도 아닌 것이 있다 ${JSON.stringify(flood.statuses)}`);
+    // 처음 모아 둔 100건 + 지난 시간만큼 채운 초당 100건(올림)을 파드마다 넘겨 대역 백엔드가 받지 않는다
+    assert.ok(flood.echo <= WEBHOOK_PER_SECOND * (1 + Math.ceil(seconds)) * replicas, `${ip}: 대역이 받은 ${flood.echo}건 > 100 × (1 + ${Math.ceil(seconds)}) × ${replicas}`);
+    assert.ok(flood.echo >= WEBHOOK_PER_SECOND, `${ip}: 초당 100건보다 적게 통과했다(${flood.echo})`);
+    assert.equal(o.errors, 0, `${other}: 시험 바탕 모자람(연결 오류)`);
+    assert.equal(o.echo, 1, `${other}: 다른 IP까지 막았다 ${JSON.stringify(o.statuses)}`);
   }
 });
 
