@@ -10,22 +10,14 @@ export class MemoryAttendeeExportStore implements AttendeeExportStore {
   /** 명단 보기 LIST 접속기록(W7-audit A2-19) */
   readonly views: AttendeeViewRecord[] = [];
 
-  async insert(record: AttendeeExportRecord): Promise<void> {
+  /** 이력과 DOWNLOAD 접속기록을 함께 남긴다(Drizzle은 한 트랜잭션) */
+  async recordExport(record: AttendeeExportRecord): Promise<void> {
     this.rows.push({ ...record });
-  }
-
-  async audit(record: AttendeeExportRecord): Promise<void> {
     this.audits.push({ ...record });
   }
 
-  /** 뼈대(W7-audit 시험 단계). 구현 담당이 채운다(A2-19) */
-  async recordExport(_record: AttendeeExportRecord): Promise<void> {
-    throw new Error('아직 없음');
-  }
-
-  /** 뼈대(W7-audit 시험 단계). 구현 담당이 채운다(A2-19) */
-  async recordView(_view: AttendeeViewRecord): Promise<void> {
-    throw new Error('아직 없음');
+  async recordView(view: AttendeeViewRecord): Promise<void> {
+    this.views.push({ ...view, filter: { ...view.filter } });
   }
 
   async list(promoterId: string, eventId: string, limit: number): Promise<AttendeeExportRecord[]> {

@@ -70,11 +70,21 @@ export function retentionEnded(eventEndsAt: Date, now: Date): boolean {
 }
 
 /**
- * 접속기록 보존 끝: UTC 달력으로 2년 뒤 같은 월·일(2월 29일 → 3월 1일). 730일이 아니다(W7-audit A2-19, docs/data.md §2).
- * 뼈대(W7-audit 시험 단계): 구현 담당이 채운다
+ * 접속기록 보존 끝: UTC 달력으로 2년 뒤 같은 월·일·시각(2월 29일 → 3월 1일). 730일이 아니다(W7-audit A2-19, docs/data.md §2).
+ * Date.UTC는 없는 날(2년 뒤 2월 29일)을 다음 달 1일로 넘긴다.
  */
-export function accessLogRetainUntil(_createdAt: Date): Date {
-  throw new Error('아직 없음');
+export function accessLogRetainUntil(createdAt: Date): Date {
+  return new Date(
+    Date.UTC(
+      createdAt.getUTCFullYear() + 2,
+      createdAt.getUTCMonth(),
+      createdAt.getUTCDate(),
+      createdAt.getUTCHours(),
+      createdAt.getUTCMinutes(),
+      createdAt.getUTCSeconds(),
+      createdAt.getUTCMilliseconds(),
+    ),
+  );
 }
 
 /** 내려받는 동안 서버가 들고 있는 행 수를 제한한다(J-T26 ② 스트리밍, 50만 행 [가정] 상한). */

@@ -18,11 +18,8 @@ export interface AttendeeViewRecord {
   createdAt: Date;
 }
 
+/** 이력과 접속기록을 따로 쓰는 길은 두지 않는다(W7-audit A2-19: 접속기록이 실패하면 이력도 남지 않아야 한다) */
 export interface AttendeeExportStore {
-  // 뼈대(W7-audit 시험 단계): insert·audit은 지금 내려받기 동작을 그대로 두려고 남겼다. 구현 담당이 recordExport로 바꾸며 포트에서 뺀다(A2-19)
-  insert(record: AttendeeExportRecord): Promise<void>;
-  /** 다운로드 접속기록(2년 보존, A2-19). 행위자·사유·건수·형식을 남긴다 */
-  audit(record: AttendeeExportRecord): Promise<void>;
   /** 내려받기 이력(attendee_export)과 DOWNLOAD 접속기록을 한 트랜잭션에 쓴다. 하나라도 실패하면 둘 다 남지 않고 오류를 던진다 */
   recordExport(record: AttendeeExportRecord): Promise<void>;
   /** 명단 보기 LIST 접속기록. 실패하면 오류를 던진다 */

@@ -2,7 +2,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { AttendeeExportStore, AttendeeViewRecord } from '../../domain/ports.js';
-import type { AttendeeExportRecord, ExportFormat, ExportResult } from '../../domain/export.js';
+import { accessLogRetainUntil, type AttendeeExportRecord, type ExportFormat, type ExportResult } from '../../domain/export.js';
 import { attendeeExport, attendeeExportAudit } from './schema.js';
 
 const toRecord = (row: typeof attendeeExport.$inferSelect): AttendeeExportRecord => ({
@@ -23,7 +23,8 @@ const toRecord = (row: typeof attendeeExport.$inferSelect): AttendeeExportRecord
 export class DrizzleAttendeeExportStore implements AttendeeExportStore {
   constructor(private readonly db: Database) {}
 
-  async insert(record: AttendeeExportRecord): Promise<void> {
+  /** 내려받기 이력과 DOWNLOAD 접속기록을 한 트랜잭션에 넣는다. 하나라도 실패하면 둘 다 되돌리고 오류를 던진다(W7-audit A2-19) */
+  async recordExport(record: AttendeeExportRecord): Promise<void> {
     await this.db.transaction(
       async (tx) => {
         await tx.insert(attendeeExport).values({
@@ -40,16 +41,9 @@ export class DrizzleAttendeeExportStore implements AttendeeExportStore {
           createdAt: record.createdAt,
           expiresAt: record.expiresAt,
         });
-      },
-      { tenantId: record.promoterId, accessMode: 'read write' },
-    );
-  }
-
-  async audit(record: AttendeeExportRecord): Promise<void> {
-    await this.db.transaction(
-      async (tx) => {
         await tx.insert(attendeeExportAudit).values({
           id: record.exportId,
+          action: 'DOWNLOAD',
           exportId: record.exportId,
           promoterId: record.promoterId,
           eventId: record.eventId,
@@ -59,22 +53,38 @@ export class DrizzleAttendeeExportStore implements AttendeeExportStore {
           reason: record.reason,
           format: record.format,
           count: record.count,
+          filter: {},
           createdAt: record.createdAt,
-          retainUntil: new Date(record.createdAt.getTime() + 2 * 365 * 24 * 60 * 60 * 1000),
+          retainUntil: accessLogRetainUntil(record.createdAt),
         });
       },
       { tenantId: record.promoterId, accessMode: 'read write' },
     );
   }
 
-  /** 뼈대(W7-audit 시험 단계). 이력과 DOWNLOAD 접속기록을 한 트랜잭션에 넣는 일은 구현 담당이 채운다(A2-19) */
-  async recordExport(_record: AttendeeExportRecord): Promise<void> {
-    throw new Error('아직 없음');
-  }
-
-  /** 뼈대(W7-audit 시험 단계). LIST 접속기록 넣기는 구현 담당이 채운다(A2-19) */
-  async recordView(_view: AttendeeViewRecord): Promise<void> {
-    throw new Error('아직 없음');
+  /** 명단 보기 LIST 접속기록. export_id·reason·format은 없다(0021 CHECK, W7-audit A2-19) */
+  async recordView(view: AttendeeViewRecord): Promise<void> {
+    await this.db.transaction(
+      async (tx) => {
+        await tx.insert(attendeeExportAudit).values({
+          id: view.auditId,
+          action: 'LIST',
+          exportId: null,
+          promoterId: view.promoterId,
+          eventId: view.eventId,
+          actorAccountId: view.actorAccountId,
+          actorDisplayName: view.actorDisplayName,
+          actorRole: view.actorRole,
+          reason: null,
+          format: null,
+          count: view.count,
+          filter: view.filter,
+          createdAt: view.createdAt,
+          retainUntil: accessLogRetainUntil(view.createdAt),
+        });
+      },
+      { tenantId: view.promoterId, accessMode: 'read write' },
+    );
   }
 
   async list(promoterId: string, eventId: string, limit: number): Promise<AttendeeExportRecord[]> {

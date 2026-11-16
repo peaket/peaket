@@ -33,10 +33,13 @@ export class PartnerAttendeeExportController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     void reply.header('cache-control', 'no-store');
-    return this.exports.listAttendees(tenantOf(me), params.eventId, {
-      limit: q.limit ?? 50,
-      ...(q.cursor ? { cursor: q.cursor } : {}),
-    });
+    // 접속기록 행위자는 이 요청의 로그인 주체다(파트너 ID가 아니다, W7-audit A2-19)
+    return this.exports.listAttendees(
+      tenantOf(me),
+      params.eventId,
+      { limit: q.limit ?? 50, ...(q.cursor ? { cursor: q.cursor } : {}) },
+      { accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'partner_admin' },
+    );
   }
 
   @Post('events/:eventId/attendee-exports')

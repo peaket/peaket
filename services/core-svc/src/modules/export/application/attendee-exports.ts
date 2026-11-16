@@ -47,6 +47,13 @@ const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
 /** 내려받기 원천 한 페이지 행 수(docs/features/settlement.md §9) */
 const EXPORT_PAGE_ROWS = 1_000;
 
+/** 접속기록 행위자가 빠진 호출은 원천을 읽기 전에 거절한다(빠진 행위자 거절, W7-audit A2-19) */
+function requireActor(actor: ExportActor | undefined): asserts actor is ExportActor {
+  if (!actor || typeof actor.accountId !== 'string' || actor.accountId === '' || typeof actor.role !== 'string' || actor.role === '') {
+    throw new Error('예매자 명단 접속기록의 행위자가 없다');
+  }
+}
+
 const safeLabel = (title: string): string => title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || '공연';
 
 export interface AttendeePageView {
@@ -67,8 +74,13 @@ export interface AttendeePageView {
 export class AttendeeExports {
   constructor(private readonly d: ExportDeps) {}
 
-  // 뼈대(W7-audit 시험 단계): 넷째 인자 actor는 모양만 받는다. 행위자 확인과 LIST 접속기록은 구현 담당이 채운다(A2-19)
-  async listAttendees(promoterId: string, eventId: string, q: { limit: number; cursor?: string }, _actor?: ExportActor): Promise<AttendeePageView> {
+  /**
+   * 명단 한 페이지를 보이고 LIST 접속기록을 남긴다(FR-064, W7-audit A2-19, docs/features/settlement.md §9).
+   * 행위자가 없으면 원천을 읽기 전에 실패한다. 접속기록을 남기지 못하면 명단을 돌려주지 않는다(fail-closed).
+   * 명단을 보이지 않은 요청(404·410)은 기록하지 않는다.
+   */
+  async listAttendees(promoterId: string, eventId: string, q: { limit: number; cursor?: string }, actor: ExportActor): Promise<AttendeePageView> {
+    requireActor(actor);
     return guard(async () => {
       const found = await this.d.events.find(promoterId, eventId);
       if (!found) throw notFound();
@@ -77,6 +89,18 @@ export class AttendeeExports {
       const page = await this.d.attendees.list(promoterId, eventId, q.limit, q.cursor);
       const rows = page.items;
       const totals = await this.d.attendees.count(promoterId, eventId);
+      // 이 페이지에 보인 행 수와 받은 조건만 남긴다(합계가 아니다). 받은 cursor가 없으면 키를 두지 않는다
+      await this.d.store.recordView({
+        auditId: uuidv7(this.d.clock),
+        promoterId,
+        eventId,
+        actorAccountId: actor.accountId,
+        actorDisplayName: await this.#displayName(actor),
+        actorRole: actor.role,
+        count: rows.length,
+        filter: { limit: q.limit, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}) },
+        createdAt: now,
+      });
       return {
         items: rows.map((r) => ({
           orderId: r.orderId,
@@ -96,6 +120,7 @@ export class AttendeeExports {
   }
 
   async create(promoterId: string, eventId: string, actor: ExportActor, token: string | undefined, body: { reason?: unknown; format?: unknown }): Promise<{ file: ExportFile; record: AttendeeExportView }> {
+    requireActor(actor);
     return guard(async () => {
       const verified = await this.d.reauth.verify(token, { sessionId: actor.sessionId, promoterId });
       if (verified.accountId !== actor.accountId) throw new ExportProblem('reauth-required', 403, '다시 인증해 주세요');
@@ -108,7 +133,7 @@ export class AttendeeExports {
       const rows = await this.#readAll(promoterId, eventId);
       const label = safeLabel(found.title);
       const file = format === 'CSV' ? csvFile(rows, label) : xlsxFile(rows, label);
-      const displayName = (await this.d.actors.displayName(actor.accountId).catch(() => undefined)) ?? (actor.role === 'partner_admin' ? '파트너 관리자' : actor.role);
+      const displayName = await this.#displayName(actor);
       const record: AttendeeExportRecord = {
         exportId: uuidv7(this.d.clock),
         promoterId,
@@ -123,10 +148,15 @@ export class AttendeeExports {
         createdAt: now,
         expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
       };
-      await this.d.store.insert(record);
-      await this.d.store.audit(record);
+      // 이력과 DOWNLOAD 접속기록은 한 번에(한 트랜잭션) 쓴다. 실패하면 그 오류로 끝나고 파일을 주지 않는다(W7-audit A2-19)
+      await this.d.store.recordExport(record);
       return { file, record: exportView(record) };
     });
+  }
+
+  /** 표시 이름은 identity에서 읽고, 읽지 못하거나 없으면 역할 이름이다(partner_admin이면 '파트너 관리자') */
+  async #displayName(actor: ExportActor): Promise<string> {
+    return (await this.d.actors.displayName(actor.accountId).catch(() => undefined)) ?? (actor.role === 'partner_admin' ? '파트너 관리자' : actor.role);
   }
 
   /**
