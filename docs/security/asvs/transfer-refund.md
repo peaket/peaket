@@ -7,6 +7,7 @@
 - **문서 상태 및 일정**: 항목 선정을 마쳤고 구현 직전 단계다(2026-10-13 수립). 요구사항 원문은 OWASP ASVS `v5.0.0_release` 원문과 대조했다(2026-10-13). V3 절은 OWASP ASVS 저장소 `v5.0.0` 태그의 V3 원문과 대조해 더했다(2026-10-15). Phase 5 양도·취소 작업 착수(wbs 5.2.1) 전에 다시 판정한다.
 
 - **BAT-425 GAT-130 잔여 메모(2026-11-15, R-592)**: ops-svc에 회차 취소 요청·판정·2인 확정(`event_cancellation_request`, 0011)을 넣었다. 요청은 commander, 판정은 commander, 확정은 판정자가 아닌 operator·commander이고 확정 때 purchase-svc `EventRefundService.StartEventRefund`를 멱등 키(요청 ID)로 부른다. 재인증 토큰은 아직 강제하지 않는다(후속). payment-svc에는 배상 송금 gRPC 계약과 가짜 어댑터를 넣어 실제 지급대행·계좌가 없으면 UNAVAILABLE(503)로 닫고, 계좌 원문은 저장하지 않는다(POL-014). core-svc에는 `core-notify-sender` 첫 몫(가짜 전송기·내부 사건 경로)을 넣어 `PEAKET_NOTIFY_SENDER_MODE=fake`가 아니면 503이다. 결제사 서킷 상태는 payment-svc 내부 `/internal/v1/circuits`와 ops `/v1/ops/pg-circuits`로 노출한다.
+- **BAT-415 GAT-080 계획 메모(2026-11-16, 웨이브 8)**: purchase-svc `FraudCancellationService`는 부르는 쪽을 ops-svc로 묶는다. 내부 토큰이 없으면 `UNAUTHENTICATED`, 호출자 머리가 `ops-svc`가 아니거나 처리자(`approved_by`) 증명이 틀리면 `PERMISSION_DENIED`이고 아무것도 쓰지 않는다(8.2.1·8.3.1, 시험 GAT-080 F14). ticket-svc `OperatorCancelTickets`는 팬 취소와 같은 티켓 행 잠금 안에서 상태·입장 기록·보유자를 다시 보고 (승인 ID, 표)로 멱등하다(15.4.2, 시험 GAT-080 F4·F5). 예매 취소의 양도 요청 중·남이 보유는 409 `transfer-pending`이다(R-T3). 결제 후 일반 취소는 취소 건마다 본문을 저장해 같은 멱등키로 같은 본문만 보낸다(시험 GAT-080 P2·P6, P-T21). 정본: docs/features/transfer-refund.md §7.4 'purchase-svc·ticket-svc 쪽 세부', docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액'.
 
 **작성 및 판독 가이드**
 

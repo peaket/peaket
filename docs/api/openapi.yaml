@@ -316,6 +316,7 @@ x-peaket-problem-types:
     subscription-limit: { status: 422, title: "알림 신청 수를 넘었습니다" }
     too-many-requests: { status: 429, title: "24시간 안에 이미 다시 받았습니다" }
     transfer-locked: { status: 409, title: "지금은 양도할 수 없는 티켓입니다" }
+    transfer-pending: { status: 409, title: "양도 요청을 철회한 뒤 취소할 수 있습니다" }
     transfer-not-allowed: { status: 403, title: "양도로 보유자가 바뀐 티켓만 새 기기를 등록할 수 있습니다" }
     assignment-required: { status: 422, title: "승인할 배정을 하나 골라 주세요" }
     proxy-approval-forbidden: { status: 403, title: "대리 승인은 현장 책임자만 할 수 있습니다" }
@@ -4468,7 +4469,7 @@ paths:
       security: [{ fanCookie: [] }]
       parameters: [{ name: ticketId, in: path, required: true, schema: { type: string } }, { $ref: '#/components/parameters/IdempotencyKey' }, { $ref: '#/components/parameters/ReauthToken' }]
       requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, properties: { refundAccount: { $ref: '#/components/schemas/RefundAccount' } } } } } }
-      responses: { '202': { description: "접수", content: { application/json: { schema: { $ref: '#/components/schemas/Cancellation' } } } }, '403': { $ref: '#/components/responses/Problem', description: "결제자가 아님(NOT_PAYER)·재인증 없음 또는 만료(REAUTH_REQUIRED)" }, '404': { $ref: '#/components/responses/Problem', description: 없음 }, '409': { $ref: '#/components/responses/Problem', description: "공연 시작 뒤·이미 취소·양도 요청 중·남이 보유·양도 경합" } }
+      responses: { '202': { description: "접수", content: { application/json: { schema: { $ref: '#/components/schemas/Cancellation' } } } }, '403': { $ref: '#/components/responses/Problem', description: "결제자가 아님(NOT_PAYER)·재인증 없음 또는 만료(REAUTH_REQUIRED)" }, '404': { $ref: '#/components/responses/Problem', description: 없음 }, '409': { $ref: '#/components/responses/Problem', description: "양도 요청 중·남이 보유는 transfer-pending이다(화면 문구 docs/design/d5 §9.2 '취소 409 양도 요청 중·남이 보유'와 같다, docs/features/transfer-refund.md §9 1번. 추천 적용 2026-11-16, BUILD_ORDER GAT-080). 입장 시작·공연 시작 뒤는 entry-started, 이미 취소·양도 경합은 cancellation-conflict다" } }
   /v1/staff-invitation-lookups:
     post: { operationId: createStaffInvitationLookup, tags: [identity], x-peaket-roles: [fan], summary: "초대 내용 조회(SCR-050). 토큰은 링크의 URL 조각에서 꺼내 본문으로 보낸다", description: "FR-046, POL-031, ADR-0051", security: [{ fanCookie: [] }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [inviteToken], properties: { inviteToken: { type: string } } } } } }, responses: { '200': { description: 초대 내용과 동의 고지, content: { application/json: { schema: { $ref: '#/components/schemas/StaffInvitationView' } } } }, '410': { $ref: '#/components/responses/Problem', description: 만료·사용됨 } } }
   /v1/staff-invitation-acceptances:
