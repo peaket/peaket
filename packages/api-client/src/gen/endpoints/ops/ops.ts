@@ -2994,6 +2994,11 @@ export type createOpsCommandResponse403 = {
   status: 403
 }
 
+export type createOpsCommandResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type createOpsCommandResponse422 = {
   data: ProblemResponse
   status: 422
@@ -3002,7 +3007,7 @@ export type createOpsCommandResponse422 = {
 export type createOpsCommandResponseSuccess = (createOpsCommandResponse201) & {
   headers: Headers;
 };
-export type createOpsCommandResponseError = (createOpsCommandResponse403 | createOpsCommandResponse422) & {
+export type createOpsCommandResponseError = (createOpsCommandResponse403 | createOpsCommandResponse409 | createOpsCommandResponse422) & {
   headers: Headers;
 };
 
@@ -8837,6 +8842,11 @@ export type createOpsEventCancellationResponse201 = {
   status: 201
 }
 
+export type createOpsEventCancellationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createOpsEventCancellationResponse403 = {
   data: ProblemResponse
   status: 403
@@ -8847,10 +8857,20 @@ export type createOpsEventCancellationResponse409 = {
   status: 409
 }
 
+export type createOpsEventCancellationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsEventCancellationResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsEventCancellationResponseSuccess = (createOpsEventCancellationResponse201) & {
   headers: Headers;
 };
-export type createOpsEventCancellationResponseError = (createOpsEventCancellationResponse403 | createOpsEventCancellationResponse409) & {
+export type createOpsEventCancellationResponseError = (createOpsEventCancellationResponse400 | createOpsEventCancellationResponse403 | createOpsEventCancellationResponse409 | createOpsEventCancellationResponse422 | createOpsEventCancellationResponse503) & {
   headers: Headers;
 };
 
@@ -8863,7 +8883,7 @@ export const getCreateOpsEventCancellationUrl = () => {
 }
 
 /**
- * FR-055, POL-038. 파트너 요청을 기다리지 않고 commander가 회차 취소를 요청한다. 판매 중지(docs/planning/03 §2.14)된 공연의 회차만 받는다. 그 뒤 판정·판정자 외 1인 승인·일괄 환불은 파트너 요청과 같다(docs/planning/03 §2.11, 추천 적용 2026-10-28, ADR-0123)
+ * FR-055, POL-038. 파트너 요청을 기다리지 않고 commander가 회차 취소를 요청한다. 판매 중지(docs/planning/03 §2.14)된 공연의 회차만 받는다. 그 뒤 판정·판정자 외 1인 승인·일괄 환불은 파트너 요청과 같다(docs/planning/03 §2.11, 추천 적용 2026-10-28, ADR-0123). 재인증 토큰은 act APPROVAL·패스키이고 회차 취소 확정과 같은 검증기로 본다. 판매 중지 여부는 core-svc 공연의 판매 중지(LCH-090) 전까지 ops-svc 명령 기록(그 회차의 마지막 SUCCEEDED SALE_STOP·SALE_RESUME)으로 본다. 접수하면 CS 처리함 '판정 대기' 건이 생긴다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, docs/features/transfer-refund.md §5 '요청 두 길')
  * @summary 판매 중지된 공연의 회차 취소 요청(commander)
  */
 export const createOpsEventCancellation = async (createOpsEventCancellationBody: CreateOpsEventCancellationBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsEventCancellationResponseSuccess> => {
@@ -9082,10 +9102,22 @@ export type createOpsEventCancellationJudgementResponse200 = {
   status: 200
 }
 
+export type createOpsEventCancellationJudgementResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsEventCancellationJudgementResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsEventCancellationJudgementResponseSuccess = (createOpsEventCancellationJudgementResponse200) & {
   headers: Headers;
 };
-;
+export type createOpsEventCancellationJudgementResponseError = (createOpsEventCancellationJudgementResponse409 | createOpsEventCancellationJudgementResponse503) & {
+  headers: Headers;
+};
 
 export const getCreateOpsEventCancellationJudgementUrl = (requestId: string,) => {
 
@@ -9096,7 +9128,7 @@ export const getCreateOpsEventCancellationJudgementUrl = (requestId: string,) =>
 }
 
 /**
- * FR-055, POL-038. 요청 접수 뒤 1영업일 안
+ * FR-055, POL-038. 요청 접수 뒤 1영업일 안. 판정을 JUDGED로 저장한 뒤 purchase-svc PreviewEventRefund로 미리보기를 계산해 dryRun에 쓰고 PENDING_APPROVAL로 둔다(T3·T5). 대상 주문 수는 주문 단위다. REQUESTED·JUDGED·PENDING_APPROVAL에서 다시 판정할 수 있고 그때마다 미리보기를 새로 계산한다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, docs/features/transfer-refund.md §5 '판정·미리보기·확정의 차례')
  * @summary 귀책 판정(commander)과 미리보기 계산
  */
 export const createOpsEventCancellationJudgement = async (requestId: string,
@@ -9131,7 +9163,7 @@ return orvalFetch<createOpsEventCancellationJudgementResponseSuccess>(getCreateO
 
 export const getCreateOpsEventCancellationJudgementMutationKey = () => ['createOpsEventCancellationJudgement'] as const;
 
-export const getCreateOpsEventCancellationJudgementMutationOptions = <TError = ErrorType<unknown>,
+export const getCreateOpsEventCancellationJudgementMutationOptions = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsEventCancellationJudgement>>, TError,CreateOpsEventCancellationJudgementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createOpsEventCancellationJudgement>>, TError,CreateOpsEventCancellationJudgementMutationVariables, TContext> => {
 
@@ -9160,13 +9192,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateOpsEventCancellationJudgementMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsEventCancellationJudgement>>>
     export type CreateOpsEventCancellationJudgementMutationBody = BodyType<CreateOpsEventCancellationJudgementBody> | undefined
-    export type CreateOpsEventCancellationJudgementMutationError = ErrorType<unknown>
+    export type CreateOpsEventCancellationJudgementMutationError = ErrorType<ProblemResponse>
     export type CreateOpsEventCancellationJudgementMutationVariables = {requestId: string;data?: BodyType<CreateOpsEventCancellationJudgementBody>}
 
     /**
  * @summary 귀책 판정(commander)과 미리보기 계산
  */
-export const useCreateOpsEventCancellationJudgement = <TError = ErrorType<unknown>,
+export const useCreateOpsEventCancellationJudgement = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsEventCancellationJudgement>>, TError,CreateOpsEventCancellationJudgementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createOpsEventCancellationJudgement>>,
@@ -9212,7 +9244,7 @@ export const getCreateOpsEventCancellationApprovalUrl = (requestId: string,) => 
 }
 
 /**
- * FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음. X-Reauth-Token은 identity-svc 재인증(패스키 포함) 토큰이며 결제사 HTTP URL과 무관하다. 검증기를 조립하지 못하면 503 reauth-unavailable, 토큰이 없거나 계정·동작이 다르면 403 reauth-required다
+ * FR-055, POL-038. 판정자 본인은 403. 실행된 환불은 되돌리지 않음. X-Reauth-Token은 identity-svc 재인증(패스키 포함) 토큰이며 결제사 HTTP URL과 무관하다. 검증기를 조립하지 못하면 503 reauth-unavailable, 토큰이 없거나 계정·동작이 다르면 403 reauth-required다. PENDING_APPROVAL에서만 확정한다. 회차 취소(CANCEL)는 일괄 환불을 시작하기 전에 그 회차의 판매를 멈추고(판매 중지 집행, suspensionRef = 요청 ID), 멈추지 못하면 확정하지 않는다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, ADR-0280)
  * @summary 회차 취소 확정 승인(판정자 외 operator 이상). 승인되면 팬 통지와 일괄 환불 작업 시작
  */
 export const createOpsEventCancellationApproval = async (requestId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsEventCancellationApprovalResponseSuccess> => {
@@ -9308,7 +9340,7 @@ export const getCreateOpsEventCancellationRejectionUrl = (requestId: string,) =>
 }
 
 /**
- * FR-055, POL-038. 판정 뒤 반려는 판정자 외 operator 이상. 허용 역할 [가정]: 판정 전 반려(docs/planning/03 §2.11 T4)를 누가 하는지 정본에 없다. 역할 칸은 판정 뒤 반려에 맞춰 operator·commander로 두고, 판정 전 반려는 귀책을 판정하는 commander만 한다(추천 적용 2026-10-30, docs/security/authz-matrix.md §5.5)
+ * FR-055, POL-038. 판정 뒤 반려는 판정자 외 operator 이상. 허용 역할 [가정]: 판정 전 반려(docs/planning/03 §2.11 T4)를 누가 하는지 정본에 없다. 역할 칸은 판정 뒤 반려에 맞춰 operator·commander로 두고, 판정 전 반려는 귀책을 판정하는 commander만 한다(추천 적용 2026-10-30, docs/security/authz-matrix.md §5.5). 판정 전 반려는 반려 사유를 저장하고, 판정 뒤(JUDGED·PENDING_APPROVAL) 반려는 JUDGED(재판정 대기, T7)로 돌아가 미리보기를 지운다(추천 적용 2026-11-16, BUILD_ORDER GAT-110)
  * @summary 회차 취소 반려(사유 필수). 판정 전이면 요청 반려(REJECTED), 판정 뒤 승인자가 반려하면 재판정 대기
  */
 export const createOpsEventCancellationRejection = async (requestId: string,

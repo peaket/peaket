@@ -25,6 +25,14 @@ export const ticketV1Ticket: Record<string, unknown> = {
                       "requestType": "OperatorCancelTicketsRequest",
                       "responseType": "OperatorCancelTicketsResponse"
                     },
+                    "EventCancelTickets": {
+                      "requestType": "EventCancelTicketsRequest",
+                      "responseType": "EventCancelTicketsResponse"
+                    },
+                    "GetEntryRecords": {
+                      "requestType": "GetEntryRecordsRequest",
+                      "responseType": "GetEntryRecordsResponse"
+                    },
                     "CheckReviewEligibility": {
                       "requestType": "CheckReviewEligibilityRequest",
                       "responseType": "CheckReviewEligibilityResponse"
@@ -189,6 +197,18 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "result": {
                       "type": "CancelTicketResult",
                       "id": 2
+                    },
+                    "first_cancellation_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "first_result": {
+                      "type": "CancelTicketResult",
+                      "id": 4
+                    },
+                    "first_cancelled_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 5
                     }
                   }
                 },
@@ -268,6 +288,113 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "outcomes": {
                       "rule": "repeated",
                       "type": "OperatorCancelOutcome",
+                      "id": 1
+                    }
+                  }
+                },
+                "EventCancelTarget": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "cancellation_id": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "EventCancelTicketsRequest": {
+                  "fields": {
+                    "cancellation_request_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "targets": {
+                      "rule": "repeated",
+                      "type": "EventCancelTarget",
+                      "id": 3
+                    }
+                  }
+                },
+                "EventCancelResult": {
+                  "values": {
+                    "EVENT_CANCEL_RESULT_UNSPECIFIED": 0,
+                    "EVENT_CANCEL_RESULT_CANCELED": 1,
+                    "EVENT_CANCEL_RESULT_ALREADY_ENDED": 2
+                  }
+                },
+                "EventCancelOutcome": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "result": {
+                      "type": "EventCancelResult",
+                      "id": 2
+                    },
+                    "order_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "holder_account_id": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "transfer_withdrawn": {
+                      "type": "bool",
+                      "id": 5
+                    }
+                  }
+                },
+                "EventCancelTicketsResponse": {
+                  "fields": {
+                    "outcomes": {
+                      "rule": "repeated",
+                      "type": "EventCancelOutcome",
+                      "id": 1
+                    }
+                  }
+                },
+                "GetEntryRecordsRequest": {
+                  "fields": {
+                    "ticket_ids": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "EntryRecord": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "found": {
+                      "type": "bool",
+                      "id": 2
+                    },
+                    "entered": {
+                      "type": "bool",
+                      "id": 3
+                    },
+                    "first_entered_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 4
+                    }
+                  }
+                },
+                "GetEntryRecordsResponse": {
+                  "fields": {
+                    "records": {
+                      "rule": "repeated",
+                      "type": "EntryRecord",
                       "id": 1
                     }
                   }

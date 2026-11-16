@@ -2333,9 +2333,19 @@ export const usePutPartnerEventEntryPolicy = <TError = ErrorType<ProblemResponse
   status: 202
 }
 
+export type createPartnerEventCancellationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createPartnerEventCancellationResponse403 = {
   data: ProblemResponse
   status: 403
+}
+
+export type createPartnerEventCancellationResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type createPartnerEventCancellationResponse409 = {
@@ -2343,10 +2353,20 @@ export type createPartnerEventCancellationResponse409 = {
   status: 409
 }
 
+export type createPartnerEventCancellationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerEventCancellationResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createPartnerEventCancellationResponseSuccess = (createPartnerEventCancellationResponse202) & {
   headers: Headers;
 };
-export type createPartnerEventCancellationResponseError = (createPartnerEventCancellationResponse403 | createPartnerEventCancellationResponse409) & {
+export type createPartnerEventCancellationResponseError = (createPartnerEventCancellationResponse400 | createPartnerEventCancellationResponse403 | createPartnerEventCancellationResponse404 | createPartnerEventCancellationResponse409 | createPartnerEventCancellationResponse422 | createPartnerEventCancellationResponse503) & {
   headers: Headers;
 };
 
@@ -2359,7 +2379,7 @@ export const getCreatePartnerEventCancellationUrl = (eventId: string,) => {
 }
 
 /**
- * FR-055, POL-032, POL-038, ADR-0046. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
+ * FR-055, POL-032, POL-038, ADR-0046. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062). ops-svc가 받는다(gw-partner가 이 경로만 ops-svc로 보낸다). 소속은 core-svc 판매 설정의 테넌트와 세션 테넌트로 보고, 판매 설정이 없는 회차와 다른 파트너 회차는 같은 404다. 연기(POSTPONE)는 newStartsAt이 필수이고 지금 공연 시작보다 늦어야 한다. 취소에 newStartsAt을 보내면 400. 사유 1~1,000자 [가정], 증빙 참조는 글 1~200자 [가정]이고 파일은 받지 않는다. 접수하면 CS 처리함 '판정 대기' 건이 생긴다(추천 적용 2026-11-16, BUILD_ORDER GAT-110, docs/features/transfer-refund.md §5 '요청 두 길')
  * @summary 회차 취소·연기 요청(확정은 운영자의 귀책 판정과 2인 승인). 귀책 의견은 참고값
  */
 export const createPartnerEventCancellation = async (eventId: string,
@@ -2470,7 +2490,7 @@ export const getGetPartnerEventCancellationUrl = (eventId: string,) => {
 }
 
 /**
- * FR-055, POL-032·038, SCR-044, docs/design/d5 §1.6 16번. 소속 파트너 회차의 가장 최근 요청 하나를 준다(반려 뒤 다시 요청하면 새 요청). 미리보기(dryRun)·결제사별 몫·판정자·내부 판정 사유는 싣지 않고 배상은 대상 수·합계만이다(authz-matrix §4.1, transfer-refund §7.3). 허용 역할 [가정]: 정본 표는 요청(관리자)만 적었고 SCR-044가 실무자 보기를 두므로 두 역할이 본다. [가정] 판정 사유 칸 judgementSummary에는 내부 판정 사유 대신 팬 통지 사유 요약(fanNoticeReason)을 싣는다(내부 사유는 따로 둔다, ADR-0062). 판정 대기 기한은 요청 시각 + 1영업일이다. Cache-Control: no-store
+ * FR-055, POL-032·038, SCR-044, docs/design/d5 §1.6 16번. 소속 파트너 회차의 가장 최근 요청 하나를 준다(반려 뒤 다시 요청하면 새 요청). 미리보기(dryRun)·결제사별 몫·판정자·내부 판정 사유는 싣지 않고 배상은 대상 수·합계만이다(authz-matrix §4.1, transfer-refund §7.3). 허용 역할 [가정]: 정본 표는 요청(관리자)만 적었고 SCR-044가 실무자 보기를 두므로 두 역할이 본다. [가정] 판정 사유 칸 judgementSummary에는 내부 판정 사유 대신 팬 통지 사유 요약(fanNoticeReason)을 싣는다(내부 사유는 따로 둔다, ADR-0062). 판정 대기 기한은 요청 시각 + 1영업일이다. 영업일 계산이 ops-svc에 들어오는 GAT-280 전까지 judgementDueAt은 null이다. ops-svc가 받고 소속은 POST와 같이 본다. 진행률·멈춤 종류·연기 신청 현황은 일괄 환불 작업에서 합계만 옮기고, 읽지 못하면 그 칸만 null이다(추천 적용 2026-11-16, BUILD_ORDER GAT-110). Cache-Control: no-store
  * @summary 회차 취소·연기 요청 상태(SCR-044 ④, 판정·반려·환불 진행률, 금액은 합계만)
  */
 export const getPartnerEventCancellation = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerEventCancellationResponseSuccess> => {
