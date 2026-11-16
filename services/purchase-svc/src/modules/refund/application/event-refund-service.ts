@@ -263,62 +263,74 @@ export class EventRefundService {
     const queue = all
       .filter((i) => (i.status === 'PENDING' || i.status === 'UNKNOWN') && i.appliedAtMs !== undefined && (i.nextAttemptAtMs === undefined || i.nextAttemptAtMs <= nowMs) && !paused.has(i.pg))
       .slice(0, Math.max(0, limit));
+    // 같은 주문의 표는 한 작업자가 큐 차례대로 처리한다. payment-svc가 같은 결제의 일반 취소를 한 번에 하나씩 보내므로(10분 안의 진행 중 건이 있으면 결과 모름),
+    // 같은 주문의 표를 동시에 보내면 결과 모름이 자동 정지 실패율에 섞인다(docs/data.md §5 '같은 주문의 표 둘을 동시에 취소', BUILD_ORDER GAT-080)
+    const groups = new Map<string, EventRefundItem[]>();
+    for (const item of queue) {
+      const group = groups.get(item.orderId);
+      if (group) group.push(item);
+      else groups.set(item.orderId, [item]);
+    }
+    const orderQueue = [...groups.values()];
     const newlyPaused: { pg: RefundPgProvider; reason: RefundPauseReason; detail: Record<string, unknown> }[] = [];
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        const item = queue.shift();
-        if (!item) return;
-        // 실행 중에 사람이 멈췄을 수 있다. 항목마다 저장된 상태를 다시 보고 새 호출을 보내지 않는다
-        const current = await this.o.store.find(request.requestId);
-        if (current) {
-          for (const p of pausedOf(current)) paused.set(p.pg, p.reason);
-          if (current.status === 'PAUSED' && !paused.has(item.pg)) paused.set(item.pg, 'MANUAL');
-        }
-        if (paused.has(item.pg)) continue;
-        // 기준을 넘긴 뒤 새 호출을 한 건도 더 보내지 않게 항목마다 판정한다
-        const stop = await this.#stopReason(item.pg, nowMs);
-        if (stop) {
-          const pgs = stop.all ? request.progress.perPg.map((p) => p.pg) : [item.pg];
-          for (const pg of pgs) {
-            if (!paused.has(pg)) {
-              paused.set(pg, stop.reason);
-              newlyPaused.push({ pg, reason: stop.reason, detail: stop.detail });
-            }
+    const processItem = async (item: EventRefundItem): Promise<void> => {
+      // 실행 중에 사람이 멈췄을 수 있다. 항목마다 저장된 상태를 다시 보고 새 호출을 보내지 않는다
+      const current = await this.o.store.find(request.requestId);
+      if (current) {
+        for (const p of pausedOf(current)) paused.set(p.pg, p.reason);
+        if (current.status === 'PAUSED' && !paused.has(item.pg)) paused.set(item.pg, 'MANUAL');
+      }
+      if (paused.has(item.pg)) return;
+      // 기준을 넘긴 뒤 새 호출을 한 건도 더 보내지 않게 항목마다 판정한다
+      const stop = await this.#stopReason(item.pg, nowMs);
+      if (stop) {
+        const pgs = stop.all ? request.progress.perPg.map((p) => p.pg) : [item.pg];
+        for (const pg of pgs) {
+          if (!paused.has(pg)) {
+            paused.set(pg, stop.reason);
+            newlyPaused.push({ pg, reason: stop.reason, detail: stop.detail });
           }
-          continue;
         }
-        const target = byTicket.get(item.ticketId);
-        if (!target) {
-          await this.#finishItem(request, item, 'FAILED', 'target-not-found', undefined, undefined);
-          continue;
+        return;
+      }
+      const target = byTicket.get(item.ticketId);
+      if (!target) {
+        await this.#finishItem(request, item, 'FAILED', 'target-not-found', undefined, undefined);
+        return;
+      }
+      try {
+        const result = await this.o.canceller.cancel(target, {
+          requestId: request.requestId,
+          cancellationId: item.cancellationId,
+          reason: request.kind === 'POSTPONE' ? 'EVENT_POSTPONED' : 'EVENT_CANCELLED',
+          nowMs: this.o.nowMs(),
+          deadlineMs: this.o.deadlineMs(),
+        });
+        const outcome = outcomeOf(result.status, result.error);
+        await this.#recordAttempt(request, item, target, outcome);
+        if (result.status === 'REFUNDED') {
+          await this.#finishItem(request, item, 'REFUNDED', undefined, target, undefined);
+        } else if (result.status === 'REFUND_PENDING') {
+          await this.#retryOrFail(request, item, 'UNKNOWN', result.error ?? 'refund-pending', target);
+        } else if (result.error !== undefined && FAILURE_ERRORS.has(result.error)) {
+          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined);
+        } else {
+          await this.#retryOrFail(request, item, 'FAILED', result.error ?? 'failed', target);
         }
-        try {
-          const result = await this.o.canceller.cancel(target, {
-            requestId: request.requestId,
-            cancellationId: item.cancellationId,
-            reason: request.kind === 'POSTPONE' ? 'EVENT_POSTPONED' : 'EVENT_CANCELLED',
-            nowMs: this.o.nowMs(),
-            deadlineMs: this.o.deadlineMs(),
-          });
-          const outcome = outcomeOf(result.status, result.error);
-          await this.#recordAttempt(request, item, target, outcome);
-          if (result.status === 'REFUNDED') {
-            await this.#finishItem(request, item, 'REFUNDED', undefined, target, undefined);
-          } else if (result.status === 'REFUND_PENDING') {
-            await this.#retryOrFail(request, item, 'UNKNOWN', result.error ?? 'refund-pending', target);
-          } else if (result.error !== undefined && FAILURE_ERRORS.has(result.error)) {
-            await this.#finishItem(request, item, 'FAILED', result.error, target, undefined);
-          } else {
-            await this.#retryOrFail(request, item, 'FAILED', result.error ?? 'failed', target);
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'unknown';
-          await this.#recordAttempt(request, item, target, 'UNKNOWN');
-          await this.#retryOrFail(request, item, 'UNKNOWN', message, target);
-        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown';
+        await this.#recordAttempt(request, item, target, 'UNKNOWN');
+        await this.#retryOrFail(request, item, 'UNKNOWN', message, target);
       }
     };
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(this.o.concurrency ?? 8, queue.length || 1)) }, worker));
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const group = orderQueue.shift();
+        if (!group) return;
+        for (const item of group) await processItem(item);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(this.o.concurrency ?? 8, orderQueue.length || 1)) }, worker));
 
     const after = await this.o.store.items(request.requestId);
     const pausedAfter = [...paused.entries()].map(([pg, reason]) => ({ pg, reason }));
