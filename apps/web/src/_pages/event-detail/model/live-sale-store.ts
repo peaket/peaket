@@ -2,6 +2,7 @@
 // - start: 문서마다 한 번만 받는다(부르는 쪽은 예매 버튼 상태가 오픈 뒤 진입(queue)일 때만 부른다). 주기 조회는 하지 않는다
 // - onVisible: 시작했고 마지막으로 받기를 '보낸' 지 30초 [가정] 이상이면(경계 포함) 한 번 더 받는다. 답이 없거나 한도로 끝난 받기도 한 번으로 센다
 // - 시간 한도 3초 [가정]가 지나도 답이 없으면 unknown이고, 늦은 답이 오면 그때 바꾼다. 늦게 온 앞선 받기의 답은 버린다(세대 번호)
+import type { BookingPhase } from './detail.ts';
 import { toLiveSale, type LiveSale } from './live-sale.ts';
 
 export const LIVE_SALE_TIMEOUT_MS = 3000;
@@ -65,4 +66,18 @@ export function createLiveSaleStore(deps: LiveSaleDeps): { get(): LiveSale; list
       if (started && deps.now() - sentAt >= LIVE_SALE_RECHECK_MS) load();
     },
   };
+}
+
+/**
+ * 받기 운전자(ADR-0272 결정 1 '읽는 때', 리뷰 R040-1 뒤): 첫 상태가 queue일 때 한 번, queue인 동안 다시 보일 때만 가게를 부른다.
+ * 시험 담당이 만든 빈 뼈대이고(ADR-0270 결정 1·2), 동작은 구현 담당이 채운다
+ */
+export function createLiveSaleDriver(store: { get(): LiveSale; listen(l: () => void): () => void; start(): void; onVisible(): void }): {
+  phase(p: BookingPhase | undefined): void;
+  visible(): void;
+  view(): LiveSale;
+  listen(l: () => void): () => void;
+} {
+  void store;
+  throw new Error('아직 없음');
 }

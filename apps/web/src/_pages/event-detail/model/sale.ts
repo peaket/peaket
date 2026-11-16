@@ -177,3 +177,14 @@ export function deniedUntilMs(phases: DetailSalePhase[], nowMs: number): number 
   const idx = phaseIndexAt(phases, nowMs);
   return idx < 0 ? undefined : phases[idx]!.endsAtMs;
 }
+
+/**
+ * 명단 밖 알림의 창(ADR-0272 결정 4, 리뷰 R040-2 뒤). 켠 시각의 판정 시각이 든 조각이 PRESALE이면 그 끝, 아니면 켠 시각 뒤 첫 조각 경계,
+ * 경계도 없으면 문서 동안(untilMs 없음). 시험 담당이 만든 빈 뼈대이고(ADR-0270 결정 1·2), 동작은 구현 담당이 채운다
+ */
+export function deniedWindow(phases: DetailSalePhase[], openAtMs: number, readAtMs: number): { untilMs?: number } {
+  void phases;
+  void openAtMs;
+  void readAtMs;
+  throw new Error('아직 없음');
+}

@@ -2,9 +2,10 @@
 // 단언 값은 정본(ADR-0272·d5·openapi)의 글과 시각을 그대로 적는다. 코드의 상수를 가져오지 않는다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { bookingCta } from './cta.ts';
 import { toEventDetail } from './detail.ts';
 import {
-  deniedUntilMs,
+  deniedWindow,
   eligibilityGate,
   eligibilityJudgeAt,
   isDeniedHash,
@@ -30,7 +31,7 @@ const fan = (eligible, phases = PHASES, lists = [{ name: '팬클럽 선예매', 
   phases: phases.map((p, i) => ({ ...p, eligible: Array.isArray(eligible) ? eligible[i] : p.kind === 'PRESALE' ? eligible : true })),
   lists,
 });
-const gate = (o = {}) => eligibilityGate({ phase: 'lobby', session: MEMBER, phases: PHASES, fan: fan(false), denied: false, openAtMs: OPEN, nowMs: OPEN - 5 * 60_000, ...o });
+const gate = (o = {}) => eligibilityGate({ phase: 'lobby', session: MEMBER, phases: PHASES, fan: fan(false), denied: null, openAtMs: OPEN, nowMs: OPEN - 5 * 60_000, ...o });
 const NOT_TARGET = '이 회차의 선예매 대상이 아닙니다';
 const REASON = '이 회차의 선예매 대상이 아닙니다. 일반 예매는 11/21(토) 00:30에 시작합니다';
 
@@ -208,18 +209,77 @@ test('[Q-T36 ⑧] 공연 상세: 주소 조각은 정확히 #sale-eligibility-re
   }
 });
 
-test('[Q-T36 ⑧] 명단 밖 알림은 팬 자격이 eligible이어도 자격 없음으로 그리고, 지금이 든 조각의 끝 1ms 전까지 켜지고 끝 시각에 꺼진다(조각을 모르면 문서 동안)', () => {
-  // 팬 자격과 상관없이(대상·모름) 자격 없음. 판정 시각은 지금
-  assert.deepEqual(gate({ phase: 'queue', nowMs: OPEN + 60_000, fan: fan(true), denied: true }), { reason: REASON });
-  assert.deepEqual(gate({ phase: 'queue', nowMs: OPEN + 60_000, fan: { status: 'none' }, denied: true }), { reason: REASON });
-  assert.deepEqual(gate({ phase: 'lobby', fan: fan(true), denied: true }), { reason: REASON }, '로비(오픈 전)에서 막혀 돌아온 때');
-  // 꺼지는 시각 = 지금이 든 조각의 끝(그 1ms 전까지 켜져 있다)
-  assert.equal(deniedUntilMs(PHASES, OPEN), GEN);
-  assert.equal(deniedUntilMs(PHASES, GEN - 1), GEN);
-  assert.equal(deniedUntilMs(PHASES, GEN), SALE_END, '끝 시각에는 그 조각이 아니다');
-  // 조각을 모르면 문서 동안(undefined)
-  assert.equal(deniedUntilMs([], OPEN), undefined);
-  assert.equal(deniedUntilMs(PHASES, OPEN - 1), undefined, '지금이 든 조각이 없음');
+// ── 리뷰 지적 R040-2 재현(계획 '리뷰 뒤 정한 것' RV6~RV8, ADR-0272 결정 4 바로잡음): 명단 밖 알림은 켤 때 정한 창 안에서만 덮는다 ──
+const CTA_DATA = {
+  eventId: EV,
+  roundLabel: '12/24(목) 19:00',
+  lobbyText: '19:50',
+  openTimeText: '20:00',
+  rounds: [{ eventId: EV, href: `/events/${EV}`, label: '12/24(목) 19:00', current: true, openAtMs: OPEN, saleEndsAtMs: SALE_END, status: 'SCHEDULED' }],
+  loginHref: '/login',
+  signupHref: '/signup/complete',
+  otherRoundFallbackHref: '/productions/p1',
+  hasLobby: true,
+};
+/** 부르는 쪽 바깥 경계: 판정(eligibilityGate)의 결과를 예매 버튼(bookingCta)에 넣는다 */
+const ctaWith = (eligibility, nowMs) =>
+  bookingCta({ phase: 'queue', data: CTA_DATA, now: nowMs, personal: null, restricted: null, eligibility, live: { status: 'known', saleStatus: 'ON_SALE', soldOutTiers: [] }, queueHref: 'https://queue.peaket.example/e1' });
+
+test('[R040-2][Q-T36 ⑧] 오픈 전 로비 403으로 켠 명단 밖 알림: 창은 오픈 시각이 든 PRESALE 조각의 끝까지이고, 일반 예매 시작 1ms 전 bookingCta는 비활성 \'대기열 들어가기\'와 이유 글, 시작 시각에는 [대기열 들어가기]다', () => {
+  // 창(오픈 시각이 든 PRESALE의 끝 = 일반 예매 시작). 팬 자격은 일부러 대상(eligible true)이다(사본 없음·설정 틀림, Q-T36 ⑨)
+  const win = { untilMs: GEN };
+  const g = (o) => gate({ fan: fan(true), denied: win, ...o });
+  assert.deepEqual(g({ phase: 'lobby', nowMs: OPEN - 60_000 }), { reason: REASON }, '오픈 1분 전 로비');
+  const before = g({ phase: 'queue', nowMs: GEN - 1 });
+  assert.deepEqual(before, { reason: REASON }, '일반 예매 시작 1ms 전');
+  assert.deepEqual(ctaWith(before, GEN - 1).primary, { type: 'disabled', label: '대기열 들어가기' });
+  assert.equal(ctaWith(before, GEN - 1).desc, REASON);
+  const at = g({ phase: 'queue', nowMs: GEN });
+  assert.equal(at, null, '일반 예매 시작 시각에는 덮지 않는다(새로고침 없이 버튼이 돌아온다)');
+  assert.deepEqual(ctaWith(at, GEN).primary, { type: 'enter', label: '대기열 들어가기' });
+  assert.equal(saleBoundaryAfter(PHASES, GEN - 1), GEN, '그 시각에 다시 고른다');
+  // 창을 정하는 함수: 오픈 10분 전(로비)에 켜면 판정 시각 = 오픈 시각이 든 PRESALE의 끝
+  assert.deepEqual(deniedWindow(PHASES, OPEN, OPEN - 10 * 60_000), { untilMs: GEN });
+});
+
+test('[R040-2][Q-T36 ⑧] 오픈 뒤 진입 403으로 켠 알림의 창은 지금이 든 PRESALE 조각의 끝까지이고, 이유 글의 일반 예매 시각은 판정 시각 뒤 첫 GENERAL이다', () => {
+  assert.deepEqual(deniedWindow(PHASES, OPEN, OPEN + 5 * 60_000), { untilMs: GEN });
+  assert.deepEqual(deniedWindow(PHASES, OPEN, GEN - 1), { untilMs: GEN }, 'PRESALE 끝 1ms 전에 켬');
+  // 팬 자격과 상관없이(대상·모름) 창 안이면 자격 없음
+  for (const f of [fan(true), { status: 'none' }, { status: 'idle' }]) assert.deepEqual(gate({ phase: 'queue', nowMs: OPEN + 5 * 60_000, fan: f, denied: { untilMs: GEN } }), { reason: REASON }, f.status);
+  // 조각 넷: 두 번째 PRESALE 안에서 켜면 그 끝까지이고, 이유 글은 앞선 GENERAL이 아니라 판정 시각 뒤 첫 GENERAL(11/21(토) 00:30)
+  const h = 60 * 60_000;
+  const P1 = { kind: 'PRESALE', startsAtMs: OPEN, endsAtMs: OPEN + h, limit: 2 };
+  const G1 = { kind: 'GENERAL', startsAtMs: OPEN + h, endsAtMs: OPEN + 2 * h, limit: 4 };
+  const P2 = { kind: 'PRESALE', startsAtMs: OPEN + 2 * h, endsAtMs: GEN, limit: 2 };
+  const four = [P1, G1, P2, G];
+  const read = OPEN + 2 * h + 60_000;
+  const win = deniedWindow(four, OPEN, read);
+  assert.deepEqual(win, { untilMs: GEN });
+  assert.deepEqual(gate({ phase: 'queue', phases: four, fan: fan(true, four), denied: win, nowMs: read }), { reason: REASON });
+});
+
+test('[R040-2] 판정 시각의 조각이 GENERAL이거나 없을 때 창은 켠 시각 뒤 첫 조각 경계까지, 공개 요약에 조각이 없으면 문서 동안', () => {
+  const X = GEN + 3 * 60 * 60_000;
+  const Gs = { kind: 'GENERAL', startsAtMs: GEN, endsAtMs: X, limit: 3 };
+  const P3 = { kind: 'PRESALE', startsAtMs: X, endsAtMs: SALE_END, limit: 2 };
+  const three = [P, Gs, P3];
+  // GENERAL 안에서 켠 창 { untilMs: X }: 경계 1ms 전은 자격 없음, 경계에서 null
+  const win = { untilMs: X };
+  assert.deepEqual(gate({ phase: 'queue', phases: three, fan: fan(true, three), denied: win, nowMs: X - 1 }), { reason: NOT_TARGET }, '경계 1ms 전(뒤에 GENERAL이 없어 첫 문장만)');
+  assert.equal(gate({ phase: 'queue', phases: three, fan: fan(true, three), denied: win, nowMs: X }), null, '경계에서 꺼진다');
+  // 창을 정하는 함수: GENERAL 안에서 켬 → 다음 경계(X)
+  assert.deepEqual(deniedWindow(three, OPEN, GEN + 60_000), { untilMs: X });
+  // 조각 사이 빈 시각에서 켬 → 다음 조각 시작
+  const gapStart = GEN + 10 * 60_000;
+  const gapped = [P, { ...G, startsAtMs: gapStart }];
+  assert.deepEqual(deniedWindow(gapped, OPEN, GEN + 60_000), { untilMs: gapStart });
+  // 공개 요약에 조각이 없으면 문서 동안(untilMs 없음): 30일 뒤에도 자격 없음
+  const none = deniedWindow([], OPEN, OPEN + 60_000);
+  assert.equal(none.untilMs, undefined);
+  assert.deepEqual(gate({ phase: 'queue', phases: [], fan: { status: 'none' }, denied: none, nowMs: OPEN + 30 * 24 * 60 * 60_000 }), { reason: NOT_TARGET });
+  // 판매 종료면 판정 시각이 없어 덮지 않는다
+  assert.equal(gate({ phase: 'ended', fan: fan(true), denied: { untilMs: GEN }, nowMs: OPEN + 60_000 }), null);
 });
 
 // toFanEligibility는 T16(가게)에서 바깥 경계로 본다. 여기서는 모양 틀림이 none인지만
