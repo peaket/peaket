@@ -11,6 +11,11 @@ metadata:
   namespace: envoy-gateway-system
 spec:
   gatewayClassName: peaket
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: peaket-proxy-queue
   listeners:
     - name: queue
       hostname: queue.peaket.example

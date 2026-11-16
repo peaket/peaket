@@ -271,9 +271,19 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - tosspayments-webhook-signature
+      - tosspayments-webhook-transmission-id
+      - tosspayments-webhook-transmission-retried-count
+      - tosspayments-webhook-transmission-time
+      - webhook-id
+      - webhook-signature
+      - webhook-timestamp
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
 ---
@@ -395,9 +405,19 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - tosspayments-webhook-signature
+      - tosspayments-webhook-transmission-id
+      - tosspayments-webhook-transmission-retried-count
+      - tosspayments-webhook-transmission-time
+      - webhook-id
+      - webhook-signature
+      - webhook-timestamp
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -535,9 +555,19 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - tosspayments-webhook-signature
+      - tosspayments-webhook-transmission-id
+      - tosspayments-webhook-transmission-retried-count
+      - tosspayments-webhook-transmission-time
+      - webhook-id
+      - webhook-signature
+      - webhook-timestamp
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -695,8 +725,18 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - tosspayments-webhook-signature
+      - tosspayments-webhook-transmission-id
+      - tosspayments-webhook-transmission-retried-count
+      - tosspayments-webhook-transmission-time
+      - webhook-id
+      - webhook-signature
+      - webhook-timestamp
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true

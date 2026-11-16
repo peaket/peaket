@@ -247,9 +247,15 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - Last-Event-ID
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Content-Disposition
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
 ---
@@ -341,9 +347,15 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - Last-Event-ID
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Content-Disposition
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -475,9 +487,15 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - Last-Event-ID
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Content-Disposition
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -603,8 +621,14 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - Last-Event-ID
+      - X-Requested-With
     exposeHeaders:
       - X-Trace-Id
       - ETag
+      - Content-Disposition
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true

@@ -271,10 +271,18 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
     exposeHeaders:
       - Date
       - X-Trace-Id
       - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
 ---
@@ -372,10 +380,18 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
     exposeHeaders:
       - Date
       - X-Trace-Id
       - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -446,10 +462,18 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
     exposeHeaders:
       - Date
       - X-Trace-Id
       - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -546,10 +570,18 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
     exposeHeaders:
       - Date
       - X-Trace-Id
       - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -711,10 +743,18 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
     exposeHeaders:
       - Date
       - X-Trace-Id
       - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -870,10 +910,18 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
     exposeHeaders:
       - Date
       - X-Trace-Id
       - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
   csrf:
@@ -1035,9 +1083,17 @@ spec:
       - Idempotency-Key
       - If-Match
       - X-Reauth-Token
+      - X-Admission-Token
+      - X-Client-Ephemeral-Key
+      - X-Purchase-Mac
+      - X-Purchase-Seq
+      - X-Requested-With
     exposeHeaders:
       - Date
       - X-Trace-Id
       - ETag
+      - Location
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true

@@ -218,6 +218,8 @@ spec:
       - Date
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
 ---
 # gw-scanner-public: 토큰 없이 부르는 스캐너 경로(기기 등록·기기 인가. 기기 증명 DPoP는 서비스가 본다, authz-matrix §5.2)
@@ -314,6 +316,8 @@ spec:
       - Date
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
 ---
 # gw-scanner-api: 현장 스태프 경로(토큰 Authorization: DPoP, 기기 증명은 ScannerGuard가 본다)
@@ -380,6 +384,8 @@ spec:
       - Date
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s
   jwt:
     providers:
@@ -508,4 +514,6 @@ spec:
       - Date
       - X-Trace-Id
       - ETag
+      - Retry-After
+      - WWW-Authenticate
     maxAge: 7200s

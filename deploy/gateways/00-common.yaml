@@ -87,6 +87,81 @@ spec:
             namespace: otel
             port: 4317
 ---
+# gw-queue 프록시: 공통 peaket-proxy와 같고 추적만 다르다(docs/infra.md §4.1 추적 표본과 속성, ADR-0125 결정 1, 웨이브 끝 리뷰 W7-COR-02).
+# - 진입 경로는 꼬리 표본에서 빼므로 trace를 시작할 때 1/1000만 고르고, 고른 trace에 고정 태그 peaket.sample.mode=head를 단다(docs/observability.md §6).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: peaket-proxy-queue
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        container:
+          env:
+            - name: PEAKET_ORIGIN_VERIFY
+              valueFrom:
+                secretKeyRef:
+                  name: peaket-origin-verify
+                  key: current
+                  optional: true
+            - name: PEAKET_ORIGIN_VERIFY_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: peaket-origin-verify
+                  key: previous
+                  optional: true
+  lua:
+    validationType: Strict
+    strictValidation:
+      allowedEnvVars:
+        - PEAKET_ORIGIN_VERIFY
+        - PEAKET_ORIGIN_VERIFY_PREVIOUS
+  filterOrder:
+    - name: envoy.filters.http.lua
+      before: envoy.filters.http.cors
+  telemetry:
+    accessLog:
+      settings:
+        - format:
+            type: JSON
+            json:
+              time: "%START_TIME(%Y-%m-%dT%H:%M:%S.%3fZ)%"
+              method: "%REQ(:METHOD)%"
+              path: "%REQ_WITHOUT_QUERY(:PATH)%"
+              host: "%REQ(:AUTHORITY)%"
+              status: "%RESPONSE_CODE%"
+              durationMs: "%DURATION%"
+              clientIp: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+              app: "%REQ(x-peaket-app)%"
+              ja4: "%REQ(cloudfront-viewer-ja4-fingerprint)%"
+              asn: "%REQ(cloudfront-viewer-asn)%"
+              edgeBotLabels: "%REQ(x-amzn-waf-bot-labels)%"
+              sub: "%REQ(x-user-id)%"
+              pid: "%REQ(x-user-pid)%"
+              traceId: "%TRACE_ID%"
+          sinks:
+            - type: File
+              file:
+                path: /dev/stdout
+    tracing:
+      provider:
+        type: OpenTelemetry
+        backendRefs:
+          - name: otel-gateway-collector
+            namespace: otel
+            port: 4317
+      samplingFraction:
+        numerator: 1
+        denominator: 1000
+      customTags:
+        peaket.sample.mode:
+          type: Literal
+          literal:
+            value: head
+---
 # 공통 Lua(EnvoyExtensionPolicy <게이트웨이>-edge가 filterContext로 게이트웨이마다 설정을 준다)
 apiVersion: v1
 kind: ConfigMap
@@ -102,8 +177,8 @@ data:
     --    끝단 신호 머리(cloudfront-viewer-로 시작하는 머리, x-amzn-waf-로 시작하는 머리, x-peaket-arrival)를 지운다. 요청은 거절하지 않는다.
     --    맞든 틀리든 원본 확인 머리 자체는 지운 뒤 안쪽으로 넘긴다.
     -- 2. 토큰 유형(docs/features/identity.md §3 '발급자와 검증 규칙', I-T36): Envoy의 JWT 확인은 typ을 보지 않는다. 토큰을 요구하는 라우트
-    --    (checkTyp 참)에서는 JWT 확인보다 먼저, 실린 토큰(Authorization과 액세스 쿠키)마다 머리를 직접 읽어 typ이 액세스 토큰 값(at+jwt)이 아니면 401이다.
-    --    JWT 꼴이 아닌 값은 뒤의 JWT 확인이 거절한다.
+    --    (checkTyp 참)에서는 JWT 확인보다 먼저, Envoy JWT 필터가 꺼낼 수 있는 자리의 토큰(Authorization 값마다, Cookie 머리마다)을 모두 꺼내
+    --    꼴이 어긋나거나 typ이 액세스 토큰 값(at+jwt)이 아니면 401이다(닫힌 쪽으로 실패, 웨이브 끝 리뷰 W7-SEC-01·W7-CON-01).
     -- 3. 내부 경로(docs/infra.md §4.1 '호스트와 내부 경로'): /internal/로 시작하는 경로는 어느 라우트든 1 다음에 404로 바로 답한다. 라우트는 /internal/을 내지 않지만
     --    앱 서버로 / 전체를 넘기는 라우트(www·partner)는 경로가 남으므로, 그 앞에서 막는다(대소문자를 가리지 않고 견준다).
     -- 설정(filterContext): originVerify(참이면 1의 견주기를 한다), checkTyp(참이면 2를 한다, 토큰을 요구하는 라우트), tokenCookie(액세스 쿠키 이름, 없으면 ""), tokenScheme(Authorization 앞말)
@@ -168,11 +243,14 @@ data:
       return table.concat(out)
     end
 
-    -- 토큰 머리(첫 마디)의 JSON 글. JWT 꼴(세 마디, base64url 머리)이 아니면 nil
+    -- JWT 꼴: base64url 마디 셋을 점으로 이은 것(빈 마디 없음)
+    local JWT_FORM = "^[%w%-_]+%.[%w%-_]+%.[%w%-_]+$"
+
+    -- 토큰 머리(첫 마디)의 JSON 글. 풀지 못하면 nil
     local function header_of(token)
-      local head = string.match(token, "^([%w%-_]+)%.[%w%-_]*%.[%w%-_]*$")
-      if head == nil then return nil end
-      local json = b64url_decode(head)
+      local dot = string.find(token, ".", 1, true)
+      if dot == nil then return nil end
+      local json = b64url_decode(string.sub(token, 1, dot - 1))
       if json == nil or string.sub(json, 1, 1) ~= "{" then return nil end
       return json
     end
@@ -183,13 +261,36 @@ data:
       return typ and string.lower(typ) or nil
     end
 
-    local function cookie_value(header, name)
-      if header == nil or name == nil or name == "" then return nil end
-      for part in string.gmatch(header, "[^;]+") do
-        local k, v = string.match(part, "^%s*([^=%s]+)%s*=%s*(.-)%s*$")
-        if k == name then return v end
+    -- 앞뒤 빈칸(빈칸·탭)을 뗀다. 패턴 없이 글자를 하나씩 본다(되짚기 없음, 웨이브 끝 리뷰 W7-CON-01)
+    local function trim(s)
+      local i, j = 1, #s
+      while i <= j do
+        local b = string.byte(s, i)
+        if b ~= 32 and b ~= 9 then break end
+        i = i + 1
       end
-      return nil
+      while j >= i do
+        local b = string.byte(s, j)
+        if b ~= 32 and b ~= 9 then break end
+        j = j - 1
+      end
+      return string.sub(s, i, j)
+    end
+
+    -- 같은 이름 머리의 값 전부(머리가 여럿이면 하나씩)
+    local function values_of(headers, name)
+      local out = {}
+      local ok, n = pcall(function() return headers:getNumValues(name) end)
+      if ok and type(n) == "number" and n > 0 then
+        for i = 0, n - 1 do
+          local v = headers:getAtIndex(name, i)
+          if v ~= nil then out[#out + 1] = v end
+        end
+      else
+        local v = headers:get(name)
+        if v ~= nil then out[#out + 1] = v end
+      end
+      return out
     end
 
     -- 설정 값 하나(filterContext는 표가 아니라 get으로 읽는 값이다, 2026-11-16 kind 확인)
@@ -200,15 +301,42 @@ data:
       return nil
     end
 
+    --[[ Envoy JWT 필터가 꺼낼 수 있는 자리의 토큰을 모두 꺼낸다(docs/infra.md §4.1 '토큰 확인과 인가', 웨이브 끝 리뷰 W7-SEC-01).
+      Envoy는 접두어를 값의 어디에서나 찾고, 같은 이름 머리와 Cookie 머리 여럿을 모두 읽고, 쿠키 값의 큰따옴표를 벗긴다.
+      그래서 닫힌 쪽으로 실패한다: 꼴이 어긋나면 nil(거절)을 돌려준다.
+      ① Authorization 값마다 접두어(대소문자 무시)가 들어 있으면 값 전체가 정확히 '접두어 + JWT 꼴'이어야 한다
+      ② Cookie 머리마다 그 이름의 값마다 앞뒤 빈칸과 큰따옴표를 벗겨 JWT 꼴이어야 한다. 나누기는 평문 찾기만 쓴다 ]]
     local function tokens_of(headers, ctx)
       local out = {}
-      local auth = headers:get("authorization")
-      local scheme = setting(ctx, "tokenScheme") or "Bearer"
-      if auth ~= nil and string.lower(string.sub(auth, 1, #scheme + 1)) == string.lower(scheme) .. " " then
-        out[#out + 1] = string.sub(auth, #scheme + 2)
+      local scheme = (setting(ctx, "tokenScheme") or "Bearer") .. " "
+      local lscheme = string.lower(scheme)
+      for _, v in ipairs(values_of(headers, "authorization")) do
+        if string.find(string.lower(v), lscheme, 1, true) ~= nil then
+          if string.sub(v, 1, #scheme) ~= scheme then return nil end
+          local t = string.sub(v, #scheme + 1)
+          if string.find(t, JWT_FORM) == nil then return nil end
+          out[#out + 1] = t
+        end
       end
-      local c = cookie_value(headers:get("cookie"), setting(ctx, "tokenCookie"))
-      if c ~= nil and c ~= "" then out[#out + 1] = c end
+      local name = setting(ctx, "tokenCookie")
+      if name ~= nil and name ~= "" then
+        for _, header in ipairs(values_of(headers, "cookie")) do
+          local pos = 1
+          while pos <= #header + 1 do
+            local semi = string.find(header, ";", pos, true)
+            local seg = string.sub(header, pos, (semi or (#header + 1)) - 1)
+            local eq = string.find(seg, "=", 1, true)
+            if eq ~= nil and trim(string.sub(seg, 1, eq - 1)) == name then
+              local val = trim(string.sub(seg, eq + 1))
+              if #val >= 2 and string.sub(val, 1, 1) == '"' and string.sub(val, -1) == '"' then val = string.sub(val, 2, -2) end
+              if string.find(val, JWT_FORM) == nil then return nil end
+              out[#out + 1] = val
+            end
+            if semi == nil then break end
+            pos = semi + 1
+          end
+        end
+      end
       return out
     end
 
@@ -221,8 +349,22 @@ data:
       return p == "/internal" or string.sub(p, 1, 10) == "/internal/"
     end
 
+    -- Lua가 직접 낸 응답에도 응답 보안 머리를 단다(docs/infra.md §9 '응답 보안 헤더', 웨이브 끝 리뷰 W7-SEC-04. 게이트웨이의 lateResponseHeaders가
+    -- 이 응답에 닿는지 kind에서 보기 전에도 빠지지 않게 같은 값을 직접 싣는다)
+    local function direct_headers(status, extra)
+      local h = {
+        [":status"] = status,
+        ["content-type"] = "application/problem+json",
+        ["strict-transport-security"] = "max-age=31536000; includeSubDomains",
+        ["x-content-type-options"] = "nosniff",
+        ["content-security-policy"] = "default-src 'none'; frame-ancestors 'none'",
+      }
+      for k, v in pairs(extra or {}) do h[k] = v end
+      return h
+    end
+
     local function reject(handle)
-      handle:respond({ [":status"] = "401", ["content-type"] = "application/problem+json", ["www-authenticate"] = 'Bearer error="invalid_token"' }, UNAUTHORIZED)
+      handle:respond(direct_headers("401", { ["www-authenticate"] = 'Bearer error="invalid_token"' }), UNAUTHORIZED)
     end
 
     function envoy_on_request(handle)
@@ -232,13 +374,15 @@ data:
       if not (setting(ctx, "originVerify") == true and origin_ok(headers:get(ORIGIN_VERIFY))) then strip_edge(headers) end
       headers:remove(ORIGIN_VERIFY)
       if is_internal(headers:get(":path")) then
-        return handle:respond({ [":status"] = "404", ["content-type"] = "application/problem+json" }, NOT_FOUND)
+        return handle:respond(direct_headers("404"), NOT_FOUND)
       end
       if setting(ctx, "checkTyp") ~= true then return end
-      for _, t in ipairs(tokens_of(headers, ctx)) do
+      local tokens = tokens_of(headers, ctx)
+      if tokens == nil then return reject(handle) end
+      for _, t in ipairs(tokens) do
+        -- 꺼낸 토큰마다 머리의 typ이 액세스 토큰 값이어야 한다(머리를 풀지 못하거나 typ이 없어도 거절)
         local head = header_of(t)
-        -- JWT 꼴이 아니면 JWT 확인이 거절한다. 꼴이면 typ이 액세스 토큰 값이어야 한다(typ이 없어도 거절)
-        if head ~= nil and typ_in(head) ~= ACCESS_TYP then return reject(handle) end
+        if head == nil or typ_in(head) ~= ACCESS_TYP then return reject(handle) end
       end
     end
 ---
@@ -255,6 +399,14 @@ spec:
     body:
       type: Inline
       inline: '{"type":"about:blank","title":"Not Found","status":404}'
+    header:
+      set:
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: Content-Security-Policy
+          value: default-src 'none'; frame-ancestors 'none'
 ---
 # TRACE를 405로 답하는 직접 응답(docs/security/asvs/delivery.md 13.4.4)
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -269,6 +421,14 @@ spec:
     body:
       type: Inline
       inline: '{"type":"about:blank","title":"Method Not Allowed","status":405}'
+    header:
+      set:
+        - name: Strict-Transport-Security
+          value: max-age=31536000; includeSubDomains
+        - name: X-Content-Type-Options
+          value: nosniff
+        - name: Content-Security-Policy
+          value: default-src 'none'; frame-ancestors 'none'
 ---
 # core 네임스페이스의 Service를 게이트웨이 라우트·정책이 가리키도록 허락한다(Gateway API ReferenceGrant)
 apiVersion: gateway.networking.k8s.io/v1beta1
