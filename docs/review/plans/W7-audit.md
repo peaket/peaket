@@ -891,3 +891,25 @@ DB·Kafka가 있어야 잡히거나, 단위 원문 시험과 따로 실제 DB가
 | 번호 | 무엇이 새나 | 시험 담당에게 넘김: 무엇을 단언해야 하나 |
 | --- | --- | --- |
 | N07 | K2 시험은 `startCoreConsumers({ database: … })`가 소비자 풀인지만 본다. 처리기에 넘기는 `consumerReviews`의 저장소(`new DrizzleReviewStore(…)`)가 API 풀(`database`)이어도 통과한다. 그러면 사건이 몰릴 때 익명화 UPDATE가 팬·관제 HTTP 경로의 연결을 쓴다(리뷰 K2가 막으려던 것). 보류 표만 소비자 풀로 간다 | `main.ts`에서 `ReviewAccountWithdrawnHandler`에 넘기는 `Reviews`의 `store: new DrizzleReviewStore(<이름>)`의 이름이 `startCoreConsumers`의 `database` 칸과 같은 소비자 풀 이름(지금 `consumerDatabase`)인지, `database`·`partnerDatabase`·`opsDatabase`가 아닌지 단언한다 |
+
+### 3단계(처음부터 통과 대조)
+
+- **누가·언제·바탕**: 검증 담당(세션 `l3w7-audit-verify`), 2026-11-16, HEAD `76873015`. 시험 담당이 `## 실패 확인`에 적은 '구현 전 트리에서 통과한 통합 시험 다섯'(`f8284d51`)마다 1·2단계 변이 가운데 그 시험을 실패시킨 것이 있는지 맞춰 봤다. 없거나 엉뚱한 까닭으로만 실패한 것은 시험 담당이 적은 틀린 구현을 넣었다. 도커 잠금이 다른 갈래 차례라 Docker가 필요한 것은 돌리지 않고 목록에만 넣었다. 단위로 볼 수 있는 것만 돌렸다(1·2단계와 같은 방법, 끝난 뒤 `git status`·`git diff`에 제품 코드 변경 없음).
+
+| 시험(처음부터 통과) | 그 시험을 실패시킨 1·2단계 변이 | 시험 담당이 적은 틀린 구현과의 대조 | 판정 |
+| --- | --- | --- | --- |
+| A2-19 J-T26 ⑥ 접속기록 넣기가 실패하면 attendee_export도 남지 않는다 | D04(이력을 따로 트랜잭션으로 먼저 커밋). 이 시험 하나만 실패했다 | 적힌 틀린 구현과 같다 | 실패 봄 |
+| A2-19 J-T26 ⑤⑥ 0021 뒤 LIST·DOWNLOAD 행이 들어가고 모양이 틀리면 CHECK가 거절한다 | D01(LIST 모양 CHECK에서 `reason is null` 뺌). D03(칸 이름 틀림)에서도 실패 | D01이 '사유 있는 LIST가 들어간다'와 같은 뜻이다 | 실패 봄 |
+| A2-19 core_partner는 접속기록을 고치거나 지우지 못하고 다른 테넌트 행을 읽지 못한다 [ASVS v5.0.0-8.4.1] | D03에서만 실패했다. 그것은 `source_ip` 칸이 없어 넣기가 실패한 것이라 권한 단언(42501, 다른 테넌트 0행)과 상관없다 | 적힌 틀린 구현을 단위로 넣었다. P01 0021에 `GRANT UPDATE, DELETE ON attendee_export_audit TO core_partner` 더함, P02 0021에서 그 표의 행 보안을 끔. 둘 다 단위 0021 원문 시험(`A2-19 0021은 … UPDATE·DELETE를 주지 않는다`)이 잡았다. 이 통합 시험 자체의 실패는 Docker가 있어야 본다 | **Docker 대기**: P01·P02를 core-svc `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts`로 |
+| COV2-06 ⑪ Drizzle 익명화는 그 계정 행만 바꾸고 다시 해도 0건이다 | D05(0022 review UPDATE 칸에서 `account_id`·`basis_order_id` 뺌, 42501), D09(`where` 계정 조건 빠뜨림) | 적힌 두 틀린 구현과 같다 | 실패 봄 |
+| COV2-06 ⑫ 실제 Kafka의 탈퇴 사건이 core 후기를 익명화하고, 읽지 못한 사건은 pid 없이 held_event에 보류된다(K9) | D05·D07·D10·D11에서 실패. 이 넷은 익명화·보류·pid·그룹 단언에서 걸렸고 K9 지표 단언은 겨누지 않았다 | 적힌 틀린 구현(K9)을 단위로 넣었다. P03 `heldCounts`를 넘기지 않음: 단위 `COV2-06 K2 소비자는 따로 둔 core_app 풀과 파티션 1·키 2로 돈다`가 잡음. P04 `registry`를 넘기지 않음: **단위에서 살아남음**(단위 시험은 `heldCounts`만 부르고 `registry`가 넘어가는지 보지 않는다). 통합 ⑫의 K9 단언(`consumer_held_events` 1)이 잡아야 한다 | 실패는 봄(⑫). **K9 부분은 Docker 대기**: P04(필요하면 P03도)를 core-svc `npx vitest run --config vitest.integration.config.mjs test-int/review-withdrawn-consumer.int.test.ts`로 |
+
+| 번호 | 파일:줄 | 바꾼 것 | 돌린 시험 | 결과 |
+| --- | --- | --- | --- | --- |
+| P01 | core `migrations/0021_attendee_access_audit_list.sql:15`(끝에 더함) | `GRANT UPDATE, DELETE ON attendee_export_audit TO core_partner;` | 단위 `test/export-audit.test.ts` | 잡힘(0021 원문 시험) |
+| P02 | `0021_attendee_access_audit_list.sql:15`(끝에 더함) | `ALTER TABLE "attendee_export_audit" DISABLE ROW LEVEL SECURITY;` | 단위 `test/export-audit.test.ts` | 잡힘(0021 원문 시험) |
+| P03 | core `consumers/start.ts:49` | `heldCounts`를 `runKeyedConsumer`에 넘기지 않는다 | 단위 `test/core-consumers.test.ts` | 잡힘(COV2-06 K2 소비자 조립) |
+| P04 | `consumers/start.ts:48` | `registry`를 `runKeyedConsumer`에 넘기지 않는다 | 단위 `test/core-consumers.test.ts` | **살아남음(단위)**, 통합 ⑫ K9로 볼 것 |
+
+- **합계(3단계)**: 넣은 수 4, 잡힘 3, 단위에서 살아남음 1(P04). 다섯 가운데 셋(⑥ 롤백, ⑤⑥ CHECK, ⑪)은 1·2단계 변이로 실패를 이미 봤다. core_partner 권한 시험은 권한 단언으로는 실패를 아직 못 봤고, ⑫는 K9 부분을 아직 못 봤다. 둘은 다음 도커 잠금에서 위 명령으로 P01·P02·P04를 돌린다.
+- **시험 담당에게 넘김(P04)**: 단위 `COV2-06 K2 소비자는 따로 둔 core_app 풀과 파티션 1·키 2로 돈다`가 `runKeyedConsumer`에 넘긴 옵션에서 `registry`가 `startCoreConsumers`에 준 그 지표 저장소와 같은 객체인지(`toBe`)도 단언한다. 그러면 Docker 없이 잡힌다.
