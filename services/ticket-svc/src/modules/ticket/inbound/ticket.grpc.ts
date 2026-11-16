@@ -4,6 +4,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
+import { verifyInternalGrpcActor } from '@peaket/platform';
 import type { TicketService } from '../application/ticket-service.js';
 import { TicketConflictError, TicketInputError } from '../domain/ticket.js';
 
@@ -47,10 +48,14 @@ export interface TicketGrpcErrorLog {
 }
 
 /** gRPC 처리기 묶음. 테스트는 startGrpcServer에 그대로 넘긴다. */
+/** 운영자 취소를 부를 수 있는 호출자(내부 gRPC 호출자 머리, docs/features/transfer-refund.md §7.4 '호출자') */
+const OPERATOR_CANCEL_CALLER = 'purchase-svc';
+
 /**
- * o.internalToken(리뷰 B6 빈 뼈대, BAT-415 리뷰 반영): 있으면 OperatorCancelTickets는 호출자 purchase-svc의 내부 토큰을 요구한다(구현 담당이 채운다)
+ * o.internalToken: 있으면 OperatorCancelTickets는 내부 토큰과 호출자 purchase-svc를 요구한다. 틀리면(토큰 없음·틀림·다른 호출자) PERMISSION_DENIED이고
+ * 쓰임새를 부르지 않는다(리뷰 B6, ASVS v5.0.0-8.2.1). 다른 메서드의 부르는 쪽 검사는 이번에 바꾸지 않는다. 토큰이 없는 local·ci 조립은 지금처럼 받는다
  */
-export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: TicketGrpcErrorLog, _o?: { readonly internalToken?: string }): grpc.UntypedServiceImplementation {
+export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: TicketGrpcErrorLog, o?: { readonly internalToken?: string }): grpc.UntypedServiceImplementation {
   return {
     IssueTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       const req = call.request;
@@ -108,6 +113,10 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
 
     // 부정 예매 운영자 취소(BAT-415 몫 F, docs/features/transfer-refund.md §7.4). 오류는 TicketInputError → INVALID_ARGUMENT. 답은 요청 차례다
     OperatorCancelTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: OPERATOR_CANCEL_CALLER }).ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+        return;
+      }
       const req = call.request;
       const targets = Array.isArray(req.targets) ? (req.targets as Req[]) : [];
       useCases.ticket

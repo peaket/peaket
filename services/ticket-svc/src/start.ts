@@ -169,9 +169,14 @@ export async function start(o: StartOptions): Promise<StartedService> {
       services: [
         {
           definition: ticketPackage().TicketService.service,
-          handlers: ticketServiceHandlers({ ticket, nowMs: () => systemClock.now() }, (method, err, orderId) => {
-            service!.logger.error({ method, ...(orderId ? { orderId } : {}), err }, 'TicketService 처리 실패');
-          }),
+          handlers: ticketServiceHandlers(
+            { ticket, nowMs: () => systemClock.now() },
+            (method, err, orderId) => {
+              service!.logger.error({ method, ...(orderId ? { orderId } : {}), err }, 'TicketService 처리 실패');
+            },
+            // 운영자 취소(OperatorCancelTickets)는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
+            { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) },
+          ),
         },
         {
           definition: ticketPackage().ScannerDeviceLookupService.service,

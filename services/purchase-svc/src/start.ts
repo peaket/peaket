@@ -305,7 +305,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   if (database && ticketGrpcAddr && paymentGrpcAddr) {
     const holidayFile = env.PEAKET_HOLIDAY_CALENDAR_FILE;
     const calendar = holidayFile ? parseHolidayCalendar(readFileSync(holidayFile, 'utf8')) : new WeekendBusinessCalendar();
-    refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr });
+    // ticket-svc 운영자 취소는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
+    refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) });
     refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),

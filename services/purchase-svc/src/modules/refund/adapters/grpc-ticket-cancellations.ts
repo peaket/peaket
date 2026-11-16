@@ -24,12 +24,17 @@ const OUTCOMES: ReadonlySet<TicketCancelOutcome> = new Set(['REFUND_NOW', 'REFUN
 const OPERATOR_RESULTS: ReadonlySet<OperatorTicketResult> = new Set(['CANCELED', 'SKIPPED_ALREADY_ENDED', 'SKIPPED_ENTRY_RECORDED', 'SKIPPED_HOLDER_CHANGED']);
 /** 운영자 취소 한 번의 데드라인 5초 [가정](대상 500장을 한 트랜잭션에서 잠그고 가른다, docs/api/guidelines.md §8.1) */
 const OPERATOR_CANCEL_DEADLINE_MS = 5_000;
+/** ticket-svc에 싣는 호출자 머리(내부 gRPC) */
+const TICKET_CALLER = 'purchase-svc';
 
 export interface GrpcTicketCancellationsOptions {
   address: string;
   profile?: GrpcLbProfile;
   breaker?: CircuitBreaker;
-  /** 리뷰 B6 빈 뼈대(BAT-415 리뷰 반영): 있으면 OperatorCancelTickets에 내부 토큰과 호출자 purchase-svc를 싣는다(구현 담당이 채운다) */
+  /**
+   * 내부 gRPC 토큰. 있으면 호출에 토큰을 싣는다. 호출자 머리(purchase-svc)는 늘 싣는다. ticket-svc OperatorCancelTickets는 토큰이 설정된 환경에서
+   * 토큰·호출자 purchase-svc가 맞지 않으면 PERMISSION_DENIED다(리뷰 B6, docs/features/transfer-refund.md §7.4 '호출자')
+   */
   internalToken?: string;
 }
 
@@ -46,6 +51,8 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
       profile: o.profile ?? 'service',
       dependency: 'ticket-svc',
       timeoutCapMs: OPERATOR_CANCEL_DEADLINE_MS,
+      caller: TICKET_CALLER,
+      ...(o.internalToken ? { internalToken: o.internalToken } : {}),
     }) as unknown as grpc.Client & { CancelTickets: Unary; OperatorCancelTickets: Unary };
   }
 
