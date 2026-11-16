@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
-import { echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, gatewayCertArgs, gatewayContract, gatewayForwardArgs, gatewayInstall, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, readGatewayObjects } from './gateway-objects.mjs';
+import { assertRatelimitBackend, echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, GATEWAY_RATELIMIT, gatewayCertArgs, gatewayContract, gatewayForwardArgs, gatewayInstall, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, RATELIMIT_REDIS, RATELIMIT_REDIS_IMAGE, ratelimitRedisObjects, ratelimitRedisSecret, ratelimitRedisTlsNames, readGatewayObjects } from './gateway-objects.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey } from './v0-token.mjs';
 import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
@@ -52,6 +52,11 @@ export const PINNED = {
   envoyGatewayControllerDigest: 'sha256:c2243d43518bed91d3ed8c2db849a4b7a14ac9b96eb019f2ab104bb1ca8572b1',
   envoyGatewayProxyImage: 'docker.io/envoyproxy/envoy:distroless-v1.40.2',
   envoyGatewayProxyDigest: 'sha256:09ca6f2140a61ad8df11779a4a30d52b48433d444466328494f9188c9c35eded',
+  // 전역 레이트 리밋 서비스(docs/infra.md §4.1 '전역 레이트 리밋 걸기', BUILD_ORDER HOT-410). 판을 따로 고르지 않고 v1.10.0 설치 파일의 기본값
+  // (envoy-gateway-config의 rateLimitDeployment.container.image)을 쓴다. 다이제스트는 docker.io/envoyproxy/ratelimit 레지스트리의 목록(index) 다이제스트다
+  // (2026-11-16 받지 않고 조회, 감독 승인: 공식 레지스트리·다이제스트 고정·판 기록)
+  envoyGatewayRatelimitImage: 'docker.io/envoyproxy/ratelimit:5ae0682e',
+  envoyGatewayRatelimitDigest: 'sha256:b95206e32b1a5f824fb06062fbb85bbdfb7f5de54135e92afe8462f22c979681',
 };
 
 /**
@@ -717,6 +722,17 @@ async function gatewayInstallFile() {
   return bytes.toString('utf8');
 }
 
+/** 레이트 리밋 저장소(Valkey) TLS 시험 인증서(인증 기관·서버). v1 무대의 법(redisTlsCertArgs)에 이름만 바꾼다. 키 파일은 임시 폴더에만 두고 바로 지운다 */
+function ratelimitRedisTls() {
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-ratelimit-redis-tls-'));
+  try {
+    for (const args of redisTlsCertArgs(dir.split(sep).join('/'), ratelimitRedisTlsNames())) execFileSync('openssl', args, { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, MSYS_NO_PATHCONV: '1' } });
+    return { ca: readFileSync(join(dir, 'ca.crt'), 'utf8'), cert: readFileSync(join(dir, 'tls.crt'), 'utf8'), key: readFileSync(join(dir, 'tls.key'), 'utf8') };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 /** 리스너 인증서 하나(자체 서명, 게이트웨이 호스트 전부). 키 파일은 임시 폴더에만 두고 바로 지운다 */
 function gatewayTls(hosts) {
   const dir = mkdtempSync(join(tmpdir(), 'peaket-gateways-tls-'));
@@ -750,10 +766,19 @@ async function gateways() {
   run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
   for (const t of ['kind', 'kubectl']) await ensureTool(t);
   await ensureCluster();
-  await preloadLocalImages([GATEWAY_CONTROLLER_IMAGE, GATEWAY_PROXY_IMAGE, GATEWAY_ECHO_IMAGE]);
-  step(`Envoy Gateway ${PINNED.envoyGatewayVersion}(설치 파일 해시 고정, Lua 확장 켬)`);
-  await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: gatewayInstall(await gatewayInstallFile()), maxBuffer: 64 * 1024 * 1024 });
-  // 설정 ConfigMap(Lua 확장)을 다시 읽게 한다
+  await preloadLocalImages([GATEWAY_CONTROLLER_IMAGE, GATEWAY_PROXY_IMAGE, GATEWAY_ECHO_IMAGE, PINNED.envoyGatewayRatelimitImage, RATELIMIT_REDIS_IMAGE]);
+  step(`Envoy Gateway ${PINNED.envoyGatewayVersion}(설치 파일 해시 고정, 컨트롤러 설정 deploy/gateways/controller/envoy-gateway.yaml: Lua 확장·전역 레이트 리밋)`);
+  const controller = readFileSync(join(REPO, 'deploy', 'gateways', 'controller', 'envoy-gateway.yaml'), 'utf8');
+  assertRatelimitBackend(controller);
+  await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: gatewayInstall(await gatewayInstallFile(), controller), maxBuffer: 64 * 1024 * 1024 });
+  // 레이트 리밋 서비스가 뜨기 전에 카운터 저장소와 그 인증서 Secret을 둔다(컨트롤러가 첫 전역 한도 정책을 받으면 envoy-ratelimit을 만든다)
+  step(`레이트 리밋 저장소 ${RATELIMIT_REDIS.name}(TLS만 받는 Valkey, 시험 인증서는 이 PC에서 새로 만든다)`);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'delete', 'secret', RATELIMIT_REDIS.secret, '--ignore-not-found']);
+  await kubectl(['create', '-f', '-'], { input: JSON.stringify(ratelimitRedisSecret(ratelimitRedisTls())) });
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: ratelimitRedisObjects() }) });
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', `deploy/${RATELIMIT_REDIS.name}`]);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', `deploy/${RATELIMIT_REDIS.name}`, '--timeout=300s']);
+  // 설정 ConfigMap(컨트롤러 설정)을 다시 읽게 한다
   await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', 'deploy/envoy-gateway']);
   await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', 'deploy/envoy-gateway', '--timeout=300s']);
 
@@ -784,6 +809,9 @@ async function gateways() {
     await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', ...proxies]);
     for (const d of proxies) await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', d, '--timeout=300s']);
   }
+  // 전역 한도 정책을 받은 컨트롤러가 만든 레이트 리밋 서비스(복제 2)가 저장소에 붙어 준비되기를 기다린다
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'wait', `deploy/${GATEWAY_RATELIMIT.deployment}`, '--for=create', '--timeout=120s']);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', `deploy/${GATEWAY_RATELIMIT.deployment}`, '--timeout=300s']);
 
   const basePort = Number(process.env.PEAKET_GATEWAY_BASE_PORT || GATEWAY_BASE_PORT);
   const contract = gatewayContract({ basePort, hosts, originVerify, keys: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.privateJwk])), caPem: tls.cert });

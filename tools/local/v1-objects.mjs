@@ -101,12 +101,13 @@ export function redisTlsNames() {
 /**
  * Valkey TLS 시험 인증서를 만드는 openssl 인자 셋(인증 기관 → 서버 키·요청 → 서명). 파일은 임시 폴더에만 두고 바로 지운다(cluster.mjs)
  * @param {string} dir
+ * @param {string[]} [names] 서버 인증서의 DNS 이름(기본은 v1 무대의 Valkey 둘, 게이트웨이의 레이트 리밋 저장소는 gateway-objects.mjs ratelimitRedisTlsNames)
  * @returns {string[][]}
  */
-export function redisTlsCertArgs(dir) {
+export function redisTlsCertArgs(dir, names = redisTlsNames()) {
   /** @param {string} f */
   const p = (f) => `${dir}/${f}`;
-  const san = redisTlsNames().map((n) => `DNS:${n}`).join(',');
+  const san = names.map((n) => `DNS:${n}`).join(',');
   return [
     ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '30', '-subj', '/CN=peaket-v1-redis-ca', '-keyout', p('ca.key'), '-out', p('ca.crt')],
     ['req', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-subj', '/CN=valkey', '-addext', `subjectAltName=${san}`, '-keyout', p('tls.key'), '-out', p('tls.csr')],

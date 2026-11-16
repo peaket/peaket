@@ -47,10 +47,17 @@ v0 배포(K6·K9의 비교 기준, docs/infra.md §3 'v0 배포')를 네임스�
 PEAKET_CLUSTER=peaket-gw node tools/local/cluster.mjs gateways
 PEAKET_CLUSTER=peaket-gw node tools/local/cluster.mjs gateways-forward   # 다른 창에서, 시험 동안 켜 둔다
 PEAKET_CLUSTER=peaket-gw node --test tools/local/e2e/gateways.e2e.mjs
+PEAKET_CLUSTER=peaket-gw node --test tools/local/e2e/gateway-limits.e2e.mjs   # 경로별 메서드·한도·게이트웨이 오류(HOT-410). 1분 창 시험이 있어 몇 분 걸린다
 node --test tools/local/e2e/queue-cors.e2e.mjs   # 먼저 tools/web-checks에서 pnpm install --frozen-lockfile(Playwright 브라우저 셋)
 ```
 
-게이트웨이 다섯(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현')을 올리고 kind·브라우저 시험을 돌립니다. 접속 정보는 `.cache/peaket-tools/gateways-e2e.json`(개인키가 들어 있어 이 PC에만)입니다.
+게이트웨이 다섯(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현'·'경로별 메서드·한도·게이트웨이 오류')을 올리고 kind·브라우저 시험을 돌립니다. 접속 정보는 `.cache/peaket-tools/gateways-e2e.json`(개인키가 들어 있어 이 PC에만)입니다.
+
+- **컨트롤러 설정**: 설치 파일의 컨트롤러 설정 자리에 `deploy/gateways/controller/envoy-gateway.yaml`을 그대로 넣습니다(Lua 확장, 전역 레이트 리밋 백엔드, 레이트 리밋 서비스 복제 2·키 접두사 `rl:`). 로컬 덧씌우기는 없습니다: 카운터 저장소는 같은 이름의 Service `peaket-ratelimit-redis`(게이트웨이 네임스페이스, TLS 포트 6379만 여는 Valkey 8.1)이고, 인증서 Secret `peaket-ratelimit-redis-tls`(`tls.crt`·`tls.key`·`ca.crt`)는 v1 무대와 같은 법(`redisTlsCertArgs`)으로 이 PC에서 새로 만듭니다. 레이트 리밋 서비스는 Envoy Gateway가 만드는 Deployment `envoy-ratelimit`입니다.
+- **라우트**: API 호스트 다섯의 HTTPRoute는 생성 파일 `deploy/gateways/<게이트웨이>.routes.yaml`입니다(`node tools/ci/gateway-routes.mjs --write`, 원천 `deploy/gateways/routes/`). 생성 파일도 다른 정의처럼 대역 백엔드로 바꿔 올립니다.
+- **접속 정보의 새 칸**(BAT-060, `tools/local/e2e/gateway-limits.e2e.mjs` 머리의 약속): `rateLimit`(`namespace`, `deployment`: `envoy-ratelimit`), `rateLimitRedis`(`namespace`, `target`: `deploy/peaket-ratelimit-redis`, `container`: `valkey`, `cli`: TLS로 붙는 `valkey-cli --tls --cacert /tls/ca.crt -h localhost -p 6379`, `plainCli`: 같은 포트에 평문으로 붙는 `valkey-cli -h localhost -p 6379`), `replicas`의 `gw-partner`(1), `stats`(프록시 통계 `19001`·`/stats/prometheus`).
+- **확인 경로**(`probes`): 생성 라우트는 계약의 (경로, 메서드)만 넘기므로 계약의 GET 경로입니다. gw-fan은 전역 한도(계정당 60회/분)가 없는 구매 경로의 좌석 스냅샷, gw-partner는 회차 관객 목록, gw-ops는 회차 실시간 현황입니다.
+- **대역 백엔드의 Problem 흉내**: 요청 머리 `x-e2e-problem-status: <상태>`를 달면 그 상태와 `application/problem+json` 본문(`traceId`는 받은 `traceparent`의 trace-id)을 돌려줍니다(D-T43 ②).
 
 **Windows에서 하나씩 돌리는 법**: Windows의 kubectl 포트 전달은 동시 연결이 몰리면 끊깁니다(2026-11-16 실측). 끊기면 그 뒤 시험이 모두 ECONNREFUSED가 됩니다. 시험은 끊김을 감추지 않고 실패하므로, 이때는 시험마다 포트 전달을 새로 띄우고 이름으로 하나씩 돌립니다.
 
@@ -100,6 +107,7 @@ node --test "tools/local/*.test.mjs"
 | metrics-server | v0.9.1(설치 파일 해시·이미지 다이제스트, 2026-11-03 확인) | v0 배포의 CPU HPA 지표. kind 노드의 kubelet 인증서가 자체 서명이라 `--kubelet-insecure-tls`를 더합니다 |
 | Valkey | 8.1(`valkey/valkey:8.1-alpine` 다이제스트) | v0 배포의 대기열 Redis. 통합 시험과 같은 이미지입니다 |
 | Envoy Gateway | 1.10.0(설치 파일 해시·컨트롤러 이미지 다이제스트, 프록시는 이 판의 기본 Envoy 1.40.2 다이제스트, 2026-11-16 확인) | 게이트웨이 다섯의 컨트롤러(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400). 공식 릴리스(envoyproxy)의 최신 안정판이고, 게이트웨이가 쓰는 출처 확인(`SecurityPolicy.csrf`)·응답 머리 `addIfAbsent`·Lua 환경 값 허용이 이 판에 있습니다. 로컬에서는 컨트롤러·프록시 이미지를 태그로 미리 싣습니다(`cluster.mjs gateways`) |
+| Envoy 레이트 리밋 서비스 | `docker.io/envoyproxy/ratelimit:5ae0682e`(목록 다이제스트 `sha256:b95206e32b1a5f824fb06062fbb85bbdfb7f5de54135e92afe8462f22c979681`, 2026-11-16 레지스트리 조회) | 전역 레이트 리밋의 판정 서버(docs/infra.md §4.1 '전역 레이트 리밋 걸기', BUILD_ORDER HOT-410). 판을 따로 고르지 않고 Envoy Gateway 1.10.0 설치 파일의 기본값을 씁니다(감독 승인 2026-11-16: 공식 레지스트리·다이제스트 고정·판 기록). 로컬에서는 태그로 미리 싣습니다 |
 
 ## AWS 흉내 서버의 한계(2026-11-01 확인)
 

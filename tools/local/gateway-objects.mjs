@@ -4,7 +4,7 @@
 // 호스트와 출처는 운영 값(*.peaket.example) 그대로 쓴다. 시험 클라이언트가 Host·SNI로 이름을 보내고 브라우저는 시험 프록시가 포트로 잇는다.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseAllDocuments } from 'yaml';
+import { parseAllDocuments, parseDocument } from 'yaml';
 
 export const GATEWAY_NAMESPACE = 'envoy-gateway-system';
 export const GATEWAY_NAMES = ['gw-queue', 'gw-fan', 'gw-partner', 'gw-ops', 'gw-scanner'];
@@ -20,12 +20,16 @@ export const GATEWAY_CONTROLLER_IMAGE = 'envoyproxy/gateway:v1.10.0';
 export const GATEWAY_BASE_PORT = 18441;
 /** 시험 발급자(정의의 issuer와 같다) */
 export const GATEWAY_ISSUER = 'https://identity.peaket.example';
-/** 접속 정보의 확인 경로: 그 게이트웨이의 토큰을 단 요청이 대역 백엔드에 닿는 경로(검색 한도 경로는 쓰지 않는다) */
+/**
+ * 접속 정보의 확인 경로: 그 게이트웨이의 토큰을 단 요청이 대역 백엔드에 닿는 경로. 생성 라우트는 계약의 (경로, 메서드)만 넘기므로 계약의 GET 경로다(BAT-060).
+ * 한도 경로는 쓰지 않는다: 검색 IP 한도와 전역 한도(gw-fan-api·gw-fan-identity 계정당 60회/분. V-T31 ①이 한 계정으로 1,000건을 보낸다).
+ * 그래서 gw-fan은 구매 경로(gw-fan-buy, 한도 없음)의 좌석 스냅샷이다
+ */
 export const GATEWAY_PROBES = {
   'gw-queue': { host: 'queue', method: 'GET', path: '/v1/queues/{event}/verification', scope: 'ticket:buy', scheme: 'Bearer' },
-  'gw-fan': { host: 'api', method: 'GET', path: '/v1/events/{event}', scope: 'ticket:buy', scheme: 'Bearer' },
-  'gw-partner': { host: 'partner-api', method: 'GET', path: '/v1/partner/events/{event}', scope: '', scheme: 'Bearer' },
-  'gw-ops': { host: 'ops-api', method: 'GET', path: '/v1/ops/events/{event}', scope: '', scheme: 'Bearer' },
+  'gw-fan': { host: 'api', method: 'GET', path: '/v1/events/{event}/seatmap-snapshot', scope: 'ticket:buy', scheme: 'Bearer' },
+  'gw-partner': { host: 'partner-api', method: 'GET', path: '/v1/partner/events/{event}/attendees', scope: '', scheme: 'Bearer' },
+  'gw-ops': { host: 'ops-api', method: 'GET', path: '/v1/ops/events/{event}/live', scope: '', scheme: 'Bearer' },
   'gw-scanner': { host: 'scanner-api', method: 'GET', path: '/v1/scanner/events/{event}/package', scope: '', scheme: 'DPoP' },
 };
 export const GATEWAY_APP_PATHS = { 'gw-fan': '/e2e-app', 'gw-partner': '/e2e-app' };
@@ -44,15 +48,115 @@ export function readGatewayObjects(dir) {
   return out;
 }
 
+/** 레이트 리밋 서비스(Envoy Gateway가 컨트롤러 네임스페이스에 만드는 Deployment, internal/infrastructure/kubernetes/ratelimit InfraName, v1.10.0) */
+export const GATEWAY_RATELIMIT = { deployment: 'envoy-ratelimit' };
 /**
- * Envoy Gateway 설치 파일을 맞춘다: Lua 확장을 켠다(v1.10 기본은 꺼짐, docs/infra.md §4.1 '자리'). 고칠 자리가 없으면(판이 바뀜) 던진다
- * @param {string} text
+ * 레이트 리밋 서비스의 카운터 저장소(로컬 kind는 TLS만 받는 Valkey 하나). 이름은 컨트롤러 설정(deploy/gateways/controller/envoy-gateway.yaml)의
+ * rateLimit.backend.redis.url·tls.certificateRef와 같다(로컬 덧씌우기 없이 같은 이름을 쓴다)
  */
-export function gatewayInstall(text) {
-  const anchor = /^( {4})extensionApis: \{\}\r?$/m;
-  if (!anchor.test(text)) throw new Error('Envoy Gateway 설치 파일에서 extensionApis 자리를 찾지 못했다(판이 바뀌었나?)');
+export const RATELIMIT_REDIS = { name: 'peaket-ratelimit-redis', secret: 'peaket-ratelimit-redis-tls', port: 6379 };
+/** 카운터 저장소의 Valkey 이미지(v0 배포 deploy/local/valkey.yaml과 같은 판) */
+export const RATELIMIT_REDIS_IMAGE = 'valkey/valkey:8.1-alpine';
+
+/**
+ * Envoy Gateway 설치 파일을 맞춘다: 설치 파일의 컨트롤러 설정 자리(ConfigMap envoy-gateway-config의 envoy-gateway.yaml)를 받은 EnvoyGateway 설정 글로 바꾼다
+ * (Lua 확장·전역 레이트 리밋 백엔드·레이트 리밋 서비스 배치, docs/infra.md §4.1 '전역 레이트 리밋 걸기'). 다른 문서는 글자 그대로 둔다.
+ * 자리나 컨트롤러 이미지를 찾지 못하거나(판이 바뀜) 받은 설정이 EnvoyGateway가 아니면 던진다
+ * @param {string} text 설치 파일 글 @param {string} controller 컨트롤러 설정 글(EnvoyGateway 객체 하나)
+ */
+export function gatewayInstall(text, controller) {
   if (!text.includes(`image: ${GATEWAY_CONTROLLER_IMAGE}`)) throw new Error(`Envoy Gateway 설치 파일에 ${GATEWAY_CONTROLLER_IMAGE}가 없다(판이 바뀌었나?)`);
-  return text.replace(anchor, (_l, indent) => `${indent}extensionApis:\n${indent}  enableLua: true`);
+  const cfg = parseAllDocuments(String(controller ?? ''))
+    .map((d) => d.toJS())
+    .filter(Boolean);
+  if (cfg.length !== 1 || cfg[0]?.kind !== 'EnvoyGateway') throw new Error('컨트롤러 설정은 EnvoyGateway 객체 하나다');
+  const body = String(controller).endsWith('\n') ? String(controller) : `${controller}\n`;
+  let found = 0;
+  const parts = text.split(/^---[ \t]*\r?\n/m).map((part) => {
+    if (!/^kind: ConfigMap\r?$/m.test(part) || !/^ {2}name: envoy-gateway-config\r?$/m.test(part)) return part;
+    const doc = parseDocument(part);
+    if (doc.errors.length) throw new Error(`envoy-gateway-config를 읽지 못했다: ${doc.errors[0].message}`);
+    if (typeof doc.getIn(['data', 'envoy-gateway.yaml']) !== 'string') throw new Error('envoy-gateway-config에 envoy-gateway.yaml 자리가 없다(판이 바뀌었나?)');
+    found++;
+    doc.setIn(['data', 'envoy-gateway.yaml'], body);
+    return doc.toString({ lineWidth: 0 });
+  });
+  if (found !== 1) throw new Error(`Envoy Gateway 설치 파일에서 컨트롤러 설정 자리(envoy-gateway-config)를 ${found}곳 찾았다(하나여야 한다, 판이 바뀌었나?)`);
+  return parts.join('---\n');
+}
+
+/**
+ * 컨트롤러 설정이 로컬 카운터 저장소 이름과 맞는지(같은 이름을 쓰므로 덧씌우지 않는다). 다르면 던진다
+ * @param {string} controller
+ */
+export function assertRatelimitBackend(controller) {
+  const redis = parseAllDocuments(controller)[0]?.toJS()?.rateLimit?.backend?.redis;
+  const want = `${RATELIMIT_REDIS.name}.${GATEWAY_NAMESPACE}.svc.cluster.local:${RATELIMIT_REDIS.port}`;
+  if (redis?.url !== want) throw new Error(`컨트롤러 설정의 rateLimit.backend.redis.url(${redis?.url})이 로컬 저장소 ${want}와 다르다`);
+  if (redis?.tls?.certificateRef?.name !== RATELIMIT_REDIS.secret) throw new Error(`컨트롤러 설정의 Redis 인증서 Secret(${redis?.tls?.certificateRef?.name})이 ${RATELIMIT_REDIS.secret}가 아니다`);
+}
+
+/** 카운터 저장소 인증서의 SAN(Service 이름 꼴 넷과 kubectl exec로 붙는 localhost) */
+export function ratelimitRedisTlsNames() {
+  const n = RATELIMIT_REDIS.name;
+  return [n, `${n}.${GATEWAY_NAMESPACE}`, `${n}.${GATEWAY_NAMESPACE}.svc`, `${n}.${GATEWAY_NAMESPACE}.svc.cluster.local`, 'localhost'];
+}
+
+/**
+ * 레이트 리밋 서비스의 카운터 저장소: TLS 포트 6379만 여는 Valkey 하나(평문 포트는 닫는다, 클라이언트 인증서는 받지 않는다)와 그 Service.
+ * 서버 인증서는 Secret RATELIMIT_REDIS.secret(tls.crt·tls.key·ca.crt)이고, 레이트 리밋 서비스도 같은 Secret의 ca.crt로 서버를 믿는다
+ */
+export function ratelimitRedisObjects() {
+  const { name, secret: secretName, port } = RATELIMIT_REDIS;
+  const labels = { 'app.kubernetes.io/name': name, 'app.kubernetes.io/part-of': 'peaket' };
+  return [
+    { apiVersion: 'v1', kind: 'Service', metadata: { name, namespace: GATEWAY_NAMESPACE, labels }, spec: { selector: labels, ports: [{ name: 'redis', port, targetPort: port }] } },
+    {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name, namespace: GATEWAY_NAMESPACE, labels },
+      spec: {
+        replicas: 1,
+        selector: { matchLabels: labels },
+        template: {
+          metadata: { labels },
+          spec: {
+            automountServiceAccountToken: false,
+            securityContext: { runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, seccompProfile: { type: 'RuntimeDefault' } },
+            containers: [
+              {
+                name: 'valkey',
+                image: RATELIMIT_REDIS_IMAGE,
+                imagePullPolicy: 'IfNotPresent',
+                args: ['valkey-server', '--save', '', '--appendonly', 'no', '--protected-mode', 'no', '--port', '0', '--tls-port', String(port), '--tls-cert-file', '/tls/tls.crt', '--tls-key-file', '/tls/tls.key', '--tls-ca-cert-file', '/tls/ca.crt', '--tls-auth-clients', 'no'],
+                ports: [{ name: 'redis', containerPort: port }],
+                readinessProbe: { tcpSocket: { port }, periodSeconds: 2 },
+                resources: { requests: { cpu: '50m', memory: '64Mi' }, limits: { memory: '256Mi' } },
+                securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: { drop: ['ALL'] } },
+                volumeMounts: [
+                  { name: 'data', mountPath: '/data' },
+                  { name: 'tls', mountPath: '/tls', readOnly: true },
+                ],
+              },
+            ],
+            volumes: [
+              { name: 'data', emptyDir: {} },
+              { name: 'tls', secret: { secretName } },
+            ],
+          },
+        },
+      },
+    },
+  ];
+}
+
+/**
+ * 카운터 저장소 인증서 Secret(tls.crt·tls.key·ca.crt). 레이트 리밋 서비스는 이 Secret을 /redis-certs에 붙인다(Envoy Gateway가 tls.crt·tls.key를 클라이언트 인증서로 넘기고,
+ * 컨트롤러 설정의 REDIS_TLS_CACERT가 ca.crt를 가리킨다). Valkey는 클라이언트 인증서를 받지 않으므로 서버 키 쌍을 함께 넣어도 된다
+ * @param {{ ca: string, cert: string, key: string }} tls
+ */
+export function ratelimitRedisSecret(tls) {
+  return secret(RATELIMIT_REDIS.secret, 'kubernetes.io/tls', { 'tls.crt': tls.cert, 'tls.key': tls.key, 'ca.crt': tls.ca });
 }
 
 const echoRef = () => ({ group: '', kind: 'Service', name: GATEWAY_ECHO.name, port: GATEWAY_ECHO.port });
@@ -172,7 +276,8 @@ export function echoObjects(o) {
 }
 
 /**
- * 시험이 읽는 접속 정보(tools/local/e2e/gateway-client.mjs 머리 주석의 약속). 개인키가 들어 있어 이 PC의 .cache에만 둔다
+ * 시험이 읽는 접속 정보(tools/local/e2e/gateway-client.mjs 머리 주석의 약속. 레이트 리밋 칸 rateLimit·rateLimitRedis·stats와 replicas의 gw-partner는
+ * tools/local/e2e/gateway-limits.e2e.mjs 머리 주석의 약속, BAT-060). 개인키가 들어 있어 이 PC의 .cache에만 둔다
  * @param {{ basePort: number, hosts: Record<string, string>, originVerify: string, keys: Record<string, unknown>, caPem: string, replicas?: Record<string, number> }} o
  */
 export function gatewayContract(o) {
@@ -187,7 +292,16 @@ export function gatewayContract(o) {
     appPaths: GATEWAY_APP_PATHS,
     logs: { namespace: GATEWAY_NAMESPACE, container: 'envoy', selector: 'gateway.envoyproxy.io/owning-gateway-name={gateway}' },
     caPem: o.caPem,
-    replicas: { 'gw-fan': 1, ...(o.replicas ?? {}) },
+    replicas: { 'gw-fan': 1, 'gw-partner': 1, ...(o.replicas ?? {}) },
+    rateLimit: { namespace: GATEWAY_NAMESPACE, deployment: GATEWAY_RATELIMIT.deployment },
+    rateLimitRedis: {
+      namespace: GATEWAY_NAMESPACE,
+      target: `deploy/${RATELIMIT_REDIS.name}`,
+      container: 'valkey',
+      cli: ['valkey-cli', '--tls', '--cacert', '/tls/ca.crt', '-h', 'localhost', '-p', String(RATELIMIT_REDIS.port)],
+      plainCli: ['valkey-cli', '-h', 'localhost', '-p', String(RATELIMIT_REDIS.port)],
+    },
+    stats: { port: 19001, path: '/stats/prometheus' },
   };
 }
 
