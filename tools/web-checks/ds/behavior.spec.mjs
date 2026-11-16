@@ -270,3 +270,55 @@ test.describe('SR-T10 검색창 한글 조합 중 키', () => {
     await expect(page.getByTestId('last-href')).toHaveText(`/search?q=${encodeURIComponent('루멘')}`);
   });
 });
+
+// BC165-1(브라우저 확인 docs/review/browser-check/HOT-270-280.md): 입력이 있을 때 지우기 단추는 화면의 [검색어 지우기] 하나다(d5 §5.3 ①).
+// type="search"의 브라우저 기본 지우기 단추(::-webkit-search-cancel-button)가 함께 보이면 둘이 된다.
+test.describe('BC165-1 검색 입력칸의 지우기 단추', () => {
+  test('검색 입력칸에 글자가 있어도 브라우저 기본 지우기 단추는 보이지 않고 화면의 지우기 단추 하나만 있다(SearchField·WebSearchBox, BC165-1)', async ({ page, browserName }) => {
+    for (const id of ['cmp-004-searchfield--ime-guard', 'cmp-004-websearchbox--ime-guard']) {
+      await openStory(page, id);
+      const input = page.getByRole('combobox');
+      // 대조군: 입력에 글자가 있다(기본 지우기 단추가 나올 조건)
+      await expect(input).toHaveValue('루멘');
+      await expect(input).toHaveAttribute('type', 'search');
+      // 화면의 지우기 단추는 하나다
+      await expect(page.getByRole('button', { name: '검색어 지우기', exact: true })).toHaveCount(1);
+      // 브라우저 기본 지우기 단추(WebKit 계열의 의사 요소)는 숨는다. Firefox에는 그 의사 요소가 없다.
+      // 의사 요소의 계산된 스타일은 엔진마다 믿을 수 없다(WebKit은 비워 주고, Chromium은 입력칸 자신의 display를 준다). 그래서 이 입력칸에 맞는
+      // '::-webkit-search-cancel-button' 규칙이 숨기는지(display: none 또는 appearance: none) 스타일 시트에서 본다
+      if (browserName !== 'firefox') {
+        const shown = await input.evaluate((el) => {
+          const display = getComputedStyle(el, '::-webkit-search-cancel-button').display;
+          const hidingRules = [];
+          const walk = (rules) => {
+            for (const r of rules) {
+              if (r.cssRules && !r.selectorText) walk(r.cssRules);
+              if (!r.selectorText || !r.selectorText.includes('::-webkit-search-cancel-button')) continue;
+              for (const sel of r.selectorText.split(',')) {
+                if (!sel.includes('::-webkit-search-cancel-button')) continue;
+                const host = sel.replace(/::-webkit-search-cancel-button/g, '').trim() || '*';
+                let matches = false;
+                try {
+                  matches = el.matches(host);
+                } catch {
+                  matches = false;
+                }
+                const hides = r.style.display === 'none' || r.style.getPropertyValue('-webkit-appearance') === 'none' || r.style.getPropertyValue('appearance') === 'none';
+                if (matches && hides) hidingRules.push(sel.trim());
+              }
+            }
+          };
+          for (const sheet of document.styleSheets) {
+            try {
+              walk(sheet.cssRules);
+            } catch {
+              // 다른 출처 스타일 시트는 읽지 못한다
+            }
+          }
+          return { display, hidden: display === 'none' || hidingRules.length > 0 };
+        });
+        expect({ id, display: shown.display, hidden: shown.hidden }).toEqual({ id, display: shown.display, hidden: true });
+      }
+    }
+  });
+});
