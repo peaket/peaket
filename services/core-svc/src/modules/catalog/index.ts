@@ -1,5 +1,5 @@
 // 이 모듈의 공개 파일. 다른 컨텍스트는 층 폴더가 아니라 이 파일로만 가져온다(층 규칙).
-export { CatalogModule, type MediaWiring } from './catalog.module.js';
+export { CatalogModule, SEARCH_DATABASE, type MediaWiring } from './catalog.module.js';
 export { tenantOf } from './inbound/partner-production.controller.js';
 export { MemoryCatalogRepository } from './adapters/memory-catalog-repository.js';
 export { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
@@ -18,14 +18,15 @@ export type { PublicFileStore, PublishLimits } from './domain/seatmap-ports.js';
 export { MemoryCdnInvalidation } from './adapters/cdn-invalidation.js';
 export { StaticTemplateCatalog } from './adapters/static-template-catalog.js';
 export { QueueSaleEligibilityCopy } from './adapters/queue-sale-eligibility-copy.js';
-export { MemorySearchIndex } from './adapters/memory-search-index.js';
-export { DrizzleSearchIndex } from './adapters/db/drizzle-search-index.js';
+export { MemorySearchDictionarySource, MemorySearchIndex } from './adapters/memory-search-index.js';
+export { DrizzleSearchIndex, SEARCH_STATEMENT_TIMEOUT_MS } from './adapters/db/drizzle-search-index.js';
 export { SearchCatalog } from './application/search.js';
 export { SEARCH_INDEX, type SearchDocument, type SearchIndex } from './domain/search.js';
 export { DrizzleSearchReadModel } from './adapters/db/drizzle-search-read-model.js';
-export { withSearchSync } from './application/search-maintenance.js';
+export { SearchReadModelTimers, withSearchSync } from './application/search-maintenance.js';
 export {
   maskSearchQuery,
+  SEARCH_DICTIONARY_SOURCE,
   SEARCH_READ_MODEL_SYNC,
   SearchUnavailable,
   SuggestionDictionary,

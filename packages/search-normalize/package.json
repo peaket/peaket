@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./refine": {
+      "types": "./dist/refine.d.ts",
+      "default": "./dist/refine.js"
     }
   },
   "scripts": {

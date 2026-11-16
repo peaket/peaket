@@ -17,7 +17,8 @@ import { MemoryImageObjectStore } from './adapters/image-store.js';
 import { MemoryCatalogRepository, MemoryProductionMedia } from './adapters/memory-catalog-repository.js';
 import { MemorySaleStore } from './adapters/memory-sale-store.js';
 import { MemorySeatmapLayoutStore } from './adapters/memory-seatmap-layout.js';
-import { MemorySearchIndex } from './adapters/memory-search-index.js';
+import { MemorySearchDictionarySource, MemorySearchIndex } from './adapters/memory-search-index.js';
+import { DrizzleSearchReadModel } from './adapters/db/drizzle-search-read-model.js';
 import { EmptyTemplateCatalog } from './adapters/static-template-catalog.js';
 import { MemoryPublicFileStore } from './adapters/public-file-store.js';
 import { MemorySaleEligibilityCopy, unavailableMemberCodes } from './adapters/sale-eligibility-copy.js';
@@ -59,7 +60,7 @@ import {
 import { LOG_PSEUDONYM, type LogPseudonym, MEMBER_CODE_DIRECTORY, type MemberCodeDirectory, SALE_ELIGIBILITY_COPY, SALE_ELIGIBILITY_METRICS, type SaleEligibilityCopy } from './domain/eligibility-ports.js';
 import { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.js';
 import { CATALOG_REPOSITORY } from './domain/ports.js';
-import { SEARCH_INDEX } from './domain/search.js';
+import { SEARCH_DICTIONARY_SOURCE, SEARCH_INDEX, SEARCH_READ_MODEL_SYNC } from './domain/search.js';
 import type { TemplateCatalog } from './domain/seatmap-templates.js';
 import { OPS_SALE_STORE, SALE_STORE } from './domain/sale-ports.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
@@ -132,6 +133,19 @@ const noStore = (_req: unknown, res: { setHeader(name: string, value: string): u
   next();
 };
 
+/**
+ * 검색 경로(`/v1/search`로 시작하는 모든 주소)는 먼저 no-store를 단다. 처리기가 200 JSON을 낼 때만 공개 캐시 머리로 바꾼다.
+ * 그래서 정의 밖 경로(`/v1/search/x.css` 등)의 404와 400·503에는 공개 캐시 머리가 없다(캐시 기만 방지, ADR-0271 결정 10, catalog-review 14.2.5)
+ */
+const searchNoStore = (req: { url?: string; originalUrl?: string }, res: { setHeader(name: string, value: string): unknown }, next: () => void): void => {
+  const url = req.originalUrl ?? req.url ?? '';
+  if (url.startsWith('/v1/search')) res.setHeader('cache-control', 'no-store');
+  next();
+};
+
+/** 검색 전용 연결 묶음(ADR-0271 결정 5). 없으면 앱 연결(DATABASE)을 쓴다(로컬·시험) */
+export const SEARCH_DATABASE = Symbol('SEARCH_DATABASE');
+
 @Module({})
 export class CatalogModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
@@ -156,6 +170,7 @@ export class CatalogModule implements NestModule {
         { path: 'v1/events/:eventId/sale-eligibility', method: RequestMethod.GET },
         { path: 'internal/v1/events/:eventId/sale-config', method: RequestMethod.GET },
       );
+    consumer.apply(searchNoStore).forRoutes({ path: '{*path}', method: RequestMethod.ALL });
   }
 
   /**
@@ -164,7 +179,7 @@ export class CatalogModule implements NestModule {
    */
   static register(
     o:
-      | { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; media: MediaWiring }
+      | { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; searchDatabase?: Database; media: MediaWiring }
       | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore },
   ): DynamicModule {
     const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale];
@@ -182,11 +197,15 @@ export class CatalogModule implements NestModule {
           { provide: SEATMAP_LAYOUT_STORE, useClass: DrizzleSeatmapLayoutStore },
           { provide: SALE_STORE, useClass: DrizzleSaleStore },
           { provide: OPS_DATABASE, useFactory: (db: Database) => o.opsDatabase ?? db, inject: [DATABASE] },
-          { provide: OPS_SALE_STORE, useFactory: (db: Database) => new DrizzleSaleStore(db), inject: [OPS_DATABASE] },
+          { provide: OPS_SALE_STORE, useFactory: (db: Database, sync: DrizzleSearchReadModel) => new DrizzleSaleStore(db, sync), inject: [OPS_DATABASE, SEARCH_READ_MODEL_SYNC] },
           { provide: SALE_CONFIG_STORE, useClass: DrizzleSaleConfigStore },
           { provide: SALE_CONFIG_READER, useClass: DrizzleSaleConfigReader },
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
-          { provide: SEARCH_INDEX, useClass: DrizzleSearchIndex },
+          { provide: SEARCH_DATABASE, useFactory: (db: Database) => o.searchDatabase ?? db, inject: [DATABASE] },
+          { provide: SEARCH_INDEX, useFactory: (db: Database, origin: string) => new DrizzleSearchIndex(db, origin), inject: [SEARCH_DATABASE, IMAGE_ORIGIN] },
+          // 동기화는 부르는 트랜잭션(판매 승인·포스터)의 연결로 쓴다. 이 인스턴스의 연결은 사전 원천(읽기)이다
+          { provide: SEARCH_READ_MODEL_SYNC, useFactory: (db: Database, origin: string) => new DrizzleSearchReadModel(db, origin), inject: [SEARCH_DATABASE, IMAGE_ORIGIN] },
+          { provide: SEARCH_DICTIONARY_SOURCE, useExisting: SEARCH_READ_MODEL_SYNC },
           { provide: DEMAND_FORECAST_SOURCE, useValue: o.media.demandSource ?? new EmptyDemandForecastSource() },
           { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           ...mediaProviders(o.media, false),
@@ -209,6 +228,7 @@ export class CatalogModule implements NestModule {
         { provide: SALE_CONFIG_READER, useExisting: SALE_CONFIG_STORE },
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
+        { provide: SEARCH_DICTIONARY_SOURCE, useFactory: (index: MemorySearchIndex) => new MemorySearchDictionarySource(index), inject: [SEARCH_INDEX] },
         { provide: DEMAND_FORECAST_SOURCE, useValue: o.media?.demandSource ?? new EmptyDemandForecastSource() },
         { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         ...mediaProviders(o.media ?? {}, true),

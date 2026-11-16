@@ -64,6 +64,9 @@ export function useSuggestionSource(): {
         const raw = r.data.items ?? [];
         const items = raw.flatMap((it) => toShellSuggestion(it) ?? []);
         last.current = { query: normalizeInput(query), items, rawCount: raw.length, at: Date.now() };
+        // 검색 품질 사건: 자동완성 창을 보였다(검색어는 싣지 않는다, docs/features/search.md §11)
+        // 머리 검색창은 모든 화면의 첫 JS라 늦게 가져온다
+        if (items.length > 0) void import('./model/search-quality-client').then((m) => m.searchQuality().suggestShown());
         return items.map(toWeb);
       } finally {
         clearTimeout(timer);

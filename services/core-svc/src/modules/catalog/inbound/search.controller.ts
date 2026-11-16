@@ -1,5 +1,6 @@
 // 받는 층: 검색 결과·자동완성(openapi listSearchResults·getSearchSuggestions, ADR-0094, docs/features/search.md §4~§6).
 // 인증 없음, CDN 캐시. 검색어·필터·쪽은 계약 스키마가 먼저 검사한다(정의 밖 칸 400).
+// 공개 캐시 머리는 200 JSON에만 단다. 오류(400·404·503 등)와 `/v1/search` 아래 정의 밖 경로는 no-store다(모듈 미들웨어, ADR-0271 결정 10, catalog-review 14.2.5).
 import { Controller, Get, Res } from '@nestjs/common';
 import { GetSearchSuggestionsQueryParams, GetSearchSuggestionsResponse, ListSearchResultsQueryParams, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { ContractQuery, ContractRouteSchema, Roles } from '@peaket/platform';
@@ -21,16 +22,16 @@ export class SearchController {
   @ContractRouteSchema({ responses: { 200: GetSearchSuggestionsResponse } })
   @Roles(['public'])
   async suggestions(@ContractQuery(GetSearchSuggestionsQueryParams) q: z.output<typeof GetSearchSuggestionsQueryParams>, @Res({ passthrough: true }) reply: FastifyReply): Promise<SearchSuggestions> {
+    const out = await this.search.suggestions(q.q);
     void reply.header('cache-control', SUGGESTION_CACHE);
-    return this.search.suggestions(q.q);
+    return out;
   }
 
   @Get()
   @ContractRouteSchema({ responses: { 200: ListSearchResultsResponse } })
   @Roles(['public'])
   async results(@ContractQuery(ListSearchResultsQueryParams) q: z.output<typeof ListSearchResultsQueryParams>, @Res({ passthrough: true }) reply: FastifyReply): Promise<SearchOutcome> {
-    void reply.header('cache-control', SEARCH_CACHE);
-    return this.search.search({
+    const out = await this.search.search({
       q: q.q ?? '',
       ...(q.genre !== undefined ? { genre: q.genre } : {}),
       ...(q.placeId !== undefined ? { placeId: q.placeId } : {}),
@@ -43,5 +44,7 @@ export class SearchController {
       ...(q.sort !== undefined ? { sort: q.sort } : {}),
       page: q.page,
     });
+    void reply.header('cache-control', SEARCH_CACHE);
+    return out;
   }
 }

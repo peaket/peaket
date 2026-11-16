@@ -4,7 +4,7 @@
 // 정비 경로(DrizzleSaleMaintenanceStore): relay 프로세스의 정비 역할 연결(core_maintenance, 모든 테넌트)이다. 파기는 명단 행을 FOR UPDATE로 잡고 파기 시각을 다시 본다.
 // 큰 명단 문장은 core 역할 문장 시간 상한(5초) 안에 들게 기본 키 차례로 5,000행 [가정]씩 나눈다(앞서 지운 행을 다시 훑지 않는다, 리뷰 C4).
 // 값은 빌더나 매개변수로만 넘긴다(ASVS v5.0.0-1.2.4). 구성원 계정 ID는 기록에 넣지 않는다.
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
@@ -16,6 +16,7 @@ import type { EventEditable, ListWrite, MaintenanceList, PendingDrop, SaleEventR
 import { applyApproval, type SaleApprovalInput } from '../../domain/sale-approval.js';
 import type { ShowScale } from '../../domain/demand-forecast.js';
 import { layoutVenueId } from '../../domain/seatmap-layout.js';
+import { SEARCH_READ_MODEL_SYNC, type SearchReadModelSync } from '../../domain/search.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { pendingOf } from './layout-rows.js';
 import { event, priceTier, production, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
@@ -144,7 +145,11 @@ async function readState(tx: Tx, p: ProductionRow, tenantId: string): Promise<Sa
 
 @Injectable()
 export class DrizzleSaleStore implements SaleStore {
-  constructor(@Inject(PARTNER_DATABASE) private readonly db: Database) {}
+  /** search: 판매 승인 트랜잭션에서 검색 읽기 모델을 같이 고친다(ADR-0271 결정 2). 없으면(파트너 경로) 부르지 않는다 */
+  constructor(
+    @Inject(PARTNER_DATABASE) private readonly db: Database,
+    @Optional() @Inject(SEARCH_READ_MODEL_SYNC) private readonly search?: SearchReadModelSync,
+  ) {}
 
   async promoterOf(productionId: string): Promise<string | undefined> {
     if (!UUID.test(productionId)) return undefined;
@@ -365,6 +370,8 @@ export class DrizzleSaleStore implements SaleStore {
             ...(input.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: input.accessibleSeatingCheck } : {}),
           })
           .where(mineProduction);
+        // 같은 트랜잭션에서 검색 읽기 모델에 넣는다(첫 승인·재승인 반영, ADR-0271 결정 2)
+        await this.search?.sync(tx, [p.id], input.now);
         return after;
       },
       reject: async (_reason, _now) => {

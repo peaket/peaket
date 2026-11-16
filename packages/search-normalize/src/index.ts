@@ -169,4 +169,4 @@ export function searchNames<T extends NameItem>(items: readonly T[], input: stri
 }
 
 /** 브라우저 거르기 함수(§4.5, ADR-0271 결정 11) */
-export { inputKind, refineLocally, type InputKind, type LastAnswer } from './refine.js';
+export { chosungOf, inputKind, normalizeInput, refineLocally, SUGGEST_LIMIT, type InputKind, type LastAnswer } from './refine.js';

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SEARCH_QUERY_SYNC_EVENT } from '@peaket/ds/WebShell';
 import { cx } from '@/shared/lib/cx';
 import { PicturePoster } from '@/shared/ui/PicturePoster';
+import { searchQuality } from '@/widgets/app-shell/model/search-quality-client';
 import { hasFilters, josa, NO_FILTERS, pageNumbers, readQuery, searchUrl, toApiParams, toResultView, type CardStatus, type ResultCard, type ResultView, type SearchQuery } from '../model/search';
 import { FilterChips, FilterPanel } from './Filters';
 import { SortSelect } from './SortSelect';
@@ -163,6 +164,9 @@ export function ResultsSkeleton() {
 }
 
 function Results({ v, query, heading, onPage }: { v: ResultView; query: SearchQuery; heading: React.RefObject<HTMLHeadingElement | null>; onPage: (href: string) => void }) {
+  // 검색 품질 사건(검색어 없이 수만, docs/features/search.md §11)
+  useEffect(() => searchQuality().resultsShown(v.total === 0), [v]);
+  const requery = () => searchQuality().requery();
   if (v.total === 0) {
     return (
       <>
@@ -178,7 +182,7 @@ function Results({ v, query, heading, onPage }: { v: ResultView; query: SearchQu
               검색 결과가 없습니다
             </p>
             {v.didYouMean ? (
-              <Link className="link t-md" href={searchUrl(query, { q: v.didYouMean, filters: query.filters })}>
+              <Link className="link t-md" href={searchUrl(query, { q: v.didYouMean, filters: query.filters })} onClick={requery}>
                 혹시 &apos;{v.didYouMean}&apos;{josa(v.didYouMean, '을')} 찾으셨나요?
               </Link>
             ) : null}
@@ -218,15 +222,15 @@ function Results({ v, query, heading, onPage }: { v: ResultView; query: SearchQu
             <span className="muted" aria-hidden="true">
               ·
             </span>
-            <Link className="link" href={searchUrl(query, { q: v.converted.from, filters: query.filters, noConvert: true })}>
+            <Link className="link" href={searchUrl(query, { q: v.converted.from, filters: query.filters, noConvert: true })} onClick={requery}>
               &apos;{v.converted.from}&apos;{josa(v.converted.from, '으로')} 찾기
             </Link>
           </p>
         ) : null}
         <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 lg:grid-cols-4 lg:gap-x-5 lg:gap-y-7">
-          {v.cards.map((c) => (
+          {v.cards.map((c, i) => (
             <li key={c.id}>
-              <ResultItem c={c} />
+              <ResultItem c={c} position={i + 1} />
             </li>
           ))}
         </ul>
@@ -238,11 +242,16 @@ function Results({ v, query, heading, onPage }: { v: ResultView; query: SearchQu
 }
 
 /** CMP-072 ProductionCard(result): 휴대폰·태블릿은 왼쪽 작은 포스터 + 글, 데스크톱은 위 포스터 + 아래 글 */
-function ResultItem({ c }: { c: ResultCard }) {
+function ResultItem({ c, position }: { c: ResultCard; position: number }) {
   const badge = STATUS_BADGE[c.status];
   return (
     <article className="h-full">
-      <Link className="card flex h-full gap-3.5 p-3 md:gap-4 md:p-3.5 lg:flex-col lg:gap-0 lg:overflow-hidden lg:p-0" href={c.href} style={{ color: 'inherit' }}>
+      <Link
+        className="card flex h-full gap-3.5 p-3 md:gap-4 md:p-3.5 lg:flex-col lg:gap-0 lg:overflow-hidden lg:p-0"
+        href={c.href}
+        style={{ color: 'inherit' }}
+        onClick={() => searchQuality().resultClick(position)}
+      >
         <PicturePoster
           src={c.posterUrl}
           alt={c.posterAlt}

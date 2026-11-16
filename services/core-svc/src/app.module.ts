@@ -18,6 +18,8 @@ export class AppModule {
           database: Database;
           partnerDatabase: Database;
           opsDatabase?: Database;
+          /** 검색 전용 연결 묶음(ADR-0271 결정 5, 운영은 읽기 전용 복제본). 없으면 database */
+          searchDatabase?: Database;
           media: MediaWiring;
           review?: Omit<DatabaseReviewWiring, 'database'>;
           shop?: Omit<DatabaseShopWiring, 'database' | 'partnerDatabase'>;
@@ -45,7 +47,7 @@ export class AppModule {
         module: AppModule,
         imports: [
           databaseModule(o.database),
-          CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), media: o.media }),
+          CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), ...(o.searchDatabase ? { searchDatabase: o.searchDatabase } : {}), media: o.media }),
           ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}) }),
           ShopModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.shop?.commission ? { commission: o.shop.commission } : {}) }),
           NotifyModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),

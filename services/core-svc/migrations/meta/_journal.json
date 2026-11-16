@@ -162,6 +162,13 @@
       "when": 1794789168699,
       "tag": "0022_review_role_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794750100000,
+      "tag": "0021_search_read_model_tables",
+      "breakpoints": true
     }
   ]
 }

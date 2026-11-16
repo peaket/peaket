@@ -7,7 +7,22 @@ import { assertInternalGrpcToken, createDatabase, createHotRedis, createService,
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
-import { assertDatabaseRole, GrpcAdminAuthz, GrpcImageProcessing, GrpcMemberCodeDirectory, GrpcSeatmapParser, LocalFolderImageStore, LocalFolderPublicFileStore, QueueSaleEligibilityCopy, SaleEligibilityMetrics, StaticTemplateCatalog, UnwiredSaleEligibilityCopy } from './modules/catalog/index.js';
+import {
+  assertDatabaseRole,
+  DrizzleSearchReadModel,
+  GrpcAdminAuthz,
+  GrpcImageProcessing,
+  GrpcMemberCodeDirectory,
+  GrpcSeatmapParser,
+  LocalFolderImageStore,
+  LocalFolderPublicFileStore,
+  QueueSaleEligibilityCopy,
+  SaleEligibilityMetrics,
+  SearchCatalog,
+  SearchReadModelTimers,
+  StaticTemplateCatalog,
+  UnwiredSaleEligibilityCopy,
+} from './modules/catalog/index.js';
 import {
   DrizzleReviewStore,
   FAN_PROFILE,
@@ -85,11 +100,17 @@ const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SE
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
 // Kafka 소비자(탈퇴 익명화·보류 표) 전용 core_app 풀. 사건이 몰려도 팬·관제 HTTP 경로의 연결을 빼앗지 않게 따로 작게 둔다(최대 2개 [가정], docs/streaming.md §2.6, 리뷰 K2)
 const consumerDatabase = createDatabase({ url, applicationName: `${SERVICE}-consumer`, max: 2 });
+// 검색 전용 연결 묶음(ADR-0271 결정 5, docs/features/search.md §7.2: 연결 10개·대기 100ms [가정]). 운영은 읽기 전용 복제본 주소(PEAKET_SEARCH_DATABASE_URL),
+// 없으면(로컬) 앱 주소를 쓴다. 다 차면 검색만 503이고 다른 경로의 연결을 빼앗지 않는다
+const SEARCH_POOL_MAX = 10;
+const SEARCH_POOL_WAIT_MS = 100;
+const searchDatabase = createDatabase({ url: process.env.PEAKET_SEARCH_DATABASE_URL ?? url, applicationName: `${SERVICE}-search`, max: SEARCH_POOL_MAX, connectionTimeoutMillis: SEARCH_POOL_WAIT_MS });
 // 소유자 주소를 넣거나 역할을 겸하면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
 await assertDatabaseRole(database, 'core_app');
 await assertDatabaseRole(partnerDatabase, 'core_partner');
 await assertDatabaseRole(opsDatabase, 'core_ops');
 await assertDatabaseRole(consumerDatabase, 'core_app');
+await assertDatabaseRole(searchDatabase, 'core_app');
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
 const service = await createService({
@@ -100,6 +121,7 @@ const service = await createService({
     database,
     partnerDatabase,
     opsDatabase,
+    searchDatabase,
     media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
     review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile() },
     ...(process.env.PEAKET_IDENTITY_JWKS_URL ? { exportJwks: { url: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' } } : {}),
@@ -112,7 +134,17 @@ const service = await createService({
 });
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
+// 검색 읽기 모델 주기 일(ADR-0271 결정 3·6): 1분 정리·1시간 관심도는 판매 승인과 같은 쓰기 역할(core_ops)로, 자동완성 사전은 검색 연결로 10초마다 갱신한다
+const searchSource = new DrizzleSearchReadModel(searchDatabase, imageOrigin);
+const searchTimers = new SearchReadModelTimers({
+  sync: new DrizzleSearchReadModel(opsDatabase, imageOrigin),
+  dictionary: service.app.get(SearchCatalog).dictionary,
+  termCount: () => searchSource.termCount(),
+  clock: systemClock,
+  logger: service.logger,
+}).register(service.metrics.registry);
 await service.listen();
+searchTimers.start();
 
 // 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다.
 const webhookWorker =
@@ -164,6 +196,7 @@ process.once('SIGTERM', () => {
 function shutdown(): Promise<void> {
   closing ??= (async () => {
     webhookWorker?.stop();
+    searchTimers.stop();
     // Kafka 소비자를 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋). 실패해도 나머지는 그대로 끝낸다
     await consumers?.stop().catch((err: unknown) => service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'));
     // 받는 요청을 마치고 identity 채널과 DB 연결을 닫는다
@@ -177,7 +210,7 @@ function shutdown(): Promise<void> {
         seatmapParser.close();
         if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
         void queueRedis?.close();
-        return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close()]);
+        return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close(), searchDatabase.close()]);
       });
   })();
   return closing;
