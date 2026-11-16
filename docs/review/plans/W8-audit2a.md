@@ -504,3 +504,8 @@ export interface ReviewStore {
   - journal의 0026은 `idx` 26·`when` 1794811994338이다. 갈래 2의 0023 등과 합칠 때 `when` 차례를 감독이 맞춘다(Drizzle 이주기는 마지막으로 적용한 `when`보다 큰 것만 돌리므로, 0026이 먼저 적용된 DB에서는 `when`이 더 작은 뒤 번호가 건너뛰어진다).
   - 후기 사진(`review_image`)이 생기는 단계가 파기 칸에 사진 키와 실제 파일 지우기를 더해야 한다(정본 data.md §2 '후기 파기'에 적혀 있다). 지금 코드는 사진을 받지 않아(422 `review-images-unavailable`) 해당 없다.
 - **높음**: 없다.
+
+### 이의 2에 대한 답: 맞다. 시험 쪽만 고쳤다(리뷰 반영 A2)
+
+- `test-int/sale-eligibility.int.test.ts`의 정비 일 조립 단언은 `toMatchObject`의 배열이 길이까지 같아야 해서, A2의 새 정비 일이 넷째로 들어가면 실패한다. 이 단언은 relay가 실제로 띄우는 정비 일 전체를 정본대로 묶어 두는 뜻이라(빠지거나 더해진 일을 잡는다) '들어 있는지만' 보게 느슨하게 하지 않고, 기대 목록 끝에 `['review-purge-legacy', 'window']`를 더했다(`coreMaintenanceTasks`가 `review-temp-block-expire` → `review-purge-legacy` 차례로 넣는다). 나머지 단언(`purge` 결과)은 그대로다.
+- 통합이라 돌리지 않았다(도커 대기). 리뷰 반영 통합 명령에 이 파일을 더한다: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/sale-eligibility.int.test.ts`(이 파일은 빌드한 `dist/maintenance-tasks.js`를 띄우므로 먼저 `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc build`).
