@@ -163,6 +163,74 @@ export function accessLogRetainUntil(createdAt: Date): Date;
 3. 컨트롤러가 행위자로 `tenantOf(me)`나 고정 계정을 넘긴다. 또는 `count`에 `totals.bookings`를 넣는다.
 4. `accessLogRetainUntil`이 `+ 730일`이다.
 
+#### R2 보충(2026-11-16, 리뷰 R2: 접속기록에 접속지 정보가 없다)
+
+**무엇이 빠졌나**: 개인정보의 안전성 확보조치 기준의 접속기록 항목은 계정·접속일시·접속지 정보·처리한 정보주체 정보·수행업무다(고시 제2조 제3호, docs/security/internal-management-plan.md §4.5). 명단 보기·내려받기 접속기록은 접속지만 없다. 저장소에 이미 있는 같은 꼴은 관리 계정 접속기록 `admin_data_access.source_ip`('접속지 정보', data.md §2 ⑦)와 identity-svc 관리 계정 로그인의 클라이언트 IP 읽기(`clientIpOf`: 입구가 하나로 다시 쓴 `x-forwarded-for`가 IP 모양이면 그것, 아니면 연결 상대 주소, docs/infra.md §3 입구 규칙 2)다. 둘을 그대로 따른다. 기기 식별값은 `admin_data_access`에도 없어 남기지 않는다. 보존은 그 행의 2년, 가림은 '응답·화면에 싣지 않음, 로그는 플랫폼의 원문 식별값 가림 키 `clientIp`'다(정본에 먼저 씀: settlement.md §9 '접속지'·J-T26 ⑤, data.md §2 `source_ip`, data-classification '관리자 시스템 접속기록' 행, internal-management-plan §4.5, asvs/settlement 16.2.1).
+
+**마이그레이션**: 새 번호를 쓰지 않는다. 아직 develop에 없는 **0021**(`0021_attendee_access_audit_list.sql`)에 더한다: `ALTER TABLE "attendee_export_audit" ADD COLUMN "source_ip" inet;`와 `ADD CONSTRAINT "attendee_export_audit_source_ip_check" CHECK ("source_ip" IS NOT NULL) NOT VALID;`(0019로 이미 들어간 행은 그대로, 새 행은 반드시 접속지가 있다). 권한은 바꾸지 않는다. Drizzle 스키마 `attendeeExportAudit`에 `sourceIp: inet('source_ip')`를 더하고 0021 스냅숏을 다시 만든다(`NOT VALID`는 손으로 쓴 SQL에만 있다).
+
+**손댈 파일**
+
+| 나눔 | 파일 |
+| --- | --- |
+| 제품 코드 | `services/core-svc/src/modules/export/application/attendee-exports.ts`(`ExportActor`, 접속지 확인), `…/export/domain/ports.ts`(`AttendeeViewRecord`, `recordExport` 둘째 인자), 새 `…/export/inbound/client-ip.ts`, `…/export/inbound/partner-attendee-export.controller.ts`(GET에도 `@Req()`), `…/export/adapters/db/drizzle-export-store.ts`, `…/export/adapters/db/schema.ts`, `…/export/adapters/memory-export-store.ts` |
+| 마이그레이션 | `services/core-svc/migrations/0021_attendee_access_audit_list.sql`(위 두 줄 더함), `migrations/meta/0021_snapshot.json` |
+| 시험 | 고침(시험 담당 몫): `test/export-audit.test.ts`(0021 원문 시험 `A2-19 0021은 action·filter를 더하고 …`에 `source_ip` 칸·CHECK 글을 더한다, 기존 LIST·DOWNLOAD 단언에 `clientIp`), `test-int/export-audit.int.test.ts`(74·98줄처럼 접속기록 행을 직접 넣는 준비에 `source_ip`를 넣어야 새 CHECK에 걸리지 않는다), 행위자 객체를 만드는 export 시험 전부(`test/export-paging-limit.test.ts`, `test/export-paging.test.ts`, `test/export-attendee-source.test.ts`, `test/export-reauth.test.ts`, `test/export-reauth-cases.test.ts`, `test/export.test.ts`에 `clientIp`). 새로: `test/client-ip.test.ts` |
+
+**공개 인터페이스(바뀌는 곳만)**
+
+```ts
+// services/core-svc/src/modules/export/application/attendee-exports.ts
+export interface ExportActor {
+  accountId: string;
+  sessionId: string;
+  role: string;
+  /** 접속지 정보: 요청의 클라이언트 IP 원문. 이름이 clientIp라 플랫폼 로그가 가린다 */
+  clientIp: string;
+}
+// listAttendees·create: actor.clientIp가 IP 모양이 아니면(isIP === 0, 빈 문자열 포함) 원천·회차를 읽기 전에 Error를 던진다(행위자 없음과 같은 자리, 접속기록·이력 없음)
+
+// services/core-svc/src/modules/export/domain/ports.ts
+export interface AttendeeViewRecord { /* … 지금 칸 … */ clientIp: string }
+export interface AttendeeExportStore {
+  /** 둘째 인자의 접속지는 DOWNLOAD 접속기록에만 쓴다(attendee_export 이력·exportView에는 싣지 않는다) */
+  recordExport(record: AttendeeExportRecord, access: { clientIp: string }): Promise<void>;
+  recordView(view: AttendeeViewRecord): Promise<void>; // view.clientIp → source_ip
+  list(promoterId: string, eventId: string, limit: number): Promise<AttendeeExportRecord[]>; // 그대로, 접속지 없음
+}
+
+// services/core-svc/src/modules/export/inbound/client-ip.ts(새)
+/** identity-svc admin-login.controller의 clientIpOf와 같은 규칙: x-forwarded-for(배열이면 첫 값)를 다듬어 IP 모양이면 그것, 아니면 socket.remoteAddress, 없으면 '' */
+export function clientIpOf(req: Pick<FastifyRequest, 'headers' | 'socket'>): string;
+```
+
+- 컨트롤러 `attendees`·`create`는 행위자에 `clientIp: clientIpOf(request)`를 싣는다. 메모리 저장소는 `views: AttendeeViewRecord[]`(접속지 포함)와 `audits: (AttendeeExportRecord & { clientIp: string })[]`(DOWNLOAD 접속기록에 받은 접속지를 붙인 것)를 공개 배열로 두고, `rows`(이력)에는 접속지를 넣지 않는다. Drizzle은 LIST·DOWNLOAD 넣기 값에 `sourceIp`를 싣는다.
+- `AttendeeExportRecord`·`exportView`·다운로드 이력 응답 모양은 바꾸지 않는다(접속지를 이력으로 내보내지 않는다).
+
+**시험 목록(R2 보충)**
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `A2-19 R2 J-T26 ⑤ 명단 보기 접속기록에 요청의 접속지를 남긴다` | 단위 + HTTP | 단위: `actor.clientIp` `'203.0.113.7'` → `views[0].clientIp` 정확히 같다. HTTP: 머리 `x-forwarded-for: 203.0.113.7` → `'203.0.113.7'`, 머리 없음 → 주입 요청의 연결 주소 `'127.0.0.1'`, `x-forwarded-for: not-an-ip` → `'127.0.0.1'`, IPv6 `2001:db8::1` → 그대로 | 부르는 쪽이 결과를 쓰는지(컨트롤러가 요청에서 읽어 넘김) |
+| `A2-19 R2 J-T26 ⑤ 접속지를 정하지 못하면 원천을 읽지 않고 실패한다` | 단위 | `clientIp` `''`·`'abc'`·`'300.1.1.1'` 각각 `listAttendees` 거절, 원천 `list` 호출 0, `views` 0. 같은 값으로 `create` 거절, `recordExport` 호출 0 | 빠진 접속지 거절·fail-closed |
+| `A2-19 R2 J-T26 ⑥ 내려받기 접속기록에도 접속지를 남기고 이력 응답에는 싣지 않는다` | 단위 + HTTP | `recordExport` 둘째 인자 `{ clientIp: '203.0.113.7' }`. HTTP `GET …/attendee-exports` 응답 본문에 `203.0.113.7` 글자가 없다 | 가림 |
+| `A2-19 R2 Drizzle 접속기록 넣기 값에 source_ip가 있다` | 단위 | 가짜 `tx`의 LIST·DOWNLOAD 넣기 값 모두 `sourceIp` = 넘긴 IP | |
+| `A2-19 R2 클라이언트 IP는 다시 쓴 x-forwarded-for가 IP일 때만 그것이고 아니면 연결 주소다` | 단위 | `clientIpOf`: `'203.0.113.7'` → 그대로, `' 203.0.113.7 '` → 다듬은 값, 배열 `['198.51.100.1', '203.0.113.7']` → 첫 값, `'203.0.113.7, 10.0.0.1'`(쉼표 목록, IP 모양 아님) → 연결 주소, 머리·연결 주소 둘 다 없음 → `''` | identity 규칙과 같은지 |
+| `A2-19 0021은 action·filter를 더하고 LIST·DOWNLOAD 모양을 CHECK로 강제하며 UPDATE·DELETE를 주지 않는다`(고침) | 단위(SQL 원문) | 지금 단언에 더해 `ADD COLUMN "source_ip" inet`, `CHECK ("source_ip" IS NOT NULL) NOT VALID`가 있다 | 0021 원문 시험. 시험 담당이 고친다 |
+| `A2-19 R2 0021 뒤 접속지 없는 새 행은 CHECK가, IP 모양이 아닌 값은 inet이 거절한다` | 통합(core PostgreSQL) | `source_ip` 없이 넣기 23514, `'abc'` 22P02, `'2001:db8::1'`은 들어가고 읽으면 같은 값. `recordView`·`recordExport`로 넣은 행의 `source_ip`가 넘긴 IP | |
+
+**차례**: 리뷰 반영이다. 시험 담당이 위 시험과 고칠 시험을 먼저 쓰고 실패를 본다(`Role: review-fix`, `Fix-By: test`). 구현 담당이 0021·스키마·코드를 고친다(`Fix-By: impl`).
+
+**돌릴 통합 시험**: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/export-audit.int.test.ts`
+
+**틀린 구현 표본 후보(R2)**
+1. 컨트롤러가 `x-forwarded-for`를 보지 않고 늘 `socket.remoteAddress`(입구 파드 주소)를 넣는다.
+2. 접속지가 빈 문자열이어도 막지 않고 `''`이나 `'0.0.0.0'`을 넣는다(fail-open).
+3. DOWNLOAD 접속기록에는 접속지를 싣지 않는다(LIST만 싣는다).
+4. `exportView`나 이력 응답에 접속지를 싣는다.
+
+**R3(리뷰, 정본 문구)**: J-T26 ④ 상황 칸의 '999건 페이지 뒤에 1,001건 페이지'를 '999건 페이지 뒤에 1,000건 페이지와 1건 페이지(원천은 한 페이지에 요청한 `limit`보다 많이 주지 않는다)'로 고쳤다(settlement.md §13). 시험(§1 첫 줄)은 이미 이 모양이라 바꿀 것이 없다. 원천이 `limit`보다 많이 줄 때 core가 거절할지는 정하지 않았다(지금 코드는 그대로 받는다).
+
 ### 3. R-628 회귀 시험 공백(`InternalToken401Guard` 시작 차단·상수 시간 비교)
 
 **무엇이 틀렸나**: 제품 코드는 맞다(R628V 확인). 커밋된 시험이 `onModuleInit` 상속(운영 무토큰 시작 차단)과 `timingSafeEqual` 사용을 묶지 않아, 두 변이(M1 `onModuleInit` 빈 재정의, M3 `===` 비교)가 모든 시험을 통과했다. 기존 core 시험은 `PEAKET_ENV=ci`만 본다. 그래서 이 항목은 **시험만** 더한다. 모두 처음부터 통과 예상이다.
@@ -328,7 +396,7 @@ export function startCoreConsumers(o: CoreConsumersOptions): { started: Promise<
 1. **탈퇴한 계정의 후기를 익명화해 남길지, 파기할지.** 정본끼리 어긋난다. R-617(2026-11-15)이 쓴 docs/features/identity.md §8 '후기 익명화'는 "본문·평점은 법정 보존·분쟁 대응을 위해 남기고 계정·주문 참조만 끊는다"이다. 그런데 docs/data.md §6 '관람 후기' 행은 "작성자가 지우거나 회원이 탈퇴하면 파기한다. 행은 DELETED로 바꾸며 본문·별점·사진 키·계정 ID를 바로 비운다"이고, docs/security/data-classification.md '관람 후기' 행("후기 삭제 또는 회원 탈퇴 시 파기")과 docs/planning/03-policies-glossary.md 권한표 '관람 후기' 행("탈퇴 때 삭제"), ADR-0086 ⑧(소프트 삭제 때 비우는 칸)도 같은 쪽이다. 후기 본문을 남길 법정 근거는 정본에 없다(법정 차단 조치 증적 3년은 `takedown_action`이 따로 둔다).
    - 추천: (가) 파기 쪽으로 맞춘다. 정본 넷이 같은 쪽이고 개인정보를 덜 남긴다. 하려면 `review.rating` NOT NULL 풀기(마이그레이션), `review_image` 파일·행 지우기, `content_fingerprint` 비우기, 공개 목록·요약에서 빠지는 것을 함께 정해야 한다. (나) R-617대로 두고 data.md·data-classification·planning/03을 고친다.
    - 이번 묶음: 결정 전까지 배선(사건 → 기존 `anonymizeAccount`)만 한다. 어느 쪽이든 '계정·주문 참조를 끊는다'는 같으므로 시험 ①⑪의 그 단언은 남고, 본문·별점·작성자 표시 단언만 바뀐다. identity.md에 결정 대기를 한 줄 적었다.
-2. **파트너 명단 접속기록을 어디에 둘지.** 정본의 관리 계정 접속기록 저장소는 ops-svc 감사 저장소의 `admin_data_access`(해시 체인, 접속지 정보 `source_ip`, FR-064 매일 이상 점검이 읽는 곳)인데, 구현은 core DB `attendee_export_audit`이다(R-606). 지금은 FR-064 점검(같은 명단 24시간 3회, 1만 건 이상, 근무 일정 밖 조회)이 파트너 명단 기록을 읽지 못한다. 이번 묶음은 core 표를 넓혀 쓰고 data.md에 '옮기는 일은 정해지지 않았다'고 적었다. 옮길지, 옮긴다면 core가 사건으로 보낼지 ops가 읽을지는 소유자 결정이다.
+2. **파트너 명단 접속기록을 어디에 둘지.** 정본의 관리 계정 접속기록 저장소는 ops-svc 감사 저장소의 `admin_data_access`(해시 체인, 접속지 정보 `source_ip`, FR-064 매일 이상 점검이 읽는 곳)인데, 구현은 core DB `attendee_export_audit`이다(R-606). 지금은 FR-064 점검(같은 명단 24시간 3회, 1만 건 이상, 근무 일정 밖 조회)이 파트너 명단 기록을 읽지 못한다. 이번 묶음은 core 표를 넓혀 쓰고 data.md에 '옮기는 일은 정해지지 않았다'고 적었다. 접속지 칸(`source_ip`)은 리뷰 R2 보충으로 core 표에도 더했으므로, 남는 차이는 해시 체인과 FR-064 점검이 읽는 곳이다. 옮길지, 옮긴다면 core가 사건으로 보낼지 ops가 읽을지는 소유자 결정이다.
 
 ### 6. 막힌 것·확인할 것
 

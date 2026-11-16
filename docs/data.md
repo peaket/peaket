@@ -2428,11 +2428,12 @@ erDiagram
 **예매자 명단 내려받기 이력과 접속기록(2026-11-15 R-588·R-606에서 만들었고, 칸 세부는 추천 적용 2026-11-16, W7-audit A2-19)**: core 논리 DB의 두 표다. 둘 다 파트너 DB 역할 `core_partner`가 `promoter_id` 행 보안(RLS)으로 자기 파트너 행만 읽고 쓴다.
 
 - `attendee_export`(0016): 화면의 [다운로드 이력]이 읽는 사본이다. 내려받기 한 번이 한 행이고 `id`(= 내보내기 ID), 회차, 행위자(계정 ID·표시 이름·역할), 사유, 형식(`CSV`·`XLSX`·`PDF`), 건수, 결과, 만든 때, 화면에서 사라지는 때(`expires_at` = 만든 때 + 30일)를 둔다.
-- `attendee_export_audit`(0019, 0021): 개인정보 접속기록이다. 명단 보기 한 페이지와 내려받기 한 번이 각각 한 행이다. 칸은 `id`, 종류 `action`(`LIST`·`DOWNLOAD`), `export_id`, 회차, 행위자(계정 ID·표시 이름·역할), `reason`, `format`, 건수 `count`(보기는 그 페이지에 보인 행 수, 내려받기는 파일의 행 수), 명단을 다시 만들 조건 `filter`(jsonb. 보기는 `limit`과 받은 `cursor`, 내려받기는 빈 객체. 개인정보 원문은 넣지 않는다), `created_at`, `retain_until`이다.
+- `attendee_export_audit`(0019, 0021): 개인정보 접속기록이다. 명단 보기 한 페이지와 내려받기 한 번이 각각 한 행이다. 칸은 `id`, 종류 `action`(`LIST`·`DOWNLOAD`), `export_id`, 회차, 행위자(계정 ID·표시 이름·역할), `reason`, `format`, 건수 `count`(보기는 그 페이지에 보인 행 수, 내려받기는 파일의 행 수), 명단을 다시 만들 조건 `filter`(jsonb. 보기는 `limit`과 받은 `cursor`, 내려받기는 빈 객체. 개인정보 원문은 넣지 않는다), 접속지 `source_ip`(inet), `created_at`, `retain_until`이다.
+  - `source_ip`(추천 적용 2026-11-16, W7-audit 리뷰 R2): 그 요청의 클라이언트 IP 원문이다(`admin_data_access.source_ip`와 같은 뜻. 읽는 규칙은 docs/features/settlement.md §9 '접속지'). 0021이 칸을 더하고, `source_ip IS NOT NULL` CHECK를 `NOT VALID`로 걸어 0019 때 이미 들어간 행(접속지 없음)은 그대로 두고 새 행은 반드시 접속지를 갖게 한다. `inet`이라 IP 모양이 아닌 값은 들어가지 않는다. 보존은 행의 `retain_until`(2년)과 같다. 이 칸은 다운로드 이력 응답에 싣지 않는다.
   - `DOWNLOAD` 행은 `id`와 `export_id`가 그 `attendee_export.id`와 같고, 사유·형식이 꼭 있다. `LIST` 행은 `id`가 새 UUIDv7이고 `export_id`·`reason`·`format`이 NULL이다. 두 모양을 CHECK 하나로 강제한다.
   - `retain_until`은 `created_at` + 2년(UTC 달력 기준으로 같은 월·일. 2월 29일이면 3월 1일)이다. 법정 최소(2년 이상)를 밑돌지 않게 날짜 수(730일)로 세지 않는다. 이 시각을 쓰는 파기 작업은 아직 없어 그동안 행은 지워지지 않는다.
   - `core_partner`에는 `SELECT`·`INSERT`만 준다(고치거나 지우지 못한다). 내려받기의 `attendee_export` 행과 `DOWNLOAD` 행은 한 트랜잭션에 넣는다(docs/features/settlement.md §9 '예매자 명단 보기·내려받기의 원천 페이지와 접속기록').
-  - 관리 계정 접속기록의 정본 저장소는 ops-svc 감사 저장소의 `admin_data_access`(§2 ⑦)다. 파트너 명단 접속기록을 그쪽으로 옮기는 일(해시 체인·접속지 정보·매일 이상 점검 FR-064)은 정해지지 않았고, 그때까지 이 표에 둔다.
+  - 관리 계정 접속기록의 정본 저장소는 ops-svc 감사 저장소의 `admin_data_access`(§2 ⑦)다. 파트너 명단 접속기록을 그쪽으로 옮기는 일(해시 체인·매일 이상 점검 FR-064)은 정해지지 않았고, 그때까지 이 표에 둔다. 접속지 정보는 이 표가 `source_ip`로 이미 갖는다.
 
 **부정 예매 사후 조사의 표(추천 적용 2026-10-31, ADR-0171 결정 2·4·5)**: 판매가 끝난 뒤 실제 기록으로 부정 예매(약관이 정하는 매크로·대기열 우회·보안문자 우회·명의 대여·매수 제한 회피, POL-046)를 묶어 찾고 사람이 소명·2인 승인을 거쳐 조치하는 데 쓰는 표다. 조사 갈래(실명 계정·주문·결제·접속)와 연구 갈래(분석 저장소의 회차 가명 사건)를 잇는 키, 한 화면에서 같이 보는 동선, 서로 옮기는 파일을 두지 않는다(결정 2).
 
