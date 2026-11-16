@@ -37,6 +37,7 @@ import {
   type EventSaleStopper,
   type SaleSuspensionLookup,
   type EventRefundHolds,
+  type PartnerEventCancellationStore,
 } from '../domain/ports.js';
 
 const audit = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
@@ -93,8 +94,12 @@ export interface EventCancellationExtra {
   readonly cases?: EventCancellationCases;
   /** 요청 전 미룸 걸기·판정·확정 때 늘리기·판정 전 반려 때 풀기(BAT-420 몫 D). 없으면 CANCEL 요청·판정·확정이 503이다 */
   readonly holds?: EventRefundHolds;
-  /** 판정 대기 건을 못 연 것처럼 요청은 받되 남길 경고 */
-  readonly log?: { warn(obj: object, msg: string): void };
+  /** 판정 대기 건을 못 연 것처럼 요청은 받되 남길 경고. error는 웨이브 끝 리뷰 K4의 되돌리기 실패(event-cancellation-revert-failed) */
+  readonly log?: { warn(obj: object, msg: string): void; error?(obj: object, msg: string): void };
+  /** 웨이브 끝 리뷰 K4(빈 뼈대, 아직 쓰지 않는다): 지표 ops_event_cancellation_revert_failures_total */
+  readonly revertFailures?: { inc(): void };
+  /** 웨이브 끝 리뷰 S2(빈 뼈대, 아직 쓰지 않는다): 파트너 경로(requestByPartner·partnerStatus)는 이 저장소만 쓴다 */
+  readonly partnerStore?: PartnerEventCancellationStore;
 }
 
 const conflict = () => new EventCancellationProblem('event-cancellation-conflict', 409, '다른 사람이 먼저 처리했습니다');

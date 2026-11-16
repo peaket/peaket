@@ -6,6 +6,14 @@ import type { EntryRecords, EntryRecordView } from './modules/refund/index.js';
 /** 대역을 받는 환경(ticket-svc 없이 도는 로컬·CI). PEAKET_ENV가 없으면 운영으로 보고 대역을 쓰지 않는다(identity 조립과 같은 fail-closed) */
 const STUB_ENVS: ReadonlySet<string> = new Set(['local', 'ci']);
 
+/**
+ * 웨이브 끝 리뷰 S1(빈 뼈대, 아직 쓰지 않는다): ops CS 처리함 주소(PEAKET_OPS_HTTP_URL)가 있는데 내부 토큰(PEAKET_INTERNAL_TOKEN)이 없으면
+ * local·ci 밖(운영·스테이징·PEAKET_ENV 없음)은 시작하지 않는다(던짐). local·ci는 경고 한 번. relay-app.ts·start.ts가 부른다
+ */
+export function requireOpsInternalToken(_o: { readonly env: Readonly<Record<string, string | undefined>>; readonly warn?: (msg: string) => void }): void {
+  throw new Error('아직 없음');
+}
+
 export function entryRecordsFromEnv(o: { readonly env: Readonly<Record<string, string | undefined>>; readonly tickets?: EntryRecords }): EntryRecords {
   if (o.tickets) return o.tickets;
   const envName = o.env.PEAKET_ENV;

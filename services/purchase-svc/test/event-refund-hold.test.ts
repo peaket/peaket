@@ -259,7 +259,7 @@ describe('남는 차액 CS 건 어댑터 [BAT-420 몫 D]', () => {
     return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
   };
 
-  test('R-T38 ④ 차액 건은 ops CS 처리함에 REFUND_FAILED·DEDUCTION_GAP·그 취소 ID·정해진 eventKey로 내부 토큰과 5,000ms 안에 보내고 실패는 삼킨다', async () => {
+  test('R-T38 ④ 차액 건은 ops CS 처리함에 REFUND_FAILED·DEDUCTION_GAP·그 취소 ID·정해진 eventKey로 내부 토큰과 5,000ms 안에 보내고, 실패는 삼키지 않고 던진다(웨이브 끝 리뷰 S1: 다음 틱에 다시 연다)', async () => {
     const sent: ExternalRequest[] = [];
     const notice = new HttpDeductionGapNotice({ request: async (r: ExternalRequest) => (sent.push(r), new Response('{"accepted":true}', { status: 202 })) }, 'it-token');
     const cancellationId = randomUUID();
@@ -271,6 +271,6 @@ describe('남는 차액 CS 건 어댑터 [BAT-420 몫 D]', () => {
     await notice.open({ cancellationId, orderId: randomUUID(), deductionAmount: 29_999, requestId: REQUEST, nowMs: NOW + 1 });
     expect(JSON.parse(String(sent[1]!.body)).eventKey).toBe(gapKey(cancellationId));
     const down = new HttpDeductionGapNotice({ request: async () => Promise.reject(new Error('ops down')) }, 'it-token');
-    await expect(down.open({ cancellationId, orderId: randomUUID(), deductionAmount: 1, requestId: REQUEST, nowMs: NOW })).resolves.toBeUndefined();
+    await expect(down.open({ cancellationId, orderId: randomUUID(), deductionAmount: 1, requestId: REQUEST, nowMs: NOW })).rejects.toThrow();
   });
 });

@@ -123,5 +123,14 @@ export class EventRefundHoldConflict extends Error {
   }
 }
 
+/**
+ * 웨이브 끝 리뷰 S2(빈 뼈대): 파트너 경로 전용 저장소. 파트너 DB 풀(ops_partner 역할)에서 트랜잭션 첫 문장으로
+ * set_config('app.tenant_id', 테넌트, true)를 걸고 쓴다(행 보안이 다른 파트너 행을 막는다). 감사·CS 건은 정의자 함수로 남긴다
+ */
+export interface PartnerEventCancellationStore {
+  insertAsTenant(tenantId: string, record: EventCancellationRecord, audit: AuditRecord, idem?: EventCancellationIdempotency): Promise<void>;
+  latestForEventAsTenant(tenantId: string, eventId: string): Promise<EventCancellationRecord | undefined>;
+}
+
 export const EVENT_CANCELLATION_STORE = Symbol.for('peaket.ops.event-cancellation-store');
 export const EVENT_REFUND_STARTER = Symbol.for('peaket.ops.event-refund-starter');

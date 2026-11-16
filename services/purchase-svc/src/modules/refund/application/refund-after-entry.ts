@@ -9,7 +9,7 @@
 // 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기가 처리하지 못한다(CS 알림 대상).
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type DueRefund } from '../domain/cancellation.js';
-import type { EventRefundHolds } from '../domain/event-refund-ports.js';
+import type { CsCaseOutbox, EventRefundHolds } from '../domain/event-refund-ports.js';
 import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationOrders, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
 
 export interface RefundAfterEntryDeps {
@@ -33,6 +33,10 @@ export interface RefundAfterEntryDeps {
    * 없으면 다시 읽지 못하므로 전처럼 SEV1이다(시작 조립은 늘 꽂는다)
    */
   orders?: Pick<CancellationOrders, 'findCancellation'>;
+  /** 웨이브 끝 리뷰 S1(빈 뼈대, 아직 쓰지 않는다): 열지 않은 이상 표시 건을 틱마다 다시 연다(연 뒤 markFlagOpened) */
+  csOutbox?: Pick<CsCaseOutbox, 'pendingFlags' | 'markFlagOpened'>;
+  /** 웨이브 끝 리뷰 C2(빈 뼈대): 지표 purchase_cs_case_open_failures_total{kind} */
+  csCaseOpenFailures?: { inc(kind: 'DEDUCTION_GAP' | 'FLAGGED'): void };
 }
 
 /** 한 번에 처리하는 취소 수 [가정] */

@@ -21,6 +21,7 @@ import {
   DrizzleCancellationWrites,
   DrizzleDeductionGapCancellations,
   DrizzleEventOpenOrders,
+  DrizzleEventRefundClaims,
   DrizzleEventRefundHolds,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
@@ -57,7 +58,7 @@ let writes: DrizzleCancellationWrites;
 const clock = fakeClock({ now: NOW });
 const pays: { cancellationId: string; orderId: string; amount: number; reason: string }[] = [];
 /** 결제사 대역의 답(BAT-420 리뷰 D6: 결과 모름 뒤 다시 부르기를 만든다) */
-let payOutcome: 'CANCELLED' | 'UNKNOWN' = 'CANCELLED';
+let payOutcome: 'CANCELLED' | 'UNKNOWN' | 'REJECTED' = 'CANCELLED';
 const payments: PaymentCancellations = {
   cancel: async (q) => {
     pays.push({ cancellationId: q.cancellationId, orderId: q.orderId, amount: q.amount, reason: q.reason });
@@ -607,5 +608,302 @@ describe('BAT-420 리뷰 D5·D6 [PostgreSQL·실제 ticket-svc gRPC]', () => {
     const free = await seat(eventId);
     const listed = (await new DrizzleEventRefundTargets(purchaseDb, configs).list(eventId)).map((t) => t.ticketId);
     expect(listed).toEqual([free.ticketId]);
+  });
+});
+
+// ---- BAT-420 웨이브 끝 리뷰 K1·K2(시험 담당, 구현 전에 씀, 계획 §11 보충 4, transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기') ----
+// 메인 감독 지시: 두 길이 동시에 도는 경우와 차례로 도는 경우를 모두 둔다
+describe('BAT-420 웨이브 끝 리뷰 K1·K2 겹침 막기 [PostgreSQL·실제 ticket-svc gRPC]', () => {
+  const failureNotices: string[] = [];
+  const wave = (nowMs: number, over: { canceller?: ConstructorParameters<typeof EventRefundService>[0]['canceller'] } = {}) =>
+    new EventRefundService({
+      store: new DrizzleEventRefundStore(purchaseDb, clock),
+      targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+      canceller:
+        over.canceller ??
+        new EventTicketCanceller({
+          tickets: ticketCancels!,
+          conversions: new DrizzlePendingCancellationConversions(purchaseDb),
+          orders: new DrizzleCancellationOrders(purchaseDb, configs),
+          writes,
+          payments,
+          calendar: new WeekendBusinessCalendar(),
+        }),
+      items: new DrizzleEventRefundStore(purchaseDb, clock),
+      openOrders: new DrizzleEventOpenOrders(purchaseDb),
+      notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
+      claims: new DrizzleEventRefundClaims(purchaseDb),
+      nowMs: () => nowMs,
+      deadlineMs: () => nowMs + 30_000,
+      concurrency: 2,
+    });
+  const runner = (nowMs: number, w = writes) =>
+    new RefundAfterEntry({
+      writes: w,
+      payments,
+      entries: ticketCancels!,
+      claims: writes,
+      failureNotice: { open: async (q) => void failureNotices.push(q.cancellationId) },
+      nowMs: () => nowMs,
+    });
+  const itemOf = async (requestId: string, ticketId: string) =>
+    (await purchaseDb.pool.query<{ status: string; last_error: string | null; cancellation_id: string }>('select status, last_error, cancellation_id from event_refund_item where request_id = $1 and ticket_id = $2', [requestId, ticketId])).rows[0];
+  const rowOf = async (cancellationId: string) =>
+    (await purchaseDb.pool.query<{ status: string; refund_failed_at: Date | null; refund_last_error: string | null; event_cancellation_request_id: string | null }>(
+      'select status, refund_failed_at, refund_last_error, event_cancellation_request_id from order_cancellation where id = $1',
+      [cancellationId],
+    )).rows[0];
+  const callsFor = (cancellationId: string) => pays.filter((p) => p.cancellationId === cancellationId).length;
+
+  test('GAT-110 K1 일괄 환불을 멈춘 동안 그 요청의 REFUND_PENDING 행에 결제사 호출이 0이고(실행기 셋·runDue 셋), 다시 열면 한 번이다(차례로)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seat(eventId);
+    pays.length = 0;
+    payOutcome = 'UNKNOWN';
+    try {
+      await wave(NOW).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    } finally {
+      payOutcome = 'CANCELLED';
+    }
+    const cancellationId = eventRefundCancellationId(requestId, s.ticketId);
+    expect(await rowOf(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', event_cancellation_request_id: requestId });
+    expect(callsFor(cancellationId)).toBe(1);
+    await wave(NOW).pause({ requestId, reason: '결제사 점검' });
+    for (let i = 1; i <= 3; i++) {
+      await runner(NOW + i * DAY).run();
+      await wave(NOW + i * DAY).runDue();
+    }
+    expect(callsFor(cancellationId)).toBe(1);
+    await wave(NOW + 4 * DAY).resume({ requestId });
+    await wave(NOW + 5 * DAY).runDue();
+    expect(callsFor(cancellationId)).toBe(2);
+    expect(await itemOf(requestId, s.ticketId)).toMatchObject({ status: 'REFUNDED' });
+  });
+
+  test('GAT-110 K1 마감 뒤 환급 실행기와 runDue가 같은 틱에 돌아도(두 실행기 모두 목록을 읽은 뒤) 결제사 호출은 하나이고, 거절이면 CS 일괄 환불 실패 하나·환급 실패(REFUND_FAILED) 0·refund_failed_at 한 번이다(동시)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seat(eventId);
+    pays.length = 0;
+    notices.length = 0;
+    failureNotices.length = 0;
+    payOutcome = 'UNKNOWN';
+    try {
+      await wave(NOW).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    } finally {
+      payOutcome = 'CANCELLED';
+    }
+    const cancellationId = eventRefundCancellationId(requestId, s.ticketId);
+    // 두 실행기가 모두 목록을 읽은 뒤에 결제사로 가게 한다
+    let listed = 0;
+    let release!: () => void;
+    const bothListed = new Promise<void>((r) => (release = r));
+    const arrive = async () => {
+      listed++;
+      if (listed === 2) release();
+      await Promise.race([bothListed, new Promise((r) => setTimeout(r, 2_000))]);
+    };
+    const runnerWrites = Object.create(writes) as typeof writes;
+    runnerWrites.dueRefunds = async (nowMs, limit) => {
+      const rows = await writes.dueRefunds(nowMs, limit);
+      await arrive();
+      return rows;
+    };
+    const items = new DrizzleEventRefundStore(purchaseDb, clock);
+    const store = new DrizzleEventRefundStore(purchaseDb, clock);
+    const listItems = store.items.bind(store);
+    store.items = async (id) => {
+      const out = await listItems(id);
+      if (id === requestId) await arrive();
+      return out;
+    };
+    const svc = new EventRefundService({
+      store,
+      targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+      canceller: new EventTicketCanceller({
+        tickets: ticketCancels!,
+        conversions: new DrizzlePendingCancellationConversions(purchaseDb),
+        orders: new DrizzleCancellationOrders(purchaseDb, configs),
+        writes,
+        payments,
+        calendar: new WeekendBusinessCalendar(),
+      }),
+      items,
+      openOrders: new DrizzleEventOpenOrders(purchaseDb),
+      notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
+      claims: new DrizzleEventRefundClaims(purchaseDb),
+      nowMs: () => NOW + DAY,
+      deadlineMs: () => NOW + DAY + 30_000,
+    });
+    payOutcome = 'REJECTED';
+    try {
+      await Promise.all([runner(NOW + DAY, runnerWrites).run(), svc.runDue()]);
+    } finally {
+      payOutcome = 'CANCELLED';
+    }
+    expect(listed).toBeGreaterThanOrEqual(2);
+    expect(callsFor(cancellationId)).toBe(2);
+    expect(notices.filter((n) => n.startsWith(s.ticketId))).toHaveLength(1);
+    expect(failureNotices.filter((id) => id === cancellationId)).toEqual([]);
+    expect((await rowOf(cancellationId))?.refund_failed_at).not.toBeNull();
+  });
+
+  test('GAT-110 K1 항목이 실패로 끝나면 행에 refund_failed_at·refund_last_error가 같은 커밋으로 써지고(저장을 실패시키면 둘 다 없다) 요청이 끝난 뒤 그 회차에 주인 없는 REFUND_PENDING 행이 없다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seat(eventId);
+    const cancellationId = eventRefundCancellationId(requestId, s.ticketId);
+    pays.length = 0;
+    await purchaseDb.pool.query(
+      `create or replace function k1_item_fail() returns trigger language plpgsql as $$ begin raise exception 'injected k1'; end $$;
+       create trigger k1_item_fail before update on event_refund_item for each row when (new.request_id = '${requestId}' and new.status = 'FAILED') execute function k1_item_fail();`,
+    );
+    payOutcome = 'REJECTED';
+    try {
+      await wave(NOW).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' }).catch(() => undefined);
+      // 항목 끝내기가 실패했으니 행 표시도 없다(같은 트랜잭션)
+      expect((await rowOf(cancellationId))?.refund_failed_at ?? null).toBeNull();
+    } finally {
+      await purchaseDb.pool.query('drop trigger if exists k1_item_fail on event_refund_item; drop function if exists k1_item_fail();');
+    }
+    try {
+      await wave(NOW + DAY).runDue();
+    } finally {
+      payOutcome = 'CANCELLED';
+    }
+    expect(await itemOf(requestId, s.ticketId)).toMatchObject({ status: 'FAILED' });
+    const row = await rowOf(cancellationId);
+    expect(row?.refund_failed_at).not.toBeNull();
+    expect(row?.refund_last_error).toBe('REJECTED');
+    await wave(NOW + 2 * DAY).runDue();
+    const orphan = await purchaseDb.pool.query(
+      `select count(*)::int as n from order_cancellation c join purchase_order o on o.id = c.order_id
+        where o.event_id = $1 and c.status = 'REFUND_PENDING' and c.refund_failed_at is null`,
+      [eventId],
+    );
+    expect(orphan.rows[0].n).toBe(0);
+  });
+
+  test('GAT-110 K2 API 파드의 Start가 항목을 잡은 뒤 리더의 runDue가 겹쳐도(두 쪽 모두 잡기를 시도) 표마다 결제사 호출이 하나이고 거짓 실패·CS 건이 없다(동시)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const held = await seat(eventId);
+    const heldId = await heldFanCancel(eventId, held, 'REQUESTED');
+    const a = await seat(eventId);
+    const b = await seat(eventId);
+    pays.length = 0;
+    notices.length = 0;
+    const claims = new DrizzleEventRefundClaims(purchaseDb);
+    let claimTries = 0;
+    const counting = Object.create(claims) as typeof claims;
+    counting.claimOrders = async (...args) => (claimTries++, claims.claimOrders(...args));
+    const inner = new EventTicketCanceller({
+      tickets: ticketCancels!,
+      conversions: new DrizzlePendingCancellationConversions(purchaseDb),
+      orders: new DrizzleCancellationOrders(purchaseDb, configs),
+      writes,
+      payments,
+      calendar: new WeekendBusinessCalendar(),
+    });
+    let overlapped = false;
+    const leader = () =>
+      new EventRefundService({
+        store: new DrizzleEventRefundStore(purchaseDb, clock),
+        targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+        canceller: inner,
+        items: new DrizzleEventRefundStore(purchaseDb, clock),
+        openOrders: new DrizzleEventOpenOrders(purchaseDb),
+        notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
+        claims: counting,
+        nowMs: () => NOW,
+        deadlineMs: () => NOW + 30_000,
+      });
+    const api = new EventRefundService({
+      store: new DrizzleEventRefundStore(purchaseDb, clock),
+      targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+      canceller: {
+        cancel: async (t, q) => {
+          if (!overlapped) {
+            overlapped = true;
+            await leader().runDue();
+          }
+          return inner.cancel(t, q);
+        },
+      },
+      items: new DrizzleEventRefundStore(purchaseDb, clock),
+      openOrders: new DrizzleEventOpenOrders(purchaseDb),
+      notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
+      claims: counting,
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 30_000,
+    });
+    await api.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect(overlapped).toBe(true);
+    expect(claimTries).toBeGreaterThanOrEqual(2);
+    const ids = [heldId, eventRefundCancellationId(requestId, a.ticketId), eventRefundCancellationId(requestId, b.ticketId)];
+    for (const id of ids) expect(callsFor(id), id).toBe(1);
+    expect(notices).toEqual([]);
+    for (const t of [held, a, b]) expect(await itemOf(requestId, t.ticketId), t.ticketId).toMatchObject({ status: 'REFUNDED' });
+  });
+
+  test('GAT-110 K2 차례로 돌면(Start 끝난 뒤 runDue, resume 뒤 runDue) 뒤에 온 쪽은 끝난 항목을 건드리지 않는다(결제사 호출 수 그대로)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seat(eventId);
+    pays.length = 0;
+    await wave(NOW).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    const id = eventRefundCancellationId(requestId, s.ticketId);
+    expect(callsFor(id)).toBe(1);
+    await wave(NOW + DAY).runDue();
+    await wave(NOW + DAY).runDue();
+    expect(callsFor(id)).toBe(1);
+    expect(await itemOf(requestId, s.ticketId)).toMatchObject({ status: 'REFUNDED' });
+  });
+
+  test('GAT-110 K2 같은 요청으로 이미 전환된 행의 전환은 CONVERTED이고 행은 한 번만 바뀌며, 다른 요청 ID로 전환된 행은 NOT_REQUESTED다', async () => {
+    const eventId = randomUUID();
+    const s = await seat(eventId);
+    const heldId = await heldFanCancel(eventId, s, 'REQUESTED');
+    const conv = new DrizzlePendingCancellationConversions(purchaseDb);
+    const requestId = randomUUID();
+    const q = { cancellationId: heldId, eventCancellationRequestId: requestId, refundAmount: 33_333, nowMs: NOW };
+    await expect(conv.convert(q)).resolves.toBe('CONVERTED');
+    const after = (await purchaseDb.pool.query('select status_changed_at, refund_amount, reason from order_cancellation where id = $1', [heldId])).rows[0];
+    await expect(conv.convert({ ...q, nowMs: NOW + 60_000 })).resolves.toBe('CONVERTED');
+    expect((await purchaseDb.pool.query('select status_changed_at, refund_amount, reason from order_cancellation where id = $1', [heldId])).rows[0]).toEqual(after);
+    await expect(conv.convert({ ...q, eventCancellationRequestId: randomUUID() })).resolves.toBe('NOT_REQUESTED');
+  });
+
+  test('GAT-110 K2 잡기는 주문 단위이고 기한 60,000ms 안(59,999ms)에는 다른 쪽이 못 잡으며 기한 정각(60,000ms)에는 다시 잡힌다(경계)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const a = await seat(eventId);
+    const b = await seat(eventId);
+    pays.length = 0;
+    // 항목만 만들고 처리하지 않는다(첫 묶음 0)
+    const svc = new EventRefundService({
+      store: new DrizzleEventRefundStore(purchaseDb, clock),
+      targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+      canceller: { cancel: async () => ({ status: 'REFUNDED' }) },
+      items: new DrizzleEventRefundStore(purchaseDb, clock),
+      openOrders: new DrizzleEventOpenOrders(purchaseDb),
+      firstBatch: 0,
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 30_000,
+    });
+    await svc.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    const claims = new DrizzleEventRefundClaims(purchaseDb);
+    const first = await claims.claimOrders(requestId, NOW, 1);
+    expect(first.items.map((i) => i.orderId)).toHaveLength(1);
+    const other = first.items[0]!.orderId === a.orderId ? b : a;
+    const second = await claims.claimOrders(requestId, NOW + 59_999, 10);
+    expect(second.items.map((i) => i.orderId)).toEqual([other.orderId]);
+    const third = await claims.claimOrders(requestId, NOW + 60_000, 10);
+    expect(third.items.map((i) => i.orderId)).toEqual([first.items[0]!.orderId]);
+    // 잡기를 잃은 첫 쪽의 끝내기는 0행이다
+    await expect(claims.finish({ requestId, ticketId: first.items[0]!.ticketId, claimToken: first.claimToken, status: 'REFUNDED', attempts: 1 })).resolves.toBe(false);
+    await expect(claims.finish({ requestId, ticketId: third.items[0]!.ticketId, claimToken: third.claimToken, status: 'REFUNDED', attempts: 1 })).resolves.toBe(true);
+    await expect(claims.finish({ requestId, ticketId: third.items[0]!.ticketId, claimToken: third.claimToken, status: 'FAILED', attempts: 2 })).resolves.toBe(false);
   });
 });

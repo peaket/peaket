@@ -31,7 +31,12 @@ export interface EventRefundStore {
   updateActive(request: EventCancellationRequest): Promise<boolean>;
   items(requestId: string): Promise<readonly EventRefundItem[]>;
   /** 항목 상태를 바꾸고, 같은 트랜잭션에 팬 알림 Outbox를 남길 수 있다 */
-  updateItem(item: EventRefundItem, outbox?: readonly EventRefundOutboxMessage[]): Promise<void>;
+  updateItem(
+    item: EventRefundItem,
+    outbox?: readonly EventRefundOutboxMessage[],
+    /** 웨이브 끝 리뷰 K1(빈 뼈대, 아직 쓰지 않는다): 항목이 FAILED로 끝나면 같은 트랜잭션에서 그 취소 행에 refund_failed_at·refund_last_error를 쓴다 */
+    extra?: { readonly cancellationFailure?: { readonly lastError: string } },
+  ): Promise<void>;
   /** 연기 신청을 조건부로 넣는다. 이미 신청했거나 창이 닫혀 NOT_APPLIED면 false다(신청·창 닫기 경합을 행 잠금으로 가른다) */
   markApplied(requestId: string, ticketId: string, appliedAtMs: number): Promise<boolean>;
   /** 신청하지 않은 항목만 NOT_APPLIED로 끝낸다. 그 사이 신청이 들어왔으면 false다 */
@@ -150,6 +155,44 @@ export interface EventRefundServiceDeps {
   readonly configs?: CancellationConfigs;
   /** 보충 2: 설정에 입장 시작이 없어 차액을 찾지 않을 때의 경고 등. 없으면 남기지 않는다 */
   readonly log?: { warn(o: object, msg: string): void };
+  /** 웨이브 끝 리뷰 K2(빈 뼈대, 아직 쓰지 않는다): 항목 처리 전 주문 단위 잡기와 조건부 끝내기. 운영 조립(start·relay)에는 꼭 넣는다 */
+  readonly claims?: EventRefundClaims;
+  /** 웨이브 끝 리뷰 C2·S1(빈 뼈대, 아직 쓰지 않는다): 확정 때 표시한 차액 건을 runDue 맨 앞에서 행마다 따로 연다 */
+  readonly csOutbox?: Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened'>;
+  /** 웨이브 끝 리뷰 C2(빈 뼈대): 지표 purchase_cs_case_open_failures_total{kind} */
+  readonly csCaseOpenFailures?: { inc(kind: 'DEDUCTION_GAP' | 'FLAGGED'): void };
+}
+
+// ---- 웨이브 끝 리뷰 K2·C2·S1(빈 뼈대): 일괄 환불 항목의 주인과 겹침 막기, CS 건 다시 열기 ----
+
+/** 주문 단위 잡기의 기한 60초 [가정](transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기') */
+export const EVENT_REFUND_CLAIM_MS = 60_000;
+
+export interface EventRefundClaims {
+  /** 그 요청의 처리할 항목을 주문 단위로 잡는다(그 주문의 다른 잡기가 살아 있으면 잡지 않는다, 기한 지난 잡기는 다시 잡는다) */
+  claimOrders(requestId: string, nowMs: number, limitOrders: number): Promise<{ readonly claimToken: string; readonly items: readonly EventRefundItem[] }>;
+  /** 잡기 값이 맞고 끝나지 않은 항목만 끝낸다(조건부). 잡기를 잃었으면 false이고 아무것도 쓰지 않는다 */
+  finish(q: {
+    readonly requestId: string;
+    readonly ticketId: string;
+    readonly claimToken: string;
+    readonly status: 'REFUNDED' | 'FAILED' | 'UNKNOWN' | 'PENDING';
+    readonly attempts: number;
+    readonly lastError?: string;
+    readonly nextAttemptAtMs?: number;
+    readonly outbox?: readonly EventRefundOutboxMessage[];
+    readonly cancellationFailure?: { readonly lastError: string };
+    readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
+  }): Promise<boolean>;
+  release(requestId: string, claimToken: string): Promise<void>;
+}
+
+/** 열지 않은 CS 건(차액·이상 표시)을 행마다 다시 연다. 한 틱에 100건 [가정] */
+export interface CsCaseOutbox {
+  pendingGaps(limit: number): Promise<readonly { cancellationId: string; orderId: string; deductionAmount: number; requestId: string }[]>;
+  markGapOpened(cancellationId: string, nowMs: number): Promise<void>;
+  pendingFlags(limit: number): Promise<readonly { cancellationId: string; orderId: string; ticketId: string; enteredAtMs: number }[]>;
+  markFlagOpened(cancellationId: string, nowMs: number): Promise<void>;
 }
 
 // ---- BAT-420 몫 D(OPEN[45] 결정): 미룸·차액 건 ----

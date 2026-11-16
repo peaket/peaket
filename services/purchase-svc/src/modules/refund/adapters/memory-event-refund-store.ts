@@ -51,7 +51,8 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     return added;
   }
 
-  async updateItem(item: EventRefundItem, outbox: readonly EventRefundOutboxMessage[] = []): Promise<void> {
+  // 웨이브 끝 리뷰 K1(빈 뼈대): _extra.cancellationFailure는 아직 쓰지 않는다
+  async updateItem(item: EventRefundItem, outbox: readonly EventRefundOutboxMessage[] = [], _extra?: { readonly cancellationFailure?: { readonly lastError: string } }): Promise<void> {
     const items = this.byRequest.get(item.requestId);
     if (!items?.has(item.ticketId)) throw new Error(`회차 취소 항목이 없다: ${item.requestId}/${item.ticketId}`);
     items.set(item.ticketId, item);

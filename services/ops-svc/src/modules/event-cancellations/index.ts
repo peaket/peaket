@@ -28,6 +28,7 @@ export {
 export type {
   EventCancellationCases,
   EventRefundHolds,
+  PartnerEventCancellationStore,
   EventCancellationIdempotency,
   EventCancellationInsert,
   EventCancellationStore,

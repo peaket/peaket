@@ -804,3 +804,39 @@ describe('0024 회차 취소 요청 중 환급 미룸 표 [BAT-420 몫 D]', () =
     expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(journal.entries.length);
   });
 });
+
+// ---- BAT-420 웨이브 끝 리뷰 K2·C2·S1(시험 담당, 구현 전에 씀): 0025 CS 건 다시 열기 칸·잡기 칸 ----
+describe('0025 CS 건 다시 열기·일괄 환불 잡기 칸 [BAT-420 웨이브 끝 리뷰]', () => {
+  const colsOf = async (table: string, names: string[]) =>
+    (
+      await q<{ column_name: string; data_type: string; is_nullable: string }>(
+        "select column_name, data_type, is_nullable from information_schema.columns where table_schema = 'public' and table_name = $1 and column_name = any($2::text[]) order by column_name",
+        [table, names],
+      )
+    ).rows;
+
+  test('GAT-110 K2·C2·S1 0025는 order_cancellation 칸 넷·event_refund_item 칸 둘(모두 빈 값 허용)과 짝 검사·부분 색인 둘을 만들고 다시 돌려도 같다', async () => {
+    expect(journal.entries.map((e) => e.tag).some((t) => /^0025_/.test(t))).toBe(true);
+    expect(await colsOf('order_cancellation', ['entry_flag_opened_at', 'deduction_gap_at', 'deduction_gap_request_id', 'deduction_gap_opened_at'])).toEqual([
+      { column_name: 'deduction_gap_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      { column_name: 'deduction_gap_opened_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      { column_name: 'deduction_gap_request_id', data_type: 'uuid', is_nullable: 'YES' },
+      { column_name: 'entry_flag_opened_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+    ]);
+    expect(await colsOf('event_refund_item', ['claim_token', 'claimed_until'])).toEqual([
+      { column_name: 'claim_token', data_type: 'uuid', is_nullable: 'YES' },
+      { column_name: 'claimed_until', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+    ]);
+    const idx = (await q<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'order_cancellation'")).rows.map((r) => r.indexdef.toLowerCase());
+    expect(idx.some((d) => d.includes('entry_recorded_at is not null') && d.includes('entry_flag_opened_at is null'))).toBe(true);
+    expect(idx.some((d) => d.includes('deduction_gap_at is not null') && d.includes('deduction_gap_opened_at is null'))).toBe(true);
+    await migratePurchase(url);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(journal.entries.length);
+  });
+
+  test('GAT-110 K2·C2 짝 검사: 차액 표시 시각과 요청 ID는 함께 있거나 함께 없고, 잡기 값과 기한도 그렇다(23514)', async () => {
+    const defs = (await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conrelid in ('public.order_cancellation'::regclass, 'public.event_refund_item'::regclass) and contype = 'c'")).rows.map((r) => r.def.toLowerCase());
+    expect(defs.some((d) => d.includes('deduction_gap_at is null') && d.includes('deduction_gap_request_id is null'))).toBe(true);
+    expect(defs.some((d) => d.includes('claim_token is null') && d.includes('claimed_until is null'))).toBe(true);
+  });
+});

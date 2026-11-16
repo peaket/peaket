@@ -87,6 +87,8 @@ const FRAUD_TAG = '0022_fraud_cancellation';
 const ENTRY_RECORDED_TAG = '0023_entry_recorded_at';
 /** 회차 취소 요청 중 보류 취소의 환급 미룸 표 event_refund_hold(BUILD_ORDER GAT-090·GAT-110, BAT-420 몫 D, OPEN[45], docs/data.md event_refund_hold) */
 const EVENT_REFUND_HOLD_TAG = '0024_event_refund_hold';
+/** 웨이브 끝 리뷰 K2·C2·S1: order_cancellation 칸 넷·event_refund_item 잡기 칸 둘(BAT-420 보충 4, 감독 배정 0025, docs/data.md order_cancellation·event_refund_item) */
+const WAVE_REVIEW_TAG = /^0025_[a-z0-9_]+$/;
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -451,6 +453,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [22, FRAUD_TAG],
       [23, ENTRY_RECORDED_TAG],
       [24, EVENT_REFUND_HOLD_TAG],
+      // 웨이브 끝 리뷰 K2·C2·S1(감독 배정 0025): 이름은 구현이 정한다
+      [25, expect.stringMatching(WAVE_REVIEW_TAG)],
     ]);
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
@@ -488,6 +492,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       `${FRAUD_TAG}.sql`,
       `${ENTRY_RECORDED_TAG}.sql`,
       `${EVENT_REFUND_HOLD_TAG}.sql`,
+      expect.stringMatching(/^0025_[a-z0-9_]+\.sql$/),
     ]);
   });
 
@@ -608,8 +613,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
 
-  test('마지막 스냅샷(0024_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘, 환급 미룸 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0024_snapshot.json');
+  test('마지막 스냅샷(0025_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘, 환급 미룸 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe('0025_snapshot.json');
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     const all = [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes, holdShape()];
     expect(Object.keys(snap.tables).sort()).toEqual(all.map((s) => `public.${s.name}`).sort());
@@ -634,6 +639,40 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     const added = Object.keys(after.tables['public.order_cancellation']!.columns).filter((c) => !Object.keys(before.tables['public.order_cancellation']!.columns).includes(c));
     expect(added).toEqual(['entry_recorded_at']);
     expect(after.tables['public.order_cancellation']!.columns.entry_recorded_at).toMatchObject({ type: 'timestamp with time zone', notNull: false, primaryKey: false });
+  });
+
+  test('GAT-110 K2·C2·S1 schema.ts의 order_cancellation은 CS 건 다시 열기 칸 넷(빈 값 허용)과 차액 표시 짝 검사·다시 열기 부분 색인 둘을, event_refund_item은 잡기 칸 둘과 짝 검사를 가진다', () => {
+    const oc = shapeOf(orderCancellation);
+    const col = (s: Shape, n: string) => s.columns.find((c) => c.name === n);
+    for (const [n, t] of [
+      ['entry_flag_opened_at', TZ],
+      ['deduction_gap_at', TZ],
+      ['deduction_gap_request_id', 'uuid'],
+      ['deduction_gap_opened_at', TZ],
+    ] as const) {
+      expect(col(oc, n), n).toMatchObject({ type: t, notNull: false, hasDefault: false });
+    }
+    expect(oc.checks.some((k) => k.expr.includes('deduction_gap_at is null') && k.expr.includes('deduction_gap_request_id is null'))).toBe(true);
+    expect(oc.indexes.some((i) => !i.unique && (i.where ?? '').includes('entry_recorded_at is not null') && (i.where ?? '').includes('entry_flag_opened_at is null'))).toBe(true);
+    expect(oc.indexes.some((i) => !i.unique && (i.where ?? '').includes('deduction_gap_at is not null') && (i.where ?? '').includes('deduction_gap_opened_at is null'))).toBe(true);
+    const item = shapeOf(eventRefundItem);
+    expect(col(item, 'claim_token')).toMatchObject({ type: 'uuid', notNull: false, hasDefault: false });
+    expect(col(item, 'claimed_until')).toMatchObject({ type: TZ, notNull: false, hasDefault: false });
+    expect(item.checks.some((k) => k.expr.includes('claim_token is null') && k.expr.includes('claimed_until is null'))).toBe(true);
+  });
+
+  test('GAT-110 K2·C2·S1 0025 SQL은 칸을 더하고 검사·색인만 만들며(표 만들기·지우기 없음), 0025 스냅샷은 0024 뒤에서 표 목록이 같다', () => {
+    const tag = journal.entries.find((e) => e.idx === 25)?.tag;
+    expect(tag).toMatch(WAVE_REVIEW_TAG);
+    const raw = readFileSync(join(MIGRATIONS, `${tag}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(raw).not.toMatch(/\b(DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM|RENAME)\b/);
+    const text = canon(raw.replace(/^-- .*$/gm, ''));
+    expect(text).not.toContain('create table');
+    for (const c of ['entry_flag_opened_at', 'deduction_gap_at', 'deduction_gap_request_id', 'deduction_gap_opened_at', 'claim_token', 'claimed_until']) expect(text, c).toContain(`add column ${c}`);
+    const before = snapshotOf('0024_snapshot.json');
+    const after = snapshotOf('0025_snapshot.json');
+    expect(after.prevId).toBe(before.id);
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
   });
 
   test('GAT-110 D6 schema.ts의 eventRefundHold는 data.md event_refund_hold의 칸(회차 하나에 한 줄)과 기한 검사 expires_at > held_at이다', () => {

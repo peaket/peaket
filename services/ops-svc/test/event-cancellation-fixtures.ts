@@ -14,6 +14,7 @@ import {
   type EventCancellationRecord,
   type EventOwnerLookup,
   type EventRefundHolds,
+  type PartnerEventCancellationStore,
   type EventRefundJobProgress,
   type EventRefundReader,
   type EventRefundStartInput,
@@ -122,6 +123,8 @@ export interface FixtureOptions {
   readonly without?: readonly Dep[];
   /** 판매 중지 확인을 이 대역으로 바꾼다(메모리 명령 기록을 읽는 어댑터 시험) */
   readonly suspension?: SaleSuspensionLookup;
+  /** 웨이브 끝 리뷰 S2: 파트너 경로 전용 저장소 대역(주면 꽂는다) */
+  readonly partnerStore?: PartnerEventCancellationStore;
 }
 
 export type OwnerAnswer = { promoterId: string; startsAtMs: number; endsAtMs?: number } | 'throw';
@@ -142,6 +145,9 @@ export function fixture(o: FixtureOptions = {}) {
   const holdCalls: Array<{ eventId: string; requestId: string; held: boolean; expiresAtMs?: number }> = [];
   /** 회차 취소 모듈이 남긴 경고 로그(BAT-420 몫 D 보충 2: event-refund-hold-conflict 등) */
   const warns: Array<{ obj: object; msg: string }> = [];
+  /** 웨이브 끝 리뷰 K4: 오류 로그(event-cancellation-revert-failed)와 지표 ops_event_cancellation_revert_failures_total */
+  const errors: Array<{ obj: object; msg: string }> = [];
+  const revertFailures = { n: 0 };
   const behaviour = {
     holdFails: false,
     releaseFails: false,
@@ -157,6 +163,7 @@ export function fixture(o: FixtureOptions = {}) {
     stopFails: false,
     startFails: false,
     jobFails: false,
+    jobMissing: false,
     casesFail: false,
     dryRun: DRY_RUN,
     job: JOB,
@@ -190,6 +197,8 @@ export function fixture(o: FixtureOptions = {}) {
       log.push(`job:${q.requestId}`);
       jobCalls.push(q.requestId);
       if (behaviour.jobFails) throw new Error('job down');
+      // 웨이브 끝 리뷰 K4: purchase에 그 일괄 환불이 없다(gRPC NOT_FOUND → undefined)
+      if (behaviour.jobMissing) return undefined as unknown as EventRefundJobProgress;
       return behaviour.job;
     },
   };
@@ -241,9 +250,11 @@ export function fixture(o: FixtureOptions = {}) {
     ...(without.has('owners') ? {} : { owners }),
     ...(without.has('cases') ? {} : { cases }),
     ...(without.has('holds') ? {} : { holds }),
-    log: { warn: (obj: object, msg: string) => void warns.push({ obj, msg }) },
+    log: { warn: (obj: object, msg: string) => void warns.push({ obj, msg }), error: (obj: object, msg: string) => void errors.push({ obj, msg }) },
+    revertFailures: { inc: () => void revertFailures.n++ },
+    ...(o.partnerStore ? { partnerStore: o.partnerStore } : {}),
   });
-  return { app, store, audit, log, warns, previewCalls, stopCalls, startCalls, jobCalls, caseCalls, suspensionCalls, ownerCalls, holdCalls, behaviour, clock };
+  return { app, store, audit, log, warns, errors, revertFailures, previewCalls, stopCalls, startCalls, jobCalls, caseCalls, suspensionCalls, ownerCalls, holdCalls, behaviour, clock };
 }
 
 export type Fixture = ReturnType<typeof fixture>;

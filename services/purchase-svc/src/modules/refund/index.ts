@@ -155,5 +155,8 @@ export type { DeductionGapCancellations, DeductionGapNotice, EventRefundHolds } 
 export { DrizzleEventRefundHolds } from './adapters/db/drizzle-event-refund-holds.js';
 export { DrizzleDeductionGapCancellations } from './adapters/db/drizzle-deduction-gap-cancellations.js';
 export { DrizzleEventCancellationLookup } from './adapters/db/drizzle-event-cancellation-lookup.js';
+export { DrizzleEventRefundClaims } from './adapters/db/drizzle-event-refund-claims.js';
+export { EVENT_REFUND_CLAIM_MS, type CsCaseOutbox, type EventRefundClaims } from './domain/event-refund-ports.js';
+export { DrizzleCsCaseOutbox } from './adapters/db/drizzle-cs-case-outbox.js';
 export { HttpDeductionGapNotice } from './adapters/http-deduction-gap-notice.js';
 export type { EventRefundGrpcOptions } from './inbound/event-refund.grpc.js';

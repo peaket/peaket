@@ -141,7 +141,7 @@ const keyOf = (prefix: string, id: string) => {
 };
 
 describe('이상 표시 CS 건 어댑터 [BAT-420 GAT-090 A]', () => {
-  test('GAT-090 A4 이상 표시는 ops CS 처리함에 FLAGGED·ENTRY_AFTER_CANCEL 본문과 내부 토큰으로 5,000ms 안에 보내고 실패는 삼킨다', async () => {
+  test('GAT-090 A4 이상 표시는 ops CS 처리함에 FLAGGED·ENTRY_AFTER_CANCEL 본문과 내부 토큰으로 5,000ms 안에 보내고, 실패는 삼키지 않고 던진다(웨이브 끝 리뷰 S1: 다음 틱에 다시 연다)', async () => {
     const sent: ExternalRequest[] = [];
     const ok = new HttpEntryFlagNotice({ request: async (r: ExternalRequest) => (sent.push(r), new Response('{"accepted":true}', { status: 202 })) }, 'it-token');
     const cancellationId = randomUUID();
@@ -153,7 +153,7 @@ describe('이상 표시 CS 건 어댑터 [BAT-420 GAT-090 A]', () => {
     expect(JSON.parse(String(sent[0]!.body))).toEqual({ eventKey: keyOf('entry-after-cancel', cancellationId), kind: 'FLAGGED', sourceId: cancellationId, category: 'ENTRY_AFTER_CANCEL', createdAt: new Date(nowMs).toISOString() });
 
     const down = new HttpEntryFlagNotice({ request: async () => Promise.reject(new Error('ops down')) }, 'it-token');
-    await expect(down.open({ cancellationId, orderId: randomUUID(), ticketId: randomUUID(), enteredAtMs: nowMs, nowMs })).resolves.toBeUndefined();
+    await expect(down.open({ cancellationId, orderId: randomUUID(), ticketId: randomUUID(), enteredAtMs: nowMs, nowMs })).rejects.toThrow();
   });
 });
 

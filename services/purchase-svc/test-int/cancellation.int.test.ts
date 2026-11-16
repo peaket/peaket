@@ -1109,3 +1109,38 @@ describe('BAT-420 리뷰 D1 결제사 환급 뒤 0행 쓰기 [실제 ticket-svc�
     expect(lines.filter((l) => JSON.stringify(l).includes('cancellation-refund-state-unexpected'))).toEqual([]);
   });
 });
+
+// ---- BAT-420 웨이브 끝 리뷰 K1(시험 담당, 구현 전에 씀, 계획 §11 보충 4, transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기') ----
+describe('BAT-420 웨이브 끝 리뷰 K1 회차 취소 행의 주인 [실제 ticket-svc·payment-svc]', () => {
+  test('GAT-110 K1 회차 취소 요청 ID가 붙은 REFUND_PENDING 행(전용 취소기·전환·연기 신청)은 마감 뒤 환급 실행기가 집지 않고, 요청 ID 없는 부정 예매·팬 행만 행마다 한 번 보낸다(차례로)', async () => {
+    gatewayOutcome = 'UNKNOWN';
+    const made: { cancellationId: string; orderId: string; reason: 'USER' | 'FRAUD' | 'EVENT_CANCELLED' | 'EVENT_POSTPONED'; requestId?: string }[] = [];
+    try {
+      for (const [reason, tagged] of [
+        ['EVENT_CANCELLED', true],
+        ['EVENT_CANCELLED', true],
+        ['EVENT_POSTPONED', true],
+        ['FRAUD', false],
+        ['USER', false],
+      ] as const) {
+        const w = await world();
+        const cancellationId = randomUUID();
+        await expect(cancelOf(w, cancellationId, reason === 'EVENT_CANCELLED' ? 'USER' : reason)).resolves.toMatchObject({ status: 'REFUND_PENDING' });
+        const requestId = tagged ? randomUUID() : undefined;
+        await admin.pool.query('update order_cancellation set reason = $2, event_cancellation_request_id = $3, next_refund_at = null where id = $1', [cancellationId, reason, requestId ?? null]);
+        made.push({ cancellationId, orderId: w.orderId, reason, ...(requestId ? { requestId } : {}) });
+      }
+    } finally {
+      gatewayOutcome = 'CANCELLED';
+    }
+    gatewayCalls = [];
+    await new RefundAfterEntry({ writes, payments: paymentCancels!, entries: ticketCancels!, claims: writes, nowMs: () => NOW + DAY }).run();
+    const keys = gatewayCalls.map((c) => c.idemKey);
+    for (const m of made) {
+      const n = keys.filter((k) => k === `cancel-${m.cancellationId}`).length;
+      expect(n, `${m.reason} ${m.requestId ? '요청 ID 있음' : '요청 ID 없음'}`).toBe(m.requestId ? 0 : 1);
+    }
+    // 뒤 시험이 다시 집지 않게 끝낸다
+    await admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = any($1::uuid[]) and status = 'REFUND_PENDING'", [made.map((m) => m.cancellationId)]);
+  });
+});

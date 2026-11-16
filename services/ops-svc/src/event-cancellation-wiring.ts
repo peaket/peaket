@@ -26,6 +26,14 @@ export interface EventCancellationDeps {
 
 const has = (v: string | undefined): v is string => typeof v === 'string' && v.trim() !== '';
 
+/**
+ * 웨이브 끝 리뷰 S2(빈 뼈대, 아직 쓰지 않는다): 파트너 경로 DB 풀 주소. PEAKET_PARTNER_DATABASE_URL이 있으면 그것,
+ * 없으면 local·ci만 관제 주소(mainUrl)를 쓰고 그 밖(운영·스테이징·PEAKET_ENV 없음)은 시작 실패(던짐). main.ts가 부른다
+ */
+export function partnerDatabaseUrlFromEnv(_env: Readonly<Record<string, string | undefined>>, _mainUrl: string): string {
+  throw new Error('아직 없음');
+}
+
 export function eventCancellationDepsFromEnv(i: EventCancellationDepsInput): EventCancellationDeps {
   const coreUrl = i.env.PEAKET_CORE_HTTP_URL;
   const httpSale = has(i.env.PEAKET_PURCHASE_HTTP_URL) && has(i.env.PEAKET_QUEUE_HTTP_URL);
