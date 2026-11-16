@@ -275,6 +275,33 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 - '자주 놓친 결함' 대조: 경계 양쪽(끝 = 시작 통과, 끝 < 시작 실패), 목록 밖 값마다 거부(Role 여덟·Fix-By 넷·Batch 꼴), 차례를 바꾼 경우(RC-14), 빈 결과가 통과로 새지 않음(빈 범위 2, 빈 담당 표), 부르는 쪽 경계(시험이 명령을 자식 프로세스로 돌림), 시작 파일 조립(`runIfMain`을 명령으로 거침)은 시험에 있다. 걸리는 것은 '허용·거부 목록은 목록 밖의 값마다 본다'의 목록 자체가 저장소의 실제 시험·코드 경로를 다 덮지 못한 RV-01·RV-02다.
 - 관찰(지적 아님): 결정 2의 겹쳐 돌리기로 묶음 N+1의 계획·시험 커밋이 같은 가지에 먼저 들어오면, N+1이 끝날 때까지 가지 전체가 `[구성]`으로 실패한다. 앞으로 감기로 가지 끝까지 합치므로 맞는 동작이지만, 감독은 N만 합치려면 N+1 커밋을 N 뒤에 두고 `--head`를 N의 마지막 커밋으로 줘야 한다.
 
+### 둘째 보기(고친 곳만, 2026-11-16)
+
+- 본 것: 첫 리뷰(`3e3050eb`) 뒤 커밋 넷만 봤다(`git log 3e3050eb..HEAD`, `git diff 3e3050eb..HEAD`). 계획 `970142d1`(위 '계획' 절 8, §8.6 세부, ADR-0270 상태 줄 보탬), 시험 쪽 리뷰 반영 `325fe4d2`(`Fix-By: test`, `Finding: RV-01~03`), 구현 쪽 리뷰 반영 `28d7780a`(`Fix-By: impl`, 같은 Finding 셋), 시험 `9426377b`(RC-38 사건 고침)다. 같은 리뷰 세션, 같은 모델의 새 맥락이다(다른 모델을 쓸 수 없었다).
+- 구현 쪽 리뷰 반영 `28d7780a`의 `git show --stat`은 계획 파일, `tools/ci/README.md`, `tools/ci/roles-check.mjs` 셋뿐이다. 시험 파일은 건드리지 않았다. 구현 뒤 시험 커밋 `9426377b`는 '시험 이의'에 적힌 사건 문제(Windows `core.ignorecase`로 대문자 `Docs/` 경로가 이미 있는 소문자 docs 폴더 아래로 커밋됨)만 고쳤다. 단언을 구현에 맞춰 느슨하게 하지 않았고, 커밋된 경로를 먼저 확인하는 단언을 더했다.
+- 돌린 것:
+  - `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`: 끝 코드 1. 묶음 줄 `코드 커밋 10개(plan 3·test 3·impl 1·review 1·review-fix 2·…)`. 실패는 아직 없는 verify 커밋(`[구성]`)과 빈 '검증' 절(`[계획 파일]`) 둘뿐이다. 이 '둘째 보기' 커밋은 리뷰 하나를 더할 뿐이라 결과가 같다.
+  - `node --test --test-reporter=tap tools/ci/roles-check.test.mjs`: 47개 가운데 47개 통과, 실패 0(약 8분).
+  - 첫 리뷰의 재현 사건(scratchpad `review-rc/mk.sh`, 리뷰 반영 사건에 `Finding: RV-1`을 달도록 고침)을 새 구현으로 다시 돌렸다. 결과는 아래 표와 같다.
+
+| 지적 | 재현 변형 | 첫 보기 | 둘째 보기 | 판정 |
+| --- | --- | --- | --- | --- |
+| RV-01 | `py`(impl이 `tools/doc-check/test_public.py`도 고침), `sim`(impl이 `services/q/test-sim/cluster.ts`도 고침) | 0 | 1, `[시험 파일] BAT-901 <impl 해시>`, 까닭에 경로 | 닫힘 |
+| RV-02 | `rootcfg`(review가 `package.json`·`eslint.config.mjs`·`loadtest/a.mjs`·`specs/a.yml`도 고침), 새 변형 `deploy`(review가 `deploy/charts/x/networkpolicy.yaml`도 고침) | 0 | 1, 경로마다 `[코드 경로] … 문서 밖 경로 …` | 닫힘 |
+| RV-03 | `fiximplonly`(`Fix-By: impl`만), `fiximplfirst`(impl 다음에 test) | 0 | 1, `[차례] BAT-901 <Fix-By: impl 해시> 지적 RV-1의 …` | 닫힘 |
+| 통과 꼴 | `good`, 새 변형 `fixproper`(test(RV-1) → impl(RV-1)) | 0 | 0 | 막지 않음 |
+| RV-04·RV-05 | `cfg`, `verifynoplan` | 0 | 0 | 계획대로 구간 끝 후보로 남김 |
+
+- 정본 대조: 구현은 §8.6 세부의 새 문장(꼬리말의 `Finding`, 차례의 '첫 구현 전 섞기'와 '지적마다 시험 먼저', 바꾸는 파일의 `test_*.py`·`test-sim`과 허용 목록)과 계획 8의 1~4와 맞는다. `Finding` 값 꼴은 Batch와 같은 검사(`idOk`)를 쓰고, `review-fix` 밖의 커밋에 달면 `[꼬리말]` 실패다. 첫 구현 전 plan·test 섞기는 '역할별 처음 나온 커밋끼리 견줌'을 그대로 써서 따로 고친 곳이 없다(RC-41·42가 경계를 본다).
+- 새 규칙에서 구멍이 아니라고 본 것: 같은 Finding의 시험 쪽 커밋이 다른 묶음에만 있으면 실패(묶음마다 셈), 시험 쪽이 뒤에 오면 실패(차례대로 셈), `finding:` 소문자 키는 없는 것, `Docs/`처럼 대소문자가 다른 `docs/`는 허용 목록 밖, 코드 경로 안의 `.md`(`tools/ci/README.md`)는 코드를 쓰지 않는 역할에 막힘.
+- 지나친 막음: 찾지 못했다. 허용 목록 밖을 바꾼 지난 `docs(...)` 커밋(`specs/results/*.json`, `loadtest/plan/*.json` 등)은 ADR-0270 전 기록이고, 웨이브 7부터는 그런 파일을 코드 묶음이 바꾼다(계획 8의 2). 측정 결과 파일을 감독(record)이 커밋해야 하는 때가 오면 그때 허용 목록을 다시 본다(지적 아님).
+
+| 번호 | 심각도 | 파일:줄 | 무엇이 틀렸나 | 재현 | 고칠 쪽 | 처리 |
+| --- | --- | --- | --- | --- | --- | --- |
+| RV-06 | 낮음 | `tools/ci/roles-check.mjs:391-399`, 계획 8의 3(192줄) | '지적마다 시험 먼저'는 같은 Finding을 단 `Fix-By: test` 커밋이 앞에 있는지만 본다. 그 커밋이 시험 파일을 하나도 바꾸지 않아도(계획 파일만 고치거나 빈 커밋) 뒤의 `Fix-By: impl`이 통과한다. 재현 시험 없이 시험 쪽 커밋만 남기면 RV-03의 규칙을 비켜 간다. 정본 문장과 계획 8의 3은 시험 쪽 커밋이 시험 파일을 바꿔야 한다고 정하지 않았으므로 구현 잘못은 아니다 | 새 변형 `fixtestdoc`(`Fix-By: test`(RV-1)가 계획 파일만 고침 → `Fix-By: impl`(RV-1)이 `services/a/src/x.ts`를 고침), `fixtestempty`(시험 쪽이 빈 커밋): 둘 다 끝 코드 0 | 계획(지적마다 시험 쪽 커밋 하나 이상이 시험 파일을 바꿔야 한다는 줄을 넣을지) → 시험 → 구현 | 구간 끝 정리 목록 후보(RV-05처럼 커밋 내용의 진위에 가깝고, 일부러 꾸며야 비켜 간다) |
+
+- 결론: RV-01~RV-03은 정본 결정대로 닫혔다. 새 발견은 RV-06(낮음, 구간 끝 후보) 하나다. 이 묶음 안에서 더 고칠 지적은 없다.
+
 ## 틀린 구현 목록
 
 검증 담당이 하나씩 넣고 `node --test tools/ci/roles-check.test.mjs`가 실패하는지 본다(B등급 표본). 번호는 위 3의 검사 번호다.
@@ -333,4 +360,4 @@ node tools/ci/roles-check.mjs [--base <리비전>] [--head <리비전>] [--root 
 | plan | w7l1-roles-plan-680fac67 | claude-opus-5-5 | 2026-11-16T07:41+09:00 | 2026-11-16T09:24+09:00 |
 | test | w7l1-roles-test-659fff14 | claude-opus-5-5 | 2026-11-16T08:00+09:00 | 2026-11-16T10:10+09:00 |
 | impl | w7l1-roles-impl-db02969f | claude-opus-5-5 | 2026-11-16T08:38+09:00 | 2026-11-16T09:59+09:00 |
-| review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T09:17+09:00 |
+| review | w7l1-roles-review-2c7ed993 | claude-opus-5-5 | 2026-11-16T09:01+09:00 | 2026-11-16T10:22+09:00 |
