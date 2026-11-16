@@ -26,6 +26,7 @@ export {
   type DueRefund,
   type PaymentCancelOutcome,
   type RefundAccount,
+  type TicketCancelAnswer,
   type TicketCancelOutcome,
 } from './domain/cancellation.js';
 export type {

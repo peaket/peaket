@@ -703,6 +703,16 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
   }
 
   /** 결제사 비동기 처리·업무 거절을 그 행에 남긴다. 끝난(CANCELED) 행은 바꾸지 않는다(겹친 재시도가 먼저 반영했을 수 있다). 원장은 그대로다 */
+  /** 리뷰 B1 빈 뼈대(BAT-415 리뷰 반영). 구현 담당이 채운다 */
+  async settleConfirmedCancelByQuery(
+    _target: ConfirmedCancelTarget,
+    _cancellationId: string,
+    _balanceAmount: number,
+    _budget?: CallBudget,
+  ): Promise<{ readonly status: 'APPLIED'; readonly cancelledAmount: number } | { readonly status: 'RESEND' } | { readonly status: 'UNDECIDABLE' }> {
+    throw new Error('아직 없음');
+  }
+
   async markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget): Promise<void> {
     const idemKey = confirmedCancelIdemKey(cancellationId);
     await this.#tx(

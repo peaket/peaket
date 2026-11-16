@@ -67,13 +67,23 @@ export type ConfirmedCancelBegin =
   | { readonly status: 'NOT_CONFIRMED' }
   | { readonly status: 'NO_BALANCE' }
   | { readonly status: 'OVER_REMAINING' }
-  | { readonly status: 'AMOUNT_MISMATCH' };
+  | { readonly status: 'AMOUNT_MISMATCH' }
+  /** 그 행이 FAILED(거절로 끝남). 결제사를 부르지 않고 REJECTED다(리뷰 B3, docs/features/payment.md §4.1 '같은 취소 ID의 재요청 세부' ③) */
+  | { readonly status: 'REJECTED' };
 
 /** 3시간 지난 재시도의 조회 대조. 잔액 = 기대 잔액 − 금액이면 APPLIED, = 기대 잔액이면 NOT_APPLIED, 그 밖 UNKNOWN(P-T21) */
 export function settleByBalance(record: Pick<ConfirmedCancelRecord, 'amount' | 'expectedBalance'>, balanceAmount: number): 'APPLIED' | 'NOT_APPLIED' | 'UNKNOWN' {
   if (balanceAmount === record.expectedBalance - record.amount) return 'APPLIED';
   if (balanceAmount === record.expectedBalance) return 'NOT_APPLIED';
   return 'UNKNOWN';
+}
+
+/**
+ * 3시간 지난 재시도에서 잔액으로 이 취소의 반영을 가를 수 있는가(리뷰 B1, docs/features/payment.md §4.1 '잔액으로 가르는 조건').
+ * 지금 원장의 남은 금액이 저장한 기대 잔액과 같고, 같은 결제에 이 행 말고 진행 중 행이 없을 때만 참이다. BAT-415 리뷰 반영 빈 뼈대
+ */
+export function canSettleByBalance(_q: { readonly ledgerRemaining: number; readonly expectedBalance: number; readonly otherInFlight: number }): boolean {
+  throw new Error('아직 없음');
 }
 
 /** CancelPaymentResponse.result의 앞머리를 뗀 값 */

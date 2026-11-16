@@ -8,7 +8,7 @@ import type {
   DueRefund,
   PaymentCancelOutcome,
   RefundAccount,
-  TicketCancelOutcome,
+  TicketCancelAnswer,
 } from './cancellation.js';
 import type { FraudCancelTarget, FraudRefundProgress, FraudTicketResult } from './fraud-cancellation.js';
 import type { BusinessCalendar } from './refund-policy.js';
@@ -29,7 +29,7 @@ export interface TicketCancellations {
     readonly requestedByAccountId: string;
     readonly cancellationId: string;
     readonly deadlineMs: number;
-  }): Promise<TicketCancelOutcome>;
+  }): Promise<TicketCancelAnswer>;
 }
 
 /** payment-svc PaymentService.CancelPayment. 결제사 멱등키는 cancel-{cancellationId}다 */

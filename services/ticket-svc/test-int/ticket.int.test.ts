@@ -380,3 +380,64 @@ describe('GAT-080 몫 F 운영자 취소 [PostgreSQL]', () => {
     expect(changes.every((c) => c.ticket_id === cancelMe)).toBe(true);
   });
 });
+
+// ---- BAT-415 리뷰 반영 B2(계획 §11 S3): CancelTickets의 첫 팬 취소 칸을 실제 DB(ticket_cancellation)로 본다 ----
+describe('GAT-080 S3 첫 팬 취소 칸 [PostgreSQL]', () => {
+  const fresh = async () => {
+    const orderId = randomUUID();
+    const r = await service.issue({ orderId, eventId: randomUUID(), payerAccountId: ACCOUNT, seatIds: [randomUUID()], issueGeneration: 0 });
+    return { orderId, eventId: r.tickets[0]!.eventId, ticketId: r.tickets[0]!.ticketId };
+  };
+  const fan = (t: { orderId: string; ticketId: string }, cancellationId: string, nowMs: number) =>
+    service.cancel({ orderId: t.orderId, ticketIds: [t.ticketId], requestedByAccountId: ACCOUNT, cancellationId, nowMs });
+
+  test('GAT-080 S3 K1 REFUND_NOW 뒤 K2는 ALREADY_CANCELLED와 첫 취소(K1·REFUND_NOW·K1 시각)를 받고, K3도 K1을 받는다', async () => {
+    const t = await fresh();
+    const [k1, k2, k3] = [randomUUID(), randomUUID(), randomUUID()];
+    expect(await fan(t, k1, NOW)).toEqual([{ ticketId: t.ticketId, result: 'REFUND_NOW' }]);
+    expect(await fan(t, k2, NOW + 60_000)).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first: { cancellationId: k1, result: 'REFUND_NOW', cancelledAtMs: NOW } }]);
+    expect(await fan(t, k3, NOW + 120_000)).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED', first: { cancellationId: k1, result: 'REFUND_NOW', cancelledAtMs: NOW } }]);
+    // K2·K3의 ALREADY_CANCELLED 기록은 첫 취소가 아니다. 같은 K1을 다시 부르면 처음 결과(첫 칸 없음)
+    expect(await fan(t, k1, NOW + 180_000)).toEqual([{ ticketId: t.ticketId, result: 'REFUND_NOW' }]);
+  });
+
+  test('GAT-080 S3 gRPC 답은 first_cancellation_id·first_result·first_cancelled_at을 싣는다', async () => {
+    const server = await startGrpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      services: [{ definition: ticketPackage().TicketService.service, handlers: ticketServiceHandlers({ ticket: service, nowMs: () => NOW + 30_000 }, () => {}) }],
+    });
+    const client = new (ticketPackage().TicketService)(`127.0.0.1:${server.port}`, (await import('@grpc/grpc-js')).credentials.createInsecure()) as unknown as {
+      CancelTickets(req: object, cb: (e: Error | null, v: { outcomes: Record<string, unknown>[] }) => void): void;
+      close(): void;
+    };
+    try {
+      const t = await fresh();
+      const k1 = randomUUID();
+      await fan(t, k1, NOW);
+      const reply = await new Promise<{ outcomes: Record<string, unknown>[] }>((resolve, reject) =>
+        client.CancelTickets({ order_id: t.orderId, ticket_ids: [t.ticketId], requested_by_account_id: ACCOUNT, cancellation_id: randomUUID() }, (e, v) => (e ? reject(e) : resolve(v))),
+      );
+      expect(reply.outcomes[0]).toMatchObject({
+        ticket_id: t.ticketId,
+        result: 'CANCEL_TICKET_RESULT_ALREADY_CANCELLED',
+        first_cancellation_id: k1,
+        first_result: 'CANCEL_TICKET_RESULT_REFUND_NOW',
+        first_cancelled_at: { seconds: Math.floor(NOW / 1000), nanos: (NOW % 1000) * 1_000_000 },
+      });
+    } finally {
+      client.close();
+      await server.close();
+    }
+  });
+
+  test('GAT-080 S3 운영자 취소한 표·무효(VOIDED, 팬 취소 기록 없음)로 끝난 표에 K2가 오면 첫 칸이 없다', async () => {
+    const byOperator = await fresh();
+    await service.operatorCancel({ approvalId: randomUUID(), fraudCaseId: randomUUID(), eventId: byOperator.eventId, targets: [{ ticketId: byOperator.ticketId, expectedHolderAccountId: ACCOUNT }], nowMs: NOW });
+    const voided = await fresh();
+    await database.pool.query("update ticket set status = 'VOIDED', key_revoked_at = now(), version = version + 1 where id = $1", [voided.ticketId]);
+    for (const t of [byOperator, voided]) {
+      expect(await fan(t, randomUUID(), NOW + 60_000)).toEqual([{ ticketId: t.ticketId, result: 'ALREADY_CANCELLED' }]);
+    }
+  });
+});

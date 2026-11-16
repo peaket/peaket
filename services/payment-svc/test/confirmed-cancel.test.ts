@@ -13,6 +13,7 @@ import {
   PaymentInputError,
   PaymentNotFoundError,
   settleByBalance,
+  canSettleByBalance,
 } from '../src/modules/payment/server.js';
 import type { CancelResult, PaymentGatewayPort, QueryOptions, QueryResult } from '../src/modules/payment/domain/payment-gateway.js';
 
@@ -54,6 +55,8 @@ function fixture(
     finish?: { status: 'APPLIED' | 'STALE'; cancelledAmount: number };
     cancel?: CancelResult;
     query?: QueryResult;
+    /** 3시간 지난 재시도의 저장소 판정(리뷰 B1). 없으면 원장이 기대 잔액 그대로이고 다른 진행 중 건이 없을 때의 판정을 흉내 낸다 */
+    settle?: { status: 'APPLIED'; cancelledAmount: number } | { status: 'RESEND' } | { status: 'UNDECIDABLE' };
   } = {},
 ) {
   const calls: string[] = [];
@@ -62,6 +65,7 @@ function fixture(
   const queries: { paymentRef: string; options?: QueryOptions }[] = [];
   const finishes: string[] = [];
   const marks: [string, 'CANCEL_PENDING' | 'FAILED'][] = [];
+  const settles: [string, number][] = [];
   const gateway = {
     pg: 'PORTONE',
     cancel: async (c: CancelBody) => {
@@ -95,12 +99,21 @@ function fixture(
         calls.push('mark');
         marks.push([id, status]);
       },
+      settleConfirmedCancelByQuery: async (_t, id, balanceAmount) => {
+        calls.push('settle');
+        settles.push([id, balanceAmount]);
+        if (o.settle) return o.settle;
+        const r = o.begin?.status === 'BEGUN' ? o.begin.record : record();
+        if (balanceAmount === r.expectedBalance - r.amount) return { status: 'APPLIED', cancelledAmount: 50_000 };
+        if (balanceAmount === r.expectedBalance) return { status: 'RESEND' };
+        return { status: 'UNDECIDABLE' };
+      },
     },
     gateways: { of: () => gateway },
     guards: { of: () => ({ tryTakeToken: () => true, circuitClosed: () => true }) as never },
     clock: fakeClock({ now: NOW }),
   });
-  return { uc, calls, begins, cancels, queries, finishes, marks };
+  return { uc, calls, begins, cancels, queries, finishes, marks, settles };
 }
 
 const input = (over: Partial<{ amount: number; reason: string }> = {}) => ({ paymentId: PAYMENT, cancellationId: CANCEL, reason: over.reason ?? '관객 취소', ...(over.amount === undefined ? {} : { amount: over.amount }) });
@@ -239,39 +252,57 @@ describe('P-T21 3시간 지난 재시도의 조회 대조', () => {
   test('P-T21 3시간 정각(10,800,000ms 전)에 만든 건의 재시도는 결제사 취소 앞에 먼저 조회한다(결제 참조·결제 시도 ID)', async () => {
     const f = fixture({ begin: begun({ createdAtMs: NOW - THREE_HOURS }, true), query: { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 80_000 } });
     await f.uc.execute(input({ amount: 30_000 }));
-    expect(f.calls.slice(0, 4)).toEqual(['read', 'begin', 'query', 'cancel']);
+    expect(f.calls.slice(0, 5)).toEqual(['read', 'begin', 'query', 'settle', 'cancel']);
+    expect(f.settles).toEqual([[CANCEL, 80_000]]);
     expect(f.queries[0]!.paymentRef).toBe('pay_ref_1');
     expect(f.queries[0]!.options).toMatchObject({ expectedTxId: 'tx_1' });
   });
 
-  test('P-T21 조회 잔액이 기대 잔액 − 금액(80,000 − 30,000 = 50,000)이면 다시 보내지 않고 원장에 반영해 CANCELLED다', async () => {
+  test('P-T21 조회 잔액이 기대 잔액 − 금액(80,000 − 30,000 = 50,000)이면 결제 행 잠금 안의 저장소 판정(settleConfirmedCancelByQuery)에 넘기고 APPLIED면 다시 보내지 않고 CANCELLED다', async () => {
     const f = fixture({
       begin: begun({ createdAtMs: NOW - THREE_HOURS - 1, amount: 30_000, expectedBalance: 80_000 }, true),
       query: { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 50_000 },
-      finish: { status: 'APPLIED', cancelledAmount: 50_000 },
+      settle: { status: 'APPLIED', cancelledAmount: 50_000 },
     });
     await expect(f.uc.execute(input({ amount: 30_000 }))).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 50_000 });
+    expect(f.settles).toEqual([[CANCEL, 50_000]]);
     expect(f.cancels).toHaveLength(0);
-    expect(f.finishes).toEqual([CANCEL]);
+    // 반영은 저장소 판정이 같은 트랜잭션에서 한다(쓰임새가 finish를 따로 부르지 않는다)
+    expect(f.finishes).toHaveLength(0);
   });
 
-  test('P-T21 조회 잔액이 기대 잔액 그대로(80,000)면 저장한 본문으로 한 번 다시 보낸다', async () => {
+  test('P-T21 저장소 판정이 RESEND(잔액이 기대 잔액 그대로)면 저장한 본문으로 한 번 다시 보낸다', async () => {
     const f = fixture({
       begin: begun({ createdAtMs: NOW - THREE_HOURS, amount: 30_000, expectedBalance: 80_000 }, true),
       query: { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 80_000 },
+      settle: { status: 'RESEND' },
     });
     await f.uc.execute(input({ amount: 30_000 }));
     expect(f.cancels).toEqual([{ paymentRef: 'pay_ref_1', amount: 30_000, reason: '관객 취소', idemKey: `cancel-${CANCEL}`, expectedBalance: 80_000 }]);
   });
 
-  test.each<[string, QueryResult]>([
-    ['그 밖의 잔액 70,000', { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 70_000 }],
-    ['한 원 차이 50,001', { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 50_001 }],
-    ['조회 결과 모름', { kind: 'UNKNOWN' }],
-    ['조회 기록 없음', { kind: 'NOT_FOUND' }],
-  ])('P-T21 3시간 지난 재시도에서 %s이면 보내지 않고 결과 모름이며 행·원장을 바꾸지 않는다', async (_name, query) => {
+  test('GAT-080 P11 3시간 지난 재시도는 잔액이 기대 잔액 − 금액과 맞아도 저장소가 가를 수 없다(UNDECIDABLE)고 하면 보내지도 반영하지도 않고 결과 모름이다', async () => {
+    const f = fixture({
+      begin: begun({ createdAtMs: NOW - THREE_HOURS, amount: 30_000, expectedBalance: 80_000 }, true),
+      query: { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 50_000 },
+      settle: { status: 'UNDECIDABLE' },
+    });
+    await expect(f.uc.execute(input({ amount: 30_000 }))).resolves.toEqual({ result: 'UNKNOWN', cancelledAmount: 20_000 });
+    expect(f.settles).toEqual([[CANCEL, 50_000]]);
+    expect(f.cancels).toHaveLength(0);
+    expect(f.finishes).toHaveLength(0);
+    expect(f.marks).toHaveLength(0);
+  });
+
+  test.each<[string, QueryResult, number]>([
+    ['그 밖의 잔액 70,000', { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 70_000 }, 1],
+    ['한 원 차이 50,001', { kind: 'FOUND', paymentRef: 'pay_ref_1', orderRef: ORDER, status: 'PARTIAL_CANCELED', amount: 100_000, balanceAmount: 50_001 }, 1],
+    ['조회 결과 모름', { kind: 'UNKNOWN' }, 0],
+    ['조회 기록 없음', { kind: 'NOT_FOUND' }, 0],
+  ])('P-T21 3시간 지난 재시도에서 %s이면 보내지 않고 결과 모름이며 행·원장을 바꾸지 않는다', async (_name, query, settleCalls) => {
     const f = fixture({ begin: begun({ createdAtMs: NOW - THREE_HOURS, amount: 30_000, expectedBalance: 80_000 }, true), query });
     await expect(f.uc.execute(input({ amount: 30_000 }))).resolves.toEqual({ result: 'UNKNOWN', cancelledAmount: 20_000 });
+    expect(f.settles).toHaveLength(settleCalls);
     expect(f.cancels).toHaveLength(0);
     expect(f.finishes).toHaveLength(0);
     expect(f.marks).toHaveLength(0);
@@ -293,5 +324,24 @@ describe('P-T21 3시간 지난 재시도의 조회 대조', () => {
     expect(settleByBalance(r, 79_999)).toBe('UNKNOWN');
     expect(settleByBalance(r, 0)).toBe('UNKNOWN');
     expect(settleByBalance({ amount: 80_000, expectedBalance: 80_000 }, 0)).toBe('APPLIED');
+  });
+});
+
+describe('BAT-415 리뷰 반영 B1·B3(단위)', () => {
+  test('GAT-080 P11 canSettleByBalance는 원장 잔액이 기대 잔액과 같고 다른 진행 중 건이 없을 때만 참이다', () => {
+    expect(canSettleByBalance({ ledgerRemaining: 80_000, expectedBalance: 80_000, otherInFlight: 0 })).toBe(true);
+    expect(canSettleByBalance({ ledgerRemaining: 50_000, expectedBalance: 80_000, otherInFlight: 0 })).toBe(false);
+    expect(canSettleByBalance({ ledgerRemaining: 80_001, expectedBalance: 80_000, otherInFlight: 0 })).toBe(false);
+    expect(canSettleByBalance({ ledgerRemaining: 79_999, expectedBalance: 80_000, otherInFlight: 0 })).toBe(false);
+    expect(canSettleByBalance({ ledgerRemaining: 80_000, expectedBalance: 80_000, otherInFlight: 1 })).toBe(false);
+  });
+
+  test('GAT-080 P12 거절된 취소(REJECTED)를 같은 취소 ID로 다시 부르면 결제사를 부르지 않고 REJECTED와 지금 누적액이다', async () => {
+    const f = fixture({ begin: { status: 'REJECTED' } });
+    await expect(f.uc.execute(input({ amount: 30_000 }))).resolves.toEqual({ result: 'REJECTED', cancelledAmount: 20_000 });
+    expect(f.cancels).toHaveLength(0);
+    expect(f.queries).toHaveLength(0);
+    expect(f.marks).toHaveLength(0);
+    expect(f.finishes).toHaveLength(0);
   });
 });

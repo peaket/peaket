@@ -81,6 +81,9 @@ export class CancelConfirmedPayment {
         throw new PaymentInputError('amount');
       case 'DONE':
         return { result: 'CANCELLED', cancelledAmount: begun.cancelledAmount };
+      case 'REJECTED':
+        // 리뷰 B3 빈 뼈대(BAT-415 리뷰 반영): 거절로 끝난 건의 재요청. 구현 담당이 채운다
+        throw new Error('아직 없음');
       case 'BUSY':
         // 같은 결제의 다른 취소가 10분 안에 진행 중이다: 보내지 않고 결과 모름(부른 쪽이 다시 시도한다)
         return unknownOf(target);

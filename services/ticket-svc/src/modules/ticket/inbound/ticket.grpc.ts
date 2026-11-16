@@ -47,7 +47,10 @@ export interface TicketGrpcErrorLog {
 }
 
 /** gRPC 처리기 묶음. 테스트는 startGrpcServer에 그대로 넘긴다. */
-export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: TicketGrpcErrorLog): grpc.UntypedServiceImplementation {
+/**
+ * o.internalToken(리뷰 B6 빈 뼈대, BAT-415 리뷰 반영): 있으면 OperatorCancelTickets는 호출자 purchase-svc의 내부 토큰을 요구한다(구현 담당이 채운다)
+ */
+export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: TicketGrpcErrorLog, _o?: { readonly internalToken?: string }): grpc.UntypedServiceImplementation {
   return {
     IssueTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       const req = call.request;

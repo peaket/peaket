@@ -57,6 +57,14 @@ export interface CancellationOrderView {
 /** 티켓 취소 포트 결과(ticket.proto CancelTicketResult와 같은 뜻) */
 export type TicketCancelOutcome = 'REFUND_NOW' | 'REFUND_AFTER_CLOSE' | 'NOT_PAYER_HOLDER' | 'TRANSFER_PENDING' | 'EVENT_STARTED' | 'ALREADY_CANCELLED';
 
+/**
+ * 티켓 취소 포트의 답(리뷰 B2, docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기'). ALREADY_CANCELLED이고 ticket-svc가 첫 팬 취소 칸을 주면 객체다.
+ * 문자열만 돌려주는 기존 어댑터·가짜는 그대로 맞는다
+ */
+export type TicketCancelAnswer =
+  | TicketCancelOutcome
+  | { readonly result: 'ALREADY_CANCELLED'; readonly firstCancellationId: string; readonly firstResult: 'REFUND_NOW' | 'REFUND_AFTER_CLOSE'; readonly firstCancelledAtMs: number };
+
 /** 결제사 취소 포트 결과(payment.proto CancelResult와 같은 뜻) */
 export type PaymentCancelOutcome = 'CANCELLED' | 'PENDING' | 'REJECTED' | 'UNKNOWN';
 

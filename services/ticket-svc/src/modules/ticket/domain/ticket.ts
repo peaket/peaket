@@ -67,6 +67,11 @@ export interface CancelTicketsInput {
 export interface CancelTicketOutcome {
   readonly ticketId: string;
   readonly result: CancelTicketResult;
+  /**
+   * result가 ALREADY_CANCELLED이고 그 표를 먼저 취소한 팬 취소(ticket_cancellation의 REFUND_NOW·REFUND_AFTER_CLOSE, 가장 이른 것)가 있을 때만(리뷰 B2,
+   * docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기'). 운영자 취소·무효로 끝난 표는 없다
+   */
+  readonly first?: { readonly cancellationId: string; readonly result: 'REFUND_NOW' | 'REFUND_AFTER_CLOSE'; readonly cancelledAtMs: number };
 }
 
 // ---- 부정 예매 운영자 취소(ticket.proto OperatorCancelTickets, docs/features/transfer-refund.md §7.4 'purchase-svc·ticket-svc 쪽 세부', BUILD_ORDER GAT-080, BAT-415 몫 F) ----

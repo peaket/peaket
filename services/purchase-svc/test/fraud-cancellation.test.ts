@@ -554,3 +554,52 @@ describe('GAT-080 몫 F 부정 예매 운영자 취소: GetFraudCancellation', (
     });
   });
 });
+
+// ---- BAT-415 리뷰 반영 B5(계획 §11 F21, docs/features/transfer-refund.md §7.4 '결과 저장') ----
+/** 저장 규칙(행이 없거나 FAILED일 때만 쓴다)을 흉내 내고, 저장 전 읽기는 비어 있다(앞 호출의 결과를 아직 못 읽은 겹친 호출) */
+class StaleStore extends Store {
+  saveCalled = false;
+  override async results(approvalId: string): Promise<readonly FraudTicketResult[]> {
+    return this.saveCalled ? super.results(approvalId) : [];
+  }
+  override async saveResults(approvalId: string, results: readonly (FraudTicketResult & { readonly expectedHolderAccountId: string })[]): Promise<void> {
+    this.saveCalled = true;
+    const current = this.saved.get(approvalId) ?? new Map<string, FraudTicketResult & { readonly expectedHolderAccountId: string }>();
+    await super.saveResults(
+      approvalId,
+      results.filter((r) => {
+        const c = current.get(r.ticketId);
+        return c === undefined || c.outcome === 'FAILED';
+      }),
+    );
+  }
+}
+
+describe('GAT-080 F21 늦은 실패가 끝난 결과를 덮지 않는다(리뷰 B5)', () => {
+  test('GAT-080 F21 같은 승인의 늦은 실패가 먼저 끝난 결과를 덮지 않는다: 겹친 호출 B의 답은 저장 뒤 다시 읽은 ACCEPTED다', async () => {
+    const a = seat();
+    const views = new Map([[a.ticketId, viewOf(a)]]);
+    const store = new StaleStore();
+    await seedRequest(store, [t(a)]);
+    // 앞 호출 A가 이미 ACCEPTED로 저장했다(B는 시작 때 이 결과를 못 읽는다)
+    store.saved.set(APPROVAL, new Map([[a.ticketId, { ...accepted(a), expectedHolderAccountId: PAYER }]]));
+    const tickets = new Tickets();
+    tickets.failNext = 1;
+    const writes = new Writes();
+    const uc = new CancelFraudTickets({
+      store,
+      tickets,
+      orders: { findByTicket: async (id) => views.get(id), findCancellation: async () => undefined },
+      configs: { config: async () => ({ saleEndsAtMs: SALE_ENDS, entryOpensAtMs: kst('2026-11-20T18:00:00') }) },
+      writes,
+      calendar,
+      seats: new Seats(),
+    });
+    const r = await uc.execute(input([t(a)], { nowMs: NOW + 60_000 }));
+    // 장애 주입이 실제로 있었다: B의 ticket-svc 호출이 실패했다
+    expect(tickets.calls).toHaveLength(1);
+    expect(r).toEqual([accepted(a)]);
+    expect(await store.results(APPROVAL)).toEqual([accepted(a)]);
+    expect(writes.created).toHaveLength(0);
+  });
+});

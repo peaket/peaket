@@ -11,7 +11,7 @@ import {
   type PaymentCancelOutcome,
   type PaymentCancellations,
   type SeatReturns,
-  type TicketCancelOutcome,
+  type TicketCancelAnswer,
   type TicketCancellations,
 } from '../src/modules/refund/index.js';
 
@@ -53,8 +53,8 @@ class Orders {
 
 class Tickets implements TicketCancellations {
   calls: Parameters<TicketCancellations['cancel']>[0][] = [];
-  constructor(private readonly outcome: TicketCancelOutcome) {}
-  async cancel(q: Parameters<TicketCancellations['cancel']>[0]): Promise<TicketCancelOutcome> {
+  constructor(private readonly outcome: TicketCancelAnswer) {}
+  async cancel(q: Parameters<TicketCancellations['cancel']>[0]): Promise<TicketCancelAnswer> {
     this.calls.push(q);
     return this.outcome;
   }
@@ -101,7 +101,7 @@ class Writes implements CancellationWrites {
   }
 }
 
-const saga = (o: { order?: CancellationOrderView | undefined; ticket?: TicketCancelOutcome; payment?: PaymentCancelOutcome; replay?: CancellationWriteOutcome } = {}) => {
+const saga = (o: { order?: CancellationOrderView | undefined; ticket?: TicketCancelAnswer; payment?: PaymentCancelOutcome; replay?: CancellationWriteOutcome } = {}) => {
   const tickets = new Tickets(o.ticket ?? 'REFUND_NOW');
   const payments = new Payments(o.payment ?? 'CANCELLED');
   const writes = new Writes(o.replay);
@@ -312,5 +312,83 @@ describe('취소 Saga', () => {
     expect(writes.retries).toHaveLength(0);
     expect(writes.failures).toHaveLength(0);
     expect(payments.calls).toHaveLength(0);
+  });
+});
+
+// ---- BAT-415 리뷰 반영 B2(계획 §11 S2, docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기') ----
+describe('GAT-080 S2 앞 시도가 티켓 단계만 마친 팬 취소 잇기', () => {
+  const K1 = '01900000-0000-4000-8000-0000000000a1';
+  const K2 = '01900000-0000-4000-8000-0000000000a2';
+  /** 공연(2026-11-20 19:00) 10일 전에 K1이 키를 폐기했다(공제 0%). K2는 9일 전에 누른다(그때 기준이면 10%) */
+  const FIRST_AT = kst('2026-11-10T10:00:00');
+  const K2_AT = kst('2026-11-11T10:00:00');
+  const first = (result: 'REFUND_NOW' | 'REFUND_AFTER_CLOSE' = 'REFUND_NOW'): TicketCancelAnswer => ({ result: 'ALREADY_CANCELLED', firstCancellationId: K1, firstResult: result, firstCancelledAtMs: FIRST_AT });
+  /** 취소 ID로 기록을 찾는 주문 가짜(K1의 기록만 있을 수 있다) */
+  class OrdersById {
+    constructor(private readonly byId: Map<string, CancellationRecord> = new Map()) {}
+    async findByTicket(): Promise<CancellationOrderView | undefined> {
+      return order();
+    }
+    async findCancellation(id: string): Promise<CancellationRecord | undefined> {
+      return this.byId.get(id);
+    }
+  }
+  const run = (answer: TicketCancelAnswer, existing?: CancellationRecord, payment: PaymentCancelOutcome = 'CANCELLED') => {
+    const tickets = new Tickets(answer);
+    const payments = new Payments(payment);
+    const writes = new Writes();
+    const seats = new Seats();
+    const svc = new CancelTicket({ orders: new OrdersById(existing ? new Map([[existing.cancellationId, existing]]) : new Map()), calendar, tickets, payments, writes, seats });
+    return { svc, tickets, payments, writes, seats };
+  };
+
+  test('GAT-080 S2 첫 팬 취소가 티켓 단계만 마친 뒤 새 키로 다시 누르면 첫 취소 ID로 좌석·취소 행·환급을 마친다(공제 기준은 첫 키 폐기 시각)', async () => {
+    const f = run(first());
+    const r = await f.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: K2_AT, deadlineMs: 2000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: K1, refundAmount: 33_333, refundAfterEntryClose: false });
+    expect(f.seats.calls).toEqual([{ eventId: order().eventId, orderId: ORDER, seatId: order().seatId, accountId: ACCOUNT, saleEndsAtMs: SALE_ENDS }]);
+    expect(f.writes.created).toHaveLength(1);
+    expect(f.writes.created[0]).toMatchObject({ cancellationId: K1, orderId: ORDER, ticketId: TICKET, reason: 'USER', daysBefore: 10, deductionBp: 0, deductionAmount: 0, refundAmount: 33_333, status: 'REFUND_PENDING' });
+    expect(f.payments.calls).toHaveLength(1);
+    expect(f.payments.calls[0]).toMatchObject({ cancellationId: K1, orderId: ORDER, amount: 33_333 });
+    expect(f.writes.updates).toEqual([{ cancellationId: K1, status: 'REFUNDED', nowMs: K2_AT }]);
+  });
+
+  test('GAT-080 S2 첫 결과가 REFUND_AFTER_CLOSE면 K1로 취소 행을 REQUESTED로 남기고 결제사를 부르지 않는다', async () => {
+    const f = run(first('REFUND_AFTER_CLOSE'));
+    const r = await f.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: K2_AT, deadlineMs: 2000 });
+    expect(r).toMatchObject({ status: 'ACCEPTED', cancellationId: K1, refundAfterEntryClose: true });
+    expect(f.writes.created[0]).toMatchObject({ cancellationId: K1, status: 'REQUESTED' });
+    expect(f.payments.calls).toHaveLength(0);
+  });
+
+  test('GAT-080 S2 K1의 order_cancellation이 이미 있으면 그 결과를 다시 주고 결제사는 REFUND_PENDING일 때만 K1으로 다시 부른다', async () => {
+    const done: CancellationRecord = { cancellationId: K1, orderId: ORDER, ticketId: TICKET, refundAmount: 33_333, state: 'REFUNDED', refundAttempts: 0 };
+    const a = run(first(), done);
+    expect(await a.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: K2_AT, deadlineMs: 2000 })).toEqual({
+      status: 'REPLAYED',
+      cancellationId: K1,
+      refundAmount: 33_333,
+      refundAfterEntryClose: false,
+    });
+    expect(a.payments.calls).toHaveLength(0);
+    expect(a.seats.calls).toHaveLength(0);
+    expect(a.writes.created).toHaveLength(0);
+
+    const pending: CancellationRecord = { ...done, state: 'REFUND_PENDING', refundAttempts: 1 };
+    const b = run(first(), pending);
+    expect(await b.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: K2_AT, deadlineMs: 2000 })).toMatchObject({ status: 'ACCEPTED', cancellationId: K1 });
+    expect(b.payments.calls).toHaveLength(1);
+    expect(b.payments.calls[0]).toMatchObject({ cancellationId: K1, amount: 33_333 });
+    expect(b.seats.calls).toHaveLength(0);
+    expect(b.writes.created).toHaveLength(0);
+  });
+
+  test('GAT-080 S2 운영자 취소·무효로 끝난 표(첫 칸 없는 ALREADY_CANCELLED)는 새 키로 눌러도 아무것도 쓰지 않는다', async () => {
+    const f = run('ALREADY_CANCELLED');
+    expect(await f.svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: K2, reason: 'USER', nowMs: K2_AT, deadlineMs: 2000 })).toEqual({ status: 'ALREADY_ENDED' });
+    expect(f.seats.calls).toHaveLength(0);
+    expect(f.writes.created).toHaveLength(0);
+    expect(f.payments.calls).toHaveLength(0);
   });
 });

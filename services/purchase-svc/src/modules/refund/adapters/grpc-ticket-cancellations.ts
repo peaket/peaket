@@ -29,6 +29,8 @@ export interface GrpcTicketCancellationsOptions {
   address: string;
   profile?: GrpcLbProfile;
   breaker?: CircuitBreaker;
+  /** 리뷰 B6 빈 뼈대(BAT-415 리뷰 반영): 있으면 OperatorCancelTickets에 내부 토큰과 호출자 purchase-svc를 싣는다(구현 담당이 채운다) */
+  internalToken?: string;
 }
 
 export class GrpcTicketCancellations implements TicketCancellations, OperatorTicketCancellations {

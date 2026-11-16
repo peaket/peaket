@@ -400,3 +400,31 @@ describe('GAT-080 몫 F 부정 예매 운영자 취소 [실제 DB·ticket-svc·p
     await expect(get.execute(randomUUID())).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
+
+// ---- BAT-415 리뷰 반영 B5(계획 §11 F21): 저장 문장이 끝난 결과를 덮지 않는다 ----
+describe('GAT-080 F21 늦은 실패의 저장 [실제 DB]', () => {
+  test('GAT-080 F21 같은 승인의 늦은 실패가 먼저 끝난 결과를 덮지 않는다(행은 ACCEPTED 그대로, 진행 읽기도 ACCEPTED와 환급 진행), FAILED 행은 덮어 쓴다', async () => {
+    const w = await world(1);
+    const approvalId = randomUUID();
+    const reply = await unary('CancelFraudTickets', requestOf(w, approvalId, randomUUID(), []));
+    expect((reply.results as Reply[]).map((r) => r.outcome)).toEqual(['FRAUD_CANCELLATION_OUTCOME_ACCEPTED']);
+    const ticketId = w.tickets[0]!.ticketId;
+    const cancellationId = fraudCancellationId(approvalId, ticketId);
+
+    // 겹친 호출 B가 시작 때 결과를 못 읽은 채 그 표를 TICKET_UNAVAILABLE로 저장하려 한다
+    await fraudStore.saveResults(approvalId, [{ ticketId, outcome: 'FAILED', failureCode: 'TICKET_UNAVAILABLE', expectedHolderAccountId: w.payerId }], NOW + 1_000);
+    const row = await admin.pool.query('select outcome, cancellation_id, refund_amount, failure_code from fraud_cancellation_ticket where approval_id = $1 and ticket_id = $2', [approvalId, ticketId]);
+    expect(row.rows).toEqual([{ outcome: 'ACCEPTED', cancellation_id: cancellationId, refund_amount: PRICE, failure_code: null }]);
+    const got = await get.execute(approvalId);
+    expect(got.results).toEqual([{ ticketId, outcome: 'ACCEPTED', cancellationId, refundAmount: PRICE }]);
+    expect(got.refunds).toEqual([{ ticketId, cancellationId, state: 'PENDING' }]);
+
+    // FAILED였던 표는 다시 부르기가 마친 결과로 덮어 쓴다
+    const other = randomUUID();
+    await fraudStore.saveResults(approvalId, [{ ticketId: other, outcome: 'FAILED', failureCode: 'SEAT_RETURN_FAILED', expectedHolderAccountId: w.payerId }], NOW + 2_000);
+    await fraudStore.saveResults(approvalId, [{ ticketId: other, outcome: 'SKIPPED_HOLDER_CHANGED', expectedHolderAccountId: w.payerId }], NOW + 3_000);
+    expect((await admin.pool.query('select outcome, failure_code from fraud_cancellation_ticket where approval_id = $1 and ticket_id = $2', [approvalId, other])).rows).toEqual([
+      { outcome: 'SKIPPED_HOLDER_CHANGED', failure_code: null },
+    ]);
+  });
+});

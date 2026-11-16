@@ -317,7 +317,7 @@ describe('GAT-080 몫 P 취소 건 기록과 기대 잔액', () => {
     expect(gatewayCalls[2]).toEqual(body(failed.orderId, 'p3_after_failed', 10_000, PRICE));
   });
 
-  test('GAT-080 P4 끝남은 그 취소 건의 CANCELED로만 가른다: 거절된 X는 다른 취소 Y가 원장을 PARTIAL_CANCELED로 만든 뒤에도 저장 본문으로 다시 보낸다', async () => {
+  test('GAT-080 P4 끝남은 그 취소 건의 상태로만 가른다: 거절된 X는 다른 취소 Y가 원장을 PARTIAL_CANCELED로 만든 뒤 다시 불러도 CANCELLED가 아니라 결제사 없이 REJECTED다(리뷰 B3)', async () => {
     const p = await putPayment(admin, { status: 'APPROVED', amount: PRICE });
     gatewayOutcome = 'REJECTED';
     await expect(cancel(p.paymentId, 'p4_x', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_REJECTED' });
@@ -325,13 +325,12 @@ describe('GAT-080 몫 P 취소 건 기록과 기대 잔액', () => {
     await expect(cancel(p.paymentId, 'p4_y', 20_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 20_000 } });
     expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 20_000 });
 
-    await expect(cancel(p.paymentId, 'p4_x', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 50_000 } });
-    expect(gatewayCalls).toHaveLength(3);
-    expect(gatewayCalls[2]).toEqual(gatewayCalls[0]);
+    await expect(cancel(p.paymentId, 'p4_x', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_REJECTED', cancelled_amount: { krw: 20_000 } });
+    expect(gatewayCalls).toHaveLength(2);
     expect(gatewayCalls[0]).toEqual(body(p.orderId, 'p4_x', 30_000, PRICE));
-    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 50_000 });
+    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 20_000 });
     expect((await cancelRows(p.paymentId)).map((r) => [r.idempotency_key, r.status])).toEqual([
-      ['cancel-p4_x', 'CANCELED'],
+      ['cancel-p4_x', 'FAILED'],
       ['cancel-p4_y', 'CANCELED'],
     ]);
   });
@@ -520,5 +519,95 @@ describe('GAT-080 P10 금액을 비운 요청과 진행 중인 다른 취소(BAT
     expect(gatewayCalls).toHaveLength(0);
     expect((await cancelRows(p.paymentId)).map((r) => r.idempotency_key)).toEqual(['cancel-p10_all_other']);
     expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 20_000 });
+  });
+});
+
+// ---- BAT-415 리뷰 반영 B1·B3(계획 §11, docs/features/payment.md §4.1 '잔액으로 가르는 조건'·'같은 취소 ID의 재요청 세부' ③) ----
+describe('GAT-080 리뷰 반영 B1·B3 [실제 저장소]', () => {
+  const createdAtOf = async (paymentId: string, key: string): Promise<number> =>
+    ((await admin.pool.query('select created_at from payment_cancel where payment_id = $1 and idempotency_key = $2', [paymentId, key])).rows[0].created_at as Date).getTime();
+  const found = (orderId: string, balanceAmount: number): QueryResult => ({ kind: 'FOUND', paymentRef: `ref-${orderId}`, orderRef: orderId, status: 'PARTIAL_CANCELED', amount: PRICE, balanceAmount });
+
+  test('GAT-080 P11 3시간 지난 재시도는 다른 취소가 반영된 뒤라면 잔액이 맞아도 반영으로 보지 않는다', async () => {
+    // 결제 100,000·누적 20,000. X(30,000, 기대 잔액 80,000)가 결과 모름으로 남은 동안, 10분 넘어 같은 결제의 Z(30,000)가 나가 반영된다(누적 50,000)
+    const p = await partial();
+    gatewayOutcome = 'UNKNOWN';
+    await cancel(p.paymentId, 'p11_x', 30_000);
+    clock.advance(600_000);
+    gatewayOutcome = 'CANCELLED';
+    await expect(cancel(p.paymentId, 'p11_z', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 50_000 } });
+    expect(gatewayCalls).toHaveLength(2);
+    // X를 만든 지 3시간(10,800,000ms)이 되도록 시계를 돌린다. 결제사 잔액 50,000은 X의 '기대 잔액 − 금액'과 우연히 같다
+    clock.advance(10_800_000 - 600_000);
+    queryAnswer = found(p.orderId, 50_000);
+    await expect(cancel(p.paymentId, 'p11_x', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN', cancelled_amount: { krw: 50_000 } });
+    expect(queryCalls).toEqual([`ref-${p.orderId}`]);
+    expect(gatewayCalls).toHaveLength(2);
+    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 50_000 });
+    expect((await cancelRows(p.paymentId)).map((r) => [r.idempotency_key, r.status])).toEqual([
+      ['cancel-p11_x', 'REQUESTED'],
+      ['cancel-p11_z', 'CANCELED'],
+    ]);
+  });
+
+  test('GAT-080 P11 3시간 지난 재시도는 같은 결제에 다른 진행 중 행이 있으면 가르지 않는다(대조: 그 행이 없으면 CANCELLED)', async () => {
+    // 원장 그대로(누적 20,000)인데 다른 진행 중 행 W(30,000, 10분 넘음)가 있다
+    const p = await partial();
+    gatewayOutcome = 'UNKNOWN';
+    await cancel(p.paymentId, 'p11_w', 30_000);
+    clock.advance(600_000);
+    await cancel(p.paymentId, 'p11_x2', 30_000);
+    expect(gatewayCalls).toHaveLength(2);
+    clock.advance(10_800_000);
+    queryAnswer = found(p.orderId, 50_000);
+    gatewayOutcome = 'CANCELLED';
+    await expect(cancel(p.paymentId, 'p11_x2', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN', cancelled_amount: { krw: 20_000 } });
+    expect(gatewayCalls).toHaveLength(2);
+    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 20_000 });
+    expect((await cancelRows(p.paymentId)).map((r) => r.status)).toEqual(['REQUESTED', 'REQUESTED']);
+
+    // 대조: 다른 진행 중 행이 없으면 같은 입력(잔액 50,000)이 이 취소의 반영이다
+    const q = await partial();
+    gatewayCalls = [];
+    gatewayOutcome = 'UNKNOWN';
+    await cancel(q.paymentId, 'p11_alone', 30_000);
+    clock.advance(10_800_000);
+    queryAnswer = found(q.orderId, 50_000);
+    await expect(cancel(q.paymentId, 'p11_alone', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 50_000 } });
+    expect(gatewayCalls).toHaveLength(1);
+  });
+
+  test('GAT-080 P12 거절된 취소를 같은 취소 ID로 다시 부르면 결제사를 부르지 않고 REJECTED이고 행을 되살리지 않는다', async () => {
+    const p = await putPayment(admin, { status: 'APPROVED', amount: PRICE });
+    gatewayOutcome = 'REJECTED';
+    await expect(cancel(p.paymentId, 'p12_x', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_REJECTED' });
+    const createdAt = await createdAtOf(p.paymentId, 'cancel-p12_x');
+    clock.advance(1_000);
+    gatewayOutcome = 'CANCELLED';
+    await expect(cancel(p.paymentId, 'p12_x', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_REJECTED', cancelled_amount: { krw: 0 } });
+    expect(gatewayCalls).toHaveLength(1);
+    expect((await cancelRows(p.paymentId)).map((r) => [r.idempotency_key, r.status])).toEqual([['cancel-p12_x', 'FAILED']]);
+    expect(await createdAtOf(p.paymentId, 'cancel-p12_x')).toBe(createdAt);
+    // 그 직후 같은 결제의 Y는 BUSY 없이 바로 보낸다(FAILED는 진행 중이 아니다)
+    await expect(cancel(p.paymentId, 'p12_y', 10_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 10_000 } });
+    expect(gatewayCalls).toHaveLength(2);
+    expect(await rowOf(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 10_000 });
+  });
+
+  test('GAT-080 P12 10분 안의 다른 진행 중 행이 있어도 거절된 취소의 재요청은 BUSY(UNKNOWN)가 아니라 REJECTED다(차례: FAILED가 BUSY보다 먼저)', async () => {
+    const p = await putPayment(admin, { status: 'APPROVED', amount: PRICE });
+    gatewayOutcome = 'REJECTED';
+    await cancel(p.paymentId, 'p12_rx', 30_000);
+    gatewayOutcome = 'UNKNOWN';
+    await cancel(p.paymentId, 'p12_v', 20_000);
+    expect(gatewayCalls).toHaveLength(2);
+    clock.advance(1_000);
+    gatewayOutcome = 'CANCELLED';
+    await expect(cancel(p.paymentId, 'p12_rx', 30_000)).resolves.toMatchObject({ result: 'CANCEL_RESULT_REJECTED', cancelled_amount: { krw: 0 } });
+    expect(gatewayCalls).toHaveLength(2);
+    expect((await cancelRows(p.paymentId)).map((r) => [r.idempotency_key, r.status])).toEqual([
+      ['cancel-p12_rx', 'FAILED'],
+      ['cancel-p12_v', 'REQUESTED'],
+    ]);
   });
 });

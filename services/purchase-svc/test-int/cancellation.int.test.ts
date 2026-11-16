@@ -42,6 +42,7 @@ import {
   QuoteCancellation,
   RedisSeatReturnNotices,
   RefundAfterEntry,
+  type SeatReturns,
   WeekendBusinessCalendar,
 } from '../src/modules/refund/index.js';
 import { migratePurchase } from '../scripts/migrate.mjs';
@@ -580,5 +581,58 @@ describe('R-T3·R-T4 결제자와 보유자', () => {
     const ticket = (await ticketDb.pool.query('select status, account_id, key_revoked_at, version from ticket where id = $1', [w.ticketId])).rows[0];
     expect(ticket).toMatchObject({ status: 'REFUNDED', account_id: w.accountId, version: 3 });
     expect(ticket.key_revoked_at).not.toBeNull();
+  });
+});
+
+// ---- BAT-415 리뷰 반영 B2(계획 §11 S2, docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기') ----
+describe('GAT-080 S2 앞 시도가 티켓 단계만 마친 팬 취소 잇기 [실제 ticket-svc·payment-svc]', () => {
+  test('GAT-080 S2 첫 팬 취소가 티켓 단계만 마친 뒤 새 키로 다시 누르면 첫 취소 ID로 좌석·취소 행·환급을 마친다', async () => {
+    // 공연 2026-11-23 19:00(+09:00): ticket-svc가 키를 폐기하는 NOW(11-13)는 10일 전(공제 0%), K2를 누르는 하루 뒤는 9일 전(10%)
+    const w = await world({ eventStartsAtMs: Date.parse('2026-11-23T19:00:00+09:00'), ticketPrice: 33_333 });
+    const real = new DrizzleSeatReturns(sales, seatMap, new RedisSeatReturnNotices(redis));
+    let failures = 0;
+    const flaky: SeatReturns = {
+      returnSold: async (q) => {
+        if (failures === 0) {
+          failures++;
+          throw new Error('좌석 되돌리기 실패(시험의 장애 주입)');
+        }
+        return real.returnSold(q);
+      },
+    };
+    const flakySaga = new CancelTicket({ orders: new DrizzleCancellationOrders(purchaseDb, seatMap), calendar, tickets: ticketCancels!, payments: paymentCancels!, writes, seats: flaky });
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    const k1 = randomUUID();
+    const k2 = randomUUID();
+    await expect(flakySaga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId: k1, reason: 'USER', nowMs: NOW, deadlineMs: 5_000 })).rejects.toThrow();
+    // 장애 주입이 실제로 있었다: ticket-svc는 키를 폐기했는데 좌석·취소 행은 없다
+    expect(failures).toBe(1);
+    expect(await ticketRow(w.ticketId)).toMatchObject({ status: 'REFUNDED' });
+    expect((await admin.pool.query('select count(*)::int as n from order_cancellation where ticket_id = $1', [w.ticketId])).rows[0].n).toBe(0);
+    expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('SOLD');
+
+    const r = await flakySaga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId: k2, reason: 'USER', nowMs: NOW + DAY, deadlineMs: 5_000 });
+    expect(r).toEqual({ status: 'ACCEPTED', cancellationId: k1, refundAmount: 33_333, refundAfterEntryClose: false });
+    const rows = await admin.pool.query('select id, deduction_bp, deduction_amount, refund_amount, status from order_cancellation where ticket_id = $1', [w.ticketId]);
+    expect(rows.rows).toEqual([{ id: k1, deduction_bp: 0, deduction_amount: 0, refund_amount: 33_333, status: 'REFUNDED' }]);
+    expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('RETURNED');
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '3'], { key: seatKeys.bitmap(w.eventId) }))).toBe(0);
+    expect(gatewayCalls).toHaveLength(1);
+    expect(gatewayCalls[0]).toMatchObject({ paymentRef: `ref-${w.orderId}`, idemKey: `cancel-${k1}` });
+    expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'CANCELED', cancelled_amount: 33_333 });
+    const tc = await ticketDb.pool.query('select cancellation_id, result from ticket_cancellation where ticket_id = $1 order by cancelled_at', [w.ticketId]);
+    expect(tc.rows).toEqual([{ cancellation_id: k1, result: 'REFUND_NOW' }]);
+  });
+
+  test('GAT-080 S2 운영자 취소로 끝난 표는 새 키로 눌러도 아무것도 쓰지 않는다(취소 행·좌석·결제사 0)', async () => {
+    const w = await world();
+    await ticketService.operatorCancel({ approvalId: randomUUID(), fraudCaseId: randomUUID(), eventId: w.eventId, targets: [{ ticketId: w.ticketId, expectedHolderAccountId: w.accountId }], nowMs: NOW });
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    await expect(cancelOf(w, randomUUID())).resolves.toEqual({ status: 'ALREADY_ENDED' });
+    expect((await admin.pool.query('select count(*)::int as n from order_cancellation where ticket_id = $1', [w.ticketId])).rows[0].n).toBe(0);
+    expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('SOLD');
+    expect(gatewayCalls).toHaveLength(0);
   });
 });

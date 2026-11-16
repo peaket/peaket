@@ -663,6 +663,16 @@ export interface PaymentConfirmedCancels {
   finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
   /** 결제사 비동기 처리(CANCEL_PENDING)·업무 거절(FAILED)을 그 행에 남긴다. 원장은 바꾸지 않는다 */
   markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget): Promise<void>;
+  /**
+   * 3시간 지난 재시도의 조회 결과를 결제 행 잠금 안에서 가른다(리뷰 B1): 행이 진행 중인지 → canSettleByBalance → settleByBalance 차례.
+   * APPLIED면 같은 트랜잭션에서 finishConfirmedCancel처럼 반영한다. RESEND는 같은 본문으로 다시 보낸다, UNDECIDABLE은 결과 모름(결제사 0)
+   */
+  settleConfirmedCancelByQuery(
+    target: ConfirmedCancelTarget,
+    cancellationId: string,
+    balanceAmount: number,
+    budget?: CallBudget,
+  ): Promise<{ readonly status: 'APPLIED'; readonly cancelledAmount: number } | { readonly status: 'RESEND' } | { readonly status: 'UNDECIDABLE' }>;
 }
 
 // ---- 결제사 호출 보호(BUILD_ORDER PRF-183, docs/features/payment.md §2 '결제사 호출 보호의 첫 구현') ----

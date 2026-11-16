@@ -63,7 +63,8 @@ describe('TicketService gRPC [HOT-160] [P-T15]', () => {
     expect(list.tickets[0]!.status).toBe('TICKET_STATUS_ISSUED');
     const ticketId = String(list.tickets[0]!.ticket_id);
     const out = await call<{ outcomes: Array<Record<string, unknown>> }>((cb) => client.CancelTickets({ order_id: ORDER, ticket_ids: [ticketId], requested_by_account_id: ACCOUNT, cancellation_id: CANCEL }, cb));
-    expect(out.outcomes).toEqual([{ ticket_id: ticketId, result: 'CANCEL_TICKET_RESULT_REFUND_NOW' }]);
+    // 리뷰 B2로 CancelTicketOutcome에 첫 팬 취소 칸 셋(3·4·5)이 생겼다. REFUND_NOW에는 비어 있다(기본값으로 읽힌다)
+    expect(out.outcomes).toEqual([{ ticket_id: ticketId, result: 'CANCEL_TICKET_RESULT_REFUND_NOW', first_cancellation_id: '', first_result: 'CANCEL_TICKET_RESULT_UNSPECIFIED', first_cancelled_at: null }]);
   });
 
   test('CheckReviewEligibility는 종료 시각·결제자·유효 티켓을 보고 자격과 근거 주문을 준다 [ASVS v5.0.0-2.2.3]', async () => {
