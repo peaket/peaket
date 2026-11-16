@@ -81,7 +81,8 @@ describe('신고와 조치', () => {
     const store = new MemoryReviewStore();
     const r = record({ status: 'HIDDEN', notice: 'RIGHTS_TEMP', noticeUntilMs: NOW - 1 });
     await store.insertReview(r);
-    await store.insertTakedown({ takedownId: 't1', reviewId: r.reviewId, reason: 'RIGHTS_TEMP', contentFingerprint: r.contentFingerprint, hiddenAtMs: NOW - 1000, endsAtMs: NOW - 1 });
+    // 조치 증적의 지문 칸은 NOT NULL이라 살아 있는 후기 본문의 지문을 바로 쓴다(record()의 값과 같다, W8-audit2a 시험 이의 1)
+    await store.insertTakedown({ takedownId: 't1', reviewId: r.reviewId, reason: 'RIGHTS_TEMP', contentFingerprint: contentFingerprint(r.body), hiddenAtMs: NOW - 1000, endsAtMs: NOW - 1 });
     expect(await store.expireTemporaryBlocks(NOW)).toBe(1);
     expect(await store.findReview(r.reviewId)).toMatchObject({ status: 'VISIBLE', notice: undefined });
     expect((await store.takedownsByReview(r.reviewId))[0]?.restoredAtMs).toBe(NOW);

@@ -125,16 +125,19 @@ describe('I-T83 탈퇴 사건으로 후기 파기', () => {
     const { clock, store, handler, results, logs } = setup();
     const DELETED_AT = T0 - 2 * 3_600_000;
     const hiddenBody = '권리 침해 임시조치로 가린 후기 본문입니다.';
+    // 살아 있는 후기의 지문(문자열)을 따로 둔다: 조치 증적·차단 목록의 지문 칸은 NOT NULL이다(시험 이의 1)
+    const a2Fingerprint = contentFingerprint(hiddenBody);
     const a1 = review({ reviewId: randomUUID(), accountId: A, rating: 5, edited: true });
-    const a2 = review({ reviewId: randomUUID(), accountId: A, status: 'HIDDEN', notice: 'RIGHTS_TEMP', noticeUntilMs: T0 + 7 * DAY, rating: 2, body: hiddenBody, contentFingerprint: contentFingerprint(hiddenBody) });
+    const a1Fingerprint = contentFingerprint(a1.body);
+    const a2 = review({ reviewId: randomUUID(), accountId: A, status: 'HIDDEN', notice: 'RIGHTS_TEMP', noticeUntilMs: T0 + 7 * DAY, rating: 2, body: hiddenBody, contentFingerprint: a2Fingerprint });
     // 2026-11-16 전의 작성자 지우기(Drizzle)는 본문·작성자 표시만 비우고 별점·지문·계정을 남겼다. 이미 지운 행도 파기 대상이다
     const a3 = review({ reviewId: randomUUID(), accountId: A, status: 'DELETED', body: '', rating: 3, authorDisplay: '***', updatedAtMs: DELETED_AT, deletedAtMs: DELETED_AT });
     const b1 = review({ reviewId: randomUUID(), accountId: B, eventId: a1.eventId, productionId: a1.productionId });
     for (const r of [a1, a2, a3, b1]) await store.insertReview(r);
     // 법정 조치 증적(takedown_action)과 같은 내용 차단 목록(review_hidden_fingerprint)은 후기와 따로 남는다
-    const takedown: TakedownRecord = { takedownId: randomUUID(), reviewId: a2.reviewId, reason: 'RIGHTS_TEMP', contentFingerprint: a2.contentFingerprint, hiddenAtMs: T0 - DAY, endsAtMs: T0 + 7 * DAY };
+    const takedown: TakedownRecord = { takedownId: randomUUID(), reviewId: a2.reviewId, reason: 'RIGHTS_TEMP', contentFingerprint: a2Fingerprint, hiddenAtMs: T0 - DAY, endsAtMs: T0 + 7 * DAY };
     await store.insertTakedown(takedown);
-    await store.addHiddenFingerprint(a1.contentFingerprint, undefined, T0 - DAY);
+    await store.addHiddenFingerprint(a1Fingerprint, undefined, T0 - DAY);
 
     // 처리 시각을 사건의 탈퇴 시각(02:00)·시험 시작(03:00)과 다르게 둔다
     clock.advance(3 * 60_000);
@@ -159,7 +162,7 @@ describe('I-T83 탈퇴 사건으로 후기 파기', () => {
     expect([...store.reviews.values()].filter((r) => r.accountId === A)).toEqual([]);
     expect(await store.findReviewByEventAccount(a1.eventId, A)).toBeUndefined();
     expect(await store.takedownsByReview(a2.reviewId)).toEqual([takedown]);
-    expect(await store.hasHiddenFingerprint(a1.contentFingerprint)).toBe(true);
+    expect(await store.hasHiddenFingerprint(a1Fingerprint)).toBe(true);
 
     // 로그에는 eventKey와 파기 수만 있고 계정 ID·pid가 없다
     expect(logs).toHaveLength(1);

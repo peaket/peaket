@@ -349,3 +349,15 @@ export interface CoreConsumersOptions { /* … 지금 칸 … */ recheck: Review
 ### 돌릴 통합 시험(감독이 Docker 차례를 알린 뒤, core-svc 폴더)
 
 - `npx vitest run --config vitest.integration.config.mjs test-int/review-purge.int.test.ts test-int/review-recheck.int.test.ts test-int/review-withdrawn.int.test.ts test-int/review-grants.int.test.ts test-int/review.int.test.ts test-int/review-withdrawn-consumer.int.test.ts`(마지막 파일은 Kafka 컨테이너. 네이티브 Kafka 모듈이 이 PC에서 막히면 CI에서만 돈다)
+
+## 시험 이의 답
+
+- **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 구현 커밋 `7f32f584`·이의 커밋 `a450164a` 위.
+
+### 이의 1에 대한 답: 맞다. 시험 쪽만 고쳤다
+
+- 실패 확인 절의 '시험은 두 꼴 모두에서 컴파일된다'는 별점에만 맞았다. 조치 증적(`TakedownRecord.contentFingerprint`)과 차단 목록 지문 포트(`addHiddenFingerprint`·`hasHiddenFingerprint`)는 DB에서 NOT NULL이라 `string`으로 두는 것이 맞고, 시험이 `ReviewRecord.contentFingerprint`(이제 `string | null`)를 거기에 그대로 넣은 것이 잘못이다. 제품 타입은 넓히지 않는다(구현 담당 판단에 동의).
+- 고친 곳(살아 있는 후기의 지문을 본문에서 따로 만든다. 값은 전과 같고 단언은 바꾸지 않았다):
+  - `test/review-withdrawn.test.ts` I-T83 ①: `a2Fingerprint = contentFingerprint(hiddenBody)`(a2 만들기·조치 증적에 씀), `a1Fingerprint = contentFingerprint(a1.body)`(차단 목록 넣기와 `hasHiddenFingerprint` 단언의 인자). `expect` 줄은 인자 이름만 바뀌었다.
+  - `test/review.test.ts` '끝 시각이 지난 임시조치는…': 조치 증적 지문을 `contentFingerprint(r.body)`로(`record()`가 넣은 값과 같다).
+- 돌린 것: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc typecheck` 오류 0. `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test` 시험 458개 모두 통과(파일 69개).
