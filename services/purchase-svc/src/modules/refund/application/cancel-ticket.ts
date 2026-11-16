@@ -78,6 +78,8 @@ export class CancelTicket {
     if (ticket === 'NOT_PAYER_HOLDER') return { status: 'TICKET_NOT_HELD' };
     if (ticket === 'TRANSFER_PENDING') return { status: 'TRANSFER_PENDING' };
     if (ticket === 'EVENT_STARTED') return { status: 'EVENT_STARTED' };
+    // 다른 취소(팬·운영자)가 먼저 끝냈다: 좌석 되돌리기·취소 행·결제사 호출을 하지 않는다(같은 취소 ID의 재요청은 ticket-svc가 처음 결과를 준다)
+    if (ticket === 'ALREADY_CANCELLED') return { status: 'ALREADY_ENDED' };
 
     // 취소표: 티켓 키를 폐기한 뒤 좌석을 RETURNED로 되돌린다. 이 단계가 실패하면 취소 행을 만들지 않아
     // 같은 취소 ID의 재시도가 티켓 취소(멱등)와 좌석 되돌리기를 다시 한다

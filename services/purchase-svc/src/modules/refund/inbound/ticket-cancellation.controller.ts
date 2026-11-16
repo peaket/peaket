@@ -40,6 +40,8 @@ const notFound = () => new ProblemError({ type: 'not-found', status: 404, title:
 const notPayer = () => new ProblemError({ type: 'not-payer', status: 403, title: '결제한 분만 할 수 있습니다' });
 const conflict = () => new ProblemError({ type: 'cancellation-conflict', status: 409, title: '지금은 취소할 수 없습니다' });
 const entryStarted = () => new ProblemError({ type: 'entry-started', status: 409, title: '입장이 시작되어 할 수 없습니다' });
+/** 양도 요청 중이거나 남이 가진 티켓(R-T3, docs/features/transfer-refund.md §9 1번, 돌려받은 뒤 취소한다) */
+const transferPending = () => new ProblemError({ type: 'transfer-pending', status: 409, title: '양도 요청을 철회한 뒤 취소할 수 있습니다' });
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
 
 @Controller('v1/tickets')
@@ -95,6 +97,7 @@ export class TicketCancellationController {
     if (r.status === 'NOT_FOUND') throw notFound();
     if (r.status === 'NOT_PAYER') throw notPayer();
     if (r.status === 'EVENT_STARTED') throw entryStarted();
+    if (r.status === 'TRANSFER_PENDING' || r.status === 'TICKET_NOT_HELD') throw transferPending();
     throw conflict();
   }
 }
