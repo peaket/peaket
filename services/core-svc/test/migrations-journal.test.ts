@@ -1,15 +1,15 @@
 // core-svc 마이그레이션 저널 점검(리뷰 R165-7, 계획 docs/review/plans/BAT-165.md '### 13' R165-7, 메인 감독 결정 2026-11-16).
 // Drizzle 마이그레이터는 DB에 마지막으로 적용된 when보다 작은 마이그레이션을 조용히 건너뛴다. 그래서 when은 idx 차례로 늘 커야 하고,
 // 파일 번호와 idx가 같아야 하며, 저널의 모든 태그에 파일이 있어야 한다.
-// 이번 웨이브 번호: 갈래 3이 0021·0022, 갈래 2가 0023·0024, 갈래 1이 0025부터. 검색 표 마이그레이션은 0023이고 when은 갈래 3 값 1794789068699보다 크다.
+// 이번 웨이브 번호: 갈래 3이 0021·0022, 갈래 2가 0023·0024, 갈래 1이 0025부터. 검색 표 마이그레이션은 0023이고 when은 갈래 3 마지막(0022) 값 1794789168699보다 크다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 const dir = fileURLToPath(new URL('../migrations/', import.meta.url));
 const journal = JSON.parse(readFileSync(`${dir}meta/_journal.json`, 'utf8')) as { entries: { idx: number; when: number; tag: string }[] };
-// 메인 감독이 정한 값(이번 웨이브 갈래 3의 마지막 when)
-const LANE3_WHEN = 1_794_789_068_699;
+// 이번 웨이브 갈래 3의 마지막 when: `wave/lane3-w7`의 `0022_review_role_grants`(리뷰 R165-13, 계획 BAT-165 '### 14'. 처음 적은 1794789068699는 0021 값이었다)
+const LANE3_WHEN = 1_794_789_168_699;
 
 describe('마이그레이션 저널', () => {
   test('core-svc 마이그레이션 저널의 when은 idx 차례로 늘 커지고 파일 번호와 idx가 같다(R165-7)', () => {

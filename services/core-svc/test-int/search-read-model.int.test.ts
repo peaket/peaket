@@ -18,7 +18,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
-import { DrizzleSearchIndex, DrizzleSearchReadModel, MemoryCatalogRepository, MemorySearchIndex, SEARCH_DICTIONARY_SOURCE, SearchCatalog, SearchUnavailable, SuggestionDictionary, type DictionarySnapshot, type SearchDictionarySource } from '../src/modules/catalog/index.js';
+import { DrizzleSearchIndex, DrizzleSearchReadModel, MemoryCatalogRepository, MemorySearchIndex, SEARCH_DICTIONARY_SOURCE, SearchCatalog, SearchUnavailable, SuggestionDictionary, type DictionarySnapshot, type SearchDictionarySource, type SearchReadModelSync } from '../src/modules/catalog/index.js';
 import { SearchReadModelTimers } from '../src/modules/catalog/application/search-maintenance.js';
 import { fillDatabase, fillMemory, type Golden } from '../test/search-golden-fixture.js';
 import { artist, event, place, production, productionArtist, promoter, searchAlias, wish } from '../src/modules/catalog/adapters/db/schema.js';
@@ -739,13 +739,16 @@ describe('R165-1 내려가 있던 동안의 시각 경계와 동시 시작', () 
     try {
       const v0 = await version();
       const at = new Date(Date.parse('2026-11-25T03:00:00.000Z'));
+      // 바뀐 끊음 수(R165-14: 원천과 표가 같은 끊음은 판을 올리지 않는다): 공연 ID 차례로 500개씩 끊었을 때 어긋난 공연이 든 끊음 수
+      const changedChunks = await changedChunkCount(admin, at.getTime(), 500);
       const out = await Promise.all([new DrizzleSearchReadModel(d1, 'https://img.test').reconcileAll(at), new DrizzleSearchReadModel(d2, 'https://img.test').reconcileAll(at)]);
       expect(arrived).toBeGreaterThanOrEqual(2);
       expect(out.map((o) => o.ran).sort()).toEqual([false, true]);
       const ran = out.find((o) => o.ran)!;
       expect(ran.productions).toBeGreaterThanOrEqual(300);
-      // 판은 끊음 수(500개 [가정]씩, ADR-0271 결정 12)만큼만 올랐다
-      expect((await version()) - v0).toBe(Math.ceil(ran.productions / 500));
+      // 판은 바뀐 끊음 수만큼만 올랐다(500개 [가정]씩, ADR-0271 결정 12. 첫 채우기면 끊음 수와 같다)
+      expect((await version()) - v0).toBe(changedChunks);
+      expect(ran.chunks).toBe(Math.ceil(ran.productions / 500));
       expect(out.find((o) => !o.ran)).toMatchObject({ ran: false, productions: 0, version: null });
     } finally {
       clearTimeout(timer);
@@ -772,3 +775,207 @@ function catalog300(): Golden {
   }
   return { now: '2026-11-16T00:00:00.000Z', places, artists, productions, cases: [] };
 }
+
+// ---- 다시 보기 지적 R165-14(계획 docs/review/plans/BAT-165.md '### 14', ADR-0271 결정 12 보탬, docs/data.md search_version.reconciled_at) ----
+
+/** 공연 ID 차례로 size개씩 끊었을 때, 원천(at)과 표가 어긋난 공연이 든 끊음 수 */
+async function changedChunkCount(d: Database, at: number, size: number): Promise<number> {
+  const r = await rows(
+    d,
+    `with ids as (select production_id from search_document_source_at($1) union select production_id from search_document),
+          ranked as (select production_id, (row_number() over (order by production_id) - 1) / $2 as chunk from ids),
+          diff as ((select ${COLS} from search_document_source_at($1) except select ${COLS} from search_document)
+                   union all (select ${COLS} from search_document except select ${COLS} from search_document_source_at($1)))
+     select count(distinct r.chunk)::int as n from ranked r join diff on diff.production_id = r.production_id`,
+    [new Date(at), size],
+  );
+  return Number(r[0]!.n);
+}
+
+/**
+ * 따라잡기 연결 묶음: n번째 커밋이 끝난 뒤의 다음 질의를 장벽에서 세운다. release()로 푼다(10초 뒤에는 저절로 풀린다).
+ * 커밋 수와 이 묶음의 서버 세션 pid를 알 수 있다
+ */
+function pausingDatabase(url: string, name: string, pauseAfterCommit: number) {
+  const d = createDatabase({ url, applicationName: name, max: 2 });
+  const state = { commits: 0, paused: false, released: false };
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let reached!: () => void;
+  const atGate = new Promise<void>((r) => (reached = r));
+  const auto = setTimeout(() => release(), 10_000);
+  d.pool.on('connect', (client) => {
+    const q = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
+    (client as unknown as { query: unknown }).query = async (...a: unknown[]) => {
+      if (state.commits >= pauseAfterCommit && !state.released) {
+        state.paused = true;
+        reached();
+        await gate;
+      }
+      const r = await q(...a);
+      const t = typeof a[0] === 'string' ? a[0] : String((a[0] as { text?: string })?.text ?? '');
+      if (/^\s*commit\b/i.test(t)) state.commits += 1;
+      return r;
+    };
+  });
+  return {
+    db: d,
+    state,
+    atGate,
+    release() {
+      state.released = true;
+      clearTimeout(auto);
+      release();
+    },
+  };
+}
+
+describe('R165-14 따라잡기는 끊음마다 커밋하고 바뀐 것만 판을 올린다', () => {
+  let c: PostgresContainer;
+  let d: Database;
+  let model: DrizzleSearchReadModel;
+  const B = Date.parse('2026-12-01T00:00:00.000Z');
+  const ids: string[] = [];
+  const P = randomUUID();
+  const L = randomUUID();
+  const reconciledAt = async () => (await rows(d, 'select reconciled_at from search_version where id = 1'))[0]!.reconciled_at as Date | null;
+  const v = async () => Number((await rows(d, 'select version from search_version where id = 1'))[0]!.version);
+  const removalCount = async () => Number((await rows(d, 'select count(*)::int as n from search_removal'))[0]!.n);
+
+  beforeAll(async () => {
+    c = await startPostgres();
+    await migrateCore(c.url);
+    d = createDatabase({ url: c.url, applicationName: 'core-svc-reconcile-chunks', max: 4 });
+    model = new DrizzleSearchReadModel(d, 'https://img.test');
+    await d.db.insert(promoter).values({ id: P, legalName: '(주)끊음' });
+    await d.db.insert(place).values({ id: L, name: '끊음홀', address: '서울', region: '서울', createdBy: ACTOR });
+    for (let i = 0; i < 50; i++) {
+      const id = randomUUID();
+      ids.push(id);
+      await d.db.insert(production).values({ id, promoterId: P, placeId: L, title: `끊음 공연 ${i}`, genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(B - 10 * D) });
+      await d.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId: P, venueId: null, openAt: new Date(B - D), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
+    }
+  }, 180_000);
+  afterAll(async () => {
+    await d?.close();
+    c?.stop();
+  });
+
+  test('HOT-270 따라잡기는 끊음마다 커밋해 그동안의 판매 승인 동기화가 따라잡기 끝을 기다리지 않는다(R165-14)', async () => {
+    const at = new Date(B);
+    // 따라잡기 동안 승인될 공연(시작 때는 승인 전이라 따라잡기 목록에 없다)
+    const late = randomUUID();
+    await d.db.insert(production).values({ id: late, promoterId: P, placeId: L, title: '끊음 늦은승인 공연', genre: '콘서트', saleReview: 'SUBMITTED' });
+    await d.db.insert(event).values({ id: randomUUID(), productionId: late, promoterId: P, venueId: null, openAt: new Date(B - D), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
+    // 1분 정리에 할 일이 있게: 창 (B, B + 1분] 안에 오픈하는 공연
+    const tidyTarget = randomUUID();
+    await d.db.insert(production).values({ id: tidyTarget, promoterId: P, placeId: L, title: '끊음 정리대상 공연', genre: '콘서트', saleReview: 'APPROVED', saleApprovedAt: new Date(B - 10 * D) });
+    await d.db.insert(event).values({ id: randomUUID(), productionId: tidyTarget, promoterId: P, venueId: null, openAt: new Date(B + 30_000), startsAt: new Date(B + 20 * D), endsAt: new Date(B + 20 * D + 2 * H) });
+
+    const v0 = await v();
+    const p = pausingDatabase(c.url, 'core-svc-reconcile-pausing', 2);
+    try {
+      const running = new DrizzleSearchReadModel(p.db, 'https://img.test').reconcileAll(at, { chunkSize: 10 });
+      const endedAt = running.then(() => Date.now());
+      // 둘째 끊음이 커밋된 뒤 장벽에서 섰다(서지 않으면 5초 뒤 실패)
+      await Promise.race([p.atGate, new Promise((_, rej) => setTimeout(() => rej(new Error('둘째 끊음 커밋 뒤 장벽에 닿지 않았다(끊음마다 커밋하지 않는다)')), 5_000))]);
+      expect(p.state.commits).toBe(2);
+      // 이미 커밋된 끊음은 따라잡기가 끝나기 전에 다른 연결에서 보인다(판이 올랐다)
+      expect(await v()).toBeGreaterThanOrEqual(v0 + 1);
+      // 그동안 다른 연결의 판매 승인 동기화는 따라잡기를 기다리지 않고 커밋한다
+      const approval = d.transaction(async (tx) => {
+        await tx.update(production).set({ saleReview: 'APPROVED', saleApprovedAt: at }).where(eq(production.id, late));
+        return model.sync(tx, [late], at);
+      });
+      const approved = await Promise.race([approval.then(() => Date.now()), new Promise<number>((_, rej) => setTimeout(() => rej(new Error('판매 승인 동기화가 따라잡기를 기다렸다')), 5_000))]);
+      // 대조군: 같은 열쇠의 1분 정리는 따라잡기 동안 돌지 않는다(할 일이 있어도 0)
+      expect(await model.syncTimed(new Date(B + 60_000), at)).toEqual({ version: null, productions: 0 });
+      const releasedAt = Date.now();
+      p.release();
+      const out = await running;
+      const ended = await endedAt;
+      expect(approved).toBeLessThan(releasedAt);
+      expect(approved).toBeLessThan(ended);
+      // 끊음 6개(시작 때 원천의 공연 51개 ÷ 10, 늦은 승인 공연은 목록에 없다) 모두 바뀌어 끊음마다 판 1, 승인 동기화 1
+      expect(out).toMatchObject({ ran: true, chunks: Math.ceil(out.productions / 10) });
+      expect(out.productions).toBeGreaterThanOrEqual(51);
+      expect((await v()) - v0).toBe(out.chunks + 1);
+      expect(await driftOn(d, at.getTime())).toBe(0);
+      // 따라잡기가 끝났으니 1분 정리는 이제 돈다
+      expect((await model.syncTimed(new Date(B + 60_000), at)).productions).toBeGreaterThanOrEqual(1);
+    } finally {
+      p.release();
+      await p.db.close();
+    }
+  });
+
+  test('HOT-270 바뀐 것이 없는 따라잡기와 동기화는 판과 지운 표시를 올리지 않는다(R165-14)', async () => {
+    const at = new Date(B + 60_000);
+    await model.reconcileAll(at, { chunkSize: 10 });
+    const v1 = await v();
+    const r1 = await removalCount();
+    // 두 번째 따라잡기: 돌기는 돌지만 판·지운 표시가 그대로다
+    const again = await model.reconcileAll(at, { chunkSize: 10 });
+    expect(again.ran).toBe(true);
+    expect([await v(), await removalCount()]).toEqual([v1, r1]);
+    // 바뀐 것 없는 공연의 sync도 판이 그대로다
+    await d.transaction((tx) => model.sync(tx, [ids[0]!], at));
+    expect(await v()).toBe(v1);
+    // 대조군: 공연 하나 이름을 바꾸고 따라잡기 → 판 +1(정확히 1)
+    await d.db.update(production).set({ title: '끊음 공연 이름바꿈' }).where(eq(production.id, ids[1]!));
+    await model.reconcileAll(at, { chunkSize: 10 });
+    expect(await v()).toBe(v1 + 1);
+    expect(await driftOn(d, at.getTime())).toBe(0);
+  });
+
+  test('HOT-270 따라잡기를 맡은 파드가 도중에 죽으면 다른 파드가 다음 정리 주기에 이어 마치고 reconciled_at을 적는다(R165-14)', async () => {
+    const at = B + 2 * 60_000;
+    // 모든 공연 이름을 바꿔 끊음마다 할 일이 있게 한다
+    for (const [i, id] of ids.entries()) await d.db.update(production).set({ title: `끊음 공연 다시 ${i}` }).where(eq(production.id, id));
+    const a = pausingDatabase(c.url, 'core-svc-reconcile-pod-a', 1);
+    const clockB = movingClock(at);
+    const recorded: { ran: boolean }[] = [];
+    const bModel = new DrizzleSearchReadModel(d, 'https://img.test');
+    const bSync: SearchReadModelSync = {
+      sync: (tx, x, t) => bModel.sync(tx as Parameters<DrizzleSearchReadModel["sync"]>[0], x, t),
+      syncTimed: (t, s) => bModel.syncTimed(t, s),
+      recountInterest: (t) => bModel.recountInterest(t),
+      purgeRemovals: (t) => bModel.purgeRemovals(t),
+      lastReconciledAt: () => bModel.lastReconciledAt(),
+      reconcileAll: async (t, o) => {
+        const r = await bModel.reconcileAll(t, { ...o, chunkSize: 10 });
+        recorded.push({ ran: r.ran });
+        return r;
+      },
+    };
+    const podB = new SearchReadModelTimers({ sync: bSync, clock: clockB });
+    try {
+      // 파드 A가 따라잡기를 시작해 첫 끊음을 커밋하고 섰다
+      const runningA = new DrizzleSearchReadModel(a.db, 'https://img.test').reconcileAll(new Date(at), { chunkSize: 10 }).catch((e: unknown) => e);
+      await Promise.race([a.atGate, new Promise((_, rej) => setTimeout(() => rej(new Error('첫 끊음 커밋 뒤 장벽에 닿지 않았다')), 5_000))]);
+      // 파드 B가 뜬다: A가 잠금을 쥐고 있어 B의 시작 따라잡기는 건너뛴다
+      const startedB = clockB.now();
+      await podB.start();
+      expect(recorded).toEqual([{ ran: false }]);
+      // A가 죽는다
+      await rows(d, "select pg_terminate_backend(pid) from pg_stat_activity where application_name = 'core-svc-reconcile-pod-a'");
+      a.release();
+      expect(await runningA).toBeInstanceOf(Error);
+      expect(await reconciledAt()).toBeNull();
+      expect(await driftOn(d, at)).toBeGreaterThanOrEqual(1);
+      // B의 다음 정리 주기가 따라잡기를 다시 돌아 마친다
+      clockB.set(at + 60_000);
+      await podB.tidy();
+      expect(recorded).toEqual([{ ran: false }, { ran: true }]);
+      const done = await reconciledAt();
+      expect(done).not.toBeNull();
+      expect(new Date(done!).getTime()).toBeGreaterThanOrEqual(startedB);
+      expect((await bModel.lastReconciledAt())?.getTime()).toBe(new Date(done!).getTime());
+      expect(await driftOn(d, at)).toBe(0);
+    } finally {
+      podB.stop();
+      a.release();
+      await a.db.close().catch(() => {});
+    }
+  });
+});

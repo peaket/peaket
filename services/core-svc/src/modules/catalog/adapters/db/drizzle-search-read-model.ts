@@ -155,10 +155,11 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
    * 시작 따라잡기(ADR-0271 결정 12, 리뷰 R165-1): 1분 정리와 같은 권고 잠금 안에서 원천에 있는 공연과 표에 있는 공연을 합친 모든 공연을
    * 500개 [가정]씩 끊어 다시 동기화한다(끊음마다 판 1). 원천에 없는 표 줄은 지우고 지운 표시를 적는다. 잠금을 못 잡으면 건너뛴다
    */
-  async reconcileAll(at: Date): Promise<{ ran: boolean; productions: number; version: number | null }> {
+  // chunkSize·chunks는 리뷰 R165-14(계획 BAT-165 '### 14')의 새 모양이다. BAT-165 시험 담당이 모양만 맞췄고(chunkSize는 아직 쓰지 않고 chunks는 -1) 구현 담당이 채운다
+  async reconcileAll(at: Date, _o: { chunkSize?: number } = {}): Promise<{ ran: boolean; productions: number; version: number | null; chunks: number }> {
     return this.db.transaction(async (tx) => {
       const [lock] = rowsOf<{ ok: boolean }>(await tx.execute(sql`select pg_try_advisory_xact_lock(${TIDY_LOCK}) as ok`));
-      if (!lock?.ok) return { ran: false, productions: 0, version: null };
+      if (!lock?.ok) return { ran: false, productions: 0, version: null, chunks: -1 };
       const ids = rowsOf<{ production_id: string }>(
         await tx.execute(sql`
           select production_id from search_document_source_at(${at.toISOString()}::timestamptz)
@@ -167,8 +168,13 @@ export class DrizzleSearchReadModel implements SearchReadModelSync, SearchDictio
       ).map((r) => r.production_id);
       let version: number | null = null;
       for (let i = 0; i < ids.length; i += RECONCILE_CHUNK) version = (await this.#apply(tx, ids.slice(i, i + RECONCILE_CHUNK), at, true)).version;
-      return { ran: true, productions: ids.length, version };
+      return { ran: true, productions: ids.length, version, chunks: -1 };
     });
+  }
+
+  /** 리뷰 R165-14. BAT-165 시험 담당이 둔 빈 뼈대 */
+  async lastReconciledAt(): Promise<Date | null> {
+    throw new Error('아직 없음');
   }
 
   async purgeRemovals(at: Date): Promise<number> {
