@@ -509,3 +509,18 @@ export interface ReviewStore {
 
 - `test-int/sale-eligibility.int.test.ts`의 정비 일 조립 단언은 `toMatchObject`의 배열이 길이까지 같아야 해서, A2의 새 정비 일이 넷째로 들어가면 실패한다. 이 단언은 relay가 실제로 띄우는 정비 일 전체를 정본대로 묶어 두는 뜻이라(빠지거나 더해진 일을 잡는다) '들어 있는지만' 보게 느슨하게 하지 않고, 기대 목록 끝에 `['review-purge-legacy', 'window']`를 더했다(`coreMaintenanceTasks`가 `review-temp-block-expire` → `review-purge-legacy` 차례로 넣는다). 나머지 단언(`purge` 결과)은 그대로다.
 - 통합이라 돌리지 않았다(도커 대기). 리뷰 반영 통합 명령에 이 파일을 더한다: core-svc 폴더에서 `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/sale-eligibility.int.test.ts`(이 파일은 시험 안에서 `buildDist()`로 빌드한 `dist/maintenance-tasks.js`를 띄운다. 따로 빌드할 것은 없다).
+
+### 다시 보기
+
+- **누가·언제**: 리뷰 담당(세션 `l3w8-a2a-review`), 2026-11-16. `737f3960..ab16df58`(계획·정본 `790dbaf7`, 시험 `51a34b49`·`c4a05752`, 구현 `53a19b01`, 시험 이의·답 `3b09c09b`·`ab16df58`)의 고친 곳만 다시 봤다. 시험은 돌리지 않았다.
+- **A1 반영됨**: `consumers/review-recheck.ts`가 한 번 돌 때마다 성공·실패와 관계없이 밀린 시간을 따로 읽어 고치고(읽기도 실패하면 그대로 둔다), 실패하면 `review_withdrawal_recheck_failures_total`을 올리며, 성공했을 때만 `review_withdrawal_recheck_last_success_timestamp_seconds`를 고친다. 이름·칸·경보 기준(5일 SEV2, 30분 SEV3, 둘 다 legal)이 정본 docs/observability.md:200 '탈퇴 후기 다시 정리' 행과 같다. 같은 등록부에 두 번 켜도 지표를 새로 만들다 실패하지 않는다. 경고에는 오류 요약만 싣는다.
+- **A2 반영됨**: 정비 일 `review-purge-legacy`(`when: 'window'`, 정비 역할)가 두 꼴(DELETED인데 별점·지문·계정이 남은 행, 살아 있는데 `account_id = id`인 행)만 `id` 커서(`>`)로 1,000행씩 `FOR UPDATE SKIP LOCKED`로 잡아 같은 `purgeSet`으로 고친다. 묶음마다 커밋하고 잠금 대기는 2초다(`drizzle-review-store.ts:319-338`). 멈춤 신호는 묶음 사이에 보고, 0건이 될 때까지 이어 부른다. 0026에 더한 `core_maintenance` 권한은 찾기 칸 넷 읽기와 파기 칸 일곱 고치기뿐이다. 이 문장이 읽는 칸(`id`·`status`·`rating`·`content_fingerprint`·`account_id`·`deleted_at`)과 고치는 칸(0022의 넷과 0026의 일곱)이 꼭 맞는다. `body` 읽기·넣기·지우기는 주지 않았다. 다음 출시 차례(0026 → 정비 일 0행 → 파기 행 CHECK `NOT VALID` → 두 `VALIDATE` → 정비 일 지움)가 docs/data.md §2와 ADR-0278 결정 1에 적혔고, 통합 시험이 정비 일 전 23514와 정비 일 뒤 성공을 함께 본다.
+- **A3 반영됨**: `REVOKE UPDATE (rating)`으로 파기만 실패하게 해 예약 행이 남지 않는지 보는 반대쪽 시험이 더해졌다(`test-int/review-recheck.int.test.ts`).
+- **새 결함 검토**: 파기가 너무 많아지지 않는다. 둘째 꼴은 `account_id = id`일 때만이고 그 꼴은 옛 익명화만 만든다(새 코드의 `purgeSet`은 같은 문장에서 DELETED로 바꾼다). 이미 제대로 파기된 행과 두 꼴 밖의 살아 있는 남의 후기는 갱신 시각까지 그대로이고, 단위·통합 시험이 이를 단언한다. 파기가 빠지지도 않는다. 0026 전에는 별점이 NOT NULL이라 이전 판의 DELETED 행은 모두 첫째 꼴에 걸리고, 이것만으로 파기 행 CHECK를 지킬 수 있다. API와의 경합도 막혔다. 잠긴 행은 건너뛰고 다음 정비 시간에 고치며, 묶음이 짧은 트랜잭션이라 API가 오래 기다리지 않는다. 구현 커밋 `53a19b01`은 시험 파일을 건드리지 않았다(`c4a05752`의 `sale-eligibility.int.test.ts`는 시험 담당 몫이다).
+
+| 번호 | 심각도 | 파일:줄 | 근거 | 고칠 쪽 |
+| --- | --- | --- | --- | --- |
+| B1 | 낮음 | `services/core-svc/src/consumers/review-recheck.ts:94` | 마지막 성공 시각 지표는 첫 성공 때 처음 생긴다. 배포 직후처럼 모든 파드가 켜자마자 계속 실패하면 이 계열이 아예 없어서, '모든 파드의 마지막 성공(`max`)이 30분 넘게 없음' 규칙의 식이 빈 결과가 되어 SEV3가 울리지 않을 수 있다. 밀린 시간 지표(5일 SEV2)는 계속 고쳐지므로 결국 잡히지만 늦다 | 구현: 반복을 켤 때 그 파드의 마지막 성공 계열을 켠 시각으로 만들어 둔다(그러면 30분 안에 성공이 없을 때 울린다). 또는 정본: docs/observability.md:200 경보에 '계열이 없거나 실패 수가 늘기만 함'을 함께 적는다. 어느 쪽인지는 감독 판단 |
+
+- **확인 필요(지적 아님)**: 리뷰 반영의 통합 시험 세 파일(`review-purge-legacy`·`review-recheck`·`review-grants`)과 처음 여섯 파일은 아직 돌리지 않았다(Docker 대기). 정비 일은 다음 출시에서 지울 때까지 정비 시간마다 표를 한 번 훑는다. 두 꼴을 찾는 조건에는 색인이 없지만 운영 전이라 문제 없는 크기다.
+- **높음·중간**: 없다.
