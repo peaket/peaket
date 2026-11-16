@@ -94,6 +94,11 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('CancelTickets', err, orderId, cb, onError));
     },
 
+    // 부정 예매 운영자 취소(BAT-415 몫 F). 구현 담당이 채운다(오류는 TicketInputError → INVALID_ARGUMENT)
+    OperatorCancelTickets: (_call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      cb({ code: grpc.status.UNIMPLEMENTED, details: '아직 없음' });
+    },
+
     CheckReviewEligibility: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       const req = call.request;
       const endsAtMs = msOf(req.event_ends_at);

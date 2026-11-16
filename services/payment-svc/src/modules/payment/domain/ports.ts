@@ -654,10 +654,15 @@ export interface PaymentDepositCancels {
 export interface PaymentConfirmedCancels {
   /** 원장 행을 읽는다. 없으면 undefined */
   readConfirmedCancelTarget(paymentId: string, budget?: CallBudget): Promise<ConfirmedCancelTarget | undefined>;
-  /** 취소 ID의 내부 표시를 남긴다. DONE이면 그 취소 ID로 이미 끝났다, NOT_CONFIRMED면 일반 취소 대상 상태가 아니다 */
-  beginConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<ConfirmedCancelBegin>;
-  /** 결제사 취소 성공 반영: cancelled_amount를 더하고 CANCELED·PARTIAL_CANCELED로 바꾼다. STALE이면 그사이 상태가 바뀌었다 */
-  finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, amount: number, budget?: CallBudget): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
+  /**
+   * 한 트랜잭션(payment 행 FOR UPDATE): 이 취소 ID의 payment_cancel 행을 찾거나 처음이면 만든다(금액·사유·전액 여부·기대 잔액).
+   * 결과의 뜻은 ConfirmedCancelBegin. 내부 표시(CONFIRMED_CANCEL_SENT)도 남긴다
+   */
+  beginConfirmedCancel(target: ConfirmedCancelTarget, q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string }, budget?: CallBudget): Promise<ConfirmedCancelBegin>;
+  /** 결제사 취소 성공 반영. 금액은 그 행에서 읽는다. 행이 이미 CANCELED면 더하지 않고 APPLIED. STALE이면 그사이 원장 상태가 바뀌었다 */
+  finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
+  /** 결제사 비동기 처리(CANCEL_PENDING)·업무 거절(FAILED)을 그 행에 남긴다. 원장은 바꾸지 않는다 */
+  markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget): Promise<void>;
 }
 
 // ---- 결제사 호출 보호(BUILD_ORDER PRF-183, docs/features/payment.md §2 '결제사 호출 보호의 첫 구현') ----

@@ -3,6 +3,7 @@
 // 세 번째 마이그레이션(0002, BUILD_ORDER PRF-143, docs/data.md §4 '다시 만들기 표와 원장 칸')의 seat_rebuild 표와 seat_hold의 hold_id·purchase_session_id 칸도 본다.
 // 네 번째 마이그레이션(0003, BUILD_ORDER PRF-160, docs/data.md §4 '주문 표 마이그레이션')은 표가 생기는 것과 파티션 여부만 여기서 보고(주문 표 다섯은 나누지 않고 Outbox 부모만 ID 범위로 나눈다),
 // 주문 표의 제약·인덱스·전이는 test-int/order-store.int.test.ts가 본다.
+// 0022(BUILD_ORDER GAT-080, BAT-415 몫 F)의 부정 예매 운영자 취소 표 둘의 제약도 맨 아래 묶음에서 본다.
 // 컨테이너는 이 파일이 끝나면 afterAll에서 지운다.
 import { randomUUID } from 'node:crypto';
 import { fakeClock, systemClock, uuidv7, uuidv7Time } from '@peaket/platform';
@@ -686,5 +687,60 @@ describe('seat_hold 활성 홀드 유일성', () => {
     await putHold(e1, s2, 1, 'HELD');
     await putHold(e2, s1, 1, 'HELD');
     expect(await count(`select count(*) as n from seat_hold where event_id in ($1, $2) and status = 'HELD'`, [e1, e2])).toBe(3);
+  });
+});
+
+// ---- 0022 부정 예매 운영자 취소 표(BUILD_ORDER GAT-080, BAT-415 몫 F, docs/data.md fraud_cancellation_request·fraud_cancellation_ticket) ----
+describe('0022 fraud_cancellation_request·fraud_cancellation_ticket', () => {
+  const putRequest = (approvalId: string, o: { requestedBy?: string; approvedBy?: string } = {}) =>
+    q(
+      `insert into fraud_cancellation_request (approval_id, fraud_case_id, event_id, targets_hash, requested_by, approved_by, approved_at, created_at)
+       values ($1, $2, $3, $4, $5, $6, now(), now())`,
+      [approvalId, id(), id(), 'a'.repeat(64), o.requestedBy ?? 'investigator-1', o.approvedBy ?? 'commander-2'],
+    );
+  const putTicket = (approvalId: string, o: { ticketId?: string; outcome?: string; cancellationId?: string | null; failureCode?: string | null; refundAmount?: number | null } = {}) =>
+    q(
+      `insert into fraud_cancellation_ticket (approval_id, ticket_id, expected_holder_account_id, outcome, cancellation_id, refund_amount, failure_code, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7, now())`,
+      [
+        approvalId,
+        o.ticketId ?? id(),
+        id(),
+        o.outcome ?? 'ACCEPTED',
+        o.cancellationId === undefined ? id() : o.cancellationId,
+        o.refundAmount === undefined ? 33_333 : o.refundAmount,
+        o.failureCode === undefined ? null : o.failureCode,
+      ],
+    );
+
+  test('GAT-080 F19 0022는 승인 단위 요청 표(기본 키 approval_id, 요청자 ≠ 승인자)를 만든다', async () => {
+    const approval = id();
+    await putRequest(approval);
+    await expect(putRequest(approval)).rejects.toMatchObject({ code: '23505' });
+    await expect(putRequest(id(), { requestedBy: 'same', approvedBy: 'same' })).rejects.toMatchObject({ code: '23514' });
+  });
+
+  test('GAT-080 F19 0022는 (승인, 표) 결과 표의 기본 키·결과와 실패 까닭 목록·ACCEPTED와 취소 ID·FAILED와 까닭·외래키를 검사한다', async () => {
+    const approval = id();
+    await putRequest(approval);
+    const ticket = id();
+    await putTicket(approval, { ticketId: ticket });
+    await expect(putTicket(approval, { ticketId: ticket })).rejects.toMatchObject({ code: '23505' });
+    // 목록 안 값은 들어간다
+    for (const outcome of ['SKIPPED_ALREADY_ENDED', 'SKIPPED_ENTRY_STARTED', 'SKIPPED_HOLDER_CHANGED']) await putTicket(approval, { outcome, cancellationId: null, refundAmount: null });
+    for (const failureCode of ['TICKET_UNAVAILABLE', 'SEAT_RETURN_FAILED', 'CANCELLATION_CONFLICT', 'ORDER_STATE', 'INTERNAL']) await putTicket(approval, { outcome: 'FAILED', cancellationId: null, refundAmount: null, failureCode });
+    // 목록 밖 결과·까닭
+    await expect(putTicket(approval, { outcome: 'DONE' })).rejects.toMatchObject({ code: '23514' });
+    await expect(putTicket(approval, { outcome: 'FAILED', cancellationId: null, refundAmount: null, failureCode: 'TIMEOUT' })).rejects.toMatchObject({ code: '23514' });
+    // ACCEPTED인데 취소 ID 없음, 취소 ID가 있는데 ACCEPTED 아님
+    await expect(putTicket(approval, { outcome: 'ACCEPTED', cancellationId: null })).rejects.toMatchObject({ code: '23514' });
+    await expect(putTicket(approval, { outcome: 'SKIPPED_ALREADY_ENDED', refundAmount: null })).rejects.toMatchObject({ code: '23514' });
+    // FAILED인데 까닭 없음, 까닭이 있는데 FAILED 아님
+    await expect(putTicket(approval, { outcome: 'FAILED', cancellationId: null, refundAmount: null, failureCode: null })).rejects.toMatchObject({ code: '23514' });
+    await expect(putTicket(approval, { outcome: 'ACCEPTED', failureCode: 'INTERNAL' })).rejects.toMatchObject({ code: '23514' });
+    // 환급액은 0 이상
+    await expect(putTicket(approval, { refundAmount: -1 })).rejects.toMatchObject({ code: '23514' });
+    // 요청 없는 결과 행은 외래키로 막는다
+    await expect(putTicket(id())).rejects.toMatchObject({ code: '23503' });
   });
 });

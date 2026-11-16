@@ -34,8 +34,45 @@ export interface ConfirmedCancelTarget {
   readonly status: PaymentLedgerStatus;
 }
 
-/** beginConfirmedCancel의 결과. DONE은 그 취소 ID로 이미 끝났다, NOT_CONFIRMED는 일반 취소 대상 상태가 아니다 */
-export type ConfirmedCancelBegin = 'BEGUN' | 'DONE' | 'NOT_CONFIRMED';
+/** 같은 결제의 다른 진행 중 취소 건이 이보다 어리면 보내지 않는다(10분 [가정], docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액') */
+export const CONFIRMED_CANCEL_BUSY_WINDOW_MS = 600_000;
+/** 취소 건을 만든 지 이 시간 이상 지난 재시도는 먼저 조회한다(3시간 [가정], P-T21) */
+export const CONFIRMED_CANCEL_QUERY_AFTER_MS = 10_800_000;
+
+/** payment_cancel.status(docs/data.md payment_cancel) */
+export type PaymentCancelStatus = 'REQUESTED' | 'CANCEL_PENDING' | 'CANCELED' | 'FAILED';
+
+/** 첫 전송 직전에 저장한 취소 건(payment_cancel 한 행). 재시도는 이 값을 그대로 보낸다 */
+export interface ConfirmedCancelRecord {
+  /** cancel-{cancellationId} */
+  readonly idemKey: string;
+  readonly amount: number;
+  readonly reason: string;
+  readonly fullCancel: boolean;
+  readonly expectedBalance: number;
+  readonly status: PaymentCancelStatus;
+  readonly createdAtMs: number;
+}
+
+/**
+ * beginConfirmedCancel의 결과(BUILD_ORDER GAT-080, BAT-415 계획 §3).
+ * BEGUN: 보낼 본문(replay = 이 취소 ID의 행이 이미 있었다), DONE: 그 행이 CANCELED, BUSY: 같은 결제의 다른 진행 중 행이 10분 안,
+ * NOT_CONFIRMED: 원장이 APPROVED·PARTIAL_CANCELED가 아니다, NO_BALANCE: 새 취소인데 남은 금액 0 이하,
+ * OVER_REMAINING: 요청액 > 결제 금액 − 누적 취소액 − 진행 중 다른 취소 합, AMOUNT_MISMATCH: 같은 취소 ID에 다른 금액
+ */
+export type ConfirmedCancelBegin =
+  | { readonly status: 'BEGUN'; readonly record: ConfirmedCancelRecord; readonly replay: boolean }
+  | { readonly status: 'DONE'; readonly cancelledAmount: number }
+  | { readonly status: 'BUSY' }
+  | { readonly status: 'NOT_CONFIRMED' }
+  | { readonly status: 'NO_BALANCE' }
+  | { readonly status: 'OVER_REMAINING' }
+  | { readonly status: 'AMOUNT_MISMATCH' };
+
+/** 3시간 지난 재시도의 조회 대조. 잔액 = 기대 잔액 − 금액이면 APPLIED, = 기대 잔액이면 NOT_APPLIED, 그 밖 UNKNOWN(P-T21) */
+export function settleByBalance(_record: Pick<ConfirmedCancelRecord, 'amount' | 'expectedBalance'>, _balanceAmount: number): 'APPLIED' | 'NOT_APPLIED' | 'UNKNOWN' {
+  throw new Error('아직 없음');
+}
 
 /** CancelPaymentResponse.result의 앞머리를 뗀 값 */
 export type ConfirmedCancelResult = 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN';

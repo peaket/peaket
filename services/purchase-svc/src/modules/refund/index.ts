@@ -28,7 +28,45 @@ export {
   type RefundAccount,
   type TicketCancelOutcome,
 } from './domain/cancellation.js';
-export type { CancellationConfigs, CancellationOrders, CancellationWrites, PaymentCancellations, ReauthGate, RefundDeps, RefundFailureNotice, SeatReturnNotices, SeatReturns, TicketCancellations } from './domain/ports.js';
+export type {
+  CancellationConfigs,
+  CancellationOrders,
+  CancellationWrites,
+  FraudCancellationRequestRecord,
+  FraudCancellationStore,
+  OperatorTicketCancellations,
+  OperatorTicketOutcome,
+  OperatorTicketResult,
+  PaymentCancellations,
+  ReauthGate,
+  RefundDeps,
+  RefundFailureNotice,
+  SeatReturnNotices,
+  SeatReturns,
+  TicketCancellations,
+} from './domain/ports.js';
+export {
+  FRAUD_CANCEL_MAX_TARGETS,
+  FRAUD_CANCEL_RESALE_PREP_MS,
+  FRAUD_FAILURE_CODES,
+  FRAUD_TICKET_OUTCOMES,
+  FraudCancellationError,
+  fraudCancelDeadlineMs,
+  fraudCancellationId,
+  fraudTargetsFingerprint,
+  parseCancelFraudTickets,
+  type CancelFraudTicketsInput,
+  type FraudCancelTarget,
+  type FraudFailureCode,
+  type FraudRefundProgress,
+  type FraudRefundState,
+  type FraudTicketOutcome,
+  type FraudTicketResult,
+} from './domain/fraud-cancellation.js';
+export { CancelFraudTickets, type CancelFraudTicketsDeps } from './application/cancel-fraud-tickets.js';
+export { GetFraudCancellation } from './application/get-fraud-cancellation.js';
+export { DrizzleFraudCancellationStore } from './adapters/db/drizzle-fraud-cancellation.js';
+export { fraudCancellationHandlers, fraudCancellationPackage, type FraudCancellationPackage } from './inbound/fraud-cancellation.grpc.js';
 export { DrizzleCancellationOrders, DrizzleCancellationWrites, DrizzleSeatReturns } from './adapters/db/drizzle-cancellation.js';
 export { GrpcTicketCancellations, type GrpcTicketCancellationsOptions } from './adapters/grpc-ticket-cancellations.js';
 export { GrpcPaymentCancellations, type GrpcPaymentCancellationsOptions } from './adapters/grpc-payment-cancellations.js';

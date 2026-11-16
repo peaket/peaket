@@ -26,7 +26,7 @@ import {
 import type { PgName } from '../../domain/payment-gateway.js';
 import { depositNextQueryAtMs } from '../../domain/virtual-account.js';
 import { DEPOSIT_CANCEL_SENT_EVENT_TYPE, type DepositCancelBegin, depositCancelEventKey, type DepositCancelTarget } from '../../domain/deposit-cancel.js';
-import { CONFIRMED_CANCEL_SENT_EVENT_TYPE, confirmedCancelEventKey, isConfirmedStatus, type ConfirmedCancelBegin, type ConfirmedCancelTarget } from '../../domain/confirmed-cancel.js';
+import type { ConfirmedCancelBegin, ConfirmedCancelTarget } from '../../domain/confirmed-cancel.js';
 import type { CallBudget, FinishConfirmResult, MarkConfirmSentResult, PaymentConfirmJobs, PaymentDepositCancels, PaymentConfirmedCancels, PaymentEventCodec, PaymentUnknownQueries, ResolveUnknownResult } from '../../domain/ports.js';
 import { buildResolvedEvent, RESOLVED_EVENT_TYPE, type ResolvedFinish, UNKNOWN_OVERDUE_MS, UNKNOWN_QUERY_BASE_MS, unknownQueryClaimHoldMs, type UnknownQueryJob } from '../../domain/unknown-resolver.js';
 import { jsonPaymentEventCodec, TRADE_PAYMENTS_TOPIC } from '../payment-events.js';
@@ -581,40 +581,17 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     };
   }
 
-  async beginConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<ConfirmedCancelBegin> {
-    const key = confirmedCancelEventKey(target.paymentId, cancellationId);
-    return this.#tx(async (tx) => {
-      const status = await lockStatus(tx, target.paymentId);
-      const r = await tx.execute(sql`select 1 from payment_event where payment_id = ${target.paymentId}::uuid and type = ${CONFIRMED_CANCEL_SENT_EVENT_TYPE} and event_key = ${key}::uuid limit 1`);
-      const sent = r.rows.length > 0;
-      if (status === undefined) return 'NOT_CONFIRMED';
-      if (sent && (status === 'CANCELED' || status === 'PARTIAL_CANCELED')) return 'DONE';
-      if (!isConfirmedStatus(status)) return 'NOT_CONFIRMED';
-      if (!sent) {
-        const seq = await nextSeq(tx, target.paymentId);
-        await tx.execute(sql`
-          insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at)
-          values (${target.paymentId}::uuid, ${seq}, ${key}::uuid, ${CONFIRMED_CANCEL_SENT_EVENT_TYPE}, false, ${new Date(this.o.clock.now())}::timestamptz)`);
-      }
-      return 'BEGUN';
-    }, budget);
+  // 0021 payment_cancel 행 만들기·찾기(BAT-415 몫 P). 구현 담당이 채운다
+  async beginConfirmedCancel(_target: ConfirmedCancelTarget, _q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string }, _budget?: CallBudget): Promise<ConfirmedCancelBegin> {
+    throw new Error('아직 없음');
   }
 
-  async finishConfirmedCancel(target: ConfirmedCancelTarget, _cancellationId: string, amount: number, budget?: CallBudget): Promise<{ status: 'APPLIED' | 'STALE'; cancelledAmount: number }> {
-    return this.#tx(async (tx) => {
-      const status = await lockStatus(tx, target.paymentId);
-      if (status === undefined || !isConfirmedStatus(status)) return { status: 'STALE', cancelledAmount: target.cancelledAmount };
-      const r = await tx.execute(sql`
-        update payment
-        set cancelled_amount = cancelled_amount + ${amount},
-            status = case when cancelled_amount + ${amount} >= amount then 'CANCELED' else 'PARTIAL_CANCELED' end,
-            status_changed_at = ${new Date(this.o.clock.now())}::timestamptz
-        where id = ${target.paymentId}::uuid and status in ('APPROVED', 'PARTIAL_CANCELED')
-        returning cancelled_amount`);
-      const row = r.rows[0] as { cancelled_amount: number | string } | undefined;
-      if (!row) return { status: 'STALE', cancelledAmount: target.cancelledAmount };
-      return { status: 'APPLIED', cancelledAmount: Number(row.cancelled_amount) };
-    }, budget);
+  async finishConfirmedCancel(_target: ConfirmedCancelTarget, _cancellationId: string, _budget?: CallBudget): Promise<{ status: 'APPLIED' | 'STALE'; cancelledAmount: number }> {
+    throw new Error('아직 없음');
+  }
+
+  async markConfirmedCancel(_target: ConfirmedCancelTarget, _cancellationId: string, _status: 'CANCEL_PENDING' | 'FAILED', _budget?: CallBudget): Promise<void> {
+    throw new Error('아직 없음');
   }
 
   async markOverdueBatch(limit: number): Promise<string[]> {

@@ -1,6 +1,6 @@
 // 티켓 저장소 포트(BUILD_ORDER HOT-160). 메모리 구현은 단위 시험, Drizzle 구현은 운영 DB가 쓴다.
 import type { DeviceKeyReason } from './device-key.js';
-import type { CancelTicketOutcome, CancelTicketsInput, IssueTicketsInput, IssueTicketsResult, ListTicketsInput, ListTicketsResult, ReviewEligibilityTicket, TicketRecord } from './ticket.js';
+import type { CancelTicketOutcome, CancelTicketsInput, IssueTicketsInput, IssueTicketsResult, ListTicketsInput, ListTicketsResult, OperatorCancelInput, OperatorCancelOutcome, ReviewEligibilityTicket, TicketRecord } from './ticket.js';
 
 /** 발권 저장 입력: 앱이 만든 멱등 지문을 함께 넘긴다. */
 export interface IssueStoreInput extends IssueTicketsInput {
@@ -17,6 +17,12 @@ export interface TicketStore {
 
   /** 티켓마다 행 잠금 안에서 조건을 보고 취소한다. cancellation_id·ticket_id 단위로 멱등하다. */
   cancel(input: CancelTicketsInput): Promise<readonly CancelTicketOutcome[]>;
+
+  /**
+   * 부정 예매 운영자 취소(BAT-415 몫 F). 한 트랜잭션, 표마다 FOR UPDATE. 없는 표·다른 회차 표는 TicketInputError(트랜잭션째 되돌림).
+   * (approval_id, ticket_id) 기록이 있으면 그 결과를 그대로 준다. 결과는 요청 차례다
+   */
+  operatorCancel(input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]>;
 
   /** 계정의 월렛 목록. 발권 최신순, 커서 페이지. */
   list(input: ListTicketsInput): Promise<ListTicketsResult>;

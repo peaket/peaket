@@ -1,5 +1,7 @@
 // 예매 취소 HTTP 조립 시험(GAT-070·GAT-080): RefundModule을 메모리 조립에 꽂아 견적 200과 취소의 닫힌 재인증 403을 본다.
+// BAT-415 몫 S: 재인증 대역을 통과로 꽂은 두 번째 조립에서 R-T3(양도 요청 중·남이 보유 → 409 transfer-pending과 안내 문구)과 S1을 본다.
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { createService, fakeClock, PROBLEM_TYPE_BASE, purchaseMac, purchaseMacInput } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -101,5 +103,118 @@ describe('예매 취소 HTTP', () => {
   test('GAT080_구매서명이_없으면_401이다', async () => {
     const r = await svc.http.inject({ method: 'POST', url: `/v1/tickets/${TICKET}/cancellation`, headers: { ...fanHeaders, 'content-type': 'application/json', 'idempotency-key': IDEM }, payload: '{}' });
     expect(r.statusCode).toBe(401);
+  });
+});
+
+describe('예매 취소 HTTP: 재인증을 통과한 뒤의 거절(BAT-415 몫 S)', () => {
+  const ACCOUNT2 = '0193a000-0000-7000-8000-000000000011';
+  const LOGIN2 = '0193a000-0000-7000-8000-000000000012';
+  const PSID2 = '0193a000-0000-7000-8000-000000000013';
+  const OTHER_PAYER_TICKET = '0193a000-0000-7000-8000-000000000015';
+  const sessions2 = new MemoryPurchaseSessions();
+  sessions2.open({ sessionId: PSID2, accountId: ACCOUNT2, eventId: EVENT, journeyId: 'journey', loginSessionId: LOGIN2, key: KEY });
+  let ticketAnswer: Awaited<ReturnType<TicketCancellations['cancel']>> = 'REFUND_NOW';
+  const created: unknown[] = [];
+  const paid: unknown[] = [];
+  const mine: CancellationOrderView = { ...view, payerAccountId: ACCOUNT2 };
+  const someoneElses: CancellationOrderView = { ...view, ticketId: OTHER_PAYER_TICKET, payerAccountId: ACCOUNT };
+  let svc2: Awaited<ReturnType<typeof createService>>;
+  let seq = 0;
+
+  beforeAll(async () => {
+    svc2 = await createService({
+      name: 'purchase-svc',
+      module: AppModule.register({
+        memory: true,
+        sessions: sessions2,
+        refund: {
+          orders: { findByTicket: async (id) => (id === TICKET ? mine : id === OTHER_PAYER_TICKET ? someoneElses : undefined), findCancellation: async () => undefined },
+          tickets: { cancel: async () => ticketAnswer },
+          payments: {
+            cancel: async (q) => {
+              paid.push(q);
+              return 'CANCELLED';
+            },
+          },
+          writes: {
+            ...writes,
+            create: async (q) => {
+              created.push(q);
+              return { status: 'CREATED' };
+            },
+          },
+          calendar: new WeekendBusinessCalendar(),
+          reauth: { verify: async () => true },
+        },
+      }),
+      purchaseSessions: sessions2,
+      env: { PEAKET_ENV: 'ci' },
+      clock,
+      logDestination: quiet,
+    });
+  });
+  afterAll(async () => {
+    await svc2?.close();
+  });
+
+  const cancelHttp = async (ticketId: string) => {
+    const url = `/v1/tickets/${ticketId}/cancellation`;
+    const payload = '{}';
+    seq += 1;
+    return svc2.http.inject({
+      method: 'POST',
+      url,
+      headers: {
+        'x-user-id': ACCOUNT2,
+        'x-session-id': LOGIN2,
+        'x-user-aud': 'fan',
+        'x-user-scope': 'ticket:buy',
+        'content-type': 'application/json',
+        'idempotency-key': randomUUID(),
+        'x-purchase-seq': String(seq),
+        'x-purchase-mac': purchaseMac(KEY, purchaseMacInput('POST', url, seq, Buffer.from(payload, 'utf8'))),
+        'x-reauth-token': 'reauth-ok',
+      },
+      payload,
+    });
+  };
+
+  test('R-T3 양도 요청 중·남이 보유한 티켓 취소는 409 transfer-pending과 안내 문구이고 취소 행·결제사 호출이 없다', async () => {
+    for (const answer of ['TRANSFER_PENDING', 'NOT_PAYER_HOLDER'] as const) {
+      ticketAnswer = answer;
+      created.length = 0;
+      paid.length = 0;
+      const r = await cancelHttp(TICKET);
+      expect(r.statusCode, answer).toBe(409);
+      const problem = JSON.parse(r.payload) as { type: string; title: string; status: number };
+      expect(problem.type, answer).toBe(`${PROBLEM_TYPE_BASE}transfer-pending`);
+      expect(problem.title, answer).toBe('양도 요청을 철회한 뒤 취소할 수 있습니다');
+      expect(problem.status, answer).toBe(409);
+      expect(created, answer).toHaveLength(0);
+      expect(paid, answer).toHaveLength(0);
+    }
+  });
+
+  test('R-T3 대조: 결제자가 아니면 403 not-payer, 공연이 시작됐으면 409 entry-started다(transfer-pending으로 바꾸지 않는다)', async () => {
+    ticketAnswer = 'REFUND_NOW';
+    const notPayer = await cancelHttp(OTHER_PAYER_TICKET);
+    expect(notPayer.statusCode).toBe(403);
+    expect(JSON.parse(notPayer.payload).type).toBe(`${PROBLEM_TYPE_BASE}not-payer`);
+
+    ticketAnswer = 'EVENT_STARTED';
+    const started = await cancelHttp(TICKET);
+    expect(started.statusCode).toBe(409);
+    expect(JSON.parse(started.payload).type).toBe(`${PROBLEM_TYPE_BASE}entry-started`);
+  });
+
+  test('GAT-080 S1 ticket-svc가 ALREADY_CANCELLED를 주면 HTTP는 409 cancellation-conflict이고 취소 행·결제사 호출이 없다', async () => {
+    ticketAnswer = 'ALREADY_CANCELLED';
+    created.length = 0;
+    paid.length = 0;
+    const r = await cancelHttp(TICKET);
+    expect(r.statusCode).toBe(409);
+    expect(JSON.parse(r.payload).type).toBe(`${PROBLEM_TYPE_BASE}cancellation-conflict`);
+    expect(created).toHaveLength(0);
+    expect(paid).toHaveLength(0);
   });
 });

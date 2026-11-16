@@ -10,6 +10,8 @@ import {
   issueFingerprint,
   type ListTicketsInput,
   type ListTicketsResult,
+  type OperatorCancelInput,
+  type OperatorCancelOutcome,
   newTicketKey,
   normalizeCancelInput,
   normalizeIssueInput,
@@ -65,6 +67,11 @@ export class TicketService {
   /** 요청자=결제자=보유자, 양도 요청 없음, 입장 전/후를 저장소 행 잠금 안에서 본다. */
   async cancel(input: CancelTicketsInput): Promise<readonly CancelTicketOutcome[]> {
     return this.deps.store.cancel(normalizeCancelInput(input));
+  }
+
+  /** 부정 예매 운영자 취소(BAT-415 몫 F): 입력 검사 뒤 저장소가 행 잠금 안에서 표마다 가른다. 구현 담당이 채운다 */
+  async operatorCancel(_input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
+    throw new Error('아직 없음');
   }
 
   /** 계정의 월렛 목록(최신 발권순). */

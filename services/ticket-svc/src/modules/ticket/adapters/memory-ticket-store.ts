@@ -7,6 +7,8 @@ import {
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
+  type OperatorCancelInput,
+  type OperatorCancelOutcome,
   type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
@@ -80,6 +82,16 @@ export class MemoryTicketStore implements TicketStore {
       this.issues.set(issueKey(t.orderId, t.issueGeneration), { ...issue, tickets: issue.tickets.map((x) => (x.ticketId === t.ticketId ? next : x)) });
     }
     return started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
+  }
+
+  /** 부정 예매 운영자 취소(BAT-415 몫 F). 구현 담당이 채운다 */
+  async operatorCancel(_input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
+    throw new Error('아직 없음');
+  }
+
+  /** 시험 씨앗: 그 표에 들어감(IN)·통과(PASS) 스캔 기록이 있는 것으로 둔다(운영자 취소의 SKIPPED_ENTRY_RECORDED) */
+  recordEntry(_ticketId: string): void {
+    throw new Error('아직 없음');
   }
 
   async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {

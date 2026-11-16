@@ -69,6 +69,35 @@ export interface CancelTicketOutcome {
   readonly result: CancelTicketResult;
 }
 
+// ---- 부정 예매 운영자 취소(ticket.proto OperatorCancelTickets, docs/features/transfer-refund.md §7.4 'purchase-svc·ticket-svc 쪽 세부', BUILD_ORDER GAT-080, BAT-415 몫 F) ----
+
+/** 한 번에 운영자 취소하는 표 상한 500장 [가정](fraud_cancellation.proto 대상 1~500) */
+export const OPERATOR_CANCEL_MAX_TARGETS = 500;
+export type OperatorCancelResult = 'CANCELED' | 'SKIPPED_ALREADY_ENDED' | 'SKIPPED_ENTRY_RECORDED' | 'SKIPPED_HOLDER_CHANGED';
+export interface OperatorCancelTarget {
+  readonly ticketId: string;
+  readonly expectedHolderAccountId: string;
+}
+export interface OperatorCancelInput {
+  readonly approvalId: string;
+  readonly fraudCaseId: string;
+  readonly eventId: string;
+  readonly targets: readonly OperatorCancelTarget[];
+  readonly nowMs: number;
+}
+export interface OperatorCancelOutcome {
+  readonly ticketId: string;
+  readonly result: OperatorCancelResult;
+  readonly orderId: string;
+  /** 시스템이 거둔 양도 요청 ID. 양도 요청 표가 생기기 전(GAT-050)에는 늘 없다 */
+  readonly withdrawnTransferOfferId?: string;
+}
+
+/** 소문자 UUID·대상 1~500·같은 표 두 번 금지. @throws TicketInputError */
+export function normalizeOperatorCancelInput(_i: OperatorCancelInput): OperatorCancelInput {
+  throw new Error('아직 없음');
+}
+
 export interface ListTicketsInput {
   readonly accountId: string;
   readonly cursor?: string;

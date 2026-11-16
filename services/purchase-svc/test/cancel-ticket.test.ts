@@ -299,4 +299,18 @@ describe('취소 Saga', () => {
     expect(payments.calls).toHaveLength(1);
     expect(writes.created[0]).toMatchObject({ status: 'REFUND_PENDING', deductionBp: 0, refundAmount: 33_333 });
   });
+
+  test('GAT-080 S1 ticket-svc가 ALREADY_CANCELLED(다른 취소가 먼저 끝냄)를 주면 좌석·취소 행·결제사를 건드리지 않고 ALREADY_ENDED다', async () => {
+    const { svc, tickets, payments, writes, seats } = saga({ ticket: 'ALREADY_CANCELLED' });
+    const r = await svc.execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: CANCEL, reason: 'USER', nowMs: kst('2026-11-13T10:00:00'), deadlineMs: 2000 });
+    expect(r).toEqual({ status: 'ALREADY_ENDED' });
+    // ticket-svc까지는 갔다(그 답을 보고 멈춘다)
+    expect(tickets.calls).toHaveLength(1);
+    expect(seats.calls).toHaveLength(0);
+    expect(writes.created).toHaveLength(0);
+    expect(writes.updates).toHaveLength(0);
+    expect(writes.retries).toHaveLength(0);
+    expect(writes.failures).toHaveLength(0);
+    expect(payments.calls).toHaveLength(0);
+  });
 });

@@ -10,6 +10,7 @@ import type {
   RefundAccount,
   TicketCancelOutcome,
 } from './cancellation.js';
+import type { FraudCancelTarget, FraudRefundProgress, FraudTicketResult } from './fraud-cancellation.js';
 import type { BusinessCalendar } from './refund-policy.js';
 
 /** 취소가 읽는 주문·티켓(운영은 purchase DB order_item.ticket_id → purchase_order, 판매 설정) */
@@ -68,6 +69,9 @@ export interface CancellationWrites {
     readonly actor: string;
     /** 회차 취소 일괄 환불 요청 ID(BAT-425). 있으면 order_cancellation에 함께 남긴다 */
     readonly eventCancellationRequestId?: string;
+    /** 부정 예매 운영자 취소의 사건 ID·승인 ID(BAT-415 몫 F). 있으면 order_cancellation에 함께 남긴다 */
+    readonly fraudCaseId?: string;
+    readonly approvalId?: string;
   }): Promise<CancellationWriteOutcome>;
   /** 입장 기록 마감 뒤 환급할 REQUESTED와 재시도할 REFUND_PENDING(환급 시각이 지난 것) */
   dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]>;
@@ -127,4 +131,51 @@ export interface RefundDeps {
   readonly seats?: SeatReturns;
   /** 없으면 재인증 토큰을 확인하지 못해 취소를 403으로 닫는다 */
   readonly reauth?: ReauthGate;
+}
+
+// ---- 부정 예매 운영자 취소(BAT-415 몫 F, fraud_cancellation.proto, docs/features/transfer-refund.md §7.4) ----
+
+/** ticket-svc OperatorCancelTickets의 표 하나 결과 */
+export type OperatorTicketResult = 'CANCELED' | 'SKIPPED_ALREADY_ENDED' | 'SKIPPED_ENTRY_RECORDED' | 'SKIPPED_HOLDER_CHANGED';
+export interface OperatorTicketOutcome {
+  readonly ticketId: string;
+  readonly result: OperatorTicketResult;
+  readonly orderId: string;
+  readonly withdrawnTransferOfferId?: string;
+}
+
+/** ticket-svc TicketService.OperatorCancelTickets(행 잠금 안에서 이미 끝남 → 입장 기록 → 보유자를 가르고 나머지는 키를 폐기한다) */
+export interface OperatorTicketCancellations {
+  /** 전송 실패·답 모름은 던진다 */
+  operatorCancel(q: {
+    readonly approvalId: string;
+    readonly fraudCaseId: string;
+    readonly eventId: string;
+    readonly targets: readonly FraudCancelTarget[];
+    readonly deadlineMs: number;
+  }): Promise<readonly OperatorTicketOutcome[]>;
+}
+
+/** 승인 업무 하나의 요청 기록(fraud_cancellation_request) */
+export interface FraudCancellationRequestRecord {
+  readonly approvalId: string;
+  readonly fraudCaseId: string;
+  readonly eventId: string;
+  readonly fingerprint: string;
+  readonly requestedBy: string;
+  readonly approvedBy: string;
+  readonly approvedAtMs?: number;
+  readonly createdAtMs: number;
+}
+
+/** 운영자 취소의 요청·표별 결과 저장소(fraud_cancellation_request·fraud_cancellation_ticket) */
+export interface FraudCancellationStore {
+  find(approvalId: string): Promise<FraudCancellationRequestRecord | undefined>;
+  /** 처음이면 CREATED. 같은 승인 ID가 이미 있으면(겹친 호출) EXISTS와 그 기록 */
+  create(r: FraudCancellationRequestRecord): Promise<{ readonly status: 'CREATED' } | { readonly status: 'EXISTS'; readonly record: FraudCancellationRequestRecord }>;
+  results(approvalId: string): Promise<readonly FraudTicketResult[]>;
+  /** (approval_id, ticket_id)로 덮어 쓴다 */
+  saveResults(approvalId: string, results: readonly (FraudTicketResult & { readonly expectedHolderAccountId: string })[], nowMs: number): Promise<void>;
+  /** ACCEPTED 표의 order_cancellation 상태(REFUNDED → REFUNDED·status_changed_at, refund_failed_at 있음·VOIDED → NEEDS_CS, 그 밖 PENDING) */
+  refunds(approvalId: string): Promise<readonly FraudRefundProgress[]>;
 }

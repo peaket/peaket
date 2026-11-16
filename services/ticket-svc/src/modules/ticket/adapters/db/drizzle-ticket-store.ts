@@ -9,6 +9,8 @@ import {
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
+  type OperatorCancelInput,
+  type OperatorCancelOutcome,
   type ReviewEligibilityTicket,
   type TicketRecord,
   TicketConflictError,
@@ -177,6 +179,11 @@ export class DrizzleTicketStore implements TicketStore {
       await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId, keyId: revokedKeyId ? Buffer.from(revokedKeyId).toString('base64url') : null });
     }
     return result;
+  }
+
+  /** 부정 예매 운영자 취소(BAT-415 몫 F, 0008 ticket_operator_cancellation). 구현 담당이 채운다 */
+  async operatorCancel(_input: OperatorCancelInput): Promise<readonly OperatorCancelOutcome[]> {
+    throw new Error('아직 없음');
   }
 
   async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {

@@ -7,6 +7,7 @@
 // - 회차·계정·주문·티켓 ID는 시험마다 새 UUID라 서로 닿지 않는다.
 // - ticket-svc와 payment-svc는 운영 처리기·저장소를 그대로 띄운다. 결제사만 기록 대역이다(멱등키와 금액을 본다).
 // - Redis 비트맵·secver·구역 Pub/Sub은 실제 Valkey에서 읽고, 취소표 Lua가 낸 글을 구독해 확인한다.
+// - BAT-415: 맨 아래 묶음이 장부 범위 R-T3(양도 요청 중 거절)·R-T4(돌려받은 표의 결제자 취소, payment_cancel 한 행)를 본다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, createHotRedis, ensureOutboxPartitions, fakeClock, type Database, type HotRedis } from '@peaket/platform';
@@ -535,5 +536,49 @@ describe('견적·취소 Saga', () => {
     await expect(cancelOf(w, cancellationId)).resolves.toEqual({ status: 'REPLAYED', cancellationId, refundAmount: 90_000, refundAfterEntryClose: false });
     expect(gatewayCalls).toHaveLength(1);
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED' });
+  });
+});
+
+// ---- 장부 범위 R-T3·R-T4(docs/features/transfer-refund.md §11, BAT-415 몫 S) ----
+describe('R-T3·R-T4 결제자와 보유자', () => {
+  test('R-T3 양도 요청 중인 티켓은 실제 ticket-svc가 거절하고 키·상태·좌석·취소 행·결제사 호출이 그대로다', async () => {
+    const w = await world();
+    await ticketDb.pool.query('update ticket set transfer_pending = true where id = $1', [w.ticketId]);
+    const before = (await ticketDb.pool.query('select status, account_id, key_revoked_at, transfer_pending, version from ticket where id = $1', [w.ticketId])).rows[0];
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    await expect(cancelOf(w, randomUUID())).resolves.toEqual({ status: 'TRANSFER_PENDING' });
+    expect((await ticketDb.pool.query('select status, account_id, key_revoked_at, transfer_pending, version from ticket where id = $1', [w.ticketId])).rows[0]).toEqual(before);
+    expect(before).toMatchObject({ status: 'ISSUED', key_revoked_at: null, transfer_pending: true, version: 0 });
+    expect((await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [w.eventId, w.seatId])).rows[0].status).toBe('SOLD');
+    expect((await admin.pool.query('select count(*)::int as n from order_cancellation where ticket_id = $1', [w.ticketId])).rows[0].n).toBe(0);
+    expect((await admin.pool.query('select status from purchase_order where id = $1', [w.orderId])).rows[0].status).toBe('CONFIRMED');
+    expect(gatewayCalls).toHaveLength(0);
+    expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'APPROVED', cancelled_amount: 0 });
+    expect(Number(await redis.command(['GETBIT', seatKeys.bitmap(w.eventId), '3'], { key: seatKeys.bitmap(w.eventId) }))).toBe(1);
+  });
+
+  test('R-T4 돌려받은 티켓을 결제자가 공연 4일 전에 취소하면 20% 공제로 처음 결제의 부분 취소 한 번으로 환급한다', async () => {
+    // 권면 33,333원, 공연 2026-11-20 19:00(+09:00), 예매 2026-11-01 10:00, 지금 2026-11-16 10:00(공연 4일 전, 공제 20%)
+    const w = await world({ eventStartsAtMs: Date.parse('2026-11-20T19:00:00+09:00'), ticketPrice: 33_333 });
+    // 양도 기능(GAT-050) 전이라 '받은 사람에게 넘어갔다가 돌려받음'을 SQL로 흉내 낸다: 보유자 결제자 → 받은 사람(version 1) → 결제자(version 2)
+    await ticketDb.pool.query('update ticket set account_id = $2, version = 1 where id = $1', [w.ticketId, randomUUID()]);
+    await ticketDb.pool.query('update ticket set account_id = $2, version = 2 where id = $1', [w.ticketId, w.accountId]);
+    gatewayOutcome = 'CANCELLED';
+    gatewayCalls = [];
+    const cancellationId = randomUUID();
+    const nowMs = Date.parse('2026-11-16T10:00:00+09:00');
+    await expect(cancelOf(w, cancellationId, 'USER', nowMs)).resolves.toEqual({ status: 'ACCEPTED', cancellationId, refundAmount: 26_667, refundAfterEntryClose: false });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', reason: 'USER', deduction_bp: 2_000, deduction_amount: 6_666, refund_amount: 26_667, refund_due_at: null });
+    // 처음 결제(그 주문의 원래 결제 참조)로 한 번, 환불 계좌 없이
+    expect(gatewayCalls).toHaveLength(1);
+    expect(gatewayCalls[0]).toMatchObject({ paymentRef: `ref-${w.orderId}`, amount: 26_667, reason: 'USER', idemKey: `cancel-${cancellationId}` });
+    expect(gatewayCalls[0]).not.toHaveProperty('refundAccount');
+    expect(await paymentRow(w.paymentId)).toMatchObject({ status: 'PARTIAL_CANCELED', cancelled_amount: 26_667 });
+    const cancels = await paymentDb.pool.query('select idempotency_key, amount, expected_balance, status from payment_cancel where payment_id = $1', [w.paymentId]);
+    expect(cancels.rows).toEqual([{ idempotency_key: `cancel-${cancellationId}`, amount: 26_667, expected_balance: 33_333, status: 'CANCELED' }]);
+    const ticket = (await ticketDb.pool.query('select status, account_id, key_revoked_at, version from ticket where id = $1', [w.ticketId])).rows[0];
+    expect(ticket).toMatchObject({ status: 'REFUNDED', account_id: w.accountId, version: 3 });
+    expect(ticket.key_revoked_at).not.toBeNull();
   });
 });

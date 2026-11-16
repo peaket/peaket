@@ -5,7 +5,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { type CircuitBreaker, createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import type { TicketCancelOutcome } from '../domain/cancellation.js';
-import type { TicketCancellations } from '../domain/ports.js';
+import type { OperatorTicketCancellations, OperatorTicketOutcome, TicketCancellations } from '../domain/ports.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
@@ -28,7 +28,7 @@ export interface GrpcTicketCancellationsOptions {
   breaker?: CircuitBreaker;
 }
 
-export class GrpcTicketCancellations implements TicketCancellations {
+export class GrpcTicketCancellations implements TicketCancellations, OperatorTicketCancellations {
   readonly #client: grpc.Client & { CancelTickets: Unary };
 
   constructor(o: GrpcTicketCancellationsOptions) {
@@ -60,6 +60,11 @@ export class GrpcTicketCancellations implements TicketCancellations {
     const raw = typeof first?.result === 'string' ? first.result.replace(/^CANCEL_TICKET_RESULT_/, '') : '';
     if (!OUTCOMES.has(raw as TicketCancelOutcome)) throw new Error('ticket-svc CancelTickets 답의 결과를 알 수 없다');
     return raw as TicketCancelOutcome;
+  }
+
+  /** ticket-svc OperatorCancelTickets(BAT-415 몫 F, 데드라인 5초 [가정]). 구현 담당이 채운다 */
+  async operatorCancel(_q: Parameters<OperatorTicketCancellations['operatorCancel']>[0]): Promise<readonly OperatorTicketOutcome[]> {
+    throw new Error('아직 없음');
   }
 
   close(): void {
