@@ -701,6 +701,9 @@ test('CF2-03 BSL-060 loadtest-check는 잠금 파일대로 의존성을 설치�
   assert.ok(install >= 0, '뿌리에서 도는 `pnpm install --frozen-lockfile` 단계가 없다');
   assert.ok(run >= 0, '`node --test "loadtest/test/*.test.mjs"` 단계가 없다');
   assert.ok(!steps[install].keys.has('working-directory'), '설치 단계가 뿌리가 아닌 폴더에서 돈다');
+  // 세 단계는 늘 돌고 실패하면 잡을 멈춘다(리뷰 RV-2, 검증 M-30 `if: false`·M-31 `continue-on-error: true`)
+  for (const [what, i] of [['pnpm 받기', getPnpm], ['설치', install], ['시험', run]])
+    for (const key of ['if', 'continue-on-error']) assert.ok(!steps[i].keys.has(key), `${what} 단계에 ${key}가 있다(건너뛰거나 실패를 넘길 수 있다)`);
   assert.doesNotMatch(text, /^\s*defaults:/m, '잡·워크플로 기본값(defaults)이 설치 폴더를 바꿀 수 있다');
   assert.ok(getPnpm < install, 'pnpm 받기가 설치보다 뒤에 있다');
   assert.ok(install < run, '설치가 시험보다 뒤에 있다');
