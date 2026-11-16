@@ -98,6 +98,7 @@ function defaultTrailers(s) {
     ...(s.batch === undefined ? [] : [`Batch: ${s.batch}`]),
     `Role: ${s.role}`,
     ...(s.fixBy ? [`Fix-By: ${s.fixBy}`] : []),
+    ...(s.findings ?? []).map((f) => `Finding: ${f}`),
     `Agent-Session: ${s.session}`,
     'Agent-Model: fixture-model',
   ];
@@ -142,8 +143,8 @@ function codeBatch(id = 'BAT-901', o = {}) {
     spec(`${p}impl`, 'impl', id, s.impl, { [src]: 'export const x = () => 1;\n' }),
     spec(`${p}review`, 'review', id, s.review, { [`docs/review/notes/${id}-review.md`]: '높음 0\n' }),
     spec(`${p}verify`, 'verify', id, s.verify, { [`docs/review/notes/${id}-verify.md`]: '다 잡았다\n' }),
-    spec(`${p}rfTest`, 'review-fix', id, s.test, { [tst]: '시험 1\n시험 2\n' }, { fixBy: 'test' }),
-    spec(`${p}rfImpl`, 'review-fix', id, s.impl, { [src]: 'export const x = () => 2;\n' }, { fixBy: 'impl' }),
+    spec(`${p}rfTest`, 'review-fix', id, s.test, { [tst]: '시험 1\n시험 2\n' }, { fixBy: 'test', findings: ['RV-901'] }),
+    spec(`${p}rfImpl`, 'review-fix', id, s.impl, { [src]: 'export const x = () => 2;\n' }, { fixBy: 'impl', findings: ['RV-901'] }),
     spec(`${p}record`, 'record', id, s.record, { 'docs/PROGRESS.md': `${id} 끝\n` }),
   ];
 }
@@ -550,7 +551,7 @@ test('RC-20 ④ 문서 묶음 구성', () => {
     ['plan 없음', drop(docBatch(), 'plan')],
     ['test 커밋 섞임', add(spec('t', 'test', 'BAT-902', S.test, { 'notes/t.md': '시험\n' }))],
     ['impl 커밋 섞임', add(spec('i', 'impl', 'BAT-902', S.impl, { 'notes/i.md': '구현\n' }))],
-    ['review-fix 커밋 섞임', add(spec('f', 'review-fix', 'BAT-902', S.test, { 'notes/f.md': '반영\n' }, { fixBy: 'test' }))],
+    ['review-fix 커밋 섞임', add(spec('f', 'review-fix', 'BAT-902', S.test, { 'notes/f.md': '반영\n' }, { fixBy: 'test', findings: ['RV-902'] }))],
     ['verify 커밋 섞임', add(spec('v', 'verify', 'BAT-902', S.verify, { 'notes/v.md': '검증\n' }))],
   ]) {
     const { r } = check(seq);
@@ -630,8 +631,8 @@ test('RC-26 ⑥ 코드를 쓰지 않는 역할이 코드 경로를 바꾸면 실
     const { r, sha } = check(seq);
     expectFail(r, `RC-26 ${name}`, '코드 경로', batch, sha[label], [p]);
   }
-  // 경계: 맨 위 폴더가 아닌 곳의 같은 이름, 비슷한 맨 위 이름, 결정 8 밖의 loadtest/·specs/
-  const near = ['docs/apps/a.md', 'notes/services/a.md', 'toolbox/a.mjs', '.githubx/a.yml', 'loadtest/a.js', 'specs/a.md'];
+  // 경계(계획 8의 2 허용 목록): docs/ 아래, 코드 경로 밖의 .md(맨 위가 아닌 곳의 같은 이름, 비슷한 맨 위 이름 포함)
+  const near = ['docs/apps/a.md', 'notes/services/a.md', 'toolbox/a.md', '.githubx/a.md', 'loadtest/README.md', 'specs/a.md'];
   const { r } = check(addFiles(codeBatch(), 'plan', Object.fromEntries(near.map((p) => [p, '\n']))));
   expectPass(r, 'RC-26 코드 경로가 아닌 곳', 1, 8);
 });
@@ -827,4 +828,171 @@ test('RC-35 ⑩ 실패를 모두 찍고 Actions 꼴을 쓴다', () => {
   expectFail(gh, 'RC-35 Actions 꼬리말', '꼬리말', 'BAT-901', sha.record, [], '::error::');
   expectFail(gh, 'RC-35 Actions 시험 파일', '시험 파일', 'BAT-901', sha.impl, ['services/a/test/100%25.test.ts'], '::error::');
   assert.doesNotMatch(gh.out, /^실패: /m, `RC-35: Actions에서 '실패: ' 앞머리를 썼다\n${gh.all}`);
+});
+
+// ---- 리뷰 지적 RV-01~RV-03과 감독 결정(계획 8, 2026-11-16) ----
+
+// 리뷰 반영 사양: 지적 번호와 바꾼 파일을 준다(시험 쪽은 s-test, 구현 쪽은 s-impl)
+const rfTestOf = (label, findings, files = { 'services/a/test/x.test.ts': `시험 ${label}\n` }) => spec(label, 'review-fix', 'BAT-901', S.test, files, { fixBy: 'test', findings });
+const rfImplOf = (label, findings, files = { 'services/a/src/x.ts': `export const x = () => '${label}';\n` }) => spec(label, 'review-fix', 'BAT-901', S.impl, files, { fixBy: 'impl', findings });
+const BEFORE_RF = ['plan', 'test', 'impl', 'review', 'verify'];
+
+test('RC-36 ⑤ 파이썬 시험과 test-sim 폴더도 시험 파일이다', () => {
+  const cases = [];
+  for (const p of ['tools/doc-check/test_public.py', 'services/q/test-sim/cluster.ts', 'services/q/test-sim/a.sim.test.ts']) {
+    cases.push([`${p} 더함`, addFiles(codeBatch(), 'impl', { [p]: '더함\n' }), p]);
+    cases.push([`${p} 고침`, addFiles(codeBatch('BAT-901', { testFiles: { [p]: '처음\n' } }), 'impl', { [p]: '고침\n' }), p]);
+    cases.push([`${p} 지움`, set(codeBatch('BAT-901', { testFiles: { [p]: '처음\n' } }), 'impl', { del: [p] }), p]);
+  }
+  // 경계: test_ 뒤 한 글자
+  cases.push(['services/q/py/test_a.py 더함', addFiles(codeBatch(), 'impl', { 'services/q/py/test_a.py': '더함\n' }), 'services/q/py/test_a.py']);
+  for (const [name, seq, p] of cases) {
+    const { r, sha } = check(seq);
+    expectFail(r, `RC-36 ${name}`, '시험 파일', 'BAT-901', sha.impl, [p]);
+  }
+});
+
+test('RC-37 ⑤ 파이썬·test-sim과 비슷한 경로는 시험 파일이 아니다', () => {
+  // services/r/Test-sim은 계획의 services/q/Test-sim과 같은 뜻이다(대소문자만 다른 폴더가 RC-36의 services/q/test-sim과 한 저장소에서 부딪히지 않게 부모를 바꿨다)
+  const near = [
+    'services/q/py/test_.py', 'services/q/py/contest_a.py', 'services/q/py/test_a.pyc', 'services/q/py/test_a.py.txt', 'services/q/py/Test_a.py',
+    'services/q/test-sims/a.ts', 'services/r/Test-sim/a.ts', 'apps/web/src/shared/lib/test-ts-resolve.mjs',
+  ];
+  const { r } = check(addFiles(codeBatch(), 'impl', Object.fromEntries(near.map((p) => [p, '고침\n']))));
+  expectPass(r, 'RC-37', 1, 8);
+});
+
+test('RC-38 ⑥ 코드를 쓰지 않는 역할은 문서 밖 경로를 못 바꾼다', () => {
+  const w7 = (files) => spec('w7', 'record', 'W7-L1', S.record, files);
+  const cases = [
+    ['review → deploy/charts/a/templates/deployment.yaml', addFiles(codeBatch(), 'review', { 'deploy/charts/a/templates/deployment.yaml': 'kind: Deployment\n' }), 'review', 'BAT-901', 'deploy/charts/a/templates/deployment.yaml'],
+    ['plan → loadtest/a.mjs', addFiles(codeBatch(), 'plan', { 'loadtest/a.mjs': '\n' }), 'plan', 'BAT-901', 'loadtest/a.mjs'],
+    ['verify → specs/a.tla', addFiles(codeBatch(), 'verify', { 'specs/a.tla': '\n' }), 'verify', 'BAT-901', 'specs/a.tla'],
+    ['doc → .claude/settings.json', addFiles(docBatch(), 'doc', { '.claude/settings.json': '{}\n' }), 'doc', 'BAT-902', '.claude/settings.json'],
+    ['기록만 묶음 record → notes/a.txt', [...codeBatch(), w7({ 'notes/a.txt': '\n' })], 'w7', 'W7-L1', 'notes/a.txt'],
+    ['plan → tools/ci/README.md(코드 경로 안의 .md)', addFiles(codeBatch(), 'plan', { 'tools/ci/README.md': '# 표\n' }), 'plan', 'BAT-901', 'tools/ci/README.md'],
+    ['review → apps/README.md(코드 경로 안의 .md)', addFiles(codeBatch(), 'review', { 'apps/README.md': '# 앱\n' }), 'review', 'BAT-901', 'apps/README.md'],
+    ['record가 deploy/a.yaml을 지움', set(codeBatch('BAT-901', { testFiles: { 'deploy/a.yaml': 'a: 1\n' } }), 'record', { del: ['deploy/a.yaml'] }), 'record', 'BAT-901', 'deploy/a.yaml'],
+    // 옛 RC-26 통과 사례(코드 경로 밖이지만 .md가 아님)와 대소문자
+    ['plan → toolbox/a.mjs', addFiles(codeBatch(), 'plan', { 'toolbox/a.mjs': '\n' }), 'plan', 'BAT-901', 'toolbox/a.mjs'],
+    ['plan → .githubx/a.yml', addFiles(codeBatch(), 'plan', { '.githubx/a.yml': '\n' }), 'plan', 'BAT-901', '.githubx/a.yml'],
+    ['plan → notes/a.MD', addFiles(codeBatch(), 'plan', { 'notes/a.MD': '\n' }), 'plan', 'BAT-901', 'notes/a.MD'],
+    ['plan → Docs/a.yaml', addFiles(codeBatch(), 'plan', { 'Docs/a.yaml': '\n' }), 'plan', 'BAT-901', 'Docs/a.yaml'],
+  ];
+  for (const f of ['package.json', 'pnpm-lock.yaml', 'eslint.config.mjs', 'turbo.json', '.gitignore']) {
+    cases.push([`record → ${f}`, addFiles(codeBatch(), 'record', { [f]: f === '.gitignore' ? 'node_modules/\n' : '{}\n' }), 'record', 'BAT-901', f]);
+  }
+  for (const [name, seq, label, batch, p] of cases) {
+    const { r, sha } = check(seq);
+    expectFail(r, `RC-38 ${name}`, '코드 경로', batch, sha[label], ['문서 밖 경로', p]);
+  }
+});
+
+test('RC-39 ⑥ 허용 목록 안은 통과한다', () => {
+  let a = addFiles(codeBatch(), 'plan', { 'docs/api/openapi.yaml': 'openapi: 3.1.0\n', 'docs/wbs/wbs.csv': 'id\n' });
+  a = addFiles(a, 'review', { '.claude/skills/x/SKILL.md': '# 기술\n' });
+  a = addFiles(a, 'record', { 'specs/README.md': '# 명세\n', 'deploy/README.md': '# 배포\n' });
+  const d = addFiles(docBatch(), 'doc', { 'README.md': '고침\n', 'CLAUDE.md': '# 규칙\n' }).map((s) => ({ ...s, label: `d.${s.label}` }));
+  const { r } = check([...a, ...d]);
+  expectPass(r, 'RC-39', 2, 12);
+});
+
+test('RC-40 ③ 구현 뒤의 plan 커밋', () => {
+  const late = (files) => [...codeBatch(), spec('planLate', 'plan', 'BAT-901', S.plan, files)];
+  const one = check(pick(late({ 'docs/PROGRESS.md': '정본 빈칸을 고쳤다\n' }), ['plan', 'test', 'impl', 'planLate', ...REST]));
+  expectPass(one.r, 'RC-40 구현 뒤 plan이 docs/PROGRESS.md만 고침', 1, 9);
+  const two = check(pick(late({ 'docs/PROGRESS.md': '정본 빈칸을 고쳤다\n', 'services/a/src/x.ts': '계획이 고침\n' }), ['plan', 'test', 'impl', 'planLate', ...REST]));
+  expectFail(two.r, 'RC-40 구현 뒤 plan이 services/a/src/x.ts도 고침', '코드 경로', 'BAT-901', two.sha.planLate, ['services/a/src/x.ts']);
+});
+
+// 첫 구현 전 plan·test 섞기에 쓰는 커밋
+const mixed = () => [
+  ...codeBatch(),
+  spec('plan2', 'plan', 'BAT-901', S.plan, { 'docs/review/plans/BAT-901.md': `${codePlan('BAT-901')}\n둘째 계획 고침.\n` }),
+  spec('plan3', 'plan', 'BAT-901', S.plan, { 'docs/review/plans/BAT-901.md': `${codePlan('BAT-901')}\n셋째 계획 고침.\n` }),
+  spec('test2', 'test', 'BAT-901', S.test, { 'services/a/test/y.test.ts': '시험 3\n' }),
+];
+
+test('RC-41 ③ 첫 구현 전에는 plan과 test가 섞여도 된다', () => {
+  const one = check(pick(mixed(), ['plan', 'test', 'plan2', 'test2', 'plan3', 'impl', ...REST]));
+  expectPass(one.r, 'RC-41 plan → test → plan → test → plan → impl', 1, 11);
+  const two = check(pick(mixed(), ['plan', 'plan2', 'test', 'test2', 'impl', ...REST]));
+  expectPass(two.r, 'RC-41 plan → plan → test → test → impl', 1, 10);
+});
+
+test('RC-42 ③ 첫 구현 전 섞기의 경계', () => {
+  const one = check(pick(mixed(), ['test', 'plan', 'test2', 'impl', ...REST]));
+  expectFail(one.r, 'RC-42 test → plan → test → impl', '차례', 'BAT-901', one.sha.test);
+  const two = check(pick(mixed(), ['plan', 'plan2', 'impl', 'test', ...REST]));
+  expectFail(two.r, 'RC-42 plan → plan → impl → test', '차례', 'BAT-901', two.sha.impl);
+});
+
+test('RC-43 ① Finding 꼬리말', () => {
+  const noFinding = (t) => t.filter((x) => !x.startsWith('Finding: '));
+  for (const [name, label, fn] of [
+    ['review-fix에 Finding 없음', 'rfTest', noFinding],
+    ['Finding: RV 01', 'rfTest', (t) => [...noFinding(t), 'Finding: RV 01']],
+    ['Finding: ../x', 'rfTest', (t) => [...noFinding(t), 'Finding: ../x']],
+    ['Finding 값이 빔', 'rfTest', (t) => [...noFinding(t), 'Finding: ']],
+    ['finding: RV-901(키 대소문자)', 'rfTest', (t) => [...noFinding(t), 'finding: RV-901']],
+    ['impl 커밋에 Finding', 'impl', (t) => [...t, 'Finding: RV-901']],
+    ['test 커밋에 Finding', 'test', (t) => [...t, 'Finding: RV-901']],
+    ['review 커밋에 Finding', 'review', (t) => [...t, 'Finding: RV-901']],
+    ['plan 커밋에 Finding', 'plan', (t) => [...t, 'Finding: RV-901']],
+    ['verify 커밋에 Finding', 'verify', (t) => [...t, 'Finding: RV-901']],
+    ['record 커밋에 Finding', 'record', (t) => [...t, 'Finding: RV-901']],
+  ]) {
+    const { r, sha } = check(retrail(codeBatch(), label, fn));
+    expectFail(r, `RC-43 ${name}`, '꼬리말', 'BAT-901', sha[label]);
+  }
+  const doc = check(retrail(docBatch(), 'doc', (t) => [...t, 'Finding: RV-902']));
+  expectFail(doc.r, 'RC-43 doc 커밋에 Finding', '꼬리말', 'BAT-902', doc.sha.doc);
+  // 지적 둘은 Finding 두 줄(값 꼴은 Batch와 같다: RV-01, A2-17)
+  const two = check(pick([...codeBatch(), rfTestOf('rfT', ['RV-01', 'A2-17']), rfImplOf('rfI', ['RV-01', 'A2-17'])], [...BEFORE_RF, 'rfT', 'rfI', 'record']));
+  expectPass(two.r, 'RC-43 Finding 두 줄', 1, 8);
+});
+
+test('RC-44 ③ 리뷰 반영은 지적마다 시험 쪽이 먼저다', () => {
+  const base901 = codeBatch();
+  const expectOrder = (r, label, sha, finding) => expectFail(r, label, '차례', 'BAT-901', sha, [finding]);
+  const one = check(pick([...base901, rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 'i1', 'record']));
+  expectOrder(one.r, 'RC-44 Fix-By: impl(RV-01)만', one.sha.i1, 'RV-01');
+  const two = check(pick([...base901, rfImplOf('i1', ['RV-01']), rfTestOf('t1', ['RV-01'])], [...BEFORE_RF, 'i1', 't1', 'record']));
+  expectOrder(two.r, 'RC-44 impl(RV-01) → test(RV-01)', two.sha.i1, 'RV-01');
+  const three = check(pick([...base901, rfTestOf('t1', ['RV-01']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02'])], [...BEFORE_RF, 't1', 'i1', 'i2', 'record']));
+  expectOrder(three.r, 'RC-44 test(RV-01) → impl(RV-01) → impl(RV-02)', three.sha.i2, 'RV-02');
+  assert.deepEqual(failures(three.r.out).filter((f) => f.check === '차례' && three.sha.i1.startsWith(f.hash)), [], `RC-44: 시험 쪽이 먼저인 impl(RV-01)에 차례 실패를 찍었다\n${three.r.all}`);
+  // 시험 쪽 커밋이 다른 묶음(BAT-903)에만 있다
+  const t903 = spec('b3.t1', 'review-fix', 'BAT-903', S.test, { 'services/b/test/x.test.ts': '시험 903\n' }, { fixBy: 'test', findings: ['RV-01'] });
+  const four = check([...pick([...base901, rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 'i1', 'record']), ...bat903(), t903]);
+  expectOrder(four.r, 'RC-44 test(RV-01)이 BAT-903에만', four.sha.i1, 'RV-01');
+});
+
+test('RC-45 ③ 리뷰 반영 차례의 통과 꼴', () => {
+  const base901 = codeBatch();
+  const one = check(pick([...base901, rfTestOf('t1', ['RV-01', 'RV-02']), rfImplOf('i1', ['RV-01']), rfImplOf('i2', ['RV-02'])], [...BEFORE_RF, 't1', 'i1', 'i2', 'record']));
+  expectPass(one.r, 'RC-45 test(RV-01·RV-02) → impl(RV-01) → impl(RV-02)', 1, 9);
+  const two = check(pick([...base901, rfTestOf('t1', ['RV-01']), rfTestOf('t2', ['RV-01']), rfImplOf('i1', ['RV-01'])], [...BEFORE_RF, 't1', 't2', 'i1', 'record']));
+  expectPass(two.r, 'RC-45 test(RV-01) → test(RV-01) → impl(RV-01)', 1, 9);
+  const docOnly = rfImplOf('i3', ['RV-03'], { 'tools/ci/README.md': '# 표 고침\n', 'docs/PROGRESS.md': '문구 고침\n' });
+  const three = check(pick([...base901, docOnly], [...BEFORE_RF, 'rfTest', 'rfImpl', 'i3', 'record']));
+  expectPass(three.r, 'RC-45 .md만 고친 impl(RV-03)', 1, 9);
+});
+
+test('RC-46 ③ 문서 예외의 경계', () => {
+  for (const [name, files] of [
+    ['tools/ci/README.md와 tools/ci/roles-check.mjs', { 'tools/ci/README.md': '# 표 고침\n', 'tools/ci/roles-check.mjs': '// 고침\n' }],
+    ['.github/workflows/a.yml만', { '.github/workflows/a.yml': 'name: a\n' }],
+    ['tools/ci/README.md.bak만', { 'tools/ci/README.md.bak': '옛 표\n' }],
+  ]) {
+    const { r, sha } = check(pick([...codeBatch(), rfImplOf('i3', ['RV-03'], files)], [...BEFORE_RF, 'rfTest', 'rfImpl', 'i3', 'record']));
+    expectFail(r, `RC-46 ${name}`, '차례', 'BAT-901', sha.i3, ['RV-03']);
+  }
+});
+
+// 정본 §8.6 세부와 ADR-0270 결정 1 표: 시험 담당은 시험과 함께 공개 인터페이스의 빈 뼈대(코드 폴더의 제품 파일)를 더한다. ⑥은 test 커밋을 보지 않는다
+test('RC-47 ⑥ test 커밋은 시험 파일 밖의 코드 파일(빈 뼈대)을 바꿔도 통과한다', () => {
+  const skeleton = { 'services/a/src/y.ts': "export const y = () => { throw new Error('아직 없음'); };\n", 'packages/p/src/a.ts': 'export {};\n', 'apps/web/src/a.ts': 'export {};\n', 'tools/ci/new-check.mjs': "process.stderr.write('아직 없음\\n');\n" };
+  const { r } = check(addFiles(codeBatch(), 'test', skeleton));
+  expectPass(r, 'RC-47', 1, 8);
 });
