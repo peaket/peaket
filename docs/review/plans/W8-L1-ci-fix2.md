@@ -172,6 +172,78 @@
 
 ## 검증
 
+검증 담당(w8l1-cifix2-verify-6e13c0cb)이 2026-11-16에 적었다. B 등급 틀린 구현 표본(§8.6의 3)과 판정 기준 대조 표본이다.
+
+- **방법**: ①②(CF2-01~04)는 감독이 꺼낸 분리 HEAD `720830f6`(`D:/ticketpass-lane1-pre`, 이 가지의 구현·시험과 같은 트리, `node_modules` 없음)의 제품 파일(`apps/web/next.config.ts`, `.github/workflows/loadtest-check.yml`, `tools/ci/changes.mjs`, M-16은 `tools/local/gateway-objects.mjs`도)에 틀린 구현을 하나씩 문자열 바꾸기로 넣고 `node --test apps/web/server/server-external.test.mjs`나 `node --test --test-name-pattern="CF2-0[34]|tools-check는" tools/ci/check-workflows.test.mjs tools/ci/changes.test.mjs`를 돌렸다. ③(CF2-05~07)은 `jose`·`yaml`이 필요해 `D:/ticketpass-lane1`(HEAD `720830f6`)에서 제품 쪽·정의 파일을 잠깐 바꾸고 `cd apps/web && node --test scripts/local-fan-gateway-parity.test.mjs`를 돌렸다. 하나 끝날 때마다 `git -C <폴더> checkout -- .` 뒤 `git status --short`가 빈 것을 봤다(실행마다 빔. 넣기 전에도 빈 것을 확인. 도구 실수로 M-10을 처음에 바뀜 없이 한 번 돌린 것은 버리고 고쳐 다시 돌렸다). 시험 파일은 고치지 않았다.
+- **기준(넣기 전)**: CF2-01·02 통과 2, CF2-03·04와 기존 tools-check 시험 통과 3(`-pre`), parity 시험 통과 4(`D:/ticketpass-lane1`).
+- **고른 표본**: 틀린 구현 목록 M-01~M-26 전부와 목록 밖 보탬 여덟(M-10b, M-27~M-33). 보탬은 시험의 단언이 약해 보인 곳(따옴표 붙은 키, 빈칸 든 키, 설치 단계의 `working-directory`·`if`·`continue-on-error`, 정의 쪽 인가 값)을 찔러 보려고 더했다. 과잉 검사 확인 하나(X-01, 통과가 맞음)는 수에 넣지 않았다.
+
+| 번호 | 대상 | 넣은 틀린 구현(바꾼 곳) | 돌린 시험 | 결과 | 처음 실패한 단언 |
+| --- | --- | --- | --- | --- | --- |
+| M-01 | ① | 일곱 한 줄을 develop 꼴 두 키(redis 여섯 / `['@peaket/platform']`)로 | CF2-01·02 | 잡음(둘 다) | '키가 2번 나온다', 첫 배열이 일곱과 다름 |
+| M-02 | ① | 한 키에서 `@peaket/platform`을 뺌 | CF2-02 | 잡음 | 일곱과 다름 |
+| M-03 | ① | 한 키에서 `@redis/client`를 뺌 | CF2-02 | 잡음 | 일곱과 다름 |
+| M-04 | ① | 값을 `['@peaket/platform']`만 | CF2-02 | 잡음 | 일곱과 다름 |
+| M-05 | ① | 값을 redis 여섯만(M-02와 결과 파일이 같다. 키가 하나라 '여섯 키를 남긴다'와 '빼고 합친다'가 같은 글이 된다) | CF2-02 | 잡음 | 일곱과 다름 |
+| M-06 | ① | `@peaket/platform`을 `transpilePackages`로 옮김 | CF2-02 | 잡음 | 일곱과 다름 |
+| M-07 | ① | `'redis'`를 두 번 | CF2-02 | 잡음 | 일곱과 다름(정렬 비교가 겹침을 셈) |
+| M-08 | ① | 여섯 키 + 둘째 키 `serverExternalPackage`(끝 s 빠짐)에 platform | CF2-02 | 잡음 | 일곱과 다름 |
+| M-09 | ① | 일곱 뒤에 `serverExternalPackages: []` | CF2-01 | 잡음 | '키가 2번 나온다' |
+| M-10 | ② | pnpm 받기·설치를 `node --test` 뒤로 | CF2-03 | 잡음 | '설치가 시험보다 뒤에 있다' |
+| M-10b | ② | (보탬) pnpm 받기는 앞, 설치만 시험 뒤 | CF2-03 | 잡음 | '설치가 시험보다 뒤에 있다' |
+| M-11 | ② | `pnpm install`(`--frozen-lockfile` 없음) | CF2-03 | 잡음 | '`pnpm install --frozen-lockfile` 단계가 없다' |
+| M-12 | ② | 두 단계를 `npm install yaml` 하나로 | CF2-03 | 잡음 | 'pnpm을 받는 단계가 없다' |
+| M-13 | ② | `--dir loadtest`를 붙임 | CF2-03 | 잡음 | '`pnpm install --frozen-lockfile` 단계가 없다' |
+| M-14 | ② | `--filter ./tools/local`을 붙임 | CF2-03 | 잡음 | 같음 |
+| M-15 | ② | pnpm 받기 단계를 뺌 | CF2-03 | 잡음 | 'pnpm을 받는 단계가 없다' |
+| M-16 | ② | 두 단계를 빼고 `gateway-objects.mjs`의 `yaml`을 `await import`로(길 나) | CF2-03 | 잡음 | 'pnpm을 받는 단계가 없다' |
+| M-17 | ② | 두 단계를 뺌(`run.mjs` 상수 옮기기는 넣지 않았다. CF2-03은 워크플로 글만 읽어 결과가 같다) | CF2-03 | 잡음 | 'pnpm을 받는 단계가 없다' |
+| M-18 | ② | 시험 명령을 `node --test "loadtest/test/v1.test.mjs"`로 | CF2-03 | 잡음 | '`node --test "loadtest/test/*.test.mjs"` 단계가 없다' |
+| M-29 | ② | (보탬) 설치 단계에 `working-directory: loadtest` | CF2-03 | 잡음 | '설치 단계가 뿌리가 아닌 폴더에서 돈다' |
+| M-30 | ② | (보탬) 설치 단계에 `if: false`(단계가 늘 건너뛰어진다) | CF2-03 | **놓침** | 통과 |
+| M-31 | ② | (보탬) 설치 단계에 `continue-on-error: true`(설치가 실패해도 시험으로 간다) | CF2-03 | **놓침** | 통과 |
+| M-19 | ②의 보탬 | `changes.mjs`에서 `gateway-objects`를 뺌 | CF2-04 | 잡음 | `tools/local/gateway-objects.mjs`가 loadtest를 안 고름 |
+| M-20 | ②의 보탬 | `gateway-object`(오타)로 | CF2-04 | 잡음 | 같음 |
+| M-21 | ③ | `GW_FAN_API_CORS.allowHeaders`에 `X-Evil` | CF2-05(+ 기존 '가짜 API는 사전 요청의 요청 머리를 …') | 잡음 | 'POST /v1/events/e2e-id-10/holds: 허용 머리' |
+| M-22 | ③ | `maxAgeSeconds` 7200 → 3600 | CF2-05 | 잡음 | '…holds: Max-Age' |
+| M-23 | ③ | `exposeHeaders`에서 `X-Trace-Id`를 뺌 | CF2-06 | 잡음 | '…holds: 노출 머리' |
+| M-24 | ③ | `local-fan-gateway.mjs` 구매 경로 `ticket:buy` 검사를 끔(`if (false && …)`) | CF2-07 | 잡음 | '…holds: ticket:buy 없음' |
+| M-25 | ③ | `gw-fan.routes.yaml`에서 `/v1/events/[^/]+/holds` 매치 셋(TRACE 막기 하나, gw-fan-buy의 POST·OPTIONS)을 지움 | CF2-05~07 | 잡음(셋 다) | 'gw-fan api에 POST /v1/events/e2e-id-10/holds 라우트가 없다' |
+| M-26 | ③ | `gw-fan.routes.yaml`을 지움 | CF2-05~07 | 잡음(셋 다) | '정의 파일이 없다: …gw-fan.routes.yaml' |
+| M-27 | ① | (보탬) 여섯 키 + 둘째 키를 따옴표 붙은 `'serverExternalPackages': ['@peaket/platform']` | CF2-01·02 | 잡음(CF2-02만) | 첫 배열이 일곱과 다름. CF2-01은 따옴표 키를 세지 않아 통과 |
+| M-28 | ① | (보탬) 일곱 뒤에 `serverExternalPackages : [...]`(키와 콜론 사이 빈칸) | CF2-01 | 잡음 | '키가 2번 나온다' |
+| M-32 | ③ | (보탬) 정의 `gw-fan.yaml` gw-fan-buy 인가의 `ticket:buy`를 `ticket:read`로 | CF2-07 | 잡음 | 정의의 `authorization`에 `ticket:buy`가 없음 |
+| M-33 | ① | (보탬) 일곱 뒤에 따옴표 붙은 빈 키 `'serverExternalPackages': []`(실제 값은 빈 배열) | CF2-01·02 | **놓침** | 둘 다 통과 |
+| X-01 | ① | (과잉 검사 확인) 일곱 앞에 주석 줄 `// 예전 꼴 serverExternalPackages: [...]` | CF2-01·02 | 통과(맞음) | 주석 줄을 세지 않는다 |
+
+- **합계**: 넣은 34개, 잡은 31개, 놓친 3개(M-30·M-31·M-33, 셋 다 목록 밖 보탬). 계획의 목록 M-01~M-26은 26개 모두 잡았다(CF2-05~07이 실패하게 될 M-25·M-26 포함). 검사 항목 ①·②·②의 보탬·③마다 하나 이상 넣었고 모두 하나 이상 잡혔다.
+- **R-1을 함께 보지 않은 것**: 목록이 M-13에 R-1도 적었지만, 이 PC에서는 pnpm 설치를 돌리지 않아(공통 규칙, `--dir loadtest` 설치의 결과를 연결로 흉내 낼 수 없음) CF2-03만 봤다. CF2-03이 잡았으므로 표본 판정은 바뀌지 않는다.
+- **처음부터 통과 시험의 실패를 본 번호**(ADR-0281 결정 3, 이것으로 완료 근거로 센다):
+  - CF2-05: M-21, M-22, M-25, M-26.
+  - CF2-06: M-23, M-25, M-26.
+  - CF2-07: M-24, M-25, M-26, M-32.
+  - CF2-01~04는 '실패 확인' 절에서 구현 전 트리로 실패를 봤고, 여기서도 M-01·M-09·M-28(CF2-01), M-02~M-08·M-27(CF2-02), M-10~M-18·M-29(CF2-03), M-19·M-20(CF2-04)로 다시 봤다.
+
+### 판정 기준 대조(표본)
+
+계획 5의 단언마다 시험 코드(`apps/web/server/server-external.test.mjs` 11~28줄, `tools/ci/check-workflows.test.mjs` 689~707줄, `apps/web/scripts/local-fan-gateway-parity.test.mjs` 머리~40줄)를 읽어 맞췄다.
+
+| 계획 단언 | 시험 | 단언이 규칙을 보나 |
+| --- | --- | --- |
+| CF2-01 키가 정확히 한 번(주석 줄 제외) | CF2-01 | 맨 키(`serverExternalPackages\s*:`)는 본다(M-01·M-09·M-28 잡음, X-01 과잉 없음). 따옴표 붙은 키는 세지 않는다(M-33 놓침) |
+| CF2-02 일곱과 같음(정렬, 겹침·빠짐 없음) | CF2-02 | 본다. 다만 **첫** 배열만 읽으므로 키가 둘이면 CF2-01에 기댄다(M-33은 둘 다 빠져 나감) |
+| CF2-03 ⓐ < ⓑ < ⓒ, 뿌리에서, `--dir`·`--filter` 없음, `yaml` 없이 글로 | CF2-03 | 본다(M-10~M-18·M-29 잡음). 단계가 실제로 돌거나 실패를 멈추는지(`if`·`continue-on-error`)는 계획이 적지 않았고 시험도 보지 않는다(M-30·M-31 놓침) |
+| CF2-04 `gateway-objects.mjs` → `loadtest` | CF2-04 | 본다(M-19·M-20 잡음) |
+| CF2-05~07 두 파일을 이름으로, 둘 다 있어야 함, 값은 정의에서 | CF2-05~07 | 본다(M-25·M-26 잡음, M-32로 정의 쪽 값을 읽는 것도 확인) |
+
+### 놓친 것의 처리(시험 담당에게 넘긴다, 검증 담당은 시험을 쓰지 않는다)
+
+- 셋 다 목록 밖 보탬이고, 계획의 정본 줄(설치한 뒤 시험, 키 하나)을 어기려면 일부러 써야 하는 모양이라 높음·보안·통과 기준 지적은 아니다(낮음). 이 묶음에서 시험을 더할지, 구간 끝 정리 목록에 둘지는 감독이 정한다.
+- **M-33(따옴표 붙은 같은 키)**: CF2-01이 키를 `['"]?serverExternalPackages['"]?\s*:`로 세면 잡는다. 계획 6의 후보 1(뿌리 ESLint `no-dupe-keys`)을 켜도 잡는다(따옴표와 관계없이 같은 키로 본다).
+- **M-30·M-31(설치 단계를 꺼 두거나 실패를 넘김)**: CF2-03이 ⓐ·ⓑ 단계에 `if`·`continue-on-error` 키가 없음을 더 보면 잡는다(지금 `steps[install].keys.has('working-directory')`와 같은 꼴).
+
+- **같은 모델 새 맥락 사실**: 이 검증은 계획·구현·시험·리뷰 담당과 같은 모델(claude-opus-5-5)이 그들의 대화 맥락 없이 새 세션에서 했다(ADR-0270 결정 6, 다른 모델을 쓸 수 없음). 받은 것은 감독이 준 공통 규칙, 이 계획 파일, `git diff origin/develop...HEAD --stat`뿐이고 다른 담당의 보고는 받지 않았다. '리뷰' 절은 이 검증을 적을 때 비어 있었다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -179,3 +251,4 @@
 | plan | w8l1-cifix2-plan-d3f0cd33 | claude-opus-5-5 | 2026-11-16T21:15+09:00 | 2026-11-16T21:44+09:00 |
 | impl | w8l1-cifix2-impl-a624bfe3 | claude-opus-5-5 | 2026-11-16T21:44+09:00 | 2026-11-16T21:53+09:00 |
 | test | w8l1-cifix2-test-6b66f6f0 | claude-opus-5-5 | 2026-11-16T21:54+09:00 | 2026-11-16T22:07+09:00 |
+| verify | w8l1-cifix2-verify-6e13c0cb | claude-opus-5-5 | 2026-11-16T22:06+09:00 | 2026-11-16T22:13+09:00 |
