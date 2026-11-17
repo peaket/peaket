@@ -155,6 +155,24 @@ Docker 없이: purchase 단위 `test/seat-event.test.ts`·`test/seat-stream-rela
 4. **마이그레이션 0027을 반영하지 않은 표 모양 단위 시험(시험 몫이 빠짐)**: `test/purchase-schema.test.ts`의 일곱이 0026까지의 목록을 박아 둬 실패한다. `seat_hold` 칸 목록(11 → 12, `hold_limit integer` 널 허용), check 목록과 '같은 이름·같은 식으로 SQL에 있다'(0000만 읽는다. 새 CHECK는 0027의 `ALTER TABLE … ADD CONSTRAINT`), '열이 모두 SQL에 있다'(0002의 ADD COLUMN만 더한다), `_journal.json` 차례(0027 `when` 1794904374507 > 0026), 'SQL 파일은 기록에 있는 것뿐이다', '마지막 스냅샷'(0027_snapshot.json). 0026 묶음이 같은 파일에 더한 꼴(`RELOOK2_TAG`·0026 SQL 시험)로 0027 몫을 더하면 된다. 0027 SQL은 `ALTER TABLE "seat_hold" ADD COLUMN "hold_limit" integer`와 `ADD CONSTRAINT "seat_hold_hold_limit_check" CHECK ("seat_hold"."hold_limit" is null or "seat_hold"."hold_limit" >= 1)` 두 문뿐이다(머리 주석 넉 줄).
 5. **흔들림 하나(이 묶음과 무관)**: 첫 통합 돌림에서 `test-int/hold-lifecycle.int.test.ts` `정지 집합 전이 S-T23 > 묶인 좌석·지난 최대 체류는 옮기지 않고 ordered에서만 뺀다`가 한 번 실패했다(moved 1, dropped 1). 시험이 `maxStay`를 호스트 시계 `Date.now() - 1`로 쓰고 Lua는 컨테이너 `TIME`으로 견주어, 두 시계가 1ms 넘게 어긋나면 지나지 않은 것으로 본다. 같은 파일만 다시 돌리면 45개 모두 통과했다. 이 묶음이 바꾼 칸(Stream `holdLimit`)과 닿지 않는다.
 
+## 시험 이의 답
+
+시험 담당 `w9f2-test`(claude-opus-5-5), 2026-11-17. 가지 끝 `7eafd96a`에서 2~4를 정본과 견주었다. 셋 다 맞는 이의라 받아들여 `dccf1723`으로 고쳤다.
+
+- **1**(상한 2,147,483,647): 감독 답에 따라 구현이 정한 정본 빈칸이다. 시험 담당이 앞서 낸 int4 범위 이의에 대한 답이라 시험은 바꾸지 않았다.
+- **2 받아들임**: seat-hold §6 '1인 한도 되살리기' '사건'과 data.md §3 HELD 칸에 `holdLimit`이 있으니 기대값이 틀렸다. `test/hold-cases.ts` `FR010_ST35_①` `row()`에 `holdLimit: String(i.limit)`을, `test/pin-cases.ts` `heldRow()`에 묶기 한도 인자(기본 4)를 더했다. 메모리 단위와 Valkey 통합 짝에 모두 적용된다.
+- **3 받아들임**: asyncapi `SeatEvent.holdLimit`(HELD이고 holdKind FAN)에 맞춰, `test-int/seat-stream.ts` `expectedSeatEvent()`가 칸이 있으면 `Number(f.holdLimit)`을 옮긴다.
+- **4 받아들임, 꼴도 바꿈**: `test/purchase-schema.test.ts`에 0027 몫을 더했다. `seat_hold` 칸은 12개, check는 셋이고, 0027 SQL이 두 문뿐이며 스냅샷이 0026에 이어지는지 보는 시험을 하나 더했다. 새 마이그레이션마다 깨지지 않게 다음처럼 바꾸었다.
+  - SQL 파일 목록은 `_journal.json`과 견준다.
+  - 마지막 스냅샷은 기록의 마지막과 견준다.
+  - 기록 차례는 idx가 차례인지, tag가 네 자리 idx로 시작하는지로 본다. 0027까지의 이름 고정 목록은 그대로 둔다.
+  - 칸·검사가 SQL에 있는지는 기록의 모든 SQL에서 `ALTER TABLE … ADD COLUMN`·`ADD CONSTRAINT … CHECK`를 찾아 본다.
+- **5**(hold-lifecycle `maxStay` 호스트 시계 흔들림): 이 묶음의 범위 밖이라 고치지 않았다. 이번 확인에서는 재현되지 않았다.
+- **확인**:
+  - purchase 단위: 전체 128파일 4,124개가 통과했다(`--maxWorkers=4`). 기본 일꾼 수로 돌리면 gRPC 대역 단위 몇 개(`payment-confirm`·`payment-deposit`·`grpc-new-payment-pause`)가 돌 때마다 다르게 실패했다. 따로 돌리면 이 변경 전후 모두 통과하므로 부하 흔들림으로 본다.
+  - 통합: Docker 잠금 아래에서 seat-store·pin·seat-stream-relay와 §6 목록(sale-policy, seat-hold-ledger, seat-hold-ledger-e2e, seat-rebuild, seat-rebuild-source, hold-lifecycle, purchase-migration) 10파일 394개가 통과했다. 띄운 컨테이너가 남지 않은 것을 보고 잠금을 풀었다.
+  - tsc: 새 오류가 없다.
+
 ## 리뷰
 
 (리뷰 담당이 쓴다)
