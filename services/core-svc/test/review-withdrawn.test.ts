@@ -395,7 +395,9 @@ describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만
     clock.advance(2 * 60_000);
     const NOW = clock.now();
     const before = sink.lines().length;
-    const ok = await call(G);
+    // 본문 길이의 안쪽 끝(사유 500자, 요청자 1자)도 받는다(검증 2 V26·V27). 섞인 계정 시험은 다른 쪽 끝(사유 10자, 요청자 64자)을 본다
+    const edge = { reason: '나'.repeat(500), requestedBy: 'k' };
+    const ok = await call(G, { body: edge });
     expect(ok.statusCode).toBe(200);
     expect(JSON.parse(ok.payload)).toEqual({ purged: 1, heldEvents: 1, heldEventIds: [HELD_G] });
     expect(await store.findReview(g1.reviewId)).toEqual(purgedOf(g1, { nowMs: NOW, deletedAtMs: NOW }));
@@ -407,7 +409,7 @@ describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만
     // 운영 줄은 정확히 하나: 처리한 보류 행 하나의 ID와 eventKey: null. 줄 글에 계정 ID(대문자로 쓴 Kafka 키 포함)가 없다
     const manual = sink.lines().slice(before).filter((l) => l.kind === 'review-purge-manual');
     expect(manual).toHaveLength(1);
-    expect(manual[0]).toMatchObject({ requestedBy: BODY.requestedBy, reason: BODY.reason, purged: 1, heldEvents: 1 });
+    expect(manual[0]).toMatchObject({ requestedBy: edge.requestedBy, reason: edge.reason, purged: 1, heldEvents: 1 });
     expect(manual[0]!.held).toEqual([{ id: HELD_G, eventKey: null }]);
     expect(manual[0]).not.toHaveProperty('heldEventKeys');
     const text = JSON.stringify(manual[0]);

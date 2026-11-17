@@ -232,6 +232,27 @@ describe('I-T83 손으로 하는 파기(실제 DB, 웨이브 끝 리뷰 S1)', ()
     expect((await heldOf([h1]))[0]?.reprocessed_at).toEqual(new Date(NOW));
   });
 
+  test('I-T83 ⑨ 손으로 하는 파기는 이미 지금 + 30분인 다시 정리 예약을 그대로 남긴다', async () => {
+    // 정본 docs/features/identity.md §8 '손으로 처리': 예약은 늦은 쪽이 남는다(greatest, 검증 2 V24). 대조로 더 이른 예약(지금 + 1분)은 넘긴 시각으로 늦춘다
+    const store = new DrizzleReviewStore(app);
+    const [A, B] = [randomUUID(), randomUUID()];
+    for (const who of [A, B]) {
+      await seedReview(who);
+      await seedHeld({ eventKey: null, businessKey: `unreadable-${randomUUID()}`, msgKey: who });
+    }
+    const created = new Date(NOW - 5 * MIN);
+    await admin.pool.query('insert into review_withdrawal_recheck (account_id, due_at, created_at) values ($1, $2, $3)', [A, new Date(NOW + 30 * MIN), created]);
+    await admin.pool.query('insert into review_withdrawal_recheck (account_id, due_at, created_at) values ($1, $2, $3)', [B, new Date(NOW + MIN), created]);
+    const createdOf = async (accountId: string) => (await admin.pool.query('select created_at from review_withdrawal_recheck where account_id = $1', [accountId])).rows[0]?.created_at as Date | undefined;
+
+    expect((await store.purgeHeldWithdrawal(A, { nowMs: NOW, recheckAtMs: NOW + 16 * MIN, limit: LIMIT }))?.purged).toBe(1);
+    expect(await recheckOf(A)).toEqual([{ due_at: new Date(NOW + 30 * MIN) }]);
+    expect((await store.purgeHeldWithdrawal(B, { nowMs: NOW, recheckAtMs: NOW + 16 * MIN, limit: LIMIT }))?.purged).toBe(1);
+    expect(await recheckOf(B)).toEqual([{ due_at: new Date(NOW + 16 * MIN) }]);
+    // 만든 시각은 처음 값 그대로다
+    for (const who of [A, B]) expect(await createdOf(who), who).toEqual(created);
+  });
+
   test('I-T83 ⑦⑨ 0026은 core_app에 held_event의 reprocessed_at 고치기만 더 준다', async () => {
     const h = await seedHeld({ eventKey: randomUUID(), businessKey: randomUUID(), msgKey: null });
     // 대조군(허용 쪽): 다시 처리 표시

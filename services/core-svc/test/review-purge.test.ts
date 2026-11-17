@@ -230,4 +230,29 @@ describe('I-T83 파기한 후기는 공개 경로에서 빠진다', () => {
     expect(at(OTHER)).toBeUndefined();
     expect(await store.findReview(b1.reviewId)).toEqual(b1);
   });
+
+  test('I-T83 ⑨ 손으로 하는 파기는 이미 지금 + 30분인 다시 정리 예약을 그대로 남긴다', async () => {
+    // 정본 docs/features/identity.md §8 '손으로 처리': 예약은 늦은 쪽이 남는다(검증 2 V12). 대조로 더 이른 예약(지금 + 1분)은 지금 + 16분으로 늦춘다
+    const { clock, store, reviews, e1, record } = world();
+    const a1 = record({ eventId: e1, accountId: A });
+    const b1 = record({ eventId: e1, accountId: B });
+    for (const r of [a1, b1]) await store.insertReview(r);
+    const TOPIC_W = 'identity.accounts-withdrawn';
+    store.heldEvents.push(
+      { id: '0190f3a1-7c2e-7a00-8000-0000000d0c02', topic: TOPIC_W, eventKey: null, businessKey: 'unreadable-a', msgKey: A },
+      { id: '0190f3a1-7c2e-7a00-8000-0000000d0c03', topic: TOPIC_W, eventKey: null, businessKey: 'unreadable-b', msgKey: B },
+    );
+    clock.advance(9 * 60_000);
+    const NOW = T0 + 9 * 60_000;
+    // A는 이미 지금 + 30분인 예약, B는 지금 + 1분인 예약이 있다(둘 다 03:01에 만듦)
+    store.rechecks.set(A, { dueAtMs: NOW + 30 * 60_000, createdAtMs: T0 + 60_000 });
+    store.rechecks.set(B, { dueAtMs: NOW + 60_000, createdAtMs: T0 + 60_000 });
+    const by = { reason: '늦은 쪽 예약 시험(손 처리)', requestedBy: 'ops-choi' };
+
+    expect(await reviews.purgeHeldWithdrawal(A, by)).toMatchObject({ purged: 1, heldEvents: 1 });
+    expect(store.rechecks.get(A)).toEqual({ dueAtMs: NOW + 30 * 60_000, createdAtMs: T0 + 60_000 });
+    expect(await reviews.purgeHeldWithdrawal(B, by)).toMatchObject({ purged: 1, heldEvents: 1 });
+    expect(store.rechecks.get(B)).toEqual({ dueAtMs: NOW + 16 * 60_000, createdAtMs: T0 + 60_000 });
+    expect(store.rechecks.size).toBe(2);
+  });
 });
