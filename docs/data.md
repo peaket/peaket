@@ -843,6 +843,7 @@ erDiagram
         uuid priority_grant_id "kind PRIORITY일 때 priority_grant.id"
         timestamptz held_at "좌석을 잡은 시각(SeatEvent HELD의 occurredAt = 홀드 Lua의 Redis TIME). 홀드 원장 적재가 채운다. 부정 예매 사후 조사의 동시 홀드 판정과 리플레이에 쓴다(추천 적용 2026-10-31, ADR-0171 결정 4)"
         timestamptz expires_at
+        int hold_limit "홀드 때 쓴 1인 한도(홀드 Hash lim = SeatEvent HELD의 holdLimit, 팬 홀드만, 1 이상). 다시 만들기가 lim으로 되살린다. 빈 값이면 판매 예약이 회차 설정 한도를 쓴다(docs/features/seat-hold.md §6 '1인 한도 되살리기', 추천 적용 2026-11-17, W9-fix2)"
     }
     priority_grant {
         uuid id PK "우선 구매 권리 하나(POL-046 ⑦, 추천 적용 2026-10-31, ADR-0171). 부정 예매 표 취소의 이의가 인정된 계정에 ops-svc가 GrantPriorityPurchase로 만든다. 그 사건에 그 계정의 이용 제한이 있었으면 풀기(LIFT_RESTRICTION)가 끝난(Done) 뒤에 연다. 표를 무상으로 되살리지 않고, 원래 가격·취소 수수료 없이 다시 살 기회를 준다"
@@ -2778,6 +2779,7 @@ erDiagram
 **다시 만들기 표와 원장 칸(추천 적용 2026-11-04, BUILD_ORDER PRF-143)**: purchase DB 세 번째 마이그레이션이 다음을 더한다. 규칙의 정본은 docs/features/seat-hold.md §6 '다시 만들기(RB-06)의 첫 구현'이다.
 - `seat_rebuild (event_id uuid PK, gen int NOT NULL DEFAULT 1 CHECK (gen >= 1), holder text, lease_until timestamptz)`: 회차마다 한 행. 다시 만들기 판 번호와 다시 만들기 임대다.
 - `seat_hold`에 `hold_id uuid`·`purchase_session_id text`(널 허용): 홀드 원장 적재가 SeatEvent의 holdId·purchaseSessionId를 쓴다. 다시 만들기가 되살린 홀드 Hash의 holdId·psid로 쓴다.
+- `seat_hold`에 `hold_limit int`(널 허용, `CHECK (hold_limit IS NULL OR hold_limit >= 1)`, 추천 적용 2026-11-17, W9-fix2, HOT-252): 홀드 원장 적재가 SeatEvent HELD의 `holdLimit`을 쓰고, 다시 만들기가 되살린 홀드 Hash의 `lim`으로 쓴다. 파티션 부모에 칸을 더하면 있는 파티션과 `ensureMonthlyPartitions`가 새로 만드는 파티션 모두 그 칸을 갖는다. 옛 행은 채우지 않는다(운영 데이터가 없고, 빈 값이면 지금처럼 회차 설정 한도다). 규칙은 docs/features/seat-hold.md §6 '1인 한도 되살리기'다.
 - 좌석 Redis 회차 슬롯의 새 키 `s:{event:E}:rebuild`(글, 다시 만들기 시도의 판 번호, 수명 판매 종료 + 1일): 다시 만들기의 첫 Lua가 쓰고 그 뒤 Lua들이 대조한다(앞 시도·늦은 파드의 쓰기를 막는 펜싱).
 
 **주문 표 마이그레이션(추천 적용 2026-11-05, BUILD_ORDER PRF-160, ADR-0113·ADR-0114)**: purchase DB 네 번째 마이그레이션이 주문 저장소의 표를 만든다. 전이 규칙의 정본은 docs/features/payment.md §3 '주문 저장소의 첫 구현'이다.
