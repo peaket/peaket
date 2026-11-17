@@ -868,12 +868,15 @@ export interface SearchReadModelSync {
 export const SEARCH_READ_MODEL_SYNC: unique symbol = Symbol('SEARCH_READ_MODEL_SYNC');
 
 // 검색어 가리기(docs/features/search.md §11, ADR-0271 결정 19). 이메일 꼴(`@` 앞뒤 공백 허용) → [이메일].
-// 숫자 사슬(숫자 묶음 사이에 하이픈·점·공백·괄호가 1~3글자씩 낀 것, 앞의 '(' 또는 '+' 포함)을 숫자만 세어:
+// 숫자 사슬(숫자 묶음 사이에 구분자가 1~3글자씩 낀 것, 앞의 '(' 또는 '+' 포함)을 숫자만 세어:
 // 0으로 시작하는 9~11자리 또는 '+82' 뒤 8~10자리 → [전화], 그 밖에 5자리 이상 → [숫자]. 다른 글자로 떨어진 4자리 이하는 남는다.
 // 정규식은 이메일 하나뿐이고 겹치는 반복이 없다(ASVS 1.3.12). 숫자 사슬은 한 번 훑어 찾는다
 const MASK_EMAIL = /[^\s@]+\s*@\s*[^\s@.]+(?:\.[^\s@.]+)+/g;
 const isDigit = (c: string | undefined) => c !== undefined && c >= '0' && c <= '9';
-const isSep = (c: string | undefined) => c === '-' || c === '.' || c === ' ' || c === '(' || c === ')';
+// 구분자: 하이픈·점·공백·괄호, 그리고 빗금(/)·역빗금(\)·밑줄(_)·쉼표(,)·가운뎃점(·, U+00B7)(추천 적용 2026-11-17, W9-fix3 F6).
+// 그래서 날짜 2026/11/17·자리 나눔 1,000,000도 [숫자]가 된다
+const MASK_SEPS: ReadonlySet<string> = new Set(['-', '.', ' ', '(', ')', '/', '\\', '_', ',', '·']);
+const isSep = (c: string | undefined) => c !== undefined && MASK_SEPS.has(c);
 /** 숫자 사슬 사이에 낄 수 있는 구분자 수 */
 const MASK_SEP_MAX = 3;
 
