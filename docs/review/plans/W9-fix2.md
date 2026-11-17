@@ -115,6 +115,54 @@ Docker 없이: purchase 단위 `test/seat-event.test.ts`·`test/seat-stream-rela
 - PRF-182의 '시험 빈 곳' 줄.
 - payment-svc 릴레이 파드의 종료 유예(대사 호출, 끊겨도 돈·상태가 틀리지 않는다)와 운영 환경 값 파일(아직 없음).
 
+### 9. 보충: 리뷰 R1·R2 반영(PRF-181, 2026-11-17)
+
+계획 담당 `w9f2-plan`, 같은 날. 리뷰(`79ae1a4f`)가 G를 '부분'으로 봤고 감독이 이 묶음에서 고치기로 했다. 정본(devops §6.4 '일반 서비스', payment §2 '잡기' 끝 문장)은 이 커밋에서 고쳐 썼다. 위 2·7의 G 줄(63초 근거, 90초)은 이 절이 대신한다.
+
+**다시 센 값(코드 상수에서)**
+
+| 몫 | 셈 | 값 |
+| --- | --- | --- |
+| 실행기가 돌던 호출을 끝내는 최악 | `CONFIRM_CALL_GUARD_MS` 72,000 + 결과 쓰기 3번 × `CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS` 5,000 + `CONFIRM_FINISH_RETRY_DELAYS_MS` 합 500 | 87.5초 |
+| payment-svc 서비스 파드 종료 유예 | preStop 5 + 87.5 + 서비스·풀 닫기 여유 약 12.5 | 105초 [가정] |
+| 합본의 payment-svc 자식 대기(SIGTERM → SIGKILL) | 87.5 + 닫기 여유 7.5(자식의 drain보다 길고 파드 유예보다 짧게) | 95초 [가정] |
+| 합본의 다른 자식 대기 | 그대로 | 5초 |
+| 합본 파드 종료 유예 | preStop 5 + 같은 프로세스 서비스 닫기 약 10 [가정] + 자식 차례대로 purchase-svc 5 + payment-svc 95 + 홀드 작업자 5 + 여유 5 | 125초 [가정] |
+| payment-svc 릴레이 파드 | 승인 호출 없음 | 30초 그대로 |
+
+- 고르지 않은 안: 자식을 한꺼번에 멈추기(합본 유예를 줄이지만 '입구부터 반대 차례로 닫기'를 바꿔 purchase-svc가 닫히기 전에 payment-svc가 닫힌다), 모든 자식 95초(다른 자식이 SIGTERM을 못 받으면 유예가 100초 넘게 는다), 결과 쓰기 다시 하기를 빼고 셈(리뷰 R1이 짚은 92.5초 > 90초가 그대로 남는다).
+- 남는 한계: 결과 쓰기가 임대 75초를 넘기면 다음 실행기가 임대 잔해로 UNKNOWN을 쓸 수 있다(돈은 틀리지 않는다). 이 묶음에서 임대·한도는 바꾸지 않는다.
+
+**손댈 파일·인터페이스(구현 담당)**
+
+| 파일 | 바꿀 것 |
+| --- | --- |
+| `deploy/workloads/payment-svc/values.yaml` | `service.terminationGracePeriodSeconds: 105`, 주석의 셈을 위 표로 |
+| `deploy/envs/local/v1-bundle.yaml` | `terminationGracePeriodSeconds: 125`, 주석 |
+| `services/bundle/src/main.ts`, 새 `services/bundle/src/stop-child.ts` | `stopChild`를 떼어 낸다: `export const BUNDLE_CHILD_STOP_MS = 5_000`, `export const BUNDLE_PAYMENT_CHILD_STOP_MS = 95_000`(95초 [가정]), `export function childStopWaitMs(name: string): number`(`payment-svc`면 95,000, 그 밖 5,000), `export async function stopChildProcess(child: Pick<ChildProcess, 'exitCode' \| 'kill' \| 'once'>, waitMs: number, timers?: { setTimeout; clearTimeout }): Promise<'exited' \| 'killed'>`. 끝나면 타이머를 지운다. 55줄 주석의 '60초'를 고친다 |
+
+**시험(시험 담당이 고치기 전에 먼저 쓴다)**
+
+| # | 시험 | 종류·파일 | 단언 | 구현 전 |
+| --- | --- | --- | --- | --- |
+| G1′ | `PRF181_payment-svc 종료 유예는 코드 상수로 센 실행기 최악 + preStop + 여유 이상이고 릴레이는 30초다`(기존 G1을 고친다) | 렌더 `tools/local/chart.test.mjs` | `confirm-runner.ts` 소스 글에서 `CONFIRM_CALL_GUARD_MS`·`CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS`·`CONFIRM_FINISH_RETRY_DELAYS_MS`를 정규식으로 읽어(못 찾으면 실패) 최악 W를 센다. 서비스 Deployment 유예 ≥ preStop + W + 10초이고 = 105, 릴레이 30 | 실패(90 < 5 + 87.5 + 10) |
+| G2 | `PRF181_합본 종료 유예는 자식 대기 합과 preStop보다 길다` | 렌더 같은 파일(`v1-bundle.yaml`) | `stop-child.ts` 소스에서 두 대기 상수를 읽어 합본 유예 ≥ preStop + 10 + 5 + 95 + 5이고 = 125, `BUNDLE_PAYMENT_CHILD_STOP_MS` ≥ W + 5초이고 < 합본 유예 | 실패(90, 상수 없음) |
+| G3 | `PRF181_합본은 payment-svc 자식이 SIGTERM 뒤 94초 동안 살아 있어도 SIGKILL하지 않고 95초에 한다` | 단위 `services/bundle/test/stop-child.test.ts`(가짜 타이머, 가짜 자식) | payment-svc: 94,999ms까지 kill은 SIGTERM 1번뿐, 95,000ms에 SIGKILL, 결과 `killed`. 90초에 스스로 끝나면 SIGKILL 0·`exited`·타이머 남지 않음. purchase-svc·hold-worker는 5,000ms에 SIGKILL. 이미 끝난 자식은 kill 0 | 실패(모듈 없음, 지금은 늘 5초) |
+| G4 | `PRF181_합본 main.ts는 stopChildProcess에 childStopWaitMs(이름)을 넘긴다` | 단위 같은 파일(소스 글 검사, 약한 시험임을 적는다) | `main.ts`에 `setTimeout(resolve, 5_000)`이 없고 `childStopWaitMs(c.name)`를 쓴다 | 실패 |
+
+**틀린 구현 표본(검증 담당)**
+
+| # | 틀린 구현 | 잡는 시험 |
+| --- | --- | --- |
+| M-G2 | 서비스 파드 유예를 결과 쓰기 다시 하기를 뺀 값(5 + 72 + 여유 < 92.5)으로 둔다 | G1′ |
+| M-G3 | `childStopWaitMs`가 늘 5초(옛 동작) / 이름 비교를 `payment`로 틀리게 | G3 |
+| M-G4 | 모든 자식에 95초를 준다 | G3(purchase-svc 5초 줄) |
+| M-G5 | 대기 비교를 `>`로 해 95,000ms 정각에 SIGKILL하지 않는다 / 스스로 끝난 뒤 타이머를 지우지 않는다 | G3 경계·타이머 줄 |
+| M-G6 | 합본 유예를 자식 대기 합보다 짧게(예 100) | G2 |
+| M-G7 | 시험이 상수를 소스에서 읽지 않고 숫자를 박는다(상수를 바꿔도 시험이 안 깨진다) — 검증 담당이 `CONFIRM_CALL_GUARD_MS`를 80,000으로 바꿔 G1′이 깨지는지 본다 | G1′ |
+
+**돌릴 시험(Docker 없음)**: `node --test tools/local/chart.test.mjs`, `cd D:/ticketpass-w9-fix2/services/bundle && node_modules/.bin/vitest run test/stop-child.test.ts test/bundle.test.ts`, bundle `tsc --noEmit`.
+
 ## 실패 확인
 
 시험 담당 `w9f2-test`(claude-opus-5-5), 2026-11-17. 시험 커밋 `4e3afad7`을 고치기 전 제품 코드(`aca1ac72`, 정본·계획만 바뀐 트리) 위에서 돌렸다. Docker 잠금을 잡고 §6의 통합 명령 셋을 그대로 돌린 뒤 띄운 컨테이너가 남지 않은 것을 보고 잠금을 풀었다.
