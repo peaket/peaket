@@ -158,6 +158,20 @@ cd /d/ticketpass-w9-fix3 && node --test tools/ci/gateway-routes.test.mjs && node
 - **더한 뼈대**(동작 없음, 구현 담당이 채운다): `packages/platform/src/secret-compare.ts`(`constantTimeEqual`은 늘 false, `index.ts` 내보내기는 하지 않음), `services/ops-svc/src/adapters/db/database-role.ts`(`assertOpsPartnerRole`은 아무것도 하지 않음), `services/ops-svc/src/event-cancellation-wiring.ts`의 `partnerRoleCheckRequired`(늘 false). 시험 도우미 `packages/platform/test/raw-http.ts`(실제 소켓 HTTP/1.1, 서버 쪽 소켓 `bytesRead`)를 더했다.
 - **형 검사·린트**: platform·core·ops `tsc -p tsconfig.json --noEmit` 0, 바꾼 src 파일 eslint 오류 0.
 
+### 검증 뒤 보충 시험(V-F2f·V-F5g·V-F5f)
+
+- **누가·어디서**: 시험 담당 `w9f3-test2`(claude-sonnet-5-5), 2026-11-17, 검증 커밋 `f3ed3af3` 위. 제품 코드는 고치지 않고 시험만 더했다(`packages/platform/test/internal-token-constant-time.test.ts`, `packages/platform/test/bulkhead-auth.test.ts`). 변이는 손으로 넣어 시험을 돌린 뒤 `git checkout src`로 되돌렸다.
+- **시험과 변이별 결과**(모두 새 시험 하나씩, 변이를 넣기 전에는 통과):
+
+| 변이 | 새 시험 | 결과 | 실패 출력 요지 |
+| --- | --- | --- | --- |
+| V-F2f(internal-grpc.ts:67 `===`) | `W9F3 V-F2f 내부 gRPC 서버 인터셉터도 토큰을 공용 비교(해시 32바이트 둘, 한 번)로 견준다` | 잡힘 | `같은 값: gRPC 서버 인터셉터: expected "vi.fn()" to be called 1 times, but got 0 times`(`timingSafeEqual` 엿보기가 0번) |
+| V-F5g(앞 판정에서만 비밀번호 바꾸기 필요 세션 403을 건너뜀) | 기존 `W9F3 F5 앞 판정은 가드와 같은 거절을 자리 잡기 전에 낸다`에 `password:change` 세션 줄을 더함 | 잡힘 | `비밀번호 바꾸기 필요 세션(password:change 스코프): 본문 없이 자리 잡기 전에 제 거절이어야 한다: expected 429 to be 403`(자리가 차 있어 429) |
+| V-F5f(request-checks.ts `publicOnly`를 '`public`이 있으면') | `W9F3 V-F5f 허용 역할이 public뿐이면 ①이 없고 [public, fan]이면 ①이 있다(신원이 있을 때만)` | 잡힘 | `[public, fan] 대상 틀린 신원: ①이 자리 잡기 전에 401: expected 429 to be 401` |
+
+- **사례 꼴**: V-F2f는 인터셉터에 가짜 호출을 달아 첫 메타데이터를 흘려 같은 값·짧은 값·긴 값·같은 길이 틀린 값마다 `timingSafeEqual` 1번·32바이트 다이제스트 둘을 보고, 통과 여부와 UNAUTHENTICATED를 함께 본다(머리가 아예 없으면 UNAUTHENTICATED). V-F5g는 자리를 쥔 옳은 요청이 있는 동안 `x-user-scope: password:change` 파트너 세션이 429가 아니라 403 `password-change-required`·`Connection: close`를 받는지 본다. V-F5f는 새 경로 둘(`[public, fan]`·`public`뿐)을 시험 서비스에 더해, `[public, fan]`은 자리가 찬 때 대상이 틀린 신원 → 401(익명 → 429), `public`뿐은 신원이 틀려도 ①이 없고 identity를 묻지 않음을 본다.
+- **되돌림 확인**: 변이 셋을 모두 되돌린 뒤 `git status`에 src 변경이 없다(시험 파일만 변경 상태였고 커밋했다). 지정한 platform 단위 시험 다섯 파일은 26개 통과, `tsc -p tsconfig.json --noEmit` 0.
+
 ## 시험 이의
 
 구현 담당 `w9f3-impl`(claude-opus-5-5), 2026-11-17. 시험 이의는 없다(17개 시험을 고치지 않고 모두 통과시켰다). 아래는 정본이 정하지 않아 구현이 정한 것과 계획·정본이 다른 한 곳이다(시험과는 부딪히지 않는다, 리뷰·계획이 볼 것).
