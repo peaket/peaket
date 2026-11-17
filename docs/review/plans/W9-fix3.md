@@ -215,3 +215,88 @@ cd /d/ticketpass-w9-fix3 && node --test tools/ci/gateway-routes.test.mjs && node
 ### 합쳐도 되나
 
 합쳐도 된다. 새 지적 넷은 모두 낮음이라 막지 않고 정리 목록으로 넘긴다(N2는 검증·성능 담당이 한 번 본다). 통합 ops rls는 검증 때 다시 돌린다.
+
+## 검증
+
+검증 담당 `w9f3-verify`(claude-opus-5-5), 2026-11-17, 가지 끝 `13583e44`. 이 묶음의 계획·시험·구현·리뷰는 맡지 않았다. 변이는 저장소 밖 스크립트(scratchpad `w9f3-verify/mutate.mjs`)로 하나씩 넣고 닿는 시험을 돌린 뒤 원래 내용으로 되돌렸다. 단위는 패키지·서비스 폴더에서 vitest(모두 `@peaket/platform`을 원본 `src`로 잇는 설정이라 platform 다시 빌드는 필요 없었다), tools는 `node --test`, F1 통합은 Docker 잠금(`D:/ticketpass-locks/docker`, 18:20~18:24)을 잡고 `vitest.integration.config.mjs`로 돌렸다(컨테이너 접두 `w9f3-verify-`, 끝난 뒤 남은 컨테이너 0, 잠금 지움).
+
+### 셈
+
+- 기준선: platform 24·core 24·ops 2·tools 41 통과, ops 통합(rls) 10 통과, purchase 회귀 넷(`write-bulkhead`·`orders-http`·`accept-http`·`order-identity`) 127 통과.
+- 넣은 변이 **31개**(계획 §5의 14 + 검증 담당이 더한 17): **잡힘 24, 살아남음 7**. 계획 14개 가운데 13개가 잡혔고 M-F4a 하나가 살아남았다(등가, 아래). 권한·보안 변이(F1·F2·F3·F5) 26개 가운데 살아남은 것은 셋(V-F2f·V-F5f·V-F5g)이다.
+
+### 변이 표
+
+시험 묶음: P = platform `body-limit`·`bulkhead-auth`·`internal-token-constant-time`·`internal-token`·`internal-token-boot`, C = core `internal-sale-config-token-boot`·`partner-bulkhead-auth`·`search-log`·`search.http`, O = ops `event-cancellation-main-wiring`, I = ops 통합 `event-cancellation-rls`, T = `tools/ci/gateway-routes.test.mjs`, G = platform `grpc-channel`.
+
+| # | 위치 | 꼴 | 결과(잡은 시험) |
+| --- | --- | --- | --- |
+| M-F1a | services/ops-svc/src/main.ts:36 | 시작 검사 호출을 뺌 | 잡힘: O 'W9F3 F1 파트너 DB 주소가 있으면 … 역할 검사를 부른다' |
+| M-F1b | services/ops-svc/src/adapters/db/database-role.ts:30 | 소유자 검사를 뺌 | 잡힘: I 'W9F3 F1 … 시작 때 본다'(:208 소유 역할 구성원 줄. 표 소유자 줄은 슈퍼유저라 특권 검사가 먼저 잡는다) |
+| M-F1c | main.ts:36 | `&& partnerUrl !== url`(같은 풀이면 건너뜀) | 잡힘: O 같은 시험(같은 주소 줄) |
+| M-F2a | packages/platform/src/secret-compare.ts:9 | 해시 전에 바이트 길이로 일찍 끝냄 | 잡힘: P ⑤·P gRPC·C ④ |
+| M-F2b | packages/platform/src/internal-grpc.ts:6 | gRPC 세 자리를 옛 `sameSecret`(길이 먼저)으로 | 잡힘: P 'W9F3 F2 내부 gRPC 토큰·처리자 증명도 공용 비교를 쓴다' |
+| M-F3a | tools/ci/gateway-routes.mjs:57 | 모르는 스코프 검사를 뺌 | 잡힘: T authKindOf·T CLI |
+| M-F3b | gateway-routes.mjs:54·73 | 배열이 아니면 문제 없이 `[]`로 봄 | 잡힘: T authKindOf·T CLI |
+| M-F3c | gateway-routes.mjs:79 | `ticket:buy`인데 token 아님 검사를 뺌 | 잡힘: T authKindOf·T CLI |
+| M-F4a | packages/platform/src/request-checks.ts:393 | 칸막이 훅 거절에서 선언 길이가 있을 때만 `Connection: close` | **살아남음**(등가): 전역 onSend(:479)가 chunked 429에도 `bodyPending`으로 닫는다. 두 겹을 함께 깨면(V-F4f) 잡힌다 |
+| M-F4b | request-checks.ts:479 | 모든 응답에 `Connection: close` | 잡힘: P 'W9F3 F4 정상 요청은 연결을 다시 쓴다' |
+| M-F5a | request-checks.ts:465 | ① 신원 판정 없이 바로 자리(옛 차례) | 잡힘: P F5 신원 없음·P F5 앞 판정·C F5 core 좌석맵 |
+| M-F5b | packages/platform/src/auth.ts:375·398 | 앞 판정은 머리만 보고 identity 세션 판정·역할을 건너뜀 | 잡힘: P F5 앞 판정 |
+| M-F5c | auth.ts:373·398 | 앞 판정에서 대상(aud) 검사를 뺌 | 잡힘: P F5 앞 판정 |
+| M-F6a | services/core-svc/src/modules/catalog/domain/search.ts:878 | 구분자에 `/`만 더함 | 잡힘: C 'W9F3 F6 SR-T17 빗금·밑줄·…' |
+| V-F1d | database-role.ts:29 | 슈퍼유저·BYPASSRLS 검사를 뺌 | 잡힘: I(:202 BYPASSRLS 줄) |
+| V-F1e | database-role.ts:26 | 소유자 판정을 '직접 소유자'로 좁힘(소유 역할 구성원 빠짐) | 잡힘: I(:208) |
+| V-F1f | services/ops-svc/src/event-cancellation-wiring.ts:49 | 빈 문자열 주소도 '있음'으로 봄 | 잡힘: O(빈 값 줄) |
+| V-F1g | database-role.ts:32 | `ops_app` 겸함 검사를 뺌 | 잡힘: I(:200 둘 다 줄) |
+| V-F2c | secret-compare.ts:12 | 기대 값 빈 문자열 거절을 뺌 | 잡힘: P ⑤(`constantTimeEqual('', '')`) |
+| V-F2d | secret-compare.ts:10 | `timingSafeEqual` 대신 `===` | 잡힘: P ⑤·P gRPC·C ④ |
+| V-F2e | auth.ts:28 | HTTP 가드만 옛 `sameSecret`(gRPC는 새 것) | 잡힘: P ⑤·C ④ |
+| V-F2f | internal-grpc.ts:67 | gRPC 서버 인터셉터의 토큰 비교만 `===` | **살아남음**: P·C·G 모두 통과. 인터셉터 비교를 엿보는 시험이 없다(`grpc-channel` 시험은 맞음·틀림 결과만 본다) |
+| V-F3d | gateway-routes.mjs:78 | `sec.length > 0` 조건을 뺌(`security: []`이 token) | 잡힘: T authKindOf(`security: []` 줄) |
+| V-F4c | request-checks.ts:479 | 전역 onSend가 본문 상태와 상관없이 오류 답(400 이상)을 모두 닫음 | **살아남음**: 본문을 다 읽은 뒤 오류 답(가드 401·검사 400 등)이 keep-alive인지 보는 시험이 없다 |
+| V-F4d | request-checks.ts:393 | 칸막이 훅 거절의 `Connection: close`를 뺌 | **살아남음**(등가): 시험 사례는 모두 본문이 남은 요청이라 전역 onSend가 닫는다 |
+| V-F4e | request-checks.ts:479 | 전역 onSend를 뺌 | **살아남음**(등가): 413은 Fastify 해석기 길(`onDone`)이 닫고, 429·①은 훅이 닫는다 |
+| V-F4f | request-checks.ts:393·479 | M-F4a + 전역 onSend를 뺌 | 잡힘: P F4 429(:251 ③ chunked가 2초 안에 닫히지 않음) |
+| V-F5d | request-checks.ts:465 | 차례를 바꿈(② 자리 → ① 신원) | 잡힘: P F5 신원 없음·P F5 앞 판정·C F5 core 좌석맵 |
+| V-F5e | request-checks.ts:434 | 놓기에서 `held` 조건을 뺌(①에서 거절된 요청도 자리를 놓음) | 잡힘: P F5 둘·P F4 셋·P HOT240·C F5 core |
+| V-F5f | request-checks.ts:427 | ① 건너뛰기를 '`public`이 있으면'으로 넓힘(계획 §2 문구) | **살아남음**: `[public, …]` 칸막이 경로를 쓰는 시험이 없다(지금 그런 경로도 없다) |
+| V-F5g | auth.ts:379·398 | 앞 판정에서만 비밀번호 바꾸기 필요 세션 403을 건너뜀 | **살아남음**: F5 앞 판정 사례에 `password:change` 세션 줄이 없다 |
+
+### 살아남은 것과 처리 제안
+
+| # | 판단 | 제안 |
+| --- | --- | --- |
+| M-F4a·V-F4d·V-F4e | 등가(두 겹 가운데 한 겹만 깬 것). 칸막이 훅의 닫기와 전역 onSend의 닫기가 서로를 덮고, 413은 지금 Fastify 5.12.7 해석기도 닫는다. 정본 동작은 지켜진다 | 받아들인다. 다만 V-F4d가 살아남는 것은, 리뷰 N2(칸막이 훅이 본문이 없어도 늘 닫음)를 고칠 때 훅의 닫기를 빼고 전역 onSend(`bodyPending`)에 맡겨도 F4·F5 시험이 그대로 통과한다는 뜻이다(N2를 정리 목록에서 다룰 때 참고). 구현 기록의 'multipart 413 두 길도 Fastify에 기대지 않는다'는 V-F4e가 살아남아 시험으로 묶여 있지 않다(Fastify가 바뀔 때만 의미가 있다, 정리 목록 낮음) |
+| V-F2f | 시험 빈 곳(낮음~중간). 인터셉터(`grpc-channel.ts`가 모든 내부 gRPC 서버에 거는 토큰 검사)가 상수 시간 비교를 쓰는지 아무 시험도 보지 않는다. 지금 구현은 맞다 | 정리 목록: `internal-token-constant-time.test.ts`의 gRPC 시험에 `internalGrpcServerInterceptor`를 한 번 태워 `timingSafeEqual` 1번·32바이트 인자를 보는 줄을 더한다(시험 담당 몫, 이 묶음을 막지 않음) |
+| V-F5g | 시험 빈 곳(낮음). 정본 ①에 '비밀번호 바꾸기 필요 세션'이 있으나 F5 앞 판정 사례에 없다. 판정 함수가 가드와 하나(`judgeIdentity`)라 갈라질 위험은 작다 | 정리 목록: F5 앞 판정 표에 `password:change` 스코프 partner 세션 → 403 `password-change-required`·자리 0 줄 하나 |
+| V-F5f | 시험 빈 곳(낮음). 정본 '`public`뿐인 경로는 ①이 없다'와 계획 '`public`이 있으면' 사이를 가르는 시험이 없다. 구현은 정본대로다 | 정리 목록: `[public, fan]` 칸막이 경로 하나에 대상이 틀린 신원 요청 → 401·자리 0 줄. 또는 그런 경로가 생기기 전까지 받아들인다 |
+| V-F4c | 시험 빈 곳(낮음, 과한 닫기). 정본은 '본문을 다 읽기 전'의 오류 답만 닫는다고 하고 그 밖의 오류 답은 말하지 않는다. 지금 구현은 keep-alive로 둔다 | 정리 목록: F4 정상 요청 시험에 '본문을 다 보낸 뒤 401(가드)·400(검사) 답에는 `connection: close`가 없다' 줄. N2와 함께 본다 |
+
+### 판정 기준 대조
+
+| 기준 문장(정본·계획) | 단언하는 시험 | 같은가 |
+| --- | --- | --- |
+| guidelines §7 차례 ① 신원 머리 셋 → 종료 세션 → 대상 → 스코프 → identity 세션·비밀번호 바꾸기 필요 세션·역할 | P F5 신원 없음(머리 없음 401), P F5 앞 판정(대상·종료 세션·`valid: false` 401, 던짐·시간 초과 503, 역할 403, 스코프 403) | 거의 같다. **비밀번호 바꾸기 필요 세션 줄이 없다**(V-F5g) |
+| ① '역할 캐시는 그대로 쓴다' | P F5 옳은 신원(identity 부름 1) | 같다 |
+| '①에서 막히면 가드와 같은 401·403·503이고 자리를 잡지 않고 본문을 읽지 않는다' | P F5 앞 판정(상태·type·WWW-Authenticate, 옳은 요청이 자리를 쥔 동안 제 거절, 머리만 보낸 요청이 본문 없이 답), C F5 core 좌석맵 | 같다('본문을 읽지 않음'은 bytesRead가 아니라 머리만 보낸 요청이 답을 받는 것으로 본다, 시험 약속대로) |
+| '허용 역할이 `public`뿐인 경로는 ①이 없다' | P body-limit의 public 칸막이 시험(신원 없이 200·429) | 절반. '뿐'과 '있으면'을 가르는 줄이 없다(V-F5f) |
+| '칸막이 경로의 허용 역할은 처리기에 단다(클래스에만 달면 서비스가 시작하지 않는다)' | P F5 클래스에만(`@Bulkhead`·`@BodyLimit` 둘, 까닭에 경로) | 같다 |
+| ④ 공용 가드 전체(지금 차례 그대로) | purchase 회귀 넷 127, 기존 가드 시험 | 같다(회귀로 본다) |
+| guidelines §7 '본문을 다 읽기 전에 오류로 답하는 모든 길(413·429·①의 401·403·503)은 `Connection: close`를 달고 응답을 다 보낸 뒤 연결을 닫는다' | P F4 429 ①②③, P F4 413 넷, P F5 두 시험(2초 안 닫힘) | 같다 |
+| '닫은 뒤 더 읽는 양은 이미 받은 것뿐이다' | P F4 bytesRead ≤ 1MiB([가정] 시험 문턱) | 근사(문턱으로 본다, 계획 §7대로) |
+| 계획 §2 F4 '정상 응답은 keep-alive 그대로' | P F4 정상 요청 | 같다. 본문을 다 읽은 뒤의 오류 답은 정본이 정하지 않았고 시험도 없다(V-F4c) |
+| authz-matrix §5.3 시작 검사 '`PEAKET_PARTNER_DATABASE_URL`이 있으면(환경과 상관없이)' | O(production·ci·local, 관제와 같은 주소, 빈 값·없음 false, main.ts를 띄워 `createService`보다 앞) | 같다 |
+| 같은 문장의 네 조건(`ops_partner`, `ops_app` 겸함 아님, 슈퍼유저·`BYPASSRLS` 아님, 표 소유자·소유 역할 구성원 아님) | I 'W9F3 F1 … 시작 때 본다' 여섯 줄 | 같다(조건마다 변이가 따로 잡힘: M-F1b·V-F1d·V-F1e·V-F1g) |
+| '하나라도 어긋나면 까닭을 적고 시작하지 않는다' / '주소가 없으면 보지 않고 경고만' | I 까닭 글 정규식, O 차례·조건 함수 | 거의 같다. 경고 문구 자체는 단언하지 않는다(낮음, 기록만) |
+| architecture §3.2 'REST' 행·asvs/settlement.md 11.2.4 'SHA-256으로 줄인 뒤 `timingSafeEqual`로 한 번, 길이가 달라도 일찍 끝내지 않음', 내부 gRPC 공유 토큰도 | P ⑤(같음·틀림·짧음·긺·빈 값·한글), C ④, P gRPC(`verifyInternalGrpcActor`의 토큰·처리자 증명) | 거의 같다. **gRPC 서버 인터셉터는 시험이 없다**(V-F2f) |
+| infra §4.1 ④ 이상한 값(배열 아님·빈 배열·문자열 아닌 원소·모르는 값·중복·`ticket:buy`인데 token 아님) → 그 작업과 까닭을 한 줄로 보이고 2로 멈춤 | T authKindOf(목록의 모든 꼴), T CLI(끝 코드 2·까닭 줄·생성 파일 없음) | 같다 |
+| infra ④ 칸이 없으면 ①~③ 그대로 | T 대조 줄(칸 없음 → token, 기존 D-T42) | 같다 |
+| search.md §11 구분자 아홉, 날짜·`1,000,000`도 `[숫자]`, 4자리 이하는 남음 | C search-log(구분자마다, `2026/11/17`·`1,000,000`, 남는 것 셋) | 같다 |
+| search.md §11 '검색 자체는 가리기 전 값으로 한다' | C search.http(전각 빗금 번호, 결과가 가리기 전 값으로 찾은 것과 같음) | 같다 |
+
+### 되돌림 확인
+
+- 변이마다 실행기가 원래 내용을 다시 썼고, 끝난 뒤 `git status --short`가 비었다(`git diff --stat` 0). 되돌린 트리에서 platform 24·core 24·ops 2·tools 41을 다시 돌려 모두 통과했다.
+- platform `dist`는 건드리지 않았다(닿는 시험이 모두 원본 `src`를 잇는다). Docker: `w9f3-verify-` 컨테이너 0, 잠금 폴더는 18:24에 지웠다(그 뒤 다른 묶음 담당이 새로 잡았다).
+- 합쳐도 되나: 막을 것은 없다. 살아남은 7개 가운데 셋은 등가, 넷은 낮은 시험 빈 곳이라 정리 목록으로 넘긴다(V-F2f를 먼저).
