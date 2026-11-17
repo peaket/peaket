@@ -42,10 +42,11 @@ export function partnerDatabaseUrlFromEnv(env: Readonly<Record<string, string | 
 }
 
 /**
- * W9-fix3 F1(authz-matrix §5.3 'ops-svc 구현' 끝 '시작 검사'): 파트너 풀의 DB 역할 시작 검사를 할지. 시험 담당이 둔 빈 뼈대(동작 없음), 구현 담당이 채운다
+ * W9-fix3 F1(authz-matrix §5.3 'ops-svc 구현' 끝 '시작 검사'): 파트너 풀의 DB 역할 시작 검사를 할지.
+ * PEAKET_PARTNER_DATABASE_URL이 비지 않으면 환경과 상관없이(관제 주소와 글자까지 같아도) 본다. 없어서 local·ci가 관제 풀을 함께 쓰면 보지 않는다(경고만)
  */
-export function partnerRoleCheckRequired(_env: Readonly<Record<string, string | undefined>>): boolean {
-  return false;
+export function partnerRoleCheckRequired(env: Readonly<Record<string, string | undefined>>): boolean {
+  return has(env.PEAKET_PARTNER_DATABASE_URL);
 }
 
 export function eventCancellationDepsFromEnv(i: EventCancellationDepsInput): EventCancellationDeps {

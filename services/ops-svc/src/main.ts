@@ -9,7 +9,8 @@ import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { HttpCommandExecutor } from './adapters/http-command-executor.js';
-import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv } from './event-cancellation-wiring.js';
+import { assertOpsPartnerRole } from './adapters/db/database-role.js';
+import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
 import { PromEventCancellationSignals } from './modules/event-cancellations/index.js';
@@ -30,6 +31,9 @@ const database = createDatabase({ url, applicationName: SERVICE });
 // local·ci는 관제 풀을 함께 쓴다(그때 행 보안은 시험하지 않는다)
 const partnerUrl = partnerDatabaseUrlFromEnv(process.env, url);
 const partnerDatabase = partnerUrl === url ? database : createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: 5 });
+// 파트너 풀의 DB 역할 시작 검사(W9-fix3 F1, authz-matrix §5.3 끝 '시작 검사'). 파트너 주소가 있으면 관제 주소와 같아도 요청을 받기 전에 보고, 어긋나면 시작하지 않는다
+const partnerRoleChecked = partnerRoleCheckRequired(process.env);
+if (partnerRoleChecked) await assertOpsPartnerRole(partnerDatabase);
 // 회차 취소 지표(확정 실패 뒤 되돌리기 저장 실패, 웨이브 끝 리뷰 K4). 서비스를 만든 뒤 레지스트리에 붙인다
 const eventCancellationSignals = new PromEventCancellationSignals();
 const adminAuthz = new GrpcAdminAuthz(identityUrl);
@@ -122,7 +126,7 @@ const service = await createService({
 });
 eventCancellationSignals.register(service.metrics.registry);
 if (anchor.warning) service.logger.warn({}, anchor.warning);
-if (partnerDatabase === database) service.logger.warn({}, 'PEAKET_PARTNER_DATABASE_URL이 없어 파트너 회차 취소 경로가 관제 DB 풀을 함께 쓴다(local·ci만, 행 보안은 앱 대조만 남는다)');
+if (!partnerRoleChecked) service.logger.warn({}, 'PEAKET_PARTNER_DATABASE_URL이 없어 파트너 회차 취소 경로가 관제 DB 풀을 함께 쓴다(local·ci만, 행 보안은 앱 대조만 남는다)');
 if (!purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 환불 gRPC를 쓰지 않는다(내부 HTTP 호환 경로)');
 if (!purchaseUrl && !purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_PURCHASE_GRPC_ADDR이 없어 EVENT_CANCEL 실행을 하지 않는다');
 if (!coreUrl) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 SCALE_CHANGE 실행을 하지 않는다');
