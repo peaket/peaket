@@ -214,3 +214,33 @@ cd D:/ticketpass-w9-fix1/services/purchase-svc && node_modules/.bin/vitest run -
 
 - 이의 1(`GAT-110 N3 잡기 늘리기는 잡기 값이 같고 기한 안일 때만 …`, 통합 `test-int/event-refund.int.test.ts`): 받아들인다. 시험 데이터의 결함이다. 기한 정각을 보는 둘째 요청 `r2`를 첫 요청과 같은 회차에 RUNNING으로 만들어, 같은 회차의 진행 중 요청을 하나로 막는 유일 색인 `event_cancellation_active_key`(data `event_cancellation_request`)에 걸렸다. 제안대로 `r2`의 표·요청만 새 회차(`eventId2 = randomUUID()`)에 만들었고 단언은 그대로다.
 - 확인: 도커 잠금 2026-11-17 18:03~18:04 KST, 구현 `bd90ff6b` 위에서 `event-refund.int` 37/37 통과. 컨테이너 목록은 앞뒤가 같고 잠금은 지웠다.
+
+## 리뷰
+
+리뷰 담당 `w9f1-review`(claude-opus-5-5), 2026-11-17. 기준 `feature/w9-fix1` `a4fea64b`(`git diff origin/develop...HEAD`). 코드·시험은 고치지 않았다. 계획 §5 단위 명령(여섯 파일)을 다시 돌려 104 모두 통과를 봤다. 통합은 돌리지 않았다(구현·시험 담당의 도커 결과를 따른다).
+
+**지적별 판정**
+
+| 지적 | 판정 | 본 것 |
+| --- | --- | --- |
+| N3 잡기 늘리기 | 고쳐짐 | `#keepClaim`(event-refund-service.ts:697)이 `processItem`의 대상 찾기 뒤, `canceller.cancel` 바로 앞(523줄)에 있고 둘 사이에 기다림이 없다. 남은 기한 `untilMs − now < 40,000`일 때만 `extend`, 정각은 늘리지 않는다. 0행이면 `false` → `runGroup`이 그 주문의 나머지를 끊고(580줄), 시도 기록·끝내기 없이 경고(`stage: 'extend'`)만, 실행 끝 `release`는 그대로다. `extend`가 던지면 보내지 않고 올라간다. SQL(drizzle-event-refund-claims.ts:128)은 같은 요청·같은 잡기 값·`claimed_until > 지금`·PENDING·UNKNOWN만 쓰고 지난 잡기를 되살리지 않는다. 잡기는 주문 하나씩(`claimOrders(…, 1)`)이고 그 값의 행은 모두 같은 기한을 가지므로, 행 일부만 남이 다시 잡은 채 늘리기가 1행 이상 되는 경우는 없다. 두 운영 조립의 `deadlineMs`가 상수를 쓴다 |
+| N3 잠금 차례·교착 | 문제 없음 | 요청 행 `FOR NO KEY UPDATE`를 잡는 길은 `claimOrders`·`extend`·`updateLocked` 셋뿐이고 모두 요청 행을 먼저 잡는다(앞 둘은 그다음 항목 행). 항목 행만 쓰는 길(`finish`·`updateItem`·`markApplied`·`markNotApplied`)은 요청 행 잠금을 잡지 않고, `addItems`의 외래 키 확인은 KEY SHARE라 NO KEY UPDATE와 부딪히지 않는다. 그래서 고리가 생기지 않는다. 늘리기를 잡기와 같은 잠금 뒤에 세운 구현 결정은 시계가 조금 다른 두 파드의 기한 경계 경합을 한 줄로 세우는 것이라 맞다 |
+| N8 모든 진행률 쓰기가 `updateLocked` | 고쳐짐 | 서비스의 요청 행 쓰기는 `pause`(318)·`resume`(342)·`#closeWindowNow`(455)·`#run` 끝(635) 넷 모두 `updateLocked`다. `src` 전체에 `store.update(`·`updateActive(` 호출이 남지 않았다(저장소 구현·포트 선언만). 요청 행을 쓰는 다른 길은 `create`뿐이다 |
+| N8 실행 끝 빼기 없음 | 고쳐짐 | `mergePauses(pausedOf(current), { add: newlyPaused })`만 쓰고 `lift`가 없다. 잠근 값이 PAUSED면 상태를 두고 멈춤만 더하며, 끝난 요청은 쓰지 않는다. `newlyPaused`에는 그 실행이 자동 정지를 판정한 결제사만 들고, DB에서 읽어 지역 표에 넣은 멈춤(505·506줄)은 들지 않는다 |
+| N8 재개는 그 결제사만 | 고쳐짐 | `lift = i.pg ? [i.pg] : pausedOf(request)`(332줄, 잠그기 전에 읽은 값)이다. 읽은 뒤 생긴 자동 정지는 남는다. 이어 도는 `#run(running)`은 잠근 뒤 쓴 값의 남은 멈춤으로 시작해 그 결제사로 보내지 않는다 |
+| N8 끝난 요청 409 | 계약과 맞음 | 같은 `EventRefundError('CONFLICT')`가 이미 잠그기 전 확인(312·330줄)에서 쓰이던 것이고(HTTP `ConflictException` 409, gRPC `FAILED_PRECONDITION`), 이번 고침은 그 확인과 잠근 쓰기 사이에 끝난 경합만 같은 답으로 돌린다. 새 응답 코드가 아니다. 다만 ops openapi의 `/pauses`·`/resumptions`가 처음부터 409를 적지 않았다(아래 R4, 이 묶음 밖) |
+| P3 그 밖 실패의 FAILED | 고쳐짐 | `#retryOrFail`이 `status === 'FAILED'`면 시도 상한과 같은 `#finishItem(…, { attempts, claimToken })`으로 끝낸다(680줄). `claims.finish` 한 트랜잭션에 항목 FAILED·`next_attempt_at` 빔·행 실패 표시(`cancellationFailure`)·`failure_case_at`·팬 `REFUND_FAILED` Outbox가 함께 들고, 0행이면 아무것도 없다(LOST). 시도 기록은 `processItem` 574~575줄에서 끝내기 뒤, LOST가 아닐 때 한 번이다. 알림은 `#finishItem` 하나에서만 만들어지고, 조건부 끝내기가 두 번째 쓰기를 막으며, 옛 갈래의 `#openFailureNow` 따로 부르기도 `#finishItem` 안 한 번으로 줄어 중복이 없다 |
+| D5 시한폭탄 고침 `992bc9c2` | 뜻을 바꾸지 않음 | 바뀐 것은 N1·N2 묶음 넷의 `store`를 그 시험 요청만 보는 저장소(`activeRequests`·`dueWindowClosures`만 거름)로 바꾼 것뿐이고 단언·대역·CS 다시 열기 포트는 그대로다. 그 시험들이 보는 것은 자기 요청의 항목·CS 건이라 다른 요청을 거르는 것이 뜻을 줄이지 않는다. D5 묶음의 고정 시각 데이터도 그대로다 |
+| 시험 경계 | 지켜짐 | 구현 커밋 `bd90ff6b`은 `src` 여덟 파일만 바꿨고 시험 파일은 건드리지 않았다. 시험 커밋 `3881012d`의 `src` 변경은 던지는 빈 뼈대·정본 값 상수 둘·`claimedUntilMs`(이미 계산하던 값을 싣기만)뿐이다. 이의 1의 시험 고침 `b3eb297b`은 둘째 요청을 새 회차에 만든 준비 고침이고 단언은 그대로다 |
+
+**새 지적(모두 합치기를 막지 않음)**
+
+| # | 등급 | 파일:줄 | 내용 | 권고 |
+| --- | --- | --- | --- | --- |
+| R1 | 낮음(이 묶음 밖, 구현 담당도 적음) | services/purchase-svc/src/modules/refund/application/event-refund-service.ts:512 | 업무 거절률 전체 정지(`stop.all`)가 실행 시작 때 읽은 `request.progress.perPg`로 결제사를 고른다. `perPg`가 없는 행이면 던지고, 그 실행 시작 뒤 쓸어 담기로 처음 생긴 결제사 몫은 '전체' 정지에서 빠진다. 다음 실행은 진행률에 그 몫이 있어 막히므로 돈은 많아야 그 실행 안의 몇 건이다 | 감독 정리 목록 후보: 잠근 값·항목의 결제사 합으로 고르고 `?? []` |
+| R2 | 참고(이 묶음 밖) | services/purchase-svc/src/modules/refund/adapters/grpc-payment-cancellations.ts:48, grpc-ticket-cancellations.ts:64·105·170 | 서비스는 `deadlineMs`에 시각(지금 + 30초)을 넘기는데 어댑터는 그 값을 길이로 읽어 상한(5초)으로 자른다. 그래서 실제 한 호출은 5초에서 끊기고, 표 한 장은 호출 두세 개라 30초 안에 든다. N3의 여유(40초 > 30초)는 실제로 지켜진다. 다만 '표 한도 30초'는 합계로 강제되는 값이 아니라 어댑터 상한이 받쳐 주는 값이다 | 정리 목록 후보: 남은 길이(`deadline − now`)로 바꿔 넘기거나 정본에 '표 한도 = 어댑터 상한의 합'임을 적는다 |
+| R3 | 참고(이 묶음 밖, 확인 필요) | services/purchase-svc/src/modules/refund/adapters/db/drizzle-event-refund-store.ts:307~316 | `dueWindowClosures`가 이미 닫힌(기한이 지난) 연기 요청도 끝날 때까지 틱마다 다시 고른다. 그래서 `#closeWindowNow`의 잠근 쓰기와 SEV3 `REFUND_WINDOW_CLOSED` 경보가 틱마다 되풀이될 수 있다. N8 고침 뒤에도 멈춤은 잠근 값을 그대로 쓰므로 돈·멈춤 쪽은 안전하다 | 감독 정리 목록 후보: 경보 중복 여부 확인, 닫힘 표시 칸이나 조건 |
+| R4 | 낮음(문서, 이 묶음 밖) | docs/api/openapi.yaml:5525·5527 | `/v1/ops/event-cancellations/{requestId}/pauses`·`/resumptions` 응답에 끝난 작업의 409가 없다(전부터 409를 돌려줌) | 정리 목록 후보: 409 `CONFLICT` 한 줄 |
+| R5 | 낮음 | services/purchase-svc/src/modules/refund/index.ts:160 | 주석이 아직 '빈 뼈대'다(구현이 채움) | 다음 손질 때 지워도 된다 |
+
+**합쳐도 되는가: 된다.** 돈이 두 번 나가거나 멈춘 결제사로 나가는 길을 새로 찾지 못했다. N3·N8·P3 모두 정본(transfer-refund §5 '잡기 늘리기'·'멈춤 표시는 합쳐 쓴다'·'주인', data `claimed_until`·§5)대로 고쳐졌고 새 지적은 모두 이 묶음 밖이거나 낮음이다. 검증 담당의 틀린 구현 표본(계획 §4) 확인을 남긴다.
