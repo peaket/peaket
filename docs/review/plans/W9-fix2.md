@@ -293,7 +293,98 @@ Docker 없이: purchase 단위 `test/seat-event.test.ts`·`test/seat-stream-rela
 
 ## 검증
 
-(검증 담당이 쓴다)
+검증 담당 `w9f2-verify`(claude-sonnet-5-5), 2026-11-17, 가지 끝 `adadf320`. 이 묶음의 계획·시험·구현·리뷰는 맡지 않았다. 변이는 저장소 밖 스크립트(scratchpad `mut.sh`, 정확한 글 한 곳 바꾸기)로 하나씩 넣고 닿는 시험을 돌린 뒤 `git checkout -- <파일>`로 되돌렸다. 1차(Docker 없는 시험)와 2차(Docker 통합)로 나눠 돌렸다. 2차는 Docker 잠금(`D:/ticketpass-locks/docker`)을 넘겨받은 뒤 §6의 통합 명령을 묶음마다 하나씩 돌렸다. 컨테이너는 시험 도구가 띄우고 시험이 끝나면 스스로 지우며, 내가 따로 띄우거나 지운 것은 없고 다른 이름의 컨테이너는 건드리지 않았다. 잠금 폴더는 지우지 않았다.
+
+### 셈
+
+- 기준선(변이 없음): 단위는 chart 44, bundle 86, purchase 계획 §6 다섯 파일 187, payment pg-sub-provider 36, invariant-checker 단위 22, avro-schema 통과. 통합은 purchase §6 여덟 파일 230, payment-sub-provider 15, invariants 33이 모두 통과했다. purchase-svc 전체 단위는 부하가 큰 때 `grpc-payment-checkout`·`payment-deposit`이 흔들려 실패한 적이 있으나(따로 돌리면 92 통과) 변이와 무관하다.
+- 넣은 변이 **49개**(계획 §5·§9 표본과 줄 안 변형 + 검증 담당이 더한 것): **잡힘 40, 살아남음 9**. 1차 단위 31개에서 6개가 살아남았고 그 가운데 M-H4c·M-H5c는 2차 통합에서 잡혔다. 2차에서 새로 넣은 변이는 18개(통합으로만 잡히는 것)이다.
+- 통합 시험이 한 번 흔들렸다. M-H3a 첫 실행에서 변이와 무관한 `ST26_판매 열기로 세대 키가 선 회차는 READY…` 하나가 실패했으나 같은 변이를 다시 돌리면 230 통과였다(시험 흔들림으로 적는다).
+
+### 변이 표
+
+시험 묶음: CH=`node --test tools/local/chart.test.mjs`, BU=bundle vitest 전체, PA=payment 단위 `pg-sub-provider`, PU=purchase 단위(§6 다섯 파일 + rebuild-orders-plan·hold-seats·purchase-schema·seat-layout·core-sale-configs·pin·auto-assign·redis-seat-store·seat-behavior), PI=purchase 통합 §6 여덟 파일, IC=invariants 통합. 파일 경로는 `services/` 아래.
+
+| # | 위치 | 꼴 | 결과(잡은 시험) |
+| --- | --- | --- | --- |
+| M-A1 | payment-svc/src/modules/payment/application/assign-event-pg.ts:47 | `>`를 `>=` | 잡힘 PA(PRF-203 …5분을 넘으면 입력 오류) |
+| M-A2 | 같은 줄 | 상한을 9999년 끝(253402300799999)으로 | 잡힘 PA |
+| M-A3a | 같은 파일 | 시각 검사를 저장소 호출 뒤로 | 잡힘 PA |
+| M-A3b | 같은 파일 | 시각 검사를 하위 결제사 규칙 뒤로 | 잡힘 PA |
+| M-G1a | deploy/workloads/payment-svc/values.yaml:10 | 서비스 유예 105를 90으로 | 잡힘 CH |
+| M-G1b | deploy/envs/local/v1-bundle.yaml:46 | 합본 유예 125를 90으로 | 잡힘 CH |
+| M-G2 | values.yaml:10 | 서비스 유예 105를 92로 | 잡힘 CH(G1′) |
+| M-G3a | bundle/src/stop-child.ts childStopWaitMs | 늘 5초 | 잡힘 BU(G3 셋) |
+| M-G3b | 같은 함수 | 이름 비교 `payment-svc`를 `payment`로 | 잡힘 BU(G3 셋) |
+| M-G4 | 같은 함수 | 모든 자식 95초 | 잡힘 BU(purchase-svc·hold-worker 5초 줄) |
+| M-G5a | stop-child.ts 타이머 | 대기 +1ms | 잡힘 BU |
+| M-G5b | stop-child.ts | `clearTimeout` 삭제 | 잡힘 BU(타이머 남지 않음 줄) |
+| M-G4main | bundle/src/main.ts | `stopChildProcess(c.child, 5_000)` | 잡힘 BU(G4 소스 글) |
+| M-G6 | v1-bundle.yaml:46 | 합본 유예 125를 100으로 | 잡힘 CH(G2) |
+| M-G7 | payment-svc/src/modules/payment/domain/confirm-runner.ts:42 | `CONFIRM_CALL_GUARD_MS` 72,000을 80,000으로 | 잡힘 CH(2건 실패, G1′ 포함) |
+| M-H1b | purchase-svc/src/modules/inventory/domain/seat-event.ts:243 | toLedgerHoldEvent가 holdLimit을 안 실음 | 잡힘 PU(seat-event) |
+| M-H6b | seat-event.ts:141 | toSeatEvent가 holdLimit을 안 옮김 | 잡힘 PU 셋(seat-event 둘, 릴레이) |
+| M-H3b | seat-event.ts(ledgerHoldLimitOf) | 범위 밖 값이면 던짐 | 잡힘 PU 다섯 |
+| M-H3a | seat-event.ts(holdLimitOfField) | 틀린 Stream 칸 holdLimit이면 toSeatEvent가 던짐 | **살아남음**: PU 187·PI 230 통과(아래) |
+| M-H4a | purchase-svc/src/modules/inventory/domain/rebuild.ts:244 | 묶인 주문(K1)에서 한도 뺌 | 잡힘 PU(rebuild-orders-plan) |
+| M-H4b | rebuild.ts:278 | 원장 홀드의 한도 뺌 | 잡힘 PU |
+| M-H4d | rebuild.ts:196 | 판매 좌석(주문 있음)의 한도 뺌 | 잡힘 PU |
+| M-H4c | rebuild.ts:208 | 판매 좌석(주문 없음, 원장 홀드)의 한도 뺌 | 단위 살아남음, **통합에서 잡힘** PI 1건(seat-rebuild) |
+| M-H4e | rebuild.ts:128 | `fanLimitOf`가 PRIORITY에도 lim을 씀 | **살아남음**(단위·통합 모두) |
+| M-H5a | adapters/memory-seat-store.ts(writeSeats HELD) | 메모리 lim 뺌 | 잡힘 PU(rebuild-memory) |
+| M-H5b | memory-seat-store.ts(writeSeats SOLD+토큰) | 메모리 SOLD 쪽 lim 뺌 | **살아남음**(메모리 이중 구현, 통합이 안 봄) |
+| M-H5c | adapters/redis-seat-store.ts:92 | 열째 칸을 늘 '' | 단위 살아남음, **통합에서 잡힘** PI 2건 |
+| M-H6c-hold, M-H6c-pin | memory-seat-store.ts:392·825 | 메모리 홀드·pin Lua의 HELD 항목에서 holdLimit 뺌 | 잡힘 PU(ST35_①, pin_ST35_·pin_ST7_) |
+| M-H6c-auto | memory-seat-store.ts:637 | 메모리 자동 배정 Lua의 HELD 항목에서 holdLimit 뺌 | **살아남음**(메모리 이중 구현. 실제 Lua판 M-H6a-auto는 잡힘) |
+| M-H1a | adapters/db/drizzle-seat-hold-ledger.ts:18 | 적재가 holdLimit을 늘 null로 | 잡힘 PI 2건(seat-hold-ledger H2, sale-policy H1) |
+| M-H1c | adapters/db/drizzle-seat-rebuild.ts:41 | 원장 읽기 holdLimit을 늘 null로 | 잡힘 PI 5건 |
+| M-H2a | drizzle-seat-hold-ledger.ts(on conflict set) | 뒤 HELD가 hold_limit을 안 채움 | 잡힘 PI 1건(H2) |
+| M-H2a-where | 같은 파일(on conflict where) | where에서 `hold_limit is null and excluded.hold_limit is not null` 절만 뺌(held_at이 이미 있는 행의 한도 채우기 빠짐) | **살아남음** |
+| M-H2b | 같은 파일 | `hold_limit = excluded.hold_limit`(이미 있는 값을 덮음) | **살아남음**(등가, 아래) |
+| M-H2b2 | 같은 파일 | `coalesce(excluded, 기존)`(덮는 쪽 우선) | **살아남음**(등가, 아래) |
+| M-H5d1 | adapters/rebuild-lua.ts:242 | 열째 칸을 받고도 HSET lim 안 함 | 잡힘 PI 3건 |
+| M-H5d2 | rebuild-lua.ts:188 | 열째 칸 검사 제거 | 잡힘 PI 1건(H4) |
+| M-H6a-hold | adapters/hold-lua.ts:349 | HELD 항목에서 holdLimit 뺌 | 잡힘 PI 2건 |
+| M-H6a-auto (M-H6d) | adapters/auto-hold-lua.ts:259 | 자동 배정 Lua만 holdLimit 뺌 | 잡힘 PI 1건(hold-lifecycle H5) |
+| M-H6a-pin | adapters/pin-lua.ts:237 | pin Lua의 holdLimit 뺌 | 잡힘 PI 1건 |
+| M-P1 | invariant-checker/sql/p4_issue_deadline_exceeded.sql:11 | 모든 전이에 greatest(승인, 반영) | 잡힘 IC 1건(P3) |
+| M-P2a | 같은 줄 | T13·T16의 기준을 greatest 대신 반영 시각만 | **살아남음** |
+| M-P2b | 같은 줄 | T16(AWAITING_DEPOSIT)을 뺌 | 잡힘 IC 1건(P2) |
+| M-P2b2 | 같은 줄 | T13(UNKNOWN)을 뺌 | 잡힘 IC 1건(P1) |
+| M-P2c | 같은 파일 late | 끝난 주문의 기한 비교 `>`를 `>=`로 | 잡힘 IC 1건(P1 경계) |
+| M-P2d | 같은 파일 late | 열린 주문(as_of)의 기한 비교 `>`를 `>=`로 | **살아남음** |
+| M-P2e | 같은 줄 | greatest를 least로 | 잡힘 IC 2건 |
+
+### 살아남은 것과 처리 제안
+
+| # | 판단 | 처리 제안 |
+| --- | --- | --- |
+| M-H2b·M-H2b2 | 등가. on conflict의 where가 'held_at이 없음' 또는 'hold_limit이 비고 새 값이 있음'일 때만 갱신하게 하므로, 갱신되는 행의 기존 hold_limit은 늘 NULL이다(끝 사건이 먼저 넣은 행은 한도가 없고 한도는 HELD만 쓴다). coalesce 순서·덮어쓰기가 결과를 바꾸지 않는다 | 받아들인다. 정본의 '있는 값은 덮지 않는다'는 where가 지킨다 |
+| M-H2a-where | 시험 빈 곳(낮음). 한도 없이 먼저 적재된 HELD(옛 파드)를 한도 있는 HELD가 다시 받았을 때 채우는 길을 보는 시험이 없다. 지금 구현은 맞다 | 정리 목록: H2에 'held_at이 이미 있고 hold_limit이 NULL인 행에 한도 있는 HELD가 오면 채운다' 한 줄(시험 담당 몫, 묶음을 막지 않음) |
+| M-H3a | 시험 빈 곳(낮음). '틀린 Stream 칸이어도 던지지 않고 칸만 뺀다'(릴레이 쪽)를 보는 시험이 없다. 원장 쪽(toLedgerHoldEvent)은 H2 통합이 보지만 toSeatEvent에 '0'·'abc'를 넣는 시험은 단위·통합 모두 없다. 실제 Lua의 ARGV는 서비스가 만든 값이라 틀린 값이 나올 길은 좁다 | 정리 목록: seat-event 단위 toSeatEvent 줄에 `holdLimit: '0'`·'abc'·'1.5' 입력이 던지지 않고 칸 없음이 되는 줄 |
+| M-H4e | 실제 입력에서는 등가. 원장 적재가 FAN만 싣고 PRIORITY 행의 hold_limit은 늘 NULL이라 이 변이가 결과를 바꾸려면 사람이 만든 입력이 필요하다 | 받아들인다. 필요하면 rebuild-orders-plan에 'PRIORITY 행에 holdLimit 5를 줘도 칸이 없다' 한 줄(낮음) |
+| M-H5b | 시험 빈 곳(낮음). 메모리 이중 구현의 판매 좌석+토큰 줄. 실제 Redis 경로(M-H5c)는 통합이 잡는다 | 받아들인다. 메모리 구현을 쓰는 시험이 늘면 rebuild-memory에 SOLD 줄 하나 |
+| M-H6c-auto | 시험 빈 곳(낮음). 메모리 자동 배정의 HELD 항목에 holdLimit이 있는지 단언하지 않는다. 실제 Lua(M-H6a-auto)는 통합이 잡는다 | 받아들인다. 메모리 이중 구현의 자동 배정 단위(ST35 꼴)에 칸 줄 하나 |
+| M-P2a | 시험 빈 곳(낮음, 거의 등가). 반영 시각이 결제사 승인 시각보다 이른 경우에만 greatest가 결과를 바꾼다. 지금 시험은 모두 반영이 승인 뒤라 늦은 쪽이 같다 | 정리 목록: P1에 '반영 시각이 승인 시각보다 이른 T13'(시계 어긋남) 한 줄. 이른 반영이 실제로 생기는지 정본에서 확인 |
+| M-P2d | 시험 빈 곳(낮음). 아직 안 끝난 주문이 정확히 기준 + 30분에 있을 때(as_of = base_at + issue_deadline) 위반이 아니라는 경계가 없다(끝난 주문의 경계는 P1이 본다) | 정리 목록: P4에 열린 주문의 as_of 정각·+1ms 두 줄 |
+
+### 판정 기준 대조
+
+| 기준 문장(계획 §2·§9) | 단언하는 시험 | 같은가 |
+| --- | --- | --- |
+| H: 적재가 HELD의 holdLimit을 hold_limit에 쓴다 | 통합 H2, H1(M-H1a·M-H2a가 깨뜨림) | 같다 |
+| H: 끝 사건이 먼저 온 행은 뒤 HELD가 채우고 있는 값은 덮지 않는다 | 통합 H2 | 채우기는 같다. 덮지 않기는 where가 지켜 따로 가르지 못한다(M-H2b, 등가) |
+| H: 틀린 holdLimit은 사건째 던지지 않는다 | 통합 H2(보류 0), 단위 toLedgerHoldEvent, 릴레이 | 절반. 원장 쪽은 같고 toSeatEvent 쪽 시험은 없다(M-H3a) |
+| H: 다시 만들기는 원장 홀드·판매 좌석·묶인 주문에 lim을 쓰고 PRIORITY·빈 값은 쓰지 않는다 | 단위 rebuild-orders-plan·rebuild-memory, 통합 H3·H4 | 같다. PRIORITY는 실제 입력에서 등가(M-H4e) |
+| H: 다시 만들기 Lua는 열째 칸을 검사하고 Hash에 쓴다 | 통합 H3·H4(M-H5d1·d2, M-H5c) | 같다 |
+| H: 홀드·자동 배정·pin Lua의 HELD 항목에 holdLimit, 릴레이가 SeatEvent로 옮긴다 | 통합 H5·seat-rebuild, 단위 H6 | 같다(메모리 자동 배정 줄만 빈칸, M-H6c-auto) |
+| A: 지정 시각 상한 = 지금 + 5분 이하(경계 포함), 저장소·하위 결제사 규칙보다 먼저 본다 | PA 단위 A1(경계, 호출 0), 통합 A2(9999년) | 같다 |
+| G: 서비스 유예 = preStop + 코드 상수로 센 최악 + 여유(105), 릴레이 30, 합본 125, 자식 대기 95/5, 정각·타이머 | CH G1′·G2(상수를 소스에서 읽음: M-G7이 깨뜨림), BU G3·G4 | 같다 |
+| P: 기한 기준은 T9 = 승인 시각, T13·T16 = greatest(승인, 반영), 비교는 '넘으면' | 통합 P1·P2·P3(M-P1·P2b·P2b2·P2c·P2e가 깨뜨림) | 거의 같다. 열린 주문 경계와 반영이 이른 경우가 없다(M-P2d·M-P2a) |
+
+### 되돌림 확인
+
+모든 변이는 넣은 뒤 `git checkout -- <파일>`로 되돌렸고 이 절을 쓰기 전 `git status`가 깨끗했다. 통합 시험 뒤 `docker ps -a`에 이 작업이 남긴 컨테이너는 없다(이름에 w9가 든 것 0). 잠금 폴더는 지우지 않았다. 1차 표는 scratchpad `w9f2-verify-part1.md`.
 
 ## 담당 표
 
