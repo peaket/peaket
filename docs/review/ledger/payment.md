@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 67 | 24 | 6 | 0 | 2 | 17 | 0 | 0 | 0 | 116 |
+| A | 70 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 118 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 125 | 24 | 6 | 0 | 2 | 48 | 0 | 0 | 0 | 205 |
+| 합계 | 128 | 24 | 6 | 0 | 2 | 47 | 0 | 0 | 0 | 207 |
 
 ## docs/features/payment.md
 
@@ -30,9 +30,11 @@
 | P-T16 | — | PG 어댑터 계약 테스트 | 세 어댑터 모두 같은 정규화 계약 결과를 돌려주고, 포트원 멱등키 따옴표 규격을 지킨다. 토스 어댑터의 첫 구현은 시뮬레이터 몫이다: 시뮬레이터 주소와… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test-int/payment-webhook.int.test.ts 외… |
 | P-T17 | — | 포트원 웹훅 서명 검증 | 서명이나 헤더에 결함이 있는 요청은 바로 거절된다. 중복 건은 1회 처리되고, 지원하지 않는 이벤트는 안전하게 무시된다. 재전송의 `webhook-id`가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-process.int.test.ts, services/payment-svc/test-int/payment-webhook.int.test.ts… |
 | P-T18 | — | 공제율 산정 정확도 검증 | 공제 없음(전액 환불), 10%, 20%, 30%, 90% 공제가 정확히 적용되고, 24시간 이내 전액 환급에서 비영업일이 정확히 빠진다. 끝수(추천 적용… | 다른 단계 | A | 미정 · 공제율 산정 정확도 |
-| P-T19 | — | 입장 개시 후 예매 취소 | 금융 환급이 보류된 뒤, '취소 뒤 입장' 이상 표시와 CS 확인으로 취소가 최종 무효 처리된다. 입장 기록이 없는 경우에만 입장 기록 마감 뒤 정상 환급된다. | 다른 단계 | A | 미정 · 입장 개시 후 예매 취소 |
+| P-T19 | ① | 입장 개시 후 예매 취소 | ① 금융 환급이 보류되고, 마감 뒤 실행기가 동기화된 들어감·통과 기록을 찾으면 결제사를 부르지 않은 채 '취소 뒤 입장' 이상 표시(CS 처리함… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/refund-entry-check.test.ts |
+| P-T19 | ② | 입장 개시 후 예매 취소 | ② CS 확인으로 취소가 최종 무효 처리된다 … 는 GAT-280) | 다른 단계 | A | GAT-280 · CS 처리함의 '취소 무효' 확정은 CS 처리함 단계가 만든다. ①③(마감 뒤 입장 기록 대조와 환급)은 GAT-090(BAT-420)의 시험 이름으로 정한다(2026-11-16 세부 나눔… |
+| P-T19 | ③ | 입장 개시 후 예매 취소 | ③ 입장 기록이 없는 경우에만 입장 기록 마감 뒤 정상 환급된다(세부 나눔 추천 적용 2026-11-16… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/refund-entry-check.test.ts |
 | P-T20 | — | 회차 취소 일괄 환불 검증 | 모든 주문에 100% 전액 환급이 실행되고, 배상 대상 수·금액 합계와 상계·보증 충당·청구 내역이 정산 리포트에 들어가며(개인 명단은 넣지 않는다), 이중… | 다른 단계 | A | 미정 · 회차 취소 일괄 환불 |
-| P-T21 | — | 취소 멱등성 및 재시도 검증 | 먼저 조회해 이미 취소됐는지 확인한 뒤 재전송해, 단 1회만 환급된다는 것을 입증한다. | 다른 단계 | A | 미정 · 취소 멱등성과 재시도 |
+| P-T21 | — | 취소 멱등성 및 재시도 검증 | 먼저 조회해 이미 취소됐는지 확인한 뒤 재전송해, 단 1회만 환급된다는 것을 입증한다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-confirmed-cancel.int.test.ts, services/payment-svc/test/confirmed-cancel.test… |
 | P-T22 | — | PG 한도 추정 모델 검증 | 300 TPS 환경에서는 확정 p99 3초를 달성한다. 100 TPS 환경에서는 대기열이 10분 기한 안에 해소되고, 기한을 넘긴 건은 과금 없이 만료된다. 첫… | 측정 | A | 구간 측정 · PG 한도 추정 모델 |
 | P-T23 | — | 주문당 활성 결제 1건 제한 | 두 번째 접수는 409 Conflict로 막힌다. 인증 단계의 이전 시도는 안전하게 대체되고, 승인이 진행 중일 때는 새 시도가 막힌다. 결제 시도… | 자동 시험 | A | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 6곳 |
 | P-T24 | — | 승인 후 프로세스 중단 복구 | 프로세스가 다시 시작되면 단독 조회 API로 상태를 확인해, 1건만 정상 승인으로 반영되고 이중 승인은 0건이다. BUILD_ORDER PRF-181은 임대가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-confirm-runner.int.test.ts, services/payment-svc/test-int/payment-process.int… |

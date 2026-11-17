@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 230 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 380 |
-| 합계 | 230 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 380 |
+| B | 239 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 389 |
+| 합계 | 239 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 389 |
 
 ## docs/features/identity.md
 
@@ -67,7 +67,7 @@
 | I-T40 | — | 부스 본인확인 대조 | 대조 목적에 동의하지 않으면 본인확인이 시작되지 않는다. 결과 `ci_hmac`이 보유 계정과 다르면 409로 부스 코드가 나오지 않는다. 연계정보 원문은… | 빈칸 | B | — |
 | I-T41 | — | TOTP 시드 암호문 결속 | 한 관리 계정의 TOTP 시드 암호문을 다른 관리 계정 행으로 복사하면 암호화 컨텍스트가 맞지 않아 복호에 실패한다. 로그인은 거부되고 보안 이벤트가 남는다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-totp.int.test.ts, services/identity-svc/test/admin-totp.test.ts |
 | I-T42 | — | 만 14세 미만 본인확인 | 본인확인 결과가 만 14세 미만이면 연계정보가 저장되지 않고, 403 `under-14`가 나오며 계정 정리가 시작된다. 생년월일은 DB·로그에 0건이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/verification-keys.int.test.ts, services/identity-svc/test/http.test.ts 외 1곳 |
-| I-T43 | — | 받은 티켓·양도 요청·가상계좌가 있는 탈퇴 | 받은 티켓은 결제자에게 돌아간다. 수락 전에 보낸 양도 요청은 철회된 뒤 취소·환급되고, 받은 양도 요청은 거절로 끝난다. 입장 시작 뒤 취소한 가상계좌 결제… | 다른 단계 | B | BOT-030·BOT-035 · 받은 티켓·양도 요청·가족계좌가 있는 탈퇴 차단은 탈퇴 참여자 단계가 맡는다. |
+| I-T43 | — | 받은 티켓·양도 요청·가상계좌가 있는 탈퇴 | 받은 티켓은 결제자에게 돌아간다. 수락 전에 보낸 양도 요청은 철회된 뒤 취소·환급되고, 받은 양도 요청은 거절로 끝난다. 입장 시작 뒤 취소한 가상계좌 결제… | 다른 단계 | B | PRF-169·GAT-050·GAT-090 · 받은 티켓·양도 요청·가족계좌가 있는 탈퇴 차단은 탈퇴 참여자 단계가 맡는다. 가상계좌 202 미룸은 PRF-169 탈퇴 참여자 틀 뒤의… |
 | I-T44 | — | 파트너 역할: 파트너 실무자로 정산 계좌 변경·명단 내려받기·회차 취소… | 실무자 요청은 모두 403이고 화면 버튼은 비활성이다. 마지막 관리자의 역할 변경·삭제는 거부된다. 역할 변경은 권한 변경 내역에 남는다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-account-management.int.test.ts, services/identity-svc/test/admin-account-manage… |
 | I-T45 | ① | 본인확인 흐름: 공연 상세에서 [휴대폰 본인확인]을 눌러 ① 팝업 완료… | ①은 별도 화면 없이 공연 상세 위 토스트, | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | I-T45 | ② | 본인확인 흐름: 공연 상세에서 [휴대폰 본인확인]을 눌러 ① 팝업 완료… | ②는 [다시 시도] 대화상자, | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
@@ -258,6 +258,15 @@
 | I-T82 | ④ | 가입 전 계정 치우기(추천 적용 2026-11-09… | ④ 본인확인을 마친 계정은 지우지 않는다 | 자동 시험 | B | 시험: services/identity-svc/test/fan-account.test.ts |
 | I-T82 | ⑤ | 가입 전 계정 치우기(추천 적용 2026-11-09… | ⑤ 본인확인 여부를 모르면 지우지 않는다 | 자동 시험 | B | 시험: services/identity-svc/test/fan-account.test.ts |
 | I-T82 | ⑥ | 가입 전 계정 치우기(추천 적용 2026-11-09… | ⑥ 한 계정이 실패해도 나머지를 다루고 끝에 실패를 알린다 | 자동 시험 | B | 시험: services/identity-svc/test/fan-account.test.ts |
+| I-T83 | ① | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ① A의 후기가 모두 docs/data.md §2 '후기 파기'의 칸대로 비워지고 DELETED가 된다. 이미 지운 후기의 지운 시각은 처음 값 그대로이고 B의… | 자동 시험 | B | 시험: services/core-svc/test-int/review-withdrawn-consumer.int.test.ts, services/core-svc/test-int/review-withdrawn.int.te… |
+| I-T83 | ② | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ② 파기한 후기는 공연 후기 목록·요약(평균 별점·후기 수)에서 빠지고 상세는 404다 | 자동 시험 | B | 시험: services/core-svc/test/review-purge.test.ts |
+| I-T83 | ③ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ③ 같은 사건을 다시 받거나 내부 경로 `/purge`를 다시 불러도 0건이고 행이 그대로다 | 자동 시험 | B | 시험: services/core-svc/test/review-withdrawn.test.ts |
+| I-T83 | ④ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ④ 처리와 같은 트랜잭션에 예약(탈퇴 시각 + 16분, 탈퇴 시각이 미래이거나 예약 셈이 읽지 못하면 처리 시각 + 16분)이 생기고, 예약 셈이 읽지 못한… | 자동 시험 | B | 시험: services/core-svc/test-int/review-recheck.int.test.ts, services/core-svc/test-int/review-withdrawn-consumer.int.test… |
+| I-T83 | ⑤ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑤ 다시 정리를 마친 예약은 지워진다. 두 파드가 겹쳐 돌아도 한 예약은 한 번만 잡히고, 밀린 예약의 시간이 지표로 보인다. 반복이 실패해도 밀린 시간 지표가… | 자동 시험 | B | 시험: services/core-svc/test-int/review-recheck.int.test.ts, services/core-svc/test/core-consumers.test.ts 외 1곳 |
+| I-T83 | ⑥ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑥ 작성자가 지운 후기도 | 자동 시험 | B | 시험: services/core-svc/test-int/review-grants.int.test.ts, services/core-svc/test-int/review-purge.int.test.ts 외 2곳 |
+| I-T83 | ⑦ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑦ 살아 있는 후기는 별점·내용 지문 없이 넣을 수 없고, 예약 표는 앱 역할의 읽기·넣기·지우기·예약 시각 고치기만 된다 | 자동 시험 | B | 시험: services/core-svc/test-int/review-grants.int.test.ts, services/core-svc/test-int/review-purge-manual.int.test.ts 외… |
+| I-T83 | ⑧ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑧이전 판이 남긴 행(작성자가 지웠는데 별점·지문·계정 ID가 남은 행, 옛 익명화로 계정 ID 자리에 후기 ID가 든 살아 있는 후기)은 정비 일… | 자동 시험 | B | 시험: services/core-svc/test-int/review-grants.int.test.ts, services/core-svc/test-int/review-purge-legacy.int.test.ts 외… |
+| I-T83 | ⑨ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑨ 손으로 처리 `/purge`는 그 계정의 보류된 탈퇴 사건이 있을 때만 파기하고 보류 행을 다시 처리로 표시하며 예약을 쓴다. 보류된 사건이 없는… | 자동 시험 | B | 시험: services/core-svc/test-int/review-purge-manual.int.test.ts, services/core-svc/test/review-purge-migration.test.ts 외… |
 
 ## docs/security/asvs/auth.md
 
@@ -343,7 +352,7 @@
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-password-change.int.test.ts, services/identity-svc/test/admin-password-change.t… |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/queue-svc/test/leave-cases.ts |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 6곳 (영역:… |
-| v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: apps/console-host… |
+| v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/bulkhead-auth.test.ts, services/core-svc/test/partner-bulkhead-auth.test.ts 외 3곳 (영역:… |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외… |
 | v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: packages/platform/test/purchase-auth.test.ts, packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
@@ -392,7 +401,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.test.m… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/seatmap-layout.test.ts (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/platform/test/telemetry.test.ts 외 4곳… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 15곳 (영역:… |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 16곳 (영역:… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
