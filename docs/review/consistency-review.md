@@ -772,6 +772,7 @@
 | R-674 | 웨이브 8 갈래 3을 develop에 합친 뒤 develop CI 비밀 검사(gitleaks generic-api-key)가 결제 취소 시험의 가짜 멱등 키 3건을 비밀로 보고 막았다 | tools/ci/gitleaks.toml, docs/review/plans/W8-ci-gitleaks.md | '시험 코드의 가짜 값' 허용 목록 블록에 시험 경로 AND 값 꼴 ^cancel\-p\d{1,2}_[a-z]+$를 더함(내부 토큰 이름은 기본 규칙이 스스로 빼므로 더하지 않음) | 적용 |
 | R-675 | 정리 목록의 권한·보안·개인정보 작은 지적 여섯(lane2 HOT-190·HOT-240·BAT-165, lane3 BAT-420·W7-audit S4, 갈래 1 BAT-060 RV-07)이 남아 있었다 | packages/platform, services/core-svc, services/ops-svc, tools/ci/gateway-routes.mjs, deploy/gateways/*.routes.yaml, docs/api/guidelines.md, docs/architecture.md, docs/review/plans/W9-fix3.md | F1~F6·PRF192 고침과 재현·보충 시험, 남은 낮음(N1~N4, V-F4c, 내부 HTTP 예외 목록)은 정리 목록으로 넘김 | 적용 |
 | R-676 | 환급 실행기가 긴 주문에서 잡기 기한을 넘겨 같은 표를 두 작업자가 보낼 수 있었고(N3), 겹친 실행이 남의 결제사 멈춤을 지웠으며(N8), 그 밖 실패로 FAILED가 될 때 팬 알림이 없었다(P3) | services/purchase-svc 환급 실행기·저장소, docs/features/transfer-refund.md §5, docs/data.md, docs/security/asvs/transfer-refund.md, docs/review/plans/W9-fix1.md | 잡기 늘리기(40초 기준·60초), 잠근 트랜잭션의 멈춤 합쳐 쓰기(updateLocked), #retryOrFail FAILED를 #finishItem으로 끝내기 | 적용 |
+| R-677 | W9-fix3을 합친 뒤 develop CI의 게이트웨이 백엔드 대조가 파트너 회차 취소 경로(GET·POST /v1/partner/events/{eventId}/cancellation)의 백엔드 core-svc와 처리기 ops-svc가 다르다고 막았다 | deploy/gateways/routes/gw-partner.yaml, deploy/gateways/gw-partner.routes.yaml, docs/review/plans/W9-ci-route.md | gw-partner-api에서 그 경로를 ops-svc 규칙으로 옮기고 생성 파일을 다시 만듦 | 적용 |
 
 ## 4. 숫자 일치표
 
