@@ -49,7 +49,8 @@ export class CreateCommand {
     if (eventId !== undefined && !z.uuid().safeParse(eventId).success) throw new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다' });
     // 회차 취소가 확정된 회차는 판매를 다시 열지 않는다(환급 중·끝난 회차를 다시 팔지 않게, ADR-0280 결정 2). 실행 때도 다시 본다
     if (input.type === 'SALE_RESUME' && eventId !== undefined && this.guard && (await this.guard.isCancelled(eventId))) {
-      throw new ProblemError({ type: 'event-cancelled', status: 409, title: '회차 취소가 확정된 회차는 판매를 재개할 수 없습니다' });
+      // 제목은 openapi x-peaket-problem-types 목록 그대로(같은 이름은 어느 서비스나 같은 제목, PRF192), 이 경우의 설명은 detail에 싣는다
+      throw new ProblemError({ type: 'event-cancelled', status: 409, title: '취소가 확정된 회차입니다', detail: '회차 취소가 확정된 회차는 판매를 재개할 수 없습니다' });
     }
     const commandId = input.commandId ?? randomUUID();
     const command = await this.store.create({
