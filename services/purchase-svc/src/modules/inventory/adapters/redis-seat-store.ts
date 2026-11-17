@@ -83,12 +83,16 @@ const BUMP_EPOCH = redisScript(BUMP_EPOCH_LUA);
 /** 좌석마다 Lua ARGV 6칸(hold-lua.ts·pin-lua.ts): 좌석 색인, 구역 색인, 구역 안 거리, 좌석 ID, 등급 ID, 구역 ID */
 const seatArgsOf = (seats: readonly SeatRef[]): string[] => seats.flatMap((s) => [String(s.index), String(s.sectionIndex), String(s.seatOffset), s.seatId, s.tierId, s.sectionId]);
 
-/** 다시 만들기 좌석 Lua의 좌석 하나 ARGV 10칸(rebuild-lua.ts): 색인, 방식, holdId, owner, psid, fence, heldAt, exp, kind, 예비 ''. 원장 행 없는 판매 좌석의 세 칸은 '' */
+/**
+ * 다시 만들기 좌석 Lua의 좌석 하나 ARGV 10칸(rebuild-lua.ts): 색인, 방식, holdId, owner, psid, fence, heldAt, exp, kind, lim(1인 한도, 없으면 '', W9-fix2 HOT-252).
+ * 원장 행 없는 판매 좌석의 세 칸은 ''
+ */
 const rebuildSeatArgsOf = (s: RebuildSeat): string[] => {
   const timed = s.fencingToken !== undefined ? [String(s.fencingToken), String(s.heldAtMs), String(s.expiresAtMs)] : ['', '', ''];
+  const lim = s.holdLimit !== undefined ? String(s.holdLimit) : '';
   return s.mode === 'SOLD'
-    ? [String(s.seat.index), 'S', s.holdId, s.accountId, s.purchaseSessionId, ...timed, 'FAN', '']
-    : [String(s.seat.index), 'H', s.holdId, s.accountId, s.purchaseSessionId, ...timed, s.kind, ''];
+    ? [String(s.seat.index), 'S', s.holdId, s.accountId, s.purchaseSessionId, ...timed, 'FAN', lim]
+    : [String(s.seat.index), 'H', s.holdId, s.accountId, s.purchaseSessionId, ...timed, s.kind, lim];
 };
 
 /** 다시 만들기 Lua의 답 → RebuildStep(OK·READY gen·STALE). OK의 둘째 칸은 부른 쪽이 본다. 모르는 답이면 Error */

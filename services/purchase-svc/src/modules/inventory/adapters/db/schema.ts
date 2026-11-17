@@ -67,6 +67,9 @@ export const seatHold = pgTable(
     // 0002 마이그레이션의 ADD COLUMN이 표 끝에 붙이므로 DB 칸 차례와 맞춰 expires_at 뒤에 둔다
     holdId: uuid('hold_id'),
     purchaseSessionId: text('purchase_session_id'),
+    // 홀드 때 쓴 1인 한도(SeatEvent HELD의 holdLimit = 홀드 Hash lim, 팬 홀드만). 다시 만들기가 lim으로 되살린다. 빈 값이면 판매 예약이 회차 설정 한도를 쓴다
+    // (docs/features/seat-hold.md §6 '1인 한도 되살리기', docs/data.md seat_hold.hold_limit, W9-fix2 HOT-252). 0027 마이그레이션이 표 끝에 붙인다. 옛 행은 비어 있다
+    holdLimit: integer('hold_limit'),
   },
   (t) => [
     primaryKey({ name: 'seat_hold_pkey', columns: [t.eventId, t.seatId, t.fencingToken] }),
@@ -76,6 +79,7 @@ export const seatHold = pgTable(
       .where(sql`${t.status} = 'HELD'`),
     check('seat_hold_status_check', sql`${t.status} in ('HELD', 'RELEASED', 'EXPIRED')`),
     check('seat_hold_kind_check', sql`${t.kind} in ('FAN', 'PRIORITY')`),
+    check('seat_hold_hold_limit_check', sql`${t.holdLimit} is null or ${t.holdLimit} >= 1`),
   ],
 );
 

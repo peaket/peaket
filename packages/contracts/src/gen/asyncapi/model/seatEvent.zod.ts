@@ -6,6 +6,8 @@
  */
 import * as zod from 'zod';
 
+
+
 export const SeatEvent = zod.object({
   "eventId": zod.string(),
   "seatId": zod.string(),
@@ -22,7 +24,8 @@ export const SeatEvent = zod.object({
   "accountId": zod.string().optional().describe('홀드한 계정 ID. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.account_id에 쓴다. 분석 적재는 가명 처리한다(trade.orders·trade.tickets와 같다, 추천 적용 2026-11-04, BUILD_ORDER PRF-141)'),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('홀드 만료 시각. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.expires_at에 쓴다(추천 적용 2026-11-04, BUILD_ORDER PRF-141)'),
   "occurredAt": zod.iso.datetime({"offset":true}),
-  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값. 홀드 사건은 UUID 버전 8(SHA-256(\'SeatEvent:\' + type + \':\' + eventId + \':\' + holdId + \':\' + seatId + \':\' + fencingToken)의 앞 16바이트, docs/features/seat-hold.md §6 \'홀드 원장 적재의 첫 구현\')')
+  "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값. 홀드 사건은 UUID 버전 8(SHA-256(\'SeatEvent:\' + type + \':\' + eventId + \':\' + holdId + \':\' + seatId + \':\' + fencingToken)의 앞 16바이트, docs/features/seat-hold.md §6 \'홀드 원장 적재의 첫 구현\')'),
+  "holdLimit": zod.int().min(1).optional().describe('홀드 때 판매 정책이 정한 1인 한도(홀드 Hash lim과 같은 값). 팬 홀드의 HELD에만 싣는다(RELEASED·EXPIRED와 우선 구매 보류에는 없다). 홀드 원장 적재가 seat_hold.hold_limit에 쓰고 전체 유실 뒤 다시 만들기가 lim으로 되살린다. 이 칸 전에 낸 사건에는 없으므로 받는 쪽은 없음을 \'한도 모름\'으로 읽는다. 분석 적재는 버린다(docs/features/seat-hold.md §6 \'1인 한도 되살리기\', 추천 적용 2026-11-17, W9-fix2)')
 })
 
 export type SeatEvent = zod.input<typeof SeatEvent>;

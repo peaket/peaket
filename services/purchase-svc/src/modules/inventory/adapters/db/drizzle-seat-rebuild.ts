@@ -9,6 +9,7 @@
 // - sales: seat_sale PENDING·SOLD, holds: seat_hold HELD이고 expires_at > now(), saleHolds: seat_hold HELD이고 같은 회차·좌석·계정의 활성 판매(PENDING·SOLD)가 있는 행
 //   (만료 조건 없음). 토큰(bigint)은 안전한 정수로 바꾸고, 아니면 Error. 차례는 좌석 ID(와 토큰) 순.
 // - ledgerRows(BUILD_ORDER PRF-167 리뷰 고침 M2): 그 회차·그 좌석들의 seat_hold 행 전부(상태·holdId 상관없이 좌석·holdId·상태·토큰). 묶인 주문 좌석의 원장 대조용.
+// - holds·saleHolds·ledgerRows는 hold_limit(홀드 때 쓴 1인 한도, W9-fix2 HOT-252)도 읽는다. 빈 값이면 null(다시 만들기가 lim을 쓰지 않는다).
 // - 판매를 연 기록(SeatRebuildMarks, BUILD_ORDER PRF-164 리뷰 고침 M3): opened는 seat_rebuild에 행이 있는 회차(event_id = any(uuid[]) 한 문장, 빈 목록이면 DB를 부르지 않는다),
 //   markOpened는 INSERT (회차, 판 번호 1, holder·lease_until 비움) ON CONFLICT (event_id) DO NOTHING(이미 있는 행의 판 번호·임대를 되돌리지 않는다. 표의 gen 기본값·CHECK gen >= 1과 맞다).
 // - 회차 ID가 소문자 UUID가 아니거나 holder가 빈 글이면 DB를 부르기 전에 RangeError다.
@@ -36,6 +37,12 @@ function safeIntOf(v: unknown, what: string): number {
 }
 
 const msOf = (v: unknown): number => (v instanceof Date ? v.getTime() : new Date(String(v)).getTime());
+/** 원장 hold_limit(int4, CHECK ≥ 1) → 1 이상 안전한 정수 또는 null(빈 값. 다시 만들기가 lim을 쓰지 않고 Saga가 회차 설정 한도를 쓴다) */
+function holdLimitOf(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'number' ? v : Number(String(v));
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
+}
 
 export class DrizzleSeatRebuildSource implements SeatRebuildSource, SeatRebuildMarks {
   readonly #leaseMs: number;
@@ -80,7 +87,7 @@ export class DrizzleSeatRebuildSource implements SeatRebuildSource, SeatRebuildM
     assertEvent(eventId);
     const r = await this.database.db.execute(sql`
       select h.seat_id::text as seat_id, h.account_id::text as account_id, h.fencing_token::text as fencing_token, h.kind, h.held_at, h.expires_at,
-             h.hold_id::text as hold_id, h.purchase_session_id
+             h.hold_id::text as hold_id, h.purchase_session_id, h.hold_limit
         from seat_hold h
        where h.event_id = ${eventId}::uuid and h.status = 'HELD' and h.expires_at > now()
          -- 판매·환불·회수로 끝난 PRIORITY 권리의 옛 HELD 행은 되살리지 않는다(B1-07)
@@ -93,7 +100,7 @@ export class DrizzleSeatRebuildSource implements SeatRebuildSource, SeatRebuildM
     assertEvent(eventId);
     const r = await this.database.db.execute(sql`
       select h.seat_id::text as seat_id, h.account_id::text as account_id, h.fencing_token::text as fencing_token, h.kind, h.held_at, h.expires_at,
-             h.hold_id::text as hold_id, h.purchase_session_id
+             h.hold_id::text as hold_id, h.purchase_session_id, h.hold_limit
         from seat_hold h
        where h.event_id = ${eventId}::uuid and h.status = 'HELD'
          and exists (select 1 from seat_sale s
@@ -111,14 +118,14 @@ export class DrizzleSeatRebuildSource implements SeatRebuildSource, SeatRebuildM
     for (let k = 0; k < ids.length; k += LEDGER_SEAT_CHUNK) {
       const chunk = ids.slice(k, k + LEDGER_SEAT_CHUNK);
       const r = await this.database.db.execute(sql`
-        select seat_id::text as seat_id, hold_id::text as hold_id, status, fencing_token::text as fencing_token
+        select seat_id::text as seat_id, hold_id::text as hold_id, status, fencing_token::text as fencing_token, hold_limit
           from seat_hold
          where event_id = ${eventId}::uuid and seat_id = any(${`{${chunk.join(',')}}`}::uuid[])
          order by seat_id, fencing_token`);
       for (const x of r.rows) {
-        const row = x as { seat_id: string; hold_id: string | null; status: string; fencing_token: unknown };
+        const row = x as { seat_id: string; hold_id: string | null; status: string; fencing_token: unknown; hold_limit: unknown };
         if (row.status !== 'HELD' && row.status !== 'RELEASED' && row.status !== 'EXPIRED') throw new Error(`원장 행 상태가 HELD·RELEASED·EXPIRED가 아니다: ${row.status}`);
-        out.push({ seatId: row.seat_id, holdId: row.hold_id, status: row.status, fencingToken: safeIntOf(row.fencing_token, '펜싱 토큰') });
+        out.push({ seatId: row.seat_id, holdId: row.hold_id, status: row.status, fencingToken: safeIntOf(row.fencing_token, '펜싱 토큰'), holdLimit: holdLimitOf(row.hold_limit) });
       }
     }
     return out;
@@ -162,7 +169,17 @@ export class DrizzleSeatRebuildSource implements SeatRebuildSource, SeatRebuildM
 
 /** seat_hold 행 → RebuildHold(토큰은 안전한 정수, 종류는 FAN·PRIORITY만) */
 function holdOf(x: unknown): RebuildHold {
-  const row = x as { seat_id: string; account_id: string; fencing_token: string; kind: string; held_at: unknown; expires_at: unknown; hold_id: string | null; purchase_session_id: string | null };
+  const row = x as {
+    seat_id: string;
+    account_id: string;
+    fencing_token: string;
+    kind: string;
+    held_at: unknown;
+    expires_at: unknown;
+    hold_id: string | null;
+    purchase_session_id: string | null;
+    hold_limit: unknown;
+  };
   if (row.kind !== 'FAN' && row.kind !== 'PRIORITY') throw new Error(`원장 홀드의 종류를 모른다: ${row.kind}`);
   return {
     seatId: row.seat_id,
@@ -173,5 +190,6 @@ function holdOf(x: unknown): RebuildHold {
     expiresAtMs: msOf(row.expires_at),
     holdId: row.hold_id,
     purchaseSessionId: row.purchase_session_id,
+    holdLimit: holdLimitOf(row.hold_limit),
   };
 }

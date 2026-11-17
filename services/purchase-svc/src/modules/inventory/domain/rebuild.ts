@@ -5,6 +5,8 @@ import { HOLD_TTL_MS, KEY_PART, type SeatRef } from './hold.js';
 export const REBUILD_LEASE_MS = 60_000;
 /** 좌석 Lua 한 번에 쓰는 좌석 수 200 [가정] */
 export const REBUILD_BATCH = 200;
+/** 되살릴 1인 한도(Hash lim)의 상한: 좌석 Lua 열째 칸이 받는 10진 15자리(^[1-9][0-9]{0,14}$) 이하. 원장 hold_limit(int4)은 늘 이 안이다 */
+export const REBUILD_HOLD_LIMIT_MAX = 999_999_999_999_999;
 
 /** 회차의 활성 판매 행 하나(seat_sale PENDING·SOLD) */
 export interface RebuildSale {
@@ -26,8 +28,8 @@ export interface RebuildHold {
   expiresAtMs: number;
   holdId: string | null;
   purchaseSessionId: string | null;
-  /** 원장 hold_limit(홀드 때 쓴 1인 한도, 없으면 null, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대(계획은 필수 칸 number | null) */
-  holdLimit?: number | null;
+  /** 원장 hold_limit(홀드 때 쓴 1인 한도 = 홀드 Hash lim, 없으면 null, docs/features/seat-hold.md §6 '1인 한도 되살리기', W9-fix2 HOT-252) */
+  holdLimit: number | null;
 }
 
 /**
@@ -62,8 +64,8 @@ export interface RebuildLedgerRow {
   holdId: string | null;
   status: 'HELD' | 'RELEASED' | 'EXPIRED';
   fencingToken: number;
-  /** 원장 hold_limit(없으면 null, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대(계획은 필수 칸 number | null) */
-  holdLimit?: number | null;
+  /** 원장 hold_limit(없으면 null, W9-fix2 HOT-252). 묶인 주문의 홀드를 되살릴 때 그 HELD 행의 값을 lim으로 쓴다 */
+  holdLimit: number | null;
 }
 
 /** planRebuild의 주문 근거(docs/features/seat-hold.md §6 '주문 기준 되살리기'). nowMs는 묶인 주문 홀드의 잡은 시각(만료 = nowMs + HOLD_TTL_MS)이다 */
@@ -81,6 +83,8 @@ export interface RebuildOrderInputs {
 /**
  * 좌석 Redis에 쓸 좌석 하나. SOLD는 판매(묶음), HELD는 되살린 홀드.
  * SOLD의 fencingToken·heldAtMs·expiresAtMs는 대조한 원장 행의 값이고 셋이 함께 있거나 함께 없다(없으면 좌석 쓰기 Lua가 TIME으로 채운다, 코드 리뷰 PRF-143)
+ * holdLimit은 그 원장 행의 hold_limit(1 이상 정수)이고 좌석 Lua가 홀드 Hash lim으로 쓴다. 없으면 lim을 쓰지 않는다(Saga가 회차 설정 한도를 쓴다,
+ * docs/features/seat-hold.md §6 '1인 한도 되살리기', W9-fix2 HOT-252)
  */
 export type RebuildSeat =
   | { mode: 'SOLD'; seat: SeatRef; accountId: string; holdId: string; purchaseSessionId: string; fencingToken?: number; heldAtMs?: number; expiresAtMs?: number; holdLimit?: number }
@@ -99,22 +103,29 @@ export type RebuildReport =
 export type RebuildStep = { result: 'OK' } | { result: 'READY'; gen: number } | { result: 'STALE' };
 
 /**
- * 묶인 주문 좌석의 되살릴 펜싱 토큰(리뷰 고침 M2·L4): 그 좌석 원장 행 가운데 그 holdId의 HELD 행의 가장 큰 토큰. 그런 행이 없거나, 그 토큰보다 큰 다른 holdId의 행
- * (상태 상관없이, holdId가 빈 옛 행 포함)이 있으면 undefined(되살리지 않는다: 더 새 홀드가 그 좌석을 잡았다)
+ * 묶인 주문 좌석의 되살릴 원장 행(리뷰 고침 M2·L4): 그 좌석 원장 행 가운데 그 holdId의 HELD 행에서 토큰이 가장 큰 것. 그런 행이 없거나, 그 토큰보다 큰 다른 holdId의 행
+ * (상태 상관없이, holdId가 빈 옛 행 포함)이 있으면 undefined(되살리지 않는다: 더 새 홀드가 그 좌석을 잡았다). 펜싱 토큰과 1인 한도(HOT-252)를 그 행에서 쓴다
  */
-function pinnedTokenOf(rows: readonly RebuildLedgerRow[], holdId: string): number | undefined {
-  let mine: number | undefined;
-  for (const r of rows) if (r.holdId === holdId && r.status === 'HELD' && (mine === undefined || r.fencingToken > mine)) mine = r.fencingToken;
+function pinnedRowOf(rows: readonly RebuildLedgerRow[], holdId: string): RebuildLedgerRow | undefined {
+  let mine: RebuildLedgerRow | undefined;
+  for (const r of rows) if (r.holdId === holdId && r.status === 'HELD' && (mine === undefined || r.fencingToken > mine.fencingToken)) mine = r;
   if (mine === undefined) return undefined;
-  const top = mine;
+  const top = mine.fencingToken;
   return rows.some((r) => r.holdId !== holdId && r.fencingToken > top) ? undefined : mine;
 }
+
+/** 원장 hold_limit → 되살릴 좌석의 holdLimit 칸(1 이상 REBUILD_HOLD_LIMIT_MAX 이하 정수일 때만. 빈 값이면 칸을 싣지 않는다, HOT-252) */
+const limitOf = (v: number | null | undefined): { holdLimit?: number } =>
+  typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 && v <= REBUILD_HOLD_LIMIT_MAX ? { holdLimit: v } : {};
 
 /** 토큰이 더 큰 원장 홀드(같으면 먼저 온 것) */
 const newer = (a: RebuildHold | undefined, b: RebuildHold): RebuildHold => (a === undefined || b.fencingToken > a.fencingToken ? b : a);
 
 /** 잡은 시각이 빈 원장 홀드는 만료 시각 − 7분(연장하지 않은 홀드의 잡은 시각) */
 const heldAtOf = (h: RebuildHold): number => h.heldAtMs ?? h.expiresAtMs - HOLD_TTL_MS;
+
+/** 원장 홀드의 1인 한도 칸: 팬 홀드만(우선 구매 보류는 lim을 쓰지 않는다, HOT-252) */
+const fanLimitOf = (h: RebuildHold): { holdLimit?: number } => (h.kind === 'FAN' ? limitOf(h.holdLimit) : {});
 
 /**
  * 판매·원장 홀드를 좌석 Redis에 쓸 좌석으로 맞춘다(명세 rebuild): 판매 좌석이 먼저(판매 좌석의 holdId는 그 좌석·계정의 가장 최근(토큰이 큰) 원장 홀드의 holdId, 없으면 주문 ID),
@@ -130,6 +141,8 @@ const heldAtOf = (h: RebuildHold): number => h.heldAtMs ?? h.expiresAtMs - HOLD_
  * - 판매가 없는 좌석의 원장 홀드는 그 좌석에서 토큰이 가장 큰 것 하나만 본다(낮은 토큰은 이미 끝난 홀드라 세지 않는다). 그것의 holdId가 null이면 넘김 하나다.
  * - skipped = 좌석맵 판에 없는 판매 + 좌석맵 판에 없는 원장 홀드 + holdId가 null이라 되살리지 않은 좌석. 판매에 덮인 원장 홀드는 세지 않는다.
  * - 잡은 시각이 빈 원장 홀드(heldAtMs null)는 expiresAtMs − HOLD_TTL_MS(7분)로 둔다(연장하지 않은 홀드의 잡은 시각).
+ * - 1인 한도(holdLimit, W9-fix2 HOT-252): 되살린 원장 홀드는 그 행의, 판매 좌석은 대조한 원장 행의(있을 때만), 묶인 주문은 고른 HELD 행의 hold_limit이다.
+ *   빈 값이면 칸을 싣지 않는다. 우선 구매 보류 원장 행의 값은 쓰지 않는다(lim을 쓰지 않는 홀드).
  * - 원장 행은 먼저 '좌석 ID|계정'·좌석 색인 키로 묶는다(O(판매 + 홀드)).
  *
  * 주문 근거(orders, BUILD_ORDER PRF-167 '주문 기준 되살리기', K1·K3)가 있으면:
@@ -180,7 +193,7 @@ export function planRebuild(
         accountId: s.accountId,
         holdId: order.holdId,
         purchaseSessionId: order.purchaseSessionId,
-        ...(ledger !== undefined ? { fencingToken: ledger.fencingToken, heldAtMs: heldAtOf(ledger), expiresAtMs: ledger.expiresAtMs } : {}),
+        ...(ledger !== undefined ? { fencingToken: ledger.fencingToken, heldAtMs: heldAtOf(ledger), expiresAtMs: ledger.expiresAtMs, ...fanLimitOf(ledger) } : {}),
       });
     } else if (ledger !== undefined && ledger.holdId !== null) {
       sold.set(seat.index, {
@@ -192,6 +205,7 @@ export function planRebuild(
         fencingToken: ledger.fencingToken,
         heldAtMs: heldAtOf(ledger),
         expiresAtMs: ledger.expiresAtMs,
+        ...fanLimitOf(ledger),
       });
     } else {
       sold.set(seat.index, { mode: 'SOLD', seat, accountId: s.accountId, holdId: s.orderId, purchaseSessionId: '' });
@@ -209,8 +223,8 @@ export function planRebuild(
     }
     for (const o of orders.pinned) {
       for (const seatId of o.seatIds) {
-        const token = pinnedTokenOf(rowsBy.get(seatId) ?? [], o.holdId);
-        if (token === undefined) continue;
+        const row = pinnedRowOf(rowsBy.get(seatId) ?? [], o.holdId);
+        if (row === undefined) continue;
         const seat = resolve(seatId);
         if (seat === undefined) {
           skipped += 1;
@@ -223,10 +237,11 @@ export function planRebuild(
           accountId: o.accountId,
           holdId: o.holdId,
           purchaseSessionId: o.purchaseSessionId,
-          fencingToken: token,
+          fencingToken: row.fencingToken,
           heldAtMs: orders.nowMs,
           expiresAtMs: orders.nowMs + HOLD_TTL_MS,
           kind: 'FAN',
+          ...limitOf(row.holdLimit),
         });
       }
     }
@@ -260,6 +275,7 @@ export function planRebuild(
       heldAtMs: heldAtOf(h),
       expiresAtMs: h.expiresAtMs,
       kind: h.kind,
+      ...fanLimitOf(h),
     });
   }
   const seats = [...sold.values(), ...pinnedSeats.values(), ...held].sort((a, b) => a.seat.index - b.seat.index);
@@ -301,6 +317,7 @@ export function assertRebuildBegin(eventId: string, gen: number, keepUntilMs: nu
  * 좌석 쓰기(SeatRebuildTarget.writeSeats) 입력의 모양(Redis·메모리 구현이 같이 쓴다, 저장소를 부르기 전).
  * eventId·계정은 KEY_PART, 좌석은 1 ~ REBUILD_BATCH개이고 색인이 겹치지 않는 0 이상의 정수, holdId는 빈 글이 아님,
  * HELD는 토큰이 1 이상의 안전한 정수이고 잡은 시각·만료 시각이 0 이상의 안전한 정수, SOLD의 토큰·시각 칸은 셋이 함께 없거나 HELD와 같은 모양,
+ * holdLimit은 있으면 1 이상 REBUILD_HOLD_LIMIT_MAX 이하의 정수,
  * keepUntilMs는 양의 안전한 정수, gen은 assertGen
  * @throws RangeError 위 모양이 아님
  */
@@ -323,6 +340,9 @@ export function assertRebuildSeats(eventId: string, seats: readonly RebuildSeat[
       if (!isNonNegativeInt(s.heldAtMs) || !isNonNegativeInt(s.expiresAtMs)) throw new RangeError('잡은 시각·만료 시각이 0 이상의 정수가 아니다');
     }
     if (s.mode === 'HELD' && s.kind !== 'FAN' && s.kind !== 'PRIORITY') throw new RangeError(`홀드 종류가 FAN·PRIORITY가 아니다: ${String(s.kind)}`);
+    if (s.holdLimit !== undefined && (!Number.isSafeInteger(s.holdLimit) || s.holdLimit < 1 || s.holdLimit > REBUILD_HOLD_LIMIT_MAX)) {
+      throw new RangeError(`1인 한도가 1 이상 ${REBUILD_HOLD_LIMIT_MAX} 이하의 정수가 아니다: ${s.holdLimit}`);
+    }
   }
 }
 

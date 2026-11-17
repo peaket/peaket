@@ -388,6 +388,8 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
         seatEpoch,
         occurredAtMs: String(now),
         expiresAtMs: String(exp),
+        // 1인 한도(Lua의 HELD 칸 holdLimit = Hash lim, W9-fix2 HOT-252)
+        holdLimit: String(i.limit),
       });
     }
     for (const [sec, list] of deltas) {
@@ -631,6 +633,8 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
         seatEpoch,
         occurredAtMs: String(now),
         expiresAtMs: String(exp),
+        // 1인 한도(Lua의 HELD 칸 holdLimit = Hash lim, W9-fix2 HOT-252)
+        holdLimit: String(i.limit),
       });
     }
     for (const [secIndex, list] of deltas) {
@@ -817,6 +821,8 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
         seatEpoch,
         occurredAtMs: String(now),
         expiresAtMs: String(exp),
+        // 1인 한도(Lua의 HELD 칸 holdLimit = Hash lim, W9-fix2 HOT-252)
+        holdLimit: String(i.limit),
       });
     }
     for (const [sec, list] of deltas) {
@@ -999,7 +1005,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
   /**
    * 다시 만들기 좌석 쓰기(계약은 adapters/rebuild-lua.ts REBUILD_SEATS_LUA): 입력 검사 → 세대 키가 있으면 READY → rebuild 판 번호 ≠ gen이면 STALE → 시각 한 번·keepUntil 지킴 → 쓰기.
    * 판매(SOLD)는 묶음 Hash(원장 행의 fence·heldAt·exp, 없으면 fence = 저장소 시각 µs(now × 1000)·heldAt = exp = now, kind FAN·ext '0'·pin '1')이고 만료 인덱스에서 빠지며,
-   * 되살린 홀드(HELD)는 원장 값 그대로(ext '0', pin 없음)와 만료 인덱스.
+   * 되살린 홀드(HELD)는 원장 값 그대로(ext '0', pin 없음)와 만료 인덱스. 둘 다 1인 한도(holdLimit, W9-fix2 HOT-252)가 있으면 lim을 쓰고 없으면 쓰지 않는다.
    * 홀드 Hash 수명은 keepUntil(DEL 뒤 새로 걸기), 비트맵·만료 인덱스는 더 늦은 쪽(만료 인덱스가 비면 Valkey처럼 키와 수명이 사라진다)
    */
   async writeSeats(eventId: string, seats: readonly RebuildSeat[], keepUntilMs: number, gen: number): Promise<RebuildStep> {
@@ -1013,13 +1019,14 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     for (const s of seats) {
       const i = s.seat.index;
       ev.bits.add(i);
+      const lim = s.holdLimit !== undefined ? { lim: s.holdLimit } : {};
       ev.holds.set(
         i,
         s.mode === 'SOLD'
           ? s.fencingToken !== undefined
-            ? { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(s.fencingToken), heldAt: s.heldAtMs!, exp: s.expiresAtMs!, kind: 'FAN', ext: '0', pin: '1' }
-            : { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(now * 1000), heldAt: now, exp: now, kind: 'FAN', ext: '0', pin: '1' }
-          : { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(s.fencingToken), heldAt: s.heldAtMs, exp: s.expiresAtMs, kind: s.kind, ext: '0' },
+            ? { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(s.fencingToken), heldAt: s.heldAtMs!, exp: s.expiresAtMs!, kind: 'FAN', ext: '0', pin: '1', ...lim }
+            : { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(now * 1000), heldAt: now, exp: now, kind: 'FAN', ext: '0', pin: '1', ...lim }
+          : { holdId: s.holdId, owner: s.accountId, psid: s.purchaseSessionId, fence: String(s.fencingToken), heldAt: s.heldAtMs, exp: s.expiresAtMs, kind: s.kind, ext: '0', ...lim },
       );
       ev.expireAt.set(seatKeys.hold(e, i), keepUntilMs);
       if (s.mode === 'HELD') ev.expiry.set(i, s.expiresAtMs);

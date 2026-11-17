@@ -18,15 +18,16 @@
 // REBUILD_SEATS_LUA: 좌석들을 쓴다(REBUILD_BATCH석 이하)
 // KEYS: 1 bitmap  2 expiry  3 epoch  4 rebuild  5.. hold:{좌석 색인}(ARGV 좌석 차례)
 // ARGV: 1 keepUntil ms  2 gen, 그다음 좌석마다 10칸: 좌석 색인, 방식(S = 판매 묶음, H = 되살린 홀드), holdId, owner, psid, fence(토큰 글), heldAt ms, exp ms,
-//       kind(FAN·PRIORITY, S는 'FAN'), 예비 칸 ''(10칸 고정). S의 fence·heldAt·exp는 대조한 원장 행의 값이거나 셋 다 ''(원장 행 없음)이다
+//       kind(FAN·PRIORITY, S는 'FAN'), lim(1인 한도 = 원장 hold_limit, 앞 0 없는 1 이상 10진 정수 15자리 이하, 빈 글 = 없음, W9-fix2 HOT-252)(10칸 고정).
+//       S의 fence·heldAt·exp는 대조한 원장 행의 값이거나 셋 다 ''(원장 행 없음)이다
 // 검사: 세대 키 → {'READY', gen}, rebuild 키 ≠ gen → {'STALE'}(아무것도 쓰지 않는다)
-// 쓰기: 좌석마다 BITFIELD SET u1 1, DEL 뒤 HSET hold(holdId·owner·psid·fence·heldAt·exp·kind·ext '0', S는 pin '1'), PEXPIREAT keepUntil.
+// 쓰기: 좌석마다 BITFIELD SET u1 1, DEL 뒤 HSET hold(holdId·owner·psid·fence·heldAt·exp·kind·ext '0', S는 pin '1', lim 칸이 빈 글이 아니면 lim), PEXPIREAT keepUntil.
 //       S의 '' 칸은 fence = TIME µs, heldAt = exp = 지금 ms로 채운다(실패 해제의 RELEASED 토큰이 1 이상이게).
 //       H만 ZADD expiry exp 색인. bitmap·expiry의 수명은 더 늦은 쪽으로 keepUntil → {'OK', 쓴 수}
 //
 // 구현에서 정한 세부(PRF-143)
 // - 인자 수가 맞지 않으면(n < 1 또는 #ARGV ≠ 2 + 10n) 'ERR PEAKET_REBUILD_ARGS …'. gen 모양이 틀리거나 방식 칸이 S·H가 아니거나 S의 fence·heldAt·exp가
-//   셋 다 ''도 셋 다 10진 숫자도 아니어도 같다(쓰기 전에 본다).
+//   셋 다 ''도 셋 다 10진 숫자도 아니거나 lim 칸이 빈 글도 ^[1-9][0-9]{0,14}$도 아니어도 같다(쓰기 전에 본다. 한 좌석만 틀려도 어느 좌석도 쓰지 않는다).
 // - epoch가 hash가 아니면(키가 없으면 통과) 'ERR PEAKET_CORRUPT_KEY {epoch 키}'(READY 판정보다 앞). READY·STALE이 아니면 TIME을 한 번 읽어 keepUntil ≤ now면
 //   'ERR PEAKET_KEEP_UNTIL_PAST …', bitmap string·expiry zset·hold:{색인} hash가 아니면(키가 없으면 통과) 'ERR PEAKET_CORRUPT_KEY {키}'.
 // - S 좌석은 ZREM expiry 그 색인도 한다(앞서 H로 썼던 좌석이 판매로 바뀌었으면 만료 인덱스에 남지 않게).
@@ -182,6 +183,9 @@ for i = 1, n do
     local digits = string.match(at(i, 6), '^%d+$') and string.match(at(i, 7), '^%d+$') and string.match(at(i, 8), '^%d+$')
     if not blank and not digits then return redis.error_reply('ERR PEAKET_REBUILD_ARGS sold ' .. at(i, 1)) end
   end
+  -- 1인 한도(lim): 빈 글이거나 앞 0 없는 1 이상 10진 정수(15자리 이하)
+  local lim = at(i, 10)
+  if lim ~= '' and not (#lim <= 15 and string.match(lim, '^[1-9]%d*$')) then return redis.error_reply('ERR PEAKET_REBUILD_ARGS lim ' .. at(i, 1)) end
 end
 
 -- 1 세대 키(있으면 다른 곳이 이미 다시 만들었다)와 판 번호(내 시도가 아니면 STALE)
@@ -234,6 +238,8 @@ for i = 1, n do
   else
     redis.call('HSET', hk, 'holdId', at(i, 3), 'owner', at(i, 4), 'psid', at(i, 5), 'fence', at(i, 6), 'heldAt', at(i, 7), 'exp', at(i, 8), 'kind', at(i, 9), 'ext', '0')
   end
+  -- 홀드 때 쓴 1인 한도(빈 글이면 쓰지 않는다: Saga가 회차 설정 한도를 쓴다)
+  if at(i, 10) ~= '' then redis.call('HSET', hk, 'lim', at(i, 10)) end
   redis.call('PEXPIREAT', hk, keepText)
 end
 if #zadd > 0 then redis.call('ZADD', KEYS[2], unpack(zadd)) end

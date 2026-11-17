@@ -48,7 +48,7 @@
 //   - exp = heldAt + TTL. 토큰 = max((GET fence 또는 0) + 1, µs). SET fence 토큰 글.
 //   - 고른 좌석을 색인 오름차순으로 정렬해 비트 켜기(BITFIELD 한 번), hold Hash DEL 뒤 HSET(holdId·owner·psid·fence·heldAt·exp·kind 'FAN'·ext '0'·lim),
 //     만료 인덱스 ZADD, 보유 수 INCRBY(고른 수), idem HSET(fp·resp·seats·assign), 바뀐 구역마다 HINCRBY secver 1,
-//     좌석마다 Stream HELD 한 건, 구역마다 SPUBLISH 델타 한 건(좌석 색인 오름차순).
+//     좌석마다 Stream HELD 한 건(holdLimit = ARGV 5, Hash lim과 같은 값, W9-fix2 HOT-252), 구역마다 SPUBLISH 델타 한 건(좌석 색인 오름차순).
 //   - auto_cur HSET(칸 = 다음 커서), PEXPIREAT keepUntil. 비트맵·expiry·quota·stream·epoch·secver·fence·auto_cur의 수명도 keepUntil까지 늘린다.
 //   - 토큰이 2^53 − 1을 넘으면 아무것도 쓰지 않고 'PEAKET_FENCE_OVERFLOW' 오류다.
 import { ENSURE_EPOCH } from './hold-lua.js';
@@ -256,7 +256,7 @@ for i = 1, #chosen do
     'type', 'HELD', 'seatIdx', s.index, 'seatId', s.seatId, 'tierId', s.tierId, 'sectionId', s.sectionId,
     'holdId', ARGV[3], 'holdKind', 'FAN', 'purchaseSessionId', ARGV[2], 'accountId', ARGV[1],
     'fencingToken', tokText, 'sectionVersion', int(version[s.sectionIndex]), 'seatEpoch', seatEpoch,
-    'occurredAtMs', nowText, 'expiresAtMs', expText)
+    'occurredAtMs', nowText, 'expiresAtMs', expText, 'holdLimit', ARGV[5])
 end
 
 -- 구역마다 샤드 Pub/Sub 한 건: '1 {seatEpoch} {구역 색인} {구역 번호} {바꾼 시각} {seatOffset}:1 …'

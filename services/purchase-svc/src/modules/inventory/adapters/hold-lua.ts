@@ -62,7 +62,8 @@
 //   - INCRBY quota n. HSET idem fp 지문 resp '{holdId}:{heldAt}:{exp}:{토큰 글}', PEXPIRE idem TTL.
 //   - 바뀐 구역마다(좌석 차례로 처음 나온 차례) HINCRBY secver 구역 색인 1.
 //   - 좌석마다 XADD stream *(길이 상한 없음) type HELD seatIdx 좌석 색인 seatId tierId sectionId holdId holdKind FAN purchaseSessionId accountId
-//     fencingToken 토큰 글 sectionVersion 그 구역의 새 번호 seatEpoch 세대 occurredAtMs heldAt expiresAtMs exp.
+//     fencingToken 토큰 글 sectionVersion 그 구역의 새 번호 seatEpoch 세대 occurredAtMs heldAt expiresAtMs exp
+//     holdLimit 1인 한도(ARGV 5, Hash lim과 같은 값. 원장 hold_limit → 다시 만들기 lim, docs/features/seat-hold.md §6 '1인 한도 되살리기', W9-fix2 HOT-252).
 //   - 바뀐 구역마다 SPUBLISH (ARGV 8 .. 구역 색인) '1 {seatEpoch} {구역 색인} {구역 번호} {heldAt} {seatOffset}:1 …'(그 구역 좌석을 좌석 차례로, 상태 1 = 다른 분 선택).
 //   - bitmap·quota·fence·expiry·stream·secver·epoch: PEXPIRETIME < keepUntil(만료 없음 −1 포함)이면 PEXPIREAT keepUntil.
 //     hold(좌석마다)는 방금 지우고 새로 쓴 키라 수명이 없으므로 PEXPIRETIME을 보지 않고 PEXPIREAT keepUntil만 건다(동작 같음).
@@ -345,7 +346,7 @@ for i = 1, n do
     'type', 'HELD', 'seatIdx', idx[i], 'seatId', at(i, 4), 'tierId', at(i, 5), 'sectionId', at(i, 6),
     'holdId', ARGV[3], 'holdKind', 'FAN', 'purchaseSessionId', ARGV[2], 'accountId', ARGV[1],
     'fencingToken', tokText, 'sectionVersion', int(version[at(i, 2)]), 'seatEpoch', seatEpoch,
-    'occurredAtMs', nowText, 'expiresAtMs', expText)
+    'occurredAtMs', nowText, 'expiresAtMs', expText, 'holdLimit', ARGV[5])
 end
 
 -- 구역마다 샤드 Pub/Sub 한 건: '1 {seatEpoch} {구역 색인} {구역 번호} {바꾼 시각} {seatOffset}:{상태} …'

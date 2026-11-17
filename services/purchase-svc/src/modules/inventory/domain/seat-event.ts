@@ -60,7 +60,10 @@ export interface SeatEventMessage {
   expiresAt: string;
   occurredAt: string;
   eventKey: string;
-  /** 홀드 때 판매 정책이 정한 1인 한도(Stream HELD 칸 holdLimit, holdKind FAN의 HELD일 때만, asyncapi SeatEvent.holdLimit, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대 */
+  /**
+   * 홀드 때 판매 정책이 정한 1인 한도(Stream HELD 칸 holdLimit = 홀드 Hash lim, holdKind FAN의 HELD일 때만, asyncapi SeatEvent.holdLimit,
+   * docs/features/seat-hold.md §6 '1인 한도 되살리기', W9-fix2 HOT-252). 칸이 없는 항목(옛 파드)·끝 사건·우선 구매 보류에는 없다
+   */
   holdLimit?: number;
 }
 
@@ -77,6 +80,8 @@ const isHoldType = (t: unknown): t is HoldEventType => typeof t === 'string' && 
 /** 판매 행 seat_sale의 Outbox가 내는 SeatEvent 종류(원장 적재가 건너뛴다) */
 const SALE_EVENT_TYPES: readonly string[] = ['PENDING', 'SOLD', 'AVAILABLE', 'RETURNED'];
 const DEC = /^(0|[1-9][0-9]*)$/;
+/** Stream HELD 칸 holdLimit(1 이상 10진 정수 글, 홀드 Lua의 한도 인자) */
+const POSITIVE_DEC = /^[1-9][0-9]*$/;
 
 function intOf(v: string | undefined, name: string): number {
   if (v === undefined || !DEC.test(v)) throw new RangeError(`${name}이(가) 10진 정수 글이 아니다`);
@@ -132,7 +137,19 @@ export function toSeatEvent(eventId: string, f: Readonly<Record<string, string |
   m.eventKey = seatEventKey(type, eventId, holdId, m.seatId, m.fencingToken);
   if (holdKind === 'FAN') m.purchaseSessionId = textOf(f.purchaseSessionId, 'purchaseSessionId');
   else m.priorityGrantId = textOf(f.priorityGrantId, 'priorityGrantId');
+  const holdLimit = holdLimitOfField(type, holdKind, f.holdLimit);
+  if (holdLimit !== undefined) m.holdLimit = holdLimit;
   return m;
+}
+
+/**
+ * Stream 칸 holdLimit → SeatEvent holdLimit(HELD이고 FAN일 때만, docs/features/seat-hold.md §6 '1인 한도 되살리기' 사건).
+ * 1 이상 안전한 정수 글이 아니면 칸을 빼고 던지지 않는다(한도 값 하나 때문에 홀드 사건을 넘기면 원장에 홀드가 없어 다시 만들기가 그 좌석을 빈 좌석으로 돌린다)
+ */
+function holdLimitOfField(type: HoldEventType, holdKind: 'FAN' | 'PRIORITY', v: string | undefined): number | undefined {
+  if (type !== 'HELD' || holdKind !== 'FAN' || v === undefined || !POSITIVE_DEC.test(v)) return undefined;
+  const n = Number(v);
+  return Number.isSafeInteger(n) ? n : undefined;
 }
 
 /** 항목 하나의 갈 곳: 홀드 사건은 trade.seats, 구매 세션 사건은 trade.purchase-sessions, 나머지는 넘김(까닭과 함께). 던지지 않는다 */
@@ -178,8 +195,18 @@ export interface LedgerHoldEvent {
   /** SeatEvent의 holdId·purchaseSessionId(원장 hold_id·purchase_session_id, 다시 만들기가 쓴다, BUILD_ORDER PRF-143) */
   holdId?: string;
   purchaseSessionId?: string;
-  /** SeatEvent의 holdLimit(원장 hold_limit, HELD·FAN의 1 이상 안전한 정수만, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대 */
+  /** SeatEvent의 holdLimit(원장 hold_limit, int4 칸). HELD·FAN의 1 이상 LEDGER_HOLD_LIMIT_MAX 이하 정수만 싣는다(W9-fix2 HOT-252) */
   holdLimit?: number;
+}
+
+/** 원장 hold_limit(int4 칸)이 담는 가장 큰 값 2,147,483,647. 넘는 holdLimit은 빈 값으로 적재한다(docs/features/seat-hold.md §6 '1인 한도 되살리기' 원장) */
+export const LEDGER_HOLD_LIMIT_MAX = 2_147_483_647;
+
+/** SeatEvent holdLimit → 원장 hold_limit: HELD이고 FAN이며 1 이상 LEDGER_HOLD_LIMIT_MAX 이하 정수일 때만. 그 밖은 칸을 뺀다(던지지 않는다, 사건은 적재된다) */
+export function ledgerHoldLimitOf(type: unknown, holdKind: unknown, v: unknown): number | undefined {
+  if (type !== 'HELD' || holdKind !== 'FAN') return undefined;
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v < 1 || v > LEDGER_HOLD_LIMIT_MAX) return undefined;
+  return v;
 }
 
 /**
@@ -211,5 +238,8 @@ export function toLedgerHoldEvent(value: unknown): LedgerHoldEvent | null {
   if (v.holdKind === 'PRIORITY') e.priorityGrantId = uuidOf(v.priorityGrantId, 'priorityGrantId');
   // 구매 세션 ID는 FAN 홀드만 싣는다(우선 구매 보류는 구매 세션이 없다. 값이 와도 싣지 않는다). 빈 글·글이 아닌 값은 싣지 않는다(원장 칸은 NULL)
   else if (typeof v.purchaseSessionId === 'string' && v.purchaseSessionId.length > 0) e.purchaseSessionId = v.purchaseSessionId;
+  // 1인 한도(원장 hold_limit, 다시 만들기가 lim으로 되살린다, W9-fix2 HOT-252). 우선 구매 보류·끝 사건·틀린 값은 싣지 않는다(원장 칸은 NULL)
+  const holdLimit = ledgerHoldLimitOf(v.type, v.holdKind, v.holdLimit);
+  if (holdLimit !== undefined) e.holdLimit = holdLimit;
   return e;
 }
