@@ -3,7 +3,7 @@
 CREATE TEMP TABLE inv_params (as_of timestamptz NOT NULL, enqueue_within interval NOT NULL, issue_deadline interval NOT NULL);
 
 CREATE TEMP TABLE purchase_order (id uuid, account_id uuid, event_id uuid, status text, amount bigint, created_at timestamptz);
-CREATE TEMP TABLE order_event (order_id uuid, seq int, to_status text, occurred_at timestamptz);
+CREATE TEMP TABLE order_event (order_id uuid, seq int, to_status text, occurred_at timestamptz, from_status text);
 CREATE TEMP TABLE order_item (order_id uuid, line_no int, seat_id uuid, ticket_id uuid);
 CREATE TEMP TABLE order_cancellation (id uuid, order_id uuid, ticket_id uuid, status text);
 CREATE TEMP TABLE seat_sale (event_id uuid, seat_id uuid, order_id uuid, status text);

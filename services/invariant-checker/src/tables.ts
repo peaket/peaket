@@ -12,7 +12,8 @@ export interface SourceTable {
 
 export const SOURCE_TABLES: readonly SourceTable[] = [
   { name: 'purchase_order', source: 'purchase', columns: ['id', 'account_id', 'event_id', 'status', 'amount', 'created_at'] },
-  { name: 'order_event', source: 'purchase', columns: ['order_id', 'seq', 'to_status', 'occurred_at'] },
+  // from_status: P4 발권 기한의 기준 시각을 가른다(결과 모름·입금 대기에서 온 승인 반영은 반영 시각 기준, W9-fix2 PRF-182)
+  { name: 'order_event', source: 'purchase', columns: ['order_id', 'seq', 'to_status', 'occurred_at', 'from_status'] },
   { name: 'order_item', source: 'purchase', columns: ['order_id', 'line_no', 'seat_id', 'ticket_id'] },
   { name: 'order_cancellation', source: 'purchase', columns: ['id', 'order_id', 'ticket_id', 'status'] },
   { name: 'seat_sale', source: 'purchase', columns: ['event_id', 'seat_id', 'order_id', 'status'] },
