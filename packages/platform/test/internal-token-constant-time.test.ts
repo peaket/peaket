@@ -14,6 +14,7 @@ import {
   INTERNAL_GRPC_CALLER_HEADER,
   INTERNAL_GRPC_TOKEN_HEADER,
   internalGrpcActorProof,
+  internalGrpcServerInterceptor,
   verifyInternalGrpcActor,
 } from '../src/internal-grpc.js';
 import { constantTimeEqual } from '../src/secret-compare.js';
@@ -108,5 +109,32 @@ describe('W9F3 F2 공용 내부 토큰 상수 시간 비교', () => {
     spy.mockClear();
     expect(verifyInternalGrpcActor(metadataWith({ token: TOKEN, caller: 'ops-svc', actor: ACTOR, proof }), TOKEN, { caller: 'ops-svc', actor: ACTOR })).toEqual({ ok: true });
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  test('W9F3 V-F2f 내부 gRPC 서버 인터셉터도 토큰을 공용 비교(해시 32바이트 둘, 한 번)로 견준다 [ASVS v5.0.0-11.2.4]', () => {
+    const TOKEN = 'internal-grpc-shared-token-0123456789';
+    /** 인터셉터를 한 번 태운다: 받은 토큰 머리로 첫 메타데이터를 흘려 넘어갔는지·UNAUTHENTICATED로 끝났는지 돌려준다 */
+    const run = (given: string | undefined): { passed: boolean; status: number | undefined } => {
+      const sendStatus = vi.fn();
+      let listener: grpc.ServerListener | undefined;
+      const call = { start: (l: grpc.ServerListener) => { listener = l; }, sendStatus } as unknown;
+      const intercepting = internalGrpcServerInterceptor(TOKEN)({ path: '/peaket.Test/Call' } as grpc.ServerMethodDefinition<unknown, unknown>, call as never);
+      const downstream = vi.fn();
+      intercepting.start({ onReceiveMetadata: downstream } as never);
+      const metadata = new grpc.Metadata();
+      if (given !== undefined) metadata.set(INTERNAL_GRPC_TOKEN_HEADER, given);
+      (listener as unknown as { onReceiveMetadata(m: grpc.Metadata, next: () => void): void }).onReceiveMetadata(metadata, () => undefined);
+      return { passed: downstream.mock.calls.length === 1, status: sendStatus.mock.calls[0]?.[0]?.code };
+    };
+    for (const [what, given] of [['같은 값', TOKEN], ['짧은 값', 'short'], ['긴 값', `${TOKEN}-longer`], ['같은 길이 틀린 값', `${TOKEN.slice(0, -1)}X`]] as const) {
+      spy.mockClear();
+      const out = run(given);
+      expect(out.passed, `${what}: 통과 여부`).toBe(given === TOKEN);
+      expect(out.status, `${what}: 상태`).toBe(given === TOKEN ? undefined : grpc.status.UNAUTHENTICATED);
+      expectOneHashedCompare(given, TOKEN, `${what}: gRPC 서버 인터셉터`);
+    }
+    // 토큰 머리가 아예 없으면 견주지 않고 UNAUTHENTICATED
+    spy.mockClear();
+    expect(run(undefined)).toEqual({ passed: false, status: grpc.status.UNAUTHENTICATED });
   });
 });

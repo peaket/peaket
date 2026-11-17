@@ -25,8 +25,10 @@ import { RawClient, type RawResponse, closedWithin, sleep, trackConnections } fr
 const SAVE = { name: 'bh-save', limit: 1, retryAfterSeconds: 3 };
 const ADMIN_ONLY = { name: 'bh-admin-only', limit: 1, retryAfterSeconds: 3 };
 const BUY = { name: 'bh-buy', limit: 1, retryAfterSeconds: 3 };
+const MIXED = { name: 'bh-mixed', limit: 1, retryAfterSeconds: 3 };
+const OPEN = { name: 'bh-open', limit: 1, retryAfterSeconds: 3 };
 /** 처리기에 닿은 수와 그때의 요청자 */
-const hits = { save: 0, adminOnly: 0, buy: 0 };
+const hits = { save: 0, adminOnly: 0, buy: 0, mixed: 0, open: 0 };
 const principals: Principal[] = [];
 
 @Controller('v1/bh')
@@ -60,6 +62,26 @@ class BulkheadAuthController {
     principals.push(me);
     return { ok: true };
   }
+
+  /** 허용 역할이 [public, fan]: 신원이 없으면 익명으로 통과하지만 신원이 있으면 ①이 대상을 본다 */
+  @HttpCode(200)
+  @Post('mixed')
+  @Roles(['public', 'fan'])
+  @Bulkhead(MIXED)
+  mixed() {
+    hits.mixed++;
+    return { ok: true };
+  }
+
+  /** 허용 역할이 public뿐: ①이 없다(신원 머리를 보지 않는다) */
+  @HttpCode(200)
+  @Post('open')
+  @Roles(['public'])
+  @Bulkhead(OPEN)
+  open() {
+    hits.open++;
+    return { ok: true };
+  }
 }
 
 @Module({ controllers: [BulkheadAuthController] })
@@ -86,11 +108,11 @@ const authz = new FakeAdminAuthz();
 const TENANT = '0194d000-0000-7000-8000-00000000f5f5';
 
 /** 파트너 신원 머리. answer로 identity 답을 정한다 */
-function partner(answer: Answer = { valid: true, role: 'partner_admin', tenantId: TENANT }, aud = 'partner'): Record<string, string> {
+function partner(answer: Answer = { valid: true, role: 'partner_admin', tenantId: TENANT }, aud = 'partner', scope = ''): Record<string, string> {
   const accountId = id('acc');
   const sessionId = id('sid');
   authz.answers.set(`${accountId}/${sessionId}`, answer);
-  return { 'x-user-id': accountId, 'x-session-id': sessionId, 'x-user-aud': aud, 'x-user-scope': '' };
+  return { 'x-user-id': accountId, 'x-session-id': sessionId, 'x-user-aud': aud, 'x-user-scope': scope };
 }
 const fan = (scope: string): Record<string, string> => ({ 'x-user-id': id('fan'), 'x-session-id': id('fsid'), 'x-user-aud': 'fan', 'x-user-scope': scope });
 
@@ -111,6 +133,8 @@ const ROUTES = {
   save: { method: 'PUT', path: '/v1/bh/save' },
   adminOnly: { method: 'PUT', path: '/v1/bh/admin-only' },
   buy: { method: 'POST', path: '/v1/bh/buy' },
+  mixed: { method: 'POST', path: '/v1/bh/mixed' },
+  open: { method: 'POST', path: '/v1/bh/open' },
 } as const;
 type RouteName = keyof typeof ROUTES;
 
@@ -197,6 +221,8 @@ describe('W9F3 F5 칸막이 경로는 신원을 먼저 본다', () => {
       { what: 'identity 던짐', route: 'save', holder: partner(), headers: partner('throw'), status: 503, type: 'https://peaket.example/problems/authz-unavailable' },
       { what: 'identity 시간 초과', route: 'save', holder: partner(), headers: partner('hang'), status: 503, type: 'https://peaket.example/problems/authz-unavailable', waitMs: 3_000 },
       { what: '역할 밖(partner_admin만 허용에 partner_member)', route: 'adminOnly', holder: partner(), headers: partner({ valid: true, role: 'partner_member', tenantId: TENANT }), status: 403 },
+      // V-F5g: 비밀번호 바꾸기 필요 세션은 연 처리기(비밀번호 바꾸기·로그아웃)만 쓴다. 가드와 같은 403이고 자리 잡기 전이다(guidelines §7 ①)
+      { what: '비밀번호 바꾸기 필요 세션(password:change 스코프)', route: 'save', holder: partner(), headers: partner(undefined, 'partner', 'password:change'), status: 403, type: 'https://peaket.example/problems/password-change-required' },
       { what: '스코프 없음(팬 ticket:buy 경로)', route: 'buy', holder: fan('openid ticket:buy'), headers: fan('openid'), status: 403 },
     ];
     for (const c of cases) {
@@ -219,6 +245,46 @@ describe('W9F3 F5 칸막이 경로는 신원을 먼저 본다', () => {
       expect(principals.filter((p) => p.accountId === c.headers['x-user-id']), `${c.what}: 처리기에 닿았다`).toEqual([]);
     }
   }, 60_000);
+
+  test('W9F3 V-F5f 허용 역할이 public뿐이면 ①이 없고 [public, fan]이면 ①이 있다(신원이 있을 때만) [ASVS v5.0.0-8.3.1]', async () => {
+    // [public, fan]: 신원 없는 익명 요청은 통과해 자리를 쥘 수 있다(자리를 붙잡는 요청)
+    const hold = await holdSlot('mixed', {});
+    try {
+      // 자리가 찬 때, 대상이 틀린 신원(partner)은 429가 아니라 ①의 401이다(본문 없이, 자리 잡기 전에)
+      const wrongAud = await headOnly('mixed', partner());
+      try {
+        const side = await tracker.of(wrongAud.localPort);
+        const r = await wrongAud.response(0, 1_500);
+        expect(r?.status, '[public, fan] 대상 틀린 신원: ①이 자리 잡기 전에 401').toBe(401);
+        expect(r?.headers['www-authenticate'], 'WWW-Authenticate').toBeTruthy();
+        expect(r?.headers.connection?.toLowerCase(), 'Connection').toBe('close');
+        expect(await closedWithin(side, 2_000), '서버가 닫지 않았다').toBe(true);
+      } finally {
+        wrongAud.destroy();
+      }
+      // 같은 때, 신원 없는 익명 요청은 ①을 지나 ②에서 자리가 차 429다(익명 통과는 ① 건너뛰기가 아니라 ①의 판정 결과)
+      const anon = await headOnly('mixed', {});
+      try {
+        expect((await anon.response(0, 1_500))?.status, '[public, fan] 익명').toBe(429);
+      } finally {
+        anon.destroy();
+      }
+    } finally {
+      await hold.release();
+    }
+
+    // public뿐: 대상이 틀린 신원 머리가 있어도 ①이 없어 자리를 잡고 본문을 기다린다(401이 아니다). identity도 묻지 않는다
+    authz.calls = 0;
+    const holder = await headOnly('open', partner());
+    try {
+      expect(await holder.response(0, 400), 'public뿐 경로의 머리만 요청은 본문을 기다린다(①로 거절되지 않는다)').toBeUndefined();
+      const ok = await full('open', partner(undefined, 'fan'));
+      expect(ok.statusCode, '자리가 찬 때 public뿐 경로: 신원이 틀려도 ①이 없어 자리 판정(429)만 있다').toBe(429);
+    } finally {
+      holder.destroy();
+    }
+    expect(authz.calls, 'public뿐 경로는 identity를 묻지 않는다').toBe(0);
+  }, 20_000);
 
   test('W9F3 F5 옳은 신원은 지금처럼 처리되고 identity는 캐시로 한 번만 묻는다 [ASVS v5.0.0-8.3.1]', async () => {
     const headers = partner({ valid: true, role: 'partner_member', tenantId: TENANT });
