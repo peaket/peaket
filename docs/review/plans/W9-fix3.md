@@ -116,3 +116,44 @@ cd /d/ticketpass-w9-fix3 && node --test tools/ci/gateway-routes.test.mjs && node
 - 수치: 시험 문턱 `bytesRead` ≤ 1MiB·닫힘 2초는 시험에만 쓰는 [가정]이다(지금 결함은 1.5초에 6MB를 읽었다). 제품 수치는 새로 정하지 않았다.
 - 정본 시험 표(search.md SR-T17 등)에는 줄을 더하지 않았다. 시험 이름은 지적 ID(`W9F3 F…`)와 기존 ID(SEC-06R·SR-T17·RV-07)로 시작한다.
 - ADR은 쓰지 않았다(방향을 바꾸는 결정이 없다. F2는 W7-audit 지적을 정본에 반영, F5는 ADR-0257 결정 2·ADR-0260 결정 11의 '본문을 읽기 전 자리'에 신원 단계를 앞에 더한 것이다).
+
+## 실패 확인
+
+- **누가·어디서**: 시험 담당 `w9f3-test`(claude-opus-5-5), 2026-11-17, 구현 전 트리 `b165df27` 위에 시험 커밋 `0c8d8b62`. 단위는 패키지·서비스 폴더에서 `node_modules/.bin/vitest run <파일들>`, tools는 `node --test`, F1 통합은 Docker 잠금(`D:/ticketpass-locks/docker`)을 잡고 `vitest.integration.config.mjs`로 돌렸다(컨테이너 접두 `w9f3-test-`, 끝난 뒤 남은 컨테이너 0, 잠금 지움).
+- **수**: 새로 쓰거나 고쳐 쓴 시험 17개(§4의 17줄과 하나씩 짝) 가운데 **14개 실패, 3개 처음부터 통과**.
+
+| 시험 | 파일 | 결과 | 실패 까닭(지금 구현) |
+| --- | --- | --- | --- |
+| W9F3 F1 ops 파트너 풀 사용자의 DB 역할을 시작 때 본다 | ops `test-int/event-cancellation-rls.int.test.ts` | 실패 | 뼈대 `assertOpsPartnerRole`이 아무것도 보지 않아 표 소유자(슈퍼유저) 풀에서 던지지 않는다('promise resolved undefined instead of rejecting'). ops_partner만 → 됨 줄은 통과 |
+| W9F3 F1 파트너 DB 주소가 있으면 … 역할 검사를 부른다 | ops `test/event-cancellation-main-wiring.test.ts` | 실패 | `partnerRoleCheckRequired`가 없다(뼈대 false). main.ts도 역할 검사를 부르지 않는다 |
+| W9F3 F2 SEC-06R ⑤ 공용 비교는 길이와 상관없이 해시 둘을 한 번 견준다 | platform `test/internal-token-constant-time.test.ts` | 실패 | `constantTimeEqual`이 없다(뼈대 false). 가드는 받은 바이트를 그대로 견주고 길이가 다르면 비교 없이 끝낸다 |
+| W9F3 F2 내부 gRPC 토큰·처리자 증명도 공용 비교를 쓴다 | 같은 파일 | 실패 | `internal-grpc.ts`의 `sameSecret`이 길이가 다르면 `timingSafeEqual`을 부르지 않는다(0번) |
+| W9F3 F2 SEC-06R ④ 내부 판매 설정 가드도 … 해시로 견주고 401이다 | core `test/internal-sale-config-token-boot.test.ts` | 실패 | 비교 인자가 32바이트 해시가 아니라 토큰 바이트(35바이트)다 |
+| W9F3 F3 RV-07 x-peaket-scopes 값이 이상하면 authKindOf가 문제를 돌린다 | `tools/ci/gateway-routes.test.mjs` | 실패 | 문자열 `'ticket:buy'`를 `{ kind: 'token' }`으로 읽는다(배열이 아니면 조용히 버림) |
+| W9F3 F3 RV-07 그런 작업이 하나라도 있으면 CLI가 2로 멈추고 … | 같은 파일 | 실패 | 문자열 스코프 작업이 있어도 생성기 문제 목록이 비어 그대로 쓴다 |
+| W9F3 F4 칸막이가 찼을 때 429는 연결을 닫고 남은 본문을 읽지 않는다 | platform `test/body-limit.test.ts` | 실패 | ① 머리만 요청의 429가 `connection: keep-alive`다(서버가 본문을 기다리며 연결을 쥔다) |
+| W9F3 F4 본문 상한 413도 연결을 닫는다(회귀) | 같은 파일 | **처음부터 통과** | Fastify 해석기 오류 길(`onDone`)이 `connection: close`를 단다. 아래 '처음부터 통과' 처리 |
+| W9F3 F4 정상 요청은 연결을 다시 쓴다 | 같은 파일 | **처음부터 통과** | 과한 고침(M-F4b) 막기라 지금 통과가 맞다. 아래 처리 |
+| W9F3 F5 신원 없는 요청은 칸막이 자리를 쥐지 못하고 본문을 기다리지 않는다 | platform 새 `test/bulkhead-auth.test.ts` | 실패 | 신원 없는 요청이 onRequest에서 자리를 잡고 본문을 기다려 1.5초 안에 답이 없다 |
+| W9F3 F5 앞 판정은 가드와 같은 거절을 자리 잡기 전에 낸다 | 같은 파일 | 실패 | 자리가 찬 때 대상 틀림(`x-user-aud: fan`) 요청이 401이 아니라 429다(첫 줄에서 멈춤) |
+| W9F3 F5 옳은 신원은 지금처럼 처리되고 identity는 캐시로 한 번만 묻는다 | 같은 파일 | **처음부터 통과** | 지금 동작을 지키는 대조 시험이다. 아래 처리 |
+| W9F3 F5 칸막이 경로의 허용 역할이 클래스에만 있으면 서비스가 시작하지 않는다 | 같은 파일 | 실패 | `v1/bh-class/bulkhead` 서비스가 그대로 시작한다 |
+| W9F3 F5 core 좌석맵 저장은 신원 없이 칸막이를 쥐지 못한다 | core 새 `test/partner-bulkhead-auth.test.ts` | 실패 | 신원 없는 머리만 요청이 자리를 잡고 본문을 기다려 1.5초 안에 답이 없다 |
+| W9F3 F6 SR-T17 빗금·밑줄·쉼표·역빗금·가운뎃점으로 이은 번호도 가린다 | core `test/search-log.test.ts` | 실패 | `010/1234/5678`이 그대로 남는다(빗금이 구분자가 아니다) |
+| W9F3 F6 SR-T17 정규화 뒤 가리기: 전각 빗금 번호도 로그에 남지 않는다 | core `test/search.http.test.ts` | 실패 | `search_query` 줄에 `010/1234/5678`이 그대로 남는다 |
+
+- **처음부터 통과한 셋의 처리**(틀린 구현을 손으로 넣어 실패를 보고 되돌렸다, 트리에 남기지 않음):
+  - F4 413 회귀: '오류 답에서 `connection` 머리를 떼어 내는 onSend 훅'(본문 전 413을 Fastify 해석기 길 밖에서 직접 낼 때 닫기를 빠뜨린 경우와 같은 꼴)을 `installRequestChecks`에 넣자 실패(`multipart 선언 길이 넘침(머리만): Connection: expected undefined to be 'close'`).
+  - F4 정상 요청: M-F4b(모든 응답에 `connection: close`)를 넣자 실패(`/v1/limit/default 1번째: Connection: expected 'close' not to be 'close'`).
+  - F5 옳은 신원: 가드가 `authz.tenantId`를 `Principal`에 넣지 않게 하자 실패(처리기가 받은 요청자의 테넌트가 비었다).
+- **시험이 맞는지 임시 구현으로도 돌려 봄**(시험 담당이 저장소 밖에서 잠깐 넣고 모두 되돌림, 커밋에 없다. 구현 담당은 이것을 쓰지 않는다): F1(core와 같은 꼴 SQL 한 번, main.ts에서 조건 아래 부름)·F4(429 길에 `connection: close`)·F5(처리기 `@Roles`를 경로 설정에도 적고 칸막이 훅 앞에서 신원 판정, 실패 시 `connection: close`)로 위 시험이 모두 통과했고, 틀린 구현 표본 M-F1a·M-F1b·M-F1c·M-F4a·M-F4b·M-F5a(platform·core 둘 다)·M-F5b·M-F5c가 각각 잡혔다. 같은 F5 임시 구현에서 purchase-svc 회귀 넷(`write-bulkhead`·`orders-http`·`accept-http`·`order-identity`, 127개)과 core의 칸막이·429 시험(`review.http`·`sale-eligibility.http`), platform `body-limit`(public 칸막이)이 그대로 통과해, §3 F5의 '신원 머리 없이 429를 기대하는 기존 시험'은 없어 머리를 달지 않았다.
+- **이 묶음과 무관하게 처음부터 실패하는 것**: `tools/ci/gateway-routes.test.mjs`의 기존 시험 'D-T42 ①② 저장소의 생성 파일이 지금 openapi와 원천으로 다시 만든 것과 같다'와 `node tools/ci/gateway-routes.mjs --check`가 출발점 `b165df27` 그대로(시험 담당 변경 없이 `git archive`로 뽑은 트리)에서도 1로 끝난다. 다섯 생성 파일의 계약 sha256 줄이 지금 openapi와 다르다(생성 파일 마지막 갱신 `e826ac8b` 뒤에 openapi가 `bca7f8a8`에서 바뀌었다). 구현 담당이나 감독이 `--write`로 다시 만들지 정한다.
+- **시험이 정한 약속(정본·계획이 정하지 않은 세부, 바꾸려면 '시험 이의')**:
+  - F1 통합: 슈퍼유저·표 소유자 까닭 글 `/행 보안/`, ops_app만 `/ops_partner/`, 둘 다 `/ops_app/`(계획), BYPASSRLS는 `/BYPASSRLS|슈퍼유저|행 보안/`, 소유 역할 구성원은 `/소유|행 보안/`(core와 같은 꼴이라고 본 너그러운 꼴). 소유 역할 구성원 줄은 표 소유자를 잠시 다른 역할로 옮겼다가 되돌린다.
+  - F1 조립: 계획의 'main.ts 글에서' 대신 main.ts를 실제로 띄워(바깥 연결 가짜) `assertOpsPartnerRole` 부름과 차례(`createService`보다 앞)를 본다. 운영 환경은 감사 서명 키 등 다른 필수 값 때문에 main.ts를 띄우지 않고 조건 함수로만 본다. 역할 검사 모듈은 `src/adapters/db/database-role.js` 경로로 가짜를 단다(계획 §3 경로).
+  - F2: `timingSafeEqual` 두 인자 차례는 [SHA-256(받은 값), SHA-256(기대 값)]. 받은 값이 빈 문자열이어도 가드가 한 번 견준다.
+  - F3: 까닭 글에 `x-peaket-scopes`와 값이 든다. 값은 JSON 꼴로 본다(null → `null`, 빈 배열 → `[]`, 문자열 원소는 그 글자 그대로).
+  - F4: 흘려보내기 사례는 첫 덩어리 뒤 응답을 받은 다음 나머지를 보낸다(서버가 닫은 뒤 보내면 손님이 응답 대신 끊김을 볼 수 있어서, 정본이 받아들인 것). 413의 JSON Problem은 지금 inject 응답과 같은 type이면 된다.
+  - F5: '본문 해석 0'은 해석기 부름을 세지 않고 '머리만 보낸 요청이 본문 없이 답을 받는다'로 본다. '자리 0'은 옳은 요청이 머리만 보내 자리를 먼저 쥔 동안 거절 요청이 429가 아니라 제 거절을 받는지로 본다. 클래스에만 단 허용 역할의 시작 실패 까닭 글에는 경로 `v1/bh-class/bulkhead`(앞 빗금 없이)가 든다.
+- **더한 뼈대**(동작 없음, 구현 담당이 채운다): `packages/platform/src/secret-compare.ts`(`constantTimeEqual`은 늘 false, `index.ts` 내보내기는 하지 않음), `services/ops-svc/src/adapters/db/database-role.ts`(`assertOpsPartnerRole`은 아무것도 하지 않음), `services/ops-svc/src/event-cancellation-wiring.ts`의 `partnerRoleCheckRequired`(늘 false). 시험 도우미 `packages/platform/test/raw-http.ts`(실제 소켓 HTTP/1.1, 서버 쪽 소켓 `bytesRead`)를 더했다.
+- **형 검사·린트**: platform·core·ops `tsc -p tsconfig.json --noEmit` 0, 바꾼 src 파일 eslint 오류 0.
