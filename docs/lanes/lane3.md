@@ -90,8 +90,14 @@
 - BAT-420(GAT-110) 구현 담당이 남긴 것: 회차 취소 확정 경로의 409 설명에 `already-approved`가 없다(문제 종류 목록에는 있다, docs/api/openapi.yaml ops 회차 취소 확정)
 - BAT-420(GAT-110) 구현 담당이 남긴 것: ops 파트너 풀의 DB 역할 시작 검사(core `assertDatabaseRole` 같은 것)가 없어, 운영에서 `PEAKET_PARTNER_DATABASE_URL`이 표 소유자를 가리키면 행 보안을 조용히 건너뛴다(authz-matrix §5.3 '앱 사용자는 표 소유자가 아니게', services/ops-svc `event-cancellation-wiring.ts`·`app.module.ts`)
 - BAT-420(GAT-110) 계획 보충 5를 쓰며 본 것: `#retryOrFail`의 FAILED 쓰기(시도 상한 전의 그 밖 실패)는 팬 실패 알림 Outbox를 남기지 않는다. 보충 5로 CS 건은 생기지만 팬은 실패를 듣지 못한다(services/purchase-svc `event-refund-service.ts:625`)
+- BAT-420(다시 보기 3 P1, 낮음): CS 건 다시 열기 목록이 표시 시각 순이라 늘 실패하는 앞 행이 같은 종류의 뒤 행과 뒤 종류(차액·이상 표시)를 굶긴다(`drizzle-cs-case-outbox.ts`, `cs-case-reopen.ts:127`). 지표를 보고 사람이 손대기 전까지만.
+- BAT-420(다시 보기 3 P2, 낮음, 팬 취소를 여는 웨이브 맨 앞): Saga의 '요청 행에는 실패 표시 안 함' 조건이 행이 아니라 입력의 요청 ID를 본다(`cancel-ticket.ts:188·197~213`). 팬 취소가 지금 403으로 닫혀 닿지 않는다.
+- BAT-420(다시 보기 3 P3, 낮음): `#retryOrFail('FAILED')` 길은 CS 건과 행 실패 표시는 남기지만 팬 실패 알림은 남기지 않는다(`event-refund-service.ts:641`, 이번 고침 전부터).
+- BAT-420(검증 2 낮음 여덟): X02 처리가 던지면 틱 끝 다시 열기 건너뜀, X05 2xx가 무응답 잇따름을 끊지 않음, X07 한 번 답한 뒤 무응답이면 예산을 넘겨 부름, X19 끝난 행의 항목도 다시 엶, X22 실패 표시된 행의 항목도 잡음, X23 남은 잡기를 풀지 않음, X10 Saga 팬 길 시도 상한 경계, X04 어댑터가 200을 거절(ops는 늘 202). 계획 BAT-420.md '## 검증' 검증 2.
+- 웨이브 8 갈래 3 시험 흔들림: purchase-svc 단위 `grpc-new-payment-pause`·`grpc-payment-checkout`이 전체 실행 한 번에 실패했다가 다시 돌리면 통과했다(BAT-420 N1·N2·N7 구현 담당 기록).
 
 ## 진행 로그
+- 2026-11-17 웨이브 8 BAT-415·BAT-420(R-673): 취소·환불 가지를 develop 위로 다시 쌓아 합쳤다. 웨이브 끝 리뷰 높음 K1·K2(이중 환불 위험)와 C1·C2·S1·K4·S2, 다시 보기 2 N1·N2·N7을 계획·시험·구현·리뷰·검증 다른 담당으로 고쳤다. 변이 검증 2 85개 중 67개+돈·권한 10개 시험. GAT-080·090·110은 다음 웨이브 몫이 남아 일부 구현. 소유자 세션 감독.
 - 2026-11-17 W8-audit2a(R-672): 탈퇴 계정 후기 파기와 16분 뒤 다시 정리(I-T83, ADR-0278)를 develop 위로 다시 쌓고(충돌 둘: ADR 목록, core journal 0023·0026), 다시 보기 N1(키 없는 보류 행 셈)·N3을 계획·시험·구현·리뷰·검증 다른 담당으로 고쳐 합쳤다. core 통합 305개 통과, 변이 검증 2 30개 중 24개+시험 넷, 감독 예외 넷(리뷰를 계획 절 밖에 씀). 소유자 세션 감독.
 - 2026-11-16 W8-ci-fix(R-650): develop CI 43799265031의 purchase `priority-hold.int`(고정 날짜 vs Valkey TIME, S-T37 넷 실패, 17:00 KST 뒤 다섯째)와 11-20 뒤 터질 `cancellation.int`의 기준 시각을 Valkey TIME에서 잡게 시험만 고쳤다. 변이 3/3, 리뷰 낮음 4. 남은 고정 날짜 넷은 정리 목록.
 - 2026-11-16 웨이브 7 W7-audit(R-647): A2-17·A2-19·R-628 시험·COV2-06을 계획·시험·구현·리뷰·검증 다른 담당으로 고쳤다(core 0021·0022, 접속지 `source_ip`, 소비자 전용 풀). 리뷰 높음 0, 변이 67개 중 처음 살아남은 4는 시험으로 막음, core test-int 257 통과. BAT-045 건너뜀. 보고서 `docs/review/measurements/W7-lane3-wave.md`.
