@@ -26,7 +26,7 @@ regexes = [
 ]
 
 [[allowlists]]
-description = '''시험 코드의 가짜 값: 멱등 키·사건 키 UUID, 결제 시뮬레이터 시험 키, 취소·환불 멱등 키 고정 값, 부하 시험이 가림·거절을 보려고 넣는 가짜 토큰·키. 시험 폴더와 시험 파일에서만 받는다'''
+description = '''시험 코드의 가짜 값: 멱등 키·사건 키 UUID, 결제 시뮬레이터 시험 키, 취소·환불 멱등 키 고정 값, 결제 취소 시험이 사례 번호와 낱말 하나로 붙인 멱등 키(웨이브 8 BAT-415), 부하 시험이 가림·거절을 보려고 넣는 가짜 토큰·키. 시험 폴더와 시험 파일에서만 받는다'''
 condition = 'AND'
 targetRules = ['generic-api-key', 'jwt', 'stripe-access-token']
 paths = ['''(?:^|/)(?:test|test-int)/[^/].*|\.test\.(?:ts|mjs)$''']
@@ -34,6 +34,7 @@ regexes = [
   '''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''',
   '''^(?:sim_sk_test_|test_sk_)0123456789abcdef$''',
   '''^(?:cancel\-12345678901234|cancel\-fixture\-0001|refund\-0123456789abcdef)$''',
+  '''^cancel\-p\d{1,2}_[a-z]+$''',
   '''^tok_SECRET_9f8e7d6c5b4a3921$''',
   '''^PRIVATE\-MATERIAL\-7f3a9c2e1b$''',
   '''^sk_live_REALSECRET\d{10}$''',
