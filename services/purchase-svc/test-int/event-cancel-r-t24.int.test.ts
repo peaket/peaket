@@ -49,6 +49,8 @@ import {
   eventRefundNoticeKey,
 } from '../src/modules/refund/index.js';
 import { startOpsCsDouble } from './ops-cs-double.js';
+// 검증 2에서 살아남은 것(시험 담당 l3w8-420-surv-test)
+import { MemoryEventRefundAttemptStore } from '../src/modules/refund/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const NOW = Date.parse('2026-11-20T18:30:00+09:00');
@@ -356,6 +358,21 @@ describe('GAT-110 E1 보류 취소 전환 경합 [PostgreSQL]', () => {
     const item = await purchaseDb.pool.query<{ status: string; last_error: string; cancellation_id: string }>('select status, last_error, cancellation_id from event_refund_item where request_id = $1', [requestId]);
     expect(item.rows).toEqual([{ status: 'FAILED', last_error: 'cancellation-in-progress', cancellation_id: heldId }]);
     expect((await cancellationsOf([held.orderId]))[0]).toMatchObject({ id: heldId, reason: 'USER', deduction_amount: 29_999, refund_amount: 3_334, status: 'REFUND_PENDING' });
+    // 검증 2 X20(시험 담당 l3w8-420-surv-test): §5 '주인' — 항목 FAILED의 행 실패 표시는 이 요청이 만들거나 전환한 행에만 쓴다.
+    // 전환에서 진 팬 행(요청 ID 없음)은 마감 뒤 환급 실행기의 것이라 실패 표시가 없고, 결과 모름으로 남은 그 행을 다음 틱이 같은 취소 ID·공제한 금액 3,334원으로 다시 부른다
+    const fan = (
+      await purchaseDb.pool.query<{ refund_failed_at: Date | null; refund_last_error: string | null; event_cancellation_request_id: string | null }>(
+        'select refund_failed_at, refund_last_error, event_cancellation_request_id from order_cancellation where id = $1',
+        [heldId],
+      )
+    ).rows[0];
+    expect(fan).toEqual({ refund_failed_at: null, refund_last_error: null, event_cancellation_request_id: null });
+    const onlyHeld = Object.create(writes) as typeof writes;
+    onlyHeld.dueRefunds = async (nowMs, limit) => (await writes.dueRefunds(nowMs, limit)).filter((r) => r.cancellationId === heldId);
+    pays.length = 0;
+    await new RefundAfterEntry({ writes: onlyHeld, payments, entries: ticketCancels!, claims: writes, nowMs: () => NOW + MINUTE }).run();
+    expect(pays).toEqual([{ cancellationId: heldId, orderId: held.orderId, amount: 3_334, reason: 'USER' }]);
+    expect((await cancellationsOf([held.orderId]))[0]).toMatchObject({ id: heldId, status: 'REFUNDED' });
   });
 });
 
@@ -386,7 +403,10 @@ const gapNoticeOf = () => {
   const bodies = () => sent.map((r) => JSON.parse(String(r.body)) as { eventKey: string; kind: string; sourceId: string; category: string; createdAt: string });
   return { notice, sent, bodies };
 };
-const gapService = (gap: ReturnType<typeof gapNoticeOf>, over: { canceller?: ConstructorParameters<typeof EventRefundService>[0]['canceller'] } = {}) =>
+const gapService = (
+  gap: ReturnType<typeof gapNoticeOf>,
+  over: { canceller?: ConstructorParameters<typeof EventRefundService>[0]['canceller']; csOutbox?: ConstructorParameters<typeof EventRefundService>[0]['csOutbox'] } = {},
+) =>
   new EventRefundService({
     store: new DrizzleEventRefundStore(purchaseDb, clock),
     targets: new DrizzleEventRefundTargets(purchaseDb, configs),
@@ -406,6 +426,7 @@ const gapService = (gap: ReturnType<typeof gapNoticeOf>, over: { canceller?: Con
     gaps: new DrizzleDeductionGapCancellations(purchaseDb),
     gapNotice: gap.notice,
     configs,
+    ...(over.csOutbox ? { csOutbox: over.csOutbox } : {}),
     nowMs: () => NOW,
     deadlineMs: () => NOW + 30_000,
     concurrency: 2,
@@ -504,6 +525,57 @@ describe('R-T38 확정 때 미룸 풀기와 남는 공제 차액 [PostgreSQL·�
     await gapService(again).start({ eventId, requestId, fault: 'FORCE_MAJEURE', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
     expect(again.sent).toEqual([]);
     expect(pays).toHaveLength(1);
+  });
+
+  // 검증 2 M-C2b(시험 담당 l3w8-420-surv-test, 2026-11-17): 운영 조립(다시 열기 포트 DrizzleCsCaseOutbox가 꽂힘)은 확정 때 차액 건을 바로 열지 않는다(§3.1 ⑥).
+  // 그래서 확정 트랜잭션의 차액 대상 표시가 빠지면 건이 영영 열리지 않는다. 표시(deduction_gap_at·deduction_gap_request_id) → 틱 끝 열기(deduction_gap_opened_at)를 잇는다
+  test('R-T38 ④ 운영 조립(다시 열기 포트)에서 확정 커밋에 공제하고 나간 USER 취소 둘의 deduction_gap_at·deduction_gap_request_id가 써지고 ops 호출 0이며, runDue 틱 끝에 둘을 한 번씩 열어 deduction_gap_opened_at을 쓴다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    await seat(eventId);
+    const after = await doneCancel(await seat(eventId), { reason: 'USER', deduction: 29_999, status: 'REFUNDED', createdAtMs: NOW - 10 * MINUTE });
+    const onTheDot = await doneCancel(await seat(eventId), { reason: 'USER', deduction: 29_999, status: 'REFUND_PENDING', createdAtMs: ENTRY_OPENS });
+    const before = await doneCancel(await seat(eventId), { reason: 'USER', deduction: 3_333, status: 'REFUNDED', createdAtMs: ENTRY_OPENS - 1 });
+    const mine = new Set([after, onTheDot, before]);
+    // 파일이 DB를 나눠 쓰므로 다시 열기 목록은 이 회차의 취소로만 거른다(연 시각 쓰기는 실제 어댑터)
+    const real = new DrizzleCsCaseOutbox(purchaseDb);
+    const csOutbox = {
+      pendingItemFailures: async () => [],
+      markItemFailureOpened: async () => undefined,
+      pendingGaps: async (limit: number) => (await real.pendingGaps(limit)).filter((r) => mine.has(r.cancellationId)),
+      markGapOpened: (id: string, nowMs: number) => real.markGapOpened(id, nowMs),
+    };
+    const gapRowsOf = async () =>
+      (
+        await purchaseDb.pool.query<{ id: string; deduction_gap_at: Date | null; deduction_gap_request_id: string | null; deduction_gap_opened_at: Date | null }>(
+          'select id, deduction_gap_at, deduction_gap_request_id, deduction_gap_opened_at from order_cancellation where id = any($1::uuid[]) order by id',
+          [[...mine]],
+        )
+      ).rows;
+    pays.length = 0;
+    notices.length = 0;
+    const gap = gapNoticeOf();
+    const svc = gapService(gap, { csOutbox });
+    await svc.start({ eventId, requestId, fault: 'FORCE_MAJEURE', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    // 확정: 표시만 쓰고 ops-svc는 부르지 않는다(입장 시작 1ms 앞 취소는 대상이 아니다)
+    expect(gap.sent).toEqual([]);
+    const marked = await gapRowsOf();
+    for (const r of marked.filter((x) => x.id !== before)) {
+      expect(r.deduction_gap_at, r.id).not.toBeNull();
+      expect(r.deduction_gap_request_id, r.id).toBe(requestId);
+      expect(r.deduction_gap_opened_at, r.id).toBeNull();
+    }
+    expect(marked.find((x) => x.id === before)).toMatchObject({ deduction_gap_at: null, deduction_gap_request_id: null });
+    // 틱 끝: 둘을 행마다 한 번씩 열고 2xx(202)를 받은 행에 연 시각을 쓴다
+    await svc.runDue();
+    expect(gap.bodies().map((b) => b.sourceId).sort()).toEqual([after, onTheDot].sort());
+    for (const b of gap.bodies()) expect(b).toEqual({ eventKey: gapKey(b.sourceId), kind: 'REFUND_FAILED', sourceId: b.sourceId, category: 'DEDUCTION_GAP', createdAt: new Date(NOW).toISOString() });
+    for (const r of (await gapRowsOf()).filter((x) => x.id !== before)) expect(r.deduction_gap_opened_at, r.id).not.toBeNull();
+    // 다음 틱에는 다시 열지 않고, 결제사 추가 호출은 0이다(대상 표 한 장만)
+    await svc.runDue();
+    expect(gap.sent).toHaveLength(2);
+    expect(pays).toHaveLength(1);
+    expect(notices).toEqual([]);
   });
 });
 
@@ -798,6 +870,41 @@ describe('BAT-420 웨이브 끝 리뷰 K1·K2 겹침 막기 [PostgreSQL·실제 
     expect(orphan.rows[0].n).toBe(0);
   });
 
+  // 검증 2 M-K1d-after(시험 담당 l3w8-420-surv-test, 2026-11-17): 위 시험은 항목 쓰기를 실패시켜 '행 표시가 먼저 커밋되는 꼴'만 본다.
+  // 거꿀로 행 실패 표시 쓰기를 실패시켜, 항목 끝내기가 따로 먼저 커밋되지 않는지(항목 FAILED·행 표시 없음인 주인 없는 행이 남지 않는지) 본다(§5 '주인' 같은 트랜잭션)
+  test('GAT-110 K1 행 실패 표시(refund_failed_at) 쓰기를 실패시키면 항목 끝내기도 커밋되지 않아 항목은 FAILED가 아니고(PENDING·UNKNOWN), 다음 틱에 둘이 같은 커밋으로 써진다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seat(eventId);
+    const cancellationId = eventRefundCancellationId(requestId, s.ticketId);
+    pays.length = 0;
+    await purchaseDb.pool.query(
+      `create or replace function k1_row_fail() returns trigger language plpgsql as $$ begin raise exception 'injected k1 row'; end $$;
+       create trigger k1_row_fail before update on order_cancellation for each row when (new.id = '${cancellationId}' and new.refund_failed_at is not null) execute function k1_row_fail();`,
+    );
+    payOutcome = 'REJECTED';
+    try {
+      await wave(NOW).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' }).catch(() => undefined);
+      // 장애 주입이 끼어들었는지 먼저: 결제사는 한 번 불렸고 거절됐다
+      expect(callsFor(cancellationId)).toBe(1);
+      const cut = await itemOf(requestId, s.ticketId);
+      expect(cut?.status).not.toBe('FAILED');
+      expect(['PENDING', 'UNKNOWN']).toContain(cut?.status);
+      expect((await rowOf(cancellationId))?.refund_failed_at ?? null).toBeNull();
+    } finally {
+      await purchaseDb.pool.query('drop trigger if exists k1_row_fail on order_cancellation; drop function if exists k1_row_fail();');
+    }
+    try {
+      await wave(NOW + DAY).runDue();
+    } finally {
+      payOutcome = 'CANCELLED';
+    }
+    expect(await itemOf(requestId, s.ticketId)).toMatchObject({ status: 'FAILED', last_error: 'REJECTED' });
+    const row = await rowOf(cancellationId);
+    expect(row?.refund_failed_at).not.toBeNull();
+    expect(row?.refund_last_error).toBe('REJECTED');
+  });
+
   test('GAT-110 K2 API 파드의 Start가 항목을 잡은 뒤 리더의 runDue가 겹쳐도(두 쪽 모두 잡기를 시도) 표마다 결제사 호출이 하나이고 거짓 실패·CS 건이 없다(동시)', async () => {
     const eventId = randomUUID();
     const requestId = randomUUID();
@@ -918,6 +1025,101 @@ describe('BAT-420 웨이브 끝 리뷰 K1·K2 겹침 막기 [PostgreSQL·실제 
     await expect(claims.finish({ requestId, ticketId: first.items[0]!.ticketId, claimToken: first.claimToken, status: 'REFUNDED', attempts: 1 })).resolves.toBe(false);
     await expect(claims.finish({ requestId, ticketId: third.items[0]!.ticketId, claimToken: third.claimToken, status: 'REFUNDED', attempts: 1 })).resolves.toBe(true);
     await expect(claims.finish({ requestId, ticketId: third.items[0]!.ticketId, claimToken: third.claimToken, status: 'FAILED', attempts: 2 })).resolves.toBe(false);
+  });
+
+  // 검증 2 X27·X28(시험 담당 l3w8-420-surv-test, 2026-11-17): §5 '잡기 표시' — API 파드의 Start 첫 묶음·Resume·Apply·CloseWindow와 리더의 runDue가 모두 같은 잡기를 거친다.
+  // 동시 시험이 Start·runDue뿐이라 Resume·Apply가 잡기를 건너뛰어도 못 잡았다. 결제사 대역(취소기)을 부를 때마다 센다(같은 항목을 두 쪽이 처리하면 둘이 된다).
+  // 리더의 runDue는 이 요청만 보게 좁힌다(파일이 DB를 나눠 쓴다)
+  const overlapRig = (requestId: string) => {
+    const calls = new Map<string, number>();
+    const attempts = new MemoryEventRefundAttemptStore();
+    const claims = new DrizzleEventRefundClaims(purchaseDb);
+    const claimTries = { api: 0, leader: 0 };
+    const counting = (side: 'api' | 'leader') => {
+      const c = Object.create(claims) as typeof claims;
+      c.claimOrders = async (...args) => (claimTries[side]++, claims.claimOrders(...args));
+      return c;
+    };
+    const record = (cancellationId: string) => calls.set(cancellationId, (calls.get(cancellationId) ?? 0) + 1);
+    const scopedStore = () => {
+      const st = new DrizzleEventRefundStore(purchaseDb, clock);
+      st.activeRequests = async () => {
+        const r = await st.find(requestId);
+        return r && ['RUNNING', 'PAUSED', 'REFUND_WINDOW'].includes(r.status) ? [r] : [];
+      };
+      st.dueWindowClosures = async () => [];
+      return st;
+    };
+    const build = (canceller: ConstructorParameters<typeof EventRefundService>[0]['canceller'], side: 'api' | 'leader', firstBatch?: number) =>
+      new EventRefundService({
+        store: scopedStore(),
+        targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+        canceller,
+        attempts,
+        claims: counting(side),
+        ...(firstBatch !== undefined ? { firstBatch } : {}),
+        nowMs: () => NOW,
+        deadlineMs: () => NOW + 30_000,
+      });
+    const leader = () => build({ cancel: async (_t, q) => (record(q.cancellationId), { status: 'REFUNDED' }) }, 'leader');
+    let overlapped = false;
+    const api = build(
+      {
+        cancel: async (_t, q) => {
+          if (!overlapped) {
+            overlapped = true;
+            await leader().runDue();
+          }
+          record(q.cancellationId);
+          return { status: 'REFUNDED' };
+        },
+      },
+      'api',
+    );
+    const idle = build({ cancel: async () => Promise.reject(new Error('이 단계에서는 부르지 않는다')) }, 'api', 0);
+    return { calls, attempts, claimTries, api, idle, overlapped: () => overlapped };
+  };
+
+  test('GAT-110 K2 Resume가 항목을 잡은 뒤 리더의 runDue가 겹쳐도(두 쪽 모두 잡기를 시도) 표마다 취소기(결제사) 호출·시도 기록이 하나이고 모두 REFUNDED다(동시)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const seats = [await seat(eventId), await seat(eventId), await seat(eventId)];
+    const rig = overlapRig(requestId);
+    // 항목만 만들고(첫 묶음 0) 멈춘 뒤 API 파드가 다시 시작한다
+    await rig.idle.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    await rig.idle.pause({ requestId, reason: '결제사 점검' });
+    rig.claimTries.api = 0;
+    await rig.api.resume({ requestId });
+    expect(rig.overlapped()).toBe(true);
+    expect(rig.claimTries.api).toBeGreaterThanOrEqual(1);
+    expect(rig.claimTries.leader).toBeGreaterThanOrEqual(1);
+    for (const s of seats) {
+      const id = eventRefundCancellationId(requestId, s.ticketId);
+      expect(rig.calls.get(id), id).toBe(1);
+      expect(await itemOf(requestId, s.ticketId), s.ticketId).toMatchObject({ status: 'REFUNDED' });
+    }
+    expect(rig.attempts.attempts.map((a) => a.ticketId).sort()).toEqual(seats.map((s) => s.ticketId).sort());
+  });
+
+  test('GAT-110 K2 연기 신청(Apply)이 그 표를 잡은 뒤 리더의 runDue가 겹쳐도 그 표의 취소기(결제사) 호출·시도 기록이 하나이고, 신청하지 않은 표는 부르지 않는다(동시)', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const applied = await seat(eventId);
+    const other = await seat(eventId);
+    const rig = overlapRig(requestId);
+    await rig.idle.start({ eventId, requestId, kind: 'POSTPONE', fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+    rig.claimTries.api = 0;
+    await rig.api.apply({ requestId, ticketId: applied.ticketId });
+    expect(rig.overlapped()).toBe(true);
+    expect(rig.claimTries.api).toBeGreaterThanOrEqual(1);
+    expect(rig.claimTries.leader).toBeGreaterThanOrEqual(1);
+    const id = eventRefundCancellationId(requestId, applied.ticketId);
+    expect(rig.calls.get(id)).toBe(1);
+    expect(rig.calls.get(eventRefundCancellationId(requestId, other.ticketId))).toBeUndefined();
+    expect([...rig.calls.values()].reduce((a, b) => a + b, 0)).toBe(1);
+    expect(await itemOf(requestId, applied.ticketId)).toMatchObject({ status: 'REFUNDED' });
+    expect(await itemOf(requestId, other.ticketId)).toMatchObject({ status: 'PENDING' });
+    expect(rig.attempts.attempts.map((a) => a.ticketId)).toEqual([applied.ticketId]);
   });
 });
 

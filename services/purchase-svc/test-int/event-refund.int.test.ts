@@ -749,4 +749,65 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
     expect(ops.state.requests.filter((r) => r.body.sourceId === fan).map((r) => r.body.category)).toEqual(['DEDUCTION_GAP']);
     expect(ops.state.requests.filter((r) => r.body.category === 'REFUND')).toEqual([]);
   }, 60_000);
+
+  // 검증 2 X24(시험 담당 l3w8-420-surv-test, 2026-11-17): §3.1 ⑥ '연 시각은 ops-svc가 2xx로 받은 뒤에만 쓴다'·'한 행이 실패해도 나머지는 열고, 실패한 행은 다음 틱에 다시 연다'.
+  // 한 요청에 실패 항목이 둘이면 연 시각(failure_case_opened_at)은 2xx를 받은 그 항목에만 써야 한다(요청 단위로 쓰면 다른 항목의 건이 열리지 않은 채 연 것이 된다)
+  test('GAT-110 N2 한 요청의 일괄 환불 실패 항목 둘 가운데 ops-svc가 하나만 202로 받으면 그 항목만 연 시각을 쓰고, 500을 받은 항목은 빈 채로 다음 틱에 그것만 다시 보낸다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const a = await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS' });
+    const b = await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS' });
+    const idA = eventRefundCancellationId(requestId, a.ticketId);
+    const idB = eventRefundCancellationId(requestId, b.ticketId);
+    // 실제 어댑터(HttpRefundFailureNotice)에 건마다 답을 고르는 HTTP 대역: A는 202, B는 처음 500
+    const sent: { sourceId: string; status: number }[] = [];
+    let rejectB = true;
+    const client = {
+      request: async (r: { body?: unknown }) => {
+        const body = JSON.parse(String(r.body)) as { sourceId: string; category: string };
+        const status = body.sourceId === idB && rejectB ? 500 : 202;
+        sent.push({ sourceId: body.sourceId, status });
+        return new Response('{}', { status });
+      },
+    };
+    const service = new EventRefundService({
+      store: new DrizzleEventRefundStore(db),
+      targets: { list: async (id) => (id === eventId ? [targetOf(a), targetOf(b)] : []) },
+      canceller: { cancel: async () => ({ status: 'FAILED', error: 'REJECTED' }) },
+      notice: new HttpRefundFailureNotice(client, 'it-token'),
+      csOutbox: scopedOutbox({ requests: new Set([requestId]), cancellations: new Set() }),
+      nowMs: () => Date.now(),
+      deadlineMs: () => Date.now() + 30_000,
+    });
+    const rowOf = async (ticketId: string) =>
+      (
+        await q<{ status: string; failure_case_at: Date | null; failure_case_opened_at: Date | null }>(
+          'select status, failure_case_at, failure_case_opened_at from event_refund_item where request_id = $1 and ticket_id = $2',
+          [requestId, ticketId],
+        )
+      ).rows[0];
+    await service.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    // 두 항목 모두 FAILED와 열 대상 표시가 남고, 처리 중에는 ops-svc를 부르지 않는다
+    for (const t of [a, b]) {
+      const row = await rowOf(t.ticketId);
+      expect(row?.status, t.ticketId).toBe('FAILED');
+      expect(row?.failure_case_at, t.ticketId).not.toBeNull();
+      expect(row?.failure_case_opened_at ?? null, t.ticketId).toBeNull();
+    }
+    expect(sent).toEqual([]);
+    // 첫 틱: 둘 다 보내고 A만 202 → A만 연 시각
+    await service.runDue();
+    expect(sent.map((x) => x.sourceId).sort()).toEqual([idA, idB].sort());
+    expect((await rowOf(a.ticketId))?.failure_case_opened_at).not.toBeNull();
+    expect((await rowOf(b.ticketId))?.failure_case_opened_at ?? null).toBeNull();
+    // 다음 틱: B만 다시 보내고 202 → B도 연 시각, 그다음 틱은 보내지 않는다
+    rejectB = false;
+    sent.length = 0;
+    await service.runDue();
+    expect(sent).toEqual([{ sourceId: idB, status: 202 }]);
+    expect((await rowOf(b.ticketId))?.failure_case_opened_at).not.toBeNull();
+    sent.length = 0;
+    await service.runDue();
+    expect(sent).toEqual([]);
+  }, 60_000);
 });

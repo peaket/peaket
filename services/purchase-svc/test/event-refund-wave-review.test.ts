@@ -794,3 +794,52 @@ describe('일괄 환불 실패 건의 열 대상 표시와 다시 열기 [BAT-42
     expect(rmetric).toEqual(['REFUND_FAILED']);
   });
 });
+
+// ---- BAT-420 검증 2에서 살아남은 M-C2b(시험 담당 l3w8-420-surv-test, 2026-11-17) ----
+// 정본: docs/features/transfer-refund.md §5 '그래도 남는 건'(차액 대상 표시는 일괄 환불 요청을 만드는 트랜잭션, CS 건은 그 뒤 일괄 환불 실행기 틱이 행마다 연다),
+// §3.1 ⑥ '처리 중에는 부르지 않는다'(다시 열기 포트가 꽂힌 운영 조립은 API 파드의 Start도 ops-svc를 부르지 않는다). 통합은 test-int/event-cancel-r-t24 R-T38 ④가 본다.
+describe('운영 조립의 확정 때 차액 대상 표시 → 틱 끝 열기 [BAT-420 검증 2 M-C2b]', () => {
+  test('R-T38 ④ 다시 열기 포트(csOutbox)를 꽂은 조립은 확정 때 찾은 차액 대상 셋을 요청을 만드는 저장(store.create)에서 그 요청 ID로 표시하고 ops 호출 0이며, 이어 runDue 틱 끝에 셋을 한 번씩 연다', async () => {
+    const store = new MemoryEventRefundStore();
+    const gapRows = [1, 2, 3].map((n) => ({ cancellationId: uuidOf(0x6000 + n), orderId: uuidOf(0x7000 + n), ticketId: uuidOf(0x8000 + n), deductionAmount: 29_999 }));
+    const byId = new Map(gapRows.map((r) => [r.cancellationId, r]));
+    const gapOpened = new Map<string, number>();
+    // 저장소가 받은 차액 표시(deductionGaps)만 다시 열기 목록으로 준다(실제 DrizzleCsCaseOutbox.pendingGaps가 deduction_gap_at으로 고르는 것과 같다)
+    const outbox: ReopenBox = {
+      pendingItemFailures: async () => [],
+      markItemFailureOpened: async () => undefined,
+      pendingGaps: async (limit) =>
+        [...store.deductionGaps.entries()]
+          .filter(([id]) => !gapOpened.has(id))
+          .slice(0, limit)
+          .map(([cancellationId, requestId]) => ({ cancellationId, orderId: byId.get(cancellationId)!.orderId, deductionAmount: byId.get(cancellationId)!.deductionAmount, requestId })),
+      markGapOpened: async (id, nowMs) => void gapOpened.set(id, nowMs),
+    };
+    const sent: GapOpen[] = [];
+    const listed: [string, number][] = [];
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [target()] },
+      canceller: { cancel: async () => ({ status: 'REFUNDED' }) },
+      gaps: { list: async (eventId, entryOpensAtMs) => (listed.push([eventId, entryOpensAtMs]), gapRows) },
+      gapNotice: { open: async (q) => void sent.push(q) },
+      configs: { config: async () => ({ saleEndsAtMs: NOW + 7 * 86_400_000, entryOpensAtMs: NOW - 3_600_000 }) },
+      csOutbox: outbox,
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    await startOf(service);
+    // 확정(start): 입장 시작 시각은 회차 판매 설정에서 읽고, 찾은 셋을 그 요청 ID로 표시한다. 처리 중에는 ops-svc를 부르지 않는다
+    expect(listed).toEqual([[EVENT, NOW - 3_600_000]]);
+    expect([...store.deductionGaps.entries()].sort()).toEqual(gapRows.map((r) => [r.cancellationId, REQUEST]).sort());
+    expect(sent).toEqual([]);
+    // 틱 끝: 셋을 행마다 한 번씩 열고 2xx(던지지 않음)를 받은 행만 연 시각을 쓴다
+    await service.runDue();
+    expect(sent.map((s) => s.cancellationId).sort()).toEqual(gapRows.map((r) => r.cancellationId).sort());
+    for (const r of gapRows) expect(sent.find((s) => s.cancellationId === r.cancellationId)).toEqual({ cancellationId: r.cancellationId, orderId: r.orderId, deductionAmount: 29_999, requestId: REQUEST, nowMs: NOW });
+    expect([...gapOpened.values()]).toEqual([NOW, NOW, NOW]);
+    // 다음 틱에는 다시 열지 않는다(차액 건은 취소마다 한 번)
+    await service.runDue();
+    expect(sent).toHaveLength(3);
+  });
+});

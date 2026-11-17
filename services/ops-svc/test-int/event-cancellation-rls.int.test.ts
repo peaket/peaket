@@ -136,4 +136,30 @@ describe('0015 파트너 행 보안 [BAT-420 웨이브 끝 리뷰 S2]', () => {
     expect(await priv('audit_chain', 'INSERT')).toBe(false);
     expect(await priv('cs_case', 'INSERT')).toBe(false);
   });
+
+  // 검증 2 X25(시험 담당 l3w8-420-surv-test, 2026-11-17): 정의자 함수는 행 보안을 지나치므로 함수 안에서 테넌트를 다시 본다(authz-matrix §5.3 'ops-svc 구현').
+  // 함수를 자기 테넌트로만 부르던 시험이 놓친 것: 다른 테넌트가 남의 요청 ID를 넘기면 감사·CS 건을 남기지 못하고 42501이다
+  test('GAT-110 S2 [ASVS v5.0.0-8.4.1] 테넌트 B가 A의 회차 취소 요청 ID로 정의자 함수 ops_append_audit·ops_open_cs_case를 부르면 42501이고 감사·CS 건이 남지 않으며, A는 같은 ID로 부를 수 있다(허용·거부)', async () => {
+    const requestId = randomUUID();
+    await admin.query(insertSql, [requestId, randomUUID(), randomUUID(), 'PARTNER', TENANT_A]);
+    const salt = Buffer.alloc(32, 7);
+    const appendAudit = () => admin.query("select ops_append_audit('EVENT_CANCELLATION_REQUESTED', $1::uuid, $2, $3, now())", [requestId, JSON.stringify({ requestId }), salt]);
+    const openCase = () => admin.query('select ops_open_cs_case($1::uuid, $2::uuid, now())', [randomUUID(), requestId]);
+    const auditRows = async () => Number((await admin.query<{ n: string }>('select count(*) as n from audit_chain where record_id = $1', [requestId])).rows[0]!.n);
+    const caseRows = async () => Number((await admin.query<{ n: string }>("select count(*) as n from cs_case where kind = 'JUDGEMENT_PENDING' and target_ref = $1", [requestId])).rows[0]!.n);
+    // 거부: 테넌트 B(남), 테넌트 값 없음
+    await expect(asRole('ops_partner', TENANT_B, appendAudit)).rejects.toMatchObject({ code: '42501' });
+    await expect(asRole('ops_partner', TENANT_B, openCase)).rejects.toMatchObject({ code: '42501' });
+    await expect(asRole('ops_partner', null, appendAudit)).rejects.toMatchObject({ code: '42501' });
+    expect(await auditRows()).toBe(0);
+    expect(await caseRows()).toBe(0);
+    // 허용: 테넌트 A(자기 요청)는 같은 트랜잭션 안에서 감사 한 줄·CS 건 하나를 남긴다(asRole이 되돌리므로 밖에는 남지 않는다)
+    const own = await asRole('ops_partner', TENANT_A, async () => {
+      await appendAudit();
+      await openCase();
+      await admin.query('reset role');
+      return { audit: await auditRows(), cases: await caseRows() };
+    });
+    expect(own).toEqual({ audit: 1, cases: 1 });
+  });
 });
