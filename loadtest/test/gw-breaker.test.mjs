@@ -69,13 +69,13 @@ function clustersText(cluster, l) {
   return `${rows.join('\n')}\n`;
 }
 /** streamMetrics 결과 꼴(시험 이의 (다)) */
-function M({ sent = 1000, n503 = 0, n429 = 0, other = 0, p99 = n503 ? 1.2 : null, overFast = 0, raMissing = 0, raNonnum = 0, bad = 0, ra429Missing = 0, n2xx } = {}) {
+function M({ sent = 1000, n503 = 0, n429 = 0, other = 0, p99 = n503 ? 1.2 : null, overFast = 0, raMissing = 0, raNonnum = 0, bad = 0, ra429Missing = 0, ra429Nonnum = 0, n2xx } = {}) {
   return {
     sent,
     status: { '2xx': n2xx ?? sent - n503 - n429 - other, 503: n503, 429: n429, other },
     latency: { '2xx': { p50: 5, p99: 9, max: 20 }, 503: { p50: n503 ? 0.8 : null, p99, max: n503 ? 4 : null }, 429: { p50: null, p99: null, max: null } },
     overFast,
-    retryAfter: { 503: { num: n503 - raMissing - raNonnum, missing: raMissing, nonnum: raNonnum }, 429: { num: n429 - ra429Missing, missing: ra429Missing, nonnum: 0 } },
+    retryAfter: { 503: { num: n503 - raMissing - raNonnum, missing: raMissing, nonnum: raNonnum }, 429: { num: n429 - ra429Missing - ra429Nonnum, missing: ra429Missing, nonnum: ra429Nonnum } },
     problem: { 503: { ok: n503 - bad, bad }, 429: { ok: n429, bad: 0 } },
   };
 }
@@ -837,6 +837,19 @@ test('V-T43 ①② R2 2xx·503 밖의 응답이 있으면 무효', async () => {
   const ok = fakeDeps();
   await runGw(parseGwArgs(SWEEP_ARGS), ok.deps);
   assert.equal(ok.saved['sweep.json'].steps[0].verdict, 'pass');
+});
+
+test('SR-T13 ② M36 넘은 요청의 429 가운데 하나라도 Retry-After가 숫자가 아니면 실패', () => {
+  const mainS = 30;
+  const cap = SEARCH_PER_IP * (mainS + 1);
+  const one = (extra) => judgeIpLimit({ case: 'single', mainS, replicas: 1, streams: { one: M({ sent: 4500, n2xx: cap, n429: 4500 - cap, ...extra }) }, generator: GEN });
+  assert.equal(one({}).verdict, 'pass', '대조: 429 모두 숫자');
+  assert.equal(one({ ra429Nonnum: 1 }).verdict, 'fail', '429 하나의 Retry-After가 숫자 아님(single)');
+  assert.equal(
+    judgeIpLimit({ case: 'mixed', mainS, replicas: 1, streams: { pool: M({ sent: 30000 }), one: M({ sent: 4500, n2xx: cap, n429: 4500 - cap, ra429Nonnum: 1 }) }, generator: GEN }).verdict,
+    'fail',
+    '429 하나의 Retry-After가 숫자 아님(mixed)',
+  );
 });
 
 test('SR-T13 ② R2 2xx·429 밖의 응답이 있으면 무효', () => {
