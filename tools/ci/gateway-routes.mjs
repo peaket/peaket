@@ -39,21 +39,47 @@ export const AUTH_KINDS = ['public', 'optional', 'token', 'token-buy'];
 /** 게이트웨이가 확인하는 액세스 토큰 방식(openapi securitySchemes 이름) */
 const ACCESS_SCHEMES = ['fanCookie', 'partnerCookie', 'opsCookie', 'staffToken'];
 
+/** 아는 스코프(docs/infra.md §4.1 '인증 종류 대조' ④, docs/security/authz-matrix.md §5.1 '게이트웨이가 요구하는 스코프'). 대소문자·앞뒤 공백이 다르면 다른 값이다 */
+export const KNOWN_SCOPES = ['ticket:buy'];
+const SCOPES_KEY = 'x-peaket-scopes';
+
+/**
+ * x-peaket-scopes 칸의 값이 이상한 까닭(④, W9-fix3 RV-07). 칸이 없으면 undefined. 값을 조용히 버리면 구매 경로가 권한 확인 없이 열릴 수 있어 멈춘다
+ * @param {Record<string, any>} op @returns {string | undefined}
+ */
+function scopesProblemOf(op) {
+  if (!op || typeof op !== 'object' || !Object.prototype.hasOwnProperty.call(op, SCOPES_KEY)) return undefined;
+  const v = op[SCOPES_KEY];
+  const bad = (why) => `${SCOPES_KEY} 값 ${String(JSON.stringify(v))}이 이상하다: ${why}(docs/infra.md §4.1 '인증 종류 대조' ④)`;
+  if (!Array.isArray(v)) return bad('배열이 아니다');
+  if (!v.length) return bad('빈 배열이다');
+  for (const x of v) if (typeof x !== 'string') return bad(`문자열이 아닌 원소 ${String(JSON.stringify(x))}가 있다`);
+  for (const x of v) if (!KNOWN_SCOPES.includes(x)) return bad(`모르는 스코프 ${JSON.stringify(x)}다(아는 값 ${KNOWN_SCOPES.join('·')})`);
+  if (new Set(v).size !== v.length) return bad('같은 값이 두 번 있다');
+  return undefined;
+}
+
 /**
  * 작업의 인증 종류(docs/infra.md §4.1 '인증 종류 대조'): security의 갈래마다 액세스 토큰 방식이 있는지와 x-peaket-scopes.
- * 구매 경로(모든 갈래에 admissionToken)인데 x-peaket-scopes에 ticket:buy가 없으면 문제다(겹친 가드)
+ * 구매 경로(모든 갈래에 admissionToken)인데 x-peaket-scopes에 ticket:buy가 없으면 문제다(겹친 가드).
+ * x-peaket-scopes 칸이 있는데 값이 이상하거나(④), ticket:buy인데 ①의 token이 아니면(어느 한 갈래라도 액세스 토큰이 없으면) 문제다
  * @param {Record<string, any>} op @param {Record<string, any>} openapi
  * @returns {{ kind?: string, problem?: string }}
  */
 export function authKindOf(op, openapi) {
   const sec = op?.security ?? openapi?.security ?? [];
-  const scopes = op?.['x-peaket-scopes'] ?? [];
-  const buy = Array.isArray(scopes) && scopes.includes('ticket:buy');
+  const scopesProblem = scopesProblemOf(op);
+  if (scopesProblem) return { problem: scopesProblem };
+  const scopes = op?.[SCOPES_KEY] ?? [];
+  const buy = scopes.includes('ticket:buy');
   const purchase = sec.length > 0 && sec.every((alt) => alt && 'admissionToken' in alt);
   if (purchase && !buy) return { problem: '구매 경로(모든 갈래에 admissionToken)인데 x-peaket-scopes에 ticket:buy가 없다' };
-  if (!sec.length) return { kind: 'public' };
   const has = sec.map((alt) => ACCESS_SCHEMES.some((a) => alt && a in alt));
-  if (has.every(Boolean)) return { kind: buy ? 'token-buy' : 'token' };
+  const token = sec.length > 0 && has.every(Boolean);
+  if (buy && !token)
+    return { problem: `${SCOPES_KEY} 값 ${JSON.stringify(scopes)}에 ticket:buy가 있는데 액세스 토큰(${ACCESS_SCHEMES.join('·')}) 없는 갈래가 있어 token이 아니다(docs/infra.md §4.1 '인증 종류 대조' ④)` };
+  if (!sec.length) return { kind: 'public' };
+  if (token) return { kind: buy ? 'token-buy' : 'token' };
   if (!has.some(Boolean)) return { kind: 'public' };
   return { kind: 'optional' };
 }
