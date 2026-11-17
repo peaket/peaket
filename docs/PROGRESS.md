@@ -126,7 +126,6 @@
 - PRF-143: 판매 뒤 판매 제외석이 된 좌석은 좌석맵 판의 resolve가 주지 않아 다시 만들기가 넘긴다(byIndex로 찾는 길은 판매 행에 좌석 색인이 없어 없다).
 - PRF-150 ①: 진행성 검사(seat_live 17초 등)는 주 1회 전수 검사에서만 돌아, 명세를 고친 PR이 진행성을 깨도 다음 전수 검사까지 드러나지 않는다(짧은 진행성 검사는 PR 때도 TLC로 돌리는 방안, tools/spec-check/spec-check.mjs).
 - PRF-150 ①: 진행성 ②(접수한 결제는 판매나 실패로 끝난다)를 깨는 반례 변형이 없다(지금 변형은 ①만 살아 있음을 보인다). 시도 3개짜리 진행성 모듈은 큰 러너 묶음 후보다.
-- PRF-150 ①: purchase-svc 통합 시험 16파일이 CI에서 처음 돈다(첫 실행 결과를 보고, 병렬 Kafka 파일의 빈 포트 고르기 틈을 본다, test-int/kafka.ts).
 - PRF-151: 재생 기록 12개가 모두 loseAll·rebuild를 relay보다 먼저 해, 원장 홀드·판매 좌석을 되살리는 다시 만들기와 K1~K3를 재생이 견주지 않는다('다시 만들기 앞에 relay가 있음' 목격 조건으로 기록을 더 낸다, spec-check traces).
 - PRF-151: 무작위 경합에서 같은 좌석·같은 한도를 두고 겹친 판매 예약이 40번에 0~3번이라 단언하지 않는다(집중 시험이 맡는다). 대기열 하네스와 patient·DUMP/RESTORE·#drive·decode가 겹친다(공용 시험 도우미 후보).
 - FND-160: CI에서 platform `test-int/keyed-consumer.int.test.ts`의 ST_T18 재조정 시험(처리 중에 소비자를 더 띄움)이 한 번 흔들렸다(두 번째 소비자가 받은 것 0, 2026-11-05 PR #5 첫 실행, 실패한 잡만 다시 돌려 통과).
@@ -142,13 +141,12 @@
 - PRF-162: 결제 접수 트랜잭션은 주문 행을 한 트랜잭션에서 세 번 고치고 왕복이 약 21번이다(주문·시도 읽기를 한 질의로, seat_gen·작업 행을 한 문장으로 줄일 수 있다). 측정 뒤 정한다.
 - PRF-162: 커밋된 멱등 기록 읽기(findCommitted)가 주문 생성·결제 접수에 같은 코드로 두 번 있다(공용 함수로 뺄 만하다).
 - PRF-165: 모든 판매 예약이 같은 seat_rebuild 회차 행을 FOR SHARE로 잡는다. 인기 회차에서 초당 수백 건이면 행 헤더 쓰기·MultiXact가 쌓일 수 있다(측정 뒤, 대안은 트랜잭션 단위 권고 잠금).
-- PRF-165: 승인 명령이 정해진 거절로 1시간 미뤄진 작업은 결과 당기기(PRF-171)가 맞출 때까지 RESERVED로 남는다. PRF-170에서 그 작업 행과 함께 정리한다.
+- PRF-165: 승인 명령이 정해진 거절로 1시간 미뤄진 작업은 결과 당기기(PRF-171)가 맞출 때까지 RESERVED로 남는다. PRF-170에서 그 작업 행과 함께 정리한다. 넘긴 PRF-170은 끝났으나 정리한 근거를 찾지 못했다(2026-11-17 확인, 다시 본다).
 - PRF-165: 실행기가 요청 맥락을 node:async_hooks AsyncResource로 떼어 낸다. 플랫폼 도우미(storage.exit 같은 것)로 두고 추적 연결을 잇는 편이 낫다.
 - PRF-165: 0006의 CHECK 추가가 NOT VALID 없이 표 전체를 훑는다(지금은 표가 작다).
 - PRF-163: 닫힌 주문 과금 보류의 대상은 FAILED·EXPIRED·COMPENSATED다. REFUNDED 주문에 새 APPROVED가 오면 IMPOSSIBLE(SEV2)인데, 환불 뒤 다시 과금이라 SEV1로 올릴지 취소·환불 단계에서 정한다.
 - PRF-163: 커밋 뒤 구매 세션 일이 주문이 아니라 구매 세션 단위라, 한 세션에서 앞 주문(UNKNOWN)의 결과가 뒤 주문의 결제 중에 오면 세션을 끝내거나 Paying을 풀 수 있다(추측, 화면이 UNKNOWN 중 새 주문을 막는지 확인).
 - PRF-163: 보류 로그를 같은 사건·까닭 60초에 한 번으로 줄였지만 처리기가 몇 번째 시도인지 받지 못한다(플랫폼 KeyedHandler에 시도 수를 넘기면 마지막 한 번만 남길 수 있다).
-- PRF-166: 결제 결과 처리기가 아직 main.ts에 조립되지 않아 실제 앱의 곧바로 깨우기는 Saga에서만 온다(PRF-164가 처리기를 붙일 때 onOrderChanged도 넘긴다). 그 전에는 200ms 묶음 조회가 깨운다.
 - PRF-166: 파드가 몰려 이벤트 루프 지연이 2초를 넘으면 25초 기다림 + 다시 읽기가 게이트웨이 27초를 넘을 수 있다(추측, P-T44 ④ 기준과 어긋남). 측정 뒤 여유(지금 1초)를 정한다.
 - PRF-166: 경로별 남은 시간 상한(@RouteDeadline)은 운영이 서비스 상한을 낮춰도 내려가지 않는다(docs/api/guidelines.md §5). 비상 때 낮추려면 장식자 값을 고쳐 배포해야 한다.
 - PRF-167: 묶기 Lua와 `pinned_at` 기록(`recordPinned`) 사이 DB 왕복 하나 동안 전체 유실·다시 만들기가 끼면 그 주문은 원장만 보고 되살려 K1이 그만큼 남는다(결과는 과금 없는 실패, application/order-saga.ts).
@@ -183,19 +181,18 @@
 - PRF-182: 시험 빈 곳: 실제 코덱, 조회 중 SIGKILL, 호출이 간격보다 긴 겹침, 대량 적체. 잡기가 빈자리만큼(파드당 초당 16건 상한)이라 결제사가 빠를 때 끝나는 대로 채우면 더 빠르다. SKIP LOCKED는 SQL 글자 검사로만 잡힌다(동작 시험은 0건으로 끝나 빠뜨리지 못한다).
 - PRF-183: `PEAKET_PAYMENT_POD_COUNT`는 파드 수를 고정값으로 나눈다. 정본 값이 2(평시)·6(온세일 목표)·12(DB 예산 최대)로 갈려 12 [가정]로 뒀고, 6개만 띄우면 토큰 합이 초당 150건이라 300 TPS 피크에 못 미친다. wbs 2.12.1·4.6.1에서 값을 정하거나 실제 파드 수를 동적으로 읽는다.
 - PRF-183: `pg_quota_utilization_ratio`(observability.md)는 코드에 없다(어느 단계 몫인지 확인). 파드 합산 상한은 측정 창에서 잰다. 낮춘 상한의 회복 규칙은 PRF-200이다.
-- PRF-184: 실제 토스 응답 모양·API 버전 고정·`DEPOSIT_CALLBACK`의 `paymentKey`·웹훅 전송 ID의 뜻(공식 문서는 사건 ID를 쓰라고 한다)은 HOT-145·HOT-150에서 원문과 대조한다. `customerKey`를 누가 저장할지는 호출자가 생기는 단계에서 정한다.
-- HOT-140: 실제 포트원 동작은 HOT-145에서 대조한다: 카드 거절·기한 만료의 실제 응답, READY가 이어지는 건의 종결, 틀린 상점의 답, 웹훅 시크릿 형식과 재전송 `webhook-id`, 카드 거절이 502 → UNKNOWN → PG_ERROR로 집계되는 분석 범주.
-- HOT-145: 실제 결제사로 확인 못 한 것: 토스 가리는 규칙(바뀌면 같은 카드의 값이 갈린다, P-T50 ⑦), 포트원 `issuer` 실제 값과 마스킹 규칙, 웹훅 머리 이름·재전송 ID, 카드 거절의 실제 응답, READY 지속. 시험 빈 곳: 입금 대기 뒤 승인 경로의 연결값, `ALREADY_APPROVED`의 저장, `main.ts` 조립(글자 검사뿐).
+- PRF-184: 실제 토스 응답 모양·API 버전 고정·`DEPOSIT_CALLBACK`의 `paymentKey`·웹훅 전송 ID의 뜻(공식 문서는 사건 ID를 쓰라고 한다)은 HOT-145·HOT-150에서 원문과 대조한다. `customerKey`를 누가 저장할지는 호출자가 생기는 단계에서 정한다. 넘긴 HOT-145·HOT-150은 끝났으나 실제 결제사 계정이 없어 대조하지 못했다(2026-11-17 확인, 계정이 생기면 본다).
+- HOT-140: 실제 포트원 동작은 HOT-145에서 대조한다: 카드 거절·기한 만료의 실제 응답, READY가 이어지는 건의 종결, 틀린 상점의 답, 웹훅 시크릿 형식과 재전송 `webhook-id`, 카드 거절이 502 → UNKNOWN → PG_ERROR로 집계되는 분석 범주. 넘긴 HOT-145는 끝났으나 실제 결제사 계정이 없어 대조하지 못했다(2026-11-17 확인, 계정이 생기면 본다).
+- HOT-145: 실제 결제사로 확인 못 한 것: 토스 가리는 규칙(바뀌면 같은 카드의 값이 갈린다, P-T50 ⑦), 포트원 `issuer` 실제 값과 마스킹 규칙, 웹훅 머리 이름·재전송 ID, 카드 거절의 실제 응답, READY 지속. 시험 빈 곳: 입금 대기 뒤 승인 경로의 연결값, `ALREADY_APPROVED`의 저장, `main.ts` 조립(글자 검사뿐). 실제 결제사 대조는 계정이 생기면 보고, 시험 빈 곳은 아직 남았다(2026-11-17 확인).
 - HOT-150: `deleteInBatches`의 복제 지연·CPU 멈춤은 재는 부품이 플랫폼에 없어 자리만 있다(운영에서는 아직 안 멈춘다). 시험 빈 곳: 풀 고갈의 429 → 503, `main.ts` 웹훅 조립과 종료 중 웹훅, 운영 구성(`allowSimulator` 거짓, 실제 토스 어댑터)의 통합 경로, 정비 DB 역할의 DELETE 권한. 토스 전송 ID는 공식 문서가 형식 검사를 말리지만 글자·길이만 묶었다(길이가 늘면 `invalid` 경보, 결제는 정기 조회로 확정).
 - HOT-151: 은행 코드를 이름으로 맞추지 않아 화면에 코드가 그대로 나온다(포트원은 열거값이라 모양도 다르다). 전 구간(HTTP·gRPC·화면) 시험이 없고 시뮬레이터 입금은 DONE과 통보가 동시라 통보 뒤 지연을 실물처럼 만들지 못한다. 토스 `dueDate`의 시간대는 공식 문서에 없어 KST [가정]이다.
 - HOT-152: 조회가 입금 대기라고 답한 뒤 커밋 전에 재입금 통보가 오면 `STATE_IGNORED`로 버려져 다음 조회가 새 기한까지 밀린다(창은 매우 좁다). 포트원 입금 오류 신호(`Transaction.VirtualAccountIssued`로 추정)와 발급만 된 가상계좌의 일반 취소는 문서로 확인하지 못했다. 티켓 서비스가 대역이라 VOIDED·키 폐기는 HOT-160에서 잇는다. `specs/payment.qnt`에 T21·입금 모델이 없다(PRF-210).
-- HOT-152: purchase-svc 0013 마이그레이션의 `when`이 앞 값 + 60초로 미래 시각(2026-11-10 02:01 KST)이라 그 전에 만드는 다음 마이그레이션은 손으로 올려야 한다. 통합 전체를 돌리면 Valkey 100ms 마감·메모리 부족 시험이 가끔 실패한다(한 파일씩은 통과).
 - HOT-153: 온세일 일정 부품이 없어 운영에서는 대사가 꺼져 있다(그 부품이 생길 때 켠다). 릴레이 배포에 결제사 설정 환경 값이 없으면 그 결제사는 대사를 건너뛴다(배포 값이 생길 때 넣는다). 입금 확정 뒤 해시 보관 90일은 [가정]이다. 실제 포트원 거래 목록 모양은 확인하지 못했다. 전액 취소 닫기와 두 리더 겹침은 시험하지만 자정 경계의 실제 결제사 지연은 시험하지 못한다.
 - PRF-190: 시험 빈 곳: 파드 둘 사이의 전환 전파, `hot` 풀 프로필(통합 시험은 `general`), 실제 SDK의 복귀 쿼리와 기한 전달, 자정 근처 KST 경계. 재입금 불가 건은 재입금 안내 뒤에 실패 안내가 바로 이어진다(알림 단계에서 합친다). `pg_switch` 주기 읽기와 새 파드 준비 조건은 OPS-310이다.
 - PRF-191: 홀드가 풀린 뒤에도 시도를 만든다(정본대로, 만료 조건 ③이 주문을 40분 더 잡고 카드 인증 뒤 RESERVE에서 실패한다. 홀드 없음과 장애를 구분해 409로 답할지 정한다). 행동 신호 전송이 기동 때 연결 실패면 파드 수명 내내 버려질 수 있다. 텔레메트리 클러스터 주소 분리는 BAS-030이다. 실제 purchase↔payment 왕복 시험이 없다(가짜 gRPC 서버). 재생은 저장 응답이 아니라 `pinned_pg`로 값을 다시 만든다(guidelines §4에 예외로 적음).
 - PRF-192: 이그레스는 `enabled`가 환경 값이라 아직 어디서도 켜지지 않았고 공인 대역 전체다(호스트 단위는 앱과 wbs 0.4.2). 켤 때 Pod Identity 에이전트·앰비언트 메시·API 서버(릴레이의 Lease) 허용을 환경 값으로 넣어야 한다. queue-svc 엣지 `entry-viewer-request.js:151`의 `dependency-unavailable` 제목이 오류 목록과 다르다. 실제 차단을 보는 시험(V-T34)에 payment-svc가 없다.
 - PRF-200: 서킷 값(창 10초, 20건·50%, 5초)은 결제사 전용 값이 정본에 없어 공용 기본값이다. 시험 빈 곳: 진짜 차단기로 시험 호출이 멈추는 경우, 두 실행기가 함께 도는 반 열림, 표시 뒤 `reschedule` 실패.
-- PRF-201: 시험 빈 곳: 통합 시험이 일반 풀이라 회차 200개·핫패스 풀 대기를 보지 못한다. 파드 사이 값 불일치와 실제 홀드 멈춤·10초 되돌림은 HOT-070에서 검증한다. HOT-070 전에는 홀드가 실제로 멈추지 않는데 503이 `holdRemainingSeconds`를 싣는다(HOT-070 전 운영 배포를 막는다).
+- PRF-201: 시험 빈 곳: 통합 시험이 일반 풀이라 회차 200개·핫패스 풀 대기를 보지 못한다(503의 남은 시간 문제는 HOT-070이 끝나 풀렸다, 2026-11-17 확인).
 - PRF-202: 로컬 관측 스택에 kube-state-metrics가 없어 `kube_pod_status_ready`를 잇는 PromQL을 가짜 응답으로만 시험했다. 실제 환경에 그 지표가 없으면 입력 없음이 되어 자동으로 다시 열리지 않는다(`deploy/local/observability.yaml`, 실제 PromQL을 한 번 돌려 본다).
 - PRF-202: Prometheus 주소는 저장소 밖 환경 값 파일에 넣어야 한다(local·ci 밖에서 없으면 payment-svc가 시작을 실패한다). NetworkPolicy의 API 서버·Prometheus 나감도 환경 값 몫이라 렌더 시험은 값 파일의 주석까지만 본다(배포 검사가 필요하다).
 - PRF-202: Lease 실패가 로그로 드러나지 않는다(`packages/platform/src/lease.ts`가 실패를 삼키고, 리더 아닌 파드와 구분되지 않는다). 판정자가 없는 상태는 `payment_entry_pause_judge_leader` 합이 0인 것으로만 보인다.
@@ -234,11 +231,9 @@
 - W8-L1-roles-implfirst(R-662, RV-02): ⑤의 시험 파일 정의 `isTestPath`가 넓어 폴더 마디 `test`·`e2e` 아래면 `deploy/charts/…/test/values-prod.yaml`·`services/a/src/test/helper.ts`도 시험 파일로 본다. 정방향 시험 쪽 커밋과 시험만 묶음이 배포·제품 트리 아래 시험 폴더의 시험 이름 아닌 파일을 바꿀 수 있다. `deploy/`·`infra/`·`.github/` 아래를 뺄지 정한다(tools/ci/roles-check.mjs).
 - W8-L1-roles-implfirst(R-662): 다른 묶음 리뷰의 지적을 받아 이 묶음에서 고치는 리뷰 반영 커밋을 나타낼 꼬리말이 없다(BAT-060은 감독 예외로 넘긴 사례). 지적이 온 묶음을 밝히는 `Finding-From: <묶음 ID>` 꼬리말을 둘지와 roles-check가 그것으로 무엇을 볼지 정한다(tools/ci/roles-check.mjs, docs/architecture.md §8.6).
 - W8-L1-roles-implfirst(R-662): 정방향 묶음 계획 파일의 '시험 결과' 절(구현 위에서 시험이 모두 통과했는지, ADR-0281 결정 2)을 `[계획 파일]` 필수 절로 할지 정한다. 지금은 사람이 본다(계획 파일 1의 6과 6 '기계로 보지 않는 것', docs/review/plans/W8-L1-roles-implfirst.md, tools/ci/roles-check.mjs).
-- BAT-055(R-665, RV-06): partner-api CORS의 노출 머리에 `Retry-After`, 사전 요청 허용 머리에 `X-Requested-With`가 없고 scanner-api 노출 머리에 `WWW-Authenticate`가 없다는 첫 리뷰 지적은 웨이브 끝 W7-COR-01·W7-WIR-04 고침(openapi에서 라우트마다 견주는 정적 시험)으로 대부분 덮였다. 다섯 호스트의 목록이 정본(guidelines §9)과 같은지 BAT-060 생성기에서 다시 본다(deploy/gateways/gw-partner.yaml, gw-scanner.yaml).
-- BAT-055(R-665, RV-09): 응답 머리 `X-Trace-Id`를 아무도 붙이지 않는다(노출 머리에만 있다). HOT-410의 D-T43 몫과 함께 정한다(deploy/gateways/gw-*.yaml `lateResponseHeaders`).
+- BAT-055(R-665, RV-06): partner-api CORS의 `X-Requested-With`와 scanner-api의 `WWW-Authenticate`는 들어갔다(2026-11-17 확인). 남은 것: 다섯 호스트의 노출·허용 머리 목록이 정본(guidelines §9)과 같은지 전체를 대조한다(deploy/gateways/gw-partner.yaml, gw-scanner.yaml).
 - BAT-055(R-665, RV-10): gw-fan에 `www`의 `/_t/*` 라우트가 없고, 게이트웨이가 CloudFront의 `X-Peaket-App`을 늘 `web`으로 덮어 partner·console·scanner 화면 지표가 web으로 셈해진다. 텔레메트리 입구 단계에서 고친다(deploy/gateways/gw-fan.yaml).
 - BAT-055(R-665, RV-15): `Vary: Origin`을 CloudFront 뒤 넷의 모든 응답에 붙인다. 정본은 쿠키를 받는 API에만 둔다. CDN 캐시(`queue-files`·www 화면)의 캐시 키·적중률에 닿는지 HOT-450에서 확인한다(deploy/gateways/gw-fan.yaml·gw-partner.yaml·gw-ops.yaml·gw-queue.yaml).
-- BAT-055(R-665, RV-17): 앱 서버 계측을 넣은 뒤 `web / budgets`를 로컬에서 미리 돌린 기록이 없다. 기록 담당이 받은 사실에도 결과가 없어 적지 못했다. 합친 뒤 develop CI `web / budgets` 잡 결과로 본다(.github/workflows/ci-web.yml).
 - BAT-055(R-665, RV-20): 리스너에는 들어왔지만 `Host`가 어느 라우트 호스트와도 맞지 않는 요청은 Lua가 돌지 않아 그 접근 로그 줄에 위조 끝단 머리가 남을 수 있다(CloudFront·NLB 전제로 닿기 어렵다). kind 시험을 두거나 남는 차이로 적는다(deploy/gateways/*.yaml).
 - BAT-055(R-665, RV-21): gw-fan 구매 경로가 core-svc 쪽 정규식보다 앞서는 까닭이 '정규식끼리는 긴 쪽이 앞'이라는 정렬뿐이고, 정본 문장의 '정규식 라우트가 있는 호스트'에 `partner-api`가 빠졌다. HOT-410 생성기가 겹치는 경로를 검사한다(deploy/gateways/gw-fan.yaml, docs/infra.md §4.1 '호스트와 내부 경로').
 - BAT-055(R-665, RV-22): web·partner `instrumentation.ts`의 `catch`가 끝내기 함수를 얻으려고 같은 모듈을 다시 가져와, 처음 실패가 그 모듈 가져오기였다면 프로세스를 끝내지 못한다(apps/web/instrumentation.ts, apps/partner/instrumentation.ts).
@@ -275,7 +270,6 @@
 - BAT-055(R-665): platform O-T37 스캐너 가드 시험이 한 번 흔들렸다(다시 돌려 통과). 원인을 따로 본다(packages/platform/test/scanner-auth.test.ts).
 - BAT-055(R-665): queue-admission §2 순서도는 로비 참가(`POST /lobby-participants`)에서 게이트웨이가 `ticket:buy`를 확인한다고 그리지만, 게이트웨이 정본(docs/infra.md §4.1 '토큰 확인과 인가')과 구현은 `ticket:buy`를 대기열 진입·입장 확정과 구매 경로에 둔다. 어느 쪽에 맞출지 정한다(docs/features/queue-admission.md, deploy/gateways/gw-queue.yaml).
 - BAT-060(R-666, RV-06): 라우트 생성기가 다섯 API 호스트와 손으로 두는 호스트(`www`·`queue-files`) 어디에도 속하지 않는 계약 경로(경로 `servers`의 호스트 오타, `x-peaket-gateways` 규칙 빠짐)에서 멈추지 않아 라우트 없이 지나간다(운영에서는 404). '생성기가 멈추는 경우'에 더하고 호스트 오타 사본이면 2로 끝나는 단위 시험을 둔다(tools/ci/gateway-routes.mjs, docs/infra.md §4.1).
-- BAT-060(R-666, RV-07): `x-peaket-scopes`의 `ticket:buy`를 액세스 토큰 없는 갈래·배열이 아닌 값·모르는 스코프일 때 조용히 버린다. 그 사례마다 2로 멈추게 한다(시험 → 구현)(tools/ci/gateway-routes.mjs `authKindOf`).
 - BAT-060(R-666, RV-08): 운영에도 쓰는 컨트롤러 설정이 레이트 리밋 서비스·`shutdownManager` 이미지를 태그로만 적는다. BAT-055 W7-SEC-05와 함께 다이제스트를 단 이름으로 고친다(deploy/gateways/controller/envoy-gateway.yaml).
 - BAT-060(R-666, RV-09): 경로별 시간 상한으로 게이트웨이가 만드는 504(와 502)가 Problem이 아니라 Envoy 기본 글 본문이다. '게이트웨이 오류의 Problem' 상태 목록에 502·504를 더할지 정하고 다섯 게이트웨이 정적 시험을 둔다(docs/infra.md §4.1, deploy/gateways/gw-*.yaml `responseOverride`).
 - BAT-060(R-666, RV-10): 429 `Retry-After`를 요청 머리 `X-User-Id`가 있으면 60, 없으면 1로 고른다. 토큰으로 세는 로컬 한도(대기열 진입 단말당·gw-ops 계정당)를 거는 단계의 지시문과 infra §4.1 확인 줄에 'Retry-After 고르기를 다시 본다'를 적는다(deploy/gateways/gw-*.yaml).

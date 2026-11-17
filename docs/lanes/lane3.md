@@ -41,7 +41,6 @@
 - BAT-200 브라우저 확인: 기각 뒤에도 셸의 닫기 링크 이름이 '…(대기는 유지됩니다)'로 남아 대기 참여가 끝난 상황과 맞지 않는다(apps/web SCR-009 셸)
 - BAT-202(BAS-011): Trivy 0.76.2(보안 수정판)는 게시 2주 규칙 때문에 0.76.1로 고정했다. 2026-11-19 뒤 올린다(다이제스트·내장 허용 규칙 목록을 함께 다시 본다, `tools/ci/scan-tools.mjs`·`trivy-secret.yaml`)
 - BAT-202(BAS-011): 화면 JS 묶음(정적 자산)의 비밀 검사를 어느 단계가 맡을지 정하지 않았다. 예약 실행(주 1회 security-scan·scorecard)이 실패했을 때의 알림은 BOT-161(DAST·게이트 검토)에서 정한다
-- BAT-202(BAS-011): CodeQL 결과 파일에 결과 없는 규칙도 규칙 목록에 남는다는 가정(프로토타입 오염 쿼리 셋이 돈 흔적 검사)과 Trivy가 BuildKit OCI 묶음 tar를 읽는지는 첫 CI 결과로 확인한다
 - BAT-195(BOT-065): 키 회전 이음 기간의 옮기기 왕복(옮길 키 보기·되살리기·마무리)이 요청 데드라인(`deadlineAtMs`)과 묶이지 않아, 이음 기간 판정이 최악 약 400ms 늘 수 있다(services/trust-svc `score-risk.ts`·`redis-feature-store.ts` migrate)
 - BAT-195(BOT-065): 판정 근거 키 `tr:vb`가 회차의 첫 `CHALLENGE`만 담아(`SET NX`), 뒤에 차단 목록으로 다시 걸린 사람의 이의 인정(`APPEAL_ACCEPTED`)은 차단 키를 지우지 않는다(BOT-050부터의 설계, bot-defense §9·§12. 근거 키에 확정 신호를 더해 적을지 볼 것)
 - BAT-195(BOT-065): 회전 이음에서 새 판 판 가드 `tr:blkv`가 먼저 생긴 기기는 옛 판 판 가드를 합치지 않아, 늦게 온 옛 판 라벨이 새 판에서 다시 반영될 수 있다(`redis-feature-store.ts`)
@@ -53,9 +52,7 @@
 - BOT-044 뒤처리: 본인확인 복귀·탈퇴·로그인 수단 흐름의 손으로 쓴 fetch도 `fetchOnce`(시간 한도, 쓰지 않는 본문 버리기)로 바꾼다(docs/frontend.md §4.1 'api-client 밖의 호출'의 남는 한계, apps/web features/identity-verify·account-withdraw·login-methods).
 - BOT-047 브라우저 확인: 만 14세 미만 가입 취소 화면의 [홈으로]가 d5 §5.5의 보조 버튼이 아니라 글자 링크다(HOT-323부터, apps/web signup-consent)
 - BOT-047 브라우저 확인: 공연 상세의 콘솔 오류 한 줄. CSP의 `frame-src 'none' https://challenges.cloudflare.com`은 'none'과 출처를 함께 적은 것이다(HOT-290, apps/web security-headers.mjs)
-- BAT-203: 실제 Valkey 통합 시험(`test-int/entry-store.int.test.ts`의 `eligibilityCases`)을 아직 돌리지 않았다. 감독 허가 뒤 갈래 2와 겹치지 않게 돌린다. 사본 쓰기 어댑터(HOT-251)가 없어 시험이 `q:{event:E}:elig:*`·`eligv`를 직접 넣는다
 - BAT-203: 바꾼 Lua(진입 번호 묶음·로비 창·입장)의 옛·새 성능 비교(ADR-0265 결정 10)는 갈래 1 몫이다. `loadtest/micro/lua-compare.mjs`의 `queue` 묶음에 `entry-lua.ts` 원문을 더하는 일을 감독이 갈래 1과 맞춘다
-- BAT-203: 화면이 403 `sale-eligibility-required`를 공연 상세의 예매 제한 안내로 돌리는 Q-T36 ⑧은 HOT-346이다. 이 묶음은 정본(docs/frontend.md §3.4)만 맞췄다
 - BAT-203: queue-svc 전체 시험을 두 번 돌리는 가운데 `GrpcTrustRisk.verify(VERIFICATION)`의 B-T11 시험이 한 번 UNAVAILABLE/ALLOW로 흔들렸다(바로 다시 돌려 665개 통과, 이번 변경과 닿지 않는 trust gRPC 시험)
 - BAT-205: 실제 Schema Registry 컨테이너로 등록·BACKWARD_TRANSITIVE를 확인하는 통합 시험과 ArgoCD PreSync 실행은 배포 단계다. 지금은 `tools/ci/avro-schema.mjs`의 정적·태그 대비 검사와 가짜 HTTP 등록 시험까지다
 - BAT-205: `build-image.yml` 게시 잡의 실제 GHCR 푸시·cosign·SLSA·SBOM 증명은 출시·핫픽스 가지 첫 CI에서 확인한다. `ci.yml` image 잡은 게시 잡 권한을 덮지만 게시 잡 조건이 PR·develop을 막는다
@@ -67,7 +64,6 @@
 - W7-audit(K4): Kafka에 닿지 못할 때 core API 새 파드가 시작에 실패하는지, 소비자 없이 조용히 뜨는지 클라이언트 `connect()` 동작을 확인한다.
 - W7-audit(K5·S6): 읽지 못한 탈퇴 사건의 보류 행을 다시 처리하거나 닫을 길·기한·경보가 없어 영영 '보류 중'으로 남고 그 계정 키도 막힌다(`held_event`).
 - W7-audit(K8·S9): purchase 명단 원천이 페이지마다 회차 전체 합계를 다시 세고, core의 원천 호출이 `promoterId`를 버린다.
-- W7-audit(S4): 내부 토큰 비교가 길이가 다르면 바로 끝난다(SEC-06R ④⑤가 이 동작을 굳힘). 두 값을 해시한 뒤 견주는 방식을 볼 것.
 - W7-audit(S5): 0022가 `core_app`에 후기 작성자 칸과 `takedown_action.restored_at` 덮어쓰기를 준다(익명화 역할 분리·한 번 쓰기).
 - W7-audit(S7·S8): CSV 첫 글자 정화에 널 문자가 빠졌고, 받은 커서를 길이·모양 검사 없이 접속기록에 남긴다.
 - W7-audit(C3): 0019 행이 이미 있는 DB에 0021을 적용하는 시험이 없다(원문 시험만 있음).
@@ -82,19 +78,22 @@
 - W8-audit2a(다시 보기 N5, 낮음): 손으로 하는 파기가 `order by id limit … for update`로 잠가, 같은 계정을 거의 동시에 두 번 부르면 보류 행이 50개 넘게 남아도 뒤 호출이 0행으로 409를 낼 수 있다(`drizzle-review-store.ts:327-335`). 정본은 409를 끝 신호로 쓴다. 겹쳐 부르기는 드물고 파기는 이미 끝난 뒤다.
 - W8-audit2a(검증 2 V14, 낮음): C1 대체 예약 때 남기는 경고 줄(`account-withdrawn.handler.ts:81`)을 보는 단언이 없다. 경고 줄은 계획 §9.2에만 있고 정본에는 없다.
 - W8-audit2a(검증 2 V23, 낮음): 손으로 하는 파기의 한 트랜잭션 안에서 파기와 예약의 차례를 바꾸는 변이를 잡는 겹침 시험이 없다(`drizzle-review-store.ts:338-342`, 검증 1 D09와 같은 꼴).
-- BAT-420(GAT-110) 다시 보기 2 N3: 일괄 환불 잡기 기한(60초)을 늘리지 않아, 표가 여럿인 느린 주문은 처리 도중 잡기가 풀려 다른 파드가 같은 주문을 다시 잡는다(같은 취소 ID라 돈은 한 번이지만 겹친 결과 모름이 자동 정지 셈에 든다). 표를 보내기 전 남은 기한이 표 한도(30초)보다 짧으면 그 주문의 나머지를 남기거나 기한을 조건부로 늘린다(services/purchase-svc `drizzle-event-refund-claims.ts:36`·`event-refund-service.ts:532`)
 - BAT-420(GAT-110) 다시 보기 2 N4: 풀지 못한 지난 잡기가 남은 항목은 수동 재개의 '다음 시각 당기기'가 조용히 건너뛴다(돈 문제 없음, 본래 다음 시각까지 기다림). 조건을 `claim_token is null or claimed_until <= now()`로(services/purchase-svc `drizzle-event-refund-store.ts:239`·`event-refund-service.ts:311`)
 - BAT-420(GAT-110) 다시 보기 2 N5: 파트너 넣기 정책의 WITH CHECK가 promoter_id만 보고, 감사 정의자 함수는 그 요청이 있는지만 본다(깊은 방어, 다른 테넌트로는 새지 않음). 정책에 `requested_via = 'PARTNER' AND status = 'REQUESTED'`를 더하고, 함수는 같은 기록 ID의 접수 기록이 이미 있으면 거절한다(services/ops-svc `migrations/0015_event_cancellation_partner_rls.sql:43~69`)
 - BAT-420(GAT-110) 다시 보기 2 N6: ops가 category를 버려 같은 취소 ID의 '환급 실패' 건과 '차액' 건이 `(kind, target_ref)`로 한 건에 모인다(둘이 함께 열려 있을 때만). category를 건에 남길지, 열린 건 키에 넣을지 정한다(services/ops-svc `receive-case-requested.ts:14`)
-- BAT-420(GAT-110) 다시 보기 2 N8: 결제사마다의 자동 정지가 겹친 두 실행의 진행률 쓰기에서 지워질 수 있다(`updateActive`가 그 실행이 아는 멈춤 목록으로 progress를 통째로 씀, 다음 표에서 대개 다시 멈춤). 진행률의 결제사 멈춤을 DB 값과 합쳐 쓴다(services/purchase-svc `event-refund-service.ts:585`)
 - BAT-420(GAT-110) 구현 담당이 남긴 것: 회차 취소 확정 경로의 409 설명에 `already-approved`가 없다(문제 종류 목록에는 있다, docs/api/openapi.yaml ops 회차 취소 확정)
-- BAT-420(GAT-110) 구현 담당이 남긴 것: ops 파트너 풀의 DB 역할 시작 검사(core `assertDatabaseRole` 같은 것)가 없어, 운영에서 `PEAKET_PARTNER_DATABASE_URL`이 표 소유자를 가리키면 행 보안을 조용히 건너뛴다(authz-matrix §5.3 '앱 사용자는 표 소유자가 아니게', services/ops-svc `event-cancellation-wiring.ts`·`app.module.ts`)
-- BAT-420(GAT-110) 계획 보충 5를 쓰며 본 것: `#retryOrFail`의 FAILED 쓰기(시도 상한 전의 그 밖 실패)는 팬 실패 알림 Outbox를 남기지 않는다. 보충 5로 CS 건은 생기지만 팬은 실패를 듣지 못한다(services/purchase-svc `event-refund-service.ts:625`)
 - BAT-420(다시 보기 3 P1, 낮음): CS 건 다시 열기 목록이 표시 시각 순이라 늘 실패하는 앞 행이 같은 종류의 뒤 행과 뒤 종류(차액·이상 표시)를 굶긴다(`drizzle-cs-case-outbox.ts`, `cs-case-reopen.ts:127`). 지표를 보고 사람이 손대기 전까지만.
 - BAT-420(다시 보기 3 P2, 낮음, 팬 취소를 여는 웨이브 맨 앞): Saga의 '요청 행에는 실패 표시 안 함' 조건이 행이 아니라 입력의 요청 ID를 본다(`cancel-ticket.ts:188·197~213`). 팬 취소가 지금 403으로 닫혀 닿지 않는다.
-- BAT-420(다시 보기 3 P3, 낮음): `#retryOrFail('FAILED')` 길은 CS 건과 행 실패 표시는 남기지만 팬 실패 알림은 남기지 않는다(`event-refund-service.ts:641`, 이번 고침 전부터).
 - BAT-420(검증 2 낮음 여덟): X02 처리가 던지면 틱 끝 다시 열기 건너뜀, X05 2xx가 무응답 잇따름을 끊지 않음, X07 한 번 답한 뒤 무응답이면 예산을 넘겨 부름, X19 끝난 행의 항목도 다시 엶, X22 실패 표시된 행의 항목도 잡음, X23 남은 잡기를 풀지 않음, X10 Saga 팬 길 시도 상한 경계, X04 어댑터가 200을 거절(ops는 늘 202). 계획 BAT-420.md '## 검증' 검증 2.
 - 웨이브 8 갈래 3 시험 흔들림: purchase-svc 단위 `grpc-new-payment-pause`·`grpc-payment-checkout`이 전체 실행 한 번에 실패했다가 다시 돌리면 통과했다(BAT-420 N1·N2·N7 구현 담당 기록).
+- W9-fix1(R-676) 리뷰 R1 낮음: 업무 거절률 전체 정지(`stop.all`)가 실행 시작 때 읽은 `request.progress.perPg`로 결제사를 고른다. `perPg`가 없는 행이면 던지고, 그 실행 중 쓸어 담기로 처음 생긴 결제사 몫은 '전체' 정지에서 빠진다(다음 실행은 막히므로 돈은 많아야 그 실행 안의 몇 건). 잠근 값·항목의 결제사 합으로 고르고 `?? []`(services/purchase-svc `event-refund-service.ts:512`)
+- W9-fix1(R-676) 리뷰 R2 참고: 환급 서비스는 `deadlineMs`에 시각(지금 + 30초)을 넘기는데 어댑터는 그 값을 길이로 읽어 상한 5초로 자른다. 지금은 표 한 장이 호출 두세 개라 30초 안에 들지만, '표 한도 30초'는 어댑터 상한이 받쳐 주는 값이다. 남은 길이(`deadline − now`)로 넘기거나 정본에 적는다(`grpc-payment-cancellations.ts:48`, `grpc-ticket-cancellations.ts:64·105·170`)
+- W9-fix1(R-676) 리뷰 R3 참고(확인 필요): `dueWindowClosures`가 이미 닫힌 연기 요청도 끝날 때까지 틱마다 다시 고른다. 잠근 쓰기와 SEV3 `REFUND_WINDOW_CLOSED` 경보가 틱마다 되풀이될 수 있다(돈·멈춤 쪽은 안전). 경보 중복을 확인하고 닫힘 표시 칸이나 조건을 둔다(`drizzle-event-refund-store.ts:307~316`)
+- W9-fix1(R-676) 리뷰 R4 낮음(문서): openapi `/v1/ops/event-cancellations/{requestId}/pauses`·`/resumptions` 응답에 끝난 작업의 409가 없다(전부터 409를 돌려줌). 409 `CONFLICT` 한 줄을 더한다(docs/api/openapi.yaml)
+- W9-fix1(R-676) 리뷰 R5 낮음: `services/purchase-svc/src/modules/refund/index.ts:160` 주석이 아직 '빈 뼈대'다. 다음 손질 때 지운다
+- W9-fix1(R-676) 계획 범위 밖: 결제사 몫 하나가 자동 정지하면 요청 전체가 PAUSED가 되어(`statusAfterRun`, 시험 `event-refund-gat130` R-T9) 다른 결제사 몫도 멈춘다. 정본 transfer-refund §5 '다른 결제사 몫은 계속한다'·data `event_cancellation_request.status`와 어긋난다(멈추는 쪽이라 돈은 안전, 상태 규칙을 바꾸면 시험·ops 화면이 함께 바뀜)
+- W9-fix1(R-676) 검증 때 본 것: 통합 전체를 한 번에 돌리면 `identity-grpc.int`의 previousPid 단언이 가끔 실패한다(그 파일만 돌리면 46개 모두 통과, 몰릴 때 흔들리는 시험)
+- W9-fix3(R-675) 리뷰 N3 낮음: pg-simulator의 `authorization` 비교가 옛 꼴(길이 먼저 비교)이다. local·CI용이라 운영 위험은 없다. 원하면 `constantTimeEqual`로(services/pg-simulator/src/server.ts:59)
 
 ## 진행 로그
 - 2026-11-17 웨이브 8 BAT-415·BAT-420(R-673): 취소·환불 가지를 develop 위로 다시 쌓아 합쳤다. 웨이브 끝 리뷰 높음 K1·K2(이중 환불 위험)와 C1·C2·S1·K4·S2, 다시 보기 2 N1·N2·N7을 계획·시험·구현·리뷰·검증 다른 담당으로 고쳤다. 변이 검증 2 85개 중 67개+돈·권한 10개 시험. GAT-080·090·110은 다음 웨이브 몫이 남아 일부 구현. 소유자 세션 감독.

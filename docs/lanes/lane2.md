@@ -29,7 +29,6 @@
 - 소유자 결정(2026-11-05 '선행 단계 먼저')대로 홈(HOT-300)의 선행 단계를 먼저 한다: HOT-170 ①(core-svc 공연 표·회차 공개 요약)과 HOT-171(공연 등록·회차 더하기·찜 API)은 끝났다. HOT-300(홈)도 끝났다(소유자 결정 '화면 먼저': 서버가 없는 화면은 계약 모양 가짜 API로 띄운다, ADR-0199). HOT-310은 넷으로 나눴다(①공연 상세 계약·②상세 화면 HOT-311·③검색 결과 HOT-312·④머리 자동완성 HOT-313, 모두 끝). HOT-320은 넷으로 나눴다(①공급자 호출 보호, ②로그인 화면·셸 로그인 표시·상세 개인 상태 HOT-321은 끝, ③가입 완료·동의·본인확인 흐름 HOT-323도 끝, ④서식 글 편집기 PoC HOT-322도 끝, Lexical로 정함 ADR-0204). 서버 몫(팬 계정 요약·가입 세 경로)은 갈래 3의 BOT-047. HOT-340은 셋으로 나눴다(①대기실 오픈 뒤 경로는 끝, ADR-0207. ②로비·여러 탭 HOT-341, ③공연 상세 진입 상태·사전 사람 확인 카드·브라우저 검사 HOT-342). HOT-341은 둘로 나눴다(①로비 경로·여러 탭·차례 도래 유예·로그아웃은 끝, ADR-0208. ②자동 배정 희망 조건·차례 직전 확인·[차례 알림 받기]는 HOT-343). HOT-342 ①(ADR-0211)·HOT-343(ADR-0212)·HOT-344(ADR-0213)도 끝났다. HOT-345 ①(ADR-0216)도 끝났고, 나머지는 HOT-347(같은 출처 검사 틀·T=0 세 엔진)·HOT-348(여러 탭 세 엔진)·HOT-349(ds QueuePanel 비교)로 나눴다. HOT-347(ADR-0217)·HOT-348(ADR-0218)·HOT-349(ADR-0220)도 끝났다. HOT-350 나눔과 차례는 위 줄이다. HOT-344에서 나눈 HOT-346(선예매·판매 정책 표시·공연 상세 매진)은 HOT-250·HOT-010 뒤에 한다. 공연 상세 응답 채우기는 새 단계 HOT-306(core-svc). 홈 피드 서버 HOT-305는 HOT-270·OPS-410 뒤에 한다. BAS-041·BAS-042는 끝났고, BAS-043(굿즈 결제 경로·인기 MD 대기열·빠진 읽기 경로 초안)도 끝났다. 그 뒤 구간 1 갈래 2의 남은 단계 HOT-340·350·360, 이어서 구간 2의 갈래 2 단계로 간다. 화면이 바뀌는 단계는 브라우저 확인을 한다. SEED 스타일 부품(`@seed-design/react`)을 처음 쓰는 단계는 ADR-0192 결정 5와 ADR-0191 결정 3을 먼저 한다. 캐시 화면 묶음 A의 화면은 응답 때 해시 서버(ADR-0193)를 거쳐야 막는 CSP가 붙으므로, 검사는 `tools/web-checks`의 서버 명령(`apps/web/server/start.mjs`)으로 띄운다.
 
 ## 구간 끝 정리 목록
-- BAT-425 R-592 리뷰 중간: 회차 취소 요청이 판매 중지된 공연인지 확인하지 않고, 확정 때 재인증 토큰(`X-Reauth-Token`)도 강제하지 않는다. core-svc 판매 상태 조회와 재인증 검증기를 붙일 때 함께 본다(services/ops-svc/src/modules/event-cancellations/application/event-cancellations.ts)
 - BAT-425 R-592 리뷰 중간: payment-svc 배상 송금 계약·가짜 어댑터는 있으나 ops-svc에서 부르는 클라이언트·경로가 없어 실제 배상 흐름에 닿지 않는다. 지급대행·정산 계좌·KYC가 정해질 때 ops 경로와 함께 잇는다(services/payment-svc/src/modules/compensation, services/ops-svc/src/modules/payouts)
 - BAT-430 R-587 리뷰 중간: `WithdrawPriorityGrant`가 보류를 먼저 풀고 DB `withdraw`를 나중에 해, DB 실패 동안 권리가 OFFERED인데 좌석 보류가 없는 창이 생긴다. 재시도로 풀리지만, 회수 상태를 먼저 WITHDRAWING으로 적는 두 단계나 재시도 표시를 다음에 둔다(services/purchase-svc/src/modules/priority/application/withdraw-priority-grant.ts)
 - BAT-430 R-587 리뷰 중간: 만료 반복이 `PRIORITY_EXPIRE_LUA`로 좌석을 푼 뒤 `onPriorityGrantsExpired`가 DB를 EXPIRED로 바꾸지 못하면 권리가 OFFERED로 남고 prio 인덱스에서 이미 빠져 다음 틱이 다시 잡지 않는다. DB 반영 실패를 재시도하는 표시(예: `priority_grant` 만료 작업 표)를 다음에 둔다(services/purchase-svc/src/modules/inventory/application/expiry-sweeper.ts)
@@ -47,7 +46,7 @@
 - HOT-291: 공연 상세 첫 JS가 BAS-220 뒤 186.5kB → 196.7kB로 늘었다(HOT-311 데이터 잇기로 197.7kB, HOT-321 로그인·본인확인 개인 상태(세션 가게·③ 줄·개인 버튼, 본인확인 흐름은 늦게 가져옴)로 199.3kB, 기준선 고침. 색 모드 스크립트 0.9kB 말고 약 9kB는 다른 단계의 화면 코드). 까닭을 찾아 줄이거나 wbs 7.5.2에서 예산을 다시 정한다(tools/web-checks/budgets/js-baseline.json)
 - HOT-291: 소비자 웹 숨김 소스 맵(.next/browser-source-maps)이 생겼으니 정적 자산 SBOM(static/assets.mjs)이 그 맵에서 묶음에 든 패키지를 읽게 한다(지금은 static/만 봐서 0개, 실행 의존성 SBOM으로 대신한다)
 - HOT-291: 운영체제가 다크면 퍼블리싱 미리보기의 '라이트로 보기'가 라이트로 바뀌지 않는다(?theme=light로 셸에 라이트 고정 표시를 두고 운영체제 다크 선택자에서 뺀다, apps/web/src/shared/lib/preview.ts·@peaket/ds Preview)
-- HOT-310 ①: 대기 상태 파일 `soldOutTiers` 설명이 '자동 배정 희망 조건 경고에만 쓴다'로 좁혀 있다. 공연 상세가 등급별 매진 표시에 쓸 출처를 HOT-010이 정할 때 그 설명과 값(좌석맵 판의 `tierId`)을 함께 고친다(docs/api/openapi.yaml)
+- HOT-310 ①: 대기 상태 파일 `soldOutTiers` 설명이 '자동 배정 희망 조건 경고에만 쓴다'로 좁혀 있다. 공연 상세가 등급별 매진 표시에 쓸 출처를 HOT-010이 정할 때 그 설명과 값(좌석맵 판의 `tierId`)을 함께 고친다(docs/api/openapi.yaml) 넘긴 HOT-010은 끝났으나 고치지 않았다(2026-11-17 확인).
 - HOT-311: 회차가 많은 공연(가짜 API 뮤지컬 52회차, 계약 상한 60)은 회차 칩(CMP-066)이 히어로를 길게 채운다. d2의 고르기(select) 변형을 ds RoundPicker에 더하고 회차가 8개 [가정]를 넘으면 그것으로 그린다(packages/ds RoundPicker, apps/web event-detail Booking.tsx)
 - HOT-311: 아직 데이터에 잇지 않은 퍼블리싱 화면의 공연 상세 링크가 목업 회차(`/events/evt-…`)라 앞 거르기에서 404다(`PlaceholderScreen.tsx`, 좌석·결제·결과 화면의 닫기 링크 등). 그 화면을 잇는 단계 전까지 미리보기에서 상세로 가지 못한다. 목업 회차 ID를 가짜 API 고정 자료의 회차로 바꾸거나 화면 단계에서 고친다
 - HOT-312: 캐시 화면 HTML의 Cache-Control이 Next.js 기본값이다(`/search` `s-maxage=31536000`, 홈·상세도 docs/frontend.md §2.5 표와 다르다). 표의 값을 어느 단계가 다는지 정하고 단다(proxy·앞 서버·CDN 설정 가운데 한 곳, apps/web)
@@ -58,7 +57,6 @@
 - HOT-321: 홈 Lighthouse LCP 가운데 값이 6.16~6.25초로 한도 5,953ms(기준선 + 10%)를 넘는다. 셸의 세션 받기를 끈 빌드도 6.25초라 이 단계 전부터다(홈 피드 잇기 HOT-300 뒤로 Lighthouse를 돌리지 않았다). LCP 요소와 배너 이미지 받기 차례를 보고 줄이거나 wbs 7.5.2에서 기준선을 다시 정한다(tools/web-checks/budgets/lighthouse-baseline.json)
 - HOT-323: 가입 화면 머리가 가입을 마치지 않은 로그인 계정에도 [로그인]을 보인다(퍼블리싱 그대로 `<AppShell guest>`). d5 §5.5는 셸을 '일반(머리만)'으로만 정했다. 공연 상세처럼 '계정 메뉴 회원'으로 보일지 정본과 함께 정한다(apps/web signup-consent SignupConsentPage.tsx)
 - HOT-311·312·313: 가짜 API에 로비 열림·판매 종료·취소 회차와 검색·자동완성의 실패·지연 상태가 없어 그 화면 상태를 브라우저로 보지 못했다(2026-11-05 Chrome 다시 확인에서도 남음). 가짜 API 상태 바꾸기에 더해 본다(apps/web scripts/mock-api.mjs)
-- HOT-340 ①: Lighthouse의 '대기실 셸' 대표 주소를 굿즈 대기(`/shop/md-lumen-lightstick/queue`)로 바꿨다. 대기열 화면은 토큰이 없으면 공연 상세로 넘어가서다. 같은 셸·묶음이지만 다음 성능 예산 잡(`node lib/docker.mjs budgets`)에서 기준선(tools/web-checks/budgets/lighthouse-baseline.json)과 맞는지 본다
 - HOT-340 ①: 대기실 JS가 데이터 잇기로 20.2kB(gzip)가 됐다(정본 한도 50KB, 목표 15KB [가정]). 목표를 넘으면 상태 기계·화면의 큰 덩어리를 나누거나 목표를 다시 정한다(apps/web/queue-room/.size-limit.json)
 - HOT-341 ①: 대기실 JS가 로비·여러 탭·로그아웃으로 24.3kB(gzip)가 됐다(정본 한도 50KB, 목표 15KB [가정]). 위 HOT-340 ① 줄과 함께 본다.
 - HOT-341 ①: 서버 로그아웃이 503으로 실패하면 그 탭의 대기실 상태 기계는 멈춘 채 남는다(저장소는 이미 지움). 소비자 웹 정리 루틴(GAT-040)을 모을 때 실패 뒤 화면을 함께 정한다.
@@ -67,7 +65,7 @@
 - HOT-343: 대기실 JS가 희망 조건·차례 알림으로 27.3kB(gzip)가 됐다(정본 한도 50KB, 목표 15KB [가정]). 위 HOT-340 ①·HOT-341 ① 줄과 함께 본다. 희망 조건 편집기·알림 시트를 늦게 싣는 덩어리로 나눌 수 있다(apps/web/queue-room/src/screens/preference.ts·modals.ts)
 - HOT-343: 등급 매진 줄의 낭독 영역(`role="status"`)이 줄과 함께 새로 생겨 화면 낭독기가 읽지 않을 수 있다. ⑧ 줄 자리에 미리 둔 낭독 영역에 글만 넣게 바꾼다(apps/web/queue-room/src/screens/queue.ts prefLine)
 - HOT-343: 숨긴 탭 제목의 `(N초)`는 폴링마다(숨긴 탭 5초 이상) 바뀐다. 마지막 60초는 1초마다 고칠지(브라우저의 숨긴 탭 타이머 제한 안에서) 본다(apps/web/queue-room/src/main.ts applyTitle)
-- HOT-343 확인 중: 웹 좌석 화면(개발 서버 3000, `/booking/[eventId]/seats`)에서 'Encountered a script tag while rendering React component'와 'Could not validate `instant`' 오류가 콘솔에 났다. 좌석 화면을 잇는 HOT-350에서 본다
+- HOT-343 확인 중: 웹 좌석 화면(개발 서버 3000, `/booking/[eventId]/seats`)에서 'Encountered a script tag while rendering React component'와 'Could not validate `instant`' 오류가 콘솔에 났다. 좌석 화면을 잇는 HOT-350에서 본다 넘긴 HOT-350은 끝났으나 고친 기록이 없다(2026-11-17 확인).
 - HOT-344: 대기실 매진 화면(신청 버튼·결과·다시 그리기)과 앞 인원 숫자 굴림의 화면 조립은 DOM 시험이 없고 브라우저 확인만 덮는다(상태 기계·신청 상태·굴림 자리는 단위 시험). 대기실 화면 시험 틀(작은 DOM 대역이나 Playwright 한 벌)을 둘지 본다(apps/web/queue-room/src/screens/soldout.ts·queue.ts)
 - HOT-291: 소비자 웹 첫 화면 CSS가 Pretendard 동적 서브셋의 `@font-face` 92개로 34.2kB → 49.1kB(gzip, 나머지 33.9kB)가 됐다(기준선 고침, §5.8 예산 25kB). 글꼴 목록을 첫 화면 CSS에서 떼어 막지 않게 싣거나 wbs 7.5.2(LCH-200)에서 예산을 다시 정한다(apps/web/src/_app/styles/globals.css, tools/web-checks/seed-css/css-baseline.json)
 - HOT-300: 캐시 화면(`/` 등)의 뒤쪽 다시 만들기가 'client rendering was requested outside a Suspense boundary'(Next.js 'Render in Browser')로 실패해 `/`가 STALE로 남는다(만든 HTML은 200으로 계속 나간다). 프리렌더가 멈춘 자리가 루트에 Suspense 없이 남는 경우인데 무엇이 멈추는지는 아직 못 찾았다. 홈 데이터가 cacheLife 60초라 운영에서 홈이 새로 만들어지지 않을 수 있다(apps/web src/_pages/home, src/_app/layouts/CachedRootLayout.tsx, CI 실행 42089422611 seed-css 로그)
@@ -87,21 +85,18 @@
 - HOT-190: 올리기 계약에 멱등 키가 없어 응답을 못 받은 상세 이미지를 다시 올리면 두 장이 될 수 있다. 작업 원장이 생기는 HOT-200에서 `Idempotency-Key`를 더할지 정한다(docs/api/openapi.yaml createPartnerProductionImage, ADR-0257 결정 3)
 - HOT-190: 포스터 부분 유일 인덱스 위반(23505)과 COMMIT 응답만 잃은 경우의 답이 정해지지 않았다(지금은 500이고 게시본을 지울 수 있다, services/core-svc production-images.ts)
 - HOT-190: 포스터를 바꾸면 옛 파생본을 지운 뒤 무효화하고 무효화 실패는 기록만 한다. 웹 공연 상세는 300초 캐시라 그동안 지운 주소를 그리고 PicturePoster에 onError 대체가 없다(services/core-svc production-images.ts, apps/web event-detail)
-- HOT-190: 선언 길이가 본문 상한을 넘으면 413만 보내고 연결을 닫지 않아 Node가 남은 본문을 읽는다(chunked도 계속 읽음, packages/platform request-checks.ts)
 - HOT-210: seatmap-worker 메모리 셈(스레드 384MiB + 대기 5개 × 12MiB 버퍼)이 컨테이너 512MiB에 붙어 있고 terminate 끝을 기다리지 않고 다음 스레드를 띄운다. S-T34 ④를 5만 석 파일로 잴 때 함께 본다(services/core-svc seatmap-worker pool.ts, seat-hold §13)
 - HOT-210: gRPC 채널에 keepalive가 없어 반쯤 열린 연결에서는 호출마다 데드라인까지 기다린다(메시가 있으면 해당 없음, services/core-svc seatmap-worker-client.ts·image-processing-client.ts)
 - 확인 필요(HOT-200): image.proto width·height가 EXIF 회전을 반영한 크기인지 정하기. core-svc가 30초에 준비 위치를 지운 뒤 늦게 끝난 image-worker가 파생본을 쓰면 기록 없는 객체가 남는다(준비 위치 수명 규칙). 파생본 Content-Disposition·nosniff를 실을 칸이 putPublic 포트에 없다
 - HOT-240: ①과 ② 사이에 프로세스가 죽거나 종료 신호를 받거나 시한 초과 뒤 지우기가 진행 중이면 그 판의 팬 파일이 기록 없이 남는다(판 번호를 다시 쓰지 않아 틀린 배치를 내지는 않는다). 정리 작업은 HOT-200의 작업 원장과 함께 정한다(services/core-svc seatmap-layouts.ts·fan-file-publisher.ts)
 - HOT-240: 잠금 안에서 큰 대기 판 JSON(`pending_layout`, 5만 석이면 수 MB)을 ①에서 두 번·②에서 한 번 읽어 해석한다. 판 번호를 잡을 때는 `version_seq`만 읽게 줄인다(services/core-svc drizzle-seatmap-layout.ts)
 - HOT-240: If-Match 판 해석이 강한 ETag(`"N"`)만 받는다. 게이트웨이 압축이 약한 꼴(`W/"N"`)로 바꾸면 모든 저장이 412다. 게이트웨이(HOT-400) 설정과 함께 본다(services/core-svc domain/seatmap-layout.ts versionOfEtag)
-- HOT-240: 큰 본문 칸막이를 인증 가드보다 먼저 잡고 본문을 해석한다. 게이트웨이를 거치지 않고 서비스에 닿는 길이 있으면 익명 요청이 자리를 쥘 수 있다. 게이트웨이(HOT-400)가 먼저 인증하는지 확인한다(packages/platform request-checks.ts)
 - HOT-240: 남의 배치본 ID를 `fromTemplate`·`templateVenueId`에 넣으면 404·422만 나고 보안 사건이 남지 않는다(행 보안 아래에서는 남의 ID와 없는 ID를 가리지 못한다). authz-matrix AZ-T2와 함께 기록 대상인지 정한다
 - HOT-240: 좌석맵 저장 칸막이 2·12MiB·회차 동시 게시 8·20초·Retry-After 10은 [가정]이다. 5만 석·회차 50개 저장으로 힙과 시간을 재어 정한다(docs/verification.md §4.1, seat-hold §13)
 - HOT-250: 명단 올리기 경로에 필요한 gw-partner 경로 시한(100초 이상)과 남은 시간 머리(90초 이상)가 정본에 없다. 게이트웨이 기본 15초면 변환이 15초에 끊긴다(게이트웨이 설정 wbs 2.11.x, HOT-400)
 - HOT-250: 올리기 하나의 힙이 정본 어림(30MB)보다 클 수 있다(코드 표·행 번호·변환 결과·디코딩한 글을 함께 쥠, 100MB대 [추정]). 동시 4개와 서비스 파드 한도 512Mi로 재어 칸막이 수를 정한다(docs/verification.md §4.1)
 - HOT-250: 작은 명단 파일의 SHA-256은 회원 코드 공간이 작아 되돌릴 수 있다. 비밀 키를 섞은 해시(HMAC)로 바꿀지는 소유자 판단이다(Q-T36 ⑥, docs/security/data-classification.md 판매 자격 명단 행)
 - HOT-250: 창 안의 조건 없는 거부 규칙(판매 휴지 시간 등)이 단계 요약에서 명단 없는 PRESALE 조각으로 보이고 배지가 붙는다. 판매 승인이 그 조각으로 진입 자격 창을 만들면 모두 막힌다. 정본(ADR-0261 결정 3)을 손볼지 LCH-080과 함께 정한다(packages/validation sale-policy phases.ts)
-- HOT-250: 파트너 화면이 평가 함수를 원본 TS로 쓰려면 파트너 앱 의존 목록과 `transpilePackages`에 `@peaket/validation`이 필요하다(Next 운영 빌드는 development 조건을 켜지 않는다). HOT-251을 시작할 때 본다(apps/partner next.config.ts)
 - HOT-250: 거절 기록(`partner_production_denied`·`sale_eligibility_locked_attempt`)의 계정은 플랫폼 로거가 가려, 누가 시도했는지는 추적 ID로 요청 로그의 `accountRef`와 이어야 한다. 좌석맵·이미지도 같은 꼴이라 기록 줄에 `accountRef`를 함께 실을지 정한다(ASVS 16.3.2, packages/platform log.ts)
 - BAT-040 R-659 리뷰 R040-3 중간: 명단 밖 알림이 켜져 ⑦이 "이 회차의 선예매 대상이 아닙니다"인데 팬 자격이 `eligible`이면(ADR-0272 결정 4의 경우) 같은 묶음의 '선예매' 줄은 "{명단} 선예매 대상입니다 …"를 그대로 보여 한 화면에 두 말이 함께 나온다. 정본(결정 3 '선예매 대상 안내'·결정 4) 문장을 먼저 정한다(apps/web/src/_pages/event-detail/ui/Booking.tsx)
 - BAT-040 R-659 리뷰 R040-5 낮음: 선착순 공연의 오픈 전에 판매 자격 없음인 팬에게도 사전 사람 확인 카드를 보인다. 예매 제한 팬은 같은 까닭(입장 확정이 막음)으로 숨기므로(ADR-0213 결정 2) 자격 없음 팬도 숨길지 정본(d5 §5.2 '사전 사람 확인'·ADR-0272 결정 3)을 먼저 정한다(ui/Booking.tsx)
@@ -130,14 +125,13 @@
 - BAT-165 R-663 리뷰 R165-10·R165-17 낮음: 아티스트·공연장 이름 줄을 지우지 않아 어느 공개 공연에도 없는 줄이 표와 사전에 남고, 그래서 필터 이름(`filterNames`)이 두 어댑터에서 다를 수 있다(data.md:567, search.md §2.2, 골든 세트 T-11에 경우 하나)
 - BAT-165 R-663 리뷰 R165-11 낮음: 후보 질의가 늘 중간 일치(`LIKE '%…%'`)라 앞부분 인덱스(`text_pattern_ops`)를 쓰지 않는다(ADR-0271 결정 4, data.md:2813). BAT-166의 질의 모양 고침과 함께 본다
 - BAT-165 R-663 리뷰 R165-12 ②·검증 V165-L4~L7 낮음: `main.ts` 조립을 시험 조립과 따로 띄워 본 시험이 없다. 검색 연결의 `core_search` 역할 확인을 뺌(L4), 검색 묶음을 앱 주소로 만듦(L5), SIGTERM에서 `searchTimers.stop()`(L6)·`searchDatabase.close()`(L7)를 뺌이 살아남았다. 시작 파일을 따로 띄우는 D 시험(R165-15와 함께)
-- BAT-165 R-663 리뷰 R165-12 ③ 낮음: 운영 코드의 부르는 자리 둘이 `withSearchSync`가 아니라 `sync`를 바로 부른다. BAT-620·BAT-420 계획에 'SR-T8 ③의 부르는 자리는 `withSearchSync`로' 한 줄을 넣는다
+- BAT-165 R-663 리뷰 R165-12 ③ 낮음: 운영 코드의 부르는 자리 둘이 `withSearchSync`가 아니라 `sync`를 바로 부른다. BAT-620·BAT-420 계획에 'SR-T8 ③의 부르는 자리는 `withSearchSync`로' 한 줄을 넣는다 BAT-420 계획에는 들어가지 않은 채 끝났고 BAT-620만 남았다(2026-11-17 확인).
 - BAT-165 R-663 리뷰 R165-15 낮음: `main.ts`가 시작 따라잡기·사전 첫 읽기를 기다린 뒤에야 웹훅 발송기와 `SIGTERM` 처리기를 건다. 따라잡기 중 `SIGTERM` 정상 종료 시험
 - BAT-165 R-663 리뷰 R165-16 낮음: 따라잡기·1분 정리가 지운 공연은 CDN 검색 경로를 비우지 않고 `search_removed`를 남기지 않는다(search.md §2.3·§10)
 - BAT-165 R-663 리뷰 R165-18 옛 차이 낮음: 관련 공연이 정본 §6의 '관심도 순'이 아니라 가나다 순이고, 빼는 범위가 맨 위 하나이며, 근거 판정이 정본 문장과 다르다(이 묶음 전부터). 오타 제안 거리는 6bf643eb(V165-4)에서 §4.4대로 고쳤다
 - BAT-165 R-663 리뷰 R165-20·R165-21·넘겨받기 낮음: 늦게 뜬 파드마다 전체 따라잡기를 한 번씩 다시 하고, 넘겨받은 파드는 앞 끊음을 다시 보지 않으며 `reconciled_at`에 앞 주인의 시작 시각이 적힌다(지금은 R165-20의 다시 하기가 경계를 메우니 함께 고친다). 이름 줄 바뀜 판정이 `norm`·`norm_nospace`·`jamo`·`chosung`을 보지 않는다
 - BAT-165 R-663 PgBouncer 컨테이너 시험 낮음: test-int에 PgBouncer가 없어 트랜잭션 풀링을 풀 대역으로만 본다. 외부 이미지를 들일지 정하고 따라잡기·정리를 실제 트랜잭션 풀링으로 돌리는 D 시험
 - BAT-165 R-663 보안 W7L2-S9 낮음: 연결 묶음 포화 보안 사건 줄이 503마다 하나라 공격 중에 로그가 몰린다. 파드마다 일정 시간에 한 번(그 사이 수 함께)으로 줄인다(application/search.ts, catalog-review 16.3.3)
-- BAT-165 R-663 보안 W7L2-S11 낮음: 검색어 가리기가 `/`·`_`·`,`로 이은 번호(`010/1234/5678`)를 놓친다. 정본 search.md §11 구분자 목록을 넓히고 `search-log.test.ts`에 더한다
 - BAT-165 R-663 정확성 W7L2-C1 중간: DB 어댑터의 `search_document.artists` 차례가 '보이는 순서'가 아니라 이름 차례다(0023 `jsonb_agg(DISTINCT …)`, 메모리 어댑터와 다름)
 - BAT-165 R-663 정확성 W7L2-C2·잇기 W7L2-W3 중간: 브라우저에서 거른 후보(peek)를 보일 때는 `search_suggest_shown_total`을 세지 않으면서 고른 것은 센다. 자동완성 선택률(search.md §11)이 부풀려진다(apps/web/src/widgets/app-shell/search-source.tsx)
 - BAT-165 R-663 정확성 W7L2-C3~C9 낮음: 검색어 없는 목록에서 빈 쪽이면 DB 어댑터만 관련 공연을 싣는다(C3). `minPrice`를 DB 어댑터가 늘 비운다(C4). 1시간 관심도 다시 세기가 판을 올리지 않는다(C5). 사전 갱신 문턱이 주기 10초와 같아 한 차례를 건너뛸 수 있다(C6). 따라잡기 끊음이 시작 시각으로 원천을 계산해 '순서와 상관없이 같은 결과' 문장이 맞지 않는다(C7). 골든 세트 정답 규칙·§5.3·코드 정렬이 셋 다 다르다(C8). 0023의 `aliases`·`interest` 꼴이 data.md와 다르다(C9). 자세한 것은 docs/review/measurements/W7-lane2-review-correctness.md
@@ -159,6 +153,10 @@
 - W8-L2-ci-loadtest R-667 리뷰 RVL-2·검증 M4: seatKeys 대조가 키 함수 23개를 입력 한 벌(`'E1','X2','Y3'`)로만 불러, 인자를 보지 않는 틀린 사본도 통과한다. 회차·계정·색인이 다른 입력 두 벌로 부른다(`loadtest/test/poc-seat.test.mjs` 95·115행)
 - W8-L2-ci-loadtest R-667 리뷰 RVL-1: 계획 4절의 우선 구매 연산 목록에 `pin`(좌석 묶기, R-604부터 KEYS에 `prio`)이 빠졌다. 측정 도구가 묶기를 대조하게 될 때 함께 적는다(redis-seat-store.ts 512~526행)
 - W8-L2-ci-loadtest R-667 리뷰 RVL-4: docs/data.md 2520행 `s:{event:E}:prio` 행이 만료 연결을 '후속'이라 적었으나 R-587이 이미 이었다(expiry-sweeper.ts 401~403행, start.ts 483행). 문장을 고친다
+- W9-fix3(R-675) 리뷰 N1 낮음: 본문 전 판정(`admitBeforeBody`)의 `deviceOnly`가 `scanner_device` 허용만 보고 `@ScannerAuth` 유무·`token: 'required'`를 보지 않아 가드보다 너그럽다. 그런 칸막이 경로가 생기면 신원 없는 요청이 자리를 잡고 본문을 읽은 뒤 가드에서 401이 된다(우회는 아니고 '자리 0' 보장만 빈다, 지금 그런 경로 없음). 시작 때 막거나 `@ScannerAuth` 옵션도 경로 설정에 적는다(packages/platform/src/auth.ts)
+- W9-fix3(R-675) 리뷰 N2 낮음: 칸막이 훅의 거절은 본문이 이미 다 왔거나 없어도 늘 `Connection: close`다. purchase 쓰기 칸막이가 과부하 때마다 게이트웨이 → 파드 연결을 끊어 가장 바쁠 때 연결 맺기 비용이 늘 수 있다(측정 안 함). 바꾼다면 정본 guidelines §7 문장을 '본문이 남았으면'으로 좁히고 훅도 `bodyPending`을 쓴다. 검증 V-F4c(본문을 다 읽은 뒤 오류 답이 keep-alive인지 보는 시험 없음)와 함께 본다(packages/platform/src/request-checks.ts)
+- W9-fix3(R-675) 리뷰 N4 낮음: 칸막이 경로는 신원 판정이 자리보다 앞이라, 칸막이가 찬 때에도 요청마다 identity를 부른다. 게이트웨이를 거치지 않는 위조 머리로 identity 부름을 늘릴 수 있다(1초 시간 초과·5초 캐시 있음). identity 쪽 부하 한도가 이 길도 덮는지 본다(packages/platform/src/request-checks.ts)
+- W9-fix3(R-675) 계획 범위 밖: 정본 architecture §3.2의 내부 HTTP 예외 목록이 REST 행 하나뿐인데 실제 내부 HTTP(`/internal/v1/…`)를 부르는 서비스는 purchase·payment·ops·ticket으로 더 많다. 목록을 실제와 맞춘다(docs/architecture.md)
 
 ## 진행 로그
 - 2026-11-04 갈래 파일을 만들었다(ADR-0190 결정 3). 지난 병렬 세션 기록(PRF-010~120)은 [docs/progress-archive.md](../progress-archive.md)에 있다.
