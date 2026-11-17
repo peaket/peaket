@@ -8,9 +8,12 @@ import { describe, expect, test } from 'vitest';
 import { MemoryEventRefundStore } from '../src/modules/refund/adapters/memory-event-refund-store.js';
 import { EventRefundService } from '../src/modules/refund/application/event-refund-service.js';
 import type { EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
-import type { CsCaseOutbox, EventRefundClaims, EventRefundFailureNotice } from '../src/modules/refund/domain/event-refund-ports.js';
+import type { CsCaseOutbox, EventRefundClaims, EventRefundFailureNotice, EventRefundStore } from '../src/modules/refund/domain/event-refund-ports.js';
 import { EVENT_REFUND_CLAIM_MS, HttpDeductionGapNotice, HttpEntryFlagNotice, MemoryEventRefundAttemptStore, RefundAfterEntry } from '../src/modules/refund/index.js';
 import { requireOpsInternalToken } from '../src/refund-wiring.js';
+// 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test, 2026-11-17, 계획 §11 보충 5)
+import { eventRefundCancellationId, progressOf, type EventRefundItem } from '../src/modules/refund/domain/event-refund.js';
+import { CS_CASE_REOPEN_BUDGET_MS, CS_CASE_REOPEN_MAX_UNREACHABLE, CsCaseRejected, CsCaseReopenBudget, HttpRefundFailureNotice } from '../src/modules/refund/index.js';
 
 const NOW = Date.parse('2026-11-20T10:00:00.000Z');
 const REQUEST = '0194c800-0000-7000-8000-000000000001';
@@ -105,9 +108,12 @@ describe('차액 건 행마다 다시 열기 [BAT-420 웨이브 끝 리뷰 C2·S
   const outboxOf = (rows: ReturnType<typeof gapRow>[]) => {
     const opened = new Map<string, number>();
     const limits: number[] = [];
-    const outbox: Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened'> = {
+    // 다시 보기 2 N2(2026-11-17): 다시 열기 포트에 일괄 환불 실패 건 둘이 더해졌다. 이 묶음은 차액 건만 보므로 빈 목록이다
+    const outbox: Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened' | 'pendingItemFailures' | 'markItemFailureOpened'> = {
       pendingGaps: async (limit) => (limits.push(limit), rows.filter((r) => !opened.has(r.cancellationId))),
       markGapOpened: async (id, nowMs) => void opened.set(id, nowMs),
+      pendingItemFailures: async () => [],
+      markItemFailureOpened: async () => undefined,
     };
     return { outbox, opened, limits };
   };
@@ -195,6 +201,44 @@ describe('CS 어댑터는 2xx만 연 것으로 본다 [BAT-420 웨이브 끝 리
     await expect(flagOpen(new HttpEntryFlagNotice(answering(202), 'it-token'))).resolves.toBeUndefined();
   });
 
+  // 다시 보기 2 N2(시험 담당 l3w8-420-n-test, 2026-11-17): 환급 실패 어댑터도 다른 둘과 같이 2xx만 연 것이다
+  test('GAT-110 N2 환급 실패 어댑터는 2xx가 아니거나 연결 실패·시간 초과면 던진다', async () => {
+    const sent: { path: string; token: string | null; body: unknown }[] = [];
+    const client = (answer: number | Error) => ({
+      request: async (r: { path: string; headers?: Record<string, string>; body?: unknown }) => {
+        sent.push({ path: r.path, token: new Headers(r.headers).get('x-peaket-internal-token'), body: JSON.parse(String(r.body)) });
+        if (answer instanceof Error) throw answer;
+        return new Response('{}', { status: answer });
+      },
+    });
+    const open = (n: HttpRefundFailureNotice, cancellationId: string) => n.open({ cancellationId, orderId: ORDER, attempts: 5, lastError: 'REJECTED', nowMs: NOW });
+    const envToken = process.env.PEAKET_INTERNAL_TOKEN;
+    process.env.PEAKET_INTERNAL_TOKEN = 'env-token-not-used';
+    try {
+      for (const status of [401, 400, 500]) {
+        const err = await open(new HttpRefundFailureNotice(client(status), 'it-token'), randomUUID()).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(err, String(status)).toBeInstanceOf(CsCaseRejected);
+        expect(err, String(status)).toMatchObject({ kind: 'refund-failed', status });
+      }
+      const refused = connError();
+      await expect(open(new HttpRefundFailureNotice(client(refused), 'it-token'), randomUUID())).rejects.toBe(refused);
+      const timeout = timeoutError();
+      await expect(open(new HttpRefundFailureNotice(client(timeout), 'it-token'), randomUUID())).rejects.toBe(timeout);
+      sent.length = 0;
+      const id = randomUUID();
+      await expect(open(new HttpRefundFailureNotice(client(202), 'it-token'), id)).resolves.toBeUndefined();
+      expect(sent).toEqual([
+        { path: '/internal/v1/cs-cases', token: 'it-token', body: { eventKey: id, kind: 'REFUND_FAILED', sourceId: id, category: 'REFUND', createdAt: new Date(NOW).toISOString() } },
+      ]);
+    } finally {
+      if (envToken === undefined) delete process.env.PEAKET_INTERNAL_TOKEN;
+      else process.env.PEAKET_INTERNAL_TOKEN = envToken;
+    }
+  });
+
   test('R-T38 ④ 환급 실행기는 열지 않은 이상 표시 건을 틱마다 다시 열고, 실패하면 연 시각을 쓰지 않고(지표 하나) 다음 틱에 연다', async () => {
     const row = { cancellationId: randomUUID(), orderId: ORDER, ticketId: TICKET, enteredAtMs: NOW - 60_000 };
     const opened = new Map<string, number>();
@@ -218,6 +262,9 @@ describe('CS 어댑터는 2xx만 연 것으로 본다 [BAT-420 웨이브 끝 리
       csOutbox: {
         pendingFlags: async (limit) => (limits.push(limit), opened.has(row.cancellationId) ? [] : [row]),
         markFlagOpened: async (id, nowMs) => void opened.set(id, nowMs),
+        // 다시 보기 2 N2(2026-11-17): 환급 실패 건 둘이 더해졌다. 이 시험은 이상 표시만 보므로 빈 목록이다
+        pendingRefundFailures: async () => [],
+        markRefundFailureOpened: async () => undefined,
       },
       csCaseOpenFailures: { inc: (kind) => void metric.push(kind) },
       log: { warn: () => undefined, error: () => undefined },
@@ -251,6 +298,30 @@ describe('운영 시작 검사 [BAT-420 웨이브 끝 리뷰 S1]', () => {
     }
   });
 
+  // 다시 보기 2 N2(시험 담당 l3w8-420-n-test): 환급 실패 어댑터도 내부 토큰을 생성자로 받는다(다른 두 CS 어댑터와 같게, process.env를 읽지 않음)
+  test('GAT-110 N2 start.ts·relay-app.ts는 환급 실패 어댑터(HttpRefundFailureNotice)를 만들 때마다 내부 토큰을 둘째 인자로 넘긴다', () => {
+    /** `new HttpRefundFailureNotice(` 뒤 괄호 짝이 맞는 인자 목록에서 맨 바깥 쉼표가 있는지 */
+    const hasSecondArg = (text: string, at: number): boolean => {
+      let depth = 0;
+      for (let i = at; i < text.length; i++) {
+        const ch = text[i]!;
+        if (ch === '(' || ch === '{' || ch === '[') depth++;
+        else if (ch === ')' || ch === '}' || ch === ']') {
+          depth--;
+          if (depth === 0) return false;
+        } else if (ch === ',' && depth === 1) return /\S/.test(text.slice(i + 1, text.indexOf(')', i + 1)));
+      }
+      return false;
+    };
+    for (const file of ['relay-app.ts', 'start.ts']) {
+      const text = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+      const marker = 'new HttpRefundFailureNotice(';
+      const starts = [...text.matchAll(/new HttpRefundFailureNotice\(/g)].map((m) => m.index! + marker.length - 1);
+      expect(starts.length, file).toBeGreaterThan(0);
+      for (const at of starts) expect(hasSecondArg(text, at), `${file}@${at}`).toBe(true);
+    }
+  });
+
   test('GAT-110 K2 start.ts·relay-app.ts의 일괄 환불은 잡기(claims)와 CS 건 다시 열기(csOutbox)를 꽂는다', () => {
     for (const file of ['relay-app.ts', 'start.ts']) {
       const text = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
@@ -260,5 +331,466 @@ describe('운영 시작 검사 [BAT-420 웨이브 끝 리뷰 S1]', () => {
       expect(block, file).toMatch(/\bclaims\s*[:,}]/);
       expect(block, file).toMatch(/\bcsOutbox\s*[:,}]/);
     }
+  });
+});
+
+// ---- BAT-420 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5 bb70a744) ----
+// 정본: docs/features/transfer-refund.md §3.1 ⑥ 'CS 건 열기와 다시 열기'·§5 '주인', docs/api/guidelines.md §8.1 'ops-svc CS 처리함 내부 HTTP'.
+// 시계는 가짜다: ops 대역이 부를 때마다 가짜 시간을 밀어 무응답(5,000ms 뒤 시간 초과)·지연(4,000ms 뒤 202)을 만든다. 실제 시계·HTTP는 test-int(event-refund·cancellation)가 본다.
+type Clock = { t: number };
+type OpsAnswer = 'hang' | 'conn' | 202 | 400 | 401 | 500 | { readonly slowMs: number };
+const uuidOf = (n: number) => `0194c800-0000-7000-8000-${n.toString(16).padStart(12, '0')}`;
+const timeoutError = () => Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+const connError = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+
+/** ops 대역: 부를 때마다 차례 기록에 'ops:…'를 남긴다. queue를 먼저 쓰고, 비면 mode다 */
+function opsDouble(clock: Clock, log: string[]) {
+  const d = {
+    mode: 'hang' as OpsAnswer,
+    queue: [] as OpsAnswer[],
+    async call(label: string): Promise<void> {
+      log.push(`ops:${label}`);
+      const a = d.queue.length > 0 ? d.queue.shift()! : d.mode;
+      if (a === 'hang') {
+        clock.t += 5_000;
+        throw timeoutError();
+      }
+      if (a === 'conn') throw connError();
+      if (typeof a === 'object') {
+        clock.t += a.slowMs;
+        return;
+      }
+      if (a !== 202) throw new CsCaseRejected('refund-failed', a);
+    },
+  };
+  return d;
+}
+const opsCalls = (log: readonly string[]) => log.filter((l) => l.startsWith('ops:'));
+/** 결제사 호출이 하나 이상 있고 모든 결제사 호출이 첫 ops 호출보다 앞이다 */
+const paysBeforeOps = (log: readonly string[]) => {
+  const lastPay = log.reduce((at, l, i) => (l.startsWith('pay:') ? i : at), -1);
+  const firstOps = log.findIndex((l) => l.startsWith('ops:'));
+  return lastPay >= 0 && (firstOps === -1 || firstOps > lastPay);
+};
+const named = (warns: readonly { o: object; msg: string }[], name: string) => warns.filter((w) => JSON.stringify(w).includes(name));
+
+const failureRow = (n: number) => ({ requestId: REQUEST, orderId: uuidOf(0x1000 + n), ticketId: uuidOf(0x2000 + n), cancellationId: uuidOf(0x3000 + n), attempts: 1, lastError: 'REJECTED' });
+const gapRowOf = (n: number) => ({ cancellationId: uuidOf(0x4000 + n), orderId: uuidOf(0x5000 + n), deductionAmount: 3_333, requestId: REQUEST });
+type ReopenBox = Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened' | 'pendingItemFailures' | 'markItemFailureOpened'>;
+
+/** 열지 않은 일괄 환불 실패 건·차액 건 목록 대역(연 시각은 mark를 부른 것만) */
+function reopenOutbox(itemFailures: readonly ReturnType<typeof failureRow>[], gaps: readonly ReturnType<typeof gapRowOf>[]) {
+  const itemOpened = new Map<string, number>();
+  const gapOpened = new Map<string, number>();
+  const outbox: ReopenBox = {
+    pendingItemFailures: async (limit) => itemFailures.filter((r) => !itemOpened.has(`${r.requestId}/${r.ticketId}`)).slice(0, limit),
+    markItemFailureOpened: async (requestId, ticketId, nowMs) => void itemOpened.set(`${requestId}/${ticketId}`, nowMs),
+    pendingGaps: async (limit) => gaps.filter((r) => !gapOpened.has(r.cancellationId)).slice(0, limit),
+    markGapOpened: async (id, nowMs) => void gapOpened.set(id, nowMs),
+  };
+  return { outbox, itemOpened, gapOpened };
+}
+
+type ItemExtra = Parameters<EventRefundStore['updateItem']>[2];
+/** 메모리 저장소의 항목 쓰기를 엿본다(끝내기와 같은 저장에 실은 표시 extra) */
+function captureWrites(store: MemoryEventRefundStore) {
+  const writes: { item: EventRefundItem; extra: ItemExtra }[] = [];
+  const real = store.updateItem.bind(store);
+  store.updateItem = async (item, outbox, extra?: ItemExtra) => (writes.push({ item, extra }), real(item, outbox, extra));
+  return writes;
+}
+/** 저장소가 받은 표시로 만든 다시 열기 포트 대역: 일괄 환불 실패는 failureCase를 실은 FAILED 쓰기, 차액은 저장소의 차액 표시 */
+function storeOutbox(store: MemoryEventRefundStore, writes: ReturnType<typeof captureWrites>) {
+  const itemOpened = new Map<string, number>();
+  const gapOpened = new Map<string, number>();
+  const outbox: ReopenBox = {
+    pendingItemFailures: async (limit) =>
+      writes
+        .filter((w) => w.item.status === 'FAILED' && w.extra?.failureCase === true && !itemOpened.has(`${w.item.requestId}/${w.item.ticketId}`))
+        .slice(0, limit)
+        .map((w) => ({ requestId: w.item.requestId, orderId: w.item.orderId, ticketId: w.item.ticketId, cancellationId: w.item.cancellationId, attempts: w.item.attempts, lastError: w.item.lastError ?? 'failed' })),
+    markItemFailureOpened: async (requestId, ticketId, nowMs) => void itemOpened.set(`${requestId}/${ticketId}`, nowMs),
+    pendingGaps: async (limit) =>
+      [...store.deductionGaps.entries()]
+        .filter(([id]) => !gapOpened.has(id))
+        .slice(0, limit)
+        .map(([cancellationId, requestId]) => ({ cancellationId, orderId: ORDER, deductionAmount: 3_333, requestId })),
+    markGapOpened: async (id, nowMs) => void gapOpened.set(id, nowMs),
+  };
+  return { outbox, itemOpened, gapOpened };
+}
+
+/** 실행 중(RUNNING) 요청 하나와 지금 처리할 PENDING 항목(표마다 주문 하나)을 넣고 그 대상 표를 준다 */
+async function seedRunning(store: MemoryEventRefundStore, requestId: string, eventId: string, nowMs: number, overs: readonly Partial<EventRefundItem>[]): Promise<EventRefundTarget[]> {
+  const targets = overs.map(() => target({ orderId: randomUUID(), ticketId: randomUUID() }));
+  const items: EventRefundItem[] = targets.map((t, i) => ({
+    requestId,
+    orderId: t.orderId,
+    ticketId: t.ticketId,
+    cancellationId: eventRefundCancellationId(requestId, t.ticketId),
+    pg: 'TOSS',
+    status: 'PENDING',
+    attempts: 0,
+    appliedAtMs: nowMs,
+    nextAttemptAtMs: nowMs,
+    ...overs[i],
+  }));
+  await store.create(
+    {
+      requestId,
+      eventId,
+      kind: 'CANCEL',
+      status: 'RUNNING',
+      fault: 'ORGANIZER',
+      targetOrders: items.length,
+      refundTotal: items.length * 33_333,
+      compensationTargets: 0,
+      compensationTotal: 0,
+      progress: progressOf(items, [], false),
+      ruledBy: 'commander-1',
+      confirmedBy: 'operator-2',
+      createdAtMs: nowMs,
+      updatedAtMs: nowMs,
+    },
+    items,
+  );
+  return targets;
+}
+
+/** 다시 열기 포트를 꽂은 일괄 환불 실행기(결제사는 늘 환급). 일괄 환불 실패 건은 notice, 차액 건은 gapNotice로 ops 대역을 부른다 */
+function reopenService(o: { clock: Clock; log: string[]; ops: ReturnType<typeof opsDouble>; outbox: ReopenBox }) {
+  const store = new MemoryEventRefundStore();
+  const targetsByEvent = new Map<string, EventRefundTarget[]>();
+  const metric: string[] = [];
+  const cuts: string[] = [];
+  const warns: { o: object; msg: string }[] = [];
+  const service = new EventRefundService({
+    store,
+    targets: { list: async (eventId) => targetsByEvent.get(eventId) ?? [] },
+    canceller: { cancel: async (t) => (o.log.push(`pay:${t.ticketId}`), { status: 'REFUNDED' }) },
+    notice: { open: (q) => o.ops.call(`fail:${q.cancellationId}`) },
+    gapNotice: { open: (q) => o.ops.call(`gap:${q.cancellationId}`) },
+    csOutbox: o.outbox,
+    csCaseOpenFailures: { inc: (kind) => void metric.push(kind), cut: (reason) => void cuts.push(reason) },
+    log: { warn: (x, msg) => void warns.push({ o: x, msg }) },
+    nowMs: () => o.clock.t,
+    deadlineMs: () => o.clock.t + 5_000,
+  });
+  return { service, store, targetsByEvent, metric, cuts, warns };
+}
+
+describe('CS 건 다시 열기는 틱 끝에서 시간 예산 안에만 [BAT-420 다시 보기 2 N1]', () => {
+  test('GAT-110 N1 ops-svc가 답하지 않아도 일괄 환불 틱은 결제사를 먼저 부르고 다시 열기는 시간 초과 두 번에서 멈춘다', async () => {
+    const clock: Clock = { t: NOW };
+    const log: string[] = [];
+    const ops = opsDouble(clock, log);
+    const box = reopenOutbox(
+      Array.from({ length: 30 }, (_, i) => failureRow(i)),
+      Array.from({ length: 30 }, (_, i) => gapRowOf(i)),
+    );
+    const r = reopenService({ clock, log, ops, outbox: box.outbox });
+    r.targetsByEvent.set(EVENT, await seedRunning(r.store, REQUEST, EVENT, NOW, [{}, {}]));
+    const before = clock.t;
+    await r.service.runDue();
+    // 장애 주입이 실제로 끼어들었는지 먼저: ops를 불렀고 가짜 시간이 밀렸다
+    expect(opsCalls(log)).toHaveLength(2);
+    expect(clock.t - before).toBeGreaterThan(0);
+    expect(log.filter((l) => l.startsWith('pay:'))).toHaveLength(2);
+    expect(paysBeforeOps(log)).toBe(true);
+    expect(clock.t - before).toBeLessThanOrEqual(10_000);
+    const cut = named(r.warns, 'cs-case-reopen-cut');
+    expect(cut).toHaveLength(1);
+    expect(JSON.stringify(cut[0])).toContain('unreachable');
+    expect(r.cuts).toEqual(['unreachable']);
+    // 차례는 일괄 환불 실패 → 차액이라 멈추기 전 둘은 일괄 환불 실패 건이다
+    expect(r.metric).toEqual(['EVENT_REFUND_FAILED', 'EVENT_REFUND_FAILED']);
+    expect(box.itemOpened.size + box.gapOpened.size).toBe(0);
+    // 다음 틱에 ops가 바로 202면 60건(종류마다 100건 한도 안) 모두 열린다
+    ops.mode = 202;
+    await r.service.runDue();
+    expect(box.itemOpened.size).toBe(30);
+    expect(box.gapOpened.size).toBe(30);
+    expect(r.cuts).toEqual(['unreachable']);
+  });
+
+  test('GAT-110 N1 ops-svc가 느리게(4초) 답하면 한 틱의 다시 열기는 5초 예산에서 멈추고 남은 건은 다음 틱이다', async () => {
+    const clock: Clock = { t: NOW };
+    const log: string[] = [];
+    const ops = opsDouble(clock, log);
+    ops.mode = { slowMs: 4_000 };
+    // 열지 않은 건 다섯(일괄 환불 실패 셋·차액 둘). 예산은 그 틱의 모든 종류가 함께 쓴다
+    const failures = [failureRow(1), failureRow(2), failureRow(3)];
+    const box = reopenOutbox(failures, [gapRowOf(1), gapRowOf(2)]);
+    const r = reopenService({ clock, log, ops, outbox: box.outbox });
+    const perTick: number[] = [];
+    for (let tick = 0; tick < 3; tick++) {
+      // 틱마다 처리할 항목 하나(다른 회차의 새 요청)를 넣어 결제사 호출이 다시 열기보다 앞인지 본다
+      const eventId = randomUUID();
+      r.targetsByEvent.set(eventId, await seedRunning(r.store, randomUUID(), eventId, clock.t, [{}]));
+      const from = log.length;
+      await r.service.runDue();
+      const slice = log.slice(from);
+      expect(slice.filter((l) => l.startsWith('pay:')), `tick ${tick}`).toHaveLength(1);
+      expect(paysBeforeOps(slice), `tick ${tick}`).toBe(true);
+      perTick.push(box.itemOpened.size + box.gapOpened.size);
+    }
+    expect(perTick).toEqual([2, 4, 5]);
+    expect(r.cuts).toEqual(['budget', 'budget']);
+    expect(named(r.warns, 'cs-case-reopen-cut')).toHaveLength(2);
+    expect(opsCalls(log).slice(0, 2)).toEqual([`ops:fail:${failures[0]!.cancellationId}`, `ops:fail:${failures[1]!.cancellationId}`]);
+
+    // 예산 경계: 남은 예산이 1ms면 부르고(4,999ms 뒤 둘째 호출) 0ms면 부르지 않는다(5,000ms 뒤 멈춤)
+    for (const [slowMs, expected] of [
+      [4_999, 2],
+      [5_000, 1],
+    ] as const) {
+      const c: Clock = { t: NOW };
+      const l: string[] = [];
+      const o2 = opsDouble(c, l);
+      o2.mode = { slowMs };
+      const b = reopenOutbox([failureRow(7), failureRow(8), failureRow(9)], []);
+      await reopenService({ clock: c, log: l, ops: o2, outbox: b.outbox }).service.runDue();
+      expect(b.itemOpened.size, `${slowMs}ms`).toBe(expected);
+    }
+    const c: Clock = { t: 0 };
+    const budget = new CsCaseReopenBudget({ nowMs: () => c.t });
+    expect(budget.canCall()).toBe(true);
+    c.t = CS_CASE_REOPEN_BUDGET_MS - 1;
+    expect(budget.canCall()).toBe(true);
+    c.t = CS_CASE_REOPEN_BUDGET_MS;
+    expect(budget.canCall()).toBe(false);
+    expect(budget.cut).toBe('budget');
+    expect(CS_CASE_REOPEN_BUDGET_MS).toBe(5_000);
+  });
+
+  test('GAT-110 N1 2xx 밖의 답은 잇따른 무응답에 세지 않는다', async () => {
+    const run = async (answers: readonly OpsAnswer[]) => {
+      const clock: Clock = { t: NOW };
+      const log: string[] = [];
+      const ops = opsDouble(clock, log);
+      ops.queue.push(...answers);
+      ops.mode = 202;
+      const box = reopenOutbox(
+        answers.map((_, i) => failureRow(20 + i)),
+        [],
+      );
+      const r = reopenService({ clock, log, ops, outbox: box.outbox });
+      await r.service.runDue();
+      return { calls: opsCalls(log).length, opened: box.itemOpened.size, failures: r.metric.length, cuts: r.cuts };
+    };
+    expect(await run([401, 'conn', 401, 'conn', 202])).toEqual({ calls: 5, opened: 1, failures: 4, cuts: [] });
+    // 대조: 연결 실패가 두 번 잇따르면 거기서 멈춘다
+    expect(await run(['conn', 'conn', 202])).toEqual({ calls: 2, opened: 0, failures: 2, cuts: ['unreachable'] });
+    const b = new CsCaseReopenBudget({ nowMs: () => NOW });
+    b.record('unreachable');
+    b.record('rejected');
+    b.record('unreachable');
+    expect(b.canCall()).toBe(true);
+    b.record('unreachable');
+    expect(b.canCall()).toBe(false);
+    expect(b.cut).toBe('unreachable');
+    expect(CS_CASE_REOPEN_MAX_UNREACHABLE).toBe(2);
+  });
+
+  test('GAT-110 N1 다시 열기 포트가 있으면 처리 중에는 CS를 부르지 않는다', async () => {
+    const clock: Clock = { t: NOW };
+    const log: string[] = [];
+    const ops = opsDouble(clock, log);
+    ops.mode = 202;
+    const store = new MemoryEventRefundStore();
+    const writes = captureWrites(store);
+    const box = storeOutbox(store, writes);
+    const GAP = uuidOf(0x9001);
+    // 전환에서 진 항목(보류 취소를 마감 뒤 환급이 먼저 공제하고 보냄): 그 행이 차액 대상이다
+    const lost = target({ ticketId: uuidOf(0x9002), orderId: uuidOf(0x9003), pendingCancellationId: GAP });
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [target(), lost] },
+      canceller: { cancel: async (t) => (log.push(`pay:${t.ticketId}`), t.ticketId === TICKET ? { status: 'FAILED', error: 'REJECTED' } : { status: 'FAILED', error: 'cancellation-in-progress' }) },
+      notice: { open: (q) => ops.call(`fail:${q.cancellationId}`) },
+      gaps: { list: async () => [{ cancellationId: GAP, orderId: lost.orderId, ticketId: lost.ticketId, deductionAmount: 3_333 }] },
+      gapNotice: { open: (q) => ops.call(`gap:${q.cancellationId}`) },
+      configs: { config: async () => ({ saleEndsAtMs: NOW + 7 * 86_400_000, entryOpensAtMs: NOW - 3_600_000 }) },
+      csOutbox: box.outbox,
+      csCaseOpenFailures: { inc: () => undefined, cut: () => undefined },
+      nowMs: () => clock.t,
+      deadlineMs: () => clock.t + 5_000,
+    });
+    // API 파드의 Start(첫 묶음): 거절 항목 하나·전환에서 진 차액 항목 하나
+    await startOf(service);
+    expect(log.filter((l) => l.startsWith('pay:'))).toHaveLength(2);
+    expect(opsCalls(log)).toEqual([]);
+    const failed = writes.filter((w) => w.item.status === 'FAILED');
+    expect(failed).toHaveLength(2);
+    expect(failed.find((w) => w.item.ticketId === TICKET)?.extra).toMatchObject({ failureCase: true, cancellationFailure: { lastError: 'REJECTED' } });
+    const lostWrite = failed.find((w) => w.item.ticketId === lost.ticketId);
+    expect(lostWrite?.extra).toMatchObject({ deductionGap: { cancellationId: GAP, requestId: REQUEST } });
+    expect(lostWrite?.extra?.failureCase).toBeUndefined();
+    // 그 뒤 리더 runDue의 틱 끝에서 건 둘(일괄 환불 실패 → 차액 차례)
+    await service.runDue();
+    expect(opsCalls(log)).toEqual([`ops:fail:${eventRefundCancellationId(REQUEST, TICKET)}`, `ops:gap:${GAP}`]);
+    expect(box.itemOpened.size).toBe(1);
+    expect(box.gapOpened.get(GAP)).toBe(NOW);
+  });
+});
+
+describe('일괄 환불 실패 건의 열 대상 표시와 다시 열기 [BAT-420 다시 보기 2 N2]', () => {
+  test('GAT-110 N2 일괄 환불 항목이 FAILED로 끝나면 같은 커밋에 열 대상 표시가 남고 틱 끝에 열어 2xx면 연 시각을 쓴다', async () => {
+    const clock: Clock = { t: NOW };
+    const log: string[] = [];
+    const ops = opsDouble(clock, log);
+    ops.mode = 500;
+    const store = new MemoryEventRefundStore();
+    const writes = captureWrites(store);
+    const box = storeOutbox(store, writes);
+    const metric: string[] = [];
+    const warns: { o: object; msg: string }[] = [];
+    const targetsByEvent = new Map<string, EventRefundTarget[]>([[EVENT, [target()]]]);
+    const cancelAs = new Map<string, { status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED'; error?: string }>([[TICKET, { status: 'FAILED', error: 'REJECTED' }]]);
+    const service = new EventRefundService({
+      store,
+      targets: { list: async (eventId) => targetsByEvent.get(eventId) ?? [] },
+      canceller: { cancel: async (t) => cancelAs.get(t.ticketId) ?? { status: 'REFUNDED' } },
+      notice: { open: (q) => ops.call(`fail:${q.cancellationId}`) },
+      csOutbox: box.outbox,
+      csCaseOpenFailures: { inc: (kind) => void metric.push(kind), cut: () => undefined },
+      log: { warn: (x, msg) => void warns.push({ o: x, msg }) },
+      nowMs: () => clock.t,
+      deadlineMs: () => clock.t + 5_000,
+    });
+    // 결제사 거절: 항목 FAILED와 열 대상 표시가 같은 저장(updateItem 한 번)이다
+    await startOf(service);
+    const failed = writes.filter((w) => w.item.status === 'FAILED');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]!.extra).toMatchObject({ failureCase: true, cancellationFailure: { lastError: 'REJECTED' } });
+    expect(opsCalls(log)).toEqual([]);
+    // 첫 열기 500: 연 시각 빔·경고 하나·지표 하나·항목 FAILED 그대로
+    await service.runDue();
+    expect(opsCalls(log)).toEqual([`ops:fail:${eventRefundCancellationId(REQUEST, TICKET)}`]);
+    expect(box.itemOpened.size).toBe(0);
+    expect(named(warns, 'event-refund-failure-notice-failed')).toHaveLength(1);
+    expect(metric).toEqual(['EVENT_REFUND_FAILED']);
+    expect((await store.items(REQUEST))[0]).toMatchObject({ status: 'FAILED', lastError: 'REJECTED' });
+    // 다음 틱 202: 연 시각
+    ops.mode = 202;
+    clock.t += 10_000;
+    await service.runDue();
+    expect(box.itemOpened.get(`${REQUEST}/${TICKET}`)).toBe(NOW + 10_000);
+    // 그다음 틱: ops 호출 없음
+    await service.runDue();
+    expect(opsCalls(log)).toHaveLength(2);
+
+    // FAILED로 끝나는 다른 길도 표시 하나씩: 시도 상한(결과 모름 5번째), #retryOrFail의 FAILED 쓰기(그 밖 실패), 즉시 실패(target-not-found)
+    const event2 = randomUUID();
+    const request2 = randomUUID();
+    const [capped, other, missing] = await seedRunning(store, request2, event2, clock.t, [{ attempts: 4, status: 'UNKNOWN' }, {}, {}]);
+    targetsByEvent.set(event2, [capped!, other!]);
+    cancelAs.set(capped!.ticketId, { status: 'REFUND_PENDING' });
+    cancelAs.set(other!.ticketId, { status: 'FAILED', error: 'boom' });
+    await service.runDue();
+    const ended = writes.filter((w) => w.item.requestId === request2 && w.item.status === 'FAILED');
+    expect(ended.map((w) => [w.item.ticketId, w.item.lastError, w.extra?.failureCase]).sort()).toEqual(
+      [
+        [capped!.ticketId, 'refund-pending', true],
+        [other!.ticketId, 'boom', true],
+        [missing!.ticketId, 'target-not-found', true],
+      ].sort(),
+    );
+  });
+
+  test('GAT-110 N2 차액 건으로 대신한 항목에는 일괄 환불 실패 건을 열지 않는다', async () => {
+    const bodies: { category: string; sourceId: string; kind: string }[] = [];
+    const client = { request: async (r: { body?: unknown }) => (bodies.push(JSON.parse(String(r.body))), new Response('{}', { status: 202 })) };
+    const store = new MemoryEventRefundStore();
+    const writes = captureWrites(store);
+    const box = storeOutbox(store, writes);
+    const GAP = uuidOf(0x9101);
+    const lost = target({ pendingCancellationId: GAP });
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [lost] },
+      canceller: { cancel: async () => ({ status: 'FAILED', error: 'cancellation-in-progress' }) },
+      notice: new HttpRefundFailureNotice(client, 'it-token'),
+      gaps: { list: async () => [{ cancellationId: GAP, orderId: ORDER, ticketId: TICKET, deductionAmount: 3_333 }] },
+      gapNotice: new HttpDeductionGapNotice(client, 'it-token'),
+      configs: { config: async () => ({ saleEndsAtMs: NOW + 7 * 86_400_000, entryOpensAtMs: NOW - 3_600_000 }) },
+      csOutbox: box.outbox,
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    await startOf(service);
+    const w = writes.find((x) => x.item.status === 'FAILED');
+    expect(w?.item.lastError).toBe('cancellation-in-progress');
+    expect(w?.extra).toMatchObject({ deductionGap: { cancellationId: GAP } });
+    expect(w?.extra?.failureCase).toBeUndefined();
+    await service.runDue();
+    expect(bodies.filter((b) => b.category === 'DEDUCTION_GAP').map((b) => b.sourceId)).toEqual([GAP]);
+    expect(bodies.filter((b) => b.category === 'REFUND')).toEqual([]);
+  });
+
+  test('GAT-110 N2 옛 조립(다시 열기 포트 없음)은 처리 중에 한 번 열고 실패하면 경고·지표만 남긴다', async () => {
+    const store = new MemoryEventRefundStore();
+    const attempts = new MemoryEventRefundAttemptStore();
+    const warns: { o: object; msg: string }[] = [];
+    const metric: string[] = [];
+    let opens = 0;
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [target()] },
+      canceller: { cancel: async () => ({ status: 'FAILED', error: 'REJECTED' }) },
+      notice: {
+        open: async () => {
+          opens++;
+          throw new CsCaseRejected('refund-failed', 500);
+        },
+      },
+      attempts,
+      csCaseOpenFailures: { inc: (kind) => void metric.push(kind) },
+      log: { warn: (x, msg) => void warns.push({ o: x, msg }) },
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    const view = await startOf(service);
+    expect(opens).toBe(1);
+    // #finishItem은 참(끝남)이다: 항목 FAILED·진행률 실패 하나·시도 기록(REJECT)이 남는다
+    expect((await store.items(REQUEST))[0]).toMatchObject({ status: 'FAILED', lastError: 'REJECTED' });
+    expect(view.progress).toMatchObject({ failed: 1 });
+    expect(attempts.attempts.map((a) => a.outcome)).toEqual(['REJECT']);
+    expect(named(warns, 'event-refund-failure-notice-failed')).toHaveLength(1);
+    expect(metric).toEqual(['EVENT_REFUND_FAILED']);
+
+    // 마감 뒤 환급 실행기의 옛 조립: 환급 실패 건 열기가 던져도 run은 던지지 않고 다음 행을 처리한다
+    const pays: string[] = [];
+    const marks: string[] = [];
+    const rwarns: { o: object; msg: string }[] = [];
+    const rmetric: string[] = [];
+    let notices = 0;
+    const row = (id: string) => ({ cancellationId: id, orderId: `o-${id}`, ticketId: `t-${id}`, amount: 7_000, reason: 'USER', status: 'REFUND_PENDING', attempts: 0 });
+    const runner = new RefundAfterEntry({
+      nowMs: () => NOW,
+      writes: {
+        dueRefunds: async () => [row('c-1'), row('c-2')],
+        updateStatus: async () => true,
+        scheduleRefundRetry: async () => true,
+        markRefundFailed: async (q: { cancellationId: string }) => (marks.push(q.cancellationId), true),
+      } as never,
+      payments: { cancel: async (q) => (pays.push(q.cancellationId), 'REJECTED') },
+      entries: { lookup: async () => new Map() },
+      claims: { claimDue: async () => true, markEntryRecorded: async () => true },
+      failureNotice: {
+        open: async () => {
+          notices++;
+          if (notices === 1) throw connError();
+        },
+      },
+      csCaseOpenFailures: { inc: (kind) => void rmetric.push(kind) },
+      log: { warn: (x, msg) => void rwarns.push({ o: x, msg }), error: () => undefined },
+    });
+    await expect(runner.run()).resolves.toMatchObject({ failed: 2 });
+    expect(pays).toEqual(['c-1', 'c-2']);
+    expect(marks).toEqual(['c-1', 'c-2']);
+    expect(notices).toBe(2);
+    expect(named(rwarns, 'cancellation-refund-failure-notice-failed')).toHaveLength(1);
+    expect(rmetric).toEqual(['REFUND_FAILED']);
   });
 });

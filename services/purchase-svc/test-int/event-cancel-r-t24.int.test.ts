@@ -5,7 +5,7 @@
 // 시험 담당이 구현 전에 썼다(ADR-0270).
 import 'reflect-metadata';
 import { createHash, randomUUID } from 'node:crypto';
-import { createDatabase, ensureOutboxPartitions, fakeClock, type Database, type ExternalRequest } from '@peaket/platform';
+import { createDatabase, createExternalHttpClient, ensureOutboxPartitions, fakeClock, type Database, type ExternalRequest } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { startGrpcServer } from '../../ticket-svc/src/grpc-server.js';
@@ -36,6 +36,19 @@ import {
   type PaymentCancellations,
 } from '../src/modules/refund/index.js';
 import { migratePurchase } from '../scripts/migrate.mjs';
+// 다시 보기 2 N7(시험 담당 l3w8-420-n-test)
+import {
+  CancelTicket,
+  CancelTicketEventRefund,
+  DrizzleCsCaseOutbox,
+  DrizzleEventRefundAttempts,
+  EVENT_REFUND_CLAIM_MS,
+  EventRefundCancellerRouter,
+  HttpRefundFailureNotice,
+  OutboxEventRefundFanNotifier,
+  eventRefundNoticeKey,
+} from '../src/modules/refund/index.js';
+import { startOpsCsDouble } from './ops-cs-double.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const NOW = Date.parse('2026-11-20T18:30:00+09:00');
@@ -906,4 +919,150 @@ describe('BAT-420 웨이브 끝 리뷰 K1·K2 겹침 막기 [PostgreSQL·실제 
     await expect(claims.finish({ requestId, ticketId: third.items[0]!.ticketId, claimToken: third.claimToken, status: 'REFUNDED', attempts: 1 })).resolves.toBe(true);
     await expect(claims.finish({ requestId, ticketId: third.items[0]!.ticketId, claimToken: third.claimToken, status: 'FAILED', attempts: 2 })).resolves.toBe(false);
   });
+});
+
+// ---- BAT-420 다시 보기 2 N7(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5, transfer-refund §5 '주인') ----
+// 연기(POSTPONE) 신청 환급을 예매 취소 Saga 그대로(실제 ticket-svc gRPC·실제 DB) 돌리고 결제사 대역이 거절한다.
+// 항목은 FAILED로 끝나고(DB 칸 값), 행 실패 표시·팬 실패 알림 Outbox·열 대상 표시가 항목 끝내기 한 커밋이며, '일괄 환불 실패' 건은 틱 끝에 하나다.
+describe('BAT-420 다시 보기 2 N7 연기 신청 환급의 결제사 거절 [PostgreSQL·실제 ticket-svc gRPC]', () => {
+  let ops: Awaited<ReturnType<typeof startOpsCsDouble>>;
+  beforeAll(async () => {
+    ops = await startOpsCsDouble();
+  });
+  afterAll(async () => {
+    await ops?.close();
+  });
+  const postponeService = (nowMs: number, requestId: string, over: { claims?: DrizzleEventRefundClaims } = {}) => {
+    const client = createExternalHttpClient({ provider: 'ops-svc', baseUrl: ops.url, timeoutCapMs: 5_000 });
+    const real = new DrizzleCsCaseOutbox(purchaseDb);
+    return new EventRefundService({
+      store: new DrizzleEventRefundStore(purchaseDb, clock),
+      targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+      canceller: new EventRefundCancellerRouter({
+        cancel: new EventTicketCanceller({
+          tickets: ticketCancels!,
+          conversions: new DrizzlePendingCancellationConversions(purchaseDb),
+          orders: new DrizzleCancellationOrders(purchaseDb, configs),
+          writes,
+          payments,
+          calendar: new WeekendBusinessCalendar(),
+        }),
+        postpone: new CancelTicketEventRefund(new CancelTicket({ orders: new DrizzleCancellationOrders(purchaseDb, configs), writes, tickets: ticketCancels!, payments, calendar: new WeekendBusinessCalendar() })),
+      }),
+      items: new DrizzleEventRefundStore(purchaseDb, clock),
+      openOrders: new DrizzleEventOpenOrders(purchaseDb),
+      attempts: new DrizzleEventRefundAttempts(purchaseDb),
+      fanNotifier: new OutboxEventRefundFanNotifier(),
+      notice: new HttpRefundFailureNotice(client, 'it-token'),
+      claims: over.claims ?? new DrizzleEventRefundClaims(purchaseDb),
+      // 파일이 DB를 나눠 쓰므로 다시 열기 목록은 이 요청의 항목으로만 거른다
+      csOutbox: {
+        pendingItemFailures: async (limit: number) => (await real.pendingItemFailures(limit)).filter((r) => r.requestId === requestId),
+        markItemFailureOpened: (r: string, t: string, n: number) => real.markItemFailureOpened(r, t, n),
+        pendingGaps: async () => [],
+        markGapOpened: async () => undefined,
+      },
+      nowMs: () => nowMs,
+      deadlineMs: () => nowMs + 30_000,
+      concurrency: 2,
+    });
+  };
+  const startPostpone = (requestId: string, eventId: string) =>
+    postponeService(NOW, requestId).start({ eventId, requestId, kind: 'POSTPONE', fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2', postponedToMs: NOW + 7 * DAY, refundWindowClosesAtMs: NOW + 3 * DAY });
+  const itemOf = async (requestId: string, ticketId: string) =>
+    (await purchaseDb.pool.query<{ status: string; last_error: string | null; cancellation_id: string; claim_token: string | null }>('select status, last_error, cancellation_id, claim_token from event_refund_item where request_id = $1 and ticket_id = $2', [requestId, ticketId])).rows[0];
+  const rowOf = async (cancellationId: string) =>
+    (await purchaseDb.pool.query<{ status: string; refund_failed_at: Date | null; refund_attempts: number; event_cancellation_request_id: string | null }>('select status, refund_failed_at, refund_attempts, event_cancellation_request_id from order_cancellation where id = $1', [cancellationId])).rows[0];
+  const fanFailures = async (eventId: string, ticketId: string, requestId: string) =>
+    (await purchaseDb.pool.query<{ payload: Buffer }>('select payload from outbox where msg_key = $1', [eventId])).rows
+      .map((r) => JSON.parse(Buffer.from(r.payload).toString('utf8')) as { type: string; eventKey: string })
+      .filter((p) => p.type === 'REFUND_FAILED' && p.eventKey === eventRefundNoticeKey(requestId, ticketId, 'REFUND_FAILED'));
+  const rejects = async (requestId: string, ticketId: string) =>
+    (await purchaseDb.pool.query<{ outcome: string }>('select outcome from event_refund_attempt where request_id = $1 and ticket_id = $2', [requestId, ticketId])).rows.map((r) => r.outcome);
+  const callsFor = (cancellationId: string) => pays.filter((p) => p.cancellationId === cancellationId).length;
+
+  test('GAT-110 N7 연기 신청 표가 결제사에 거절되면 항목은 FAILED로 끝나고 CS 건 하나·팬 실패 알림 하나다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const applied = await seat(eventId);
+    const other = await seat(eventId);
+    await startPostpone(requestId, eventId);
+    // 신청(API 파드의 apply 대신 신청 칸만 쓰고) → 리더 runDue가 처리한다
+    expect(await new DrizzleEventRefundStore(purchaseDb, clock).markApplied(requestId, applied.ticketId, NOW)).toBe(true);
+    pays.length = 0;
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    payOutcome = 'REJECTED';
+    try {
+      await postponeService(NOW + MINUTE, requestId).runDue();
+    } finally {
+      payOutcome = 'CANCELLED';
+    }
+    const item = await itemOf(requestId, applied.ticketId);
+    // 결제사를 실제로 불렀고 거절됐다(장애 주입 확인)
+    expect(callsFor(item!.cancellation_id)).toBe(1);
+    expect(item).toMatchObject({ status: 'FAILED', last_error: 'REJECTED' });
+    const row = await rowOf(item!.cancellation_id);
+    expect(row).toMatchObject({ status: 'REFUND_PENDING', event_cancellation_request_id: requestId });
+    expect(row?.refund_failed_at).not.toBeNull();
+    expect(await fanFailures(eventId, applied.ticketId, requestId)).toHaveLength(1);
+    expect(await rejects(requestId, applied.ticketId)).toEqual(['REJECT']);
+    expect(ops.state.requests.filter((r) => r.body.sourceId === item!.cancellation_id).map((r) => [r.body.kind, r.body.category])).toEqual([['REFUND_FAILED', 'REFUND']]);
+    // 다른 항목이 끝나면(신청 창 닫기로 NOT_APPLIED) 요청은 COMPLETED
+    await postponeService(NOW + 2 * MINUTE, requestId).closeWindow({ requestId, closedBy: 'operator-2', reason: '시험' });
+    expect((await postponeService(NOW + 2 * MINUTE, requestId).get(requestId)).status).toBe('COMPLETED');
+    void other;
+    // 다음 runDue에 결제사 호출 0
+    await postponeService(NOW + DAY, requestId).runDue();
+    expect(callsFor(item!.cancellation_id)).toBe(1);
+  }, 60_000);
+
+  test('GAT-110 N7 거절을 받은 뒤 끝내기 전에 끊기면 다시 잡혀 같은 취소 ID로 다시 부르고 FAILED로 끝난다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seat(eventId);
+    await startPostpone(requestId, eventId);
+    expect(await new DrizzleEventRefundStore(purchaseDb, clock).markApplied(requestId, s.ticketId, NOW)).toBe(true);
+    pays.length = 0;
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    // 끝내기 저장을 한 번 실패시킨다(거절을 받은 뒤 파드가 끝난 것과 같다)
+    await purchaseDb.pool.query(
+      `create or replace function n7_item_fail() returns trigger language plpgsql as $$ begin raise exception 'injected n7'; end $$;
+       create trigger n7_item_fail before update on event_refund_item for each row when (new.request_id = '${requestId}' and new.status = 'FAILED') execute function n7_item_fail();`,
+    );
+    // 파드가 끝난 것처럼 실행 끝의 잡기 풀기도 하지 않는다(잡기는 기한까지 남는다)
+    const dying = Object.create(new DrizzleEventRefundClaims(purchaseDb)) as DrizzleEventRefundClaims;
+    dying.release = async () => undefined;
+    payOutcome = 'REJECTED';
+    try {
+      await postponeService(NOW + MINUTE, requestId, { claims: dying })
+        .runDue()
+        .catch(() => undefined);
+    } finally {
+      await purchaseDb.pool.query('drop trigger if exists n7_item_fail on event_refund_item; drop function if exists n7_item_fail();');
+    }
+    try {
+      const cut = await itemOf(requestId, s.ticketId);
+      // 장애 주입이 끼어들었는지 먼저: 결제사는 한 번 불렸고, 행에 실패 표시가 없고, 항목은 끝나지 않았고 잡기 값이 남았다
+      expect(callsFor(cut!.cancellation_id)).toBe(1);
+      expect((await rowOf(cut!.cancellation_id))?.refund_failed_at ?? null).toBeNull();
+      expect(cut?.status).not.toBe('FAILED');
+      expect(cut?.claim_token).not.toBeNull();
+      // 잡기 기한 안(59,999ms)에는 다시 잡히지 않는다
+      await postponeService(NOW + MINUTE + EVENT_REFUND_CLAIM_MS - 1, requestId).runDue();
+      expect(callsFor(cut!.cancellation_id)).toBe(1);
+      // 잡기 기한(60,000ms) 뒤 runDue: 다시 잡혀 같은 cancel-{취소 ID}로 다시 부르고 FAILED로 끝난다
+      await postponeService(NOW + MINUTE + EVENT_REFUND_CLAIM_MS, requestId).runDue();
+      expect(pays.filter((p) => p.cancellationId === cut!.cancellation_id)).toHaveLength(2);
+      // 대역 원장: 거절만 받았으니 나간 돈은 0이다
+      expect(await cancellationsOf([s.orderId])).toEqual([expect.objectContaining({ id: cut!.cancellation_id, status: 'REFUND_PENDING' })]);
+      expect(await itemOf(requestId, s.ticketId)).toMatchObject({ status: 'FAILED', last_error: 'REJECTED' });
+      expect((await rowOf(cut!.cancellation_id))?.refund_failed_at).not.toBeNull();
+      expect(ops.state.requests.filter((r) => r.body.sourceId === cut!.cancellation_id)).toHaveLength(1);
+      expect(await fanFailures(eventId, s.ticketId, requestId)).toHaveLength(1);
+    } finally {
+      payOutcome = 'CANCELLED';
+    }
+  }, 60_000);
 });

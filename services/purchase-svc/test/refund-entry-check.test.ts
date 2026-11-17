@@ -3,7 +3,7 @@
 // 모르면(조회 실패·표 없음) 환급하지 않고 다음 틱에 다시 묻고, 없으면 조건부로 집은 뒤에만 결제사를 부르는지 본다.
 // 저장소는 상태를 가진 대역이다(마감 시각 비교·조건부 갱신의 실제 SQL은 test-int/cancellation.int.test.ts가 본다). 시험 담당이 구현 전에 썼다(ADR-0270).
 import { describe, expect, test } from 'vitest';
-import { RefundAfterEntry, type EntryRecordView } from '../src/modules/refund/index.js';
+import { CsCaseRejected, RefundAfterEntry, type EntryRecordView } from '../src/modules/refund/index.js';
 
 const START = Date.parse('2026-11-20T19:00:00+09:00');
 /** 마감 = 공연 시작 + 50시간(180,000,000ms) */
@@ -294,5 +294,128 @@ describe('환급 실행기의 0행 쓰기·나눔·조립 [BAT-420 검증 살아
     expect(() => new RefundAfterEntry({ ...base, entries })).toThrow(/claims/);
     expect(() => new RefundAfterEntry({ ...base })).toThrow();
     expect(() => new RefundAfterEntry({ ...base, entries, claims })).not.toThrow();
+  });
+});
+
+// ---- BAT-420 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5, transfer-refund §3.1 ⑥) ----
+// 마감 뒤 환급 실행기도 CS 건(환급 실패 → 이상 표시 차례)을 처리 중에는 부르지 않고 틱 끝에서 5초 [가정] 예산 안에만 연다. 시계는 가짜다.
+describe('마감 뒤 환급 실행기의 CS 건 다시 열기 [BAT-420 다시 보기 2 N1·N2]', () => {
+  type Clock = { t: number };
+  type Ops = 'hang' | 202 | 500 | { readonly slowMs: number };
+  type Due = { cancellationId: string; orderId: string; ticketId: string; amount: number; reason: string; status: 'REQUESTED' | 'REFUND_PENDING'; attempts: number };
+  const due = (id: string, status: Due['status'], attempts = 0): Due => ({ cancellationId: `c-${id}`, orderId: `o-${id}`, ticketId: `t-${id}`, amount: 3_334, reason: 'USER', status, attempts });
+
+  /** 환급 실패 표시(refund_failed_at)·이상 표시(entry_recorded_at)를 가진 상태 대역과 ops 대역. 차례 기록에 일과 ops 호출을 남긴다 */
+  function rig(clock: Clock, o: { refundFailures?: number; flags?: number; due?: Due[]; pay?: (id: string) => 'CANCELLED' | 'REJECTED' | 'UNKNOWN' }) {
+    const log: string[] = [];
+    const ops = { mode: 'hang' as Ops };
+    const call = async (label: string): Promise<void> => {
+      log.push(`ops:${label}`);
+      const a = ops.mode;
+      if (a === 'hang') {
+        clock.t += 5_000;
+        throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+      }
+      if (typeof a === 'object') {
+        clock.t += a.slowMs;
+        return;
+      }
+      if (a !== 202) throw new CsCaseRejected('refund-failed', a);
+    };
+    const failed = new Map<string, { cancellationId: string; orderId: string; attempts: number; lastError: string }>();
+    for (let i = 0; i < (o.refundFailures ?? 0); i++) failed.set(`rf-${i}`, { cancellationId: `rf-${i}`, orderId: `o-rf-${i}`, attempts: 5, lastError: 'REJECTED' });
+    const refundOpened = new Map<string, number>();
+    const flagRows = Array.from({ length: o.flags ?? 0 }, (_, i) => ({ cancellationId: `fl-${i}`, orderId: `o-fl-${i}`, ticketId: `t-fl-${i}`, enteredAtMs: ENTERED_AT }));
+    const flagOpened = new Map<string, number>();
+    const metric: string[] = [];
+    const cuts: string[] = [];
+    const warns: { o: object; msg: string }[] = [];
+    const queue = [...(o.due ?? [])];
+    const runner = new RefundAfterEntry({
+      nowMs: () => clock.t,
+      writes: {
+        dueRefunds: async () => queue.splice(0),
+        updateStatus: async (q: { cancellationId: string; status: string }) => (log.push(`write:${q.cancellationId}:${q.status}`), true),
+        scheduleRefundRetry: async (q: { cancellationId: string }) => (log.push(`retry:${q.cancellationId}`), true),
+        markRefundFailed: async (q: { cancellationId: string; attempts: number; lastError: string }) => {
+          log.push(`failed:${q.cancellationId}`);
+          failed.set(q.cancellationId, { cancellationId: q.cancellationId, orderId: `o-${q.cancellationId}`, attempts: q.attempts, lastError: q.lastError });
+          return true;
+        },
+      } as never,
+      payments: { cancel: async (q) => (log.push(`pay:${q.cancellationId}`), o.pay?.(q.cancellationId) ?? 'CANCELLED') },
+      entries: {
+        lookup: async (ids) => (log.push('lookup'), new Map(ids.map((id) => [id, id === 't-ent' ? { found: true, entered: true, firstEnteredAtMs: ENTERED_AT } : { found: true, entered: false }]))),
+      },
+      claims: { claimDue: async (id) => (log.push(`claim:${id}`), true), markEntryRecorded: async (id) => (log.push(`entry:${id}`), true) },
+      failureNotice: { open: (q) => call(`fail:${q.cancellationId}`) },
+      flags: { open: (q) => call(`flag:${q.cancellationId}`) },
+      csOutbox: {
+        pendingRefundFailures: async (limit) => [...failed.values()].filter((r) => !refundOpened.has(r.cancellationId)).slice(0, limit),
+        markRefundFailureOpened: async (id, nowMs) => void refundOpened.set(id, nowMs),
+        pendingFlags: async (limit) => flagRows.filter((r) => !flagOpened.has(r.cancellationId)).slice(0, limit),
+        markFlagOpened: async (id, nowMs) => void flagOpened.set(id, nowMs),
+      },
+      csCaseOpenFailures: { inc: (kind) => void metric.push(kind), cut: (reason) => void cuts.push(reason) },
+      log: { warn: (x, msg) => void warns.push({ o: x, msg }), error: () => undefined },
+    });
+    const opsCalls = () => log.filter((l) => l.startsWith('ops:'));
+    const named = (name: string) => warns.filter((w) => JSON.stringify(w).includes(name));
+    return { runner, log, ops, failed, refundOpened, flagOpened, metric, cuts, warns, opsCalls, named };
+  }
+
+  test('GAT-090 N1 마감 뒤 환급 실행기도 다시 열기를 틱 끝에서 예산 안에만 한다', async () => {
+    const clock: Clock = { t: NOW };
+    // 이번 틱의 일: 입장 기록 없는 보류 취소(집고 환급), 입장 기록 있는 보류 취소(새 이상 표시), 결제사 거절(새 환급 실패)
+    const r = rig(clock, { refundFailures: 20, flags: 20, due: [due('new', 'REQUESTED'), due('ent', 'REQUESTED'), due('rej', 'REFUND_PENDING')], pay: (id) => (id === 'c-rej' ? 'REJECTED' : 'CANCELLED') });
+    const before = clock.t;
+    await expect(r.runner.run()).resolves.toMatchObject({ refunded: 1, failed: 1, entryRecorded: 1 });
+    // 장애 주입이 끼어들었는지 먼저: ops를 불렀고 가짜 시간이 밀렸다
+    expect(r.opsCalls()).toHaveLength(2);
+    expect(clock.t - before).toBeGreaterThan(0);
+    // 입장 기록 대조·집기·결제사·상태 쓰기가 모두 첫 ops 호출보다 앞이다(이번 틱에 새로 남긴 입장 기록·환급 실패도 처리 중에는 부르지 않는다)
+    const lastWork = r.log.reduce((at, l, i) => (/^(lookup|claim:|pay:|write:|failed:|entry:|retry:)/.test(l) ? i : at), -1);
+    const firstOps = r.log.findIndex((l) => l.startsWith('ops:'));
+    expect(r.log.filter((l) => l.startsWith('pay:'))).toEqual(['pay:c-new', 'pay:c-rej']);
+    expect(firstOps).toBeGreaterThan(lastWork);
+    // 차례는 환급 실패 → 이상 표시라 멈추기 전 둘은 환급 실패 건이다
+    expect(r.opsCalls()).toEqual(['ops:fail:rf-0', 'ops:fail:rf-1']);
+    expect(r.cuts).toEqual(['unreachable']);
+    expect(r.named('cs-case-reopen-cut')).toHaveLength(1);
+    expect(clock.t - before).toBeLessThanOrEqual(10_000);
+    expect(r.metric).toEqual(['REFUND_FAILED', 'REFUND_FAILED']);
+    expect(r.refundOpened.size + r.flagOpened.size).toBe(0);
+
+    // 느린 ops(4초)면 한 틱 2건
+    const c2: Clock = { t: NOW };
+    const slow = rig(c2, { refundFailures: 20, flags: 20 });
+    slow.ops.mode = { slowMs: 4_000 };
+    await slow.runner.run();
+    expect(slow.refundOpened.size + slow.flagOpened.size).toBe(2);
+    expect(slow.cuts).toEqual(['budget']);
+  });
+
+  test('GAT-090 N2 마감 뒤 환급 실행기는 환급 실패 건을 2xx로 받은 행만 연 것으로 적고 다음 틱에 다시 연다', async () => {
+    const clock: Clock = { t: NOW };
+    // 결제사 거절(첫 시도)과 결과 모름 5회 소진(앞 시도 4번) → 둘 다 refund_failed_at
+    const r = rig(clock, { due: [due('rej', 'REFUND_PENDING', 0), due('max', 'REFUND_PENDING', 4)], pay: (id) => (id === 'c-rej' ? 'REJECTED' : 'UNKNOWN') });
+    r.ops.mode = 500;
+    await expect(r.runner.run()).resolves.toMatchObject({ failed: 2 });
+    expect(r.log.filter((l) => l.startsWith('failed:'))).toEqual(['failed:c-rej', 'failed:c-max']);
+    // 틱 끝 ops 500: 연 시각 빔·경고·지표 하나씩, run은 던지지 않는다
+    expect(r.opsCalls()).toEqual(['ops:fail:c-rej', 'ops:fail:c-max']);
+    expect(r.refundOpened.size).toBe(0);
+    expect(r.named('cancellation-refund-failure-notice-failed')).toHaveLength(2);
+    expect(r.metric).toEqual(['REFUND_FAILED', 'REFUND_FAILED']);
+    // 다음 틱 202: 연 시각
+    r.ops.mode = 202;
+    clock.t += 60_000;
+    await expect(r.runner.run()).resolves.toMatchObject({ failed: 0 });
+    expect(r.refundOpened.get('c-rej')).toBe(NOW + 60_000);
+    expect(r.refundOpened.get('c-max')).toBe(NOW + 60_000);
+    // 그다음 틱: 다시 부르지 않는다
+    const calls = r.opsCalls().length;
+    await r.runner.run();
+    expect(r.opsCalls()).toHaveLength(calls);
   });
 });

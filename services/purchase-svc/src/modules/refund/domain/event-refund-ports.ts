@@ -50,7 +50,12 @@ export interface EventRefundStore {
      * cancellationFailure: 항목이 FAILED로 끝나면 같은 트랜잭션에서 그 취소 행(이 요청이 만들거나 전환한 REFUND_PENDING 행만)에 refund_failed_at·refund_last_error를 쓴다(웨이브 끝 리뷰 K1·C1).
      * deductionGap: 전환에서 지거나 겹친 항목의 차액 대상 행에 deduction_gap_at·deduction_gap_request_id를 쓴다(웨이브 끝 리뷰 C2·S1)
      */
-    extra?: { readonly cancellationFailure?: { readonly lastError: string }; readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string } },
+    extra?: {
+      readonly cancellationFailure?: { readonly lastError: string };
+      readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
+      /** 다시 보기 2 N2: 항목을 FAILED로 끝내는 같은 트랜잭션에서 event_refund_item.failure_case_at(일괄 환불 실패 건을 열 대상)을 쓴다. 차액 건으로 대신한 항목에는 싣지 않는다 */
+      readonly failureCase?: true;
+    },
   ): Promise<boolean | void>;
   /** 연기 신청을 조건부로 넣는다. 이미 신청했거나 창이 닫혀 NOT_APPLIED면 false다(신청·창 닫기 경합을 행 잠금으로 가른다) */
   markApplied(requestId: string, ticketId: string, appliedAtMs: number): Promise<boolean>;
@@ -179,9 +184,12 @@ export interface EventRefundServiceDeps {
    * 웨이브 끝 리뷰 C2·S1: 확정·항목 끝내기 트랜잭션에서 표시한 차액 건을 runDue 맨 앞에서 행마다 따로 연다(2xx를 받은 행만 연 시각을 쓴다).
    * 없으면(옛 조립) 차액 건을 표시와 함께 곧바로 연다(행마다 따로, 실패해도 나머지는 연다)
    */
-  readonly csOutbox?: Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened'>;
-  /** 웨이브 끝 리뷰 C2: 지표 purchase_cs_case_open_failures_total{kind}. CS 건 열기가 실패한 행마다 하나 */
-  readonly csCaseOpenFailures?: { inc(kind: 'DEDUCTION_GAP' | 'FLAGGED'): void };
+  readonly csOutbox?: Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened' | 'pendingItemFailures' | 'markItemFailureOpened'>;
+  /**
+   * 웨이브 끝 리뷰 C2: 지표 purchase_cs_case_open_failures_total{kind}. CS 건 열기가 실패한 행마다 하나.
+   * 다시 보기 2 N1·N2: kind에 REFUND_FAILED·EVENT_REFUND_FAILED, 틱의 다시 열기를 멈추면 cut(purchase_cs_case_reopen_cut_total{reason})
+   */
+  readonly csCaseOpenFailures?: CsCaseOpenSignals;
 }
 
 // ---- 웨이브 끝 리뷰 K2·C2·S1: 일괄 환불 항목의 주인과 겹침 막기, CS 건 다시 열기 ----
@@ -210,6 +218,8 @@ export interface EventRefundClaims {
     readonly outbox?: readonly EventRefundOutboxMessage[];
     readonly cancellationFailure?: { readonly lastError: string };
     readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
+    /** 다시 보기 2 N2: 같은 트랜잭션에서 그 항목에 failure_case_at을 쓴다(FAILED로 끝낼 때, 차액 건으로 대신하면 싣지 않음) */
+    readonly failureCase?: true;
   }): Promise<boolean>;
   /** 그 잡기 값의 남은 잡기를 푼다(처리하지 않고 남긴 항목을 다른 쪽이 곧 잡게) */
   release(requestId: string, claimToken: string): Promise<void>;
@@ -218,7 +228,13 @@ export interface EventRefundClaims {
 /** 한 틱에 다시 여는 CS 건 수 [가정](차액·이상 표시 각각) */
 export const CS_CASE_REOPEN_BATCH = 100;
 
-/** 열지 않은 CS 건(차액·이상 표시)을 행마다 다시 연다. 한 틱에 100건 [가정] */
+/** CS 건 열기 실패·다시 열기 멈춤 지표(purchase_cs_case_open_failures_total{kind}·purchase_cs_case_reopen_cut_total{reason}) */
+export interface CsCaseOpenSignals {
+  inc(kind: 'DEDUCTION_GAP' | 'FLAGGED' | 'REFUND_FAILED' | 'EVENT_REFUND_FAILED'): void;
+  cut?(reason: 'budget' | 'unreachable'): void;
+}
+
+/** 열지 않은 CS 건(차액·이상 표시·일괄 환불 실패·환급 실패)을 행마다 다시 연다. 한 틱에 종류마다 100건 [가정] */
 export interface CsCaseOutbox {
   /** deduction_gap_at이 있고 deduction_gap_opened_at이 빈 행(표시 시각 순) */
   pendingGaps(limit: number): Promise<readonly { cancellationId: string; orderId: string; deductionAmount: number; requestId: string }[]>;
@@ -228,6 +244,16 @@ export interface CsCaseOutbox {
   pendingFlags(limit: number): Promise<readonly { cancellationId: string; orderId: string; ticketId: string; enteredAtMs: number }[]>;
   /** ops-svc가 2xx로 받은 뒤에만 부른다. 이미 쓴 행은 그대로다 */
   markFlagOpened(cancellationId: string, nowMs: number): Promise<void>;
+  /**
+   * 다시 보기 2 N2: failure_case_at이 있고 failure_case_opened_at이 빈 일괄 환불 항목(그 취소 행이 REFUNDED·VOIDED가 아님, 행이 없어도 넣음, failure_case_at 순)
+   */
+  pendingItemFailures(limit: number): Promise<readonly { requestId: string; orderId: string; ticketId: string; cancellationId: string; attempts: number; lastError: string }[]>;
+  /** ops-svc가 2xx로 받은 뒤에만 부른다 */
+  markItemFailureOpened(requestId: string, ticketId: string, nowMs: number): Promise<void>;
+  /** 다시 보기 2 N2: refund_failed_at이 있고 refund_failed_opened_at이 빈, 회차 취소 요청 ID가 없는 REFUND_PENDING 행(refund_failed_at 순) */
+  pendingRefundFailures(limit: number): Promise<readonly { cancellationId: string; orderId: string; attempts: number; lastError: string }[]>;
+  /** ops-svc가 2xx로 받은 뒤에만 부른다 */
+  markRefundFailureOpened(cancellationId: string, nowMs: number): Promise<void>;
 }
 
 // ---- BAT-420 몫 D(OPEN[45] 결정): 미룸·차액 건 ----

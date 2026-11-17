@@ -11,7 +11,7 @@
 // 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기가 처리하지 못한다(CS 알림 대상).
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type DueRefund } from '../domain/cancellation.js';
-import { CS_CASE_REOPEN_BATCH, type CsCaseOutbox, type EventRefundHolds } from '../domain/event-refund-ports.js';
+import { CS_CASE_REOPEN_BATCH, type CsCaseOpenSignals, type CsCaseOutbox, type EventRefundHolds } from '../domain/event-refund-ports.js';
 import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationOrders, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
 
 export interface RefundAfterEntryDeps {
@@ -39,9 +39,9 @@ export interface RefundAfterEntryDeps {
    * 웨이브 끝 리뷰 S1: 열지 않은 이상 표시 건(entry_recorded_at 있음·entry_flag_opened_at 빔)을 틱 맨 앞에서 100건 [가정]까지 행마다 다시 열고,
    * ops-svc가 2xx로 받은 행만 markFlagOpened를 쓴다. 없으면(옛 조립) 입장 기록을 남길 때 한 번만 연다
    */
-  csOutbox?: Pick<CsCaseOutbox, 'pendingFlags' | 'markFlagOpened'>;
-  /** 웨이브 끝 리뷰 C2·S1: 지표 purchase_cs_case_open_failures_total{kind}. 이상 표시 건 열기가 실패한 행마다 FLAGGED 하나 */
-  csCaseOpenFailures?: { inc(kind: 'DEDUCTION_GAP' | 'FLAGGED'): void };
+  csOutbox?: Pick<CsCaseOutbox, 'pendingFlags' | 'markFlagOpened' | 'pendingRefundFailures' | 'markRefundFailureOpened'>;
+  /** 웨이브 끝 리뷰 C2·S1: 지표 purchase_cs_case_open_failures_total{kind}. 이상 표시 건 열기가 실패한 행마다 FLAGGED 하나(다시 보기 2: 환급 실패는 REFUND_FAILED, 멈춤은 cut) */
+  csCaseOpenFailures?: CsCaseOpenSignals;
 }
 
 /** 한 번에 처리하는 취소 수 [가정] */

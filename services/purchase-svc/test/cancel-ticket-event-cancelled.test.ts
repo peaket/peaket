@@ -162,3 +162,71 @@ describe('확정된 회차의 팬 취소·견적 HTTP [BAT-420 리뷰 D5]', () =
     expect(p.calls).toMatchObject({ tickets: 0, payments: 0, creates: 0 });
   });
 });
+
+// ---- BAT-420 다시 보기 2 N7(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5, transfer-refund §5 '주인') ----
+// 연기 신청 환급(예매 취소 Saga)은 회차 취소 요청 ID가 달린 행에 실패 표시(refund_failed_at)를 쓰지 않는다. 시도 수·마지막 결과만 적고 거절 답을 돌려준다.
+describe('연기 신청 환급 행의 실패 표시 [BAT-420 다시 보기 2 N7]', () => {
+  const EVENT_REQUEST = '0194c700-0000-7000-8000-0000000000e1';
+  const sagaOf = (payment: 'REJECTED' | 'UNKNOWN', existingAttempts?: number) => {
+    const failedMarks: { cancellationId: string; attempts: number; lastError: string }[] = [];
+    const retries: { cancellationId: string; attempts: number; lastError: string }[] = [];
+    let pays = 0;
+    const writes: CancellationWrites = {
+      create: async () => ({ status: 'CREATED' }),
+      updateStatus: async () => undefined,
+      scheduleRefundRetry: async (q) => void retries.push({ cancellationId: q.cancellationId, attempts: q.attempts, lastError: q.lastError }),
+      markRefundFailed: async (q) => void failedMarks.push({ cancellationId: q.cancellationId, attempts: q.attempts, lastError: q.lastError }),
+      dueRefunds: async () => [],
+    };
+    const orders = {
+      findByTicket: async () => view,
+      findCancellation: async (id: string) =>
+        existingAttempts === undefined ? undefined : { cancellationId: id, orderId: ORDER, ticketId: TICKET, refundAmount: 33_333, state: 'REFUND_PENDING' as const, refundAttempts: existingAttempts },
+    };
+    const saga = new CancelTicket({
+      orders,
+      calendar,
+      tickets: { cancel: async () => 'REFUND_NOW' },
+      payments: { cancel: async () => (pays++, payment) },
+      writes,
+      seats: { returnSold: async () => 1 },
+    });
+    return { saga, failedMarks, retries, pays: () => pays };
+  };
+  const postponeInput = (cancellationId: string, eventCancellationRequestId?: string) => ({
+    accountId: ACCOUNT,
+    ticketId: TICKET,
+    cancellationId,
+    reason: eventCancellationRequestId ? ('EVENT_POSTPONED' as const) : ('USER' as const),
+    nowMs: NOW,
+    deadlineMs: NOW + 5_000,
+    ...(eventCancellationRequestId ? { eventCancellationRequestId } : {}),
+  });
+
+  test('GAT-110 N7 예매 취소 Saga는 회차 취소 요청 ID가 달린 행에 실패 표시를 쓰지 않는다', async () => {
+    // 첫 시도: 요청 ID 있음 + 결제사 거절 → 실패 표시 0, 재시도 적기 하나(시도 수·마지막 결과), 답은 REFUND_PENDING·REJECTED
+    const first = sagaOf('REJECTED');
+    const id = randomUUID();
+    await expect(first.saga.execute(postponeInput(id, EVENT_REQUEST))).resolves.toMatchObject({ status: 'REFUND_PENDING', cancellationId: id, refundAmount: 33_333, payment: 'REJECTED' });
+    expect(first.pays()).toBe(1);
+    expect(first.failedMarks).toEqual([]);
+    expect(first.retries).toEqual([{ cancellationId: id, attempts: 1, lastError: 'REJECTED' }]);
+
+    // 다시 보냄(같은 취소 ID, 앞 시도 4번): 다섯째 시도(Saga 상한)인 결과 모름·거절도 실패 표시를 쓰지 않는다
+    for (const payment of ['UNKNOWN', 'REJECTED'] as const) {
+      const replay = sagaOf(payment, 4);
+      const rid = randomUUID();
+      await expect(replay.saga.execute(postponeInput(rid, EVENT_REQUEST)), payment).resolves.toMatchObject({ status: 'REFUND_PENDING', cancellationId: rid, payment });
+      expect(replay.pays(), payment).toBe(1);
+      expect(replay.failedMarks, payment).toEqual([]);
+      expect(replay.retries, payment).toEqual([{ cancellationId: rid, attempts: 5, lastError: payment }]);
+    }
+
+    // 대조: 요청 ID 없음(팬 취소)은 지금처럼 거절이면 실패 표시 하나다
+    const fan = sagaOf('REJECTED');
+    const fid = randomUUID();
+    await expect(fan.saga.execute(postponeInput(fid))).resolves.toMatchObject({ status: 'REFUND_PENDING', payment: 'REJECTED' });
+    expect(fan.failedMarks).toEqual([{ cancellationId: fid, attempts: 1, lastError: 'REJECTED' }]);
+    expect(fan.retries).toEqual([]);
+  });
+});

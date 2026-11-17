@@ -46,4 +46,16 @@ describe('/internal/v1/cs-cases', () => {
     expect(first.caseId).toEqual(expect.any(String));
     expect(JSON.parse((await post(body)).payload)).toEqual({ accepted: true, caseId: first.caseId });
   });
+
+  // BAT-420 다시 보기 2 N2(시험 담당 l3w8-420-n-test, 2026-11-17): purchase-svc의 틱 끝 다시 열기는 같은 환급 실패 건을 같은 eventKey(취소 ID)로 다시 보낸다(멱등 대조)
+  test('GAT-110 N2 같은 취소 ID의 REFUND_FAILED(category REFUND)를 두 번 받아도 둘 다 2xx이고 열린 건은 하나다', async () => {
+    const cancellationId = '0194b000-0000-7000-8000-0000000a0420';
+    const body = { eventKey: cancellationId, kind: 'REFUND_FAILED', sourceId: cancellationId, category: 'REFUND', createdAt: new Date(NOW).toISOString() };
+    const a = await post(body);
+    const b = await post(body);
+    expect([a.statusCode, b.statusCode]).toEqual([202, 202]);
+    const first = JSON.parse(a.payload) as { accepted: boolean; caseId?: string };
+    expect(first).toEqual({ accepted: true, caseId: expect.any(String) });
+    expect(JSON.parse(b.payload)).toEqual({ accepted: true, caseId: first.caseId });
+  });
 });

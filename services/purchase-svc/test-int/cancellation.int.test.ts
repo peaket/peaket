@@ -10,7 +10,7 @@
 // - BAT-415: 맨 아래 묶음이 장부 범위 R-T3(양도 요청 중 거절)·R-T4(돌려받은 표의 결제자 취소, payment_cancel 한 행)를 본다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { createDatabase, createHotRedis, ensureOutboxPartitions, fakeClock, type Database, type HotRedis } from '@peaket/platform';
+import { createDatabase, createExternalHttpClient, createHotRedis, ensureOutboxPartitions, fakeClock, type Database, type HotRedis } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import {
@@ -47,6 +47,9 @@ import {
   WeekendBusinessCalendar,
 } from '../src/modules/refund/index.js';
 import { migratePurchase } from '../scripts/migrate.mjs';
+// 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test)
+import { DrizzleCsCaseOutbox, HttpEntryFlagNotice, HttpRefundFailureNotice } from '../src/modules/refund/index.js';
+import { startOpsCsDouble } from './ops-cs-double.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { type ShardSubscriber, shardSubscriber, startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -1143,4 +1146,110 @@ describe('BAT-420 웨이브 끝 리뷰 K1 회차 취소 행의 주인 [실제 ti
     // 뒤 시험이 다시 집지 않게 끝낸다
     await admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = any($1::uuid[]) and status = 'REFUND_PENDING'", [made.map((m) => m.cancellationId)]);
   });
+});
+
+// ---- BAT-420 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5, transfer-refund §3.1 ⑥) ----
+// 마감 뒤 환급 실행기가 실제 SQL(DrizzleCsCaseOutbox)로 열지 않은 환급 실패·이상 표시 건을 찾고, 실제 HTTP 어댑터로 틱 끝에 여는지 본다.
+// 결제사·입장 기록 대조는 기록 대역이다(이 묶음은 CS 건의 차례·시간·대상 고르기를 본다). 파일이 DB를 나눠 써서 목록은 이 시험의 행으로만 거른다.
+describe('BAT-420 다시 보기 2 N1·N2 마감 뒤 환급 실행기의 CS 건 다시 열기 [PostgreSQL·실제 HTTP]', () => {
+  let ops: Awaited<ReturnType<typeof startOpsCsDouble>>;
+  const log: string[] = [];
+  beforeAll(async () => {
+    ops = await startOpsCsDouble(log);
+  });
+  afterAll(async () => {
+    await ops?.close();
+  });
+  /** 그 표의 취소 행 하나를 칸 값 그대로 넣는다(표마다 진행 중 취소는 하나) */
+  const putRow = async (w: World, o: { status: 'REQUESTED' | 'REFUND_PENDING' | 'VOIDED'; dueAt?: Date; entryAt?: Date; failedAt?: Date; requestId?: string; attempts?: number }): Promise<string> => {
+    const id = randomUUID();
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at,
+                                       refund_due_at, entry_recorded_at, refund_failed_at, refund_last_error, refund_attempts, event_cancellation_request_id)
+       values ($1, $2, $3, $4, 0, false, 0, 0, 1000, $5, now(), now(), $6, $7, $8, $9, $10, $11)`,
+      [id, w.orderId, w.ticketId, o.requestId ? 'EVENT_CANCELLED' : 'USER', o.status, o.dueAt ?? null, o.entryAt ?? null, o.failedAt ?? null, o.failedAt ? 'REJECTED' : null, o.attempts ?? 0, o.requestId ?? null],
+    );
+    return id;
+  };
+  const scoped = (mine: ReadonlySet<string>) => {
+    const real = new DrizzleCsCaseOutbox(admin);
+    return {
+      pendingRefundFailures: async (limit: number) => (await real.pendingRefundFailures(limit)).filter((r) => mine.has(r.cancellationId)),
+      markRefundFailureOpened: (id: string, nowMs: number) => real.markRefundFailureOpened(id, nowMs),
+      pendingFlags: async (limit: number) => (await real.pendingFlags(limit)).filter((r) => mine.has(r.cancellationId)),
+      markFlagOpened: (id: string, nowMs: number) => real.markFlagOpened(id, nowMs),
+    };
+  };
+  const runnerOf = (mine: ReadonlySet<string>, pay: (id: string) => 'CANCELLED' | 'REJECTED') => {
+    const client = createExternalHttpClient({ provider: 'ops-svc', baseUrl: ops.url, timeoutCapMs: 5_000 });
+    const scopedWrites = Object.create(writes) as typeof writes;
+    scopedWrites.dueRefunds = async (nowMs, limit) => (await writes.dueRefunds(nowMs, limit)).filter((r) => mine.has(r.cancellationId));
+    return new RefundAfterEntry({
+      writes: scopedWrites,
+      payments: { cancel: async (q) => (log.push(`pay:${q.cancellationId}`), pay(q.cancellationId)) },
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: writes,
+      failureNotice: new HttpRefundFailureNotice(client, 'it-token'),
+      flags: new HttpEntryFlagNotice(client, 'it-token'),
+      csOutbox: scoped(mine),
+      csCaseOpenFailures: { inc: () => undefined, cut: () => undefined },
+      log: { warn: () => undefined, error: () => undefined },
+      nowMs: () => Date.now(),
+    });
+  };
+  const opened = async (ids: readonly string[], column: 'entry_flag_opened_at' | 'refund_failed_opened_at') =>
+    Number((await admin.pool.query<{ n: string }>(`select count(*) as n from order_cancellation where id = any($1::uuid[]) and ${column} is not null`, [ids])).rows[0]!.n);
+
+  test('GAT-090 N1 실제 DB에서 느린 ops(4초)에도 마감 뒤 환급 실행기는 결제사를 먼저 부르고 한 틱에 2건만 연다', async () => {
+    const hourAgo = new Date(Date.now() - HOUR);
+    const flagged: string[] = [];
+    for (let i = 0; i < 3; i++) flagged.push(await putRow(await world(), { status: 'REQUESTED', entryAt: hourAgo }));
+    const due = await putRow(await world(), { status: 'REQUESTED', dueAt: hourAgo });
+    const mine = new Set([...flagged, due]);
+    log.length = 0;
+    ops.state.requests.length = 0;
+    ops.state.mode = { slowMs: 4_000, status: 202 };
+    await runnerOf(mine, () => 'CANCELLED').run();
+    // 장애 주입이 끼어들었는지 먼저: 느린 ops가 요청을 받았다
+    expect(ops.state.requests.length).toBeGreaterThan(0);
+    expect(log.filter((l) => l === `pay:${due}`)).toHaveLength(1);
+    expect(log.indexOf(`pay:${due}`)).toBeLessThan(log.findIndex((l) => l.startsWith('ops:')));
+    expect(ops.state.requests.map((r) => r.body.kind)).toEqual(['FLAGGED', 'FLAGGED']);
+    expect(await opened(flagged, 'entry_flag_opened_at')).toBe(2);
+    await runnerOf(mine, () => 'CANCELLED').run();
+    expect(await opened(flagged, 'entry_flag_opened_at')).toBe(3);
+  }, 60_000);
+
+  test('GAT-090 N2 마감 뒤 환급 실행기는 환급 실패 건을 2xx로 받은 행만 연 것으로 적고 다음 틱에 다시 연다', async () => {
+    const hourAgo = new Date(Date.now() - HOUR);
+    // 예매 취소 Saga가 결제사 거절로 표시한 팬 행(이 실행기 밖에서 표시됨)
+    const fanMarked = await putRow(await world(), { status: 'REFUND_PENDING', failedAt: hourAgo, attempts: 1 });
+    // 이 실행기가 이번 틱에 결제사 거절로 표시할 행
+    const rejected = await putRow(await world(), { status: 'REFUND_PENDING', attempts: 0 });
+    // 열지 않는 행: 회차 취소 요청 ID가 달린 실패 행(그 항목의 일괄 환불 실패 건 하나만), CS가 무효로 끝낸 행
+    const withRequest = await putRow(await world(), { status: 'REFUND_PENDING', failedAt: hourAgo, attempts: 1, requestId: randomUUID() });
+    const voided = await putRow(await world(), { status: 'VOIDED', failedAt: hourAgo, attempts: 1 });
+    const mine = new Set([fanMarked, rejected, withRequest, voided]);
+    log.length = 0;
+    ops.state.requests.length = 0;
+    ops.state.mode = 500;
+    await expect(runnerOf(mine, () => 'REJECTED').run()).resolves.toMatchObject({ failed: 1 });
+    expect((await cancellationRow(rejected))?.refund_failed_at).not.toBeNull();
+    // 틱 끝 ops 500: 두 행 모두 불렀고 연 시각은 빔
+    expect(ops.state.requests.map((r) => r.body.sourceId).sort()).toEqual([fanMarked, rejected].sort());
+    expect(ops.state.requests.every((r) => r.body.kind === 'REFUND_FAILED' && r.body.category === 'REFUND' && r.token === 'it-token')).toBe(true);
+    expect(await opened([fanMarked, rejected], 'refund_failed_opened_at')).toBe(0);
+    // 다음 틱 202 → 연 시각
+    ops.state.mode = 202;
+    await runnerOf(mine, () => 'REJECTED').run();
+    expect(await opened([fanMarked, rejected], 'refund_failed_opened_at')).toBe(2);
+    const n = ops.state.requests.length;
+    await runnerOf(mine, () => 'REJECTED').run();
+    expect(ops.state.requests).toHaveLength(n);
+    expect(ops.state.requests.map((r) => r.body.sourceId)).not.toContain(withRequest);
+    expect(ops.state.requests.map((r) => r.body.sourceId)).not.toContain(voided);
+    expect(await opened([withRequest, voided], 'refund_failed_opened_at')).toBe(0);
+    // 뒤 시험이 다시 집지 않게 끝낸다
+    await admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = any($1::uuid[]) and status = 'REFUND_PENDING'", [[...mine]]);
+  }, 60_000);
 });

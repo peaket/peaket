@@ -841,3 +841,48 @@ describe('0025 CS 건 다시 열기·일괄 환불 잡기 칸 [BAT-420 웨이브
     expect(defs.some((d) => d.includes('claim_token is null') && d.includes('claimed_until is null'))).toBe(true);
   });
 });
+
+// ---- BAT-420 다시 보기 2 N2(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5 '필요한 마이그레이션', 감독 배정 0026) ----
+describe('0026 환급 실패·일괄 환불 실패 건의 연 시각 칸 [BAT-420 다시 보기 2 N2]', () => {
+  test('GAT-110 N2 마이그레이션: 칸 셋·CHECK·부분 색인 둘', async () => {
+    expect(journal.entries.map((e) => e.tag).some((t) => /^0026_/.test(t))).toBe(true);
+    const colsOf = async (table: string, names: string[]) =>
+      (
+        await q<{ column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(
+          "select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = $1 and column_name = any($2::text[]) order by column_name",
+          [table, names],
+        )
+      ).rows;
+    expect(await colsOf('order_cancellation', ['refund_failed_opened_at'])).toEqual([{ column_name: 'refund_failed_opened_at', data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null }]);
+    expect(await colsOf('event_refund_item', ['failure_case_at', 'failure_case_opened_at'])).toEqual([
+      { column_name: 'failure_case_at', data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null },
+      { column_name: 'failure_case_opened_at', data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null },
+    ]);
+    // 부분 색인 둘: 환급 실패 다시 열기(요청 ID 없는 행만)·일괄 환불 실패 다시 열기
+    const ocIdx = (await q<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'order_cancellation'")).rows.map((r) => r.indexdef.toLowerCase());
+    expect(ocIdx.some((d) => d.includes('refund_failed_at is not null') && d.includes('refund_failed_opened_at is null') && d.includes('event_cancellation_request_id is null'))).toBe(true);
+    const itemIdx = (await q<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'event_refund_item'")).rows.map((r) => r.indexdef.toLowerCase());
+    expect(itemIdx.some((d) => d.includes('failure_case_at is not null') && d.includes('failure_case_opened_at is null'))).toBe(true);
+    // CHECK: failure_case_at 없이 failure_case_opened_at만 쓰면 거절(23514), 둘 다 있거나 표시만 있으면 받는다
+    const requestId = id();
+    const eventId = id();
+    await q(
+      `insert into event_cancellation_request (id, event_id, kind, status, fault, target_orders, refund_total, compensation_targets, compensation_total, progress, created_at, updated_at)
+       values ($1, $2, 'CANCEL', 'RUNNING', 'ORGANIZER', 0, 0, 0, 0, '{"total":0,"done":0,"failed":0,"notApplied":0,"perPg":[]}'::jsonb, now(), now())`,
+      [requestId, eventId],
+    );
+    const item = async (failureCaseAt: string | null, openedAt: string | null) =>
+      q(
+        `insert into event_refund_item (request_id, ticket_id, order_id, cancellation_id, pg, status, attempts, updated_at, failure_case_at, failure_case_opened_at)
+         values ($1, $2, $3, $4, 'TOSS', 'FAILED', 1, now(), $5::timestamptz, $6::timestamptz)`,
+        [requestId, id(), id(), id(), failureCaseAt, openedAt],
+      );
+    await expect(item(null, new Date().toISOString())).rejects.toMatchObject({ code: '23514' });
+    await expect(item(new Date().toISOString(), null)).resolves.toBeDefined();
+    await expect(item(new Date().toISOString(), new Date().toISOString())).resolves.toBeDefined();
+    await expect(item(null, null)).resolves.toBeDefined();
+    // 다시 돌려도 같다
+    await migratePurchase(url);
+    expect(await count('select count(*) as n from drizzle.__drizzle_migrations', [])).toBe(journal.entries.length);
+  });
+});

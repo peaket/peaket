@@ -159,5 +159,7 @@ export { DrizzleEventRefundClaims } from './adapters/db/drizzle-event-refund-cla
 export { EVENT_REFUND_CLAIM_MS, type CsCaseOutbox, type EventRefundClaims } from './domain/event-refund-ports.js';
 export { DrizzleCsCaseOutbox } from './adapters/db/drizzle-cs-case-outbox.js';
 export { PromCsCaseSignals } from './adapters/prom-cs-case-signals.js';
+export { CS_CASE_REOPEN_BUDGET_MS, CS_CASE_REOPEN_MAX_UNREACHABLE, CsCaseReopenBudget } from './application/cs-case-reopen.js';
+export { CsCaseRejected } from './adapters/cs-case-response.js';
 export { HttpDeductionGapNotice } from './adapters/http-deduction-gap-notice.js';
 export type { EventRefundGrpcOptions } from './inbound/event-refund.grpc.js';

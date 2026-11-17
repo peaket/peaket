@@ -53,4 +53,21 @@ export class DrizzleCsCaseOutbox implements CsCaseOutbox {
       update order_cancellation set entry_flag_opened_at = ${new Date(nowMs)}::timestamptz
        where id = ${cancellationId}::uuid and entry_recorded_at is not null and entry_flag_opened_at is null`);
   }
+
+  // ---- 다시 보기 2 N2 빈 뼈대(시험 담당, 구현 전에 씀): 0026이 받칠 칸을 쓰는 질의는 구현 담당이 채운다 ----
+  async pendingItemFailures(_limit: number): ReturnType<CsCaseOutbox['pendingItemFailures']> {
+    throw new Error('아직 없음');
+  }
+
+  async markItemFailureOpened(_requestId: string, _ticketId: string, _nowMs: number): Promise<void> {
+    throw new Error('아직 없음');
+  }
+
+  async pendingRefundFailures(_limit: number): ReturnType<CsCaseOutbox['pendingRefundFailures']> {
+    throw new Error('아직 없음');
+  }
+
+  async markRefundFailureOpened(_cancellationId: string, _nowMs: number): Promise<void> {
+    throw new Error('아직 없음');
+  }
 }

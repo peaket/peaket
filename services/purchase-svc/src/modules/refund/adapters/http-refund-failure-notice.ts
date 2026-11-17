@@ -15,7 +15,11 @@ interface Failure {
 }
 
 export class HttpRefundFailureNotice implements RefundFailureNotice, EventRefundFailureNotice {
-  constructor(private readonly client: Pick<ExternalHttpClient, 'request'>) {}
+  // 다시 보기 2 N2 빈 뼈대(시험 담당): 둘째 인자 내부 토큰은 구현 담당이 쓴다(다른 두 CS 어댑터와 같은 생성자)
+  constructor(
+    private readonly client: Pick<ExternalHttpClient, 'request'>,
+    _internalToken?: string,
+  ) {}
 
   async open(q: Failure): Promise<void> {
     try {

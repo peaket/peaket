@@ -5,7 +5,7 @@ import { MemoryEventRefundStore } from '../src/modules/refund/adapters/memory-ev
 import { EventRefundService } from '../src/modules/refund/application/event-refund-service.js';
 import { compensationAmount, eventRefundCancellationId, progressOf, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { EventRefundCanceller, EventRefundFailureNotice, EventRefundStartInput, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
-import { EventTicketCanceller, MemoryEventRefundAttemptStore, WeekendBusinessCalendar, eventRefundPreviewOf } from '../src/modules/refund/index.js';
+import { CancelTicketEventRefund, EventTicketCanceller, MemoryEventRefundAttemptStore, WeekendBusinessCalendar, eventRefundPreviewOf, type CancelTicket } from '../src/modules/refund/index.js';
 
 const NOW = Date.parse('2026-11-14T05:00:00.000Z');
 const REQUEST = '0193a000-0000-7000-8000-000000000001';
@@ -514,5 +514,47 @@ describe('확정과 겹친 팬 공제 환급의 차액 건 [BAT-420 리뷰 D5]',
       expect(r.notices, JSON.stringify(fan)).toHaveLength(1);
       expect(r.notices[0]).toMatchObject({ ticketId: TICKET, lastError: 'ticket-already-ended' });
     }
+  });
+});
+
+// ---- BAT-420 다시 보기 2 N7(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5, transfer-refund §5 '주인') ----
+describe('연기 취소기 어댑터의 결제사 거절 [BAT-420 다시 보기 2 N7]', () => {
+  const sagaAnswering = (payment: 'REJECTED' | 'PENDING' | 'UNKNOWN', calls: { n: number } = { n: 0 }) =>
+    new CancelTicketEventRefund({
+      execute: async (i: { cancellationId: string }) => (calls.n++, { status: 'REFUND_PENDING' as const, cancellationId: i.cancellationId, refundAmount: 33_333, payment }),
+    } as unknown as CancelTicket);
+
+  test('GAT-110 N7 연기 취소기 어댑터는 거절만 FAILED(REJECTED)로 주고 결과 모름은 재시도로 둔다', async () => {
+    const q = { requestId: REQUEST, eventId: EVENT, cancellationId: randomUUID(), reason: 'EVENT_POSTPONED' as const, nowMs: NOW, deadlineMs: NOW + 5_000 };
+    await expect(sagaAnswering('REJECTED').cancel(target(), q)).resolves.toEqual({ status: 'FAILED', error: 'REJECTED' });
+    await expect(sagaAnswering('PENDING').cancel(target(), q)).resolves.toMatchObject({ status: 'REFUND_PENDING' });
+    await expect(sagaAnswering('UNKNOWN').cancel(target(), q)).resolves.toMatchObject({ status: 'REFUND_PENDING' });
+
+    // 거절은 실행기에서 업무 거절 FAILED(REJECTED)로 끝난다
+    const rejected = new MemoryEventRefundStore();
+    await new EventRefundService({ store: rejected, targets: { list: async () => [target()] }, canceller: sagaAnswering('REJECTED'), nowMs: () => NOW, deadlineMs: () => NOW + 5_000 }).start({
+      eventId: EVENT,
+      requestId: REQUEST,
+      fault: 'ORGANIZER',
+      ruledBy: 'commander-1',
+      confirmedBy: 'operator-2',
+    });
+    expect((await rejected.items(REQUEST))[0]).toMatchObject({ status: 'FAILED', lastError: 'REJECTED' });
+
+    // 결과 모름은 UNKNOWN 재시도로 남고 다음 시각(첫 재시도 60,000ms) 뒤에 다시 잡힌다
+    const clock = { t: NOW };
+    const calls = { n: 0 };
+    const store = new MemoryEventRefundStore();
+    const service = new EventRefundService({ store, targets: { list: async () => [target()] }, canceller: sagaAnswering('UNKNOWN', calls), nowMs: () => clock.t, deadlineMs: () => clock.t + 5_000 });
+    await service.start({ eventId: EVENT, requestId: REQUEST, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect((await store.items(REQUEST))[0]).toMatchObject({ status: 'UNKNOWN', attempts: 1, nextAttemptAtMs: NOW + 60_000 });
+    expect(calls.n).toBe(1);
+    clock.t = NOW + 59_999;
+    await service.runDue();
+    expect(calls.n).toBe(1);
+    clock.t = NOW + 60_000;
+    await service.runDue();
+    expect(calls.n).toBe(2);
+    expect((await store.items(REQUEST))[0]).toMatchObject({ status: 'UNKNOWN', attempts: 2 });
   });
 });

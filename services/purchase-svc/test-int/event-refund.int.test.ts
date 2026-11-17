@@ -4,11 +4,15 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createDatabase, ensureOutboxPartitions, fakeClock, type Database } from '@peaket/platform';
+import { createDatabase, createExternalHttpClient, ensureOutboxPartitions, fakeClock, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
 import { DrizzleEventCancellationLookup, DrizzleEventOpenOrders, DrizzleEventRefundAttempts, DrizzleEventRefundHolds, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService, OutboxEventRefundFanNotifier } from '../src/modules/refund/index.js';
+// 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test)
+import { DrizzleCsCaseOutbox, DrizzleDeductionGapCancellations, HttpDeductionGapNotice, HttpRefundFailureNotice } from '../src/modules/refund/index.js';
+import { progressOf } from '../src/modules/refund/domain/event-refund.js';
+import { startOpsCsDouble } from './ops-cs-double.js';
 import { eventRefundCancellationId, type EventCancellationRequest, type EventRefundItem, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { EventRefundAlert, EventRefundAttemptStore, EventRefundCanceller, EventRefundFailureNotice, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -565,4 +569,184 @@ describe('확정된 회차 취소 찾기 [BAT-420 리뷰 D5]', () => {
     await put(eventId, 'CANCEL', 'RUNNING');
     await expect(new DrizzleEventCancellationLookup(db).confirmed(eventId)).resolves.toBe(true);
   });
+});
+
+// ---- BAT-420 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test, 구현 전에 씀, 계획 §11 보충 5, transfer-refund §3.1 ⑥·§5 '주인') ----
+// 실제 PostgreSQL과 실제 HTTP 어댑터(5초 한도)로 ops-svc가 답하지 않거나 거절할 때 일괄 환불 틱의 차례·시간과 열 대상 표시·연 시각을 본다.
+// 파일이 DB를 나눠 쓰므로 다시 열기 포트(실제 SQL)는 그 시험이 만든 행으로만 거른다(다른 시험의 열지 않은 행이 예산을 쓰지 않게).
+describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [PostgreSQL·실제 HTTP]', () => {
+  let ops: Awaited<ReturnType<typeof startOpsCsDouble>>;
+  const log: string[] = [];
+  beforeAll(async () => {
+    ops = await startOpsCsDouble(log);
+  });
+  afterAll(async () => {
+    await ops?.close();
+  });
+  const opsClient = () => createExternalHttpClient({ provider: 'ops-svc', baseUrl: ops.url, timeoutCapMs: 5_000 });
+  const scopedOutbox = (mine: { requests: ReadonlySet<string>; cancellations: ReadonlySet<string> }) => {
+    const real = new DrizzleCsCaseOutbox(db);
+    return {
+      pendingItemFailures: async (limit: number) => (await real.pendingItemFailures(limit)).filter((r) => mine.requests.has(r.requestId)),
+      markItemFailureOpened: (requestId: string, ticketId: string, nowMs: number) => real.markItemFailureOpened(requestId, ticketId, nowMs),
+      pendingGaps: async (limit: number) => (await real.pendingGaps(limit)).filter((r) => mine.cancellations.has(r.cancellationId)),
+      markGapOpened: (id: string, nowMs: number) => real.markGapOpened(id, nowMs),
+    };
+  };
+  const targetOf = (s: { orderId: string; ticketId: string }, over: Partial<EventRefundTarget> = {}): EventRefundTarget => ({
+    orderId: s.orderId,
+    ticketId: s.ticketId,
+    seatId: randomUUID(),
+    payerAccountId: randomUUID(),
+    ticketPrice: 10_000,
+    bookedAtMs: Date.now() - 10 * DAY,
+    saleEndsAtMs: Date.now() + 7 * DAY,
+    pg: 'TOSS',
+    ...over,
+  });
+  const itemRow = async (requestId: string) =>
+    (
+      await q<{ status: string; last_error: string | null; failure_case_at: Date | null; failure_case_opened_at: Date | null }>(
+        'select status, last_error, failure_case_at, failure_case_opened_at from event_refund_item where request_id = $1',
+        [requestId],
+      )
+    ).rows[0];
+
+  test('GAT-110 N1 실제 DB에서 답하지 않는 ops 대역에도 runDue 한 번이 결제사를 부르고 약 10초 안에 끝난다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const t0 = Date.now() - 60_000;
+    // 열지 않은 차액 건 10: 공제하고 보낸 팬 취소 행에 차액 표시만 있고 연 시각이 빔
+    const gapIds: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const s = await seedOrder({ eventId: randomUUID(), accountId: randomUUID(), amount: 10_000, pg: 'TOSS', cancelled: true });
+      const r = await q<{ id: string }>('update order_cancellation set deduction_amount = 3333, deduction_gap_at = now(), deduction_gap_request_id = $2 where order_id = $1 returning id', [s.orderId, requestId]);
+      gapIds.push(r.rows[0]!.id);
+    }
+    // 요청 하나: 일괄 환불 실패 항목 10(열 대상 표시를 칸에 직접 넣음)과 처리할 PENDING 항목 하나
+    const seeded: { orderId: string; ticketId: string }[] = [];
+    for (let i = 0; i < 11; i++) seeded.push(await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS' }));
+    const items: EventRefundItem[] = seeded.map((s, i) => ({
+      requestId,
+      orderId: s.orderId,
+      ticketId: s.ticketId,
+      cancellationId: eventRefundCancellationId(requestId, s.ticketId),
+      pg: 'TOSS',
+      status: i < 10 ? 'FAILED' : 'PENDING',
+      attempts: i < 10 ? 1 : 0,
+      ...(i < 10 ? { lastError: 'REJECTED' } : { nextAttemptAtMs: t0 }),
+      appliedAtMs: t0,
+    }));
+    await new DrizzleEventRefundStore(db).create(
+      { requestId, eventId, kind: 'CANCEL', status: 'RUNNING', fault: 'ORGANIZER', targetOrders: 11, refundTotal: 110_000, compensationTargets: 0, compensationTotal: 0, progress: progressOf(items, [], false), ruledBy: 'commander-1', confirmedBy: 'operator-2', createdAtMs: t0, updatedAtMs: t0 },
+      items,
+    );
+    await q("update event_refund_item set failure_case_at = now() where request_id = $1 and status = 'FAILED'", [requestId]);
+    const pending = seeded[10]!;
+    log.length = 0;
+    ops.state.requests.length = 0;
+    ops.state.mode = 'hang';
+    const client = opsClient();
+    const service = new EventRefundService({
+      store: new DrizzleEventRefundStore(db),
+      targets: { list: async (id) => (id === eventId ? [targetOf(pending)] : []) },
+      canceller: { cancel: async (t) => (log.push(`pay:${t.ticketId}`), { status: 'REFUNDED' }) },
+      notice: new HttpRefundFailureNotice(client, 'it-token'),
+      gapNotice: new HttpDeductionGapNotice(client, 'it-token'),
+      csOutbox: scopedOutbox({ requests: new Set([requestId]), cancellations: new Set(gapIds) }),
+      csCaseOpenFailures: { inc: () => undefined, cut: () => undefined },
+      nowMs: () => Date.now(),
+      deadlineMs: () => Date.now() + 30_000,
+    });
+    const started = Date.now();
+    await service.runDue();
+    const took = Date.now() - started;
+    // 장애 주입이 실제로 끼어들었는지 먼저: ops 대역이 요청 둘을 받고 답하지 않았다
+    expect(ops.state.requests).toHaveLength(2);
+    expect(log.filter((l) => l === `pay:${pending.ticketId}`)).toHaveLength(1);
+    expect(log.indexOf(`pay:${pending.ticketId}`)).toBeLessThan(log.findIndex((l) => l.startsWith('ops:')));
+    expect(took).toBeLessThan(12_000);
+    expect(await count('select count(*) as n from event_refund_item where request_id = $1 and failure_case_opened_at is not null', [requestId])).toBe(0);
+    expect(await count('select count(*) as n from order_cancellation where id = any($1::uuid[]) and deduction_gap_opened_at is not null', [gapIds])).toBe(0);
+    // 뒤 시험이 다시 열지 않게 연 것으로 둔다
+    await q('update event_refund_item set failure_case_opened_at = now() where request_id = $1 and failure_case_at is not null', [requestId]);
+    await q('update order_cancellation set deduction_gap_opened_at = now() where id = any($1::uuid[])', [gapIds]);
+  }, 60_000);
+
+  test('GAT-110 N2 일괄 환불 항목이 FAILED로 끝나면 같은 커밋에 열 대상 표시가 남고 틱 끝에 열어 2xx면 연 시각을 쓴다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS' });
+    const cancellationId = eventRefundCancellationId(requestId, s.ticketId);
+    ops.state.requests.length = 0;
+    const client = opsClient();
+    const svc = () =>
+      new EventRefundService({
+        store: new DrizzleEventRefundStore(db),
+        targets: { list: async (id) => (id === eventId ? [targetOf(s)] : []) },
+        canceller: { cancel: async () => ({ status: 'FAILED', error: 'REJECTED' }) },
+        notice: new HttpRefundFailureNotice(client, 'it-token'),
+        csOutbox: scopedOutbox({ requests: new Set([requestId]), cancellations: new Set() }),
+        nowMs: () => Date.now(),
+        deadlineMs: () => Date.now() + 30_000,
+      });
+    // 저장 실패 주입: FAILED 끝내기가 실패하면 열 대상 표시도 없다(같은 트랜잭션)
+    await q(
+      `create or replace function n2_item_fail() returns trigger language plpgsql as $$ begin raise exception 'injected n2'; end $$;
+       create trigger n2_item_fail before update on event_refund_item for each row when (new.request_id = '${requestId}' and new.status = 'FAILED') execute function n2_item_fail();`,
+    );
+    try {
+      await svc()
+        .start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' })
+        .catch(() => undefined);
+      const injected = await itemRow(requestId);
+      expect(injected?.status).not.toBe('FAILED');
+      expect(injected?.failure_case_at ?? null).toBeNull();
+    } finally {
+      await q('drop trigger if exists n2_item_fail on event_refund_item; drop function if exists n2_item_fail();');
+    }
+    // 결제사 거절 → 항목 FAILED와 열 대상 표시가 한 커밋, 틱 끝 첫 열기 500 → 연 시각 빔
+    ops.state.mode = 500;
+    await svc().runDue();
+    const failed = await itemRow(requestId);
+    expect(failed).toMatchObject({ status: 'FAILED', last_error: 'REJECTED' });
+    expect(failed?.failure_case_at).not.toBeNull();
+    expect(failed?.failure_case_opened_at ?? null).toBeNull();
+    expect(ops.state.requests.filter((r) => r.body.sourceId === cancellationId).map((r) => [r.body.kind, r.body.category, r.token])).toEqual([['REFUND_FAILED', 'REFUND', 'it-token']]);
+    // 다음 틱 202 → 연 시각, 그다음 틱 ops 요청 없음
+    ops.state.mode = 202;
+    await svc().runDue();
+    expect((await itemRow(requestId))?.failure_case_opened_at).not.toBeNull();
+    const n = ops.state.requests.length;
+    await svc().runDue();
+    expect(ops.state.requests).toHaveLength(n);
+  }, 60_000);
+
+  test('GAT-110 N2 차액 건으로 대신한 항목에는 일괄 환불 실패 건을 열지 않는다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS', cancelled: true });
+    // 그 표의 팬 취소는 입장 시작 뒤 공제(3,333원)하고 결제사로 보낸 것이고, 회차 취소 항목은 그 행을 전환하려다 진다(cancellation-in-progress)
+    const fan = (await q<{ id: string }>('update order_cancellation set deduction_amount = 3333, refund_amount = 6667, created_at = now() where order_id = $1 returning id', [s.orderId])).rows[0]!.id;
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    const client = opsClient();
+    const service = new EventRefundService({
+      store: new DrizzleEventRefundStore(db),
+      targets: { list: async (id) => (id === eventId ? [targetOf(s, { pendingCancellationId: fan })] : []) },
+      canceller: { cancel: async () => ({ status: 'FAILED', error: 'cancellation-in-progress' }) },
+      notice: new HttpRefundFailureNotice(client, 'it-token'),
+      gaps: new DrizzleDeductionGapCancellations(db),
+      gapNotice: new HttpDeductionGapNotice(client, 'it-token'),
+      configs: { config: async () => ({ saleEndsAtMs: Date.now() + 7 * DAY, entryOpensAtMs: Date.now() - 3_600_000 }) },
+      csOutbox: scopedOutbox({ requests: new Set([requestId]), cancellations: new Set([fan]) }),
+      nowMs: () => Date.now(),
+      deadlineMs: () => Date.now() + 30_000,
+    });
+    await service.start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect(await itemRow(requestId)).toMatchObject({ status: 'FAILED', last_error: 'cancellation-in-progress', failure_case_at: null });
+    await service.runDue();
+    expect(ops.state.requests.filter((r) => r.body.sourceId === fan).map((r) => r.body.category)).toEqual(['DEDUCTION_GAP']);
+    expect(ops.state.requests.filter((r) => r.body.category === 'REFUND')).toEqual([]);
+  }, 60_000);
 });
