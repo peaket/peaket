@@ -934,9 +934,11 @@ describe('W9-fix1 잡기 늘리기·멈춤 합치기·그 밖 실패 알림 [Pos
     expect(await claimRows(requestId)).toEqual(released);
 
     // 기한 정각(잡은 때 + 60,000ms)이면 0행이고 지난 잡기를 되살리지 않는다(다른 요청)
+    // 같은 회차의 진행 중 요청은 하나뿐이라(event_cancellation_active_key) 새 회차에 만든다(시험 이의 1)
     const r2 = randomUUID();
-    const o2 = await seedTickets(eventId, 2, 'TOSS');
-    await createRunning(r2, eventId, o2.ticketIds.map((t) => itemFor(r2, o2.orderId, t, 'TOSS')));
+    const eventId2 = randomUUID();
+    const o2 = await seedTickets(eventId2, 2, 'TOSS');
+    await createRunning(r2, eventId2, o2.ticketIds.map((t) => itemFor(r2, o2.orderId, t, 'TOSS')));
     const c2 = await claims.claimOrders(r2, C, 1);
     expect(c2.items).toHaveLength(2);
     const before2 = await claimRows(r2);
