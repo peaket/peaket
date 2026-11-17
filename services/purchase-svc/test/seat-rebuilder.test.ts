@@ -149,7 +149,7 @@ function world(o: SourceOptions & TargetHooks & { defs?: MemorySeatDef[]; seatCo
 /** 원장 홀드 하나(1분 전에 잡아 6분 뒤 만료) */
 function ledger(seatId: string, accountId: string, fencingToken: number, over: Partial<RebuildHold> = {}): RebuildHold {
   const heldAtMs = NOW - 60_000;
-  return { seatId, accountId, fencingToken, kind: 'FAN', heldAtMs, expiresAtMs: heldAtMs + TTL, holdId: `h-${seatId}`, purchaseSessionId: `ps-${seatId}`, ...over };
+  return { seatId, accountId, fencingToken, kind: 'FAN', heldAtMs, expiresAtMs: heldAtMs + TTL, holdId: `h-${seatId}`, purchaseSessionId: `ps-${seatId}`, holdLimit: null, ...over };
 }
 const tok = (n: number) => (NOW - 60_000) * 1000 + n;
 

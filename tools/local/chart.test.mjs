@@ -483,6 +483,37 @@ test('PRF192_payment-svc값_결제사출구는DNS와공인주소443이고_정책
   assertPublicHttpsRule(np.spec.egress[1]);
 });
 
+test('PRF181_payment-svc 서비스 파드 종료 유예는 90초이고 preStop + 승인 호출 한 번보다 길며 릴레이는 30초다', () => {
+  // 정본: docs/devops.md §6.4 '일반 서비스', docs/features/payment.md §2 '승인 실행기의 첫 구현' '잡기'(W9-fix2).
+  // 90초 [가정] = preStop 5초 + 결제사 승인 호출 한 번(연결 3초 + 읽기 60초) + 결과 쓰기·연결 닫기 여유 약 20초
+  const CONNECT_S = 3;
+  const READ_S = 60;
+  const SLACK_S = 20;
+  const file = join(REPO, 'deploy', 'workloads', 'payment-svc', 'values.yaml');
+  const sets = ['image.repository=peaket/payment-svc', 'image.tag=local', 'env.PEAKET_ENV=local', 'outboxRelay.enabled=true'];
+  const { objects, error } = renderFiles([file], sets, 'payment');
+  assert.equal(error, undefined, error);
+  const svc = find(objects, 'Deployment', 'payment-svc');
+  assert.ok(svc, 'Deployment payment-svc');
+  const spec = svc.spec.template.spec;
+  const preStop = spec.containers[0].lifecycle.preStop.sleep.seconds;
+  assert.equal(spec.terminationGracePeriodSeconds, 90);
+  assert.ok(spec.terminationGracePeriodSeconds >= preStop + CONNECT_S + READ_S + SLACK_S, `종료 유예 ${spec.terminationGracePeriodSeconds} < preStop ${preStop} + ${CONNECT_S + READ_S} + ${SLACK_S}`);
+  // 릴레이는 승인 호출을 하지 않아 차트 기본 30초 그대로다
+  const relay = find(objects, 'Deployment', 'payment-svc-outbox-relay');
+  assert.ok(relay, 'Deployment payment-svc-outbox-relay');
+  assert.equal(relay.spec.template.spec.terminationGracePeriodSeconds, 30);
+  // v1 무대의 payment-svc 릴레이 값 파일도 30초다
+  const relayOnly = renderFiles([join(ENVS, 'v1-payment-relay.yaml')], [], 'v1');
+  assert.equal(relayOnly.error, undefined, relayOnly.error);
+  assert.equal(find(relayOnly.objects, 'Deployment', 'payment-svc-outbox-relay').spec.template.spec.terminationGracePeriodSeconds, 30);
+  // payment-svc를 담은 합본 파드도 90초다
+  const bundle = renderFiles([join(ENVS, 'v1-bundle.yaml')], [], 'v1');
+  assert.equal(bundle.error, undefined, bundle.error);
+  assert.match(envOf(find(bundle.objects, 'Deployment', 'bundle').spec.template.spec.containers[0]).PEAKET_BUNDLE_SERVICES, /(^|,)payment-svc(,|$)/);
+  assert.equal(find(bundle.objects, 'Deployment', 'bundle').spec.template.spec.terminationGracePeriodSeconds, 90);
+});
+
 test('K9_v0-monolith값_HPA는1~4복제·CPU70%·요청CPU500m이고_복제수를적지않는다', () => {
   const { objects, error } = renderFiles([join(ENVS, 'v0-monolith.yaml')]);
   assert.equal(error, undefined, error);

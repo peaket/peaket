@@ -250,6 +250,49 @@ describe('toSeatEvent: Stream 홀드 사건 칸 → SeatEvent', () => {
   });
 });
 
+describe('HOT-252 holdLimit: Stream HELD → SeatEvent → 원장 사건(docs/features/seat-hold.md §6 1인 한도 되살리기)', () => {
+  test('HOT-252 Stream 릴레이는 holdLimit을 SeatEvent로 옮기고 적재 변환은 HELD·FAN의 1 이상 정수만 싣는다(toSeatEvent) [ASVS v5.0.0-2.2.1]', () => {
+    // HELD 칸 holdLimit '2' → SeatEvent holdLimit 2(number). 나머지 칸은 그대로다
+    const m = toSeatEvent(EV, heldFields({ holdLimit: '2' }));
+    expect(m.holdLimit).toBe(2);
+    expect(m).toEqual({ ...heldMessage(), holdLimit: 2 });
+    expect(SeatEvent.safeParse(m).success).toBe(true);
+    // 칸이 없으면(옛 파드가 낸 항목, RELEASED·EXPIRED·우선 구매 보류) SeatEvent에도 칸이 없다
+    for (const f of [heldFields(), expiredFields(), heldFields({ type: 'RELEASED' })]) {
+      const x = toSeatEvent(EV, f);
+      expect('holdLimit' in x, String(f.type)).toBe(false);
+    }
+    // 칸 이름은 Avro 스키마 SeatEvent의 필드다
+    const avsc = JSON.parse(readFileSync(new URL('../../../docs/api/avro/peaket/trade/SeatEvent.avsc', import.meta.url), 'utf8')) as { fields: Array<{ name: string }> };
+    expect(avsc.fields.map((f) => f.name)).toContain('holdLimit');
+  });
+
+  test('HOT-252 Stream 릴레이는 holdLimit을 SeatEvent로 옮기고 적재 변환은 HELD·FAN의 1 이상 정수만 싣는다(toLedgerHoldEvent) [ASVS v5.0.0-2.2.1]', () => {
+    // HELD·FAN의 2 → 원장 사건 holdLimit 2
+    expect(toLedgerHoldEvent(seatEventValue({ holdLimit: 2 }))?.holdLimit).toBe(2);
+    expect(toLedgerHoldEvent(JSON.parse(JSON.stringify(toSeatEvent(EV, heldFields({ holdLimit: '3' })))))?.holdLimit).toBe(3);
+    // 칸이 없으면 원장 사건에도 없다
+    expect('holdLimit' in toLedgerHoldEvent(seatEventValue())!).toBe(false);
+    // 우선 구매 보류·끝 사건에 값이 와도 싣지 않는다
+    const grant = '0190f3a1-7c2e-7a00-8000-00000000c001';
+    const prio = seatEventValue({ holdKind: 'PRIORITY', priorityGrantId: grant, holdLimit: 2 });
+    delete prio.purchaseSessionId;
+    expect('holdLimit' in toLedgerHoldEvent(prio)!).toBe(false);
+    for (const type of ['RELEASED', 'EXPIRED'] as const) {
+      const e = toLedgerHoldEvent(seatEventValue({ type, eventKey: uuid8Of(`SeatEvent:${type}:${EV}:${HOLD}:${SEAT}:${TOKEN}`), holdLimit: 2 }))!;
+      expect('holdLimit' in e, type).toBe(false);
+    }
+    // 1 이상의 안전한 정수가 아니면 칸만 빼고 던지지 않는다(사건은 적재된다: 한도 값 하나 때문에 원장 홀드를 잃지 않는다)
+    for (const bad of [0, -1, 2.5, '2', 2 ** 53, null, true, Number.NaN]) {
+      let e: LedgerHoldEvent | null = null;
+      expect(() => (e = toLedgerHoldEvent(seatEventValue({ holdLimit: bad }))), String(bad)).not.toThrow();
+      expect(e, String(bad)).not.toBeNull();
+      expect('holdLimit' in e!, String(bad)).toBe(false);
+      expect(e!, String(bad)).toMatchObject({ type: 'HELD', holdId: HOLD, fencingToken: Number(TOKEN) });
+    }
+  });
+});
+
 describe('routeStreamEntry: 항목 하나의 갈 곳', () => {
   test.each(['HELD', 'RELEASED', 'EXPIRED'] as const)('ST35_%s는 trade.seats로 보낸다(메시지는 toSeatEvent 결과) [ASVS v5.0.0-2.2.1]', (type: HoldEventType) => {
     const f = type === 'EXPIRED' ? expiredFields() : heldFields({ type });

@@ -85,13 +85,18 @@ interface HoldSeed {
   expiresAtMs: number;
   holdId: string | null;
   purchaseSessionId: string | null;
+  /** 원장 hold_limit(W9-fix2 HOT-252). 없으면 칸을 적지 않는다(NULL) */
+  holdLimit?: number | null;
 }
 
 /** 원장 행 하나를 직접 SQL로 넣는다(적재 소비자를 거치지 않는다) */
 const putHold = (eventId: string, h: HoldSeed) =>
   q(
-    `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, held_at, expires_at, hold_id, purchase_session_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    h.holdLimit === undefined
+      ? `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, held_at, expires_at, hold_id, purchase_session_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+      : `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, held_at, expires_at, hold_id, purchase_session_id, hold_limit)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     [
       eventId,
       h.seatId,
@@ -103,6 +108,7 @@ const putHold = (eventId: string, h: HoldSeed) =>
       new Date(h.expiresAtMs),
       h.holdId,
       h.purchaseSessionId,
+      ...(h.holdLimit === undefined ? [] : [h.holdLimit]),
     ],
   );
 
@@ -275,7 +281,7 @@ describe('holds: 회차의 만료 전 원장 홀드(HELD, expires_at > now())', 
     const other = uuidv7(systemClock);
     const now = Date.now();
     const base = { status: 'HELD' as const, kind: 'FAN' as const };
-    const live: HoldSeed = { ...base, seatId: randomUUID(), accountId: randomUUID(), token: T1, heldAtMs: now - MIN, expiresAtMs: now + 5 * MIN, holdId: randomUUID(), purchaseSessionId: randomUUID() };
+    const live: HoldSeed = { ...base, seatId: randomUUID(), accountId: randomUUID(), token: T1, heldAtMs: now - MIN, expiresAtMs: now + 5 * MIN, holdId: randomUUID(), purchaseSessionId: randomUUID(), holdLimit: 2 };
     // 우선 구매 보류, 잡은 시각이 빈 행, holdId·구매 세션이 빈 옛 행(소스는 그대로 주고 되살리기 여부는 planRebuild가 가른다)
     const oldRow: HoldSeed = { ...base, seatId: randomUUID(), accountId: randomUUID(), token: T1 + 1, kind: 'PRIORITY', heldAtMs: null, expiresAtMs: now + 6 * MIN, holdId: null, purchaseSessionId: null };
     const out: HoldSeed[] = [
@@ -296,6 +302,8 @@ describe('holds: 회차의 만료 전 원장 홀드(HELD, expires_at > now())', 
       expiresAtMs: h.expiresAtMs,
       holdId: h.holdId,
       purchaseSessionId: h.purchaseSessionId,
+      // 원장 hold_limit(HOT-252, 빈 값이면 null)
+      holdLimit: h.holdLimit ?? null,
     }));
     const got = await podA.holds(e);
     expect(bySeat(got)).toEqual(bySeat(expected));
@@ -313,7 +321,7 @@ describe('holds: 회차의 만료 전 원장 홀드(HELD, expires_at > now())', 
     await putHold(e, old);
     await putHold(e, cur);
     expect(await podA.holds(e)).toEqual([
-      { seatId, accountId, fencingToken: cur.token, kind: 'FAN', heldAtMs: cur.heldAtMs, expiresAtMs: cur.expiresAtMs, holdId: cur.holdId, purchaseSessionId: cur.purchaseSessionId },
+      { seatId, accountId, fencingToken: cur.token, kind: 'FAN', heldAtMs: cur.heldAtMs, expiresAtMs: cur.expiresAtMs, holdId: cur.holdId, purchaseSessionId: cur.purchaseSessionId, holdLimit: null },
     ]);
   });
 
@@ -334,7 +342,7 @@ describe('코드 리뷰 재현(PRF-143)', () => {
     await putSale(e, s5, A, randomUUID(), 'SOLD');
     const base = { status: 'HELD' as const, kind: 'FAN' as const, holdId: randomUUID(), purchaseSessionId: randomUUID() };
     // s1: 묶인 지 10분이라 만료 시각이 지난 HELD(나와야 한다)
-    const pinned: HoldSeed = { ...base, seatId: s1, accountId: A, token: T1, heldAtMs: now - 10 * MIN, expiresAtMs: now - 3 * MIN };
+    const pinned: HoldSeed = { ...base, seatId: s1, accountId: A, token: T1, heldAtMs: now - 10 * MIN, expiresAtMs: now - 3 * MIN, holdLimit: 3 };
     // s2: 만료 전 HELD(나와야 한다)와 같은 좌석의 RELEASED(빠진다). s5: A가 산 좌석의 남의 계정(B) HELD(빠진다, 좌석마다 HELD는 하나)
     const live: HoldSeed = { ...base, seatId: s2, accountId: A, token: T1 + 2, heldAtMs: null, expiresAtMs: now + 5 * MIN, holdId: randomUUID() };
     await putHold(e, pinned);
@@ -353,6 +361,8 @@ describe('코드 리뷰 재현(PRF-143)', () => {
       expiresAtMs: h.expiresAtMs,
       holdId: h.holdId,
       purchaseSessionId: h.purchaseSessionId,
+      // 원장 hold_limit(HOT-252, 빈 값이면 null)
+      holdLimit: h.holdLimit ?? null,
     }));
     expect(bySeat(await podA.saleHolds(e))).toEqual(bySeat(want));
     // holds()는 지금처럼 만료 전만(묶인 s1의 행은 없다)
@@ -420,7 +430,7 @@ describe('ledgerRows: 그 회차·그 좌석들의 원장 행 전부(BUILD_ORDER
     const h1 = randomUUID();
     const rows: HoldSeed[] = [
       { ...base, seatId: s1, token: T1, status: 'EXPIRED', expiresAtMs: now - 10 * MIN, holdId: h1 },
-      { ...base, seatId: s1, token: T1 + 5, status: 'HELD', expiresAtMs: now - 5 * MIN, holdId: randomUUID() },
+      { ...base, seatId: s1, token: T1 + 5, status: 'HELD', expiresAtMs: now - 5 * MIN, holdId: randomUUID(), holdLimit: 4 },
       { ...base, seatId: s2, token: T1 + 1, status: 'RELEASED', expiresAtMs: now + MIN, holdId: null, purchaseSessionId: null },
     ];
     for (const h of rows) await putHold(e, h);
@@ -432,7 +442,8 @@ describe('ledgerRows: 그 회차·그 좌석들의 원장 행 전부(BUILD_ORDER
     expect(got).toHaveLength(3);
     const key = (r: { seatId: string; fencingToken: number }) => `${r.seatId}|${r.fencingToken}`;
     expect([...got].sort((a, b) => (key(a) < key(b) ? -1 : 1))).toEqual(
-      rows.map((h) => ({ seatId: h.seatId, holdId: h.holdId, status: h.status, fencingToken: h.token })).sort((a, b) => (key(a) < key(b) ? -1 : 1)),
+      // 원장 hold_limit(HOT-252, 빈 값이면 null)
+      rows.map((h) => ({ seatId: h.seatId, holdId: h.holdId, status: h.status, fencingToken: h.token, holdLimit: h.holdLimit ?? null })).sort((a, b) => (key(a) < key(b) ? -1 : 1)),
     );
     for (const r of got) expect(Number.isSafeInteger(r.fencingToken)).toBe(true);
     expect(await podA.ledgerRows(e, [])).toEqual([]);

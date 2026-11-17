@@ -10,7 +10,7 @@
 //   이 Valkey는 단일 노드라 표지가 'standalone'이다. 장애 조치(복제본 승격)는 세대 키 node를 HSET으로 다른 표지로 바꿔 흉내 낸다(클러스터 승격은 S-T26 측정의 몫).
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { createDatabase, createHotRedis, type Database, type HotRedis, type RedisScript, systemClock, uuidv7 } from '@peaket/platform';
+import { createDatabase, createHotRedis, type Database, type HotRedis, type RedisScript, redisScript, systemClock, uuidv7 } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mjs';
 import {
@@ -33,6 +33,7 @@ import {
   slotOf,
   toLedgerHoldEvent,
 } from '../src/modules/inventory/index.js';
+import { DrizzleRebuildOrders } from '../src/modules/booking/index.js';
 import { DAY, fingerprintOf } from '../test/hold-cases.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
@@ -104,14 +105,22 @@ interface LedgerSeed {
   expiresAtMs: number;
   holdId: string | null;
   purchaseSessionId: string | null;
+  /** 원장 hold_limit(W9-fix2 HOT-252). 없으면 칸을 적지 않는다(NULL) */
+  holdLimit?: number | null;
 }
 
 const putHold = (eventId: string, h: LedgerSeed) =>
-  q(
-    `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, held_at, expires_at, hold_id, purchase_session_id)
+  h.holdLimit === undefined
+    ? q(
+        `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, held_at, expires_at, hold_id, purchase_session_id)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [eventId, h.seatId, h.accountId, h.token, h.status, h.kind, new Date(h.heldAtMs), new Date(h.expiresAtMs), h.holdId, h.purchaseSessionId],
-  );
+        [eventId, h.seatId, h.accountId, h.token, h.status, h.kind, new Date(h.heldAtMs), new Date(h.expiresAtMs), h.holdId, h.purchaseSessionId],
+      )
+    : q(
+        `insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, kind, held_at, expires_at, hold_id, purchase_session_id, hold_limit)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [eventId, h.seatId, h.accountId, h.token, h.status, h.kind, new Date(h.heldAtMs), new Date(h.expiresAtMs), h.holdId, h.purchaseSessionId, h.holdLimit],
+      );
 
 const MIN = 60_000;
 const T0 = 1_762_250_000_000_001;
@@ -973,5 +982,85 @@ describe('코드 리뷰 재현(PRF-143)', () => {
     expect(await holdHash(eventId, 10)).toBeNull();
     expect(await bit(eventId, 11)).toBe(1);
     expect(await holdHash(eventId, 11)).toMatchObject({ holdId: gOffered, owner: B, kind: 'PRIORITY' });
+  });
+});
+
+describe('HOT-252 1인 한도 되살리기(docs/features/seat-hold.md §6 1인 한도 되살리기 다시 만들기)', () => {
+  /** 결제를 접수하고 묶은 주문(ACCEPTED·pinned_at, 작업 행 RESERVE, 항목 한 줄. test-int/relay-app.int.test.ts의 씨앗과 같다) */
+  async function putPinnedOrder(eventId: string, seat: SeatRef, o: { orderId: string; accountId: string; holdId: string; psid: string }): Promise<void> {
+    await q(
+      `with o as (insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id, seat_gen, pinned_at)
+                  values ($1, $2, $3, 'ACCEPTED', 99000, 1, $4, 'consent-2026.11_v1', 'PICK', now(), $5, $6, 1, now()) returning id),
+            e as (insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) select id, 1, null, 'ACCEPTED', 'TEST', 'test', now() from o),
+            i as (insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) select id, 1, $7, 'R', 'SEC-A', 99000 from o)
+       insert into order_saga_job (order_id, event_id, step, attempts, next_attempt_at, created_at) select id, $3, 'RESERVE', 0, now() + interval '1 hour', now() from o`,
+      [o.orderId, o.accountId, eventId, randomUUID(), o.holdId, o.psid, seat.seatId],
+    );
+  }
+
+  test('HOT-252 다시 만들기는 원장 홀드·묶인 주문의 홀드에 hold_limit을 lim으로 쓰고 빈 값이면 쓰지 않는다 [ASVS v5.0.0-2.3.2] [S-T26]', async () => {
+    const eventId = uuidv7(systemClock);
+    const now = Date.now();
+    const [A, B, C, D] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    const seed = (seat: number, accountId: string, token: number, over: Partial<LedgerSeed> = {}): LedgerSeed => ({
+      seatId: S(seat).seatId,
+      accountId,
+      token,
+      status: 'HELD',
+      kind: 'FAN',
+      heldAtMs: now - MIN,
+      expiresAtMs: now + 5 * MIN,
+      holdId: uuidv7(systemClock),
+      purchaseSessionId: randomUUID(),
+      ...over,
+    });
+    // 판매 좌석 0(A, 대조 원장 행의 한도 4. 묶인 지 오래라 만료 시각은 지났다)
+    await putSale(eventId, S(0).seatId, A, randomUUID(), 'SOLD');
+    await putHold(eventId, seed(0, A, T0 + 100, { heldAtMs: now - 20 * MIN, expiresAtMs: now - 13 * MIN, holdLimit: 4 }));
+    // 원장 홀드 좌석 4(B, 한도 2), 빈 값 홀드 좌석 6(C, 칸 없음)
+    await putHold(eventId, seed(4, B, T0 + 104, { holdLimit: 2 }));
+    await putHold(eventId, seed(6, C, T0 + 106));
+    // 묶인 주문(K1) 좌석 5(D, 그 holdId의 HELD 원장 행 한도 3, 만료 시각은 이미 지남)
+    const k1 = { orderId: uuidv7(systemClock), accountId: D, holdId: uuidv7(systemClock), psid: randomUUID() };
+    await putPinnedOrder(eventId, S(5), k1);
+    await putHold(eventId, seed(5, D, T0 + 105, { holdId: k1.holdId, purchaseSessionId: k1.psid, heldAtMs: now - 2 * MIN, expiresAtMs: now - MIN, holdLimit: 3 }));
+
+    const rebuilder = new SeatRebuilder({ source: new DrizzleSeatRebuildSource(dbA), target: store, seatMap: seatMapOf(eventId), holder: 'pod-hot252', orders: new DrizzleRebuildOrders(dbA) });
+    const keepUntilMs = Date.now() + 2 * DAY;
+    expect(await rebuilder.rebuild(eventId, { keepUntilMs })).toMatchObject({ result: 'REBUILT' });
+    expect(await bits(eventId)).toEqual(Array.from({ length: SEAT_COUNT }, (_, i) => ([0, 4, 5, 6].includes(i) ? 1 : 0)));
+    expect(await holdHash(eventId, 5)).toMatchObject({ holdId: k1.holdId, owner: D });
+    const lim = async (i: number) => (await holdHash(eventId, i))?.lim;
+    // 원장 홀드 2, 묶인 주문 3, 빈 값 홀드는 lim 없음, 판매 좌석 4
+    expect([await lim(4), await lim(5), await lim(6), await lim(0)]).toEqual(['2', '3', undefined, '4']);
+  });
+
+  test('HOT-252 다시 만들기 좌석 Lua는 열째 칸이 빈 글이나 1 이상 10진 정수가 아니면 아무것도 쓰지 않는다 [ASVS v5.0.0-2.2.1] [S-T26]', async () => {
+    const SEATS_SCRIPT = redisScript(REBUILD_SEATS_LUA);
+    const eventId = uuidv7(systemClock);
+    const keepUntilMs = Date.now() + 2 * DAY;
+    expect(await store.begin(eventId, 2, keepUntilMs)).toEqual({ result: 'OK' });
+    const now = Date.now();
+    const heldArgs = (i: number, tenth: string) => [String(i), 'H', uuidv7(systemClock), randomUUID(), randomUUID(), String(T0 + i), String(now - MIN), String(now + 5 * MIN), 'FAN', tenth];
+    const call = (rows: string[][]) =>
+      redis.evalScript(
+        SEATS_SCRIPT,
+        [seatKeys.bitmap(eventId), seatKeys.expiry(eventId), seatKeys.epoch(eventId), seatKeys.rebuild(eventId), ...rows.map((r) => seatKeys.hold(eventId, Number(r[0])))],
+        [String(keepUntilMs), '2', ...rows.flat()],
+      );
+    // 둘째 좌석의 열째 칸만 틀려도(첫 좌석은 바른 한도 2) 쓰기 전에 거절해 비트·Hash·만료 인덱스가 모두 그대로 비어 있다
+    for (const bad of ['0', 'x', '01']) {
+      await expect(call([heldArgs(1, '2'), heldArgs(2, bad)]), bad).rejects.toThrow(/PEAKET_REBUILD_ARGS/);
+      expect(await bits(eventId), bad).toEqual(Array(SEAT_COUNT).fill(0));
+      for (const i of [1, 2]) {
+        expect(await holdHash(eventId, i), `${bad} ${i}`).toBeNull();
+        expect(await expiryScore(eventId, i), `${bad} ${i}`).toBeNull();
+      }
+    }
+    // 빈 글(한도 없음)과 1 이상 10진 정수는 받는다(대조)
+    const okReply = (await call([heldArgs(1, ''), heldArgs(2, '7')])) as unknown[];
+    expect([String(okReply[0]), Number(okReply[1])]).toEqual(['OK', 2]);
+    expect((await holdHash(eventId, 1))?.lim).toBeUndefined();
+    expect((await holdHash(eventId, 2))?.lim).toBe('7');
   });
 });

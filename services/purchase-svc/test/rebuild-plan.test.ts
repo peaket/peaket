@@ -28,6 +28,7 @@ function ledger(seatId: string, accountId: string, fencingToken: number, over: P
     expiresAtMs: heldAtMs + TTL,
     holdId: `h-${seatId}-${fencingToken}`,
     purchaseSessionId: `ps-${accountId.slice(-4)}`,
+    holdLimit: null,
     ...over,
   };
 }

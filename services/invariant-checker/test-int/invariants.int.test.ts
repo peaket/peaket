@@ -53,6 +53,8 @@ const order = async (o: { account?: string; status?: string; amount?: number; ev
   return id;
 };
 const event = (orderId: string, seq: number, to: string, at: string) => ins('purchase', 'order_event', { order_id: orderId, seq, to_status: to, occurred_at: at });
+/** from_status까지 적는 주문 사건(P4 기준 시각은 마지막 입금 대기 뒤 첫 APPROVED 사건의 from_status로 가른다, W9-fix2 PRF-182) */
+const eventFrom = (orderId: string, seq: number, from: string | null, to: string, at: string) => ins('purchase', 'order_event', { order_id: orderId, seq, from_status: from, to_status: to, occurred_at: at });
 const payment = async (o: { orderId: string; status?: string; approvedAt?: string | null; amount?: number; pg?: string; event?: string }) => {
   const id = randomUUID();
   await ins('payment', 'payment', { id, order_id: o.orderId, event_id: o.event ?? EVENT, pg: o.pg ?? 'SIMULATOR', amount: o.amount ?? 10_000, status: o.status ?? 'APPROVED', approved_at: o.approvedAt === undefined ? '2026-11-02T10:00:00+09:00' : o.approvedAt });
@@ -334,6 +336,57 @@ describe('결제(K7, NFR-005·006, ADR-0106)', () => {
     await event(done, 5, 'CONFIRMED', '2026-11-02T11:10:00+09:00');
     const r = (await check({ asOf: '2026-11-02T11:40:00+09:00' })).run;
     expect(res(r, 'P4').details.map((d) => d.subject)).toEqual([stuck]);
+  });
+
+  // 정본: docs/verification.md §2.5 '판정'·'검사기'(W9-fix2 PRF-182), docs/features/payment.md §2 '승인 트랜잭션'·'입금 확인의 첫 구현'.
+  // 기준 = 마지막 입금 대기 뒤 첫 APPROVED 사건이 UNKNOWN(T13)·AWAITING_DEPOSIT(T16)에서 왔으면 greatest(approved_at, 그 사건 시각), 그 밖(T9)이면 approved_at. 기한 = 기준 + 30분
+  it('PRF-182 P4 결과 모름을 늦게 푼 주문(T13)의 발권 기한은 반영 시각 + 30분이다', async () => {
+    const approvedAt = '2026-11-02T10:00:00+09:00';
+    // 결제사 승인 T, 결과 모름 진입 T+1초, 조회로 풀어 반영 T+40분(10:40) → 기한 11:10
+    const t13 = async (o: { status?: string; confirmedAt?: string }) => {
+      const id = await order({ status: o.status ?? 'CONFIRMED' });
+      const pay = await payment({ orderId: id, approvedAt });
+      await paymentEvent(pay, 2, 'RESOLVED', '2026-11-02T10:40:00+09:00');
+      await eventFrom(id, 1, 'CREATED', 'RESERVED', '2026-11-02T09:59:50+09:00');
+      await eventFrom(id, 2, 'RESERVED', 'UNKNOWN', '2026-11-02T10:00:01+09:00');
+      await eventFrom(id, 3, 'UNKNOWN', 'APPROVED', '2026-11-02T10:40:00+09:00');
+      if (o.confirmedAt !== undefined) await eventFrom(id, 4, 'APPROVED', 'CONFIRMED', o.confirmedAt);
+      return id;
+    };
+    const ok = await t13({ confirmedAt: '2026-11-02T10:55:00+09:00' });
+    const edge = await t13({ confirmedAt: '2026-11-02T11:10:00.000+09:00' });
+    const over = await t13({ confirmedAt: '2026-11-02T11:10:00.001+09:00' });
+    const waiting = await t13({ status: 'APPROVED' });
+    // 반영 + 29분: 끝나지 않은 주문은 아직 기한 안이다. 승인 + 30분(10:30)으로 재면 넷 다 위반이 된다
+    let r = (await check({ asOf: '2026-11-02T11:09:00+09:00' })).run;
+    expect(res(r, 'P4').details.map((d) => d.subject)).toEqual([over]);
+    expect(res(r, 'P4').details[0]!.detail).toContain('base_at=');
+    // 반영 + 31분: 끝나지 않은 주문도 위반이다
+    r = (await check({ asOf: '2026-11-02T11:11:00+09:00' })).run;
+    expect(res(r, 'P4').details.map((d) => d.subject).sort()).toEqual([over, waiting].sort());
+    expect([ok, edge].some((o) => res(r, 'P4').details.some((d) => d.subject === o))).toBe(false);
+  });
+
+  it('PRF-182 P4 입금 대기에서 온 승인(T16)도 반영 시각 기준이다', async () => {
+    const approvedAt = '2026-11-02T10:00:00+09:00';
+    // 입금 확인(결제사 승인 T)을 purchase-svc가 T+20분에 반영(AWAITING_DEPOSIT → APPROVED), 발권은 반영 + 25분(T+45분)
+    const id = await order();
+    await payment({ orderId: id, approvedAt });
+    await eventFrom(id, 1, 'RESERVED', 'AWAITING_DEPOSIT', '2026-11-02T09:50:00+09:00');
+    await eventFrom(id, 2, 'AWAITING_DEPOSIT', 'APPROVED', '2026-11-02T10:20:00+09:00');
+    await eventFrom(id, 3, 'APPROVED', 'CONFIRMED', '2026-11-02T10:45:00+09:00');
+    const r = (await check({ asOf: '2026-11-02T11:00:00+09:00' })).run;
+    expect(res(r, 'P4').details).toEqual([]);
+  });
+
+  it('PRF-182 P4 바로 승인(T9)은 지금처럼 결제사 승인 시각 기준이다', async () => {
+    // 승인 T, 반영(RESERVED → APPROVED) T+50초, 발권 T+30분+10초 → 승인 + 30분을 넘어 위반이다(반영 기준이면 T+30분 50초까지라 위반이 아니게 된다)
+    const id = await order();
+    await payment({ orderId: id, approvedAt: '2026-11-02T10:00:00+09:00' });
+    await eventFrom(id, 1, 'RESERVED', 'APPROVED', '2026-11-02T10:00:50+09:00');
+    await eventFrom(id, 2, 'APPROVED', 'CONFIRMED', '2026-11-02T10:30:10+09:00');
+    const r = (await check()).run;
+    expect(res(r, 'P4').details.map((d) => d.subject)).toEqual([id]);
   });
 
   it('P5 살아 있는 승인이 없는 유효 티켓(결제 취소, 주문 없음, 환불된 취소)', async () => {

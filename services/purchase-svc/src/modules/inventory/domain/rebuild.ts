@@ -26,6 +26,8 @@ export interface RebuildHold {
   expiresAtMs: number;
   holdId: string | null;
   purchaseSessionId: string | null;
+  /** 원장 hold_limit(홀드 때 쓴 1인 한도, 없으면 null, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대(계획은 필수 칸 number | null) */
+  holdLimit?: number | null;
 }
 
 /**
@@ -60,6 +62,8 @@ export interface RebuildLedgerRow {
   holdId: string | null;
   status: 'HELD' | 'RELEASED' | 'EXPIRED';
   fencingToken: number;
+  /** 원장 hold_limit(없으면 null, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대(계획은 필수 칸 number | null) */
+  holdLimit?: number | null;
 }
 
 /** planRebuild의 주문 근거(docs/features/seat-hold.md §6 '주문 기준 되살리기'). nowMs는 묶인 주문 홀드의 잡은 시각(만료 = nowMs + HOLD_TTL_MS)이다 */
@@ -79,8 +83,8 @@ export interface RebuildOrderInputs {
  * SOLD의 fencingToken·heldAtMs·expiresAtMs는 대조한 원장 행의 값이고 셋이 함께 있거나 함께 없다(없으면 좌석 쓰기 Lua가 TIME으로 채운다, 코드 리뷰 PRF-143)
  */
 export type RebuildSeat =
-  | { mode: 'SOLD'; seat: SeatRef; accountId: string; holdId: string; purchaseSessionId: string; fencingToken?: number; heldAtMs?: number; expiresAtMs?: number }
-  | { mode: 'HELD'; seat: SeatRef; accountId: string; holdId: string; purchaseSessionId: string; fencingToken: number; heldAtMs: number; expiresAtMs: number; kind: 'FAN' | 'PRIORITY' };
+  | { mode: 'SOLD'; seat: SeatRef; accountId: string; holdId: string; purchaseSessionId: string; fencingToken?: number; heldAtMs?: number; expiresAtMs?: number; holdLimit?: number }
+  | { mode: 'HELD'; seat: SeatRef; accountId: string; holdId: string; purchaseSessionId: string; fencingToken: number; heldAtMs: number; expiresAtMs: number; kind: 'FAN' | 'PRIORITY'; holdLimit?: number };
 
 /** 다시 만들기 한 회차의 결과 */
 export type RebuildReport =

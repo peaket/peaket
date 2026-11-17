@@ -78,6 +78,29 @@ function stateOf(store: MemorySeatStore, eventId: string) {
   });
 }
 
+describe('HOT-252 1인 한도 되살리기(docs/features/seat-hold.md §6 1인 한도 되살리기 다시 만들기)', () => {
+  test('HOT-252 다시 만들기는 원장 홀드·묶인 주문의 홀드에 hold_limit을 lim으로 쓰고 빈 값이면 쓰지 않는다(메모리 writeSeats) [ASVS v5.0.0-2.3.2]', async () => {
+    const s = setup();
+    const seats: RebuildSeat[] = [
+      // 원장 홀드(한도 2), 묶인 주문(K1)의 홀드(한도 3), 빈 값 홀드, 판매 좌석(대조 행 한도 4)
+      { ...held('A03', ACCOUNT_A, '0190f3a1-7c2e-7a00-8000-0000000000a3', '0190f3a1-7c2e-7a00-8000-0000000001a3', T_A3), holdLimit: 2 },
+      { ...held('A05', ACCOUNT_B, '0190f3a1-7c2e-7a00-8000-0000000000b5', '0190f3a1-7c2e-7a00-8000-0000000001b5', T_B5), holdLimit: 3 },
+      held('A06', ACCOUNT_B, '0190f3a1-7c2e-7a00-8000-0000000000b6', '0190f3a1-7c2e-7a00-8000-0000000001b6', T_B5 + 1),
+      { mode: 'SOLD', seat: ref('A01'), accountId: ACCOUNT_A, holdId: '0190f3a1-7c2e-7a00-8000-0000000000a1', purchaseSessionId: '0190f3a1-7c2e-7a00-8000-0000000001a1', fencingToken: T_A3 - 1, heldAtMs: HELD_AT, expiresAtMs: EXP, holdLimit: 4 },
+    ];
+    expect(await s.store.writeSeats(s.eventId, seats, KEEP, 2)).toEqual(OK);
+    const ev = s.ev();
+    expect(ev.holds.get(ref('A03').index)?.lim).toBe(2);
+    expect(ev.holds.get(ref('A05').index)?.lim).toBe(3);
+    expect('lim' in ev.holds.get(ref('A06').index)!).toBe(false);
+    expect(ev.holds.get(ref('A01').index)?.lim).toBe(4);
+    // 판매 좌석에 대조 행이 없어(토큰·시각 칸 없음) 한도도 없으면 lim을 쓰지 않는다
+    const t = setup();
+    expect(await t.store.writeSeats(t.eventId, [sold('A02', ACCOUNT_A, '0190f3a1-7c2e-7a00-8000-0000000000a2', '')], KEEP, 2)).toEqual(OK);
+    expect('lim' in t.ev().holds.get(ref('A02').index)!).toBe(false);
+  });
+});
+
 describe('isReady·writeSeats(REBUILD_SEATS_LUA의 쌍둥이)', () => {
   test('ST26_ isReady는 세대 키가 있을 때만 참이다: 처음 보는 회차·좌석만 쓴 회차는 거짓, finish·판매 열기 뒤는 참 [S-T26]', async () => {
     const s = setup();

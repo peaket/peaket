@@ -342,7 +342,34 @@ describe('마이그레이션과 표 모양', () => {
     );
     const expected = [seatSale, purchaseQuota, seatHold, seatRebuild].flatMap((t) => getTableConfig(t).checks.map((k) => k.name)).sort();
     expect(r.rows.map((x) => x.conname)).toEqual(expected);
-    expect(expected).toEqual(['purchase_quota_used_within_limit', 'seat_hold_kind_check', 'seat_hold_status_check', 'seat_rebuild_gen_check', 'seat_sale_status_check']);
+    // seat_hold_hold_limit_check는 0027(W9-fix2 HOT-252)이 더한다
+    expect(expected).toEqual(['purchase_quota_used_within_limit', 'seat_hold_hold_limit_check', 'seat_hold_kind_check', 'seat_hold_status_check', 'seat_rebuild_gen_check', 'seat_sale_status_check']);
+  });
+
+  test('HOT-252 마이그레이션: 0027 seat_hold.hold_limit과 CHECK(docs/data.md seat_hold.hold_limit) [ASVS v5.0.0-2.3.2]', async () => {
+    expect(journal.entries.map((e) => e.tag).some((t) => t.startsWith('0027_')), '0027 마이그레이션').toBe(true);
+    const cols = async (table: string) =>
+      (
+        await q<{ column_name: string; data_type: string; is_nullable: string; column_default: string | null }>(
+          `select column_name, data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = $1 and column_name = 'hold_limit'`,
+          [table],
+        )
+      ).rows.map((x) => [x.column_name, x.data_type, x.is_nullable, x.column_default]);
+    // 부모와 마이그레이션 뒤 ensureSeatHoldPartitions가 새로 만든 월 파티션(처음·마지막) 모두 칸이 있다(널 허용, 기본값 없음)
+    for (const table of ['seat_hold', firstCreated[0]!, firstCreated.at(-1)!]) expect(await cols(table), table).toEqual([['hold_limit', 'integer', 'YES', null]]);
+    const ins = (limit: unknown) =>
+      q(`insert into seat_hold (event_id, seat_id, account_id, fencing_token, status, expires_at, hold_limit) values ($1, $2, $3, 1, 'RELEASED', now() + interval '1 minute', $4)`, [eventAt(Date.now()), id(), id(), limit]);
+    // 0·음수는 CHECK가 거절한다(23514)
+    for (const bad of [0, -1]) await expect(ins(bad), String(bad)).rejects.toMatchObject({ code: '23514' });
+    // NULL과 1 이상은 받는다
+    await expect(ins(null)).resolves.toMatchObject({ rowCount: 1 });
+    await expect(ins(1)).resolves.toMatchObject({ rowCount: 1 });
+    await expect(ins(4)).resolves.toMatchObject({ rowCount: 1 });
+    // 칸을 적지 않은 행은 NULL이다(옛 행은 채우지 않는다)
+    const e = eventAt(Date.now());
+    const seat = id();
+    await putHold(e, seat, 7, 'RELEASED');
+    expect((await q<{ hold_limit: number | null }>('select hold_limit from seat_hold where event_id = $1 and seat_id = $2', [e, seat])).rows).toEqual([{ hold_limit: null }]);
   });
 });
 

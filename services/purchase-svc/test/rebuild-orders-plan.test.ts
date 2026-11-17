@@ -42,15 +42,41 @@ const pinned = (orderId: string, accountId: string, seatIds: string[]): RebuildP
   seatIds,
 });
 /** 원장 행 하나(pinnedLedger). holdId는 'hold-of-{주문}' 꼴 */
-const row = (seatId: string, holdId: string | null, fencingToken: number, status: RebuildLedgerRow['status'] = 'HELD'): RebuildLedgerRow => ({ seatId, holdId, status, fencingToken });
+const row = (seatId: string, holdId: string | null, fencingToken: number, status: RebuildLedgerRow['status'] = 'HELD', holdLimit: number | null = null): RebuildLedgerRow => ({ seatId, holdId, status, fencingToken, holdLimit });
 /** 묶인 주문의 좌석마다 그 주문 holdId의 HELD 원장 행(토큰은 from부터 1씩) */
 const heldRows = (orderId: string, seatIds: string[], from = 100): RebuildLedgerRow[] => seatIds.map((s, k) => row(s, `hold-of-${orderId}`, from + k));
 /** 원장 홀드 하나(기본은 FAN, 1분 전에 잡아 6분 뒤 만료) */
 function ledger(seatId: string, accountId: string, fencingToken: number, over: Partial<RebuildHold> = {}): RebuildHold {
   const heldAtMs = NOW - 60_000;
-  return { seatId, accountId, fencingToken, kind: 'FAN', heldAtMs, expiresAtMs: heldAtMs + TTL, holdId: `h-${seatId}-${fencingToken}`, purchaseSessionId: 'ps-ledger', ...over };
+  return { seatId, accountId, fencingToken, kind: 'FAN', heldAtMs, expiresAtMs: heldAtMs + TTL, holdId: `h-${seatId}-${fencingToken}`, purchaseSessionId: 'ps-ledger', holdLimit: null, ...over };
 }
 const orders = (o: Partial<RebuildOrderInputs> = {}): RebuildOrderInputs => ({ saleOrders: [], pinned: [], pinnedLedger: [], nowMs: NOW, ...o });
+
+describe('HOT-252 1인 한도 되살리기(docs/features/seat-hold.md §6 1인 한도 되살리기 다시 만들기)', () => {
+  test('HOT-252 다시 만들기는 원장 홀드·묶인 주문의 홀드에 hold_limit을 lim으로 쓰고 빈 값이면 쓰지 않는다(planRebuild) [ASVS v5.0.0-2.3.2]', () => {
+    const plan = planRebuild(
+      [sale('A01', ACCOUNT_A, 'order-1')],
+      [ledger('A03', ACCOUNT_B, 300, { holdLimit: 2 }), ledger('A04', ACCOUNT_B, 400, { holdLimit: null })],
+      resolve,
+      // 판매 좌석의 대조 원장 행(한도 4)
+      [ledger('A01', ACCOUNT_A, 100, { holdLimit: 4 })],
+      orders({ saleOrders: [saleOrder('order-1')], pinned: [pinned('order-9', ACCOUNT_B, ['A05'])], pinnedLedger: [row('A05', 'hold-of-order-9', 500, 'HELD', 3)] }),
+    );
+    const by = new Map(plan.seats.map((s) => [s.seat.seatId, s]));
+    expect([...by.keys()].sort()).toEqual(['A01', 'A03', 'A04', 'A05']);
+    // 원장 홀드(2), 묶인 주문(K1)의 홀드(3), 판매 좌석(대조 행 4)
+    expect(by.get('A03')).toMatchObject({ mode: 'HELD', holdLimit: 2 });
+    expect(by.get('A05')).toMatchObject({ mode: 'HELD', holdId: 'hold-of-order-9', holdLimit: 3 });
+    expect(by.get('A01')).toMatchObject({ mode: 'SOLD', holdLimit: 4 });
+    // 빈 값(이 칸 전에 적재한 행·옛 파드의 사건)이면 한도를 싣지 않는다(Saga가 회차 설정 한도를 쓴다)
+    expect(by.get('A04')!.holdLimit).toBeUndefined();
+    // 판매 좌석에 대조 행이 없거나 그 행이 빈 값이면 싣지 않는다
+    const bare = planRebuild([sale('A02', ACCOUNT_A, 'order-2')], [], resolve, [ledger('A02', ACCOUNT_A, 200, { holdLimit: null })], orders({ saleOrders: [saleOrder('order-2')] }));
+    expect(bare.seats[0]!.holdLimit).toBeUndefined();
+    const none = planRebuild([sale('A02', ACCOUNT_A, 'order-2')], [], resolve, [], orders({ saleOrders: [saleOrder('order-2')] }));
+    expect(none.seats[0]!.holdLimit).toBeUndefined();
+  });
+});
 
 describe('planRebuild 주문 근거(PRF-167)', () => {
   test('rebuild_④ K3: 원장 행이 없는 판매 좌석은 SOLD이고 holdId·purchaseSessionId = 그 판매 주문의 hold_id·purchase_session_id다(주문 ID·빈 글이 아니다). 토큰·시각 칸은 없다 [ASVS v5.0.0-2.3.4]', () => {

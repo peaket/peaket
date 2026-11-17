@@ -44,6 +44,7 @@ import {
   StaticPaymentGateways,
   TossPaymentGateway,
 } from '../src/modules/payment/server.js';
+import { PaymentInputError } from '../src/modules/payment/domain/confirm-command.js';
 import { PaymentNewPausedError } from '../src/modules/payment/domain/entry-pause.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { type GrpcStack, ledgerOf, newId, portoneConfirm, startGrpcStack, unary } from './support.js';
@@ -145,7 +146,7 @@ async function rig(o: { portone: PortoneChannelMap; tossUrl?: string; tossKey?: 
   const pauseQuery = new GetNewPaymentPause({ selection: new DrizzlePgSelectionBatch({ database: hot }), pauses, channels: channelTableOf(gateways), defaults: { primary: 'TOSS', fallback: 'PORTONE' }, fallbackExclusions: countedExclusions });
   const guards = new PgCallGuards({ gateways, podCount: 1, clock: s.clock, signals: new PromPgCallGuardSignals().register(metrics.registry), log: pgCallGuardLog(logger) });
   const runner = new PaymentConfirmRunner({ jobs: new DrizzleConfirmJobs({ database: runnerDb, clock: s.clock }), gateways, guards, log: paymentConfirmLog(logger), signals: new PromPaymentConfirmSignals().register(metrics.registry), clock: s.clock, podId: 'pod-sub', timer: { setInterval: () => 0, clearInterval: () => undefined } });
-  const assign = new AssignEventPg({ store: selection, portone: o.portone });
+  const assign = new AssignEventPg({ store: selection, portone: o.portone, clock: s.clock });
   return { s, logs, metrics: () => metrics.registry.metrics(), prepare, pauseQuery, exclusionReads: () => exclusionReads, runner, observer, assign, selection };
 }
 
@@ -211,6 +212,21 @@ describe('P-T46 ①②: 명령 12의 회차 지정', () => {
     await expect(r.assign.execute({ eventId, primary: 'PORTONE', fallback: 'TOSS', updatedAtMs: at - 1 })).resolves.toEqual({ written: false });
     await expect(r.assign.execute({ eventId, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: at })).resolves.toEqual({ written: false });
     expect(await assignmentOf(eventId)).toEqual([{ pg_primary: 'TOSS', pg_fallback: 'PORTONE', updated_at: new Date(at) }]);
+  });
+
+  test('PRF-203 먼 미래 지정이 거절되어 뒤의 바른 지정이 그대로 쓰인다 [ASVS v5.0.0-2.2.1]', async () => {
+    const eventId = newId();
+    const r = await rig({ portone: mapWith('KCP_V2') });
+    const at = r.s.clock.now();
+    await expect(r.assign.execute({ eventId, primary: 'TOSS', updatedAtMs: at })).resolves.toEqual({ written: true });
+    // 9999년 지정은 입력 오류(updated_at)이고 표는 앞 지정 그대로다
+    const err = await r.assign.execute({ eventId, primary: 'PORTONE', updatedAtMs: Date.parse('9999-12-31T23:59:59.999Z') }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PaymentInputError);
+    expect((err as PaymentInputError).field).toBe('updated_at');
+    expect(await assignmentOf(eventId)).toEqual([{ pg_primary: 'TOSS', pg_fallback: null, updated_at: new Date(at) }]);
+    // 그 뒤의 바른 지정(지금 + 1초)은 막히지 않고 쓰인다
+    await expect(r.assign.execute({ eventId, primary: 'PORTONE', updatedAtMs: at + 1_000 })).resolves.toEqual({ written: true });
+    expect(await assignmentOf(eventId)).toEqual([{ pg_primary: 'PORTONE', pg_fallback: null, updated_at: new Date(at + 1_000) }]);
   });
 });
 

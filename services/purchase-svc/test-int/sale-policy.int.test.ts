@@ -10,13 +10,15 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDatabase, createExternalHttpClient, createHotRedis, fakeClock, type HotRedis, ProblemError, uuidv7 } from '@peaket/platform';
+import { createDatabase, createExternalHttpClient, createHotRedis, fakeClock, type HotRedis, ProblemError, systemClock, uuidv7 } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { migratePurchase } from '../scripts/migrate.mjs';
+import { ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mjs';
 import {
   AdmissionTokenRejected,
   CoreSaleConfigs,
+  DrizzleSeatHoldLedger,
+  DrizzleSeatRebuildSource,
   DrizzleSeatSales,
   type EventSeatConfig,
   FileSeatMapSource,
@@ -32,15 +34,20 @@ import {
   RedisOrderHolds,
   RedisSeatStore,
   type ResolvedPurchaseSessionInfo,
+  routeStreamEntry,
   SaleConfigUnavailable,
+  SEAT_TOPIC,
+  SeatRebuilder,
   type SeatRef,
   seatKeys,
+  toLedgerHoldEvent,
   throwHoldProblem,
   verifyAdmissionToken,
 } from '../src/modules/inventory/index.js';
 import { ACCOUNT_A, ACCOUNT_B, DAY, newEvent, SEAT_COUNT, SEAT_DEFS } from '../test/hold-cases.js';
 import { claimsOf, ISS, JNY, newKey, signAdmission } from '../test/admission-fixtures.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { streamItems } from './seat-stream.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 const NOW = Date.now();
@@ -69,6 +76,8 @@ beforeAll(async () => {
   if (!valkey || !pg) throw (v.status === 'rejected' ? v.reason : (p as PromiseRejectedResult).reason) as Error;
   redis = await createHotRedis({ url: valkey.url });
   await migratePurchase(pg.url);
+  // 홀드 원장 seat_hold의 이번 달 파티션(HOT-252 다시 만들기 시험이 원장에 적재한다)
+  await ensureSeatHoldPartitions(pg.url);
   database = createDatabase({ url: pg.url, profile: 'hot', max: 8, applicationName: 'bat051-int-hot' });
   admin = createDatabase({ url: pg.url, profile: 'general', max: 4, applicationName: 'bat051-int-admin' });
 }, 180_000);
@@ -379,6 +388,69 @@ describe('홀드 Hash lim과 purchase_quota 한도(실제 Valkey·PostgreSQL)', 
     const row = (await admin!.pool.query<{ limit_count: number; used: number }>('select limit_count, used from purchase_quota where account_id = $1 and event_id = $2', [accountId, eventId])).rows[0]!;
     expect({ limit_count: row.limit_count, used: row.used }).toEqual({ limit_count: 2, used: 2 });
     expect(await sales.reserve({ eventId, accountId, orderId: randomUUID(), seatIds: [randomUUID()], limit: limit! })).toEqual({ status: 'QUOTA_EXCEEDED' });
+  });
+});
+
+describe('HOT-252 다시 만든 뒤의 1인 한도(docs/features/seat-hold.md §6 1인 한도 되살리기, 실제 Valkey·PostgreSQL)', () => {
+  test('HOT-252 판매 정책 한도 2로 잡은 홀드를 다시 만든 뒤 예약 한도도 2다 [ASVS v5.0.0-2.3.2] [S-T26]', async () => {
+    // 회차 설정 한도 4, 판매 정책 규칙 한도 2(홀드 Lua의 한도 인자). 원장 파티션에 들어가게 이번 달 UUIDv7 회차
+    const eventId = uuidv7(systemClock);
+    const map = new MemorySeatMap();
+    map.put({ eventId, layoutVersion: 'v1', seatCount: 2, perAccountLimit: 4, saleEndsAtMs: NOW + DAY }, UUID_SEATS);
+    const store = new RedisSeatStore(redis);
+    const keepUntilMs = Date.now() + 2 * DAY;
+    await store.openSale({ eventId, seatCount: 2, keepUntilMs });
+    const seatIds = UUID_SEATS.map((s) => s.seatId);
+    const seats = (await map.resolve(eventId, seatIds)).filter((s): s is SeatRef => s !== undefined);
+    const accountId = ACCOUNT_A;
+    const purchaseSessionId = 'ps-hot252-rebuild';
+    const holdId = uuidv7(systemClock);
+    const held = await store.hold({ eventId, accountId, purchaseSessionId, holdId, idempotencyKey: randomUUID(), fingerprint: holdFingerprint(seatIds), seats, limit: 2, keepUntilMs });
+    expect(held.kind).toBe('OK');
+
+    // 적재: 좌석 Stream의 HELD 항목 → 릴레이의 SeatEvent(JSON) → 적재 변환 → 원장(적재기에 직접 넘긴다)
+    const ledger = new DrizzleSeatHoldLedger(admin!);
+    let applied = 0;
+    for (const item of await streamItems(redis, eventId)) {
+      const route = routeStreamEntry(eventId, item);
+      if (route.kind !== 'send' || route.topic !== SEAT_TOPIC) continue;
+      const ev = toLedgerHoldEvent(JSON.parse(JSON.stringify(route.message)));
+      if (ev === null) continue;
+      await ledger.apply(ev);
+      applied += 1;
+    }
+    expect(applied).toBe(2);
+
+    // 전체 유실: 좌석 Redis의 그 회차 키를 모두 지운다
+    const pattern = `s:{event:${eventId}}:*`;
+    const routeKey = seatKeys.epoch(eventId);
+    let cursor = '0';
+    do {
+      const r = (await redis.command(['SCAN', cursor, 'MATCH', pattern, 'COUNT', '1000'], { key: routeKey })) as [unknown, unknown[]];
+      cursor = String(r[0]);
+      for (const k of r[1] ?? []) await redis.command(['DEL', String(k)], { key: String(k) });
+    } while (cursor !== '0');
+    expect(await store.isReady(eventId)).toBe(false);
+
+    // 다시 만들기: 원장 홀드(만료 전)를 되살린다
+    const rebuilder = new SeatRebuilder({ source: new DrizzleSeatRebuildSource(admin!), target: store, seatMap: map, holder: 'pod-hot252' });
+    expect(await rebuilder.rebuild(eventId, { keepUntilMs })).toMatchObject({ result: 'REBUILT', held: 2 });
+    for (const s of seats) {
+      const key = seatKeys.hold(eventId, s.index);
+      expect(String(await redis.command(['HGET', key, 'lim'], { key })), s.seatId).toBe('2');
+    }
+
+    // 예약: Saga reserveStep처럼 홀드 Hash lim이 있으면 그 값, 없으면 회차 설정 한도(4)
+    const orderHolds = new RedisOrderHolds(redis, map);
+    const held2 = await orderHolds.limit({ eventId, accountId, purchaseSessionId, holdId, seatIds });
+    expect(held2).toBe(2);
+    const limit = held2 ?? 4;
+    const sales = new DrizzleSeatSales(database!);
+    expect(await sales.reserve({ eventId, accountId, orderId: randomUUID(), seatIds, limit })).toEqual({ status: 'RESERVED' });
+    const row = (await admin!.pool.query<{ limit_count: number; used: number }>('select limit_count, used from purchase_quota where account_id = $1 and event_id = $2', [accountId, eventId])).rows[0]!;
+    expect({ limit_count: row.limit_count, used: row.used }).toEqual({ limit_count: 2, used: 2 });
+    // 같은 계정이 한 좌석 더 예약하면 한도 초과다(회차 설정 한도 4였다면 들어갔다)
+    expect(await sales.reserve({ eventId, accountId, orderId: randomUUID(), seatIds: [randomUUID()], limit })).toEqual({ status: 'QUOTA_EXCEEDED' });
   });
 });
 

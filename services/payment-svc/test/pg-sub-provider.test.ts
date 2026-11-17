@@ -84,6 +84,9 @@ describe('규칙(subProviderConflict)', () => {
 });
 
 describe('회차 지정 쓰임새(AssignEventPg)', () => {
+  /** payment-svc 시계의 지금(T). 지정 시각 상한은 T + 5분이다(docs/features/payment.md §2.2, W9-fix2 PRF-203) */
+  const T = Date.parse('2026-11-17T03:00:00.000Z');
+  const clock = () => fakeClock({ now: T });
   class FakeStore implements EventPgAssignmentStore {
     readonly writes: EventPgAssignmentWrite[] = [];
     async assignEvent(w: EventPgAssignmentWrite): Promise<boolean> {
@@ -94,7 +97,7 @@ describe('회차 지정 쓰임새(AssignEventPg)', () => {
 
   test('P-T46 ① 걸린 지정은 이름 붙은 오류 pg-fallback-same-provider(422)로 거절하고 저장소를 부르지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
     const store = new FakeStore();
-    const use = new AssignEventPg({ store, portone: single('TOSSPAYMENTS') });
+    const use = new AssignEventPg({ store, portone: single('TOSSPAYMENTS'), clock: clock() });
     const err = await use.execute({ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: 1 }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PgFallbackSameProviderError);
     expect(err).toMatchObject({ code: 'FAILED_PRECONDITION', problem: 'pg-fallback-same-provider', status: 422, message: 'pg-fallback-same-provider', conflict: { provider: 'TOSSPAYMENTS', reason: 'SAME_PROVIDER' } });
@@ -103,7 +106,7 @@ describe('회차 지정 쓰임새(AssignEventPg)', () => {
 
   test('P-T46 ⑤ 걸리지 않는 지정은 그대로 쓴다', async () => {
     const store = new FakeStore();
-    await expect(new AssignEventPg({ store, portone: single('KCP_V2') }).execute({ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: 7 })).resolves.toEqual({ written: true });
+    await expect(new AssignEventPg({ store, portone: single('KCP_V2'), clock: clock() }).execute({ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: 7 })).resolves.toEqual({ written: true });
     expect(store.writes).toEqual([{ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: 7 }]);
   });
 
@@ -115,9 +118,31 @@ describe('회차 지정 쓰임새(AssignEventPg)', () => {
     ['updated_at', { eventId: EVENT, primary: 'TOSS', updatedAtMs: Number.NaN }],
   ])('P-T46 입력이 틀리면(%s) 쓰지 않는다', async (field, input) => {
     const store = new FakeStore();
-    const err = await new AssignEventPg({ store }).execute({ updatedAtMs: 1, ...input }).catch((e: unknown) => e);
+    const err = await new AssignEventPg({ store, clock: clock() }).execute({ updatedAtMs: 1, ...input }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PaymentInputError);
     expect((err as PaymentInputError).field).toBe(field);
+    expect(store.writes).toEqual([]);
+  });
+
+  test('PRF-203 회차 지정 시각이 지금 + 5분을 넘으면 입력 오류이고 표를 바꾸지 않는다 [ASVS v5.0.0-2.2.1]', async () => {
+    // 경계: 정확히 지금 + 5분(300,000ms)은 받는다
+    const okStore = new FakeStore();
+    await expect(new AssignEventPg({ store: okStore, portone: single('KCP_V2'), clock: clock() }).execute({ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: T + 300_000 })).resolves.toEqual({ written: true });
+    expect(okStore.writes).toEqual([{ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: T + 300_000 }]);
+    // 지금 + 5분 + 1ms, 9999년 끝, 날짜로 나타낼 수 있는 가장 먼 시각(8.64e15)은 거절하고 저장소를 부르지 않는다
+    for (const updatedAtMs of [T + 300_001, Date.parse('9999-12-31T23:59:59.999Z'), 8.64e15]) {
+      const store = new FakeStore();
+      const err = await new AssignEventPg({ store, portone: single('KCP_V2'), clock: clock() }).execute({ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs }).catch((e: unknown) => e);
+      expect(err, String(updatedAtMs)).toBeInstanceOf(PaymentInputError);
+      expect((err as PaymentInputError).field, String(updatedAtMs)).toBe('updated_at');
+      expect(store.writes, String(updatedAtMs)).toEqual([]);
+    }
+    // 하위 결제사 규칙에 걸리는 입력이어도 지정 시각 검사가 먼저다(pg-fallback-same-provider가 아니라 updated_at)
+    const store = new FakeStore();
+    const err = await new AssignEventPg({ store, portone: single('TOSSPAYMENTS'), clock: clock() }).execute({ eventId: EVENT, primary: 'TOSS', fallback: 'PORTONE', updatedAtMs: T + 300_001 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PaymentInputError);
+    expect(err).not.toBeInstanceOf(PgFallbackSameProviderError);
+    expect((err as PaymentInputError).field).toBe('updated_at');
     expect(store.writes).toEqual([]);
   });
 });

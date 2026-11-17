@@ -1,6 +1,7 @@
 // 회차의 결제사 지정 쓰임새(명령 12, docs/features/payment.md §2.2 '회차별 지정'·'하위 결제사 검사의 첫 구현', BUILD_ORDER PRF-203).
 // 하위 결제사 규칙에 걸린 지정은 이름 붙은 오류 pg-fallback-same-provider로 거절하고 표를 바꾸지 않는다. 지정 시각이 표의 값보다 늦을 때만 쓴다.
 // 명령 12를 받아 이 쓰임새를 부르는 전송(core-svc 저장·설정 사건 소비자·dry-run·콘솔 422)은 OPS-290이다.
+import type { Clock } from '@peaket/platform';
 import { isLowerUuid, PaymentInputError } from '../domain/confirm-command.js';
 import type { PgName } from '../domain/payment-gateway.js';
 import { PgFallbackSameProviderError, type PortoneChannelMap, subProviderConflict } from '../domain/pg-sub-provider.js';
@@ -21,6 +22,8 @@ export interface AssignEventPgDeps {
   readonly store: EventPgAssignmentStore;
   /** 설정의 포트원 채널 표(하위 결제사). 없으면 규칙이 보지 못한다(포트원 어댑터 없음) */
   readonly portone?: PortoneChannelMap;
+  /** payment-svc 시계(지정 시각 상한 = 지금 + 5분, docs/features/payment.md §2.2, W9-fix2 PRF-203). 시험 담당이 더한 빈 뼈대이고 검사는 구현 담당이 넣는다 */
+  readonly clock: Pick<Clock, 'now'>;
 }
 
 export class AssignEventPg {

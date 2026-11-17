@@ -1,10 +1,13 @@
 // 홀드 해제·연장·다시 읽기와 결제 정지 멈춤을 실제 Valkey 8.1로 돈다(docs/features/seat-hold.md §5, BUILD_ORDER HOT-070, ADR-0254).
 // 시간은 Redis TIME이라, 지난 시각은 홀드 Hash와 만료 인덱스 값을 직접 고쳐 만든다.
 import 'reflect-metadata';
-import { createHotRedis, type HotRedis, systemClock } from '@peaket/platform';
+import { randomUUID } from 'node:crypto';
+import { createHotRedis, type HotRedis, systemClock, uuidv7 } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { ExpirySweeper, HOLD_EXTENSION_MS, RedisOrderHolds, HoldPauseView, type HoldTarget, holdLifecycleKeys, MemorySeatMap, type PaymentPauseAnswer, RedisHoldLifecycle, RedisSeatStore, RedisSweepLeases, type SeatRef, seatKeys } from '../src/modules/inventory/index.js';
-import { ACCOUNT_A, ACCOUNT_B, DAY, held, holdInput, idx, newEvent, ref, SEAT_COUNT, SEAT_DEFS } from '../test/hold-cases.js';
+import { AUTO_CANDIDATE_PAGE, type AutoCondition, autoCandidatesOf, autoFingerprint, EXPIRY_BATCH_SIZE, ExpirySweeper, HOLD_EXTENSION_MS, RedisOrderHolds, HoldPauseView, type HoldTarget, holdLifecycleKeys, MemorySeatMap, type PaymentPauseAnswer, RedisHoldLifecycle, RedisSeatStore, RedisSweepLeases, type SeatRef, seatKeys } from '../src/modules/inventory/index.js';
+import { expireSeatsOf, okOf } from '../test/expiry-cases.js';
+import { ACCOUNT_A, ACCOUNT_B, ACCOUNT_C, ACCOUNT_D, DAY, held, holdInput, idx, newEvent, ref, SEAT_COUNT, SEAT_DEFS } from '../test/hold-cases.js';
+import { streamItems } from './seat-stream.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 let valkey: ValkeyContainer | undefined;
@@ -584,3 +587,56 @@ describe('리뷰 재현(L5·L8·L9)', () => {
   });
 });
 
+describe('HOT-252 HELD 항목의 holdLimit(docs/features/seat-hold.md §6 1인 한도 되살리기 사건)', () => {
+  test('HOT-252 팬 홀드 Lua 셋은 HELD 항목에 holdLimit을 싣고 우선 구매 보류는 싣지 않는다 [ASVS v5.0.0-2.3.2]', async () => {
+    const e = await openEvent();
+    const keep = KEEP();
+    // ① 홀드 Lua(한도 인자 3)
+    const h1 = holdInput(e, ['A01'], { accountId: ACCOUNT_A, purchaseSessionId: 'ps-hot252-a', keepUntilMs: keep, limit: 3 });
+    held(await store.hold(h1));
+    // ② 자동 배정 Lua(한도 인자 2, 연석 2석)
+    const cond: AutoCondition = { firstTierId: 'R', count: 2, wheelchair: false, allowSplit: false };
+    const list = autoCandidatesOf(SEAT_DEFS.filter((d) => !d.saleExcluded), cond, new Set(['R', 'S']));
+    const autoHoldId = uuidv7(systemClock);
+    const auto = await store.holdAuto({
+      eventId: e,
+      accountId: ACCOUNT_B,
+      purchaseSessionId: 'ps-hot252-b',
+      holdId: autoHoldId,
+      idempotencyKey: randomUUID(),
+      fingerprint: autoFingerprint(cond),
+      count: cond.count,
+      groups: list.groups.slice(0, AUTO_CANDIDATE_PAGE),
+      cursor: 0,
+      cursorField: autoFingerprint(cond),
+      limit: 2,
+      keepUntilMs: keep,
+    });
+    expect(auto.kind).toBe('OK');
+    // ③ 묶기 Lua가 빈 좌석 B05를 다시 잡는다(한도 인자 4)
+    const pinHoldId = uuidv7(systemClock);
+    expect(await store.pin({ eventId: e, accountId: ACCOUNT_C, purchaseSessionId: 'ps-hot252-c', holdId: pinHoldId, seats: [ref('B05')], limit: 4, orderGen: 1, keepUntilMs: keep })).toMatchObject({ kind: 'OK', regrabbed: 1 });
+    // 우선 구매 보류(lim을 쓰지 않는다)
+    expect(await store.holdPriority({ eventId: e, accountId: ACCOUNT_D, grantId: randomUUID(), seat: ref('B09'), expiresAtMs: Date.now() + DAY, keepUntilMs: keep })).toMatchObject({ kind: 'OK' });
+    // RELEASED(A01 해제)와 EXPIRED(A10 만료)
+    expect(await life.release({ eventId: e, holdId: h1.holdId, accountId: ACCOUNT_A, purchaseSessionId: 'ps-hot252-a', seats: [...h1.seats] }, keep)).toMatchObject({ kind: 'OK' });
+    const late = await holdOf(e, ['A10'], ACCOUNT_C, 'ps-hot252-late');
+    await makeDue(late);
+    const x = okOf(await store.expire({ eventId: e, keepUntilMs: keep, seats: expireSeatsOf(await store.dueExpiries({ eventId: e, nowMs: Date.now(), limit: EXPIRY_BATCH_SIZE })) }));
+    expect(x.released).toBe(1);
+
+    const items = (await streamItems(redis, e)).map((i) => i.fields);
+    const heldOf = (holdId: string) => items.filter((f) => f.type === 'HELD' && f.holdId === holdId);
+    // 팬 홀드 HELD 항목의 holdLimit = 그 Lua의 한도 인자(Hash lim과 같은 값)
+    expect(heldOf(h1.holdId).map((f) => f.holdLimit)).toEqual(['3']);
+    expect(heldOf(autoHoldId).map((f) => f.holdLimit)).toEqual(['2', '2']);
+    expect(heldOf(pinHoldId).map((f) => f.holdLimit)).toEqual(['4']);
+    expect(heldOf(late.holdId).map((f) => f.holdLimit)).toEqual(['4']);
+    // 우선 구매 보류의 HELD, RELEASED·EXPIRED에는 칸이 없다
+    const prio = items.filter((f) => f.type === 'HELD' && f.holdKind === 'PRIORITY');
+    expect(prio).toHaveLength(1);
+    const ends = items.filter((f) => f.type === 'RELEASED' || f.type === 'EXPIRED');
+    expect(ends.map((f) => f.type).sort()).toEqual(['EXPIRED', 'RELEASED']);
+    for (const f of [...prio, ...ends]) expect('holdLimit' in f, `${f.type} ${f.holdKind}`).toBe(false);
+  });
+});

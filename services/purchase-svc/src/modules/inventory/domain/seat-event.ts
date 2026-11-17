@@ -60,6 +60,8 @@ export interface SeatEventMessage {
   expiresAt: string;
   occurredAt: string;
   eventKey: string;
+  /** 홀드 때 판매 정책이 정한 1인 한도(Stream HELD 칸 holdLimit, holdKind FAN의 HELD일 때만, asyncapi SeatEvent.holdLimit, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대 */
+  holdLimit?: number;
 }
 
 /** 보낼 수 없는 항목을 넘기는 까닭(지표 seat_stream_relay_dropped_total의 reason) */
@@ -176,6 +178,8 @@ export interface LedgerHoldEvent {
   /** SeatEvent의 holdId·purchaseSessionId(원장 hold_id·purchase_session_id, 다시 만들기가 쓴다, BUILD_ORDER PRF-143) */
   holdId?: string;
   purchaseSessionId?: string;
+  /** SeatEvent의 holdLimit(원장 hold_limit, HELD·FAN의 1 이상 안전한 정수만, W9-fix2 HOT-252). 시험 담당이 더한 빈 뼈대 */
+  holdLimit?: number;
 }
 
 /**

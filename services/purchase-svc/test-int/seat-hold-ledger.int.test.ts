@@ -11,7 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { createDatabase, type Database, fakeClock, isTransientError, systemClock, uuidv7 } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mjs';
-import { DrizzleSeatHoldLedger, HOLD_TTL_MS, type LedgerHoldEvent, type SeatHoldLedger } from '../src/modules/inventory/index.js';
+import type { ConsumedMessage } from '@peaket/platform';
+import { DrizzleSeatHoldLedger, HOLD_TTL_MS, type LedgerHoldEvent, type SeatHoldLedger, SeatHoldLedgerHandler, seatEventKey } from '../src/modules/inventory/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { uuid8 } from './seat-stream.js';
 
@@ -380,5 +381,79 @@ describe('DrizzleSeatHoldLedger: hold_id·purchase_session_id 적재(다시 만�
     expect(e.purchaseSessionId).toBeUndefined();
     await ledger.apply(e);
     expect(await idsOf(h.eventId, h.seatId)).toEqual([{ token: T1, holdId: null, purchaseSessionId: null }]);
+  });
+});
+
+describe('HOT-252 원장 hold_limit(docs/features/seat-hold.md §6 1인 한도 되살리기 원장)', () => {
+  /** 그 좌석 행들의 hold_limit(토큰 순) */
+  async function limitsOf(eventId: string, seatId: string): Promise<{ token: number; holdLimit: number | null; status: string }[]> {
+    const r = await admin.pool.query(`select fencing_token::text as t, hold_limit, status from seat_hold where event_id = $1 and seat_id = $2 order by fencing_token`, [eventId, seatId]);
+    return r.rows.map((x: Record<string, unknown>) => ({ token: Number(x.t), holdLimit: x.hold_limit === null ? null : Number(x.hold_limit), status: String(x.status) }));
+  }
+  /** Kafka에서 읽은 SeatEvent 값(JSON)을 적재 소비자 처리기에 넘긴다(decode → handle). 보류(던짐)되면 그 오류를 돌려준다 */
+  async function consume(h: Hold, type: 'HELD' | 'RELEASED' | 'EXPIRED', extra: Record<string, unknown>, atMs = h.heldAtMs): Promise<unknown> {
+    const holdId = uuidv7(systemClock);
+    const value = {
+      eventId: h.eventId,
+      seatId: h.seatId,
+      tierId: 'R',
+      sectionId: 'SEC-A',
+      type,
+      fencingToken: h.token,
+      sectionVersion: 1,
+      seatEpoch: 1,
+      holdId,
+      holdKind: 'FAN',
+      purchaseSessionId: randomUUID(),
+      accountId: h.accountId,
+      expiresAt: new Date(h.expiresAtMs).toISOString(),
+      occurredAt: new Date(atMs).toISOString(),
+      eventKey: seatEventKey(type, h.eventId, holdId, h.seatId, h.token),
+      ...extra,
+    };
+    const handler = new SeatHoldLedgerHandler(ledger);
+    const m: ConsumedMessage = { topic: 'trade.seats', partition: 0, offset: 0n, key: h.eventId, value: Buffer.from(JSON.stringify(value), 'utf8'), headers: {}, timestamp: atMs };
+    const r = handler.decode(m);
+    try {
+      await handler.handle(r, m);
+      return undefined;
+    } catch (err) {
+      return err;
+    }
+  }
+
+  test('HOT-252 원장 적재는 HELD의 holdLimit을 hold_limit에 쓰고 끝 사건이 먼저 온 행은 뒤 HELD가 채운다 [ASVS v5.0.0-2.3.2]', async () => {
+    // HELD(3) → 3
+    const a = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+    await ledger.apply({ ...heldEvent(a), holdLimit: 3 });
+    expect(await limitsOf(a.eventId, a.seatId)).toEqual([{ token: T1, holdLimit: 3, status: 'HELD' }]);
+
+    // EXPIRED가 먼저 와서 넣은 행(NULL) → 같은 토큰 HELD(3)가 채운다 → 같은 HELD를 값 5로 다시 받아도 3 그대로(덮지 않는다)
+    const b = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+    await ledger.apply(endEvent(b, 'EXPIRED', b.expiresAtMs));
+    expect(await limitsOf(b.eventId, b.seatId)).toEqual([{ token: T1, holdLimit: null, status: 'EXPIRED' }]);
+    await ledger.apply({ ...heldEvent(b), holdLimit: 3 });
+    expect(await limitsOf(b.eventId, b.seatId)).toEqual([{ token: T1, holdLimit: 3, status: 'EXPIRED' }]);
+    await ledger.apply({ ...heldEvent(b), holdLimit: 5 });
+    expect(await limitsOf(b.eventId, b.seatId)).toEqual([{ token: T1, holdLimit: 3, status: 'EXPIRED' }]);
+
+    // HELD 위에 같은 HELD(5)를 다시 받아도 3 그대로
+    await ledger.apply({ ...heldEvent(a), holdLimit: 5 });
+    expect(await limitsOf(a.eventId, a.seatId)).toEqual([{ token: T1, holdLimit: 3, status: 'HELD' }]);
+
+    // 칸 없음 → NULL
+    const c = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+    await ledger.apply(heldEvent(c));
+    expect(await limitsOf(c.eventId, c.seatId)).toEqual([{ token: T1, holdLimit: null, status: 'HELD' }]);
+
+    // 적재 소비자 길: 1 이상 정수 2는 쓰고, 0·2.5·글 '2'·-1은 NULL로 적재하며 보류하지 않는다(행은 들어간다)
+    const good = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+    expect(await consume(good, 'HELD', { holdLimit: 2 })).toBeUndefined();
+    expect(await limitsOf(good.eventId, good.seatId)).toEqual([{ token: T1, holdLimit: 2, status: 'HELD' }]);
+    for (const bad of [0, 2.5, '2', -1]) {
+      const h = hold({ eventId: newEventId(), seatId: randomUUID(), token: T1 });
+      expect(await consume(h, 'HELD', { holdLimit: bad }), String(bad)).toBeUndefined();
+      expect(await limitsOf(h.eventId, h.seatId), String(bad)).toEqual([{ token: T1, holdLimit: null, status: 'HELD' }]);
+    }
   });
 });

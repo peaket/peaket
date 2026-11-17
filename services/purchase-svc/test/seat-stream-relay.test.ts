@@ -337,6 +337,22 @@ describe('SeatStreamRelay.tick: 읽은 묶음을 차례대로 보내고 확인�
   });
 });
 
+describe('HOT-252 holdLimit(docs/features/seat-hold.md §6 1인 한도 되살리기)', () => {
+  test('HOT-252 Stream 릴레이는 holdLimit을 SeatEvent로 옮기고 적재 변환은 HELD·FAN의 1 이상 정수만 싣는다(릴레이가 부호기에 넘기는 SeatEvent) [ASVS v5.0.0-2.2.1]', async () => {
+    const entries = [held('1762225200000-0', 1, { holdLimit: '2' }), held('1762225200000-1', 2), released('1762225200001-0', 3)];
+    const w = world({ [EV_A]: entries });
+    const t = await w.relay().tick();
+    expect(t).toEqual({ events: [{ eventId: EV_A, sent: 3, dropped: 0, acked: 3 }] });
+    expect(w.calls.encode.map(([topic]) => topic)).toEqual([SEAT_TOPIC, SEAT_TOPIC, SEAT_TOPIC]);
+    const [withLimit, without, rel] = w.calls.encode.map(([, m]) => m as Record<string, unknown>);
+    expect(withLimit).toMatchObject({ type: 'HELD', seatId: seatOf(1), holdLimit: 2 });
+    expect('holdLimit' in without!).toBe(false);
+    expect('holdLimit' in rel!).toBe(false);
+    // 보낸 값도 그 메시지다(Kafka 레코드에 한도가 실린다)
+    expect(JSON.parse(w.calls.publish[0]![0]!.value.toString('utf8'))).toMatchObject({ topic: SEAT_TOPIC, message: { holdLimit: 2 } });
+  });
+});
+
 describe('SeatStreamRelay.tick: 실패', () => {
   test('publish가 던지면 ack하지 않고 failed(publish)이며, 다음 틱에 같은 항목을 다시 읽어 같은 레코드로 보낸 뒤에야 ack한다(적어도 한 번) [ASVS v5.0.0-16.5.2]', async () => {
     const entries = [held('1762225200000-0', 1), started('1762225200000-1')];
