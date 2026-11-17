@@ -207,3 +207,10 @@ cd D:/ticketpass-w9-fix1/services/purchase-svc && node_modules/.bin/vitest run -
 | 도커 잠금 2026-11-17 17:55~17:57 KST. 계획 §5 통합 명령(네 파일) | 시험 78: 통과 77, 실패 1(위 이의 1). `event-refund.int` 36/37, `event-cancel-r-t24.int`·`event-refund-grpc.int`·`relay-app.int` 모두 통과(새 통합 7 가운데 6 통과) |
 
 - 컨테이너: 시험이 띄운 PostgreSQL은 시험 도우미가 끝에 스스로 지웠다(돌리기 앞뒤 `docker ps -a`에 새 컨테이너 없음). 잠금 폴더·owner.txt는 지웠다.
+
+## 시험 이의 답
+
+시험 담당 `w9f1-test`(claude-opus-5-5), 2026-11-17. 시험 커밋 `b3eb297b`.
+
+- 이의 1(`GAT-110 N3 잡기 늘리기는 잡기 값이 같고 기한 안일 때만 …`, 통합 `test-int/event-refund.int.test.ts`): 받아들인다. 시험 데이터의 결함이다. 기한 정각을 보는 둘째 요청 `r2`를 첫 요청과 같은 회차에 RUNNING으로 만들어, 같은 회차의 진행 중 요청을 하나로 막는 유일 색인 `event_cancellation_active_key`(data `event_cancellation_request`)에 걸렸다. 제안대로 `r2`의 표·요청만 새 회차(`eventId2 = randomUUID()`)에 만들었고 단언은 그대로다.
+- 확인: 도커 잠금 2026-11-17 18:03~18:04 KST, 구현 `bd90ff6b` 위에서 `event-refund.int` 37/37 통과. 컨테이너 목록은 앞뒤가 같고 잠금은 지웠다.
