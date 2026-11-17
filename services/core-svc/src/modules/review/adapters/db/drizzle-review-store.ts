@@ -320,7 +320,8 @@ export class DrizzleReviewStore implements ReviewStore {
     return Math.max(0, nowMs - Math.round(Number(raw)));
   }
 
-  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
+  // 뼈대(리뷰 N1 시험): limit은 아직 쓰지 않는다
+  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number; limit?: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
     // 손으로 처리(웨이브 끝 보안 리뷰 S1, docs/features/identity.md §8 '손으로 처리'). 한 트랜잭션: 보류 행 잠금 → 예약(늦은 쪽) → 파기 → 보류 행 다시 처리 표시.
     // 예약을 파기보다 먼저 쓰는 것은 다시 정리 반복과 잠금 차례(예약 행 → 후기)를 맞추려는 것이다. 보류 행이 없으면 아무것도 쓰지 않는다
     return this.database.transaction(async (tx) => {

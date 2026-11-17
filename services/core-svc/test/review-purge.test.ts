@@ -1,5 +1,6 @@
 // I-T83 ②③⑥(W8-audit2a, 소유자 결정 2026-11-16 OPEN[42], ADR-0278, ADR-0086 ⑧): 파기한 후기는 공연 후기 목록·요약·상세에서 빠지고,
 // 작성자가 지운 후기도 탈퇴 파기와 같은 칸을 비운다. 손으로 하는 파기(purgeHeldWithdrawal)는 보류된 탈퇴 사건이 있을 때만 하고 다시 정리 예약을 쓴다(웨이브 끝 리뷰 S1).
+// 손으로 하는 파기는 한 번에 보류 행 ID 차례로 50개까지 처리하고, 처리한 보류 행 수·ID를 돌려준다(eventKey가 없는 행 포함, 다시 보기 N1, 계획 §10.5).
 // 정본: docs/features/identity.md §8 '후기 파기'·§12 I-T83, docs/data.md §2 '후기 파기'·§6 '관람 후기'. 단언 값은 정본에서 적고 코드 상수를 가져오지 않는다.
 import { fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -166,7 +167,8 @@ describe('I-T83 파기한 후기는 공개 경로에서 빠진다', () => {
     const a1 = record({ eventId: e1, accountId: A });
     const b1 = record({ eventId: e1, accountId: B });
     for (const r of [a1, b1]) await store.insertReview(r);
-    store.heldEvents.push({ topic: 'identity.accounts-withdrawn', eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0b02', businessKey: A, msgKey: A });
+    const HELD = '0190f3a1-7c2e-7a00-8000-0000000d0b02';
+    store.heldEvents.push({ id: HELD, topic: 'identity.accounts-withdrawn', eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0b02', businessKey: A, msgKey: A });
     const by = { reason: '보류된 탈퇴 사건 손 처리 시험', requestedBy: 'ops-lee' };
 
     for (const bad of ['not-a-uuid', '', `${A}x`]) await expect(reviews.purgeHeldWithdrawal(bad, by), bad).rejects.toMatchObject({ type: 'review-invalid', status: 422 });
@@ -175,11 +177,57 @@ describe('I-T83 파기한 후기는 공개 경로에서 빠진다', () => {
 
     clock.advance(11 * 60_000);
     const NOW = T0 + 11 * 60_000;
-    expect(await reviews.purgeHeldWithdrawal(A, by)).toEqual({ purged: 1, heldEvents: 1 });
+    expect(await reviews.purgeHeldWithdrawal(A, by)).toEqual({ purged: 1, heldEvents: 1, heldEventIds: [HELD] });
     expect(await store.findReview(a1.reviewId)).toEqual(purgedOf(a1, { nowMs: NOW, deletedAtMs: NOW }));
     expect(await store.findReview(b1.reviewId)).toEqual(b1);
     expect(store.rechecks.get(A)?.dueAtMs).toBe(NOW + 16 * 60_000);
     expect(store.heldEvents[0]?.reprocessedAtMs).toBe(NOW);
     await expect(reviews.purgeHeldWithdrawal(A, by)).rejects.toMatchObject({ type: expect.stringMatching(/withdrawal-not-held$/), status: 409 });
+  });
+
+  test('I-T83 ⑨ 한 번에 처리하는 보류 행은 50개까지이고 남은 행은 다시 불러 처리한다', async () => {
+    // 정본 docs/features/identity.md §8 '손으로 처리': 보류 행 ID 차례로 한 번에 50개 [가정]까지 잠그고 처리한다. 목록만 자르지 않고 처리 자체를 50개로 묶는다.
+    // 남은 행이 있으면 다시 부르고, 409 withdrawal-not-held가 끝 신호다. 예약은 늦은 쪽이 남는다
+    const { clock, store, reviews, e1, record } = world();
+    const a1 = record({ eventId: e1, accountId: A });
+    const b1 = record({ eventId: e1, accountId: B });
+    for (const r of [a1, b1]) await store.insertReview(r);
+    const TOPIC_W = 'identity.accounts-withdrawn';
+    // 키 없는 보류 행 51개(해독하지 못한 사건, Kafka 키만 그 계정). ID는 차례가 정해진 고정 글자이고 ids가 ID 차례다
+    const ids = Array.from({ length: 51 }, (_, i) => `0190f3a1-7c2e-7a00-8000-0000000d${(0x1000 + i).toString(16)}`);
+    // 넣는 차례는 ID 차례와 다르다(i × 7 mod 51: 맨 끝에 넣는 행은 ids[44], 가장 큰 ID ids[50]은 가운데쯤)
+    for (let k = 0; k < 51; k += 1) {
+      const i = (k * 7) % 51;
+      store.heldEvents.push({ id: ids[i]!, topic: TOPIC_W, eventKey: null, businessKey: `unreadable-${i}`, msgKey: i % 2 === 0 ? A : A.toUpperCase() });
+    }
+    // 다른 계정의 키 없는 보류 하나는 A의 어느 행보다 ID가 작다(상한을 다른 계정 행으로 채우지 않는다)
+    const OTHER = '0190f3a1-7c2e-7a00-8000-0000000d0fff';
+    store.heldEvents.push({ id: OTHER, topic: TOPIC_W, eventKey: null, businessKey: 'unreadable-b', msgKey: B });
+    const at = (id: string) => store.heldEvents.find((h) => h.id === id)?.reprocessedAtMs;
+    const by = { reason: '보류 행 상한 시험(51개)', requestedBy: 'ops-park' };
+
+    clock.advance(5 * 60_000);
+    const T1 = T0 + 5 * 60_000;
+    // 첫 호출: ID 차례 앞 50개만 처리한다
+    expect(await reviews.purgeHeldWithdrawal(A, by)).toEqual({ purged: 1, heldEvents: 50, heldEventIds: ids.slice(0, 50) });
+    for (const id of ids.slice(0, 50)) expect(at(id), id).toBe(T1);
+    expect(at(ids[50]!)).toBeUndefined();
+    expect(at(OTHER)).toBeUndefined();
+    expect(store.rechecks.get(A)?.dueAtMs).toBe(T1 + 16 * 60_000);
+
+    // 1분 뒤 둘째 호출: 남은 하나(가장 큰 ID). 이미 파기한 후기는 0건, 예약은 늦은 쪽(둘째 시각 + 16분)
+    clock.advance(60_000);
+    const T2 = T1 + 60_000;
+    expect(await reviews.purgeHeldWithdrawal(A, by)).toEqual({ purged: 0, heldEvents: 1, heldEventIds: [ids[50]] });
+    expect(at(ids[50]!)).toBe(T2);
+    for (const id of ids.slice(0, 50)) expect(at(id), id).toBe(T1);
+    expect(store.rechecks.get(A)?.dueAtMs).toBe(T2 + 16 * 60_000);
+    expect(store.rechecks.size).toBe(1);
+
+    // 셋째 호출: 남은 보류가 없어 409(끝 신호). 다른 계정의 보류 행·후기는 그대로다
+    clock.advance(60_000);
+    await expect(reviews.purgeHeldWithdrawal(A, by)).rejects.toMatchObject({ type: expect.stringMatching(/withdrawal-not-held$/), status: 409 });
+    expect(at(OTHER)).toBeUndefined();
+    expect(await store.findReview(b1.reviewId)).toEqual(b1);
   });
 });

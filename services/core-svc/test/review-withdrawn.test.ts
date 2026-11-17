@@ -1,4 +1,4 @@
-// I-T83 ①③(W8-audit2a, 소유자 결정 2026-11-16 OPEN[42], ADR-0278)·COV2-06(W7-audit): 탈퇴 사건(identity.accounts-withdrawn)을 받으면 core가 그 계정 후기를 파기한다.
+// I-T83 ①③⑨(W8-audit2a, 소유자 결정 2026-11-16 OPEN[42], ADR-0278)·COV2-06(W7-audit): 탈퇴 사건(identity.accounts-withdrawn)을 받으면 core가 그 계정 후기를 파기한다.
 // 정본: docs/features/identity.md §8 '후기 파기'·§12 I-T83, docs/data.md §2 '후기 파기'(비우는 칸), docs/streaming.md §2.6 'core-svc 소비자',
 // asyncapi consumeAccountWithdrawn, docs/security/data-classification.md '탈퇴 사건의 pid 사본'(core는 eventKey·accountId·withdrawnAt만 읽는다).
 // W7-audit의 '익명화'(계정·주문 참조만 끊고 본문·별점을 남김) 단언은 파기 단언으로 바꿨다(옛 COV2-06 ①②⑨). 단언 값은 정본에서 적고 코드 상수를 가져오지 않는다.
@@ -229,7 +229,9 @@ describe('I-T83 탈퇴 사건으로 후기 파기', () => {
 
 describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만)', () => {
   // 웨이브 끝 보안 리뷰 S1(계획 §9.1, 정본 docs/features/identity.md §8 '손으로 처리'): 내부 경로는 그 계정의 처리 안 한 탈퇴 보류 사건이 있을 때만 파기하고,
-  // 요청자·사유를 받아 운영 줄에 남긴다(계정 ID 없음). 같은 트랜잭션에서 다시 정리 예약(지금 + 16분)을 쓰고 보류 행을 다시 처리로 표시한다
+  // 요청자·사유를 받아 운영 줄에 남긴다(계정 ID 없음). 같은 트랜잭션에서 다시 정리 예약(지금 + 16분)을 쓰고 보류 행을 다시 처리로 표시한다.
+  // 다시 보기 N1(계획 §10.5): 응답 heldEvents·heldEventIds와 운영 줄 held는 처리한 보류 행 전부(eventKey가 없는 행 포함)를 보류 행 ID 차례로 싣는다.
+  // 해독하지 못한 사건(값이 없거나 깨진 사건)은 eventKey 없이 보류된다(docs/data.md §4의 15). 그런 행은 eventKey: null로 넣는다
   const TOKEN = 'review-purge-internal-token-1';
   const TOPIC_W = 'identity.accounts-withdrawn';
   const C = '0190f3a1-7c2e-7a00-8000-00000000c001';
@@ -244,23 +246,36 @@ describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만
   const c1 = review({ reviewId: randomUUID(), accountId: C });
   const d1 = review({ reviewId: randomUUID(), accountId: D });
   const e1 = review({ reviewId: randomUUID(), accountId: E });
+  // G: 해독하지 못한 사건의 보류 행(eventKey 없음) 하나뿐인 계정(리뷰 N1의 꼴)
+  const G = '0190f3a1-7c2e-7a00-8000-000000009001';
+  const g1 = review({ reviewId: randomUUID(), accountId: G });
   const KEY_A1 = '0190f3a1-7c2e-7a00-8000-0000000e0a01';
-  const KEY_A2 = '0190f3a1-7c2e-7a00-8000-0000000e0a02';
+  // 보류 행 ID(held_event.id). 차례가 정해진 고정 글자이고 eventKey·계정 ID와 다른 값이다
+  const HELD_A1 = '0190f3a1-7c2e-7a00-8000-0000000d0a01';
+  const HELD_A2 = '0190f3a1-7c2e-7a00-8000-0000000d0a02';
+  const HELD_A3 = '0190f3a1-7c2e-7a00-8000-0000000d0a03';
+  const HELD_C = '0190f3a1-7c2e-7a00-8000-0000000d0c01';
+  const HELD_D = '0190f3a1-7c2e-7a00-8000-0000000d0d01';
+  const HELD_F = '0190f3a1-7c2e-7a00-8000-0000000d0f01';
+  const HELD_G = '0190f3a1-7c2e-7a00-8000-0000000d9001';
   let svc: Awaited<ReturnType<typeof createService>>;
   let previous: string | undefined;
 
   beforeAll(async () => {
     previous = process.env.PEAKET_INTERNAL_TOKEN;
     process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
-    for (const r of [a1, a2, b1, c1, d1, e1]) await store.insertReview(r);
+    for (const r of [a1, a2, b1, c1, d1, e1, g1]) await store.insertReview(r);
     store.heldEvents.push(
-      // A: 업무 키가 그 계정인 보류 하나와, 값을 읽지 못해 Kafka 키(대문자)만 그 계정인 보류 하나
-      { topic: TOPIC_W, eventKey: KEY_A1, businessKey: A, msgKey: A },
-      { topic: TOPIC_W, eventKey: KEY_A2, businessKey: 'unreadable-0', msgKey: A.toUpperCase() },
+      // A: 업무 키가 그 계정인 보류 하나와, 값을 읽지 못해 eventKey 없이 Kafka 키(대문자)만 그 계정인 보류 둘. 넣는 차례(a03, a01, a02)는 ID 차례와 다르다
+      { id: HELD_A3, topic: TOPIC_W, eventKey: null, businessKey: 'unreadable-2', msgKey: A.toUpperCase() },
+      { id: HELD_A1, topic: TOPIC_W, eventKey: KEY_A1, businessKey: A, msgKey: A },
+      { id: HELD_A2, topic: TOPIC_W, eventKey: null, businessKey: 'unreadable-0', msgKey: A.toUpperCase() },
       // C: 이미 다시 처리한 보류뿐, D: 다른 토픽의 보류뿐, E: 보류가 없고 다른 계정(F)의 보류만 있다. B는 보류가 아예 없다
-      { topic: TOPIC_W, eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0c01', businessKey: C, msgKey: C, reprocessedAtMs: T0 - DAY },
-      { topic: 'trade.orders', eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0d01', businessKey: D, msgKey: D },
-      { topic: TOPIC_W, eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0f01', businessKey: '0190f3a1-7c2e-7a00-8000-00000000f001', msgKey: null },
+      { id: HELD_C, topic: TOPIC_W, eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0c01', businessKey: C, msgKey: C, reprocessedAtMs: T0 - DAY },
+      { id: HELD_D, topic: 'trade.orders', eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0d01', businessKey: D, msgKey: D },
+      { id: HELD_F, topic: TOPIC_W, eventKey: '0190f3a1-7c2e-7a00-8000-0000000e0f01', businessKey: '0190f3a1-7c2e-7a00-8000-00000000f001', msgKey: null },
+      // G: 해독하지 못한 사건의 보류 하나(eventKey 없음, 업무 키는 읽지 못한 값, Kafka 키는 대문자 G)
+      { id: HELD_G, topic: TOPIC_W, eventKey: null, businessKey: 'unreadable-1', msgKey: G.toUpperCase() },
     );
     svc = await createService({
       name: 'core-svc',
@@ -292,6 +307,8 @@ describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만
     });
   };
   const snapshot = () => ({ reviews: [...store.reviews.values()].map((r) => ({ ...r })), held: store.heldEvents.map((h) => ({ ...h })), rechecks: [...store.rechecks] });
+  /** 보류 행 ID → 다시 처리 시각(없으면 '없음') */
+  const reprocessed = () => Object.fromEntries(store.heldEvents.map((h) => [h.id, h.reprocessedAtMs ?? '없음']));
 
   test('I-T83 ⑨ 보류된 탈퇴 사건이 없는 계정은 손으로 파기할 수 없다', async () => {
     const before = snapshot();
@@ -333,29 +350,35 @@ describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만
     expect(snapshot()).toEqual(before);
   });
 
-  test('I-T83 ⑨ 보류된 탈퇴 사건이 있으면 파기하고 보류 행을 다시 처리로 표시하며 예약을 쓴다', async () => {
+  test('I-T83 ⑨ 키 있는 행과 없는 행이 섞인 계정은 모두 세고 ID 차례로 싣는다', async () => {
     // 경계 안쪽 끝 값(사유 10자, 요청자 64자)으로 부른다. 대문자 계정 ID로 불러도 같은 계정이다
+    // 리뷰 N1: 전에는 값 없는 행에도 eventKey를 넣어(KEY_A2) 키 없는 행이 수와 운영 줄에서 빠지는 결함을 덮었다
     clock.advance(3 * 60_000);
     const NOW = T0 + 3 * 60_000;
     const body = { reason: '가'.repeat(10), requestedBy: 'r'.repeat(64) };
     const before = sink.lines().length;
     const ok = await call(A.toUpperCase(), { body });
     expect(ok.statusCode).toBe(200);
-    expect(JSON.parse(ok.payload)).toEqual({ purged: 2, heldEvents: 2 });
+    // 처리한 보류 행 셋을 모두 센다(eventKey가 있든 없든). ID는 보류 행 ID 차례다
+    expect(JSON.parse(ok.payload)).toEqual({ purged: 2, heldEvents: 3, heldEventIds: [HELD_A1, HELD_A2, HELD_A3] });
     for (const r of [a1, a2]) expect(await store.findReview(r.reviewId)).toEqual(purgedOf(r, { nowMs: NOW, deletedAtMs: NOW }));
-    for (const r of [b1, c1, d1, e1]) expect(await store.findReview(r.reviewId)).toEqual(r);
-    // A의 두 보류 행은 다시 처리(지금), 다른 보류 행은 그대로
-    expect(store.heldEvents.filter((h) => h.eventKey === KEY_A1 || h.eventKey === KEY_A2).map((h) => h.reprocessedAtMs)).toEqual([NOW, NOW]);
-    expect(store.heldEvents.filter((h) => h.eventKey !== KEY_A1 && h.eventKey !== KEY_A2).map((h) => h.reprocessedAtMs)).toEqual([T0 - DAY, undefined, undefined]);
+    for (const r of [b1, c1, d1, e1, g1]) expect(await store.findReview(r.reviewId)).toEqual(r);
+    // A의 세 보류 행은 다시 처리(지금), 다른 보류 행은 그대로
+    expect(reprocessed()).toEqual({ [HELD_A1]: NOW, [HELD_A2]: NOW, [HELD_A3]: NOW, [HELD_C]: T0 - DAY, [HELD_D]: '없음', [HELD_F]: '없음', [HELD_G]: '없음' });
     // 다시 정리 예약 = 지금 + 16분(처리 시각 기준)
     expect(store.rechecks.get(A)?.dueAtMs).toBe(NOW + 16 * 60_000);
     expect(store.rechecks.size).toBe(1);
 
-    // 운영 줄 하나: 누가·왜·어느 보류 사건·몇 건. 계정 ID는 없다
+    // 운영 줄 하나: 누가·왜·몇 건·어느 보류 행(응답과 같은 차례, 키 없는 행은 eventKey: null). 옛 칸 heldEventKeys와 계정 ID는 없다
     const manual = sink.lines().slice(before).filter((l) => l.kind === 'review-purge-manual');
     expect(manual).toHaveLength(1);
-    expect(manual[0]).toMatchObject({ requestedBy: body.requestedBy, reason: body.reason, purged: 2 });
-    expect([...(manual[0]!.heldEventKeys as string[])].sort()).toEqual([KEY_A1, KEY_A2].sort());
+    expect(manual[0]).toMatchObject({ requestedBy: body.requestedBy, reason: body.reason, purged: 2, heldEvents: 3 });
+    expect(manual[0]!.held).toEqual([
+      { id: HELD_A1, eventKey: KEY_A1 },
+      { id: HELD_A2, eventKey: null },
+      { id: HELD_A3, eventKey: null },
+    ]);
+    expect(manual[0]).not.toHaveProperty('heldEventKeys');
     const text = JSON.stringify(manual[0]);
     for (const secret of [A, A.toUpperCase()]) expect(text).not.toContain(secret);
 
@@ -365,5 +388,32 @@ describe('I-T83 손으로 하는 파기(보류된 탈퇴 사건이 있을 때만
     const again = await call(A, { body });
     expect(again.statusCode).toBe(409);
     expect(snapshot()).toEqual(once);
+  });
+
+  test('I-T83 ⑨ 키 없는 보류 행만 있는 계정도 처리한 보류 행 수와 ID를 돌려주고 운영 줄에 남긴다', async () => {
+    // 리뷰 N1의 꼴 그대로: 이 경로가 있는 까닭인 '값 없이 Kafka 키만 그 계정인 보류 행' 하나뿐인 계정
+    clock.advance(2 * 60_000);
+    const NOW = clock.now();
+    const before = sink.lines().length;
+    const ok = await call(G);
+    expect(ok.statusCode).toBe(200);
+    expect(JSON.parse(ok.payload)).toEqual({ purged: 1, heldEvents: 1, heldEventIds: [HELD_G] });
+    expect(await store.findReview(g1.reviewId)).toEqual(purgedOf(g1, { nowMs: NOW, deletedAtMs: NOW }));
+    expect(store.heldEvents.find((h) => h.id === HELD_G)?.reprocessedAtMs).toBe(NOW);
+    expect(store.rechecks.get(G)?.dueAtMs).toBe(NOW + 16 * 60_000);
+    // 다른 계정의 처리 안 한 보류 행은 그대로다
+    expect(reprocessed()).toMatchObject({ [HELD_D]: '없음', [HELD_F]: '없음' });
+
+    // 운영 줄은 정확히 하나: 처리한 보류 행 하나의 ID와 eventKey: null. 줄 글에 계정 ID(대문자로 쓴 Kafka 키 포함)가 없다
+    const manual = sink.lines().slice(before).filter((l) => l.kind === 'review-purge-manual');
+    expect(manual).toHaveLength(1);
+    expect(manual[0]).toMatchObject({ requestedBy: BODY.requestedBy, reason: BODY.reason, purged: 1, heldEvents: 1 });
+    expect(manual[0]!.held).toEqual([{ id: HELD_G, eventKey: null }]);
+    expect(manual[0]).not.toHaveProperty('heldEventKeys');
+    const text = JSON.stringify(manual[0]);
+    for (const secret of [G, G.toUpperCase()]) expect(text).not.toContain(secret);
+
+    // 다시 부르면 409
+    expect((await call(G)).statusCode).toBe(409);
   });
 });

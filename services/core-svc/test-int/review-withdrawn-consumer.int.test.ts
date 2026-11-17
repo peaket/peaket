@@ -148,10 +148,13 @@ describe('I-T83 core 탈퇴 소비자(실제 Kafka)', () => {
         const r = await admin.pool.query('select count(*)::int as n from held_event where topic = $1', [TOPIC]);
         return r.rows[0].n >= 1;
       }, '읽지 못한 탈퇴 사건의 보류', 90_000);
-      const held = (await admin.pool.query('select topic, value, headers::text as headers, row_to_json(h)::text as whole from held_event h where topic = $1', [TOPIC])).rows;
+      const held = (await admin.pool.query('select topic, value, event_key, msg_key, headers::text as headers, row_to_json(h)::text as whole from held_event h where topic = $1', [TOPIC])).rows;
       expect(held).toHaveLength(1);
       expect(held[0].topic).toBe(TOPIC);
       expect(held[0].value).toBeNull();
+      // 해독하지 못한 사건은 eventKey 없이 Kafka 키로만 보류된다(I-T83 ⑨ 손으로 처리가 다루는 꼴, 다시 보기 N1의 전제)
+      expect(held[0].event_key).toBeNull();
+      expect(held[0].msg_key).toBe(badKey);
       for (const secret of [PID, OLD_PID]) {
         expect(held[0].headers).not.toContain(secret);
         expect(held[0].whole).not.toContain(secret);

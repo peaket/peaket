@@ -59,6 +59,8 @@ const compare = (a: ReviewRecord, b: ReviewRecord, sort: ReviewSort): number => 
 
 /** 시험용 보류 사건 한 행(held_event의 칸 가운데 손으로 처리에 쓰는 것) */
 export interface MemoryHeldEvent {
+  /** held_event.id(uuid, 보류 행 ID). 뼈대(리뷰 N1 시험): 아직 쓰지 않는다 */
+  id: string;
   topic: string;
   eventKey: string | null;
   businessKey: string;
