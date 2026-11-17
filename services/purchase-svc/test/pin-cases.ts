@@ -120,8 +120,8 @@ function okPin(r: PinResult): Extract<PinResult, { kind: 'OK' }> {
   return r;
 }
 
-/** 다시 잡은 좌석의 Stream HELD 한 줄(hold-lua.ts·data.md §3의 HELD 칸) */
-const heldRow = (id: string, o: Order, token: number, sectionVersion: number, seatEpoch: number | undefined, nowMs: number) => ({
+/** 다시 잡은 좌석의 Stream HELD 한 줄(hold-lua.ts·data.md §3의 HELD 칸). limit은 묶기 한도 인자(pinInput 기본 4) */
+const heldRow = (id: string, o: Order, token: number, sectionVersion: number, seatEpoch: number | undefined, nowMs: number, limit = 4) => ({
   type: 'HELD',
   seatIdx: String(idx(id)),
   seatId: id,
@@ -136,6 +136,8 @@ const heldRow = (id: string, o: Order, token: number, sectionVersion: number, se
   seatEpoch: String(seatEpoch),
   occurredAtMs: String(nowMs),
   expiresAtMs: String(nowMs + HOLD_TTL_MS),
+  // 홀드 때 판매 정책이 정한 1인 한도(Hash lim과 같은 값, 팬 홀드의 HELD만, docs/features/seat-hold.md §6 1인 한도 되살리기, W9-fix2 HOT-252)
+  holdLimit: String(limit),
 });
 
 /** 푼 좌석의 Stream RELEASED 한 줄(expire-lua.ts EXPIRED와 같은 칸, 값은 풀기 전 홀드 Hash에서) */

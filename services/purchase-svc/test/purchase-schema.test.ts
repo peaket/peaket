@@ -91,6 +91,8 @@ const EVENT_REFUND_HOLD_TAG = '0024_event_refund_hold';
 const WAVE_REVIEW_TAG = /^0025_[a-z0-9_]+$/;
 /** 다시 보기 2 N2: order_cancellation.refund_failed_opened_at·event_refund_item.failure_case_at·failure_case_opened_at(BAT-420 보충 5, 감독 배정 0026, docs/data.md) */
 const RELOOK2_TAG = /^0026_[a-z0-9_]+$/;
+/** 1인 한도 되살리기: seat_hold.hold_limit과 CHECK(W9-fix2 HOT-252, 감독 배정 0027, docs/data.md seat_hold.hold_limit) */
+const HOLD_LIMIT_TAG = /^0027_[a-z0-9_]+$/;
 const PENDING_INDEX = 'seat_sale_pending_idx';
 const BREAKPOINT = '--> statement-breakpoint';
 const dialect = new PgDialect();
@@ -207,6 +209,8 @@ describe('표 정의(schema.ts)', () => {
       // 0002의 ADD COLUMN이 표 끝에 붙이므로 DB 칸 차례와 같게 expires_at 뒤다(PRF-143)
       ['hold_id', 'uuid', false],
       ['purchase_session_id', 'text', false],
+      // 0027의 ADD COLUMN이 표 끝에 붙인다(W9-fix2 HOT-252, 1 이상 또는 빈 값)
+      ['hold_limit', 'integer', false],
     ]);
   });
 
@@ -265,6 +269,8 @@ describe('표 정의(schema.ts)', () => {
     expect(hold.checks).toEqual([
       { name: 'seat_hold_status_check', expr: canon("status IN ('HELD','RELEASED','EXPIRED')") },
       { name: 'seat_hold_kind_check', expr: canon("kind IN ('FAN','PRIORITY')") },
+      // 0027(W9-fix2 HOT-252): 1인 한도는 비었거나 1 이상
+      { name: 'seat_hold_hold_limit_check', expr: canon('hold_limit is null or hold_limit >= 1') },
     ]);
     expect(rebuild.checks).toEqual([{ name: 'seat_rebuild_gen_check', expr: canon('gen >= 1') }]);
   });
@@ -310,6 +316,20 @@ const createTable = (name: string): string => {
   expect(s, `${name}을 만드는 문이 있어야 한다`).toBeDefined();
   return s!;
 };
+/**
+ * 기록(_journal.json)에 있는 모든 마이그레이션의 문(차례대로). 뒤 마이그레이션이 ALTER TABLE로 좌석 표에 더한 칸·검사를 찾는다
+ * (새 마이그레이션마다 이 파일의 목록을 고치지 않게, W9-fix2 시험 이의 4)
+ */
+const journalTags = (JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.map((e) => e.tag);
+const allStatements = journalTags.flatMap((t) => statementsOf(readFileSync(join(MIGRATIONS, `${t}.sql`), 'utf8')));
+/** 모든 마이그레이션의 ALTER TABLE … ADD COLUMN: [표, 열] */
+const alteredColumns = (): [string, string][] =>
+  allStatements.flatMap((x) => {
+    const m = /^ALTER TABLE "([a-z_]+)" ADD COLUMN "([a-z_]+)" /.exec(x);
+    return m ? [[m[1]!, m[2]!] as [string, string]] : [];
+  });
+/** 모든 마이그레이션의 ALTER TABLE … ADD CONSTRAINT … CHECK(canon, 끝 ; 없이) */
+const alteredChecks = allStatements.filter((x) => /^ALTER TABLE "[a-z_]+" ADD CONSTRAINT "[a-z_]+" CHECK /.test(x)).map((x) => canon(x).replace(/;$/, ''));
 /** ALTER TABLE … ADD COLUMN으로 더한 열: [표, 열, 그 문] */
 const addedColumns = (): [string, string, string][] =>
   seatStatements.flatMap((x) => {
@@ -375,15 +395,19 @@ describe('마이그레이션 SQL 파일(0000_purchase_seat_tables.sql)', () => {
     }
   });
 
-  test('schema.ts의 check 제약이 같은 이름·같은 식으로 SQL에 있다 [ASVS v5.0.0-2.3.2]', () => {
+  test('schema.ts의 check 제약이 같은 이름·같은 식으로 SQL에 있다(만드는 문이나 뒤 마이그레이션의 ALTER TABLE … ADD CONSTRAINT) [ASVS v5.0.0-2.3.2]', () => {
     for (const s of SHAPES) {
       const c = canon(createTable(s.name));
-      for (const k of s.checks) expect(c, k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+      for (const k of s.checks) {
+        const inCreate = c.includes(`constraint ${k.name} check(${k.expr})`);
+        const inAlter = alteredChecks.includes(`alter table ${s.name} add constraint ${k.name} check(${k.expr})`);
+        expect(inCreate || inAlter, k.name).toBe(true);
+      }
     }
   });
 
-  test('schema.ts의 열이 모두 SQL에 있고 그 밖의 열은 없다(만드는 문의 열 + 0002가 ADD COLUMN으로 더한 열)', () => {
-    const added = addedColumns();
+  test('schema.ts의 열이 모두 SQL에 있고 그 밖의 열은 없다(만드는 문의 열 + 뒤 마이그레이션이 ADD COLUMN으로 더한 열)', () => {
+    const added = alteredColumns();
     for (const s of SHAPES) {
       const body = createTable(s.name);
       const inSql = [...body.matchAll(/^\t"([a-z_]+)" /gm)].map((m) => m[1]!);
@@ -459,7 +483,15 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [25, expect.stringMatching(WAVE_REVIEW_TAG)],
       // 다시 보기 2 N2(감독 배정 0026, 2026-11-17): 이름은 구현이 정한다
       [26, expect.stringMatching(RELOOK2_TAG)],
+      // 1인 한도 되살리기(W9-fix2, 감독 배정 0027): 이름은 구현이 정한다
+      [27, expect.stringMatching(HOLD_LIMIT_TAG)],
+      ...journal.entries.slice(28).map((e): [number, string] => [e.idx, e.tag]),
     ]);
+    // 앞의 고정 목록 뒤에 더한 기록도 idx는 차례이고 tag는 네 자리 idx로 시작한다(새 마이그레이션마다 목록을 고치지 않게, W9-fix2 시험 이의 4)
+    journal.entries.forEach((e, i) => {
+      expect(e.idx, e.tag).toBe(i);
+      expect(e.tag, e.tag).toMatch(new RegExp(`^${String(i).padStart(4, '0')}_[a-z0-9_]+$`));
+    });
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
     for (const e of journal.entries) {
@@ -470,7 +502,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   });
 
   test('migrations 폴더의 SQL 파일은 기록에 있는 것뿐이다(기록에 없는 SQL이 몰래 쌓이지 않는다)', () => {
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual([
+    // 폴더의 SQL과 기록이 하나씩 맞는다(수를 고정하지 않는다, W9-fix2 시험 이의 4). 아래 고정 목록은 0027까지의 이름이다
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql'))).toEqual(journal.entries.map((e) => `${e.tag}.sql`));
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).slice(0, 28)).toEqual([
       `${TAG}.sql`,
       `${HELD_TAG}.sql`,
       `${REBUILD_TAG}.sql`,
@@ -499,6 +533,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       expect.stringMatching(/^0025_[a-z0-9_]+\.sql$/),
       // 다시 보기 2 N2(감독 배정 0026, 2026-11-17)
       expect.stringMatching(/^0026_[a-z0-9_]+\.sql$/),
+      // 1인 한도 되살리기(W9-fix2, 감독 배정 0027)
+      expect.stringMatching(/^0027_[a-z0-9_]+\.sql$/),
     ]);
   });
 
@@ -619,9 +655,10 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
 
-  // 다시 보기 2 N2(2026-11-17): 마지막 스냅샷이 0026이다
-  test('마지막 스냅샷(0026_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘, 환급 미룸 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
-    expect(snapshotFiles.at(-1)).toBe('0026_snapshot.json');
+  // 마지막 스냅샷은 기록의 마지막 마이그레이션 것이다(수를 고정하지 않는다, W9-fix2 시험 이의 4)
+  test('마지막 스냅샷(기록의 마지막, 지금 0027_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘, 환급 미룸 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+    expect(snapshotFiles.at(-1)).toBe(`${String(journal.entries.at(-1)!.idx).padStart(4, '0')}_snapshot.json`);
+    expect(Number(snapshotFiles.at(-1)!.slice(0, 4))).toBeGreaterThanOrEqual(27);
     const snap = snapshotOf(snapshotFiles.at(-1)!);
     const all = [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes, holdShape()];
     expect(Object.keys(snap.tables).sort()).toEqual(all.map((s) => `public.${s.name}`).sort());
@@ -708,6 +745,21 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     for (const c of ['refund_failed_opened_at', 'failure_case_at', 'failure_case_opened_at']) expect(text, c).toContain(`add column ${c}`);
     const before = snapshotOf('0025_snapshot.json');
     const after = snapshotOf('0026_snapshot.json');
+    expect(after.prevId).toBe(before.id);
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+  });
+
+  test('HOT-252 0027 SQL은 seat_hold에 hold_limit integer 칸과 CHECK seat_hold_hold_limit_check만 더하고(표 만들기·지우기·옛 행 채우기 없음), 0027 스냅샷은 0026 뒤에서 표 목록이 같다', () => {
+    const tag = journal.entries.find((e) => e.idx === 27)?.tag;
+    expect(tag).toMatch(HOLD_LIMIT_TAG);
+    const raw = readFileSync(join(MIGRATIONS, `${tag}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(raw).not.toMatch(/\b(DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM|RENAME|UPDATE)\b/i);
+    expect(statementsOf(raw).map((x) => canon(x).replace(/;$/, ''))).toEqual([
+      'alter table seat_hold add column hold_limit integer',
+      'alter table seat_hold add constraint seat_hold_hold_limit_check check(hold_limit is null or hold_limit >= 1)',
+    ]);
+    const before = snapshotOf('0026_snapshot.json');
+    const after = snapshotOf('0027_snapshot.json');
     expect(after.prevId).toBe(before.id);
     expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
   });

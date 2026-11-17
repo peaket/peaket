@@ -266,6 +266,8 @@ export function holdCases(name: string, setup: () => Promise<SeatHarness>): void
       seatEpoch: String(seatEpoch),
       occurredAtMs: String(r.heldAtMs),
       expiresAtMs: String(r.expiresAtMs),
+      // 홀드 때 판매 정책이 정한 1인 한도(Hash lim과 같은 값, 팬 홀드의 HELD만, docs/features/seat-hold.md §6 1인 한도 되살리기, W9-fix2 HOT-252)
+      holdLimit: String(i.limit),
     });
     expect(await h.stream(e)).toEqual([row('A01', i1, r1, 1), row('A02', i1, r1, 1), row('B01', i1, r1, 1), row('A03', i2, r2, 2)]);
     // 샤드 Pub/Sub: 바뀐 구역마다 한 건, '1 {seatEpoch} {구역 색인} {구역 번호} {heldAt} {seatOffset}:1 …'(Valkey는 실제 SSUBSCRIBE로 받은 것)

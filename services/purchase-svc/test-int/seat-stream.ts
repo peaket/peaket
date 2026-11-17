@@ -138,5 +138,7 @@ export function expectedSeatEvent(eventId: string, f: Readonly<Record<string, st
     expiresAt: iso(f.expiresAtMs!),
     occurredAt: iso(f.occurredAtMs!),
     eventKey: seatEventKeyOf(f.type!, eventId, f.holdId!, f.seatId!, f.fencingToken!),
+    // 1인 한도: HELD이고 holdKind FAN인 항목에 칸이 있으면 옮긴다(asyncapi SeatEvent.holdLimit, W9-fix2 HOT-252)
+    ...(f.type === 'HELD' && f.holdKind === 'FAN' && f.holdLimit !== undefined ? { holdLimit: Number(f.holdLimit) } : {}),
   };
 }
