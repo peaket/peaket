@@ -270,6 +270,27 @@ Docker 없이: purchase 단위 `test/seat-event.test.ts`·`test/seat-stream-rela
 - **G는 R1·R2를 이 묶음에서 고친 뒤에 합치기를 권한다.** 둘 다 돈을 틀리게 하지는 않는다(끊긴 호출은 임대 잔해가 UNKNOWN으로 맞추고 조회로 확정된다). 다만 R2 때문에 이 묶음이 합본에 대해 말한 고침이 실제로는 듣지 않고, R1 때문에 정본의 근거 숫자가 틀려 있다. 고치는 데 손이 적다(문서·시험 상수, 합본 자식 SIGKILL 대기). 감독이 이번에 고치지 않기로 하면 R1·R2를 정리 목록(갈래 1)에 옮기고 G 줄을 '서비스 파드만'으로 좁혀 합친다.
 - R3·R4는 합치기를 막지 않는다.
 
+### §9 보충 다시 보기
+
+리뷰 담당 `w9f2-review2`(claude-sonnet-5-5), 2026-11-17. `git diff ea04e2fd..HEAD`(구현 `325ad07a`)를 §9 계획과 견줬다. `node --test tools/local/chart.test.mjs`의 PRF181 둘과 bundle `vitest run test/stop-child.test.ts test/bundle.test.ts`(67개)를 돌려 통과를 확인했다. 코드·시험은 고치지 않았다.
+
+**판정: R1 고쳐짐, R2 고쳐짐.**
+
+- 셈: 실행기 최악 = `CONFIRM_CALL_GUARD_MS` 72,000 + 쓰기 3번 × 5,000 + 쉬기 합 500(100+400) = 87.5초로 코드 상수와 맞다. 서비스 파드 105 = 5 + 87.5 + 12.5, 합본 125 = 5 + 10 + 5 + 95 + 5 + 여유 5이고 세 자식이 모두 끝까지 버텨도(5 + 10 + 5 + 95 + 5 = 120) 5초가 남는다. 자식 95초 = 87.5 + 7.5이고 합본 유예보다 짧다. 값 파일·devops §6.4 문장·주석이 같은 숫자를 쓰고, 옛 90초는 남아 있지 않다.
+- 자식 대기: `stopChildProcess`는 `exit` 구독과 타이머를 SIGTERM 전에 걸고, 기한이 먼저 오면 SIGKILL('killed'), 끝이 먼저면 'exited'를 돌려주며 두 길 모두 `clearTimeout`을 지난다(기한이 이미 지난 길도 지워도 무해). 이미 끝난 자식(`exitCode !== null`)은 kill·타이머 없이 바로 돌아간다. 타이머가 새는 길은 없다.
+- 연결: `main.ts`는 `stopChildProcess(c.child, childStopWaitMs(c.name))`만 쓰고 옛 5초 `setTimeout`은 사라졌다. 자식 생성 차례(payment → purchase → hold)의 반대로 멈추므로 계획의 차례와 같고, 55줄 주석은 125초로 고쳐졌다.
+- 시험: G1′는 세 상수를 소스에서 읽고 못 찾으면 실패하며 ≥ 식과 = 105를 모두 본다. G2는 두 대기 상수를 소스에서 읽어 ≥ 식·= 125·payment 대기 ≥ 최악 + 5초·< 유예를 본다. G3은 94,999ms SIGKILL 없음, 95,000ms 정각 SIGKILL, 90초 자진 종료의 타이머 0, 5초 자식 경계, 이미 끝난 자식, 이름 비슷한 자식까지 본다. 상수만 늘 5초로 되돌리거나(옛 동작), `>`로 비교하거나, 타이머를 안 지우는 틀린 구현은 모두 G3에서 걸린다.
+
+**새 지적**
+
+| # | 등급 | 파일:줄 | 내용 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| N1 | 낮음 | `services/bundle/src/stop-child.ts:33` | 이미 끝났다는 판정이 `exitCode !== null`뿐이다. 신호로 죽은 자식(OOM 등)은 `exitCode`가 null이고 `signalCode`만 차 있으며 `exit` 사건은 이미 지나갔으므로, 그 자식이 payment-svc면 아무도 대답하지 않는 SIGTERM을 95초 기다린 뒤 SIGKILL한다(이미 죽은 프로세스에). 옛 코드의 같은 구멍이 대기 5초에서 95초로 커졌다. 자식 하나가 신호로 죽어 합본이 스스로 끝나는 길(`main.ts:84` 예기치 않은 종료)에서 남은 자식 멈추기가 그만큼 늦어져 유예 125초를 넘길 수 있다. 돈은 틀리지 않는다(남은 자식이 SIGKILL로 끊기면 임대 잔해가 UNKNOWN으로 맞춘다) | `child.exitCode !== null || child.signalCode !== null`로 보고 `Pick`에 `signalCode`를 더한다. 시험은 `signalCode: 'SIGKILL'`인 자식이 kill 0·타이머 0으로 'exited'인 줄 하나면 된다. 이번에 못 고치면 정리 목록에 둔다 |
+| N2 | 낮음 | `tools/local/chart.test.mjs`(G2의 `OTHER_CHILDREN = 2`, `SAME_PROCESS_CLOSE_S = 10`), `services/bundle/test/stop-child.test.ts`(G4) | 합본의 다른 자식 수 2와 '같은 프로세스 닫기 10초'는 시험에 박힌 숫자이고, 자식을 더하거나 `main.ts`의 `spawnChild` 호출이 늘어도 G2는 따라 깨지지 않는다. G4는 소스 글 검사라 `childStopWaitMs(c.name)`를 부르는 줄만 본다(계획이 약한 시험임을 밝혔다). 합본 유예가 모자라지게 되는 변경을 시험이 못 잡는 빈칸이다 | G2가 `main.ts`의 `spawnChild(`·`spawnHold(` 호출 수를 세어 `OTHER_CHILDREN`과 견주면 충분하다. 못 해도 합치기를 막지 않는다 |
+| N3 | 정보 | `services/bundle/src/stop-child.ts:39` | `child.kill('SIGTERM')`이 던지면(드문 경우) 걸어 둔 타이머가 지워지지 않는다. 합본 프로세스가 곧 끝나므로 영향이 없다 | 없음 |
+
+**합쳐도 되는지: 합쳐도 된다.** R1·R2가 계획 §9대로 고쳐졌고 N1·N2는 낮음이라 합치기를 막지 않는다(N1은 정리 목록 갈래 1에 옮기거나 한 줄 고침으로 바로 닫아도 된다).
+
 ## 검증
 
 (검증 담당이 쓴다)
