@@ -190,6 +190,22 @@ Docker 없이: purchase 단위 `test/seat-event.test.ts`·`test/seat-stream-rela
 - **contracts 생성물**: 생성물이 없어 컴파일되지 않는 시험은 없다. seat-event 단위의 `SeatEvent.safeParse`는 지금 생성물(모르는 칸을 버림)과 다시 만든 생성물 모두에서 통과한다.
 - **빈 뼈대**: `AssignEventPgDeps.clock`(필수), `SeatEventMessage.holdLimit?`, `LedgerHoldEvent.holdLimit?`, `RebuildSeat` 두 갈래의 `holdLimit?`, `RebuildHold.holdLimit?`·`RebuildLedgerRow.holdLimit?`(계획은 필수 칸이지만 제품 코드가 컴파일되게 선택 칸으로 둠. 구현 담당이 필수로 바꾼다). 동작은 없다. `tsc --noEmit`은 payment-svc·invariant-checker·purchase-svc 모두 이 변경으로 생긴 오류가 없다(purchase-svc는 이 작업 폴더에 `@peaket/shuffle` 빌드가 없어 queue-svc 쪽 기존 오류만 난다).
 
+### §9 보충 시험(G1′~G4)의 실패 확인
+
+시험 담당 `w9f2-test`, 2026-11-17. 시험 커밋 `38a4aef0`을 §9 보충 구현 전 트리(`ea04e2fd`, 서비스 파드 90초·합본 90초·자식 늘 5초) 위에서 돌렸다. Docker는 쓰지 않았다.
+
+| # | 시험(파일) | 결과 | 까닭 |
+| --- | --- | --- | --- |
+| G1′ | `PRF181_payment-svc 종료 유예는 코드 상수로 센 실행기 최악 + preStop + 여유 이상이고 릴레이는 30초다`(chart.test.mjs, 기존 G1을 고침) | 실패 | 소스 상수로 센 최악이 87.5초라 90 < 5 + 87.5 + 10이다 |
+| G2 | `PRF181_합본 종료 유예는 자식 대기 합과 preStop보다 길다`(chart.test.mjs) | 실패 | `stop-child.ts`에 `BUNDLE_CHILD_STOP_MS`가 없다(뼈대에 상수를 두지 않음). 상수가 있어도 합본은 90 < 125다 |
+| G3 | `childStopWaitMs` 1개와 `stopChildProcess` 5개(94,999/95,000ms 경계, 90초에 스스로 끝남, purchase-svc·hold-worker 5초, 이미 끝난 자식)(services/bundle/test/stop-child.test.ts) | 6개 실패 | 뼈대가 던진다(지금 main.ts는 늘 5초다) |
+| G4 | `PRF181_합본 main.ts는 stopChildProcess에 childStopWaitMs(이름)을 넘긴다`(같은 파일, 소스 글 검사라 약한 시험) | 실패 | main.ts에 `setTimeout(resolve, 5_000)`이 그대로 있다 |
+
+- **수**: 새 시험(고친 G1′ 포함) 9개가 모두 실패했다. 렌더 2, bundle 단위 7. 처음부터 통과한 것은 없다.
+- **시험 틀 확인**: 바른 `stop-child.ts`를 손으로 넣어 돌리자 G3 여섯이 모두 통과하고, main.ts를 고치지 않은 G4만 실패했다. 확인한 뒤 뼈대로 되돌렸다.
+- **M-G7 대비**: G1′·G2는 숫자를 박지 않는다. `confirm-runner.ts`·`stop-child.ts` 소스 글에서 상수를 정규식으로 읽고, 못 찾으면 실패한다. 다만 기대값 105·125는 정본 값이라 박아 두었다.
+- **빈 뼈대**: `services/bundle/src/stop-child.ts`의 `StopChildTimers` 형, `childStopWaitMs`, `stopChildProcess`(둘 다 던진다). 상수는 두지 않았다. bundle `tsc --noEmit`에서 이 파일들로 생긴 오류는 없다(서비스 dist가 없어 생긴 기존 TS2307뿐이다). bundle 단위의 다른 3파일은 통과한다.
+
 ## 시험 이의
 
 구현 담당 `w9f2-impl`(claude-opus-5-5), 2026-11-17. 시험 파일은 고치지 않았다. 아래 2~4는 시험 담당이 고칠 몫이고, 고치면 제품 코드는 그대로 통과한다(2·3은 기대값에 칸 하나, 4는 0027 몫을 더하는 것).
