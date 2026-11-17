@@ -9,9 +9,10 @@ import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { HttpCommandExecutor } from './adapters/http-command-executor.js';
-import { eventCancellationDepsFromEnv } from './event-cancellation-wiring.js';
+import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
+import { PromEventCancellationSignals } from './modules/event-cancellations/index.js';
 import type { HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
@@ -25,6 +26,12 @@ const identityUrl = process.env.PEAKET_IDENTITY_GRPC_URL;
 if (!identityUrl) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(identity AdminAuthzService host:port)');
 
 const database = createDatabase({ url, applicationName: SERVICE });
+// 파트너 회차 취소 경로의 DB 풀(ops_partner 역할 사용자, 행 보안의 대상, 웨이브 끝 리뷰 S2·authz-matrix §5.3). 운영은 PEAKET_PARTNER_DATABASE_URL이 없으면 시작하지 않고,
+// local·ci는 관제 풀을 함께 쓴다(그때 행 보안은 시험하지 않는다)
+const partnerUrl = partnerDatabaseUrlFromEnv(process.env, url);
+const partnerDatabase = partnerUrl === url ? database : createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: 5 });
+// 회차 취소 지표(확정 실패 뒤 되돌리기 저장 실패, 웨이브 끝 리뷰 K4). 서비스를 만든 뒤 레지스트리에 붙인다
+const eventCancellationSignals = new PromEventCancellationSignals();
 const adminAuthz = new GrpcAdminAuthz(identityUrl);
 const purchaseUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
 const purchaseGrpcAddr = process.env.PEAKET_PURCHASE_GRPC_ADDR;
@@ -89,6 +96,7 @@ const eventCancellations = {
   ...(reauth ? { reauth } : {}),
   ...cancellationDeps,
   ...(holds ? { holds } : {}),
+  revertFailures: eventCancellationSignals.revertFailures,
 };
 /** AppModule이 만든 명령 사건 처리기(Kafka 소비자가 HTTP와 같은 객체를 쓴다) */
 let commandEvents: HandleCommandEvent | undefined;
@@ -102,6 +110,7 @@ const service = await createService({
   adminAuthz,
   module: AppModule.register({
     database,
+    partnerDatabase,
     executor,
     signer: anchor.signer,
     ...(priority ? { priority } : {}),
@@ -111,7 +120,9 @@ const service = await createService({
     onCommandEvent: (h) => (commandEvents = h),
   }),
 });
+eventCancellationSignals.register(service.metrics.registry);
 if (anchor.warning) service.logger.warn({}, anchor.warning);
+if (partnerDatabase === database) service.logger.warn({}, 'PEAKET_PARTNER_DATABASE_URL이 없어 파트너 회차 취소 경로가 관제 DB 풀을 함께 쓴다(local·ci만, 행 보안은 앱 대조만 남는다)');
 if (!purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 환불 gRPC를 쓰지 않는다(내부 HTTP 호환 경로)');
 if (!purchaseUrl && !purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_PURCHASE_GRPC_ADDR이 없어 EVENT_CANCEL 실행을 하지 않는다');
 if (!coreUrl) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 SCALE_CHANGE 실행을 하지 않는다');
@@ -176,6 +187,7 @@ process.once('SIGTERM', () => {
       scannerDevices?.close();
       adminAuthz.close();
       await reauthRedis?.close();
+      if (partnerDatabase !== database) await partnerDatabase.close();
       await database.close();
     }
   })();

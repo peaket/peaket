@@ -1,6 +1,8 @@
 // 회차 취소 요청 모듈의 공개 면.
 export { EventCancellations, type EventCancellationExtra, type EventCancellationReauth, type OpsActor, type PartnerActor, type PartnerEventCancellationInput } from './application/event-cancellations.js';
 export { DrizzleEventCancellationStore } from './adapters/db/drizzle-store.js';
+export { DrizzlePartnerEventCancellationStore } from './adapters/db/drizzle-partner-store.js';
+export { PromEventCancellationSignals } from './adapters/prom-event-cancellation-signals.js';
 export { MemoryEventCancellationStore } from './adapters/memory-store.js';
 export { DrizzleSaleSuspensionLookup } from './adapters/db/drizzle-sale-suspension-lookup.js';
 export { MemorySaleSuspensionLookup } from './adapters/memory-sale-suspension-lookup.js';

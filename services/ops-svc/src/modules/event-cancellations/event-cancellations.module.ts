@@ -4,7 +4,17 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { AuditChain } from '../audit/audit.js';
 import { EventCancellations, type EventCancellationReauth } from './application/event-cancellations.js';
-import type { EventCancellationCases, EventCancellationStore, EventOwnerLookup, EventRefundHolds, EventRefundReader, EventRefundStarter, EventSaleStopper, SaleSuspensionLookup } from './domain/ports.js';
+import type {
+  EventCancellationCases,
+  EventCancellationStore,
+  EventOwnerLookup,
+  EventRefundHolds,
+  EventRefundReader,
+  EventRefundStarter,
+  EventSaleStopper,
+  PartnerEventCancellationStore,
+  SaleSuspensionLookup,
+} from './domain/ports.js';
 import { EventCancellationsController } from './inbound/event-cancellations.controller.js';
 import { PartnerEventCancellationController } from './inbound/partner-event-cancellation.controller.js';
 
@@ -28,6 +38,10 @@ export interface EventCancellationsModuleDeps {
   readonly cases?: EventCancellationCases;
   /** purchase-svc 환급 미룸(SetEventRefundHold, BAT-420 몫 D). 없으면 CANCEL 요청·판정·확정이 503 event-refund-unavailable이다 */
   readonly holds?: EventRefundHolds;
+  /** 파트너 경로 전용 저장소(파트너 DB 풀, 세션 테넌트로 행 보안, 웨이브 끝 리뷰 S2). 없으면(메모리 조립) 관제 저장소를 쓴다 */
+  readonly partnerStore?: PartnerEventCancellationStore;
+  /** 지표 ops_event_cancellation_revert_failures_total(웨이브 끝 리뷰 K4). 없으면 오류 로그만 남긴다 */
+  readonly revertFailures?: { inc(): void };
 }
 
 @Module({})
@@ -48,7 +62,9 @@ export class EventCancellationsModule {
               ...(deps.owners ? { owners: deps.owners } : {}),
               ...(deps.cases ? { cases: deps.cases } : {}),
               ...(deps.holds ? { holds: deps.holds } : {}),
-              log: { warn: (obj, msg) => logger.warn(obj, msg) },
+              ...(deps.partnerStore ? { partnerStore: deps.partnerStore } : {}),
+              ...(deps.revertFailures ? { revertFailures: deps.revertFailures } : {}),
+              log: { warn: (obj, msg) => logger.warn(obj, msg), error: (obj, msg) => logger.error(obj, msg) },
             }),
         },
       ],

@@ -6,6 +6,8 @@
 // 모든 상태 변화는 ops 감사 체인에도 남긴다(transfer-refund §8, settlement §5.1).
 // 회차 취소(CANCEL)는 요청 전에 purchase-svc에 환급 미룸을 걸고(지금 + 72시간), 판정·확정 시도 때 늘리며, 판정 전 반려 때 푼다(BAT-420 몫 D, OPEN[45],
 // transfer-refund §5 '회차 취소 요청 중 보류 취소의 환급 미룸'). 걸거나 늘리지 못하면 503 event-refund-unavailable이고 상태를 바꾸지 않는다.
+// 웨이브 끝 리뷰 K4: 확정 중 끊겨 RUNNING인데 purchase-svc에 일괄 환불이 없으면 approve가 같은 요청 ID로 다시 확정한다. 되돌리기 저장 실패는 오류 로그·지표다.
+// 웨이브 끝 리뷰 S2(authz-matrix §5.3 'ops-svc 구현'): 파트너 경로는 파트너 저장소(파트너 DB 풀, 세션 테넌트로 행 보안)만 쓰고, commander 요청도 회차의 promoterId를 적는다.
 import { randomUUID } from 'node:crypto';
 import type { IdempotencyRequest } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
@@ -37,6 +39,7 @@ import {
   type EventSaleStopper,
   type SaleSuspensionLookup,
   type EventRefundHolds,
+  type EventCancellationInsert,
   type PartnerEventCancellationStore,
 } from '../domain/ports.js';
 
@@ -96,7 +99,7 @@ export interface EventCancellationExtra {
   readonly holds?: EventRefundHolds;
   /** 판정 대기 건을 못 연 것처럼 요청은 받되 남길 경고. error는 웨이브 끝 리뷰 K4의 되돌리기 실패(event-cancellation-revert-failed) */
   readonly log?: { warn(obj: object, msg: string): void; error?(obj: object, msg: string): void };
-  /** 웨이브 끝 리뷰 K4(빈 뼈대, 아직 쓰지 않는다): 지표 ops_event_cancellation_revert_failures_total */
+  /** 웨이브 끝 리뷰 K4: 지표 ops_event_cancellation_revert_failures_total(확정 실패 뒤 PENDING_APPROVAL 되돌리기 저장이 던질 때마다 하나) */
   readonly revertFailures?: { inc(): void };
   /** 웨이브 끝 리뷰 S2(빈 뼈대, 아직 쓰지 않는다): 파트너 경로(requestByPartner·partnerStatus)는 이 저장소만 쓴다 */
   readonly partnerStore?: PartnerEventCancellationStore;
@@ -107,7 +110,11 @@ const invalidBody = () => new EventCancellationProblem('invalid-body', 400, '요
 const notFound = () => new EventCancellationProblem('not-found', 404, '찾을 수 없습니다');
 const authzUnavailable = () => new EventCancellationProblem('authz-unavailable', 503, '권한을 확인하지 못했습니다');
 const reauthRequired = () => new EventCancellationProblem('reauth-required', 403, '다시 인증해 주세요');
-const active = (requestId: string) => new EventCancellationProblem('event-cancellation-active', 409, '이미 진행 중인 회차 취소 요청이 있습니다', { requestId });
+/** 진행 중 요청 409. 파트너에게 보이지 않는 옛 행(promoter_id 빔)이면 요청 ID를 싣지 않는다(웨이브 끝 리뷰 S2) */
+const active = (requestId: string) =>
+  requestId === ''
+    ? new EventCancellationProblem('event-cancellation-active', 409, '이미 진행 중인 회차 취소 요청이 있습니다')
+    : new EventCancellationProblem('event-cancellation-active', 409, '이미 진행 중인 회차 취소 요청이 있습니다', { requestId });
 const refundUnavailable = () => new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불 실행기를 쓸 수 없습니다');
 const saleStopUnavailable = () => new EventCancellationProblem('sale-stop-unavailable', 503, '판매를 멈추지 못해 확정하지 않았습니다');
 
@@ -134,8 +141,10 @@ export class EventCancellations {
     if (!this.extra.suspension || !(await this.extra.suspension.isSuspended(input.eventId))) {
       throw new EventCancellationProblem('sale-not-suspended', 409, '판매 중지된 공연의 회차가 아닙니다');
     }
+    // 파트너가 자기 회차에 걸린 commander 요청도 보도록 회차의 promoterId를 적는다(웨이브 끝 리뷰 S2, authz-matrix §5.3). 판매 설정을 못 읽으면 503이고 아무것도 쓰지 않는다
+    const promoterId = await this.#commanderPromoter(input.eventId);
     const nowMs = this.now();
-    const record = this.#newRecord({ eventId: input.eventId, kind: 'CANCEL', reason: input.reason, requestedBy: actor.accountId, requestedVia: 'COMMANDER', promoterId: null, faultOpinion: null, evidenceRef: null, newStartsAt: null }, nowMs);
+    const record = this.#newRecord({ eventId: input.eventId, kind: 'CANCEL', reason: input.reason, requestedBy: actor.accountId, requestedVia: 'COMMANDER', promoterId, faultOpinion: null, evidenceRef: null, newStartsAt: null }, nowMs);
     return this.#insert(record, nowMs, idem);
   }
 
@@ -174,6 +183,9 @@ export class EventCancellations {
       },
       nowMs,
     );
+    // 파트너 저장소가 있으면 파트너 DB 풀·세션 테넌트로만 쓴다(행 보안이 두 번째로 막는다, 웨이브 끝 리뷰 S2)
+    const partner = this.extra.partnerStore;
+    if (partner) return this.#insertAsTenant(partner, actor.tenantId.toLowerCase(), record, nowMs, idem);
     return this.#insert(record, nowMs, idem);
   }
 
@@ -185,7 +197,8 @@ export class EventCancellations {
     if (!UUID.test(eventId)) throw notFound();
     const id = eventId.toLowerCase();
     await this.#ownedEvent(id, tenantId);
-    const [r] = await this.store.list({ eventId: id, limit: 1 });
+    const partner = this.extra.partnerStore;
+    const r = partner ? await partner.latestForEventAsTenant(tenantId.toLowerCase(), id) : (await this.store.list({ eventId: id, limit: 1 }))[0];
     if (!r) throw notFound();
     const approved = APPROVED_STATUSES.has(r.status);
     const wantsProgress = PARTNER_PROGRESS_STATUSES.has(r.status);
@@ -270,8 +283,13 @@ export class EventCancellations {
    */
   async approve(requestId: string, actor: OpsActor, reauthToken?: string): Promise<EventCancellationView> {
     const r = await this.#find(requestId);
-    if (r.status === 'JUDGED' || (r.status === 'PENDING_APPROVAL' && !r.dryRun)) throw new EventCancellationProblem('preview-required', 409, '미리보기 없이는 확정할 수 없습니다');
-    if (r.status !== 'PENDING_APPROVAL') throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
+    // RUNNING 고착(웨이브 끝 리뷰 K4, transfer-refund §5 '판정·미리보기·확정의 차례' 예외): RUNNING을 저장한 뒤 바깥 호출 도중 끊겨
+    // purchase-svc에 그 요청 ID의 일괄 환불이 없으면 같은 요청 ID로 미룸 늘리기·판매 멈춤·Start를 다시 부른다(셋 다 멱등)
+    const stuck = r.status === 'RUNNING';
+    if (!stuck) {
+      if (r.status === 'JUDGED' || (r.status === 'PENDING_APPROVAL' && !r.dryRun)) throw new EventCancellationProblem('preview-required', 409, '미리보기 없이는 확정할 수 없습니다');
+      if (r.status !== 'PENDING_APPROVAL') throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
+    }
     if (r.judgedBy === actor.accountId) throw new EventCancellationProblem('approver-ineligible', 403, '판정자는 확정할 수 없습니다');
     // 계약(openapi /v1/ops/event-cancellations/{requestId}/approvals)은 재인증 토큰을 요구한다(SEC-02).
     await this.#verifyReauth(actor, reauthToken);
@@ -279,12 +297,15 @@ export class EventCancellations {
     const stopper = this.extra.stopper;
     if (r.kind === 'CANCEL' && !stopper) throw saleStopUnavailable();
     if (r.fault === null) throw new EventCancellationProblem('judgement-required', 409, '판정 전에는 확정할 수 없습니다');
+    // 다시 확정은 purchase-svc에 일괄 환불이 없을 때만이다. 있으면 409(중복 시작 막기), 읽기가 실패하면 없음으로 보지 않고 503이다(바깥 호출 없음)
+    if (stuck) await this.#requireMissingJob(r);
     const nowMs = this.now();
     // 판정이 끝나기 전(확정 시작 전)까지 보류 취소의 환급 미룸이 풀리지 않게 기한을 늘린다(BAT-420 몫 D, GAT-110 D2)
     if (r.kind === 'CANCEL') await this.#extendHold(r, nowMs);
-    // 외부 호출 전에 RUNNING으로 조건부 저장해, 확정 중복과 외부 실패 뒤 재시도를 함께 다룬다(OPS-07).
+    // 외부 호출 전에 RUNNING으로 조건부 저장해, 확정 중복과 외부 실패 뒤 재시도를 함께 다룬다(OPS-07). 다시 확정도 판 번호 조건부 저장이라 겹친 다시 확정은 하나만 이어 간다
     const running: EventCancellationRecord = { ...r, status: 'RUNNING', approvedBy: actor.accountId, approvedAt: new Date(nowMs), version: r.version + 1, updatedAt: new Date(nowMs) };
-    if (!(await this.store.save(running, audit('EVENT_CANCELLATION_APPROVED', running.requestId, { ...eventBase(running), status: running.status, fault: running.fault }, nowMs)))) throw conflict();
+    const approvedAudit = audit('EVENT_CANCELLATION_APPROVED', running.requestId, { ...eventBase(running), status: running.status, fault: running.fault, ...(stuck ? { reapproval: true } : {}) }, nowMs);
+    if (!(await this.store.save(running, approvedAudit))) throw conflict();
     if (r.kind === 'CANCEL' && stopper) {
       try {
         // 판매 중지 집행의 명령 ID·중지 참조는 요청 ID다. 다시 확정하면 같은 ID로 다시 부른다(받는 쪽 멱등, ADR-0280 결정 1)
@@ -392,6 +413,18 @@ export class EventCancellations {
     return owner;
   }
 
+  /**
+   * commander 요청에 적을 회차의 테넌트(core 판매 설정의 promoterId, 웨이브 끝 리뷰 S2). 판매 설정 읽기가 실패하면 503 authz-unavailable이다.
+   * 소속 확인을 조립하지 않았거나 판매 설정이 없으면(core 404) 비운다(그 파트너가 보지 못하는 행으로 남는다)
+   */
+  async #commanderPromoter(eventId: string): Promise<string | null> {
+    if (!this.extra.owners) return null;
+    const owner = await this.extra.owners.find(eventId).catch(() => {
+      throw authzUnavailable();
+    });
+    return owner ? owner.promoterId.toLowerCase() : null;
+  }
+
   #newRecord(
     o: Pick<EventCancellationRecord, 'eventId' | 'kind' | 'reason' | 'requestedBy'> & Required<Pick<EventCancellationRecord, 'requestedVia' | 'promoterId' | 'faultOpinion' | 'evidenceRef' | 'newStartsAt'>>,
     nowMs: number,
@@ -446,7 +479,7 @@ export class EventCancellations {
       }
       const existing = await this.store.findActiveByEvent(record.eventId);
       if (existing) throw active(existing.requestId);
-      await this.#placeHold(record, nowMs);
+      await this.#placeHold(record, nowMs, (eventId) => this.store.findActiveByEvent(eventId));
     }
     let result: Awaited<ReturnType<EventCancellationStore['insert']>>;
     try {
@@ -468,8 +501,45 @@ export class EventCancellations {
     return eventCancellationView(record);
   }
 
-  /** 새 요청의 미룸 걸기(지금 + 72시간). 실패는 503(ALREADY_EXISTS면 진행 중 요청을 다시 본다) */
-  async #placeHold(record: EventCancellationRecord, nowMs: number): Promise<void> {
+  /**
+   * 파트너 저장소로 넣기(웨이브 끝 리뷰 S2). 차례는 #insert와 같고, 확인·넣기·감사·CS '판정 대기' 건은 모두 파트너 저장소(파트너 DB 풀, 세션 테넌트)로 한다.
+   * CS 건은 넣기와 같은 트랜잭션의 정의자 함수가 연다(관제 저장소·관제 CS 저장소를 부르지 않는다)
+   */
+  async #insertAsTenant(p: PartnerEventCancellationStore, tenantId: string, record: EventCancellationRecord, nowMs: number, idem?: IdempotencyRequest): Promise<EventCancellationView> {
+    const requested = audit(
+      'EVENT_CANCELLATION_REQUESTED',
+      record.requestId,
+      { ...eventBase(record), reason: record.reason, status: record.status, requestedVia: record.requestedVia, ...(record.promoterId ? { promoterId: record.promoterId } : {}) },
+      nowMs,
+    );
+    const holding = record.kind === 'CANCEL';
+    const findActive = p.activeForEventAsTenant ? (eventId: string) => p.activeForEventAsTenant!(tenantId, eventId) : undefined;
+    if (holding) {
+      if (idem && p.replayOfAsTenant) {
+        const replay = await p.replayOfAsTenant(tenantId, idem);
+        if (replay) return replay;
+      }
+      if (findActive) {
+        const existing = await findActive(record.eventId);
+        if (existing) throw active(existing.requestId);
+      }
+      await this.#placeHold(record, nowMs, findActive);
+    }
+    let result: EventCancellationInsert;
+    try {
+      result = (await p.insertAsTenant(tenantId, record, requested, idem, { nowMs })) ?? { status: 'INSERTED' };
+    } catch (err) {
+      if (holding) await this.#releaseHold(record);
+      throw err;
+    }
+    if (holding && result.status !== 'INSERTED') await this.#releaseHold(record);
+    if (result.status === 'REPLAYED') return result.view;
+    if (result.status === 'ACTIVE') throw active(result.requestId);
+    return eventCancellationView(record);
+  }
+
+  /** 새 요청의 미룸 걸기(지금 + 72시간). 실패는 503(ALREADY_EXISTS면 진행 중 요청을 다시 본다, 다시 볼 길이 없으면 503) */
+  async #placeHold(record: EventCancellationRecord, nowMs: number, findActive?: (eventId: string) => Promise<EventCancellationRecord | undefined>): Promise<void> {
     const holds = this.extra.holds;
     if (!holds) throw refundUnavailable();
     try {
@@ -477,7 +547,7 @@ export class EventCancellations {
     } catch (err) {
       if (err instanceof EventRefundHoldConflict) {
         // 걸기와 진행 중 확인 사이에 다른 요청이 들어왔거나(그 요청을 알린다), 풀기를 놓친 옛 미룸이 기한 전이다(경고, 기한에 저절로 풀린다)
-        const again = await this.store.findActiveByEvent(record.eventId);
+        const again = findActive ? await findActive(record.eventId) : undefined;
         if (again) throw active(again.requestId);
         this.extra.log?.warn({ eventId: record.eventId, requestId: record.requestId }, 'event-refund-hold-conflict: 진행 중 요청이 없는데 그 회차에 다른 요청의 환급 미룸이 걸려 있다');
       }
@@ -516,12 +586,38 @@ export class EventCancellations {
     }
   }
 
+  /** RUNNING 고착 다시 확정의 전제: purchase-svc에 그 요청 ID의 일괄 환불이 없다(웨이브 끝 리뷰 K4). 있으면 409 already-approved, 읽기 실패·조립 없음은 503 */
+  async #requireMissingJob(r: EventCancellationRecord): Promise<void> {
+    if (!this.extra.reader) throw refundUnavailable();
+    let job: EventRefundJobProgress | undefined;
+    try {
+      job = await this.extra.reader.job({ requestId: r.requestId });
+    } catch {
+      throw new EventCancellationProblem('event-refund-unavailable', 503, '일괄 환불이 있는지 확인하지 못했습니다');
+    }
+    if (job) throw new EventCancellationProblem('already-approved', 409, '이미 확정된 요청입니다');
+  }
+
+  /**
+   * 확정 실패 뒤 PENDING_APPROVAL로 되돌린다(다시 확정할 수 있게). 저장이 던지면 원래 오류를 가리지 않고 오류 로그 event-cancellation-revert-failed와
+   * 지표 ops_event_cancellation_revert_failures_total을 남긴다(웨이브 끝 리뷰 K4: 그 요청은 RUNNING에 남고 approve의 다시 확정이 이어 간다).
+   * 다른 요청이 먼저 바꿔 저장이 0행이면 경고만 남긴다
+   */
   async #backToPendingApproval(running: EventCancellationRecord, error: string, err: unknown): Promise<void> {
     const backMs = this.now();
     const back: EventCancellationRecord = { ...running, status: 'PENDING_APPROVAL', approvedBy: null, approvedAt: null, version: running.version + 1, updatedAt: new Date(backMs) };
-    await this.store
-      .save(back, audit('EVENT_CANCELLATION_APPROVAL_FAILED', back.requestId, { ...eventBase(back), status: back.status, error, cause: err instanceof Error ? err.name : 'unknown' }, backMs))
-      .catch(() => false);
+    let saved: boolean;
+    try {
+      saved = await this.store.save(back, audit('EVENT_CANCELLATION_APPROVAL_FAILED', back.requestId, { ...eventBase(back), status: back.status, error, cause: err instanceof Error ? err.name : 'unknown' }, backMs));
+    } catch (revertErr) {
+      const fields = { event: 'event-cancellation-revert-failed', requestId: running.requestId, error, err: revertErr instanceof Error ? revertErr.name : 'unknown' };
+      const msg = 'event-cancellation-revert-failed: 확정 실패 뒤 PENDING_APPROVAL로 되돌리지 못했다(RUNNING에 남고, 일괄 환불이 없으면 다시 확정이 이어 간다)';
+      if (this.extra.log?.error) this.extra.log.error(fields, msg);
+      else this.extra.log?.warn(fields, msg);
+      this.extra.revertFailures?.inc();
+      return;
+    }
+    if (!saved) this.extra.log?.warn({ event: 'event-cancellation-revert-conflict', requestId: running.requestId, error }, 'event-cancellation-revert-conflict: 되돌리는 사이 다른 요청이 먼저 바꿨다');
   }
 }
 

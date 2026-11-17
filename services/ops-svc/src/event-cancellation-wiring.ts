@@ -26,12 +26,19 @@ export interface EventCancellationDeps {
 
 const has = (v: string | undefined): v is string => typeof v === 'string' && v.trim() !== '';
 
+/** 파트너 DB 주소 없이 관제 주소를 함께 써도 되는 환경(행 보안을 시험하지 않는 로컬·CI) */
+const SHARED_POOL_ENVS: ReadonlySet<string> = new Set(['local', 'ci']);
+
 /**
- * 웨이브 끝 리뷰 S2(빈 뼈대, 아직 쓰지 않는다): 파트너 경로 DB 풀 주소. PEAKET_PARTNER_DATABASE_URL이 있으면 그것,
- * 없으면 local·ci만 관제 주소(mainUrl)를 쓰고 그 밖(운영·스테이징·PEAKET_ENV 없음)은 시작 실패(던짐). main.ts가 부른다
+ * 웨이브 끝 리뷰 S2(authz-matrix §5.3 'ops-svc 구현'): 파트너 경로 DB 풀 주소. PEAKET_PARTNER_DATABASE_URL(ops_partner 역할 사용자)이 있으면 그것,
+ * 없으면 local·ci만 관제 주소(mainUrl)를 쓰고 그 밖(운영·스테이징·PEAKET_ENV 없음)은 시작 실패(던짐, identity 조립과 같은 fail-closed). main.ts가 부른다
  */
-export function partnerDatabaseUrlFromEnv(_env: Readonly<Record<string, string | undefined>>, _mainUrl: string): string {
-  throw new Error('아직 없음');
+export function partnerDatabaseUrlFromEnv(env: Readonly<Record<string, string | undefined>>, mainUrl: string): string {
+  const partnerUrl = env.PEAKET_PARTNER_DATABASE_URL;
+  if (has(partnerUrl)) return partnerUrl;
+  const envName = env.PEAKET_ENV;
+  if (envName !== undefined && SHARED_POOL_ENVS.has(envName)) return mainUrl;
+  throw new Error('PEAKET_PARTNER_DATABASE_URL이 없다(파트너 회차 취소 경로의 ops_partner DB 사용자, 운영 필수. 비밀 관리에서 넣는다)');
 }
 
 export function eventCancellationDepsFromEnv(i: EventCancellationDepsInput): EventCancellationDeps {

@@ -89,7 +89,11 @@ export interface EventRefundJobProgress {
 /** purchase-svc PreviewEventRefund·GetEventRefundJob. 실패는 던진다 */
 export interface EventRefundReader {
   preview(q: { eventId: string; requestId: string; fault: EventCancellationFault }): Promise<EventCancellationDryRun>;
-  job(q: { requestId: string }): Promise<EventRefundJobProgress>;
+  /**
+   * 그 요청 ID의 일괄 환불 진행률. purchase-svc에 그 일괄 환불이 없으면(gRPC NOT_FOUND) undefined다(웨이브 끝 리뷰 K4: RUNNING 고착 다시 확정의 근거).
+   * 그 밖의 실패(UNAVAILABLE·시간 초과 등)는 던진다(없음으로 보지 않는다)
+   */
+  job(q: { requestId: string }): Promise<EventRefundJobProgress | undefined>;
 }
 
 /** core-svc 내부 판매 설정(GET /internal/v1/events/{eventId}/sale-config). 없으면 undefined, 실패는 던진다 */
@@ -124,12 +128,27 @@ export class EventRefundHoldConflict extends Error {
 }
 
 /**
- * 웨이브 끝 리뷰 S2(빈 뼈대): 파트너 경로 전용 저장소. 파트너 DB 풀(ops_partner 역할)에서 트랜잭션 첫 문장으로
- * set_config('app.tenant_id', 테넌트, true)를 걸고 쓴다(행 보안이 다른 파트너 행을 막는다). 감사·CS 건은 정의자 함수로 남긴다
+ * 웨이브 끝 리뷰 S2(authz-matrix §5.3 'ops-svc 구현'): 파트너 경로 전용 저장소. 파트너 DB 풀(ops_partner 역할)에서 트랜잭션 첫 문장으로
+ * set_config('app.tenant_id', 테넌트, true)를 걸고 쓴다(행 보안이 다른 파트너 행을 막는다). 감사·CS 건은 정의자 함수로 같은 트랜잭션에 남긴다.
+ * 파트너 경로(requestByPartner·partnerStatus)는 관제 저장소(EventCancellationStore)를 부르지 않고 이 포트만 쓴다
  */
 export interface PartnerEventCancellationStore {
-  insertAsTenant(tenantId: string, record: EventCancellationRecord, audit: AuditRecord, idem?: EventCancellationIdempotency): Promise<void>;
+  /**
+   * 행·감사(·cs가 있으면 CS '판정 대기' 건)를 한 트랜잭션에 넣는다. 결과는 관제 저장소의 insert와 같다(INSERTED·REPLAYED·ACTIVE).
+   * 돌려주지 않는 대역은 INSERTED로 본다. 진행 중 요청이 그 테넌트에 보이지 않는 옛 행이면 ACTIVE의 requestId가 빈 글이다
+   */
+  insertAsTenant(
+    tenantId: string,
+    record: EventCancellationRecord,
+    audit: AuditRecord,
+    idem?: EventCancellationIdempotency,
+    cs?: { readonly nowMs: number },
+  ): Promise<EventCancellationInsert | void>;
   latestForEventAsTenant(tenantId: string, eventId: string): Promise<EventCancellationRecord | undefined>;
+  /** 그 테넌트에 보이는 그 회차의 진행 중 요청(미룸을 걸기 전 확인). 없는 대역은 넣기의 진행 중 확인만 쓴다 */
+  activeForEventAsTenant?(tenantId: string, eventId: string): Promise<EventCancellationRecord | undefined>;
+  /** 같은 멱등 키의 처음 응답(미룸을 걸기 전 확인). 다른 지문이면 422를 던진다. 없는 대역은 넣기의 멱등 규칙만 쓴다 */
+  replayOfAsTenant?(tenantId: string, idem: EventCancellationIdempotency): Promise<EventCancellationView | undefined>;
 }
 
 export const EVENT_CANCELLATION_STORE = Symbol.for('peaket.ops.event-cancellation-store');

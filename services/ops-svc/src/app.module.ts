@@ -13,6 +13,7 @@ import { PayoutsModule, type PayoutsModuleDeps } from './modules/payouts/index.j
 import {
   CsCaseEventCancellationCases,
   DrizzleEventCancellationStore,
+  DrizzlePartnerEventCancellationStore,
   DrizzleSaleSuspensionLookup,
   EventCancellationsModule,
   MemoryEventCancellationStore,
@@ -25,6 +26,7 @@ import {
   type EventRefundReader,
   type EventRefundStarter,
   type EventSaleStopper,
+  type PartnerEventCancellationStore,
   type SaleSuspensionLookup,
 } from './modules/event-cancellations/index.js';
 
@@ -59,20 +61,24 @@ interface CommonWiring {
     readonly cases?: EventCancellationCases;
     /** purchase-svc SetEventRefundHold(BAT-420 몫 D, 시작 조립이 purchase gRPC 클라이언트로 채운다). 없으면 CANCEL 요청·판정·확정이 503이다 */
     readonly holds?: import('./modules/event-cancellations/index.js').EventRefundHolds;
+    /** 지표 ops_event_cancellation_revert_failures_total(웨이브 끝 리뷰 K4, main.ts가 서비스 레지스트리에 붙인다) */
+    readonly revertFailures?: { inc(): void };
   };
 }
 
-/** 회차 취소 모듈의 의존(넘긴 것만 싣고, 판매 중지 확인·판정 대기 건은 기본을 채운다) */
+/** 회차 취소 모듈의 의존(넘긴 것만 싣고, 판매 중지 확인·판정 대기 건은 기본을 채운다). 파트너 저장소는 DB 조립에서만 넣는다 */
 function eventCancellationDeps(
   o: CommonWiring,
   store: EventCancellationStore,
-  defaults: { suspension: SaleSuspensionLookup; cases: EventCancellationCases },
+  defaults: { suspension: SaleSuspensionLookup; cases: EventCancellationCases; partnerStore?: PartnerEventCancellationStore },
   audit: AuditChain,
 ) {
   const e = o.eventCancellations ?? {};
   return {
     store,
     audit,
+    ...(defaults.partnerStore ? { partnerStore: defaults.partnerStore } : {}),
+    ...(e.revertFailures ? { revertFailures: e.revertFailures } : {}),
     suspension: e.suspension ?? defaults.suspension,
     cases: e.cases ?? defaults.cases,
     ...(e.refunds ? { refunds: e.refunds } : {}),
@@ -86,7 +92,10 @@ function eventCancellationDeps(
 
 @Module({})
 export class AppModule {
-  static register(o: ({ database: Database } & CommonWiring) | ({ memory: true } & CommonWiring)): DynamicModule {
+  /**
+   * partnerDatabase: 파트너 회차 취소 경로의 DB 풀(ops_partner 역할, PEAKET_PARTNER_DATABASE_URL, 웨이브 끝 리뷰 S2). 없으면 관제 풀을 함께 쓴다(local·ci·시험)
+   */
+  static register(o: ({ database: Database; partnerDatabase?: Database } & CommonWiring) | ({ memory: true } & CommonWiring)): DynamicModule {
     const signer = o.signer ?? ephemeralAuditAnchorSigner();
     if ('database' in o) {
       const chain = o.auditChain ?? new DrizzleAuditChain(o.database);
@@ -106,7 +115,19 @@ export class AppModule {
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
           PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts, audit: chain } : { storage: 'memory', deps: { audit: chain } }),
-          EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new DrizzleSaleSuspensionLookup(o.database), cases: new CsCaseEventCancellationCases(csCases) }, chain)),
+          EventCancellationsModule.register(
+            eventCancellationDeps(
+              o,
+              cancellations,
+              {
+                suspension: new DrizzleSaleSuspensionLookup(o.database),
+                cases: new CsCaseEventCancellationCases(csCases),
+                // 파트너 경로는 파트너 풀과 세션 테넌트로만 접속한다(행 보안, authz-matrix §5.3 'ops-svc 구현')
+                partnerStore: new DrizzlePartnerEventCancellationStore(o.partnerDatabase ?? o.database),
+              },
+              chain,
+            ),
+          ),
         ],
       };
     }

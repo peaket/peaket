@@ -18,7 +18,8 @@ import {
 } from '../../domain/event-cancellation.js';
 import type { EventCancellationIdempotency, EventCancellationInsert, EventCancellationStore } from '../../domain/ports.js';
 
-interface Row {
+/** event_cancellation_request 행(파트너 저장소도 같은 꼴로 읽는다) */
+export interface Row {
   request_id: string;
   event_id: string;
   kind: string;
@@ -46,7 +47,7 @@ interface Row {
 }
 
 const dryRunOf = (v: Row['dry_run']): EventCancellationDryRun | null => (v === null ? null : typeof v === 'string' ? (JSON.parse(v) as EventCancellationDryRun) : v);
-const recordOf = (r: Row): EventCancellationRecord => ({
+export const recordOf = (r: Row): EventCancellationRecord => ({
   requestId: r.request_id,
   eventId: r.event_id,
   kind: r.kind as EventCancellationKind,
@@ -72,29 +73,38 @@ const recordOf = (r: Row): EventCancellationRecord => ({
   dryRun: dryRunOf(r.dry_run),
   rejectionReason: r.rejection_reason,
 });
-const COLUMNS = sql`request_id, event_id, kind, status, reason, requested_by, requested_at, fault, judgement_reason, fan_notice_reason, judged_by, judged_at, approved_by, approved_at, refund_job_state, version, updated_at,
+export const COLUMNS = sql`request_id, event_id, kind, status, reason, requested_by, requested_at, fault, judgement_reason, fan_notice_reason, judged_by, judged_at, approved_by, approved_at, refund_job_state, version, updated_at,
   requested_via, promoter_id, fault_opinion, evidence_ref, new_starts_at, dry_run, rejection_reason`;
 const ACTIVE_STATUSES: ReadonlySet<EventCancellationStatus> = new Set(ACTIVE_EVENT_CANCELLATION_STATUSES);
 const ACTIVE = sql`status in ('REQUESTED','JUDGED','PENDING_APPROVAL','APPROVED','RUNNING','PAUSED','REFUND_WINDOW')`;
+/** 진행 중 요청 조건(파트너 저장소도 같은 조건을 쓴다) */
+export const ACTIVE_CONDITION = ACTIVE;
 const jsonOf = (v: EventCancellationDryRun | null | undefined): string | null => (v ? JSON.stringify(v) : null);
 
 /** 같은 회차에 진행 중 요청이 있어 넣지 않는다(트랜잭션을 되돌리려고 던진다) */
-class ActiveRequest extends Error {
+export class ActiveRequest extends Error {
   constructor(readonly requestId: string) {
     super('event-cancellation-active');
   }
 }
 
-const pgCode = (e: unknown): string | undefined => {
+export const pgCode = (e: unknown): string | undefined => {
   const any = e as { code?: unknown; cause?: { code?: unknown } } | undefined;
   const c = any?.code ?? any?.cause?.code;
   return typeof c === 'string' ? c : undefined;
 };
-const constraintOf = (e: unknown): string | undefined => {
+export const constraintOf = (e: unknown): string | undefined => {
   const any = e as { constraint?: unknown; cause?: { constraint?: unknown } } | undefined;
   const c = any?.constraint ?? any?.cause?.constraint;
   return typeof c === 'string' ? c : undefined;
 };
+
+/** 넣기 문장의 values 괄호 하나(칸 차례는 COLUMNS와 같다) */
+export const insertValues = (r: EventCancellationRecord) => sql`(${r.requestId}::uuid, ${r.eventId}::uuid, ${r.kind}, ${r.status}, ${r.reason}, ${r.requestedBy}, ${r.requestedAt}::timestamptz,
+              ${r.fault}, ${r.judgementReason}, ${r.fanNoticeReason}, ${r.judgedBy}, ${r.judgedAt}::timestamptz, ${r.approvedBy}, ${r.approvedAt}::timestamptz,
+              ${r.refundJobState}, ${r.version}::bigint, ${r.updatedAt}::timestamptz,
+              ${r.requestedVia ?? 'COMMANDER'}, ${r.promoterId ?? null}::uuid, ${r.faultOpinion ?? null}, ${r.evidenceRef ?? null}, ${r.newStartsAt ?? null}::timestamptz,
+              ${jsonOf(r.dryRun)}::jsonb, ${r.rejectionReason ?? null})`;
 
 export class DrizzleEventCancellationStore implements EventCancellationStore {
   readonly #idempotency: IdempotencyStore;
@@ -158,13 +168,7 @@ export class DrizzleEventCancellationStore implements EventCancellationStore {
       const existing = (active.rows[0] as { request_id: string } | undefined)?.request_id;
       if (existing !== undefined) throw new ActiveRequest(existing);
     }
-    await tx.execute(sql`
-      insert into event_cancellation_request (${COLUMNS})
-      values (${r.requestId}::uuid, ${r.eventId}::uuid, ${r.kind}, ${r.status}, ${r.reason}, ${r.requestedBy}, ${r.requestedAt}::timestamptz,
-              ${r.fault}, ${r.judgementReason}, ${r.fanNoticeReason}, ${r.judgedBy}, ${r.judgedAt}::timestamptz, ${r.approvedBy}, ${r.approvedAt}::timestamptz,
-              ${r.refundJobState}, ${r.version}::bigint, ${r.updatedAt}::timestamptz,
-              ${r.requestedVia ?? 'COMMANDER'}, ${r.promoterId ?? null}::uuid, ${r.faultOpinion ?? null}, ${r.evidenceRef ?? null}, ${r.newStartsAt ?? null}::timestamptz,
-              ${jsonOf(r.dryRun)}::jsonb, ${r.rejectionReason ?? null})`);
+    await tx.execute(sql`insert into event_cancellation_request (${COLUMNS}) values ${insertValues(r)}`);
     if (audit) await appendAuditIn(tx, audit);
   }
 

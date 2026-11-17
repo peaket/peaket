@@ -168,9 +168,18 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, 
     }
   }
 
-  /** GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W): 결제사 몫마다 상태·멈춘 이유·끝남·실패·결과 모름, 연기 신청 수·신청 창 닫힘 */
-  async job(q: { requestId: string }): Promise<EventRefundJobProgress> {
-    const a = await this.#call('GetEventRefundJob', { job_id: q.requestId });
+  /**
+   * GetEventRefundJob의 진행률 칸을 다 읽는다(BAT-420 GAT-110 W): 결제사 몫마다 상태·멈춘 이유·끝남·실패·결과 모름, 연기 신청 수·신청 창 닫힘.
+   * purchase-svc에 그 일괄 환불이 없으면(NOT_FOUND) undefined다(웨이브 끝 리뷰 K4). 그 밖의 실패는 그대로 던진다
+   */
+  async job(q: { requestId: string }): Promise<EventRefundJobProgress | undefined> {
+    let a: Record<string, unknown>;
+    try {
+      a = await this.#call('GetEventRefundJob', { job_id: q.requestId });
+    } catch (err) {
+      if ((err as Partial<grpc.ServiceError> | undefined)?.code === grpc.status.NOT_FOUND) return undefined;
+      throw err;
+    }
     const closesAtMs = msOf(a.refund_window_closes_at);
     return {
       state: enumOf(a.state, 'REFUND_JOB_STATE_') ?? 'UNKNOWN',
