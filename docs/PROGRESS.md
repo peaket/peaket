@@ -176,8 +176,7 @@
 - PRF-180: 시험 빈 곳: 앞 트랜잭션이 열린 채 뒤가 기다리는 차례와 앞이 되돌려져 뒤가 만드는 차례를 강제하지 않는다, ConfirmPayment 200ms 안에 끝나는지 재는 시험이 없다, 처리 중인 호출이 있을 때의 종료를 보지 않는다.
 - PRF-180: 문장 시간 한도는 문장마다 걸려 INSERT 셋의 합이 남은 시간을 조금 넘을 수 있고 핫패스에 왕복이 한 번 는다. 측정 창에서 왕복 비용을 재서 정한다. 릴레이 정비 일 가운데 통계 스냅샷(`stat_snapshot`)을 payment DB에 언제 넣을지 정한다.
 - PRF-181: 시험 빈 곳: 실제 프로세스가 시뮬레이터로 승인까지 가는 길, `markSent`와 임대 끝난 잡기의 실제 동시 경합. 결과 반영 처리기는 decode까지만 잇는다(UNKNOWN 뒤 최종 결과 T12→T13은 PRF-182에서 끝까지 잇는다).
-- PRF-181: payment-svc 종료 유예는 차트 기본 30초라 느린 호출이 배포 때마다 UNKNOWN이 된다(안전한 쪽). 배포 값이 생길 때 80초 이상으로 둔다. 원장 읽기가 계속 실패하는 행은 100ms마다 다시 잡혀 로그가 늘 수 있다. 취소(`cancel`) 어댑터 갈래에도 JSON `code` 없는 4xx를 거절로 보는 꼴이 남았다(취소 단계에서 고친다).
-- PRF-182: 불변식 P4(`services/invariant-checker/sql/p4_issue_deadline_exceeded.sql`)는 `approved_at + 기한`으로 판정해, UNKNOWN을 늦게 푼 주문(T13)의 발권 기한(반영 시각 기준)과 어긋난다. P4의 기준을 맞춘다.
+- PRF-181: 원장 읽기가 계속 실패하는 행은 100ms마다 다시 잡혀 로그가 늘 수 있다(종료 유예는 W9-fix2 R-678이, 취소 어댑터의 JSON `code` 없는 4xx는 PRF-184가 고쳤다, 2026-11-17 확인).
 - PRF-182: 시험 빈 곳: 실제 코덱, 조회 중 SIGKILL, 호출이 간격보다 긴 겹침, 대량 적체. 잡기가 빈자리만큼(파드당 초당 16건 상한)이라 결제사가 빠를 때 끝나는 대로 채우면 더 빠르다. SKIP LOCKED는 SQL 글자 검사로만 잡힌다(동작 시험은 0건으로 끝나 빠뜨리지 못한다).
 - PRF-183: `PEAKET_PAYMENT_POD_COUNT`는 파드 수를 고정값으로 나눈다. 정본 값이 2(평시)·6(온세일 목표)·12(DB 예산 최대)로 갈려 12 [가정]로 뒀고, 6개만 띄우면 토큰 합이 초당 150건이라 300 TPS 피크에 못 미친다. wbs 2.12.1·4.6.1에서 값을 정하거나 실제 파드 수를 동적으로 읽는다.
 - PRF-183: `pg_quota_utilization_ratio`(observability.md)는 코드에 없다(어느 단계 몫인지 확인). 파드 합산 상한은 측정 창에서 잰다. 낮춘 상한의 회복 규칙은 PRF-200이다.
@@ -205,7 +204,6 @@
 - CI 흔들림(c9ddbb9c, 실행 42697021230): 월렛 Lighthouse LCP 7,302ms가 한도 7,255ms(기준선 + 25%)를 넘었다가 다음 실행에서 통과했다. 월렛 화면은 바뀌지 않았다(tools/web-checks/budgets/lighthouse.spec.mjs).
 - BAT-020(PRF-203, R-448): 하위 결제사 불일치 SEV2 로그가 관측 표 쓰기 전에 나가, 쓰기가 실패하면 로그는 '뺐다'인데 어느 파드도 빼지 않는다(다음 관측 때 다시 쓴다).
 - BAT-020(PRF-203, R-448): 결제사 답의 `pgProvider` 값을 목록·길이로 검사하지 않고 DB·로그에 싣고, 중복 로그 막기 집합에 상한이 없다(상대가 인증된 포트원이라 위험 낮음).
-- BAT-020(PRF-203, R-448): 회차 지정 쓰임새 `AssignEventPg`의 지정 시각에 상한이 없다(아주 먼 미래 값 하나가 뒤 지정을 모두 막는다). 결제창 준비처럼 '9999년 끝'으로 묶는다.
 - BAT-020(PRF-203, R-448): 포트원형 시뮬레이터가 하위 결제사를 인증 때가 아니라 답할 때 다시 찾아, 표를 바꾸면 이미 인증한 결제의 답도 바뀐다. 시뮬레이터 프로세스는 채널 표 시작 옵션을 받지 않아 다시 띄우면 표가 빈다.
 - BAT-020(PRF-210, R-448): 결제 모델 기반 시험의 스케줄러 문을 `tx.insert`·`tx.select`가 지나지 않는다(차례가 한쪽으로 치우침. 지금 경합 쌍에서 닿는 것은 당기기 읽기뿐).
 - BAT-020(PRF-210, R-448): admission-ctrl 통합 시험이 queue-svc 소스를 가져오는데 CI `--affected` 타입 검사가 그 변경을 따라가지 않는다(purchase-svc는 이 묶음에서 늘 돌게 고쳤다).
@@ -215,7 +213,6 @@
 - BAT-022(PRF-215, R-458): 틀린 구현 표본에서 놓친 셋(합본 SIGTERM의 닫기 신호, 진입 시행이 모자랄 때 무효 합치기, purchase-svc 종료 차례)에 더한 시험은 소스 글을 읽는 시험이라 약하다. 실제 동작은 통합 시험이나 리허설에 경우를 더해 본다. 결과 모름을 끝 상태로 세던 결함(k6 시나리오)은 Docker가 필요한 k6 시험만 잡는다.
 - BAT-051(HOT-252, R-535): core-svc 내부 HTTP `GET /internal/v1/events/{eventId}/sale-config` 호출자 인증은 NetworkPolicy(wbs 0.4.4) 전제다. 운영 배포 때 purchase-svc만 받게 제한하고 `PEAKET_CORE_HTTP_URL` 값을 workloads에 넣는다.
 - BAT-051(HOT-252, R-535): `lst`는 게이트웨이가 서명 확인 뒤 넘기는 계약(seat-hold §2)이지만 purchase-svc에서 구매 세션 jti와 묶는 검사를 후속으로 더한다.
-- BAT-051(HOT-252, R-535): Redis 재구축 뒤 `seat_hold` 원장에 `lim`이 없어 `purchase_quota`가 회차 한도로 되돌아간다. 원장·재구축에 `lim`을 넣는다.
 - BAT-051(HOT-252, R-535): `payment-model` V-T40 확률 경합 시험이 한 번 흔들렸다. 재실행에서 통과했지만 흔들림 원인을 따로 본다.
 - W7-L1-roles-check(R-643, RV-04): 구현 커밋이 시험 설정 파일(`services/*/vitest*.config.mjs`의 include·exclude, 패키지 `package.json`의 시험 스크립트)을 바꿔 시험을 빼도 ⑤가 못 잡는다. 정본에서 시험 설정 파일을 시험 쪽으로 볼지 정한 뒤 시험 → 구현(tools/ci/roles-check.mjs).
 - W7-L1-roles-check(R-643, RV-06): 같은 Finding의 `Fix-By: test` 커밋이 시험 파일을 하나도 바꾸지 않아도(계획 파일만 고치거나 빈 커밋) 뒤의 `Fix-By: impl`이 통과한다. 지적마다 시험 쪽 커밋 하나 이상이 시험 파일을 바꿔야 하는지 정한다(tools/ci/roles-check.mjs).
@@ -311,6 +308,11 @@
 - W8-L1-ci-fix4(R-670, 계획 6의 3): `serverExternalPackages`에 적은 모든 이름이 실제로 밖 모듈이 됐는지(덩어리에 그 이름의 밖 부르기가 있는지) 산출물로 보는 일반 시험을 둔다. 지금은 redis를 `standalone-scm.build.test.mjs`가, OTel을 CF4-03이 따로 본다(apps/web/test-int/, apps/partner).
 - W8-L1-ci-fix4(R-670, 계획 7): web/budgets Lighthouse 단계에서 standalone 서버가 `…/.next/standalone/apps/web/app/sw.ts`를 해석하지 못한다는 빌드 오류가 27줄 난다(033bb26d·108f029a 같음, 시험은 통과). 운영 빌드에서 서비스 워커(sw.js)가 실제로 나가는지, 오류가 standalone 실행 방식(next start 경고 포함) 탓인지 확인한다. 낮음, 원인 미확인(apps/web/app/serwist/[path]/route.ts, apps/web/app/sw.ts, tools/web-checks/budgets/).
 - W8-L1-ci-fix4(R-670, CI 흔들림): develop CI 실행 43907749815 1차에서 `node / node`의 services/identity-svc `test/trust-login-risk.test.ts` `BOT-050_맥락은LOGIN이고_회차·pid·토큰을비우고_기기·IP·ASN·UA를싣는다`가 `expected { verdict: 'UNKNOWN' } to deeply equal { verdict: 'ALLOW' }`(525ms)로 실패했고, 실패 잡만 다시 돌려(2차) 통과했다. `108f029a..4105bd83`에서 services·packages/platform은 바뀌지 않았다. 원인은 첫 gRPC 호출이 데드라인 300ms에 걸려 UNKNOWN이 된 것이다(바쁜 CI에서 한 번 났고 다시 돌려 통과했다, 감독 확인). 연결을 미리 데울지, 데드라인을 시험 전용 값으로 둘지 정한다(services/identity-svc/test/trust-login-risk.test.ts).
+- W9-fix2(R-678) 리뷰 R3 낮음: 불변식 P4의 반영 시각은 `transition()` 안에서 다시 읽은 시계 값(`order_event.occurred_at`)이고, purchase가 큐 행 기한에 쓰는 `appliedAtMs`는 트랜잭션 전 `clock.now()`라 SQL 기준이 수 ms 늦어 위반을 아주 조금 덜 셀 수 있다. 정본 '같은 규칙' 옆에 반영 시각의 출처를 적거나 한 값으로 맞춘다(services/invariant-checker/sql/p4_issue_deadline_exceeded.sql:12, purchase `apply-payment-result.ts:202`)
+- W9-fix2(R-678) §9 다시 보기 N1 낮음: 합본의 자식 멈추기가 끝남을 `exitCode !== null`로만 본다. 신호로 죽은 자식(OOM 등)은 `exitCode`가 null이라 payment-svc면 이미 죽은 프로세스를 95초 기다린 뒤 SIGKILL하고, 자식 하나가 죽어 합본이 스스로 끝나는 길에서 유예 125초를 넘길 수 있다. `signalCode`도 보고 시험 한 줄을 더한다(services/bundle/src/stop-child.ts:33)
+- W9-fix2(R-678) §9 다시 보기 N2 낮음: 합본 유예 시험(chart G2)과 자식 대기 시험(G4)에 다른 자식 수 2·닫기 10초가 박혀 있어 자식이 늘어도 G2가 깨지지 않고, G4는 소스 글 검사다. `spawnChild` 호출 수를 세어 견준다(tools/local/chart.test.mjs, services/bundle/test/stop-child.test.ts)
+- W9-fix2(R-678) 검증 시험 빈 곳(모두 낮음): `held_at`이 이미 있는 행에 한도만 채우는 경우(M-H2a-where), 틀린 Stream 칸 `holdLimit`이면 `toSeatEvent`가 던지는 변이(M-H3a), 메모리 구현의 SOLD 줄 `lim`(M-H5b)과 자동 배정 HELD 칸(M-H6c-auto), P4에서 반영 시각이 승인 시각보다 이른 경우의 `greatest`(M-P2a), 안 끝난 주문이 `as_of` 정확히 기준 + 30분인 경계(M-P2d). 계획 docs/review/plans/W9-fix2.md '## 검증'
+- W9-ci-route(R-677) 리뷰 낮음: docs/infra.md §4.1 게이트웨이 표(86행)의 gw-partner 백엔드 ops-svc 칸이 '실시간 판매 현황'뿐이다. '회차 취소 요청·상태'(transfer-refund T1)를 더한다
 
 ## 미해결
 
