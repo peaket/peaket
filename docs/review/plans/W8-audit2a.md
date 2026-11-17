@@ -872,6 +872,26 @@ class Reviews {
 - **확인 필요(지적 아님)**: 리뷰 반영의 통합 시험 세 파일(`review-purge-legacy`·`review-recheck`·`review-grants`)과 처음 여섯 파일은 아직 돌리지 않았다(Docker 대기). 정비 일은 다음 출시에서 지울 때까지 정비 시간마다 표를 한 번 훑는다. 두 꼴을 찾는 조건에는 색인이 없지만 운영 전이라 문제 없는 크기다.
 - **높음·중간**: 없다.
 
+### 다시 보기 2: N1·N3 반영(2026-11-17)
+
+- **누가·언제**: 리뷰 담당(세션 `w8a2-relook-review`, claude-opus-5-5), 2026-11-17. 이 묶음의 계획·시험·구현은 맡지 않았고, 코드와 시험은 고치지 않았다. 웨이브 끝 리뷰 반영 다시 보기(`d5151d5c`, 계획 §10.1~10.4)의 이어 보기다. 그 결과는 §10에 그대로 두었다(§10.5가 그 번호를 이어 쓴다).
+- **본 범위**: `git diff d5151d5c 03a5e8b6`. 계획 `237fd7c6`(§10.5와 정본 identity.md §8·§12 I-T83 ⑨, data.md §4의 15, catalog-review 16.2.1), 시험 `966f754c`, 실패 확인 `453bc399`, 구현 `03a5e8b6`. 줄 번호는 `03a5e8b6` 기준이다.
+- **돌린 것**: core-svc 단위 `review-withdrawn`·`review-purge` 13개 통과. 통합 23개 통과는 구현 담당 보고(커밋 `03a5e8b6` 본문)대로 받고 다시 돌리지 않았다.
+- **N1 고쳐짐**:
+  - 셈: 키 없는 행을 빼던 `flatMap`이 없어지고, 처리한(`reprocessed_at`을 적은) 행 전부를 `held: { id, eventKey }[]`로 돌려준다(`drizzle-review-store.ts:344`, `memory-review-store.ts:230`). `heldEvents`는 그 길이다(`reviews.ts:342-347`).
+  - 차례와 상한: Drizzle은 `order by id limit ${o.limit}::int for update`로 잠그고, 표시도 그 행에만 한다(`drizzle-review-store.ts:327-343`). 메모리는 거른 뒤 ID 글자 차례로 정렬해 자른다. 상한은 `MANUAL_PURGE_HELD_LIMIT = 50`이다(`domain/review.ts:216`). 목록만 자르는 꼴(§10.5 ⓓ)이 아니다.
+  - 응답: 200 `{ purged, heldEvents(1~50), heldEventIds(uuid 1~50개) }`(`internal-review.controller.ts:16-20`).
+  - 운영 줄: `{ kind, requestedBy, reason, purged, heldEvents, held: [{ id, eventKey }] }`이고 옛 `heldEventKeys`는 없다(`reviews.ts:344`). 업무 키·Kafka 키는 저장소가 읽지도 돌려주지도 않으므로 줄에 들어갈 길이 없다. 단위 HTTP 시험이 줄 글에 계정 ID(대·소문자)가 없음을 본다(`test/review-withdrawn.test.ts:383`·`:414`).
+- **N3 고쳐짐**: REVOKE 대신 그 보류 행에만 걸린 `BEFORE UPDATE` 방아쇠(행이 바뀌기 직전에 도는 함수)를 쓴다(`test-int/review-purge-manual.int.test.ts:193-229`). 행 잠금(`FOR UPDATE`)은 방아쇠를 부르지 않으므로 마지막 문장만 실패한다. 오류 글 `recheck=1 review=DELETED`는 예약·파기가 같은 트랜잭션 안에서 먼저 돌았다는 뜻이다. 실패 뒤 '후기 VISIBLE·예약 없음·표시 없음'은 셋이 함께 되돌려졌다는 뜻이다. 둘을 함께 보므로 '먼저 커밋하고 따로 표시'와 '표시를 먼저 따로' 두 꼴(§10.5 ⓕ)을 모두 잡는다. 방아쇠와 함수는 `finally`에서 지운다. SQL 글에 넣는 값은 시험이 만든 UUID뿐임을 먼저 확인한다.
+- **구현 커밋이 시험 파일을 건드렸나**: 건드리지 않았다. `03a5e8b6`는 `src/` 여섯 파일만 바꿨다. 시험 커밋 `966f754c`의 제품 코드 변경은 뼈대(`MemoryHeldEvent.id`, `limit?` 옵션)뿐이다.
+
+| 번호 | 심각도 | 파일:줄 | 근거 | 고칠 쪽 |
+| --- | --- | --- | --- | --- |
+| N5 | 낮음 | `services/core-svc/src/modules/review/adapters/db/drizzle-review-store.ts:327-335` | PostgreSQL의 `… order by id limit n for update`는 행을 고른 뒤에 잠근다. 같은 계정을 두 번 겹쳐 부르면(운영자가 두 번 누름) 뒤 호출은 앞 호출이 잡은 앞 50개를 기다린다(RB-11 다시 처리와 겹치면 몇 행이 빠질 뿐 0행이 되지는 않는다). 앞 호출이 커밋하면 그 행들은 조건(`reprocessed_at is null`)에서 빠지는데, 51번째 행은 다시 찾지 않는다. 그래서 보류 행이 51개 넘게 남아 있어도 0행 → 409 `withdrawal-not-held`가 나올 수 있다. 정본은 409를 '끝 신호'로 쓰므로, 운영자가 보류 행이 남았는데 끝났다고 볼 수 있다. 한 계정의 보류 행이 50개를 넘는 일도 드물고 겹쳐 부르는 일도 드물어 낮음이다. 이미 파기는 했으므로 남는 것은 보류 행뿐이다. | 계획: 409 앞에 보류 행을 잠그지 않고 한 번 더 세어 남았으면 409 대신 0건 200(또는 재시도 안내)으로 할지, 아니면 런북에 '409 뒤 보류 수 지표로 확인'을 적을지 정한다. 갈래 3 정리 목록 후보 |
+
+- **확인했지만 지적하지 않은 것**: 운영 줄의 `held`는 최대 50개라 한 줄 크기가 크지 않다. `held`·`id`·`eventKey`는 로그 가림 칸이 아니고 개인정보도 아니다(보류 행 ID는 uuidv7). 응답 스키마의 `min`·`max`·`uuid`는 직렬화에만 쓰여 응답을 막지 않지만, 값은 저장소가 늘 1~50개의 uuid로 채운다. 남은 행은 다시 부르면 처리된다(이미 파기한 후기는 0건, 예약은 늦은 쪽).
+- **높음·중간**: 없다. **합치기**: N1·N3은 고쳐졌고 N5는 낮음이라 막지 않는다. 합쳐도 된다. 다만 앞 다시 보기 커밋 `d5151d5c`는 결과를 '## 리뷰' 절 밖(§10)에 적었다. 합치기 전 역할 확인에서 그 커밋을 어떻게 다룰지는 감독이 정한다.
+
 ## 검증
 
 - **누가·언제**: 검증 담당(세션 `l3w8-a2a-verify`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, 끝 `3e81c89a` 위. 계획·시험·구현·리뷰에 관여하지 않았다. 바뀐 부분 `c3b0935c..3e81c89a`(스냅숏 JSON·계약 생성물 건너뜀)를 보고 틀린 구현을 하나씩 넣었다. Docker 없이 돌렸다.
