@@ -169,3 +169,49 @@ cd /d/ticketpass-w9-fix3 && node --test tools/ci/gateway-routes.test.mjs && node
 - (참고, 이의 아님) **`installRequestChecks`를 부르는 곳**: 서비스 코드에는 없다(`grep -r installRequestChecks services`가 비었다). 부르는 곳은 platform `src/service.ts`(`createService`, 가드와 같은 `AuthState`를 넘긴다)와 성능 비교 벤치 `bench/vt41/src/main.ts`(칸막이 경로가 없어 빈 `AuthState`)뿐이라 둘을 고쳤다.
 - (참고, 이의 아님) **라우트 생성 파일 다시 만들기(감독 결정)**: F3 뒤 `node tools/ci/gateway-routes.mjs --write`로 다섯 파일을 다시 만들었다. 바뀐 것은 파일마다 둘째 줄 '계약 sha256'(`720ff10b…` → `7ef1b0bd…`)뿐이고 새로 생기거나 사라진 경로·메서드는 없다(openapi `bca7f8a8`의 변경은 응답 설명이라 라우트가 같다). 지금 openapi에는 F3 검사에 걸려 생성기가 멈추는 `x-peaket-scopes` 값이 없다.
 - (참고, 이의 아님) **이 묶음과 무관하게 처음부터 실패하는 단위 시험**: platform `test/problem-types.test.ts`의 'PRF192_서비스 코드의 이름 붙은 오류는 모두 목록에 있고 상태 코드와 제목이 같다'가 출발점 트리(이 묶음 변경을 치운 상태)에서도 실패한다. ops-svc `event-cancelled`의 제목 '회차 취소가 확정된 회차는 판매를 재개할 수 없습니다'가 목록의 제목과 다르다. 이 묶음 범위 밖이라 고치지 않았다.
+
+## 리뷰
+
+리뷰 담당 `w9f3-review`(claude-opus-5-5), 2026-11-17, 가지 끝 `92efe01b`(출발점 `9199a3de` = 지금 `origin/develop`, 그 뒤 develop에 openapi·deploy·platform 변경 없음). `git diff origin/develop...HEAD`로 읽고, 다시 돌린 것: platform `body-limit`·`bulkhead-auth`·`internal-token-constant-time`·`internal-token`(23 통과)·`problem-types`(2 통과), core `internal-sale-config-token-boot`·`partner-bulkhead-auth`·`search-log`·`search.http`(24 통과), ops `event-cancellation-main-wiring`(2 통과), `node --test tools/ci/gateway-routes.test.mjs`(41 통과), `node tools/ci/gateway-routes.mjs --check` 0, platform·ops `tsc --noEmit` 0. 통합(ops rls)은 Docker 잠금이 필요해 다시 돌리지 않았다(구현 담당 보고 10 통과).
+
+### 지적마다 판정
+
+| # | 판정 | 본 것 |
+| --- | --- | --- |
+| F1 | 맞음 | `assertOpsPartnerRole`(services/ops-svc/src/adapters/db/database-role.ts)의 SQL 한 번이 네 조건을 본다: ① `pg_has_role(current_user,'ops_partner','member')` ② `ops_app` 겸함 ③ `rolsuper or rolbypassrls`(역할 속성은 물려받지 않아 current_user만 보면 된다) ④ `event_cancellation_request`의 `relowner`에 대한 `pg_has_role(..., 'member')`(소유 역할 구성원 포함). 슈퍼유저는 `pg_has_role`이 모두 참이라 ③을 먼저 보는 차례가 맞다. 없는 역할 이름이면 SQL이 오류라 닫힌 쪽으로 실패한다. main.ts는 `partnerDatabase`를 만든 바로 뒤, `createService`·소비자 시작 전에 최상위 await로 부르고, `partnerUrl === url`로 건너뛰지 않는다. 조건은 `has(PEAKET_PARTNER_DATABASE_URL)`(공백만이면 없음)로 정본 authz-matrix §5.3 '시작 검사'와 같다. 경고 조건도 `!partnerRoleChecked`로 바뀌어 주소를 관제 주소와 같게 넣은 경우 경고 대신 검사한다 |
+| F2 | 맞음 | `constantTimeEqual`(packages/platform/src/secret-compare.ts)은 두 값을 SHA-256(utf8) 32바이트로 줄여 `timingSafeEqual` 한 번, 기대 값 빈 문자열은 비교 뒤 false. 두 `sameSecret`이 모두 지워졌고 HTTP `InternalTokenGuard`(core `InternalToken401Guard`가 물려받음)·gRPC 인터셉터·`verifyInternalGrpcActor`의 토큰과 처리자 증명 세 자리가 모두 바뀌었다. gRPC의 `caller`·`actor` 이름 비교(`!==`)는 비밀이 아니다. 짧은 grep으로 남은 비밀 `===`/길이 먼저 비교를 찾았다: 남은 `length !== … \|\| timingSafeEqual`은 모두 길이가 공개인 고정 길이 값(멱등 키 해시·HMAC 요약·쿠키 서명, 계획 §1 범위 밖과 같다)이고, 메모리 어댑터(시험용)의 `===`뿐이다. 하나만 아래 새 지적 N3 |
+| F3 | 맞음 | `scopesProblemOf`(tools/ci/gateway-routes.mjs)는 칸이 있을 때만(`hasOwnProperty`) 보고, 배열 아님(null·문자열)·빈 배열·문자열 아닌 원소·모르는 값(대소문자·공백 다름)·중복을 문제로 돌린다. 그 뒤 `ticket:buy`인데 갈래 하나라도 액세스 토큰이 없거나 `security: []`이면 문제다. 칸이 없으면 옛 흐름 그대로라 너무 넓지 않고, 계획 §2 목록보다 좁지도 않다. 다시 만든 생성 파일 다섯은 파일마다 둘째 줄 계약 sha256 한 줄만 바뀌었다(5 insertions, 5 deletions) |
+| F4 | 맞음(낮음 하나) | 칸막이 훅의 거절(429와 ①의 401·403·503)은 `rejectBeforeBody`가 `Connection: close`를 달고, 그 밖의 오류 답은 전역 onSend가 '상태 ≥ 400이고 본문이 오는 요청인데 소켓이 다 받지도(`complete`) 다 읽지도(`readableEnded`) 않음'일 때만 단다. 정상 응답과 본문을 다 읽은 뒤의 오류(가드 401·검사 400 등)는 keep-alive 그대로라 M-F4b(모든 응답 닫기)에 걸리지 않는다(정상 요청 재사용 시험도 통과). HTTP/2를 쓰지 않아(`connection` 머리가 h2에서 금지되는 문제 없음) 안전하다. 칸막이 훅만 조건 없이 닫는 점은 N2 |
+| F5 | 맞음(낮음 둘) | 아래 보안 점검 |
+| F6 | 맞음 | `MASK_SEPS`에 `/`·`\`·`_`·`,`·`·`(U+00B7)를 더하고 하이픈·점·공백·괄호와 상한 3은 그대로. 정본 search.md §11과 같다 |
+| PRF192 | 맞음 | ops `event-cancelled`의 제목을 openapi 목록 '취소가 확정된 회차입니다'(purchase와 같음)로 맞추고 옛 문장은 `detail`로 옮겼다. ops 시험은 `slug`·상태만 보고, 관제 화면의 '재개할 수 없는 회차'는 화면 고정 문구라 영향이 없다. `problem-types` 시험 통과. 범위 밖이라 했던 §'시험 이의' 마지막 줄과 달리 고쳤으나, 작은 맞춤이라 받아들인다 |
+
+### F5 보안 점검
+
+- **우회 길**: 없다. 앞 판정(①)은 거절을 더할 뿐이고 통과해도 본문 뒤 공용 가드 전체(④)가 그대로 돈다. 가드는 여전히 `ROLES_METADATA`를 처리기 → 클래스 차례로 읽고, 경로 설정의 `ROUTE_ROLES_KEY`는 처리기에 단 같은 `policy` 객체라 둘이 다를 수 없다. `@Bulkhead`·`@BodyLimit`·`@AcceptMultipart`·`@Roles`는 모두 경로 설정을 `{ ...prev }`로 합쳐 쓰므로 데코레이터 차례와 상관없이 칸이 남고, 서비스 코드에 Nest `@RouteConfig`(덮어쓰기)는 없다. 지금 칸막이 경로 여덟(core 넷, purchase 넷)은 모두 처리기에 `@Roles`가 있다.
+- **① 건너뛰기 조건**: `publicOnly`(허용 역할이 모두 `public`)일 때만 건너뛴다. 정본 guidelines §7 '`public`뿐인 경로는 ①이 없다'와 같다. 계획 §2 F5의 '`public`이 있으면'은 정본과 다르고 정본이 이긴다(구현 판단이 맞다). `[public, fan]`이면 `judgeIdentity`가 가드와 같이 신원 머리가 없을 때만 익명 통과다.
+- **판정이 같은가**: `AuthGuard`와 `admitBeforeBody`가 `judgeIdentity` 한 함수를 쓴다. 가드 리팩터링 전후 차례(공개 → 신원 → 종료 세션 → 대상 → 스코프 → identity 세션 → 비밀번호 바꾸기 → 역할, 익명 통과 때 검사 실패만)가 같음을 한 줄씩 대조했다. 다른 곳은 `deviceOnly` 하나다: 가드는 `@ScannerAuth`가 있고 `token !== 'required'`이며 `scanner_device`를 허용할 때, 앞 판정은 `scanner_device`를 허용하기만 하면 참이다. 앞 판정이 더 너그러운 쪽이라 우회는 아니다(N1).
+- **응답 꼴·연결 닫기**: 훅 오류는 Nest가 Fastify 오류 처리기로 거는 전역 `ProblemFilter`를 지나므로 가드와 같은 Problem 꼴이다. 401은 `rejectBeforeBody`가 가드와 같은 `WWW-Authenticate: Cookie realm="peaket"`를 달고, 503 `authz-unavailable`(Retry-After 1)·403 `password-change-required`·429 `server-busy`(Retry-After)도 같은 오류 객체다. 모두 `Connection: close`. 시험이 401·403·503의 type·머리·닫힘·처리기 0을 본다.
+- **자리 놓기**: `held`가 참일 때만 놓으므로 ①에서 거절된 요청이 남의 자리를 줄이지 않는다. 판정을 기다리는 동안 끊긴 요청도 close 수신기를 판정 전에 걸어 놓쳐지지 않는다(그 뒤 `take`로 잡힌 자리는 옛 흐름처럼 onSend → `handled`에서 놓는다).
+- **identity 캐시·fresh**: 앞 판정이 `adminAuthzOf(..., fresh)`로 캐시를 채우고 가드는 5초 안이면 캐시를 쓴다(시험: 부름 1). 본문이 5초보다 오래 걸리면 가드가 다시 묻고, 종료 세션 목록도 가드가 다시 보므로 옛 보장보다 약해지지 않는다. `valid: false`는 캐시하지 않는다. `fresh: true` 칸막이 경로는 두 번 묻는다(지금 없음, 구현 기록대로).
+- **시작 실패**: 칸막이 경로에 경로 설정 정책이 없으면 onRoute에서 던져 `app.init`이 실패한다(클래스에만 단 `@Roles`, 시험 통과). `@Roles`가 아예 없으면 옛 AZ-T1 시작 검사가 막는다.
+
+### 새 지적
+
+| # | 등급 | 파일:줄 | 내용 | 권고 |
+| --- | --- | --- | --- | --- |
+| N1 | 낮음 | packages/platform/src/auth.ts:398 | `admitBeforeBody`의 `deviceOnly`가 `scanner_device` 허용만 보고 `@ScannerAuth` 유무·`token: 'required'`를 보지 않아 가드(auth.ts:422)보다 너그럽다. 예를 들어 `[scanner_device, ops_admin]`에 `@ScannerAuth({ token: 'required' })`를 단 칸막이 경로가 생기면 신원 없는 요청이 자리를 잡고 본문을 읽은 뒤 가드에서 401이다(우회 아님, '자리 0' 보장만 빈다). 지금 그런 경로는 없다 | 정리 목록. 시작 때 칸막이 경로가 `scanner_device`를 허용하면 막거나, `@ScannerAuth` 옵션도 경로 설정에 적어 가드와 같은 식으로 본다 |
+| N2 | 낮음 | packages/platform/src/request-checks.ts:392-393, :465 | 칸막이 훅의 거절은 본문이 이미 다 왔거나 없어도 늘 `Connection: close`다(전역 onSend는 `bodyPending`으로 가른다, :479). 정본 guidelines §7이 '칸막이 429'를 닫는 길로 적었으니 정본대로다. 다만 purchase 쓰기 칸막이(작은 JSON 본문, 과부하 때 429로 덜어 내는 핫패스)에서 과부하마다 게이트웨이 → 파드 연결을 끊고 다시 열게 되어, 가장 바쁠 때 연결 맺기 비용이 늘 수 있다. 측정하지 않았다 | 검증·성능 담당이 볼 것. 바꾼다면 정본 문장을 '본문이 남았으면'으로 좁히고 훅에서도 `bodyPending`을 쓴다(F4 시험 ①~③은 모두 본문이 남은 경우라 그대로 통과할 것) |
+| N3 | 낮음 | services/pg-simulator/src/server.ts:59 | 시뮬레이터의 `authorization` 비교가 옛 꼴(길이 먼저 비교)이다. local·CI용이라 운영 위험은 없다 | 정리 목록(원하면 `constantTimeEqual`로) |
+| N4 | 낮음 | packages/platform/src/request-checks.ts:465 | ①이 ②보다 앞이라, 칸막이가 찬 때에도 관리 대상 요청마다 identity를 부른다(옛 흐름은 찬 때 identity 없이 429). 게이트웨이를 거치지 않는 위조 머리(세션 ID를 바꿔 가며)로 identity 부름을 늘릴 수 있다. 정본이 정한 차례의 대가이고 1초 시간 초과·5초 캐시가 있다 | 기록만. identity 쪽 부하 한도가 이 길도 덮는지 정리 목록에서 확인 |
+
+- 높음·중간은 없다.
+
+### 시험 경계
+
+- 구현 커밋 `32df9b52`·`714f8414`·`5c90986e`·`3199cd37`·`2fbbe2d4`·`92efe01b`는 `test/`·`test-int/`·`*.test.*`·`raw-http.ts`를 건드리지 않았다(파일 목록 대조).
+- 시험 커밋 `0c8d8b62`의 제품 코드 변경은 뼈대 셋뿐이다: `secret-compare.ts`(늘 false), ops `database-role.ts`(빈 함수), `partnerRoleCheckRequired`(늘 false). 동작이 없고 '실패 확인'에 적힌 대로다.
+
+### 합쳐도 되나
+
+합쳐도 된다. 새 지적 넷은 모두 낮음이라 막지 않고 정리 목록으로 넘긴다(N2는 검증·성능 담당이 한 번 본다). 통합 ops rls는 검증 때 다시 돌린다.
