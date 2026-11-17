@@ -173,3 +173,37 @@ cd D:/ticketpass-w9-fix1/services/purchase-svc && node_modules/.bin/vitest run -
 - `adapters/db/drizzle-event-refund-claims.ts`: `claimOrders`가 `claimedUntilMs`(= nowMs + 잡기 기한, 이미 계산하던 값)를 싣는다. `extend`는 던진다.
 - `adapters/memory-event-refund-store.ts`·`adapters/db/drizzle-event-refund-store.ts`: `updateLocked`는 던진다. `domain/event-refund.ts`: `mergePauses`는 던진다. `index.ts`: 상수 둘·`mergePauses` 내보내기.
 - 고친 기존 시험(통과 그대로): `test/event-refund-wave-review.test.ts`의 잡기 대역에 `claimedUntilMs`·`extend`(살아 있는 잡기로 답함).
+
+## 시험 이의
+
+구현 담당 `w9f1-impl`(claude-opus-5-5), 2026-11-17. 구현 커밋 `bd90ff6b`. 시험 파일은 고치지 않았다.
+
+**이의 1: `GAT-110 N3 잡기 늘리기는 잡기 값이 같고 기한 안일 때만 …`(통합 `test-int/event-refund.int.test.ts`)의 시험 준비가 정본 제약과 부딪힌다**
+
+- 지금 결과: 실패. `EventRefundActiveConflict: 같은 회차에 진행 중인 회차 취소 요청이 있습니다`(시험 939줄 `createRunning(r2, eventId, …)`).
+- 까닭: 시험 뒷부분('기한 정각이면 0행', 다른 요청 `r2`)이 첫 요청과 **같은 회차(`eventId`)**에 둘째 RUNNING 요청을 만든다. 첫 요청은 그때 아직 RUNNING이라 같은 회차의 진행 중 요청을 하나로 막는 유일 색인 `event_cancellation_active_key`(0016, docs/data.md `event_cancellation_request`)에 걸린다. 제품 동작이 아니라 시험 데이터의 결함이다(정본이 막는 상태를 시험이 만들려 함).
+- 그 줄 앞의 단언(잡기 기한 = 잡은 때 + 60,000ms, 다른 잡기 값 0행, 59,999ms에 늘리면 119,999ms이고 PENDING·UNKNOWN 행만 바뀜, 119,998ms 잡기 빈 목록, 풀린 잡기 0행)은 모두 통과했다.
+- 확인: `r2`의 표·요청만 새 회차(`randomUUID()`)로 바꾼 임시 사본으로 그 시험 하나를 돌려 통과했다(기한 정각 60,000ms면 undefined이고 행 그대로). 사본은 커밋하지 않고 지웠다.
+- 제안(시험 담당 몫): 939줄 앞에 `const eventId2 = randomUUID();`를 두고 `seedTickets(eventId2, 2, 'TOSS')`·`createRunning(r2, eventId2, …)`로 바꾼다. 단언은 그대로다.
+
+**정본 빈칸: 없음.** 구현에서 정한 것(정본과 어긋나지 않음, 리뷰에 알림)
+
+- N3 늘리기의 잠금: `DrizzleEventRefundClaims.extend`는 조건부 갱신 한 문장 앞에 잡기(`claimOrders`)와 같은 요청 행 잠금(`for no key update`)을 잡는다. 시계가 조금 다른 두 파드가 기한 경계에서 늘리기와 다시 잡기를 함께 하면 한 주문의 행을 나눠 갖거나 교착으로 한쪽이 끊길 수 있어서다. 그 잠금이 늘리기와 잡기를 한 줄로 세운다. 늘리기 판단은 여전히 한 문장의 조건부 갱신이다.
+- N3 위치: 늘리기는 대상 찾기(`target-not-found`는 결제사로 보내지 않음) 뒤, `canceller.cancel` 바로 앞이다. 0행 경고는 `event-refund-item-claim-lost`에 `stage: 'extend'`를 더했다.
+- N8: 수동 멈춤·재개가 잠근 값에서 끝난 요청(COMPLETED·REJECTED)을 보면 쓰지 않고 409(CONFLICT)다. 전에는 읽은 값으로 덮었다. 창 닫기·실행 끝도 끝난 요청은 쓰지 않는다. 결제사 없이 멈추면 잠근 값의 결제사 몫과 읽은 항목의 결제사를 합친 모든 결제사에 `MANUAL`을 더한다(쓸어 담기로 더해진 결제사도 빠지지 않게).
+- N8: 실행 끝의 '끝나지 않은 주문' 수(ADR-0280 결정 5)는 `updateLocked`의 `next`가 동기라 잠그기 전에 센다. 항목이 모두 끝났을 때만 센다(전에는 멈춤도 없을 때만 셈. 결과 상태는 같다).
+- 감독 메모의 `pausedOf`: `progress.perPg`가 없으면 멈춤 없음으로 보게 고쳤다(`perPg ?? []`). `#closeWindowNow`가 그런 행에서 던지지 않는다. `#run`의 `AUTO_REJECT_RATE` 갈래(`request.progress.perPg.map`)는 이번 범위가 아니라 그대로 두었다(정리 목록 후보).
+- 저장소의 `update`·`updateActive`는 지우지 않았다(N8 단위 시험이 감싸고 통합 시험이 직접 부른다). 서비스는 더 부르지 않는다.
+
+**돌린 것(구현 담당)**
+
+| 명령 | 결과 |
+| --- | --- |
+| `packages/shuffle` build 뒤 purchase-svc `node_modules/.bin/tsc --noEmit` | 오류 0 |
+| 뿌리 `node_modules/.bin/eslint`(바꾼 `src` 여덟 파일) | 오류 0 |
+| purchase-svc `node_modules/.bin/vitest run`(단위 전체) | 파일 129, 시험 4,128 모두 통과(새 단위 10 포함) |
+| 계획 §5 단위 명령(여섯 파일) | 104 모두 통과 |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0, 경고 4(기존 openapi 3·mermaid 건너뜀) |
+| 도커 잠금 2026-11-17 17:55~17:57 KST. 계획 §5 통합 명령(네 파일) | 시험 78: 통과 77, 실패 1(위 이의 1). `event-refund.int` 36/37, `event-cancel-r-t24.int`·`event-refund-grpc.int`·`relay-app.int` 모두 통과(새 통합 7 가운데 6 통과) |
+
+- 컨테이너: 시험이 띄운 PostgreSQL은 시험 도우미가 끝에 스스로 지웠다(돌리기 앞뒤 `docker ps -a`에 새 컨테이너 없음). 잠금 폴더·owner.txt는 지웠다.
