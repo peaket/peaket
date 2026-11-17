@@ -43,7 +43,7 @@ import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mer
 import { dbStatsDelta, deltaJudge, deltaSummary, gateOnlineCheck, gateSummary, hpaTimeline } from './runner/probes.mjs';
 import { sideTasks } from './runner/side.mjs';
 import { ADMIN_PORT, GW_NAMESPACE, PROXY_SELECTOR, STEP_OVERHEAD_S, SWEEP_LABEL, gwConsole } from './runner/gw.mjs';
-import { runGw } from './runner/gw-run.mjs';
+import { cleanupGw, gwCollectArgs, runGw } from './runner/gw-run.mjs';
 import { loadContract, token } from '../tools/local/e2e/gateway-client.mjs';
 import { parseAllDocuments } from 'yaml';
 import {
@@ -277,8 +277,13 @@ async function runCleanup() {
   }
   await kc(['-n', NS, 'delete', 'configmap', LOCK, '--ignore-not-found']);
   await sweepLeftovers();
-  // 게이트웨이 스윕이 남긴 임시 정책(이름표 peaket.io/sweep, BAT-056). 게이트웨이가 없는 클러스터면 건너뛴다
-  await kc(['-n', GW_NAMESPACE, 'delete', 'backendtrafficpolicies', '-l', `${SWEEP_LABEL}=true`, '--ignore-not-found']).catch(() => {});
+  // 게이트웨이 측정이 남긴 것(이름표 peaket.io/sweep 임시 정책, capacity가 되돌리지 못한 EnvoyProxy CPU 묶음 주석, BAT-056 R6).
+  // 게이트웨이가 없는 클러스터면 건너뛴다
+  try {
+    await cleanupGw({ kubectl: (args, o = {}) => kubectl(args, { quiet: true, timeout: 120_000, maxBuffer: 1 << 30, ...(o.input !== undefined ? { input: o.input } : {}) }), log });
+  } catch (e) {
+    log(`게이트웨이 몫 정리를 건너뛴다: ${String(e.message ?? e).split('\n')[0]}`);
+  }
   // 강제로 끝난 v1 실행이 남긴 진행 중 회차를 끝낸다(같은 무대의 다음 실행과 입장 제어를 나눠 쓰지 않게, 코드 리뷰 H1)
   let v1Up = false;
   try {
@@ -2162,42 +2167,21 @@ async function runGwCommand(a, runTag) {
     writeFileSync(join(dir, 'generator.json'), JSON.stringify(g, null, 2));
     return { summary, marks, retryAfterValues, generator: { valid: g.judge.valid, reasons: g.judge.reasons, dropped: g.dropped, cpuMeanPct: g.cpuMeanPctMax, cpuMaxPct: g.cpuMaxPctMax }, dir };
   };
+  // 장부 인자는 gw-run.mjs gwCollectArgs가 만든다(0건 판정은 --verdict·notes, 점검은 과부하 3ms 하나, 무효는 --invalid-reason, BAT-056 R1)
   const record = async (o) => {
     const dir = join(outDir, `step-${String(o.index + 1).padStart(2, '0')}`);
-    let checksFile;
-    if (o.checks) {
-      checksFile = join(dir, 'checks.json');
-      writeFileSync(checksFile, JSON.stringify(o.checks, null, 2));
-    }
+    const checksFile = join(dir, 'checks.json');
+    const { args, checks } = gwCollectArgs(o, {
+      mainS: a.mainS,
+      warmS: a.warmS,
+      summaryFile: join(dir, 'summary.json'),
+      infraFile: join(outDir, 'infra.txt'),
+      checksFile,
+      generator: `k6 1.4.2, 발생기 파드 ${pods.length}대(CPU ${a.cpus}·메모리 ${a.memoryMi}Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)`,
+    });
+    if (checks) writeFileSync(checksFile, JSON.stringify(checks, null, 2));
     step(`성능 장부(${o.runId})`);
-    execFileSync(
-      PYTHON,
-      [
-        '-I',
-        '-X',
-        'utf8',
-        ...collectArgs({
-          runId: o.runId,
-          kpi: o.kpi,
-          // Envoy Gateway는 최종 아키텍처(v1)의 게이트웨이다(docs/perf-ledger.md §4 local-gw)
-          version: 'v1',
-          profile: 'local-gw',
-          rps: o.rps,
-          durationS: a.mainS,
-          warmupS: a.warmS,
-          scenario: o.scenario,
-          summaryFile: join(dir, 'summary.json'),
-          infraFile: join(outDir, 'infra.txt'),
-          notes: o.notes,
-          start: new Date(o.marks.main_start - a.warmS * 1000).toISOString(),
-          end: new Date(o.marks.main_end).toISOString(),
-          ...(o.invalidReason ? { invalidReason: o.invalidReason } : {}),
-          ...(checksFile ? { checks: checksFile } : {}),
-          generator: `k6 1.4.2, 발생기 파드 ${pods.length}대(CPU ${a.cpus}·메모리 ${a.memoryMi}Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)`,
-        }),
-      ],
-      { cwd: REPO, stdio: 'inherit' },
-    );
+    execFileSync(PYTHON, ['-I', '-X', 'utf8', ...args], { cwd: REPO, stdio: 'inherit' });
   };
   try {
     step('네임스페이스, 실행 잠금');

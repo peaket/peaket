@@ -25,9 +25,11 @@ import {
   clusterName,
   conflictingPolicies,
   delayText,
+  combineMetrics,
   isOverload,
   judgeIpLimit,
   judgeSweepStep,
+  judgeSweepStreams,
   limitsLoaded,
   parseClusterLimits,
   parseClusterStats,
@@ -42,6 +44,7 @@ import {
   sweepChecks,
   sweepPolicy,
 } from './gw.mjs';
+import { collectArgs } from './results.mjs';
 
 /** 새 상한이 /clusters에 보이기를 기다리는 시간과 간격 [가정] */
 export const LOAD_WAIT_MS = 90_000;
@@ -216,6 +219,45 @@ export async function runGw(a, deps) {
   }
 }
 
+/** CPU 묶음의 원래 값을 남기는 EnvoyProxy 주석(docs/infra.md §4.1 '측정(V-T43)', 추천 적용 2026-11-18, BAT-056 R6) */
+export const RESTORE_ANNOTATION = 'peaket.io/sweep-restore';
+
+/**
+ * 그 게이트웨이의 EnvoyProxy 이름: Gateway의 infrastructure.parametersRef, 없으면 GatewayClass의 parametersRef(나머지 넷이 함께 쓰는 peaket-proxy)
+ */
+async function envoyProxyName(deps, gateway) {
+  const gwObj = JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'gateway', gateway, '-o', 'json']));
+  const own = gwObj?.spec?.infrastructure?.parametersRef;
+  if (own?.kind === 'EnvoyProxy' && own.name) return own.name;
+  const cls = gwObj?.spec?.gatewayClassName;
+  if (!cls) throw new Error(`${gateway}의 EnvoyProxy를 모른다(parametersRef·gatewayClassName이 없다)`);
+  const gc = JSON.parse(await deps.kubectl(['get', 'gatewayclass', cls, '-o', 'json']));
+  const ref = gc?.spec?.parametersRef;
+  if (ref?.kind !== 'EnvoyProxy' || !ref.name) throw new Error(`${gateway}의 GatewayClass ${cls}에 EnvoyProxy parametersRef가 없다`);
+  return ref.name;
+}
+
+/** EnvoyProxy 객체에서 CPU 요청·한도와 Envoy 일꾼 수(없으면 null) */
+export function proxyResources(obj) {
+  const spec = obj?.spec ?? {};
+  const res = spec.provider?.kubernetes?.envoyDeployment?.container?.resources ?? {};
+  return { envoyProxy: obj?.metadata?.name ?? null, cpuRequest: res.requests?.cpu ?? null, cpuLimit: res.limits?.cpu ?? null, concurrency: spec.concurrency ?? null };
+}
+
+/** 장부 notes에 넣을 프록시 자원 글 */
+export const proxyText = (p) => `프록시 EnvoyProxy ${p.envoyProxy} CPU 요청 ${p.cpuRequest ?? '(없음)'}·한도 ${p.cpuLimit ?? '(없음)'}, 일꾼 수 ${p.concurrency ?? '기본(CPU 수)'}`;
+
+/**
+ * 그 게이트웨이 EnvoyProxy를 읽어 { name, obj, proxy }. CPU 묶음 주석(RESTORE_ANNOTATION)이 남아 있으면(강제 종료로 되돌리지 못한 capacity) 재지 않고 멈춘다(R6)
+ */
+async function readProxy(deps, gateway) {
+  const name = await envoyProxyName(deps, gateway);
+  const obj = JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'envoyproxy', name, '-o', 'json']));
+  if (obj?.metadata?.annotations?.[RESTORE_ANNOTATION] !== undefined)
+    throw new Error(`EnvoyProxy ${name}에 CPU 묶음 주석 ${RESTORE_ANNOTATION}이 남아 있다(앞 capacity가 되돌리지 못하고 끝났다). node loadtest/run.mjs cleanup으로 되돌린 뒤 다시 돌린다`);
+  return { name, obj, proxy: proxyResources(obj) };
+}
+
 /** 재는 라우트의 규칙 묶음 이름(재는 흐름의 메서드·경로로 규칙을 찾는다) */
 function targetCluster(a, deps, target) {
   return clusterName(a.route, ruleIndexFor(deps.routeObject(a.route), target.method, pathOnly(target.path.replaceAll('{id}', 'x'))));
@@ -227,27 +269,47 @@ async function commonInputs(deps, streams) {
   return ips;
 }
 
+/** 요약에서 흐름마다의 값(못 읽은 흐름은 빠지고 까닭을 남긴다) */
+function metricsOf(summary, names, log) {
+  const out = {};
+  for (const n of names) {
+    try {
+      out[n] = streamMetrics(summary, n);
+    } catch (e) {
+      log(`  요약을 읽지 못함: ${e.message}`);
+    }
+  }
+  return out;
+}
+
+/** 장부 notes의 건수 글: 보낸 수와 상태별 수 */
+const countText = (m) => `보낸 ${m.sent}(2xx ${m.status['2xx']}·503 ${m.status['503']}·429 ${m.status['429']}·그 밖 ${m.status.other})`;
+
 async function sweep(a, deps, restores) {
   const streams = streamsFor(a);
-  const target = streams.find((s) => s.target);
+  const targets = streams.filter((s) => s.target);
+  const px0 = await readProxy(deps, a.gateway);
   // 같은 라우트를 겨눈 정책이 있으면 임시 정책이 버려지거나 운영 정책이 빠진다(그 라우트로는 재지 않는다)
   const items = JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'backendtrafficpolicies', '-o', 'json'])).items ?? [];
   const conflicts = conflictingPolicies(items, a.route);
   if (conflicts.length) throw new Error(`${a.route}를 겨눈 정책이 이미 있다(${conflicts.join(', ')}). 임시 정책과 부딪혀 스윕 값이 실리지 않는다`);
-  const cluster = targetCluster(a, deps, target);
+  const clusters = [...new Set(targets.map((t) => targetCluster(a, deps, t)))];
+  if (clusters.length !== 1) throw new Error(`재는 흐름들(${targets.map((t) => t.name).join('·')})이 서로 다른 규칙 묶음(${clusters.join(', ')})에 있다`);
+  const cluster = clusters[0];
   const pods = await proxyPods(deps, a.gateway);
   const serviceIps = await commonInputs(deps, streams);
   restores.push(() => deps.kubectl([...SWEEP_DELETE_ARGS]));
-  const result = { command: 'gw sweep', gateway: a.gateway, route: a.route, cluster, proxyPods: pods, rate: a.rate, mix: a.mix, delay: delayText(a.delay), warmS: a.warmS, mainS: a.mainS, steps: [] };
+  const result = { command: 'gw sweep', gateway: a.gateway, route: a.route, cluster, targets: targets.map((t) => t.name), proxyPods: pods, proxy: px0.proxy, rate: a.rate, mix: a.mix, delay: delayText(a.delay), warmS: a.warmS, mainS: a.mainS, steps: [] };
   const save = () => deps.save('sweep.json', result);
   for (const step of a.steps) {
     stopIfAborted(deps);
     const label = `p${step.maxParallelRequests}-q${step.maxPendingRequests}-c${step.maxConnections}-r${step.repeat}`;
     deps.log(`단계 ${step.index + 1}/${a.steps.length}: 동시 ${step.maxParallelRequests}·보류 ${step.maxPendingRequests}·연결 ${step.maxConnections}, 도착률 ${step.rate}/s, 지연 ${delayText(step.delay)}`);
-    const base = { step: step.index, maxConnections: step.maxConnections, maxParallelRequests: step.maxParallelRequests, maxPendingRequests: step.maxPendingRequests, rate: step.rate, delay: delayText(step.delay), mix: step.mix, repeat: step.repeat };
+    const proxy = (await readProxy(deps, a.gateway)).proxy;
+    const base = { step: step.index, maxConnections: step.maxConnections, maxParallelRequests: step.maxParallelRequests, maxPendingRequests: step.maxPendingRequests, rate: step.rate, delay: delayText(step.delay), mix: step.mix, repeat: step.repeat, proxy };
     await deps.kubectl(['apply', '-f', '-'], { input: JSON.stringify(sweepPolicy({ route: a.route, ...step })) });
     const w = await waitLimits(deps, pods, cluster, step);
-    const overload = isOverload(step, rateOf(target, step.rate));
+    const overload = isOverload(step);
     if (!w.loaded) {
       const j = judgeSweepStep({ step, overload, limitsLoaded: false });
       result.steps.push({ ...base, overload, sent: 0, valid: false, invalid_reason: j.invalid_reason, verdict: j.verdict, item: j.item, reasons: j.reasons, clustersSeen: w.last ?? null });
@@ -266,35 +328,39 @@ async function sweep(a, deps, restores) {
     } catch (e) {
       statsError = [e.message, ...r.errors].join('; ');
     }
-    let m = null;
-    try {
-      m = streamMetrics(r.load.summary, target.name);
-    } catch (e) {
-      // m이 없으면 판정이 '보낸 요청 0건'으로 무효다
-      deps.log(`  요약을 읽지 못함: ${e.message}`);
+    // 보낸 흐름 모두(도착률이 0이라 보내지 않은 흐름은 빠진다)의 값. 재는 흐름은 targetNames
+    const sentNames = input.streams.map((s) => s.name);
+    const ms = metricsOf(r.load.summary, sentNames, deps.log);
+    const targetNames = targets.map((t) => t.name).filter((n) => sentNames.includes(n));
+    const accessLogs = {};
+    if (overload) {
+      try {
+        const lines = await deps.readAccessLog(a.gateway, Math.ceil((deps.now() - marks.main_start) / 1000) + 30);
+        for (const t of targets) accessLogs[t.name] = accessLogDurations(lines, { fromMs: marks.main_start, toMs: marks.main_end, status: '503', pathRe: pathPattern(t.path) });
+      } catch (e) {
+        deps.log(`  접근 로그를 읽지 못함: ${e.message}`);
+      }
     }
-    let accessLog = null;
-    try {
-      const lines = await deps.readAccessLog(a.gateway, Math.ceil((deps.now() - marks.main_start) / 1000) + 30);
-      accessLog = accessLogDurations(lines, { fromMs: marks.main_start, toMs: marks.main_end, status: '503', pathRe: pathPattern(target.path) });
-    } catch (e) {
-      deps.log(`  접근 로그를 읽지 못함: ${e.message}`);
-    }
-    const j = judgeSweepStep({ step, overload, limitsLoaded: true, statsError, stats, m, generator: r.load.generator, accessLog });
+    const j = judgeSweepStreams({ step, overload, limitsLoaded: true, statsError, stats, streams: ms, targets: targetNames, generator: r.load.generator, accessLogs });
+    const tm = targetNames.length && targetNames.every((n) => ms[n]) ? combineMetrics(targetNames.map((n) => ms[n])) : null;
+    const all = Object.keys(ms).length ? combineMetrics(Object.values(ms)) : null;
+    const m1 = targetNames.length === 1 ? tm : null;
     const ra = r.load.retryAfterValues ?? {};
     const row = {
       ...base,
       overload,
-      sent: m?.sent ?? 0,
-      status: m?.status ?? null,
+      targets: targetNames,
+      sent: tm?.sent ?? 0,
+      status: tm?.status ?? null,
+      streams: Object.fromEntries(Object.entries(ms).map(([n, v]) => [n, { sent: v.sent, status: v.status, latency503: v.latency['503'], retryAfter503: v.retryAfter['503'], problem503: v.problem['503'] }])),
       overflow: stats?.overflow ?? null,
       rqActiveMax: stats?.rqActiveMax ?? null,
       rqPendingActiveMax: stats?.rqPendingActiveMax ?? null,
-      latency: m ? { '2xx': m.latency['2xx'], 503: m.latency['503'] } : null,
-      retryAfter: m ? { present: m.retryAfter['503'].num + m.retryAfter['503'].nonnum, missing: m.retryAfter['503'].missing, nonNumeric: m.retryAfter['503'].nonnum, values: [...(ra['503'] ?? [])].sort() } : null,
-      problemOk: m?.problem['503'].ok ?? null,
-      problemBad: m?.problem['503'].bad ?? null,
-      accessLog503: accessLog,
+      latency: m1 ? { '2xx': m1.latency['2xx'], 503: m1.latency['503'] } : null,
+      retryAfter: tm ? { present: tm.retryAfter['503'].num + tm.retryAfter['503'].nonnum, missing: tm.retryAfter['503'].missing, nonNumeric: tm.retryAfter['503'].nonnum, values: [...(ra['503'] ?? [])].sort() } : null,
+      problemOk: tm?.problem['503'].ok ?? null,
+      problemBad: tm?.problem['503'].bad ?? null,
+      accessLog503: overload ? accessLogs : null,
       generator: { cpuMeanPct: r.load.generator?.cpuMeanPct ?? null, cpuMaxPct: r.load.generator?.cpuMaxPct ?? null, dropped_iterations: r.load.generator?.dropped ?? null },
       valid: j.valid,
       invalid_reason: j.invalid_reason,
@@ -306,16 +372,25 @@ async function sweep(a, deps, restores) {
     result.steps.push(row);
     save();
     deps.log(`  ${j.item} ${j.verdict}${j.reasons.length ? `: ${j.reasons.join('; ')}` : ''}`);
-    if (a.record && m) {
+    if (a.record && all) {
       await deps.record({
         index: step.index,
         runId: runIdOf(a.runIdPrefix, 'sweep', `${String(step.index + 1).padStart(2, '0')}-${label}`),
         kpi: 'NFR-001',
         rps: step.rate,
         scenario: `loadtest/scenarios/gw.js gw sweep ${a.gateway}/${a.route} maxConnections=${step.maxConnections} maxParallelRequests=${step.maxParallelRequests} maxPendingRequests=${step.maxPendingRequests} delay=${delayText(step.delay)} rate=${step.rate}/s mix=${step.mix}`,
-        notes: notesOf([`게이트웨이 차단 상한 스윕(local-gw, V-T43, docs/infra.md §4.1): ${j.item} ${j.verdict}${j.reasons.length ? `(${j.reasons.join('; ')})` : ''}`, `프록시 ${a.gateway} 파드 ${pods.length}개`, `묶음 ${cluster}`, stats ? `넘침 ${stats.overflowTotal}, 처리 중 최대 ${stats.rqActiveMax}, 보류 최대 ${stats.rqPendingActiveMax}` : null]),
-        checks: sweepChecks(target.name, overload, m),
-        ...(j.valid ? {} : { invalidReason: j.invalid_reason }),
+        notes: notesOf([
+          `게이트웨이 차단 상한 스윕(local-gw, V-T43, docs/infra.md §4.1): ${j.item} ${j.verdict}${j.reasons.length ? `(${j.reasons.join('; ')})` : ''}`,
+          `흐름 모두 ${countText(all)}`,
+          ...Object.entries(ms).map(([n, v]) => `${n} ${countText(v)}`),
+          overload ? null : `정상 부하 503 ${all.status['503']}건(세 흐름 합, 허용 0건)`,
+          `프록시 ${a.gateway} 파드 ${pods.length}개, ${proxyText(proxy)}`,
+          `묶음 ${cluster}`,
+          stats ? `넘침 ${stats.overflowTotal}, 처리 중 최대 ${stats.rqActiveMax}, 보류 최대 ${stats.rqPendingActiveMax}` : null,
+        ]),
+        // 0건 목표는 판정으로, 점검은 과부하의 3ms 하나(재는 흐름마다)뿐이다(R1). 무효 단계는 점검을 넘기지 않는다
+        checks: j.valid ? { checks: targetNames.flatMap((n) => (ms[n] ? sweepChecks(n, overload, ms[n]).checks : [])) } : { checks: [] },
+        ...(j.valid ? { verdict: j.verdict } : { invalidReason: j.invalid_reason }),
         marks,
       });
     }
@@ -338,6 +413,18 @@ export function envoyProxyPatches(original, cpus) {
   return { bind, restore };
 }
 
+/** 주석에 남길 원래 값(일꾼 수·자원, 없으면 null) */
+const restoreRecord = (obj) => {
+  const spec = obj?.spec ?? {};
+  return { concurrency: spec.concurrency ?? null, resources: spec.provider?.kubernetes?.envoyDeployment?.container?.resources ?? null };
+};
+/** 주석의 값에서 되돌리는 병합 패치 */
+const restoreFromRecord = (rec) => {
+  const spec = { provider: { kubernetes: { envoyDeployment: { container: rec?.resources ? { resources: rec.resources } : {} } } } };
+  if (rec?.concurrency !== null && rec?.concurrency !== undefined) spec.concurrency = rec.concurrency;
+  return envoyProxyPatches({ spec }, 1).restore;
+};
+
 /** EnvoyProxy를 고친 뒤 컨트롤러가 프록시 Deployment를 고칠 시간 [가정] */
 export const PATCH_SETTLE_MS = 10_000;
 
@@ -351,13 +438,13 @@ async function rollout(deps, gateway) {
 async function capacity(a, deps, restores) {
   const streams = streamsFor({ ...a, mix: 'single' });
   const target = streams[0];
-  const gwObj = JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'gateway', a.gateway, '-o', 'json']));
-  const ep = gwObj?.spec?.infrastructure?.parametersRef?.name;
-  if (!ep) throw new Error(`${a.gateway}의 EnvoyProxy(infrastructure.parametersRef)를 모른다`);
-  const original = JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'envoyproxy', ep, '-o', 'json']));
+  const { name: ep, obj: original } = await readProxy(deps, a.gateway);
   const { bind, restore } = envoyProxyPatches(original, a.proxyCpus);
+  // 강제 종료로 아래 되돌리기를 건너뛰어도 cleanup이 되돌리게 원래 값을 주석에 먼저 남긴다(R6)
+  await deps.kubectl(['-n', GW_NAMESPACE, 'annotate', 'envoyproxy', ep, `${RESTORE_ANNOTATION}=${JSON.stringify(restoreRecord(original))}`, '--overwrite']);
   restores.push(async () => {
     await deps.kubectl(['-n', GW_NAMESPACE, 'patch', 'envoyproxy', ep, '--type', 'merge', '-p', JSON.stringify(restore)]);
+    await deps.kubectl(['-n', GW_NAMESPACE, 'annotate', 'envoyproxy', ep, `${RESTORE_ANNOTATION}-`]);
     await rollout(deps, a.gateway);
   });
   deps.log(`프록시 ${a.gateway}(EnvoyProxy ${ep})를 CPU ${a.proxyCpus}·일꾼 ${bind.spec.concurrency}로 묶는다`);
@@ -370,6 +457,7 @@ async function capacity(a, deps, restores) {
   for (const [i, rate] of a.rates.entries()) {
     stopIfAborted(deps);
     deps.log(`단계 ${i + 1}/${a.rates.length}: 도착률 ${rate}/s, 지연 ${delayText(a.delay)}`);
+    const proxy = proxyResources(JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'envoyproxy', ep, '-o', 'json'])));
     const input = scenarioInput({ ...deps.inputBase, streams, rate, delay: a.delay, serviceIps, memoryMi: a.memoryMi, generators: a.generators });
     const r = await loadWithSamples(deps, pods, null, { index: i, label: `r${rate}`, input, rate, warmS: a.warmS, mainS: a.mainS }, { cpu: true });
     stopIfAborted(deps);
@@ -393,7 +481,7 @@ async function capacity(a, deps, restores) {
     if (!g.valid) reasons.push(`발생기 무효: ${(g.reasons ?? []).join('; ')}`);
     if (m && !(m.sent > 0)) reasons.push('보낸 요청 0건');
     const valid = reasons.length === 0;
-    const row = { step: i, rate, sent: m?.sent ?? 0, status: m?.status ?? null, latency: m ? { '2xx': m.latency['2xx'], 503: m.latency['503'] } : null, p99Ms: m?.latency['2xx'].p99 ?? null, proxyCpuPct: cpuPct, generator: { cpuMeanPct: g.cpuMeanPct ?? null, dropped_iterations: g.dropped ?? null }, valid, invalid_reason: valid ? null : reasons.join('; '), marks };
+    const row = { step: i, rate, proxy, sent: m?.sent ?? 0, status: m?.status ?? null, latency: m ? { '2xx': m.latency['2xx'], 503: m.latency['503'] } : null, p99Ms: m?.latency['2xx'].p99 ?? null, proxyCpuPct: cpuPct, generator: { cpuMeanPct: g.cpuMeanPct ?? null, dropped_iterations: g.dropped ?? null }, valid, invalid_reason: valid ? null : reasons.join('; '), marks };
     result.steps.push(row);
     result.saturation = saturation(result.steps, a.proxyCpus, a.delay.ms);
     save();
@@ -405,8 +493,8 @@ async function capacity(a, deps, restores) {
         kpi: 'NFR-001',
         rps: rate,
         scenario: `loadtest/scenarios/gw.js gw capacity ${a.gateway}/${a.route} proxyCpus=${a.proxyCpus} concurrency=${bind.spec.concurrency} delay=${delayText(a.delay)} rate=${rate}/s`,
-        notes: notesOf([`게이트웨이 프록시 포화 처리량(local-gw, V-T43 '값의 식'의 파드 포화 처리량, 계획 docs/review/plans/BAT-056.md §5 M1)`, `프록시 ${a.gateway} 파드 ${pods.length}개 CPU ${a.proxyCpus}·일꾼 ${bind.spec.concurrency}`, `프록시 CPU ${cpuPct}%`]),
-        ...(valid ? {} : { invalidReason: row.invalid_reason }),
+        notes: notesOf([`게이트웨이 프록시 포화 처리량(local-gw, V-T43 '값의 식'의 파드 포화 처리량, 계획 docs/review/plans/BAT-056.md §5 M1)`, countText(m), `프록시 ${a.gateway} 파드 ${pods.length}개, ${proxyText(proxy)}`, `프록시 CPU 사용 ${cpuPct}%`]),
+        ...(valid ? { verdict: 'baseline' } : { invalidReason: row.invalid_reason }),
         marks,
       });
     }
@@ -417,6 +505,7 @@ async function capacity(a, deps, restores) {
 
 async function ipLimit(a, deps) {
   const streams = streamsFor(a);
+  const { proxy } = await readProxy(deps, 'gw-fan');
   const pods = await proxyPods(deps, 'gw-fan');
   const serviceIps = await commonInputs(deps, streams);
   const input = scenarioInput({ ...deps.inputBase, streams, rate: a.rate, delay: { kind: 'normal' }, serviceIps, memoryMi: a.memoryMi, generators: a.generators });
@@ -438,6 +527,7 @@ async function ipLimit(a, deps) {
     command: 'gw ip-limit',
     case: a.case,
     replicas: pods.length,
+    proxy,
     warmS: a.warmS,
     mainS: a.mainS,
     streams: Object.fromEntries(Object.entries(ms).map(([k, v]) => [k, { sent: v.sent, status: v.status, retryAfter429: v.retryAfter['429'], problem429: v.problem['429'], latency429: v.latency['429'] }])),
@@ -460,10 +550,78 @@ async function ipLimit(a, deps) {
       kpi: 'NFR-028',
       rps: a.rate + (a.singleRate ?? 0),
       scenario: `loadtest/scenarios/gw.js gw ip-limit case=${a.case} ${streams.map((s) => `${s.name}=${rateOf(s, a.rate)}/s`).join(' ')}`,
-      notes: notesOf([`검색 IP 한도(local-gw, SR-T13 ②, docs/features/search.md §12 '측정 판정'): ${j.verdict}${j.reasons.length ? `(${j.reasons.join('; ')})` : ''}`, `프록시 gw-fan 복제 ${pods.length}`, j.cap ? `한 IP 통과 상한 ${j.cap}` : null]),
-      ...(j.valid ? {} : { invalidReason: j.invalid_reason }),
+      notes: notesOf([
+        `검색 IP 한도(local-gw, SR-T13 ②, docs/features/search.md §12 '측정 판정'): ${j.verdict}${j.reasons.length ? `(${j.reasons.join('; ')})` : ''}`,
+        ...Object.entries(ms).map(([n, v]) => `${n} ${countText(v)}`),
+        `프록시 gw-fan 복제 ${pods.length}, ${proxyText(proxy)}`,
+        j.cap ? `한 IP 통과 상한 ${j.cap}` : null,
+      ]),
+      // 관찰(v6-64)은 판정 없이 baseline으로 남긴다
+      ...(j.valid ? { verdict: j.verdict === 'pass' || j.verdict === 'fail' ? j.verdict : 'baseline' } : { invalidReason: j.invalid_reason }),
       marks: load.marks,
     });
   }
   return { exitCode: 0, result };
+}
+
+/**
+ * 성능 장부로 옮기는 collect.py 인자(docs/perf-ledger.md §2.2 checks, 추천 적용 2026-11-18, BAT-056 R1). o는 runGw가 deps.record에 넘긴 값,
+ * ctx = { mainS, warmS, summaryFile, infraFile, checksFile, generator }. 돌려주는 꼴: { args(첫 원소 'tools/perf-ledger/collect.py'), checks(ctx.checksFile에 쓸 JSON, 없으면 null) }.
+ * - 무효(o.invalidReason): --invalid-reason만 주고 --verdict·--checks는 주지 않는다
+ * - 점검이 있으면(과부하의 503 p99 3ms): --checks를 준다. 판정이 pass면 --verdict를 주지 않아 장부가 점검에서 판정을 정하고(시행 수가 최소 시행 수 미달이면 비움),
+ *   fail이면 --verdict fail(Retry-After·Problem 빠짐 같은 점검 밖의 까닭)
+ * - 점검이 없으면 --verdict <o.verdict>(pass·fail·baseline, 없으면 baseline)
+ */
+export function gwCollectArgs(o, ctx) {
+  const checks = !o.invalidReason && o.checks?.checks?.length ? { checks: o.checks.checks } : null;
+  const args = collectArgs({
+    runId: o.runId,
+    kpi: o.kpi,
+    // Envoy Gateway는 최종 아키텍처(v1)의 게이트웨이다(docs/perf-ledger.md §4 local-gw)
+    version: 'v1',
+    profile: 'local-gw',
+    rps: o.rps,
+    durationS: ctx.mainS,
+    warmupS: ctx.warmS,
+    scenario: o.scenario,
+    summaryFile: ctx.summaryFile,
+    infraFile: ctx.infraFile,
+    notes: o.notes,
+    start: new Date(o.marks.main_start - ctx.warmS * 1000).toISOString(),
+    end: new Date(o.marks.main_end).toISOString(),
+    ...(o.invalidReason ? { invalidReason: o.invalidReason } : {}),
+    ...(checks ? { checks: ctx.checksFile } : {}),
+    ...(ctx.generator ? { generator: ctx.generator } : {}),
+  });
+  // collectArgs는 늘 --verdict baseline을 넣는다. 위 규칙대로 바꾼다
+  const v = args.indexOf('--verdict');
+  if (v >= 0) args.splice(v, 2);
+  if (!o.invalidReason) {
+    const verdict = checks && o.verdict === 'pass' ? null : (o.verdict ?? 'baseline');
+    if (verdict !== null) args.push('--verdict', verdict);
+  }
+  return { args, checks };
+}
+
+/**
+ * node loadtest/run.mjs cleanup의 게이트웨이 몫(R6): 이름표 peaket.io/sweep 임시 정책을 지우고, CPU 묶음 주석(RESTORE_ANNOTATION)이 남은 EnvoyProxy를
+ * 주석의 값으로 되돌린 뒤 주석을 지운다. 주석 없는 EnvoyProxy는 건드리지 않는다. deps는 runGw의 꼴(kubectl·log)
+ */
+export async function cleanupGw(deps) {
+  await deps.kubectl([...SWEEP_DELETE_ARGS]);
+  const items = JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'envoyproxies', '-o', 'json'])).items ?? [];
+  for (const ep of items) {
+    const raw = ep?.metadata?.annotations?.[RESTORE_ANNOTATION];
+    if (raw === undefined) continue;
+    const name = ep.metadata.name;
+    let rec;
+    try {
+      rec = JSON.parse(raw);
+    } catch {
+      throw new Error(`EnvoyProxy ${name}의 주석 ${RESTORE_ANNOTATION}을 읽지 못했다: ${String(raw).slice(0, 200)}`);
+    }
+    await deps.kubectl(['-n', GW_NAMESPACE, 'patch', 'envoyproxy', name, '--type', 'merge', '-p', JSON.stringify(restoreFromRecord(rec))]);
+    await deps.kubectl(['-n', GW_NAMESPACE, 'annotate', 'envoyproxy', name, `${RESTORE_ANNOTATION}-`]);
+    deps.log?.(`EnvoyProxy ${name}를 주석의 원래 값(일꾼 수 ${rec?.concurrency ?? '기본'}, 자원 ${JSON.stringify(rec?.resources ?? null)})으로 되돌렸다`);
+  }
 }

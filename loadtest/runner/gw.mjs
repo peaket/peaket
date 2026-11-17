@@ -213,6 +213,15 @@ export function parseGwArgs(argv) {
     if (!routeOf) fail(`--gateway ${gateway} --route ${route}로 보낼 요청 흐름이 없다(아는 짝: ${Object.values(STREAMS).map((s) => `${s.gateway} ${s.route}`).join(', ')})`);
     const a = { ...common, gateway, route, rate, mix, delay, maxParallel, maxPending, pendingDefault, maxConnections, repeat };
     const steps = expandSweepSteps(a);
+    // 과부하 꼴(고정 지연)인데 재는 흐름들의 도착률 × 지연이 동시 상한 이하이면 과부하가 아니다(R8, docs/infra.md §4.1 '측정(V-T43)'). 정수로 견준다
+    if (delay.kind === 'fixed') {
+      const targetRate = streamsFor(a)
+        .filter((s) => s.target)
+        .reduce((s, x) => s + rateOf(x, rate), 0);
+      for (const st of steps)
+        if (targetRate * delay.ms <= st.maxParallelRequests * 1000)
+          fail(`과부하 단계(--delay fixed:${delay.ms})인데 도착률 ${targetRate}/s × ${delay.ms}ms = 평균 동시 ${(targetRate * delay.ms) / 1000}가 동시 상한 ${st.maxParallelRequests} 이하다(과부하가 아니다)`);
+    }
     checkLength(steps.length);
     const peak = streamsFor(a).reduce((s, x) => s + rateOf(x, rate), 0);
     return { ...a, generators: gens(peak), steps };
@@ -504,18 +513,51 @@ export function streamMetrics(summary, stream) {
 }
 
 /**
- * 과부하 단계인가: 평균 동시 요청 수(도착률 × 평균 지연)가 동시 + 보류 상한을 넘으면 과부하다(그 단계는 V-T43 ②를, 아니면 ①을 판정한다)
+ * 과부하 단계인가: 계산으로 가르지 않고 부하 꼴로 정한다(docs/infra.md §4.1 '측정(V-T43)', 추천 적용 2026-11-18, BAT-056 R8).
+ * 지연이 정본 분포(normal)면 정상 부하(①), 재는 흐름의 지연을 고정 값(fixed:<ms>)으로 바꾼 단계면 과부하(②)다
  */
-export function isOverload(step, streamRate) {
-  return (streamRate * meanDelayMs(step.delay)) / 1000 > step.maxParallelRequests + step.maxPendingRequests;
+export function isOverload(step) {
+  return step?.delay?.kind === 'fixed';
+}
+
+/**
+ * 여러 흐름의 streamMetrics 결과를 합친 하나(상태별 수·Retry-After·Problem·overFast는 더한다. 응답 시간은 합칠 수 없어 흐름이 하나일 때만 그대로다)
+ * @param {Array<ReturnType<typeof streamMetrics>>} list
+ */
+export function combineMetrics(list) {
+  const ms = (list ?? []).filter(Boolean);
+  if (ms.length === 1) return ms[0];
+  const add = (get) => ms.reduce((s, m) => s + (get(m) ?? 0), 0);
+  const nullTrend = { p50: null, p99: null, max: null };
+  return {
+    sent: add((m) => m.sent),
+    status: Object.fromEntries(['2xx', '503', '429', 'other'].map((c) => [c, add((m) => m.status[c])])),
+    latency: { '2xx': nullTrend, 503: nullTrend, 429: nullTrend },
+    overFast: add((m) => m.overFast),
+    retryAfter: Object.fromEntries(['503', '429'].map((c) => [c, Object.fromEntries(['num', 'missing', 'nonnum'].map((k) => [k, add((m) => m.retryAfter[c][k])]))])),
+    problem: Object.fromEntries(['503', '429'].map((c) => [c, { ok: add((m) => m.problem[c].ok), bad: add((m) => m.problem[c].bad) }])),
+  };
+}
+
+/**
+ * 2xx와 그 상태(503 또는 429) 밖의 응답이 있으면 그 글, 없으면 null(docs/infra.md §4.1 '측정(V-T43)' R2, docs/features/search.md SR-T13 ②).
+ * 밖의 응답이 없다는 것은 그 밖(other)이 0이고 2xx + 그 상태 = 보낸 수라는 뜻이다
+ */
+export function outsideResponses(m, expected) {
+  const n = m.sent - m.status['2xx'] - m.status[expected];
+  if (n === 0 && m.status.other === 0) return null;
+  const parts = ['503', '429'].filter((c) => c !== expected && m.status[c] > 0).map((c) => `${c} ${m.status[c]}`);
+  if (m.status.other > 0) parts.push(`그 밖(401·403·404·연결 실패·시간 넘김 등) ${m.status.other}`);
+  return `2xx·${expected} 밖의 응답 ${Math.max(n, m.status.other)}건(${parts.join(', ') || '보낸 수와 상태별 수가 맞지 않음'})`;
 }
 
 /**
  * 스윕 단계 하나의 판정(정본 docs/infra.md §4.1 '측정(V-T43)'). 입력:
  *   { step, overload, limitsLoaded, statsError?(통계를 못 읽은 까닭), stats?(statsWindow 결과), m?(streamMetrics 결과),
- *     generator: { valid, reasons, dropped }, accessLog?(accessLogDurations 결과 또는 null) }
+ *     mAll?(보낸 흐름 모두를 합친 것, 그 밖 응답(R2)을 m과 함께 본다), generator: { valid, reasons, dropped }, accessLog?(accessLogDurations 결과 또는 null) }
  * 돌려주는 꼴: { item: 'V-T43 ①'|'V-T43 ②', verdict: 'pass'|'fail'|'invalid', valid, invalid_reason, reasons: string[] }
- * - 무효(통과로 세지 않음): 상한이 실리지 않음, 통계를 못 읽음, 보낸 수 0, dropped_iterations ≥ 1, 발생기 판정 무효, 과부하인데 503 0건,
+ * - 무효(통과로 세지 않음): 상한이 실리지 않음, 통계를 못 읽음, 보낸 수 0, dropped_iterations ≥ 1, 발생기 판정 무효,
+ *   2xx·503 밖의 응답이 한 건이라도 있음(R2: 상한에 닿기 전에 다른 까닭으로 막힘), 과부하인데 503 0건,
  *   발생기 503 p99만 FAST_FAIL_MS를 넘고 접근 로그 p99는 안 넘음('측정 지점 의심')
  * - 실패: (공통) 503 하나라도 Retry-After가 없거나 숫자가 아님, 503 Problem 본문이 틀림, 처리 중 최대 > 동시 상한.
  *   (정상 부하 ①) 발생기 503이 1건 이상이거나 Envoy 넘침이 1 이상. (과부하 ②) 503 p99 > FAST_FAIL_MS
@@ -531,6 +573,10 @@ export function judgeSweepStep(o) {
   if (!Number.isSafeInteger(dropped)) return invalid('발생기 dropped_iterations를 모름');
   if (dropped >= 1) return invalid(`발생기가 반복을 시작하지 못함(dropped_iterations ${dropped})`);
   if (!o.generator?.valid) return invalid(`발생기 무효: ${(o.generator?.reasons ?? []).join('; ') || '까닭 모름'}`);
+  for (const x of o.mAll && o.mAll !== m ? [m, o.mAll] : [m]) {
+    const out = outsideResponses(x, '503');
+    if (out) return invalid(out);
+  }
   const n503 = m.status['503'];
   if (o.overload && n503 === 0) return invalid('과부하인데 503 0건');
   const p99 = m.latency['503'].p99;
@@ -556,23 +602,41 @@ export function judgeSweepStep(o) {
 }
 
 /**
- * 성능 장부 점검(collect.py --checks, docs/perf-ledger.md §2.2 checks). 판정과 같은 값을 쓴다:
- * - 정상 부하(①): <흐름>_503(허용 0, 시행 보낸 수, 어김 503 수)
- * - 과부하(②): <흐름>_503_p99_3ms(허용 0.01, 시행 503 수, 어김 FAST_FAIL_MS 넘은 503 수)
- * - 공통(503이 있을 때): <흐름>_503_retry_after(허용 0, 시행 503 수, 어김 없음+숫자 아님), <흐름>_503_problem(허용 0, 시행 503 수, 어김 틀린 본문)
+ * 흐름 여럿을 보낸 단계의 판정(docs/infra.md §4.1 '측정(V-T43)', 추천 적용 2026-11-18, BAT-056 R7·R2).
+ * - 정상 부하(①): 보낸 흐름 모두를 합쳐 판정한다(503 0건은 세 흐름 합). 재는 흐름 가운데 보낸 수 0인 것이 있으면 무효
+ * - 과부하(②): 재는 흐름(targets)마다 판정해 하나라도 무효면 그 무효, 아니면 하나라도 실패면 실패(흐름이 둘 이상이면 까닭 앞에 흐름 이름)
+ * - 2xx·503 밖의 응답은 보낸 흐름 모두에서 본다(R2)
+ * 입력: { step, overload, limitsLoaded, statsError?, stats?, streams: { <흐름>: streamMetrics 결과 }, targets: string[], generator, accessLogs?: { <흐름>: accessLogDurations 결과 } }
+ */
+export function judgeSweepStreams(o) {
+  const names = Object.keys(o.streams ?? {});
+  const all = names.length ? combineMetrics(names.map((n) => o.streams[n])) : null;
+  const base = { step: o.step, overload: o.overload, limitsLoaded: o.limitsLoaded, statsError: o.statsError, stats: o.stats, generator: o.generator };
+  const targets = o.targets ?? [];
+  const missing = targets.filter((n) => !o.streams?.[n]);
+  if (missing.length || !all) return judgeSweepStep({ ...base, m: null });
+  const zero = targets.find((n) => !(o.streams[n].sent > 0));
+  if (zero) return judgeSweepStep({ ...base, m: o.streams[zero] });
+  if (!o.overload) return judgeSweepStep({ ...base, m: all, mAll: all, accessLog: null });
+  const js = targets.map((n) => [n, judgeSweepStep({ ...base, m: o.streams[n], mAll: all, accessLog: o.accessLogs?.[n] ?? null })]);
+  const bad = js.find(([, j]) => !j.valid);
+  if (bad) return bad[1];
+  const many = js.length > 1;
+  const reasons = [...new Set(js.flatMap(([n, j]) => j.reasons.map((r) => (many && !r.startsWith('처리 중 최대') ? `${n}: ${r}` : r))))];
+  return { item: 'V-T43 ②', verdict: reasons.length ? 'fail' : 'pass', valid: true, invalid_reason: null, reasons };
+}
+
+/**
+ * 성능 장부 점검(collect.py --checks, docs/perf-ledger.md §2.2 checks, 추천 적용 2026-11-18, BAT-056 R1).
+ * '0건' 목표(정상 부하 503, 503의 Retry-After·Problem 빠짐)는 장부 도구가 받는 꼴(0 < allowed < 1, 시행 수 ≥ 1)이 아니라 점검으로 넣지 않고
+ * 판정(--verdict)과 notes로 넘긴다. 점검은 과부하의 '503 응답 시간 p99 ≤ 3ms' 하나(<흐름>_503_p99_3ms, allowed 0.01, 시행 수 503 수,
+ * 어김 FAST_FAIL_MS 넘은 503 수)이고 503이 0건이면 만들지 않는다
  * @returns {{ checks: Array<{ name: string, allowed: number, trials: number, violations: number, target: string }> }}
  */
 export function sweepChecks(stream, overload, m) {
-  const n503 = m.status['503'];
-  const checks = [];
-  if (!overload) checks.push({ name: `${stream}_503`, allowed: 0, trials: m.sent, violations: n503, target: `${stream} 정상 부하 503 0건(V-T43 ①)` });
-  else checks.push({ name: `${stream}_503_p99_${FAST_FAIL_MS}ms`, allowed: 0.01, trials: n503, violations: Math.min(n503, m.overFast), target: `${stream} 게이트웨이 503 p99 ≤ ${FAST_FAIL_MS}ms(V-T43 ②)` });
-  if (n503 > 0) {
-    const ra = m.retryAfter['503'];
-    checks.push({ name: `${stream}_503_retry_after`, allowed: 0, trials: n503, violations: Math.min(n503, ra.missing + ra.nonnum), target: `${stream} 503 모두 Retry-After(V-T43 ②)` });
-    checks.push({ name: `${stream}_503_problem`, allowed: 0, trials: n503, violations: Math.min(n503, m.problem['503'].bad), target: `${stream} 503 모두 Problem 본문(V-T43 ②)` });
-  }
-  return { checks };
+  const n503 = m?.status?.['503'] ?? 0;
+  if (!overload || !(n503 >= 1)) return { checks: [] };
+  return { checks: [{ name: `${stream}_503_p99_${FAST_FAIL_MS}ms`, allowed: 0.01, trials: n503, violations: Math.min(n503, m.overFast), target: `${stream} 게이트웨이 503 p99 ≤ ${FAST_FAIL_MS}ms(V-T43 ②)` }] };
 }
 
 /**
@@ -580,7 +644,7 @@ export function sweepChecks(stream, overload, m) {
  * - single·mixed의 한 IP 흐름 'one': 통과(2xx) ≤ 50 × (mainS + 1) × replicas, 넘은 요청(429) 모두 Retry-After(숫자)
  * - many: 429 0건(그 밖은 'one'이 없다). mixed의 'pool'은 관찰만(판정에 넣지 않는다)
  * - v6-64: 판정하지 않는다(관찰, verdict 'observe')
- * 무효: 보낸 수 0, 발생기 무효·dropped ≥ 1, 'one'이 한도를 넘겨 보냈는데 429 0건
+ * 무효: 보낸 수 0, 발생기 무효·dropped ≥ 1, 어느 흐름이든 2xx·429 밖의 응답이 한 건이라도 있음(R2), 'one'이 한도를 넘겨 보냈는데 429 0건
  * @returns {{ verdict: 'pass'|'fail'|'invalid'|'observe', valid, invalid_reason, reasons, cap?: number }}
  */
 export function judgeIpLimit(o) {
@@ -592,6 +656,11 @@ export function judgeIpLimit(o) {
   if (!Number.isSafeInteger(dropped)) return invalid('발생기 dropped_iterations를 모름');
   if (dropped >= 1) return invalid(`발생기가 반복을 시작하지 못함(dropped_iterations ${dropped})`);
   if (!o.generator?.valid) return invalid(`발생기 무효: ${(o.generator?.reasons ?? []).join('; ') || '까닭 모름'}`);
+  // 2xx·429 밖의 응답(403·404·503·연결 실패 등)은 한도에 닿기 전에 막힌 것이라 무대의 잘못으로 보고 다시 잰다(R2, docs/features/search.md SR-T13 ② '측정 판정')
+  for (const n of names) {
+    const out = outsideResponses(o.streams[n], '429');
+    if (out) return invalid(`${n}: ${out}`);
+  }
   if (o.case === 'v6-64') return { verdict: 'observe', valid: true, invalid_reason: null, reasons: [] };
   const reasons = [];
   const cap = SEARCH_PER_IP_PER_S * (o.mainS + 1) * o.replicas;
