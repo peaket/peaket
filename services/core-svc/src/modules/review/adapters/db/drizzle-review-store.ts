@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from '../../domain/review.js';
-import type { ReviewListInput, ReviewListResult, ReviewStore } from '../../domain/ports.js';
+import type { HeldWithdrawalRow, ReviewListInput, ReviewListResult, ReviewStore } from '../../domain/ports.js';
 import { contentReport, review, reviewHiddenFingerprint, takedownAction } from './schema.js';
 
 type Db = Database['db'] | DbTransaction;
@@ -320,10 +320,10 @@ export class DrizzleReviewStore implements ReviewStore {
     return Math.max(0, nowMs - Math.round(Number(raw)));
   }
 
-  // 뼈대(리뷰 N1 시험): limit은 아직 쓰지 않는다
-  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number; limit?: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
+  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number; limit: number }): Promise<{ purged: number; held: HeldWithdrawalRow[] } | undefined> {
     // 손으로 처리(웨이브 끝 보안 리뷰 S1, docs/features/identity.md §8 '손으로 처리'). 한 트랜잭션: 보류 행 잠금 → 예약(늦은 쪽) → 파기 → 보류 행 다시 처리 표시.
-    // 예약을 파기보다 먼저 쓰는 것은 다시 정리 반복과 잠금 차례(예약 행 → 후기)를 맞추려는 것이다. 보류 행이 없으면 아무것도 쓰지 않는다
+    // 예약을 파기보다 먼저 쓰는 것은 다시 정리 반복과 잠금 차례(예약 행 → 후기)를 맞추려는 것이다. 보류 행이 없으면 아무것도 쓰지 않는다.
+    // 보류 행은 ID 차례로 limit개까지만 잠그고 그 행만 표시한다(목록만 자르지 않는다). eventKey가 없는 행(해독하지 못한 사건)도 센다(다시 보기 N1)
     return this.database.transaction(async (tx) => {
       const found = await tx.execute(sql`
         select id::text as id, event_key from held_event
@@ -331,6 +331,7 @@ export class DrizzleReviewStore implements ReviewStore {
            and reprocessed_at is null
            and (lower(business_key) = ${accountId} or lower(msg_key) = ${accountId})
          order by id
+         limit ${o.limit}::int
          for update`);
       const held = found.rows as { id: string; event_key: string | null }[];
       if (held.length === 0) return undefined;
@@ -340,7 +341,7 @@ export class DrizzleReviewStore implements ReviewStore {
         on conflict (account_id) do update set due_at = greatest(review_withdrawal_recheck.due_at, excluded.due_at)`);
       const purged = await purgeAccountRows(tx, accountId, o.nowMs);
       await tx.execute(sql`update held_event set reprocessed_at = ${new Date(o.nowMs)}::timestamptz where id = any(${sql.param(held.map((h) => h.id))}::uuid[])`);
-      return { purged, heldEventKeys: held.flatMap((h) => (h.event_key === null ? [] : [h.event_key])) };
+      return { purged, held: held.map((h) => ({ id: h.id, eventKey: h.event_key })) };
     });
   }
 

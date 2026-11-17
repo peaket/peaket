@@ -209,6 +209,12 @@ export function maskAuthor(nickname: string | undefined): string {
 /** 액세스 토큰 최대 15분 + 처리 중이던 쓰기 요청의 여유 1분 [가정](docs/features/identity.md §8 '다시 정리', 소유자 결정 2026-11-16 OPEN[44], ADR-0278) */
 export const WITHDRAWAL_RECHECK_DELAY_MS = (15 + 1) * 60_000;
 
+/**
+ * 손으로 처리(내부 경로 /purge) 한 번에 처리하는 보류 행 수의 상한 [가정](docs/features/identity.md §8 '손으로 처리', W8-audit2a 다시 보기 N1).
+ * 한 계정의 탈퇴 사건은 하나라 보류 행은 같은 사건을 다시 받은 만큼(보통 몇 개)이다. 남은 행이 있으면 409가 날 때까지 다시 부른다
+ */
+export const MANUAL_PURGE_HELD_LIMIT = 50;
+
 /** 계약의 date-time(시간대 표기 필수). Date.parse만으로는 '2026-11-16'처럼 날짜만 있는 글도 읽혀서 모양을 먼저 본다 */
 const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 

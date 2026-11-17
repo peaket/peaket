@@ -1,7 +1,7 @@
 // 메모리 후기 저장소(단위 시험). 운영은 adapters/db/drizzle-review-store.ts를 쓴다.
 import { randomUUID } from 'node:crypto';
 import { purgedReview, type ReportRecord, type ReviewRecord, type ReviewSort, type TakedownRecord } from '../domain/review.js';
-import type { ReportSummary, ReviewListInput, ReviewListResult, ReviewStore } from '../domain/ports.js';
+import type { HeldWithdrawalRow, ReportSummary, ReviewListInput, ReviewListResult, ReviewStore } from '../domain/ports.js';
 
 interface Cursor {
   readonly t: number;
@@ -59,7 +59,7 @@ const compare = (a: ReviewRecord, b: ReviewRecord, sort: ReviewSort): number => 
 
 /** 시험용 보류 사건 한 행(held_event의 칸 가운데 손으로 처리에 쓰는 것) */
 export interface MemoryHeldEvent {
-  /** held_event.id(uuid, 보류 행 ID). 뼈대(리뷰 N1 시험): 아직 쓰지 않는다 */
+  /** held_event.id(uuid, 보류 행 ID). 손으로 처리는 이 차례로 처리하고 응답·운영 줄에 싣는다 */
   id: string;
   topic: string;
   eventKey: string | null;
@@ -210,18 +210,24 @@ export class MemoryReviewStore implements ReviewStore {
     return oldest === undefined ? 0 : Math.max(0, nowMs - oldest);
   }
 
-  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number }): Promise<{ purged: number; heldEventKeys: string[] } | undefined> {
-    // 그 계정의 처리 안 한 탈퇴 보류 사건(업무 키 또는 Kafka 키가 그 계정, 글자 크기 무시)
-    const held = this.heldEvents.filter(
-      (h) => h.topic === ACCOUNTS_WITHDRAWN && h.reprocessedAtMs === undefined && (h.businessKey.toLowerCase() === accountId || h.msgKey?.toLowerCase() === accountId),
-    );
+  async purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number; limit: number }): Promise<{ purged: number; held: HeldWithdrawalRow[] } | undefined> {
+    // 그 계정의 처리 안 한 탈퇴 보류 사건(업무 키 또는 Kafka 키가 그 계정, 글자 크기 무시)을 보류 행 ID 차례로 limit개까지.
+    // 거른 뒤에 자른다. ID 차례는 PostgreSQL uuid 차례(소문자 16진 글자 차례)와 같다. eventKey가 없는 행도 처리하고 센다(다시 보기 N1)
+    const held = this.heldEvents
+      .filter((h) => h.topic === ACCOUNTS_WITHDRAWN && h.reprocessedAtMs === undefined && (h.businessKey.toLowerCase() === accountId || h.msgKey?.toLowerCase() === accountId))
+      .sort((a, b) => {
+        const x = a.id.toLowerCase();
+        const y = b.id.toLowerCase();
+        return x < y ? -1 : x > y ? 1 : 0;
+      })
+      .slice(0, o.limit);
     if (held.length === 0) return undefined;
     // 예약 먼저(늦은 쪽), 파기, 보류 행 다시 처리 표시(Drizzle은 한 트랜잭션)
     const before = this.rechecks.get(accountId);
     this.rechecks.set(accountId, before ? { ...before, dueAtMs: Math.max(before.dueAtMs, o.recheckAtMs) } : { dueAtMs: o.recheckAtMs, createdAtMs: o.nowMs });
     const purged = this.#purgeAccount(accountId, o.nowMs);
     for (const h of held) h.reprocessedAtMs = o.nowMs;
-    return { purged, heldEventKeys: held.flatMap((h) => (h.eventKey === null ? [] : [h.eventKey])) };
+    return { purged, held: held.map((h) => ({ id: h.id, eventKey: h.eventKey })) };
   }
 
   async countLegacyRows(): Promise<number> {

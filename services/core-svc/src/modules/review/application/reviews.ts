@@ -4,6 +4,7 @@ import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import {
   contentFingerprint,
   type EligibilityView,
+  MANUAL_PURGE_HELD_LIMIT,
   maskAuthor,
   moderationEffect,
   type ModerationInput,
@@ -327,18 +328,23 @@ export class Reviews {
 
   /**
    * 손으로 처리(내부 경로 POST /internal/v1/reviews/accounts/{accountId}/purge, 웨이브 끝 보안 리뷰 S1, docs/features/identity.md §8 '손으로 처리').
-   * 그 계정의 처리 안 한 탈퇴 보류 사건(held_event)이 있을 때만, 한 트랜잭션에서 보류 행 잠금 → 다시 정리 예약(지금 + 16분) → 파기 → 보류 행 다시 처리 표시를 한다.
-   * 커밋한 뒤 운영 줄 review-purge-manual에 요청자·사유·보류 사건 eventKey·파기 수를 남긴다(계정 ID 없음).
+   * 그 계정의 처리 안 한 탈퇴 보류 사건(held_event)이 있을 때만, 한 트랜잭션에서 보류 행을 ID 차례로 50개(MANUAL_PURGE_HELD_LIMIT)까지 잠금 → 다시 정리 예약(지금 + 16분) → 파기 → 그 행들 다시 처리 표시를 한다.
+   * heldEvents·heldEventIds는 처리한 보류 행 전부다(eventKey가 없는 행 포함, W8-audit2a 다시 보기 N1). 남은 행이 있으면 409가 날 때까지 다시 부른다.
+   * 커밋한 뒤 운영 줄 review-purge-manual에 요청자·사유·파기 수·처리한 보류 행 수·보류 행마다 { id, eventKey }를 남긴다(계정 ID와, 그 값과 같은 업무 키·Kafka 키 없음).
    * @throws ReviewProblem('review-invalid', 422) 계정 ID가 UUID가 아님
    * @throws ReviewProblem('withdrawal-not-held', 409) 그 계정의 보류된 탈퇴 사건이 없음(아무것도 바꾸지 않는다)
    */
-  async purgeHeldWithdrawal(accountId: string, by: { reason: string; requestedBy: string }): Promise<{ purged: number; heldEvents: number }> {
+  async purgeHeldWithdrawal(accountId: string, by: { reason: string; requestedBy: string }): Promise<{ purged: number; heldEvents: number; heldEventIds: string[] }> {
     if (!UUID.test(accountId)) throw invalidAccount();
     const nowMs = this.d.clock.now();
-    const r = await this.d.store.purgeHeldWithdrawal(accountId.toLowerCase(), { nowMs, recheckAtMs: nowMs + WITHDRAWAL_RECHECK_DELAY_MS });
+    const r = await this.d.store.purgeHeldWithdrawal(accountId.toLowerCase(), { nowMs, recheckAtMs: nowMs + WITHDRAWAL_RECHECK_DELAY_MS, limit: MANUAL_PURGE_HELD_LIMIT });
     if (!r) throw new ReviewProblem('withdrawal-not-held', 409, '이 계정에는 처리하지 않은 탈퇴 보류 사건이 없습니다');
-    this.d.logger?.info({ kind: 'review-purge-manual', requestedBy: by.requestedBy, reason: by.reason, heldEventKeys: r.heldEventKeys, purged: r.purged }, '보류된 탈퇴 사건을 손으로 처리했다');
-    return { purged: r.purged, heldEvents: r.heldEventKeys.length };
+    const held = r.held.map((h) => ({ id: h.id, eventKey: h.eventKey }));
+    this.d.logger?.info(
+      { kind: 'review-purge-manual', requestedBy: by.requestedBy, reason: by.reason, purged: r.purged, heldEvents: held.length, held },
+      '보류된 탈퇴 사건을 손으로 처리했다',
+    );
+    return { purged: r.purged, heldEvents: held.length, heldEventIds: held.map((h) => h.id) };
   }
 
   /**
