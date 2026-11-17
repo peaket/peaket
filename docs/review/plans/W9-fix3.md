@@ -157,3 +157,15 @@ cd /d/ticketpass-w9-fix3 && node --test tools/ci/gateway-routes.test.mjs && node
   - F5: '본문 해석 0'은 해석기 부름을 세지 않고 '머리만 보낸 요청이 본문 없이 답을 받는다'로 본다. '자리 0'은 옳은 요청이 머리만 보내 자리를 먼저 쥔 동안 거절 요청이 429가 아니라 제 거절을 받는지로 본다. 클래스에만 단 허용 역할의 시작 실패 까닭 글에는 경로 `v1/bh-class/bulkhead`(앞 빗금 없이)가 든다.
 - **더한 뼈대**(동작 없음, 구현 담당이 채운다): `packages/platform/src/secret-compare.ts`(`constantTimeEqual`은 늘 false, `index.ts` 내보내기는 하지 않음), `services/ops-svc/src/adapters/db/database-role.ts`(`assertOpsPartnerRole`은 아무것도 하지 않음), `services/ops-svc/src/event-cancellation-wiring.ts`의 `partnerRoleCheckRequired`(늘 false). 시험 도우미 `packages/platform/test/raw-http.ts`(실제 소켓 HTTP/1.1, 서버 쪽 소켓 `bytesRead`)를 더했다.
 - **형 검사·린트**: platform·core·ops `tsc -p tsconfig.json --noEmit` 0, 바꾼 src 파일 eslint 오류 0.
+
+## 시험 이의
+
+구현 담당 `w9f3-impl`(claude-opus-5-5), 2026-11-17. 시험 이의는 없다(17개 시험을 고치지 않고 모두 통과시켰다). 아래는 정본이 정하지 않아 구현이 정한 것과 계획·정본이 다른 한 곳이다(시험과는 부딪히지 않는다, 리뷰·계획이 볼 것).
+
+- **정본과 다른 점(계획 판단 필요)**: 계획 §2 F5는 '허용 역할에 `public`이 있으면 ①을 건너뛴다'인데 정본 docs/api/guidelines.md §7 '본문을 읽기 전의 차례'는 '허용 역할이 `public`뿐인 경로는 ①이 없다'다. 정본대로 했다. ①은 공용 가드 앞부분과 같은 판정 함수(`judgeIdentity`)라 `[public, fan]` 같은 경로는 가드처럼 신원 머리가 없으면 익명으로 넘기고 있으면 본다. 지금 그런 칸막이 경로는 없다.
+- (참고, 이의 아님) **기기 증명만 하는 스캐너 경로의 ①**: ①은 경로 설정의 허용 역할만 보고 기기 증명(`@ScannerAuth`)을 보지 못한다. 그래서 허용 역할에 `scanner_device`가 있으면 신원 머리 없는 요청을 ①에서 막지 않고 ④의 공용 가드·스캐너 가드에 맡긴다(가드보다 엄하게 거절하지 않는다). 지금 칸막이를 단 스캐너 경로는 없다.
+- (참고, 이의 아님) **위험 작업(`@Roles(..., { fresh: true })`) 칸막이 경로**: 역할 캐시를 쓰지 않는 작업이라 ①과 ④가 identity를 한 번씩 묻는다(두 번). 지금 그런 칸막이 경로는 없다.
+- (참고, 이의 아님) **'본문을 다 읽기 전'의 판정(F4)**: 칸막이 훅의 거절(429·①의 401·403·503)은 훅이 `Connection: close`를 직접 단다. 그 밖의 오류 답(해석기의 413·415 등)은 `installRequestChecks`가 거는 onSend 하나가 '상태 400 이상이고, 본문이 오는 요청(Content-Length가 0보다 크거나 chunked)인데 소켓이 본문 끝을 받지 못했고(`complete`) 다 읽지도 않았다(`readableEnded`)'이면 단다. 그래서 multipart 413 두 길도 Fastify 해석기 길(`onDone`)에 기대지 않는다. 정상 응답과 본문을 다 받은 뒤의 오류 답은 keep-alive 그대로다.
+- (참고, 이의 아님) **`installRequestChecks`를 부르는 곳**: 서비스 코드에는 없다(`grep -r installRequestChecks services`가 비었다). 부르는 곳은 platform `src/service.ts`(`createService`, 가드와 같은 `AuthState`를 넘긴다)와 성능 비교 벤치 `bench/vt41/src/main.ts`(칸막이 경로가 없어 빈 `AuthState`)뿐이라 둘을 고쳤다.
+- (참고, 이의 아님) **라우트 생성 파일 다시 만들기(감독 결정)**: F3 뒤 `node tools/ci/gateway-routes.mjs --write`로 다섯 파일을 다시 만들었다. 바뀐 것은 파일마다 둘째 줄 '계약 sha256'(`720ff10b…` → `7ef1b0bd…`)뿐이고 새로 생기거나 사라진 경로·메서드는 없다(openapi `bca7f8a8`의 변경은 응답 설명이라 라우트가 같다). 지금 openapi에는 F3 검사에 걸려 생성기가 멈추는 `x-peaket-scopes` 값이 없다.
+- (참고, 이의 아님) **이 묶음과 무관하게 처음부터 실패하는 단위 시험**: platform `test/problem-types.test.ts`의 'PRF192_서비스 코드의 이름 붙은 오류는 모두 목록에 있고 상태 코드와 제목이 같다'가 출발점 트리(이 묶음 변경을 치운 상태)에서도 실패한다. ops-svc `event-cancelled`의 제목 '회차 취소가 확정된 회차는 판매를 재개할 수 없습니다'가 목록의 제목과 다르다. 이 묶음 범위 밖이라 고치지 않았다.
