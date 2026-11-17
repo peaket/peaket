@@ -193,8 +193,9 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   // ops 주소가 있는데 내부 토큰이 없으면 운영은 시작하지 않는다(모든 CS 건이 401로 막힘, 웨이브 끝 리뷰 S1). local·ci는 경고(로거가 생기면 남긴다)
   const startupWarnings: string[] = [];
   requireOpsInternalToken({ env: o.env ?? {}, warn: (m) => void startupWarnings.push(m) });
+  // 환급 실패 CS 건은 2xx를 받아야 연 것이고 내부 토큰은 생성자로 넘긴다(다시 보기 2 N2). 다시 열기 포트가 꽂히면 틱 끝에서만 연다(N1)
   const refundFailureNotice = opsUrl
-    ? new HttpRefundFailureNotice(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }))
+    ? new HttpRefundFailureNotice(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }), o.env?.PEAKET_INTERNAL_TOKEN)
     : {
         open: async (q: { cancellationId: string; attempts: number; lastError: string }) =>
           taskLogger.warn({ event: 'cancellation_refund_failed', cancellationId: q.cancellationId, attempts: q.attempts, error: q.lastError }, '환급 재시도 소진·업무 거절(CS 처리함 주소 없음)'),
@@ -208,7 +209,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   const refundWrites = new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock }));
   // 열지 못한 이상 표시·공제 차액 CS 건 다시 열기(웨이브 끝 리뷰 C2·S1). ops 주소가 있을 때만 꽂는다(로그 대역이 '연 것'으로 남지 않게, 주소가 생기면 그때 연다)
   const csOutbox = opsClient ? new DrizzleCsCaseOutbox(o.serviceDatabase) : undefined;
-  // CS 건 열기 실패 지표(purchase_cs_case_open_failures_total{kind}). leaderLoops에서 프로세스 레지스트리에 붙인다
+  // CS 건 열기 실패·다시 열기 멈춤 지표(purchase_cs_case_open_failures_total{kind}·purchase_cs_case_reopen_cut_total{reason}, 다시 보기 2 N1).
+  // 두 실행기의 틱 끝 다시 열기가 함께 쓰고, leaderLoops에서 프로세스 레지스트리에 붙인다
   const csCaseSignals = new PromCsCaseSignals();
   // 입장 기록이 나온 취소의 CS '이상 표시'. ops-svc 주소가 없으면 로그 대역이다
   const entryFlagNotice = opsClient
@@ -284,7 +286,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           }),
           attempts: new DrizzleEventRefundAttempts(o.serviceDatabase),
           fanNotifier: new OutboxEventRefundFanNotifier(),
-          ...(opsClient ? { notice: new HttpRefundFailureNotice(opsClient), alert: new HttpEventRefundAlert(opsClient) } : {}),
+          ...(opsClient ? { notice: new HttpRefundFailureNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN), alert: new HttpEventRefundAlert(opsClient) } : {}),
           nowMs: () => clock.now(),
           deadlineMs: () => clock.now() + 30_000,
           concurrency: 8,

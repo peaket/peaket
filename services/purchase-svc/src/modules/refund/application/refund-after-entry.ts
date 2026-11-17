@@ -7,12 +7,15 @@
 // 회차 취소(CANCEL)가 요청된 회차의 보류 취소는 그 요청의 미룸(event_refund_hold)이 걸린 동안 집지 않는다(BAT-420 몫 D, transfer-refund §5). 틱 맨 앞에
 // 기한이 지난 미룸을 풀고 풀린 줄마다 SEV2 로그를 한 번 남긴다. 풀기가 실패해도 그 틱은 이어 간다(기한 판단은 집기 SQL이 한다, 보충 2).
 // 회차 취소 요청이 만들거나 전환한 REFUND_PENDING 행(event_cancellation_request_id 있음)은 집지 않는다. 그 행은 일괄 환불 실행기만 결제사로 보낸다(웨이브 끝 리뷰 K1·C1).
-// 이상 표시 CS 건은 ops-svc가 2xx로 받아야 연 것이고, 못 연 건은 틱 맨 앞에서 다시 연다(웨이브 끝 리뷰 S1).
+// CS 건(환급 실패·이상 표시)은 ops-svc가 2xx로 받아야 연 것이다(웨이브 끝 리뷰 S1, 다시 보기 2 N2). 다시 열기 포트(csOutbox)가 꽂힌 조립에서는 처리 중에
+// ops-svc를 부르지 않고 행에 표시(refund_failed_at·entry_recorded_at)만 남기며, 건은 그 틱의 집기·결제사 호출이 끝난 뒤 틱 끝 한 곳에서 환급 실패 → 이상 표시
+// 차례로, 5초 [가정] 예산과 잇따른 무응답 멈춤 안에서 연다(다시 보기 2 N1, transfer-refund §3.1 ⑥, cs-case-reopen.ts). 포트가 없는 옛 조립만 처리 중에 한 번 연다.
 // 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기가 처리하지 못한다(CS 알림 대상).
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type DueRefund } from '../domain/cancellation.js';
-import { CS_CASE_REOPEN_BATCH, type CsCaseOpenSignals, type CsCaseOutbox, type EventRefundHolds } from '../domain/event-refund-ports.js';
+import type { CsCaseOpenSignals, CsCaseOutbox, EventRefundHolds } from '../domain/event-refund-ports.js';
 import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationOrders, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
+import { CsCaseReopenTick } from './cs-case-reopen.js';
 
 export interface RefundAfterEntryDeps {
   writes: CancellationWrites;
@@ -36,8 +39,9 @@ export interface RefundAfterEntryDeps {
    */
   orders?: Pick<CancellationOrders, 'findCancellation'>;
   /**
-   * 웨이브 끝 리뷰 S1: 열지 않은 이상 표시 건(entry_recorded_at 있음·entry_flag_opened_at 빔)을 틱 맨 앞에서 100건 [가정]까지 행마다 다시 열고,
-   * ops-svc가 2xx로 받은 행만 markFlagOpened를 쓴다. 없으면(옛 조립) 입장 기록을 남길 때 한 번만 연다
+   * 웨이브 끝 리뷰 S1·다시 보기 2 N1·N2: 열지 않은 환급 실패 건(refund_failed_at 있음·refund_failed_opened_at 빔, 회차 취소 요청 ID 없음)과 이상 표시 건
+   * (entry_recorded_at 있음·entry_flag_opened_at 빔)을 틱 끝에서 종류마다 100건 [가정]까지 행마다 다시 열고, ops-svc가 2xx로 받은 행만 연 시각을 쓴다.
+   * 꽂히면 처리 중에는 ops-svc를 부르지 않는다. 없으면(옛 조립) 실패 표시·입장 기록을 남길 때 한 번만 연다
    */
   csOutbox?: Pick<CsCaseOutbox, 'pendingFlags' | 'markFlagOpened' | 'pendingRefundFailures' | 'markRefundFailureOpened'>;
   /** 웨이브 끝 리뷰 C2·S1: 지표 purchase_cs_case_open_failures_total{kind}. 이상 표시 건 열기가 실패한 행마다 FLAGGED 하나(다시 보기 2: 환급 실패는 REFUND_FAILED, 멈춤은 cut) */
@@ -73,10 +77,17 @@ export class RefundAfterEntry {
     this.#claims = deps.claims;
   }
 
+  /** 한 틱: 기한 지난 미룸 풀기 → 집기·결제사 호출 → (처리가 던져도) 틱 끝 CS 건 다시 열기(다시 보기 2 N1) */
   async run(limit = REFUND_AFTER_ENTRY_BATCH): Promise<RefundAfterEntryResult> {
+    try {
+      return await this.#runRefunds(limit);
+    } finally {
+      await this.#reopenCases();
+    }
+  }
+
+  async #runRefunds(limit: number): Promise<RefundAfterEntryResult> {
     await this.#releaseExpiredHolds();
-    // 열지 못한 이상 표시 건을 먼저 다시 연다(웨이브 끝 리뷰 S1). 이번 틱에 새로 남긴 건은 아래에서 한 번 열고, 못 열면 다음 틱에 여기서 연다
-    await this.#reopenFlags();
     const due = await this.deps.writes.dueRefunds(this.deps.nowMs(), limit);
     let refunded = 0;
     let pending = 0;
@@ -124,7 +135,8 @@ export class RefundAfterEntry {
       if (r === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) {
         const marked = await this.deps.writes.markRefundFailed({ cancellationId: c.cancellationId, attempts, lastError: r, nowMs: this.deps.nowMs() });
         if (marked === false) continue;
-        await this.deps.failureNotice?.open({ cancellationId: c.cancellationId, orderId: c.orderId, attempts, lastError: r, nowMs: this.deps.nowMs() });
+        // 행에는 실패 표시가 남았으므로 건 열기가 실패해도 실패로 센다(다시 보기 2 N2)
+        await this.#openRefundFailureNow({ cancellationId: c.cancellationId, orderId: c.orderId, attempts, lastError: r });
         failed++;
         continue;
       }
@@ -212,44 +224,71 @@ export class RefundAfterEntry {
   }
 
   /**
-   * 입장 기록을 남기고(환급 시각을 비운다) CS '이상 표시'를 연다. 이미 남긴 행이면 false.
-   * 건 열기가 실패하면 경고·지표만 남긴다(행에는 entry_recorded_at이 있고 entry_flag_opened_at이 비어 다음 틱에 다시 연다, 웨이브 끝 리뷰 S1)
+   * 입장 기록을 남기고(환급 시각을 비운다) 이상 표시 건의 열 대상으로 둔다. 이미 남긴 행이면 false.
+   * 다시 열기 포트가 꽂혔으면 건은 틱 끝이 열고(다시 보기 2 N1), 옛 조립만 여기서 한 번 연다(실패하면 경고·지표만, 웨이브 끝 리뷰 S1)
    */
   async #recordEntry(c: DueRefund, record: EntryRecordView): Promise<boolean> {
     const nowMs = this.deps.nowMs();
     const enteredAtMs = record.firstEnteredAtMs ?? nowMs;
     if (!(await this.#claims.markEntryRecorded(c.cancellationId, enteredAtMs, nowMs))) return false;
-    await this.#openFlag({ cancellationId: c.cancellationId, orderId: c.orderId, ticketId: c.ticketId ?? '', enteredAtMs }, nowMs);
+    if (!this.deps.csOutbox && this.deps.flags) {
+      try {
+        await this.deps.flags.open({ cancellationId: c.cancellationId, orderId: c.orderId, ticketId: c.ticketId ?? '', enteredAtMs, nowMs });
+      } catch (err) {
+        this.deps.log?.warn(
+          { event: 'cancellation-entry-flag-failed', cancellationId: c.cancellationId, err: err instanceof Error ? err.name : 'unknown' },
+          'cancellation-entry-flag-failed: 이상 표시 건을 열지 못했다(행에는 입장 기록이 남음)',
+        );
+        this.deps.csCaseOpenFailures?.inc('FLAGGED');
+      }
+    }
     return true;
   }
 
-  /** 열지 않은 이상 표시 건을 행마다 따로 다시 연다(한 틱에 100건 [가정]). 목록을 읽지 못하면 경고만 남기고 틱을 이어 간다 */
-  async #reopenFlags(): Promise<void> {
-    const outbox = this.deps.csOutbox;
-    if (!outbox || !this.deps.flags) return;
-    let rows: Awaited<ReturnType<typeof outbox.pendingFlags>>;
+  /**
+   * 옛 조립(다시 열기 포트 없음)만: 실패 표시를 남긴 행의 환급 실패 건을 처리 중에 한 번 연다. 던지면 경고·지표만 남기고 다음 행을 이어 간다
+   * (어댑터가 2xx 밖·무응답이면 던진다, 다시 보기 2 N2). 포트가 꽂혔으면 부르지 않는다(틱 끝이 연다)
+   */
+  async #openRefundFailureNow(q: { cancellationId: string; orderId: string; attempts: number; lastError: string }): Promise<void> {
+    if (this.deps.csOutbox || !this.deps.failureNotice) return;
     try {
-      rows = await outbox.pendingFlags(CS_CASE_REOPEN_BATCH);
-    } catch (err) {
-      this.deps.log?.warn({ event: 'cancellation-entry-flag-failed', err: err instanceof Error ? err.name : 'unknown' }, 'cancellation-entry-flag-failed: 열지 않은 이상 표시 건을 읽지 못했다(다음 틱에 다시 본다)');
-      return;
-    }
-    const nowMs = this.deps.nowMs();
-    for (const row of rows) await this.#openFlag(row, nowMs);
-  }
-
-  /** 이상 표시 건 하나를 연다. ops-svc가 2xx로 받으면 연 시각을 쓰고, 실패하면 경고·지표 뒤 다음 틱에 다시 연다 */
-  async #openFlag(row: { cancellationId: string; orderId: string; ticketId: string; enteredAtMs: number }, nowMs: number): Promise<void> {
-    if (!this.deps.flags) return;
-    try {
-      await this.deps.flags.open({ cancellationId: row.cancellationId, orderId: row.orderId, ticketId: row.ticketId, enteredAtMs: row.enteredAtMs, nowMs });
-      await this.deps.csOutbox?.markFlagOpened(row.cancellationId, nowMs);
+      await this.deps.failureNotice.open({ ...q, nowMs: this.deps.nowMs() });
     } catch (err) {
       this.deps.log?.warn(
-        { event: 'cancellation-entry-flag-failed', cancellationId: row.cancellationId, err: err instanceof Error ? err.name : 'unknown' },
-        'cancellation-entry-flag-failed: 이상 표시 건을 열지 못했다(다음 틱에 다시 연다)',
+        { event: 'cancellation-refund-failure-notice-failed', cancellationId: q.cancellationId, err: err instanceof Error ? err.name : 'unknown' },
+        'cancellation-refund-failure-notice-failed: 환급 실패 CS 건을 열지 못했다(행에는 실패 표시가 남음)',
       );
-      this.deps.csCaseOpenFailures?.inc('FLAGGED');
+      this.deps.csCaseOpenFailures?.inc('REFUND_FAILED');
+    }
+  }
+
+  /**
+   * 틱 끝 한 곳의 CS 건 다시 열기(다시 보기 2 N1·N2): 열지 않은 환급 실패 건 → 이상 표시 건 차례로 종류마다 100건 [가정]까지, 한 틱 예산 하나(5초 [가정])와
+   * 잇따른 무응답 멈춤(2번 [가정]) 안에서 행마다 따로 연다. ops-svc가 2xx로 받은 행만 연 시각을 쓰고, 실패한 행은 경고·지표 뒤 다음 틱에 다시 연다. 던지지 않는다
+   */
+  async #reopenCases(): Promise<void> {
+    const { csOutbox, failureNotice, flags } = this.deps;
+    if (!csOutbox) return;
+    const tick = new CsCaseReopenTick({ nowMs: () => this.deps.nowMs(), runner: 'cancellation-refund', signals: this.deps.csCaseOpenFailures, log: this.deps.log });
+    if (failureNotice) {
+      await tick.reopen({
+        kind: 'REFUND_FAILED',
+        failedEvent: 'cancellation-refund-failure-notice-failed',
+        list: (limit) => csOutbox.pendingRefundFailures(limit),
+        open: (row, nowMs) => failureNotice.open({ cancellationId: row.cancellationId, orderId: row.orderId, attempts: row.attempts, lastError: row.lastError, nowMs }),
+        markOpened: (row, nowMs) => csOutbox.markRefundFailureOpened(row.cancellationId, nowMs),
+        ids: (row) => ({ cancellationId: row.cancellationId }),
+      });
+    }
+    if (flags) {
+      await tick.reopen({
+        kind: 'FLAGGED',
+        failedEvent: 'cancellation-entry-flag-failed',
+        list: (limit) => csOutbox.pendingFlags(limit),
+        open: (row, nowMs) => flags.open({ cancellationId: row.cancellationId, orderId: row.orderId, ticketId: row.ticketId, enteredAtMs: row.enteredAtMs, nowMs }),
+        markOpened: (row, nowMs) => csOutbox.markFlagOpened(row.cancellationId, nowMs),
+        ids: (row) => ({ cancellationId: row.cancellationId }),
+      });
     }
   }
 }

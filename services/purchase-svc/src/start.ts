@@ -341,7 +341,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 자동 정지(실패율·실패 금액·연속 실패·거절률), 연기 신청 창, 백그라운드 실행기, 팬 알림 Outbox를 남긴다.
   // CS 처리함·경보 연결은 ops-svc 내부 HTTP다. 주소가 없으면 로그 대역이다.
   let eventRefundService: EventRefundService | undefined;
-  // CS 건 열기 실패 지표(purchase_cs_case_open_failures_total{kind}, 웨이브 끝 리뷰 C2). 서비스를 만든 뒤 레지스트리에 붙인다
+  // CS 건 열기 실패·다시 열기 멈춤 지표(purchase_cs_case_open_failures_total{kind}·purchase_cs_case_reopen_cut_total{reason}, 웨이브 끝 리뷰 C2·다시 보기 2 N1).
+  // 서비스를 만든 뒤 레지스트리에 붙인다
   const csCaseSignals = new PromCsCaseSignals();
   if (database && refund && refundTickets) {
     const opsUrl = env.PEAKET_OPS_HTTP_URL;
@@ -383,8 +384,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
           },
       configs: new SeatMapSaleConfigs(seatMap),
       log: { warn: (obj: object, msg: string) => log?.warn(obj, msg) },
+      // 다시 열기 포트가 꽂히면 Start·Resume·Apply·CloseWindow는 표시만 하고 건은 릴레이 리더 틱 끝이 연다(다시 보기 2 N1). 내부 토큰은 생성자로 넘긴다(N2)
       notice: opsClient
-        ? new HttpRefundFailureNotice(opsClient)
+        ? new HttpRefundFailureNotice(opsClient, env.PEAKET_INTERNAL_TOKEN)
         : {
             open: async (q) => {
               log?.warn(

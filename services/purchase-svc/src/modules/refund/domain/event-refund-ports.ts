@@ -181,8 +181,9 @@ export interface EventRefundServiceDeps {
    */
   readonly claims?: EventRefundClaims;
   /**
-   * 웨이브 끝 리뷰 C2·S1: 확정·항목 끝내기 트랜잭션에서 표시한 차액 건을 runDue 맨 앞에서 행마다 따로 연다(2xx를 받은 행만 연 시각을 쓴다).
-   * 없으면(옛 조립) 차액 건을 표시와 함께 곧바로 연다(행마다 따로, 실패해도 나머지는 연다)
+   * 웨이브 끝 리뷰 C2·S1·다시 보기 2 N1·N2: 확정·항목 끝내기 트랜잭션에서 표시한 일괄 환불 실패 건(failure_case_at)·차액 건(deduction_gap_at)을
+   * runDue 틱 끝에서 그 차례로 행마다 따로 연다(2xx를 받은 행만 연 시각을 쓴다, 5초 [가정] 예산·잇따른 무응답 멈춤). 꽂히면 처리 중에는 ops-svc를 부르지 않는다.
+   * 없으면(옛 조립) 건을 표시와 함께 곧바로 연다(행마다 따로, 실패해도 나머지는 연다)
    */
   readonly csOutbox?: Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened' | 'pendingItemFailures' | 'markItemFailureOpened'>;
   /**
@@ -225,7 +226,7 @@ export interface EventRefundClaims {
   release(requestId: string, claimToken: string): Promise<void>;
 }
 
-/** 한 틱에 다시 여는 CS 건 수 [가정](차액·이상 표시 각각) */
+/** 한 틱에 다시 여는 CS 건 수 [가정](종류마다: 차액·이상 표시·환급 실패·일괄 환불 실패) */
 export const CS_CASE_REOPEN_BATCH = 100;
 
 /** CS 건 열기 실패·다시 열기 멈춤 지표(purchase_cs_case_open_failures_total{kind}·purchase_cs_case_reopen_cut_total{reason}) */

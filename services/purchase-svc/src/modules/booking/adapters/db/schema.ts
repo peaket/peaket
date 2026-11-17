@@ -127,6 +127,11 @@ export const orderCancellation = pgTable(
     deductionGapRequestId: uuid('deduction_gap_request_id'),
     /** 차액 CS 건(REFUND_FAILED·DEDUCTION_GAP)을 ops-svc가 2xx로 받은 시각. deduction_gap_at이 있는데 비어 있으면 일괄 환불 실행기 틱이 다시 연다 */
     deductionGapOpenedAt: at('deduction_gap_opened_at'),
+    /**
+     * 환급 실패 CS 건(REFUND_FAILED·REFUND)을 ops-svc가 2xx로 받은 시각(0026, 다시 보기 2 N2). 회차 취소 요청 ID가 없는 행만 쓴다(그 행은 일괄 환불 항목의
+     * failure_case_opened_at이 맡는다). refund_failed_at이 있고 REFUND_PENDING인데 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다
+     */
+    refundFailedOpenedAt: at('refund_failed_opened_at'),
   },
   (t) => [
     uniqueIndex('order_cancellation_active_key')
@@ -149,6 +154,10 @@ export const orderCancellation = pgTable(
     index('order_cancellation_deduction_gap_open_idx')
       .on(t.deductionGapAt)
       .where(sql`${t.deductionGapAt} is not null and ${t.deductionGapOpenedAt} is null`),
+    // 환급 실패 건 다시 열기 목록(열지 않은 건, 회차 취소 요청 ID가 없는 행만)을 받치는 부분 색인(0026)
+    index('order_cancellation_refund_failed_open_idx')
+      .on(t.refundFailedAt)
+      .where(sql`${t.refundFailedAt} is not null and ${t.refundFailedOpenedAt} is null and ${t.eventCancellationRequestId} is null`),
   ],
 );
 

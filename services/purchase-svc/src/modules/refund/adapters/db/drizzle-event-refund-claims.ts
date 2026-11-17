@@ -88,13 +88,18 @@ export class DrizzleEventRefundClaims implements EventRefundClaims {
     });
   }
 
-  /** 잡기 값이 같고 끝나지 않은 항목만 쓴다. 0행이면 false이고 Outbox·취소 행 표시도 남기지 않는다(같은 트랜잭션) */
+  /**
+   * 잡기 값이 같고 끝나지 않은 항목만 쓴다. 0행이면 false이고 Outbox·취소 행 표시도 남기지 않는다(같은 트랜잭션).
+   * FAILED로 끝내며 failureCase가 있으면 같은 문장에서 일괄 환불 실패 건을 열 대상(failure_case_at)으로 표시한다(다시 보기 2 N2)
+   */
   async finish(q: Parameters<EventRefundClaims['finish']>[0]): Promise<boolean> {
     return this.database.transaction(async (tx) => {
+      const failureCaseAt = q.failureCase === true && q.status === 'FAILED' ? new Date(this.clock.now()) : null;
       const updated = await tx.execute(sql`
         update event_refund_item
            set status = ${q.status}, attempts = ${q.attempts}, last_error = ${q.lastError ?? null},
                next_attempt_at = ${q.nextAttemptAtMs !== undefined ? new Date(q.nextAttemptAtMs) : null}::timestamptz,
+               failure_case_at = coalesce(failure_case_at, ${failureCaseAt}::timestamptz),
                updated_at = now()
          where request_id = ${q.requestId}::uuid and ticket_id = ${q.ticketId}::uuid
            and claim_token = ${q.claimToken}::uuid

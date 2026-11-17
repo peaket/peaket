@@ -10,6 +10,8 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
   readonly cancellationFailures = new Map<string, string>();
   /** 공제 차액 대상 표시(취소 ID → 요청 ID, 웨이브 끝 리뷰 C2·S1). 처음 표시한 요청을 둔다 */
   readonly deductionGaps = new Map<string, string>();
+  /** 일괄 환불 실패 건을 열 대상으로 표시한 항목(`요청 ID/표 ID`, 다시 보기 2 N2 failure_case_at). FAILED 쓰기와 함께 남긴다 */
+  readonly failureCases = new Set<string>();
 
   async find(requestId: string): Promise<EventCancellationRequest | undefined> {
     return this.requests.get(requestId);
@@ -63,12 +65,16 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
 
   /**
    * 끝나지 않은(PENDING·UNKNOWN) 항목만 쓴다(웨이브 끝 리뷰 K2: 끝난 상태를 덮지 않는다). 썼을 때만 Outbox와
-   * 취소 행 실패 표시(K1·C1, cancellationFailures)·차액 대상 표시(C2·S1, deductionGaps)를 남긴다. 쓰지 않았으면 false
+   * 취소 행 실패 표시(K1·C1, cancellationFailures)·차액 대상 표시(C2·S1, deductionGaps)·일괄 환불 실패 건 표시(다시 보기 2 N2, failureCases)를 남긴다. 쓰지 않았으면 false
    */
   async updateItem(
     item: EventRefundItem,
     outbox: readonly EventRefundOutboxMessage[] = [],
-    extra: { readonly cancellationFailure?: { readonly lastError: string }; readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string } } = {},
+    extra: {
+      readonly cancellationFailure?: { readonly lastError: string };
+      readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
+      readonly failureCase?: true;
+    } = {},
   ): Promise<boolean> {
     const items = this.byRequest.get(item.requestId);
     const current = items?.get(item.ticketId);
@@ -78,6 +84,7 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     this.outbox.push(...outbox);
     if (extra.cancellationFailure && !this.cancellationFailures.has(item.cancellationId)) this.cancellationFailures.set(item.cancellationId, extra.cancellationFailure.lastError);
     if (extra.deductionGap && !this.deductionGaps.has(extra.deductionGap.cancellationId)) this.deductionGaps.set(extra.deductionGap.cancellationId, extra.deductionGap.requestId);
+    if (extra.failureCase === true && item.status === 'FAILED') this.failureCases.add(`${item.requestId}/${item.ticketId}`);
     return true;
   }
 

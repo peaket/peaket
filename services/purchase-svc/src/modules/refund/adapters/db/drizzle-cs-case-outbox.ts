@@ -1,6 +1,8 @@
-// 열지 않은 CS 건(차액 DEDUCTION_GAP·이상 표시 FLAGGED) 다시 열기(웨이브 끝 리뷰 C2·S1, transfer-refund §3.1 ②·§5 '그래도 남는 건',
-// guidelines §8.1 'ops-svc CS 처리함 내부 HTTP'). order_cancellation.deduction_gap_at·deduction_gap_request_id·deduction_gap_opened_at·entry_flag_opened_at(0025)을 쓴다.
-// 목록은 부분 색인(order_cancellation_deduction_gap_open_idx·order_cancellation_entry_flag_open_idx)이 받친다. 연 시각은 ops-svc가 2xx로 받은 뒤에만 쓴다(부른 쪽).
+// 열지 않은 CS 건(차액 DEDUCTION_GAP·이상 표시 FLAGGED·환급 실패·일괄 환불 실패) 다시 열기(웨이브 끝 리뷰 C2·S1, 다시 보기 2 N2, transfer-refund §3.1 ②·⑥·§5 '그래도 남는 건',
+// guidelines §8.1 'ops-svc CS 처리함 내부 HTTP'). order_cancellation.deduction_gap_at·deduction_gap_request_id·deduction_gap_opened_at·entry_flag_opened_at(0025),
+// order_cancellation.refund_failed_opened_at·event_refund_item.failure_case_at·failure_case_opened_at(0026)을 쓴다.
+// 목록은 부분 색인(order_cancellation_deduction_gap_open_idx·order_cancellation_entry_flag_open_idx·order_cancellation_refund_failed_open_idx·
+// event_refund_item_failure_case_open_idx)이 받친다. 연 시각은 ops-svc가 2xx로 받은 뒤에만 쓴다(부른 쪽).
 import type { Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { CsCaseOutbox } from '../../domain/event-refund-ports.js';
@@ -54,20 +56,59 @@ export class DrizzleCsCaseOutbox implements CsCaseOutbox {
        where id = ${cancellationId}::uuid and entry_recorded_at is not null and entry_flag_opened_at is null`);
   }
 
-  // ---- 다시 보기 2 N2 빈 뼈대(시험 담당, 구현 전에 씀): 0026이 받칠 칸을 쓰는 질의는 구현 담당이 채운다 ----
-  async pendingItemFailures(_limit: number): ReturnType<CsCaseOutbox['pendingItemFailures']> {
-    throw new Error('아직 없음');
+  /**
+   * 일괄 환불 실패 건을 열 대상으로 표시했는데 아직 열지 않은 항목(표시 시각·요청·표 순). 그 취소 행이 환급·무효로 끝났으면 다시 열지 않는다(행이 없는 항목은 넣는다:
+   * 대상 없음·전환에서 진 항목·팬 취소와 겹친 항목도 건 하나 = 항목 하나다, 다시 보기 2 N2)
+   */
+  async pendingItemFailures(limit: number): ReturnType<CsCaseOutbox['pendingItemFailures']> {
+    const r = await this.database.db.execute(sql`
+      select i.request_id, i.order_id, i.ticket_id, i.cancellation_id, i.attempts, i.last_error
+        from event_refund_item i
+        left join order_cancellation c on c.id = i.cancellation_id
+       where i.failure_case_at is not null and i.failure_case_opened_at is null
+         and (c.id is null or c.status not in ('REFUNDED', 'VOIDED'))
+       order by i.failure_case_at, i.request_id, i.ticket_id
+       limit ${limit}`);
+    return (r.rows as { request_id: string; order_id: string; ticket_id: string; cancellation_id: string; attempts: number | string; last_error: string | null }[]).map((x) => ({
+      requestId: x.request_id,
+      orderId: x.order_id,
+      ticketId: x.ticket_id,
+      cancellationId: x.cancellation_id,
+      attempts: Number(x.attempts),
+      lastError: x.last_error ?? 'failed',
+    }));
   }
 
-  async markItemFailureOpened(_requestId: string, _ticketId: string, _nowMs: number): Promise<void> {
-    throw new Error('아직 없음');
+  async markItemFailureOpened(requestId: string, ticketId: string, nowMs: number): Promise<void> {
+    await this.database.db.execute(sql`
+      update event_refund_item set failure_case_opened_at = ${new Date(nowMs)}::timestamptz
+       where request_id = ${requestId}::uuid and ticket_id = ${ticketId}::uuid
+         and failure_case_at is not null and failure_case_opened_at is null`);
   }
 
-  async pendingRefundFailures(_limit: number): ReturnType<CsCaseOutbox['pendingRefundFailures']> {
-    throw new Error('아직 없음');
+  /**
+   * 환급 실패로 표시했는데 아직 열지 않은 행(표시 시각·취소 ID 순). 회차 취소 요청 ID가 달린 행은 그 항목의 일괄 환불 실패 건이 맡으므로 넣지 않고,
+   * CS가 이미 끝낸 행(REFUND_PENDING이 아님: 무효·환급으로 정함)도 다시 열지 않는다. 예매 취소 Saga가 결제사 거절로 표시한 팬·부정 예매 행도 여기서 연다
+   */
+  async pendingRefundFailures(limit: number): ReturnType<CsCaseOutbox['pendingRefundFailures']> {
+    const r = await this.database.db.execute(sql`
+      select id, order_id, refund_attempts, refund_last_error
+        from order_cancellation
+       where refund_failed_at is not null and refund_failed_opened_at is null
+         and event_cancellation_request_id is null and status = 'REFUND_PENDING'
+       order by refund_failed_at, id
+       limit ${limit}`);
+    return (r.rows as { id: string; order_id: string; refund_attempts: number | string; refund_last_error: string | null }[]).map((x) => ({
+      cancellationId: x.id,
+      orderId: x.order_id,
+      attempts: Number(x.refund_attempts),
+      lastError: x.refund_last_error ?? 'failed',
+    }));
   }
 
-  async markRefundFailureOpened(_cancellationId: string, _nowMs: number): Promise<void> {
-    throw new Error('아직 없음');
+  async markRefundFailureOpened(cancellationId: string, nowMs: number): Promise<void> {
+    await this.database.db.execute(sql`
+      update order_cancellation set refund_failed_opened_at = ${new Date(nowMs)}::timestamptz
+       where id = ${cancellationId}::uuid and refund_failed_at is not null and refund_failed_opened_at is null`);
   }
 }

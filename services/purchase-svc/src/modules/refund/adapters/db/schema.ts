@@ -78,6 +78,10 @@ export const eventRefundItem = pgTable(
     claimToken: uuid('claim_token'),
     /** 잡기 기한(지금 + 60초 [가정]). 지나면(claimed_until <= 지금) 다른 처리자가 다시 잡는다 */
     claimedUntil: at('claimed_until'),
+    /** 일괄 환불 실패 CS 건을 열 대상으로 정한 시각(0026, 다시 보기 2 N2). 항목을 FAILED로 끝내는 쓰기와 같은 트랜잭션에서 쓰고, 차액 건으로 대신한 항목에는 쓰지 않는다 */
+    failureCaseAt: at('failure_case_at'),
+    /** 그 건을 ops-svc가 2xx로 받은 시각. failure_case_at이 있는데 비어 있으면 일괄 환불 실행기 틱 끝에 다시 연다. failure_case_at 없이 쓰지 않는다(CHECK) */
+    failureCaseOpenedAt: at('failure_case_opened_at'),
   },
   (t) => [
     primaryKey({ name: 'event_refund_item_pkey', columns: [t.requestId, t.ticketId] }),
@@ -89,6 +93,12 @@ export const eventRefundItem = pgTable(
     check('event_refund_item_attempts_check', sql`${t.attempts} >= 0`),
     // 잡기 값과 기한은 함께 있거나 함께 없다(0025)
     check('event_refund_item_claim_check', sql`(${t.claimToken} is null) = (${t.claimedUntil} is null)`),
+    // 연 시각은 열 대상 표시가 있을 때만 쓴다(0026)
+    check('event_refund_item_failure_case_check', sql`${t.failureCaseOpenedAt} is null or ${t.failureCaseAt} is not null`),
+    // 일괄 환불 실패 건 다시 열기 목록(열지 않은 건)을 받치는 부분 색인(0026)
+    index('event_refund_item_failure_case_open_idx')
+      .on(t.failureCaseAt)
+      .where(sql`${t.failureCaseAt} is not null and ${t.failureCaseOpenedAt} is null`),
   ],
 );
 

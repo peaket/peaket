@@ -226,21 +226,29 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
   async updateItem(
     item: EventRefundItem,
     outbox: readonly EventRefundOutboxMessage[] = [],
-    extra: { readonly cancellationFailure?: { readonly lastError: string }; readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string } } = {},
+    extra: {
+      readonly cancellationFailure?: { readonly lastError: string };
+      readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
+      readonly failureCase?: true;
+    } = {},
   ): Promise<boolean> {
+    const { failureCase, ...side } = extra;
     return this.database.transaction(async (tx) => {
+      // FAILED로 끝내며 failureCase가 있으면 같은 문장에서 일괄 환불 실패 건을 열 대상으로 표시한다(다시 보기 2 N2)
+      const failureCaseAt = failureCase === true && item.status === 'FAILED' ? new Date(this.clock.now()) : null;
       const updated = await tx.execute(sql`
         update event_refund_item
            set status = ${item.status}, attempts = ${item.attempts}, last_error = ${item.lastError ?? null},
                applied_at = ${item.appliedAtMs !== undefined ? new Date(item.appliedAtMs) : null}::timestamptz,
                next_attempt_at = ${item.nextAttemptAtMs !== undefined ? new Date(item.nextAttemptAtMs) : null}::timestamptz,
+               failure_case_at = coalesce(failure_case_at, ${failureCaseAt}::timestamptz),
                updated_at = now()
          where request_id = ${item.requestId}::uuid and ticket_id = ${item.ticketId}::uuid
            and status in ('PENDING', 'UNKNOWN') and claim_token is null
          returning cancellation_id`);
       const row = updated.rows[0] as { cancellation_id: string } | undefined;
       if (!row) return false;
-      await finishSideWrites(tx, this.clock, { requestId: item.requestId, cancellationId: row.cancellation_id, outbox, ...extra });
+      await finishSideWrites(tx, this.clock, { requestId: item.requestId, cancellationId: row.cancellation_id, outbox, ...side });
       return true;
     });
   }
