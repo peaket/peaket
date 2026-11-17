@@ -117,7 +117,30 @@ Docker 없이: purchase 단위 `test/seat-event.test.ts`·`test/seat-stream-rela
 
 ## 실패 확인
 
-(시험 담당이 쓴다)
+시험 담당 `w9f2-test`(claude-opus-5-5), 2026-11-17. 시험 커밋 `4e3afad7`을 고치기 전 제품 코드(`aca1ac72`, 정본·계획만 바뀐 트리) 위에서 돌렸다. Docker 잠금을 잡고 §6의 통합 명령 셋을 그대로 돌린 뒤 띄운 컨테이너가 남지 않은 것을 보고 잠금을 풀었다.
+
+| # | 시험(파일) | 결과 | 까닭 |
+| --- | --- | --- | --- |
+| H1 | `HOT-252 판매 정책 한도 2로 잡은 홀드를 다시 만든 뒤 예약 한도도 2다`(sale-policy 통합) | 실패 | 다시 만든 홀드 Hash에 `lim`이 없다(`'null'`, 기대 `'2'`) |
+| H2 | `HOT-252 원장 적재는 HELD의 holdLimit을 …`(seat-hold-ledger 통합) | 실패 | `hold_limit` 칸이 없다(마이그레이션 없음). 칸만 임시로 더해 보면 HELD(3)가 NULL로 남는다 |
+| H3 | `HOT-252 다시 만들기는 원장 홀드·묶인 주문의 홀드에 …`(seat-rebuild 통합, rebuild-orders-plan·rebuild-memory 단위) | 실패 셋 | 통합은 칸 없음(칸만 임시로 더하면 `lim` 넷 모두 없음, 기대 `'2'·'3'·없음·'4'`), planRebuild는 HELD·SOLD 좌석에 `holdLimit`이 없고, 메모리 writeSeats는 `lim`을 쓰지 않는다 |
+| H4 | `HOT-252 다시 만들기 좌석 Lua는 열째 칸이 …`(seat-rebuild 통합) | 실패 | 열째 칸 `'0'`을 받아 `['OK', 2]`로 쓴다(예비 칸이라 검사가 없다) |
+| H5 | `HOT-252 팬 홀드 Lua 셋은 HELD 항목에 holdLimit을 …`(hold-lifecycle 통합) | 실패 | 홀드 Lua HELD 항목에 `holdLimit`이 없다(기대 `'3'`) |
+| H6 | `HOT-252 Stream 릴레이는 holdLimit을 …`(seat-event 단위 둘, seat-stream-relay 단위 하나) | 실패 셋 | `toSeatEvent`·`toLedgerHoldEvent`가 `holdLimit`을 옮기지 않고, 릴레이가 부호기에 넘기는 SeatEvent에도 없다 |
+| H7 | `HOT-252 마이그레이션: 0027 seat_hold.hold_limit과 CHECK`(purchase-migration 통합) | 실패 | 저널에 `0027_` 마이그레이션이 없다 |
+| A1 | `PRF-203 회차 지정 시각이 지금 + 5분을 넘으면 …`(pg-sub-provider 단위) | 실패 | 지금 + 5분 + 1ms를 받아 `written: true`다 |
+| A2 | `PRF-203 먼 미래 지정이 거절되어 …`(payment-sub-provider 통합) | 실패 | 9999년 지정을 받아 `written: true`다 |
+| G1 | `PRF181_payment-svc 서비스 파드 종료 유예는 90초이고 …`(chart.test.mjs) | 실패 | payment-svc Deployment가 차트 기본 30초다 |
+| P1 | `PRF-182 P4 결과 모름을 늦게 푼 주문(T13)의 …`(invariants 통합) | 실패 | 승인 + 30분으로 재어 넷 모두 위반(기대는 반영 + 30분 + 1ms인 한 건) |
+| P2 | `PRF-182 P4 입금 대기에서 온 승인(T16)도 …`(invariants 통합) | 실패 | 반영 + 25분 발권이 승인 + 30분을 넘어 위반 한 건(기대 0) |
+| P3 | `PRF-182 P4 바로 승인(T9)은 …`(invariants 통합) | 처음부터 통과(대조) | 이미 있는 동작이다. M-P1(모든 전이에 greatest(승인, 첫 APPROVED 반영))을 `p4_issue_deadline_exceeded.sql`에 손으로 넣자 실패(위반 0건, 기대 1건)했고 `git checkout`으로 되돌렸다 |
+
+- **수**: 새 시험 17개(계획 13항목. H3은 통합·planRebuild·메모리 셋, H6은 toSeatEvent·toLedgerHoldEvent·릴레이 셋으로 나눔) 가운데 16개가 실패, P3 하나가 처음부터 통과(위 표본으로 한 번 실패를 봄). 단위 6개 모두 실패(purchase 5, payment 1), 렌더 1개 실패, 통합 10개 가운데 9개 실패(purchase 6, payment 1, invariant-checker 2)와 P3 통과.
+- **기존 시험 고침이라 함께 실패하는 것**: 계획 §3의 인터페이스(`RebuildHold.holdLimit`·`RebuildLedgerRow.holdLimit: number | null`)에 맞춰 seat-rebuild-source 통합 넷(holds 둘, saleHolds, ledgerRows)의 기대값에 `holdLimit`을 넣었다. 칸이 없어 실패하고, 칸만 임시로 더해도 읽기가 `holdLimit`을 주지 않아 실패한다. purchase-migration `check 제약 이름이 schema.ts와 같게 DB에 있다`는 목록에 `seat_hold_hold_limit_check`를 더해 실패한다(제약 이름은 정본에 없어 PostgreSQL 기본 이름 꼴로 정했다).
+- **통과를 지킨 것**: AssignEventPg 기존 호출 넷(단위 셋, 통합 하나)은 시계를 넘겨 그대로 통과한다. §6의 나머지 파일(seat-hold-ledger-e2e, seat-stream-relay 통합)과 단위 rebuild-plan·seat-rebuilder는 통과한다(원장 도우미에 `holdLimit: null` 기본값).
+- **틀린 구현 하나 더 본 것**: G1은 서비스 값 파일만 90으로 고친 꼴(M-G1의 '합본을 빠뜨림')을 손으로 넣어 합본 줄에서 실패(60 ≠ 90)하는 것을 보고 되돌렸다.
+- **contracts 생성물**: 생성물이 없어 컴파일되지 않는 시험은 없다. seat-event 단위의 `SeatEvent.safeParse`는 지금 생성물(모르는 칸을 버림)과 다시 만든 생성물 모두에서 통과한다.
+- **빈 뼈대**: `AssignEventPgDeps.clock`(필수), `SeatEventMessage.holdLimit?`, `LedgerHoldEvent.holdLimit?`, `RebuildSeat` 두 갈래의 `holdLimit?`, `RebuildHold.holdLimit?`·`RebuildLedgerRow.holdLimit?`(계획은 필수 칸이지만 제품 코드가 컴파일되게 선택 칸으로 둠. 구현 담당이 필수로 바꾼다). 동작은 없다. `tsc --noEmit`은 payment-svc·invariant-checker·purchase-svc 모두 이 변경으로 생긴 오류가 없다(purchase-svc는 이 작업 폴더에 `@peaket/shuffle` 빌드가 없어 queue-svc 쪽 기존 오류만 난다).
 
 ## 시험 이의
 
