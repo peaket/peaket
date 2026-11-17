@@ -476,6 +476,93 @@ export interface ReviewStore {
 
 높음은 없다. N1(중간)을 고치고, §9.4 통합 시험이 실제 DB에서 통과하는 것을 본 뒤 합친다. N2~N4는 정리 목록에 올려도 된다(N3은 고친 곳 검증 담당에게 넘긴다).
 
+#### 10.5 N1·N3 반영 계획(2026-11-17)
+
+- **계획 담당**: `w8a2-n1-plan`(claude-opus-5-5). 이 묶음의 시험·구현·리뷰는 맡지 않았다. 소유자 결정(2026-11-17): N1을 고친 뒤 합친다. N3도 함께 고친다. N2·N4는 갈래 3 구간 끝 정리 목록(docs/lanes/lane3.md, 이 계획 커밋)으로 넘긴다. 절 번호는 §10.1~10.4가 이미 있어 10.5로 했다.
+- **차례**: 리뷰 반영이다. 시험 담당이 먼저 시험을 고치고 실패를 본다(`Role: review-fix`, `Fix-By: test`, `Finding: N1`·`N3`). 그다음 구현 담당이 고친다(`Fix-By: impl`, `Finding: N1`). N3은 시험만 고친다. 마이그레이션은 바꾸지 않는다(0026 그대로, 새 번호 없음. `core_app`의 `held_event` 읽기에 `id`가 이미 들어 있다).
+- **정본(이 계획 커밋에 먼저 씀)**: docs/features/identity.md §8 '손으로 처리'(셈 기준·상한·응답·운영 줄)와 §12 I-T83 ⑨, docs/data.md §4의 15 '표 정의'(`id` 칸, 해독하지 못한 사건의 빈 `event_key`), docs/security/asvs/catalog-review.md v5.0.0-16.2.1(운영 줄 칸).
+
+**정한 것(정본 docs/features/identity.md §8 '손으로 처리')**
+- **셈 기준**: 이 호출이 `reprocessed_at`을 적은 보류 행 수다. `event_key`가 있든 없든 센다.
+- **상한**: 한 번에 처리하는 보류 행은 보류 행 ID(`held_event.id`) 차례로 50개 [가정]까지다(`MANUAL_PURGE_HELD_LIMIT`). 한 계정의 탈퇴 사건은 하나라 보류 행은 같은 사건을 다시 받은 만큼(보통 몇 개)이다. 목록만 자르지 않고 처리 자체를 50개로 묶는다. 목록만 자르면 처리했는데 운영 줄에 없는 행이 생기기 때문이다. 남은 행이 있으면 다시 부르고, 409 `withdrawal-not-held`가 끝 신호다.
+- **응답 200**: `{ purged: number(0 이상), heldEvents: number(1~50), heldEventIds: string[](uuid 1~50개, 보류 행 ID 차례, 길이 = heldEvents) }`.
+- **운영 줄 `review-purge-manual`**(커밋 뒤 하나): `{ kind, requestedBy, reason, purged, heldEvents, held: [{ id, eventKey }] }`. `held`는 응답 `heldEventIds`와 같은 차례이고, 키 없는 행은 `eventKey: null`이다. 옛 칸 `heldEventKeys`는 없앤다. 계정 ID와, 계정 ID와 같은 값인 업무 키·Kafka 키는 싣지 않는다. 보류 행 ID는 보류한 시각과 무작위 값으로 만든 uuidv7이라 개인정보가 아니다.
+
+| 나눔 | 파일·함수 | 고칠 것 |
+| --- | --- | --- |
+| 도메인 | `services/core-svc/src/modules/review/domain/review.ts`(`WITHDRAWAL_RECHECK_DELAY_MS` 옆, 210줄) | `export const MANUAL_PURGE_HELD_LIMIT = 50;` |
+| 포트 | `…/review/domain/ports.ts` `ReviewStore.purgeHeldWithdrawal`(77줄) | 아래 꼴로 바꾼다. 설명 주석에 상한·차례·'키 없는 행 포함'을 적는다 |
+| DB 저장소 | `…/review/adapters/db/drizzle-review-store.ts` `purgeHeldWithdrawal`(323~344줄, 리뷰의 342줄) | 잠금 문장을 `order by id limit ${o.limit} for update`로(`order by id`는 이미 있다). 돌려주는 값은 `held: held.map((h) => ({ id: h.id, eventKey: h.event_key }))`이다. 키 없는 행을 빼는 `flatMap`을 없앤다 |
+| 메모리 저장소 | `…/review/adapters/memory-review-store.ts` `MemoryHeldEvent`(61줄)·`purgeHeldWithdrawal`(211~223줄, 리뷰의 222줄) | `MemoryHeldEvent`에 `id: string`(필수)을 더한다. 거른 행을 `id` 글자 차례(PostgreSQL uuid 차례와 같다)로 정렬해 `limit`개만 처리하고, `held`를 같은 꼴로 돌려준다 |
+| 유스케이스 | `…/review/application/reviews.ts` `Reviews.purgeHeldWithdrawal`(335~342줄, 리뷰의 340~341줄) | 저장소에 `limit: MANUAL_PURGE_HELD_LIMIT`를 넘긴다. 운영 줄을 위 꼴로 바꾼다(`heldEventKeys` 없앰). 돌려주는 값은 `{ purged, heldEvents: r.held.length, heldEventIds: r.held.map((h) => h.id) }`이다. 주석 331줄의 '보류 사건 eventKey'도 고친다 |
+| 내부 경로 | `…/review/inbound/internal-review.controller.ts` 응답 스키마 `View`(14줄)·머리 주석 | `z.object({ purged: z.number().int().nonnegative(), heldEvents: z.number().int().min(1).max(MANUAL_PURGE_HELD_LIMIT), heldEventIds: z.array(z.uuid()).min(1).max(MANUAL_PURGE_HELD_LIMIT) })` |
+| 시험 | 고침: `services/core-svc/test/review-withdrawn.test.ts`(I-T83 ⑨ HTTP), `test/review-purge.test.ts`(I-T83 ⑨ 유스케이스), `test-int/review-purge-manual.int.test.ts`(N1·N3). 선택으로 단언 하나 더함: `test-int/review-withdrawn-consumer.int.test.ts` | 아래 표. `MemoryHeldEvent`를 넣는 곳(`review-withdrawn.test.ts:256`, `review-purge.test.ts:169`)에는 모두 `id`를 단다 |
+
+```ts
+// services/core-svc/src/modules/review/domain/ports.ts
+/** 손으로 처리한 보류 행 하나 */
+export interface HeldWithdrawalRow {
+  /** held_event.id(uuid) */
+  id: string;
+  /** 해독하지 못한 사건이면 null */
+  eventKey: string | null;
+}
+export interface ReviewStore {
+  /**
+   * 그 계정의 보류된 탈퇴 사건이 있으면 한 트랜잭션에서: 보류 행을 id 차례로 limit개까지 잠금 → 다시 정리 예약(recheckAtMs) → 파기 → 그 행들 reprocessed_at = nowMs.
+   * held는 처리한 행 전부(id 차례, eventKey가 없는 행 포함). 보류된 사건이 없으면 아무것도 바꾸지 않고 undefined
+   */
+  purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number; limit: number }): Promise<{ purged: number; held: HeldWithdrawalRow[] } | undefined>;
+}
+
+// services/core-svc/src/modules/review/application/reviews.ts
+class Reviews {
+  purgeHeldWithdrawal(accountId: string, by: { reason: string; requestedBy: string }): Promise<{ purged: number; heldEvents: number; heldEventIds: string[] }>;
+}
+// 운영 줄: logger.info({ kind: 'review-purge-manual', requestedBy, reason, purged, heldEvents, held: [{ id, eventKey }] }, '보류된 탈퇴 사건을 손으로 처리했다')
+```
+
+| 시험 이름 | 단계 | 단언(정본 값) | 비고 |
+| --- | --- | --- | --- |
+| `I-T83 ⑨ 키 없는 보류 행만 있는 계정도 처리한 보류 행 수와 ID를 돌려주고 운영 줄에 남긴다` | 단위 HTTP(`review-withdrawn.test.ts`, 새로) | 계정 G의 보류 행은 하나뿐이고 해독하지 못한 꼴이다(`{ id: H_G, eventKey: null, businessKey: 'unreadable-1', msgKey: G를 대문자로 }`). 부르면 200 `{ purged: 1, heldEvents: 1, heldEventIds: [H_G] }`, 그 행 `reprocessedAtMs` = 지금, 예약 = 지금 + 16분. 운영 줄은 정확히 하나이고 `purged: 1`, `heldEvents: 1`, `held: [{ id: H_G, eventKey: null }]`이며 `heldEventKeys` 칸이 없다. 줄 글(JSON)에 G·대문자 G가 없다 | N1의 꼴 그대로. 지금 구현은 `heldEvents: 0`이다 |
+| `I-T83 ⑨ 키 있는 행과 없는 행이 섞인 계정은 모두 세고 ID 차례로 싣는다` | 단위 HTTP(`review-withdrawn.test.ts:336` 기존 시험을 고침) | A의 보류 행 셋: 업무 키가 A이고 키 있는 행(`KEY_A1`) 하나, 값을 읽지 못해 Kafka 키(대문자 A)만 A이고 **`eventKey: null`**인 행 둘(지금 시험은 값 없는 행에 `KEY_A2`를 넣어 결함을 덮는다, 리뷰 N1). 대문자 A로 부르면 200 `{ purged: 2, heldEvents: 3, heldEventIds: [세 ID를 글자 차례로] }`. 운영 줄 `held`는 `[{ id, eventKey: KEY_A1 }, { id, eventKey: null }, { id, eventKey: null }]`을 ID 차례로 담고, 응답 차례와 같다. 셋 다 `reprocessedAtMs` = 지금이고 다른 계정의 행은 그대로다. 다시 부르면 409 | ID는 차례가 정해진 고정 글자(예: `0190f3a1-7c2e-7a00-8000-0000000e0a01`~`a03`)로 쓰고, 넣는 차례를 ID 차례와 다르게(a03, a01, a02) 해 정렬을 본다 |
+| `I-T83 ⑨ 한 번에 처리하는 보류 행은 50개까지이고 남은 행은 다시 불러 처리한다` | 단위 유스케이스(`review-purge.test.ts`, 새로, 메모리) | 계정 A의 후기 하나와 키 없는 보류 행 51개를 두되 보류 행은 ID 차례와 다른 차례로 넣는다. 첫 호출은 `{ purged: 1, heldEvents: 50, heldEventIds: ID 차례 앞 50개 }`이고, 가장 큰 ID 행만 `reprocessedAtMs`가 없다. 1분 뒤 두 번째 호출은 `{ purged: 0, heldEvents: 1, heldEventIds: [가장 큰 ID] }`이고 예약 = 두 번째 시각 + 16분(늦은 쪽)이다. 세 번째 호출은 409 | 상한·차례·끝 신호 |
+| `I-T83 ⑨ 손으로 하는 파기는 계정 ID가 UUID가 아니면 거절하고 …`(`review-purge.test.ts:163` 기존) | 단위 유스케이스 | 기대 값을 `{ purged: 1, heldEvents: 1, heldEventIds: [그 행 ID] }`로 고친다 | 고침만 |
+| `I-T83 ⑨ 보류된 탈퇴 사건이 있으면 파기하고 …`(`review-purge-manual.int.test.ts:99` 기존) | 통합(core PostgreSQL, `core_app`) | `h2`를 운영 꼴대로 `eventKey: null`로 넣고(값 없이 Kafka 키만 그 계정, 리뷰가 든 109줄), 키 없는 `h3`(업무 키 `unreadable-…`, Kafka 키 A)을 더한다. 결과는 `{ purged: 2, held: h1·h2·h3을 ID 차례로 }`이고 `h1`만 `eventKey: keyA1`, 나머지는 null이다. 세 행 `reprocessed_at` = 지금, 다른 계정 행은 null | 차례의 기준 값은 관리자 연결로 `order by id`해 읽는다 |
+| `I-T83 ⑨ 키 없는 보류 행만 있는 계정도 처리하고 그 행 ID를 돌려준다` | 통합(새로) | 계정 G의 보류 행 하나(`event_key` null, `business_key` `unreadable-…`, `msg_key` 대문자 G). 결과는 `{ purged: 1, held: [{ id: h, eventKey: null }] }`, `reprocessed_at` = 지금, 예약 = 지금 + 16분 | 실제 SQL의 null 처리 |
+| `I-T83 ⑨ 한 번에 잠그는 보류 행은 ID 차례로 50개까지다` | 통합(새로) | 계정 A에 키 없는 보류 행 51개(`randomUUID` ID). `limit: 50`으로 부르면 `held`의 ID는 관리자 연결로 `order by id`해 읽은 그 계정 보류 행 ID의 앞 50개와 같고, 나머지 하나만 `reprocessed_at`이 null이다. 다시 부르면 `held`가 그 하나다 | Drizzle 쪽 `limit`·`order by`는 메모리 시험으로 볼 수 없다 |
+| `I-T83 ⑨ 보류 행 표시가 실패하면 파기·예약도 남지 않는다`(`review-purge-manual.int.test.ts:127` 기존을 고침, N3) | 통합 | 아래 '한 트랜잭션 증명' 차례대로. 거절 1건, 코드 `P0001`, 오류 글에 `i-t83-n3 recheck=1 review=DELETED`. 그 뒤 후기 VISIBLE, 예약 없음, `reprocessed_at` null. 방아쇠를 지운 뒤 다시 부르면 `purged: 1`, `held`가 `h1` 하나이고 셋 다 남는다 | 마지막 문장만 실패시켜 한 트랜잭션을 증명한다 |
+| `I-T83 ① 실제 Kafka의 탈퇴 사건이 …`(`review-withdrawn-consumer.int.test.ts:128` 기존, 선택) | 통합(core Kafka + PostgreSQL) | 읽지 못한 사건의 보류 행 단언에 `event_key`가 null임을 더한다. N1의 전제(운영 소비자가 해독하지 못한 사건을 키 없이 보류한다)를 실제 소비자로 고정한다 | Kafka 네이티브 모듈이 이 PC에서 막히면 CI 몫 |
+
+**한 트랜잭션 증명(N3)**: 리뷰가 짚은 대로 `REVOKE UPDATE (reprocessed_at)`은 쓰지 않는다. `core_app`의 `held_event` 고치기 권한은 그 칸 하나뿐인데 `SELECT … FOR UPDATE`는 칸 하나 이상의 UPDATE 권한이 있어야 해서, 첫 문장(보류 행 잠금)에서 42501로 끝나기 때문이다. 대신 마지막 문장(`update held_event set reprocessed_at …`)에만 걸리는 방아쇠(트리거, 행이 바뀌기 직전에 도는 함수)를 쓴다. 행 잠금(`FOR UPDATE`)은 방아쇠를 부르지 않는다.
+1. 관리자 연결로 시험 전용 함수와 방아쇠를 만든다. 함수는 같은 트랜잭션에서 앞 문장들이 이미 돈 흔적을 읽어 오류 글에 싣는다. `<A>`·`<r1>`·`<h1>`은 시험이 만든 `randomUUID` 값을 글로 넣는다.
+   ```sql
+   create function i_t83_n3_fail() returns trigger language plpgsql as $$
+   begin
+     raise exception using errcode = 'P0001', message = format('i-t83-n3 recheck=%s review=%s',
+       (select count(*) from review_withdrawal_recheck where account_id = '<A>'::uuid),
+       (select status from review where id = '<r1>'::uuid));
+   end $$;
+   create trigger i_t83_n3 before update on held_event for each row when (old.id = '<h1>'::uuid) execute function i_t83_n3_fail();
+   ```
+   함수는 부른 역할(`core_app`)의 권한으로 돈다. `core_app`은 `review`와 `review_withdrawal_recheck`를 읽을 수 있다(0022). `when (old.id = …)`로 그 행에만 걸어 같은 파일의 다른 시험이 닿지 않게 한다.
+2. `core_app` 저장소로 `purgeHeldWithdrawal(A, …)`를 부른다. 거절이 1건이고, 코드(오류 자신이나 `cause`의 `code`)는 `P0001`, 글(같은 곳의 `message`)에 `i-t83-n3 recheck=1 review=DELETED`가 들어 있다. 방아쇠는 그 트랜잭션 안에서 돌므로, 이 글은 잠금 → 예약 → 파기가 표시보다 먼저 **같은 트랜잭션**에서 돌았다는 증거다.
+3. 관리자 연결로 보면 후기는 VISIBLE, 예약은 없음, `reprocessed_at`은 null이다(셋 다 되돌려졌다).
+4. `finally`에서 `drop trigger if exists i_t83_n3 on held_event`와 `drop function if exists i_t83_n3_fail()`을 한다. 지운 뒤 다시 부르면 셋 다 남는다.
+
+**틀린 구현 표본(N1·N3)**
+- ⓐ `heldEvents`를 키 있는 행만 센다(지금 결함). 키 없는 행만 있는 계정의 단위·통합 시험(`heldEvents: 1`, `held` 길이 1)이 잡는다.
+- ⓑ 응답 수는 바르게 세지만 운영 줄은 옛 `heldEventKeys`(키 있는 행만)를 그대로 싣거나 `held`에서 키 없는 행을 뺀다. 두 단위 HTTP 시험의 `held` 단언이 잡는다.
+- ⓒ 키 없는 행의 `eventKey` 자리에 Kafka 키(`msg_key`)나 업무 키를 대신 싣는다(계정 ID가 운영 줄로 샌다). '줄 글에 G·대문자 G가 없다'와 `eventKey: null` 단언이 잡는다.
+- ⓓ 상한 없이 모두 처리하고 목록만 50개로 자른다(처리 수와 목록이 어긋나고 51번째 행이 운영 줄에 없다). 상한 시험(51번째 `reprocessed_at` 없음, `heldEvents: 50`)이 잡는다.
+- ⓔ 차례 없이 자른다(Drizzle에서 `order by id` 없이 `limit`, 메모리에서 넣은 차례대로 자름). 상한 시험의 'ID 차례 앞 50개'와 섞인 계정 시험의 차례 단언이 잡는다.
+- ⓕ 표시를 파기와 다른 트랜잭션에서 한다. 잠금·예약·파기를 커밋한 뒤 표시하면 후기 DELETED가 남고, 표시를 먼저 따로 하면 방아쇠 오류 글이 `recheck=0 review=VISIBLE`이 된다. 고친 N3 시험이 두 꼴을 다 잡는다. 지금 시험(REVOKE)은 둘 다 첫 문장에서 42501로 끝나 놓친다.
+
+**돌릴 통합 시험(도커 잠금 아래, 합치기 전 조건)**
+- core-svc 폴더에서: `cd D:/ticketpass-lane3-w8b/services/core-svc && npx vitest run --config vitest.integration.config.mjs test-int/review-purge-manual.int.test.ts test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/review-withdrawn.int.test.ts`(§9.4와 같은 다섯. 리뷰 §10.4의 '실제 DB에서 통과' 조건을 이것으로 채운다)
+- 선택(Kafka): `npx vitest run --config vitest.integration.config.mjs test-int/review-withdrawn-consumer.int.test.ts`
+- 싼 게이트: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test`·`typecheck`, 닿는 경로 `npx eslint`, 문서 점검(`python -I -X utf8 tools/doc-check/check_all.py`).
+
 ## 실패 확인
 
 - **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, 계획 커밋 `7901c762` 위. Docker 없이 돌렸다.

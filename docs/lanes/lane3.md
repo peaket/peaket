@@ -77,6 +77,8 @@
 - W8-ci-fix(W4): 언젠가 날짜가 지나 터질 고정 날짜 test-int 넷 — core-svc `catalog`(2026-12 무렵, 근거 약함), `queue-sale-eligibility-copy`(2027-01-01, `PEXPIREAT` 절대 시각), `shop-notify`(2027-03, 시스템 시계로 `NOT_STARTED`), purchase-svc `seat-hold-ledger`(2031). 기준 시각을 서버 시각에서 잡게 고친다(docs/review/plans/W8-ci-fix.md (나)).
 - W8-ci-fix(W1·W2): `cancellation.int` 기준 '3일 전'의 까닭 주석이 없고(421·433행 두 시험은 반납이 늘 NOT_READY 길), `priority-hold.int` B1-01·⑦ 만료 회수는 아직 PC 시계 기준이라 컨테이너 시계와 어긋나면 흔들릴 수 있다(⑦ 여유 약 50ms).
 - BAT-415(시험 이의 7): payment 어댑터 `CANCEL_IDEM_KEY`를 취소 ID 규칙(9~64자, 접두 포함 16자 이상)에 맞게 좁히고, 짧은 키를 쓰는 시험 54곳(toss 52·simulator 1·pg-circuit 1)을 늘린다. 입력 검사가 이미 9자 이상만 받아 운영 동작은 같다.
+- W8-audit2a(다시 보기 N2): 이전 판 행 고치기 정비 일(`review-purge-legacy`)이 멈춤 신호로 끝나도 남은 대상 수를 세지만, 플랫폼 정비 반복은 신호가 끊기면 '정비 일 끝' 줄을 적지 않고 빠져나가 그 수가 어디에도 남지 않고, 표 전체를 훑는 세기 한 번만큼 종료·리더 넘김이 늦어진다. 신호가 끊겼으면 세지 않거나 주석을 실제 동작에 맞춘다(services/core-svc `review-maintenance.ts`, packages/platform `maintenance.ts`)
+- W8-audit2a(다시 보기 N4): 메모리 후기 저장소의 새 상수 `ACCOUNTS_WITHDRAWN`이 `isLegacyRow` 설명 주석과 함수 사이에 끼어 주석이 상수에 붙었고, 토픽 글을 `ACCOUNTS_WITHDRAWN_TOPIC`(`account-withdrawn.handler.ts`)과 따로 두 저장소에 적었다. 주석 자리를 바로잡고 한 상수를 함께 쓴다(services/core-svc `memory-review-store.ts`·`drizzle-review-store.ts`, 동작 영향 없음)
 
 ## 진행 로그
 - 2026-11-16 W8-ci-fix(R-650): develop CI 43799265031의 purchase `priority-hold.int`(고정 날짜 vs Valkey TIME, S-T37 넷 실패, 17:00 KST 뒤 다섯째)와 11-20 뒤 터질 `cancellation.int`의 기준 시각을 Valkey TIME에서 잡게 시험만 고쳤다. 변이 3/3, 리뷰 낮음 4. 남은 고정 날짜 넷은 정리 목록.
