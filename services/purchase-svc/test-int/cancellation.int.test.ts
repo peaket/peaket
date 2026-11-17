@@ -55,6 +55,7 @@ import { type ShardSubscriber, shardSubscriber, startValkey, type ValkeyContaine
 
 // 기준 시각(NOW)은 Valkey 서버 시각에서 잡는다(beforeAll). 판매 보관 시한(NOW + 7일)을 Lua가 PEXPIREAT·Redis TIME과 견주므로
 // 고정 날짜로 두면 그날이 지난 뒤 반납 단언이 깨진다(W8-ci-fix). 서버 기준 한국 날짜의 3일 전 10:00(한국 시각)으로 둔다
+// 공연 시각도 고정 날짜로 두지 않고 NOW에서 센다: 공제 구간(달력일)이 오늘 날짜에 따라 바뀌지 않게 한다(다시 쌓은 뒤 고침 2026-11-17)
 let NOW: number;
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -574,15 +575,15 @@ describe('R-T3·R-T4 결제자와 보유자', () => {
   });
 
   test('R-T4 돌려받은 티켓을 결제자가 공연 4일 전에 취소하면 20% 공제로 처음 결제의 부분 취소 한 번으로 환급한다', async () => {
-    // 권면 33,333원, 공연 2026-11-20 19:00(+09:00), 예매 2026-11-01 10:00, 지금 2026-11-16 10:00(공연 4일 전, 공제 20%)
-    const w = await world({ eventStartsAtMs: Date.parse('2026-11-20T19:00:00+09:00'), ticketPrice: 33_333 });
+    // 권면 33,333원, 공연 NOW + 7일 19:00(한국 시각), 예매 NOW − 12일, 지금 NOW + 3일 10:00(공연 4일 전 달력일, 공제 20%. 예매 뒤 영업시간 24시간이 지나 24시간 안 무료가 아니다)
+    const w = await world({ eventStartsAtMs: NOW + 7 * DAY + 9 * HOUR, ticketPrice: 33_333 });
     // 양도 기능(GAT-050) 전이라 '받은 사람에게 넘어갔다가 돌려받음'을 SQL로 흉내 낸다: 보유자 결제자 → 받은 사람(version 1) → 결제자(version 2)
     await ticketDb.pool.query('update ticket set account_id = $2, version = 1 where id = $1', [w.ticketId, randomUUID()]);
     await ticketDb.pool.query('update ticket set account_id = $2, version = 2 where id = $1', [w.ticketId, w.accountId]);
     gatewayOutcome = 'CANCELLED';
     gatewayCalls = [];
     const cancellationId = randomUUID();
-    const nowMs = Date.parse('2026-11-16T10:00:00+09:00');
+    const nowMs = NOW + 3 * DAY;
     await expect(cancelOf(w, cancellationId, 'USER', nowMs)).resolves.toEqual({ status: 'ACCEPTED', cancellationId, refundAmount: 26_667, refundAfterEntryClose: false });
     expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', reason: 'USER', deduction_bp: 2_000, deduction_amount: 6_666, refund_amount: 26_667, refund_due_at: null });
     // 처음 결제(그 주문의 원래 결제 참조)로 한 번, 환불 계좌 없이
@@ -601,8 +602,8 @@ describe('R-T3·R-T4 결제자와 보유자', () => {
 // ---- BAT-415 리뷰 반영 B2(계획 §11 S2, docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기') ----
 describe('GAT-080 S2 앞 시도가 티켓 단계만 마친 팬 취소 잇기 [실제 ticket-svc·payment-svc]', () => {
   test('GAT-080 S2 첫 팬 취소가 티켓 단계만 마친 뒤 새 키로 다시 누르면 첫 취소 ID로 좌석·취소 행·환급을 마친다', async () => {
-    // 공연 2026-11-23 19:00(+09:00): ticket-svc가 키를 폐기하는 NOW(11-13)는 10일 전(공제 0%), K2를 누르는 하루 뒤는 9일 전(10%)
-    const w = await world({ eventStartsAtMs: Date.parse('2026-11-23T19:00:00+09:00'), ticketPrice: 33_333 });
+    // 공연 NOW + 10일 19:00(한국 시각): ticket-svc가 키를 폐기하는 NOW는 공연 10일 전 달력일(공제 0%), K2를 누르는 하루 뒤(NOW + 1일)는 9일 전(10%)
+    const w = await world({ eventStartsAtMs: NOW + 10 * DAY + 9 * HOUR, ticketPrice: 33_333 });
     const real = new DrizzleSeatReturns(sales, seatMap, new RedisSeatReturnNotices(redis));
     let failures = 0;
     const flaky: SeatReturns = {
@@ -781,9 +782,14 @@ describe('BAT-420 마감 뒤 환급의 입장 기록 대조 [실제 ticket-svc·
 
 // ---- BAT-415 리뷰 반영 B2 보충(계획 §11 보충, 2ab218ad, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우') ----
 describe('GAT-080 S4 공연 시작 뒤 다시 누른 팬 취소 [실제 ticket-svc·payment-svc]', () => {
-  // 이 파일의 ticket-svc는 키 폐기 시각을 NOW(2026-11-13 10:00 KST)로 적는다. 공연을 2026-11-17 19:00(+09:00)에 두면 첫 키 폐기는 공연 4일 전(공제 20%)이다
-  const EVENT_AT = Date.parse('2026-11-17T19:00:00+09:00');
-  const AFTER_START = EVENT_AT + 60_000;
+  // 이 파일의 ticket-svc는 키 폐기 시각을 NOW(서버 기준 한국 날짜의 3일 전 10:00)로 적는다. 공연을 NOW + 4일 19:00(한국 시각)에 두면 첫 키 폐기는 공연 4일 전 달력일(공제 20%)이다.
+  // NOW는 파일의 beforeAll에서 정해지므로 공연 시각도 그 뒤(이 묶음의 beforeAll)에 정한다
+  let EVENT_AT: number;
+  let AFTER_START: number;
+  beforeAll(() => {
+    EVENT_AT = NOW + 4 * DAY + 9 * HOUR;
+    AFTER_START = EVENT_AT + 60_000;
+  });
   /** 첫 시도 K1이 ticket-svc 키 폐기를 커밋한 뒤 좌석 되돌리기에서 한 번 던진다 */
   const firstFails = async () => {
     const w = await world({ eventStartsAtMs: EVENT_AT, ticketPrice: 33_333 });
@@ -848,8 +854,8 @@ describe('GAT-080 S4 공연 시작 뒤 다시 누른 팬 취소 [실제 ticket-s
 // ---- 다시 보기 R1(계획 §11 보충 3, 78d8dbd8, docs/features/payment.md §4.1 '이어 갈 수 있는 앞 기록은 팬 취소뿐이다') ----
 describe('GAT-080 S5 일괄 환불 항목이 티켓 단계만 마친 표 [실제 ticket-svc·payment-svc]', () => {
   test('GAT-080 S5 일괄 환불 항목이 티켓 단계만 마친 표에 팬이 새 키로 누르면 아무것도 쓰지 않고, 항목 재시도가 공제 0원·회차 취소 요청 ID로 마친다', async () => {
-    // 공연 2026-11-17 19:00(+09:00): 지금(NOW, 11-13)은 공연 4일 전이라 팬 취소(USER)였다면 20% 공제인 날이다
-    const w = await world({ eventStartsAtMs: Date.parse('2026-11-17T19:00:00+09:00'), ticketPrice: 33_333 });
+    // 공연 NOW + 4일 19:00(한국 시각): 지금(NOW)은 공연 4일 전 달력일이라 팬 취소(USER)였다면 20% 공제인 날이다
+    const w = await world({ eventStartsAtMs: NOW + 4 * DAY + 9 * HOUR, ticketPrice: 33_333 });
     const real = new DrizzleSeatReturns(sales, seatMap, new RedisSeatReturnNotices(redis));
     let failures = 0;
     const seats: SeatReturns = {

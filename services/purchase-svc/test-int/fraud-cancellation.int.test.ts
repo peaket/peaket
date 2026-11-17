@@ -51,11 +51,14 @@ import { migratePurchase } from '../scripts/migrate.mjs';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
-const kst = (s: string): number => Date.parse(`${s}+09:00`);
-/** 공연 2026-11-20 19:00 → 판매 종료 11-19 19:00 → 취소 마감 11-19 17:00. 지금은 마감 전이다 */
-const NOW = kst('2026-11-16T10:00:00');
-const EVENT_STARTS = kst('2026-11-20T19:00:00');
-const SALE_ENDS = EVENT_STARTS - 86_400_000;
+const DAY = 86_400_000;
+const HOUR = 3_600_000;
+// 기준 시각(NOW)은 Valkey 서버 시각에서 잡는다(beforeAll, cancellation.int와 같은 법). 판매 보관 시한(판매 종료 + 1일)을 Lua가 PEXPIREAT·Redis TIME과 견주므로
+// 고정 날짜로 두면 그날이 지난 뒤 좌석 되돌리기가 NOT_READY가 된다(다시 쌓은 뒤 고침 2026-11-17). 서버 기준 한국 날짜의 3일 전 10:00(한국 시각)으로 둔다.
+/** 공연 NOW + 4일 19:00(한국 시각) → 판매 종료 그 하루 전 19:00 → 취소 마감 그날 17:00. 지금은 마감 전이다 */
+let NOW: number;
+let EVENT_STARTS: number;
+let SALE_ENDS: number;
 const PRICE = 33_333;
 const TOKEN = 'internal-grpc-token-fraud-it';
 const APPROVED_BY = 'commander-2';
@@ -110,9 +113,16 @@ beforeAll(async () => {
   ticketDb = createDatabase({ url: ticketUrl, profile: 'general', max: 6, applicationName: 'fraud-it-ticket' });
   paymentDb = createDatabase({ url: paymentUrl, profile: 'general', max: 6, applicationName: 'fraud-it-payment' });
   admin = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'fraud-it-admin' });
-  await ensureOutboxPartitions(admin, fakeClock({ now: NOW }));
   valkey = await startValkey();
   redis = await createHotRedis({ url: valkey.url });
+  const t = (await redis.command(['TIME'], {})) as unknown[];
+  const serverMs = Number(t[0]) * 1000 + Math.floor(Number(t[1]) / 1000);
+  const KST = 9 * HOUR;
+  const dayStart = Math.floor((serverMs + KST) / DAY) * DAY - KST; // 서버 기준 한국 날짜 0시(UTC 밀리초)
+  NOW = dayStart - 3 * DAY + 10 * HOUR;
+  EVENT_STARTS = NOW + 4 * DAY + 9 * HOUR;
+  SALE_ENDS = EVENT_STARTS - DAY;
+  await ensureOutboxPartitions(admin, fakeClock({ now: NOW }));
   seatMap = new MemorySeatMap();
   sales = new DrizzleSeatSales(purchaseDb);
   store = new RedisSeatStore(redis);
@@ -219,7 +229,7 @@ async function world(n: number): Promise<World> {
     { eventId, layoutVersion: 'v1', seatCount: 20, perAccountLimit: 10, saleEndsAtMs: SALE_ENDS, tierPrices: { R: PRICE } },
     seats.map((s) => ({ seatId: s.seatId, index: s.index, sectionId: 'A', sectionIndex: 0, seatOffset: s.index, tierId: 'R' })),
   );
-  const bookedAt = new Date(kst('2026-11-01T10:00:00'));
+  const bookedAt = new Date(NOW - 15 * DAY);
   const c = await admin.pool.connect();
   try {
     await c.query('begin');
@@ -493,8 +503,8 @@ describe('GAT-080 F21 FAILED끼리의 저장 차례 [실제 DB]', () => {
     expect(failures).toBe(1);
     // 겹친 호출이 그 표를 ticket-svc 실패로 늦게 저장하려 한다
     await fraudStore.saveResults(approvalId, [{ ticketId, outcome: 'FAILED', failureCode: 'TICKET_UNAVAILABLE', expectedHolderAccountId: w.payerId }], NOW + 1_000);
-    // 마감(판매 종료 − 2시간 = 2026-11-19 17:00) 정각에 다시 부르면 티켓 단계 뒤 실패의 나머지를 마친다(F20 (가)와 같은 끝)
-    const late = await flaky.execute(input(kst('2026-11-19T17:00:00')));
+    // 마감(판매 종료 − 2시간 = NOW + 3일 17:00) 정각에 다시 부르면 티켓 단계 뒤 실패의 나머지를 마친다(F20 (가)와 같은 끝)
+    const late = await flaky.execute(input(SALE_ENDS - 2 * HOUR));
     expect(late).toEqual([{ ticketId, outcome: 'ACCEPTED', cancellationId: fraudCancellationId(approvalId, ticketId), refundAmount: PRICE }]);
     expect((await admin.pool.query('select count(*)::int as n from order_cancellation where ticket_id = $1', [ticketId])).rows[0].n).toBe(1);
   });

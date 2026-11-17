@@ -66,7 +66,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.pool.query('truncate payment, payment_event, payment_confirm_job, payment_entry_pause, payment_entry_trial');
+  await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job, payment_entry_pause, payment_entry_trial');
   expect((await control('DELETE', '/sim/faults')).status).toBe(204);
 });
 

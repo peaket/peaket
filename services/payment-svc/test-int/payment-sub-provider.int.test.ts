@@ -89,7 +89,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.pool.query('truncate payment, payment_event, payment_confirm_job, event_pg_config, pg_switch, payment_pg_channel_observed, payment_entry_pause');
+  await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job, event_pg_config, pg_switch, payment_pg_channel_observed, payment_entry_pause');
   expect((await control(portoneSim, 'PUT', '/sim/portone/channels', { channels: { [CHANNEL]: 'KCP_V2' } })).status).toBe(204);
 });
 

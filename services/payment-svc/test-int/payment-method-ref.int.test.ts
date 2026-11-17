@@ -146,7 +146,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.pool.query('truncate payment, payment_event, payment_confirm_job');
+  await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job');
   await admin.pool.query('delete from outbox');
   expect((await control('DELETE', '/sim/faults')).status).toBe(204);
   // 시계가 멈춰 있어 호출 토큰이 다시 차지 않는다. 시험마다 1초 밀어 채운다(포트원은 승인 한 건이 토큰 2개다)

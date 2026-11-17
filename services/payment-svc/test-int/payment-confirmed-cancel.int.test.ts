@@ -118,7 +118,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   // payment_cancel(0021)이 payment를 가리키므로 cascade로 함께 비운다
-  await admin.pool.query('truncate payment, payment_event, payment_confirm_job cascade');
+  await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job');
   gatewayOutcome = 'CANCELLED';
   gatewayCalls = [];
   queryAnswer = { kind: 'UNKNOWN' };

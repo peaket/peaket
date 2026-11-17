@@ -164,7 +164,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.pool.query('truncate payment, payment_event, payment_confirm_job, webhook_receipt, outbox');
+  await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job, webhook_receipt, outbox');
   queryHooks.clear();
   h.logs.length = 0;
   // 시계를 조금 밀어 시험끼리 토큰·로그 문을 나눈다

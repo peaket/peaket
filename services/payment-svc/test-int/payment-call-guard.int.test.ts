@@ -132,7 +132,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.pool.query('truncate payment, payment_event, payment_confirm_job');
+  await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job');
   expect((await sim.control('DELETE', '/sim/faults')).status).toBe(204);
   sim.calls.length = 0;
   sim.active = 0;

@@ -161,7 +161,7 @@ async function buildHarness(): Promise<Harness> {
 }
 
 beforeEach(async () => {
-  await admin.pool.query('truncate payment, payment_event, payment_confirm_job, webhook_receipt, outbox');
+  await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job, webhook_receipt, outbox');
   await admin.pool.query('truncate test_hooks.fail_key, test_hooks.settle_key');
   simQueries.length = 0;
   const h = await built?.catch(() => undefined);
