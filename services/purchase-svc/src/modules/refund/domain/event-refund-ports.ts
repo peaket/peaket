@@ -34,13 +34,13 @@ export interface EventRefundStore {
     outbox?: readonly EventRefundOutboxMessage[],
     extra?: { readonly deductionGaps?: readonly string[] },
   ): Promise<EventCancellationRequest>;
-  /** 진행률·상태·일시정지 표시를 바꾼다 */
+  /** 진행률·상태·일시정지 표시를 통째로 바꾼다. 서비스의 진행률 쓰기는 W9-fix1 N8부터 updateLocked만 쓴다(겹친 쓰기가 남의 멈춤을 지우지 않게) */
   update(request: EventCancellationRequest): Promise<void>;
   /** 실행 중(RUNNING·REFUND_WINDOW)일 때만 진행률을 바꾼다. 그 사이 PAUSED가 됐으면 덮지 않고 false */
   updateActive(request: EventCancellationRequest): Promise<boolean>;
   /**
    * W9-fix1 N8(transfer-refund §5 '멈춤 표시는 합쳐 쓴다'): 요청 행을 FOR NO KEY UPDATE로 잠근 트랜잭션에서 지금 행을 읽어 동기 함수 next를 부르고,
-   * 돌려준 값을 쓴다. undefined면 쓰지 않는다. 행이 없으면 undefined. 쓴 값을 돌려준다(빈 뼈대: 시험 담당, 구현 전)
+   * 돌려준 값을 쓴다. undefined면 쓰지 않는다. 행이 없으면 undefined. 쓴 값을 돌려준다. 서비스의 진행률 쓰기(실행 끝·멈춤·재개·창 닫기)는 모두 이 길이다
    */
   updateLocked(requestId: string, next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined>;
   items(requestId: string): Promise<readonly EventRefundItem[]>;
@@ -216,7 +216,7 @@ export interface EventRefundClaims {
   claimOrders(requestId: string, nowMs: number, limitOrders: number): Promise<{ readonly claimToken: string; readonly items: readonly EventRefundItem[]; readonly claimedUntilMs: number }>;
   /**
    * W9-fix1 N3(transfer-refund §5 '잡기 늘리기'): 같은 요청·같은 잡기 값·claimed_until > nowMs·PENDING·UNKNOWN인 행의 claimed_until을 nowMs + 60초로 한 문장으로 쓴다.
-   * 늘린 새 기한을 주고, 0행이면(잡기를 잃었거나 기한이 지남) undefined다(빈 뼈대: 시험 담당, 구현 전)
+   * 늘린 새 기한을 주고, 0행이면(잡기를 잃었거나 기한이 지남) undefined다. 잡은 쪽은 표를 보내기 직전 남은 기한이 EVENT_REFUND_CLAIM_EXTEND_BELOW_MS보다 짧을 때만 부른다
    */
   extend(requestId: string, claimToken: string, nowMs: number): Promise<number | undefined>;
   /**

@@ -51,6 +51,7 @@ import {
   DrizzleEventRefundTargets,
   DrizzlePendingCancellationConversions,
   DrizzleSeatReturns,
+  EVENT_REFUND_TICKET_DEADLINE_MS,
   EventRefundCancellerRouter,
   EventRefundLoop,
   EventRefundService,
@@ -288,7 +289,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           fanNotifier: new OutboxEventRefundFanNotifier(),
           ...(opsClient ? { notice: new HttpRefundFailureNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN), alert: new HttpEventRefundAlert(opsClient) } : {}),
           nowMs: () => clock.now(),
-          deadlineMs: () => clock.now() + 30_000,
+          deadlineMs: () => clock.now() + EVENT_REFUND_TICKET_DEADLINE_MS,
           concurrency: 8,
           batchSize: 200,
         })

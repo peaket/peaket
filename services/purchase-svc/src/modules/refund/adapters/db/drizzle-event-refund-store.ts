@@ -160,34 +160,31 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
   }
 
   async update(request: EventCancellationRequest): Promise<void> {
-    await this.database.db.execute(sql`
-      update event_cancellation_request
-         set status = ${request.status}, fault = ${request.fault ?? null}, fan_notice_reason = ${request.fanNoticeReason ?? null},
-             postponed_to = ${request.postponedToMs !== undefined ? new Date(request.postponedToMs) : null}::timestamptz,
-             refund_window_closes_at = ${request.refundWindowClosesAtMs !== undefined ? new Date(request.refundWindowClosesAtMs) : null}::timestamptz,
-             ruled_by = ${request.ruledBy ?? null}, confirmed_by = ${request.confirmedBy ?? null}, target_orders = ${request.targetOrders},
-             refund_total = ${request.refundTotal}, compensation_targets = ${request.compensationTargets}, compensation_total = ${request.compensationTotal},
-             progress = ${JSON.stringify(request.progress)}::jsonb, updated_at = ${new Date(request.updatedAtMs)}::timestamptz
-       where id = ${request.requestId}::uuid`);
+    await this.database.db.execute(sql`update event_cancellation_request set ${requestColumns(request)} where id = ${request.requestId}::uuid`);
   }
 
   async updateActive(request: EventCancellationRequest): Promise<boolean> {
     const r = await this.database.db.execute(sql`
-      update event_cancellation_request
-         set status = ${request.status}, fault = ${request.fault ?? null}, fan_notice_reason = ${request.fanNoticeReason ?? null},
-             postponed_to = ${request.postponedToMs !== undefined ? new Date(request.postponedToMs) : null}::timestamptz,
-             refund_window_closes_at = ${request.refundWindowClosesAtMs !== undefined ? new Date(request.refundWindowClosesAtMs) : null}::timestamptz,
-             ruled_by = ${request.ruledBy ?? null}, confirmed_by = ${request.confirmedBy ?? null}, target_orders = ${request.targetOrders},
-             refund_total = ${request.refundTotal}, compensation_targets = ${request.compensationTargets}, compensation_total = ${request.compensationTotal},
-             progress = ${JSON.stringify(request.progress)}::jsonb, updated_at = ${new Date(request.updatedAtMs)}::timestamptz
+      update event_cancellation_request set ${requestColumns(request)}
        where id = ${request.requestId}::uuid and status in ('RUNNING', 'REFUND_WINDOW')
        returning id`);
     return r.rows.length > 0;
   }
 
-  /** W9-fix1 N8 요청 행을 잠근 진행률 쓰기(빈 뼈대: 시험 담당, 구현 전. 동작은 구현 담당이 채운다) */
-  async updateLocked(_requestId: string, _next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined> {
-    throw new Error('아직 없음: DrizzleEventRefundStore.updateLocked');
+  /**
+   * W9-fix1 N8(transfer-refund §5 '멈춤 표시는 합쳐 쓴다'): 요청 행을 FOR NO KEY UPDATE(잡기와 같은 잠금)로 잡은 한 트랜잭션에서 지금 행을 읽어 next를 부르고,
+   * 돌려준 값을 쓴다. 다른 쪽이 그 행을 잡고 있으면 읽기부터 기다리므로 next는 늘 커밋된 최신 멈춤을 받는다. undefined면 쓰지 않는다. 행이 없으면 undefined
+   */
+  async updateLocked(requestId: string, next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined> {
+    return this.database.transaction(async (tx) => {
+      const locked = await tx.execute(sql`select * from event_cancellation_request where id = ${requestId}::uuid for no key update`);
+      const row = locked.rows[0] as unknown as RequestRow | undefined;
+      if (!row) return undefined;
+      const written = next(toRequest(row));
+      if (written === undefined) return undefined;
+      const r = await tx.execute(sql`update event_cancellation_request set ${requestColumns(written)} where id = ${requestId}::uuid returning *`);
+      return toRequest(r.rows[0] as unknown as RequestRow);
+    });
   }
 
   /**
@@ -318,6 +315,16 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
        limit ${limit}`);
     return (r.rows as unknown as RequestRow[]).map(toRequest);
   }
+}
+
+/** 요청 행에서 바꿀 수 있는 칸(update·updateActive·updateLocked가 같은 꼴로 쓴다) */
+function requestColumns(request: EventCancellationRequest) {
+  return sql`status = ${request.status}, fault = ${request.fault ?? null}, fan_notice_reason = ${request.fanNoticeReason ?? null},
+             postponed_to = ${request.postponedToMs !== undefined ? new Date(request.postponedToMs) : null}::timestamptz,
+             refund_window_closes_at = ${request.refundWindowClosesAtMs !== undefined ? new Date(request.refundWindowClosesAtMs) : null}::timestamptz,
+             ruled_by = ${request.ruledBy ?? null}, confirmed_by = ${request.confirmedBy ?? null}, target_orders = ${request.targetOrders},
+             refund_total = ${request.refundTotal}, compensation_targets = ${request.compensationTargets}, compensation_total = ${request.compensationTotal},
+             progress = ${JSON.stringify(request.progress)}::jsonb, updated_at = ${new Date(request.updatedAtMs)}::timestamptz`;
 }
 
 /**

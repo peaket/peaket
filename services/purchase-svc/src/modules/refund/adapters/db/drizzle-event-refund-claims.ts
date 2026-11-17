@@ -119,9 +119,25 @@ export class DrizzleEventRefundClaims implements EventRefundClaims {
     });
   }
 
-  /** W9-fix1 N3 잡기 늘리기(빈 뼈대: 시험 담당, 구현 전. 동작은 구현 담당이 채운다) */
-  async extend(_requestId: string, _claimToken: string, _nowMs: number): Promise<number | undefined> {
-    throw new Error('아직 없음: DrizzleEventRefundClaims.extend');
+  /**
+   * W9-fix1 N3 잡기 늘리기(transfer-refund §5 '잡기 늘리기'): 그 잡기 값이 같고 기한이 아직 지나지 않은(claimed_until > 지금) 처리할 항목(PENDING·UNKNOWN)에
+   * claimed_until = 지금 + 60초 [가정]을 한 문장의 조건부 갱신으로 쓴다. 0행이면(잡기를 잃었거나 기한이 지남) undefined이고 지난 잡기를 되살리지 않는다.
+   * 잡기(claimOrders)와 같은 요청 행 잠금 뒤에 서서, 기한 경계에서 다른 쪽의 다시 잡기와 한 주문의 행을 나눠 갖지 않는다
+   */
+  async extend(requestId: string, claimToken: string, nowMs: number): Promise<number | undefined> {
+    const untilMs = nowMs + EVENT_REFUND_CLAIM_MS;
+    return this.database.transaction(async (tx) => {
+      await tx.execute(sql`select id from event_cancellation_request where id = ${requestId}::uuid for no key update`);
+      const r = await tx.execute(sql`
+        update event_refund_item
+           set claimed_until = ${new Date(untilMs)}::timestamptz
+         where request_id = ${requestId}::uuid
+           and claim_token = ${claimToken}::uuid
+           and claimed_until > ${new Date(nowMs)}::timestamptz
+           and status in ('PENDING', 'UNKNOWN')
+         returning ticket_id`);
+      return r.rows.length > 0 ? untilMs : undefined;
+    });
   }
 
   /** 그 잡기 값의 남은 잡기를 푼다(처리하지 않은 항목을 다른 쪽이 기한을 기다리지 않고 잡게) */

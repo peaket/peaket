@@ -13,6 +13,7 @@ import {
   eventRefundPreviewOf,
   eventRefundRetryDelayMs,
   EVENT_REFUND_AUTO_STOP,
+  mergePauses,
   progressOf,
   rateBp,
   type EventCancellationRequest,
@@ -26,15 +27,16 @@ import {
   type RefundPauseReason,
 } from '../domain/event-refund.js';
 import { CsCaseReopenTick } from './cs-case-reopen.js';
-import type {
-  EventRefundApplyInput,
-  EventRefundCloseWindowInput,
-  EventRefundOutboxMessage,
-  EventRefundPauseInput,
-  EventRefundPreviewInput,
-  EventRefundResumeInput,
-  EventRefundServiceDeps,
-  EventRefundStartInput,
+import {
+  EVENT_REFUND_CLAIM_EXTEND_BELOW_MS,
+  type EventRefundApplyInput,
+  type EventRefundCloseWindowInput,
+  type EventRefundOutboxMessage,
+  type EventRefundPauseInput,
+  type EventRefundPreviewInput,
+  type EventRefundResumeInput,
+  type EventRefundServiceDeps,
+  type EventRefundStartInput,
 } from '../domain/event-refund-ports.js';
 import { parseEventRefundHold, type EventRefundHoldInput, type EventRefundHoldState } from '../domain/event-refund-hold.js';
 
@@ -52,8 +54,18 @@ export class EventRefundError extends Error {
   }
 }
 
+/** 저장된 진행률의 멈춘 결제사와 사유. 진행률에 결제사 몫이 없는 행(칸 기본값 '{}')은 멈춤 없음으로 본다 */
 const pausedOf = (request: EventCancellationRequest): { pg: RefundPgProvider; reason: RefundPauseReason }[] =>
-  request.progress.perPg.filter((p) => p.state === 'PAUSED' && p.pauseReason !== undefined).map((p) => ({ pg: p.pg, reason: p.pauseReason! }));
+  (request.progress.perPg ?? []).filter((p) => p.state === 'PAUSED' && p.pauseReason !== undefined).map((p) => ({ pg: p.pg, reason: p.pauseReason! }));
+
+/** 끝난 요청(COMPLETED·REJECTED)은 진행률을 다시 쓰지 않는다 */
+const ended = (request: EventCancellationRequest): boolean => request.status === 'COMPLETED' || request.status === 'REJECTED';
+
+/** 잡은 주문의 잡기 값과 그 작업자가 아는 기한(늘리면 바뀐다, W9-fix1 N3) */
+interface HeldClaim {
+  readonly token: string;
+  untilMs: number;
+}
 
 const statusAfterRun = (
   _request: EventCancellationRequest,
@@ -300,18 +312,24 @@ export class EventRefundService {
     if (request.status === 'COMPLETED' || request.status === 'REJECTED') throw new EventRefundError('CONFLICT', '끝난 작업은 멈출 수 없습니다');
     const reason = i.reason.trim();
     if (reason.length === 0) throw new EventRefundError('INVALID', '멈추는 사유가 필요합니다');
-    const pgs = i.pg ? [i.pg] : request.progress.perPg.map((p) => p.pg);
-    const paused = [...pausedOf(request).filter((p) => !pgs.includes(p.pg)), ...pgs.map((pg) => ({ pg, reason: 'MANUAL' as const }))];
     const items = await this.o.store.items(i.requestId);
-    const updated: EventCancellationRequest = { ...request, status: 'PAUSED', progress: progressOf(items, paused, false), updatedAtMs: this.o.nowMs() };
-    await this.o.store.update(updated);
+    const nowMs = this.o.nowMs();
+    // 잠근 DB 값의 멈춤에 MANUAL을 더한다(그사이 다른 실행이 적은 자동 정지를 지우지 않는다, W9-fix1 N8). 결제사를 안 주면 잠근 값의 모든 결제사 몫이다
+    const written = await this.o.store.updateLocked(i.requestId, (current) => {
+      if (ended(current)) return undefined;
+      const pgs = i.pg ? [i.pg] : [...new Set([...items.map((x) => x.pg), ...(current.progress.perPg ?? []).map((p) => p.pg)])];
+      const paused = mergePauses(pausedOf(current), { add: pgs.map((pg) => ({ pg, reason: 'MANUAL' as const })) });
+      return { ...current, status: 'PAUSED', progress: progressOf(items, paused, false), updatedAtMs: nowMs };
+    });
+    if (!written) throw new EventRefundError('CONFLICT', '끝난 작업은 멈출 수 없습니다');
     return this.get(i.requestId);
   }
 
   async resume(i: EventRefundResumeInput): Promise<EventCancellationRequest> {
     const request = await this.get(i.requestId);
     if (request.status === 'COMPLETED' || request.status === 'REJECTED') throw new EventRefundError('CONFLICT', '끝난 작업은 다시 시작할 수 없습니다');
-    const paused = pausedOf(request).filter((p) => (i.pg ? p.pg !== i.pg : false));
+    // 빼는 것은 그 결제사만, 한꺼번에면 재개가 처음 읽은 멈춤만이다(읽은 뒤 생긴 자동 정지는 남는다, W9-fix1 N8)
+    const lift = i.pg ? [i.pg] : pausedOf(request).map((p) => p.pg);
     const items = await this.o.store.items(i.requestId);
     // 수동 재개는 기다리던 재시도를 지금 다시 본다(결과 모름을 결제사 조회로 먼저 끝내는 규칙).
     const nowMs = this.o.nowMs();
@@ -320,9 +338,14 @@ export class EventRefundService {
         await this.o.store.updateItem({ ...item, nextAttemptAtMs: nowMs });
       }
     }
-    const windowOpen = this.#windowOpen(request);
-    const running: EventCancellationRequest = { ...request, status: windowOpen ? 'REFUND_WINDOW' : 'RUNNING', progress: progressOf(items, paused, windowOpen), updatedAtMs: this.o.nowMs() };
-    await this.o.store.update(running);
+    // 상태는 실행 중으로 두고, 남은 멈춤이 있으면 이어 도는 실행이 끝에서 다시 정한다
+    const running = await this.o.store.updateLocked(i.requestId, (current) => {
+      if (ended(current)) return undefined;
+      const windowOpen = this.#windowOpen(current);
+      const paused = mergePauses(pausedOf(current), { lift });
+      return { ...current, status: windowOpen ? 'REFUND_WINDOW' : 'RUNNING', progress: progressOf(items, paused, windowOpen), updatedAtMs: nowMs };
+    });
+    if (!running) throw new EventRefundError('CONFLICT', '끝난 작업은 다시 시작할 수 없습니다');
     const targets = await this.#targets(request.eventId);
     await this.#run(running, targets, this.o.firstBatch ?? 200);
     return this.get(i.requestId);
@@ -426,11 +449,16 @@ export class EventRefundService {
       // 신청과 창 닫기가 겹치면 행 잠금이 먼저 온 쪽만 남긴다. 신청이 이겼으면 applied_at이 있어 여기서 지우지 않는다.
       if (item.appliedAtMs === undefined) await this.o.store.markNotApplied(request.requestId, item.ticketId);
     }
-    const paused = pausedOf(request);
     const after = await this.o.store.items(request.requestId);
-    const progress = progressOf(after, paused, false);
-    const updated: EventCancellationRequest = { ...request, status: statusAfterRun(request, progress, paused, false), progress, updatedAtMs: nowMs };
-    await this.o.store.update(updated);
+    let progress = progressOf(after, pausedOf(request), false);
+    // 잠근 DB 값의 멈춤을 그대로 쓰고, 그사이 PAUSED가 됐으면 상태를 둔다(창을 읽은 뒤 적힌 자동 정지를 지우지 않는다, W9-fix1 N8)
+    await this.o.store.updateLocked(request.requestId, (current) => {
+      if (ended(current)) return undefined;
+      const paused = pausedOf(current);
+      progress = progressOf(after, paused, false);
+      const status = current.status === 'PAUSED' ? 'PAUSED' : statusAfterRun(current, progress, paused, false);
+      return { ...current, status, progress, updatedAtMs: nowMs };
+    });
     await this.o.alert?.raise({
       requestId: request.requestId,
       eventId: request.eventId,
@@ -466,9 +494,11 @@ export class EventRefundService {
     const newlyPaused: { pg: RefundPgProvider; reason: RefundPauseReason; detail: Record<string, unknown> }[] = [];
     /**
      * 항목 하나를 처리하고, 그 항목이 끝났는지(환급·실패) 돌려준다. 멈춤·자동 정지로 보내지 않았거나 재시도를 기다리거나 잡기를 잃었으면 false다.
-     * claimToken이 있으면 쓰기는 잡기 값을 조건으로 한 끝내기(claims.finish)다(웨이브 끝 리뷰 K2). 시도 기록·CS 건·차액 건은 쓰기가 된 뒤에만 남긴다
+     * claim이 있으면 쓰기는 잡기 값을 조건으로 한 끝내기(claims.finish)다(웨이브 끝 리뷰 K2). 시도 기록·CS 건·차액 건은 쓰기가 된 뒤에만 남긴다.
+     * 표를 결제사로 보내기 직전에 남은 잡기 기한이 짧으면 늘리고, 늘리지 못하면 보내지 않는다(W9-fix1 N3)
      */
-    const processItem = async (item: EventRefundItem, claimToken?: string): Promise<boolean> => {
+    const processItem = async (item: EventRefundItem, claim?: HeldClaim): Promise<boolean> => {
+      const claimToken = claim?.token;
       // 실행 중에 사람이 멈췄을 수 있다. 항목마다 저장된 상태를 다시 보고 새 호출을 보내지 않는다
       const current = await this.o.store.find(request.requestId);
       if (current) {
@@ -490,6 +520,7 @@ export class EventRefundService {
       }
       const target = byTicket.get(item.ticketId);
       if (!target) return this.#finishItem(request, item, 'FAILED', 'target-not-found', undefined, { claimToken });
+      if (claim && !(await this.#keepClaim(request, item, claim))) return false;
       let result: Awaited<ReturnType<EventRefundServiceDeps['canceller']['cancel']>>;
       try {
         result = await this.o.canceller.cancel(target, {
@@ -545,8 +576,8 @@ export class EventRefundService {
       return after === 'FAILED';
     };
     /** 같은 주문의 표를 차례로: 재시도할 결과 모름을 처음 보내는 표보다 먼저 하고, 앞 항목이 끝나지 않으면(결과 모름·멈춤·잡기 잃음) 나머지는 이번 실행에서 부르지 않는다(리뷰 B4) */
-    const runGroup = async (group: readonly EventRefundItem[], claimToken?: string): Promise<void> => {
-      for (const item of [...group.filter((i) => i.status === 'UNKNOWN'), ...group.filter((i) => i.status !== 'UNKNOWN')]) if (!(await processItem(item, claimToken))) break;
+    const runGroup = async (group: readonly EventRefundItem[], claim?: HeldClaim): Promise<void> => {
+      for (const item of [...group.filter((i) => i.status === 'UNKNOWN'), ...group.filter((i) => i.status !== 'UNKNOWN')]) if (!(await processItem(item, claim))) break;
     };
     const workers = Math.max(1, Math.min(this.o.concurrency ?? 8, groups.size || 1));
     const claims = this.o.claims;
@@ -576,7 +607,9 @@ export class EventRefundService {
             budget = 0;
             return;
           }
-          for (const group of groupByOrder(claimed.items).values()) await runGroup(group, claimed.claimToken);
+          // 그 잡기의 기한은 이 작업자만 알고, 늘리면 바뀐다(W9-fix1 N3)
+          const claim: HeldClaim = { token: claimed.claimToken, untilMs: claimed.claimedUntilMs };
+          for (const group of groupByOrder(claimed.items).values()) await runGroup(group, claim);
         }
       };
       settled = await Promise.allSettled(Array.from({ length: workers }, worker));
@@ -591,14 +624,24 @@ export class EventRefundService {
     }
 
     const after = await this.o.store.items(request.requestId);
-    const pausedAfter = [...paused.entries()].map(([pg, reason]) => ({ pg, reason }));
-    const progress = progressOf(after, pausedAfter, this.#windowOpen(request));
-    let status = statusAfterRun(request, progress, pausedAfter, this.#windowOpen(request));
-    // 회차 취소는 그 회차에 끝나지 않은 주문이 있으면 항목이 다 끝나도 COMPLETED로 가지 않는다(늦게 끝난 주문을 쓸어 담는다, ADR-0280 결정 5)
-    if (status === 'COMPLETED' && request.kind === 'CANCEL' && this.o.openOrders && (await this.o.openOrders.count(request.eventId)) > 0) status = 'RUNNING';
-    const updated: EventCancellationRequest = { ...request, status, progress, updatedAtMs: this.o.nowMs() };
-    // 그 사이 사람이 멈췄으면 PAUSED를 RUNNING 진행률로 덮지 않는다
-    await this.o.store.updateActive(updated);
+    // 회차 취소는 그 회차에 끝나지 않은 주문이 있으면 항목이 다 끝나도 COMPLETED로 가지 않는다(늦게 끝난 주문을 쓸어 담는다, ADR-0280 결정 5).
+    // 잠근 쓰기의 next는 동기라 그 수는 잠그기 전에 센다(항목이 다 끝났을 때만)
+    const allEnded = after.every((i) => i.status === 'REFUNDED' || i.status === 'FAILED' || i.status === 'NOT_APPLIED');
+    const openOrders = allEnded && request.kind === 'CANCEL' && this.o.openOrders ? await this.o.openOrders.count(request.eventId) : 0;
+    const added = newlyPaused.map(({ pg, reason }) => ({ pg, reason }));
+    const writtenAtMs = this.o.nowMs();
+    // 진행률은 잠근 DB 값의 멈춤에 이 실행이 새로 판정한 자동 정지만 더해 쓴다(아무것도 빼지 않는다, W9-fix1 N8).
+    // 그사이 PAUSED가 됐으면 상태는 두고 멈춤만 더하며, 끝난 요청은 쓰지 않는다
+    await this.o.store.updateLocked(request.requestId, (current) => {
+      if (ended(current)) return undefined;
+      const merged = mergePauses(pausedOf(current), { add: added });
+      const windowOpen = this.#windowOpen(current);
+      const progress = progressOf(after, merged, windowOpen);
+      if (current.status === 'PAUSED') return { ...current, progress, updatedAtMs: writtenAtMs };
+      let status = statusAfterRun(current, progress, merged, windowOpen);
+      if (status === 'COMPLETED' && openOrders > 0) status = 'RUNNING';
+      return { ...current, status, progress, updatedAtMs: writtenAtMs };
+    });
     for (const p of newlyPaused) {
       await this.o.alert?.raise({
         requestId: request.requestId,
@@ -621,6 +664,8 @@ export class EventRefundService {
 
   /**
    * 재시도를 적거나(시도 상한이면 실패로 끝낸다) 그 뒤의 항목 상태를 돌려준다. UNKNOWN만 다음 실행에서 다시 집는다.
+   * 그 밖 실패(업무 거절 목록 밖의 FAILED 답)는 시도 상한과 같은 끝내기(#finishItem)로 쓴다: 항목 FAILED·다음 시각 빔·행 실패 표시·failure_case_at·
+   * 팬 REFUND_FAILED Outbox가 한 트랜잭션이다(W9-fix1 P3, transfer-refund §5 '주인').
    * 쓰기가 0행이면(잡기를 잃었거나 다른 쪽이 끝냄) LOST이고 아무것도 남기지 않는다(웨이브 끝 리뷰 K2)
    */
   async #retryOrFail(
@@ -632,19 +677,35 @@ export class EventRefundService {
     claimToken?: string,
   ): Promise<'UNKNOWN' | 'FAILED' | 'LOST'> {
     const attempts = item.attempts + 1;
-    if (attempts >= EVENT_REFUND_AUTO_STOP.maxAttempts) {
+    if (status === 'FAILED' || attempts >= EVENT_REFUND_AUTO_STOP.maxAttempts) {
       return (await this.#finishItem(request, item, 'FAILED', error, target, { attempts, claimToken })) ? 'FAILED' : 'LOST';
     }
     const nextAttemptAtMs = this.o.nowMs() + eventRefundRetryDelayMs(attempts);
     const next: EventRefundItem = { ...item, status, attempts, lastError: error, nextAttemptAtMs };
-    // FAILED로 적는 재시도(업무 거절 밖의 실패)도 끝난 항목이라 그 취소 행에 실패를 표시하고(웨이브 끝 리뷰 K1·C1) 일괄 환불 실패 건을 열 대상으로 표시한다(다시 보기 2 N2)
-    const written = await this.#write(request, next, claimToken, status === 'FAILED' ? { cancellationFailure: { lastError: error }, failureCase: true } : {});
-    if (!written) {
+    if (!(await this.#write(request, next, claimToken, {}))) {
       this.#claimLost(request, item);
       return 'LOST';
     }
-    if (status === 'FAILED') await this.#openFailureNow(request, next);
     return status;
+  }
+
+  /**
+   * 잡기 늘리기(W9-fix1 N3, transfer-refund §5 '잡기 늘리기'): 표를 결제사로 보내기 직전에 남은 기한(그 작업자가 아는 기한 − 지금)이
+   * 40초 [가정]보다 짧으면 살아 있는 잡기만 지금 + 60초 [가정]로 늘린다. 늘리지 못하면(0행: 잡기를 잃었거나 기한이 지남) false이고,
+   * 그 표를 보내지 않으며 시도 기록도 없다(경고 event-refund-item-claim-lost). 늘리기가 던지면 그 오류가 그대로 올라간다(보내지 않음)
+   */
+  async #keepClaim(request: EventCancellationRequest, item: EventRefundItem, claim: HeldClaim): Promise<boolean> {
+    const claims = this.o.claims;
+    if (!claims) return true;
+    const nowMs = this.o.nowMs();
+    if (claim.untilMs - nowMs >= EVENT_REFUND_CLAIM_EXTEND_BELOW_MS) return true;
+    const untilMs = await claims.extend(request.requestId, claim.token, nowMs);
+    if (untilMs === undefined) {
+      this.#claimLost(request, item, 'extend');
+      return false;
+    }
+    claim.untilMs = untilMs;
+    return true;
   }
 
   /**
@@ -744,11 +805,16 @@ export class EventRefundService {
     return (await this.o.store.updateItem(next, outbox ?? [], extra)) !== false;
   }
 
-  /** 잡기를 잃었거나 다른 쪽이 먼저 끝낸 항목(쓰기 0행). 시도 기록·팬 알림·CS 건을 남기지 않고 경고 한 번이다 */
-  #claimLost(request: EventCancellationRequest, item: EventRefundItem): void {
+  /**
+   * 잡기를 잃었거나 다른 쪽이 먼저 끝낸 항목(쓰기 0행). 시도 기록·팬 알림·CS 건을 남기지 않고 경고 한 번이다.
+   * stage extend는 보내기 전 잡기 늘리기가 0행이라 그 표를 결제사로 보내지 않은 것이다(W9-fix1 N3)
+   */
+  #claimLost(request: EventCancellationRequest, item: EventRefundItem, stage: 'finish' | 'extend' = 'finish'): void {
     this.o.log?.warn(
-      { event: 'event-refund-item-claim-lost', requestId: request.requestId, ticketId: item.ticketId },
-      'event-refund-item-claim-lost: 잡기를 잃었거나 다른 쪽이 먼저 끝낸 항목이라 쓰지 않았다(시도 기록·알림·CS 건 없음)',
+      { event: 'event-refund-item-claim-lost', requestId: request.requestId, ticketId: item.ticketId, stage },
+      stage === 'extend'
+        ? 'event-refund-item-claim-lost: 보내기 전 잡기를 늘리지 못해(잡기를 잃었거나 기한이 지남) 그 표와 주문의 나머지를 보내지 않았다(시도 기록 없음)'
+        : 'event-refund-item-claim-lost: 잡기를 잃었거나 다른 쪽이 먼저 끝낸 항목이라 쓰지 않았다(시도 기록·알림·CS 건 없음)',
     );
   }
 

@@ -48,9 +48,17 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     return true;
   }
 
-  /** W9-fix1 N8 잠근 진행률 쓰기(빈 뼈대: 시험 담당, 구현 전. 동작은 구현 담당이 채운다) */
-  async updateLocked(_requestId: string, _next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined> {
-    throw new Error('아직 없음: MemoryEventRefundStore.updateLocked');
+  /**
+   * W9-fix1 N8: 지금 값을 읽고 next를 불러 돌려준 값을 쓴다. 읽기와 쓰기 사이에 기다림이 없어(next는 동기) 한 프로세스 안에서는 요청 행 잠금과 같다.
+   * next가 undefined면 쓰지 않는다. 요청이 없으면 undefined
+   */
+  async updateLocked(requestId: string, next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined> {
+    const current = this.requests.get(requestId);
+    if (!current) return undefined;
+    const written = next(current);
+    if (written === undefined) return undefined;
+    this.requests.set(requestId, written);
+    return written;
   }
 
   async items(requestId: string): Promise<readonly EventRefundItem[]> {

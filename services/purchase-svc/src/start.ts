@@ -65,6 +65,7 @@ import {
   DrizzleFraudCancellationStore,
   DrizzlePendingCancellationConversions,
   DrizzleSeatReturns,
+  EVENT_REFUND_TICKET_DEADLINE_MS,
   EventRefundCancellerRouter,
   EventRefundGrpcController,
   EventRefundService,
@@ -403,7 +404,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             },
           },
       nowMs: () => systemClock.now(),
-      deadlineMs: () => systemClock.now() + 30_000,
+      deadlineMs: () => systemClock.now() + EVENT_REFUND_TICKET_DEADLINE_MS,
       concurrency: 8,
     });
     refund.eventRefund = eventRefundService;
