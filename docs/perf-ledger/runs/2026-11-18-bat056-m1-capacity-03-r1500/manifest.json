@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-18-bat056-m1-capacity-03-r1500",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-gw",
+  "scale": {
+    "users": null,
+    "arrival_rps": 1500.0,
+    "duration_s": 30,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/gw.js gw capacity gw-queue/gw-queue-buy proxyCpus=0.5 concurrency=1 delay=fixed:5 rate=1500/s",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "9dc16f666035057ad300f04a328e986d26e668ef",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 3대(CPU 4·메모리 2048Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)",
+    "dropped_iterations": 6
+  },
+  "started_at": "2026-11-17T22:00:26Z",
+  "ended_at": "2026-11-17T22:01:06Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 5.831943,
+    "p95_ms": 6.898198,
+    "p99_ms": 13.335318709999974,
+    "error_rate": 0,
+    "requests": 45001,
+    "rps": 1500.0333333333333,
+    "dropped_iterations": 6
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": false,
+  "invalid_reason": "발생기가 반복을 시작하지 못함(dropped_iterations 6); 발생기 무효: 발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 2); 발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 2); 발생기 2: 발생기가 반복을 시작하지 못함(dropped_iterations 2)",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "게이트웨이 프록시 포화 처리량(local-gw, V-T43 '값의 식'의 파드 포화 처리량, 계획 docs/review/plans/BAT-056.md §5 M1); 보낸 45001(2xx 45001·503 0·429 0·그 밖 0); 프록시 gw-queue 파드 1개, 프록시 EnvoyProxy peaket-proxy-queue CPU 요청 500m·한도 500m, 일꾼 수 1; 프록시 CPU 사용 100.8%",
+  "collected_at": "2026-11-17T22:01:11Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

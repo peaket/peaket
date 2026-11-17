@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-18-bat056-ma-rep-p96-sweep-01-p96-q12-c96-r1",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-gw",
+  "scale": {
+    "users": null,
+    "arrival_rps": 1500.0,
+    "duration_s": 60,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/gw.js gw sweep gw-queue/gw-queue-buy maxConnections=96 maxParallelRequests=96 maxPendingRequests=12 delay=normal rate=1500/s mix=normal",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "9dc16f666035057ad300f04a328e986d26e668ef",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 4·메모리 2048Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-17T22:33:30Z",
+  "ended_at": "2026-11-17T22:34:40Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 5.740134,
+    "p95_ms": 20.71434095,
+    "p99_ms": 24.878351799999706,
+    "error_rate": 0,
+    "requests": 91081,
+    "rps": 1518.0166666666667,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "fail",
+  "notes": "게이트웨이 차단 상한 스윕(local-gw, V-T43, docs/infra.md §4.1): V-T43 ① fail(Envoy 넘침 239(upstream_cx_overflow 239)); 흐름 모두 보낸 91081(2xx 91081·503 0·429 0·그 밖 0); entry 보낸 90001(2xx 90001·503 0·429 0·그 밖 0); hold 보낸 900(2xx 900·503 0·429 0·그 밖 0); pay 보낸 180(2xx 180·503 0·429 0·그 밖 0); 정상 부하 503 0건(세 흐름 합, 허용 0건); 프록시 gw-queue 파드 1개, 프록시 EnvoyProxy peaket-proxy-queue CPU 요청 (없음)·한도 (없음), 일꾼 수 기본(CPU 수); 묶음 httproute/envoy-gateway-system/gw-queue-buy/rule/0; 넘침 239, 처리 중 최대 16, 보류 최대 0",
+  "collected_at": "2026-11-17T22:34:44Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

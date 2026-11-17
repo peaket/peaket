@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-18-bat056-ms-ip-mixed",
+  "kpi": "NFR-028",
+  "version": "v1",
+  "profile": "local-gw",
+  "scale": {
+    "users": null,
+    "arrival_rps": 1150.0,
+    "duration_s": 60,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/gw.js gw ip-limit case=mixed pool=1000/s one=150/s",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "9dc16f666035057ad300f04a328e986d26e668ef",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 4·메모리 2048Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-17T22:59:02Z",
+  "ended_at": "2026-11-17T23:00:12Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 5.587717,
+    "p95_ms": 20.536259,
+    "p99_ms": 21.712845,
+    "error_rate": 0.08694076897436269,
+    "requests": 69001,
+    "rps": 1150.0166666666667,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "pass",
+  "notes": "검색 IP 한도(local-gw, SR-T13 ②, docs/features/search.md §12 '측정 판정'): pass; pool 보낸 60001(2xx 60001·503 0·429 0·그 밖 0); one 보낸 9000(2xx 3001·503 0·429 5999·그 밖 0); 프록시 gw-fan 복제 1, 프록시 EnvoyProxy peaket-proxy CPU 요청 (없음)·한도 (없음), 일꾼 수 기본(CPU 수); 한 IP 통과 상한 3050",
+  "collected_at": "2026-11-17T23:00:17Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,69 @@
+{
+  "run_id": "2026-11-18-bat056-mc-d50-sweep-02-p64-q8-c64-r2",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-gw",
+  "scale": {
+    "users": null,
+    "arrival_rps": 1500.0,
+    "duration_s": 60,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/gw.js gw sweep gw-queue/gw-queue-buy maxConnections=64 maxParallelRequests=64 maxPendingRequests=8 delay=fixed:50 rate=1500/s mix=normal",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "9dc16f666035057ad300f04a328e986d26e668ef",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 4·메모리 2048Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-17T22:52:55Z",
+  "ended_at": "2026-11-17T22:54:05Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 50.717362,
+    "p95_ms": 90.94741219999995,
+    "p99_ms": 146.48061523,
+    "error_rate": 0.27378625853626404,
+    "requests": 91082,
+    "rps": 1518.0333333333333,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "entry_503_p99_3ms",
+      "allowed": 0.01,
+      "trials": 24937,
+      "violations": 7,
+      "cp_upper": 0.000527,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "entry 게이트웨이 503 p99 ≤ 3ms(V-T43 ②)"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "pass",
+  "notes": "게이트웨이 차단 상한 스윕(local-gw, V-T43, docs/infra.md §4.1): V-T43 ② pass; 흐름 모두 보낸 91082(2xx 66145·503 24937·429 0·그 밖 0); entry 보낸 90001(2xx 65064·503 24937·429 0·그 밖 0); hold 보낸 901(2xx 901·503 0·429 0·그 밖 0); pay 보낸 180(2xx 180·503 0·429 0·그 밖 0); 프록시 gw-queue 파드 1개, 프록시 EnvoyProxy peaket-proxy-queue CPU 요청 (없음)·한도 (없음), 일꾼 수 기본(CPU 수); 묶음 httproute/envoy-gateway-system/gw-queue-buy/rule/0; 넘침 43825, 처리 중 최대 60, 보류 최대 9",
+  "collected_at": "2026-11-17T22:54:08Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,7 @@
+2026-11-17T22:46:19Z 측정 폴더: D:\ticketpass-lane1\docs\perf-ledger\runs\2026-11-18-bat056-mc-d500-sweep-03-p128-q16-c128-r3
+2026-11-17T22:46:19Z 첨부: D:\ticketpass-lane1\.cache\peaket-loadtest\2026-11-18-gw-sweep-mwla1mx108dd\step-03\summary.json → k6-summary.json
+2026-11-17T22:46:19Z k6: p99=704.6225082200001 ms, 오류율=0.8248410790158427, 요청=91083, 못 보낸 반복=0
+2026-11-17T22:46:19Z 첨부: D:\ticketpass-lane1\.cache\peaket-loadtest\2026-11-18-gw-sweep-mwla1mx108dd\infra.txt → infra.txt
+2026-11-17T22:46:19Z 원본 버킷(--raw-bucket)이 없어 큰 원본(metrics/·traces/·grafana/·stdout.log)이 폴더에 남는다. Git에는 작은 파일만 넣는다(docs/perf-ledger.md §2.1)
+2026-11-17T22:46:19Z 점검: entry_503_p99_3ms n=75129 k=63 상한=0.001034 → pass
+2026-11-17T22:46:19Z manifest.json 작성

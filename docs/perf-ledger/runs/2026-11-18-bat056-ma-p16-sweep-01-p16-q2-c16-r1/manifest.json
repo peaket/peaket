@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-18-bat056-ma-p16-sweep-01-p16-q2-c16-r1",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-gw",
+  "scale": {
+    "users": null,
+    "arrival_rps": 1500.0,
+    "duration_s": 60,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/gw.js gw sweep gw-queue/gw-queue-buy maxConnections=16 maxParallelRequests=16 maxPendingRequests=2 delay=normal rate=1500/s mix=normal",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "9dc16f666035057ad300f04a328e986d26e668ef",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 4·메모리 2048Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-17T22:13:54Z",
+  "ended_at": "2026-11-17T22:15:04Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 5.716997,
+    "p95_ms": 20.940518299999997,
+    "p99_ms": 99.89281487000001,
+    "error_rate": 0.09970136799806767,
+    "requests": 91082,
+    "rps": 1518.0333333333333,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "fail",
+  "notes": "게이트웨이 차단 상한 스윕(local-gw, V-T43, docs/infra.md §4.1): V-T43 ① fail(정상 부하에서 503 9081건; Envoy 넘침 17305(upstream_cx_overflow 8248, upstream_rq_active_overflow 57, upstream_rq_pending_overflow 9000)); 흐름 모두 보낸 91082(2xx 82001·503 9081·429 0·그 밖 0); entry 보낸 90001(2xx 80920·503 9081·429 0·그 밖 0); hold 보낸 900(2xx 900·503 0·429 0·그 밖 0); pay 보낸 181(2xx 181·503 0·429 0·그 밖 0); 정상 부하 503 9081건(세 흐름 합, 허용 0건); 프록시 gw-queue 파드 1개, 프록시 EnvoyProxy peaket-proxy-queue CPU 요청 (없음)·한도 (없음), 일꾼 수 기본(CPU 수); 묶음 httproute/envoy-gateway-system/gw-queue-buy/rule/0; 넘침 17305, 처리 중 최대 14, 보류 최대 2",
+  "collected_at": "2026-11-17T22:15:09Z",
+  "tool": "tools/perf-ledger/collect.py"
+}
