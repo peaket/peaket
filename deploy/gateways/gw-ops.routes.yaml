@@ -647,7 +647,8 @@ spec:
           name: core-svc
           namespace: core
           port: 8080
-    - matches:
+    - name: ops-event-live
+      matches:
         - path:
             type: RegularExpression
             value: /v1/ops/events/[^/]+/live
@@ -679,7 +680,8 @@ spec:
           port: 8080
       timeouts:
         request: 0s
-    - matches:
+    - name: ops-live
+      matches:
         - path:
             type: Exact
             value: /v1/ops/live

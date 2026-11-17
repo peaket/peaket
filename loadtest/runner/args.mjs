@@ -7,6 +7,7 @@
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통, --main 기본 180]
 //   node loadtest/run.mjs v1 queue|seat-hold|payment …(v0와 같은 인자, docs/verification.md §3.9 'v1 경로'. --namespace·--settle·--hpa-timeline은 없다)
+//   node loadtest/run.mjs gw sweep|capacity|ip-limit …(게이트웨이 차단 상한·검색 IP 한도, BAT-056. 인자 규칙은 ./gw.mjs parseGwArgs가 맡는다)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
 //   seat-hold만: [--keep] [--db-stats], payment만: [--db-stats]
@@ -14,6 +15,9 @@
 export class UsageError extends Error {
   name = 'UsageError';
 }
+
+// gw.mjs도 UsageError를 이 파일에서 가져온다(서로 가져오지만 모듈을 읽을 때 쓰지 않고 함수 안에서만 써서 순서 문제가 없다)
+import { parseGwArgs } from './gw.mjs';
 
 /** 입구의 IP당 초당 요청 한도(deploy/envs/local/v0-gateway.yaml PEAKET_V0_RATE_PER_SECOND, 시험이 견준다) */
 export const GATEWAY_RATE_PER_IP = 10;
@@ -152,6 +156,7 @@ function parseRates(raw) {
  * 인자를 읽어 검사한다. 틀리면 UsageError(메시지는 한국어, 무엇이 틀렸는지).
  * 돌려주는 꼴:
  * - cleanup: { command: 'cleanup' }(다른 인자는 받지 않는다)
+ * - gw: parseGwArgs(argv.slice(1))의 결과(./gw.mjs, { command: 'gw', sub, … })
  * - calibrate: { command: 'calibrate', cpus, memoryMi, targetCpus, rates: number[], warmS, mainS, record: boolean, out?: string }
  * - v0: { command: 'v0', scenario: 'queue'|'seat-hold'|'payment', users, warmS, mainS, cpus, memoryMi, record, runId?, profile?, invariants: boolean, out?,
  *         (queue) entryRate, admitPerSecond, (seat-hold) rate, mode, holdSize, hotCount, pairs, releaseMs, (payment) rate, seatsPerOrder }
@@ -204,6 +209,7 @@ export function parseArgs(argv) {
     if (rest0.length > 0) fail('cleanup은 인자를 받지 않는다');
     return { command: 'cleanup' };
   }
+  if (command === 'gw') return parseGwArgs(rest0);
   if (command === 'calibrate') {
     kind = 'calibrate';
     rest = rest0;
@@ -217,7 +223,7 @@ export function parseArgs(argv) {
     if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = `v1:${scenario}`;
     rest = rest0.slice(1);
-  } else fail(`명령은 calibrate·v0·v1·cleanup 가운데 하나다: ${command ?? '(없음)'}`);
+  } else fail(`명령은 calibrate·v0·v1·gw·cleanup 가운데 하나다: ${command ?? '(없음)'}`);
   const v1 = command === 'v1';
 
   const seen = new Map();

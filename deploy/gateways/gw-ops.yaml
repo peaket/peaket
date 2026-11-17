@@ -122,6 +122,8 @@ spec:
 # 직접 응답 필터 peaket-api-not-found가 같은 Problem 본문과 X-Trace-Id를 낸다(00-common.yaml, docs/infra.md §4.1 '추적 머리', 계획 '판단: 구현 kind 확인의 남은 것' 1 (가)②).
 # 403(인가·출처 확인 거절, W7-WIR-08)·405(TRACE, W7-SEC-04)도 같은 고정 본문으로 바꾼다. 403은 대상 거절을 401로 바꾸는 첫 고치기 뒤에 둔다(그 고치기가 먼저 맞는다).
 # 라우트에 따로 건 BackendTrafficPolicy(한도)는 mergeType: StrategicMerge로 이 정책에 합쳐 그 라우트에도 이 응답 고치기가 닿는다.
+# 게이트웨이가 만든 503(차단 상한 넘침·연결 실패·건강한 파드 없음)에는 Retry-After: 2 [가정]를 단다(docs/infra.md §4.1 '게이트웨이 차단 상한', docs/api/guidelines.md §2, V-T43 ②).
+# 차단 상한(circuitBreaker)도 이 정책에 두어, 합친 라우트 정책이 그 칸을 적지 않으면 이 값이 그 라우트에 닿는다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy
 metadata:
@@ -132,6 +134,12 @@ spec:
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: gw-ops
+  # 차단 상한(서킷 브레이커, docs/infra.md §4.1 '게이트웨이 차단 상한', V-T43). 프록시 파드 하나·라우트 규칙 하나마다 센다.
+  # 값은 정본 '첫 값(측정 전)'이다. 연결 = 동시 처리 = ⌈k × R_pod × L_gw⌉, 보류 = ⌈동시 × q⌉. 재시도(retry)는 어디에도 두지 않는다(ADR-0009 결정 3)
+  circuitBreaker:
+    maxConnections: 6000
+    maxParallelRequests: 6000
+    maxPendingRequests: 750
   responseOverride:
     - match:
         statusCodes:
@@ -234,6 +242,8 @@ spec:
           inline: '{"type":"about:blank","title":"Service Unavailable","status":503}'
         header:
           set:
+            - name: Retry-After
+              value: "2"
             - name: Strict-Transport-Security
               value: max-age=31536000; includeSubDomains
             - name: X-Content-Type-Options
@@ -536,3 +546,29 @@ spec:
       - WWW-Authenticate
     maxAge: 7200s
     allowCredentials: true
+---
+# gw-ops-api의 길게 쥐는 규칙(관제 SSE 두 흐름, 요청 시간 상한을 끈 규칙)만 차단 상한을 65,536 [가정]으로 올려 사실상 끈다
+# (docs/infra.md §4.1 '게이트웨이 차단 상한' '길게 쥐는 라우트', V-T43 ①). 요청을 쥐는 시간이 동시 요청 수를 정해 게이트웨이 상한의 식이 맞지 않고, 덜어 내기는 서비스 쪽이 맡는다.
+# 규칙 이름(sectionName)으로 그 규칙 하나만 겨눈다(Envoy Gateway v1.10.0: HTTPRoute를 겨눌 때 sectionName은 규칙 이름이다. 라우트 원천 routes/gw-ops.yaml의 규칙 name).
+# mergeType: StrategicMerge라 게이트웨이 정책 gw-ops-responses(응답 고치기·503의 Retry-After)와 합쳐 그 규칙에도 그대로 닿는다.
+# 규칙을 겨눈 정책은 그 규칙에서 라우트 전체를 겨눈 정책을 덮는다(v1.10.0 internal/gatewayapi/backendtrafficpolicy.go). gw-ops-api를 겨눈 BackendTrafficPolicy는 이것뿐이다.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: gw-ops-long-hold
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-ops-api
+      sectionName: ops-event-live
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-ops-api
+      sectionName: ops-live
+  mergeType: StrategicMerge
+  circuitBreaker:
+    maxConnections: 65536
+    maxParallelRequests: 65536
+    maxPendingRequests: 65536

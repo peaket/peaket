@@ -15,9 +15,13 @@ export const K6_UID = 12345;
 /**
  * kind 노드 컨테이너(클러스터 peaket의 노드 하나)와 그 안의 실행 폴더 뿌리. 발생기 파드의 입력(시나리오·토큰·인증서·환경 파일)은
  * `docker cp`로 노드의 `<NODE_ROOT>/<실행 꼬리표>`에 넣고 파드가 hostPath로 /work에 붙인다. 이 PC에서 `kubectl exec -i`의 표준 입력이
- * 3만~10만 바이트 언저리에서 잘려(2026-11-03 확인, WebSocket·SPDY 둘 다) 파일을 표준 입력으로 넘기지 않는다
+ * 3만~10만 바이트 언저리에서 잘려(2026-11-03 확인, WebSocket·SPDY 둘 다) 파일을 표준 입력으로 넘기지 않는다.
+ * 노드 이름은 클러스터 이름(PEAKET_CLUSTER, 기본 peaket, tools/local/cluster.mjs CLUSTER)을 따른다. 갈래마다 따로 띄운 클러스터(예: lane1-b056m)에서도
+ * 실행 도구가 그 노드에 입력을 넣게 한다(BAT-056 측정 창)
  */
-export const KIND_NODE = 'peaket-control-plane';
+const CLUSTER_NAME = process.env.PEAKET_CLUSTER || 'peaket';
+if (!/^[a-z0-9]([-a-z0-9]{0,40}[a-z0-9])?$/.test(CLUSTER_NAME)) throw new Error(`PEAKET_CLUSTER 꼴이 틀렸다: ${CLUSTER_NAME}`);
+export const KIND_NODE = `${CLUSTER_NAME}-control-plane`;
 export const NODE_ROOT = '/var/local/peaket-loadtest';
 /** 대기 상태 응답과 비슷한 크기의 고정 JSON(빈 응답 대역이 GET마다 준다) */
 export const NULL_TARGET_BODY = '{"status":"WAITING","seq":123456,"ahead":4321,"serving":119135,"servingRate":28.3,"etaSeconds":153,"pollAfterMs":5000,"saleStatus":"ON_SALE","serverTimeMs":1793649471000}';

@@ -55,6 +55,34 @@ node loadtest/k5/seatmap-lab.mjs --reps 20
 | 공통 | — | `--warm 30` `--main 60` `--cpus 4` `--memory-mi 4096` `--generators`(최고 도착률 ÷ 1,000, 나누면 CPU 2·메모리 1GiB씩) `--namespace v0` `--settle` `--hpa-timeline` `--record --run-id` `--profile`(사용자 수로 local-1k·10k·100k) `--prom-url` `--invariants` `--out` |
 | seat-hold·payment만 | — | seat-hold `--keep`(놓지 않기), `--db-stats`(교착·HOT 통계), payment `--fault-drop-pct` `--fault-delay-pct` `--kill-app-at` |
 
+## 게이트웨이 차단 상한·검색 IP 한도(`gw`, V-T43·SR-T13 ②)
+
+게이트웨이(Envoy Gateway)의 차단 상한(서킷 브레이커: 뒤의 서비스에 동시에 보내는 요청 수와 기다리는 요청 수의 상한)을 바꿔 가며 재고, 같은 무대에서 검색 IP 한도를 잽니다(BUILD_ORDER BAS-090, 묶음 BAT-056 계획 `docs/review/plans/BAT-056.md` §2·§5). 정본은 docs/infra.md §4.1 '게이트웨이 차단 상한'과 docs/features/search.md §12 SR-T13 ②입니다. 먼저 클러스터와 게이트웨이를 올립니다(같은 `PEAKET_CLUSTER` 값으로).
+
+```bash
+PEAKET_CLUSTER=lane1-b056m node tools/local/cluster.mjs up && PEAKET_CLUSTER=lane1-b056m node tools/local/cluster.mjs gateways
+
+node loadtest/run.mjs gw capacity --proxy-cpus 0.5 --rates 500,1000,1500,2000,3000 --delay fixed:5   # M1 포화 처리량
+node loadtest/run.mjs gw sweep --mix normal --delay normal --rate 1500 --max-parallel 4,8,12,16,24,32,64   # M-A 동시 상한(보류는 기본 1024)
+node loadtest/run.mjs gw sweep --max-parallel 24 --max-pending 1,3,12 --rate 1500   # M-B 보류 상한
+node loadtest/run.mjs gw sweep --max-parallel 24 --max-pending 3 --delay fixed:50 --repeat 3   # M-C 과부하(V-T43 ②)
+node loadtest/run.mjs gw ip-limit --case single   # M-S(SR-T13 ②). many·mixed·v6-64도 같은 꼴
+```
+
+| 명령 | 하는 일 | 인자(기본값) |
+| --- | --- | --- |
+| `gw sweep` | 라우트 하나에 임시 상한 정책을 걸고(단계마다 값 바꿈) 부하를 넣어 단계마다 판정한다(정상 부하는 V-T43 ①, 과부하는 ②) | `--gateway gw-queue` `--route gw-queue-buy` `--rate 1500` `--mix normal|single` `--delay normal|fixed:<ms>` `--max-parallel <목록>`(필수) `--max-pending <수 또는 목록>`(1024) `--max-connections same|<수>`(same) `--warm 10` `--main 60` `--repeat 1` `--generators`(⌈도착률 합 ÷ 1,000⌉) `--cpus 4` `--memory-mi 4096` `--record --run-id-prefix <접두>` `--out` |
+| `gw capacity` | 프록시 파드의 CPU·Envoy 일꾼 수를 묶고(그 게이트웨이의 `EnvoyProxy`. gw-queue 밖 넷은 `peaket-proxy`를 함께 써서 넷 모두 묶인다) 도착률을 올려 포화 처리량(포화 앞 단계 도착률 ÷ 프록시 CPU)을 잰다. 프록시 CPU는 kubelet 요약 통계의 envoy 컨테이너 누적값으로 잰다 | `--gateway gw-queue` `--route gw-queue-buy` `--proxy-cpus 0.5` `--rates 500,1000,1500,2000,3000` `--delay fixed:5` `--warm 10` `--main 30` |
+| `gw ip-limit` | 검색 IP 한도를 `X-Forwarded-For` 값을 바꿔 가며 잰다 | `--case single|many|mixed|v6-64`(필수) `--rate` `--ips`(경우마다 기본: single 150/s·IP 1, many 1,000/s·IP 1,000, mixed 1,000/s·IP 2만 + 한 IP 150/s, v6-64 1,000/s·/64 안 주소 100) `--main 60` |
+
+- 발생기는 클러스터 안 k6 파드이고 게이트웨이 프록시 Service로 바로 보냅니다(k6 `hosts`로 호스트 이름을 Service 주소로. 포트 전달·포트 매핑을 거치지 않습니다). 토큰은 접속 정보(`.cache/peaket-tools/gateways-e2e.json`)의 시험 키로 도구가 만듭니다(`ticket:buy`, 수명은 실행 길이 + 10분). 지연은 대역 백엔드의 요청 머리 `x-e2e-delay-ms`로 고릅니다.
+- `--mix normal`은 진입(gw-queue)·홀드·결제 접수(gw-fan)를 1,500 : 15 : 3 비율로 보내고, `--delay`는 재는 흐름(`--route`에 맞는 것)에만 줍니다. 다른 흐름은 정본 분포(5ms 90%·20ms 9%·100ms 1%)입니다.
+- 임시 정책은 이름 `peaket-sweep-<라우트>`, 이름표 `peaket.io/sweep: "true"`, 대상은 그 HTTPRoute 하나, `mergeType: StrategicMerge`, 칸은 `circuitBreaker`뿐입니다. 그 라우트를 이미 겨눈 다른 정책이 있으면 시작하지 않습니다(같은 대상을 두 정책이 겨누면 Envoy Gateway가 하나를 버립니다). 단계마다 프록시 관리 포트의 `/clusters`에서 그 규칙 묶음(`httproute/envoy-gateway-system/<라우트>/rule/<번호>`)의 상한이 새 값으로 보일 때까지 90초 기다리고, 안 보이면 그 단계는 부하를 넣지 않고 무효('상한이 실리지 않음')입니다. 관리 포트는 파드 안에만 열려 있어 그때만 포트 전달로 잠깐 엽니다(부하는 거치지 않습니다).
+- 보류 상한(`--max-pending`)을 주면 동시 상한보다 크게 줄 수 없습니다(인자 오류). 주지 않은 기본 1024(Envoy 기본값)는 보류로 막지 않고 동시 상한만 재는 단계라 이 검사를 하지 않습니다.
+- 단계 판정(`runner/gw.mjs` `judgeSweepStep`): 평균 동시 요청 수(도착률 × 평균 지연)가 동시 + 보류 상한을 넘으면 과부하 단계(②), 아니면 정상 부하 단계(①)입니다. ①은 본구간 503 0건과 Envoy 넘침 0, ②는 게이트웨이 503의 발생기 p99 ≤ 3ms(접근 로그 `durationMs`로 교차 확인, 발생기 쪽만 넘으면 '측정 지점 의심'으로 무효), 둘 다 503 모두 숫자 `Retry-After`와 Problem 본문, 처리 중 최대 ≤ 동시 상한입니다. 상한이 실리지 않음·통계를 못 읽음·보낸 수 0·`dropped_iterations` 1 이상·발생기 무효·과부하인데 503 0건은 통과가 아니라 무효입니다.
+- 산출물은 `.cache/peaket-loadtest/<날짜>-gw-<명령>-<실행>/`(또는 `--out`)의 `sweep.json`·`capacity.json`·`ip-limit.json`(단계마다 세 상한 값·도착률·지연 꼴·보낸 수·상태별 수·넘침 카운터·처리 중·보류 최대·2xx와 503의 p50·p99·최대·`Retry-After` 있음·없음·값 목록·Problem 본문 맞는 수·접근 로그 503의 3ms 이하 비율·발생기 CPU·`dropped_iterations`·`valid`·`invalid_reason`·판정)과 `step-<번호>/`(요약·k6 로그·콘솔)입니다. `--record --run-id-prefix <YYYY-MM-DD-…>`는 단계마다 성능 장부 실행 하나(프로파일 `local-gw`, 실행 ID `<접두>-sweep-<번호>-p<동시>-q<보류>-c<연결>-r<되풀이>` 등)를 남깁니다.
+- 임시 정책과 CPU 묶음은 정상 끝·오류·종료 신호 모두에서 되돌리고, `node loadtest/run.mjs cleanup`도 이름표로 임시 정책을 지웁니다. 종료 코드는 위와 같습니다(0 실행을 마치고 결과를 씀(판정이 실패·무효여도), 1 도구 오류, 2 인자 오류, 128 + 신호).
+
 ## 파일
 
 | 파일 | 하는 일 |
@@ -67,6 +95,7 @@ node loadtest/k5/seatmap-lab.mjs --reps 20
 | `lib/users.mjs`·`lib/seats.mjs` | 가상 사용자 가명·IP·머리, 좌석 고르기 |
 | `runner/args.mjs`·`manifests.mjs`·`results.mjs` | 인자 검사, 발생기 파드·빈 응답 대역 객체, 발생기 지표·판정·보정 용량·기록 나누기·장부 인자 |
 | `run.mjs` | 실행 도구 |
+| `runner/gw.mjs`·`runner/gw-run.mjs`·`scenarios/gw.js` | 게이트웨이 차단 상한·검색 IP 한도 측정(`gw`): 인자·단계 펼치기·임시 정책·통계 읽기·판정·장부 점검(순수 함수), 실행 조립(클러스터는 주입), k6 시나리오 |
 | `test/*.test.mjs` | 계산·실행 도구 시험과 시나리오 형식 검사(`node --test "loadtest/test/*.test.mjs"`, CI `loadtest-check.yml`) |
 | `scenarios/v1-*.js`·`v1-common.js`, `lib/v1.mjs`·`lib/purchase-auth.mjs`, `queries/v1.txt` | v1 경로의 시나리오와 계산(신원·좌석 UUID·시각 기반 일련번호·VU별 사용자 나누기, k6·Node 공용 구매 요청 인증), 합본 서버 지표 질의(BUILD_ORDER PRF-215) |
 | `e2e/v1-rehearsal.e2e.mjs` | v1 합본 리허설(K1·K2·K7 ② 작은 규모 한 번씩, 장부에 남기지 않음, `node --test loadtest/e2e/v1-rehearsal.e2e.mjs`) |

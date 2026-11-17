@@ -405,13 +405,16 @@ export function generateRoutes(input) {
 /**
  * 손으로 쓴 정책이 나뉜 생성 라우트를 모두 고르는지(docs/infra.md §4.1 '생성기가 멈추는 경우'의 대안: 정책의 targetRefs에 나뉜 이름을 모두 적는다).
  * 한 원천(이름표)에서 나온 라우트 가운데 하나라도 targetRefs로 고른 정책은 나머지도 모두 골라야 한다(그 이름표의 targetSelectors가 있으면 된다).
- * 나뉘어 생긴 적 없는 이름(<원천>-<수>)을 고르는 것도 문제다(라우트가 줄었는데 정책이 남음)
+ * 나뉘어 생긴 적 없는 이름(<원천>-<수>)을 고르는 것도 문제다(라우트가 줄었는데 정책이 남음).
+ * 규칙 하나를 겨눈 targetRef(sectionName이 있음)는 나뉜 라우트를 함께 고르지 않아도 되고, 대신 그 생성 라우트에 그 이름의 규칙이 없으면 문제다(BAT-056)
  * @param {Map<string, string>} files generateRoutes의 files
  * @param {Array<Record<string, any>>} objects deploy/gateways/*.yaml(생성 파일 밖)의 객체들
  * @returns {string[]}
  */
 export function policyProblems(files, objects) {
   const families = new Map();
+  /** 생성 라우트 이름 → 그 라우트의 규칙 이름들(규칙을 겨눈 정책의 sectionName 대조) */
+  const ruleNames = new Map();
   for (const text of files.values())
     for (const d of parseAllDocuments(text)) {
       const o = d.toJS();
@@ -419,12 +422,18 @@ export function policyProblems(files, objects) {
       const label = o.metadata?.labels?.[ROUTE_LABEL] ?? o.metadata?.name;
       if (!families.has(label)) families.set(label, new Set());
       families.get(label).add(o.metadata.name);
+      ruleNames.set(o.metadata.name, new Set((o.spec?.rules ?? []).map((r) => r?.name).filter(Boolean)));
     }
   const familyOf = new Map();
   for (const [label, names] of families) for (const n of names) familyOf.set(n, label);
   const out = [];
   for (const p of objects) {
-    const refs = [...(p.spec?.targetRefs ?? []), ...(p.spec?.targetRef ? [p.spec.targetRef] : [])].filter((t) => t.kind === 'HTTPRoute');
+    const all = [...(p.spec?.targetRefs ?? []), ...(p.spec?.targetRef ? [p.spec.targetRef] : [])].filter((t) => t.kind === 'HTTPRoute');
+    // 규칙 하나를 겨눈 것(sectionName = 규칙 이름, Envoy Gateway v1.10.0)은 나뉜 라우트를 함께 고를 일이 없다. 대신 그 생성 라우트에 그 이름의 규칙이 있어야 한다
+    // (없으면 정책이 붙지 않는다. 계약이 늘어 규칙이 나뉜 다른 라우트로 옮겨 가면 여기서 잡는다, docs/infra.md §4.1 '게이트웨이 차단 상한' '길게 쥐는 라우트')
+    for (const t of all.filter((x) => x.sectionName !== undefined))
+      if (familyOf.has(t.name) && !ruleNames.get(t.name)?.has(t.sectionName)) out.push(`${p.kind}/${p.metadata?.name}: 생성 라우트 ${t.name}에 규칙 ${t.sectionName}이 없다`);
+    const refs = all.filter((t) => t.sectionName === undefined);
     if (!refs.length) continue;
     const named = new Set(refs.map((t) => t.name));
     const selected = new Set((p.spec?.targetSelectors ?? []).filter((s) => s.kind === 'HTTPRoute').map((s) => s.matchLabels?.[ROUTE_LABEL]).filter(Boolean));

@@ -6,6 +6,7 @@
 # 라우트마다 이름표 peaket.io/auth(public·optional·token·token-buy)를 단다. 맡은 작업의 openapi security·x-peaket-scopes로 정한 인증 종류와 다르면 생성기가 멈춘다
 # (docs/infra.md §4.1 '인증 종류 대조'). 백엔드는 그 작업의 처리기가 있는 서비스다('백엔드 대조', 정적 시험 deploy/gateways/test/route-contract.test.mjs).
 # 규칙의 timeouts는 생성 규칙에 그대로 옮긴다('경로별 시간 상한').
+# 규칙의 name도 그대로 옮긴다. 정책이 규칙 하나만 겨눌 때(targetRefs의 sectionName) 쓴다: 길게 쥐는 규칙(SSE)의 차단 상한(docs/infra.md §4.1 '게이트웨이 차단 상한' '길게 쥐는 라우트').
 # 정책(SecurityPolicy·EnvoyExtensionPolicy·BackendTrafficPolicy)은 deploy/gateways/gw-ops.yaml에 손으로 두고 라우트 이름으로 고른다.
 # 상한을 넘어 나뉜 생성 라우트(<이름>-2 …)도 정책의 targetRefs에 모두 적는다(--check가 본다).
 ---
@@ -186,7 +187,8 @@ spec:
           name: core-svc
           namespace: core
           port: 8080
-    - matches:
+    - name: ops-event-live
+      matches:
         - path:
             type: Exact
             value: /v1/ops/events/{eventId}/live
@@ -208,7 +210,8 @@ spec:
           port: 8080
       timeouts:
         request: 0s
-    - matches:
+    - name: ops-live
+      matches:
         - path:
             type: Exact
             value: /v1/ops/live

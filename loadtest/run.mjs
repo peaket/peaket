@@ -7,6 +7,7 @@
 //   node loadtest/run.mjs v0 payment --users N --rate R [--seats-per-order 2] [--fault-drop-pct P] [--fault-delay-pct P] [--kill-app-at S] [--db-stats] [공통]
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통]
+//   node loadtest/run.mjs gw sweep|capacity|ip-limit …(게이트웨이 차단 상한·검색 IP 한도, V-T43·SR-T13 ②. 인자는 loadtest/runner/gw.mjs 머리, 결과 sweep.json·capacity.json·ip-limit.json)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--target-cpus N] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
 // - Before 측정(docs/verification.md §3.10): 최고 도착률이 1,000/s를 넘으면 발생기를 나눈다(k6 실행 구간). 장부는 큰 원본을 보낼 폴더로 옮긴다
@@ -41,6 +42,10 @@ import { DEFAULTS, SCENARIOS, UsageError, V1_SCENARIOS, parseArgs } from './runn
 import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
 import { dbStatsDelta, deltaJudge, deltaSummary, gateOnlineCheck, gateSummary, hpaTimeline } from './runner/probes.mjs';
 import { sideTasks } from './runner/side.mjs';
+import { ADMIN_PORT, GW_NAMESPACE, PROXY_SELECTOR, STEP_OVERHEAD_S, SWEEP_LABEL, gwConsole } from './runner/gw.mjs';
+import { runGw } from './runner/gw-run.mjs';
+import { loadContract, token } from '../tools/local/e2e/gateway-client.mjs';
+import { parseAllDocuments } from 'yaml';
 import {
   K6_IMAGE,
   K6_UID,
@@ -272,6 +277,8 @@ async function runCleanup() {
   }
   await kc(['-n', NS, 'delete', 'configmap', LOCK, '--ignore-not-found']);
   await sweepLeftovers();
+  // 게이트웨이 스윕이 남긴 임시 정책(이름표 peaket.io/sweep, BAT-056). 게이트웨이가 없는 클러스터면 건너뛴다
+  await kc(['-n', GW_NAMESPACE, 'delete', 'backendtrafficpolicies', '-l', `${SWEEP_LABEL}=true`, '--ignore-not-found']).catch(() => {});
   // 강제로 끝난 v1 실행이 남긴 진행 중 회차를 끝낸다(같은 무대의 다음 실행과 입장 제어를 나눠 쓰지 않게, 코드 리뷰 H1)
   let v1Up = false;
   try {
@@ -2011,6 +2018,217 @@ async function runCalibrate(a, runTag) {
   }
 }
 
+// ───────────── 게이트웨이 차단 상한·검색 IP 한도(gw, V-T43·SR-T13 ②, BAT-056) ─────────────
+
+/** 시나리오가 쓰는 회차 ID(대역 백엔드는 보지 않는다) */
+const GW_EVENT_ID = '00000000-0000-4000-8000-000000000056';
+/** 시나리오의 가상 사용자 토큰 수(토큰을 쓰는 흐름이 돌려 쓴다) */
+const GW_TOKENS = 1000;
+
+/** 프록시 관리 포트(파드 안 127.0.0.1:19000)의 글. 부하가 아니므로 포트 전달로 잠깐 열고 닫는다 */
+async function adminGet(pod, path) {
+  const k = await ensureTool('kubectl');
+  const pf = spawn(k, ['--kubeconfig', KUBECONFIG, '-n', GW_NAMESPACE, 'port-forward', '--address', '127.0.0.1', `pod/${pod}`, `:${ADMIN_PORT}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const stop = async () => pf.kill();
+  cleanups.add(stop);
+  try {
+    const port = await new Promise((ok, no) => {
+      let buf = '';
+      const t = setTimeout(() => no(new Error(`${pod} 관리 포트 전달이 열리지 않았다`)), 30_000);
+      pf.stdout.on('data', (d) => {
+        buf += String(d);
+        const m = /127\.0\.0\.1:(\d+) ->/.exec(buf);
+        if (m) {
+          clearTimeout(t);
+          ok(Number(m[1]));
+        }
+      });
+      pf.on('exit', (code) => {
+        clearTimeout(t);
+        no(new Error(`${pod} 관리 포트 전달이 끝났다(${code})`));
+      });
+    });
+    const r = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(30_000) });
+    if (!r.ok) throw new Error(`${pod} 관리 포트 ${path}: ${r.status}`);
+    return await r.text();
+  } finally {
+    cleanups.delete(stop);
+    pf.kill();
+  }
+}
+
+/** 생성 라우트(deploy/gateways/*.routes.yaml, 읽기만)에서 이름으로 HTTPRoute 객체 */
+function gwRouteObject(route) {
+  const dir = join(REPO, 'deploy', 'gateways');
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.routes.yaml')))
+    for (const d of parseAllDocuments(readFileSync(join(dir, f), 'utf8'))) {
+      const o = d.toJS();
+      if (o?.kind === 'HTTPRoute' && o.metadata?.name === route) return o;
+    }
+  throw new Error(`생성 라우트 ${route}가 deploy/gateways/*.routes.yaml에 없다`);
+}
+
+/** 프록시 envoy 컨테이너의 누적 CPU(나노초, kubelet 요약 통계) */
+async function gwProxyCpuNs(pods) {
+  const s = JSON.parse(await kc(['get', '--raw', `/api/v1/nodes/${KIND_NODE}/proxy/stats/summary`]));
+  const out = {};
+  for (const p of pods) {
+    const pod = (s.pods ?? []).find((x) => x.podRef?.namespace === GW_NAMESPACE && x.podRef?.name === p);
+    const c = pod?.containers?.find((x) => x.name === 'envoy');
+    const ns = c?.cpu?.usageCoreNanoSeconds;
+    if (!Number.isFinite(ns)) throw new Error(`${p} envoy 컨테이너의 CPU 누적값이 없다`);
+    out[p] = ns;
+  }
+  return out;
+}
+
+/** 프록시 접근 로그 JSON 줄 */
+async function gwAccessLog(gateway, sinceS) {
+  const out = await kc(['-n', GW_NAMESPACE, 'logs', '-l', PROXY_SELECTOR(gateway), '-c', 'envoy', `--since=${Math.max(1, sinceS)}s`, '--tail=-1', '--prefix=false'], { timeout: 180_000 });
+  const lines = [];
+  for (const l of out.split('\n')) {
+    try {
+      const o = JSON.parse(l);
+      if (o && typeof o === 'object') lines.push(o);
+    } catch {
+      // JSON이 아닌 줄(Envoy 자체 로그)은 버린다
+    }
+  }
+  return lines;
+}
+
+async function runGwCommand(a, runTag) {
+  const c = loadContract();
+  if (!c.caPem) throw new Error('게이트웨이 접속 정보에 caPem이 없다(클러스터 안 발생기가 게이트웨이 인증서를 확인하지 못한다)');
+  const outDir = resolve(a.out ?? join(OUT_ROOT, `${today()}-gw-${a.sub}-${runTag}`));
+  mkdirSync(outDir, { recursive: true });
+  const hostDir = `${NODE_ROOT}/${runTag}`;
+  const nSteps = a.sub === 'sweep' ? a.steps.length : a.sub === 'capacity' ? a.rates.length : 1;
+  const totalS = nSteps * (a.warmS + a.mainS + STEP_OVERHEAD_S) + 600;
+  const segments = executionSegments(a.generators);
+  const pods = segments.map((sg) => `loadgen-${runTag}-g${sg.index}`);
+  const gen = { cpus: a.cpus, memoryMi: a.memoryMi };
+  let locked = false;
+  let started = false;
+  const cleanup = async () => {
+    for (const p of pods) await kc(['-n', NS, 'delete', 'pod', p, '--ignore-not-found', '--wait=true']).catch(() => {});
+    removeNodeDir(hostDir);
+    if (locked) await releaseLock(runTag);
+  };
+  cleanups.add(cleanup);
+  const startGenerators = async () => {
+    step(`발생기 파드 ${pods.length}대(CPU ${a.cpus}, 메모리 ${a.memoryMi}Mi씩)`);
+    const iat = Math.floor(Date.now() / 1000);
+    const tokens = JSON.stringify(Array.from({ length: GW_TOKENS }, (_, i) => token(c, 'fan', { sub: accountRef(runTag, i), sid: sidOf(runTag, i), pid: pidOf(runTag, i), aud: 'fan', scope: 'ticket:buy', iat, exp: iat + totalS + 600 })));
+    stageInputs(hostDir, { caPem: c.caPem, tokens });
+    for (const [i, p] of pods.entries()) await createObject(generatorPod({ name: p, cpus: a.cpus, memoryMi: a.memoryMi, hostDir, deadlineS: Math.min(11400, totalS), index: segments[i].index }));
+    for (const p of pods) await waitPodReady(p);
+    writeFileSync(join(outDir, 'infra.txt'), infraText({ cpus: a.cpus, memoryMi: a.memoryMi, generators: pods.length, args: a }));
+    started = true;
+  };
+  const runLoad = async ({ index, input, rate, warmS, mainS }) => {
+    if (!started) await startGenerators();
+    const dir = join(outDir, `step-${String(index + 1).padStart(2, '0')}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'gw.json'), JSON.stringify({ ...input, originVerify: '(지움)' }, null, 2));
+    putNodeFile(hostDir, 'gw.json', JSON.stringify(input));
+    for (const sg of segments) {
+      putNodeFile(hostDir, `run-${sg.index}.env`, runEnvFile({ SCENARIO: 'gw.js', RUN_TAG: runTag, OUT_DIR: `/work/out/g${sg.index}`, USERS_FILE: '/work/users.json', GW_FILE: '/work/gw.json', RATE: rate, WARM_S: warmS, MAIN_S: mainS, K6_EXECUTION_SEGMENT: sg.segment, K6_EXECUTION_SEGMENT_SEQUENCE: sg.sequence }));
+      onNode(['rm', '-f', `${hostDir}/out/g${sg.index}/exit`, `${hostDir}/out/g${sg.index}/exit.tmp`]);
+    }
+    onNode(['rm', '-f', `${hostDir}/go`]);
+    for (const p of pods) await kc(['-n', NS, 'exec', p, '--', 'sh', '-c', 'nohup sh /work/bin/run-split.sh >/dev/null 2>&1 &']);
+    await sleep(1000);
+    onNode(['sh', '-c', `touch ${hostDir}/go && chown ${K6_UID}:${K6_UID} ${hostDir}/go`]);
+    const loadStartMs = Date.now();
+    const outs = await Promise.all(segments.map((sg) => waitK6(pods[sg.index], hostDir, `out/g${sg.index}`, warmS + mainS + 30)));
+    onNode(['rm', '-f', `${hostDir}/go`]);
+    for (const [i, o] of outs.entries()) {
+      writeFileSync(join(dir, `k6-g${i}.log`), o.k6log);
+      writeFileSync(join(dir, `cgroup-g${i}.log`), o.cgroup);
+      writeFileSync(join(dir, `console-g${i}.ndjson`), o.console);
+    }
+    const bad = outs.find((o) => o.exit !== 0 && o.exit !== 99);
+    if (bad) throw new Error(`k6가 종료 코드 ${bad.exit}로 끝났다:\n${bad.k6log.slice(-1500)}`);
+    const parsed = outs.map((o) => gwConsole(o.console));
+    const marks = Object.assign({}, ...parsed.map((p) => p.marks));
+    if (marks.main_start === undefined || marks.main_end === undefined) throw new Error('본구간 경계 표시가 없다(k6가 본구간까지 가지 못했다)');
+    const retryAfterValues = {};
+    for (const p of parsed) for (const [cls, set] of Object.entries(p.retryAfterValues)) for (const v of set) (retryAfterValues[cls] ??= new Set()).add(v);
+    const evs = outs.map((o) => evaluate(o, gen, marks, { records: [], marks, probes: [] }));
+    const summary = mergeSummaries(evs.map((e) => e.summary));
+    writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary, null, 2));
+    const g = combineGenerators(evs.map((e) => e.generator), loadStartMs);
+    writeFileSync(join(dir, 'generator.json'), JSON.stringify(g, null, 2));
+    return { summary, marks, retryAfterValues, generator: { valid: g.judge.valid, reasons: g.judge.reasons, dropped: g.dropped, cpuMeanPct: g.cpuMeanPctMax, cpuMaxPct: g.cpuMaxPctMax }, dir };
+  };
+  const record = async (o) => {
+    const dir = join(outDir, `step-${String(o.index + 1).padStart(2, '0')}`);
+    let checksFile;
+    if (o.checks) {
+      checksFile = join(dir, 'checks.json');
+      writeFileSync(checksFile, JSON.stringify(o.checks, null, 2));
+    }
+    step(`성능 장부(${o.runId})`);
+    execFileSync(
+      PYTHON,
+      [
+        '-I',
+        '-X',
+        'utf8',
+        ...collectArgs({
+          runId: o.runId,
+          kpi: o.kpi,
+          // Envoy Gateway는 최종 아키텍처(v1)의 게이트웨이다(docs/perf-ledger.md §4 local-gw)
+          version: 'v1',
+          profile: 'local-gw',
+          rps: o.rps,
+          durationS: a.mainS,
+          warmupS: a.warmS,
+          scenario: o.scenario,
+          summaryFile: join(dir, 'summary.json'),
+          infraFile: join(outDir, 'infra.txt'),
+          notes: o.notes,
+          start: new Date(o.marks.main_start - a.warmS * 1000).toISOString(),
+          end: new Date(o.marks.main_end).toISOString(),
+          ...(o.invalidReason ? { invalidReason: o.invalidReason } : {}),
+          ...(checksFile ? { checks: checksFile } : {}),
+          generator: `k6 1.4.2, 발생기 파드 ${pods.length}대(CPU ${a.cpus}·메모리 ${a.memoryMi}Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)`,
+        }),
+      ],
+      { cwd: REPO, stdio: 'inherit' },
+    );
+  };
+  try {
+    step('네임스페이스, 실행 잠금');
+    await ensureNamespace();
+    await acquireLock(runTag, Date.now() + totalS * 1000 * 2);
+    locked = true;
+    await sweepLeftovers();
+    await kc(['-n', GW_NAMESPACE, 'delete', 'backendtrafficpolicies', '-l', `${SWEEP_LABEL}=true`, '--ignore-not-found']);
+    const r = await runGw(a, {
+      kubectl: (args, o = {}) => kubectl(args, { quiet: true, timeout: 330_000, maxBuffer: 1 << 30, ...(o.input !== undefined ? { input: o.input } : {}) }),
+      readAdmin: adminGet,
+      routeObject: gwRouteObject,
+      runLoad,
+      readAccessLog: gwAccessLog,
+      proxyCpuNs: gwProxyCpuNs,
+      record,
+      save: (name, v) => writeFileSync(join(outDir, name), JSON.stringify(v, null, 2)),
+      sleep,
+      now: () => Date.now(),
+      log,
+      onCleanup: (fn) => cleanups.add(fn),
+      offCleanup: (fn) => cleanups.delete(fn),
+      inputBase: { origin: c.origins.www, originVerify: c.originVerify, hostNames: c.hosts, eventId: GW_EVENT_ID },
+    });
+    return { outDir, exitCode: r.exitCode };
+  } finally {
+    cleanups.delete(cleanup);
+    await cleanup();
+  }
+}
+
 // ───────────── 시작 ─────────────
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -2020,7 +2238,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment [...] | gw sweep|capacity|ip-limit [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2047,7 +2265,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'v1' ? await runV1(a, runTag) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? await runGwCommand(a, runTag) : a.command === 'v1' ? await runV1(a, runTag) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {
