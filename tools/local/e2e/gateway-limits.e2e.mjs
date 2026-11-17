@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { parseAllDocuments } from 'yaml';
 import { KUBECONFIG, kubectl } from '../cluster.mjs';
 import { ensureTool } from '../tools.mjs';
-import { accessToken, echoed, edge, loadContract, send } from './gateway-client.mjs';
+import { API_CSP, HSTS, accessToken, echoed, edge, loadContract, send, token } from './gateway-client.mjs';
 
 const RUN = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
 let c;
@@ -840,6 +840,63 @@ test('V-T43 ① 동시 상한까지는 503이 없고 동시 + 보류 상한을 �
   assert.ok(six503 >= 1, `동시 + 보류를 넘는 6개에 503이 없다 ${order}`);
   assert.ok(sixEcho <= 5, `6개 가운데 대역에 닿은 수 ${sixEcho} > 동시 + 보류 5 ${order}`);
   assert.equal(six503 + sixEcho, 6, `503도 대역 응답도 아닌 것이 있다 ${order}`);
+});
+
+// 리뷰 반영 R3(BAT-056): 관제 SSE 두 규칙은 규칙을 겨눈 정책 gw-ops-long-hold(mergeType: StrategicMerge)가 상한만 덮는다. 게이트웨이 정책 gw-ops-responses의 응답 고치기
+// (대상 거절 403 → 401·WWW-Authenticate, 오류 응답의 보안 머리, 503 Problem·Retry-After: 2)가 그 규칙에도 닿는지를 소스 읽기가 아니라 kind에서 본다.
+// 값(401 Unauthorized, WWW-Authenticate Bearer error="invalid_token", HSTS, nosniff, CSP, Retry-After 2)은 정본 docs/infra.md §4.1 '게이트웨이 오류의 Problem'·'게이트웨이 차단 상한'.
+test('V-T43 ② R3 관제 SSE 두 규칙에도 게이트웨이 응답 고치기가 닿는다', async () => {
+  const sub = nextSub();
+  const wrongAud = token(c, 'admin', { sub, sid: `s-${sub}`, aud: 'partner', scope: c.probes['gw-ops'].scope ?? '' });
+  for (const path of ['/v1/ops/live', `/v1/ops/events/e-${RUN}/live`]) {
+    const r = await send(c, 'ops-api', { path, headers: edge(c, '198.51.100.57', { authorization: `Bearer ${wrongAud}` }) });
+    const at = `대상이 다른 토큰 GET ${path}`;
+    assert.equal(r.status, 401, `${at}: ${r.status} ${r.text.slice(0, 200)}`);
+    assert.match(String(r.headers['content-type'] ?? ''), /^application\/problem\+json\b/, `${at}: 형식`);
+    assert.deepEqual(JSON.parse(r.text), { type: 'about:blank', title: 'Unauthorized', status: 401 }, `${at}: 본문`);
+    assert.equal(r.headers['www-authenticate'], 'Bearer error="invalid_token"', `${at}: WWW-Authenticate`);
+    assert.equal(r.headers['strict-transport-security'], HSTS, `${at}: HSTS`);
+    assert.equal(r.headers['x-content-type-options'], 'nosniff', `${at}: nosniff`);
+    assert.equal(r.headers['content-security-policy'], API_CSP, `${at}: CSP`);
+    assert.throws(() => echoed(r), `${at}: 대역 백엔드에 닿았다`);
+  }
+  // 상한을 넘은 SSE 요청: gw-ops-long-hold의 세 칸을 잠깐 1로 고쳐 같은 규칙에 2초 넘게 쥐는 요청 셋을 200ms 간격으로 연다(끝나면 되돌리고 65,536으로 돌아올 때까지 기다린다)
+  const live = clusterOf('gw-ops-api', 'GET', '/v1/ops/live');
+  const eventLive = clusterOf('gw-ops-api', 'GET', '/v1/ops/events/e1/live');
+  const original = clean(JSON.parse(await kubectl(['-n', NS(), 'get', 'backendtrafficpolicies', 'gw-ops-long-hold', '-o', 'json'], { quiet: true, timeout: 30_000 })));
+  let rs;
+  try {
+    const one = structuredClone(original);
+    one.spec.circuitBreaker = { maxConnections: 1, maxParallelRequests: 1, maxPendingRequests: 1 };
+    await applyObject(one);
+    await waitLimits('gw-ops', [[live, { max_connections: 1, max_requests: 1, max_pending_requests: 1 }]]);
+    await sleep(7000);
+    const tv = accessToken(c, 'gw-ops', nextSub());
+    rs = await Promise.all(
+      [0, 1, 2].map(async (i) => {
+        await sleep(i * 200);
+        return send(c, 'ops-api', { path: '/v1/ops/live', headers: edge(c, '198.51.100.58', { authorization: `Bearer ${tv}`, 'x-e2e-delay-ms': '4000' }), timeoutMs: 30_000 });
+      }),
+    );
+  } finally {
+    await applyObject(original);
+    await waitLimits('gw-ops', [
+      [live, LONG_HOLD_LIMITS],
+      [eventLive, LONG_HOLD_LIMITS],
+    ]);
+  }
+  const order = rs.map((r) => r.status).join(',');
+  assert.equal(rs[0].status, 200, `첫 요청: ${order}`);
+  echoed(rs[0]);
+  const s503 = rs.filter((r) => r.status === 503);
+  assert.ok(s503.length >= 1, `상한 1을 넘은 SSE 요청에 503이 없다 ${order}`);
+  for (const [i, r] of s503.entries()) {
+    assert.equal(r.headers['retry-after'], RETRY_AFTER_503, `SSE 503 #${i}: Retry-After ${r.headers['retry-after']}`);
+    assert.match(String(r.headers['content-type'] ?? ''), /^application\/problem\+json\b/, `SSE 503 #${i}: 형식`);
+    assert.deepEqual(JSON.parse(r.text), { type: 'about:blank', title: TITLE[503], status: 503 }, `SSE 503 #${i}: 본문`);
+    assert.equal(r.headers['strict-transport-security'], HSTS, `SSE 503 #${i}: HSTS`);
+    assert.throws(() => echoed(r), `SSE 503 #${i}: 대역 백엔드에 닿았다`);
+  }
 });
 
 // ===================== 열림(D-T50 ③, 맨 끝) =====================

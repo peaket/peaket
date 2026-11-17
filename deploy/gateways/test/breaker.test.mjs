@@ -260,6 +260,23 @@ test('V-T43 ① 관제 SSE 두 규칙만 상한을 65,536으로 올리고 결제
   assert.ok(others > 0, '본 다른 규칙이 0개다');
 });
 
+// ===================== R4(리뷰 반영) =====================
+
+// 규칙을 겨눈 정책은 그 규칙에서 라우트 전체를 겨눈 정책을 덮어 쓴다(docs/infra.md §4.1 '길게 쥐는 라우트', Envoy Gateway v1.10.0). 그래서 같은 라우트에 둘이 함께 있으면
+// 라우트 전체 정책(한도 등)이 그 규칙에서만 조용히 빠진다. 정본의 전제 'gw-ops-api를 겨눈 다른 BackendTrafficPolicy가 없다'를 지킨다(BAT-056 리뷰 R4)
+test('V-T43 R4 규칙을 겨눈 BackendTrafficPolicy가 있는 라우트에는 라우트 전체를 겨눈 BackendTrafficPolicy가 없다', () => {
+  requireDefinitions();
+  let ruled = 0;
+  for (const r of routes()) {
+    const sectionPolicies = BTP().filter((p) => refsOf(p).some((t) => t.kind === 'HTTPRoute' && t.name === r.metadata?.name && t.sectionName !== undefined));
+    if (!sectionPolicies.length) continue;
+    ruled++;
+    const whole = BTP().filter((p) => targetsWholeRoute(p, r));
+    assert.deepEqual(whole.map(nameOf), [], `${r.metadata?.name}: 규칙을 겨눈 정책(${sectionPolicies.map(nameOf).join(', ')})이 있는데 라우트 전체를 겨눈 정책이 있다(그 규칙에서 덮여 빠진다)`);
+  }
+  assert.ok(ruled > 0, '규칙을 겨눈 정책이 있는 라우트가 0개다(gw-ops-api의 관제 SSE 정책이 있어야 한다)');
+});
+
 // ===================== S4 =====================
 
 test('V-T43 ② 어느 BackendTrafficPolicy에도 retry가 없다', () => {
