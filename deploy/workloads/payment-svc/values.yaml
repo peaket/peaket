@@ -4,6 +4,10 @@ name: payment-svc
 service:
   # 새 결제 진입 정지 판정자를 뽑는 Lease(ADR-0105 결정 8, BUILD_ORDER PRF-202). 입력을 읽을 클러스터 Prometheus 주소 PEAKET_PROMETHEUS_URL은 환경 값이다(local·ci 밖에서 없으면 시작이 실패한다, 코드 리뷰)
   leaderLease: payment-entry-pause
+  # 종료 유예 90초 [가정](docs/devops.md §6.4 '일반 서비스', docs/features/payment.md §2 '승인 실행기의 첫 구현' '잡기', W9-fix2 PRF-181).
+  # 승인 실행기는 멈출 때 돌던 결제사 호출과 그 뒤 쓰기를 기다린다: preStop 5초 + 승인 호출 한 번(연결 3초 + 읽기 60초) + 결과 쓰기·연결 닫기 여유 약 20초.
+  # 차트 기본 30초면 배포·축소 때마다 돌던 승인 호출이 끊겨 결과 모름(UNKNOWN)이 되고 조회로 늦게 확정된다. 릴레이 파드(outboxRelay)는 승인 호출을 하지 않아 기본 30초 그대로다
+  terminationGracePeriodSeconds: 90
   # 포트원 어댑터를 켜는 환경(PEAKET_PG_PORTONE_SECRET 등을 주는 곳)은 local·ci 밖이면 PEAKET_PG_PORTONE_CHANNEL_PROVIDERS(쓰는 채널 키마다 하위 결제사, JSON)도 환경 값에 꼭 적는다.
   # 없거나 쓰지 않는 키가 있으면 시작이 실패한다(docs/features/payment.md §2.2 '하위 결제사 검사의 첫 구현', 추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰)
   networkPolicy:
