@@ -89,6 +89,22 @@ describe('확정된 회차의 팬 취소·견적 [BAT-420 리뷰 D5]', () => {
     expect(r).toEqual({ status: 'NOT_PAYER' });
     expect(p.calls.tickets).toBe(0);
   });
+
+  // 검증(e2d565c6) 살아남은 M-R5i-q: 결제자 대조가 팬 취소에만 있어, 견적에서 확정 확인을 결제자 검사 앞으로 옮겨도 통과했다
+  test('GAT-110 R5 견적도 결제자가 아니면 확정된 회차여도 NOT_PAYER이고 회차 확정 여부를 묻지 않는다(남의 표로 회차 상태를 알아내지 못한다)', async () => {
+    const p = parts(true);
+    await expect(new QuoteCancellation(p).execute({ accountId: randomUUID(), ticketId: TICKET, nowMs: NOW })).resolves.toEqual({ status: 'NOT_PAYER' });
+    expect(p.calls.lookups).toEqual([]);
+  });
+
+  // 검증(e2d565c6) 살아남은 M-R5h: 막기는 팬 취소(USER)에만 건다(정본 '공제하는 팬 취소 길을 닫는다'). 연기 신청 환급처럼 공제 없는 사유는 확정 회차여도 막지 않는다
+  test('GAT-110 R5 확정된 회차여도 팬 취소가 아닌 사유(연기 신청 환급 EVENT_POSTPONED)는 막지 않고 공제 없이 권면 33,333원을 환급한다', async () => {
+    const p = parts(true);
+    const r = await new CancelTicket(p).execute({ accountId: ACCOUNT, ticketId: TICKET, cancellationId: randomUUID(), reason: 'EVENT_POSTPONED', nowMs: NOW, deadlineMs: NOW + 5_000 });
+    expect(r).toMatchObject({ status: 'ACCEPTED', refundAmount: 33_333 });
+    expect(p.calls.tickets).toBe(1);
+    expect(p.calls.payments).toBe(1);
+  });
 });
 
 describe('확정된 회차의 팬 취소·견적 HTTP [BAT-420 리뷰 D5]', () => {

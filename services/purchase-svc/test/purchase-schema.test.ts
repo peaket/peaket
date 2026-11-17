@@ -693,6 +693,17 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(h.columns.every((c) => !c.hasDefault)).toBe(true);
   });
 
+  // 검증(e2d565c6) 살아남은 M-MIG24-c: 아래 시험은 칸 정의를 '들어 있다'로만 봐서 released_at 뒤에 not null을 붙여도 통과했다
+  test('GAT-110 D6 0024 SQL의 칸 정의는 schema.ts와 글자까지 같다(풀린 시각 released_at은 빈 값 허용이라 not null이 붙지 않는다)', () => {
+    const raw = readFileSync(join(MIGRATIONS, `${EVENT_REFUND_HOLD_TAG}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    const text = canon(raw.replace(/^-- .*$/gm, ''));
+    const body = text.slice(text.indexOf('create table event_refund_hold(') + 'create table event_refund_hold('.length);
+    const defs = new Map(body.split(',').map((d) => [d.split(' ')[0]!, d.replace(/\);?$/, '')] as const));
+    const h = holdShape();
+    for (const c of h.columns) expect(defs.get(c.name), c.name).toBe(`${c.name} ${c.type}${c.primary ? ' primary key' : ''}${c.notNull ? ' not null' : ''}`);
+    expect(defs.get('released_at')).toBe('released_at timestamp with time zone');
+  });
+
   test('GAT-110 D6 0024 SQL은 event_refund_hold 표 하나만 만들고(다른 표·인덱스·지우기 없음), 0024 스냅샷은 0023 뒤에서 그 표 하나만 늘린다', () => {
     const raw = readFileSync(join(MIGRATIONS, `${EVENT_REFUND_HOLD_TAG}.sql`), 'utf8').replace(/\r\n/g, '\n');
     expect(raw).not.toMatch(/\b(DROP|TRUNCATE|DELETE FROM|UPDATE "|RENAME)\b/);

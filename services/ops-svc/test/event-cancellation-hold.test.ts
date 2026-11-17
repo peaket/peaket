@@ -229,6 +229,33 @@ describe('판정·확정 때 늘리기, 판정 전 반려 때 풀기 [BAT-420 �
     expect(f.holdCalls.filter((c) => !c.held)).toEqual([]);
   });
 
+  // 검증(e2d565c6) 살아남은 M-RT38-2c: 연기는 미루지 않으므로(transfer-refund §5 '미룸 풀기') 판정 전 반려도 풀기를 부르지 않는다
+  test('R-T38 ② 연기(POSTPONE) 요청의 판정 전 반려(REQUESTED → REJECTED)는 미룸을 풀지 않는다(미룸 호출 0)', async () => {
+    const f = fixture();
+    const startsAtMs = NOW + 10 * 86_400_000;
+    const r = await partnerAsk(f, ownEvent(f, { startsAtMs }), { kind: 'POSTPONE', reason: '연기', newStartsAt: new Date(startsAtMs + 86_400_000).toISOString() });
+    expect((await f.app.reject(r.requestId, COMMANDER_C, '파트너 확인 결과 일정 그대로')).status).toBe('REJECTED');
+    expect(f.store.rows.get(r.requestId)).toMatchObject({ kind: 'POSTPONE', status: 'REJECTED' });
+    expect(f.holdCalls).toEqual([]);
+  });
+
+  // 검증(e2d565c6) 살아남은 M-503b: 'without holds'는 요청 단계만 봤다. 미룸 대역이 없으면 판정·확정의 늘리기도 503이고 아무것도 쓰지 않는다
+  test('GAT-110 P4 미룸 대역을 조립하지 않았으면 CANCEL 판정·확정도 503 event-refund-unavailable이고 저장·미리보기·판매 멈춤·시작이 0이다', async () => {
+    const f = fixture({ without: ['holds'] });
+    const asked = recordOf({ status: 'REQUESTED' });
+    f.store.rows.set(asked.requestId, asked);
+    await expect(f.app.judge(asked.requestId, { ...JUDGEMENT }, COMMANDER_A)).rejects.toMatchObject(problem('event-refund-unavailable', 503));
+    expect(f.store.rows.get(asked.requestId)).toMatchObject({ status: 'REQUESTED', fault: null, version: asked.version });
+    expect(f.previewCalls).toEqual([]);
+    const pending = recordOf({ eventId: randomUUID(), status: 'PENDING_APPROVAL', fault: 'ORGANIZER', judgementReason: '주최 측 귀책', fanNoticeReason: '공연이 취소되었습니다', judgedBy: COMMANDER_A.accountId, judgedAt: new Date(NOW - 30_000), dryRun: { targetOrders: 3, refundTotal: 133_332, compensationTargets: 3, compensationTotal: 13_335, perPg: [] } });
+    f.store.rows.set(pending.requestId, pending);
+    await expect(approveBy(f, pending.requestId)).rejects.toMatchObject(problem('event-refund-unavailable', 503));
+    expect(f.store.rows.get(pending.requestId)).toMatchObject({ status: 'PENDING_APPROVAL', approvedBy: null, version: pending.version });
+    expect(f.stopCalls).toEqual([]);
+    expect(f.startCalls).toEqual([]);
+    expect(f.audit.entries).toEqual([]);
+  });
+
   test('GAT-110 D2 연기(POSTPONE) 요청은 판정·확정 때 미룸을 부르지 않는다', async () => {
     const f = fixture();
     const startsAtMs = NOW + 10 * 86_400_000;

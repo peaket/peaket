@@ -54,3 +54,40 @@ describe('ops 시작 조립의 미룸 [BAT-420 몫 D]', () => {
     expect(main).toMatch(/holds/);
   });
 });
+
+// 검증(e2d565c6) 살아남은 M-P4b·M-P4e: 위 두 시험은 main.ts에 이름이 있는지만 봐서, 넘기는 식에서 owners·holds를 빼도 통과했다.
+// main.ts의 회차 취소 조립 식(구조 분해부터 eventCancellations 객체까지)을 그대로 떼어 돌려, 모듈에 실리는 값을 본다(시작 파일 조립을 따로)
+describe('main.ts 회차 취소 조립 식을 그대로 돌림 [BAT-420 GAT-110 P4]', () => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const from = main.indexOf('const { holds, ...cancellationDeps } = ');
+  const to = main.indexOf('\n};\n', main.indexOf('const eventCancellations = {', from));
+  /** main.ts의 그 몇 줄을 바깥 이름(조립 함수·환경·실행기·gRPC 클라이언트·내부 토큰·재인증·지표)만 넣어 돌린다 */
+  const build = (env: Record<string, string>, refunds: unknown) =>
+    new Function('eventCancellationDepsFromEnv', 'process', 'executor', 'refunds', 'internalToken', 'reauth', 'eventCancellationSignals', `${main.slice(from, to + 3)}\nreturn eventCancellations;`)(
+      eventCancellationDepsFromEnv,
+      { env },
+      executor,
+      refunds,
+      'it-token',
+      undefined,
+      { revertFailures: { inc: () => undefined } },
+    ) as Record<string, unknown>;
+
+  test('GAT-110 P4 main.ts 조립 식은 core 주소가 있으면 소속 확인기(owners)를, purchase gRPC 클라이언트가 미룸도 하면 holds를 회차 취소 모듈 값에 싣는다', () => {
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    const client = { ...reader, hold: async (q: { held: boolean }) => ({ held: q.held }), start: async () => ({ jobId: 'x', state: 'RUNNING' }) };
+    const built = build({ PEAKET_CORE_HTTP_URL: 'http://core-svc:8080', PEAKET_PURCHASE_HTTP_URL: 'http://purchase-svc:8080', PEAKET_QUEUE_HTTP_URL: 'http://queue-svc:8080' }, client);
+    expect(built.owners).toBeInstanceOf(HttpCoreEventOwners);
+    expect(built.holds).toBe(client);
+    expect(built.reader).toBe(client);
+    expect(built.refunds).toBe(client);
+    expect(built.stopper).toBeInstanceOf(HttpEventSaleStopper);
+    // 주소가 없으면 그 칸은 비어 그 경로가 503으로 닫힌다(값이 남지 않는다)
+    const bare = build({}, undefined);
+    expect(bare.owners).toBeUndefined();
+    expect(bare.holds).toBeUndefined();
+    // 그렇게 만든 값을 AppModule.register에 그대로 넘긴다
+    expect(main).toMatch(/AppModule\.register\(\{[\s\S]*?\n\s+eventCancellations,\n[\s\S]*?\}\),\n\}\);/);
+  });
+});

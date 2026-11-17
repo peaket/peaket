@@ -178,6 +178,36 @@ describe('회차 취소 전용 표 취소기 [BAT-420 GAT-110 E]', () => {
     expect(left.pays).toHaveLength(1);
   });
 
+  // 검증(e2d565c6) 살아남은 M-RT24c3: 보류 취소 ID와 항목 취소 ID가 다른 갈래가 없었다(항목을 만든 뒤 생긴 보류 취소의 행을 남이 전환할 수 있다)
+  test('R-T24 표의 보류 취소 ID가 항목 취소 ID와 다르면 그 행을 전환하지 않고 표 끝내기·새 취소 행(항목 취소 ID) 길로 간다', async () => {
+    const f = fixture({ convert: 'CONVERTED' });
+    const r = await f.canceller.cancel(targetOf(NOW - HOUR, { pendingCancellationId: PENDING_ID }), q(CANCEL_ID));
+    expect(r).toEqual({ status: 'REFUNDED' });
+    expect(f.conversions).toEqual([]);
+    expect(f.log).toEqual(['ticket', 'create', 'pay', 'status']);
+    expect(f.ticketCalls[0]).toMatchObject({ targets: [{ ticketId: TICKET, cancellationId: CANCEL_ID }] });
+    expect(f.creates[0]).toMatchObject({ cancellationId: CANCEL_ID, refundAmount: 33_333, deductionAmount: 0 });
+    expect(f.pays).toEqual([expect.objectContaining({ cancellationId: CANCEL_ID, amount: 33_333 })]);
+  });
+
+  // 검증(e2d565c6) 살아남은 M-REC-2: 결제사 성공 뒤 답을 잃어 다시 부른 경우(이미 끝난 표 + 그 취소 ID의 행이 REFUNDED) 줄이 없었다
+  test('GAT-110 E2 이미 끝난 표인데 그 취소 ID의 행이 이미 REFUNDED면(앞 시도가 결제사까지 끝냄) REFUNDED이고 결제사를 다시 부르지 않는다', async () => {
+    const existing: CancellationRecord = { cancellationId: CANCEL_ID, orderId: ORDER, ticketId: TICKET, refundAmount: 33_333, state: 'REFUNDED', refundAttempts: 1 };
+    const f = fixture({ ticket: 'ALREADY_ENDED', existing });
+    expect(await f.canceller.cancel(targetOf(NOW + 3 * DAY), q())).toEqual({ status: 'REFUNDED' });
+    expect(f.pays).toEqual([]);
+    expect(f.creates).toEqual([]);
+    expect(f.statuses).toEqual([]);
+  });
+
+  // 검증(e2d565c6) 살아남은 M-REC-8: 회차 취소 행은 환급액 = 권면이라 앞 시험에서는 권면으로 불러도 같았다. 정본 D6 '그 행에 저장한 금액·멱등키로 다시 부른다'
+  test('GAT-110 E2 이미 끝난 표의 REFUND_PENDING 행으로 다시 부를 때는 지금 권면이 아니라 그 행에 저장한 환급액(33,333원)으로 결제사를 부른다', async () => {
+    const existing: CancellationRecord = { cancellationId: CANCEL_ID, orderId: ORDER, ticketId: TICKET, refundAmount: 33_333, state: 'REFUND_PENDING', refundAttempts: 1 };
+    const f = fixture({ ticket: 'ALREADY_ENDED', existing });
+    expect(await f.canceller.cancel(targetOf(NOW + 3 * DAY, { ticketPrice: 30_000 }), q())).toEqual({ status: 'REFUNDED' });
+    expect(f.pays).toEqual([expect.objectContaining({ cancellationId: CANCEL_ID, amount: 33_333, reason: 'EVENT_CANCELLED' })]);
+  });
+
   test('GAT-110 E2 결제사 업무 거절은 FAILED REJECTED이고 모름·대기는 REFUND_PENDING이며 환급 상태를 쓰지 않는다', async () => {
     const rejected = fixture({ payment: 'REJECTED' });
     expect(await rejected.canceller.cancel(targetOf(NOW + 3 * DAY), q())).toEqual({ status: 'FAILED', error: 'REJECTED' });

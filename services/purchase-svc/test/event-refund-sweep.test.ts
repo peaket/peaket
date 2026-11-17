@@ -46,7 +46,10 @@ function fixture() {
     deadlineMs: () => NOW + 5_000,
   });
   const start = () => service.start({ eventId: EVENT, requestId: REQUEST, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
-  return { store, world, cancels, confirmedOrders, service, start };
+  /** 연기(POSTPONE) 시작: 바뀐 공연 시작 7일 뒤, 신청 창은 3일 뒤 닫힘 */
+  const startPostpone = () =>
+    service.start({ eventId: EVENT, requestId: REQUEST, fault: 'CONTENT_CHANGE', ruledBy: 'commander-1', confirmedBy: 'operator-2', kind: 'POSTPONE', postponedToMs: NOW + 7 * 86_400_000, refundWindowClosesAtMs: NOW + 3 * 86_400_000 });
+  return { store, world, cancels, confirmedOrders, service, start, startPostpone };
 }
 
 describe('확정 뒤 늦게 끝난 주문 [BAT-420 GAT-110 H]', () => {
@@ -107,5 +110,51 @@ describe('확정 뒤 늦게 끝난 주문 [BAT-420 GAT-110 H]', () => {
     for (const s of open) expect(isEventOrderOpen(s), s).toBe(true);
     for (const s of ended) expect(isEventOrderOpen(s), s).toBe(false);
     expect(isEventOrderOpen('NOPE')).toBe(false);
+  });
+});
+
+// ---- 검증(e2d565c6) 살아남은 변이(시험 담당 l3w8-420-fix-test, 2026-11-17): 아는 주문의 늦은 표·연기 요청 쓸어 담기·연기 대상의 보류 표 ----
+describe('쓸어 담기의 목록 밖 값 [BAT-420 검증 살아남은 것]', () => {
+  test('R-T37 ⑥ 이미 아는 주문에 늦게 끝난 표가 생기면 그 표를 더해 환급하되 확정 알림은 그 주문에 다시 남기지 않는다(주문마다 한 번)', async () => {
+    const f = fixture();
+    await f.start();
+    expect(f.confirmedOrders).toEqual([[target(1).orderId]]);
+    const sameOrder = target(5, { orderId: target(1).orderId });
+    f.world.targets = [target(1), sameOrder];
+    f.world.open = 0;
+    await f.service.runDue();
+    expect((await f.store.items(REQUEST)).find((i) => i.ticketId === sameOrder.ticketId)).toMatchObject({ cancellationId: eventRefundCancellationId(REQUEST, sameOrder.ticketId), status: 'REFUNDED' });
+    expect(f.cancels).toHaveLength(2);
+    expect(f.confirmedOrders).toEqual([[target(1).orderId]]);
+    const confirmedMessages = f.store.outbox.filter((m) => new TextDecoder().decode(m.payload).startsWith('EVENT_CANCELLATION_CONFIRMED'));
+    expect(confirmedMessages).toHaveLength(1);
+  });
+
+  test('R-T37 ⑥ 연기(POSTPONE) 요청은 멈춘 동안에도 쓸어 담지 않는다(대상이 늘어도 항목을 더하지 않는다)', async () => {
+    const f = fixture();
+    await f.startPostpone();
+    expect(await f.store.items(REQUEST)).toHaveLength(1);
+    await f.service.pause({ requestId: REQUEST, reason: '수동 정지' });
+    expect((await f.service.get(REQUEST)).status).toBe('PAUSED');
+    f.world.targets = [target(1), target(6)];
+    await f.service.runDue();
+    expect((await f.store.items(REQUEST)).map((i) => i.ticketId)).toEqual([target(1).ticketId]);
+    expect(f.confirmedOrders).toHaveLength(1);
+    expect(f.cancels).toEqual([]);
+  });
+
+  test('GAT-110 E5 연기(POSTPONE) 시작은 보류 취소(REQUESTED) 표를 신청 대상 항목에 넣지 않는다(회차 취소 시작은 넣는다)', async () => {
+    const pendingTarget = target(7, { pendingCancellationId: '0194c400-0000-7000-8000-0000000004ff' });
+    const postponed = fixture();
+    postponed.world.targets = [target(1), pendingTarget];
+    const p = await postponed.startPostpone();
+    expect((await postponed.store.items(REQUEST)).map((i) => i.ticketId)).toEqual([target(1).ticketId]);
+    expect(p.progress.total).toBe(1);
+    // 대조: 회차 취소(CANCEL)는 보류 표를 그 행 ID로 넣는다
+    const cancelled = fixture();
+    cancelled.world.targets = [target(1), pendingTarget];
+    cancelled.world.open = 0;
+    await cancelled.start();
+    expect((await cancelled.store.items(REQUEST)).find((i) => i.ticketId === pendingTarget.ticketId)).toMatchObject({ cancellationId: pendingTarget.pendingCancellationId });
   });
 });

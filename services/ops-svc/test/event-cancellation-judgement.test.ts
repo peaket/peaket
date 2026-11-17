@@ -176,6 +176,19 @@ describe('판정·미리보기·확정 [BAT-420 GAT-110 W]', () => {
     ]);
     expect(f.startCalls).toHaveLength(2);
   });
+
+  // 검증(e2d565c6) 살아남은 M-RT37-2e: 판정이 늘 미리보기를 함께 저장해 이 상태를 흐름으로 못 만든다. 0013 전 행은 dry_run이 NULL일 수 있어 행을 바로 둔다
+  test('R-T37 ② 미리보기 없이 승인 대기인 행(0013 전 행, dry_run 빔)도 확정되지 않고 409 preview-required이며 미룸 늘리기·판매 멈춤·시작·감사가 0이다', async () => {
+    const f = fixture();
+    const row = recordOf({ status: 'PENDING_APPROVAL', fault: 'ORGANIZER', judgementReason: '주최 측 귀책', fanNoticeReason: '공연이 취소되었습니다', judgedBy: COMMANDER_A.accountId, judgedAt: new Date(NOW - 30_000), dryRun: null });
+    f.store.rows.set(row.requestId, row);
+    await expect(approveBy(f, row.requestId)).rejects.toMatchObject(problem('preview-required', 409));
+    expect(f.holdCalls).toEqual([]);
+    expect(f.stopCalls).toEqual([]);
+    expect(f.startCalls).toEqual([]);
+    expect(f.audit.entries).toEqual([]);
+    expect(f.store.rows.get(row.requestId)).toMatchObject({ status: 'PENDING_APPROVAL', approvedBy: null, version: row.version });
+  });
 });
 
 describe('확정 때 판매 멈춤 [BAT-420 GAT-110 H]', () => {

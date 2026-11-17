@@ -206,6 +206,22 @@ describe('기한 지난 미룸 풀기 [BAT-420 몫 D]', () => {
     await runner.run();
     expect(lines.filter((l) => JSON.stringify(l).includes('event-refund-hold-expired'))).toHaveLength(1);
   });
+
+  // 검증(e2d565c6) 살아남은 M-RT38-5d: 위 시험은 글 어딘가의 'SEV2'만 봐서(알림 글에도 SEV2가 있다) severity 칸을 SEV3로 바꿔도 통과했다
+  test('R-T38 ⑤ 기한 지난 미룸 로그는 오류 로그이고 severity 칸이 SEV2이며 회차·요청 ID를 칸으로 싣는다', async () => {
+    const lines: { level: string; o: object; msg: string }[] = [];
+    const runner = new RefundAfterEntry({
+      nowMs: () => NOW,
+      writes: { dueRefunds: async () => [] } as never,
+      payments: { cancel: async () => 'CANCELLED' },
+      entries: { lookup: async () => new Map() },
+      claims: { claimDue: async () => true, markEntryRecorded: async () => true },
+      holds: { releaseExpired: async () => [{ eventId: EVENT, cancellationRequestId: REQUEST }] },
+      log: { warn: (o, msg) => void lines.push({ level: 'warn', o, msg }), error: (o, msg) => void lines.push({ level: 'error', o, msg }) },
+    });
+    await runner.run();
+    expect(lines.map((l) => ({ level: l.level, o: l.o }))).toEqual([{ level: 'error', o: { event: 'event-refund-hold-expired', severity: 'SEV2', eventId: EVENT, cancellationRequestId: REQUEST } }]);
+  });
 });
 
 describe('기한 지난 미룸 풀기 실패 [BAT-420 몫 D 보충 2]', () => {

@@ -91,6 +91,17 @@ describe('GetEntryRecords 어댑터 [BAT-420 GAT-090 A]', () => {
     expect((await adapter.lookup([a], 2_000)).get(a)).toEqual({ found: true, entered: false });
     await expect(adapter.lookup([a, b], 2_000)).rejects.toThrow();
   });
+
+  // 검증(e2d565c6) M-PT19-3e(found 빠진 답을 found 참으로)를 위한 지킴 시험. 지금 어댑터 로더(defaults 참)는 빠진 bool을 거짓으로 채워
+  // 이 변이 하나만으로는 같은 동작이다. 로더 기본값이 바뀌어도 found가 빠진 답(입장 기록이 있다는 뜻이 아니다)을 환급할 수 있는 '표 앎'으로 보지 않는지 본다
+  test('GAT-090 A5 found가 빠진 답(proto3 기본값)은 found 거짓·입장 없음으로 읽고, 입장 칸이 참이어도 표를 아는 것으로 보지 않는다', async () => {
+    const [a, b] = [randomUUID(), randomUUID()];
+    const atMs = Date.parse('2026-11-20T18:01:00+09:00');
+    entryAnswer = () => ({ records: [{ ticket_id: a, entered: true, first_entered_at: { seconds: Math.floor(atMs / 1000), nanos: 0 } }, { ticket_id: b }] });
+    const got = await adapter.lookup([a, b], 2_000);
+    expect(got.get(a)).toEqual({ found: false, entered: false });
+    expect(got.get(b)).toEqual({ found: false, entered: false });
+  });
 });
 
 describe('EventCancelTickets 어댑터 [BAT-420 GAT-110 E]', () => {

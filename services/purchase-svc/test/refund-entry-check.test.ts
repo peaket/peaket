@@ -26,7 +26,7 @@ interface FakeRow {
 const requested = (id: string, amount = 3_334): FakeRow => ({ cancellationId: `c-${id}`, orderId: `o-${id}`, ticketId: `t-${id}`, amount, status: 'REQUESTED', attempts: 0, dueAtMs: DUE });
 const pending = (id: string, attempts = 1, amount = 7_000): FakeRow => ({ cancellationId: `c-${id}`, orderId: `o-${id}`, ticketId: `t-${id}`, amount, status: 'REFUND_PENDING', attempts, nextRetryAtMs: NOW - 1 });
 
-function fixture(rows: FakeRow[], o: { claim?: boolean } = {}) {
+function fixture(rows: FakeRow[], o: { claim?: boolean; mark?: boolean } = {}) {
   const byId = new Map(rows.map((r) => [r.cancellationId, r]));
   const entryAnswers = new Map<string, EntryRecordView>();
   const behaviour = { lookupFails: false, claim: o.claim ?? true };
@@ -80,6 +80,8 @@ function fixture(rows: FakeRow[], o: { claim?: boolean } = {}) {
       },
       markEntryRecorded: async (cancellationId, enteredAtMs, nowMs) => {
         marks.push({ cancellationId, enteredAtMs, nowMs });
+        // mark 거짓: 다른 실행기가 같은 행에 먼저 입장 기록을 남겨 이 쓰기는 0행이다
+        if (o.mark === false) return false;
         const r = byId.get(cancellationId)!;
         r.entryRecordedAtMs = enteredAtMs;
         delete r.dueAtMs;
@@ -220,5 +222,77 @@ describe('결제사 환급 뒤 0행 쓰기의 다시 읽기 [BAT-420 리뷰 D1]'
     expect(warned).toHaveLength(1);
     expect(JSON.stringify(warned[0])).toContain('c-1');
     expect(r.result).toMatchObject({ refunded: 0 });
+  });
+});
+
+// ---- 검증(e2d565c6) 살아남은 변이(시험 담당 l3w8-420-fix-test, 2026-11-17): 결과 수·0행 쓰기·100장 나눔·조립 검사 ----
+describe('환급 실행기의 0행 쓰기·나눔·조립 [BAT-420 검증 살아남은 것]', () => {
+  test('P-T19 ① 입장 기록 남기기가 0행이면(다른 실행기가 먼저 남김) 이상 표시를 열지 않고 entryRecorded로 세지 않으며 결제사도 부르지 않는다', async () => {
+    const f = fixture([requested('a')], { mark: false });
+    f.entryAnswers.set('t-a', { found: true, entered: true, firstEnteredAtMs: ENTERED_AT });
+    await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
+    expect(f.marks).toHaveLength(1);
+    expect(f.flags).toEqual([]);
+    expect(f.pays).toEqual([]);
+    expect(f.claims).toEqual([]);
+  });
+
+  test('GAT-090 A1 보류 취소가 101장이면 입장 조회를 100장·1장 두 번으로 나눠 요청 차례대로 묻는다(ticket.proto GetEntryRecords 100장)', async () => {
+    const rows = Array.from({ length: 101 }, (_, i) => requested(String(i).padStart(3, '0')));
+    const f = fixture(rows);
+    await f.refund.run(200);
+    expect(f.lookups.map((l) => l.ids.length)).toEqual([100, 1]);
+    expect(f.lookups.flatMap((l) => l.ids)).toEqual(rows.map((r) => r.ticketId));
+    for (const l of f.lookups) expect(l.deadlineMs).toBe(2_000);
+    expect(f.pays).toHaveLength(101);
+  });
+
+  /** REFUND_PENDING 행 하나를 결제사 답 outcome으로 돌린다. 상태 쓰기(실패 표시·재시도 예약)는 applied가 거짓이면 0행(그사이 CS가 무효로 끝냄) */
+  const runPending = async (outcome: 'REJECTED' | 'UNKNOWN', applied: boolean) => {
+    const failedMarks: string[] = [];
+    const retries: string[] = [];
+    const notices: string[] = [];
+    const runner = new RefundAfterEntry({
+      nowMs: () => NOW,
+      writes: {
+        dueRefunds: async () => [{ cancellationId: 'c-p', orderId: 'o-p', ticketId: 't-p', amount: 7_000, reason: 'USER', status: 'REFUND_PENDING', attempts: 1 }],
+        updateStatus: async () => true,
+        scheduleRefundRetry: async (q: { cancellationId: string }) => (retries.push(q.cancellationId), applied),
+        markRefundFailed: async (q: { cancellationId: string }) => (failedMarks.push(q.cancellationId), applied),
+      } as never,
+      payments: { cancel: async () => outcome },
+      entries: { lookup: async () => new Map() },
+      claims: { claimDue: async () => true, markEntryRecorded: async () => true },
+      failureNotice: { open: async (q) => void notices.push(q.cancellationId) },
+    });
+    return { result: await runner.run(), failedMarks, retries, notices };
+  };
+
+  test('GAT-090 A3 결제사 거절 뒤 실패 표시가 0행이면(CS가 무효로 끝냄) CS 환급 실패 건을 열지 않고 failed로 세지 않는다(1행이면 한 번 연다)', async () => {
+    const voided = await runPending('REJECTED', false);
+    expect(voided.failedMarks).toEqual(['c-p']);
+    expect(voided.notices).toEqual([]);
+    expect(voided.result).toMatchObject({ refunded: 0, pending: 0, failed: 0 });
+    const marked = await runPending('REJECTED', true);
+    expect(marked.notices).toEqual(['c-p']);
+    expect(marked.result).toMatchObject({ failed: 1 });
+  });
+
+  test('GAT-090 A3 결과 모름 뒤 재시도 예약이 0행이면(CS가 무효로 끝냄) pending으로 세지 않는다(1행이면 하나)', async () => {
+    const voided = await runPending('UNKNOWN', false);
+    expect(voided.retries).toEqual(['c-p']);
+    expect(voided.result).toMatchObject({ refunded: 0, pending: 0, failed: 0 });
+    expect(voided.notices).toEqual([]);
+    expect((await runPending('UNKNOWN', true)).result).toMatchObject({ pending: 1 });
+  });
+
+  test('GAT-090 A6 입장 기록 대조(entries)나 조건부 집기(claims) 없이 환급 실행기를 만들면 던진다', () => {
+    const base = { nowMs: () => NOW, writes: {} as never, payments: { cancel: async () => 'CANCELLED' as const } };
+    const entries = { lookup: async () => new Map<string, EntryRecordView>() };
+    const claims = { claimDue: async () => true, markEntryRecorded: async () => true };
+    expect(() => new RefundAfterEntry({ ...base, claims })).toThrow(/entries/);
+    expect(() => new RefundAfterEntry({ ...base, entries })).toThrow(/claims/);
+    expect(() => new RefundAfterEntry({ ...base })).toThrow();
+    expect(() => new RefundAfterEntry({ ...base, entries, claims })).not.toThrow();
   });
 });

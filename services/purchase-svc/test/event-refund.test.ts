@@ -431,6 +431,40 @@ describe('회차 취소 확정 때 남는 공제 차액 CS 건 [BAT-420 몫 D, O
     expect(calls).toBe(1);
     expect(gapOpens).toHaveLength(opened);
   });
+
+  // 검증(e2d565c6) 살아남은 M-D7c: 위 시험의 차액 대상 목록이 한 행뿐이라 '목록의 첫 행'을 그 항목의 행으로 봐도 통과했다
+  test('GAT-110 D7 차액 대상 목록에 다른 취소가 먼저 있어도 전환에서 진 항목은 그 항목의 취소 ID 행으로만 차액 건을 연다', async () => {
+    const pendingId = '0194c600-0000-7000-8000-0000000000e1';
+    const otherId = '0194c600-0000-7000-8000-0000000000e9';
+    const store = new MemoryEventRefundStore();
+    const gapOpens: GapOpen[] = [];
+    const notices: Parameters<EventRefundFailureNotice['open']>[0][] = [];
+    let claimed = false;
+    const service = new EventRefundService({
+      store,
+      targets: { list: async () => [target({ pendingCancellationId: pendingId })] },
+      configs: { config: async () => ({ saleEndsAtMs: NOW + 7 * 86_400_000, entryOpensAtMs: ENTRY_OPENS }) },
+      canceller: { cancel: async () => ((claimed = true), { status: 'FAILED', error: 'cancellation-in-progress' }) },
+      notice: { open: async (q) => void notices.push(q) },
+      // 집힌 뒤 목록: 다른 표의 차액 대상(공제 3,333)이 앞에, 이 항목의 보류 취소(공제 29,999)가 뒤에 있다
+      gaps: {
+        list: async () =>
+          claimed
+            ? [
+                { cancellationId: otherId, orderId: '0194c600-0000-7000-8000-0000000000ea', ticketId: '0194c600-0000-7000-8000-0000000000eb', deductionAmount: 3_333 },
+                { cancellationId: pendingId, orderId: ORDER, ticketId: TICKET, deductionAmount: 29_999 },
+              ]
+            : [],
+      },
+      gapNotice: { open: async (q) => void gapOpens.push(q) },
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+    });
+    await start(service);
+    expect(notices).toEqual([]);
+    expect(gapOpens.length).toBeGreaterThanOrEqual(1);
+    for (const g of gapOpens) expect(g).toEqual({ cancellationId: pendingId, orderId: ORDER, deductionAmount: 29_999, requestId: REQUEST, nowMs: NOW });
+  });
 });
 
 // ---- BAT-420 리뷰 D5(시험 담당, 구현 전에 씀, 계획 §11 보충 3, transfer-refund §5 '확정 뒤 팬 취소') ----
