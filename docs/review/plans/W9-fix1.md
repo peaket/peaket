@@ -244,3 +244,66 @@ cd D:/ticketpass-w9-fix1/services/purchase-svc && node_modules/.bin/vitest run -
 | R5 | 낮음 | services/purchase-svc/src/modules/refund/index.ts:160 | 주석이 아직 '빈 뼈대'다(구현이 채움) | 다음 손질 때 지워도 된다 |
 
 **합쳐도 되는가: 된다.** 돈이 두 번 나가거나 멈춘 결제사로 나가는 길을 새로 찾지 못했다. N3·N8·P3 모두 정본(transfer-refund §5 '잡기 늘리기'·'멈춤 표시는 합쳐 쓴다'·'주인', data `claimed_until`·§5)대로 고쳐졌고 새 지적은 모두 이 묶음 밖이거나 낮음이다. 검증 담당의 틀린 구현 표본(계획 §4) 확인을 남긴다.
+
+## 검증
+
+검증 담당 `w9f1-verify2`(claude-sonnet-5-5), 2026-11-17, 가지 끝 `3d3465a6`(앞 검증 담당은 사용 한도로 멈췄고 남은 시험 컨테이너가 없음을 확인한 뒤 이어 받았다). 이 묶음의 계획·시험·구현·리뷰는 맡지 않았다. 변이는 저장소 밖 스크립트(scratchpad `mut.mjs`)로 `services/purchase-svc`에 하나씩 넣고 계획 §5의 단위 시험(여섯 파일, 104)을 돌린 뒤 곧바로 `git checkout -- <파일>`로 되돌렸다. 단위로 안 잡힌 것은 §5의 통합 시험(네 파일, 78)을 Docker 잠금(`D:/ticketpass-locks/docker`, 감독이 넘김)을 쥔 채 한 번에 하나씩 돌렸다(시험이 만든 컨테이너는 시험 스스로 지웠고 남은 것 없음, 다른 이름의 컨테이너는 건드리지 않았다).
+
+### 셈
+
+- 기준선(변이 없음, 바른 코드): 단위 여섯 파일 **104 통과**, 통합 네 파일 **78 통과**, `services/purchase-svc` 단위 전체 **129 파일 4128 통과**. 통합 전체(`vitest.integration.config.mjs`, 57 파일)는 1950 통과·1 실패·2 건너뜀: 실패는 `test-int/identity-grpc.int.test.ts`의 'previousPid' 단언 하나로 이 묶음 밖(identity 재확인)이고, 그 파일만 따로 돌리면 46 모두 통과한다(전체를 한꺼번에 돌릴 때의 부하·시간 흔들림으로 본다, 이 묶음 코드와 닿지 않음).
+- 넣은 변이 **23개**(계획 §4의 변형을 따로 센 20 + 검증 담당이 더한 3: M-N8a2·M-P3c1b·M-P3c2b): **잡힘 21, 살아남음 2**(둘 다 등가). 계획 §4 변이는 N3 8·N8 8·P3 4개이고 모두 잡혔다(P3c의 '밖에서 한 번 더'와 '잡기를 잃은 쪽도' 서비스 쪽 변형 둘은 그 길이 저장소의 조건부 쓰기에 막혀 살아남았지만, 같은 뜻을 저장소 쪽에서 넣은 변형이 잡혔다. 아래).
+- 단위로 잡힌 것 15, 단위가 놓치고 통합이 잡은 것 6(M-N3c1·c2·d, M-N8d, M-P3c1b·c2b).
+
+### 변이 표
+
+시험 묶음: U = 계획 §5 단위 여섯 파일, I = 계획 §5 통합 네 파일. 위치는 `services/purchase-svc/src/modules/refund/` 아래(M-N3b3만 `src/` 바로 아래).
+
+| # | 위치 | 꼴 | 결과(잡은 시험) |
+| --- | --- | --- | --- |
+| M-N3a | application/event-refund-service.ts:523 | `#keepClaim` 호출을 뺌(늘리지 않음) | 잡힘: U 'N3 표 셋이 각 25초…'·'N3 늘리기 기준은 … 40,000ms 미만'·'N3 늘리기가 0행이면 …' |
+| M-N3b1 | event-refund-service.ts:701 | 기준 비교 `>=`를 `>`로(정각에도 늘림) | 잡힘: U 'N3 늘리기 기준은 남은 기한 40,000ms 미만' |
+| M-N3b2 | domain/event-refund-ports.ts:208 | 기준 40,000을 표 한도 30,000으로 | 잡힘: U 네 줄('표 셋 25초'·'기준'·'0행'·'잡기 60초 > 40초 > 30초 …') |
+| M-N3b3a | src/start.ts:407 | 운영 조립 `deadlineMs`를 지금 + 45초로 | 잡힘: U wave-review 'N3 잡기 60초 > 늘리기 기준 40초 > 표 한도 30초 …' |
+| M-N3b3b | src/relay-app.ts:292 | 같은 변이(릴레이 조립) | 잡힘: U 같은 시험 |
+| M-N3c1 | adapters/db/drizzle-event-refund-claims.ts:127 | 늘리기 문장에서 `claimed_until > 지금` 조건을 뺌 | U 살아남음 → 잡힘: I 'N3 잡기 늘리기는 잡기 값이 같고 기한 안일 때만 … 지금 + 60초로 쓴다' |
+| M-N3c2 | drizzle-event-refund-claims.ts:126 | 늘리기 문장에서 `claim_token` 조건을 뺌 | U 살아남음 → 잡힘: I 같은 시험 |
+| M-N3d | drizzle-event-refund-claims.ts:131 | 0행이어도 새 기한(`untilMs`)을 돌려줌 | U 살아남음 → 잡힘: I 같은 시험 |
+| M-N8a | event-refund-service.ts:637 | 실행 끝이 그 실행이 읽은 값(`pausedOf(request)`)을 바탕으로 쓴다 | 잡힘: U 'N8 겹친 두 실행이 서로 다른 결제사를 자동 정지하면 …'·'N8 재개 전에 시작한 실행이 늦게 끝나도 …' |
+| M-N8a2 | event-refund-service.ts:637 | 실행 끝이 DB 멈춤을 버리고 자기 지역 표 전부로 통째로 씀 | 잡힘: U 같은 두 시험 |
+| M-N8b | event-refund-service.ts:631 | `newlyPaused` 대신 그 실행의 멈춤 표 전부를 더함 | 잡힘: U 'N8 재개 전에 시작한 실행이 늦게 끝나도 …' |
+| M-N8c1 | event-refund-service.ts:345 | 한꺼번에 재개가 잠근 값의 모든 멈춤을 뺌(읽은 뒤 생긴 자동 정지까지) | 잡힘: U 'N8 겹친 두 실행 …'·'N8 한꺼번에 재개는 재개가 읽은 멈춤만 빼고 …' |
+| M-N8c2 | event-refund-service.ts:456 | 창 닫기가 잠근 값이 아니라 읽어 둔 값(`pausedOf(request)`)으로 씀 | 잡힘: U 'N8 신청 창 닫기·수동 멈춤은 그사이 적힌 자동 정지를 지우지 않는다' |
+| M-N8c3 | event-refund-service.ts:321 | 수동 멈춤이 읽어 둔 값으로 씀 | 잡힘: U 같은 시험 |
+| M-N8d | adapters/db/drizzle-event-refund-store.ts:180 | `updateLocked`가 `for no key update`를 뺌(잠그지 않고 읽은 뒤 씀) | U 살아남음 → 잡힘: I 'N8 실제 DB에서 두 끝 쓰기가 같은 순간에 와도 … updateLocked는 기다린다' |
+| M-N8e1 | domain/event-refund.ts:277 | 합치기가 자동 사유로도 DB 사유를 덮음 | 잡힘: U 'N8 멈춤 합치기: 빼기 먼저·더하기 다음 …' |
+| M-N8e2 | domain/event-refund.ts:277 | MANUAL이 사유를 바꾸지 못함 | 잡힘: U 같은 시험 |
+| M-P3a | event-refund-service.ts:679 | `#retryOrFail`의 `status === 'FAILED'` 분기를 뺌(옛 동작: Outbox 없이 FAILED 쓰기) | 잡힘: U 'P3 그 밖 실패(…)로 끝난 항목도 팬 실패 알림 하나를 같은 쓰기에 남긴다'·'N2 일괄 환불 항목이 FAILED로 끝나면 …' |
+| M-P3b | event-refund-service.ts:737 | 끝내기 쓰기에서 Outbox를 빼고 따로 쓰는 모양(끝내기 쓰기는 `outbox: []`) | 잡힘: U 'P3 …같은 쓰기에 남긴다'·GAT-130 '팬 알림은 Outbox에 …'·'환급 실패는 CS 알림과 팬 실패 알림을 함께 …' |
+| M-P3c1 | event-refund-service.ts:681 | 끝내기 뒤 `updateItem`으로 알림을 한 번 더 남김(서비스 쪽) | **살아남음**(등가, 아래) |
+| M-P3c2 | event-refund-service.ts:737 | 끝내기 0행(잡기 잃음)이어도 `updateItem`으로 알림을 남김(서비스 쪽) | **살아남음**(등가, 아래) |
+| M-P3c1b | adapters/db/drizzle-event-refund-store.ts:370 | 같은 트랜잭션의 Outbox 쓰기를 두 번(알림 한 번 더, 저장소 쪽) | U 살아남음 → 잡힘: I 5건('N7 연기 신청 표가 거절되면 … 팬 실패 알림 하나'·'N7 거절을 받은 뒤 끝내기 전에 끊기면 …'·'P3 연기 신청 Saga …'·'P3 두 실행이 … 팬 실패 알림은 하나다'·'P3 실제 DB에서 그 밖 실패의 끝내기를 실패시키면 …') |
+| M-P3c2b | drizzle-event-refund-claims.ts:105 | 끝내기 0행이어도 Outbox를 남김(잡기 잃은 쪽, 저장소 쪽) | U 살아남음 → 잡힘: I 'P3 두 실행이 같은 그 밖 실패 항목을 겹쳐 끝내도 팬 실패 알림은 하나다' |
+
+### 살아남은 것과 처리 제안
+
+| # | 판단 | 제안 |
+| --- | --- | --- |
+| M-P3c1·M-P3c2 | 등가. 이 두 변이는 서비스 밖 `updateItem`을 끝난·잡힌 항목에 다시 불러 알림을 더하려 했으나, 저장소 `updateItem`(DB `drizzle-event-refund-store.ts:249`, 메모리 `memory-event-refund-store.ts:95`)이 `status in (PENDING, UNKNOWN)`이고 잡기 값이 비었을 때만 쓰므로 0행이 되어 아무것도 남지 않는다(그 길로는 알림이 두 번 나갈 수 없다). 같은 뜻을 저장소 쪽(Outbox 두 번 쓰기, 0행 뒤 쓰기)으로 넣은 M-P3c1b·M-P3c2b는 통합 시험이 잡는다 | 받아들인다. 시험 빈 곳이 아니다 |
+| (참고) M-P3b | 계획 §4의 'Outbox를 끝내기 뒤 따로 쓴다'는 서비스에서 실제로 따로 쓸 길(Outbox만 쓰는 포트)이 없어 'Outbox를 끝내기 쓰기에서 뺀다' 꼴로 넣었다. 단위가 잡고, 장애 주입 통합('P3 실제 DB에서 그 밖 실패의 끝내기를 실패시키면 항목 FAILED·팬 알림·failure_case_at이 모두 없다')이 같은 트랜잭션을 따로 본다 | 기록만 |
+| (참고) 통합 전체 1건 실패 | `test-int/identity-grpc.int.test.ts`의 'previousPid' 단언(이 묶음 밖, 환급 실행기와 닿지 않음)이 통합 전체를 한꺼번에 돌릴 때만 실패했고 그 파일만 돌리면 통과한다 | 흔들림 후보로 감독 정리 목록에 올릴지는 감독 몫 |
+
+살아남은 변이 가운데 시험 빈 곳은 없다.
+
+### 판정 기준 대조
+
+| 기준 문장(정본·계획) | 단언하는 시험 | 같은가 |
+| --- | --- | --- |
+| transfer-refund §5 '잡기 늘리기': 표를 보내기 직전 남은 기한 < 40초면 살아 있는 잡기만 지금 + 60초로 늘림, 0행이면 보내지 않음 | U N3 표 셋 25초·기준 경계(40,000ms 정각은 안 늘림)·0행·상수 대조(60 > 40 > 30, 두 조립 `deadlineMs` + 30초), I N3 DB 문장(같은 잡기 값·기한 안·정각·다른 값) | 같다(조건마다 변이가 따로 잡힘: M-N3a·b1~b3b·c1·c2·d) |
+| §5 '멈춤 표시는 합쳐 쓴다': 요청 행 잠금 안에서 DB 멈춤에 더하고 빼기만, 실행 끝은 새 자동 정지만 더함, 재개는 그 결제사(한꺼번에면 읽은 것만), 이미 멈춘 결제사는 DB 사유·MANUAL만 사유 변경, PAUSED면 상태 그대로 | U N8 겹친 두 실행·늦게 끝난 실행·한꺼번에 재개·창 닫기와 수동 멈춤·합치기 표, I N8 DB 동시(잡힌 동안 기다림) | 같다(M-N8a~e 모두 잡힘) |
+| §5 '주인': 그 밖 실패도 끝내기 트랜잭션에 팬 `REFUND_FAILED` 하나, 시도 상한과 같은 길, 잡기 잃으면 아무것도 없음 | U P3 단위(같은 쓰기·상한 1), I P3 겹친 두 실행·장애 주입·연기 신청 Saga | 같다(M-P3a·b·c1b·c2b 잡힘, c1·c2는 등가) |
+| 계획 §2 '이 묶음은 마이그레이션·정본 밖 동작을 바꾸지 않는다' | 바른 코드 단위 4128·통합 4파일 78 통과 | 같다(통합 전체의 1건은 이 묶음 밖 identity 시험의 흔들림) |
+
+### 되돌림 확인
+
+변이마다 `git checkout -- <파일>`로 되돌렸고, 마지막 변이 뒤와 이 절을 쓴 뒤 `git status`에 이 계획 파일 말고 바뀐 것이 없다(제품 코드·시험 파일 변경 0). `D:/ticketpass-locks/docker`는 지우지 않고 그대로 둔다(감독이 정리). 시험이 남긴 컨테이너 없음.
