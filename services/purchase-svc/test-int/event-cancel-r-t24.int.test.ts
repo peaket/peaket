@@ -954,7 +954,7 @@ describe('BAT-420 다시 보기 2 N7 연기 신청 환급의 결제사 거절 [P
       attempts: new DrizzleEventRefundAttempts(purchaseDb),
       fanNotifier: new OutboxEventRefundFanNotifier(),
       notice: new HttpRefundFailureNotice(client, 'it-token'),
-      claims: over.claims ?? new DrizzleEventRefundClaims(purchaseDb),
+      claims: over.claims ?? new DrizzleEventRefundClaims(purchaseDb, clock),
       // 파일이 DB를 나눠 쓰므로 다시 열기 목록은 이 요청의 항목으로만 거른다
       csOutbox: {
         pendingItemFailures: async (limit: number) => (await real.pendingItemFailures(limit)).filter((r) => r.requestId === requestId),
@@ -1032,7 +1032,7 @@ describe('BAT-420 다시 보기 2 N7 연기 신청 환급의 결제사 거절 [P
        create trigger n7_item_fail before update on event_refund_item for each row when (new.request_id = '${requestId}' and new.status = 'FAILED') execute function n7_item_fail();`,
     );
     // 파드가 끝난 것처럼 실행 끝의 잡기 풀기도 하지 않는다(잡기는 기한까지 남는다)
-    const dying = Object.create(new DrizzleEventRefundClaims(purchaseDb)) as DrizzleEventRefundClaims;
+    const dying = Object.create(new DrizzleEventRefundClaims(purchaseDb, clock)) as DrizzleEventRefundClaims;
     dying.release = async () => undefined;
     payOutcome = 'REJECTED';
     try {
