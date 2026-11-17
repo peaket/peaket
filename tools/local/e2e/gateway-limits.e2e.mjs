@@ -23,13 +23,21 @@
 //   node tools/local/cluster.mjs gateways, 그다음 node --test tools/local/e2e/gateway-limits.e2e.mjs. 포트 전달은 띄우지 않는다(kind 포트 매핑과 로컬 전용
 //   NodePort Service로 127.0.0.1에 잇는다, docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법')
 // 끝나면 클러스터를 지우고(kind delete cluster), 시험이 만든 컨테이너는 docker rm -f -v로 지우고 잠금 폴더를 지운다(PROGRESS 턴 규칙 'Docker 차례', R-644).
+// 차단 상한(V-T43, 묶음 BAT-056 계획 §3의 K1~K3)은 D-T43 ④ 뒤·D-T50 ③ 앞에 둔다. K3은 운영 정의의 상한을 프록시 관리 포트 /clusters에서 읽고(관리 포트는 파드 안
+//   127.0.0.1에만 열려 있어 그 읽기만 kubectl 포트 전달을 잠깐 연다. 부하는 거치지 않는다), K1·K2는 gw-queue-buy에 임시 정책(이름표 peaket.io/sweep)을 잠깐 걸고
+//   대역 백엔드 파드 안에서 gw-queue 프록시 Service로 2초 지연 요청을 보낸 뒤 임시 정책을 지운다. 시험 값(Retry-After 2, 첫 값 2,400·300·6,000·750, 65,536)은 정본
+//   docs/infra.md §4.1 '게이트웨이 차단 상한' 값을 적고, 임시 상한(1·4)은 운영 값과 다르게 고른다.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { kubectl } from '../cluster.mjs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseAllDocuments } from 'yaml';
+import { KUBECONFIG, kubectl } from '../cluster.mjs';
+import { ensureTool } from '../tools.mjs';
 import { accessToken, echoed, edge, loadContract, send } from './gateway-client.mjs';
 
 const RUN = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
@@ -497,6 +505,341 @@ test('D-T43 ④ RV-15 PoC: 계정당 전역 한도 429의 응답 고치기 본�
   const traceId = bodyTraceId(result.last);
   assert.match(String(traceId), HEX32, `본문 traceId가 32자리 16진수가 아니다: ${traceId}`);
   assert.equal(traceId, result.last.headers['x-trace-id'], '본문 traceId와 X-Trace-Id 머리가 다르다');
+});
+
+// ===================== 차단 상한(V-T43 ①②, BAT-056 K1~K3) =====================
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+/** 정본 첫 값(docs/infra.md §4.1 '게이트웨이 차단 상한' '첫 값'): Envoy /clusters 칸 이름(max_requests = 동시 처리) */
+const FIRST_LIMITS = {
+  'gw-queue': { max_connections: 2400, max_requests: 2400, max_pending_requests: 300 },
+  'gw-fan': { max_connections: 6000, max_requests: 6000, max_pending_requests: 750 },
+  'gw-ops': { max_connections: 6000, max_requests: 6000, max_pending_requests: 750 },
+};
+/** 길게 쥐는 규칙(관제 SSE 두 흐름)의 세 칸 65,536 [가정] */
+const LONG_HOLD_LIMITS = { max_connections: 65536, max_requests: 65536, max_pending_requests: 65536 };
+/** 게이트웨이가 만든 503의 Retry-After [가정] */
+const RETRY_AFTER_503 = '2';
+/** K의 느슨한 시간 값(3ms 판정은 측정 몫, 계획 §3 K1) */
+const K_FAST_MS = 100;
+const SWEEP_LABEL = 'peaket.io/sweep';
+const K_POLICY = 'peaket-e2e-breaker-gw-queue-buy';
+
+/** 생성 라우트(deploy/gateways/*.routes.yaml, 읽기만)에서 (메서드, 경로)가 맞는 규칙 번호 */
+function ruleIndexOf(routeName, method, path) {
+  const dir = join(REPO, 'deploy', 'gateways');
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.routes.yaml')))
+    for (const d of parseAllDocuments(readFileSync(join(dir, f), 'utf8'))) {
+      const o = d.toJS();
+      if (o?.kind !== 'HTTPRoute' || o.metadata?.name !== routeName) continue;
+      for (const [i, rule] of (o.spec?.rules ?? []).entries())
+        for (const m of rule.matches ?? []) {
+          if (m.method && m.method !== method) continue;
+          const p = m.path ?? { type: 'PathPrefix', value: '/' };
+          if (p.type === 'Exact' ? p.value === path : p.type === 'RegularExpression' ? new RegExp(`^(?:${p.value})$`).test(path) : path === p.value || path.startsWith(`${p.value.replace(/\/$/, '')}/`)) return i;
+        }
+      throw new Error(`${routeName}에 ${method} ${path} 규칙이 없다`);
+    }
+  throw new Error(`생성 라우트 ${routeName}가 없다`);
+}
+/** Envoy Gateway v1.10.0의 규칙 묶음(cluster) 이름 */
+const clusterOf = (routeName, method, path) => `httproute/${NS()}/${routeName}/rule/${ruleIndexOf(routeName, method, path)}`;
+
+async function proxyPodsOf(gw) {
+  const items = JSON.parse(await kubectl(['-n', NS(), 'get', 'pods', '-l', `gateway.envoyproxy.io/owning-gateway-name=${gw}`, '-o', 'json'], { quiet: true, timeout: 30_000 })).items ?? [];
+  const pods = items.filter((p) => p.status?.phase === 'Running' && !p.metadata?.deletionTimestamp).map((p) => p.metadata.name);
+  assert.ok(pods.length > 0, `${gw} 프록시 파드가 없다`);
+  return pods;
+}
+/** 프록시 파드 관리 포트(127.0.0.1:19000)의 /clusters 글. 포트 전달을 이 읽기 동안만 연다(띄운 kubectl 하나만 끝낸다) */
+async function adminClusters(pod) {
+  const k = await ensureTool('kubectl');
+  const pf = spawn(k, ['--kubeconfig', KUBECONFIG, '-n', NS(), 'port-forward', '--address', '127.0.0.1', `pod/${pod}`, ':19000'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    const port = await new Promise((ok, no) => {
+      let buf = '';
+      const t = setTimeout(() => no(new Error(`${pod} 관리 포트 전달이 30초 안에 열리지 않았다`)), 30_000);
+      pf.stdout.on('data', (d) => {
+        buf += String(d);
+        const m = /127\.0\.0\.1:(\d+) ->/.exec(buf);
+        if (m) {
+          clearTimeout(t);
+          ok(Number(m[1]));
+        }
+      });
+      pf.on('exit', (code) => {
+        clearTimeout(t);
+        no(new Error(`${pod} 관리 포트 전달이 끝났다(${code})`));
+      });
+    });
+    const r = await fetch(`http://127.0.0.1:${port}/clusters`, { signal: AbortSignal.timeout(30_000) });
+    assert.equal(r.status, 200, `${pod} /clusters`);
+    return await r.text();
+  } finally {
+    pf.kill();
+  }
+}
+/** /clusters 글에서 그 묶음의 기본 우선순위 상한(없는 칸은 빠진다) */
+function limitsIn(text, cluster) {
+  const out = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (!line.startsWith(`${cluster}::default_priority::`)) continue;
+    const [k, v] = line.slice(`${cluster}::default_priority::`.length).split('::');
+    if (['max_connections', 'max_requests', 'max_pending_requests'].includes(k)) out[k] = Number(v);
+  }
+  return out;
+}
+/** 칸 차례에 기대지 않고 견준다 */
+const sameLimits = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+const near = (text, cluster) => [...new Set(text.split('\n').map((l) => l.split('::')[0]).filter((n) => n.startsWith(cluster.replace(/\/rule\/\d+$/, ''))))].join(', ');
+/** 그 게이트웨이의 모든 프록시 파드에서 묶음들의 상한이 want일 때까지 기다린다(시간이 넘으면 마지막에 본 값과 함께 실패) */
+async function waitLimits(gw, wants, timeoutMs = 90_000) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const seen = [];
+    let ok = true;
+    for (const pod of await proxyPodsOf(gw)) {
+      let text = '';
+      try {
+        text = await adminClusters(pod);
+      } catch (e) {
+        ok = false;
+        seen.push(`${pod}: ${e.message}`);
+        continue;
+      }
+      for (const [cluster, want] of wants) {
+        const got = limitsIn(text, cluster);
+        if (!sameLimits(got, want)) {
+          ok = false;
+          seen.push(`${pod} ${cluster}: ${JSON.stringify(got)}(비슷한 묶음: ${near(text, cluster) || '없음'})`);
+        }
+      }
+    }
+    if (ok) return;
+    if (Date.now() > until) assert.fail(`${gw} 프록시에 상한이 실리지 않았다(${timeoutMs}ms): ${seen.join(' / ')}`);
+    await sleep(3000);
+  }
+}
+/** 그 게이트웨이 프록시 파드들의 통계(19001 /stats/prometheus, API 서버 프록시)에서 그 묶음 카운터 합 */
+async function clusterCounter(gw, cluster, stat) {
+  let sum = 0;
+  let seen = false;
+  for (const pod of await proxyPodsOf(gw)) {
+    const text = await kubectl(['get', '--raw', `/api/v1/namespaces/${NS()}/pods/${pod}:${c.stats?.port ?? 19001}/proxy${c.stats?.path ?? '/stats/prometheus'}`], { quiet: true, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+    for (const line of text.split('\n'))
+      if (line.startsWith(`envoy_cluster_${stat}{`) && line.includes(`envoy_cluster_name="${cluster}"`)) {
+        seen = true;
+        sum += Number(line.trim().split(/\s+/).pop()) || 0;
+      }
+  }
+  assert.ok(seen, `${gw} 통계에 ${cluster}의 ${stat}가 없다`);
+  return sum;
+}
+/** gw-queue-buy를 라우트 전체로 겨눈 다른 BackendTrafficPolicy(있으면 임시 정책이 버려진다) */
+async function otherBuyPolicies() {
+  const list = JSON.parse(await kubectl(['-n', NS(), 'get', 'backendtrafficpolicies', '-o', 'json'], { quiet: true, timeout: 30_000 })).items ?? [];
+  return list.filter((p) => p.metadata?.name !== K_POLICY && (p.spec?.targetRefs ?? []).some((t) => t.kind === 'HTTPRoute' && t.name === 'gw-queue-buy' && t.sectionName === undefined)).map((p) => p.metadata.name);
+}
+/** 시험의 임시 정책(라우트 하나, StrategicMerge로 게이트웨이 정책의 503 응답 고치기를 그대로 받는다) */
+const kPolicy = (limit, pending) => ({
+  apiVersion: 'gateway.envoyproxy.io/v1alpha1',
+  kind: 'BackendTrafficPolicy',
+  metadata: { name: K_POLICY, namespace: NS(), labels: { [SWEEP_LABEL]: 'true' } },
+  spec: {
+    targetRefs: [{ group: 'gateway.networking.k8s.io', kind: 'HTTPRoute', name: 'gw-queue-buy' }],
+    mergeType: 'StrategicMerge',
+    circuitBreaker: { maxConnections: limit, maxParallelRequests: limit, maxPendingRequests: pending },
+  },
+});
+async function removeKPolicy(cluster, limits) {
+  await kubectl(['-n', NS(), 'delete', 'backendtrafficpolicies', K_POLICY, '--ignore-not-found'], { quiet: true, timeout: 60_000 });
+  // 다음 시험이 임시 상한을 물려받지 않게, 그 묶음의 상한이 임시 값이 아닐 때까지 기다린다(값 단언은 K3)
+  const until = Date.now() + 90_000;
+  for (;;) {
+    let still = false;
+    for (const pod of await proxyPodsOf('gw-queue')) {
+      try {
+        if (sameLimits(limitsIn(await adminClusters(pod), cluster), limits)) still = true;
+      } catch {
+        still = true;
+      }
+    }
+    if (!still) return;
+    if (Date.now() > until) throw new Error(`임시 상한 ${JSON.stringify(limits)}이 90초 안에 빠지지 않았다`);
+    await sleep(3000);
+  }
+}
+
+/**
+ * 클러스터 안 보내기(대역 백엔드 파드의 Node, 원문을 kubectl exec … node -e로 넘김. 바깥 이름을 쓰지 않는다):
+ * gw-queue 프록시 Service로 진입 POST를 count개, staggerMs 간격으로 보낸다(0이면 한꺼번에). 요청마다 새 연결이고 응답 시간은 TLS 연결이 선 뒤부터 잰다.
+ * 결과: [{ status, echo, retryAfter, contentType, body, ms, totalMs, error }]
+ */
+async function inClusterQueueBurst(o) {
+  const https = require('node:https');
+  const one = () =>
+    new Promise((resolve) => {
+      const t0 = performance.now();
+      let t1 = null;
+      const req = https.request(
+        { host: o.service, port: o.port, servername: o.host, method: 'POST', path: o.path, agent: false, ...(o.ca ? { ca: o.ca } : { rejectUnauthorized: false }), timeout: 20000, headers: { host: o.host, 'content-length': Buffer.byteLength(o.body), ...o.headers } },
+        (res) => {
+          let b = '';
+          res.on('data', (d) => (b += d));
+          res.on('end', () => {
+            const end = performance.now();
+            let echo = false;
+            try {
+              const j = JSON.parse(b);
+              echo = j !== null && typeof j === 'object' && typeof j.method === 'string' && typeof j.path === 'string' && j.headers !== null && typeof j.headers === 'object';
+            } catch {
+              echo = false;
+            }
+            resolve({ status: res.statusCode, echo, retryAfter: res.headers['retry-after'] ?? null, contentType: res.headers['content-type'] ?? null, body: echo ? '' : b.slice(0, 300), ms: end - (t1 ?? t0), totalMs: end - t0 });
+          });
+        },
+      );
+      req.on('socket', (s) => s.once('secureConnect', () => (t1 = performance.now())));
+      req.on('timeout', () => req.destroy(new Error('timeout')));
+      req.on('error', (e) => resolve({ status: 0, error: String(e.code || e.message) }));
+      req.end(o.body);
+    });
+  const ps = [];
+  for (let i = 0; i < o.count; i++) {
+    ps.push(one());
+    if (o.staggerMs > 0) await new Promise((r) => setTimeout(r, o.staggerMs));
+  }
+  console.log(JSON.stringify(await Promise.all(ps)));
+}
+async function queueBurst(count, staggerMs, delayMs = 2000) {
+  const echoPod = (await kubectl(['-n', NS(), 'get', 'pods', '-l', 'app.kubernetes.io/name=gateway-echo', '-o', 'jsonpath={.items[0].metadata.name}'], { quiet: true, timeout: 30_000 })).trim();
+  assert.ok(echoPod, '대역 백엔드 파드가 없다');
+  const svc = (await kubectl(['-n', NS(), 'get', 'svc', '-l', 'gateway.envoyproxy.io/owning-gateway-name=gw-queue', '-o', 'jsonpath={.items[0].metadata.name}'], { quiet: true, timeout: 30_000 })).trim();
+  assert.ok(svc, 'gw-queue 프록시 Service가 없다');
+  const sub = nextSub();
+  const tv = accessToken(c, 'gw-queue', sub);
+  const args = {
+    service: `${svc}.${NS()}.svc.cluster.local`,
+    port: 443,
+    host: c.hosts.queue,
+    path: `/v1/queues/e-${RUN}/entries`,
+    ca: c.caPem,
+    count,
+    staggerMs,
+    body: '{}',
+    headers: { ...edge(c, '198.51.100.56', { origin: c.origins.www, 'content-type': 'text/plain;charset=UTF-8', cookie: `__Secure-peaket_at=${tv}` }), 'x-e2e-delay-ms': String(delayMs) },
+  };
+  const script = `(${inClusterQueueBurst.toString()})(${JSON.stringify(args)}).catch((e) => { console.error(e); process.exit(1); })`;
+  const b64 = Buffer.from(script, 'utf8').toString('base64');
+  const out = await kubectl(['-n', NS(), 'exec', echoPod, '-c', 'echo', '--', 'node', '-e', `eval(Buffer.from('${b64}', 'base64').toString('utf8'))`], { quiet: true, timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+  return JSON.parse(out.trim().split('\n').pop());
+}
+const statusCounts = (rs) => rs.reduce((m, r) => ((m[r.status] = (m[r.status] ?? 0) + 1), m), {});
+
+test('V-T43 ② 운영 정의의 상한이 프록시 설정에 실린다', async () => {
+  // gw-queue 진입·gw-fan 홀드(정본 첫 값), gw-fan 결제 결과 롱 폴링(게이트웨이 값, 감독 결정 2026-11-18), gw-ops 관제 SSE 두 규칙(65,536)과 gw-ops의 다른 규칙(게이트웨이 값)
+  await waitLimits('gw-queue', [[clusterOf('gw-queue-buy', 'POST', '/v1/queues/e1/entries'), FIRST_LIMITS['gw-queue']]], 10_000);
+  await waitLimits(
+    'gw-fan',
+    [
+      [clusterOf('gw-fan-buy', 'POST', '/v1/events/e1/holds'), FIRST_LIMITS['gw-fan']],
+      [clusterOf('gw-fan-api', 'GET', '/v1/orders/o1/payment-status'), FIRST_LIMITS['gw-fan']],
+    ],
+    10_000,
+  );
+  await waitLimits(
+    'gw-ops',
+    [
+      [clusterOf('gw-ops-api', 'GET', '/v1/ops/events/e1/live'), LONG_HOLD_LIMITS],
+      [clusterOf('gw-ops-api', 'GET', '/v1/ops/live'), LONG_HOLD_LIMITS],
+      [clusterOf('gw-ops-api', 'GET', '/v1/ops/events/e1/bot-review'), FIRST_LIMITS['gw-ops']],
+    ],
+    10_000,
+  );
+});
+
+test('V-T43 ② 상한을 넘은 요청은 바로 503·Retry-After: 2·Problem이고 백엔드에 닿지 않는다', async () => {
+  const cluster = clusterOf('gw-queue-buy', 'POST', '/v1/queues/e1/entries');
+  const temp = { max_connections: 1, max_requests: 1, max_pending_requests: 1 };
+  assert.deepEqual(await otherBuyPolicies(), [], 'gw-queue-buy를 겨눈 다른 정책이 있어 임시 정책이 버려진다');
+  const pods = (await proxyPodsOf('gw-queue')).length;
+  let rs;
+  let delta;
+  try {
+    await applyObject(kPolicy(1, 1));
+    await waitLimits('gw-queue', [[cluster, temp]]);
+    // 그 묶음 통계 줄은 첫 요청 뒤에 생긴다(2026-11-18 kind 실측): 지연 없는 요청 하나로 줄을 만든 뒤 바탕 값을 읽는다
+    const warm = await queueBurst(1, 0, 0);
+    assert.ok(warm[0]?.echo, `시험 바탕: 첫 요청이 대역에 닿지 않았다 ${JSON.stringify(warm)}`);
+    const before = await clusterCounter('gw-queue', cluster, 'upstream_rq_total');
+    rs = await queueBurst(20, 0);
+    delta = (await clusterCounter('gw-queue', cluster, 'upstream_rq_total')) - before;
+  } finally {
+    await removeKPolicy(cluster, temp);
+  }
+  const counts = statusCounts(rs);
+  assert.equal(rs.filter((r) => r.status === 0).length, 0, `시험 바탕 모자람(연결 오류) ${JSON.stringify(counts)}`);
+  const s503 = rs.filter((r) => r.status === 503);
+  const echo = rs.filter((r) => r.echo && r.status < 400);
+  // 동시 1 + 보류 1 = 2(프록시 파드마다)를 넘는 요청은 503
+  assert.ok(s503.length >= 20 - 2 * pods, `503 ${s503.length}건 < ${20 - 2 * pods} ${JSON.stringify(counts)}`);
+  assert.equal(s503.length + echo.length, rs.length, `503도 대역 응답도 아닌 것이 있다 ${JSON.stringify(counts)}`);
+  assert.ok(echo.length >= 1 && echo.length <= 2 * pods, `대역에 닿은 수 ${echo.length}(1~${2 * pods})`);
+  assert.ok(delta <= 2 * pods, `그 묶음의 업스트림 요청 수가 ${delta} 늘었다(≤ ${2 * pods})`);
+  for (const [i, r] of s503.entries()) {
+    assert.equal(r.echo, false, `503 #${i}: 대역 백엔드 응답이다`);
+    assert.equal(r.retryAfter, RETRY_AFTER_503, `503 #${i}: Retry-After ${r.retryAfter}`);
+    assert.match(String(r.contentType ?? ''), /^application\/problem\+json\b/, `503 #${i}: 형식 ${r.contentType}`);
+    assert.deepEqual(JSON.parse(r.body || 'null'), { type: 'about:blank', title: TITLE[503], status: 503 }, `503 #${i}: 본문 ${r.body}`);
+    assert.ok(r.ms < K_FAST_MS, `503 #${i}: ${r.ms.toFixed(1)}ms(연결 뒤) ≥ ${K_FAST_MS}ms`);
+  }
+});
+
+// 계획 §3 K2는 '동시 + 보류(5개)까지 503 0건, 6개에 정확히 1건'이었으나, 보류 자리로 받을 5번째 요청을 Envoy가 늘 받아 주지 않는다(2026-11-18 kind lane1-b056t-pre,
+// 구현 전 트리, 같은 임시 상한 동시 4·연결 4·보류 1: 5개 묶음 일곱 번에 503 0건 한 번·1건 여섯 번(5번째가 upstream_rq_active_overflow나 upstream_rq_pending_overflow로 503),
+// 6개 묶음 세 번에 200·503 꼴 '4·2'·'5·1(5번째가 503, 6번째가 닿음)'). 그래서 결정적인 쪽만 단언한다: 동시 상한(4개)까지는 503 0건, 동시 + 보류(5)를 넘는 6개에는
+// 503이 1건 이상이고 대역에 닿은 수가 5 이하다. 5개 묶음은 결과를 진단으로만 남긴다(계획 '시험 결과' 참고).
+test('V-T43 ① 동시 상한까지는 503이 없고 동시 + 보류 상한을 넘은 요청은 503이다(보류 경계의 5번째는 관찰)', async (t) => {
+  const cluster = clusterOf('gw-queue-buy', 'POST', '/v1/queues/e1/entries');
+  const temp = { max_connections: 4, max_requests: 4, max_pending_requests: 1 };
+  assert.deepEqual(await otherBuyPolicies(), [], 'gw-queue-buy를 겨눈 다른 정책이 있어 임시 정책이 버려진다');
+  // 경계가 파드마다라 파드 하나일 때만 정확히 센다(로컬 덧씌우기는 복제 1)
+  assert.equal((await proxyPodsOf('gw-queue')).length, 1, '시험 바탕: gw-queue 프록시 파드가 하나가 아니다');
+  let four;
+  let five;
+  let six;
+  try {
+    await applyObject(kPolicy(4, 1));
+    await waitLimits('gw-queue', [[cluster, temp]]);
+    // 150ms 간격으로 보낸다(앞 요청의 업스트림 연결이 선 뒤 다음 요청이 온다). 묶음마다 빈 연결 묶음에서 시작한다: 대역 백엔드(Node http)는 쉬는 연결을
+    // 5초 뒤 닫으므로 7초 기다린다(앞 묶음의 쉬는 연결이 남으면 넘침 꼴이 바뀌었다, 2026-11-18 실측)
+    await sleep(7000);
+    four = await queueBurst(4, 150);
+    await sleep(7000);
+    five = await queueBurst(5, 150);
+    await sleep(7000);
+    six = await queueBurst(6, 150);
+  } finally {
+    await removeKPolicy(cluster, temp);
+  }
+  for (const [label, rs] of [
+    ['4개', four],
+    ['5개', five],
+    ['6개', six],
+  ])
+    assert.equal(rs.filter((r) => r.status === 0).length, 0, `${label}: 시험 바탕 모자람(연결 오류) ${JSON.stringify(statusCounts(rs))}`);
+  t.diagnostic(`보류 경계 5개: ${five.map((r) => r.status).join(',')} / 6개: ${six.map((r) => r.status).join(',')}`);
+  assert.equal(four.filter((r) => r.status === 503).length, 0, `동시 상한 4개에 503이 있다 ${JSON.stringify(statusCounts(four))}`);
+  assert.equal(four.filter((r) => r.echo && r.status < 400).length, 4, `4개가 모두 대역에 닿지 않았다 ${JSON.stringify(statusCounts(four))}`);
+  // 6개: 앞 4개는 동시 상한 안이라 닿고, 동시 + 보류(5)를 넘으므로 503이 1건 이상이며 대역에 닿은 수는 5 이하다(503도 대역 응답도 아닌 것은 없다)
+  const order = six.map((r) => r.status).join(',');
+  assert.deepEqual(six.slice(0, 4).map((r) => r.echo && r.status < 400), [true, true, true, true], `6개의 앞 4개 ${order}`);
+  const six503 = six.filter((r) => r.status === 503 && !r.echo).length;
+  const sixEcho = six.filter((r) => r.echo && r.status < 400).length;
+  assert.ok(six503 >= 1, `동시 + 보류를 넘는 6개에 503이 없다 ${order}`);
+  assert.ok(sixEcho <= 5, `6개 가운데 대역에 닿은 수 ${sixEcho} > 동시 + 보류 5 ${order}`);
+  assert.equal(six503 + sixEcho, 6, `503도 대역 응답도 아닌 것이 있다 ${order}`);
 });
 
 // ===================== 열림(D-T50 ③, 맨 끝) =====================
