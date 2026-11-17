@@ -1,12 +1,13 @@
 // SEC-06R(W7-audit, R-628 회귀 시험 공백): 내부 판매 설정 경로의 가드(InternalToken401Guard)가 공용 InternalTokenGuard의
 // 시작 차단(onModuleInit)과 상수 시간 비교(timingSafeEqual)를 그대로 쓰는지 서비스 시작 경계에서 본다.
-// 정본: docs/architecture.md §3.2 'REST' 행(이 경로는 401, local·ci 밖 무토큰 시작 거절, 길이가 다르면 비교 없이 거절), asvs/settlement.md v5.0.0-11.2.4.
+// 정본: docs/architecture.md §3.2 'REST' 행(이 경로는 401, local·ci 밖 무토큰 시작 거절, 받은 값과 기대 값을 SHA-256 뒤 한 번 비교), asvs/settlement.md v5.0.0-11.2.4.
+// W9-fix3 F2(시험 담당 w9f3-test, 2026-11-17): 옛 ④의 '길이가 다르면 timingSafeEqual 0번'은 정본이 바뀌어 '해시 32바이트 둘을 1번'으로 뒤집었다(시험 이의 아님).
 // 기존 internal-sale-config-token.test.ts는 PEAKET_ENV=ci만 본다. 여기서는 INTERNAL_TOKEN_REQUIRED를 createService가 PEAKET_ENV로 넣게 해 prod·staging을 본다.
 // timingSafeEqual 엿보기가 다른 시험 파일에 번지지 않게 이 파일에만 node:crypto 감싸기를 둔다(@peaket/platform은 원본으로 이어져 엿보기가 닿는다).
 import 'reflect-metadata';
 import { type DynamicModule, Module } from '@nestjs/common';
 import { createService, INTERNAL_TOKEN, type PlatformService } from '@peaket/platform';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { MemorySaleConfigStore } from '../src/modules/catalog/adapters/memory-sale-config-store.js';
 import type { EventSaleConfig } from '../src/modules/catalog/domain/event-sale-config.js';
@@ -124,22 +125,28 @@ describe('SEC-06R 운영 토큰 검사', () => {
     expect(due.statusCode).toBe(401);
   });
 
-  test('SEC-06R ④ 내부 판매 설정 가드는 공용 상수 시간 비교를 쓴다', async () => {
+  test('W9F3 F2 SEC-06R ④ 내부 판매 설정 가드도 길이가 다른 토큰을 해시로 견주고 401이다 [ASVS v5.0.0-11.2.4]', async () => {
+    const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
+    const expectOneHashed = (given: string) => {
+      expect(spy, given).toHaveBeenCalledTimes(1);
+      const [a, b] = spy.mock.calls[0]!;
+      expect(Buffer.isBuffer(a) && Buffer.isBuffer(b), given).toBe(true);
+      expect([(a as Buffer).length, (b as Buffer).length], given).toEqual([32, 32]);
+      expect([(a as Buffer).toString('hex'), (b as Buffer).toString('hex')], given).toEqual([sha256(given), sha256(TOKEN)]);
+    };
+
     spy.mockClear();
     expect((await get(svc, EVENT, TOKEN)).statusCode).toBe(200);
-    expect(spy).toHaveBeenCalledTimes(1);
-    const [a, b] = spy.mock.calls[0]!;
-    expect(Buffer.isBuffer(a) && Buffer.isBuffer(b)).toBe(true);
-    expect((a as Buffer).length).toBe((b as Buffer).length);
-    expect([(a as Buffer).toString('utf8'), (b as Buffer).toString('utf8')]).toEqual([TOKEN, TOKEN]);
+    expectOneHashed(TOKEN);
 
     spy.mockClear();
     const sameLengthWrong = `X${TOKEN.slice(1)}`;
     expect((await get(svc, EVENT, sameLengthWrong)).statusCode).toBe(401);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expectOneHashed(sameLengthWrong);
 
+    // 길이가 다르면 옛 구현은 비교 없이 거절했다(이른 종료). 지금은 해시 둘을 한 번 견주고 401이다
     spy.mockClear();
     expect((await get(svc, EVENT, 'short')).statusCode).toBe(401);
-    expect(spy).toHaveBeenCalledTimes(0);
+    expectOneHashed('short');
   });
 });

@@ -41,6 +41,13 @@ export function partnerDatabaseUrlFromEnv(env: Readonly<Record<string, string | 
   throw new Error('PEAKET_PARTNER_DATABASE_URL이 없다(파트너 회차 취소 경로의 ops_partner DB 사용자, 운영 필수. 비밀 관리에서 넣는다)');
 }
 
+/**
+ * W9-fix3 F1(authz-matrix §5.3 'ops-svc 구현' 끝 '시작 검사'): 파트너 풀의 DB 역할 시작 검사를 할지. 시험 담당이 둔 빈 뼈대(동작 없음), 구현 담당이 채운다
+ */
+export function partnerRoleCheckRequired(_env: Readonly<Record<string, string | undefined>>): boolean {
+  return false;
+}
+
 export function eventCancellationDepsFromEnv(i: EventCancellationDepsInput): EventCancellationDeps {
   const coreUrl = i.env.PEAKET_CORE_HTTP_URL;
   const httpSale = has(i.env.PEAKET_PURCHASE_HTTP_URL) && has(i.env.PEAKET_QUEUE_HTTP_URL);

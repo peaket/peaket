@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, parseAllDocuments, stringify } from 'yaml';
-import { generateRoutes } from './gateway-routes.mjs';
+import { authKindOf, generateRoutes } from './gateway-routes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'gateway-routes.mjs');
@@ -1072,4 +1072,78 @@ test('D-T43 ③ 저장소: openapi의 CDN 캐시 공개 읽기(홈·검색·자�
     }
   }
   assert.ok(other > 0, 'X-Trace-Id를 붙이는 규칙이 하나도 없다');
+});
+
+// ===================== W9-fix3 F3(BAT-060 R-666 RV-07): x-peaket-scopes 값이 이상하면 멈춘다 =====================
+// 정본: docs/infra.md §4.1 '인증 종류 대조' ④, docs/security/authz-matrix.md §5.1 '게이트웨이가 요구하는 스코프'(추천 적용 2026-11-17, W9-fix3).
+// 시험이 정한 약속(시험 담당 w9f3-test, 2026-11-17): 까닭 글에는 'x-peaket-scopes'와 그 값이 든다. 값은 JSON 꼴로 적는다고 보고
+// null은 'null', 빈 배열은 '[]', 문자열 원소는 그 글자 그대로(앞뒤 공백 포함)가 까닭 글에 들어 있는지 본다.
+/** 모든 갈래가 fanCookie인 작업(①의 token) */
+const FAN_ONLY = [{ fanCookie: [] }];
+/** x-peaket-scopes 칸에 값을 그대로 넣은 작업(openapiOf는 거짓 값을 넣지 않으므로 직접 만든다) */
+const scopedOp = (scopes, security = FAN_ONLY) => ({ ...op({ security }), 'x-peaket-scopes': scopes });
+/** [값, 까닭 글에 들어야 할 조각] */
+const BAD_SCOPES = [
+  ['ticket:buy', 'ticket:buy'], // 배열이 아님(문자열 하나)
+  [null, 'null'], // 배열이 아님(빈 값)
+  [[], '[]'], // 빈 배열
+  [['ticket:buyy'], 'ticket:buyy'], // 모르는 값
+  [['Ticket:Buy'], 'Ticket:Buy'], // 대소문자가 다르면 다른 값
+  [[' ticket:buy'], ' ticket:buy'], // 앞뒤 공백이 다르면 다른 값
+  [[1], '1'], // 문자열이 아닌 원소
+  [['ticket:buy', 'ticket:buy'], 'ticket:buy'], // 같은 값 두 번
+];
+
+test('W9F3 F3 RV-07 x-peaket-scopes 값이 이상하면 authKindOf가 문제를 돌린다 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.3.1]', () => {
+  const openapi = openapiOf({});
+  for (const [scopes, needle] of BAD_SCOPES) {
+    const r = authKindOf(scopedOp(scopes), openapi);
+    const label = JSON.stringify(scopes);
+    assert.equal(typeof r?.problem, 'string', `${label}: 문제를 돌리지 않았다(${JSON.stringify(r)})`);
+    assert.ok(r.problem.includes('x-peaket-scopes'), `${label}: 까닭 글에 x-peaket-scopes가 없다: ${r.problem}`);
+    assert.ok(r.problem.includes(needle), `${label}: 까닭 글에 값(${needle})이 없다: ${r.problem}`);
+  }
+  // ticket:buy인데 ①의 token이 아닌 작업(한 갈래라도 액세스 토큰 넷이 없다)
+  for (const security of [[{ fanCookie: [] }, {}], [], [{ admissionToken: [] }]]) {
+    const r = authKindOf(scopedOp(['ticket:buy'], security), openapi);
+    const label = JSON.stringify(security);
+    assert.equal(typeof r?.problem, 'string', `security ${label}: ticket:buy인데 토큰 없는 갈래가 있어도 문제를 돌리지 않았다(${JSON.stringify(r)})`);
+    assert.ok(r.problem.includes('x-peaket-scopes'), `security ${label}: 까닭 글에 x-peaket-scopes가 없다: ${r.problem}`);
+  }
+  // 대조: 바른 값이면 지금 그대로
+  assert.deepEqual(authKindOf(scopedOp(['ticket:buy']), openapi), { kind: 'token-buy' });
+  assert.deepEqual(authKindOf(op({ security: FAN_ONLY }), openapi), { kind: 'token' });
+  assert.deepEqual(authKindOf(scopedOp(['ticket:buy'], [{ fanCookie: [] }, { opsCookie: [] }]), openapi), { kind: 'token-buy' });
+});
+
+test('W9F3 F3 RV-07 그런 작업이 하나라도 있으면 CLI가 2로 멈추고 생성 파일을 쓰지 않는다 [ASVS v5.0.0-8.2.1]', () => {
+  const BAD_PATH = '/v1/events/{eventId}';
+  // 지금 구현이 그 값으로 읽는 인증 종류와 같은 이름표를 단다(그래서 멈춘다면 까닭은 x-peaket-scopes 값뿐이다)
+  const cases = [
+    { scopes: 'ticket:buy', security: FAN_ONLY, label: 'token' },
+    { scopes: null, security: FAN_ONLY, label: 'token' },
+    { scopes: ['ticket:buyy'], security: FAN_ONLY, label: 'token' },
+    { scopes: ['ticket:buy', 'ticket:buy'], security: FAN_ONLY, label: 'token-buy' },
+    { scopes: ['ticket:buy'], security: [{ fanCookie: [] }, {}], label: 'optional' },
+    { scopes: ['ticket:buy'], security: [{ admissionToken: [] }], label: 'public' },
+  ];
+  for (const c of cases) {
+    const what = `${JSON.stringify(c.scopes)} / security ${JSON.stringify(c.security)}`;
+    const openapi = openapiOf({ '/v1/orders/{orderId}': 'GET' });
+    openapi.paths[BAD_PATH] = { get: scopedOp(c.scopes, c.security) };
+    const sources = {
+      'gw-fan': [
+        sourceRoute('gw-fan', 'gw-fan-api', [{ prefixes: ['/v1/orders'], backend: 'purchase-svc' }], { auth: 'token' }),
+        sourceRoute('gw-fan', 'gw-fan-events', [{ prefixes: ['/v1/events'], backend: 'core-svc' }], { auth: c.label }),
+      ],
+    };
+    const r = generateRoutes({ openapi, sources });
+    assert.ok(Array.isArray(r?.problems), 'problems 목록이 없다');
+    assert.ok(r.problems.some((p) => p.includes(BAD_PATH) && p.includes('x-peaket-scopes')), `${what}: 멈춤 까닭에 ${BAD_PATH}와 x-peaket-scopes가 함께 없다: ${JSON.stringify(r.problems)}`);
+    const root = fixture(openapi, sources);
+    const w = cli(root, '--write');
+    assert.equal(w.status, 2, `${what}: CLI 종료 코드 ${w.status}\n${w.out}`);
+    assert.ok(w.out.split('\n').some((l) => l.includes(BAD_PATH) && l.includes('x-peaket-scopes')), `${what}: CLI 까닭 줄에 ${BAD_PATH}와 x-peaket-scopes가 함께 없다:\n${w.out}`);
+    assert.ok(!existsSync(join(root, genPath('gw-fan'))), `${what}: 멈췄는데 ${genPath('gw-fan')}를 썼다`);
+  }
 });

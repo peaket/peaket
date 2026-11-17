@@ -361,6 +361,26 @@ describe('검색 원본의 503·캐시·로그·후보 읽기(메모리)', () =>
     expect(logs.text()).not.toContain('"query":"12345"');
   });
 
+  // W9-fix3 F6(BAT-165 R-663 W7L2-S11, 시험 담당 w9f3-test 2026-11-17). 정본: docs/features/search.md §11 '검색어 가리기'(구분자에 빗금 더함)·
+  // §11 '검색 자체는 가리기 전 값으로 한다'. 전각 숫자·빗금은 정규화(NFKC)로 '010/1234/5678'이 된 뒤 가린다
+  test('W9F3 F6 SR-T17 정규화 뒤 가리기: 전각 빗금 번호도 로그에 남지 않는다 [ASVS v5.0.0-16.2.5]', async () => {
+    const before = lines('search_query').length;
+    const wide = await get2('/v1/search?q=' + encodeURIComponent('０１０／１２３４／５６７８'));
+    expect(wide.statusCode).toBe(200);
+    const wideOut = ListSearchResultsResponse.parse(json(wide));
+    // 검색은 가린 값이 아니라 정규화한 값으로 했다
+    expect(wideOut.query?.normalized).toBe('010/1234/5678');
+    const plain = ListSearchResultsResponse.parse(json(await get2('/v1/search?q=' + encodeURIComponent('010/1234/5678'))));
+    expect({ items: wideOut.items, total: wideOut.total }).toEqual({ items: plain.items, total: plain.total });
+    const got = lines('search_query').slice(before);
+    expect(got.map((l) => l.query)).toEqual(['[전화]', '[전화]']);
+    for (const l of got) {
+      expect(String(l.query).match(/[0-9０-９]/g) ?? [], JSON.stringify(l)).toEqual([]);
+      const text = JSON.stringify(l);
+      for (const secret of ['010/1234/5678', '1234/5678', '０１０']) expect(text).not.toContain(secret);
+    }
+  });
+
   test('HOT-280 검색 한 번은 후보 공연만 읽고 이름 색인을 요청마다 다시 만들지 않는다(COV2-07)', async () => {
     const documentOf = vi.mocked(searchDomain.documentOf);
     const counters = [vi.mocked(normalizePkg.indexNames), vi.mocked(normalizePkg.indexName)];

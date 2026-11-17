@@ -108,3 +108,26 @@ describe('0건 검색어 목록', () => {
     expect(zeroResultQueries([], { weekStart: WEEK_START })).toEqual([]);
   });
 });
+
+// W9-fix3 F6(BAT-165 R-663 W7L2-S11, 시험 담당 w9f3-test 2026-11-17): 구분자에 빗금(/)·역빗금(\)·밑줄(_)·쉼표(,)·가운뎃점(·, U+00B7)을 더한다.
+// 정본: docs/features/search.md §11 '검색어 가리기'(추천 적용 2026-11-17, W9-fix3). 하이픈·점·공백·괄호와 1~3글자 상한은 그대로다
+describe('검색어 가리기(구분자 더함, W9-fix3)', () => {
+  test('W9F3 F6 SR-T17 빗금·밑줄·쉼표·역빗금·가운뎃점으로 이은 번호도 가린다 [ASVS v5.0.0-16.2.5] [ASVS v5.0.0-14.2.4]', () => {
+    // 전화: 새 구분자 다섯 각각, 그리고 공백과 섞인 빗금
+    for (const phone of ['010/1234/5678', '010_1234_5678', '010,1234,5678', '010\\1234\\5678', '010·1234·5678', '010 / 1234 / 5678']) {
+      expect(maskSearchQuery(phone), phone).toBe('[전화]');
+    }
+    // 국제 꼴도 같은 구분자로 잇는다
+    expect(maskSearchQuery('+82/10/1234/5678')).toBe('[전화]');
+    // 전화가 아닌 이어진 숫자 5자리 이상: 카드 번호, 날짜(정본 예시), 쉼표 자리 나눔
+    expect(maskSearchQuery('1234/5678/9012/3456')).toBe('[숫자]');
+    expect(maskSearchQuery('2026/11/17')).toBe('[숫자]');
+    expect(maskSearchQuery('1,000,000')).toBe('[숫자]');
+    // 글 사이에 섞여도 그 부분만 바꾼다
+    expect(maskSearchQuery('루멘 010/1234/5678 문의')).toBe('루멘 [전화] 문의');
+    // 남는 것: 4자리 이하로 떨어진 숫자, 글자로 떨어진 연도, 구분자 4글자(잇지 않는다)
+    for (const keep of ['루멘 2/3회', '2026_루멘', '010////1234', '010____1234', '010,,,,1234']) expect(maskSearchQuery(keep), keep).toBe(keep);
+    // 경계: 구분자 3글자는 잇는다
+    expect(maskSearchQuery('010///1234')).toBe('[숫자]');
+  });
+});

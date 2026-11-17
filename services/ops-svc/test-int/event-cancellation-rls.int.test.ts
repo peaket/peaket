@@ -3,8 +3,10 @@
 // ops_app은 전체를 본다. 정의자 함수는 search_path를 고정하고 EXECUTE는 정한 역할만 갖는다(감독 덧붙임).
 // 정본: docs/security/authz-matrix.md §5.3 'ops-svc 구현', docs/data.md event_cancellation_request·§5, ASVS v5.0.0-8.4.1. 컨테이너는 afterAll에서 지운다.
 import { randomUUID } from 'node:crypto';
+import { createDatabase, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { assertOpsPartnerRole } from '../src/adapters/db/database-role.js';
 import { migrateOps } from '../scripts/migrate.mjs';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -161,5 +163,57 @@ describe('0015 파트너 행 보안 [BAT-420 웨이브 끝 리뷰 S2]', () => {
       return { audit: await auditRows(), cases: await caseRows() };
     });
     expect(own).toEqual({ audit: 1, cases: 1 });
+  });
+});
+
+// W9-fix3 F1(BAT-420 GAT-110 구현 담당이 남긴 것, 시험 담당 w9f3-test 2026-11-17): 파트너 풀의 DB 역할 시작 검사를 실제 역할로 본다.
+// 정본: docs/security/authz-matrix.md §5.3 'ops-svc 구현' 끝 '시작 검사'(① ops_partner 구성원 ② ops_app 구성원 아님 ③ 슈퍼유저·BYPASSRLS 아님
+// ④ event_cancellation_request의 소유자(소유 역할의 구성원 포함) 아님), 같은 절 '앱 사용자는 표 소유자가 아니게'. core-svc의 같은 검사와 같은 꼴이라
+// 슈퍼유저·표 소유자 까닭 글에는 '행 보안', 역할이 틀리면 그 역할 이름이 든다(계획 docs/review/plans/W9-fix3.md §4).
+describe('ops 파트너 풀의 DB 역할 시작 검사 [W9-fix3 F1]', () => {
+  test('W9F3 F1 ops 파트너 풀 사용자의 DB 역할을 시작 때 본다 [ASVS v5.0.0-8.4.1] [ASVS v5.0.0-13.2.2]', async () => {
+    const PW = 'peaket-test';
+    const pools: Database[] = [];
+    const poolFor = (user: string): Database => {
+      const d = createDatabase({ url: container!.urlFor(user, PW), applicationName: 'ops-svc-role-check-it', max: 1 });
+      pools.push(d);
+      return d;
+    };
+    const login = async (user: string, grants: string[], extra = ''): Promise<Database> => {
+      await admin.query(`drop role if exists ${user}`);
+      await admin.query(`create role ${user} login password '${PW}' nosuperuser ${extra}`);
+      for (const g of grants) await admin.query(`grant ${g} to ${user}`);
+      return poolFor(user);
+    };
+    const owner = (await admin.query<{ owner: string }>("select pg_get_userbyid(relowner) as owner from pg_class where oid = 'public.event_cancellation_request'::regclass")).rows[0]!.owner;
+    try {
+      // 됨: ops_partner만 가진 로그인 사용자
+      const partner = await login('w9f3_partner_login', ['ops_partner']);
+      await expect(assertOpsPartnerRole(partner)).resolves.toBeUndefined();
+      // 던짐: 표 소유자(마이그레이션 사용자, 여기서는 슈퍼유저)
+      const migrator = createDatabase({ url: container!.url, applicationName: 'ops-svc-role-check-it', max: 1 });
+      pools.push(migrator);
+      await expect(assertOpsPartnerRole(migrator)).rejects.toThrow(/행 보안/);
+      // 던짐: ops_app만
+      await expect(assertOpsPartnerRole(await login('w9f3_app_login', ['ops_app']))).rejects.toThrow(/ops_partner/);
+      // 던짐: 둘 다(행 보안 정책이 합쳐진다)
+      await expect(assertOpsPartnerRole(await login('w9f3_both_login', ['ops_partner', 'ops_app']))).rejects.toThrow(/ops_app/);
+      // 던짐: ops_partner + BYPASSRLS(행 보안을 조용히 건너뛴다)
+      await expect(assertOpsPartnerRole(await login('w9f3_bypass_login', ['ops_partner'], 'bypassrls'))).rejects.toThrow(/BYPASSRLS|슈퍼유저|행 보안/);
+      // 던짐: 소유 역할의 구성원(표 소유자를 슈퍼유저가 아닌 역할로 옮기고 그 역할을 받은 ops_partner 사용자)
+      await admin.query('drop role if exists w9f3_owner_role');
+      await admin.query('create role w9f3_owner_role nologin');
+      await admin.query('alter table event_cancellation_request owner to w9f3_owner_role');
+      const ownerMember = await login('w9f3_owner_member_login', ['ops_partner', 'w9f3_owner_role']);
+      await expect(assertOpsPartnerRole(ownerMember)).rejects.toThrow(/소유|행 보안/);
+      // 대조: 소유 역할을 받지 않은 ops_partner 사용자는 그대로 된다(소유자 검사가 이 표 하나를 본다)
+      await expect(assertOpsPartnerRole(partner)).resolves.toBeUndefined();
+    } finally {
+      for (const d of pools) await d.close().catch(() => undefined);
+      await admin.query(`alter table event_cancellation_request owner to ${owner}`).catch(() => undefined);
+      for (const u of ['w9f3_partner_login', 'w9f3_app_login', 'w9f3_both_login', 'w9f3_bypass_login', 'w9f3_owner_member_login', 'w9f3_owner_role']) {
+        await admin.query(`drop role if exists ${u}`).catch(() => undefined);
+      }
+    }
   });
 });

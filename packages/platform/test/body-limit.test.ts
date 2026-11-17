@@ -4,6 +4,7 @@ import { Body, Controller, HttpCode, Module, Post } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AcceptMultipart, BodyLimit, Bulkhead, DEFAULT_BODY_LIMIT_BYTES, ProblemError, Roles, createService, fakeClock } from '../src/index.js';
 import { collector } from './fixture.js';
+import { RawClient, closedWithin, sleep, trackConnections, trickle } from './raw-http.js';
 
 /** 칸막이 시험: 처리기 안에서 기다리게 하는 문 */
 const gate = { current: { promise: Promise.resolve(), open: () => {} }, hits: 0 };
@@ -171,5 +172,126 @@ describe('칸막이 자리는 처리기가 끝날 때까지 쥔다(ADR-0260 결�
 describe('createService requestTimeoutMs', () => {
   test('HOT150_요청 받기 시한을 앱 포트 서버에 건다', () => {
     expect(svc.http.server.requestTimeout).toBe(5_000);
+  });
+});
+
+// ===================== W9-fix3 F4(HOT-190 '선언 길이가 본문 상한을 넘으면…', 시험 담당 w9f3-test 2026-11-17) =====================
+// 정본: docs/api/guidelines.md §7 '본문을 다 읽기 전에 답하면 연결을 닫는다'(추천 적용 2026-11-17, W9-fix3). 본문을 다 읽기 전에 오류로 답하는 모든 길
+// (본문 상한 413, 칸막이 429)은 Connection: close를 달고 응답을 다 보낸 뒤 연결을 닫는다. 정상 응답은 keep-alive 그대로다.
+// 시험 문턱(계획 §7 [가정], 시험에만 쓴다): 서버 쪽 소켓 bytesRead ≤ 1MiB, 닫힘 2초 안. 보내는 중인 손님은 응답 대신 끊김을 볼 수 있어(정본이 받아들임)
+// 흘려보내기 사례는 첫 덩어리 뒤 응답을 받은 다음 나머지를 보낸다.
+const MiB = 1024 * 1024;
+const BYTES_READ_MAX = MiB;
+const CLOSE_WITHIN_MS = 2_000;
+const DECLARED = 8 * MiB;
+
+let tracker: ReturnType<typeof trackConnections> | undefined;
+async function rawPort(): Promise<number> {
+  if (!svc.http.server.listening) await svc.http.listen({ port: 0, host: '127.0.0.1' });
+  tracker ??= trackConnections(svc.http.server);
+  return (svc.http.server.address() as { port: number }).port;
+}
+
+/**
+ * 요청 하나를 실제 소켓으로 보낸다. first(본문 첫 몫)를 보낸 뒤 응답을 기다리고, 그 뒤 rest만큼 흘려보낸다.
+ * 서버 쪽이 2초 안에 닫혔는지와 그때(또는 2초 뒤)의 bytesRead를 돌려준다
+ */
+async function rawSend(o: { path: string; contentType: string; chunked?: boolean; first?: Buffer; rest?: number }) {
+  const port = await rawPort();
+  const started = Date.now();
+  const c = await RawClient.open(port);
+  const side = await tracker!.of(c.localPort);
+  c.head('POST', o.path, { 'Content-Type': o.contentType, ...(o.chunked ? { 'Transfer-Encoding': 'chunked' } : { 'Content-Length': DECLARED }) });
+  if (o.first) c.write(o.chunked ? Buffer.concat([Buffer.from(`${o.first.length.toString(16)}\r\n`), o.first, Buffer.from('\r\n')]) : o.first);
+  const response = await c.response(0, CLOSE_WITHIN_MS);
+  if (o.rest) await trickle(c, { totalBytes: o.rest, chunkBytes: 64 * 1024, intervalMs: 5, chunked: o.chunked });
+  const closed = await closedWithin(side, Math.max(0, CLOSE_WITHIN_MS - (Date.now() - started)));
+  const bytesRead = side.bytesRead();
+  c.destroy();
+  return { response, closed, bytesRead };
+}
+
+/** 한도 1 칸막이(SHARED)를 처리기 안에서 붙잡는다. 찼는지 먼저 단언한다(장애 주입이 실제로 끼어들었는지) */
+async function holdShared(): Promise<{ release(): Promise<void> }> {
+  let open!: () => void;
+  gate.current = { promise: new Promise<void>((r) => (open = r)), open: () => open() };
+  gate.hits = 0;
+  const first = post('/v1/limit/big', JSON.stringify({ a: 1 }));
+  for (let i = 0; i < 100 && gate.hits === 0; i++) await sleep(10);
+  expect(gate.hits, '칸막이를 붙잡을 요청이 처리기에 닿지 않았다(시험 준비)').toBe(1);
+  expect((await post('/v1/limit/big', JSON.stringify({ a: 2 }))).statusCode, '칸막이가 차 있어야 한다(시험 준비)').toBe(429);
+  return {
+    async release() {
+      open();
+      expect((await first).statusCode).toBe(200);
+      gate.current = { promise: Promise.resolve(), open: () => {} };
+    },
+  };
+}
+
+describe('W9F3 F4 본문을 다 읽기 전의 오류 답은 연결을 닫는다', () => {
+  test('W9F3 F4 칸막이가 찼을 때 429는 연결을 닫고 남은 본문을 읽지 않는다 [ASVS v5.0.0-15.2.2] [ASVS v5.0.0-2.4.1]', async () => {
+    const hold = await holdShared();
+    try {
+      // ① 머리만(선언 8MiB): 본문 없이 바로 429, Connection: close, 서버가 닫는다
+      const headOnly = await rawSend({ path: '/v1/limit/big', contentType: 'application/json' });
+      expect(headOnly.response?.status, '① 머리만: 상태').toBe(429);
+      expect(headOnly.response?.headers.connection?.toLowerCase(), '① 머리만: Connection').toBe('close');
+      expect(JSON.parse(headOnly.response?.body ?? '{}').type).toBe('https://peaket.example/problems/server-busy');
+      expect(headOnly.closed, '① 머리만: 서버가 2초 안에 닫지 않았다').toBe(true);
+      expect(headOnly.bytesRead, '① 머리만: bytesRead').toBeLessThanOrEqual(BYTES_READ_MAX);
+      // ② 선언 8MiB를 5ms마다 64KiB씩 흘려보낸다
+      const declared = await rawSend({ path: '/v1/limit/big', contentType: 'application/json', first: Buffer.alloc(64 * 1024, 0x61), rest: DECLARED - 64 * 1024 });
+      expect(declared.response?.status, '② 선언 길이 흘려보내기: 상태').toBe(429);
+      expect(declared.closed, '② 선언 길이 흘려보내기: 서버가 2초 안에 닫지 않았다').toBe(true);
+      expect(declared.bytesRead, '② 선언 길이 흘려보내기: bytesRead').toBeLessThanOrEqual(BYTES_READ_MAX);
+      // ③ chunked로 같게
+      const chunked = await rawSend({ path: '/v1/limit/big', contentType: 'application/json', chunked: true, first: Buffer.alloc(64 * 1024, 0x61), rest: DECLARED - 64 * 1024 });
+      expect(chunked.response?.status, '③ chunked 흘려보내기: 상태').toBe(429);
+      expect(chunked.closed, '③ chunked 흘려보내기: 서버가 2초 안에 닫지 않았다').toBe(true);
+      expect(chunked.bytesRead, '③ chunked 흘려보내기: bytesRead').toBeLessThanOrEqual(BYTES_READ_MAX);
+    } finally {
+      await hold.release();
+    }
+  }, 20_000);
+
+  test('W9F3 F4 본문 상한 413도 연결을 닫는다(회귀) [ASVS v5.0.0-5.2.1] [ASVS v5.0.0-15.2.2]', async () => {
+    // 지금(inject)과 같은 이름 붙은 Problem이어야 한다
+    const jsonTooLarge = JSON.parse((await post('/v1/limit/small', `{${'x'.repeat(64)}}`)).payload).type as string;
+    const cases = [
+      { what: 'multipart 선언 길이 넘침(머리만)', path: '/v1/limit/upload', contentType: 'multipart/form-data; boundary=x', type: 'https://peaket.example/problems/image-too-large' },
+      { what: 'multipart chunked 넘침', path: '/v1/limit/upload', contentType: 'multipart/form-data; boundary=x', chunked: true, first: Buffer.alloc(1024, 0x61), rest: DECLARED, type: 'https://peaket.example/problems/image-too-large' },
+      { what: 'JSON @BodyLimit 선언 길이(머리만)', path: '/v1/limit/small', contentType: 'application/json', type: jsonTooLarge },
+      { what: 'JSON @BodyLimit chunked', path: '/v1/limit/small', contentType: 'application/json', chunked: true, first: Buffer.alloc(1024, 0x61), rest: DECLARED, type: jsonTooLarge },
+    ];
+    for (const c of cases) {
+      const r = await rawSend(c);
+      expect(r.response?.status, `${c.what}: 상태`).toBe(413);
+      expect(JSON.parse(r.response?.body ?? '{}').type, `${c.what}: Problem`).toBe(c.type);
+      expect(r.response?.headers.connection?.toLowerCase(), `${c.what}: Connection`).toBe('close');
+      expect(r.closed, `${c.what}: 서버가 2초 안에 닫지 않았다`).toBe(true);
+      expect(r.bytesRead, `${c.what}: bytesRead`).toBeLessThanOrEqual(BYTES_READ_MAX);
+    }
+  }, 30_000);
+
+  test('W9F3 F4 정상 요청은 연결을 다시 쓴다 [ASVS v5.0.0-15.2.2]', async () => {
+    const port = await rawPort();
+    for (const path of ['/v1/limit/default', '/v1/limit/big']) {
+      const c = await RawClient.open(port);
+      const side = await tracker!.of(c.localPort);
+      try {
+        for (const [i, payload] of [JSON.stringify({ n: 1 }), JSON.stringify({ n: 2 })].entries()) {
+          c.head('POST', path, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) });
+          c.write(payload);
+          const r = await c.response(i, CLOSE_WITHIN_MS);
+          expect(r?.status, `${path} ${i + 1}번째`).toBe(200);
+          expect(r?.headers.connection?.toLowerCase(), `${path} ${i + 1}번째: Connection`).not.toBe('close');
+        }
+        // 한 연결로 두 응답을 받았고 서버가 그 연결을 닫지 않았다
+        expect(side.closed, `${path}: 정상 응답 뒤 서버가 연결을 닫았다`).toBe(false);
+      } finally {
+        c.destroy();
+      }
+    }
   });
 });
