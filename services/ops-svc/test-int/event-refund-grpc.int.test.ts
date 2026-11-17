@@ -30,6 +30,8 @@ const PREVIEW_ANSWER = {
   ],
 };
 
+/** 웨이브 끝 리뷰 K4: GetEventRefundJob을 이 gRPC 상태로 실패시킨다(undefined면 jobAnswer를 준다) */
+let jobFail: grpc.status | undefined;
 /** BAT-420 몫 D: SetEventRefundHold 대역의 다음 답·실패와 받은 호출자 머리 */
 const holdServer = { fail: false, code: grpc.status.UNAVAILABLE as grpc.status, callers: [] as unknown[] };
 
@@ -48,7 +50,14 @@ beforeAll(async () => {
   server = new grpc.Server();
   server.addService(pkg.EventRefundService.service, {
     StartEventRefund: handler('StartEventRefund', (r) => ({ job_id: r.cancellation_request_id, state: 'REFUND_JOB_STATE_RUNNING' })),
-    GetEventRefundJob: handler('GetEventRefundJob', () => jobAnswer),
+    GetEventRefundJob: (call: grpc.ServerUnaryCall<Record<string, unknown>, Record<string, unknown>>, cb: grpc.sendUnaryData<Record<string, unknown>>) => {
+      received.push({ method: 'GetEventRefundJob', req: call.request });
+      if (jobFail !== undefined) {
+        cb({ code: jobFail, details: 'purchase-svc says no' });
+        return;
+      }
+      cb(null, jobAnswer);
+    },
     PauseEventRefundJob: handler('PauseEventRefundJob', () => ({ state: 'REFUND_JOB_STATE_PAUSED' })),
     ResumeEventRefundJob: handler('ResumeEventRefundJob', () => ({ state: 'REFUND_JOB_STATE_RUNNING' })),
     PreviewEventRefund: handler('PreviewEventRefund', () => PREVIEW_ANSWER),
@@ -156,13 +165,32 @@ describe('BAT425 ops-svc 환불 gRPC 클라이언트', () => {
       not_applied_orders: 0,
       applied_orders: 9,
     };
-    const r = await client.job({ requestId: REQUEST });
+    const answered = await client.job({ requestId: REQUEST });
     expect(received.at(-1)).toMatchObject({ method: 'GetEventRefundJob', req: { job_id: REQUEST } });
+    // BAT-420 보충 4(K4): job은 NOT_FOUND면 undefined를 준다. 여기는 답이 있는 경우라 있다고 먼저 본다
+    expect(answered).toBeDefined();
+    const r = answered!;
     expect(r).toMatchObject({ state: 'PAUSED', total: 30, done: 8, failed: 5, appliedOrders: 9, refundWindowClosesAt: new Date(closesAtMs).toISOString() });
     expect(r.perPg).toHaveLength(2);
     expect(r.perPg[0]).toMatchObject({ pg: 'TOSS', state: 'RUNNING', done: 5, failed: 1, unknown: 2 });
     expect(r.perPg[0]!.pauseReason).toBeUndefined();
     expect(r.perPg[1]).toEqual({ pg: 'PORTONE', state: 'PAUSED', pauseReason: 'AUTO_CIRCUIT_OPEN', done: 3, failed: 4, unknown: 6 });
+  });
+
+  // 웨이브 끝 리뷰 K4(transfer-refund §5 '판정·미리보기·확정의 차례' 예외): 다시 확정은 GetEventRefundJob이 NOT_FOUND일 때만 이어 간다.
+  // 그 밖의 실패를 '없음'으로 읽으면 purchase-svc가 멈춘 동안 다시 확정이 중복 시작을 부를 수 있다(서비스 단위 시험의 대역은 이 어댑터를 거치지 않는다)
+  test('GAT-110 K4 진행률 읽기는 purchase-svc의 NOT_FOUND만 undefined(일괄 환불 없음)로 읽고 UNAVAILABLE·시간 초과 같은 실패는 그대로 던진다', async () => {
+    try {
+      jobFail = grpc.status.NOT_FOUND;
+      await expect(client.job({ requestId: REQUEST })).resolves.toBeUndefined();
+      for (const code of [grpc.status.UNAVAILABLE, grpc.status.DEADLINE_EXCEEDED, grpc.status.INTERNAL, grpc.status.PERMISSION_DENIED]) {
+        jobFail = code;
+        await expect(client.job({ requestId: REQUEST }), String(code)).rejects.toMatchObject({ code });
+      }
+    } finally {
+      jobFail = undefined;
+    }
+    expect(await client.job({ requestId: REQUEST })).toBeDefined();
   });
 
   // BAT-420 몫 D(OPEN[45] 결정): 회차 취소 요청 중 보류 취소의 환급 미룸. 시험 담당이 구현 전에 썼다(Docker 없이 도는 gRPC 시험).

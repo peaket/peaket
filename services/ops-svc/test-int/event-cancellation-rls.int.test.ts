@@ -45,8 +45,10 @@ const visiblePromoters = async () => (await admin.query<{ p: string | null }>('s
 
 describe('0015 파트너 행 보안 [BAT-420 웨이브 끝 리뷰 S2]', () => {
   test('GAT-110 S2 0015가 적용되고 역할 둘과 행 보안이 켜져 있다', async () => {
-    const tags = (await admin.query<{ hash: string }>('select hash from drizzle.__drizzle_migrations')).rows.length;
-    expect(tags).toBeGreaterThanOrEqual(16);
+    // ops-svc 실행기(scripts/migrate.mjs)는 ops_migration 표에 이름을 남긴다(drizzle 표가 아니다). 수를 고정하지 않고 0015가 한 번 적용됐는지 본다
+    const names = (await admin.query<{ name: string }>('select name from ops_migration order by name')).rows.map((r) => r.name);
+    expect(names.filter((n) => n.startsWith('0015_'))).toEqual(['0015_event_cancellation_partner_rls.sql']);
+    expect(names.indexOf('0015_event_cancellation_partner_rls.sql')).toBeGreaterThan(names.indexOf('0014_idempotency_record.sql'));
     const roles = (await admin.query<{ rolname: string }>("select rolname from pg_roles where rolname in ('ops_partner', 'ops_app') order by rolname")).rows.map((r) => r.rolname);
     expect(roles).toEqual(['ops_app', 'ops_partner']);
     const rls = (await admin.query<{ relrowsecurity: boolean }>("select relrowsecurity from pg_class where oid = 'public.event_cancellation_request'::regclass")).rows[0];

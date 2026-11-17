@@ -102,7 +102,8 @@ describe('마이그레이션과 표 모양', () => {
     const idx = await q<{ indexname: string; indexdef: string }>("select indexname, indexdef from pg_indexes where schemaname = 'public' and tablename = 'order_cancellation'");
     expect(idx.rows.find((r) => r.indexname === 'order_cancellation_active_key')?.indexdef).toContain("status <> 'VOIDED'");
     const checks = await q<{ conname: string }>("select conname from pg_constraint where conrelid = 'public.order_cancellation'::regclass and contype = 'c' order by conname");
-    expect(checks.rows.map((r) => r.conname)).toEqual(['order_cancellation_amounts_check', 'order_cancellation_reason_check', 'order_cancellation_refund_attempts_check', 'order_cancellation_status_check']);
+    // 0015가 refund_attempts_check, 0025(BAT-420 웨이브 끝 리뷰 C2·S1, 차액 표시 시각·요청 ID 짝)가 deduction_gap_check를 더했다. 목록을 통째로 견줘 몰래 생긴 CHECK를 잡는다
+    expect(checks.rows.map((r) => r.conname)).toEqual(['order_cancellation_amounts_check', 'order_cancellation_deduction_gap_check', 'order_cancellation_reason_check', 'order_cancellation_refund_attempts_check', 'order_cancellation_status_check']);
   });
 
   test('GAT090_0015(환급 재시도): refund_attempts·next_refund_at·refund_failed_at·refund_last_error와 REFUND_PENDING 부분 인덱스를 만든다', async () => {

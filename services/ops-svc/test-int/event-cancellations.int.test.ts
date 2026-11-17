@@ -492,7 +492,8 @@ describe('0013·0014 마이그레이션 실제 PostgreSQL 18 [BAT-420 GAT-110 P3
     await rejected(base({ kind: 'POSTPONE' }));
     await rejected(base({ requested_via: 'EMAIL' }));
     await rejected(base({ requested_via: 'PARTNER' }));
-    await rejected(base({ requested_via: 'COMMANDER', promoter_id: randomUUID() }));
+    // 0015(웨이브 끝 리뷰 S2)가 CHECK를 'PARTNER면 promoter_id가 있다'로 넓혔다: commander 요청도 core 판매 설정의 promoterId를 적는다(data.md, authz-matrix §5.3)
+    await expect(insert(base({ requested_via: 'COMMANDER', promoter_id: randomUUID() }))).resolves.toBeTruthy();
     await rejected(base({ evidence_ref: 'x'.repeat(201) }));
     await rejected(base({ evidence_ref: '' }));
     await rejected(base({ fault_opinion: 'NOPE' }));

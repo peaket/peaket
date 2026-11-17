@@ -2,6 +2,8 @@
 // 0000 마이그레이션 적용·재적용, ops_command·command_event·command_approval·audit_chain 저장소,
 // 2인 승인·요청자≠승인자, 감사 해시 체인, CS REFUND_FAILED 열린 건 멱등을 실제 DB에서 본다.
 import { randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createDatabase, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -83,8 +85,11 @@ describe('0000 마이그레이션과 표 모양', () => {
     await migrateOps(url);
     await migrateOps(url);
     expect(await tables()).toEqual(before);
-    // BAT-420(2026-11-16): 0013(회차 취소 요청 칸)·0014(멱등 기록)가 더해져 13개다
-    expect(await count('select count(*) as n from ops_migration')).toBe(13);
+    // BAT-420(2026-11-17): 수를 고정하지 않는다. 두 번 다시 돌려도 migrations/의 파일마다 한 행이고, 목록 끝은 0015(파트너 행 보안) 이후다
+    const applied = (await q<{ name: string }>('select name from ops_migration order by name')).rows.map((r) => r.name);
+    expect(applied).toEqual(readdirSync(fileURLToPath(new URL('../migrations', import.meta.url))).filter((n) => n.endsWith('.sql')).sort());
+    expect(applied).toContain('0015_event_cancellation_partner_rls.sql');
+    expect(applied.at(-1)! >= '0015_').toBe(true);
     const typeCheck = await q<{ def: string }>("select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'ops_command_type_check'");
     expect(typeCheck.rows[0]?.def).toContain("'EVENT_CANCEL'");
     expect(typeCheck.rows[0]?.def).toContain("'SCALE_CHANGE'");
