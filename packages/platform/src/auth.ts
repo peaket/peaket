@@ -17,7 +17,6 @@ import {
   UnauthorizedException,
   createParamDecorator,
 } from '@nestjs/common';
-import { timingSafeEqual } from 'node:crypto';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
 import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -25,6 +24,7 @@ import type { Clock } from './clock.js';
 import { requestContext } from './context.js';
 import type { HotPathMetrics } from './hot-path.js';
 import { ProblemError } from './problem.js';
+import { constantTimeEqual } from './secret-compare.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
 import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
@@ -85,18 +85,10 @@ export const INTERNAL_TOKEN = Symbol.for('peaket.platform.internal-token');
 /** 운영처럼 내부 토큰이 꼭 있어야 하는 환경인지(platformRoot가 PEAKET_ENV로 정한다) */
 export const INTERNAL_TOKEN_REQUIRED = Symbol.for('peaket.platform.internal-token-required');
 
-/** 길이가 같은 두 비밀 값을 타이밍에 기대지 않고 비교한다 */
-function sameSecret(a: string, b: string): boolean {
-  const left = Buffer.from(a, 'utf8');
-  const right = Buffer.from(b, 'utf8');
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
-
 /**
  * 서비스 사이 내부 HTTP 처리기의 공유 토큰 검사(BAT-425). 공개 게이트웨이에 노출하지 않는 경로에만 쓴다.
  * local·ci에서만 토큰 없이 통과하고(시험·로컬 편의), 그 밖의 환경은 토큰이 없으면 시작을 막는다.
- * 토큰 비교는 길이가 같을 때 `timingSafeEqual`로 한다.
+ * 토큰 비교는 공용 `constantTimeEqual`(SHA-256 둘을 `timingSafeEqual`로 한 번, 길이가 달라도 일찍 끝내지 않음, W9-fix3 F2)로 한다.
  */
 @Injectable()
 export class InternalTokenGuard implements CanActivate, OnModuleInit {
@@ -116,7 +108,7 @@ export class InternalTokenGuard implements CanActivate, OnModuleInit {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
     const got = request.headers['x-peaket-internal-token'];
     const value = Array.isArray(got) ? got[0] : got;
-    return typeof value === 'string' && sameSecret(value, this.expected);
+    return typeof value === 'string' && constantTimeEqual(value, this.expected);
   }
 }
 

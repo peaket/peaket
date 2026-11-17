@@ -2,7 +2,8 @@
 // 클러스터 안의 다른 워크로드가 자금·권한 경로를 그냥 부르지 못하게 한다.
 // 토큰은 local·ci에서만 비워 둘 수 있고, 그 밖의 환경은 시작할 때 없으면 실패한다.
 import * as grpc from '@grpc/grpc-js';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac } from 'node:crypto';
+import { constantTimeEqual } from './secret-compare.js';
 
 export const INTERNAL_GRPC_TOKEN_HEADER = 'x-peaket-internal-grpc-token';
 export const INTERNAL_GRPC_CALLER_HEADER = 'x-peaket-internal-grpc-caller';
@@ -25,13 +26,6 @@ export function internalGrpcTokenFromEnv(env: Env): string | undefined {
   throw new Error('PEAKET_INTERNAL_GRPC_TOKEN이 없다(운영에서는 내부 gRPC 공유 토큰이 꼭 필요하다)');
 }
 
-function sameSecret(a: string, b: string): boolean {
-  const left = Buffer.from(a, 'utf8');
-  const right = Buffer.from(b, 'utf8');
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
-
 /** 호출자 신원(서비스 이름)과 처리자(관리 계정 ID)를 토큰으로 묶는 증명 */
 export function internalGrpcActorProof(token: string, actor: string): string {
   return createHmac('sha256', token).update(actor, 'utf8').digest('base64url');
@@ -45,14 +39,14 @@ export function verifyInternalGrpcActor(
 ): { ok: true } | { ok: false; reason: 'token' | 'caller' | 'actor' } {
   if (!token) return { ok: false, reason: 'token' };
   const gotToken = metadata.get(INTERNAL_GRPC_TOKEN_HEADER)[0];
-  if (typeof gotToken !== 'string' || !sameSecret(gotToken, token)) return { ok: false, reason: 'token' };
+  if (typeof gotToken !== 'string' || !constantTimeEqual(gotToken, token)) return { ok: false, reason: 'token' };
   const caller = metadata.get(INTERNAL_GRPC_CALLER_HEADER)[0];
   if (typeof caller !== 'string' || (expected.caller !== undefined && caller !== expected.caller)) return { ok: false, reason: 'caller' };
   if (expected.actor !== undefined) {
     const actor = metadata.get(INTERNAL_GRPC_ACTOR_HEADER)[0];
     const proof = metadata.get(INTERNAL_GRPC_ACTOR_PROOF_HEADER)[0];
     if (typeof actor !== 'string' || actor !== expected.actor) return { ok: false, reason: 'actor' };
-    if (typeof proof !== 'string' || !sameSecret(proof, internalGrpcActorProof(token, expected.actor))) return { ok: false, reason: 'actor' };
+    if (typeof proof !== 'string' || !constantTimeEqual(proof, internalGrpcActorProof(token, expected.actor))) return { ok: false, reason: 'actor' };
   }
   return { ok: true };
 }
@@ -70,7 +64,7 @@ export function internalGrpcServerInterceptor(token: string, services?: readonly
         next({
           onReceiveMetadata(metadata: grpc.Metadata, nextMetadata: (m: grpc.Metadata) => void) {
             const got = metadata.get(INTERNAL_GRPC_TOKEN_HEADER)[0];
-            if (typeof got === 'string' && sameSecret(got, token)) {
+            if (typeof got === 'string' && constantTimeEqual(got, token)) {
               nextMetadata(metadata);
               return;
             }
