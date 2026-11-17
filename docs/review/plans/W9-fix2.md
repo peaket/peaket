@@ -144,7 +144,16 @@ Docker 없이: purchase 단위 `test/seat-event.test.ts`·`test/seat-stream-rela
 
 ## 시험 이의
 
-(구현 담당이 쓴다)
+구현 담당 `w9f2-impl`(claude-opus-5-5), 2026-11-17. 시험 파일은 고치지 않았다. 아래 2~4는 시험 담당이 고칠 몫이고, 고치면 제품 코드는 그대로 통과한다(2·3은 기대값에 칸 하나, 4는 0027 몫을 더하는 것).
+
+1. **`holdLimit` 상한(감독 답 반영)**: `seat_hold.hold_limit`은 int4라 적재 변환(`toLedgerHoldEvent`, 적재기도 같은 함수 `ledgerHoldLimitOf`로 한 번 더)은 HELD·FAN의 1 이상 **2,147,483,647 이하** 정수만 싣고 그 밖은 칸을 빼 NULL로 적재한다(사건은 보류하지 않는다, 정본 '틀린 값은 NULL'). 구현이 정한 정본 빈칸으로 seat-hold §6 '1인 한도 되살리기' '원장'과 data.md `seat_hold.hold_limit` 문단에 한 줄씩 적었다. `toSeatEvent`는 상한을 두지 않는다(asyncapi `integer minimum 1`, avsc `long`).
+2. **Stream HELD 칸을 정확히 견주는 기존 시험 셋(메모리·Valkey 짝, 정본과 어긋남)**: 정본(seat-hold §6 '1인 한도 되살리기' '사건')대로 팬 홀드 Lua 셋이 HELD 항목에 `holdLimit`을 싣자, 칸 목록을 `toEqual`로 견주는 아래 시험이 칸 하나가 더 있다고 실패한다. 메모리 저장소는 Lua의 쌍둥이(같은 사례를 메모리와 Valkey에 똑같이 돈다)라 같은 칸을 싣게 했다(빼면 Valkey 짝만 어긋나고, 시험을 고친 뒤 메모리 짝이 다시 실패한다).
+   - `test/hold-cases.ts` `FR010_ST35_①`의 `row()`(단위 `test/hold-seats.test.ts` [메모리], 통합 `test-int/seat-store.int.test.ts` [Valkey Lua]): `holdLimit: String(i.limit)`이 빠졌다.
+   - `test/pin-cases.ts` `heldRow()`(`pin_ST35_`·`pin_ST7_`, 단위 `test/pin.test.ts`, 통합 `test-int/pin.int.test.ts`): 묶기 한도 인자(`holdLimit: String(<묶기 limit>)`)가 빠졌다.
+   - 같은 까닭으로 data.md §3 `s:{event:E}:stream`의 HELD 칸 목록에도 `holdLimit`이 없어(계획이 고치지 않은 곳) 이번 정본 커밋에서 더했다. 위 시험 이름의 '칸은 data.md §3대로다'와 맞추려면 기대값에 칸을 더하면 된다.
+3. **릴레이 통합의 기대 SeatEvent 도우미(정본과 어긋남)**: `test-int/seat-stream.ts` `expectedSeatEvent()`가 Stream 칸에서 SeatEvent를 만들 때 `holdLimit`을 옮기지 않아, 계획 §6 목록의 `test-int/seat-stream-relay.int.test.ts` 다섯(`ST35_HELD 항목 하나가…`, `여러 항목(좌석 5개, 홀드 셋)…`, `보낼 수 없는 항목…`, `보내기가 확인 전에 실패하면…`, `Kafka를 멈춘 채 틱…`)이 `toEqual`에서 실패한다(받은 값에 `holdLimit: 4`가 더 있다). 도우미가 HELD·FAN이고 칸이 있으면 `holdLimit: Number(f.holdLimit)`을 싣게 고치면 된다. 실패 확인 절의 '통과를 지킨 것'(seat-stream-relay 통합)은 구현 전이라 통과했던 것이다.
+4. **마이그레이션 0027을 반영하지 않은 표 모양 단위 시험(시험 몫이 빠짐)**: `test/purchase-schema.test.ts`의 일곱이 0026까지의 목록을 박아 둬 실패한다. `seat_hold` 칸 목록(11 → 12, `hold_limit integer` 널 허용), check 목록과 '같은 이름·같은 식으로 SQL에 있다'(0000만 읽는다. 새 CHECK는 0027의 `ALTER TABLE … ADD CONSTRAINT`), '열이 모두 SQL에 있다'(0002의 ADD COLUMN만 더한다), `_journal.json` 차례(0027 `when` 1794904374507 > 0026), 'SQL 파일은 기록에 있는 것뿐이다', '마지막 스냅샷'(0027_snapshot.json). 0026 묶음이 같은 파일에 더한 꼴(`RELOOK2_TAG`·0026 SQL 시험)로 0027 몫을 더하면 된다. 0027 SQL은 `ALTER TABLE "seat_hold" ADD COLUMN "hold_limit" integer`와 `ADD CONSTRAINT "seat_hold_hold_limit_check" CHECK ("seat_hold"."hold_limit" is null or "seat_hold"."hold_limit" >= 1)` 두 문뿐이다(머리 주석 넉 줄).
+5. **흔들림 하나(이 묶음과 무관)**: 첫 통합 돌림에서 `test-int/hold-lifecycle.int.test.ts` `정지 집합 전이 S-T23 > 묶인 좌석·지난 최대 체류는 옮기지 않고 ordered에서만 뺀다`가 한 번 실패했다(moved 1, dropped 1). 시험이 `maxStay`를 호스트 시계 `Date.now() - 1`로 쓰고 Lua는 컨테이너 `TIME`으로 견주어, 두 시계가 1ms 넘게 어긋나면 지나지 않은 것으로 본다. 같은 파일만 다시 돌리면 45개 모두 통과했다. 이 묶음이 바꾼 칸(Stream `holdLimit`)과 닿지 않는다.
 
 ## 리뷰
 
