@@ -41,9 +41,9 @@ service:
     requests: { cpu: "1", memory: 512Mi }
     limits: { cpu: "1", memory: 512Mi }
   # 종료: 입구부터 반대 차례로 닫는다(서비스마다 진행 중 요청 마감).
-  # payment-svc의 승인 실행기를 담으므로 payment-svc 서비스 파드와 같은 90초 [가정]다(preStop 5 + 승인 호출 한 번 63 + 결과 쓰기·닫기 여유 약 20,
+  # payment-svc의 승인 실행기를 담아 자식을 차례대로 기다린다: 125초 [가정](preStop 5 + 같은 프로세스 서비스 닫기 약 10 + purchase-svc 5 + payment-svc 95 + 홀드 작업자 5 + 여유 5,
   # docs/devops.md §6.4 '일반 서비스', W9-fix2 PRF-181)
-  terminationGracePeriodSeconds: 90
+  terminationGracePeriodSeconds: 125
   volumes:
     - { name: bundle-env, secret: { secretName: v1-bundle-env } }
     - { name: redis-tls, secret: { secretName: v1-redis-tls, items: [{ key: ca.crt, path: ca.crt }] } }

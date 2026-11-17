@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createPlatformLogger, errorSummary, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { type BundleConfig, type BundleService, loadBundleConfig, parseEnvFile, type RunningBundle, startBundle } from './bundle.js';
 import { startManagement } from './management.js';
+import { childStopWaitMs, stopChildProcess } from './stop-child.js';
 
 /** 홀드 전용 purchase-svc의 앱 포트(차트 Service가 연다)와 관리 포트(합본이 /ready·/metrics로 모은다) */
 const HOLD_PORT = 8083;
@@ -44,15 +45,11 @@ logger.info({ mode: split ? 'split' : 'single', services: config.services, holdP
 // SIGTERM 처리기는 서비스를 켜기 전에 건다: 켜는 중에 오면 startBundle이 켠 것을 닫고 던진다(코드 리뷰 낮음)
 const stop = new AbortController();
 const stopChild = async (c: ChildEntry): Promise<void> => {
-  if (c.child.exitCode !== null) return;
-  const exited = new Promise<void>((resolve) => c.child.once('exit', () => resolve()));
-  c.child.kill('SIGTERM');
-  await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 5_000))]);
-  if (c.child.exitCode === null) c.child.kill('SIGKILL');
+  await stopChildProcess(c.child, childStopWaitMs(c.name));
 };
 const shutdown = (): Promise<void> => {
   closing ??= (async () => {
-    // 닫는 데 걸린 시간(ms)을 적는다: 종료 유예(deploy/envs/local/v1-bundle.yaml 60초)를 맞추는 근거(코드 리뷰)
+    // 닫는 데 걸린 시간(ms)을 적는다: 종료 유예(deploy/envs/local/v1-bundle.yaml 125초)를 맞추는 근거(코드 리뷰)
     const startedMs = performance.now();
     await running?.close();
     for (const c of [...children].reverse()) await stopChild(c);
