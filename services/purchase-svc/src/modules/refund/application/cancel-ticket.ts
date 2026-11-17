@@ -168,19 +168,29 @@ export class CancelTicket {
       return { status: 'ACCEPTED', cancellationId: run.cancellationId, refundAmount: quote.refundAmount, refundAfterEntryClose: false };
     }
     // 결과 모름·재시도 대기·업무 거절은 모두 환급 대기다. 업무 거절은 바로, 결과 모름은 재시도 뒤
-    // 다 쓰면 CS 처리함 '환급 실패'로 넘긴다(refund_failed_at, transfer-refund §7.1)
-    const attempts = 1;
-    if (payment === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) {
-      await this.o.writes.markRefundFailed({ cancellationId: run.cancellationId, attempts, lastError: payment, nowMs: i.nowMs });
-    } else {
-      await this.o.writes.scheduleRefundRetry({ cancellationId: run.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
-    }
+    // 다 쓰면 CS 처리함 '환급 실패'로 넘긴다(refund_failed_at, transfer-refund §7.1). 회차 취소 요청 행은 표시하지 않는다(아래 #recordUnrefunded)
+    await this.#recordUnrefunded(run, 1, payment);
     return {
       status: 'REFUND_PENDING',
       cancellationId: run.cancellationId,
       refundAmount: quote.refundAmount,
       payment: payment === 'REJECTED' ? 'REJECTED' : payment,
     };
+  }
+
+  /**
+   * 결제사가 환급하지 않은 시도(결과 모름·재시도 대기·업무 거절)를 행에 적는다. 업무 거절·시도 상한이면 실패 표시(refund_failed_at, CS '환급 실패' 대상)이고
+   * 그 밖은 다음 재시도 시각이다. 회차 취소 요청 ID가 달린 행(연기 신청 환급)은 실패 표시를 쓰지 않고 시도 수·마지막 결과만 적는다(다시 보기 2 N7,
+   * transfer-refund §5 '주인'): 그 행은 일괄 환불 실행기만 결제사로 보내고, 거절 답을 받은 일괄 환불이 항목을 FAILED로 끝내는 트랜잭션에서 실패를 표시한다.
+   * 그 행은 마감 뒤 환급 실행기가 집지 않으므로(K1) 다음 재시도 시각은 쓰이지 않는다
+   */
+  async #recordUnrefunded(i: CancelTicketInput, attempts: number, payment: 'PENDING' | 'UNKNOWN' | 'REJECTED'): Promise<void> {
+    const failed = (payment === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) && i.eventCancellationRequestId === undefined;
+    if (failed) {
+      await this.o.writes.markRefundFailed({ cancellationId: i.cancellationId, attempts, lastError: payment, nowMs: i.nowMs });
+      return;
+    }
+    await this.o.writes.scheduleRefundRetry({ cancellationId: i.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
   }
 
   /** 같은 취소 ID의 재요청. REFUND_PENDING이면 같은 멱등키로 결제사를 다시 부르고, 끝난 취소는 처음 결과를 준다 */
@@ -200,12 +210,7 @@ export class CancelTicket {
         await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
         return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount, refundAfterEntryClose: false };
       }
-      const attempts = refundAttempts + 1;
-      if (payment === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) {
-        await this.o.writes.markRefundFailed({ cancellationId: i.cancellationId, attempts, lastError: payment, nowMs: i.nowMs });
-      } else {
-        await this.o.writes.scheduleRefundRetry({ cancellationId: i.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
-      }
+      await this.#recordUnrefunded(i, refundAttempts + 1, payment);
       return {
         status: 'REFUND_PENDING',
         cancellationId: i.cancellationId,
