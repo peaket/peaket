@@ -99,3 +99,75 @@ cd D:/ticketpass-w9-fix1/services/purchase-svc && node_modules/.bin/vitest run -
 | 잡기 기한을 늘리는 법 | 표를 보내기 직전, 남은 기한 < 40초 [가정](표 한도 30초 [가정] + 끝내기 여유 10초 [가정])이면 살아 있는 잡기만 한 문장으로 지금 + 60초. 0행이면 보내지 않음. 심장박동은 쓰지 않음. 60 > 40 > 30 | transfer-refund §5 '잡기 늘리기', data `claimed_until`·§5 K2 줄 |
 | 진행률 병합 규칙 | 요청 행 잠금 안에서 DB 멈춤에 더하고 빼기만. 실행 끝은 새 자동 정지만 더함, 빼기는 재개만(한꺼번에면 재개가 읽은 것만), 이미 멈춘 결제사는 DB 사유, MANUAL만 사유를 바꿈, PAUSED면 상태 그대로 | transfer-refund §5 '멈춤 표시는 합쳐 쓴다', data §5 새 줄, ASVS 15.2.2 |
 | 그 밖 실패의 FAILED 알림 꼴 | 다른 FAILED 길과 같다: 끝내기 트랜잭션에 그 주문의 `trade.orders` `REFUND_FAILED` 하나(요청·표·종류로 정해지는 중복 제거 키). 끝내기는 시도 상한과 같은 길 | transfer-refund §5 '주인' |
+
+## 실패 확인
+
+시험 담당 `w9f1-test`(claude-opus-5-5), 2026-11-17. 계획 §3의 재현 시험 17(단위 10, 통합 7)을 구현 전에 썼다(시험 커밋 `3881012d`). 기준은 `79e9073f`의 제품 코드다(동작은 바꾸지 않고 빈 뼈대만 더함). 단언 값은 정본(transfer-refund §5 '잡기 늘리기'·'멈춤 표시는 합쳐 쓴다'·'주인', data `event_refund_item.claimed_until`·§5)과 계획 §3에서 가져왔다. 시험 이름은 계획대로 `GAT-110 N3`·`GAT-110 N8`·`GAT-110 P3`로 시작한다(감독 지시의 예는 `GAT-090 P3`였지만 계획 §1~3이 P3을 GAT-110 범위로 적어 계획을 따랐다).
+
+**돌린 명령과 결과**
+
+| 명령 | 결과 |
+| --- | --- |
+| purchase-svc `node_modules/.bin/tsc --noEmit` | 바꾼 파일·새 시험 오류 0. `../queue-svc`의 `@peaket/shuffle` 모듈 찾기 오류 7은 이 작업 폴더에 그 패키지 `dist`가 없어서 생기는 기존 것(이 묶음과 무관) |
+| 뿌리 `node_modules/.bin/eslint`(바꾼 `src` 여섯 파일) | 오류 0(시험 파일은 설정상 제외) |
+| purchase-svc `node_modules/.bin/vitest run`(단위 전체) | 시험 파일 129, 시험 4,128: 실패 10(모두 새 시험), 통과 4,118. 손대지 않은 기존 시험에 새로 깨진 것 0 |
+| 계획 §5 단위 명령(여섯 파일) | 104: 실패 10, 통과 94 |
+| 도커 잠금 2026-11-17 17:24~17:26 KST. 계획 §5 통합 명령(네 파일) | 시험 78: 실패 11, 통과 67. 실패 = 새 시험 7 + 기존 시험 4(아래 '기존 시험의 시계 의존 실패', 이 묶음과 무관). `event-refund-grpc.int`·`relay-app.int`는 모두 통과 |
+
+- 컨테이너: 시험이 띄운 PostgreSQL은 시험 끝에 스스로 지웠다(돌리기 앞뒤 `docker ps -a` 목록이 같음). 잠금 폴더·owner.txt는 지웠다.
+
+**실패 수와 까닭(새 시험 17 모두 실패, 까닭은 모두 '아직 구현 안 됨')**
+
+| 시험(파일) | 지금 결과 | 까닭 |
+| --- | --- | --- |
+| `GAT-110 N3 표 셋이 각 25초 …`(단위 `test/event-refund-claim-pause.test.ts`) | 실패 | 늘리지 않아 잡은 때 + 75,000ms에 기한(+ 60,000ms)이 지나 둘째 실행이 셋째 표를 잡음(잡은 항목 1, 셋째 표 호출 2) |
+| `GAT-110 N3 늘리기 기준은 남은 기한 40,000ms 미만이다`(단위) | 실패 | 남은 39,999ms에도 `extend` 호출 0 |
+| `GAT-110 N3 늘리기가 0행이면 …`(단위) | 실패 | `extend`를 부르지 않아 둘째·셋째 표를 보냄 |
+| `GAT-110 N3 잡기 60초 > 늘리기 기준 40초 > 표 한도 30초 …`(단위 `test/event-refund-wave-review.test.ts` '운영 시작 검사') | 실패 | 상수는 빈 뼈대로 생겼지만 `relay-app.ts`·`start.ts`의 `deadlineMs`가 `+ 30_000` 글자 그대로(상수를 안 씀) |
+| `GAT-110 N3 실제 DB에서 API 파드의 느린 주문 처리와 리더 runDue가 겹쳐도 …`(통합 `test-int/event-cancel-r-t24.int.test.ts`) | 실패 | 셋째 표 전 `claimed_until` = 잡은 때 + 60,000ms(늘리지 않음). 장애 주입 확인(셋째 호출 안에서 리더가 돎)은 통과 |
+| `GAT-110 N3 잡기 늘리기는 잡기 값이 같고 기한 안일 때만 …`(통합 `test-int/event-refund.int.test.ts`) | 실패 | `DrizzleEventRefundClaims.extend`가 빈 뼈대(던짐). 잡기의 `claimedUntilMs` = 잡은 때 + 60,000ms와 끝내기 뒤 행 값은 맞음 |
+| `GAT-110 N8 겹친 두 실행이 서로 다른 결제사를 자동 정지하면 …`(단위) | 실패 | A의 `updateActive`가 0행이라 PORTONE 멈춤이 사라짐(저장된 멈춤 TOSS 하나). 장애 주입 확인(B의 PAUSED{TOSS}가 먼저)은 통과 |
+| `GAT-110 N8 재개 전에 시작한 실행이 늦게 끝나도 …`(단위) | 실패 | A가 처음 본 TOSS로 PAUSED{TOSS}를 다시 씀 |
+| `GAT-110 N8 한꺼번에 재개는 재개가 읽은 멈춤만 빼고 …`(단위) | 실패 | 재개가 읽은 목록으로 통째로 써 끼운 PORTONE 멈춤이 지워짐(그 뒤 PORTONE 표 호출 1) |
+| `GAT-110 N8 신청 창 닫기·수동 멈춤은 …`(단위) | 실패 | 창 닫기가 읽은 값으로 RUNNING을 써 TOSS 멈춤이 지워지고, 같은 틱에 신청 표를 보내 COMPLETED |
+| `GAT-110 N8 멈춤 합치기: …`(단위) | 실패 | `mergePauses`가 빈 뼈대(던짐) |
+| `GAT-110 N8 실제 DB에서 두 끝 쓰기가 같은 순간에 와도 …`(통합 `event-refund.int`) | 실패 | `DrizzleEventRefundStore.updateLocked`가 빈 뼈대(던짐) |
+| `GAT-110 N8 실제 DB에서 겹친 두 실행이 …`(통합 `event-cancel-r-t24.int`) | 실패 | DB `progress`에 PORTONE 멈춤 없음(TOSS 하나). 장애 주입 확인은 통과 |
+| `GAT-110 P3 그 밖 실패(업무 거절 목록 밖, 시도 상한 전)로 …`(단위) | 실패 | `#retryOrFail`의 FAILED 갈래가 다음 시각을 채우고 팬 알림 Outbox를 쓰지 않음 |
+| `GAT-110 P3 실제 DB에서 그 밖 실패의 끝내기를 실패시키면 …`(통합 `event-refund.int`) | 실패 | 끝내기에 Outbox 쓰기가 없어 장애 주입이 끼어들지 못함(첫 틱 runDue가 던지지 않고 항목이 FAILED로 커밋) |
+| `GAT-110 P3 연기 신청 Saga의 업무 실패 답 …`(통합 `event-cancel-r-t24.int`) | 실패 | 팬 `REFUND_FAILED` 0. 항목 FAILED(`NOT_FOUND`)·Saga 호출 1은 맞음 |
+| `GAT-110 P3 두 실행이 같은 그 밖 실패 항목을 겹쳐 끝내도 …`(통합 `event-cancel-r-t24.int`) | 실패 | 팬 `REFUND_FAILED` 0. 겹침(Saga 호출 2)은 실제로 일어남 |
+
+- 시험 파일을 못 읽어 실행조차 안 된 실패는 없다.
+
+**처음부터 통과한 것: 없음**
+
+- 계획 §3은 `GAT-110 P3 두 실행이 같은 그 밖 실패 항목을 겹쳐 끝내도 …`를 '처음부터 통과 예상'으로 적었지만, 지금 코드는 그 갈래에서 팬 알림을 아예 쓰지 않아(0) 실패한다. 그래서 틀린 구현을 손으로 넣어 볼 필요가 없었다. 이 시험이 원래 잡으려던 M-P3c(알림을 끝내기 밖에서 한 번 더, 잡기를 잃은 쪽도 남김)는 구현 뒤 검증 담당이 넣어 본다.
+
+**기존 시험의 시계 의존 실패(이 묶음과 무관, 감독 정리 목록 후보)**
+
+- `event-refund.int`의 `BAT-420 다시 보기 2 N1·N2` 묶음 넷(`GAT-110 N1 실제 DB에서 답하지 않는 ops 대역에도 …`, `GAT-110 N2 일괄 환불 항목이 FAILED로 끝나면 …`, `GAT-110 N2 차액 건으로 대신한 항목에는 …`, `GAT-110 N2 한 요청의 일괄 환불 실패 항목 둘 가운데 …`)이 `TypeError: Cannot read properties of undefined (reading 'filter')`(`pausedOf` ← `#closeWindowNow` ← `runDue`)로 실패한다.
+- 까닭: 같은 파일의 `확정된 회차 취소 찾기 [BAT-420 리뷰 D5]`가 SQL로 넣는 연기 요청의 `refund_window_closes_at`이 고정 시각 `NOW + 3일` = 2026-11-17T08:00Z(17:00 KST)이고 `progress`에 `perPg`가 없다. N1·N2 묶음은 진짜 시계(`Date.now()`)로 거르지 않은 `runDue`를 돌리므로, 그 시각이 지난 뒤로는 그 요청을 닫으려다 던진다. 내 새 시험(같은 파일 끝, 이 요청만 보는 저장소)은 이 영향을 받지 않는다.
+- 고치는 길(시험 몫, 이 묶음에서는 하지 않음): D5의 연기 요청에 먼 기한·`perPg`를 넣거나, N1·N2의 서비스 저장소를 그 시험 요청으로 좁힌다.
+
+**정한 것과 계획과 다르게 둔 곳**
+
+- 단위 잡기 대역(`ClaimsDouble`, 새 단위 파일): 실제 `DrizzleEventRefundClaims` 규칙을 따른다(실행 중 요청만, 멈춘 결제사 제외, 그 주문에 살아 있는 잡기·기다리는 결과 모름이 없을 때만, 기한 = 지금 + 60초, 끝내기는 잡기 값·끝나지 않은 상태만 보고 기한은 안 봄, 늘리기는 같은 값·기한 > 지금·PENDING·UNKNOWN만). 잡기 차례는 저장소에 넣은 차례(실제 SQL은 표 ID 차례)다.
+- N8 단위의 '읽은 뒤·쓰기 전에 끼우기'는 요청 쓰기(`update`·`updateActive`·`updateLocked`) 가운데 처음 오는 것 앞에 한 번 끼운다. 지금 코드와 고친 코드 모두에서 같은 자리에 끼우고, 끼웠는지(`injected`)를 먼저 단언한다. 그래서 구현은 진행률 쓰기를 `updateLocked`로 하면 되고, 그 앞에 따로 요청 쓰기를 더하면 끼우는 자리가 바뀐다.
+- N8 '늦게 끝난 실행': 사람의 TOSS 재개는 첫 묶음 0인 조립(쓰기만, 처리 없음)으로 했다. 그래야 대조에서 SIMULATOR 정지를 A 혼자 판정한다. 잡기 차례는 PORTONE → SIMULATOR → TOSS.
+- N8 '한꺼번에 재개'에 끼우는 PORTONE 멈춤의 사유는 `AUTO_FAILURE_RATE`(다른 실행의 1분 창)다. 재개하는 쪽 서킷이 닫혀 있어야 지금 코드에서 PORTONE 표가 불려 재현이 된다.
+- N8 창 닫기: 계획의 단언에 '멈춘 결제사로 신청 표 호출 0'을 더했다(정본 §5 '사람이 재개하기 전에는 멈춘 결제사로 새 환불 호출이 나가지 않는다').
+- N3 0행: '시도 기록 0'은 보내지 않은 둘째·셋째 표의 기록 0으로 읽었다(먼저 보낸 첫 표의 SUCCESS 1은 남는다).
+- N3 상수·조립: 두 시작 파일의 `new EventRefundService(` 인자에서 `deadlineMs: () => <시계>.now() + EVENT_REFUND_TICKET_DEADLINE_MS`와 같은 시계의 `nowMs: () => <시계>.now()`를 소스 글로 본다. 글자 그대로의 `30_000`도 실패다(계획 ⑤ '상수를 빼고 두 운영 조립의 deadlineMs가 쓴다').
+- P3 단위는 잡기를 꽂은 조립과 옛 조립(잡기 없음) 둘 다 본다. 시도 상한 대조는 항목 시도 수를 4로 둔 뒤 한 번 더 실패시킨다.
+- P3 통합 장애 주입은 그 회차의 `outbox` 넣기에 BEFORE INSERT 트리거로 예외를 낸다. Drizzle이 질의 오류를 `DrizzleQueryError`로 감싸므로 오류 사슬(`cause`)에서 `injected p3`를 찾는다. '셋이 한 커밋'은 첫 틱에 셋 다 없고 다음 틱에 셋 다 있는 것으로 본다(행의 트랜잭션 ID 비교는 실행 끝의 잡기 풀기가 같은 항목 행을 다시 쓰므로 쓰지 않았다).
+- P3 연기 신청 Saga의 `NOT_FOUND`는 Saga의 주문 조회 어댑터에 그 회차 판매 설정이 없게 해서 만든다(대상 조회는 정상 설정). 결제사·ticket-svc는 부르지 않는다.
+- 통합 새 묶음은 다른 시험의 1분 창·잡기와 겹치지 않게 먼 시각(`event-refund.int` NOW + 20일, `event-cancel-r-t24.int` NOW + 40일)에서 돌고, `runDue`는 그 시험 요청만 보는 저장소로 좁혔다.
+- 시험 담당은 제품 코드를 쓰지 않으므로, 맞는 구현에서 새 시험이 통과하는지는 확인하지 못했다(참고 구현을 시도했지만 역할 밖이라 막혔다). 소스 글 검사만 따로 확인했다: 지금 글은 실패, 상수로 바꾼 글은 통과, `45_000`은 실패.
+
+**더한 빈 뼈대(동작 없음)**
+
+- `domain/event-refund-ports.ts`: `EVENT_REFUND_TICKET_DEADLINE_MS = 30_000`·`EVENT_REFUND_CLAIM_EXTEND_BELOW_MS = 40_000`, `EventRefundClaims.extend`, `claimOrders` 반환의 `claimedUntilMs`, `EventRefundStore.updateLocked`.
+- `adapters/db/drizzle-event-refund-claims.ts`: `claimOrders`가 `claimedUntilMs`(= nowMs + 잡기 기한, 이미 계산하던 값)를 싣는다. `extend`는 던진다.
+- `adapters/memory-event-refund-store.ts`·`adapters/db/drizzle-event-refund-store.ts`: `updateLocked`는 던진다. `domain/event-refund.ts`: `mergePauses`는 던진다. `index.ts`: 상수 둘·`mergePauses` 내보내기.
+- 고친 기존 시험(통과 그대로): `test/event-refund-wave-review.test.ts`의 잡기 대역에 `claimedUntilMs`·`extend`(살아 있는 잡기로 답함).
