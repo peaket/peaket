@@ -53,10 +53,12 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleCsCaseOutbox,
   DrizzleDeductionGapCancellations,
   DrizzleEventCancellationLookup,
   DrizzleEventOpenOrders,
   DrizzleEventRefundAttempts,
+  DrizzleEventRefundClaims,
   DrizzleEventRefundHolds,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
@@ -78,10 +80,12 @@ import {
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
   parseHolidayCalendar,
+  PromCsCaseSignals,
   RedisSeatReturnNotices,
   type RefundModuleDeps,
   WeekendBusinessCalendar,
 } from './modules/refund/index.js';
+import { requireOpsInternalToken } from './refund-wiring.js';
 import { startPurchaseGrpcServer } from './grpc-server.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
@@ -241,6 +245,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const coreHttpUrl = env.PEAKET_CORE_HTTP_URL;
   const envName = env.PEAKET_ENV ?? 'local';
   const internalGrpcToken = internalGrpcTokenFromEnv(env);
+  // ops 주소가 있는데 내부 토큰이 없으면 운영은 시작하지 않는다(모든 CS 건이 401로 막힘, 웨이브 끝 리뷰 S1). local·ci는 경고(서비스 로거가 생기면 남긴다)
+  const opsTokenWarnings: string[] = [];
+  requireOpsInternalToken({ env, warn: (m) => void opsTokenWarnings.push(m) });
   if (!coreHttpUrl && envName !== 'local' && envName !== 'ci' && envName !== 'demo') throw new Error('PEAKET_CORE_HTTP_URL이 없다(core-svc 판매 설정 사본 읽기, 운영 필수)');
 
   // 만료 임대 값: {HOSTNAME 앞 57자}-{무작위 16진 6자리}. HOSTNAME이 없거나 키 조각 모양이 아니면 무작위 UUID(이 프로세스 안에서만 같다, L5)
@@ -334,6 +341,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 자동 정지(실패율·실패 금액·연속 실패·거절률), 연기 신청 창, 백그라운드 실행기, 팬 알림 Outbox를 남긴다.
   // CS 처리함·경보 연결은 ops-svc 내부 HTTP다. 주소가 없으면 로그 대역이다.
   let eventRefundService: EventRefundService | undefined;
+  // CS 건 열기 실패 지표(purchase_cs_case_open_failures_total{kind}, 웨이브 끝 리뷰 C2). 서비스를 만든 뒤 레지스트리에 붙인다
+  const csCaseSignals = new PromCsCaseSignals();
   if (database && refund && refundTickets) {
     const opsUrl = env.PEAKET_OPS_HTTP_URL;
     const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
@@ -355,6 +364,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
       }),
       items: new DrizzleEventRefundStore(database),
       openOrders: new DrizzleEventOpenOrders(database),
+      // 릴레이 리더의 runDue와 겹쳐도 주문 단위 잡기를 거친 쪽만 처리한다(Start 첫 묶음·Resume·Apply·CloseWindow, 웨이브 끝 리뷰 K2)
+      claims: new DrizzleEventRefundClaims(database),
+      // 확정 때 표시한 차액 건은 릴레이 리더의 runDue가 행마다 연다(C2·S1). ops 주소가 없으면 꽂지 않아 표시와 함께 로그 대역으로 간다
+      ...(opsClient ? { csOutbox: new DrizzleCsCaseOutbox(database) } : {}),
+      csCaseOpenFailures: csCaseSignals,
       attempts: new DrizzleEventRefundAttempts(database),
       fanNotifier: new OutboxEventRefundFanNotifier(),
       // 회차 취소 요청 중 보류 취소의 환급 미룸(gRPC SetEventRefundHold)과 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D, OPEN[45])
@@ -563,10 +577,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
     purchaseSessions: sessions,
   });
   log = service.logger;
+  for (const m of opsTokenWarnings) service.logger.warn({ event: 'purchase-ops-internal-token-missing' }, m);
   // DB 없이 뜬 것을 시작 로그에 남긴다(운영에서 비밀이 빠진 것을 결제 접수 연결(PRF-160) 전에도 알아채게, PRF-140 ① 리뷰)
   if (!database) service.logger.warn({ dep: 'postgres' }, 'PEAKET_DATABASE_URL이 없어 purchase DB 없이 떴다(판매 확정 저장소 SeatSales와 주문 생성 POST /v1/orders를 내놓지 않는다)');
   signals.register(service.metrics.registry);
   hotPath.register(service.metrics.registry);
+  csCaseSignals.register(service.metrics.registry);
   // 주문 생성의 identity-svc 클라이언트(듣기 전에 붙인다). 재확인은 차단기로 감싼다(열리면 부르지 않고 토큰 판정, ADR-0055). 주소가 없으면 대역과 경고 한 줄
   // 가명 계산은 재확인과 따로인 차단기다(identity-svc-contact-ref: 가명이 막혀도 재확인 차단기를 열지 않는다). local·ci가 아닌데 주소가 없으면 여기서 던진다(시작 실패, 듣기 전)
   let identity: ReturnType<typeof identityClientsFromEnv> | undefined;

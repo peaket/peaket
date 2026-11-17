@@ -117,6 +117,16 @@ export const orderCancellation = pgTable(
      * 쓸 때 refund_due_at을 비워 실행기가 더 집지 않는다. 그 건은 CS 처리함 '이상 표시'가 처리한다
      */
     entryRecordedAt: at('entry_recorded_at'),
+    /**
+     * 이상 표시(FLAGGED) CS 건을 ops-svc가 2xx로 받은 시각(0025, 웨이브 끝 리뷰 S1). entry_recorded_at이 있는데 비어 있으면 환급 실행기가 다음 틱에 다시 연다
+     */
+    entryFlagOpenedAt: at('entry_flag_opened_at'),
+    /** 회차 취소 확정 때(또는 전환에서 지거나 겹친 항목을 끝낼 때) 공제 차액 대상으로 정한 시각(0025, OPEN[45] ②, 웨이브 끝 리뷰 C2·S1) */
+    deductionGapAt: at('deduction_gap_at'),
+    /** 차액 대상으로 정한 회차 취소 요청(event_cancellation_request.id, 외래 키 없이 둔다) */
+    deductionGapRequestId: uuid('deduction_gap_request_id'),
+    /** 차액 CS 건(REFUND_FAILED·DEDUCTION_GAP)을 ops-svc가 2xx로 받은 시각. deduction_gap_at이 있는데 비어 있으면 일괄 환불 실행기 틱이 다시 연다 */
+    deductionGapOpenedAt: at('deduction_gap_opened_at'),
   },
   (t) => [
     uniqueIndex('order_cancellation_active_key')
@@ -130,6 +140,15 @@ export const orderCancellation = pgTable(
     check('order_cancellation_status_check', sql`${t.status} in ('REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED')`),
     check('order_cancellation_amounts_check', sql`${t.daysBefore} >= 0 and ${t.deductionBp} between 0 and 10000 and ${t.deductionAmount} >= 0 and ${t.refundAmount} >= 0`),
     check('order_cancellation_refund_attempts_check', sql`${t.refundAttempts} >= 0`),
+    // 차액 대상 표시 시각과 그 요청 ID는 함께 있거나 함께 없다(0025)
+    check('order_cancellation_deduction_gap_check', sql`(${t.deductionGapAt} is null) = (${t.deductionGapRequestId} is null)`),
+    // 다시 열기 목록(열지 않은 이상 표시·차액 건)만 받치는 부분 색인(0025)
+    index('order_cancellation_entry_flag_open_idx')
+      .on(t.entryRecordedAt)
+      .where(sql`${t.entryRecordedAt} is not null and ${t.entryFlagOpenedAt} is null`),
+    index('order_cancellation_deduction_gap_open_idx')
+      .on(t.deductionGapAt)
+      .where(sql`${t.deductionGapAt} is not null and ${t.deductionGapOpenedAt} is null`),
   ],
 );
 

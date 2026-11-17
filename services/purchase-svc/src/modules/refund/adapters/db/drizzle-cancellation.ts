@@ -235,7 +235,13 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
             // 입장 기록이 나온 보류 취소(entry_recorded_at)는 CS 처리함 '이상 표시'가 처리하므로 더 집지 않는다(BAT-420 P-T19 ①)
             // 회차 취소 요청의 미룸이 걸렸거나(BAT-420 몫 D) 그 회차의 일괄 환불이 진행 중(RUNNING·PAUSED)이면 집지 않는다. 결과 모름 재시도(REFUND_PENDING)는 미루지 않는다
             and(eq(orderCancellation.status, 'REQUESTED'), lte(orderCancellation.refundDueAt, now), isNull(orderCancellation.entryRecordedAt), sql`not ${held}`, sql`not ${running}`),
-            and(eq(orderCancellation.status, 'REFUND_PENDING'), or(isNull(orderCancellation.nextRefundAt), lte(orderCancellation.nextRefundAt, now))),
+            // 회차 취소 요청이 만들거나 전환한 행(연기 신청 환급 행 포함)은 일괄 환불 실행기만 결제사로 보낸다(웨이브 끝 리뷰 K1·C1,
+            // transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기'). 요청의 진행 상태와 관계없이 뺀다. 부정 예매·팬 행(요청 ID 없음)은 지금처럼 집는다
+            and(
+              eq(orderCancellation.status, 'REFUND_PENDING'),
+              isNull(orderCancellation.eventCancellationRequestId),
+              or(isNull(orderCancellation.nextRefundAt), lte(orderCancellation.nextRefundAt, now)),
+            ),
           ),
         ),
       )
@@ -294,7 +300,10 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     return updated.length > 0;
   }
 
-  /** 입장 기록이 나온 보류 취소(REQUESTED)에 가장 이른 입장 시각을 쓰고 refund_due_at을 비운다(BAT-420 P-T19 ①). 상태는 그대로다 */
+  /**
+   * 입장 기록이 나온 보류 취소(REQUESTED)에 가장 이른 입장 시각을 쓰고 refund_due_at을 비운다(BAT-420 P-T19 ①). 상태는 그대로다.
+   * entry_flag_opened_at은 비운 채 둔다. CS '이상 표시' 건을 ops-svc가 2xx로 받은 뒤에 CsCaseOutbox.markFlagOpened가 쓴다(웨이브 끝 리뷰 S1)
+   */
   async markEntryRecorded(cancellationId: string, enteredAtMs: number, _nowMs: number): Promise<boolean> {
     const updated = await this.database.db
       .update(orderCancellation)

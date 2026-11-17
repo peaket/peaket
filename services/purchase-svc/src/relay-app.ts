@@ -41,9 +41,11 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleCsCaseOutbox,
   DrizzleDeductionGapCancellations,
   DrizzleEventOpenOrders,
   DrizzleEventRefundAttempts,
+  DrizzleEventRefundClaims,
   DrizzleEventRefundHolds,
   DrizzleEventRefundStore,
   DrizzleEventRefundTargets,
@@ -60,12 +62,13 @@ import {
   HttpEventRefundAlert,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
+  PromCsCaseSignals,
   RedisSeatReturnNotices,
   RefundAfterEntry,
   RefundRetryLoop,
   WeekendBusinessCalendar,
 } from './modules/refund/index.js';
-import { entryRecordsFromEnv } from './refund-wiring.js';
+import { entryRecordsFromEnv, requireOpsInternalToken } from './refund-wiring.js';
 import {
   DrizzleSeatRebuildSource,
   DrizzleSeatSales,
@@ -187,6 +190,9 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   const paymentCancelAddress = o.env?.PEAKET_PAYMENT_GRPC_ADDR;
   const paymentCancels = paymentCancelAddress ? new GrpcPaymentCancellations({ address: paymentCancelAddress }) : undefined;
   const opsUrl = o.env?.PEAKET_OPS_HTTP_URL;
+  // ops 주소가 있는데 내부 토큰이 없으면 운영은 시작하지 않는다(모든 CS 건이 401로 막힘, 웨이브 끝 리뷰 S1). local·ci는 경고(로거가 생기면 남긴다)
+  const startupWarnings: string[] = [];
+  requireOpsInternalToken({ env: o.env ?? {}, warn: (m) => void startupWarnings.push(m) });
   const refundFailureNotice = opsUrl
     ? new HttpRefundFailureNotice(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }))
     : {
@@ -200,6 +206,10 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   const refundTicketCancels = ticketGrpcAddr ? new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(ticketGrpcToken ? { internalToken: ticketGrpcToken } : {}) }) : undefined;
   const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
   const refundWrites = new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock }));
+  // 열지 못한 이상 표시·공제 차액 CS 건 다시 열기(웨이브 끝 리뷰 C2·S1). ops 주소가 있을 때만 꽂는다(로그 대역이 '연 것'으로 남지 않게, 주소가 생기면 그때 연다)
+  const csOutbox = opsClient ? new DrizzleCsCaseOutbox(o.serviceDatabase) : undefined;
+  // CS 건 열기 실패 지표(purchase_cs_case_open_failures_total{kind}). leaderLoops에서 프로세스 레지스트리에 붙인다
+  const csCaseSignals = new PromCsCaseSignals();
   // 입장 기록이 나온 취소의 CS '이상 표시'. ops-svc 주소가 없으면 로그 대역이다
   const entryFlagNotice = opsClient
     ? new HttpEntryFlagNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN)
@@ -217,6 +227,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         entries: entryRecordsFromEnv({ env: o.env ?? {}, ...(refundTicketCancels ? { tickets: refundTicketCancels } : {}) }),
         claims: refundWrites,
         flags: entryFlagNotice,
+        ...(csOutbox ? { csOutbox } : {}),
+        csCaseOpenFailures: csCaseSignals,
         // 기한 지난 환급 미룸 풀기와 SEV2(BAT-420 몫 D), 0행 쓰기 뒤 다시 읽기(VOIDED만 SEV1, BAT-420 리뷰 D1)
         holds: new DrizzleEventRefundHolds(o.serviceDatabase),
         orders: new DrizzleCancellationOrders(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
@@ -244,6 +256,11 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           gaps: new DrizzleDeductionGapCancellations(o.serviceDatabase),
           gapNotice: deductionGapNotice,
           configs: new SeatMapSaleConfigs(o.seatMap),
+          // API 파드의 Start·Resume·Apply·CloseWindow와 겹쳐도 주문 단위 잡기를 거친 쪽만 처리한다(웨이브 끝 리뷰 K2)
+          claims: new DrizzleEventRefundClaims(o.serviceDatabase, clock),
+          // 확정·항목 끝내기 때 표시한 차액 건은 이 실행기 틱이 행마다 연다(C2·S1). ops 주소가 없으면 꽂지 않아 차액 건은 표시와 함께 로그 대역으로 간다
+          ...(csOutbox ? { csOutbox } : {}),
+          csCaseOpenFailures: csCaseSignals,
           log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg) },
           canceller: new EventRefundCancellerRouter({
             cancel: new EventTicketCanceller({
@@ -306,6 +323,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       seatSignals.register(ctx.registry);
       orderSignals.register(ctx.registry);
       orderExpirySignals.register(ctx.registry);
+      csCaseSignals.register(ctx.registry);
       const store = new RedisSeatStore(o.redis, ctx.logger, ctx.clock);
       // 다시 만들기의 DB 쪽(임대·판 번호·읽기)이자 판매를 연 기록(seat_rebuild 행). 기록이 있는 회차만 다시 만든다(리뷰 고침 M3)
       const rebuildSource = new DrizzleSeatRebuildSource(o.serviceDatabase);
@@ -319,6 +337,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         logger: ctx.logger,
       });
       late = { logger: ctx.logger, store, orderExpiryStore, orderExpiry };
+      for (const m of startupWarnings.splice(0)) ctx.logger.warn({ event: 'purchase-ops-internal-token-missing' }, m);
       return [
         new SeatStreamRelay({
           source: new RedisSeatStreamSource(o.redis),

@@ -23,20 +23,35 @@ export interface EventRefundTargets {
 
 export interface EventRefundStore {
   find(requestId: string): Promise<EventCancellationRequest | undefined>;
-  /** 요청과 대상 항목을 한 트랜잭션에 만든다. 같은 requestId가 있으면 REPLAYED다. 팬 알림 Outbox도 같은 트랜잭션에 넣는다 */
-  create(request: EventCancellationRequest, items: readonly EventRefundItem[], outbox?: readonly EventRefundOutboxMessage[]): Promise<EventCancellationRequest>;
+  /**
+   * 요청과 대상 항목을 한 트랜잭션에 만든다. 같은 requestId가 있으면 REPLAYED다. 팬 알림 Outbox도 같은 트랜잭션에 넣는다.
+   * extra.deductionGaps는 확정 때 찾은 공제 차액 대상 취소 ID다. 같은 트랜잭션에서 그 행에 deduction_gap_at·deduction_gap_request_id를 쓴다
+   * (이미 표시한 행은 그대로, 웨이브 끝 리뷰 C2·S1, transfer-refund §5 '그래도 남는 건'). CS 건은 일괄 환불 실행기 틱이 연다
+   */
+  create(
+    request: EventCancellationRequest,
+    items: readonly EventRefundItem[],
+    outbox?: readonly EventRefundOutboxMessage[],
+    extra?: { readonly deductionGaps?: readonly string[] },
+  ): Promise<EventCancellationRequest>;
   /** 진행률·상태·일시정지 표시를 바꾼다 */
   update(request: EventCancellationRequest): Promise<void>;
   /** 실행 중(RUNNING·REFUND_WINDOW)일 때만 진행률을 바꾼다. 그 사이 PAUSED가 됐으면 덮지 않고 false */
   updateActive(request: EventCancellationRequest): Promise<boolean>;
   items(requestId: string): Promise<readonly EventRefundItem[]>;
-  /** 항목 상태를 바꾸고, 같은 트랜잭션에 팬 알림 Outbox를 남길 수 있다 */
+  /**
+   * 항목 상태를 바꾸고, 같은 트랜잭션에 팬 알림 Outbox를 남길 수 있다. 끝난 상태(REFUNDED·FAILED·NOT_APPLIED)와 잡힌 항목은 덮지 않는다(웨이브 끝 리뷰 K2).
+   * 쓰지 않았으면 false다(Outbox·행 표시도 남기지 않는다). 대역은 돌려주지 않아도 된다(쓴 것으로 본다)
+   */
   updateItem(
     item: EventRefundItem,
     outbox?: readonly EventRefundOutboxMessage[],
-    /** 웨이브 끝 리뷰 K1(빈 뼈대, 아직 쓰지 않는다): 항목이 FAILED로 끝나면 같은 트랜잭션에서 그 취소 행에 refund_failed_at·refund_last_error를 쓴다 */
-    extra?: { readonly cancellationFailure?: { readonly lastError: string } },
-  ): Promise<void>;
+    /**
+     * cancellationFailure: 항목이 FAILED로 끝나면 같은 트랜잭션에서 그 취소 행(이 요청이 만들거나 전환한 REFUND_PENDING 행만)에 refund_failed_at·refund_last_error를 쓴다(웨이브 끝 리뷰 K1·C1).
+     * deductionGap: 전환에서 지거나 겹친 항목의 차액 대상 행에 deduction_gap_at·deduction_gap_request_id를 쓴다(웨이브 끝 리뷰 C2·S1)
+     */
+    extra?: { readonly cancellationFailure?: { readonly lastError: string }; readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string } },
+  ): Promise<boolean | void>;
   /** 연기 신청을 조건부로 넣는다. 이미 신청했거나 창이 닫혀 NOT_APPLIED면 false다(신청·창 닫기 경합을 행 잠금으로 가른다) */
   markApplied(requestId: string, ticketId: string, appliedAtMs: number): Promise<boolean>;
   /** 신청하지 않은 항목만 NOT_APPLIED로 끝낸다. 그 사이 신청이 들어왔으면 false다 */
@@ -155,23 +170,35 @@ export interface EventRefundServiceDeps {
   readonly configs?: CancellationConfigs;
   /** 보충 2: 설정에 입장 시작이 없어 차액을 찾지 않을 때의 경고 등. 없으면 남기지 않는다 */
   readonly log?: { warn(o: object, msg: string): void };
-  /** 웨이브 끝 리뷰 K2(빈 뼈대, 아직 쓰지 않는다): 항목 처리 전 주문 단위 잡기와 조건부 끝내기. 운영 조립(start·relay)에는 꼭 넣는다 */
+  /**
+   * 웨이브 끝 리뷰 K2: 항목 처리 전 주문 단위 잡기와 조건부 끝내기(transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기'). 운영 조립(start·relay)에는 꼭 넣는다.
+   * 없으면(단위 시험·옛 조립) 한 프로세스 안에서만 겹침을 막고 끝내기는 store.updateItem(끝난 상태를 덮지 않음)이다
+   */
   readonly claims?: EventRefundClaims;
-  /** 웨이브 끝 리뷰 C2·S1(빈 뼈대, 아직 쓰지 않는다): 확정 때 표시한 차액 건을 runDue 맨 앞에서 행마다 따로 연다 */
+  /**
+   * 웨이브 끝 리뷰 C2·S1: 확정·항목 끝내기 트랜잭션에서 표시한 차액 건을 runDue 맨 앞에서 행마다 따로 연다(2xx를 받은 행만 연 시각을 쓴다).
+   * 없으면(옛 조립) 차액 건을 표시와 함께 곧바로 연다(행마다 따로, 실패해도 나머지는 연다)
+   */
   readonly csOutbox?: Pick<CsCaseOutbox, 'pendingGaps' | 'markGapOpened'>;
-  /** 웨이브 끝 리뷰 C2(빈 뼈대): 지표 purchase_cs_case_open_failures_total{kind} */
+  /** 웨이브 끝 리뷰 C2: 지표 purchase_cs_case_open_failures_total{kind}. CS 건 열기가 실패한 행마다 하나 */
   readonly csCaseOpenFailures?: { inc(kind: 'DEDUCTION_GAP' | 'FLAGGED'): void };
 }
 
-// ---- 웨이브 끝 리뷰 K2·C2·S1(빈 뼈대): 일괄 환불 항목의 주인과 겹침 막기, CS 건 다시 열기 ----
+// ---- 웨이브 끝 리뷰 K2·C2·S1: 일괄 환불 항목의 주인과 겹침 막기, CS 건 다시 열기 ----
 
 /** 주문 단위 잡기의 기한 60초 [가정](transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기') */
 export const EVENT_REFUND_CLAIM_MS = 60_000;
 
 export interface EventRefundClaims {
-  /** 그 요청의 처리할 항목을 주문 단위로 잡는다(그 주문의 다른 잡기가 살아 있으면 잡지 않는다, 기한 지난 잡기는 다시 잡는다) */
+  /**
+   * 그 요청의 처리할 항목을 주문 단위로 잡는다(그 주문의 다른 잡기가 살아 있으면 잡지 않는다, 기한 지난 잡기는 다시 잡는다).
+   * 잡은 주문의 처리할 항목(PENDING·UNKNOWN, 신청됨, 다음 시각 지남)을 준다. 요청이 실행 중(RUNNING·REFUND_WINDOW)이 아니거나 limitOrders가 0이면 빈 목록이다
+   */
   claimOrders(requestId: string, nowMs: number, limitOrders: number): Promise<{ readonly claimToken: string; readonly items: readonly EventRefundItem[] }>;
-  /** 잡기 값이 맞고 끝나지 않은 항목만 끝낸다(조건부). 잡기를 잃었으면 false이고 아무것도 쓰지 않는다 */
+  /**
+   * 잡기 값이 맞고 끝나지 않은(PENDING·UNKNOWN) 항목만 쓴다(조건부). 잡기를 잃었으면 false이고 아무것도 쓰지 않는다.
+   * Outbox·취소 행 실패 표시(cancellationFailure)·차액 대상 표시(deductionGap)는 같은 트랜잭션이다
+   */
   finish(q: {
     readonly requestId: string;
     readonly ticketId: string;
@@ -184,14 +211,22 @@ export interface EventRefundClaims {
     readonly cancellationFailure?: { readonly lastError: string };
     readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
   }): Promise<boolean>;
+  /** 그 잡기 값의 남은 잡기를 푼다(처리하지 않고 남긴 항목을 다른 쪽이 곧 잡게) */
   release(requestId: string, claimToken: string): Promise<void>;
 }
 
+/** 한 틱에 다시 여는 CS 건 수 [가정](차액·이상 표시 각각) */
+export const CS_CASE_REOPEN_BATCH = 100;
+
 /** 열지 않은 CS 건(차액·이상 표시)을 행마다 다시 연다. 한 틱에 100건 [가정] */
 export interface CsCaseOutbox {
+  /** deduction_gap_at이 있고 deduction_gap_opened_at이 빈 행(표시 시각 순) */
   pendingGaps(limit: number): Promise<readonly { cancellationId: string; orderId: string; deductionAmount: number; requestId: string }[]>;
+  /** ops-svc가 2xx로 받은 뒤에만 부른다. 이미 쓴 행은 그대로다 */
   markGapOpened(cancellationId: string, nowMs: number): Promise<void>;
+  /** entry_recorded_at이 있고 entry_flag_opened_at이 빈, 아직 CS가 끝내지 않은(REQUESTED) 행(입장 시각 순) */
   pendingFlags(limit: number): Promise<readonly { cancellationId: string; orderId: string; ticketId: string; enteredAtMs: number }[]>;
+  /** ops-svc가 2xx로 받은 뒤에만 부른다. 이미 쓴 행은 그대로다 */
   markFlagOpened(cancellationId: string, nowMs: number): Promise<void>;
 }
 
@@ -218,7 +253,10 @@ export interface DeductionGapCancellations {
 }
 
 export interface DeductionGapNotice {
-  /** ops CS REFUND_FAILED(category DEDUCTION_GAP, sourceId = 취소 ID, eventKey = sha256(`deduction-gap:${id}`) 앞 16바이트 UUID). best effort */
+  /**
+   * ops CS REFUND_FAILED(category DEDUCTION_GAP, sourceId = 취소 ID, eventKey = sha256(`deduction-gap:${id}`) 앞 16바이트 UUID).
+   * 2xx를 받아야 연 것이다. 못 열면(401·5xx·시간 초과) 던진다(웨이브 끝 리뷰 S1, 부른 쪽이 경고·지표 뒤 다음 틱에 다시 연다)
+   */
   open(q: { readonly cancellationId: string; readonly orderId: string; readonly deductionAmount: number; readonly requestId: string; readonly nowMs: number }): Promise<void>;
 }
 
@@ -234,7 +272,10 @@ export interface EventTicketCancellations {
   }): Promise<readonly { readonly ticketId: string; readonly result: 'CANCELED' | 'ALREADY_ENDED'; readonly orderId: string; readonly holderAccountId: string; readonly transferWithdrawn: boolean }[]>;
 }
 
-/** 주문 행 잠금 안에서 status = 'REQUESTED'인 그 행만: reason EVENT_CANCELLED, deduction 0, refund = refundAmount, event_cancellation_request_id, refund_due_at 빔, REFUND_PENDING */
+/**
+ * 주문 행 잠금 안에서 status = 'REQUESTED'인 그 행만: reason EVENT_CANCELLED, deduction 0, refund = refundAmount, event_cancellation_request_id, refund_due_at 빔, REFUND_PENDING.
+ * 이미 같은 요청 ID로 전환된 행(사유 EVENT_CANCELLED, REFUND_PENDING·REFUNDED)이면 바꾸지 않고 CONVERTED다(웨이브 끝 리뷰 K2 전환 멱등)
+ */
 export interface PendingCancellationConversions {
   convert(q: { readonly cancellationId: string; readonly eventCancellationRequestId: string; readonly refundAmount: number; readonly nowMs: number }): Promise<'CONVERTED' | 'NOT_REQUESTED'>;
 }

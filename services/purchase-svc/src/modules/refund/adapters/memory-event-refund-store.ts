@@ -6,12 +6,21 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
   readonly requests = new Map<string, EventCancellationRequest>();
   readonly byRequest = new Map<string, Map<string, EventRefundItem>>();
   readonly outbox: EventRefundOutboxMessage[] = [];
+  /** 항목 FAILED 때 그 취소 행에 남긴 실패 표시(취소 ID → 마지막 오류, 웨이브 끝 리뷰 K1·C1) */
+  readonly cancellationFailures = new Map<string, string>();
+  /** 공제 차액 대상 표시(취소 ID → 요청 ID, 웨이브 끝 리뷰 C2·S1). 처음 표시한 요청을 둔다 */
+  readonly deductionGaps = new Map<string, string>();
 
   async find(requestId: string): Promise<EventCancellationRequest | undefined> {
     return this.requests.get(requestId);
   }
 
-  async create(request: EventCancellationRequest, items: readonly EventRefundItem[], outbox: readonly EventRefundOutboxMessage[] = []): Promise<EventCancellationRequest> {
+  async create(
+    request: EventCancellationRequest,
+    items: readonly EventRefundItem[],
+    outbox: readonly EventRefundOutboxMessage[] = [],
+    extra: { readonly deductionGaps?: readonly string[] } = {},
+  ): Promise<EventCancellationRequest> {
     const existing = this.requests.get(request.requestId);
     if (existing) return existing;
     const active = [...this.requests.values()].find(
@@ -21,6 +30,7 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     this.requests.set(request.requestId, request);
     this.byRequest.set(request.requestId, new Map(items.map((i) => [i.ticketId, i])));
     this.outbox.push(...outbox);
+    for (const id of extra.deductionGaps ?? []) if (!this.deductionGaps.has(id)) this.deductionGaps.set(id, request.requestId);
     return request;
   }
 
@@ -51,12 +61,24 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     return added;
   }
 
-  // 웨이브 끝 리뷰 K1(빈 뼈대): _extra.cancellationFailure는 아직 쓰지 않는다
-  async updateItem(item: EventRefundItem, outbox: readonly EventRefundOutboxMessage[] = [], _extra?: { readonly cancellationFailure?: { readonly lastError: string } }): Promise<void> {
+  /**
+   * 끝나지 않은(PENDING·UNKNOWN) 항목만 쓴다(웨이브 끝 리뷰 K2: 끝난 상태를 덮지 않는다). 썼을 때만 Outbox와
+   * 취소 행 실패 표시(K1·C1, cancellationFailures)·차액 대상 표시(C2·S1, deductionGaps)를 남긴다. 쓰지 않았으면 false
+   */
+  async updateItem(
+    item: EventRefundItem,
+    outbox: readonly EventRefundOutboxMessage[] = [],
+    extra: { readonly cancellationFailure?: { readonly lastError: string }; readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string } } = {},
+  ): Promise<boolean> {
     const items = this.byRequest.get(item.requestId);
-    if (!items?.has(item.ticketId)) throw new Error(`회차 취소 항목이 없다: ${item.requestId}/${item.ticketId}`);
+    const current = items?.get(item.ticketId);
+    if (!items || !current) throw new Error(`회차 취소 항목이 없다: ${item.requestId}/${item.ticketId}`);
+    if (current.status !== 'PENDING' && current.status !== 'UNKNOWN') return false;
     items.set(item.ticketId, item);
     this.outbox.push(...outbox);
+    if (extra.cancellationFailure && !this.cancellationFailures.has(item.cancellationId)) this.cancellationFailures.set(item.cancellationId, extra.cancellationFailure.lastError);
+    if (extra.deductionGap && !this.deductionGaps.has(extra.deductionGap.cancellationId)) this.deductionGaps.set(extra.deductionGap.cancellationId, extra.deductionGap.requestId);
+    return true;
   }
 
   async markApplied(requestId: string, ticketId: string, appliedAtMs: number): Promise<boolean> {

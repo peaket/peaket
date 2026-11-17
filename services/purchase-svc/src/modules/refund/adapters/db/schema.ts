@@ -74,6 +74,10 @@ export const eventRefundItem = pgTable(
     appliedAt: at('applied_at'),
     nextAttemptAt: at('next_attempt_at'),
     updatedAt: at('updated_at').notNull(),
+    /** 주문 단위로 잡은 처리자의 무작위 값(0025, 웨이브 끝 리뷰 K2). 잡은 쪽만 처리하고 끝내기는 이 값이 같고 상태가 PENDING·UNKNOWN일 때만 쓴다 */
+    claimToken: uuid('claim_token'),
+    /** 잡기 기한(지금 + 60초 [가정]). 지나면(claimed_until <= 지금) 다른 처리자가 다시 잡는다 */
+    claimedUntil: at('claimed_until'),
   },
   (t) => [
     primaryKey({ name: 'event_refund_item_pkey', columns: [t.requestId, t.ticketId] }),
@@ -83,6 +87,8 @@ export const eventRefundItem = pgTable(
     check('event_refund_item_pg_check', sql`${t.pg} in ('TOSS', 'PORTONE', 'SIMULATOR')`),
     check('event_refund_item_status_check', sql`${t.status} in ('PENDING', 'REFUNDED', 'FAILED', 'UNKNOWN', 'NOT_APPLIED')`),
     check('event_refund_item_attempts_check', sql`${t.attempts} >= 0`),
+    // 잡기 값과 기한은 함께 있거나 함께 없다(0025)
+    check('event_refund_item_claim_check', sql`(${t.claimToken} is null) = (${t.claimedUntil} is null)`),
   ],
 );
 

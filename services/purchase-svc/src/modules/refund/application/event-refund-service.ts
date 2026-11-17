@@ -2,6 +2,9 @@
 // 취소는 확정 뒤 대상 티켓을 기존 예매 취소 Saga(CancelTicket)로 한 장씩 환불하고,
 // 연기는 환급 신청 창(REFUND_WINDOW)을 연 뒤 신청한 티켓만 환불한다.
 // 자동 정지(실패율·실패 금액·연속 실패·거절률·서킷), 재시도·멱등·중단/재개·진행률, 팬 알림 Outbox를 남긴다.
+// 웨이브 끝 리뷰 K1·K2·C1·C2(transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기'·'그래도 남는 건'): 항목은 주문 단위로 잡은 쪽만 처리하고(claims),
+// 쓰기는 잡기 값·진행 중 상태를 조건으로 한다(0행이면 시도 기록·알림·CS 건 없음). 항목이 FAILED로 끝나면 같은 트랜잭션에서 그 취소 행에 refund_failed_at을 쓴다.
+// 공제 차액 대상은 확정·항목 끝내기 트랜잭션에서 행에 표시하고, CS 건은 runDue 맨 앞에서 행마다 따로 연다(csOutbox, 실패해도 항목 상태는 그대로).
 import {
   EventRefundActiveConflict,
   eventRefundCancellationId,
@@ -20,6 +23,7 @@ import {
   type RefundPgProvider,
   type RefundPauseReason,
 } from '../domain/event-refund.js';
+import { CS_CASE_REOPEN_BATCH } from '../domain/event-refund-ports.js';
 import type {
   EventRefundApplyInput,
   EventRefundCloseWindowInput,
@@ -66,6 +70,17 @@ const FAILURE_ERRORS = new Set(['REJECTED', 'TICKET_NOT_HELD', 'TRANSFER_PENDING
  * 재시도해도 같은 답이라 바로 FAILED로 끝내 CS '일괄 환불 실패'로 넘긴다. 결제사 호출이 아니므로 자동 정지 기록에 넣지 않는다
  */
 const IMMEDIATE_FAILURES = new Set(['cancellation-in-progress', 'ticket-already-ended', 'cancellation-conflict']);
+
+/** 항목을 주문별로 묶는다(처음 나온 차례를 지킨다) */
+function groupByOrder(items: readonly EventRefundItem[]): Map<string, EventRefundItem[]> {
+  const groups = new Map<string, EventRefundItem[]>();
+  for (const item of items) {
+    const group = groups.get(item.orderId);
+    if (group) group.push(item);
+    else groups.set(item.orderId, [item]);
+  }
+  return groups;
+}
 
 /** 대상 표 한 장의 일괄 환불 항목. 보류 취소가 있으면 그 행 ID를, 아니면 요청·표로 정해진 취소 ID를 쓴다(BAT-420 GAT-110 E1) */
 function itemOf(requestId: string, t: EventRefundTarget, kind: EventRefundKind, nowMs: number): EventRefundItem {
@@ -147,40 +162,82 @@ export class EventRefundService {
       updatedAtMs: nowMs,
     };
     const confirmed = this.o.fanNotifier?.confirmed(request, targets, nowMs) ?? [];
+    // 처음 만들 때만(다시 부르기는 위에서 돌아갔다) 남는 공제 차액 대상을 찾아 요청 행과 같은 트랜잭션에서 표시한다(BAT-420 몫 D, R-T38 ④, 웨이브 끝 리뷰 C2·S1)
+    const gapRows = kind === 'CANCEL' ? await this.#findDeductionGaps(request) : [];
     let created: EventCancellationRequest;
     try {
-      created = await this.o.store.create(request, items, confirmed);
+      created = await this.o.store.create(request, items, confirmed, gapRows.length > 0 ? { deductionGaps: gapRows.map((r) => r.cancellationId) } : {});
     } catch (err) {
       // 같은 회차의 진행 중 요청(0016 active key)과 부딪히면 500이 아니라 409다
       if (err instanceof EventRefundActiveConflict) throw new EventRefundError('CONFLICT', `같은 회차에 진행 중인 회차 취소 요청이 있습니다: ${err.requestId}`);
       throw err;
     }
     if (kind === 'CANCEL') {
-      // 처음 만들 때만(다시 부르기는 위에서 돌아갔다) 남는 공제 차액을 CS 건으로 연다(BAT-420 몫 D, R-T38 ④). 결제사는 더 부르지 않는다
-      await this.#openDeductionGaps(created, nowMs);
+      // 차액 건은 결제사 호출이 아니다. 다시 열기 포트(csOutbox)가 있으면 일괄 환불 실행기 틱이 행마다 열고, 없으면(옛 조립) 여기서 행마다 따로 연다
+      if (!this.o.csOutbox) for (const row of gapRows) await this.#openGapNow(request.requestId, row, nowMs);
       await this.#run(created, targets, this.o.firstBatch ?? 200);
     }
     return this.get(i.requestId);
   }
 
   /**
-   * 회차 취소 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D, OPEN[45] 결정 ②, transfer-refund §5). 입장 시작 시각은 회차 판매 설정에서 읽는다(대상 표가 0이어도 찾는다, 보충 2).
-   * 설정에 입장 시작이 없으면 찾지 않고 경고를 남긴다. best effort: 찾기·열기가 실패해도 일괄 환불은 이어 간다
+   * 회차 취소 확정 때 남는 공제 차액 대상(BAT-420 몫 D, OPEN[45] 결정 ②, transfer-refund §5). 입장 시작 시각은 회차 판매 설정에서 읽는다(대상 표가 0이어도 찾는다, 보충 2).
+   * 설정에 입장 시작이 없으면 찾지 않고 경고를 남긴다. best effort: 찾기가 실패하면 경고 뒤 빈 목록이고 일괄 환불은 이어 간다
    */
-  async #openDeductionGaps(request: EventCancellationRequest, nowMs: number): Promise<void> {
+  async #findDeductionGaps(request: EventCancellationRequest): Promise<readonly { cancellationId: string; orderId: string; deductionAmount: number }[]> {
     const { gaps, gapNotice } = this.o;
-    if (!gaps || !gapNotice) return;
+    if (!gaps || !gapNotice) return [];
     try {
       const entryOpensAtMs = await this.#entryOpensAt(request.eventId);
       if (entryOpensAtMs === undefined) {
         this.o.log?.warn({ eventId: request.eventId, requestId: request.requestId }, 'event-refund-deduction-gap-skipped: 회차 판매 설정에 입장 시작 시각이 없어 차액 건을 찾지 않는다');
-        return;
+        return [];
       }
-      for (const row of await gaps.list(request.eventId, entryOpensAtMs)) {
-        await gapNotice.open({ cancellationId: row.cancellationId, orderId: row.orderId, deductionAmount: row.deductionAmount, requestId: request.requestId, nowMs });
-      }
+      return await gaps.list(request.eventId, entryOpensAtMs);
     } catch (err) {
       this.o.log?.warn({ eventId: request.eventId, requestId: request.requestId, err: err instanceof Error ? err.message : 'unknown' }, 'event-refund-deduction-gap-failed');
+      return [];
+    }
+  }
+
+  /**
+   * 차액 건 하나를 지금 연다(다시 열기 포트가 없는 옛 조립). 한 행이 실패해도 나머지는 이어 열고, 실패는 경고·지표만 남긴다(항목 상태를 바꾸지 않는다, 웨이브 끝 리뷰 C2)
+   */
+  async #openGapNow(requestId: string, row: { cancellationId: string; orderId: string; deductionAmount: number }, nowMs: number): Promise<void> {
+    if (!this.o.gapNotice) return;
+    try {
+      await this.o.gapNotice.open({ cancellationId: row.cancellationId, orderId: row.orderId, deductionAmount: row.deductionAmount, requestId, nowMs });
+    } catch (err) {
+      this.#gapOpenFailed(requestId, row.cancellationId, err);
+    }
+  }
+
+  #gapOpenFailed(requestId: string, cancellationId: string, err: unknown): void {
+    this.o.log?.warn({ event: 'event-refund-deduction-gap-failed', requestId, cancellationId, err: err instanceof Error ? err.name : 'unknown' }, 'event-refund-deduction-gap-failed: 차액 CS 건을 열지 못했다(다음 틱에 다시 연다)');
+    this.o.csCaseOpenFailures?.inc('DEDUCTION_GAP');
+  }
+
+  /**
+   * 열지 않은 차액 건(deduction_gap_at 있음·deduction_gap_opened_at 빔)을 한 틱에 100건 [가정]까지 행마다 따로 연다(웨이브 끝 리뷰 C2·S1).
+   * ops-svc가 2xx로 받은 행만 연 시각을 쓴다. 한 행이 실패해도 나머지는 열고, 실패한 행은 경고·지표 뒤 다음 틱에 다시 연다
+   */
+  async #openPendingGaps(nowMs: number): Promise<void> {
+    const { csOutbox, gapNotice } = this.o;
+    if (!csOutbox || !gapNotice) return;
+    let rows: Awaited<ReturnType<typeof csOutbox.pendingGaps>>;
+    try {
+      rows = await csOutbox.pendingGaps(CS_CASE_REOPEN_BATCH);
+    } catch (err) {
+      this.o.log?.warn({ event: 'event-refund-deduction-gap-failed', err: err instanceof Error ? err.name : 'unknown' }, 'event-refund-deduction-gap-failed: 열지 않은 차액 건을 읽지 못했다(다음 틱에 다시 본다)');
+      return;
+    }
+    for (const row of rows) {
+      try {
+        await gapNotice.open({ cancellationId: row.cancellationId, orderId: row.orderId, deductionAmount: row.deductionAmount, requestId: row.requestId, nowMs });
+        await csOutbox.markGapOpened(row.cancellationId, nowMs);
+      } catch (err) {
+        this.#gapOpenFailed(row.requestId, row.cancellationId, err);
+      }
     }
   }
 
@@ -303,6 +360,8 @@ export class EventRefundService {
    */
   async runDue(): Promise<{ closedWindows: number; processed: number }> {
     const nowMs = this.o.nowMs();
+    // 맨 앞에서 열지 않은 차액 건을 행마다 다시 연다(웨이브 끝 리뷰 C2·S1). 열기 실패는 항목 상태를 바꾸지 않고 틱도 멈추지 않는다
+    await this.#openPendingGaps(nowMs);
     let closedWindows = 0;
     for (const request of await this.o.store.dueWindowClosures(nowMs, 20)) {
       await this.#closeWindowNow(request, 'system:event-refund-window');
@@ -387,16 +446,13 @@ export class EventRefundService {
     // 같은 주문의 표는 한 작업자가 큐 차례대로 처리한다. payment-svc가 같은 결제의 일반 취소를 한 번에 하나씩 보내므로(10분 안의 진행 중 건이 있으면 결과 모름),
     // 같은 주문의 표를 동시에 보내면 결과 모름이 자동 정지 실패율에 섞인다(docs/data.md §5 '같은 주문의 표 둘을 동시에 취소', BUILD_ORDER GAT-080).
     // 묶음 안에서는 재시도할 결과 모름을 처음 보내는 표보다 먼저 한다(앞 건이 끝나야 뒤 건을 보낼 수 있다)
-    const groups = new Map<string, EventRefundItem[]>();
-    for (const item of queue) {
-      const group = groups.get(item.orderId);
-      if (group) group.push(item);
-      else groups.set(item.orderId, [item]);
-    }
-    const orderQueue = [...groups.values()].map((g) => [...g.filter((i) => i.status === 'UNKNOWN'), ...g.filter((i) => i.status !== 'UNKNOWN')]);
+    const groups = groupByOrder(queue);
     const newlyPaused: { pg: RefundPgProvider; reason: RefundPauseReason; detail: Record<string, unknown> }[] = [];
-    /** 항목 하나를 처리하고, 그 항목이 끝났는지(환급·실패) 돌려준다. 멈춤·자동 정지로 보내지 않았거나 재시도를 기다리면 false다 */
-    const processItem = async (item: EventRefundItem): Promise<boolean> => {
+    /**
+     * 항목 하나를 처리하고, 그 항목이 끝났는지(환급·실패) 돌려준다. 멈춤·자동 정지로 보내지 않았거나 재시도를 기다리거나 잡기를 잃었으면 false다.
+     * claimToken이 있으면 쓰기는 잡기 값을 조건으로 한 끝내기(claims.finish)다(웨이브 끝 리뷰 K2). 시도 기록·CS 건·차액 건은 쓰기가 된 뒤에만 남긴다
+     */
+    const processItem = async (item: EventRefundItem, claimToken?: string): Promise<boolean> => {
       // 실행 중에 사람이 멈췄을 수 있다. 항목마다 저장된 상태를 다시 보고 새 호출을 보내지 않는다
       const current = await this.o.store.find(request.requestId);
       if (current) {
@@ -417,12 +473,10 @@ export class EventRefundService {
         return false;
       }
       const target = byTicket.get(item.ticketId);
-      if (!target) {
-        await this.#finishItem(request, item, 'FAILED', 'target-not-found', undefined, undefined);
-        return true;
-      }
+      if (!target) return this.#finishItem(request, item, 'FAILED', 'target-not-found', undefined, { claimToken });
+      let result: Awaited<ReturnType<EventRefundServiceDeps['canceller']['cancel']>>;
       try {
-        const result = await this.o.canceller.cancel(target, {
+        result = await this.o.canceller.cancel(target, {
           requestId: request.requestId,
           eventId: request.eventId,
           cancellationId: item.cancellationId,
@@ -430,45 +484,95 @@ export class EventRefundService {
           nowMs: this.o.nowMs(),
           deadlineMs: this.o.deadlineMs(),
         });
-        // 결제사로 보내지 않은 실패(티켓 단계)는 결제사 호출로 세지 않고 재시도한다(GAT-110 E7)
-        if (result.status === 'NOT_SENT') return (await this.#retryOrFail(request, item, 'UNKNOWN', result.error, target)) !== 'UNKNOWN';
-        // 결제사로 보내기 전에 끝난 즉시 실패는 기록하지 않고 바로 FAILED다(GAT-110 E1·E2)
-        if (result.status === 'FAILED' && result.error !== undefined && IMMEDIATE_FAILURES.has(result.error)) {
-          // 전환에서 진 항목: 마감 뒤 환급이 먼저 공제하고 보냈으면 일반 실패 알림 대신 그 행 공제액의 차액 건 하나만 연다(BAT-420 몫 D, GAT-110 D7).
-          // 확정과 겹쳐 팬 취소가 먼저 그 표를 끝냈으면(ticket-already-ended·cancellation-conflict) 그 표의 공제 > 0인 USER 취소로 차액 건을 연다(BAT-420 리뷰 D5).
-          // 차액 대상이 아니면(입장 시작 전 접수·공제 0·아직 보내지 않음) 전과 같이 일반 실패 알림이다
-          const gap = result.error === 'cancellation-in-progress' ? await this.#gapOf(request, item) : await this.#overlapGapOf(request, item, result.error);
-          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined, gap === undefined);
-          if (gap) await this.o.gapNotice?.open({ cancellationId: gap.cancellationId, orderId: gap.orderId, deductionAmount: gap.deductionAmount, requestId: request.requestId, nowMs: this.o.nowMs() });
-          return true;
-        }
-        const outcome = outcomeOf(result.status, result.error);
-        await this.#recordAttempt(request, item, target, outcome);
-        if (result.status === 'REFUNDED') {
-          await this.#finishItem(request, item, 'REFUNDED', undefined, target, undefined);
-          return true;
-        }
-        if (result.status === 'REFUND_PENDING') return (await this.#retryOrFail(request, item, 'UNKNOWN', result.error ?? 'refund-pending', target)) !== 'UNKNOWN';
-        if (result.error !== undefined && FAILURE_ERRORS.has(result.error)) {
-          await this.#finishItem(request, item, 'FAILED', result.error, target, undefined);
-          return true;
-        }
-        return (await this.#retryOrFail(request, item, 'FAILED', result.error ?? 'failed', target)) !== 'UNKNOWN';
       } catch (err) {
+        // 취소기가 던지면 결과 모름이다. 항목 쓰기의 실패는 여기서 잡지 않는다(끝난 항목을 결과 모름으로 되돌리지 않는다, 웨이브 끝 리뷰 C2)
         const message = err instanceof Error ? err.message : 'unknown';
-        await this.#recordAttempt(request, item, target, 'UNKNOWN');
-        return (await this.#retryOrFail(request, item, 'UNKNOWN', message, target)) !== 'UNKNOWN';
+        const after = await this.#retryOrFail(request, item, 'UNKNOWN', message, target, claimToken);
+        if (after !== 'LOST') await this.#recordAttempt(request, item, target, 'UNKNOWN');
+        return after === 'FAILED';
       }
-    };
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        const group = orderQueue.shift();
-        if (!group) return;
-        // 앞 항목이 끝나지 않으면(결과 모름·멈춤) 그 묶음의 나머지는 이번 실행에서 부르지 않는다(리뷰 B4)
-        for (const item of group) if (!(await processItem(item))) break;
+      // 결제사로 보내지 않은 실패(티켓 단계)는 결제사 호출로 세지 않고 재시도한다(GAT-110 E7)
+      if (result.status === 'NOT_SENT') return (await this.#retryOrFail(request, item, 'UNKNOWN', result.error, target, claimToken)) === 'FAILED';
+      // 결제사로 보내기 전에 끝난 즉시 실패는 기록하지 않고 바로 FAILED다(GAT-110 E1·E2)
+      if (result.status === 'FAILED' && result.error !== undefined && IMMEDIATE_FAILURES.has(result.error)) {
+        // 전환에서 진 항목: 마감 뒤 환급이 먼저 공제하고 보냈으면 일반 실패 알림 대신 그 행 공제액의 차액 건 하나만 연다(BAT-420 몫 D, GAT-110 D7).
+        // 확정과 겹쳐 팬 취소가 먼저 그 표를 끝냈으면(ticket-already-ended·cancellation-conflict) 그 표의 공제 > 0인 USER 취소로 차액 건을 연다(BAT-420 리뷰 D5).
+        // 차액 대상이 아니면(입장 시작 전 접수·공제 0·아직 보내지 않음) 전과 같이 일반 실패 알림이다.
+        // 차액 대상 표시는 항목을 끝내는 같은 트랜잭션이고, 건은 다시 열기 포트가 있으면 실행기 틱이, 없으면 여기서 연다(웨이브 끝 리뷰 C2·S1)
+        const gap = result.error === 'cancellation-in-progress' ? await this.#gapOf(request, item) : await this.#overlapGapOf(request, item, result.error);
+        const finished = await this.#finishItem(request, item, 'FAILED', result.error, target, {
+          claimToken,
+          failureNotice: gap === undefined,
+          ...(gap ? { deductionGap: { cancellationId: gap.cancellationId, requestId: request.requestId } } : {}),
+        });
+        if (finished && gap && !this.o.csOutbox) await this.#openGapNow(request.requestId, gap, this.o.nowMs());
+        return finished;
       }
+      const outcome = outcomeOf(result.status, result.error);
+      if (result.status === 'REFUNDED') {
+        const finished = await this.#finishItem(request, item, 'REFUNDED', undefined, target, { claimToken });
+        if (finished) await this.#recordAttempt(request, item, target, outcome);
+        return finished;
+      }
+      if (result.status === 'REFUND_PENDING') {
+        const after = await this.#retryOrFail(request, item, 'UNKNOWN', result.error ?? 'refund-pending', target, claimToken);
+        if (after !== 'LOST') await this.#recordAttempt(request, item, target, outcome);
+        return after === 'FAILED';
+      }
+      if (result.error !== undefined && FAILURE_ERRORS.has(result.error)) {
+        const finished = await this.#finishItem(request, item, 'FAILED', result.error, target, { claimToken });
+        if (finished) await this.#recordAttempt(request, item, target, outcome);
+        return finished;
+      }
+      const after = await this.#retryOrFail(request, item, 'FAILED', result.error ?? 'failed', target, claimToken);
+      if (after !== 'LOST') await this.#recordAttempt(request, item, target, outcome);
+      return after === 'FAILED';
     };
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(this.o.concurrency ?? 8, orderQueue.length || 1)) }, worker));
+    /** 같은 주문의 표를 차례로: 재시도할 결과 모름을 처음 보내는 표보다 먼저 하고, 앞 항목이 끝나지 않으면(결과 모름·멈춤·잡기 잃음) 나머지는 이번 실행에서 부르지 않는다(리뷰 B4) */
+    const runGroup = async (group: readonly EventRefundItem[], claimToken?: string): Promise<void> => {
+      for (const item of [...group.filter((i) => i.status === 'UNKNOWN'), ...group.filter((i) => i.status !== 'UNKNOWN')]) if (!(await processItem(item, claimToken))) break;
+    };
+    const workers = Math.max(1, Math.min(this.o.concurrency ?? 8, groups.size || 1));
+    const claims = this.o.claims;
+    let settled: PromiseSettledResult<void>[];
+    if (!claims) {
+      const orderQueue = [...groups.values()];
+      const worker = async (): Promise<void> => {
+        for (;;) {
+          const group = orderQueue.shift();
+          if (!group) return;
+          await runGroup(group);
+        }
+      };
+      settled = await Promise.allSettled(Array.from({ length: workers }, worker));
+    } else {
+      // 프로세스 사이의 겹침 막기(웨이브 끝 리뷰 K2): 작업자마다 주문 하나씩 잡은 뒤 처리한다. 잡은 쪽만 처리하고 같은 주문의 표는 그 작업자가 차례로 한다.
+      // 이번 실행이 잡는 주문 수는 위에서 본 처리할 주문 수(limit 안)까지다. 다른 쪽이 먼저 잡았으면 빈 잡기로 멈춘다.
+      // 처리하지 않고 남긴 항목(멈춤·결과 모름 뒤 나머지)의 잡기는 모든 작업자가 끝난 뒤 푼다(작업 중인 잡기를 먼저 풀지 않는다)
+      let budget = groups.size;
+      const tokens: string[] = [];
+      const worker = async (): Promise<void> => {
+        while (budget > 0) {
+          budget--;
+          const claimed = await claims.claimOrders(request.requestId, this.o.nowMs(), 1);
+          tokens.push(claimed.claimToken);
+          if (claimed.items.length === 0) {
+            budget = 0;
+            return;
+          }
+          for (const group of groupByOrder(claimed.items).values()) await runGroup(group, claimed.claimToken);
+        }
+      };
+      settled = await Promise.allSettled(Array.from({ length: workers }, worker));
+      for (const token of tokens) {
+        try {
+          await claims.release(request.requestId, token);
+        } catch (err) {
+          // 풀지 못한 잡기는 기한(60초 [가정])이 지나면 다른 쪽이 다시 잡는다
+          this.o.log?.warn({ event: 'event-refund-claim-release-failed', requestId: request.requestId, err: err instanceof Error ? err.name : 'unknown' }, 'event-refund-claim-release-failed');
+        }
+      }
+    }
 
     const after = await this.o.store.items(request.requestId);
     const pausedAfter = [...paused.entries()].map(([pg, reason]) => ({ pg, reason }));
@@ -490,37 +594,58 @@ export class EventRefundService {
         nowMs: this.o.nowMs(),
       });
     }
+    // 작업자 하나가 던졌으면(항목 쓰기 실패 등) 다른 작업자·진행률 쓰기를 마친 뒤 그 오류를 올린다(남은 항목은 다음 틱이 다시 잡는다)
+    const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+    if (failed) throw failed.reason;
   }
 
   async #recordAttempt(request: EventCancellationRequest, item: EventRefundItem, target: EventRefundTarget, outcome: EventRefundAttemptOutcome): Promise<void> {
     await this.o.attempts?.record({ requestId: request.requestId, ticketId: item.ticketId, pg: item.pg, amount: target.ticketPrice, outcome, atMs: this.o.nowMs() });
   }
 
-  /** 재시도를 적거나(시도 상한이면 실패로 끝낸다) 그 뒤의 항목 상태를 돌려준다. UNKNOWN만 다음 실행에서 다시 집는다 */
-  async #retryOrFail(request: EventCancellationRequest, item: EventRefundItem, status: 'UNKNOWN' | 'FAILED', error: string, target: EventRefundTarget | undefined): Promise<'UNKNOWN' | 'FAILED'> {
+  /**
+   * 재시도를 적거나(시도 상한이면 실패로 끝낸다) 그 뒤의 항목 상태를 돌려준다. UNKNOWN만 다음 실행에서 다시 집는다.
+   * 쓰기가 0행이면(잡기를 잃었거나 다른 쪽이 끝냄) LOST이고 아무것도 남기지 않는다(웨이브 끝 리뷰 K2)
+   */
+  async #retryOrFail(
+    request: EventCancellationRequest,
+    item: EventRefundItem,
+    status: 'UNKNOWN' | 'FAILED',
+    error: string,
+    target: EventRefundTarget | undefined,
+    claimToken?: string,
+  ): Promise<'UNKNOWN' | 'FAILED' | 'LOST'> {
     const attempts = item.attempts + 1;
     if (attempts >= EVENT_REFUND_AUTO_STOP.maxAttempts) {
-      await this.#finishItem(request, item, 'FAILED', error, target, attempts);
-      return 'FAILED';
+      return (await this.#finishItem(request, item, 'FAILED', error, target, { attempts, claimToken })) ? 'FAILED' : 'LOST';
     }
     const nextAttemptAtMs = this.o.nowMs() + eventRefundRetryDelayMs(attempts);
-    await this.o.store.updateItem({ ...item, status, attempts, lastError: error, nextAttemptAtMs });
+    const next: EventRefundItem = { ...item, status, attempts, lastError: error, nextAttemptAtMs };
+    // FAILED로 적는 재시도(업무 거절 밖의 실패)도 끝난 항목이라 그 취소 행에 실패를 표시한다(웨이브 끝 리뷰 K1·C1)
+    const written = await this.#write(request, next, claimToken, status === 'FAILED' ? { cancellationFailure: { lastError: error } } : {});
+    if (!written) {
+      this.#claimLost(request, item);
+      return 'LOST';
+    }
     return status;
   }
 
+  /**
+   * 항목을 환급·실패로 끝낸다. 쓰기가 되면 true이고 그 뒤에만 '일괄 환불 실패' CS 건을 연다(쓰기 0행이면 잡기를 잃은 것이라 아무것도 남기지 않는다, 웨이브 끝 리뷰 K2).
+   * FAILED면 같은 트랜잭션에서 그 취소 행(이 요청이 만들거나 전환한 REFUND_PENDING 행)에 refund_failed_at·refund_last_error를 쓴다(웨이브 끝 리뷰 K1·C1)
+   */
   async #finishItem(
     request: EventCancellationRequest,
     item: EventRefundItem,
-    status: EventRefundItem['status'],
+    status: 'REFUNDED' | 'FAILED',
     error: string | undefined,
     target: EventRefundTarget | undefined,
-    attempts?: number,
-    failureNotice = true,
-  ): Promise<void> {
+    o: { readonly attempts?: number; readonly failureNotice?: boolean; readonly claimToken?: string | undefined; readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string } } = {},
+  ): Promise<boolean> {
     const next: EventRefundItem = {
       ...item,
       status,
-      attempts: attempts ?? item.attempts + (status === 'REFUNDED' ? 0 : 1),
+      attempts: o.attempts ?? item.attempts + (status === 'REFUNDED' ? 0 : 1),
       ...(error !== undefined ? { lastError: error } : {}),
       nextAttemptAtMs: undefined,
     };
@@ -530,18 +655,69 @@ export class EventRefundService {
         : status === 'FAILED' && this.o.fanNotifier
           ? [this.o.fanNotifier.failed(request, next, target, this.o.nowMs())]
           : [];
-    await this.o.store.updateItem(next, outbox);
-    if (status === 'FAILED' && failureNotice) {
-      await this.o.notice?.open({
+    const written = await this.#write(request, next, o.claimToken, {
+      outbox,
+      ...(status === 'FAILED' ? { cancellationFailure: { lastError: error ?? 'failed' } } : {}),
+      ...(o.deductionGap ? { deductionGap: o.deductionGap } : {}),
+    });
+    if (!written) {
+      this.#claimLost(request, item);
+      return false;
+    }
+    if (status === 'FAILED' && (o.failureNotice ?? true) && this.o.notice) {
+      try {
+        await this.o.notice.open({
+          requestId: request.requestId,
+          orderId: item.orderId,
+          ticketId: item.ticketId,
+          cancellationId: item.cancellationId,
+          attempts: next.attempts,
+          lastError: error ?? 'failed',
+          nowMs: this.o.nowMs(),
+        });
+      } catch (err) {
+        // CS 건 열기의 실패는 끝난 항목을 되돌리지 않는다(웨이브 끝 리뷰 C2). 취소 행에는 refund_failed_at이 남아 있다
+        this.o.log?.warn({ event: 'event-refund-failure-notice-failed', requestId: request.requestId, cancellationId: item.cancellationId, err: err instanceof Error ? err.name : 'unknown' }, 'event-refund-failure-notice-failed');
+      }
+    }
+    return true;
+  }
+
+  /** 항목 쓰기 하나: 잡기 값이 있으면 조건부 끝내기(claims.finish), 없으면 저장소 쓰기(끝난 상태를 덮지 않음). 썼으면 true */
+  async #write(
+    request: EventCancellationRequest,
+    next: EventRefundItem,
+    claimToken: string | undefined,
+    side: {
+      readonly outbox?: readonly EventRefundOutboxMessage[];
+      readonly cancellationFailure?: { readonly lastError: string };
+      readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
+    },
+  ): Promise<boolean> {
+    if (claimToken !== undefined && this.o.claims) {
+      // NOT_APPLIED는 신청 창 닫기(markNotApplied)만 쓴다. 이 길로 오지 않는다
+      if (next.status === 'NOT_APPLIED') throw new Error('일괄 환불 항목 끝내기에 NOT_APPLIED는 쓰지 않는다');
+      return this.o.claims.finish({
         requestId: request.requestId,
-        orderId: item.orderId,
-        ticketId: item.ticketId,
-        cancellationId: item.cancellationId,
+        ticketId: next.ticketId,
+        claimToken,
+        status: next.status,
         attempts: next.attempts,
-        lastError: error ?? 'failed',
-        nowMs: this.o.nowMs(),
+        ...(next.lastError !== undefined ? { lastError: next.lastError } : {}),
+        ...(next.nextAttemptAtMs !== undefined ? { nextAttemptAtMs: next.nextAttemptAtMs } : {}),
+        ...side,
       });
     }
+    const { outbox, ...extra } = side;
+    return (await this.o.store.updateItem(next, outbox ?? [], extra)) !== false;
+  }
+
+  /** 잡기를 잃었거나 다른 쪽이 먼저 끝낸 항목(쓰기 0행). 시도 기록·팬 알림·CS 건을 남기지 않고 경고 한 번이다 */
+  #claimLost(request: EventCancellationRequest, item: EventRefundItem): void {
+    this.o.log?.warn(
+      { event: 'event-refund-item-claim-lost', requestId: request.requestId, ticketId: item.ticketId },
+      'event-refund-item-claim-lost: 잡기를 잃었거나 다른 쪽이 먼저 끝낸 항목이라 쓰지 않았다(시도 기록·알림·CS 건 없음)',
+    );
   }
 
   async #stopReason(pg: RefundPgProvider, nowMs: number): Promise<StopReason> {
