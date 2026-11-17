@@ -483,12 +483,34 @@ test('PRF192_payment-svc값_결제사출구는DNS와공인주소443이고_정책
   assertPublicHttpsRule(np.spec.egress[1]);
 });
 
-test('PRF181_payment-svc 서비스 파드 종료 유예는 90초이고 preStop + 승인 호출 한 번보다 길며 릴레이는 30초다', () => {
-  // 정본: docs/devops.md §6.4 '일반 서비스', docs/features/payment.md §2 '승인 실행기의 첫 구현' '잡기'(W9-fix2).
-  // 90초 [가정] = preStop 5초 + 결제사 승인 호출 한 번(연결 3초 + 읽기 60초) + 결과 쓰기·연결 닫기 여유 약 20초
-  const CONNECT_S = 3;
-  const READ_S = 60;
-  const SLACK_S = 20;
+/**
+ * 승인 실행기가 돌던 호출을 끝내는 최악(ms)을 payment-svc 코드 상수로 센다(W9-fix2 계획 §9, 리뷰 R1):
+ * 호출 한도 CONFIRM_CALL_GUARD_MS + 결과 쓰기 (다시 하기 수 + 1)번 × 문장 한도 CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS + 다시 하기 쉬기 합.
+ * 숫자를 박지 않고 소스 글에서 읽는다(상수를 바꾸면 이 시험이 따라 깨진다). 못 찾으면 실패한다
+ */
+function confirmRunnerWorstMs() {
+  const src = repoText('services', 'payment-svc', 'src', 'modules', 'payment', 'domain', 'confirm-runner.ts');
+  const num = (name) => {
+    const m = new RegExp(`export const ${name}\\s*=\\s*([\\d_]+)\\s*;`).exec(src);
+    assert.ok(m, `confirm-runner.ts에 ${name}이 없다`);
+    return Number(m[1].replaceAll('_', ''));
+  };
+  const delays = /export const CONFIRM_FINISH_RETRY_DELAYS_MS[^=]*=\s*Object\.freeze\(\[([\d_,\s]+)\]\)/.exec(src);
+  assert.ok(delays, 'confirm-runner.ts에 CONFIRM_FINISH_RETRY_DELAYS_MS가 없다');
+  const waits = delays[1].split(',').map((x) => Number(x.trim().replaceAll('_', ''))).filter((x) => Number.isFinite(x));
+  return num('CONFIRM_CALL_GUARD_MS') + (waits.length + 1) * num('CONFIRM_RUNNER_STATEMENT_TIMEOUT_MS') + waits.reduce((a, b) => a + b, 0);
+}
+/** 합본 자식 대기 상수(ms)를 services/bundle/src/stop-child.ts 소스 글에서 읽는다(못 찾으면 실패) */
+function bundleChildStopMs(name) {
+  const src = repoText('services', 'bundle', 'src', 'stop-child.ts');
+  const m = new RegExp(`export const ${name}\\s*=\\s*([\\d_]+)\\s*;`).exec(src);
+  assert.ok(m, `stop-child.ts에 ${name}이 없다`);
+  return Number(m[1].replaceAll('_', ''));
+}
+
+test('PRF181_payment-svc 종료 유예는 코드 상수로 센 실행기 최악 + preStop + 여유 이상이고 릴레이는 30초다', () => {
+  // 정본: docs/devops.md §6.4 '일반 서비스', docs/features/payment.md §2 '잡기'(W9-fix2 §9 보충): 105초 [가정] = preStop 5 + 실행기 최악 87.5 + 닫기 여유 약 12.5
+  const worstMs = confirmRunnerWorstMs();
   const file = join(REPO, 'deploy', 'workloads', 'payment-svc', 'values.yaml');
   const sets = ['image.repository=peaket/payment-svc', 'image.tag=local', 'env.PEAKET_ENV=local', 'outboxRelay.enabled=true'];
   const { objects, error } = renderFiles([file], sets, 'payment');
@@ -497,21 +519,39 @@ test('PRF181_payment-svc 서비스 파드 종료 유예는 90초이고 preStop +
   assert.ok(svc, 'Deployment payment-svc');
   const spec = svc.spec.template.spec;
   const preStop = spec.containers[0].lifecycle.preStop.sleep.seconds;
-  assert.equal(spec.terminationGracePeriodSeconds, 90);
-  assert.ok(spec.terminationGracePeriodSeconds >= preStop + CONNECT_S + READ_S + SLACK_S, `종료 유예 ${spec.terminationGracePeriodSeconds} < preStop ${preStop} + ${CONNECT_S + READ_S} + ${SLACK_S}`);
+  assert.ok(spec.terminationGracePeriodSeconds >= preStop + worstMs / 1000 + 10, `종료 유예 ${spec.terminationGracePeriodSeconds} < preStop ${preStop} + 실행기 최악 ${worstMs / 1000} + 10`);
+  assert.equal(spec.terminationGracePeriodSeconds, 105);
   // 릴레이는 승인 호출을 하지 않아 차트 기본 30초 그대로다
   const relay = find(objects, 'Deployment', 'payment-svc-outbox-relay');
   assert.ok(relay, 'Deployment payment-svc-outbox-relay');
   assert.equal(relay.spec.template.spec.terminationGracePeriodSeconds, 30);
-  // v1 무대의 payment-svc 릴레이 값 파일도 30초다
   const relayOnly = renderFiles([join(ENVS, 'v1-payment-relay.yaml')], [], 'v1');
   assert.equal(relayOnly.error, undefined, relayOnly.error);
   assert.equal(find(relayOnly.objects, 'Deployment', 'payment-svc-outbox-relay').spec.template.spec.terminationGracePeriodSeconds, 30);
-  // payment-svc를 담은 합본 파드도 90초다
+});
+
+test('PRF181_합본 종료 유예는 자식 대기 합과 preStop보다 길다', () => {
+  // 정본: W9-fix2 계획 §9 보충, docs/devops.md §6.4. 125초 [가정] = preStop 5 + 같은 프로세스 서비스 닫기 약 10 + 자식 차례대로(purchase-svc 5 + payment-svc 95 + 홀드 작업자 5) + 여유 5
+  const SAME_PROCESS_CLOSE_S = 10;
+  /** payment-svc 밖의 자식 수(split 합본: purchase-svc·hold-worker, services/bundle/src/main.ts spawnChild) */
+  const OTHER_CHILDREN = 2;
+  const otherMs = bundleChildStopMs('BUNDLE_CHILD_STOP_MS');
+  const paymentMs = bundleChildStopMs('BUNDLE_PAYMENT_CHILD_STOP_MS');
+  const worstMs = confirmRunnerWorstMs();
   const bundle = renderFiles([join(ENVS, 'v1-bundle.yaml')], [], 'v1');
   assert.equal(bundle.error, undefined, bundle.error);
-  assert.match(envOf(find(bundle.objects, 'Deployment', 'bundle').spec.template.spec.containers[0]).PEAKET_BUNDLE_SERVICES, /(^|,)payment-svc(,|$)/);
-  assert.equal(find(bundle.objects, 'Deployment', 'bundle').spec.template.spec.terminationGracePeriodSeconds, 90);
+  const dep = find(bundle.objects, 'Deployment', 'bundle');
+  const c = dep.spec.template.spec.containers[0];
+  assert.match(envOf(c).PEAKET_BUNDLE_SERVICES, /(^|,)payment-svc(,|$)/);
+  assert.equal(envOf(c).PEAKET_BUNDLE_MODE, 'split');
+  const grace = dep.spec.template.spec.terminationGracePeriodSeconds;
+  const preStop = c.lifecycle.preStop.sleep.seconds;
+  const need = preStop + SAME_PROCESS_CLOSE_S + (OTHER_CHILDREN * otherMs + paymentMs) / 1000;
+  assert.ok(grace >= need, `합본 종료 유예 ${grace} < ${need}`);
+  assert.equal(grace, 125);
+  // payment-svc 자식 대기는 실행기 최악 + 5초 이상이고 파드 유예보다 짧다(유예 안에 SIGKILL까지 끝난다)
+  assert.ok(paymentMs >= worstMs + 5_000, `payment-svc 자식 대기 ${paymentMs} < 실행기 최악 ${worstMs} + 5,000`);
+  assert.ok(paymentMs / 1000 < grace, `payment-svc 자식 대기 ${paymentMs} ≥ 합본 유예 ${grace}초`);
 });
 
 test('K9_v0-monolith값_HPA는1~4복제·CPU70%·요청CPU500m이고_복제수를적지않는다', () => {
