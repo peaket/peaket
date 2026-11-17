@@ -42,3 +42,11 @@ _apalache-out/
 
 # 규칙 모델 검사가 결과를 옮기기 전에 쓰는 준비 폴더(tools/spec-check/spec-check.mjs)
 specs/results/.staging-*/
+
+
+.env·*.env
+
+# 로컬 비밀 값(결제사 시험 키 등). 공개 저장소라 절대 커밋하지 않는다
+.env
+.env.*
+*.env
