@@ -10,6 +10,7 @@
 // - 수출 사건은 승인 실행기(PRF-181)가 아직 없어 만드는 길이 없다. 이력 행은 SQL로 직접 넣는다.
 // - 실행 계획은 서버가 실제로 보낸 문장을 pg.Client 쪽에서 엿봐 큰 표에서 EXPLAIN한다(order-expiry·sale-state 본보기).
 import 'reflect-metadata';
+import { readdirSync } from 'node:fs';
 import * as grpc from '@grpc/grpc-js';
 import { createDatabase, type Database, ensureOutboxPartitions, systemClock, writeOutbox } from '@peaket/platform';
 import pg from 'pg';
@@ -164,14 +165,17 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션과 표 모양', () => {
-  test('PRF180_PRF181_PRF182_PRF183_GAT080_마이그레이션(0000~0020)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록은 21개다', async () => {
+  test('PRF180_PRF181_PRF182_PRF183_GAT080_마이그레이션(0000~0021)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록 수는 migrations 폴더의 SQL 파일 수와 같다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
-    expect(before).toEqual(['event_pg_config', 'outbox', 'partner_receivable', 'payment', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'pg_switch', 'receivable_move', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'settlement_statement_audit', 'statement_dispute', 'statement_source', 'webhook_receipt']);
+    expect(before).toEqual(['event_pg_config', 'outbox', 'partner_receivable', 'payment', 'payment_cancel', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'pg_switch', 'receivable_move', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'settlement_statement_audit', 'statement_dispute', 'statement_source', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);
-    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe('21');
+    // 적용 기록 수는 migrations 폴더의 SQL 파일 수와 같다(마이그레이션을 더할 때마다 수를 고치지 않게 한다. 파일 목록과 기록 차례는 단위 payment-schema.test가 맞춘다)
+    const sqlFiles = readdirSync(new URL('../migrations/', import.meta.url)).filter((f) => f.endsWith('.sql'));
+    expect(sqlFiles).toContain('0021_payment_cancel.sql');
+    expect((await q<{ n: string }>('select count(*) as n from drizzle.__drizzle_migrations'))[0]!.n).toBe(String(sqlFiles.length));
   });
 
   test.each(Object.keys(COLUMNS))('PRF180_%s 표의 칸 이름·종류·빈 값 허용이 docs/data.md ERD와 같다', async (table) => {
