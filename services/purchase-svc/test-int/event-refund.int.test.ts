@@ -595,6 +595,23 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
       markGapOpened: (id: string, nowMs: number) => real.markGapOpened(id, nowMs),
     };
   };
+  /**
+   * 이 시험이 만든 요청만 보는 저장소(W9-fix1 시험 담당 w9f1-test, 2026-11-17). 이 묶음은 진짜 시계(Date.now())로 runDue를 돌므로,
+   * 같은 DB의 고정 시각 요청(예: '확정된 회차 취소 찾기' 묶음이 SQL로 넣는 연기 요청, 창 닫힘 NOW + 3일 = 2026-11-17T08:00Z, progress에 perPg 없음)을
+   * 그 시각 뒤에 닫거나 처리하지 않게 runDue의 창 닫기·실행 중 요청 목록을 그 요청으로 좁힌다(단언은 그대로)
+   */
+  const scopedStore = (requestId: string) => {
+    const st = new DrizzleEventRefundStore(db);
+    st.activeRequests = async () => {
+      const r = await st.find(requestId);
+      return r && ['RUNNING', 'PAUSED', 'REFUND_WINDOW'].includes(r.status) ? [r] : [];
+    };
+    st.dueWindowClosures = async (nowMs) => {
+      const r = await st.find(requestId);
+      return r && r.kind === 'POSTPONE' && r.status !== 'COMPLETED' && r.status !== 'REJECTED' && r.refundWindowClosesAtMs !== undefined && r.refundWindowClosesAtMs <= nowMs ? [r] : [];
+    };
+    return st;
+  };
   const targetOf = (s: { orderId: string; ticketId: string }, over: Partial<EventRefundTarget> = {}): EventRefundTarget => ({
     orderId: s.orderId,
     ticketId: s.ticketId,
@@ -650,7 +667,7 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
     ops.state.mode = 'hang';
     const client = opsClient();
     const service = new EventRefundService({
-      store: new DrizzleEventRefundStore(db),
+      store: scopedStore(requestId),
       targets: { list: async (id) => (id === eventId ? [targetOf(pending)] : []) },
       canceller: { cancel: async (t) => (log.push(`pay:${t.ticketId}`), { status: 'REFUNDED' }) },
       notice: new HttpRefundFailureNotice(client, 'it-token'),
@@ -684,7 +701,7 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
     const client = opsClient();
     const svc = () =>
       new EventRefundService({
-        store: new DrizzleEventRefundStore(db),
+        store: scopedStore(requestId),
         targets: { list: async (id) => (id === eventId ? [targetOf(s)] : []) },
         canceller: { cancel: async () => ({ status: 'FAILED', error: 'REJECTED' }) },
         notice: new HttpRefundFailureNotice(client, 'it-token'),
@@ -734,7 +751,7 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
     ops.state.mode = 202;
     const client = opsClient();
     const service = new EventRefundService({
-      store: new DrizzleEventRefundStore(db),
+      store: scopedStore(requestId),
       targets: { list: async (id) => (id === eventId ? [targetOf(s, { pendingCancellationId: fan })] : []) },
       canceller: { cancel: async () => ({ status: 'FAILED', error: 'cancellation-in-progress' }) },
       notice: new HttpRefundFailureNotice(client, 'it-token'),
@@ -773,7 +790,7 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
       },
     };
     const service = new EventRefundService({
-      store: new DrizzleEventRefundStore(db),
+      store: scopedStore(requestId),
       targets: { list: async (id) => (id === eventId ? [targetOf(a), targetOf(b)] : []) },
       canceller: { cancel: async () => ({ status: 'FAILED', error: 'REJECTED' }) },
       notice: new HttpRefundFailureNotice(client, 'it-token'),
