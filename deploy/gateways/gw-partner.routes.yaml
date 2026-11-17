@@ -596,6 +596,40 @@ spec:
           port: 8080
     - matches:
         - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/cancellation
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/cancellation
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/cancellation
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
             type: Exact
             value: /v1/partner/artists
           method: GET
@@ -630,18 +664,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/partner/events/[^/]+/attendees
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/cancellation
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/cancellation
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/cancellation
           method: OPTIONS
         - path:
             type: RegularExpression
@@ -851,6 +873,18 @@ spec:
             type: RegularExpression
             value: /v1/partner/productions/[^/]+/sale-eligibility-lists
           method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+
+          method: DELETE
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -889,18 +923,6 @@ spec:
     - partner-api.peaket.example
   rules:
     - matches:
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-eligibility-lists
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-eligibility-lists
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+
-          method: DELETE
         - path:
             type: RegularExpression
             value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+

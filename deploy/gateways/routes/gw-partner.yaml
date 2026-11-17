@@ -211,6 +211,27 @@ spec:
           name: ticket-svc
           namespace: ticket
           port: 8080
+    # 회차 취소 요청·상태: BAT-420 처리기가 ops-svc에 있다(docs/features/transfer-refund.md, infra §4.1 '백엔드 대조')
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/cancellation
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: partner
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
     - matches:
         - path:
             type: Exact
@@ -221,9 +242,6 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/partner/events/{eventId}/attendees
-        - path:
-            type: PathPrefix
-            value: /v1/partner/events/{eventId}/cancellation
         - path:
             type: PathPrefix
             value: /v1/partner/events/{eventId}/entry-policy
