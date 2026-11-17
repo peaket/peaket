@@ -48,6 +48,11 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     return true;
   }
 
+  /** W9-fix1 N8 잠근 진행률 쓰기(빈 뼈대: 시험 담당, 구현 전. 동작은 구현 담당이 채운다) */
+  async updateLocked(_requestId: string, _next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined> {
+    throw new Error('아직 없음: MemoryEventRefundStore.updateLocked');
+  }
+
   async items(requestId: string): Promise<readonly EventRefundItem[]> {
     return [...(this.byRequest.get(requestId)?.values() ?? [])];
   }

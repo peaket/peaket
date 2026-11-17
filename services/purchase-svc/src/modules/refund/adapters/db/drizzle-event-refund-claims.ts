@@ -31,14 +31,15 @@ export class DrizzleEventRefundClaims implements EventRefundClaims {
    */
   async claimOrders(requestId: string, nowMs: number, limitOrders: number): ReturnType<EventRefundClaims['claimOrders']> {
     const claimToken = randomUUID();
-    if (!(Number.isInteger(limitOrders) && limitOrders > 0)) return { claimToken, items: [] };
+    const claimedUntilMs = nowMs + EVENT_REFUND_CLAIM_MS;
+    if (!(Number.isInteger(limitOrders) && limitOrders > 0)) return { claimToken, items: [], claimedUntilMs };
     const now = new Date(nowMs);
-    const until = new Date(nowMs + EVENT_REFUND_CLAIM_MS);
+    const until = new Date(claimedUntilMs);
     return this.database.transaction(async (tx) => {
       // 같은 요청의 잡기를 한 줄로 세운다(아래 '살아 있는 다른 잡기 없음' 판단이 먼저 커밋한 잡기를 본다)
       const head = await tx.execute(sql`select status, progress from event_cancellation_request where id = ${requestId}::uuid for no key update`);
       const request = head.rows[0] as { status: string; progress: ProgressShape | string | null } | undefined;
-      if (!request || !RUNNABLE.has(request.status)) return { claimToken, items: [] };
+      if (!request || !RUNNABLE.has(request.status)) return { claimToken, items: [], claimedUntilMs };
       const progress = (typeof request.progress === 'string' ? JSON.parse(request.progress) : request.progress) as ProgressShape | null;
       const paused = (progress?.perPg ?? []).flatMap((p) => (p.state === 'PAUSED' && typeof p.pg === 'string' && PGS.has(p.pg) ? [p.pg] : []));
       const pausedList = `{${paused.join(',')}}`;
@@ -84,7 +85,7 @@ export class DrizzleEventRefundClaims implements EventRefundClaims {
           from claimed
           left join order_cancellation c on c.id = claimed.cancellation_id
          order by claimed.order_id, claimed.ticket_id`);
-      return { claimToken, items: (r.rows as unknown as ItemRow[]).map(toItem) };
+      return { claimToken, items: (r.rows as unknown as ItemRow[]).map(toItem), claimedUntilMs };
     });
   }
 
@@ -116,6 +117,11 @@ export class DrizzleEventRefundClaims implements EventRefundClaims {
       });
       return true;
     });
+  }
+
+  /** W9-fix1 N3 잡기 늘리기(빈 뼈대: 시험 담당, 구현 전. 동작은 구현 담당이 채운다) */
+  async extend(_requestId: string, _claimToken: string, _nowMs: number): Promise<number | undefined> {
+    throw new Error('아직 없음: DrizzleEventRefundClaims.extend');
   }
 
   /** 그 잡기 값의 남은 잡기를 푼다(처리하지 않은 항목을 다른 쪽이 기한을 기다리지 않고 잡게) */

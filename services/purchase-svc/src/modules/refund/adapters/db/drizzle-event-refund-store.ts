@@ -185,6 +185,11 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
     return r.rows.length > 0;
   }
 
+  /** W9-fix1 N8 요청 행을 잠근 진행률 쓰기(빈 뼈대: 시험 담당, 구현 전. 동작은 구현 담당이 채운다) */
+  async updateLocked(_requestId: string, _next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined> {
+    throw new Error('아직 없음: DrizzleEventRefundStore.updateLocked');
+  }
+
   /**
    * 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H, ADR-0280 결정 4). 없는 (요청, 표)만 PENDING으로 더한다((request_id, ticket_id)·cancellation_id 유일).
    * 팬 확정 알림 Outbox는 같은 트랜잭션에, 실제로 더한 항목이 있을 때만 남긴다. 더한 항목을 돌려준다

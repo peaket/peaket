@@ -259,6 +259,17 @@ export function progressOf(
   };
 }
 
+/**
+ * W9-fix1 N8(transfer-refund §5 '멈춤 표시는 합쳐 쓴다'): 지금 DB의 멈춤에 빼기(lift) 먼저, 그다음 더하기(add)를 한 결과.
+ * 이미 멈춘 결제사는 DB 사유를 두고 MANUAL만 사유를 바꾼다(빈 뼈대: 시험 담당, 구현 전. 동작은 구현 담당이 채운다)
+ */
+export function mergePauses(
+  _current: readonly { pg: RefundPgProvider; reason: RefundPauseReason }[],
+  _delta: { readonly add?: readonly { pg: RefundPgProvider; reason: RefundPauseReason }[]; readonly lift?: readonly RefundPgProvider[] },
+): { pg: RefundPgProvider; reason: RefundPauseReason }[] {
+  throw new Error('아직 없음: mergePauses');
+}
+
 /** 1분 창의 비율(기준점, 10000분의 1) */
 export function rateBp(part: number, whole: number): number {
   return whole === 0 ? 0 : Math.round((part * 10_000) / whole);

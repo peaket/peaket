@@ -10,6 +10,8 @@ import { EventRefundService } from '../src/modules/refund/application/event-refu
 import type { EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { CsCaseOutbox, EventRefundClaims, EventRefundFailureNotice, EventRefundStore } from '../src/modules/refund/domain/event-refund-ports.js';
 import { EVENT_REFUND_CLAIM_MS, HttpDeductionGapNotice, HttpEntryFlagNotice, MemoryEventRefundAttemptStore, RefundAfterEntry } from '../src/modules/refund/index.js';
+// W9-fix1 N3(시험 담당 w9f1-test)
+import { EVENT_REFUND_CLAIM_EXTEND_BELOW_MS, EVENT_REFUND_TICKET_DEADLINE_MS } from '../src/modules/refund/index.js';
 import { requireOpsInternalToken } from '../src/refund-wiring.js';
 // 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test, 2026-11-17, 계획 §11 보충 5)
 import { eventRefundCancellationId, progressOf, type EventRefundItem } from '../src/modules/refund/domain/event-refund.js';
@@ -68,11 +70,13 @@ describe('잡기를 잃은 쪽의 끝내기 [BAT-420 웨이브 끝 리뷰 K2]', 
     store.updateItem = async (item, outbox, extra) => (storeFinishes++, real(item, outbox, extra));
     const claimCalls: [string, number][] = [];
     const finishes: Parameters<EventRefundClaims['finish']>[0][] = [];
+    // W9-fix1 N3(시험 담당 w9f1-test): 잡기 결과에 기한(claimedUntilMs)이 생기고 늘리기(extend)가 더해졌다. 이 시험은 잡기를 끝내기에서 잃으므로 늘리기는 살아 있는 잡기로 답한다
     const claims: EventRefundClaims = {
       claimOrders: async (requestId, nowMs) => {
         claimCalls.push([requestId, nowMs]);
-        return { claimToken: 'tok-1', items: (await store.items(requestId)).filter((i) => i.status === 'PENDING') };
+        return { claimToken: 'tok-1', items: (await store.items(requestId)).filter((i) => i.status === 'PENDING'), claimedUntilMs: nowMs + 60_000 };
       },
+      extend: async (_requestId, _token, nowMs) => nowMs + 60_000,
       finish: async (q) => (finishes.push(q), false),
       release: async () => undefined,
     };
@@ -319,6 +323,47 @@ describe('운영 시작 검사 [BAT-420 웨이브 끝 리뷰 S1]', () => {
       const starts = [...text.matchAll(/new HttpRefundFailureNotice\(/g)].map((m) => m.index! + marker.length - 1);
       expect(starts.length, file).toBeGreaterThan(0);
       for (const at of starts) expect(hasSecondArg(text, at), `${file}@${at}`).toBe(true);
+    }
+  });
+
+  // W9-fix1 N3(시험 담당 w9f1-test, 계획 W9-fix1 §3): transfer-refund §5 '잡기 늘리기' — 잡기 기한(60초)은 늘리기 기준(40초)보다, 늘리기 기준은 표 한도(30초)보다 길다.
+  // 운영 조립의 표 한도(deadlineMs = 지금 + 30초)는 상수로 쓴다(상수 밖 값, 예 45초면 늘린 기한 안에 끝내기가 들어가지 않는다)
+  test('GAT-110 N3 잡기 60초 > 늘리기 기준 40초 > 표 한도 30초이고 두 운영 조립의 deadlineMs는 지금 + 30초다', () => {
+    expect(EVENT_REFUND_CLAIM_MS).toBe(60_000);
+    expect(EVENT_REFUND_CLAIM_EXTEND_BELOW_MS).toBe(40_000);
+    expect(EVENT_REFUND_TICKET_DEADLINE_MS).toBe(30_000);
+    expect(EVENT_REFUND_CLAIM_MS).toBeGreaterThan(EVENT_REFUND_CLAIM_EXTEND_BELOW_MS);
+    expect(EVENT_REFUND_CLAIM_EXTEND_BELOW_MS).toBeGreaterThan(EVENT_REFUND_TICKET_DEADLINE_MS);
+    /** `new EventRefundService(` 뒤 괄호 짝이 맞는 인자 글(글자 묶음 안의 괄호는 세지 않는다) */
+    const argsOf = (text: string, marker: string): string => {
+      const at = text.indexOf(marker);
+      expect(at, marker).toBeGreaterThanOrEqual(0);
+      let depth = 0;
+      let quote: string | undefined;
+      for (let i = at + marker.length - 1; i < text.length; i++) {
+        const ch = text[i]!;
+        if (quote) {
+          if (ch === '\\') i++;
+          else if (ch === quote) quote = undefined;
+          continue;
+        }
+        if (ch === "'" || ch === '"' || ch === '`') quote = ch;
+        else if (ch === '(' || ch === '{' || ch === '[') depth++;
+        else if (ch === ')' || ch === '}' || ch === ']') {
+          depth--;
+          if (depth === 0) return text.slice(at, i + 1);
+        }
+      }
+      return '';
+    };
+    for (const file of ['relay-app.ts', 'start.ts']) {
+      const text = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+      const args = argsOf(text, 'new EventRefundService(');
+      const deadline = /\bdeadlineMs:\s*\(\)\s*=>\s*([\w.]+)\.now\(\)\s*\+\s*EVENT_REFUND_TICKET_DEADLINE_MS\b/.exec(args);
+      expect(deadline, `${file}: deadlineMs는 () => 시계.now() + EVENT_REFUND_TICKET_DEADLINE_MS`).not.toBeNull();
+      // 같은 시계의 nowMs와 견준다(deadlineMs() − nowMs() = 30,000)
+      const clockOf = deadline![1]!.replace(/\./g, '\\.');
+      expect(args, file).toMatch(new RegExp(`\\bnowMs:\\s*\\(\\)\\s*=>\\s*${clockOf}\\.now\\(\\)\\s*[,}]`));
     }
   });
 

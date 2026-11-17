@@ -52,6 +52,8 @@ import { startOpsCsDouble } from './ops-cs-double.js';
 // 검증 2에서 살아남은 것(시험 담당 l3w8-420-surv-test)
 import { MemoryEventRefundAttemptStore } from '../src/modules/refund/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+// W9-fix1 N3·N8·P3(시험 담당 w9f1-test)
+import type { EventRefundCanceller } from '../src/modules/refund/index.js';
 
 const NOW = Date.parse('2026-11-20T18:30:00+09:00');
 const MINUTE = 60_000;
@@ -1266,5 +1268,275 @@ describe('BAT-420 다시 보기 2 N7 연기 신청 환급의 결제사 거절 [P
     } finally {
       payOutcome = 'CANCELLED';
     }
+  }, 60_000);
+});
+
+// ---- W9-fix1(시험 담당 w9f1-test, 구현 전에 씀, 계획 docs/review/plans/W9-fix1.md §3) ----
+// 정본: docs/features/transfer-refund.md §5 '잡기 늘리기'·'멈춤 표시는 합쳐 쓴다'·'주인'. 실제 잡기(DrizzleEventRefundClaims)·실제 저장소로
+// API 파드와 리더의 겹침(N3), 겹친 두 실행의 자동 정지(N8), 연기 신청 Saga의 그 밖 실패(P3)를 본다. 결제사 대역 호출은 취소 ID마다 센다.
+describe('W9-fix1 잡기 늘리기·멈춤 합치기·그 밖 실패 알림 [PostgreSQL·실제 ticket-svc gRPC]', () => {
+  /** 다른 시험의 잡기·시도 기록(1분 창)과 겹치지 않는 때 */
+  const T0 = NOW + 40 * DAY;
+  let ops: Awaited<ReturnType<typeof startOpsCsDouble>>;
+  beforeAll(async () => {
+    ops = await startOpsCsDouble();
+  });
+  afterAll(async () => {
+    await ops?.close();
+  });
+  /** 표 n장 주문 하나(purchase DB만, 결제 완료). ticketIds를 주지 않으면 오름차순 새 ID */
+  async function multiOrder(eventId: string, n: number, pgName: 'TOSS' | 'PORTONE' = 'TOSS', given?: string[]): Promise<{ orderId: string; ticketIds: string[] }> {
+    const orderId = randomUUID();
+    const ticketIds = given ?? Array.from({ length: n }, () => randomUUID()).sort();
+    const client = await purchaseDb.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(
+        `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+         values ($1, $2, $3, 'CONFIRMED', $4, 1, $5, 'v1', 'PICK', $6, $7, 'ps-test')`,
+        [orderId, randomUUID(), eventId, PRICE * ticketIds.length, randomUUID(), new Date(NOW - 10 * DAY), randomUUID()],
+      );
+      await client.query("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, 'CONFIRMED', 'T8', 'test', $2)", [orderId, new Date(NOW - 10 * DAY)]);
+      for (const [i, ticketId] of ticketIds.entries()) {
+        await client.query("insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id) values ($1, $2, $3, 'R', 'A', $4, $5)", [orderId, i + 1, randomUUID(), PRICE, ticketId]);
+      }
+      await client.query("insert into payment_attempt (id, order_id, pg, status, created_at) values ($1, $1, $2, 'ACCEPTED', now())", [orderId, pgName]);
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    return { orderId, ticketIds };
+  }
+  /** 이 요청만 보는 저장소(파일이 DB를 나눠 쓰므로 runDue가 다른 시험의 요청을 집지 않게) */
+  const scopedStore = (requestId: string) => {
+    const st = new DrizzleEventRefundStore(purchaseDb, clock);
+    st.activeRequests = async () => {
+      const r = await st.find(requestId);
+      return r && ['RUNNING', 'PAUSED', 'REFUND_WINDOW'].includes(r.status) ? [r] : [];
+    };
+    st.dueWindowClosures = async () => [];
+    return st;
+  };
+  const counter = () => {
+    const calls = new Map<string, number>();
+    return { calls, hit: (id: string) => void calls.set(id, (calls.get(id) ?? 0) + 1), of: (id: string) => calls.get(id) ?? 0 };
+  };
+  const pausedInDb = async (requestId: string) =>
+    (await new DrizzleEventRefundStore(purchaseDb, clock).find(requestId))!.progress.perPg
+      .filter((p) => p.state === 'PAUSED')
+      .map((p) => [p.pg, p.pauseReason])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  const itemOf = async (requestId: string, ticketId: string) =>
+    (await purchaseDb.pool.query<{ status: string; last_error: string | null; cancellation_id: string }>('select status, last_error, cancellation_id from event_refund_item where request_id = $1 and ticket_id = $2', [requestId, ticketId])).rows[0];
+  const fanFailures = async (eventId: string, ticketId: string, requestId: string) =>
+    (await purchaseDb.pool.query<{ payload: Buffer }>('select payload from outbox where msg_key = $1', [eventId])).rows
+      .map((r) => JSON.parse(Buffer.from(r.payload).toString('utf8')) as { type: string; eventKey: string })
+      .filter((p) => p.type === 'REFUND_FAILED' && p.eventKey === eventRefundNoticeKey(requestId, ticketId, 'REFUND_FAILED'));
+  const startInput = (eventId: string, requestId: string) => ({ eventId, requestId, fault: 'ORGANIZER' as const, ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+
+  test('GAT-110 N3 실제 DB에서 API 파드의 느린 주문 처리와 리더 runDue가 겹쳐도 표마다 결제사 호출·시도 기록이 하나이고 결과 모름이 없다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const o = await multiOrder(eventId, 3);
+    // 두 서비스가 가짜 시계 하나를 함께 쓴다. API 파드의 결제사 대역은 부를 때마다 25,000ms 걸린다
+    let now = T0;
+    const pay = counter();
+    const attempts = new DrizzleEventRefundAttempts(purchaseDb);
+    const build = (canceller: ConstructorParameters<typeof EventRefundService>[0]['canceller']) =>
+      new EventRefundService({
+        store: scopedStore(requestId),
+        targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+        canceller,
+        attempts,
+        claims: new DrizzleEventRefundClaims(purchaseDb, clock),
+        nowMs: () => now,
+        deadlineMs: () => now + 30_000,
+      });
+    const leader = build({ cancel: async (_t, q) => (pay.hit(q.cancellationId), { status: 'REFUNDED' }) });
+    let calls = 0;
+    let untilAtThird: number | undefined;
+    let leaderRan = false;
+    const api = build({
+      cancel: async (t, q) => {
+        now += 25_000;
+        calls++;
+        if (calls === 3) {
+          // 셋째 표를 보내는 도중(잡은 때 + 75,000ms) 리더의 runDue를 함께 띄운다
+          const row = (await purchaseDb.pool.query<{ claimed_until: Date | null }>('select claimed_until from event_refund_item where request_id = $1 and ticket_id = $2', [requestId, t.ticketId])).rows[0];
+          untilAtThird = row?.claimed_until?.getTime();
+          await Promise.all([leader.runDue().then(() => void (leaderRan = true)), Promise.resolve().then(() => pay.hit(q.cancellationId))]);
+        } else pay.hit(q.cancellationId);
+        return { status: 'REFUNDED' };
+      },
+    });
+    await api.start(startInput(eventId, requestId));
+    // 장애 주입이 끼어들었는지 먼저: 셋째 표 호출 안에서 리더가 돌았다
+    expect(calls).toBe(3);
+    expect(leaderRan).toBe(true);
+    // 셋째 표 보내기 전 그 주문 행의 기한 = 잡은 때 + 110,000ms(+25,000ms·+50,000ms에 늘림)
+    expect(untilAtThird).toBe(T0 + 110_000);
+    for (const t of o.ticketIds) expect(pay.of(eventRefundCancellationId(requestId, t)), t).toBe(1);
+    const rows = (await purchaseDb.pool.query<{ ticket_id: string; outcome: string }>('select ticket_id, outcome from event_refund_attempt where request_id = $1 order by ticket_id', [requestId])).rows;
+    expect(rows.map((r) => [r.ticket_id, r.outcome])).toEqual(o.ticketIds.map((t) => [t, 'SUCCESS']));
+    for (const t of o.ticketIds) expect(await itemOf(requestId, t), t).toMatchObject({ status: 'REFUNDED' });
+  }, 60_000);
+
+  test('GAT-110 N8 실제 DB에서 겹친 두 실행이 다른 결제사를 멈춘 뒤 TOSS만 재개해도 PORTONE 결제사 호출은 0이다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    // 잡기는 표 ID 차례라 O1(PORTONE)이 먼저 잡힌다
+    const [ta, tb] = [randomUUID(), randomUUID()].sort() as [string, string];
+    const o1 = await multiOrder(eventId, 1, 'PORTONE', [ta]);
+    const o2 = await multiOrder(eventId, 1, 'TOSS', [tb]);
+    const pay = counter();
+    const open = new Set<string>(['TOSS', 'PORTONE']);
+    const claims = new DrizzleEventRefundClaims(purchaseDb, clock);
+    const build = (o: { claims?: DrizzleEventRefundClaims; firstBatch?: number; asked?: string[] } = {}) =>
+      new EventRefundService({
+        store: scopedStore(requestId),
+        targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+        canceller: { cancel: async (_t, q) => (pay.hit(q.cancellationId), { status: 'REFUNDED' }) },
+        claims: o.claims ?? claims,
+        circuitOpen: (pgName) => (o.asked?.push(pgName), open.has(pgName)),
+        concurrency: 1,
+        ...(o.firstBatch !== undefined ? { firstBatch: o.firstBatch } : {}),
+        nowMs: () => T0,
+        deadlineMs: () => T0 + 30_000,
+      });
+    await build({ firstBatch: 0 }).start(startInput(eventId, requestId));
+    const b = build();
+    const aAsked: string[] = [];
+    let aClaims = 0;
+    let afterB: unknown;
+    // A의 둘째 잡기만 감싸 멈춘다: 그동안 B가 O2를 잡아 TOSS 정지로 끝까지 돌고 PAUSED{TOSS}를 쓴다
+    const aSide = Object.create(claims) as DrizzleEventRefundClaims;
+    aSide.claimOrders = async (...args) => {
+      aClaims++;
+      if (aClaims === 2 && aAsked.includes('PORTONE')) {
+        await b.runDue();
+        afterB = await pausedInDb(requestId);
+      }
+      return claims.claimOrders(...args);
+    };
+    await build({ claims: aSide, asked: aAsked }).runDue();
+    // 장애 주입이 끼어들었는지 먼저: B의 PAUSED{TOSS}가 A의 끝 쓰기보다 먼저 DB에 있었다
+    expect(afterB).toEqual([['TOSS', 'AUTO_CIRCUIT_OPEN']]);
+    expect(await pausedInDb(requestId)).toEqual([
+      ['PORTONE', 'AUTO_CIRCUIT_OPEN'],
+      ['TOSS', 'AUTO_CIRCUIT_OPEN'],
+    ]);
+    // 서킷이 닫힌 뒤 TOSS만 재개
+    open.clear();
+    await build().resume({ requestId, pg: 'TOSS', reason: '결제사 정상 확인' });
+    expect(pay.of(eventRefundCancellationId(requestId, ta))).toBe(0);
+    expect(pay.of(eventRefundCancellationId(requestId, tb))).toBe(1);
+    expect(await pausedInDb(requestId)).toEqual([['PORTONE', 'AUTO_CIRCUIT_OPEN']]);
+    void o1;
+    void o2;
+  }, 60_000);
+
+  /** 연기 신청 환급을 실제 예매 취소 Saga로 돌리되, Saga의 주문 조회가 그 회차 판매 설정을 못 찾아 NOT_FOUND(업무 거절 목록 밖)로 답한다 */
+  const sagaService = (
+    nowMs: number,
+    eventId: string,
+    requestId: string,
+    o: { log?: { warn(x: object, msg: string): void }; around?: (inner: () => ReturnType<EventRefundCanceller['cancel']>) => ReturnType<EventRefundCanceller['cancel']>; sagaCalls?: () => void } = {},
+  ) => {
+    const client = createExternalHttpClient({ provider: 'ops-svc', baseUrl: ops.url, timeoutCapMs: 5_000 });
+    const real = new DrizzleCsCaseOutbox(purchaseDb);
+    const noConfig = { config: async (id: string) => (id === eventId ? undefined : configs.config()) };
+    const saga = new CancelTicketEventRefund(new CancelTicket({ orders: new DrizzleCancellationOrders(purchaseDb, noConfig), writes, tickets: ticketCancels!, payments, calendar: new WeekendBusinessCalendar() }));
+    const postpone: EventRefundCanceller = {
+      cancel: (t, q) => {
+        const inner = () => (o.sagaCalls?.(), saga.cancel(t, q));
+        return o.around ? o.around(inner) : inner();
+      },
+    };
+    return new EventRefundService({
+      store: scopedStore(requestId),
+      targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+      canceller: new EventRefundCancellerRouter({ cancel: { cancel: async () => Promise.reject(new Error('회차 취소 길은 이 시험에서 부르지 않는다')) }, postpone }),
+      attempts: new DrizzleEventRefundAttempts(purchaseDb),
+      fanNotifier: new OutboxEventRefundFanNotifier(),
+      notice: new HttpRefundFailureNotice(client, 'it-token'),
+      claims: new DrizzleEventRefundClaims(purchaseDb, clock),
+      csOutbox: {
+        pendingItemFailures: async (limit: number) => (await real.pendingItemFailures(limit)).filter((r) => r.requestId === requestId),
+        markItemFailureOpened: (r: string, t: string, n: number) => real.markItemFailureOpened(r, t, n),
+        pendingGaps: async () => [],
+        markGapOpened: async () => undefined,
+      },
+      ...(o.log ? { log: o.log } : {}),
+      nowMs: () => nowMs,
+      deadlineMs: () => nowMs + 30_000,
+    });
+  };
+  const startPostponeApplied = async (eventId: string, requestId: string, ticketId: string) => {
+    await sagaService(T0, eventId, requestId).start({ ...startInput(eventId, requestId), kind: 'POSTPONE', postponedToMs: T0 + 7 * DAY, refundWindowClosesAtMs: T0 + 3 * DAY });
+    expect(await new DrizzleEventRefundStore(purchaseDb, clock).markApplied(requestId, ticketId, T0)).toBe(true);
+  };
+
+  test('GAT-110 P3 연기 신청 Saga의 업무 실패 답(업무 거절 목록 밖)이면 항목 FAILED·팬 실패 알림 하나·CS 건 하나다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const o = await multiOrder(eventId, 1);
+    const ticketId = o.ticketIds[0]!;
+    await startPostponeApplied(eventId, requestId, ticketId);
+    pays.length = 0;
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    let sagaCalls = 0;
+    await sagaService(T0 + MINUTE, eventId, requestId, { sagaCalls: () => void sagaCalls++ }).runDue();
+    const item = await itemOf(requestId, ticketId);
+    // 장애 주입이 끼어들었는지 먼저: Saga를 실제로 불렀고 NOT_FOUND로 답했다(결제사는 부르지 않음)
+    expect(sagaCalls).toBe(1);
+    expect(item).toMatchObject({ status: 'FAILED', last_error: 'NOT_FOUND' });
+    expect(await fanFailures(eventId, ticketId, requestId)).toHaveLength(1);
+    expect(ops.state.requests.filter((r) => r.body.sourceId === item!.cancellation_id).map((r) => [r.body.kind, r.body.category])).toEqual([['REFUND_FAILED', 'REFUND']]);
+    // 다음 runDue는 다시 부르지 않는다
+    await sagaService(T0 + DAY, eventId, requestId, { sagaCalls: () => void sagaCalls++ }).runDue();
+    expect(sagaCalls).toBe(1);
+    expect(pays.filter((p) => p.cancellationId === item!.cancellation_id)).toEqual([]);
+    expect(await fanFailures(eventId, ticketId, requestId)).toHaveLength(1);
+  }, 60_000);
+
+  test('GAT-110 P3 두 실행이 같은 그 밖 실패 항목을 겹쳐 끝내도 팬 실패 알림은 하나다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const o = await multiOrder(eventId, 1);
+    const ticketId = o.ticketIds[0]!;
+    await startPostponeApplied(eventId, requestId, ticketId);
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    const warns: { o: object; msg: string }[] = [];
+    const log = { warn: (x: object, msg: string) => void warns.push({ o: x, msg }) };
+    let sagaCalls = 0;
+    // B는 A의 잡기 기한(잡은 때 + 60,000ms) 정각에 돈다: A가 Saga의 답을 받은 뒤 끝내기 전에 B가 다시 잡아 먼저 끝낸다
+    const b = sagaService(T0 + MINUTE + 60_000, eventId, requestId, { log, sagaCalls: () => void sagaCalls++ });
+    let overlapped = false;
+    const a = sagaService(T0 + MINUTE, eventId, requestId, {
+      log,
+      sagaCalls: () => void sagaCalls++,
+      around: async (inner) => {
+        const answer = await inner();
+        if (!overlapped) {
+          overlapped = true;
+          await b.runDue();
+        }
+        return answer;
+      },
+    });
+    await a.runDue();
+    // 장애 주입이 끼어들었는지 먼저: B가 그 항목을 다시 잡아 Saga를 한 번 더 불렀다
+    expect(overlapped).toBe(true);
+    expect(sagaCalls).toBe(2);
+    const item = await itemOf(requestId, ticketId);
+    expect(item).toMatchObject({ status: 'FAILED', last_error: 'NOT_FOUND' });
+    expect(await fanFailures(eventId, ticketId, requestId)).toHaveLength(1);
+    expect(warns.filter((w) => JSON.stringify(w).includes('event-refund-item-claim-lost'))).toHaveLength(1);
+    expect(ops.state.requests.filter((r) => r.body.sourceId === item!.cancellation_id)).toHaveLength(1);
   }, 60_000);
 });

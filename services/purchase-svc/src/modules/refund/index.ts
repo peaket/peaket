@@ -157,6 +157,9 @@ export { DrizzleDeductionGapCancellations } from './adapters/db/drizzle-deductio
 export { DrizzleEventCancellationLookup } from './adapters/db/drizzle-event-cancellation-lookup.js';
 export { DrizzleEventRefundClaims } from './adapters/db/drizzle-event-refund-claims.js';
 export { EVENT_REFUND_CLAIM_MS, type CsCaseOutbox, type EventRefundClaims } from './domain/event-refund-ports.js';
+// W9-fix1 N3·N8(빈 뼈대)
+export { EVENT_REFUND_CLAIM_EXTEND_BELOW_MS, EVENT_REFUND_TICKET_DEADLINE_MS } from './domain/event-refund-ports.js';
+export { mergePauses } from './domain/event-refund.js';
 export { DrizzleCsCaseOutbox } from './adapters/db/drizzle-cs-case-outbox.js';
 export { PromCsCaseSignals } from './adapters/prom-cs-case-signals.js';
 export { CS_CASE_REOPEN_BUDGET_MS, CS_CASE_REOPEN_MAX_UNREACHABLE, CsCaseReopenBudget } from './application/cs-case-reopen.js';

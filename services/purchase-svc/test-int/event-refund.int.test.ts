@@ -16,6 +16,8 @@ import { startOpsCsDouble } from './ops-cs-double.js';
 import { eventRefundCancellationId, type EventCancellationRequest, type EventRefundItem, type EventRefundTarget } from '../src/modules/refund/domain/event-refund.js';
 import type { EventRefundAlert, EventRefundAttemptStore, EventRefundCanceller, EventRefundFailureNotice, EventRefundTargets } from '../src/modules/refund/domain/event-refund-ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+// W9-fix1 N3·N8·P3(시험 담당 w9f1-test)
+import { DrizzleEventRefundClaims, eventRefundNoticeKey } from '../src/modules/refund/index.js';
 
 const NOW = Date.parse('2026-11-14T08:00:00.000Z');
 const DAY = 86_400_000;
@@ -809,5 +811,262 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
     sent.length = 0;
     await service.runDue();
     expect(sent).toEqual([]);
+  }, 60_000);
+});
+
+// ---- W9-fix1(시험 담당 w9f1-test, 구현 전에 씀, 계획 docs/review/plans/W9-fix1.md §3) ----
+// 정본: docs/features/transfer-refund.md §5 '잡기 늘리기'·'멈춤 표시는 합쳐 쓴다'·'주인', docs/data.md event_refund_item.claimed_until·§5.
+// 실제 DrizzleEventRefundClaims.extend 한 문장·DrizzleEventRefundStore.updateLocked의 요청 행 잠금·그 밖 실패 끝내기의 같은 트랜잭션을 본다.
+describe('W9-fix1 잡기 늘리기·멈춤 합치기·그 밖 실패 알림 [PostgreSQL]', () => {
+  /** 다른 시험의 잡기·시도 기록과 겹치지 않는 때 */
+  const C = NOW + 20 * DAY;
+  /** 표 n장 주문 하나(결제 완료). 표 ID는 오름차순 */
+  async function seedTickets(eventId: string, n: number, pgName: 'TOSS' | 'PORTONE'): Promise<{ orderId: string; ticketIds: string[] }> {
+    const orderId = randomUUID();
+    const ticketIds = Array.from({ length: n }, () => randomUUID()).sort();
+    await q('begin');
+    try {
+      await q(
+        `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+         values ($1, $2, $3, 'CONFIRMED', $4, 1, $5, 'v1', 'PICK', now(), $6, $7)`,
+        [orderId, randomUUID(), eventId, 10_000 * n, `idem-${orderId}`, randomUUID(), randomUUID()],
+      );
+      await q("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, 'CONFIRMED', 'T8', 'system:test', now())", [orderId]);
+      for (const [i, ticketId] of ticketIds.entries()) {
+        await q("insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id) values ($1, $2, $3, 'VIP', 'A', 10000, $4)", [orderId, i + 1, randomUUID(), ticketId]);
+      }
+      await q("insert into payment_attempt (id, order_id, pg, status, created_at) values ($1, $1, $2, 'ACCEPTED', now())", [orderId, pgName]);
+      await q('commit');
+    } catch (err) {
+      await q('rollback').catch(() => undefined);
+      throw err;
+    }
+    return { orderId, ticketIds };
+  }
+  const itemFor = (requestId: string, orderId: string, ticketId: string, pgName: 'TOSS' | 'PORTONE'): EventRefundItem => ({
+    requestId,
+    orderId,
+    ticketId,
+    cancellationId: eventRefundCancellationId(requestId, ticketId),
+    pg: pgName,
+    status: 'PENDING',
+    attempts: 0,
+    appliedAtMs: C - 1_000,
+    nextAttemptAtMs: C - 1_000,
+  });
+  const createRunning = (requestId: string, eventId: string, items: EventRefundItem[]) =>
+    new DrizzleEventRefundStore(db).create(
+      { requestId, eventId, kind: 'CANCEL', status: 'RUNNING', fault: 'ORGANIZER', targetOrders: 1, refundTotal: 10_000 * items.length, compensationTargets: 0, compensationTotal: 0, progress: progressOf(items, [], false), ruledBy: 'commander-1', confirmedBy: 'operator-2', createdAtMs: C - 1_000, updatedAtMs: C - 1_000 },
+      items,
+    );
+  const claimRows = async (requestId: string) =>
+    (
+      await q<{ ticket_id: string; status: string; claim_token: string | null; claimed_until: Date | null }>(
+        'select ticket_id, status, claim_token, claimed_until from event_refund_item where request_id = $1 order by ticket_id',
+        [requestId],
+      )
+    ).rows.map((r) => ({ ticketId: r.ticket_id, status: r.status, token: r.claim_token, until: r.claimed_until === null ? null : r.claimed_until.getTime() }));
+  /** 이 요청만 보는 저장소(파일이 DB를 나눠 쓰므로 runDue가 다른 시험의 요청을 집지 않게) */
+  const scopedStore = (requestId: string) => {
+    const st = new DrizzleEventRefundStore(db);
+    st.activeRequests = async () => {
+      const r = await st.find(requestId);
+      return r && ['RUNNING', 'PAUSED', 'REFUND_WINDOW'].includes(r.status) ? [r] : [];
+    };
+    st.dueWindowClosures = async () => [];
+    return st;
+  };
+
+  test('GAT-110 N3 잡기 늘리기는 잡기 값이 같고 기한 안일 때만 처리할 항목의 기한을 지금 + 60초로 쓴다', async () => {
+    const claims = new DrizzleEventRefundClaims(db);
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const o = await seedTickets(eventId, 3, 'TOSS');
+    await createRunning(requestId, eventId, o.ticketIds.map((t) => itemFor(requestId, o.orderId, t, 'TOSS')));
+    const claimed = await claims.claimOrders(requestId, C, 1);
+    expect(claimed.items.map((i) => i.ticketId)).toEqual(o.ticketIds);
+    expect(claimed.claimedUntilMs).toBe(C + 60_000);
+    const [t1, t2, t3] = o.ticketIds as [string, string, string];
+    // 한 표는 환급으로 끝내고(REFUNDED), 한 표는 결과 모름(UNKNOWN)으로 둔다. 둘 다 잡기 값은 그대로 남는다
+    await expect(claims.finish({ requestId, ticketId: t1, claimToken: claimed.claimToken, status: 'REFUNDED', attempts: 1 })).resolves.toBe(true);
+    await expect(claims.finish({ requestId, ticketId: t2, claimToken: claimed.claimToken, status: 'UNKNOWN', attempts: 1, lastError: 'timeout', nextAttemptAtMs: C + 1_000 })).resolves.toBe(true);
+    const before = await claimRows(requestId);
+    expect(before.map((r) => [r.status, r.token, r.until])).toEqual([
+      ['REFUNDED', claimed.claimToken, C + 60_000],
+      ['UNKNOWN', claimed.claimToken, C + 60_000],
+      ['PENDING', claimed.claimToken, C + 60_000],
+    ]);
+    // 다른 잡기 값이면 0행
+    await expect(claims.extend(requestId, randomUUID(), C + 59_999)).resolves.toBeUndefined();
+    expect(await claimRows(requestId)).toEqual(before);
+    // 기한 안(59,999ms): 새 기한 = 지금 + 60,000ms = 119,999ms, PENDING·UNKNOWN 행만 바뀐다(REFUNDED 행 그대로)
+    await expect(claims.extend(requestId, claimed.claimToken, C + 59_999)).resolves.toBe(C + 119_999);
+    const extended = await claimRows(requestId);
+    expect(extended.map((r) => [r.ticketId, r.status, r.token, r.until])).toEqual([
+      [t1, 'REFUNDED', claimed.claimToken, C + 60_000],
+      [t2, 'UNKNOWN', claimed.claimToken, C + 119_999],
+      [t3, 'PENDING', claimed.claimToken, C + 119_999],
+    ]);
+    // 늘린 뒤 다른 잡기는 119,998ms에 빈 목록
+    expect((await claims.claimOrders(requestId, C + 119_998, 10)).items).toEqual([]);
+    // 풀린 잡기면 0행
+    await claims.release(requestId, claimed.claimToken);
+    const released = await claimRows(requestId);
+    expect(released.every((r) => r.token === null && r.until === null)).toBe(true);
+    await expect(claims.extend(requestId, claimed.claimToken, C + 60_000)).resolves.toBeUndefined();
+    expect(await claimRows(requestId)).toEqual(released);
+
+    // 기한 정각(잡은 때 + 60,000ms)이면 0행이고 지난 잡기를 되살리지 않는다(다른 요청)
+    const r2 = randomUUID();
+    const o2 = await seedTickets(eventId, 2, 'TOSS');
+    await createRunning(r2, eventId, o2.ticketIds.map((t) => itemFor(r2, o2.orderId, t, 'TOSS')));
+    const c2 = await claims.claimOrders(r2, C, 1);
+    expect(c2.items).toHaveLength(2);
+    const before2 = await claimRows(r2);
+    await expect(claims.extend(r2, c2.claimToken, C + 60_000)).resolves.toBeUndefined();
+    expect(await claimRows(r2)).toEqual(before2);
+  });
+
+  test('GAT-110 N8 실제 DB에서 두 끝 쓰기가 같은 순간에 와도 두 자동 정지가 모두 남고, 다른 연결이 그 행을 잡은 동안 updateLocked는 기다린다', async () => {
+    const store = new DrizzleEventRefundStore(db);
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const toss = await seedTickets(eventId, 1, 'TOSS');
+    const portone = await seedTickets(eventId, 1, 'PORTONE');
+    await createRunning(requestId, eventId, [itemFor(requestId, toss.orderId, toss.ticketIds[0]!, 'TOSS'), itemFor(requestId, portone.orderId, portone.ticketIds[0]!, 'PORTONE')]);
+    const items = await store.items(requestId);
+    const pausesOf = (r: EventCancellationRequest) => r.progress.perPg.filter((p) => p.state === 'PAUSED' && p.pauseReason !== undefined).map((p) => ({ pg: p.pg, reason: p.pauseReason! }));
+    // 시험의 next: 잠근 값(current)의 멈춤에 하나를 더해 PAUSED로 쓴다(합치기 함수는 쓰지 않는다)
+    const adding = (pgName: 'TOSS' | 'PORTONE', reason: 'AUTO_CIRCUIT_OPEN' | 'AUTO_FAILURE_RATE') => (current: EventCancellationRequest): EventCancellationRequest => ({
+      ...current,
+      status: 'PAUSED',
+      progress: progressOf(items, [...pausesOf(current).filter((p) => p.pg !== pgName), { pg: pgName, reason }], false),
+      updatedAtMs: C,
+    });
+    const pausedInDb = async () =>
+      pausesOf((await store.find(requestId))!)
+        .map((p) => [p.pg, p.reason])
+        .sort();
+    const both = [
+      ['PORTONE', 'AUTO_FAILURE_RATE'],
+      ['TOSS', 'AUTO_CIRCUIT_OPEN'],
+    ];
+    // ① 같은 순간의 두 끝 쓰기
+    await Promise.all([store.updateLocked(requestId, adding('TOSS', 'AUTO_CIRCUIT_OPEN')), store.updateLocked(requestId, adding('PORTONE', 'AUTO_FAILURE_RATE'))]);
+    expect(await pausedInDb()).toEqual(both);
+
+    // ② 다른 연결이 요청 행을 잡은(for no key update) 열린 트랜잭션 안에서 PORTONE 멈춤을 쓰는 동안 TOSS 멈춤을 updateLocked로 쓴다
+    await store.update({ ...(await store.find(requestId))!, status: 'RUNNING', progress: progressOf(items, [], false) });
+    expect(await pausedInDb()).toEqual([]);
+    const holder = new pg.Client({ connectionString: url });
+    await holder.connect();
+    let seen: EventCancellationRequest | undefined;
+    try {
+      await holder.query('begin');
+      await holder.query('select id from event_cancellation_request where id = $1 for no key update', [requestId]);
+      const held = adding('PORTONE', 'AUTO_FAILURE_RATE')((await store.find(requestId))!);
+      await holder.query("update event_cancellation_request set status = 'PAUSED', progress = $2::jsonb where id = $1", [requestId, JSON.stringify(held.progress)]);
+      let done = false;
+      const pending = store.updateLocked(requestId, (current) => ((seen = current), adding('TOSS', 'AUTO_CIRCUIT_OPEN')(current)));
+      const settled = pending.then(
+        () => void (done = true),
+        () => void (done = true),
+      );
+      await new Promise((r) => setTimeout(r, 200));
+      // 잡힌 동안은 끝나지 않는다(읽기부터 잠금을 기다린다)
+      expect(done).toBe(false);
+      await holder.query('commit');
+      await settled;
+      const written = await pending;
+      expect(written?.status).toBe('PAUSED');
+    } finally {
+      await holder.query('rollback').catch(() => undefined);
+      await holder.end();
+    }
+    // next가 받은 값은 잡은 쪽이 커밋한 PORTONE 멈춤을 본다
+    expect(pausesOf(seen!).map((p) => p.pg)).toEqual(['PORTONE']);
+    expect(await pausedInDb()).toEqual(both);
+    // TOSS만 재개한 뒤 잡기는 PORTONE 항목을 주지 않는다
+    await store.updateLocked(requestId, (current) => ({
+      ...current,
+      status: 'RUNNING',
+      progress: progressOf(
+        items,
+        pausesOf(current).filter((p) => p.pg !== 'TOSS'),
+        false,
+      ),
+    }));
+    const claimed = await new DrizzleEventRefundClaims(db).claimOrders(requestId, C, 10);
+    expect(claimed.items.map((i) => i.pg)).toEqual(['TOSS']);
+  });
+
+  test('GAT-110 P3 실제 DB에서 그 밖 실패의 끝내기를 실패시키면 항목 FAILED·팬 알림·failure_case_at이 모두 없다', async () => {
+    const eventId = randomUUID();
+    const requestId = randomUUID();
+    const s = await seedTickets(eventId, 1, 'TOSS');
+    const ticketId = s.ticketIds[0]!;
+    let now = C;
+    const svc = (firstBatch?: number) =>
+      new EventRefundService({
+        store: scopedStore(requestId),
+        targets: {
+          list: async (id) =>
+            id === eventId
+              ? [{ orderId: s.orderId, ticketId, seatId: randomUUID(), payerAccountId: randomUUID(), ticketPrice: 10_000, bookedAtMs: C - 10 * DAY, saleEndsAtMs: C + 7 * DAY, pg: 'TOSS' as const }]
+              : [],
+        },
+        // 업무 거절 목록 밖의 실패 답(시도 상한 전)
+        canceller: { cancel: async () => ({ status: 'FAILED', error: 'NOT_FOUND' }) },
+        fanNotifier: new OutboxEventRefundFanNotifier(),
+        claims: new DrizzleEventRefundClaims(db),
+        csOutbox: { pendingItemFailures: async () => [], markItemFailureOpened: async () => undefined, pendingGaps: async () => [], markGapOpened: async () => undefined },
+        ...(firstBatch !== undefined ? { firstBatch } : {}),
+        nowMs: () => now,
+        deadlineMs: () => now + 30_000,
+      });
+    await svc(0).start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    const key = eventRefundNoticeKey(requestId, ticketId, 'REFUND_FAILED');
+    const fanFailures = async () =>
+      (await q<{ payload: Buffer }>('select payload from outbox where msg_key = $1', [eventId])).rows
+        .map((r) => ({ p: JSON.parse(Buffer.from(r.payload).toString('utf8')) as { type: string; eventKey: string } }))
+        .filter((r) => r.p.type === 'REFUND_FAILED' && r.p.eventKey === key);
+    const itemRow = async () =>
+      (await q<{ status: string; attempts: number; failure_case_at: Date | null }>('select status, attempts, failure_case_at from event_refund_item where request_id = $1 and ticket_id = $2', [requestId, ticketId])).rows[0]!;
+    // 끝내기 트랜잭션 안의 팬 알림 Outbox 쓰기에 장애를 넣는다(이 회차의 Outbox 줄만)
+    await q(
+      `create or replace function p3_outbox_fail() returns trigger language plpgsql as $$ begin raise exception 'injected p3'; end $$;
+       create trigger p3_outbox_fail before insert on outbox for each row when (new.msg_key = '${eventId}') execute function p3_outbox_fail();`,
+    );
+    try {
+      now = C + 60_000;
+      // 장애 주입이 끼어들었는지 먼저: 끝내기가 팬 알림을 쓰려다 실패했다(Drizzle은 질의 오류를 감싸고 pg 오류를 cause에 둔다)
+      const err = await svc()
+        .runDue()
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      const chain: string[] = [];
+      for (let e: unknown = err, i = 0; e !== undefined && e !== null && i < 8; e = (e as { cause?: unknown }).cause, i++) chain.push(e instanceof Error ? e.message : String(e));
+      expect(
+        chain.some((m) => m.includes('injected p3')),
+        `runDue 오류 사슬: ${chain.join(' | ').slice(0, 300)}`,
+      ).toBe(true);
+      const cut = await itemRow();
+      expect(cut.status).toBe('PENDING');
+      expect(cut.attempts).toBe(0);
+      expect(cut.failure_case_at).toBeNull();
+      expect(await fanFailures()).toEqual([]);
+    } finally {
+      await q('drop trigger if exists p3_outbox_fail on outbox; drop function if exists p3_outbox_fail();');
+    }
+    // 다음 틱(장애 없음): 항목 FAILED·failure_case_at·팬 알림 하나가 함께 써진다(첫 틱에 셋 다 없었으니 한 트랜잭션이다)
+    now = C + 2 * 60_000;
+    await svc().runDue();
+    const done = await itemRow();
+    expect(done).toMatchObject({ status: 'FAILED', attempts: 1 });
+    expect(done.failure_case_at).not.toBeNull();
+    const notices = await fanFailures();
+    expect(notices).toHaveLength(1);
   }, 60_000);
 });

@@ -38,6 +38,11 @@ export interface EventRefundStore {
   update(request: EventCancellationRequest): Promise<void>;
   /** 실행 중(RUNNING·REFUND_WINDOW)일 때만 진행률을 바꾼다. 그 사이 PAUSED가 됐으면 덮지 않고 false */
   updateActive(request: EventCancellationRequest): Promise<boolean>;
+  /**
+   * W9-fix1 N8(transfer-refund §5 '멈춤 표시는 합쳐 쓴다'): 요청 행을 FOR NO KEY UPDATE로 잠근 트랜잭션에서 지금 행을 읽어 동기 함수 next를 부르고,
+   * 돌려준 값을 쓴다. undefined면 쓰지 않는다. 행이 없으면 undefined. 쓴 값을 돌려준다(빈 뼈대: 시험 담당, 구현 전)
+   */
+  updateLocked(requestId: string, next: (current: EventCancellationRequest) => EventCancellationRequest | undefined): Promise<EventCancellationRequest | undefined>;
   items(requestId: string): Promise<readonly EventRefundItem[]>;
   /**
    * 항목 상태를 바꾸고, 같은 트랜잭션에 팬 알림 Outbox를 남길 수 있다. 끝난 상태(REFUNDED·FAILED·NOT_APPLIED)와 잡힌 항목은 덮지 않는다(웨이브 끝 리뷰 K2).
@@ -197,13 +202,23 @@ export interface EventRefundServiceDeps {
 
 /** 주문 단위 잡기의 기한 60초 [가정](transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기') */
 export const EVENT_REFUND_CLAIM_MS = 60_000;
+/** W9-fix1 N3: 표 한 장의 취소기 호출 한도 30초 [가정](transfer-refund §5 '잡기 늘리기'). 운영 조립의 deadlineMs가 쓴다 */
+export const EVENT_REFUND_TICKET_DEADLINE_MS = 30_000;
+/** W9-fix1 N3: 표를 보내기 전 남은 잡기 기한이 이보다 짧으면 늘린다 40초 [가정](표 한도 30초 + 끝내기 여유 10초) */
+export const EVENT_REFUND_CLAIM_EXTEND_BELOW_MS = 40_000;
 
 export interface EventRefundClaims {
   /**
    * 그 요청의 처리할 항목을 주문 단위로 잡는다(그 주문의 다른 잡기가 살아 있으면 잡지 않는다, 기한 지난 잡기는 다시 잡는다).
-   * 잡은 주문의 처리할 항목(PENDING·UNKNOWN, 신청됨, 다음 시각 지남)을 준다. 요청이 실행 중(RUNNING·REFUND_WINDOW)이 아니거나 limitOrders가 0이면 빈 목록이다
+   * 잡은 주문의 처리할 항목(PENDING·UNKNOWN, 신청됨, 다음 시각 지남)을 준다. 요청이 실행 중(RUNNING·REFUND_WINDOW)이 아니거나 limitOrders가 0이면 빈 목록이다.
+   * claimedUntilMs는 이 잡기의 기한(nowMs + EVENT_REFUND_CLAIM_MS)이다(W9-fix1 N3)
    */
-  claimOrders(requestId: string, nowMs: number, limitOrders: number): Promise<{ readonly claimToken: string; readonly items: readonly EventRefundItem[] }>;
+  claimOrders(requestId: string, nowMs: number, limitOrders: number): Promise<{ readonly claimToken: string; readonly items: readonly EventRefundItem[]; readonly claimedUntilMs: number }>;
+  /**
+   * W9-fix1 N3(transfer-refund §5 '잡기 늘리기'): 같은 요청·같은 잡기 값·claimed_until > nowMs·PENDING·UNKNOWN인 행의 claimed_until을 nowMs + 60초로 한 문장으로 쓴다.
+   * 늘린 새 기한을 주고, 0행이면(잡기를 잃었거나 기한이 지남) undefined다(빈 뼈대: 시험 담당, 구현 전)
+   */
+  extend(requestId: string, claimToken: string, nowMs: number): Promise<number | undefined>;
   /**
    * 잡기 값이 맞고 끝나지 않은(PENDING·UNKNOWN) 항목만 쓴다(조건부). 잡기를 잃었으면 false이고 아무것도 쓰지 않는다.
    * Outbox·취소 행 실패 표시(cancellationFailure)·차액 대상 표시(deductionGap)는 같은 트랜잭션이다
