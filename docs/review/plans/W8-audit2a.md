@@ -433,6 +433,49 @@ export interface ReviewStore {
 - core-svc 폴더에서: `npx vitest run --config vitest.integration.config.mjs test-int/review-purge-manual.int.test.ts test-int/review-purge-legacy.int.test.ts test-int/review-recheck.int.test.ts test-int/review-grants.int.test.ts test-int/review-withdrawn.int.test.ts`
 - 싼 게이트: `pnpm --dir D:/ticketpass-lane3-w8b/services/core-svc test`·`typecheck`, 닿는 경로 `npx eslint`, 문서 점검.
 
+### 10. 웨이브 끝 리뷰 반영 다시 보기(2026-11-17)
+
+- **리뷰 담당**: `w8a2-relook-review`(claude-opus-5-5). 이 묶음의 계획·시험·구현은 맡지 않았고, 코드와 시험은 고치지 않았다. '다시 보기'는 고친 곳만 짧게 보는 리뷰다(ADR-0190 결정 2).
+- **본 범위**: 시험 커밋 `e55ccab4`와 구현 커밋 `e6cad3c9`(`git diff HEAD~2 HEAD`), develop `d1d31a07` 위로 다시 쌓은 범위(`git range-diff c3b0935c..eed67724 origin/develop..e6cad3c9`). 아래 줄 번호는 `e6cad3c9` 기준이다.
+- **돌린 것**: core-svc 단위 시험 여섯 파일(`review-withdrawn`·`review-recheck`·`review-purge-legacy`·`review-purge`·`review-purge-migration`·`migrations-journal`) 37개 모두 통과. 통합 시험(§9.4, 실제 PostgreSQL)은 돌리지 않았다(도커 차례는 감독 몫). 그래서 S1·C2의 DB 쪽 동작(권한·잠금·한 트랜잭션)은 아직 실제 DB에서 확인되지 않았다.
+
+#### 10.1 지적마다 판정
+
+| 지적 | 판정 | 확인한 것 |
+| --- | --- | --- |
+| S1 손으로 하는 파기 | **고쳐짐**(고치면서 새 결함 N1 하나) | 본문은 `{ reason: 10~500자, requestedBy: 1~64자 }`이고 모르는 칸을 받지 않는다(`internal-review.controller.ts:13`). 검사는 경로 스키마라 인증 가드 뒤에 400이 난다. 보류 행(처리하지 못해 `held_event`에 따로 옮겨 둔 사건) 조건이 §9.1과 같다: 토픽, `reprocessed_at is null`, `lower(business_key)` 또는 `lower(msg_key)`(`drizzle-review-store.ts:327-333`). 한 트랜잭션 안에서 보류 행 잠금(`FOR UPDATE`) → 예약(늦은 쪽, `greatest`) → 파기 → `reprocessed_at` 표시 차례다(`:323-344`). 보류 행이 없으면 아무것도 쓰지 않고 409 `withdrawal-not-held`다(`reviews.ts:339`). 운영 줄은 커밋 뒤에 남고, 칸은 `kind`·`requestedBy`·`reason`·`heldEventKeys`·`purged`뿐이라 계정 ID가 없다(`:340`). 로거는 전역 `PLATFORM_LOGGER`(`packages/platform/src/service.ts:36`, 전역 모듈)로 들어오므로 운영에서도 줄이 남는다. 0026에 GRANT 한 줄이 더해졌다(`0026_review_purge_recheck.sql:37`). 옛 `purgeByAccount`·`purgeAccount`는 지워졌고 부르는 곳도 남지 않았다. |
+| C1 예약 셈 실패에도 파기 | **고쳐짐** | `withdrawalRecheckAt`이 던지면 처리 시각 + 16분으로 예약하고, 파기는 그대로 한다(`reviews.ts:351-363`). 처리기는 값과 계정 ID 없이 경고 한 줄을 남긴다(`account-withdrawn.handler.ts:81`). 운영 처리기 로거는 Pino라 `warn`이 있다(`main.ts:184`). `withdrawalRecheckAt` 자체의 엄격한 검사(검증에서 살아남았던 M49의 시험)는 그대로다(`domain/review.ts:220-224`). 대체 시각을 늘 쓰거나 파기를 건너뛰는 꼴(틀린 구현 표본 ⓒⓓ)은 없다. |
+| C2 남은 대상 수 | **고쳐짐**(낮음 N2 하나) | 대상 조건 글을 한 곳(`LEGACY_ROWS`, `drizzle-review-store.ts:67`)에 두고 고치기(`:359`)와 세기(`:346-350`)가 같이 쓴다. 세기는 잠그지 않고 `SKIP LOCKED`도 쓰지 않는다(잠긴 행도 센다). 쓰는 칸은 정비 역할이 읽을 수 있는 칸(`id`·`status`·`rating`·`content_fingerprint`·`account_id`)뿐이다. 결과 `{ purged, remaining }`(`review-maintenance.ts:36-38`)는 플랫폼 정비 반복의 '정비 일 끝' 줄 `report`에 실린다(`packages/platform/src/maintenance.ts:101`). |
+
+- **구현 커밋이 시험 파일을 건드렸나**: 건드리지 않았다. `e6cad3c9`는 `src/`와 `migrations/0026`의 아홉 파일만 바꿨다. 시험 커밋 `e55ccab4`의 제품 코드 변경은 뼈대(`throw new Error('아직 없음')`, 메모리 보류 사건 칸, 형식 내보내기)뿐이다.
+
+#### 10.2 새 지적
+
+| 번호 | 등급 | 파일:줄 | 내용 |
+| --- | --- | --- | --- |
+| N1 | 중간 | `services/core-svc/src/modules/review/adapters/db/drizzle-review-store.ts:342`, `…/adapters/memory-review-store.ts:222`, `…/application/reviews.ts:340-341`, `…/inbound/internal-review.controller.ts:14` | **eventKey가 없는 보류 행은 응답 수에서 빠지고 운영 줄에 흔적이 남지 않는다.** 응답의 `heldEvents`를 `heldEventKeys.length`로 세는데, `heldEventKeys`는 `event_key`가 null인 행을 뺀다. 플랫폼은 해독에 실패한 사건(값이 없거나 깨진 사건)을 `event_key` null로 보류한다(`packages/platform/src/keyed-consumer.ts:435-437`, `held_event.event_key`는 null 허용). 이 경로가 있는 까닭인 '값 없이 Kafka 키만 그 계정인 보류 행'이 바로 그 꼴이다. 그런 행 하나뿐인 계정을 처리하면 200 `{ purged, heldEvents: 0 }`이 나간다(응답 스키마 `positive()`와 어긋나지만, 응답 스키마는 직렬화에만 쓰여 막히지 않는다). 운영 줄에는 계정 ID도 eventKey도 없어 어느 보류 행을 처리했는지 알 수 없다. 보안 리뷰 S1이 든 ASVS 16.2.1('무엇을 했는지 기록')이 이 꼴에서 채워지지 않는다. 시험은 값 없는 행에도 eventKey를 넣어(`test-int/review-purge-manual.int.test.ts:109`, `test/review-withdrawn.test.ts:259`) 이 결함을 덮는다. **고칠 쪽**: 저장소가 처리한 보류 행 수(`held.length`)와 보류 행 ID(`held_event.id`, uuidv7이라 개인정보가 아니다. 또는 파티션·오프셋)를 돌려주고, `heldEvents`는 그 수로 센다. 운영 줄에는 eventKey 옆에 보류 행 ID를 싣는다. 시험은 값 없는 행을 `eventKey: null`로 넣는다. |
+| N2 | 낮음 | `services/core-svc/src/modules/review/application/review-maintenance.ts:36-37`, `packages/platform/src/maintenance.ts:97` | 멈춤 신호로 끝났을 때도 남은 수를 센다고 적었지만, 플랫폼 정비 반복은 신호가 끊기면 결과를 적지 않고 빠져나간다(`if (taskSignal.aborted) break`가 '정비 일 끝' 줄보다 앞). 그래서 그때 센 `remaining`은 어디에도 남지 않고, 표 전체를 훑는 세기 한 번만큼 종료·리더 넘김이 늦어진다. 정본 조건('남은 대상 0')은 끝까지 돈 날의 줄로 판정하면 되므로 막는 지적은 아니다. 신호가 끊겼으면 세지 않거나, 주석을 실제 동작에 맞춘다. |
+| N3 | 낮음(시험) | `services/core-svc/test-int/review-purge-manual.int.test.ts:127-133` | '보류 행 표시가 실패하면 파기·예약도 남지 않는다' 시험은 `REVOKE UPDATE (reprocessed_at) ON held_event FROM core_app`으로 마지막 문장만 실패하게 한다고 적었다. 그런데 `core_app`의 `held_event` 고치기 권한은 그 칸 하나뿐이고, PostgreSQL의 `SELECT … FOR UPDATE`는 칸 하나 이상의 UPDATE 권한이 있어야 한다. 그래서 첫 문장(보류 행 잠금, `drizzle-review-store.ts:327-333`)에서 42501로 끝나고, 예약·파기는 처음부터 돌지 않는다. '잠금·예약·파기를 한 트랜잭션에 두고 표시만 다른 트랜잭션에서 하는' 틀린 구현(§9.1 ⓔ의 한 꼴)도 이 시험을 통과한다. 고친 곳 검증 담당이 볼 것: 마지막 문장만 실패하게 하는 다른 수단(관리자 연결로 `held_event`에 잠시 `BEFORE UPDATE` 방아쇠를 걸어 오류를 내는 등)을 쓴다. |
+| N4 | 낮음(정리) | `services/core-svc/src/modules/review/adapters/memory-review-store.ts:28-34` | 새 상수 `ACCOUNTS_WITHDRAWN`을 `isLegacyRow`의 설명 주석과 함수 사이에 넣어, 그 주석이 상수에 붙었다. 토픽 글은 이미 `ACCOUNTS_WITHDRAWN_TOPIC`(`account-withdrawn.handler.ts:9`)이 있는데 두 저장소에 같은 글을 따로 적었다. 동작에는 영향이 없다. |
+
+- **확인했지만 지적하지 않은 것**
+  - 잠금 순서: 손으로 처리는 보류 행 → 예약 행 → 후기, 탈퇴 사건 처리는 예약 행 → 후기, 다시 정리 반복은 예약 행(`SKIP LOCKED`) → 후기다. 플랫폼 다시 처리(RB-11)는 보류 행을 잠그지 않고 읽고, 처리기 트랜잭션이 끝난 뒤 따로 `reprocessed_at`을 적는다. 서로 거꾸로 기다리는 짝이 없어 교착(서로 잡은 것을 기다려 멈춤)이 생기지 않는다.
+  - 권한: `core_app`은 0022의 `SELECT, INSERT`에 0026의 `UPDATE (reprocessed_at)`만 더 받는다. `FOR UPDATE`에 필요한 칸 UPDATE 권한도 이것으로 채워진다. 칸 권한이라 다른 토픽의 보류 행도 표시할 수 있는 것은 계획 §9.1이 받아들인 범위다.
+  - 손으로 처리는 플랫폼의 업무 키 잠금(advisory lock)을 잡지 않는다. 그래서 같은 때 실시간 소비자가 같은 계정 사건을 새로 보류하면 그 행이 남을 수 있다. 하지만 그 행은 보류 수에 보이고, 다시 부르면 처리된다(409가 아니다). RB-11과 같은 꼴이라 새 결함으로 보지 않는다.
+  - 본문 검사는 앞뒤 빈칸을 자르지 않아 빈칸 열 개짜리 사유도 받는다. 계획이 정한 모양 그대로다. 사유·요청자는 로그 가림 칸이 아니라 그대로 남는다. JSON 로그라 줄 바꿈을 넣어 다른 줄인 척하기는 어렵다.
+  - 409 문제 응답의 `instance`에는 요청 경로(계정 ID 포함)가 실린다. 하지만 부른 쪽이 이미 아는 값이고, 운영 줄과 접속 줄에는 경로 틀만 남는다.
+
+#### 10.3 충돌 해결 판정
+
+- **`docs/architecture.md` ADR 목록 0278 행**: 맞다. 행 글은 원래 끝 `eed67724`와 한 글자도 다르지 않다. 자리는 develop의 0270 행 뒤, 0282 행 앞이다. `git diff origin/develop HEAD -- docs/architecture.md`는 이 한 줄을 더한 것뿐이고, develop이 더한 0281·0282 행은 그대로다(0281이 0267·0270 사이에 있는 것은 develop 쪽 차례다).
+- **`services/core-svc/migrations/meta/_journal.json`**: 맞다. 0000~0023 줄은 develop과 같고, 0026 줄이 그 뒤에 붙었다. `when`은 0023 `1794789200000` < 0026 `1794811994338`로 차례대로 커지며, `migrations-journal.test.ts`가 통과한다. 0026 SQL과 `0026_snapshot.json`은 `eed67724`에서 바뀌지 않았다. 스냅숏의 `prevId`는 0022 스냅숏 ID(`07378a4f…`)여서, 손으로 쓴 0023을 건너뛰고 마지막 스냅숏에 잇는 이 저장소 규칙과 같다. 지금 있는 웨이브·갈래 가지에서 core-svc 0024~0026 파일은 이 가지의 0026뿐이라 번호가 겹치지 않는다.
+  - 주의(지적 아님): 0024·0025는 빈 번호로 남는다. 나중에 누가 그 번호를 채우면 `when`이 0026보다 작아야 차례 시험을 통과하는데, 그러면 이미 0026을 돌린 DB에서 Drizzle이 그 파일을 조용히 건너뛴다. docs/PROGRESS.md의 '번호와 `when`은 develop보다 모두 커야 한다' 규칙이 이를 막으므로 다음 core-svc 마이그레이션은 0027부터다(W8-audit2b가 이미 0027).
+- **`services/core-svc/src/main.ts`**(range-diff에 함께 나옴): 바뀐 것은 주변 줄(develop의 검색 연결 묶음)뿐이다. 연결 묶음 넷의 역할 확인(`assertDatabaseRole`, `main.ts:112-115`)은 그대로다.
+
+#### 10.4 합쳐도 되나
+
+높음은 없다. N1(중간)을 고치고, §9.4 통합 시험이 실제 DB에서 통과하는 것을 본 뒤 합친다. N2~N4는 정리 목록에 올려도 된다(N3은 고친 곳 검증 담당에게 넘긴다).
+
 ## 실패 확인
 
 - **누가·언제**: 시험 담당(세션 `l3w8-a2a-test`), 2026-11-16. 가지 `wave/lane3-w8-audit2`, 계획 커밋 `7901c762` 위. Docker 없이 돌렸다.
