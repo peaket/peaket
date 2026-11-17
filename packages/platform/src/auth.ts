@@ -18,6 +18,7 @@ import {
   createParamDecorator,
 } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
+import { FASTIFY_ROUTE_CONFIG_METADATA } from '@nestjs/platform-fastify/constants.js';
 import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Clock } from './clock.js';
@@ -80,6 +81,12 @@ export const PASSWORD_CHANGE_SCOPE = 'password:change';
 
 export const ROLES_METADATA = 'peaket:roles';
 
+/**
+ * Fastify 경로 설정 칸: 처리기에 단 @Roles가 같은 정책을 여기에도 적는다(W9-fix3 F5). 칸막이 경로는 본문을 읽기 전(onRequest)에 이 정책으로
+ * 신원을 판정한다(docs/api/guidelines.md §7 '본문을 읽기 전의 차례'). 클래스에만 단 허용 역할은 이 칸에 들어가지 않는다
+ */
+export const ROUTE_ROLES_KEY = 'peaketRoles';
+
 /** 서비스 사이 내부 HTTP의 공유 토큰 주입 이름(환경 값 PEAKET_INTERNAL_TOKEN) */
 export const INTERNAL_TOKEN = Symbol.for('peaket.platform.internal-token');
 /** 운영처럼 내부 토큰이 꼭 있어야 하는 환경인지(platformRoot가 PEAKET_ENV로 정한다) */
@@ -117,7 +124,15 @@ export function Roles(roles: readonly RoleValue[], options: RolesOptions = {}): 
   if (roles.length === 0) throw new Error('허용 역할 목록이 비었다(공개 작업은 [public])');
   if (new Set(roles).size !== roles.length) throw new Error(`허용 역할에 같은 값이 두 번 있다: ${roles.join(', ')}`);
   const policy: RolesPolicy = { roles: [...roles], scopes: [...(options.scopes ?? [])], fresh: options.fresh === true, passwordChangeSession: options.passwordChangeSession === true };
-  return SetMetadata(ROLES_METADATA, policy);
+  const setRoles = SetMetadata(ROLES_METADATA, policy);
+  return ((target: object, key?: string | symbol, descriptor?: PropertyDescriptor) => {
+    if (key === undefined || descriptor === undefined) return setRoles(target as Type<unknown>);
+    // 처리기에 단 정책은 경로 설정에도 적는다(본문 전 신원 판정이 읽는다, ROUTE_ROLES_KEY)
+    const fn = descriptor.value as object;
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [ROUTE_ROLES_KEY]: policy }, fn);
+    return setRoles(target, key, descriptor);
+  }) as MethodDecorator & ClassDecorator;
 }
 
 /** 판정한 요청자. 계정·세션·pid는 게이트웨이 머리, 역할·테넌트는 요청마다 identity에서 받은 값이다 */
@@ -340,7 +355,50 @@ function identityOf(headers: FastifyRequest['headers']): Principal | undefined {
 /** 쿠키 경로의 challenge(docs/api/guidelines.md §12) */
 export const COOKIE_CHALLENGE = 'Cookie realm="peaket"';
 
-/** 모든 요청에 거는 가드(전역). 순서: 공개 → 신원 → 종료 세션 → 대상 → 스코프 → 관리 역할(세션 판정 → 비밀번호 바꾸기 필요 세션 → 역할) → 멱등 키 → 구매 세션 요청 서명 → 경로 스키마 검사 실패 */
+/**
+ * 신원 판정(공용 가드의 앞부분, docs/api/guidelines.md §7 '본문을 읽기 전의 차례' ①). AuthGuard와 본문 전 판정(admitBeforeBody)이 함께 쓴다(둘이 갈라지지 않게).
+ * 순서: 공개 → 신원 머리 셋 → 종료 세션 → 대상 → 스코프 → 관리 대상이면 identity 세션 판정(역할 캐시) → 비밀번호 바꾸기 필요 세션 → 역할.
+ * 익명으로 통과하면(공개 작업, 신원 없는 기기 증명 경로) undefined. 거절은 401 UnauthorizedException(부르는 쪽이 WWW-Authenticate를 단다)·403·503(authz-unavailable)을 던진다
+ */
+async function judgeIdentity(state: AuthState, policy: RolesPolicy, headers: FastifyRequest['headers'], deviceOnly: boolean): Promise<Principal | undefined> {
+  const roles = policy.roles.filter((r) => r !== 'public') as Exclude<RoleValue, 'public'>[];
+  const identity = identityOf(headers);
+  // 공개 작업: 공개만 허용하면 신원 머리를 보지 않고, 세션이 있으면 더 보이는 작업([public, fan])은 신원이 없을 때만 익명으로 통과
+  if (policy.roles.includes('public') && (roles.length === 0 || !identity)) return undefined;
+  if (!identity) {
+    if (deviceOnly) return undefined;
+    throw new UnauthorizedException();
+  }
+  if (state.terminated.has(identity.sessionId)) throw new UnauthorizedException();
+  if (!roles.some((r) => AUDIENCE_OF[r] === identity.aud)) throw new UnauthorizedException();
+  for (const s of policy.scopes) if (!identity.scopes.includes(s)) throw new ForbiddenException();
+  if (identity.aud !== 'partner' && identity.aud !== 'ops') return identity;
+  const authz = await state.adminAuthzOf(identity.accountId, identity.sessionId, policy.fresh);
+  if (!authz.valid) throw new UnauthorizedException();
+  // 비밀번호 바꾸기 필요 세션은 연 처리기(비밀번호 바꾸기·로그아웃)만(auth-controls §3.5, AC-T4). 끝난 세션이면 위에서 먼저 401이다
+  if (identity.scopes.includes(PASSWORD_CHANGE_SCOPE) && !policy.passwordChangeSession) {
+    throw new ProblemError({ type: 'password-change-required', status: 403, title: '비밀번호를 먼저 바꿔 주세요' });
+  }
+  const role = authz.role as RoleValue;
+  if (!roles.includes(role as Exclude<RoleValue, 'public'>) || AUDIENCE_OF[role as Exclude<RoleValue, 'public'>] !== identity.aud) {
+    throw new ForbiddenException();
+  }
+  const principal: Principal = { ...identity, role: authz.role };
+  if (authz.tenantId) principal.tenantId = authz.tenantId;
+  return principal;
+}
+
+/**
+ * 칸막이 경로의 본문 전 신원 판정(W9-fix3 F5, docs/api/guidelines.md §7 '본문을 읽기 전의 차례' ①). 칸막이 자리를 잡기 전(onRequest)에 부른다.
+ * 공용 가드와 같은 판정 함수를 쓰고 같은 오류를 던진다(401은 UnauthorizedException이라 부르는 쪽이 WWW-Authenticate를 단다). 역할 캐시를 쓰므로
+ * 뒤의 가드(④)는 같은 세션을 identity에 다시 묻지 않는다. 허용 역할이 public뿐이면 아무것도 보지 않는다.
+ * 기기 증명은 여기서 보지 못하므로 scanner_device를 허용한 경로의 신원 없는 요청은 통과시키고 ④의 가드·스캐너 가드에 맡긴다(가드보다 엄하게 거절하지 않는다)
+ */
+export async function admitBeforeBody(state: AuthState, policy: RolesPolicy, headers: FastifyRequest['headers']): Promise<void> {
+  await judgeIdentity(state, policy, headers, policy.roles.includes('scanner_device'));
+}
+
+/** 모든 요청에 거는 가드(전역). 순서: 신원 판정(judgeIdentity: 공개 → 신원 → 종료 세션 → 대상 → 스코프 → 관리 역할) → 멱등 키 → 구매 세션 요청 서명 → 경로 스키마 검사 실패 */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
@@ -357,46 +415,22 @@ export class AuthGuard implements CanActivate {
     if (!policy) throw new ForbiddenException();
     const http = ctx.switchToHttp();
     const request = http.getRequest<FastifyRequest>();
-    const unauthorized = () => {
-      void http.getResponse<FastifyReply>().header('www-authenticate', COOKIE_CHALLENGE);
-      return new UnauthorizedException();
-    };
-    const roles = policy.roles.filter((r) => r !== 'public') as Exclude<RoleValue, 'public'>[];
-    const identity = identityOf(request.headers);
+    const challenge = () => void http.getResponse<FastifyReply>().header('www-authenticate', COOKIE_CHALLENGE);
     const scannerOptions = this.reflector.getAllAndOverride<ScannerAuthOptions | undefined>(SCANNER_AUTH_METADATA, [ctx.getHandler(), ctx.getClass()]);
     // 기기 증명만 하는 스캐너 경로(기기 승인 코드·토큰·기기 인증 업로드)는 사람 신원 머리가 없다.
     // 역할 판정과 기기 상태·세션은 뒤의 ScannerGuard가 한다.
-    const deviceOnly = scannerOptions !== undefined && scannerOptions.token !== 'required' && roles.includes('scanner_device');
-    // 공개 작업: 공개만 허용하면 신원 머리를 보지 않고, 세션이 있으면 더 보이는 작업([public, fan])은 신원이 없을 때만 익명으로 통과
-    if (policy.roles.includes('public') && (roles.length === 0 || !identity)) {
+    const deviceOnly = scannerOptions !== undefined && scannerOptions.token !== 'required' && policy.roles.includes('scanner_device');
+    let principal: Principal | undefined;
+    try {
+      principal = await judgeIdentity(this.state, policy, request.headers, deviceOnly);
+    } catch (err) {
+      if (err instanceof UnauthorizedException) challenge();
+      throw err;
+    }
+    // 공개 작업이나 신원 없는 기기 증명 경로는 익명으로 통과(검사 실패만 낸다)
+    if (!principal) {
       throwAttachedValidationError(request);
       return true;
-    }
-    if (!identity) {
-      if (deviceOnly) {
-        throwAttachedValidationError(request);
-        return true;
-      }
-      throw unauthorized();
-    }
-    if (this.state.terminated.has(identity.sessionId)) throw unauthorized();
-    if (!roles.some((r) => AUDIENCE_OF[r] === identity.aud)) throw unauthorized();
-    for (const s of policy.scopes) if (!identity.scopes.includes(s)) throw new ForbiddenException();
-
-    let principal = identity;
-    if (identity.aud === 'partner' || identity.aud === 'ops') {
-      const authz = await this.state.adminAuthzOf(identity.accountId, identity.sessionId, policy.fresh);
-      if (!authz.valid) throw unauthorized();
-      // 비밀번호 바꾸기 필요 세션은 연 처리기(비밀번호 바꾸기·로그아웃)만(auth-controls §3.5, AC-T4). 끝난 세션이면 위에서 먼저 401이다
-      if (identity.scopes.includes(PASSWORD_CHANGE_SCOPE) && !policy.passwordChangeSession) {
-        throw new ProblemError({ type: 'password-change-required', status: 403, title: '비밀번호를 먼저 바꿔 주세요' });
-      }
-      const role = authz.role as RoleValue;
-      if (!roles.includes(role as Exclude<RoleValue, 'public'>) || AUDIENCE_OF[role as Exclude<RoleValue, 'public'>] !== identity.aud) {
-        throw new ForbiddenException();
-      }
-      principal = { ...identity, role: authz.role };
-      if (authz.tenantId) principal.tenantId = authz.tenantId;
     }
     const rc = requestContext();
     if (rc) {
@@ -411,12 +445,15 @@ export class AuthGuard implements CanActivate {
     if (this.reflector.get<boolean | undefined>(PURCHASE_SIGNED_METADATA, ctx.getHandler()) === true) {
       const port = this.state.purchase.sessions;
       // 시작 확인이 막으므로 오지 않는다. 와도 닫는다
-      if (!port) throw unauthorized();
+      if (!port) {
+        challenge();
+        throw new UnauthorizedException();
+      }
       const rejected = await verifyPurchaseRequest(request, principal, port);
       if (rejected) {
         this.state.purchase.onRejected?.(rejected);
         // 이유별 이름 붙은 401(BAS-040). 신원 401과 같은 WWW-Authenticate를 싣는다(RFC 9110 §15.5.2)
-        void http.getResponse<FastifyReply>().header('www-authenticate', COOKIE_CHALLENGE);
+        challenge();
         throw new ProblemError({ ...PURCHASE_REJECTION_PROBLEMS[rejected] });
       }
     }

@@ -187,8 +187,8 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   });
   const http = app.getHttpAdapter().getInstance() as unknown as FastifyInstance;
   installHttpHooks(http, { metrics, clock, maxDeadlineMs: config.maxDeadlineMs, canonical, ...(o.hotPath ? { hotPath: o.hotPath } : {}) });
-  // 경로 스키마 검사기와 본문 해석기는 경로를 붙이기(app.init) 전에 건다(결정 4·6)
-  installRequestChecks(http);
+  // 경로 스키마 검사기와 본문 해석기는 경로를 붙이기(app.init) 전에 건다(결정 4·6). 칸막이 경로의 본문 전 신원 판정은 가드와 같은 인증 상태를 쓴다(W9-fix3 F5)
+  installRequestChecks(http, auth);
   app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors, ...(o.hotPath ? { hotPath: o.hotPath } : {}) }));
   await app.init();
 

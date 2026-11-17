@@ -4,12 +4,14 @@
 // - 두 길 모두 쿼리·경로·머리의 문자열을 같은 함수로 바꾸고(http-values.ts), 실패는 같은 Problem 400이다
 // - 본문은 application/json만, @AcceptTextPlain()을 단 경로만 text/plain도 JSON으로 읽는다(그 밖은 415, asvs/delivery.md 3.5.2).
 //   @AcceptMultipart()를 단 올리기 경로만 multipart/form-data를 바이트로 받는다(ADR-0257)
-import { BadRequestException, Body, createParamDecorator, type ExecutionContext, Param, type PipeTransform, Query } from '@nestjs/common';
+import { BadRequestException, Body, createParamDecorator, type ExecutionContext, Param, type PipeTransform, Query, UnauthorizedException } from '@nestjs/common';
 import { FASTIFY_ROUTE_CONFIG_METADATA, FASTIFY_ROUTE_SCHEMA_METADATA } from '@nestjs/platform-fastify/constants.js';
 import { Ajv, type ValidateFunction } from 'ajv';
 import addFormatsModule from 'ajv-formats';
-import type { FastifyInstance, FastifyRequest, FastifySchema } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest, FastifySchema } from 'fastify';
 import { z } from 'zod';
+// 순환 가져오기(auth.ts도 이 파일을 가져온다)지만 둘 다 함수 안에서만 쓴다(모듈을 읽는 동안에는 쓰지 않는다)
+import { admitBeforeBody, type AuthState, COOKIE_CHALLENGE, ROUTE_ROLES_KEY, type RolesPolicy } from './auth.js';
 import { type HttpPart, type JsonSchema, httpValueCoercer } from './http-values.js';
 import { keepRawBody } from './raw-body.js';
 import { ProblemError } from './problem.js';
@@ -249,8 +251,9 @@ export interface AcceptMultipartOptions {
   /** 상한을 넘었을 때 낼 이름 붙은 413(경로마다 이름이 다르다, 예 image-too-large) */
   tooLarge: () => ProblemError;
   /**
-   * 같은 이름의 경로들이 함께 쓰는 동시 처리 칸막이(벌크헤드, 서비스 인스턴스마다 하나). 자리는 본문을 읽기 전(그 경로의 onRequest)에 잡고
-   * 응답이 끝나거나 연결이 끊기면 놓는다. 차면 본문을 읽지 않고 429 server-busy와 Retry-After(초)다(ADR-0257 결정 2)
+   * 같은 이름의 경로들이 함께 쓰는 동시 처리 칸막이(벌크헤드, 서비스 인스턴스마다 하나). 자리는 본문을 읽기 전(그 경로의 onRequest)에
+   * 신원 판정 뒤에 잡고(guidelines §7 '본문을 읽기 전의 차례') 응답이 끝나거나 연결이 끊기면 놓는다. 차면 본문을 읽지 않고 429 server-busy와
+   * Retry-After(초)이고 연결을 닫는다(ADR-0257 결정 2). 이 경로의 허용 역할(@Roles)은 처리기에 단다
    */
   bulkhead?: { name: string; limit: number; retryAfterSeconds: number };
 }
@@ -373,14 +376,39 @@ function unsupportedMediaType(): Error {
 }
 
 /**
+ * 본문이 오는 요청(Content-Length가 0보다 크거나 chunked)인데 아직 다 받지도 다 읽지도 않았는가.
+ * 소켓은 끝까지 받았으면(complete) 더 읽을 것이 없고, inject 요청은 complete가 없어 다 읽었는지(readableEnded)로 본다
+ */
+function bodyPending(request: FastifyRequest): boolean {
+  if (request.raw.complete === true || request.raw.readableEnded) return false;
+  const length = Number(request.headers['content-length']);
+  return request.headers['transfer-encoding'] !== undefined || (Number.isFinite(length) && length > 0);
+}
+
+/**
+ * 본문을 다 읽기 전의 오류 답(W9-fix3 F4, docs/api/guidelines.md §7 '본문을 다 읽기 전에 답하면 연결을 닫는다'). Connection: close를 달아
+ * 응답을 다 보낸 뒤 연결을 닫게 한다(그러지 않으면 Node가 연결을 다시 쓰려고 남은 본문을 끝까지 읽는다). 401은 가드처럼 WWW-Authenticate를 단다
+ */
+function rejectBeforeBody(reply: FastifyReply, err: unknown, done: (err?: Error) => void): void {
+  void reply.header('connection', 'close');
+  if (err instanceof UnauthorizedException) void reply.header('www-authenticate', COOKIE_CHALLENGE);
+  done(err instanceof Error ? err : new Error(String(err)));
+}
+
+const serverBusy = (b: RouteBulkhead) => new ProblemError({ type: 'server-busy', status: 429, title: '요청이 많아 잠시 처리하지 못했습니다', retryAfterSeconds: b.retryAfterSeconds });
+
+/**
  * 요청 검사 설치(결정 4·6). 경로를 붙이기(app.init) 전에 부른다.
  * - 플랫폼 검사기 생성기
  * - @ContractRouteSchema를 단 경로는 검사 결과를 요청에 붙이기만 하고(attachValidation), 인증 가드가 신원을 판정한 뒤 400을 낸다.
  *   Fastify 검사는 Nest 가드보다 먼저 돌아 익명 요청이 401 대신 400을 받았다(검사 규칙을 떠볼 수 있다, 코드 리뷰 2026-11-01)
+ * - 칸막이 경로(W9-fix3 F5, guidelines §7 '본문을 읽기 전의 차례'): onRequest에서 ① 신원(auth로 공용 가드와 같은 판정) ② 칸막이 자리 차례로 보고,
+ *   ③ 본문 ④ 공용 가드 전체는 그 뒤다. ①·②에서 막히면 본문을 읽지 않고 연결을 닫는다(F4). 허용 역할이 처리기에 없으면 시작하지 않는다
+ * - 본문을 다 읽기 전의 오류 답(해석기의 413 등)도 연결을 닫는다(F4). 정상 응답은 keep-alive 그대로다
  * - 본문 해석기: Fastify 기본 text/plain 해석기(문자열을 그대로 넘김)를 지우고, 표시한 경로만 기본 JSON 해석기(원형 오염 키 거부)로
  *   읽는다. application/json 밖의 형식은 해석기가 없어 Fastify가 415로 답한다
  */
-export function installRequestChecks(http: FastifyInstance): void {
+export function installRequestChecks(http: FastifyInstance, auth: AuthState): void {
   http.setValidatorCompiler(platformValidatorCompiler());
   /** 칸막이 이름 → 쓰는 자리 수(이 서비스 인스턴스 안에서만 나눈다) */
   const inUse = new Map<string, number>();
@@ -390,23 +418,26 @@ export function installRequestChecks(http: FastifyInstance): void {
     if (typeof config?.[BODY_LIMIT_KEY] === 'number') route.bodyLimit = config[BODY_LIMIT_KEY];
     const bulkhead = (config?.[MULTIPART_KEY] as AcceptMultipartOptions | undefined)?.bulkhead ?? (config?.[BULKHEAD_KEY] as RouteBulkhead | undefined);
     if (bulkhead) {
-      const hook = (request: FastifyRequest, reply: { raw: NodeJS.EventEmitter }, done: (err?: Error) => void) => {
-        const used = inUse.get(bulkhead.name) ?? 0;
-        if (used >= bulkhead.limit) {
-          done(new ProblemError({ type: 'server-busy', status: 429, title: '요청이 많아 잠시 처리하지 못했습니다', retryAfterSeconds: bulkhead.retryAfterSeconds }));
-          return;
-        }
-        inUse.set(bulkhead.name, used + 1);
+      // 본문 전 신원 판정은 처리기에 단 @Roles가 경로 설정에 적은 정책을 쓴다. 클래스에만 달면 여기서 볼 수 없어 시작을 막는다
+      const policy = config?.[ROUTE_ROLES_KEY] as RolesPolicy | undefined;
+      if (!policy) {
+        const methods = Array.isArray(route.method) ? route.method.join(',') : route.method;
+        throw new Error(`칸막이 경로 ${methods} ${route.url}의 허용 역할(@Roles)이 처리기에 없다(클래스에만 달면 본문을 읽기 전에 신원을 판정하지 못한다, docs/api/guidelines.md §7 '본문을 읽기 전의 차례')`);
+      }
+      const publicOnly = policy.roles.every((r) => r === 'public');
+      const hook = (request: FastifyRequest, reply: FastifyReply, done: (err?: Error) => void) => {
+        let held = false;
         let released = false;
         let handled = false;
         let closed = false;
         const release = () => {
-          if (released) return;
+          if (!held || released) return;
           released = true;
           inUse.set(bulkhead.name, (inUse.get(bulkhead.name) ?? 1) - 1);
         };
         // 응답이 끝나면(finish) 놓는다. 연결이 먼저 끊기면(close) 처리기가 끝난 뒤(응답을 보내기 시작한 때, onSend)에 놓는다:
-        // 손님이 끊어도 처리기는 본문을 쥐고 일하고 있으므로 그 자리를 다른 요청에 주지 않는다(ADR-0260 결정 11). 요청 본문의 close는 본문을 다 읽은 때라 쓰지 않는다
+        // 손님이 끊어도 처리기는 본문을 쥐고 일하고 있으므로 그 자리를 다른 요청에 주지 않는다(ADR-0260 결정 11). 요청 본문의 close는 본문을 다 읽은 때라 쓰지 않는다.
+        // 신원 판정을 기다리는 동안 끊긴 것도 놓치지 않게 판정 전에 건다(자리를 잡기 전에 끝난 응답이면 놓을 것이 없다)
         (request as unknown as Record<symbol, () => void>)[BULKHEAD_DONE] = () => {
           handled = true;
           if (closed) release();
@@ -416,7 +447,22 @@ export function installRequestChecks(http: FastifyInstance): void {
           closed = true;
           if (handled) release();
         });
-        done();
+        const take = () => {
+          const used = inUse.get(bulkhead.name) ?? 0;
+          if (used >= bulkhead.limit) {
+            rejectBeforeBody(reply, serverBusy(bulkhead), done);
+            return;
+          }
+          inUse.set(bulkhead.name, used + 1);
+          held = true;
+          done();
+        };
+        // ① 신원 → ② 자리. 공개만 허용하면 ①이 없다
+        if (publicOnly) {
+          take();
+          return;
+        }
+        admitBeforeBody(auth, policy, request.headers).then(take, (err: unknown) => rejectBeforeBody(reply, err, done));
       };
       const sent = (request: FastifyRequest, _reply: unknown, payload: unknown, done: (err: Error | null, payload?: unknown) => void) => {
         (request as unknown as Record<symbol, (() => void) | undefined>)[BULKHEAD_DONE]?.();
@@ -427,6 +473,11 @@ export function installRequestChecks(http: FastifyInstance): void {
       const prevSend = route.onSend;
       route.onSend = (prevSend === undefined ? [] : Array.isArray(prevSend) ? prevSend : [prevSend]).concat(sent as never) as typeof route.onSend;
     }
+  });
+  // 본문을 다 읽기 전에 낸 오류 답(해석기의 413·415 등, 칸막이 훅은 위에서 이미 단다)은 연결을 닫는다(F4). Fastify 해석기 길이 다는 것에 기대지 않는다
+  http.addHook('onSend', (request, reply, payload, done) => {
+    if (reply.statusCode >= 400 && bodyPending(request)) void reply.header('connection', 'close');
+    done(null, payload);
   });
   const json = http.getDefaultJsonParser('error', 'error');
   // 해석기는 바이트로 받아 해석 전 바이트를 남기고(요청 지문·요청 서명, add-idempotency-and-outbox 결정 4), 해석은 기본 JSON 해석기에 맡긴다

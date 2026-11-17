@@ -17,6 +17,8 @@ import type { FastifyInstance } from 'fastify';
 import { CreateQueueEntryBody, CreateQueueEntryParams, CreateQueueEntryResponse } from '@peaket/contracts/openapi/queue';
 import { CreateEventHoldBody, CreateEventHoldParams, CreateEventHoldResponse } from '@peaket/contracts/openapi/seats';
 // 플랫폼 원본을 바로 가져온다(본문 해석기·경로 스키마 검사기를 거는 installRequestChecks는 서비스 시작 함수 안에서만 쓰여 내보내지 않는다)
+import { AuthState } from '../../../src/auth.js';
+import { systemClock } from '../../../src/clock.js';
 import { ProblemFilter } from '../../../src/problem-filter.js';
 import { AcceptTextPlain, ContractBody, ContractParams, ContractRouteSchema, installRequestChecks, throwAttachedValidationError } from '../../../src/request-checks.js';
 
@@ -127,7 +129,8 @@ async function main(): Promise<void> {
       bodyParser: false,
       logger: ['error'],
     });
-    installRequestChecks(app.getHttpAdapter().getInstance() as unknown as FastifyInstance);
+    // 칸막이 경로가 없어 본문 전 신원 판정은 돌지 않는다(인증 상태는 빈 것)
+    installRequestChecks(app.getHttpAdapter().getInstance() as unknown as FastifyInstance, new AuthState(systemClock));
     app.useGlobalFilters(filter);
     app.useGlobalGuards(new CheckGuard());
     await app.listen(PORT, '0.0.0.0');
