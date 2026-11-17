@@ -79,6 +79,6 @@ export { PgChannelLimitSync, type PgChannelLimitSyncDeps, type PgChannelLimitSyn
 export { DrizzlePgChannelLimit, DrizzlePgChannelObserved, PG_CHANNEL_LIMIT_READ_TIMEOUT_MS, PG_CHANNEL_LIMIT_WRITE_TIMEOUT_MS, PG_CHANNEL_OBSERVED_READ_TIMEOUT_MS } from './adapters/db/drizzle-pg-channel-limit.js';
 export { PromPgChannelSignals } from './adapters/prom-pg-channel-signals.js';
 export { pgChannelLog } from './adapters/pg-channel-log.js';
-export { AssignEventPg, type AssignEventPgDeps, type AssignEventPgInput } from './application/assign-event-pg.js';
+export { AssignEventPg, type AssignEventPgDeps, type AssignEventPgInput, EVENT_PG_ASSIGN_MAX_SKEW_MS } from './application/assign-event-pg.js';
 export { CachedPgChannelObservations, type CachedPgChannelObservationsOptions, PG_CHANNEL_OBSERVED_MAX_STALE_MS, PG_CHANNEL_OBSERVED_READ_BUDGET_MS, PG_CHANNEL_OBSERVED_TTL_MS, PortoneFallbackExclusions } from './application/pg-channel-observations.js';
 export { PgChannelObserver, type PgChannelObserverDeps, type PortoneObservedChannel } from './application/pg-channel-observer.js';
