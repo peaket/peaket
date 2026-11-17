@@ -82,6 +82,14 @@
 - W8-audit2a(다시 보기 N5, 낮음): 손으로 하는 파기가 `order by id limit … for update`로 잠가, 같은 계정을 거의 동시에 두 번 부르면 보류 행이 50개 넘게 남아도 뒤 호출이 0행으로 409를 낼 수 있다(`drizzle-review-store.ts:327-335`). 정본은 409를 끝 신호로 쓴다. 겹쳐 부르기는 드물고 파기는 이미 끝난 뒤다.
 - W8-audit2a(검증 2 V14, 낮음): C1 대체 예약 때 남기는 경고 줄(`account-withdrawn.handler.ts:81`)을 보는 단언이 없다. 경고 줄은 계획 §9.2에만 있고 정본에는 없다.
 - W8-audit2a(검증 2 V23, 낮음): 손으로 하는 파기의 한 트랜잭션 안에서 파기와 예약의 차례를 바꾸는 변이를 잡는 겹침 시험이 없다(`drizzle-review-store.ts:338-342`, 검증 1 D09와 같은 꼴).
+- BAT-420(GAT-110) 다시 보기 2 N3: 일괄 환불 잡기 기한(60초)을 늘리지 않아, 표가 여럿인 느린 주문은 처리 도중 잡기가 풀려 다른 파드가 같은 주문을 다시 잡는다(같은 취소 ID라 돈은 한 번이지만 겹친 결과 모름이 자동 정지 셈에 든다). 표를 보내기 전 남은 기한이 표 한도(30초)보다 짧으면 그 주문의 나머지를 남기거나 기한을 조건부로 늘린다(services/purchase-svc `drizzle-event-refund-claims.ts:36`·`event-refund-service.ts:532`)
+- BAT-420(GAT-110) 다시 보기 2 N4: 풀지 못한 지난 잡기가 남은 항목은 수동 재개의 '다음 시각 당기기'가 조용히 건너뛴다(돈 문제 없음, 본래 다음 시각까지 기다림). 조건을 `claim_token is null or claimed_until <= now()`로(services/purchase-svc `drizzle-event-refund-store.ts:239`·`event-refund-service.ts:311`)
+- BAT-420(GAT-110) 다시 보기 2 N5: 파트너 넣기 정책의 WITH CHECK가 promoter_id만 보고, 감사 정의자 함수는 그 요청이 있는지만 본다(깊은 방어, 다른 테넌트로는 새지 않음). 정책에 `requested_via = 'PARTNER' AND status = 'REQUESTED'`를 더하고, 함수는 같은 기록 ID의 접수 기록이 이미 있으면 거절한다(services/ops-svc `migrations/0015_event_cancellation_partner_rls.sql:43~69`)
+- BAT-420(GAT-110) 다시 보기 2 N6: ops가 category를 버려 같은 취소 ID의 '환급 실패' 건과 '차액' 건이 `(kind, target_ref)`로 한 건에 모인다(둘이 함께 열려 있을 때만). category를 건에 남길지, 열린 건 키에 넣을지 정한다(services/ops-svc `receive-case-requested.ts:14`)
+- BAT-420(GAT-110) 다시 보기 2 N8: 결제사마다의 자동 정지가 겹친 두 실행의 진행률 쓰기에서 지워질 수 있다(`updateActive`가 그 실행이 아는 멈춤 목록으로 progress를 통째로 씀, 다음 표에서 대개 다시 멈춤). 진행률의 결제사 멈춤을 DB 값과 합쳐 쓴다(services/purchase-svc `event-refund-service.ts:585`)
+- BAT-420(GAT-110) 구현 담당이 남긴 것: 회차 취소 확정 경로의 409 설명에 `already-approved`가 없다(문제 종류 목록에는 있다, docs/api/openapi.yaml ops 회차 취소 확정)
+- BAT-420(GAT-110) 구현 담당이 남긴 것: ops 파트너 풀의 DB 역할 시작 검사(core `assertDatabaseRole` 같은 것)가 없어, 운영에서 `PEAKET_PARTNER_DATABASE_URL`이 표 소유자를 가리키면 행 보안을 조용히 건너뛴다(authz-matrix §5.3 '앱 사용자는 표 소유자가 아니게', services/ops-svc `event-cancellation-wiring.ts`·`app.module.ts`)
+- BAT-420(GAT-110) 계획 보충 5를 쓰며 본 것: `#retryOrFail`의 FAILED 쓰기(시도 상한 전의 그 밖 실패)는 팬 실패 알림 Outbox를 남기지 않는다. 보충 5로 CS 건은 생기지만 팬은 실패를 듣지 못한다(services/purchase-svc `event-refund-service.ts:625`)
 
 ## 진행 로그
 - 2026-11-17 W8-audit2a(R-672): 탈퇴 계정 후기 파기와 16분 뒤 다시 정리(I-T83, ADR-0278)를 develop 위로 다시 쌓고(충돌 둘: ADR 목록, core journal 0023·0026), 다시 보기 N1(키 없는 보류 행 셈)·N3을 계획·시험·구현·리뷰·검증 다른 담당으로 고쳐 합쳤다. core 통합 305개 통과, 변이 검증 2 30개 중 24개+시험 넷, 감독 예외 넷(리뷰를 계획 절 밖에 씀). 소유자 세션 감독.
