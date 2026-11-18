@@ -16,3 +16,6 @@
 - BAT-053(R-694) CON-02 곁가지 낮음: 같은 박자에 맺은 연결들의 하트비트가 한 박자에 몰린다(services/realtime-gw/src/modules/stream/application/hub.ts).
 - BAT-053(R-694) 검증 참고: observability §3 realtime-gw 행에 `realtime_gw_degraded`·`realtime_gw_pubsub_lag_ms`가 없다(§5·G-06 행에는 있음)(docs/observability.md).
 - BAT-052·BAT-053 CI 흔들림: `web / budgets`의 월렛 Lighthouse(LCP·CLS·총 차단 시간)가 웹을 건드리지 않은 PR에서 두 번 실패해 실패한 잡만 다시 돌려 통과(PR #24 실행 44355043848, PR #27 실행 44388717732)(갈래 2 영역).
+- W11-rtgw-flake(R-700) RV-01·검증 낮음: 좌석 글 바이트 같음 단언이 RF-T6 몸 안에 있어 `-t`로 다른 시험만 돌리면 안 돌고, 좌석 수 집합도 손으로 적었다 — 도우미만 보는 시험으로 떼어 낸다(services/realtime-gw/test/degraded.test.ts).
+- W11-rtgw-flake(R-700) RV-03·RV-04 낮음: RF-T4·RF-T1은 시험별 한도 없이 남김(CI 어림 1.7s·1.45s) — CI에서 2,500ms를 넘으면 한도를 준다. RF-T6은 허브 자신의 처리가 시간을 써 한도로만 막음(제품 코드 범위 밖).
+- W11-rtgw-flake(R-700) RV-05 정보: 같은 꼴로 느려질 수 있는 시험 후보 — realtime-gw `layout-sections.test.ts` 'S-T42 ⑳'(65,536구역 판), `hub.test.ts` 'S-T42 ⑲'(실제 타이머 경주), `gateway.test.ts` 'S-T42 ⑯' 셋, queue-svc `state-mirror.test.ts`(이 폴더에서 vitest 실패로 못 잼).
