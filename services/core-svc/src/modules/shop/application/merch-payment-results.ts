@@ -2,7 +2,7 @@
 // 1초 [가정]마다 다음 시각이 된 승인 명령 작업을 100건 [가정]까지 FOR UPDATE SKIP LOCKED로 잡는다(잡은 작업은 30초 동안 다시 잡히지 않는다).
 // - 받아짐을 모르는 작업(sent 거짓): 승인 기한(인증 + 10분) 전이면 ConfirmPayment를 다시 보낸다(1초부터 두 배씩 30초까지).
 //   기한이 지났으면 다시 보내지 않고 BatchGetPayments로 묻는다. 결제가 없으면(명령이 기록되지 않음) 주문 FAILED(O6 승인 기한 초과)와 두 재고 복구,
-//   있으면 받아짐으로 바꾸고 그 결과대로 반영한다(시간 초과로 답을 못 받았어도 payment-svc가 적었을 수 있다). 묻지 못하면 그 작업을 5초 [가정] 미룬다(RV-01, P-T56 ⑨).
+//   있으면 받아짐으로 바꾸고 그 결과대로 반영한다(시간 초과로 답을 못 받았어도 payment-svc가 적었을 수 있다). 묻지 못하면 그 작업을 5초 [가정] 미룬다(RV-01, P-T57 ⑨).
 // - 받아진 작업: BatchGetPayments로 묻는다. APPROVED(취소 상태 포함) → PAID와 RELEASE(restore=0), FAILED → FAILED·product_stock 복구와 RELEASE(restore=1),
 //   ACCEPTED 2초·UNKNOWN 30초·입금 대기 60초 뒤 다시, 답에 없으면 기한 전에는 다시 보내기·기한 뒤에는 FAILED(다시 보내지 않는다),
 //   payment-svc가 답하지 못하면 그 묶음을 5초 미룬다.
