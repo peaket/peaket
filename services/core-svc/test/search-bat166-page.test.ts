@@ -194,3 +194,58 @@ describe('SR-T13 ① 큰 후보를 끊어 처리해도 답은 그대로이고 �
     expect(atSuggest).toBeLessThan(n);
   });
 });
+
+// 검증 P12(계획 '검증' 절): 끊어 처리하는 사이(다음 차례로 넘기는 동안) 같은 어댑터의 다른 검색이 끼어든다. 중간 결과를 요청 밖에 두면 두 검색의 후보가 빠지거나 섞인다
+/** 질의 값에 든 글로 후보를 고르는 가짜 DB(후보 질의만 줄을 돌려주고, 관련 공연 등 다른 질의는 빈 줄) */
+function routedDb(routes: Array<{ key: string; rows: DocumentRow[] }>): Database {
+  const strings = (v: unknown, out: string[] = [], seen = new Set<unknown>()): string[] => {
+    if (typeof v === 'string') out.push(v);
+    else if (v && typeof v === 'object' && !seen.has(v)) {
+      seen.add(v);
+      for (const x of Object.values(v)) strings(x, out, seen);
+    }
+    return out;
+  };
+  return {
+    transaction: async <T>(fn: (t: unknown) => Promise<T>): Promise<T> =>
+      fn({
+        execute: async (query: unknown) => {
+          const text = strings(query).join('\n');
+          if (!/search_term/.test(text)) return { rows: [] };
+          return { rows: routes.find((r) => text.includes(r.key))?.rows ?? [] };
+        },
+      }),
+  } as unknown as Database;
+}
+
+describe('SR-T13 ① 끊어 처리하는 사이 함께 온 검색(검증 P12)', () => {
+  test('SR-T13 ① 후보가 큰 검색 둘을 같은 어댑터에 함께 보내도 각자의 쪽·전체 수가 혼자 보냈을 때와 같다', async () => {
+    const make = (prefix: string, title: string, n: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...row(i, i % 7), production_id: `${prefix}-${String(i).padStart(5, '0')}`, title }));
+    // 서로 다른 질의, 둘 다 덩이 하나(2,000줄)보다 크고 줄 수도 다르다
+    const a = make('a', '같은 이름 공연', 5_003);
+    const b = make('b', '다른 제목 공연', 3_501);
+    const db = routedDb([
+      // 후보 질의는 입력의 낱자를 값으로 싣는다
+      { key: nameKeys('같은 이름').jamo, rows: a },
+      { key: nameKeys('다른 제목').jamo, rows: b },
+    ]);
+    const qa = q('같은 이름', { page: 2 });
+    const qb = q('다른 제목', { sort: 'POPULAR' });
+    const solo = new DrizzleSearchIndex(db, 'https://img.test');
+    const wantA = await solo.search(qa);
+    const wantB = await solo.search(qb);
+    // 혼자 보낸 답이 맞는 후보에서 나왔다(빈 결과로 통과하지 않게)
+    expect([wantA.items.length, wantA.total, wantA.items.every((x) => x.productionId.startsWith('a-'))]).toEqual([PAGE, CAP, true]);
+    expect([wantB.items.length, wantB.total, wantB.items.every((x) => x.productionId.startsWith('b-'))]).toEqual([PAGE, CAP, true]);
+    // 같은 어댑터(같은 인스턴스)에 함께 보낸다. 끼어드는 차례를 바꿔 두 번
+    const shared = new DrizzleSearchIndex(db, 'https://img.test');
+    const [gotA, gotB] = await Promise.all([shared.search(qa), shared.search(qb)]);
+    expect(ids(gotA)).toEqual(ids(wantA));
+    expect(ids(gotB)).toEqual(ids(wantB));
+    expect([gotA.total, gotB.total]).toEqual([wantA.total, wantB.total]);
+    const [gotB2, gotA2] = await Promise.all([shared.search(qb), shared.search(qa)]);
+    expect(ids(gotA2)).toEqual(ids(wantA));
+    expect(ids(gotB2)).toEqual(ids(wantB));
+  });
+});
