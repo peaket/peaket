@@ -27,6 +27,8 @@ export const SLOW_BUFFER_EXIT_BYTES = 64 * 1024;
 export const SLOW_BUFFER_EXIT_TURNS = 30;
 /** 쌓인 묶음의 프레임 크기가 이 값에 닿으면 간격과 관계없이 그 자리에서 보낸다(64KiB [가정], ADR-0298 결정 5) */
 export const MAX_PENDING_FRAME_BYTES = 64 * 1024;
+/** 버퍼 1초 연결의 차례 보내기에 박자마다 주는 몫(ms, 20 [가정], 괜찮음 기준 25ms 아래, ADR-0298 결정 5, SEC-06) */
+export const BUFFER_SLOW_SEND_BUDGET_MS = 20;
 /** 주기 하트비트 간격(ms, [가정]) */
 export const HEARTBEAT_EVERY_MS = 15_000;
 /** 구독 바꾸기를 세는 창(ms). (t − 창, t] 안의 SubscribeSections 수를 센다 */
@@ -111,7 +113,7 @@ export interface StreamHub {
   receive(c: StreamConnection, data: Uint8Array, isBinary: boolean): void;
   /** 연결이 닫혔다(상대가 닫았거나 끊겼다). 여러 번 불러도 된다 */
   gone(c: StreamConnection): void;
-  /** 박자 하나: 파드 창 판정 → (연결마다) 만료(4401) → 보내기 버퍼(1013) → 간격 판정과 BatchInterval → 쌓인 묶음 → 주기 하트비트 */
+  /** 박자 하나: 파드 창 판정 → (연결마다) 만료(4401) → 보내기 버퍼(1013) → 간격 판정과 BatchInterval → 쌓인 묶음 → 주기 하트비트 → (뒤 고리) 버퍼 1초 연결의 차례 보내기(20ms 몫) */
   tick(): void;
   /** 모든 연결을 1012로 닫고, 구독 해제 응답은 1초까지만 기다린다(ADR-0297 결정 5). 그 뒤 open은 곧 1012로 닫는다 */
   shutdown(): Promise<void>;
@@ -156,6 +158,11 @@ interface Conn {
   bufferSlow: boolean;
   /** bufferSlow인 동안 차례 직전 버퍼가 SLOW_BUFFER_EXIT_BYTES 이하였던 이어진 차례 수(넘는 차례가 끼면 0) */
   lowTurns: number;
+  /**
+   * 버퍼 1초 연결이 뒤 고리 줄에 서 있는 까닭(보내면 지운다). turn은 열린 1초 차례,
+   * switch는 1초로 바뀐 박자의 쌓인 것 보내기(차례를 넘기지 않고 버퍼 표본도 보지 않는다)
+   */
+  turnOpen: 'turn' | 'switch' | undefined;
 }
 
 export function createStreamHub(d: StreamHubDeps): StreamHub {
@@ -177,6 +184,15 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
   let lastTickStartMs: number | undefined;
   /** 지금 박자의 예정 시각(박자 늦음 표본의 기준) */
   let tickDueMs = 0;
+  /** 차례가 열린 버퍼 1초 연결의 줄(뒤 고리가 앞에서부터 보낸다. 몫을 넘겨 못 보낸 연결은 다음 박자에 맨 앞이다) */
+  const openTurns: Conn[] = [];
+
+  /** 1초 차례를 넘긴다: 지난 차례 + 1,000ms(고정 격자). 지금보다 1,000ms 넘게 뒤졌으면 지난 차례를 건너뛴다(ADR-0298 결정 5) */
+  const advanceTurn = (conn: Conn, mono: number): void => {
+    conn.nextTurnMs += DEGRADED_BATCH_INTERVAL_MS;
+    const behind = mono - conn.nextTurnMs;
+    if (behind > DEGRADED_BATCH_INTERVAL_MS) conn.nextTurnMs += Math.floor(behind / DEGRADED_BATCH_INTERVAL_MS) * DEGRADED_BATCH_INTERVAL_MS;
+  };
 
   const metric = (name: string, labels: Record<string, string>, value: number): void => d.onMetric?.(name, labels, value);
 
@@ -370,6 +386,7 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
         nextTurnMs: openedMs,
         bufferSlow: false,
         lowTurns: 0,
+        turnOpen: undefined,
       };
       conn.intervalMs = wantedInterval(conn);
       // Degraded 중에 붙은 연결은 맺은 때를 1초가 된 때로 보고 차례를 흩는다
@@ -446,33 +463,38 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
           closeConn(conn, CLOSE.TRY_AGAIN_LATER, CLOSE_REASON.slowConsumer);
           continue;
         }
-        // 1초 간격 연결의 차례 박자인가(고정 격자)
-        const turn = conn.intervalMs !== BATCH_INTERVAL_MS && mono >= conn.nextTurnMs;
-        // 보내기 버퍼로 그 연결만 바꾼다(ADR-0298 결정 3): 100ms 간격이면 박자마다 보고 256KiB 이상이면 1초.
-        // 버퍼로 1초가 된 연결은 차례 박자에서 보내기 바로 전 버퍼만 보고, 64KiB 이하인 차례가 30번 이어지면 되돌린다(넘는 차례가 끼면 처음부터)
-        if (conn.intervalMs === BATCH_INTERVAL_MS) {
-          if (buffered >= SLOW_BUFFER_ENTER_BYTES) setBufferSlow(conn, true);
-        } else if (conn.bufferSlow && turn) {
-          conn.lowTurns = buffered <= SLOW_BUFFER_EXIT_BYTES ? conn.lowTurns + 1 : 0;
-          if (conn.lowTurns >= SLOW_BUFFER_EXIT_TURNS) setBufferSlow(conn, false);
-        }
-        // 간격이 바뀐 박자에 BatchInterval을 한 번 보내고, 쌓인 것도 그 박자에 보낸다(같으면 다시 보내지 않는다, 결정 4)
-        const wanted = wantedInterval(conn);
-        if (wanted !== conn.intervalMs) {
-          conn.intervalMs = wanted;
-          // 1초가 된 박자 t에서 첫 차례는 t + 100 × ((연결 번호 mod 10) + 1)(전환 때 모든 연결이 한 박자에 몰리지 않게, 결정 5)
-          if (wanted === DEGRADED_BATCH_INTERVAL_MS) conn.nextTurnMs = firstTurn(conn, mono);
-          if (!sendTo(conn, encodeBatchInterval(wanted))) continue;
-          flush(conn, true);
-        } else if (conn.intervalMs === BATCH_INTERVAL_MS) {
-          flush(conn, true);
-        } else if (turn) {
-          // 1초 간격: 차례가 된 뒤 첫 박자에 보낸다. 다음 차례는 지난 차례 + 1,000ms(고정 격자라 박자 늦음이 쌓이지 않는다).
-          // 지금보다 1,000ms 넘게 뒤졌으면 지난 차례를 건너뛴다. 쌓인 것이 없어도 차례는 넘어간다(결정 5)
-          conn.nextTurnMs += DEGRADED_BATCH_INTERVAL_MS;
-          const behind = mono - conn.nextTurnMs;
-          if (behind > DEGRADED_BATCH_INTERVAL_MS) conn.nextTurnMs += Math.floor(behind / DEGRADED_BATCH_INTERVAL_MS) * DEGRADED_BATCH_INTERVAL_MS;
-          flush(conn, true);
+        if (conn.bufferSlow) {
+          // 버퍼로 1초가 된 연결: 차례가 되면 열어 뒤 고리 줄 끝에 세운다(보내기는 다른 연결을 모두 돈 뒤, SEC-06)
+          if (conn.turnOpen === undefined && mono >= conn.nextTurnMs) {
+            conn.turnOpen = 'turn';
+            openTurns.push(conn);
+          }
+        } else {
+          // 1초 간격 연결(파드가 Degraded)의 차례 박자인가(고정 격자)
+          const turn = conn.intervalMs !== BATCH_INTERVAL_MS && mono >= conn.nextTurnMs;
+          // 보내기 버퍼로 그 연결만 바꾼다(ADR-0298 결정 3): 100ms 간격이면 박자마다 보고 256KiB 이상이면 1초
+          if (conn.intervalMs === BATCH_INTERVAL_MS && buffered >= SLOW_BUFFER_ENTER_BYTES) setBufferSlow(conn, true);
+          // 간격이 바뀐 박자에 BatchInterval을 한 번 보내고, 쌓인 것도 그 박자에 보낸다(같으면 다시 보내지 않는다, 결정 4)
+          const wanted = wantedInterval(conn);
+          if (wanted !== conn.intervalMs) {
+            conn.intervalMs = wanted;
+            // 1초가 된 박자 t에서 첫 차례는 t + 100 × ((연결 번호 mod 10) + 1)(전환 때 모든 연결이 한 박자에 몰리지 않게, 결정 5)
+            if (wanted === DEGRADED_BATCH_INTERVAL_MS) conn.nextTurnMs = firstTurn(conn, mono);
+            if (!sendTo(conn, encodeBatchInterval(wanted))) continue;
+            if (conn.bufferSlow) {
+              // 버퍼로 1초가 된 박자에 쌓인 것은 뒤 고리에서 보낸다(같은 박자 남의 표본을 늦추지 않게, SEC-06)
+              conn.turnOpen = 'switch';
+              openTurns.push(conn);
+            } else {
+              flush(conn, true);
+            }
+          } else if (conn.intervalMs === BATCH_INTERVAL_MS) {
+            flush(conn, true);
+          } else if (turn) {
+            // 1초 간격: 차례가 된 뒤 첫 박자에 보낸다. 쌓인 것이 없어도 차례는 넘어간다(결정 5)
+            advanceTurn(conn, mono);
+            flush(conn, true);
+          }
         }
         if (conn.closed) continue;
         // 마지막 주기 하트비트(처음에는 맺은 때)에서 15초가 지난 첫 박자(TimeSync 답은 이 주기를 옮기지 않는다)
@@ -481,6 +503,44 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
           sendTo(conn, encodeHeartbeat(now, 0n));
         }
       }
+
+      // 뒤 고리: 버퍼 1초 연결의 차례 보내기. 뒤 고리를 시작한 때부터 20ms 몫 안에서만 보내고, 넘으면 남은 연결은
+      // 차례를 연 채 다음 박자 뒤 고리의 맨 앞에 둔다(다음 차례 격자는 그대로, ADR-0298 결정 5, SEC-06).
+      // 이 묶음은 박자 늦음 표본으로 세지 않는다(결정 1)
+      const backStartMs = d.clock.monotonicMs();
+      let done = 0;
+      for (; done < openTurns.length; done += 1) {
+        const conn = openTurns[done]!;
+        const why = conn.turnOpen;
+        if (conn.closed || !conn.bufferSlow || why === undefined) {
+          conn.turnOpen = undefined;
+          continue;
+        }
+        if (d.clock.monotonicMs() - backStartMs >= BUFFER_SLOW_SEND_BUDGET_MS) break;
+        conn.turnOpen = undefined;
+        if (why === 'switch') {
+          // 1초로 바뀐 박자에 쌓인 것(BatchInterval 1000은 앞 고리에서 보냈다)
+          flush(conn);
+          continue;
+        }
+        // 보내기 바로 전 버퍼를 본다: 1MiB를 넘었으면 1013, 64KiB 이하인 차례가 30번 이어지면 되돌린다(넘는 차례가 끼면 처음부터, 결정 3)
+        const buffered = conn.c.bufferedAmount;
+        if (buffered > MAX_BUFFERED_BYTES) {
+          closeConn(conn, CLOSE.TRY_AGAIN_LATER, CLOSE_REASON.slowConsumer);
+          continue;
+        }
+        conn.lowTurns = buffered <= SLOW_BUFFER_EXIT_BYTES ? conn.lowTurns + 1 : 0;
+        if (conn.lowTurns >= SLOW_BUFFER_EXIT_TURNS) setBufferSlow(conn, false);
+        advanceTurn(conn, mono);
+        const wanted = wantedInterval(conn);
+        if (wanted !== conn.intervalMs) {
+          // 버퍼에서 풀리고 파드도 평시면 그 차례에 100으로 되돌린다(파드가 Degraded면 1초 그대로라 알림 없음)
+          conn.intervalMs = wanted;
+          if (!sendTo(conn, encodeBatchInterval(wanted))) continue;
+        }
+        flush(conn);
+      }
+      openTurns.splice(0, done);
     },
 
     async shutdown() {
