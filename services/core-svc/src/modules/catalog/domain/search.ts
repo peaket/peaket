@@ -267,11 +267,31 @@ function comparatorOf(sort: SortKey, grades: Map<string, Grade>): (a: SearchDocu
   };
 }
 
-function sortDocs(docs: SearchDocument[], q: SearchQuery, grades: Map<string, Grade>): SearchDocument[] {
-  return [...docs].sort(comparatorOf(sortOf(q), grades));
+/**
+ * 정렬 차례로 앞의 k개만(정렬한 배열의 앞 k개와 같다). 비교는 가나다 → ID로 끝나 늘 하나의 차례라 답이 같다.
+ * 후보가 수천~수만이고 보이는 것은 그 쪽까지(쪽 × 20, 많아야 1,000)이므로 전부 정렬하지 않는다(BAT-166 측정 §5 3·4, ADR-0271 결정 23)
+ */
+export function firstSorted<T>(items: readonly T[], cmp: (a: T, b: T) => number, k: number): T[] {
+  if (k <= 0) return [];
+  if (items.length <= k) return [...items].sort(cmp);
+  const out: T[] = [];
+  for (const x of items) {
+    if (out.length === k && cmp(x, out[k - 1]!) >= 0) continue;
+    // 들어갈 자리(같은 것 뒤, 이분 탐색)
+    let lo = 0;
+    let hi = out.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (cmp(out[mid]!, x) <= 0) lo = mid + 1;
+      else hi = mid;
+    }
+    out.splice(lo, 0, x);
+    if (out.length > k) out.pop();
+  }
+  return out;
 }
 
-/** 정확도 순의 맨 위(관련 공연의 근거). 요청 정렬이 정확도 순이면 정렬한 첫째이고, 아니면 한 번 훑어 고른다(같은 후보를 두 번 정렬하지 않는다, ADR-0271 결정 23) */
+/** 정확도 순의 맨 위(관련 공연의 근거). sorted는 요청 정렬의 앞부분(첫째를 담는다). 요청 정렬이 정확도 순이면 정렬한 첫째이고, 아니면 한 번 훑어 고른다(같은 후보를 두 번 정렬하지 않는다, ADR-0271 결정 23) */
 function topOf(filtered: readonly SearchDocument[], sorted: readonly SearchDocument[], q: SearchQuery, grades: Map<string, Grade>): SearchDocument | undefined {
   if (sortOf(q) === 'RELEVANCE') return sorted[0];
   const cmp = comparatorOf('RELEVANCE', grades);
@@ -446,8 +466,9 @@ export function rankMatched(matched: readonly SearchDocument[], q: SearchQuery, 
   const query = q.q.trim();
   const docs = matched;
   const filtered = filterDocs(docs, q, query === '' ? null : grades);
-  const sorted = sortDocs(filtered, q, grades);
-  const total = Math.min(sorted.length, SEARCH_TOTAL_CAP);
+  // 이 쪽까지의 앞부분만 차례대로 고른다(전체 수는 거른 수에서 센다)
+  const sorted = firstSorted(filtered, comparatorOf(sortOf(q), grades), q.page * SEARCH_PAGE_SIZE);
+  const total = Math.min(filtered.length, SEARCH_TOTAL_CAP);
   const pageItems = sorted.slice((q.page - 1) * SEARCH_PAGE_SIZE, q.page * SEARCH_PAGE_SIZE).map(card);
   const relaxed = filtered.length === 0 && hasFilters(q) ? filterDocs(docs, { ...q, genre: undefined, placeId: undefined, artistId: undefined, dateFrom: undefined, dateTo: undefined, status: undefined }, query === '' ? null : grades).length : null;
   const top = topOf(filtered, sorted, q, grades);
@@ -457,7 +478,7 @@ export function rankMatched(matched: readonly SearchDocument[], q: SearchQuery, 
       page: q.page,
       limit: SEARCH_PAGE_SIZE,
       total,
-      totalCapped: sorted.length > SEARCH_TOTAL_CAP,
+      totalCapped: filtered.length > SEARCH_TOTAL_CAP,
       totalPages: Math.ceil(total / SEARCH_PAGE_SIZE),
       query: { normalized: normalize(query), converted: convertedQuery(query, graded.converted, filtered.length > 0) },
       relaxedTotal: relaxed,

@@ -23,6 +23,7 @@ import {
   SEARCH_PAGE_SIZE,
   SEARCH_TOTAL_CAP,
   SearchUnavailable,
+  type DocumentIndex,
   type NameKeysLookup,
   type RankedSearch,
   type RelatedSource,
@@ -68,6 +69,11 @@ export function unavailableOf(e: unknown): unknown {
   }
   return e;
 }
+
+/** 후보 줄을 이만큼씩 끊어 바꾸고 사이에 I/O를 돌린다 [가정](공연 1만의 한 글자 입력이 수천~1만7천 줄, BAT-166 측정 §5 5) */
+const SEARCH_YIELD_ROWS = 2_000;
+/** 지금까지 쌓인 I/O 콜백(DB 답·새 요청)을 먼저 돌린 뒤 잇는다 */
+const yieldToIo = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -152,8 +158,20 @@ export class DrizzleSearchIndex implements SearchIndex {
     const query = q.q.trim();
     const keys = keySets(query, q.noConvert);
     const rows = keys.length === 0 ? [] : await this.#read((tx) => this.#candidates(tx, keys));
-    const candidates = rows.map((r) => documentOfRow(r, this.origin));
-    return rankMatched(candidates, q, matchGrades(indexDocuments(candidates, this.o.keysOf), query, q.noConvert));
+    // 후보가 많으면(한두 글자 입력은 수천~수만) 줄 바꾸기·이름 색인을 끊어 하며 사이사이 다른 요청의 I/O(연결 반환·자동완성)를 먼저 돌린다.
+    // 한 요청의 긴 계산이 주 스레드를 한 덩이로 막아 다른 검색이 연결 대기 100ms를 넘기지 않게 한다(BAT-166 측정 §5 4). 답은 같다
+    const candidates: SearchDocument[] = [];
+    const index: Array<DocumentIndex[number]> = [];
+    for (let i = 0; i < rows.length; i += SEARCH_YIELD_ROWS) {
+      if (i > 0) await yieldToIo();
+      const part = rows.slice(i, i + SEARCH_YIELD_ROWS).map((r) => documentOfRow(r, this.origin));
+      candidates.push(...part);
+      index.push(...indexDocuments(part, this.o.keysOf));
+    }
+    if (rows.length > SEARCH_YIELD_ROWS) await yieldToIo();
+    const graded = matchGrades(index, query, q.noConvert);
+    if (rows.length > SEARCH_YIELD_ROWS) await yieldToIo();
+    return rankMatched(candidates, q, graded);
   }
 
   /** 검색어가 없을 때: 필터를 건 정렬 질의의 한 쪽과 1,001줄까지 센 전체 수 */
