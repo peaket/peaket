@@ -821,3 +821,41 @@ test('CF3-03 HOT-400 ci-kind는 포트 전달 없이 게이트웨이 시험 넷�
     assert.ok(a.step < b.step || (a.step === b.step && a.line < b.line), `${FILES[i - 1]} → ${FILES[i]} 차례가 아니다`);
   }
 });
+
+// W11-ci-conc: 정본 docs/devops.md §3.4 'CI 속도와 신뢰' — 앞 실행 취소는 PR에서만 하고, develop·main·릴리스·핫픽스 푸시는 끝까지 돈다.
+// YAML 패키지 없이 줄로 읽어 로컬에서도 건너뛰지 않는다. 주석 줄과 줄 끝 주석은 보지 않는다
+function ciLines() {
+  return readFileSync(join(REPO, '.github', 'workflows', 'ci.yml'), 'utf8')
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^\s*#.*$/, '').replace(/\s+#.*$/, ''));
+}
+
+test('CC-01 실제 ci.yml 맨 위 concurrency 블록은 PR 번호(없으면 ref) 그룹이고, 취소는 PR 사건일 때만 한다', () => {
+  const lines = ciLines();
+  const start = lines.findIndex((l) => /^concurrency:\s*$/.test(l));
+  assert.ok(start >= 0, '맨 위(들여쓰기 없는) concurrency: 블록이 없다');
+  const body = {};
+  for (let i = start + 1; i < lines.length && (lines[i] === '' || /^\s/.test(lines[i])); i++) {
+    const m = lines[i].match(/^\s+([\w-]+):\s*(.*?)\s*$/);
+    if (m) body[m[1]] = m[2];
+  }
+  assert.equal(body.group, 'ci-${{ github.event.pull_request.number || github.ref }}', 'concurrency.group 값');
+  assert.equal(body['cancel-in-progress'], "${{ github.event_name == 'pull_request' }}", 'concurrency.cancel-in-progress 값');
+});
+
+test('CC-02 실제 ci.yml에 concurrency:와 cancel-in-progress: 줄이 각각 하나뿐이다(잡에 따로 두어 맨 위 규칙을 덮지 않는다)', () => {
+  const lines = ciLines();
+  for (const key of ['concurrency', 'cancel-in-progress']) {
+    const at = lines.flatMap((l, i) => (new RegExp(String.raw`^\s*${key}:`).test(l) ? [i + 1] : []));
+    assert.equal(at.length, 1, `${key}: 줄이 ${at.length}개다(줄 ${at.join(', ') || '없음'})`);
+  }
+});
+
+test("CC-03 규칙 4: github.event_name == 'pull_request'는 사용자가 고칠 수 없는 값이라 식에 써도 된다(맨 위 concurrency 블록에 두어도 끝 코드 0)", () => {
+  const expr = "github.event_name == 'pull_request'";
+  assert.equal(run(GOOD.replace('github.event.pull_request.head.sha', expr)).code, 0, '단계 env');
+  const withConc = GOOD.replace('jobs:\n', `concurrency:\n  group: ci-\${{ github.event.pull_request.number || github.ref }}\n  cancel-in-progress: \${{ ${expr} }}\n\njobs:\n`);
+  assert.notEqual(withConc, GOOD, '표본에 concurrency 블록을 넣지 못했다');
+  const r = run(withConc);
+  assert.equal(r.code, 0, r.out);
+});

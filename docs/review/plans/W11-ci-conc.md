@@ -55,11 +55,15 @@
 
 ## 실패 확인
 
-(아직)
+- 시험 파일을 구현 전 트리(`D:/ticketpass-lane4-ci-base`, `760f465b`)에 복사해 `node --test tools/ci/check-workflows.test.mjs`를 돌렸다(2026-11-19 06:19). 50개 중 통과 46, 실패 1, 건너뜀 3. 확인 뒤 `git checkout -- .`로 되돌렸다.
+- 실패 1은 CC-01 ★이다. 까닭: `cancel-in-progress` 값이 `true`이고 정본 값 `${{ github.event_name == 'pull_request' }}`와 다르다(단언 메시지 'concurrency.cancel-in-progress 값'). 그룹 값은 구현 전에도 같아 첫 단언은 통과했다.
+- CC-02는 구현 전에도 통과한다. 구현 전 `ci.yml`도 `concurrency:`·`cancel-in-progress:` 줄이 맨 위 블록에 하나씩뿐이라, 이 시험은 고친 값이 아니라 잡에 따로 블록을 더해 맨 위 규칙을 덮는 것(M5)을 막는 되돌림 막기다.
+- CC-03은 구현 전에도 통과한다. 규칙 4(`check-workflows.mjs`)는 이미 `github.event_name`을 사용자가 고칠 수 없는 값으로 보고(기존 `== 'schedule'` 시험), 검사 도구는 이번에 바꾸지 않았다. 새 식이 단계 `env`와 맨 위 `concurrency` 블록 어디에 있어도 검사가 막지 않음을 지킨다.
+- 건너뜀 3 중 2는 구현 전 트리에 `node_modules`(yaml 패키지)가 없어 YAML 시험이 건너뛴 것이고, 1은 CI 밖이라 건너뛰는 시험이다. 새 시험 셋은 YAML 패키지 없이 줄로 읽어 건너뛰지 않았다.
 
 ## 시험 결과
 
-(아직)
+- 작업 폴더(`f81981e1` + 이 시험)에서 `node --test tools/ci/check-workflows.test.mjs`: 50개 중 통과 49, 실패 0, 건너뜀 1(CI 밖 시험). CC-01·CC-02·CC-03 모두 통과.
 
 ## 리뷰
 
@@ -75,3 +79,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w11ci-plan-1b7c | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:20+09:00 |
 | impl | w11ci-impl-4e90 | claude-opus-5-5 | 2026-11-19T06:15+09:00 | 2026-11-19T06:17+09:00 |
+| test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T06:22+09:00 |
