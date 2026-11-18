@@ -117,16 +117,18 @@ describe('취소표 델타의 변경 시각(WIR-01)', () => {
     await expectReturned(eventId, ONE);
   });
 
-  test('WIR-01 ③ 초가 2^31을 넘어도(TIME {2147483648, 123456}) 지수·소수 표기 없이 2147483648123이다', async () => {
+  // RV-01·M11: Valkey의 Lua 5.1은 숫자를 `..`로 이을 때 %.14g로 글을 만든다. 13자리(지금의 epoch 밀리초)는 그대로 나와
+  // 정수 글 함수(int)를 빼도 가려지지 않으므로, 10^14 이상(15자리)을 골라 int가 없으면 `1e+14`로 새는 것을 잡는다
+  test('WIR-01 ③ 변경 시각이 10^14 이상이어도(TIME {100000000000, 0}) 지수·소수 표기 없이 100000000000000이다', async () => {
     const eventId = randomUUID();
     await seed(eventId, ONE);
-    const { reply, messages } = await returnWithFixedTime(eventId, ONE, '2147483648', '123456');
+    const { reply, messages } = await returnWithFixedTime(eventId, ONE, '100000000000', '0');
     expect(reply).toEqual(['OK', 1]);
     expect(messages).toHaveLength(1);
     const changedAt = messages[0]!.message.split(' ')[4];
-    expect(changedAt).toMatch(/^\d{13}$/);
-    expect(changedAt).toBe('2147483648123');
-    expect(messages[0]!.message).toBe('1 1731234567 0 1 2147483648123 3:0');
+    expect(changedAt).toMatch(/^\d{15}$/);
+    expect(changedAt).toBe('100000000000000');
+    expect(messages[0]!.message).toBe('1 1731234567 0 1 100000000000000 3:0');
     await expectReturned(eventId, ONE);
   });
 
