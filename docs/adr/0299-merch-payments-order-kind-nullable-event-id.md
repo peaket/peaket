@@ -2,7 +2,7 @@
 
 - **상태**: 채택(2026-11-18, 추천 적용. 갈래 5 BAT-600 계획 담당이 정본 빈칸으로 정했다. BUILD_ORDER PRF-180이 넘긴 'payment-svc `ConfirmPayment`의 `event_id` 필수를 LCH-010이 풀거나 다른 길을 정한다'에 답한다. 결제 흐름과 결제사 고정(ADR-0044), 결제 결과 당기기(ADR-0140)는 그대로 두고, 그 위에 굿즈 주문이 지나갈 길만 정한다)
 - **관련**: [ADR-0044](0044-dual-pg-selection-and-switchover.md)(결제사 선택과 고정), [ADR-0107](0107-expire-unpaid-orders-ticket-expired-merch-stock-reservation.md)(굿즈 재고 예약), [ADR-0140](0140-payment-result-pull-fallback-when-kafka-is-late.md)(결과 당기기), [ADR-0150](0150-event-schema-required-fields-always-present.md), [ADR-0300](0300-merch-order-stock-reservation-first-implementation.md), [docs/features/payment.md](../features/payment.md) §2 '승인 명령 접수의 첫 구현'·'선택기의 첫 구현', [docs/api/proto/peaket/payment/v1/payment.proto](../api/proto/peaket/payment/v1/payment.proto), [docs/api/avro/peaket/trade/PaymentEvent.avsc](../api/avro/peaket/trade/PaymentEvent.avsc), [docs/features/settlement.md](../features/settlement.md) §4.5, [docs/review/plans/BAT-600.md](../review/plans/BAT-600.md)
-- **관련 ID**: P-T55, P-T56, FR-015, FR-014, BUILD_ORDER LCH-010·PRF-180
+- **관련 ID**: P-T56, P-T57, FR-015, FR-014, BUILD_ORDER LCH-010·PRF-180
 
 ## 맥락
 

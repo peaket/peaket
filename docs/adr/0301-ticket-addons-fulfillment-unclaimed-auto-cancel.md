@@ -1,8 +1,8 @@
 # ADR-0301: 티켓 연동 부가 상품·수령 방식·미수령 자동 취소의 첫 구현(2026-11-18)
 
 - **상태**: 채택(2026-11-18, 추천 적용. 갈래 5 BAT-600 계획 담당이 LCH-020의 정본 빈칸으로 정했다. 방향은 FR-014·FR-015, POL-016(취소·반품 기준), docs/planning/03 §2.13 I2 '미수령'과 용어 '미수령'(마지막 수령 시간대가 끝날 때까지 받지 않으면 다음 영업일에 취소·전액 환급) 그대로이고, 그 안의 집행 세부를 정한다)
-- **관련**: [ADR-0300](0300-merch-order-stock-reservation-first-implementation.md)(굿즈 주문·재고 예약), [ADR-0299](0299-merch-payments-order-kind-nullable-event-id.md)(굿즈 결제), [ADR-0062](0062-open-items-delegated-decisions.md)(수령 방식·취소·반품), [docs/data.md](../data.md) §2 `merch_order`·`merch_order_item`·`pickup_slot`, §5, [docs/api/openapi.yaml](../api/openapi.yaml) `POST·GET /v1/tickets/{ticketId}/addons`·`MerchOrderCreatePickup`, [docs/api/proto/peaket/ticket/v1/ticket.proto](../api/proto/peaket/ticket/v1/ticket.proto) `ListHeldTickets`, [docs/verification.md](../verification.md) V-T35, [docs/features/payment.md](../features/payment.md) §11 P-T57, [docs/review/plans/BAT-600.md](../review/plans/BAT-600.md)
-- **관련 ID**: V-T35, P-T57, FR-014, FR-015, POL-016, BUILD_ORDER LCH-020
+- **관련**: [ADR-0300](0300-merch-order-stock-reservation-first-implementation.md)(굿즈 주문·재고 예약), [ADR-0299](0299-merch-payments-order-kind-nullable-event-id.md)(굿즈 결제), [ADR-0062](0062-open-items-delegated-decisions.md)(수령 방식·취소·반품), [docs/data.md](../data.md) §2 `merch_order`·`merch_order_item`·`pickup_slot`, §5, [docs/api/openapi.yaml](../api/openapi.yaml) `POST·GET /v1/tickets/{ticketId}/addons`·`MerchOrderCreatePickup`, [docs/api/proto/peaket/ticket/v1/ticket.proto](../api/proto/peaket/ticket/v1/ticket.proto) `ListHeldTickets`, [docs/verification.md](../verification.md) V-T35, [docs/features/payment.md](../features/payment.md) §11 P-T58, [docs/review/plans/BAT-600.md](../review/plans/BAT-600.md)
+- **관련 ID**: V-T35, P-T58, FR-014, FR-015, POL-016, BUILD_ORDER LCH-020
 
 ## 맥락
 
