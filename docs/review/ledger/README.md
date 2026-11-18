@@ -4,8 +4,8 @@
 
 ## 완성 판정
 
-- 항목 3724개: 시험 시나리오(세부 단위) 1684, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2025
-- 빈칸 928, ID만 1150: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
+- 항목 3745개: 시험 시나리오(세부 단위) 1705, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2025
+- 빈칸 849, ID만 1208: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 5(모두 사유가 있다): 완료로 세지 않고 따로 센다
 - 다시 볼 notes 8: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
@@ -14,48 +14,48 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 324 | 116 | 23 | 2 | 2 | 33 | 1 | 0 | 130 | 631 |
-| B | 925 | 1034 | 19 | 2 | 3 | 66 | 0 | 245 | 797 | 3091 |
+| A | 350 | 116 | 23 | 2 | 2 | 28 | 1 | 0 | 130 | 652 |
+| B | 946 | 1092 | 19 | 2 | 3 | 66 | 0 | 245 | 718 | 3091 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 1249 | 1150 | 42 | 5 | 5 | 99 | 1 | 245 | 928 | 3724 |
+| 합계 | 1296 | 1208 | 42 | 5 | 5 | 94 | 1 | 245 | 849 | 3745 |
 
 ## 분야별 상태
 
 | 분야 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| analytics | B | 0 | 109 | 0 | 0 | 0 | 0 | 0 | 29 | 50 | 188 |
+| analytics | B | 0 | 116 | 0 | 0 | 0 | 0 | 0 | 29 | 43 | 188 |
 | bot-defense | B | 117 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 8 | 152 |
-| catalog-review | B | 66 | 19 | 0 | 0 | 0 | 0 | 0 | 16 | 15 | 116 |
-| control-tower | B | 4 | 107 | 0 | 0 | 1 | 3 | 0 | 24 | 157 | 296 |
-| delivery | B | 36 | 27 | 0 | 0 | 0 | 0 | 0 | 3 | 11 | 77 |
+| catalog-review | B | 66 | 24 | 0 | 0 | 0 | 0 | 0 | 16 | 10 | 116 |
+| control-tower | B | 4 | 114 | 0 | 0 | 1 | 3 | 0 | 24 | 150 | 296 |
+| delivery | B | 36 | 31 | 0 | 0 | 0 | 0 | 0 | 3 | 7 | 77 |
 | devops | B | 50 | 6 | 0 | 0 | 1 | 1 | 0 | 0 | 56 | 114 |
-| forensic-replay | B | 4 | 114 | 0 | 0 | 0 | 3 | 0 | 19 | 51 | 191 |
-| frontend | B | 84 | 40 | 8 | 2 | 0 | 5 | 0 | 22 | 42 | 203 |
+| forensic-replay | B | 4 | 121 | 0 | 0 | 0 | 3 | 0 | 19 | 44 | 191 |
+| frontend | B | 84 | 47 | 8 | 2 | 0 | 5 | 0 | 22 | 35 | 203 |
 | identity | A | 7 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 8 |
-| identity | B | 239 | 49 | 0 | 0 | 0 | 6 | 0 | 7 | 87 | 388 |
-| notify | B | 2 | 109 | 0 | 0 | 0 | 0 | 0 | 21 | 47 | 179 |
-| offline-gate | B | 27 | 106 | 0 | 0 | 0 | 3 | 0 | 19 | 77 | 232 |
+| identity | B | 239 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 388 |
+| notify | B | 2 | 116 | 0 | 0 | 0 | 0 | 0 | 21 | 40 | 179 |
+| offline-gate | B | 27 | 112 | 0 | 0 | 0 | 3 | 0 | 19 | 71 | 232 |
 | payment | A | 77 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 125 |
 | payment | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
 | queue-admission | A | 104 | 52 | 2 | 0 | 0 | 2 | 0 | 0 | 31 | 191 |
-| queue-admission | B | 36 | 12 | 0 | 0 | 0 | 3 | 0 | 2 | 6 | 59 |
+| queue-admission | B | 36 | 13 | 0 | 0 | 0 | 3 | 0 | 2 | 5 | 59 |
 | requirements | A | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 |
 | requirements | B | 2 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 9 | 12 |
 | requirements | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
 | search | B | 18 | 0 | 2 | 0 | 1 | 2 | 0 | 0 | 0 | 23 |
-| seat-hold | A | 87 | 13 | 15 | 2 | 0 | 14 | 1 | 0 | 0 | 132 |
-| seat-hold | B | 88 | 31 | 0 | 0 | 0 | 3 | 0 | 15 | 19 | 156 |
+| seat-hold | A | 113 | 13 | 15 | 2 | 0 | 9 | 1 | 0 | 0 | 153 |
+| seat-hold | B | 109 | 19 | 0 | 0 | 0 | 3 | 0 | 15 | 10 | 156 |
 | security | B | 17 | 6 | 0 | 0 | 0 | 0 | 0 | 0 | 34 | 57 |
 | settlement | A | 10 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 44 |
-| settlement | B | 0 | 105 | 0 | 0 | 0 | 0 | 0 | 23 | 25 | 153 |
+| settlement | B | 0 | 112 | 0 | 0 | 0 | 0 | 0 | 23 | 18 | 153 |
 | streaming | B | 4 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 22 | 27 |
-| support | B | 0 | 68 | 0 | 0 | 0 | 0 | 0 | 22 | 11 | 101 |
+| support | B | 0 | 73 | 0 | 0 | 0 | 0 | 0 | 22 | 6 | 101 |
 | transfer-refund | A | 38 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 130 |
-| transfer-refund | B | 0 | 92 | 0 | 0 | 0 | 0 | 0 | 20 | 14 | 126 |
+| transfer-refund | B | 0 | 97 | 0 | 0 | 0 | 0 | 0 | 20 | 9 | 126 |
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | B | 36 | 3 | 8 | 0 | 0 | 0 | 0 | 0 | 56 | 103 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 1249 | 1150 | 42 | 5 | 5 | 99 | 1 | 245 | 928 | 3724 |
+| 합계 |  | 1296 | 1208 | 42 | 5 | 5 | 94 | 1 | 245 | 849 | 3745 |
 
 ## 다시 볼 notes
 
@@ -75,6 +75,9 @@
 - I-T51 ①: tools/poc/login-compare/login-compare.test.mjs
 - I-T51 ⑥: tools/poc/login-compare/login-compare.test.mjs
 - Q-T64 ⑤: services/queue-svc/test/admission-cases.ts
+- RF-T11: services/realtime-gw/test-int/stream.int.test.ts
+- RF-T13: services/realtime-gw/test-int/stream.int.test.ts
+- RF-T9: packages/platform/test/admission-token.test.ts
 - S-T30 ①: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
 - S-T30 ②: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
 - S-T30 ③: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
@@ -85,11 +88,11 @@
 - docs/features/identity.md:759: I-T51 시나리오 칸의 ①⑥이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/identity.md:781: I-T73 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/queue-admission.md:709: Q-T64 시나리오 칸의 ⑤이 판정 칸에 없어 세부로 세지 않는다
-- docs/features/seat-hold.md:559: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
-- docs/frontend.md:1633: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
-- docs/frontend.md:1638: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
+- docs/features/seat-hold.md:578: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
+- docs/frontend.md:1634: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
+- docs/frontend.md:1639: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
 - docs/security/authz-matrix.md:336: AZ-T15 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
-- docs/verification.md:643: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
+- docs/verification.md:645: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 
 ## 이 도구의 한계
 
