@@ -38,7 +38,7 @@ export function SeatHoldWidget({ data, ...base }: SeatHoldWidgetProps) {
         <span className={sloClass}>{data.status}</span>
         <span className="stat-meta">{data.meta}</span>
       </div>
-      <figure className="col" style={{ gap: 2 }}>
+      <figure data-reflow-exception="" className="col" style={{ gap: 2 }}>
         <figcaption className="row between t-xs">
           <span className="fw-b">5분 창 소진 배수</span>
           <span className="num muted">지금 {data.burn.now}</span>

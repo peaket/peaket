@@ -944,7 +944,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               <>
                 <div className="widget-body grow">
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "12px", alignItems: "start" }}>
-                    <figure className="col" style={{ gap: "4px", gridColumn: "span 2" }}>
+                    <figure data-reflow-exception="" className="col" style={{ gap: "4px", gridColumn: "span 2" }}>
                       <figcaption className="row between t-xs">
                         <span className="fw-b">퍼널(F3): 입장 → 첫 홀드 성공 → 결제 접수 → 승인 → 발권</span>
                         <span className="muted">숫자 · 앞 단계 대비</span>
@@ -2486,7 +2486,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </div>
               </div>
               <div className="widget-body" style={{ gap: "6px" }}>
-                <figure className="col" style={{ gap: "4px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "4px" }}>
                   <figcaption className="row between t-xs">
                     <span className="fw-b">16:30 입장 시작부터 · 분당 입장(통과)</span>
                     <span className="num muted">누계 1,388명 · 동문 778 · 서문 610</span>
@@ -2538,7 +2538,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </div>
               </div>
               <div className="widget-body" style={{ gap: "6px" }}>
-                <figure className="col" style={{ gap: "4px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "4px" }}>
                   <figcaption className="row between t-xs">
                     <span className="fw-b">거부 46건 · 판정 1,434건 중 3.2%</span>
                     <span className="num muted">오거부 후보 19건(거부 뒤 10분 [가정] 안 정상 통과)</span>
