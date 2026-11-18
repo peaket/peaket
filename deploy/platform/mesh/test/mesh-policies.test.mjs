@@ -273,6 +273,12 @@ const withoutComments = (text) =>
     .split('\n')
     .filter((l) => !/^\s*#/.test(l))
     .join('\n');
+/**
+ * deploy/ 아래 매니페스트 글 파일(YAML·Helm 템플릿·JSON, 이 시험 폴더 뺌). 운영 오버레이가 놓일 deploy/envs/<환경>/와 차트 템플릿까지 훑는다
+ * (리뷰 RV-02·RV-03: 줄 모양·확장자에 기대지 않는다). 주석 줄을 뺀 글과 함께 돌려준다
+ */
+const deployTexts = () =>
+  walk(join(REPO, 'deploy'), (f) => /\.(ya?ml|tpl|json)$/.test(f) && !f.startsWith(HERE)).map((f) => ({ file: f, text: withoutComments(readFileSync(f, 'utf8')) }));
 
 /** proto: 전체 서비스 이름 → { package, file, methods } (시험이 스스로 읽는다, MS-08) */
 function readProtos() {
@@ -855,9 +861,9 @@ test('MS-11 웨이포인트와 디스커버리: 업무 gRPC 워크로드마다 <
   for (const p of mesh.filter((o) => o.kind === 'AuthorizationPolicy' && o.spec?.targetRefs))
     assert.ok(p.spec.targetRefs.every((t) => t.kind === 'Gateway' && GRPC_RECEIVERS.some((w) => t.name === `${w}-waypoint`)), `${p.metadata?.name}: 웨이포인트가 아닌 대상 ${JSON.stringify(p.spec.targetRefs)}`);
   // deploy/ 아래 다른 곳(기본 Service·네임스페이스·차트)에 use-waypoint가 없다(기본 Service에 붙이면 내부 HTTP가 웨이포인트를 지난다, ADR-0285 결정 5)
-  const others = walk(join(REPO, 'deploy'), (f) => /\.(ya?ml|tpl)$/.test(f) && f !== POLICIES && !f.includes(`${join('mesh', 'test')}`));
+  const others = deployTexts().filter((x) => x.file !== POLICIES);
   assert.ok(others.length > 10, 'deploy/ 아래 YAML을 읽지 못했다');
-  for (const f of others) assert.doesNotMatch(withoutComments(readFileSync(f, 'utf8')), /istio\.io\/use-waypoint/, `${rel(f)}에 istio.io/use-waypoint`);
+  for (const { file, text } of others) assert.doesNotMatch(text, /istio\.io\/use-waypoint/, `${rel(file)}에 istio.io/use-waypoint`);
 });
 
 test('MS-11 배포 값: deploy/workloads/*/values.yaml의 PEAKET_*_GRPC_URL은 모두 <업무 gRPC 워크로드>-grpc:<그 포트>다(ops-svc의 PEAKET_IDENTITY_GRPC_URL은 identity-svc-grpc:50051, ADR-0285 결정 5)', () => {
@@ -886,17 +892,37 @@ test('MS-11 배포 값: deploy/workloads/*/values.yaml의 PEAKET_*_GRPC_URL은 �
 
 // ===================== MS-12·13·14·15 메시 바탕 =====================
 
-test('MS-12 STRICT: deploy/ 아래 PeerAuthentication은 istio-system의 default 하나이고 mode STRICT, 고르개·portLevelMtls가 없다. PERMISSIVE·DISABLE·UNSET은 어디에도 없다', () => {
-  const files = walk(join(REPO, 'deploy'), (f) => /\.(ya?ml|tpl)$/.test(f) && !f.includes(`${join('mesh', 'test')}`));
-  const holders = files.filter((f) => /^\s*kind:\s*["']?PeerAuthentication["']?\s*$/m.test(withoutComments(readFileSync(f, 'utf8'))));
-  assert.deepEqual(holders.map(rel), ['deploy/platform/mesh/peer-authentication.yaml'], 'PeerAuthentication이 있는 파일');
+test('MS-12 RV-03 STRICT: deploy/ 아래(YAML·템플릿·JSON) 주석 밖에 PeerAuthentication이 나오는 파일은 peer-authentication.yaml 하나이고 그 안은 istio-system의 default 하나(mode STRICT, 고르개·portLevelMtls 없음)다. mode PERMISSIVE·DISABLE·UNSET은 어느 꼴(줄 끝 주석·흐름 꼴·JSON)로도 없다', () => {
+  const files = deployTexts();
+  assert.ok(files.length > 10, 'deploy/ 아래 매니페스트를 읽지 못했다');
+  // 줄 모양(kind: 앞뒤 고정)에 기대지 않는다: 줄 끝 주석 꼴 'kind: PeerAuthentication # 메모', 흐름 꼴 '{ kind: PeerAuthentication, … }', JSON도 센다(리뷰 RV-03)
+  const holders = files.filter((x) => /PeerAuthentication/.test(x.text));
+  assert.deepEqual(holders.map((x) => rel(x.file)), ['deploy/platform/mesh/peer-authentication.yaml'], 'PeerAuthentication이 있는 파일');
+  // YAML은 문서로도 읽어 kind를 본다(글 찾기를 비켜 간 꼴이 남지 않게)
+  for (const { file } of files.filter((x) => /\.ya?ml$/.test(x.file))) {
+    let docs;
+    try {
+      docs = parseAllDocuments(readFileSync(file, 'utf8')).map((d) => d.toJS());
+    } catch {
+      continue;
+    }
+    if (file !== PEER_AUTH) assert.ok(!docs.some((o) => o?.kind === 'PeerAuthentication'), `${rel(file)}에 PeerAuthentication 객체`);
+  }
   const pas = objectsOf(PEER_AUTH).filter((o) => o.kind === 'PeerAuthentication');
   assert.equal(pas.length, 1, 'PeerAuthentication 수');
   const [pa] = pas;
   assert.equal(pa.apiVersion, 'security.istio.io/v1');
   assert.deepEqual([pa.metadata?.namespace, pa.metadata?.name], ['istio-system', 'default']);
   assert.deepEqual(pa.spec, { mtls: { mode: 'STRICT' } }, '고르개·portLevelMtls 없이 STRICT 하나');
-  for (const f of files) assert.doesNotMatch(withoutComments(readFileSync(f, 'utf8')), /^\s*mode:\s*["']?(PERMISSIVE|DISABLE|UNSET)\b/m, `${rel(f)}에 mTLS를 푸는 mode`);
+  // 줄 앞에 묶지 않는다: 'mtls: { mode: PERMISSIVE }', '"mode": "DISABLE"'도 잡는다(리뷰 RV-03)
+  for (const { file, text } of files) assert.doesNotMatch(text, /["']?\bmode["']?\s*:\s*["']?(PERMISSIVE|DISABLE|UNSET)\b/, `${rel(file)}에 mTLS를 푸는 mode`);
+});
+
+test('MS-20 RV-02 다른 인가 정책 없음: deploy/ 아래(YAML·템플릿·JSON) 주석 밖에 AuthorizationPolicy가 나오는 파일은 생성 파일 policies.yaml 하나뿐이다(ALLOW 정책은 합집합이라 다른 파일의 정책 하나가 표를 넓힌다)', () => {
+  const files = deployTexts();
+  assert.ok(files.length > 10, 'deploy/ 아래 매니페스트를 읽지 못했다');
+  const holders = files.filter((x) => /AuthorizationPolicy/.test(x.text)).map((x) => rel(x.file));
+  assert.deepEqual(holders, ['deploy/platform/mesh/policies.yaml'], 'AuthorizationPolicy가 있는 파일');
 });
 
 test('MS-13 최소 TLS 1.3: istiod 값의 meshConfig.meshMTLS.minProtocolVersion이 TLSV1_3이고 trustDomain이 cluster.local이다. deploy/ 아래 다른 최소 판은 없다', () => {
@@ -904,8 +930,7 @@ test('MS-13 최소 TLS 1.3: istiod 값의 meshConfig.meshMTLS.minProtocolVersion
   const v = parse(readFileSync(ISTIOD_VALUES, 'utf8'));
   assert.equal(v?.meshConfig?.meshMTLS?.minProtocolVersion, 'TLSV1_3');
   assert.equal(v?.meshConfig?.trustDomain, 'cluster.local');
-  for (const f of walk(join(REPO, 'deploy'), (x) => /\.(ya?ml|tpl)$/.test(x) && !x.includes(`${join('mesh', 'test')}`)))
-    for (const m of withoutComments(readFileSync(f, 'utf8')).matchAll(/minProtocolVersion:\s*["']?(\w+)/g)) assert.equal(m[1], 'TLSV1_3', `${rel(f)}의 minProtocolVersion`);
+  for (const { file, text } of deployTexts()) for (const m of text.matchAll(/minProtocolVersion["']?\s*:\s*["']?(\w+)/g)) assert.equal(m[1], 'TLSV1_3', `${rel(file)}의 minProtocolVersion`);
 });
 
 test('MS-14 cacerts: ExternalSecret이 istio-system에 Secret cacerts를 키 넷으로 만들고(ClusterSecretStore aws-secrets-manager, 경로 peaket/<환경>/mesh/cacerts), 메시 폴더 어디에도 kind: Secret·stringData·PEM 글이 없다', () => {

@@ -429,3 +429,12 @@ test('MG-10 CI가 돌린다(changes.mjs): 메시 폴더는 tools·kind, proto·�
   }
   assert.deepEqual(missing, [], `changes.mjs가 고르지 않는 범위:\n${missing.join('\n')}`);
 });
+
+test('MG-10 RV-01 CI가 돌린다(changes.mjs, deploy 전체): 정적 시험(MS-11·12·13·20)이 deploy/ 전체를 훑으므로 운영 오버레이 자리(deploy/envs/)·공용 차트 템플릿·로컬 매니페스트만 바꾼 PR도 tools를 고른다', () => {
+  const missing = [];
+  for (const file of ['deploy/envs/x/y.yaml', 'deploy/charts/peaket-service/templates/x.yaml', 'deploy/local/x.yaml']) {
+    const got = scopesFor(file);
+    if (!got.includes('tools')) missing.push(`${file} → tools(고른 범위 ${got.join(', ') || '없음'})`);
+  }
+  assert.deepEqual(missing, [], `changes.mjs가 tools를 고르지 않는 deploy/ 파일:\n${missing.join('\n')}`);
+});
