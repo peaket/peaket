@@ -37,10 +37,14 @@ const TAG_0019 = '0019_settlement_kyc_holder_names';
 const TAG_0020 = '0020_settlement_statement_audit';
 /** 결제 후 일반 취소 한 건 payment_cancel(BUILD_ORDER GAT-080, BAT-415 몫 P, docs/data.md payment_cancel) */
 const TAG_0021 = '0021_payment_cancel';
-/** payment_cancel.fail_reason(BAT-420-rest 리뷰 반영 RV-03, docs/features/payment.md §6 '구현에서 정한 것' ④, docs/data.md payment_cancel). 0022는 갈래 5 몫이라 비어 있다 */
+/** 굿즈 결제의 원장 길: payment.order_kind와 event_id 널 허용(ADR-0299 결정 1, BAT-600) */
+const TAG_0022 = '0022_merch_order_kind';
+const ADDED_COLUMN_0022 = 'order_kind';
+const ADDED_CHECKS_0022 = ['payment_order_kind_check', 'payment_order_kind_event_check'];
+/** payment_cancel.fail_reason(BAT-420-rest 리뷰 반영 RV-03, docs/features/payment.md §6 '구현에서 정한 것' ④, docs/data.md payment_cancel) */
 const TAG_0023 = '0023_payment_cancel_fail_reason';
-/** 다른 갈래 몫으로 비워 둔 번호(docs/lanes/coord.md). 그 번호의 기록이 나중에 들어와도 이 시험은 그 자리를 건너 견준다 */
-const RESERVED_ELSEWHERE = new Set([22]);
+/** 비워 둔 번호(docs/lanes/coord.md)가 있으면 그 자리를 건너 견준다. 지금은 없다(0022를 BAT-600이 채웠다) */
+const RESERVED_ELSEWHERE = new Set<number>([]);
 const reservedFile = (f: string) => [...RESERVED_ELSEWHERE].some((n) => f.startsWith(`${String(n).padStart(4, '0')}_`));
 const ADDED_COLUMN_0012 = 'virtual_account_allowed';
 const ADDED_COLUMN_0014 = 'cancelled_amount';
@@ -108,8 +112,9 @@ const RECON_INDEX_0008 = 'payment_recon_approved_idx';
 const HASH_INDEX_0008 = 'payment_deposit_hash_idx';
 const SHAPES_0000 = SHAPES.map((s) => ({
   ...s,
-  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && c.name !== ADDED_COLUMN_0009 && c.name !== ADDED_COLUMN_0012 && c.name !== ADDED_COLUMN_0014 && c.name !== ADDED_COLUMN_0018 && c.name !== ADDED_JOB_COLUMN_0010 && !ADDED_COLUMNS_0002.includes(c.name) && !(s.name === 'payment_confirm_job' && c.name === 'pg')),
-  checks: s.checks.filter((k) => k.name !== ADDED_CHECK && k.name !== NEXT_QUERY_CHECK && k.name !== JOB_PG_CHECK && k.name !== ADDED_CHECK_0014 && k.name !== ADDED_CHECK_0018),
+  // 0022가 order_kind를 더하고 event_id의 NOT NULL을 풀었다(0000에서 event_id는 NOT NULL이다)
+  columns: s.columns.filter((c) => c.name !== ADDED_COLUMN_0022 && c.name !== ADDED_COLUMN && c.name !== ADDED_COLUMN_0004 && c.name !== ADDED_COLUMN_0005 && c.name !== ADDED_COLUMN_0006 && c.name !== ADDED_COLUMN_0009 && c.name !== ADDED_COLUMN_0012 && c.name !== ADDED_COLUMN_0014 && c.name !== ADDED_COLUMN_0018 && c.name !== ADDED_JOB_COLUMN_0010 && !ADDED_COLUMNS_0002.includes(c.name) &&  !(s.name === 'payment_confirm_job' && c.name === 'pg')).map((c) => (s.name === 'payment' && c.name === 'event_id' ? { ...c, notNull: true } : c)),
+  checks: s.checks.filter((k) => !ADDED_CHECKS_0022.includes(k.name) && k.name !== ADDED_CHECK && k.name !== NEXT_QUERY_CHECK && k.name !== JOB_PG_CHECK && k.name !== ADDED_CHECK_0014 && k.name !== ADDED_CHECK_0018),
   // 0003이 잡기 색인을 바꾼다(0000은 next_attempt_at 하나짜리다)
   indexes: s.name === 'payment_confirm_job' ? [{ name: 'payment_confirm_job_next_idx', unique: false, columns: ['next_attempt_at'] }] : s.indexes.filter((i) => i.name !== QUERY_DUE_INDEX && i.name !== ADDED_OVERDUE_INDEX_0002 && i.name !== ADDED_INDEX_0005 && i.name !== RECON_INDEX_0008 && i.name !== HASH_INDEX_0008),
 }));
@@ -124,7 +129,9 @@ describe('표 정의(schema.ts)', () => {
     expect(cols(paymentShape)).toEqual([
       ['id', 'uuid', true],
       ['order_id', 'uuid', true],
-      ['event_id', 'uuid', true],
+      // 굿즈(MERCH)는 회차 칸이 비어 있다(ADR-0299 결정 1)
+      ['event_id', 'uuid', false],
+      ['order_kind', 'text', true],
       ['attempt_id', 'uuid', true],
       ['attempt_no', 'integer', true],
       ['pg', 'text', true],
@@ -187,9 +194,9 @@ describe('표 정의(schema.ts)', () => {
     ]);
   });
 
-  test('PRF180_기본값은 payment.pg_store·cancelled_amount·created_at·query_attempts·job.attempts·job.created_at뿐이다', () => {
+  test('PRF180_P-T55_기본값은 payment.order_kind·pg_store·cancelled_amount·created_at·query_attempts·job.attempts·job.created_at뿐이다', () => {
     const withDefault = SHAPES.flatMap((s) => s.columns.filter((c) => c.hasDefault).map((c) => `${s.name}.${c.name}`));
-    expect(withDefault).toEqual(['payment.pg_store', 'payment.cancelled_amount', 'payment.created_at', 'payment.query_attempts', 'payment_confirm_job.attempts', 'payment_confirm_job.created_at']);
+    expect(withDefault).toEqual(['payment.order_kind', 'payment.pg_store', 'payment.cancelled_amount', 'payment.created_at', 'payment.query_attempts', 'payment_confirm_job.attempts', 'payment_confirm_job.created_at']);
   });
 
   test('PRF180_기본 키는 payment.id·payment_event(payment_id, seq)·payment_confirm_job.payment_id다', () => {
@@ -285,6 +292,7 @@ describe('표 정의(schema.ts)', () => {
       'payment_status_check',
       'payment_pg_check',
       ADDED_CHECK_0018,
+      ...ADDED_CHECKS_0022,
       'payment_amount_check',
       ADDED_CHECK_0014,
       'payment_attempt_no_check',
@@ -567,8 +575,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const latest = snapshotOf('0014_snapshot.json');
   const before0021 = snapshotOf('0020_snapshot.json');
   const snap0021 = snapshotOf('0021_snapshot.json');
-  // 마지막 스냅샷(0023, BAT-420-rest 리뷰 반영 RV-03). 0022는 다른 갈래 몫이라 비어 있다
+  // 마지막 스냅샷(0023, BAT-420-rest 리뷰 반영 RV-03). 그 앞은 0022(BAT-600 굿즈 원장)다
   const latestAll = snapshotOf('0023_snapshot.json');
+  const snap0022 = snapshotOf('0022_snapshot.json');
 
   test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
     expect(twelfth.prevId).toBe(eleventh.id);
@@ -618,9 +627,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     ]);
   });
 
-  // BAT-420-rest 리뷰 반영 RV-03(정본 변경 반영, 시험 담당 l3-b420-test): 0023 payment_cancel.fail_reason을 더했다. 0022는 갈래 5 몫이라 비어 있고,
-  // 나중에 들어와도 깨지지 않게 그 번호의 기록은 이름 앞머리(0022_)만 보고 나머지를 차례로 견준다
-  test('PRF182_PRF183_기록은 0000~0021·0023 차례이고 SQL 파일과 맞는다(0021은 GAT-080 payment_cancel, 0023은 fail_reason, 0022는 다른 갈래 몫)', () => {
+  // BAT-420-rest 리뷰 반영 RV-03(정본 변경 반영, 시험 담당 l3-b420-test): 0023 payment_cancel.fail_reason을 더했다.
+  // BAT-600이 비워 두었던 0022(payment.order_kind)를 채웠다. 비워 둔 번호가 다시 생기면 reservedFile이 그 자리를 건너 견준다
+  test('PRF182_PRF183_기록은 0000~0023 차례이고 SQL 파일과 맞는다(0021은 GAT-080 payment_cancel, 0022는 BAT-600 주문 종류, 0023은 fail_reason)', () => {
     expect(journal.dialect).toBe('postgresql');
     for (const e of journal.entries.filter((x) => RESERVED_ELSEWHERE.has(x.idx))) expect(e.tag, `${e.idx}`).toMatch(new RegExp(`^${String(e.idx).padStart(4, '0')}_`));
     expect(journal.entries.map((e) => e.idx)).toEqual([...journal.entries.map((e) => e.idx)].sort((a, b) => a - b));
@@ -649,6 +658,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [19, TAG_0019],
       [20, TAG_0020],
       [21, TAG_0021],
+      [22, TAG_0022],
       [23, TAG_0023],
     ]);
     for (const e of journal.entries) {
@@ -676,16 +686,18 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[19]!.when).toBeGreaterThan(journal.entries[18]!.when);
     expect(journal.entries[20]!.when).toBeGreaterThan(journal.entries[19]!.when);
     expect(journal.entries[21]!.when).toBeGreaterThan(journal.entries[20]!.when);
-    // 0023은 0021보다 뒤에 만들었다(0022가 그 사이에 들어와도 known 차례로 본다)
+    expect(journal.entries[22]!.when).toBeGreaterThan(journal.entries[21]!.when);
+    expect(journal.entries[23]!.when).toBeGreaterThan(journal.entries[22]!.when);
+    // 0023은 0022보다 뒤에 만들었다
     expect(known.at(-1)!.tag).toBe(TAG_0023);
     expect(known.at(-1)!.when).toBeGreaterThan(known.at(-2)!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
-    // 0022(다른 갈래 몫)의 파일은 기록에 있을 때만 받는다
+    // 비워 둔 번호는 지금 없다(0022는 BAT-600이 채웠다). reservedFile은 그 자리를 지키는 장치로 남긴다
     for (const f of readdirSync(MIGRATIONS).filter((x) => x.endsWith('.sql') && reservedFile(x))) expect(journal.entries.map((e) => `${e.tag}.sql`), f).toContain(f);
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql') && !reservedFile(f))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`, `${TAG_0021}.sql`, `${TAG_0023}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json') && !reservedFile(f))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json', '0021_snapshot.json', '0023_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql') && !reservedFile(f))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`, `${TAG_0021}.sql`, `${TAG_0022}.sql`, `${TAG_0023}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json') && !reservedFile(f))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json', '0021_snapshot.json', '0022_snapshot.json', '0023_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {
@@ -777,7 +789,9 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes, ...entryShapes, ...limitShapes, cancelShape];
     expect(Object.keys(latestAll.tables).filter((t) => shapes.some((s) => `public.${s.name}` === t)).sort()).toEqual(shapes.map((s) => `public.${s.name}`).sort());
     for (const s of shapes) {
-      const t = latestAll.tables[`public.${s.name}`]!;
+      // 0023은 0021에서 갈라진 스냅샷이라 0022의 order_kind가 없다. payment_cancel은 0023, 나머지는 0022에서 본다
+      const snapshot = s.name === 'payment_cancel' ? latestAll : snap0022;
+      const t = snapshot.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), s.name).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
       expect(Object.keys(t.checkConstraints), s.name).toEqual(s.checks.map((k) => k.name));
@@ -854,5 +868,35 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     ]);
     const fk = getTableConfig(paymentCancel).foreignKeys.map((f) => f.reference());
     expect(fk.map((r) => [r.columns.map((x) => x.name), getTableConfig(r.foreignTable).name, r.foreignColumns.map((x) => x.name)])).toEqual([[['payment_id'], 'payment', ['id']]]);
+  });
+
+  test('P-T55 ① 0022 스냅샷의 앞은 0021 스냅샷이고, 표를 더하지 않고 payment에 order_kind를 더하고 event_id의 NOT NULL만 푼다(ADR-0299 결정 1)', () => {
+    expect(snap0022.prevId).toBe(snap0021.id);
+    expect(Object.keys(snap0022.tables).sort()).toEqual(Object.keys(snap0021.tables).sort());
+    const before = snap0021.tables['public.payment']!;
+    const after = snap0022.tables['public.payment']!;
+    expect(Object.keys(before.columns)).not.toContain('order_kind');
+    expect(before.columns['event_id']).toMatchObject({ type: 'uuid', notNull: true });
+    expect(after.columns['event_id']).toMatchObject({ type: 'uuid', notNull: false });
+    expect(after.columns['order_kind']).toMatchObject({ type: 'text', notNull: true });
+    expect(Object.keys(after.checkConstraints).filter((k) => !Object.keys(before.checkConstraints).includes(k))).toEqual(ADDED_CHECKS_0022);
+  });
+
+  test('P-T55 ① 0022 SQL은 event_id NOT NULL 풀기·order_kind 칸(기본 TICKET)·CHECK 둘뿐이고 지우거나 옮기는 문이 없다 [ASVS v5.0.0-2.2.1]', () => {
+    const sqlOf = readFileSync(join(MIGRATIONS, `${TAG_0022}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(sqlOf).not.toMatch(/\b(TRUNCATE|DELETE FROM|UPDATE "|RENAME|DROP TABLE|DROP COLUMN)\b/);
+    const statements = sqlOf.replace(/^-- .*$/gm, '').split(BREAKPOINT).map((x) => canon(x)).filter((x) => x !== '');
+    expect(statements).toEqual([
+      'alter table payment alter column event_id drop not null;',
+      "alter table payment add column order_kind text default 'TICKET' not null;",
+      "alter table payment add constraint payment_order_kind_check check(order_kind in('TICKET','MERCH'));",
+      "alter table payment add constraint payment_order_kind_event_check check((order_kind = 'TICKET')=(event_id is not null));",
+    ]);
+  });
+
+  test('P-T55 ① schema.ts의 주문 종류 CHECK가 ADR-0299 결정 1의 값·식과 같다(TICKET만 회차가 있다)', () => {
+    expect(literalsOf(checkOf(paymentShape, 'payment_order_kind_check'))).toEqual(['TICKET', 'MERCH']);
+    expect(checkOf(paymentShape, 'payment_order_kind_event_check')).toBe("(order_kind = 'TICKET')=(event_id is not null)");
+    expect(paymentShape.columns.find((c) => c.name === 'order_kind')).toEqual({ name: 'order_kind', type: 'text', notNull: true, hasDefault: true, primary: false });
   });
 });
