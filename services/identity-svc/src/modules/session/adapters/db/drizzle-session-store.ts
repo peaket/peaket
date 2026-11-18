@@ -443,6 +443,41 @@ export class DrizzleSessionStore implements SessionStore {
           .set({ status: 'WITHDRAWAL_PENDING', closureReason: reason, closureStartedAt: date(now) })
           .where(and(eq(account.id, accountId), eq(account.status, 'ACTIVE')));
       },
+      markWithdrawalPending: async (accountId, now, nextCheckAt) => {
+        // ACTIVE면 미룸을 시작하고, 이미 WITHDRAWAL 미룸이면 시작 시각은 두고 다음 확인 시각만 바꾼다(identity §8 '미룸 표시'). 그 밖은 그대로다
+        await tx.execute(sql`
+          update account
+             set status = 'WITHDRAWAL_PENDING',
+                 closure_reason = 'WITHDRAWAL',
+                 closure_started_at = case when status = 'ACTIVE' then ${date(now)}::timestamptz else closure_started_at end,
+                 closure_next_check_at = ${date(nextCheckAt)}::timestamptz
+           where id = ${accountId}
+             and (status = 'ACTIVE' or (status = 'WITHDRAWAL_PENDING' and closure_reason = 'WITHDRAWAL'))`);
+      },
+      withdrawalPendingOf: async (accountId) => {
+        const [r] = await tx.select({ status: account.status, reason: account.closureReason }).from(account).where(eq(account.id, accountId));
+        return r !== undefined && r.status === 'WITHDRAWAL_PENDING' && r.reason === 'WITHDRAWAL';
+      },
+      claimPendingWithdrawals: async (now, nextCheckAt, limit) => {
+        // 한 문장(docs/data.md §5.1 '탈퇴 미룸 다시 하기 고리'): 잡은 행은 다음 확인 시각을 미뤄 커밋하므로 참여자를 부르는 동안 잠그지 않고 다른 파드도 잡지 않는다
+        const r = await tx.execute(sql`
+          update account set closure_next_check_at = ${date(nextCheckAt)}::timestamptz
+           where id in (
+             select id from account
+              where status = 'WITHDRAWAL_PENDING' and closure_reason = 'WITHDRAWAL' and closure_next_check_at <= ${date(now)}::timestamptz
+              order by closure_next_check_at
+              limit ${limit}
+              for update skip locked)
+          returning id`);
+        return (r.rows as { id: string }[]).map((x) => x.id);
+      },
+      oldestPendingWithdrawalSince: async () => {
+        const r = await tx.execute(sql`select min(closure_started_at) as oldest from account where status = 'WITHDRAWAL_PENDING' and closure_reason = 'WITHDRAWAL'`);
+        const v = (r.rows[0] as { oldest?: unknown } | undefined)?.oldest;
+        if (v === null || v === undefined) return null;
+        const ms = v instanceof Date ? v.getTime() : Date.parse(String(v));
+        return Number.isFinite(ms) ? ms : null;
+      },
       accountStatusOf: async (accountId) => {
         const [r] = await tx.select({ status: account.status }).from(account).where(eq(account.id, accountId));
         return r ? (r.status as AccountStatus) : null;
@@ -451,7 +486,7 @@ export class DrizzleSessionStore implements SessionStore {
         // 프로필 칸을 비우고 DELETED로. 회원 코드도 비운다(UNIQUE). 계정 행과 ID는 다른 서비스의 법정 기록이 잇는 값이라 남긴다(docs/data.md §6)
         await tx
           .update(account)
-          .set({ status: 'DELETED', deletedAt: date(now), nickname: null, nicknameKey: null, email: null, emailVerified: false, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null, closureReason: null, closureStartedAt: null })
+          .set({ status: 'DELETED', deletedAt: date(now), nickname: null, nicknameKey: null, email: null, emailVerified: false, phone: null, memberCode: null, savedBookerName: null, savedBookerPhone: null, closureReason: null, closureStartedAt: null, closureNextCheckAt: null })
           .where(eq(account.id, accountId));
         await tx.delete(accountProvider).where(eq(accountProvider.accountId, accountId));
         await tx.delete(device).where(eq(device.accountId, accountId));

@@ -9,7 +9,7 @@ import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 import { loginMethodChangedMessage } from './login-method-message.js';
 import { accountMergedMessage } from './account-merged-message.js';
 
-type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; deletedAt?: number; nickname?: string | null; nicknameKey?: string | null; ageVerified?: boolean; memberCode?: string | null; phone?: string | null };
+type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; closureNextCheckAt?: number; deletedAt?: number; nickname?: string | null; nicknameKey?: string | null; ageVerified?: boolean; memberCode?: string | null; phone?: string | null };
 
 type StoredSession = NewSession & { loginVerdictReason: string | null; loginVerdictAt: number; terminatedAt: number | null; terminatedReason: string | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
 
@@ -491,6 +491,29 @@ export class MemorySessionStore implements SessionStore {
       markClosure: async (accountId, reason, now) => {
         const a = s.accounts.get(accountId);
         if (a && a.status === 'ACTIVE') Object.assign(a, { status: 'WITHDRAWAL_PENDING', closureReason: reason, closureStartedAt: now });
+      },
+      markWithdrawalPending: async (accountId, now, nextCheckAt) => {
+        const a = s.accounts.get(accountId);
+        if (!a) return;
+        if (a.status === 'ACTIVE') Object.assign(a, { status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureStartedAt: now, closureNextCheckAt: nextCheckAt });
+        else if (a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'WITHDRAWAL') a.closureNextCheckAt = nextCheckAt;
+      },
+      withdrawalPendingOf: async (accountId) => {
+        const a = s.accounts.get(accountId);
+        return a !== undefined && a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'WITHDRAWAL';
+      },
+      claimPendingWithdrawals: async (now, nextCheckAt, limit) => {
+        // PostgreSQL 저장소의 한 문장과 같은 규칙(다음 확인 시각 순으로 limit개, 잡으면 다음 확인 시각을 미룬다). 트랜잭션이 직렬이라 SKIP LOCKED가 필요 없다
+        const due = [...s.accounts.values()]
+          .filter((a) => a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'WITHDRAWAL' && a.closureNextCheckAt !== undefined && a.closureNextCheckAt <= now)
+          .sort((x, y) => x.closureNextCheckAt! - y.closureNextCheckAt!)
+          .slice(0, limit);
+        for (const a of due) a.closureNextCheckAt = nextCheckAt;
+        return due.map((a) => a.id);
+      },
+      oldestPendingWithdrawalSince: async () => {
+        const starts = [...s.accounts.values()].filter((a) => a.status === 'WITHDRAWAL_PENDING' && a.closureReason === 'WITHDRAWAL' && a.closureStartedAt !== undefined).map((a) => a.closureStartedAt!);
+        return starts.length > 0 ? Math.min(...starts) : null;
       },
       accountStatusOf: async (accountId) => s.accounts.get(accountId)?.status ?? null,
       signupStateOf: async (accountId) => signupStateIn(s, accountId),

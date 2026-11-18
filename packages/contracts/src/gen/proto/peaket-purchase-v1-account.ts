@@ -232,6 +232,61 @@ export const purchaseV1Account: Record<string, unknown> = {
                       "id": 6
                     }
                   }
+                },
+                "WithdrawalParticipantService": {
+                  "methods": {
+                    "ProcessAccountWithdrawal": {
+                      "requestType": "ProcessAccountWithdrawalRequest",
+                      "responseType": "ProcessAccountWithdrawalResponse"
+                    }
+                  }
+                },
+                "ProcessAccountWithdrawalRequest": {
+                  "fields": {
+                    "account_id": {
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "WithdrawalParticipantState": {
+                  "values": {
+                    "WITHDRAWAL_PARTICIPANT_STATE_UNSPECIFIED": 0,
+                    "WITHDRAWAL_PARTICIPANT_STATE_DONE": 1,
+                    "WITHDRAWAL_PARTICIPANT_STATE_PENDING": 2
+                  }
+                },
+                "WithdrawalPendingReason": {
+                  "values": {
+                    "WITHDRAWAL_PENDING_REASON_UNSPECIFIED": 0,
+                    "WITHDRAWAL_PENDING_REASON_PAYMENT_PENDING_ORDER": 1,
+                    "WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING": 2
+                  }
+                },
+                "ProcessAccountWithdrawalResponse": {
+                  "fields": {
+                    "state": {
+                      "type": "WithdrawalParticipantState",
+                      "id": 1
+                    },
+                    "reasons": {
+                      "rule": "repeated",
+                      "type": "WithdrawalPendingReason",
+                      "id": 2
+                    },
+                    "payment_pending_orders": {
+                      "type": "int32",
+                      "id": 3
+                    },
+                    "deposit_orders_cancelled": {
+                      "type": "int32",
+                      "id": 4
+                    },
+                    "deposit_orders_pending": {
+                      "type": "int32",
+                      "id": 5
+                    }
+                  }
                 }
               }
             }

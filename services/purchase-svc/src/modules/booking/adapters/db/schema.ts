@@ -70,6 +70,9 @@ export const purchaseOrder = pgTable(
     // 구매 세션이 끝났을 때 그 세션의 열린 주문을 찾는다(0011, ADR-0107 결정 2, BUILD_ORDER PRF-172). 조건을 두지 않는다:
     // status를 조건에 넣으면 상태를 바꾸는 UPDATE가 모두 HOT 갱신에서 빠져 쓰기 비용이 더 크다(data.md §5.1)
     index('purchase_order_session_idx').on(t.purchaseSessionId),
+    // 탈퇴 참여자가 그 계정의 주문을 찾는다(탈퇴 참여자 마이그레이션 0028, ADR-0284, BUILD_ORDER PRF-169). 0011과 같은 까닭으로 조건을 두지 않는다:
+    // account_id·id는 바뀌지 않아 HOT 갱신을 막지 않고 주문을 넣을 때 항목이 하나 는다(data.md §5.1 '탈퇴 참여자의 계정 주문 찾기')
+    index('purchase_order_account_idx').on(t.accountId, t.id),
     check('purchase_order_status_check', sql`${t.status} in (${STATUS_LIST})`),
     check('purchase_order_amount_check', sql`${t.amount} >= 0`),
     check('purchase_order_event_seq_check', sql`${t.eventSeq} >= 1`),

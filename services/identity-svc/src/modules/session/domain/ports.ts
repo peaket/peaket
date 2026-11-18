@@ -148,6 +148,21 @@ export interface SessionTx {
   markClosure(accountId: string, reason: 'UNDER_14', now: number): Promise<void>;
   /** 정리 중(WITHDRAWAL_PENDING)인 계정의 정리 사유. 아니면 null */
   closureReasonOf(accountId: string): Promise<'UNDER_14' | null>;
+  /**
+   * 탈퇴 미룸 표시(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현' '미룸 표시', ADR-0284 결정 2): ACTIVE 계정은 WITHDRAWAL_PENDING·정리 사유 WITHDRAWAL·
+   * closure_started_at = now·closure_next_check_at = nextCheckAt으로 둔다. 이미 WITHDRAWAL_PENDING(WITHDRAWAL)이면 시작 시각은 그대로 두고 다음 확인 시각만 바꾼다.
+   * 그 밖의 상태(UNDER_14 정리 중 포함)는 그대로 둔다. 부르는 쪽이 계정을 잠근 뒤 부른다
+   */
+  markWithdrawalPending(accountId: string, now: number, nextCheckAt: number): Promise<void>;
+  /** 탈퇴 미룸(WITHDRAWAL_PENDING이고 정리 사유 WITHDRAWAL) 중인가 */
+  withdrawalPendingOf(accountId: string): Promise<boolean>;
+  /**
+   * 다시 하기 고리의 잡기(docs/data.md §5.1 '탈퇴 미룸 다시 하기 고리'): WITHDRAWAL_PENDING·WITHDRAWAL이고 closure_next_check_at <= now인 계정을
+   * 다음 확인 시각 순으로 limit개까지 FOR UPDATE SKIP LOCKED로 잡고 closure_next_check_at을 nextCheckAt으로 미룬다(한 문장). 잡은 계정 ID
+   */
+  claimPendingWithdrawals(now: number, nextCheckAt: number, limit: number): Promise<string[]>;
+  /** 가장 오래 미룬 WITHDRAWAL 계정의 closure_started_at(ms). 없으면 null */
+  oldestPendingWithdrawalSince(): Promise<number | null>;
   /** 계정 상태. 없으면 null */
   accountStatusOf(accountId: string): Promise<AccountStatus | null>;
   /** 가입 마무리 상태. 계정이 없으면 null. 계정 잠금과 함께 쓰면 잠근 뒤의 값이다 */

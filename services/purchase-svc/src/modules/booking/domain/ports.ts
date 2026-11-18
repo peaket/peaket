@@ -1935,3 +1935,54 @@ export interface OrderExpirySignals {
 export interface OrderExpiryLogger {
   warn(obj: object, msg: string): void;
 }
+
+// ---- 탈퇴 참여자(docs/features/payment.md §4.1 '탈퇴 참여자의 첫 구현', ADR-0284, BUILD_ORDER PRF-169, P-T55) ----
+
+/** 탈퇴 참여자가 읽는 그 계정의 주문 하나(결제 결과 대기·입금 대기 상태만) */
+export interface WithdrawalOrder {
+  readonly orderId: string;
+  readonly status: OrderStatus;
+  /** 주문 금액(원, 서버 계산) */
+  readonly amount: number;
+}
+
+/**
+ * 탈퇴 참여자의 계정 주문 찾기(adapters/db/drizzle-withdrawal-orders.ts, docs/data.md §5.1 '탈퇴 참여자의 계정 주문 찾기').
+ * 그 계정 ID의 CREATED·AUTHENTICATED·ACCEPTED·RESERVED·UNKNOWN·AWAITING_DEPOSIT 주문을 주문 ID 순으로 한 문장으로 읽는다(문장 시간 한도 statementTimeoutMs).
+ * DB에 닿지 못하거나 문장 시간 한도를 넘으면 WithdrawalOrdersUnavailable을 던진다. 그 밖의 오류는 그대로 던진다
+ */
+export interface WithdrawalOrders {
+  openOrdersOf(accountId: string, o: { statementTimeoutMs: number }): Promise<WithdrawalOrder[]>;
+}
+
+/** 탈퇴 참여자가 purchase DB에 닿지 못했다(gRPC UNAVAILABLE) */
+export class WithdrawalOrdersUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('탈퇴 참여자가 purchase DB에 닿지 못했다', cause === undefined ? undefined : { cause });
+    this.name = 'WithdrawalOrdersUnavailable';
+  }
+}
+
+/** 입금 대기 주문 취소의 답(payment-svc CancelPayment, 일반 취소 어댑터의 결과 이름. PENDING은 CANCEL_PENDING) */
+export type WithdrawalDepositCancelOutcome = 'CANCELLED' | 'PENDING' | 'REJECTED' | 'UNKNOWN';
+
+/**
+ * 입금 대기 주문의 입금 전 취소(payment-svc GetPayment → CancelPayment, 운영은 refund 모듈의 GrpcPaymentCancellations를 그대로 넣는다).
+ * 같은 취소 ID로 다시 불러도 결과가 같다(payment §6 '입금 전 취소'). 답이 없으면 UNKNOWN이다
+ */
+export interface WithdrawalDepositCancellations {
+  cancel(q: { readonly cancellationId: string; readonly orderId: string; readonly amount: number; readonly reason: 'ACCOUNT_WITHDRAWAL'; readonly deadlineMs: number }): Promise<WithdrawalDepositCancelOutcome>;
+}
+
+/** 탈퇴 참여자 지표(payment §4.1 '지표·로그'). 던지지 않는다 */
+export interface WithdrawalParticipantSignals {
+  /** purchase_withdrawal_participant_total{state}(done·pending·error) */
+  participant(state: 'done' | 'pending' | 'error'): void;
+  /** purchase_withdrawal_deposit_cancel_total{result}(cancelled·pending·unknown·rejected·skipped) */
+  depositCancel(result: 'cancelled' | 'pending' | 'unknown' | 'rejected' | 'skipped'): void;
+}
+
+/** 탈퇴 참여자 경고 로그(주문 ID만 싣는다. 계좌번호·결제 키는 싣지 않는다) */
+export interface WithdrawalParticipantLogger {
+  warn(obj: object, msg: string): void;
+}

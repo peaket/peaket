@@ -4,6 +4,22 @@ export { ACCESS_TOKEN_TTL_MS, decideRefresh, REFRESH_RETRY_GRACE_MS, sessionAliv
 export { ACCOUNT_HOLD_CLOSED_KEEP_MS } from './domain/merge.js';
 export { ACCOUNT_CLAIMS, ACCOUNT_CLOSURE, ACCOUNT_ERASER, type AccountClaims, type AccountClosure, type AccountEraser, FRAUD_HOLDS, type FraudHolds, REVERIFICATIONS, type Reverifications } from './domain/ports.js';
 export { FinishWithdrawals } from './application/finish-withdrawals.js';
+export { RetryPendingWithdrawals, type RetryPendingWithdrawalsReport } from './application/retry-pending-withdrawals.js';
+export { WithdrawAccount, type WithdrawResult } from './application/withdraw-account.js';
+export {
+  WITHDRAWAL_NEXT_CHECK_MS,
+  WITHDRAWAL_PARTICIPANTS,
+  WITHDRAWAL_REQUEST_DEADLINE_MS,
+  WITHDRAWAL_RETRY_BATCH,
+  WITHDRAWAL_RETRY_DEADLINE_MS,
+  WITHDRAWAL_RETRY_INTERVAL_MS,
+  WITHDRAWAL_SIGNALS,
+  WithdrawalParticipantUnavailable,
+  type WithdrawalParticipant,
+  type WithdrawalParticipantAnswer,
+  type WithdrawalSignals,
+} from './domain/withdrawal.js';
+export { doneWithdrawalParticipant, GrpcWithdrawalParticipant, toWithdrawalAnswer, unavailableWithdrawalParticipant, withdrawalParticipantsFromEnv } from './adapters/grpc-withdrawal-participants.js';
 export { DrizzleSessionStore, writeContactRef } from './adapters/db/drizzle-session-store.js';
 export { CreateSession } from './application/create-session.js';
 export { GetLinkProposal } from './application/get-link-proposal.js';

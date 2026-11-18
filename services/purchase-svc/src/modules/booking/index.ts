@@ -339,6 +339,32 @@ export { LoggerOrderLog, LoggerPaymentPullLog, LoggerPaymentResultLog, LoggerSag
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';
 export { bookingRestrictionHandlers, bookingRestrictionPackage, type BookingRestrictionPackage } from './inbound/booking-restriction.grpc.js';
+// 탈퇴 참여자(payment §4.1 '탈퇴 참여자의 첫 구현', ADR-0284, BUILD_ORDER PRF-169)
+export {
+  ProcessAccountWithdrawal,
+  WITHDRAWAL_CANCEL_DEADLINE_MS,
+  WITHDRAWAL_CANCEL_LIMIT,
+  WITHDRAWAL_CANCEL_MARGIN_MS,
+  WITHDRAWAL_CANCEL_MIN_REMAINING_MS,
+  WITHDRAWAL_PAYMENT_PENDING_STATUSES,
+  WITHDRAWAL_STATEMENT_TIMEOUT_MS,
+  withdrawalCancellationId,
+  type ProcessAccountWithdrawalDeps,
+  type ProcessAccountWithdrawalResult,
+  type WithdrawalPendingReasonName,
+} from './application/process-account-withdrawal.js';
+export { DrizzleWithdrawalOrders } from './adapters/db/drizzle-withdrawal-orders.js';
+export { PromWithdrawalParticipantSignals } from './adapters/prom-withdrawal-participant-signals.js';
+export { WITHDRAWAL_PARTICIPANT_CALLER, withdrawalParticipantHandlers, withdrawalParticipantPackage, type WithdrawalParticipantHandlerOptions, type WithdrawalParticipantPackage } from './inbound/withdrawal-participant.grpc.js';
+export {
+  WithdrawalOrdersUnavailable,
+  type WithdrawalDepositCancellations,
+  type WithdrawalDepositCancelOutcome,
+  type WithdrawalOrder,
+  type WithdrawalOrders,
+  type WithdrawalParticipantLogger,
+  type WithdrawalParticipantSignals,
+} from './domain/ports.js';
 export {
   ACCEPT_PAYMENT_OPERATION,
   AcceptPayment,
