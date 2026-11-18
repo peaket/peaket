@@ -6,6 +6,7 @@
 import Link from 'next/link';
 import { Button } from '@peaket/ds/Button';
 import { useShopToast, type ShopToastKind } from '@/entities/cart';
+import { useStickyInset } from '@/shared/lib/sticky-inset';
 
 export interface ProductActionsProps {
   /** 'bar': 아래 고정 띠(lg 미만) · 'inline': 데스크톱 한 줄 */
@@ -18,6 +19,8 @@ export interface ProductActionsProps {
 
 export function ProductActions({ placement, blockedReasonId, checkoutHref = '/shop/checkout', initialToast = null }: ProductActionsProps) {
   const [toastNode, showToast] = useShopToast(initialToast);
+  // 띠의 실제 높이를 아래 스크롤 여백으로(docs/frontend.md §5.11 '초점이 가려지지 않게', BAT-171 R171-2). 데스크톱 한 줄(inline)에서는 달지 않는다
+  const barRef = useStickyInset('bottom');
   const buttons = (
     <>
       <Button variant="secondary" size="lg" className="grow" disabledReasonId={blockedReasonId} onClick={() => showToast('added')}>
@@ -35,7 +38,7 @@ export function ProductActions({ placement, blockedReasonId, checkoutHref = '/sh
     </>
   );
   return placement === 'bar' ? (
-    <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 lg:hidden">
+    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 lg:hidden">
       {buttons}
       {toastNode}
     </div>
