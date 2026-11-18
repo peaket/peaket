@@ -30,7 +30,7 @@ test('저장소는 통과한다', () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
-test('D_T45_⑥_공용모듈기본값그대로인판은_통과한다', () => {
+test('D-T45 ⑥_공용모듈기본값그대로인판은_통과한다', () => {
   const r = run({
     'services/purchase-svc/src/kafka.ts': use(`{ 'linger.ms': 5 }`),
     // Kafka를 쓰지 않는 파일의 같은 이름 칸은 상관없다(제어 명령의 ack 수 등)
@@ -53,7 +53,7 @@ for (const [label, extra, name] of [
   ['④', `{ autoCommit: true }`, 'autoCommit'],
   ['⑤', `{ 'group.instance.id': 'pod-1' }`, 'group.instance.id'],
 ]) {
-  test(`D_T45_${label}_${name}를 덮어쓴 판은 실패한다`, () => {
+  test(`D-T45 ${label}_${name}를 덮어쓴 판은 실패한다`, () => {
     const r = run({ 'services/purchase-svc/src/kafka.ts': use(extra) });
     assert.equal(r.status, 1, r.stdout);
     assert.match(r.stderr, new RegExp(name.replace(/\./g, '\\.')));
@@ -61,7 +61,7 @@ for (const [label, extra, name] of [
   });
 }
 
-test('D_T45_Kafka클라이언트를직접가져오면_실패한다(필수 설정을 거치지 않는다)', () => {
+test('D-T45 ①~⑤_Kafka클라이언트를직접가져오면_실패한다(필수 설정을 거치지 않는다)', () => {
   const r = run({
     'services/a/src/x.ts': "import { KafkaJS } from '@confluentinc/kafka-javascript';\n",
     'services/b/src/y.js': "const { Kafka } = require('kafkajs');\n",

@@ -151,6 +151,8 @@ describe('[ASVS v5.0.0-13.4.2] 시작 설정 검사', () => {
       sampleOneIn: 10,
       defaultSloLatencyMs: 500,
       grpcLbProfile: 'service',
+      // 업무 gRPC 포트 기본값 [가정](ADR-0303 결정 1, docs/devops.md §6.4, BAT-075 시험 이의 TO-1)
+      grpcPort: 50051,
     });
   });
 });
