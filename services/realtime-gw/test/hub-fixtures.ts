@@ -21,6 +21,27 @@ export const SPEC = {
   sameTokenMax: 2,
   /** 내릴 때 구독 해제 응답을 기다리는 상한(ms, ADR-0297 결정 5, [가정]) */
   shutdownUnsubscribeWaitMs: 1_000,
+  /** 전파 Degraded 자동 전환(seat-hold §7 '자동 전환의 첫 구현', §12 S-T14, ADR-0298 결정 1~5, [가정] S-T12·K4) */
+  degraded: {
+    /** Degraded 연결의 묶음 간격(ms) */
+    intervalMs: 1_000,
+    /** 파드 판정 창(ms) */
+    windowMs: 10_000,
+    /** 넘친 대기가 이것을 넘으면 '넘음' 쪽(ms) */
+    enterExcessMs: 60,
+    /** 넘친 대기가 이것을 넘으면 '괜찮음'을 깨는 쪽(ms) */
+    exitExcessMs: 30,
+    /** Degraded로 바꾸는 이어진 넘음 창 수(3분) */
+    enterWindows: 18,
+    /** 평시로 되돌리는 이어진 괜찮음 창 수(5분) */
+    exitWindows: 30,
+    /** 보내기 버퍼가 이 값 이상이면 그 연결만 1초(바이트, 256KiB) */
+    slowEnterBytes: 256 * 1024,
+    /** 1초가 된 연결은 이 값 이하 박자가 이어지면 되돌림(바이트, 64KiB) */
+    slowExitBytes: 64 * 1024,
+    /** 되돌림에 필요한 이어짐(ms) */
+    slowExitMs: 30_000,
+  },
 } as const;
 
 /** 시작 시각은 박자(100ms)의 배수가 아니게 고른다 */
@@ -98,15 +119,18 @@ export interface Harness {
   clock: FakeClock;
   sub: FakeSubscriber;
   metrics: MetricCall[];
+  /** onDegradedChange로 받은 파드 바뀜(ADR-0298 결정 7) */
+  degradedChanges: Array<{ degraded: boolean; batches: number; over60: number; over30: number }>;
   sections: Map<string, number>;
   /** 열고 첫 프레임까지 받은 연결. tokenId를 주지 않으면 연결마다 다른 토큰 jti다 */
   open(o?: { eventId?: string; accountId?: string; expiresAtMs?: number; tokenId?: string }): FakeConn;
 }
 
-export function harness(o: { sections?: Record<string, number> } = {}): Harness {
-  const clock = fakeClock({ now: WALL0, monotonic: MONO0 });
+export function harness(o: { sections?: Record<string, number>; monotonic?: number } = {}): Harness {
+  const clock = fakeClock({ now: WALL0, monotonic: o.monotonic ?? MONO0 });
   const sub = new FakeSubscriber();
   const metrics: MetricCall[] = [];
+  const degradedChanges: Harness['degradedChanges'] = [];
   const sections = new Map(Object.entries(o.sections ?? { 'ev-1': 20, 'ev-2': 20 }));
   let tokens = 0;
   const hub = createStreamHub({
@@ -114,12 +138,14 @@ export function harness(o: { sections?: Record<string, number> } = {}): Harness 
     subscriber: sub,
     sectionCount: (eventId) => sections.get(eventId),
     onMetric: (name, labels, value) => metrics.push({ name, labels, value }),
+    onDegradedChange: (e) => degradedChanges.push({ degraded: e.degraded, batches: e.batches, over60: e.over60, over30: e.over30 }),
   });
   return {
     hub,
     clock,
     sub,
     metrics,
+    degradedChanges,
     sections,
     open(s = {}) {
       const c = new FakeConn();

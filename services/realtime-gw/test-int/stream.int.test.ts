@@ -1,6 +1,6 @@
 // realtime-gw 통합 시험: 실제 Valkey 컨테이너와 start()로 띄운 서비스에 WebSocket 클라이언트로 붙는다(BUILD_ORDER HOT-090, BAT-052).
 // 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현'(핸드셰이크·받는 프레임 검사·좌석 Redis 구독·묶음·느린 연결과 내릴 때·지표와 로그),
-// §12 S-T31 ①②③④·S-T42 ①②③⑤⑧⑪⑫⑭~⑯⑱·S-T12 ②, docs/frontend.md §4.4.1(닫힘 이유 글 포함), docs/data.md §3 `s:{event:E}:sec:{section}` 행, docs/observability.md §7 ts,
+// §12 S-T31 ①②③④·S-T42 ①②③⑤⑧⑪⑫⑭~⑯⑱·S-T12 ②·S-T14 ①(§7 '자동 전환의 첫 구현', ADR-0298, BAT-053), docs/frontend.md §4.4.1(닫힘 이유 글 포함), docs/data.md §3 `s:{event:E}:sec:{section}` 행, docs/observability.md §7 ts,
 // ADR-0297(리뷰 반영 RF-T1·T4·T6·T7·T8·T11·T13). 시험이 쓰는 좌석 채널 메시지는 시험이 직접 SPUBLISH한 것뿐이다(환불 Lua의 changedAtMs에 기대지 않는다, 감독 지시).
 // docs/security/asvs/seat-hold.md. 묶음은 화면과 같은 해독기(@peaket/seatmap decodeFrame)로 읽는다.
 import { request as httpRequest } from 'node:http';
@@ -681,7 +681,7 @@ describe('S-T42 ⑱ 답 없는 구독 연결(ADR-0297 결정 4)', () => {
 
 describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', () => {
   test(
-    'S-T42 ⑪ 받기를 멈춘 실제 연결 하나가 있는 채 큰 묶음을 퍼부으면 그 연결만 1013으로 닫히고(서버의 보내기 버퍼 1MiB) 다른 연결은 묶음을 이어 받는다',
+    'S-T42 ⑪ S-T14 ① 받기를 멈춘 실제 연결 하나가 있는 채 큰 묶음을 퍼부으면 그 연결만 1013으로 닫히고(서버의 보내기 버퍼 1MiB) 다른 연결은 묶음을 이어 받는다. 닫히기 전 realtime_gw_buffer_slow_connections가 1(256KiB 이상인 동안 1초 간격)이고 닫힌 뒤 0이며, 받는 연결은 BatchInterval 1000을 받지 않는다(시험 이의 TO-1)',
     async () => {
       const ch = channelOf('ev-1', 15);
       const slow = await open();
@@ -696,13 +696,21 @@ describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', (
       // 메시지 하나 = 좌석 20,000개(묶음 항목 약 60KB). 박자마다 6개(약 360KB)씩, 받는 연결이 따라오게 쉬며 보낸다
       const seats = Array.from({ length: 20_000 }, (_, i) => [i, 1] as [number, number]);
       let version = 0;
+      // 버퍼 1초 연결 게이지를 박자마다 본다(1013 전에 1이 되어야 한다, ADR-0298 결정 3)
+      let sawSlow = false;
+      const watchSlow = async (): Promise<void> => {
+        if (metricValue(await svc.metrics(), 'realtime_gw_buffer_slow_connections') === 1) sawSlow = true;
+      };
       for (let round = 0; round < 150 && (await closes1013()) === 0; round++) {
         const m = redis.multi();
         for (let k = 0; k < 6; k++) m.addCommand(['SPUBLISH', ch, deltaText({ epoch: 3, section: 15, version: ++version, changedAtMs: Date.now(), seats })]);
         await m.exec();
         await sleep(60);
+        await watchSlow();
       }
       await until(async () => (await closes1013()) === 1, '느린 연결 1013', 10_000);
+      expect(sawSlow).toBe(true);
+      await until(async () => metricValue(await svc.metrics(), 'realtime_gw_buffer_slow_connections') === 0, '버퍼 1초 연결 게이지 0');
       // 다른 연결은 열려 있고 그 뒤의 묶음을 받는다
       expect(fast.ws.readyState).toBe(fast.ws.OPEN);
       const from = fast.raw.length;
@@ -711,9 +719,94 @@ describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', (
       const isLast = (f: Parameters<typeof isDelta>[0]): f is DeltaFrame => isDelta(f) && f.sections.some((s) => s.sectionVersion === last);
       await fast.next(isLast, 10_000, from);
       expect(await closes1013()).toBe(1);
+      // 받는 연결은 처음의 100 말고 BatchInterval을 받지 않았다(받기를 멈춘 연결의 버퍼는 그 연결만 바꾼다)
+      expect(fast.frames().filter(isBatchInterval).map((f) => f.intervalMs)).toEqual([100]);
       await until(() => svc.logLines().some((l) => l.includes('"ws_closed"') && l.includes('"code":1013')), 'ws_closed 1013 줄');
     },
     90_000,
+  );
+
+  test(
+    'S-T14 ① 받기를 멈춘 실제 연결은 보내기 버퍼가 256KiB에 닿으면 그 연결만 1초 간격이 되고(realtime_gw_buffer_slow_connections 1, realtime_gw_degraded 0), 다시 받으면 BatchInterval 1000 뒤 묶음 serverTimeMs가 1,000ms 안팎 간격이며, 버퍼가 빈 뒤 30초 근처에 BatchInterval 100을 받고 게이지가 0이다. 받는 연결은 100 그대로다',
+    async () => {
+      // 시작 파일이 게이지 둘을 0으로 낸다(ADR-0298 결정 7)
+      const m0 = await svc.metrics();
+      expect(metricValue(m0, 'realtime_gw_degraded')).toBe(0);
+      expect(metricValue(m0, 'realtime_gw_buffer_slow_connections')).toBe(0);
+      const ch = channelOf('ev-1', 14);
+      const slow = await open();
+      const fast = await open();
+      slow.send(subscribeBytes([14]));
+      fast.send(subscribeBytes([14]));
+      await until(async () => (await shardSubs(ch)) === 1, '구역 14 구독');
+      await sleep(200);
+      rawSocketOf(slow.ws).pause();
+      const gaugeOf = async (name: string): Promise<number | undefined> => metricValue(await svc.metrics(), name);
+      // 메시지 하나 = 좌석 20,000개(묶음 항목 약 60KB). 박자마다 둘(약 120KB)씩 보내고 박자마다 게이지를 본다.
+      // 1초가 된 뒤 쌓이는 양이 1MiB에 닿지 않게(1013이 아니게) 게이지가 1이 되면 곧 멈춘다
+      const seats = Array.from({ length: 20_000 }, (_, i) => [i, 1] as [number, number]);
+      let version = 0;
+      let switched = false;
+      for (let round = 0; round < 600 && !switched; round++) {
+        const m = redis.multi();
+        for (let k = 0; k < 2; k++) m.addCommand(['SPUBLISH', ch, deltaText({ epoch: 4, section: 14, version: ++version, changedAtMs: Date.now(), seats })]);
+        await m.exec();
+        await sleep(80);
+        switched = (await gaugeOf('realtime_gw_buffer_slow_connections')) === 1;
+      }
+      expect(switched).toBe(true);
+      expect(await gaugeOf('realtime_gw_degraded')).toBe(0); // 한 연결의 버퍼는 파드를 바꾸지 않는다
+
+      // 다시 받는다. 작은 메시지를 100ms마다 계속 보낸다(멈출 때까지)
+      let publishing = true;
+      const smallLoop = (async () => {
+        while (publishing) {
+          await spublish(ch, deltaText({ epoch: 4, section: 14, version: ++version, changedAtMs: Date.now(), seats: [[version % 100, 2]] }));
+          await sleep(100);
+        }
+      })();
+      const resumedAt = Date.now();
+      rawSocketOf(slow.ws).resume();
+      try {
+        const isInterval = (ms: number) => (f: Parameters<typeof isBatchInterval>[0]): f is Extract<typeof f, { type: 'batchInterval' }> => isBatchInterval(f) && f.intervalMs === ms;
+        await slow.next(isInterval(1_000), 10_000);
+        await sleep(5_500);
+        expect(slow.ws.readyState).toBe(slow.ws.OPEN); // 1MiB에 닿지 않았다(1013 아님)
+        const frames = slow.frames();
+        const i1000 = frames.findIndex(isInterval(1_000));
+        // 다시 받은 뒤(+300ms부터) 보낸 묶음끼리의 간격: '1,000ms 이상 지난 첫 박자'라 1,000ms에서 박자 하나(100ms) 안쪽.
+        // 실제 타이머라 허용 폭을 아래 50ms·위 50ms [가정]로 둔다(경계는 허브 시험이 가짜 시계로 본다)
+        const later = frames.slice(i1000 + 1).filter(isDelta).filter((f) => f.serverTimeMs >= resumedAt + 300);
+        const gaps = later.slice(1).map((f, i) => f.serverTimeMs - later[i]!.serverTimeMs);
+        expect(gaps.length).toBeGreaterThanOrEqual(3);
+        for (const g of gaps) {
+          expect(g).toBeGreaterThanOrEqual(1_000 - 50);
+          expect(g).toBeLessThanOrEqual(1_000 + 100 + 50);
+        }
+        expect(await gaugeOf('realtime_gw_buffer_slow_connections')).toBe(1);
+
+        // 버퍼가 빈 뒤(다시 받은 뒤) 30초 근처에 BatchInterval 100. 받기를 멈춘 동안은 버퍼가 256KiB 아래로 내려가지 않으므로 30초 전에는 오지 않는다
+        await slow.next(isInterval(100), 40_000, i1000 + 1);
+        const back = Date.now() - resumedAt;
+        expect(back).toBeGreaterThanOrEqual(30_000 - 50);
+        expect(back).toBeLessThanOrEqual(30_000 + 1_000);
+        expect(await gaugeOf('realtime_gw_buffer_slow_connections')).toBe(0);
+        // 되돌린 뒤 묶음은 100ms 박자에 온다(보내는 쪽 타이머가 박자 하나둘을 비울 수 있어 300ms 안쪽으로 본다. 1초 간격이면 950ms 이상이다)
+        const i100 = slow.frames().findIndex(isInterval(100));
+        await sleep(800);
+        const after = slow.frames().slice(i100 + 1).filter(isDelta);
+        expect(after.length).toBeGreaterThanOrEqual(3);
+        for (let i = 1; i < after.length; i++) expect(after[i]!.serverTimeMs - after[i - 1]!.serverTimeMs).toBeLessThanOrEqual(300);
+      } finally {
+        publishing = false;
+        await smallLoop;
+      }
+      // 받는 연결은 처음의 100 말고 BatchInterval을 받지 않았고 묶음을 이어 받았다
+      expect(fast.frames().filter(isBatchInterval).map((f) => f.intervalMs)).toEqual([100]);
+      expect(fast.frames().filter(isDelta).length).toBeGreaterThan(30);
+      expect(await gaugeOf('realtime_gw_degraded')).toBe(0);
+    },
+    120_000,
   );
 
   test('S-T31 ② 실제 소켓으로 1초 안에 SubscribeSections 셋(0·300·600ms)을 보내면 셋째에 4429 too many다(맺은 뒤 첫 구독도 센다) [ASVS v5.0.0-2.4.1]', async () => {
