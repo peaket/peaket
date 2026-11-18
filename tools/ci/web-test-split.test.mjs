@@ -2,7 +2,7 @@
 // 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3). 꼴:
 // - apps/web/test-int/*.int.test.mjs: Valkey만 쓴다(운영 빌드를 읽지 않는다). ci-node가 돈다(JUnit 보고서를 남긴다)
 // - *.build.test.mjs: 운영 빌드만 쓴다(Docker를 부르지 않는다). ci-web budgets 잡이 운영 빌드 뒤 돈다
-//   (계획 §17 G-6, 소유자 결정 (나): web / reflow 잡은 BAT-171에서 처음 켠다. 그때까지 ci-web.yml에 reflow 잡이 없다)
+//   (계획 §17 G-6). web / reflow 잡은 BAT-171에서 처음 켰고(소유자 결정 2026-11-16 (나)) test:build는 돌지 않는다(아래 HOT-381 시험)
 // - *.heavy.test.mjs: 둘 다 쓴다. 로컬 무거운 게이트에서만 돈다
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -91,5 +91,41 @@ test('W7L2-W1 웹 컨테이너 시험의 파일 이름이 필요한 것과 맞�
   const testBuild = lines.findIndex((l) => l.includes('pnpm --filter @peaket/web test:build'));
   assert.ok(testBuild > prodBuild, 'budgets 잡에 운영 빌드 뒤 test:build 단계가 없다');
   assert.doesNotMatch(budgets, /test:heavy/, 'CI가 무거운 게이트 묶음을 돈다');
-  assert.equal(jobOf(web, 'reflow'), null, 'ci-web.yml에 reflow 잡이 있다(BAT-171에서 처음 켠다)');
+});
+
+// BAT-171 시험(계획 §3 T3): 시험 담당(l2-bat171-test)이 구현(9e92ae9d) 뒤에 썼다(ADR-0281 결정 3). 위 W7L2-W1의 'reflow 잡 없음' 단언을 뒤집었다.
+// 기준: docs/devops.md §3.1 ci-web.yml 행, docs/frontend.md §5.17 '화면 매트릭스와 FE-T31·FE-T18 자동 몫의 세부'(PR마다 운영 빌드로 돈다),
+// BUILD_ORDER HOT-381, 소유자 결정 2026-11-16 (나)(재배치 단계에 continue-on-error를 두지 않는다)
+test('HOT-381 ci-web.yml에 reflow 잡이 있고 운영 빌드 뒤 pnpm run reflow를 continue-on-error 없이 돌리며 보고서를 올린다', () => {
+  const web = read('.github/workflows/ci-web.yml');
+  // 주석 줄은 뺀다(잡 사이의 설명 글이 단언에 걸리지 않게)
+  const code = (job) => (job ?? '').split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n');
+  const reflow = code(jobOf(web, 'reflow'));
+  assert.ok(reflow, 'ci-web.yml에 reflow 잡이 없다');
+  const lines = reflow.split('\n');
+  const prodBuild = lines.findIndex((l, i) => l.includes('node seed-css/build.mjs') && /PEAKET_BUILDS:\s*prod\b/.test(stepAt(lines, i)));
+  assert.ok(prodBuild >= 0, 'reflow 잡에 운영 빌드 단계(node seed-css/build.mjs, PEAKET_BUILDS: prod)가 없다');
+  // 재배치 시험 묶음(playwright.reflow.config.mjs)을 실제로 부른다: tools/web-checks에서 pnpm run reflow
+  const run = lines.findIndex((l) => /^\s*(?:- )?run:\s*pnpm run reflow\s*$/.test(l));
+  assert.ok(run >= 0, 'reflow 잡에 pnpm run reflow 단계가 없다');
+  assert.ok(run > prodBuild, 'reflow 잡이 운영 빌드보다 먼저 pnpm run reflow를 돈다');
+  const runStep = stepAt(lines, run);
+  assert.match(runStep, /working-directory:\s*tools\/web-checks\s*$/m, `pnpm run reflow 단계가 tools/web-checks에서 돌지 않는다\n${runStep}`);
+  assert.doesNotMatch(runStep, /^\s*(?:- )?if:/m, `pnpm run reflow 단계에 조건이 붙어 건너뛸 수 있다\n${runStep}`);
+  // 실패를 잡 실패로 낸다: 잡에도 단계에도 continue-on-error가 없다(false여도 두지 않는다)
+  assert.doesNotMatch(reflow, /continue-on-error/, `reflow 잡에 continue-on-error가 있다\n${reflow}`);
+  // 실패한 실행에서도 보고서를 올린다: 시험 단계 뒤 if: always()인 upload-artifact 단계가 tools/web-checks/reports/를 올린다
+  const upload = lines.findIndex((l, i) => i > run && l.includes('actions/upload-artifact@'));
+  assert.ok(upload > run, 'reflow 잡에 pnpm run reflow 뒤 보고서 올리기 단계가 없다');
+  const uploadStep = stepAt(lines, upload);
+  assert.match(uploadStep, /^\s*(?:- )?if:\s*always\(\)\s*$/m, `보고서 올리기가 실패한 실행에서 돌지 않는다\n${uploadStep}`);
+  assert.match(uploadStep, /^\s*path:\s*tools\/web-checks\/reports\/?\s*$/m, `보고서 올리기가 tools/web-checks/reports를 올리지 않는다\n${uploadStep}`);
+  // test:build는 지금처럼 budgets 잡에만 있다(31d356ba 전 reflow 잡에 있던 것을 다시 옮기지 않는다, 계획 F9)
+  assert.doesNotMatch(reflow, /test:build/, 'reflow 잡이 test:build를 돈다(budgets 잡 몫이다)');
+  const jobNames = [...web.matchAll(/^ {2}([A-Za-z][\w-]*):\s*$/gm)].map((m) => m[1]);
+  assert.deepEqual(
+    jobNames.filter((name) => /test:build/.test(code(jobOf(web, name)))),
+    ['budgets'],
+    'test:build를 도는 잡이 budgets 하나가 아니다',
+  );
 });
