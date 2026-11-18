@@ -9,7 +9,7 @@
 import { test, expect } from '@playwright/test';
 import { stubFanApi } from '../csp/pages.mjs';
 import { openReflowPage } from './open.mjs';
-import { REFLOW_PAGES, obscuredFocusFindings, stickyInsetFindings } from './rules.mjs';
+import { REFLOW_PAGES, TEXT_SPACING_CSS, obscuredFocusFindings, stickyInsetFindings } from './rules.mjs';
 
 /** Tab을 이만큼까지 누른다(처음 초점으로 돌아오면 멈춘다) [가정] */
 const MAX_TABS = 80;
@@ -179,5 +179,64 @@ for (const p of REFLOW_PAGES) {
     await page.setViewportSize({ width: 320, height: 321 });
     const again = await expectInsetsCover(page, `${p.path} 320×321(다시)`);
     expect(again.bands.length, `${p.path} 321px로 돌아온 뒤 띠 수가 다르다`).toBe(stuck.bands.length);
+  });
+
+  // BAT-171 리뷰 R171-3 재현(Role: review-fix, 시험 담당 l2-bat171-test). 기준 docs/frontend.md §5.11 '초점이 가려지지 않게',
+  // docs/design/d5-screen-blueprint.md §5.2 '낮은 화면': 320px 이하에서 흐름에 둔 하단 띠는 본문 main의 끝, 셸 바닥글 앞이다(DOM 순서도 같다)
+  if (!DETAIL.test(p.path)) continue;
+  test(`FE-T18 ${p.app} ${p.locale} ${p.path} 320: 보이는 높이 320px에서 흐름에 둔 하단 띠는 main의 끝, 바닥글 앞에 있다`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 321 });
+    expect(await openReflowPage(page, p), '도착 경로가 다르다(빈 결과)').toBe(p.path);
+    // 321px에서 아래에 붙은 띠를 표시해 둔다(그 띠를 320px에서 찾는다)
+    const stuck = await expectInsetsCover(page, `${p.path} 320×321`);
+    expect(stuck.bands.filter((b) => b.edge === 'bottom'), `${p.path} 321px에서 아래에 붙는 띠(하단 예매)가 없다(빈 결과)`).not.toEqual([]);
+    await page.setViewportSize({ width: 320, height: 320 });
+    await expect.poll(async () => (await markedBands(page)).filter((b) => b.edge === 'bottom').map((b) => b.position), { timeout: 5_000, message: '320px에서 하단 띠가 흐름에 있지 않다' }).not.toContain('sticky');
+    const place = await page.evaluate(() => {
+      const bar = document.querySelector('[data-fet18-band="bottom"]');
+      const main = document.querySelector('main');
+      const footer = [...document.querySelectorAll('footer, [role="contentinfo"]')].find((f) => !f.closest('main')) ?? null;
+      const shown = (el) => (typeof el.checkVisibility === 'function' ? el.checkVisibility() : el.getClientRects().length > 0) && el.getBoundingClientRect().height > 0;
+      if (!bar || !main) return { bar: !!bar, main: !!main };
+      const docTop = (el) => el.getBoundingClientRect().top + window.scrollY;
+      const docBottom = (el) => el.getBoundingClientRect().bottom + window.scrollY;
+      // main 안에서 띠 뒤(DOM 순서)에 오는 보이는 내용(띠 안쪽은 뺀다)
+      const after = [...main.querySelectorAll('*')].filter((el) => !bar.contains(el) && !el.contains(bar) && bar.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING && shown(el) && (el.textContent ?? '').trim() !== '');
+      return {
+        bar: true,
+        main: true,
+        inMain: main.contains(bar),
+        footer: !!footer,
+        beforeFooterInDom: !!footer && !!(bar.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING),
+        aboveFooter: !!footer && docBottom(bar) <= docTop(footer) + 1,
+        after: after.slice(0, 5).map((el) => `${el.tagName.toLowerCase()} ${(el.textContent ?? '').trim().slice(0, 30)}`),
+      };
+    });
+    expect(place, `${p.path} 320×320 하단 띠 자리`).toEqual({ bar: true, main: true, inMain: true, footer: true, beforeFooterInDom: true, aboveFooter: true, after: [] });
+  });
+}
+
+// BAT-171 리뷰 R171-2 재현(Role: review-fix, 시험 담당 l2-bat171-test). 기준 docs/frontend.md §5.11 '초점이 가려지지 않게'(높이는 띠가 지금 그려진 실제 높이,
+// 박아 둔 여백이 띠보다 작으면 결함). 화면 목록 밖이지만 하단 띠를 가진 소비자 웹 화면(굿즈 상세·가입 동의·예매 취소, 화면 목록의 예시 주소)을 321px 높이의
+// 좁은 폭에서 연다. 글자 간격(WCAG 1.4.12)을 더하면 띠가 높아지고 여백도 따라와야 한다. 결제 화면은 운영 빌드에서 홀드를 만들 길이 없어 rules.test의 소스 검사가 본다
+const BAR_PAGES = [
+  { app: 'web', locale: 'ko', path: '/shop/gds-lumen-lightstick' },
+  { app: 'web', locale: 'ko', path: '/signup/consent' },
+  { app: 'web', locale: 'ko', path: '/my/tickets/tkt-lumen-r1-0313/cancel' },
+];
+for (const p of BAR_PAGES) {
+  test(`FE-T18 ${p.app} ${p.locale} ${p.path} 320: 하단 띠의 스크롤 여백이 띠의 실제 높이 이상이다(높이 321px, 글자 간격 전후)`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 321 });
+    expect(await openReflowPage(page, p), '도착 경로가 다르다(빈 결과)').toBe(p.path);
+    const plain = await expectInsetsCover(page, `${p.path} 320×321`);
+    expect(plain.bands.filter((b) => b.edge === 'bottom'), `${p.path} 아래에 붙는 띠가 없다(빈 결과)`).not.toEqual([]);
+    await page.evaluate((css) => {
+      const sheet = new CSSStyleSheet();
+      for (const rule of css.split('}').map((r) => r.trim()).filter(Boolean)) sheet.insertRule(`${rule}}`);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }, TEXT_SPACING_CSS);
+    expect(await page.evaluate(() => getComputedStyle(document.body).letterSpacing), '글자 간격이 걸리지 않았다').not.toBe('normal');
+    const spaced = await expectInsetsCover(page, `${p.path} 320×321 글자 간격`);
+    expect(spaced.bands.filter((b) => b.edge === 'bottom'), `${p.path} 글자 간격 뒤 아래에 붙는 띠가 없다(빈 결과)`).not.toEqual([]);
   });
 }
