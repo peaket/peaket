@@ -12,8 +12,8 @@ export interface OpsCsRequest {
 }
 
 /** log를 주면 요청이 닿을 때마다 `ops:{category}:{sourceId}`를 덧붙인다(호출 차례 기록) */
-export async function startOpsCsDouble(log?: string[]): Promise<{ state: { mode: OpsCsMode; requests: OpsCsRequest[] }; url: string; close(): Promise<void> }> {
-  const state = { mode: 202 as OpsCsMode, requests: [] as OpsCsRequest[] };
+export async function startOpsCsDouble(log?: string[]): Promise<{ state: { mode: OpsCsMode; requests: OpsCsRequest[]; accepted: boolean }; url: string; close(): Promise<void> }> {
+  const state = { mode: 202 as OpsCsMode, requests: [] as OpsCsRequest[], accepted: true };
   const sockets = new Set<Socket>();
   const server = createServer((req, res) => {
     let raw = '';
@@ -26,13 +26,15 @@ export async function startOpsCsDouble(log?: string[]): Promise<{ state: { mode:
       log?.push(`ops:${body.category}:${body.sourceId}`);
       const m = state.mode;
       if (m === 'hang') return;
+      // BAT-420-rest 리뷰 반영 RV-01(시험 담당 l3-b420-test): 실제 ops-svc처럼 2xx 본문에 accepted를 싣는다(state.accepted, 기본 참, transfer-refund §3.1 ⑥ '실패 기록')
+      const answer = (status: number) => (status >= 200 && status <= 299 ? JSON.stringify({ accepted: state.accepted }) : '{}');
       if (typeof m === 'object') {
         setTimeout(() => {
-          if (!res.destroyed) res.writeHead(m.status, { 'content-type': 'application/json' }).end('{}');
+          if (!res.destroyed) res.writeHead(m.status, { 'content-type': 'application/json' }).end(answer(m.status));
         }, m.slowMs);
         return;
       }
-      res.writeHead(m, { 'content-type': 'application/json' }).end('{}');
+      res.writeHead(m, { 'content-type': 'application/json' }).end(answer(m));
     });
   });
   server.on('connection', (s: Socket) => {

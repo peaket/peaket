@@ -9,6 +9,7 @@ import { fakeClock, PlatformMetrics } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { PortoneGateway, type PortoneGatewayOptions } from '../src/modules/payment/adapters/pg/portone-gateway.js';
 import { TossPaymentGateway } from '../src/modules/payment/adapters/pg/toss-gateway.js';
+import { SimulatorPaymentGateway } from '../src/modules/payment/adapters/pg/simulator-gateway.js';
 import { virtualAccountPaidOf } from '../src/modules/payment/domain/confirm-command.js';
 import { refundAccountOf, type CancelResult, type PaymentGatewayPort, type QueryResult } from '../src/modules/payment/domain/payment-gateway.js';
 import { CancelConfirmedPayment, type ConfirmedCancelBegin, type ConfirmedCancelRecord, type ConfirmedCancelTarget, cancelInputOf, cancelResponseOf, getPaymentResponseOf, PromPaymentDepositSignals } from '../src/modules/payment/server.js';
@@ -45,7 +46,7 @@ type CancelBody = Parameters<PaymentGatewayPort['cancel']>[0];
 /** 결제사 조회 답(FOUND) */
 const found = (status: 'APPROVED' | 'PARTIAL_CANCELED', balanceAmount: number): QueryResult => ({ kind: 'FOUND', paymentRef: 'tpk_va_1', orderRef: TARGET.orderId, status, amount: 60_000, balanceAmount });
 
-function fixture(o: { begin?: ConfirmedCancelBegin; cancel?: CancelResult; query?: QueryResult; settle?: { status: 'APPLIED'; cancelledAmount: number } | { status: 'RESEND' } | { status: 'UNDECIDABLE' }; signals?: boolean } = {}) {
+function fixture(o: { target?: ConfirmedCancelTarget; begin?: ConfirmedCancelBegin; cancel?: CancelResult; query?: QueryResult; settle?: { status: 'APPLIED'; cancelledAmount: number } | { status: 'RESEND' } | { status: 'UNDECIDABLE' }; signals?: boolean } = {}) {
   const calls: string[] = [];
   const begins: Record<string, unknown>[] = [];
   const cancels: CancelBody[] = [];
@@ -65,7 +66,7 @@ function fixture(o: { begin?: ConfirmedCancelBegin; cancel?: CancelResult; query
   } as unknown as PaymentGatewayPort;
   const uc = new CancelConfirmedPayment({
     store: {
-      readConfirmedCancelTarget: async () => TARGET,
+      readConfirmedCancelTarget: async () => o.target ?? TARGET,
       beginConfirmedCancel: async (_t, q) => {
         calls.push('begin');
         begins.push({ ...q });
@@ -162,10 +163,35 @@ describe('P-T71 쓰임새의 가상계좌 갈래(저장소 판정을 쓰는 쪽)
     expect(undecidable.cancels).toHaveLength(0);
   });
 
-  test('P-T71 ③ 대조: 계좌를 다시 실은 재시도(같은 멱등키·같은 본문)는 조회 없이 결제사 취소를 한 번 부른다', async () => {
-    const f = fixture({ begin: begun({ replay: true, virtualAccount: true }) });
-    await expect(run(f, RAW_ACCOUNT)).resolves.toMatchObject({ result: 'CANCELLED' });
-    expect(f.calls).toEqual(['begin', 'cancel', 'finish']);
+  // BAT-420-rest 리뷰 반영 RV-02(시험 담당 l3-b420-test, 정본 변경 반영): 정본 §6 '구현에서 정한 것' ⑥이 '같은 멱등키에는 첫 본문만'으로 바뀌어
+  // 처음의 '계좌를 다시 실은 재시도는 조회 없이 결제사 취소를 한 번 부른다' 대조를 뒤집었다(이름의 P-T71 ③ 대조는 그대로 두고 단언을 반대로)
+  test('P-T71 ③ 대조(정본 ⑥로 뒤집음): 계좌를 다시 실은 재시도(행 있음·가상계좌)도 결제사 취소 0·조회 1이다', async () => {
+    const f = fixture({ begin: begun({ replay: true, virtualAccount: true }), query: found('PARTIAL_CANCELED', 35_000), settle: { status: 'APPLIED', cancelledAmount: 25_000 } });
+    await expect(run(f, RAW_ACCOUNT)).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 25_000 });
+    expect(f.calls).toEqual(['begin', 'query', 'settle']);
+    expect(f.cancels).toHaveLength(0);
+  });
+
+  test('P-T73 ① 결과 모름으로 진행 중인 행에 다른 계좌(예금주 띄어쓰기만 다른 것 포함)로 다시 부르면 결제사 취소 0·조회 1이고, 반영 아님이면 REFUND_ACCOUNT_REQUIRED다', async () => {
+    for (const holderName of ['김결제', '김 결제', HOLDER]) {
+      const f = fixture({ begin: begun({ replay: true, virtualAccount: true }), query: found('APPROVED', 60_000), settle: { status: 'RESEND' } });
+      await expect(run(f, { ...RAW_ACCOUNT, holderName, accountNumber: '220-111-222333' }), holderName).resolves.toEqual({ result: 'REFUND_ACCOUNT_REQUIRED', cancelledAmount: 0 });
+      expect(f.calls, holderName).toEqual(['begin', 'query', 'settle']);
+      expect(f.cancels, holderName).toHaveLength(0);
+    }
+  });
+
+  test('P-T74 ③ 포트원 결제에 대응표 밖 은행 코드(04)가 오면 모양이 틀린 계좌와 같다: 저장소에 hasRefundAccount를 알리지 않는다. 토스 결제의 같은 코드는 계좌다(대조)', async () => {
+    const portone = fixture({ target: { ...TARGET, pg: 'PORTONE' }, begin: { status: 'ACCOUNT_REQUIRED' } });
+    await expect(run(portone, { ...RAW_ACCOUNT, bankCode: '04' })).resolves.toEqual({ result: 'REFUND_ACCOUNT_REQUIRED', cancelledAmount: 0 });
+    expect(portone.begins[0]).not.toHaveProperty('hasRefundAccount');
+    expect(portone.cancels).toHaveLength(0);
+    const portoneMapped = fixture({ target: { ...TARGET, pg: 'PORTONE' }, begin: { status: 'ACCOUNT_REQUIRED' } });
+    await run(portoneMapped, { ...RAW_ACCOUNT, bankCode: '88' });
+    expect(portoneMapped.begins[0]).toMatchObject({ hasRefundAccount: true });
+    const toss = fixture({ begin: { status: 'ACCOUNT_REQUIRED' } });
+    await run(toss, { ...RAW_ACCOUNT, bankCode: '04' });
+    expect(toss.begins[0]).toMatchObject({ hasRefundAccount: true });
   });
 
   test('P-T71 ④ 결제사가 계좌를 거절하면(REJECTED·REFUND_ACCOUNT_INVALID) 행을 FAILED로 끝내고 REFUND_ACCOUNT_REQUIRED다. 까닭 없는 거절은 REJECTED다', async () => {
@@ -307,5 +333,29 @@ describe('P-T71 ① 포트원 본문(refundAccount)', () => {
     const seen: Seen[] = [];
     await portoneOf([portoneCancelled], seen).cancel({ paymentRef: 'pay-va-1', amount: 25_000, reason: '관객 취소', idemKey: `cancel-${randomUUID()}`, expectedBalance: 60_000 });
     expect(JSON.parse(seen[0]!.body)).not.toHaveProperty('refundAccount');
+  });
+});
+
+describe("P-T73 ② 결제사의 멱등키 재사용 답(정본 §6 '구현에서 정한 것' ⑥)", () => {
+  test('P-T73 ② 토스 모양 어댑터(토스·시뮬레이터)는 422 IDEMPOTENCY_KEY_REUSED를 업무 거절이 아니라 결과 모름(UNKNOWN)으로 읽는다(계좌 있음·없음 모두)', async () => {
+    const reused: Scripted = { status: 422, body: { code: 'IDEMPOTENCY_KEY_REUSED', message: '같은 멱등키로 다른 요청을 보냈습니다' } };
+    for (const make of [
+      (replies: Scripted[], seen: Seen[]) => tossOf(replies, seen),
+      (replies: Scripted[], seen: Seen[]) => new SimulatorPaymentGateway({ baseUrl: 'http://pg.test', secretKey: TOSS_SECRET, clientKey: 'sim_ck_1', fetch: scriptedFetch(replies, seen) }),
+    ]) {
+      const seen: Seen[] = [];
+      const g = make([reused, reused], seen);
+      const withAccount = await g.cancel({ paymentRef: 'tpk_va_1', amount: 25_000, reason: '관객 취소', idemKey: `cancel-${CANCEL}`, refundAccount: ACCOUNT });
+      expect(withAccount.outcome).toBe('UNKNOWN');
+      const without = await g.cancel({ paymentRef: 'tpk_va_1', amount: 25_000, reason: '관객 취소', idemKey: `cancel-${CANCEL}` });
+      expect(without.outcome).toBe('UNKNOWN');
+      expect(seen).toHaveLength(2);
+    }
+  });
+
+  test('P-T73 ② 쓰임새는 결제사 UNKNOWN에 행을 끝내지 않는다(mark 0, 결과 UNKNOWN)', async () => {
+    const f = fixture({ begin: begun({ virtualAccount: true }), cancel: { outcome: 'UNKNOWN' } });
+    await expect(run(f, RAW_ACCOUNT)).resolves.toMatchObject({ result: 'UNKNOWN' });
+    expect(f.marks).toEqual([]);
   });
 });

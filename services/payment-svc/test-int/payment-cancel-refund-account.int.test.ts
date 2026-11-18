@@ -291,7 +291,8 @@ describe('P-T71 결제 후 일반 취소의 가상계좌 갈래 [실제 PostgreS
     expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
   });
 
-  test('P-T71 ④ 결제사가 계좌를 거절하면(000으로 시작하는 계좌번호, INVALID_REFUND_ACCOUNT_NUMBER) 행 FAILED·REFUND_ACCOUNT_REQUIRED이고 돈은 나가지 않으며, 같은 취소 ID를 맞는 계좌로 다시 불러도 REJECTED다(새 멱등키는 GAT-130)', async () => {
+  // BAT-420-rest 리뷰 반영 RV-03(정본 변경 반영, 시험 담당 l3-b420-test): 정본 §6 '구현에서 정한 것' ④가 '같은 취소 ID = 같은 답'으로 바뀌어 다시 부름의 답을 REJECTED에서 REFUND_ACCOUNT_REQUIRED로 고쳤다
+  test('P-T71 ④ 결제사가 계좌를 거절하면(000으로 시작하는 계좌번호, INVALID_REFUND_ACCOUNT_NUMBER) 행 FAILED·REFUND_ACCOUNT_REQUIRED이고 돈은 나가지 않으며, 같은 취소 ID를 맞는 계좌로 다시 불러도 결제사 0·같은 답 REFUND_ACCOUNT_REQUIRED다(새 멱등키는 GAT-130)', async () => {
     const p = await tossPaid({ virtual: true });
     const cancellationId = randomUUID();
     const r = await cancel(p.paymentId, cancellationId, { account: { ...REFUND_ACCOUNT, account_number: '000-987-654321' } });
@@ -303,7 +304,7 @@ describe('P-T71 결제 후 일반 취소의 가상계좌 갈래 [실제 PostgreS
     expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
     expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
     sent.length = 0;
-    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT })).toMatchObject({ result: 'CANCEL_RESULT_REJECTED' });
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT })).toEqual({ result: 'CANCEL_RESULT_REFUND_ACCOUNT_REQUIRED', cancelled_amount: { krw: 0 } });
     expect(calls('POST ')).toEqual([]);
     expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
   });
@@ -342,5 +343,82 @@ describe('P-T71 결제 후 일반 취소의 가상계좌 갈래 [실제 PostgreS
     expect(await get(expired.orderId)).toMatchObject({ virtual_account_paid: false });
     const awaiting = await putPayment(admin, { status: 'AWAITING_DEPOSIT', pg: 'SIMULATOR', amount: AMOUNT, events: [{ seq: 1, type: 'AWAITING_DEPOSIT', exported: true }] });
     expect(await get(awaiting.orderId)).toMatchObject({ virtual_account_paid: false });
+  });
+});
+
+// BAT-420-rest 리뷰 반영 RV-02·RV-03·RV-04 재현(P-T73 ①②③, P-T74 ③, 시험 담당 l3-b420-test, 2026-11-19).
+// 정본: docs/features/payment.md §6 '구현에서 정한 것' ②(포트원 대응표 밖 코드는 행을 만들기 전에 모양이 틀린 계좌와 같다)·④(같은 취소 ID = 같은 답, fail_reason)·⑥(같은 멱등키에는 첫 본문만, 멱등키 재사용 답은 UNKNOWN), §11 P-T73·P-T74.
+describe('P-T73·P-T74 같은 취소 ID의 다시 부름과 계좌 [실제 PostgreSQL·gRPC·어댑터·시뮬레이터]', () => {
+  const failReason = async (paymentId: string) => (await admin.pool.query('select status, fail_reason from payment_cancel where payment_id = $1', [paymentId])).rows as { status: string; fail_reason: string | null }[];
+
+  test('P-T73 ① 계좌를 실어 보낸 취소가 결과 모름(결제사 반영 전에 끊김)으로 진행 중일 때 다른 계좌(예금주 김결제·김 결제)로 다시 부르면 결제사 취소 0·조회 1이고 결제사 기록의 본문은 첫 본문 하나뿐이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    expect((await control('POST', '/sim/faults', { op: 'cancel', times: 1, orderId: p.orderId, kind: 'drop', applied: false })).status).toBe(204);
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT })).toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN' });
+    const first = calls(`POST /v1/payments/${p.paymentKey}/cancel`);
+    expect(first.map((s) => s.status)).toEqual(['dropped']);
+    for (const holder_name of ['김결제', '김 결제']) {
+      sent.length = 0;
+      const r = await cancel(p.paymentId, cancellationId, { account: { bank_code: '88', account_number: '220-111-222333', holder_name } });
+      expect(r, holder_name).toEqual({ result: 'CANCEL_RESULT_REFUND_ACCOUNT_REQUIRED', cancelled_amount: { krw: 0 } });
+      expect(calls('POST '), holder_name).toEqual([]);
+      expect(calls(`GET /v1/payments/${p.paymentKey}`), holder_name).toHaveLength(1);
+    }
+    expect(await cancelRows(p.paymentId)).toEqual([{ idempotency_key: `cancel-${cancellationId}`, amount: 25_000, expected_balance: 60_000, status: 'REQUESTED' }]);
+    // 결제사(시뮬레이터) 쪽에는 첫 본문만 닿았다: 다른 계좌 본문이 멱등키 재사용으로 걸린 적이 없고 잔액도 그대로다
+    expect(first[0]!.body).toMatchObject({ refundReceiveAccount: { bank: '88', accountNumber: ACCOUNT_DIGITS, holderName: HOLDER } });
+    expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
+  });
+
+  test('P-T73 ② 결제사가 멱등키 재사용(IDEMPOTENCY_KEY_REUSED)으로 답하면 UNKNOWN이고 행은 진행 중(REQUESTED) 그대로다(FAILED 아님)', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    // 같은 멱등키(cancel-{취소 ID})에 다른 본문을 먼저 남긴다(계좌 없는 가상계좌 취소라 돈은 나가지 않고 400이 저장된다)
+    const earlier = await control('POST', `/v1/payments/${p.paymentKey}/cancel`, { cancelReason: '다른 본문', cancelAmount: 1_000 }, { authorization: basic, 'idempotency-key': `cancel-${cancellationId}` });
+    expect(earlier.status).toBe(400);
+    const r = await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT });
+    expect(r).toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN' });
+    // 장애 주입이 끼어들었다: 결제사가 멱등키 재사용으로 답했다
+    expect(calls(`POST /v1/payments/${p.paymentKey}/cancel`).map((s) => s.status)).toEqual([422]);
+    expect(await cancelRows(p.paymentId)).toEqual([{ idempotency_key: `cancel-${cancellationId}`, amount: 25_000, expected_balance: 60_000, status: 'REQUESTED' }]);
+    expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+    expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
+  });
+
+  test('P-T73 ③ 계좌 거절로 끝난 행은 fail_reason REFUND_ACCOUNT_INVALID이고, 같은 취소 ID를 맞는 계좌로 다시 부르면 결제사 0·REFUND_ACCOUNT_REQUIRED다(같은 취소 ID = 같은 답)', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    expect(await cancel(p.paymentId, cancellationId, { account: { ...REFUND_ACCOUNT, account_number: '000-987-654321' } })).toEqual({ result: 'CANCEL_RESULT_REFUND_ACCOUNT_REQUIRED', cancelled_amount: { krw: 0 } });
+    expect(await failReason(p.paymentId)).toEqual([{ status: 'FAILED', fail_reason: 'REFUND_ACCOUNT_INVALID' }]);
+    sent.length = 0;
+    for (const account of [REFUND_ACCOUNT, undefined]) {
+      const again = await cancel(p.paymentId, cancellationId, account ? { account } : {});
+      expect(again, account ? '계좌 있음' : '계좌 없음').toEqual({ result: 'CANCEL_RESULT_REFUND_ACCOUNT_REQUIRED', cancelled_amount: { krw: 0 } });
+    }
+    expect(calls('POST ')).toEqual([]);
+    expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
+  });
+
+  test('P-T73 ③ 대조: 다른 업무 거절(NOT_CANCELABLE_PAYMENT)로 끝난 행은 REJECTED·fail_reason 빔이고 다시 불러도 REJECTED·결제사 0이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    expect((await control('POST', '/sim/faults', { op: 'cancel', times: 1, orderId: p.orderId, kind: 'decline', code: 'NOT_CANCELABLE_PAYMENT' })).status).toBe(204);
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT })).toMatchObject({ result: 'CANCEL_RESULT_REJECTED' });
+    expect(await failReason(p.paymentId)).toEqual([{ status: 'FAILED', fail_reason: null }]);
+    sent.length = 0;
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT })).toMatchObject({ result: 'CANCEL_RESULT_REJECTED' });
+    expect(calls('POST ')).toEqual([]);
+  });
+
+  test('P-T74 ③ 포트원 대응표에 없는 은행 코드(04)는 payment_cancel 0행·결제사 0·REFUND_ACCOUNT_REQUIRED이고, 같은 취소 ID를 대응표에 있는 코드(88)로 다시 부르면 결제사로 간다', async () => {
+    const p = await portoneVirtualPaid();
+    const cancellationId = randomUUID();
+    expect(await cancel(p.paymentId, cancellationId, { account: { ...REFUND_ACCOUNT, bank_code: '04' } })).toEqual({ result: 'CANCEL_RESULT_REFUND_ACCOUNT_REQUIRED', cancelled_amount: { krw: 0 } });
+    expect(await cancelRows(p.paymentId)).toEqual([]);
+    expect(calls(`POST /payments/${p.portonePaymentId}/cancel`)).toEqual([]);
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT })).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
+    expect(calls(`POST /payments/${p.portonePaymentId}/cancel`)).toHaveLength(1);
+    expect(await simBalance(p.portonePaymentId)).toBe(35_000);
   });
 });
