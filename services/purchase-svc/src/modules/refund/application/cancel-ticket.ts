@@ -2,8 +2,12 @@
 // 차례: 주문·결제자 확인 → 견적(공제) → ticket-svc 키 폐기·취소표·양도 확인 → order_cancellation → payment-svc 부분 취소 → 상태.
 // ticket-svc가 멈추면 아무것도 쓰지 않는다. 결제사가 결과 모름이면 REFUND_PENDING으로 두고 재시도 큐가 이어 간다.
 // 회원 탈퇴(ACCOUNT_WITHDRAWAL)도 이 Saga를 쓴다: 공제는 POL-032, 취소 ID는 표마다 고정 UUID(탈퇴 참여자는 refund/application/account-withdrawal-tickets.ts).
+// 환불 계좌 규칙(docs/features/payment.md §6 'purchase-svc 예매 취소', BUILD_ORDER GAT-090): 팬 취소(USER)이고 지금 환급할 취소(입장 시작 전)면 견적 뒤·티켓 단계 앞에서
+// 결제 수단을 읽는다. 가상계좌인데 계좌가 없으면 REFUND_ACCOUNT_REQUIRED(422), 읽지 못하면 DEPENDENCY_UNAVAILABLE(503)이고 둘 다 아무것도 쓰지 않는다.
+// 입장 시작 뒤 취소·가상계좌가 아닌 결제에 온 계좌는 버리고 접수한다(재시도 큐·Outbox에 계좌가 들어가지 않는다). payment가 REFUND_ACCOUNT_REQUIRED로 답하면
+// 행을 계좌 대기(refund_account_required_at, next_refund_at 빔, 재시도 횟수 그대로)로 두고 REFUND_PENDING·refundAccountRequired로 답한다.
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type CancellationReason, type CancellationStatus, type CancelTicketResult, type RefundAccount } from '../domain/cancellation.js';
-import type { CancellationOrders, CancellationWrites, EventCancellationLookup, PaymentCancellations, SeatReturns, TicketCancellations } from '../domain/ports.js';
+import { type CancellationOrders, type CancellationWrites, type EventCancellationLookup, PAYMENT_METHOD_LOOKUP_DEADLINE_MS, type PaymentCancellations, type PaymentMethodLookup, type SeatReturns, type TicketCancellations } from '../domain/ports.js';
 import type { BusinessCalendar, RefundQuote } from '../domain/refund-policy.js';
 import { quoteRefund } from '../domain/refund-policy.js';
 import { eventStartsAtOf } from './quote-cancellation.js';
@@ -47,6 +51,8 @@ export class CancelTicket {
       readonly seats?: SeatReturns;
       /** 팬 취소(USER)는 주문을 찾은 뒤·티켓 단계 앞에서 확정된 회차면 EVENT_CANCELLED(BAT-420 리뷰 D5). 없으면 확인하지 않는다 */
       readonly eventCancellations?: EventCancellationLookup;
+      /** 팬 취소의 가상계좌 판정. 없으면 판정하지 않고 본문의 계좌를 전처럼 넘긴다(시험·옛 조립) */
+      readonly paymentMethods?: PaymentMethodLookup;
     },
   ) {}
 
@@ -75,6 +81,25 @@ export class CancelTicket {
       ...(order.entryOpensAtMs !== undefined ? { entryOpensAtMs: order.entryOpensAtMs } : {}),
     });
     if (q.status === 'INVALID_AMOUNT') return { status: 'ALREADY_ENDED' };
+    // 환불 계좌 규칙(Saga 앞): 이 판정이 끝나기 전에는 티켓·좌석·취소 행·결제사를 부르지 않는다
+    let account = i.refundAccount;
+    if (i.reason === 'USER' && this.o.paymentMethods) {
+      const refundNow = q.status === 'OK' && !q.quote.refundAfterEntryClose;
+      if (!refundNow) {
+        account = undefined;
+      } else {
+        let virtualAccount: boolean;
+        try {
+          virtualAccount = await this.o.paymentMethods.virtualAccountPaid({ orderId: order.orderId, deadlineMs: PAYMENT_METHOD_LOOKUP_DEADLINE_MS });
+        } catch {
+          return { status: 'DEPENDENCY_UNAVAILABLE' };
+        }
+        if (virtualAccount && account === undefined) return { status: 'REFUND_ACCOUNT_REQUIRED' };
+        if (!virtualAccount) account = undefined;
+      }
+    }
+    const { refundAccount: _given, ...base } = i;
+    const withAccount: CancelTicketInput = account === undefined ? base : { ...base, refundAccount: account };
     // 지금 시각으로 공연이 시작됐으면 새 취소는 없다. 다만 앞 시도가 공연 전에 키만 폐기했을 수 있어, ticket-svc를 행을 바꾸지 않는 확인(replayOnly)으로 불러
     // 팬 취소 기록이 있으면 그 첫 취소로 잇는다(리뷰 B2 보충, docs/features/payment.md §4.1 '공연이 시작된 뒤 다시 누른 경우')
     const replayOnly = q.status === 'EVENT_STARTED';
@@ -93,13 +118,13 @@ export class CancelTicket {
     // 확인에서 첫 팬 취소가 없으면(유효한 표·다른 길로 끝난 표·남이 보유) 지금처럼 공연 시작이고 아무것도 쓰지 않는다
     if (replayOnly && typeof ticket !== 'object') return { status: 'EVENT_STARTED' };
     // 이어 갈 취소(run)·견적·티켓 단계 결과. 앞 시도가 티켓 단계만 마친 팬 취소를 새 키로 다시 누른 것이면 첫 취소 ID로 잇는다(아래)
-    let run: CancelTicketInput = i;
+    let run: CancelTicketInput = withAccount;
     let quote: RefundQuote;
     let ticketResult: 'REFUND_NOW' | 'REFUND_AFTER_CLOSE';
     if (typeof ticket === 'object') {
       // 리뷰 B2(docs/features/payment.md §4.1 '앞 시도가 티켓 단계만 마친 팬 취소 잇기'): ticket-svc가 그 표의 키를 폐기한 팬 취소(K1)를 알려 왔다.
       // 결제자 확인은 위에서 했다. K2가 아니라 K1로 좌석·취소 행·환급을 마치고, 공제 기준 시각은 K1이 키를 폐기한 시각이다
-      run = { ...i, cancellationId: ticket.firstCancellationId };
+      run = { ...withAccount, cancellationId: ticket.firstCancellationId };
       const before = await this.o.orders.findCancellation(run.cancellationId);
       if (before) {
         if (before.orderId !== order.orderId || before.ticketId !== i.ticketId) return { status: 'CONFLICT' };
@@ -164,13 +189,14 @@ export class CancelTicket {
       orderId: order.orderId,
       amount: quote.refundAmount,
       reason: i.reason,
-      ...(i.refundAccount !== undefined ? { refundAccount: i.refundAccount } : {}),
+      ...(run.refundAccount !== undefined ? { refundAccount: run.refundAccount } : {}),
       deadlineMs: i.deadlineMs,
     });
     if (payment === 'CANCELLED') {
       await this.o.writes.updateStatus({ cancellationId: run.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
       return { status: 'ACCEPTED', cancellationId: run.cancellationId, refundAmount: quote.refundAmount, refundAfterEntryClose: false };
     }
+    if (payment === 'REFUND_ACCOUNT_REQUIRED') return this.#awaitAccount(run, quote.refundAmount);
     // 결과 모름·재시도 대기·업무 거절은 모두 환급 대기다. 업무 거절은 바로, 결과 모름은 재시도 뒤
     // 다 쓰면 CS 처리함 '환급 실패'로 넘긴다(refund_failed_at, transfer-refund §7.1). 회차 취소 요청 행은 표시하지 않는다(아래 #recordUnrefunded)
     await this.#recordUnrefunded(run, 1, payment);
@@ -197,6 +223,16 @@ export class CancelTicket {
     await this.o.writes.scheduleRefundRetry({ cancellationId: i.cancellationId, attempts, nextRetryAtMs: i.nowMs + refundRetryDelayMs(attempts), lastError: payment, nowMs: i.nowMs });
   }
 
+  /**
+   * 계좌 대기(BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기'): 행에 refund_account_required_at을 쓰고 next_refund_at을 비운다. 재시도 횟수·실패 표시는 그대로다.
+   * CS '환불 대기' 건은 마감 뒤 환급 실행기의 틱 끝 다시 열기가 연다. 표시 포트가 없는 대역은 실패 표시(CS 대상)로 대신한다
+   */
+  async #awaitAccount(i: CancelTicketInput, refundAmount: number): Promise<CancelTicketResult> {
+    if (this.o.writes.markRefundAccountRequired) await this.o.writes.markRefundAccountRequired({ cancellationId: i.cancellationId, nowMs: i.nowMs });
+    else await this.o.writes.markRefundFailed({ cancellationId: i.cancellationId, attempts: 0, lastError: 'REFUND_ACCOUNT_REQUIRED', nowMs: i.nowMs });
+    return { status: 'REFUND_PENDING', cancellationId: i.cancellationId, refundAmount, payment: 'REFUND_ACCOUNT_REQUIRED', refundAccountRequired: true };
+  }
+
   /** 같은 취소 ID의 재요청. REFUND_PENDING이면 같은 멱등키로 결제사를 다시 부르고, 끝난 취소는 처음 결과를 준다 */
   async #replay(state: CancellationStatus, refundAmount: number, refundAttempts: number, orderId: string, i: CancelTicketInput): Promise<CancelTicketResult> {
     // CS가 무효로 끝낸 취소는 되살리지 않는다
@@ -214,6 +250,7 @@ export class CancelTicket {
         await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs: i.nowMs });
         return { status: 'ACCEPTED', cancellationId: i.cancellationId, refundAmount, refundAfterEntryClose: false };
       }
+      if (payment === 'REFUND_ACCOUNT_REQUIRED') return this.#awaitAccount(i, refundAmount);
       await this.#recordUnrefunded(i, refundAttempts + 1, payment);
       return {
         status: 'REFUND_PENDING',

@@ -273,6 +273,10 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "applied_orders": {
                       "type": "int32",
                       "id": 9
+                    },
+                    "account_pending_orders": {
+                      "type": "int32",
+                      "id": 10
                     }
                   }
                 },

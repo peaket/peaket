@@ -170,6 +170,9 @@ message GetEventRefundJobResponse {
   int32 not_applied_orders = 8;
   // 연기(POSTPONE)에서 환급을 신청한 건
   int32 applied_orders = 9;
+  // 가상계좌 결제라 환불 계좌를 기다리는 항목(ACCOUNT_PENDING) 수. COMPLETED 셈에서는 끝난 항목으로 보되 여기에 따로 센다
+  // (docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', 추천 적용 2026-11-19, BUILD_ORDER GAT-090, R-T40).
+  int32 account_pending_orders = 10;
 }
 
 message PauseEventRefundJobRequest {

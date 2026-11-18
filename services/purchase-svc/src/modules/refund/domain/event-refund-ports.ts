@@ -60,6 +60,8 @@ export interface EventRefundStore {
       readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
       /** 다시 보기 2 N2: 항목을 FAILED로 끝내는 같은 트랜잭션에서 event_refund_item.failure_case_at(일괄 환불 실패 건을 열 대상)을 쓴다. 차액 건으로 대신한 항목에는 싣지 않는다 */
       readonly failureCase?: true;
+      /** 항목을 ACCOUNT_PENDING으로 끝내는 같은 트랜잭션에서 그 취소 행(REFUND_PENDING)에 refund_account_required_at을 쓰고 next_refund_at을 비운다(BUILD_ORDER GAT-090) */
+      readonly accountPending?: true;
     },
   ): Promise<boolean | void>;
   /** 연기 신청을 조건부로 넣는다. 이미 신청했거나 창이 닫혀 NOT_APPLIED면 false다(신청·창 닫기 경합을 행 잠금으로 가른다) */
@@ -99,7 +101,8 @@ export interface EventRefundCanceller {
       readonly nowMs: number;
       readonly deadlineMs: number;
     },
-  ): Promise<{ readonly status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED'; readonly error?: string } | { readonly status: 'NOT_SENT'; readonly error: string }>;
+    /** ACCOUNT_PENDING: payment가 REFUND_ACCOUNT_REQUIRED로 답했다(가상계좌 결제의 계좌 대기, 결제사로 돈이 나가지 않음, BUILD_ORDER GAT-090) */
+  ): Promise<{ readonly status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED' | 'ACCOUNT_PENDING'; readonly error?: string } | { readonly status: 'NOT_SENT'; readonly error: string }>;
 }
 
 /** 실패 건을 CS 처리함 '환급 실패'로 잇는 포트 */
@@ -227,7 +230,7 @@ export interface EventRefundClaims {
     readonly requestId: string;
     readonly ticketId: string;
     readonly claimToken: string;
-    readonly status: 'REFUNDED' | 'FAILED' | 'UNKNOWN' | 'PENDING';
+    readonly status: 'REFUNDED' | 'FAILED' | 'UNKNOWN' | 'PENDING' | 'ACCOUNT_PENDING';
     readonly attempts: number;
     readonly lastError?: string;
     readonly nextAttemptAtMs?: number;
@@ -236,6 +239,8 @@ export interface EventRefundClaims {
     readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
     /** 다시 보기 2 N2: 같은 트랜잭션에서 그 항목에 failure_case_at을 쓴다(FAILED로 끝낼 때, 차액 건으로 대신하면 싣지 않음) */
     readonly failureCase?: true;
+    /** 같은 트랜잭션에서 그 취소 행에 계좌 대기 표시를 쓴다(ACCOUNT_PENDING으로 끝낼 때, BUILD_ORDER GAT-090) */
+    readonly accountPending?: true;
   }): Promise<boolean>;
   /** 그 잡기 값의 남은 잡기를 푼다(처리하지 않고 남긴 항목을 다른 쪽이 곧 잡게) */
   release(requestId: string, claimToken: string): Promise<void>;
@@ -246,7 +251,7 @@ export const CS_CASE_REOPEN_BATCH = 100;
 
 /** CS 건 열기 실패·다시 열기 멈춤 지표(purchase_cs_case_open_failures_total{kind}·purchase_cs_case_reopen_cut_total{reason}) */
 export interface CsCaseOpenSignals {
-  inc(kind: 'DEDUCTION_GAP' | 'FLAGGED' | 'REFUND_FAILED' | 'EVENT_REFUND_FAILED'): void;
+  inc(kind: 'DEDUCTION_GAP' | 'FLAGGED' | 'REFUND_FAILED' | 'EVENT_REFUND_FAILED' | 'REFUND_ACCOUNT_PENDING'): void;
   cut?(reason: 'budget' | 'unreachable'): void;
 }
 
@@ -270,6 +275,18 @@ export interface CsCaseOutbox {
   pendingRefundFailures(limit: number): Promise<readonly { cancellationId: string; orderId: string; attempts: number; lastError: string }[]>;
   /** ops-svc가 2xx로 받은 뒤에만 부른다 */
   markRefundFailureOpened(cancellationId: string, nowMs: number): Promise<void>;
+  /**
+   * 계좌 대기(BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기'): refund_account_required_at이 있고 refund_account_case_opened_at이 빈 REFUND_PENDING 행
+   * (회차 취소 요청 ID와 관계없이, refund_account_required_at 순). 없는 대역은 이 종류를 열지 않는다
+   */
+  pendingRefundAccounts?(limit: number): Promise<readonly { cancellationId: string; orderId: string }[]>;
+  /** ops-svc가 2xx로 받은 뒤에만 부른다 */
+  markRefundAccountOpened?(cancellationId: string, nowMs: number): Promise<void>;
+}
+
+/** CS 처리함 '환불 대기'(REFUND_ACCOUNT_PENDING, 대상 취소 ID, eventKey는 refund-account:{취소 ID}의 SHA-256 앞 16바이트 UUID). 2xx가 아니면 던진다 */
+export interface RefundAccountNotice {
+  open(q: { readonly cancellationId: string; readonly orderId: string; readonly nowMs: number }): Promise<void>;
 }
 
 // ---- BAT-420 몫 D(OPEN[45] 결정): 미룸·차액 건 ----

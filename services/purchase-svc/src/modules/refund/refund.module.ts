@@ -4,7 +4,7 @@ import { INTERNAL_TOKEN, InternalTokenGuard } from '@peaket/platform';
 import { CancelTicket } from './application/cancel-ticket.js';
 import { EventRefundService } from './application/event-refund-service.js';
 import { QuoteCancellation } from './application/quote-cancellation.js';
-import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type EventCancellationLookup, type PaymentCancellations, type ReauthGate, type SeatReturns, type TicketCancellations } from './domain/ports.js';
+import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type EventCancellationLookup, type PaymentCancellations, type PaymentMethodLookup, type ReauthGate, type SeatReturns, type TicketCancellations } from './domain/ports.js';
 import type { BusinessCalendar } from './domain/refund-policy.js';
 import { EventRefundController } from './inbound/event-refund.controller.js';
 import { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
@@ -21,6 +21,8 @@ export interface RefundModuleDeps {
   eventRefund?: EventRefundService;
   /** 확정된 회차의 팬 취소·견적은 409 event-cancelled(BAT-420 리뷰 D5). 없으면 확인하지 않는다 */
   eventCancellations?: EventCancellationLookup;
+  /** 견적·팬 취소의 가상계좌 판정(BUILD_ORDER GAT-090). 없으면 판정하지 않는다(시험 조립). 시작 조립은 payment-svc gRPC 어댑터를 꽂는다 */
+  paymentMethods?: PaymentMethodLookup;
 }
 
 @Module({})
@@ -29,7 +31,13 @@ export class RefundModule {
     const providers: Provider[] = [
       {
         provide: QuoteCancellation,
-        useFactory: () => new QuoteCancellation({ orders: deps.orders, calendar: deps.calendar, ...(deps.eventCancellations ? { eventCancellations: deps.eventCancellations } : {}) }),
+        useFactory: () =>
+          new QuoteCancellation({
+            orders: deps.orders,
+            calendar: deps.calendar,
+            ...(deps.eventCancellations ? { eventCancellations: deps.eventCancellations } : {}),
+            ...(deps.paymentMethods ? { paymentMethods: deps.paymentMethods } : {}),
+          }),
       },
       {
         provide: CancelTicket,
@@ -42,6 +50,7 @@ export class RefundModule {
             writes: deps.writes,
             ...(deps.seats ? { seats: deps.seats } : {}),
             ...(deps.eventCancellations ? { eventCancellations: deps.eventCancellations } : {}),
+            ...(deps.paymentMethods ? { paymentMethods: deps.paymentMethods } : {}),
           }),
       },
       { provide: REAUTH_GATE, useValue: deps.reauth ?? unavailableReauth },

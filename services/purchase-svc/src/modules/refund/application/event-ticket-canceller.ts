@@ -85,6 +85,8 @@ export class EventTicketCanceller implements EventRefundCanceller {
       return { status: 'REFUNDED' };
     }
     if (payment === 'REJECTED') return { status: 'FAILED', error: 'REJECTED' };
+    // 가상계좌 결제: 일괄 환불에는 계좌가 없어 payment-svc가 결제사를 부르지 않고 계좌 대기로 답한다(항목 ACCOUNT_PENDING, BUILD_ORDER GAT-090, R-T40)
+    if (payment === 'REFUND_ACCOUNT_REQUIRED') return { status: 'ACCOUNT_PENDING' };
     return { status: 'REFUND_PENDING' };
   }
 }

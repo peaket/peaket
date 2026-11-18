@@ -651,6 +651,12 @@ export interface PaymentDepositCancels {
  * 결제 후 일반 취소(부분·전액)의 원장 저장소(GAT-080, docs/features/payment.md §4.1).
  * payment 행을 FOR UPDATE로 잠그고 cancelled_amount를 더한다. 결제사 호출은 잠금 밖에서 한다.
  */
+/** 가상계좌 환불 계좌 지표(BUILD_ORDER GAT-090). 계좌 값은 싣지 않는다. 던지지 않는다 */
+export interface RefundAccountSignals {
+  /** payment_cancel_refund_account_ignored_total{pg}를 1 올린다: 가상계좌가 아닌 결제에 온 계좌를 버렸다 */
+  refundAccountIgnored(pg: PgName): void;
+}
+
 export interface PaymentConfirmedCancels {
   /** 원장 행을 읽는다. 없으면 undefined */
   readConfirmedCancelTarget(paymentId: string, budget?: CallBudget): Promise<ConfirmedCancelTarget | undefined>;
@@ -658,7 +664,12 @@ export interface PaymentConfirmedCancels {
    * 한 트랜잭션(payment 행 FOR UPDATE): 이 취소 ID의 payment_cancel 행을 찾거나 처음이면 만든다(금액·사유·전액 여부·기대 잔액).
    * 결과의 뜻은 ConfirmedCancelBegin. 내부 표시(CONFIRMED_CANCEL_SENT)도 남긴다
    */
-  beginConfirmedCancel(target: ConfirmedCancelTarget, q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string }, budget?: CallBudget): Promise<ConfirmedCancelBegin>;
+  beginConfirmedCancel(
+    target: ConfirmedCancelTarget,
+    /** hasRefundAccount: 모양이 맞는 환불 계좌가 왔다. 가상계좌 결제인데 거짓이고 행이 없으면 행을 만들지 않고 ACCOUNT_REQUIRED다(BUILD_ORDER GAT-090) */
+    q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string; readonly hasRefundAccount?: boolean },
+    budget?: CallBudget,
+  ): Promise<ConfirmedCancelBegin>;
   /** 결제사 취소 성공 반영. 금액은 그 행에서 읽는다. 행이 이미 CANCELED면 더하지 않고 APPLIED. STALE이면 그사이 원장 상태가 바뀌었다 */
   finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
   /** 결제사 비동기 처리(CANCEL_PENDING)·업무 거절(FAILED)을 그 행에 남긴다. 원장은 바꾸지 않는다 */

@@ -965,6 +965,8 @@ erDiagram
         uuid deduction_gap_request_id "차액 대상으로 정한 회차 취소 요청"
         timestamptz deduction_gap_opened_at "차액 CS 건(REFUND_FAILED·DEDUCTION_GAP)을 ops-svc가 2xx로 받은 시각. deduction_gap_at이 있는데 비어 있으면 일괄 환불 실행기 틱이 다시 연다"
         timestamptz refund_failed_opened_at "환급 실패 CS 건(REFUND_FAILED·REFUND)을 ops-svc가 2xx로 받은 시각. 회차 취소 요청 ID가 없는 행만 쓴다(그 행은 일괄 환불 항목의 failure_case_opened_at이 맡는다). refund_failed_at이 있고 REFUND_PENDING인데 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다(추천 적용 2026-11-17, BAT-420 다시 보기 2 N2)"
+        timestamptz refund_account_required_at "계좌 대기: payment-svc가 REFUND_ACCOUNT_REQUIRED로 답한 시각(REFUND_PENDING만, 가상계좌 결제의 계좌 없음·계좌 거절). 있으면 환급 실행기가 집지 않고(next_refund_at 빔) 재시도 횟수·자동 정지 셈에 넣지 않는다. 계좌는 저장하지 않는다(purchase 0029, 추천 적용 2026-11-19, BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기')"
+        timestamptz refund_account_case_opened_at "CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건을 ops-svc가 2xx로 받은 시각. refund_account_required_at 없이 쓰지 않는다(CHECK). 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다(purchase 0029)"
         timestamptz entry_recorded_at "입장 시작 뒤 취소(REQUESTED)의 마감 뒤 대조에서 찾은 가장 이른 들어감·통과 시각. 있으면 환급 실행기가 결제사를 부르지 않고 refund_due_at을 비우며 CS 처리함 FLAGGED 건을 연다. 무효·환급은 CS가 정한다(추천 적용 2026-11-16, BUILD_ORDER GAT-090, docs/features/transfer-refund.md §3.1 '입장 기록 대조')"
     }
     fraud_cancellation_request {
@@ -1017,7 +1019,7 @@ erDiagram
         uuid order_id
         uuid cancellation_id "같은 요청·티켓이면 같은 결정적 UUID. 결제사 멱등키 cancel-{cancellation_id}"
         text pg "TOSS|PORTONE|SIMULATOR"
-        text status "PENDING|REFUNDED|FAILED|UNKNOWN"
+        text status "PENDING|REFUNDED|FAILED|UNKNOWN|NOT_APPLIED|ACCOUNT_PENDING. ACCOUNT_PENDING은 가상계좌 결제의 계좌 대기로 다시 보내지 않고 COMPLETED 셈에서 끝난 항목이다(purchase 0029, 추천 적용 2026-11-19, BUILD_ORDER GAT-090, R-T40)"
         int attempts "환급 재시도 횟수"
         text last_error "마지막 실패 결과 코드. 계좌·결제 참조는 싣지 않는다"
         uuid claim_token "주문 단위로 잡은 처리자의 무작위 값. 잡은 쪽만 처리하고 끝내기는 이 값이 같고 상태가 PENDING·UNKNOWN일 때만 쓴다(추천 적용 2026-11-16, 웨이브 끝 리뷰 K2)"
@@ -2004,6 +2006,9 @@ erDiagram
         text judged_by
         text approved_by "판정자와 다르다"
         bigint version "조건부 갱신"
+        timestamptz core_applied_at "core 회차 상태 반영(POST /internal/v1/events/{eventId}/cancellation-status)에 core-svc가 2xx로 답한 시각. 비어 있으면 1분 [가정] 다시 하기가 잇는다(판과 따로 쓴다, ops 0016, 추천 적용 2026-11-19, BUILD_ORDER GAT-110, R-T41)"
+        timestamptz core_apply_next_at "다시 하기가 잡은 뒤 다음에 볼 시각(잡기 뒤 미루기, 파드 여럿이 겹쳐 부르지 않게, ops 0016)"
+        timestamptz core_apply_overdue_at "확정 뒤 10분 [가정]이 지나도 반영하지 못해 SEV2 로그를 남긴 시각(요청마다 한 번, ops 0016)"
     }
     ops_alert {
         uuid id PK "BAT-425 GAT-130(2026-11-15, R-583). purchase-svc 회차 취소 환불 자동 정지·신청 창 닫힘 경보"

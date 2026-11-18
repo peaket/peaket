@@ -54,6 +54,17 @@ export interface PaymentCancellations {
   }): Promise<PaymentCancelOutcome>;
 }
 
+/** payment-svc GetPayment 한 번의 데드라인 300ms [가정](docs/features/payment.md §6 'purchase-svc 견적', 차단기 payment-svc-get) */
+export const PAYMENT_METHOD_LOOKUP_DEADLINE_MS = 300;
+
+/**
+ * 결제 수단 읽기(payment-svc GetPayment의 virtual_account_paid, docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090).
+ * 참이면 가상계좌로 받은 결제다. 읽지 못하면(시간 초과·연결 실패·차단기 열림·결제 없음) 던진다. 모르는 것을 '계좌 필요 없음'으로 보지 않는다
+ */
+export interface PaymentMethodLookup {
+  virtualAccountPaid(q: { readonly orderId: string; readonly deadlineMs: number }): Promise<boolean>;
+}
+
 /** order_cancellation 쓰기(운영은 purchase DB 한 트랜잭션) */
 export interface CancellationWrites {
   /**
@@ -93,6 +104,11 @@ export interface CancellationWrites {
   scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
   /** 재시도 소진·업무 거절: REFUND_PENDING 행에만 CS 처리함 대상 표시(refund_failed_at)를 남긴다(BAT-420 A3). 바꾼 행이 없으면 false를 돌려줄 수 있다 */
   markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
+  /**
+   * 계좌 대기(payment가 REFUND_ACCOUNT_REQUIRED, BUILD_ORDER GAT-090): REFUND_PENDING 행에 refund_account_required_at을 쓰고 next_refund_at을 비운다.
+   * 재시도 횟수(refund_attempts)는 바꾸지 않는다. 바꾼 행이 없으면 false를 돌려줄 수 있다. 없는 대역은 실패 표시(markRefundFailed)로 대신한다
+   */
+  markRefundAccountRequired?(q: { readonly cancellationId: string; readonly nowMs: number }): Promise<boolean | void>;
 }
 
 /** 환급 재시도 소진·업무 거절을 CS 처리함에 잇는 포트(ops-svc 계약이 생기기 전에는 기록 대역) */
@@ -196,6 +212,11 @@ export interface RefundDeps {
   readonly reauth?: ReauthGate;
   /** 확정된 회차의 팬 취소·견적은 409 event-cancelled(BAT-420 리뷰 D5). 없으면 확인하지 않는다(시작 조립은 DB가 있으면 꽂는다) */
   readonly eventCancellations?: EventCancellationLookup;
+  /**
+   * 견적·팬 취소의 가상계좌 판정(BUILD_ORDER GAT-090). 없으면(시험·옛 조립) 판정하지 않는다: 견적의 refundAccountRequired는 거짓이고 팬 취소는 본문의 계좌를
+   * 전처럼 그대로 넘긴다. 시작 조립은 늘 gRPC 어댑터를 꽂는다
+   */
+  readonly paymentMethods?: PaymentMethodLookup;
 }
 
 // ---- 부정 예매 운영자 취소(BAT-415 몫 F, fraud_cancellation.proto, docs/features/transfer-refund.md §7.4) ----

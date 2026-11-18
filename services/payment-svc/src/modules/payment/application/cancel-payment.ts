@@ -15,7 +15,7 @@ export interface CancelPaymentStatusReader {
 
 /** 두 갈래의 공통 답. 입금 전 취소는 취소액이 늘 0이고(칸 없음), 일반 취소는 누적 취소액을 싣는다 */
 export interface CancelAnswer {
-  readonly result: 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN';
+  readonly result: 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN' | 'REFUND_ACCOUNT_REQUIRED';
   readonly cancelledAmount?: number;
 }
 

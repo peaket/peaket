@@ -66,6 +66,10 @@ import { OPS_SALE_STORE, SALE_STORE } from './domain/sale-ports.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
 import { EventSummaryController } from './inbound/event-summary.controller.js';
 import { InternalSaleConfigController } from './inbound/internal-sale-config.controller.js';
+import { InternalEventStatusController } from './inbound/internal-event-status.controller.js';
+import { ApplyEventCancellationStatus } from './application/apply-event-cancellation-status.js';
+import { DrizzleEventStatusStore } from './adapters/db/drizzle-event-status-store.js';
+import { EVENT_STATUS_STORE } from './domain/event-cancellation-status.js';
 import { PartnerDirectoryController } from './inbound/partner-directory.controller.js';
 import { PartnerEventController } from './inbound/partner-event.controller.js';
 import { PartnerMediaController } from './inbound/partner-media.controller.js';
@@ -187,9 +191,12 @@ export class CatalogModule implements NestModule {
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
-        controllers,
+        // core 회차 상태 반영(BUILD_ORDER GAT-110)은 core_ops 쓰기와 검색 동기화가 있어야 하므로 DB 조립에서만 연다
+        controllers: [...controllers, InternalEventStatusController],
         providers: [
           ...shared,
+          ApplyEventCancellationStatus,
+          { provide: EVENT_STATUS_STORE, useFactory: (db: Database) => new DrizzleEventStatusStore(db), inject: [OPS_DATABASE] },
           { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           { provide: PARTNER_DATABASE, useValue: o.partnerDatabase },
           { provide: CATALOG_REPOSITORY, useClass: DrizzleCatalogRepository },

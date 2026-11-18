@@ -20,7 +20,8 @@ export const CancellationQuote = zod.object({
   "ticketPrice": zod.int().optional(),
   "deductionAmount": zod.int().optional().describe('공제액 = 티켓 금액 × 공제율의 원 미만 버림(POL-032, 기술 검토 낮음-095)'),
   "refundAmount": zod.int().optional().describe('티켓 금액 − 공제액. 실제 환급과 같은 공용 함수의 결과'),
-  "refundAfterEntryClose": zod.boolean().optional().describe('입장 시작 뒤 취소라 환급을 입장 기록 마감 뒤 실행(ADR-0051 결정 13)')
+  "refundAfterEntryClose": zod.boolean().optional().describe('입장 시작 뒤 취소라 환급을 입장 기록 마감 뒤 실행(ADR-0051 결정 13)'),
+  "refundAccountRequired": zod.boolean().optional().describe('취소 본문에 환불 계좌(refundAccount)를 실어야 하는지. 가상계좌 결제이고 지금 환급할 때(입장 시작 전 취소)만 참이다. 서버가 payment-svc GetPayment의 virtual_account_paid로 정하고, 읽지 못하면 견적은 503 dependency-unavailable이다(docs/features/payment.md §6 \'가상계좌 환불 계좌 전달의 첫 구현\', 추천 적용 2026-11-19, BUILD_ORDER GAT-090)')
 }).describe('예매 취소 환급 예상(POL-032). 소비자분쟁해결기준 공연업 공제율')
 
 export type CancellationQuote = zod.input<typeof CancellationQuote>;

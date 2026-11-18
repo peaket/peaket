@@ -273,7 +273,8 @@ let circuitsRef: PgCircuits | undefined;
   limitSync = new PgChannelLimitSync({ store: new DrizzlePgChannelLimit({ database: batchDatabase }), guards, clock: systemClock, signals: channelSignals, log: channelLogs });
   const depositCancel = new CancelDepositPayment({ store: confirmJobs, gateways, guards, signals: depositSignals, clock: systemClock });
   // 결제 후 일반 취소(GAT-080). 입금 전 취소와 같은 차단기·호출 보호기를 쓰고, 원장 상태로 갈래를 고른다
-  const confirmedCancel = new CancelConfirmedPayment({ store: confirmJobs, gateways, guards, clock: systemClock });
+  // 가상계좌가 아닌 결제에 온 환불 계좌를 버린 수는 입금 지표가 함께 낸다(BUILD_ORDER GAT-090)
+  const confirmedCancel = new CancelConfirmedPayment({ store: confirmJobs, gateways, guards, clock: systemClock, refundAccountSignals: depositSignals });
   const cancelPayment = new CancelPayment(depositCancel, confirmedCancel, confirmJobs);
   const VIRTUAL_ACCOUNT_DISALLOWED_REASON = '가상계좌를 받지 않는 공연의 입금 대기';
   entryPauseReleaseWatcher = new EntryPauseReleaseWatcher({ closeCircuit: (pg) => guards.of(pg)?.closeCircuit() });

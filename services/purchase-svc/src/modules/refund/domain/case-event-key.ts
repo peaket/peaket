@@ -3,7 +3,8 @@
 // 접두어가 다르면(이상 표시 entry-after-cancel·차액 deduction-gap) 같은 취소라도 다른 건이다.
 import { createHash } from 'node:crypto';
 
-export type CaseEventKeyPrefix = 'entry-after-cancel' | 'deduction-gap';
+/** refund-account: CS '환불 대기'(REFUND_ACCOUNT_PENDING, BUILD_ORDER GAT-090) */
+export type CaseEventKeyPrefix = 'entry-after-cancel' | 'deduction-gap' | 'refund-account';
 
 export function caseEventKey(prefix: CaseEventKeyPrefix, cancellationId: string): string {
   const h = createHash('sha256').update(`${prefix}:${cancellationId}`).digest('hex').slice(0, 32);

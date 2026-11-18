@@ -110,6 +110,8 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
           bank: payment.virtualAccountBank,
           accountNo: payment.virtualAccountNo,
           dueAt: payment.depositDueAt,
+          // 가상계좌로 받은 결제인가(docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090): AWAITING_DEPOSIT 사건이 있다
+          depositEvent: sql<boolean>`exists (select 1 from ${paymentEvent} e where e.payment_id = ${payment.id} and e.type = 'AWAITING_DEPOSIT' and e.exported)`,
         })
         .from(payment)
         .where(key.kind === 'orderId' ? eq(payment.orderId, key.orderId) : eq(payment.id, key.paymentId));
@@ -126,6 +128,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
       ...(r.bank === null ? {} : { virtualAccountBank: r.bank }),
       ...(r.accountNo === null ? {} : { virtualAccountNoSealed: r.accountNo }),
       ...(r.dueAt ? { depositDueAtMs: r.dueAt.getTime() } : {}),
+      depositEvent: r.depositEvent === true,
     };
   }
 

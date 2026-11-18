@@ -31,6 +31,20 @@ const PAYMENT_ID_PARAM = { type: 'object', required: ['paymentId'], properties: 
 const KEY_PARAM = { type: 'object', required: ['paymentKey'], properties: { paymentKey: { type: 'string', minLength: 1, maxLength: 200 } } } as const;
 const IDEM_HEADER = { type: 'object', properties: { 'idempotency-key': { type: 'string', minLength: 1, maxLength: 300 } } } as const;
 const AMOUNT = { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER } as const;
+/** 가상계좌 환불 계좌(토스 refundReceiveAccount: 은행 코드·숫자만 20자·예금주 60자, 공식 문서 2026-11-19 확인). 저장하지 않는다(BUILD_ORDER GAT-090) */
+const REFUND_RECEIVE_ACCOUNT = {
+  type: 'object',
+  required: ['bank', 'accountNumber', 'holderName'],
+  additionalProperties: false,
+  properties: { bank: { type: 'string', minLength: 1, maxLength: 40 }, accountNumber: { type: 'string', pattern: '^[0-9]{1,20}$' }, holderName: { type: 'string', minLength: 1, maxLength: 60 } },
+} as const;
+/** 포트원 refundAccount(CancelPaymentBodyRefundAccount의 bank·number·holderName) */
+const PORTONE_REFUND_ACCOUNT = {
+  type: 'object',
+  required: ['bank', 'number', 'holderName'],
+  additionalProperties: false,
+  properties: { bank: { type: 'string', minLength: 1, maxLength: 40 }, number: { type: 'string', pattern: '^[0-9]{1,20}$' }, holderName: { type: 'string', minLength: 1, maxLength: 60 }, holderPhoneNumber: { type: 'string', maxLength: 20 } },
+} as const;
 const ORDER = { type: 'string', pattern: '^[A-Za-z0-9_-]{6,64}$' } as const;
 /** 결제창 인증이 받는 시험 결제 수단(BUILD_ORDER HOT-145) */
 const INSTRUMENT = {
@@ -100,16 +114,24 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     { schema: { params: { type: 'object', required: ['orderId'], properties: { orderId: ORDER } } } },
     async (req, reply) => send(req, reply, await engine.queryByOrder(req.params.orderId)),
   );
-  app.post<{ Params: { paymentKey: string }; Body: { cancelReason: string; cancelAmount?: number } }>(
+  app.post<{ Params: { paymentKey: string }; Body: { cancelReason: string; cancelAmount?: number; refundReceiveAccount?: { bank: string; accountNumber: string; holderName: string } } }>(
     '/v1/payments/:paymentKey/cancel',
     {
       schema: {
         params: KEY_PARAM,
         headers: IDEM_HEADER,
-        body: { type: 'object', required: ['cancelReason'], additionalProperties: false, properties: { cancelReason: { type: 'string', minLength: 1, maxLength: 200 }, cancelAmount: AMOUNT } },
+        body: {
+          type: 'object',
+          required: ['cancelReason'],
+          additionalProperties: false,
+          properties: { cancelReason: { type: 'string', minLength: 1, maxLength: 200 }, cancelAmount: AMOUNT, refundReceiveAccount: REFUND_RECEIVE_ACCOUNT },
+        },
       },
     },
-    async (req, reply) => send(req, reply, await engine.cancel(req.params.paymentKey, req.body, idemOf(req))),
+    async (req, reply) => {
+      const { refundReceiveAccount, ...rest } = req.body;
+      return send(req, reply, await engine.cancel(req.params.paymentKey, { ...rest, ...(refundReceiveAccount === undefined ? {} : { refundAccount: refundReceiveAccount }) }, idemOf(req)));
+    },
   );
 
   // 거래 조회(대사, BUILD_ORDER HOT-153)
@@ -161,7 +183,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     { schema: { params: PAYMENT_ID_PARAM, querystring: { type: 'object', additionalProperties: false, properties: { storeId: { type: 'string', maxLength: 200 } } } } },
     async (req, reply) => (wrongStore(req.query.storeId, reply) ? reply : send(req, reply, portoneQueryResponse(await engine.query(req.params.paymentId), portoneChannels))),
   );
-  app.post<{ Params: { paymentId: string }; Body: { reason: string; amount?: number; currentCancellableAmount?: number; storeId?: string } }>(
+  app.post<{ Params: { paymentId: string }; Body: { reason: string; amount?: number; currentCancellableAmount?: number; storeId?: string; refundAccount?: { bank: string; number: string; holderName: string } } }>(
     '/payments/:paymentId/cancel',
     {
       schema: {
@@ -170,14 +192,25 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
           type: 'object',
           required: ['reason'],
           additionalProperties: false,
-          properties: { reason: { type: 'string', minLength: 1, maxLength: 200 }, amount: AMOUNT, currentCancellableAmount: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, storeId: { type: 'string', maxLength: 200 } },
+          properties: {
+            reason: { type: 'string', minLength: 1, maxLength: 200 },
+            amount: AMOUNT,
+            currentCancellableAmount: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+            storeId: { type: 'string', maxLength: 200 },
+            refundAccount: PORTONE_REFUND_ACCOUNT,
+          },
         },
       },
     },
     async (req, reply) => {
       const idem = portoneIdemOf(req, reply);
       if (idem === 'BAD' || wrongStore(req.body.storeId, reply)) return reply;
-      const body = { cancelReason: req.body.reason, ...(req.body.amount === undefined ? {} : { cancelAmount: req.body.amount }) };
+      const ra = req.body.refundAccount;
+      const body = {
+        cancelReason: req.body.reason,
+        ...(req.body.amount === undefined ? {} : { cancelAmount: req.body.amount }),
+        ...(ra === undefined ? {} : { refundAccount: { bank: ra.bank, accountNumber: ra.number, holderName: ra.holderName } }),
+      };
       const options = { retentionMs: PORTONE_IDEMPOTENCY_RETENTION_MS, ...(req.body.currentCancellableAmount === undefined ? {} : { currentCancellableAmount: req.body.currentCancellableAmount }) };
       return send(req, reply, portoneCancelResponse(await engine.cancel(req.params.paymentId, body, idem, options)));
     },

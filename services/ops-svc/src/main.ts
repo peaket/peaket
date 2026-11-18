@@ -10,10 +10,10 @@ import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { HttpCommandExecutor } from './adapters/http-command-executor.js';
 import { assertOpsPartnerRole } from './adapters/db/database-role.js';
-import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired } from './event-cancellation-wiring.js';
+import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
-import { PromEventCancellationSignals } from './modules/event-cancellations/index.js';
+import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
 import type { HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
@@ -91,6 +91,8 @@ const payouts = paymentUrl
       ...(reauth ? { reauth } : {}),
     }
   : undefined;
+// core 회차 상태 반영(BAT-420-rest GAT-110): 주소가 없으면 local·ci만 경고로 시작하고 그 밖은 여기서 시작 실패다
+const coreEventStatusWarning = requireCoreEventStatusUrl(process.env);
 // 회차 취소 요청(BAT-420 GAT-110): 파트너 소속 확인(core 판매 설정)·확정 때 판매 멈춤(판매 중지 집행)·판정 미리보기와 진행률(purchase gRPC).
 // 판매 중지 확인과 CS '판정 대기' 건은 AppModule이 같은 DB로 기본을 채운다.
 // 환급 미룸(holds, BAT-420 몫 D)은 같은 purchase gRPC 클라이언트의 SetEventRefundHold다. 없으면 CANCEL 요청·판정·확정이 503이다.
@@ -101,6 +103,7 @@ const eventCancellations = {
   ...cancellationDeps,
   ...(holds ? { holds } : {}),
   revertFailures: eventCancellationSignals.revertFailures,
+  coreApplyFailures: eventCancellationSignals.coreApplyFailures,
 };
 /** AppModule이 만든 명령 사건 처리기(Kafka 소비자가 HTTP와 같은 객체를 쓴다) */
 let commandEvents: HandleCommandEvent | undefined;
@@ -137,7 +140,18 @@ if (!cancellationDeps.owners) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 �
 if (!cancellationDeps.stopper) service.logger.warn({}, '판매 중지 집행 길(purchase·queue HTTP 또는 제어 gRPC)이 없어 회차 취소 확정이 503 sale-stop-unavailable이다');
 if (!cancellationDeps.reader) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 판정 미리보기가 503 event-refund-unavailable이다');
 if (!reauth) service.logger.warn({}, 'PEAKET_IDENTITY_JWKS_URL이 없어 회차 취소 요청·확정이 503 reauth-unavailable이다');
+if (coreEventStatusWarning) service.logger.warn({}, coreEventStatusWarning);
 await service.listen();
+// core 회차 상태 반영 다시 하기(1분 [가정], BAT-420-rest GAT-110, R-T41 ③). 잡기 뒤 미루기(SKIP LOCKED)라 파드 여럿이 함께 돌려도 한 요청은 한쪽만 부른다
+const coreApplyTimer = cancellationDeps.core
+  ? setInterval(() => {
+      void service.app
+        .get(EventCancellations)
+        .retryCoreApply()
+        .catch((err: unknown) => service.logger.warn({ event: 'event-cancellation-core-apply-tick-failed', err: err instanceof Error ? err.name : 'unknown' }, 'core 반영 다시 하기 한 바퀴가 실패했다'));
+    }, CORE_APPLY_RETRY_MS)
+  : undefined;
+coreApplyTimer?.unref();
 
 // 명령 요청·결과 사건 소비자(ops.command-events, BAT-465 R-584). HTTP 수신기와 같은 처리기를 쓴다.
 let consumers: OpsConsumers | undefined;
@@ -165,6 +179,7 @@ try {
 }
 
 process.once('SIGTERM', () => {
+  if (coreApplyTimer) clearInterval(coreApplyTimer);
   void (async () => {
     try {
       await consumers?.stop();

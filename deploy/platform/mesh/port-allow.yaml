@@ -94,6 +94,7 @@ workloads:
     namespace: core
     podLabels: { app.kubernetes.io/name: core-svc, app.kubernetes.io/component: service }
     ports:
+      # ops-svc는 판매 설정 사본·회차 규모 변경과 회차 취소·연기의 core 회차 상태 반영(/internal/v1/events/{eventId}/cancellation-status, 2026-11-19 GAT-110)을 부른다(ADR-0285 결정 9 표)
       rest: { port: 8080, callers: [ops-svc, payment-svc, purchase-svc, ticket-svc] }
       grpc:
         port: 50051

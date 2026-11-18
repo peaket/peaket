@@ -1,7 +1,7 @@
 // GetPayment 쓰임새(docs/api/proto/peaket/payment/v1/payment.proto, docs/features/payment.md §6 '`GetPayment` 서버', BUILD_ORDER HOT-151).
 // 결제사를 부르지 않고 원장만 읽는다. 저장한 계좌번호는 여기서 연다. 열지 못하거나 입금 기한이 지났으면 계좌번호 칸만 비운다(원장 삭제는 입금 확정·만료 때다).
 import type { Clock } from '@peaket/platform';
-import { type GetPaymentKey, type PaymentDetail, type PaymentDetailRow, PaymentNotFoundError, parseGetPaymentKey } from '../domain/confirm-command.js';
+import { type GetPaymentKey, type PaymentDetail, type PaymentDetailRow, PaymentNotFoundError, parseGetPaymentKey, virtualAccountPaidOf } from '../domain/confirm-command.js';
 import type { CallBudget, PaymentDepositLog, PaymentDepositSignals, PaymentDetailReader, PaymentGetSignals } from '../domain/ports.js';
 import type { VirtualAccountCipher } from '../domain/virtual-account.js';
 
@@ -53,6 +53,7 @@ export class GetPaymentDetail {
       cancelledAmount: row.cancelledAmount ?? 0,
       ...(row.approvedAtMs === undefined ? {} : { approvedAtMs: row.approvedAtMs }),
       ...(virtualAccount === undefined ? {} : { virtualAccount }),
+      ...(virtualAccountPaidOf(row) ? { virtualAccountPaid: true } : {}),
     };
   }
 

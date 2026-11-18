@@ -23,7 +23,8 @@ export type EventRefundFault = (typeof EVENT_REFUND_FAULTS)[number];
 export const EVENT_REFUND_STATUSES = ['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED', 'REJECTED'] as const;
 export type EventRefundStatus = (typeof EVENT_REFUND_STATUSES)[number];
 
-export const EVENT_REFUND_ITEM_STATUSES = ['PENDING', 'REFUNDED', 'FAILED', 'UNKNOWN', 'NOT_APPLIED'] as const;
+/** ACCOUNT_PENDING: 가상계좌 결제라 환불 계좌를 기다린다. 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목이다(docs/features/payment.md §6 '계좌 대기', BUILD_ORDER GAT-090, R-T40) */
+export const EVENT_REFUND_ITEM_STATUSES = ['PENDING', 'REFUNDED', 'FAILED', 'UNKNOWN', 'NOT_APPLIED', 'ACCOUNT_PENDING'] as const;
 export type EventRefundItemStatus = (typeof EVENT_REFUND_ITEM_STATUSES)[number];
 
 export const REFUND_JOB_STATES = ['RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED'] as const;
@@ -169,6 +170,8 @@ export interface EventRefundProgress {
   readonly done: number;
   readonly failed: number;
   readonly notApplied: number;
+  /** 계좌 대기 항목 수(BUILD_ORDER GAT-090, R-T40). 옛 진행률(JSON)에는 없을 수 있다 */
+  readonly accountPending?: number;
   readonly perPg: readonly EventRefundPgProgress[];
 }
 
@@ -219,26 +222,30 @@ export function eventRefundCancellationId(requestId: string, ticketId: string): 
  * 진행률. 결제사 몫의 상태는 멈춤(PAUSED) → 신청 창(REFUND_WINDOW) → 끝(COMPLETED) → 실행(RUNNING) 차례로 고른다.
  * `windowOpen`이면 아직 끝나지 않은 몫을 REFUND_WINDOW로 보인다(연기 확정 뒤 신청을 기다리는 동안).
  */
+const accountPendingOf = (items: readonly EventRefundItem[]): number => items.filter((i) => i.status === 'ACCOUNT_PENDING').length;
+
 export function progressOf(
   items: readonly EventRefundItem[],
   paused: readonly { pg: RefundPgProvider; reason: RefundPauseReason }[] = [],
   windowOpen = false,
 ): EventRefundProgress {
-  const byPg = new Map<RefundPgProvider, { total: number; done: number; failed: number; unknown: number; notApplied: number }>();
+  const byPg = new Map<RefundPgProvider, { total: number; done: number; failed: number; unknown: number; notApplied: number; accountPending: number }>();
   for (const item of items) {
-    const p = byPg.get(item.pg) ?? { total: 0, done: 0, failed: 0, unknown: 0, notApplied: 0 };
+    const p = byPg.get(item.pg) ?? { total: 0, done: 0, failed: 0, unknown: 0, notApplied: 0, accountPending: 0 };
     p.total++;
     if (item.status === 'REFUNDED') p.done++;
     else if (item.status === 'FAILED') p.failed++;
     else if (item.status === 'UNKNOWN') p.unknown++;
     else if (item.status === 'NOT_APPLIED') p.notApplied++;
+    else if (item.status === 'ACCOUNT_PENDING') p.accountPending++;
     byPg.set(item.pg, p);
   }
   const perPg: EventRefundPgProgress[] = [...byPg.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([pg, p]) => {
       const pause = paused.find((x) => x.pg === pg);
-      const terminal = p.done + p.failed + p.notApplied === p.total;
+      // 계좌 대기는 다시 보내지 않는 끝난 항목이다(R-T40 ④)
+      const terminal = p.done + p.failed + p.notApplied + p.accountPending === p.total;
       const state: RefundJobState = pause ? 'PAUSED' : terminal ? 'COMPLETED' : windowOpen ? 'REFUND_WINDOW' : 'RUNNING';
       return {
         pg,
@@ -255,6 +262,8 @@ export function progressOf(
     done: items.filter((i) => i.status === 'REFUNDED').length,
     failed: items.filter((i) => i.status === 'FAILED').length,
     notApplied: items.filter((i) => i.status === 'NOT_APPLIED').length,
+    // 계좌 대기가 있을 때만 싣는다(없으면 0으로 읽는다)
+    ...(accountPendingOf(items) > 0 ? { accountPending: accountPendingOf(items) } : {}),
     perPg,
   };
 }
