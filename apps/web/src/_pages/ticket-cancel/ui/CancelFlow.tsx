@@ -249,7 +249,7 @@ export function CancelBar() {
   const c = useCancel();
   const blocked = c.calculating ? '환급 예상액을 계산한 뒤 진행할 수 있습니다' : c.n === 0 ? '취소할 좌석을 고르면 진행할 수 있습니다' : null;
   return (
-    <div className="bottom-bar sticky bottom-0 z-10 md:px-6 md:pt-3.5 md:pb-5 lg:hidden">
+    <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3.5 md:pb-5 lg:hidden">
       <div className="mx-auto flex w-full max-w-[600px] flex-col items-stretch gap-2.5 md:flex-row md:items-center md:gap-4">
         {c.n > 0 ? (
           <div className="flex items-center justify-between md:grow md:flex-col md:items-start md:justify-start md:gap-0.5">

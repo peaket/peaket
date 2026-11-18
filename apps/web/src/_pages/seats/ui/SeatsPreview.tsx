@@ -261,10 +261,10 @@ export async function SeatsPreview({ params, searchParams }: Props) {
   const bottomBar =
     v.pick && v.summary ? (
       <>
-        <div className="sticky bottom-0 z-10 md:hidden">
+        <div className="sticky bottom-0 z-10 short-screen:static md:hidden">
           <SummarySheet view={v} hold={DEMO_HOLD} links={links} />
         </div>
-        <div className="sticky bottom-0 z-10 hidden md:block lg:hidden">
+        <div className="sticky bottom-0 z-10 short-screen:static hidden md:block lg:hidden">
           <SummaryBar view={v} hold={DEMO_HOLD} links={links} />
         </div>
       </>
