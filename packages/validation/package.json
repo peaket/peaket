@@ -2,7 +2,7 @@
   "name": "@peaket/validation",
   "private": true,
   "version": "0.0.0",
-  "description": "요청·응답 Zod(계약 생성 스키마를 다시 내보냄)와 계약에 적을 수 없는 규칙(docs/frontend.md §2.2). 하위 경로 ./sale-policy는 판매 정책 규칙 문법 1판의 읽기·평가 함수(화면과 서버가 같이 씀, ADR-0261 결정 3·11)이고, 서비스는 빌드한 dist를 쓴다",
+  "description": "요청·응답 Zod(계약 생성 스키마를 다시 내보냄)와 계약에 적을 수 없는 규칙(docs/frontend.md §2.2). 하위 경로 ./product-types는 상품 유형별 속성 스키마 판 묶음(ADR-0300 결정 1), ./sale-policy는 판매 정책 규칙 문법 1판의 읽기·평가 함수(화면과 서버가 같이 씀, ADR-0261 결정 3·11)이고, 서비스는 빌드한 dist를 쓴다",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -11,6 +11,11 @@
       "types": "./src/sale-policy/index.ts",
       "development": "./src/sale-policy/index.ts",
       "default": "./dist/sale-policy/index.js"
+    },
+    "./product-types": {
+      "types": "./src/product-types/index.ts",
+      "development": "./src/product-types/index.ts",
+      "default": "./dist/product-types/index.js"
     },
     "./seatmap-checks": {
       "types": "./src/seatmap-checks/index.ts",
