@@ -193,6 +193,7 @@ export {
   type GrpcPaymentResultReaderOptions,
 } from './adapters/grpc-payment-results.js';
 export { PromPaymentPullSignals } from './adapters/prom-payment-pull-signals.js';
+export { PromPaymentEventSkipSignals } from './adapters/prom-payment-result-skip-signals.js';
 export { PaymentResultPuller, type PaymentPullTickResult, type PaymentPullTimer, type PaymentResultPullDeps } from './application/payment-result-pull.js';
 export {
   isPaymentResultMissingLong,
@@ -305,6 +306,9 @@ export {
   type PaymentResultName,
   type PaymentResultOrderView,
   type PaymentResultSkipReason,
+  PAYMENT_EVENT_SKIP_REASONS,
+  type PaymentEventSkipReason,
+  type PaymentEventSkipSignals,
   type PaymentResultTransition,
   type PaymentResultWrite,
 } from './domain/payment-result.js';

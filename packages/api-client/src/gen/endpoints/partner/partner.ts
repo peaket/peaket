@@ -6513,6 +6513,11 @@ export type updatePartnerProductResponse412 = {
   status: 412
 }
 
+export type updatePartnerProductResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
 export type updatePartnerProductResponse428 = {
   data: ProblemResponse
   status: 428
@@ -6521,7 +6526,7 @@ export type updatePartnerProductResponse428 = {
 export type updatePartnerProductResponseSuccess = (updatePartnerProductResponse200) & {
   headers: Headers;
 };
-export type updatePartnerProductResponseError = (updatePartnerProductResponse401 | updatePartnerProductResponse404 | updatePartnerProductResponse412 | updatePartnerProductResponse428) & {
+export type updatePartnerProductResponseError = (updatePartnerProductResponse401 | updatePartnerProductResponse404 | updatePartnerProductResponse412 | updatePartnerProductResponse422 | updatePartnerProductResponse428) & {
   headers: Headers;
 };
 

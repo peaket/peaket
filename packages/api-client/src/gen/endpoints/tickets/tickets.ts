@@ -1386,15 +1386,40 @@ export const useCreateTicketCancellation = <TError = ErrorType<ProblemResponse |
   status: 201
 }
 
+export type createTicketAddonResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createTicketAddonResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createTicketAddonResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createTicketAddonResponse409 = {
   data: ProblemResponse
   status: 409
 }
 
+export type createTicketAddonResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createTicketAddonResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createTicketAddonResponseSuccess = (createTicketAddonResponse201) & {
   headers: Headers;
 };
-export type createTicketAddonResponseError = (createTicketAddonResponse409) & {
+export type createTicketAddonResponseError = (createTicketAddonResponse400 | createTicketAddonResponse401 | createTicketAddonResponse404 | createTicketAddonResponse409 | createTicketAddonResponse422 | createTicketAddonResponse503) & {
   headers: Headers;
 };
 
@@ -1442,7 +1467,7 @@ return orvalFetch<createTicketAddonResponseSuccess>(getCreateTicketAddonUrl(tick
 
 export const getCreateTicketAddonMutationKey = () => ['createTicketAddon'] as const;
 
-export const getCreateTicketAddonMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateTicketAddonMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketAddon>>, TError,CreateTicketAddonMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createTicketAddon>>, TError,CreateTicketAddonMutationVariables, TContext> => {
 
@@ -1471,13 +1496,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateTicketAddonMutationResult = NonNullable<Awaited<ReturnType<typeof createTicketAddon>>>
     export type CreateTicketAddonMutationBody = BodyType<CreateTicketAddonBody>
-    export type CreateTicketAddonMutationError = ErrorType<ProblemResponse>
+    export type CreateTicketAddonMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
     export type CreateTicketAddonMutationVariables = {ticketId: string;data: BodyType<CreateTicketAddonBody>}
 
     /**
  * @summary 티켓 연동 부가 상품 주문(티켓 보유 확인)
  */
-export const useCreateTicketAddon = <TError = ErrorType<ProblemResponse>,
+export const useCreateTicketAddon = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketAddon>>, TError,CreateTicketAddonMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createTicketAddon>>,
@@ -1526,7 +1551,7 @@ export const getListTicketAddonsUrl = (ticketId: string,
 }
 
 /**
- * FR-014, POL-016, SCR-013 ⑫, docs/frontend.md §6.2 32번. 티켓의 지금 보유자만 읽는다. 새로 살 수 있는 부가 상품 목록은 GET /v1/shop/products?linkedEventId={eventId}다. 양도로 받은 티켓에는 그 상품이 양도 가능(product.transferable)일 때만 보인다 [가정]. 주문 항목을 티켓에 잇는 칸이 docs/data.md merch_order·merch_order_item에 아직 없다(더해야 한다, POL-016 §1.4 '연결 티켓' 행도 이 칸이 있어야 된다). Cache-Control: private, no-store
+ * FR-014, POL-016, SCR-013 ⑫, docs/frontend.md §6.2 32번. 티켓의 지금 보유자만 읽는다. 새로 살 수 있는 부가 상품 목록은 GET /v1/shop/products?linkedEventId={eventId}다. 양도로 받은 티켓에는 그 상품이 양도 가능(product.transferable)일 때만 보인다 [가정]. 주문 항목을 티켓에 잇는 칸은 merch_order_item.linked_ticket_id다. 결제가 끝난(PAID) 주문의 항목만 모으고, 항목이 있으면 그 회차로 ticket-svc ListHeldTickets(세션 계정)를 불러 지금 보유자인지 보며 아니면 404다. 항목이 하나도 없으면 보유 확인 없이 빈 목록이다(추천 적용 2026-11-18, BAT-600 계획, ADR-0301 결정 3). Cache-Control: private, no-store
  * @summary 이 티켓에 연동해 산 부가 상품 목록(월렛의 이용권 표시)
  */
 export const listTicketAddons = async (ticketId: string,

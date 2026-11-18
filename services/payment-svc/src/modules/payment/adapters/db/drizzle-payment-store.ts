@@ -4,7 +4,7 @@
 // 모자라면 아무 문장도 보내지 않고 PaymentDeadlineError를 던지고, 넉넉하면 그 시간으로 문장 시간 한도를 건다(플랫폼 statementTimeoutMs는 연결을 받기 전에 값을 정해 풀 대기를 뺄 수 없다).
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
-import { type ConfirmPaymentCommand, type ConfirmPaymentRef, type GetPaymentKey, MIN_CALL_REMAINING_MS, PaymentDeadlineError, type PaymentLedgerStatus, type PaymentDetailRow, type PaymentRecord, type PaymentState } from '../../domain/confirm-command.js';
+import { type ConfirmPaymentCommand, type ConfirmPaymentRef, type GetPaymentKey, MIN_CALL_REMAINING_MS, PaymentDeadlineError, type PaymentLedgerStatus, type PaymentDetailRow, type PaymentOrderKind, type PaymentRecord, type PaymentState } from '../../domain/confirm-command.js';
 import { confirmIdemKey, type FailureCategory, type PgName } from '../../domain/payment-gateway.js';
 import type { CallBudget, NewPaymentValues, PaymentCommandStore, PaymentDetailReader, PaymentStateReader, StoreCommandResult } from '../../domain/ports.js';
 import { payment, paymentConfirmJob, paymentEvent } from './schema.js';
@@ -52,7 +52,9 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
         .values({
           id: values.paymentId,
           orderId: command.orderId,
+          // 굿즈는 회차 칸을 비운다(ADR-0299 결정 1)
           eventId: command.eventId,
+          orderKind: command.orderKind ?? 'TICKET',
           attemptId: command.attemptId,
           attemptNo: command.attemptNo,
           pg: command.pg,
@@ -73,7 +75,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
       if (inserted.length === 0) {
         // 겹친 쪽은 앞 쪽이 커밋할 때까지 유일 확인에서 기다렸다가 0행을 받는다. READ COMMITTED의 다음 문장은 커밋된 행을 본다
         const [row] = await tx
-          .select({ paymentId: payment.id, orderId: payment.orderId, attemptId: payment.attemptId, pg: payment.pg, amount: payment.amount, status: payment.status, approvedAt: payment.approvedAt, failureCategory: payment.failureCategory })
+          .select({ paymentId: payment.id, orderId: payment.orderId, attemptId: payment.attemptId, pg: payment.pg, amount: payment.amount, orderKind: payment.orderKind, status: payment.status, approvedAt: payment.approvedAt, failureCategory: payment.failureCategory })
           .from(payment)
           .where(eq(payment.orderId, command.orderId));
         if (!row) throw new Error('유일 제약에 걸린 결제 행을 읽지 못했다');
@@ -81,6 +83,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
         const record: PaymentRecord = {
           ...rest,
           pg: rest.pg as PgName,
+          orderKind: rest.orderKind as PaymentOrderKind,
           status: rest.status as PaymentLedgerStatus,
           ...(approvedAt ? { approvedAtMs: approvedAt.getTime() } : {}),
           ...(failureCategory ? { failureCategory: failureCategory as FailureCategory } : {}),
@@ -90,7 +93,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
 
       await tx.insert(paymentEvent).values({ paymentId: values.paymentId, seq: 1, eventKey: values.eventKey, type: 'ACCEPTED', exported: false, occurredAt: now });
       await tx.insert(paymentConfirmJob).values({ paymentId: values.paymentId, pg: command.pg, nextAttemptAt: now, createdAt: now });
-      return { kind: 'CREATED', record: { paymentId: values.paymentId, orderId: command.orderId, attemptId: command.attemptId, pg: command.pg, amount: command.amount, status: 'ACCEPTED' } };
+      return { kind: 'CREATED', record: { paymentId: values.paymentId, orderId: command.orderId, attemptId: command.attemptId, pg: command.pg, amount: command.amount, orderKind: command.orderKind ?? 'TICKET', status: 'ACCEPTED' } };
     }, CONFIRM_TRANSACTION);
   }
 
