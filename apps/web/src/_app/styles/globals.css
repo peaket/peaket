@@ -21,12 +21,15 @@
 
 /*
  * 초점이 가려지지 않게(WCAG 2.4.11, docs/frontend.md §5.11 '초점이 가려지지 않게', FE-T18 자동 몫 tools/web-checks/reflow/keyboard.spec.mjs).
- * 위에 붙는 탭 띠(공연 상세 sticky top-0)와 아래에 붙는 예매·결제 띠(.bottom-bar sticky bottom-0)의 높이만큼 스크롤 여백을 둬,
- * Tab으로 옮긴 초점이 그 띠 밑에 숨지 않게 브라우저가 굴린다. 값은 위 56px(탭 띠 48px에 여유)·아래 96px(버튼 48 + 위아래 여백 32 + 테두리·그림자) [가정]
+ * 위에 붙는 탭 띠(공연 상세 sticky top-0)와 아래에 붙는 예매·좌석 띠(sticky bottom-0)의 높이만큼 스크롤 여백을 둬,
+ * Tab으로 옮긴 초점과 scrollIntoView로 굴린 요소가 그 띠 밑에 숨지 않게 브라우저가 굴린다. 높이는 띠가 지금 그려진 실제 높이다
+ * (안내 글 줄바꿈·글자 간격으로 띠가 높아지면 여백도 는다, BAT-171): 띠 부품이 useStickyInset(shared/lib/sticky-inset.ts)으로
+ * --pk-sticky-top·--pk-sticky-bottom에 잰 높이를 넣는다. 변수가 없을 때(띠 부품이 아직 그 값을 넣지 않은 첫 그림, 아직 옮기지 않은 결제·가입·취소·상점 띠)는
+ * 예전 값 위 56px(탭 띠 48px에 여유)·아래 96px(버튼 48 + 위아래 여백 32 + 테두리·그림자) [가정]을 쓴다
  */
 @layer base {
   html {
-    scroll-padding-top: 56px;
-    scroll-padding-bottom: 96px;
+    scroll-padding-top: var(--pk-sticky-top, 56px);
+    scroll-padding-bottom: var(--pk-sticky-bottom, 96px);
   }
 }

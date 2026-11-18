@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { LikeToggle } from '@/features/like-production';
 import { derivativeUrl } from '@/shared/lib/image-loader';
 import { cx } from '@/shared/lib/cx';
+import { useStickyInset } from '@/shared/lib/sticky-inset';
 import { derivativeSrcSet } from '@/shared/ui/PicturePoster';
 import { useDetailPersonal } from './DetailPersonal';
 
@@ -13,6 +14,8 @@ import { useDetailPersonal } from './DetailPersonal';
  */
 export function SectionTabs({ items, initial, stuck = false }: { items: readonly { id: string; label: string }[]; initial: string; stuck?: boolean }) {
   const [active, setActive] = useState(initial);
+  // 위에 붙는 띠의 실제 높이를 위 스크롤 여백으로(docs/frontend.md §5.11 '초점이 가려지지 않게', BAT-171)
+  const navRef = useStickyInset('top');
   useEffect(() => {
     const els = items.map((it) => document.getElementById(it.id)).filter((el): el is HTMLElement => el !== null);
     if (els.length === 0 || typeof IntersectionObserver === 'undefined') return;
@@ -28,6 +31,7 @@ export function SectionTabs({ items, initial, stuck = false }: { items: readonly
   }, [items]);
   return (
     <nav
+      ref={navRef}
       className="tabs tabs-sm tabs-scroll sticky top-0 z-[5] px-2 lg:px-0 lg:[&_.tab]:min-h-11 lg:[&_.tab]:px-3 lg:[&_.tab]:text-[15px] lg:[&_.tab]:leading-5"
       aria-label="섹션 바로가기"
       style={{ background: 'var(--surface)', boxShadow: stuck ? 'var(--shadow-md)' : undefined }}
