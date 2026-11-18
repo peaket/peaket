@@ -4,7 +4,7 @@
 // 팬 취소의 재인증 확인기 조립(fanReauthGateFromEnv, BAT-415-reauth)도 같은 규칙이다.
 import type { Clock, ReauthJtiStore } from '@peaket/platform';
 import type { EntryRecords, EntryRecordView, ReauthGate } from './modules/refund/index.js';
-import { JwksFanReauthGate } from './modules/refund/adapters/jwks-fan-reauth-gate.js';
+import { type FanReauthResult, JwksFanReauthGate } from './modules/refund/adapters/jwks-fan-reauth-gate.js';
 
 /** 대역을 받는 환경(ticket-svc 없이 도는 로컬·CI). PEAKET_ENV가 없으면 운영으로 보고 대역을 쓰지 않는다(identity 조립과 같은 fail-closed) */
 const STUB_ENVS: ReadonlySet<string> = new Set(['local', 'ci']);
@@ -33,14 +33,15 @@ export function entryRecordsFromEnv(o: { readonly env: Readonly<Record<string, s
   };
 }
 
-/** 재인증을 받는 다른 서비스와 같은 발급자 기본값 [가정](docs/features/transfer-refund.md §3.1 '시작 조립') */
+/** local·ci의 발급자 기본값 [가정](재인증을 받는 다른 서비스와 같다, docs/features/transfer-refund.md §3.1 '시작 조립') */
 const DEFAULT_IDENTITY_ISSUER = 'https://identity.peaket.example';
 
 /**
  * 팬 취소의 재인증 확인기 조립(docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인'의 '시작 조립', R-T39 ⑥).
- * PEAKET_IDENTITY_FAN_JWKS_URL(팬 공개키 묶음 주소)이 있으면 JwksFanReauthGate(발급자 PEAKET_IDENTITY_ISSUER, 없으면 기본값)를 돌려준다.
- * 없으면(빈 문자열 포함) local·ci는 undefined(닫힌 대역, 늘 403)와 경고 한 번이고, 그 밖 환경(PEAKET_ENV 없음 포함)은 던진다(시작 실패).
- * start.ts가 예매 취소 조립(purchase DB가 있을 때) 안에서 좌석 Redis의 jti 저장소로 부른다
+ * PEAKET_IDENTITY_FAN_JWKS_URL(팬 공개키 묶음 주소)이 있으면 JwksFanReauthGate(발급자 PEAKET_IDENTITY_ISSUER)를 돌려준다.
+ * 주소가 없으면(빈 문자열 포함) local·ci는 undefined(닫힌 대역, 늘 403)와 경고 한 번이고, 그 밖 환경(PEAKET_ENV 없음 포함)은 던진다(시작 실패).
+ * 주소는 있고 발급자가 없거나 빈 값이면 local·ci만 기본값을 쓰고 그 밖 환경은 던진다(기본값으로 조용히 떠 모든 취소가 403이 되는 것을 막는다, 리뷰 RV-06).
+ * onResult(403·503의 까닭 기록)는 확인기에 그대로 넘긴다. start.ts가 예매 취소 조립(purchase DB가 있을 때) 안에서 좌석 Redis의 jti 저장소로 부른다
  */
 export function fanReauthGateFromEnv(o: {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -48,21 +49,26 @@ export function fanReauthGateFromEnv(o: {
   readonly warn?: (msg: string) => void;
   readonly clock?: Clock;
   readonly fetch?: typeof fetch;
+  readonly onResult?: (r: FanReauthResult) => void;
 }): ReauthGate | undefined {
+  const envName = o.env.PEAKET_ENV;
+  const stubEnv = envName !== undefined && STUB_ENVS.has(envName);
   const jwksUrl = o.env.PEAKET_IDENTITY_FAN_JWKS_URL;
   if (jwksUrl !== undefined && present(jwksUrl)) {
     const issuer = o.env.PEAKET_IDENTITY_ISSUER;
+    const hasIssuer = issuer !== undefined && present(issuer);
+    if (!hasIssuer && !stubEnv) throw new Error('PEAKET_IDENTITY_FAN_JWKS_URL은 있는데 PEAKET_IDENTITY_ISSUER가 없다(기본값 발급자로 뜨면 팬 취소가 늘 403일 수 있다). 운영에서는 시작하지 않는다');
     return new JwksFanReauthGate({
       jwksUrl: jwksUrl.trim(),
-      issuer: issuer !== undefined && present(issuer) ? issuer.trim() : DEFAULT_IDENTITY_ISSUER,
+      issuer: hasIssuer ? issuer.trim() : DEFAULT_IDENTITY_ISSUER,
       jti: o.jti,
       ...(o.clock ? { clock: o.clock } : {}),
       ...(o.fetch ? { fetch: o.fetch } : {}),
+      ...(o.onResult ? { onResult: o.onResult } : {}),
     });
   }
-  const envName = o.env.PEAKET_ENV;
   const msg = 'PEAKET_IDENTITY_FAN_JWKS_URL이 없다(팬 취소의 재인증 토큰을 확인하지 못해 취소가 늘 403 reauth-required다)';
-  if (envName === undefined || !STUB_ENVS.has(envName)) throw new Error(`${msg}. 운영에서는 시작하지 않는다`);
+  if (!stubEnv) throw new Error(`${msg}. 운영에서는 시작하지 않는다`);
   o.warn?.(msg);
   return undefined;
 }

@@ -307,7 +307,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   });
   const signals = new PromSeatSignals();
   // 서비스 로거는 서비스를 만든 뒤에야 생기므로, 좌석맵 판은 늦게 묶는 로거로 경고를 남긴다(판 파일은 처음 요청 때 읽는다)
-  let log: { warn(obj: object, msg: string): void } | undefined;
+  let log: { warn(obj: object, msg: string): void; info(obj: object, msg: string): void } | undefined;
   const coreSaleConfigs = coreHttpUrl
     ? new CoreSaleConfigs({ client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 200, clock: systemClock }), clock: systemClock, ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}) })
     : undefined;
@@ -332,7 +332,17 @@ export async function start(o: StartOptions): Promise<StartedService> {
     // ticket-svc 운영자 취소는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
     refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) });
     refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
-    const fanReauth = fanReauthGateFromEnv({ env, jti: new RedisReauthJtiStore(redis), clock: systemClock, warn: (m) => void fanReauthWarnings.push(m) });
+    // 403·503마다 까닭 이름표 하나만 남긴다(403 info, 503 warn. 토큰·jti·계정 ID·세션 ID는 싣지 않는다, §3.1 '거절 기록'). 로거는 서비스를 만든 뒤 묶인다
+    const fanReauth = fanReauthGateFromEnv({
+      env,
+      jti: new RedisReauthJtiStore(redis),
+      clock: systemClock,
+      warn: (m) => void fanReauthWarnings.push(m),
+      onResult: (r) =>
+        r.outcome === 'rejected'
+          ? log?.info({ event: 'fan_reauth_rejected', reason: r.reason }, '팬 취소의 재인증 토큰을 거절했다')
+          : log?.warn({ event: 'fan_reauth_unavailable', reason: r.reason }, '팬 취소의 재인증 토큰을 확인하지 못했다'),
+    });
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
       writes: new DrizzleCancellationWrites(database, new DrizzleOrderStore({ clock: systemClock })),
