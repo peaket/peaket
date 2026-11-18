@@ -1240,7 +1240,7 @@ test('V-T43 ①② HOT-405 WU6 발생기마다의 요약이 없거나 2xx 수를
 // ---------- WU7~WU9: gw limits ----------
 
 /** 보류 = ⌈동시 ÷ 8⌉(docs/infra.md §4.1 '값의 식'): 시험 후보마다 손으로 적는다 */
-const PENDING_OF = { 12: 2, 16: 2, 24: 3, 28: 4, 32: 4, 39: 5, 40: 5, 48: 6 };
+const PENDING_OF = { 12: 2, 16: 2, 24: 3, 28: 4, 32: 4, 39: 5, 40: 5, 48: 6, 64: 8, 75: 10 };
 /**
  * 손으로 만든 gw sweep 결과 파일(sweep.json, 정상 부하 gw-queue gw-queue-buy). runs = [[동시, 판정('pass'|'fail'|'invalid'), 진입 2xx avg(ms)], …].
  * o로 파일·단계의 칸을 바꿔 섞인 입력을 만든다(o.step(단계 줄, 번호)로 단계 칸을 고친다)
@@ -1466,4 +1466,66 @@ test('V-T43 ① HOT-405 WU6·WU9 이어서: gw sweep이 쓴 결과 파일(발생
     'gw-queue': { maxConnections: 1373, maxParallelRequests: 1373, maxPendingRequests: 172 },
     others: { maxConnections: 3432, maxParallelRequests: 3432, maxPendingRequests: 429 },
   });
+});
+
+// ===================== BAT-058 리뷰 반영 RV-03·RV-04(HOT-405, Fix-By: test) =====================
+// 정본: ADR-0287 결정 7 끝(감독 결정·추천 적용, 2026-11-19, BAT-058 리뷰 반영 RV-03·RV-04)과 '되돌릴 조건':
+//   RV-03 올리기 전 k가 5 이상이면(정수로 견줌: r_min × 1,000,000 ≥ 5 × 도착률 × L̄µs, 경계 5는 넘은 쪽) 상한을 내지 않고 끝 코드 1.
+//     경계 셋: 바로 아래 r_min 75·L̄ 10.001ms(75,000,000 < 5 × 1,500 × 10,001 = 75,007,500, 올리기 전 4.9995) → 정하고 k 5.0,
+//     정확히 5 r_min 75·L̄ 10.000ms(75,000,000 = 75,000,000) → 넘은 쪽, 바로 위 r_min 64·L̄ 8.533ms(64,000,000 ≥ 63,997,500, 올리기 전 5.0002) → 넘은 쪽.
+//     소수 셋째 자리로 반올림해 견주면 5.0002가 5로 보여 틈이 생긴다(리뷰 f8baa272 RV-03).
+//   RV-04 유효 단계(통과·실패)에서 읽은 일꾼 수(결과 줄 workers.pods)가 모두 --pod-cpus와 같지 않으면 정하지 않고 끝 코드 1(ADR-0287 결정 2·6,
+//     계획 §4.4의 2 '섞인 입력을 조용히 버리지 않는다'). workers 칸이 없거나 비면 '같다'가 아니다. 무효 단계(일꾼 수가 달라 부하를 넣지 않은 단계)는 세지 않는다.
+
+/** RV-03: 끝 코드 1이고 운영 상한을 내지 않으며 까닭에 5가 있다(잰 r_min·평균 지연은 남긴다) */
+function assertOverK5(r, rMin, meanMs, label) {
+  assert.equal(r.exitCode, 1, `${label}: 끝 코드 ${r.exitCode} ${JSON.stringify({ kRaw: r.out.kRaw, k: r.out.k, warnings: r.out.warnings, reasons: r.out.reasons })}`);
+  assert.equal(r.out.limits ?? null, null, `${label}: 운영 상한을 냈다 ${JSON.stringify(r.out.limits)}`);
+  const why = [...(r.out.reasons ?? []), ...(r.out.warnings ?? [])].join(' / ');
+  assert.match(why, /5/, `${label}: 되돌릴 조건(k ≥ 5)을 알리지 않는다 ${why}`);
+  assert.equal(r.out.rMin, rMin, `${label}: r_min`);
+  assert.ok(Math.abs(r.out.meanLatencyMs - meanMs) < 1e-9, `${label}: 평균 지연 ${r.out.meanLatencyMs}`);
+}
+
+test('V-T43 ① HOT-405 RV-03 gw limits: 올리기 전 k가 5 바로 아래(r_min 75·L̄ 10.001ms → 4.9995)이면 k 5.0으로 정하고 끝 코드 0', async () => {
+  const r = await limitsOf([sweepJson([[64, 'fail', 9]]), sweepJson(rep(75, 'pass', 3, 10.001))]);
+  assert.equal(r.exitCode, 0, `끝 코드 ${r.exitCode} ${JSON.stringify([r.out.reasons, r.out.warnings])}`);
+  assert.equal(r.out.determined, true);
+  assert.equal(r.out.rMin, 75);
+  assert.equal(r.out.k, 5, `k ${r.out.k}`);
+  // k10 50: gw-queue ⌈50 × 6 × 2,600 × 2 × 200 ÷ 100,000⌉ = 3,120, ⌈3,120 ÷ 8⌉ = 390 / 나머지 ⌈… × 500 ÷ 100,000⌉ = 7,800, 975
+  assert.deepEqual(r.out.limits, {
+    'gw-queue': { maxConnections: 3120, maxParallelRequests: 3120, maxPendingRequests: 390 },
+    others: { maxConnections: 7800, maxParallelRequests: 7800, maxPendingRequests: 975 },
+  });
+});
+
+test('V-T43 ① HOT-405 RV-03 gw limits: 올리기 전 k가 정확히 5(r_min 75·L̄ 10.000ms)이면 넘은 쪽이라 상한을 내지 않고 끝 코드 1', async () => {
+  assertOverK5(await limitsOf([sweepJson([[64, 'fail', 9]]), sweepJson(rep(75, 'pass', 3, 10))]), 75, 10, '정확히 5');
+});
+
+test('V-T43 ① HOT-405 RV-03 gw limits: 올리기 전 k가 5를 조금 넘으면(r_min 64·L̄ 8.533ms → 5.0002) 상한을 내지 않고 끝 코드 1', async () => {
+  assertOverK5(await limitsOf([sweepJson([[48, 'fail', 9]]), sweepJson(rep(64, 'pass', 3, 8.533))]), 64, 8.533, '5.0002');
+});
+
+const rv04Good = () => [sweepJson([[24, 'fail']]), sweepJson(rep(28, 'pass', 3, 8.5))];
+const rv04Pods = (n) => (s) => ({ ...s, workers: { ...s.workers, pods: { 'envoy-gw-queue-a': n } } });
+const rv04Three = () => [sweepJson([[24, 'fail']], { step: rv04Pods(3) }), sweepJson(rep(28, 'pass', 3, 8.5), { step: rv04Pods(3) })];
+
+for (const [label, files, podCpus] of [
+  ['유효 단계 하나에 일꾼 32가 섞임(틀린 판 ⑦ 같은 무대)', () => [...rv04Good(), sweepJson([[32, 'pass']], { step: rv04Pods(32) })], '2'],
+  ['workers 칸이 없는 옛 결과 파일(BAT-056 꼴)', () => [...rv04Good(), sweepJson([[32, 'pass']], { step: ({ workers: _w, ...s }) => s })], '2'],
+  ['통과 단계의 workers.pods가 빈 것', () => [sweepJson([[24, 'fail']]), sweepJson(rep(28, 'pass', 3, 8.5), { step: (s) => ({ ...s, workers: { expected: null, source: null, pods: {} } }) })], '2'],
+  ['읽은 일꾼 수가 모두 3인데 --pod-cpus 2', rv04Three, '2'],
+]) {
+  test(`V-T43 ① HOT-405 RV-04 gw limits: ${label}이면 정하지 않고 끝 코드 1`, async () => {
+    // 대조: 일꾼 2·--pod-cpus 2는 정한다(WU8 (나))
+    assert.equal((await limitsOf(rv04Good())).exitCode, 0, '바탕이 정해지지 않는다');
+    assertUndetermined(await limitsOf(files(), { podCpus }), label);
+  });
+}
+
+test('V-T43 ① HOT-405 RV-04 gw limits 대조: 일꾼 3을 --pod-cpus 3으로 주면 정하고, 무효 단계(부하를 넣지 않은 일꾼 32)는 거르지 않는다', async () => {
+  assert.equal((await limitsOf(rv04Three(), { podCpus: '3' })).exitCode, 0, '일꾼 3 · --pod-cpus 3');
+  assert.equal((await limitsOf([...rv04Good(), sweepJson([[28, 'invalid']])])).exitCode, 0, '무효 단계의 일꾼 32');
 });

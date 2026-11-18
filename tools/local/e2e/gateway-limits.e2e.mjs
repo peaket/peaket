@@ -27,6 +27,8 @@
 //   127.0.0.1에만 열려 있어 그 읽기만 kubectl 포트 전달을 잠깐 연다. 부하는 거치지 않는다), K1·K2는 gw-queue-buy에 임시 정책(이름표 peaket.io/sweep)을 잠깐 걸고
 //   대역 백엔드 파드 안에서 gw-queue 프록시 Service로 2초 지연 요청을 보낸 뒤 임시 정책을 지운다. 시험 값(Retry-After 2, 첫 값 2,400·300·6,000·750, 65,536)은 정본
 //   docs/infra.md §4.1 '게이트웨이 차단 상한' 값을 적고, 임시 상한(1·4)은 운영 값과 다르게 고른다.
+// 프록시 일꾼 수(V-T43 ①, 묶음 BAT-058 계획 §7의 WK1, HOT-405)는 K3 앞에 둔다: 다섯 게이트웨이 프록시 파드마다 관리 포트 통계(19001 /stats/prometheus, API 서버 프록시)의
+//   server.concurrency가 2이고 envoy 컨테이너 CPU 요청이 로컬 덧씌우기의 100m·CPU 한도 없음이다(docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 1~4).
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -510,12 +512,19 @@ test('D-T43 ④ RV-15 PoC: 계정당 전역 한도 429의 응답 고치기 본�
 // ===================== 차단 상한(V-T43 ①②, BAT-056 K1~K3) =====================
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-/** 정본 첫 값(docs/infra.md §4.1 '게이트웨이 차단 상한' '첫 값'): Envoy /clusters 칸 이름(max_requests = 동시 처리) */
-const FIRST_LIMITS = {
+/**
+ * 정본 지금 운영 값(docs/infra.md §4.1 '게이트웨이 차단 상한' '지금 값과 잰 값(적용 보류)': 첫 값(측정 전) 그대로, develop 값): Envoy /clusters 칸 이름(max_requests = 동시 처리).
+ * BAT-058 측정의 새 값(3,120·390·7,800·975)은 감독 결정(2026-11-19, 리뷰 f8baa272 RV-01·02)으로 적용을 보류했다
+ */
+const OPS_LIMITS = {
   'gw-queue': { max_connections: 2400, max_requests: 2400, max_pending_requests: 300 },
   'gw-fan': { max_connections: 6000, max_requests: 6000, max_pending_requests: 750 },
   'gw-ops': { max_connections: 6000, max_requests: 6000, max_pending_requests: 750 },
 };
+/** 프록시 일꾼 수(= 파드 CPU 2)와 로컬·CI kind 덧씌우기의 envoy 컨테이너 CPU 요청(docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 2·4) */
+const PROXY_WORKERS = 2;
+const LOCAL_PROXY_CPU = '100m';
+const GATEWAY_NAMES5 = ['gw-queue', 'gw-fan', 'gw-partner', 'gw-ops', 'gw-scanner'];
 /** 길게 쥐는 규칙(관제 SSE 두 흐름)의 세 칸 65,536 [가정] */
 const LONG_HOLD_LIMITS = { max_connections: 65536, max_requests: 65536, max_pending_requests: 65536 };
 /** 게이트웨이가 만든 503의 Retry-After [가정] */
@@ -737,14 +746,40 @@ async function queueBurst(count, staggerMs, delayMs = 2000) {
 }
 const statusCounts = (rs) => rs.reduce((m, r) => ((m[r.status] = (m[r.status] ?? 0) + 1), m), {});
 
+/** 관리 포트 통계 글의 실제 일꾼 수(Envoy 통계 server.concurrency, Prometheus 이름 envoy_server_concurrency, 꼬리표 없는 줄). 없으면 null */
+function serverConcurrencyIn(text) {
+  const vals = String(text)
+    .split('\n')
+    .map((l) => /^envoy_server_concurrency(?:\{\})?\s+(\S+)\s*$/.exec(l.replace(/\r$/, ''))?.[1])
+    .filter((v) => v !== undefined);
+  return vals.length === 1 && /^\d+$/.test(vals[0]) ? Number(vals[0]) : vals.length ? `읽을 수 없는 값 ${JSON.stringify(vals)}` : null;
+}
+
+test('V-T43 ① HOT-405 WK1 다섯 게이트웨이 프록시 파드의 실제 일꾼 수(server.concurrency)가 2이고 envoy 컨테이너 CPU 요청이 100m·CPU 한도 없음이다', async () => {
+  const seen = [];
+  for (const gw of GATEWAY_NAMES5) {
+    for (const pod of await proxyPodsOf(gw)) {
+      const text = await kubectl(['get', '--raw', `/api/v1/namespaces/${NS()}/pods/${pod}:${c.stats?.port ?? 19001}/proxy${c.stats?.path ?? '/stats/prometheus'}`], { quiet: true, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 });
+      assert.equal(serverConcurrencyIn(text), PROXY_WORKERS, `${gw} ${pod}: 관리 포트의 envoy_server_concurrency(정하지 않으면 노드 CPU 수만큼 생긴다)`);
+      const spec = JSON.parse(await kubectl(['-n', NS(), 'get', 'pod', pod, '-o', 'json'], { quiet: true, timeout: 30_000 })).spec ?? {};
+      const envoy = (spec.containers ?? []).find((x) => x.name === 'envoy');
+      assert.ok(envoy, `${gw} ${pod}: envoy 컨테이너가 없다(${(spec.containers ?? []).map((x) => x.name).join(', ')})`);
+      assert.equal(envoy.resources?.requests?.cpu, LOCAL_PROXY_CPU, `${gw} ${pod}: envoy CPU 요청 ${JSON.stringify(envoy.resources?.requests?.cpu)}(로컬 덧씌우기는 100m)`);
+      assert.equal(envoy.resources?.limits?.cpu, undefined, `${gw} ${pod}: envoy CPU 한도 ${JSON.stringify(envoy.resources?.limits?.cpu)}가 있다`);
+      seen.push(`${gw}/${pod}`);
+    }
+  }
+  assert.ok(seen.length >= GATEWAY_NAMES5.length, `본 프록시 파드 ${seen.join(', ')}`);
+});
+
 test('V-T43 ② 운영 정의의 상한이 프록시 설정에 실린다', async () => {
-  // gw-queue 진입·gw-fan 홀드(정본 첫 값), gw-fan 결제 결과 롱 폴링(게이트웨이 값, 감독 결정 2026-11-18), gw-ops 관제 SSE 두 규칙(65,536)과 gw-ops의 다른 규칙(게이트웨이 값)
-  await waitLimits('gw-queue', [[clusterOf('gw-queue-buy', 'POST', '/v1/queues/e1/entries'), FIRST_LIMITS['gw-queue']]], 10_000);
+  // HOT-405 K3: gw-queue 진입·gw-fan 홀드(정본 첫 값), gw-fan 결제 결과 롱 폴링(게이트웨이 값, 감독 결정 2026-11-18), gw-ops 관제 SSE 두 규칙(65,536)과 gw-ops의 다른 규칙(게이트웨이 값)
+  await waitLimits('gw-queue', [[clusterOf('gw-queue-buy', 'POST', '/v1/queues/e1/entries'), OPS_LIMITS['gw-queue']]], 10_000);
   await waitLimits(
     'gw-fan',
     [
-      [clusterOf('gw-fan-buy', 'POST', '/v1/events/e1/holds'), FIRST_LIMITS['gw-fan']],
-      [clusterOf('gw-fan-api', 'GET', '/v1/orders/o1/payment-status'), FIRST_LIMITS['gw-fan']],
+      [clusterOf('gw-fan-buy', 'POST', '/v1/events/e1/holds'), OPS_LIMITS['gw-fan']],
+      [clusterOf('gw-fan-api', 'GET', '/v1/orders/o1/payment-status'), OPS_LIMITS['gw-fan']],
     ],
     10_000,
   );
@@ -753,7 +788,7 @@ test('V-T43 ② 운영 정의의 상한이 프록시 설정에 실린다', async
     [
       [clusterOf('gw-ops-api', 'GET', '/v1/ops/events/e1/live'), LONG_HOLD_LIMITS],
       [clusterOf('gw-ops-api', 'GET', '/v1/ops/live'), LONG_HOLD_LIMITS],
-      [clusterOf('gw-ops-api', 'GET', '/v1/ops/events/e1/bot-review'), FIRST_LIMITS['gw-ops']],
+      [clusterOf('gw-ops-api', 'GET', '/v1/ops/events/e1/bot-review'), OPS_LIMITS['gw-ops']],
     ],
     10_000,
   );
