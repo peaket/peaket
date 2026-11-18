@@ -22,6 +22,9 @@ spec:
 # - 조사 칸 ja4·asn·edgeBotLabels는 Lua가 원본 확인 뒤에 남긴 값이다(위조 머리는 지워져 비는 칸, docs/features/bot-defense.md §3.3). 토큰의 jny는 입장 토큰 확인(BAT-057)과 함께 싣는다.
 # - 원본 확인 값(docs/security/secrets-and-keys.md 'CloudFront 원본 확인 헤더 값', 교체 중 두 값)은 Secret peaket-origin-verify에서 받는다. 저장소에는 값이 없다.
 #   Lua 검증(Strict)이 os.getenv로 읽는 이름을 allowedEnvVars에 적는다.
+# - 입장 토큰 공개키 목록(docs/infra.md §4.1 '입장 토큰 확인', ADR-0288 결정 5)은 ConfigMap peaket-admission-jwks의 jwks를 PEAKET_ADMISSION_JWKS로 받는다.
+#   optional: true라 ConfigMap이 없어도 프록시는 뜨고(그때 입장 토큰은 모두 거절), 값은 배포 때 queue-svc 묶음과 같게 넣는다(저장소에는 값이 없다).
+#   이 값을 쓰는 라우트는 gw-fan-buy뿐이다. gw-queue의 peaket-proxy-queue는 값을 받지 않고, 같은 공통 Lua를 검증하므로 allowedEnvVars에만 이름을 둔다.
 # - 일꾼(요청을 처리하는 작업 스레드) 수 concurrency는 envoy 컨테이너 CPU 요청과 같은 2 [가정]이다. 정하지 않으면 노드 CPU 수만큼 생긴다
 #   (docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 1~3). extraArgs로 --concurrency·--cpuset-threads를 겹쳐 걸지 않는다.
 #   resources를 적으면 Envoy Gateway 기본 요청이 통째로 바뀌므로 메모리 요청 512Mi(기본값)를 다시 적고, CPU·메모리 한도는 두지 않는다.
@@ -50,6 +53,12 @@ spec:
                   name: peaket-origin-verify
                   key: previous
                   optional: true
+            - name: PEAKET_ADMISSION_JWKS
+              valueFrom:
+                configMapKeyRef:
+                  name: peaket-admission-jwks
+                  key: jwks
+                  optional: true
           resources:
             requests:
               cpu: "2"
@@ -60,6 +69,7 @@ spec:
       allowedEnvVars:
         - PEAKET_ORIGIN_VERIFY
         - PEAKET_ORIGIN_VERIFY_PREVIOUS
+        - PEAKET_ADMISSION_JWKS
   filterOrder:
     - name: envoy.filters.http.lua
       before: envoy.filters.http.cors
@@ -134,6 +144,7 @@ spec:
       allowedEnvVars:
         - PEAKET_ORIGIN_VERIFY
         - PEAKET_ORIGIN_VERIFY_PREVIOUS
+        - PEAKET_ADMISSION_JWKS
   filterOrder:
     - name: envoy.filters.http.lua
       before: envoy.filters.http.cors
@@ -196,7 +207,13 @@ data:
     --    꼴이 어긋나거나 typ이 액세스 토큰 값(at+jwt)이 아니면 401이다(닫힌 쪽으로 실패, 웨이브 끝 리뷰 W7-SEC-01·W7-CON-01).
     -- 3. 내부 경로(docs/infra.md §4.1 '호스트와 내부 경로'): /internal/로 시작하는 경로는 어느 라우트든 1 다음에 404로 바로 답한다. 라우트는 /internal/을 내지 않지만
     --    앱 서버로 / 전체를 넘기는 라우트(www·partner)는 경로가 남으므로, 그 앞에서 막는다(대소문자를 가리지 않고 견준다).
-    -- 설정(filterContext): originVerify(참이면 1의 견주기를 한다), checkTyp(참이면 2를 한다, 토큰을 요구하는 라우트), tokenCookie(액세스 쿠키 이름, 없으면 ""), tokenScheme(Authorization 앞말)
+    -- 4. 입장 토큰(docs/infra.md §4.1 '입장 토큰 확인', ADR-0288 결정 4~6, 묶음 BAT-057): admission이 참인 라우트(gw-fan-buy)에서 사전 요청(OPTIONS)을 뺀
+    --    요청마다 X-Admission-Token을 JWT 확인보다 앞에서 차례 ①~⑨로 본다. ①~⑧에 걸리면 401 admission-token-invalid, ⑨(주소의 회차)는 403이다.
+    --    키 목록은 프록시 환경 값 PEAKET_ADMISSION_JWKS(ConfigMap peaket-admission-jwks)다. 없거나 읽지 못하거나 쓸 키가 없거나 확인 중 오류가 나면
+    --    모두 거절한다(닫힌 쪽. Envoy는 Lua 오류를 만나면 요청을 그대로 넘기므로 확인 전체를 pcall로 감싼다).
+    -- 5. 거절 응답의 교차 출처 머리(ADR-0288 결정 6): corsOrigin을 받은 라우트에서 요청 Origin이 그 값 하나와 같으면 Lua가 낸 401·403에 교차 출처 머리를 단다.
+    -- 설정(filterContext): originVerify(참이면 1의 견주기를 한다), checkTyp(참이면 2를 한다, 토큰을 요구하는 라우트), tokenCookie(액세스 쿠키 이름, 없으면 ""), tokenScheme(Authorization 앞말),
+    -- admission(참이면 4를 한다), admissionIssuer(입장 토큰 발급자 iss), corsOrigin(5의 화면 출처)
 
     local ORIGIN_VERIFY = "x-peaket-origin-verify"
     local EDGE_PREFIXES = { "cloudfront-viewer-", "x-amzn-waf-" }
@@ -378,8 +395,356 @@ data:
       return h
     end
 
-    local function reject(handle)
-      handle:respond(direct_headers("401", { ["www-authenticate"] = 'Bearer error="invalid_token"' }), UNAUTHORIZED)
+    -- 5. Lua가 낸 거절에 다는 교차 출처 머리. corsOrigin이 있고 요청 Origin이 정확히 하나이며 그 값과 같을 때만(허용 밖 출처에는 달지 않는다)
+    local function cors_headers(headers, ctx)
+      local allowed = setting(ctx, "corsOrigin")
+      if type(allowed) ~= "string" or allowed == "" then return {} end
+      local origins = values_of(headers, "origin")
+      if #origins ~= 1 or origins[1] ~= allowed then return {} end
+      return {
+        ["access-control-allow-origin"] = allowed,
+        ["access-control-allow-credentials"] = "true",
+        ["vary"] = "Origin",
+        ["access-control-expose-headers"] = "WWW-Authenticate",
+      }
+    end
+
+    local function reject(handle, headers, ctx)
+      local extra = cors_headers(headers, ctx)
+      extra["www-authenticate"] = 'Bearer error="invalid_token"'
+      handle:respond(direct_headers("401", extra), UNAUTHORIZED)
+    end
+
+    -- 4. 입장 토큰 확인(docs/infra.md §4.1 '입장 토큰 확인', ADR-0288 결정 4·5)
+    local ADMISSION_HEADER = "x-admission-token"
+    local ADMISSION_ENV = "PEAKET_ADMISSION_JWKS"
+    local ADMISSION_TYP = "admission+jwt"
+    local ADMISSION_AUD = "purchase"
+    local ADMISSION_MAX = 2048
+    local ADMISSION_INVALID = '{"type":"https://peaket.example/problems/admission-token-invalid","title":"입장 확인이 끝났습니다","status":401}'
+    local FORBIDDEN = '{"type":"about:blank","title":"Forbidden","status":403}'
+    local EVENTS_PREFIX = "/v1/events/"
+    -- P-256 공개키의 SubjectPublicKeyInfo DER 앞부분(SEQUENCE{ SEQUENCE{ id-ecPublicKey, prime256v1 }, BIT STRING 04 ‖ x ‖ y })
+    local P256_SPKI = string.char(0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04)
+
+    -- base64url(채움 없음)을 엄격하게 푼다: 길이를 4로 나눈 나머지가 1이거나 남는 비트가 0이 아니면 nil(같은 값의 다른 글이 통하지 않게)
+    local function b64url_strict(s)
+      if #s % 4 == 1 then return nil end
+      local out, bits, nbits = {}, 0, 0
+      for i = 1, #s do
+        local v = B64_INDEX[string.sub(s, i, i)]
+        if v == nil then return nil end
+        bits = bits * 64 + v
+        nbits = nbits + 6
+        if nbits >= 8 then
+          nbits = nbits - 8
+          local byte = math.floor(bits / 2 ^ nbits)
+          out[#out + 1] = string.char(byte)
+          bits = bits - byte * 2 ^ nbits
+        end
+      end
+      if bits ~= 0 then return nil end
+      return table.concat(out)
+    end
+
+    --[[ 작은 JSON 읽개(RFC 8259의 객체·배열·문자열·수·true·false·null). 틀리면 nil.
+      객체는 [OBJ], 배열은 [ARR], 수는 [NUM] 표시가 있는 표이고 null은 NULL이다(JSON 글로는 문자열이 아닌 열쇠를 만들 수 없어 꾸밀 수 없다).
+      수는 value(값)와 integer(소수점·지수 없는 15자리 이하 정수인가)를 든다. 같은 이름의 칸이 두 번 나오거나, 깊이가 8을 넘거나,
+      값 뒤에 글이 남거나, \u 이스케이프가 서로게이트면 틀린 것으로 본다. 글자를 하나씩 보고 되짚기 패턴을 쓰지 않는다 ]]
+    local OBJ, ARR, NUM, NULL = {}, {}, {}, {}
+    local JSON_ESCAPES = { [34] = '"', [92] = "\\", [47] = "/", [98] = "\b", [102] = "\f", [110] = "\n", [114] = "\r", [116] = "\t" }
+
+    local function utf8_of(cp)
+      if cp < 0x80 then return string.char(cp) end
+      if cp < 0x800 then return string.char(0xC0 + math.floor(cp / 0x40), 0x80 + cp % 0x40) end
+      return string.char(0xE0 + math.floor(cp / 0x1000), 0x80 + math.floor(cp / 0x40) % 0x40, 0x80 + cp % 0x40)
+    end
+
+    local function json_decode(s)
+      local pos, n = 1, #s
+      local function skip()
+        while pos <= n do
+          local b = string.byte(s, pos)
+          if b ~= 32 and b ~= 9 and b ~= 10 and b ~= 13 then return end
+          pos = pos + 1
+        end
+      end
+      local function str()
+        pos = pos + 1
+        local out = {}
+        while pos <= n do
+          local b = string.byte(s, pos)
+          if b == 34 then
+            pos = pos + 1
+            return table.concat(out)
+          elseif b < 32 then
+            return nil
+          elseif b == 92 then
+            local e = string.byte(s, pos + 1)
+            if e == 117 then
+              local hex = string.sub(s, pos + 2, pos + 5)
+              if #hex ~= 4 or string.find(hex, "[^%x]") ~= nil then return nil end
+              local cp = tonumber(hex, 16)
+              if cp >= 0xD800 and cp <= 0xDFFF then return nil end
+              out[#out + 1] = utf8_of(cp)
+              pos = pos + 6
+            elseif e ~= nil and JSON_ESCAPES[e] ~= nil then
+              out[#out + 1] = JSON_ESCAPES[e]
+              pos = pos + 2
+            else
+              return nil
+            end
+          else
+            local stop = pos
+            while stop <= n do
+              local c = string.byte(s, stop)
+              if c == 34 or c == 92 or c < 32 then break end
+              stop = stop + 1
+            end
+            out[#out + 1] = string.sub(s, pos, stop - 1)
+            pos = stop
+          end
+        end
+        return nil
+      end
+      local function digits()
+        local start = pos
+        while pos <= n do
+          local c = string.byte(s, pos)
+          if c < 48 or c > 57 then break end
+          pos = pos + 1
+        end
+        return pos - start
+      end
+      local function num()
+        local start = pos
+        if string.byte(s, pos) == 45 then pos = pos + 1 end
+        local int_start = pos
+        local nd = digits()
+        if nd == 0 or (nd > 1 and string.byte(s, int_start) == 48) then return nil end
+        local integer = nd <= 15
+        if string.byte(s, pos) == 46 then
+          pos = pos + 1
+          integer = false
+          if digits() == 0 then return nil end
+        end
+        local c = string.byte(s, pos)
+        if c == 101 or c == 69 then
+          pos = pos + 1
+          integer = false
+          c = string.byte(s, pos)
+          if c == 43 or c == 45 then pos = pos + 1 end
+          if digits() == 0 then return nil end
+        end
+        local v = tonumber(string.sub(s, start, pos - 1))
+        if v == nil then return nil end
+        return { [NUM] = true, value = v, integer = integer }
+      end
+      local function word(w, v)
+        if string.sub(s, pos, pos + #w - 1) ~= w then return nil end
+        pos = pos + #w
+        return v
+      end
+      local value
+      value = function(depth)
+        if depth > 8 then return nil end
+        skip()
+        local b = string.byte(s, pos)
+        if b == 123 then
+          pos = pos + 1
+          local o = { [OBJ] = true }
+          skip()
+          if string.byte(s, pos) == 125 then
+            pos = pos + 1
+            return o
+          end
+          while true do
+            skip()
+            if string.byte(s, pos) ~= 34 then return nil end
+            local k = str()
+            if k == nil or o[k] ~= nil then return nil end
+            skip()
+            if string.byte(s, pos) ~= 58 then return nil end
+            pos = pos + 1
+            local v = value(depth + 1)
+            if v == nil then return nil end
+            o[k] = v
+            skip()
+            local c = string.byte(s, pos)
+            pos = pos + 1
+            if c == 125 then return o end
+            if c ~= 44 then return nil end
+          end
+        elseif b == 91 then
+          pos = pos + 1
+          local a = { [ARR] = true }
+          local count = 0
+          skip()
+          if string.byte(s, pos) == 93 then
+            pos = pos + 1
+            return a
+          end
+          while true do
+            local v = value(depth + 1)
+            if v == nil then return nil end
+            count = count + 1
+            a[count] = v
+            skip()
+            local c = string.byte(s, pos)
+            pos = pos + 1
+            if c == 93 then return a end
+            if c ~= 44 then return nil end
+          end
+        elseif b == 34 then
+          return str()
+        elseif b == 116 then
+          return word("true", true)
+        elseif b == 102 then
+          return word("false", false)
+        elseif b == 110 then
+          return word("null", NULL)
+        elseif b ~= nil and (b == 45 or (b >= 48 and b <= 57)) then
+          return num()
+        end
+        return nil
+      end
+      local v = value(1)
+      if v == nil then return nil end
+      skip()
+      if pos <= n then return nil end
+      return v
+    end
+
+    local function is_obj(v) return type(v) == "table" and v[OBJ] == true end
+    local function int_of(v)
+      if type(v) == "table" and v[NUM] == true and v.integer == true then return v.value end
+      return nil
+    end
+
+    -- 원소 하나를 { der, until_s }로 바꾼다. P-256 공개 JWK가 아니거나(d가 있으면 아님) peaket_until이 정수가 아니면 nil
+    local function admission_key(jwk)
+      if not is_obj(jwk) or jwk.kty ~= "EC" or jwk.crv ~= "P-256" or jwk.d ~= nil then return nil end
+      if jwk.alg ~= nil and jwk.alg ~= "ES256" then return nil end
+      if jwk.use ~= nil and jwk.use ~= "sig" then return nil end
+      if type(jwk.kid) ~= "string" or #jwk.kid > 64 or string.find(jwk.kid, "^[%w%._%-]+$") == nil then return nil end
+      if type(jwk.x) ~= "string" or type(jwk.y) ~= "string" then return nil end
+      local x, y = b64url_strict(jwk.x), b64url_strict(jwk.y)
+      if x == nil or y == nil or #x ~= 32 or #y ~= 32 then return nil end
+      local until_s = nil
+      if jwk.peaket_until ~= nil then
+        until_s = int_of(jwk.peaket_until)
+        if until_s == nil then return nil end
+      end
+      return { der = P256_SPKI .. x .. y, until_s = until_s }
+    end
+
+    -- 키 목록을 kid → 원소 표로 읽는다. 일꾼(Lua 상태)마다 환경 값이 바뀌었을 때만 다시 읽는다(환경 값은 프록시가 시작할 때 정해진다).
+    -- 틀린 원소·겹친 kid가 하나라도 있거나 키가 하나도 없으면 목록 전체를 쓰지 않는다(닫힌 쪽). 쓸 수 없는 동안 일꾼마다 60초에 한 번 경고 로그를 남긴다
+    local admission_cache = { raw = false, keys = nil, problem = nil, warned_s = nil }
+
+    local function admission_parse(raw)
+      if raw == nil or raw == "" then return nil, "missing" end
+      if #raw > 65536 then return nil, "too-large" end
+      local doc = json_decode(raw)
+      if not is_obj(doc) or type(doc.keys) ~= "table" or doc.keys[ARR] ~= true then return nil, "malformed" end
+      local keys, count = {}, 0
+      for _, jwk in ipairs(doc.keys) do
+        local key = admission_key(jwk)
+        if key == nil or keys[jwk.kid] ~= nil then return nil, "malformed" end
+        keys[jwk.kid] = key
+        count = count + 1
+      end
+      if count == 0 then return nil, "empty" end
+      return keys, nil
+    end
+
+    local function admission_keys(handle, now_s)
+      local raw = os.getenv(ADMISSION_ENV)
+      if raw ~= admission_cache.raw then
+        admission_cache.raw = raw
+        admission_cache.keys, admission_cache.problem = admission_parse(raw)
+        admission_cache.warned_s = nil
+      end
+      if admission_cache.keys == nil and (admission_cache.warned_s == nil or now_s - admission_cache.warned_s >= 60) then
+        admission_cache.warned_s = now_s
+        handle:logWarn("peaket admission jwks unusable: " .. tostring(admission_cache.problem) .. " (all admission tokens rejected)")
+      end
+      return admission_cache.keys
+    end
+
+    -- DER INTEGER 하나(앞의 0 바이트를 떼고, 맨 앞 비트가 1이면 0을 붙인다)
+    local function der_int(b)
+      local i = 1
+      while i < #b and string.byte(b, i) == 0 do i = i + 1 end
+      b = string.sub(b, i)
+      if string.byte(b, 1) >= 0x80 then b = string.char(0) .. b end
+      return string.char(0x02, #b) .. b
+    end
+
+    -- JWS ES256 서명(r‖s 64바이트)을 DER ECDSA-Sig-Value(SEQUENCE{ INTEGER r, INTEGER s })로
+    local function der_signature(raw)
+      local r, s = der_int(string.sub(raw, 1, 32)), der_int(string.sub(raw, 33, 64))
+      return string.char(0x30, #r + #s) .. r .. s
+    end
+
+    -- 차례 ①~⑨. 통과면 nil, 아니면 401 또는 403
+    local function admission_check(handle, headers, ctx)
+      -- ① 값이 정확히 하나이고 2,048자 이하의 JWT 꼴
+      local values = values_of(headers, ADMISSION_HEADER)
+      if #values ~= 1 then return 401 end
+      local token = values[1]
+      if #token > ADMISSION_MAX or string.find(token, JWT_FORM) == nil then return 401 end
+      local d1 = string.find(token, ".", 1, true)
+      local d2 = string.find(token, ".", d1 + 1, true)
+      local head_json = b64url_strict(string.sub(token, 1, d1 - 1))
+      local head = head_json and json_decode(head_json)
+      if not is_obj(head) then return 401 end
+      -- ② alg ES256(머리의 jku·x5u·jwk·x5c는 읽지 않는다)
+      if head.alg ~= "ES256" then return 401 end
+      -- ③ kid가 키 목록에 있고 peaket_until이 있으면 지금(초) ≤ 그 값
+      local now_s = math.floor(handle:timestamp() / 1000)
+      local keys = admission_keys(handle, now_s)
+      if keys == nil or type(head.kid) ~= "string" then return 401 end
+      local key = keys[head.kid]
+      if key == nil or (key.until_s ~= nil and now_s > key.until_s) then return 401 end
+      -- ④ 서명(r‖s 64바이트를 DER로 바꿔 확인한다). Envoy v1.40은 가져온 공개키를 그 요청의 저장소에 두고 importPublicKey가 돌려준 객체의 get()을
+      --    verifySignature에 넘긴다. 그 저장소는 요청이 끝나면 사라지고 한 요청에서 두 번째 importPublicKey는 첫 키를 돌려주므로,
+      --    요청마다 쓸 키 하나만 가져온다(2026-11-19 같은 프록시 이미지에서 확인, docs/infra.md §4.1 '입장 토큰 확인')
+      local sig = b64url_strict(string.sub(token, d2 + 1))
+      if sig == nil or #sig ~= 64 then return 401 end
+      local der = der_signature(sig)
+      local signed = string.sub(token, 1, d2 - 1)
+      local pub = handle:importPublicKey(key.der, #key.der):get()
+      if type(pub) ~= "string" or pub == "" then return 401 end
+      local ok = handle:verifySignature("sha256", pub, der, #der, signed, #signed)
+      if ok ~= true then return 401 end
+      -- ⑤ typ(글자 그대로)
+      if head.typ ~= ADMISSION_TYP then return 401 end
+      local body_json = b64url_strict(string.sub(token, d1 + 1, d2 - 1))
+      local body = body_json and json_decode(body_json)
+      if not is_obj(body) then return 401 end
+      -- ⑥ iss
+      local issuer = setting(ctx, "admissionIssuer")
+      if type(issuer) ~= "string" or issuer == "" or body.iss ~= issuer then return 401 end
+      -- ⑦ aud는 문자열 purchase(배열은 받지 않는다)
+      if body.aud ~= ADMISSION_AUD then return 401 end
+      -- ⑧ 정수 exp와 지금(초) < exp
+      local exp = int_of(body.exp)
+      if exp == nil or not (now_s < exp) then return 401 end
+      -- ⑨ 주소가 /v1/events/{eventId}/로 시작하면 eventId = event(글자 그대로)
+      local path = string.match(headers:get(":path") or "", "^[^?#]*") or ""
+      if string.sub(path, 1, #EVENTS_PREFIX) == EVENTS_PREFIX then
+        local slash = string.find(path, "/", #EVENTS_PREFIX + 1, true)
+        if slash ~= nil and (type(body.event) ~= "string" or body.event ~= string.sub(path, #EVENTS_PREFIX + 1, slash - 1)) then return 403 end
+      end
+      return nil
+    end
+
+    local function admission_reject(handle, headers, ctx, status)
+      local extra = cors_headers(headers, ctx)
+      if status == 403 then return handle:respond(direct_headers("403", extra), FORBIDDEN) end
+      extra["www-authenticate"] = 'Cookie realm="peaket"'
+      return handle:respond(direct_headers("401", extra), ADMISSION_INVALID)
     end
 
     function envoy_on_request(handle)
@@ -391,13 +756,23 @@ data:
       if is_internal(headers:get(":path")) then
         return handle:respond(direct_headers("404"), NOT_FOUND)
       end
-      if setting(ctx, "checkTyp") ~= true then return end
-      local tokens = tokens_of(headers, ctx)
-      if tokens == nil then return reject(handle) end
-      for _, t in ipairs(tokens) do
-        -- 꺼낸 토큰마다 머리의 typ이 액세스 토큰 값이어야 한다(머리를 풀지 못하거나 typ이 없어도 거절)
-        local head = header_of(t)
-        if head == nil or typ_in(head) ~= ACCESS_TYP then return reject(handle) end
+      if setting(ctx, "checkTyp") == true then
+        local tokens = tokens_of(headers, ctx)
+        if tokens == nil then return reject(handle, headers, ctx) end
+        for _, t in ipairs(tokens) do
+          -- 꺼낸 토큰마다 머리의 typ이 액세스 토큰 값이어야 한다(머리를 풀지 못하거나 typ이 없어도 거절)
+          local head = header_of(t)
+          if head == nil or typ_in(head) ~= ACCESS_TYP then return reject(handle, headers, ctx) end
+        end
+      end
+      if setting(ctx, "admission") == true and headers:get(":method") ~= "OPTIONS" then
+        -- 확인 중 Lua 오류는 거절로 바꾼다(Envoy는 오류 난 Lua 뒤로 요청을 넘긴다: 열린 쪽 실패를 막는다)
+        local ok, status = pcall(admission_check, handle, headers, ctx)
+        if not ok then
+          handle:logWarn("peaket admission check error (rejected)")
+          status = 401
+        end
+        if status ~= nil then return admission_reject(handle, headers, ctx, status) end
       end
     end
 ---

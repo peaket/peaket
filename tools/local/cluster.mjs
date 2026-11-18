@@ -12,6 +12,8 @@
 //   node tools/local/cluster.mjs v1-down   v1 측정 무대를 내린다(네임스페이스 v1과 kind 노드 폴더. 클러스터는 그대로)
 //   node tools/local/cluster.mjs gateways  게이트웨이 다섯(Envoy Gateway 고정 판·deploy/gateways 로컬 덧씌우기·대역 백엔드·시험 키, docs/infra.md §4.1)과 시험 접속 정보 .cache/peaket-tools/gateways-e2e.json.
 //                                         다섯은 kind 포트 매핑과 로컬 전용 NodePort Service로 127.0.0.1:18441~18445에 바로 열린다(포트 전달 없음)
+//   node tools/local/cluster.mjs gateways-admission restore|empty|remove  gw-fan의 입장 토큰 키 목록 ConfigMap peaket-admission-jwks를 처음 값·빈 묶음·지움으로
+//                                         바꾸고 gw-fan 프록시를 다시 띄워 기다린다(복구 경로 장애 주입 시험, docs/infra.md §4.1 '입장 토큰 확인', BAT-057)
 //   node tools/local/cluster.mjs mesh-netpol  메시 없는 실행의 포트별 허용 NetworkPolicy 무대(BUILD_ORDER HOT-420, D-T36, ADR-0285): 원천
 //                                         deploy/platform/mesh/port-allow.yaml의 워크로드마다 받는 쪽 대역 파드와 생성 NetworkPolicy를 올리고 시험 접속 정보
 //                                         .cache/peaket-tools/mesh-netpol-e2e.json을 쓴다. 다시 돌려도 된다(덮어쓰기). 내리는 명령은 없다(down이 클러스터를 지운다)
@@ -33,7 +35,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
-import { assertRatelimitBackend, echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, GATEWAY_RATELIMIT, gatewayCertArgs, gatewayContract, gatewayHostPorts, gatewayInstall, gatewayNodePortService, gatewayPortMappings, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, RATELIMIT_REDIS, RATELIMIT_REDIS_IMAGE, ratelimitRedisObjects, ratelimitRedisSecret, ratelimitRedisTlsNames, readGatewayObjects } from './gateway-objects.mjs';
+import { admissionJwks, admissionJwksConfigMap, admissionKeySet, ADMISSION_JWKS_CONFIGMAP, assertRatelimitBackend, echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, GATEWAY_RATELIMIT, gatewayCertArgs, gatewayContract, gatewayHostPorts, gatewayInstall, gatewayNodePortService, gatewayPortMappings, gatewaysAdmissionMode, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, RATELIMIT_REDIS, RATELIMIT_REDIS_IMAGE, ratelimitRedisObjects, ratelimitRedisSecret, ratelimitRedisTlsNames, readGatewayObjects } from './gateway-objects.mjs';
 import { MESH_NETPOL_POLICIES, MESH_NETPOL_SOURCE, meshNetpolContract, meshNetpolLayout, meshNetpolStandIns } from './mesh-netpol-objects.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey } from './v0-token.mjs';
 import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
@@ -818,11 +820,14 @@ async function gateways() {
   const hosts = hostsOf(defs);
   const tls = gatewayTls([...new Set(certs.map((c) => c.host))]);
   const keys = Object.fromEntries(['fan', 'admin', 'staff', 'admission'].map((k) => [k, generateV0TokenKey()]));
+  // 입장 토큰 시험 키 넷(지금 키 = keys.admission, 다음 키, 끝 시각이 남은 옛 키, 끝 시각이 지난 옛 키)과 게이트웨이 키 목록 ConfigMap(docs/infra.md §4.1 '입장 토큰 확인', BAT-057)
+  const admission = admissionKeySet({ current: keys.admission.privateJwk, next: generateV0TokenKey().privateJwk, previous: generateV0TokenKey().privateJwk, expired: generateV0TokenKey().privateJwk }, Math.floor(Date.now() / 1000));
   const originVerify = randomBytes(32).toString('base64url');
   for (const o of gatewaySecrets(certs, tls, originVerify)) {
     await kubectl(['-n', GATEWAY_NAMESPACE, 'delete', 'secret', o.metadata.name, '--ignore-not-found']);
     await kubectl(['create', '-f', '-'], { input: JSON.stringify(o) });
   }
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify(admissionJwksConfigMap(admissionJwks(admission))) });
   step(`대역 백엔드 ${GATEWAY_ECHO.name}(받은 요청을 돌려주고 시험 공개키 묶음을 낸다)`);
   const script = readFileSync(join(REPO, 'tools', 'local', 'gateway-echo.mjs'), 'utf8');
   const jwks = Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.jwks]));
@@ -848,7 +853,7 @@ async function gateways() {
   for (const gw of GATEWAY_NAMES) nodePortServices.push(gatewayNodePortService(gw, await gatewayHttpsTargetPort(gw)));
   await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: nodePortServices }) });
 
-  const contract = gatewayContract({ ports, hosts, originVerify, keys: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.privateJwk])), caPem: tls.cert });
+  const contract = gatewayContract({ ports, hosts, originVerify, keys: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.privateJwk])), caPem: tls.cert, admission });
   mkdirSync(dirname(GATEWAYS_CONTRACT_FILE), { recursive: true });
   writeFileSync(GATEWAYS_CONTRACT_FILE, `${JSON.stringify(contract, null, 2)}\n`, { mode: 0o600 });
 
@@ -860,6 +865,32 @@ async function gateways() {
   step('준비됨');
   console.log(`접속 정보: ${GATEWAYS_CONTRACT_FILE}`);
   console.log(`게이트웨이: ${GATEWAY_NAMES.map((gw) => `${gw} https://127.0.0.1:${ports[gw]}`).join(', ')}`);
+}
+
+/**
+ * 게이트웨이 입장 토큰 키 목록을 바꾸고 gw-fan 프록시를 다시 띄운다(복구 경로 장애 주입, BAT-057 계획 §5 K13). 프록시는 환경 값을 시작 때 읽는다.
+ * restore: 접속 정보의 admission 키 넷으로 처음 값을 다시 만든다. empty: 빈 묶음 {"keys":[]}. remove: ConfigMap을 지운다(optional: true라 프록시는 뜬다)
+ * @param {readonly string[]} argv
+ */
+async function gatewaysAdmission(argv = []) {
+  const mode = gatewaysAdmissionMode(argv);
+  if (!existsSync(GATEWAYS_CONTRACT_FILE)) throw new Error(`게이트웨이 접속 정보가 없다: ${GATEWAYS_CONTRACT_FILE}. 먼저 node tools/local/cluster.mjs gateways`);
+  const contract = JSON.parse(readFileSync(GATEWAYS_CONTRACT_FILE, 'utf8'));
+  if (!contract.admission) throw new Error('접속 정보에 admission 칸이 없다: node tools/local/cluster.mjs gateways를 다시 돌린다');
+  step(`입장 토큰 키 목록 ${ADMISSION_JWKS_CONFIGMAP.name}: ${mode}`);
+  if (mode === 'remove') await kubectl(['-n', GATEWAY_NAMESPACE, 'delete', 'configmap', ADMISSION_JWKS_CONFIGMAP.name, '--ignore-not-found']);
+  else await kubectl(['apply', '-f', '-'], { input: JSON.stringify(admissionJwksConfigMap(mode === 'empty' ? { keys: [] } : admissionJwks(contract.admission))) });
+  step('gw-fan 프록시 다시 띄우기(환경 값을 새로 읽게)');
+  const selector = 'gateway.envoyproxy.io/owning-gateway-name=gw-fan';
+  const proxies = (await kubectl(['-n', GATEWAY_NAMESPACE, 'get', 'deploy', '-l', selector, '-o', 'name'], { quiet: true })).split('\n').filter(Boolean);
+  if (proxies.length === 0) throw new Error('gw-fan 프록시 Deployment가 없다');
+  const oldPods = (await kubectl(['-n', GATEWAY_NAMESPACE, 'get', 'pods', '-l', selector, '-o', 'name'], { quiet: true })).split('\n').filter(Boolean);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', ...proxies]);
+  for (const d of proxies) await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', d, '--timeout=300s']);
+  // 옛 파드는 연결을 비우는 동안(Terminating) 옛 환경 값으로 요청을 받는다. 다 사라진 뒤에 준비로 본다(2026-11-19 kind에서 옛 파드가 답한 것을 봤다)
+  if (oldPods.length) await kubectl(['-n', GATEWAY_NAMESPACE, 'wait', '--for=delete', ...oldPods, '--timeout=300s']);
+  await waitGatewayTls(contract);
+  step('준비됨');
 }
 
 /** kind 노드 컨테이너의 포트 공개(docker inspect의 HostConfig.PortBindings) */
@@ -946,19 +977,20 @@ async function down() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
-  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'mesh-netpol': meshNetpol, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
+  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|mesh-netpol|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();
-  if (cmd === 'up' || cmd === 'v1') {
+  const withArgs = { up: upPlan, v1: v1Plan, 'gateways-admission': gatewaysAdmissionMode };
+  if (withArgs[cmd]) {
     try {
-      (cmd === 'up' ? upPlan : v1Plan)(process.argv.slice(3));
+      withArgs[cmd](process.argv.slice(3));
     } catch (e) {
       console.error(e.message);
       usage();
     }
   }
-  await (cmd === 'up' ? up(process.argv.slice(3)) : cmd === 'v1' ? v1(process.argv.slice(3)) : cmds[cmd]());
+  await (withArgs[cmd] ? cmds[cmd](process.argv.slice(3)) : cmds[cmd]());
 }
