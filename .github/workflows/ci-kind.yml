@@ -13,7 +13,8 @@ permissions:
 jobs:
   kind:
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    # BAT-075 e2e 둘(각 시험 상한 15분)을 더해 70분에서 늘렸다
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,6 +41,20 @@ jobs:
       - run: node --test tools/local/e2e/aws-emulator.e2e.mjs tools/local/e2e/relay-takeover.e2e.mjs
       # 로컬 관측 최소(Prometheus·Grafana·템플릿 대시보드). relay-takeover가 올린 example-svc를 긁으므로 그 뒤에 따로 돈다
       - run: node --test tools/local/e2e/observability.e2e.mjs
+      # 준비 프로브와 이벤트 루프 막기 비교(D-T19 ③④)와 진단 수집(D-T18 ①, RB-31)(BUILD_ORDER BAS-080, BAT-075 계획 '시험 이의' TO-2). 앞 단계가 만든
+      # example-svc 이미지·PostgreSQL·AWS 흉내 서버(peaket-local/svc/aws)와 실행기의 AWS CLI를 쓰고 이름공간 probes-e2e·diagnose-e2e를 따로 쓴다.
+      # 증거 버킷은 diagnose 시험이 만든다. 결과 줄(docs/review/measurements 폴더의 BAT-075-probes.md·BAT-075-diagnose.md)은 커밋하지 않고 산출물로 올린다
+      - run: node --test --test-timeout=900000 tools/local/e2e/probes.e2e.mjs
+      - run: node --test --test-timeout=900000 tools/local/e2e/diagnose.e2e.mjs
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kind-bat075-measurements
+          path: |
+            docs/review/measurements/BAT-075-probes.md
+            docs/review/measurements/BAT-075-diagnose.md
+          if-no-files-found: ignore
+          retention-days: 7
       # v0 앞에서 앞 시험의 작업 부하(예제 서비스·Kafka)를 내린다. v0는 둘을 쓰지 않는다. 저장소가 비공개이던 때 표준 실행기(CPU 2개)에서
       # 다 남겨 두면 v0 파드가 CPU 부족으로 배치되지 못했다(2026-11-03). 공개 저장소의 실행기는 CPU 4개지만, v0 시험이 HPA로 v0-monolith를
       # 최대 4개(요청 500m씩)까지 늘릴 자리를 남기려고 그대로 둔다. 관측 도구는 v0 시험이 쓰므로 남긴다
