@@ -35,8 +35,8 @@ export interface ShopDeps {
 }
 
 const typeInvalid = () => new ProblemError({ type: 'product-type-invalid', status: 422, title: '쓸 수 없는 상품 유형입니다' });
-const attributesInvalid = () => new ProblemError({ type: 'product-attributes-invalid', status: 422, title: '상품 속성이 유형 스키마에 맞지 않습니다' });
-const limitedQtyInvalid = () => new ProblemError({ type: 'product-limited-qty-invalid', status: 422, title: '이미 팔린 수량보다 적게 줄일 수 없습니다' });
+const attributesInvalid = () => new ProblemError({ type: 'product-attributes-invalid', status: 422, title: '상품 속성이 상품 유형에 맞지 않습니다' });
+const limitedQtyInvalid = () => new ProblemError({ type: 'product-limited-qty-invalid', status: 422, title: '한정 수량이 맞지 않습니다' });
 
 export interface ProductPage {
   items: ProductView[];
