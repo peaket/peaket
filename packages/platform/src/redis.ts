@@ -7,6 +7,7 @@
 // - 응답 없이 사라진 노드는 호출 쪽 마감(100ms)이 끊는다. 마감에 걸린 명령도 나중에 서버에 닿으면 실행될 수 있다(ADR-0176 결정 2)
 // - 시작은 정한 시간 안에 붙지 못하면 실패한다(연결 뒤 첫 인사에는 시간 초과가 없어 시작 전체에 마감을 건다). 오류 문구에 주소를 싣지 않는다
 // - 닫기는 남은 응답을 잠깐 기다린 뒤 끊는다
+// - 명령 시간 초과(node-redis TimeoutError)와 호출 쪽 마감 초과는 호출 하나에 한 번 redis_command_timeout_total{cluster}로 센다(ADR-0070, BUILD_ORDER BAS-080)
 // - 클러스터는 찾아낸 노드에 defaults와 주소만으로 붙는다. 그래서 시작 주소의 사용자·비밀번호·TLS(rediss)를 defaults에 넣는다
 //   (ElastiCache는 RBAC 사용자와 전송 암호화가 필수, docs/infra.md. 2026-11-03 새 맥락 리뷰)
 import { createHash } from 'node:crypto';
@@ -23,8 +24,10 @@ import {
   RootNodesUnavailableError,
   SocketClosedUnexpectedlyError,
   SocketTimeoutError,
+  TimeoutError,
   type RedisClusterOptions,
 } from 'redis';
+import { TIMEOUT_METRICS } from './metrics.js';
 import type { RedisCommander } from './redis-stream.js';
 
 /** 핫패스 명령 시간 초과(밀리초, 소켓에 쓰기 전까지) */
@@ -100,9 +103,16 @@ const sleepFor = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** 문자열 응답을 Buffer로 받는 명령 옵션(node-redis typeMapping) */
 const BINARY = { typeMapping: { [RESP_TYPES.BLOB_STRING]: Buffer } };
 
-/** 호출 규칙(다시 보내기·마감·스크립트)을 RawRedis 위에 얹는다. 시험은 RawRedis를 바꿔 끼운다 */
-export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise<void> } = {}): HotRedis {
+/** 시간 초과로 센 호출인가: 호출 쪽 마감 초과와 node-redis 명령 시간 초과(commandOptions.timeout) */
+const isRedisTimeout = (err: unknown): boolean => err instanceof RedisDeadlineError || err instanceof TimeoutError;
+
+/**
+ * 호출 규칙(다시 보내기·마감·스크립트)을 RawRedis 위에 얹는다. 시험은 RawRedis를 바꿔 끼운다.
+ * onTimeout은 시간 초과로 끝난 호출마다 한 번 부른다(기본은 redis_command_timeout_total{cluster="default"})
+ */
+export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise<void>; onTimeout?: () => void } = {}): HotRedis {
   const sleep = o.sleep ?? sleepFor;
+  const onTimeout = o.onTimeout ?? (() => TIMEOUT_METRICS.redisCommandTimeouts.inc({ cluster: 'default' }));
 
   /** 한 번 보내고, 연결이 끊겨 소켓에 쓰지 못했으면 잠깐 뒤 한 번 더. 마감이 지났으면 다시 보내지 않는다(부른 쪽은 이미 실패를 받았다) */
   const once = async (key: string | undefined, args: string[], expired: () => boolean, binary?: boolean, pin?: boolean): Promise<unknown> => {
@@ -129,6 +139,9 @@ export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise
     work.catch(() => {}); // 마감으로 끊은 뒤에 오는 거부를 처리된 것으로 둔다
     try {
       return await Promise.race([work, deadline]);
+    } catch (err) {
+      if (isRedisTimeout(err)) onTimeout();
+      throw err;
     } finally {
       clearTimeout(timer);
     }
@@ -242,6 +255,8 @@ export interface HotRedisOptions {
   /** 클러스터가 알려 주는 노드 주소('호스트:포트') → 붙을 주소. 측정·시험에서 컨테이너 망 이름을 이 PC 포트로 바꿀 때만 쓴다 */
   nodeAddressMap?: Readonly<Record<string, { host: string; port: number }>>;
   startupTimeoutMs?: number;
+  /** redis_command_timeout_total의 cluster 라벨(예: seat·queue). 주소를 싣지 않게 이름을 따로 받는다. 기본 default */
+  cluster?: string;
 }
 
 /** 시작 마감 안에 붙은 핫패스 Redis. 못 붙으면 RedisConnectError */
@@ -297,5 +312,6 @@ export async function createHotRedis(o: HotRedisOptions): Promise<HotRedis> {
     clearTimeout(timer);
   }
   state.started = true;
-  return hotRedisOver(raw);
+  const cluster = o.cluster ?? 'default';
+  return hotRedisOver(raw, { onTimeout: () => TIMEOUT_METRICS.redisCommandTimeouts.inc({ cluster }) });
 }
