@@ -285,7 +285,10 @@ let circuitsRef: PgCircuits | undefined;
   const httpPorts = await service.listen();
   const grpc = await startGrpcServer({
     host: config.grpcHost,
+    // 포트는 payment-svc 설정(기본 50051, 공용 설정과 같은 값)이다. 부하 분산 프로필·호출 지표는 공용 설정·지표 묶음을 쓴다(BUILD_ORDER BAS-080)
     port: config.grpcPort,
+    profile: service.config.grpcLbProfile,
+    metrics: service.metrics,
     services: [
       {
         definition: paymentPackage().PaymentService.service,

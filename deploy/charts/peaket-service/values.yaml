@@ -19,6 +19,16 @@ secretEnvFrom: ""
 # 관리 포트(/metrics·/ready·/livez). 앱 트래픽과 다른 포트다(docs/architecture.md §5 '프로브 규칙')
 managementPort: 9464
 
+# 진단 수집(RB-31, ADR-0070 결정 1, BUILD_ORDER BAS-080). 서비스·릴레이 컨테이너는 늘 진단 실행 옵션(NODE_OPTIONS)·/diag·주석 파일·메모리 한도 값을 받는다.
+# 운영자가 파드에 peaket.io/diagnose=<report|heap>@<UTC 시각> 주석을 달면 서비스가 준비를 내리고 보고서(·힙 스냅샷)를 증거 버킷에 올린 뒤 다시 뜬다.
+diagnose:
+  # 증거 버킷 이름(운영은 Terraform이 만든 버킷). 비우면 local·ci는 수집을 끄고(경고 한 줄), 그 밖의 환경은 서비스가 시작하지 않는다
+  bucket: ""
+  # 흉내 서버 주소(local·ci의 AWS 흉내 서버 moto S3). local·ci에서 수집을 켜려면 bucket과 함께 있어야 한다
+  s3Endpoint: ""
+  # V8 힙 상한(메모리 한도에 대한 백분율, 10~90) [가정]. 나머지는 힙 밖 메모리와 힙 스냅샷 여유다
+  heapPercent: 75
+
 service:
   enabled: true
   replicas: 2

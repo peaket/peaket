@@ -32,9 +32,70 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 - name: PEAKET_MANAGEMENT_PORT
   value: {{ .Values.managementPort | quote }}
 {{- range $k, $v := .Values.env }}
+{{- if ne $k "NODE_OPTIONS" }}
 - name: {{ $k }}
   value: {{ $v | quote }}
 {{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* 메모리 한도 글(512Mi·1Gi)을 Mi 정수로. 진단 수집의 V8 힙 상한·/diag 크기가 쓴다. 다른 꼴은 렌더를 멈춘다 */}}
+{{- define "peaket.memoryMi" -}}
+{{- $raw := toString (required (printf "%s.resources.limits.memory가 필요하다(V8 힙 상한·/diag 크기, ADR-0070)" .where) .limit) -}}
+{{- if regexMatch "^[1-9][0-9]*Mi$" $raw -}}
+{{- trimSuffix "Mi" $raw | atoi -}}
+{{- else if regexMatch "^[1-9][0-9]*Gi$" $raw -}}
+{{- mul (trimSuffix "Gi" $raw | atoi) 1024 -}}
+{{- else -}}
+{{- fail (printf "%s.resources.limits.memory는 <정수>Mi나 <정수>Gi로 적는다(%s)" .where $raw) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* 진단 수집(RB-31, ADR-0070 결정 1, docs/devops.md D-T18 ①)의 환경 변수. 서비스·릴레이 컨테이너가 받는다.
+    NODE_OPTIONS: SIGUSR1 인스펙터 끄기, 치명 오류 보고서를 /diag에(환경 변수·네트워크 칸 없음), V8 힙 상한은 메모리 한도의 heapPercent(기본 75%) [가정].
+    값으로 받은 NODE_OPTIONS(env·서비스/릴레이 env)는 뒤에 붙인다. 주석은 Downward API 파일로, 메모리 한도는 resourceFieldRef로 받는다.
+    인자: dict "root" 차트 "resources" 컨테이너 자원 "extra" 덧붙일 NODE_OPTIONS "where" 값 이름 */}}
+{{- define "peaket.diagnoseEnv" -}}
+{{- $root := .root -}}
+{{- $limitMi := include "peaket.memoryMi" (dict "limit" (dig "limits" "memory" "" .resources) "where" .where) | atoi -}}
+{{- $percent := int $root.Values.diagnose.heapPercent -}}
+{{- if or (lt $percent 10) (gt $percent 90) -}}{{- fail "diagnose.heapPercent는 10~90이다" -}}{{- end -}}
+{{- $heapMi := div (mul $limitMi $percent) 100 -}}
+{{- $opts := list "--disable-sigusr1" "--report-on-fatalerror" "--report-exclude-env" "--report-exclude-network" "--report-directory=/diag" (printf "--max-old-space-size=%d" $heapMi) -}}
+{{- with $root.Values.env.NODE_OPTIONS }}{{ $opts = append $opts (toString .) }}{{ end -}}
+{{- with .extra }}{{ $opts = append $opts (toString .) }}{{ end -}}
+- name: NODE_OPTIONS
+  value: {{ join " " $opts | quote }}
+- name: PEAKET_DIAG_ANNOTATIONS_FILE
+  value: /etc/podinfo/annotations
+- name: PEAKET_DIAG_DIR
+  value: /diag
+- name: PEAKET_MEMORY_LIMIT_BYTES
+  valueFrom: { resourceFieldRef: { resource: limits.memory, divisor: "1" } }
+{{- with $root.Values.diagnose.bucket }}
+- name: PEAKET_DIAG_BUCKET
+  value: {{ . | quote }}
+{{- end }}
+{{- with $root.Values.diagnose.s3Endpoint }}
+- name: PEAKET_DIAG_S3_ENDPOINT
+  value: {{ . | quote }}
+{{- end }}
+{{- end -}}
+
+{{/* 진단 수집의 볼륨: /diag(보고서·힙 스냅샷·처리 표시, 크기 한도는 메모리 한도의 두 배 [가정])와 주석 Downward API 파일. 인자: dict "resources" "where" */}}
+{{- define "peaket.diagnoseVolumes" -}}
+{{- $limitMi := include "peaket.memoryMi" (dict "limit" (dig "limits" "memory" "" .resources) "where" .where) | atoi -}}
+- { name: diag, emptyDir: { sizeLimit: {{ printf "%dMi" (mul $limitMi 2) }} } }
+- name: podinfo
+  downwardAPI:
+    items:
+      - { path: annotations, fieldRef: { fieldPath: metadata.annotations } }
+{{- end -}}
+
+{{/* 진단 수집 볼륨을 붙일 자리 */}}
+{{- define "peaket.diagnoseMounts" -}}
+- { name: diag, mountPath: /diag }
+- { name: podinfo, mountPath: /etc/podinfo, readOnly: true }
 {{- end -}}
 
 {{/* 제한 파드 보안 기준(Restricted)에 맞춘 컨테이너 보안 설정 */}}
@@ -145,13 +206,14 @@ seccompProfile: { type: RuntimeDefault }
 {{- end }}
 {{- end -}}
 
-{{/* 관리 포트 프로브(docs/architecture.md §5 '프로브 규칙'): 준비는 /ready(의존성을 부르지 않는다), 생존은 /livez 10초·5초·6번 */}}
+{{/* 관리 포트 프로브(docs/architecture.md §5 '프로브 규칙'): 준비는 /ready(의존성을 부르지 않는다) 5초·3초·6번 [가정](약 30초, 이벤트 루프 지연에 함께 빠지지 않게, D-T19),
+    생존은 /livez 10초·5초·6번, 시작은 /livez 2초·30번. 준비 값은 BUILD_ORDER BAS-080에서 2초·2번을 고쳤다 */}}
 {{- define "peaket.probes" -}}
 readinessProbe:
   httpGet: { path: /ready, port: management }
   periodSeconds: 5
-  timeoutSeconds: 2
-  failureThreshold: 2
+  timeoutSeconds: 3
+  failureThreshold: 6
 livenessProbe:
   httpGet: { path: /livez, port: management }
   periodSeconds: 10

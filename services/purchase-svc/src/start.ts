@@ -904,12 +904,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
     handlers: bookingRestrictionHandlers({ apply: (i) => bookingRestrictions.apply(i) }, (method, err) => service.logger.error({ err: errorSummary(err), method }, 'BookingRestrictionService 처리 실패')),
   });
   if (grpcServices.length > 0 && env.PEAKET_GRPC_PORT) {
-    const raw = env.PEAKET_GRPC_PORT;
-    const port = Number(raw);
-    if (!Number.isInteger(port) || port <= 0 || port > 65_535) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${raw}`);
+    // 포트 값은 공용 설정이 읽고 검사한다(틀리면 createService가 시작하지 않는다, BUILD_ORDER BAS-080)
     refundGrpc = await startPurchaseGrpcServer({
       host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
-      port,
+      port: service.config.grpcPort,
+      profile: service.config.grpcLbProfile,
+      metrics: service.metrics,
       services: grpcServices,
       internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.purchase.v1.EventRefundService', 'peaket.purchase.v1.FraudCancellationService', 'peaket.purchase.v1.WithdrawalParticipantService'] },
     });

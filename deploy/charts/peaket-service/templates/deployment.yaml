@@ -59,9 +59,12 @@ spec:
             - name: PORT
               value: {{ .Values.service.port | quote }}
             {{- range $k, $v := .Values.service.env }}
+            {{- if ne $k "NODE_OPTIONS" }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+            {{- end }}
+            {{- include "peaket.diagnoseEnv" (dict "root" $ "resources" .Values.service.resources "extra" .Values.service.env.NODE_OPTIONS "where" "service") | nindent 12 }}
           {{- if .Values.secretEnvFrom }}
           envFrom:
             - secretRef: { name: {{ .Values.secretEnvFrom }} }
@@ -74,11 +77,13 @@ spec:
           securityContext: {{- include "peaket.containerSecurity" . | nindent 12 }}
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+            {{- include "peaket.diagnoseMounts" . | nindent 12 }}
             {{- with .Values.service.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+        {{- include "peaket.diagnoseVolumes" (dict "resources" .Values.service.resources "where" "service") | nindent 8 }}
         {{- with .Values.service.volumes }}
         {{- include "peaket.volumes" (dict "volumes" . "env" $.Values.env.PEAKET_ENV "where" "service.volumes") | nindent 8 }}
         {{- end }}
