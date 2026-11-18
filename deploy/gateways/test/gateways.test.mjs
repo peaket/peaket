@@ -419,8 +419,23 @@ test('I-T36 게이트웨이마다 jwt 제공자가 자기 키 셋의 공개키 �
   }
 });
 
-// 이 시험은 Lua 원문의 글자만 본다(동작은 VF-01의 정적·kind 시험과 기존 kind I-T36이 본다, 계획 §14 VF-01 ③)
-test('I-T36 게이트웨이마다 issuer를 확인하고 공통 Lua 원문이 typ을 at+jwt와 견준다(reauth+jwt·admission+jwt 글자 없음)', () => {
+/**
+ * 공통 Lua 요청 처리기(envoy_on_request)에서 checkTyp 갈래의 글(설정 "checkTyp"을 읽는 곳부터 다음 설정 갈래 "admission" 앞까지).
+ * 입장 토큰 확인(BAT-057, docs/infra.md §4.1 '입장 토큰 확인')이 같은 Lua에 admission+jwt를 들이므로, 액세스 토큰 typ 확인은 이 갈래만 본다
+ */
+function checkTypBranch(lua) {
+  const handler = lua.slice(lua.indexOf('function envoy_on_request'));
+  const from = handler.indexOf('"checkTyp"');
+  assert.ok(from >= 0, '요청 처리기에 checkTyp 갈래가 없다');
+  const to = handler.indexOf('"admission"', from);
+  return to >= 0 ? handler.slice(from, to) : handler.slice(from);
+}
+/** 글 안에 그 이름이 낱말로 있는가(앞뒤가 이름 글자가 아님) */
+const wordIn = (text, name) => [...text.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)].some((m) => m[0] === name);
+
+// 이 시험은 Lua 원문의 글자만 본다(동작은 VF-01의 정적·kind 시험과 기존 kind I-T36이 본다, 계획 §14 VF-01 ③).
+// BAT-057: 공통 Lua가 입장 토큰 확인에 admission+jwt를 쓰게 되어, 'admission+jwt 글자 없음'은 checkTyp 갈래(액세스 토큰 자리)에만 건다
+test('I-T36 게이트웨이마다 issuer를 확인하고 공통 Lua의 checkTyp 갈래가 typ을 at+jwt 하나와만 견준다(reauth+jwt는 어디에도 없고 admission+jwt는 그 갈래에 없다)', () => {
   requireDefinitions();
   const issuers = new Set();
   for (const gw of GATEWAYS) {
@@ -430,8 +445,15 @@ test('I-T36 게이트웨이마다 issuer를 확인하고 공통 Lua 원문이 ty
     }
     const lua = luaFor(gw);
     assert.ok(lua.includes('at+jwt'), `${gw}: Lua가 typ at+jwt를 보지 않는다`);
-    // 받는 typ 목록에 다른 값을 더하지 않는다
-    for (const other of ['reauth+jwt', 'admission+jwt']) assert.ok(!lua.includes(other), `${gw}: Lua가 ${other}를 다룬다`);
+    assert.ok(!lua.includes('reauth+jwt'), `${gw}: Lua가 reauth+jwt를 다룬다`);
+    const branch = checkTypBranch(lua);
+    // 갈래가 견주는 값: 글자 그대로 at+jwt이거나, 값이 at+jwt인 Lua 지역 이름
+    const names = [...lua.matchAll(/local\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"at\+jwt"/g)].map((m) => m[1]);
+    assert.ok(branch.includes('at+jwt') || names.some((n) => wordIn(branch, n)), `${gw}: checkTyp 갈래가 at+jwt와 견주지 않는다`);
+    // 그 갈래가 받는 typ 목록에 다른 값을 더하지 않는다(입장 토큰 typ이나 그것을 담은 이름이 그 갈래에 없다)
+    const admissionNames = [...lua.matchAll(/local\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"admission\+jwt"/g)].map((m) => m[1]);
+    assert.ok(!/admission\+jwt|reauth\+jwt/.test(branch), `${gw}: checkTyp 갈래가 다른 typ을 받는다`);
+    for (const n of admissionNames) assert.ok(!wordIn(branch, n), `${gw}: checkTyp 갈래가 ${n}(admission+jwt)을 받는다`);
   }
   assert.equal(issuers.size, 1, `identity 토큰의 iss는 하나다: ${[...issuers]}`);
 });
@@ -1089,4 +1111,107 @@ test('W7-COR-02 나머지 넷은 공통 EnvoyProxy의 samplingRate 100이다', (
     assert.equal(t.samplingRate, 100, `${gw}: samplingRate`);
     assert.equal(t.samplingFraction, undefined, `${gw}: samplingFraction`);
   }
+});
+
+// ===================== BAT-057 입장 토큰 확인(계획 §6 S1·S2·S3, docs/infra.md §4.1 '입장 토큰 확인', ADR-0288 결정 4·5·6) =====================
+// 값은 정본에서 적는다: 발급자 https://queue.peaket.example [가정](ADR-0288 결정 8), 교차 출처 화면 https://www.peaket.example, 프록시 환경 값 PEAKET_ADMISSION_JWKS,
+// ConfigMap peaket-admission-jwks의 키 jwks(optional: true), 라우트 원천 이름 gw-fan-buy(나뉜 라우트는 이름표 peaket.io/route: gw-fan-buy).
+
+const ADMISSION_ISSUER = 'https://queue.peaket.example';
+const ADMISSION_ENV = 'PEAKET_ADMISSION_JWKS';
+const ADMISSION_CONFIGMAP = { name: 'peaket-admission-jwks', key: 'jwks' };
+const BUY_ROUTE = 'gw-fan-buy';
+/** 라우트 원천 gw-fan-buy에서 만든 라우트(나뉘면 <이름>-2 등, 이름표로 고른다) */
+const buyRoutes = () => byKind('HTTPRoute').filter((r) => r.metadata?.labels?.['peaket.io/route'] === BUY_ROUTE);
+/** 공통 Lua를 쓰는 EnvoyExtensionPolicy의 (정책, filterContext) 쌍 */
+const commonLuaUses = () => byKind('EnvoyExtensionPolicy').flatMap((p) => commonLuaContexts([p]).map((ctx) => ({ p, ctx })));
+/** openapi에서 모든 security 갈래에 admissionToken이 있는 작업(ADR-0288 결정 4의 '구매 경로'). fanCookie는 따지지 않는다 */
+function allAdmissionOperations() {
+  const out = [];
+  for (const [path, item] of Object.entries(openapi().paths ?? {}))
+    for (const [method, op] of Object.entries(item ?? {})) {
+      if (!['get', 'post', 'put', 'patch', 'delete'].includes(method) || !Array.isArray(op?.security) || op.security.length === 0) continue;
+      if (op.security.every((r) => 'admissionToken' in r)) out.push({ method: method.toUpperCase(), path });
+    }
+  return out;
+}
+/** openapi 경로 틀을 라우트 매치의 꼴로(매개변수 → [^/]+, 매개변수 없으면 Exact) */
+const matchOf = (path) => (/\{[^}]+\}/.test(path) ? { type: 'RegularExpression', value: path.replace(/\{[^}]+\}/g, '[^/]+') } : { type: 'Exact', value: path });
+
+test('S-T28 ① [ASVS v5.0.0-9.2.3] gw-fan-buy(나뉜 라우트 포함)에 붙은 공통 Lua 설정에 admission 참·admissionIssuer https://queue.peaket.example·corsOrigin www 하나가 있고 checkTyp도 그대로다', () => {
+  requireDefinitions();
+  const routes = buyRoutes();
+  assert.ok(routes.length > 0, `이름표 peaket.io/route: ${BUY_ROUTE}인 라우트가 없다`);
+  assert.ok(routes.every((r) => (r.spec?.parentRefs ?? []).every((p) => p.name === 'gw-fan')), 'gw-fan-buy가 gw-fan 밖에 붙었다');
+  for (const r of routes) {
+    // 그 라우트를 겨눈 EnvoyExtensionPolicy(게이트웨이에 건 것으로 대신하지 않는다)
+    const own = byKind('EnvoyExtensionPolicy').filter((p) => targetsRoute(p, r));
+    const ctx = commonLuaContexts(own);
+    assert.equal(ctx.length, 1, `${r.metadata?.name}: 그 라우트를 겨눈 공통 Lua가 하나여야 한다(${ctx.length})`);
+    const x = ctx[0];
+    assert.equal(x.admission, true, `${r.metadata?.name}: admission`);
+    assert.equal(x.admissionIssuer, ADMISSION_ISSUER, `${r.metadata?.name}: admissionIssuer`);
+    assert.equal(x.corsOrigin, SCREEN['gw-fan'], `${r.metadata?.name}: corsOrigin`);
+    assert.equal(x.checkTyp, true, `${r.metadata?.name}: checkTyp(팬 토큰 typ 확인은 그대로)`);
+    assert.equal(x.originVerify, true, `${r.metadata?.name}: originVerify`);
+  }
+});
+
+test('S-T28 ① [ASVS v5.0.0-9.2.3] admission 설정은 gw-fan-buy 밖(다른 gw-fan 라우트, gw-queue 등 다른 게이트웨이, 게이트웨이에 건 정책)에 없다', () => {
+  requireDefinitions();
+  const buy = new Set(buyRoutes().map((r) => r.metadata?.name));
+  const withAdmission = commonLuaUses().filter(({ ctx }) => 'admission' in ctx || 'admissionIssuer' in ctx);
+  assert.ok(withAdmission.length > 0, 'admission 설정이 어디에도 없다');
+  for (const { p, ctx } of withAdmission) {
+    const targets = targetsOf(p);
+    assert.ok(targets.length > 0 && targets.every((t) => t.kind === 'HTTPRoute' && buy.has(t.name)), `${p.metadata?.name}: gw-fan-buy 밖을 겨눈다 ${JSON.stringify(targets)}`);
+    assert.equal(ctx.admission, true, `${p.metadata?.name}: admission이 참이 아닌 채 남았다`);
+  }
+  // 게이트웨이 다섯 각각: 그 게이트웨이의 라우트 가운데 gw-fan-buy가 아닌 것에 닿는 공통 Lua에는 admission이 없다
+  for (const gw of GATEWAYS) {
+    for (const r of routesOf(gw).filter((x) => !buy.has(x.metadata?.name))) {
+      for (const x of commonLuaContexts(effective('EnvoyExtensionPolicy', r))) assert.equal(x.admission, undefined, `${gw}/${r.metadata?.name}: admission이 붙었다`);
+    }
+    for (const x of commonLuaContexts(gatewayPolicies('EnvoyExtensionPolicy', gw))) assert.equal(x.admission, undefined, `${gw}: 게이트웨이에 건 Lua에 admission`);
+  }
+});
+
+test('S-T28 ① gw-fan-buy의 (경로, 메서드)는 openapi에서 모든 security 갈래에 admissionToken이 있는 작업과 그 OPTIONS와 같다(더도 덜도 아님)', () => {
+  requireDefinitions();
+  const want = new Set();
+  const ops = allAdmissionOperations();
+  // 좌석 스냅샷, 홀드 잡기·조회·해제·연장, 구매 세션 끝내기, 주문 생성, 결제 시작, 결제 접수(openapi가 정본). 비면 시험이 뜻을 잃는다
+  assert.ok(ops.length >= 9, `구매 작업이 ${ops.length}개뿐이다`);
+  for (const { method, path } of ops) {
+    const m = matchOf(path);
+    want.add(`${method} ${m.type} ${m.value}`);
+    want.add(`OPTIONS ${m.type} ${m.value}`);
+  }
+  const got = new Set();
+  for (const r of buyRoutes())
+    for (const rule of routeRules(r))
+      for (const m of rule.matches ?? []) {
+        assert.ok(m.method, `${r.metadata?.name}: 메서드 없는 매치(모든 메서드)`);
+        got.add(`${m.method} ${m.path?.type} ${m.path?.value}`);
+      }
+  assert.deepEqual([...got].sort(), [...want].sort());
+});
+
+test('[ASVS v5.0.0-9.1.3] EnvoyProxy peaket-proxy가 PEAKET_ADMISSION_JWKS를 ConfigMap peaket-admission-jwks의 jwks에서 optional: true로 받고, gw-fan이 그 프록시를 쓰며, Lua allowedEnvVars에 그 이름이 있다. 정의 어디에도 키 값이 없다', () => {
+  requireDefinitions();
+  assert.equal(proxyNameOf('gw-fan'), 'peaket-proxy', 'gw-fan의 EnvoyProxy');
+  const proxy = named('EnvoyProxy', 'peaket-proxy');
+  assert.ok(proxy, 'EnvoyProxy peaket-proxy가 없다');
+  const envs = findKey(proxy.spec ?? {}, 'env').flat();
+  const e = envs.filter((x) => x?.name === ADMISSION_ENV);
+  assert.equal(e.length, 1, `${ADMISSION_ENV} 환경 값이 하나여야 한다(${e.length})`);
+  assert.deepEqual(e[0].valueFrom, { configMapKeyRef: { name: ADMISSION_CONFIGMAP.name, key: ADMISSION_CONFIGMAP.key, optional: true } });
+  assert.equal(e[0].value, undefined, '환경 값에 묶음 값을 바로 넣었다');
+  assert.ok((proxy.spec?.lua?.strictValidation?.allowedEnvVars ?? []).includes(ADMISSION_ENV), 'peaket-proxy Lua allowedEnvVars');
+  // 같은 공통 Lua를 검증하는 다른 EnvoyProxy도 그 이름을 허용해야 엄격 검증을 지난다(값은 받지 않아도 된다)
+  for (const p of byKind('EnvoyProxy').filter((x) => x.spec?.lua?.validationType === 'Strict')) assert.ok((p.spec.lua.strictValidation?.allowedEnvVars ?? []).includes(ADMISSION_ENV), `${p.metadata?.name}: allowedEnvVars`);
+  // 저장소의 게이트웨이 정의는 키 목록 값을 싣지 않는다(키 값은 배포 때 ConfigMap으로. 로컬 kind는 cluster.mjs가 시험 키로 만든다)
+  assert.equal(named('ConfigMap', ADMISSION_CONFIGMAP.name), undefined, '정의 폴더에 키 목록 ConfigMap이 있다');
+  assert.doesNotMatch(RAW, /"x"\s*:/, '정의에 JWK 좌표 값이 있다');
+  assert.doesNotMatch(RAW, /"kty"\s*:\s*"EC"/, '정의에 JWK가 있다');
 });

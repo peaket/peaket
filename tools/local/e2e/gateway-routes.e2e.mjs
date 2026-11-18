@@ -10,7 +10,7 @@
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { API_CSP, GATEWAYS, HSTS, accessToken, echoed, edge, loadContract, send, token } from './gateway-client.mjs';
+import { API_CSP, GATEWAYS, HSTS, accessToken, admissionToken, echoed, edge, loadContract, send, token } from './gateway-client.mjs';
 
 const RUN = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
 const EVENT = `e2e-${RUN}`;
@@ -93,7 +93,8 @@ test('W7-COR-04 ticket:buy 없는 토큰의 GET /v1/orders·GET /v1/orders/{orde
     assert.ok(r.status < 400, `GET ${path}: ${r.status} ${r.text.slice(0, 200)}`);
     assert.equal(echoed(r)['x-user-id'], sub);
   }
-  const buy = await send(c, 'api', { method: 'POST', path: '/v1/orders', headers: edge(c, nextIp(), { authorization: `Bearer ${tv}`, origin: c.origins.www, 'content-type': 'application/json' }), body: '{}' });
+  // 구매 경로라 맞는 입장 토큰을 싣는다(BAT-057, docs/infra.md §4.1 '입장 토큰 확인'): 없으면 인가(ticket:buy)보다 앞의 입장 토큰 확인이 401로 끊는다
+  const buy = await send(c, 'api', { method: 'POST', path: '/v1/orders', headers: edge(c, nextIp(), { authorization: `Bearer ${tv}`, origin: c.origins.www, 'content-type': 'application/json', 'x-admission-token': admissionToken(c, { event: EVENT }) }), body: '{}' });
   assert.equal(buy.status, 403, `ticket:buy 없는 POST /v1/orders: ${buy.status}`);
 });
 
