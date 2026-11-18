@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ancestorClipFindings,
   EXCEPTION_SELECTORS,
   REFLOW_PAGES,
   REFLOW_VIEWPORTS,
@@ -48,6 +49,38 @@ test('FE-T31 문서 가로 스크롤은 1px 여유를 두고 판정한다', () =
 });
 
 // BAT-170 웨이브 7(T1~T3): 시험 담당(l2w7-BAT170-test)이 판정 구현 전에 썼다(ADR-0270 결정 3). 기준 docs/frontend.md §5.17 '화면 매트릭스와 FE-T31·FE-T18 자동 몫의 세부'.
+// BAT-171 검증 V171-09e(시험 담당 l2-bat171-test): 글을 안쪽 span에 둔 버튼이 넘침을 숨겨 글을 자르면, 글을 바로 담은 span은 자기 넘침이 없어
+// clippedTextFindings가 못 본다. 넘침을 숨긴 조상 상자 밖으로 나간 글 줄을 본다. 값은 검증이 잰 것(상자 세로 348~360, 글 342~366)과 경계 양쪽
+test('FE-T31 잘림: 넘침을 숨긴 조상 상자 밖으로 글 줄이 1px 넘게 나가면 찾는다(안쪽 span 글을 자른 버튼)', () => {
+  const ids = (items) => ancestorClipFindings(items).map((f) => `${f.id}@${f.clip}`);
+  const button = { id: 'button', overflowX: 'hidden', overflowY: 'hidden', textOverflow: 'clip', lineClamp: 'none', left: 0, top: 348, right: 120, bottom: 360 };
+  const v09e = { id: 'span', text: { left: 10, top: 342, right: 80, bottom: 366 }, clips: [button] };
+  assert.deepEqual(ids([v09e]), ['span@button']);
+  // 같은 꼴을 예전 판정(글을 바로 담은 상자의 자기 넘침)은 못 잡는다: span은 넘침이 visible이고 scroll 크기가 보이는 크기와 같다
+  assert.deepEqual(clippedTextFindings([{ text: true, overflowX: 'visible', overflowY: 'visible', textOverflow: 'clip', scrollWidth: 70, clientWidth: 70, scrollHeight: 24, clientHeight: 24 }]), []);
+  // 경계: 1px까지 나간 것은 통과, 1.5px는 찾는다(위·아래·왼쪽·오른쪽)
+  const at = (text) => ids([{ id: 'span', text, clips: [button] }]);
+  assert.deepEqual(at({ left: 10, top: 347, right: 80, bottom: 361 }), []);
+  assert.deepEqual(at({ left: 10, top: 346.5, right: 80, bottom: 360 }), ['span@button']);
+  assert.deepEqual(at({ left: 10, top: 348, right: 80, bottom: 361.5 }), ['span@button']);
+  assert.deepEqual(at({ left: -1.5, top: 348, right: 80, bottom: 360 }), ['span@button']);
+  assert.deepEqual(at({ left: 10, top: 348, right: 121.5, bottom: 360 }), ['span@button']);
+  // 방향: 세로만 숨기면 가로로 나간 글은 세지 않는다(auto·scroll·visible도 세지 않는다)
+  for (const o of ['auto', 'scroll', 'visible']) {
+    assert.deepEqual(ids([{ ...v09e, clips: [{ ...button, overflowY: o, overflowX: o }] }]), [], o);
+  }
+  assert.deepEqual(ids([{ id: 'span', text: { left: 10, top: 348, right: 200, bottom: 360 }, clips: [{ ...button, overflowX: 'visible' }] }]), []);
+  assert.deepEqual(ids([{ ...v09e, clips: [{ ...button, overflowX: 'visible', overflowY: 'clip' }] }]), ['span@button']);
+  // 줄임표·여러 줄 줄임·접혀 크기 0인 상자는 세지 않는다
+  assert.deepEqual(ids([{ ...v09e, clips: [{ ...button, textOverflow: 'ellipsis' }] }]), []);
+  assert.deepEqual(ids([{ ...v09e, clips: [{ ...button, lineClamp: '2' }] }]), []);
+  assert.deepEqual(ids([{ ...v09e, clips: [{ ...button, top: 348, bottom: 348 }] }]), []);
+  // 여러 조상 가운데 자른 첫 상자를 알리고, 조상이 없으면 없다
+  assert.deepEqual(ids([{ ...v09e, clips: [{ ...button, id: 'wide', top: 0, bottom: 1000 }, button] }]), ['span@button']);
+  assert.deepEqual(ids([{ ...v09e, clips: [] }]), []);
+  assert.deepEqual(ancestorClipFindings([]), []);
+});
+
 test('FE-T31 잘림은 overflow가 hidden·clip인 방향만 센다(auto·scroll·visible·줄임표는 뺀다)', () => {
   const box = { text: true, textOverflow: 'clip', scrollWidth: 100, clientWidth: 100, scrollHeight: 10, clientHeight: 10 };
   const items = [
@@ -244,7 +277,8 @@ test('FE-T31 겹침: 예외 밖 보이는 글자 노드 둘의 줄 사각형이 
 // BAT-171 리뷰 R171-2 재현(시험 담당 l2-bat171-test, Role: review-fix). 기준 docs/frontend.md §5.11 '초점이 가려지지 않게'
 // (높이는 그 띠가 지금 그려진 실제 높이다. 한 값으로 박아 둔 여백이 띠보다 작으면 결함이다). 결제 화면의 띠는 운영 빌드에서 시험 화면으로 열 길이 없어
 // (홀드·주문을 가짜 API로 만들 수 없다) 브라우저 시험(keyboard.spec의 굿즈·가입·취소 화면)과 함께 소스에서도 본다: 소비자 웹의 sticky·fixed 하단 띠(.bottom-bar)는
-// 모두 ref를 달고, 그 파일이 아래 띠 높이 훅 useStickyInset('bottom')을 쓴다. 띠가 하나도 없으면 빈 결과로 실패한다
+// 모두 ref를 달고, 그 ref 이름은 같은 파일에서 아래 띠 높이 훅 useStickyInset('bottom')이 돌려준 값이다. 띠가 하나도 없으면 빈 결과로 실패한다.
+// BAT-171 검증 R2b-결제(시험 담당 l2-bat171-test): 처음 판은 `ref=` 글자와 훅 이름만 봐 `ref={undefined}`를 거르지 못했다. 그래서 이름까지 맞춘다
 test('FE-T18 소비자 웹의 sticky·fixed 하단 띠(.bottom-bar)는 모두 그려진 높이를 아래 스크롤 여백으로 넘기는 ref를 단다', () => {
   const src = resolve(dirname(fileURLToPath(import.meta.url)), '../../../apps/web/src');
   const files = [];
@@ -263,9 +297,16 @@ test('FE-T18 소비자 웹의 sticky·fixed 하단 띠(.bottom-bar)는 모두 �
       const cls = m[1].split(/\s+/);
       if (!cls.includes('bottom-bar') || !(cls.includes('sticky') || cls.includes('fixed'))) continue;
       const at = `${relative(src, f).replaceAll('\\', '/')}:${text.slice(0, m.index).split('\n').length}`;
-      bars.push({ at, ref: /\sref=\{/.test(m[0]), hook: /useStickyInset\(\s*'bottom'\s*\)/.test(text) });
+      // 띠의 ref 이름과, 그 이름이 아래 띠 훅의 결과로 묶였는지(const 이름 = useStickyInset('bottom'))
+      const name = /\sref=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(m[0])?.[1];
+      const bound = !!name && name !== 'undefined' && new RegExp(`\\bconst\\s+${name}\\s*=\\s*useStickyInset\\(\\s*'bottom'\\s*\\)`).test(text);
+      bars.push({ at, name: name ?? null, bound });
     }
   }
   assert.ok(bars.length > 0, 'apps/web/src에 sticky·fixed 하단 띠(.bottom-bar)가 없다(빈 결과)');
-  assert.deepEqual(bars.filter((b) => !b.ref || !b.hook).map((b) => b.at), [], '그려진 높이를 재지 않는 하단 띠(96px 기본 여백에 기댄다)');
+  assert.deepEqual(
+    bars.filter((b) => !b.bound).map((b) => `${b.at} ref=${b.name}`),
+    [],
+    "그려진 높이를 재지 않는 하단 띠(ref가 useStickyInset('bottom')의 결과가 아니다. 96px 기본 여백에 기댄다)",
+  );
 });

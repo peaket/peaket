@@ -75,6 +75,14 @@ test('[ASVS v5.0.0-14.3.2] 기본 폭: 월렛 워커 아래서 연 양도 화면
   // 허용 꼴 + 캐시해도 되는 헤더 → 캐시에 들어가야 한다(대조군)
   await context.route('**/my/tickets/tkt-bat170-ok', (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', headers: { 'cache-control': 'public, max-age=60' }, body: html('티켓') }));
   await controlled(page, context);
+  // 이동 미리 받기(navigationPreload)는 브라우저가 직접 내는 요청이라 시험 대역(context.route)을 지나 진짜 서버로 간다(BAT-171 시험 이의 8:
+  // 고정 자료 밖 티켓이라 404). 이 시험 동안 끈다. 워커의 캐시 거르기(경로·no-store)는 워커의 fetch 응답에 그대로 걸린다(docs/frontend.md §5.4 '갱신' ⑤)
+  const preload = await page.evaluate(async (scope) => {
+    const r = await navigator.serviceWorker.getRegistration(scope);
+    await r?.navigationPreload?.disable();
+    return (await r?.navigationPreload?.getState())?.enabled ?? null;
+  }, SCOPE);
+  expect(preload, '이동 미리 받기를 끄지 못했다').toBe(false);
 
   for (const p of ['/my/tickets/tkt-bat170-ok', '/my/tickets/tkt-bat170-nostore', '/my/tickets/tkt-bat170-ok/transfer']) {
     const res = await page.goto(`${WEB}${p}`, { waitUntil: 'networkidle' });
@@ -90,19 +98,17 @@ test('[ASVS v5.0.0-14.3.2] 기본 폭: 월렛 워커 아래서 연 양도 화면
 
 test('HOT-390 기본 폭: 새 워커는 waiting에 머물고 스스로 활성화하지 않는다', async ({ page, context }) => {
   await controlled(page, context);
-  const original = await (await page.request.get(`${WEB}/serwist/sw.js`)).text();
-  expect(original.length, '워커 스크립트를 받지 못했다').toBeGreaterThan(0);
-  // 바이트가 다른 새 판을 낸다(새 배포와 같다)
-  await context.route('**/serwist/sw.js', (r) =>
-    r.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', headers: { 'service-worker-allowed': SCOPE, 'cache-control': 'no-cache' }, body: `${original}\n// bat170-new-version\n` }),
-  );
+  // 새 판을 낸다(새 배포와 같다). 워커 스크립트 갱신 요청(registration.update())은 브라우저가 직접 내 시험 대역에 걸리지 않으므로(BAT-171 시험 이의 8,
+  // 4차 CI에서 같은 바이트를 받아 새 워커가 생기지 않았다) 같은 범위에 스크립트 주소만 다른 등록을 한다. 주소가 다르면 바이트가 같아도 새 워커를 설치한다
+  // (서비스 워커 갱신 규칙). 경로 처리기는 쿼리를 보지 않고 같은 파일을 낸다
   await page.evaluate(async (scope) => {
     window.__controllerChanged = 0;
     navigator.serviceWorker.addEventListener('controllerchange', () => (window.__controllerChanged += 1));
-    await (await navigator.serviceWorker.getRegistration(scope)).update();
+    await navigator.serviceWorker.register('/serwist/sw.js?v=bat171-2', { scope, type: 'module' });
   }, SCOPE);
   // 비동기 판정이라 waitForFunction 대신 poll로 기다린다(위 controlled와 같은 까닭)
   await expect.poll(async () => (await swState(page)).waiting, { timeout: 15_000, message: '새 판 워커가 waiting에 들지 않았다' }).toBe('installed');
+  expect(await page.evaluate(async (scope) => (await navigator.serviceWorker.getRegistration(scope)).waiting?.scriptURL ?? '', SCOPE), 'waiting 워커가 새 판이 아니다').toContain('v=bat171-2');
   // 화면이 열린 채로 기다려도 활성화하지 않는다
   await page.waitForTimeout(3_000);
   expect(await page.evaluate(async (scope) => !!(await navigator.serviceWorker.getRegistration(scope))?.waiting, SCOPE), '새 워커가 waiting을 떠났다').toBe(true);

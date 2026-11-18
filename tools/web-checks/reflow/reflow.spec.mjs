@@ -8,7 +8,7 @@
 import { test, expect } from '@playwright/test';
 import { stubFanApi } from '../csp/pages.mjs';
 import { openReflowPage as open } from './open.mjs';
-import { EXCEPTION_SELECTORS, REFLOW_PAGES, TEXT_SPACING_CSS, clippedTextFindings, emptyMeasurement, hasPageOverflow, overlapFindings, unreachableFindings } from './rules.mjs';
+import { EXCEPTION_SELECTORS, REFLOW_PAGES, TEXT_SPACING_CSS, ancestorClipFindings, clippedTextFindings, emptyMeasurement, hasPageOverflow, overlapFindings, unreachableFindings } from './rules.mjs';
 
 /** 화면 읽기용 숨김 글·장식은 재지 않는다 */
 const IGNORE = '.sr-only,[aria-hidden="true"],[inert],svg,canvas';
@@ -39,6 +39,7 @@ const measureText = (page) =>
       };
       const outside = (el) => !exceptions.some((sel) => el.closest(sel)) && !el.closest(ignore) && !screenOnly(el);
       const items = [];
+      const clipped = [];
       for (const el of document.querySelectorAll('body *')) {
         if (!outside(el)) continue;
         const hasText = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim().length > 0);
@@ -57,9 +58,42 @@ const measureText = (page) =>
           scrollHeight: el.scrollHeight,
           clientHeight: el.clientHeight,
         });
+        // 넘침을 숨긴 조상이 자른 글(BAT-171 검증 V171-09e): 이 상자가 바로 담은 글 줄의 사각형과, 넘침을 숨긴 조상들의 안쪽(패딩) 상자
+        const range = document.createRange();
+        let text;
+        for (const n of el.childNodes) {
+          if (n.nodeType !== Node.TEXT_NODE || !(n.textContent ?? '').trim()) continue;
+          range.selectNodeContents(n);
+          for (const r of range.getClientRects()) {
+            if (!(r.width > 0 && r.height > 0)) continue;
+            text = text ? { left: Math.min(text.left, r.left), top: Math.min(text.top, r.top), right: Math.max(text.right, r.right), bottom: Math.max(text.bottom, r.bottom) } : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+          }
+        }
+        const clips = [];
+        for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+          if (exceptions.some((sel) => a.matches(sel))) break;
+          const acs = getComputedStyle(a);
+          const cut = (v) => v === 'hidden' || v === 'clip';
+          if (!cut(acs.overflowX) && !cut(acs.overflowY)) continue;
+          const ar = a.getBoundingClientRect();
+          const left = ar.left + a.clientLeft;
+          const top = ar.top + a.clientTop;
+          clips.push({
+            id: `${a.tagName.toLowerCase()}${typeof a.className === 'string' && a.className ? `.${a.className.split(/\s+/).slice(0, 3).join('.')}` : ''}`,
+            overflowX: acs.overflowX,
+            overflowY: acs.overflowY,
+            textOverflow: acs.textOverflow,
+            lineClamp: acs.webkitLineClamp || acs.getPropertyValue('-webkit-line-clamp') || 'none',
+            left,
+            top,
+            right: left + a.clientWidth,
+            bottom: top + a.clientHeight,
+          });
+        }
+        if (text && clips.length > 0) clipped.push({ id: `${el.tagName.toLowerCase()} ${(el.textContent ?? '').trim().slice(0, 40)}`, text, clips });
       }
       const controlCount = [...document.querySelectorAll(controls)].filter(outside).length;
-      return { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, items, controlCount };
+      return { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, items, clipped, controlCount };
     },
     { exceptions: EXCEPTION_SELECTORS, ignore: IGNORE, controls: CONTROLS },
   );
@@ -180,6 +214,7 @@ for (const p of REFLOW_PAGES) {
     const text = await measureText(page);
     expect(emptyMeasurement({ requestedPath: p.path, finalPath, textCount: text.items.length, controlCount: text.controlCount }), `${name} 빈 결과`).toBeNull();
     expect(clippedTextFindings(text.items), `${name} 글자 잘림`).toEqual([]);
+    expect(ancestorClipFindings(text.clipped), `${name} 넘침을 숨긴 조상이 자른 글`).toEqual([]);
     const rects = await measureTextRects(page);
     expect(rects.length, `${name} 잰 글자 노드가 없다(빈 결과)`).toBeGreaterThan(0);
     expect(overlapFindings(rects), `${name} 글자 겹침`).toEqual([]);
@@ -193,6 +228,7 @@ for (const p of REFLOW_PAGES) {
     const text = await measureText(page);
     expect(emptyMeasurement({ requestedPath: p.path, finalPath, textCount: text.items.length, controlCount: text.controlCount }), `${name} 빈 결과`).toBeNull();
     expect(clippedTextFindings(text.items), `${name} 글자 잘림(글자 간격)`).toEqual([]);
+    expect(ancestorClipFindings(text.clipped), `${name} 넘침을 숨긴 조상이 자른 글(글자 간격)`).toEqual([]);
     const rects = await measureTextRects(page);
     expect(rects.length, `${name} 잰 글자 노드가 없다(빈 결과)`).toBeGreaterThan(0);
     expect(overlapFindings(rects), `${name} 글자 겹침(글자 간격)`).toEqual([]);
