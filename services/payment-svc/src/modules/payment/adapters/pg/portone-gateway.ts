@@ -30,6 +30,7 @@ import {
   type QueryOptions,
   type QueryResult,
   type QueryStatus,
+  type RefundAccount,
   type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
 import { portoneCardOfMethod } from './card-fields.js';
@@ -138,6 +139,43 @@ const CANCEL_REJECTED = new Set([
   'SUM_OF_PARTS_EXCEEDS_CANCEL_AMOUNT',
   'UNAUTHORIZED',
 ]);
+/**
+ * 토스 은행 코드(두 자리) → 포트원 Bank 열거값(docs/features/payment.md §6 '구현에서 정한 것' ②, 2026-11-19 [가정]: 포트원 공식 스키마의 Bank 값 이름과 토스 은행 코드 표를 맞춘 것이다.
+ * 실제 서버 대조 때 고친다). 포트원은 계좌 거절을 따로 나타내는 오류 유형을 공식 문서에서 찾지 못해 계좌를 실은 취소의 거절도 일반 거절로 읽는다([가정])
+ */
+const PORTONE_BANK_OF = new Map<string, string>([
+  ['02', 'KDB'],
+  ['03', 'IBK'],
+  ['06', 'KOOKMIN'],
+  ['07', 'SUHYUP'],
+  ['11', 'NONGHYUP'],
+  ['12', 'LOCAL_NONGHYUP'],
+  ['20', 'WOORI'],
+  ['23', 'SC_FIRST'],
+  ['27', 'CITI'],
+  ['31', 'DAEGU'],
+  ['32', 'BUSAN'],
+  ['34', 'GWANGJU'],
+  ['35', 'JEJU'],
+  ['37', 'JEONBUK'],
+  ['39', 'KYONGNAM'],
+  ['45', 'KFCC'],
+  ['48', 'SHINHYUP'],
+  ['50', 'SAVINGS_BANK'],
+  ['54', 'HSBC'],
+  ['64', 'NFCF'],
+  ['71', 'POST'],
+  ['81', 'HANA'],
+  ['88', 'SHINHAN'],
+  ['89', 'K_BANK'],
+  ['90', 'KAKAO'],
+  ['92', 'TOSS'],
+]);
+
+/** 토스 은행 코드 → 포트원 Bank. 대응표에 없으면 undefined */
+export function portoneBankOf(bankCode: string): string | undefined {
+  return PORTONE_BANK_OF.get(bankCode);
+}
 /** 조회를 부를 결제 사건. 그 밖의 사건은 무시한다(payment §5) */
 const PAYMENT_EVENTS = new Set(['Transaction.Paid', 'Transaction.VirtualAccountIssued', 'Transaction.PartialCancelled', 'Transaction.Cancelled', 'Transaction.Failed', 'Transaction.PayPending', 'Transaction.CancelPending']);
 
@@ -331,11 +369,21 @@ export class PortoneGateway implements PaymentGatewayPort {
     return { kind: 'PAGE', items, ...(cursor === undefined || cursor === '' ? {} : { nextCursor: cursor }), ...(unreadable.length === 0 ? {} : { unreadable }) };
   }
 
-  async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult> {
+  async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number; refundAccount?: RefundAccount }): Promise<CancelResult> {
     if (!CANCEL_IDEM_KEY.test(c.idemKey)) throw new TypeError('취소 멱등키는 cancel-{취소 ID}여야 한다');
     const idem = idempotencyHeader(c.idemKey);
+    // 가상계좌 환불 계좌는 refundAccount(bank·number·holderName)다(CancelPaymentBodyRefundAccount, 공식 스키마 2026-11-19 확인). 은행은 Bank 열거값으로 바꾼다.
+    // 대응표에 없는 은행 코드는 호출자가 미리 거른다(portoneBankOf). 이 본문을 로그에 싣지 않는다
+    const bank = c.refundAccount === undefined ? undefined : portoneBankOf(c.refundAccount.bankCode);
+    if (c.refundAccount !== undefined && bank === undefined) return { outcome: 'REJECTED', reason: 'REFUND_ACCOUNT_INVALID' };
     // 검증값은 호출자가 첫 전송 전에 저장한 값만 보낸다(payment §2.1 결제 취소 API). 직전 조회로 읽으면 재시도마다 값이 달라져 같은 멱등키에 다른 본문을 보내게 된다
-    const body = { storeId: this.#storeId, reason: c.reason, ...(c.amount === 'ALL' ? {} : { amount: c.amount }), ...(c.expectedBalance === undefined ? {} : { currentCancellableAmount: c.expectedBalance }) };
+    const body = {
+      storeId: this.#storeId,
+      reason: c.reason,
+      ...(c.amount === 'ALL' ? {} : { amount: c.amount }),
+      ...(c.expectedBalance === undefined ? {} : { currentCancellableAmount: c.expectedBalance }),
+      ...(c.refundAccount === undefined || bank === undefined ? {} : { refundAccount: { bank, number: c.refundAccount.accountNumber, holderName: c.refundAccount.holderName } }),
+    };
     const r = await this.#post('/payments/{paymentId}/cancel', c.paymentRef, body, idem);
     if (r === 'NO_ANSWER' || r.status >= 500 || r.status === 429) return { outcome: 'UNKNOWN' };
     if (r.status === 200) {

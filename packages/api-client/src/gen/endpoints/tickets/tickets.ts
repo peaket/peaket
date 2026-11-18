@@ -1152,10 +1152,15 @@ export type getTicketCancellationQuoteResponse409 = {
   status: 409
 }
 
+export type getTicketCancellationQuoteResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type getTicketCancellationQuoteResponseSuccess = (getTicketCancellationQuoteResponse200) & {
   headers: Headers;
 };
-export type getTicketCancellationQuoteResponseError = (getTicketCancellationQuoteResponse403 | getTicketCancellationQuoteResponse404 | getTicketCancellationQuoteResponse409) & {
+export type getTicketCancellationQuoteResponseError = (getTicketCancellationQuoteResponse403 | getTicketCancellationQuoteResponse404 | getTicketCancellationQuoteResponse409 | getTicketCancellationQuoteResponse503) & {
   headers: Headers;
 };
 
@@ -1193,7 +1198,7 @@ export const getGetTicketCancellationQuoteQueryKey = (ticketId: string,) => {
     }
 
 
-export const getGetTicketCancellationQuoteQueryOptions = <TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse>>(ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+export const getGetTicketCancellationQuoteQueryOptions = <TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1212,10 +1217,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetTicketCancellationQuoteQueryResult = NonNullable<Awaited<ReturnType<typeof getTicketCancellationQuote>>>
-export type GetTicketCancellationQuoteQueryError = ErrorType<ProblemResponse>
+export type GetTicketCancellationQuoteQueryError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
 
 
-export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse>>(
+export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
  ticketId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getTicketCancellationQuote>>,
@@ -1225,7 +1230,7 @@ export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse>>(
+export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
  ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getTicketCancellationQuote>>,
@@ -1235,7 +1240,7 @@ export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof 
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse>>(
+export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
  ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -1243,7 +1248,7 @@ export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof 
  * @summary 예매 취소 환급 예상(공제율·근거·환급액)
  */
 
-export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse>>(
+export function useGetTicketCancellationQuote<TData = Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>>(
  ticketId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTicketCancellationQuote>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -1280,6 +1285,11 @@ export type createTicketCancellationResponse409 = {
   status: 409
 }
 
+export type createTicketCancellationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
 export type createTicketCancellationResponse503 = {
   data: ServiceUnavailableResponse
   status: 503
@@ -1288,7 +1298,7 @@ export type createTicketCancellationResponse503 = {
 export type createTicketCancellationResponseSuccess = (createTicketCancellationResponse202) & {
   headers: Headers;
 };
-export type createTicketCancellationResponseError = (createTicketCancellationResponse403 | createTicketCancellationResponse404 | createTicketCancellationResponse409 | createTicketCancellationResponse503) & {
+export type createTicketCancellationResponseError = (createTicketCancellationResponse403 | createTicketCancellationResponse404 | createTicketCancellationResponse409 | createTicketCancellationResponse422 | createTicketCancellationResponse503) & {
   headers: Headers;
 };
 

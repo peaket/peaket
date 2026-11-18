@@ -63,6 +63,10 @@ interface CommonWiring {
     readonly holds?: import('./modules/event-cancellations/index.js').EventRefundHolds;
     /** 지표 ops_event_cancellation_revert_failures_total(웨이브 끝 리뷰 K4, main.ts가 서비스 레지스트리에 붙인다) */
     readonly revertFailures?: { inc(): void };
+    /** core 회차 상태 반영(BAT-420-rest GAT-110, 시작 조립이 PEAKET_CORE_HTTP_URL로 채운다). 없으면 부르지 않는다 */
+    readonly core?: import('./modules/event-cancellations/index.js').CoreEventStatus;
+    /** 지표 ops_event_cancellation_core_apply_failures_total(main.ts가 서비스 레지스트리에 붙인다) */
+    readonly coreApplyFailures?: { inc(): void };
   };
 }
 
@@ -87,6 +91,8 @@ function eventCancellationDeps(
     ...(e.stopper ? { stopper: e.stopper } : {}),
     ...(e.owners ? { owners: e.owners } : {}),
     ...(e.holds ? { holds: e.holds } : {}),
+    ...(e.core ? { core: e.core } : {}),
+    ...(e.coreApplyFailures ? { coreApplyFailures: e.coreApplyFailures } : {}),
   };
 }
 

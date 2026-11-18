@@ -352,6 +352,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
       calendar,
       // 회차 취소가 확정된 회차의 팬 취소·견적은 키 폐기 전에 409 event-cancelled(BAT-420 리뷰 D5)
       eventCancellations: new DrizzleEventCancellationLookup(database),
+      // 견적·팬 취소의 가상계좌 판정은 같은 payment-svc 클라이언트의 GetPayment다(BUILD_ORDER GAT-090). 차단기 payment-svc-get은 서비스를 만든 뒤 묶는다
+      paymentMethods: refundPayments,
       ...(fanReauth ? { reauth: fanReauth } : {}),
     };
   }
@@ -655,6 +657,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     payment = paymentConfirmsFromEnv(env, { profile: service.config.grpcLbProfile, breaker: paymentBreaker });
     for (const w of payment.warnings) service.logger.warn({ dep: 'payment-svc' }, w);
     depositBreaker = new CircuitBreaker({ service: SERVICE, dependency: PAYMENT_DEPOSIT_BREAKER, registry: service.metrics.registry, logger: service.logger });
+    // 견적·팬 취소의 결제 수단 읽기도 같은 GetPayment라 같은 차단기(payment-svc-get)를 쓴다(docs/features/payment.md §6 'purchase-svc 견적', BUILD_ORDER GAT-090)
+    refundPayments?.useMethodBreaker(depositBreaker);
     depositReader = paymentDepositReaderFromEnv(env, {
       profile: service.config.grpcLbProfile,
       breaker: depositBreaker,

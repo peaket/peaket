@@ -46,7 +46,7 @@ const DueEventsResponse = z
  * 그 밖의 환경은 토큰이 없으면 시작하지 않는다(fail-closed). INTERNAL_TOKEN_REQUIRED는 createService가 전역으로 준다.
  */
 @Injectable()
-class InternalToken401Guard extends InternalTokenGuard {
+export class InternalToken401Guard extends InternalTokenGuard {
   constructor(
     @Inject(INTERNAL_TOKEN) expected?: string,
     @Optional() @Inject(INTERNAL_TOKEN_REQUIRED) required = false,

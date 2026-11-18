@@ -442,6 +442,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "virtual_account": {
                       "type": "VirtualAccountInfo",
                       "id": 8
+                    },
+                    "virtual_account_paid": {
+                      "type": "bool",
+                      "id": 9
                     }
                   }
                 },
@@ -544,6 +548,26 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "scope": {
                       "type": "CancelScope",
                       "id": 5
+                    },
+                    "refund_account": {
+                      "type": "RefundAccount",
+                      "id": 6
+                    }
+                  }
+                },
+                "RefundAccount": {
+                  "fields": {
+                    "bank_code": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "account_number": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "holder_name": {
+                      "type": "string",
+                      "id": 3
                     }
                   }
                 },
@@ -559,7 +583,8 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "CANCEL_RESULT_CANCELLED": 1,
                     "CANCEL_RESULT_CANCEL_PENDING": 2,
                     "CANCEL_RESULT_REJECTED": 3,
-                    "CANCEL_RESULT_UNKNOWN": 4
+                    "CANCEL_RESULT_UNKNOWN": 4,
+                    "CANCEL_RESULT_REFUND_ACCOUNT_REQUIRED": 5
                   }
                 },
                 "CancelPaymentResponse": {

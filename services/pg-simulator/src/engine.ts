@@ -302,8 +302,19 @@ export class PgSimulatorEngine {
     });
   }
 
-  cancel(paymentKey: string, c: { cancelReason: string; cancelAmount?: number }, idemKey?: string, portone?: PortoneCallOptions): Promise<SimResponse> {
-    const fp = JSON.stringify(['cancel', paymentKey, c.cancelReason, c.cancelAmount ?? null, portone?.currentCancellableAmount ?? null]);
+  /**
+   * refundAccount는 가상계좌 환불 계좌다(토스 refundReceiveAccount, 포트원 refundAccount를 같은 모양으로 받는다). 저장하지 않고 멱등 대조 값에만 쓴다.
+   * 입금된 가상계좌 결제를 계좌 없이 취소하면 업무 거절(INVALID_REQUEST), 계좌번호가 000으로 시작하면 계좌 거절(INVALID_REFUND_ACCOUNT_NUMBER)이다
+   * (시험용 규칙 [가정], docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090)
+   */
+  cancel(
+    paymentKey: string,
+    c: { cancelReason: string; cancelAmount?: number; refundAccount?: { bank: string; accountNumber: string; holderName: string } },
+    idemKey?: string,
+    portone?: PortoneCallOptions,
+  ): Promise<SimResponse> {
+    const account = c.refundAccount;
+    const fp = JSON.stringify(['cancel', paymentKey, c.cancelReason, c.cancelAmount ?? null, portone?.currentCancellableAmount ?? null, account === undefined ? null : [account.bank, account.accountNumber, account.holderName]]);
     const orderId = this.payments.get(paymentKey)?.orderId;
     return this.idempotent('cancel', idemKey, fp, orderId, portone?.retentionMs ?? IDEMPOTENCY_RETENTION_MS, async (fault) => {
       const p = this.payments.get(paymentKey);
@@ -319,6 +330,8 @@ export class PgSimulatorEngine {
         return { response: { status: 200, body: this.view(p) } };
       }
       if (p.status !== 'DONE' && p.status !== 'PARTIAL_CANCELED') return { response: err(403, 'NOT_CANCELABLE_PAYMENT', '취소할 수 없는 결제입니다') };
+      if (p.method === '가상계좌' && account === undefined) return { response: err(400, 'INVALID_REQUEST', '가상계좌 환불에는 환불 계좌가 필요합니다') };
+      if (p.method === '가상계좌' && account !== undefined && account.accountNumber.startsWith('000')) return { response: err(400, 'INVALID_REFUND_ACCOUNT_NUMBER', '잘못된 환불 계좌번호입니다') };
       if (portone?.currentCancellableAmount !== undefined && portone.currentCancellableAmount !== p.balance) return { response: err(409, 'CANCELLABLE_AMOUNT_CONSISTENCY_BROKEN', '취소 가능 금액이 맞지 않습니다') };
       const fits = (a: number) => Number.isSafeInteger(a) && a > 0 && a <= p.balance;
       if (!fits(c.cancelAmount ?? p.balance)) return { response: err(400, 'NOT_CANCELABLE_AMOUNT', '취소할 수 없는 금액입니다') };

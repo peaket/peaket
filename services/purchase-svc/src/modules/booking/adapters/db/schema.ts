@@ -135,6 +135,13 @@ export const orderCancellation = pgTable(
      * failure_case_opened_at이 맡는다). refund_failed_at이 있고 REFUND_PENDING인데 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다
      */
     refundFailedOpenedAt: at('refund_failed_opened_at'),
+    /**
+     * 계좌 대기(0029, BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기'): payment-svc가 REFUND_ACCOUNT_REQUIRED로 답한 시각(REFUND_PENDING만).
+     * 있으면 환급 실행기가 집지 않고(next_refund_at 빔) 재시도 횟수·자동 정지 셈에 넣지 않는다. 계좌는 저장하지 않는다
+     */
+    refundAccountRequiredAt: at('refund_account_required_at'),
+    /** CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건을 ops-svc가 2xx로 받은 시각(0029). 계좌 대기 표시 없이 쓰지 않는다. 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다 */
+    refundAccountCaseOpenedAt: at('refund_account_case_opened_at'),
   },
   (t) => [
     uniqueIndex('order_cancellation_active_key')
@@ -161,6 +168,12 @@ export const orderCancellation = pgTable(
     index('order_cancellation_refund_failed_open_idx')
       .on(t.refundFailedAt)
       .where(sql`${t.refundFailedAt} is not null and ${t.refundFailedOpenedAt} is null and ${t.eventCancellationRequestId} is null`),
+    // '환불 대기' 건을 연 시각은 계좌 대기 표시 없이 쓰지 않는다(0029)
+    check('order_cancellation_refund_account_case_check', sql`${t.refundAccountCaseOpenedAt} is null or ${t.refundAccountRequiredAt} is not null`),
+    // '환불 대기' 건 다시 열기 목록(열지 않은 건)을 받치는 부분 색인(0029)
+    index('order_cancellation_refund_account_open_idx')
+      .on(t.refundAccountRequiredAt)
+      .where(sql`${t.refundAccountRequiredAt} is not null and ${t.refundAccountCaseOpenedAt} is null`),
   ],
 );
 
