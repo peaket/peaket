@@ -1215,3 +1215,54 @@ test('[ASVS v5.0.0-9.1.3] EnvoyProxy peaket-proxy가 PEAKET_ADMISSION_JWKS를 Co
   assert.doesNotMatch(RAW, /"x"\s*:/, '정의에 JWK 좌표 값이 있다');
   assert.doesNotMatch(RAW, /"kty"\s*:\s*"EC"/, '정의에 JWK가 있다');
 });
+
+// ===================== BAT-057 리뷰 반영 R057-1(S8, docs/infra.md §4.1 '거절 응답의 교차 출처 머리'의 '403') =====================
+
+/** 그 응답 고치기가 맞추는 상태 값들 */
+const overrideStatuses = (o) => (o.match?.statusCodes ?? []).map((s) => Number(s.value));
+/** 그 응답 고치기의 응답 머리 조건 */
+const overrideHeaders = (o) => o.match?.responseHeaders ?? [];
+/** 응답 고치기가 싣는 머리(이름 소문자 → 값) */
+const overrideSet = (o) => Object.fromEntries((o.response?.header?.set ?? []).map((h) => [lc(h.name), h.value]));
+
+test('S-T28 ① R057-1 gw-fan-responses에 상태 403·응답 머리 Access-Control-Allow-Origin이 정확히 www인 Local 고치기가 하나 있고, 차례는 대상 거절(invalid_token → 401) 뒤·조건 없는 403 앞이며, 본문은 조건 없는 403과 같고 보안 머리 셋과 교차 출처 머리 넷을 싣는다. 그 출처는 gw-fan-buy의 corsOrigin·cors.allowOrigins와 같다', () => {
+  requireDefinitions();
+  const WWW = 'https://www.peaket.example';
+  const p = named('BackendTrafficPolicy', 'gw-fan-responses');
+  assert.ok(p, 'BackendTrafficPolicy gw-fan-responses가 없다');
+  const list = p.spec?.responseOverride ?? [];
+  const is403 = (o) => overrideStatuses(o).length === 1 && overrideStatuses(o)[0] === 403 && o.source === 'Local';
+  const invalid = list.findIndex((o) => is403(o) && overrideHeaders(o).some((h) => lc(h.name) === 'www-authenticate'));
+  const plain = list.findIndex((o) => is403(o) && overrideHeaders(o).length === 0);
+  const cors = list.map((o, i) => [o, i]).filter(([o]) => is403(o) && overrideHeaders(o).some((h) => lc(h.name) === 'access-control-allow-origin'));
+  assert.ok(invalid >= 0, '대상 거절(invalid_token) 403 고치기가 없다');
+  assert.ok(plain >= 0, '조건 없는 403 고치기가 없다');
+  assert.equal(cors.length, 1, `Access-Control-Allow-Origin 조건 403 고치기가 하나여야 한다(${cors.length})`);
+  const [o, i] = cors[0];
+  // 조건: 그 머리 하나, 값은 정확히(Exact) www 출처
+  assert.equal(overrideHeaders(o).length, 1, '응답 머리 조건은 하나다');
+  assert.deepEqual(overrideHeaders(o)[0].value, { type: 'Exact', value: WWW }, '조건 값');
+  // 차례: 먼저 맞는 것이 이긴다
+  assert.ok(invalid < i && i < plain, `차례: invalid_token ${invalid} < 교차 출처 ${i} < 조건 없는 ${plain}`);
+  // 본문·형식은 조건 없는 403과 같다(상태는 그대로 403)
+  assert.ok(o.response?.statusCode === undefined || o.response.statusCode === 403, `상태 ${o.response?.statusCode}`);
+  assert.equal(o.response?.contentType, list[plain].response?.contentType, '형식');
+  assert.deepEqual(o.response?.body, list[plain].response?.body, '본문');
+  assert.deepEqual(JSON.parse(o.response?.body?.inline ?? '{}'), { type: 'about:blank', title: 'Forbidden', status: 403 }, '본문 값');
+  const set = overrideSet(o);
+  const want = {
+    'strict-transport-security': HSTS,
+    'x-content-type-options': 'nosniff',
+    'content-security-policy': API_CSP,
+    'access-control-allow-origin': WWW,
+    'access-control-allow-credentials': 'true',
+    vary: 'Origin',
+    'access-control-expose-headers': 'WWW-Authenticate',
+  };
+  for (const [k, v] of Object.entries(want)) assert.equal(set[k], v, `머리 ${k}`);
+  assert.deepEqual(Object.keys(set).sort(), Object.keys(want).sort(), '그 밖의 머리를 싣지 않는다');
+  // 한 값을 세 곳에 적는다: 고치기의 출처, gw-fan-buy Lua corsOrigin, gw-fan-buy-security cors.allowOrigins
+  const lua = commonLuaContexts(byKind('EnvoyExtensionPolicy').filter((x) => buyRoutes().some((r) => targetsRoute(x, r))));
+  assert.ok(lua.length > 0 && lua.every((x) => x.corsOrigin === WWW), 'gw-fan-buy corsOrigin');
+  assert.deepEqual(named('SecurityPolicy', 'gw-fan-buy-security')?.spec?.cors?.allowOrigins, [WWW], 'gw-fan-buy-security cors.allowOrigins');
+});

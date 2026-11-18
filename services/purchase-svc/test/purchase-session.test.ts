@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vitest';
 import {
   KEY_PART,
   MemoryPurchaseSessionStore,
+  OpenSessionError,
   PURCHASE_SESSION_INFO,
   type PurchaseSessionStore,
   RedisPurchaseSessionStore,
@@ -182,6 +183,29 @@ describe('StoredPurchaseSessions.resolve (구매 요청 인증 포트)', () => {
       url: '/v1/events/ev-1/holds',
     } as unknown as FastifyRequest;
     await expect(sessions.resolve(request, principal())).rejects.toMatchObject({ status: 503 });
+  });
+
+  test('Q-T69 ④ R057-2 세션이 없고 openFirstUse가 KEYS_UNAVAILABLE(입장 토큰 공개키 묶음을 한 번도 받지 못함)을 던지면 503 dependency-unavailable·Retry-After 1초이고 401로 숨기지 않는다. 다른 열기 거절(TOKEN_INVALID)은 지금처럼 인증 실패다', async () => {
+    const w = world();
+    const request = (jti: string) =>
+      ({
+        headers: { 'x-admission-token': admissionHeader(jti) },
+        params: { eventId: 'ev-1' },
+        body: { clientEphemeralPublicKey: 'key' },
+        url: '/v1/events/ev-1/holds',
+      }) as unknown as FastifyRequest;
+    const withOpener = (code: 'KEYS_UNAVAILABLE' | 'TOKEN_INVALID') =>
+      new StoredPurchaseSessions({
+        store: w.mem,
+        ecdh: w.server,
+        clock: w.clock,
+        openFirstUse: async () => {
+          throw new OpenSessionError(code);
+        },
+      });
+    await expect(withOpener('KEYS_UNAVAILABLE').resolve(request(newJti()), principal())).rejects.toMatchObject({ status: 503, slug: 'dependency-unavailable', retryAfterSeconds: 1 });
+    // 대조: 묶음 탓이 아닌 거절은 세션 없음(→ 401)
+    await expect(withOpener('TOKEN_INVALID').resolve(request(newJti()), principal())).resolves.toBeUndefined();
   });
 
   test('ST16_세션이 있고 계정·로그인 세션이 맞으면 { ref: jti, key }를 주고 key는 클라이언트가 따로 계산한 요청 인증 키와 같다 [ASVS v5.0.0-8.2.1]', async () => {

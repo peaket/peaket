@@ -60,7 +60,7 @@ const ecdh = (() => {
   return { jwk: { kty: 'EC', crv: 'P-256', x: j.x!, y: j.y!, d: j.d!, kid: 'it-ecdh-1' }, pub: createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: j.x!, y: j.y! }, format: 'jwk' }) };
 })();
 
-/** 회차 좌석맵 판(좌석 A01·A02, 판매 끝은 내일) */
+/** 회차 좌석맵 판(좌석 A01·A02·A03, 판매 끝은 내일. A03은 첫 홀드 계정 몫) */
 const layoutFile = () => ({
   perAccountLimit: 2,
   saleEndsAt: new Date(Date.now() + DAY).toISOString(),
@@ -73,10 +73,11 @@ const layoutFile = () => ({
         name: 'A구역',
         shape: { type: 'polygon', points: [] },
         tierId: 'R',
-        seatIndexRange: { from: 0, to: 1 },
+        seatIndexRange: { from: 0, to: 2 },
         seats: [
           { seatId: 'A01', row: 'A', number: 1, x: 10, y: 20, index: 0 },
           { seatId: 'A02', row: 'A', number: 2, x: 20, y: 20, index: 1 },
+          { seatId: 'A03', row: 'A', number: 3, x: 30, y: 20, index: 2 },
         ],
       },
     ],
@@ -88,7 +89,7 @@ beforeAll(async () => {
   redis = await createHotRedis({ url: valkey.url });
   seatDir = await mkdtemp(join(tmpdir(), 'peaket-bat057-'));
   await writeFile(join(seatDir, `${EVENT}.json`), JSON.stringify(layoutFile()));
-  await new RedisSeatStore(redis).openSale({ eventId: EVENT, seatCount: 2, keepUntilMs: Date.now() + 3 * DAY });
+  await new RedisSeatStore(redis).openSale({ eventId: EVENT, seatCount: 3, keepUntilMs: Date.now() + 3 * DAY });
   standIn.server = createServer(answer);
   await new Promise<void>((r) => standIn.server!.listen(0, '127.0.0.1', () => r()));
   standIn.port = (standIn.server.address() as AddressInfo).port;
@@ -125,15 +126,24 @@ afterAll(async () => {
 const ACCOUNT = '0190f3a1-7c2e-7a00-8000-0000000000a1';
 const LOGIN = 'it-login-1';
 const identity = { 'x-user-id': ACCOUNT, 'x-session-id': LOGIN, 'x-user-aud': 'fan', 'x-user-scope': 'ticket:buy' };
+/** 첫 홀드(자동 배정 공연처럼 스냅샷 없이 홀드 본문의 clientEphemeralPublicKey로 구매 세션을 여는 요청)의 계정 */
+const ACCOUNT2 = '0190f3a1-7c2e-7a00-8000-0000000000a2';
+const LOGIN2 = 'it-login-2';
+const identity2 = { 'x-user-id': ACCOUNT2, 'x-session-id': LOGIN2, 'x-user-aud': 'fan', 'x-user-scope': 'ticket:buy' };
 const app = (path: string, init: RequestInit = {}) => fetch(`http://127.0.0.1:${appPort}${path}`, init);
 const exists = async (k: string) => Number(await redis.command(['EXISTS', k], { key: k, deadlineMs: 5_000 }));
+/** 회차 Stream(s:{event:E}:stream)에 그 jti가 든 항목이 있는가(SESSION_STARTED) */
+const startedIn = async (jti: string) => {
+  const k = `s:{event:${EVENT}}:stream`;
+  return JSON.stringify(await redis.command(['XRANGE', k, '-', '+'], { key: k, deadlineMs: 5_000 })).includes(jti);
+};
 const failures = async (reason: string) => {
   const text = await (await fetch(`http://127.0.0.1:${managementPort}/metrics`)).text();
   const line = text.split('\n').find((l) => l.startsWith(`purchase_admission_jwks_fetch_failures_total{reason="${reason}"}`));
   return line === undefined ? undefined : Number(line.trim().split(/\s+/).at(-1));
 };
 
-test('Q-T69 ③④ (복구 경로 장애 주입) start()는 묶음을 받기 전 첫 사용을 503으로 닫고, 받은 뒤 구매 세션을 열며, 묶음 서버가 멈춘 뒤에도 마지막 묶음으로 홀드 다시 읽기·새 홀드·스냅샷 재요청이 이어진다', async () => {
+test('Q-T69 ③④ R057-2 (복구 경로 장애 주입) start()는 묶음을 받기 전 첫 사용(스냅샷·첫 홀드)을 503으로 닫고, 받은 뒤 구매 세션을 열며, 묶음 서버가 멈춘 뒤에도 마지막 묶음으로 홀드 다시 읽기·새 홀드·스냅샷 재요청이 이어진다', async () => {
   const jti = randomUUID();
   const token = signAdmission(ADMISSION, claimsOf({ nowMs: Date.now(), jti, accountId: ACCOUNT, loginSessionId: LOGIN, eventId: EVENT }));
   const client = clientKeyOf();
@@ -151,6 +161,21 @@ test('Q-T69 ③④ (복구 경로 장애 주입) start()는 묶음을 받기 전
     });
   };
 
+  // 첫 홀드(R057-2): 새 jti의 입장 토큰과 본문 clientEphemeralPublicKey로 홀드를 부른다(그 요청에서 구매 세션을 연다)
+  const firstJti = randomUUID();
+  const firstToken = signAdmission(ADMISSION, claimsOf({ nowMs: Date.now(), jti: firstJti, accountId: ACCOUNT2, loginSessionId: LOGIN2, eventId: EVENT }));
+  const firstClient = clientKeyOf();
+  const firstMac = Buffer.from(purchaseRequestKey(diffieHellman({ privateKey: firstClient.privateKey, publicKey: ecdh.pub }), firstJti));
+  const firstHold = () => {
+    const url = `/v1/events/${EVENT}/holds`;
+    const body = JSON.stringify({ seatIds: ['A03'], clientEphemeralPublicKey: firstClient.text });
+    return app(url, {
+      method: 'POST',
+      body,
+      headers: { ...identity2, 'content-type': 'application/json', 'idempotency-key': randomUUID(), 'x-admission-token': firstToken, 'x-purchase-seq': '1', 'x-purchase-mac': purchaseMac(firstMac, purchaseMacInput('POST', url, 1, Buffer.from(body, 'utf8'))) },
+    });
+  };
+
   // ① 한 번도 받지 못함: 503 dependency-unavailable, Retry-After 1, 표지 없음
   const until = Date.now() + 5_000;
   while (standIn.served.length === 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
@@ -162,6 +187,14 @@ test('Q-T69 ③④ (복구 경로 장애 주입) start()는 묶음을 받기 전
   expect(((await closed.json()) as { type: string }).type).toBe(`${PROBLEM_TYPE_BASE}dependency-unavailable`);
   expect(await exists(`s:jti:{${jti}}`), '503인데 구매 세션 표지를 썼다').toBe(0);
   expect(await exists(`s:session:{${jti}}`)).toBe(0);
+  // 첫 홀드도 503 dependency-unavailable·Retry-After 1이고(401로 답하지 않는다) 구매 세션을 열지 않는다(R057-2, seat-hold §2 '한 번도 받지 못했을 때')
+  const firstClosed = await firstHold();
+  expect(firstClosed.status, `첫 홀드 ${await firstClosed.clone().text()}`).toBe(503);
+  expect(firstClosed.headers.get('retry-after')).toBe('1');
+  expect(((await firstClosed.json()) as { type: string }).type).toBe(`${PROBLEM_TYPE_BASE}dependency-unavailable`);
+  expect(await exists(`s:jti:{${firstJti}}`), '첫 홀드 503인데 구매 세션 표지를 썼다').toBe(0);
+  expect(await exists(`s:session:{${firstJti}}`)).toBe(0);
+  expect(await startedIn(firstJti), '첫 홀드 503인데 SESSION_STARTED가 있다').toBe(false);
   expect(standIn.served.every((s) => s.status === 500), '실패만 냈다').toBe(true);
 
   // ② 정상 묶음: 받기 전에는 1초마다 다시 읽으므로 곧 받는다. 같은 토큰의 첫 사용이 세션을 연다
@@ -181,6 +214,10 @@ test('Q-T69 ③④ (복구 경로 장애 주입) start()는 묶음을 받기 전
   const h1 = await hold(['A01']);
   expect(h1.status).toBe(201);
   const holdId = ((await h1.json()) as { holdId: string }).holdId;
+  // 묶음을 받은 뒤 같은 입장 토큰의 첫 홀드는 구매 세션을 열고 홀드를 잡는다(R057-2)
+  const firstOpened = await firstHold();
+  expect(firstOpened.status, `받은 뒤 첫 홀드 ${await firstOpened.clone().text()}`).toBe(201);
+  expect(await exists(`s:jti:{${firstJti}}`)).toBe(1);
 
   // ③ 묶음 서버를 멈춘다(연결 거절). 모르는 kid의 첫 사용이 다시 읽기를 일으키고 실패한다 → 그 요청은 401, 실패 수 지표가 오른다
   const errorsBefore = (await failures('error')) ?? 0;

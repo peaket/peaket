@@ -5,14 +5,15 @@
 // 있다), gw-fan의 입장 토큰을 쓰지 않는 경로(api·www 앱 서버)와 다른 게이트웨이 넷은 그대로이며, 프록시가 그 까닭을 경고 로그로 남긴다. 되돌린 뒤 다시 통과한다.
 // 키 목록 바꾸기는 node tools/local/cluster.mjs gateways-admission restore|empty|remove(gw-fan 프록시를 다시 띄워 옛 파드가 사라질 때까지 기다린다)이고,
 // 깨진 JSON은 이 시험이 ConfigMap을 직접 고친 뒤 같은 방법으로 다시 띄운다. gw-fan 프록시를 다시 띄우므로 같은 클러스터의 게이트웨이 시험 맨 끝에 돈다.
+// 리뷰 반영(R057-3·R057-8): 옛 키 끝 시각의 초 경계(K8b, 게이트웨이 시계는 kind 노드 시계를 docker exec로 읽는다)와 틀린 원소가 든 목록(K13b)을 같은 법으로 더 본다(각각 끝에 restore).
 // 실행(저장소 뿌리, Docker 차례 잠금을 잡고): gateway-admission.e2e.mjs와 같은 바탕에서 node --test tools/local/e2e/gateway-admission-fault.e2e.mjs
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { kubectl } from '../cluster.mjs';
+import { CLUSTER, kubectl } from '../cluster.mjs';
 import { GATEWAYS, accessToken, admissionToken, echoed, edge, loadContract, probe, send, waitLogLine } from './gateway-client.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -46,10 +47,13 @@ async function run(mode) {
   assert.equal(r.status, 0, `cluster.mjs gateways-admission ${mode}: 종료 ${r.status}\n${r.out.slice(-1500)}`);
 }
 
-/** 깨진 JSON을 넣고 gw-fan 프록시를 다시 띄운다(cluster.mjs gateways-admission과 같은 차례: 다시 띄우기 → 준비 → 옛 파드가 사라짐) */
-async function broken() {
+/** 깨진 JSON을 넣고 gw-fan 프록시를 다시 띄운다 */
+const broken = () => writeAndRestart('{"keys":[');
+
+/** 키 목록 값을 직접 쓰고 gw-fan 프록시를 다시 띄운다(cluster.mjs gateways-admission과 같은 차례: 다시 띄우기 → 준비 → 옛 파드가 사라짐 → TLS 응답) */
+async function writeAndRestart(jwksText) {
   changed = true;
-  const cm = { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: CONFIGMAP, namespace: NS }, data: { jwks: '{"keys":[' } };
+  const cm = { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: CONFIGMAP, namespace: NS }, data: { jwks: jwksText } };
   await kubectl(['apply', '-f', '-'], { input: JSON.stringify(cm) });
   const deploys = (await kubectl(['-n', NS, 'get', 'deploy', '-l', GW_FAN, '-o', 'name'], { quiet: true })).split('\n').filter(Boolean);
   const pods = (await kubectl(['-n', NS, 'get', 'pods', '-l', GW_FAN, '-o', 'name'], { quiet: true })).split('\n').filter(Boolean);
@@ -144,4 +148,90 @@ test('Q-T69 ② (복구 경로 장애 주입) 게이트웨이 키 목록이 비�
   const expired = await buyWith('expired', `${RUN}-restore-expired`);
   assert.equal(expired.status, 401, `restore 뒤 끝 시각이 지난 옛 키: ${expired.status}`);
   await othersUnaffected('restore');
+});
+
+// ===================== BAT-057 리뷰 반영(R057-3 K8b, R057-8 K13b): 키 목록을 시험이 직접 쓴다 =====================
+
+/** 접속 정보의 개인 JWK에서 키 목록 원소(공개 부분, queue-svc 묶음 원소와 같은 칸). extra로 칸을 더하거나 바꾼다 */
+const pub = (jwk, extra = {}) => ({ kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y, kid: jwk.kid, alg: 'ES256', use: 'sig', ...extra });
+const listOf = (...keys) => JSON.stringify({ keys });
+
+/** kind 노드 시계 − 이 PC 시계(밀리초)와 그 불확실성(docker exec 왕복의 가운데, 세 번 가운데 가장 짧은 왕복). 프록시는 노드와 같은 시계를 쓴다 */
+function nodeClockOffset() {
+  let best;
+  for (let i = 0; i < 3; i++) {
+    const t0 = Date.now();
+    const out = execFileSync('docker', ['exec', `${CLUSTER}-control-plane`, 'date', '+%s%3N'], { encoding: 'utf8' }).trim();
+    const t1 = Date.now();
+    const m = { offset: Number(out) - (t0 + t1) / 2, half: (t1 - t0) / 2 };
+    assert.ok(Number.isFinite(m.offset), `노드 시계를 읽지 못했다: ${out}`);
+    if (!best || m.half < best.half) best = m;
+  }
+  return best;
+}
+/** 게이트웨이 시계로 그 초 S의 가운데(400~600ms)까지 기다린다. S가 이미 지났으면 던진다 */
+async function midOf(S, offset) {
+  for (;;) {
+    const g = Date.now() + offset;
+    const s = Math.floor(g / 1000);
+    const frac = g - s * 1000;
+    if (s > S || (s === S && frac > 600)) throw new Error(`게이트웨이 시계의 초 ${S}가 이미 지났다(지금 ${s}.${frac})`);
+    if (s === S && frac >= 400) return;
+    await new Promise((r) => setTimeout(r, Math.max(10, (S - s) * 1000 + 400 - frac)));
+  }
+}
+
+test('Q-T69 ② R057-3 (복구 경로) 옛 키 원소의 peaket_until = U이면 게이트웨이 시계의 초 U에는 옛 키 토큰이 대역에 닿고 U + 1에는 401이며 접근 로그에 그 401 줄이 있다. 지금 키는 두 초 모두 통과한다', async () => {
+  assert.ok(c.admission, '접속 정보에 admission 칸이 없다(BAT-057 계획 §5)');
+  const { offset, half } = nodeClockOffset();
+  assert.ok(half <= 300, `노드 시계 차를 ${half}ms 오차로만 쟀다(docker exec가 느리다)`);
+  // 다시 띄우는 데 약 40초(2026-11-19 kind). 끝 시각은 그보다 넉넉히 뒤(게이트웨이 시계 + 120초)
+  const U = Math.floor((Date.now() + offset) / 1000) + 120;
+  await writeAndRestart(listOf(pub(c.admission.current), pub(c.admission.next), pub(c.admission.previous.jwk, { peaket_until: U })));
+  const readyAt = Math.floor((Date.now() + offset) / 1000);
+  assert.ok(readyAt < U - 2, `프록시가 준비된 때(${readyAt})가 끝 시각(${U})에 너무 가깝다`);
+  await midOf(U, offset);
+  const atU = await buyWith('previous', `${RUN}-k8b-at`);
+  const curU = await buyWith('current', `${RUN}-k8b-cur-at`);
+  await midOf(U + 1, offset);
+  const afterU = await buyWith('previous', `${RUN}-k8b-after`);
+  const curAfter = await buyWith('current', `${RUN}-k8b-cur-after`);
+  assert.ok(atU.status < 400 && isEcho(atU), `초 U의 옛 키: ${atU.status} ${atU.text.slice(0, 160)}`);
+  assert.equal(afterU.status, 401, `초 U + 1의 옛 키: ${afterU.status} ${afterU.text.slice(0, 160)}`);
+  assert.ok(!isEcho(afterU), '초 U + 1의 옛 키가 대역에 닿았다');
+  assert.deepEqual(JSON.parse(afterU.text), INVALID_BODY, '초 U + 1의 본문');
+  for (const [r, label] of [
+    [curU, '초 U 지금 키'],
+    [curAfter, '초 U + 1 지금 키'],
+  ])
+    assert.ok(r.status < 400 && isEcho(r), `${label}: ${r.status}`);
+  const lines = await waitLogLine(c, 'gw-fan', `/v1/events/${RUN}-k8b-after/seatmap-snapshot`);
+  assert.ok(lines.some((l) => String(l.status) === '401'), `접근 로그의 401 줄: ${JSON.stringify(lines.map((l) => l.status))}`);
+  await run('restore');
+  changed = false;
+});
+
+test('HOT-400 R057-8 (복구 경로) 키 목록에 틀린 원소가 하나라도 있으면(d가 든 원소·같은 kid·peaket_until 소수) 목록 전체를 쓰지 않아 지금 키 토큰도 401이고 접근 로그에 그 401과 경고 로그가 있다. restore 뒤 다시 통과한다', async () => {
+  assert.ok(c.admission, '접속 정보에 admission 칸이 없다(BAT-057 계획 §5)');
+  const good = pub(c.admission.current);
+  const stages = [
+    ['d가 든 원소', listOf(good, { ...pub(c.admission.next), d: c.admission.next.d })],
+    ['같은 kid', listOf(good, pub(c.admission.next, { kid: c.admission.current.kid }))],
+    ['peaket_until 소수', listOf(good, pub(c.admission.previous.jwk, { peaket_until: 1.5 }))],
+  ];
+  for (const [stage, text] of stages) {
+    await writeAndRestart(text);
+    const event = `${RUN}-k13b-${stages.findIndex(([s]) => s === stage)}`;
+    const r = await buyWith('current', event);
+    assert.equal(r.status, 401, `${stage}: 지금 키 ${r.status} ${r.text.slice(0, 160)}`);
+    assert.ok(!isEcho(r), `${stage}: 대역에 닿았다(좋은 원소만 골라 썼다)`);
+    assert.deepEqual(JSON.parse(r.text), INVALID_BODY, `${stage}: 본문`);
+    const lines = await waitLogLine(c, 'gw-fan', `/v1/events/${event}/seatmap-snapshot`);
+    assert.ok(lines.some((l) => String(l.status) === '401'), `${stage}: 접근 로그에 401 줄이 없다`);
+    assert.match(await proxyLog(), /admission jwks unusable/, `${stage}: 경고 로그가 없다`);
+  }
+  await run('restore');
+  changed = false;
+  const back = await buyWith('current', `${RUN}-k13b-restore`);
+  assert.ok(back.status < 400 && isEcho(back), `restore 뒤 지금 키: ${back.status}`);
 });
