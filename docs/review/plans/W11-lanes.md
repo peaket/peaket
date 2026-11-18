@@ -96,7 +96,43 @@
 
 ## 검증
 
-(아직)
+- 담당 `w11-lanes-verify-9b61`(claude-opus-5-5), B 등급 틀린 구현 검사와 기준 대조(architecture §8.6 4 '역할 나누기'). 대상은 머리 `230431b8`. 작업 폴더와 다른 임시 사본(`git worktree add --detach`, 끝나고 `git worktree remove --force`)에서 `tools/ci/records.mjs`에 결함을 하나씩 넣고 `node --test tools/ci/records.test.mjs`(시험 51개)를 돌린 뒤 원래대로 되돌렸다. 결함 없는 사본은 51개 모두 통과.
+- 결과: **넣은 수 22, 잡힌 수 21, 놓친 수 1.**
+
+| # | 틀린 구현 | 결과 | 잡은 시험 |
+| --- | --- | --- | --- |
+| M1 | lane4만 더함(lane5 빠짐) | 잡힘 | RS-03(lane5)·RS-10·RS-12 |
+| M2 | lane5만 더함(lane4 빠짐) | 잡힘 | RS-03(lane4)·RS-10·RS-12 |
+| M3 | `docs/lanes/`의 `lane*.md` 글롭(정리 목록·lane6도 봄) | 잡힘 | RS-04·RS-10·RS-13 |
+| M4 | `docs/lanes/`의 `.md`를 모두 보되 `-cleanup`만 뺌(coord·lane6 봄) | 잡힘 | RS-04·RS-10·RS-13 |
+| M5 | `lane\d+\.md`로 폴더 훑기(lane6 봄) | 잡힘 | RS-10·RS-13 |
+| M6a | 경로 오타 `docs/lanes/` 아래 `lane-4.md` | 잡힘 | RS-03(lane4)·RS-10·RS-12 |
+| M6b | 경로 오타 `docs/` 바로 아래 `lane5.md` | 잡힘 | RS-03(lane5)·RS-10·RS-12 |
+| M7 | 목록에서 `docs/PROGRESS.md`를 빠뜨림 | 잡힘 | RS-02·05~10·12 |
+| M8 | 새 두 파일이 없으면 오류로 던져 2로 끝남 | 잡힘 | RS-01~06·08·10·12·13과 명령줄 시험 7개(시험 사본에 갈래 4·5 파일이 없는 경우) |
+| V1 | 비교를 `>`에서 `>=`로(40,960도 걸림) | 잡힘 | RS-01·RS-06 |
+| V2 | CRLF를 LF로 바꾸지 않고 잼 | 잡힘 | RS-06 |
+| V3 | 바이트 대신 글자 수로 잼 | 잡힘 | RS-02·03·05~10·12 |
+| V4 | 없는 파일에서 멈춤(`continue` → `break`) | 잡힘 | RS-10 |
+| V5 | 없는 파일 경고를 찍지 않음 | 잡힘 | RS-10(경고 정확히 6줄) |
+| V6 | 알림 글에 바이트 수를 빼먹음 | 잡힘 | RS-02·03·05~07·10·12 |
+| V7 | 걸린 파일 가운데 첫 하나만 알림 | 잡힘 | RS-08·RS-12 |
+| V8 | 맞추기(인자 없음)가 크기로 1로 끝남 | 잡힘 | RS-09 |
+| V9 | 맞추기가 크기 경고를 찍지 않음 | 잡힘 | RS-09 |
+| V10 | 갈래 파일만 `>=`(PROGRESS는 `>` 그대로) | **놓침** | 없음 |
+| V11 | 목록에 lane4를 두 번 적음(같은 줄 두 번) | 잡힘 | RS-03(lane4)·RS-10·RS-12 |
+| V12 | 갈래 6·7(`lane6.md`·`lane7.md`)을 미리 목록에 더함 | 잡힘 | RS-13 |
+| V13 | 감독 기록 `docs/lanes/coord.md`를 목록에 넣음 | 잡힘 | RS-04 |
+
+- 놓친 것 처리(ADR-0283 결정 2)
+  - **V10 — 통과 기준에 걸림, 이 묶음에서 시험 담당이 시험을 더한다.** 계획 1의 3('상한·`>` 비교는 그대로')과 ADR-0283 결정 1('40,960 그대로는 통과')은 여섯 파일 모두에 쓰이는데, 경계 그대로(40,960바이트) 사례는 RS-01·RS-06이 `docs/PROGRESS.md`로만 본다. 그래서 갈래 파일(특히 새 lane4·lane5)에만 비교가 갈리는 구현은 지금 시험으로 못 잡는다. 지금 코드(`records.mjs` 비교 한 줄, 상수 하나)에는 결함이 없다. 더할 시험(제안): RS-12 옆에 '여섯 파일이 모두 40,960바이트면 `--check` 0, 출력에 여섯 경로 없음'. 리뷰 RV-03과 같은 빈칸이며, 리뷰는 정리 목록으로 보냈으나 검증은 통과 기준에 걸린다고 본다. 시험만 더하는 일이라 `Role: test` 커밋 뒤 검증을 다시 한다.
+  - 나머지 놓친 것은 없다(정리 목록으로 보낼 것 없음).
+- 기준 대조
+  - 시험의 정확한 값: 경로 여섯은 `LANES`·`SIZE_FILES`와 RS-12의 `six`에 글로 적었고 `records.mjs` 상수를 가져오지 않는다. 상한은 `LIMIT = 40960`(RS-01 40,960 통과·RS-02 40,961 걸림), LF는 RS-06(CRLF 40,960 통과·40,961 걸림), 정리 목록·`coord.md`·보관 파일 제외는 RS-04(각 100,000바이트, 출력에 `cleanup`·`coord`·`progress-archive` 없음), 목록 밖 lane6은 RS-13, 끝 코드는 `--check` 0·1(RS-01·02·04·10·12·13), 맞추기 0(RS-09), 없는 파일은 2가 아님(RS-10), 읽을 표 파일이 없으면 2(명령줄 시험)를 정확한 값으로 단언한다.
+  - 정본과 코드·글: `RECORD_SIZE_FILES`(`tools/ci/records.mjs` 290~297줄) 여섯 경로, 머리 주석 11~14줄, `tools/ci/README.md` `records.mjs` 행(lane1~lane5, 정리 목록·`coord.md`·보관 파일 뺌)이 ADR-0283 결정 1(lane1~3에 ADR-0286으로 lane4·5, `coord.md` 뺌), ADR-0286 '확인' 둘째 줄, architecture §8.6 4 '10.'(lane1~lane5), `origin/develop`(`658eeb47`)의 `docs/PROGRESS.md` 15줄(lane1~lane5, `coord.md`·`lane*-cleanup.md` 뺌)과 맞는다. ADR-0283 결정 1의 정리 목록 예시가 lane1~3뿐인 것은 리뷰 RV-02대로 정리 목록 몫.
+  - 참고: 이 가지는 `08120a67`에서 갈라져 `origin/develop`의 `07a3eae8`·`658eeb47`이 아직 없다(합칠 때 다시 쌓기). 작업 폴더에 추적하지 않는 `docs/lanes/lane4-cleanup.md`가 있으나 이 묶음 커밋에는 없다. 실제 기록 파일 크기는 PROGRESS 33,811·lane1 19,074·lane2 12,638·lane3 11,211·lane4 2,390·lane5 2,418바이트(LF 기준)로 모두 상한 안이다.
+- 고친 곳 확인: 리뷰 RV-01 고침 `230431b8`(`Role: impl`, 세션 `w11-lanes-impl-7e2b`)은 이 파일 '## 담당 표'에 impl 행 한 줄만 더했다(바꾼 파일 하나, 1줄 더함·지움 0). 코드·시험은 건드리지 않았다.
+- 점검: `python -I -X utf8 tools/doc-check/check_all.py` 오류 0. `node tools/ci/roles-check.mjs --base 08120a67`는 이 커밋 뒤 결과를 커밋 본문에 적는다.
 
 ## 담당 표
 
@@ -106,5 +142,6 @@
 | impl | w11-lanes-impl-7e2b | claude-opus-5-5 | 2026-11-18T20:50+09:00 | 2026-11-18T21:04+09:00 |
 | test | w11-lanes-test-c3d9 | claude-opus-5-5 | 2026-11-18T20:53+09:00 | 2026-11-18T20:59+09:00 |
 | review | w11-lanes-review-5f80 | claude-opus-5-5 | 2026-11-18T20:59+09:00 | 2026-11-18T21:05+09:00 |
+| verify | w11-lanes-verify-9b61 | claude-opus-5-5 | 2026-11-18T21:05+09:00 | 2026-11-18T21:36+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다.
