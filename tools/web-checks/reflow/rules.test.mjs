@@ -16,6 +16,9 @@ import {
   unreachableFindings,
 } from './rules.mjs';
 import { lighthousePages } from '../budgets/pages.mjs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 test('FE-T31 뷰포트 둘은 320×256(400% 확대)과 640×400(200% 확대)이다', () => {
   assert.deepEqual(REFLOW_VIEWPORTS, [
@@ -236,4 +239,33 @@ test('FE-T31 겹침: 예외 밖 보이는 글자 노드 둘의 줄 사각형이 
   // 셋 가운데 포개진 짝만
   assert.deepEqual(pairs([base, { node: 'b', left: 50, top: 5, width: 100, height: 20 }, { node: 'c', left: 500, top: 0, width: 10, height: 10 }]), ['a|b']);
   assert.deepEqual(overlapFindings([]), []);
+});
+
+// BAT-171 리뷰 R171-2 재현(시험 담당 l2-bat171-test, Role: review-fix). 기준 docs/frontend.md §5.11 '초점이 가려지지 않게'
+// (높이는 그 띠가 지금 그려진 실제 높이다. 한 값으로 박아 둔 여백이 띠보다 작으면 결함이다). 결제 화면의 띠는 운영 빌드에서 시험 화면으로 열 길이 없어
+// (홀드·주문을 가짜 API로 만들 수 없다) 브라우저 시험(keyboard.spec의 굿즈·가입·취소 화면)과 함께 소스에서도 본다: 소비자 웹의 sticky·fixed 하단 띠(.bottom-bar)는
+// 모두 ref를 달고, 그 파일이 아래 띠 높이 훅 useStickyInset('bottom')을 쓴다. 띠가 하나도 없으면 빈 결과로 실패한다
+test('FE-T18 소비자 웹의 sticky·fixed 하단 띠(.bottom-bar)는 모두 그려진 높이를 아래 스크롤 여백으로 넘기는 ref를 단다', () => {
+  const src = resolve(dirname(fileURLToPath(import.meta.url)), '../../../apps/web/src');
+  const files = [];
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const f = join(d, e.name);
+      if (e.isDirectory()) walk(f);
+      else if (f.endsWith('.tsx')) files.push(f);
+    }
+  };
+  walk(src);
+  const bars = [];
+  for (const f of files) {
+    const text = readFileSync(f, 'utf8');
+    for (const m of text.matchAll(/<div\b[^>]*\bclassName="([^"]*)"[^>]*>/g)) {
+      const cls = m[1].split(/\s+/);
+      if (!cls.includes('bottom-bar') || !(cls.includes('sticky') || cls.includes('fixed'))) continue;
+      const at = `${relative(src, f).replaceAll('\\', '/')}:${text.slice(0, m.index).split('\n').length}`;
+      bars.push({ at, ref: /\sref=\{/.test(m[0]), hook: /useStickyInset\(\s*'bottom'\s*\)/.test(text) });
+    }
+  }
+  assert.ok(bars.length > 0, 'apps/web/src에 sticky·fixed 하단 띠(.bottom-bar)가 없다(빈 결과)');
+  assert.deepEqual(bars.filter((b) => !b.ref || !b.hook).map((b) => b.at), [], '그려진 높이를 재지 않는 하단 띠(96px 기본 여백에 기댄다)');
 });
