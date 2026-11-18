@@ -53,7 +53,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 
 {{/* 진단 수집(RB-31, ADR-0070 결정 1, docs/devops.md D-T18 ①)의 환경 변수. 서비스·릴레이 컨테이너가 받는다.
     NODE_OPTIONS: SIGUSR1 인스펙터 끄기, 치명 오류 보고서를 /diag에(환경 변수·네트워크 칸 없음), V8 힙 상한은 메모리 한도의 heapPercent(기본 75%) [가정].
-    값으로 받은 NODE_OPTIONS(env·서비스/릴레이 env)는 뒤에 붙인다. 주석은 Downward API 파일로, 메모리 한도는 resourceFieldRef로 받는다.
+    값으로 받은 NODE_OPTIONS(env·서비스/릴레이 env)는 안전 옵션 앞에 둔다(같은 옵션은 뒤의 것이 이긴다). 안전 옵션을 끄는 값(--no-…·--inspect…)은 렌더를 멈춘다(ADR-0303 결정 3, 리뷰 SEC-02).
+    local·ci 밖(staging·prod·demo)은 증거 버킷 diagnose.bucket이 있어야 하고, 흉내 S3 주소 diagnose.s3Endpoint는 local·ci에서만 받는다(리뷰 SEC-06·SEC-01).
+    주석은 Downward API 파일로, 메모리 한도는 resourceFieldRef로 받는다.
     인자: dict "root" 차트 "resources" 컨테이너 자원 "extra" 덧붙일 NODE_OPTIONS "where" 값 이름 */}}
 {{- define "peaket.diagnoseEnv" -}}
 {{- $root := .root -}}
@@ -61,9 +63,21 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $percent := int $root.Values.diagnose.heapPercent -}}
 {{- if or (lt $percent 10) (gt $percent 90) -}}{{- fail "diagnose.heapPercent는 10~90이다" -}}{{- end -}}
 {{- $heapMi := div (mul $limitMi $percent) 100 -}}
-{{- $opts := list "--disable-sigusr1" "--report-on-fatalerror" "--report-exclude-env" "--report-exclude-network" "--report-directory=/diag" (printf "--max-old-space-size=%d" $heapMi) -}}
+{{- $env := toString ($root.Values.env.PEAKET_ENV | default "") -}}
+{{- $testEnv := has $env (list "local" "ci") -}}
+{{- if not $testEnv -}}
+{{- $_ := required (printf "diagnose.bucket(진단 증거 버킷)이 필요하다(PEAKET_ENV %s, local·ci 밖은 버킷이 없으면 서비스가 시작하지 않는다, RB-31)" $env) $root.Values.diagnose.bucket -}}
+{{- if $root.Values.diagnose.s3Endpoint -}}{{- fail (printf "diagnose.s3Endpoint(흉내 S3 주소)는 PEAKET_ENV local·ci에서만 쓴다(%s, 증거는 전용 버킷으로만 보낸다)" $env) -}}{{- end -}}
+{{- end -}}
+{{- $opts := list -}}
 {{- with $root.Values.env.NODE_OPTIONS }}{{ $opts = append $opts (toString .) }}{{ end -}}
 {{- with .extra }}{{ $opts = append $opts (toString .) }}{{ end -}}
+{{- range $opts -}}
+{{- if regexMatch "(^|\\s)--(no-disable-sigusr1|no-report-exclude-env|no-report-exclude-network|no-report-on-fatalerror|inspect)(=|-|\\s|$)" . -}}
+{{- fail (printf "%s.env·env의 NODE_OPTIONS에 진단 안전 옵션을 끄는 값이 있다(%s, --no-disable-sigusr1·--no-report-*·--inspect…는 받지 않는다)" $.where .) -}}
+{{- end -}}
+{{- end -}}
+{{- $opts = concat $opts (list "--disable-sigusr1" "--report-on-fatalerror" "--report-exclude-env" "--report-exclude-network" "--report-directory=/diag" (printf "--max-old-space-size=%d" $heapMi)) -}}
 - name: NODE_OPTIONS
   value: {{ join " " $opts | quote }}
 - name: PEAKET_DIAG_ANNOTATIONS_FILE
