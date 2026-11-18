@@ -649,109 +649,113 @@ export function MainT({ v, close, go }: { v: V; close?: () => void; go?: (state:
                   </div>
                   {v.isPaused ? (
                     <>
-                      <svg className="chart" viewBox="0 0 690 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:01:40입니다.">
-                        <line className="grid" x1="46" y1="40" x2="676" y2="40" />
-                        <line className="grid" x1="46" y1="65" x2="676" y2="65" />
-                        <line className="grid" x1="46" y1="90" x2="676" y2="90" />
-                        <line className="grid" x1="46" y1="115" x2="676" y2="115" />
-                        <line className="grid" x1="46" y1="140" x2="676" y2="140" />
-                        <text className="axis" x="40" y="44" textAnchor="end">8초</text>
-                        <text className="axis" x="40" y="69" textAnchor="end">6초</text>
-                        <text className="axis" x="40" y="94" textAnchor="end">4초</text>
-                        <text className="axis" x="40" y="119" textAnchor="end">2초</text>
-                        <text className="axis" x="40" y="144" textAnchor="end">0</text>
-                        <text className="axis" x="46" y="160" textAnchor="middle">11:00</text>
-                        <text className="axis" x="203.5" y="160" textAnchor="middle">11:05</text>
-                        <text className="axis" x="361" y="160" textAnchor="middle">11:10</text>
-                        <text className="axis" x="518.5" y="160" textAnchor="middle">11:15</text>
-                        <text className="axis" x="676" y="160" textAnchor="middle">11:20</text>
-                        <line className="slo-line" x1="46" y1="77.5" x2="676" y2="77.5" />
-                        <text className="axis" x="672" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
-                        <polyline className="line" points="46.0,125 61.8,123.8 77.5,124.4 93.3,105 98.5,72.5 109.0,65 124.8,63.8 140.5,66.3 156.3,68.8 172.0,75 187.8,82.5 219.3,88.8 250.8,95 282.3,102.5 313.8,110 345.3,116.3 376.8,120 408.3,122.5 439.8,122.5 458.1,121.3 471.3,113.8 487.0,117.5 518.5,121.3 550.0,122.5 581.5,123.8 613.0,123.8 644.5,125 676.0,125" />
-                        <line className="now" x1="98.5" y1="23" x2="98.5" y2="142" />
-                        <circle cx="98.5" cy="14" r="7" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="114.3" cy="31" r="7" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="121.6" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="168.3" cy="31" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="376.8" cy="31" r="7" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="458.1" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="614" cy="31" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <text x="98.5" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          1
-                        </text>
-                        <text x="114.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          2
-                        </text>
-                        <text x="121.6" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          3
-                        </text>
-                        <text x="168.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          4
-                        </text>
-                        <text x="376.8" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          5
-                        </text>
-                        <text x="458.1" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          6
-                        </text>
-                        <text x="614" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          7
-                        </text>
-                      </svg>
+                      <div data-reflow-exception="">
+                        <svg className="chart" viewBox="0 0 690 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:01:40입니다.">
+                          <line className="grid" x1="46" y1="40" x2="676" y2="40" />
+                          <line className="grid" x1="46" y1="65" x2="676" y2="65" />
+                          <line className="grid" x1="46" y1="90" x2="676" y2="90" />
+                          <line className="grid" x1="46" y1="115" x2="676" y2="115" />
+                          <line className="grid" x1="46" y1="140" x2="676" y2="140" />
+                          <text className="axis" x="40" y="44" textAnchor="end">8초</text>
+                          <text className="axis" x="40" y="69" textAnchor="end">6초</text>
+                          <text className="axis" x="40" y="94" textAnchor="end">4초</text>
+                          <text className="axis" x="40" y="119" textAnchor="end">2초</text>
+                          <text className="axis" x="40" y="144" textAnchor="end">0</text>
+                          <text className="axis" x="46" y="160" textAnchor="middle">11:00</text>
+                          <text className="axis" x="203.5" y="160" textAnchor="middle">11:05</text>
+                          <text className="axis" x="361" y="160" textAnchor="middle">11:10</text>
+                          <text className="axis" x="518.5" y="160" textAnchor="middle">11:15</text>
+                          <text className="axis" x="676" y="160" textAnchor="middle">11:20</text>
+                          <line className="slo-line" x1="46" y1="77.5" x2="676" y2="77.5" />
+                          <text className="axis" x="672" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
+                          <polyline className="line" points="46.0,125 61.8,123.8 77.5,124.4 93.3,105 98.5,72.5 109.0,65 124.8,63.8 140.5,66.3 156.3,68.8 172.0,75 187.8,82.5 219.3,88.8 250.8,95 282.3,102.5 313.8,110 345.3,116.3 376.8,120 408.3,122.5 439.8,122.5 458.1,121.3 471.3,113.8 487.0,117.5 518.5,121.3 550.0,122.5 581.5,123.8 613.0,123.8 644.5,125 676.0,125" />
+                          <line className="now" x1="98.5" y1="23" x2="98.5" y2="142" />
+                          <circle cx="98.5" cy="14" r="7" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="114.3" cy="31" r="7" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="121.6" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="168.3" cy="31" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="376.8" cy="31" r="7" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="458.1" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="614" cy="31" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <text x="98.5" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            1
+                          </text>
+                          <text x="114.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            2
+                          </text>
+                          <text x="121.6" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            3
+                          </text>
+                          <text x="168.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            4
+                          </text>
+                          <text x="376.8" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            5
+                          </text>
+                          <text x="458.1" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            6
+                          </text>
+                          <text x="614" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            7
+                          </text>
+                        </svg>
+                      </div>
                     </>
                   ) : null}
                   {' '}
                   {v.isPlaying ? (
                     <>
-                      <svg className="chart" viewBox="0 0 690 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:03:55입니다.">
-                        <line className="grid" x1="46" y1="40" x2="676" y2="40" />
-                        <line className="grid" x1="46" y1="65" x2="676" y2="65" />
-                        <line className="grid" x1="46" y1="90" x2="676" y2="90" />
-                        <line className="grid" x1="46" y1="115" x2="676" y2="115" />
-                        <line className="grid" x1="46" y1="140" x2="676" y2="140" />
-                        <text className="axis" x="40" y="44" textAnchor="end">8초</text>
-                        <text className="axis" x="40" y="69" textAnchor="end">6초</text>
-                        <text className="axis" x="40" y="94" textAnchor="end">4초</text>
-                        <text className="axis" x="40" y="119" textAnchor="end">2초</text>
-                        <text className="axis" x="40" y="144" textAnchor="end">0</text>
-                        <text className="axis" x="46" y="160" textAnchor="middle">11:00</text>
-                        <text className="axis" x="203.5" y="160" textAnchor="middle">11:05</text>
-                        <text className="axis" x="361" y="160" textAnchor="middle">11:10</text>
-                        <text className="axis" x="518.5" y="160" textAnchor="middle">11:15</text>
-                        <text className="axis" x="676" y="160" textAnchor="middle">11:20</text>
-                        <line className="slo-line" x1="46" y1="77.5" x2="676" y2="77.5" />
-                        <text className="axis" x="672" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
-                        <polyline className="line" points="46.0,125 61.8,123.8 77.5,124.4 93.3,105 98.5,72.5 109.0,65 124.8,63.8 140.5,66.3 156.3,68.8 172.0,75 187.8,82.5 219.3,88.8 250.8,95 282.3,102.5 313.8,110 345.3,116.3 376.8,120 408.3,122.5 439.8,122.5 458.1,121.3 471.3,113.8 487.0,117.5 518.5,121.3 550.0,122.5 581.5,123.8 613.0,123.8 644.5,125 676.0,125" />
-                        <line className="now" x1="169.3" y1="23" x2="169.3" y2="142" />
-                        <circle cx="98.5" cy="14" r="7" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="114.3" cy="31" r="7" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="121.6" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="168.3" cy="31" r="8" style={{ fill: "var(--link)", stroke: "var(--text)", strokeWidth: "2" }} />
-                        <circle cx="376.8" cy="31" r="7" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="458.1" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="614" cy="31" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <text x="98.5" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          1
-                        </text>
-                        <text x="114.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          2
-                        </text>
-                        <text x="121.6" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          3
-                        </text>
-                        <text x="168.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          4
-                        </text>
-                        <text x="376.8" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          5
-                        </text>
-                        <text x="458.1" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          6
-                        </text>
-                        <text x="614" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
-                          7
-                        </text>
-                      </svg>
+                      <div data-reflow-exception="">
+                        <svg className="chart" viewBox="0 0 690 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:03:55입니다.">
+                          <line className="grid" x1="46" y1="40" x2="676" y2="40" />
+                          <line className="grid" x1="46" y1="65" x2="676" y2="65" />
+                          <line className="grid" x1="46" y1="90" x2="676" y2="90" />
+                          <line className="grid" x1="46" y1="115" x2="676" y2="115" />
+                          <line className="grid" x1="46" y1="140" x2="676" y2="140" />
+                          <text className="axis" x="40" y="44" textAnchor="end">8초</text>
+                          <text className="axis" x="40" y="69" textAnchor="end">6초</text>
+                          <text className="axis" x="40" y="94" textAnchor="end">4초</text>
+                          <text className="axis" x="40" y="119" textAnchor="end">2초</text>
+                          <text className="axis" x="40" y="144" textAnchor="end">0</text>
+                          <text className="axis" x="46" y="160" textAnchor="middle">11:00</text>
+                          <text className="axis" x="203.5" y="160" textAnchor="middle">11:05</text>
+                          <text className="axis" x="361" y="160" textAnchor="middle">11:10</text>
+                          <text className="axis" x="518.5" y="160" textAnchor="middle">11:15</text>
+                          <text className="axis" x="676" y="160" textAnchor="middle">11:20</text>
+                          <line className="slo-line" x1="46" y1="77.5" x2="676" y2="77.5" />
+                          <text className="axis" x="672" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
+                          <polyline className="line" points="46.0,125 61.8,123.8 77.5,124.4 93.3,105 98.5,72.5 109.0,65 124.8,63.8 140.5,66.3 156.3,68.8 172.0,75 187.8,82.5 219.3,88.8 250.8,95 282.3,102.5 313.8,110 345.3,116.3 376.8,120 408.3,122.5 439.8,122.5 458.1,121.3 471.3,113.8 487.0,117.5 518.5,121.3 550.0,122.5 581.5,123.8 613.0,123.8 644.5,125 676.0,125" />
+                          <line className="now" x1="169.3" y1="23" x2="169.3" y2="142" />
+                          <circle cx="98.5" cy="14" r="7" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="114.3" cy="31" r="7" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="121.6" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="168.3" cy="31" r="8" style={{ fill: "var(--link)", stroke: "var(--text)", strokeWidth: "2" }} />
+                          <circle cx="376.8" cy="31" r="7" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="458.1" cy="14" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="614" cy="31" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <text x="98.5" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            1
+                          </text>
+                          <text x="114.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            2
+                          </text>
+                          <text x="121.6" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            3
+                          </text>
+                          <text x="168.3" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            4
+                          </text>
+                          <text x="376.8" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            5
+                          </text>
+                          <text x="458.1" y="17.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            6
+                          </text>
+                          <text x="614" y="34.5" textAnchor="middle" style={{ fill: "var(--surface)", fontSize: "9px", fontWeight: "700", fontFamily: "var(--font)" }}>
+                            7
+                          </text>
+                        </svg>
+                      </div>
                     </>
                   ) : null}
                   <ol aria-label="리플레이 이벤트" style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "8px 16px" }}>

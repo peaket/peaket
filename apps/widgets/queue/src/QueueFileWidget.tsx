@@ -38,23 +38,25 @@ export function QueueFileWidget({ data, ...base }: QueueFileWidgetProps) {
         <span className={data.ok ? 'slo slo-ok' : 'slo slo-burning'}>{data.status}</span>
         <span className="stat-meta">{data.meta}</span>
       </div>
-      <svg className="chart" viewBox="0 0 260 72" role="img" aria-label={data.chart.aria}>
-        <line className="grid" x1="28" y1="50" x2="252" y2="50" />
-        <line className="slo-line" x1="28" y1="14.8" x2="252" y2="14.8" />
-        <text className="axis" x="248" y="11" textAnchor="end">
-          기준 2초
-        </text>
-        <text className="axis" x="22" y="53" textAnchor="end">
-          0
-        </text>
-        <polyline className="line" points={data.chart.points} />
-        <line className="now" x1={data.chart.nowX} y1="3" x2={data.chart.nowX} y2="52" />
-        {data.chart.ticks.map((t) => (
-          <text key={t.label} className="axis" x={t.x} y="67" textAnchor="middle">
-            {t.label}
+      <div data-reflow-exception="">
+        <svg className="chart" viewBox="0 0 260 72" role="img" aria-label={data.chart.aria}>
+          <line className="grid" x1="28" y1="50" x2="252" y2="50" />
+          <line className="slo-line" x1="28" y1="14.8" x2="252" y2="14.8" />
+          <text className="axis" x="248" y="11" textAnchor="end">
+            기준 2초
           </text>
-        ))}
-      </svg>
+          <text className="axis" x="22" y="53" textAnchor="end">
+            0
+          </text>
+          <polyline className="line" points={data.chart.points} />
+          <line className="now" x1={data.chart.nowX} y1="3" x2={data.chart.nowX} y2="52" />
+          {data.chart.ticks.map((t) => (
+            <text key={t.label} className="axis" x={t.x} y="67" textAnchor="middle">
+              {t.label}
+            </text>
+          ))}
+        </svg>
+      </div>
       <ul className="col t-xs" style={{ gap: 6 }}>
         {data.steps.map((s) => (
           <li key={s.label} className="row between">
