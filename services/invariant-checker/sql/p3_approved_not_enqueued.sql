@@ -9,7 +9,8 @@ base AS (
          (SELECT max(e.occurred_at) FROM pg_temp.payment_event e
             WHERE e.payment_id = pay.id AND e.type = 'RESOLVED') AS resolved_at
   FROM pg_temp.payment pay
-  WHERE pay.approved_at IS NOT NULL
+  -- 결제 원장 order_kind가 TICKET인 결제만 본다. 굿즈·티켓 연동 부가 상품(MERCH)은 purchase 주문·발권이 없다(docs/verification.md §2.5, ADR-0299 결정 1, BAT-600)
+  WHERE pay.approved_at IS NOT NULL AND pay.order_kind = 'TICKET'
 ),
 p AS (
   SELECT b.id, b.order_id, b.amount, b.approved_at, b.resolved_at,
