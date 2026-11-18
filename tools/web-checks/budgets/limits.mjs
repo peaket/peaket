@@ -11,8 +11,8 @@ export function jsLimit(budget, baseline) {
   return Math.round((baseline + JS_OVER_BUDGET_MARGIN) * 100) / 100;
 }
 
-/** Lighthouse를 주소마다 몇 번 재는가 [가정](가운데 값을 쓴다, docs/frontend.md §5.8 'Lighthouse CI') */
-export const RUNS = 3;
+/** Lighthouse를 주소마다 다섯 번 [가정] 잰다(작은 차례로 늘어놓은 셋째 값, 곧 가운데 값으로 판정한다, docs/frontend.md §5.8 'Lighthouse CI', BAT-174) */
+export const RUNS = 5;
 
 /**
  * 적재 지표가 목표를 넘은 주소가 기준선보다 더 나빠져도 되는 여유 [가정]: 시간은 25%, CLS는 0.02.
