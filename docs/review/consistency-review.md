@@ -788,6 +788,8 @@
 | R-692 | 게이트웨이 프록시 Envoy 일꾼 수가 기본(노드 스레드 수 32)이라 차단 상한의 여유 배수 k가 운영과 다른 무대에서 셈해졌다(OPEN[49] (가)) | deploy/gateways(EnvoyProxy 둘 spec.concurrency·resources, 다섯 게이트웨이 차단 상한), tools/local/gateway-objects.mjs, loadtest/runner(gw·gw-run·run·args), docs/infra.md·verification.md·architecture.md·ledger-notes, 측정 보고서, ADR-0287 | 정방향 B 짧은 고리(계획·구현·독립 시험·리뷰·리뷰 반영·검증), 첫 측정(k 5.0)을 리뷰가 무대 탓으로 보류, 미리 커밋한 결정 규칙의 진단 측정(gw-queue CPU 요청 2, k 3.9)으로 상한을 정함, gw limits 되돌릴 조건 정수 비교·일꾼 수 섞임 막기 | 완료(로컬 시험·kind·Docker 시험 통과, 측정 창 둘) |
 | R-694 | realtime-gw에 전파 Degraded 자동 전환(S-T14)이 없었고, 첫 판정 방식은 1초 간격에서 박자 늦음이 쌓여 평시로 돌아오지 못했다 | services/realtime-gw, ADR-0298, docs/features/seat-hold.md, docs/frontend.md, docs/api/asyncapi.yaml, docs/observability.md, docs/review/plans/BAT-053.md | 박자 늦음 판정·고정 격자 차례·버퍼 1초 연결 처리와 시험 S-T14 ①~③(BAT-053) | 적용 |
 | R-695 | BAT-166 SR-T13 ① 다시 재기·로마자 입력 500 | core-svc 검색·search-normalize·ADR-0271·search.md | 계획·시험·구현·리뷰·검증·측정 역할 분리 | 1만 통과·2만 BAT-167 |
+| R-691 | 팬 재인증 토큰의 한 번 쓰기가 받는 서비스마다 따로라 같은 토큰을 두 작업에 쓸 수 있었다(BAT-415-reauth RV-01, OPEN[50] (나)) | proto ReauthOperation, packages/platform token-verify, services/identity-svc session, services/purchase-svc refund, apps/web social-login·account-withdraw·login-methods·settings, ADR-0293, identity §3·§7.1, authz-matrix §6, transfer-refund §3.1, frontend §4.1 | 계획·구현·시험·리뷰·검증 다섯 담당(B 짧은 고리) | 끝 |
+| R-696 | BAT-171 재배치 첫 실행 실패·초점 가림·web / reflow 잡 켜기 | apps/web 띠 여백·320px 이하 띠 흐름·월렛 워커, console-host 그래프 상자, ci-web.yml·brief.mjs, frontend.md·devops.md·d5 | 계획·시험·구현·리뷰·검증·브라우저 확인 역할 분리 | HOT-381 끝·HOT-391 BAT-172 |
 
 ## 4. 숫자 일치표
 
