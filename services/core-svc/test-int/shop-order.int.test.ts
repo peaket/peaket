@@ -25,6 +25,7 @@ import { FakeIdentity, fan, quiet, testMedia } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from '../../queue-svc/test-int/valkey.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 import { loginFor } from './roles.js';
+import { DrizzleProductStore } from '../src/modules/shop/adapters/db/drizzle-product-store.js';
 
 type Confirm = Parameters<MerchPayments['confirm']>[0];
 type ConfirmResult = Awaited<ReturnType<MerchPayments['confirm']>>;
@@ -709,5 +710,99 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
       await results.tick();
     }
     expect(payments.confirmsOf(orderId)).toBe(sent);
+  });
+
+  // ---- 검증(6a675242)이 놓친 운영 어댑터 결함을 잡는 시험(실제 PostgreSQL) ----
+
+  test('P-T57 ⑦ 계정당 한도 2: 결제를 접수했지만 아직 CREATED인 주문 둘(1개·1개) 뒤 1개 더는 422 merch-quantity-limit-exceeded다(운영 저장소의 한도 셈)', async () => {
+    const p = await product({ limitedQty: null, attributes: { perAccountLimit: 2 } });
+    const a = randomUUID();
+    const first = await orderAndAccept(a, p);
+    const second = await orderAndAccept(a, p);
+    expect([await statusOf(first), await statusOf(second)]).toEqual(['CREATED', 'CREATED']);
+    const before = Number((await admin.pool.query('select count(*)::int as n from merch_order where account_id = $1', [a])).rows[0].n);
+    const third = await order(a, p);
+    expect(third.statusCode, third.payload).toBe(422);
+    expect(problem(third)).toBe('merch-quantity-limit-exceeded');
+    expect(Number((await admin.pool.query('select count(*)::int as n from merch_order where account_id = $1', [a])).rows[0].n)).toBe(before);
+    // 대조군: 다른 계정은 한도와 무관하다
+    expect((await order(randomUUID(), p)).statusCode).toBe(201);
+  });
+
+  test('P-T57 ⑥ 다른 계정이 그 주문의 결제를 접수하면 운영 저장소도 없는 주문과 같은 404 not-found이고 주문·시도·재고·승인 명령이 그대로다 [ASVS v5.0.0-8.2.2]', async () => {
+    const p = await product({ limitedQty: 3 });
+    const owner = randomUUID();
+    const o = await order(owner, p);
+    expect(o.statusCode).toBe(201);
+    const orderId = JSON.parse(o.payload).orderId as string;
+    const s = await startPayment(owner, orderId);
+    expect(s.statusCode).toBe(201);
+    const attemptId = JSON.parse(s.payload).attemptId as string;
+    const amount = (await orderRow(orderId))!.amount;
+    const confirms = payments.confirmsOf(orderId);
+    const res = await acceptPayment(randomUUID(), orderId, amount, attemptId);
+    expect(res.statusCode).toBe(404);
+    expect(problem(res)).toBe('not-found');
+    const none = await acceptPayment(randomUUID(), randomUUID(), amount, attemptId);
+    expect(none.statusCode).toBe(404);
+    expect(JSON.parse(res.payload).title).toBe(JSON.parse(none.payload).title);
+    expect(await statusOf(orderId)).toBe('CREATED');
+    expect((await admin.pool.query('select status from merch_payment_attempt where order_id = $1', [orderId])).rows.map((r) => r.status)).toEqual(['READY']);
+    expect(await productStock(p.productId)).toBe(3);
+    expect(Number((await admin.pool.query('select count(*)::int as n from merch_confirm_job where order_id = $1', [orderId])).rows[0].n)).toBe(0);
+    expect(payments.confirmsOf(orderId)).toBe(confirms);
+    // 대조군: 주인은 접수할 수 있다
+    expect((await acceptPayment(owner, orderId, amount, attemptId)).statusCode).toBe(202);
+  });
+
+  test('P-T57 ⑧ 운영 상품 저장소의 한정 수량 고치기는 남은 수 + 변화량이 음수면(읽은 뒤 팔린 경합) stock-negative로 거절하고 남은 수·한정 수량·판이 그대로다. 결과 0은 받는다', async () => {
+    const p = await product({ limitedQty: 3 });
+    const products = new DrizzleProductStore(partnerDb);
+    const read = (await products.find(SELLER, p.productId))!;
+    expect(read.stock).toBe(3);
+    // 파트너가 읽은 뒤 결제 접수가 2개를 깎았다(남은 수 1)
+    await admin.pool.query('update product_stock set stock = 1 where product_id = $1', [p.productId]);
+    const version = read.version;
+    const out = await products.save(SELLER, { ...read, limitedQty: 1, updatedAt: new Date(clock.now()) }, version, { kind: 'delta', delta: -2 });
+    expect(out).toBe('stock-negative');
+    expect(await productStock(p.productId)).toBe(1);
+    const row = (await admin.pool.query('select limited_qty, version from product where id = $1', [p.productId])).rows[0];
+    expect([Number(row.limited_qty), Number(row.version)]).toEqual([3, version]);
+    // 경계: 결과가 0이면 받는다(3 → 2, 남은 수 1 − 1 = 0)
+    const ok = await products.save(SELLER, { ...read, limitedQty: 2, updatedAt: new Date(clock.now()) }, version, { kind: 'delta', delta: -1 });
+    expect(ok).not.toBe('stock-negative');
+    expect(ok).not.toBe('conflict');
+    expect(await productStock(p.productId)).toBe(0);
+  });
+
+  test('P-T56 ② 결과 반영 FAILED 트랜잭션이 product_stock을 돌린 뒤 커밋에서 실패하면 주문·재고가 둘 다 그대로이고, 다시 반영하면 재고가 한 번만 돌아온다 [ASVS v5.0.0-2.3.3]', async () => {
+    const p = await product({ limitedQty: 3 });
+    const orderId = await orderAndAccept(randomUUID(), p);
+    expect(await productStock(p.productId)).toBe(2);
+    // 커밋 때 실패를 넣는다: 주문이 FAILED가 되는 갱신에 지연 제약 트리거(커밋 직전에 돈다)를 단다. 끊긴 사례가 있었는지는 시퀀스(트랜잭션 밖)로 센다
+    await admin.pool.query('drop sequence if exists test_commit_fail_seq; create sequence test_commit_fail_seq');
+    await admin.pool.query(`create or replace function test_commit_fail() returns trigger language plpgsql security definer as $f$ begin perform nextval('test_commit_fail_seq'); raise exception 'test: 커밋 전 실패 주입'; end $f$`);
+    await admin.pool.query(
+      `create constraint trigger test_commit_fail_trg after update on merch_order deferrable initially deferred for each row when (new.id = '${orderId}'::uuid and new.status = 'FAILED') execute function test_commit_fail()`,
+    );
+    try {
+      payments.states.set(orderId, { orderId, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'FAILED', approvedAtMs: undefined, failureCategory: 'REJECTED' });
+      clock.advance(2_000);
+      await dueAllJobs();
+      await expect(results.tick()).rejects.toThrow();
+      const seq = (await admin.pool.query('select last_value, is_called from test_commit_fail_seq')).rows[0];
+      expect([seq.is_called, Number(seq.last_value)]).toEqual([true, 1]);
+      expect(await statusOf(orderId)).toBe('CREATED');
+      expect(await productStock(p.productId)).toBe(2);
+      expect(await counter(p.productId)).toBe('2');
+      expect(Number((await admin.pool.query('select count(*)::int as n from merch_confirm_job where order_id = $1', [orderId])).rows[0].n)).toBe(1);
+    } finally {
+      await admin.pool.query('drop trigger if exists test_commit_fail_trg on merch_order');
+    }
+    await dueAllJobs();
+    expect((await results.tick()).failed).toBeGreaterThanOrEqual(1);
+    expect(await statusOf(orderId)).toBe('FAILED');
+    expect(await productStock(p.productId)).toBe(3);
+    expect(await counter(p.productId)).toBe('3');
   });
 });
