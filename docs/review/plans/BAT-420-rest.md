@@ -266,6 +266,156 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 
 ## 검증
 
+- **누가·어디서**: 검증 담당 `l3-b420-verify`(claude-opus-5-5, 2026-11-19). 계획·구현·시험·리뷰에 관여하지 않았다. 시험 커밋 `5654fd91`을 따로 된 작업 폴더(`D:/ticketpass-lane3-b420-verify`, `--detach`)로 꺼내 `pnpm install --frozen-lockfile --prefer-offline`을 하고 패키지 여섯(search-normalize·shuffle·validation·contracts·platform·pg-simulator)을 빌드했다. 리뷰 커밋 `f21f8034`은 이 파일만 고쳐 제품 코드는 같다.
+  - 틀린 구현은 제품 코드(시뮬레이터 포함)에 한 번에 하나씩 넣었다. 그 서비스의 시험을 돌린 뒤 `git checkout -- <파일>`로 되돌렸다. 시험 파일은 고치지 않았다.
+  - 단위 시험: 결함마다 그 서비스의 단위 시험 전체를 돌렸다. payment-svc 49파일 3,033개, purchase-svc 136파일 4,249개, ops-svc 41파일 278개, pg-simulator 6파일 109개다. 고치지 않은 트리에서는 모두 통과했다.
+  - 통합 시험: 이 PC Docker에서 결함마다 관련 파일만 돌렸다(payment `payment-cancel-refund-account`·`payment-deposit`, purchase `cancellation`·`event-cancel-r-t24`, core `search-read-model`). Docker 잠금 `lane3-BAT-420`은 2026-11-19T06:27:09+09:00부터 06:45:28+09:00까지 잡았다. 시험이 띄운 컨테이너는 끝날 때 0개였고 오늘 생긴 남은 볼륨도 0개다. `bench-*` 컨테이너는 없었다.
+  - 결함마다 넣은 코드는 검증 담당의 임시 스크립트에 있고 커밋하지 않았다.
+- **결과: 넣은 것 40, 잡힌 것 36, 살아남은 것 4.**
+  - 살아남은 넷: A05, I06, O09, O13.
+  - 돈이 바로 나가는 결함은 없다. O13은 돈 길에 간접으로 닿는다. I06·O09·O13 셋은 통과 기준(SR-T8 ③, R-T41 ③)에 걸린다(아래).
+
+| # | 자리 | 틀린 구현(계획 번호) | 잡은 시험 |
+| --- | --- | --- | --- |
+| V01 | payment `cancel-confirmed-payment.ts` V5 갈래 | 계좌 없는 가상계좌 재시도(행 있음)의 조회 갈래를 빼서 결제사 취소를 다시 부른다(M3) | P-T71 ③ 단위 셋 |
+| V02 | 같음 | 조회 대조가 '반영 아님(RESEND)'이어도 CANCELLED로 답한다(M4) | P-T71 ③ 단위(RESEND) |
+| V03 | 같음 | 장애 주입: 조회 실패(UNKNOWN)를 계좌 대기로 답한다(세 상태의 가운데) | P-T71 ③ 단위(세 상태) |
+| V04 | 같음 | 카드 결제에 온 계좌를 결제사 본문에 싣는다(M6) | P-T71 ⑤ 단위, P-T71 ⑤ 통합(같은 결함을 통합으로 다시 돌림) |
+| V05 | 같음 | 카드에 온 계좌를 버릴 때 지표를 올리지 않는다 | P-T71 ⑤ 단위 |
+| V06 | 같음 | 결제사 계좌 거절(`REFUND_ACCOUNT_INVALID`)을 REJECTED로 답한다 | P-T71 ④ 단위 |
+| V07 | 같음 | 계좌 거절 행을 FAILED 대신 CANCEL_PENDING으로 남긴다 | P-T71 ④ 단위 |
+| V09 | payment `confirm-command.ts` `virtualAccountPaidOf` | 원장 상태를 보지 않는다(기한 만료 FAILED·입금 대기도 참) | P-T71 ⑥ 단위 |
+| V11 | payment `toss-shaped.ts` | 계좌 칸 이름을 `refundReceiveAccount` 대신 `refundAccount`로 쓴다 | P-T71 ① 단위(토스 모양) |
+| V14 | payment `cancel-confirmed-payment.ts` → 저장소 | 계좌번호를 `payment_cancel` 사유에 덧붙인다(M5) | 단위는 통과. P-T71 ① 통합 둘(DB 행 글 찾기)과 ③④ 통합 |
+| N07 | 같음 | 계좌를 다시 실은 재시도도 조회 갈래로 보낸다(V5 조건을 '재시도면'으로) | P-T71 ③ 대조(계좌를 다시 실은 재시도) |
+| N08 | payment `portone-gateway.ts` | 계좌가 없을 때도 본문에 `refundAccount: null`을 싣는다 | P-T71 ① 포트원 계좌 없음, 기존 P-T16 넷 |
+| I01 | payment `drizzle-confirm-jobs.ts` `hasDepositEvent`·`drizzle-payment-store.ts` | 가상계좌 판정을 `virtual_account_no IS NOT NULL`로 한다(M1) | P-T71 ①②③④⑥ 통합 8 |
+| I02 | payment `drizzle-confirm-jobs.ts` `beginConfirmedCancel` | 겹친 가드의 payment 쪽: 계좌 없는 가상계좌의 ACCOUNT_REQUIRED를 빼서 행을 만든다(M2) | P-T71 ② 통합(`payment_cancel` 0행) |
+| N09 | pg-simulator `engine.ts` | 계좌 없는 취소의 거절을 카드 결제에도 건다 | 시뮬레이터 P-T71 ⑤와 기존 취소 시험 아홉 |
+| N10 | pg-simulator `server.ts` | 토스·포트원 경로가 계좌 칸을 엔진에 넘기지 않는다 | 시뮬레이터 P-T71 ① 토스·포트원, ③, ④ |
+| A01 | purchase `quote-cancellation.ts` | 입장 시작 뒤에도 결제 수단을 읽어 `refundAccountRequired`가 참이다(M7) | P-T72 ① 경계 |
+| A02 | 같음 | 장애 주입: GetPayment 실패를 '계좌 필요 없음'으로 본다(M8) | P-T72 ① 503 |
+| A03 | purchase `cancel-ticket.ts` | 장애 주입: 취소의 결제 수단 읽기 실패를 카드로 보고 Saga를 돈다(M8) | P-T72 ② 503 |
+| A04 | 같음 | 겹친 가드의 purchase 쪽: 422 가드를 뺀다. payment가 돈은 막지만 표가 취소된다(M9) | P-T72 ②(ticket·payment·`writes` 0) |
+| A05 | 같음 | 입장 시작 뒤 취소의 계좌를 버리지 않는다(M10) | **살아남음** |
+| A07 | 같음 | REFUND_ACCOUNT_REQUIRED 답을 계좌 대기 대신 재시도 예약으로 처리한다(M11) | P-T72 ④ 단위 |
+| A10 | purchase `refund-after-entry.ts` | 재시도 실행기가 REFUND_ACCOUNT_REQUIRED를 재시도 횟수에 넣는다(M11) | P-T72 ④ 실행기 단위 |
+| A11 | 같음 | 장애 주입: ops '환불 대기' 열기 실패를 삼켜서 연 시각을 2xx 전에 쓴다(M12) | P-T72 ⑤ 단위 |
+| A12 | 같음 | '환불 대기'를 환급 실패보다 먼저 연다 | P-T72 ⑤ 단위(차례) |
+| A14 | purchase `start.ts` | 결제 수단 읽기 포트를 시작 조립에서 뺀다 | P-T72 시작 조립(글 읽기) |
+| N01 | purchase `cancel-ticket.ts` | 가상계좌면 계좌를 버리고 카드면 넘긴다(조건 뒤집기) | P-T72 ③ 가상계좌 계좌·카드 계좌 |
+| N02 | 같음 | '지금 환급' 판정에서 입장 시작을 뺀다 | P-T72 ③ 입장 시작 뒤 |
+| N03 | 같음 | 결과 모름(UNKNOWN)도 계좌 대기로 처리한다 | P-T72 ④ 대조 UNKNOWN, 기존 GAT-080 시험 하나 |
+| N04 | 같음 | 카드 결제도 계좌가 없으면 422다 | P-T72 ② 대조 카드 |
+| N05 | purchase `refund-after-entry.ts` | 재시도 실행기가 업무 거절(REJECTED)도 계좌 대기로 처리한다 | P-T72 ④ 대조 REJECTED, 기존 GAT-090·GAT-110 시험 다섯 |
+| N06 | purchase `cancel-ticket.ts` `writes.create` | 계좌번호를 취소 행 `actor` 칸에 싣는다(M5) | P-T72 ③ 단위(`created`의 계좌 글). 통합으로 다시 돌려 P-T72 ③④⑥ 통합 |
+| I03 | purchase `drizzle-cancellation.ts` `dueRefunds` | 겹친 가드: 계좌 대기 행 빼기(`refund_account_required_at IS NULL`)를 뺀다 | P-T72 ④ 통합(하루 뒤 `dueRefunds`), ⑤ 통합 |
+| B01 | purchase `event-refund-service.ts` | 계좌 대기 항목을 자동 정지 기록에 실패로 넣는다(M13) | R-T40 ③ 단위 |
+| B02 | 같음 | COMPLETED 셈에서 계좌 대기를 뺀다(M14) | R-T40 ④ 단위 |
+| I06 | core `apply-event-cancellation-status.ts` | 검색 동기화를 회차 쓰기 트랜잭션 밖(커밋 뒤의 다른 트랜잭션)에서 부른다(M15) | **살아남음** |
+| O01 | ops `event-cancellations.ts` `#applyCore` | 장애 주입: core가 실패해도 `core_applied_at`을 쓴다(M16) | R-T41 ③ 단위 넷 |
+| O02 | 같음 | 성공한 뒤에 `core_applied_at`을 쓰지 않는다(M16) | R-T41 ③ 단위 셋 |
+| O09 | ops `http-core-event-status.ts` | 장애 주입: 연결 실패·시간 초과(`request`가 던짐)를 204로 읽는다 | **살아남음** |
+| O13 | ops `approve` | core 반영을 Start(일괄 환불 시작) 앞으로 옮긴다 | **살아남음** |
+
+- I06은 첫 실행 때 관계없는 시험 하나(HOT-280의 읽은 줄 수)가 실패했다. 다른 갈래 시험과 함께 돌아 부하가 컸던 때다. 고치지 않은 트리와 같은 결함 트리를 다시 돌리니 32개가 모두 통과해 '살아남음'으로 적었다.
+- **구현 전에도 통과한 12개**(위 '실패 확인'): 모두 이번 틀린 구현으로 실패를 봤다.
+
+| 구현 전에 통과한 시험 | 실패시킨 결함 |
+| --- | --- |
+| 시뮬레이터 토스 모양 ① | N10 |
+| 시뮬레이터 카드 ⑤ | N09 |
+| 시뮬레이터 포트원 ① | N10 |
+| payment 단위 대조: 계좌를 다시 실은 재시도 | N07 |
+| payment 단위 대조: 계좌 없는 포트원 본문 | N08 |
+| payment 통합 ⑤ 카드 결제의 본문 | V04(통합으로 다시 돌림) |
+| purchase HTTP 대조: 카드 결제(② 대조) | N04 |
+| purchase HTTP 대조: 가상계좌에 계좌를 실은 취소(③) | N01, N06 |
+| purchase HTTP 대조: 입장 시작 뒤 취소(③) | N02 |
+| purchase HTTP 대조: 결과 모름(④ 대조) | N03 |
+| 환급 실행기의 업무 거절 대조(④) | N05 |
+| purchase 통합 ⑥ 계좌 글 누설 0 | N06(통합으로 다시 돌림) |
+
+- **겹친 가드를 하나씩 뺀 결과**:
+  - 계좌 규칙(purchase 422와 payment ACCOUNT_REQUIRED): 두 쪽을 따로 뺀 A04와 I02가 각각 P-T72 ②·P-T71 ②에서 잡혔다.
+  - 재시도 실행기의 계좌 대기 행 빼기(I03)는 P-T72 ④ 통합이 잡았다. `next_refund_at`을 비우는 것은 가드가 되지 못한다. `dueRefunds`는 `next_refund_at`이 빈 REFUND_PENDING 행도 집기 때문이다. 그래서 `refund_account_required_at IS NULL` 하나만이 그 행을 막는다.
+  - 표시 칸 CHECK(`order_cancellation_refund_account_case_check`)는 넣지 않았다. P-T72 ④ 통합이 제약 이름과 23514를 직접 단언하는 것을 읽어서 확인했다.
+  - 카드 결제의 계좌 버리기(purchase·payment 두 곳): payment 쪽(V04)은 잡혔다. purchase 쪽은 N01이 뒤집은 조건으로 함께 잡혔다.
+- **복구 경로 장애 주입**:
+  - 결제사 조회 실패(V03): 잡혔다.
+  - 결제 수단 읽기 실패(A02·A03): 잡혔다.
+  - ops CS 5xx(A11): 잡혔다.
+  - core 실패를 성공으로 적기(O01): 잡혔다.
+  - core 연결 실패·시간 초과를 어댑터가 성공으로 읽는 것(O09): 살아남았다.
+  - 계좌 대기 표시 쓰기 실패는 실행하지 않고 코드를 읽어 판단했다. 판단 결과는 이렇다.
+    - 팬 취소에서 `markRefundAccountRequired`가 던지면 응답은 5xx다. 행은 REFUND_PENDING·`next_refund_at` 빔으로 남는다.
+    - 그러면 다음 틱에 재시도 실행기가 그 행을 계좌 없이 다시 부른다. 계좌 없음·모양 틀림 갈래는 다시 계좌 대기가 되어 스스로 낫는다.
+    - 결제사가 계좌를 거절한 행(payment FAILED)은 다르다. payment가 REJECTED로 답해 '환급 실패' 건이 열리고, '환불 대기'는 열리지 않는다. 돈은 나가지 않는다.
+    - 이 실패를 넣는 시험은 없다. 시험 결과 절의 의심 ①, 리뷰 RV-03과 같은 끝으로 간다.
+- **살아남은 것과 잡을 시험 제안**:
+  - A05(입장 시작 뒤 취소의 계좌를 버리지 않음): 걸림 없음. 돈·권한에 걸리지 않고, 통과 기준(P-T72 ③)에는 좁은 길에서만 약하게 닿는다.
+    - 대부분은 결과가 같은 결함이다. 입장 시작 뒤 취소는 ticket-svc가 REFUND_AFTER_CLOSE로 답해 payment를 부르지 않고, 취소 행에는 계좌 칸이 없다.
+    - 보이는 길은 하나뿐이다. 공연 시작 뒤 다시 누름(`replayOnly`)에 ticket-svc가 첫 팬 취소 K1을 REFUND_NOW로 알려 오는 경우다. 이때 본문 계좌가 payment로 간다(계좌는 결제사에만 간다).
+    - 제안: 그 길(견적 EVENT_STARTED + ticket 대역 `ALREADY_CANCELLED`·`firstResult: REFUND_NOW`, 본문에 계좌)에서 payment 대역이 계좌를 받지 않는지 단언한다. 아니면 이 길의 정책을 정본에 정한다.
+  - I06(검색 동기화를 트랜잭션 밖에서): 통과 기준 SR-T8 ③('같은 트랜잭션에서')에 걸린다. 돈·권한에는 걸리지 않는다.
+    - 지금 SR-T8 ③ 시험은 회차 행의 커밋 자리에 실패를 넣는다. 그래서 동기화가 같은 트랜잭션이든 커밋 뒤 따로든 둘 다 되돌려진 것처럼 보인다.
+    - 이 결함 트리에서는 동기화가 실패하면 core 회차는 CANCELLED인데 공연이 검색에 남는다.
+    - 제안: 실패를 검색 쪽 쓰기에 넣는다(예: 그 공연의 `search_document` 갱신에 지연 제약 트리거). 그리고 회차 행이 SCHEDULED·판 그대로인지 단언한다.
+  - O09(어댑터가 연결 실패·시간 초과를 성공으로 읽음): 통과 기준 R-T41 ③('core가 실패하면 `core_applied_at`이 빈다')에 걸린다. 돈·권한에는 걸리지 않는다.
+    - 이 결함이면 반영 실패에도 칸이 써진다. 다시 하기도 10분 SEV2도 돌지 않고, core 회차는 SCHEDULED로 남는다(검색·판매 상태가 어긋난다).
+    - `HttpCoreEventStatus` 단위 시험은 상태 코드만 바꾸고 `request`가 던지는 경우가 없다. ops 단위·통합은 core 대역(던짐)을 꽂아 어댑터를 지나지 않는다.
+    - 제안: 단위에 `request`가 시간 초과·ECONNREFUSED로 던지면 `apply`도 던지는지 단언한다. 또는 ops 통합에 실제 어댑터를 닫힌 포트로 꽂아 `core_applied_at` 빔을 본다.
+  - O13(Start 앞에서 core 반영): 통과 기준 R-T41 ③과 transfer-refund §5('Start까지 끝낸 뒤')에 걸린다. 돈 길에는 간접으로 닿는다.
+    - Start가 실패하면 요청은 PENDING_APPROVAL로 돌아간다. 그런데 core 회차는 이미 CANCELLED이고 검색에서 빠진다. 그 뒤 반려되면 환급 없이 회차만 취소로 보인다.
+    - ops 단위 첫 시험은 이름과 주석에 '차례: Start가 core 반영보다 먼저다'를 적었다. 그러나 단언은 `f.log.indexOf('start:…') >= 0`(Start가 있었는지)뿐이라 차례를 보지 않는다.
+    - 제안: Start 대역과 core 대역이 같은 기록에 쓰게 해 차례를 견준다. 그리고 Start가 실패하는 확정에서 core 호출 0을 단언한다.
+- **넣지 않은 표본**(상한 40이라 뺐다): 아래는 각각 단언이 정확히 그 값을 보는지 읽어서 확인했다. 실행으로 본 것이 아니다.
+  - 계획 M14의 다른 쪽(`accountPending` 0): R-T40 ④ `accountPending: 2`.
+  - 취소기 둘의 ACCOUNT_PENDING 옮기기: R-T40 ① 취소기 둘.
+  - 덧붙일 만한 것 셋:
+    - core 멱등: core 단위 R-T41 ①의 `undefined`, 통합 ②의 판·무효화·줄 그대로.
+    - 연기의 판매 멈춤: ops 단위 ④ `stopCalls` [].
+    - 공유 토큰 가드 빠짐: 통합 ⑤ 401 둘.
+  - 연기 시작 경계: core 단위 ⑤ 지금·+1ms.
+  - 0029 CHECK 빼기: 통합 ④ 23514.
+  - 일괄 환불 항목의 계좌 대기 표시 쓰기: 통합 R-T40 ① `refund_account_required_at`.
+  - 늦음 표시 한 번만: ops 통합 '다시 0건'.
+  - 다시 하기 간격·늦음 경계 상수: 단위 59,999·60,000ms, 9분 59초·10분.
+- **판정 기준 대조**(정본 payment §11 P-T71·P-T72, transfer-refund §11 R-T40·R-T41, search §12 SR-T8 ③과 그 ID를 단 시험의 단언):
+  - 단언이 비었거나 ID만 단 시험은 없었다.
+  - 기준의 한 구절을 단언이 보지 않는 곳이 넷이다. R-T40 ②·P-T72 ⑤의 'CS 건이 열린다', R-T41 ③의 차례, SR-T8 ③의 '같은 트랜잭션', P-T72 ③의 재시도 실행기 몫이다.
+
+| 항목 | 정본 판정(요지) | 시험의 단언 | 대조 |
+| --- | --- | --- | --- |
+| P-T71 ① | 토스 모양·포트원 본문에 계좌가 정확히, `payment_cancel`·`payment_event`·Outbox에 계좌 글 0 | 통합: 결제사 기록 대역의 본문 전체 `toEqual`(토스 `refundReceiveAccount`, 포트원 `refundAccount`·SHINHAN), 결제 DB의 모든 공개 표·모든 행과 로그에서 계좌번호(하이픈 있음·없음)·예금주 글 찾기 0 | 맞음 |
+| P-T71 ② | 결제사 0, REFUND_ACCOUNT_REQUIRED, `payment_cancel` 0행 | 통합: `sent` [], 결과, 행 [], 사건·원장·시뮬레이터 잔액 그대로. 21자리 계좌도 같음 | 맞음 |
+| P-T71 ③ | 결제사 취소 0·조회 1, 반영 → CANCELLED, 아님 → REFUND_ACCOUNT_REQUIRED·행 진행 중 | 통합 둘(결제사 커밋 뒤 끊김·반영 전 끊김)과 단위의 세 상태 | 맞음 |
+| P-T71 ④ | 행 FAILED, REFUND_ACCOUNT_REQUIRED | 통합: 000 계좌번호로 행 FAILED·결과·돈 0, 같은 취소 ID 다시 부르면 REJECTED | 맞음 |
+| P-T71 ⑤ | 카드: 본문에 계좌 없음, 지표 +1 | 통합: 본문 `toEqual`(계좌 칸 없음), 지표 `{pg="SIMULATOR"}` 1, 계좌 없는 카드는 그대로 | 맞음 |
+| P-T71 ⑥ | 입금 확정 뒤·부분 취소 뒤 참, 카드·기한 만료 거짓 | 통합 둘(`payment-cancel-refund-account` ⑥, `payment-deposit` 실제 입금 흐름) | 맞음 |
+| P-T72 ① | 가상계좌·입장 시작 전만 참, 뒤·카드 거짓, GetPayment 실패 503 | 단위 HTTP: 세 경우, 경계 +1ms·정각·뒤, 503 유형·칸 없음, 읽기 데드라인 300 | 맞음 |
+| P-T72 ② | 422, ticket·payment·`order_cancellation` 쓰기 0, 실패 503도 0 | 단위 HTTP `nothingRan`(ticket·payment·created·좌석), 통합: 실제 ticket 행·`order_cancellation`·`payment_cancel`·결제사 호출 그대로 | 맞음 |
+| P-T72 ③ | payment 대역이 받은 계좌 = 본문, 입장 시작 뒤 계좌는 payment 대역이 받지 않음(재시도 실행기의 호출에도) | 단위 HTTP·통합 ③ | 약함(작다): 재시도 실행기 몫은 손으로 만든 `DueRefund`(계좌 칸이 없는 꼴)로 부르므로 늘 참이다. 실제 근거는 취소 행에 계좌가 없다는 단언(③·⑥)이다. 좁은 길은 A05 |
+| P-T72 ④ | 202 REFUND_PENDING·`refundAccountRequired`, `next_refund_at` 빔·`refund_account_required_at`·재시도 횟수 그대로, 재시도 실행기가 다시 집지 않음 | 통합: 행 칸 정확한 값, 하루 뒤 실제 `dueRefunds`에 없음 | 맞음 |
+| P-T72 ⑤ | '환불 대기' 건을 한 번 열고, 2xx 뒤에만 연 시각, 실패하면 다음 틱, 환급 실패 다음 차례 | 단위 차례·지표, 통합 500 → 202 → 다시 0 | 약함: '건을 연다'를 purchase가 보낸 요청과 연 시각으로만 본다. 실제 ops-svc 받는 쪽은 이 종류를 202 `accepted: false`로 받고 저장하지 않는다(리뷰 RV-01과 같은 자리, `receive-case-requested.ts` ACCEPTED 셋). ops 쪽 결과를 보는 단언이 없다 |
+| P-T72 ⑥ | 로그·Outbox·`order_cancellation`에 계좌 글 0 | 단위 로그, 통합 purchase·ticket·payment DB 모든 행 | 맞음 |
+| R-T40 ① | 카드 환급, 가상계좌 두 표 결제사 0·ACCOUNT_PENDING, 행 REFUND_PENDING·빔·표시 | 통합(실제 ticket·payment gRPC) | 맞음 |
+| R-T40 ② | 취소마다 '환불 대기' 한 번(틱 다시 돌려도 한 건), ops가 내려가면 다음 틱에 | 통합: ops HTTP 대역 500 → 202, 다시 돌려도 더 부르지 않음 | 약함: P-T72 ⑤와 같다. 'CS 처리함에 건이 열린다'를 ops 대역의 받은 요청으로만 본다. 실제 ops-svc는 이 종류를 만들지 않는다(RV-01). '내려감'은 500이고 연결 끊김은 아니다(같은 던짐 길이라 작다) |
+| R-T40 ③ | 자동 정지 실패율·연속 실패·실패 금액에 들지 않음, 다음 틱 결제사 0 | 단위·통합: 시도 기록은 카드 둘 SUCCESS뿐, 연속 실패 0·실패 금액 0, 다음 틱 두 번 호출 그대로 | 맞음 |
+| R-T40 ④ | COMPLETED, 진행 합계에 계좌 대기 2 | 단위·통합, gRPC `account_pending_orders` 2 | 맞음(ops·관제 화면 몫은 리뷰 RV-05) |
+| R-T41 ① | 첫 확정: CANCELLED·검색에 남음·무효화 0·줄 0, 둘째: 빠짐·무효화 1·줄 1(EVENT_CANCELLED) | 통합: 판 +1, `['/v1/search*']`, 줄 이유·판, 이름 줄 0 | 맞음 |
+| R-T41 ② | 같은 요청 다시: 바뀐 것·무효화·줄 0 | 통합: 회차 행 `toEqual`, 검색 판·무효화·줄 수 그대로 | 맞음 |
+| R-T41 ③ | core 실패 → 확정 202·칸 빔, 살아나면 다시 하기 1번·칸, 10분 SEV2 요청마다 1번 | 단위(9분 59초·10분·그 뒤 0, 20건·21건째, 1분 경계)·통합(실제 DB 잡기·SKIP LOCKED·늦음 경계, 서비스 HTTP) | 약함: '확정이 Start까지 끝낸 뒤'의 차례를 단언이 보지 않는다(O13). 실패 주입이 모두 core 대역이라 실제 어댑터의 연결 실패·시간 초과 길이 없다(O09) |
+| R-T41 ④ | POSTPONED·바뀐 시작, 판매 멈춤 없음 | core 통합(시작·끝·입장 시작 옮김, 오픈 시각 그대로), ops 단위 `stopCalls` [] | 맞음 |
+| R-T41 ⑤ | 404, 409 `event-status-conflict`, 401, 셋 다 쓰기 0 | 통합: 유형까지, 401 둘, 400 넷, 전후 스냅숏 같음 | 맞음 |
+| SR-T8 ③ | 회차 전부 취소가 같은 트랜잭션에서 동기화, 커밋 뒤 무효화·`search_removed` | 통합: 커밋 자리 실패 주입 → 회차·검색·판·무효화·줄 그대로, 트리거를 치운 뒤 정상 | 약함: 실패를 회차 행 커밋에 넣어서 '같은 트랜잭션'을 증명하지 못한다(I06) |
+
+- **장부**: `node tools/ci/ledger.mjs --batch BAT-420`(이 폴더)은 항목 48개다. 상태는 자동 시험 47, 다른 단계 1이다.
+  - 다른 단계 1은 SR-T8 ③이다. `docs/review/ledger/search.md`가 'LCH-090·GAT-110'으로 둔 대로다.
+  - GAT-110 쪽은 이 묶음 시험이 생겼다. 판매 중지(LCH-090) 쪽이 남아 있으므로 '다른 단계'가 맞다.
+  - `--require`는 그 1건으로 실패한다(지시서 §1과 같다).
+- **검증 폴더**: `git worktree remove`가 'Filename too long'으로 폴더 지우기에 실패했다. worktree 등록은 풀렸고 `D:/ticketpass-lane3-b420-verify` 폴더(apps·node_modules 등)는 남겨 두었다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -274,5 +424,6 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | impl | l3-b420-impl | claude-opus-5-5 | 2026-11-19T04:05+09:00 | 2026-11-19T04:56+09:00 |
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T04:58+09:00 | 2026-11-19T06:10+09:00 |
 | review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:18+09:00 |
+| verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T06:06+09:00 | 2026-11-19T06:50+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
