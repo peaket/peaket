@@ -5,14 +5,18 @@ import type { SeatReturnNotices } from '../domain/ports.js';
 
 const KEY_PART = /^[A-Za-z0-9_-]{1,64}$/;
 
-const RETURN_SOLD_LUA = `#!lua
+// 시험이 Redis TIME을 고정한 사본을 만들 수 있게 내보낸다. TIME은 정확히 한 번만 읽는다.
+export const RETURN_SOLD_LUA = `#!lua
 -- KEYS: 1 bitmap, 2 epoch, 3 secver, 4 prio, 5.. hold:{index} (좌석 차례)
 -- ARGV: 1 keepUntilMs, 2 channel prefix, 3.. seat triples (index, sectionIndex, seatOffset)
+-- 델타: 1 {seatEpoch} {sectionIndex} {sectionVersion} {changedAtMs} {seatOffset}:0 ... (changedAtMs는 Redis TIME의 epoch 밀리초, WIR-01)
+local function int(x) return string.format('%.0f', x) end
 local keep = ARGV[1]
 local prefix = ARGV[2]
 local epoch = redis.call('HGET', KEYS[2], 'epoch')
 if not epoch then return {'NOT_READY'} end
-local now = redis.call('TIME')[1]
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local versions = {}
 local deltas = {}
 local released = 0
@@ -33,7 +37,7 @@ for i = 3, #ARGV, 3 do
   end
 end
 for sec, list in pairs(deltas) do
-  redis.call('SPUBLISH', prefix .. sec, '1 ' .. epoch .. ' ' .. sec .. ' ' .. versions[sec] .. ' ' .. now .. ' ' .. table.concat(list, ' '))
+  redis.call('SPUBLISH', prefix .. sec, '1 ' .. epoch .. ' ' .. sec .. ' ' .. versions[sec] .. ' ' .. int(now) .. ' ' .. table.concat(list, ' '))
 end
 redis.call('PEXPIREAT', KEYS[1], keep)
 redis.call('PEXPIREAT', KEYS[2], keep)
