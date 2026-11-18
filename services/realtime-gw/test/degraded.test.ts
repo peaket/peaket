@@ -347,13 +347,20 @@ describe('S-T14 ② 파드 전환: 박자 늦음의 10초 창(ADR-0298 결정 1�
     expect(h.degradedChanges).toEqual([{ degraded: true, batches: 0, overEnter: 0, overExit: 0, ticks: 0 }]);
   });
 
-  test('S-T14 ② RF-T7 Degraded에서 박자가 300,001ms 멈추면(박자가 돌지 않은 창은 괜찮음이 아니다) Degraded 그대로다', async () => {
+  test('S-T14 ② RF-T7 VF-M25b Degraded에서 박자가 300,001ms 멈추면(박자가 돌지 않은 창은 괜찮음이 아니다) Degraded 그대로이고, 그 뒤 괜찮음 창 10개로도 돌아오지 않는다', async () => {
     const h = harness({ monotonic: START });
     const driver = h.open();
     h.hub.receive(driver, subscribeBytes([1]), true);
     await settle();
     const T0 = enterDegraded(h, driver, 1);
     tickAt(h, T0 + 300_001);
+    expect(intervals(driver)).toEqual([D.intervalMs]);
+    expect(gauge(h, 'realtime_gw_degraded')).toBe(1);
+    expect(h.degradedChanges).toHaveLength(1);
+    // VF-M25b: 멈춘 뒤 박자는 돌고 표본이 없는 괜찮음 창 10개(48~57)를 더 돌려도 Degraded 그대로다.
+    // 멈춘 동안의 창 19~47은 박자가 돌지 않아 넘음이라 이어짐이 끊겼고, 괜찮음은 창 48부터 10개뿐이다(30개가 이어져야 돌아온다)
+    for (let t = T0 + 300_101; t < 58 * W; t += 100) tickAt(h, t);
+    tickAt(h, 58 * W);
     expect(intervals(driver)).toEqual([D.intervalMs]);
     expect(gauge(h, 'realtime_gw_degraded')).toBe(1);
     expect(h.degradedChanges).toHaveLength(1);
