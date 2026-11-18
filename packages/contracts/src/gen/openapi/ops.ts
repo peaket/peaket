@@ -3010,6 +3010,8 @@ export const CreateOpsEventCancellationBody = zod.object({
 
 export const createOpsEventCancellationResponseFanNoticeReasonMax = 200;
 
+export const createOpsEventCancellationResponseProgressAccountPendingMin = 0;
+
 
 
 export const CreateOpsEventCancellationResponse = zod.object({
@@ -3026,6 +3028,7 @@ export const CreateOpsEventCancellationResponse = zod.object({
   "total": zod.int().optional(),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "accountPending": zod.int().min(createOpsEventCancellationResponseProgressAccountPendingMin).optional().describe('가상계좌 결제라 환불 계좌를 기다리는 항목 수(ACCOUNT_PENDING, 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목). 있을 때만 싣고 결제사별 몫에는 없다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤)'),
   "perPg": zod.array(zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
   "state": zod.enum(['RUNNING', 'PAUSED', 'COMPLETED']).optional(),
@@ -3066,6 +3069,8 @@ export const ListOpsEventCancellationsQueryParams = zod.object({
 
 export const listOpsEventCancellationsResponseItemsItemFanNoticeReasonMax = 200;
 
+export const listOpsEventCancellationsResponseItemsItemProgressAccountPendingMin = 0;
+
 
 
 export const ListOpsEventCancellationsResponse = zod.object({
@@ -3083,6 +3088,7 @@ export const ListOpsEventCancellationsResponse = zod.object({
   "total": zod.int().optional(),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "accountPending": zod.int().min(listOpsEventCancellationsResponseItemsItemProgressAccountPendingMin).optional().describe('가상계좌 결제라 환불 계좌를 기다리는 항목 수(ACCOUNT_PENDING, 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목). 있을 때만 싣고 결제사별 몫에는 없다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤)'),
   "perPg": zod.array(zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
   "state": zod.enum(['RUNNING', 'PAUSED', 'COMPLETED']).optional(),
@@ -3128,6 +3134,8 @@ export const CreateOpsEventCancellationJudgementBody = zod.object({
 
 export const createOpsEventCancellationJudgementResponseFanNoticeReasonMax = 200;
 
+export const createOpsEventCancellationJudgementResponseProgressAccountPendingMin = 0;
+
 
 
 export const CreateOpsEventCancellationJudgementResponse = zod.object({
@@ -3144,6 +3152,7 @@ export const CreateOpsEventCancellationJudgementResponse = zod.object({
   "total": zod.int().optional(),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "accountPending": zod.int().min(createOpsEventCancellationJudgementResponseProgressAccountPendingMin).optional().describe('가상계좌 결제라 환불 계좌를 기다리는 항목 수(ACCOUNT_PENDING, 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목). 있을 때만 싣고 결제사별 몫에는 없다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤)'),
   "perPg": zod.array(zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
   "state": zod.enum(['RUNNING', 'PAUSED', 'COMPLETED']).optional(),
@@ -3210,6 +3219,8 @@ export const CreateOpsEventCancellationPauseBody = zod.object({
 
 export const createOpsEventCancellationPauseResponseFanNoticeReasonMax = 200;
 
+export const createOpsEventCancellationPauseResponseProgressAccountPendingMin = 0;
+
 
 
 export const CreateOpsEventCancellationPauseResponse = zod.object({
@@ -3226,6 +3237,7 @@ export const CreateOpsEventCancellationPauseResponse = zod.object({
   "total": zod.int().optional(),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "accountPending": zod.int().min(createOpsEventCancellationPauseResponseProgressAccountPendingMin).optional().describe('가상계좌 결제라 환불 계좌를 기다리는 항목 수(ACCOUNT_PENDING, 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목). 있을 때만 싣고 결제사별 몫에는 없다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤)'),
   "perPg": zod.array(zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
   "state": zod.enum(['RUNNING', 'PAUSED', 'COMPLETED']).optional(),
@@ -3264,6 +3276,8 @@ export const CreateOpsEventCancellationResumptionBody = zod.object({
 
 export const createOpsEventCancellationResumptionResponseFanNoticeReasonMax = 200;
 
+export const createOpsEventCancellationResumptionResponseProgressAccountPendingMin = 0;
+
 
 
 export const CreateOpsEventCancellationResumptionResponse = zod.object({
@@ -3280,6 +3294,7 @@ export const CreateOpsEventCancellationResumptionResponse = zod.object({
   "total": zod.int().optional(),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "accountPending": zod.int().min(createOpsEventCancellationResumptionResponseProgressAccountPendingMin).optional().describe('가상계좌 결제라 환불 계좌를 기다리는 항목 수(ACCOUNT_PENDING, 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목). 있을 때만 싣고 결제사별 몫에는 없다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤)'),
   "perPg": zod.array(zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
   "state": zod.enum(['RUNNING', 'PAUSED', 'COMPLETED']).optional(),
@@ -4465,6 +4480,8 @@ export const GetOpsEventCancellationParams = zod.object({
 
 export const getOpsEventCancellationResponseFanNoticeReasonMax = 200;
 
+export const getOpsEventCancellationResponseProgressAccountPendingMin = 0;
+
 
 
 export const GetOpsEventCancellationResponse = zod.object({
@@ -4481,6 +4498,7 @@ export const GetOpsEventCancellationResponse = zod.object({
   "total": zod.int().optional(),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "accountPending": zod.int().min(getOpsEventCancellationResponseProgressAccountPendingMin).optional().describe('가상계좌 결제라 환불 계좌를 기다리는 항목 수(ACCOUNT_PENDING, 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목). 있을 때만 싣고 결제사별 몫에는 없다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤)'),
   "perPg": zod.array(zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
   "state": zod.enum(['RUNNING', 'PAUSED', 'COMPLETED']).optional(),

@@ -166,6 +166,8 @@ export const paymentCancel = pgTable(
     status: text('status').notNull(),
     createdAt: at('created_at').notNull(),
     canceledAt: at('canceled_at'),
+    // FAILED의 개인정보 없는 까닭(0023, BAT-420-rest 리뷰 반영 RV-03). 계좌 거절이면 REFUND_ACCOUNT_INVALID, 그 밖 업무 거절은 비운다. 같은 취소 ID = 같은 답의 근거다
+    failReason: text('fail_reason'),
   },
   (t) => [
     uniqueIndex('payment_cancel_payment_idempotency_key').on(t.paymentId, t.idempotencyKey),
@@ -174,6 +176,8 @@ export const paymentCancel = pgTable(
     check('payment_cancel_amount_check', sql`${t.amount} > 0`),
     check('payment_cancel_expected_balance_check', sql`${t.expectedBalance} >= ${t.amount}`),
     check('payment_cancel_status_check', sql`${t.status} IN ('REQUESTED', 'CANCEL_PENDING', 'CANCELED', 'FAILED')`),
+    // 까닭은 FAILED 행에만, 값은 계좌 거절 하나다(0023)
+    check('payment_cancel_fail_reason_check', sql`${t.failReason} IS NULL OR (${t.status} = 'FAILED' AND ${t.failReason} = 'REFUND_ACCOUNT_INVALID')`),
   ],
 );
 

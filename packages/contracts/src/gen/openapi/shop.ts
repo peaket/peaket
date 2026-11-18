@@ -400,6 +400,13 @@ export const createShopOrderCancellationBodyItemIdsItemMax = 64;
 
 export const createShopOrderCancellationBodyItemIdsMax = 20;
 
+export const createShopOrderCancellationBodyRefundAccountBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createShopOrderCancellationBodyRefundAccountAccountNumberMax = 30;
+
+
+export const createShopOrderCancellationBodyRefundAccountAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const createShopOrderCancellationBodyRefundAccountHolderNameMax = 60;
+
 
 
 export const CreateShopOrderCancellationBody = zod.object({
@@ -407,9 +414,9 @@ export const CreateShopOrderCancellationBody = zod.object({
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('취소할 항목. 없으면 READY 항목 전부'),
   "refundAccount": zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
+  "bankCode": zod.string().regex(createShopOrderCancellationBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 두 자리(예 88 신한). 포트원 결제는 대응표에 있는 코드만 결제사로 간다'),
+  "accountNumber": zod.string().min(1).max(createShopOrderCancellationBodyRefundAccountAccountNumberMax).regex(createShopOrderCancellationBodyRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(createShopOrderCancellationBodyRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
 }).strict().optional().describe('가상계좌 결제일 때 필수. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014). 보내면 X-Reauth-Token이 필수다')
 }).strict().describe('굿즈·부가 상품 주문 취소 본문(POL-016 §1.4)')
 

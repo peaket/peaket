@@ -269,12 +269,21 @@ export const CreateTicketCancellationHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
+export const createTicketCancellationBodyRefundAccountBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createTicketCancellationBodyRefundAccountAccountNumberMax = 30;
+
+
+export const createTicketCancellationBodyRefundAccountAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const createTicketCancellationBodyRefundAccountHolderNameMax = 60;
+
+
+
 export const CreateTicketCancellationBody = zod.object({
   "refundAccount": zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
-}).strict().optional().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
+  "bankCode": zod.string().regex(createTicketCancellationBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 두 자리(예 88 신한). 포트원 결제는 대응표에 있는 코드만 결제사로 간다'),
+  "accountNumber": zod.string().min(1).max(createTicketCancellationBodyRefundAccountAccountNumberMax).regex(createTicketCancellationBodyRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(createTicketCancellationBodyRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
+}).strict().optional().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
 }).strict()
 
 export const CreateTicketCancellationResponse = zod.object({
@@ -353,11 +362,20 @@ export const CreateCompensationAccountHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
+export const createCompensationAccountBodyBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createCompensationAccountBodyAccountNumberMax = 30;
+
+
+export const createCompensationAccountBodyAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const createCompensationAccountBodyHolderNameMax = 60;
+
+
+
 export const CreateCompensationAccountBody = zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
-}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
+  "bankCode": zod.string().regex(createCompensationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 숫자 두 자리(예 88 신한). 포트원 결제는 대응표에 있는 코드만 결제사로 간다'),
+  "accountNumber": zod.string().min(1).max(createCompensationAccountBodyAccountNumberMax).regex(createCompensationAccountBodyAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(createCompensationAccountBodyHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
 
 export const CreateCompensationAccountResponse = zod.object({
   "compensationId": zod.string().optional(),
@@ -383,11 +401,20 @@ export const CreateCancellationAccountHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
+export const createCancellationAccountBodyBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createCancellationAccountBodyAccountNumberMax = 30;
+
+
+export const createCancellationAccountBodyAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const createCancellationAccountBodyHolderNameMax = 60;
+
+
+
 export const CreateCancellationAccountBody = zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
-}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014)')
+  "bankCode": zod.string().regex(createCancellationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 숫자 두 자리(예 88 신한). 포트원 결제는 대응표에 있는 코드만 결제사로 간다'),
+  "accountNumber": zod.string().min(1).max(createCancellationAccountBodyAccountNumberMax).regex(createCancellationAccountBodyAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(createCancellationAccountBodyHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
 
 export const CreateCancellationAccountResponse = zod.object({
   "cancellationId": zod.string().optional(),

@@ -58,11 +58,14 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         refundAmount: orderCancellation.refundAmount,
         state: orderCancellation.status,
         refundAttempts: orderCancellation.refundAttempts,
+        accountRequiredAt: orderCancellation.refundAccountRequiredAt,
       })
       .from(orderCancellation)
       .where(eq(orderCancellation.id, cancellationId))
       .limit(1);
-    return row ? { ...row, state: row.state as CancellationRecord['state'] } : undefined;
+    if (!row) return undefined;
+    const { accountRequiredAt, ...rest } = row;
+    return { ...rest, state: row.state as CancellationRecord['state'], ...(accountRequiredAt ? { refundAccountRequired: true } : {}) };
   }
 }
 

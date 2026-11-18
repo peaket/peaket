@@ -51,7 +51,7 @@ export interface EventCancellationsModuleDeps {
 }
 
 const isCoreApplyStore = (s: unknown): s is CoreApplyStore =>
-  typeof (s as Partial<CoreApplyStore>).claimCoreApplies === 'function' && typeof (s as Partial<CoreApplyStore>).markCoreApplied === 'function' && typeof (s as Partial<CoreApplyStore>).markCoreApplyOverdue === 'function';
+  typeof (s as Partial<CoreApplyStore>).claimCoreApplies === 'function' && typeof (s as Partial<CoreApplyStore>).markCoreApplied === 'function' && typeof (s as Partial<CoreApplyStore>).markCoreApplyOverdue === 'function' && typeof (s as Partial<CoreApplyStore>).deferCoreApply === 'function';
 
 @Module({})
 export class EventCancellationsModule {

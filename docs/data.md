@@ -1184,9 +1184,10 @@ erDiagram
         text reason "결제사에 보낸 취소 사유. 재시도에도 그대로 보낸다(같은 멱등키의 본문)"
         bool full_cancel "금액을 생략한 전액 취소로 보냈는가. 진행 중인 다른 취소가 없고 금액이 남은 전부일 때만 참"
         int expected_balance "CHECK >= amount. 첫 전송 직전의 결제 금액 - 누적 취소액. 포트원 currentCancellableAmount로 보내고, 3시간 지난 재시도의 조회 대조에 쓴다(HOT-140이 넘긴 것, P-T21)"
-        text status "REQUESTED|CANCEL_PENDING|CANCELED|FAILED. REQUESTED·CANCEL_PENDING이 진행 중이다. 진행 중 행이 있고 만든 지 10분 [가정] 안이면 같은 결제의 다른 취소를 보내지 않는다. CANCELED는 반영으로, FAILED는 거절로 끝난 건이다. FAILED는 같은 취소 ID로 다시 보내지 않고 REJECTED를 다시 준다(리뷰 B3)"
+        text status "REQUESTED|CANCEL_PENDING|CANCELED|FAILED. REQUESTED·CANCEL_PENDING이 진행 중이다. 진행 중 행이 있고 만든 지 10분 [가정] 안이면 같은 결제의 다른 취소를 보내지 않는다. CANCELED는 반영으로, FAILED는 거절로 끝난 건이다. FAILED는 같은 취소 ID로 다시 보내지 않고 첫 답을 다시 준다(리뷰 B3. 계좌 거절이면 REFUND_ACCOUNT_REQUIRED, 그 밖 REJECTED, fail_reason)"
         timestamptz created_at "첫 전송 직전에 행을 만든 시각"
         timestamptz canceled_at "결제사 취소 완료 시각(ADR-0086)"
+        text fail_reason "FAILED의 개인정보 없는 까닭. 계좌 거절(은행·계좌번호·예금주 확인 실패)이면 REFUND_ACCOUNT_INVALID이고 그 밖 업무 거절은 비운다(CHECK: FAILED에만). 같은 취소 ID를 다시 부르면 이 값으로 첫 답(REFUND_ACCOUNT_REQUIRED·REJECTED)을 그대로 준다(payment 0023, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-03, docs/features/payment.md §6 '구현에서 정한 것' ④)"
     }
     settlement_statement {
         uuid id PK
@@ -2009,6 +2010,7 @@ erDiagram
         timestamptz core_applied_at "core 회차 상태 반영(POST /internal/v1/events/{eventId}/cancellation-status)에 core-svc가 2xx로 답한 시각. 비어 있으면 1분 [가정] 다시 하기가 잇는다(판과 따로 쓴다, ops 0016, 추천 적용 2026-11-19, BUILD_ORDER GAT-110, R-T41)"
         timestamptz core_apply_next_at "다시 하기가 잡은 뒤 다음에 볼 시각(잡기 뒤 미루기, 파드 여럿이 겹쳐 부르지 않게, ops 0016)"
         timestamptz core_apply_overdue_at "확정 뒤 10분 [가정]이 지나도 반영하지 못해 SEV2 로그를 남긴 시각(요청마다 한 번, ops 0016)"
+        timestamptz core_apply_superseded_at "같은 회차의 뒤 요청(확정 시각이 더 늦은 것)이 먼저 반영돼 이 요청은 더 부르지 않는다고 정한 시각(뒤 요청의 반영 표시와 같은 트랜잭션, ops 0016, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-06). 잡기 차례는 core_apply_next_at(빈 값 먼저) → approved_at이고 4xx(401 제외)는 다음 볼 시각 + 10분이다"
     }
     ops_alert {
         uuid id PK "BAT-425 GAT-130(2026-11-15, R-583). purchase-svc 회차 취소 환불 자동 정지·신청 창 닫힘 경보"

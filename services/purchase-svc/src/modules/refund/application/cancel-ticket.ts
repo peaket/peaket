@@ -60,7 +60,7 @@ export class CancelTicket {
     const existing = await this.o.orders.findCancellation(i.cancellationId);
     if (existing) {
       if (existing.orderId !== order.orderId || existing.ticketId !== i.ticketId) return { status: 'CONFLICT' };
-      return this.#replay(existing.state, existing.refundAmount, existing.refundAttempts, order.orderId, i);
+      return this.#replay(existing.state, existing.refundAmount, existing.refundAttempts, order.orderId, i, existing.refundAccountRequired === true);
     }
     // 회차 취소 일괄 환불이 확정된 회차(CANCEL RUNNING·PAUSED·COMPLETED)의 팬 취소는 키를 폐기하기 전에 막는다. 일괄 환불이 공제 없이 돌려주고,
     // 티켓을 끝낸 뒤에 거절하면 키는 폐기됐는데 환급할 행이 없는 표가 생긴다(BAT-420 리뷰 D5, transfer-refund §5 '확정 뒤 팬 취소').
@@ -124,7 +124,7 @@ export class CancelTicket {
       const before = await this.o.orders.findCancellation(run.cancellationId);
       if (before) {
         if (before.orderId !== order.orderId || before.ticketId !== i.ticketId) return { status: 'CONFLICT' };
-        return this.#replay(before.state, before.refundAmount, before.refundAttempts, order.orderId, run);
+        return this.#replay(before.state, before.refundAmount, before.refundAttempts, order.orderId, run, before.refundAccountRequired === true);
       }
       const atFirst = quoteRefund({
         ticketPrice: order.ticketPrice,
@@ -229,17 +229,23 @@ export class CancelTicket {
     return { status: 'REFUND_PENDING', cancellationId: i.cancellationId, refundAmount, payment: 'REFUND_ACCOUNT_REQUIRED', refundAccountRequired: true };
   }
 
-  /** 같은 취소 ID의 재요청. REFUND_PENDING이면 같은 멱등키로 결제사를 다시 부르고, 끝난 취소는 처음 결과를 준다 */
-  async #replay(state: CancellationStatus, refundAmount: number, refundAttempts: number, orderId: string, i: CancelTicketInput): Promise<CancelTicketResult> {
+  /**
+   * 같은 취소 ID의 재요청. REFUND_PENDING이면 같은 멱등키로 결제사를 다시 부르고, 끝난 취소는 처음 결과를 준다.
+   * 다시 누름은 계좌를 넘기지 않는다(같은 멱등키에는 첫 본문만, docs/features/payment.md §6 '구현에서 정한 것' ⑥, BAT-420-rest 리뷰 반영 RV-02).
+   * 계좌 대기 행(refund_account_required_at 있음)은 payment를 부르지 않고 실패 표시 없이 계좌 대기 답을 다시 준다(RV-03, '계좌 대기' 끝). 다른 계좌를 받는 길은 GAT-130이다
+   */
+  async #replay(state: CancellationStatus, refundAmount: number, refundAttempts: number, orderId: string, i: CancelTicketInput, accountWaiting = false): Promise<CancelTicketResult> {
     // CS가 무효로 끝낸 취소는 되살리지 않는다
     if (state === 'VOIDED') return { status: 'CONFLICT' };
+    if (state === 'REFUND_PENDING' && accountWaiting) {
+      return { status: 'REFUND_PENDING', cancellationId: i.cancellationId, refundAmount, payment: 'REFUND_ACCOUNT_REQUIRED', refundAccountRequired: true };
+    }
     if (state === 'REFUND_PENDING') {
       const payment = await this.o.payments.cancel({
         cancellationId: i.cancellationId,
         orderId,
         amount: refundAmount,
         reason: i.reason,
-        ...(i.refundAccount !== undefined ? { refundAccount: i.refundAccount } : {}),
         deadlineMs: i.deadlineMs,
       });
       if (payment === 'CANCELLED') {

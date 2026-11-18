@@ -1,6 +1,7 @@
 // 받는 층: ops-svc가 회차 취소·연기 확정을 core 회차 상태에 반영하는 내부 HTTP 경로(BUILD_ORDER GAT-110, R-T41, SR-T8 ③,
 // docs/features/transfer-refund.md §5 'core 회차 상태 반영', ADR-0280 결정 6). 판매 설정 읽기와 같은 내부 토큰 가드(없거나 틀리면 401)를 쓴다.
-// 게이트웨이 HTTPRoute에 없고 클러스터 안에서만 닿는다(메시 허용 정책의 부르는 쪽은 ops-svc 하나, ADR-0285 결정 9). DB 조립에서만 연다.
+// 게이트웨이 HTTPRoute에 없고 클러스터 안에서만 닿는다. 메시 허용 정책은 포트 단위라 core-svc REST 포트를 부르는 다른 서비스(payment·purchase·ticket-svc)도
+// 서비스 사이 공유 토큰이 있으면 이 경로에 닿는다(경로 단위로 막지 않는다, ADR-0285 결정 9·'되돌릴 조건', BAT-420-rest 리뷰 반영 RV-07). 부르는 곳은 ops-svc 하나다. DB 조립에서만 연다.
 // 답: 204(바꿈·이미 같은 상태 모두), 404 not-found, 409 event-status-conflict, 400(모양은 플랫폼 공통, 종류와 연기 시작이 맞지 않으면 invalid-body). 응답은 no-store다.
 import { Controller, HttpCode, Param, Post, Res, UseGuards } from '@nestjs/common';
 import { ContractBody, ContractRouteSchema, ProblemError, Roles } from '@peaket/platform';

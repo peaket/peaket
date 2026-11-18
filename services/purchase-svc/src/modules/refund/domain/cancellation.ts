@@ -31,6 +31,8 @@ export interface CancellationRecord {
   readonly refundAmount: number;
   readonly state: CancellationStatus;
   readonly refundAttempts: number;
+  /** 계좌 대기 행(refund_account_required_at 있음, BUILD_ORDER GAT-090). 다시 누름은 payment를 부르지 않는다(BAT-420-rest 리뷰 반영 RV-03). 없으면 거짓 */
+  readonly refundAccountRequired?: boolean;
 }
 
 /** 취소가 보는 주문·티켓 한 장. ticket-svc가 소유한 보유자·양도 상태는 여기 없다(티켓 취소 포트가 본다) */
