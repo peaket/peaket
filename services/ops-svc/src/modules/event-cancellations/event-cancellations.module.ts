@@ -5,6 +5,8 @@ import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket
 import type { AuditChain } from '../audit/audit.js';
 import { EventCancellations, type EventCancellationReauth } from './application/event-cancellations.js';
 import type {
+  CoreApplyStore,
+  CoreEventStatus,
   EventCancellationCases,
   EventCancellationStore,
   EventOwnerLookup,
@@ -42,7 +44,14 @@ export interface EventCancellationsModuleDeps {
   readonly partnerStore?: PartnerEventCancellationStore;
   /** 지표 ops_event_cancellation_revert_failures_total(웨이브 끝 리뷰 K4). 없으면 오류 로그만 남긴다 */
   readonly revertFailures?: { inc(): void };
+  /** core 회차 상태 반영(BAT-420-rest GAT-110). 없으면 부르지 않는다. 반영 표시는 저장소가 CoreApplyStore면 그것이다 */
+  readonly core?: CoreEventStatus;
+  /** 지표 ops_event_cancellation_core_apply_failures_total */
+  readonly coreApplyFailures?: { inc(): void };
 }
+
+const isCoreApplyStore = (s: unknown): s is CoreApplyStore =>
+  typeof (s as Partial<CoreApplyStore>).claimCoreApplies === 'function' && typeof (s as Partial<CoreApplyStore>).markCoreApplied === 'function' && typeof (s as Partial<CoreApplyStore>).markCoreApplyOverdue === 'function';
 
 @Module({})
 export class EventCancellationsModule {
@@ -64,6 +73,9 @@ export class EventCancellationsModule {
               ...(deps.holds ? { holds: deps.holds } : {}),
               ...(deps.partnerStore ? { partnerStore: deps.partnerStore } : {}),
               ...(deps.revertFailures ? { revertFailures: deps.revertFailures } : {}),
+              ...(deps.core ? { core: deps.core } : {}),
+              ...(isCoreApplyStore(deps.store) ? { coreApplies: deps.store } : {}),
+              ...(deps.coreApplyFailures ? { coreApplyFailures: deps.coreApplyFailures } : {}),
               log: { warn: (obj, msg) => logger.warn(obj, msg), error: (obj, msg) => logger.error(obj, msg) },
             }),
         },

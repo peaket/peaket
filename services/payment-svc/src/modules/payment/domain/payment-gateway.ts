@@ -194,6 +194,35 @@ export interface CancelResult {
   outcome: CancelOutcome;
   balanceAmount?: number;
   pgCode?: string;
+  /** REJECTED의 까닭이 환불 계좌 확인 실패(은행·계좌번호·예금주)일 때만 싣는다(docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090) */
+  reason?: 'REFUND_ACCOUNT_INVALID';
+}
+
+/**
+ * 가상계좌 결제의 환불 계좌(docs/features/payment.md §6 '구현에서 정한 것' ②, ADR-0050 결정 3). 결제사 취소 본문에만 싣는다.
+ * 저장·로그·사건·지표에 싣지 않는다. bankCode는 토스 은행 코드 표의 두 자리 숫자, accountNumber는 숫자 1~20자, holderName은 1~60자다
+ */
+export interface RefundAccount {
+  readonly bankCode: string;
+  readonly accountNumber: string;
+  readonly holderName: string;
+}
+
+const REFUND_BANK_CODE = /^[0-9]{2}$/;
+const REFUND_ACCOUNT_NUMBER = /^[0-9]{1,20}$/;
+const REFUND_HOLDER_MAX = 60;
+const REFUND_CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** 모양이 맞는 계좌만 돌려준다. 계좌번호의 하이픈·공백은 뺀다. 틀리면 undefined(계좌가 없는 것과 같게 다룬다). 던지지 않고 값을 글에 싣지 않는다 */
+export function refundAccountOf(raw: { readonly bankCode?: unknown; readonly accountNumber?: unknown; readonly holderName?: unknown } | undefined): RefundAccount | undefined {
+  if (raw === undefined) return undefined;
+  const { bankCode, accountNumber, holderName } = raw;
+  if (typeof bankCode !== 'string' || typeof accountNumber !== 'string' || typeof holderName !== 'string') return undefined;
+  const number = accountNumber.replace(/[-\s]/g, '');
+  const holder = holderName.trim();
+  if (!REFUND_BANK_CODE.test(bankCode) || !REFUND_ACCOUNT_NUMBER.test(number)) return undefined;
+  if (holder.length === 0 || holder.length > REFUND_HOLDER_MAX || REFUND_CONTROL.test(holder)) return undefined;
+  return { bankCode, accountNumber: number, holderName: holder };
 }
 
 /** 웹훅은 확정 데이터가 아니라 조회를 부르는 신호다(ADR-0029 결정 5). 상태를 싣지 않는다 */
@@ -243,7 +272,11 @@ export interface PaymentGatewayPort {
    * idemKey는 cancel-{cancellationId}. amount 'ALL'은 전액.
    * expectedBalance는 이 취소 앞의 취소 가능 금액(포트원 currentCancellableAmount). 호출자가 첫 전송 전에 저장한 값을 재시도에도 그대로 넘긴다. 같은 멱등키의 본문이 달라지면 안 되기 때문이다(BUILD_ORDER HOT-140, 코드 리뷰)
    */
-  cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult>;
+  /**
+   * refundAccount는 가상계좌 결제의 환불 계좌다(있을 때만 본문에 싣는다, 저장하지 않는다). 계좌 확인 실패는 REJECTED + reason REFUND_ACCOUNT_INVALID다
+   * (docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090)
+   */
+  cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number; refundAccount?: RefundAccount }): Promise<CancelResult>;
   /** 본문은 원문 바이트를 UTF-8로 읽은 글이다. 던지지 않는다 */
   parseWebhook(headers: HeaderBag, body: string): WebhookParseResult;
 }

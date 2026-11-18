@@ -20,6 +20,11 @@ export interface ConfirmedCancelInput {
   readonly reason: string;
   /** 환급액(원). 없으면 남은 전액이다 */
   readonly amount?: number;
+  /**
+   * 가상계좌 결제의 환불 계좌(검사 전, 선택). 모양이 맞을 때만 결제사 본문에 싣고 저장·기록하지 않는다
+   * (docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090)
+   */
+  readonly refundAccount?: { readonly bankCode: string; readonly accountNumber: string; readonly holderName: string };
 }
 
 /** 저장소가 읽은 원장 값 */
@@ -62,7 +67,10 @@ export interface ConfirmedCancelRecord {
  * OVER_REMAINING: 요청액 > 결제 금액 − 누적 취소액 − 진행 중 다른 취소 합, AMOUNT_MISMATCH: 같은 취소 ID에 다른 금액
  */
 export type ConfirmedCancelBegin =
-  | { readonly status: 'BEGUN'; readonly record: ConfirmedCancelRecord; readonly replay: boolean }
+  /** virtualAccount: 결제 행 잠금 안에서 본 가상계좌 결제 여부(AWAITING_DEPOSIT 사건이 있다). 없으면 거짓이다 */
+  | { readonly status: 'BEGUN'; readonly record: ConfirmedCancelRecord; readonly replay: boolean; readonly virtualAccount?: boolean }
+  /** 가상계좌 결제인데 환불 계좌가 없고 이 취소 ID의 행도 없다. 행을 만들지 않았다(docs/features/payment.md §6 '결제 후 일반 취소의 가상계좌 갈래') */
+  | { readonly status: 'ACCOUNT_REQUIRED' }
   | { readonly status: 'DONE'; readonly cancelledAmount: number }
   | { readonly status: 'BUSY' }
   | { readonly status: 'NOT_CONFIRMED' }
@@ -87,8 +95,8 @@ export function canSettleByBalance(q: { readonly ledgerRemaining: number; readon
   return q.ledgerRemaining === q.expectedBalance && q.otherInFlight === 0;
 }
 
-/** CancelPaymentResponse.result의 앞머리를 뗀 값 */
-export type ConfirmedCancelResult = 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN';
+/** CancelPaymentResponse.result의 앞머리를 뗀 값. REFUND_ACCOUNT_REQUIRED는 가상계좌 결제의 계좌 없음·계좌 거절이다(BUILD_ORDER GAT-090) */
+export type ConfirmedCancelResult = 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN' | 'REFUND_ACCOUNT_REQUIRED';
 
 export interface ConfirmedCancelAnswer {
   readonly result: ConfirmedCancelResult;

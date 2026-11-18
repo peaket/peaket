@@ -14,7 +14,8 @@ import * as zod from 'zod';
 export const Cancellation = zod.object({
   "cancellationId": zod.string().optional(),
   "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
-  "refundAmount": zod.int().optional()
+  "refundAmount": zod.int().optional(),
+  "refundAccountRequired": zod.boolean().optional().describe('REFUND_PENDING이고 환불 계좌를 기다리는 건(결제사가 계좌를 거절했거나 계좌 없이 일괄 환불에 든 가상계좌 결제). 화면은 SCR-060 안내를 보인다. 없으면 거짓으로 본다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BUILD_ORDER GAT-090)')
 })
 
 export type Cancellation = zod.input<typeof Cancellation>;

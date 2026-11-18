@@ -74,7 +74,8 @@ const statusAfterRun = (
   windowOpen: boolean,
 ): EventCancellationRequest['status'] => {
   if (paused.length > 0) return 'PAUSED';
-  if (progress.total > progress.done + progress.failed + progress.notApplied) return windowOpen ? 'REFUND_WINDOW' : 'RUNNING';
+  // 계좌 대기(ACCOUNT_PENDING)는 다시 보내지 않으므로 COMPLETED 셈에서 끝난 항목이다(BUILD_ORDER GAT-090, R-T40 ④)
+  if (progress.total > progress.done + progress.failed + progress.notApplied + (progress.accountPending ?? 0)) return windowOpen ? 'REFUND_WINDOW' : 'RUNNING';
   return 'COMPLETED';
 };
 
@@ -555,6 +556,10 @@ export class EventRefundService {
         if (finished && gap && !this.o.csOutbox) await this.#openGapNow(request.requestId, gap, this.o.nowMs());
         return finished;
       }
+      // 계좌 대기(BUILD_ORDER GAT-090, R-T40): 결제사로 돈이 나가지 않았다. 항목을 ACCOUNT_PENDING으로 끝내 다시 보내지 않고, 같은 트랜잭션에서 그 취소 행에
+      // 계좌 대기 표시를 쓴다. 자동 정지 기록(시도)에 넣지 않고(실패율·연속 실패·실패 금액 밖) 실패 알림·일괄 환불 실패 건도 열지 않는다.
+      // CS '환불 대기' 건은 마감 뒤 환급 실행기의 틱 끝 다시 열기가 연다
+      if (result.status === 'ACCOUNT_PENDING') return this.#finishItem(request, item, 'ACCOUNT_PENDING', 'refund-account-required', target, { claimToken });
       const outcome = outcomeOf(result.status, result.error);
       if (result.status === 'REFUNDED') {
         const finished = await this.#finishItem(request, item, 'REFUNDED', undefined, target, { claimToken });
@@ -626,7 +631,7 @@ export class EventRefundService {
     const after = await this.o.store.items(request.requestId);
     // 회차 취소는 그 회차에 끝나지 않은 주문이 있으면 항목이 다 끝나도 COMPLETED로 가지 않는다(늦게 끝난 주문을 쓸어 담는다, ADR-0280 결정 5).
     // 잠근 쓰기의 next는 동기라 그 수는 잠그기 전에 센다(항목이 다 끝났을 때만)
-    const allEnded = after.every((i) => i.status === 'REFUNDED' || i.status === 'FAILED' || i.status === 'NOT_APPLIED');
+    const allEnded = after.every((i) => i.status === 'REFUNDED' || i.status === 'FAILED' || i.status === 'NOT_APPLIED' || i.status === 'ACCOUNT_PENDING');
     const openOrders = allEnded && request.kind === 'CANCEL' && this.o.openOrders ? await this.o.openOrders.count(request.eventId) : 0;
     const added = newlyPaused.map(({ pg, reason }) => ({ pg, reason }));
     const writtenAtMs = this.o.nowMs();
@@ -717,7 +722,7 @@ export class EventRefundService {
   async #finishItem(
     request: EventCancellationRequest,
     item: EventRefundItem,
-    status: 'REFUNDED' | 'FAILED',
+    status: 'REFUNDED' | 'FAILED' | 'ACCOUNT_PENDING',
     error: string | undefined,
     target: EventRefundTarget | undefined,
     o: { readonly attempts?: number; readonly failureNotice?: boolean; readonly claimToken?: string | undefined; readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string } } = {},
@@ -725,7 +730,7 @@ export class EventRefundService {
     const next: EventRefundItem = {
       ...item,
       status,
-      attempts: o.attempts ?? item.attempts + (status === 'REFUNDED' ? 0 : 1),
+      attempts: o.attempts ?? item.attempts + (status === 'FAILED' ? 1 : 0),
       ...(error !== undefined ? { lastError: error } : {}),
       nextAttemptAtMs: undefined,
     };
@@ -741,6 +746,7 @@ export class EventRefundService {
       ...(status === 'FAILED' ? { cancellationFailure: { lastError: error ?? 'failed' } } : {}),
       ...(o.deductionGap ? { deductionGap: o.deductionGap } : {}),
       ...(failureCase ? { failureCase: true as const } : {}),
+      ...(status === 'ACCOUNT_PENDING' ? { accountPending: true as const } : {}),
     });
     if (!written) {
       this.#claimLost(request, item);
@@ -785,6 +791,7 @@ export class EventRefundService {
       readonly cancellationFailure?: { readonly lastError: string };
       readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
       readonly failureCase?: true;
+      readonly accountPending?: true;
     },
   ): Promise<boolean> {
     if (claimToken !== undefined && this.o.claims) {

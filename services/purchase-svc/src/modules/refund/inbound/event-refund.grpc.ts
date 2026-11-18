@@ -166,6 +166,8 @@ export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, o?
         kind: job.kind === 'POSTPONE' ? 'EVENT_REFUND_KIND_POSTPONE' : 'EVENT_REFUND_KIND_CANCEL',
         ...(job.refundWindowClosesAtMs !== undefined ? { refund_window_closes_at: timestampOf(job.refundWindowClosesAtMs) } : {}),
         applied_orders: job.progress.total - job.progress.notApplied,
+        // 계좌 대기 항목(BUILD_ORDER GAT-090, R-T40 ④). 있을 때만 싣는다(proto3 기본값 0)
+        ...((job.progress.accountPending ?? 0) > 0 ? { account_pending_orders: job.progress.accountPending } : {}),
       };
     }),
     PauseEventRefundJob: unary(async (r) => {

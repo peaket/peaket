@@ -101,6 +101,50 @@ export interface EventOwnerLookup {
   find(eventId: string): Promise<{ promoterId: string; startsAtMs: number; endsAtMs?: number } | undefined>;
 }
 
+// ---- BAT-420-rest GAT-110: core 회차 상태 반영(transfer-refund §5 'core 회차 상태 반영', R-T41) ----
+
+/** core-svc POST /internal/v1/events/{eventId}/cancellation-status. 2xx가 아니거나 시간 초과·연결 실패면 던진다(4xx는 CoreEventStatusRejected) */
+export interface CoreEventStatus {
+  apply(q: { readonly eventId: string; readonly requestId: string; readonly kind: EventCancellationKind; readonly postponedTo?: Date }): Promise<void>;
+}
+
+/** core가 4xx로 답했다(계약 결함, 경고 대신 오류 로그, guidelines §8.1). 상태 코드만 싣는다 */
+export class CoreEventStatusRejected extends Error {
+  constructor(readonly status: number) {
+    super(`core-svc가 회차 상태 반영을 받지 않았다(status ${status})`);
+    this.name = 'CoreEventStatusRejected';
+  }
+}
+
+/** 다시 하기 간격 1분 [가정], 한 번에 20건 [가정], 확정 뒤 SEV2까지 10분 [가정](transfer-refund §5) */
+export const CORE_APPLY_RETRY_MS = 60_000;
+export const CORE_APPLY_BATCH = 20;
+export const CORE_APPLY_OVERDUE_MS = 600_000;
+
+/** 반영을 다시 할 요청 한 건 */
+export interface CoreApplyDue {
+  readonly requestId: string;
+  readonly eventId: string;
+  readonly kind: EventCancellationKind;
+  readonly newStartsAt?: Date;
+}
+
+/**
+ * core 반영 표시(ops 0016 core_applied_at·core_apply_next_at·core_apply_overdue_at). 요청 행의 판(version)과 따로 쓴다(확정·진행률 저장과 겹치지 않게).
+ * 대상은 Start까지 끝낸(refund_job_state 있음) APPROVED·RUNNING·PAUSED·REFUND_WINDOW·COMPLETED 요청이다
+ */
+export interface CoreApplyStore {
+  /** core가 2xx로 답한 뒤에만 부른다. 이미 쓴 행은 그대로다 */
+  markCoreApplied(requestId: string, nowMs: number): Promise<void>;
+  /**
+   * 반영하지 않았고 다음 볼 시각이 지난(또는 빈) 요청을 확정 시각 순으로 limit건 잡아 다음 볼 시각을 지금 + retryAfterMs로 미룬다(한 문장, FOR UPDATE SKIP LOCKED).
+   * 파드 여럿이 함께 돌려도 한 요청은 한쪽만 잡는다
+   */
+  claimCoreApplies(nowMs: number, limit: number, retryAfterMs: number): Promise<readonly CoreApplyDue[]>;
+  /** 확정 뒤 overdueAfterMs 이상(경계 포함) 지나도 반영하지 않은 요청에 core_apply_overdue_at을 쓰고 그 요청들을 돌려준다(요청마다 한 번) */
+  markCoreApplyOverdue(nowMs: number, overdueAfterMs: number, limit: number): Promise<readonly { readonly requestId: string; readonly eventId: string }[]>;
+}
+
 /** CS 처리함 JUDGEMENT_PENDING(대상 요청 ID). 같은 대상은 한 건 */
 export interface EventCancellationCases {
   judgementPending(requestId: string, nowMs: number): Promise<void>;
