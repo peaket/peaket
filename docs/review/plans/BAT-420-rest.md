@@ -21,7 +21,8 @@
 | — | — | 합계 | 2.35 | — |
 
 - 단계 줄 WBS(GAT-090 1.75 + GAT-110 1.65 = 3.4)에서 이미 한 몫(R-547·R-552·R-673·BAT-415-reauth)을 빼고 남은 일을 어림했다. 5일 [가정]은 넘지 않는다. 그래도 한 묶음으로는 무겁다. 서비스 다섯(payment·purchase·ops·core·identity)과 앱 셋(apps/web·apps/partner·apps/console-host)에 걸치고, 화면은 갈래 2 영역(ADR-0286)이며, W는 다른 갈래 단계(PRF-174)가 먼저다.
-- **나누기 안(감독이 전체 감독과 정한다. BUILD_ORDER에는 쓰지 않았다)**:
+- **나누기 결정(2026-11-19 전체 감독 승인, docs/lanes/coord.md, develop `dcd69477`)**: BAT-421은 갈래 2로 BUILD_ORDER '기능 묶음' 표에 BAT-420 바로 뒤에 더했고(wbs.csv에는 더하지 않음, 기존 몫을 나눔), W는 안 (가)대로 PRF-174로 옮겼다(GAT-090·GAT-110·PRF-174 단계 줄에 한 구절씩). 아래는 처음 낸 안이다.
+- **나누기 안(처음 낸 것)**:
   - **BAT-420-rest(이 파일, 갈래 3, A)**: V·K. 1.2일 [가정]. 선행 없음(BAT-415-reauth·BAT-010은 develop에 있다. BAT-408은 합치기 대기이고 이 몫은 그 코드에 닿지 않는다).
   - **BAT-421(새 묶음, A, 화면)**: S1·S2와 브라우저 확인(대본 `docs/review/browser-check/` 아래 `GAT-090-GAT-110.md`, d5 §5.20·§6.12·§7.8과 R-T36·R-T37·R-T39·P-T72로 만든다). 0.9일 [가정]. 선행 BAT-420-rest(견적·취소 응답의 `refundAccountRequired`, 422 `refund-account-required`가 계약에 들어가야 화면을 잇는다)와 BAT-408(ADR-0293 `purpose`). 안: 갈래 2가 한다(ADR-0286 화면 영역. 갈래 3이 하면 web 잡 아홉과 첫 JS 예산을 이 갈래가 처음 재야 하고, 갈래 2의 화면 묶음과 같은 앱 파일이 겹친다).
   - **BAT-422(새 묶음, A, 서버)** 또는 **PRF-174에 합치기**: W. 0.25일 [가정]. 선행 PRF-174(BAT-013, 갈래 1, 탈퇴 참여자의 미사용 티켓 취소)와 BAT-420-rest. 지금은 탈퇴가 표를 취소하지 않아 계좌를 넘길 호출이 없다(docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현'의 남는 한계). 안 (가) 추천: PRF-174에 합친다(같은 참여자 호출·같은 파일, identity → purchase 참여자 계약 `account.proto`에 계좌 칸을 한 번만 더한다. 0.25일을 GAT-090에서 PRF-174로 옮긴다). 안 (나): 갈래 3 BAT-422로 BAT-013 뒤에 한다.
@@ -82,14 +83,14 @@
 | `…/application/refund-retry-loop.ts`·`refund-after-entry.ts` | V9. 계좌 대기 행을 집지 않는다(`refund_account_required_at IS NULL`) | — |
 | `…/application/cs-case-reopen.ts`, 새 `…/adapters/http-refund-account-notice.ts` | V10. ops-svc CS 내부 HTTP(kind `REFUND_ACCOUNT_PENDING`, 지금 `HttpRefundFailureNotice`와 같은 꼴), 지표 kind `REFUND_ACCOUNT_PENDING` | — |
 | `…/application/event-refund-service.ts`·`event-refund-loop.ts`, `…/adapters/db/drizzle-event-refund-store.ts` | V11. 항목 상태 `ACCOUNT_PENDING`, 진행 합계 `accountPending` | `GetEventRefundJob` 답에 계좌 대기 수(refund.proto 칸 하나, 구현이 이름을 정함) |
-| `services/purchase-svc/migrations/00NN_refund_account_pending.sql`(번호 감독 확인 필요) | `order_cancellation.refund_account_required_at`·`refund_account_case_opened_at`(CHECK: 연 시각은 표시 없이 쓰지 않음), `event_refund_item_status_check`에 `ACCOUNT_PENDING`, 다시 열기 부분 인덱스 | — |
+| `services/purchase-svc/migrations/0029_refund_account_pending.sql`(번호 감독 확정 2026-11-19. Drizzle journal `meta/_journal.json`의 `when`은 develop의 마지막 항목보다 커야 한다) | `order_cancellation.refund_account_required_at`·`refund_account_case_opened_at`(CHECK: 연 시각은 표시 없이 쓰지 않음), `event_refund_item_status_check`에 `ACCOUNT_PENDING`, 다시 열기 부분 인덱스 | — |
 | `services/core-svc/src/modules/catalog/inbound/internal-sale-config.controller.ts`(같은 `internal/v1/events` 컨트롤러) 또는 새 컨트롤러 | K1·K3. 같은 공유 토큰 가드 | `POST /internal/v1/events/:eventId/cancellation-status` 본문 `{ requestId: uuid, kind: 'CANCEL' \| 'POSTPONE', postponedTo?: ISO 시각 }`(모르는 칸 400) → 204 |
 | 새 `services/core-svc/src/modules/catalog/application/apply-event-cancellation-status.ts`, 저장소(drizzle·memory) | K2·K3. `withSearchSync({ reason: 'EVENT_CANCELLED', … })` 안에서 회차 행 잠금·상태 확인·쓰기, 바뀐 공연 ID 돌려줌 | `export class ApplyEventCancellationStatus { execute(i: { eventId: string; requestId: string; kind: 'CANCEL' \| 'POSTPONE'; postponedTo?: Date }): Promise<'APPLIED' \| 'UNCHANGED'> }`, 오류 `EventNotFound`·`EventStatusConflict` |
 | 새 `services/ops-svc/src/adapters/http-core-event-status.ts`, `…/event-cancellations/domain/ports.ts` | K1. `http-core-event-owners.ts`와 같은 꼴(`createExternalHttpClient`, 3초) | `export interface CoreEventStatus { apply(q: { eventId: string; requestId: string; kind: 'CANCEL' \| 'POSTPONE'; postponedTo?: Date }): Promise<void> }`(실패는 던진다) |
 | `services/ops-svc/src/modules/event-cancellations/application/event-cancellations.ts` | K1·K4. approve가 Start 뒤에 부르고, 실패는 삼켜 경고·지표만. 다시 하기 쓰임새 `retryCoreApply(now)` | — |
 | `services/ops-svc/src/event-cancellation-wiring.ts`(또는 시작 조립) | K4 고리(1분, `FOR UPDATE SKIP LOCKED` 잡기 뒤 미루기, 파드 여럿 안전). 주소 `PEAKET_CORE_HTTP_URL`이 없으면 local·ci만 대역, 그 밖은 시작 실패(판매 설정 읽기와 같은 규칙) | — |
-| `services/ops-svc/migrations/00NN_event_cancellation_core_applied.sql`(번호 감독 확인 필요) | `event_cancellation_request.core_applied_at`·`core_apply_overdue_at`, 다시 하기 부분 인덱스 | — |
-| 메시 허용 정책 생성 원천(ADR-0285 결정 9의 표, 생성 도구의 원천 파일) | ops-svc → core-svc에 `/internal/v1/events/{eventId}/cancellation-status`를 더한다. ADR-0285 표 줄도 사실대로 더한다 | — |
+| `services/ops-svc/migrations/0016_event_cancellation_core_applied.sql`(번호 감독 확정 2026-11-19. journal `when`은 develop의 마지막 항목보다 커야 한다) | `event_cancellation_request.core_applied_at`·`core_apply_overdue_at`, 다시 하기 부분 인덱스 | — |
+| 메시 허용 원천 `deploy/platform/mesh/port-allow.yaml`(BAT-061이 만든 원천 하나)과 생성물 `deploy/platform/mesh/policies.yaml`·`meshless-networkpolicies.yaml` | ops-svc → core-svc 줄에 `/internal/v1/events/{eventId}/cancellation-status`를 더하고, **같은 커밋에서** `node tools/ci/mesh-policies.mjs --write`로 생성물을 다시 만든다(`--check`가 CI에서 견준다). ADR-0285 결정 9 표 줄도 사실대로 더한다. 주의: 갈래 1이 같은 원천·생성물을 고칠 수 있다. 합칠 때 겹치면 원천을 합친 뒤 생성물은 손으로 합치지 말고 다시 만든다(ops→core 내부 HTTP는 2026-11-19 감독 승인) | — |
 | docs/api/guidelines.md §8.1 | core-svc 회차 상태 반영 행(실패 모양·무게) | — |
 
 ### 5. 판정 항목마다 쓸 시험(시험 담당, 구현 뒤에 쓰고 구현 전 트리에서 실패를 본다)
@@ -130,8 +131,8 @@
 | 서비스 | 필요 | 번호 |
 | --- | --- | --- |
 | payment-svc | 없음(V1을 사건으로 판정) | 갈래 3 몫 0023~0024는 쓰지 않는다 |
-| purchase-svc | 있음(취소 행 두 칸·CHECK, 일괄 환불 항목 상태 값, 부분 인덱스) | **감독 확인 필요**(지금 마지막 0028) |
-| ops-svc | 있음(`core_applied_at`·`core_apply_overdue_at`, 부분 인덱스) | **감독 확인 필요**(지금 마지막 0015) |
+| purchase-svc | 있음(취소 행 두 칸·CHECK, 일괄 환불 항목 상태 값, 부분 인덱스) | **0029**(감독 확정 2026-11-19, journal `when`은 develop 것보다 크게) |
+| ops-svc | 있음(`core_applied_at`·`core_apply_overdue_at`, 부분 인덱스) | **0016**(감독 확정 2026-11-19, journal `when`은 develop 것보다 크게) |
 | core-svc | 없음(회차 `status`·`starts_at`이 있다) | — |
 
 - 다른 갈래 영향: docs/api의 payment.proto·openapi와 생성물 두 패키지(깨지지 않는 칸·값 더하기. 새 enum 값은 옛 purchase-svc가 모르는 값이라 배포 차례는 purchase-svc와 payment-svc를 함께, 운영 전이라 지금은 함께 나간다). core-svc 카탈로그 컨트롤러(갈래 2가 검색 표를 만든 곳, BAT-165)·`withSearchSync` 부르는 곳 하나 더함. 메시 허용 정책 원천(ADR-0285, 갈래 1이 만든 도구일 수 있다). 화면 앱은 건드리지 않는다.
@@ -139,7 +140,7 @@
 
 ### 8. 차례(구현 담당 안에서)
 
-1. proto·openapi 칸 → 생성물 두 패키지 → 2. payment-svc(포트·어댑터·시뮬레이터·일반 취소 갈래·`GetPayment`) → 3. purchase-svc 마이그레이션(번호를 감독에게 받은 뒤) → 4. purchase-svc 포트·견적·취소·재시도·다시 열기·일괄 환불 → 5. core-svc 쓰임새·컨트롤러 → 6. ops-svc 마이그레이션(번호를 받은 뒤)·어댑터·approve·다시 하기·시작 조립 → 7. 메시 정책 원천·guidelines §8.1 → 8. 아래 §11 게이트. V와 K는 서로 닿지 않아 순서를 바꿔도 된다.
+1. proto·openapi 칸 → 생성물 두 패키지 → 2. payment-svc(포트·어댑터·시뮬레이터·일반 취소 갈래·`GetPayment`) → 3. purchase-svc 마이그레이션 0029 → 4. purchase-svc 포트·견적·취소·재시도·다시 열기·일괄 환불 → 5. core-svc 쓰임새·컨트롤러 → 6. ops-svc 마이그레이션 0016·어댑터·approve·다시 하기·시작 조립 → 7. 메시 원천과 생성물 다시 만들기(같은 커밋)·guidelines §8.1 → 8. 아래 §11 게이트. V와 K는 서로 닿지 않아 순서를 바꿔도 된다.
 
 ### 9. 자주 놓친 결함 가운데 해당하는 것
 
@@ -190,7 +191,7 @@
 | services/core-svc | node / node, contract-check / contracts | 통합 `pnpm --filter @peaket/core-svc test:integration`(R-T41 ①②⑤, SR-T8 ③) |
 | services/ops-svc | node / node, contract-check / contracts, docs-check / docs | — |
 | services/pg-simulator | node / node, image / build | 이미지 스모크 |
-| 메시 정책 원천 | kind / kind(정책을 쓰는 곳), node / node | 도구 위치는 구현이 확인 |
+| 메시 원천·생성물(`deploy/platform/mesh/`) | `.github/workflows/tools-check.yml`(`node tools/ci/mesh-policies.mjs --check`), kind / kind | 생성물은 `node tools/ci/mesh-policies.mjs --write`로만 만든다 |
 | docs | docs-check / docs | — |
 
 ```
@@ -220,6 +221,6 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T03:43+09:00 | 2026-11-19T04:00+09:00 |
+| plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T03:43+09:00 | 2026-11-19T04:04+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
