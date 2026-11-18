@@ -61,9 +61,11 @@
 - CC-03은 구현 전에도 통과한다. 규칙 4(`check-workflows.mjs`)는 이미 `github.event_name`을 사용자가 고칠 수 없는 값으로 보고(기존 `== 'schedule'` 시험), 검사 도구는 이번에 바꾸지 않았다. 새 식이 단계 `env`와 맨 위 `concurrency` 블록 어디에 있어도 검사가 막지 않음을 지킨다.
 - 건너뜀 3 중 2는 구현 전 트리에 `node_modules`(yaml 패키지)가 없어 YAML 시험이 건너뛴 것이고, 1은 CI 밖이라 건너뛰는 시험이다. 새 시험 셋은 YAML 패키지 없이 줄로 읽어 건너뛰지 않았다.
 
+- 리뷰 반영(VF-A3·A4·A5, 2026-11-19 06:50): 임시 사본(`git worktree add --detach`, `node_modules`는 디렉터리 연결, 끝나고 연결을 끊고 사본을 지움)에 결함을 하나씩 넣었다. 바꾸지 않은 사본은 51개 중 통과 50·건너뜀 1. A3(`ci-kind.yml` 잡 `kind`에 `concurrency:`)·A4(`ci.yml` 잡 `kind`에 따옴표 키 `"concurrency":`)는 CC-04가 각각 실패('ci-kind.yml의 잡 kind에 concurrency가 있다'·'ci.yml의 잡 kind에 concurrency가 있다'), A5(규칙 4가 `cancel-in-progress:` 줄을 건너뜀)는 CC-03 대조 단언이 끝 코드 0으로 실패했다. 셋 다 51개 중 실패 1.
 ## 시험 결과
 
 - 작업 폴더(`f81981e1` + 이 시험)에서 `node --test tools/ci/check-workflows.test.mjs`: 50개 중 통과 49, 실패 0, 건너뜀 1(CI 밖 시험). CC-01·CC-02·CC-03 모두 통과.
+- 리뷰 반영 뒤(CC-04·CC-03 대조 더함) 작업 폴더: 51개 중 통과 50, 실패 0, 건너뜀 1(CI 밖 시험). CC-04는 YAML 패키지가 없으면 건너뛰지만 CI에서는 기존 시험 'CI에서는_yaml패키지가있어_YAML시험을건너뛰지않는다'가 패키지가 있음을 지켜 꼭 돈다.
 
 ## 리뷰
 
@@ -146,6 +148,6 @@
 | --- | --- | --- | --- | --- |
 | plan | w11ci-plan-1b7c | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:46+09:00 |
 | impl | w11ci-impl-4e90 | claude-opus-5-5 | 2026-11-19T06:15+09:00 | 2026-11-19T06:17+09:00 |
-| test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T06:22+09:00 |
+| test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T06:51+09:00 |
 | review | w11ci-review-2c58 | claude-opus-5-5 | 2026-11-19T06:22+09:00 | 2026-11-19T06:30+09:00 |
 | verify | w11ci-verify-9f13 | claude-opus-5-5 | 2026-11-19T06:27+09:00 | 2026-11-19T06:46+09:00 |

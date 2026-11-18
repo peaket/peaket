@@ -858,4 +858,32 @@ test("CC-03 규칙 4: github.event_name == 'pull_request'는 사용자가 고칠
   assert.notEqual(withConc, GOOD, '표본에 concurrency 블록을 넣지 못했다');
   const r = run(withConc);
   assert.equal(r.code, 0, r.out);
+  // 대조(검증 VF-A5, 리뷰 RV-03): 같은 블록에 사용자가 고칠 수 있는 값을 넣으면 실패해야, 규칙 4가 맨 위 concurrency 블록도 본다는 것이 지켜진다
+  const bad = withConc.replace(`cancel-in-progress: \${{ ${expr} }}`, "cancel-in-progress: ${{ github.head_ref == 'x' }}");
+  assert.notEqual(bad, withConc, '대조 표본을 만들지 못했다');
+  const rb = run(bad);
+  assert.equal(rb.code, 1, rb.out);
+  assert.match(rb.out, /사용자가 고칠 수 있는 값/);
+});
+
+// CC-04(검증 VF-A3·A4): 잡 단위 concurrency가 있으면 develop 푸시가 이어질 때 다음 실행의 그 잡이 앞 실행의 잡을 취소한다.
+// 따옴표 키("concurrency":)도 YAML로는 같은 키라 줄이 아니라 YAML로 읽는다. CI에서는 'CI에서는_yaml패키지가있어_YAML시험을건너뛰지않는다'가 건너뛰지 않음을 지킨다
+test('CC-04 ci.yml과 ci.yml이 부르는 워크플로(./.github/workflows/*.yml, 부른 것이 부르는 것까지)의 어느 잡에도 concurrency가 없고, concurrency는 ci.yml 맨 위에만 있다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const dir = join(REPO, '.github', 'workflows');
+  const seen = new Set();
+  const queue = ['ci.yml'];
+  while (queue.length) {
+    const name = queue.shift();
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const doc = YAML.parse(readFileSync(join(dir, name), 'utf8'));
+    if (name === 'ci.yml') assert.ok(doc.concurrency, 'ci.yml 맨 위 concurrency가 없다');
+    else assert.equal(doc.concurrency, undefined, `${name} 맨 위에 concurrency가 있다`);
+    for (const [job, def] of Object.entries(doc.jobs ?? {})) {
+      assert.ok(!Object.hasOwn(def ?? {}, 'concurrency'), `${name}의 잡 ${job}에 concurrency가 있다`);
+      const m = typeof def?.uses === 'string' && def.uses.match(/^\.\/\.github\/workflows\/([\w.-]+\.ya?ml)$/);
+      if (m) queue.push(m[1]);
+    }
+  }
+  assert.ok(seen.size > 1, `ci.yml이 부르는 워크플로를 찾지 못했다: ${[...seen].join(', ')}`);
 });
