@@ -29,6 +29,7 @@ import { deviceId } from '@/shared/lib/device-id';
 import { entryHref } from '@/shared/lib/in-app-browser';
 import { lobbyUnlockDelayMs } from '@/shared/lib/lobby-unlock';
 import { renderNextLink } from '@/shared/lib/next-link';
+import { useStickyInset } from '@/shared/lib/sticky-inset';
 import { bookingCta, type CtaData, type CtaModel, type Primary } from '../model/cta';
 import { bookingPhase, roundBadge, tierBadge, type BookingPhase, type DetailRound, type EventDetail } from '../model/detail';
 import type { LiveSale } from '../model/live-sale';
@@ -341,6 +342,8 @@ function AlertToggle({ title, className, iconOnlyBelowMd }: { title: string; cla
 /** 휴대폰·태블릿 화면 아래 고정 띠(보드 SCR-002-m·t의 .bottom-bar). 데스크톱(lg)에서는 숨긴다 */
 export function BookingBar({ data }: { data: BookingData }) {
   const { m, phase, unlockAt } = useCta(data);
+  // 띠의 실제 높이를 아래 스크롤 여백으로(안내 글이 320 폭에서 줄을 바꾸면 띠가 96px보다 높아진다, docs/frontend.md §5.11, BAT-171)
+  const barRef = useStickyInset('bottom');
   const descId = m.desc ? `bar-${phase ?? 'load'}-why` : undefined;
   let body: ReactNode;
   if (m.special === 'load') {
@@ -411,7 +414,7 @@ export function BookingBar({ data }: { data: BookingData }) {
     );
   }
   return (
-    <div className="bottom-bar sticky bottom-0 z-10 md:px-6 lg:hidden" data-verify-scope>
+    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 md:px-6 lg:hidden" data-verify-scope>
       <div className="w-full">
         <DomesticPhoneNotice text={data.domesticPhoneNotice} lang={data.locale} className="px-1 pb-1 text-center md:text-left" />
         {body}
