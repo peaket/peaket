@@ -20,7 +20,7 @@ import { AppModule } from '../src/app.module.js';
 import { event, place, production, promoter } from '../src/modules/catalog/adapters/db/schema.js';
 import { GrpcSeatmapParser, LocalFolderPublicFileStore } from '../src/modules/catalog/index.js';
 import { FakeIdentity, NOW_MS, testMedia } from '../test/support.js';
-import { buildDist, freePort, logSink, multipart, SERVICE_DIR, startWorker, until, type WorkerProcess } from './media-support.js';
+import { buildDist, freePort, logSink, multipart, SERVICE_DIR, startWorker, until, waitReady, type WorkerProcess } from './media-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { ensureSearchLogin, loginFor } from './roles.js';
 
@@ -396,13 +396,7 @@ describe('시작 파일(main.ts) 조립', () => {
     child.stderr!.on('data', (d) => (text += String(d)));
     const exited = new Promise<number | null>((r) => child.once('exit', (c) => r(c)));
     try {
-      await until(async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${mgmt}/ready`)).status === 200;
-        } catch {
-          return false;
-        }
-      }, `core-svc 준비: ${text.slice(-400)}`, 30_000, 200);
+      await waitReady(`http://127.0.0.1:${mgmt}/ready`, child, () => text, 'core-svc 준비', 30_000, 200);
       const m = await makeProduction({ rows: 1 });
       const account = randomUUID();
       const session = randomUUID();

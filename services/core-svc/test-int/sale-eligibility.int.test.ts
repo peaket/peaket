@@ -19,7 +19,7 @@ import { AppModule } from '../src/app.module.js';
 import { event, place, production, promoter, saleEligibilityList, saleEligibilityMember } from '../src/modules/catalog/adapters/db/schema.js';
 import { DrizzleSaleMaintenanceStore, GrpcMemberCodeDirectory, MemorySaleEligibilityCopy, SaleEligibilityMetrics, saleEligibilityMaintenanceTasks, UnwiredSaleEligibilityCopy } from '../src/modules/catalog/index.js';
 import { FakeIdentity, testMedia } from '../test/support.js';
-import { buildDist, freePort, logSink, multipart, SERVICE_DIR, until } from './media-support.js';
+import { buildDist, freePort, logSink, multipart, SERVICE_DIR, until, waitReady } from './media-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { ensureSearchLogin, loginFor } from './roles.js';
 
@@ -688,13 +688,7 @@ describe('시작 파일(main.ts)과 relay 정비 일 조립', () => {
     child.stderr!.on('data', (d) => (text += String(d)));
     const exited = new Promise<number | null>((r) => child.once('exit', (c) => r(c)));
     try {
-      await until(async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${mgmt}/ready`)).status === 200;
-        } catch {
-          return false;
-        }
-      }, `core-svc 준비: ${text.slice(-500)}`, 30_000, 200);
+      await waitReady(`http://127.0.0.1:${mgmt}/ready`, child, () => text, 'core-svc 준비', 30_000, 200);
       const m = await makeProduction({ rules: [presale()] });
       const [c1] = known(1, 900);
       const account = randomUUID();

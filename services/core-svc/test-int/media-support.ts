@@ -106,13 +106,53 @@ export function logSink(): { stream: Writable; lines: () => Record<string, unkno
   return { stream, lines: () => logLines(text), text: () => text };
 }
 
-export async function until(pred: () => boolean | Promise<boolean>, what: string, timeoutMs = 5_000, everyMs = 25): Promise<void> {
+/** 조건이 참이 될 때까지 기다린다. what이 함수면 실패할 때 불러 그때의 글(아이 출력 등)을 싣는다 */
+export async function until(pred: () => boolean | Promise<boolean>, what: string | (() => string), timeoutMs = 5_000, everyMs = 25): Promise<void> {
   const end = Date.now() + timeoutMs;
   for (;;) {
     if (await pred()) return;
-    if (Date.now() > end) throw new Error(`기다리다 시간이 지났다: ${what}`);
+    if (Date.now() > end) throw new Error(`기다리다 시간이 지났다: ${typeof what === 'function' ? what() : what}`);
     await new Promise((r) => setTimeout(r, everyMs));
   }
+}
+
+/** 실패 메시지에 싣는 아이 출력의 끝 줄 수 */
+export const CHILD_TAIL_LINES = 40;
+
+/** 글의 끝 n줄 */
+export function tailLines(text: string, n = CHILD_TAIL_LINES): string {
+  return text.replace(/\n$/, '').split('\n').slice(-n).join('\n');
+}
+
+/**
+ * 시작 파일로 띄운 아이 프로세스의 준비(관리 포트 /ready 200)를 기다린다(BAT-174 계획 12 (ㄱ)).
+ * 기다리는 동안 아이가 끝나면 남은 시간을 쓰지 않고 바로 실패하고, 실패 메시지에는 끝 코드와 아이 출력 끝 CHILD_TAIL_LINES줄을 싣는다.
+ * 시간 상한·간격은 부르는 쪽이 지금 값 그대로 준다.
+ */
+export async function waitReady(readyUrl: string, child: ChildProcess, output: () => string, what: string, timeoutMs: number, everyMs: number): Promise<void> {
+  const ended = () => child.exitCode !== null || child.signalCode !== null;
+  const info = () => `${what}\n아이 출력 끝 ${CHILD_TAIL_LINES}줄:\n${tailLines(output())}`;
+  let exitedEarly = false;
+  await until(
+    async () => {
+      if (ended()) {
+        exitedEarly = true;
+        return true;
+      }
+      try {
+        return (await fetch(readyUrl)).status === 200;
+      } catch {
+        return false;
+      }
+    },
+    info,
+    timeoutMs,
+    everyMs,
+  );
+  if (!exitedEarly) return;
+  // 남은 출력이 다 들어오기를 기다린다(끝난 뒤 'close'는 표준 출력·오류가 닫힌 뒤에 온다)
+  if (!(child.stdout?.closed ?? true) || !(child.stderr?.closed ?? true)) await new Promise((r) => child.once('close', r));
+  throw new Error(`준비 전에 아이 프로세스가 끝났다(끝 코드 ${child.exitCode ?? child.signalCode}): ${info()}`);
 }
 
 export interface FilePart {
