@@ -5,6 +5,8 @@
 // ⑤ `peaket.auth.` 값이 꼭 하나가 아니거나 토큰 확인 실패 401(4.4.3·4.4.4) ⑥ 판 파일 없음·틀림 503.
 // 거절 응답은 본문이 없고 이유를 싣지 않는다(16.5.1). 통과하면 `peaket.seats.v1`을 골라 맺는다(토큰 값은 되돌려 보내지 않는다).
 // 주소의 회차와 토큰 event가 다르면 맺은 뒤 바로 4403 bad event, 같은 토큰(jti)의 파드 연결이 이미 2개면 4429 too many(허브가 닫는다).
+// 곧 닫는 연결(4403 bad event·4429 too many)은 닫기로 정한 순간 파드 연결 셈에서 빼 '닫히는 중'으로 옮기고 닫기 인사를 100ms [가정]만 기다린다.
+// 같은 jti의 닫히는 중 연결(회차가 다른 것 포함)이 4개 [가정]면 그 jti의 새 핸드셰이크는 ⑤ 뒤 업그레이드 없이 503이다(ADR-0297 결정 3 '곧 닫는 연결').
 // 클라이언트 Ping은 받지 않는다: autoPong을 끄고 Ping이 오면 4403 bad frame(ADR-0297 결정 2).
 // 신원은 확인한 토큰에서만 정한다(x-user-id·x-forwarded-for 같은 머리는 읽지 않는다, 4.1.3).
 // 토큰과 하위 프로토콜 값은 로그·지표에 싣지 않는다(14.1.2). 업그레이드 요청은 Fastify 경로를 거치지 않는다(v0 delta-socket.ts와 같은 꼴).
@@ -28,6 +30,12 @@ const TOKEN_CHARS = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const WS_MAX_PAYLOAD = 64 * 1024;
 /** 닫기 인사를 기다리는 시간(ms). 넘으면 끊는다 */
 const CLOSE_GRACE_MS = 1_000;
+/** 곧 닫는 연결(4403 bad event·4429 too many)의 닫기 인사 유예(ms, [가정], ADR-0297 결정 3) */
+export const CLOSING_GRACE_MS = 100;
+/** 같은 jti의 닫히는 중 연결 상한([가정], ADR-0297 결정 3). 이만큼 있으면 그 jti의 새 핸드셰이크는 503 */
+export const MAX_CLOSING_PER_TOKEN = 4;
+/** 곧 닫는 연결로 보는 닫힘 이유 글(맺은 뒤 바로 닫는 것) */
+const CLOSING_FAST_REASONS: ReadonlySet<string> = new Set([CLOSE_REASON.badEvent, CLOSE_REASON.tooMany]);
 
 const STATUS_TEXT: Readonly<Record<number, string>> = { 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 503: 'Service Unavailable' };
 
@@ -42,6 +50,7 @@ export type HandshakeRejectReason =
   | 'upgrade_headers'
   | 'subprotocol'
   | 'token_count'
+  | 'token_closing'
   | `token_${AdmissionTokenRejected['reason']}`
   | 'layout';
 
@@ -92,6 +101,10 @@ export class StreamGateway {
   readonly #wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_PAYLOAD, clientTracking: false, perMessageDeflate: false, autoPong: false, handleProtocols: () => SEATS_PROTOCOL });
   /** 맺은 소켓 모두(회차 다름으로 곧 닫는 것도) */
   readonly #sockets = new Set<WebSocket>();
+  /** 파드 상한에 세는 열린 연결(곧 닫기로 정한 것은 뺀다) */
+  readonly #open = new Set<WebSocket>();
+  /** jti → 닫히는 중(곧 닫는) 연결 수 */
+  readonly #closingByToken = new Map<string, number>();
   #stopping = false;
   #stopped: Promise<void> | undefined;
 
@@ -105,9 +118,9 @@ export class StreamGateway {
     });
   };
 
-  /** 지금 맺은 연결 수 */
+  /** 지금 열린 연결 수(곧 닫는 연결은 세지 않는다) */
   get connections(): number {
-    return this.#sockets.size;
+    return this.#open.size;
   }
 
   /** 새 핸드셰이크를 받지 않고 모든 연결을 1012로 닫는다. 닫기 인사를 1초까지 기다리고 남은 소켓은 끊는다 */
@@ -136,7 +149,7 @@ export class StreamGateway {
     if (eventId === undefined || !KEY_PART.test(eventId)) return this.#reject(socket, 404, 'path');
     // ② 내리는 중·파드 연결 상한
     if (this.#stopping) return this.#reject(socket, 503, 'shutting_down');
-    if (this.#sockets.size >= this.d.maxConnections) return this.#reject(socket, 503, 'capacity');
+    if (this.#open.size >= this.d.maxConnections) return this.#reject(socket, 503, 'capacity');
     // ③ 출처
     const origin = req.headers.origin;
     if (typeof origin !== 'string' || origin !== this.d.webOrigin) return this.#reject(socket, 403, 'origin');
@@ -153,11 +166,13 @@ export class StreamGateway {
     } catch (err) {
       return this.#reject(socket, 401, err instanceof AdmissionTokenRejected ? `token_${err.reason}` : 'token_format');
     }
+    // 같은 jti의 닫히는 중 연결이 상한이면 업그레이드하지 않는다(맺고 곧 닫기를 되풀이해 소켓을 쌓지 못하게)
+    if ((this.#closingByToken.get(claims.jti) ?? 0) >= MAX_CLOSING_PER_TOKEN) return this.#reject(socket, 503, 'token_closing');
     // ⑥ 판 파일
     const layout = await this.d.layout.get(eventId);
     if (layout === undefined) return this.#reject(socket, 503, 'layout');
     if (this.#stopping) return this.#reject(socket, 503, 'shutting_down');
-    if (this.#sockets.size >= this.d.maxConnections) return this.#reject(socket, 503, 'capacity');
+    if (this.#open.size >= this.d.maxConnections) return this.#reject(socket, 503, 'capacity');
     if (socket.destroyed) return;
     this.#wss.handleUpgrade(req, socket, head, (ws) => this.#connected(ws, eventId, claims));
   }
@@ -168,6 +183,9 @@ export class StreamGateway {
       return;
     }
     this.#sockets.add(ws);
+    this.#open.add(ws);
+    const jti = claims.jti;
+    let closingCounted = false;
     this.d.onOpened?.();
     const startedMs = this.d.clock.monotonicMs();
     let sentCode: number | undefined;
@@ -177,8 +195,15 @@ export class StreamGateway {
       close: (code, reason) => {
         if (sentCode !== undefined) return;
         sentCode = code;
+        const fast = CLOSING_FAST_REASONS.has(reason);
+        if (fast) {
+          // 곧 닫는 연결: 파드 셈에서 빼고 그 jti의 닫히는 중으로 센다
+          this.#open.delete(ws);
+          this.#closingByToken.set(jti, (this.#closingByToken.get(jti) ?? 0) + 1);
+          closingCounted = true;
+        }
         ws.close(code, reason);
-        graceTimer = setTimeout(() => ws.terminate(), CLOSE_GRACE_MS);
+        graceTimer = setTimeout(() => ws.terminate(), fast ? CLOSING_GRACE_MS : CLOSE_GRACE_MS);
         graceTimer.unref();
       },
       get bufferedAmount() {
@@ -194,6 +219,13 @@ export class StreamGateway {
     ws.on('close', (code: number) => {
       if (graceTimer) clearTimeout(graceTimer);
       this.#sockets.delete(ws);
+      this.#open.delete(ws);
+      if (closingCounted) {
+        closingCounted = false;
+        const n = (this.#closingByToken.get(jti) ?? 1) - 1;
+        if (n > 0) this.#closingByToken.set(jti, n);
+        else this.#closingByToken.delete(jti);
+      }
       this.d.hub.gone(conn);
       this.d.onClosed?.({ eventId, accountId: claims.accountId, code: sentCode ?? code, connectedMs: Math.max(0, Math.round(this.d.clock.monotonicMs() - startedMs)) });
     });
