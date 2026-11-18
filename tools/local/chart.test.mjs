@@ -690,10 +690,11 @@ test('PRF215_volumes·volumeMounts를_주면_tmp뒤에_그대로붙이고_주지
   const { objects, error } = render([...BASE, 'service.volumes[0].name=envs', 'service.volumes[0].secret.secretName=v1-bundle-env', 'service.volumeMounts[0].name=envs', 'service.volumeMounts[0].mountPath=/etc/peaket/bundle', 'service.volumeMounts[0].readOnly=true']);
   assert.equal(error, undefined, error);
   const spec = find(objects, 'Deployment', 'example-svc').spec.template.spec;
-  assert.deepEqual(spec.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'envs', secret: { secretName: 'v1-bundle-env' } }]);
-  assert.deepEqual(spec.containers[0].volumeMounts, [{ name: 'tmp', mountPath: '/tmp' }, { name: 'envs', mountPath: '/etc/peaket/bundle', readOnly: true }]);
+  // 진단 수집 볼륨 둘(/diag·주석 파일)은 늘 tmp 바로 뒤에 붙는다(ADR-0070 결정 1, ADR-0303 결정 3, BAT-075 시험 이의 TO-1)
+  assert.deepEqual(spec.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'diag', emptyDir: { sizeLimit: '1024Mi' } }, { name: 'podinfo', downwardAPI: { items: [{ path: 'annotations', fieldRef: { fieldPath: 'metadata.annotations' } }] } }, { name: 'envs', secret: { secretName: 'v1-bundle-env' } }]);
+  assert.deepEqual(spec.containers[0].volumeMounts, [{ name: 'tmp', mountPath: '/tmp' }, { name: 'diag', mountPath: '/diag' }, { name: 'podinfo', mountPath: '/etc/podinfo', readOnly: true }, { name: 'envs', mountPath: '/etc/peaket/bundle', readOnly: true }]);
   const plain = find(render(BASE).objects, 'Deployment', 'example-svc').spec.template.spec;
-  assert.deepEqual(plain.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }]);
+  assert.deepEqual(plain.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'diag', emptyDir: { sizeLimit: '1024Mi' } }, { name: 'podinfo', downwardAPI: { items: [{ path: 'annotations', fieldRef: { fieldPath: 'metadata.annotations' } }] } }]);
 });
 
 test('PRF215_outboxRelay.volumes·volumeMounts를_주면_릴레이파드에만_tmp뒤로붙인다', () => {
@@ -701,9 +702,10 @@ test('PRF215_outboxRelay.volumes·volumeMounts를_주면_릴레이파드에만_t
   const { objects, error } = render(sets, 'v1');
   assert.equal(error, undefined, error);
   const relay = find(objects, 'Deployment', 'example-svc-outbox-relay').spec.template.spec;
-  assert.deepEqual(relay.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'seatmaps', hostPath: { path: '/var/local/x' } }]);
-  assert.deepEqual(relay.containers[0].volumeMounts, [{ name: 'tmp', mountPath: '/tmp' }, { name: 'seatmaps', mountPath: '/etc/peaket/seatmaps' }]);
-  assert.deepEqual(find(objects, 'Deployment', 'example-svc').spec.template.spec.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }]);
+  // 릴레이 메모리 한도 384Mi → /diag 768Mi(BAT-075 시험 이의 TO-1)
+  assert.deepEqual(relay.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'diag', emptyDir: { sizeLimit: '768Mi' } }, { name: 'podinfo', downwardAPI: { items: [{ path: 'annotations', fieldRef: { fieldPath: 'metadata.annotations' } }] } }, { name: 'seatmaps', hostPath: { path: '/var/local/x' } }]);
+  assert.deepEqual(relay.containers[0].volumeMounts, [{ name: 'tmp', mountPath: '/tmp' }, { name: 'diag', mountPath: '/diag' }, { name: 'podinfo', mountPath: '/etc/podinfo', readOnly: true }, { name: 'seatmaps', mountPath: '/etc/peaket/seatmaps' }]);
+  assert.deepEqual(find(objects, 'Deployment', 'example-svc').spec.template.spec.volumes, [{ name: 'tmp', emptyDir: { sizeLimit: '64Mi' } }, { name: 'diag', emptyDir: { sizeLimit: '1024Mi' } }, { name: 'podinfo', downwardAPI: { items: [{ path: 'annotations', fieldRef: { fieldPath: 'metadata.annotations' } }] } }]);
 });
 
 test('PRF215_코드리뷰S1_볼륨은_secret·configMap·emptyDir만받고_hostPath는_PEAKET_ENV_local·ci에서만이며_projected·그밖의종류는_렌더하지_않는다 [ASVS v5.0.0-13.2.2]', () => {
@@ -728,4 +730,67 @@ test('PRF215_코드리뷰S1_볼륨은_secret·configMap·emptyDir만받고_hostP
     assert.match(render([...BASE, ...relay, ...vol(where, 0, 'secret', 'secretName', 's'), `${where}[0].emptyDir.sizeLimit=1Mi`]).error ?? '(렌더됨)', /종류 하나/, `${where} 둘`);
     assert.match(render([...BASE, ...relay, `${where}[0].secret.secretName=s`]).error ?? '(렌더됨)', /name/, `${where} 이름 없음`);
   }
+});
+
+// --- BAS-080 프로브 값과 진단 실행 옵션(docs/architecture.md §5 '프로브 규칙', docs/devops.md D-T19 ③·D-T18 ①, ADR-0070 결정 1, ADR-0303) ---
+
+const containersOf = (objects) => [
+  ['service', find(objects, 'Deployment', 'example-svc').spec.template.spec],
+  ['relay', find(objects, 'Deployment', 'example-svc-outbox-relay').spec.template.spec],
+];
+const probeValues = (p) => ({ path: p.httpGet.path, port: p.httpGet.port, period: p.periodSeconds, timeout: p.timeoutSeconds ?? 1, failure: p.failureThreshold });
+
+test('D-T19 ③_서비스·릴레이파드의_준비프로브는ready_5초·3초·6번_생존은livez_10초·5초·6번_시작은livez_2초·30번이다', () => {
+  const { objects, error } = render([...BASE, 'outboxRelay.enabled=true']);
+  assert.equal(error, undefined, error);
+  for (const [where, spec] of containersOf(objects)) {
+    const c = spec.containers[0];
+    assert.deepEqual(probeValues(c.readinessProbe), { path: '/ready', port: 'management', period: 5, timeout: 3, failure: 6 }, `${where} 준비`);
+    assert.deepEqual(probeValues(c.livenessProbe), { path: '/livez', port: 'management', period: 10, timeout: 5, failure: 6 }, `${where} 생존`);
+    assert.deepEqual({ path: c.startupProbe.httpGet.path, period: c.startupProbe.periodSeconds, failure: c.startupProbe.failureThreshold }, { path: '/livez', period: 2, failure: 30 }, `${where} 시작`);
+  }
+});
+
+const DIAG_FLAGS = ['--disable-sigusr1', '--report-on-fatalerror', '--report-exclude-env', '--report-exclude-network', '--report-directory=/diag'];
+
+test('D-T18 ①_서비스·릴레이컨테이너는_진단실행옵션다섯과_힙상한(한도512Mi면384)·diag한도1024Mi·주석DownwardAPI파일·메모리한도값을받는다', () => {
+  const { objects, error } = render([...BASE, 'outboxRelay.enabled=true', 'service.resources.limits.memory=512Mi', 'outboxRelay.resources.limits.memory=1Gi']);
+  assert.equal(error, undefined, error);
+  for (const [where, spec] of containersOf(objects)) {
+    // 서비스 512Mi → 힙 384·/diag 1024Mi, 릴레이 1Gi → 힙 768·/diag 2048Mi
+    const [heapMi, diagMi] = where === 'service' ? [384, '1024Mi'] : [768, '2048Mi'];
+    const c = spec.containers[0];
+    const nodeOptions = c.env.filter((e) => e.name === 'NODE_OPTIONS');
+    assert.equal(nodeOptions.length, 1, `${where} NODE_OPTIONS 하나`);
+    const flags = nodeOptions[0].value.split(/\s+/);
+    for (const f of DIAG_FLAGS) assert.ok(flags.includes(f), `${where} ${f}`);
+    assert.deepEqual(flags.filter((f) => f.startsWith('--max-old-space-size=')), [`--max-old-space-size=${heapMi}`], `${where} 힙 상한`);
+    const env = envOf(c);
+    assert.deepEqual(env.PEAKET_MEMORY_LIMIT_BYTES, { resourceFieldRef: { resource: 'limits.memory', divisor: '1' } }, `${where} 메모리 한도 값`);
+    assert.equal(env.PEAKET_DIAG_DIR, '/diag', where);
+    // /diag emptyDir(한도는 메모리 한도의 두 배)와 주석 파일(Downward API)이 붙고, 환경 값이 그 파일을 가리킨다
+    const diag = spec.volumes.find((v) => v.name === c.volumeMounts.find((m) => m.mountPath === '/diag')?.name);
+    assert.deepEqual(diag, { name: 'diag', emptyDir: { sizeLimit: diagMi } }, `${where} /diag`);
+    const file = env.PEAKET_DIAG_ANNOTATIONS_FILE;
+    const mount = c.volumeMounts.find((m) => typeof file === 'string' && file.startsWith(`${m.mountPath}/`));
+    assert.ok(mount, `${where} 주석 파일 자리`);
+    assert.equal(mount.readOnly, true, `${where} 주석 파일은 읽기 전용`);
+    const podinfo = spec.volumes.find((v) => v.name === mount.name);
+    assert.deepEqual(podinfo.downwardAPI.items, [{ path: file.slice(mount.mountPath.length + 1), fieldRef: { fieldPath: 'metadata.annotations' } }], `${where} Downward API`);
+  }
+});
+
+test('D-T18 ①_값으로준NODE_OPTIONS는_진단옵션뒤에붙고_틀린메모리한도글이나없는한도는렌더하지않는다', () => {
+  const { objects, error } = render([...BASE, 'outboxRelay.enabled=true', 'env.NODE_OPTIONS=--enable-source-maps', 'service.env.NODE_OPTIONS=--trace-warnings']);
+  assert.equal(error, undefined, error);
+  for (const [where, spec] of containersOf(objects)) {
+    const values = spec.containers[0].env.filter((e) => e.name === 'NODE_OPTIONS');
+    assert.equal(values.length, 1, where);
+    const flags = values[0].value.split(/\s+/);
+    assert.deepEqual(flags.slice(0, 5), DIAG_FLAGS, where);
+    assert.ok(flags.includes('--enable-source-maps'), where);
+    assert.equal(flags.includes('--trace-warnings'), where === 'service', where);
+  }
+  assert.match(render([...BASE, 'service.resources.limits.memory=0.5G']).error ?? '(렌더됨)', /memory/);
+  assert.match(render([...BASE, 'service.resources.limits.memory=null']).error ?? '(렌더됨)', /memory/);
 });
