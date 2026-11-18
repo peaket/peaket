@@ -129,8 +129,10 @@ export async function startIdentityStub() {
       const s = sessions.get(r.session_id);
       if (!s || s.ended || s.accountId !== r.account_id) return fail(cb, 'FAILED_PRECONDITION', '세션 아님');
       if (accounts.get(`${r.provider}|${r.provider_user_id}`) !== r.account_id) return cb(null, { result: 'REAUTH_RESULT_ACCOUNT_MISMATCH' });
-      // 대역의 세션은 모두 로그인 판정이 UNKNOWN이다(identity §7.1 ③)
-      if (r.purpose === 'REAUTH_PURPOSE_HIGH_RISK' && r.strength === 'REAUTH_STRENGTH_REQUESTED') return cb(null, { result: 'REAUTH_RESULT_REVERIFY_REQUIRED' });
+      // 받는 쪽 작업 operation이 없거나 모르는 값이면 토큰을 주지 않는다(identity §7.1 ③, ADR-0293 결정 4). 옛 칸 purpose는 읽지 않는다
+      if (!REAUTH_OPERATIONS.has(r.operation)) return fail(cb, 'INVALID_ARGUMENT', 'operation이 없다');
+      // 대역의 세션은 모두 로그인 판정이 UNKNOWN이다(identity §7.1 ③). 고위험은 그 작업의 act가 FAN_HIGH_RISK일 때다
+      if (HIGH_RISK_OPERATIONS.has(r.operation) && r.strength === 'REAUTH_STRENGTH_REQUESTED') return cb(null, { result: 'REAUTH_RESULT_REVERIFY_REQUIRED' });
       cb(null, { result: 'REAUTH_RESULT_ISSUED', reauth_token: `reauth.${r.strength}.${r.provider}.${randomUUID()}`, reauth_token_expires_at_ms: Date.now() + 300_000 });
     },
   });
@@ -148,6 +150,15 @@ export async function startIdentityStub() {
     close: () => new Promise((r) => server.tryShutdown(() => r())),
   };
 }
+
+/**
+ * 받는 쪽 작업(docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293)의 proto 이름. 대역이 identity처럼 판정하려고 정본 표에서 옮겨 적는다
+ * (앱 서버의 대응표를 가져오지 않는다). 고위험(act FAN_HIGH_RISK)은 다섯이다
+ */
+export const REAUTH_OPERATIONS = new Set(
+  ['ACCOUNT_WITHDRAW', 'SESSION_END', 'SCANNER_SESSION_END', 'LOGIN_METHOD_ADD', 'LOGIN_METHOD_REMOVE', 'ACCOUNT_MERGE', 'CONTACT_CHANGE', 'TICKET_CANCEL', 'TICKET_CANCEL_REFUND_ACCOUNT', 'DEVICE_KEY_ISSUE', 'TICKET_RETURN', 'TRANSFER_REQUEST', 'REFUND_ACCOUNT', 'COMPENSATION_ACCOUNT', 'SHOP_CANCEL_REFUND_ACCOUNT'].map((op) => `REAUTH_OPERATION_${op}`),
+);
+export const HIGH_RISK_OPERATIONS = new Set(['TICKET_CANCEL_REFUND_ACCOUNT', 'TRANSFER_REQUEST', 'REFUND_ACCOUNT', 'COMPENSATION_ACCOUNT', 'SHOP_CANCEL_REFUND_ACCOUNT'].map((op) => `REAUTH_OPERATION_${op}`));
 
 /** 브라우저 흉내: 쿠키 모음(이름·경로·만료만 본다. 시험은 http라 Secure는 보지 않는다) */
 export class Browser {
