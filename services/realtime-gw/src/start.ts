@@ -87,9 +87,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
       env,
       clock,
       module: AppModule.register({ gateway }),
+      // 로그 시각은 플랫폼 기본(KST 오프셋 ISO 8601)이다(docs/observability.md §7 정규 로그 줄의 ts, ASVS v5.0.0-16.2.2)
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
-      // 로그 시각은 UTC다(seat-hold §7 '지표와 로그', ASVS v5.0.0-16.2.2)
-      logUtc: true,
     });
     const started = service;
     const logger = started.logger;
