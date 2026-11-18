@@ -3,7 +3,7 @@
 import { request as httpRequest } from 'node:http';
 import { afterEach, describe, expect, test } from 'vitest';
 import { NestPinoLogger, PlatformConfigError, createPlatformLogger, createService, fakeClock, loadPlatformConfig } from '../src/index.js';
-import { DemoModule, collector, start, type LogLine, type Started } from './fixture.js';
+import { DemoModule, collector, sample, start, type LogLine, type Started } from './fixture.js';
 
 let s: Started | undefined;
 afterEach(async () => {
@@ -100,6 +100,19 @@ describe('정규 로그 줄의 필드', () => {
   });
 });
 
+/** 조건이 설 때까지 5ms마다 본다(고정 시간 기다림 대신, BAT-075 리뷰 RV-11) */
+const waitFor = async (what: string, cond: () => boolean | Promise<boolean>, ms = 2_000) => {
+  const end = Date.now() + ms;
+  while (!(await cond())) {
+    if (Date.now() > end) throw new Error(`기다림 한도: ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+};
+/** 서버가 끊김을 봤다: 끊김 처리(abort)가 맨 먼저 처리 중 요청 게이지를 내린다 */
+const serverSawAbort = (route: string) => waitFor(`${route} 끊김`, async () => (sample(await s!.metrics(), 'http_server_active_requests', { route }) ?? 0) === 0);
+/** 정규 로그 줄이 생길 때까지 */
+const lineWritten = (ms?: number) => waitFor('정규 로그 줄', () => s!.requests().length > 0, ms);
+
 describe('오류의 err', () => {
   test('[ASVS v5.0.0-16.3.4] ADR0069_예상하지못한오류는_그요청의줄err에_이름메시지스택이남고_다른기록줄은없다', async () => {
     s = await start();
@@ -156,9 +169,9 @@ describe('오류의 err', () => {
     req.end('{"a":1}');
     await slowGate.current.reached;
     req.destroy();
-    await new Promise((r) => setTimeout(r, 50));
+    await serverSawAbort('/v1/demo/wait');
     slowGate.current.open();
-    await new Promise((r) => setTimeout(r, 50));
+    await lineWritten();
     // 처리기가 끝난 뒤에 쓴다. status는 보내려던 응답의 상태다
     const line = only(s.requests());
     expect(line).toMatchObject({ msg: 'request aborted', aborted: true, route: '/v1/demo/wait', method: 'POST', status: 201 });
@@ -175,9 +188,9 @@ describe('오류의 err', () => {
     req.end('{"a":1}');
     await slowGate.current.reached;
     req.destroy();
-    await new Promise((r) => setTimeout(r, 50));
+    await serverSawAbort('/v1/demo/wait-boom');
     slowGate.current.open();
-    await new Promise((r) => setTimeout(r, 50));
+    await lineWritten();
     const line = only(s.requests());
     expect(line).toMatchObject({ aborted: true, status: 500, level: 'error', sampleRate: 1, err: { type: 'Error', message: 'db exploded' } });
   });
@@ -192,7 +205,7 @@ describe('오류의 err', () => {
     req.end();
     await slowGate.current.reached;
     req.destroy();
-    await new Promise((r) => setTimeout(r, 50));
+    await serverSawAbort(path);
     return slowGate.current;
   }
 
@@ -200,7 +213,7 @@ describe('오류의 err', () => {
     // 다시 본 리뷰(2026-11-01): GET은 끊기면 Fastify가 바로 onRequestAbort를 불러 상태와 err 없이 줄을 썼다
     const g = await abortGet('/v1/demo/wait-boom');
     g.open();
-    await new Promise((r) => setTimeout(r, 50));
+    await lineWritten();
     expect(only(s!.requests())).toMatchObject({ aborted: true, status: 500, level: 'error', err: { message: 'db exploded on get' } });
   });
 
@@ -208,7 +221,8 @@ describe('오류의 err', () => {
     // 다시 본 리뷰(2026-11-01): 처리기가 응답을 보내지 않으면 줄이 영영 없었다. 남은 시간 + 1초 뒤에 쓴다
     await abortGet('/v1/demo/hang', { 'x-peaket-deadline-ms': '30' });
     expect(s!.requests()).toHaveLength(0);
-    await new Promise((r) => setTimeout(r, 1_200));
+    // 남은 시간 30ms + 1초 뒤에 쓴다. 상한은 전과 같은 1,200ms다
+    await lineWritten(1_200);
     const line = only(s!.requests());
     expect(line).toMatchObject({ aborted: true, route: '/v1/demo/hang', sampleRate: 1 });
     expect(line).not.toHaveProperty('status');

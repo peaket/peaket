@@ -1,6 +1,7 @@
 // 진단 수집(RB-31, ADR-0070 결정 1 '수동' 1~6, docs/devops.md D-T18 ①, docs/infra.md RB-31, BUILD_ORDER BAS-080, ADR-0303 결정 3).
 // 실제 파일(임시 폴더)과 가짜 저장소·힙·기다리기로 차례와 경계를 본다. 실제 kind·moto S3에서 끝까지 보는 것은 tools/local/e2e/diagnose.e2e.mjs다.
-// 기다리기는 주입한 sleep이 받은 값으로 본다(구현 보고 판정 4): 준비를 내린 뒤 30,000ms [가정], 마감 10,000ms [가정].
+// 기다리기는 주입한 sleep이 받은 값으로 본다(구현 보고 판정 4): 준비를 내린 뒤 40,000ms [가정](준비 프로브 5초 × (6회 + 1) + 퍼짐 여유 5초,
+// 리뷰 RV-01·SEC-07 ①로 30초에서 고침, ADR-0303 결정 3), 마감 10,000ms [가정].
 import 'reflect-metadata';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -104,11 +105,13 @@ function boot(o: Partial<StartDiagnoseOptions> & { diagDir: string; annotationsF
 const results = async (m: PlatformMetrics, result: string) => sample(await m.registry.metrics(), 'diagnose_collections_total', { service: 'example-svc', result });
 
 describe('D-T18 ① 진단 수집 차례(RB-31)', () => {
-  test('D-T18 ①_기본값은_읽기5000ms·준비내린뒤30000ms·마감10000ms다', () => {
-    expect(DIAGNOSE_DEFAULTS).toEqual({ pollMs: 5_000, unreadyWaitMs: 30_000, drainMs: 10_000 });
+  test('D-T18 ①_기본값은_읽기5000ms·준비내린뒤40000ms·마감10000ms다(RV-01)', () => {
+    // 준비 프로브 주기 5초 × (연속 실패 6회 + 첫 실패까지 한 주기) + 끝점 퍼짐 여유 5초 = 40초 [가정]. 30초면 여유가 0이다
+    expect(DIAGNOSE_DEFAULTS).toEqual({ pollMs: 5_000, unreadyWaitMs: 40_000, drainMs: 10_000 });
+    expect(DIAGNOSE_DEFAULTS.unreadyWaitMs).toBeGreaterThanOrEqual(5_000 * (6 + 1) + 5_000);
   });
 
-  test('D-T18 ①_heap요청은_준비내림·새일멈춤→30000ms기다림→마감→보고서→스냅샷→올리기→지우기→끝내기한번_차례다', async () => {
+  test('D-T18 ①_heap요청은_준비내림·새일멈춤→40000ms기다림→마감→보고서→스냅샷→올리기→지우기→끝내기한번_차례다', async () => {
     const s = stage();
     const events: string[] = [];
     const sl = manualSleep(events);
@@ -119,7 +122,7 @@ describe('D-T18 ① 진단 수집 차례(RB-31)', () => {
       store: { put: async (k, f) => (events.push(`put:${f.includes('heap') ? 'heap' : 'report'}`), store.put(k, f)) },
       memoryLimitBytes: 1024 * MB,
       sleep: (ms) => {
-        if (ms === 30_000) readyAtWait = readiness.status();
+        if (ms === 40_000) readyAtWait = readiness.status();
         return sl.sleep(ms);
       },
       onStopWork: async () => void events.push('stopWork'),
@@ -133,15 +136,15 @@ describe('D-T18 ① 진단 수집 차례(RB-31)', () => {
     await until('준비 내림', () => sl.pending.length === 1);
     expect(readyAtWait).toBe('diagnosing');
     expect(readiness.pending()).toEqual(['diagnosing']);
-    // 기다리는 동안(29,999ms까지)은 보고서를 쓰지 않는다
-    expect(events).toEqual(['stopWork', 'sleep:30000']);
+    // 기다리는 동안(39,999ms까지)은 보고서를 쓰지 않는다
+    expect(events).toEqual(['stopWork', 'sleep:40000']);
     await settle(50);
-    expect(events).toEqual(['stopWork', 'sleep:30000']);
+    expect(events).toEqual(['stopWork', 'sleep:40000']);
     sl.pending[0]!.resolve();
     await until('마감 기다림', () => sl.pending.length === 2);
     expect(sl.pending[1]!.ms).toBe(10_000);
     await until('끝내기', () => exits.n === 1);
-    expect(events).toEqual(['stopWork', 'sleep:30000', 'sleep:10000', 'report', 'snapshot', 'put:report', 'put:heap', 'exit:0']);
+    expect(events).toEqual(['stopWork', 'sleep:40000', 'sleep:10000', 'report', 'snapshot', 'put:report', 'put:heap', 'exit:0']);
     expect(puts).toHaveLength(2);
     await settle(100);
     expect(exits.n).toBe(1);
@@ -163,6 +166,29 @@ describe('D-T18 ① 진단 수집 차례(RB-31)', () => {
     expect(exits.n).toBe(0);
     finishWork();
     await until('끝내기', () => exits.n === 1);
+  });
+
+  test('D-T18 ①_report요청도_준비를내린뒤40000ms를기다린다음에야_보고서를쓰고끝낸다(RV-01, Service에서빠질여유)', async () => {
+    const s = stage();
+    const events: string[] = [];
+    const sl = manualSleep(events);
+    const { store } = memoryStore();
+    const { exits, readiness } = boot({
+      ...s,
+      store: { put: async (k, f) => (events.push('put'), store.put(k, f)) },
+      sleep: sl.sleep,
+      report: (f) => (events.push('report'), writeFileSync(f, '{"header":{}}')),
+      exit: () => (events.push('exit'), void exits.n++),
+    });
+    s.annotate(`report@${AT}`);
+    await until('준비 내림', () => sl.pending.length === 1);
+    expect(readiness.pending()).toEqual(['diagnosing']);
+    expect(events).toEqual(['sleep:40000']);
+    sl.pending[0]!.resolve();
+    await until('마감 기다림', () => sl.pending.length === 2);
+    sl.pending[1]!.resolve();
+    await until('끝내기', () => exits.n === 1);
+    expect(events).toEqual(['sleep:40000', 'sleep:10000', 'report', 'put', 'exit']);
   });
 });
 
@@ -219,17 +245,29 @@ describe('D-T18 ① 되풀이와 틀린 값', () => {
     expect(puts[1]!.key).toContain('/2026-11-19T03:00:00Z/');
   });
 
-  for (const bad of ['heap@어제', 'dump@2026-11-19T01:02:03Z', 'heap@2026-02-30T00:00:00Z', 'heap 2026-11-19T01:02:03Z']) {
-    test(`D-T18 ①_틀린값_${bad}는_경고한번만남기고_수집하지않는다(되풀이읽기에도한번)`, async () => {
+  test('D-T18 ①_분까지적은시각(ADR-0070보기_heap@2026-11-02T20:10Z)도받아_한번수집하고_객체이름에그시각을쓴다(SEC-05)', async () => {
+    const s = stage();
+    const { store, puts } = memoryStore();
+    const { exits, metrics } = boot({ ...s, store, memoryLimitBytes: 4096 * MB, report: (f) => writeFileSync(f, '{"header":{}}') });
+    s.annotate('heap@2026-11-02T20:10Z');
+    await until('끝내기', () => exits.n === 1);
+    expect(puts.map((p) => p.key.split('/').slice(0, 3).join('/'))).toEqual(['example-svc/p-1/2026-11-02T20:10Z', 'example-svc/p-1/2026-11-02T20:10Z']);
+    expect(await results(metrics, 'invalid_request')).toBeUndefined();
+  });
+
+  for (const bad of ['heap@어제', 'dump@2026-11-19T01:02:03Z', 'heap@2026-02-30T00:00:00Z', 'heap 2026-11-19T01:02:03Z', 'heap@2026-11-19T01:02:03+09:00']) {
+    test(`D-T18 ①_틀린값_${bad}는_경고한번과invalid_request한번만남기고_수집하지않는다(되풀이읽기에도한번)`, async () => {
       const s = stage();
       const { store, puts } = memoryStore();
       s.annotate(bad);
-      const { exits, readiness, logs: lines } = boot({ ...s, store });
+      const { exits, readiness, metrics, logs: lines } = boot({ ...s, store });
       await settle(300);
       expect(exits.n).toBe(0);
       expect(readiness.status()).toBe('ready');
       expect(puts).toHaveLength(0);
       expect(lines.filter((l) => l.level === 'warn')).toHaveLength(1);
+      // 런북대로 달았는데 받지 않은 값을 지표로도 본다(SEC-05)
+      expect(await results(metrics, 'invalid_request')).toBe(1);
     });
   }
 });
@@ -289,6 +327,91 @@ describe('D-T18 ① 증거 이름·내용과 지우기', () => {
     expect(again.exits.n).toBe(0);
     expect(existsSync(join(s.diagDir, left[0]!))).toBe(false);
   });
+
+  test('D-T18 ①_시작할때남은보고서도_환경변수·네트워크칸을지운뒤올린다(SEC-02, M23) [ASVS v5.0.0-14.2.1]', async () => {
+    const s = stage();
+    writeFileSync(
+      join(s.diagDir, 'report.20261119.010203.1.001.json'),
+      JSON.stringify({ header: { nodejsVersion: 'v24', networkInterfaces: [{ name: 'eth0', address: '10.0.0.7' }] }, environmentVariables: { PEAKET_LOG_PSEUDONYM_KEY: 'leak-me-5678' } }),
+    );
+    const { store, puts } = memoryStore();
+    boot({ ...s, store });
+    await until('남은 보고서 올림', () => puts.length === 1);
+    const body = JSON.parse(puts[0]!.body) as Record<string, unknown> & { header: Record<string, unknown> };
+    expect(body).not.toHaveProperty('environmentVariables');
+    expect(body.header).not.toHaveProperty('networkInterfaces');
+    expect(puts[0]!.body).not.toContain('leak-me-5678');
+    expect(body.header.nodejsVersion).toBe('v24');
+  });
+
+  test('D-T18 ①_시작할때남은보고서를읽지못하면_올리지않고경고한다(SEC-02) [ASVS v5.0.0-14.2.1]', async () => {
+    const s = stage();
+    writeFileSync(join(s.diagDir, 'report.20261119.010203.1.002.json'), '{"environmentVariables":{"SECRET":"cut-off');
+    const { store, puts } = memoryStore();
+    const { logs: lines } = boot({ ...s, store });
+    await settle(200);
+    expect(puts).toHaveLength(0);
+    expect(lines.some((l) => l.level === 'warn')).toBe(true);
+  });
+
+  test('D-T18 ①_진단을켜면시작하자마자_process.report의excludeEnv·excludeNetwork를켠다(SEC-02, 치명오류보고서도두겹) [ASVS v5.0.0-14.2.1]', async () => {
+    const report = process.report as NodeJS.ProcessReport & { excludeEnv?: boolean; excludeNetwork?: boolean };
+    const before = { excludeEnv: report.excludeEnv, excludeNetwork: report.excludeNetwork };
+    report.excludeEnv = false;
+    report.excludeNetwork = false;
+    try {
+      const s = stage();
+      boot({ ...s, store: memoryStore().store });
+      await settle(50);
+      expect({ excludeEnv: report.excludeEnv, excludeNetwork: report.excludeNetwork }).toEqual({ excludeEnv: true, excludeNetwork: true });
+    } finally {
+      report.excludeEnv = before.excludeEnv ?? false;
+      report.excludeNetwork = before.excludeNetwork ?? false;
+    }
+  });
+
+  test('D-T18 ①_스냅샷도중죽은뒤같은값으로다시뜨면_수집을되풀이하지않고interrupted로세며_partial은올리지않고지운다(SEC-03)', async () => {
+    const s = stage();
+    s.annotate(`heap@${AT}`);
+    const snapshotFiles: string[] = [];
+    const first = boot({
+      ...s,
+      store: memoryStore().store,
+      memoryLimitBytes: 4096 * MB,
+      report: (f) => writeFileSync(f, '{"header":{}}'),
+      // 스냅샷을 쓰는 도중에 멈춘다(생존 프로브 재시작·OOM으로 죽은 것과 같다)
+      heap: { used: () => 100 * MB, rss: () => 200 * MB, snapshot: (f) => (snapshotFiles.push(f), writeFileSync(f, '{"snapshot":'), new Promise<void>(() => {})) },
+    });
+    await until('스냅샷 시작', () => snapshotFiles.length === 1);
+    first.d.stop();
+    // 쓰는 도중의 스냅샷은 끝난 이름이 아니다
+    expect(snapshotFiles[0]).toMatch(/\.partial$/);
+    expect(first.exits.n).toBe(0);
+
+    const ok = memoryStore();
+    const events: string[] = [];
+    const again = boot({ ...s, store: ok.store, memoryLimitBytes: 4096 * MB, sleep: async (ms) => void events.push(`sleep:${ms}`) });
+    await settle(300);
+    expect(events).toEqual([]);
+    expect(again.exits.n).toBe(0);
+    expect(again.readiness.status()).toBe('ready');
+    expect(await results(again.metrics, 'interrupted')).toBe(1);
+    expect(ok.puts.filter((p) => /partial|heapsnapshot/.test(p.key))).toEqual([]);
+    expect(readdirSync(s.diagDir).filter((n) => n.endsWith('.partial'))).toEqual([]);
+  });
+
+  test('D-T18 ①_끝까지쓴스냅샷만_heapsnapshot이름으로올린다(SEC-03)', async () => {
+    const s = stage();
+    const { store, puts } = memoryStore();
+    const written: string[] = [];
+    const { exits } = boot({ ...s, store, memoryLimitBytes: 4096 * MB, report: (f) => writeFileSync(f, '{"header":{}}'), heap: { used: () => 100 * MB, rss: () => 200 * MB, snapshot: async (f) => (written.push(f), writeFileSync(f, '{}')) } });
+    s.annotate(`heap@${AT}`);
+    await until('끝내기', () => exits.n === 1);
+    expect(written[0]).toMatch(/\.partial$/);
+    const heapKeys = puts.map((p) => p.key).filter((k) => k.includes('heap'));
+    expect(heapKeys).toHaveLength(1);
+    expect(heapKeys[0]).toMatch(/\.heapsnapshot$/);
+  });
 });
 
 describe('BAS-080 증거 저장소 설정이 없을 때(ADR-0303 결정 3, 구현 보고 판정 1)', () => {
@@ -340,6 +463,14 @@ describe('BAS-080 증거 저장소 설정이 없을 때(ADR-0303 결정 3, 구�
       expect(() => diagnoseConfigFromEnv(env, peaketEnv)).toThrow(/PEAKET_DIAG_BUCKET/);
       // 버킷이 있으면 moto 주소 없이 켠다(운영은 진짜 S3)
       expect(diagnoseConfigFromEnv({ ...env, PEAKET_DIAG_BUCKET: 'b' }, peaketEnv)).toMatchObject({ bucket: 'b', missing: [] });
+    });
+
+    test(`${peaketEnv}에서_흉내S3주소를주면_증거를전용버킷밖으로보내지않게_시작하지않는다(SEC-01)`, () => {
+      const env = { PEAKET_DIAG_ANNOTATIONS_FILE: '/etc/podinfo/annotations', PEAKET_DIAG_BUCKET: 'b' };
+      for (const endpoint of ['http://aws.peaket-local.svc:5000', 'https://s3.example.net']) {
+        expect(() => diagnoseConfigFromEnv({ ...env, PEAKET_DIAG_S3_ENDPOINT: endpoint }, peaketEnv), endpoint).toThrow(PlatformConfigError);
+        expect(() => diagnoseConfigFromEnv({ ...env, PEAKET_DIAG_S3_ENDPOINT: endpoint }, peaketEnv), endpoint).toThrow(/PEAKET_DIAG_S3_ENDPOINT/);
+      }
     });
   }
 

@@ -30,8 +30,8 @@ test('FND110_차트_이름·이미지가_없거나_틀리면_렌더하지_않는
   assert.match(render(BASE.filter((s) => !s.startsWith('name='))).error, /name/);
   assert.match(render([...BASE, 'image.digest=sha256:abc']).error, /sha256/);
   // 태그는 로컬·CI 시험에서만. 다른 환경은 다이제스트로 고정한다
-  assert.match(render([...BASE.filter((s) => !s.startsWith('env.')), 'env.PEAKET_ENV=prod']).error, /digest/);
-  const d = render([...BASE.filter((s) => !s.startsWith('image.tag') && !s.startsWith('env.')), 'env.PEAKET_ENV=prod', `image.digest=sha256:${'a'.repeat(64)}`]);
+  assert.match(render([...BASE.filter((s) => !s.startsWith('env.')), 'env.PEAKET_ENV=prod', 'diagnose.bucket=peaket-diag']).error, /digest/);
+  const d = render([...BASE.filter((s) => !s.startsWith('image.tag') && !s.startsWith('env.')), 'env.PEAKET_ENV=prod', 'diagnose.bucket=peaket-diag', `image.digest=sha256:${'a'.repeat(64)}`]);
   assert.equal(find(d.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0].image, `peaket/example-svc@sha256:${'a'.repeat(64)}`);
 });
 
@@ -709,7 +709,7 @@ test('PRF215_outboxRelay.volumes·volumeMounts를_주면_릴레이파드에만_t
 });
 
 test('PRF215_코드리뷰S1_볼륨은_secret·configMap·emptyDir만받고_hostPath는_PEAKET_ENV_local·ci에서만이며_projected·그밖의종류는_렌더하지_않는다 [ASVS v5.0.0-13.2.2]', () => {
-  const PROD = ['name=example-svc', 'image.repository=peaket/example-svc', `image.digest=sha256:${'a'.repeat(64)}`, 'env.PEAKET_ENV=staging'];
+  const PROD = ['name=example-svc', 'image.repository=peaket/example-svc', `image.digest=sha256:${'a'.repeat(64)}`, 'env.PEAKET_ENV=staging', 'diagnose.bucket=peaket-diag'];
   const vol = (where, i, kind, field, value) => [`${where}[${i}].name=v${i}`, `${where}[${i}].${kind}.${field}=${value}`];
   for (const where of ['service.volumes', 'outboxRelay.volumes']) {
     const relay = where.startsWith('outboxRelay') ? ['outboxRelay.enabled=true'] : [];
@@ -780,17 +780,59 @@ test('D-T18 ①_서비스·릴레이컨테이너는_진단실행옵션다섯과_
   }
 });
 
-test('D-T18 ①_값으로준NODE_OPTIONS는_진단옵션뒤에붙고_틀린메모리한도글이나없는한도는렌더하지않는다', () => {
+test('D-T18 ①_값으로준NODE_OPTIONS는_안전옵션앞에붙고_틀린메모리한도글이나없는한도는렌더하지않는다(SEC-02)', () => {
   const { objects, error } = render([...BASE, 'outboxRelay.enabled=true', 'env.NODE_OPTIONS=--enable-source-maps', 'service.env.NODE_OPTIONS=--trace-warnings']);
   assert.equal(error, undefined, error);
   for (const [where, spec] of containersOf(objects)) {
     const values = spec.containers[0].env.filter((e) => e.name === 'NODE_OPTIONS');
     assert.equal(values.length, 1, where);
     const flags = values[0].value.split(/\s+/);
-    assert.deepEqual(flags.slice(0, 5), DIAG_FLAGS, where);
+    // 안전 옵션 다섯은 값으로 준 옵션보다 뒤에 온다(같은 옵션은 뒤의 것이 이긴다, ADR-0303 결정 3)
+    const lastUser = Math.max(flags.indexOf('--enable-source-maps'), flags.indexOf('--trace-warnings'));
+    for (const f of DIAG_FLAGS) assert.ok(flags.indexOf(f) > lastUser, `${where} ${f}는 값 뒤`);
     assert.ok(flags.includes('--enable-source-maps'), where);
     assert.equal(flags.includes('--trace-warnings'), where === 'service', where);
   }
   assert.match(render([...BASE, 'service.resources.limits.memory=0.5G']).error ?? '(렌더됨)', /memory/);
   assert.match(render([...BASE, 'service.resources.limits.memory=null']).error ?? '(렌더됨)', /memory/);
+});
+
+// --- BAT-075 리뷰 반영(SEC-01·SEC-02·SEC-06, ADR-0303 결정 3·'남는 것') ---
+
+const STAGING = ['name=example-svc', 'image.repository=peaket/example-svc', `image.digest=sha256:${'a'.repeat(64)}`];
+
+test('D-T18 ①_local·ci밖에서는_증거버킷diagnose.bucket이없으면_렌더하지않는다(SEC-06, demo포함)', () => {
+  for (const env of ['staging', 'prod', 'demo']) {
+    assert.match(render([...STAGING, `env.PEAKET_ENV=${env}`]).error ?? '(렌더됨)', /diagnose\.bucket/, `${env} 버킷 없음`);
+    const ok = render([...STAGING, `env.PEAKET_ENV=${env}`, 'diagnose.bucket=peaket-diag']);
+    assert.equal(ok.error, undefined, `${env} 버킷 있음: ${ok.error}`);
+    assert.equal(envOf(find(ok.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0]).PEAKET_DIAG_BUCKET, 'peaket-diag');
+  }
+  // local·ci는 버킷 없이도 렌더한다(서비스가 경고 한 줄과 함께 수집을 끈다)
+  for (const env of ['local', 'ci']) assert.equal(render([...BASE.filter((s) => !s.startsWith('env.')), `env.PEAKET_ENV=${env}`]).error, undefined, env);
+});
+
+test('D-T18 ①_흉내S3주소diagnose.s3Endpoint는_local·ci에서만받고_그밖에서는렌더하지않는다(SEC-01) [ASVS v5.0.0-14.2.1]', () => {
+  for (const env of ['staging', 'prod', 'demo']) {
+    const r = render([...STAGING, `env.PEAKET_ENV=${env}`, 'diagnose.bucket=peaket-diag', 'diagnose.s3Endpoint=http://aws.peaket-local.svc:5000']);
+    assert.match(r.error ?? '(렌더됨)', /s3Endpoint/, env);
+  }
+  const local = render([...BASE, 'diagnose.bucket=peaket-diag', 'diagnose.s3Endpoint=http://aws.peaket-local.svc:5000']);
+  assert.equal(local.error, undefined, local.error);
+  assert.equal(envOf(find(local.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0]).PEAKET_DIAG_S3_ENDPOINT, 'http://aws.peaket-local.svc:5000');
+});
+
+test('D-T18 ①_값으로준NODE_OPTIONS에_안전옵션을끄는값이있으면_렌더하지않는다(SEC-02) [ASVS v5.0.0-14.2.1]', () => {
+  const unsafe = ['--no-disable-sigusr1', '--no-report-exclude-env', '--no-report-exclude-network', '--no-report-on-fatalerror', '--inspect', '--inspect=0.0.0.0:9229', '--inspect-brk', '--inspect-wait'];
+  for (const flag of unsafe) {
+    for (const [where, sets] of [
+      ['env', [`env.NODE_OPTIONS=${flag}`]],
+      ['service.env', [`service.env.NODE_OPTIONS=--enable-source-maps ${flag}`]],
+      ['outboxRelay.env', ['outboxRelay.enabled=true', `outboxRelay.env.NODE_OPTIONS=${flag}`]],
+    ]) {
+      assert.notEqual(render([...BASE, ...sets]).error, undefined, `${where} ${flag}가 렌더됐다`);
+    }
+  }
+  // 안전 옵션을 끄지 않는 값은 받는다
+  assert.equal(render([...BASE, 'service.env.NODE_OPTIONS=--enable-source-maps --trace-warnings']).error, undefined);
 });

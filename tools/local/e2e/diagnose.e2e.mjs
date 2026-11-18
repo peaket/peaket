@@ -41,13 +41,14 @@ const isReady = (p) => p?.status.conditions?.some((c) => c.type === 'Ready' && c
 const restartsOf = (p) => p?.status.containerStatuses?.[0]?.restartCount ?? 0;
 const objects = (prefix) => (aws(['s3api', 'list-objects-v2', '--bucket', BUCKET, '--prefix', prefix]).Contents ?? []).map((o) => o.Key);
 
-/** 다른 파드 안에서 Service 주소로 요청을 흘리고, 끝나면 { ok, errors }를 표준 출력에 낸다 */
+/** 다른 파드 안에서 Service 주소로 요청을 흘리고, 끝나면 { ok, errors, errorAtMs(시작부터 오류 시각들) }를 표준 출력에 낸다 */
 function trafficFrom(pod, seconds) {
-  const script = `const end=Date.now()+${seconds * 1000};let ok=0,errors=0;(async()=>{while(Date.now()<end){try{const r=await fetch('http://${SERVICE}.${NS}.svc:8080/v1/example/notes/00000000-0000-4000-8000-000000000000',{headers:{'x-user-id':'acc-1','x-session-id':'s-1','x-user-aud':'fan'}});if(r.status>=500)errors++;else ok++;}catch{errors++}await new Promise(r=>setTimeout(r,100))}process.stdout.write(JSON.stringify({ok,errors}))})()`;
+  const script = `const t0=Date.now(),end=t0+${seconds * 1000};let ok=0,errors=0;const at=[];(async()=>{while(Date.now()<end){try{const r=await fetch('http://${SERVICE}.${NS}.svc:8080/v1/example/notes/00000000-0000-4000-8000-000000000000',{headers:{'x-user-id':'acc-1','x-session-id':'s-1','x-user-aud':'fan'}});if(r.status>=500){errors++;at.push(Date.now()-t0)}else ok++;}catch{errors++;at.push(Date.now()-t0)}await new Promise(r=>setTimeout(r,100))}process.stdout.write(JSON.stringify({ok,errors,errorAtMs:at}))})()`;
   return kubectl(['-n', NS, 'exec', pod, '--', 'node', '-e', script]).then((out) => JSON.parse(out.trim().split('\n').at(-1)));
 }
 
-test('D-T18 ①_kind_heap주석을단파드는_준비를내리고·보고서와스냅샷을moto에올리고·다시뜨며_되풀이없고_다른파드로간요청오류는0이다', { timeout: 900_000 }, async (t) => {
+/** moto 버킷과 example-svc 2복제를 띄우고 [주석을 달 파드, 다른 파드]를 돌려준다 */
+async function stageDiag(t) {
   const helm = await ensureTool('helm');
   const k = await ensureTool('kubectl');
   // ---- 증거 버킷(moto) ----
@@ -86,6 +87,11 @@ test('D-T18 ①_kind_heap주석을단파드는_준비를내리고·보고서와�
     { stdio: 'inherit' },
   );
   const [target, other] = (await pods()).map((p) => p.metadata.name).sort();
+  return { helm, target, other };
+}
+
+test('D-T18 ①_kind_heap주석을단파드는_준비를내리고·보고서와스냅샷을moto에올리고·다시뜨며_되풀이없고_다른파드로간요청오류는0이다', { timeout: 900_000 }, async (t) => {
+  const { helm, target, other } = await stageDiag(t);
   assert.ok(target && other, '파드 둘');
   const restarts0 = restartsOf(await podOf(target));
   const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -135,5 +141,21 @@ test('D-T18 ①_kind_heap주석을단파드는_준비를내리고·보고서와�
     );
   }
   appendFileSync(MEASUREMENTS, `| ${new Date().toISOString().slice(0, 10)} | heap | ${uploadMs} | ${uploaded.length} | ${ok}·${errors} |\n`);
+  execFileSync(helm, ['--kubeconfig', KUBECONFIG, 'uninstall', 'diag', '-n', NS, '--wait', '--ignore-not-found'], { stdio: 'inherit' });
+});
+
+test('D-T18 ①_kind_report주석도_준비를내린뒤40초를기다려_Service에서빠진다음에끝내므로_주석뒤28~40초를포함해Service로간요청오류는0이다(RV-01)', { timeout: 900_000 }, async (t) => {
+  const { helm, target, other } = await stageDiag(t);
+  const restarts0 = restartsOf(await podOf(target));
+  const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // 주석을 달기 직전부터 90초 동안 다른 파드에서 Service로 요청을 흘린다(자기 SIGTERM으로 앱을 닫는 때가 이 창 안이다)
+  const traffic = trafficFrom(other, 90);
+  await kubectl(['-n', NS, 'annotate', 'pod', target, `peaket.io/diagnose=report@${at}`, '--overwrite']);
+  await until('보고서 객체', async () => (objects(`${SERVICE}/${target}/${at}/`).some((key) => /\/report[^/]*\.json$/.test(key)) ? true : undefined), 180_000);
+  await until('다시 뜸', async () => restartsOf(await podOf(target)) === restarts0 + 1, 180_000);
+  const { ok, errors, errorAtMs } = await traffic;
+  assert.ok(ok > 0, '요청이 흘렀다');
+  assert.equal(errors, 0, `Service로 보낸 요청 오류 ${errors}(요청을 흘리기 시작한 뒤 ${JSON.stringify(errorAtMs)}ms, 주석은 시작 직후)`);
+  assert.equal(objects(`${SERVICE}/${target}/${at}/`).some((key) => /heapsnapshot/.test(key)), false, 'report 요청은 스냅샷을 뜨지 않는다');
   execFileSync(helm, ['--kubeconfig', KUBECONFIG, 'uninstall', 'diag', '-n', NS, '--wait', '--ignore-not-found'], { stdio: 'inherit' });
 });
