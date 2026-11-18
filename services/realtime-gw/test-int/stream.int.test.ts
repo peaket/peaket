@@ -779,6 +779,8 @@ describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', (
         const later = frames.slice(i1000 + 1).filter(isDelta).filter((f) => f.serverTimeMs >= resumedAt + 300);
         const gaps = later.slice(1).map((f, i) => f.serverTimeMs - later[i]!.serverTimeMs);
         expect(gaps.length).toBeGreaterThanOrEqual(3);
+        // 실측값을 남긴다(계획 '## 시험 결과'에 옮겨 적는다, WIR-04)
+        console.info(`[S-T14 ① 실측] 1초 간격 묶음 사이 ms 최소 ${Math.min(...gaps)} 최대 ${Math.max(...gaps)} (${gaps.length}개)`);
         for (const g of gaps) {
           expect(g).toBeGreaterThanOrEqual(1_000 - 50);
           expect(g).toBeLessThanOrEqual(1_000 + 100 + 50);
@@ -786,10 +788,12 @@ describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', (
         expect(await gaugeOf('realtime_gw_buffer_slow_connections')).toBe(1);
 
         // 버퍼가 빈 뒤(다시 받은 뒤) 차례 30번(30초 근처) 뒤 BatchInterval 100. 받기를 멈춘 동안은 버퍼가 64KiB 아래로 내려가지 않으므로 30초 전에는 오지 않는다.
-        // 차례 30번은 다시 받은 뒤 첫 낮은 차례(1초 안)부터 세므로 위 허용 폭은 30,000 + 1,500ms다(RF-T12)
+        // 차례 30번은 다시 받은 뒤 첫 낮은 차례(버퍼가 빈 뒤 1초 안)부터 그 뒤 29번의 1,000ms 격자다. 그래서 아래는 29 × 1,000 − 50ms,
+        // 위는 첫 차례까지 1초와 비우는 시간을 더한 30,000 + 1,500ms다(RF-T12. 처음 둔 아래 30,000 − 50은 첫 차례를 한 번 더 센 시험 결함, 실측 29,158ms)
         await slow.next(isInterval(100), 40_000, i1000 + 1);
         const back = Date.now() - resumedAt;
-        expect(back).toBeGreaterThanOrEqual(30_000 - 50);
+        console.info(`[S-T14 ① 실측] 다시 받은 뒤 BatchInterval 100까지 ${back}ms`);
+        expect(back).toBeGreaterThanOrEqual(29 * 1_000 - 50);
         expect(back).toBeLessThanOrEqual(30_000 + 1_500);
         expect(await gaugeOf('realtime_gw_buffer_slow_connections')).toBe(0);
         // 되돌린 뒤 묶음은 100ms 박자에 온다(보내는 쪽 타이머가 박자 하나둘을 비울 수 있어 300ms 안쪽으로 본다. 1초 간격이면 950ms 이상이다)
