@@ -1011,3 +1011,47 @@ test("I-T85 ①-3 받는 쪽 작업이 없는 옛 진행 쿠키로 콜백하면 
   const p = await pickup(b);
   assert.equal(JSON.parse(p.text).type, 'reauth-failed');
 });
+
+// ---- 리뷰 반영(BAT-408 리뷰 RV-01·RV-05, 2026-11-19) ----
+
+test("I-T85 ①-4 배포 전 진행 쿠키의 실제 모양(reauthPurpose 'sensitive'·'high-risk', reauthOp 없음)도 옛 칸으로 작업을 대신하지 않고 '그 밖의 실패'다 (RV-01)", async () => {
+  // 2026-11-18 앞 앱 서버는 진행 쿠키에 reauthPurpose('sensitive'·'high-risk')를 봉인했다. 그 칸을 작업으로 바꿔 쓰지 않는다(ADR-0293 결정 3)
+  for (const reauthPurpose of ['sensitive', 'high-risk']) {
+    const b = new Browser();
+    await login(b);
+    identity.calls.length = 0;
+    const start = await reauthStart(b, { purpose: 'session-end' });
+    assert.equal(start.res.status, 303, reauthPurpose);
+    const keys = deriveLoginKeys(SECRET);
+    const c = b.get(OIDC);
+    const prog = unseal([keys.progress], OIDC, c.value, Date.now());
+    assert.ok(prog && prog.purpose === 'reauth', `${reauthPurpose}: 진행 쿠키를 열었다`);
+    const old = { ...prog, reauthPurpose };
+    delete old.reauthOp;
+    c.value = seal(keys.progress, OIDC, old, Date.now() + 5 * 60_000);
+    const back = await fetch(start.res.headers.get('location'), { redirect: 'manual' });
+    let tokenExchanges = 0;
+    op.mode.onToken = () => void tokenExchanges++;
+    const r = await b.go(back.headers.get('location'));
+    op.mode.onToken = null;
+    assert.equal(new URL(r.trail.at(-1).url).pathname, '/my/settings', reauthPurpose);
+    assert.equal(tokenExchanges, 0, `${reauthPurpose}: 제공자 인가 코드를 바꾸지 않는다`);
+    assert.equal(lastCall('IssueReauthToken'), undefined, `${reauthPurpose}: identity를 부르지 않는다`);
+    assert.equal(JSON.parse((await pickup(b)).text).type, 'reauth-failed', reauthPurpose);
+  }
+});
+
+test('I-T85 ①-5 객체 원형의 이름(constructor·__proto__·toString·hasOwnProperty·valueOf)인 purpose도 400이고 진행 쿠키가 없다 (RV-05)', async () => {
+  const b = new Browser();
+  await login(b);
+  const authorizeBefore = JSON.stringify(op.lastAuthorize);
+  for (const purpose of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf', 'isPrototypeOf']) {
+    const r = await reauthStart(b, { purpose });
+    assert.equal(r.res.status, 400, purpose);
+    assert.equal(r.res.headers.get('location'), null, `${purpose}: Location 없음`);
+    assert.ok(!r.res.headers.getSetCookie().some((c) => c.startsWith(`${OIDC}=`)), `${purpose}: 진행 쿠키를 만들지 않는다`);
+    assert.equal(b.get(OIDC), undefined, purpose);
+  }
+  assert.equal(JSON.stringify(op.lastAuthorize), authorizeBefore, '제공자 인가 화면에 가지 않았다');
+  assert.equal(lastCall('IssueReauthToken'), undefined);
+});

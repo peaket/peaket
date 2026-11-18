@@ -11,11 +11,13 @@ import { AccountError } from '../src/modules/session/application/account-error.j
 import { AddProvider } from '../src/modules/session/application/add-provider.js';
 import { ConfirmMerge } from '../src/modules/session/application/confirm-merge.js';
 import { EndDeviceSession } from '../src/modules/session/application/end-device-session.js';
+import { IssueReauthToken } from '../src/modules/session/application/issue-reauth-token.js';
 import { MergeError } from '../src/modules/session/application/merge-error.js';
 import { MergePlanner } from '../src/modules/session/application/plan-merge.js';
+import { SessionError } from '../src/modules/session/application/session-error.js';
 import { UnlinkProvider } from '../src/modules/session/application/unlink-provider.js';
 import { WithdrawAccount } from '../src/modules/session/application/withdraw-account.js';
-import type { AccountEraser } from '../src/modules/session/domain/ports.js';
+import { type AccountEraser, noReverifications } from '../src/modules/session/domain/ports.js';
 import type { ReauthOperation } from '../src/modules/session/domain/session.js';
 import { fanReauthToken, ISSUER, kit, newKey } from './support.js';
 
@@ -170,5 +172,44 @@ describe('I-T85 ③ identity가 받는 다섯 작업은 자기 op 토큰만 받�
     expect(await outcome(run(wrong))).toBe('REAUTH_REQUIRED');
     // 거절한 토큰은 그 토큰의 자기 작업(탈퇴)에는 아직 쓸 수 있다: 잡히지 않았다
     expect(await outcome(t.withdraw.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: wrong, body: {} }))).toBe('OK');
+  });
+});
+
+// 리뷰 반영(BAT-408 리뷰 RV-04·RV-05, 2026-11-19): 발급의 operation 검사는 gRPC 표와 유스케이스 두 곳이다(겹친 가드).
+// 유스케이스를 직접 불러 그쪽 검사만 따로 본다(다른 받는 층이 생겨도 이 검사가 남는다, identity §7.1 ③, ADR-0293 결정 4)
+describe('I-T85 ② 발급 유스케이스의 operation 검사', () => {
+  test('I-T85 ②-4 IssueReauthToken.run에 operation이 없거나·빈 값·모르는 값·proto 이름·객체 원형 이름이면 INVALID_ARGUMENT이고 서명·발급 신호가 0이다 (RV-04·RV-05)', async () => {
+    const sessions = new MemorySessionStore();
+    const k = await kit(sessions);
+    const signed: unknown[] = [];
+    // 서명기를 감싸 reauth 부르기를 센다(나머지는 그대로 넘긴다)
+    const signer = new Proxy(k.signer, {
+      get(target, p) {
+        if (p === 'reauth') return (c: unknown, now: number) => (signed.push(c), target.reauth(c as Parameters<typeof target.reauth>[0], now));
+        const v = Reflect.get(target, p, target) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const issue = new IssueReauthToken(sessions, signer, k.signals, noReverifications, k.clock);
+    const a = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'k-iss', email: null, deviceId: 'dev-a' });
+    const ask = (operation: unknown) =>
+      issue.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'kakao', providerUserId: 'k-iss', strength: 'verified', operation: operation as ReauthOperation });
+    const codeOf = async (p: Promise<unknown>) => {
+      try {
+        await p;
+        return 'OK';
+      } catch (e) {
+        if (e instanceof SessionError) return e.code;
+        throw e;
+      }
+    };
+    for (const bad of [undefined, null, '', 'BOGUS', 'session_end', 'session-end', 'REAUTH_OPERATION_SESSION_END', 'BOOKER_EXPORT', '__proto__', 'constructor', 'toString', 'hasOwnProperty', 0, 2, ['SESSION_END']]) {
+      expect(await codeOf(ask(bad)), JSON.stringify(bad) ?? 'undefined').toBe('INVALID_ARGUMENT');
+    }
+    expect(signed).toHaveLength(0);
+    expect(k.signals.seen.filter((x) => x.startsWith('reauth:'))).toEqual([]);
+    // 대조: 표의 값이면 같은 세션에서 바로 나온다(위 0이 세는 방법의 결함이 아니다)
+    expect((await ask('SESSION_END')).result).toBe('ISSUED');
+    expect(signed).toHaveLength(1);
   });
 });
