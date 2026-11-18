@@ -287,7 +287,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(new Set(payments.calls.map((c) => c.cancellationId)).size).toBe(1);
   });
 
-  test('P-T57 ③ 결제사가 거절(REJECTED)하면 SEV2 한 줄(kind merch-refund-rejected, 주문 ID만)이고 환급 행은 남고 다시 부르지 않는다', async () => {
+  test('P-T57 ③ 결제사가 거절(REJECTED)하면 SEV2 한 줄(kind merch-refund-rejected, 주문 ID만)이고 환급 행은 상태 REJECTED로 금액과 함께 남고 다시 부르지 않는다', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
     const clock = fakeClock({ now: MON_1000 });
     const payments = new FakePayments(['REJECTED']);
@@ -298,7 +298,8 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     const rows = await refunds(o.orderId);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ amount: 15_000, reason: 'UNCLAIMED' });
-    expect(rows[0]!.status).not.toBe('CANCELLED');
+    // '그대로' = 지우거나 CANCELLED로 끝내지 않고 금액을 남기며 다시 부르지 않음, 행 상태는 REJECTED(ADR-0301 결정 5, 계획 '시험 이의' E-3 판정)
+    expect(rows[0]!.status).toBe('REJECTED');
     expect(await items(o.orderId)).toEqual([{ status: 'CANCELLED', cancelReason: 'UNCLAIMED', refundedAmount: 0 }]);
     clock.advance(RETRY_MS);
     expect(await unclaimed.retry()).toEqual({ retried: 0 });
