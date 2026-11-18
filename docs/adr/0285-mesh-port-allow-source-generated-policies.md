@@ -78,7 +78,7 @@
 ## 되돌릴 조건
 
 - Envoy Gateway가 프록시 서비스 계정 이름을 정하는 설정을 주면 그 이름으로 고정한다.
-- 내부 HTTP를 경로로 거를 필요가 커지면(내부 HTTP 부르는 쪽이 바깥 경로를 부른 사고나 검토 지적) 대안 2를 새 ADR로 다시 본다.
+- 내부 HTTP를 경로로 거를 필요가 커지면(내부 HTTP 부르는 쪽이 바깥 경로를 부른 사고나 검토 지적) 대안 2를 새 ADR로 다시 본다. 상태를 바꾸는 내부 HTTP가 늘면 그 경로를 여기 적는다. 2026-11-19: core-svc `POST /internal/v1/events/{eventId}/cancellation-status`(회차 취소·연기 반영). 부르는 쪽은 ops-svc뿐이지만 포트 단위라 core-svc REST 포트를 부르는 다른 서비스도 공유 토큰만 있으면 닿는다(BAT-420-rest 리뷰 RV-07).
 
 ## 확인
 
