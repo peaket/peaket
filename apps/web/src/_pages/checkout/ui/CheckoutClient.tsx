@@ -4,6 +4,7 @@
 // 미리보기(개발 서버)의 [결제하기]는 결제 복귀 화면으로 가고, 실제 화면은 onPay로 주문을 만든다(ADR-0228).
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useStickyInset } from '@/shared/lib/sticky-inset';
 import type { PayMode } from '../model/view';
 
 type ConsentKey = 'thirdParty' | 'terms';
@@ -114,6 +115,8 @@ export interface PayActionProps {
 export function PayAction({ layout, mode, amountText, holdText, holdAria, returnHref, onPay, busy = false, verify }: PayActionProps) {
   const router = useRouter();
   const { checked } = useCheckoutConsent();
+  // 띠의 실제 높이를 아래 스크롤 여백으로(docs/frontend.md §5.11 '초점이 가려지지 않게', BAT-171 R171-2)
+  const barRef = useStickyInset('bottom');
   const reason = reasonOf(mode, checked.thirdParty && checked.terms);
   const reasonId = `pay-why-${layout}`;
   const timerTone = mode === 'pay-paused' ? 'is-paused' : mode === 'expired' ? 'is-expired' : '';
@@ -173,7 +176,7 @@ export function PayAction({ layout, mode, amountText, holdText, holdAria, return
     );
   }
   return (
-    <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3.5 md:pb-[22px] lg:hidden">
+    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3.5 md:pb-[22px] lg:hidden">
       <div className="flex w-full flex-col gap-2 md:mx-auto md:max-w-[600px] md:flex-row md:items-center md:gap-4">
         <div className="col gap-2 md:grow md:gap-1">
           <p className="t-xs muted">{PAY_NOTE}</p>

@@ -12,6 +12,7 @@ import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { previewHref } from '@peaket/ds/Preview';
 import { RefundQuote } from '@peaket/ds/RefundQuote';
 import { cx } from '@/shared/lib/cx';
+import { useStickyInset } from '@/shared/lib/sticky-inset';
 import { CARD_REFUND_TEXT, CURRENT_FEE_BP, CURRENT_FEE_TEXT, refundOf, type CancelSeat, type CancelSheet } from '../model/view';
 
 const won = (n: number) => `₩${new Intl.NumberFormat('ko-KR').format(n)}`;
@@ -247,9 +248,11 @@ function ctaLabel(c: CancelCtx): string {
 /** 휴대폰·태블릿 아래 고정 막대(보드 m·t의 .bottom-bar). 데스크톱(lg)은 오른쪽 패널이 버튼을 가진다 */
 export function CancelBar() {
   const c = useCancel();
+  // 띠의 실제 높이를 아래 스크롤 여백으로(docs/frontend.md §5.11 '초점이 가려지지 않게', BAT-171 R171-2)
+  const barRef = useStickyInset('bottom');
   const blocked = c.calculating ? '환급 예상액을 계산한 뒤 진행할 수 있습니다' : c.n === 0 ? '취소할 좌석을 고르면 진행할 수 있습니다' : null;
   return (
-    <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3.5 md:pb-5 lg:hidden">
+    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3.5 md:pb-5 lg:hidden">
       <div className="mx-auto flex w-full max-w-[600px] flex-col items-stretch gap-2.5 md:flex-row md:items-center md:gap-4">
         {c.n > 0 ? (
           <div className="flex items-center justify-between md:grow md:flex-col md:items-start md:justify-start md:gap-0.5">

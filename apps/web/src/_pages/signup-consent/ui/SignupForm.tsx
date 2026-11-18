@@ -18,6 +18,7 @@ import { TextField } from '@peaket/ds/TextField';
 import { refreshFanSession, useFanSession } from '@/entities/me';
 import { VerifyFlowProvider, VerifyTrigger, VerifyWaitingStatus } from '@/features/identity-verify';
 import { isUnauthorizedError, problemName } from '@/shared/api/refresh';
+import { useStickyInset } from '@/shared/lib/sticky-inset';
 import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
 import { ERRORS, nicknameProblem, toSignupInput, validateSignup, type NickCheck, type SignupForm as Form } from '../model/signup';
 
@@ -40,6 +41,8 @@ const EMPTY: Form = { age: false, terms: false, privacy: false, marketing: false
 
 export function SignupForm({ next }: { next: string }) {
   const session = useFanSession();
+  // 띠의 실제 높이를 아래 스크롤 여백으로(docs/frontend.md §5.11 '초점이 가려지지 않게', BAT-171 R171-2)
+  const barRef = useStickyInset('bottom');
   const [f, setF] = useState<Form>(EMPTY);
   // 위쪽 요약은 다음 제출까지 그대로 둔다(칸을 고칠 때마다 요약이 바뀌면 첫 오류 칸으로 초점을 다시 옮긴다, HOT-323 새 맥락 리뷰 중간 1).
   // 고친 칸은 cleared에 넣어 그 칸 아래 오류만 걷는다
@@ -377,7 +380,7 @@ export function SignupForm({ next }: { next: string }) {
       >
         <p id="u14-desc">가입을 취소하면 소셜 로그인으로 받은 정보를 지우고 로그아웃합니다. 되돌릴 수 없습니다.</p>
       </WebShellModal>
-      <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3 md:pb-5 lg:hidden">
+      <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3 md:pb-5 lg:hidden">
         <button className="btn btn-primary btn-lg btn-block md:mx-auto md:max-w-[560px]" type="submit" form="signup-form" disabled={busy} aria-busy={busy || undefined}>
           가입 완료
         </button>
