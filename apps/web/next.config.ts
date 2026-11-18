@@ -6,6 +6,7 @@ import { cacheConfig } from './server/cache-env.mjs';
 import { deploymentIdOf } from './server/deployment-id.mjs';
 import { hideSourceMaps } from './scripts/hide-source-maps.mjs';
 import { writeSeatPreload } from './scripts/seat-preload.mjs';
+import { writeServiceWorker } from './scripts/service-worker.mjs';
 
 // SEED CSS 층 PoC 빌드(FE-T36, tools/web-checks/seed-css/). 이때만 page.poc.tsx가 경로가 된다(운영 빌드에는 탐침 화면이 없다)
 const seedCssPoc = process.env.PEAKET_POC === 'seed-css';
@@ -73,6 +74,9 @@ const config: NextConfig = {
       hideSourceMaps({ distDir });
       // 좌석 화면 자산 목록(대기실이 차례 전에 받는다, ADR-0216 결정 3). PoC 빌드에도 같은 경로가 있어 함께 만든다
       writeSeatPreload({ distDir });
+      // 월렛 서비스 워커를 빌드 때 묶어 <distDir>/serwist/sw.js로 둔다. 숨김 소스 맵 뒤라 미리 저장 판이 배포 파일과 맞고,
+      // 경로 처리기는 요청 때 다시 묶지 않는다(BAT-171 시험 이의 6)
+      await writeServiceWorker({ distDir });
     },
   },
   // next dev가 앱 폴더에 AGENTS.md를 만들지 않게 한다(저장소 규칙은 뿌리 CLAUDE.md·docs가 정한다)
@@ -98,5 +102,6 @@ const config: NextConfig = {
   },
 };
 
-// 월렛 서비스 워커(offline-gate §2·§4, BAT-350). Turbopack 빌드에서 app/serwist/[path]/route.ts가 sw를 만든다.
+// 월렛 서비스 워커(offline-gate §2·§4, BAT-350). 빌드 때 scripts/service-worker.mjs가 묶고 app/serwist/[path]/route.ts가 그 파일을 낸다.
+// withSerwist는 esbuild를 서버 외부 패키지로 둔다(빌드 때 묶기에 쓴다).
 export default withSerwist(config);
