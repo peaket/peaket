@@ -241,15 +241,22 @@ export function checkOrderLines(path: OrderPath, fulfillment: Fulfillment, lines
   }
 }
 
+/** 상품 ID마다 모든 줄의 수량 합(같은 상품을 옵션·수량만 다른 여러 줄로 보내도 한 상품으로 센다, ADR-0300 결정 4) */
+export function quantitiesByProduct(lines: readonly OrderLineInput[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const l of lines) out.set(l.productId, (out.get(l.productId) ?? 0) + l.quantity);
+  return out;
+}
+
 /**
- * 계정당 한도: 이 주문 수량 + 그 계정의 PAID·결제 접수한 주문 수량 ≤ perAccountLimit(ADR-0300 결정 4). 한도가 없으면(null) 보지 않는다.
+ * 계정당 한도: 이 주문의 그 상품 수량(모든 줄의 합) + 그 계정의 PAID·결제 접수한 주문 수량 ≤ perAccountLimit(ADR-0300 결정 4). 한도가 없으면(null) 보지 않는다.
  * @throws ShopProblem 422 merch-quantity-limit-exceeded
  */
 export function checkPerAccountLimit(lines: readonly OrderLineInput[], products: ReadonlyMap<string, OrderableProduct>, committed: ReadonlyMap<string, number>): void {
-  for (const line of lines) {
-    const limit = commonAttributesOf(products.get(line.productId)!.attributes).perAccountLimit;
+  for (const [productId, quantity] of quantitiesByProduct(lines)) {
+    const limit = commonAttributesOf(products.get(productId)!.attributes).perAccountLimit;
     if (limit === null) continue;
-    if (line.quantity + (committed.get(line.productId) ?? 0) > limit) throw merchQuantityLimitExceeded();
+    if (quantity + (committed.get(productId) ?? 0) > limit) throw merchQuantityLimitExceeded();
   }
 }
 
