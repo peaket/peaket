@@ -889,3 +889,23 @@ describe('입금 오류 되돌림(P-T36 ④)', () => {
     expect((await rowOf(i.orderId)).next_query_at).toBeNull();
   });
 });
+
+// BAT-420-rest P-T71 ⑥(시험 담당 l3-b420-test, 2026-11-19): 실제 입금 흐름(승인 → 입금 통보 → 조회 → APPROVED, 기한 + 10분 조회 → FAILED)을 지난 원장의
+// GetPayment virtual_account_paid. 가상계좌 칸(virtual_account_no 등)은 입금 확정 때 지워지므로 그 칸으로 판정하면 입금 뒤 거짓이 된다(정본 '가상계좌였는지').
+describe('P-T71 ⑥ 실제 입금 흐름 뒤의 virtual_account_paid', () => {
+  test('P-T71 ⑥ 입금 대기는 거짓, 입금 확정(APPROVED, 계좌 칸이 지워짐) 뒤 참, 기한이 지나 끝난 결제(FAILED)는 거짓이다', async () => {
+    const i = await issued();
+    expect(await unary(h.client, 'GetPayment', { order_id: i.orderId })).toMatchObject({ status: 'PAYMENT_STATUS_AWAITING_DEPOSIT', virtual_account_paid: false });
+    await control('POST', `/sim/deposits/${i.paymentKey}`);
+    await h.webhook.receive('toss', {}, callbackBody(i));
+    expect(await drive(h.resolver)).toBe(1);
+    expect(await rowOf(i.orderId)).toMatchObject({ status: 'APPROVED', virtual_account_no: null, virtual_account_bank: null });
+    expect(await unary(h.client, 'GetPayment', { order_id: i.orderId })).toMatchObject({ status: 'PAYMENT_STATUS_APPROVED', virtual_account_paid: true });
+
+    const expired = await issued();
+    clock.advance(expired.dueAtMs + DEPOSIT_QUERY_GRACE_MS - clock.now());
+    expect(await drive(h.resolver)).toBe(1);
+    expect((await rowOf(expired.orderId)).status).toBe('FAILED');
+    expect(await unary(h.client, 'GetPayment', { order_id: expired.orderId })).toMatchObject({ status: 'PAYMENT_STATUS_FAILED', virtual_account_paid: false });
+  });
+});

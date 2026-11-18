@@ -211,7 +211,34 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 
 ## 실패 확인
 
+- **누가·어디서**: 시험 담당 `l3-b420-test`(claude-opus-5-5, 2026-11-19). 구현 전 트리는 계획 커밋 `6bfe405a`를 따로 꺼낸 worktree(`D:/ticketpass-lane3-b420-base`)에 pnpm install·패키지 다섯(search-normalize·shuffle·validation·contracts·platform) 빌드 뒤 시험 파일만 복사해 돌렸다. 통합 시험은 Docker 잠금(`lane3-BAT-420`, 2026-11-19T05:54:34+09:00 ~ 06:02:32+09:00) 안에서 파일 하나씩 차례로 돌렸고 남은 컨테이너는 0이다.
+- **결과(새 시험 103개)**: 실패 66, 실행조차 안 됨 25(새 모듈이 없어 파일을 읽지 못함 19 = core `test/event-cancellation-status.test.ts` 5·ops `test/event-cancellation-core-apply.test.ts` 14, 0016 칸이 없어 묶음 준비가 실패해 건너뜀 6 = ops `test-int/event-cancellations.int.test.ts` R-T41 ③), 통과 12.
+
+| 파일 | 시험 ID | 개수 | 구현 전 트리 |
+| --- | --- | --- | --- |
+| `services/pg-simulator/test/refund-account.test.ts`(새) | P-T71 | 9 | 실패 6, 통과 3 |
+| `services/payment-svc/test/cancel-confirmed-payment-refund-account.test.ts`(새) | P-T71 | 18 | 실패 16, 통과 2 |
+| `services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts`(새) | P-T71 ①~⑥ | 8 | 실패 7, 통과 1 |
+| `services/payment-svc/test-int/payment-deposit.int.test.ts`(더함) | P-T71 ⑥ | 1 | 실패 1 |
+| `services/purchase-svc/test/cancel-refund-account-http.test.ts`(새) | P-T72 ①~④·⑥ | 13 | 실패 9, 통과 4 |
+| `services/purchase-svc/test/event-refund-account-pending.test.ts`(새) | R-T40 ①③④ 6, P-T72 ④⑤ 7 | 13 | 실패 12, 통과 1 |
+| `services/purchase-svc/test-int/cancellation.int.test.ts`(더함) | P-T72 ②~⑥ | 5 | 실패 4, 통과 1 |
+| `services/purchase-svc/test-int/event-cancel-r-t24.int.test.ts`(더함) | R-T40 ①~④ | 4 | 실패 4 |
+| `services/core-svc/test/event-cancellation-status.test.ts`(새) | R-T41 | 5 | 실행 안 됨(모듈 없음) |
+| `services/core-svc/test-int/search-read-model.int.test.ts`(더함) | R-T41 ①②④⑤ 4, SR-T8 ③ 1 | 5 | 실패 5(경로 404) |
+| `services/ops-svc/test/event-cancellation-core-apply.test.ts`(새) | R-T41 ③④ | 14 | 실행 안 됨(모듈 없음) |
+| `services/ops-svc/test/event-cancellation-core-apply-main.test.ts`(새) | R-T41 ③ 시작 조립 | 2 | 실패 2 |
+| `services/ops-svc/test-int/event-cancellations.int.test.ts`(더함) | R-T41 ③ | 6 | 실행 안 됨(묶음 준비 42703) |
+
+- **구현 전 트리에서 통과한 12개(새 동작이 아닌 대조·회귀)**: 시뮬레이터 토스 모양 ①(옛 시뮬레이터가 모르는 칸을 버리고 취소해 통과한다. 계좌가 결제사 본문에 실리는지는 payment 통합 ①이 잡는다)·카드 ⑤·포트원 ①, payment 단위의 대조 둘(계좌를 다시 실은 재시도, 계좌 없는 포트원 본문), payment 통합 ⑤(카드 결제의 본문), purchase HTTP 대조 넷(카드 결제, 가상계좌에 계좌를 실은 취소, 입장 시작 뒤 취소, 결과 모름), 환급 실행기의 업무 거절 대조, purchase 통합 ⑥(계좌 글 누설 0 — 옛 트리도 저장하지 않는다). 계획 §5 끝 줄대로 이 단언들의 실패는 검증의 틀린 구현(M6·M10 등)으로 본다.
+- **구현 전 트리의 실패가 보여 준 것**: R-T40 ①에서 옛 일괄 환불은 가상계좌 주문의 두 표도 계좌 없이 결제사 취소를 불러 done 4였다(돈이 계좌 없이 나가는 길). P-T72 ②는 422 대신 Saga가 돌아 ACCEPTED였다.
+
 ## 시험 결과
+
+- **구현 트리(`2930f8b3` + 이 커밋의 시험)**: 새·바꾼 시험 파일 모두 통과. 단위 전체 — pg-simulator 6파일 109, payment-svc 49파일 3,033, core-svc 80파일 516, ops-svc 41파일 278, purchase-svc 136파일 4,249(모두 통과). 통합(이 PC Docker, 새·바꾼 파일만) — payment `payment-cancel-refund-account` 8·`payment-deposit` 47, purchase `cancellation` 43·`event-cancel-r-t24` 31, core `search-read-model` 32, ops `event-cancellations` 23(모두 통과). 통합 전체는 감독의 초안 PR CI 몫이다.
+- `npx tsc -p tsconfig.json --noEmit`(test·test-int 포함) payment·purchase·core·ops·pg-simulator 오류 0. `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(이 커밋이 닿지 않은 openapi 응답 설명 셋, mermaid 건너뜀). 시험 파일은 eslint 설정 밖이다(경고 'File ignored').
+- **시험을 고치며 정한 것**: CancelPayment 답의 `remaining_cancellable`(시뮬레이터 토스 모양은 비어 있음)은 견주지 않는다. 결제 후 전액이 되는 카드 일괄 환불의 결제사 금액은 'ALL'이고 금액은 payment_cancel 행(33,333)으로 본다. 잡기·늦음 표시의 돌려주는 줄 차례는 견주지 않는다(UPDATE … RETURNING은 차례를 정하지 않는다, 고르는 차례는 limit으로 본다). 검색 어긋난 줄(drift)은 같은 DB를 나눠 쓰는 앞 묶음 때문에 0이 아니어서 이 묶음에서는 그 공연의 이름 줄 0으로 대신했다.
+- **구현 결함 의심(시험으로 확인하지 않음, 리뷰·검증 판단)**: ① 팬 취소가 계좌 거절로 계좌 대기(REFUND_PENDING·refund_account_required_at)가 된 뒤 팬이 같은 표를 새 키로 다시 누르면, ticket-svc가 첫 취소 ID를 알려 `CancelTicket.#replay`가 같은 취소 ID로 payment를 다시 부르고, payment-svc는 FAILED 행이라 REJECTED를 돌려 그 행에 환급 실패 표시(refund_failed_at)까지 남는 것으로 읽힌다(CS 건이 '환불 대기'와 '환급 실패' 둘). ② core-svc에 계획 §7이 '없음'으로 둔 마이그레이션 `0029_event_status_ops_grant.sql`이 생겼다(구현 주석 '번호 감독 확인 대기'). ③ 시뮬레이터는 모르는 칸을 거절하지 않고 버린다(옛 동작, 결함 아님).
 
 ## 리뷰
 
@@ -223,5 +250,6 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | --- | --- | --- | --- | --- |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T03:43+09:00 | 2026-11-19T04:04+09:00 |
 | impl | l3-b420-impl | claude-opus-5-5 | 2026-11-19T04:05+09:00 | 2026-11-19T04:56+09:00 |
+| test | l3-b420-test | claude-opus-5-5 | 2026-11-19T04:58+09:00 | 2026-11-19T06:10+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.

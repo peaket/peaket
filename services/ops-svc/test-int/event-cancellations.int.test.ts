@@ -21,6 +21,8 @@ import { DRY_RUN, JOB, fakeReauth, tokenFor } from '../test/event-cancellation-f
 import type { EventRefundHolds } from '../src/modules/event-cancellations/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+// BAT-420-rest R-T41 ③(시험 담당 l3-b420-test)
+import { DrizzleEventCancellationStore, EventCancellations } from '../src/modules/event-cancellations/index.js';
 
 const NOW = Date.parse('2026-11-15T08:00:00.000Z');
 /** 공연 시각은 실제 시계로 끝나지 않을 먼 미래로 둔다(요청 시각 셈이 Date.now든 CLOCK이든 같게) */
@@ -586,5 +588,144 @@ describe('회차 취소 요청 전 미룸 [BAT-420 몫 D]', () => {
     const requestId = json(again).requestId as string;
     expect(holdState.calls.filter((c) => c.requestId === requestId && c.held)).toHaveLength(1);
     expect(await count("select count(*) as n from cs_case where kind = 'JUDGEMENT_PENDING' and target_ref = $1", [requestId])).toBe(1);
+  });
+});
+
+// BAT-420-rest R-T41 ③(시험 담당 l3-b420-test, 2026-11-19): core 회차 상태 반영 표시(ops 0016)와 다시 하기 잡기를 실제 PostgreSQL 18로 본다.
+// 정본: docs/features/transfer-refund.md §5 'core 회차 상태 반영' 둘째 줄(1분 [가정]·20건 [가정]·10분 [가정] SEV2 요청마다 한 번),
+// 'core 반영의 구현에서 정한 것' ⑤(대상은 Start까지 끝낸 확정 뒤 요청, 잡을 때 다음 볼 시각을 지금 + 1분으로 미룸 FOR UPDATE SKIP LOCKED, 10분 경계 포함).
+// 이 묶음은 파일 끝에서 돈다: 앞 시험이 남긴 확정 행은 반영한 것으로 표시해 잡기 결과에서 빼고, 이 묶음이 만든 요청만 센다.
+describe('R-T41 ③ core 반영 표시와 다시 하기 잡기 실제 DB [BAT-420-rest GAT-110]', () => {
+  const MIN = 60_000;
+  const store = () => new DrizzleEventCancellationStore(db, clock);
+  const coreRow = async (requestId: string) =>
+    (await admin.query<{ core_applied_at: Date | null; core_apply_next_at: Date | null; core_apply_overdue_at: Date | null }>('select core_applied_at, core_apply_next_at, core_apply_overdue_at from event_cancellation_request where request_id = $1', [requestId])).rows[0]!;
+  /** 요청 → 판정 → 판정자 외 확정(Start까지)까지 HTTP로 만든다(이 서비스는 core 대역이 없어 core_applied_at이 빈다) */
+  const approved = async (): Promise<string> => {
+    const requestId = await pendingApproval(randomUUID());
+    const r = await post(`/v1/ops/event-cancellations/${requestId}/approvals`, reauthed(identity.ops('operator')), {});
+    expect(json(r).status).toBe('RUNNING');
+    return requestId;
+  };
+  let mine: string[] = [];
+  let notStarted: string;
+  const T0 = Date.parse('2026-11-19T00:00:00.000Z');
+
+  beforeAll(async () => {
+    mine = [await approved(), await approved(), await approved()];
+    notStarted = await pendingApproval(randomUUID());
+    // 앞 묶음이 남긴 확정 행은 이 묶음의 잡기 셈에서 뺀다
+    await admin.query('update event_cancellation_request set core_applied_at = now() where not (request_id = any($1::uuid[]))', [[...mine, notStarted]]);
+    // 확정 시각을 1ms씩 다르게 정한다(차례·10분 경계)
+    for (const [i, id] of mine.entries()) await admin.query('update event_cancellation_request set approved_at = $2 where request_id = $1', [id, new Date(T0 + i)]);
+  });
+
+  test('R-T41 ③ 0016은 core_applied_at·core_apply_next_at·core_apply_overdue_at(빈 값 허용)과 반영하지 않은 확정 뒤 요청만 받치는 부분 색인을 만든다', async () => {
+    const cols = await admin.query<{ column_name: string; data_type: string; is_nullable: string }>(
+      "select column_name, data_type, is_nullable from information_schema.columns where table_name = 'event_cancellation_request' and column_name like 'core_%' order by column_name",
+    );
+    expect(cols.rows).toEqual([
+      { column_name: 'core_applied_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      { column_name: 'core_apply_next_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      { column_name: 'core_apply_overdue_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+    ]);
+    const idx = await admin.query<{ indexdef: string }>("select indexdef from pg_indexes where indexname = 'event_cancellation_request_core_apply_idx'");
+    expect(idx.rows[0]!.indexdef).toMatch(/core_applied_at IS NULL/);
+    expect(idx.rows[0]!.indexdef).toMatch(/refund_job_state IS NOT NULL/);
+    for (const id of mine) expect(await coreRow(id), id).toEqual({ core_applied_at: null, core_apply_next_at: null, core_apply_overdue_at: null });
+  });
+
+  test('R-T41 ③ 잡기는 Start까지 끝낸 확정 뒤 요청만 확정 시각 순으로 limit건 잡고 다음 볼 시각을 지금 + 60,000ms로 쓴다: 59,999ms 뒤 0건, 60,000ms 뒤 다시 잡힌다', async () => {
+    const t = T0 + 30 * MIN;
+    const first = await store().claimCoreApplies(t, 2, MIN);
+    // 고르는 차례는 확정 시각 순이다(돌려주는 줄의 차례는 견주지 않는다: UPDATE … RETURNING은 차례를 정하지 않는다)
+    expect(first.map((d) => d.requestId).sort()).toEqual(mine.slice(0, 2).sort());
+    expect(first[0]).toMatchObject({ kind: 'CANCEL' });
+    for (const id of mine.slice(0, 2)) expect((await coreRow(id)).core_apply_next_at?.getTime()).toBe(t + MIN);
+    const second = await store().claimCoreApplies(t, 2, MIN);
+    expect(second.map((d) => d.requestId)).toEqual([mine[2]]);
+    expect(await store().claimCoreApplies(t + 59_999, 20, MIN)).toEqual([]);
+    expect((await store().claimCoreApplies(t + 60_000, 20, MIN)).map((d) => d.requestId).sort()).toEqual([...mine].sort());
+    // 판정만 끝난 요청(Start 전)은 잡히지 않는다
+    expect((await store().claimCoreApplies(t + 10 * MIN, 20, MIN)).map((d) => d.requestId)).not.toContain(notStarted);
+  });
+
+  test('R-T41 ③ 두 연결이 같은 순간에 잡아도 한 요청은 한쪽만 잡는다(SKIP LOCKED)', async () => {
+    const t = T0 + 60 * MIN;
+    const other = createDatabase({ url: container!.url, applicationName: 'ops-core-apply-claim-2' });
+    try {
+      const [a, b] = await Promise.all([store().claimCoreApplies(t, 20, MIN), new DrizzleEventCancellationStore(other, clock).claimCoreApplies(t, 20, MIN)]);
+      const ids = [...a, ...b].map((d) => d.requestId);
+      expect(ids.sort()).toEqual([...mine].sort());
+      expect(new Set(ids).size).toBe(ids.length);
+    } finally {
+      await other.close();
+    }
+  });
+
+  test('R-T41 ③ 늦음 표시는 확정 + 600,000ms ≤ 지금(경계 포함)인 요청에 한 번만 쓴다: 경계 1ms 전 0건, 정각 1건, 다시 0건', async () => {
+    expect(await store().markCoreApplyOverdue(T0 + 10 * MIN - 1, 10 * MIN, 100)).toEqual([]);
+    const at = await store().markCoreApplyOverdue(T0 + 10 * MIN, 10 * MIN, 100);
+    expect(at.map((o) => o.requestId)).toEqual([mine[0]]);
+    expect((await coreRow(mine[0]!)).core_apply_overdue_at?.getTime()).toBe(T0 + 10 * MIN);
+    expect(await store().markCoreApplyOverdue(T0 + 10 * MIN, 10 * MIN, 100)).toEqual([]);
+    expect((await store().markCoreApplyOverdue(T0 + 10 * MIN + 2, 10 * MIN, 100)).map((o) => o.requestId).sort()).toEqual(mine.slice(1).sort());
+    expect(await store().markCoreApplyOverdue(T0 + 20 * MIN, 10 * MIN, 100)).toEqual([]);
+  });
+
+  test('R-T41 ③ 반영 표시는 한 번만 쓰이고(두 번째는 처음 시각 그대로) 표시된 요청은 다시 잡히지도 늦음으로 표시되지도 않는다', async () => {
+    const [a] = mine;
+    await store().markCoreApplied(a!, T0 + 70 * MIN);
+    await store().markCoreApplied(a!, T0 + 80 * MIN);
+    expect((await coreRow(a!)).core_applied_at?.getTime()).toBe(T0 + 70 * MIN);
+    expect((await store().claimCoreApplies(T0 + 200 * MIN, 20, MIN)).map((d) => d.requestId)).not.toContain(a);
+  });
+
+  test('R-T41 ③ core 대역을 꽂은 서비스: 확정 HTTP는 core가 내려가도 RUNNING이고 core_applied_at이 비며, core가 살아난 뒤 다시 하기 한 바퀴가 반영하고 칸을 쓴다', async () => {
+    const core = { down: true, calls: [] as string[] };
+    const withCore = await createService({
+      name: 'ops-svc-event-cancellations-core',
+      module: AppModule.register({
+        database: db,
+        nowMs: NOW,
+        executor: commandExecutor,
+        eventCancellations: {
+          refunds,
+          reauth: fakeReauth(),
+          reader,
+          // 판매 멈춤은 받는 쪽이 멱등이라 이 묶음에서는 늘 받는 대역이다(판매 멈춤 자체는 위 R-T37 ④가 본다)
+          stopper: { stop: async () => undefined },
+          owners: ownerLookup,
+          holds: intHolds,
+          core: {
+            apply: async (q) => {
+              core.calls.push(`${q.requestId}:${q.kind}`);
+              if (core.down) throw new Error('connect ECONNREFUSED core-svc');
+            },
+          },
+        },
+      }),
+      env: { PEAKET_ENV: 'ci' },
+      clock,
+      logDestination: quiet(),
+      adminAuthz: identity,
+    });
+    try {
+      const requestId = await pendingApproval(randomUUID());
+      const r = await withCore.http.inject({ method: 'POST', url: `/v1/ops/event-cancellations/${requestId}/approvals`, headers: { ...reauthed(identity.ops('operator')), 'content-type': 'application/json' }, payload: '{}' });
+      expect(json(r).status).toBe('RUNNING');
+      // 장애 주입이 끼어들었다: core를 한 번 불렀고 실패했다
+      expect(core.calls).toEqual([`${requestId}:CANCEL`]);
+      expect((await coreRow(requestId)).core_applied_at).toBeNull();
+      core.down = false;
+      const result = await withCore.app.get(EventCancellations).retryCoreApply(clock.now() + MIN);
+      expect(result.applied).toBeGreaterThanOrEqual(1);
+      expect(core.calls.filter((c) => c === `${requestId}:CANCEL`)).toHaveLength(2);
+      expect((await coreRow(requestId)).core_applied_at).not.toBeNull();
+      await withCore.app.get(EventCancellations).retryCoreApply(clock.now() + 3 * MIN);
+      expect(core.calls.filter((c) => c === `${requestId}:CANCEL`)).toHaveLength(2);
+    } finally {
+      await withCore.close();
+    }
   });
 });
