@@ -17,6 +17,7 @@ import {
   LocalFolderImageStore,
   LocalFolderPublicFileStore,
   QueueSaleEligibilityCopy,
+  registerSearchPoolWaiting,
   SaleEligibilityMetrics,
   SearchCatalog,
   SearchReadModelTimers,
@@ -137,6 +138,8 @@ const service = await createService({
 });
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
+// 검색 전용 연결 묶음의 대기 수(게이지 search_pool_waiting, SR-T13 ①). 기본 core_app 묶음이 아니라 검색 묶음을 넘긴다
+registerSearchPoolWaiting(service.metrics.registry, searchDatabase.pool);
 // 검색 읽기 모델 주기 일(ADR-0271 결정 3·6): 1분 정리·1시간 관심도는 판매 승인과 같은 쓰기 역할(core_ops)로, 자동완성 사전은 검색 연결로 10초마다 갱신한다
 const searchSource = new DrizzleSearchReadModel(searchDatabase, imageOrigin);
 const searchTimers = new SearchReadModelTimers({
@@ -147,7 +150,7 @@ const searchTimers = new SearchReadModelTimers({
   logger: service.logger,
 }).register(service.metrics.registry);
 await service.listen();
-// 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기(그때까지 /ready 503, 결정 14) → 주기 일
+// 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기 → 주기 일. 둘 다 준비 확인에 넣지 않는다: 그동안 /ready는 200이고 검색은 표에 있는 줄로, 자동완성은 빈 후보·no-store로 답한다(결정 14)
 await searchTimers.start();
 
 // 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다.
