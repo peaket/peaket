@@ -164,7 +164,25 @@
 
 **고친 곳 확인**
 
-- 이 묶음은 아직 리뷰 반영 고침이 없다(RV-01·RV-02는 문서·소유자 확인, RV-03은 정리 목록). 확인할 고친 곳이 없다.
+2026-11-19 07:26~07:33 같은 검증 담당이 머리 `d3f8f605`(시험 `0aab575d` CC-04·CC-03 대조, `ec1cb8a5` CC-05, 구현 `d3f8f605` `ci.yml` `mode:` 식) 트리로 했다. 앞과 같은 임시 사본 방식(`node_modules` 디렉터리 연결, 끝나고 연결을 끊고 `worktree remove --force`)으로 결함을 하나씩 넣고 `node --test tools/ci/check-workflows.test.mjs`·`node tools/ci/check-workflows.mjs`를 돌린 뒤 되돌렸다. 바꾸지 않은 사본에서는 실패 0, 검사 끝 코드 0이었다.
+
+- 넣은 수 9, 잡힌 수 9, 놓친 수 0. 계획 '리뷰 반영 계획' 4의 S1~S6은 모두 CC-05가, 앞서 놓친 A3·A4는 CC-04가, A5는 CC-03 대조 단언이 잡았다. `check-workflows.mjs`는 아홉 모두에서 끝 코드 0이었다(값은 시험만 본다).
+
+| # | 넣은 결함 | 실패한 시험(첫 단언) |
+| --- | --- | --- |
+| S1 | `mode:`를 고치기 전 식으로 되돌리고 `spec-check.yml` `runs-on`에 `github.event_name != 'push' &&`를 넣음(push에서 표준 러너로 full) | CC-05('push refs/heads/develop … specs_full=true: mode') |
+| S2 | `github.event_name == 'push' &&` | CC-05(같은 단언) |
+| S3 | 괄호 없이 앞에 붙임 | CC-05(같은 단언) |
+| S4 | PR에서 `changes` 실패 대비를 뺌(`specs_full`만 봄) | CC-05('pull_request … changes=failure … : mode') |
+| S5 | `spec-check.yml` `list` 잡 `MODE`를 `inputs.mode \|\| 'pr'`로 | CC-05('일정 실행 list MODE') |
+| S6 | 잡 `spec-check` `if:` 앞에 `github.event_name == 'push' &&` | CC-05('pull_request … specs_full=true: 잡이 불리지 않는다') |
+| A3 | `ci-kind.yml` 첫 잡에 `concurrency:`(`cancel-in-progress: true`) | CC-04('ci-kind.yml의 잡 kind에 concurrency가 있다') |
+| A4 | `ci.yml` 잡 `kind`에 따옴표 키 `"concurrency":` | CC-04('ci.yml의 잡 kind에 concurrency가 있다') |
+| A5 | 규칙 4가 맨 위 `concurrency` 블록 줄을 건너뜀 | CC-03 대조 단언 |
+
+- 대조: 바꾸지 않은 검사에 `ci.yml` 18줄을 `${{ github.head_ref == 'x' }}`로 바꾸면 끝 코드 1, A5를 넣으면 0이었다. 결함이 실제로 규칙 4를 끈 것을 확인했다.
+- 셈에서 뺀 것 하나: 규칙 4가 `cancel-in-progress:`로 시작하는 줄만 건너뛰게 한 꼴은 위 대조에서도 끝 코드가 1이라(검사의 다른 길이 여전히 잡음) 규칙 4를 끄지 못한 결함이다. 잡힘·놓침 어느 쪽으로도 세지 않았다.
+- 통과 기준(가지 푸시는 취소하지 않고 큰 러너 전수 검사를 띄우지 않음, PR은 취소하고 조건이 맞으면 전수 검사)에 걸린 놓침이 없어 '시험 더함 필요'는 없다. CC-05의 기대값(push는 `pr`·`ubuntu-24.04`, PR은 `changes` 실패나 `specs_full` 참일 때 `full`·`peaket-runner2`, 일정 실행은 `full`·큰 러너)은 정본 `docs/devops.md` §3.4 소유자 결정 (다) 문장과 같다.
 
 ## 담당 표
 
@@ -174,4 +192,4 @@
 | impl | w11ci-impl-4e90 | claude-opus-5-5 | 2026-11-19T06:15+09:00 | 2026-11-19T06:17+09:00 |
 | test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T07:19+09:00 |
 | review | w11ci-review-2c58 | claude-opus-5-5 | 2026-11-19T06:22+09:00 | 2026-11-19T06:30+09:00 |
-| verify | w11ci-verify-9f13 | claude-opus-5-5 | 2026-11-19T06:27+09:00 | 2026-11-19T06:46+09:00 |
+| verify | w11ci-verify-9f13 | claude-opus-5-5 | 2026-11-19T06:27+09:00 | 2026-11-19T07:34+09:00 |
