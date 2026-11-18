@@ -49,6 +49,7 @@ import type {
   ProblemResponse,
   RecipientLookupResult,
   RefundAccount,
+  ServiceUnavailableResponse,
   Ticket,
   TicketAddonPage,
   TooManyRequestsResponse,
@@ -1279,10 +1280,15 @@ export type createTicketCancellationResponse409 = {
   status: 409
 }
 
+export type createTicketCancellationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createTicketCancellationResponseSuccess = (createTicketCancellationResponse202) & {
   headers: Headers;
 };
-export type createTicketCancellationResponseError = (createTicketCancellationResponse403 | createTicketCancellationResponse404 | createTicketCancellationResponse409) & {
+export type createTicketCancellationResponseError = (createTicketCancellationResponse403 | createTicketCancellationResponse404 | createTicketCancellationResponse409 | createTicketCancellationResponse503) & {
   headers: Headers;
 };
 
@@ -1330,7 +1336,7 @@ return orvalFetch<createTicketCancellationResponseSuccess>(getCreateTicketCancel
 
 export const getCreateTicketCancellationMutationKey = () => ['createTicketCancellation'] as const;
 
-export const getCreateTicketCancellationMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateTicketCancellationMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketCancellation>>, TError,CreateTicketCancellationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createTicketCancellation>>, TError,CreateTicketCancellationMutationVariables, TContext> => {
 
@@ -1359,13 +1365,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateTicketCancellationMutationResult = NonNullable<Awaited<ReturnType<typeof createTicketCancellation>>>
     export type CreateTicketCancellationMutationBody = BodyType<CreateTicketCancellationBody> | undefined
-    export type CreateTicketCancellationMutationError = ErrorType<ProblemResponse>
+    export type CreateTicketCancellationMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type CreateTicketCancellationMutationVariables = {ticketId: string;data?: BodyType<CreateTicketCancellationBody>}
 
     /**
  * @summary 예매 취소(티켓 단위, 공연 시작 전까지, 제공자 재인증 후). 키 즉시 폐기, 좌석 취소표, 환급은 PG 부분 취소
  */
-export const useCreateTicketCancellation = <TError = ErrorType<ProblemResponse>,
+export const useCreateTicketCancellation = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketCancellation>>, TError,CreateTicketCancellationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createTicketCancellation>>,

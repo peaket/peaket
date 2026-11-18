@@ -31,7 +31,7 @@ import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, internalGrpcTokenFromEnv, kafkaTelemetrySend, type KafkaTelemetrySender, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, internalGrpcTokenFromEnv, kafkaTelemetrySend, type KafkaTelemetrySender, RedisReauthJtiStore, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import {
@@ -86,7 +86,7 @@ import {
   type RefundModuleDeps,
   WeekendBusinessCalendar,
 } from './modules/refund/index.js';
-import { requireOpsInternalToken } from './refund-wiring.js';
+import { fanReauthGateFromEnv, requireOpsInternalToken } from './refund-wiring.js';
 import { startPurchaseGrpcServer } from './grpc-server.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
@@ -318,8 +318,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
     ...(coreSaleConfigs ? { overlay: coreSaleConfigs } : {}),
   });
   // 예매 취소 견적·취소(GAT-070·GAT-080). purchase DB가 있을 때만 연다.
-  // 재인증 토큰 확인 계약이 아직 없어 ReauthGate 기본값(늘 false)이 취소를 403으로 닫는다(known gap).
+  // 팬 취소의 재인증 토큰은 팬 공개키 묶음(PEAKET_IDENTITY_FAN_JWKS_URL)과 좌석 Redis의 jti 한 번 쓰기로 본다(docs/features/transfer-refund.md §3.1
+  // '팬 취소의 재인증 확인'). 주소가 없으면 local·ci는 닫힌 대역(늘 403)과 시작 경고, 그 밖 환경은 시작하지 않는다(fanReauthGateFromEnv가 던짐).
   let refund: RefundModuleDeps | undefined;
+  const fanReauthWarnings: string[] = [];
   let refundTickets: GrpcTicketCancellations | undefined;
   let refundPayments: GrpcPaymentCancellations | undefined;
   const ticketGrpcAddr = env.PEAKET_TICKET_GRPC_ADDR;
@@ -330,6 +332,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     // ticket-svc 운영자 취소는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
     refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) });
     refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
+    const fanReauth = fanReauthGateFromEnv({ env, jti: new RedisReauthJtiStore(redis), clock: systemClock, warn: (m) => void fanReauthWarnings.push(m) });
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
       writes: new DrizzleCancellationWrites(database, new DrizzleOrderStore({ clock: systemClock })),
@@ -339,6 +342,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       calendar,
       // 회차 취소가 확정된 회차의 팬 취소·견적은 키 폐기 전에 409 event-cancelled(BAT-420 리뷰 D5)
       eventCancellations: new DrizzleEventCancellationLookup(database),
+      ...(fanReauth ? { reauth: fanReauth } : {}),
     };
   }
   if (database && (!ticketGrpcAddr || !paymentGrpcAddr) && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {
@@ -587,6 +591,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   });
   log = service.logger;
   for (const m of opsTokenWarnings) service.logger.warn({ event: 'purchase-ops-internal-token-missing' }, m);
+  for (const m of fanReauthWarnings) service.logger.warn({ dep: 'identity-jwks', event: 'purchase-fan-reauth-jwks-missing' }, m);
   // DB 없이 뜬 것을 시작 로그에 남긴다(운영에서 비밀이 빠진 것을 결제 접수 연결(PRF-160) 전에도 알아채게, PRF-140 ① 리뷰)
   if (!database) service.logger.warn({ dep: 'postgres' }, 'PEAKET_DATABASE_URL이 없어 purchase DB 없이 떴다(판매 확정 저장소 SeatSales와 주문 생성 POST /v1/orders를 내놓지 않는다)');
   signals.register(service.metrics.registry);

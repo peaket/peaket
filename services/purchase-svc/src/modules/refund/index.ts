@@ -39,6 +39,7 @@ export type {
   OperatorTicketCancellations,
   OperatorTicketOutcome,
   OperatorTicketResult,
+  FanReauthAct,
   PaymentCancellations,
   ReauthGate,
   RefundDeps,
@@ -76,6 +77,9 @@ export { RedisSeatReturnNotices } from './adapters/redis-seat-returns.js';
 export { CancelTicket, zeroDeductionFor, type CancelTicketInput } from './application/cancel-ticket.js';
 export { RefundModule, type RefundModuleDeps } from './refund.module.js';
 export { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
+// BAT-415-reauth(팬 취소의 재인증 확인, docs/features/transfer-refund.md §3.1)
+export { ReauthUnavailable } from './domain/ports.js';
+export { JwksFanReauthGate } from './adapters/jwks-fan-reauth-gate.js';
 export { eventStartsAtOf, QuoteCancellation, type CancellationQuoteView, type QuoteCancellationInput, type QuoteCancellationResult } from './application/quote-cancellation.js';
 export { RefundAfterEntry, type RefundAfterEntryDeps, refundAfterEntryTask } from './application/refund-after-entry.js';
 export { REFUND_RETRY_TICK_MS, RefundRetryLoop, type RefundRetryLoopDeps, type RefundRetryTick } from './application/refund-retry-loop.js';
