@@ -69,3 +69,8 @@
 - W9-fix1(R-676) 계획 범위 밖: 결제사 몫 하나가 자동 정지하면 요청 전체가 PAUSED가 되어(`statusAfterRun`, 시험 `event-refund-gat130` R-T9) 다른 결제사 몫도 멈춘다. 정본 transfer-refund §5 '다른 결제사 몫은 계속한다'·data `event_cancellation_request.status`와 어긋난다(멈추는 쪽이라 돈은 안전, 상태 규칙을 바꾸면 시험·ops 화면이 함께 바뀜)
 - W9-fix1(R-676) 검증 때 본 것: 통합 전체를 한 번에 돌리면 `identity-grpc.int`의 previousPid 단언이 가끔 실패한다(그 파일만 돌리면 46개 모두 통과, 몰릴 때 흔들리는 시험)
 - W9-fix3(R-675) 리뷰 N3 낮음: pg-simulator의 `authorization` 비교가 옛 꼴(길이 먼저 비교)이다. local·CI용이라 운영 위험은 없다. 원하면 `constantTimeEqual`로(services/pg-simulator/src/server.ts:59)
+- BAT-415-reauth(R-688) 리뷰 RV-03 낮음: 팬 공개키 묶음 주소(`PEAKET_IDENTITY_FAN_JWKS_URL`)의 쿼리를 버리고, 주소가 틀렸을 때 오류 글에 설정 이름이 없다(services/purchase-svc/src/modules/refund/adapters/jwks-fan-reauth-gate.ts)
+- BAT-415-reauth(R-688) 리뷰 RV-04 낮음: 공개키 묶음 읽기(상한 1,000ms)가 주문 쓰기 칸막이 안에서 돈다. 시작할 때 미리 읽기와 오래된 캐시로 답하기를 검토한다
+- BAT-415-reauth(R-688) 리뷰 RN-02 낮음: 받는 수명 상한(`jwks-fan-reauth-gate.ts` `MAX_REMAINING_LIFETIME_MS`)과 공용 기록 상한(`packages/platform/src/reauth-jti.ts` `REAUTH_JTI_TTL_MS`)이 같은 330,000을 따로 적는다. 또 core·ops·payment의 재인증 확인기는 수명 거절이 없고 `jti` 저장소가 선택 인자라 넘기지 않으면 한 번 쓰기를 건너뛴다(계획 담당 메모)
+- BAT-415-reauth(R-688) 검증 V3·살아남은 것: 빈 토큰 먼저 거절 줄은 플랫폼 확인기와 동치(시험 불필요). 503 목록의 `ERR_JWK_INVALID`·`ERR_JWKS_INVALID`는 jose 6.2.14 확인 단계에서 나는 입력이 없어 방어로 남겼다(뺄지 정한다)
+- BAT-415-reauth(R-688) 마지막 검증 살아남은 2(관측, 통과 기준 밖): 거절 로그의 사건 이름 `event`를 바꿔도, start.ts가 감싼 로거의 `info`를 `warn`으로 이어도 시험이 통과한다. start.ts 글 시험에 감싼 두 줄을 더하거나 함수가 서비스 로거를 바로 받게 한다
