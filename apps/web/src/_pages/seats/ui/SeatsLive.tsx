@@ -502,7 +502,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const showSummary = phase === 'ready' && booking && (auto === null || autoView === 'done');
   const bottomBar =
     showSummary && booking ? (
-      <div ref={summaryBarRef} className="sticky bottom-0 z-10">
+      <div ref={summaryBarRef} className="sticky bottom-0 z-10 short-screen:static">
         <LiveSummary
           picks={booking.picks}
           prices={prices}

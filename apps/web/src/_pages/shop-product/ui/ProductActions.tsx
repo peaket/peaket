@@ -35,7 +35,7 @@ export function ProductActions({ placement, blockedReasonId, checkoutHref = '/sh
     </>
   );
   return placement === 'bar' ? (
-    <div className="bottom-bar sticky bottom-0 z-10 md:px-6 lg:hidden">
+    <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 lg:hidden">
       {buttons}
       {toastNode}
     </div>

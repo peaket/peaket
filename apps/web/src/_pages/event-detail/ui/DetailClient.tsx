@@ -33,7 +33,7 @@ export function SectionTabs({ items, initial, stuck = false }: { items: readonly
   return (
     <nav
       ref={navRef}
-      className="tabs tabs-sm tabs-scroll sticky top-0 z-[5] px-2 scroll-px-2 lg:px-0 lg:scroll-px-0 lg:[&_.tab]:min-h-11 lg:[&_.tab]:px-3 lg:[&_.tab]:text-[15px] lg:[&_.tab]:leading-5"
+      className="tabs tabs-sm tabs-scroll sticky top-0 z-[5] short-screen:static px-2 scroll-px-2 lg:px-0 lg:scroll-px-0 lg:[&_.tab]:min-h-11 lg:[&_.tab]:px-3 lg:[&_.tab]:text-[15px] lg:[&_.tab]:leading-5"
       aria-label="섹션 바로가기"
       style={{ background: 'var(--surface)', boxShadow: stuck ? 'var(--shadow-md)' : undefined }}
     >
