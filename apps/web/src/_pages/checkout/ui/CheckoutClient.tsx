@@ -173,7 +173,7 @@ export function PayAction({ layout, mode, amountText, holdText, holdAria, return
     );
   }
   return (
-    <div className="bottom-bar sticky bottom-0 z-10 md:px-6 md:pt-3.5 md:pb-[22px] lg:hidden">
+    <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3.5 md:pb-[22px] lg:hidden">
       <div className="flex w-full flex-col gap-2 md:mx-auto md:max-w-[600px] md:flex-row md:items-center md:gap-4">
         <div className="col gap-2 md:grow md:gap-1">
           <p className="t-xs muted">{PAY_NOTE}</p>

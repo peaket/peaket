@@ -414,7 +414,7 @@ export function BookingBar({ data }: { data: BookingData }) {
     );
   }
   return (
-    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 md:px-6 lg:hidden" data-verify-scope>
+    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 lg:hidden" data-verify-scope>
       <div className="w-full">
         <DomesticPhoneNotice text={data.domesticPhoneNotice} lang={data.locale} className="px-1 pb-1 text-center md:text-left" />
         {body}

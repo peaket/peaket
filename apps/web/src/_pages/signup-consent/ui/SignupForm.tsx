@@ -377,7 +377,7 @@ export function SignupForm({ next }: { next: string }) {
       >
         <p id="u14-desc">가입을 취소하면 소셜 로그인으로 받은 정보를 지우고 로그아웃합니다. 되돌릴 수 없습니다.</p>
       </WebShellModal>
-      <div className="bottom-bar sticky bottom-0 z-10 md:px-6 md:pt-3 md:pb-5 lg:hidden">
+      <div className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 md:pt-3 md:pb-5 lg:hidden">
         <button className="btn btn-primary btn-lg btn-block md:mx-auto md:max-w-[560px]" type="submit" form="signup-form" disabled={busy} aria-busy={busy || undefined}>
           가입 완료
         </button>
