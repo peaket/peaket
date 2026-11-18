@@ -567,6 +567,42 @@ describe('팬 취소 재인증: 처음 공개키 읽기가 답하지 않음 [BAT
   });
 });
 
+describe('팬 취소 재인증: 실제 확인기의 뜻밖 오류 [BAT-415-reauth]', () => {
+  // 고친 곳 검증 E7: 실제 어댑터가 뜻밖 오류를 503으로 덮지 않는지 HTTP 경계에서 본다. 시계(jti 저장소가 아닌 주입 지점)가 TypeError를 낸다
+  let h: Harness;
+  let redis: Redis;
+  const results: unknown[] = [];
+  beforeAll(async () => {
+    redis = fakeSeatRedis();
+    const bug = (): never => {
+      throw new TypeError("Cannot read properties of undefined (reading 'now')");
+    };
+    const gate = new JwksFanReauthGate({
+      jwksUrl: JWKS_URL,
+      issuer: ISS,
+      jti: new RedisReauthJtiStore(redis),
+      clock: { now: bug, monotonicMs: bug },
+      fetch: fakeJwksFetch([fan]).fetch,
+      onResult: (r) => void results.push(r),
+    });
+    h = await boot(gate);
+  });
+  afterAll(async () => {
+    await h?.svc.close();
+  });
+
+  test('R-T39 ⑦ 실제 확인기가 뜻밖의 오류를 내면 500이고 Retry-After가 없으며 아무것도 부르지 않는다', async () => {
+    const r = await h.send({ token: signReauth(fan, good()) });
+    expect(r.statusCode).toBe(500);
+    expect(r.headers['retry-after'], 'Retry-After 없음').toBeUndefined();
+    expect(h.ticketCalls).toHaveLength(0);
+    expect(h.paymentCalls).toHaveLength(0);
+    expect(h.created).toHaveLength(0);
+    expect(redis.commands, 'jti를 잡지 않는다').toHaveLength(0);
+    expect(results, '거절·확인 못 함 기록 0번').toHaveLength(0);
+  });
+});
+
 describe('팬 취소 재인증: 컨트롤러가 확인기에 묻는 것과 답을 쓰는 것 [BAT-415-reauth]', () => {
   let h: Harness;
   const asked: { token: string | undefined; q: unknown }[] = [];
