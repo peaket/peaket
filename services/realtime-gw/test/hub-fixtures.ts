@@ -21,26 +21,28 @@ export const SPEC = {
   sameTokenMax: 2,
   /** 내릴 때 구독 해제 응답을 기다리는 상한(ms, ADR-0297 결정 5, [가정]) */
   shutdownUnsubscribeWaitMs: 1_000,
-  /** 전파 Degraded 자동 전환(seat-hold §7 '자동 전환의 첫 구현', §12 S-T14, ADR-0298 결정 1~5, [가정] S-T12·K4) */
+  /** 전파 Degraded 자동 전환(seat-hold §7 '자동 전환의 첫 구현', §12 S-T14, ADR-0298 결정 1~5(2026-11-19 리뷰 반영으로 고침), [가정] S-T12·K4) */
   degraded: {
-    /** Degraded 연결의 묶음 간격(ms) */
+    /** 1초 간격 연결의 묶음 간격이자 1초 차례 격자(ms) */
     intervalMs: 1_000,
     /** 파드 판정 창(ms) */
     windowMs: 10_000,
-    /** 넘친 대기가 이것을 넘으면 '넘음' 쪽(ms) */
-    enterExcessMs: 60,
-    /** 넘친 대기가 이것을 넘으면 '괜찮음'을 깨는 쪽(ms) */
-    exitExcessMs: 30,
+    /** 박자 늦음이 이것을 넘으면 '넘음' 쪽(ms) */
+    enterLagMs: 50,
+    /** 박자 늦음이 이것을 넘으면 '괜찮음'을 깨는 쪽(ms) */
+    exitLagMs: 25,
     /** Degraded로 바꾸는 이어진 넘음 창 수(3분) */
     enterWindows: 18,
     /** 평시로 되돌리는 이어진 괜찮음 창 수(5분) */
     exitWindows: 30,
-    /** 보내기 버퍼가 이 값 이상이면 그 연결만 1초(바이트, 256KiB) */
+    /** 100ms 연결의 보내기 버퍼가 이 값 이상이면 그 연결만 1초(바이트, 256KiB) */
     slowEnterBytes: 256 * 1024,
-    /** 1초가 된 연결은 이 값 이하 박자가 이어지면 되돌림(바이트, 64KiB) */
+    /** 1초가 된 연결은 차례 직전 버퍼가 이 값 이하인 차례가 이어지면 되돌림(바이트, 64KiB) */
     slowExitBytes: 64 * 1024,
-    /** 되돌림에 필요한 이어짐(ms) */
-    slowExitMs: 30_000,
+    /** 되돌림에 필요한 이어진 차례 수 */
+    slowExitTurns: 30,
+    /** 쌓인 묶음 프레임이 이 크기에 닿으면 그 자리에서 보낸다(바이트, 64KiB) */
+    maxPendingFrameBytes: 64 * 1024,
   },
 } as const;
 
@@ -52,8 +54,11 @@ export class FakeConn implements StreamConnection {
   readonly sent: Uint8Array[] = [];
   closes: Array<{ code: number; reason: string }> = [];
   bufferedAmount = 0;
+  /** 보낸 뒤 부르는 갈고리(시험이 가짜 시계를 밀어 박자 처리 시간을 만든다) */
+  onSend: ((frame: Uint8Array) => void) | undefined;
   send(frame: Uint8Array): void {
     this.sent.push(frame);
+    this.onSend?.(frame);
   }
   close(code: number, reason: string): void {
     this.closes.push({ code, reason });
@@ -120,7 +125,7 @@ export interface Harness {
   sub: FakeSubscriber;
   metrics: MetricCall[];
   /** onDegradedChange로 받은 파드 바뀜(ADR-0298 결정 7) */
-  degradedChanges: Array<{ degraded: boolean; batches: number; over60: number; over30: number }>;
+  degradedChanges: Array<{ degraded: boolean; batches: number; overEnter: number; overExit: number; ticks: number }>;
   sections: Map<string, number>;
   /** 열고 첫 프레임까지 받은 연결. tokenId를 주지 않으면 연결마다 다른 토큰 jti다 */
   open(o?: { eventId?: string; accountId?: string; expiresAtMs?: number; tokenId?: string }): FakeConn;
@@ -138,7 +143,11 @@ export function harness(o: { sections?: Record<string, number>; monotonic?: numb
     subscriber: sub,
     sectionCount: (eventId) => sections.get(eventId),
     onMetric: (name, labels, value) => metrics.push({ name, labels, value }),
-    onDegradedChange: (e) => degradedChanges.push({ degraded: e.degraded, batches: e.batches, over60: e.over60, over30: e.over30 }),
+    // 리뷰 반영 뒤 필드(overEnter·overExit·ticks, 계획 '리뷰 반영 계획' 2). 형은 구현이 바꾼다
+    onDegradedChange: (e) => {
+      const x = e as unknown as { degraded: boolean; batches: number; overEnter: number; overExit: number; ticks: number };
+      degradedChanges.push({ degraded: x.degraded, batches: x.batches, overEnter: x.overEnter, overExit: x.overExit, ticks: x.ticks });
+    },
   });
   return {
     hub,
