@@ -1,5 +1,6 @@
 // 받는 층: 팬 탈퇴(openapi DELETE /v1/identity/account, docs/features/identity.md §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030, FR-017, POL-033).
 // gw-fan이 넘긴 신원(계정·세션)과 재인증 토큰 머리(X-Reauth-Token, docs/api/guidelines.md 재인증 토큰)를 쓴다. 응답은 캐시하지 않는다.
+// 끝냈으면 204, 탈퇴 참여자를 기다려 미뤘으면 본문 없는 202다(BUILD_ORDER PRF-169, ADR-0284).
 import { Controller, Delete, Get, Headers, HttpCode, Param, Res } from '@nestjs/common';
 import { ContractBody, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
@@ -35,12 +36,14 @@ export class AccountController {
   ): Promise<void> {
     void reply.header('cache-control', 'no-store');
     try {
-      await this.withdraw.run({
+      const r = await this.withdraw.run({
         accountId: me.accountId,
         sessionId: me.sessionId,
         reauthToken: reauthToken ?? '',
         body: { confirmCancelUnusedTickets: body?.confirmCancelUnusedTickets, acknowledgeFraudHold: body?.acknowledgeFraudHold },
       });
+      // 탈퇴 참여자가 끝나지 않았거나 답하지 못했으면 본문 없는 202(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', ADR-0284). 끝냈으면 204 그대로
+      if (r.outcome === 'DEFERRED') void reply.code(202);
     } catch (e) {
       // 대조값 보관 행이 있으면 409 '탈퇴 전 확인'과 fraudHold(상태와 끝, identity §8 '대조값 보관의 첫 구현')
       if (e instanceof AccountError && e.code === 'CONFIRMATION_REQUIRED' && e.fraudHold) {

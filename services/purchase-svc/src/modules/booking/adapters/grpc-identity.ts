@@ -103,9 +103,12 @@ export interface GrpcIdentityOptions {
   breaker?: CircuitBreaker;
 }
 
-/** 재확인 응답 → 답. verified가 참이 아니면 DENIED(pid 칸은 보지 않는다) */
+/**
+ * 재확인 응답 → 답. verified가 참이 아니면 DENIED(pid 칸은 보지 않는다). 그때 withdrawal_pending이 참이면 탈퇴 미룸 표시를 싣는다(409 withdrawal-pending, ADR-0284).
+ * verified가 참이면 withdrawal_pending을 보지 않는다(identity는 둘을 함께 참으로 주지 않는다)
+ */
 function answerOf(v: Record<string, unknown>): RecheckAnswer {
-  if (v.verified !== true) return { status: 'DENIED' };
+  if (v.verified !== true) return v.withdrawal_pending === true ? { status: 'DENIED', withdrawalPending: true } : { status: 'DENIED' };
   const pid = typeof v.pid === 'string' ? v.pid : '';
   const prev = typeof v.previous_pid === 'string' ? v.previous_pid : '';
   return { status: 'VERIFIED', pid, ...(prev !== '' ? { previousPid: prev } : {}) };

@@ -46,6 +46,9 @@ import {
   RedisDeviceAuthorizations,
   RedisDeviceApprovalLimits,
   RedisScannerDpopReplayStore,
+  RetryPendingWithdrawals,
+  WITHDRAWAL_RETRY_INTERVAL_MS,
+  withdrawalParticipantsFromEnv,
 } from './modules/session/index.js';
 import {
   assertKeyVersions,
@@ -150,6 +153,9 @@ const deviceApprovalLimits = cache ? new RedisDeviceApprovalLimits(cache) : unde
 const scannerDpopReplay = cache ? new RedisScannerDpopReplayStore(cache) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile, (dependency) => lateBreaker(dependency, MERGE_CHECK_BREAKER));
+// 탈퇴 참여자(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', ADR-0284, PRF-169): purchase-svc WithdrawalParticipantService. 병합 확인과 같은 purchase-svc 차단기다.
+// 주소가 없으면 local·ci만 '늘 DONE' 대역, 그 밖은 '늘 답하지 않음'(탈퇴가 늘 202)
+const withdrawal = withdrawalParticipantsFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile, (dependency) => lateBreaker(dependency, MERGE_CHECK_BREAKER));
 // 로그인 판정(identity §7, BOT-050): trust-svc 주소가 없으면 세션의 판정을 UNKNOWN으로 남긴다(양도·계좌 입력에서 안전 쪽, 로그인은 막지 않는다)
 const trustGrpc = process.env.PEAKET_TRUST_GRPC_URL;
 const loginRisk = trustGrpc ? new GrpcTrustLoginRisk(trustGrpc, loadPlatformConfig(process.env).grpcLbProfile, lateBreaker('trust-svc', TRUST_LOGIN_BREAKER)) : undefined;
@@ -157,7 +163,7 @@ const loginRisk = trustGrpc ? new GrpcTrustLoginRisk(trustGrpc, loadPlatformConf
 const adminAuthzHolder: { port?: AdminAuthzPort } = {};
 const adminAuthz: AdminAuthzPort = { getAdminAuthz: (q, o) => (adminAuthzHolder.port ? adminAuthzHolder.port.getAdminAuthz(q, o) : Promise.reject(new Error('관리 역할 판정이 아직 준비되지 않았다'))) };
 // 관리 경로(페퍼가 있을 때만 싣는다)가 없으면 판정 포트도 넘기지 않는다: 시작 확인이 관리 역할 처리기 없음을 그대로 본다(새 맥락 리뷰 2026-11-05)
-const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
+const service = await createService({ name: SERVICE, ...(adminPepper ? { adminAuthz } : {}), module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, withdrawalParticipants: withdrawal.participants, withdrawalSignals: signals, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));
@@ -210,6 +216,29 @@ if (adminPepper) {
     await inflight;
   };
 }
+// 탈퇴 미룸 다시 하기 고리 withdrawal-pending-retry: API 파드마다 60초 [가정]마다(앞 바퀴가 도는 중이면 건너뛴다, identity §8 '다시 하기 고리', ADR-0284 결정 4).
+// 잡기는 FOR UPDATE SKIP LOCKED와 다음 확인 시각 미루기라 파드가 여럿이어도 한 계정은 한 번만 잡힌다
+const retryWithdrawals = service.app.get(RetryPendingWithdrawals);
+const withdrawalAbort = new AbortController();
+let withdrawalInflight: Promise<unknown> | null = null;
+const withdrawalTimer = setInterval(() => {
+  if (withdrawalInflight) return;
+  withdrawalInflight = retryWithdrawals
+    .run(withdrawalAbort.signal)
+    .then((r) => {
+      if (r.failed > 0) service.logger.warn({ ...r }, '미룬 탈퇴 일부를 끝내지 못했다(다음 확인 시각에 다시 한다)');
+    })
+    .catch((err: unknown) => service.logger.warn({ err }, '미룬 탈퇴를 잡지 못했다(다음 고리에서 다시 한다)'))
+    .finally(() => {
+      withdrawalInflight = null;
+    });
+}, WITHDRAWAL_RETRY_INTERVAL_MS);
+withdrawalTimer.unref();
+const stopWithdrawalRetry = async (): Promise<void> => {
+  clearInterval(withdrawalTimer);
+  withdrawalAbort.abort();
+  await withdrawalInflight;
+};
 if (adminPepper && !adminMailer) service.logger.warn('관리 계정 메일 포트가 없어 계정 주인 알림(해제 링크 등)을 보내지 않는다. 알림 행은 쌓인다(identity §6 BOT-121)');
 // 기록이 쓰는 연계정보 키 판을 설정이 모두 갖지 않으면 시작하지 않는다(같은 사람이 계정을 하나 더 만들지 못하게, identity §5 '키 판·만 14세…')
 if (process.env[VERIFICATION_PROVIDER_ENV]) await assertKeyVersions(service.app.get<DrizzleVerificationStore>(VERIFICATION_STORE), verification.hashers);
@@ -223,6 +252,7 @@ invRefs.ring.onFingerprint((label, version, fingerprint) => {
 for (const e of earlyInvRefErrors) service.logger.warn(e, '조사용 가명 라벨 키를 받지 못했다(identity §9.1)');
 invRefs.ring.onRefreshError((label, reason, err) => service.logger.warn({ label, reason, err }, '조사용 가명 라벨 키를 다시 받지 못했다(identity §9.1)'));
 for (const w of merge.warnings) service.logger.warn(w);
+for (const w of withdrawal.warnings) service.logger.warn(w);
 if (!loginRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 세션의 로그인 판정이 늘 UNKNOWN이다');
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 
@@ -294,7 +324,7 @@ process.once('SIGTERM', () => {
   // gRPC 포트를 먼저 닫아 새 호출을 받지 않고, 처리 중인 호출이 끝나면 서비스와 연결을 닫는다
   void grpc
     .close()
-    .then(() => Promise.all([stopAdminNotices(), stopPasswordOnly()]))
+    .then(() => Promise.all([stopAdminNotices(), stopPasswordOnly(), stopWithdrawalRetry()]))
     // 응답 뒤에서 도는 로그인 판정이 끝나기를 기다린다(시간 상한 5초 [가정]. 넘으면 그 세션은 UNKNOWN으로 남는다)
     .then(() => service.app.get(CreateSession).drain())
     .then(() => service.close())
@@ -302,6 +332,7 @@ process.once('SIGTERM', () => {
       // 처리 중인 요청이 끝난 뒤 차단기를 끈다(끈 뒤에는 부르지 않는다)
       for (const b of breakers.values()) b.shutdown();
       loginRisk?.close();
+      for (const c of withdrawal.clients) c.close();
     })
     .catch((err: unknown) => service.logger.error({ err }, 'identity-svc 종료 실패'))
     .finally(() => {

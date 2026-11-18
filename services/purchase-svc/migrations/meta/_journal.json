@@ -197,6 +197,13 @@
       "when": 1794904374507,
       "tag": "0027_seat_hold_hold_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794992325062,
+      "tag": "0028_withdrawal_participant_account_idx",
+      "breakpoints": true
     }
   ]
 }

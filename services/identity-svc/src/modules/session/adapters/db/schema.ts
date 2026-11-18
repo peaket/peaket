@@ -28,6 +28,8 @@ export const account = pgTable(
     closureReason: text('closure_reason'),
     // 정리를 시작한 시각. 만 14세 미만 정리는 10분 [가정] 뒤 정비가 끝낸다(identity §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030)
     closureStartedAt: at('closure_started_at'),
+    // WITHDRAWAL 미룸의 다음 참여자 확인 시각. 미룰 때와 다시 하기 고리가 잡을 때 지금 + 60초 [가정](identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', ADR-0284)
+    closureNextCheckAt: at('closure_next_check_at'),
     locale: text('locale').notNull().default('ko'),
     createdAt: at('created_at').notNull(),
     deletedAt: at('deleted_at'),
@@ -36,8 +38,10 @@ export const account = pgTable(
     check('account_status_check', sql`${t.status} in ('ACTIVE', 'WITHDRAWAL_PENDING', 'MERGED', 'DELETED')`),
     check('account_locale_check', sql`${t.locale} in ('ko', 'en', 'ja', 'zh')`),
     check('account_merged_check', sql`(${t.status} = 'MERGED') = (${t.mergedIntoAccountId} is not null)`),
-    check('account_closure_reason_check', sql`${t.closureReason} is null or ${t.closureReason} in ('UNDER_14')`),
+    check('account_closure_reason_check', sql`${t.closureReason} is null or ${t.closureReason} in ('UNDER_14', 'WITHDRAWAL')`),
     uniqueIndex('account_nickname_key_key').on(t.nicknameKey).where(sql`${t.nicknameKey} is not null`),
+    // 다시 하기 고리의 잡기(미룬 계정만 담긴다, docs/data.md §5.1 '탈퇴 미룸 다시 하기 고리', ADR-0284)
+    index('account_withdrawal_retry_idx').on(t.closureNextCheckAt).where(sql`${t.status} = 'WITHDRAWAL_PENDING' AND ${t.closureReason} = 'WITHDRAWAL'`),
   ],
 );
 

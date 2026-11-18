@@ -94,6 +94,7 @@ export interface CreateOrderCommand {
  * - CONSENT_REQUIRED·CONSENT_VERSION_OUTDATED → 422
  * - BUYER_INVALID: 예매자 성명·번호가 없거나 1~100자가 아니거나 번호를 E.164로 맞출 수 없음 → 400(about:blank)
  * - IDENTITY_DENIED: 재확인 거부(토큰 판정 거부 포함) → 403 identity-verification-required
+ * - WITHDRAWAL_PENDING: 재확인 답이 verified 거짓·withdrawal_pending 참(탈퇴 미룸 계정) → 409 withdrawal-pending. 주문 행·멱등 기록을 만들지 않는다(payment §2 '탈퇴 미룸 409', PRF-169)
  * - IDENTITY_MISCONFIGURED: 재확인 PERMISSION_DENIED·INVALID_ARGUMENT·정본 목록 밖(unexpected) → 503 dependency-unavailable(SEV2)
  * - BOOKING_RESTRICTED: 예매 제한 ACTIVE이고 끝 시각 전 → 403 booking-restricted
  * - PRICE_MISSING: 가격이 없는 등급, 또는 등급 가격 합이 int4를 넘음(리뷰 고침 L5) → 500(설정 오류)
@@ -110,6 +111,7 @@ export type CreateOrderRejection =
   | 'CONSENT_VERSION_OUTDATED'
   | 'BUYER_INVALID'
   | 'IDENTITY_DENIED'
+  | 'WITHDRAWAL_PENDING'
   | 'IDENTITY_MISCONFIGURED'
   | 'BOOKING_RESTRICTED'
   | 'PRIORITY_GRANT_INVALID'
@@ -135,7 +137,7 @@ export type CreateOrderResult =
  * 5. buyerOf(body.buyer) → BUYER_INVALID
  * 6. identity.check({ 계정, 로그인 세션, deadlineMs = min(150, 남은 시간) }) → judgeRecheck(답, token):
  *    PASS_FALLBACK·DENY(fallbackReason 있음)이면 signals.identityFallback?.(까닭)과 log.identityFallback(계정·까닭·통과 여부·멱등 키) 한 번씩.
- *    DENY → IDENTITY_DENIED, MISCONFIGURED → log.configError 뒤 IDENTITY_MISCONFIGURED
+ *    DENY → IDENTITY_DENIED, WITHDRAWAL_PENDING → WITHDRAWAL_PENDING(409), MISCONFIGURED → log.configError 뒤 IDENTITY_MISCONFIGURED
  * 7. restrictions.read(계정): ACTIVE이고 untilMs가 없거나 clock.now() < untilMs → BOOKING_RESTRICTED(같은 처리의 홀드 해제는 HOT-070이 붙인다)
  * 8. priceSeats(홀드 좌석, tierPrices): PRICE_MISSING·AMOUNT_OUT_OF_RANGE → log.configError(tier_price_missing·amount_out_of_range) 뒤 PRICE_MISSING
  * 9. contactRefs.compute(phoneE164, min(50, 남은 시간)): undefined면 contactRef 없이 refMissing 참.
@@ -242,6 +244,8 @@ export class CreateOrder {
       d.log.identityFallback({ accountId: c.accountId, reason: fallbackReason, passed: verdict.kind === 'PASS_FALLBACK', idempotencyKey: c.idem.key });
     }
     if (verdict.kind === 'DENY') return rejected('IDENTITY_DENIED');
+    // 탈퇴를 미루는 중인 계정: 403 대신 409이고 주문 행·멱등 기록을 만들지 않는다. 홀드는 풀지 않는다(홀드 만료가 돌려준다, payment §2 '탈퇴 미룸 409')
+    if (verdict.kind === 'WITHDRAWAL_PENDING') return rejected('WITHDRAWAL_PENDING');
     if (verdict.kind === 'MISCONFIGURED') {
       d.log.configError({ what: 'identity_misconfigured', reason: verdict.reason });
       return rejected('IDENTITY_MISCONFIGURED');

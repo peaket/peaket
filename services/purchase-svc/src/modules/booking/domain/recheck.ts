@@ -30,8 +30,11 @@ export const FALLBACK_REASONS: readonly FallbackReason[] = ['circuit_open', 'dea
 export type RecheckAnswer =
   /** verified 참. pid·previousPid는 응답 그대로다(previous_pid가 빈 글이면 previousPid는 없다) */
   | { readonly status: 'VERIFIED'; readonly pid: string; readonly previousPid?: string }
-  /** verified 거짓(본인확인 전, 끝난 로그인 세션 등). 그대로 거부한다(ADR-0055) */
-  | { readonly status: 'DENIED' }
+  /**
+   * verified 거짓(본인확인 전, 끝난 로그인 세션 등). 그대로 거부한다(ADR-0055).
+   * withdrawalPending: 응답의 withdrawal_pending이 참(탈퇴 미룸 계정)이면 true. 그때는 403 대신 409 withdrawal-pending이다(payment §2 '탈퇴 미룸 409', ADR-0284 결정 5)
+   */
+  | { readonly status: 'DENIED'; readonly withdrawalPending?: boolean }
   /** 답이 없다 */
   | { readonly status: 'FAILED'; readonly reason: RecheckFailure };
 
@@ -50,12 +53,14 @@ export const TICKET_BUY_SCOPE = 'ticket:buy';
  * - PASS: 재확인 통과
  * - PASS_FALLBACK: 답이 없어 토큰 판정으로 통과(지표·보안 로그를 남긴다)
  * - DENY: 403 identity-verification-required. fallbackReason이 있으면 토큰 판정으로 거부한 것이다(그때도 지표·보안 로그를 남긴다)
+ * - WITHDRAWAL_PENDING: 409 withdrawal-pending. 재확인 답이 verified 거짓·withdrawal_pending 참이다(payment §2 '탈퇴 미룸 409', BUILD_ORDER PRF-169)
  * - MISCONFIGURED: PERMISSION_DENIED·INVALID_ARGUMENT·정본 목록 밖(unexpected). 대체 판정 없이 503(SEV2, 설정 오류)
  */
 export type RecheckVerdict =
   | { readonly kind: 'PASS' }
   | { readonly kind: 'PASS_FALLBACK'; readonly reason: FallbackReason }
   | { readonly kind: 'DENY'; readonly fallbackReason?: FallbackReason }
+  | { readonly kind: 'WITHDRAWAL_PENDING' }
   | { readonly kind: 'MISCONFIGURED'; readonly reason: MisconfiguredReason };
 
 const MISCONFIGURED_REASONS: ReadonlySet<RecheckFailure> = new Set<MisconfiguredReason>(['permission_denied', 'invalid_argument', 'unexpected']);
@@ -64,7 +69,7 @@ const MISCONFIGURED_REASONS: ReadonlySet<RecheckFailure> = new Set<Misconfigured
  * 재확인 결과와 토큰 값으로 판정한다(payment §2 '본인확인 재확인'):
  * - VERIFIED이고 token.pid가 있고 answer.pid 또는 answer.previousPid와 같다 → PASS
  * - VERIFIED인데 token.pid가 없거나 둘 다와 다르다 → DENY(fallbackReason 없음)
- * - DENIED → DENY(fallbackReason 없음)
+ * - DENIED이고 withdrawalPending 참 → WITHDRAWAL_PENDING, 아니면 DENY(fallbackReason 없음). VERIFIED면 withdrawal_pending을 보지 않는다
  * - FAILED이고 까닭이 permission_denied·invalid_argument·unexpected → MISCONFIGURED(같은 까닭)
  * - FAILED이고 그 밖의 까닭(FallbackReason) →token.scopes에 'ticket:buy'가 있고 token.pid가 빈 글이 아니면 PASS_FALLBACK(까닭), 아니면 DENY(fallbackReason = 까닭)
  * pid 비교는 글 그대로(대소문자 구분) 같은지 본다. 던지지 않는다
@@ -76,7 +81,7 @@ export function judgeRecheck(answer: RecheckAnswer, token: RecheckToken): Rechec
     case 'VERIFIED':
       return pid !== undefined && (answer.pid === pid || answer.previousPid === pid) ? { kind: 'PASS' } : { kind: 'DENY' };
     case 'DENIED':
-      return { kind: 'DENY' };
+      return answer.withdrawalPending === true ? { kind: 'WITHDRAWAL_PENDING' } : { kind: 'DENY' };
     case 'FAILED': {
       const reason = answer.reason;
       // 정본 목록 밖(모르는 값 포함)은 대체 판정으로 숨기지 않는다

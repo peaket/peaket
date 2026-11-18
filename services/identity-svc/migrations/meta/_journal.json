@@ -239,6 +239,13 @@
       "when": 1794810000000,
       "tag": "0033_scanner_session_account_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794992400000,
+      "tag": "0034_withdrawal_participant",
+      "breakpoints": true
     }
   ]
 }

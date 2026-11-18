@@ -146,6 +146,12 @@ import {
   RedisBookingRestrictions,
   bookingRestrictionHandlers,
   bookingRestrictionPackage,
+  DrizzleWithdrawalOrders,
+  ProcessAccountWithdrawal,
+  PromWithdrawalParticipantSignals,
+  type WithdrawalDepositCancellations,
+  withdrawalParticipantHandlers,
+  withdrawalParticipantPackage,
   SeatMapSagaConfigs,
   SeatMapSaleConfigs,
   simulatorPaymentCheckouts,
@@ -855,6 +861,29 @@ export async function start(o: StartOptions): Promise<StartedService> {
       handlers: priorityPurchaseHandlers({ grant: service.app.get(GrantPriorityPurchase), withdraw: service.app.get(WithdrawPriorityGrant) }),
     });
   }
+  // 탈퇴 참여자(identity-svc만 부른다, payment §4.1 '탈퇴 참여자의 첫 구현', ADR-0284, PRF-169). purchase DB가 있을 때만 연다.
+  // 입금 전 취소는 예매 취소와 같은 payment-svc 일반 취소 어댑터를 쓴다(주소 PEAKET_PAYMENT_GRPC_ADDR). 주소가 없으면(local·ci·demo만, 운영은 위에서 시작하지 않는다)
+  // 취소를 부르지 못해 늘 UNKNOWN이라 입금 대기 주문이 있는 탈퇴는 미뤄진다(DONE으로 접지 않는다)
+  let withdrawalPayments: GrpcPaymentCancellations | undefined;
+  if (database) {
+    withdrawalPayments = refundPayments ? undefined : paymentGrpcAddr ? new GrpcPaymentCancellations({ address: paymentGrpcAddr }) : undefined;
+    const deposits: WithdrawalDepositCancellations = refundPayments ?? withdrawalPayments ?? { cancel: async () => 'UNKNOWN' };
+    if (!paymentGrpcAddr) service.logger.warn({ dep: 'payment-svc' }, 'PEAKET_PAYMENT_GRPC_ADDR가 없어 탈퇴 참여자가 입금 대기 주문을 취소하지 못한다(그런 탈퇴는 늘 미뤄진다)');
+    const withdrawalParticipant = new ProcessAccountWithdrawal({
+      orders: new DrizzleWithdrawalOrders(database),
+      deposits,
+      clock: systemClock,
+      signals: new PromWithdrawalParticipantSignals().register(service.metrics.registry),
+      log: { warn: (obj, msg) => service.logger.warn(obj, msg) },
+    });
+    grpcServices.push({
+      definition: withdrawalParticipantPackage().WithdrawalParticipantService.service,
+      handlers: withdrawalParticipantHandlers(withdrawalParticipant, {
+        ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}),
+        onError: (method, err) => service.logger.error({ err: errorSummary(err), method }, 'WithdrawalParticipantService 처리 실패'),
+      }),
+    });
+  }
   grpcServices.push({
     definition: bookingRestrictionPackage().BookingRestrictionService.service,
     handlers: bookingRestrictionHandlers({ apply: (i) => bookingRestrictions.apply(i) }, (method, err) => service.logger.error({ err: errorSummary(err), method }, 'BookingRestrictionService 처리 실패')),
@@ -867,7 +896,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
       port,
       services: grpcServices,
-      internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.purchase.v1.EventRefundService', 'peaket.purchase.v1.FraudCancellationService'] },
+      internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.purchase.v1.EventRefundService', 'peaket.purchase.v1.FraudCancellationService', 'peaket.purchase.v1.WithdrawalParticipantService'] },
     });
     service.logger.info({ port: refundGrpc.port }, 'purchase-svc gRPC 포트를 열었다');
   } else if (grpcServices.length > 0) {
@@ -956,6 +985,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         try {
           refundTickets?.close();
           refundPayments?.close();
+          withdrawalPayments?.close();
         } catch (err) {
           service.logger.error({ err: errorSummary(err) }, '취소 gRPC 클라이언트 닫기 실패');
         }

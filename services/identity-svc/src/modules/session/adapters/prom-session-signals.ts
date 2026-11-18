@@ -1,8 +1,9 @@
 // 운영 확인 지표(docs/features/identity.md §10.1, docs/architecture.md §8.4). 이름표는 제공자·강도·까닭처럼 값이 몇 개뿐인 것만 단다(observability §8).
-import { Counter, type Registry } from '@prometheus-io/client';
+import { Counter, Gauge, type Registry } from '@prometheus-io/client';
 import type { SessionSignals } from '../domain/ports.js';
+import type { WithdrawalOutcome, WithdrawalPath, WithdrawalSignals } from '../domain/withdrawal.js';
 
-export class PromSessionSignals implements SessionSignals {
+export class PromSessionSignals implements SessionSignals, WithdrawalSignals {
   readonly #created = new Counter({ name: 'identity_session_created_total', help: '소셜 로그인으로 만든 세션 수', labelNames: ['provider', 'new_account'] as const, registers: [] });
   readonly #replayed = new Counter({ name: 'identity_create_session_replay_total', help: '같은 멱등 키로 다시 온 CreateSession(같은 세션에 토큰을 다시 줌)', labelNames: ['provider'] as const, registers: [] });
   readonly #deviceLimit = new Counter({ name: 'identity_session_device_limit_total', help: '기기 한도(5대)를 넘어 끝낸 세션 수', registers: [] });
@@ -19,12 +20,28 @@ export class PromSessionSignals implements SessionSignals {
   readonly #signup = new Counter({ name: 'identity_signup_completed_total', help: '가입 마무리를 끝낸 수(ADR-0235)', labelNames: ['marketing'] as const, registers: [] });
   readonly #loginVerdict = new Counter({ name: 'identity_login_verdict_total', help: '로그인 판정 결과(UNKNOWN은 trust-svc 판정을 받지 못했거나 기록하지 못함)', labelNames: ['verdict'] as const, registers: [] });
   readonly #nickLimited = new Counter({ name: 'identity_nickname_check_limited_total', help: '요청 한도에 걸린 닉네임 확인(ADR-0235)', registers: [] });
+  // 탈퇴 참여자와 탈퇴 미룸(identity §8 '지표', ADR-0284, PRF-169)
+  readonly #withdrawalParticipant = new Counter({
+    name: 'identity_withdrawal_participant_total',
+    help: '탈퇴 참여자 호출 결과(path request·retry, outcome done·pending·failed)',
+    labelNames: ['participant', 'path', 'outcome'] as const,
+    registers: [],
+  });
+  readonly #withdrawalOldest = new Gauge({ name: 'identity_withdrawal_pending_oldest_seconds', help: '가장 오래 미룬 탈퇴(WITHDRAWAL)의 closure_started_at부터 지금까지의 초(없으면 0)', registers: [] });
 
   /** 서비스의 지표 모음(/metrics)에 단다 */
   register(registry: Registry): this {
-    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#loginVerdict, this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded];
+    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#loginVerdict, this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded, this.#withdrawalParticipant, this.#withdrawalOldest];
     for (const m of all) registry.registerMetric(m);
     return this;
+  }
+
+  participant(participant: string, path: WithdrawalPath, outcome: WithdrawalOutcome): void {
+    this.#withdrawalParticipant.inc({ participant, path, outcome });
+  }
+
+  pendingOldest(seconds: number): void {
+    this.#withdrawalOldest.set(seconds);
   }
 
   loginVerdict(verdict: string): void {

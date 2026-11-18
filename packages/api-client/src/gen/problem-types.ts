@@ -307,7 +307,8 @@ export type ProblemType =
   | 'webhook-delivery-not-redeliverable'
   | 'webhook-url-not-allowed'
   | 'wish-limit'
-  | 'withdrawal-confirmation-required';
+  | 'withdrawal-confirmation-required'
+  | 'withdrawal-pending';
 
 export const PROBLEM_TYPE_BASE = "https://peaket.example/problems/";
 
@@ -619,4 +620,5 @@ export const PROBLEM_TYPES = {
   'webhook-url-not-allowed': { status: 400, title: "받지 않는 웹훅 주소입니다" },
   'wish-limit': { status: 422, title: "찜 수를 넘었습니다" },
   'withdrawal-confirmation-required': { status: 409, title: "탈퇴 전에 확인해 주세요" },
+  'withdrawal-pending': { status: 409, title: "탈퇴 처리 중에는 새 예매를 할 수 없습니다" },
 } as const satisfies Record<ProblemType, { status: number; title: string }>;

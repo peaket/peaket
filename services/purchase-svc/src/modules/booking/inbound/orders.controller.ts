@@ -106,6 +106,8 @@ export const ORDER_PROBLEMS: Readonly<Record<CreateOrderRejection, OrderProblemS
   CONSENT_VERSION_OUTDATED: { status: 422, type: 'consent-version-outdated', title: '동의 문안이 바뀌었습니다. 다시 확인해 주세요' },
   BUYER_INVALID: { status: 400, type: 'about:blank', title: 'Bad Request' },
   IDENTITY_DENIED: { status: 403, type: 'identity-verification-required', title: '휴대폰 본인확인을 먼저 해 주세요' },
+  // 탈퇴를 미루는 중인 계정(재확인 답의 withdrawal_pending 참, payment §2 '탈퇴 미룸 409', ADR-0284, PRF-169)
+  WITHDRAWAL_PENDING: { status: 409, type: 'withdrawal-pending', title: '탈퇴 처리 중에는 새 예매를 할 수 없습니다' },
   IDENTITY_MISCONFIGURED: { status: 503, type: 'dependency-unavailable', title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 2 },
   BOOKING_RESTRICTED: { status: 403, type: 'booking-restricted', title: '예매가 제한된 계정입니다' },
   // 우선 구매 권리가 없음·남의 것·다른 회차·이미 사용·기한 지남·진행 중 주문 있음(어느 것인지 새지 않는다, GAT-135)

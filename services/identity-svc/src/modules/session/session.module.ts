@@ -18,6 +18,8 @@ import { GetVerificationStatus } from './application/get-verification-status.js'
 import { IssueReauthToken } from './application/issue-reauth-token.js';
 import { RefreshSession } from './application/refresh-session.js';
 import { WithdrawAccount } from './application/withdraw-account.js';
+import { RetryPendingWithdrawals } from './application/retry-pending-withdrawals.js';
+import { WITHDRAWAL_PARTICIPANTS, WITHDRAWAL_SIGNALS, type WithdrawalParticipant, type WithdrawalSignals } from './domain/withdrawal.js';
 import { LOGIN_RISK, type LoginRisk, ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, INV_REFS, type InvRefs, LINK_PROPOSALS, type LinkProposals, MERGE_CHECKERS, MERGE_PROPOSALS, type MergeChecker, type MergeProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
 import { AccountController, ProvidersController } from './inbound/account.controller.js';
 import { ListProviders } from './application/list-providers.js';
@@ -91,6 +93,10 @@ export interface SessionModuleOptions {
   scannerDpopReplay?: DpopReplayStore;
   /** 시험에서 스캐너 세션 ID를 고정한다 */
   newScannerSessionId?: () => string;
+  /** 탈퇴 참여자(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현'). 없으면 참여자 없이 바로 끝낸다(시험) */
+  withdrawalParticipants?: WithdrawalParticipant[];
+  /** 탈퇴 미룸 지표. 없으면 내지 않는다(시험) */
+  withdrawalSignals?: WithdrawalSignals;
 }
 
 @Module({})
@@ -141,6 +147,9 @@ export class SessionModule {
         GetVerificationStatus,
         RefreshSession,
         WithdrawAccount,
+        RetryPendingWithdrawals,
+        { provide: WITHDRAWAL_PARTICIPANTS, useValue: o.withdrawalParticipants ?? [] },
+        ...(o.withdrawalSignals ? [{ provide: WITHDRAWAL_SIGNALS, useValue: o.withdrawalSignals }] : []),
         ListProviders,
         ListSessions,
         EndDeviceSession,
@@ -169,7 +178,7 @@ export class SessionModule {
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, FinishWithdrawals, CheckScannerSession, TerminateScannerSessions, ACCOUNT_CLOSURE],
+      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, RetryPendingWithdrawals, FinishWithdrawals, CheckScannerSession, TerminateScannerSessions, ACCOUNT_CLOSURE],
     };
   }
 }

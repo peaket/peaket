@@ -133,7 +133,8 @@ export function identityServiceHandlers(uc: { status: Pick<GetVerificationStatus
   return {
     GetVerificationStatus: unary('GetVerificationStatus', async (r) => {
       const s = await uc.status.run({ accountId: text(r.account_id), sessionId: text(r.session_id) });
-      return { verified: s.verified, pid: s.pid, previous_pid: s.previousPid };
+      // withdrawal_pending: 탈퇴 미룸 계정이면 참(주문 생성이 409 withdrawal-pending으로 답한다, ADR-0284 결정 5)
+      return { verified: s.verified, pid: s.pid, previous_pid: s.previousPid, withdrawal_pending: s.withdrawalPending === true };
     }),
   };
 }

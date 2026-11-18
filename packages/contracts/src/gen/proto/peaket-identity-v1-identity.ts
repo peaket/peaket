@@ -40,6 +40,10 @@ export const identityV1Identity: Record<string, unknown> = {
                     "previous_pid": {
                       "type": "string",
                       "id": 3
+                    },
+                    "withdrawal_pending": {
+                      "type": "bool",
+                      "id": 4
                     }
                   }
                 },
