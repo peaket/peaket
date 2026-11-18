@@ -9,6 +9,8 @@ import { loadRealtimeGwConfig } from './config.js';
 import { BATCH_INTERVAL_MS, createStreamHub, LAYOUT_REFRESH_MS, LayoutSectionsFile, RedisChannelSubscriber, StreamGateway } from './modules/stream/index.js';
 
 const SERVICE = 'realtime-gw';
+/** 내리기 전체 마감(ms, [가정], ADR-0297 결정 5). 넘으면 close()가 거절되고 main.ts가 종료 코드 1로 끝낸다 */
+export const SHUTDOWN_DEADLINE_MS = 10_000;
 
 /** 보낸 maxWaitMs의 히스토그램 경계(ms). 경보는 p99 150ms [가정]이다(seat-hold §7 운영 확인 표) */
 const BATCH_WAIT_BUCKETS_MS = [5, 10, 25, 50, 75, 100, 150, 200, 300, 500, 1_000, 5_000, 65_535];
@@ -33,6 +35,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 지표·로거는 서비스를 만든 뒤에 생긴다. 그 전에 난 일(시작 때 Redis 붙음)은 값만 들고 있다가 옮긴다
   let redisUp = false;
   let redisUpGauge: Gauge | undefined;
+  let mismatch = 0;
+  let mismatchGauge: Gauge | undefined;
   let warn: (obj: object, msg: string) => void = () => {};
   let service: Awaited<ReturnType<typeof createService>> | undefined;
   let subscriber: RedisChannelSubscriber | undefined;
@@ -46,7 +50,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
         redisUp = up;
         redisUpGauge?.set(up ? 1 : 0);
       },
-      onError: (e) => warn({ channel: e.channel, err: e.error }, '좌석 채널 구독을 다시 맞추지 못했다'),
+      onMismatch: (n) => {
+        mismatch = n;
+        mismatchGauge?.set(n);
+      },
+      // 채널마다 물러서기 단계가 바뀔 때만 온다(ADR-0297 결정 1)
+      onError: (e) => warn({ channel: e.channel, err: e.error }, '좌석 채널 구독·해제가 실패해 물러선 뒤 다시 보낸다'),
     });
 
     // 지표 받는 곳(서비스를 만든 뒤 채운다)
@@ -56,7 +65,6 @@ export async function start(o: StartOptions): Promise<StartedService> {
       subscriber,
       sectionCount: (eventId) => layout.count(eventId),
       onMetric: (name, labels, value) => sinks.get(name)?.(labels, value),
-      onSubscribeError: (e) => warn({ channel: e.channel, op: e.op, err: e.error }, '좌석 채널 구독·해제가 실패해 다음 박자에 다시 맞춘다'),
     });
 
     let connections: Gauge | undefined;
@@ -69,6 +77,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       clock,
       admission: { keys: config.admissionKeys, issuer: config.admissionIssuer },
       webOrigin: config.webOrigin,
+      maxConnections: config.maxConnections,
       layout,
       onRejected: (e) => {
         rejects?.inc({ status: String(e.status) });
@@ -109,6 +118,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     for (const result of ['ok', 'bad', 'unrouted']) messages.inc({ result }, 0);
     redisUpGauge = new Gauge({ name: 'realtime_gw_redis_up', help: '좌석 Redis 구독 연결이 붙어 있으면 1', registers });
     redisUpGauge.set(redisUp ? 1 : 0);
+    mismatchGauge = new Gauge({ name: 'realtime_gw_subscribe_mismatch', help: '원하는 구독 상태와 실제가 어긋난 좌석 채널 수(ADR-0297 결정 1)', registers });
+    mismatchGauge.set(mismatch);
     sinks.set('realtime_gw_batches_total', (_l, v) => batches.inc(v));
     sinks.set('realtime_gw_batch_bytes_total', (_l, v) => batchBytes.inc(v));
     sinks.set('realtime_gw_batch_wait_ms', (_l, v) => batchWait.observe(v));
@@ -125,18 +136,32 @@ export async function start(o: StartOptions): Promise<StartedService> {
 
     const startedSubscriber = subscriber;
     let closing: Promise<void> | undefined;
+    const shutdown = async (): Promise<void> => {
+      started.readiness.register('shutting-down');
+      if (refreshTimer) clearInterval(refreshTimer);
+      try {
+        // 새 핸드셰이크를 503으로 거절하고 모든 연결을 1012로 닫은 뒤(구독 해제 응답은 1초까지) 서버를 닫는다
+        await gateway.shutdown();
+        if (tickTimer) clearInterval(tickTimer);
+        await started.close();
+      } finally {
+        if (tickTimer) clearInterval(tickTimer);
+        await startedSubscriber.close();
+      }
+    };
+    // 전체는 10초 안에 끝낸다. 넘으면 로그 한 줄을 남기고 거절한다(main.ts가 종료 코드 1로 끝낸다, ADR-0297 결정 5)
     const close = (): Promise<void> =>
       (closing ??= (async () => {
-        started.readiness.register('shutting-down');
-        if (refreshTimer) clearInterval(refreshTimer);
-        try {
-          // 새 핸드셰이크를 받지 않고 모든 연결을 1012로 닫은 뒤 서버를 닫는다
-          await gateway.shutdown();
-          if (tickTimer) clearInterval(tickTimer);
-          await started.close();
-        } finally {
-          if (tickTimer) clearInterval(tickTimer);
-          await startedSubscriber.close();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const late = new Promise<'late'>((r) => {
+          timer = setTimeout(() => r('late'), SHUTDOWN_DEADLINE_MS);
+          timer.unref?.();
+        });
+        const result = await Promise.race([shutdown().then(() => 'done' as const), late]);
+        clearTimeout(timer);
+        if (result === 'late') {
+          logger.error({ event: 'realtime_gw_shutdown_late', deadlineMs: SHUTDOWN_DEADLINE_MS }, '내리기 마감을 넘겼다');
+          throw new Error(`realtime-gw 내리기가 ${SHUTDOWN_DEADLINE_MS}ms 마감을 넘겼다`);
         }
       })());
     return { ports: { app: listened.port, management: listened.managementPort }, close };
