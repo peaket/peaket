@@ -792,6 +792,7 @@
 | R-696 | BAT-171 재배치 첫 실행 실패·초점 가림·web / reflow 잡 켜기 | apps/web 띠 여백·320px 이하 띠 흐름·월렛 워커, console-host 그래프 상자, ci-web.yml·brief.mjs, frontend.md·devops.md·d5 | 계획·시험·구현·리뷰·검증·브라우저 확인 역할 분리 | HOT-381 끝·HOT-391 BAT-172 |
 | R-698 | develop 푸시 CI가 다음 푸시에 취소돼 갈래 사이 통합을 끝까지 못 봤고, 끝까지 돌리면 큰 러너 비용이 늘었다 | .github/workflows/ci.yml, tools/ci/check-workflows.test.mjs, docs/devops.md, ADR-0187, docs/verification.md | 취소는 PR에서만, 가지 푸시는 spec-check pr 모드(W11-ci-conc) | 적용 |
 | R-699 | BAT-174 CI 흔들림(web / budgets Lighthouse 판정, S-T34 ④ 좌석맵 해석 시간 상한) | tools/web-checks/budgets limits.mjs·playwright.budgets.config.mjs, services/core-svc seatmap-worker pool.ts·parse-thread.ts, test-int/media-support.ts 시작 기다림, docs/features/seat-hold.md·docs/verification.md·ADR-0257 결정 5 | 계획·구현·시험·리뷰·검증 역할 분리(C, 정방향), 한도·상한은 넓히지 않음 | BAT-174 끝(단계 없음)·계획 12는 정리 목록 |
+| R-700 | realtime-gw Degraded 시험이 느린 CI 러너에서 벽시계 5초를 넘겨 다른 갈래 PR CI를 흔들었다 | services/realtime-gw/test/degraded.test.ts, docs/review/plans/W11-rtgw-flake.md | 계산량 줄이기와 두 시험만의 한도(W11-rtgw-flake) | 적용 |
 
 ## 4. 숫자 일치표
 
