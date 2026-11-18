@@ -25,7 +25,7 @@
    - `PrepareCheckout`은 `ORDER_KIND_MERCH`를 받는다. `event_id`는 비어도 된다. 있으면(티켓 연동 부가 상품의 연결 회차) 그 회차의 지정·전환 행을 보고, 비면 플랫폼 행과 플랫폼 기본·대체만 본다.
    - 굿즈의 복귀 주소는 `{PEAKET_WEB_ORIGIN}/shop/checkout/return?order={orderId}&pg={결제사}`다(성공·실패 같은 주소). 웹 화면 쪽 같은 모양의 함수는 굿즈 결제 화면을 만드는 단계가 둔다.
    - 굿즈는 가상계좌를 허용 수단에서 뺀다(`VIRTUAL_ACCOUNT` 요청은 `INVALID_ARGUMENT`). 굿즈의 입금 대기(docs/planning/03 §2.13 O2~O4)와 그동안의 재고 예약 길이는 BAT-605(LCH-030, 결제대금예치와 함께)가 정한다. 승인 명령에는 `virtual_account_allowed = false`를 싣는다.
-   - 결제 상점(일반·결제대금예치)을 고르는 칸은 아직 없다. 택배 주문(결제대금예치 상점, POL-014)의 결제창 값은 BAT-605가 더한다. 그때까지 core-svc는 택배 주문의 결제 시도 시작을 503 `pg-unavailable`로 답한다(ADR-0300 결정 7).
+   - 결제 상점(일반·결제대금예치)을 고르는 칸은 아직 없다. 택배 주문(결제대금예치 상점, POL-014)의 결제창 값은 BAT-605가 더한다. 그때까지 core-svc는 택배 주문의 결제 시도 시작을 503 `pg-unavailable`로 답하고, 주문 만들기도 재고를 잡기 전에 같은 503으로 답한다(ADR-0300 결정 4·5, 추천 적용, 2026-11-19, BAT-600 리뷰 반영).
 4. **결제 사건의 회차 칸을 비울 수 있게 하고 주문 종류를 싣는다(추천 적용).**
    - `PaymentEvent.eventId`를 `["null", "string"]`(기본값 null)로 푼다. 필수 칸을 null 허용으로 푸는 변경은 호환 검사를 통과하므로 소비자를 먼저 고친다(docs/api/avro/README.md §3).
    - 새 칸 `orderKind`(열거 `PaymentEventOrderKind` = `UNRECOGNIZED`·`TICKET`·`MERCH`, 열거 기본값 `UNRECOGNIZED`, 칸 기본값 `TICKET`)를 더한다. 생산자는 `UNRECOGNIZED`를 내지 않는다.
