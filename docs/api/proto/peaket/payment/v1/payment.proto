@@ -43,6 +43,9 @@ service PaymentService {
   // 취소(전액·부분). 결제사 멱등키는 cancel-{cancellation_id}다.
   // 예매 취소, 회차 취소 일괄 환불, 발권 불가 보상(회차 취소 확정·CS 확인 뒤, ADR-0106)이 쓴다. 실패 건의 재시도는 payment-svc 워커가 맡는다.
   // 첫 구현은 입금 대기 결제의 입금 전 취소만이고 그 밖의 상태는 FAILED_PRECONDITION이다(추천 적용 2026-11-09, BUILD_ORDER HOT-152).
+  // GAT-080 뒤로는 원장 상태로 갈래를 고른다(입금 대기 → 입금 전 취소, 승인·부분 취소 → 결제 후 일반 취소). 요청의 scope가
+  // CANCEL_SCOPE_DEPOSIT_ONLY면 늘 입금 전 취소로 보내고, 입금 대기가 아니면 결제사를 부르지 않고 REJECTED다
+  // (docs/features/payment.md §6 '입금 전 취소만 부르기', 추천 적용 2026-11-18, BAT-010 계획).
   rpc CancelPayment(CancelPaymentRequest) returns (CancelPaymentResponse);
 
   // 지급대행 판매자 등록(판매 승인 때 core-svc가 부른다).
@@ -302,11 +305,22 @@ message CancelPaymentRequest {
   string payment_id = 1;
   // 취소 건마다 하나. 결제사 멱등키 cancel-{cancellation_id}의 재료다.
   // 영문자·숫자·`_`·`-` 9~64자다(포트원 멱등키는 16자 이상이라 `cancel-` 7자를 붙여 16자가 되게 한다). 어기면 INVALID_ARGUMENT다.
-  // 부르는 쪽 purchase-svc는 늘 UUID(36자)를 보낸다(docs/features/payment.md §4.1 '취소 ID의 길이', 추천 적용 2026-11-16, BUILD_ORDER GAT-080)
+  // 부르는 쪽 purchase-svc는 늘 UUID(36자)를 보낸다(docs/features/payment.md §4.1 '취소 ID의 길이', 추천 적용 2026-11-16, BUILD_ORDER GAT-080).
+  // 탈퇴 참여자의 입금 전 취소만 withdrawal-{주문 ID}(47자)다(추천 적용 2026-11-18, BAT-010 계획).
   string cancellation_id = 2;
   // 비우면 전액 취소다.
   peaket.common.v1.Money amount = 3;
   string reason = 4;
+  // 어느 취소를 받을지. 비우면(UNSPECIFIED) 원장 상태로 고른다(추천 적용 2026-11-18, BAT-010 계획).
+  CancelScope scope = 5;
+}
+
+// CancelPayment가 받는 취소의 범위(docs/features/payment.md §6 '입금 전 취소만 부르기').
+enum CancelScope {
+  // 원장 상태로 고른다: 입금 대기면 입금 전 취소, 승인·부분 취소면 결제 후 일반 취소(GAT-080)
+  CANCEL_SCOPE_UNSPECIFIED = 0;
+  // 입금 전 취소만. 입금 대기가 아니면 결제사를 부르지 않고 원장을 바꾸지 않은 채 REJECTED, 이 취소 ID로 이미 끝났으면 CANCELLED
+  CANCEL_SCOPE_DEPOSIT_ONLY = 1;
 }
 
 // 정규화한 취소 결과(docs/features/payment.md §2.1 '결제 취소 API' 행).
