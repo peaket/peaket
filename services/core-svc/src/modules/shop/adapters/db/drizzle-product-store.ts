@@ -2,7 +2,7 @@
 // RLS는 트랜잭션의 app.tenant_id로 거르므로 모든 질의를 테넌트 트랜잭션 안에서 한다(ADR-0241, authz-matrix §5.3).
 import { and, desc, eq, lt, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
-import type { ProductListPage, ProductStore } from '../../domain/ports.js';
+import type { ProductListPage, ProductStore, StockChange } from '../../domain/ports.js';
 import type { Fulfillment, ProductFilter, ProductRecord } from '../../domain/product.js';
 import { product, productStock } from './schema.js';
 
@@ -34,6 +34,7 @@ const toRecord = (row: Row): ProductRecord => ({
   returnAddress: row.product.returnAddress,
   limitedQty: row.product.limitedQty,
   stock: row.product.limitedQty === null ? null : (row.stock?.stock ?? 0),
+  schemaVersion: row.product.schemaVersion,
   transferable: row.product.transferable,
   ticketLinked: row.product.ticketLinked,
   linkedEventId: row.product.linkedEventId,
@@ -94,6 +95,7 @@ export class DrizzleProductStore implements ProductStore {
           id: record.productId,
           promoterId: record.promoterId,
           type: record.type,
+          schemaVersion: record.schemaVersion ?? 1,
           name: record.name,
           status: record.status,
           price: record.price,
@@ -119,13 +121,14 @@ export class DrizzleProductStore implements ProductStore {
     );
   }
 
-  async save(promoterId: string, record: ProductRecord, expectedVersion: number): Promise<ProductRecord | 'conflict'> {
+  async save(promoterId: string, record: ProductRecord, expectedVersion: number, change: StockChange = { kind: 'set', stock: record.stock ?? record.limitedQty ?? 0 }): Promise<ProductRecord | 'conflict' | 'stock-negative'> {
     return this.db.transaction(
       async (tx) => {
         const updated = await tx
           .update(product)
           .set({
             type: record.type,
+            schemaVersion: record.schemaVersion ?? 1,
             name: record.name,
             status: record.status,
             price: record.price,
@@ -148,18 +151,38 @@ export class DrizzleProductStore implements ProductStore {
           .where(and(eq(product.id, record.productId), eq(product.promoterId, promoterId), eq(product.version, expectedVersion)))
           .returning({ version: product.version });
         if (updated.length === 0) return 'conflict';
-        if (record.limitedQty === null) await tx.delete(productStock).where(eq(productStock.productId, record.productId));
-        else
+        let stock: number | null = record.stock;
+        if (record.limitedQty === null || change.kind === 'remove') {
+          await tx.delete(productStock).where(eq(productStock.productId, record.productId));
+          stock = null;
+        } else if (change.kind === 'delta') {
+          // 남은 수 + (새 수량 − 옛 수량). 결제 접수의 조건부 차감과 겹쳐도 한 문장이라 잃지 않는다. 음수면 되돌린다(ADR-0300 결정 3)
+          const r = await tx
+            .update(productStock)
+            .set({ stock: sql`${productStock.stock} + ${change.delta}`, updatedAt: record.updatedAt })
+            .where(and(eq(productStock.productId, record.productId), sql`${productStock.stock} + ${change.delta} >= 0`))
+            .returning({ stock: productStock.stock });
+          if (r.length === 0) throw new StockNegative();
+          stock = r[0]!.stock;
+        } else if (change.kind === 'set') {
           await tx
             .insert(productStock)
-            .values({ productId: record.productId, stock: record.stock ?? record.limitedQty, updatedAt: record.updatedAt })
-            .onConflictDoUpdate({ target: productStock.productId, set: { stock: record.stock ?? record.limitedQty, updatedAt: record.updatedAt } });
-        return { ...record, version: updated[0]!.version };
+            .values({ productId: record.productId, stock: change.stock, updatedAt: record.updatedAt })
+            .onConflictDoUpdate({ target: productStock.productId, set: { stock: change.stock, updatedAt: record.updatedAt } });
+          stock = change.stock;
+        }
+        return { ...record, stock, version: updated[0]!.version };
       },
       { tenantId: promoterId },
-    );
+    ).catch((e: unknown) => {
+      if (e instanceof StockNegative) return 'stock-negative' as const;
+      throw e;
+    });
   }
 }
+
+/** 한정 수량 고치기의 남은 수가 음수(트랜잭션째 되돌린다) */
+class StockNegative extends Error {}
 
 /** 회차→공연 이름. core_app 읽기 역할로 event·production을 읽는다. */
 export class DrizzleProductEventDirectory {

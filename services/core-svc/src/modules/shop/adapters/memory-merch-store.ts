@@ -17,14 +17,14 @@ export class MemoryMerchOrderStore implements MerchOrderStore {
     for (const item of this.items.values()) {
       if (item.promoterId !== promoterId || item.eventId !== eventId) continue;
       const order = this.orders.get(item.orderId);
-      if (!order || order.status === 'CANCELLED' || order.status === 'REFUNDED') continue;
+      if (!order || order.status !== 'PAID') continue;
       if (item.status === 'CANCELLED' || item.status === 'REFUNDED') continue;
       const current = byOrder.get(order.orderId);
       if (current) {
         current.quantity += item.quantity;
         if (item.seatLabel) current.seatLabel = current.seatLabel ? `${current.seatLabel}, ${item.seatLabel}` : item.seatLabel;
       } else {
-        byOrder.set(order.orderId, { orderId: order.orderId, eventId, buyerName: order.buyerName, buyerPhone: order.buyerPhone, seatLabel: item.seatLabel, quantity: item.quantity });
+        byOrder.set(order.orderId, { orderId: order.orderId, eventId, buyerName: order.buyerName ?? '', buyerPhone: order.buyerPhone ?? '', seatLabel: item.seatLabel, quantity: item.quantity });
       }
     }
     return [...byOrder.values()].sort((a, b) => a.orderId.localeCompare(b.orderId));

@@ -1,10 +1,35 @@
 // 서비스별 Outbox 릴레이 프로세스 시작(ADR-0116 결정 1·2, BUILD_ORDER FND-110).
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `<서비스>-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더만 보내고 정비를 돈다.
-import { createDatabase, createHotRedis, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, platformMaintenanceTasks, startOutboxRelayProcess, systemClock } from '@peaket/platform';
+import {
+  createDatabase,
+  createHotRedis,
+  createPlatformLogger,
+  inClusterLeaseApi,
+  kafkaAuthFromEnv,
+  loadOutboxRelayProcessConfig,
+  loadPlatformConfig,
+  platformMaintenanceTasks,
+  startOutboxRelayProcess,
+  systemClock,
+} from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
 import { assertDatabaseRole, CompositeSaleConfigStore, DrizzleSaleConfigStore, QueueSaleConfigStore } from './modules/catalog/index.js';
 import { coreMaintenanceTasks } from './maintenance-tasks.js';
+import {
+  DrizzleShopOrderStore,
+  GrpcMerchPayments,
+  intervalLoop,
+  MERCH_LOOP_INTERVAL_MS,
+  MERCH_REFUND_LOOP_INTERVAL_MS,
+  MerchPaymentResults,
+  MerchStockExpiry,
+  MerchUnclaimed,
+  RedisMerchStock,
+  ShopSignals,
+  unavailableMerchPayments,
+  unavailableMerchStock,
+} from './modules/shop/index.js';
 
 const SERVICE = 'core-svc';
 const config = loadOutboxRelayProcessConfig(SERVICE, process.env);
@@ -30,8 +55,27 @@ const saleConfigStore = opsDatabase
     ? new CompositeSaleConfigStore(new DrizzleSaleConfigStore(opsDatabase), new QueueSaleConfigStore(queueRedis))
     : new DrizzleSaleConfigStore(opsDatabase)
   : undefined;
+// 굿즈 주문의 리더 반복 셋(재고 예약 만료·결과 당기기와 승인 명령 다시 보내기·미수령 환급 다시 부르기)과 shop 정비 일 둘(BAT-600, ADR-0300 결정 2·6·7, ADR-0301 결정 5).
+// 서비스 역할 연결(core_app, PEAKET_DATABASE_URL)이 있을 때만 돈다. 재고 Redis(PEAKET_SHOP_REDIS_URL)나 payment-svc(PEAKET_PAYMENT_GRPC_ADDR)가 없으면 그 호출이 실패로 끝나고
+// 반복은 다음 바퀴에 다시 한다(경고 로그)
+const platformConfig = loadPlatformConfig(process.env);
+const shopLogger = createPlatformLogger({ service: SERVICE, env: platformConfig.env, version: platformConfig.version, clock: systemClock, level: platformConfig.logLevel });
+const shopUrl = process.env.PEAKET_DATABASE_URL;
+const shopDatabase = shopUrl ? createDatabase({ url: shopUrl, applicationName: `${SERVICE}-relay-shop`, max: 2 }) : undefined;
+if (shopDatabase) await assertDatabaseRole(shopDatabase, 'core_app');
+else shopLogger.warn({ kind: 'shop-relay' }, 'PEAKET_DATABASE_URL이 없어 굿즈 주문의 만료·결과 당기기·환급 반복과 shop 정비 일을 돌리지 않는다');
+const shopRedis = process.env.PEAKET_SHOP_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_SHOP_REDIS_URL }) : undefined;
+const merchStock = shopRedis ? new RedisMerchStock(shopRedis) : unavailableMerchStock;
+const paymentAddr = process.env.PEAKET_PAYMENT_GRPC_ADDR;
+const grpcPayments = paymentAddr ? new GrpcMerchPayments(paymentAddr, platformConfig.grpcLbProfile) : undefined;
+const merchPayments = grpcPayments ?? unavailableMerchPayments;
+const shopSignals = new ShopSignals();
 // 공용 정비 일과 core-svc의 일(판매 자격 명단 파기·사본 다시 넘기기·회차 판매 설정 다시 쓰기, ADR-0261 결정 7·9, LCH-080)
-const core = coreMaintenanceTasks(maintenanceDatabase, systemClock, process.env, { ...(saleConfigStore ? { saleConfigStore } : {}), ...(opsDatabase ? { opsDatabase } : {}) });
+const core = coreMaintenanceTasks(maintenanceDatabase, systemClock, process.env, {
+  ...(saleConfigStore ? { saleConfigStore } : {}),
+  ...(opsDatabase ? { opsDatabase } : {}),
+  ...(shopDatabase ? { shop: { database: shopDatabase, payments: merchPayments, signals: shopSignals } } : {}),
+});
 const relay = await startOutboxRelayProcess({
   service: SERVICE,
   database,
@@ -39,9 +83,23 @@ const relay = await startOutboxRelayProcess({
   publisher: kafkaOutboxPublisher(producer),
   leaseApi: inClusterLeaseApi(config.leaseName),
   maintenanceTasks: [...platformMaintenanceTasks(maintenanceDatabase, systemClock), ...core.tasks],
+  leaderLoops: ({ leader, logger }) => {
+    if (!shopDatabase) return [];
+    const store = new DrizzleShopOrderStore(shopDatabase, systemClock);
+    const deps = { store, stock: merchStock, payments: merchPayments, clock: systemClock, signals: shopSignals, logger };
+    const expiry = new MerchStockExpiry(deps);
+    const results = new MerchPaymentResults(deps);
+    const unclaimed = new MerchUnclaimed(deps);
+    return [
+      intervalLoop({ name: 'merch-stock-expiry', everyMs: MERCH_LOOP_INTERVAL_MS, leader, logger, tick: () => expiry.tick() }),
+      intervalLoop({ name: 'merch-payment-results', everyMs: MERCH_LOOP_INTERVAL_MS, leader, logger, tick: () => results.tick() }),
+      intervalLoop({ name: 'merch-refund-retry', everyMs: MERCH_REFUND_LOOP_INTERVAL_MS, leader, logger, tick: () => unclaimed.retry() }),
+    ];
+  },
 });
 core.copy.register(relay.registry);
 core.metrics.register(relay.registry);
+shopSignals.register(relay.registry);
 
 // 종료: 보내던 묶음을 마치고 Lease를 놓은 뒤 연결을 닫는다(종료 대기 30초 안, docs/devops.md §6.4).
 // 처리기는 시작 바로 뒤에 붙인다(관리 포트를 여는 중에 SIGTERM이 와도 Lease를 놓고 끝나게, 코드 리뷰 2026-11-01)
@@ -53,7 +111,11 @@ const shutdown = async (why: string, code: number) => {
     await relay.stop();
     await producer.disconnect();
     // 풀 닫기는 쓰이는 연결이 돌아오기를 기다린다. 정비 한도를 넘겨 아직 도는 문장이 있어도 3초 [가정] 뒤에는 끝낸다(코드 리뷰 2026-11-01)
-    await Promise.race([Promise.all([database.close(), maintenanceDatabase.close(), opsDatabase?.close(), queueRedis?.close()]), new Promise((r) => setTimeout(r, 3_000).unref())]);
+    grpcPayments?.close();
+    await Promise.race([
+      Promise.all([database.close(), maintenanceDatabase.close(), opsDatabase?.close(), queueRedis?.close(), shopDatabase?.close(), shopRedis?.close()]),
+      new Promise((r) => setTimeout(r, 3_000).unref()),
+    ]);
   } catch (err) {
     console.error(JSON.stringify({ kind: 'outbox-relay', msg: `${why} 뒤 끝내기 실패`, err: String(err) }));
     code = 1;
