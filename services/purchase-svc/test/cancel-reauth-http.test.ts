@@ -513,6 +513,35 @@ describe('팬 취소 재인증: 공개키 묶음 안의 키가 깨짐 [BAT-415-r
   });
 });
 
+describe('팬 취소 재인증: 좌표가 곡선 밖인 키 [BAT-415-reauth]', () => {
+  // 같은 kid, x는 팬 키 그대로이고 y만 다른 키의 것(jose가 DOMException DataError를 낸다, 정본 §3.1 '답'의 503 목록)
+  const offCurve: FanKey = { ...fan, publicJwk: { ...fan.publicJwk, y: fanKey(fan.kid).publicJwk.y! } };
+  // 대조: crv가 빠진 키(맞는 키 없음 → 403, 까닭 kid)
+  const noCrv: FanKey = { ...fan, publicJwk: Object.fromEntries(Object.entries(fan.publicJwk).filter(([k]) => k !== 'crv')) };
+  let bad: Awaited<ReturnType<typeof bootReal>>;
+  let control: Awaited<ReturnType<typeof bootReal>>;
+  beforeAll(async () => {
+    bad = await bootReal([offCurve]);
+    control = await bootReal([noCrv]);
+  });
+  afterAll(async () => {
+    await bad?.h.svc.close();
+    await control?.h.svc.close();
+  });
+
+  test('R-T39 ⑤ 좌표가 곡선 밖인 키를 담은 공개키 묶음이면 503 reauth-unavailable이다', async () => {
+    const r = await bad.h.send({ token: signReauth(fan, good()) });
+    expectUnavailable(bad.h, r);
+    expect(bad.jwks.urls.length, '깨진 묶음을 실제로 받았다').toBeGreaterThanOrEqual(1);
+    expect(bad.redis.commands, 'jti를 잡지 않는다').toHaveLength(0);
+    expect(bad.results, '까닭 keys').toEqual([{ outcome: 'unavailable', reason: 'keys' }]);
+
+    const c = await control.h.send({ token: signReauth(fan, good()) });
+    expectRejected(control.h, control.redis, c, 'crv 없음');
+    expect(control.results, 'crv 없음: 까닭 kid').toEqual([{ outcome: 'rejected', reason: 'kid' }]);
+  });
+});
+
 describe('팬 취소 재인증: 처음 공개키 읽기가 답하지 않음 [BAT-415-reauth]', () => {
   let h: Harness;
   let redis: Redis;

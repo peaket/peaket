@@ -184,6 +184,7 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | T9 | `R-T39 ② alg none·HS256 토큰은 403이다`(HTTP), `R-T39 ② 어댑터는 alg none·HS256 토큰을 거절하고 jti를 잡지 않으며, none은 공개키 묶음도 읽지 않는다`(어댑터) | 처음부터 통과(검증이 플랫폼 `alg` 검사 빼기로 실패를 본다) | 플랫폼 확인기가 머리에서 `alg` 거절 |
 | T10 | 어댑터 이름: '정확한 수명' → `R-T39 ③ …(한 번 쓰기)`, 'act·sid·sub' → `R-T39 ② …`, '빈 값' → `R-T39 ② …`. 공개키 못 받음·저장소 세 상태는 ⑤ 그대로 | 이름만(통과) | — |
 | T11 | `R-T39 ② 어댑터는 토큰이 없거나 빈 값이면 false이고 공개키도 jti도 건드리지 않는다`에 `jwks.urls` 0번 | 처음부터 통과(검증 F3 류로 실패를 본다) | 지금도 먼저 거절 |
+| T12 | `R-T39 ⑤ 좌표가 곡선 밖인 키를 담은 공개키 묶음이면 503 reauth-unavailable이다`(HTTP, 대조 `crv` 없음 → 403·까닭 `kid`), `R-T39 ⑤ 좌표가 곡선 밖인 키를 담은 공개키 묶음이면 어댑터는 ReauthUnavailable을 던진다`(어댑터, 같은 대조 → false). 트리 `3e97790e`, `npx vitest run test/cancel-reauth-http.test.ts test/jwks-fan-reauth-gate.test.ts -t "곡선 밖"` → 2개 모두 실패 | 실패(재현) 2 | HTTP는 500, 어댑터는 `DOMException`(DataError)을 그대로 던짐. 단언 실패라 대조 줄까지는 가지 않았다. 전체는 4,175개 가운데 실패 15(앞 13 + 이 2)·통과 4,160, `tsc` 오류 2 그대로 |
 
 - 셈: 단언 실패 13 = **재현 8**(T1 둘, T2 둘, T3, T6 운영, T7 둘) + **새 이름이 없어 생긴 실패 5**(T5 셋, T6 `onResult` 둘. 돌기는 하고 기록이 0줄이라 단언에서 실패한다. RV-06의 결함 그 자체이기도 하다). 실행조차 안 되는 실패는 0이다(vitest는 타입을 보지 않는다). 대신 `tsc --noEmit`이 오류 2다: `cancel-reauth-http.test.ts`·`fan-reauth-wiring.test.ts`의 `onResult`가 아직 없는 속성(TS2353). 구현 뒤 사라져야 한다. 처음부터 통과 6(T4, T6 local·ci 대조, T8, T9 둘, T11).
 - 구현 담당이 맞출 모양(시험이 이 모양을 단언한다):
@@ -382,6 +383,6 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | review | l3-b415r-review | claude-opus-5-5 | 2026-11-18T21:37+09:00 | 2026-11-18T21:49+09:00 |
 | verify | l3-b415r-verify | claude-opus-5-5 | 2026-11-18T21:38+09:00 | 2026-11-18T22:05+09:00 |
 | plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:40+09:00 |
-| test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T22:31+09:00 |
+| test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T22:40+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.

@@ -147,6 +147,20 @@ describe('JwksFanReauthGate [BAT-415-reauth]', () => {
     expect(redis.commands).toHaveLength(0);
   });
 
+  test('R-T39 ⑤ 좌표가 곡선 밖인 키를 담은 공개키 묶음이면 어댑터는 ReauthUnavailable을 던진다', async () => {
+    // 같은 kid, x는 팬 키 그대로이고 y만 다른 키의 것(곡선 밖, jose가 DOMException DataError를 낸다)
+    const offCurve: FanKey = { ...fan, publicJwk: { ...fan.publicJwk, y: fanKey(fan.kid).publicJwk.y! } };
+    const { gate, redis, jwks } = gateAt(NOW, [offCurve]);
+    await expect(gate.verify(token().t, q())).rejects.toBeInstanceOf(ReauthUnavailable);
+    expect(jwks.urls.length, '깨진 묶음을 실제로 받았다').toBeGreaterThanOrEqual(1);
+    expect(redis.commands, 'jti를 잡지 않는다').toHaveLength(0);
+    // 대조: crv가 빠진 키는 맞는 키가 없는 것이라 거절(false)이지 확인 못 함이 아니다
+    const noCrv: FanKey = { ...fan, publicJwk: Object.fromEntries(Object.entries(fan.publicJwk).filter(([k]) => k !== 'crv')) };
+    const c = gateAt(NOW, [noCrv]);
+    expect(await c.gate.verify(token().t, q()), 'crv 없음').toBe(false);
+    expect(c.redis.commands).toHaveLength(0);
+  });
+
   test('R-T39 ⑤ 처음 공개키 읽기가 답하지 않으면 1,000ms 안팎에 ReauthUnavailable이다', { timeout: 15_000 }, async () => {
     const { gate, redis, jwks } = gateAt();
     jwks.mode = 'hang';
