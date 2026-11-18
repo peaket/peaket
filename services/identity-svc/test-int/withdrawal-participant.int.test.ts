@@ -19,6 +19,7 @@ import { JoseReauthVerifier } from '../src/modules/session/adapters/jose-reauth-
 import { AccountError } from '../src/modules/session/application/account-error.js';
 import { CloseAccount } from '../src/modules/session/application/close-account.js';
 import { RetryPendingWithdrawals } from '../src/modules/session/application/retry-pending-withdrawals.js';
+import { GetVerificationStatus } from '../src/modules/session/application/get-verification-status.js';
 import { WithdrawAccount } from '../src/modules/session/application/withdraw-account.js';
 import { DrizzleVerificationStore } from '../src/modules/verification/adapters/db/drizzle-verification-store.js';
 import { HmacIdentityHashers } from '../src/modules/verification/adapters/hmac-identity-hashers.js';
@@ -110,12 +111,20 @@ beforeEach(() => {
   answers.clear();
 });
 
-function setup() {
+/** failErase: 참이면 그 계정의 본인확인 기록 파기(끝내기 뒤 정리)를 실패시킨다(검증 M11, pid가 남은 채 겹치게) */
+function setup(o: { failErase?: (accountId: string) => boolean } = {}) {
   const sessions = new DrizzleSessionStore(database, clock);
   const verifications = new DrizzleVerificationStore(database);
   const closure = new CloseAccount(sessions, clock);
   const claims = new VerificationClaims(verifications, closure);
-  const eraser = new VerificationEraser(verifications);
+  const realEraser = new VerificationEraser(verifications);
+  const eraser = {
+    pidsOf: (accountId: string) => realEraser.pidsOf(accountId),
+    erase: async (accountId: string, now: number) => {
+      if (o.failErase?.(accountId)) throw new Error('주입한 장애(본인확인 기록 파기)');
+      return realEraser.erase(accountId, now);
+    },
+  };
   const participant = new GrpcWithdrawalParticipant({ address });
   participants.push(participant);
   const build = async () => {
@@ -128,8 +137,8 @@ function setup() {
   return { sessions, verifications, closure, claims, eraser, build, pod, hold: new SetRestrictedCiHold(verifications, clock) };
 }
 
-async function world() {
-  const s = setup();
+async function world(o: { failErase?: (accountId: string) => boolean } = {}) {
+  const s = setup(o);
   const { k, withdraw } = await s.build();
   const provider = testAgency(clock);
   const hashers = HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5));
@@ -392,5 +401,94 @@ describe('다시 하기 고리(I-T84 ④⑦)', () => {
     expect(await accountOf(a.accountId)).toMatchObject({ status: 'DELETED' });
     expect(await withdrawnEvents(a.accountId)).toBe(1);
     expect(await terminations(a.accountId)).toEqual(['DELETE', 'DELETE']);
+  });
+});
+
+// 검증이 놓친 M11·M10a-pg(BAT-010 검증 2a6066f0, 계획 9의 M10·M11)
+describe('겹친 끝내기의 상태 다시 보기(I-T84 ⑦, 검증 M11)', () => {
+  test('I-T84⑦_장애주입_PostgreSQL에서고리가먼저끝냈지만본인확인기록파기가실패해pid가남은채요청경로가끝내기에닿아도_탈퇴사건은한건·세션마다DELETE한번이다', async () => {
+    let erased = 0;
+    const t = await world({
+      failErase: () => {
+        erased++;
+        return true;
+      },
+    });
+    await isolate();
+    const a = await t.login('m11-1');
+    await t.login('m11-1');
+    await t.verify(a.accountId, 'm11-person');
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    // 요청 경로는 풀릴 때까지 늦게 DONE, 고리는 바로 DONE
+    answers.set(a.accountId, [{ hold, state: 'DONE' }, { state: 'DONE' }]);
+    const request = t.run(a);
+    for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toHaveLength(1);
+    clock.advance(NEXT_CHECK_MS);
+    expect(await t.retry.run()).toMatchObject({ claimed: 1, withdrawn: 1 });
+    // 끊긴 사례가 실제로 있었다: 고리의 끝내기 뒤 파기가 실패해 본인확인 기록(pid)이 남았다
+    expect(erased).toBe(1);
+    expect(await verificationRows(a.accountId)).toBe(1);
+    release();
+    const r = await request;
+    expect(r).not.toBeInstanceOf(Error);
+    expect(seen).toHaveLength(2);
+    expect(await accountOf(a.accountId)).toMatchObject({ status: 'DELETED' });
+    expect(await withdrawnEvents(a.accountId)).toBe(1);
+    expect(await terminations(a.accountId)).toEqual(['DELETE', 'DELETE']);
+  });
+
+  test('I-T84⑦_PostgreSQL에서요청경로와고리의참여자답을같은때풀어두끝내기가모두pid를읽은뒤잠금을다퉈도_탈퇴사건은한건·세션마다DELETE한번이다', async () => {
+    const t = await world();
+    await isolate();
+    const a = await t.login('m11-2');
+    await t.login('m11-2');
+    await t.verify(a.accountId, 'm11-2-person');
+    let release!: () => void;
+    const hold = new Promise<void>((r) => (release = r));
+    answers.set(a.accountId, [{ hold, state: 'DONE' }, { hold, state: 'DONE' }]);
+    const request = t.run(a);
+    for (let i = 0; i < 200 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    clock.advance(NEXT_CHECK_MS);
+    const round = t.retry.run();
+    for (let i = 0; i < 200 && seen.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(seen).toHaveLength(2);
+    release();
+    const [r, report] = await Promise.all([request, round]);
+    expect(r).not.toBeInstanceOf(Error);
+    expect(report).toMatchObject({ claimed: 1, failed: 0 });
+    expect(await accountOf(a.accountId)).toMatchObject({ status: 'DELETED' });
+    expect(await withdrawnEvents(a.accountId)).toBe(1);
+    expect(await terminations(a.accountId)).toEqual(['DELETE', 'DELETE']);
+  });
+});
+
+describe('PostgreSQL 저장소의 탈퇴 미룸 판정(I-T84 ⑥, 검증 M10a-pg)', () => {
+  test('I-T84⑥_PostgreSQL에서GetVerificationStatus는요청경로가미룬계정의살아있는세션에verified거짓·withdrawalPending참이고_끝난세션·만14세미만정리계정·ACTIVE계정은거짓이다', async () => {
+    const t = await world();
+    const status = new GetVerificationStatus(t.sessions, t.claims, clock);
+    const a = await t.login('m10-1');
+    const gone = await t.login('m10-1');
+    await t.verify(a.accountId, 'm10-person');
+    // 미루기 전(ACTIVE·본인확인함)
+    expect(await status.run({ accountId: a.accountId, sessionId: a.sessionId })).toMatchObject({ verified: true, withdrawalPending: false });
+    answers.set(a.accountId, [{ state: 'PENDING' }]);
+    expect(await t.run(a)).toEqual({ outcome: 'DEFERRED' });
+    expect(await status.run({ accountId: a.accountId, sessionId: a.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: true });
+    expect(await t.sessions.transaction((tx) => tx.withdrawalPendingOf(a.accountId))).toBe(true);
+    // 끝난 세션은 거짓
+    await t.k.end.run({ sessionId: gone.sessionId, accountId: gone.accountId });
+    expect(await status.run({ accountId: a.accountId, sessionId: gone.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
+    // 만 14세 미만으로 정리 중(UNDER_14)인 계정은 저장소 판정도 GetVerificationStatus도 거짓
+    const kid = await t.login('m10-kid');
+    expect(await t.verify(kid.accountId, 'm10-kid', '2014-04-04')).toMatchObject({ code: 'UNDER_14' });
+    expect(await accountOf(kid.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closure_reason: 'UNDER_14' });
+    expect(await t.sessions.transaction((tx) => tx.withdrawalPendingOf(kid.accountId))).toBe(false);
+    expect(await status.run({ accountId: kid.accountId, sessionId: kid.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
+    // ACTIVE이고 본인확인 전인 계정도 거짓
+    const plain = await t.login('m10-plain');
+    expect(await t.sessions.transaction((tx) => tx.withdrawalPendingOf(plain.accountId))).toBe(false);
+    expect(await status.run({ accountId: plain.accountId, sessionId: plain.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
   });
 });
