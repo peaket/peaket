@@ -3,6 +3,7 @@
 // API 파드마다 60초 [가정]마다 main.ts가 부른다(앞 바퀴가 도는 중이면 건너뛴다). 한 트랜잭션에서 다음 확인 시각이 된 미룬 계정을 20개 [가정]까지
 // FOR UPDATE SKIP LOCKED로 잡고 다음 확인 시각을 지금 + 60초로 미뤄 커밋한다. 그다음 계정마다 참여자를 부르고(데드라인 10초 [가정]) 모두 DONE이면
 // 요청 경로와 같은 끝내기를 한다. 한 계정의 실패는 경고 로그만 남기고 나머지를 이어 간다. 바퀴 끝에 가장 오래 미룬 계정의 나이를 지표로 낸다.
+// 한 바퀴는 잡은 시각 + 50초 [가정]부터 남은 계정을 부르지 않는다(다음 확인 시각 뒤 다시 잡힌다, BAT-010 리뷰 RV-03).
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { ACCOUNT_ERASER, type AccountEraser, SESSION_STORE, type SessionStore } from '../domain/ports.js';
@@ -12,6 +13,7 @@ import {
   WITHDRAWAL_PARTICIPANTS,
   WITHDRAWAL_RETRY_BATCH,
   WITHDRAWAL_RETRY_DEADLINE_MS,
+  WITHDRAWAL_RETRY_ROUND_MS,
   WITHDRAWAL_SIGNALS,
   type WithdrawalParticipant,
   type WithdrawalSignals,
@@ -42,12 +44,14 @@ export class RetryPendingWithdrawals {
   async run(signal?: AbortSignal): Promise<RetryPendingWithdrawalsReport> {
     const now = this.clock.now();
     const ids = await this.store.transaction((tx) => tx.claimPendingWithdrawals(now, now + WITHDRAWAL_NEXT_CHECK_MS, WITHDRAWAL_RETRY_BATCH));
+    // 바퀴 마감은 잡기 문장의 '지금'(다음 확인 시각을 now + 60초로 미룬 그 시각)에서 센다
+    const roundEndsAt = now + WITHDRAWAL_RETRY_ROUND_MS;
     const report: RetryPendingWithdrawalsReport = { claimed: ids.length, withdrawn: 0, deferred: 0, failed: 0 };
     const participants = this.participants ?? [];
     const deps: WithdrawalFinishDeps = { store: this.store, eraser: this.eraser, ...(this.staff ? { staff: this.staff } : {}), ...(this.logger ? { logger: this.logger } : {}) };
     for (const accountId of ids) {
-      // 멈추면 남은 계정은 부르지 않는다(다음 확인 시각이 지나면 다른 파드가 다시 잡는다)
-      if (signal?.aborted) break;
+      // 멈추거나 바퀴 마감에 닿으면 남은 계정은 부르지 않는다(어디에도 세지 않고, 다음 확인 시각이 지나면 다시 잡힌다)
+      if (signal?.aborted || this.clock.now() >= roundEndsAt) break;
       try {
         const verdict = await askParticipants(participants, accountId, { path: 'retry', deadlineMs: WITHDRAWAL_RETRY_DEADLINE_MS, ...(this.signals ? { signals: this.signals } : {}), ...(this.logger ? { logger: this.logger } : {}) });
         if (verdict === 'FAILED') {
