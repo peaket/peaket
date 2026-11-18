@@ -185,6 +185,11 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | T10 | 어댑터 이름: '정확한 수명' → `R-T39 ③ …(한 번 쓰기)`, 'act·sid·sub' → `R-T39 ② …`, '빈 값' → `R-T39 ② …`. 공개키 못 받음·저장소 세 상태는 ⑤ 그대로 | 이름만(통과) | — |
 | T11 | `R-T39 ② 어댑터는 토큰이 없거나 빈 값이면 false이고 공개키도 jti도 건드리지 않는다`에 `jwks.urls` 0번 | 처음부터 통과(검증 F3 류로 실패를 본다) | 지금도 먼저 거절 |
 | T12 | `R-T39 ⑤ 좌표가 곡선 밖인 키를 담은 공개키 묶음이면 503 reauth-unavailable이다`(HTTP, 대조 `crv` 없음 → 403·까닭 `kid`), `R-T39 ⑤ 좌표가 곡선 밖인 키를 담은 공개키 묶음이면 어댑터는 ReauthUnavailable을 던진다`(어댑터, 같은 대조 → false). 트리 `3e97790e`, `npx vitest run test/cancel-reauth-http.test.ts test/jwks-fan-reauth-gate.test.ts -t "곡선 밖"` → 2개 모두 실패 | 실패(재현) 2 | HTTP는 500, 어댑터는 `DOMException`(DataError)을 그대로 던짐. 단언 실패라 대조 줄까지는 가지 않았다. 전체는 4,175개 가운데 실패 15(앞 13 + 이 2)·통과 4,160, `tsc` 오류 2 그대로 |
+| RN-03·L7 | `R-T39 ② fanReauthResultLogger는 403을 info 한 줄, 503을 warn 한 줄로 남기고 까닭 이름표 말고는 싣지 않는다`(조립, 이름표 13 + 2마다 가짜 로거. 결과에 토큰·jti·계정·세션 ID를 얹어 넘겨도 줄에 없고, 칸은 `reason`과 사건 이름 `event`뿐), `R-T39 ② 실제 확인기의 거절과 확인 못 함이 fanReauthResultLogger를 거쳐 info·warn 한 줄씩 남는다`(조립, 다른 계정 → `info` `sub`, 저장소 오류 → `warn` `store`). 트리 `99461bf1`(고친 곳 검증 뒤, 고치기 전) | 실패(새 이름) 2 | `TypeError: fanReauthResultLogger is not a function`(`refund-wiring.ts`에 그 내보내기가 없어 돌지 못함. `tsc`도 TS2305 1). 감독이 정한 모양 `fanReauthResultLogger(log: { info(o: object): void; warn(o: object): void }): (r: FanReauthResult) => void`대로 부른다 |
+| RN-03·L7 | `R-T39 ② start.ts는 확인기 조립의 onResult로 fanReauthResultLogger를 넘긴다`(start.ts 글. 앞 'onResult를 넘긴다' 시험을 좁힘) | 실패(재현) 1 | 인자에 `onResult: fanReauthResultLogger(`가 없고 몸체를 start.ts에 직접 둠 |
+| E7 | `R-T39 ⑦ 어댑터는 뜻밖의 오류(시계가 TypeError)를 ReauthUnavailable로 덮지 않고 그대로 던진다`(어댑터: 같은 오류 객체, `onResult` 0번, `command` 0번), `R-T39 ⑦ 실제 확인기가 뜻밖의 오류를 내면 500이고 Retry-After가 없으며 아무것도 부르지 않는다`(HTTP, 실제 어댑터에 깨진 시계) | 처음부터 통과 2(검증이 E7 '뜻밖 오류를 503으로 덮기'로 실패를 본다) | 지금 어댑터는 목록 밖 오류를 그대로 던진다 |
+| R4 | `R-T39 ⑤ 남은 수명이 상한보다 길면 PX를 정본 값 330000으로 자르고, 짧으면 남은 수명 그대로다`(새 `packages/platform/test/reauth-jti.test.ts`: 400초·330,001ms·330,000ms → `'330000'`, 329,999ms → `'329999'`, 100초 → `'100000'`), `R-T39 ⑤ 이미 있으면(NX가 null) false다` | 처음부터 통과 2(검증이 R4 '공용 상한 6분'·R3 '5분'으로 실패를 본다) | 지금 공용 상한이 정본대로 5분 30초 |
+| 위 묶음 실행 | purchase-svc `npx vitest run` 4,179개 가운데 실패 3(위 RN-03 셋)·통과 4,176, `tsc --noEmit` 오류 1(TS2305 `fanReauthResultLogger`). `packages/platform` `npx vitest run` 49 파일·581개 통과, `tsc --noEmit` 오류 0 | — | — |
 
 - 셈: 단언 실패 13 = **재현 8**(T1 둘, T2 둘, T3, T6 운영, T7 둘) + **새 이름이 없어 생긴 실패 5**(T5 셋, T6 `onResult` 둘. 돌기는 하고 기록이 0줄이라 단언에서 실패한다. RV-06의 결함 그 자체이기도 하다). 실행조차 안 되는 실패는 0이다(vitest는 타입을 보지 않는다). 대신 `tsc --noEmit`이 오류 2다: `cancel-reauth-http.test.ts`·`fan-reauth-wiring.test.ts`의 `onResult`가 아직 없는 속성(TS2353). 구현 뒤 사라져야 한다. 처음부터 통과 6(T4, T6 local·ci 대조, T8, T9 둘, T11).
 - 구현 담당이 맞출 모양(시험이 이 모양을 단언한다):
@@ -473,7 +478,7 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | review | l3-b415r-review | claude-opus-5-5 | 2026-11-18T21:37+09:00 | 2026-11-18T22:52+09:00 |
 | verify | l3-b415r-verify | claude-opus-5-5 | 2026-11-18T21:38+09:00 | 2026-11-18T23:11+09:00 |
 | plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:40+09:00 |
-| test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T22:40+09:00 |
+| test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T23:20+09:00 |
 | impl | l3-b415r-impl | claude-opus-5-5 | 2026-11-18T22:41+09:00 | 2026-11-18T22:47+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.

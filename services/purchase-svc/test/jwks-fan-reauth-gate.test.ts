@@ -2,7 +2,7 @@
 // 정본: docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인'('공개키 묶음 읽기'·'한 번 쓰기'·'답'), docs/data.md §3 `reauth:jti:{jti}`
 // (서명·클레임 확인을 마친 뒤 잡고, 수명은 토큰의 남은 시간이며 5분 30초를 넘지 않는다. 넘는 토큰은 잡지 않고 거절한다).
 // 가짜 시계로 경계(exp 직전 1ms·exp, 남은 수명 330,000ms·330,001ms)를 재고, 수명 값은 상수와 다르게(180초·600초) 고른다.
-// 리뷰 반영 재현(RV-02·RV-05·RV-09, 검증 V8·대조 어긋남 둘)은 같은 시험 담당 세션이 더했다.
+// 리뷰 반영 재현(RV-02·RV-05·RV-09, 검증 V8·대조 어긋남 둘)과 고친 곳 검증 E7(뜻밖 오류를 덮지 않음)은 같은 시험 담당 세션이 더했다.
 import { fakeClock, RedisReauthJtiStore } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { JwksFanReauthGate, ReauthUnavailable, type FanReauthAct } from '../src/modules/refund/index.js';
@@ -176,6 +176,31 @@ describe('JwksFanReauthGate [BAT-415-reauth]', () => {
     expect(took, `걸린 시간 ${Math.round(took)}ms`).toBeLessThan(2_500);
     expect(jwks.urls, '읽기 한 번').toHaveLength(1);
     expect(redis.commands).toHaveLength(0);
+  });
+
+  test('R-T39 ⑦ 어댑터는 뜻밖의 오류(시계가 TypeError)를 ReauthUnavailable로 덮지 않고 그대로 던진다', async () => {
+    // jti 저장소가 아닌 주입 지점(시계)이 코드 결함 같은 TypeError를 낸다(정본 §3.1 '답': 그 밖의 뜻밖 오류는 500이고 덮지 않는다)
+    const bug = new TypeError("Cannot read properties of undefined (reading 'now')");
+    const brokenClock = {
+      now(): number {
+        throw bug;
+      },
+      monotonicMs(): number {
+        throw bug;
+      },
+    };
+    const redis = fakeSeatRedis();
+    const jwks = fakeJwksFetch([fan]);
+    const results: unknown[] = [];
+    const gate = new JwksFanReauthGate({ jwksUrl: JWKS_URL, issuer: ISS, jti: new RedisReauthJtiStore(redis), clock: brokenClock, fetch: jwks.fetch, onResult: (r) => void results.push(r) });
+    const err = await gate.verify(token().t, q()).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err, '같은 오류 그대로').toBe(bug);
+    expect(err).not.toBeInstanceOf(ReauthUnavailable);
+    expect(results, '거절·확인 못 함 기록 0번').toHaveLength(0);
+    expect(redis.commands, 'jti를 잡지 않는다').toHaveLength(0);
   });
 
   test('R-T39 ⑤ 어댑터는 jti 저장소 오류에 ReauthUnavailable, 이미 있음에 false를 준다(세 상태)', async () => {
