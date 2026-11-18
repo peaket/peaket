@@ -179,6 +179,8 @@ const REJECTIONS: Record<CreateOrderRejection, { arrange?: () => void; body?: ()
   CONSENT_VERSION_OUTDATED: { body: () => okBody({ consents: { provisionToSeller: true, salesTerms: true, consentVersion: 'v2' } }) },
   BUYER_INVALID: { body: () => okBody({ buyer: { name: '홍길동', phone: 'SECRETPHONE-1234' } }) },
   IDENTITY_DENIED: { arrange: () => (fx.recheck = { status: 'DENIED' }) },
+  // 탈퇴 미룸 계정(재확인 답 verified 거짓·withdrawal_pending 참, payment §2 '탈퇴 미룸 409', P-T55 ⑦, BAT-010)
+  WITHDRAWAL_PENDING: { arrange: () => (fx.recheck = { status: 'DENIED', withdrawalPending: true }) },
   IDENTITY_MISCONFIGURED: { arrange: () => (fx.recheck = { status: 'FAILED', reason: 'permission_denied' }) },
   BOOKING_RESTRICTED: { arrange: () => (fx.restriction = { st: 'ACTIVE' }) },
   PRIORITY_GRANT_INVALID: { arrange: () => (fx.session = { ...fx.session!, priorityGrantId: '01900000-0000-7000-8000-000000000099' }) },
@@ -231,6 +233,7 @@ describe('거절 → 문제 상세(ORDER_PROBLEMS 전부)', () => {
       CONSENT_VERSION_OUTDATED: [422, 'consent-version-outdated'],
       BUYER_INVALID: [400, 'about:blank'],
       IDENTITY_DENIED: [403, 'identity-verification-required'],
+      WITHDRAWAL_PENDING: [409, 'withdrawal-pending'],
       IDENTITY_MISCONFIGURED: [503, 'dependency-unavailable'],
       BOOKING_RESTRICTED: [403, 'booking-restricted'],
       PRIORITY_GRANT_INVALID: [409, 'priority-grant-in-use'],
@@ -418,5 +421,45 @@ describe('BAT-037 쓰기 칸막이(HTTP 백프레셔)', () => {
       fx.createGate = undefined;
       setWriteBulkheadLimit(WRITE_BULKHEAD_DEFAULT_LIMIT);
     }
+  });
+});
+
+/** 탈퇴 미룸 409(docs/features/payment.md §2 '탈퇴 미룸 409', ADR-0284 결정 5, BUILD_ORDER PRF-169, P-T55 ⑦, BAT-010 시험 담당) */
+describe('탈퇴 미룸 409 withdrawal-pending(P-T55 ⑦)', () => {
+  test('P-T55⑦_재확인답이verified거짓·withdrawal_pending참이면_409 withdrawal-pending(문제상세·no-store)이고주문행·멱등기록을만들지않으며예매제한을읽지않는다 [ASVS v5.0.0-2.3.1]', async () => {
+    fx.recheck = { status: 'DENIED', withdrawalPending: true };
+    const r = await post(okBody());
+    expect(r.statusCode).toBe(409);
+    expect(r.headers['content-type']).toMatch(/^application\/problem\+json/);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(json(r)).toMatchObject({ type: problem('withdrawal-pending'), status: 409, title: '탈퇴 처리 중에는 새 예매를 할 수 없습니다' });
+    expect(fx.created).toEqual([]);
+    expect(fx.calls).not.toContain('writes.create');
+    expect(fx.restrictionReads).toEqual([]);
+    expect(fx.payingCalls).toEqual([]);
+  });
+
+  test('P-T55⑦_verified거짓·withdrawal_pending거짓은지금처럼403 identity-verification-required다(탈퇴 요청 전·뒤)', async () => {
+    for (const recheck of [{ status: 'DENIED' as const }, { status: 'DENIED' as const, withdrawalPending: false }]) {
+      fx.reset();
+      fx.recheck = recheck;
+      const r = await post(okBody());
+      expect(r.statusCode).toBe(403);
+      expect(json(r)).toMatchObject({ type: problem('identity-verification-required'), status: 403 });
+      expect(fx.created).toEqual([]);
+    }
+  });
+
+  test('P-T55⑦_탈퇴요청전(ACTIVE·본인확인)은201이고_재확인이답하지못한토큰판정은지금그대로다(pid있으면201·없으면403)', async () => {
+    fx.recheck = { status: 'VERIFIED', pid: PID };
+    expect((await post(okBody())).statusCode).toBe(201);
+    fx.reset();
+    fx.recheck = { status: 'FAILED', reason: 'unavailable' };
+    expect((await post(okBody())).statusCode).toBe(201);
+    fx.reset();
+    fx.recheck = { status: 'FAILED', reason: 'unavailable' };
+    const r = await post(okBody(), { pid: null });
+    expect(r.statusCode).toBe(403);
+    expect(json(r)).toMatchObject({ type: problem('identity-verification-required') });
   });
 });

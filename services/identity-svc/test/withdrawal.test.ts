@@ -1,5 +1,7 @@
 // 탈퇴의 첫 구현(docs/features/identity.md §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030, I-T16·I-T27·I-T8, POL-033, [ASVS v5.0.0-7.4.2]).
 // 메모리 저장소로 재인증 토큰 1회 사용, 계정·본인확인 기록 파기, 세션 종료, 만 14세 미만 정리 마무리, 리프레시 토큰 해시 지우기를 본다. PostgreSQL은 test-int/withdrawal.int.test.ts.
+// 맨 아래 묶음은 탈퇴 참여자와 탈퇴 미룸(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', ADR-0284, BUILD_ORDER PRF-169, I-T84 ①②③⑤⑥⑦)의 응용 층이다(BAT-010 시험 담당).
+// 그 묶음은 구현 전 트리에서도 읽히도록 새 모듈을 가져오지 않는다(참여자는 같은 모양의 객체다. 고리는 test/withdrawal-retry.test.ts, 어댑터는 test/withdrawal-participant.grpc.test.ts).
 import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { JoseReauthVerifier } from '../src/modules/session/adapters/jose-reauth-verifier.js';
@@ -21,6 +23,8 @@ import { ConfirmVerification } from '../src/modules/verification/application/con
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
 import { VerificationError } from '../src/modules/verification/application/verification-error.js';
 import { AccountWithdrawn, SessionTerminated } from '@peaket/contracts/asyncapi';
+import { VerificationHolds } from '../src/modules/verification/adapters/verification-holds.js';
+import { SetRestrictedCiHold } from '../src/modules/verification/application/set-restricted-ci-hold.js';
 import { agencyResult, ISSUER, kit, newKey, noClaims, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 const DAY = 86_400_000;
@@ -201,7 +205,7 @@ describe('탈퇴(I-T16·I-T27)', () => {
     const tok = payload((await t.login('p-1')).accessToken);
     expect(tok.scope).toBeUndefined();
     expect(tok.pid).toBeUndefined();
-    expect(await t.status.run({ accountId: a.accountId, sessionId: a.sessionId })).toEqual({ verified: false, pid: '', previousPid: '' });
+    expect(await t.status.run({ accountId: a.accountId, sessionId: a.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
   });
 
   test('BOT-020넘김_만14세미만으로정리중인계정은_정리를시작하고10분이지난뒤정비가재인증없이끝낸다', async () => {
@@ -458,5 +462,274 @@ describe('탈퇴 계정의 대기열 키 지우기(BOT-037, I-T27)', () => {
     await t.finish.run();
     expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
     expect(withdrawn(t).map(valueOf)).toEqual([{ eventKey: expect.any(String), accountId: a.accountId, pids: [pid], withdrawnAt: iso(at), purgeBy: iso(at + 5 * DAY) }]);
+  });
+});
+
+// ---- 탈퇴 참여자와 탈퇴 미룸(I-T84, BAT-010) ----
+// 값은 정본에서 적는다: 다음 확인 = 요청 시각 + 60초, 요청 경로 데드라인 3초(identity §8 '미룸 표시'·'참여자 호출'). 코드 상수를 가져오지 않는다.
+// 시계는 둥근 시각이 아닌 곳에서 시작해 '+ 60초'를 다른 값과 가린다.
+
+type Answer = { state: 'DONE' } | { state: 'PENDING'; reasons: readonly string[] };
+interface ParticipantCall {
+  accountId: string;
+  deadlineMs: number;
+  /** 부른 때의 계정 상태(미룸 표시가 호출 앞에 커밋됐는지 본다) */
+  statusAtCall: string | undefined;
+  reasonAtCall: string | undefined;
+}
+
+/** 이름과 답을 정하는 참여자 대역. answer가 던지면 '답하지 않음'이다 */
+function recordingParticipant(sessions: MemorySessionStore, answer: (accountId: string) => Promise<Answer>, name = 'purchase') {
+  const calls: ParticipantCall[] = [];
+  return {
+    calls,
+    participant: {
+      name,
+      process: async (accountId: string, o: { deadlineMs: number }): Promise<Answer> => {
+        const a = sessions.accountOf(accountId);
+        calls.push({ accountId, deadlineMs: o.deadlineMs, statusAtCall: a?.status, reasonAtCall: a?.closureReason });
+        return answer(accountId);
+      },
+    },
+  };
+}
+
+const START = Date.parse('2026-11-18T09:13:27.431Z');
+const NEXT_CHECK_MS = 60_000;
+const REQUEST_DEADLINE_MS = 3_000;
+
+async function participantSetup(answers: Array<(accountId: string) => Promise<Answer>>) {
+  const t = await setup();
+  t.clock.advance(START - t.clock.now());
+  const participants = answers.map((a, i) => recordingParticipant(t.sessions, a, i === 0 ? 'purchase' : `other-${i}`));
+  const holds = new VerificationHolds(t.verifications);
+  const reauth = new JoseReauthVerifier(t.k.keys, ISSUER, t.clock);
+  const eraser = new VerificationEraser(t.verifications);
+  // 생성자 뒤 두 칸(참여자 목록·지표)은 구현 전 트리에 없어도 넘겨진다(그 트리에서는 무시된다)
+  const withdrawP = new (WithdrawAccount as unknown as new (...a: unknown[]) => WithdrawAccount)(t.sessions, reauth, eraser, t.clock, holds, t.staff, undefined, participants.map((p) => p.participant), undefined);
+  return { ...t, participants, calls: participants[0]?.calls ?? [], withdrawP, hold: new SetRestrictedCiHold(t.verifications, t.clock) };
+}
+
+const DONE = async (): Promise<Answer> => ({ state: 'DONE' });
+const PENDING = async (): Promise<Answer> => ({ state: 'PENDING', reasons: ['PAYMENT_PENDING_ORDER'] });
+const NO_ANSWER = async (): Promise<Answer> => {
+  throw new Error('참여자가 답하지 않았다(주입)');
+};
+
+describe('탈퇴 참여자와 탈퇴 미룸의 응용 층(I-T84, BAT-010)', () => {
+  test('I-T84①_참여자가모두DONE이면_WITHDRAWN이고계정은DELETED·살아있던세션은모두DELETE로끝나며_본인확인한계정은탈퇴사건한건_참여자는그계정ID로요청경로데드라인3초에불린다 [ASVS v5.0.0-7.4.2]', async () => {
+    const t = await participantSetup([DONE, DONE]);
+    const a = await t.login('p84-1');
+    await t.login('p84-1');
+    await t.verify(a.accountId, 'p84-person-1');
+    const r = await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(r).toEqual({ outcome: 'WITHDRAWN' });
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'DELETED', deletedAt: START });
+    expect(t.sessions.activeCount(a.accountId)).toBe(0);
+    expect(t.sessions.terminations(a.accountId).map(([, why]) => why)).toEqual(['DELETE', 'DELETE']);
+    expect(t.sessions.withdrawnMessages()).toHaveLength(1);
+    expect(t.sessions.withdrawnMessages()[0]).toMatchObject({ topic: 'identity.accounts-withdrawn', key: a.accountId });
+    for (const p of t.participants) expect(p.calls.map((c) => [c.accountId, c.deadlineMs])).toEqual([[a.accountId, REQUEST_DEADLINE_MS]]);
+    expect(await t.verifications.recordOf(a.accountId)).toBeNull();
+  });
+
+  test('I-T84②_참여자하나라도PENDING이면_DEFERRED이고_WITHDRAWAL_PENDING·사유WITHDRAWAL·시작=요청시각·다음확인=요청시각+60초_프로필·세션·본인확인기록그대로·탈퇴사건없음_쓴재인증토큰은다시403', async () => {
+    const t = await participantSetup([DONE, PENDING]);
+    const a = await t.login('p84-2');
+    const b = await t.login('p84-2');
+    await t.verify(a.accountId, 'p84-person-2');
+    const before = { ...t.sessions.accountOf(a.accountId)! };
+    const token = await t.reauthToken(a);
+    const r = await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} });
+    expect(r).toEqual({ outcome: 'DEFERRED' });
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureStartedAt: START, closureNextCheckAt: START + NEXT_CHECK_MS });
+    // 프로필(이메일)·로그인 수단·기기·세션·본인확인 기록은 그대로다
+    expect(before.email).toBe('p84-2@kakao.test');
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ email: before.email, emailVerified: before.emailVerified });
+    expect(t.sessions.accountOf(a.accountId)?.deletedAt).toBeUndefined();
+    expect(t.sessions.providerCount(a.accountId)).toBe(1);
+    expect(t.sessions.deviceCount(a.accountId)).toBe(1);
+    expect(t.sessions.activeCount(a.accountId)).toBe(2);
+    expect(t.sessions.terminations(a.accountId)).toEqual([]);
+    expect(await t.verifications.recordOf(a.accountId)).not.toBeNull();
+    expect(t.sessions.withdrawnMessages()).toEqual([]);
+    // 미룸 표시는 참여자 호출보다 먼저 커밋된다(부른 때 이미 WITHDRAWAL_PENDING·WITHDRAWAL)
+    for (const p of t.participants) expect(p.calls).toEqual([{ accountId: a.accountId, deadlineMs: REQUEST_DEADLINE_MS, statusAtCall: 'WITHDRAWAL_PENDING', reasonAtCall: 'WITHDRAWAL' }]);
+    // 쓴 재인증 토큰은 다시 쓰지 못한다(참여자도 다시 부르지 않는다)
+    expect(await code(t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} }))).toBe('REAUTH_REQUIRED');
+    expect(t.calls).toHaveLength(1);
+    // 다른 세션의 갱신은 된다(세션이 살아 있다)
+    expect((await t.k.refresh.run({ refreshToken: b.refreshToken })).result).toBe('OK');
+  });
+
+  test('I-T84②_재인증이맞지않으면(없음·다른세션·다른계정의토큰)403이고_참여자를부르지않으며계정은ACTIVE그대로다', async () => {
+    const t = await participantSetup([PENDING]);
+    const a = await t.login('p84-3');
+    const second = await t.login('p84-3');
+    const other = await t.login('p84-3-other');
+    const run = (token: string) => t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} });
+    expect(await code(run(''))).toBe('REAUTH_REQUIRED');
+    expect(await code(run(await t.reauthToken(second)))).toBe('REAUTH_REQUIRED');
+    expect(await code(run(await t.reauthToken(other)))).toBe('REAUTH_REQUIRED');
+    expect(t.calls).toEqual([]);
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'ACTIVE' });
+    expect(t.sessions.accountOf(a.accountId)?.closureReason).toBeUndefined();
+  });
+
+  test('I-T84③_참여자가답하지않으면(던짐)_204가아니라②와같은DEFERRED·미룸상태이고_DONE·PENDING과섞여도DONE으로접지않는다', async () => {
+    const cases: Array<[string, Array<(accountId: string) => Promise<Answer>>]> = [
+      ['alone', [NO_ANSWER]],
+      ['done-first', [DONE, NO_ANSWER]],
+      ['done-last', [NO_ANSWER, DONE]],
+      ['pending', [NO_ANSWER, PENDING]],
+    ];
+    for (const [name, answers] of cases) {
+      const t = await participantSetup(answers);
+      const a = await t.login(`p84-4-${name}`);
+      await t.verify(a.accountId, `p84-person-4-${name}`);
+      const r = await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+      expect({ name, r }).toEqual({ name, r: { outcome: 'DEFERRED' } });
+      expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureStartedAt: START, closureNextCheckAt: START + NEXT_CHECK_MS });
+      expect(t.sessions.activeCount(a.accountId)).toBe(1);
+      expect(t.sessions.withdrawnMessages()).toEqual([]);
+      expect(await t.verifications.recordOf(a.accountId)).not.toBeNull();
+      for (const p of t.participants) expect(p.calls.map((c) => c.deadlineMs)).toEqual([REQUEST_DEADLINE_MS]);
+    }
+  });
+
+  test('I-T84①_장애주입_참여자가모두DONE인데끝내기트랜잭션이실패하면_500(던짐)이아니라DEFERRED이고_계정은미룸으로남는다', async () => {
+    const t = await participantSetup([]);
+    let failNext = false;
+    let injected = 0;
+    const flaky = new Proxy(t.sessions, {
+      get(target, prop) {
+        if (prop === 'transaction')
+          return (fn: Parameters<SessionStore['transaction']>[0]) => {
+            if (failNext) {
+              failNext = false;
+              injected++;
+              return Promise.reject(new Error('주입한 DB 장애(끝내기 트랜잭션)'));
+            }
+            return target.transaction(fn);
+          };
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    // 참여자가 DONE으로 답하는 바로 그때 다음 트랜잭션(끝내기)을 실패시킨다
+    const calls: string[] = [];
+    const participant = {
+      name: 'purchase',
+      process: async (accountId: string) => {
+        calls.push(accountId);
+        failNext = true;
+        return { state: 'DONE' as const };
+      },
+    };
+    const withdraw = new (WithdrawAccount as unknown as new (...a: unknown[]) => WithdrawAccount)(flaky, new JoseReauthVerifier(t.k.keys, ISSUER, t.clock), new VerificationEraser(t.verifications), t.clock, undefined, t.staff, undefined, [participant], undefined);
+    const a = await t.login('p84-5');
+    await t.verify(a.accountId, 'p84-person-5');
+    const r = await withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(calls).toEqual([a.accountId]);
+    // 끊는 자리가 참여자 답 뒤의 끝내기 트랜잭션에 실제로 닿았다
+    expect(injected).toBe(1);
+    expect(r).toEqual({ outcome: 'DEFERRED' });
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureNextCheckAt: START + NEXT_CHECK_MS });
+    expect(t.sessions.withdrawnMessages()).toEqual([]);
+  });
+
+  test('I-T84⑤_미룬계정이새재인증토큰으로다시요청하면_참여자를다시부르고_PENDING이면DEFERRED·시작시각그대로·다음확인=다시요청시각+60초_DONE이면WITHDRAWN', async () => {
+    let next: () => Promise<Answer> = PENDING;
+    const t = await participantSetup([() => next()]);
+    const a = await t.login('p84-6');
+    await t.verify(a.accountId, 'p84-person-6');
+    expect(await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} })).toEqual({ outcome: 'DEFERRED' });
+    // 37.5초 뒤 다시 요청(60초 고리보다 앞)
+    t.clock.advance(37_500);
+    const again = t.clock.now();
+    expect(await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} })).toEqual({ outcome: 'DEFERRED' });
+    expect(t.calls.map((c) => [c.accountId, c.statusAtCall, c.reasonAtCall])).toEqual([
+      [a.accountId, 'WITHDRAWAL_PENDING', 'WITHDRAWAL'],
+      [a.accountId, 'WITHDRAWAL_PENDING', 'WITHDRAWAL'],
+    ]);
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureStartedAt: START, closureNextCheckAt: again + NEXT_CHECK_MS });
+    // 셋째 요청에서 참여자가 DONE이면 끝낸다
+    t.clock.advance(1_250);
+    next = DONE;
+    expect(await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} })).toEqual({ outcome: 'WITHDRAWN' });
+    expect(t.calls).toHaveLength(3);
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'DELETED', deletedAt: t.clock.now() });
+    expect(t.sessions.withdrawnMessages()).toHaveLength(1);
+  });
+
+  test('I-T84⑤_미룬동안로그인·토큰갱신은되고_새액세스토큰에는ticket:buy와pid가없다', async () => {
+    const t = await participantSetup([PENDING]);
+    const a = await t.login('p84-7');
+    await t.verify(a.accountId, 'p84-person-7');
+    // 미루기 전에는 ticket:buy·pid가 실린다(대조)
+    const pre = payload((await t.login('p84-7')).accessToken);
+    expect(pre.scope).toBe('ticket:buy');
+    expect(pre.pid).toEqual(expect.any(String));
+    await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('WITHDRAWAL_PENDING');
+    const s = await t.login('p84-7');
+    expect(s.accountId).toBe(a.accountId);
+    const tok = payload(s.accessToken);
+    expect(tok.scope).toBeUndefined();
+    expect(tok.pid).toBeUndefined();
+    const refreshed = await t.k.refresh.run({ refreshToken: s.refreshToken });
+    expect(refreshed.result).toBe('OK');
+    const rt = payload((refreshed as { accessToken: string }).accessToken);
+    expect(rt.scope).toBeUndefined();
+    expect(rt.pid).toBeUndefined();
+  });
+
+  test('I-T84⑥_GetVerificationStatus는살아있는세션의탈퇴미룸계정에verified거짓·withdrawalPending참이고_끝난세션·다른계정세션·UNDER_14정리중·ACTIVE계정은거짓이다', async () => {
+    const t = await participantSetup([PENDING]);
+    const a = await t.login('p84-8');
+    const ended = await t.login('p84-8');
+    await t.verify(a.accountId, 'p84-person-8');
+    // 미루기 전(ACTIVE·본인확인함): verified 참·withdrawalPending 거짓
+    expect(await t.status.run({ accountId: a.accountId, sessionId: a.sessionId })).toMatchObject({ verified: true, withdrawalPending: false });
+    await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(await t.status.run({ accountId: a.accountId, sessionId: a.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: true });
+    // 끝난 세션은 거짓
+    await t.k.end.run({ sessionId: ended.sessionId, accountId: ended.accountId });
+    expect(await t.status.run({ accountId: a.accountId, sessionId: ended.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
+    // 다른 계정의 세션으로 물어도 거짓
+    const other = await t.login('p84-8-other');
+    expect(await t.status.run({ accountId: a.accountId, sessionId: other.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
+    // 만 14세 미만 정리 중(UNDER_14)은 거짓
+    const kid = await t.login('p84-8-kid');
+    expect(await code(t.verify(kid.accountId, 'p84-kid', '2014-05-05'))).toBe('UNDER_14');
+    expect(t.sessions.accountOf(kid.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'UNDER_14' });
+    expect(await t.status.run({ accountId: kid.accountId, sessionId: kid.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
+    // ACTIVE이고 본인확인 전인 계정도 거짓
+    expect(await t.status.run({ accountId: other.accountId, sessionId: other.sessionId })).toEqual({ verified: false, pid: '', previousPid: '', withdrawalPending: false });
+  });
+
+  test('I-T84⑦_대조값보관행이있으면지금처럼409이고_계정은ACTIVE그대로이며참여자는불리지않는다_보관을확인하고다시보내면참여자를부른다', async () => {
+    const t = await participantSetup([PENDING]);
+    const a = await t.login('p84-9');
+    await t.verify(a.accountId, 'p84-person-9');
+    expect(await t.hold.run({ accountId: a.accountId, fraudCaseId: '0190f3a1-7c2e-7a00-8000-0000000084a9', state: 'CASE_OPEN', until: START + 30 * DAY, version: 1 })).toBe('OK');
+    const token = await t.reauthToken(a);
+    expect(await code(t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} }))).toBe('CONFIRMATION_REQUIRED');
+    expect(t.calls).toEqual([]);
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'ACTIVE' });
+    expect(t.sessions.accountOf(a.accountId)?.closureReason).toBeUndefined();
+    // 409는 토큰을 쓰지 않는다: 같은 토큰에 acknowledgeFraudHold를 실으면 참여자에 간다
+    expect(await t.withdrawP.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: { acknowledgeFraudHold: true } })).toEqual({ outcome: 'DEFERRED' });
+    expect(t.calls.map((c) => c.accountId)).toEqual([a.accountId]);
+  });
+
+  test('I-T84⑦_만14세미만으로정리중인계정의재인증탈퇴는_참여자를부르지않고바로끝낸다', async () => {
+    const t = await participantSetup([PENDING]);
+    const kid = await t.login('p84-10');
+    expect(await code(t.verify(kid.accountId, 'p84-kid-10', '2014-01-01'))).toBe('UNDER_14');
+    const r = await t.withdrawP.run({ accountId: kid.accountId, sessionId: kid.sessionId, reauthToken: await t.reauthToken(kid), body: {} });
+    expect(r).toEqual({ outcome: 'WITHDRAWN' });
+    expect(t.calls).toEqual([]);
+    expect(t.sessions.accountOf(kid.accountId)?.status).toBe('DELETED');
   });
 });
