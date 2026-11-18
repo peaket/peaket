@@ -103,7 +103,7 @@ const setting = (kind: string, _target: string, value: unknown, occurredAt: numb
 });
 
 describe('D-T29 시작 작업과 준비 표시', () => {
-  test('D_T29_세작업이끝나기전에는_ready가503이고남은작업을알리며_끝나면200이다', async () => {
+  test('D-T29 ①_세작업이끝나기전에는_ready가503이고남은작업을알리며_끝나면200이다', async () => {
     expect(CONTROL_SYNC_DEFAULTS).toMatchObject({ degradeAfterMs: 30_000, reconcileMs: 2_000, sessionsRewindMs: 15 * MIN });
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -117,7 +117,7 @@ describe('D-T29 시작 작업과 준비 표시', () => {
     await until(async () => (await ready()).statusCode === 200);
   });
 
-  test('D_T29_제어상태를읽지못하면_Kafka가멀쩡해도계속준비상태가아니다', async () => {
+  test('D-T29 ①_제어상태를읽지못하면_Kafka가멀쩡해도계속준비상태가아니다', async () => {
     const { ready } = await boot({
       control: async () => {
         throw new Error('sale_control 읽기 실패');
@@ -129,7 +129,7 @@ describe('D-T29 시작 작업과 준비 표시', () => {
     expect(JSON.parse(r.payload)).toEqual({ status: 'starting', pending: ['control-state'] });
   });
 
-  test('D_T29_Kafka에닿지않은채뜨면_정한시간뒤준비상태가되고_control_sync_lagging이1이며_돌아와따라잡으면0이다 [ASVS v5.0.0-16.5.2]', async () => {
+  test('D-T29 ④_Kafka에닿지않은채뜨면_정한시간뒤준비상태가되고_control_sync_lagging이1이며_돌아와따라잡으면0이다 [ASVS v5.0.0-16.5.2]', async () => {
     const broker = new FakeBroker();
     broker.up = false;
     const { s, ready } = await boot({ broker });
@@ -143,7 +143,7 @@ describe('D-T29 시작 작업과 준비 표시', () => {
     expect(sample(await s.metrics(), 'control_sync_lagging', { service: 'demo-svc', kind: 'settings' })).toBe(0);
   });
 
-  test('D_T29_D_T19_ready는의존성을부르지않는다', async () => {
+  test('D-T29 ④_D-T19 ①_ready는의존성을부르지않는다 [ASVS v5.0.0-16.5.2]', async () => {
     let reads = 0;
     const broker = new FakeBroker();
     const { ready } = await boot({ broker, control: async () => (reads++, []), options: { reconcileMs: 60_000, measureMs: 60_000 } });
@@ -153,6 +153,55 @@ describe('D-T29 시작 작업과 준비 표시', () => {
     for (let i = 0; i < 20; i += 1) expect((await ready()).statusCode).toBe(200);
     expect(broker.calls).toBe(calls);
     expect(reads).toBe(r0);
+  });
+
+  test('D-T29 ②_설정토픽을끝위치까지읽기전에는_503이고남은작업에settings가있으며_끝까지읽으면200이다', async () => {
+    const broker = new FakeBroker();
+    const t0 = Date.parse('2026-11-01T00:00:00Z');
+    for (let i = 0; i < 3; i += 1) broker.append(CONTROL_TOPICS.settings, `PLATFORM:FEATURE_FLAG:f${i}`, setting('FEATURE_FLAG', `f${i}`, { enabled: true }, t0 + i), t0 + i);
+    // 첫 사건만 넘기고 나머지(끝 위치까지)는 문을 열 때까지 쥔다
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const read = broker.read.bind(broker);
+    broker.read = (topic, from, onRecord, signal) =>
+      read(
+        topic,
+        from,
+        async (r) => {
+          if (topic === CONTROL_TOPICS.settings && r.offset >= 1n) await gate;
+          await onRecord(r);
+        },
+        signal,
+      );
+    const { ready } = await boot({ broker, options: { degradeAfterMs: 60_000 } });
+    await until(async () => (JSON.parse((await ready()).payload) as { pending?: string[] }).pending?.includes('sessions') === false);
+    await new Promise((r) => setTimeout(r, 100));
+    const before = await ready();
+    expect(before.statusCode).toBe(503);
+    expect(JSON.parse(before.payload)).toEqual({ status: 'starting', pending: ['settings'] });
+    release();
+    await until(async () => (await ready()).statusCode === 200);
+  });
+
+  test('D-T29 ③_종료세션을지금빼기15분부터되감기전에는_503이고남은작업에sessions가있으며_되감은위치는정확히지금빼기900000ms다', async () => {
+    const broker = new FakeBroker();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const offsetsAt = broker.offsetsAt.bind(broker);
+    broker.offsetsAt = async (topic, at) => {
+      const r = await offsetsAt(topic, at);
+      await gate;
+      return r;
+    };
+    const { s, ready } = await boot({ broker, options: { degradeAfterMs: 60_000 } });
+    await until(() => broker.asked.length > 0);
+    await new Promise((r) => setTimeout(r, 100));
+    const before = await ready();
+    expect(before.statusCode).toBe(503);
+    expect(JSON.parse(before.payload)).toEqual({ status: 'starting', pending: ['sessions'] });
+    expect(broker.asked[0]).toEqual({ topic: CONTROL_TOPICS.sessionsTerminated, at: s.clock.now() - 900_000 });
+    release();
+    await until(async () => (await ready()).statusCode === 200);
   });
 });
 
