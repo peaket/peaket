@@ -1,5 +1,7 @@
 // 입장 토큰 확인(docs/features/seat-hold.md §2 '구매 세션 열기와 확인의 첫 구현', ADR-0183 결정 8, ADR-0050 결정 9, BUILD_ORDER PRF-136).
-// ES256만, 공개키는 설정한 묶음(PEAKET_ADMISSION_JWKS)에서 머리의 kid로만 찾는다. Node 표준 암호 모듈로 한다(queue-svc의 서명과 같은 RFC 7515 형식, 서명은 r‖s 64바이트).
+// ES256만, 공개키는 공개키 묶음(운영은 queue-svc 묶음 주기 읽기 adapters/admission-jwks-loader.ts, local·ci는 PEAKET_ADMISSION_JWKS)에서 머리의 kid로만 찾는다.
+// Node 표준 암호 모듈로 한다(queue-svc의 서명과 같은 RFC 7515 형식, 서명은 r‖s 64바이트).
+// 묶음 원소에 peaket_until(초)이 있으면 그 키는 지금(밀리초) ≤ peaket_until × 1000일 때만 쓴다(docs/features/queue-admission.md §6 '받는 쪽의 끝 시각', ADR-0288 결정 3).
 // 순서(ASVS 9.1.1: 서명을 확인한 뒤에만 내용을 받는다): 모양 → alg → kid → 서명 → typ → 본문 모양 → iss·aud → 클레임 모양 → exp → iat.
 // 도메인 층이라 프레임워크·플랫폼 형을 가져오지 않는다(node:crypto만).
 import { createPublicKey, type KeyObject, verify } from 'node:crypto';
@@ -48,8 +50,70 @@ export interface AdmissionClaims {
   lists?: string[];
 }
 
-/** kid → 공개키 */
+/** kid → 공개키. parseAdmissionJwks가 만든 묶음(AdmissionKeyMap)은 키마다 끝 시각도 든다 */
 export type AdmissionKeys = ReadonlyMap<string, KeyObject>;
+
+/** parseAdmissionJwks가 만든 묶음: kid → 공개키와, peaket_until이 있던 키의 끝 시각(밀리초) */
+export class AdmissionKeyMap extends Map<string, KeyObject> {
+  readonly #untilMs = new Map<string, number>();
+
+  /** 그 kid의 끝 시각(peaket_until × 1000). 없으면 undefined(끝 없음) */
+  untilMs(kid: string): number | undefined {
+    return this.#untilMs.get(kid);
+  }
+
+  /** 묶음을 읽을 때만 쓴다 */
+  setUntilMs(kid: string, untilMs: number): void {
+    this.#untilMs.set(kid, untilMs);
+  }
+}
+
+/** 그 묶음에서 kid의 끝 시각(밀리초). 끝 시각을 모르는 묶음(시험이 만든 Map)이면 undefined */
+export function admissionKeyUntilMs(keys: AdmissionKeys, kid: string): number | undefined {
+  return keys instanceof AdmissionKeyMap ? keys.untilMs(kid) : undefined;
+}
+
+/**
+ * 공개키 묶음을 주는 쪽(주기 읽기, adapters/admission-jwks-loader.ts). keysFor는 그 kid가 든 묶음을 준다: 모르는 kid면 다시 읽기 한 번을 기다리고
+ * (동시에 온 요청은 하나로 묶고 30초에 한 번, 기다림 1초까지), 그래도 없으면 마지막 묶음을 준다(그 kid는 확인에서 'kid'로 거절된다).
+ * 묶음을 한 번도 받지 못했으면 AdmissionKeysUnavailable을 던진다
+ */
+export interface AdmissionKeySource {
+  keysFor(kid: string | undefined): Promise<AdmissionKeys>;
+}
+
+/** 입장 토큰 공개키 묶음을 한 번도 받지 못했다(503 dependency-unavailable, Retry-After 1초, seat-hold §2 '입장 토큰 공개키 묶음 주기 읽기') */
+export class AdmissionKeysUnavailable extends Error {
+  constructor() {
+    super('입장 토큰 공개키 묶음을 아직 받지 못했다');
+    this.name = 'AdmissionKeysUnavailable';
+  }
+}
+/** 묶음을 받지 못했을 때의 응답 이름과 제목(openapi의 이미 있는 이름. 새 이름을 만들지 않는다) */
+export const ADMISSION_KEYS_UNAVAILABLE_PROBLEM = { type: 'dependency-unavailable', title: '의존 서비스를 잠시 쓸 수 없습니다' } as const;
+/** 그때의 Retry-After(초) [가정] */
+export const ADMISSION_KEYS_RETRY_AFTER_SEC = 1;
+
+const isKeySource = (v: AdmissionKeys | AdmissionKeySource): v is AdmissionKeySource => typeof (v as Partial<AdmissionKeySource>).keysFor === 'function';
+
+/**
+ * 정적 묶음이면 그대로, 주는 쪽이면 토큰 머리의 kid로 묶음을 받는다(머리를 풀지 못하면 kid 없이).
+ * @throws AdmissionKeysUnavailable 주는 쪽이 묶음을 한 번도 받지 못했다
+ */
+export async function admissionKeysFor(keys: AdmissionKeys | AdmissionKeySource, token: unknown): Promise<AdmissionKeys> {
+  if (!isKeySource(keys)) return keys;
+  return keys.keysFor(admissionKidOf(token));
+}
+
+/** 토큰 머리의 kid(서명 확인 전이라 묶음을 고르는 데만 쓴다). 모양이 틀리면 undefined */
+export function admissionKidOf(token: unknown): string | undefined {
+  if (typeof token !== 'string' || token.length > ADMISSION_TOKEN_MAX_CHARS) return undefined;
+  const dot = token.indexOf('.');
+  if (dot <= 0) return undefined;
+  const hb = decodePart(token.slice(0, dot));
+  const header = hb ? jsonObject(hb) : undefined;
+  return typeof header?.kid === 'string' && KID.test(header.kid) ? header.kid : undefined;
+}
 
 /** 채움 없는 base64url을 바이트로. 허용 밖 글자·비정규 표기(같은 바이트의 다른 글)는 undefined */
 function decodePart(s: string): Buffer | undefined {
@@ -118,6 +182,9 @@ export function verifyAdmissionToken(token: unknown, o: { keys: AdmissionKeys; i
   if (typeof header.kid !== 'string' || !KID.test(header.kid)) throw new AdmissionTokenRejected('kid');
   const key = o.keys.get(header.kid);
   if (!key) throw new AdmissionTokenRejected('kid');
+  // 끝 시각이 지난 옛 키는 마지막 묶음에 남아 있어도 받지 않는다(지금 ≤ peaket_until × 1000까지 받는다)
+  const untilMs = admissionKeyUntilMs(o.keys, header.kid);
+  if (untilMs !== undefined && o.nowMs > untilMs) throw new AdmissionTokenRejected('kid');
   if (sb.length !== 64) throw new AdmissionTokenRejected('format');
   let ok = false;
   try {
@@ -156,10 +223,11 @@ export function verifyAdmissionToken(token: unknown, o: { keys: AdmissionKeys; i
 }
 
 /**
- * 공개키 묶음(JWKS JSON)을 읽는다(환경 값 PEAKET_ADMISSION_JWKS). EC P-256 공개키만 받고 kid가 꼭 있어야 한다.
- * 개인 성분(d)이 섞이면 던진다(비밀이 설정 값에 잘못 들어간 것). 오류 문구에는 키 값을 싣지 않는다
+ * 공개키 묶음(JWKS JSON)을 읽는다(queue-svc 묶음이나 환경 값 PEAKET_ADMISSION_JWKS). EC P-256 공개키만 받고 kid가 꼭 있어야 한다.
+ * 개인 성분(d)이 섞이면 던진다(비밀이 설정 값에 잘못 들어간 것). peaket_until이 있으면 정수(초)여야 하고 그 키의 끝 시각으로 둔다.
+ * 오류 문구에는 키 값을 싣지 않는다
  */
-export function parseAdmissionJwks(raw: string): AdmissionKeys {
+export function parseAdmissionJwks(raw: string): AdmissionKeyMap {
   let doc: unknown;
   try {
     doc = JSON.parse(raw);
@@ -168,7 +236,7 @@ export function parseAdmissionJwks(raw: string): AdmissionKeys {
   }
   const list = doc !== null && typeof doc === 'object' ? (doc as { keys?: unknown }).keys : undefined;
   if (!Array.isArray(list) || list.length === 0) throw new Error('입장 토큰 공개키 묶음에 keys가 없거나 비었다');
-  const keys = new Map<string, KeyObject>();
+  const keys = new AdmissionKeyMap();
   list.forEach((k: unknown, n: number) => {
     const at = `keys[${n}]`;
     if (k === null || typeof k !== 'object' || Array.isArray(k)) throw new Error(`입장 토큰 공개키 ${at}가 객체가 아니다`);
@@ -180,8 +248,13 @@ export function parseAdmissionJwks(raw: string): AdmissionKeys {
     if (j.use !== undefined && j.use !== 'sig') throw new Error(`입장 토큰 공개키 ${at}의 use는 sig여야 한다`);
     if (j.alg !== undefined && j.alg !== 'ES256') throw new Error(`입장 토큰 공개키 ${at}의 alg는 ES256이어야 한다`);
     if (keys.has(j.kid)) throw new Error(`입장 토큰 공개키 kid가 겹친다: ${at}`);
+    const until = j.peaket_until;
+    if (until !== undefined && (typeof until !== 'number' || !Number.isSafeInteger(until) || until < 0 || !Number.isSafeInteger(until * 1000))) {
+      throw new Error(`입장 토큰 공개키 ${at}의 peaket_until은 정수(초)여야 한다`);
+    }
     try {
       keys.set(j.kid, createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: j.x, y: j.y }, format: 'jwk' }));
+      if (typeof until === 'number') keys.setUntilMs(j.kid, until * 1000);
     } catch {
       throw new Error(`입장 토큰 공개키 ${at}의 좌표가 P-256 곡선 위의 점이 아니다`);
     }

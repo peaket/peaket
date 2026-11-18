@@ -1,7 +1,7 @@
 // 받는 층: 좌석 스냅샷(openapi GET /v1/events/{eventId}/seatmap-snapshot, docs/features/seat-hold.md §2 '스냅샷 API의 첫 구현', BUILD_ORDER PRF-137).
 // 팬 경로(역할 fan)이고 구매 세션 요청 서명은 없다(첫 사용 요청이라 구매 세션이 아직 없다). 입장 토큰은 ReadSeatSnapshot이 확인한다.
 // 거절 바꾸기: OpenSessionError TOKEN_INVALID·TOKEN_EXPIRED·FIRST_USE_EXPIRED·TOKEN_MISMATCH·TOKEN_USED 401 admission-token-invalid, SESSION_ENDED 401 purchase-session-ended(둘 다 WWW-Authenticate COOKIE_CHALLENGE, ADR-0194 결정 3, BUILD_ORDER PRF-192),
-// EVENT_MISMATCH 403, CLIENT_KEY_INVALID 400(이름 없는 본문). SnapshotError NOT_READY 503 seat-store-unavailable + Retry-After, SECTION_OUT_OF_RANGE 400.
+// EVENT_MISMATCH 403, CLIENT_KEY_INVALID 400(이름 없는 본문), KEYS_UNAVAILABLE 503 dependency-unavailable + Retry-After 1초(공개키 묶음을 한 번도 받지 못함, BAT-057). SnapshotError NOT_READY 503 seat-store-unavailable + Retry-After, SECTION_OUT_OF_RANGE 400.
 // SeatStoreUnavailable 503(까닭은 싣지 않는다). 그 밖의 오류는 키 이름을 지워(sanitizedStoreError) 던진다. 응답: 200 application/octet-stream, no-store(오류도).
 // 경로 스키마(@ContractRouteSchema)가 주소의 회차 ID 모양(KEY_PART)과 section(정수 0 ~ 65535, 한 번만)을 본다 — 틀리면 400이다(ASVS 15.3.7).
 import { ForbiddenException, Controller, Get, Headers, Inject, Optional, Param, Query, Res } from '@nestjs/common';
@@ -91,6 +91,8 @@ export class SnapshotController {
           return new RequestValidationError('임시 공개키 머리가 없거나 모양이 틀리다');
         case 'SESSION_ENDED':
           return this.#hold(new HoldError('SESSION_NOT_FOUND', '이 입장 토큰의 구매 세션이 이미 끝났다', { cause: e }), reply);
+        case 'KEYS_UNAVAILABLE':
+          return this.#hold(new HoldError('ADMISSION_KEYS_UNAVAILABLE', '입장 토큰 공개키 묶음을 아직 받지 못했다', { cause: e }), reply);
         default:
           void reply.header('www-authenticate', COOKIE_CHALLENGE);
           return new ProblemError({ ...ADMISSION_TOKEN_INVALID, cause: e });
