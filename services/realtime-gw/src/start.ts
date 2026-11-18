@@ -15,6 +15,10 @@ export const SHUTDOWN_DEADLINE_MS = 10_000;
 
 /** 보낸 maxWaitMs의 히스토그램 경계(ms). 경보는 p99 150ms [가정]이다(seat-hold §7 운영 확인 표) */
 const BATCH_WAIT_BUCKETS_MS = [5, 10, 25, 50, 75, 100, 150, 200, 300, 500, 1_000, 5_000, 65_535];
+/** 박자 늦음(박자 시작 − 예정 시각)의 히스토그램 경계(ms). 판정 기준 25·50ms를 경계에 둔다(ADR-0298 결정 1·7) */
+const TICK_LAG_BUCKETS_MS = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1_000, 5_000];
+/** 좌석 Redis에서 받기까지의 퍼짐(받은 벽시각 − changedAtMs)의 히스토그램 경계(ms, 판정에는 쓰지 않는다) */
+const PUBSUB_LAG_BUCKETS_MS = [1, 5, 10, 25, 50, 100, 250, 500, 1_000, 5_000, 60_000];
 
 export interface StartOptions {
   env: Record<string, string | undefined>;
@@ -67,10 +71,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
       subscriber,
       sectionCount: (eventId) => layout.count(eventId),
       onMetric: (name, labels, value) => sinks.get(name)?.(labels, value),
-      // 파드가 바뀔 때 정규 로그 줄 하나(바뀐 쪽, 마지막 창의 n·a·b, ADR-0298 결정 7). 연결마다의 바뀜은 남기지 않는다
+      // 파드가 바뀔 때 정규 로그 줄 하나(바뀐 쪽, 마지막 창의 n·a·b와 박자 수, ADR-0298 결정 7). 연결마다의 바뀜은 남기지 않는다
       onDegradedChange: (e) =>
         canonical?.info(
-          { event: 'realtime_gw_degraded', degraded: e.degraded, batches: e.batches, over60: e.over60, over30: e.over30 },
+          { event: 'realtime_gw_degraded', degraded: e.degraded, batches: e.batches, overEnter: e.overEnter, overExit: e.overExit, ticks: e.ticks },
           e.degraded ? '좌석 전파를 Degraded(1초 묶음)로 바꿨다' : '좌석 전파를 평시(100ms 묶음)로 되돌렸다',
         ),
     });
@@ -133,6 +137,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const bufferSlow = new Gauge({ name: 'realtime_gw_buffer_slow_connections', help: '보내기 버퍼로 1초 묶음 간격이 된 연결 수(ADR-0298)', registers });
     bufferSlow.set(0);
     sinks.set('realtime_gw_degraded', (_l, v) => degraded.set(v));
+    const tickLag = new Histogram({ name: 'realtime_gw_tick_lag_ms', help: '박자마다 시작 시각 − 예정 시각(지난 박자 시작 + 100ms)(ms, ADR-0298)', buckets: TICK_LAG_BUCKETS_MS, registers });
+    const pubsubLag = new Histogram({ name: 'realtime_gw_pubsub_lag_ms', help: '좌석 채널 메시지를 받은 벽시각 − changedAtMs(ms, 시계 차이가 든다, ADR-0298)', buckets: PUBSUB_LAG_BUCKETS_MS, registers });
+    sinks.set('realtime_gw_tick_lag_ms', (_l, v) => tickLag.observe(v));
+    sinks.set('realtime_gw_pubsub_lag_ms', (_l, v) => pubsubLag.observe(v));
     sinks.set('realtime_gw_buffer_slow_connections', (_l, v) => bufferSlow.set(v));
     sinks.set('realtime_gw_batches_total', (_l, v) => batches.inc(v));
     sinks.set('realtime_gw_batch_bytes_total', (_l, v) => batchBytes.inc(v));
