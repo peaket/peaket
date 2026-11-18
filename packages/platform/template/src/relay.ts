@@ -1,7 +1,7 @@
 // 서비스별 Outbox 릴레이 프로세스 시작(ADR-0116 결정 1·2, BUILD_ORDER FND-110).
 // 서비스와 같은 이미지를 다른 시작 명령으로 띄운다: node --import @peaket/platform/telemetry/register dist/relay.js
 // 배포는 `<서비스>-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더만 보내고 정비를 돈다.
-import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, startOutboxRelayProcess } from '@peaket/platform';
+import { createDatabase, inClusterLeaseApi, kafkaAuthFromEnv, loadOutboxRelayProcessConfig, onSigterm, startOutboxRelayProcess } from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
 
 const SERVICE = 'example-svc';
@@ -40,7 +40,8 @@ const shutdown = async (why: string, code: number) => {
   }
   process.exit(code);
 };
-process.once('SIGTERM', () => void shutdown('SIGTERM', 0));
+// SIGTERM은 공용 처리기로 한 번만 받는다(두 번째 SIGTERM이 마무리를 끊지 않게, BUILD_ORDER BAS-080)
+onSigterm(() => shutdown('SIGTERM', 0));
 process.once('SIGINT', () => void shutdown('SIGINT', 0));
 
 try {

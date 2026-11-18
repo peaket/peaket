@@ -3,10 +3,12 @@
 // - 연결 시작 매개변수로 statement_timeout을 보내지 않는다(PgBouncer 트랜잭션 풀링이 거절하거나 버린다, ADR-0070)
 // - 트랜잭션에만 걸 값은 첫 문장에서 set_config(…, true)(= SET LOCAL)로 건다. 끝나면 사라진다(ADR-0083)
 // - SQL형 빌더만 쓴다(Relational Queries를 쓰지 않으므로 스키마를 넘기지 않는다, ADR-0037 결정 1)
+// - 풀 대기 초과는 db_pool_wait_timeout_total{service}, 서버 상한으로 취소된 문장(SQLSTATE 57014)은 db_statement_timeout_total{role}로 센다(ADR-0070, BUILD_ORDER BAS-080)
 import { type DynamicModule, Global, Module } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { type NodePgDatabase, drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
+import { TIMEOUT_METRICS } from './metrics.js';
 import { serverBusy } from './problem.js';
 
 export type DatabaseProfile = 'hot' | 'general';
@@ -24,22 +26,88 @@ export const POOL_DEFAULTS = {
  */
 const CONNECT_TIMEOUTS: ReadonlySet<string> = new Set(['timeout exceeded when trying to connect', 'Connection terminated due to connection timeout']);
 
-const toBusy = (err: unknown): unknown => (err instanceof Error && CONNECT_TIMEOUTS.has(err.message) ? serverBusy(err) : err);
+/** 서버 상한(statement_timeout)으로 취소된 문장의 SQLSTATE. 사람이 끊은 문장(pg_cancel_backend)도 같은 값이다 */
+const STATEMENT_TIMEOUT_SQLSTATE = '57014';
+
+const isStatementTimeout = (err: unknown): boolean => typeof err === 'object' && err !== null && (err as { code?: unknown }).code === STATEMENT_TIMEOUT_SQLSTATE;
 
 type ConnectCallback = (err: Error | undefined, client: pg.PoolClient | undefined, done: (release?: unknown) => void) => void;
 
-/** 풀 대기 초과를 429 server-busy로 바꾸는 풀. 질의(pool.query)도 안에서 connect를 부르므로 함께 바뀐다 */
+const COUNTED = Symbol('peaket.platform.statementTimeoutCounted');
+
+/**
+ * 연결 하나의 query가 57014로 실패하면 센다. 약속을 돌려주는 꼴은 같은 거부를 이은 약속을, 콜백 꼴은 감싼 콜백을 쓴다(부른 쪽이 받는 값은 같다).
+ * 그 밖의 꼴(Submittable)은 그대로 넘긴다. 연결마다 한 번만 감싼다
+ */
+function countStatementTimeouts(client: pg.PoolClient, onTimeout: () => void): void {
+  const marked = client as pg.PoolClient & { [COUNTED]?: true };
+  if (marked[COUNTED]) return;
+  marked[COUNTED] = true;
+  const query = client.query as (...args: unknown[]) => unknown;
+  (client as unknown as { query: (...args: unknown[]) => unknown }).query = function (this: unknown, ...args: unknown[]) {
+    const last = args.length - 1;
+    const callback = args[last];
+    if (typeof callback === 'function') {
+      args[last] = function (this: unknown, err: unknown, ...rest: unknown[]) {
+        if (isStatementTimeout(err)) onTimeout();
+        return (callback as (...a: unknown[]) => unknown).call(this, err, ...rest);
+      };
+      return query.apply(this, args);
+    }
+    const r = query.apply(this, args);
+    if (r instanceof Promise) {
+      return r.catch((err: unknown) => {
+        if (isStatementTimeout(err)) onTimeout();
+        throw err;
+      });
+    }
+    return r;
+  };
+}
+
+/** 풀 대기 초과를 429 server-busy로 바꾸고 시간 초과를 세는 풀. 질의(pool.query)도 안에서 connect를 부르므로 함께 바뀐다 */
 class PlatformPool extends pg.Pool {
+  readonly #labels: { service: string; role: string };
+
+  constructor(config: pg.PoolConfig, labels: { service: string; role: string }) {
+    super(config);
+    this.#labels = labels;
+  }
+
+  #toBusy(err: unknown): unknown {
+    if (!(err instanceof Error && CONNECT_TIMEOUTS.has(err.message))) return err;
+    TIMEOUT_METRICS.dbPoolWaitTimeouts.inc({ service: this.#labels.service });
+    return serverBusy(err);
+  }
+
+  #counted(client: pg.PoolClient | undefined): pg.PoolClient | undefined {
+    if (client) countStatementTimeouts(client, () => TIMEOUT_METRICS.dbStatementTimeouts.inc({ role: this.#labels.role }));
+    return client;
+  }
+
   override connect(): Promise<pg.PoolClient>;
   override connect(callback: ConnectCallback): void;
   override connect(callback?: ConnectCallback): Promise<pg.PoolClient> | void {
     if (callback) {
-      super.connect((err, client, done) => callback(err ? (toBusy(err) as Error) : undefined, client, done));
+      super.connect((err, client, done) => callback(err ? (this.#toBusy(err) as Error) : undefined, this.#counted(client), done));
       return;
     }
-    return super.connect().catch((err: unknown) => {
-      throw toBusy(err);
-    });
+    return super.connect().then(
+      (client) => this.#counted(client)!,
+      (err: unknown) => {
+        throw this.#toBusy(err);
+      },
+    );
+  }
+}
+
+/** 접속 주소의 사용자 이름(DB 역할). 읽지 못하면 undefined다. 비밀번호는 읽지 않는다 */
+function roleOf(url: string): string | undefined {
+  try {
+    const name = decodeURIComponent(new URL(url).username);
+    return name === '' ? undefined : name;
+  } catch {
+    return undefined;
   }
 }
 
@@ -54,6 +122,10 @@ export interface DatabaseOptions {
   connectionTimeoutMillis?: number;
   /** pg_stat_activity의 application_name(서비스 이름) */
   applicationName?: string;
+  /** db_pool_wait_timeout_total의 service 라벨. 기본 applicationName(없으면 unknown) */
+  service?: string;
+  /** db_statement_timeout_total의 role 라벨(DB 역할). 기본 접속 주소의 사용자 이름(없으면 unknown) */
+  role?: string;
 }
 
 export type DbTransaction = Parameters<Parameters<NodePgDatabase['transaction']>[0]>[0];
@@ -84,14 +156,17 @@ export function createDatabase(o: DatabaseOptions): Database {
   if (o.connectionTimeoutMillis !== undefined && (!Number.isInteger(o.connectionTimeoutMillis) || o.connectionTimeoutMillis < 1)) {
     throw new RangeError(`connectionTimeoutMillis는 양의 정수(ms)여야 한다: ${String(o.connectionTimeoutMillis)}`);
   }
-  const pool = new PlatformPool({
-    connectionString: o.url,
-    max: o.max ?? 10,
-    connectionTimeoutMillis: o.connectionTimeoutMillis ?? POOL_DEFAULTS.connectionTimeoutMillis[profile],
-    idleTimeoutMillis: POOL_DEFAULTS.idleTimeoutMillis,
-    maxLifetimeSeconds: POOL_DEFAULTS.maxLifetimeSeconds,
-    application_name: o.applicationName,
-  });
+  const pool = new PlatformPool(
+    {
+      connectionString: o.url,
+      max: o.max ?? 10,
+      connectionTimeoutMillis: o.connectionTimeoutMillis ?? POOL_DEFAULTS.connectionTimeoutMillis[profile],
+      idleTimeoutMillis: POOL_DEFAULTS.idleTimeoutMillis,
+      maxLifetimeSeconds: POOL_DEFAULTS.maxLifetimeSeconds,
+      application_name: o.applicationName,
+    },
+    { service: o.service ?? o.applicationName ?? 'unknown', role: o.role ?? roleOf(o.url) ?? 'unknown' },
+  );
   // 쉬는 연결의 오류(서버 재시작 등)가 프로세스를 죽이지 않게 받는다. 그 연결은 풀이 버린다
   pool.on('error', () => {});
   const db = drizzle({ client: pool });
