@@ -34,6 +34,12 @@ const swState = (page) =>
  */
 async function controlled(page, context) {
   await stubFanApi(context);
+  // 워커 스크립트가 운영 서버에서 나오는지 먼저 본다(BAT-171 시험 이의 6: 3차 CI에서 standalone 서버가 /serwist/sw.js를 다시 묶으려다
+  // app/sw.ts를 찾지 못해 실패했고, 등록이 한 번도 생기지 않았다). 실패하면 등록 기다림 대신 이 메시지로 끝난다
+  const sw = await page.request.get(`${WEB}/serwist/sw.js`);
+  expect(sw.status(), `/serwist/sw.js 응답 ${sw.status()} ${(await sw.text()).slice(0, 200)}`).toBe(200);
+  expect(sw.headers()['content-type'] ?? '', '/serwist/sw.js가 스크립트가 아니다').toMatch(/javascript/);
+  expect(sw.headers()['service-worker-allowed'], '/serwist/sw.js에 Service-Worker-Allowed가 없다').toBe(SCOPE);
   await page.goto(`${WEB}${SCOPE}`, { waitUntil: 'networkidle' });
   // 등록이 활성(activating·activated)이 될 때까지 기다린다. page.waitForFunction은 비동기 판정 함수가 돌려준 Promise를 참으로 읽어
   // 기다리지 않는다(BAT-171 시험 이의 5, 2차 CI에서 바로 뒤 상태가 scope·active 모두 null). 월렛 화면은 오프라인 배너 뒤 Serwist 덩어리를 받아 늦게 등록한다
