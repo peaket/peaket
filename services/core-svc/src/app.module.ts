@@ -3,7 +3,7 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import { type Database, databaseModule } from '@peaket/platform';
 import { CatalogModule, type MediaWiring, type MemoryCatalogRepository, type SaleConfigStore } from './modules/catalog/index.js';
 import { ReviewModule, type DatabaseReviewWiring, type MemoryReviewWiring } from './modules/review/index.js';
-import { ShopModule, type DatabaseShopWiring, type MemoryShopWiring } from './modules/shop/index.js';
+import { ShopModule, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock, type DatabaseShopWiring, type MemoryShopWiring } from './modules/shop/index.js';
 import { NotifyModule } from './modules/notify/index.js';
 import type { NotificationTransport } from './modules/notify/index.js';
 import type { WebhookStore } from './modules/notify/domain/ports.js';
@@ -22,7 +22,8 @@ export class AppModule {
           searchDatabase?: Database;
           media: MediaWiring;
           review?: Omit<DatabaseReviewWiring, 'database'>;
-          shop?: Omit<DatabaseShopWiring, 'database' | 'partnerDatabase'>;
+          /** 굿즈 주문의 재고 Redis·payment-svc·ticket-svc. 빠진 것은 '늘 실패' 어댑터(그 경로만 503)다 */
+          shop?: Partial<Omit<DatabaseShopWiring, 'database' | 'partnerDatabase'>>;
           notify?: { notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> };
           exportJwks?: { url: string; issuer: string };
           identityGrpc?: string;
@@ -49,7 +50,15 @@ export class AppModule {
           databaseModule(o.database),
           CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), ...(o.searchDatabase ? { searchDatabase: o.searchDatabase } : {}), media: o.media }),
           ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}) }),
-          ShopModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.shop?.commission ? { commission: o.shop.commission } : {}) }),
+          ShopModule.register({
+            storage: 'database',
+            database: o.database,
+            partnerDatabase: o.partnerDatabase,
+            ...(o.shop ?? {}),
+            stock: o.shop?.stock ?? unavailableMerchStock,
+            payments: o.shop?.payments ?? unavailableMerchPayments,
+            held: o.shop?.held ?? unavailableHeldTickets,
+          }),
           NotifyModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
           ExportModule.register({
             storage: 'database',

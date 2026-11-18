@@ -1,5 +1,5 @@
 // shop 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
-import type { ProductListPage, ProductStore } from '../domain/ports.js';
+import type { ProductListPage, ProductStore, StockChange } from '../domain/ports.js';
 import type { ProductFilter, ProductRecord } from '../domain/product.js';
 
 const encodeCursor = (p: ProductRecord): string => Buffer.from(`${p.updatedAt.getTime()}:${p.productId}`).toString('base64url');
@@ -39,11 +39,19 @@ export class MemoryProductStore implements ProductStore {
     this.rows.set(record.productId, { ...record, attributes: { ...record.attributes }, fulfillments: [...record.fulfillments] });
   }
 
-  async save(promoterId: string, record: ProductRecord, expectedVersion: number): Promise<ProductRecord | 'conflict'> {
+  async save(promoterId: string, record: ProductRecord, expectedVersion: number, change: StockChange = { kind: 'set', stock: record.stock ?? 0 }): Promise<ProductRecord | 'conflict' | 'stock-negative'> {
     const current = await this.find(promoterId, record.productId);
     if (!current) throw new Error('not-found');
     if (current.version !== expectedVersion) return 'conflict';
-    const next = { ...record, promoterId, version: current.version + 1, attributes: { ...record.attributes }, fulfillments: [...record.fulfillments] };
+    let stock: number | null = current.stock;
+    if (change.kind === 'set') stock = change.stock;
+    else if (change.kind === 'remove') stock = null;
+    else if (change.kind === 'delta') {
+      stock = (current.stock ?? 0) + change.delta;
+      if (stock < 0) return 'stock-negative';
+    }
+    if (record.limitedQty === null) stock = null;
+    const next = { ...record, stock, promoterId, version: current.version + 1, attributes: { ...record.attributes }, fulfillments: [...record.fulfillments] };
     this.rows.set(record.productId, next);
     return next;
   }
