@@ -75,3 +75,38 @@ test('[ASVS v5.0.0-13.4.1] public을 standalone으로 복사할 때 점으로 �
     rmSync(appDir, { recursive: true, force: true });
   }
 });
+
+// BAT-171 시험 이의 6·7(시험 담당 l2-bat171-test, docs/frontend.md §5.4 '서비스 워커'·§5.18 '앱 서버 실행'): 월렛 서비스 워커는 빌드 때
+// <dist>/serwist/sw.js로 묶어 두고 경로 처리기는 그 파일만 읽는다. standalone 서버(자기 폴더에서 뜬다)가 찾도록 그 폴더를 standalone 안 같은 자리로 복사한다
+test('HOT-390 standalone 폴더에 빌드 때 묶은 월렛 서비스 워커(<dist>/serwist)를 같은 자리로 복사한다', () => {
+  for (const dist of ['.next', '.next-poc']) {
+    const appDir = mkdtempSync(join(tmpdir(), 'peaket-standalone-'));
+    try {
+      mkdirSync(join(appDir, dist, 'serwist'), { recursive: true });
+      mkdirSync(join(appDir, dist, 'standalone', 'apps', 'web'), { recursive: true });
+      writeFileSync(join(appDir, dist, 'serwist', 'sw.js'), 'self.__v = 10;\n');
+      writeFileSync(join(appDir, dist, 'standalone', 'apps', 'web', 'server.js'), '// server');
+      assert.equal(prepareStandalone(appDir, dist), true);
+      const copied = join(appDir, dist, 'standalone', 'apps', 'web', dist, 'serwist', 'sw.js');
+      assert.ok(existsSync(copied), `${dist}: standalone 안에 serwist/sw.js가 없다`);
+      assert.equal(readFileSync(copied, 'utf8'), 'self.__v = 10;\n', dist);
+    } finally {
+      rmSync(appDir, { recursive: true, force: true });
+    }
+  }
+  // 워커 폴더가 없으면(개발 빌드 등) 빈 폴더를 만들지 않는다
+  const appDir = fixture();
+  try {
+    assert.equal(prepareStandalone(appDir, '.next'), true);
+    assert.equal(existsSync(join(appDir, '.next', 'standalone', 'apps', 'web', '.next', 'serwist')), false);
+  } finally {
+    rmSync(appDir, { recursive: true, force: true });
+  }
+});
+
+test('HOT-390 standalone이 복사하는 워커 폴더 이름은 빌드 때 워커를 쓰는 폴더 이름(scripts/service-worker.mjs)과 같다', async () => {
+  const server = await import('./standalone.mjs');
+  const script = await import('../scripts/service-worker.mjs');
+  assert.equal(typeof server.SW_DIR, 'string', 'server/standalone.mjs가 워커 폴더 이름을 내놓지 않는다');
+  assert.equal(server.SW_DIR, script.SW_DIR);
+});
