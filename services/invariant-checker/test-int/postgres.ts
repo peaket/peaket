@@ -67,7 +67,7 @@ export const SCHEMA: Record<'purchase' | 'payment' | 'ticket', string> = {
     CREATE TABLE ticket_issue_job (order_id uuid PRIMARY KEY, event_id uuid NOT NULL, attempts int NOT NULL DEFAULT 0, next_attempt_at timestamptz, issue_due_at timestamptz NOT NULL, last_error text, created_at timestamptz NOT NULL);
   `,
   payment: `
-    CREATE TABLE payment (id uuid PRIMARY KEY, order_id uuid NOT NULL, event_id uuid NOT NULL, attempt_id uuid, pg text NOT NULL, pg_payment_ref text, pg_confirm_token text, amount int NOT NULL,
+    CREATE TABLE payment (id uuid PRIMARY KEY, order_id uuid NOT NULL, order_kind text NOT NULL DEFAULT 'TICKET' CHECK (order_kind IN ('TICKET', 'MERCH')), event_id uuid, CHECK ((order_kind = 'TICKET') = (event_id IS NOT NULL)), attempt_id uuid, pg text NOT NULL, pg_payment_ref text, pg_confirm_token text, amount int NOT NULL,
       status text NOT NULL, virtual_account_no text, idempotency_key text, card_bin text, created_at timestamptz NOT NULL DEFAULT now(), approved_at timestamptz, status_changed_at timestamptz);
     CREATE TABLE payment_event (payment_id uuid NOT NULL, seq bigint NOT NULL, type text NOT NULL, occurred_at timestamptz NOT NULL, PRIMARY KEY (payment_id, seq));
     CREATE TABLE payment_cancel (id uuid PRIMARY KEY, payment_id uuid NOT NULL, amount int NOT NULL, idempotency_key text, status text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), canceled_at timestamptz);

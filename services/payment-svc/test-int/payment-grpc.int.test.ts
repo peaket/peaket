@@ -76,7 +76,9 @@ const COLUMNS: Record<string, Record<string, [string, 'YES' | 'NO']>> = {
   payment: {
     id: ['uuid', 'NO'],
     order_id: ['uuid', 'NO'],
-    event_id: ['uuid', 'NO'],
+    // 굿즈(MERCH)는 회차 칸을 비운다(마이그레이션 0022, ADR-0299 결정 1)
+    event_id: ['uuid', 'YES'],
+    order_kind: ['text', 'NO'],
     attempt_id: ['uuid', 'NO'],
     attempt_no: ['integer', 'NO'],
     pg: ['text', 'NO'],
@@ -193,6 +195,7 @@ describe('마이그레이션과 표 모양', () => {
     expect(rows).toEqual([
       { table_name: 'payment', column_name: 'cancelled_amount', column_default: '0' },
       { table_name: 'payment', column_name: 'created_at', column_default: 'now()' },
+      { table_name: 'payment', column_name: 'order_kind', column_default: "'TICKET'::text" },
       { table_name: 'payment', column_name: 'pg_store', column_default: "'STANDARD'::text" },
       { table_name: 'payment', column_name: 'query_attempts', column_default: '0' },
       { table_name: 'payment_confirm_job', column_name: 'attempts', column_default: '0' },
