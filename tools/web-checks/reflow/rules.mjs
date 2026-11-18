@@ -113,6 +113,8 @@ if (!seatDemo?.sessionStorage) throw new Error('budgets/pages.mjs에 좌석 화�
  * 시험할 주요 흐름. 소비자 웹·파트너·관제의 대표 화면만 돈다(전 화면은 출시 후보). 항목은 { app, path, locale, sessionStorage? }.
  * - 소비자 웹 en은 주소 접두 /en으로 돈다(§5.12). en 접두 경로가 있는 화면만(지금은 공연 상세) en을 싣는다. 파트너·관제는 ko만이다.
  * - sessionStorage(키 → 문자열)는 reflow.spec이 페이지 스크립트보다 먼저 넣는다. 운영 빌드는 ?state=를 무시하므로 미리보기로 열지 않는다
+ * - 경로는 앱이 다른 경로로 넘기지 않고 바로 그리는 도착 경로다. 관제 첫 화면 `/`는 라우터가 `/dashboard`로 넘기므로 `/dashboard`를 적는다
+ *   (docs/frontend.md §5.17 '화면 목록의 경로', BAT-171 F3)
  */
 export const REFLOW_PAGES = [
   { app: 'web', locale: 'ko', path: '/' },
@@ -122,5 +124,5 @@ export const REFLOW_PAGES = [
   { app: 'web', locale: 'ko', path: '/my/tickets' },
   { app: 'web', locale: 'ko', path: '/search' },
   { app: 'partner', locale: 'ko', path: '/events' },
-  { app: 'console', locale: 'ko', path: '/' },
+  { app: 'console', locale: 'ko', path: '/dashboard' },
 ];
