@@ -276,6 +276,63 @@ describe('SR-T4 PostgreSQL 어댑터의 query.converted(§3.2 ④)', () => {
   });
 });
 
+// 리뷰 반영 R166-1(계획 '리뷰' 절): 검색이 검색 전용 연결을 쥔 채 TS 계산을 하면, 주 스레드가 바쁠 때 연결을 쥐는 시간이 늘어 대기 100ms(search.md:244)를 넘는 503이 는다
+// (SR-T13 ① 둘째·셋째, search.md:306, ADR-0271 결정 23 '주 스레드가 다 차지 않게'). 연결을 쥔 시간은 연결 묶음의 acquire → release 사이로 잰다.
+// 계산 시간은 어댑터가 받는 사전 함수(keysOf·correct)를 느리게 해 넣는다. 기준 값은 넣은 계산 시간에 대한 비율이라 코드 상수와 무관하다
+describe('R166-1 검색 연결을 쥐는 구간', () => {
+  const spin = (ms: number) => {
+    const end = performance.now() + ms;
+    while (performance.now() < end);
+  };
+
+  async function heldWhile(index: (db: Database) => DrizzleSearchIndex, input: string) {
+    const searchDb = createDatabase({ url: pg.url, applicationName: 'core-svc-bat166-hold', max: 2 });
+    const since = new Map<unknown, number>();
+    let held = 0;
+    searchDb.pool.on('acquire', (c) => since.set(c, performance.now()));
+    searchDb.pool.on('release', (_e: unknown, c: unknown) => {
+      const t = since.get(c);
+      if (t !== undefined) held += performance.now() - t;
+      since.delete(c);
+    });
+    try {
+      const out = await index(searchDb).search(query(input));
+      return { out, held };
+    } finally {
+      await searchDb.close();
+    }
+  }
+
+  test('SR-T13 ① R166-1 검색은 검색 전용 연결을 쥔 동안 질의만 하고, 후보의 이름 비교·등급 계산은 연결을 돌려준 뒤에 한다', async () => {
+    let busy = 0;
+    // 사전에서 이름 비교 값을 찾을 때마다 5ms씩 주 스레드를 쓴다(후보 10개 × 이름 셋이면 약 150ms)
+    const slow = (n: string) => {
+      spin(5);
+      busy += 5;
+      return normalizePkg.nameKeys(n);
+    };
+    const { out, held } = await heldWhile((db) => new DrizzleSearchIndex(db, 'https://img.test', { keysOf: slow }), '아티스트007');
+    expect(out.total).toBe(10);
+    // 계산을 실제로 넣었다(0이면 이 시험은 아무것도 보지 않는다)
+    expect(busy).toBeGreaterThanOrEqual(100);
+    // 연결을 쥔 시간은 넣은 계산 시간의 절반보다 짧다(계산이 연결을 쥔 구간 밖에 있다)
+    expect(held).toBeLessThan(busy / 2);
+  });
+
+  test('SR-T13 ① R166-1 0건 오타 제안 계산도 검색 전용 연결을 돌려준 뒤에 한다', async () => {
+    let busy = 0;
+    const slowCorrect = () => {
+      spin(200);
+      busy += 200;
+      return null;
+    };
+    const { out, held } = await heldWhile((db) => new DrizzleSearchIndex(db, 'https://img.test', { correct: slowCorrect }), '없는공연이름하나');
+    expect(out.total).toBe(0);
+    expect(busy).toBe(200);
+    expect(held).toBeLessThan(busy / 2);
+  });
+});
+
 describe('A4 게이지 search_pool_waiting', () => {
   test('SR-T13 ① 게이지 search_pool_waiting은 검색 전용 연결을 기다리는 요청 수이고 대기가 풀리면 0이며, 대기 한도를 넘긴 요청은 SearchUnavailable(pool-timeout)이다', async () => {
     // 묶음 크기 2·대기 1,500ms(운영 상수 10·100ms와 다르게)
