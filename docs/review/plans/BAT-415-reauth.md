@@ -157,6 +157,45 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
   - **건너뜀 11(세지 않는다)**: `cancel-reauth-http.test.ts`의 실제 확인기 조립 둘(①·②×2·③×4·④·⑤×2, 그리고 공개키 묶음 못 받음 ⑤)은 `beforeAll`에서 `JwksFanReauthGate is not a constructor`로 조립이 깨져 돌지 않았다.
 - 구현 전 트리에서 단언 실패를 보지 못한 시험 20개(어댑터·조립 함수·실제 확인기 HTTP)는 계획 §5 끝 줄대로 검증 담당의 틀린 구현(§9 M1~M14)으로 실패를 한 번 본다.
 
+### 리뷰 반영 재현
+
+- 담당: 시험 `l3-b415r-test`(구현을 맡지 않음), 2026-11-18. '리뷰 반영 계획' §2의 T1~T11을 썼다. 트리는 고치기 전 머리 `44f0d12a`(리뷰 반영 계획 커밋. `src`는 `f0aab468`과 같다)에 시험 파일 넷만 바꾼 그대로다. 따로 꺼낸 폴더는 쓰지 않았다. 단언 값(5분 30초 = 330,000ms, 읽기 상한 1,000ms, 까닭 이름표, `Retry-After` `5`)은 transfer-refund §3.1 '공개키 묶음 읽기'·'한 번 쓰기'·'답'·'거절 기록'·'시작 조립'과 data.md §3 `reauth:jti:{jti}`에서 가져왔다.
+- 명령: `cd /d/ticketpass-lane3/services/purchase-svc && npx vitest run test/cancel-reauth-http.test.ts test/jwks-fan-reauth-gate.test.ts test/fan-reauth-wiring.test.ts` → 39개 가운데 **실패 13·통과 26**. 전체 `npx vitest run`은 132 파일·4,173개 가운데 실패 13(같은 13)·통과 4,160. `npx tsc -p tsconfig.json --noEmit`은 오류 2(아래 '새 이름'). `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(출발점과 같음).
+- 시험 도구(`test/fan-reauth-fixtures.ts`)에 더한 것: 가짜 `fetch`의 `hang` 모드(받은 `AbortSignal`이 끊을 때까지 답하지 않음), `unsignedReauth`(alg none), `hs256Reauth`(공개키 좌표를 비밀로 쓴 HS256).
+
+| # | 시험(파일) | 지금 트리 | 까닭 |
+| --- | --- | --- | --- |
+| T1 | `R-T39 ② 남은 수명이 5분 30초를 넘는 토큰은 거절하고 jti를 잡지 않는다`(어댑터. 앞 '정확한 수명' 시험의 600초 줄을 옮겨 뒤집음) | 실패(재현) | 남은 330,000ms의 `PX`가 `'300000'`(공용 상한 5분)이라 첫 단언에서 멈춤 |
+| T1 | `R-T39 ② 남은 수명이 5분 30초를 넘는 토큰(600초)은 403이고 jti를 잡지 않는다`(HTTP) | 실패(재현) | 202를 받음 |
+| T2 | `R-T39 ⑤ 공개키 묶음 안의 키가 깨지면 503 reauth-unavailable이다`(HTTP) | 실패(재현) | 500을 받음 |
+| T2 | `R-T39 ⑤ 공개키 묶음 안의 키가 깨지면(같은 kid 키 둘, ERR_JWKS_MULTIPLE_MATCHING_KEYS) 어댑터는 ReauthUnavailable을 던진다`(어댑터) | 실패(재현) | jose `JWKSMultipleMatchingKeys`를 그대로 던짐 |
+| T3 | `R-T39 ② 모르는 crit 머리의 토큰은 403이다`(HTTP) | 실패(재현) | 500을 받음(jose `ERR_JOSE_NOT_SUPPORTED`를 그대로 던짐) |
+| T4 | `R-T39 ⑦ 확인기가 뜻밖의 오류를 내면 500이고 Retry-After가 없으며 아무것도 부르지 않는다`(HTTP 확인기 대역) | 처음부터 통과(검증이 틀린 구현으로 실패를 본다: V7 '모든 오류를 503') | 컨트롤러가 `ReauthUnavailable`만 503으로 바꾼다 |
+| T5 | `R-T39 ② 거절마다 까닭 이름표 하나를 로그에 남기고 토큰·계정 ID는 싣지 않는다`(HTTP, 21가지 + 다시 씀 `replay`) | 실패(새 이름) | `onResult`가 없어 기록 0줄(첫 줄 '머리 없음'에서 멈춤) |
+| T5 | `R-T39 ⑤ 확인하지 못함은 까닭 store 하나를 남긴다(jti 저장소 오류)`(HTTP) | 실패(새 이름) | 기록 0줄 |
+| T5 | `R-T39 ⑤ 팬 공개키 묶음을 받지 못하면 503 …, 살아나면 새 토큰으로 202다`(HTTP, 앞 시험에 까닭 `keys` 단언 한 줄을 더함) | 실패(새 이름) | 503·호출 0은 통과, 까닭 `keys` 기록 0줄 |
+| T6 | `R-T39 ⑥ 주소는 있고 PEAKET_IDENTITY_ISSUER가 없으면 운영에서 시작하지 않는다`(조립) | 실패(재현) | prod에서 던지지 않음 |
+| T6 | `R-T39 ⑥ local·ci에서 PEAKET_IDENTITY_ISSUER가 없으면 발급자 https://identity.peaket.example만 받고, 있으면 그 값만 받는다`(조립, 앞 발급자 기본값 시험을 prod → local·ci, 없음·빈 값으로 바꿈) | 처음부터 통과(대조 쪽. 검증이 I5 '운영에서 기본값'으로 위 줄의 실패를 본다) | 지금도 local·ci는 기본값 |
+| T6 | `R-T39 ② fanReauthGateFromEnv는 거절 기록을 받는 곳(onResult)을 확인기에 넘긴다`(조립) | 실패(새 이름) | 기록 0줄 |
+| T6 | `R-T39 ② start.ts는 확인기 조립에 거절 기록을 받는 곳(onResult)을 넘긴다`(start.ts 글) | 실패(새 이름) | 예매 취소 조립의 `fanReauthGateFromEnv(` 인자에 `onResult`가 없음 |
+| T7 | `R-T39 ⑤ 처음 공개키 읽기가 답하지 않으면 1,000ms 안팎에 ReauthUnavailable이다`(어댑터) | 실패(재현) | 5,014ms(상한 5,000ms) |
+| T7 | `R-T39 ⑤ 처음 공개키 읽기가 답하지 않으면 1,000ms 안팎에 503이다`(HTTP) | 실패(재현) | 5,085ms |
+| T8 | `R-T39 ③ 같은 토큰으로 다른 표 둘을 동시에 보내면 하나만 지난다`(HTTP, `Promise.all`) | 처음부터 통과(검증이 `jti` 잡기 빼기로 실패를 본다) | `SET NX` 두 번, 하나가 `null` |
+| T9 | `R-T39 ② alg none·HS256 토큰은 403이다`(HTTP), `R-T39 ② 어댑터는 alg none·HS256 토큰을 거절하고 jti를 잡지 않으며, none은 공개키 묶음도 읽지 않는다`(어댑터) | 처음부터 통과(검증이 플랫폼 `alg` 검사 빼기로 실패를 본다) | 플랫폼 확인기가 머리에서 `alg` 거절 |
+| T10 | 어댑터 이름: '정확한 수명' → `R-T39 ③ …(한 번 쓰기)`, 'act·sid·sub' → `R-T39 ② …`, '빈 값' → `R-T39 ② …`. 공개키 못 받음·저장소 세 상태는 ⑤ 그대로 | 이름만(통과) | — |
+| T11 | `R-T39 ② 어댑터는 토큰이 없거나 빈 값이면 false이고 공개키도 jti도 건드리지 않는다`에 `jwks.urls` 0번 | 처음부터 통과(검증 F3 류로 실패를 본다) | 지금도 먼저 거절 |
+
+- 셈: 단언 실패 13 = **재현 8**(T1 둘, T2 둘, T3, T6 운영, T7 둘) + **새 이름이 없어 생긴 실패 5**(T5 셋, T6 `onResult` 둘. 돌기는 하고 기록이 0줄이라 단언에서 실패한다. RV-06의 결함 그 자체이기도 하다). 실행조차 안 되는 실패는 0이다(vitest는 타입을 보지 않는다). 대신 `tsc --noEmit`이 오류 2다: `cancel-reauth-http.test.ts`·`fan-reauth-wiring.test.ts`의 `onResult`가 아직 없는 속성(TS2353). 구현 뒤 사라져야 한다. 처음부터 통과 6(T4, T6 local·ci 대조, T8, T9 둘, T11).
+- 구현 담당이 맞출 모양(시험이 이 모양을 단언한다):
+  - `JwksFanReauthGate` 생성자 선택 인자 `onResult`, `fanReauthGateFromEnv`의 선택 인자 `onResult`(받아서 그대로 넘긴다), start.ts는 예매 취소 조립의 `fanReauthGateFromEnv({ … })` 인자에 `onResult`를 넣는다(`onResult:` 또는 줄인 `onResult,`).
+  - 기록은 403·503마다 **정확히 한 번**, 값은 `{ outcome: 'rejected', reason }` 또는 `{ outcome: 'unavailable', reason: 'keys' | 'store' }`이고 다른 칸이 없다(`toEqual`). 통과(202)의 기록은 보지 않는다.
+  - 까닭: 없음·빈 값 `missing`, 형식 깨짐 `format`, 만료 `expired`, 다른 세션·act 반대·목록 밖 act·act 없음·jti 없음 `claims`, 다른 계정 `sub`, 팬 묶음에 없는 kid `kid`, 같은 kid의 다른 키 `signature`, `typ` at+jwt `typ`, `aud` partner `aud`, `iss` 다름 `iss`, alg none·HS256 `alg`, 모르는 `crit` **`claims`**, 남은 수명 600초 `lifetime`, 다시 씀 `replay`. 확인 못 함: `jti` 저장소 오류 `store`, 공개키 못 받음·같은 kid 키 둘 `keys`.
+  - 남은 수명: `expiresAt − 지금 > 330_000`이면 거절(jti 안 잡음), 330,000이면 통과이고 `PX` `'330000'`(I2 공용 상한도 함께 바꿔야 통과한다).
+  - 발급자: 주소가 있고 `PEAKET_IDENTITY_ISSUER`가 없거나 빈 값이면 prod·production·staging·demo·`PEAKET_ENV` 없음에서 던지고 글에 `PEAKET_IDENTITY_ISSUER`를 넣는다. 주소와 발급자가 둘 다 없으면 기존 시험대로 글에 `PEAKET_IDENTITY_FAN_JWKS_URL`이 있어야 한다(주소 검사가 먼저이거나 두 이름을 다 넣는다).
+  - 읽기 상한: 답하지 않는 첫 읽기가 실제 시간 900ms 이상·2,500ms 미만에 `ReauthUnavailable`(HTTP 503)이고 `fetch` 1번.
+- 계획과 정본이 어긋나는 곳(정본을 따랐다): 계획 §3 I3은 `ERR_JOSE_NOT_SUPPORTED`의 까닭을 `format`이라 했으나, 정본 §3.1 '거절 기록'은 `claims`에 넣는다(`claims`(`sid`·`act` 어긋남과 `ERR_JOSE_NOT_SUPPORTED` 포함)). 시험은 `claims`를 단언한다.
+- 계획 담당에게 넘길 정본 빈칸(시험은 쓰지 않음): 계획 T2가 예로 든 깨진 키 둘은 jose 6.2.14에서 정본의 503 코드 목록에 들지 않는다. 곡선 밖 좌표·`y` 없음·숫자 `x`는 `ERR_JWK_INVALID`가 아니라 `DOMException`(이름 DataError, 'Invalid keyData', `code` 0)이고, `crv` 없음은 `ERR_JWKS_NO_MATCHING_KEY`(지금 403 `kid`)다. 확인 때 실제로 닿는 목록의 코드는 `ERR_JWKS_MULTIPLE_MATCHING_KEYS`(같은 kid 키 둘)뿐이라 T2를 그것으로 썼다. `ERR_JWKS_INVALID`(묶음에 비밀 키 `d`가 든 경우 등)는 `createLocalJWKSet`이 읽기 단계에서 내므로 처음이면 이미 `TokenKeysUnavailable`(503)이다. 곡선 밖 좌표의 키는 I3대로 고치면 500으로 남아 R-T39 ⑤ '공개키 묶음 안의 키가 깨졌을 때 503'과 어긋난다. 정본 '답'의 목록에 그 DOMException을 더할지 정해야 한다.
+
 ## 시험 결과
 
 - 시험 파일(이름은 모두 `R-T39 <세부>`로 시작):
@@ -342,5 +381,6 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | review | l3-b415r-review | claude-opus-5-5 | 2026-11-18T21:37+09:00 | 2026-11-18T21:49+09:00 |
 | verify | l3-b415r-verify | claude-opus-5-5 | 2026-11-18T21:38+09:00 | 2026-11-18T22:05+09:00 |
 | plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:25+09:00 |
+| test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T22:31+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
