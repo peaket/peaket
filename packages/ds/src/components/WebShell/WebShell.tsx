@@ -170,7 +170,10 @@ export interface WebShellProps {
   businessInfo?: ReactNode;
   /** 처음부터 연 겹침 창(상태 미리보기) */
   defaultOpen?: WebShellOverlay | null;
-  /** 바닥글 뒤에 붙는 띠(공연 상세의 하단 고정 예매 버튼 등). 위치(sticky 등)는 넣는 쪽이 정한다 */
+  /**
+   * 바닥글 뒤에 붙는 띠. 위치(sticky 등)는 넣는 쪽이 정한다. 바닥글을 그리는 셸(default)의 하단 고정 띠는 이 자리 대신 화면의 main 끝에 둔다:
+   * 보이는 높이 320px 이하에서 흐름에 들어간 띠가 바닥글 뒤에 오지 않게 한다(docs/frontend.md §5.11, d5 §5.2, BAT-171 R171-3)
+   */
   bottomBar?: ReactNode;
   /** 로그아웃 확인을 눌렀을 때 */
   onLogout?: (opts: { clearEntryKeys: boolean }) => void;

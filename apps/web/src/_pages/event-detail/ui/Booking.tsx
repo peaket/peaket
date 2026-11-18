@@ -339,7 +339,10 @@ function AlertToggle({ title, className, iconOnlyBelowMd }: { title: string; cla
   );
 }
 
-/** 휴대폰·태블릿 화면 아래 고정 띠(보드 SCR-002-m·t의 .bottom-bar). 데스크톱(lg)에서는 숨긴다 */
+/**
+ * 휴대폰·태블릿 화면 아래 고정 띠(보드 SCR-002-m·t의 .bottom-bar). 데스크톱(lg)에서는 숨긴다.
+ * 공연 상세 main의 끝에 둔다(R171-3). -mb-6은 main의 아래 안쪽 여백(pb-6)만큼 띠를 main 끝에 붙인다
+ */
 export function BookingBar({ data }: { data: BookingData }) {
   const { m, phase, unlockAt } = useCta(data);
   // 띠의 실제 높이를 아래 스크롤 여백으로(안내 글이 320 폭에서 줄을 바꾸면 띠가 96px보다 높아진다, docs/frontend.md §5.11, BAT-171)
@@ -414,7 +417,7 @@ export function BookingBar({ data }: { data: BookingData }) {
     );
   }
   return (
-    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 short-screen:static md:px-6 lg:hidden" data-verify-scope>
+    <div ref={barRef} className="bottom-bar sticky bottom-0 z-10 short-screen:static -mb-6 md:px-6 lg:hidden" data-verify-scope>
       <div className="w-full">
         <DomesticPhoneNotice text={data.domesticPhoneNotice} lang={data.locale} className="px-1 pb-1 text-center md:text-left" />
         {body}

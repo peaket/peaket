@@ -138,7 +138,7 @@ export async function ShopProductPage({ params, searchParams }: Props) {
   const toast = state === '품절' ? ({ kind: 'soldout' } as const) : null;
 
   return (
-    <AppShell dark={dark} current="shop" bottomBar={<ProductActions placement="bar" blockedReasonId={reasonId} initialToast={toast} />}>
+    <AppShell dark={dark} current="shop">
       <main className="page-main" id="main" tabIndex={-1}>
         <div className="mx-auto col w-full max-w-[1280px] gap-5 px-4 pt-3 pb-8 md:gap-6 md:px-6 md:pt-6 md:pb-12 lg:gap-8 lg:px-8 lg:pb-16">
           <Link className="row t-sm muted" href="/shop" style={{ gap: 2, alignSelf: 'flex-start' }}>
@@ -204,6 +204,8 @@ export async function ShopProductPage({ params, searchParams }: Props) {
             <SellerSection seller={seller} />
           </div>
         </div>
+        {/* 하단 띠는 main의 끝(셸 바닥글 앞)에 둔다. 보이는 높이 320px 이하에서 흐름에 들어가도 바닥글을 지나지 않고 닿는다(docs/frontend.md §5.11, d5 §5.2, BAT-171 R171-3) */}
+        <ProductActions placement="bar" blockedReasonId={reasonId} initialToast={toast} />
       </main>
       <PreviewSwitcher path={productHref(p.id)} states={SCR015_PRODUCT_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
     </AppShell>

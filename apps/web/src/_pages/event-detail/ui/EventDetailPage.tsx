@@ -106,7 +106,7 @@ export async function EventDetailPage({ params, locale }: Props & { locale?: Loc
       <BookingProvider data={booking}>
         <PreverifyProvider eventId={d.eventId} loginHref={loginHref}>
         <ReviewSummaryProvider eventId={d.eventId}>
-          <AppShell variant="default" bottomBar={<BookingBar data={booking} />}>
+          <AppShell variant="default">
             <EventJsonLd d={d} atMs={r.fetchedAtMs} />
             <VerifyReturnResume loginHref={loginHref} />
             <DetailModalsProvider initial={null} sellerName={d.sellerName} seller={d.seller} sortText={sort.body} perPerson={d.perPersonLimit} loginHref={loginHref}>
@@ -293,6 +293,8 @@ export async function EventDetailPage({ params, locale }: Props & { locale?: Loc
                     </div>
                   </aside>
                 </div>
+                {/* 하단 띠는 main의 끝(셸 바닥글 앞)에 둔다. 보이는 높이 320px 이하에서 흐름에 들어가도 바닥글을 지나지 않고 닿는다(docs/frontend.md §5.11, d5 §5.2, BAT-171 R171-3) */}
+                <BookingBar data={booking} />
               </main>
             </DetailModalsProvider>
           </AppShell>
