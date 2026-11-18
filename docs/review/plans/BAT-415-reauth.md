@@ -149,11 +149,26 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+- 담당: 시험 `l3-b415r-test`(구현을 맡지 않음), 2026-11-18. 구현 전 트리는 계획 커밋 `f9aed291`(구현 `6dfb671b` 앞)이다.
+- 명령: `git -C D:/ticketpass worktree add --detach D:/ticketpass-lane3-base f9aed291` → 그 안에서 `pnpm install --frozen-lockfile --prefer-offline` → `packages/shuffle`에서 `npx tsc -p tsconfig.build.json`(dist) → 시험 파일 넷(`test/fan-reauth-fixtures.ts`·`test/cancel-reauth-http.test.ts`·`test/jwks-fan-reauth-gate.test.ts`·`test/fan-reauth-wiring.test.ts`)만 복사 → `services/purchase-svc`에서 `npx vitest run test/cancel-reauth-http.test.ts test/jwks-fan-reauth-gate.test.ts test/fan-reauth-wiring.test.ts` → 끝난 뒤 `git -C D:/ticketpass worktree remove --force D:/ticketpass-lane3-base`.
+- 결과: 시험 23개 가운데 실패 12·건너뜀 11·통과 0.
+  - **단언 실패 3(실패로 센다)**: `R-T39 ④ 컨트롤러는 … FAN_HIGH_RISK, 없으면 FAN_SENSITIVE를 … 묻는다`(확인기가 받은 질의에 `act`가 없다), `R-T39 ⑤ 확인기가 확인하지 못하면(ReauthUnavailable) 503 …`(500을 받았다. 구현 전 컨트롤러는 확인기가 던진 오류를 503으로 바꾸지 않는다), `R-T39 ⑥ start.ts는 좌석 Redis의 jti 저장소로 확인기를 만들어 …`(예매 취소 조립 블록에 `fanReauthGateFromEnv(`가 없다).
+  - **새 이름이 없어 돌지 못함 9(세지 않는다)**: `jwks-fan-reauth-gate.test.ts`의 ⑤ 다섯은 `TypeError: JwksFanReauthGate is not a constructor`, `fan-reauth-wiring.test.ts`의 ⑥ 조립 함수 넷은 `TypeError: fanReauthGateFromEnv is not a function`(구현 전 `refund/index.ts`·`refund-wiring.ts`에 그 내보내기가 없다).
+  - **건너뜀 11(세지 않는다)**: `cancel-reauth-http.test.ts`의 실제 확인기 조립 둘(①·②×2·③×4·④·⑤×2, 그리고 공개키 묶음 못 받음 ⑤)은 `beforeAll`에서 `JwksFanReauthGate is not a constructor`로 조립이 깨져 돌지 않았다.
+- 구현 전 트리에서 단언 실패를 보지 못한 시험 20개(어댑터·조립 함수·실제 확인기 HTTP)는 계획 §5 끝 줄대로 검증 담당의 틀린 구현(§9 M1~M14)으로 실패를 한 번 본다.
 
 ## 시험 결과
 
-(시험 담당이 채운다)
+- 시험 파일(이름은 모두 `R-T39 <세부>`로 시작):
+  - `services/purchase-svc/test/cancel-reauth-http.test.ts` 13개: ① 1, ② 2(목록 17가지 거절 + `exp` = 지금 + 1초 경계 대조), ③ 4(다른 표에 다시 씀, 401 뒤 같은 토큰, 400 뒤 같은 토큰, 같은 멱등 키를 새 토큰으로 다시 보냄), ④ 2(실제 확인기, 컨트롤러가 묻는 `act`), ⑤ 4(jti 저장소 오류 503, 가운데 상태 '이미 있음' 403, 공개키 묶음 못 받음 503 뒤 살아나면 202, 확인기의 `ReauthUnavailable` → 503).
+  - `services/purchase-svc/test/jwks-fan-reauth-gate.test.ts` 5개: 모두 ⑤(수명 180초 → `PX 180000`·600초 → `300000`·`exp` 직전 1ms → `1`·`exp` → 거절, act·sid·sub 거절과 jti 안 잡음, 빈 토큰, 공개키 못 받음(던짐·500) → `ReauthUnavailable`, jti 세 상태).
+  - `services/purchase-svc/test/fan-reauth-wiring.test.ts` 5개: 모두 ⑥(주소 없음·빈 값 × prod·production·staging·demo·없음 → 던짐, local·ci → undefined와 경고 1번, 주소가 있으면 환경마다 확인기이고 그 주소에서 읽음, 발급자 기본값, start.ts 글).
+  - 도구 `services/purchase-svc/test/fan-reauth-fixtures.ts`(ES256 서명, 가짜 공개키 묶음 fetch, 명령을 적는 가짜 좌석 Redis). 발급자는 `https://identity.test`, 토큰 수명은 180초(5분 상수와 다름).
+  - 통합(선택) `services/purchase-svc/test-int/cancel-reauth.int.test.ts` 1개(③): 실제 Valkey로 같은 토큰 두 번째 취소 → 403, 키 값 `1`·남은 시간 170~180초. 이 PC에서 Docker로 돌리지 않았고 `tsc --noEmit`으로 컴파일만 확인했다(감독이 초안 PR CI로 돌린다). 계획은 `cancellation.int.test.ts`에 더한다고 했으나, Valkey만 띄우는 가벼운 새 파일로 나눴다.
+- 계획과 달라진 것: ③(다)는 가짜 `writes`·`orders`가 취소 기록을 돌려주게 해 뺄 필요가 없었다(202, 같은 취소 ID, 결제사 취소 1번). 계획에 없던 것으로 ③ '본문 검사(400) 뒤 같은 토큰'(정본 '차례'의 본문 검사 → 재인증), ② `OPS_COMMAND`·`jti 없음`, ④ 목록 밖 `PAYOUT_ACCOUNT`, 확인기 대역으로 컨트롤러가 묻는 질의와 503 변환을 따로 본 둘을 더했다.
+- 구현 트리(`6dfb671b`): 새 시험 23/23 통과. `services/purchase-svc`에서 `npx vitest run` 전체 132 파일·4,157개 통과(구현 커밋의 129 파일·4,134개에 새 3 파일·23개). 회귀(refund-http·cancel-ticket·cancel-ticket-event-cancelled·refund-wiring·start-fraud-grpc)도 그 안에서 통과.
+- 구현 결함 의심: 없다(실패한 시험이 없다).
+- 게이트: `npx tsc -p tsconfig.json --noEmit`(purchase-svc, test·test-int 포함) 통과. `npx eslint`(바꾼 파일 다섯) 오류 0(저장소 설정이 서비스 시험 파일을 대상으로 두지 않아 '설정 없음' 경고만), `npx eslint services/purchase-svc` 오류 0. `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(출발점과 같음).
 
 ## 리뷰
 
@@ -169,5 +184,6 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | --- | --- | --- | --- | --- |
 | plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T20:50+09:00 | 2026-11-18T21:08+09:00 |
 | impl | l3-b415r-impl | claude-opus-5-5 | 2026-11-18T21:07+09:00 | 2026-11-18T21:17+09:00 |
+| test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T21:19+09:00 | 2026-11-18T21:36+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
