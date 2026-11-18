@@ -30,16 +30,12 @@ import {
 } from './modules/scoring/index.js';
 
 const SERVICE = 'trust-svc';
-/** 업무 gRPC 포트 [가정](identity-svc와 같은 기본값, BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
-const DEFAULT_GRPC_PORT = 50051;
 const RULES_READY_TASK = 'trust-rules';
 /** 종료 때 남은 텔레메트리를 보내는 시간 [가정] */
 const TELEMETRY_CLOSE_MS = 2_000;
 
 const env = process.env;
 const internalGrpcToken = internalGrpcTokenFromEnv(env);
-const grpcPort = Number(env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
-if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${env.PEAKET_GRPC_PORT}`);
 
 // 판정 피처 Redis(세션·캐시 클러스터, docs/data.md §3): 로컬·CI는 단일 노드 주소, 운영은 클러스터 시작 노드 주소들(쉼표)
 const clusterUrls = (env.PEAKET_TRUST_REDIS_CLUSTER_URLS ?? '')
@@ -156,9 +152,12 @@ const rulesLoop = startRuleRefresh({ rules, readiness: service.readiness, task: 
 await rulesLoop.first;
 
 await service.listen();
+// 업무 gRPC 포트(PEAKET_GRPC_PORT, 기본 50051 [가정])와 부하 분산 프로필은 공용 설정이 읽는다(BUILD_ORDER BAS-080)
 const grpc = await startGrpcServer({
   host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
-  port: grpcPort,
+  port: service.config.grpcPort,
+  profile: service.config.grpcLbProfile,
+  metrics: service.metrics,
   services: [
     { definition: trustPackage().TrustService.service, handlers: trustServiceHandlers(score, (method, err) => service.logger.error({ err, method }, 'TrustService 처리 실패')) },
     { definition: trustPackage().TrustLabelService.service, handlers: trustLabelServiceHandlers(applyLabel, (method, err) => service.logger.error({ err, method }, 'TrustLabelService 처리 실패'), internalGrpcToken) },

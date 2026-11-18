@@ -68,13 +68,9 @@ import {
 } from './modules/verification/index.js';
 
 const SERVICE = 'identity-svc';
-/** 업무 gRPC 포트 [가정](정본에 값이 없다. BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
-const DEFAULT_GRPC_PORT = 50051;
 
 const url = process.env.PEAKET_DATABASE_URL;
 if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
-const grpcPort = Number(process.env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
-if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${process.env.PEAKET_GRPC_PORT}`);
 
 // 의존성 차단기(docs/architecture.md §5 '2차 서비스 내부 차단', BOT-042·BOT-111이 넘긴 것): 세 서비스 병합 확인과 사람 확인에 의존성마다 하나.
 // 지표는 서비스 지표 저장소에 싣는데 저장소는 서비스가 선 뒤에 생긴다. 그래서 어댑터에는 늦게 잇는 차단기를 넣고 서비스가 선 뒤 진짜 차단기를 단다
@@ -257,9 +253,12 @@ if (!loginRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 
 await service.listen();
+// 업무 gRPC 포트(PEAKET_GRPC_PORT, 기본 50051 [가정])와 부하 분산 프로필은 공용 설정이 읽는다(createService가 틀린 값이면 시작하지 않는다, BUILD_ORDER BAS-080)
 const grpc = await startGrpcServer({
   host: process.env.PEAKET_GRPC_HOST ?? '0.0.0.0',
-  port: grpcPort,
+  port: service.config.grpcPort,
+  profile: service.config.grpcLbProfile,
+  metrics: service.metrics,
   services: [
     {
       definition: identityPackage().SessionService.service,
