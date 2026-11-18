@@ -17,7 +17,7 @@
 3. **월렛의 부가 상품 목록(`GET /v1/tickets/{ticketId}/addons`, 추천 적용).** `linked_ticket_id`가 그 티켓이고 주문이 `PAID`인 항목을 모은다. 항목이 있으면 그 회차로 `ListHeldTickets(세션 계정, 회차)`를 불러 세션 계정이 지금 보유자인지 보고, 아니면 404 `not-found`다. 보유자가 주문한 계정이 아니면(양도로 받은 티켓) 양도 가능 상품(`product.transferable`)의 항목만 보인다. 항목이 하나도 없으면 물어볼 회차를 모르므로 보유 확인 없이 빈 목록이다(남의 티켓 ID로 알아낼 것이 없다).
 4. **수령 방식별 주문 규칙(추천 적용).**
    - 현장 수령(`PICKUP`): 고른 시간대가 주문 항목 상품 가운데 하나의 시간대이고, 다른 항목 상품에도 같은 회차의 시간대가 있어야 한다. 끝난 시간대(`ends_at` ≤ 지금)이거나, 티켓 소지자 전용 시간대인데 `ListHeldTickets(세션 계정, 시간대 회차)`가 비면 422 `pickup-slot-unavailable`이다. 주문의 `event_id`는 시간대의 회차, 결제 상점은 일반이다.
-   - 택배(`DELIVERY`): 배송지와 동의가 있어야 하고(없으면 422 `consent-required`), 동의 문안 판은 환경 값 `PEAKET_MERCH_CONSENT_VERSION`과 같아야 한다(다르면 422 `consent-version-outdated`). 수령인·주소·문안 판을 주문에 적고, 결제 상점은 결제대금예치다(결제 시작은 BAT-605, ADR-0299 결정 3).
+   - 택배(`DELIVERY`): 배송지와 동의가 있어야 하고(없으면 422 `consent-required`), 동의 문안 판은 환경 값 `PEAKET_MERCH_CONSENT_VERSION`과 같아야 한다(다르면 422 `consent-version-outdated`). 수령인·주소·문안 판을 주문에 적고, 결제 상점은 결제대금예치다(결제 시작은 BAT-605, ADR-0299 결정 3). BAT-605 전까지는 이 검사를 마친 뒤 주문 만들기를 503 `pg-unavailable`로 답한다(ADR-0300 결정 4, 추천 적용, 2026-11-19, BAT-600 리뷰 반영).
    - 수령 시간대 표 `pickup_slot`(docs/data.md ERD)을 이 묶음의 마이그레이션으로 만든다. 파트너가 시간대를 만드는 API는 계약에 없어 이 묶음은 만들지 않는다(넘긴 것).
 5. **미수령 자동 취소(추천 적용).**
    - core-svc 정비 일 `merch-unclaimed-cancel`이 매일 10:00 KST [가정]에 돈다. 은행 영업일(주말을 건너뛴다. 공휴일 달력은 정산과 같이 후속, docs/features/settlement.md §5.1)에만 일한다.
