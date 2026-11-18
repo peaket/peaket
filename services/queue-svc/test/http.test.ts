@@ -7,9 +7,11 @@ import { TestSeedSealer } from '@peaket/shuffle';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { HmacArrivalCookies } from '../src/modules/entry/adapters/arrival-cookie.js';
-import { MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
+import { HmacQueueTokens } from '../src/modules/entry/adapters/hmac-tokens.js';
+import { type MemoryEntryStore, MemoryEventSchedules } from '../src/modules/entry/adapters/memory-entry-store.js';
+import { ENTRY_STORE } from '../src/modules/entry/domain/ports.js';
 import type { EventSchedule } from '../src/modules/entry/domain/queue.js';
-import { ACCOUNT, DEVICE, newEvent, newRequest, openSchedule, PID, preverifyToken, recordingRisk, tokens } from './support.js';
+import { ACCOUNT, DEVICE, newEvent, newRequest, OTHER_ACCOUNT, openSchedule, PID, preverifyToken, recordingRisk, tokens } from './support.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
 const quiet = new Writable({ write: (_c, _e, cb) => cb() });
@@ -301,5 +303,64 @@ describe('로비 참가 경로(HOT-040, ADR-0231)', () => {
     expect((await join(id, 'text/plain;charset=UTF-8')).statusCode).toBe(415);
     expect((await join(id, 'application/json', fan({ pid: 'pid-lobby-6' }), { deviceId: DEVICE, extra: 1 })).statusCode).toBe(400);
     expect((await join(id, 'application/json', fan({ pid: null }))).statusCode).toBe(403);
+  });
+});
+
+// Q-T41 ⑥(docs/features/queue-admission.md §11 Q-T41 ⑥ '본문에 사전 검증 토큰이 없거나 남의 것 → 거절(대기표 미발급)', §3 '응답 코드', openapi.yaml EntryBody required preverifyToken,
+// BUILD_ORDER HOT-400 묶음 BAT-057 계획 §6 U1·U2). 사전 요청 없는 형식(text/plain)으로 보낸다. 거절 뒤에 대기표·번호·사람 키(q:dup:{pid}:E)가 없고,
+// 같은 사람이 맞는 토큰으로 다시 오면 첫 번호(1)를 받는다(거절이 번호를 쓰지 않았다는 바깥 경계).
+describe('Q-T41 ⑥ 사전 검증 토큰이 없거나 남의 것이면 대기표를 주지 않는다', () => {
+  const store = () => svc.app.get<MemoryEntryStore>(ENTRY_STORE);
+  /** 거절 뒤 그 회차에 남은 것이 없다: 번호 0, 대기표 집합 비었음, 사람 키 없음 */
+  function nothingLeft(id: string, label: string) {
+    expect(store().counterOf(id), `${label}: 번호를 썼다`).toBe(0);
+    expect(store().membersOf(id), `${label}: 대기표가 생겼다`).toEqual([]);
+    expect(store().dupForTest(PID, id).value, `${label}: 사람 키(q:dup)가 생겼다`).toBeNull();
+  }
+  /** 같은 사람이 맞는 토큰으로 다시 오면 201이고 번호가 1이다(앞의 거절이 번호를 쓰지 않았다) */
+  async function firstNumberStillFree(id: string) {
+    const ok = await enter(id, entryBody(id));
+    expect(ok.statusCode).toBe(201);
+    expect(JSON.parse(ok.payload).seq).toBe(1);
+  }
+
+  test('Q-T41 ⑥ text/plain 진입 본문에 preverifyToken이 없거나 글이 아니면 400이고 대기표·번호·사람 키가 없다', async () => {
+    const id = await event({ openBatch: false });
+    const cases: [string, string][] = [
+      ['칸 없음', JSON.stringify({ deviceId: DEVICE, entryRequestId: newRequest() })],
+      ['null', JSON.stringify({ preverifyToken: null, deviceId: DEVICE, entryRequestId: newRequest() })],
+      ['숫자', JSON.stringify({ preverifyToken: 7, deviceId: DEVICE, entryRequestId: newRequest() })],
+    ];
+    for (const [label, payload] of cases) {
+      const r = await enter(id, payload);
+      expect(r.statusCode, label).toBe(400);
+      expect(r.payload, label).not.toContain('queueTicket');
+      nothingLeft(id, label);
+    }
+    await firstNumberStillFree(id);
+  });
+
+  test('Q-T41 ⑥ [ASVS v5.0.0-9.2.3] 남의 계정·다른 회차·다른 기기·꾸민 사전 검증 토큰이면 403 preverify-invalid이고 대기표·번호·사람 키가 없다', async () => {
+    const id = await event({ openBatch: false });
+    // 같은 꼴이지만 다른 키로 서명한 토큰(꾸민 것). 키 이름(k1)은 같다
+    const forger = HmacQueueTokens.fromEnv({ PEAKET_QUEUE_TOKEN_KEY: `k1:${Buffer.alloc(32, 9).toString('base64')}` });
+    const now = svc.clock.now();
+    const forged = forger.preverify({ e: id, a: ACCOUNT, d: DEVICE, i0: now, iat: now, exp: now + 900_000, jny: '0190f3a1-7c2e-7a00-8000-0000000000aa' });
+    const cases: [string, string][] = [
+      ['남의 계정', entryBody(id, { preverifyToken: preverifyToken(svc.clock, id, { a: OTHER_ACCOUNT }) })],
+      ['다른 회차', entryBody(id, { preverifyToken: preverifyToken(svc.clock, newEvent()) })],
+      ['다른 기기', entryBody(id, { deviceId: 'AgICAgICAgICAgICAgICAg' })],
+      ['다른 키로 서명', entryBody(id, { preverifyToken: forged })],
+      ['꼴만 같음', entryBody(id, { preverifyToken: 'v1.k1.x.y' })],
+      ['빈 글', entryBody(id, { preverifyToken: '' })],
+    ];
+    for (const [label, payload] of cases) {
+      const r = await enter(id, payload);
+      expect(r.statusCode, label).toBe(403);
+      expect(JSON.parse(r.payload).type, label).toMatch(/preverify-invalid$/);
+      expect(r.payload, label).not.toContain('queueTicket');
+      nothingLeft(id, label);
+    }
+    await firstNumberStillFree(id);
   });
 });

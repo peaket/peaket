@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import net from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { GATEWAY_OF_HOST, accessLog, loadContract, send, token } from './gateway-client.mjs';
+import { GATEWAY_OF_HOST, accessLog, admissionToken, loadContract, send, token } from './gateway-client.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const RUN = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
@@ -194,13 +194,14 @@ for (const name of BROWSERS) {
       const hold = await pageFetch(page, apiUrl(`/v1/events/${event}/holds`), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'content-type': 'application/json', 'x-admission-token': 'e2e-admission', 'x-purchase-seq': '1', 'x-purchase-mac': 'e2e-mac', 'idempotency-key': `idem-${RUN}-${name}` },
+        // 그 회차의 맞는 입장 토큰(BAT-057: gw-fan 구매 경로는 게이트웨이가 입장 토큰을 본다, docs/infra.md §4.1 '입장 토큰 확인')
+        headers: { 'content-type': 'application/json', 'x-admission-token': admissionToken(c, { event }), 'x-purchase-seq': '1', 'x-purchase-mac': 'e2e-mac', 'idempotency-key': `idem-${RUN}-${name}` },
         body: '{}',
       });
       assert.equal(hold.error, undefined, `${name} 홀드: 사전 요청 뒤 응답을 읽지 못했다 ${hold.error}`);
       assert.ok(hold.status < 400, `${name} 홀드: ${hold.status}`);
       assert.equal(JSON.parse(hold.text).method, 'POST');
-      const snap = await pageFetch(page, apiUrl(`/v1/events/${event}/seatmap-snapshot`), { credentials: 'include', headers: { 'x-admission-token': 'e2e-admission', 'x-client-ephemeral-key': 'e2e-key' } });
+      const snap = await pageFetch(page, apiUrl(`/v1/events/${event}/seatmap-snapshot`), { credentials: 'include', headers: { 'x-admission-token': admissionToken(c, { event }), 'x-client-ephemeral-key': 'e2e-key' } });
       assert.equal(snap.error, undefined, `${name} 스냅샷: 사전 요청 뒤 응답을 읽지 못했다 ${snap.error}`);
       assert.ok(snap.status < 400, `${name} 스냅샷: ${snap.status}`);
     } finally {
@@ -213,7 +214,9 @@ for (const name of BROWSERS) {
     const { browser, page } = await openPage(name, c.origins.www);
     try {
       const path = c.probes['gw-fan'].path.replaceAll('{event}', event);
-      const r = await pageFetch(page, apiUrl(`${path}?e2e-status=429&e2e-header=retry-after:7`), { credentials: 'include', cache: 'no-store' });
+      // 확인 경로가 구매 경로(admission)면 그 회차의 입장 토큰을 싣는다(BAT-057). 싣는 머리 때문에 사전 요청이 먼저 나간다(429 응답 읽기는 그대로 본다)
+      const extra = c.probes['gw-fan'].admission ? { headers: { 'x-admission-token': admissionToken(c, { event }) } } : {};
+      const r = await pageFetch(page, apiUrl(`${path}?e2e-status=429&e2e-header=retry-after:7`), { credentials: 'include', cache: 'no-store', ...extra });
       assert.equal(r.error, undefined, `${name}: 응답을 읽지 못했다 ${r.error}`);
       assert.equal(r.status, 429);
       assert.equal(r.retryAfter, '7', `${name}: Retry-After를 스크립트가 읽지 못한다`);

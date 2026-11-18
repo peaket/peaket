@@ -944,3 +944,68 @@ test('CF3-08 HOT-400 gateways는 접속 정보 포트를 노드 공개에서 읽
   // ⓓ 시작 값으로 계산하지 않는다
   for (const re of [/\bgatewayBasePort\(/, /\bGATEWAY_BASE_PORT\b/, /PEAKET_GATEWAY_BASE_PORT/]) assert.doesNotMatch(body, re, `gateways() 본문이 시작 값(${re.source})을 쓴다`);
 });
+
+// ---- 입장 토큰 키 목록(BUILD_ORDER HOT-400 묶음 BAT-057 계획 §5 'kind 명령'·'kind 접속 정보', docs/infra.md §4.1 '입장 토큰 확인'의 '로컬 kind') ----
+
+test('Q-T69 ② cluster.mjs gateways-admission은 restore·empty·remove 하나만 받고, 쓰는 법과 파일 머리에 적혀 있다', async () => {
+  const head = readFileSync(join(HERE_DIR, 'cluster.mjs'), 'utf8').split('\n').slice(0, 40).join('\n');
+  assert.match(head, /node tools\/local\/cluster\.mjs gateways-admission restore\|empty\|remove/, '파일 머리의 쓰는 법에 gateways-admission이 없다');
+  const usage = spawnSync(process.execPath, [join(HERE_DIR, 'cluster.mjs'), '--no-such-command'], { encoding: 'utf8' });
+  assert.match(usage.stderr, /gateways-admission restore\|empty\|remove/, '쓰는 법에 gateways-admission이 없다');
+  // 인자가 틀리면 클러스터에 닿기 전에 쓰는 법을 찍고 2로 끝난다
+  for (const args of [[], ['bogus'], ['restore', 'extra'], ['RESTORE']]) {
+    const r = spawnSync(process.execPath, [join(HERE_DIR, 'cluster.mjs'), 'gateways-admission', ...args], { encoding: 'utf8', env: { ...process.env, PEAKET_KUBECONFIG: join(tmpdir(), 'peaket-no-such-kubeconfig') } });
+    assert.equal(r.status, 2, `gateways-admission ${args.join(' ')}: 종료 ${r.status} ${r.stderr}`);
+  }
+  const { gatewaysAdmissionMode } = await import('./gateway-objects.mjs');
+  assert.equal(typeof gatewaysAdmissionMode, 'function', 'gateway-objects.mjs가 gatewaysAdmissionMode를 내놓지 않는다');
+  for (const m of ['restore', 'empty', 'remove']) assert.equal(gatewaysAdmissionMode([m]), m);
+  for (const args of [[], ['bogus'], ['restore', 'empty']]) assert.throws(() => gatewaysAdmissionMode(args), `${args.join(' ')}`);
+});
+
+test('Q-T69 ② [ASVS v5.0.0-9.1.3] 시험 키 넷(지금·다음·끝 시각이 남은 옛 키 지금 + 1시간·지난 옛 키 지금 − 1시간)의 공개 묶음과 ConfigMap peaket-admission-jwks에는 d가 없고 옛 키 둘에만 peaket_until이 있다', async () => {
+  const g = await import('./gateway-objects.mjs');
+  for (const n of ['admissionKeySet', 'admissionJwks', 'admissionJwksConfigMap']) assert.equal(typeof g[n], 'function', `gateway-objects.mjs가 ${n}을 내놓지 않는다`);
+  const priv = (kid) => {
+    const j = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' });
+    return { kty: 'EC', crv: 'P-256', x: j.x, y: j.y, d: j.d, kid };
+  };
+  const now = 1_800_000_000;
+  const set = g.admissionKeySet({ current: priv('a-cur'), next: priv('a-next'), previous: priv('a-prev'), expired: priv('a-exp') }, now);
+  assert.equal(set.issuer, 'https://queue.peaket.example', '발급자(gw-fan admissionIssuer와 같은 값)');
+  assert.equal(set.previous.until, now + 3600);
+  assert.equal(set.expired.until, now - 3600);
+  assert.throws(() => g.admissionKeySet({ current: priv('dup'), next: priv('dup'), previous: priv('p'), expired: priv('e') }, now), 'kid가 겹쳐도 만든다');
+  const jwks = g.admissionJwks(set);
+  assert.deepEqual(
+    jwks.keys.map((k) => [k.kid, k.peaket_until]),
+    [
+      ['a-cur', undefined],
+      ['a-next', undefined],
+      ['a-prev', now + 3600],
+      ['a-exp', now - 3600],
+    ],
+  );
+  for (const k of jwks.keys) {
+    assert.equal(k.d, undefined, `${k.kid}: d`);
+    assert.deepEqual(Object.keys(k).filter((x) => x !== 'peaket_until').sort(), ['alg', 'crv', 'kid', 'kty', 'use', 'x', 'y'], `${k.kid}: 칸`);
+    assert.equal(k.alg, 'ES256');
+    assert.equal(k.use, 'sig');
+  }
+  const cm = g.admissionJwksConfigMap(jwks);
+  assert.equal(cm.kind, 'ConfigMap');
+  assert.equal(cm.metadata.name, 'peaket-admission-jwks');
+  assert.equal(cm.metadata.namespace, 'envoy-gateway-system');
+  assert.deepEqual(Object.keys(cm.data), ['jwks']);
+  assert.deepEqual(JSON.parse(cm.data.jwks), jwks);
+  assert.doesNotMatch(cm.data.jwks, /"d"/);
+  // 개인 성분이 섞인 목록은 ConfigMap으로 만들지 않는다
+  assert.throws(() => g.admissionJwksConfigMap({ keys: [priv('leak')] }));
+  // 빈 묶음(gateways-admission empty)은 만든다
+  assert.deepEqual(JSON.parse(g.admissionJwksConfigMap({ keys: [] }).data.jwks), { keys: [] });
+  // 접속 정보의 admission 칸(개인 JWK, 이 PC에만)과 확인 경로 gw-fan의 admission 표시
+  const contract = g.gatewayContract({ ports: {}, hosts: {}, originVerify: 'x', keys: {}, caPem: '', admission: set });
+  assert.deepEqual(Object.keys(contract.admission).sort(), ['current', 'expired', 'issuer', 'next', 'previous']);
+  assert.equal(contract.probes['gw-fan'].admission, true, '확인 경로 gw-fan(구매 경로)에 admission 표시가 없다');
+  for (const gw of ['gw-queue', 'gw-partner', 'gw-ops', 'gw-scanner']) assert.notEqual(contract.probes[gw].admission, true, `${gw}: admission 표시`);
+});

@@ -20,6 +20,7 @@ import {
   SCREEN_OF,
   accessLog,
   accessToken,
+  admissionToken,
   blank,
   echoed,
   edge,
@@ -599,7 +600,8 @@ test('HOT-400 authz-matrix §5.1 RV-03 ticket:buy 없는 토큰의 POST /v1/even
   const without = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'profile', pid: `p-${sub}` });
   const withBuy = token(c, 'fan', { sub, sid: `s-${sub}`, aud: 'fan', scope: 'profile ticket:buy', pid: `p-${sub}` });
   for (const path of [`/v1/events/${EVENT}/holds`, '/v1/orders']) {
-    const hdr = (tv) => edge(c, nextIp(), { origin: c.origins.www, 'content-type': 'application/json', 'x-admission-token': 'e2e-admission', cookie: `__Secure-peaket_at=${tv}` });
+    // 구매 경로는 게이트웨이가 입장 토큰도 본다(BAT-057, docs/infra.md §4.1 '입장 토큰 확인'): 맞는 입장 토큰을 실어야 인가(ticket:buy)까지 닿는다
+    const hdr = (tv) => edge(c, nextIp(), { origin: c.origins.www, 'content-type': 'application/json', 'x-admission-token': admissionToken(c, { event: EVENT }), cookie: `__Secure-peaket_at=${tv}` });
     const denied = await send(c, 'api', { method: 'POST', path, body: '{}', headers: hdr(without) });
     assert.equal(denied.status, 403, `${path}: ticket:buy 없음`);
     assert.throws(() => echoed(denied), `${path}: ticket:buy 없이 백엔드에 닿았다`);
@@ -631,7 +633,8 @@ test('[ASVS v5.0.0-3.5.1] VF-02 허용 밖 Origin 넷의 POST /v1/events/{id}/ho
   assert.equal(outside.length, 4);
   for (const path of [`/v1/events/${EVENT}/holds`, '/v1/orders']) {
     for (const origin of outside) {
-      const r = await send(c, 'api', { method: 'POST', path, body: '{}', headers: edge(c, nextIp(), { origin, 'content-type': 'application/json', 'x-admission-token': 'e2e-admission', cookie: `${COOKIE_OF['gw-fan']}=${tv}` }) });
+      // 맞는 입장 토큰을 싣는다(BAT-057): 입장 토큰 확인(공통 Lua)은 출처 확인보다 앞이라, 틀린 입장 토큰이면 출처를 보기 전에 401이다
+      const r = await send(c, 'api', { method: 'POST', path, body: '{}', headers: edge(c, nextIp(), { origin, 'content-type': 'application/json', 'x-admission-token': admissionToken(c, { event: EVENT }), cookie: `${COOKIE_OF['gw-fan']}=${tv}` }) });
       assert.equal(r.status, 403, `${path} ${origin}: ${r.status}`);
       assert.throws(() => echoed(r), `${path} ${origin}: 대역에 닿았다`);
     }
@@ -815,7 +818,7 @@ test('[ASVS v5.0.0-3.4.1] [ASVS v5.0.0-3.4.4] W7-SEC-04 게이트웨이가 직�
   // 쿠키로 인증하는 쓰기(출처 확인이 붙는 곳)와 그 쿠키 이름(gw-scanner는 쿠키를 받지 않아 출처 확인 사례가 없다)
   const WRITE = {
     'gw-queue': { host: 'queue', path: `/v1/queues/${EVENT}/entries`, cookie: '__Secure-peaket_at', type: 'text/plain;charset=UTF-8' },
-    'gw-fan': { host: 'api', path: '/v1/orders', cookie: '__Secure-peaket_at', type: 'application/json' },
+    'gw-fan': { host: 'api', path: '/v1/orders', cookie: '__Secure-peaket_at', type: 'application/json', admission: true },
     'gw-partner': { host: 'partner-api', path: '/v1/partner/productions', cookie: '__Secure-peaket_partner_at', type: 'application/json' },
     'gw-ops': { host: 'ops-api', path: '/v1/ops/admin-accounts', cookie: '__Host-peaket_ops_at', type: 'application/json' },
   };
@@ -833,7 +836,9 @@ test('[ASVS v5.0.0-3.4.1] [ASVS v5.0.0-3.4.4] W7-SEC-04 게이트웨이가 직�
       ['없는 경로 404', p.host, { path: `/v1/e2e-no-such-${RUN}`, headers: edge(c, nextIp()) }, 404],
     ];
     const w = WRITE[gw];
-    if (w) cases.push(['출처 확인 403', w.host, { method: 'POST', path: w.path, body: '{}', headers: edge(c, nextIp(), { origin: 'https://evil.example', 'content-type': w.type, cookie: `${w.cookie}=${accessToken(c, gw, nextSub())}` }) }, 403]);
+    // 구매 경로(gw-fan POST /v1/orders)는 맞는 입장 토큰을 싣는다(BAT-057): 입장 토큰 확인(공통 Lua)이 출처 확인보다 앞이라 없으면 출처를 보기 전에 401이다
+    const adm = w?.admission ? { 'x-admission-token': admissionToken(c, { event: EVENT }) } : {};
+    if (w) cases.push(['출처 확인 403', w.host, { method: 'POST', path: w.path, body: '{}', headers: edge(c, nextIp(), { origin: 'https://evil.example', 'content-type': w.type, cookie: `${w.cookie}=${accessToken(c, gw, nextSub())}`, ...adm }) }, 403]);
     for (const [m, host, req, status] of cases) {
       const r = await send(c, host, req);
       if (status) assert.equal(r.status, status, `${gw} ${m}: ${r.status}`);
