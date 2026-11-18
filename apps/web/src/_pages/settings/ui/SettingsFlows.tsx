@@ -250,7 +250,7 @@ export function SettingsFlows({
           provider: chosen ?? liveProvider,
           pickProvider: () => pickProvider(sorryDevice),
           target,
-          submit: submitReauthForm,
+          submit: (p) => submitReauthForm(p, 'session-end'),
           cancelled: () => ticket.cancelled,
         });
         if (r === 'left' || ticket.cancelled) return;
@@ -282,7 +282,7 @@ export function SettingsFlows({
           now: () => Date.now(),
           provider: chosen ?? liveProvider,
           pickProvider,
-          submit: submitReauthForm,
+          submit: (p) => submitReauthForm(p, 'account-withdraw'),
           cancelled: () => ticket.cancelled,
         });
         if (r === 'left' || ticket.cancelled) return;

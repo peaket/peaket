@@ -16,7 +16,7 @@ import { SessionError } from '../application/session-error.js';
 import type { ComputeContactRef } from '../application/compute-contact-ref.js';
 import type { GetInvestigationRefs } from '../application/get-investigation-refs.js';
 import { InvRefError } from '../application/inv-ref-error.js';
-import type { Provider, ReauthPurpose, ReauthStrength } from '../domain/session.js';
+import { FAN_REAUTH_OPS, type Provider, type ReauthOperation, type ReauthStrength } from '../domain/session.js';
 
 /** 설명자를 읽는 선택지: 필드 이름은 proto 그대로, enum은 이름, int64는 숫자(밀리초 시각은 2^53 안), oneof 이름 칸을 단다 */
 export const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
@@ -51,7 +51,8 @@ export function identityPackage(): IdentityPackage {
 
 const PROVIDER: Record<string, Provider> = { PROVIDER_KAKAO: 'kakao', PROVIDER_NAVER: 'naver', PROVIDER_GOOGLE: 'google' };
 const STRENGTH: Record<string, ReauthStrength> = { REAUTH_STRENGTH_VERIFIED: 'verified', REAUTH_STRENGTH_REQUESTED: 'requested' };
-const PURPOSE: Record<string, ReauthPurpose> = { REAUTH_PURPOSE_SENSITIVE: 'sensitive', REAUTH_PURPOSE_HIGH_RISK: 'high-risk' };
+/** proto ReauthOperation 이름(REAUTH_OPERATION_<op>) → 작업. UNSPECIFIED·모르는 값은 없다(ADR-0293 결정 4). 옛 칸 purpose는 읽지 않는다 */
+const OPERATION: ReadonlyMap<string, ReauthOperation> = new Map((Object.keys(FAN_REAUTH_OPS) as ReauthOperation[]).map((op) => [`REAUTH_OPERATION_${op}`, op]));
 
 /** 저장소·의존성에 닿지 못한 오류(연결 거부·끊김, PostgreSQL 연결 예외 08xxx·관리자 종료 57P0x, 풀 대기 초과). 부르는 쪽은 서킷 브레이커와 대체 응답으로 간다 */
 const UNREACHABLE = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENOTFOUND', '57P01', '57P02', '57P03']);
@@ -187,15 +188,15 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
     IssueReauthToken: unary('IssueReauthToken', async (r) => {
       const strength = STRENGTH[String(r.strength)];
       if (!strength) throw new SessionError('INVALID_ARGUMENT', 'strength가 없다');
-      const purpose = PURPOSE[String(r.purpose)];
-      if (!purpose) throw new SessionError('INVALID_ARGUMENT', 'purpose가 없다');
+      const operation = OPERATION.get(String(r.operation));
+      if (!operation) throw new SessionError('INVALID_ARGUMENT', 'operation이 없다');
       const out = await uc.reauth.run({
         sessionId: text(r.session_id),
         accountId: text(r.account_id),
         provider: providerOf(r.provider),
         providerUserId: text(r.provider_user_id),
         strength,
-        purpose,
+        operation,
       });
       if (out.result === 'ISSUED') return { result: 'REAUTH_RESULT_ISSUED', reauth_token: out.token, reauth_token_expires_at_ms: out.expiresAt };
       return { result: out.result === 'ACCOUNT_MISMATCH' ? 'REAUTH_RESULT_ACCOUNT_MISMATCH' : 'REAUTH_RESULT_REVERIFY_REQUIRED' };

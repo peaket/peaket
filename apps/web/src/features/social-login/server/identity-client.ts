@@ -72,6 +72,38 @@ export function clientIpOf(req: Request): string {
 
 export type ReauthIssue = { result: 'ISSUED'; token: string; expiresAt: number } | { result: 'ACCOUNT_MISMATCH' } | { result: 'REVERIFY_REQUIRED' };
 
+/**
+ * 재인증 시작 폼 칸 purpose(웹 값) → 받는 쪽 작업 op(docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293 결정 2·3).
+ * 이 표에 없는 값(빈 값, 옛 high-risk, 대문자 op 이름, 모르는 값)은 받지 않는다. 표는 여기 한 곳에만 둔다
+ */
+export const REAUTH_PURPOSE_OPS = Object.freeze({
+  'account-withdraw': 'ACCOUNT_WITHDRAW',
+  'session-end': 'SESSION_END',
+  'scanner-session-end': 'SCANNER_SESSION_END',
+  'login-method-add': 'LOGIN_METHOD_ADD',
+  'login-method-remove': 'LOGIN_METHOD_REMOVE',
+  'account-merge': 'ACCOUNT_MERGE',
+  'contact-change': 'CONTACT_CHANGE',
+  'ticket-cancel': 'TICKET_CANCEL',
+  'ticket-cancel-refund-account': 'TICKET_CANCEL_REFUND_ACCOUNT',
+  'device-key-issue': 'DEVICE_KEY_ISSUE',
+  'ticket-return': 'TICKET_RETURN',
+  'transfer-request': 'TRANSFER_REQUEST',
+  'refund-account': 'REFUND_ACCOUNT',
+  'compensation-account': 'COMPENSATION_ACCOUNT',
+  'shop-cancel-refund-account': 'SHOP_CANCEL_REFUND_ACCOUNT',
+} as const);
+export type ReauthPurpose = keyof typeof REAUTH_PURPOSE_OPS;
+export type ReauthOp = (typeof REAUTH_PURPOSE_OPS)[ReauthPurpose];
+
+/** 웹 값을 작업으로. 표에 없으면 undefined(대소문자·앞뒤 공백을 고치지 않는다) */
+export function reauthOpOf(purpose: string | null | undefined): ReauthOp | undefined {
+  return typeof purpose === 'string' && Object.hasOwn(REAUTH_PURPOSE_OPS, purpose) ? REAUTH_PURPOSE_OPS[purpose as ReauthPurpose] : undefined;
+}
+
+/** 진행 쿠키에서 꺼낸 작업이 표의 값인가 */
+export const isReauthOp = (v: unknown): v is ReauthOp => typeof v === 'string' && (Object.values(REAUTH_PURPOSE_OPS) as string[]).includes(v);
+
 export class IdentityClient {
   readonly #client: SessionClient;
 
@@ -161,7 +193,8 @@ export class IdentityClient {
     return { ended: Boolean(r.ended) };
   }
 
-  async issueReauthToken(i: { sessionId: string; accountId: string; provider: Provider; providerUserId: string; strength: 'verified' | 'requested'; purpose: 'sensitive' | 'high-risk'; clientIp?: string; userAgent: string }): Promise<ReauthIssue> {
+  /** 재인증 토큰 받기. 작업은 operation(REAUTH_OPERATION_<op>)으로 넘기고 옛 칸 purpose는 채우지 않는다(ADR-0293 결정 3·4) */
+  async issueReauthToken(i: { sessionId: string; accountId: string; provider: Provider; providerUserId: string; strength: 'verified' | 'requested'; operation: ReauthOp; clientIp?: string; userAgent: string }): Promise<ReauthIssue> {
     const r = await this.#call('IssueReauthToken', {
       session_id: i.sessionId,
       account_id: i.accountId,
@@ -170,7 +203,7 @@ export class IdentityClient {
       strength: i.strength === 'verified' ? 'REAUTH_STRENGTH_VERIFIED' : 'REAUTH_STRENGTH_REQUESTED',
       client_ip: i.clientIp ?? '',
       user_agent: i.userAgent,
-      purpose: i.purpose === 'high-risk' ? 'REAUTH_PURPOSE_HIGH_RISK' : 'REAUTH_PURPOSE_SENSITIVE',
+      operation: `REAUTH_OPERATION_${i.operation}`,
     });
     if (r.result === 'REAUTH_RESULT_ISSUED') return { result: 'ISSUED', token: r.reauth_token, expiresAt: Number(r.reauth_token_expires_at_ms) };
     if (r.result === 'REAUTH_RESULT_ACCOUNT_MISMATCH') return { result: 'ACCOUNT_MISMATCH' };

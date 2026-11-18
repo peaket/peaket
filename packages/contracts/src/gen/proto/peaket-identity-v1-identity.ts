@@ -375,8 +375,35 @@ export const identityV1Identity: Record<string, unknown> = {
                     },
                     "purpose": {
                       "type": "ReauthPurpose",
-                      "id": 8
+                      "id": 8,
+                      "options": {
+                        "deprecated": true
+                      }
+                    },
+                    "operation": {
+                      "type": "ReauthOperation",
+                      "id": 9
                     }
+                  }
+                },
+                "ReauthOperation": {
+                  "values": {
+                    "REAUTH_OPERATION_UNSPECIFIED": 0,
+                    "REAUTH_OPERATION_ACCOUNT_WITHDRAW": 1,
+                    "REAUTH_OPERATION_SESSION_END": 2,
+                    "REAUTH_OPERATION_SCANNER_SESSION_END": 3,
+                    "REAUTH_OPERATION_LOGIN_METHOD_ADD": 4,
+                    "REAUTH_OPERATION_LOGIN_METHOD_REMOVE": 5,
+                    "REAUTH_OPERATION_ACCOUNT_MERGE": 6,
+                    "REAUTH_OPERATION_CONTACT_CHANGE": 7,
+                    "REAUTH_OPERATION_TICKET_CANCEL": 8,
+                    "REAUTH_OPERATION_TICKET_CANCEL_REFUND_ACCOUNT": 9,
+                    "REAUTH_OPERATION_DEVICE_KEY_ISSUE": 10,
+                    "REAUTH_OPERATION_TICKET_RETURN": 11,
+                    "REAUTH_OPERATION_TRANSFER_REQUEST": 12,
+                    "REAUTH_OPERATION_REFUND_ACCOUNT": 13,
+                    "REAUTH_OPERATION_COMPENSATION_ACCOUNT": 14,
+                    "REAUTH_OPERATION_SHOP_CANCEL_REFUND_ACCOUNT": 15
                   }
                 },
                 "ReauthPurpose": {

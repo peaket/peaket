@@ -1,7 +1,7 @@
 // 세션 컨텍스트의 포트: 저장소(트랜잭션 하나에서 쓰는 일), 토큰 서명, 기기 가명, 운영 신호.
 import type { InvRefLabel } from './inv-ref.js';
 import type { ConsentKind } from './signup.js';
-import type { ActiveSession, LiveSession, LoginVerdict, Provider, ReauthPurpose, ReauthStrength, TerminationReason } from './session.js';
+import type { ActiveSession, LiveSession, LoginVerdict, Provider, ReauthOperation, ReauthStrength, TerminationReason } from './session.js';
 
 export interface CreateKeyRecord {
   provider: Provider;
@@ -288,7 +288,8 @@ export interface TokenSigner {
   /** 발급자(iss). 재인증 토큰을 확인할 때 같은 값을 본다 */
   readonly issuer: string;
   access(c: { accountId: string; sessionId: string; scopes?: string[]; pid?: string; pidPrev?: string }, now: number): Promise<SignedToken>;
-  reauth(c: { accountId: string; sessionId: string; provider: Provider; strength: ReauthStrength; purpose: ReauthPurpose }, now: number): Promise<SignedToken>;
+  /** 팬 재인증 토큰. op = operation, act = 그 작업의 묶음(ADR-0293 결정 1·4) */
+  reauth(c: { accountId: string; sessionId: string; provider: Provider; strength: ReauthStrength; operation: ReauthOperation }, now: number): Promise<SignedToken>;
   /** 현장 스태프 토큰(ES256, typ at+jwt, aud scanner, cnf.jkt = 기기 키 지문, 만료 = 역할 유효 끝) */
   staff(c: { accountId: string; scannerSessionId: string; eventId: string; jkt: string; expiresAtMs: number }, now: number): Promise<SignedToken>;
 }
@@ -391,9 +392,12 @@ export interface AccountEraser {
 }
 
 export const REAUTH_VERIFIER = Symbol('identity.ReauthVerifier');
-/** 재인증 토큰 확인(typ reauth+jwt, 팬 토큰 키, 세션·작업 묶음). 맞지 않으면 ReauthRejected를 던진다 */
+/**
+ * 재인증 토큰 확인(typ reauth+jwt, 팬 토큰 키, 세션·작업 묶음·받는 쪽 작업). 맞지 않으면 ReauthRejected를 던진다.
+ * op는 부르는 유스케이스가 자기 작업으로 정한다(토큰에서 읽지 않는다, ADR-0293 결정 5)
+ */
 export interface ReauthVerifier {
-  verify(token: string, o: { sessionId: string; act: string }): Promise<{ jti: string; accountId: string; expiresAt: number }>;
+  verify(token: string, o: { sessionId: string; act: string; op: ReauthOperation }): Promise<{ jti: string; accountId: string; expiresAt: number }>;
 }
 
 /** 재인증 토큰이 없거나 맞지 않는다(403 reauth-required, docs/api/guidelines.md 재인증 토큰) */

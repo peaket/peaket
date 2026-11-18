@@ -1,7 +1,7 @@
 // 받는 층: 예매 취소 견적·취소(openapi getTicketCancellationQuote·createTicketCancellation, GAT-070·GAT-080).
 // 팬 쿠키와 구매 요청 서명을 쓰고, 취소는 Idempotency-Key를 cancellationId로 쓴다.
 // 취소는 구매 요청 서명·본문 검사 뒤에 X-Reauth-Token을 ReauthGate로 본다(docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인').
-// 작업 묶음은 본문에 환급 계좌가 있으면 FAN_HIGH_RISK, 없으면 FAN_SENSITIVE다. 거절은 403 reauth-required, 확인 못 함은 503 reauth-unavailable이다.
+// 작업 묶음·받는 쪽 작업은 본문에 환급 계좌가 있으면 FAN_HIGH_RISK·TICKET_CANCEL_REFUND_ACCOUNT, 없으면 FAN_SENSITIVE·TICKET_CANCEL이다(ADR-0293). 거절은 403 reauth-required, 확인 못 함은 503 reauth-unavailable이다.
 // 확인기를 꽂지 않은 조립은 닫힌 대역(unavailableReauth, 늘 403)이다. 견적은 재인증이 필요 없어 연다.
 import { Controller, Get, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { Bulkhead, CLOCK, type Clock, ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, type IdempotencyRequest as Idem, Idempotent, type Principal, ProblemError, PurchaseSigned, Roles } from '@peaket/platform';
@@ -11,7 +11,7 @@ import { CancelTicket } from '../application/cancel-ticket.js';
 import type { CancelTicketResult } from '../domain/cancellation.js';
 import { QuoteCancellation, type QuoteCancellationResult } from '../application/quote-cancellation.js';
 import { WRITE_BULKHEAD } from '../../../write-bulkhead.js';
-import { type FanReauthAct, REAUTH_GATE, type ReauthGate, ReauthUnavailable } from '../domain/ports.js';
+import { type FanReauthAct, type FanReauthOp, REAUTH_GATE, type ReauthGate, ReauthUnavailable } from '../domain/ports.js';
 
 const TicketParams = z.object({ ticketId: z.uuid() }).strict();
 const QuoteResponse = z
@@ -87,10 +87,13 @@ export class TicketCancellationController {
   ): Promise<z.output<typeof CancelResponse>> {
     const token = typeof request.headers['x-reauth-token'] === 'string' ? request.headers['x-reauth-token'] : undefined;
     // 환급 계좌를 담은 취소는 '환급 계좌 입력'이라 FAN_HIGH_RISK만 받는다(docs/security/authz-matrix.md §6). 반대 묶음도 거절한다
-    const act: FanReauthAct = body.refundAccount !== undefined ? 'FAN_HIGH_RISK' : 'FAN_SENSITIVE';
+    // 받는 쪽 작업 op도 본문으로 정한다(토큰에서 읽지 않는다, authz-matrix §6 '받는 쪽 작업 op의 값', ADR-0293 결정 5)
+    const withAccount = body.refundAccount !== undefined;
+    const act: FanReauthAct = withAccount ? 'FAN_HIGH_RISK' : 'FAN_SENSITIVE';
+    const op: FanReauthOp = withAccount ? 'TICKET_CANCEL_REFUND_ACCOUNT' : 'TICKET_CANCEL';
     let passed: boolean;
     try {
-      passed = await this.reauth.verify(token, { accountId: me.accountId, sessionId: me.sessionId, act });
+      passed = await this.reauth.verify(token, { accountId: me.accountId, sessionId: me.sessionId, act, op });
     } catch (e) {
       if (e instanceof ReauthUnavailable) throw reauthUnavailable(e);
       throw e;

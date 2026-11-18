@@ -19,22 +19,41 @@ export const DEVICE_LIMIT = 5;
 export const CREATE_KEY_TTL_MS = 10 * 60_000;
 /** 재인증 토큰 5분(identity §13) */
 export const REAUTH_TOKEN_TTL_MS = 5 * 60_000;
-/** 팬 재인증의 목적: 고위험(양도 요청·환급·배상 계좌 입력)과 그 밖의 민감 작업(identity §7.1 ③) */
-export type ReauthPurpose = 'sensitive' | 'high-risk';
-/** 팬 재인증 토큰의 작업 묶음(docs/security/authz-matrix.md §6) */
-export const FAN_REAUTH_ACT: Readonly<Record<ReauthPurpose, string>> = Object.freeze({ sensitive: 'FAN_SENSITIVE', 'high-risk': 'FAN_HIGH_RISK' });
+/**
+ * 팬 재인증 토큰을 받을 작업(토큰의 op)과 그 작업 묶음(act). 값 하나가 받는 API 작업 하나다
+ * (docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293 결정 2). 고위험(FAN_HIGH_RISK)은 양도 요청과 환급·배상 계좌 입력뿐이다
+ */
+export const FAN_REAUTH_OPS = Object.freeze({
+  ACCOUNT_WITHDRAW: 'FAN_SENSITIVE',
+  SESSION_END: 'FAN_SENSITIVE',
+  SCANNER_SESSION_END: 'FAN_SENSITIVE',
+  LOGIN_METHOD_ADD: 'FAN_SENSITIVE',
+  LOGIN_METHOD_REMOVE: 'FAN_SENSITIVE',
+  ACCOUNT_MERGE: 'FAN_SENSITIVE',
+  CONTACT_CHANGE: 'FAN_SENSITIVE',
+  TICKET_CANCEL: 'FAN_SENSITIVE',
+  TICKET_CANCEL_REFUND_ACCOUNT: 'FAN_HIGH_RISK',
+  DEVICE_KEY_ISSUE: 'FAN_SENSITIVE',
+  TICKET_RETURN: 'FAN_SENSITIVE',
+  TRANSFER_REQUEST: 'FAN_HIGH_RISK',
+  REFUND_ACCOUNT: 'FAN_HIGH_RISK',
+  COMPENSATION_ACCOUNT: 'FAN_HIGH_RISK',
+  SHOP_CANCEL_REFUND_ACCOUNT: 'FAN_HIGH_RISK',
+} as const satisfies Record<string, 'FAN_SENSITIVE' | 'FAN_HIGH_RISK'>);
+export type ReauthOperation = keyof typeof FAN_REAUTH_OPS;
+export const isReauthOperation = (v: unknown): v is ReauthOperation => typeof v === 'string' && Object.hasOwn(FAN_REAUTH_OPS, v);
 
 export type LoginVerdict = 'ALLOW' | 'CHALLENGE' | 'UNKNOWN';
 
-/**
- * 고위험 재인증에 본인확인 재통과가 필요한가(identity §7 '로그인 판정의 처리', §7.1 ③): 요청만 함 + 로그인 판정 CHALLENGE·UNKNOWN.
- * UNKNOWN을 CHALLENGE와 같게 다루는 것은 이 작업들에서만이다
- */
 /** 고위험 재인증이 받는 본인확인 재통과: 같은 세션의 REVERIFY VERIFIED가 확정된 지 10분 [가정] 안(identity §5) */
 export const REVERIFY_WINDOW_MS = 10 * 60_000;
 
-export function needsReverification(purpose: ReauthPurpose, strength: ReauthStrength, verdict: LoginVerdict): boolean {
-  return purpose === 'high-risk' && strength === 'requested' && verdict !== 'ALLOW';
+/**
+ * 고위험 재인증에 본인확인 재통과가 필요한가(identity §7 '로그인 판정의 처리', §7.1 ③): 작업의 act가 FAN_HIGH_RISK이고
+ * 요청만 함 + 로그인 판정 CHALLENGE·UNKNOWN(ADR-0293 결정 4). UNKNOWN을 CHALLENGE와 같게 다루는 것은 이 작업들에서만이다
+ */
+export function needsReverification(op: ReauthOperation, strength: ReauthStrength, verdict: LoginVerdict): boolean {
+  return FAN_REAUTH_OPS[op] === 'FAN_HIGH_RISK' && strength === 'requested' && verdict !== 'ALLOW';
 }
 
 /**

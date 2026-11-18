@@ -3,6 +3,7 @@
 // ADR-0055(응답이 없을 때 토큰 값으로 판정), ADR-0011·0119(세션 생성은 소비자 웹 앱 서버만), docs/architecture.md §3.2.
 // SessionService는 2026-10-28에 더했다(추천 적용 2026-10-28, 기술 검토 중간-083).
 // SessionService.IssueReauthToken은 2026-11-03에 더했다(팬 재인증, 추천 적용 2026-11-03, BUILD_ORDER PRF-020).
+// IssueReauthTokenRequest.operation(enum ReauthOperation)은 2026-11-18에 더했다(받는 쪽 작업 op, purpose는 읽지 않음, 추천 적용 2026-11-18, ADR-0293).
 // AccountHoldService·ScannerSessionQueryService는 2026-10-29에 더했다(초안, 추천 적용 2026-10-29, ADR-0148). 그 정본: docs/features/identity.md §2.1·POL-034(병합 차단 사유),
 // docs/data.md `account_hold`·`scanner_session`·§4 경계 9, docs/planning/03-policies-glossary.md '소명'(appeal), docs/api/openapi.yaml `ScannerDevice`,
 // ADR-0082·0102(ops-svc는 업무 gRPC를 받지 않는다).
@@ -224,11 +225,50 @@ message IssueReauthTokenRequest {
   // 법정 접속기록 줄에만 싣는 원문 IP와 단말 정보(CreateSession과 같다)
   string client_ip = 6;
   string user_agent = 7;
-  // 목적. 고위험(양도 요청·환급·배상 계좌 입력)이면 토큰의 act가 FAN_HIGH_RISK이고, 요청만 함 + 로그인 판정 CHALLENGE·UNKNOWN이면
-  // 본인확인 재통과를 확인한 뒤에만 준다(docs/features/identity.md §7.1 ③, 추천 적용 2026-11-03)
-  ReauthPurpose purpose = 8;
+  // 쓰지 않음(2026-11-18, ADR-0293 결정 4). identity는 읽지 않고 웹도 채우지 않는다. 작업은 operation으로 받는다
+  ReauthPurpose purpose = 8 [deprecated = true];
+  // 이 토큰을 받을 작업(토큰의 op). 작업의 act가 FAN_HIGH_RISK이면 요청만 함 + 로그인 판정 CHALLENGE·UNKNOWN일 때
+  // 본인확인 재통과를 확인한 뒤에만 준다. UNSPECIFIED·모르는 값은 INVALID_ARGUMENT(docs/features/identity.md §7.1 ③,
+  // docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', 추천 적용 2026-11-18, ADR-0293)
+  ReauthOperation operation = 9;
 }
 
+// 팬 재인증 토큰을 받을 작업(토큰의 op). 값 하나가 받는 API 작업 하나다. 표의 정본은 docs/security/authz-matrix.md §6(ADR-0293 결정 2)
+enum ReauthOperation {
+  REAUTH_OPERATION_UNSPECIFIED = 0;
+  // act FAN_SENSITIVE. identity-svc DELETE /v1/identity/account
+  REAUTH_OPERATION_ACCOUNT_WITHDRAW = 1;
+  // act FAN_SENSITIVE. identity-svc DELETE /v1/identity/sessions/{sessionId}
+  REAUTH_OPERATION_SESSION_END = 2;
+  // act FAN_SENSITIVE. identity-svc DELETE /v1/identity/scanner-sessions/{sessionId}
+  REAUTH_OPERATION_SCANNER_SESSION_END = 3;
+  // act FAN_SENSITIVE. identity-svc 제공자 잇기(웹 앱 서버 POST /link/{provider} 뒤)
+  REAUTH_OPERATION_LOGIN_METHOD_ADD = 4;
+  // act FAN_SENSITIVE. identity-svc DELETE /v1/identity/providers/{provider}
+  REAUTH_OPERATION_LOGIN_METHOD_REMOVE = 5;
+  // act FAN_SENSITIVE. identity-svc POST /v1/identity/merge-proposals/{proposalId}/confirmation
+  REAUTH_OPERATION_ACCOUNT_MERGE = 6;
+  // act FAN_SENSITIVE. identity-svc PATCH /v1/identity/profile(휴대폰 번호를 바꿀 때)
+  REAUTH_OPERATION_CONTACT_CHANGE = 7;
+  // act FAN_SENSITIVE. purchase-svc POST /v1/tickets/{ticketId}/cancellation(본문에 환급 계좌 없음)
+  REAUTH_OPERATION_TICKET_CANCEL = 8;
+  // act FAN_HIGH_RISK. purchase-svc 같은 API(본문에 refundAccount 있음)
+  REAUTH_OPERATION_TICKET_CANCEL_REFUND_ACCOUNT = 9;
+  // act FAN_SENSITIVE. ticket-svc POST /v1/tickets/{ticketId}/device-keys
+  REAUTH_OPERATION_DEVICE_KEY_ISSUE = 10;
+  // act FAN_SENSITIVE. ticket-svc POST /v1/tickets/{ticketId}/returns
+  REAUTH_OPERATION_TICKET_RETURN = 11;
+  // act FAN_HIGH_RISK. ticket-svc POST /v1/tickets/{ticketId}/transfers
+  REAUTH_OPERATION_TRANSFER_REQUEST = 12;
+  // act FAN_HIGH_RISK. payment-svc POST /v1/cancellations/{cancellationId}/account
+  REAUTH_OPERATION_REFUND_ACCOUNT = 13;
+  // act FAN_HIGH_RISK. payment-svc POST /v1/compensations/{compensationId}/account
+  REAUTH_OPERATION_COMPENSATION_ACCOUNT = 14;
+  // act FAN_HIGH_RISK. core-svc POST /v1/shop/orders/{orderId}/cancellations(본문에 환급 계좌 있음)
+  REAUTH_OPERATION_SHOP_CANCEL_REFUND_ACCOUNT = 15;
+}
+
+// 쓰지 않음(2026-11-18, ADR-0293). IssueReauthTokenRequest.purpose와 함께 남긴다
 enum ReauthPurpose {
   REAUTH_PURPOSE_UNSPECIFIED = 0;
   // 그 밖의 팬 민감 작업(POL-019 목록). act FAN_SENSITIVE

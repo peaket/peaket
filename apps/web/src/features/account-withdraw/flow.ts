@@ -222,9 +222,15 @@ export function afterWithdraw(r: WithdrawAnswer, o: { closed: boolean }): Withdr
   return r.kind === 'fraudHold' ? 'hold' : r.kind === 'reauth' ? 'reauth' : r.kind === 'login' ? 'login' : 'error';
 }
 
-/** 재인증 시작 양식(POST /reauth/{provider}, 목적 비움 = FAN_SENSITIVE, identity §7.1 ①) */
-export function reauthForm(provider: Provider): { action: string; fields: Record<string, string> } {
-  return { action: `/reauth/${provider}`, fields: { returnTo: RETURN_TO, purpose: '' } };
+/**
+ * 설정 화면이 이 양식으로 여는 재인증의 작업(웹 purpose 값, docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293):
+ * 탈퇴 account-withdraw, 다른 기기 로그아웃 session-end
+ */
+export type SettingsReauthPurpose = 'account-withdraw' | 'session-end';
+
+/** 재인증 시작 양식(POST /reauth/{provider}, identity §7.1 ①). purpose는 부르는 쪽이 꼭 넘긴다(기본값 없음, 빈 값은 앱 서버가 400) */
+export function reauthForm(provider: Provider, purpose: SettingsReauthPurpose): { action: string; fields: Record<string, string> } {
+  return { action: `/reauth/${provider}`, fields: { returnTo: RETURN_TO, purpose } };
 }
 
 /** fraudHold.until(날짜·시각)을 화면 글(KST 날짜)로 */

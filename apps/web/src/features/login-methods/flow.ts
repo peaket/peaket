@@ -279,9 +279,16 @@ export function takePending(storage: StorageLike, now: number): Pending | null {
   }
 }
 
-/** 재인증 시작 양식(목적 비움 = FAN_SENSITIVE, identity §7.1 ①) */
-export function reauthForm(provider: Provider): { action: string; fields: Record<string, string> } {
-  return { action: `/reauth/${provider}`, fields: { returnTo: RETURN_TO, purpose: '' } };
+/**
+ * 로그인 수단 화면이 여는 재인증의 작업(웹 purpose 값, docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293):
+ * 해제 login-method-remove, 추가 login-method-add, 계정 합치기 account-merge
+ */
+export type LoginMethodReauthPurpose = 'login-method-remove' | 'login-method-add' | 'account-merge';
+const PENDING_PURPOSE: Readonly<Record<Pending['action'], LoginMethodReauthPurpose>> = Object.freeze({ unlink: 'login-method-remove', add: 'login-method-add', merge: 'account-merge' });
+
+/** 재인증 시작 양식(identity §7.1 ①). purpose는 부르는 쪽이 꼭 넘긴다(기본값 없음, 빈 값은 앱 서버가 400) */
+export function reauthForm(provider: Provider, purpose: LoginMethodReauthPurpose): { action: string; fields: Record<string, string> } {
+  return { action: `/reauth/${provider}`, fields: { returnTo: RETURN_TO, purpose } };
 }
 
 /**
@@ -299,7 +306,8 @@ export async function leaveForReauth(o: {
   if (r === 'rejected') return 'login';
   if (r !== 'ok') return 'retry';
   markPending(o.storage, o.pending);
-  o.submit(reauthForm(o.provider));
+  // 남긴 할 일(해제·추가·합치기)로 작업을 고른다(그 작업의 토큰만 identity가 받는다)
+  o.submit(reauthForm(o.provider, PENDING_PURPOSE[o.pending.action]));
   return 'left';
 }
 

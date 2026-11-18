@@ -1,5 +1,5 @@
 // 팬 탈퇴(openapi DELETE /v1/identity/account, docs/features/identity.md §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030, FR-017, POL-033, I-T16·I-T27).
-// 재인증 토큰(세션·FAN_SENSITIVE에 묶임)을 확인하고 jti를 한 번 쓴 뒤, 계정 트랜잭션 하나에서 계정을 파기하고 살아 있는 세션을 모두 끝낸다(DELETE).
+// 재인증 토큰(세션·FAN_SENSITIVE·op ACCOUNT_WITHDRAW에 묶임, ADR-0293)을 확인하고 jti를 한 번 쓴 뒤, 계정 트랜잭션 하나에서 계정을 파기하고 살아 있는 세션을 모두 끝낸다(DELETE).
 // 본인확인 기록(연계정보 HMAC·pid) 파기는 다음 트랜잭션이고, 실패해도 탈퇴는 끝난 것으로 답한다(정비 withdrawal-finish가 다시 지운다).
 // 탈퇴 참여자와 탈퇴 미룸(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', ADR-0284, BUILD_ORDER PRF-169, I-T84): 참여자가 있으면
 // 재인증 토큰을 쓰는 트랜잭션에서 계정을 WITHDRAWAL_PENDING(WITHDRAWAL)으로 먼저 커밋하고, 트랜잭션 밖에서 참여자를 부른다.
@@ -152,7 +152,7 @@ export class WithdrawAccount {
     const sessionId = i.sessionId.toLowerCase();
     let token: { jti: string; accountId: string; expiresAt: number };
     try {
-      token = await this.reauth.verify(i.reauthToken, { sessionId, act: WITHDRAWAL_REAUTH_ACT });
+      token = await this.reauth.verify(i.reauthToken, { sessionId, act: WITHDRAWAL_REAUTH_ACT, op: 'ACCOUNT_WITHDRAW' });
     } catch (e) {
       if (e instanceof ReauthRejected) throw new AccountError('REAUTH_REQUIRED', e.message);
       throw e;
