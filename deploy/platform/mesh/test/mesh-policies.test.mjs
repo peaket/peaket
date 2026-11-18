@@ -221,7 +221,8 @@ const OUTSIDERS = (() => {
     out.push({ who: `표에 없는 파드(${ns})`, namespace: ns, podLabels: serviceLabels('mesh-test-stranger') });
     out.push({ who: `라벨 없는 파드(${ns})`, namespace: ns, podLabels: {} });
   }
-  for (const n of ['admission-ctrl', 'core-svc', 'identity-svc', 'ops-svc', 'payment-svc', 'purchase-svc', 'queue-svc', 'ticket-svc', 'trust-svc', 'web']) {
+  // 워크로드가 아닌 부르는 쪽(core-notify-sender·inv-ingest)도 같은 이름 라벨의 릴레이·작업 파드가 있을 수 있다(검증 V09)
+  for (const n of ['admission-ctrl', 'core-svc', 'identity-svc', 'ops-svc', 'payment-svc', 'purchase-svc', 'queue-svc', 'ticket-svc', 'trust-svc', 'web', 'core-notify-sender', 'inv-ingest']) {
     const ns = NAMESPACE_OF[n];
     out.push({ who: `${n} 릴레이 파드`, namespace: ns, podLabels: { 'app.kubernetes.io/name': n, 'app.kubernetes.io/component': 'outbox-relay' } });
     out.push({ who: `${n} 이름 라벨만`, namespace: ns, podLabels: { 'app.kubernetes.io/name': n } });
@@ -918,22 +919,31 @@ test('MS-12 RV-03 STRICT: deploy/ 아래(YAML·템플릿·JSON) 주석 밖에 Pe
   for (const { file, text } of files) assert.doesNotMatch(text, /["']?\bmode["']?\s*:\s*["']?(PERMISSIVE|DISABLE|UNSET)\b/, `${rel(file)}에 mTLS를 푸는 mode`);
 });
 
-test('MS-20 RV-02 다른 인가 정책 없음: deploy/ 아래(YAML·템플릿·JSON) 주석 밖에 AuthorizationPolicy가 나오는 파일은 생성 파일 policies.yaml 하나뿐이다(ALLOW 정책은 합집합이라 다른 파일의 정책 하나가 표를 넓힌다)', () => {
+test('MS-20 RV-02 V26 다른 인가 정책·NetworkPolicy 없음: deploy/ 아래(YAML·템플릿·JSON) 주석 밖에 AuthorizationPolicy가 나오는 파일은 policies.yaml 하나, NetworkPolicy 객체를 두는 파일은 meshless 파일과 공용 차트 템플릿뿐이다(둘 다 받는 쪽은 합집합이라 다른 파일의 정책 하나가 표를 넓힌다)', () => {
   const files = deployTexts();
   assert.ok(files.length > 10, 'deploy/ 아래 매니페스트를 읽지 못했다');
   const holders = files.filter((x) => /AuthorizationPolicy/.test(x.text)).map((x) => rel(x.file));
   assert.deepEqual(holders, ['deploy/platform/mesh/policies.yaml'], 'AuthorizationPolicy가 있는 파일');
+  // 검증 V26: kind 칸을 줄 모양에 기대지 않고 찾는다(줄 끝 주석·흐름 꼴·JSON). 공용 차트의 NetworkPolicy와의 합집합은 정리 목록(리뷰 RV-10)
+  const np = files.filter((x) => /\bkind["']?\s*:\s*["']?NetworkPolicy\b/.test(x.text)).map((x) => rel(x.file));
+  assert.deepEqual(np.filter((f) => !f.startsWith('deploy/charts/peaket-service/templates/')), ['deploy/platform/mesh/meshless-networkpolicies.yaml'], 'NetworkPolicy가 있는 파일(차트 템플릿 밖)');
 });
 
-test('MS-13 최소 TLS 1.3: istiod 값의 meshConfig.meshMTLS.minProtocolVersion이 TLSV1_3이고 trustDomain이 cluster.local이다. deploy/ 아래 다른 최소 판은 없다', () => {
+test('MS-13 V13 V14 최소 TLS 1.3: istiod 값이 정확히 meshConfig.trustDomain: cluster.local과 meshMTLS.minProtocolVersion: TLSV1_3이고(다른 기본값 덮어쓰기 없음, ADR-0285 결정 10), deploy/ 아래에 다른 최소 판·istio-system 밖의 rootNamespace·trustDomainAliases가 없다', () => {
   assert.ok(existsSync(ISTIOD_VALUES), `${rel(ISTIOD_VALUES)}가 없다`);
   const v = parse(readFileSync(ISTIOD_VALUES, 'utf8'));
   assert.equal(v?.meshConfig?.meshMTLS?.minProtocolVersion, 'TLSV1_3');
   assert.equal(v?.meshConfig?.trustDomain, 'cluster.local');
-  for (const { file, text } of deployTexts()) for (const m of text.matchAll(/minProtocolVersion["']?\s*:\s*["']?(\w+)/g)) assert.equal(m[1], 'TLSV1_3', `${rel(file)}의 minProtocolVersion`);
+  // 검증 V13·V14: 뿌리 네임스페이스를 옮기면 istio-system의 default STRICT가 메시 전체가 아니게 되고, 신뢰 도메인 별칭은 다른 도메인 신원을 같은 주체로 받는다
+  assert.deepEqual(v, { meshConfig: { trustDomain: 'cluster.local', meshMTLS: { minProtocolVersion: 'TLSV1_3' } } }, 'istiod 값은 두 칸뿐이다');
+  for (const { file, text } of deployTexts()) {
+    for (const m of text.matchAll(/minProtocolVersion["']?\s*:\s*["']?(\w+)/g)) assert.equal(m[1], 'TLSV1_3', `${rel(file)}의 minProtocolVersion`);
+    for (const m of text.matchAll(/rootNamespace["']?\s*:\s*["']?([\w-]+)/g)) assert.equal(m[1], 'istio-system', `${rel(file)}의 rootNamespace`);
+    assert.doesNotMatch(text, /trustDomainAliases/, `${rel(file)}에 trustDomainAliases`);
+  }
 });
 
-test('MS-14 cacerts: ExternalSecret이 istio-system에 Secret cacerts를 키 넷으로 만들고(ClusterSecretStore aws-secrets-manager, 경로 peaket/<환경>/mesh/cacerts), 메시 폴더 어디에도 kind: Secret·stringData·PEM 글이 없다', () => {
+test('MS-14 V17 V18 cacerts: ExternalSecret이 istio-system에 Secret cacerts를 키 넷으로 만들고(ClusterSecretStore aws-secrets-manager, 경로는 자리 표시 그대로 peaket/<환경>/mesh/cacerts), deploy/ 아래 그 경로를 읽는 것은 이것 하나이며, 메시 폴더 어디에도 kind: Secret·stringData·PEM 글이 없다', () => {
   const objs = objectsOf(CACERTS);
   assert.equal(objs.length, 1, 'cacerts.yaml의 객체는 ExternalSecret 하나');
   const [es] = objs;
@@ -945,9 +955,29 @@ test('MS-14 cacerts: ExternalSecret이 istio-system에 Secret cacerts를 키 넷
   assert.deepEqual(sorted(data.map((d) => d.secretKey)), sorted(CACERTS_KEYS), '받는 키 넷');
   assert.equal(data.length, CACERTS_KEYS.length, '같은 키를 두 번 받지 않는다');
   for (const d of data) {
-    assert.match(String(d.remoteRef?.key), /^peaket\/[^/]+\/mesh\/cacerts$/, `${d.secretKey}의 비밀 저장소 경로`);
+    // 검증 V18: 바탕 파일은 환경 이름을 박지 않는다(<환경> 자리는 환경 오버레이가 채운다, ADR-0285 결정 12, docs/security/secrets-and-keys.md '서비스 메시 중간 CA')
+    assert.equal(d.remoteRef?.key, 'peaket/<환경>/mesh/cacerts', `${d.secretKey}의 비밀 저장소 경로`);
     assert.equal(d.remoteRef?.property, d.secretKey, `${d.secretKey}는 같은 이름 칸에서 받는다`);
   }
+  // 검증 V17: 메시 중간 CA 경로를 다른 네임스페이스로 끌어오는 ExternalSecret이 없다(접근은 istiod(istio-system)만)
+  const texts = deployTexts();
+  assert.deepEqual(
+    texts.filter((x) => /mesh\/cacerts/.test(x.text)).map((x) => rel(x.file)),
+    ['deploy/platform/mesh/cacerts.yaml'],
+    '주석 밖에 mesh/cacerts 경로가 있는 파일',
+  );
+  const readers = [];
+  for (const { file } of texts.filter((x) => /\.ya?ml$/.test(x.file))) {
+    let docs = [];
+    try {
+      docs = parseAllDocuments(readFileSync(file, 'utf8')).map((d) => d.toJS());
+    } catch {
+      continue;
+    }
+    for (const o of docs)
+      if (o?.kind === 'ExternalSecret' && JSON.stringify(o.spec ?? {}).includes('mesh/cacerts')) readers.push(`${o.metadata?.namespace}/${o.metadata?.name}`);
+  }
+  assert.deepEqual(readers, ['istio-system/cacerts'], 'mesh/cacerts를 읽는 ExternalSecret');
   const files = walk(MESH, (f) => /\.(ya?ml|json)$/.test(f) && !f.startsWith(HERE));
   assert.ok(files.length >= 6, '메시 폴더의 매니페스트를 읽지 못했다');
   for (const f of files) {
@@ -958,7 +988,15 @@ test('MS-14 cacerts: ExternalSecret이 istio-system에 Secret cacerts를 키 넷
   }
 });
 
-test('MS-15 앰비언트 등록: namespaces.yaml이 ADR-0285 결정 10의 네임스페이스 열에 istio.io/dataplane-mode: ambient를 달고, 워크로드·부르는 쪽 네임스페이스가 모두 그 안에 있으며 istio-system·kube-system은 없다', () => {
+test('MS-15 V15 앰비언트 등록: namespaces.yaml이 ADR-0285 결정 10의 네임스페이스 열에 istio.io/dataplane-mode: ambient를 달고, 워크로드·부르는 쪽 네임스페이스가 모두 그 안에 있으며 istio-system·kube-system은 없다. deploy/ 아래 다른 곳(차트 템플릿 포함)에는 dataplane-mode 라벨이 없다', () => {
+  // 검증 V15: 파드·Service에 istio.io/dataplane-mode: none을 달면 그 파드가 앰비언트에서 빠져 STRICT·인가 정책을 모두 건너뛴다
+  const texts = deployTexts();
+  assert.deepEqual(
+    texts.filter((x) => /istio\.io\/dataplane-mode/.test(x.text)).map((x) => rel(x.file)),
+    ['deploy/platform/mesh/namespaces.yaml'],
+    '주석 밖에 istio.io/dataplane-mode가 있는 파일',
+  );
+  for (const { text } of texts) for (const m of text.matchAll(/istio\.io\/dataplane-mode["']?\s*:\s*["']?([\w-]+)/g)) assert.equal(m[1], 'ambient', 'istio.io/dataplane-mode 값');
   const objs = objectsOf(NAMESPACES);
   assert.ok(objs.every((o) => o.kind === 'Namespace' && o.apiVersion === 'v1'), 'Namespace 밖의 객체');
   assert.deepEqual(sorted(objs.map((o) => o.metadata?.name)), sorted(AMBIENT_NAMESPACES), '등록 네임스페이스');
@@ -1051,6 +1089,9 @@ test('MS-18 메시 없는 출처 칸의 꼴: 다른 네임스페이스의 부르
           assert.deepEqual(r.ports.map((p) => p.port), [CONTROL_PORT], `${where}: 네임스페이스만인 칸은 제어 포트에만`);
         } else {
           assert.ok(Object.keys(peer.podSelector.matchLabels ?? {}).length > 0 && !peer.podSelector.matchExpressions, `${where}: 빈 podSelector(네임스페이스의 모든 파드)`);
+          // 검증 V09: 출처 칸의 (네임스페이스, 파드 라벨)은 신원 표(ADR-0285 결정 7)의 한 부르는 쪽과 정확히 같다(라벨을 하나 빼면 릴레이·작업 파드까지 고른다)
+          const who = Object.entries(IDENTITY).filter(([n, i]) => n !== 'ops-breakglass' && i.namespace === ns && JSON.stringify(sorted(Object.entries(i.podLabels).map(String))) === JSON.stringify(sorted(Object.entries(peer.podSelector.matchLabels).map(String))));
+          assert.equal(who.length, 1, `${where}: 신원 표의 어느 부르는 쪽과도 (네임스페이스, 라벨)이 정확히 같지 않다`);
         }
       }
   assert.ok(peers > 50, `출처 칸이 너무 적다(${peers})`);

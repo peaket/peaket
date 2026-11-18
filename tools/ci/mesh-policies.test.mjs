@@ -361,7 +361,7 @@ test('MG-09 인자: 인자 없음·--write --check·--bogus·--root 뒤 폴더 �
 
 // ===================== MG-10 =====================
 
-/** 워크플로의 run 줄(주석 줄을 뺀다)과 그 단계의 if */
+/** 워크플로의 run 줄(주석 줄을 뺀다)과 그 단계·잡 */
 function runLines(file) {
   const wf = parse(readFileSync(join(REPO, '.github/workflows', file), 'utf8'));
   const out = [];
@@ -370,10 +370,80 @@ function runLines(file) {
       if (typeof s.run !== 'string') return;
       for (const line of s.run.split('\n')) {
         const t = line.trim();
-        if (t && !t.startsWith('#')) out.push({ job, step: i, if: s.if, line: t });
+        if (t && !t.startsWith('#')) out.push({ job, step: i, if: s.if, line: t, stepObj: s, jobObj: j });
       }
     });
   return out;
+}
+/**
+ * 그 run 줄이 실패하면 잡이 실패하는가(검증 V20·V21): 줄은 정규식 전체로 맞아야 하고(끝 고정, 뒤에 '|| true'·';'·'&' 없음),
+ * 그 단계·잡에 continue-on-error가 없고, 단계 글에 'set +e'가 없다. 까닭 목록을 돌려준다
+ */
+function failsTheJob(l, what) {
+  const out = [];
+  if (l.stepObj['continue-on-error'] !== undefined && l.stepObj['continue-on-error'] !== false) out.push(`${what}: 단계에 continue-on-error ${JSON.stringify(l.stepObj['continue-on-error'])}`);
+  if (l.jobObj['continue-on-error'] !== undefined && l.jobObj['continue-on-error'] !== false) out.push(`${what}: 잡 ${l.job}에 continue-on-error ${JSON.stringify(l.jobObj['continue-on-error'])}`);
+  if (/^\s*set\s+\+e\b/m.test(l.stepObj.run)) out.push(`${what}: 단계에 set +e`);
+  return out;
+}
+/** 한 줄 전체가 그 명령인 run 줄(끝 고정). 뒤에 '|| true' 같은 것이 붙으면 찾지 못한다 */
+const findRun = (lines, re) => lines.find((l) => !l.if && re.test(l.line) && !/(\|\||;|&)/.test(l.line));
+
+/**
+ * GitHub 식(${{ … }})을 문맥으로 계산한다: !cancelled()·always()는 참, ==·!=, &&·||·!·괄호, 작은따옴표 글. 모르는 꼴이면 던진다(검증 V22)
+ * @param {string} expr
+ * @param {Record<string, string>} ctx
+ */
+function evalExpr(expr, ctx) {
+  const src = /^\$\{\{\s*([\s\S]*?)\s*\}\}$/.exec(String(expr).trim())?.[1] ?? String(expr);
+  const toks = src.match(/\s*(\|\||&&|==|!=|!|\(|\)|'[^']*'|[\w.-]+\(\)|[\w.-]+)/g)?.map((t) => t.trim()) ?? [];
+  assert.equal(toks.join(''), src.replace(/\s+/g, ''), `계산하지 못하는 식: ${src}`);
+  let i = 0;
+  const value = () => {
+    const t = toks[i++];
+    if (t === '(') {
+      const v = or();
+      assert.equal(toks[i++], ')', `괄호가 맞지 않는다: ${src}`);
+      return v;
+    }
+    if (t === '!') return !truthy(value());
+    if (t === 'cancelled()') return false;
+    if (t === 'always()' || t === 'success()') return true;
+    if (t?.startsWith("'")) return t.slice(1, -1);
+    assert.ok(t && Object.hasOwn(ctx, t), `문맥에 없다: ${t}`);
+    return ctx[t];
+  };
+  const truthy = (v) => v !== false && v !== '' && v !== undefined && v !== null;
+  const cmp = () => {
+    const a = value();
+    if (toks[i] === '==' || toks[i] === '!=') {
+      const op = toks[i++];
+      const b = value();
+      return op === '==' ? a === b : a !== b;
+    }
+    return a;
+  };
+  const and = () => {
+    let v = cmp();
+    while (toks[i] === '&&') {
+      i++;
+      const r = cmp();
+      v = truthy(v) && truthy(r);
+    }
+    return v;
+  };
+  const or = () => {
+    let v = and();
+    while (toks[i] === '||') {
+      i++;
+      const r = and();
+      v = truthy(v) || truthy(r);
+    }
+    return v;
+  };
+  const v = or();
+  assert.equal(i, toks.length, `식을 끝까지 읽지 못했다: ${src}`);
+  return truthy(v);
 }
 /** changes.mjs가 그 파일 하나를 바꾼 가지에서 고르는 범위 */
 function scopesFor(file) {
@@ -389,24 +459,55 @@ function scopesFor(file) {
   return Object.keys(out.scopes).filter((k) => out.scopes[k]);
 }
 
-test('MG-10 CI가 돌린다(tools-check): mesh-policies.mjs --check와 deploy/platform/mesh/test 정적 시험이 실패 때만 도는 단계가 아닌 run 줄(주석 아님)로 있다', () => {
-  const tools = runLines('tools-check.yml').filter((l) => !l.if);
+test('MG-10 V20 V21 CI가 돌린다(tools-check): mesh-policies.mjs --check와 deploy/platform/mesh/test 정적 시험이 실패 때만 도는 단계가 아닌 run 줄(주석 아님, 줄 끝까지 그 명령)로 있고, 실패하면 잡이 실패한다(continue-on-error·|| true·set +e 없음)', () => {
+  const tools = runLines('tools-check.yml');
   const missing = [];
-  if (!tools.some((l) => /^node tools\/ci\/mesh-policies\.mjs --check$/.test(l.line))) missing.push('node tools/ci/mesh-policies.mjs --check');
-  if (!tools.some((l) => /^node --test\b.*deploy\/platform\/mesh\/test\//.test(l.line))) missing.push('node --test "deploy/platform/mesh/test/*.test.mjs"');
-  if (!tools.some((l) => /^node --test\b.*tools\/ci\/\*\.test\.mjs/.test(l.line))) missing.push('node --test "tools/ci/*.test.mjs"(이 파일)');
-  assert.deepEqual(missing, [], `tools-check에 없는 run 줄: ${missing.join(' / ')}`);
+  for (const [what, re] of [
+    ['node tools/ci/mesh-policies.mjs --check', /^node tools\/ci\/mesh-policies\.mjs --check$/],
+    ['node --test "deploy/platform/mesh/test/*.test.mjs"', /^node --test\s+"?deploy\/platform\/mesh\/test\/[^\s"]*"?$/],
+    ['node --test "tools/ci/*.test.mjs"(이 파일)', /^node --test\s+"?tools\/ci\/\*\.test\.mjs"?$/],
+  ]) {
+    const l = findRun(tools, re);
+    if (!l) missing.push(`${what}(없거나 줄 끝에 다른 것이 붙었다)`);
+    else missing.push(...failsTheJob(l, what));
+  }
+  assert.deepEqual(missing, [], `tools-check: ${missing.join(' / ')}`);
 });
 
-test('MG-10 CI가 돌린다(ci-kind): 게이트웨이 무대·시험 뒤에 cluster.mjs mesh-netpol과 mesh-netpol.e2e.mjs run 줄이 차례로 있다', () => {
+test('MG-10 V22 CI가 돌린다(ci.yml): changes 잡의 tools·kind 범위가 켜지면 tools-check·kind 잡이 돈다(잡 조건을 계산해 본다)', () => {
+  const wf = parse(readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8'));
+  const jobUsing = (file) => Object.entries(wf.jobs ?? {}).find(([, j]) => j.uses === `./.github/workflows/${file}`);
+  const ctx = (o = {}) => {
+    const c = { 'needs.changes.result': 'success', 'github.event_name': 'pull_request', 'github.ref': 'refs/heads/feature/x' };
+    for (const k of Object.keys(wf.jobs.changes?.outputs ?? {})) c[`needs.changes.outputs.${k}`] = 'false';
+    return { ...c, ...o };
+  };
+  for (const [file, scope] of [
+    ['tools-check.yml', 'tools'],
+    ['ci-kind.yml', 'kind'],
+  ]) {
+    const found = jobUsing(file);
+    assert.ok(found, `ci.yml에 ${file}을 부르는 잡이 없다`);
+    const [name, job] = found;
+    assert.match(String(wf.jobs.changes?.outputs?.[scope] ?? ''), new RegExp(`outputs\\.${scope}\\b`), `changes 잡이 ${scope} 범위를 내보내지 않는다`);
+    assert.ok((Array.isArray(job.needs) ? job.needs : [job.needs]).includes('changes'), `${name}이 changes를 기다리지 않는다`);
+    assert.equal(job.if === undefined || evalExpr(job.if, ctx({ [`needs.changes.outputs.${scope}`]: 'true' })), true, `${name}: ${scope} 범위가 켜져도 돌지 않는다(if ${job.if})`);
+    assert.equal(job['continue-on-error'] ?? false, false, `${name}에 continue-on-error`);
+  }
+});
+
+test('MG-10 V20 V21 CI가 돌린다(ci-kind): 게이트웨이 무대·시험 뒤에 cluster.mjs mesh-netpol과 mesh-netpol.e2e.mjs run 줄(줄 끝까지 그 명령)이 차례로 있고, 실패하면 잡이 실패한다', () => {
   const kind = runLines('ci-kind.yml');
-  const at = (re) => kind.findIndex((l) => !l.if && re.test(l.line));
-  const stage = at(/^node tools\/local\/cluster\.mjs mesh-netpol$/);
-  const e2e = at(/^node --test\b.*tools\/local\/e2e\/mesh-netpol\.e2e\.mjs/);
-  const gateways = at(/^node tools\/local\/cluster\.mjs gateways$/);
+  const stageLine = findRun(kind, /^node tools\/local\/cluster\.mjs mesh-netpol$/);
+  const e2eLine = findRun(kind, /^node --test(\s+--[\w-]+(=\S+)?)*\s+tools\/local\/e2e\/mesh-netpol\.e2e\.mjs$/);
+  const bad = [...(stageLine ? failsTheJob(stageLine, 'cluster.mjs mesh-netpol') : []), ...(e2eLine ? failsTheJob(e2eLine, 'mesh-netpol.e2e.mjs') : [])];
+  assert.deepEqual(bad, [], `ci-kind: ${bad.join(' / ')}`);
+  const stage = stageLine ? kind.indexOf(stageLine) : -1;
+  const e2e = e2eLine ? kind.indexOf(e2eLine) : -1;
+  const gateways = kind.findIndex((l) => !l.if && /^node tools\/local\/cluster\.mjs gateways$/.test(l.line));
   const gwE2e = Math.max(...kind.map((l, i) => (!l.if && /tools\/local\/e2e\/gateway[\w-]*\.e2e\.mjs/.test(l.line) ? i : -1)));
-  assert.ok(stage >= 0, 'ci-kind에 cluster.mjs mesh-netpol run 줄이 없다(실패 때만 도는 단계 밖)');
-  assert.ok(e2e >= 0, 'ci-kind에 mesh-netpol.e2e.mjs run 줄이 없다');
+  assert.ok(stage >= 0, 'ci-kind에 cluster.mjs mesh-netpol run 줄이 없다(실패 때만 도는 단계 밖, 또는 줄 끝에 다른 것이 붙었다)');
+  assert.ok(e2e >= 0, 'ci-kind에 mesh-netpol.e2e.mjs run 줄이 없다(줄 끝에 || true 같은 것이 붙었으면 찾지 않는다)');
   assert.ok(gateways >= 0 && gwE2e >= 0, 'ci-kind에 게이트웨이 무대·시험 줄이 없다');
   assert.ok(gateways < stage && gwE2e < stage && stage < e2e, `차례: 게이트웨이(${gateways}) → 게이트웨이 시험(${gwE2e}) → mesh-netpol(${stage}) → 시험(${e2e})`);
 });
