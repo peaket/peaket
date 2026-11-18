@@ -783,6 +783,7 @@
 | R-686 | 기록 크기 점검(records.mjs --check)이 갈래 4·5 파일을 보지 않아 두 갈래 기록이 40KB를 넘어도 막지 못했다 | tools/ci/records.mjs, tools/ci/README.md, tools/ci/records.test.mjs, ADR-0283, docs/architecture.md, docs/review/plans/W11-lanes.md | RECORD_SIZE_FILES에 lane4·lane5, 시험 RS-03·04·10·12·13·14 (W11-lanes) | 적용 |
 | R-687 | 메시 포트별 인가 정책과 메시 없는 실행의 NetworkPolicy가 없어 D-T36(포트마다 부르는 쪽만 연결)을 보일 수 없었다 | deploy/platform/mesh(원천·바탕 매니페스트·생성 파일·시험), tools/ci/mesh-policies.mjs·changes.mjs, tools/local/cluster.mjs mesh-netpol·e2e, .github/workflows tools-check·ci-kind, deploy/workloads/ops-svc, ADR-0285 | 정방향 B 짧은 고리(계획·구현·독립 시험·리뷰·리뷰 반영·검증 두 바퀴), 리뷰 RV-01~05 고침, 검증이 놓친 10개 시험 더함, BAT-010 위로 다시 쌓아 탈퇴 참여자 서비스 한 줄 | 완료(로컬 정적·생성기·도구 시험 통과, kind는 초안 PR #15) |
 | R-688 | 팬 예매 취소가 재인증 계약 없이 늘 403으로 닫혀 있었다(GAT-080 남은 몫) | services/purchase-svc refund(jwks-fan-reauth-gate·컨트롤러·조립), packages/platform reauth-jti, docs/features/transfer-refund.md §3.1·§11, authz-matrix §6, data §3, openapi | 계획·구현·시험·리뷰·검증 다섯 담당, 리뷰 반영 두 바퀴 | 끝 |
+| R-690 | 좌석 델타를 화면에 전하는 realtime-gw가 없어 HOT-090이 보류였다 | services/realtime-gw, packages/platform, tools/ci/brief.mjs, .github/workflows/ci-node.yml, ADR-0296·0297, docs/features/seat-hold.md, docs/frontend.md, docs/api/asyncapi.yaml, docs/review/plans/BAT-052.md | 새 서비스와 시험 S-T31 ①~⑤·S-T12 ②·S-T42 ①~⑳(BAT-052) | 적용 |
 
 ## 4. 숫자 일치표
 
