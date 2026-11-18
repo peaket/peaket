@@ -73,7 +73,8 @@ async function setup(o: { fallback?: (accountId: string) => Promise<Answer>; sto
   const signals = recordingWithdrawalSignals();
   const store = o.store ? o.store(sessions) : sessions;
   const withdraw = new WithdrawAccount(store, new JoseReauthVerifier(k.keys, ISSUER, clock), eraser, clock, undefined, staff, undefined, [p.participant], signals);
-  const retry = new RetryPendingWithdrawals(sessions, eraser, clock, [p.participant], staff, undefined, signals);
+  // 고리도 같은 저장소(장애 주입 대역이면 그것)를 쓴다(검증 M8b)
+  const retry = new RetryPendingWithdrawals(store, eraser, clock, [p.participant], staff, undefined, signals);
   const login = (id: string) => k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: id, email: null, deviceId: null });
   const verify = async (accountId: string, person: string, birth = '2000-01-01') => {
     const st = await new StartVerification(verifications, provider, closure, clock).run({ accountId, sessionId: null, purpose: 'FIRST', next: '/' });
@@ -234,6 +235,50 @@ describe('다시 하기 고리 한 바퀴(I-T84 ④)', () => {
 
 // 리뷰 RV-03(BAT-010 리뷰 반영, identity §8 '다시 하기 고리' 573행 · I-T84 ④ 끝): 한 바퀴는 잡은 시각 + 50초 [가정]부터 남은 계정을 부르지 않는다.
 // 참여자 대역이 부를 때마다 가짜 시계를 민다(느린 참여자). 값은 정본의 50초·60초를 적는다.
+// 검증이 놓친 M8b(BAT-010 검증 2a6066f0): 고리에서 끝내기 트랜잭션이 실패해도 바퀴가 던지지 않고 다음 계정을 이어 간다(identity §8 '다시 하기 고리' '한 계정의 실패는 … 나머지를 이어 간다', I-T84 ④)
+describe('고리의 끝내기 트랜잭션 실패(I-T84 ④ 복구 경로, 검증 M8b)', () => {
+  test('I-T84④_장애주입_첫계정은참여자DONE인데끝내기트랜잭션이실패해도_바퀴는던지지않고claimed2·withdrawn1·failed1이며둘째계정은DELETED다', async () => {
+    let failNext = false;
+    let injected = 0;
+    const flaky = (s: MemorySessionStore): SessionStore =>
+      new Proxy(s, {
+        get(target, prop) {
+          if (prop === 'transaction')
+            return (fn: Parameters<SessionStore['transaction']>[0]) => {
+              if (failNext) {
+                failNext = false;
+                injected++;
+                return Promise.reject(new Error('주입한 DB 장애(고리의 끝내기 트랜잭션)'));
+              }
+              return target.transaction(fn);
+            };
+          const v = Reflect.get(target, prop, target) as unknown;
+          return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+        },
+      });
+    const t = await setup({ store: flaky });
+    const first = await t.deferred('m8b-first');
+    t.clock.advance(5);
+    const second = await t.deferred('m8b-second');
+    // 첫 계정의 참여자가 DONE으로 답하는 그때 다음 트랜잭션(그 계정의 끝내기)을 실패시킨다
+    t.p.byAccount.set(first.accountId, async () => {
+      failNext = true;
+      return { state: 'DONE' };
+    });
+    t.p.byAccount.set(second.accountId, DONE);
+    t.clock.advance(NEXT_CHECK_MS);
+    t.p.calls.length = 0;
+    expect(await t.retry.run()).toEqual({ claimed: 2, withdrawn: 1, deferred: 0, failed: 1 });
+    // 끊는 자리가 첫 계정의 끝내기 트랜잭션에 실제로 닿았다
+    expect(injected).toBe(1);
+    expect(t.p.calls.map((c) => c.accountId)).toEqual([first.accountId, second.accountId]);
+    expect(t.sessions.accountOf(second.accountId)?.status).toBe('DELETED');
+    expect(t.sessions.withdrawnMessages().map((m) => m.key)).toEqual([second.accountId]);
+    expect(t.sessions.accountOf(first.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL' });
+    expect(t.sessions.activeCount(first.accountId)).toBe(1);
+  });
+});
+
 describe('바퀴 마감: 잡은 시각 + 50초(I-T84 ④, 리뷰 RV-03)', () => {
   const ROUND_CUTOFF_MS = 50_000;
 
