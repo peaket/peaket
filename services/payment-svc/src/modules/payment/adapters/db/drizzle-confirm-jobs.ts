@@ -8,7 +8,7 @@
 // - 잡기의 '임대가 지났다'는 lease_until < 지금이다(같은 시각은 아직 임대 중이다, drizzle-ticket-issue.ts와 같다).
 import { type Clock, type Database, type DatabaseOptions, type DbTransaction, uuidv7, writeOutbox } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import type { PaymentLedgerStatus } from '../../domain/confirm-command.js';
+import type { PaymentLedgerStatus, PaymentOrderKind } from '../../domain/confirm-command.js';
 import {
   buildPaymentEvent,
   type BuildPaymentEventInput,
@@ -20,6 +20,7 @@ import {
   type ConfirmJob,
   type ConfirmTarget,
   DEPOSIT_REVERSED_EVENT_TYPE,
+  paymentEventKafkaKey,
   paymentEventKey,
   type PaymentEventMessage,
 } from '../../domain/confirm-runner.js';
@@ -81,7 +82,8 @@ type ClaimRow = {
   /** BAT-032: claimDue가 같은 트랜잭션에서 함께 읽은 원장 값. 기한 지난 행 잡기는 없다(그때는 read로 읽는다) */
   id?: string;
   order_id?: string;
-  event_id?: string;
+  event_id?: string | null;
+  order_kind?: string;
   attempt_no?: number | string;
   pg?: string;
   pg_payment_ref?: string;
@@ -99,7 +101,8 @@ type ClaimRow = {
 type TargetRow = {
   id: string;
   order_id: string;
-  event_id: string;
+  event_id: string | null;
+  order_kind: string;
   attempt_no: number | string;
   pg: string;
   pg_payment_ref: string;
@@ -117,7 +120,8 @@ type TargetRow = {
 type QueryRow = {
   id: string;
   order_id: string;
-  event_id: string;
+  event_id: string | null;
+  order_kind: string;
   attempt_no: number | string;
   pg: string;
   pg_payment_ref: string;
@@ -136,12 +140,16 @@ type QueryRow = {
 
 const msOf = (v: Date | string): number => new Date(v).getTime();
 
+/** payment.order_kind 글 → 주문 종류(칸이 없거나 모르는 값이면 TICKET. CHECK가 두 값만 받는다, ADR-0299 결정 1) */
+const orderKindOfRow = (v: string | null | undefined): PaymentOrderKind => (v === 'MERCH' ? 'MERCH' : 'TICKET');
+
 /** TargetRow → ConfirmTarget. read와 claimDue가 같은 규칙을 쓴다(BAT-032) */
 function targetOf(row: TargetRow): ConfirmTarget {
   return {
     paymentId: row.id,
     orderId: row.order_id,
     eventId: row.event_id,
+    orderKind: orderKindOfRow(row.order_kind),
     attemptNo: Number(row.attempt_no),
     pg: row.pg as PgName,
     paymentRef: row.pg_payment_ref,
@@ -241,7 +249,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
         join payment pay on pay.id = p.payment_id
         where j.payment_id = p.payment_id
         returning j.payment_id::text as payment_id, j.attempts, j.next_attempt_at, p.lease_owner as previous_owner, j.queued_at,
-          pay.id::text as id, pay.order_id::text as order_id, pay.event_id::text as event_id, pay.attempt_no, pay.pg, pay.pg_payment_ref, pay.pg_confirm_token, pay.pg_tx_id, pay.amount,
+          pay.id::text as id, pay.order_id::text as order_id, pay.event_id::text as event_id, pay.order_kind, pay.attempt_no, pay.pg, pay.pg_payment_ref, pay.pg_confirm_token, pay.pg_tx_id, pay.amount,
           pay.status, pay.authenticated_at, pay.status_changed_at, pay.entry_opens_at, pay.virtual_account_allowed,
           exists (select 1 from payment_event e where e.payment_id = pay.id and e.type = ${CONFIRM_SENT_EVENT_TYPE}) as confirm_sent`),
     );
@@ -310,7 +318,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
 
   async read(paymentId: string): Promise<ConfirmTarget | undefined> {
     const r = await this.o.database.db.execute(sql`
-      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at, p.virtual_account_allowed, p.entry_opens_at, p.status_changed_at,
+      select p.id::text as id, p.order_id::text as order_id, p.event_id::text as event_id, p.order_kind, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_confirm_token, p.pg_tx_id, p.amount, p.status, p.authenticated_at, p.virtual_account_allowed, p.entry_opens_at, p.status_changed_at,
              exists (select 1 from payment_event e where e.payment_id = p.id and e.type = ${CONFIRM_SENT_EVENT_TYPE}) as confirm_sent
       from payment p where p.id = ${paymentId}::uuid`);
     const row = r.rows[0] as TargetRow | undefined;
@@ -342,7 +350,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       const message = await this.#recordResult(tx, target, finish, this.o.clock.now());
       await tx.execute(sql`delete from payment_confirm_job where payment_id = ${target.paymentId}::uuid`);
       // Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
-      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: target.eventId, payload: this.#codec.encode(message) }]);
+      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: paymentEventKafkaKey(message), payload: this.#codec.encode(message) }]);
       return 'APPLIED';
     });
   }
@@ -437,7 +445,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     return this.#tx(async (tx) => {
       // 상태 목록은 부분 인덱스 조건과 맞도록 값 자리가 아니라 문장에 그대로 적는다. RETURNING 차례가 정해지지 않아 고르기와 밀기를 나눈다(고른 차례를 지키고 간격 식은 도메인 하나다)
       const r = await tx.execute(sql`
-        select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, virtual_account_allowed, amount, anomaly_logged_at, query_attempts, status, deposit_due_at, deposit_notified_at, entry_opens_at,
+        select id::text as id, order_id::text as order_id, event_id::text as event_id, order_kind, attempt_no, pg, pg_payment_ref, pg_tx_id, virtual_account_allowed, amount, anomaly_logged_at, query_attempts, status, deposit_due_at, deposit_notified_at, entry_opens_at,
                case when status = 'AWAITING_DEPOSIT' then (select max(e.occurred_at) from payment_event e where e.payment_id = payment.id and e.type = ${DEPOSIT_REVERSED_EVENT_TYPE}) end as reversed_at,
                case when status = 'UNKNOWN' then (select e.occurred_at from payment_event e where e.payment_id = payment.id and e.seq = 1) end as accepted_at
         from payment
@@ -453,6 +461,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
           paymentId: row.id,
           orderId: row.order_id,
           eventId: row.event_id,
+          orderKind: orderKindOfRow(row.order_kind),
           attemptNo: Number(row.attempt_no),
           pg: row.pg as PgName,
           paymentRef: row.pg_payment_ref,
@@ -538,7 +547,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       if ((await lockStatus(tx, job.paymentId)) !== 'APPROVED') return 'STALE';
       const message = await this.#recordResult(tx, job, finish, this.o.clock.now());
       // Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
-      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(message) }]);
+      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: paymentEventKafkaKey(message), payload: this.#codec.encode(message) }]);
       return 'APPLIED';
     });
   }
@@ -552,7 +561,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       await writeOutbox(
         tx,
         this.o.clock,
-        messages.map((m) => ({ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(m) })),
+        messages.map((m) => ({ topic: TRADE_PAYMENTS_TOPIC, key: paymentEventKafkaKey(m), payload: this.#codec.encode(m) })),
       );
       return 'APPLIED';
     });
@@ -562,13 +571,13 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     const r = await this.#tx(
       (tx) =>
         tx.execute(sql`
-      select id::text as id, order_id::text as order_id, event_id::text as event_id, attempt_no, pg, pg_payment_ref, pg_tx_id, amount
+      select id::text as id, order_id::text as order_id, event_id::text as event_id, order_kind, attempt_no, pg, pg_payment_ref, pg_tx_id, amount
       from payment where id = ${paymentId}::uuid`),
       budget,
     );
     const row = r.rows[0] as Omit<QueryRow, 'anomaly_logged_at' | 'query_attempts' | 'status' | 'deposit_due_at' | 'deposit_notified_at' | 'reversed_at' | 'entry_opens_at'> | undefined;
     if (!row) return undefined;
-    return { paymentId: row.id, orderId: row.order_id, eventId: row.event_id, attemptNo: Number(row.attempt_no), pg: row.pg as PgName, paymentRef: row.pg_payment_ref, amount: Number(row.amount), ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}) };
+    return { paymentId: row.id, orderId: row.order_id, eventId: row.event_id, orderKind: orderKindOfRow(row.order_kind), attemptNo: Number(row.attempt_no), pg: row.pg as PgName, paymentRef: row.pg_payment_ref, amount: Number(row.amount), ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}) };
   }
 
   async readCancelStatus(paymentId: string, budget?: CallBudget): Promise<PaymentLedgerStatus | undefined> {
@@ -599,7 +608,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       if ((await lockStatus(tx, target.paymentId)) !== 'AWAITING_DEPOSIT') return 'STALE';
       const message = await this.#recordResult(tx, target, { status: 'FAILED', result: 'DECLINED', failureCategory: 'DEPOSIT_CANCELED' }, this.o.clock.now());
       // Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
-      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: target.eventId, payload: this.#codec.encode(message) }]);
+      await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: paymentEventKafkaKey(message), payload: this.#codec.encode(message) }]);
       return 'APPLIED';
     }, budget);
   }
@@ -608,16 +617,17 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
     const r = await this.#tx(
       (tx) =>
         tx.execute(sql`
-      select id::text as id, order_id::text as order_id, event_id::text as event_id, pg, pg_payment_ref, pg_tx_id, amount, cancelled_amount, status
+      select id::text as id, order_id::text as order_id, event_id::text as event_id, order_kind, pg, pg_payment_ref, pg_tx_id, amount, cancelled_amount, status
       from payment where id = ${paymentId}::uuid`),
       budget,
     );
-    const row = r.rows[0] as { id: string; order_id: string; event_id: string; pg: PgName; pg_payment_ref: string; pg_tx_id: string | null; amount: number | string; cancelled_amount: number | string; status: PaymentLedgerStatus } | undefined;
+    const row = r.rows[0] as { id: string; order_id: string; event_id: string | null; order_kind: string; pg: PgName; pg_payment_ref: string; pg_tx_id: string | null; amount: number | string; cancelled_amount: number | string; status: PaymentLedgerStatus } | undefined;
     if (!row) return undefined;
     return {
       paymentId: row.id,
       orderId: row.order_id,
       eventId: row.event_id,
+      orderKind: orderKindOfRow(row.order_kind),
       pg: row.pg,
       paymentRef: row.pg_payment_ref,
       ...(row.pg_tx_id ? { txId: row.pg_tx_id } : {}),
@@ -801,7 +811,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       const message = await this.#recordResult(tx, job, finish, now);
       if (job.deposit !== undefined) {
         // 입금 대기의 끝(T16·T17)은 UNKNOWN 해소가 아니라 해소 기록을 내지 않는다. Outbox는 트랜잭션의 마지막 문장이다(ADR-0116 결정 3)
-        await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(message) }]);
+        await writeOutbox(tx, this.o.clock, [{ topic: TRADE_PAYMENTS_TOPIC, key: paymentEventKafkaKey(message), payload: this.#codec.encode(message) }]);
         return 'APPLIED';
       }
       // 결과 사건 뒤의 순번으로 해소 기록을 남긴다(ADR-0073. 결과 당기기와 주문 쪽 처리기는 RESOLVED를 결과로 보지 않는다)
@@ -813,7 +823,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       await writeOutbox(
         tx,
         this.o.clock,
-        [message, resolved].map((m) => ({ topic: TRADE_PAYMENTS_TOPIC, key: job.eventId, payload: this.#codec.encode(m) })),
+        [message, resolved].map((m) => ({ topic: TRADE_PAYMENTS_TOPIC, key: paymentEventKafkaKey(m), payload: this.#codec.encode(m) })),
       );
       return 'APPLIED';
     });

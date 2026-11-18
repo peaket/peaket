@@ -127,7 +127,13 @@ export type ProblemType =
   | 'member-code-lookup-unavailable'
   | 'merch-cancel-not-allowed'
   | 'merch-item-state-conflict'
+  | 'merch-options-invalid'
+  | 'merch-order-in-progress'
+  | 'merch-order-mixed'
+  | 'merch-product-unavailable'
+  | 'merch-quantity-limit-exceeded'
   | 'merch-return-not-allowed'
+  | 'merch-sold-out'
   | 'merge-blocked'
   | 'merge-check-unavailable'
   | 'merge-invariant-violated'
@@ -188,6 +194,7 @@ export type ProblemType =
   | 'priority-grant-in-use'
   | 'priority-grant-not-found'
   | 'priority-seat-only'
+  | 'product-attributes-invalid'
   | 'product-fulfillment-invalid'
   | 'product-limited-qty-invalid'
   | 'product-return-address-required'
@@ -195,6 +202,7 @@ export type ProblemType =
   | 'product-settlement-source-unavailable'
   | 'product-shipping-fee-required'
   | 'product-ticket-link-invalid'
+  | 'product-type-invalid'
   | 'production-suspended'
   | 'promoter-mismatch'
   | 'provider-down'
@@ -440,7 +448,13 @@ export const PROBLEM_TYPES = {
   'member-code-lookup-unavailable': { status: 503, title: "회원 코드를 잠시 확인할 수 없습니다" },
   'merch-cancel-not-allowed': { status: 409, title: "이미 보냈거나 받은 상품은 취소할 수 없습니다" },
   'merch-item-state-conflict': { status: 409, title: "지금 주문 상태에서는 할 수 없습니다" },
+  'merch-options-invalid': { status: 422, title: "고를 수 없는 옵션입니다" },
+  'merch-order-in-progress': { status: 409, title: "같은 상품의 다른 주문을 처리하고 있습니다. 잠시 뒤 다시 시도해 주세요" },
+  'merch-order-mixed': { status: 422, title: "판매자나 수령 방식이 다른 상품은 한 주문에 담을 수 없습니다" },
+  'merch-product-unavailable': { status: 422, title: "지금 이 방법으로 살 수 없는 상품입니다" },
+  'merch-quantity-limit-exceeded': { status: 422, title: "한 계정이 살 수 있는 수량을 넘었습니다" },
   'merch-return-not-allowed': { status: 409, title: "반품할 수 없는 상품이 있습니다" },
+  'merch-sold-out': { status: 409, title: "품절된 상품입니다" },
   'merge-blocked': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다" },
   'merge-check-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'merge-invariant-violated': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요" },
@@ -501,6 +515,7 @@ export const PROBLEM_TYPES = {
   'priority-grant-in-use': { status: 409, title: "지금 쓸 수 없는 우선 구매 권리입니다" },
   'priority-grant-not-found': { status: 404, title: "쓸 수 있는 우선 구매 권리가 없습니다" },
   'priority-seat-only': { status: 409, title: "우선 구매 권리의 좌석만 고를 수 있습니다" },
+  'product-attributes-invalid': { status: 422, title: "상품 속성이 상품 유형에 맞지 않습니다" },
   'product-fulfillment-invalid': { status: 422, title: "수령 방식이 맞지 않습니다" },
   'product-limited-qty-invalid': { status: 422, title: "한정 수량이 맞지 않습니다" },
   'product-return-address-required': { status: 422, title: "택배 상품은 반품 받을 주소가 필요합니다" },
@@ -508,6 +523,7 @@ export const PROBLEM_TYPES = {
   'product-settlement-source-unavailable': { status: 503, title: "상품 정산 원천을 읽을 수 없습니다" },
   'product-shipping-fee-required': { status: 422, title: "택배 상품은 배송비가 필요합니다" },
   'product-ticket-link-invalid': { status: 422, title: "티켓 연동 여부와 연결 회차가 맞지 않습니다" },
+  'product-type-invalid': { status: 422, title: "쓸 수 없는 상품 유형입니다" },
   'production-suspended': { status: 409, title: "판매 중지 중에는 바꿀 수 없습니다" },
   'promoter-mismatch': { status: 422, title: "계정의 파트너사와 다릅니다" },
   'provider-down': { status: 503, title: "지금은 본인확인을 할 수 없습니다" },

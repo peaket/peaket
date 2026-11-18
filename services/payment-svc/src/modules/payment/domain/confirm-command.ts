@@ -19,6 +19,10 @@ export const MIN_CALL_REMAINING_MS = 50;
 export const PAYMENT_LEDGER_STATUSES = ['ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED'] as const;
 export type PaymentLedgerStatus = (typeof PAYMENT_LEDGER_STATUSES)[number];
 
+/** 주문 종류(payment.order_kind, ADR-0299 결정 1). 굿즈·티켓 연동 부가 상품은 MERCH이고 회차 칸이 비어 있다 */
+export const PAYMENT_ORDER_KINDS = ['TICKET', 'MERCH'] as const;
+export type PaymentOrderKind = (typeof PAYMENT_ORDER_KINDS)[number];
+
 /** 결제창 복귀 값. `kind`는 proto oneof payment_ref의 칸 이름이다(시뮬레이터는 toss 칸을 쓴다) */
 export type ConfirmPaymentRef =
   | { readonly kind: 'toss'; readonly paymentKey: string }
@@ -31,6 +35,8 @@ export interface ConfirmPaymentInput {
   /** 결제 시도 순번(1부터). 칸이 없으면 0 */
   readonly attemptNo: number;
   readonly eventId: string;
+  /** OrderKind에서 ORDER_KIND_를 뗀 이름. 칸이 없으면 'UNSPECIFIED'(TICKET으로 본다, ADR-0299 결정 2) */
+  readonly orderKind?: string;
   /** PgProvider에서 PG_PROVIDER_를 뗀 이름. 지정이 없으면 'UNSPECIFIED' */
   readonly pg: string;
   /** 결제 상점(STANDARD·ESCROW). 비면 STANDARD(A1-H2) */
@@ -51,7 +57,10 @@ export interface ConfirmPaymentCommand {
   readonly orderId: string;
   readonly attemptId: string;
   readonly attemptNo: number;
-  readonly eventId: string;
+  /** 주문 종류. MERCH면 eventId가 null이다(ADR-0299 결정 2). 입력 검사는 늘 채운다. 없으면 TICKET으로 본다 */
+  readonly orderKind?: PaymentOrderKind;
+  /** 회차 ID. MERCH면 null */
+  readonly eventId: string | null;
   readonly pg: PgName;
   readonly pgStore?: 'STANDARD' | 'ESCROW';
   readonly paymentRef: ConfirmPaymentRef;
@@ -70,6 +79,8 @@ export interface PaymentRecord {
   readonly attemptId: string;
   readonly pg: PgName;
   readonly amount: number;
+  /** 주문 종류(payment.order_kind, 마이그레이션 0022). 다시 부를 때 대조한다. 저장소는 늘 채운다. 없으면 TICKET으로 본다 */
+  readonly orderKind?: PaymentOrderKind;
   readonly status: PaymentLedgerStatus;
   /** 승인 시각(epoch ms). 비었으면 undefined */
   readonly approvedAtMs?: number;
@@ -226,7 +237,18 @@ function checkedRef(pg: PgName, orderId: string, ref: ConfirmPaymentRef | undefi
 }
 
 /**
- * 승인 명령 입력 검사(payment §2 '승인 명령 접수의 첫 구현' 입력 검사): order_id·attempt_id·event_id는 소문자 UUID, 금액은 1 이상 PAYMENT_AMOUNT_MAX 이하 정수,
+ * order_kind 이름 → 주문 종류. UNSPECIFIED(칸 없음)는 TICKET이다(ADR-0299 결정 2). 그 밖의 값은 INVALID_ARGUMENT.
+ * @throws PaymentInputError field = 'order_kind'
+ */
+export function orderKindOf(value: string | undefined): PaymentOrderKind {
+  if (value === undefined || value === '' || value === 'UNSPECIFIED' || value === 'TICKET') return 'TICKET';
+  if (value === 'MERCH') return 'MERCH';
+  throw new PaymentInputError('order_kind');
+}
+
+/**
+ * 승인 명령 입력 검사(payment §2 '승인 명령 접수의 첫 구현' 입력 검사): order_id·attempt_id는 소문자 UUID, order_kind가 TICKET(UNSPECIFIED 포함)이면 event_id도 소문자 UUID,
+ * MERCH면 event_id·entry_opens_at이 비어야 한다(ADR-0299 결정 2). 금액은 1 이상 PAYMENT_AMOUNT_MAX 이하 정수,
  * attempt_no는 1 이상 정수, authenticated_at은 있고 양수이며 nowMs + AUTHENTICATED_AT_MAX_FUTURE_MS 이하(연도 10000 같은 값도 여기서 막힌다),
  * pg는 TOSS·PORTONE·SIMULATOR, 결제 참조는 결제사와 짝이 맞음(TOSS·SIMULATOR는 toss, PORTONE은 portone),
  * 참조 값은 1~PAYMENT_REF_MAX_LENGTH자의 보이는 ASCII(0x21~0x7E), 포트원 paymentId는 `pay-{orderId}`. entry_opens_at은 있으면 양수 시각이고 9999년을 넘지 않는다.
@@ -236,7 +258,11 @@ function checkedRef(pg: PgName, orderId: string, ref: ConfirmPaymentRef | undefi
 export function parseConfirmPaymentInput(input: ConfirmPaymentInput, nowMs: number): ConfirmPaymentCommand {
   const orderId = uuidOf(input.orderId, 'order_id');
   const attemptId = uuidOf(input.attemptId, 'attempt_id');
-  const eventId = uuidOf(input.eventId, 'event_id');
+  const orderKind = orderKindOf(input.orderKind);
+  // 굿즈는 회차가 없다(티켓 연동 부가 상품도 회차 정산서에 섞이지 않게 비운다, ADR-0299 결정 1·2)
+  if (orderKind === 'MERCH' && input.eventId !== '') throw new PaymentInputError('event_id');
+  if (orderKind === 'MERCH' && input.entryOpensAtMs !== undefined) throw new PaymentInputError('entry_opens_at');
+  const eventId = orderKind === 'MERCH' ? null : uuidOf(input.eventId, 'event_id');
   if (!(Number.isInteger(input.amount) && input.amount >= 1 && input.amount <= PAYMENT_AMOUNT_MAX)) throw new PaymentInputError('amount');
   if (!(Number.isInteger(input.attemptNo) && input.attemptNo >= 1)) throw new PaymentInputError('attempt_no');
   const authenticatedAtMs = input.authenticatedAtMs;
@@ -245,7 +271,7 @@ export function parseConfirmPaymentInput(input: ConfirmPaymentInput, nowMs: numb
   if (input.pgStore !== undefined && input.pgStore !== 'STANDARD' && input.pgStore !== 'ESCROW') throw new PaymentInputError('pg_store');
   const { entryOpensAtMs } = input;
   checkEntryOpensAt(entryOpensAtMs);
-  return { orderId, attemptId, attemptNo: input.attemptNo, eventId, pg: input.pg, pgStore: input.pgStore ?? 'STANDARD', paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }), ...(input.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: input.virtualAccountAllowed }) };
+  return { orderId, attemptId, attemptNo: input.attemptNo, orderKind, eventId, pg: input.pg, pgStore: input.pgStore ?? 'STANDARD', paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }), ...(input.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: input.virtualAccountAllowed }) };
 }
 
 /**
@@ -267,9 +293,9 @@ export function parseGetPaymentKey(paymentId: string | undefined, orderId: strin
   return { kind: 'orderId', orderId: uuidOf(orderId!, 'order_id') };
 }
 
-/** 이미 있는 결제와 같은 명령인가(attempt_id·pg·amount가 모두 같다) */
+/** 이미 있는 결제와 같은 명령인가(attempt_id·pg·amount·order_kind가 모두 같다, ADR-0299 결정 2) */
 export function isSameCommand(existing: PaymentRecord, command: ConfirmPaymentCommand): boolean {
-  return existing.attemptId === command.attemptId && existing.pg === command.pg && existing.amount === command.amount;
+  return existing.attemptId === command.attemptId && existing.pg === command.pg && existing.amount === command.amount && (existing.orderKind ?? 'TICKET') === (command.orderKind ?? 'TICKET');
 }
 
 const ANSWER_OF: Readonly<Record<PaymentLedgerStatus, ConfirmAnswerResult>> = {

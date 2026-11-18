@@ -2,7 +2,7 @@
 // 입금 전 취소(deposit-cancel.ts)와 달리 APPROVED·PARTIAL_CANCELED 원장에서 결제사 부분 취소를 부르고,
 // 성공한 금액을 payment.cancelled_amount에 더한다. 프레임워크·저장소를 모른다.
 import { createHash } from 'node:crypto';
-import { isLowerUuid, PaymentInputError, type PaymentLedgerStatus } from './confirm-command.js';
+import { isLowerUuid, PaymentInputError, type PaymentLedgerStatus, type PaymentOrderKind } from './confirm-command.js';
 import type { PgName } from './payment-gateway.js';
 
 /** 취소 ID: 영문자·숫자·_·- 9~64자. 결제사 멱등키 cancel-{취소 ID}가 포트원 규격(16자 이상)에 맞게 한다(docs/features/payment.md §4.1 '취소 ID의 길이') */
@@ -31,7 +31,10 @@ export interface ConfirmedCancelInput {
 export interface ConfirmedCancelTarget {
   readonly paymentId: string;
   readonly orderId: string;
-  readonly eventId: string;
+  /** 회차 ID. 굿즈(orderKind MERCH)는 null(ADR-0299 결정 1) */
+  readonly eventId: string | null;
+  /** 주문 종류. 없으면 TICKET(ADR-0299 결정 4) */
+  readonly orderKind?: PaymentOrderKind;
   readonly pg: PgName;
   readonly paymentRef: string;
   readonly txId?: string;

@@ -1,5 +1,5 @@
 // 받는 쪽: gRPC TicketService(docs/api/proto/peaket/ticket/v1/ticket.proto)의 최소 처리기(BUILD_ORDER HOT-160).
-// IssueTickets·CancelTickets·OperatorCancelTickets·EventCancelTickets·GetEntryRecords·CheckReviewEligibility·ListTickets를 채운다. 나머지 RPC는 grpc-js가 UNIMPLEMENTED로 답한다.
+// IssueTickets·CancelTickets·OperatorCancelTickets·EventCancelTickets·GetEntryRecords·CheckReviewEligibility·ListHeldTickets(ADR-0301 결정 1)·ListTickets를 채운다. 나머지 RPC는 grpc-js가 UNIMPLEMENTED로 답한다.
 // 오류: TicketInputError → INVALID_ARGUMENT, TicketConflictError → FAILED_PRECONDITION, 그 밖 → INTERNAL.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
@@ -219,6 +219,17 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
           });
         })
         .catch((err: unknown) => fail('CheckReviewEligibility', err, text(req.event_id), cb, onError));
+    },
+
+    // 보유 티켓 확인(ADR-0301 결정 1, 부르는 쪽 core-svc shop). 읽기만 한다. 소문자 UUID가 아니면 INVALID_ARGUMENT. 티켓 키·좌석은 싣지 않는다
+    ListHeldTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      const req = call.request;
+      useCases.ticket
+        .heldTickets({ accountId: text(req.account_id), eventId: text(req.event_id) })
+        .then((tickets) => {
+          cb(null, { tickets: tickets.map((t) => ({ ticket_id: t.ticketId, status: statusOf(t.status) })) });
+        })
+        .catch((err: unknown) => fail('ListHeldTickets', err, undefined, cb, onError));
     },
 
     ListTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {

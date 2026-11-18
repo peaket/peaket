@@ -22,8 +22,10 @@ export const payment = pgTable(
     id: uuid('id').primaryKey(),
     // 승인 요청은 주문당 한 번(유일 인덱스 payment_order_id_key)
     orderId: uuid('order_id').notNull(),
-    // 회차. 승인 명령의 event_id. 결제 사건의 eventId
-    eventId: uuid('event_id').notNull(),
+    // 회차. 승인 명령의 event_id. 결제 사건의 eventId. 굿즈(order_kind MERCH)는 비운다(ADR-0299 결정 1, 마이그레이션 0022)
+    eventId: uuid('event_id'),
+    // 주문 종류(TICKET 예매·MERCH 굿즈와 티켓 연동 부가 상품). 회차 정산서는 event_id로 읽으므로 굿즈가 걸리지 않는다(ADR-0299 결정 1, 마이그레이션 0022)
+    orderKind: text('order_kind').notNull().default('TICKET'),
     attemptId: uuid('attempt_id').notNull(),
     // 같은 주문의 결제 시도 순번(1부터). 결제 사건의 attemptNo
     attemptNo: integer('attempt_no').notNull(),
@@ -88,6 +90,9 @@ export const payment = pgTable(
     check('payment_status_check', sql`${t.status} IN (${STATUS_LIST})`),
     check('payment_pg_check', sql`${t.pg} IN (${PG_LIST})`),
     check('payment_pg_store_check', sql`${t.pgStore} IN ('STANDARD', 'ESCROW')`),
+    check('payment_order_kind_check', sql`${t.orderKind} IN ('TICKET', 'MERCH')`),
+    // 티켓만 회차가 있다(ADR-0299 결정 1)
+    check('payment_order_kind_event_check', sql`(${t.orderKind} = 'TICKET') = (${t.eventId} IS NOT NULL)`),
     check('payment_amount_check', sql`${t.amount} > 0`),
     check('payment_cancelled_amount_check', sql`${t.cancelledAmount} >= 0 and ${t.cancelledAmount} <= ${t.amount}`),
     check('payment_attempt_no_check', sql`${t.attemptNo} >= 1`),

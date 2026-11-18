@@ -18,7 +18,7 @@ export class AcceptPaymentCommand {
    * @param budget 이 호출에 남은 시간(저장소의 문장 시간 한도 재료)
    * @returns 답(처음과 다시 온 같은 명령은 같은 답, confirmAnswerOf)
    * @throws PaymentInputError 입력이 틀림(지표 invalid, 쓰지 않는다)
-   * @throws PaymentCommandMismatchError 이미 있는 결제와 attempt_id·pg·amount가 다름(지표 mismatch, SEV2 로그 mismatch, 행을 바꾸지 않는다)
+   * @throws PaymentCommandMismatchError 이미 있는 결제와 attempt_id·pg·amount·order_kind가 다름(지표 mismatch, SEV2 로그 mismatch, 행을 바꾸지 않는다)
    * 저장소 오류는 지표 error를 세고 그대로 던진다
    */
   async execute(input: ConfirmPaymentInput, budget?: CallBudget): Promise<ConfirmAnswer> {
