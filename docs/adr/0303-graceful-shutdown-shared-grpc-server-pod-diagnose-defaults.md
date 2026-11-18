@@ -21,13 +21,16 @@
    - 서버 옵션은 공용 설정의 부하 분산 프로필(`PEAKET_GRPC_LB_PROFILE`)을 쓴다. 포트는 `PEAKET_GRPC_PORT`(기본 50051 [가정], 1~65535)다. 0(빈 포트)은 local·ci 시험에서만 받는다. payment-svc(50051)·ticket-svc(50052)는 이미 있던 자기 설정 포트를 그대로 쓴다.
 2. **gRPC 서버 지표 이름**: `rpc_server_call_duration_seconds{service, method, code}`(OpenTelemetry `rpc.server.call.duration`). `method`는 proto 이름이고 등록 밖 메서드는 `unknown`, `code`는 gRPC 상태 이름, 마감을 넘겨 끊은 호출은 `CANCELLED`다. 등록 밖 메서드를 세려고 grpc-js 1.14의 내부 처리기 찾기(`_retrieveHandler`)를 감싼다. 그 함수가 없는 판에서는 감싸지 않고 그 호출만 세지 않으며, 등록 밖 메서드 시험이 실패해 판 올림 때 알아챈다.
 3. **파드 진단 수집(RB-31)의 첫 구현 값**:
-   - 주석 `peaket.io/diagnose`(값 `report` 또는 `heap`과 `@<UTC 시각>`)를 Downward API 파일에서 5초 [가정]마다 읽는다. 형식에 맞지 않는 값은 경고 한 번만 남기고 무시한다.
-   - 준비를 내리고(남은 작업 `diagnosing`) 새 일을 멈춘 뒤 30초 [가정](준비 프로브 5초 × 연속 6회) 기다려 Service에서 빠질 시간을 준다. 그동안 HTTP는 그대로 받는다. 그다음 진행 중인 일을 최대 10초 [가정] 마감한다.
+   - 주석 `peaket.io/diagnose`(값 `report` 또는 `heap`과 `@<UTC 시각>`)를 Downward API 파일에서 5초 [가정]마다 읽는다. 시각은 분까지(ADR-0070의 보기 `heap@2026-11-02T20:10Z`)나 초까지, 밀리초 세 자리까지 적은 UTC다. 형식에 맞지 않는 값은 값마다 경고 한 번과 `result="invalid_request"` 한 번만 남기고 무시한다(리뷰 SEC-05, 2026-11-19).
+   - 준비를 내리고(남은 작업 `diagnosing`) 새 일을 멈춘 뒤 40초 [가정] 기다려 Service에서 빠질 시간을 준다. 근거: 준비 프로브 주기 5초 × (연속 실패 6회 + 1) = 35초(준비를 내린 순간부터 첫 실패 프로브까지 최대 한 주기가 더 든다) + 끝점 제거가 게이트웨이·메시에 퍼지는 여유 5초 [가정](preStop `sleep` 5초와 같은 값. 자기에게 보내는 SIGTERM에는 preStop이 없다). 그동안 HTTP는 그대로 받는다. 그다음 진행 중인 일을 최대 10초 [가정] 마감한다(리뷰 RV-01·SEC-07, 2026-11-19. 처음 값 30초는 여유가 0이라 끝의 SIGTERM이 Service에서 빠지기 전에 앱을 닫았다).
    - 힙 스냅샷은 (메모리 한도 − RSS) > 2 × 쓰는 힙일 때만 뜬다. 한도 값이 없으면 건너뛰고 까닭을 남긴다.
+   - 보고서·스냅샷을 쓰기 전에 표시 파일에 `<요청 값> started`를 먼저 쓴다. 다시 떴을 때 같은 값이 `started`로 남아 있으면(수집 중 생존 프로브 재시작·OOM) 다시 수집하지 않고 `result="interrupted"`로 한 번 센다. 스냅샷은 `*.partial` 이름으로 쓰고 다 쓴 뒤 이름을 바꾼다. 남은 `*.partial`은 올리지 않고 경고와 함께 지운다(리뷰 SEC-03·RV-03, 2026-11-19).
+   - 환경 변수를 두 겹으로 뺀다. 진단을 켤 때 시작하자마자 `process.report.excludeEnv`·`excludeNetwork`를 켠다(실행 옵션과 별도). 시작 때 `/diag`에 남은 `.json` 보고서(치명 오류 보고서 포함)도 환경 변수·네트워크 칸을 지운 뒤 올리고, JSON으로 읽지 못하면 올리지 않고 경고한다. 공용 차트는 값으로 받은 `NODE_OPTIONS`에 안전 옵션을 끄는 값(`--no-disable-sigusr1`·`--no-report-exclude-env`·`--no-report-exclude-network`·`--no-report-on-fatalerror`·`--inspect`로 시작하는 옵션)이 있으면 렌더를 멈추고, 안전 옵션을 값 뒤에 둔다(리뷰 SEC-02, 2026-11-19).
    - 증거 객체 이름은 `<서비스>/<파드>/<요청 시각>/<파일>`뿐이다. 올리기에 성공한 파일만 지운다. 처리한 요청 값은 `/diag` 안 표시 파일에 남겨, 다시 뜬 뒤 같은 요청을 되풀이하지 않는다. 다 하면 자기에게 SIGTERM을 보내 결정 1의 종료 차례로 끝나고 kubelet이 다시 띄운다. 시작할 때 `/diag`에 남은 보고서도 올리고 지운다.
-   - 수집은 주석 파일 환경 값(`PEAKET_DIAG_ANNOTATIONS_FILE`, 공용 차트가 넣는다)이 있을 때만 켜진다. 그때 증거 저장소 설정이 없으면 local·ci는 경고 한 줄과 함께 끈다(버킷과 moto 주소가 둘 다 있어야 켠다). 그 밖의 환경은 빠진 이름을 대며 시작하지 않는다.
+   - 수집은 주석 파일 환경 값(`PEAKET_DIAG_ANNOTATIONS_FILE`, 공용 차트가 넣는다)이 있을 때만 켜진다. 그때 증거 저장소 설정이 없으면 local·ci는 경고 한 줄과 함께 끈다(버킷과 moto 주소가 둘 다 있어야 켠다). 그 밖의 환경(staging·prod·demo)은 빠진 이름을 대며 시작하지 않는다. demo도 버킷을 요구한다: demo는 클라우드 데모 계정에서 돌고 P1 증거를 둘 곳이 전용 버킷뿐이다. 노트북의 kind에서 돌리는 시연은 local 오버레이다. 그래서 공용 차트는 `PEAKET_ENV`가 local·ci 밖이면 `diagnose.bucket`을 `required`로 받아 렌더 때 멈춘다(리뷰 SEC-06, 2026-11-19).
+   - 흉내 서버 주소(`PEAKET_DIAG_S3_ENDPOINT`)는 local·ci에서만 받는다. 그 밖의 환경에 값이 있으면 시작하지 않고(`PlatformConfigError`), 공용 차트도 렌더를 멈춘다. P1 증거가 전용 버킷 밖(평문 http 포함)으로 가지 않게 한다(리뷰 SEC-01, 2026-11-19).
    - Outbox 릴레이 프로세스에는 이번에 진단 수집을 붙이지 않는다. 실행 옵션(`--disable-sigusr1`·치명 오류 보고서)은 공용 차트가 릴레이 파드에도 준다.
-   - 결과 지표는 `diagnose_collections_total{service, result}`다.
+   - 결과 지표는 `diagnose_collections_total{service, result}`다(`result` 목록은 docs/observability.md §3 '진단 수집 지표').
 4. **프로브 값**: 공용 차트의 준비 프로브를 정본 값(5초·3초·6회)으로 맞춘다. 로컬 kind에서 이벤트 루프를 2초씩 막는 비교(D-T19 ③④)를 근거로 남긴다. 온세일 부하의 이벤트 루프 지연 p99로 다시 보는 일은 측정 창 BAT-095가 한다(전체 감독 결정 2026-11-19).
 
 ## 결과
@@ -35,6 +38,7 @@
 - 서비스 여섯의 `src/grpc-server.ts`가 공용 서버를 부르는 얇은 파일이 되고, 부하 분산 프로필이 실제로 서버 옵션에 걸린다.
 - 종료 차례 시험(D-T27)과 진단 수집 시험(D-T18 ①)은 `packages/platform`과 로컬 kind에서 본다. `--disable-sigusr1`이 없는 파드를 거부하는 정책(D-T18 ②)은 BAS-150이다.
 - 남는 것: 서비스마다 따로인 SIGTERM 처리기를 공용 감싸개로 모으는 일, 릴레이 파드의 진단 수집, 운영 kubelet에서 주석이 파일에 닿는 시간.
+- 남는 것(진단을 거는 권한, 리뷰 SEC-04, 2026-11-19): 지금은 `patch pods` 권한이면 누구나 주석을 달아 파드를 빼고 메모리 사본을 버킷에 쓰게 할 수 있고, 여러 파드에 한 번에 달면 끝점이 0이 된다. 입장 정책(BUILD_ORDER BAS-150의 Kyverno 또는 쿠버네티스 ValidatingAdmissionPolicy)으로 ① `peaket.io/diagnose` 주석은 긴급 접근 그룹만 달거나 바꾸게 하고, 바꾸면 감사 경보를 내며 ② 같은 Deployment(같은 소유자)의 파드에 동시에 둘 이상 달린 것을 거부한다(RB-31·ADR-0070 '한 번에 파드 하나'). 그때까지 RB-31은 긴급 접근 절차(docs/devops.md §10.2)로만 한다.
 
 ## 다른 선택지
 
