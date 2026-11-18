@@ -805,3 +805,4 @@
 
 - 2026-11-09 공연 상세 ISR 저장 실패 고침(R-431): `Booking.tsx`가 서버 그리기 중 `Date.now()`를 읽어 미리 그리기가 멈췄다(255cc2fa부터). `budgets/isr.spec.mjs`·`no-render-clock.test.mjs`를 더했다. CI의 공연 상세 LCP 실패(edd7778d)와의 관계는 다음 CI로 본다.
 - 2026-11-09 BOT-060 즉시 피처와 기기 라벨 키 통일(R-433, B-T16·B-T22~25, ADR-0251): `tr:devshare`(사람 확인 결과와 상관없이 넣음, 상한 20·10분)와 `tr:asnhost`(10초 칸), 키 고리 `packages/platform/src/inv-ref.ts`를 identity와 trust-svc가 함께 쓰고, 지문을 시작 로그와 `inv_ref_key_info`에 낸다. 로그인 근거는 기기 이력 하나다. 새 맥락 리뷰 높음 2·중간 3·낮음 7을 고치거나 한계로 적었다. 소유자 결정으로 이 단계에서 갈래 3을 멈춘다.
+- 2026-11-10 BAT-195 BOT-065 차단 기기 목록·라벨 반영·그림자 판·기기 키 회전 이음(R-441, B-T4·B-T9·B-T20·B-T21·B-T26·B-T27·Q-T48, ADR-0258): trust-svc `TrustLabelService.ApplyLabel`(멱등 기록과 판 가드), 규칙 파일 `shadow`·`stage: "LAUNCH"`, 이음 기간 옮기기와 이어 달기. 장부 범위 빈칸 33 → 0, 독립 틀린 구현 70개 중 12개 놓침 → 시험 더함. BOT-080은 BAT-197로 옮김

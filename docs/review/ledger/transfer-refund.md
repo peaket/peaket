@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 38 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 130 |
+| A | 39 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 131 |
 | B | 0 | 97 | 0 | 0 | 0 | 0 | 0 | 20 | 9 | 126 |
-| 합계 | 38 | 116 | 0 | 0 | 0 | 0 | 0 | 20 | 82 | 256 |
+| 합계 | 39 | 116 | 0 | 0 | 0 | 0 | 0 | 20 | 82 | 257 |
 
 ## docs/features/transfer-refund.md
 
@@ -142,6 +142,7 @@
 | R-T39 | ⑤ | 예매 취소의 재인증 토큰(추천 적용 2026-11-18, §3.1 '팬… | ⑤ 모두 503 `reauth-unavailable`과 `Retry-After`이고 호출 0이며, 답하지 않는 읽기는 1,000ms [가정] 안팎에 503이다 | 자동 시험 | A | 시험: packages/platform/test/reauth-jti.test.ts, services/purchase-svc/test/cancel-reauth-http.test.ts 외 1곳 |
 | R-T39 | ⑥ | 예매 취소의 재인증 토큰(추천 적용 2026-11-18, §3.1 '팬… | ⑥ 둘 다 시작하지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/fan-reauth-wiring.test.ts |
 | R-T39 | ⑦ | 예매 취소의 재인증 토큰(추천 적용 2026-11-18, §3.1 '팬… | ⑦ 500이고 `Retry-After`가 없으며 호출 0 | 자동 시험 | A | 시험: services/purchase-svc/test/cancel-reauth-http.test.ts, services/purchase-svc/test/jwks-fan-reauth-gate.test.ts |
+| R-T39 | ⑧ | 예매 취소의 재인증 토큰(추천 적용 2026-11-18, §3.1 '팬… | ⑧ 모두 403 `reauth-required`이고 ticket-svc·payment-svc 호출, `order_cancellation` 쓰기, `jti`… | 자동 시험 | A | 시험: services/purchase-svc/test/cancel-reauth-http.test.ts |
 
 ## docs/security/asvs/transfer-refund.md
 

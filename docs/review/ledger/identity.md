@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 7 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 8 |
-| B | 239 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 388 |
-| 합계 | 246 | 51 | 0 | 0 | 0 | 7 | 0 | 7 | 85 | 396 |
+| B | 244 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 393 |
+| 합계 | 251 | 51 | 0 | 0 | 0 | 7 | 0 | 7 | 85 | 401 |
 
 ## docs/features/identity.md
 
@@ -275,6 +275,11 @@
 | I-T84 | ⑤ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ⑤ 미룬 계정이 새 재인증 토큰으로 다시 요청하면 참여자를 다시 부르고 `DONE`이면 204, `PENDING`이면 202다… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal.test.ts |
 | I-T84 | ⑥ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ⑥ `GetVerificationStatus`는 살아 있는 세션의 `WITHDRAWAL_PENDING`(`WITHDRAWAL`) 계정에 verified… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/identity.grpc.test.ts… |
 | I-T84 | ⑦ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ⑦ 요청 경로의 끝내기와 고리의 끝내기가 겹쳐도 계정은 한 번 끝나고 탈퇴 사건은 한 건이다. 대조값 보관 행이 있으면 지금처럼 409… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal-participant… |
+| I-T85 | ① | 재인증 토큰의 받는 쪽 작업 `op`(추천 적용, 2026-11-18… | ① 표의 값은 303으로 제공자에 가고, 콜백이 부른 `IssueReauthToken`의 `operation`이 그 값의… | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
+| I-T85 | ② | 재인증 토큰의 받는 쪽 작업 `op`(추천 적용, 2026-11-18… | ② 열다섯 값마다 `ISSUED`이고 토큰의 `op`가 그 값, `act`가 표의 값(`TRANSFER_REQUEST`·TICKET_CANCEL_REFUND_A… | 자동 시험 | B | 시험: services/identity-svc/test/reauth-op.test.ts, services/identity-svc/test/session.grpc.test.ts |
+| I-T85 | ③ | 재인증 토큰의 받는 쪽 작업 `op`(추천 적용, 2026-11-18… | ③ 자기 `op`만 지금처럼 성공하고, 나머지는 모두 403 `reauth-required`이며 `reauth_token_use` 행이 생기지 않고… | 자동 시험 | B | 시험: services/identity-svc/test/http.test.ts, services/identity-svc/test/reauth-op.test.ts 외 1곳 |
+| I-T85 | ④ | 재인증 토큰의 받는 쪽 작업 `op`(추천 적용, 2026-11-18… | ④ 같은 것만 통과하고 나머지 토큰은 `TokenRejected`(까닭 `claims`)다. 기대 `op`를 잘못 넘긴 둘은 `TokenRejected`가 아닌… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
+| I-T85 | ⑤ | 재인증 토큰의 받는 쪽 작업 `op`(추천 적용, 2026-11-18… | ⑤ 다섯 화면이 보낸 재인증 양식의 `purpose`가 차례로 `account-withdraw`·`session-end`·`login-method-remove`… | 자동 시험 | B | 시험: apps/web/src/features/account-withdraw/flow.test.mjs, apps/web/src/features/login-methods/flow.test.mjs |
 
 ## docs/security/asvs/auth.md
 
@@ -366,7 +371,7 @@
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | B | 시험: services/queue-svc/test/tokens.test.ts |
 | v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
-| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
+| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts, services/purchase-svc/test/admission-token.test.ts |
 | v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-10.1.1 | — | L2 | 토큰은 꼭 필요한 구성요소에만 보낸다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
