@@ -290,6 +290,31 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 
 - **확인했고 문제없는 것**: 계좌 없는 재시도는 결제사 취소 0·조회만(V5), 조회 실패·가를 수 없음은 UNKNOWN(계좌 대기로 보지 않음). 카드 결제에 온 계좌는 버리고 지표만. 422·503(결제 수단 읽기)은 ticket·좌석·취소 행·결제사 호출 앞이라 쓰는 것이 없다(재인증 토큰 소비는 정본의 남는 한계). 견적은 입장 시작 뒤면 결제 수단을 읽지 않는다. 마감 뒤 환급의 REQUESTED 행은 `claimDue`가 먼저 REFUND_PENDING으로 바꾸므로 `markRefundAccountRequired` 조건과 맞는다. 재시도 실행기·일괄 환불은 계좌를 싣지 않고, 계좌 대기 행·항목을 다시 집지 않으며 자동 정지 셈 밖이다. 일괄 환불 COMPLETED 셈에 `ACCOUNT_PENDING`이 끝난 항목으로 들어간다. 계좌는 proto·gRPC 받는 층·결제사 본문에만 있고 `payment_cancel`·사건·Outbox·CS 건 본문·로그·지표 이름표에 없다. core 반영은 한 트랜잭션 안의 `withSearchSync`라 되돌리면 검색도 그대로다. ops 다시 하기 잡기는 `FOR UPDATE SKIP LOCKED` + 미루기 한 문장이고 늦음 표시는 요청마다 한 번이다. `PEAKET_CORE_HTTP_URL`은 local·ci 밖에서 없으면 시작 실패다. core 경로는 공용 내부 토큰 가드(운영은 토큰 없으면 시작 안 함, 401)다. proto는 칸·열거값 더하기만이라 옛 purchase는 새 결과를 UNKNOWN으로 읽고, openapi는 선택 칸·응답 더하기이며 생성물·게이트웨이 계약 해시가 함께 바뀌었다.
 
+### 다시 보기(리뷰 반영 뒤, 2026-11-19)
+
+- **본 것**: 가지 `feature/lane3-BAT-420r` 머리 `fa909a81`. `git diff f21f8034..fa909a81 -- . ':!docs/review/plans'`(반영 계획 `85394ba0`, 재현 시험 `fbed418c`, 구현 `7817c75e`, 스키마 시험 `6fa6086d`, 은행 코드 정본 `97614273`, 생성물 `fa909a81`)와 이 파일 '리뷰 반영 계획' 절. 고친 곳 중심으로 읽었고 시험·빌드는 돌리지 않았다.
+- **결과**: 높음 둘·보안 하나를 포함해 맡긴 일곱(RV-01~07) 모두 닫힘. RV-08·RV-10·RV-11은 반영 계획대로 정리 목록으로 넘어갔고(남음, 낮음), RV-09는 감독 번호 확인으로 닫혔다. 새 지적 셋(모두 낮음). 고침이 새 이중 환불·환불 누락·개인정보 누설 길을 만들지는 않았다.
+
+| # | 판정 | 근거 |
+| --- | --- | --- |
+| RV-01 | 닫힘 | ops-svc `receive-case-requested.ts`의 받는 종류에 `REFUND_ACCOUNT_PENDING`이 들어갔다. purchase `requireAccepted`는 2xx이고 본문이 JSON 객체이며 `accepted === true`일 때만 연 것으로 본다(`accepted: false`·칸 없음·JSON 아님은 `CsCaseRejected`, 다시 열기가 잇는다). 다른 CS 어댑터 넷이 보내는 종류(`REFUND_FAILED`·`FLAGGED`)도 ops가 받는 종류라, 더 엄해진 판정이 기존 건을 막지 않는다. 다섯 본문을 실제 ops 받는 층에 넣어 보는 계약 시험(`cs-case-adapters-contract.test.ts`·`cases-contract.test.ts`, 공용 본문 표 `cs-case-bodies.json`)이 생겼다 |
+| RV-02 | 닫힘 | payment-svc는 가상계좌 결제에서 그 취소 ID의 행이 이미 있으면(replay) 계좌가 있어도 다시 보내지 않고 조회 대조(V5)로만 끝을 본다(`virtualAccount && (replay || refundAccount === undefined)`). purchase `#replay`는 계좌를 넘기지 않는다(겹친 가드). 토스 모양 어댑터는 `IDEMPOTENCY_KEY_REUSED`를 결과 모름으로 읽고, 포트원은 그 코드가 거절 목록에 없어 이미 결과 모름이다. 같은 멱등키로 나가는 본문은 첫 본문 하나뿐이다. 카드 결제의 재시도는 그대로다 |
+| RV-03 | 닫힘 | payment-svc 0023 `payment_cancel.fail_reason`(계좌 거절만 `REFUND_ACCOUNT_INVALID`, CHECK로 FAILED 행에만)을 남기고 그 행의 다시 부름은 결제사 0·`REFUND_ACCOUNT_REQUIRED`다(같은 취소 ID = 같은 답). purchase는 계좌 대기 행(`refund_account_required_at` 있음)의 다시 누름에서 payment를 부르지 않고 실패 표시 없이 202 `refundAccountRequired` 참을 준다. 그래서 '환급 실패' 건이 함께 열리지 않는다. `VOIDED` 검사가 먼저라 CS가 끝낸 행은 되살리지 않는다. 칸에는 개인정보가 없다 |
+| RV-04 | 닫힘 | purchase는 재인증 앞에서 공용 규칙(`@peaket/validation/refund-account` `refundAccountShape`)으로 모양을 보고 틀리면 400 `invalid-body`다(토큰·결제 수단 읽기·Saga 0, 오류 글에 값 없음). 은행 코드는 토스 숫자 두 자리만이고 세 자리(`004`·`088`)는 400이다(payment §6 ②·openapi `RefundAccount` `pattern`). payment는 같은 규칙의 사본을 두고 같은 표(`refund-account-cases.json`)를 두 쪽 시험이 돈다. 포트원 대응표 밖 코드는 행을 만들기 전에 계좌 없음과 같게 다뤄 그 취소 ID를 태우지 않는다. 남는 빈틈은 RN-01 |
+| RV-05 | 닫힘 | ops 어댑터가 `account_pending_orders`를 `accountPending`으로 읽어 관제 진행률(`views.ts`·openapi `progress.accountPending`, 생성물)에 싣는다. 결제사별 몫에는 없다고 계약에 적었다(SCR-047은 합계로 그린다) |
+| RV-06 | 닫힘 | ① ops 0016에 `core_apply_superseded_at`을 더하고 `markCoreApplied`가 같은 트랜잭션에서 같은 회차의 앞 요청(확정 시각이 더 이르고 반영 전)에 대체 표시를 써, 앞 요청이 뒤 상태를 덮지 않는다. 대체된 요청은 다시 하기·늦음 표시 대상 밖이다. 한 바퀴 안에서는 확정 시각 차례로 부른다. ② 4xx(401 제외)는 다음 볼 시각을 10분 [가정] 미뤄 1분마다 쌓이던 오류 로그를 줄인다. ③ 잡기 차례가 '다음 볼 시각(빈 값 먼저) → 확정 시각'이고 부분 색인도 그 차례라 머리 막힘이 없다. ④ core `decideEventStatus`는 '이미 같은 시각으로 연기됨'을 '지금보다 이름' 앞에서 봐 지난 시각의 같은 반영도 204다 |
+| RV-07 | 닫힘 | 컨트롤러 머리 주석, ASVS 메모, ADR-0285 '되돌릴 조건'에 '포트 단위라 core-svc REST 포트를 부르는 다른 서비스도 공유 토큰만 있으면 닿는다'를 사실대로 적었다. 경로 단위 거르기는 ADR-0285 대안 2를 다시 볼 때의 몫으로 남는다(이 묶음에서 고칠 것 아님) |
+| RV-08 | 남음(낮음) | 정리 목록으로 넘어갔다. RV-02 고침으로 이 경우가 늘었다(RN-03) |
+| RV-09 | 닫힘 | 감독이 core-svc 0029를 갈래 3에 줬다(develop `0daf6434`). 계획 §7 core 행을 고쳤다 |
+| RV-10 | 남음(낮음) | 정리 목록으로 넘어갔다 |
+| RV-11 | 남음(낮음) | 정리 목록으로 넘어갔다. 확정 직후 반영과 다시 하기의 겹친 부름은 그대로이고 core가 멱등이라 결과는 같다 |
+
+| # | 심각도 | 파일:줄 | 무엇이 틀렸나(근거) | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RN-01 | 낮음 | `packages/validation/src/refund-account/index.ts`(`BANK_CODE`), `services/payment-svc/src/modules/payment/domain/payment-gateway.ts`(`PORTONE_BANK_OF`) | 공용 규칙은 은행 코드를 '숫자 두 자리'로만 본다. 토스 은행 코드 표에 없는 두 자리(예 `99`)는 400을 지나 Saga가 돌고, 토스는 `INVALID_BANK`로 계좌 거절(행 FAILED·`fail_reason`), 포트원은 대응표 밖이라 계좌 없음이 되어 둘 다 표가 취소된 채 계좌 대기로 빠진다. RV-03 고침으로 계좌 대기 행의 다시 누름은 payment를 부르지 않으므로, 팬이 맞는 코드로 다시 눌러도 GAT-130 전에는 고칠 길이 없다. 포트원 대응표의 26개가 토스 은행 코드 표와 같은 목록이라 같은 표로 막을 수 있다 | 공용 규칙이 토스 은행 코드 표(지금 포트원 대응표와 같은 26개)에 있는 코드만 받게 하고, 표를 한 곳(공용 패키지나 공용 시험 표)에 둔다. 틀리면 지금처럼 400 `invalid-body` |
+| RN-02 | 낮음(문서) | `docs/security/asvs/transfer-refund.md:14`(BAT-420-rest 메모 끝) | 메모는 '환불 계좌 모양은 purchase·payment가 같은 공용 함수로 본다'고 적었지만, payment-svc는 v0 이미지 때문에 같은 규칙의 사본(`refundAccountOf`)을 두고 같은 표로 시험한다. 사본은 gRPC로 온 공백을 먼저 빼 purchase보다 조금 너그럽다(겹친 가드라 문제는 아니다) | 메모를 '같은 규칙(purchase는 공용 함수, payment는 같은 표로 시험하는 사본)'으로 고친다 |
+| RN-03 | 낮음(장애, 넘김) | `services/payment-svc/src/modules/payment/application/cancel-confirmed-payment.ts`(V5 조건), GAT-130 지시서 | RV-02 고침의 정해진 대가다. 계좌를 실은 첫 전송이 결제사에 닿지 않은 채 결과 모름이 되면, 전에는 같은 계좌로 다시 누르면 다시 보낼 수 있었지만 이제는 조회 '반영 아님'으로 계좌 대기가 되고 GAT-130 전까지 CS 손일이다(payment §6 ⑥이 받아들인 것). 이 진행 중 행(REQUESTED)은 결제사가 늦게 반영할 수 있어(RV-08), GAT-130이 새 멱등키로 다른 계좌를 보낼 때 앞 행을 닫지 않으면 이중 환불이 된다 | GAT-130(BAT-425) 지시서와 정리 목록 RV-08 줄에 '새 멱등키 전송 전에 그 취소 ID의 진행 중 행을 조회로 끝내고(반영이면 환급 끝, 아니면 행을 닫은 뒤) 보낸다'를 적는다 |
+
 ## 검증
 
 - **누가·어디서**: 검증 담당 `l3-b420-verify`(claude-opus-5-5, 2026-11-19). 계획·구현·시험·리뷰에 관여하지 않았다. 시험 커밋 `5654fd91`을 따로 된 작업 폴더(`D:/ticketpass-lane3-b420-verify`, `--detach`)로 꺼내 `pnpm install --frozen-lockfile --prefer-offline`을 하고 패키지 여섯(search-normalize·shuffle·validation·contracts·platform·pg-simulator)을 빌드했다. 리뷰 커밋 `f21f8034`은 이 파일만 고쳐 제품 코드는 같다.
@@ -549,7 +574,7 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T03:43+09:00 | 2026-11-19T04:04+09:00 |
 | impl | l3-b420-impl | claude-opus-5-5 | 2026-11-19T04:05+09:00 | 2026-11-19T04:56+09:00 |
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T04:58+09:00 | 2026-11-19T06:10+09:00 |
-| review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:18+09:00 |
+| review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T08:31+09:00(다시 보기 08:27~08:31) |
 | verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T06:06+09:00 | 2026-11-19T06:50+09:00 |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T06:52+09:00 | 2026-11-19T07:00+09:00 |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T08:18+09:00 | 2026-11-19T08:30+09:00 |
