@@ -69,6 +69,11 @@ jobs:
           node --test --test-timeout=300000 tools/local/e2e/gateway-limits.e2e.mjs
           # 생성 라우트의 인증 종류·백엔드·시간 상한·게이트웨이 오류 403·405(BAT-060 계획 15절, BAT-055 웨이브 끝 리뷰 지적의 K 재현). 시간 상한 시험이 요청 하나에 20~28초다
           node --test --test-timeout=300000 tools/local/e2e/gateway-routes.e2e.mjs
+      # 메시 없는 실행의 포트별 허용 NetworkPolicy(D-T36 ①~⑦ kind, ADR-0285 결정 13, BUILD_ORDER HOT-420): 원천의 워크로드마다 받는 쪽 대역과 생성 NetworkPolicy
+      # (deploy/platform/mesh/meshless-networkpolicies.yaml, kindnet이 지킨다)를 올리고 부르는 쪽 시험 파드로 연결·거부를 본다. 게이트웨이 시험 뒤에 돈다
+      # (게이트웨이 라벨을 단 시험 파드가 로컬 전용 NodePort Service의 끝점이 될 수 있어서다. 실제 프록시 파드의 서비스 계정도 본다)
+      - run: node tools/local/cluster.mjs mesh-netpol
+      - run: node --test --test-timeout=300000 tools/local/e2e/mesh-netpol.e2e.mjs
       - if: ${{ failure() }}
         run: |
           node tools/local/cluster.mjs status || true
@@ -85,5 +90,9 @@ jobs:
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system logs deploy/envoy-ratelimit --tail=100 || true
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n envoy-gateway-system get svc -o wide || true
           docker port peaket-control-plane || true
+          # 메시 없는 NetworkPolicy 무대: 생성 NetworkPolicy와 받는 쪽 대역·시험 파드(원천의 워크로드·부르는 쪽 네임스페이스)
+          for ns in core purchase queue ticket trust web ops-breakglass observability envoy-gateway-system; do
+            "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n "$ns" get networkpolicies,pods -o wide || true
+          done
       - if: ${{ always() }}
         run: node tools/local/cluster.mjs down || true

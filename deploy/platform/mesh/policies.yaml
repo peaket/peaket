@@ -1,0 +1,1456 @@
+# 생성 파일이다. 손으로 고치지 않는다(원천 deploy/platform/mesh/port-allow.yaml과 deploy/gateways/*.yaml의 라우트·공개키 묶음 주소, docs/api/proto에서 node tools/ci/mesh-policies.mjs --write가 만든다, ADR-0285 결정 2)
+# 운영 오버레이 몫: 받는 쪽 노드 프록시 인가 정책 <워크로드>-ports(포트마다 허용 주체, 업무 gRPC 포트는 그 워크로드의 웨이포인트 하나), 업무 gRPC 워크로드의
+# 웨이포인트 <워크로드>-waypoint와 업무 gRPC Service <워크로드>-grpc, 웨이포인트 인가 정책 <워크로드>-waypoint-callers(서비스·메서드 경로마다 부르는 쪽, docs/architecture.md §5 '포트별 허용 표')
+# 부르는 쪽이 없어 규칙을 만들지 않은 업무 gRPC(아무도 부르지 못함): peaket.payment.v1.CompensationTransferService
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: admission-ctrl-ports
+  namespace: queue
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: admission-ctrl
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admission-ctrl
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ops-breakglass/sa/ops-breakglass
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            ports:
+              - "50061"
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: core-svc-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: core-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: core-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-ops-72791c8c
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+              - cluster.local/ns/core/sa/ops-svc
+              - cluster.local/ns/purchase/sa/payment-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
+              - cluster.local/ns/ticket/sa/ticket-svc
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: core-svc-waypoint
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: core-svc
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-svc-grpc
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: core-svc
+    istio.io/use-waypoint: core-svc-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: core-svc
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: core-svc-waypoint-callers
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: core-svc
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: core-svc-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/identity-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.core.v1.AccountMergeCheckService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.core.v1.BookingRestrictionViewService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.core.v1.CatalogAdminService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.core.v1.FraudAppealViewService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.core.v1.ReviewModerationService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.core.v1.SaleReviewService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.core.v1.SupportCaseService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: identity-svc-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: identity-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: identity-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-ops-72791c8c
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-queue-38f088e6
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-scanner-1784b03e
+              - cluster.local/ns/core/sa/ops-svc
+              - cluster.local/ns/purchase/sa/payment-svc
+              - cluster.local/ns/web/sa/web
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/identity-svc-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: identity-svc-waypoint
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: identity-svc
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-svc-grpc
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: identity-svc
+    istio.io/use-waypoint: identity-svc-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: identity-svc
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: identity-svc-waypoint-callers
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: identity-svc
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: identity-svc-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.AccountHoldService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.AdminAccountService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/queue/sa/admission-ctrl
+              - cluster.local/ns/core/sa/core-svc
+              - cluster.local/ns/core/sa/identity-svc
+              - cluster.local/ns/core/sa/ops-svc
+              - cluster.local/ns/purchase/sa/payment-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
+              - cluster.local/ns/queue/sa/queue-svc
+              - cluster.local/ns/ticket/sa/ticket-svc
+              - cluster.local/ns/trust/sa/trust-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.AdminAuthzService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.AdminDesignationService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.AdminSessionService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.ContactRefService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.IdentityService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/trust/sa/inv-ingest
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.InvestigationRefService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.MemberCodeService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-notify-sender
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.RecipientQueryService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.RestrictedCiHoldService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/queue/sa/queue-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.ReverificationCheckService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ticket/sa/ticket-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.ScannerSessionCheckService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.ScannerSessionQueryService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/web/sa/web
+      to:
+        - operation:
+            paths:
+              - /peaket.identity.v1.SessionService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: image-worker-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: image-worker
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: image-worker
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/image-worker-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: image-worker-waypoint
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: image-worker
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-worker-grpc
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: image-worker
+    istio.io/use-waypoint: image-worker-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: image-worker
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: image-worker-waypoint-callers
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: image-worker
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: image-worker-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.image.v1.ImageService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: ops-svc-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: ops-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ops-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-ops-72791c8c
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+              - cluster.local/ns/purchase/sa/purchase-svc
+              - cluster.local/ns/ticket/sa/ticket-svc
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: partner-ports
+  namespace: web
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: partner
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: partner
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+      to:
+        - operation:
+            ports:
+              - "3001"
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: payment-svc-ports
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: payment-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/payment-svc-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ops-breakglass/sa/ops-breakglass
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            ports:
+              - "50061"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: payment-svc-waypoint
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: payment-svc
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-svc-grpc
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: payment-svc
+    istio.io/use-waypoint: payment-svc-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: payment-svc
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: payment-svc-waypoint-callers
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: payment-svc
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: payment-svc-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/ApprovePayoutBatch
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/BatchGetPayments
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/CancelPayment
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/ConfirmPayment
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/GetNewPaymentPause
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/GetPayment
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/PrepareCheckout
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/RegisterPayoutSeller
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: purchase-svc-ports
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: purchase-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: purchase-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ops-breakglass/sa/ops-breakglass
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            ports:
+              - "50061"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: purchase-svc-waypoint
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: purchase-svc
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: purchase-svc-grpc
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: purchase-svc
+    istio.io/use-waypoint: purchase-svc-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: purchase-svc
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: purchase-svc-waypoint-callers
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: purchase-svc
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: purchase-svc-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/identity-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.purchase.v1.AccountMergeCheckService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.purchase.v1.BookingRestrictionService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.purchase.v1.EventRefundService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.purchase.v1.FraudCancellationService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.purchase.v1.PriorityPurchaseService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: queue-svc-ports
+  namespace: queue
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: queue-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: queue-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-queue-38f088e6
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/queue/sa/queue-svc-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ops-breakglass/sa/ops-breakglass
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            ports:
+              - "50061"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: queue-svc-waypoint
+  namespace: queue
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: queue-svc
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue-svc-grpc
+  namespace: queue
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: queue-svc
+    istio.io/use-waypoint: queue-svc-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: queue-svc
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: queue-svc-waypoint-callers
+  namespace: queue
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: queue-svc
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: queue-svc-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.queue.v1.BookingRestrictionService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.queue.v1.PriorityGrantService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/trust/sa/trust-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.queue.v1.QueueService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.queue.v1.VerificationAppealService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: seatmap-worker-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: seatmap-worker
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: seatmap-worker
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/seatmap-worker-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: seatmap-worker-waypoint
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: seatmap-worker
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seatmap-worker-grpc
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: seatmap-worker
+    istio.io/use-waypoint: seatmap-worker-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: seatmap-worker
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: seatmap-worker-waypoint-callers
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: seatmap-worker
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: seatmap-worker-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.seatmap.v1.SeatmapImportService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: ticket-svc-ports
+  namespace: ticket
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: ticket-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ticket-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-scanner-1784b03e
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/ticket/sa/ticket-svc-waypoint
+      to:
+        - operation:
+            ports:
+              - "50052"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ticket-svc-waypoint
+  namespace: ticket
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: ticket-svc
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ticket-svc-grpc
+  namespace: ticket
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: ticket-svc
+    istio.io/use-waypoint: ticket-svc-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: ticket-svc
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50052
+      targetPort: 50052
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: ticket-svc-waypoint-callers
+  namespace: ticket
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: ticket-svc
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ticket-svc-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/identity-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.AccountMergeCheckService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/identity-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.ScannerDeviceLookupService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.ScannerDeviceService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketReclaimService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/CancelTickets
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/CheckReviewEligibility
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/EventCancelTickets
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/GetEntryRecords
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/IssueTickets
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/core-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/ListHeldTickets
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/web/sa/web
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/ListTickets
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/OperatorCancelTickets
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TicketService/VoidTickets
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.ticket.v1.TransferLockService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: trust-svc-ports
+  namespace: trust
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: trust-svc
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trust-svc
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+      to:
+        - operation:
+            ports:
+              - "8080"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/observability/sa/prometheus
+      to:
+        - operation:
+            ports:
+              - "9464"
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/trust/sa/trust-svc-waypoint
+      to:
+        - operation:
+            ports:
+              - "50051"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: trust-svc-waypoint
+  namespace: trust
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: trust-svc
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trust-svc-grpc
+  namespace: trust
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: trust-svc
+    istio.io/use-waypoint: trust-svc-waypoint
+spec:
+  selector:
+    app.kubernetes.io/name: trust-svc
+    app.kubernetes.io/component: service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+      appProtocol: grpc
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: trust-svc-waypoint-callers
+  namespace: trust
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: trust-svc
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: trust-svc-waypoint
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.trust.v1.TrustEvidenceService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.trust.v1.TrustLabelService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/identity-svc
+              - cluster.local/ns/queue/sa/queue-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.trust.v1.TrustService/*
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: web-ports
+  namespace: web
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: web
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: web
+      app.kubernetes.io/component: service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+      to:
+        - operation:
+            ports:
+              - "3000"

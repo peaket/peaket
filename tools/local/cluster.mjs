@@ -12,6 +12,9 @@
 //   node tools/local/cluster.mjs v1-down   v1 측정 무대를 내린다(네임스페이스 v1과 kind 노드 폴더. 클러스터는 그대로)
 //   node tools/local/cluster.mjs gateways  게이트웨이 다섯(Envoy Gateway 고정 판·deploy/gateways 로컬 덧씌우기·대역 백엔드·시험 키, docs/infra.md §4.1)과 시험 접속 정보 .cache/peaket-tools/gateways-e2e.json.
 //                                         다섯은 kind 포트 매핑과 로컬 전용 NodePort Service로 127.0.0.1:18441~18445에 바로 열린다(포트 전달 없음)
+//   node tools/local/cluster.mjs mesh-netpol  메시 없는 실행의 포트별 허용 NetworkPolicy 무대(BUILD_ORDER HOT-420, D-T36, ADR-0285): 원천
+//                                         deploy/platform/mesh/port-allow.yaml의 워크로드마다 받는 쪽 대역 파드와 생성 NetworkPolicy를 올리고 시험 접속 정보
+//                                         .cache/peaket-tools/mesh-netpol-e2e.json을 쓴다. 다시 돌려도 된다(덮어쓰기). 내리는 명령은 없다(down이 클러스터를 지운다)
 //   node tools/local/cluster.mjs status  파드 목록
 //   node tools/local/cluster.mjs down    클러스터를 지운다
 // - 클러스터 이름은 PEAKET_CLUSTER(기본 peaket)다. 여러 작업 폴더가 한 PC에서 따로 띄울 때 바꾼다(kubeconfig 기본 이름도 따라 바뀐다)
@@ -31,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
 import { assertRatelimitBackend, echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, GATEWAY_RATELIMIT, gatewayCertArgs, gatewayContract, gatewayHostPorts, gatewayInstall, gatewayNodePortService, gatewayPortMappings, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, RATELIMIT_REDIS, RATELIMIT_REDIS_IMAGE, ratelimitRedisObjects, ratelimitRedisSecret, ratelimitRedisTlsNames, readGatewayObjects } from './gateway-objects.mjs';
+import { MESH_NETPOL_POLICIES, MESH_NETPOL_SOURCE, meshNetpolContract, meshNetpolLayout, meshNetpolStandIns } from './mesh-netpol-objects.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey } from './v0-token.mjs';
 import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
@@ -906,15 +910,45 @@ async function waitGatewayTls(contract, timeoutMs = 60_000) {
   }
 }
 
+// --- 메시 없는 실행의 포트별 허용 NetworkPolicy(BUILD_ORDER HOT-420, D-T36, ADR-0285 결정 13, 묶음 BAT-061 계획 4.4) ---
+
+/** 시험 접속 정보 파일(비밀 없음) */
+export const MESH_NETPOL_CONTRACT_FILE = process.env.PEAKET_MESH_NETPOL_E2E || join(DEFAULT_ROOT, 'mesh-netpol-e2e.json');
+
+async function meshNetpol() {
+  step('Docker 엔진과 도구');
+  run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
+  for (const t of ['kind', 'kubectl']) await ensureTool(t);
+  await ensureCluster();
+  step(`고정 Node 이미지 ${GATEWAY_ECHO_IMAGE}(대역·시험 파드, 게이트웨이 대역 백엔드와 같은 것)`);
+  if (nodeImageDigest(onKindNode(['ctr', '-n', 'k8s.io', 'images', 'ls']), GATEWAY_ECHO_IMAGE)) console.log('kind 노드에 이미 있다');
+  else await preloadLocalImages([GATEWAY_ECHO_IMAGE]);
+  const layout = meshNetpolLayout(readFileSync(join(REPO, MESH_NETPOL_SOURCE), 'utf8'));
+  step(`네임스페이스 ${layout.namespaces.join(', ')}(없는 것만 만든다)`);
+  const existing = new Set((JSON.parse(await kubectl(['get', 'namespaces', '-o', 'json'], { quiet: true })).items ?? []).map((o) => o.metadata.name));
+  for (const ns of layout.namespaces) if (!existing.has(ns)) await kubectl(['create', 'namespace', ns]);
+  step(`받는 쪽 대역 ${layout.workloads.length}개(워크로드마다 Deployment·Service, 모든 포트에서 연결을 받아 답하고 닫는다)`);
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: meshNetpolStandIns(layout, GATEWAY_ECHO_IMAGE) }) });
+  step(`생성 NetworkPolicy ${MESH_NETPOL_POLICIES}(그대로 적용)`);
+  await kubectl(['apply', '-f', join(REPO, MESH_NETPOL_POLICIES)]);
+  step('대역이 준비되기를 기다린다');
+  for (const w of layout.workloads) await kubectl(['-n', w.namespace, 'rollout', 'status', `deploy/${w.name}`, '--timeout=300s']);
+  const contract = meshNetpolContract(layout, GATEWAY_ECHO_IMAGE);
+  mkdirSync(dirname(MESH_NETPOL_CONTRACT_FILE), { recursive: true });
+  writeFileSync(MESH_NETPOL_CONTRACT_FILE, `${JSON.stringify(contract, null, 2)}\n`);
+  step('준비됨');
+  console.log(`접속 정보: ${MESH_NETPOL_CONTRACT_FILE}`);
+}
+
 async function down() {
   await kind(['delete', 'cluster', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
-  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
+  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'mesh-netpol': meshNetpol, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|mesh-netpol|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();

@@ -1,0 +1,921 @@
+# 생성 파일이다. 손으로 고치지 않는다(원천 deploy/platform/mesh/port-allow.yaml과 deploy/gateways/*.yaml의 라우트·공개키 묶음 주소, docs/api/proto에서 node tools/ci/mesh-policies.mjs --write가 만든다, ADR-0285 결정 2)
+# 메시 없는 로컬·CI·데모 몫: 워크로드마다 Ingress NetworkPolicy <워크로드>-ports(포트마다 부르는 쪽의 네임스페이스와 파드 라벨을 한 출처 칸에 함께).
+# 업무 gRPC 포트는 경로로 거르지 못해 그 워크로드의 모든 업무 gRPC 부르는 쪽을 합쳐 받는다(ADR-0285 결정 8). 운영 오버레이에는 넣지 않는다(docs/infra.md §9)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: admission-ctrl-ports
+  namespace: queue
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: admission-ctrl
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: admission-ctrl
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-breakglass
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50061
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: core-svc-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: core-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: core-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-fan
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-ops
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-partner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: purchase-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ticket
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ticket-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: identity-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: identity-svc-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: identity-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: identity-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-fan
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-ops
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-partner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-queue
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-scanner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: web
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: web
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: queue
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: admission-ctrl
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-notify-sender
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: identity-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trust
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: inv-ingest
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: payment-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: purchase-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: queue
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: queue-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ticket
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ticket-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trust
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: trust-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: web
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: web
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: image-worker-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: image-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: image-worker
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ops-svc-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: ops-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ops-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-ops
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-partner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: purchase-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ticket
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ticket-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: partner-ports
+  namespace: web
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: partner
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: partner
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-partner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+      ports:
+        - protocol: TCP
+          port: 3001
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: payment-svc-ports
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: payment-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: payment-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-fan
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-partner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: purchase-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-breakglass
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50061
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: purchase-svc-ports
+  namespace: purchase
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: purchase-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: purchase-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-fan
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: identity-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-breakglass
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50061
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: queue-svc-ports
+  namespace: queue
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: queue-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: queue-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-queue
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trust
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: trust-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ops-breakglass
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50061
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: seatmap-worker-ports
+  namespace: core
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: seatmap-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: seatmap-worker
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ticket-svc-ports
+  namespace: ticket
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: ticket-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ticket-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-fan
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-partner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-scanner
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: core-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: identity-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: purchase-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: web
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: web
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50052
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trust-svc-ports
+  namespace: trust
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: trust-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: trust-svc
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-fan
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9464
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: identity-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ops-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: queue
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: queue-svc
+              app.kubernetes.io/component: service
+      ports:
+        - protocol: TCP
+          port: 50051
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-ports
+  namespace: web
+  labels:
+    peaket.io/generated-by: mesh-policies
+    peaket.io/workload: web
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: web
+      app.kubernetes.io/component: service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: gw-fan
+              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+      ports:
+        - protocol: TCP
+          port: 3000

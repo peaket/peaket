@@ -32,6 +32,11 @@ jobs:
       # 게이트웨이 라우트 생성 대조(D-T42 ①②, docs/infra.md §4.1 '생성 대조', BUILD_ORDER HOT-410): openapi·라우트 원천으로 다시 만든 결과가 생성 파일과 다르면 실패.
       # gitops-check(docs/devops.md §3, BAS-150)가 생기기 전에는 이 잡이 돈다
       - run: node tools/ci/gateway-routes.mjs --check
+      # 메시 포트별 허용 정책의 정적 시험(D-T36 ①~⑦ 정적, ADR-0285, BUILD_ORDER HOT-420): 생성 정책·NetworkPolicy를 정본 표와 견주고 STRICT·최소 TLS 1.3·cacerts를 본다
+      - run: node --test "deploy/platform/mesh/test/*.test.mjs"
+      # 메시 정책 생성 대조(D-T36, ADR-0285 결정 2): 원천 deploy/platform/mesh/port-allow.yaml·게이트웨이 라우트·proto로 다시 만든 결과가 생성 파일과 다르거나
+      # 원천과 라우트·proto·배포 값이 어긋나면 실패. gitops-check(docs/devops.md §3, BAS-150)가 생기기 전에는 이 잡이 돈다
+      - run: node tools/ci/mesh-policies.mjs --check
       # 엣지 저장소 맞추기 도구(ADR-0223 결정 10)
       - run: node --test "tools/edge/*.test.mjs"
       # 결제사 스모크 도구(BUILD_ORDER HOT-145. 실제 결제사를 부르지 않는다)

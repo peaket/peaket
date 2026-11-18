@@ -1,0 +1,27 @@
+# 메시 중간 CA(cacerts)를 비밀 저장소에서 넣는 ExternalSecret(ADR-0285 결정 12, docs/security/secrets-and-keys.md '서비스 메시 중간 CA', BUILD_ORDER HOT-420).
+# External Secrets Operator가 AWS Secrets Manager 경로 peaket/<환경>/mesh/cacerts [가정]의 네 칸을 istio-system의 Secret cacerts로 만든다.
+# 키 이름은 Istio 'Plug in CA Certificates'의 넷이다(2026-11-18 확인). 저장소에는 값이 없다(경로만). 오프라인 루트의 개인키는 클러스터와 AWS에 두지 않는다.
+# 경로의 <환경> 자리는 환경 오버레이(deploy/envs/<환경>/)가 채운다. 비밀 저장소 객체 이름 aws-secrets-manager는 [가정, BAS-140에서 확정]이다.
+# istiod보다 먼저 맞춰지게 하는 설치 차례는 BAS-140이 정한다
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: cacerts
+  namespace: istio-system
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: aws-secrets-manager
+  target:
+    name: cacerts
+    creationPolicy: Owner
+  data:
+    - secretKey: ca-cert.pem
+      remoteRef: { key: peaket/<환경>/mesh/cacerts, property: ca-cert.pem }
+    - secretKey: ca-key.pem
+      remoteRef: { key: peaket/<환경>/mesh/cacerts, property: ca-key.pem }
+    - secretKey: root-cert.pem
+      remoteRef: { key: peaket/<환경>/mesh/cacerts, property: root-cert.pem }
+    - secretKey: cert-chain.pem
+      remoteRef: { key: peaket/<환경>/mesh/cacerts, property: cert-chain.pem }

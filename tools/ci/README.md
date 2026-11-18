@@ -35,6 +35,7 @@
 | `entry.mjs` | 판정 도구의 직접 실행 판별(실제 경로로 견줌). 이름은 같은데 경로가 맞지 않으면 통과가 아니라 실패로 끝냅니다(ADR-0263 결정 13 ⑦) | `scan-gate.mjs`·`scan-tools.mjs`·`vuln-deadline.mjs`·`check-repo-visibility.mjs` |
 | `check-lint-disables.mjs` | 보안 린트 규칙(`peaket-web/*`·`peaket-service/*`)이나 모든 규칙을 끄는 `eslint-disable` 주석을 찾아 거절합니다. 이름을 단 예외는 `lint-disable-exceptions.json`(파일·까닭)에만 둡니다(디자인 캔버스 보드 파일 54곳). docs/devops.md §4.4, BUILD_ORDER BAS-010 ①, ADR-0259 결정 12 | `ci.yml`의 `lint-guard` |
 | `check-docker-timeouts.mjs` | Docker 호출 시간 제한 점검(ADR-0283 결정 4). git이 추적하는 `apps/`·`services/`·`packages/`의 시험 파일(`*.test.*`·`*.spec.*`이거나 `test/`·`test-int/`·`test-sim/`·`__tests__/`·`e2e/` 아래)에서 첫 인자가 `docker`인 `execFileSync`·`execFile`·`spawnSync`·`spawn`·`execSync`·`exec` 호출마다 옵션에 `timeout`이 1~300,000(ms) 정수 숫자로 바로 적혀 있는지 봅니다. 엔진이 멈추면 시험이 몇 시간이 아니라 5분 안에 실패하게 하려는 것입니다. 문제를 모두 찍고 1, Docker 호출을 하나도 찾지 못해도 1, 인자·git 오류는 2입니다. `tools/`·`loadtest/`는 보지 않습니다 | `tools-check.yml` |
+| `mesh-policies.mjs` | 메시 포트별 허용 정책 생성기(D-T36, ADR-0285, BUILD_ORDER HOT-420). 원천 `deploy/platform/mesh/port-allow.yaml`, `deploy/gateways/` 맨 위 YAML의 라우트 백엔드와 공개키 묶음 주소, `docs/api/proto`의 서비스·메서드로 `deploy/platform/mesh/policies.yaml`(운영 오버레이: 노드 프록시·웨이포인트 인가 정책, 웨이포인트, 업무 gRPC Service)과 `meshless-networkpolicies.yaml`(메시 없는 실행의 NetworkPolicy)을 만듭니다. `--write`는 쓰고 `--check`는 견줍니다. 다르거나 원천이 라우트·proto·배포 단위 값과 어긋나면 `막음: <파일>: <까닭>`을 모두 찍고 1, 인자 오류는 2입니다. 워크로드·라우트·proto를 하나도 읽지 못해도 1입니다 | `tools-check.yml` |
 | `git-fixture.mjs` | 시험용 임시 git 저장소. 시험만 씁니다 | `*.test.mjs` |
 
 ## 로컬에서 돌리기

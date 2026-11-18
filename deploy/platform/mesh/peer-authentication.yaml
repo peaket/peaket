@@ -1,0 +1,11 @@
+# 메시 전체 STRICT(ADR-0285 결정 10, ADR-0082, docs/architecture.md §5 '메시 기본값 덮어쓰기' mTLS 행, BUILD_ORDER HOT-420).
+# istio-system(메시 뿌리 네임스페이스)의 default에 고르개를 두지 않으면 메시의 모든 워크로드가 mTLS로만 받는다(평문을 받지 않는다).
+# deploy/ 아래에 다른 PeerAuthentication을 두지 않는다. 네임스페이스·워크로드·포트(portLevelMtls) 단위로 STRICT를 풀지 못하게 한다(정적 시험이 본다)
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
