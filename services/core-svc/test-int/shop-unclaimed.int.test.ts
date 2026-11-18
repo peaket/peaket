@@ -224,6 +224,31 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(await refunds(o.orderId)).toEqual([]);
   });
 
+  test('P-T58 ② 정비 일이 대상 항목을 읽은 뒤 그 항목의 교환권 확인(READY → PICKED_UP)이 먼저 들어오면 운영 저장소의 조건부 취소가 0행이라 환급 행·결제 취소가 0건이다', async () => {
+    const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
+    const clock = fakeClock({ now: MON_1000 });
+    const payments = new FakePayments();
+    let raced = 0;
+    /** 대상을 읽은 직후 교환권 확인이 끼어드는 저장소(경합 끼워 넣기, 시험 대역) */
+    class RacingStore extends DrizzleShopOrderStore {
+      override async unclaimedCandidates(nowMs: number, limit: number) {
+        const c = await super.unclaimedCandidates(nowMs, limit);
+        if (c.some((x) => x.orderId === o.orderId)) {
+          await pickUp(o.itemIds[0]!, MON_1000 - 1);
+          raced++;
+        }
+        return c;
+      }
+    }
+    const { logger } = capture();
+    const unclaimed = new MerchUnclaimed({ store: new RacingStore(appDb, clock), payments, clock, logger });
+    await unclaimed.run();
+    expect(raced).toBe(1);
+    expect(payments.calls.filter((c) => c.paymentId === o.paymentId)).toHaveLength(0);
+    expect(await items(o.orderId)).toEqual([{ status: 'PICKED_UP', cancelReason: null, refundedAmount: 0 }]);
+    expect(await refunds(o.orderId)).toEqual([]);
+  });
+
   test('P-T58 ③ 결제 취소가 CANCEL_PENDING이면 10분 − 1ms에는 부르지 않고 10분에 같은 취소 ID로 다시 불러 REFUNDED가 된다(F-7)', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
     const clock = fakeClock({ now: MON_1000 });
