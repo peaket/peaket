@@ -421,9 +421,10 @@ test('CRLF로 저장된 문서도 LF 글로 다루고 LF로 쓴다', () => {
 // ---------- 기록 크기 점검(ADR-0283 결정 1, 계획 docs/review/plans/W10-guards.md G1) ----------
 // 상한 40KB = 40,960바이트(40×1,024). 줄 끝을 LF로 바꾼 UTF-8 바이트 수가 이 값을 넘으면 걸리고, 이 값 그대로는 통과다.
 // 값은 정본(ADR-0283 결정 1)에서 숫자로 적는다(records.mjs의 상수를 가져오지 않는다).
+// 갈래 파일은 다섯이다(ADR-0283 결정 1, ADR-0286 '확인'으로 lane4·lane5를 더함, 계획 docs/review/plans/W11-lanes.md).
 const LIMIT = 40960;
 const PROGRESS = 'docs/PROGRESS.md';
-const LANES = ['docs/lanes/lane1.md', 'docs/lanes/lane2.md', 'docs/lanes/lane3.md'];
+const LANES = ['docs/lanes/lane1.md', 'docs/lanes/lane2.md', 'docs/lanes/lane3.md', 'docs/lanes/lane4.md', 'docs/lanes/lane5.md'];
 const SIZE_FILES = [PROGRESS, ...LANES];
 
 // 한글(3바이트)과 영문을 섞어 LF 줄 끝으로 정확히 bytes바이트인 글을 만든다
@@ -443,7 +444,7 @@ function put(dir, path, text) {
   writeFileSync(full, text);
 }
 
-// 기록 표를 먼저 맞춘 저장소에 네 크기 파일을 작게 둔다(over에 든 파일만 바꿔 쓴다)
+// 기록 표를 먼저 맞춘 저장소에 여섯 크기 파일을 작게 둔다(over에 든 파일만 바꿔 쓴다)
 function sizedRepo(over = {}, { align = true } = {}) {
   const dir = seedRepo();
   if (align) assert.equal(cli(dir).status, 0);
@@ -477,20 +478,26 @@ for (const lane of LANES) {
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.ok(lines(r.stdout).some((l) => l.includes(lane) && l.includes('40961')), r.stdout);
     for (const other of SIZE_FILES.filter((f) => f !== lane)) assert.equal(r.stdout.includes(other), false, `${other}: ${r.stdout}`);
+    // 걸린 줄은 그 파일 하나뿐이다(크기 파일 경로를 담은 줄이 정확히 1줄)
+    assert.equal(lines(r.stdout).filter((l) => SIZE_FILES.some((f) => l.includes(f))).length, 1, r.stdout);
   });
 }
 
-test('RS-04 정리 목록 파일과 보관 파일은 크기를 보지 않는다', () => {
+test('RS-04 정리 목록 파일·감독 기록·보관 파일은 크기를 보지 않는다(갈래 4·5 정리 목록 포함)', () => {
   const big = sized(100000);
   const dir = sizedRepo({
     'docs/lanes/lane1-cleanup.md': big,
     'docs/lanes/lane2-cleanup.md': big,
     'docs/lanes/lane3-cleanup.md': big,
+    'docs/lanes/lane4-cleanup.md': big,
+    'docs/lanes/lane5-cleanup.md': big,
+    'docs/lanes/coord.md': big,
     'docs/progress-archive.md': big,
   });
   const r = cli(dir, '--check');
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(r.stdout.includes('cleanup'), false, r.stdout);
+  assert.equal(r.stdout.includes('coord'), false, r.stdout);
   assert.equal(r.stdout.includes('progress-archive'), false, r.stdout);
 });
 
@@ -547,7 +554,7 @@ test('RS-09 맞추기(인자 없음)는 크기로 멈추지 않고 기록 표를
   assert.equal(readFileSync(join(dir, PROGRESS), 'utf8'), text);
 });
 
-test('RS-10 없는 크기 파일은 건너뛰고 나머지는 본다 / 네 파일이 모두 없으면 통과', () => {
+test('RS-10 없는 크기 파일은 건너뛰고 나머지는 본다 / 여섯 파일이 모두 없으면 통과', () => {
   const dir = sizedRepo({ 'docs/lanes/lane1.md': sized(LIMIT + 1) });
   rmSync(join(dir, 'docs/lanes/lane2.md'));
   const r = cli(dir, '--check');
@@ -561,10 +568,45 @@ test('RS-10 없는 크기 파일은 건너뛰고 나머지는 본다 / 네 파�
   assert.equal(a3.status, 1, a3.stdout + a3.stderr);
   assert.ok(lines(a3.stdout).some((l) => l.includes('docs/lanes/lane3.md') && l.includes('40961')), a3.stdout);
 
+  // 새 갈래 파일도 같다: lane4가 없으면 경고하고 건너뛰며(2로 끝나지 않는다) 그 뒤 lane5는 본다
+  const l45 = sizedRepo({ 'docs/lanes/lane5.md': sized(LIMIT + 1) });
+  rmSync(join(l45, 'docs/lanes/lane4.md'));
+  const a5 = cli(l45, '--check');
+  assert.equal(a5.status, 1, a5.stdout + a5.stderr);
+  assert.ok(lines(a5.stdout).some((l) => l.includes('docs/lanes/lane5.md') && l.includes('40961')), a5.stdout);
+  assert.equal(lines(a5.stdout).filter((l) => SIZE_FILES.some((f) => l.includes(f))).length, 1, a5.stdout);
+  assert.ok(lines(a5.stderr).some((l) => l.startsWith('경고:') && l.includes('docs/lanes/lane4.md')), a5.stderr);
+
   const none = seedRepo();
   assert.equal(cli(none).status, 0);
   const n = cli(none, '--check');
   assert.equal(n.status, 0, n.stdout + n.stderr);
+  // 여섯 파일마다 없다는 경고가 한 줄씩(정확히 6줄)
+  const warned = lines(n.stderr).filter((l) => l.startsWith('경고:') && SIZE_FILES.some((f) => l.includes(f)));
+  assert.equal(warned.length, 6, n.stderr);
+  for (const f of SIZE_FILES) assert.equal(warned.filter((l) => l.includes(f)).length, 1, `${f}: ${n.stderr}`);
+});
+
+test('RS-12 여섯 파일이 모두 상한을 넘으면(각 40,961바이트) 여섯 경로를 서로 다른 줄에 하나씩 찍고 1로 끝난다', () => {
+  const six = ['docs/PROGRESS.md', 'docs/lanes/lane1.md', 'docs/lanes/lane2.md', 'docs/lanes/lane3.md', 'docs/lanes/lane4.md', 'docs/lanes/lane5.md'];
+  const dir = sizedRepo(Object.fromEntries(six.map((f) => [f, sized(LIMIT + 1)])));
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  const hit = lines(r.stdout).filter((l) => six.some((f) => l.includes(f)));
+  assert.equal(hit.length, 6, r.stdout);
+  for (const f of six) {
+    const mine = hit.filter((l) => l.includes(f));
+    assert.equal(mine.length, 1, `${f}: ${r.stdout}`);
+    assert.ok(mine[0].includes('40961'), `${f}: ${r.stdout}`);
+  }
+});
+
+test('RS-13 목록 밖 갈래 6 파일(docs/lanes/lane6.md)은 상한을 넘어도 보지 않는다', () => {
+  const dir = sizedRepo({ 'docs/lanes/lane6.md': sized(LIMIT + 1) });
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout.includes('lane6'), false, r.stdout);
+  assert.equal(r.stderr.includes('lane6'), false, r.stderr);
 });
 
 test('RS-11 --next-r는 크기를 보지 않는다', () => {

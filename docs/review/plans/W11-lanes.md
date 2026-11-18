@@ -57,15 +57,23 @@
 
 ## 시험 이의
 
-(아직)
+- 막는 이의는 없다. 경로 여섯과 40,960은 ADR-0283 결정 1(`lane1.md`~`lane3.md`에 ADR-0286으로 `lane4.md`·`lane5.md`를 더함, 감독 기록 `coord.md`는 뺌)과 ADR-0286 '확인' 둘째 줄에서 글로 적었다.
+- `docs/PROGRESS.md` 15줄 '기록 상한'은 아직 `lane1.md`~`lane3.md`라 적고 `coord.md`를 뺀다는 말이 없다. 계획 1의 5대로 전체 감독이 기록 단계에서 고칠 일이며, 시험은 ADR 쪽을 따랐다.
+- 작은 빈칸(막지 않음): ADR-0283 결정 1의 정리 목록 예시는 `lane1-cleanup.md`~`lane3-cleanup.md`만 적는다. '정리 목록 파일은 보지 않는다'는 규칙이 이름과 상관없이 쓰이므로 RS-04는 `lane4-cleanup.md`·`lane5-cleanup.md`도 보지 않는 것으로 단언했다. 정본 예시를 넓힐지는 기록 단계 감독이 정한다.
 
 ## 실패 확인
 
-(아직)
+- 명령: 고친 `tools/ci/records.test.mjs`를 구현 전 트리 `D:/ticketpass-lane4-base`(`08120a67`)에 복사해 그 폴더에서 `node --test tools/ci/records.test.mjs`(끝나고 `git -C D:/ticketpass-lane4-base checkout -- .`로 되돌림).
+- 결과: 시험 51개 가운데 통과 47·실패 4, 끝 코드 1. 실패는 ★ 셋(RS-03·10·12)뿐이다.
+  - RS-03 `docs/lanes/lane4.md`, RS-03 `docs/lanes/lane5.md`: 끝 코드 0(기대 1). 출력이 '기록 표가 맞다'뿐이라 새 두 파일의 크기를 보지 않는다.
+  - RS-10: 'lane4 없음 + lane5 40,961바이트' 사례에서 끝 코드 0(기대 1). lane5를 보지 않는다.
+  - RS-12: 크기 파일 경로를 담은 줄이 4(기대 6). PROGRESS·lane1~3만 찍는다.
+- RS-04·RS-13은 구현 전에도 통과한다(구현 전 목록도 정리 목록·`coord.md`·`lane6.md`를 보지 않으므로). 이 둘이 잡는 틀린 구현은 검증 담당이 계획 4의 M3·M4·M5(글롭, `-cleanup`만 빼기, `lane\d+\.md` 훑기)로 본다.
 
 ## 시험 결과
 
-(아직)
+- 작업 폴더 `D:/ticketpass-lane4`(구현 `19c9a8ba` 위)에서 `node --test tools/ci/records.test.mjs`: 시험 51개 모두 통과(실패 0), 끝 코드 0.
+- 고친 시험: `LANES`를 다섯으로(RS-03이 lane4·lane5 사례 둘을 더 만들고, 크기 파일 경로를 담은 줄이 정확히 1줄인지도 본다), RS-04에 `lane4-cleanup.md`·`lane5-cleanup.md`·`docs/lanes/coord.md`(각 100,000바이트)와 `coord` 없음 단언, RS-10에 'lane4 없음 + lane5 40,961바이트'(끝 코드 1, lane5 줄 1줄, lane4 없음 경고)와 '여섯 파일이 모두 없으면' 0·경고 정확히 6줄, 새 RS-12(여섯 경로가 서로 다른 줄에 하나씩, 각 `40961`), 새 RS-13(`docs/lanes/` 아래 `lane6.md`가 40,961바이트여도 0, 출력·경고에 `lane6` 없음). 경계 양쪽(RS-01 40,960 통과·RS-02 40,961 걸림)은 그대로 둔다.
 
 ## 리뷰
 
@@ -80,5 +88,6 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w11-lanes-plan-4a1c | claude-opus-5-5 | 2026-11-18T20:44+09:00 | 2026-11-18T20:51+09:00 |
+| test | w11-lanes-test-c3d9 | claude-opus-5-5 | 2026-11-18T20:53+09:00 | 2026-11-18T20:59+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다.
