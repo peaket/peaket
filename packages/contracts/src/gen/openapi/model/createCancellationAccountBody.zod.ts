@@ -20,7 +20,7 @@ export const createCancellationAccountBodyHolderNameMax = 60;
 
 
 export const CreateCancellationAccountBody = zod.object({
-  "bankCode": zod.string().regex(createCancellationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 숫자 두 자리(예 88 신한). 포트원 결제는 대응표에 있는 코드만 결제사로 간다'),
+  "bankCode": zod.string().regex(createCancellationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
   "accountNumber": zod.string().min(1).max(createCancellationAccountBodyAccountNumberMax).regex(createCancellationAccountBodyAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
   "holderName": zod.string().min(1).max(createCancellationAccountBodyHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
 }).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
