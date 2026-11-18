@@ -159,9 +159,23 @@ export interface SeatReturnNotices {
 
 export const REAUTH_GATE = Symbol('purchase.REAUTH_GATE');
 
-/** 재인증 토큰 확인(identity 계약이 생기기 전에는 늘 false인 대역) */
+/** 팬 취소가 받는 재인증 작업 묶음(docs/security/authz-matrix.md §6). 본문에 환급 계좌가 있으면 FAN_HIGH_RISK, 없으면 FAN_SENSITIVE */
+export type FanReauthAct = 'FAN_SENSITIVE' | 'FAN_HIGH_RISK';
+
+/** 재인증 토큰을 확인하지 못함(팬 공개키 묶음을 한 번도 받지 못함, jti 저장소 오류). 받는 층은 503 reauth-unavailable로 답한다 */
+export class ReauthUnavailable extends Error {
+  constructor(message = '재인증 토큰을 확인하지 못했다', options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'ReauthUnavailable';
+  }
+}
+
+/**
+ * 재인증 토큰 확인(docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인'). true = 통과이고 이번 호출이 jti를 잡았다,
+ * false = 거절(403 reauth-required). 확인하지 못하면 ReauthUnavailable을 던진다(503). 대역이 없는 조립은 늘 false다
+ */
 export interface ReauthGate {
-  verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string }): Promise<boolean>;
+  verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: FanReauthAct }): Promise<boolean>;
 }
 
 /** 견적·취소가 함께 쓰는 의존성 */
@@ -173,7 +187,7 @@ export interface RefundDeps {
   readonly writes: CancellationWrites;
   /** 없으면 좌석 DB 되돌리기를 하지 않는다(계산·계약 시험) */
   readonly seats?: SeatReturns;
-  /** 없으면 재인증 토큰을 확인하지 못해 취소를 403으로 닫는다 */
+  /** 없으면 재인증 토큰을 확인하지 않고 취소를 403으로 닫는다(닫힌 대역 unavailableReauth) */
   readonly reauth?: ReauthGate;
   /** 확정된 회차의 팬 취소·견적은 409 event-cancelled(BAT-420 리뷰 D5). 없으면 확인하지 않는다(시작 조립은 DB가 있으면 꽂는다) */
   readonly eventCancellations?: EventCancellationLookup;

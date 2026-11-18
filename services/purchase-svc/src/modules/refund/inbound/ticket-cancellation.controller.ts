@@ -1,7 +1,8 @@
 // 받는 층: 예매 취소 견적·취소(openapi getTicketCancellationQuote·createTicketCancellation, GAT-070·GAT-080).
 // 팬 쿠키와 구매 요청 서명을 쓰고, 취소는 Idempotency-Key를 cancellationId로 쓴다.
-// X-Reauth-Token 확인 계약이 아직 없어 ReauthGate 기본값은 늘 false다. 그동안 취소는 403 reauth-required로 닫고,
-// 견적은 재인증이 필요 없어 연다(known gap: identity 재인증 토큰 확인 어댑터).
+// 취소는 구매 요청 서명·본문 검사 뒤에 X-Reauth-Token을 ReauthGate로 본다(docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인').
+// 작업 묶음은 본문에 환급 계좌가 있으면 FAN_HIGH_RISK, 없으면 FAN_SENSITIVE다. 거절은 403 reauth-required, 확인 못 함은 503 reauth-unavailable이다.
+// 확인기를 꽂지 않은 조립은 닫힌 대역(unavailableReauth, 늘 403)이다. 견적은 재인증이 필요 없어 연다.
 import { Controller, Get, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { Bulkhead, CLOCK, type Clock, ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, type IdempotencyRequest as Idem, Idempotent, type Principal, ProblemError, PurchaseSigned, Roles } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
@@ -10,7 +11,7 @@ import { CancelTicket } from '../application/cancel-ticket.js';
 import type { CancelTicketResult } from '../domain/cancellation.js';
 import { QuoteCancellation, type QuoteCancellationResult } from '../application/quote-cancellation.js';
 import { WRITE_BULKHEAD } from '../../../write-bulkhead.js';
-import { REAUTH_GATE, type ReauthGate } from '../domain/ports.js';
+import { type FanReauthAct, REAUTH_GATE, type ReauthGate, ReauthUnavailable } from '../domain/ports.js';
 
 const TicketParams = z.object({ ticketId: z.uuid() }).strict();
 const QuoteResponse = z
@@ -43,6 +44,8 @@ const entryStarted = () => new ProblemError({ type: 'entry-started', status: 409
 /** 양도 요청 중이거나 남이 가진 티켓(R-T3, docs/features/transfer-refund.md §9 1번, 돌려받은 뒤 취소한다) */
 const transferPending = () => new ProblemError({ type: 'transfer-pending', status: 409, title: '양도 요청을 철회한 뒤 취소할 수 있습니다' });
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
+/** 재인증 토큰을 확인하지 못함(팬 공개키 묶음을 한 번도 받지 못함, jti 저장소 오류). Retry-After 5초 [가정](openapi createTicketCancellation 503) */
+const reauthUnavailable = (cause: unknown) => new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 검증기를 쓸 수 없습니다', retryAfterSeconds: 5, cause });
 /** 회차 취소 일괄 환불이 확정된 회차(공제 없이 일괄 환불이 돌려준다, BAT-420 리뷰 D5, openapi 팬 취소·견적 409) */
 const eventCancelled = () => new ProblemError({ type: 'event-cancelled', status: 409, title: '취소가 확정된 회차입니다' });
 
@@ -83,7 +86,16 @@ export class TicketCancellationController {
     @Req() request: FastifyRequest,
   ): Promise<z.output<typeof CancelResponse>> {
     const token = typeof request.headers['x-reauth-token'] === 'string' ? request.headers['x-reauth-token'] : undefined;
-    if (!(await this.reauth.verify(token, { accountId: me.accountId, sessionId: me.sessionId }))) throw reauthRequired();
+    // 환급 계좌를 담은 취소는 '환급 계좌 입력'이라 FAN_HIGH_RISK만 받는다(docs/security/authz-matrix.md §6). 반대 묶음도 거절한다
+    const act: FanReauthAct = body.refundAccount !== undefined ? 'FAN_HIGH_RISK' : 'FAN_SENSITIVE';
+    let passed: boolean;
+    try {
+      passed = await this.reauth.verify(token, { accountId: me.accountId, sessionId: me.sessionId, act });
+    } catch (e) {
+      if (e instanceof ReauthUnavailable) throw reauthUnavailable(e);
+      throw e;
+    }
+    if (!passed) throw reauthRequired();
     const r: CancelTicketResult = await this.cancel.execute({
       accountId: me.accountId,
       ticketId: params.ticketId,
@@ -106,5 +118,5 @@ export class TicketCancellationController {
   }
 }
 
-/** 재인증 계약이 생기기 전의 닫힌 대역. 견적은 이 대역을 쓰지 않는다 */
+/** 확인기를 꽂지 않은 조립의 닫힌 기본값(늘 403). 견적은 이 대역을 쓰지 않는다 */
 export const unavailableReauth: ReauthGate = { verify: async () => false };
