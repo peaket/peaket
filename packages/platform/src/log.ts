@@ -107,11 +107,6 @@ export interface PlatformLoggerOptions {
   level: LogLevelName;
   /** 기본 표준 출력 */
   destination?: DestinationStream | NodeJS.WritableStream;
-  /**
-   * 참이면 `ts`를 UTC ISO 8601(`…Z`)로 쓴다. 기본은 KST 오프셋(docs/observability.md 정규 로그 줄의 `ts`).
-   * realtime-gw는 정본이 UTC 시각을 적었다(docs/features/seat-hold.md §7 'realtime-gw의 첫 구현' '지표와 로그', ASVS 16.2.2, BUILD_ORDER HOT-090)
-   */
-  utc?: boolean;
 }
 
 export function createPlatformLogger(o: PlatformLoggerOptions): PlatformLogger {
@@ -124,7 +119,7 @@ export function createPlatformLogger(o: PlatformLoggerOptions): PlatformLogger {
       level: o.level,
       base,
       messageKey: 'msg',
-      timestamp: o.utc ? () => `,"ts":"${new Date(o.clock.now()).toISOString()}"` : () => `,"ts":"${kstIso(o.clock.now())}"`,
+      timestamp: () => `,"ts":"${kstIso(o.clock.now())}"`,
       formatters: {
         level: (label) => ({ level: label }),
         log: (obj) => redactDeep(obj) as Record<string, unknown>,
