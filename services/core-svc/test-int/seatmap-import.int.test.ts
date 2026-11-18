@@ -359,7 +359,8 @@ describe('S-T34 좌석맵 해석 작업 격리', () => {
     expect(other.statusCode).toBe(200);
     expect(slowWorker.isRunning()).toBe(true);
     const again = await importFile(slow, { format: 'SVG', file: tiny });
-    expect(again.statusCode).toBe(200);
+    // 흔들림을 가리려고 작업의 마지막 기록(상태·코드)을 함께 남긴다(BAT-174 계획 11 (ㄱ))
+    expect(again.statusCode, JSON.stringify(slowWorker.parses().at(-1))).toBe(200);
   }, 60_000);
 
   test('S-T34 ④ 힙 상한을 넘긴 해석은 스레드만 죽고 503 Retry-After이며 작업 프로세스와 core-svc는 다음 요청을 받는다 [ASVS v5.0.0-15.2.2] [ASVS v5.0.0-15.2.5]', async () => {
@@ -638,6 +639,6 @@ describe('리뷰 2차: 작업 결과 다시 보기와 작업 줄', () => {
   test('S-T34 ④ 시간 상한을 넘긴 해석이 있어도 같은 작업 프로세스의 다른 가져오기는 정상이다', async () => {
     const [cut, other] = await Promise.all([importFile(slow, { format: 'SVG', file: enc(heavySvg()) }), importFile(slow, { format: 'SVG', file: enc(svg('<polygon data-section="A" points="0,0 10,0 10,10"/>')) })]);
     expect([cut.statusCode, json(cut).detail]).toEqual([422, 'CPU_LIMIT']);
-    expect(other.statusCode).toBe(200);
+    expect(other.statusCode, JSON.stringify(slowWorker.parses().slice(-2))).toBe(200);
   }, 60_000);
 });

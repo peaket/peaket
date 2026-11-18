@@ -20,7 +20,7 @@ import { DrizzleSearchIndex, DrizzleSearchReadModel, registerSearchPoolWaiting, 
 import { production } from '../src/modules/catalog/adapters/db/schema.js';
 import type { SearchQuery } from '../src/modules/catalog/domain/search.js';
 import { FakeIdentity, quiet, testMedia } from '../test/support.js';
-import { buildDist, freePort, logLines, SERVICE_DIR, until } from './media-support.js';
+import { buildDist, freePort, logLines, SERVICE_DIR, until, waitReady } from './media-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { ensureSearchLogin, loginFor } from './roles.js';
 
@@ -415,18 +415,7 @@ describe('A5 시작 파일(main.ts) 조립', () => {
     child.stdout!.on('data', (d) => (text += String(d)));
     child.stderr!.on('data', (d) => (text += String(d)));
     exited = new Promise<number | null>((r) => child.once('exit', (c) => r(c)));
-    await until(
-      async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${mgmt}/ready`)).status === 200;
-        } catch {
-          return false;
-        }
-      },
-      `core-svc 준비: ${text.slice(-500)}`,
-      60_000,
-      200,
-    );
+    await waitReady(`http://127.0.0.1:${mgmt}/ready`, child, () => text, 'core-svc 준비', 60_000, 200);
   }, 300_000);
 
   afterAll(async () => {

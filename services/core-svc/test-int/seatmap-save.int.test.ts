@@ -23,7 +23,7 @@ import { LocalFolderPublicFileStore } from '../src/modules/catalog/index.js';
 import type { PublicFileStore, PublishLimits } from '../src/modules/catalog/domain/seatmap-ports.js';
 import { layoutVenueId } from '../src/modules/catalog/domain/seatmap-layout.js';
 import { FakeIdentity, NOW_MS, testMedia } from '../test/support.js';
-import { buildDist, freePort, logSink, multipart, SERVICE_DIR, until } from './media-support.js';
+import { buildDist, freePort, logSink, multipart, SERVICE_DIR, until, waitReady } from './media-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { ensureSearchLogin, loginFor } from './roles.js';
 
@@ -1431,13 +1431,7 @@ describe('시작 파일(main.ts) 조립', () => {
       const pub = join(dir, 'public-files');
       const ok = await boot({ ...env, PEAKET_PUBLIC_FILE_DIR: pub });
       try {
-        await until(async () => {
-          try {
-            return (await fetch(`http://127.0.0.1:${mgmt}/ready`)).status === 200;
-          } catch {
-            return false;
-          }
-        }, 'core-svc 준비', 30_000, 200);
+        await waitReady(`http://127.0.0.1:${mgmt}/ready`, ok.child, ok.output, 'core-svc 준비', 30_000, 200);
         const m = await makeProduction({ rows: 1 });
         const account = randomUUID();
         const session = randomUUID();
