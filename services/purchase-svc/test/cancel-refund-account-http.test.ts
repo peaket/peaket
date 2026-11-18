@@ -7,6 +7,8 @@
 // 실제 PostgreSQL 행(next_refund_at·refund_account_required_at)·틱 끝 다시 열기(⑤)는 test-int/cancellation.int.test.ts가 본다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Writable } from 'node:stream';
 import { createService, fakeClock, PROBLEM_TYPE_BASE, purchaseMac, purchaseMacInput, RedisReauthJtiStore } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
@@ -42,7 +44,7 @@ const fan = fanKey('fan-2026-11-b420');
 type Lookup = 'VIRTUAL' | 'CARD' | 'FAIL';
 
 /** 결제자 ACCOUNT의 표. 33,333원, 공제 10% → 환급 30,000원(refund-http와 같은 표). entryOpensAtMs를 표마다 바꾼다 */
-const viewOf = (ticketId: string, entryOpensAtMs: number): CancellationOrderView => ({
+const viewOf = (ticketId: string, entryOpensAtMs: number, saleEndsAtMs = Date.parse('2026-11-19T19:00:00+09:00')): CancellationOrderView => ({
   orderId: ORDER,
   eventId: EVENT,
   ticketId,
@@ -50,7 +52,7 @@ const viewOf = (ticketId: string, entryOpensAtMs: number): CancellationOrderView
   payerAccountId: ACCOUNT,
   ticketPrice: 33_333,
   bookedAtMs: Date.parse('2026-11-01T10:00:00+09:00'),
-  saleEndsAtMs: Date.parse('2026-11-19T19:00:00+09:00'),
+  saleEndsAtMs,
   entryOpensAtMs,
   orderStatus: 'CONFIRMED',
 });
@@ -69,6 +71,10 @@ const state = {
   /** 표 ID → 입장 시작 시각 */
   entryOf: new Map<string, number>(),
   records: new Map<string, CancellationRecord>(),
+  /** BAT-420-rest 리뷰 반영: 재인증 확인 횟수(P-T74 ①), 표마다 ticket-svc 답(다시 누름 ALREADY_CANCELLED, P-T73 ⑤)·판매 종료 시각(공연 시작 뒤) */
+  verifies: 0,
+  ticketAnswer: new Map<string, unknown>(),
+  saleEndsOf: new Map<string, number>(),
 };
 const redis = fakeSeatRedis();
 let svc: Awaited<ReturnType<typeof createService>>;
@@ -101,10 +107,15 @@ beforeAll(async () => {
       memory: true,
       sessions,
       refund: {
-        orders: { findByTicket: async (id) => viewOf(id, state.entryOf.get(id) ?? Date.parse('2026-11-20T18:00:00+09:00')), findCancellation: async (id) => state.records.get(id) },
+        orders: {
+          findByTicket: async (id) => viewOf(id, state.entryOf.get(id) ?? Date.parse('2026-11-20T18:00:00+09:00'), state.saleEndsOf.get(id)),
+          findCancellation: async (id) => state.records.get(id),
+        },
         tickets: {
           cancel: async (q) => {
             state.ticketCalls.push(q);
+            const answer = state.ticketAnswer.get(q.ticketIds[0]!);
+            if (answer !== undefined) return answer as never;
             return (state.entryOf.get(q.ticketIds[0]!) ?? Number.POSITIVE_INFINITY) <= NOW ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
           },
         },
@@ -116,7 +127,7 @@ beforeAll(async () => {
         },
         writes,
         calendar: new WeekendBusinessCalendar(),
-        reauth,
+        reauth: { verify: (t, q) => (state.verifies++, reauth.verify(t, q)) },
         paymentMethods: {
           virtualAccountPaid: async (q) => {
             state.lookups.push({ orderId: q.orderId, deadlineMs: q.deadlineMs });
@@ -144,6 +155,7 @@ beforeEach(() => {
   state.lookup = 'VIRTUAL';
   state.payment = 'CANCELLED';
   for (const a of [state.lookups, state.ticketCalls, state.paymentCalls, state.created, state.accountMarks, state.retries, state.failures]) a.length = 0;
+  state.verifies = 0;
   redis.commands.length = 0;
 });
 
@@ -325,5 +337,68 @@ describe('P-T72 ⑥ 계좌 글 누설', () => {
     const text = logs.join('\n');
     expect(text.length).toBeGreaterThan(0);
     for (const needle of [ACCOUNT_NO, '110987654321', HOLDER]) expect(text).not.toContain(needle);
+  });
+});
+
+// ---- BAT-420-rest 리뷰 반영 재현(시험 담당 l3-b420-test, 2026-11-19) ----
+
+describe('P-T73 ⑤ 다시 누름의 계좌는 payment로 가지 않는다(RV-02, 검증 A05)', () => {
+  /** 앞 팬 취소(첫 취소 ID)가 REFUND_PENDING으로 남은 표: ticket-svc 대역은 새 키에 ALREADY_CANCELLED로 첫 취소를 알린다 */
+  const pressedBefore = (t: string) => {
+    const first = randomUUID();
+    state.records.set(first, { cancellationId: first, orderId: ORDER, ticketId: t, refundAmount: 30_000, state: 'REFUND_PENDING', refundAttempts: 1 });
+    state.ticketAnswer.set(t, { result: 'ALREADY_CANCELLED', firstCancellationId: first, firstResult: 'REFUND_NOW', firstCancelledAtMs: NOW - 60_000 });
+    return first;
+  };
+
+  test('P-T73 ⑤ 가상계좌 표를 새 멱등 키로 다시 누르며 본문에 계좌를 실어도 payment 대역이 받은 호출(첫 취소 ID)에 refundAccount가 없다', async () => {
+    const t = ticket();
+    const first = pressedBefore(t);
+    const r = await send(t, { refundAccount: REFUND_ACCOUNT });
+    expect(r.statusCode).toBe(202);
+    expect(state.paymentCalls).toEqual([{ cancellationId: first }]);
+  });
+
+  test('P-T73 ⑤ 공연 시작 뒤 다시 누름(견적 EVENT_STARTED, ticket 대역 ALREADY_CANCELLED·REFUND_NOW)에 실은 계좌도 payment 대역이 받지 않는다', async () => {
+    const t = ticket();
+    // 공연 시작 = 판매 종료 + 24시간 ≤ 지금
+    state.saleEndsOf.set(t, NOW - 25 * 3_600_000);
+    const first = pressedBefore(t);
+    const r = await send(t, { refundAccount: REFUND_ACCOUNT });
+    expect(r.statusCode).toBe(202);
+    expect(state.paymentCalls).toEqual([{ cancellationId: first }]);
+  });
+});
+
+interface ShapeRow {
+  name: string;
+  input: { bankCode: string; accountNumber: string; holderName: string };
+  ok: boolean;
+}
+const SHAPES = (JSON.parse(readFileSync(fileURLToPath(new URL('../../../packages/validation/test/fixtures/refund-account-cases.json', import.meta.url)), 'utf8')) as { cases: ShapeRow[] }).cases;
+
+describe('P-T74 ① 본문 계좌 모양(RV-04, 공용 표 packages/validation/test/fixtures/refund-account-cases.json)', () => {
+  test('P-T74 ① 표의 틀린 모양은 각각 400 invalid-body이고 재인증 확인·결제 수단 읽기·Saga(ticket·payment 취소, order_cancellation 쓰기)가 0이다', async () => {
+    const bad = SHAPES.filter((c) => !c.ok);
+    expect(bad).toHaveLength(8);
+    for (const c of bad) {
+      state.verifies = 0;
+      state.lookups.length = 0;
+      const r = await send(ticket(), { refundAccount: c.input });
+      expect(r.statusCode, c.name).toBe(400);
+      expect(r.body.type, c.name).toBe(`${PROBLEM_TYPE_BASE}invalid-body`);
+      expect(state.verifies, `${c.name}: 재인증 확인`).toBe(0);
+      expect(state.lookups, `${c.name}: 결제 수단 읽기`).toEqual([]);
+      nothingRan(c.name);
+    }
+  });
+
+  test('P-T74 ① 경계 대조(숫자 20자·하이픈 섞인 30자·예금주 60자 등 표의 맞는 모양)는 지나 202이고 payment 대역이 받은 계좌는 본문 그대로다', async () => {
+    for (const c of SHAPES.filter((x) => x.ok)) {
+      state.paymentCalls.length = 0;
+      const r = await send(ticket(), { refundAccount: c.input });
+      expect(r.statusCode, c.name).toBe(202);
+      expect(state.paymentCalls, c.name).toHaveLength(1);
+    }
   });
 });

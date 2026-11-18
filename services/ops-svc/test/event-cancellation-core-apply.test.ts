@@ -247,3 +247,111 @@ describe('R-T41 ③ 시작 조립(PEAKET_CORE_HTTP_URL)', () => {
     expect(without.core).toBeUndefined();
   });
 });
+
+// ---- BAT-420-rest 리뷰 반영 재현(시험 담당 l3-b420-test, 2026-11-19) ----
+// 정본: docs/features/transfer-refund.md §5 'core 반영의 구현에서 정한 것' ⑥(같은 회차는 확정 시각 차례로만, 뒤 요청이 반영되면 앞 요청은 core_apply_superseded_at,
+// 잡기는 core_apply_next_at 차례(빈 값 먼저), 4xx(401 제외)는 다음 볼 시각 10분 뒤·5xx·무응답은 1분 뒤), §11 R-T41 ⑥, §5 'core 회차 상태 반영' 첫 줄(Start 뒤).
+
+/** 요청마다 답을 고르는 core 대역(호출 차례를 적는다) */
+function scriptedCore(answerOf: (requestId: string) => 'ok' | 'down' | number) {
+  const calls: string[] = [];
+  const core: CoreEventStatus = {
+    apply: async (q) => {
+      calls.push(q.requestId);
+      const a = answerOf(q.requestId);
+      if (a === 'ok') return;
+      if (a === 'down') throw new Error('connect ECONNREFUSED core-svc');
+      if (a >= 400 && a <= 499) throw new CoreEventStatusRejected(a);
+      throw new Error(`core-svc 회차 상태 반영 ${a}`);
+    },
+  };
+  return { calls, core };
+}
+function withScripted(answerOf: (requestId: string) => 'ok' | 'down' | number) {
+  const f = fixture();
+  const c = scriptedCore(answerOf);
+  Object.assign((f.app as unknown as { extra: Record<string, unknown> }).extra, { core: c.core, coreApplies: f.store, coreApplyFailures: { inc: () => undefined } });
+  return { f, c };
+}
+const approvedRecord = (over: Partial<EventCancellationRecord>) => recordOf({ status: 'RUNNING', fault: 'ORGANIZER', approvedBy: 'op', refundJobState: 'RUNNING', ...over });
+
+describe('R-T41 ⑥ 같은 회차 요청 사이의 차례와 머리 막힘', () => {
+  test('R-T41 ⑥ 같은 회차의 앞 연기 P1이 반영 못 한 채 뒤 요청 P2가 반영되면 다음 바퀴는 P1을 부르지 않는다', async () => {
+    const eventId = randomUUID();
+    const p1 = approvedRecord({ eventId, kind: 'POSTPONE', newStartsAt: new Date(NOW + 20 * 86_400_000), approvedAt: new Date(NOW - 10 * MIN) });
+    const p2 = approvedRecord({ eventId, kind: 'POSTPONE', newStartsAt: new Date(NOW + 30 * 86_400_000), approvedAt: new Date(NOW - 5 * MIN) });
+    const { f, c } = withScripted((id) => (id === p1.requestId ? 'down' : 'ok'));
+    f.store.rows.set(p1.requestId, p1);
+    f.store.rows.set(p2.requestId, p2);
+    await f.app.retryCoreApply(NOW);
+    expect(c.calls).toEqual([p1.requestId, p2.requestId]);
+    expect(f.store.core.get(p2.requestId)?.appliedAtMs).toBe(NOW);
+    c.calls.length = 0;
+    await f.app.retryCoreApply(NOW + MIN);
+    await f.app.retryCoreApply(NOW + 2 * MIN);
+    expect(c.calls).toEqual([]);
+    expect(f.store.core.get(p1.requestId)?.appliedAtMs).toBeUndefined();
+  });
+
+  test('R-T41 ⑥ 같은 바퀴에 둘 다 비어 있으면 확정 시각 차례로 P1 → P2를 부르고 둘 다 반영한다', async () => {
+    const eventId = randomUUID();
+    const p2 = approvedRecord({ eventId, kind: 'CANCEL', approvedAt: new Date(NOW - 5 * MIN) });
+    const p1 = approvedRecord({ eventId, kind: 'POSTPONE', newStartsAt: new Date(NOW + 20 * 86_400_000), approvedAt: new Date(NOW - 10 * MIN) });
+    const { f, c } = withScripted(() => 'ok');
+    f.store.rows.set(p2.requestId, p2);
+    f.store.rows.set(p1.requestId, p1);
+    await f.app.retryCoreApply(NOW);
+    expect(c.calls).toEqual([p1.requestId, p2.requestId]);
+  });
+
+  test('R-T41 ⑥ 늘 4xx(409)인 요청 21건이 있어도 그 뒤 확정한 새 요청은 다음 바퀴에 반영되고, 4xx 행의 다음 볼 시각은 지금 + 600,000ms다', async () => {
+    const rejected = Array.from({ length: 21 }, (_, i) => approvedRecord({ eventId: randomUUID(), approvedAt: new Date(NOW - 60 * MIN + i) }));
+    const fresh = approvedRecord({ eventId: randomUUID(), approvedAt: new Date(NOW + 30_000) });
+    const { f, c } = withScripted((id) => (id === fresh.requestId ? 'ok' : 409));
+    for (const r of rejected) f.store.rows.set(r.requestId, r);
+    await f.app.retryCoreApply(NOW);
+    await f.app.retryCoreApply(NOW);
+    expect(new Set(c.calls)).toEqual(new Set(rejected.map((r) => r.requestId)));
+    for (const r of rejected) expect(f.store.core.get(r.requestId)?.nextAtMs, r.requestId).toBe(NOW + 600_000);
+    f.store.rows.set(fresh.requestId, fresh);
+    c.calls.length = 0;
+    await f.app.retryCoreApply(NOW + MIN);
+    expect(c.calls).toEqual([fresh.requestId]);
+    expect(f.store.core.get(fresh.requestId)?.appliedAtMs).toBe(NOW);
+  });
+
+  test('R-T41 ⑥ 다음 볼 시각: 5xx·연결 실패·401은 지금 + 60,000ms, 400·404·409는 지금 + 600,000ms다', async () => {
+    const answers = { a500: 500, down: 'down', a401: 401, a400: 400, a404: 404, a409: 409 } as const;
+    const recs = Object.fromEntries(Object.keys(answers).map((k, i) => [k, approvedRecord({ eventId: randomUUID(), approvedAt: new Date(NOW - 20 * MIN + i) })])) as Record<keyof typeof answers, EventCancellationRecord>;
+    const byId = new Map(Object.entries(recs).map(([k, r]) => [r.requestId, answers[k as keyof typeof answers]]));
+    const { f } = withScripted((id) => byId.get(id)! as 'down' | number);
+    for (const r of Object.values(recs)) f.store.rows.set(r.requestId, r);
+    await f.app.retryCoreApply(NOW);
+    const next = (k: keyof typeof answers) => f.store.core.get(recs[k].requestId)?.nextAtMs;
+    expect({ a500: next('a500'), down: next('down'), a401: next('a401') }).toEqual({ a500: NOW + 60_000, down: NOW + 60_000, a401: NOW + 60_000 });
+    expect({ a400: next('a400'), a404: next('a404'), a409: next('a409') }).toEqual({ a400: NOW + 600_000, a404: NOW + 600_000, a409: NOW + 600_000 });
+  });
+});
+
+describe('R-T41 ③ 확정 직후 반영의 차례(검증 O13)', () => {
+  test('R-T41 ③ 확정은 Start를 끝낸 뒤에만 core를 부른다: 한 기록 배열에서 start 다음 core이고, Start가 실패한 확정에서 core 호출 0이다', async () => {
+    const f = fixture();
+    const core: CoreEventStatus = { apply: async (q) => void f.log.push(`core:${q.requestId}`) };
+    Object.assign((f.app as unknown as { extra: Record<string, unknown> }).extra, { core, coreApplies: f.store });
+    const id = await pendingApproval(f);
+    await approveBy(f, id);
+    expect(f.log.filter((l) => /^(start|core):/.test(l))).toEqual([`start:${id}`, `core:${id}`]);
+
+    const g = fixture();
+    const coreCalls: string[] = [];
+    Object.assign((g.app as unknown as { extra: Record<string, unknown> }).extra, { core: { apply: async (q: { requestId: string }) => void coreCalls.push(q.requestId) }, coreApplies: g.store });
+    g.behaviour.startFails = true;
+    const id2 = await pendingApproval(g);
+    await expect(approveBy(g, id2)).rejects.toThrow();
+    // 확정은 PENDING_APPROVAL로 되돌려졌다(다시 확정할 수 있다)
+    expect(g.store.rows.get(id2)?.status).toBe('PENDING_APPROVAL');
+    // 장애 주입이 끼어들었다: Start를 불렀고 실패했다
+    expect(g.startCalls).toHaveLength(1);
+    expect(coreCalls).toEqual([]);
+  });
+});

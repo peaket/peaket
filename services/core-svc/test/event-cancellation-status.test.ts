@@ -62,4 +62,13 @@ describe('R-T41 회차 상태 판정', () => {
     expect(at(1)()).toMatchObject({ status: 'POSTPONED' });
     expect(() => decideEventStatus(base(), { kind: 'POSTPONE' }, NOW)).toThrow(EventStatusConflict);
   });
+
+  // BAT-420-rest 리뷰 반영 RV-06 재현(시험 담당 l3-b420-test, 2026-11-19): 정본 transfer-refund §5 '구현에서 정한 것' ⑥('이미 같은 상태'를 '지금보다 이름'보다 먼저), §11 R-T41 ⑥
+  test('R-T41 ⑥ 같은 시각으로 이미 연기된 회차를 그 시각 + 1ms에 다시 받으면 바꾸지 않는다(UNCHANGED, 204). 다른 시각의 지난 연기는 여전히 409다', () => {
+    const to = new Date(NOW.getTime() + 30 * D);
+    const postponed = base({ status: 'POSTPONED', startsAt: to, endsAt: new Date(to.getTime() + 2 * H) });
+    const later = new Date(to.getTime() + 1);
+    expect(decideEventStatus(postponed, { kind: 'POSTPONE', postponedTo: to }, later)).toBeUndefined();
+    expect(() => decideEventStatus(postponed, { kind: 'POSTPONE', postponedTo: new Date(to.getTime() - 1) }, later)).toThrow(EventStatusConflict);
+  });
 });
