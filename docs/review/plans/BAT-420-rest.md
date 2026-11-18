@@ -257,6 +257,7 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 - **구현이 맞출 이름·모양**(계획 §3): `packages/validation/src/refund-account/index.ts`의 `refundAccountShape(v): { ok: true; value: { bankCode; accountNumber(하이픈 뺀 숫자); holderName } } | { ok: false }`(하위 경로 `@peaket/validation/refund-account`). payment `payment_cancel.fail_reason`(계좌 거절 `REFUND_ACCOUNT_INVALID`, 그 밖 null). ops 진행 `EventRefundJobProgress.accountPending`·관제 상세 `progress.accountPending`(결제사별 몫에는 없음). ops 0016 `event_cancellation_request.core_apply_superseded_at`, 메모리 저장소의 `core.get(id).nextAtMs`·`appliedAtMs`는 지금 이름 그대로 쓴다(4xx 401 제외 + 600,000ms, 5xx·무응답·401 + 60,000ms). purchase 본문 모양 오류는 400 `invalid-body`(문제 유형 접두어 + `invalid-body`). CS 받는 층 답은 2xx 본문 `accepted: true`일 때만 연 것.
 - **알림**: ops `test/event-cancellation-core-apply-main.test.ts`(main.ts를 띄우는 두 시험)가 다섯 서비스 단위를 한꺼번에 돌린 때 시간 초과로 실패했고 혼자 돌리면 통과한다(부하에 따른 흔들림, 이 반영과 무관). 검증 담당이 다시 볼 때 따로 돌리기를 권한다.
 - **시험 이의(구현 담당 `l3-b420-impl`, 리뷰 반영 구현, 2026-11-19)**: payment `test/payment-schema.test.ts`의 다섯 시험(PRF180·PRF181·PRF182_PRF183·GAT-080 P8 둘)은 마이그레이션 기록을 0000~0021로, `payment_cancel` 칸을 아홉으로 못 박아 정본 ④가 정한 새 칸 `fail_reason`(마이그레이션 0023, 감독 지시 번호)과 어긋나 실패한다. 구현 잘못이 아니라 시험이 정본 변경(payment §6 '구현에서 정한 것' ④, docs/data.md payment_cancel)을 따라가지 않은 것이라, 시험 담당이 기록 목록에 `[23, '0023_payment_cancel_fail_reason']`·SQL 파일 목록에 `0023_payment_cancel_fail_reason.sql`·칸 목록에 `fail_reason text`(빈 값 허용)·check `payment_cancel_fail_reason_check`를 더하고, 0022가 비는 것(갈래 5 몫)을 기록 차례 검사가 받게 고쳐 주기를 바란다. 그 밖 재현 시험은 모두 지난다.
+  - **처리(시험 담당 `l3-b420-test`, 2026-11-19, 정본 변경 반영)**: `payment-schema.test.ts`를 정본 ④대로 고쳤다. 기록 목록에 `[23, '0023_payment_cancel_fail_reason']`, SQL·스냅샷 목록에 0023, 마지막 스냅샷을 `0023_snapshot.json`으로, `payment_cancel` 칸에 `fail_reason text`(빈 값 허용)와 `payment_cancel_fail_reason_check`(빈 값이거나 FAILED·`REFUND_ACCOUNT_INVALID`)를 더했고, 0023 SQL은 그 칸과 검사 두 문뿐이라는 시험을 새로 두었다. 0022(갈래 5 몫)는 기록·파일이 나중에 들어와도 그 번호만 앞머리로 보고 나머지를 차례로 견준다(idx 오름차순·중복 없음은 전체로 본다). payment 단위 50파일 3,039 통과, `tsc --noEmit` 오류 0.
 
 ## 시험 결과
 
@@ -534,6 +535,13 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | R12 | 잡기 차례를 `approved_at`만으로 둔다(머리 막힘) | T6(21건) |
 | R13 | core가 '지금보다 이름'을 먼저 본다(옛 동작) | T6 core |
 
+### 6. 은행 코드의 꼴(2026-11-19 감독 지적 반영)
+
+- **정한 꼴**: 공용 `RefundAccount.bankCode`는 토스 은행 코드 표의 숫자 코드 두 자리만 받는다(예 신한 `88`, KB국민 `06`). 금융결제원 세 자리(예 `004`·`088`)는 400 `invalid-body`이고 바꾸지 않는다. 결제사별 바꾸기는 토스 어댑터가 그대로 싣고, 포트원은 `services/payment-svc/src/modules/payment/domain/payment-gateway.ts` 대응표가 열거값으로 바꾼다. 정본은 payment §6 '구현에서 정한 것' ②의 '은행 코드의 꼴'과 openapi `RefundAccount.bankCode` 설명(이 커밋)이다.
+- **근거**: 토스페이먼츠 개발자 문서 '은행 코드 및 증권사 코드'(2026-11-19 확인)는 두 자리 숫자·금융결제원 세 자리·영문 코드를 따로 두고 요청에는 두 자리를 가장 권한다. 토스 취소 API `refundReceiveAccount.bank`는 형식을 따로 적지 않고 그 표를 가리킨다. 두 꼴은 앞 0 떼기로 바뀌지 않는다(KB국민 `06`과 `004`, IBK기업 `03`과 `003`). 포트원 열거값 이름은 [가정]이다.
+- **바꿀 수 있는 안(쓰지 않음, 감독 결정 대기)**: 세 자리도 받으려면 공용 함수 `refundAccountShape`가 두 꼴(두 자리 토스 코드, 세 자리 금융결제원 코드)을 받고, 세 자리는 금융결제원 → 토스 대응표(공용 `packages/validation`에 한 곳)로 두 자리로 바꾼 값을 돌려준다. 대응표에 없는 세 자리는 400이다. 서비스는 바꾼 두 자리만 다룬다(purchase·payment가 같은 함수, 결제사 어댑터는 지금 그대로). 탈퇴(identity, PRF-174)·굿즈 취소(core shop)도 같은 함수를 쓰게 된다.
+- 시험 영향(지금 꼴 그대로면 없음): P-T74 ①의 '세 자리(`088`) 400'은 지금 정본과 맞다. 위 안을 고르면 그 줄과 `packages/validation` 시험 표를 바꾸는 시험 담당 몫이 생긴다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -544,7 +552,9 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:18+09:00 |
 | verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T06:06+09:00 | 2026-11-19T06:50+09:00 |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T06:52+09:00 | 2026-11-19T07:00+09:00 |
+| plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T08:18+09:00 | 2026-11-19T08:30+09:00 |
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T07:00+09:00 | 2026-11-19T07:42+09:00 |
 | impl | l3-b420-impl | claude-opus-5-5 | 2026-11-19T07:45+09:00 | 2026-11-19T08:17+09:00 |
+| test | l3-b420-test | claude-opus-5-5 | 2026-11-19T08:18+09:00 | 2026-11-19T08:22+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
