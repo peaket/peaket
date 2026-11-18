@@ -301,6 +301,30 @@ describe('검색 질의(PostgreSQL)', () => {
       await searchDb.close();
     }
   });
+
+  // BAT-166 재현 시험(버그: 로마자 입력 500). 정본 docs/features/search.md §3.2(98줄)·SR-T4(297줄, 방법 칸의 통합 시험), ADR-0271 결정 24
+  test('SR-T4 PostgreSQL 어댑터도 변환 값을 만들 수 없는 로마자 입력에 0건·변환 없음으로 답한다', async () => {
+    const wet = (await seed({ title: '웻 로마자시험' })).productionId;
+    await admin.transaction((tx) => sync.sync(tx, [wet], new Date(now)));
+    const index = new DrizzleSearchIndex(admin, 'https://img.test');
+    // 대조군: 'dnpt'는 '웻'으로 바꿔 찾는다(변환을 통째로 끄거나 오류 판단을 넓게 잡으면 걸린다)
+    const control = await index.search(query('dnpt'));
+    expect(control.items.map((x) => x.productionId)).toEqual([wet]);
+    expect(control.query.converted).toEqual({ from: 'dnpt', to: '웻' });
+    for (const input of ['npt', 'mla', 'hov', 'gunpg', 'nPt']) {
+      const out = await index.search(query(input)).then(
+        (v) => v,
+        (e: unknown) => ({ thrown: e }),
+      );
+      // 던졌으면 그 오류를 그대로 보인다
+      expect((out as { thrown?: unknown }).thrown, input).toBeUndefined();
+      const ok = out as Awaited<ReturnType<DrizzleSearchIndex['search']>>;
+      expect(ok.items, input).toEqual([]);
+      expect(ok.query.converted, input).toBeNull();
+      // 서비스 조립(검색 전용 역할 연결)을 거친 HTTP도 200이다(apiIds가 200을 단언한다)
+      expect(await apiIds(input), input).toEqual([]);
+    }
+  });
 });
 
 /** 판은 새 연결에서, 줄·지운 표시는 미리 열어 둔 옛 스냅숏에서 읽는 틀린 원천(복제본 지연 흉내, 대조군) */

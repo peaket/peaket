@@ -140,6 +140,28 @@ describe('검색(메모리)', () => {
     expect(out.items?.length).toBeLessThanOrEqual(8);
     expect((await get('/v1/search/suggestions?q=')).statusCode).toBe(400);
   });
+
+  // BAT-166 재현 시험(버그: 로마자 입력 500). 정본 docs/features/search.md §3.2(98줄)·SR-T4(297줄), ADR-0271 결정 24.
+  // 사전 첫 읽기는 beforeAll이 마쳤다(준비된 사전으로 본다)
+  test.each(['npt', 'mla', 'hov', 'gunpg', 'nPt'])("SR-T4 변환 값을 만들 수 없는 로마자 입력('%s')은 검색이 200·converted null·0건이고 자동완성이 200·빈 후보다", async (input) => {
+    const r = await get('/v1/search?q=' + encodeURIComponent(input));
+    expect(r.statusCode).toBe(200);
+    const body = json(r) as { items: unknown[]; total: number; query: { converted?: unknown } };
+    // 정본은 null이다(빠진 칸이나 원래 입력이 아니다)
+    expect(body.query.converted).toBeNull();
+    expect(body.items).toEqual([]);
+    expect(body.total).toBe(0);
+    const s = await get('/v1/search/suggestions?q=' + encodeURIComponent(input));
+    expect(s.statusCode).toBe(200);
+    expect(GetSearchSuggestionsResponse.parse(json(s)).items).toEqual([]);
+  });
+
+  test("SR-T4 변환 값을 만들 수 없는 로마자 입력의 대조군: 자동완성도 'fnaps'를 '루멘'으로 바꿔 후보를 낸다", async () => {
+    // 변환을 통째로 끄는 고침이면 여기서 걸린다(위 시험이 빈 후보로 통과하지 않게)
+    const s = await get('/v1/search/suggestions?q=fnaps');
+    expect(s.statusCode).toBe(200);
+    expect(GetSearchSuggestionsResponse.parse(json(s)).items?.some((x) => x.kind === 'ARTIST' && x.artistId === ARTIST)).toBe(true);
+  });
 });
 
 // ---- BAT-165 웨이브 7 T-07·T-08·T-09·T-17·T-19(메모리). 공연 300개를 둔 다른 서비스로 돌려 위 시험의 기대값을 건드리지 않는다 ----
