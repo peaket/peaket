@@ -20,7 +20,8 @@ export const SOURCE_TABLES: readonly SourceTable[] = [
   { name: 'purchase_quota', source: 'purchase', columns: ['account_id', 'event_id', 'used', 'limit_count'] },
   { name: 'event_sale', source: 'purchase', columns: ['event_id', 'sellable_seats'] },
   { name: 'ticket_issue_job', source: 'purchase', columns: ['order_id', 'event_id', 'issue_due_at', 'created_at'] },
-  { name: 'payment', source: 'payment', columns: ['id', 'order_id', 'event_id', 'pg', 'amount', 'status', 'approved_at'] },
+  // order_kind: P3·P4는 TICKET 결제만 본다(굿즈·부가 상품 MERCH는 purchase 주문·발권이 없다). P1·P2·P6은 모든 결제(docs/verification.md §2.5, ADR-0299 결정 1)
+  { name: 'payment', source: 'payment', columns: ['id', 'order_id', 'event_id', 'pg', 'amount', 'status', 'approved_at', 'order_kind'] },
   { name: 'payment_event', source: 'payment', columns: ['payment_id', 'seq', 'type', 'occurred_at'] },
   { name: 'payment_cancel', source: 'payment', columns: ['id', 'payment_id', 'amount', 'status', 'canceled_at'] },
   {
