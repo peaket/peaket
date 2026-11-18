@@ -74,3 +74,6 @@
 - BAT-415-reauth(R-688) 리뷰 RN-02 낮음: 받는 수명 상한(`jwks-fan-reauth-gate.ts` `MAX_REMAINING_LIFETIME_MS`)과 공용 기록 상한(`packages/platform/src/reauth-jti.ts` `REAUTH_JTI_TTL_MS`)이 같은 330,000을 따로 적는다. 또 core·ops·payment의 재인증 확인기는 수명 거절이 없고 `jti` 저장소가 선택 인자라 넘기지 않으면 한 번 쓰기를 건너뛴다(계획 담당 메모)
 - BAT-415-reauth(R-688) 검증 V3·살아남은 것: 빈 토큰 먼저 거절 줄은 플랫폼 확인기와 동치(시험 불필요). 503 목록의 `ERR_JWK_INVALID`·`ERR_JWKS_INVALID`는 jose 6.2.14 확인 단계에서 나는 입력이 없어 방어로 남겼다(뺄지 정한다)
 - BAT-415-reauth(R-688) 마지막 검증 살아남은 2(관측, 통과 기준 밖): 거절 로그의 사건 이름 `event`를 바꿔도, start.ts가 감싼 로거의 `info`를 `warn`으로 이어도 시험이 통과한다. start.ts 글 시험에 감싼 두 줄을 더하거나 함수가 서비스 로거를 바로 받게 한다
+- BAT-416(R-689) 계획 메모 낮음: epoch 밀리초 식(`TIME[1]*1000 + floor(TIME[2]/1000)`)과 정수 글 함수가 좌석 Lua 아홉 파일에 따로 복사돼 있다. 하나로 묶을지 정한다(모듈 경계를 넘음)
+- BAT-416(R-689) 검증 낮음: `tools/ci/trace-check.mjs`의 ID 정규식이 `WIR-01`을 찾을 때 `W7-WIR-01`에도 맞는다. 보고서를 합치면 다른 리뷰의 같은 번호가 섞여 셀 수 있다
+- BAT-416(R-689) 검증 등가 2: 하나뿐인 `TIME` 읽기를 구역 고리 안으로 옮김(Valkey는 스크립트 동안 TIME을 멈춤), `tonumber` 빼기(자동 바꿈) — 시험으로 가를 수 없어 그대로 둔다
