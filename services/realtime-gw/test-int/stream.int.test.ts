@@ -104,10 +104,10 @@ describe('S-T42 핸드셰이크', () => {
     expect([...c.raw[0]!]).toEqual([1, 3, 100, 0]);
   });
 
-  test('S-T42 ② 경로 틀림·출처 없음·출처 다름·Sec-WebSocket-Key 틀림·Sec-WebSocket-Version 틀림·하위 프로토콜 겹침·peaket.seats.v1 없음·토큰 없음·토큰 둘·서명 틀림·만료·typ·aud·iss 틀림·판 파일 없음은 차례대로 404·403·403·400×4·401×7·503이고 업그레이드가 없으며 본문이 비었고 상태별로 센다 [ASVS v5.0.0-4.4.2] [ASVS v5.0.0-4.4.3] [ASVS v5.0.0-4.4.4] [ASVS v5.0.0-16.5.1]', async () => {
+  test('S-T42 ② 경로 틀림·출처 없음·출처 다름·Sec-WebSocket-Key 틀림·Sec-WebSocket-Version 틀림·하위 프로토콜 겹침·POST·Upgrade h2c·빈 하위 프로토콜 값·peaket.seats.v1 없음·토큰 없음·토큰 둘·서명 틀림·만료·typ·aud·iss 틀림·판 파일 없음은 차례대로 404·403·403·400×7·401×7·503이고 업그레이드가 없으며 본문이 비었고 상태별로 센다 [ASVS v5.0.0-4.4.2] [ASVS v5.0.0-4.4.3] [ASVS v5.0.0-4.4.4] [ASVS v5.0.0-16.5.1]', async () => {
     const good = admissionToken();
     const now = Date.now();
-    const cases: Array<[string, string, { origin?: string; protocols?: string[]; headers?: Record<string, string> }, number]> = [
+    const cases: Array<[string, string, { origin?: string; protocols?: string[]; headers?: Record<string, string>; method?: string; rawProtocols?: string }, number]> = [
       ['경로 틀림', '/v1/events/ev-1/seats', { origin: ORIGIN, protocols: [SEATS, AUTH + good] }, 404],
       ['출처 없음', streamPath('ev-1'), { protocols: [SEATS, AUTH + good] }, 403],
       ['출처 다름', streamPath('ev-1'), { origin: 'https://evil.example', protocols: [SEATS, AUTH + good] }, 403],
@@ -115,6 +115,10 @@ describe('S-T42 핸드셰이크', () => {
       ['Sec-WebSocket-Key 틀림', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good], headers: { 'Sec-WebSocket-Key': Buffer.alloc(15, 9).toString('base64') } }, 400],
       ['Sec-WebSocket-Version 틀림', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good], headers: { 'Sec-WebSocket-Version': '8' } }, 400],
       ['하위 프로토콜 겹침', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, SEATS, AUTH + good] }, 400],
+      // 메서드 GET 아님(업그레이드 머리는 맞음)·Upgrade h2c·빈 하위 프로토콜 값(SEC-R03: ws의 405나 본문 있는 400이 아니라 우리 차례의 400)
+      ['POST', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good], method: 'POST' }, 400],
+      ['Upgrade h2c', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good], headers: { Upgrade: 'h2c' } }, 400],
+      ['빈 하위 프로토콜 값', streamPath('ev-1'), { origin: ORIGIN, rawProtocols: `${SEATS},,${AUTH}${good}` }, 400],
       ['peaket.seats.v1 없음', streamPath('ev-1'), { origin: ORIGIN, protocols: [AUTH + good] }, 400],
       ['토큰 없음', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS] }, 401],
       ['토큰 둘', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good, AUTH + admissionToken()] }, 401],
@@ -134,13 +138,13 @@ describe('S-T42 핸드셰이크', () => {
       expect(r.headers.upgrade, name).toBeUndefined();
     }
     expect(got).toEqual(cases.map(([name, , , status]) => [name, status, '']));
-    expect(got.map(([, s]) => s)).toEqual([404, 403, 403, 400, 400, 400, 400, 401, 401, 401, 401, 401, 401, 401, 503]);
+    expect(got.map(([, s]) => s)).toEqual([404, 403, 403, 400, 400, 400, 400, 400, 400, 400, 401, 401, 401, 401, 401, 401, 401, 503]);
     // 거절 수는 상태 코드별로 센다(ws가 스스로 거절하던 머리 셋도 우리 차례에서 센다, ADR-0297 결정 7)
     const after = await svc.metrics();
     const delta = (status: number) => (metricValue(after, `realtime_gw_handshake_rejects_total{status="${status}"}`) ?? 0) - (metricValue(before, `realtime_gw_handshake_rejects_total{status="${status}"}`) ?? 0);
-    expect([404, 403, 400, 401, 503].map(delta)).toEqual([1, 2, 4, 7, 1]);
-    // 400 넷은 모두 ws_rejected 줄이 남는다
-    await until(() => svc.logLines().filter((l) => l.includes('"ws_rejected"') && l.includes('"status":400')).length >= 4, 'ws_rejected 400 줄 넷');
+    expect([404, 403, 400, 401, 503].map(delta)).toEqual([1, 2, 7, 7, 1]);
+    // 400 일곱은 모두 ws_rejected 줄이 남는다
+    await until(() => svc.logLines().filter((l) => l.includes('"ws_rejected"') && l.includes('"status":400')).length >= 7, 'ws_rejected 400 줄 일곱');
   });
 
   test('S-T42 ② 앞 차례가 걸리면 뒤는 보지 않는다: 회차 ID 모양이 틀린 경로는 출처가 없어도 404, 출처가 없으면 토큰이 없어도 403, 업그레이드 머리나 하위 프로토콜이 틀리면 토큰이 틀려도 400, 토큰이 틀리면 판 파일이 없어도 401 [ASVS v5.0.0-4.4.2] [ASVS v5.0.0-16.5.1]', async () => {
@@ -527,6 +531,99 @@ describe('S-T42 ⑯ 연결 수 상한(ADR-0297 결정 3)', () => {
       for (const c of mine) c.ws.terminate();
       await svcMax.close();
     }
+  });
+});
+
+describe('S-T42 ⑯ 곧 닫는 연결과 상한(보안 다시 보기 SEC-R01·R02, ADR-0297 결정 3)', () => {
+  /** 101 뒤 소켓을 열어 둔 채 아무것도 쓰지 않는다(닫기 인사에 답하지 않음). 받은 닫힘 프레임 코드와 끊김을 본다 */
+  interface Silent {
+    status: number;
+    body: string;
+    upgrade: string | string[] | undefined;
+    code(): number | undefined;
+    closed(): boolean;
+  }
+  const kept: import('node:net').Socket[] = [];
+  const silent = async (port: number, path: string, token: string): Promise<Silent> => {
+    const data: Buffer[] = [];
+    let ended = false;
+    const h = await handshake(port, path, { origin: ORIGIN, protocols: [SEATS, AUTH + token] }, (s, head) => {
+      kept.push(s);
+      if (head.length > 0) data.push(Buffer.from(head));
+      s.on('data', (d: Buffer) => data.push(d));
+      s.on('close', () => (ended = true));
+      s.on('error', () => {});
+    });
+    return {
+      status: h.status,
+      body: h.body,
+      upgrade: h.headers.upgrade,
+      code: () => {
+        const b = Buffer.concat(data);
+        const at = b.indexOf(0x88);
+        return at >= 0 && b.length >= at + 4 ? b.readUInt16BE(at + 2) : undefined;
+      },
+      closed: () => ended,
+    };
+  };
+  afterEach(() => {
+    for (const s of kept.splice(0)) s.destroy();
+  });
+
+  test('S-T42 ⑯ 파드 상한 3(시험 값)에서 회차가 다른 토큰으로 셋, 같은 jti로 넷(셋째·넷째 4429)을 답하지 않는 채 붙여도 곧바로(1초 안) 다른 토큰의 핸드셰이크는 101이다 [ASVS v5.0.0-2.4.1]', async () => {
+    const svcMax = await startService(serviceEnv({ redisUrl: valkey.url, seatMapDir: layout.dir, extra: { PEAKET_REALTIME_MAX_CONNECTIONS: '3' } }));
+    try {
+      const p = svcMax.ports.app;
+      // (가) 회차 ev-2 토큰 하나로 ev-1 주소에 셋: 모두 101 뒤 4403 bad event, 답하지 않는다
+      const evil = admissionToken({ eventId: 'ev-2' });
+      const startedA = Date.now();
+      const bad: Silent[] = [];
+      for (let i = 0; i < 3; i++) bad.push(await silent(p, streamPath('ev-1'), evil));
+      expect(bad.map((b) => b.status)).toEqual([101, 101, 101]);
+      await until(() => bad.every((b) => b.code() === 4403), '4403 닫힘 프레임 셋', 1_000, 10);
+      const otherA = await silent(p, streamPath('ev-1'), admissionToken({ accountId: 'acct-a' }));
+      expect(Date.now() - startedA).toBeLessThan(1_000);
+      expect(otherA.status).toBe(101);
+      for (const s of kept.splice(0)) s.destroy();
+      await until(async () => (metricValue(await svcMax.metrics(), 'realtime_gw_connections') ?? 0) === 0, '연결 0', 5_000);
+
+      // (나) 같은 jti로 넷: 앞의 둘은 열리고 셋째·넷째는 101 뒤 4429 too many, 답하지 않는다
+      const same = admissionToken({ accountId: 'acct-b' });
+      const startedB = Date.now();
+      const four: Silent[] = [];
+      for (let i = 0; i < 4; i++) four.push(await silent(p, streamPath('ev-1'), same));
+      expect(four.map((b) => b.status)).toEqual([101, 101, 101, 101]);
+      await until(() => four[2]!.code() === 4429 && four[3]!.code() === 4429, '4429 닫힘 프레임 둘', 1_000, 10);
+      const otherB = await silent(p, streamPath('ev-1'), admissionToken({ accountId: 'acct-c' }));
+      expect(Date.now() - startedB).toBeLessThan(1_000);
+      expect(otherB.status).toBe(101);
+    } finally {
+      for (const s of kept.splice(0)) s.destroy();
+      await svcMax.close();
+    }
+  });
+
+  test('S-T42 ⑯ 같은 jti로 회차가 다른 연결을 답하지 않는 채 넷(101 뒤 4403 bad event) 만든 뒤 다섯째 핸드셰이크는 회차가 맞든 다르든 업그레이드 없이 503·빈 본문이고, 그 연결들이 끊긴 뒤(300ms) 같은 토큰의 맞는 회차는 101이다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.5.1]', async () => {
+    const p = svc.ports.app;
+    // 같은 jti, 회차 ev-2. ev-1 주소면 회차가 다르고 ev-2 주소면 맞다
+    const tok = admissionToken({ eventId: 'ev-2', accountId: 'acct-r02' });
+    const four: Silent[] = [];
+    for (let i = 0; i < 4; i++) four.push(await silent(p, streamPath('ev-1'), tok));
+    expect(four.map((b) => b.status)).toEqual([101, 101, 101, 101]);
+    await until(() => four.every((b) => b.code() === 4403), '4403 닫힘 프레임 넷', 1_000, 10);
+    const before = await svc.metrics();
+    const fifthWrong = await silent(p, streamPath('ev-1'), tok);
+    const fifthRight = await silent(p, streamPath('ev-2'), tok);
+    for (const [name, r] of [['회차 다름', fifthWrong], ['회차 맞음', fifthRight]] as const) {
+      expect([r.status, r.body, r.upgrade], name).toEqual([503, '', undefined]);
+    }
+    const after = await svc.metrics();
+    const d503 = (metricValue(after, 'realtime_gw_handshake_rejects_total{status="503"}') ?? 0) - (metricValue(before, 'realtime_gw_handshake_rejects_total{status="503"}') ?? 0);
+    expect(d503).toBe(2);
+    await sleep(300);
+    expect(four.every((b) => b.closed())).toBe(true);
+    const later = await silent(p, streamPath('ev-2'), tok);
+    expect(later.status).toBe(101);
   });
 });
 

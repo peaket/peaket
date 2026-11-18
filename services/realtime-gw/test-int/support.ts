@@ -116,7 +116,7 @@ export interface Handshake {
 }
 
 /** 손으로 하는 업그레이드 요청. 101이면 소켓을 닫고 돌려준다(keep이 참이면 소켓을 둔다) */
-export function handshake(port: number, path: string, h: { origin?: string; protocols?: string[]; headers?: Record<string, string> }, keep?: (socket: import('node:net').Socket) => void): Promise<Handshake> {
+export function handshake(port: number, path: string, h: { origin?: string; protocols?: string[]; headers?: Record<string, string>; method?: string; rawProtocols?: string }, keep?: (socket: import('node:net').Socket, head: Buffer) => void): Promise<Handshake> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = {
       Connection: 'Upgrade',
@@ -127,9 +127,11 @@ export function handshake(port: number, path: string, h: { origin?: string; prot
     };
     if (h.origin !== undefined) headers.Origin = h.origin;
     if (h.protocols !== undefined) headers['Sec-WebSocket-Protocol'] = h.protocols.join(', ');
-    const req = request({ host: '127.0.0.1', port, path, method: 'GET', headers });
-    req.once('upgrade', (res, socket) => {
-      if (keep) keep(socket);
+    // 하위 프로토콜 머리를 글자 그대로(빈 값 'a,,b' 같은 것)
+    if (h.rawProtocols !== undefined) headers['Sec-WebSocket-Protocol'] = h.rawProtocols;
+    const req = request({ host: '127.0.0.1', port, path, method: h.method ?? 'GET', headers });
+    req.once('upgrade', (res, socket, head: Buffer) => {
+      if (keep) keep(socket, head);
       else socket.destroy();
       resolve({ status: res.statusCode ?? 0, headers: res.headers, body: '' });
     });
