@@ -2,4 +2,3 @@
 
 - 갈래 4(ADR-0286)가 묶음에서 고치지 않은 리뷰·검증의 중간·낮은 지적을 '묶음 ID(R 번호) 지적 번호 심각도: 지적 한 줄(파일)' 꼴로 적는다(ADR-0190 결정 2, ADR-0283 결정 2). 구간 마무리(SEG) 때 소유자가 한 번에 정하고, 그 밖에는 이 목록을 고칠 때만 읽는다. 크기 상한(ADR-0283 결정 1)을 보지 않는 파일이다.
 
-- W11-lanes(R-686) RV-02 낮음: ADR-0283 결정 1의 정리 목록 예시가 `lane1-cleanup.md`~`lane3-cleanup.md`뿐이다. 규칙과 코드는 이름과 상관없이 맞다. 예시를 `lane*-cleanup.md`로 넓힐지 정한다(docs/adr/0283-cut-batch-overhead-keep-high-yield-checks.md).

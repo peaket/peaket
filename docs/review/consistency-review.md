@@ -780,6 +780,7 @@
 | R-683 | develop CI security-scan dependencies가 빨간색: picomatch GHSA-fc5q-39xc-vjpf(높음, 4.0.7 이하 전부, 수정본 없음) | tools/ci/vuln-exceptions.json | 잠금 파일로 운영 의존성 경로를 따져 개발·CI 도구 전용임을 확인하고 이슈 #14 근거로 2026-12-18까지 30일 예외를 둔다 | 완료(로컬 vuln-deadline 시험 8건 통과, 실제 판정은 develop CI 확인) |
 | R-684 | WBS·실행 규칙이 1인·3갈래 기준이라 남은 일의 의존 관계가 허락하는 병렬(5~7갈래)을 못 쓰고, 웨이브 10에서는 동시에 두 묶음만 돌았다 | docs/adr/0286, docs/BUILD_ORDER.md 기능 묶음 표, docs/PROGRESS.md 턴 규칙, docs/lanes/*.md, docs/wbs/wbs.md §1, docs/architecture.md ADR 표 | 코드 영역별 5갈래(첫 바퀴 뒤 7)·전체 감독·합치기 줄·바퀴별 번호 나누기(ADR-0286) | 적용 |
 | R-685 | 탈퇴 참여자의 틀(PRF-169)이 없어 결제 대기·입금 대기 주문이 있어도 탈퇴가 끝나고, 탈퇴 중 새 주문이 403이었다 | services/identity-svc(참여자 포트·gRPC 어댑터·202 미룸·다시 하기 고리·0034), services/purchase-svc(참여자 gRPC·409 withdrawal-pending·0028), services/payment-svc(CancelPayment scope DEPOSIT_ONLY), docs/api/proto, ADR-0284 | 정방향 A 묶음(계획·구현·독립 시험·리뷰·리뷰 반영·다시 리뷰·검증 두 바퀴), 시험이 찾은 돈 결함 D1·D2를 입금 전 취소만 부르기로 고침, 리뷰 RV-01·03·04 고침, 틀린 구현 86/76 → 놓친 3개 시험 더함 | 완료(로컬 단위·닿는 통합 통과, 다시 쌓은 트리 통합 전체는 초안 PR #16 CI) |
+| R-686 | 기록 크기 점검(records.mjs --check)이 갈래 4·5 파일을 보지 않아 두 갈래 기록이 40KB를 넘어도 막지 못했다 | tools/ci/records.mjs, tools/ci/README.md, tools/ci/records.test.mjs, ADR-0283, docs/architecture.md, docs/review/plans/W11-lanes.md | RECORD_SIZE_FILES에 lane4·lane5, 시험 RS-03·04·10·12·13·14 (W11-lanes) | 적용 |
 
 ## 4. 숫자 일치표
 
