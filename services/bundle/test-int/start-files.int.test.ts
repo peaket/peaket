@@ -13,6 +13,7 @@ import { migratePayment } from '../../payment-svc/scripts/migrate.mjs';
 import { createDatabase, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { envFileText, v1EnvFiles, v1Keys } from '../../../tools/local/v1-stage.mjs';
 import { build, freePort, logLines, type Postgres, type Running, SERVICES_DIR, sigterm, spawnMain, startPostgres, startValkey, type Container, waitReady } from './support.js';
+import { processAccountWithdrawal } from '../../purchase-svc/test-int/withdrawal-grpc-client.js';
 
 type Svc = 'payment-svc' | 'purchase-svc' | 'admission-ctrl' | 'queue-svc';
 const SERVICES: Svc[] = ['payment-svc', 'purchase-svc', 'admission-ctrl', 'queue-svc'];
@@ -103,6 +104,45 @@ describe('서비스 시작 파일(dist/main.js)', () => {
         expect(lines.length).toBeGreaterThan(0);
         expect(lines.every((l) => l.service === svc), '모든 로그 줄이 그 서비스 이름이다').toBe(true);
         for (const s of secrets()) expect(r.output()).not.toContain(s);
+      } finally {
+        if (!r.gone()) r.child.kill('SIGKILL');
+      }
+    },
+    180_000,
+  );
+});
+
+// BAT-010 리뷰 RV-04: purchase-svc 시작 파일(start.ts)의 탈퇴 참여자 조립을 시험 조립과 따로 띄워 본다(docs/features/payment.md §4.1 '탈퇴 참여자의 첫 구현' '계약'·'지표·로그',
+// docs/security/asvs/payment.md 8.2.1, P-T55 ⑥). gRPC 포트·내부 토큰은 무대 함수가 아니라 이 시험이 더한다(tools/local/v1-stage.mjs는 고치지 않는다).
+describe('purchase-svc 시작 파일의 탈퇴 참여자 gRPC(P-T55 ⑥, BAT-010 리뷰 RV-04)', () => {
+  const TOKEN = 'bat010-rv04-internal-token';
+  test(
+    'P-T55⑥_RV-04_시작 파일로 띄운 purchase-svc는 ProcessAccountWithdrawal을 열고, 내부 토큰이 없거나 틀리면 UNAUTHENTICATED, 토큰이 맞고 부르는 쪽이 identity-svc가 아니면 PERMISSION_DENIED, identity-svc면 주문 없는 계정에 DONE이고 /metrics에 purchase_withdrawal_participant_total이 1 는다 [ASVS v5.0.0-8.2.1]',
+    async () => {
+      const p = await ports();
+      const grpcPort = await freePort();
+      const env = { ...envFiles(p, 'withdrawal')['purchase-svc'], PEAKET_GRPC_HOST: '127.0.0.1', PEAKET_GRPC_PORT: String(grpcPort), PEAKET_INTERNAL_GRPC_TOKEN: TOKEN };
+      const r: Running = spawnMain(join(SERVICES_DIR, 'purchase-svc'), { PEAKET_ENV: 'ci', OTEL_SERVICE_NAME: 'purchase-svc', ...env });
+      try {
+        await waitReady(r, p['purchase-svc'].management);
+        const address = `127.0.0.1:${grpcPort}`;
+        const account = '0193a000-0000-7000-8000-00000000b104';
+        expect(await processAccountWithdrawal(address, account, { caller: 'identity-svc' })).toEqual({ ok: false, code: 'UNAUTHENTICATED' });
+        expect(await processAccountWithdrawal(address, account, { token: `${TOKEN}-wrong`, caller: 'identity-svc' })).toEqual({ ok: false, code: 'UNAUTHENTICATED' });
+        expect(await processAccountWithdrawal(address, account, { token: TOKEN, caller: 'ops-svc' })).toEqual({ ok: false, code: 'PERMISSION_DENIED' });
+        expect(await processAccountWithdrawal(address, account, { token: TOKEN })).toEqual({ ok: false, code: 'PERMISSION_DENIED' });
+        const before = await (await fetch(`http://127.0.0.1:${p['purchase-svc'].management}/metrics`)).text();
+        const done = (text: string) => Number(/^purchase_withdrawal_participant_total\{[^}]*state="done"[^}]*\} (\d+)$/m.exec(text)?.[1] ?? 0);
+        expect(await processAccountWithdrawal(address, account, { token: TOKEN, caller: 'identity-svc' })).toEqual({
+          ok: true,
+          reply: { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE', reasons: [], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 0 },
+        });
+        const metrics = await (await fetch(`http://127.0.0.1:${p['purchase-svc'].management}/metrics`)).text();
+        expect(metrics).toMatch(/^# TYPE purchase_withdrawal_participant_total counter$/m);
+        expect(done(metrics)).toBe(done(before) + 1);
+        const left = await sigterm(r);
+        expect(left, r.output().slice(-2000)).toEqual({ code: 0, signal: null });
+        expect(r.output()).not.toContain(TOKEN);
       } finally {
         if (!r.gone()) r.child.kill('SIGKILL');
       }

@@ -246,6 +246,31 @@ describe('withdrawalParticipantsFromEnv(주소가 없을 때, I-T84 ⑦)', () =>
     expect(await t.run(await t.login(`env-${env}`))).toEqual({ outcome: 'DEFERRED' });
   });
 
+  // 리뷰 RV-01(BAT-010 리뷰 반영, identity §8 '참여자 호출' · I-T84 ⑦ 끝: PEAKET_ENV가 없거나 빈 글이면 운영으로 본다)
+  test.each<[string, Record<string, string | undefined>]>([
+    ['PEAKET_ENV 키 없음', {}],
+    ['PEAKET_ENV 빈 글', { PEAKET_ENV: '' }],
+    ['PEAKET_ENV undefined 값', { PEAKET_ENV: undefined }],
+  ])('I-T84⑦_RV-01_%s이고 주소가 없으면 운영으로 보아 늘 답하지 않음(경고 한 줄)이고, 그 참여자로 탈퇴하면 202(DEFERRED)·WITHDRAWAL_PENDING이다 [ASVS v5.0.0-7.4.2]', async (_name, env) => {
+    const r = withdrawalParticipantsFromEnv(env);
+    expect(r.participants).toHaveLength(1);
+    expect(r.warnings).toHaveLength(1);
+    expect(await rejection(r.participants[0]!.process(ACCOUNT, { deadlineMs: 100 }))).toBeInstanceOf(WithdrawalParticipantUnavailable);
+    const t = await app(r.participants);
+    const s = await t.login(`env-missing-${Object.keys(env).length}-${String(env.PEAKET_ENV)}`);
+    expect(await t.run(s)).toEqual({ outcome: 'DEFERRED' });
+    expect(t.sessions.accountOf(s.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL' });
+    expect(t.sessions.activeCount(s.accountId)).toBe(1);
+    expect(seen).toEqual([]);
+  });
+
+  test('I-T84⑦_RV-01_대조: 같은 꼴에서 PEAKET_ENV가 local·ci일 때만 늘 DONE이다(대소문자·앞뒤 공백이 다르면 운영)', async () => {
+    for (const env of ['local', 'ci']) expect(await withdrawalParticipantsFromEnv({ PEAKET_ENV: env }).participants[0]!.process(ACCOUNT, { deadlineMs: 100 })).toEqual({ state: 'DONE' });
+    for (const env of ['LOCAL', 'Ci', ' local', 'local ']) {
+      expect({ env, e: await rejection(withdrawalParticipantsFromEnv({ PEAKET_ENV: env }).participants[0]!.process(ACCOUNT, { deadlineMs: 100 })) }).toEqual({ env, e: expect.any(WithdrawalParticipantUnavailable) });
+    }
+  });
+
   test('I-T84⑦_주소가있으면그서버를부르는클라이언트하나이고경고가없다(운영도같다)', async () => {
     for (const env of ['local', 'prod']) {
       seen.length = 0;
