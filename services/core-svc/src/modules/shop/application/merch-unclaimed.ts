@@ -1,4 +1,4 @@
-// 현장 수령 미수령 자동 취소와 환급 다시 부르기(ADR-0301 결정 5, P-T57, docs/planning/03 용어 '미수령'·§2.13 I2·I16).
+// 현장 수령 미수령 자동 취소와 환급 다시 부르기(ADR-0301 결정 5, P-T58, docs/planning/03 용어 '미수령'·§2.13 I2·I16).
 // - 정비 일 merch-unclaimed-cancel: 매일 10:00 KST [가정] 뒤(그 전이면 미룸), 은행 영업일(주말 건너뜀)에만 일한다. PAID 현장 수령 주문의 READY 항목 가운데
 //   그 상품·그 회차의 마지막 시간대가 끝난 날 D의 다음 영업일이 오늘이거나 지났으면 주문마다 한 트랜잭션에서 READY → CANCELLED(cancel_reason UNCLAIMED, 조건부)와
 //   환급 행(REQUESTED, ID가 결제 취소 ID)을 넣고, 커밋 뒤 CancelPayment(그 금액, 사유 UNCLAIMED)를 부른다. 재고는 돌리지 않는다.
