@@ -232,6 +232,66 @@ describe('다시 하기 고리 한 바퀴(I-T84 ④)', () => {
   });
 });
 
+// 리뷰 RV-03(BAT-010 리뷰 반영, identity §8 '다시 하기 고리' 573행 · I-T84 ④ 끝): 한 바퀴는 잡은 시각 + 50초 [가정]부터 남은 계정을 부르지 않는다.
+// 참여자 대역이 부를 때마다 가짜 시계를 민다(느린 참여자). 값은 정본의 50초·60초를 적는다.
+describe('바퀴 마감: 잡은 시각 + 50초(I-T84 ④, 리뷰 RV-03)', () => {
+  const ROUND_CUTOFF_MS = 50_000;
+
+  async function slowRound(firstCallMs: number) {
+    const t = await setup();
+    const a = await t.deferred('cut-a');
+    t.clock.advance(3);
+    const b = await t.deferred('cut-b');
+    t.clock.advance(3);
+    const c = await t.deferred('cut-c');
+    t.clock.advance(NEXT_CHECK_MS);
+    const claimedAt = t.clock.now();
+    // a는 PENDING으로 답하며 firstCallMs를 쓰고, b는 DONE으로 답하며 1ms를 쓴다. c는 PENDING이다
+    t.p.byAccount.set(a.accountId, async () => {
+      t.clock.advance(firstCallMs);
+      return { state: 'PENDING', reasons: ['PAYMENT_PENDING_ORDER'] };
+    });
+    t.p.byAccount.set(b.accountId, async () => {
+      t.clock.advance(1);
+      return { state: 'DONE' };
+    });
+    t.p.byAccount.set(c.accountId, PENDING);
+    t.p.calls.length = 0;
+    const report = await t.retry.run();
+    return { t, a, b, c, claimedAt, report };
+  }
+
+  test('I-T84④_RV-03_앞계정이49,999ms를써서잡은시각+50초−1ms면다음계정을부르고_그계정이1ms를써서+50초에닿으면남은계정은부르지않으며상태·다음확인시각(잡은시각+60초)그대로다', async () => {
+    const { t, a, b, c, claimedAt, report } = await slowRound(ROUND_CUTOFF_MS - 1);
+    expect(t.p.calls.map((x) => x.accountId)).toEqual([a.accountId, b.accountId]);
+    // 부르지 않은 계정은 끝냄·미룸·실패 어디에도 세지 않는다
+    expect(report).toEqual({ claimed: 3, withdrawn: 1, deferred: 1, failed: 0 });
+    expect(t.sessions.accountOf(b.accountId)?.status).toBe('DELETED');
+    expect(t.sessions.accountOf(c.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureStartedAt: START + 6, closureNextCheckAt: claimedAt + NEXT_CHECK_MS });
+    expect(t.sessions.activeCount(c.accountId)).toBe(1);
+    expect(t.sessions.withdrawnMessages().map((m) => m.key)).toEqual([b.accountId]);
+  });
+
+  test('I-T84④_RV-03_앞계정이50초를써서잡은시각+50초에닿으면_남은두계정을부르지않고상태·다음확인시각(잡은시각+60초)그대로다', async () => {
+    const { t, a, b, c, claimedAt, report } = await slowRound(ROUND_CUTOFF_MS);
+    expect(t.p.calls.map((x) => x.accountId)).toEqual([a.accountId]);
+    expect(report).toEqual({ claimed: 3, withdrawn: 0, deferred: 1, failed: 0 });
+    for (const x of [b, c]) {
+      expect(t.sessions.accountOf(x.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureNextCheckAt: claimedAt + NEXT_CHECK_MS });
+      expect(t.sessions.activeCount(x.accountId)).toBe(1);
+    }
+    expect(t.sessions.withdrawnMessages()).toEqual([]);
+    // 다음 확인 시각에 다시 잡힌다
+    t.p.byAccount.set(b.accountId, DONE);
+    t.p.byAccount.set(c.accountId, DONE);
+    t.p.byAccount.set(a.accountId, PENDING);
+    t.clock.advance(claimedAt + NEXT_CHECK_MS - t.clock.now());
+    t.p.calls.length = 0;
+    expect(await t.retry.run()).toMatchObject({ claimed: 3, withdrawn: 2 });
+    expect(t.p.calls.map((x) => x.accountId).sort()).toEqual([a.accountId, b.accountId, c.accountId].sort());
+  });
+});
+
 describe('요청 경로와 고리의 끝내기(I-T84 ①⑦)', () => {
   test('I-T84⑦_요청경로의끝내기와고리의끝내기가겹쳐도_계정은한번끝나고탈퇴사건은한건·세션종료사건도한번이다', async () => {
     const t = await setup();
@@ -243,7 +303,9 @@ describe('요청 경로와 고리의 끝내기(I-T84 ①⑦)', () => {
     let calls = 0;
     t.p.byAccount.set(a.accountId, async () => (++calls === 1 ? held : { state: 'DONE' }));
     const request = t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauth(a), body: {} });
-    await new Promise((r) => setTimeout(r, 0));
+    // 요청 경로가 참여자를 부를 때까지 기다린다(재인증 확인이 비동기라 한 틱으로는 모자랄 수 있다, 부하 아래 흔들림 고침)
+    for (let i = 0; i < 500 && calls === 0; i++) await new Promise((r) => setTimeout(r, 2));
+    expect(calls).toBe(1);
     expect(t.sessions.accountOf(a.accountId)?.status).toBe('WITHDRAWAL_PENDING');
     t.clock.advance(NEXT_CHECK_MS);
     expect(await t.retry.run()).toMatchObject({ claimed: 1, withdrawn: 1 });
