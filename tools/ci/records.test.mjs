@@ -609,6 +609,15 @@ test('RS-13 목록 밖 갈래 6 파일(docs/lanes/lane6.md)은 상한을 넘어�
   assert.equal(r.stderr.includes('lane6'), false, r.stderr);
 });
 
+// VF-V10: 상한 그대로(40,960) 통과는 PROGRESS만이 아니라 갈래 파일에도 같다(ADR-0283 결정 1 '40,960 그대로는 통과')
+test('RS-14 여섯 파일이 모두 상한 그대로(각 40,960바이트)면 --check가 0으로 끝나고 여섯 경로를 하나도 찍지 않는다', () => {
+  const six = ['docs/PROGRESS.md', 'docs/lanes/lane1.md', 'docs/lanes/lane2.md', 'docs/lanes/lane3.md', 'docs/lanes/lane4.md', 'docs/lanes/lane5.md'];
+  const dir = sizedRepo(Object.fromEntries(six.map((f) => [f, sized(LIMIT)])));
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  for (const f of six) assert.equal(r.stdout.includes(f), false, `${f}: ${r.stdout}`);
+});
+
 test('RS-11 --next-r는 크기를 보지 않는다', () => {
   const dir = sizedRepo({ [PROGRESS]: sized(LIMIT + 1) }, { align: false });
   const r = cli(dir, '--next-r');
