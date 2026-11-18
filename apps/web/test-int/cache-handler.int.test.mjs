@@ -18,7 +18,7 @@ const HOUR_S = 3_600;
 const CANON_TIMEOUT_MS = 100;
 const SLACK_MS = 900;
 
-const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const NAME = `lane2-bat170t-valkey-${process.pid}`;
 /** 이 시험의 빌드 칸(정본 꼴 [A-Za-z0-9_-] 1~64자) */
 const BUILD = 'bat170int';

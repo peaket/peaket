@@ -15,7 +15,7 @@ export interface PostgresContainer {
   stop(): void;
 }
 
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
 export async function startPostgres(): Promise<PostgresContainer> {
   const id = docker(['run', '-d', '--rm', '-e', 'POSTGRES_PASSWORD=peaket-test', '-e', 'POSTGRES_DB=peaket', '-p', '127.0.0.1::5432', POSTGRES_IMAGE]);

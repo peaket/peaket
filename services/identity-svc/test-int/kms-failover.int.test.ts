@@ -11,7 +11,7 @@ import { KmsTotpSeedCipher } from '../src/modules/admin/adapters/kms-totp-seed-c
 import { Pbkdf2AdminPasswords } from '../src/modules/admin/adapters/pbkdf2-admin-passwords.js';
 
 const MOTO_IMAGE = 'motoserver/moto:5.2.5';
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const creds = { accessKeyId: 'test', secretAccessKey: 'test' };
 /** 응답하지 않는 서울(닫힌 포트) */
 const DEAD = 'http://127.0.0.1:1';

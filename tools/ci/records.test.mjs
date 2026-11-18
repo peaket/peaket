@@ -1,7 +1,7 @@
 // tools/ci/records.mjs 시험(ADR-0190 결정 3: 기록은 한 번만 쓰고 공용 표는 스크립트가 만든다)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
@@ -416,4 +416,153 @@ test('CRLF로 저장된 문서도 LF 글로 다루고 LF로 쓴다', () => {
   const out = readFileSync(join(dir, 'docs/wbs/wbs.csv'), 'utf8');
   assert.equal(out.includes('\r'), false);
   assert.ok(out.includes('"FR-010, ADR-0014",진행,0.5'));
+});
+
+// ---------- 기록 크기 점검(ADR-0283 결정 1, 계획 docs/review/plans/W10-guards.md G1) ----------
+// 상한 40KB = 40,960바이트(40×1,024). 줄 끝을 LF로 바꾼 UTF-8 바이트 수가 이 값을 넘으면 걸리고, 이 값 그대로는 통과다.
+// 값은 정본(ADR-0283 결정 1)에서 숫자로 적는다(records.mjs의 상수를 가져오지 않는다).
+const LIMIT = 40960;
+const PROGRESS = 'docs/PROGRESS.md';
+const LANES = ['docs/lanes/lane1.md', 'docs/lanes/lane2.md', 'docs/lanes/lane3.md'];
+const SIZE_FILES = [PROGRESS, ...LANES];
+
+// 한글(3바이트)과 영문을 섞어 LF 줄 끝으로 정확히 bytes바이트인 글을 만든다
+function sized(bytes) {
+  const line = '- 진행 기록 한 줄 abc\n';
+  let s = '# 진행\n';
+  while (Buffer.byteLength(s + line) <= bytes - 1) s += line;
+  s += 'a'.repeat(bytes - 1 - Buffer.byteLength(s)) + '\n';
+  assert.equal(Buffer.byteLength(s), bytes);
+  assert.equal(s.includes('\r'), false);
+  return s;
+}
+
+function put(dir, path, text) {
+  const full = join(dir, path);
+  mkdirSync(join(full, '..'), { recursive: true });
+  writeFileSync(full, text);
+}
+
+// 기록 표를 먼저 맞춘 저장소에 네 크기 파일을 작게 둔다(over에 든 파일만 바꿔 쓴다)
+function sizedRepo(over = {}, { align = true } = {}) {
+  const dir = seedRepo();
+  if (align) assert.equal(cli(dir).status, 0);
+  for (const f of SIZE_FILES) put(dir, f, sized(1000));
+  for (const [f, text] of Object.entries(over)) put(dir, f, text);
+  return dir;
+}
+
+const lines = (s) => s.split(/\r?\n/).filter(Boolean);
+
+test('RS-01 상한 그대로(40,960바이트)는 통과한다', () => {
+  const dir = sizedRepo({ [PROGRESS]: sized(LIMIT) });
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout.includes(PROGRESS), false, r.stdout);
+});
+
+test('RS-02 상한을 1바이트 넘으면(40,961바이트) --check가 그 파일과 바이트 수를 찍고 1로 끝나며 파일을 고치지 않는다', () => {
+  const text = sized(LIMIT + 1);
+  const dir = sizedRepo({ [PROGRESS]: text });
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.ok(lines(r.stdout).some((l) => l.includes(PROGRESS) && l.includes('40961')), r.stdout);
+  assert.equal(readFileSync(join(dir, PROGRESS), 'utf8'), text);
+});
+
+for (const lane of LANES) {
+  test(`RS-03 갈래 파일도 본다: ${lane}만 상한을 넘으면 그 파일만 찍는다`, () => {
+    const dir = sizedRepo({ [lane]: sized(LIMIT + 1) });
+    const r = cli(dir, '--check');
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.ok(lines(r.stdout).some((l) => l.includes(lane) && l.includes('40961')), r.stdout);
+    for (const other of SIZE_FILES.filter((f) => f !== lane)) assert.equal(r.stdout.includes(other), false, `${other}: ${r.stdout}`);
+  });
+}
+
+test('RS-04 정리 목록 파일과 보관 파일은 크기를 보지 않는다', () => {
+  const big = sized(100000);
+  const dir = sizedRepo({
+    'docs/lanes/lane1-cleanup.md': big,
+    'docs/lanes/lane2-cleanup.md': big,
+    'docs/lanes/lane3-cleanup.md': big,
+    'docs/progress-archive.md': big,
+  });
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout.includes('cleanup'), false, r.stdout);
+  assert.equal(r.stdout.includes('progress-archive'), false, r.stdout);
+});
+
+test('RS-05 글자 수가 아니라 UTF-8 바이트 수로 잰다(한글 13,654자 = 40,962바이트)', () => {
+  const text = '가'.repeat(13654);
+  assert.ok(text.length < LIMIT);
+  assert.equal(Buffer.byteLength(text), 40962);
+  const dir = sizedRepo({ [PROGRESS]: text });
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.ok(lines(r.stdout).some((l) => l.includes(PROGRESS) && l.includes('40962')), r.stdout);
+});
+
+test('RS-06 CRLF는 LF로 바꿔 잰다(LF로 40,960이면 통과, 40,961이면 막음)', () => {
+  const atLimit = sized(LIMIT).replaceAll('\n', '\r\n');
+  assert.ok(Buffer.byteLength(atLimit) > LIMIT);
+  const ok = cli(sizedRepo({ [PROGRESS]: atLimit }), '--check');
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.equal(ok.stdout.includes(PROGRESS), false, ok.stdout);
+
+  const over = cli(sizedRepo({ [PROGRESS]: sized(LIMIT + 1).replaceAll('\n', '\r\n') }), '--check');
+  assert.equal(over.status, 1, over.stdout + over.stderr);
+  assert.ok(lines(over.stdout).some((l) => l.includes(PROGRESS) && l.includes('40961')), over.stdout);
+});
+
+test('RS-07 기록 표와 크기 둘 다 걸리면 --check가 둘 다 찍고 파일은 그대로 둔다', () => {
+  const text = sized(LIMIT + 1);
+  const dir = sizedRepo({ [PROGRESS]: text }, { align: false });
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.ok(lines(r.stdout).some((l) => l.includes('R-265')), r.stdout);
+  assert.ok(lines(r.stdout).some((l) => l.includes(PROGRESS) && l.includes('40961')), r.stdout);
+  assert.equal(readFileSync(join(dir, PROGRESS), 'utf8'), text);
+  assert.equal(readFileSync(join(dir, 'docs/review/consistency-review.md'), 'utf8'), REVIEW);
+});
+
+test('RS-08 걸린 파일을 모두 찍는다(PROGRESS와 lane2가 각각 다른 줄에)', () => {
+  const dir = sizedRepo({ [PROGRESS]: sized(LIMIT + 1), 'docs/lanes/lane2.md': sized(LIMIT + 1) });
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  const out = lines(r.stdout);
+  const p = out.findIndex((l) => l.includes(PROGRESS));
+  const l2 = out.findIndex((l) => l.includes('docs/lanes/lane2.md'));
+  assert.ok(p >= 0 && l2 >= 0 && p !== l2, r.stdout);
+});
+
+test('RS-09 맞추기(인자 없음)는 크기로 멈추지 않고 기록 표를 맞추며 표준 오류에 경고만 찍는다', () => {
+  const text = sized(LIMIT + 1);
+  const dir = sizedRepo({ [PROGRESS]: text }, { align: false });
+  const r = cli(dir);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(readFileSync(join(dir, 'docs/review/consistency-review.md'), 'utf8').includes(ROW_265));
+  assert.ok(lines(r.stderr).some((l) => l.startsWith('경고:') && l.includes(PROGRESS)), r.stderr);
+  assert.equal(readFileSync(join(dir, PROGRESS), 'utf8'), text);
+});
+
+test('RS-10 없는 크기 파일은 건너뛰고 나머지는 본다 / 네 파일이 모두 없으면 통과', () => {
+  const dir = sizedRepo({ 'docs/lanes/lane1.md': sized(LIMIT + 1) });
+  rmSync(join(dir, 'docs/lanes/lane2.md'));
+  const r = cli(dir, '--check');
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.ok(lines(r.stdout).some((l) => l.includes('docs/lanes/lane1.md') && l.includes('40961')), r.stdout);
+
+  const none = seedRepo();
+  assert.equal(cli(none).status, 0);
+  const n = cli(none, '--check');
+  assert.equal(n.status, 0, n.stdout + n.stderr);
+});
+
+test('RS-11 --next-r는 크기를 보지 않는다', () => {
+  const dir = sizedRepo({ [PROGRESS]: sized(LIMIT + 1) }, { align: false });
+  const r = cli(dir, '--next-r');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout.trim(), 'R-266');
 });

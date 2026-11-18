@@ -54,7 +54,7 @@ describe.runIf(process.env.PEAKET_LOCAL_STACK === '1')('로컬 파트너 스택'
   test('파트너 콘솔이 붙을 수 있게 띄워 둔다', async () => {
     if (existsSync(STOP)) await rm(STOP);
     try {
-      execFileSync('docker', ['rm', '-f', '-v', CONTAINER], { stdio: 'ignore' });
+      execFileSync('docker', ['rm', '-f', '-v', CONTAINER], { stdio: 'ignore', timeout: 300_000 });
     } catch {
       // 남은 컨테이너가 없다
     }

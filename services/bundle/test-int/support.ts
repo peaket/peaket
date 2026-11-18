@@ -12,7 +12,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const SERVICES_DIR = join(HERE, '..', '..');
 export const REPO = join(SERVICES_DIR, '..');
 
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const mappedPort = (id: string, port: number) => {
   const mapped = docker(['port', id, `${port}/tcp`]).split('\n')[0]!;
   return Number(mapped.slice(mapped.lastIndexOf(':') + 1));

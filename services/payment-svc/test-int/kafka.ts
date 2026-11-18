@@ -7,7 +7,7 @@ import { createKafkaAdmin, createKafkaConsumer, type KafkaConsumer } from '@peak
 
 export const KAFKA_IMAGE = 'apache/kafka:3.9.2';
 
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
 /** 빈 포트 하나(잡았다 바로 놓는다) */
 export async function freePort(): Promise<number> {

@@ -30,7 +30,7 @@ const MOCK_PORT = PORT + 2;
 /** 공연 상세는 가짜 API 고정 자료의 회차(seed-css/apps.mjs와 같다) */
 const DETAIL = '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 
-const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const cli = (...a) => docker(['exec', NAME, 'valkey-cli', '-p', String(VALKEY_PORT), ...a]);
 /** 이 PC에서 그 포트가 비었는지 */
 const isFree = (port) =>

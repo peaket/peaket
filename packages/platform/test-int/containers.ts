@@ -11,7 +11,7 @@ import { createKafkaAdmin } from '../src/stream-worker.js';
 export const KAFKA_IMAGE = 'apache/kafka:3.9.2';
 export const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
 
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -147,7 +147,7 @@ export async function startKafka(o: { oauth?: boolean } = {}): Promise<KafkaCont
       const out = new Map<number, number>();
       let text = '';
       try {
-        text = (await promisify(execFile)('docker', ['exec', id, '/opt/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', 'localhost:9094', '--describe', '--group', group], { encoding: 'utf8' })).stdout;
+        text = (await promisify(execFile)('docker', ['exec', id, '/opt/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', 'localhost:9094', '--describe', '--group', group], { encoding: 'utf8', timeout: 300_000 })).stdout;
       } catch {
         return out;
       }
@@ -162,7 +162,7 @@ export async function startKafka(o: { oauth?: boolean } = {}): Promise<KafkaCont
       const out = new Map<number, string>();
       let text = '';
       try {
-        text = (await promisify(execFile)('docker', ['exec', id, '/opt/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', 'localhost:9094', '--describe', '--group', group], { encoding: 'utf8' })).stdout;
+        text = (await promisify(execFile)('docker', ['exec', id, '/opt/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', 'localhost:9094', '--describe', '--group', group], { encoding: 'utf8', timeout: 300_000 })).stdout;
       } catch {
         return out;
       }

@@ -20,7 +20,7 @@ const HOUR_S = 3_600;
 const CMD_LIMIT_MS = 100 + 50;
 const NET = `lane2-bat170t-net-${process.pid}`;
 const NAMES = [1, 2, 3, 4, 5, 6].map((i) => `lane2-bat170t-k${i}-${process.pid}`);
-const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const tryDocker = (...args) => {
   try {
     return docker(...args);

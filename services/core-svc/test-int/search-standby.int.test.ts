@@ -14,7 +14,7 @@ import { event, place, production, promoter } from '../src/modules/catalog/adapt
 import { DrizzleSearchReadModel } from '../src/modules/catalog/index.js';
 import { POSTGRES_IMAGE } from './postgres.js';
 
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const tag = `${process.env.PEAKET_TEST_CONTAINER_PREFIX ?? 'bat165-'}standby-${Math.random().toString(36).slice(2, 8)}`;
 const NET = `${tag}-net`;
 const PRIMARY = `${tag}-primary`;

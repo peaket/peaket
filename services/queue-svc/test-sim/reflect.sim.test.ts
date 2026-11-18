@@ -35,7 +35,7 @@ const WARMUP_S = 15;
 /** 끝나기 전 이 시간 안에 넘은 번호는 세지 않는다(볼 기회가 모자라 잘리지 않게) */
 const TAIL_S = 3;
 const POLLER_PROCS = 4;
-const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const q = (xs: number[], p: number) => {
   if (xs.length === 0) return null;

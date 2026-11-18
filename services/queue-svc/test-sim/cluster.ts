@@ -4,7 +4,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { VALKEY_IMAGE } from '../test-int/valkey.js';
 
-const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const tryDocker = (...args: string[]) => {
   try {
     return docker(...args);
@@ -83,7 +83,7 @@ export async function simCluster(): Promise<SimCluster> {
     pause: (node) => void docker('pause', node),
     // 이미 풀렸으면 그대로 둔다(정리에서 한 번 더 부른다)
     unpause: (node) => void tryDocker('unpause', node),
-    dockerAsync: (...args) => new Promise<void>((res) => execFile('docker', args, () => res())),
+    dockerAsync: (...args) => new Promise<void>((res) => execFile('docker', args, { timeout: 300_000 }, () => res())),
     down: simDown,
   };
 }

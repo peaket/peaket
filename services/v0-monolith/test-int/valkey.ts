@@ -5,7 +5,7 @@ import { createClient } from 'redis';
 
 export const VALKEY_IMAGE = 'valkey/valkey:8.1-alpine';
 
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
 export interface ValkeyContainer {
   url: string;

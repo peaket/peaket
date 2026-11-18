@@ -21,7 +21,7 @@ import { agencyResult, kit, newKey, testAgency } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const MOTO_IMAGE = 'motoserver/moto:5.2.5';
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const creds = { accessKeyId: 'test', secretAccessKey: 'test' };
 
 let pg: PostgresContainer;

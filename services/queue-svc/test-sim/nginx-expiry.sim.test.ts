@@ -15,7 +15,7 @@ const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '
 const SIM = join(ROOT, '.cache', 'peaket-sim');
 const NGINX_IMAGE = 'nginx:1.27-alpine';
 const SECONDS = 10;
-const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function run(mode: 'next' | 'current') {

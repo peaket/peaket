@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { KmsSeedSealer, kmsSealClient, seedSealerFromEnv } from '../src/modules/entry/adapters/kms-seed-sealer.js';
 
 const MOTO_IMAGE = 'motoserver/moto:5.2.5';
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const creds = { accessKeyId: 'test', secretAccessKey: 'test' };
 let moto: string;
 let endpoint: string;

@@ -7,7 +7,7 @@ export const POSTGRES_IMAGE = 'postgres:18-alpine';
 export const DATABASES = ['purchase', 'payment', 'ticket', 'bare'] as const;
 export type DbName = (typeof DATABASES)[number];
 
-const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
 export interface PostgresServer {
   url(db: DbName): string;

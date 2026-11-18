@@ -181,11 +181,24 @@
 
 ## 실패 확인
 
-(시험 담당이 채운다: 돌린 명령, 실패한 시험 수, 실패 까닭. 위 5대로 RS는 구현 전 트리에서, DT-13은 구현 커밋 트리에서 도우미를 고치기 전에.)
+2026-11-18 시험 담당 `w10-guards-test-bd3092cd`가 돌렸다. 복사한 시험 파일은 돌린 뒤 구현 전 트리에서 지웠다(`git status` 깨끗함).
+
+- **RS(구현 전 트리 `D:/ticketpass-w10-base`, `55216411`)**: `tools/ci/records.test.mjs`를 복사해 `node --test tools/ci/records.test.mjs`. 47개 가운데 10개 실패, 37개 통과. 실패한 것은 RS-02, RS-03(사례 셋 모두), RS-05, RS-06, RS-07, RS-08, RS-09, RS-10이다. 까닭은 모두 크기 점검이 없어서다: `--check`가 크기를 넘은 파일에도 0으로 끝나거나(RS-02·03·05·06 뒤 사례·08·10 앞 사례), 기록 표 줄만 찍고 `docs/PROGRESS.md` 줄이 없거나(RS-07), 맞추기가 표준 오류에 `경고:` 줄을 찍지 않는다(RS-09). 통과한 RS-01·RS-04·RS-11은 위 5가 적은 대로 구현 전에도 통과하는 것이다(RS-06 앞 사례와 RS-10 뒤 사례도 통과하지만 같은 시험의 뒤·앞 사례가 실패해 시험 단위로는 실패로 셌다). 기존 시험 34개는 그대로 통과.
+- **DT(구현 전 트리)**: `tools/ci/check-docker-timeouts.test.mjs`를 복사해 돌리면 `check-docker-timeouts.mjs`가 없어 모듈을 찾지 못하고(`ERR_MODULE_NOT_FOUND`) 파일 전체가 실패 1로 끝난다. 실행조차 안 되는 실패라 세지 않는다(14개 모두 셈 밖).
+- **DT-13(구현 커밋 `f4f5c2ca` 트리, 도우미 고치기 전)**: `node --test tools/ci/check-docker-timeouts.test.mjs` → 14개 가운데 DT-13 하나만 실패. 점검이 끝 코드 1과 마지막 줄 `막음: 시험 파일 1078개, Docker 호출 48곳, 문제 48건`을 냈고, 막은 곳은 위 3의 목록(파일 41개·호출 48곳)과 파일·줄까지 같았다. 이것이 G3의 실패 확인이다.
+- **DT-14(구현 커밋 트리에서 `tools-check.yml`의 점검 줄을 잠시 지움, 커밋하지 않고 되돌림)**: `node --test --test-name-pattern="^DT-14" tools/ci/check-docker-timeouts.test.mjs` → 실패 1.
+- **손으로 넣은 틀린 구현(스크립트·시험·`git-fixture.mjs`를 임시 폴더에 복사해 그 사본만 바꿈, DT-01~12만 돌림)**: M11(`timeout` 낱말만 있으면 통과) → DT-05 실패. M12(상한 600,000) → DT-05 실패. M13(`execFileSync`만 찾음) → DT-03·DT-06 실패. M14(글 조각 속 괄호도 셈) → DT-04 실패. M15 앞(`test-int` 폴더만 봄) → DT-07 실패. M15 뒤(호출 0곳을 통과로) → DT-10 실패. 원본 사본은 12개 모두 통과. 여섯 모두 잡혔다.
 
 ## 시험 결과
 
-(시험 담당이 채운다: 구현 커밋 위에서의 결과. 리뷰 반영 구현의 결과는 구현 담당이 그 커밋에 적는다.)
+2026-11-18 시험 담당 `w10-guards-test-bd3092cd`, 구현 커밋 `f4f5c2ca` 위에 이 시험 커밋의 바뀐 파일을 얹은 트리(`D:/ticketpass-w10`)에서 돌렸다.
+
+- `node --test tools/ci/check-docker-timeouts.test.mjs`(새 파일, DT-01~14): 14개 모두 통과. `GITHUB_ACTIONS=true`로 돌려도 14개 통과(시험이 그 환경 변수를 떼고 DT-11만 켠다).
+- `node --test tools/ci/records.test.mjs`: 47개 모두 통과(기존 34개, 새 RS 13개. RS-03은 갈래 파일마다 하나씩 셋으로 나눴다).
+- `node --test tools/ci/changes.test.mjs`: 40개 모두 통과. `node --test tools/ci/check-workflows.test.mjs`: 47개 가운데 44개 통과, 3개 건너뜀(뿌리 개발 의존성 `yaml`이 이 PC에 없어서 건너뛰는 시험, CI는 설치 뒤 돈다), 실패 0.
+- G3: 위 3의 목록 파일 41개·호출 48곳의 옵션에 `timeout: 300_000`을 넣었다(줄마다 한 곳씩, 다른 글자는 그대로). 꼴은 넷이다: `stdio` 배열 뒤(`docker` 도우미 함수 40곳), `promisify(execFile)(…, { encoding: 'utf8', timeout: 300_000 })`(6곳), `{ stdio: 'ignore', timeout: 300_000 }`(`services/core-svc/test-int/local-partner-stack.int.test.ts`), 옵션이 없던 `execFile('docker', args, { timeout: 300_000 }, () => res())`(`services/queue-svc/test-sim/cluster.ts` 86줄). 목록에 없는 곳은 나오지 않았다. 넣은 뒤 `node tools/ci/check-docker-timeouts.mjs` → 끝 코드 0, `통과: 시험 파일 1078개, Docker 호출 48곳`. TS 도우미의 형 검사와 Docker를 띄우는 통합 시험은 이 PC에서 돌리지 않았다(CI 몫, 지시서).
+- `node tools/ci/check-workflows.mjs`: `통과: 워크플로 19개`. `python -I -X utf8 tools/doc-check/check_all.py`: 오류 0, 경고 4(이 묶음과 상관없는 기존 경고).
+- 구현 결함 의심: 없음. 계획과 다르게 구현한 두 점(주석 안의 `timeout` 글을 가림, 범위 밖 값의 까닭에 적은 꼴과 정수를 함께 적음)은 계획의 단언과 어긋나지 않는다(DT-05는 `300_001`·`300001` 어느 꼴이든 받는다).
 
 ## 리뷰
 
@@ -205,5 +218,6 @@
 | --- | --- | --- | --- | --- |
 | plan | w10-guards-plan-165e372c | claude-opus-5-5 | 2026-11-18T14:20+09:00 | 2026-11-18T14:55+09:00 |
 | impl | w10-guards-impl-0bbaa2ef | claude-opus-5-5 | 2026-11-18T14:43+09:00 | 2026-11-18T14:50+09:00 |
+| test | w10-guards-test-bd3092cd | claude-opus-5-5 | 2026-11-18T14:56+09:00 | 2026-11-18T15:12+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행(역할·세션 ID·모델·시작·끝)을 더한다. 세션 ID는 구현 `w10-guards-impl-0bbaa2ef`, 시험 `w10-guards-test-bd3092cd`, 리뷰 `w10-guards-review-79646c1e`, 검증 `w10-guards-verify-c4a72407`이다(지시서). 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.

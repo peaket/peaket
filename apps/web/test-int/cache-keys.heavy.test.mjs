@@ -24,7 +24,7 @@ const MOCK_PORT = WEB_PORT + 2;
 /** 가짜 API 고정 자료에 있는 회차(대조군) */
 const KNOWN = '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 
-const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const tryDocker = (...args) => {
   try {
     return docker(...args);

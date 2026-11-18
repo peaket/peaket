@@ -40,7 +40,7 @@ function caseVariants(id, n) {
   return [...out];
 }
 
-const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const docker = (...args) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 const tryDocker = (...args) => {
   try {
     return docker(...args);
