@@ -190,22 +190,22 @@ export class ShopProblem extends Error {
 const unprocessable = (type: string, title: string) => new ShopProblem(type, 422, title);
 const conflict = (type: string, title: string) => new ShopProblem(type, 409, title);
 
-export const merchOrderMixed = () => unprocessable('merch-order-mixed', '한 주문에는 한 판매자·한 수령 방식의 상품만 담습니다');
-export const merchProductUnavailable = () => unprocessable('merch-product-unavailable', '지금 주문할 수 없는 상품입니다');
-export const merchOptionsInvalid = () => unprocessable('merch-options-invalid', '고른 옵션이 상품에 맞지 않습니다');
-export const merchQuantityLimitExceeded = () => unprocessable('merch-quantity-limit-exceeded', '계정당 살 수 있는 수량을 넘었습니다');
+export const merchOrderMixed = () => unprocessable('merch-order-mixed', '판매자나 수령 방식이 다른 상품은 한 주문에 담을 수 없습니다');
+export const merchProductUnavailable = () => unprocessable('merch-product-unavailable', '지금 이 방법으로 살 수 없는 상품입니다');
+export const merchOptionsInvalid = () => unprocessable('merch-options-invalid', '고를 수 없는 옵션입니다');
+export const merchQuantityLimitExceeded = () => unprocessable('merch-quantity-limit-exceeded', '한 계정이 살 수 있는 수량을 넘었습니다');
 export const pickupSlotUnavailable = () => unprocessable('pickup-slot-unavailable', '고를 수 없는 수령 시간대입니다');
-export const consentRequired = () => unprocessable('consent-required', '배송 정보 판매자 제공 동의가 필요합니다');
-export const consentVersionOutdated = () => unprocessable('consent-version-outdated', '동의 문안이 바뀌었습니다. 다시 동의해 주세요');
-export const merchSoldOut = () => conflict('merch-sold-out', '품절된 상품이 있습니다');
-export const merchOrderInProgress = () => new ShopProblem('merch-order-in-progress', 409, '같은 상품의 다른 주문을 만드는 중입니다', 1);
-export const orderExpired = () => conflict('order-expired', '결제하지 않아 주문이 만료되었습니다');
-export const paymentAlreadyAccepted = () => conflict('payment-already-accepted', '이미 결제를 접수한 주문입니다');
+export const consentRequired = () => unprocessable('consent-required', '동의가 필요합니다');
+export const consentVersionOutdated = () => unprocessable('consent-version-outdated', '동의 문안이 바뀌었습니다. 다시 확인해 주세요');
+export const merchSoldOut = () => conflict('merch-sold-out', '품절된 상품입니다');
+export const merchOrderInProgress = () => new ShopProblem('merch-order-in-progress', 409, '같은 상품의 다른 주문을 처리하고 있습니다. 잠시 뒤 다시 시도해 주세요', 1);
+export const orderExpired = () => conflict('order-expired', '결제하지 않아 끝난 주문입니다');
+export const paymentAlreadyAccepted = () => conflict('payment-already-accepted', '이 주문의 결제를 이미 접수했습니다');
 export const paymentAttemptsExceeded = () => conflict('payment-attempts-exceeded', '결제 시도 횟수를 넘었습니다');
-export const paymentAttemptMismatch = () => conflict('payment-attempt-mismatch', '결제 시도가 맞지 않습니다');
+export const paymentAttemptMismatch = () => conflict('payment-attempt-mismatch', '결제 시도와 맞지 않습니다. 결제를 다시 시작해 주세요');
 export const paymentNotAccepted = () => conflict('payment-not-accepted', '아직 결제를 접수하지 않은 주문입니다');
-export const pgUnavailable = (retryAfterSeconds = 2) => new ShopProblem('pg-unavailable', 503, '결제사를 잠시 쓸 수 없습니다', retryAfterSeconds);
-export const dependencyUnavailable = (retryAfterSeconds = 1) => new ShopProblem('dependency-unavailable', 503, '잠시 뒤 다시 시도해 주세요', retryAfterSeconds);
+export const pgUnavailable = (retryAfterSeconds = 2) => new ShopProblem('pg-unavailable', 503, '결제를 잠시 시작할 수 없습니다', retryAfterSeconds);
+export const dependencyUnavailable = (retryAfterSeconds = 1) => new ShopProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds);
 /** 금액 불일치는 이름 없는 400(about:blank)이다(티켓 결제 접수와 같다) */
 export const amountMismatch = () => new ShopProblem('amount_mismatch', 400, '결제 금액이 주문 금액과 다릅니다');
 /** 이름 없는 400(요청 오류) */
