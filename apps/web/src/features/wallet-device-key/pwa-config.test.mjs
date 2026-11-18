@@ -42,14 +42,40 @@ test('HOT-390 회전 QR 부품은 화면에 붙어 있는 동안 QR 잠금을 �
   assert.match(index, /from '\.\/update-hold'/);
 });
 
-test('Serwist 경로는 /~offline과 /my/tickets을 미리 저장하고 Service-Worker-Allowed를 준다', () => {
+// BAT-171 시험 이의 7(시험 담당 l2-bat171-test): 워커 묶기를 빌드 때(scripts/service-worker.mjs)로 옮겼다(이의 6, standalone 서버가 요청 때 다시 묶다 실패).
+// 미리 저장 목록은 그 모듈이 내놓는 값을 바깥 경계로 보고(판 값은 상수와 다른 두 자리 값으로), 경로 처리기는 다시 묶지 않는지 소스로 본다
+test('HOT-390 Serwist 워커는 빌드 때 /~offline과 /my/tickets을 그 배포 판으로 미리 저장하게 묶는다', async () => {
+  const { serwistOptions, swRevision } = await import('../../../scripts/service-worker.mjs');
+  const o = serwistOptions({ PEAKET_DEPLOYMENT_ID: 'deploy-10', GITHUB_SHA: 'sha-9' });
+  assert.equal(o.swSrc, 'app/sw.ts');
+  assert.equal(o.useNativeEsbuild, true);
+  assert.deepEqual(o.additionalPrecacheEntries, [
+    { url: '/~offline', revision: 'deploy-10' },
+    { url: '/my/tickets', revision: 'deploy-10' },
+  ]);
+  // 판: 배포 ID > 커밋 > 개발 값
+  assert.equal(swRevision({ PEAKET_DEPLOYMENT_ID: 'deploy-10', GITHUB_SHA: 'sha-9' }), 'deploy-10');
+  assert.equal(swRevision({ GITHUB_SHA: 'sha-9' }), 'sha-9');
+  assert.equal(swRevision({}), 'wallet-dev');
+});
+
+test('HOT-390 묶은 워커 글 끝의 소스 맵 링크 줄을 지운다(숨김 소스 맵, docs/frontend.md §5.18)', async () => {
+  const { stripSourceMapLink } = await import('../../../scripts/service-worker.mjs');
+  assert.equal(stripSourceMapLink('self.a=1;\n//# sourceMappingURL=sw.js.map\n'), 'self.a=1;\n');
+  assert.equal(stripSourceMapLink('self.a=1;\n//# sourceMappingURL=sw.js.map'), 'self.a=1;\n');
+  // 끝 줄이 아닌 같은 글은 건드리지 않는다
+  assert.equal(stripSourceMapLink('// sourceMappingURL 설명\nself.a=1;'), '// sourceMappingURL 설명\nself.a=1;\n');
+});
+
+test('HOT-390 Serwist 경로는 빌드 때 묶은 파일만 읽고 요청 때 다시 묶지 않으며 Service-Worker-Allowed를 준다', () => {
   const route = read('app/serwist/[path]/route.ts');
-  assert.match(route, /additionalPrecacheEntries/);
-  assert.match(route, /url: '\/~offline'/);
-  assert.match(route, /url: '\/my\/tickets'/);
+  // 요청 때 app/sw.ts를 다시 묶는 길이 없다(standalone 폴더에는 원본이 없다, BAT-171 시험 이의 6)
+  const code = route.replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(code, /@serwist\/turbopack|createSerwistRoute|esbuild/, '경로 처리기가 요청 때 워커를 묶는다');
+  assert.match(route, /from '(?:\.\.\/)+scripts\/service-worker\.mjs'/, '경로 처리기가 빌드 때 쓴 워커 폴더·파일 이름을 같은 모듈에서 읽지 않는다');
+  assert.match(route, /\bSW_DIR\b/);
   assert.match(route, /'use cache'/);
   assert.match(route, /Service-Worker-Allowed': '\/my\/tickets'/);
-  assert.match(route, /useNativeEsbuild: true/);
 });
 
 test('오프라인 대체 화면이 있고 서비스 워커 범위는 /my/tickets이며 루트 문서에는 없다', () => {
