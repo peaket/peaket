@@ -42,6 +42,10 @@ message GetVerificationStatusResponse {
   // pid 키 전환 기간에만 채우는 옛 pid. 교체 직전에 받은 토큰(옛 pid만 실림)이 거부되지 않게 한다.
   // 전환이 끝나면 비운다(docs/features/identity.md §5, 추천 적용 2026-10-28, 기술 검토 높음-18).
   string previous_pid = 3;
+  // verified가 거짓이고 그 계정이 탈퇴 미룸(account.status WITHDRAWAL_PENDING, 정리 사유 WITHDRAWAL) 중이며 세션이 살아 있으면 true.
+  // 정리 사유 UNDER_14와 그 밖의 계정은 false다. 주문 생성은 이 값이 true면 403 대신 409 withdrawal-pending으로 답한다
+  // (docs/features/payment.md §2 '탈퇴 미룸 409', 추천 적용 2026-11-18, BAT-010 계획, ADR-0284).
+  bool withdrawal_pending = 4;
 }
 
 // 부르는 쪽: 소비자 웹 앱 서버(OIDC 클라이언트)만. 메시 신원 허용 목록 밖이면 PERMISSION_DENIED다.
