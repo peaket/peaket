@@ -17,8 +17,8 @@ import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleCha
 import { type CaseRequestPublisher, GetVerificationAppeal, GrpcReverification, KafkaCaseRequests, LocalCaseRequests, PromVerificationSignals, queuePackage, ResolveVerificationAppeal, verificationAppealHandlers } from './modules/verification/index.js';
 
 const SERVICE = 'queue-svc';
-/** 업무 gRPC 포트 [가정](trust-svc·identity-svc와 같은 기본값, BUILD_ORDER BAS-080이 공용 설정으로 옮긴다) */
-export const DEFAULT_GRPC_PORT = 50051;
+/** 업무 gRPC 포트 기본값 [가정]. 공용 설정(PEAKET_GRPC_PORT, packages/platform config)의 값이다(BUILD_ORDER BAS-080) */
+export { DEFAULT_GRPC_PORT } from '@peaket/platform';
 
 export interface StartOptions {
   /** 이 서비스의 환경 값(시작 파일은 process.env, 합본은 공통 값과 이 서비스의 환경 파일을 합친 값) */
@@ -36,8 +36,6 @@ export interface StartedService {
 
 export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
-  const grpcPort = Number(env.PEAKET_GRPC_PORT ?? DEFAULT_GRPC_PORT);
-  if (!(Number.isInteger(grpcPort) && grpcPort > 0 && grpcPort <= 65535)) throw new Error(`PEAKET_GRPC_PORT가 틀렸다: ${env.PEAKET_GRPC_PORT}`);
   // 대기열 Redis: 로컬·CI는 단일 노드 주소, 운영은 클러스터 시작 노드 주소들(쉼표)
   const clusterUrls = (env.PEAKET_QUEUE_REDIS_CLUSTER_URLS ?? '')
     .split(',')
@@ -171,9 +169,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 열지 못하면(포트 겹침 등) 이미 연 서비스를 닫고 던진다(시작 실패, 합본도 같은 길로 끝난다)
   let grpc: Awaited<ReturnType<typeof startGrpcServer>>;
   try {
+    // 포트(PEAKET_GRPC_PORT, 기본 50051 [가정])와 부하 분산 프로필은 공용 설정이 읽는다(BUILD_ORDER BAS-080)
     grpc = await startGrpcServer({
       host: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
-      port: grpcPort,
+      port: service.config.grpcPort,
+      profile: service.config.grpcLbProfile,
+      metrics: service.metrics,
       services: [
         {
           definition: queuePackage().VerificationAppealService.service,

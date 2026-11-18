@@ -91,9 +91,12 @@ spec:
           env:
             {{- include "peaket.commonEnv" . | nindent 12 }}
             {{- range $k, $v := .Values.outboxRelay.env }}
+            {{- if ne $k "NODE_OPTIONS" }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+            {{- end }}
+            {{- include "peaket.diagnoseEnv" (dict "root" $ "resources" .Values.outboxRelay.resources "extra" .Values.outboxRelay.env.NODE_OPTIONS "where" "outboxRelay") | nindent 12 }}
           {{- if or .Values.secretEnvFrom .Values.outboxRelay.secretEnvFrom }}
           envFrom:
             {{- if .Values.secretEnvFrom }}
@@ -108,11 +111,13 @@ spec:
           securityContext: {{- include "peaket.containerSecurity" . | nindent 12 }}
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+            {{- include "peaket.diagnoseMounts" . | nindent 12 }}
             {{- with .Values.outboxRelay.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+        {{- include "peaket.diagnoseVolumes" (dict "resources" .Values.outboxRelay.resources "where" "outboxRelay") | nindent 8 }}
         {{- with .Values.outboxRelay.volumes }}
         {{- include "peaket.volumes" (dict "volumes" . "env" $.Values.env.PEAKET_ENV "where" "outboxRelay.volumes") | nindent 8 }}
         {{- end }}
