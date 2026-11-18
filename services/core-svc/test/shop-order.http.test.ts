@@ -560,3 +560,87 @@ describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
     expect(typeOf(late)).toContain('order-expired');
   });
 });
+
+// 검증(6a675242)이 놓친 틀린 구현을 잡는 시험(메모리 어댑터). 값은 정본에서: ADR-0300 결정 4(한도는 상품 ID마다 모든 줄 합 + PAID·결제 접수한 주문, 취소·환급 항목은 세지 않음,
+// 한정 상품은 상품마다 합한 수량으로 예약), ADR-0301 결정 4(고른 시간대는 주문 항목 상품 가운데 하나의 시간대), ADR-0300 결정 5(결제 접수는 READY 시도와 맞아야 함, 아니면 409)
+describe('검증 놓침 보강(P-T57 ③⑦, ASVS 2.3.1)', () => {
+  test('P-T57 ③⑦ 한정 상품을 옵션만 다른 두 줄(1개·1개)로 주문하면 예약 수량은 합 2이고 카운터는 5 − 2 = 3이다', async () => {
+    const p = product({ name: '한정 두 줄 예약', limitedQty: 5, stock: 5, attributes: { options: [{ name: '색상', values: ['빨강', '파랑'] }] } });
+    stock.setCounter(p.productId, 5);
+    const res = await pickupOrder(
+      randomUUID(),
+      [
+        { productId: p.productId, quantity: 1, options: { 색상: '빨강' } },
+        { productId: p.productId, quantity: 1, options: { 색상: '파랑' } },
+      ],
+      slot(p.productId),
+    );
+    expect(res.statusCode, res.payload).toBe(201);
+    const orderId = JSON.parse(res.payload).orderId as string;
+    const s = stock.slots.get(p.productId)!;
+    expect(s.resvQty.get(orderId)).toBe(2);
+    expect(s.stock).toBe(3);
+    expect(s.resv.has(orderId)).toBe(true);
+  });
+
+  test('P-T57 ⑦ 계정당 한도 2: PAID 2개 가운데 1개가 미수령 취소·환급된 뒤에는 1개 더 사면 201이고, 그다음 1개는 422 merch-quantity-limit-exceeded다', async () => {
+    const account = randomUUID();
+    const p = product({ name: '한도 2 취소 뒤', attributes: { perAccountLimit: 2 } });
+    const s = slot(p.productId);
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const r = await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], s);
+      expect(r.statusCode).toBe(201);
+      ids.push(JSON.parse(r.payload).orderId as string);
+    }
+    for (const id of ids) orders.orders.get(id)!.status = 'PAID';
+    // 둘째 주문의 항목이 미수령으로 취소된 뒤 환급됐다(I2·I16)
+    const item = [...orders.items.values()].find((i) => i.orderId === ids[1])!;
+    item.status = 'REFUNDED';
+    const more = await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], s);
+    expect(more.statusCode, more.payload).toBe(201);
+    orders.orders.get(JSON.parse(more.payload).orderId)!.status = 'PAID';
+    const over = await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], s);
+    expect(over.statusCode).toBe(422);
+    expect(typeOf(over)).toContain('merch-quantity-limit-exceeded');
+    // 취소(아직 환급 전, CANCELLED)도 세지 않는다
+    item.status = 'CANCELLED';
+    const firstItem = [...orders.items.values()].find((i) => i.orderId === ids[0])!;
+    firstItem.status = 'CANCELLED';
+    expect((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], s)).statusCode).toBe(201);
+  });
+
+  test('P-T57 ⑦ 고른 시간대가 주문 상품의 것이 아니면(같은 회차의 다른 상품 시간대) 주문 상품에 그 회차 시간대가 있어도 422 pickup-slot-unavailable다', async () => {
+    const mine = product({ name: '시간대 내 상품' });
+    const other = product({ name: '시간대 다른 상품' });
+    const mySlot = slot(mine.productId, { eventId: EVENT });
+    const otherSlot = slot(other.productId, { eventId: EVENT });
+    const writes = orders.writes;
+    const res = await pickupOrder(randomUUID(), [{ productId: mine.productId, quantity: 1 }], otherSlot);
+    expect(res.statusCode).toBe(422);
+    expect(typeOf(res)).toContain('pickup-slot-unavailable');
+    expect(orders.writes).toBe(writes);
+    // 대조군: 자기 상품의 시간대는 201
+    expect((await pickupOrder(randomUUID(), [{ productId: mine.productId, quantity: 1 }], mySlot)).statusCode).toBe(201);
+  });
+
+  test('P-T57 ⑦ 결제 접수 본문의 attemptId가 지금 READY 시도가 아니면(앞서 대체된 시도) 409 payment-attempt-mismatch이고 승인 명령을 보내지 않는다 [ASVS v5.0.0-2.3.1]', async () => {
+    const account = randomUUID();
+    const p = product({ name: '시도 대조' });
+    const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;
+    const first = JSON.parse((await post(account, `/v1/shop/orders/${orderId}/payments`, {})).payload);
+    const second = JSON.parse((await post(account, `/v1/shop/orders/${orderId}/payments`, {})).payload);
+    expect(second.attemptId).not.toBe(first.attemptId);
+    const amount = orders.orders.get(orderId)!.amount;
+    const confirms = payments.calls.confirm.length;
+    const res = await post(account, `/v1/shop/orders/${orderId}/payment-acceptance`, { pg: first.pg, paymentKey: `sim_${orderId.slice(0, 8)}`, amount, attemptId: first.attemptId });
+    expect(res.statusCode).toBe(409);
+    expect(typeOf(res)).toContain('payment-attempt-mismatch');
+    expect(payments.calls.confirm.length).toBe(confirms);
+    expect([...orders.attempts.values()].filter((a) => a.orderId === orderId && a.status === 'ACCEPTED')).toEqual([]);
+    expect(orders.orders.get(orderId)!.status).toBe('CREATED');
+    // 대조군: 지금 시도의 attemptId면 202
+    const ok = await post(account, `/v1/shop/orders/${orderId}/payment-acceptance`, { pg: second.pg, paymentKey: `sim_${orderId.slice(0, 8)}`, amount, attemptId: second.attemptId });
+    expect(ok.statusCode, ok.payload).toBe(202);
+  });
+});
