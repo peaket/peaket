@@ -203,7 +203,8 @@ workloads:
     namespace: queue
     podLabels: { app.kubernetes.io/name: queue-svc, app.kubernetes.io/component: service }
     ports:
-      rest: { port: 8080, callers: [ops-svc] }
+      # purchase-svc는 입장 토큰 공개키 묶음 GET /internal/jwks/admission.json을 5분마다 읽는다(docs/features/seat-hold.md §2, ADR-0288 결정 7·8, 묶음 BAT-057)
+      rest: { port: 8080, callers: [ops-svc, purchase-svc] }
       grpc:
         port: 50051
         services:

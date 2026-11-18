@@ -910,6 +910,7 @@ spec:
             principals:
               - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-queue-38f088e6
               - cluster.local/ns/core/sa/ops-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
       to:
         - operation:
             ports:

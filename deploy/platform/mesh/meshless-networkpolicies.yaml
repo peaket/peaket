@@ -654,6 +654,13 @@ spec:
             matchLabels:
               app.kubernetes.io/name: ops-svc
               app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: purchase-svc
+              app.kubernetes.io/component: service
       ports:
         - protocol: TCP
           port: 8080

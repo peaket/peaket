@@ -6,7 +6,7 @@ import { OpenPurchaseSession } from './application/open-purchase-session.js';
 import { EndPurchaseSession, type EndPurchaseSessionDeps } from './application/end-purchase-session.js';
 import { ReadSeatSnapshot } from './application/read-seat-snapshot.js';
 import { SessionSweeper } from './application/session-sweeper.js';
-import type { AdmissionKeys } from './domain/admission-token.js';
+import type { AdmissionKeys, AdmissionKeySource } from './domain/admission-token.js';
 import { MemorySeatMap } from './adapters/memory-seat-map.js';
 import { MemorySeatStore } from './adapters/memory-seat-store.js';
 import { RecordingHoldAttempts } from './adapters/recording-hold-attempts.js';
@@ -63,8 +63,8 @@ export interface AdmissionOptions {
   endedLog?: SessionEndedLog;
   /** 구매 세션 정리 색인(BUILD_ORDER PRF-138). endedLog와 함께 있고 저장소가 redis이면 정리 반복(SessionSweeper)을 만들어 내보낸다 */
   index?: SessionIndex;
-  /** 입장 토큰 공개키 묶음(PEAKET_ADMISSION_JWKS) */
-  keys: AdmissionKeys;
+  /** 입장 토큰 공개키 묶음: 정적 묶음(local·ci PEAKET_ADMISSION_JWKS)이나 주기 읽기(AdmissionJwksLoader, PEAKET_ADMISSION_JWKS_URL) */
+  keys: AdmissionKeys | AdmissionKeySource;
   /** 입장 토큰 발급자(PEAKET_ADMISSION_ISSUER) */
   issuer: string;
   /** 구매 세션을 끝낸 뒤 부를 고리(EndPurchaseSession onEnded, BUILD_ORDER PRF-172). 운영은 purchase DB가 있을 때 booking OrderExpiry.onSessionEnded를 잇는다 */

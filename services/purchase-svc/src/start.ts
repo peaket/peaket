@@ -16,7 +16,7 @@
 // purchase DB가 있으면 결제하지 않은 주문의 만료 판정(OrderExpiry, PRF-172, ADR-0107)을 만들어 구매 세션 종료·홀드 만료 고리에 꽂는다. 고리 전용 일반 풀(연결 4개 [가정], purchase-svc-order-expiry)을 쓰고
 // 지표 purchase_order_expir*·purchase_order_open_stale을 /metrics에 붙인다. 안전망 반복(OrderExpirySweep)은 릴레이 프로세스가 돈다.
 // 구매 세션은 좌석 Redis의 s:jti·s:session과 서버 고정 ECDH 개인키(PEAKET_PURCHASE_ECDH_KEY)로 확인한다(BUILD_ORDER PRF-136). 입장 토큰은 공개키 묶음
-// (PEAKET_ADMISSION_JWKS)과 발급자(PEAKET_ADMISSION_ISSUER)로 확인하고, 스냅샷 API가 입장 토큰의 첫 사용에 구매 세션을 연다(PRF-137).
+// (운영은 PEAKET_ADMISSION_JWKS_URL 주기 읽기, local·ci는 정적 PEAKET_ADMISSION_JWKS도, BAT-057)과 발급자(PEAKET_ADMISSION_ISSUER)로 확인하고, 스냅샷 API가 입장 토큰의 첫 사용에 구매 세션을 연다(PRF-137).
 // 좌석맵 판은 환경 값 PEAKET_SEATMAP_DIR 폴더의 {eventId}.json이다(docs/features/seat-hold.md §2 '운영 좌석맵 판'). 30초 [가정]마다 읽은 회차를 다시 읽는다.
 // purchase DB가 있으면 Kafka 소비자 둘(결제 결과 반영 trade.payments·홀드 원장 적재 trade.seats, BUILD_ORDER PRF-164, src/consumers.ts)을 듣기 시작한 뒤 켠다.
 // 두 소비자는 핫패스 풀과 따로 소비자 전용 일반 풀(연결 4개 [가정], purchase-svc-consumers)을 쓴다(밀린 사건을 한꺼번에 처리해도 홀드·주문 요청이 풀 대기 초과를 받지 않게).
@@ -201,7 +201,7 @@ import {
   JsonBehaviorSignals,
   SeatBehaviorReporter,
   type BehaviorSignals,
-  parseAdmissionJwks,
+  admissionKeysFromEnv,
   podIdFrom,
 } from './modules/inventory/index.js';
 
@@ -243,8 +243,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
     if (!v) throw new Error(`${name}가 없다(${what})`);
     return v;
   };
-  // 입장 토큰 공개키 묶음과 발급자(공개 값이라 설정에서 넣는다. 바꾸면 다시 시작한다, docs/features/seat-hold.md §2), 좌석맵 판 폴더
-  const admissionKeys = parseAdmissionJwks(need('PEAKET_ADMISSION_JWKS', '입장 토큰 공개키 묶음 JWKS JSON'));
+  // 입장 토큰 공개키 묶음과 발급자, 좌석맵 판 폴더(docs/features/seat-hold.md §2). 묶음은 운영이 queue-svc 묶음 주기 읽기(PEAKET_ADMISSION_JWKS_URL),
+  // local·ci는 정적 PEAKET_ADMISSION_JWKS도 받는다(두 값을 함께 두거나 local·ci 밖에서 주소가 없으면 시작하지 않는다, '입장 토큰 공개키 묶음 주기 읽기', BAT-057).
+  // 주기 읽기의 로거·지표는 서비스가 생긴 뒤 붙이고 그때 첫 읽기를 시작한다(준비 상태는 막지 않는다)
+  const { keys: admissionKeys, loader: admissionLoader } = admissionKeysFromEnv(env, { logger: { warn: (obj: object, msg: string) => log?.warn(obj, msg) } });
   const admissionIssuer = need('PEAKET_ADMISSION_ISSUER', '입장 토큰 발급자 iss');
   const seatMapDir = need('PEAKET_SEATMAP_DIR', '회차별 좌석맵 판 파일 {eventId}.json이 있는 폴더');
   // 판매 설정 사본(event_sale_config)을 core-svc 내부 HTTP 경로에서 읽는다(BAT-051). 주소가 없으면 파일 설정만 쓴다(로컬·CI).
@@ -600,6 +602,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
     purchaseSessions: sessions,
   });
   log = service.logger;
+  // 입장 토큰 공개키 묶음 주기 읽기: 지표를 붙이고 첫 읽기를 시작한다(기다리지 않는다. 받기 전의 서명 확인 요청은 1초까지 기다린 뒤 503이다)
+  if (admissionLoader) {
+    admissionLoader.register(service.metrics.registry);
+    void admissionLoader.start();
+  }
   for (const m of opsTokenWarnings) service.logger.warn({ event: 'purchase-ops-internal-token-missing' }, m);
   for (const m of fanReauthWarnings) service.logger.warn({ dep: 'identity-jwks', event: 'purchase-fan-reauth-jwks-missing' }, m);
   // DB 없이 뜬 것을 시작 로그에 남긴다(운영에서 비밀이 빠진 것을 결제 접수 연결(PRF-160) 전에도 알아채게, PRF-140 ① 리뷰)
@@ -957,7 +964,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       // 제어 gRPC 서버는 새 제어를 받지 않고 돌던 호출을 기다린다(ADR-0102의 우아한 종료)
       (controlServer?.close() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, '제어 gRPC 서버 닫기 실패')),
     ])
-      .then(() => Promise.all([sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
+      .then(() => Promise.all([admissionLoader?.stop(), sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
       .then(() => service.close())
       .finally(closeTelemetry)
       .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
