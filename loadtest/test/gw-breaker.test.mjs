@@ -1,6 +1,8 @@
 // 게이트웨이 차단 상한 측정 도구(gw sweep·capacity·ip-limit)의 단위 시험(BUILD_ORDER BAS-090, 묶음 BAT-056 계획 §3의 U1~U8, V-T43 ①②·SR-T13 ②).
 // 대상: loadtest/runner/gw.mjs(순수 함수)와 gw-run.mjs runGw(클러스터·발생기는 가짜 deps). 각 export의 JSDoc과 계획 '시험 이의' (가)~(라)의 입력 꼴을 명세로 본다.
 // 정본: docs/infra.md §4.1 '게이트웨이 차단 상한' '측정(V-T43)'(판정 둘, 무효를 통과로 세지 않음), docs/features/search.md §12 SR-T13 ② '측정 판정'(50 × (본구간 초 + 1) × 복제 수).
+// 묶음 BAT-058(HOT-405) 계획 docs/review/plans/BAT-058.md §7의 WU1~WU9(일꾼 수 확인·발생기 가중 평균·gw limits)는 파일 끝 절에 있다(정본 docs/infra.md §4.1 '값의 식'·
+// '측정(V-T43)' 끝 ①~⑤, ADR-0287 결정 6·7·10). 가짜 관리 포트는 통계 글에 실제 일꾼 수 줄(envoy_server_concurrency)을 덧붙인다(fakeDeps 머리).
 // 시험 값(3ms, 초당 50건, 이름표 peaket.io/sweep, 네임스페이스 envoy-gateway-system)은 코드 상수를 가져오지 않고 정본·계획 값을 적는다. 상한 값은 운영 첫 값과 다르게 고른다
 // (동시 7·보류 2 등. 값이 같으면 상수를 잘못 쓴 결함이 숨는다). 판정 함수만 보지 않고 부르는 쪽(runGw의 결과 파일·성능 장부 기록·끝 코드)이 판정을 쓰는지 본다.
 // 실행: node --test loadtest/test/gw-breaker.test.mjs
@@ -17,6 +19,8 @@ import { expandSweepSteps, judgeIpLimit, judgeSweepStep, limitsLoaded, parseClus
 import { runGw, waitLimits } from '../runner/gw-run.mjs';
 // 리뷰 반영(R1·R6)이 새로 내보낼 함수는 이름으로 찾는다(없으면 그 시험만 실패하고 파일 전체가 읽기에 실패하지 않게)
 import * as gwRun from '../runner/gw-run.mjs';
+// 묶음 BAT-058(HOT-405)이 새로 내보낸 함수도 이름으로 찾는다(구현 전 트리에서 파일이 읽히고 그 시험만 실패하게)
+import * as gw from '../runner/gw.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUN_MJS = join(HERE, '..', 'run.mjs');
@@ -380,11 +384,21 @@ function mergePatch(target, patch) {
 const EP_RESOURCES = new Set(['envoyproxy', 'envoyproxies', 'envoyproxies.gateway.envoyproxy.io', 'envoyproxy.gateway.envoyproxy.io']);
 /** 게이트웨이의 EnvoyProxy(gw-queue는 자기 것, 나머지 넷은 함께 쓰는 peaket-proxy) */
 const EP_OF = (gw) => (gw === 'gw-queue' ? 'gw-queue-proxy' : 'peaket-proxy');
+/**
+ * EnvoyProxy가 일꾼 수를 정하지 않았을 때 Envoy가 쓰는 일꾼 수(그 기계의 하드웨어 스레드 수, 이 PC 32: docs/infra.md §4.1 '첫 값'의 BAT-056 진단,
+ * ADR-0287 맥락). 가짜 관리 포트가 이 값을 준다
+ */
+const NODE_CPUS = 32;
+/** 관리 포트 통계의 실제 일꾼 수 줄(Envoy Prometheus 꼴, 꼬리표 없는 게이지는 `이름{} 값`. 묶음 BAT-058 구현 메모 1) */
+const concurrencyLine = (n) => `# TYPE envoy_server_concurrency gauge\nenvoy_server_concurrency{} ${n}\n`;
 
 /**
  * 가짜 deps. o: { pods, admin(pod, polls) → /clusters 글, load(call, deps) → runLoad 결과, stats(pod) → 통계 글, envoyProxy(gw-queue-proxy의 객체),
- * envoyProxies({ 이름: 객체 }), failAfterBind(CPU를 묶은 뒤 EnvoyProxy 고치기를 실패시켜 강제 종료를 흉내), routeObjs({ 이름: HTTPRoute }), cluster(기본 묶음 이름) }
- * calls에 kubectl 명령을 차례로 남기고, EnvoyProxy는 메모리 상태(eps)에 병합 패치·JSON 패치·주석을 실제로 적용한다
+ * envoyProxies({ 이름: 객체 }), failAfterBind(CPU를 묶은 뒤 EnvoyProxy 고치기를 실패시켜 강제 종료를 흉내), routeObjs({ 이름: HTTPRoute }), cluster(기본 묶음 이름),
+ * workers(pod) → 관리 포트가 주는 실제 일꾼 수(null이면 그 줄이 없음) }
+ * calls에 kubectl 명령을 차례로 남기고, EnvoyProxy는 메모리 상태(eps)에 병합 패치·JSON 패치·주석을 실제로 적용한다.
+ * 통계 글(--raw …/stats/prometheus)에는 실제 일꾼 수 줄 envoy_server_concurrency를 덧붙인다(묶음 BAT-058, ADR-0287 결정 10: 도구가 단계마다 부하 전에 읽는다).
+ * 값은 o.workers가 없으면 마지막으로 읽은 게이트웨이의 EnvoyProxy spec.concurrency(capacity가 묶으면 묶은 값), 그것도 없으면 NODE_CPUS(Envoy 기본)다
  */
 function fakeDeps(o = {}) {
   let t = 1_763_000_000_000;
@@ -399,7 +413,8 @@ function fakeDeps(o = {}) {
   const polls = {};
   const eps = structuredClone(o.envoyProxies ?? { 'gw-queue-proxy': o.envoyProxy ?? { spec: {} }, 'peaket-proxy': { spec: {} } });
   for (const [n, e] of Object.entries(eps)) e.metadata = { ...(e.metadata ?? {}), name: n, namespace: NS };
-  const state = { bound: false, allowRestore: false };
+  const state = { bound: false, allowRestore: false, gateway: 'gw-queue' };
+  const workersOf = (pod) => (o.workers ? o.workers(pod) : (eps[EP_OF(state.gateway)]?.spec?.concurrency ?? NODE_CPUS));
   const routeObjs = o.routeObjs ?? { [ROUTE]: ROUTE_OBJ };
   const nameAfter = (args, i) => (args[i + 1] !== undefined && !args[i + 1].startsWith('-') ? args[i + 1] : undefined);
   const epCall = (args) => {
@@ -416,7 +431,8 @@ function fakeDeps(o = {}) {
       const s = args.join(' ');
       if (args.includes('--raw') && s.includes('/stats/prometheus')) {
         const pod = /pods\/([^:/]+):/.exec(s)?.[1];
-        return o.stats ? o.stats(pod) : statsText(cluster);
+        const n = workersOf(pod);
+        return `${o.stats ? o.stats(pod) : statsText(cluster)}${n === null || n === undefined ? '' : concurrencyLine(n)}`;
       }
       if (args.includes('--raw')) throw new Error(`모르는 --raw ${s}`);
       if (s.includes('get backendtrafficpolicies')) return JSON.stringify({ items: o.policies ?? [] });
@@ -453,6 +469,7 @@ function fakeDeps(o = {}) {
       if (args.includes('delete')) return 'deleted';
       if (s.includes('get gateway')) {
         const gw = nameAfter(args, args.indexOf('gateway'));
+        state.gateway = gw;
         return JSON.stringify({ metadata: { name: gw }, spec: { infrastructure: { parametersRef: { group: 'gateway.envoyproxy.io', kind: 'EnvoyProxy', name: EP_OF(gw) } } } });
       }
       if (s.includes('get deploy')) return 'envoy-gw-queue-abc';
@@ -1012,4 +1029,441 @@ test('V-T43 R8 ①·②는 부하 꼴로 가른다', async () => {
   assert.throws(() => parseGwArgs(fixed('20', '40', '500')), (e) => e instanceof UsageError, '40 × 500ms = 20 ≤ 동시 20');
   const r = spawnSync(process.execPath, [RUN_MJS, 'gw', ...fixed('20', '400', '50')], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PEAKET_KUBECONFIG: join(HERE, 'no-such-kubeconfig') } });
   assert.equal(r.status, 2, `실행 도구 끝 코드 ${r.status} ${r.stderr}`);
+});
+
+// ===================== BAT-058 WU1~WU9(HOT-405): 일꾼 수 확인·발생기 가중 평균·gw limits =====================
+// 정본: docs/infra.md §4.1 '측정(V-T43)' 끝 ①(단계마다 부하 전에 관리 포트 server.concurrency를 읽고 기대 값(--workers, 없으면 EnvoyProxy spec.concurrency,
+// capacity는 묶은 값)과 다르거나 못 읽으면 부하 없이 무효) ④(r_min은 실패한 가장 큰 후보의 바로 위 후보이고 3회 모두 통과, 무효는 세지 않음)
+// ⑤(평균 지연은 발생기마다의 평균을 그 발생기 2xx 수로 가중), '값의 식'(k = r_min ÷ (도착률 × 평균 지연)을 0.1 단위로 올리고 2 미만이면 2,
+// 동시 = 연결 = ⌈k × 0.6 × 포화 처리량 × 파드 CPU × L_gw⌉(gw-queue 0.2초, 나머지 넷 0.5초), 보류 = ⌈동시 ÷ 8⌉, 정수 셈 뒤 한 번만 올림),
+// '첫 값' 끝(포화 처리량 2,600, 파드 CPU 2), ADR-0287 결정 6·7·10. 공개 인터페이스는 계획 §4.3·§4.4와 '구현 메모' 3·4(결과 줄 workers·latency2xx.avg, limits.json).
+// 기대값은 도구 함수로 만들지 않고 정본 식으로 손 셈한 값을 적는다. --workers는 운영 값 2와 다른 5, EnvoyProxy 일꾼은 3으로 고른다.
+
+/** 정본 '첫 값' 끝의 입력: 포화 처리량(vCPU 하나의 초당 건수)·파드 CPU, 정상 부하 진입 도착률(docs/infra.md §4.1 '측정(V-T43)') */
+const SATURATION = 2600;
+const POD_CPUS = 2;
+const ENTRY_RATE = 1500;
+/** 두 파드 */
+const PODS2 = ['envoy-gw-queue-a', 'envoy-gw-queue-b'];
+/** 발생기 하나의 요약: 진입 2xx 평균 avgMs·2xx 수 n2xx(나머지 흐름은 summaryFor와 같다) */
+function genSummary(avgMs, n2xx) {
+  const s = summaryFor('entry', { sent: n2xx });
+  s.metrics['gw_dur_2xx{phase:main,stream:entry}'] = { type: 'trend', values: { med: avgMs, 'p(99)': avgMs * 2, max: avgMs * 3, avg: avgMs, min: 1 } };
+  return s;
+}
+const assertNoPassRecord = (f, label) =>
+  assert.ok(
+    f.records.every((x) => x.verdict !== 'pass' && typeof x.invalidReason === 'string' && x.invalidReason.length > 0),
+    `${label}: 장부에 판정(--verdict pass)으로 넘겼다 ${JSON.stringify(f.records.map((x) => [x.verdict, x.invalidReason]))}`,
+  );
+
+// ---------- WU1 ----------
+
+test('V-T43 ①② HOT-405 WU1 gw sweep --workers는 1~64 정수만 받고 capacity·ip-limit에는 없다(인자 오류)', () => {
+  const sweep = (...x) => parseGwArgs(['sweep', '--max-parallel', '4', ...x]);
+  for (const bad of ['0', '-1', '1.5', 'two', '65', '']) assert.throws(() => sweep('--workers', bad), (e) => e instanceof UsageError, `--workers ${JSON.stringify(bad)}`);
+  assert.throws(() => sweep('--workers'), (e) => e instanceof UsageError, '--workers 값 없음(끝)');
+  assert.throws(() => parseGwArgs(['sweep', '--workers', '--max-parallel', '4']), (e) => e instanceof UsageError, '--workers 값 없음(다음 인자)');
+  assert.throws(() => sweep('--workers', '5', '--workers', '5'), (e) => e instanceof UsageError, '--workers 두 번');
+  assert.equal(sweep('--workers', '5').workers, 5);
+  assert.equal(sweep('--workers', '1').workers, 1, '하한 1');
+  assert.equal(sweep('--workers', '64').workers, 64, '상한 64');
+  assert.equal(sweep().workers, null, '없으면 null(기대 값은 EnvoyProxy)');
+  assert.throws(() => parseGwArgs(['capacity', '--workers', '2']), (e) => e instanceof UsageError, 'capacity --workers');
+  assert.throws(() => parseGwArgs(['ip-limit', '--case', 'single', '--workers', '2']), (e) => e instanceof UsageError, 'ip-limit --workers');
+});
+
+test('V-T43 ①② HOT-405 WU1 실행 도구는 --workers 인자 오류에 끝 코드 2로 클러스터를 건드리기 전에 끝난다', () => {
+  for (const args of [
+    ['sweep', '--max-parallel', '4', '--workers', '0'],
+    ['sweep', '--max-parallel', '4', '--workers', '65'],
+    ['capacity', '--workers', '2'],
+  ]) {
+    const r = spawnSync(process.execPath, [RUN_MJS, 'gw', ...args], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PEAKET_KUBECONFIG: join(HERE, 'no-such-kubeconfig') } });
+    assert.equal(r.status, 2, `gw ${args.join(' ')}: 끝 코드 ${r.status} ${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /==/, `gw ${args.join(' ')}: 단계를 시작했다`);
+  }
+});
+
+// ---------- WU2 ----------
+
+test('V-T43 ①② HOT-405 WU2 관리 포트 통계에서 실제 일꾼 수(envoy_server_concurrency)를 읽는다: 없거나 정수가 아니면 오류', () => {
+  const parse = gw.parseServerConcurrency;
+  assert.equal(typeof parse, 'function', 'loadtest/runner/gw.mjs에 parseServerConcurrency가 없다');
+  assert.equal(parse('envoy_server_concurrency 5\n'), 5, '`이름 값` 꼴');
+  assert.equal(parse('envoy_server_concurrency{} 5'), 5, '`이름{} 값` 꼴');
+  // 이름이 앞부분만 같은 지표가 먼저 와도 그 값을 읽지 않는다, 다른 통계 줄 사이에서도 찾는다
+  assert.equal(parse(`envoy_server_concurrency_extra 9\n${statsText(CLUSTER)}# TYPE envoy_server_concurrency gauge\nenvoy_server_concurrency{} 5\n`), 5, '앞부분만 같은 지표 + 그 지표');
+  const bad = [
+    ['지표 줄 없음(묶음 통계만)', statsText(CLUSTER)],
+    ['빈 글', ''],
+    ['설명 줄만', '# TYPE envoy_server_concurrency gauge\n'],
+    ['앞부분만 같은 지표만', 'envoy_server_concurrency_extra 9\n'],
+    ['값 5.5', 'envoy_server_concurrency 5.5\n'],
+    ['값 -1', 'envoy_server_concurrency{} -1\n'],
+  ];
+  for (const [label, text] of bad) assert.throws(() => parse(text), label);
+});
+
+// ---------- WU3 ----------
+
+test('V-T43 ①② HOT-405 WU3 기대 일꾼 수: --workers가 EnvoyProxy 값보다 앞서고, 없으면 EnvoyProxy 값, 둘 다 없으면 기대 없음', () => {
+  const ew = gw.expectedWorkers;
+  assert.equal(typeof ew, 'function', 'loadtest/runner/gw.mjs에 expectedWorkers가 없다');
+  assert.deepEqual(ew({ flag: 5, concurrency: 3 }), { expected: 5, source: 'flag' });
+  assert.deepEqual(ew({ flag: null, concurrency: 3 }), { expected: 3, source: 'envoyproxy' });
+  assert.deepEqual(ew({ flag: null, concurrency: null }), { expected: null, source: null });
+  assert.deepEqual(ew({ flag: null }), { expected: null, source: null });
+});
+
+test('V-T43 ①② HOT-405 WU3 부르는 쪽: --workers 5가 EnvoyProxy 일꾼 3보다 앞서고, 둘 다 없으면 무효 없이 읽은 값만 결과 줄에 적는다', async () => {
+  const ep3 = { spec: { concurrency: 3 } };
+  const argv = [...SWEEP_ARGS, '--workers', '5'];
+  // 관리 포트가 5를 주면 부하가 나간다(EnvoyProxy 3을 기대하지 않는다)
+  const five = fakeDeps({ envoyProxy: ep3, workers: () => 5 });
+  assert.equal((await runGw(parseGwArgs(argv), five.deps)).exitCode, 0);
+  assert.equal(five.loads.length, 1, '--workers 5인데 관리 포트 5에서 부하를 넣지 않았다');
+  assert.deepEqual(five.saved['sweep.json'].steps[0].workers, { expected: 5, source: 'flag', pods: { 'envoy-gw-queue-a': 5 } });
+  // 관리 포트가 EnvoyProxy 값 3을 주면 --workers 5와 달라 무효
+  const three = fakeDeps({ envoyProxy: ep3, workers: () => 3 });
+  await runGw(parseGwArgs(argv), three.deps);
+  assert.equal(three.loads.length, 0, '--workers 5인데 관리 포트 3에서 부하를 넣었다(EnvoyProxy 값을 앞세움)');
+  assert.equal(three.saved['sweep.json'].steps[0].invalid_reason, '일꾼 수가 5가 아님(envoy-gw-queue-a 3)');
+  // 둘 다 없으면 기대 없음: 무효가 아니고 읽은 값(32)을 적는다
+  const none = fakeDeps({ envoyProxy: { spec: {} }, workers: () => 32 });
+  await runGw(parseGwArgs(SWEEP_ARGS), none.deps);
+  const st = none.saved['sweep.json'].steps[0];
+  assert.equal(none.loads.length, 1, '기대 값이 없는데 부하를 넣지 않았다');
+  assert.equal(st.verdict, 'pass', JSON.stringify(st.reasons));
+  assert.deepEqual(st.workers, { expected: null, source: null, pods: { 'envoy-gw-queue-a': 32 } });
+});
+
+// ---------- WU4 ----------
+
+for (const [mode, argv, ep, expected, source] of [
+  ['--workers 5로 기대', [...SWEEP_ARGS, '--workers', '5'], { spec: {} }, 5, 'flag'],
+  ['--workers 없이 EnvoyProxy 일꾼 3으로 기대', SWEEP_ARGS, { spec: { concurrency: 3 } }, 3, 'envoyproxy'],
+]) {
+  const rec = [...argv, '--record', '--run-id-prefix', '2026-11-19-bat058t'];
+  test(`V-T43 ①② HOT-405 WU4 sweep(${mode}): 파드 둘 가운데 하나만 기대와 다르면 부하 없이 무효이고 장부에 판정으로 넘기지 않는다`, async () => {
+    const f = fakeDeps({ pods: PODS2, envoyProxy: ep, workers: (pod) => (pod === 'envoy-gw-queue-b' ? 4 : expected) });
+    assert.equal((await runGw(parseGwArgs(rec), f.deps)).exitCode, 0, '끝 코드');
+    assert.equal(f.loads.length, 0, '일꾼 수가 다른 파드가 있는데 발생기를 띄웠다');
+    const st = f.saved['sweep.json']?.steps?.[0];
+    assert.ok(st, `결과 파일에 단계가 없다 ${JSON.stringify(f.saved)}`);
+    assert.deepEqual([st.verdict, st.valid, st.sent], ['invalid', false, 0]);
+    assert.equal(st.invalid_reason, `일꾼 수가 ${expected}가 아님(envoy-gw-queue-b 4)`);
+    assert.deepEqual(st.workers?.pods, { 'envoy-gw-queue-a': expected, 'envoy-gw-queue-b': 4 }, '결과 줄 workers.pods');
+    assert.deepEqual([st.workers?.expected, st.workers?.source], [expected, source]);
+    assertNoPassRecord(f, mode);
+    assertDeletedAfterApply(f.calls, mode);
+  });
+
+  test(`V-T43 ①② HOT-405 WU4 sweep(${mode}): 한 파드의 일꾼 수를 못 읽으면 부하 없이 무효('일꾼 수를 못 읽음')`, async () => {
+    const f = fakeDeps({ pods: PODS2, envoyProxy: ep, workers: (pod) => (pod === 'envoy-gw-queue-b' ? null : expected) });
+    assert.equal((await runGw(parseGwArgs(rec), f.deps)).exitCode, 0, '끝 코드');
+    assert.equal(f.loads.length, 0, '일꾼 수를 못 읽은 파드가 있는데 발생기를 띄웠다');
+    const st = f.saved['sweep.json']?.steps?.[0];
+    assert.ok(st, `결과 파일에 단계가 없다 ${JSON.stringify(f.saved)}`);
+    assert.deepEqual([st.verdict, st.valid, st.sent], ['invalid', false, 0]);
+    assert.match(String(st.invalid_reason), /^일꾼 수를 못 읽음: envoy-gw-queue-b/, `까닭 ${st.invalid_reason}`);
+    assert.doesNotMatch(String(st.invalid_reason), /envoy-gw-queue-a/, '읽은 파드를 까닭에 적었다');
+    assert.equal(st.workers?.pods?.['envoy-gw-queue-a'], expected);
+    assert.equal(st.workers?.pods?.['envoy-gw-queue-b'], null, '못 읽은 파드의 값은 null(0으로 두지 않는다)');
+    assertNoPassRecord(f, mode);
+  });
+
+  test(`V-T43 ①② HOT-405 WU4 sweep(${mode}): 두 파드가 모두 기대와 같으면 부하가 나가고 결과 줄·장부 notes에 읽은 값을 적는다`, async () => {
+    const f = fakeDeps({ pods: PODS2, envoyProxy: ep, workers: () => expected });
+    assert.equal((await runGw(parseGwArgs(rec), f.deps)).exitCode, 0);
+    assert.equal(f.loads.length, 1, '부하를 넣지 않았다');
+    const st = f.saved['sweep.json'].steps[0];
+    assert.equal(st.verdict, 'pass', JSON.stringify(st.reasons));
+    assert.deepEqual(st.workers, { expected, source, pods: { 'envoy-gw-queue-a': expected, 'envoy-gw-queue-b': expected } });
+    assert.equal(f.records.length, 1);
+    assert.match(
+      String(f.records[0].notes),
+      new RegExp(`일꾼 수\\(관리 포트\\) envoy-gw-queue-a ${expected}[,;]? envoy-gw-queue-b ${expected}, 기대 ${expected}\\(${source}\\)`),
+      `장부 notes ${f.records[0].notes}`,
+    );
+  });
+}
+
+// ---------- WU5 ----------
+
+test('V-T43 ①② HOT-405 WU5 capacity: CPU 0.5(일꾼 1)로 묶었는데 관리 포트가 32를 주면 부하 없이 무효이고 원래 EnvoyProxy로 되돌린다', async () => {
+  const original = { spec: { concurrency: 3, provider: { type: 'Kubernetes', kubernetes: { envoyDeployment: { container: { resources: { requests: { cpu: '250m' }, limits: { cpu: '1' } } } } } } } };
+  const CAP = ['capacity', '--rates', '500,700', '--warm', '1', '--main', '5'];
+  const f = fakeDeps({ envoyProxy: original, workers: () => 32 });
+  assert.equal((await runGw(parseGwArgs(CAP), f.deps)).exitCode, 0);
+  assert.equal(f.loads.length, 0, '묶은 일꾼 수가 실리지 않았는데 부하를 넣었다');
+  const st = f.saved['capacity.json']?.steps?.[0];
+  assert.ok(st, `capacity 결과에 단계가 없다 ${JSON.stringify(f.saved)}`);
+  assert.equal(st.valid, false);
+  assert.equal(st.invalid_reason, '일꾼 수가 1가 아님(envoy-gw-queue-a 32)');
+  assert.deepEqual(st.workers, { expected: 1, source: 'capacity', pods: { 'envoy-gw-queue-a': 32 } });
+  assert.equal(f.saved['capacity.json'].steps.length, 1, '무효 단계 뒤 다음 도착률로 넘어갔다');
+  // 원래 EnvoyProxy로 되돌리는 패치는 그대로 나간다(마지막 패치가 원래 일꾼 3·CPU 250m·한도 1)
+  const ps = f.calls.filter((c) => c.args.includes('patch') && c.args.includes('envoyproxy')).map((c) => JSON.parse(c.args[c.args.indexOf('-p') + 1]));
+  const last = ps.at(-1);
+  assert.equal(last?.spec?.concurrency, 3, `되돌리는 패치 ${JSON.stringify(last)}`);
+  assert.deepEqual(f.eps['gw-queue-proxy'].spec.provider.kubernetes.envoyDeployment.container.resources, { requests: { cpu: '250m' }, limits: { cpu: '1' } }, '원래 CPU로 되돌리지 않았다');
+  assert.equal(f.eps['gw-queue-proxy'].spec.concurrency, 3, '원래 일꾼 수로 되돌리지 않았다');
+  // 대조: 관리 포트가 묶은 값 1을 주면 부하가 나가고 결과 줄에 읽은 값
+  const ok = fakeDeps({ envoyProxy: original, load: async () => ({ summary: summaryFor('entry', { sent: 2500 }), generator: GEN }) });
+  await runGw(parseGwArgs(CAP), ok.deps);
+  assert.ok(ok.loads.length >= 1, '묶은 값 1을 읽었는데 부하를 넣지 않았다');
+  assert.deepEqual(ok.saved['capacity.json'].steps[0].workers, { expected: 1, source: 'capacity', pods: { 'envoy-gw-queue-a': 1 } });
+});
+
+// ---------- WU6 ----------
+
+test('V-T43 ①② HOT-405 WU6 결과 줄의 진입 2xx 평균은 발생기마다의 avg를 그 2xx 수로 가중한다(8.0ms·30,000 / 10.0ms·10,000 → 8.5ms)', async () => {
+  // 합친 요약의 avg는 발생기 가운데 큰 값(10)이다(loadtest/runner/merge.mjs). 그 값도, 단순 평균 9도 아니어야 한다
+  const f = fakeDeps({ load: async () => ({ summary: genSummary(10, 40000), summaries: [genSummary(8, 30000), genSummary(10, 10000)], generator: GEN }) });
+  assert.equal((await runGw(parseGwArgs(SWEEP_ARGS), f.deps)).exitCode, 0);
+  const st = f.saved['sweep.json'].steps[0];
+  assert.equal(st.verdict, 'pass', JSON.stringify(st.reasons));
+  assert.equal(st.streams?.entry?.latency2xx?.avg, 8.5, `진입 2xx avg ${JSON.stringify(st.streams?.entry)}`);
+  assert.equal(st.latency?.['2xx']?.avg, 8.5, '재는 흐름이 하나일 때 latency.2xx.avg');
+});
+
+test('V-T43 ①② HOT-405 WU6 발생기마다의 요약이 없거나 2xx 수를 모르면 평균은 null이다(합친 요약 값을 쓰지 않는다)', async () => {
+  const none = fakeDeps({ load: async () => ({ summary: genSummary(10, 40000), generator: GEN }) });
+  await runGw(parseGwArgs(SWEEP_ARGS), none.deps);
+  assert.equal(none.saved['sweep.json'].steps[0].streams?.entry?.latency2xx?.avg, null, '발생기마다의 요약이 없다');
+  const partial = fakeDeps({ load: async () => ({ summary: genSummary(10, 40000), summaries: [genSummary(8, 30000), { metrics: {} }], generator: GEN }) });
+  await runGw(parseGwArgs(SWEEP_ARGS), partial.deps);
+  assert.equal(partial.saved['sweep.json'].steps[0].streams?.entry?.latency2xx?.avg, null, '한 발생기의 2xx 수를 모른다');
+});
+
+// ---------- WU7~WU9: gw limits ----------
+
+/** 보류 = ⌈동시 ÷ 8⌉(docs/infra.md §4.1 '값의 식'): 시험 후보마다 손으로 적는다 */
+const PENDING_OF = { 12: 2, 16: 2, 24: 3, 28: 4, 32: 4, 39: 5, 40: 5, 48: 6 };
+/**
+ * 손으로 만든 gw sweep 결과 파일(sweep.json, 정상 부하 gw-queue gw-queue-buy). runs = [[동시, 판정('pass'|'fail'|'invalid'), 진입 2xx avg(ms)], …].
+ * o로 파일·단계의 칸을 바꿔 섞인 입력을 만든다(o.step(단계 줄, 번호)로 단계 칸을 고친다)
+ */
+function sweepJson(runs, o = {}) {
+  const rate = o.rate ?? ENTRY_RATE;
+  const delay = o.delay ?? 'normal';
+  return {
+    command: 'gw sweep',
+    gateway: o.gateway ?? 'gw-queue',
+    route: o.route ?? 'gw-queue-buy',
+    cluster: CLUSTER,
+    targets: ['entry'],
+    proxyPods: ['envoy-gw-queue-a'],
+    workersFlag: 2,
+    rate,
+    mix: 'normal',
+    delay,
+    warmS: 10,
+    mainS: 60,
+    steps: runs.map(([p, verdict, avg = 8], i) => {
+      const s = {
+        step: i,
+        maxConnections: p,
+        maxParallelRequests: p,
+        maxPendingRequests: PENDING_OF[p],
+        rate,
+        delay,
+        mix: 'normal',
+        repeat: 1,
+        overload: delay !== 'normal',
+        workers: { expected: 2, source: 'flag', pods: { 'envoy-gw-queue-a': verdict === 'invalid' ? 32 : 2 } },
+        ...(verdict === 'invalid'
+          ? { sent: 0, valid: false, verdict: 'invalid', item: 'V-T43 ①', invalid_reason: '일꾼 수가 2가 아님(envoy-gw-queue-a 32)', reasons: ['일꾼 수가 2가 아님(envoy-gw-queue-a 32)'] }
+          : { sent: 1500, valid: true, verdict, item: 'V-T43 ①', reasons: verdict === 'fail' ? ['정상 부하 503 1건'] : [], streams: { entry: { sent: 1500, latency2xx: { p50: avg, p99: avg * 2, max: avg * 3, avg } } } }),
+      };
+      return o.step ? o.step(s, i) : s;
+    }),
+  };
+}
+/** gw limits를 runLimits로(파일은 메모리). files = sweep.json 객체 목록. 돌려주는 것: 끝 코드, limits.json, 콘솔 글 */
+async function limitsOf(files, { saturation = String(SATURATION), podCpus = String(POD_CPUS) } = {}) {
+  assert.equal(typeof gwRun.runLimits, 'function', 'loadtest/runner/gw-run.mjs에 runLimits(gw limits)가 없다');
+  const store = Object.fromEntries(files.map((d, i) => [`m${i}/sweep.json`, JSON.stringify(d)]));
+  const a = parseGwArgs(['limits', '--from', Object.keys(store).join(','), '--saturation', saturation, '--pod-cpus', podCpus]);
+  const saved = {};
+  const logs = [];
+  const r = await gwRun.runLimits(a, {
+    readFile: async (p) => {
+      if (!Object.hasOwn(store, p)) throw new Error(`없는 파일(가짜) ${p}`);
+      return store[p];
+    },
+    save: (name, v) => (saved[name] = structuredClone(v)),
+    log: (m) => logs.push(m),
+  });
+  assert.ok(saved['limits.json'], `limits.json을 쓰지 않았다 ${JSON.stringify(Object.keys(saved))}`);
+  return { exitCode: r.exitCode, out: saved['limits.json'], logs };
+}
+const assertUndetermined = (r, label) => {
+  assert.equal(r.exitCode, 1, `${label}: 끝 코드 ${r.exitCode} ${JSON.stringify(r.out?.reasons)}`);
+  assert.equal(r.out.determined, false, `${label}: determined`);
+  assert.ok(Array.isArray(r.out.reasons) && r.out.reasons.length > 0, `${label}: 까닭이 없다`);
+  assert.equal(r.out.limits ?? null, null, `${label}: 정하지 못했는데 상한 값이 있다 ${JSON.stringify(r.out.limits)}`);
+};
+const rep = (p, verdict, n, avg) => Array.from({ length: n }, () => [p, verdict, avg]);
+
+test('V-T43 ① HOT-405 WU7 (가) r_min: 24 실패·28 통과 3회·32·40 통과 → 28', async () => {
+  const r = await limitsOf([sweepJson([[24, 'fail']]), sweepJson([[28, 'pass']]), sweepJson(rep(28, 'pass', 2)), sweepJson([[32, 'pass']]), sweepJson([[40, 'pass']])]);
+  assert.equal(r.exitCode, 0, JSON.stringify(r.out.reasons));
+  assert.equal(r.out.determined, true);
+  assert.equal(r.out.rMin, 28);
+  assert.deepEqual(r.out.runs, { 24: { pass: 0, fail: 1, invalid: 0 }, 28: { pass: 3, fail: 0, invalid: 0 }, 32: { pass: 1, fail: 0, invalid: 0 }, 40: { pass: 1, fail: 0, invalid: 0 } });
+});
+
+test('V-T43 ① HOT-405 WU7 (나) r_min: 24 실패·28·32 통과·40 실패·48 통과 3회 → 48(실패한 가장 큰 후보의 위, 28이 아님)', async () => {
+  const r = await limitsOf([sweepJson([[24, 'fail']]), sweepJson([[28, 'pass']]), sweepJson([[32, 'pass']]), sweepJson([[40, 'fail']]), sweepJson(rep(48, 'pass', 3))]);
+  assert.equal(r.exitCode, 0, JSON.stringify(r.out.reasons));
+  assert.equal(r.out.rMin, 48);
+});
+
+test('V-T43 ① HOT-405 WU7 (다)(라)(마)(바)(사) r_min을 정하지 못하면 끝 코드 1·determined false와 다음 할 일', async () => {
+  // (다) 28이 통과·통과·실패: 28이 실패한 가장 큰 후보가 되고 바로 위 32는 1회뿐 → 32를 더 잰다
+  const c = await limitsOf([sweepJson([[24, 'fail']]), sweepJson([[28, 'pass'], [28, 'pass'], [28, 'fail']]), sweepJson([[32, 'pass']]), sweepJson([[40, 'pass']])]);
+  assertUndetermined(c, '(다)');
+  assert.equal(c.out.rMin, null);
+  assert.match(c.out.next.join(' / '), /32[^0-9]/, `(다) 다음 할 일에 32가 없다 ${JSON.stringify(c.out.next)}`);
+  // (라) 28이 통과·무효·통과: 유효 단계 2개(무효는 통과로 세지 않는다)
+  const d = await limitsOf([sweepJson([[24, 'fail']]), sweepJson([[28, 'pass'], [28, 'invalid'], [28, 'pass']]), sweepJson([[32, 'pass']])]);
+  assertUndetermined(d, '(라)');
+  assert.deepEqual(d.out.runs['28'], { pass: 2, fail: 0, invalid: 1 }, '(라) 28의 수');
+  assert.match(d.out.next.join(' / '), /28[^0-9]/, `(라) 다음 할 일에 28이 없다 ${JSON.stringify(d.out.next)}`);
+  // (마) 12 통과 3회·16 통과, 실패 없음: 경계를 모른다 → 더 작은 후보
+  const e = await limitsOf([sweepJson(rep(12, 'pass', 3)), sweepJson([[16, 'pass']])]);
+  assertUndetermined(e, '(마)');
+  assert.match(e.out.next.join(' / '), /12[^0-9]/, `(마) 다음 할 일에 12가 없다 ${JSON.stringify(e.out.next)}`);
+  assert.match(e.out.next.join(' / '), /작은/, `(마) 다음 할 일이 '더 작은 후보'가 아니다 ${JSON.stringify(e.out.next)}`);
+  // (바) 통과 없음
+  assertUndetermined(await limitsOf([sweepJson([[24, 'fail']]), sweepJson([[28, 'fail']])]), '(바)');
+  // (사) 실패한 가장 큰 후보 위를 재지 않음
+  assertUndetermined(await limitsOf([sweepJson(rep(24, 'pass', 3)), sweepJson([[28, 'fail']])]), '(사)');
+});
+
+// WU8: 정본 식으로 손 셈한 값(포화 처리량 2,600, 파드 CPU 2, 도착률 1,500 → R_pod 3,120)
+//   k10 = max(20, ⌈10 × r_min × 1,000,000 ÷ (1,500 × L̄µs)⌉), 동시 = ⌈k10 × 6 × 2,600 × 2 × L_gw(ms) ÷ 100,000⌉, 보류 = ⌈동시 ÷ 8⌉, r_pc = ⌈k10 × 1,500 × L̄µs ÷ 10,000,000⌉
+//   (가) r_min 32·L̄ 8.160: 320,000,000 ÷ 12,240,000 = 26.14 → k 2.7(올리기 전 2.614). gw-queue 168,480,000 ÷ 100,000 = 1,684.8 → 1,685, ⌈1,685 ÷ 8⌉ = 211;
+//        나머지 421,200,000 ÷ 100,000 = 4,212, ⌈4,212 ÷ 8⌉ = 527. r_pc 330,480,000 ÷ 10,000,000 = 33.05 → 34
+//   (나) r_min 28·L̄ 8.500: 280,000,000 ÷ 12,750,000 = 21.96 → k 2.2. gw-queue 137,280,000 → 1,372.8 → 1,373, 172; 나머지 343,200,000 → 3,432(정수, 소수 곱 2.2 × 3,120 × 0.5는 3,433이 되는 함정), 429.
+//        r_pc 280,500,000 ÷ 10,000,000 = 28.05 → 29
+//   (다) r_min 39·L̄ 10.000: 390,000,000 ÷ 15,000,000 = 26 → k 2.6(딱 나눠져 올리지 않음, 2.7이 아님). gw-queue 162,240,000 → 1,622.4 → 1,623, 203; 나머지 405,600,000 → 4,056, 4,056 ÷ 8 = 507(딱 나눠짐).
+//        r_pc 390,000,000 ÷ 10,000,000 = 39
+//   (라) r_min 16·L̄ 8.000: 160,000,000 ÷ 12,000,000 = 13.3 → 14 < 20 → k 2(하한). gw-queue 124,800,000 → 1,248, 156; 나머지 312,000,000 → 3,120, 390. r_pc 240,000,000 ÷ 10,000,000 = 24
+const WU8_CASES = [
+  ['(가) r_min 32·L̄ 8.160ms → k 2.7', 28, 32, [8.15, 8.16, 8.17], { k: 2.7, kRaw: 2.614, meanMs: 8.16, q: [1685, 211], o: [4212, 527], rPc: 34 }],
+  ['(나) r_min 28·L̄ 8.500ms → k 2.2(소수 곱 함정 3,433)', 24, 28, [8.5, 8.5, 8.5], { k: 2.2, kRaw: 2.196, meanMs: 8.5, q: [1373, 172], o: [3432, 429], rPc: 29 }],
+  ['(다) r_min 39·L̄ 10.000ms → k 2.6(딱 0.1 단위)', 32, 39, [10, 10, 10], { k: 2.6, kRaw: 2.6, meanMs: 10, q: [1623, 203], o: [4056, 507], rPc: 39 }],
+  ['(라) r_min 16·L̄ 8.000ms → k 2(하한)', 12, 16, [8, 8, 8], { k: 2, kRaw: 1.333, meanMs: 8, q: [1248, 156], o: [3120, 390], rPc: 24 }],
+];
+for (const [label, failAt, rMin, avgs, x] of WU8_CASES) {
+  test(`V-T43 ① HOT-405 WU8 gw limits 셈 ${label}: 세 칸·r_pc가 정본 식의 정수 셈 값이다`, async () => {
+    const r = await limitsOf([sweepJson([[failAt, 'fail', 9]]), sweepJson(avgs.map((v) => [rMin, 'pass', v]))]);
+    assert.equal(r.exitCode, 0, JSON.stringify(r.out.reasons));
+    const o = r.out;
+    assert.equal(o.determined, true);
+    assert.equal(o.rMin, rMin);
+    assert.ok(Math.abs(o.meanLatencyMs - x.meanMs) < 1e-9, `평균 지연 ${o.meanLatencyMs}ms`);
+    assert.equal(o.k, x.k, `k ${o.k}`);
+    assert.ok(Math.abs(o.kRaw - x.kRaw) <= 0.0006, `올리기 전 k ${o.kRaw}(손 셈 ${x.kRaw})`);
+    assert.equal(o.rPod, 3120, 'R_pod = 0.6 × 2,600 × 2');
+    assert.equal(o.rPc, x.rPc, `r_pc ${o.rPc}`);
+    assert.deepEqual(o.limits, {
+      'gw-queue': { maxConnections: x.q[0], maxParallelRequests: x.q[0], maxPendingRequests: x.q[1] },
+      others: { maxConnections: x.o[0], maxParallelRequests: x.o[0], maxPendingRequests: x.o[1] },
+    });
+    assert.deepEqual([o.inputs?.saturation, o.inputs?.podCpus, o.inputs?.rate], [SATURATION, POD_CPUS, ENTRY_RATE], 'inputs');
+  });
+}
+
+test('V-T43 ① HOT-405 WU8 r_min 단계에 진입 2xx 평균이 없으면(null) 정하지 못한다', async () => {
+  const r = await limitsOf([sweepJson([[24, 'fail']]), sweepJson([[28, 'pass', 8.5], [28, 'pass', null], [28, 'pass', 8.5]])]);
+  assertUndetermined(r, '평균 null');
+});
+
+test('V-T43 ① HOT-405 WU9 gw limits 입력 거르기: 과부하·다른 도착률·보류 ≠ ⌈동시 ÷ 8⌉·연결 ≠ 동시·다른 게이트웨이·sweep 밖 파일이 섞이면 끝 코드 1', async () => {
+  // 바탕(섞이지 않으면 정함): WU8 (나)와 같은 입력
+  const good = () => [sweepJson([[24, 'fail']]), sweepJson(rep(28, 'pass', 3, 8.5))];
+  const base = await limitsOf(good());
+  assert.equal(base.exitCode, 0, `바탕이 정해지지 않는다 ${JSON.stringify(base.out.reasons)}`);
+  const cases = [
+    ['과부하 단계(지연 fixed:500)가 섞임', sweepJson([[40, 'pass']], { delay: 'fixed:500' })],
+    ['도착률 1,400 단계가 섞임', sweepJson([[40, 'pass']], { rate: 1400 })],
+    ['보류 3(⌈28 ÷ 8⌉ = 4가 아님)', sweepJson([[28, 'pass']], { step: (s) => ({ ...s, maxPendingRequests: 3 }) })],
+    ['보류 기본 1024', sweepJson([[28, 'pass']], { step: (s) => ({ ...s, maxPendingRequests: 1024 }) })],
+    ['연결 9,999 ≠ 동시 28', sweepJson([[28, 'pass']], { step: (s) => ({ ...s, maxConnections: 9999 }) })],
+    ['게이트웨이 gw-fan gw-fan-buy', sweepJson([[40, 'pass']], { gateway: 'gw-fan', route: 'gw-fan-buy' })],
+    ['capacity 결과 파일', { command: 'gw capacity', gateway: 'gw-queue', route: 'gw-queue-buy', steps: [] }],
+  ];
+  for (const [label, extra] of cases) assertUndetermined(await limitsOf([...good(), extra]), label);
+});
+
+/** 실행 도구로 gw limits(임시 폴더). files = { 이름: sweep.json 객체 } */
+function limitsCli(files, extraArgs, { from } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'gw-limits-'));
+  try {
+    for (const [n, d] of Object.entries(files)) writeFileSync(join(root, n), JSON.stringify(d));
+    const out = join(root, 'out');
+    const fromArg = from ?? Object.keys(files).map((n) => join(root, n)).join(',');
+    const args = extraArgs(fromArg, out);
+    const r = spawnSync(process.execPath, [RUN_MJS, 'gw', 'limits', ...args], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, PEAKET_KUBECONFIG: join(HERE, 'no-such-kubeconfig') } });
+    const f = join(out, 'limits.json');
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr, limits: existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null, root };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test('V-T43 ① HOT-405 WU9 gw limits 명령줄: --from·--saturation·--pod-cpus가 없거나 정수가 아니면 끝 코드 2, 없는 파일은 1, 정하면 0이고 limits.json의 칸이 모두 있다', () => {
+  const files = { 'a.json': sweepJson([[24, 'fail']]), 'b.json': sweepJson(rep(28, 'pass', 3, 8.5)) };
+  for (const [label, argsOf] of [
+    ['--saturation 없음', (from, out) => ['--from', from, '--pod-cpus', '2', '--out', out]],
+    ['--pod-cpus 없음', (from, out) => ['--from', from, '--saturation', '2600', '--out', out]],
+    ['--from 없음', (_from, out) => ['--saturation', '2600', '--pod-cpus', '2', '--out', out]],
+    ['--pod-cpus 2.5', (from, out) => ['--from', from, '--saturation', '2600', '--pod-cpus', '2.5', '--out', out]],
+    ['--saturation abc', (from, out) => ['--from', from, '--saturation', 'abc', '--pod-cpus', '2', '--out', out]],
+    ['--saturation 2600.5', (from, out) => ['--from', from, '--saturation', '2600.5', '--pod-cpus', '2', '--out', out]],
+  ]) {
+    const r = limitsCli(files, argsOf);
+    assert.equal(r.status, 2, `${label}: 끝 코드 ${r.status} ${r.stderr}`);
+  }
+  const missing = limitsCli(files, (from, out) => ['--from', `${from},${join(tmpdir(), 'bat058-no-such-sweep.json')}`, '--saturation', '2600', '--pod-cpus', '2', '--out', out]);
+  assert.equal(missing.status, 1, `없는 파일: 끝 코드 ${missing.status} ${missing.stderr}`);
+  assert.equal(missing.limits?.determined, false, '없는 파일: limits.json에 determined false가 없다');
+  const ok = limitsCli(files, (from, out) => ['--from', from, '--saturation', '2600', '--pod-cpus', '2', '--out', out]);
+  assert.equal(ok.status, 0, `정함: 끝 코드 ${ok.status} ${ok.stderr}`);
+  const l = ok.limits;
+  assert.ok(l, 'limits.json이 없다');
+  for (const k of ['determined', 'inputs', 'runs', 'rMin', 'meanLatencyMs', 'kRaw', 'k', 'rPod', 'rPc', 'limits', 'reasons']) assert.ok(Object.hasOwn(l, k), `limits.json에 ${k}가 없다`);
+  for (const k of ['files', 'saturation', 'podCpus', 'rate']) assert.ok(Object.hasOwn(l.inputs, k), `limits.json inputs에 ${k}가 없다`);
+  assert.equal(l.inputs.files.length, 2);
+  assert.deepEqual([l.determined, l.rMin, l.k, l.rPc], [true, 28, 2.2, 29]);
+  assert.deepEqual(l.limits, {
+    'gw-queue': { maxConnections: 1373, maxParallelRequests: 1373, maxPendingRequests: 172 },
+    others: { maxConnections: 3432, maxParallelRequests: 3432, maxPendingRequests: 429 },
+  });
+});
+
+test('V-T43 ① HOT-405 WU6·WU9 이어서: gw sweep이 쓴 결과 파일(발생기 가중 평균)을 gw limits가 그대로 받아 정한다', async () => {
+  // 24 실패 1회, 28 통과 3회(발생기 둘 8.0ms·30,000 / 10.0ms·10,000 → 8.5ms) → WU8 (나)와 같은 값
+  const weighted = async () => ({ summary: genSummary(10, 40000), summaries: [genSummary(8, 30000), genSummary(10, 10000)], generator: GEN });
+  // 관리 포트 /clusters는 그 단계의 상한을 보인다(실린 것으로 본다)
+  const loaded = (p, q) => () => clustersText(CLUSTER, { maxConnections: p, maxPendingRequests: q, maxRequests: p });
+  const failRun = fakeDeps({ workers: () => 2, admin: loaded(24, 3), load: async () => ({ summary: summaryFor('entry', { n503: 1 }), summaries: [genSummary(8, 30000)], generator: GEN }) });
+  await runGw(parseGwArgs(['sweep', '--max-parallel', '24', '--max-pending', '3', '--rate', '1500', '--workers', '2', '--warm', '1', '--main', '5']), failRun.deps);
+  const passRun = fakeDeps({ workers: () => 2, admin: loaded(28, 4), load: weighted });
+  await runGw(parseGwArgs(['sweep', '--max-parallel', '28', '--max-pending', '4', '--rate', '1500', '--repeat', '3', '--workers', '2', '--warm', '1', '--main', '5']), passRun.deps);
+  const a = failRun.saved['sweep.json'];
+  const b = passRun.saved['sweep.json'];
+  assert.deepEqual(a.steps.map((s) => s.verdict), ['fail'], '시험 바탕: 24 단계');
+  assert.deepEqual(b.steps.map((s) => s.verdict), ['pass', 'pass', 'pass'], '시험 바탕: 28 단계');
+  const r = await limitsOf([a, b]);
+  assert.equal(r.exitCode, 0, JSON.stringify(r.out.reasons));
+  assert.deepEqual([r.out.rMin, r.out.meanLatencyMs, r.out.k, r.out.rPc], [28, 8.5, 2.2, 29]);
+  assert.deepEqual(r.out.limits, {
+    'gw-queue': { maxConnections: 1373, maxParallelRequests: 1373, maxPendingRequests: 172 },
+    others: { maxConnections: 3432, maxParallelRequests: 3432, maxPendingRequests: 429 },
+  });
 });

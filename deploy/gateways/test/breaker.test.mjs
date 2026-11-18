@@ -4,6 +4,8 @@
 // docs/api/guidelines.md §2(게이트웨이가 과부하로 막으면 503과 Retry-After 필수), ADR-0009 결정 3(게이트웨이는 다시 보내지 않는다), docs/verification.md V-T43.
 // 시험 값(Retry-After 2, gw-queue 2,400·2,400·300, 나머지 넷 6,000·6,000·750, 길게 쥐는 규칙 65,536, 429의 60·1, 상태 문구)은 YAML·코드 상수에서 가져오지 않고
 // 정본 값을 적는다(docs/architecture.md §8.6 '자주 놓친 결함').
+// 묶음 BAT-058(HOT-405) 계획 docs/review/plans/BAT-058.md §7의 WS1~WS4: 프록시 일꾼 수와 파드 CPU(docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 1~3).
+// 그 시험 값(일꾼 수 2, CPU 요청 2코어, 메모리 요청 512Mi, 한도 없음, extraArgs의 --concurrency·--cpuset-threads 금지)도 정본에서 적는다.
 // 정책이 라우트 규칙에 닿는 법(Envoy Gateway v1.10.0, docs/infra.md §4.1 '길게 쥐는 라우트'의 확인 2026-11-17): 규칙 이름(sectionName)을 겨눈 정책이 있으면
 // 그 규칙에서는 라우트 전체를 겨눈 정책을 덮어 쓰고(합치지 않음), mergeType이 있으면 게이트웨이(리스너)를 겨눈 정책하고만 합친다. 규칙을 겨눈 정책이 없으면
 // 라우트 전체를 겨눈 정책(mergeType이 있으면 게이트웨이 정책과 합침), 그것도 없으면 게이트웨이 정책이다. 같은 대상(라우트 전체, 또는 한 규칙)을 두 정책이
@@ -314,4 +316,111 @@ test('V-T43 deploy/gateways에 이름표 peaket.io/sweep 객체가 없다', () =
       assert.ok(!String(o.metadata?.name ?? '').startsWith('peaket-sweep-'), `${at}: 임시 정책 이름(peaket-sweep-…)이다`);
     }
   assert.ok(seen > 0, '읽은 객체가 0개다');
+});
+
+// ===================== BAT-058 WS1~WS4(HOT-405) =====================
+// 정본 docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU'(추천 적용 2026-11-18, BAT-058 계획, ADR-0287 결정 1~3, 소유자 결정 OPEN[49] (가)):
+// EnvoyProxy 두 개(peaket-proxy·peaket-proxy-queue) 모두 spec.concurrency에 일꾼 수를 적고 그 값은 envoy 컨테이너 CPU 요청(코어)과 같다. 지금은 둘 다 2 [가정].
+// CPU 요청이 정수 코어가 아니면 일꾼 수는 내린 정수이고 1 이상. envoy 컨테이너 resources는 requests { cpu: "2", memory: 512Mi }이고 한도는 두지 않는다.
+// spec.extraArgs로 --concurrency·--cpuset-threads를 겹쳐 걸지 않는다.
+
+/** 정본의 파드 CPU(코어)이자 일꾼 수 */
+const POD_CPU_CORES = 2;
+const PROXY_WORKERS = 2;
+/** 메모리 요청(Envoy Gateway 기본 요청을 다시 적은 값) */
+const PROXY_MEMORY_REQUEST = '512Mi';
+/** 정본의 EnvoyProxy 두 개 */
+const ENVOY_PROXIES = ['peaket-proxy', 'peaket-proxy-queue'];
+/** Envoy 명령줄의 일꾼 수 인자(붙여 쓴 --concurrency=2, 한 칸에 값까지 쓴 '--concurrency 2' 포함) */
+const WORKER_ARG = /^-{1,2}(?:concurrency|cpuset-threads)(?:$|[=\s])/;
+
+const envoyProxy = (name) => byKind('EnvoyProxy').find((p) => p.metadata?.name === name);
+const envoyResources = (p) => p?.spec?.provider?.kubernetes?.envoyDeployment?.container?.resources;
+/** Kubernetes CPU 양(`"2"`, `2000m`, `1.5`)을 코어 수로. 모르는 꼴이면 NaN */
+function cpuCores(q) {
+  const s = String(q ?? '');
+  if (/^\d+m$/.test(s)) return Number(s.slice(0, -1)) / 1000;
+  if (/^\d+(\.\d+)?$/.test(s)) return Number(s);
+  return Number.NaN;
+}
+
+test('V-T43 ① HOT-405 WS 시험 바탕: CPU 양 읽기("2"·2000m은 2코어, 1500m은 1.5)', () => {
+  assert.equal(cpuCores('2'), 2);
+  assert.equal(cpuCores('2000m'), 2);
+  assert.equal(cpuCores(2), 2);
+  assert.equal(cpuCores('1500m'), 1.5);
+  assert.ok(Number.isNaN(cpuCores(undefined)));
+  assert.ok(Number.isNaN(cpuCores('2Gi')));
+});
+
+for (const name of ENVOY_PROXIES) {
+  test(`V-T43 ① HOT-405 WS1 EnvoyProxy ${name}의 spec.concurrency(일꾼 수)가 2다`, () => {
+    requireDefinitions();
+    const p = envoyProxy(name);
+    assert.ok(p, `deploy/gateways에 EnvoyProxy ${name}이 없다`);
+    assert.equal(p.spec?.concurrency, PROXY_WORKERS, `${p.__file} EnvoyProxy ${name}: spec.concurrency ${JSON.stringify(p.spec?.concurrency)}(정하지 않으면 노드 CPU 수만큼 생긴다)`);
+  });
+
+  test(`V-T43 ① HOT-405 WS2 EnvoyProxy ${name}의 envoy 컨테이너는 CPU 요청 2코어(= 일꾼 수)·메모리 요청 512Mi이고 한도가 없다`, () => {
+    requireDefinitions();
+    const p = envoyProxy(name);
+    assert.ok(p, `deploy/gateways에 EnvoyProxy ${name}이 없다`);
+    const res = envoyResources(p);
+    assert.ok(res && typeof res === 'object', `${name}: spec.provider.kubernetes.envoyDeployment.container.resources가 없다`);
+    const cores = cpuCores(res.requests?.cpu);
+    assert.equal(cores, POD_CPU_CORES, `${name}: requests.cpu ${JSON.stringify(res.requests?.cpu)}가 ${POD_CPU_CORES}코어가 아니다`);
+    // 일꾼 수 = CPU 요청을 내린 정수(1 이상)
+    assert.equal(p.spec?.concurrency, Math.max(1, Math.floor(cores)), `${name}: 일꾼 수 ${p.spec?.concurrency}가 CPU 요청 ${res.requests?.cpu}와 맞지 않는다`);
+    assert.equal(res.requests?.memory, PROXY_MEMORY_REQUEST, `${name}: requests.memory ${JSON.stringify(res.requests?.memory)}(resources를 적으면 Envoy Gateway 기본 512Mi가 빠진다)`);
+    assert.equal(res.limits?.cpu, undefined, `${name}: CPU 한도 ${JSON.stringify(res.limits?.cpu)}가 있다`);
+    assert.equal(res.limits?.memory, undefined, `${name}: 메모리 한도 ${JSON.stringify(res.limits?.memory)}가 있다`);
+    assert.deepEqual(Object.keys(res.limits ?? {}), [], `${name}: 한도 칸이 있다 ${JSON.stringify(res.limits)}`);
+  });
+}
+
+test('V-T43 ① HOT-405 WS3 다섯 게이트웨이가 받는 EnvoyProxy(자기 parametersRef, 없으면 GatewayClass의 것)의 일꾼 수가 모두 2다', () => {
+  requireDefinitions();
+  const seen = [];
+  for (const g of byKind('Gateway')) {
+    const gw = g.metadata?.name;
+    if (!GATEWAYS.includes(gw)) continue;
+    const own = g.spec?.infrastructure?.parametersRef;
+    let ref;
+    if (own?.kind === 'EnvoyProxy') ref = own.name;
+    else {
+      const cls = byKind('GatewayClass').find((c) => c.metadata?.name === g.spec?.gatewayClassName);
+      assert.ok(cls, `${gw}: GatewayClass ${g.spec?.gatewayClassName}가 없다`);
+      assert.equal(cls.spec?.parametersRef?.kind, 'EnvoyProxy', `${gw}: GatewayClass ${cls.metadata?.name}에 EnvoyProxy parametersRef가 없다`);
+      ref = cls.spec.parametersRef.name;
+    }
+    const p = envoyProxy(ref);
+    assert.ok(p, `${gw}: 받는 EnvoyProxy ${ref}가 deploy/gateways에 없다`);
+    assert.equal(p.spec?.concurrency, PROXY_WORKERS, `${gw}: 받는 EnvoyProxy ${ref}의 spec.concurrency ${JSON.stringify(p.spec?.concurrency)}`);
+    assert.equal(cpuCores(envoyResources(p)?.requests?.cpu), POD_CPU_CORES, `${gw}: 받는 EnvoyProxy ${ref}의 CPU 요청`);
+    seen.push(gw);
+  }
+  assert.deepEqual(seen.sort(), [...GATEWAYS].sort(), '다섯 게이트웨이를 모두 보지 못했다');
+});
+
+test('V-T43 ① HOT-405 WS4 어느 EnvoyProxy의 extraArgs에도 --concurrency·--cpuset-threads가 없다(형식 칸과 겹쳐 걸지 않음)', () => {
+  requireDefinitions();
+  const files = allYaml(DIR);
+  let proxies = 0;
+  for (const f of files)
+    for (const d of parseAllDocuments(readFileSync(f, 'utf8'))) {
+      const o = d.toJS();
+      if (!o || typeof o !== 'object' || o.kind !== 'EnvoyProxy') continue;
+      proxies++;
+      const args = findKey(o, 'extraArgs')
+        .flat()
+        .map((x) => String(x).trim());
+      const bad = args.filter((x) => WORKER_ARG.test(x));
+      assert.deepEqual(bad, [], `${relative(DIR, f)} EnvoyProxy/${o.metadata?.name}: extraArgs에 일꾼 수 인자가 있다(${JSON.stringify(args)})`);
+    }
+  assert.ok(proxies >= ENVOY_PROXIES.length, `본 EnvoyProxy가 ${proxies}개다`);
+});
+
+test('V-T43 ① HOT-405 WS4 시험 바탕: 일꾼 수 인자 꼴을 가린다', () => {
+  for (const x of ['--concurrency', '--concurrency=32', '--concurrency 2', '--cpuset-threads', '-concurrency']) assert.ok(WORKER_ARG.test(x), x);
+  for (const x of ['--component-log-level', '--concurrencyx', '2', '--log-level']) assert.ok(!WORKER_ARG.test(x), x);
 });
