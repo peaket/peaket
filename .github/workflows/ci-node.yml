@@ -124,6 +124,12 @@ jobs:
       - run: pnpm --filter @peaket/purchase-svc test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
+      # realtime-gw의 좌석 델타 WebSocket을 실제 Valkey로: 핸드셰이크 거절, 샤드 Pub/Sub 구독·묶음, Valkey를 멈췄다 다시 띄움, 구독 명령만 허용한 사용자,
+      # SIGTERM 1012, 시작 파일(dist/main.js)(BUILD_ORDER HOT-090, S-T31·S-T42). 시작 파일 시험이 dist를 쓰므로 의존 패키지와 함께 먼저 빌드한다
+      - run: pnpm exec turbo run build --filter=@peaket/realtime-gw...
+      - run: pnpm --filter @peaket/realtime-gw test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
       # 시작 파일 시험(BUILD_ORDER PRF-215): 서비스 넷(queue-svc·admission-ctrl·purchase-svc·payment-svc)의 dist/main.js와 한 프로세스 합본의 dist/main.js를
       # 운영 시작 명령 그대로 띄워 실제 Valkey·PostgreSQL 18에 붙이고 준비·종료 차례를 본다(시험 조립과 따로, docs/architecture.md §8.6 '자주 놓친 결함')
       # 앞 단계가 만든 서비스 넷·합본의 dist를 그대로 쓴다(시험은 다시 빌드하지 않고 dist가 src보다 새로운지만 본다, 코드 리뷰)

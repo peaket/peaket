@@ -60,6 +60,8 @@ export interface CreateServiceOptions {
   clock?: Clock;
   /** 로그 목적지. 기본 표준 출력(시험에서 바꿔 끼운다) */
   logDestination?: Writable;
+  /** 참이면 로그 시각 `ts`를 UTC(`…Z`)로 쓴다(기본 KST 오프셋, createPlatformLogger의 utc) */
+  logUtc?: boolean;
   /** NestJS 자체 기록 수준. 기본 error·warn(서비스 로거로 간다) */
   nestLogLevels?: LogLevel[] | false;
   /** identity-svc GetAdminAuthz 포트. 관리 역할(partner_*·관제 다섯)을 단 처리기가 있으면 꼭 있어야 한다(ADR-0172) */
@@ -138,6 +140,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     clock,
     level: config.logLevel,
     destination: o.logDestination,
+    ...(o.logUtc ? { utc: true } : {}),
   });
   if (warning) logger.warn(warning);
   // 정규 로그 줄은 서비스 로거 수준과 관계없이 info부터 낸다(수준을 올려도 표본 집계가 깨지지 않게)
