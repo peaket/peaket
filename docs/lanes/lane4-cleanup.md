@@ -9,3 +9,10 @@
 - BAT-052(R-690) 입장 토큰 확인 규칙이 `packages/platform` `verifyAdmissionToken`과 purchase-svc 두 곳에 있다. purchase-svc를 platform 함수로 바꾸는 일(다른 갈래 코드)(ADR-0296 결정 2).
 - BAT-052(R-690) 계정 전체 동시 연결 상한(SEC-02 뒤, 지금은 파드 안 jti 2개·파드 5,000만): S-T12 ① 측정(갈래 5 측정 창 2) 뒤 정함, 정하면 HOT-415(갈래 1) 쪽(감독 결정 2026-11-19).
 - 감독 넘김(BAT-416 RV-02, 낮음): 차례 배포 중 옛 purchase-svc 파드가 `changedAtMs`를 초로 낼 수 있다. realtime-gw가 `changedAtMs` < 10^12면 묶음 대기·지연 계산에서 뺄지 나중에 정한다(services/realtime-gw/src/modules/stream/application/hub.ts).
+- BAT-053(R-694) CON-08 낮음: 세대 바뀜 등으로 박자 밖에서 보낸 묶음을 advance 전이라 끝난 창에 센다(지금은 박자 밖 묶음을 판정에서 뺐으니 남은 영향 확인)(services/realtime-gw/src/modules/stream/application/hub.ts).
+- BAT-053(R-694) CON-09 낮음: Degraded 상태가 파드 기억에만 있어 굴려 배포하면 새 파드는 평시로 시작하고, 내리는 동안 `realtime_gw_degraded`가 1로 남는다. 정본에 적을지 정한다(ADR-0298).
+- BAT-053(R-694) WIR-08·TO-2·검증 M27 낮음: 시작 파일의 Degraded 로그 줄(`overEnter`·`overExit`·`ticks`)을 보는 자동 시험이 없다(박자를 손으로 돌리는 이음새가 생기면 단위 시험)(services/realtime-gw/src/start.ts).
+- BAT-053(R-694) 검증 놓침(통과 기준 밖): E12(20ms 몫 정각 경계 시험 없음), E17('1,000ms 넘게 뒤진 차례는 건너뜀' 시험 없음), E19(바뀔 때 괜찮음 이어짐을 지우지 않는 틀린 구현 — 두 번째 Degraded 되돌림 시험 없음)(services/realtime-gw/test/degraded.test.ts).
+- BAT-053(R-694) CON-02 곁가지 낮음: 같은 박자에 맺은 연결들의 하트비트가 한 박자에 몰린다(services/realtime-gw/src/modules/stream/application/hub.ts).
+- BAT-053(R-694) 검증 참고: observability §3 realtime-gw 행에 `realtime_gw_degraded`·`realtime_gw_pubsub_lag_ms`가 없다(§5·G-06 행에는 있음)(docs/observability.md).
+- BAT-052·BAT-053 CI 흔들림: `web / budgets`의 월렛 Lighthouse(LCP·CLS·총 차단 시간)가 웹을 건드리지 않은 PR에서 두 번 실패해 실패한 잡만 다시 돌려 통과(PR #24 실행 44355043848, PR #27 실행 44388717732)(갈래 2 영역).

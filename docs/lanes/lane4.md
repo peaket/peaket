@@ -7,9 +7,10 @@
 - **ADR 번호(첫 바퀴)**: 0296~0298. 모자라면 전체 감독에게 더 받는다(`docs/lanes/coord.md`).
 
 ## 다음 할 일
-- 다음 묶음(묶음 표 차례대로): BAT-053(HOT-091 realtime-gw 전파 Degraded 자동 전환, A, BAT-052에서 나눔) → BAT-075(BAS-080·120) → BAT-080(BAS-130·140, BAS-140에 BAT-052가 넘긴 realtime-gw 이미지·차트·kind·운영 ACL) → BAT-085(BAS-150·160) → BAT-355·360·365·390(ops-svc 제어 평면) → BAT-245~275(선행 OPS-010~030이 갈래 1에서 `develop`에 들어온 뒤). 선행이 없는 묶음은 건너뛴다.
+- 다음 묶음(묶음 표 차례대로): BAT-075(BAS-080·120) → BAT-080(BAS-130·140, BAS-140에 BAT-052·053이 넘긴 realtime-gw 이미지·차트·kind·운영 ACL·Degraded 경보) → BAT-085(BAS-150·160) → BAT-355·360·365·390(ops-svc 제어 평면) → BAT-245~275(선행 OPS-010~030이 갈래 1에서 `develop`에 들어온 뒤). 선행이 없는 묶음은 건너뛴다.
 - kind 클러스터 이름은 `lane4-`로 시작한다. 갈래 1도 kind를 쓰므로 Docker·합치기 잠금은 도우미로만 잡고 놓는다(`bash D:/ticketpass-locks/lock.sh take|drop|who <docker|merge> lane4-<묶음>`, 갈래마다 한 담당만, 2026-11-18 감독 규칙). 무거운 시험은 초안 PR CI로 돌린다(ADR-0286 결정 5). 자기 작업 가지 강제 푸시는 이 세션 권한에서 막혀, 다시 올린 가지는 `feature/lane4-<묶음>-r2` 같은 새 이름으로 올린다.
 
 ## 진행 로그
 - 2026-11-18 W11-lanes(R-686): 기록 크기 점검(`records.mjs --check`)에 `docs/lanes/lane4.md`·`lane5.md`를 더함(ADR-0286 '확인'). B 짧은 고리 커밋 8개, 틀린 구현 22/21(놓친 VF-V10은 시험 RS-14 더함), 리뷰 RV-02는 lane4-cleanup.md. 계획 `docs/review/plans/W11-lanes.md`.
 - 2026-11-19 BAT-052(R-690): 새 서비스 realtime-gw(좌석 델타 WebSocket, ADR-0296·0297)와 platform `verifyAdmissionToken`. A 등급, 커밋 18개, 관점 리뷰 높음 3 고침, 틀린 구현 80/73, PR #24 CI 초록. 뺀 몫은 BAT-053·066·095·182·BAS-140. 계획 `docs/review/plans/BAT-052.md`.
+- 2026-11-19 BAT-053(R-694): realtime-gw 전파 Degraded 자동 전환(ADR-0298 — 박자 늦음 판정·고정 격자 1초 차례·버퍼 1초 연결은 박자 맨 뒤). A 등급, 커밋 17개, 관점 리뷰 높음 4와 보안 다시 보기 SEC-06 고침, 틀린 구현 61/56, 통합 두 번 35/35. 계획 `docs/review/plans/BAT-053.md`.

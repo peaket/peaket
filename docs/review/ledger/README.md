@@ -75,9 +75,20 @@
 - I-T51 ①: tools/poc/login-compare/login-compare.test.mjs
 - I-T51 ⑥: tools/poc/login-compare/login-compare.test.mjs
 - Q-T64 ⑤: services/queue-svc/test/admission-cases.ts
+- RF-T1: services/realtime-gw/test/degraded.test.ts
+- RF-T10: services/realtime-gw/test/degraded.test.ts
 - RF-T11: services/realtime-gw/test-int/stream.int.test.ts
-- RF-T13: services/realtime-gw/test-int/stream.int.test.ts
-- RF-T9: packages/platform/test/admission-token.test.ts
+- RF-T12: services/realtime-gw/test-int/stream.int.test.ts
+- RF-T13: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/degraded.test.ts
+- RF-T14: services/realtime-gw/test/degraded.test.ts
+- RF-T2: services/realtime-gw/test/degraded.test.ts
+- RF-T3: services/realtime-gw/test/degraded.test.ts
+- RF-T4: services/realtime-gw/test/degraded.test.ts
+- RF-T5: services/realtime-gw/test/degraded.test.ts
+- RF-T6: services/realtime-gw/test/degraded.test.ts
+- RF-T7: services/realtime-gw/test/degraded.test.ts
+- RF-T8: services/realtime-gw/test/degraded.test.ts
+- RF-T9: packages/platform/test/admission-token.test.ts, services/realtime-gw/test/degraded.test.ts
 - S-T30 ①: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
 - S-T30 ②: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
 - S-T30 ③: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
