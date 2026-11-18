@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 70 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 118 |
+| A | 77 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 125 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 128 | 24 | 6 | 0 | 2 | 47 | 0 | 0 | 0 | 207 |
+| 합계 | 135 | 24 | 6 | 0 | 2 | 47 | 0 | 0 | 0 | 214 |
 
 ## docs/features/payment.md
 
@@ -130,6 +130,13 @@
 | P-T54 | ④ | 결제 결과 조회 서버(추천 적용 2026-11-09… | ④는 답에 없다. | ID만 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test-int/payment-process.int.test.ts 외… |
 | P-T54 | ⑤ | 결제 결과 조회 서버(추천 적용 2026-11-09… | ⑤는 100건이 되고 101건은 `INVALID_ARGUMENT`다. | ID만 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test-int/payment-process.int.test.ts 외… |
 | P-T54 | ⑥ | 결제 결과 조회 서버(추천 적용 2026-11-09… | ⑥은 `payment (order_id)` 유일 인덱스와 `payment_event` 기본 키를 쓴다. 표가 잠겨 읽지 못하면 문장 시간 한도 400ms… | ID만 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test-int/payment-process.int.test.ts 외… |
+| P-T55 | ① | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ① A에 주문이 없거나 APPROVED·CONFIRMED·FAILED·EXPIRED·COMPENSATED·PARTIALLY_REFUNDED·REFUNDED… | 자동 시험 | A | 시험: services/purchase-svc/test-int/withdrawal-participant.int.test.ts, services/purchase-svc/test/process-account-withdr… |
+| P-T55 | ② | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ② A의 CREATED·AUTHENTICATED·ACCEPTED·RESERVED·UNKNOWN 주문은 상태마다 하나씩만 있어도 각각 `PENDING`·이유… | 자동 시험 | A | 시험: services/purchase-svc/test-int/withdrawal-participant.int.test.ts, services/purchase-svc/test/process-account-withdr… |
+| P-T55 | ③ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ③ A의 AWAITING_DEPOSIT 주문마다 `CancelPayment`가 취소 ID `withdrawal-{주문 ID}`·금액 = 주문 금액·사유… | 자동 시험 | A | 시험: services/purchase-svc/test-int/withdrawal-participant.int.test.ts, services/purchase-svc/test/process-account-withdr… |
+| P-T55 | ④ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ④ 취소 답이 `CANCEL_PENDING`·`UNKNOWN`·`REJECTED`이거나 호출이 실패하면(결제사 취소 뒤 답 유실 포함) `PENDING`·이유… | 자동 시험 | A | 시험: services/payment-svc/test/deposit-only-cancel.test.ts, services/purchase-svc/test-int/withdrawal-participant.int.tes… |
+| P-T55 | ⑤ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ⑤ 남은 시간이 50ms보다 모자라면 `CancelPayment`를 부르지 않고 그 주문을 남은 것으로 센다(50ms면 부른다). 입금 대기 주문이 11개면… | 자동 시험 | A | 시험: services/purchase-svc/test/process-account-withdrawal.test.ts |
+| P-T55 | ⑥ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ⑥ B의 주문은 읽지도 바꾸지도 않는다(B의 입금 대기 주문 취소 0건). 계정 ID가 대문자이거나 UUID가 아니면 `INVALID_ARGUMENT`이고… | 자동 시험 | A | 시험: services/bundle/test-int/start-files.int.test.ts, services/purchase-svc/test-int/withdrawal-participant.int.test.ts… |
+| P-T55 | ⑦ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ⑦ 주문 생성은 재확인 답이 verified 거짓·`withdrawal_pending` 참이면 409 `withdrawal-pending`이고 주문 행·멱등… | 자동 시험 | A | 시험: services/purchase-svc/test-int/identity-grpc.int.test.ts, services/purchase-svc/test/create-order.test.ts 외 2곳 |
 
 ## docs/security/asvs/payment.md
 
@@ -141,7 +148,7 @@
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-deposit.int.test.t… |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/auto-assign.test.ts, services/purchase-svc/test/hold-seats.test.ts 외 2곳 |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-confirm-runner.int… |
-| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 24곳 |
+| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 25곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 14곳 |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-confirm-runner.int.test.ts, services/payment-svc/test-int/payment-deposit.int… |
 | v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: packages/platform/test-int/idempotency.int.test.ts, packages/platform/test-int/template.int.test.ts |
@@ -166,7 +173,7 @@
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test/pg-selection.test.ts |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-password-change.int.test.ts, services/identity-svc/test/admin-password-change.t… |
-| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 20곳 |
+| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 22곳 |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 2곳 |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test/payment-method-ref.test.ts |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 다른 단계 | B | 결제 공통 후속 · payment-svc·플랫폼의 TLS·KMS 경로가 맡는다. BAT-050 범위 밖이다. |

@@ -228,3 +228,13 @@
 - W10-guards(R-682) RV-02 중간: `promisify(execFile)`를 변수에 담은 꼴, 이름 바꾼 import, 상수에 담은 명령, `cp['…']`, `?.(`, `sudo docker` 호출은 막지도 세지도 않는다(tools/ci/check-docker-timeouts.mjs). 지금 저장소에는 없다.
 - W10-guards(R-682) RV-03·VF-X20·VF-X22 낮음: 호출 괄호 안 어디든 통과하는 `timeout`이 하나 있으면 통과로 본다(뒤에 펼친 옵션, 중복 키, 다른 인자 속 객체, 콜백 몸, 정규식 괄호, 주석·글 조각 속 글을 가리는 시험이 없다)(tools/ci/check-docker-timeouts.mjs).
 - W10-guards(R-682) RV-04 낮음: 확장자 목록에 `.jsx`가 없어 역할 확인의 시험 파일 정의와 조금 다르다(tools/ci/check-docker-timeouts.mjs).
+- PRF-169(BAT-010 RV-02): purchase 취소 어댑터 `GrpcPaymentCancellations`가 `GetPayment`와 `CancelPayment`에 데드라인을 따로 걸어 한 취소가 남은 시간의 최대 두 배까지 걸린다(refund/adapters/grpc-payment-cancellations.ts). identity 고리의 60초 안 끝남은 identity 쪽 호출에만 맞고 purchase 안의 취소는 그 뒤까지 돌 수 있다(취소 ID가 같아 해는 없다).
+- PRF-169(BAT-010 RV-07): 다시 하기 고리의 잡기가 실패하면 `identity_withdrawal_pending_oldest_seconds`가 옛 값에 머물러 1시간 경보가 울리지 않을 수 있다(application/retry-pending-withdrawals.ts).
+- PRF-169(BAT-010 RV-08): 정본의 50ms 하한과 '남은 시간 − 100ms' 여유가 남은 50~100ms에서 맞지 않아 1ms 데드라인으로 부른다(purchase booking/application/process-account-withdrawal.ts, payment.md §6).
+- PRF-169(BAT-010 RV-09): `CancelPaymentRequest.scope`를 옛 payment-svc가 버린다. 정본에 배포 차례(payment-svc 먼저)만 적었고, 답에 받은 범위를 되돌려 purchase가 확인하는 코드 가드는 없다.
+- PRF-169(BAT-010 RV-05): 재확인 거부와 409 `withdrawal-pending`을 까닭 이름표로 세는 지표가 없다(지금은 요청 기록의 상태·문제 이름으로 본다).
+- PRF-169(BAT-010 리뷰): `grpc-merge-checkers.ts:120`의 `PEAKET_ENV ?? 'local'`이 RV-01과 같은 꼴이다(값이 없으면 운영으로 봐야 한다, 보안 중간).
+- PRF-169(BAT-010 RV-10): 바퀴 마감·멈춤 신호로 부르지 않은 계정이 결과·로그·지표에 드러나지 않고, 잘린 계정과 끝낸 계정의 다음 확인 시각이 같아 다음 바퀴 차례가 정해지지 않는다.
+- PRF-169(BAT-010 RV-11): RV-01 시험에 단 `[ASVS v5.0.0-7.4.2]` 표시가 단언 내용과 맞지 않는다(identity test/withdrawal-participant.grpc.test.ts).
+- PRF-169(BAT-010 검증 C3·X5·M11b·X1): `main.ts`의 고리 간격을 바꿔도 시험이 통과한다(시험용 간격 설정이 없다), 고리가 멈춤 신호를 무시해도 통과한다, 겹친 요청의 답을 `toBeDefined`로만 본다, 재인증 토큰의 계정 대조를 빼도 세션 묶음이 먼저 막아 드러나지 않는다.
+- 흔들리는 시험(2026-11-18 BAT-010·061 중 관찰): purchase `test/payment-confirm.test.ts`(부하 아래 3번 중 2번, 매번 다른 시험), identity `BOT-050_맥락은LOGIN…`(한 번), purchase 통합 `test-int/payment-model.int.test.ts` V-T40(주문 1·시도 2, fast-check 시드 122710908, '결제사 1 대역이 주문을 풀지 못한 호출', 초안 PR #15), web/budgets Lighthouse 월렛(`lighthouse.spec.mjs:58`, 초안 PR #13·#15에서 실패, develop 푸시에서는 통과).

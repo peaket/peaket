@@ -4,8 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 239 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 389 |
-| 합계 | 239 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 389 |
+| A | 7 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 8 |
+| B | 239 | 49 | 0 | 0 | 0 | 6 | 0 | 7 | 87 | 388 |
+| 합계 | 246 | 49 | 0 | 0 | 0 | 7 | 0 | 7 | 87 | 396 |
 
 ## docs/features/identity.md
 
@@ -50,7 +51,7 @@
 | I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 빈칸 | B | — |
 | I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 빈칸 | B | — |
 | I-T25 | — | 현장 책임자 권한 통제 | `gate_staff` 토큰과 대리 승인 토큰으로 예외 통과·기기 배치·부스 허용·확인 스캔을 시도하면 403이 돌아온다. 이 작업은 `gate_lead`… | 빈칸 | B | — |
-| I-T26 | — | 미사용 티켓 보유 회원의 탈퇴 | 남은 티켓의 환불 예상액과 양도 가능 여부 안내를 투명하게 보여 준다. 사용자가 최종 확인하면 취소·환불·탈퇴가 차례로 끝난다. | 다른 단계 | B | BOT-030·BOT-035 · 탈퇴 참여자의 미사용 티켓 취소는 탈퇴 참여자 단계가 맡는다. |
+| I-T26 | — | 미사용 티켓 보유 회원의 탈퇴 | 남은 티켓의 환불 예상액과 양도 가능 여부 안내를 투명하게 보여 준다. 사용자가 최종 확인하면 취소·환불·탈퇴가 차례로 끝난다. | 다른 단계 | A | PRF-174 · 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(§1.5 ①, 돈)은 PRF-174(BAT-013)가 맡는다(2026-11-18 BAT-010 계획이 빈칸을 찾음, ADR-0283 결정 6). |
 | I-T27 | — | 탈퇴 후 재가입 및 온세일 방어 | 탈퇴 때 CI 해시가 파기됐는지 확인한다. 바로 재가입하고 본인확인을 하는 것은 정상적으로 되지만, 탈퇴 뒤 5일 안에는 진행 중인 같은 공연에서 중복 순번이… | 자동 시험 | B | 시험: services/identity-svc/test-int/withdrawal.int.test.ts, services/identity-svc/test/withdrawal.test.ts 외 4곳 |
 | I-T28 | — | PBKDF2 비밀번호 해시 규격 검증 | DB에 저장된 해시 문자열에 `pbkdf2-sha256` 식별자, 600,000회 이상의 반복 파라미터, 페퍼 키 버전이 들어 있는지 검증한다. 다른 관리 계정… | 빈칸 | B | — |
 | I-T29 | — | 계정 연결 제안 발동 조건 | 검증된 이메일이 일치하는 활성 계정이 정확히 1개일 때만 연결 제안(`CreateSession`의 `link_proposal_id`, 웹은 SCR-039로… | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, services/identity-svc/test-int/link-proposal.int.te… |
@@ -67,7 +68,7 @@
 | I-T40 | — | 부스 본인확인 대조 | 대조 목적에 동의하지 않으면 본인확인이 시작되지 않는다. 결과 `ci_hmac`이 보유 계정과 다르면 409로 부스 코드가 나오지 않는다. 연계정보 원문은… | 빈칸 | B | — |
 | I-T41 | — | TOTP 시드 암호문 결속 | 한 관리 계정의 TOTP 시드 암호문을 다른 관리 계정 행으로 복사하면 암호화 컨텍스트가 맞지 않아 복호에 실패한다. 로그인은 거부되고 보안 이벤트가 남는다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-totp.int.test.ts, services/identity-svc/test/admin-totp.test.ts |
 | I-T42 | — | 만 14세 미만 본인확인 | 본인확인 결과가 만 14세 미만이면 연계정보가 저장되지 않고, 403 `under-14`가 나오며 계정 정리가 시작된다. 생년월일은 DB·로그에 0건이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/verification-keys.int.test.ts, services/identity-svc/test/http.test.ts 외 1곳 |
-| I-T43 | — | 받은 티켓·양도 요청·가상계좌가 있는 탈퇴 | 받은 티켓은 결제자에게 돌아간다. 수락 전에 보낸 양도 요청은 철회된 뒤 취소·환급되고, 받은 양도 요청은 거절로 끝난다. 입장 시작 뒤 취소한 가상계좌 결제… | 다른 단계 | B | PRF-169·GAT-050·GAT-090 · 받은 티켓·양도 요청·가족계좌가 있는 탈퇴 차단은 탈퇴 참여자 단계가 맡는다. 가상계좌 202 미룸은 PRF-169 탈퇴 참여자 틀 뒤의… |
+| I-T43 | — | 받은 티켓·양도 요청·가상계좌가 있는 탈퇴 | 받은 티켓은 결제자에게 돌아간다. 수락 전에 보낸 양도 요청은 철회된 뒤 취소·환급되고, 받은 양도 요청은 거절로 끝난다. 입장 시작 뒤 취소한 가상계좌 결제… | 다른 단계 | B | GAT-050·GAT-090 · 받은 티켓·양도 요청이 있는 탈퇴는 양도 단계(GAT-050), 가상계좌 지연 환급의 202 미룸은 GAT-090이 탈퇴 참여자에 더한다. 참여자의 틀과 결제 대기·입금 대기 주문… |
 | I-T44 | — | 파트너 역할: 파트너 실무자로 정산 계좌 변경·명단 내려받기·회차 취소… | 실무자 요청은 모두 403이고 화면 버튼은 비활성이다. 마지막 관리자의 역할 변경·삭제는 거부된다. 역할 변경은 권한 변경 내역에 남는다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-account-management.int.test.ts, services/identity-svc/test/admin-account-manage… |
 | I-T45 | ① | 본인확인 흐름: 공연 상세에서 [휴대폰 본인확인]을 눌러 ① 팝업 완료… | ①은 별도 화면 없이 공연 상세 위 토스트, | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | I-T45 | ② | 본인확인 흐름: 공연 상세에서 [휴대폰 본인확인]을 눌러 ① 팝업 완료… | ②는 [다시 시도] 대화상자, | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
@@ -267,6 +268,13 @@
 | I-T83 | ⑦ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑦ 살아 있는 후기는 별점·내용 지문 없이 넣을 수 없고, 예약 표는 앱 역할의 읽기·넣기·지우기·예약 시각 고치기만 된다 | 자동 시험 | B | 시험: services/core-svc/test-int/review-grants.int.test.ts, services/core-svc/test-int/review-purge-manual.int.test.ts 외… |
 | I-T83 | ⑧ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑧이전 판이 남긴 행(작성자가 지웠는데 별점·지문·계정 ID가 남은 행, 옛 익명화로 계정 ID 자리에 후기 ID가 든 살아 있는 후기)은 정비 일… | 자동 시험 | B | 시험: services/core-svc/test-int/review-grants.int.test.ts, services/core-svc/test-int/review-purge-legacy.int.test.ts 외… |
 | I-T83 | ⑨ | 관람 후기 파기와 탈퇴 15분 뒤 다시 정리(소유자 결정… | ⑨ 손으로 처리 `/purge`는 그 계정의 보류된 탈퇴 사건이 있을 때만 파기하고 보류 행을 다시 처리로 표시하며 예약을 쓴다. 보류된 사건이 없는… | 자동 시험 | B | 시험: services/core-svc/test-int/review-purge-manual.int.test.ts, services/core-svc/test/review-purge-migration.test.ts 외… |
+| I-T84 | ① | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ① 참여자가 모두 `DONE`이면 204다. 계정은 `DELETED`이고 살아 있던 세션이 모두 `DELETE`로 끝나며, 본인확인한 계정이면 탈퇴 사건이 한… | 자동 시험 | A | 시험: services/identity-svc/test-int/main-withdrawal.int.test.ts, services/identity-svc/test-int/withdrawal-participant.in… |
+| I-T84 | ② | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ② 참여자 하나라도 `PENDING`이면 본문 없는 202다. 계정은 `WITHDRAWAL_PENDING`·정리 사유… | 자동 시험 | A | 시험: services/identity-svc/test-int/main-withdrawal.int.test.ts, services/identity-svc/test-int/withdrawal-participant.in… |
+| I-T84 | ③ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ③ 참여자 호출이 `UNAVAILABLE`·`DEADLINE_EXCEEDED`·`INVALID_ARGUMENT`·`INTERNAL`로 끝나거나, 차단기가… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal-participant… |
+| I-T84 | ④ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ④ 고리는 `closure_next_check_at` − 1ms에는 그 계정을 잡지 않고 그 시각에는 잡으며, 잡으면… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal-retry.test… |
+| I-T84 | ⑤ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ⑤ 미룬 계정이 새 재인증 토큰으로 다시 요청하면 참여자를 다시 부르고 `DONE`이면 204, `PENDING`이면 202다… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal.test.ts |
+| I-T84 | ⑥ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ⑥ `GetVerificationStatus`는 살아 있는 세션의 `WITHDRAWAL_PENDING`(`WITHDRAWAL`) 계정에 verified… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/identity.grpc.test.ts… |
+| I-T84 | ⑦ | 결제 결과를 기다리는 주문·입금 대기 주문이 있는 탈퇴와 미룸(추천… | ⑦ 요청 경로의 끝내기와 고리의 끝내기가 겹쳐도 계정은 한 번 끝나고 탈퇴 사건은 한 건이다. 대조값 보관 행이 있으면 지금처럼 409… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal-participant… |
 
 ## docs/security/asvs/auth.md
 
@@ -339,7 +347,7 @@
 | v5.0.0-7.3.1 | — | L2 | 위험 분석과 문서화한 보안 결정에 따라 유휴 만료를 두어 재인증을 요구한다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-token-refresh-http.test.ts |
 | v5.0.0-7.3.2 | — | L2 | 위험 분석과 문서화한 보안 결정에 따라 절대 만료를 두어 재인증을 요구한다. | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-7.4.1 | — | L1 | 로그아웃·만료로 세션이 끝나면 그 세션을 더 쓰지 못하게 하고, 참조 토큰·상태 저장 세션은 백엔드에서 무효화하며 자체 완결형 토큰은 종료 목록 등으로 거부한다. | 자동 시험 | B | 시험: packages/platform/test/auth-guard.test.ts, services/identity-svc/test-int/device-sessions.int.test.ts 외 7곳 |
-| v5.0.0-7.4.2 | — | L1 | 계정이 정지·삭제되면 그 계정의 모든 활성 세션을 끝낸다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-token-refresh-http.test.ts, services/identity-svc/test/http.test.ts |
+| v5.0.0-7.4.2 | — | L1 | 계정이 정지·삭제되면 그 계정의 모든 활성 세션을 끝낸다. | 자동 시험 | B | 시험: services/identity-svc/test-int/main-withdrawal.int.test.ts, services/identity-svc/test-int/withdrawal-participant.in… |
 | v5.0.0-7.4.3 | — | L2 | 인증 요소를 바꾸거나 지운 뒤 다른 세션을 모두 끝낼 수 있게 한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/device-sessions.int.test.ts, services/identity-svc/test-int/link-proposal.int.test.ts… |
 | v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web |
 | v5.0.0-7.4.5 | — | L2 | 관리자가 사용자별·전체 활성 세션을 끝낼 수 있다. | 빈칸 | B | 영역: services/identity-svc, services/ops-svc |
