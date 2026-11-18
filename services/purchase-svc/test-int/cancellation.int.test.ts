@@ -49,6 +49,8 @@ import {
 import { migratePurchase } from '../scripts/migrate.mjs';
 // 다시 보기 2 N1·N2(시험 담당 l3w8-420-n-test)
 import { DrizzleCsCaseOutbox, HttpEntryFlagNotice, HttpRefundFailureNotice } from '../src/modules/refund/index.js';
+// BAT-420-rest P-T72(시험 담당 l3-b420-test)
+import { HttpRefundAccountNotice } from '../src/modules/refund/index.js';
 import { startOpsCsDouble } from './ops-cs-double.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { type ShardSubscriber, shardSubscriber, startValkey, type ValkeyContainer } from './valkey.js';
@@ -83,6 +85,8 @@ let beforeGatewayAnswer: (() => Promise<void>) | undefined;
 let writes: DrizzleCancellationWrites;
 let gatewayOutcome: CancelResult['outcome'] = 'CANCELLED';
 let gatewayCalls: Parameters<PaymentGatewayPort['cancel']>[0][] = [];
+/** BAT-420-rest P-T72: 결제사 대역 거절의 까닭(REFUND_ACCOUNT_INVALID면 계좌 거절) */
+let gatewayReason: CancelResult['reason'] | undefined;
 const calendar = new WeekendBusinessCalendar();
 
 /** 같은 PostgreSQL 서버에 이름이 다른 데이터베이스를 만든다(마이그레이션 표·outbox 이름이 겹치지 않게) */
@@ -135,7 +139,8 @@ beforeAll(async () => {
     cancel: async (c: Parameters<PaymentGatewayPort['cancel']>[0]) => {
       gatewayCalls.push(c);
       if (beforeGatewayAnswer) await beforeGatewayAnswer();
-      return { outcome: gatewayOutcome };
+      // BAT-420-rest P-T72(시험 담당 l3-b420-test): 계좌 거절의 까닭을 실을 수 있게 한다(없으면 지금과 같다)
+      return { outcome: gatewayOutcome, ...(gatewayReason ? { reason: gatewayReason } : {}) };
     },
   } as unknown as PaymentGatewayPort;
   const confirmed = new CancelConfirmedPayment({
@@ -1271,4 +1276,227 @@ describe('BAT-420 다시 보기 2 N1·N2 마감 뒤 환급 실행기의 CS 건 �
     // 뒤 시험이 다시 집지 않게 끝낸다
     await admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = any($1::uuid[]) and status = 'REFUND_PENDING'", [[...mine]]);
   }, 60_000);
+});
+
+// BAT-420-rest P-T72 ②③④⑤⑥(시험 담당 l3-b420-test, 2026-11-19): 예매 취소의 환불 계좌 규칙과 계좌 대기를 실제 PostgreSQL(purchase·ticket·payment)·
+// 실제 ticket-svc·payment-svc gRPC(운영 처리기·저장소)로 돈다. 결제사만 기록 대역이다. 가상계좌 결제는 payment 원장에 수출 사건 AWAITING_DEPOSIT·APPROVED를 넣어 만든다
+// (정본 docs/features/payment.md §6 '가상계좌였는지'). 결제 수단 읽기는 실제 GrpcPaymentCancellations.virtualAccountPaid(GetPayment)다.
+// HTTP 422·503 모양과 견적은 test/cancel-refund-account-http.test.ts가 본다. 계좌 글 누설은 세 DB의 모든 행에서 찾는다.
+describe('P-T72 예매 취소의 환불 계좌 규칙과 계좌 대기 [실제 PostgreSQL·ticket-svc·payment-svc gRPC]', () => {
+  const ACCOUNT_NO = '110-987-654321';
+  const ACCOUNT_DIGITS = '110987654321';
+  const HOLDER = '김환불';
+  const REFUND_ACCOUNT = { bankCode: '88', accountNumber: ACCOUNT_NO, holderName: HOLDER };
+  let ops: Awaited<ReturnType<typeof startOpsCsDouble>>;
+  const log: string[] = [];
+  let vaSaga: CancelTicket;
+  beforeAll(async () => {
+    ops = await startOpsCsDouble(log);
+    vaSaga = new CancelTicket({
+      orders: new DrizzleCancellationOrders(purchaseDb, seatMap),
+      calendar,
+      tickets: ticketCancels!,
+      payments: paymentCancels!,
+      writes,
+      seats: new DrizzleSeatReturns(sales, seatMap, new RedisSeatReturnNotices(redis)),
+      paymentMethods: paymentCancels!,
+    });
+  });
+  afterAll(async () => {
+    await ops?.close();
+    gatewayReason = undefined;
+    gatewayOutcome = 'CANCELLED';
+  });
+
+  /** 입금 확정까지 간 가상계좌 결제(수출 사건 AWAITING_DEPOSIT·APPROVED) */
+  const virtualWorld = async (): Promise<World> => {
+    const w = await world();
+    await paymentDb.pool.query(
+      `insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at) values ($1, 1, $2, 'AWAITING_DEPOSIT', true, now()), ($1, 2, $3, 'APPROVED', true, now())`,
+      [w.paymentId, randomUUID(), randomUUID()],
+    );
+    return w;
+  };
+  const vaCancel = (w: World, cancellationId: string, refundAccount?: typeof REFUND_ACCOUNT) =>
+    vaSaga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId, reason: 'USER', nowMs: NOW, deadlineMs: 5_000, ...(refundAccount ? { refundAccount } : {}) });
+  const accountRow = async (cancellationId: string) =>
+    (
+      await admin.pool.query<{ status: string; next_refund_at: Date | null; refund_account_required_at: Date | null; refund_account_case_opened_at: Date | null; refund_attempts: number; refund_failed_at: Date | null }>(
+        'select status, next_refund_at, refund_account_required_at, refund_account_case_opened_at, refund_attempts, refund_failed_at from order_cancellation where id = $1',
+        [cancellationId],
+      )
+    ).rows[0];
+  const paymentCancelRows = async (paymentId: string) => (await paymentDb.pool.query('select status from payment_cancel where payment_id = $1', [paymentId])).rows as { status: string }[];
+  /** 세 DB 모든 공개 표·모든 행에서 계좌 글을 찾는다 */
+  const leaks = async (): Promise<string[]> => {
+    const found: string[] = [];
+    for (const [name, d] of [
+      ['purchase', admin],
+      ['ticket', ticketDb],
+      ['payment', paymentDb],
+    ] as const) {
+      const tables = (await d.pool.query<{ table_name: string }>("select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE'")).rows.map((r) => r.table_name);
+      for (const t of tables) {
+        const rows = (await d.pool.query<{ line: string }>(`select t::text as line from "${t}" t`)).rows;
+        for (const r of rows) for (const needle of [ACCOUNT_NO, ACCOUNT_DIGITS, HOLDER]) if (r.line.includes(needle)) found.push(`${name}.${t}:${needle}`);
+      }
+    }
+    return found;
+  };
+
+  test('P-T72 ② 가상계좌·입장 시작 전에 계좌 없이 취소하면 REFUND_ACCOUNT_REQUIRED이고 실제 ticket 행·order_cancellation·payment_cancel·결제사 호출이 그대로다(0)', async () => {
+    const w = await virtualWorld();
+    const before = await ticketRow(w.ticketId);
+    gatewayCalls = [];
+    const cancellationId = randomUUID();
+    await expect(vaCancel(w, cancellationId)).resolves.toEqual({ status: 'REFUND_ACCOUNT_REQUIRED' });
+    expect(await ticketRow(w.ticketId)).toEqual(before);
+    expect(await cancellationRow(cancellationId)).toBeUndefined();
+    expect((await admin.pool.query('select 1 from order_cancellation where order_id = $1', [w.orderId])).rows).toEqual([]);
+    expect(await paymentCancelRows(w.paymentId)).toEqual([]);
+    expect(gatewayCalls).toEqual([]);
+    expect(await paymentRow(w.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+  });
+
+  test('P-T72 ③ 계좌를 실으면 결제사 대역이 받은 계좌가 본문과 같고(하이픈을 뺀 숫자) 환급액이 한 번 나간다. 카드 결제에 실은 계좌는 결제사에 가지 않는다', async () => {
+    const w = await virtualWorld();
+    gatewayCalls = [];
+    gatewayOutcome = 'CANCELLED';
+    const cancellationId = randomUUID();
+    const r = await vaCancel(w, cancellationId, REFUND_ACCOUNT);
+    expect(r).toMatchObject({ status: 'ACCEPTED', cancellationId });
+    expect(gatewayCalls).toHaveLength(1);
+    expect(gatewayCalls[0]!.refundAccount).toEqual({ bankCode: '88', accountNumber: ACCOUNT_DIGITS, holderName: HOLDER });
+    expect(gatewayCalls[0]!.idemKey).toBe(`cancel-${cancellationId}`);
+    const row = await cancellationRow(cancellationId);
+    expect(row).toMatchObject({ status: 'REFUNDED' });
+    expect((await paymentRow(w.paymentId))!.cancelled_amount).toBe(row!.refund_amount);
+
+    const card = await world();
+    gatewayCalls = [];
+    await expect(vaCancel(card, randomUUID(), REFUND_ACCOUNT)).resolves.toMatchObject({ status: 'ACCEPTED' });
+    expect(gatewayCalls).toHaveLength(1);
+    expect(gatewayCalls[0]).not.toHaveProperty('refundAccount');
+  });
+
+  test('P-T72 ④ 결제사가 계좌를 거절해 payment가 REFUND_ACCOUNT_REQUIRED로 답하면 REFUND_PENDING·refundAccountRequired이고, 행은 next_refund_at 빔·refund_account_required_at = 취소 시각·재시도 횟수 0·실패 표시 없음이며 마감 뒤 환급 실행기가 집지 않는다', async () => {
+    const w = await virtualWorld();
+    gatewayCalls = [];
+    gatewayOutcome = 'REJECTED';
+    gatewayReason = 'REFUND_ACCOUNT_INVALID';
+    const cancellationId = randomUUID();
+    try {
+      const r = await vaCancel(w, cancellationId, REFUND_ACCOUNT);
+      expect(r).toMatchObject({ status: 'REFUND_PENDING', cancellationId, payment: 'REFUND_ACCOUNT_REQUIRED', refundAccountRequired: true });
+    } finally {
+      gatewayOutcome = 'CANCELLED';
+      gatewayReason = undefined;
+    }
+    // 장애 주입이 실제로 끼어들었다: 결제사가 한 번 불렸고 payment_cancel 행이 FAILED다
+    expect(gatewayCalls).toHaveLength(1);
+    expect(await paymentCancelRows(w.paymentId)).toEqual([{ status: 'FAILED' }]);
+    const row = await accountRow(cancellationId);
+    expect(row).toMatchObject({ status: 'REFUND_PENDING', next_refund_at: null, refund_attempts: 0, refund_failed_at: null, refund_account_case_opened_at: null });
+    expect(row!.refund_account_required_at?.getTime()).toBe(NOW);
+    expect(await paymentRow(w.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+    // 하루 뒤에도 실제 집기 질의(dueRefunds)에 없다
+    const due = await writes.dueRefunds(NOW + DAY, 1_000);
+    expect(due.map((d) => d.cancellationId)).not.toContain(cancellationId);
+    // 0029 CHECK: 표시 없이 연 시각을 쓸 수 없다
+    await expect(admin.pool.query('update order_cancellation set refund_account_required_at = null, refund_account_case_opened_at = now() where id = $1', [cancellationId])).rejects.toMatchObject({
+      code: '23514',
+      constraint: 'order_cancellation_refund_account_case_check',
+    });
+  });
+
+  test("P-T72 ⑤ 틱 끝 다시 열기는 환급 실패 건 다음에 '환불 대기'(REFUND_ACCOUNT_PENDING) 건을 열고 2xx 뒤에만 refund_account_case_opened_at을 쓰며, ops가 500이면 다음 틱에 다시 열고 연 뒤에는 다시 부르지 않는다", async () => {
+    const w = await virtualWorld();
+    gatewayOutcome = 'REJECTED';
+    gatewayReason = 'REFUND_ACCOUNT_INVALID';
+    const pendingId = randomUUID();
+    try {
+      await vaCancel(w, pendingId, REFUND_ACCOUNT);
+    } finally {
+      gatewayOutcome = 'CANCELLED';
+      gatewayReason = undefined;
+    }
+    // 환급 실패로 표시된 다른 팬 행(차례 대조)
+    const failedWorld = await world();
+    const failedId = randomUUID();
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at, refund_failed_at, refund_last_error, refund_attempts)
+       values ($1, $2, $3, 'USER', 0, false, 0, 0, 1000, 'REFUND_PENDING', now(), now(), now(), 'REJECTED', 1)`,
+      [failedId, failedWorld.orderId, failedWorld.ticketId],
+    );
+    const mine = new Set<string>([pendingId, failedId]);
+    const real = new DrizzleCsCaseOutbox(admin);
+    const client = createExternalHttpClient({ provider: 'ops-svc', baseUrl: ops.url, timeoutCapMs: 5_000 });
+    const scopedWrites = Object.create(writes) as typeof writes;
+    scopedWrites.dueRefunds = async (nowMs, limit) => (await writes.dueRefunds(nowMs, limit)).filter((r) => mine.has(r.cancellationId));
+    const failures: string[] = [];
+    const runner = () =>
+      new RefundAfterEntry({
+        writes: scopedWrites,
+        payments: { cancel: async (q) => (log.push(`pay:${q.cancellationId}`), 'CANCELLED') },
+        entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+        claims: writes,
+        failureNotice: new HttpRefundFailureNotice(client, 'it-token'),
+        flags: new HttpEntryFlagNotice(client, 'it-token'),
+        accountNotice: new HttpRefundAccountNotice(client, 'it-token'),
+        csOutbox: {
+          pendingRefundFailures: async (limit: number) => (await real.pendingRefundFailures(limit)).filter((r) => mine.has(r.cancellationId)),
+          markRefundFailureOpened: (id: string, nowMs: number) => real.markRefundFailureOpened(id, nowMs),
+          pendingFlags: async (limit: number) => (await real.pendingFlags(limit)).filter((r) => mine.has(r.cancellationId)),
+          markFlagOpened: (id: string, nowMs: number) => real.markFlagOpened(id, nowMs),
+          pendingRefundAccounts: async (limit: number) => (await real.pendingRefundAccounts(limit)).filter((r) => mine.has(r.cancellationId)),
+          markRefundAccountOpened: (id: string, nowMs: number) => real.markRefundAccountOpened(id, nowMs),
+        },
+        csCaseOpenFailures: { inc: (k) => void failures.push(k), cut: () => undefined },
+        log: { warn: () => undefined, error: () => undefined },
+        nowMs: () => Date.now(),
+      });
+    log.length = 0;
+    ops.state.requests.length = 0;
+    ops.state.mode = 500;
+    await runner().run();
+    // 장애 주입이 끼어들었다: 두 건 모두 불렸고 500을 받았다
+    expect(ops.state.requests.map((r) => [r.body.kind, r.body.sourceId])).toEqual([
+      ['REFUND_FAILED', failedId],
+      ['REFUND_ACCOUNT_PENDING', pendingId],
+    ]);
+    expect(failures).toEqual(['REFUND_FAILED', 'REFUND_ACCOUNT_PENDING']);
+    expect((await accountRow(pendingId))!.refund_account_case_opened_at).toBeNull();
+    // 계좌 대기 행은 결제사로 다시 가지 않는다
+    expect(log.filter((l) => l === `pay:${pendingId}`)).toEqual([]);
+
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    await runner().run();
+    expect(ops.state.requests.map((r) => [r.body.kind, r.body.sourceId, r.body.category, r.token])).toEqual([
+      ['REFUND_FAILED', failedId, 'REFUND', 'it-token'],
+      ['REFUND_ACCOUNT_PENDING', pendingId, 'REFUND', 'it-token'],
+    ]);
+    expect((await accountRow(pendingId))!.refund_account_case_opened_at).not.toBeNull();
+    ops.state.requests.length = 0;
+    await runner().run();
+    expect(ops.state.requests).toEqual([]);
+    expect(log.filter((l) => l === `pay:${pendingId}`)).toEqual([]);
+    // 뒤 시험이 다시 집지 않게 끝낸다
+    await admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = any($1::uuid[]) and status = 'REFUND_PENDING'", [[...mine]]);
+  }, 60_000);
+
+  test('P-T72 ⑥ 계좌를 실은 취소·계좌 거절·계좌 대기를 돈 뒤 purchase·ticket·payment DB의 모든 행(order_cancellation·Outbox 포함)에 계좌번호·예금주 글이 없다 [ASVS v5.0.0-14.2.4]', async () => {
+    const w = await virtualWorld();
+    await vaCancel(w, randomUUID(), REFUND_ACCOUNT);
+    const w2 = await virtualWorld();
+    gatewayOutcome = 'REJECTED';
+    gatewayReason = 'REFUND_ACCOUNT_INVALID';
+    try {
+      await vaCancel(w2, randomUUID(), REFUND_ACCOUNT);
+    } finally {
+      gatewayOutcome = 'CANCELLED';
+      gatewayReason = undefined;
+    }
+    expect(await leaks()).toEqual([]);
+  });
 });
