@@ -1,7 +1,7 @@
 // 가상계좌 환불의 계좌 대기를 ops-svc CS 처리함 '환불 대기'(REFUND_ACCOUNT_PENDING, category REFUND)로 여는 어댑터
 // (BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기', docs/features/transfer-refund.md §3.1 ⑥). HttpRefundFailureNotice와 같은 꼴이다.
 // POST /internal/v1/cs-cases, 본문 { eventKey, kind: 'REFUND_ACCOUNT_PENDING', sourceId, category, createdAt }, 내부 토큰 머리, 5초.
-// 2xx를 받아야 연 것이다. 401·4xx·5xx는 CsCaseRejected, 시간 초과·연결 실패는 그 오류 그대로 던진다. 부른 쪽(환급 실행기 틱 끝)이 경고·지표를 남기고
+// 2xx이고 본문 accepted: true여야 연 것이다(BAT-420-rest 리뷰 반영 RV-01). 그 밖 답은 CsCaseRejected, 시간 초과·연결 실패는 그 오류 그대로 던진다. 부른 쪽(환급 실행기 틱 끝)이 경고·지표를 남기고
 // refund_account_case_opened_at을 비운 채 두어 다음 틱에 다시 연다.
 // eventKey는 `refund-account:{취소 ID}`의 SHA-256 앞 16바이트 UUID다. 계좌·금액·개인정보는 싣지 않는다(계좌는 저장하지 않으므로 여기에도 없다).
 import type { ExternalHttpClient } from '@peaket/platform';

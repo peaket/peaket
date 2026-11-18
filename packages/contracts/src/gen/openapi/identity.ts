@@ -510,13 +510,22 @@ export const DeleteIdentityAccountHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
+export const deleteIdentityAccountBodyRefundAccountBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const deleteIdentityAccountBodyRefundAccountAccountNumberMax = 30;
+
+
+export const deleteIdentityAccountBodyRefundAccountAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const deleteIdentityAccountBodyRefundAccountHolderNameMax = 60;
+
+
+
 export const DeleteIdentityAccountBody = zod.object({
   "confirmCancelUnusedTickets": zod.boolean().optional().describe('결제한 미사용 티켓의 취소·환급을 확인했다. 409의 unusedTickets(환급 예상)를 본 뒤 true로 다시 보낸다. 없거나 거짓이고 티켓이 있으면 409다. 409는 재인증 토큰을 쓰지 않아 같은 토큰으로 다시 보낸다(추천 적용 2026-11-19, BAT-013 계획)'),
   "acknowledgeFraudHold": zod.boolean().optional().describe('보관 안내(409의 fraudHold)를 본 뒤 true로 다시 보낸다. 보관 행이 있는데 없으면 다른 확인할 것이 없어도 409다(추천 적용 2026-10-31, ADR-0173)'),
   "refundAccount": zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
+  "bankCode": zod.string().regex(deleteIdentityAccountBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 두 자리(예 88 신한). 포트원 결제는 대응표에 있는 코드만 결제사로 간다'),
+  "accountNumber": zod.string().min(1).max(deleteIdentityAccountBodyRefundAccountAccountNumberMax).regex(deleteIdentityAccountBodyRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(deleteIdentityAccountBodyRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
 }).strict().optional().describe('가상계좌 결제 티켓을 지금 환급할 때만. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014)')
 }).strict()
 

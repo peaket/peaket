@@ -256,6 +256,7 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 - **정본 변경 반영(시험 이의 아님)**: payment 단위 'P-T71 ③ 대조'를 정본 ⑥대로 결제사 취소 0·조회 1로 뒤집음(재현), payment 통합 'P-T71 ④'의 다시 부름 답을 REJECTED에서 `REFUND_ACCOUNT_REQUIRED`·결제사 0으로(재현), ops `test/cases.test.ts`의 '받는 종류 셋'을 넷(환불 대기 더함, `DISPUTE` 등은 여전히 `accepted: false`)으로, purchase `test/cancel-reauth-http.test.ts`의 계좌 표본 `bankCode '088'`을 `'88'`로. 받는 쪽 대역의 2xx 본문을 `{"accepted":true}`로 바꿈: purchase `test-int/ops-cs-double.ts`(`state.accepted`, 기본 참), `test/event-refund-wave-review.test.ts` 대역 둘, `test/event-refund-account-pending.test.ts`의 202 답(구현 I1 뒤에도 기존 시험이 지나게).
 - **구현이 맞출 이름·모양**(계획 §3): `packages/validation/src/refund-account/index.ts`의 `refundAccountShape(v): { ok: true; value: { bankCode; accountNumber(하이픈 뺀 숫자); holderName } } | { ok: false }`(하위 경로 `@peaket/validation/refund-account`). payment `payment_cancel.fail_reason`(계좌 거절 `REFUND_ACCOUNT_INVALID`, 그 밖 null). ops 진행 `EventRefundJobProgress.accountPending`·관제 상세 `progress.accountPending`(결제사별 몫에는 없음). ops 0016 `event_cancellation_request.core_apply_superseded_at`, 메모리 저장소의 `core.get(id).nextAtMs`·`appliedAtMs`는 지금 이름 그대로 쓴다(4xx 401 제외 + 600,000ms, 5xx·무응답·401 + 60,000ms). purchase 본문 모양 오류는 400 `invalid-body`(문제 유형 접두어 + `invalid-body`). CS 받는 층 답은 2xx 본문 `accepted: true`일 때만 연 것.
 - **알림**: ops `test/event-cancellation-core-apply-main.test.ts`(main.ts를 띄우는 두 시험)가 다섯 서비스 단위를 한꺼번에 돌린 때 시간 초과로 실패했고 혼자 돌리면 통과한다(부하에 따른 흔들림, 이 반영과 무관). 검증 담당이 다시 볼 때 따로 돌리기를 권한다.
+- **시험 이의(구현 담당 `l3-b420-impl`, 리뷰 반영 구현, 2026-11-19)**: payment `test/payment-schema.test.ts`의 다섯 시험(PRF180·PRF181·PRF182_PRF183·GAT-080 P8 둘)은 마이그레이션 기록을 0000~0021로, `payment_cancel` 칸을 아홉으로 못 박아 정본 ④가 정한 새 칸 `fail_reason`(마이그레이션 0023, 감독 지시 번호)과 어긋나 실패한다. 구현 잘못이 아니라 시험이 정본 변경(payment §6 '구현에서 정한 것' ④, docs/data.md payment_cancel)을 따라가지 않은 것이라, 시험 담당이 기록 목록에 `[23, '0023_payment_cancel_fail_reason']`·SQL 파일 목록에 `0023_payment_cancel_fail_reason.sql`·칸 목록에 `fail_reason text`(빈 값 허용)·check `payment_cancel_fail_reason_check`를 더하고, 0022가 비는 것(갈래 5 몫)을 기록 차례 검사가 받게 고쳐 주기를 바란다. 그 밖 재현 시험은 모두 지난다.
 
 ## 시험 결과
 
@@ -544,5 +545,6 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T06:06+09:00 | 2026-11-19T06:50+09:00 |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T06:52+09:00 | 2026-11-19T07:00+09:00 |
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T07:00+09:00 | 2026-11-19T07:42+09:00 |
+| impl | l3-b420-impl | claude-opus-5-5 | 2026-11-19T07:45+09:00 | 2026-11-19T08:17+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.

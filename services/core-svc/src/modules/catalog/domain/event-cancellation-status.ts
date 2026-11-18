@@ -54,10 +54,12 @@ export class EventStatusConflict extends Error {
  */
 export function decideEventStatus(current: LockedEventStatus, q: { readonly kind: EventCancellationKind; readonly postponedTo?: Date }, now: Date): EventStatusWrite | undefined {
   if (q.kind === 'CANCEL') return current.status === 'CANCELLED' ? undefined : { status: 'CANCELLED' };
-  if (current.status === 'CANCELLED') throw new EventStatusConflict('CANCELLED');
   const to = q.postponedTo;
+  // '이미 같은 상태'를 먼저 본다: 같은 시각으로 이미 연기된 회차는 그 시각이 지난 뒤 다시 와도 바꾸지 않는다(다시 하기의 멱등,
+  // transfer-refund §5 'core 반영의 구현에서 정한 것' ⑥, BAT-420-rest 리뷰 반영 RV-06)
+  if (current.status === 'POSTPONED' && to !== undefined && current.startsAt.getTime() === to.getTime()) return undefined;
+  if (current.status === 'CANCELLED') throw new EventStatusConflict('CANCELLED');
   if (to === undefined || to.getTime() <= now.getTime()) throw new EventStatusConflict('POSTPONE_IN_PAST');
-  if (current.status === 'POSTPONED' && current.startsAt.getTime() === to.getTime()) return undefined;
   const shift = to.getTime() - current.startsAt.getTime();
   return {
     status: 'POSTPONED',

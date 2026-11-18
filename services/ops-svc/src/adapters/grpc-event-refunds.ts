@@ -186,6 +186,8 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, 
       total: intOf(a.total_orders),
       done: intOf(a.done_orders),
       failed: intOf(a.failed_orders),
+      // 계좌 대기 수(BAT-420-rest 리뷰 반영 RV-05). 0(칸 없는 옛 답 포함)이면 싣지 않는다
+      ...(intOf(a.account_pending_orders) > 0 ? { accountPending: intOf(a.account_pending_orders) } : {}),
       perPg: rows(a.per_pg).flatMap((p) => {
         const pg = typeof p.pg === 'string' ? PG_OF[p.pg] : undefined;
         if (!pg) return [];

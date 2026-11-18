@@ -80,6 +80,8 @@ export interface EventRefundJobProgress {
   readonly total: number;
   readonly done: number;
   readonly failed: number;
+  /** 계좌 대기 항목 수(GetEventRefundJob.account_pending_orders, 0이면 싣지 않는다, BAT-420-rest 리뷰 반영 RV-05) */
+  readonly accountPending?: number;
   readonly perPg: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string; readonly done: number; readonly failed: number; readonly unknown: number }[];
   readonly appliedOrders?: number;
   /** ISO 8601 */
@@ -120,10 +122,14 @@ export class CoreEventStatusRejected extends Error {
 export const CORE_APPLY_RETRY_MS = 60_000;
 export const CORE_APPLY_BATCH = 20;
 export const CORE_APPLY_OVERDUE_MS = 600_000;
+/** 4xx(401 제외, 계약 결함)로 실패한 요청의 다음 볼 시각은 지금 + 10분 [가정]이다(머리 막힘 막기, BAT-420-rest 리뷰 반영 RV-06). 그 밖 실패는 CORE_APPLY_RETRY_MS */
+export const CORE_APPLY_REJECTED_RETRY_MS = 600_000;
 
 /** 반영을 다시 할 요청 한 건 */
 export interface CoreApplyDue {
   readonly requestId: string;
+  /** 확정 시각(epoch ms). 한 바퀴 안에서 이 차례로 부른다 */
+  readonly approvedAtMs?: number;
   readonly eventId: string;
   readonly kind: EventCancellationKind;
   readonly newStartsAt?: Date;
@@ -134,10 +140,16 @@ export interface CoreApplyDue {
  * 대상은 Start까지 끝낸(refund_job_state 있음) APPROVED·RUNNING·PAUSED·REFUND_WINDOW·COMPLETED 요청이다
  */
 export interface CoreApplyStore {
-  /** core가 2xx로 답한 뒤에만 부른다. 이미 쓴 행은 그대로다 */
-  markCoreApplied(requestId: string, nowMs: number): Promise<void>;
   /**
-   * 반영하지 않았고 다음 볼 시각이 지난(또는 빈) 요청을 확정 시각 순으로 limit건 잡아 다음 볼 시각을 지금 + retryAfterMs로 미룬다(한 문장, FOR UPDATE SKIP LOCKED).
+   * core가 2xx로 답한 뒤에만 부른다. 이미 쓴 행은 그대로다. 같은 트랜잭션에서 같은 회차의 앞 요청(확정 시각이 더 이르고 반영하지 않은 것)에
+   * core_apply_superseded_at을 쓴다(앞 요청이 뒤 상태를 덮지 않게, RV-06)
+   */
+  markCoreApplied(requestId: string, nowMs: number): Promise<void>;
+  /** 다음 볼 시각을 untilMs로 미룬다(반영하지 않은 행만, 4xx의 10분 미룸) */
+  deferCoreApply(requestId: string, untilMs: number): Promise<void>;
+  /**
+   * 반영하지 않았고 대체되지 않았으며 다음 볼 시각이 지난(또는 빈) 요청을 다음 볼 시각(빈 값 먼저) → 확정 시각 차례로 limit건 잡아
+   * 다음 볼 시각을 지금 + retryAfterMs로 미룬다(한 문장, FOR UPDATE SKIP LOCKED). 돌려주는 차례는 확정 시각 순이다(같은 회차는 앞 요청 먼저).
    * 파드 여럿이 함께 돌려도 한 요청은 한쪽만 잡는다
    */
   claimCoreApplies(nowMs: number, limit: number, retryAfterMs: number): Promise<readonly CoreApplyDue[]>;

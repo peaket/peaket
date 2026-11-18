@@ -46,6 +46,7 @@ import {
   type PartnerEventCancellationStore,
   CORE_APPLY_BATCH,
   CORE_APPLY_OVERDUE_MS,
+  CORE_APPLY_REJECTED_RETRY_MS,
   CORE_APPLY_RETRY_MS,
   type CoreApplyStore,
   type CoreEventStatus,
@@ -258,7 +259,7 @@ export class EventCancellations {
     if (!PROGRESS_STATUSES.has(r.status) || !this.extra.reader) return eventCancellationDetailView(r);
     const job = await this.#job(r.requestId);
     const progress: EventCancellationProgress = job
-      ? { state: job.state, total: job.total, done: job.done, failed: job.failed, perPg: job.perPg.map((p) => ({ pg: p.pg, state: p.state, ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}), done: p.done, failed: p.failed, unknown: p.unknown })) }
+      ? { state: job.state, total: job.total, done: job.done, failed: job.failed, ...(job.accountPending !== undefined ? { accountPending: job.accountPending } : {}), perPg: job.perPg.map((p) => ({ pg: p.pg, state: p.state, ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}), done: p.done, failed: p.failed, unknown: p.unknown })) }
       : { state: r.refundJobState ?? r.status };
     return eventCancellationDetailView(r, progress);
   }
@@ -353,7 +354,7 @@ export class EventCancellations {
       const next: EventCancellationRecord = { ...running, status, refundJobState: job.state, version: running.version + 1, updatedAt: new Date(doneMs) };
       if (!(await this.store.save(next, audit('EVENT_CANCELLATION_STARTED', next.requestId, { ...eventBase(next), status: next.status, jobState: job.state }, doneMs)))) throw conflict();
       // Start까지 끝났다: core 회차 상태를 반영한다. 실패는 확정을 되돌리지 않는다(던지지 않는다, 다시 하기가 잇는다)
-      await this.#applyCore({ requestId: next.requestId, eventId: next.eventId, kind: next.kind, ...(next.newStartsAt ? { newStartsAt: next.newStartsAt } : {}) });
+      await this.#applyCore({ requestId: next.requestId, eventId: next.eventId, kind: next.kind, ...(next.newStartsAt ? { newStartsAt: next.newStartsAt } : {}) }, this.now());
       return eventCancellationDetailView(next);
     } catch (err) {
       // 외부 호출이 실패하면 다시 확정할 수 있게 PENDING_APPROVAL로 되돌린다(외부 시작은 요청 ID 멱등에 기댄다).
@@ -378,7 +379,7 @@ export class EventCancellations {
       this.extra.log?.warn({ event: 'event-cancellation-core-apply-claim-failed', err: err instanceof Error ? err.name : 'unknown' }, 'event-cancellation-core-apply-claim-failed: 다시 할 core 반영을 읽지 못했다(다음 바퀴)');
     }
     for (const d of due) {
-      if (await this.#applyCore(d)) applied++;
+      if (await this.#applyCore(d, nowMs)) applied++;
       else failed++;
     }
     let overdue: Awaited<ReturnType<CoreApplyStore['markCoreApplyOverdue']>> = [];
@@ -396,8 +397,11 @@ export class EventCancellations {
     return { applied, failed, overdue: overdue.length };
   }
 
-  /** core 반영 한 번. 성공하면 core_applied_at을 쓰고 true. 실패는 경고(4xx는 오류)·지표 뒤 false다. 던지지 않는다 */
-  async #applyCore(r: { readonly requestId: string; readonly eventId: string; readonly kind: EventCancellationKind; readonly newStartsAt?: Date }): Promise<boolean> {
+  /**
+   * core 반영 한 번. 성공하면 core_applied_at을 쓰고(같은 회차의 앞 요청은 대체 표시) true. 실패는 경고(4xx는 오류)·지표 뒤 false다. 던지지 않는다.
+   * 4xx(401 제외, 계약 결함)는 다음 볼 시각을 지금 + 10분 [가정]으로 미뤄 늘 거절되는 요청이 새 요청의 자리를 막지 않게 한다(RV-06). 5xx·무응답·401은 잡기의 1분 그대로다
+   */
+  async #applyCore(r: { readonly requestId: string; readonly eventId: string; readonly kind: EventCancellationKind; readonly newStartsAt?: Date }, nowMs: number): Promise<boolean> {
     const core = this.extra.core;
     if (!core) return false;
     try {
@@ -408,6 +412,13 @@ export class EventCancellations {
       if (err instanceof CoreEventStatusRejected && this.extra.log?.error) this.extra.log.error({ ...fields, status: err.status }, msg);
       else this.extra.log?.warn(fields, msg);
       this.extra.coreApplyFailures?.inc();
+      if (err instanceof CoreEventStatusRejected && err.status !== 401) {
+        try {
+          await this.extra.coreApplies?.deferCoreApply(r.requestId, nowMs + CORE_APPLY_REJECTED_RETRY_MS);
+        } catch {
+          // 미루기를 못 써도 잡기의 1분 뒤 다시 본다
+        }
+      }
       return false;
     }
     try {
