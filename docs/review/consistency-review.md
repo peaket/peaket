@@ -778,6 +778,7 @@
 | R-681 | 매 턴 읽는 PROGRESS·갈래 파일이 다시 27만·10만 바이트로 커졌고, B 등급 묶음도 리뷰 뒤 문서 커밋·다시 리뷰로 커밋 18개(BAT-056)가 들었으며, 잘 잡히는 검사(다시 쌓은 트리 통합 전체)는 규칙에 없었다 | docs/adr/0283, docs/architecture.md §8.6, docs/PROGRESS.md, docs/lanes/*.md, docs/progress-archive.md §6 | 기록 40KB 상한과 지난 줄 옮기기, B·C 짧은 고리, 필수 검사, 웨이브 단위 승인, 범위 더하는 때 모으기(ADR-0283) | 적용 |
 | R-682 | ADR-0283 결정 1·4(기록 40KB 상한, 시험 도우미 Docker 호출 시간 제한)를 지키는 점검이 없어 기록이 다시 커지거나 Docker 엔진이 멈출 때 시험이 몇 시간 멈출 수 있었다 | tools/ci/records.mjs, tools/ci/check-docker-timeouts.mjs, .github/workflows/tools-check.yml, 시험 도우미 41개, docs/review/plans/W10-guards.md | records --check 크기 점검, Docker 호출 시간 제한 점검과 CI, 도우미에 timeout 300_000(W10-guards) | 적용 |
 | R-683 | develop CI security-scan dependencies가 빨간색: picomatch GHSA-fc5q-39xc-vjpf(높음, 4.0.7 이하 전부, 수정본 없음) | tools/ci/vuln-exceptions.json | 잠금 파일로 운영 의존성 경로를 따져 개발·CI 도구 전용임을 확인하고 이슈 #14 근거로 2026-12-18까지 30일 예외를 둔다 | 완료(로컬 vuln-deadline 시험 8건 통과, 실제 판정은 develop CI 확인) |
+| R-684 | WBS·실행 규칙이 1인·3갈래 기준이라 남은 일의 의존 관계가 허락하는 병렬(5~7갈래)을 못 쓰고, 웨이브 10에서는 동시에 두 묶음만 돌았다 | docs/adr/0286, docs/BUILD_ORDER.md 기능 묶음 표, docs/PROGRESS.md 턴 규칙, docs/lanes/*.md, docs/wbs/wbs.md §1, docs/architecture.md ADR 표 | 코드 영역별 5갈래(첫 바퀴 뒤 7)·전체 감독·합치기 줄·바퀴별 번호 나누기(ADR-0286) | 적용 |
 
 ## 4. 숫자 일치표
 
