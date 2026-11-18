@@ -19,7 +19,7 @@ export { MemoryCdnInvalidation } from './adapters/cdn-invalidation.js';
 export { StaticTemplateCatalog } from './adapters/static-template-catalog.js';
 export { QueueSaleEligibilityCopy } from './adapters/queue-sale-eligibility-copy.js';
 export { MemorySearchDictionarySource, MemorySearchIndex } from './adapters/memory-search-index.js';
-export { DrizzleSearchIndex, SEARCH_STATEMENT_TIMEOUT_MS } from './adapters/db/drizzle-search-index.js';
+export { DrizzleSearchIndex, registerSearchPoolWaiting, SEARCH_STATEMENT_TIMEOUT_MS } from './adapters/db/drizzle-search-index.js';
 export { SearchCatalog } from './application/search.js';
 export { SEARCH_INDEX, type SearchDocument, type SearchIndex } from './domain/search.js';
 export { DrizzleSearchReadModel } from './adapters/db/drizzle-search-read-model.js';

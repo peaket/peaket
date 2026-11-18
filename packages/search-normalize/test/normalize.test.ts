@@ -123,3 +123,32 @@ describe('searchNames(대상마다 한 번, §3.2·§4.1)', () => {
     expect(searchNames(list, 'fnaps').map((r) => r.item.id)).toEqual(['x']);
   });
 });
+
+// BAT-166 재현 시험(버그: 로마자 입력 500). 정본 docs/features/search.md §3.2 '변환 값을 만들 수 없는 로마자 입력'(98줄)·SR-T4(297줄), ADR-0271 결정 24.
+// 입력 넷은 정본이 든 것('npt'·'mla'·'hov'·'gunpg'), 'nPt'는 친 그대로는 바뀌고 소문자로는 안 바뀌는 것이다.
+describe('SR-T4 변환 값을 만들 수 없는 로마자 입력(§3.2, BAT-166)', () => {
+  const list = [
+    { id: 'lumen', name: '루멘', aliases: [] },
+    { id: 'wet', name: '웻', aliases: [] },
+  ];
+  const ids = (q: string) => searchNames(list, q).map((r) => r.item.id);
+
+  test.each(['npt', 'mla', 'hov', 'gunpg'])("SR-T4 변환 값을 만들 수 없는 로마자 입력('%s')으로 이름 목록을 찾아도 던지지 않고 0건이다", (q) => {
+    expect(() => searchNames(list, q)).not.toThrow();
+    expect(ids(q)).toEqual([]);
+  });
+
+  test("SR-T4 변환 값을 만들 수 없는 로마자 입력의 대조군: 'fnaps'는 '루멘'으로, 'dnpt'는 '웻'으로 바꿔 찾는다", () => {
+    // 변환을 통째로 끄거나 오류 판단을 넓게 잡으면 여기서 걸린다(빈 결과로 위 시험이 통과하지 않게)
+    expect(ids('fnaps')).toEqual(['lumen']);
+    expect(ids('dnpt')).toEqual(['wet']);
+  });
+
+  test("SR-T4 친 그대로는 바뀌고 소문자로는 안 바뀌는 'nPt'도 던지지 않는다", () => {
+    // 'nPt' → 'ㅜㅖㅅ'(0건) → 소문자 'npt'는 변환 값을 만들 수 없다: 둘째 대체 자리
+    expect(() => searchNames(list, 'nPt')).not.toThrow();
+    expect(ids('nPt')).toEqual([]);
+    // 대조군: 친 그대로 'DnPt' → '우ㅖㅅ'은 0건이고 소문자 'dnpt' → '웻'으로 찾는다(둘째 대체가 살아 있다)
+    expect(ids('DnPt')).toEqual(['wet']);
+  });
+});

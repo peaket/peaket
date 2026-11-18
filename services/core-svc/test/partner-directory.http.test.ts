@@ -101,6 +101,24 @@ describe('FR-022 공연장 찾기', () => {
   });
 });
 
+// BAT-166 재현 시험(버그: 로마자 입력 500). 정본 docs/features/search.md §3.2(98줄, 파트너 화면의 아티스트·공연장 찾기도 같다)·SR-T4(297줄), ADR-0271 결정 24.
+describe('SR-T4 변환 값을 만들 수 없는 로마자 입력(FR-022, BAT-166)', () => {
+  test.each(['npt', 'mla', 'hov', 'gunpg', 'nPt'])("SR-T4 공연 등록의 아티스트·공연장 찾기도 변환 값을 만들 수 없는 로마자 입력('%s')에 200·빈 목록이다(FR-022)", async (input) => {
+    for (const path of ['/v1/partner/artists', '/v1/partner/places']) {
+      const r = await get(`${path}?q=${q(input)}`);
+      expect(r.statusCode, path).toBe(200);
+      expect(JSON.parse(r.payload), path).toEqual({ items: [], nextCursor: null });
+    }
+  });
+
+  test("SR-T4 변환 값을 만들 수 없는 로마자 입력의 대조군: 공연장 찾기도 'vlzpt'를 '피켓'으로 바꿔 찾는다", async () => {
+    // 변환을 통째로 끄는 고침이면 여기서 걸린다(위 시험이 빈 목록으로 통과하지 않게)
+    const r = await get(`/v1/partner/places?q=vlzpt`);
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.payload).items.map((x: { name: string }) => x.name)).toEqual(['피켓 아레나']);
+  });
+});
+
 describe('이름 목록 캐시(ADR-0242)', () => {
   test('30초 동안은 저장소를 다시 부르지 않고, 지나면 새 목록을 읽으며, 읽기가 실패하면 앞 목록을 쓴다', async () => {
     clock.advance(DIRECTORY_TTL_MS + 1);
