@@ -164,13 +164,19 @@ flowchart LR
 - 처리 중 요청 게이지는 응답을 보냈을 때와 연결이 끊겼을 때(본문을 다 받은 뒤 끊긴 경우 포함) 한 번만 내린다. 끊긴 요청은 지연 히스토그램에 들지 않는다.
 - 지연은 서비스에 주입한 시계(단조 시계)로 잰다. 시험은 `packages/platform/test/metrics.test.ts`(5xx는 오류 카운터, 409 경합 패배는 정상 분기 카운터, docs/verification.md §2.7의 지표 내보내기 층)다.
 
-**서비스 템플릿이 내는 gRPC 서버 지표(추천 적용 2026-11-19, BAT-075 계획, BUILD_ORDER BAS-080)**: 공용 gRPC 서버(`packages/platform`의 업무 gRPC 포트 시작 코드, 다른 서비스가 부르는 서비스 사이 함수 호출 창구)가 받은 호출마다 아래 지표를 낸다. HTTP 지표와 같은 관리 포트 `/metrics`에 싣는다.
+**서비스 템플릿이 내는 gRPC 서버 지표(추천 적용 2026-11-19, BAT-075 계획, [ADR-0303](adr/0303-graceful-shutdown-shared-grpc-server-pod-diagnose-defaults.md), BUILD_ORDER BAS-080)**: 공용 gRPC 서버(`packages/platform`의 업무 gRPC 포트 시작 코드, 다른 서비스가 부르는 서비스 사이 함수 호출 창구)가 받은 호출마다 아래 지표를 낸다. HTTP 지표와 같은 관리 포트 `/metrics`에 싣는다.
 
 | 지표 | 종류 | 라벨 | 뜻 |
 | --- | --- | --- | --- |
 | `rpc_server_call_duration_seconds` | 히스토그램(§8 표준 칸) | `service`·`method`·`code` | 호출 하나를 처리한 시간(OpenTelemetry `rpc.server.call.duration`). `method`는 `peaket.<영역>.v1.<서비스>/<메서드>`처럼 proto에 정한 이름이고 등록한 메서드 밖은 `unknown` 하나로 묶는다. `code`는 gRPC 상태 이름(`OK`·`UNAVAILABLE` 등)이다. 오류 수는 `code`가 `OK`가 아닌 칸의 개수로 센다 |
 
 - 종료 중에 끊긴 호출(10초 [가정] 마감을 넘겨 끊은 것)도 `code`를 `CANCELLED`로 한 번 센다.
+
+**진단 수집 지표(추천 적용 2026-11-19, BAT-075, [ADR-0303](adr/0303-graceful-shutdown-shared-grpc-server-pod-diagnose-defaults.md) 결정 3)**: 공용 시작 코드의 파드 진단 수집(RB-31, 주석 `peaket.io/diagnose`)이 결과마다 센다.
+
+| 지표 | 종류 | 라벨 | 뜻 |
+| --- | --- | --- | --- |
+| `diagnose_collections_total` | 카운터 | `service`·`result` | 진단 수집 결과 수. `result`는 고정 목록이다: `report`(보고서 올림), `heap`(스냅샷 올림), `heap_skipped_low_memory`(메모리 여유가 힙의 두 배 이하라 건너뜀), `heap_skipped_no_limit`(메모리 한도 값이 없어 건너뜀), `heap_failed`, `report_failed`, `upload_failed`, `leftover_uploaded`(시작할 때 남은 보고서를 올림) |
 
 **핫패스 구간 진단 지표(추천 적용 2026-11-11, BAT-027·HOT-462, R-472)**: K2 2,000/s의 p99 꼬리와 홀드 409 경로, 결제 확정·`payment_status` 롱 폴링, 대기열 진입의 시간을 코드 안 구간별로 가르기 위한 진단 지표다. 동작을 바꾸지 않고, 지표가 던져도 요청을 막지 않는다. 계정·주문·좌석·회차 ID는 이름표에 싣지 않는다(§8).
 
@@ -197,7 +203,7 @@ flowchart LR
 | 처리 중 요청이 쌓이지 않는다 | `http_server_active_requests` | 없음 | 포화도 패널(리틀의 법칙) | 없음(위 문단) | 부하 시험에서 처리량 × 평균 처리 시간과 견준다 |
 | 요청 검사 실패가 400·415로 끝나고 서버 오류로 세지 않는다(추천 적용 2026-11-01, openspec 변경 add-service-structure-and-request-checks) | 정규 로그 줄의 `status` 400·415와 `err.type`(`RequestValidationError`·`FST_ERR_CTP_INVALID_JSON_BODY`·`FST_ERR_CTP_INVALID_MEDIA_TYPE`), `http_server_request_duration_seconds{status_class="4xx"}` | 없음 | 오류율 패널의 4xx 줄 | 없음. 새 판 뒤 4xx가 갑자기 늘면 카나리 분석이 잡는다 | 배포 뒤 화면 하나를 지나 정규 로그 줄에 400이 늘지 않았는지 본다(화면은 같은 생성 Zod로 먼저 검사한다) |
 | 끝난 세션과 역할 판정이 닫힌 쪽으로 동작한다(추천 적용 2026-11-01) | 401·403과 503 `authz-unavailable`의 정규 로그 줄(`err.type`, `sidRef`), `http_server_errors_total{status_class="5xx"}` | 없음 | 오류 패널(503 `authz-unavailable`이 늘면 identity 조회 장애) | 503은 서비스 SLO 경보에 든다(5xx) | 관리 계정 하나의 역할을 바꾼 뒤 5초 안에 그 세션의 관리 요청이 새 역할로 판정되는지, 로그아웃한 세션의 요청이 401인지 본다(AZ-T16, I-T48) |
-| DB 풀이 꽉 차도 기다리지 않는다(추천 적용 2026-11-01) | 429 `server-busy`의 정규 로그 줄, `http_server_request_duration_seconds{status_class="4xx"}` | 없음 | 포화도 패널 | 없음. 풀 대기 초과 429는 설계한 즉시 거절이라 따로 경보하지 않고, 5xx·SLO 경보와 포화도 패널(`db_pool_wait_timeout_total{service}` 비율)이 본다(추천 적용 2026-11-19, BAT-075 계획) | 부하 시험에서 풀 대기 초과가 429로 빨리 끝나고 5xx가 오르지 않는지 본다 |
+| DB 풀이 꽉 차도 기다리지 않는다(추천 적용 2026-11-01) | 429 `server-busy`의 정규 로그 줄, `http_server_request_duration_seconds{status_class="4xx"}` | 없음 | 포화도 패널 | 없음. 풀 대기 초과 429는 설계한 즉시 거절이라 따로 경보하지 않고, 5xx·SLO 경보와 포화도 패널(`db_pool_wait_timeout_total{service}` 비율)이 본다(추천 적용 2026-11-19, BAT-075 계획, [ADR-0303](adr/0303-graceful-shutdown-shared-grpc-server-pod-diagnose-defaults.md)) | 부하 시험에서 풀 대기 초과가 429로 빨리 끝나고 5xx가 오르지 않는지 본다 |
 | 같은 멱등 키로 다시 보낸 쓰기가 두 번 처리되지 않는다(추천 적용 2026-11-01, openspec 변경 add-idempotency-and-outbox) | 정규 로그 줄의 `status` 400·409·422와 `err.type`(`idempotency-key-invalid`·`idempotency-request-in-progress`·`idempotency-key-reused`), `http_server_business_rejections_total` | 없음 | 오류율 패널 옆 정상 분기 패널(409 처리 중이 늘면 첫 요청이 1초 [가정] 넘게 걸린다) | 없음 | 배포 뒤 확인 시험이 같은 키로 두 번 보내 같은 결과를 받고, 본문을 바꿔 422를 받는다 |
 | Outbox 사건이 밀리지 않고 리더 하나가 보낸다(ADR-0116) | `outbox_relay_lag_seconds`·`outbox_relay_is_leader`·`outbox_relay_published_total`·`outbox_relay_errors_total`·`outbox_relay_batch_seconds`(모두 `service` 라벨), 릴레이 오류와 리더 바뀜의 운영 줄(`kind` outbox-relay, 바뀜은 `leader`·`lease` 칸), 릴레이 프로세스의 관리 포트 `/ready`·`/livez` | 릴레이 지연(5초 [가정] 안) | '스트림 작업자' 화면의 Outbox 릴레이 패널 | 지연 5초 [가정] 1분 넘음·리더 없음 1분이면 SEV2(`kind` cause, `dependency` outbox-relay, RB-39) | 리더 파드 하나를 지우고 15초 [가정] 안에 다른 복제의 `outbox_relay_is_leader`가 1이 되는지, 지연이 돌아오는지 본다. kind 시험(`tools/local/e2e/relay-takeover.e2e.mjs`)이 쓰기를 흘리며 리더 프로세스를 SIGSTOP으로 멈춰, 대기 복제가 20초 안에 Lease를 잡고 받는 쪽의 빠짐·같은 키 순서 뒤집힘이 0인지 본다(2026-11-01 두 번 11.1·13.5초, openspec 변경 add-local-cluster-and-relay-deployment) |
 | Outbox 일 파티션이 미리 있고 지난 것이 지워진다(ADR-0083·0116) | `outbox_partitions_ahead_days`(오늘 뒤로 미리 만든 날 수), `outbox_partitions_overdue`(지울 날에서 하루 더 지나도 남은 파티션 수) | 없음 | DB 위생 패널 | 미리 만든 날이 3 [가정]보다 적으면 SEV2(`kind` hygiene), 지난 파티션이 남으면 SEV2(보내지 않은 행에 막혔거나 정비 잡이 돌지 않음) | 정비 잡을 한 번 돌린 뒤 두 지표를 본다 |
