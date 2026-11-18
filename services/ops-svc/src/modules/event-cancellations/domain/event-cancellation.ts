@@ -23,6 +23,8 @@ export interface EventCancellationProgress {
   readonly total?: number;
   readonly done?: number;
   readonly failed?: number;
+  /** 가상계좌 계좌 대기 항목 수(있을 때만, docs/features/payment.md §6 '계좌 대기' 끝, R-T40 ⑤). 결제사별 몫에는 없다 */
+  readonly accountPending?: number;
   readonly perPg?: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string | null; readonly done: number; readonly failed: number; readonly unknown: number }[];
 }
 

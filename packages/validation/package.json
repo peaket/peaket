@@ -16,6 +16,11 @@
       "types": "./src/seatmap-checks/index.ts",
       "development": "./src/seatmap-checks/index.ts",
       "default": "./dist/seatmap-checks/index.js"
+    },
+    "./refund-account": {
+      "types": "./src/refund-account/index.ts",
+      "development": "./src/refund-account/index.ts",
+      "default": "./dist/refund-account/index.js"
     }
   },
   "scripts": {

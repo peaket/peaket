@@ -69,7 +69,10 @@ export interface ConfirmedCancelRecord {
 export type ConfirmedCancelBegin =
   /** virtualAccount: 결제 행 잠금 안에서 본 가상계좌 결제 여부(AWAITING_DEPOSIT 사건이 있다). 없으면 거짓이다 */
   | { readonly status: 'BEGUN'; readonly record: ConfirmedCancelRecord; readonly replay: boolean; readonly virtualAccount?: boolean }
-  /** 가상계좌 결제인데 환불 계좌가 없고 이 취소 ID의 행도 없다. 행을 만들지 않았다(docs/features/payment.md §6 '결제 후 일반 취소의 가상계좌 갈래') */
+  /**
+   * 가상계좌 결제인데 환불 계좌가 없고 이 취소 ID의 행도 없다(행을 만들지 않았다), 또는 이 취소 ID의 행이 계좌 거절(fail_reason REFUND_ACCOUNT_INVALID)로 끝났다
+   * (docs/features/payment.md §6 '결제 후 일반 취소의 가상계좌 갈래'·'구현에서 정한 것' ④)
+   */
   | { readonly status: 'ACCOUNT_REQUIRED' }
   | { readonly status: 'DONE'; readonly cancelledAmount: number }
   | { readonly status: 'BUSY' }

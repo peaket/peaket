@@ -21,6 +21,8 @@ const Progress = z.object({
   total: z.number().int().optional(),
   done: z.number().int().optional(),
   failed: z.number().int().optional(),
+  /** 가상계좌 계좌 대기 항목 수(있을 때만, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤) */
+  accountPending: z.number().int().optional(),
   perPg: z
     .array(z.object({ pg: z.enum(PGS), state: z.string(), pauseReason: z.string().nullable().optional(), done: z.number().int(), failed: z.number().int(), unknown: z.number().int() }))
     .optional(),

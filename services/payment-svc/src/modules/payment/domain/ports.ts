@@ -672,8 +672,11 @@ export interface PaymentConfirmedCancels {
   ): Promise<ConfirmedCancelBegin>;
   /** 결제사 취소 성공 반영. 금액은 그 행에서 읽는다. 행이 이미 CANCELED면 더하지 않고 APPLIED. STALE이면 그사이 원장 상태가 바뀌었다 */
   finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
-  /** 결제사 비동기 처리(CANCEL_PENDING)·업무 거절(FAILED)을 그 행에 남긴다. 원장은 바꾸지 않는다 */
-  markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget): Promise<void>;
+  /**
+   * 결제사 비동기 처리(CANCEL_PENDING)·업무 거절(FAILED)을 그 행에 남긴다. 원장은 바꾸지 않는다.
+   * failReason은 FAILED의 개인정보 없는 까닭(계좌 거절 REFUND_ACCOUNT_INVALID만, payment_cancel.fail_reason 0023, BAT-420-rest 리뷰 반영 RV-03)
+   */
+  markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget, failReason?: 'REFUND_ACCOUNT_INVALID'): Promise<void>;
   /**
    * 3시간 지난 재시도의 조회 결과를 결제 행 잠금 안에서 가른다(리뷰 B1): 행이 진행 중인지 → canSettleByBalance → settleByBalance 차례.
    * APPLIED면 같은 트랜잭션에서 finishConfirmedCancel처럼 반영한다. RESEND는 같은 본문으로 다시 보낸다, UNDECIDABLE은 결과 모름(결제사 0)

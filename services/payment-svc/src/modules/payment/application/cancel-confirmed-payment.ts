@@ -7,6 +7,9 @@
 // 계좌가 있으면 결제사 본문에 싣고(저장·로그 없음), 없으면 결제사 취소를 부르지 않는다. 행이 없으면 REFUND_ACCOUNT_REQUIRED, 행이 있으면 조회로 반영을 가른다
 // (반영 → CANCELLED, 아님 → REFUND_ACCOUNT_REQUIRED, 가를 수 없음·조회 실패 → UNKNOWN). 결제사가 계좌를 거절하면 행 FAILED와 REFUND_ACCOUNT_REQUIRED다.
 // 가상계좌가 아닌 결제에 온 계좌는 보내지 않고 버린다(지표).
+// 리뷰 반영(BAT-420-rest RV-02·RV-03·RV-04, payment §6 '구현에서 정한 것' ②④⑥): 포트원 결제의 대응표 밖 은행 코드는 행을 만들기 전에 계좌 없음과 같다.
+// 가상계좌 결제에서 그 취소 ID의 행이 이미 있으면 계좌가 있어도(다른 계좌여도) 다시 보내지 않고 조회 대조로만 끝을 본다(같은 멱등키에는 첫 본문만).
+// 계좌 거절로 끝낸 행은 fail_reason REFUND_ACCOUNT_INVALID를 남기고, 같은 취소 ID의 다시 부름은 결제사 0·REFUND_ACCOUNT_REQUIRED다(같은 취소 ID = 같은 답).
 import type { Clock } from '@peaket/platform';
 import { MIN_CALL_REMAINING_MS, PaymentInputError, PaymentNotFoundError } from '../domain/confirm-command.js';
 import {
@@ -18,7 +21,7 @@ import {
   parseConfirmedCancel,
 } from '../domain/confirmed-cancel.js';
 import { PaymentCancelStateError } from '../domain/deposit-cancel.js';
-import { type CancelResult, type PaymentGatewayPort, type QueryResult, type RefundAccount, refundAccountOf } from '../domain/payment-gateway.js';
+import { type CancelResult, type PaymentGatewayPort, portoneBankOf, type QueryResult, type RefundAccount, refundAccountOf } from '../domain/payment-gateway.js';
 import type { PgCallGuards } from '../domain/pg-call-guard.js';
 import type { CallBudget, PaymentConfirmedCancels, PaymentGateways, RefundAccountSignals } from '../domain/ports.js';
 
@@ -61,9 +64,11 @@ export class CancelConfirmedPayment {
     const { store, gateways, guards, clock } = this.deps;
     const parsed = parseConfirmedCancel(input);
     // 모양이 틀린 계좌는 없는 것과 같다(docs/features/payment.md §6 '구현에서 정한 것' ②). 값은 이 호출 안에서만 쓴다
-    const account = refundAccountOf(input.refundAccount);
+    let account = refundAccountOf(input.refundAccount);
     const target = await store.readConfirmedCancelTarget(parsed.paymentId, budget);
     if (target === undefined) throw new PaymentNotFoundError();
+    // 포트원 대응표 밖 은행 코드는 모양이 틀린 계좌와 같다(행을 만들기 전, 같은 취소 ID를 맞는 계좌로 다시 쓸 수 있다, RV-04)
+    if (account !== undefined && target.pg === 'PORTONE' && portoneBankOf(account.bankCode) === undefined) account = undefined;
 
     const begun = await store.beginConfirmedCancel(
       target,
@@ -72,7 +77,7 @@ export class CancelConfirmedPayment {
     );
     switch (begun.status) {
       case 'ACCOUNT_REQUIRED':
-        // 가상계좌인데 계좌가 없고 행도 없다: 결제사 0·행 0(V4)
+        // 가상계좌인데 계좌가 없고 행도 없다: 결제사 0·행 0(V4). 계좌 거절로 끝낸 행의 다시 부름도 같은 답이다(RV-03)
         return { result: 'REFUND_ACCOUNT_REQUIRED', cancelledAmount: target.cancelledAmount };
       case 'NOT_CONFIRMED':
         throw new PaymentCancelStateError('승인된 결제만 취소할 수 있다');
@@ -103,8 +108,8 @@ export class CancelConfirmedPayment {
     const guard = gateway === undefined ? undefined : guards.of(target.pg);
     if (gateway === undefined || guard === undefined || leftMs() < MIN_CALL_REMAINING_MS || !guard.circuitClosed() || !guard.tryTakeToken()) return unknownOf(target);
 
-    // 가상계좌인데 계좌 없는 재시도(앞서 계좌를 실어 보낸 행이 진행 중): 같은 멱등키로 계좌 없는 본문을 보내지 않고 조회로만 끝을 본다(V5)
-    if (virtualAccount && refundAccount === undefined) {
+    // 가상계좌의 다시 부름(앞서 계좌를 실어 보낸 행이 진행 중): 계좌가 있어도 같은 멱등키로 다른 본문을 보내지 않고 조회로만 끝을 본다(V5, RV-02 ⑥)
+    if (virtualAccount && (replay || refundAccount === undefined)) {
       const query = await this.#query(gateway, target, leftMs());
       if (query.kind !== 'FOUND') return unknownOf(target);
       const settled = await store.settleConfirmedCancelByQuery(target, parsed.cancellationId, query.balanceAmount, budget);
@@ -130,9 +135,12 @@ export class CancelConfirmedPayment {
       case 'CANCELLED':
         return this.#finish(target, parsed.cancellationId, budget);
       case 'REJECTED':
-        await store.markConfirmedCancel(target, parsed.cancellationId, 'FAILED', budget);
-        // 결제사가 계좌를 거절했으면 행을 FAILED로 끝내고 계좌 대기로 답한다(V6)
-        return { result: refundAccount !== undefined && cancel.reason === 'REFUND_ACCOUNT_INVALID' ? 'REFUND_ACCOUNT_REQUIRED' : 'REJECTED', cancelledAmount: target.cancelledAmount };
+      {
+        // 결제사가 계좌를 거절했으면 행을 FAILED(fail_reason REFUND_ACCOUNT_INVALID)로 끝내고 계좌 대기로 답한다(V6, RV-03)
+        const accountInvalid = refundAccount !== undefined && cancel.reason === 'REFUND_ACCOUNT_INVALID';
+        await store.markConfirmedCancel(target, parsed.cancellationId, 'FAILED', budget, accountInvalid ? 'REFUND_ACCOUNT_INVALID' : undefined);
+        return { result: accountInvalid ? 'REFUND_ACCOUNT_REQUIRED' : 'REJECTED', cancelledAmount: target.cancelledAmount };
+      }
       case 'CANCEL_PENDING':
         await store.markConfirmedCancel(target, parsed.cancellationId, 'CANCEL_PENDING', budget);
         return { result: 'CANCEL_PENDING', cancelledAmount: target.cancelledAmount };

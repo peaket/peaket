@@ -11,13 +11,21 @@
  */
 import * as zod from 'zod';
 
+export const deleteIdentityAccountBodyRefundAccountBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const deleteIdentityAccountBodyRefundAccountAccountNumberMax = 30;
+
+
+export const deleteIdentityAccountBodyRefundAccountAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const deleteIdentityAccountBodyRefundAccountHolderNameMax = 60;
+
+
 export const DeleteIdentityAccountBody = zod.object({
   "confirmCancelUnusedTickets": zod.boolean().optional(),
   "acknowledgeFraudHold": zod.boolean().optional().describe('보관 안내(409의 fraudHold)를 본 뒤 true로 다시 보낸다. 보관 행이 있는데 없으면 다른 확인할 것이 없어도 409다(추천 적용 2026-10-31, ADR-0173)'),
   "refundAccount": zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
+  "bankCode": zod.string().regex(deleteIdentityAccountBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 두 자리(예 88 신한). 포트원 결제는 대응표에 있는 코드만 결제사로 간다'),
+  "accountNumber": zod.string().min(1).max(deleteIdentityAccountBodyRefundAccountAccountNumberMax).regex(deleteIdentityAccountBodyRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(deleteIdentityAccountBodyRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
 }).strict().optional().describe('가상계좌 결제 티켓을 지금 환급할 때만. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014)')
 }).strict()
 

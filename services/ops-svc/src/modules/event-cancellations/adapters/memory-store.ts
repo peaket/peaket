@@ -13,7 +13,7 @@ const CORE_APPLY_STATUSES: ReadonlySet<EventCancellationStatus> = new Set(['APPR
 export class MemoryEventCancellationStore implements EventCancellationStore, CoreApplyStore {
   readonly rows = new Map<string, EventCancellationRecord>();
   /** core 반영 표시(ops 0016과 같은 세 칸, 요청 ID별) */
-  readonly core = new Map<string, { appliedAtMs?: number; nextAtMs?: number; overdueAtMs?: number }>();
+  readonly core = new Map<string, { appliedAtMs?: number; nextAtMs?: number; overdueAtMs?: number; supersededAtMs?: number }>();
   /** 멱등 기록: `계정\n작업\n키` → 지문과 처음 응답 */
   readonly #once = new Map<string, { hash: Buffer; view: EventCancellationView }>();
 
@@ -53,7 +53,21 @@ export class MemoryEventCancellationStore implements EventCancellationStore, Cor
 
   async markCoreApplied(requestId: string, nowMs: number): Promise<void> {
     const c = this.core.get(requestId) ?? {};
-    if (c.appliedAtMs === undefined) this.core.set(requestId, { ...c, appliedAtMs: nowMs });
+    if (c.appliedAtMs !== undefined) return;
+    this.core.set(requestId, { ...c, appliedAtMs: nowMs });
+    // 같은 회차의 앞 요청은 대체한다(DB 저장소와 같다, RV-06)
+    const me = this.rows.get(requestId);
+    if (!me?.approvedAt) return;
+    for (const r of this.rows.values()) {
+      if (r.requestId === requestId || r.eventId !== me.eventId || !r.approvedAt || r.approvedAt.getTime() >= me.approvedAt.getTime()) continue;
+      const o = this.core.get(r.requestId) ?? {};
+      if (o.appliedAtMs === undefined && o.supersededAtMs === undefined) this.core.set(r.requestId, { ...o, supersededAtMs: nowMs });
+    }
+  }
+
+  async deferCoreApply(requestId: string, untilMs: number): Promise<void> {
+    const c = this.core.get(requestId) ?? {};
+    if (c.appliedAtMs === undefined) this.core.set(requestId, { ...c, nextAtMs: untilMs });
   }
 
   async claimCoreApplies(nowMs: number, limit: number, retryAfterMs: number): Promise<readonly CoreApplyDue[]> {
@@ -61,10 +75,23 @@ export class MemoryEventCancellationStore implements EventCancellationStore, Cor
       const next = this.core.get(r.requestId)?.nextAtMs;
       return next === undefined || next <= nowMs;
     });
-    return due.slice(0, limit).map((r) => {
-      this.core.set(r.requestId, { ...(this.core.get(r.requestId) ?? {}), nextAtMs: nowMs + retryAfterMs });
-      return { requestId: r.requestId, eventId: r.eventId, kind: r.kind, ...(r.newStartsAt ? { newStartsAt: r.newStartsAt } : {}) };
-    });
+    // 잡기 차례: 다음 볼 시각이 빈 것 먼저, 그다음 다음 볼 시각 → 확정 시각(DB 저장소와 같다). 돌려주는 차례는 확정 시각 순
+    const nextOf = (r: EventCancellationRecord) => this.core.get(r.requestId)?.nextAtMs;
+    const picked = [...due]
+      .sort((a, b) => {
+        const na = nextOf(a);
+        const nb = nextOf(b);
+        if (na === undefined && nb !== undefined) return -1;
+        if (na !== undefined && nb === undefined) return 1;
+        return (na ?? 0) - (nb ?? 0) || (a.approvedAt?.getTime() ?? 0) - (b.approvedAt?.getTime() ?? 0) || a.requestId.localeCompare(b.requestId);
+      })
+      .slice(0, limit);
+    return picked
+      .map((r) => {
+        this.core.set(r.requestId, { ...(this.core.get(r.requestId) ?? {}), nextAtMs: nowMs + retryAfterMs });
+        return { requestId: r.requestId, eventId: r.eventId, kind: r.kind, ...(r.newStartsAt ? { newStartsAt: r.newStartsAt } : {}), ...(r.approvedAt ? { approvedAtMs: r.approvedAt.getTime() } : {}) };
+      })
+      .sort((a, b) => (a.approvedAtMs ?? 0) - (b.approvedAtMs ?? 0) || a.requestId.localeCompare(b.requestId));
   }
 
   async markCoreApplyOverdue(nowMs: number, overdueAfterMs: number, limit: number): Promise<readonly { requestId: string; eventId: string }[]> {
@@ -78,7 +105,7 @@ export class MemoryEventCancellationStore implements EventCancellationStore, Cor
   /** Start까지 끝냈고(refundJobState 있음) 반영하지 않은 확정 뒤 요청(확정 시각 순) */
   #coreTargets(): EventCancellationRecord[] {
     return [...this.rows.values()]
-      .filter((r) => CORE_APPLY_STATUSES.has(r.status) && r.refundJobState !== null && this.core.get(r.requestId)?.appliedAtMs === undefined)
+      .filter((r) => CORE_APPLY_STATUSES.has(r.status) && r.refundJobState !== null && this.core.get(r.requestId)?.appliedAtMs === undefined && this.core.get(r.requestId)?.supersededAtMs === undefined)
       .sort((a, b) => (a.approvedAt?.getTime() ?? 0) - (b.approvedAt?.getTime() ?? 0) || a.requestId.localeCompare(b.requestId));
   }
 

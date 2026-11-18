@@ -30,9 +30,13 @@ import {
   type QueryOptions,
   type QueryResult,
   type QueryStatus,
+  portoneBankOf,
   type RefundAccount,
   type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
+
+/** 대응표는 도메인(payment-gateway.ts)에 있다. 쓰임새가 행을 만들기 전에 같은 표로 거른다(BAT-420-rest 리뷰 반영 RV-04) */
+export { portoneBankOf };
 import { portoneCardOfMethod } from './card-fields.js';
 import type { PayMethod } from '../../domain/payment-gateway.js';
 import { num, pgRequest, str, unreadableRowOf, type PgReply } from './pg-reply.js';
@@ -139,43 +143,6 @@ const CANCEL_REJECTED = new Set([
   'SUM_OF_PARTS_EXCEEDS_CANCEL_AMOUNT',
   'UNAUTHORIZED',
 ]);
-/**
- * 토스 은행 코드(두 자리) → 포트원 Bank 열거값(docs/features/payment.md §6 '구현에서 정한 것' ②, 2026-11-19 [가정]: 포트원 공식 스키마의 Bank 값 이름과 토스 은행 코드 표를 맞춘 것이다.
- * 실제 서버 대조 때 고친다). 포트원은 계좌 거절을 따로 나타내는 오류 유형을 공식 문서에서 찾지 못해 계좌를 실은 취소의 거절도 일반 거절로 읽는다([가정])
- */
-const PORTONE_BANK_OF = new Map<string, string>([
-  ['02', 'KDB'],
-  ['03', 'IBK'],
-  ['06', 'KOOKMIN'],
-  ['07', 'SUHYUP'],
-  ['11', 'NONGHYUP'],
-  ['12', 'LOCAL_NONGHYUP'],
-  ['20', 'WOORI'],
-  ['23', 'SC_FIRST'],
-  ['27', 'CITI'],
-  ['31', 'DAEGU'],
-  ['32', 'BUSAN'],
-  ['34', 'GWANGJU'],
-  ['35', 'JEJU'],
-  ['37', 'JEONBUK'],
-  ['39', 'KYONGNAM'],
-  ['45', 'KFCC'],
-  ['48', 'SHINHYUP'],
-  ['50', 'SAVINGS_BANK'],
-  ['54', 'HSBC'],
-  ['64', 'NFCF'],
-  ['71', 'POST'],
-  ['81', 'HANA'],
-  ['88', 'SHINHAN'],
-  ['89', 'K_BANK'],
-  ['90', 'KAKAO'],
-  ['92', 'TOSS'],
-]);
-
-/** 토스 은행 코드 → 포트원 Bank. 대응표에 없으면 undefined */
-export function portoneBankOf(bankCode: string): string | undefined {
-  return PORTONE_BANK_OF.get(bankCode);
-}
 /** 조회를 부를 결제 사건. 그 밖의 사건은 무시한다(payment §5) */
 const PAYMENT_EVENTS = new Set(['Transaction.Paid', 'Transaction.VirtualAccountIssued', 'Transaction.PartialCancelled', 'Transaction.Cancelled', 'Transaction.Failed', 'Transaction.PayPending', 'Transaction.CancelPending']);
 
@@ -396,6 +363,8 @@ export class PortoneGateway implements PaymentGatewayPort {
     }
     const code = str(r.json?.type);
     if (r.status < 400 || r.status === 408 || !code) return { outcome: 'UNKNOWN' };
+    // 멱등키 재사용(같은 키·다른 본문)은 거절 목록(CANCEL_REJECTED)에 없어 아래에서 UNKNOWN으로 읽는다. 포트원 공식 스키마에서 그 뜻의 오류 유형 이름을 찾지 못했다
+    // (2026-11-19 확인, [가정]. docs/features/payment.md §6 '구현에서 정한 것' ⑥, BAT-420-rest 리뷰 반영 RV-02)
     if (code === OUTSTANDING) return { outcome: 'CANCEL_PENDING', pgCode: code };
     // 이미 전액 취소된 결제를 전액 취소하면 바라는 상태와 같다
     if (code === ALREADY_CANCELLED && c.amount === 'ALL') return { outcome: 'CANCELLED', pgCode: code };

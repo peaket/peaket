@@ -9,6 +9,7 @@
 import { Controller, Get, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { Bulkhead, CLOCK, type Clock, ContractBody, dependencyUnavailable, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, type IdempotencyRequest as Idem, Idempotent, type Principal, ProblemError, PurchaseSigned, Roles } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
+import { refundAccountShape } from '@peaket/validation/refund-account';
 import { z } from 'zod';
 import { CancelTicket } from '../application/cancel-ticket.js';
 import type { CancelTicketResult } from '../domain/cancellation.js';
@@ -31,7 +32,8 @@ const QuoteResponse = z
     refundAccountRequired: z.boolean(),
   })
   .strict();
-const RefundAccountBody = z.object({ bankCode: z.string().min(1).max(20), accountNumber: z.string().min(1).max(40), holderName: z.string().min(1).max(100) }).strict();
+// 칸 모양(글자 수·숫자)은 여기서 보지 않고 처리기의 공용 규칙(refundAccountShape)이 400 invalid-body로 본다(재인증 앞, RV-04). 여기서는 칸 이름과 글 길이 상한만 본다
+const RefundAccountBody = z.object({ bankCode: z.string().max(20), accountNumber: z.string().max(64), holderName: z.string().max(200) }).strict();
 const CancelBody = z.object({ refundAccount: RefundAccountBody.optional() }).strict();
 const CancelHeaders = z.object({
   'Idempotency-Key': z.uuid(),
@@ -55,6 +57,8 @@ const reauthUnavailable = (cause: unknown) => new ProblemError({ type: 'reauth-u
 /** 회차 취소 일괄 환불이 확정된 회차(공제 없이 일괄 환불이 돌려준다, BAT-420 리뷰 D5, openapi 팬 취소·견적 409) */
 const eventCancelled = () => new ProblemError({ type: 'event-cancelled', status: 409, title: '취소가 확정된 회차입니다' });
 /** 가상계좌 결제이고 지금 환급할 취소인데 본문에 환불 계좌가 없다(openapi createTicketCancellation 422, BUILD_ORDER GAT-090) */
+/** 환불 계좌 모양이 틀렸다(400 invalid-body, 공용 규칙 @peaket/validation/refund-account, docs/features/payment.md §6 '구현에서 정한 것' ⑦, BAT-420-rest 리뷰 반영 RV-04) */
+const invalidBody = () => new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
 const refundAccountRequired = () => new ProblemError({ type: 'refund-account-required', status: 422, title: '환불받을 계좌를 입력해 주세요' });
 /** 결제 수단(가상계좌였는지)을 payment-svc에서 읽지 못함. Retry-After 1초 [가정](openapi 견적·취소 503, BUILD_ORDER GAT-090) */
 const paymentMethodUnavailable = () => dependencyUnavailable(1);
@@ -96,6 +100,9 @@ export class TicketCancellationController {
     @IdempotencyRequest() idem: Idem,
     @Req() request: FastifyRequest,
   ): Promise<z.output<typeof CancelResponse>> {
+    // 계좌 모양은 재인증 앞에서 본다(틀리면 토큰을 쓰지 않고 400 invalid-body, 결제 수단 읽기·Saga 0). 맞으면 본문 그대로 넘긴다(payment-svc가 같은 규칙으로 다시 본다)
+    const refundAccount = body.refundAccount;
+    if (refundAccount !== undefined && !refundAccountShape(refundAccount).ok) throw invalidBody();
     const token = typeof request.headers['x-reauth-token'] === 'string' ? request.headers['x-reauth-token'] : undefined;
     // 환급 계좌를 담은 취소는 '환급 계좌 입력'이라 FAN_HIGH_RISK만 받는다(docs/security/authz-matrix.md §6). 반대 묶음도 거절한다
     // 받는 쪽 작업 op도 본문으로 정한다(토큰에서 읽지 않는다, authz-matrix §6 '받는 쪽 작업 op의 값', ADR-0293 결정 5)
@@ -117,7 +124,7 @@ export class TicketCancellationController {
       reason: 'USER',
       nowMs: this.clock.now(),
       deadlineMs: 5_000,
-      ...(body.refundAccount !== undefined ? { refundAccount: body.refundAccount } : {}),
+      ...(refundAccount !== undefined ? { refundAccount } : {}),
     });
     if (r.status === 'ACCEPTED' || r.status === 'REPLAYED') {
       return { cancellationId: r.cancellationId, status: r.refundAfterEntryClose ? 'REQUESTED' : 'REFUNDED', refundAmount: r.refundAmount };
