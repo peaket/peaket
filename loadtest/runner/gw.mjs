@@ -893,8 +893,11 @@ const K10_MIN = 20;
 const RMIN_RUNS = 3;
 const LIMITS_GATEWAY = 'gw-queue';
 const LIMITS_ROUTE = 'gw-queue-buy';
-/** 되돌릴 조건(ADR-0287): 잰 k(올리기 전)가 이 값보다 크면 알린다 */
-const K_RAW_WARN = 5;
+/**
+ * 되돌릴 조건(ADR-0287 '되돌릴 조건'·결정 7 끝, docs/infra.md §4.1 '측정(V-T43)' ⑤, BAT-058 리뷰 반영 RV-03): 올리기 전 k가 이 값 이상이면
+ * (정수로 견줌: r_min × 1,000,000 ≥ K_ROLLBACK × 도착률 × L̄µs, 경계는 넘은 쪽) 상한을 내지 않고 끝 코드 1
+ */
+const K_ROLLBACK = 5;
 
 /** 양의 정수 나눗셈의 올림(BigInt로 정확히) */
 const ceilDiv = (a, b) => {
@@ -909,10 +912,13 @@ const verdictOf = (s) => (s?.valid === true && (s.verdict === 'pass' || s.verdic
  * 하나라도 어기면 reasons에 까닭을 한 줄씩(조용히 버리지 않는다): gw sweep 결과가 아님, 게이트웨이·라우트가 gw-queue gw-queue-buy가 아님,
  * 정상 부하(mix normal·delay normal)가 아닌 파일·단계(과부하 단계 포함), 단계가 없음, 연결 ≠ 동시, 보류 ≠ ⌈동시 ÷ 8⌉, 도착률이 없거나 단계끼리 다름,
  * 판정이 pass·fail·invalid가 아님. 무효 단계(valid가 true가 아니거나 verdict invalid)도 설정은 같은 규칙으로 본다.
+ * o.podCpus가 있으면 유효 단계(통과·실패)마다 결과 줄 workers.pods의 값이 하나 이상 있고 모두 o.podCpus와 같아야 한다(일꾼 수 = 파드 CPU, ADR-0287 결정 2·6).
+ * 다르거나, workers 칸이 없거나(옛 결과 파일), pods가 비었으면 섞인 입력이다(BAT-058 리뷰 반영 RV-04). 무효 단계는 보지 않는다(부하를 넣지 않았다).
  * 단계의 진입 2xx 평균은 단계 줄의 streams.entry.latency2xx.avg다
+ * @param {Array<{ path: string, data: any }>} files @param {{ podCpus?: number }} [o]
  * @returns {{ steps: Array<{ file: string, index: number, parallel: number, verdict: 'pass'|'fail'|'invalid', avg: number|null }>, rate: number|null, reasons: string[] }}
  */
-export function limitsSteps(files) {
+export function limitsSteps(files, o = {}) {
   const reasons = [];
   const steps = [];
   const rates = new Set();
@@ -943,8 +949,18 @@ export function limitsSteps(files) {
       if (!Number.isSafeInteger(s.rate) || s.rate < 1) reasons.push(`${w}: 도착률이 1 이상 정수가 아니다(${JSON.stringify(s.rate)})`);
       else rates.add(s.rate);
       if (!['pass', 'fail', 'invalid'].includes(s.verdict)) reasons.push(`${w}: 판정이 pass·fail·invalid가 아니다(${JSON.stringify(s.verdict)})`);
+      const verdict = verdictOf(s);
+      if (o.podCpus !== undefined && verdict !== 'invalid') {
+        const pods = s.workers?.pods;
+        const names = pods && typeof pods === 'object' ? Object.keys(pods).sort() : [];
+        if (!names.length) reasons.push(`${w}: 결과 줄에 읽은 일꾼 수(workers.pods)가 없다(일꾼 수를 보기 전의 결과 파일이거나 못 읽음)`);
+        else {
+          const bad = names.filter((n) => pods[n] !== o.podCpus);
+          if (bad.length) reasons.push(`${w}: 읽은 일꾼 수가 --pod-cpus ${o.podCpus}와 다르다(${bad.map((n) => `${n} ${JSON.stringify(pods[n])}`).join(', ')})`);
+        }
+      }
       const avg = s.streams?.entry?.latency2xx?.avg;
-      steps.push({ file: at, index: i, parallel: p, verdict: verdictOf(s), avg: Number.isFinite(avg) ? avg : null });
+      steps.push({ file: at, index: i, parallel: p, verdict, avg: Number.isFinite(avg) ? avg : null });
     }
   }
   if (rates.size > 1) reasons.push(`단계의 도착률이 서로 다르다(${[...rates].sort((a, b) => a - b).join(', ')}/s)`);
@@ -985,7 +1001,7 @@ export function limitsRMin(steps) {
  * saturation(vCPU 하나의 포화 처리량 /s), podCpus(파드 CPU 코어). 아니면 RangeError.
  * k10 = max(20, ⌈10 × rMin × 1,000,000 ÷ (rate × meanLatencyUs)⌉), k = k10 ÷ 10,
  * 동시 = 연결 = ⌈k10 × 6 × saturation × podCpus × L_gw(ms) ÷ 100,000⌉, 보류 = ⌈동시 ÷ 8⌉, r_pc = ⌈k10 × rate × meanLatencyUs ÷ 10,000,000⌉.
- * kRaw는 올리기 전 k(소수 셋째 자리 반올림), rPod는 0.6 × saturation × podCpus
+ * kRaw는 올리기 전 k(소수 넷째 자리 반올림, 보이기용이고 되돌릴 조건은 gwLimits가 정수로 견준다), rPod는 0.6 × saturation × podCpus
  */
 export function limitsValues(o) {
   for (const k of ['rMin', 'meanLatencyUs', 'rate', 'saturation', 'podCpus']) if (!Number.isSafeInteger(o?.[k]) || o[k] < 1) throw new RangeError(`${k}는 1 이상 정수다: ${o?.[k]}`);
@@ -996,7 +1012,7 @@ export function limitsValues(o) {
     return { maxConnections: p, maxParallelRequests: p, maxPendingRequests: ceilDiv(p, PENDING_DIV) };
   };
   return {
-    kRaw: Math.round(((o.rMin * 1_000_000) / den) * 1000) / 1000,
+    kRaw: Math.round(((o.rMin * 1_000_000) / den) * 10000) / 10000,
     k10,
     k: k10 / 10,
     rPod: (R_POD_NUM * o.saturation * o.podCpus) / R_POD_DEN,
@@ -1010,8 +1026,11 @@ export function limitsValues(o) {
  * L̄은 r_min의 유효 단계(모두 통과) 진입 2xx avg의 평균을 마이크로초 정수로 반올림한 값이다(한 단계라도 avg가 null이면 정하지 못함).
  * o = { saturation, podCpus, paths?(입력 파일 이름, 없으면 files의 path), readErrors?(파일을 못 읽은 까닭들. 있으면 정하지 못함) }.
  * 결과(limits.json): { command: 'gw limits', determined, inputs: { files, saturation, podCpus, rate }, constants, runs, rMin, meanLatencyUs, meanLatencyMs,
- *   kRaw, k, rPod, rPc, limits: { 'gw-queue': { maxConnections, maxParallelRequests, maxPendingRequests }, others: {…} } | null, reasons, next, warnings }.
- * 정하지 못하면 determined false이고 정하지 못한 값 칸은 null, reasons에 까닭, next에 더 재야 할 것. warnings는 잰 k(올리기 전)가 5보다 클 때(ADR-0287 되돌릴 조건)
+ *   kRaw, k, rPod, rPc, limits: { 'gw-queue': { maxConnections, maxParallelRequests, maxPendingRequests }, others: {…} } | null, rollback, reasons, next, warnings }.
+ * 정하지 못하면 determined false이고 정하지 못한 값 칸은 null, reasons에 까닭, next에 더 재야 할 것.
+ * 유효 단계에서 읽은 일꾼 수가 o.podCpus와 다르면 정하지 못한다(limitsSteps, RV-04).
+ * 되돌릴 조건(RV-03): 올리기 전 k가 5 이상이면(정수로 견줌: rMin × 1,000,000 ≥ 5 × 도착률 × L̄µs) determined false, rollback true, limits·k·rPc null이고
+ * reasons에 '운영 값에 쓰지 않음'과 견준 두 정수를 남긴다(잰 rMin·L̄·kRaw는 남긴다). 그 밖에는 rollback false
  */
 export function gwLimits(files, o) {
   const base = {
@@ -1028,13 +1047,15 @@ export function gwLimits(files, o) {
     rPod: null,
     rPc: null,
     limits: null,
+    rollback: false,
     reasons: [],
     next: [],
     warnings: [],
   };
   if (o?.readErrors?.length) return { ...base, reasons: [...o.readErrors], next: ['파일 경로를 고쳐 다시 돌린다'] };
-  const input = limitsSteps(files);
-  if (input.reasons.length) return { ...base, reasons: input.reasons, next: ['정상 부하 gw-queue gw-queue-buy, 같은 도착률, 연결 = 동시, 보류 = ⌈동시 ÷ 8⌉인 sweep.json만 준다'] };
+  const input = limitsSteps(files, { podCpus: o?.podCpus });
+  if (input.reasons.length)
+    return { ...base, reasons: input.reasons, next: [`정상 부하 gw-queue gw-queue-buy, 같은 도착률, 연결 = 동시, 보류 = ⌈동시 ÷ 8⌉이고 유효 단계의 읽은 일꾼 수가 모두 --pod-cpus ${o?.podCpus}인 sweep.json만 준다`] };
   const r = limitsRMin(input.steps);
   const withRuns = { ...base, inputs: { ...base.inputs, rate: input.rate }, runs: r.runs };
   if (r.rMin === null) return { ...withRuns, reasons: r.reasons, next: r.next };
@@ -1044,8 +1065,21 @@ export function gwLimits(files, o) {
   const meanLatencyUs = Math.round((at.reduce((s, x) => s + x.avg, 0) / at.length) * 1000);
   if (meanLatencyUs < 1) return { ...withRuns, rMin: r.rMin, reasons: [`r_min ${r.rMin}의 진입 2xx 평균이 1µs보다 작다(${meanLatencyUs}µs)`], next: [`동시 상한 ${r.rMin}에서 다시 잰다`] };
   const v = limitsValues({ rMin: r.rMin, meanLatencyUs, rate: input.rate, saturation: o.saturation, podCpus: o.podCpus });
-  const warnings = v.kRaw > K_RAW_WARN ? [`잰 k(올리기 전) ${v.kRaw}가 ${K_RAW_WARN}보다 크다(ADR-0287 '되돌릴 조건': 운영 값을 고치지 않고 감독에게 알린다)`] : [];
-  return { ...withRuns, determined: true, rMin: r.rMin, meanLatencyUs, meanLatencyMs: meanLatencyUs / 1000, kRaw: v.kRaw, k: v.k, rPod: v.rPod, rPc: v.rPc, limits: v.limits, warnings };
+  const measured = { rMin: r.rMin, meanLatencyUs, meanLatencyMs: meanLatencyUs / 1000, kRaw: v.kRaw, rPod: v.rPod };
+  // 되돌릴 조건은 올리기 전 k를 정수로 견준다(반올림한 kRaw로 견주면 5.0002가 5로 보인다)
+  const lhs = BigInt(r.rMin) * 1_000_000n;
+  const rhs = BigInt(K_ROLLBACK) * BigInt(input.rate) * BigInt(meanLatencyUs);
+  if (lhs >= rhs)
+    return {
+      ...withRuns,
+      ...measured,
+      rollback: true,
+      reasons: [
+        `올리기 전 k(${r.rMin} ÷ (${input.rate} × ${meanLatencyUs}µs) ≈ ${v.kRaw})가 ${K_ROLLBACK} 이상이다(정수로 견줌: ${lhs} ≥ ${rhs}). ADR-0287 '되돌릴 조건': 운영 값에 쓰지 않음, 상한을 내지 않는다`,
+      ],
+      next: ['운영 값을 고치지 않고 감독에게 알린다(ADR-0287 대안 4·5를 새 ADR로 다시 본다)'],
+    };
+  return { ...withRuns, ...measured, determined: true, k: v.k, rPc: v.rPc, limits: v.limits };
 }
 
 /** gw limits 결과의 콘솔 글(한국어 몇 줄) */
@@ -1054,7 +1088,8 @@ export function limitsLines(r) {
   const runs = Object.entries(r.runs ?? {});
   if (runs.length) lines.push(`후보(동시 상한)마다 통과·실패·무효: ${runs.map(([c, x]) => `${c} ${x.pass}·${x.fail}·${x.invalid}`).join(', ')}`);
   if (!r.determined) {
-    lines.push('정하지 못했다:');
+    if (r.rMin !== null && r.meanLatencyMs !== null) lines.push(`r_min ${r.rMin}, 평균 지연 ${r.meanLatencyMs}ms, 올리기 전 k ${r.kRaw}`);
+    lines.push(r.rollback ? '되돌릴 조건에 걸려 상한을 내지 않는다(운영 값에 쓰지 않음):' : '정하지 못했다:');
     for (const x of r.reasons) lines.push(`  까닭: ${x}`);
     for (const x of r.next) lines.push(`  다음: ${x}`);
     return lines;

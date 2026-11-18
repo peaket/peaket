@@ -152,12 +152,12 @@ spec:
       kind: Gateway
       name: gw-queue
   # 차단 상한(서킷 브레이커, docs/infra.md §4.1 '게이트웨이 차단 상한', V-T43). 프록시 파드 하나·라우트 규칙 하나마다 센다.
-  # 값은 정본 '잰 값으로 고친 값'이다(일꾼 2 무대에서 잰 k, BAT-058 측정 docs/review/measurements/BAT-058-gateway-workers.md, ADR-0287).
+  # 값은 정본 '지금 값과 잰 값(적용 보류)'의 지금 값(첫 값)이다. BAT-058 첫 측정의 잰 값은 적용 보류이고 진단 측정이 정하면 고친다(ADR-0287 결정 11).
   # 연결 = 동시 처리 = ⌈k × R_pod × L_gw⌉, 보류 = ⌈동시 × q⌉. 재시도(retry)는 어디에도 두지 않는다(ADR-0009 결정 3)
   circuitBreaker:
-    maxConnections: 3120
-    maxParallelRequests: 3120
-    maxPendingRequests: 390
+    maxConnections: 2400
+    maxParallelRequests: 2400
+    maxPendingRequests: 300
   responseOverride:
     - match:
         statusCodes:
