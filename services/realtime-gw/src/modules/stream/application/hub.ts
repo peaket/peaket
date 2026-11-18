@@ -1,6 +1,7 @@
 // 좌석 델타 허브(docs/features/seat-hold.md §7 'realtime-gw의 첫 구현', ADR-0296 결정 4·5·6, ADR-0110 결정 3·4, ADR-0240 결정 10, BUILD_ORDER HOT-090).
 // 맺은 연결(핸드셰이크를 통과하고 회차가 토큰과 같은 것)마다 구독 집합·받는 프레임 검사·쌓인 묶음·하트비트·만료를 맡고,
-// 파드 안에서 구역 채널마다 구독한 연결 수를 세어 좌석 Redis 샤드 Pub/Sub 구독을 0 ↔ 1에서만 바꾼다.
+// 파드 안에서 구역 채널마다 구독한 연결 수를 세어 0 → 1이면 구독기의 subscribe, 1 → 0이면 unsubscribe를 한 번 부른다.
+// 원하는 구독 상태의 주인은 구독기 하나다(ADR-0297 결정 1): 허브는 약속의 결과로 상태를 정하지 않고, 다시 보내기·물러서기도 구독기 몫이다.
 // 박자(tick)는 파드에 하나다(100ms [가정], 부르는 쪽의 타이머). 시계는 주입한다: 벽시계(now)는 serverTimeMs·maxWaitMs·토큰 exp에,
 // 단조 시계(monotonicMs)는 간격(구독 바꾸기 1초 창, TimeSync 1,000ms, 하트비트 15초)에 쓴다.
 // 회차·구역·연결은 Map·Set으로만 찾는다(ASVS v5.0.0-15.3.6). 닫힘 이유 글은 아래 고정 글만 싣는다(받은 값을 넣지 않는다, 1.3.7).
@@ -24,6 +25,10 @@ export const TIME_SYNC_MIN_GAP_MS = 1_000;
 export const MAX_BUFFERED_BYTES = 1024 * 1024;
 /** maxWaitMs는 u16이라 이 값에서 자른다 */
 export const MAX_WAIT_MS_CAP = 65_535;
+/** 같은 입장 토큰(jti)의 파드 연결 상한([가정], ADR-0297 결정 3). 셋째는 맺은 뒤 4429 */
+export const MAX_CONNECTIONS_PER_TOKEN = 2;
+/** 내릴 때 구독 해제 응답을 기다리는 상한(ms, [가정], ADR-0297 결정 5) */
+export const SHUTDOWN_UNSUBSCRIBE_WAIT_MS = 1_000;
 /** 묶음 하나의 구역 항목 수 상한(u16 sectionCount). 닿으면 그 자리에서 보낸다 */
 const MAX_BATCH_ENTRIES = 65_535;
 
@@ -36,7 +41,7 @@ export const CLOSE = {
   TOO_MANY: 4429,
 } as const;
 
-/** 닫힘 이유 글(코드에 고정한 짧은 글, ASVS v5.0.0-1.3.7) */
+/** 닫힘 이유 글(코드에 고정한 짧은 글, ASVS v5.0.0-1.3.7). docs/frontend.md §4.4.1 '닫힘 이유 글'의 계약이다(ADR-0297 결정 8) */
 export const CLOSE_REASON = {
   serverRestart: 'server restart',
   slowConsumer: 'slow consumer',
@@ -54,7 +59,10 @@ export interface StreamConnection {
   readonly bufferedAmount: number;
 }
 
-/** 좌석 Redis 샤드 Pub/Sub 구독(어댑터가 node-redis sSubscribe·sUnsubscribe로 구현한다) */
+/**
+ * 좌석 Redis 샤드 Pub/Sub 구독(어댑터가 node-redis sSubscribe·sUnsubscribe로 구현한다).
+ * 두 함수는 원하는 상태를 적고 곧 돌려주며 거절하지 않는다(ADR-0297 결정 1). 허브는 거절이 와도 삼키고 다시 부르지 않는다
+ */
 export interface ChannelSubscriber {
   subscribe(channel: string, onMessage: (message: string) => void): Promise<void>;
   unsubscribe(channel: string): Promise<void>;
@@ -70,20 +78,18 @@ export interface StreamHubDeps {
    * realtime_gw_batches_total·realtime_gw_batch_bytes_total·realtime_gw_batch_wait_ms·realtime_gw_pubsub_messages_total{result}
    */
   onMetric?(name: string, labels: Record<string, string>, value: number): void;
-  /** 구독·해제가 실패했을 때(다음 박자에 다시 맞춘다). 채널 이름과 오류 이름만 넘긴다 */
-  onSubscribeError?(e: { channel: string; op: 'subscribe' | 'unsubscribe'; error: string }): void;
 }
 
 export interface StreamHub {
-  /** 맺은 연결을 들인다. 곧 BatchInterval{100}을 보낸다 */
-  open(c: StreamConnection, s: { eventId: string; accountId: string; expiresAtMs: number }): void;
+  /** 맺은 연결을 들인다. 곧 BatchInterval{100}을 보낸다. 같은 토큰(tokenId = jti)의 연결이 이미 2개면 4429 too many로 닫는다 */
+  open(c: StreamConnection, s: { eventId: string; accountId: string; expiresAtMs: number; tokenId: string }): void;
   /** 받은 프레임 하나 */
   receive(c: StreamConnection, data: Uint8Array, isBinary: boolean): void;
   /** 연결이 닫혔다(상대가 닫았거나 끊겼다). 여러 번 불러도 된다 */
   gone(c: StreamConnection): void;
-  /** 박자 하나: 만료(4401) → 쌓인 묶음 → 주기 하트비트 */
+  /** 박자 하나: 만료(4401) → 보내기 버퍼(1013) → 쌓인 묶음 → 주기 하트비트 */
   tick(): void;
-  /** 모든 연결을 1012로 닫고, 진행 중인 구독·해제가 끝나기를 기다린다. 그 뒤 open은 곧 1012로 닫는다 */
+  /** 모든 연결을 1012로 닫고, 구독 해제 응답은 1초까지만 기다린다(ADR-0297 결정 5). 그 뒤 open은 곧 1012로 닫는다 */
   shutdown(): Promise<void>;
 }
 
@@ -99,6 +105,7 @@ interface Conn {
   readonly c: StreamConnection;
   readonly eventId: string;
   readonly expiresAtMs: number;
+  readonly tokenId: string;
   sections: Set<number>;
   /** 받은 SubscribeSections의 단조 시각(창 안의 것만 둔다) */
   subscribeTimes: number[];
@@ -110,74 +117,29 @@ interface Conn {
   closed: boolean;
 }
 
-interface ChannelState {
-  /** Redis에 실제로 구독했다고 본 상태(마지막으로 끝난 구독·해제의 결과) */
-  actual: boolean;
-  /** 구독·해제가 진행 중(같은 채널은 한 번에 하나씩) */
-  busy: boolean;
-}
-
 export function createStreamHub(d: StreamHubDeps): StreamHub {
   const conns = new Map<StreamConnection, Conn>();
   /** 채널 → 그 구역을 구독한 연결 */
   const byChannel = new Map<string, Set<Conn>>();
-  const channels = new Map<string, ChannelState>();
-  /** 구독·해제가 실패해 다음 박자에 다시 맞출 채널 */
-  const dirty = new Set<string>();
+  /** 토큰 jti → 그 토큰의 연결 */
+  const byToken = new Map<string, Set<Conn>>();
+  /** 부른 구독·해제의 약속(내릴 때 1초까지만 기다린다) */
   const inFlight = new Set<Promise<void>>();
-  /** 채널마다 메시지 받는 함수(같은 채널은 같은 함수) */
-  const listeners = new Map<string, (message: string) => void>();
   let stopped = false;
 
   const metric = (name: string, labels: Record<string, string>, value: number): void => d.onMetric?.(name, labels, value);
 
-  const want = (channel: string): boolean => (byChannel.get(channel)?.size ?? 0) > 0;
-
-  const listenerOf = (channel: string): ((message: string) => void) => {
-    let l = listeners.get(channel);
-    if (!l) {
-      l = (message: string) => onMessage(channel, message);
-      listeners.set(channel, l);
-    }
-    return l;
-  };
-
-  /** 채널의 원하는 상태(연결 수 > 0)와 실제를 맞춘다. 같은 채널은 한 번에 하나씩, 끝난 뒤 다르면 한 번 더 한다(docs/data.md §5) */
-  const reconcile = (channel: string): void => {
-    let st = channels.get(channel);
-    if (!st) {
-      st = { actual: false, busy: false };
-      channels.set(channel, st);
-    }
-    if (st.busy) return;
-    const target = want(channel);
-    if (target === st.actual) {
-      if (!target) {
-        channels.delete(channel);
-        listeners.delete(channel);
-      }
-      return;
-    }
-    const state = st;
-    state.busy = true;
-    dirty.delete(channel);
-    let op: Promise<void>;
+  /** 구독기를 한 번 부른다. 결과로 상태를 정하지 않고 거절은 삼킨다(다시 보내기는 구독기 몫, ADR-0297 결정 1) */
+  const call = (run: () => Promise<void>): void => {
+    let p: Promise<void>;
     try {
-      op = target ? d.subscriber.subscribe(channel, listenerOf(channel)) : d.subscriber.unsubscribe(channel);
+      p = Promise.resolve(run());
     } catch (err) {
-      op = Promise.reject(err);
+      p = Promise.reject(err);
     }
-    const done: Promise<void> = Promise.resolve(op).then(
-      () => {
-        state.actual = target;
-        state.busy = false;
-        reconcile(channel);
-      },
-      (err: unknown) => {
-        state.busy = false;
-        dirty.add(channel);
-        d.onSubscribeError?.({ channel, op: target ? 'subscribe' : 'unsubscribe', error: err instanceof Error ? err.name : 'unknown' });
-      },
+    const done = p.then(
+      () => {},
+      () => {},
     );
     inFlight.add(done);
     void done.finally(() => inFlight.delete(done));
@@ -191,7 +153,8 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
       byChannel.set(channel, set);
     }
     set.add(conn);
-    if (set.size === 1) reconcile(channel);
+    if (set.size !== 1) return;
+    call(() => d.subscriber.subscribe(channel, (message: string) => onMessage(channel, message)));
   };
 
   const leave = (conn: Conn, sectionIndex: number): void => {
@@ -200,12 +163,17 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
     if (!set || !set.delete(conn)) return;
     if (set.size === 0) {
       byChannel.delete(channel);
-      reconcile(channel);
+      call(() => d.subscriber.unsubscribe(channel));
     }
   };
 
   const detach = (conn: Conn): void => {
     conns.delete(conn.c);
+    const same = byToken.get(conn.tokenId);
+    if (same) {
+      same.delete(conn);
+      if (same.size === 0) byToken.delete(conn.tokenId);
+    }
     for (const s of conn.sections) leave(conn, s);
     conn.sections = new Set();
     conn.pending = undefined;
@@ -303,10 +271,18 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
         c.close(CLOSE.FORBIDDEN, CLOSE_REASON.badEvent);
         return;
       }
+      // 같은 입장 토큰의 파드 연결은 2개까지(다시 붙는 동안의 겹침 하나, ADR-0297 결정 3)
+      const tokenId = typeof s.tokenId === 'string' ? s.tokenId : '';
+      let same = byToken.get(tokenId);
+      if (same && same.size >= MAX_CONNECTIONS_PER_TOKEN) {
+        c.close(CLOSE.TOO_MANY, CLOSE_REASON.tooMany);
+        return;
+      }
       const conn: Conn = {
         c,
         eventId: s.eventId,
         expiresAtMs: s.expiresAtMs,
+        tokenId,
         sections: new Set(),
         subscribeTimes: [],
         lastTimeSyncAnswerMs: undefined,
@@ -315,6 +291,8 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
         closed: false,
       };
       conns.set(c, conn);
+      if (!same) byToken.set(tokenId, (same = new Set()));
+      same.add(conn);
       // 첫 프레임은 BatchInterval{100}(ADR-0240 결정 10)
       sendTo(conn, encodeBatchInterval(BATCH_INTERVAL_MS));
     },
@@ -359,7 +337,6 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
     },
 
     tick() {
-      for (const channel of [...dirty]) reconcile(channel);
       const now = d.clock.now();
       const mono = d.clock.monotonicMs();
       for (const conn of [...conns.values()]) {
@@ -367,6 +344,11 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
         // 토큰 exp 이상이 된 첫 박자에 4401(늦어도 박자 하나)
         if (now >= conn.expiresAtMs) {
           closeConn(conn, CLOSE.TOKEN_EXPIRED, CLOSE_REASON.tokenExpired);
+          continue;
+        }
+        // 보낼 것이 없어도 보내기 버퍼가 상한을 넘은 연결은 닫는다(읽지 않는 연결이 다른 연결을 해치지 않게, ADR-0297 결정 2)
+        if (conn.c.bufferedAmount > MAX_BUFFERED_BYTES) {
+          closeConn(conn, CLOSE.TRY_AGAIN_LATER, CLOSE_REASON.slowConsumer);
           continue;
         }
         flush(conn);
@@ -382,7 +364,11 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
     async shutdown() {
       stopped = true;
       for (const conn of [...conns.values()]) closeConn(conn, CLOSE.SERVER_RESTART, CLOSE_REASON.serverRestart);
-      while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
+      if (inFlight.size === 0) return;
+      // 연결은 이미 닫혔다. 해제 응답은 1초까지만 기다린다(좌석 Redis가 멈춰도 내리기가 남지 않게)
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([Promise.allSettled([...inFlight]), new Promise<void>((r) => (timer = setTimeout(r, SHUTDOWN_UNSUBSCRIBE_WAIT_MS)))]);
+      clearTimeout(timer);
     },
   };
 }
