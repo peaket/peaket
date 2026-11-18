@@ -691,7 +691,11 @@ spec:
             scopes:
               - ticket:buy
 ---
-# gw-fan-buy: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+# gw-fan-buy: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다) + 입장 토큰 확인(docs/infra.md §4.1 '입장 토큰 확인', ADR-0288 결정 4·6).
+# - admission: X-Admission-Token의 서명·alg·kid(옛 키 끝 시각)·typ·iss·aud·exp·주소의 회차를 본다(①~⑧ 401 admission-token-invalid, ⑨ 403).
+#   Envoy Gateway v1.10의 JWT 제공자는 여럿이면 하나만 맞아도 통과라 팬 토큰과 함께 요구하려고 Lua가 본다. 키 목록은 EnvoyProxy peaket-proxy의 PEAKET_ADMISSION_JWKS.
+# - admissionIssuer: queue-svc PEAKET_ADMISSION_TOKEN_ISSUER·purchase-svc PEAKET_ADMISSION_ISSUER와 같은 값 [가정](ADR-0288 결정 8, deploy/workloads).
+# - corsOrigin: Lua가 낸 401·403에 교차 출처 머리를 달 화면 출처(위 gw-fan-buy-security의 cors.allowOrigins와 같은 값, 결정 6)
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyExtensionPolicy
 metadata:
@@ -713,6 +717,9 @@ spec:
         checkTyp: true
         tokenCookie: __Secure-peaket_at
         tokenScheme: Bearer
+        admission: true
+        admissionIssuer: https://queue.peaket.example
+        corsOrigin: https://www.peaket.example
 ---
 # gw-fan-api: 교차 출처·출처 확인·토큰 확인·인가(유효한 토큰)
 apiVersion: gateway.envoyproxy.io/v1alpha1

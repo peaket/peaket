@@ -41,12 +41,85 @@ export const GATEWAY_ISSUER = 'https://identity.peaket.example';
  */
 export const GATEWAY_PROBES = {
   'gw-queue': { host: 'queue', method: 'GET', path: '/v1/queues/{event}/verification', scope: 'ticket:buy', scheme: 'Bearer' },
-  'gw-fan': { host: 'api', method: 'GET', path: '/v1/events/{event}/seatmap-snapshot', scope: 'ticket:buy', scheme: 'Bearer' },
+  // 구매 경로라 입장 토큰도 요구한다(admission: true면 손님이 그 회차의 입장 토큰을 X-Admission-Token에 붙인다, docs/infra.md §4.1 '입장 토큰 확인', BAT-057)
+  'gw-fan': { host: 'api', method: 'GET', path: '/v1/events/{event}/seatmap-snapshot', scope: 'ticket:buy', scheme: 'Bearer', admission: true },
   'gw-partner': { host: 'partner-api', method: 'GET', path: '/v1/partner/events/{event}/attendees', scope: '', scheme: 'Bearer' },
   'gw-ops': { host: 'ops-api', method: 'GET', path: '/v1/ops/events/{event}/live', scope: '', scheme: 'Bearer' },
   'gw-scanner': { host: 'scanner-api', method: 'GET', path: '/v1/scanner/events/{event}/package', scope: '', scheme: 'DPoP' },
 };
 export const GATEWAY_APP_PATHS = { 'gw-fan': '/e2e-app', 'gw-partner': '/e2e-app' };
+
+/**
+ * 입장 토큰 키 목록 ConfigMap(EnvoyProxy peaket-proxy가 키 jwks를 PEAKET_ADMISSION_JWKS로 받는다, optional: true).
+ * docs/infra.md §4.1 '입장 토큰 확인', ADR-0288 결정 5. 운영은 배포 때 queue-svc 묶음과 같은 값을 넣고, 로컬 kind는 cluster.mjs gateways가 시험 키로 만든다
+ */
+export const ADMISSION_JWKS_CONFIGMAP = Object.freeze({ name: 'peaket-admission-jwks', key: 'jwks' });
+/** 시험 입장 토큰 발급자(deploy/gateways/gw-fan.yaml gw-fan-buy-edge의 admissionIssuer와 같다, ADR-0288 결정 8) */
+export const GATEWAY_ADMISSION_ISSUER = 'https://queue.peaket.example';
+/** 시험 옛 키 둘의 끝 시각 거리(초): 끝 시각이 남은 옛 키는 지금 + 1시간, 끝 시각이 지난 옛 키는 지금 − 1시간 */
+export const ADMISSION_PREVIOUS_UNTIL_SECONDS = 3600;
+/** kind 명령 gateways-admission의 방식: restore(처음 값), empty(빈 묶음 {"keys":[]}), remove(ConfigMap 지움) */
+export const GATEWAYS_ADMISSION_MODES = Object.freeze(['restore', 'empty', 'remove']);
+
+/** 개인 JWK의 공개 부분(queue-svc 묶음 원소와 같은 칸: kty·crv·x·y·kid·alg·use). 개인키 칸 d는 싣지 않는다 */
+const publicAdmissionJwk = (jwk) => ({ kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y, kid: jwk.kid, alg: 'ES256', use: 'sig' });
+
+/**
+ * 시험 입장 토큰 키 넷(접속 정보의 admission 칸): 지금 키·다음 키·끝 시각이 남은 옛 키·끝 시각이 지난 옛 키. kid가 겹치면 던진다
+ * @param {{ current: { kid: string }, next: { kid: string }, previous: { kid: string }, expired: { kid: string } }} keys 개인 JWK 넷
+ * @param {number} nowSeconds 지금(초)
+ */
+export function admissionKeySet(keys, nowSeconds) {
+  const kids = [keys.current, keys.next, keys.previous, keys.expired].map((k) => k?.kid);
+  if (kids.some((k) => typeof k !== 'string' || k === '') || new Set(kids).size !== kids.length) throw new Error('시험 입장 토큰 키 넷의 kid가 없거나 겹친다');
+  if (!Number.isInteger(nowSeconds)) throw new Error('지금(초)은 정수다');
+  return {
+    issuer: GATEWAY_ADMISSION_ISSUER,
+    current: keys.current,
+    next: keys.next,
+    previous: { jwk: keys.previous, until: nowSeconds + ADMISSION_PREVIOUS_UNTIL_SECONDS },
+    expired: { jwk: keys.expired, until: nowSeconds - ADMISSION_PREVIOUS_UNTIL_SECONDS },
+  };
+}
+
+/**
+ * 키 넷의 공개 묶음(queue-svc GET /internal/jwks/admission.json과 같은 꼴, 옛 키 원소에 peaket_until). 개인키 칸 d는 싣지 않는다
+ * @param {ReturnType<typeof admissionKeySet>} set
+ */
+export function admissionJwks(set) {
+  return {
+    keys: [
+      publicAdmissionJwk(set.current),
+      publicAdmissionJwk(set.next),
+      { ...publicAdmissionJwk(set.previous.jwk), peaket_until: set.previous.until },
+      { ...publicAdmissionJwk(set.expired.jwk), peaket_until: set.expired.until },
+    ],
+  };
+}
+
+/**
+ * 게이트웨이 키 목록 ConfigMap(ADMISSION_JWKS_CONFIGMAP). 값은 JSON 글 하나다. 원소에 개인키 칸 d가 있으면 던진다
+ * @param {{ keys: unknown[] }} jwks
+ */
+export function admissionJwksConfigMap(jwks) {
+  if (!jwks || !Array.isArray(jwks.keys)) throw new Error('입장 토큰 키 목록은 { keys: [...] }다');
+  for (const k of jwks.keys) if (k && typeof k === 'object' && 'd' in k) throw new Error('입장 토큰 키 목록에 개인키 칸 d가 있다');
+  return {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: { name: ADMISSION_JWKS_CONFIGMAP.name, namespace: GATEWAY_NAMESPACE, labels: { 'app.kubernetes.io/part-of': 'peaket-local' } },
+    data: { [ADMISSION_JWKS_CONFIGMAP.key]: JSON.stringify(jwks) },
+  };
+}
+
+/**
+ * gateways-admission 명령 인자에서 방식 하나(GATEWAYS_ADMISSION_MODES). 없거나 모르는 값이거나 인자가 더 있으면 던진다
+ * @param {readonly string[]} argv
+ */
+export function gatewaysAdmissionMode(argv) {
+  if (argv.length !== 1 || !GATEWAYS_ADMISSION_MODES.includes(argv[0])) throw new Error(`쓰는 법: node tools/local/cluster.mjs gateways-admission ${GATEWAYS_ADMISSION_MODES.join('|')}`);
+  return argv[0];
+}
 export const GATEWAY_ORIGINS = { www: 'https://www.peaket.example', partner: 'https://partner.peaket.example', console: 'https://console.peaket.example', scanner: 'https://scanner.peaket.example' };
 
 /** deploy/gateways/*.yaml의 객체(파일 이름 차례, 문서 차례) */
@@ -298,7 +371,8 @@ export function echoObjects(o) {
  * 시험이 읽는 접속 정보(tools/local/e2e/gateway-client.mjs 머리 주석의 약속. 레이트 리밋 칸 rateLimit·rateLimitRedis·stats와 replicas의 gw-partner는
  * tools/local/e2e/gateway-limits.e2e.mjs 머리 주석의 약속, BAT-060). 개인키가 들어 있어 이 PC의 .cache에만 둔다
  * ports는 kind 노드의 실제 포트 공개에서 읽은 값이다(gatewayHostPorts. 시작 값으로 계산하지 않는다)
- * @param {{ ports: Record<string, number>, hosts: Record<string, string>, originVerify: string, keys: Record<string, unknown>, caPem: string, replicas?: Record<string, number> }} o
+ * admission은 입장 토큰 시험 키 넷(admissionKeySet, BAT-057 계획 §5): { issuer, current, next, previous: { jwk, until }, expired: { jwk, until } }(개인 JWK, until은 초)
+ * @param {{ ports: Record<string, number>, hosts: Record<string, string>, originVerify: string, keys: Record<string, unknown>, caPem: string, replicas?: Record<string, number>, admission?: ReturnType<typeof admissionKeySet> }} o
  */
 export function gatewayContract(o) {
   return {
@@ -309,6 +383,7 @@ export function gatewayContract(o) {
     issuer: GATEWAY_ISSUER,
     keys: o.keys,
     probes: GATEWAY_PROBES,
+    ...(o.admission ? { admission: o.admission } : {}),
     appPaths: GATEWAY_APP_PATHS,
     logs: { namespace: GATEWAY_NAMESPACE, container: 'envoy', selector: 'gateway.envoyproxy.io/owning-gateway-name={gateway}' },
     caPem: o.caPem,
