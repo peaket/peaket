@@ -28,12 +28,23 @@ class FakePubSub extends EventEmitter {
   readonly subs = new Map<string, (message: string, channel: string) => void>();
   /** `${op} ${channel}` → 남은 실패 수와 오류 */
   readonly failures = new Map<string, { left: number; error: () => Error }>();
+  /** `${op} ${channel}` → 다음 한 번을 끝내지 않고 붙잡는다(release로 성공시킨다) */
+  readonly holds = new Map<string, { release(): void } | true>();
   down = false;
   destroyed = false;
   pings = 0;
 
   failNext(op: Op, channel: string, times: number, error: () => Error = () => new Error('ERR fake')): void {
     this.failures.set(`${op} ${channel}`, { left: times, error });
+  }
+
+  /** 다음 `op channel` 명령 하나를 붙잡는다. 돌려준 함수로 풀면 그 명령이 성공한다 */
+  holdNext(op: Op, channel: string): () => void {
+    this.holds.set(`${op} ${channel}`, true);
+    return () => {
+      const h = this.holds.get(`${op} ${channel}`);
+      if (h && h !== true) h.release();
+    };
   }
 
   #run(op: Op, channels: string | string[], ok: (ch: string) => void): Promise<void> {
@@ -52,6 +63,17 @@ class FakePubSub extends EventEmitter {
       const err = f.error();
       call.error = err.name + ':' + err.message;
       return Promise.reject(err);
+    }
+    if (this.holds.get(`${op} ${channel}`) === true) {
+      return new Promise<void>((resolve) =>
+        this.holds.set(`${op} ${channel}`, {
+          release: () => {
+            this.holds.delete(`${op} ${channel}`);
+            ok(channel);
+            resolve();
+          },
+        }),
+      );
     }
     ok(channel);
     return Promise.resolve();
@@ -285,5 +307,48 @@ describe('S-T42 ⑰ 다시 붙은 뒤 다시 맞추기(ADR-0297 결정 1, CON-02
     r.fake.deliver('c6', 'late');
     expect(got).toEqual([]);
     expect(r.mismatch.at(-1) ?? 0).toBe(0);
+  });
+});
+
+describe('S-T42 ⑧ ⑰ 명령이 끝나기 전에 바뀐 원하는 상태(검증 놓침 VF-M23)', () => {
+  test('S-T42 ⑧ ⑰ sSubscribe가 끝나기 전에 unsubscribe가 오면, 같은 채널의 명령은 한 번에 하나씩이라 sSubscribe가 끝난 뒤 sUnsubscribe를 한 번 보내고 realtime_gw_subscribe_mismatch가 0이다(아무도 없는 채널의 구독이 남지 않는다)', async () => {
+    const r = (current = await rig());
+    const release = r.fake.holdNext('sSubscribe', 'h1');
+    r.sub.subscribe('h1', () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.fake.of('h1').map((c) => c.op)).toEqual(['sSubscribe']);
+    await expect(r.sub.unsubscribe('h1')).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(SPEC.firstRetryMs);
+    // 진행 중인 sSubscribe가 끝나기 전에는 같은 채널의 다음 명령을 보내지 않는다
+    expect(r.fake.of('h1').map((c) => c.op)).toEqual(['sSubscribe']);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(SPEC.maxRetryMs * 2);
+    expect(r.fake.of('h1').map((c) => c.op)).toEqual(['sSubscribe', 'sUnsubscribe']);
+    expect(lastOf(r.fake.of('h1'))!.error).toBeUndefined();
+    expect(r.fake.subs.has('h1')).toBe(false);
+    expect(r.mismatch.at(-1)).toBe(0);
+  });
+
+  test('S-T42 ⑧ ⑰ sUnsubscribe가 끝나기 전에 다시 subscribe가 오면, sUnsubscribe가 끝난 뒤 sSubscribe를 한 번 보내고 메시지가 새 함수로 오며 realtime_gw_subscribe_mismatch가 0이다', async () => {
+    const r = (current = await rig());
+    r.sub.subscribe('h2', () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    const release = r.fake.holdNext('sUnsubscribe', 'h2');
+    r.sub.unsubscribe('h2');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.fake.of('h2').map((c) => c.op)).toEqual(['sSubscribe', 'sUnsubscribe']);
+    const got: string[] = [];
+    await expect(r.sub.subscribe('h2', (m) => got.push(m))).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(SPEC.firstRetryMs);
+    expect(r.fake.of('h2').map((c) => c.op)).toEqual(['sSubscribe', 'sUnsubscribe']);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(SPEC.maxRetryMs * 2);
+    expect(r.fake.of('h2').map((c) => c.op)).toEqual(['sSubscribe', 'sUnsubscribe', 'sSubscribe']);
+    expect(lastOf(r.fake.of('h2'))!.error).toBeUndefined();
+    expect(r.fake.deliver('h2', 'm-h2')).toBe(true);
+    expect(got).toEqual(['m-h2']);
+    expect(r.mismatch.at(-1)).toBe(0);
   });
 });
