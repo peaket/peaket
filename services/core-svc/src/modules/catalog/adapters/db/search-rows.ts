@@ -47,9 +47,12 @@ const dateOf = (v: string | Date | null): string | undefined => {
   if (v instanceof Date) return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
   return String(v).slice(0, 10);
 };
+// toISOString과 같은 꼴(밀리초, UTC 'Z'). 질의가 이 꼴의 글로 주면 다시 해석하지 않는다(검색 후보 수천 줄, ADR-0271 결정 23)
+const ISO_MS_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const isoOf = (v: string | Date | null): string | undefined => {
   if (v === null) return undefined;
   if (v instanceof Date) return v.toISOString();
+  if (ISO_MS_Z.test(v)) return v;
   // drizzle execute는 timestamptz를 PostgreSQL 글자(`2026-11-19 10:00:00+00`)로 줄 수 있다. 계약은 ISO 8601만 받는다.
   const parsed = Date.parse(String(v));
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : String(v);

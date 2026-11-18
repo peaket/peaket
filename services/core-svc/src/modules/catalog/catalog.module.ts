@@ -203,7 +203,7 @@ export class CatalogModule implements NestModule {
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SEARCH_DATABASE, useFactory: (db: Database) => o.searchDatabase ?? db, inject: [DATABASE] },
           // 0건 제안은 메모리 사전이 답한다(ADR-0271 결정 13). 사전이 아직 준비되지 않았으면 search_term으로 대신한다
-          { provide: SEARCH_INDEX, useFactory: (db: Database, origin: string, d: SuggestionDictionary) => new DrizzleSearchIndex(db, origin, { correct: (q) => (d.ready ? d.correct(q) : undefined) }), inject: [SEARCH_DATABASE, IMAGE_ORIGIN, SEARCH_DICTIONARY] },
+          { provide: SEARCH_INDEX, useFactory: (db: Database, origin: string, d: SuggestionDictionary) => new DrizzleSearchIndex(db, origin, { correct: (q) => (d.ready ? d.correct(q) : undefined), keysOf: (name) => d.keysOf(name) }), inject: [SEARCH_DATABASE, IMAGE_ORIGIN, SEARCH_DICTIONARY] },
           // 동기화는 부르는 트랜잭션(판매 승인·포스터)의 연결로 쓴다. 이 인스턴스의 연결은 사전 원천(읽기)이다
           { provide: SEARCH_READ_MODEL_SYNC, useFactory: (db: Database, origin: string) => new DrizzleSearchReadModel(db, origin), inject: [SEARCH_DATABASE, IMAGE_ORIGIN] },
           { provide: SEARCH_DICTIONARY_SOURCE, useExisting: SEARCH_READ_MODEL_SYNC },
