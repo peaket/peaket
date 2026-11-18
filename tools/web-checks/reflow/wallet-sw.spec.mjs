@@ -35,7 +35,11 @@ const swState = (page) =>
 async function controlled(page, context) {
   await stubFanApi(context);
   await page.goto(`${WEB}${SCOPE}`, { waitUntil: 'networkidle' });
-  await page.waitForFunction(async (scope) => !!(await navigator.serviceWorker.getRegistration(scope))?.active, SCOPE, { timeout: 30_000 });
+  // 등록이 활성(activating·activated)이 될 때까지 기다린다. page.waitForFunction은 비동기 판정 함수가 돌려준 Promise를 참으로 읽어
+  // 기다리지 않는다(BAT-171 시험 이의 5, 2차 CI에서 바로 뒤 상태가 scope·active 모두 null). 월렛 화면은 오프라인 배너 뒤 Serwist 덩어리를 받아 늦게 등록한다
+  await expect
+    .poll(() => swState(page), { timeout: 30_000, message: '월렛 워커 등록이 활성이 되지 않았다(등록 없음·설치 실패)' })
+    .toEqual(expect.objectContaining({ scope: `${WEB}${SCOPE}`, active: expect.stringMatching(/^(activating|activated)$/) }));
   // 다시 불러오기 전 상태(판정하지 않고 실패 메시지에만 싣는다: 다시 불러온 문서만 워커를 비켜 갔는지 가른다)
   const before = await swState(page);
   await page.reload({ waitUntil: 'networkidle' });
@@ -91,7 +95,8 @@ test('HOT-390 기본 폭: 새 워커는 waiting에 머물고 스스로 활성화
     navigator.serviceWorker.addEventListener('controllerchange', () => (window.__controllerChanged += 1));
     await (await navigator.serviceWorker.getRegistration(scope)).update();
   }, SCOPE);
-  await page.waitForFunction(async (scope) => !!(await navigator.serviceWorker.getRegistration(scope))?.waiting, SCOPE, { timeout: 15_000 });
+  // 비동기 판정이라 waitForFunction 대신 poll로 기다린다(위 controlled와 같은 까닭)
+  await expect.poll(async () => (await swState(page)).waiting, { timeout: 15_000, message: '새 판 워커가 waiting에 들지 않았다' }).toBe('installed');
   // 화면이 열린 채로 기다려도 활성화하지 않는다
   await page.waitForTimeout(3_000);
   expect(await page.evaluate(async (scope) => !!(await navigator.serviceWorker.getRegistration(scope))?.waiting, SCOPE), '새 워커가 waiting을 떠났다').toBe(true);

@@ -25,7 +25,19 @@ test.beforeEach(async ({ page }) => {
 const measureText = (page) =>
   page.evaluate(
     ({ exceptions, ignore, controls }) => {
-      const outside = (el) => !exceptions.some((sel) => el.closest(sel)) && !el.closest(ignore);
+      // 화면에서만 숨긴 글(docs/frontend.md §5.17 '판정'): 클래스 이름(.sr-only)만이 아니라 계산된 모양으로 본다. 반응형 숨김(max-lg:sr-only 등)도
+      // 같은 모양이다(절대·고정 위치의 1×1 이하 상자이고 넘침을 숨기거나 잘라 낸다). BAT-171 시험 이의 4
+      const screenOnly = (el) => {
+        for (let a = el; a && a !== document.body; a = a.parentElement) {
+          const cs = getComputedStyle(a);
+          if (cs.position !== 'absolute' && cs.position !== 'fixed') continue;
+          const r = a.getBoundingClientRect();
+          const cut = cs.overflowX === 'hidden' || cs.overflowX === 'clip' || cs.overflowY === 'hidden' || cs.overflowY === 'clip' || cs.clipPath !== 'none' || (!!cs.clip && cs.clip !== 'auto');
+          if (r.width <= 1 && r.height <= 1 && cut) return true;
+        }
+        return false;
+      };
+      const outside = (el) => !exceptions.some((sel) => el.closest(sel)) && !el.closest(ignore) && !screenOnly(el);
       const items = [];
       for (const el of document.querySelectorAll('body *')) {
         if (!outside(el)) continue;
@@ -56,7 +68,19 @@ const measureText = (page) =>
 const measureReach = (page) =>
   page.evaluate(
     async ({ exceptions, ignore, controls }) => {
-      const outside = (el) => !exceptions.some((sel) => el.closest(sel)) && !el.closest(ignore);
+      // 화면에서만 숨긴 글(docs/frontend.md §5.17 '판정'): 클래스 이름(.sr-only)만이 아니라 계산된 모양으로 본다. 반응형 숨김(max-lg:sr-only 등)도
+      // 같은 모양이다(절대·고정 위치의 1×1 이하 상자이고 넘침을 숨기거나 잘라 낸다). BAT-171 시험 이의 4
+      const screenOnly = (el) => {
+        for (let a = el; a && a !== document.body; a = a.parentElement) {
+          const cs = getComputedStyle(a);
+          if (cs.position !== 'absolute' && cs.position !== 'fixed') continue;
+          const r = a.getBoundingClientRect();
+          const cut = cs.overflowX === 'hidden' || cs.overflowX === 'clip' || cs.overflowY === 'hidden' || cs.overflowY === 'clip' || cs.clipPath !== 'none' || (!!cs.clip && cs.clip !== 'auto');
+          if (r.width <= 1 && r.height <= 1 && cut) return true;
+        }
+        return false;
+      };
+      const outside = (el) => !exceptions.some((sel) => el.closest(sel)) && !el.closest(ignore) && !screenOnly(el);
       const visible = (el) => {
         const cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') return false;
@@ -92,13 +116,25 @@ const measureTextRects = (page) =>
   page.evaluate(
     ({ exceptions, ignore }) => {
       window.scrollTo(0, 0);
+      // 화면에서만 숨긴 글(docs/frontend.md §5.17 '판정'): 클래스 이름(.sr-only)만이 아니라 계산된 모양으로 본다. 반응형 숨김(max-lg:sr-only 등)도
+      // 같은 모양이다(절대·고정 위치의 1×1 이하 상자이고 넘침을 숨기거나 잘라 낸다). BAT-171 시험 이의 4
+      const screenOnly = (el) => {
+        for (let a = el; a && a !== document.body; a = a.parentElement) {
+          const cs = getComputedStyle(a);
+          if (cs.position !== 'absolute' && cs.position !== 'fixed') continue;
+          const r = a.getBoundingClientRect();
+          const cut = cs.overflowX === 'hidden' || cs.overflowX === 'clip' || cs.overflowY === 'hidden' || cs.overflowY === 'clip' || cs.clipPath !== 'none' || (!!cs.clip && cs.clip !== 'auto');
+          if (r.width <= 1 && r.height <= 1 && cut) return true;
+        }
+        return false;
+      };
       const out = [];
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let i = 0;
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const el = n.parentElement;
         if (!el || !(n.textContent ?? '').trim()) continue;
-        if (exceptions.some((sel) => el.closest(sel)) || el.closest(ignore)) continue;
+        if (exceptions.some((sel) => el.closest(sel)) || el.closest(ignore) || screenOnly(el)) continue;
         const cs = getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden' || (typeof el.checkVisibility === 'function' && !el.checkVisibility())) continue;
         const range = document.createRange();
