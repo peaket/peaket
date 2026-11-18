@@ -64,7 +64,7 @@ spec:
               value: {{ $v | quote }}
             {{- end }}
             {{- end }}
-            {{- include "peaket.diagnoseEnv" (dict "root" $ "resources" .Values.service.resources "extra" .Values.service.env.NODE_OPTIONS "where" "service") | nindent 12 }}
+            {{- include "peaket.diagnoseEnv" (dict "root" $ "resources" .Values.service.resources "extra" .Values.service.env.NODE_OPTIONS "containerEnv" .Values.service.env "where" "service") | nindent 12 }}
           {{- if .Values.secretEnvFrom }}
           envFrom:
             - secretRef: { name: {{ .Values.secretEnvFrom }} }
