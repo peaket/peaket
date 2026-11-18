@@ -94,7 +94,7 @@ export async function TicketCancelPage({ params, searchParams }: Props) {
       keep={keep}
       doneHref={orderHref}
     >
-      <AppShell dark={dark} bottomBar={withForm ? <CancelBar /> : null}>
+      <AppShell dark={dark}>
         <main className="page-main px-4 pt-4 pb-8 md:px-6 md:pt-5 md:pb-10 lg:px-8 lg:pt-8 lg:pb-16" id="main" tabIndex={-1}>
           <div className={cx('col mx-auto w-full max-w-[600px] gap-6 lg:gap-7', withForm ? 'lg:max-w-[976px]' : 'lg:max-w-[640px]')}>
             <div className="col gap-2">
@@ -178,6 +178,8 @@ export async function TicketCancelPage({ params, searchParams }: Props) {
               <ResultCard kind={v.result} seat={mine.seat} price={mine.price} orderHref={orderHref} vbank={vbank} refundAccountHref={refundAccountHref} />
             ) : null}
           </div>
+          {/* 하단 띠는 main의 끝(셸 바닥글 앞)에 둔다. 보이는 높이 320px 이하에서 흐름에 들어가도 바닥글을 지나지 않고 닿는다(docs/frontend.md §5.11, d5 §5.2, BAT-171 R171-3) */}
+          {withForm ? <CancelBar /> : null}
         </main>
         {withForm ? <CancelSheets /> : null}
         <PreviewSwitcher path={path} states={SCR038_STATES} current={state} keep={keep} />
