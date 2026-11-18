@@ -8,9 +8,10 @@
 // 쓰는 법: node tools/ci/records.mjs [--check] [--next-r] [--rev <리비전>] [--root <저장소>]
 //   --check  고칠 것이 있거나 기록 파일이 크기 상한을 넘으면 알리고 1로 끝난다(파일은 고치지 않는다)
 //   --next-r 다음 R 번호를 찍는다(정합 점검 표와 커밋 기록 가운데 큰 번호 + 1). 크기는 보지 않는다
-// 기록 크기 점검(ADR-0283 결정 1): docs/PROGRESS.md와 docs/lanes/lane1.md·lane2.md·lane3.md가 40,960바이트(줄 끝을 LF로 바꾼
-//   UTF-8 바이트 수)를 넘으면 걸린다. --check는 걸린 파일마다 한 줄을 찍고 1, 맞추기(인자 없음)는 표준 오류에 경고만 찍고 끝 코드를
-//   바꾸지 않는다. 정리 목록(docs/lanes/lane*-cleanup.md)과 docs/progress-archive.md는 보지 않고, 없는 파일은 경고하고 건너뛴다.
+// 기록 크기 점검(ADR-0283 결정 1): docs/PROGRESS.md와 docs/lanes/lane1.md·lane2.md·lane3.md·lane4.md·lane5.md가 40,960바이트
+//   (줄 끝을 LF로 바꾼 UTF-8 바이트 수)를 넘으면 걸린다. --check는 걸린 파일마다 한 줄을 찍고 1, 맞추기(인자 없음)는 표준 오류에
+//   경고만 찍고 끝 코드를 바꾸지 않는다. 정리 목록(docs/lanes/lane*-cleanup.md)·감독 기록(docs/lanes/coord.md)·
+//   docs/progress-archive.md는 보지 않고, 없는 파일은 경고하고 건너뛴다.
 //   크기는 --root 아래 작업 트리의 파일로 잰다(--rev와 상관없다). 지난 줄을 옮기는 일은 사람이 고르므로 이 스크립트가 하지 않는다
 // 끝 코드: 0 맞음(또는 고침), 1 --check에서 고칠 것 있음(크기 상한 넘음 포함), 2 읽기·실행 오류(아무것도 고치지 않는다)
 // 지난 커밋의 잘못된 행이나 겹친 번호는 경고하고 건너뛴다. develop 기록은 고칠 수 없어서, 오류로 멈추면 영구히 막히기 때문이다.
@@ -286,7 +287,14 @@ export function nextR(reviewText, records) {
 
 // ---------- 기록 크기(ADR-0283 결정 1) ----------
 export const RECORD_SIZE_LIMIT = 40_960;
-export const RECORD_SIZE_FILES = ['docs/PROGRESS.md', 'docs/lanes/lane1.md', 'docs/lanes/lane2.md', 'docs/lanes/lane3.md'];
+export const RECORD_SIZE_FILES = [
+  'docs/PROGRESS.md',
+  'docs/lanes/lane1.md',
+  'docs/lanes/lane2.md',
+  'docs/lanes/lane3.md',
+  'docs/lanes/lane4.md',
+  'docs/lanes/lane5.md',
+];
 
 // 상한을 넘은 파일마다 알릴 글. 없는 파일은 warn으로 알리고 건너뛴다(나머지는 본다)
 export function recordSizeProblems(root, warn = () => {}) {
