@@ -1,5 +1,6 @@
 // 입금 전 취소 쓰임새(gRPC CancelPayment, docs/features/payment.md §6 '입금 전 취소와 입금 오류 되돌림의 첫 구현', BUILD_ORDER HOT-152, ADR-0062).
 // 입금 대기 결제만 받는다. 차례: 표시(트랜잭션) → 결제사 취소 → 단독 조회 → 답 반영(트랜잭션). 잠금을 쥔 채 결제사를 부르지 않는다.
+// 범위가 DEPOSIT_ONLY면(§6 '입금 전 취소만 부르기', BAT-010) 시작에서 입금 대기가 아닐 때 FAILED_PRECONDITION 대신 REJECTED로 답한다(결제사·원장·사건 그대로).
 // 호출의 남은 시간을 지킨다: 결제사 호출은 min(10초 [가정], 남은 시간)에서 끊고, 남은 시간이 50ms [가정]보다 모자라면 다음 일을 시작하지 않고 UNKNOWN이다(부른 쪽이 같은 취소 ID로 다시 보낸다, BUILD_ORDER HOT-152 코드 리뷰).
 import type { Clock } from '@peaket/platform';
 import { MIN_CALL_REMAINING_MS, PaymentInputError, PaymentNotFoundError } from '../domain/confirm-command.js';
@@ -40,7 +41,7 @@ export class CancelDepositPayment {
   /**
    * @throws PaymentInputError 입력이 틀렸다(INVALID_ARGUMENT)
    * @throws PaymentNotFoundError 결제가 없다(NOT_FOUND)
-   * @throws PaymentCancelStateError 입금 대기가 아니다(FAILED_PRECONDITION)
+   * @throws PaymentCancelStateError 입금 대기가 아니다(FAILED_PRECONDITION). 범위가 DEPOSIT_ONLY면 던지지 않고 REJECTED로 답한다
    */
   async execute(input: DepositCancelInput, budget?: CallBudget): Promise<DepositCancelAnswer> {
     const { store, gateways, guards, clock } = this.deps;
@@ -65,6 +66,8 @@ export class CancelDepositPayment {
     }
     const begun = await store.beginDepositCancel(target, parsed.cancellationId, left());
     if (begun === 'NOT_WAITING') {
+      // 입금이 먼저 확정됐거나 기한 경과 등 다른 길로 끝났다. 입금 전 취소만 부른 쪽에는 REJECTED로 답한다(일반 취소로 보내지 않는다, BAT-010 D1)
+      if (parsed.scope === 'DEPOSIT_ONLY') return this.#answer('REJECTED');
       this.#outcome('not_waiting');
       throw new PaymentCancelStateError();
     }

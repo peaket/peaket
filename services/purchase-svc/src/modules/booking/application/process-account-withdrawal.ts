@@ -1,7 +1,8 @@
 // 탈퇴 참여자(docs/features/payment.md §4.1 '탈퇴 참여자의 첫 구현', docs/api/proto/peaket/purchase/v1/account.proto WithdrawalParticipantService,
 // ADR-0284, BUILD_ORDER PRF-169, P-T55). identity-svc가 탈퇴 요청과 다시 하기 고리에서 부른다.
 // 차례: 그 계정의 결제 결과 대기·입금 대기 주문을 한 문장으로 읽는다(문장 시간 한도 min(400ms [가정], 남은 시간)) → 입금 대기 주문마다 차례로
-// payment-svc CancelPayment(취소 ID withdrawal-{주문 ID}, 금액 = 주문 금액, 사유 ACCOUNT_WITHDRAWAL, 데드라인 min(남은 시간 − 100ms, 5초) [가정])를 부른다.
+// payment-svc CancelPayment(취소 ID withdrawal-{주문 ID}, 금액 = 주문 금액, 사유 ACCOUNT_WITHDRAWAL, 범위 DEPOSIT_ONLY, 데드라인 min(남은 시간 − 100ms, 5초) [가정])를 부른다.
+// 범위 DEPOSIT_ONLY라 원장이 이미 승인이면 일반 취소(전액 환불)로 가지 않고 REJECTED다(payment §6 '입금 전 취소만 부르기', BAT-010 D1·D2).
 // 남은 시간이 50ms [가정]보다 모자라거나 이번 호출에서 10건 [가정]을 이미 불렀으면 부르지 않고 남은 것으로 센다. 답이 CANCELLED면 끝난 것, 그 밖과 호출 실패는 남은 것이다.
 // 남은 것이 없으면 DONE, 있으면 PENDING과 이유다. 주문 행·좌석·결제를 직접 바꾸지 않는다(주문의 T17은 결제 사건으로 지금처럼 온다).
 import type { Clock } from '@peaket/platform';
@@ -96,7 +97,7 @@ export class ProcessAccountWithdrawal {
       const deadlineMs = Math.max(1, Math.floor(Math.min(left - WITHDRAWAL_CANCEL_MARGIN_MS, WITHDRAWAL_CANCEL_DEADLINE_MS)));
       let outcome: WithdrawalDepositCancelOutcome;
       try {
-        outcome = await this.d.deposits.cancel({ cancellationId: withdrawalCancellationId(o.orderId), orderId: o.orderId, amount: o.amount, reason: 'ACCOUNT_WITHDRAWAL', deadlineMs });
+        outcome = await this.d.deposits.cancel({ cancellationId: withdrawalCancellationId(o.orderId), orderId: o.orderId, amount: o.amount, reason: 'ACCOUNT_WITHDRAWAL', deadlineMs, scope: 'DEPOSIT_ONLY' });
       } catch {
         outcome = 'UNKNOWN';
       }

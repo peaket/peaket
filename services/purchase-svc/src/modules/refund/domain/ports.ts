@@ -46,6 +46,11 @@ export interface PaymentCancellations {
     readonly reason: CancellationReason;
     readonly refundAccount?: RefundAccount;
     readonly deadlineMs: number;
+    /**
+     * 취소 범위(payment.proto CancelScope). DEPOSIT_ONLY면 payment-svc가 입금 전 취소만 하고 입금 대기가 아니면 REJECTED다(탈퇴 참여자만 싣는다,
+     * docs/features/payment.md §6 '입금 전 취소만 부르기', BAT-010). 없으면 원장 상태로 고른다(예매 취소·회차 취소·부정 예매 취소)
+     */
+    readonly scope?: 'DEPOSIT_ONLY';
   }): Promise<PaymentCancelOutcome>;
 }
 

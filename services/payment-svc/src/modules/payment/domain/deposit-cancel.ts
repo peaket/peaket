@@ -20,6 +20,13 @@ export const DEPOSIT_CANCEL_CALL_TIMEOUT_MS = 10_000;
 export const DEPOSIT_CANCEL_OUTCOMES = ['cancelled', 'replayed', 'pending', 'rejected', 'unknown', 'not_waiting', 'invalid'] as const;
 export type DepositCancelOutcome = (typeof DEPOSIT_CANCEL_OUTCOMES)[number];
 
+/**
+ * CancelPayment가 받는 취소의 범위(payment.proto CancelScope, docs/features/payment.md §6 '입금 전 취소만 부르기', 추천 적용 2026-11-18, BAT-010 계획).
+ * UNSPECIFIED: 원장 상태로 고른다(GAT-080). DEPOSIT_ONLY: 늘 입금 전 취소이고, 입금 대기가 아니면 결제사·원장을 건드리지 않고 REJECTED다
+ */
+export const DEPOSIT_CANCEL_SCOPES = ['UNSPECIFIED', 'DEPOSIT_ONLY'] as const;
+export type DepositCancelScope = (typeof DEPOSIT_CANCEL_SCOPES)[number];
+
 /** gRPC 입력(검사 전) */
 export interface DepositCancelInput {
   readonly paymentId: string;
@@ -27,6 +34,8 @@ export interface DepositCancelInput {
   readonly reason: string;
   /** 금액(원). 칸이 없으면 전액이다 */
   readonly amount?: number;
+  /** 취소 범위. 칸이 없으면 UNSPECIFIED다(받는 층은 모르는 값을 그대로 넘겨 검사가 INVALID_ARGUMENT로 거절한다) */
+  readonly scope?: DepositCancelScope;
 }
 
 /** 저장소가 읽은 원장 값 */
@@ -66,13 +75,14 @@ export type DepositCancelDecision = { readonly kind: 'FINISH' } | { readonly kin
 
 /**
  * 입력을 검사한다.
- * @throws PaymentInputError 결제 ID·취소 ID·사유가 틀렸거나 금액이 비지 않았는데 전액이 아니다(전액 대조는 parse에 ledgerAmount를 주었을 때만)
+ * @throws PaymentInputError 결제 ID·취소 ID·사유·범위가 틀렸거나 금액이 비지 않았는데 전액이 아니다(전액 대조는 parse에 ledgerAmount를 주었을 때만)
  */
 export function parseDepositCancel(input: DepositCancelInput): DepositCancelInput {
   if (!isLowerUuid(input.paymentId)) throw new PaymentInputError('payment_id');
   if (!CANCELLATION_ID.test(input.cancellationId)) throw new PaymentInputError('cancellation_id');
   if (input.reason.length === 0 || input.reason.length > DEPOSIT_CANCEL_REASON_MAX || CONTROL.test(input.reason)) throw new PaymentInputError('reason');
   if (input.amount !== undefined && (!Number.isSafeInteger(input.amount) || input.amount < 1)) throw new PaymentInputError('amount');
+  if (input.scope !== undefined && !(DEPOSIT_CANCEL_SCOPES as readonly string[]).includes(input.scope)) throw new PaymentInputError('scope');
   return input;
 }
 

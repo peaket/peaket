@@ -540,7 +540,17 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "reason": {
                       "type": "string",
                       "id": 4
+                    },
+                    "scope": {
+                      "type": "CancelScope",
+                      "id": 5
                     }
+                  }
+                },
+                "CancelScope": {
+                  "values": {
+                    "CANCEL_SCOPE_UNSPECIFIED": 0,
+                    "CANCEL_SCOPE_DEPOSIT_ONLY": 1
                   }
                 },
                 "CancelResult": {

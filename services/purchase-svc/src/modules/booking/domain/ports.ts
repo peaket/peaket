@@ -1971,7 +1971,8 @@ export type WithdrawalDepositCancelOutcome = 'CANCELLED' | 'PENDING' | 'REJECTED
  * 같은 취소 ID로 다시 불러도 결과가 같다(payment §6 '입금 전 취소'). 답이 없으면 UNKNOWN이다
  */
 export interface WithdrawalDepositCancellations {
-  cancel(q: { readonly cancellationId: string; readonly orderId: string; readonly amount: number; readonly reason: 'ACCOUNT_WITHDRAWAL'; readonly deadlineMs: number }): Promise<WithdrawalDepositCancelOutcome>;
+  /** scope DEPOSIT_ONLY: payment-svc가 입금 전 취소만 하고, 입금 대기가 아니면(입금이 먼저 확정됨 등) 결제사를 부르지 않고 REJECTED다(payment §6 '입금 전 취소만 부르기') */
+  cancel(q: { readonly cancellationId: string; readonly orderId: string; readonly amount: number; readonly reason: 'ACCOUNT_WITHDRAWAL'; readonly deadlineMs: number; readonly scope: 'DEPOSIT_ONLY' }): Promise<WithdrawalDepositCancelOutcome>;
 }
 
 /** 탈퇴 참여자 지표(payment §4.1 '지표·로그'). 던지지 않는다 */

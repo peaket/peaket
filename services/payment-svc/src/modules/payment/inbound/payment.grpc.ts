@@ -10,7 +10,7 @@ import { paymentV1Payment } from '@peaket/contracts/proto';
 import type { AcceptPaymentCommand } from '../application/accept-payment-command.js';
 import type { BatchGetPaymentStates } from '../application/batch-get-payment-states.js';
 import type { GetPaymentDetail } from '../application/get-payment-detail.js';
-import { type DepositCancelInput, PaymentCancelStateError } from '../domain/deposit-cancel.js';
+import { type DepositCancelInput, type DepositCancelScope, PaymentCancelStateError } from '../domain/deposit-cancel.js';
 import type { CancelPayment } from '../application/cancel-payment.js';
 import { type ConfirmAnswer, type ConfirmPaymentInput, type ConfirmPaymentRef, isLowerUuid, MIN_CALL_REMAINING_MS, PaymentCommandMismatchError, PaymentDeadlineError, type PaymentDetail, PaymentInputError, PaymentNotFoundError, type PaymentState } from '../domain/confirm-command.js';
 import type { CallBudget } from '../domain/ports.js';
@@ -125,10 +125,27 @@ export function getPaymentResponseOf(detail: PaymentDetail): Record<string, unkn
   };
 }
 
-/** 요청(proto 칸 이름) → 검사 전 입력. 금액 칸이 없으면 amount를 뺀다 */
+/**
+ * 요청의 scope(CancelScope) → 입력의 범위. 칸이 없거나 UNSPECIFIED면 undefined(지금 그대로), 모르는 값은 그대로 넘겨 검사(parseDepositCancel)가 INVALID_ARGUMENT로 거절한다
+ * (docs/features/payment.md §6 '입금 전 취소만 부르기', BAT-010)
+ */
+function cancelScopeOf(v: unknown): DepositCancelScope | undefined {
+  if (v === undefined || v === null || v === '' || v === 'CANCEL_SCOPE_UNSPECIFIED' || v === 0) return undefined;
+  if (v === 'CANCEL_SCOPE_DEPOSIT_ONLY') return 'DEPOSIT_ONLY';
+  return String(v) as DepositCancelScope;
+}
+
+/** 요청(proto 칸 이름) → 검사 전 입력. 금액 칸이 없으면 amount를, 범위가 비었으면 scope를 뺀다 */
 export function cancelInputOf(request: Record<string, unknown>): DepositCancelInput {
   const krw = childOf(request.amount)?.krw;
-  return { paymentId: text(request.payment_id), cancellationId: text(request.cancellation_id), reason: text(request.reason), ...(typeof krw === 'number' ? { amount: krw } : {}) };
+  const scope = cancelScopeOf(request.scope);
+  return {
+    paymentId: text(request.payment_id),
+    cancellationId: text(request.cancellation_id),
+    reason: text(request.reason),
+    ...(typeof krw === 'number' ? { amount: krw } : {}),
+    ...(scope === undefined ? {} : { scope }),
+  };
 }
 
 /** 답 → CancelPaymentResponse(proto 칸 이름, result는 CANCEL_RESULT_ 앞머리를 붙인다) */
