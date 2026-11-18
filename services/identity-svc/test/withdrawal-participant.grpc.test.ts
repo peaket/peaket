@@ -172,7 +172,7 @@ async function app(participants: WithdrawalParticipant[]) {
   const withdraw = new WithdrawAccount(sessions, new JoseReauthVerifier(k.keys, ISSUER, clock), eraser, clock, undefined, undefined, undefined, participants);
   const retry = new RetryPendingWithdrawals(sessions, eraser, clock, participants);
   const login = (id: string) => k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: id, email: null, deviceId: null });
-  const reauth = async (s: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const reauth = async (s: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, clock.now())).token;
   const run = async (s: { accountId: string; sessionId: string }) => withdraw.run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauth(s), body: {} });
   return { clock, sessions, withdraw, retry, login, run };
 }

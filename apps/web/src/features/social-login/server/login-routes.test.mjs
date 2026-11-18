@@ -4,6 +4,8 @@ import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CLIENT, serve, startMockOP } from '../../../../scripts/mock-oidc.mjs';
 import { createSocialLogin, LOGIN_ROUTES } from './index.ts';
+import { deriveLoginKeys } from './keys.ts';
+import { seal, unseal } from './sealed.ts';
 import { Browser, formPost, startIdentityStub, TOKEN_ISSUER } from './testing.mjs';
 
 let op;
@@ -301,8 +303,9 @@ test('ADR0119_모든 로그인 경로 응답은 캐시하지 않는다', async (
 
 // ---- 재인증(identity §7.1, I-T54·I-T72) ----
 
-async function reauth(b, provider = 'kakao', origin = web.url) {
-  return b.go(`${web.url}/reauth/${provider}`, formPost(origin, { returnTo: '/my/settings' }));
+/** 재인증 시작. 화면은 받는 쪽 작업의 웹 purpose를 꼭 싣는다(identity §7.1 ①, ADR-0293 결정 3). 기본은 설정의 탈퇴 */
+async function reauth(b, provider = 'kakao', origin = web.url, purpose = 'account-withdraw') {
+  return b.go(`${web.url}/reauth/${provider}`, formPost(origin, { returnTo: '/my/settings', purpose }));
 }
 const pickup = (b, origin = web.url) => b.go(`${web.url}/reauth/token`, { method: 'POST', headers: { origin } });
 
@@ -473,21 +476,21 @@ test('I-T71_양식 전송이 Origin null이어도 Sec-Fetch-Site가 same-origin�
 test('I-T54_고위험 재인증(양도·계좌 입력)은 요청만 함이고 판정이 UNKNOWN이면 본인확인 재통과를 요구한다', async () => {
   const b = new Browser();
   await login(b, 'naver');
-  await b.go(`${web.url}/reauth/naver`, formPost(web.url, { returnTo: '/my/settings', purpose: 'high-risk' }));
-  assert.equal(lastCall('IssueReauthToken').purpose, 'REAUTH_PURPOSE_HIGH_RISK');
+  await b.go(`${web.url}/reauth/naver`, formPost(web.url, { returnTo: '/my/settings', purpose: 'transfer-request' }));
+  assert.equal(lastCall('IssueReauthToken').operation, 'REAUTH_OPERATION_TRANSFER_REQUEST');
   const p = await pickup(b);
   assert.equal(p.res.status, 409);
   assert.equal(JSON.parse(p.text).type, 'reauth-reverify-required');
   // 다른 민감 작업은 그대로 요청만 함 토큰을 받는다
   await reauth(b, 'naver');
-  assert.equal(lastCall('IssueReauthToken').purpose, 'REAUTH_PURPOSE_SENSITIVE');
+  assert.equal(lastCall('IssueReauthToken').operation, 'REAUTH_OPERATION_ACCOUNT_WITHDRAW');
   assert.equal((await pickup(b)).res.status, 200);
 });
 
 test('I-T72_⑤ 제공자에서 취소한 재인증은 돌아갈 주소로 보내고 실패 종류만 준다', async () => {
   const b = new Browser();
   await login(b);
-  const start = await b.go(`${web.url}/reauth/kakao`, { ...formPost(web.url, { returnTo: '/my/settings' }), follow: false });
+  const start = await b.go(`${web.url}/reauth/kakao`, { ...formPost(web.url, { returnTo: '/my/settings', purpose: 'session-end' }), follow: false });
   const state = new URL(start.res.headers.get('location')).searchParams.get('state');
   const r = await b.go(`${web.url}/login/callback/kakao?error=access_denied&state=${state}`);
   assert.equal(new URL(r.trail.at(-1).url).pathname, '/my/settings');
@@ -916,4 +919,95 @@ test('HOT-400 PRF-020 x-forwarded-for가 여러 값·IP가 아닌 값·없음이
     assert.ok(req, `${xff}: CreateSession을 부르지 않았다`);
     assert.equal(req.client_ip, '', String(xff));
   }
+});
+
+// ---- 재인증의 받는 쪽 작업(I-T85 ①, identity §7.1 ①③, ADR-0293 결정 3) ----
+// 값은 docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값' 표에서 옮겨 적는다(앱 서버의 REAUTH_PURPOSE_OPS를 가져오지 않는다).
+const PURPOSE_OPS = [
+  ['account-withdraw', 'ACCOUNT_WITHDRAW'],
+  ['session-end', 'SESSION_END'],
+  ['scanner-session-end', 'SCANNER_SESSION_END'],
+  ['login-method-add', 'LOGIN_METHOD_ADD'],
+  ['login-method-remove', 'LOGIN_METHOD_REMOVE'],
+  ['account-merge', 'ACCOUNT_MERGE'],
+  ['contact-change', 'CONTACT_CHANGE'],
+  ['ticket-cancel', 'TICKET_CANCEL'],
+  ['ticket-cancel-refund-account', 'TICKET_CANCEL_REFUND_ACCOUNT'],
+  ['device-key-issue', 'DEVICE_KEY_ISSUE'],
+  ['ticket-return', 'TICKET_RETURN'],
+  ['transfer-request', 'TRANSFER_REQUEST'],
+  ['refund-account', 'REFUND_ACCOUNT'],
+  ['compensation-account', 'COMPENSATION_ACCOUNT'],
+  ['shop-cancel-refund-account', 'SHOP_CANCEL_REFUND_ACCOUNT'],
+];
+const reauthStart = (b, fields) => b.go(`${web.url}/reauth/kakao`, { ...formPost(web.url, { returnTo: '/my/settings', ...fields }), follow: false });
+
+test('I-T85 ①-1 표의 purpose 열다섯은 303으로 제공자에 가고, 콜백이 부른 IssueReauthToken의 operation이 그 작업이며 옛 칸 purpose는 채우지 않는다', async () => {
+  assert.equal(PURPOSE_OPS.length, 15);
+  const b = new Browser();
+  await login(b);
+  for (const [purpose, opName] of PURPOSE_OPS) {
+    const start = await reauthStart(b, { purpose });
+    assert.equal(start.res.status, 303, purpose);
+    assert.equal(new URL(start.res.headers.get('location')).origin, new URL(op.issuer('kakao')).origin, `${purpose}: 제공자로`);
+    assert.ok(b.get(OIDC), `${purpose}: 진행 쿠키`);
+    const before = identity.calls.filter((c) => c.method === 'IssueReauthToken').length;
+    const r = await b.go(start.res.headers.get('location'));
+    assert.equal(new URL(r.trail.at(-1).url).pathname, '/my/settings', purpose);
+    const calls = identity.calls.filter((c) => c.method === 'IssueReauthToken');
+    assert.equal(calls.length, before + 1, `${purpose}: identity를 한 번 부른다`);
+    const req = calls.at(-1).request;
+    assert.equal(req.operation, `REAUTH_OPERATION_${opName}`, purpose);
+    assert.ok(req.purpose === undefined || req.purpose === 'REAUTH_PURPOSE_UNSPECIFIED' || req.purpose === 0, `${purpose}: 옛 칸 purpose를 채우지 않는다(${req.purpose})`);
+    assert.equal((await pickup(b)).res.status, 200, purpose);
+  }
+});
+
+test('I-T85 ①-2 표에 없는 purpose(빈 값·칸 없음·high-risk·대문자 op 이름·모르는 값)는 400이고 제공자로 가지 않으며 진행 쿠키가 없다', async () => {
+  const b = new Browser();
+  await login(b);
+  const authorizeBefore = JSON.stringify(op.lastAuthorize);
+  for (const [what, fields] of [
+    ['빈 값', { purpose: '' }],
+    ['칸 없음', {}],
+    ['high-risk', { purpose: 'high-risk' }],
+    ['ACCOUNT_WITHDRAW', { purpose: 'ACCOUNT_WITHDRAW' }],
+    ['withdraw', { purpose: 'withdraw' }],
+    ['Account-Withdraw', { purpose: 'Account-Withdraw' }],
+    ['account_withdraw', { purpose: 'account_withdraw' }],
+    [' account-withdraw', { purpose: ' account-withdraw' }],
+    ['sensitive', { purpose: 'sensitive' }],
+  ]) {
+    const r = await reauthStart(b, fields);
+    assert.equal(r.res.status, 400, what);
+    assert.equal(r.res.headers.get('location'), null, `${what}: Location 없음`);
+    assert.ok(!r.res.headers.getSetCookie().some((c) => c.startsWith(`${OIDC}=`)), `${what}: 진행 쿠키를 만들지 않는다`);
+    assert.equal(b.get(OIDC), undefined, what);
+  }
+  assert.equal(JSON.stringify(op.lastAuthorize), authorizeBefore, '제공자 인가 화면에 가지 않았다');
+  assert.equal(lastCall('IssueReauthToken'), undefined);
+});
+
+test("I-T85 ①-3 받는 쪽 작업이 없는 옛 진행 쿠키로 콜백하면 제공자 토큰 교환도 identity 호출도 없이 재인증 결과가 '그 밖의 실패'다", async () => {
+  const b = new Browser();
+  await login(b);
+  const start = await reauthStart(b, { purpose: 'session-end' });
+  assert.equal(start.res.status, 303);
+  // 앱 서버 키로 진행 쿠키를 열어 받는 쪽 작업을 빼고 다시 봉인한다(배포 전에 만든 쿠키 모양)
+  const keys = deriveLoginKeys(SECRET);
+  const c = b.get(OIDC);
+  const prog = unseal([keys.progress], OIDC, c.value, Date.now());
+  assert.ok(prog && prog.purpose === 'reauth', '진행 쿠키를 열었다');
+  const old = { ...prog };
+  delete old.reauthOp;
+  c.value = seal(keys.progress, OIDC, old, Date.now() + 5 * 60_000);
+  const back = await fetch(start.res.headers.get('location'), { redirect: 'manual' });
+  let tokenExchanges = 0;
+  op.mode.onToken = () => void tokenExchanges++;
+  const r = await b.go(back.headers.get('location'));
+  assert.equal(new URL(r.trail.at(-1).url).pathname, '/my/settings');
+  assert.equal(tokenExchanges, 0, '제공자 인가 코드를 바꾸지 않는다');
+  assert.equal(lastCall('IssueReauthToken'), undefined, 'identity를 부르지 않는다');
+  const p = await pickup(b);
+  assert.equal(JSON.parse(p.text).type, 'reauth-failed');
 });

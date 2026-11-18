@@ -1,6 +1,7 @@
 // gRPC SessionService 받는 층(docs/api/proto identity.proto, docs/api/proto/README.md §2 상태 코드, I-T50, I-T54).
 // 실제 grpc-js 서버를 루프백에 띄우고, 계약 설명자(@peaket/contracts/proto)로 만든 클라이언트로 부른다.
 import * as grpc from '@grpc/grpc-js';
+import { decodeJwt, decodeProtectedHeader } from 'jose';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { startGrpcServer } from '../src/grpc-server.js';
 import { MemoryLinkProposals } from '../src/modules/session/adapters/memory-link-proposals.js';
@@ -10,7 +11,7 @@ import { SeparateAccount } from '../src/modules/session/application/separate-acc
 import { AddProvider } from '../src/modules/session/application/add-provider.js';
 import { JoseReauthVerifier } from '../src/modules/session/adapters/jose-reauth-verifier.js';
 import { identityPackage, sessionServiceHandlers } from '../src/modules/session/inbound/session.grpc.js';
-import { ISSUER, kit, newKey } from './support.js';
+import { fanReauthToken, ISSUER, kit, newKey } from './support.js';
 
 type Cb<T> = (e: grpc.ServiceError | null, v?: T) => void;
 type Unary = (req: Record<string, unknown>, md: grpc.Metadata, opts: grpc.CallOptions, cb: Cb<Record<string, any>>) => void;
@@ -119,11 +120,23 @@ describe('SessionService(gRPC)', () => {
 
   test('I-T34_AddProvider는_재인증토큰으로새제공자를잇고결과를열거로준다(재인증이맞지않거나다시쓰면REAUTH_REQUIRED)', async () => {
     const r = await create({ provider_user_id: 'grpc-add-1', email: '' });
-    const tok = (await kitRef.signer.reauth({ accountId: r.session.account_id, sessionId: r.session.session_id, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, kitRef.clock.now())).token;
+    const tok = (await kitRef.signer.reauth({ accountId: r.session.account_id, sessionId: r.session.session_id, provider: 'kakao', strength: 'verified', operation: 'LOGIN_METHOD_ADD' }, kitRef.clock.now())).token;
     const base = { session_id: r.session.session_id, account_id: r.session.account_id, provider: 'PROVIDER_GOOGLE', provider_user_id: 'grpc-add-g' };
     expect(await call('AddProvider', { ...base, reauth_token: 'nope' })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED', merge_proposal_id: '' });
     expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_LINKED', merge_proposal_id: '' });
     expect(await call('AddProvider', { ...base, reauth_token: tok })).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED', merge_proposal_id: '' });
+  });
+
+  test('I-T85 ③ AddProvider(gRPC)는 op가 LOGIN_METHOD_ADD가 아닌 토큰에 REAUTH_REQUIRED이고 잇지 않는다', async () => {
+    const r = await create({ provider_user_id: 'grpc-add-op', email: '' });
+    // 정본 모양의 토큰을 직접 만든다(같은 세션·act FAN_SENSITIVE, op만 고른다)
+    const tokenOf = (op: string) => fanReauthToken(kitRef.keys, { accountId: r.session.account_id, sessionId: r.session.session_id, act: 'FAN_SENSITIVE', op, now: kitRef.clock.now() });
+    const base = { session_id: r.session.session_id, account_id: r.session.account_id, provider: 'PROVIDER_GOOGLE', provider_user_id: 'grpc-add-op-g' };
+    for (const op of ['LOGIN_METHOD_REMOVE', 'ACCOUNT_MERGE', 'TICKET_CANCEL'] as const) {
+      expect(await call('AddProvider', { ...base, reauth_token: await tokenOf(op) }), op).toEqual({ result: 'ADD_PROVIDER_RESULT_REAUTH_REQUIRED', merge_proposal_id: '' });
+    }
+    expect(storeRef.providerCount(r.session.account_id)).toBe(1);
+    expect(await call('AddProvider', { ...base, reauth_token: await tokenOf('LOGIN_METHOD_ADD') })).toEqual({ result: 'ADD_PROVIDER_RESULT_LINKED', merge_proposal_id: '' });
   });
 
   test('I-T76_CreateSession·SeparateAccount의user_agent에서화면용기기이름만뽑아세션에둔다(원문은두지않는다)', async () => {
@@ -147,7 +160,7 @@ describe('SessionService(gRPC)', () => {
 
   test('I-T54_IssueReauthToken은_강도를받아_토큰이나계정불일치를돌려준다', async () => {
     const r = await create({ provider_user_id: '4000123' });
-    const base = { session_id: r.session.session_id, account_id: r.session.account_id, provider: 'PROVIDER_KAKAO', provider_user_id: '4000123', purpose: 'REAUTH_PURPOSE_SENSITIVE' };
+    const base = { session_id: r.session.session_id, account_id: r.session.account_id, provider: 'PROVIDER_KAKAO', provider_user_id: '4000123', operation: 'REAUTH_OPERATION_SESSION_END' };
     const ok = await call('IssueReauthToken', { ...base, strength: 'REAUTH_STRENGTH_VERIFIED' });
     expect(ok.result).toBe('REAUTH_RESULT_ISSUED');
     expect(ok.reauth_token.split('.')).toHaveLength(3);
@@ -155,9 +168,95 @@ describe('SessionService(gRPC)', () => {
     const other = await call('IssueReauthToken', { ...base, provider_user_id: '4000124', strength: 'REAUTH_STRENGTH_REQUESTED' });
     expect(other).toMatchObject({ result: 'REAUTH_RESULT_ACCOUNT_MISMATCH', reauth_token: '' });
     expect(await status(call('IssueReauthToken', { ...base, strength: 'REAUTH_STRENGTH_UNSPECIFIED' }))).toBe('INVALID_ARGUMENT');
-    expect(await status(call('IssueReauthToken', { ...base, strength: 'REAUTH_STRENGTH_VERIFIED', purpose: 'REAUTH_PURPOSE_UNSPECIFIED' }))).toBe('INVALID_ARGUMENT');
+    expect(await status(call('IssueReauthToken', { ...base, strength: 'REAUTH_STRENGTH_VERIFIED', operation: 'REAUTH_OPERATION_UNSPECIFIED' }))).toBe('INVALID_ARGUMENT');
     const naver = await create({ provider: 'PROVIDER_NAVER', provider_user_id: 'nv-9' });
-    expect(await call('IssueReauthToken', { session_id: naver.session.session_id, account_id: naver.session.account_id, provider: 'PROVIDER_NAVER', provider_user_id: 'nv-9', strength: 'REAUTH_STRENGTH_REQUESTED', purpose: 'REAUTH_PURPOSE_HIGH_RISK' })).toMatchObject({ result: 'REAUTH_RESULT_REVERIFY_REQUIRED', reauth_token: '' });
+    expect(await call('IssueReauthToken', { session_id: naver.session.session_id, account_id: naver.session.account_id, provider: 'PROVIDER_NAVER', provider_user_id: 'nv-9', strength: 'REAUTH_STRENGTH_REQUESTED', operation: 'REAUTH_OPERATION_TRANSFER_REQUEST' })).toMatchObject({ result: 'REAUTH_RESULT_REVERIFY_REQUIRED', reauth_token: '' });
+  });
+
+  // I-T85 ②(docs/features/identity.md §12, §7.1 ③④, ADR-0293 결정 2·4). 값은 docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값' 표에서 옮겨 적는다
+  const OP_ACT: ReadonlyArray<readonly [string, 'FAN_SENSITIVE' | 'FAN_HIGH_RISK']> = [
+    ['ACCOUNT_WITHDRAW', 'FAN_SENSITIVE'],
+    ['SESSION_END', 'FAN_SENSITIVE'],
+    ['SCANNER_SESSION_END', 'FAN_SENSITIVE'],
+    ['LOGIN_METHOD_ADD', 'FAN_SENSITIVE'],
+    ['LOGIN_METHOD_REMOVE', 'FAN_SENSITIVE'],
+    ['ACCOUNT_MERGE', 'FAN_SENSITIVE'],
+    ['CONTACT_CHANGE', 'FAN_SENSITIVE'],
+    ['TICKET_CANCEL', 'FAN_SENSITIVE'],
+    ['TICKET_CANCEL_REFUND_ACCOUNT', 'FAN_HIGH_RISK'],
+    ['DEVICE_KEY_ISSUE', 'FAN_SENSITIVE'],
+    ['TICKET_RETURN', 'FAN_SENSITIVE'],
+    ['TRANSFER_REQUEST', 'FAN_HIGH_RISK'],
+    ['REFUND_ACCOUNT', 'FAN_HIGH_RISK'],
+    ['COMPENSATION_ACCOUNT', 'FAN_HIGH_RISK'],
+    ['SHOP_CANCEL_REFUND_ACCOUNT', 'FAN_HIGH_RISK'],
+  ];
+  /** 옛 칸 purpose를 그 작업과 반대 묶음 값으로 채운다(읽지 않는지 본다) */
+  const oppositePurpose = (act: string) => (act === 'FAN_HIGH_RISK' ? 'REAUTH_PURPOSE_SENSITIVE' : 'REAUTH_PURPOSE_HIGH_RISK');
+
+  test('I-T85 ②-1 IssueReauthToken은 열다섯 작업마다 토큰의 op에 그 작업을, act에 표의 묶음을 싣는다(옛 purpose는 반대 묶음이어도 읽지 않는다)', async () => {
+    expect(OP_ACT).toHaveLength(15);
+    for (const [op, act] of OP_ACT) {
+      const r = await create({ provider_user_id: `op-${op}` });
+      const got = await call('IssueReauthToken', {
+        session_id: r.session.session_id,
+        account_id: r.session.account_id,
+        provider: 'PROVIDER_KAKAO',
+        provider_user_id: `op-${op}`,
+        strength: 'REAUTH_STRENGTH_VERIFIED',
+        operation: `REAUTH_OPERATION_${op}`,
+        purpose: oppositePurpose(act),
+      });
+      expect(got.result, op).toBe('REAUTH_RESULT_ISSUED');
+      expect(decodeProtectedHeader(got.reauth_token)).toMatchObject({ typ: 'reauth+jwt' });
+      const claims = decodeJwt(got.reauth_token);
+      expect({ op: claims.op, act: claims.act }, op).toEqual({ op, act });
+      expect(claims).toMatchObject({ sub: r.session.account_id, sid: r.session.session_id, aud: 'fan' });
+    }
+  });
+
+  test('I-T85 ②-2 operation이 UNSPECIFIED·칸 없음·모르는 번호면 INVALID_ARGUMENT이고 토큰을 주지 않는다(옛 purpose만 채워도)', async () => {
+    const r = await create({ provider_user_id: 'op-none' });
+    const base = { session_id: r.session.session_id, account_id: r.session.account_id, provider: 'PROVIDER_KAKAO', provider_user_id: 'op-none', strength: 'REAUTH_STRENGTH_VERIFIED' };
+    const issuedBefore = kitRef.signals.seen.filter((x) => x.startsWith('reauth:')).length;
+    for (const extra of [
+      { operation: 'REAUTH_OPERATION_UNSPECIFIED' },
+      { operation: 0 },
+      { operation: 99 },
+      {},
+      { purpose: 'REAUTH_PURPOSE_SENSITIVE' },
+      { purpose: 'REAUTH_PURPOSE_HIGH_RISK' },
+      { operation: 'REAUTH_OPERATION_UNSPECIFIED', purpose: 'REAUTH_PURPOSE_SENSITIVE' },
+    ]) {
+      expect(await status(call('IssueReauthToken', { ...base, ...extra })), JSON.stringify(extra)).toBe('INVALID_ARGUMENT');
+    }
+    // 토큰을 한 번도 서명하지 않았다(발급 신호 0)
+    expect(kitRef.signals.seen.filter((x) => x.startsWith('reauth:')).length).toBe(issuedBefore);
+  });
+
+  test("I-T85 ②-3 '요청만 함'·로그인 판정 CHALLENGE 세션에서 TRANSFER_REQUEST는 본인확인 재통과가 필요하고 SESSION_END는 토큰이 나온다(옛 purpose와 반대로 채워도)", async () => {
+    const ask = async (op: string, purpose: string) => {
+      const sub = `nv-ch-${op}`;
+      const r = await create({ provider: 'PROVIDER_NAVER', provider_user_id: sub, email: null, email_verified: false });
+      await storeRef.transaction((tx) => tx.setLoginVerdict(r.session.session_id, 'CHALLENGE', 'NETWORK', kitRef.clock.now()));
+      return call('IssueReauthToken', {
+        session_id: r.session.session_id,
+        account_id: r.session.account_id,
+        provider: 'PROVIDER_NAVER',
+        provider_user_id: sub,
+        strength: 'REAUTH_STRENGTH_REQUESTED',
+        operation: `REAUTH_OPERATION_${op}`,
+        purpose,
+      });
+    };
+    expect(await ask('TRANSFER_REQUEST', 'REAUTH_PURPOSE_SENSITIVE')).toMatchObject({ result: 'REAUTH_RESULT_REVERIFY_REQUIRED', reauth_token: '' });
+    const end = await ask('SESSION_END', 'REAUTH_PURPOSE_HIGH_RISK');
+    expect(end.result).toBe('REAUTH_RESULT_ISSUED');
+    expect(decodeJwt(end.reauth_token)).toMatchObject({ op: 'SESSION_END', act: 'FAN_SENSITIVE', strength: 'requested' });
+    // 고위험 다섯은 모두 재통과가 필요하다
+    for (const op of ['TICKET_CANCEL_REFUND_ACCOUNT', 'REFUND_ACCOUNT', 'COMPENSATION_ACCOUNT', 'SHOP_CANCEL_REFUND_ACCOUNT']) {
+      expect((await ask(op, 'REAUTH_PURPOSE_SENSITIVE')).result, op).toBe('REAUTH_RESULT_REVERIFY_REQUIRED');
+    }
   });
 
   test('proto README §2_DB연결실패는_UNAVAILABLE이다', async () => {

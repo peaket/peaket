@@ -27,6 +27,11 @@ export interface ReauthClaimsInput {
   accountId: string;
   sessionId: string;
   act?: string;
+  /**
+   * 받는 쪽 작업 op(docs/security/authz-matrix.md §6, ADR-0293). 없으면 act로 고른다: FAN_HIGH_RISK면 TICKET_CANCEL_REFUND_ACCOUNT, 그 밖은 TICKET_CANCEL
+   * (팬 취소가 받는 두 값). op 칸을 빼려면 over에 { op: undefined }를 준다
+   */
+  op?: string;
   /** 토큰 수명(초). 5분 상수와 다르게 고른다 */
   lifeS?: number;
   jti?: string;
@@ -44,6 +49,7 @@ export function reauthClaims(c: ReauthClaimsInput, over: Record<string, unknown>
     sid: c.sessionId,
     jti: c.jti ?? randomUUID(),
     act: c.act ?? 'FAN_SENSITIVE',
+    op: c.op ?? (c.act === 'FAN_HIGH_RISK' ? 'TICKET_CANCEL_REFUND_ACCOUNT' : 'TICKET_CANCEL'),
     provider: 'kakao',
     ...over,
   };

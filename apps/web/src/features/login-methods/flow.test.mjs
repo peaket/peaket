@@ -90,7 +90,7 @@ test('재인증뒤할일은10분안이고한번만믿으며_모양이틀리면�
   assert.equal(takePending(s, 1_001 + PENDING_TTL_MS), null);
   s.set(PENDING_KEY, '{"action":"drop","provider":"kakao","at":1}');
   assert.equal(takePending(s, 5), null);
-  assert.deepEqual(reauthForm('kakao'), { action: '/reauth/kakao', fields: { returnTo: '/my/settings/providers', purpose: '' } });
+  assert.deepEqual(reauthForm('kakao', 'login-method-remove'), { action: '/reauth/kakao', fields: { returnTo: '/my/settings/providers', purpose: 'login-method-remove' } });
   assert.deepEqual(linkForm('google', 'tok'), { action: '/link/google', fields: { reauthToken: 'tok', returnTo: '/my/settings/providers' } });
 });
 
@@ -444,7 +444,7 @@ test('재인증으로떠나기전갱신은401일때만로그인이고_일시장�
     const out = await leaveForReauth({ api: { refresh: async () => refresh }, storage: st, pending: { action: 'unlink', provider: 'google', at: 9 }, provider: 'kakao', submit: (f) => submitted.push(f) });
     return { out, pending: st.m.get(PENDING_KEY), submitted };
   };
-  assert.deepEqual(await run('ok'), { out: 'left', pending: JSON.stringify({ action: 'unlink', provider: 'google', at: 9 }), submitted: [reauthForm('kakao')] });
+  assert.deepEqual(await run('ok'), { out: 'left', pending: JSON.stringify({ action: 'unlink', provider: 'google', at: 9 }), submitted: [{ action: '/reauth/kakao', fields: { returnTo: '/my/settings/providers', purpose: 'login-method-remove' } }] });
   assert.deepEqual(await run('rejected'), { out: 'login', pending: undefined, submitted: [] });
   assert.deepEqual(await run('unavailable'), { out: 'retry', pending: undefined, submitted: [] });
   const r = await createLoginMethodsApi({ origin: '', fetch: seq(json(503)) }).refresh();
@@ -497,4 +497,21 @@ test('I-T33_토큰갱신은주입한잠금안에서돈다(잠금대역으로순�
 
 test('I-T75_계정합치기를확정하면처리중안내에다른기기에서는모두로그아웃했다고함께알린다(새맥락리뷰낮음6) [ASVS v5.0.0-7.4.3]', () => {
   assert.equal(mergeView(view(), 0, TITLES).merging.message, '처리 중입니다. 다른 기기에서는 모두 로그아웃했습니다. 완료되면 알림으로 안내해 드립니다');
+});
+
+// ---- I-T85 ⑤(docs/features/identity.md §12, docs/frontend.md §4.1 '재인증', ADR-0293 결정 3) ----
+test('I-T85 ⑤-2 로그인 수단 화면의 재인증 양식은 해제 login-method-remove, 추가 login-method-add, 계정 합치기 account-merge를 싣는다', async () => {
+  const sent = async (pending) => {
+    const submitted = [];
+    const out = await leaveForReauth({ api: { refresh: async () => 'ok' }, storage: memoryStore(), pending, provider: 'naver', submit: (f) => submitted.push(f) });
+    assert.equal(out, 'left');
+    assert.equal(submitted.length, 1);
+    return submitted[0];
+  };
+  const at = 5;
+  assert.deepEqual(await sent({ action: 'unlink', provider: 'google', at }), { action: '/reauth/naver', fields: { returnTo: '/my/settings/providers', purpose: 'login-method-remove' } });
+  assert.deepEqual(await sent({ action: 'add', provider: 'google', at }), { action: '/reauth/naver', fields: { returnTo: '/my/settings/providers', purpose: 'login-method-add' } });
+  const merge = await sent({ action: 'merge', provider: 'google', proposalId: 'mp-1', at });
+  assert.equal(merge.fields.purpose, 'account-merge');
+  assert.notEqual(merge.fields.purpose, 'login-method-add');
 });

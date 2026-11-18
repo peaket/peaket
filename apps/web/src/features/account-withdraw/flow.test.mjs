@@ -1,5 +1,6 @@
 // 탈퇴 흐름(flow.ts) 시험(docs/features/identity.md §8 '탈퇴 화면 연결', BUILD_ORDER BOT-036, I-T16·I-T68 ⑨). 가짜 fetch·저장소로 본다.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { afterWithdraw, createWithdrawApi, leaveForReauth, linkedProvidersQuietly, markPending, PENDING_KEY, PENDING_TTL_MS, reauthFailureText, reauthForm, takePending, takePendingAt, untilText } from './flow.ts';
 
@@ -83,7 +84,7 @@ test('탈퇴재인증표시는_10분안이고한번만믿으며_재인증양식�
   assert.equal(takePending(s, 1_001 + PENDING_TTL_MS), false);
   s.set(PENDING_KEY, 'junk');
   assert.equal(takePending(s, 5), false);
-  assert.deepEqual(reauthForm('naver'), { action: '/reauth/naver', fields: { returnTo: '/my/settings', purpose: '' } });
+  assert.deepEqual(reauthForm('naver', 'account-withdraw'), { action: '/reauth/naver', fields: { returnTo: '/my/settings', purpose: 'account-withdraw' } });
 });
 
 test('I-T16_재인증실패문구는이유마다다르고_갱신은재인증양식을보내기전에부를수있다', async () => {
@@ -205,4 +206,38 @@ test('I-T74_탈퇴재인증표시의남긴시각을한번만돌려준다(원격�
   markPending(s, 1000);
   assert.equal(takePendingAt(s, 1001 + PENDING_TTL_MS), null, '10분이 지남');
   assert.equal(s.m.size, 0);
+});
+
+// ---- I-T85 ⑤(docs/features/identity.md §12, docs/frontend.md §4.1 '재인증', ADR-0293 결정 3) ----
+// 값은 docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값' 표의 웹 purpose에서 옮겨 적는다
+/** 주석을 뺀 원문(주석의 예시 글이 단언을 통과시키지 않게) */
+const codeOnly = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+const SETTINGS_FLOWS = codeOnly(readFileSync(new URL('../../_pages/settings/ui/SettingsFlows.tsx', import.meta.url), 'utf8'));
+const WITHDRAW_BROWSER = codeOnly(readFileSync(new URL('./browser.ts', import.meta.url), 'utf8'));
+/** 원문에서 `name({` 부르기 하나의 인자 덩이(닫는 `})`까지) */
+function callBlock(src, name) {
+  const at = src.indexOf(`${name}({`);
+  assert.ok(at >= 0, `${name} 부르기가 있다`);
+  let depth = 0;
+  for (let i = at + name.length; i < src.length; i++) {
+    if (src[i] === '(') depth++;
+    else if (src[i] === ')' && --depth === 0) return src.slice(at, i + 1);
+  }
+  throw new Error(`${name} 부르기가 닫히지 않는다`);
+}
+
+test('I-T85 ⑤-1 설정의 재인증 양식은 탈퇴면 purpose account-withdraw, 다른 기기 로그아웃이면 session-end다(같은 양식 함수를 써도)', () => {
+  assert.deepEqual(reauthForm('kakao', 'account-withdraw'), { action: '/reauth/kakao', fields: { returnTo: '/my/settings', purpose: 'account-withdraw' } });
+  assert.deepEqual(reauthForm('google', 'session-end'), { action: '/reauth/google', fields: { returnTo: '/my/settings', purpose: 'session-end' } });
+  // 화면 연결: 다른 기기 로그아웃의 떠나기(leaveForDeviceReauth)는 session-end, 탈퇴의 떠나기(leaveForReauth)는 account-withdraw를 싣는다
+  const device = callBlock(SETTINGS_FLOWS, 'leaveForDeviceReauth');
+  assert.match(device, /submit:\s*\(p\)\s*=>\s*submitReauthForm\(p,\s*'session-end'\)/);
+  assert.doesNotMatch(device, /account-withdraw/);
+  const withdraw = callBlock(SETTINGS_FLOWS, 'leaveForReauth');
+  assert.match(withdraw, /submit:\s*\(p\)\s*=>\s*submitReauthForm\(p,\s*'account-withdraw'\)/);
+  assert.doesNotMatch(withdraw, /session-end/);
+  // 한 인자로만 부르는 곳이 없다(기본값으로 빠지지 않는다)
+  assert.doesNotMatch(SETTINGS_FLOWS, /submitReauthForm\(\s*[A-Za-z_$][\w$]*\s*\)/);
+  // 양식 제출 함수는 받은 purpose를 그대로 양식에 넘기고 기본값을 두지 않는다
+  assert.match(WITHDRAW_BROWSER, /export function submitReauthForm\(provider: Provider, purpose: SettingsReauthPurpose\): void \{\s*const \{ action, fields \} = reauthForm\(provider, purpose\);/);
 });

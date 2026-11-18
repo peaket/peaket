@@ -25,6 +25,7 @@ import { VerificationError } from '../src/modules/verification/application/verif
 import { AccountWithdrawn, SessionTerminated } from '@peaket/contracts/asyncapi';
 import { VerificationHolds } from '../src/modules/verification/adapters/verification-holds.js';
 import { SetRestrictedCiHold } from '../src/modules/verification/application/set-restricted-ci-hold.js';
+import type { ReauthOperation } from '../src/modules/session/domain/session.js';
 import { agencyResult, ISSUER, kit, newKey, noClaims, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
 const DAY = 86_400_000;
@@ -60,8 +61,8 @@ async function setup(o: { failErase?: number; failEraseFor?: (accountId: string)
     const st = await new StartVerification(verifications, provider, closure, clock).run({ accountId, sessionId: null, purpose: 'FIRST', next: '/' });
     return new ConfirmVerification(verifications, provider, hashers, closure, clock).run({ accountId, verificationId: st.verificationId, providerResult: agencyResult(clock, st.verificationId, { person, birth }) });
   };
-  const reauthToken = async (s: { accountId: string; sessionId: string }, purpose: 'sensitive' | 'high-risk' = 'sensitive', o2: { now?: number } = {}) =>
-    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose }, o2.now ?? clock.now())).token;
+  const reauthToken = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation = 'ACCOUNT_WITHDRAW', o2: { now?: number } = {}) =>
+    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, o2.now ?? clock.now())).token;
   return { clock, sessions, verifications, staff, k, withdraw, finish, login, verify, reauthToken, closure, claims, provider, hashers, status: new GetVerificationStatus(sessions, claims, clock) };
 }
 
@@ -171,9 +172,9 @@ describe('탈퇴(I-T16·I-T27)', () => {
     const second = await t.login('r-1');
     expect(await code(run(await t.reauthToken(second)))).toBe('REAUTH_REQUIRED');
     expect(await code(run(await t.reauthToken(other)))).toBe('REAUTH_REQUIRED');
-    expect(await code(run(await t.reauthToken(a, 'high-risk')))).toBe('REAUTH_REQUIRED');
+    expect(await code(run(await t.reauthToken(a, 'TRANSFER_REQUEST')))).toBe('REAUTH_REQUIRED');
     // 5분이 지난 토큰
-    const old = await t.reauthToken(a, 'sensitive', { now: t.clock.now() - 6 * 60_000 });
+    const old = await t.reauthToken(a, 'ACCOUNT_WITHDRAW', { now: t.clock.now() - 6 * 60_000 });
     expect(await code(run(old))).toBe('REAUTH_REQUIRED');
     expect(t.sessions.accountOf(a.accountId)?.status).toBe('ACTIVE');
     // 맞는 토큰은 한 번만 쓴다: 두 번째 세션(살아 있음)에서 같은 토큰을 다시 보내면 403이다

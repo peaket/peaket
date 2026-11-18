@@ -48,7 +48,7 @@ async function setup(o: { hashers?: () => HmacIdentityHashers } = {}) {
     await new ConfirmVerification(verifications, provider, hashers(), closure, clock).run({ accountId, verificationId: st.verificationId, providerResult: agencyResult(clock, st.verificationId, { person }) });
     return new GetVerificationResult(verifications, clock).run({ accountId, verificationId: st.verificationId });
   };
-  const reauth = async (s: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const reauth = async (s: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, clock.now())).token;
   const scope = async (id: string) => payload((await login(id)).accessToken).scope;
   return { clock, sessions, verifications, k, withdraw, hold, login, verify, reauth, scope, hashers, status: new GetVerificationStatus(sessions, claims, clock) };
 }

@@ -11,7 +11,7 @@ import { AddProvider } from '../src/modules/session/application/add-provider.js'
 import { EndDeviceSession } from '../src/modules/session/application/end-device-session.js';
 import { ListSessions } from '../src/modules/session/application/list-sessions.js';
 import { UnlinkProvider } from '../src/modules/session/application/unlink-provider.js';
-import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from '../src/modules/session/domain/session.js';
+import { type ReauthOperation, SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from '../src/modules/session/domain/session.js';
 import { ISSUER, kit, newKey } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -40,8 +40,8 @@ async function setup() {
   const k = await kit(sessions, { clock });
   const reauth = new JoseReauthVerifier(k.keys, ISSUER, clock);
   const login = (sub: string, deviceId: string | null, userAgent?: string) => k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: sub, email: null, deviceId, userAgent });
-  const token = async (s: { accountId: string; sessionId: string }) =>
-    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const token = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) =>
+    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, clock.now())).token;
   return {
     sessions,
     k,
@@ -87,7 +87,7 @@ test('I-T74·I-T76_PostgreSQL에서_로그인때기기이름·마지막활동을
     { sessionId: bare.sessionId, deviceName: null, lastActiveAt: new Date(clock.now() - 1_000).toISOString(), current: false, otherSessions: 0 },
     { sessionId: p2.sessionId, deviceName: 'Samsung Internet · Android', lastActiveAt: new Date(clock.now() - 2_000).toISOString(), current: false, otherSessions: 1 },
   ]);
-  expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), targetSessionId: p1.sessionId })).toEqual({ ended: 2 });
+  expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'SESSION_END'), targetSessionId: p1.sessionId })).toEqual({ ended: 2 });
   expect([await alive(p1.sessionId), await alive(p2.sessionId), await alive(bare.sessionId), await alive(me.sessionId)]).toEqual([false, false, true, true]);
   expect((await events(me.accountId)).sort()).toEqual([
     [p1.sessionId, 'LOGOUT'],
@@ -110,7 +110,7 @@ test('I-T74_PostgreSQL에서_남의세션·끝난세션·없는ID는같은404이
   const other = await t.login('pg-ds-2', 'dev-other');
   const sibling = await t.login('pg-ds-2', 'dev-me');
   const me = await t.login('pg-ds-2', 'dev-me');
-  const tok = await t.token(me);
+  const tok = await t.token(me, 'SESSION_END');
   for (const target of [stranger.sessionId, gone.sessionId, '0190f3a1-7c2e-7a00-8000-0000000000fd']) {
     expect(await code(t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: tok, targetSessionId: target }))).toBe('SESSION_NOT_FOUND');
   }
@@ -119,10 +119,10 @@ test('I-T74_PostgreSQL에서_남의세션·끝난세션·없는ID는같은404이
   expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: tok, targetSessionId: other.sessionId })).toEqual({ ended: 1 });
   expect(await q('select 1 from reauth_token_use where account_id = $1', [me.accountId])).toHaveLength(1);
   // 지금 기기 줄을 끄면 지금 세션만 남기고 같은 기기의 다른 세션(sibling)을 끝낸다(새 맥락 리뷰 중간 1)
-  expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), targetSessionId: me.sessionId })).toEqual({ ended: 1 });
+  expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'SESSION_END'), targetSessionId: me.sessionId })).toEqual({ ended: 1 });
   expect([await alive(sibling.sessionId), await alive(me.sessionId)]).toEqual([false, true]);
   // 두 탭이 같은 기기를 끄면 뒤 쪽은 404다(사건은 한 번)
-  expect(await code(t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), targetSessionId: other.sessionId }))).toBe('SESSION_NOT_FOUND');
+  expect(await code(t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'SESSION_END'), targetSessionId: other.sessionId }))).toBe('SESSION_NOT_FOUND');
   expect((await events(me.accountId)).filter(([id]) => id === other.sessionId)).toHaveLength(1);
 });
 
@@ -136,7 +136,7 @@ test('새맥락리뷰낮음4_PostgreSQL에서_남의세션행은잠그지않는�
     await holder.query('select 1 from session where id = $1 for update', [stranger.sessionId]);
     const started = Date.now();
     const out = await Promise.race([
-      code(t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), targetSessionId: stranger.sessionId })),
+      code(t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'SESSION_END'), targetSessionId: stranger.sessionId })),
       new Promise((r) => setTimeout(() => r('WAITED'), 3_000)),
     ]);
     expect(out).toBe('SESSION_NOT_FOUND');
@@ -151,11 +151,11 @@ test('I-T75_PostgreSQL에서_로그인수단추가·해제는이세션말고다�
   const t = await setup();
   const phone = await t.login('pg-ds-3', 'dev-phone');
   const me = await t.login('pg-ds-3', 'dev-pc');
-  expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'kakao', providerUserId: 'pg-ds-3' })).toBe('ALREADY_LINKED');
+  expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_ADD'), provider: 'kakao', providerUserId: 'pg-ds-3' })).toBe('ALREADY_LINKED');
   expect(await alive(phone.sessionId)).toBe(true);
-  expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'google', providerUserId: 'pg-ds-3-g' })).toBe('LINKED');
+  expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-ds-3-g' })).toBe('LINKED');
   const again = await t.login('pg-ds-3', 'dev-phone');
-  await t.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'google' });
+  await t.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_REMOVE'), provider: 'google' });
   expect([await alive(phone.sessionId), await alive(again.sessionId), await alive(me.sessionId)]).toEqual([false, false, true]);
   expect(await events(me.accountId)).toEqual([
     [phone.sessionId, 'LOGIN_METHOD_CHANGED'],

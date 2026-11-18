@@ -133,6 +133,6 @@ test('I-T55_④PostgreSQL에서_같은세션의REVERIFY확정만_재통과로찾
   expect(await t.verifications.recentlyReverified(s.accountId, '0190f3a1-7c2e-7a00-8000-000000000009', since())).toBe(false);
   t.k.clock.advance(600_001);
   expect(await t.verifications.recentlyReverified(s.accountId, s.sessionId, since())).toBe(false);
-  const r = await t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'x', strength: 'requested', purpose: 'high-risk' });
+  const r = await t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'x', strength: 'requested', operation: 'TRANSFER_REQUEST' });
   expect(r.result).not.toBe('ISSUED');
 });

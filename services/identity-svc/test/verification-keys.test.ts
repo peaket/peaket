@@ -317,7 +317,7 @@ describe('고위험 재인증의 본인확인 재통과(I-T55 ④)', () => {
     const s = await t.login('rv-none');
     expect((await t.confirm(s.accountId, (await t.start(s.accountId, 'REVERIFY', s.sessionId)).verificationId, { person: 'rv-none' })).status).toBe('FAILED');
     expect(await t.verifications.claimsOf(s.accountId)).toBeNull();
-    const r = await t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'rv-none', strength: 'requested', purpose: 'high-risk' });
+    const r = await t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'rv-none', strength: 'requested', operation: 'TRANSFER_REQUEST' });
     expect(r.result).toBe('REVERIFY_REQUIRED');
   });
 
@@ -325,7 +325,7 @@ describe('고위험 재인증의 본인확인 재통과(I-T55 ④)', () => {
     const t = await setup();
     const s = await t.login('rv-1');
     await t.confirm(s.accountId, (await t.start(s.accountId, 'FIRST', s.sessionId)).verificationId, { person: 'rv' });
-    const reauth = () => t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'rv-1', strength: 'requested', purpose: 'high-risk' });
+    const reauth = () => t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'rv-1', strength: 'requested', operation: 'TRANSFER_REQUEST' });
     // 판정 UNKNOWN(trust-svc 전) 세션: 재통과 전에는 주지 않는다
     expect((await reauth()).result).toBe('REVERIFY_REQUIRED');
     const re = await t.start(s.accountId, 'REVERIFY', s.sessionId);
@@ -344,7 +344,7 @@ describe('고위험 재인증의 본인확인 재통과(I-T55 ④)', () => {
     await t.confirm(s.accountId, (await t.start(s.accountId, 'FIRST', s.sessionId)).verificationId, { person: 'rv2' });
     await t.confirm(s.accountId, (await t.start(s.accountId, 'REVERIFY', other.sessionId)).verificationId, { person: 'rv2' });
     await t.confirm(s.accountId, (await t.start(s.accountId, 'REVERIFY', s.sessionId)).verificationId, { person: 'someone-else' });
-    const r = await t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'rv-2', strength: 'requested', purpose: 'high-risk' });
+    const r = await t.k.reauth.run({ sessionId: s.sessionId, accountId: s.accountId, provider: 'kakao', providerUserId: 'rv-2', strength: 'requested', operation: 'TRANSFER_REQUEST' });
     expect(r.result).toBe('REVERIFY_REQUIRED');
   });
 });

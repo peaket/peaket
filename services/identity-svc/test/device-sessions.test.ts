@@ -14,7 +14,7 @@ import { ListSessions } from '../src/modules/session/application/list-sessions.j
 import { MergePlanner } from '../src/modules/session/application/plan-merge.js';
 import { UnlinkProvider } from '../src/modules/session/application/unlink-provider.js';
 import { deviceLabelOf } from '../src/modules/session/application/device-label.js';
-import { SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from '../src/modules/session/domain/session.js';
+import { type ReauthOperation, SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from '../src/modules/session/domain/session.js';
 import { ISSUER, kit, newKey } from './support.js';
 
 /** 합성 User-Agent(실제 사람의 값이 아니다. 브라우저들이 내는 꼴만 따랐다) */
@@ -49,8 +49,8 @@ async function setup() {
   const planner = new MergePlanner(sessions, { pidsOf: async (id) => (verified.has(id) ? ['pid'] : []) }, [], proposals, k.clock, undefined, k.signals);
   const login = (o: { provider?: 'kakao' | 'naver' | 'google'; sub: string; deviceId?: string | null; userAgent?: string; email?: string | null }) =>
     k.create.run({ idempotencyKey: newKey(), provider: o.provider ?? 'kakao', providerUserId: o.sub, email: o.email ?? null, emailVerified: o.email != null, deviceId: o.deviceId === undefined ? 'dev-a' : o.deviceId, userAgent: o.userAgent });
-  const token = async (s: { accountId: string; sessionId: string }) =>
-    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, k.clock.now())).token;
+  const token = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) =>
+    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, k.clock.now())).token;
   return {
     sessions,
     k,
@@ -191,7 +191,7 @@ describe('다른 기기 로그아웃(I-T74)', () => {
     const p1 = await t.login({ sub: 'k-off', deviceId: 'dev-phone', userAgent: UA.safariIphone });
     const p2 = await t.login({ sub: 'k-off', deviceId: 'dev-phone', userAgent: UA.safariIphone });
     const me = await t.login({ sub: 'k-off', deviceId: 'dev-pc', userAgent: UA.chromeWindows });
-    expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), targetSessionId: p2.sessionId })).toEqual({ ended: 2 });
+    expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'SESSION_END'), targetSessionId: p2.sessionId })).toEqual({ ended: 2 });
     expect([alive(t, p1.sessionId), alive(t, p2.sessionId), alive(t, me.sessionId)]).toEqual([false, false, true]);
     expect(t.sessions.terminations(me.accountId).sort()).toEqual([
       [p1.sessionId, 'LOGOUT'],
@@ -212,8 +212,8 @@ describe('다른 기기 로그아웃(I-T74)', () => {
     const me = await t.login({ sub: 'k-ra', deviceId: 'dev-1' });
     const run = (reauthToken: string, targetSessionId: string) => t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken, targetSessionId });
     expect(await code(run('', other.sessionId))).toBe('REAUTH_REQUIRED');
-    expect(await code(run(await t.token(other), other.sessionId))).toBe('REAUTH_REQUIRED');
-    const once = await t.token(me);
+    expect(await code(run(await t.token(other, 'SESSION_END'), other.sessionId))).toBe('REAUTH_REQUIRED');
+    const once = await t.token(me, 'SESSION_END');
     expect(await code(run(once, other.sessionId))).toBe('OK');
     expect(await code(run(once, third.sessionId))).toBe('REAUTH_REQUIRED');
     expect(alive(t, third.sessionId)).toBe(true);
@@ -226,7 +226,7 @@ describe('다른 기기 로그아웃(I-T74)', () => {
     await t.k.end.run({ sessionId: gone.sessionId, accountId: gone.accountId });
     const other = await t.login({ sub: 'k-404', deviceId: 'dev-o' });
     const me = await t.login({ sub: 'k-404', deviceId: 'dev-m' });
-    const tok = await t.token(me);
+    const tok = await t.token(me, 'SESSION_END');
     for (const target of [stranger.sessionId, gone.sessionId, '0190f3a1-7c2e-7a00-8000-0000000000ff', 'not-a-uuid']) {
       expect(await code(t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: tok, targetSessionId: target })), target).toBe('SESSION_NOT_FOUND');
     }
@@ -248,12 +248,12 @@ describe('다른 기기 로그아웃(I-T74)', () => {
       [me.sessionId, true, 2],
       [other.sessionId, false, 0],
     ]);
-    expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), targetSessionId: me.sessionId })).toEqual({ ended: 2 });
+    expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'SESSION_END'), targetSessionId: me.sessionId })).toEqual({ ended: 2 });
     expect([alive(t, old.sessionId), alive(t, older.sessionId), alive(t, me.sessionId), alive(t, other.sessionId)]).toEqual([false, false, true, true]);
     expect(t.sessions.terminations(me.accountId).map(([, why]) => why)).toEqual(['LOGOUT', 'LOGOUT']);
     expect((await t.list.run({ accountId: me.accountId, sessionId: me.sessionId }))[0]).toMatchObject({ sessionId: me.sessionId, current: true, otherSessions: 0 });
     // 끝낼 다른 로그인이 없으면 같은 404이고 재인증 토큰을 쓰지 않는다
-    const tok = await t.token(me);
+    const tok = await t.token(me, 'SESSION_END');
     expect(await code(t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: tok, targetSessionId: me.sessionId }))).toBe('SESSION_NOT_FOUND');
     expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: tok, targetSessionId: other.sessionId })).toEqual({ ended: 1 });
   });
@@ -262,7 +262,7 @@ describe('다른 기기 로그아웃(I-T74)', () => {
     const t = await setup();
     const sibling = await t.login({ sub: 'k-sib', deviceId: 'dev-same' });
     const me = await t.login({ sub: 'k-sib', deviceId: 'dev-same' });
-    expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), targetSessionId: sibling.sessionId })).toEqual({ ended: 1 });
+    expect(await t.end.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'SESSION_END'), targetSessionId: sibling.sessionId })).toEqual({ ended: 1 });
     expect([alive(t, sibling.sessionId), alive(t, me.sessionId)]).toEqual([false, true]);
   });
 
@@ -270,8 +270,8 @@ describe('다른 기기 로그아웃(I-T74)', () => {
     const t = await setup();
     const a = await t.login({ sub: 'k-race', deviceId: 'dev-a' });
     const b = await t.login({ sub: 'k-race', deviceId: 'dev-b' });
-    const tokB = await t.token(b);
-    expect(await t.end.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), targetSessionId: b.sessionId })).toEqual({ ended: 1 });
+    const tokB = await t.token(b, 'SESSION_END');
+    expect(await t.end.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'SESSION_END'), targetSessionId: b.sessionId })).toEqual({ ended: 1 });
     expect(await code(t.end.run({ accountId: b.accountId, sessionId: b.sessionId, reauthToken: tokB, targetSessionId: a.sessionId }))).toBe('REAUTH_REQUIRED');
     expect(alive(t, a.sessionId)).toBe(true);
   });
@@ -311,7 +311,7 @@ describe('로그인 수단을 바꾸면 다른 세션을 끝낸다(I-T75)', () =
     const phone = await t.login({ sub: 'k-add', deviceId: 'dev-phone' });
     const tablet = await t.login({ sub: 'k-add', deviceId: 'dev-tablet' });
     const me = await t.login({ sub: 'k-add', deviceId: 'dev-pc' });
-    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'google', providerUserId: 'g-add' })).toBe('LINKED');
+    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-add' })).toBe('LINKED');
     expect([alive(t, phone.sessionId), alive(t, tablet.sessionId), alive(t, me.sessionId)]).toEqual([false, false, true]);
     const box = outboxOf(t, me.accountId);
     expect(box.slice(0, 2).map((m) => m[2])).toEqual(['LOGIN_METHOD_CHANGED', 'LOGIN_METHOD_CHANGED']);
@@ -325,15 +325,15 @@ describe('로그인 수단을 바꾸면 다른 세션을 끝낸다(I-T75)', () =
     const phone = await t.login({ sub: 'k-un', deviceId: 'dev-phone' });
     const me = await t.login({ sub: 'k-un', deviceId: 'dev-pc' });
     // 바뀐 것이 없으면 끝내지 않는다
-    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'kakao', providerUserId: 'k-un' })).toBe('ALREADY_LINKED');
-    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'kakao', providerUserId: 'k-un-2' })).toBe('PROVIDER_TYPE_TAKEN');
-    expect(await code(t.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'kakao' }))).toBe('LAST_LOGIN_METHOD');
+    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_ADD'), provider: 'kakao', providerUserId: 'k-un' })).toBe('ALREADY_LINKED');
+    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_ADD'), provider: 'kakao', providerUserId: 'k-un-2' })).toBe('PROVIDER_TYPE_TAKEN');
+    expect(await code(t.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_REMOVE'), provider: 'kakao' }))).toBe('LAST_LOGIN_METHOD');
     expect(alive(t, phone.sessionId)).toBe(true);
     // 수단을 하나 더 이으면 다른 세션이 끝난다. 그 뒤 다른 기기로 다시 로그인하고 해제하면 또 끝난다
-    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'naver', providerUserId: 'n-un' })).toBe('LINKED');
+    expect(await t.add.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_ADD'), provider: 'naver', providerUserId: 'n-un' })).toBe('LINKED');
     expect(alive(t, phone.sessionId)).toBe(false);
     const phoneAgain = await t.login({ sub: 'k-un', deviceId: 'dev-phone' });
-    expect(await code(t.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider: 'naver' }))).toBe('OK');
+    expect(await code(t.unlink.run({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_REMOVE'), provider: 'naver' }))).toBe('OK');
     expect([alive(t, phoneAgain.sessionId), alive(t, me.sessionId)]).toEqual([false, true]);
     expect(t.sessions.terminations(me.accountId).map(([id, why]) => [id === phone.sessionId || id === phoneAgain.sessionId, why])).toEqual([
       [true, 'LOGIN_METHOD_CHANGED'],
@@ -350,11 +350,11 @@ describe('로그인 수단을 바꾸면 다른 세션을 끝낸다(I-T75)', () =
       // 대표는 a다. primary: 지금 계정 a가 b의 구글을 더한다(둘 다 본인확인 전이면 지금 계정이 대표). absorbed: a만 본인확인을 마쳤고 b가 a의 카카오를 더한다
       if (requester === 'absorbed') t.verified.add(a.accountId);
       const [me, provider, sub] = requester === 'primary' ? [a, 'google' as const, `g-m-${requester}`] : [b, 'kakao' as const, `k-m-${requester}`];
-      const r = await t.add.add({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me), provider, providerUserId: sub });
+      const r = await t.add.add({ accountId: me.accountId, sessionId: me.sessionId, reauthToken: await t.token(me, 'LOGIN_METHOD_ADD'), provider, providerUserId: sub });
       expect(r.result).toBe('OTHER_ACCOUNT');
       // 다른 계정이라 병합 제안으로 갔을 뿐 바뀐 것이 없어 아직 끝내지 않는다
       expect([alive(t, aPhone.sessionId), alive(t, a.sessionId), alive(t, b.sessionId)]).toEqual([true, true, true]);
-      await t.confirm.run({ accountId: me.accountId, sessionId: me.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(me) });
+      await t.confirm.run({ accountId: me.accountId, sessionId: me.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(me, 'ACCOUNT_MERGE') });
       expect(t.sessions.accountOf(b.accountId)).toMatchObject({ status: 'MERGED', mergedInto: a.accountId });
       expect(t.sessions.terminations(b.accountId)).toEqual([[b.sessionId, 'MERGED']]);
       if (requester === 'primary') {
@@ -378,10 +378,10 @@ describe('로그인 수단을 바꾸면 다른 세션을 끝낸다(I-T75)', () =
     const a = await t.login({ sub: 'k-ord', deviceId: 'dev-a-pc' });
     await t.login({ provider: 'google', sub: 'g-ord', deviceId: 'dev-b' });
     const calls = recordCalls(t.sessions);
-    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-ord' });
-    await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'naver', providerUserId: 'n-ord' })).toBe('LINKED');
-    await t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'naver' });
+    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-ord' });
+    await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') });
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'naver', providerUserId: 'n-ord' })).toBe('LINKED');
+    await t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_REMOVE'), provider: 'naver' });
     expect(calls.some((c) => c.includes('recordAccountMerged'))).toBe(true);
     for (const c of calls) expectOutboxLast(c);
   });

@@ -9,10 +9,13 @@ import { MergeCheckUnavailable } from '../src/modules/session/domain/ports.js';
 import { HmacIdentityHashers, SetRestrictedCiHold } from '../src/modules/verification/index.js';
 import { ConfirmVerification } from '../src/modules/verification/application/confirm-verification.js';
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
-import { AGENCY_URL, agencyResult, fanKey, ISSUER, newKey, recordingSignals, testAgency, testDeviceRefs } from './support.js';
+import { AGENCY_URL, agencyResult, fanKey, fanReauthToken, ISSUER, newKey, recordingSignals, testAgency, testDeviceRefs } from './support.js';
+import type { ReauthOperation } from '../src/modules/session/domain/session.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
 let signer: JoseTokenSigner;
+/** 팬 토큰 키(I-T85 ③ 경계 시험이 정본 모양의 토큰을 직접 만든다) */
+let fanKeys: TokenKeyRing;
 const clock = fakeClock({ now: Date.parse('2026-11-03T03:00:00Z') });
 /** 서비스 로그(정규 로그 줄)를 모은다: 기관 결과 값이 로그에 남지 않는지 본다(I-T45) */
 const logLines: string[] = [];
@@ -26,6 +29,7 @@ const quiet = new Writable({
 beforeAll(async () => {
   const fan = await fanKey();
   const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(fan.privateJwk) });
+  fanKeys = keys;
   svc = await createService({
     name: 'identity-svc',
     module: AppModule.register({ memory: true, session: { signer: (signer = new JoseTokenSigner(keys, ISSUER)), keys, deviceRefs: testDeviceRefs(), signals: recordingSignals(), cookieDomain: 'peaket.example' }, verification: { provider: testAgency(clock), hashers: HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
@@ -54,7 +58,7 @@ describe('탈퇴 경로(DELETE /v1/identity/account, identity §8 탈퇴의 첫 
       expect(r.statusCode).toBe(403);
       expect(JSON.parse(r.payload)).toMatchObject({ type: 'https://peaket.example/problems/reauth-required', status: 403 });
     }
-    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, svc.clock.now())).token;
     const ok = await del({ ...fanHeaders(s), 'x-reauth-token': token });
     expect(ok.statusCode).toBe(204);
     expect(ok.headers['cache-control']).toBe('no-store');
@@ -72,7 +76,7 @@ describe('탈퇴 경로(DELETE /v1/identity/account, identity §8 탈퇴의 첫 
     const st = await svc.app.get(StartVerification).run({ accountId: s.accountId, sessionId: null, purpose: 'FIRST', next: '/' });
     await svc.app.get(ConfirmVerification).run({ accountId: s.accountId, verificationId: st.verificationId, providerResult: agencyResult(clock, st.verificationId, { person: 'http-hold-person' }) });
     expect(await svc.app.get(SetRestrictedCiHold).run({ accountId: s.accountId, fraudCaseId: caseId, state: 'CASE_OPEN', until, version: 1 })).toBe('OK');
-    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, svc.clock.now())).token;
     const first = await del({ ...fanHeaders(s), 'x-reauth-token': token });
     expect(first.statusCode).toBe(409);
     expect(JSON.parse(first.payload)).toMatchObject({ type: 'https://peaket.example/problems/withdrawal-confirmation-required', status: 409, fraudHold: { state: 'CASE_OPEN', until: new Date(until).toISOString() } });
@@ -253,20 +257,20 @@ describe('본인확인기관이 없는 환경', () => {
 
 describe('로그인 수단 해제 경로(BOT-041, I-T33)', () => {
   const fan = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
-  const reauthOf = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+  const reauthOf = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, svc.clock.now())).token;
   const unlink = (p: string, headers: Record<string, string>) => svc.http.inject({ method: 'DELETE', url: `/v1/identity/providers/${p}`, headers });
 
   test('I-T33_마지막로그인수단해제는409last-login-method_재인증없으면403_없는종류는404_둘이면204이고캐시하지않는다', async () => {
     const s = await login();
     expect((await unlink('kakao', fan(s))).statusCode).toBe(403);
-    const last = await unlink('kakao', { ...fan(s), 'x-reauth-token': await reauthOf(s) });
+    const last = await unlink('kakao', { ...fan(s), 'x-reauth-token': await reauthOf(s, 'LOGIN_METHOD_REMOVE') });
     expect(last.statusCode).toBe(409);
     expect(JSON.parse(last.payload)).toMatchObject({ type: expect.stringMatching(/last-login-method$/), status: 409 });
     expect(last.headers['cache-control']).toBe('no-store');
-    expect((await unlink('naver', { ...fan(s), 'x-reauth-token': await reauthOf(s) })).statusCode).toBe(404);
-    expect((await unlink('apple', { ...fan(s), 'x-reauth-token': await reauthOf(s) })).statusCode).toBe(404);
-    expect(await svc.app.get(AddProvider).run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauthOf(s), provider: 'google', providerUserId: `g-${newKey().slice(0, 8)}` })).toBe('LINKED');
-    const ok = await unlink('google', { ...fan(s), 'x-reauth-token': await reauthOf(s) });
+    expect((await unlink('naver', { ...fan(s), 'x-reauth-token': await reauthOf(s, 'LOGIN_METHOD_REMOVE') })).statusCode).toBe(404);
+    expect((await unlink('apple', { ...fan(s), 'x-reauth-token': await reauthOf(s, 'LOGIN_METHOD_REMOVE') })).statusCode).toBe(404);
+    expect(await svc.app.get(AddProvider).run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauthOf(s, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: `g-${newKey().slice(0, 8)}` })).toBe('LINKED');
+    const ok = await unlink('google', { ...fan(s), 'x-reauth-token': await reauthOf(s, 'LOGIN_METHOD_REMOVE') });
     expect(ok.statusCode).toBe(204);
     expect(ok.headers['cache-control']).toBe('no-store');
   });
@@ -274,7 +278,7 @@ describe('로그인 수단 해제 경로(BOT-041, I-T33)', () => {
 
 describe('로그인한 기기 경로(BOT-044, I-T74, ADR-0209)', () => {
   const fan = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
-  const reauthOf = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+  const reauthOf = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, svc.clock.now())).token;
   const loginOn = (sub: string, deviceId: string, userAgent: string) => svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: sub, email: null, deviceId, userAgent });
   const list = (headers: Record<string, string>) => svc.http.inject({ method: 'GET', url: '/v1/identity/sessions', headers });
   const off = (id: string, headers: Record<string, string>) => svc.http.inject({ method: 'DELETE', url: `/v1/identity/sessions/${id}`, headers });
@@ -309,7 +313,7 @@ describe('로그인한 기기 경로(BOT-044, I-T74, ADR-0209)', () => {
     const no = await off(phone.sessionId, fan(me));
     expect(no.statusCode).toBe(403);
     expect(JSON.parse(no.payload)).toMatchObject({ type: 'https://peaket.example/problems/reauth-required', status: 403 });
-    const tok = await reauthOf(me);
+    const tok = await reauthOf(me, 'SESSION_END');
     for (const id of [stranger.sessionId, '0190f3a1-7c2e-7a00-8000-0000000000fe', 'nope']) {
       const r = await off(id, { ...fan(me), 'x-reauth-token': tok });
       expect(r.statusCode, id).toBe(404);
@@ -330,13 +334,13 @@ describe('로그인한 기기 경로(BOT-044, I-T74, ADR-0209)', () => {
 
 describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
   const fan = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
-  const reauthOf = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+  const reauthOf = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, svc.clock.now())).token;
 
   test('I-T31·I-T32_병합제안은제안한계정만읽고_확정은재인증이있어야202이며_그뒤흡수계정의제공자로로그인하면대표계정이다', async () => {
     const a = await login();
     const gsub = `g-${newKey().slice(0, 8)}`;
     const b = await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null });
-    const r = await svc.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauthOf(a), provider: 'google', providerUserId: gsub });
+    const r = await svc.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauthOf(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: gsub });
     expect(r.result).toBe('OTHER_ACCOUNT');
     const url = `/v1/identity/merge-proposals/${r.mergeProposalId}`;
     const got = await svc.http.inject({ method: 'GET', url, headers: fan(a) });
@@ -345,10 +349,10 @@ describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
     expect(JSON.parse(got.payload)).toMatchObject({ proposalId: r.mergeProposalId, primaryAccountId: a.accountId, mergedAccountId: b.accountId, status: 'PROPOSED', blockers: [], moved: { providers: 1 } });
     expect((await svc.http.inject({ method: 'GET', url, headers: fan(b) })).statusCode).toBe(404);
     expect((await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: fan(a) })).statusCode).toBe(403);
-    const ok = await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a) } });
+    const ok = await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a, 'ACCOUNT_MERGE') } });
     expect(ok.statusCode).toBe(202);
     expect((await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null })).accountId).toBe(a.accountId);
-    expect((await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a) } })).statusCode).toBe(404);
+    expect((await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a, 'ACCOUNT_MERGE') } })).statusCode).toBe(404);
   });
 
   test('I-T31_OPEN21_두계정에같은종류의다른로그인수단이있으면_조회는BLOCKED와SAME_PROVIDER_KIND·sameKindProviders이고_확정은409merge-blocked와같은두칸이다', async () => {
@@ -356,12 +360,12 @@ describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
     const gsub = `g-${newKey().slice(0, 8)}`;
     const b = await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null });
     // 두 계정에 서로 다른 네이버 계정을 잇는다
-    for (const s of [a, b]) expect(await svc.app.get(AddProvider).run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauthOf(s), provider: 'naver', providerUserId: `n-${newKey().slice(0, 8)}` })).toBe('LINKED');
-    const r = await svc.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauthOf(a), provider: 'google', providerUserId: gsub });
+    for (const s of [a, b]) expect(await svc.app.get(AddProvider).run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauthOf(s, 'LOGIN_METHOD_ADD'), provider: 'naver', providerUserId: `n-${newKey().slice(0, 8)}` })).toBe('LINKED');
+    const r = await svc.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauthOf(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: gsub });
     const url = `/v1/identity/merge-proposals/${r.mergeProposalId}`;
     const got = await svc.http.inject({ method: 'GET', url, headers: fan(a) });
     expect(JSON.parse(got.payload)).toMatchObject({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver'] });
-    const blocked = await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a) } });
+    const blocked = await svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': await reauthOf(a, 'ACCOUNT_MERGE') } });
     expect(blocked.statusCode).toBe(409);
     expect(JSON.parse(blocked.payload)).toMatchObject({ type: expect.stringMatching(/merge-blocked$/), blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver'] });
   });
@@ -380,7 +384,7 @@ describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
     const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify((await fanKey()).privateJwk) });
     const signer2 = new JoseTokenSigner(keys, ISSUER);
     const seen2 = recordingSignals();
-    const reauth2 = async (s: { accountId: string; sessionId: string }) => (await signer2.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+    const reauth2 = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) => (await signer2.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, clock.now())).token;
     const s2 = await createService({
       name: 'identity-svc',
       module: AppModule.register({ memory: true, session: { signer: signer2, keys, deviceRefs: testDeviceRefs(), signals: seen2, mergeCheckers: checkers as never }, verification: { provider: testAgency(clock), hashers: HmacIdentityHashers.single(Buffer.alloc(32, 4), Buffer.alloc(32, 5)) } }),
@@ -392,9 +396,9 @@ describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
       const a = await s2.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `k-${newKey().slice(0, 8)}`, email: null, deviceId: null });
       const gsub = `g-${newKey().slice(0, 8)}`;
       await s2.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null });
-      const r = await s2.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauth2(a), provider: 'google', providerUserId: gsub });
+      const r = await s2.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await reauth2(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: gsub });
       const url = `/v1/identity/merge-proposals/${r.mergeProposalId}/confirmation`;
-      const post = async () => s2.http.inject({ method: 'POST', url, headers: { ...fan(a), 'x-reauth-token': await reauth2(a) } });
+      const post = async () => s2.http.inject({ method: 'POST', url, headers: { ...fan(a), 'x-reauth-token': await reauth2(a, 'ACCOUNT_MERGE') } });
       mode = 'blocked';
       const blocked = await post();
       expect(blocked.statusCode).toBe(409);
@@ -417,3 +421,53 @@ describe('계정 병합 경로(BOT-042, I-T31·I-T32)', () => {
   });
 });
 
+
+// I-T85 ③ 바깥 경계(docs/features/identity.md §7.1 ④): 받는 경로가 op 어긋남을 403 reauth-required로 돌려주고 작업을 하지 않는다
+describe('I-T85 ③ 받는 경로는 다른 작업의 재인증 토큰을 403으로 거절한다', () => {
+  const fan = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
+  /** 같은 세션·act FAN_SENSITIVE에 op만 고른 토큰(정본 모양, 서명기를 거치지 않는다) */
+  const tokenOf = (s: { accountId: string; sessionId: string }, op: ReauthOperation) => fanReauthToken(fanKeys, { ...s, act: 'FAN_SENSITIVE', op, now: svc.clock.now() });
+  const expect403 = (r: { statusCode: number; payload: string }, what: string) => {
+    expect(r.statusCode, what).toBe(403);
+    expect(JSON.parse(r.payload), what).toMatchObject({ type: 'https://peaket.example/problems/reauth-required', status: 403 });
+  };
+
+  test('I-T85 ③ 경로: 탈퇴·다른 기기 로그아웃·로그인 수단 해제·계정 합치기 확정은 자기 op 아닌 토큰에 403이고, 그 뒤 자기 op 토큰으로는 지금처럼 성공한다', async () => {
+    // 탈퇴(DELETE /v1/identity/account): SESSION_END·TICKET_CANCEL 토큰은 403, 계정이 그대로라 갱신이 된다
+    const w = await login();
+    const del = (t: string) => svc.http.inject({ method: 'DELETE', url: '/v1/identity/account', headers: { ...fan(w), 'x-reauth-token': t, 'content-type': 'application/json' }, payload: '{}' });
+    for (const op of ['SESSION_END', 'TICKET_CANCEL'] as const) expect403(await del(await tokenOf(w, op)), `withdraw ← ${op}`);
+    expect((await refresh(`__Secure-peaket_rt=${w.refreshToken}`)).statusCode).toBe(204);
+    expect((await del(await tokenOf(w, 'ACCOUNT_WITHDRAW'))).statusCode).toBe(204);
+
+    // 다른 기기 로그아웃(DELETE /v1/identity/sessions/{id}): ACCOUNT_WITHDRAW 토큰은 403, 그 기기 세션이 살아 있다
+    const sub = `u-${newKey().slice(0, 8)}`;
+    const phone = await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: sub, email: null, deviceId: 'dev-i85-phone' });
+    const me = await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: sub, email: null, deviceId: 'dev-i85-pc' });
+    const off = (t: string) => svc.http.inject({ method: 'DELETE', url: `/v1/identity/sessions/${phone.sessionId}`, headers: { ...fan(me), 'x-reauth-token': t } });
+    for (const op of ['ACCOUNT_WITHDRAW', 'LOGIN_METHOD_REMOVE'] as const) expect403(await off(await tokenOf(me, op)), `session-end ← ${op}`);
+    expect((await refresh(`__Secure-peaket_rt=${phone.refreshToken}`)).statusCode).toBe(204);
+    expect((await off(await tokenOf(me, 'SESSION_END'))).statusCode).toBe(204);
+
+    // 로그인 수단 해제(DELETE /v1/identity/providers/{provider}): LOGIN_METHOD_ADD 토큰은 403
+    const u = await login();
+    expect(await svc.app.get(AddProvider).run({ accountId: u.accountId, sessionId: u.sessionId, reauthToken: await tokenOf(u, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: `g-${newKey().slice(0, 8)}` })).toBe('LINKED');
+    const unlink = (t: string) => svc.http.inject({ method: 'DELETE', url: '/v1/identity/providers/google', headers: { ...fan(u), 'x-reauth-token': t } });
+    for (const op of ['LOGIN_METHOD_ADD', 'SESSION_END'] as const) expect403(await unlink(await tokenOf(u, op)), `unlink ← ${op}`);
+    const listed = await svc.http.inject({ method: 'GET', url: '/v1/identity/providers', headers: fan(u) });
+    expect(listed.payload).toContain('google');
+    expect((await unlink(await tokenOf(u, 'LOGIN_METHOD_REMOVE'))).statusCode).toBe(204);
+
+    // 계정 합치기 확정(POST …/confirmation): LOGIN_METHOD_ADD·TICKET_CANCEL 토큰은 403, 제안이 남아 있다
+    const a = await login();
+    const gsub = `g-${newKey().slice(0, 8)}`;
+    await svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'google', providerUserId: gsub, email: null, deviceId: null });
+    const r = await svc.app.get(AddProvider).add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await tokenOf(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: gsub });
+    expect(r.result).toBe('OTHER_ACCOUNT');
+    const url = `/v1/identity/merge-proposals/${r.mergeProposalId}`;
+    const confirm = (t: string) => svc.http.inject({ method: 'POST', url: `${url}/confirmation`, headers: { ...fan(a), 'x-reauth-token': t } });
+    for (const op of ['LOGIN_METHOD_ADD', 'TICKET_CANCEL'] as const) expect403(await confirm(await tokenOf(a, op)), `merge ← ${op}`);
+    expect(JSON.parse((await svc.http.inject({ method: 'GET', url, headers: fan(a) })).payload)).toMatchObject({ status: 'PROPOSED' });
+    expect((await confirm(await tokenOf(a, 'ACCOUNT_MERGE'))).statusCode).toBe(202);
+  });
+});

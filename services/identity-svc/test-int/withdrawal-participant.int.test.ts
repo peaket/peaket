@@ -149,7 +149,7 @@ async function world(o: { failErase?: (accountId: string) => boolean } = {}) {
       .run({ accountId, verificationId: st.verificationId, providerResult: agencyResult(clock, st.verificationId, { person, birth }) })
       .catch((e: unknown) => e);
   };
-  const reauth = async (x: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: x.accountId, sessionId: x.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const reauth = async (x: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: x.accountId, sessionId: x.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, clock.now())).token;
   const run = async (x: { accountId: string; sessionId: string }, token?: string, body: { acknowledgeFraudHold?: boolean } = {}) =>
     withdraw.run({ accountId: x.accountId, sessionId: x.sessionId, reauthToken: token ?? (await reauth(x)), body }).catch((e: unknown) => (e instanceof AccountError ? e.code : Promise.reject(e)));
   /** 로그인·본인확인한 계정을 요청 경로로 미룬다 */
