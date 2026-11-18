@@ -224,3 +224,7 @@
 - BAT-056(R-679) 리뷰 다시 보기 N2 낮음: `gw capacity`가 gw-fan·gw-partner·gw-ops·gw-scanner에서도 돌지만 넷은 EnvoyProxy `peaket-proxy` 하나를 함께 써서 하나를 재면 넷이 함께 CPU 0.5로 묶인다. 함께 쓰는 프록시 설정이면 인자 오류로 막는다(runner/gw-run.mjs)
 - BAT-056(R-679) 시험 빈 곳 낮음: `loadtest/scenarios/gw.js`의 3ms 경계 그 자체(3.0 통과·3.01 넘음)는 망을 거친 k6 시험으로 고를 수 없다. 응답 분류를 순수 모듈로 떼어 경계 단위 시험을 둔다
 - BAT-056(R-679) 측정 M-B: 보류 1·16·64의 503이 1·0·0으로 같지 않았다(1/8과 어긋나지는 않음). 보류 비율 q를 다시 볼지 계획 담당이 정한다(docs/review/measurements/BAT-056-gateway-breaker.md)
+- W10-guards(R-682) RV-01 중간: 기록 크기가 1로 끝나는 길은 `records.mjs --check`뿐인데 CI는 `--check`를 돌리지 않는다(절차 몫은 턴 규칙에 더함, tools/ci/records.mjs, .github/workflows).
+- W10-guards(R-682) RV-02 중간: `promisify(execFile)`를 변수에 담은 꼴, 이름 바꾼 import, 상수에 담은 명령, `cp['…']`, `?.(`, `sudo docker` 호출은 막지도 세지도 않는다(tools/ci/check-docker-timeouts.mjs). 지금 저장소에는 없다.
+- W10-guards(R-682) RV-03·VF-X20·VF-X22 낮음: 호출 괄호 안 어디든 통과하는 `timeout`이 하나 있으면 통과로 본다(뒤에 펼친 옵션, 중복 키, 다른 인자 속 객체, 콜백 몸, 정규식 괄호, 주석·글 조각 속 글을 가리는 시험이 없다)(tools/ci/check-docker-timeouts.mjs).
+- W10-guards(R-682) RV-04 낮음: 확장자 목록에 `.jsx`가 없어 역할 확인의 시험 파일 정의와 조금 다르다(tools/ci/check-docker-timeouts.mjs).
