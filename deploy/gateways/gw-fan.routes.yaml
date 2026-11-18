@@ -1146,6 +1146,18 @@ spec:
             value: /v1/subscriptions
           method: OPTIONS
         - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/addons
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/addons
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/addons
+          method: OPTIONS
+        - path:
             type: Exact
             value: /v1/wishes
           method: GET
@@ -1190,18 +1202,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/tickets/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/addons
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/addons
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/addons
           method: OPTIONS
         - path:
             type: RegularExpression
