@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { JS_OVER_BUDGET_MARGIN, LOAD_MARGIN, jsLimit, loadLimit, median } from './limits.mjs';
+import { JS_OVER_BUDGET_MARGIN, LOAD_MARGIN, RUNS, jsLimit, loadLimit, median } from './limits.mjs';
 import { loadJsBudgets, loadLoadTargets, loadTbtLimitMs, parseJsBudgets, parseLoadTargets, parseTbtLimitMs } from '../lib/canon.mjs';
 import { scriptSrcs } from '../seed-css/apps.mjs';
 import { lighthousePages } from './pages.mjs';
@@ -83,4 +83,65 @@ test('기준선 파일의 주소·경로 이름은 지금 검사 대상에 있�
   for (const p of lighthousePages('h')) {
     if (targets.get(p.row)?.lcpMs === undefined) assert.ok(lh[p.name]?.lcpMs, `LCP 목표가 없는 ${p.name}에는 기준선이 있어야 한다`);
   }
+});
+
+// BAT-174: Lighthouse를 주소마다 다섯 번 재고 가운데 값(작은 차례로 늘어놓은 셋째 값)으로 판정한다(docs/frontend.md §5.8 'Lighthouse CI', NFR-012).
+// 단언 값은 정본 문장(5번)과 계획 docs/review/plans/BAT-174.md 3의 숫자다. RUNS는 단언 대상으로만 가져온다.
+test('BAT-174 Lighthouse는 주소마다 다섯 번 잰다', () => {
+  assert.equal(RUNS, 5);
+});
+
+test('BAT-174 다섯 값의 가운데 값은 작은 차례로 늘어놓은 셋째 값이다', () => {
+  // 평균 6,496.6, 최솟값 4,508, 넣은 차례의 셋째 7,893, 정렬한 둘째 5,804·넷째 7,893과 모두 다르다
+  assert.equal(median([8042, 4508, 7893, 6236, 5804]), 6236);
+  assert.equal(median([5, 4, 3, 2, 1]), 3);
+});
+
+test('BAT-174 가운데 값은 글자 차례가 아니라 숫자 차례로 늘어놓는다', () => {
+  // 글자 차례면 [10000, 6000, 70000, 800, 9000]이라 셋째가 70000이다
+  assert.equal(median([10000, 9000, 800, 70000, 6000]), 9000);
+});
+
+test('BAT-174 짝수·홀수 길이 경계: 홀수는 가운데 하나, 짝수는 가운데 둘의 평균', () => {
+  assert.equal(median([7]), 7);
+  assert.equal(median([1, 4]), 2.5);
+  assert.equal(median([4, 1, 3, 2]), 2.5);
+  assert.equal(median([5, 1, 4, 2, 3]), 3);
+  assert.equal(median([6, 1, 5, 2, 4, 3]), 3.5);
+  assert.equal(median([2, 1, 1, 2, 1]), 1);
+  assert.throws(() => median([]), /값이 없다/);
+});
+
+test('BAT-174 바깥 경계: 다섯 번 가운데 값이 한도와 같으면 통과, 1ms 넘으면 실패, 두 번 튄 값은 판정을 바꾸지 않는다', () => {
+  // 월렛 LCP 한도: 기준선 5,804ms × 1.25 = 7,255ms(docs/frontend.md §5.8)
+  const limit = loadLimit(undefined, 5804, 'lcpMs');
+  assert.equal(limit, 7255);
+  const at = median([9000, 7255, 1000, 7256, 7254]);
+  assert.equal(at, 7255);
+  assert.ok(at <= limit, '한도와 같은 가운데 값은 통과다');
+  const over = median([9000, 7256, 1000, 7257, 7255]);
+  assert.equal(over, 7256);
+  assert.ok(over > limit, '한도를 1ms 넘는 가운데 값은 실패다');
+  // 두 번 튄 실행: 다섯 번이면 가운데 값이 튀지 않는다(세 번이면 튄다, 대조)
+  const five = median([8042, 8041, 5804, 5900, 6000]);
+  assert.equal(five, 6000);
+  assert.ok(five <= limit);
+  const three = median([8042, 8041, 5804]);
+  assert.equal(three, 8041);
+  assert.ok(three > limit);
+});
+
+test('BAT-174 가운데 값은 받은 배열을 바꾸지 않는다', () => {
+  const xs = [3, 1, 2, 5, 4];
+  assert.equal(median(xs), 3);
+  assert.deepEqual(xs, [3, 1, 2, 5, 4]);
+});
+
+test('BAT-174 lighthouse.spec.mjs는 RUNS만큼 재고 median으로 LCP·CLS·총 차단 시간을 판정한다', () => {
+  const src = readFileSync(new URL('./lighthouse.spec.mjs', import.meta.url), 'utf8');
+  assert.match(src, /import \{[^}]*\bRUNS\b[^}]*\bmedian\b[^}]*\} from '\.\/limits\.mjs'/);
+  assert.match(src, /for \(let i = 0; i < RUNS; i\+\+\)/);
+  assert.doesNotMatch(src, /i < \d/, '재는 횟수를 숫자로 박지 않는다');
+  for (const k of ['lcpMs', 'cls', 'tbtMs']) assert.ok(src.includes(`median(runs.map((x) => x.${k}))`), `${k}는 다섯 번의 가운데 값으로 판정한다`);
+  assert.doesNotMatch(src, /runs\.at\(|runs\[runs\.length/, '마지막 실행 값으로 판정하지 않는다');
 });

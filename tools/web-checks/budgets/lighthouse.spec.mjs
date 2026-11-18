@@ -1,6 +1,6 @@
 // Lighthouse 적재 지표 회귀 검사(docs/frontend.md §5.8 'Lighthouse CI'·'회귀 방지와 판정의 도구가 다르다', BUILD_ORDER BAS-220).
 // 대표 주소(budgets/pages.mjs)마다 Lighthouse 모바일 기본값(화면 412×823, CPU 4배 느림, 왕복 150ms·1.6Mbps, 모의 느리게 하기)으로
-// 세 번 [가정] 재고 가운데 값의 LCP·CLS·총 차단 시간(TBT)을 본다. 한도는 §5.8 그 행의 체감 목표(LCP·CLS)와 §5.8 'Lighthouse CI'의
+// 다섯 번 [가정] 재고 가운데 값의 LCP·CLS·총 차단 시간(TBT)을 본다. 한도는 §5.8 그 행의 체감 목표(LCP·CLS)와 §5.8 'Lighthouse CI'의
 // 총 차단 시간이다. 행에 LCP가 없으면(좌석·결제·월렛·콘솔) 잰 값(lighthouse-baseline.json) + 여유로 회귀만 막고, CLS가 없으면 NFR-012의 0.1을 쓴다.
 // INP는 재지 않는다(탐색 모드는 조작이 없어 INP를 내지 못한다, §5.8). 랩 값이라 '랩 판정'이 아니라 회귀 방지다.
 // 목표를 넘은 주소는 wbs 7.5.2까지 기준선 + 여유를 넘지 않게만 막는다.
