@@ -274,6 +274,12 @@ async function world(o: { eventStartsAtMs?: number; entryOpensAtMs?: number; tic
   return { eventId, orderId, accountId, seatId, ticketId, paymentId, eventStartsAtMs, saleEndsAtMs, ...(o.entryOpensAtMs !== undefined ? { entryOpensAtMs: o.entryOpensAtMs } : {}) };
 }
 
+/** Valkey 서버 시각(epoch 밀리초): 초 × 1000 + floor(마이크로초 ÷ 1000) */
+const valkeyMs = async (): Promise<number> => {
+  const t = (await redis.command(['TIME'], {})) as unknown[];
+  return Number(t[0]) * 1000 + Math.floor(Number(t[1]) / 1000);
+};
+
 const cancelOf = (w: World, cancellationId: string, reason: 'USER' | 'FRAUD' | 'EVENT_POSTPONED' = 'USER', nowMs = NOW) =>
   saga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId, reason, nowMs, deadlineMs: 5_000 });
 
@@ -349,7 +355,10 @@ describe('견적·취소 Saga', () => {
     gatewayCalls = [];
     try {
       const cancellationId = randomUUID();
+      // WIR-01: 델타의 변경 시각(changedAtMs)이 Redis TIME의 epoch 밀리초인지 앞뒤 Valkey TIME으로 잰다(앱 시계는 쓰지 않는다)
+      const beforeMs = await valkeyMs();
       await expect(cancelOf(w, cancellationId)).resolves.toEqual({ status: 'ACCEPTED', cancellationId, refundAmount: 90_000, refundAfterEntryClose: false });
+      const afterMs = await valkeyMs();
 
       expect(await cancellationRow(cancellationId)).toMatchObject({
         status: 'REFUNDED',
@@ -371,7 +380,11 @@ describe('견적·취소 Saga', () => {
       await sub.sync();
       expect(sub.messages).toHaveLength(1);
       expect(sub.messages[0]!.channel).toBe(`s:{event:${w.eventId}}:sec:0`);
-      expect(sub.messages[0]!.message).toMatch(/^1 \d+ 0 1 \d+ 3:0$/);
+      const delta = /^1 \d+ 0 1 (\d+) 3:0$/.exec(sub.messages[0]!.message);
+      expect(delta, sub.messages[0]!.message).not.toBeNull();
+      const changedAtMs = Number(delta![1]);
+      expect(changedAtMs).toBeGreaterThanOrEqual(beforeMs);
+      expect(changedAtMs).toBeLessThanOrEqual(afterMs);
     } finally {
       sub.close();
     }
