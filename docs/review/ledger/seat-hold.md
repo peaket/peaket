@@ -29,7 +29,7 @@
 | S-T14 | ① | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ① 박자에 보내기 버퍼가 256KiB 이상인 연결만 그 박자에 `BatchInterval` 1000을 받고 그 뒤 묶음이 1,000ms마다 오며(256KiB −… | 빈칸 | A | — |
 | S-T14 | ② | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ② 넘친 대기 p99가 60ms를 넘는 10초 창이 18개 이어지면 파드의 모든 연결이 `BatchInterval` 1000을 받고… | 빈칸 | A | — |
 | S-T14 | ③ | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ③ 파드가 Degraded인 동안 새로 붙은 연결의 첫 프레임은 `BatchInterval` 1000이고, 간격이 그대로면 `BatchInterval`을 다시… | 빈칸 | A | — |
-| S-T14 | ④ | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ④ 1초 배치 주기로 자동 완화 전환되어 완화 SLO p99 1.5초를 지키고, 초과 판매 0건을 유지한다. | 측정 | A | 구간 측정 · 실시간 전파 Degraded Mode의 완화 SLO p99 1.5초와 초과 판매 0건. ①~③(자동 전환)은 BAT-053(HOT-091) 시험이다(2026-11-19 계획, ADR-0298). 측정… |
+| S-T14 | ④ | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ④ 1초 배치 주기로 자동 완화 전환되어 완화 SLO p99 1.5초를 지키고, 초과 판매 0건을 유지한다. | 측정 | A | BAT-095 · 실시간 전파 Degraded Mode의 완화 SLO p99 1.5초와 초과 판매 0건(측정 창 2). ①~③(자동 전환)은 BAT-053(HOT-091) 시험이다(2026-11-19 계획… |
 | S-T15 | — | 대규모 좌석맵 그리기 성능 검증 | 5만 석 화면 표시 1초 미만, 4배 스로틀 환경에서 INP ≤ 200ms, 조작 경로 Long Task 0건, 화면 이동 뒤 메모리 누수 0건. v0 대비 힙… | 측정 | A | 구간 측정 · 대규모 좌석맵 그리기 성능 (이름을 단 시험도 있다) |
 | S-T16 | ① | 구매 세션 탈취 재현과 소지 증명 검증(ADR-0124) | ①은 공격마다 결과를 '방해'(좌석·한도·시간을 묶음)와 '이득'(돈이나 티켓이 공격자 쪽으로 감)으로 나눠 기록하고, ADR-0124 결정 2대로 소지 증명을… | 사람 확인 | A | BOT-100 · 공격마다 결과를 '방해'와 '이득'으로 나눠 기록하고 소지 증명을 남길지 정하는 것은 사람의 판단이다(ADR-0124 결정 2) |
 | S-T16 | ② | 구매 세션 탈취 재현과 소지 증명 검증(ADR-0124) | ②는 서버 계층에서 바로 401로 거부되고, 정상 요청의 확인 p99가 1ms 예산 안에서 끝난다 | 측정 | A | BAT-090 heavy gate · 탈취 거부(서명 변조·재전송·다른 세션 키)는 `services/purchase-svc/test/purchase-session-theft.test.ts`가 본다. 정상 요청… |
@@ -166,11 +166,11 @@
 | S-T42 | ⑧ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑧은 첫 구독에 `SSUBSCRIBE` 한 번, 마지막 해제에 `SUNSUBSCRIBE` 한 번이고 그 사이 해제에는 없다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts 외 1곳 |
 | S-T42 | ⑨ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑨는 틀린 메시지만 빠지고 `realtime_gw_pubsub_messages_total{result="bad"}`가 그 수만큼 늘며 연결은 열려 있다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts 외 1곳 |
 | S-T42 | ⑩ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑩은 연결이 닫히지 않고 다시 띄운 뒤의 메시지가 온다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/redis-outage.int.test.ts |
-| S-T42 | ⑪ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑪은 그 연결만 1013으로 닫히고 다른 연결의 묶음은 이어 온다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
+| S-T42 | ⑪ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑪은 그 연결만 1013으로 닫히고 다른 연결의 묶음은 이어 온다(닫히기 전 보내기 버퍼가 256KiB 이상인 동안 그 연결은 1초 간격이다, S-T14… | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | S-T42 | ⑫ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑫는 모든 연결이 1012로 닫힌다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/main.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts |
 | S-T42 | ⑬ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑬은 시작하지 않고 오류 글에 비밀번호가 없다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/main.int.test.ts, services/realtime-gw/test/config.test.ts |
 | S-T42 | ⑭ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑭는 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts |
-| S-T42 | ⑮ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑮는 Ping을 받은 연결이 4403 `bad frame`으로 닫히고, 버퍼가 넘친 연결은 다음 박자에 1013으로 닫힌다(1MiB 정각은 열림) | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
+| S-T42 | ⑮ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑮는 Ping을 받은 연결이 4403 `bad frame`으로 닫히고, 버퍼가 넘친 연결은 다음 박자에 1013으로 닫힌다(1MiB 정각은 열림. 256KiB… | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | S-T42 | ⑯ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑯은 셋째 연결이 4429 `too many`, 상한을 넘는 핸드셰이크는 503이고, 닫히는 중 연결은 상한을 차지하지 않아 다른 토큰의 핸드셰이크는… | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/config.test.ts 외 2곳 |
 | S-T42 | ⑰ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑰은 그 뒤 원하는 상태와 Valkey의 실제 구독(`PUBSUB SHARDNUMSUB`)이 같아지고 다시 보낸 간격이 물러서며, 구독자가 있는 구역의 메시지는… | 자동 시험 | A | 시험: services/realtime-gw/test-int/redis-outage.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts 외 2곳 |
 | S-T42 | ⑱ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ⑱은 PING 5초 + 답 2초 뒤 박자 안에 `realtime_gw_redis_up`이 0이 되고 망을 되살리면 델타가 다시 온다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts |
