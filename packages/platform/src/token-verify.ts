@@ -53,6 +53,8 @@ export interface VerifiedReauth {
   accountId: string;
   sessionId: string;
   act: string;
+  /** 받는 쪽 작업(팬 키 셋일 때만, 부르는 쪽이 넘긴 기대값과 같다. ADR-0293) */
+  op?: string;
   /** 토큰 만료(밀리초). jti 1회용 기록의 TTL을 토큰 수명 안으로 줄인다 */
   expiresAt: number;
   provider?: string;
@@ -165,11 +167,24 @@ export class TokenVerifier {
     return v;
   }
 
-  /** 재인증 토큰(typ reauth+jwt): 요청의 세션·작업 묶음과 같아야 한다(identity §3 '재인증 토큰의 묶음'). 한 번 쓰기(jti)는 부르는 쪽이 본다 */
-  async verifyReauth(token: string, o: { keySet: TokenKeySet; audience: string; sessionId: string; act: string }): Promise<VerifiedReauth> {
+  /**
+   * 재인증 토큰(typ reauth+jwt): 요청의 세션·작업 묶음과 같아야 한다(identity §3 '재인증 토큰의 묶음'). 한 번 쓰기(jti)는 부르는 쪽이 본다.
+   * 팬 키 셋은 받는 쪽 작업 op도 같아야 한다(ADR-0293 결정 5). 기대 op는 부르는 쪽이 요청의 작업으로 정해 넘긴다(토큰에서 읽지 않는다).
+   * 팬 키 셋에 기대 op가 없거나 관리·현장 스태프 키 셋에 op를 넘기면 부르는 쪽 코드 결함이라 TokenRejected가 아닌 오류를 던진다
+   */
+  async verifyReauth(token: string, o: { keySet: TokenKeySet; audience: string; sessionId: string; act: string; op?: string }): Promise<VerifiedReauth> {
+    let expectedOp: string | undefined;
+    if (o.keySet === 'fan') {
+      if (typeof o.op !== 'string' || o.op === '') throw new Error('팬 재인증 토큰 확인에 기대 op가 없다(부르는 쪽 결함)');
+      expectedOp = o.op;
+    } else if (o.op !== undefined) {
+      throw new Error(`${o.keySet} 재인증 토큰에는 op가 없다(부르는 쪽 결함)`);
+    }
     const p = await this.#verify(token, o.keySet, o.audience, 'reauth+jwt');
     if (typeof p.sub !== 'string' || typeof p.jti !== 'string' || typeof p.exp !== 'number' || p.sid !== o.sessionId || p.act !== o.act) throw new TokenRejected('claims');
+    if (expectedOp !== undefined && !(typeof p.op === 'string' && p.op === expectedOp)) throw new TokenRejected('claims');
     const v: VerifiedReauth = { jti: p.jti, accountId: p.sub, sessionId: o.sessionId, act: o.act, expiresAt: p.exp * 1000 };
+    if (expectedOp !== undefined) v.op = expectedOp;
     if (typeof p.provider === 'string') v.provider = p.provider;
     if (typeof p.strength === 'string') v.strength = p.strength;
     if (Array.isArray(p.factors)) v.factors = p.factors.filter((f): f is string => typeof f === 'string');

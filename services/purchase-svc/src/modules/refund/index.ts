@@ -40,6 +40,7 @@ export type {
   OperatorTicketOutcome,
   OperatorTicketResult,
   FanReauthAct,
+  FanReauthOp,
   PaymentCancellations,
   ReauthGate,
   RefundDeps,

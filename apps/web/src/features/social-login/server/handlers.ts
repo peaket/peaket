@@ -24,7 +24,7 @@ import {
   sessionCookies,
 } from './cookies.ts';
 import { FanTokenVerifier } from './fan-token.ts';
-import { clientIpOf, IdentityClient } from './identity-client.ts';
+import { clientIpOf, IdentityClient, isReauthOp, type ReauthOp, reauthOpOf } from './identity-client.ts';
 import { deriveLoginKeys, idempotencyKeyOf, separateKeyOf } from './keys.ts';
 import { OidcProviders } from './oidc.ts';
 import { BUSY_RETRY_AFTER_SEC, createProviderGuard, ProviderBusyError, ProviderOpenError, tokenExchangeOnly, type ProviderGuardOptions } from './provider-guard.ts';
@@ -53,8 +53,8 @@ interface Progress {
   verifier: string;
   returnTo: string;
   deviceId?: string | null;
-  /** 재인증만: 목적(identity §7.1 ③), 시작 시각과 그 세션(액세스 토큰에서 확인한 값) */
-  reauthPurpose?: 'sensitive' | 'high-risk';
+  /** 재인증만: 받는 쪽 작업(폼 purpose에서 고른 op, identity §7.1 ①③, ADR-0293), 시작 시각과 그 세션(액세스 토큰에서 확인한 값) */
+  reauthOp?: ReauthOp;
   startedAt?: number;
   sid?: string;
   sub?: string;
@@ -234,12 +234,15 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     const fan = await fanTokens.verify(cookieOf(req, ACCESS_COOKIE), at, { allowExpired: false });
     if (!fan) return respond(401, '다시 로그인해 주세요');
     const f = await formOf(req);
+    // 받는 쪽 작업은 표의 웹 값으로만 고른다. 표에 없으면(빈 값·옛 high-risk·대문자 이름·모르는 값) 진행 쿠키를 만들지 않고 제공자로 보내지 않는다(ADR-0293 결정 3)
+    const reauthOp = reauthOpOf(f.get('purpose'));
+    if (!reauthOp) return respond(400, '재인증할 작업을 알 수 없습니다. 화면을 새로 연 뒤 다시 시도해 주세요');
     const progress: Progress = {
       purpose: 'reauth',
       p: provider,
       ...randomFlow(),
       returnTo: safeReturnTo(f.get('returnTo')),
-      reauthPurpose: f.get('purpose') === 'high-risk' ? 'high-risk' : 'sensitive',
+      reauthOp,
       startedAt: at,
       sid: fan.sessionId,
       sub: fan.accountId,
@@ -286,6 +289,9 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
       if (prog.purpose === 'link') return redirect(withResult(prog.returnTo, 'loginMethod', 'failed'), [clearProgressCookie()]);
       return toLoginScreen(prog.returnTo, 'failed', undefined, [clearProgressCookie()]);
     };
+    // 작업이 없는 재인증 진행 쿠키(배포 전에 만든 것)는 identity를 부르지 않고 그 밖의 실패로 돌려준다(ADR-0293 결정 3)
+    const reauthOp = isReauthOp(prog.reauthOp) ? prog.reauthOp : undefined;
+    if (prog.purpose === 'reauth' && !reauthOp) return fail('operation');
     const u = new URL(req.url);
     // 제공자가 돌려준 오류(사용자 취소 등)와 다른 state는 코드 교환 전에 나눠 남긴다(운영 확인의 이유 범주, identity §10.1)
     const providerError = u.searchParams.get('error');
@@ -328,6 +334,8 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     }
 
     if (prog.purpose === 'reauth') {
+      // 위에서 이미 걸렀다. 여기서 다시 보는 것은 로그인 흐름으로 흘러내리지 않게 닫아 두는 것이다
+      if (!reauthOp) return fail('operation');
       const done = reauthDone;
       const outcome = reauthStrength(provider, login.claims, prog.startedAt ?? 0, now());
       if (outcome === 'stale') {
@@ -341,7 +349,7 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
           provider,
           providerUserId: sub,
           strength: outcome,
-          purpose: prog.reauthPurpose ?? 'sensitive',
+          operation: reauthOp,
           clientIp,
           userAgent,
         });

@@ -1,11 +1,11 @@
 // 팬 취소의 재인증 토큰 확인(docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인', BUILD_ORDER GAT-080, R-T39).
 // identity-svc 팬 공개키 묶음(GET /internal/jwks/fan.json)과 플랫폼 공용 확인기(TokenVerifier.verifyReauth, 키 셋 fan·aud fan)로
-// 서명·typ·iss·aud·exp·sid·act를 보고, sub = 요청 계정과 남은 수명(5분 30초 이하)을 여기서 본다(확인기는 둘 다 보지 않는다).
+// 서명·typ·iss·aud·exp·sid·act·op(받는 쪽 작업, ADR-0293. 어긋나면 까닭 claims)를 보고, sub = 요청 계정과 남은 수명(5분 30초 이하)을 여기서 본다(확인기는 둘 다 보지 않는다).
 // 모두 통과한 뒤에만 jti를 한 번 잡는다(좌석 Redis reauth:jti:{jti}, docs/data.md §3). 저장소는 필수다(core·ops와 달리 건너뛰지 않는다).
 // 공개키 묶음을 한 번도 받지 못했거나(처음 읽기의 시간 초과 포함), 묶음 안의 키를 쓸 수 없거나, jti 저장소가 던지면 ReauthUnavailable(503)이다.
 // 403·503마다 onResult에 까닭 이름표 하나를 넘긴다(§3.1 '거절 기록'. 토큰·jti·계정 ID·세션 ID는 넘기지 않는다).
 import { createExternalHttpClient, type Clock, type ReauthJtiStore, systemClock, TokenKeysUnavailable, TokenRejected, type TokenRejectReason, TokenVerifier, type TokenVerifierOptions } from '@peaket/platform';
-import { type FanReauthAct, type ReauthGate, ReauthUnavailable } from '../domain/ports.js';
+import { type FanReauthAct, type FanReauthOp, type ReauthGate, ReauthUnavailable } from '../domain/ports.js';
 
 /** 공개키 묶음 읽기 한 번의 시간 상한 1,000ms [가정](§3.1 '공개키 묶음 읽기'. 요청 마감과 쓰기 칸막이를 오래 잡지 않는다) */
 const JWKS_TIMEOUT_CAP_MS = 1_000;
@@ -64,11 +64,11 @@ export class JwksFanReauthGate implements ReauthGate {
     return new ReauthUnavailable(message, { cause });
   }
 
-  async verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: FanReauthAct }): Promise<boolean> {
+  async verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: FanReauthAct; readonly op: FanReauthOp }): Promise<boolean> {
     if (token === undefined || token.trim() === '') return this.#reject('missing');
     let verified: Awaited<ReturnType<TokenVerifier['verifyReauth']>>;
     try {
-      verified = await this.#verifier.verifyReauth(token, { keySet: 'fan', audience: 'fan', sessionId: q.sessionId, act: q.act });
+      verified = await this.#verifier.verifyReauth(token, { keySet: 'fan', audience: 'fan', sessionId: q.sessionId, act: q.act, op: q.op });
     } catch (e) {
       if (e instanceof TokenRejected) return this.#reject(e.reason);
       if (e instanceof TokenKeysUnavailable) throw this.#unavailable('keys', '팬 공개키 묶음을 받지 못해 재인증 토큰을 확인하지 못했다', e);

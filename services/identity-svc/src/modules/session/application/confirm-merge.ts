@@ -1,5 +1,5 @@
 // 병합 확정(POST /v1/identity/merge-proposals/{proposalId}/confirmation, identity §2.1 '계정 병합의 첫 구현', BUILD_ORDER BOT-042, I-T32·I-T34, POL-034).
-// 재인증(제안한 세션, 한 번) → 대표 계정 다시 고르기(바뀌었으면 NOT_FOUND) → 세 서비스 다시 확인(답이 없으면 UNAVAILABLE) → 막는 사유면 BLOCKED, 불변식 위반이면 INVARIANT →
+// 재인증(제안한 세션·FAN_SENSITIVE·op ACCOUNT_MERGE, 한 번, ADR-0293) → 대표 계정 다시 고르기(바뀌었으면 NOT_FOUND) → 세 서비스 다시 확인(답이 없으면 UNAVAILABLE) → 막는 사유면 BLOCKED, 불변식 위반이면 INVARIANT →
 // 한 트랜잭션: 추가하려던 제공자와 두 계정(ID 순)을 잠그고 끝난 계정이 없는지(먼저) → 세션·재인증 토큰 → 그 수단이 아직 다른 계정의 것인지·본인확인으로 고른 대표가 그대로인지 →
 // 탈퇴 유예·같은 종류의 로그인 수단(SAME_PROVIDER_KIND, OPEN[21]) → 로그인 수단·기기 행 이전(OPEN[22])·MERGED·이메일 지우기·사슬 고치기·account_merge → 흡수 계정 세션 끝내기(MERGED) →
 // 대표 계정의 다른 세션 끝내기(LOGIN_METHOD_CHANGED: 흡수 계정의 수단이 옮겨 와 인증 요소가 바뀌었다. 제안한 세션이 대표 계정의 것이면 그 세션만 남긴다, ASVS 7.4.3, BOT-044, ADR-0209 결정 5) → 병합 사건.
@@ -41,7 +41,7 @@ export class ConfirmMerge {
     if (!p || p.requesterAccountId !== accountId || p.requesterSessionId !== sessionId) throw new MergeError('NOT_FOUND', '병합 제안이 없다');
     let token: { jti: string; accountId: string; expiresAt: number };
     try {
-      token = await this.reauth.verify(i.reauthToken, { sessionId, act: WITHDRAWAL_REAUTH_ACT });
+      token = await this.reauth.verify(i.reauthToken, { sessionId, act: WITHDRAWAL_REAUTH_ACT, op: 'ACCOUNT_MERGE' });
     } catch (e) {
       if (e instanceof ReauthRejected) throw new MergeError('REAUTH_REQUIRED', e.message);
       throw e;

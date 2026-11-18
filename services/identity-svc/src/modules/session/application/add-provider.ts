@@ -1,5 +1,5 @@
 // 계정 설정의 로그인 수단 추가(SCR-040 ②, SessionService.AddProvider, identity §2.1 '설정의 로그인 수단 연결·해제의 첫 구현', BUILD_ORDER BOT-041, I-T34).
-// 재인증 토큰(같은 세션·FAN_SENSITIVE)을 한 번 쓰고, 계정을 잠근 뒤 새 제공자 (제공자, sub)를 이 계정에 잇는다. 결과는 오류가 아니라 값으로 돌려준다.
+// 재인증 토큰(같은 세션·FAN_SENSITIVE·op LOGIN_METHOD_ADD, ADR-0293)을 한 번 쓰고, 계정을 잠근 뒤 새 제공자 (제공자, sub)를 이 계정에 잇는다. 결과는 오류가 아니라 값으로 돌려준다.
 // 이었으면(LINKED) 이 세션 말고 그 계정의 살아 있는 세션을 모두 끝낸다(ASVS 7.4.3, BUILD_ORDER BOT-044, ADR-0209 결정 5).
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
@@ -47,7 +47,7 @@ export class AddProvider {
     if (!i.providerUserId || i.providerUserId.length > 255) return { result: 'REAUTH_REQUIRED' };
     let token: { jti: string; accountId: string; expiresAt: number };
     try {
-      token = await this.reauth.verify(i.reauthToken, { sessionId, act: WITHDRAWAL_REAUTH_ACT });
+      token = await this.reauth.verify(i.reauthToken, { sessionId, act: WITHDRAWAL_REAUTH_ACT, op: 'LOGIN_METHOD_ADD' });
     } catch (e) {
       if (e instanceof ReauthRejected) return { result: 'REAUTH_REQUIRED' };
       throw e;

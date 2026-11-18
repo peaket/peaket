@@ -161,6 +161,11 @@ export const REAUTH_GATE = Symbol('purchase.REAUTH_GATE');
 
 /** 팬 취소가 받는 재인증 작업 묶음(docs/security/authz-matrix.md §6). 본문에 환급 계좌가 있으면 FAN_HIGH_RISK, 없으면 FAN_SENSITIVE */
 export type FanReauthAct = 'FAN_SENSITIVE' | 'FAN_HIGH_RISK';
+/**
+ * 팬 취소가 받는 재인증 토큰의 받는 쪽 작업 op(docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293).
+ * 본문에 환급 계좌가 없으면 TICKET_CANCEL(FAN_SENSITIVE), 있으면 TICKET_CANCEL_REFUND_ACCOUNT(FAN_HIGH_RISK)
+ */
+export type FanReauthOp = 'TICKET_CANCEL' | 'TICKET_CANCEL_REFUND_ACCOUNT';
 
 /** 재인증 토큰을 확인하지 못함(팬 공개키 묶음을 한 번도 받지 못함, jti 저장소 오류). 받는 층은 503 reauth-unavailable로 답한다 */
 export class ReauthUnavailable extends Error {
@@ -175,7 +180,7 @@ export class ReauthUnavailable extends Error {
  * false = 거절(403 reauth-required). 확인하지 못하면 ReauthUnavailable을 던진다(503). 대역이 없는 조립은 늘 false다
  */
 export interface ReauthGate {
-  verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: FanReauthAct }): Promise<boolean>;
+  verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: FanReauthAct; readonly op: FanReauthOp }): Promise<boolean>;
 }
 
 /** 견적·취소가 함께 쓰는 의존성 */

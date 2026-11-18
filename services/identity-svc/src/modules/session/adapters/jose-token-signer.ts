@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
 import type { SignedToken, TokenSigner } from '../domain/ports.js';
-import { ACCESS_TOKEN_TTL_MS, FAN_REAUTH_ACT, REAUTH_TOKEN_TTL_MS, type ReauthPurpose } from '../domain/session.js';
+import { ACCESS_TOKEN_TTL_MS, FAN_REAUTH_OPS, REAUTH_TOKEN_TTL_MS, type ReauthOperation } from '../domain/session.js';
 import type { TokenKeyRing } from './token-keys.js';
 
 export const TOKEN_ISSUER_ENV = 'PEAKET_TOKEN_ISSUER';
@@ -52,10 +52,11 @@ export class JoseTokenSigner implements TokenSigner {
     return { token, expiresAt: exp * 1000 };
   }
 
-  async reauth(c: { accountId: string; sessionId: string; provider: string; strength: string; purpose: ReauthPurpose }, now: number): Promise<SignedToken> {
+  /** 팬 재인증 토큰: 받는 쪽 작업 op와 그 작업 묶음 act를 함께 싣는다(op 하나에 act 하나, ADR-0293 결정 1) */
+  async reauth(c: { accountId: string; sessionId: string; provider: string; strength: string; operation: ReauthOperation }, now: number): Promise<SignedToken> {
     const { kid, key } = this.#keys.signingKey('fan');
     const exp = seconds(now + REAUTH_TOKEN_TTL_MS);
-    const token = await new SignJWT({ sid: c.sessionId, act: FAN_REAUTH_ACT[c.purpose], provider: c.provider, strength: c.strength })
+    const token = await new SignJWT({ sid: c.sessionId, op: c.operation, act: FAN_REAUTH_OPS[c.operation], provider: c.provider, strength: c.strength })
       .setProtectedHeader({ alg: 'ES256', typ: 'reauth+jwt', kid })
       .setIssuer(this.#issuer)
       .setSubject(c.accountId)
