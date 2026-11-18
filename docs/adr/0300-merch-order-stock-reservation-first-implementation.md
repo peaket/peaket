@@ -1,8 +1,8 @@
 # ADR-0300: 굿즈 주문·한정 재고·재고 예약의 첫 구현(2026-11-18)
 
 - **상태**: 채택(2026-11-18, 추천 적용. 갈래 5 BAT-600 계획 담당이 LCH-010의 정본 빈칸으로 정했다. 방향은 [ADR-0101](0101-product-catalog-postgres-jsonb-drop-mongodb.md)(상품 정의와 유형 스키마)과 [ADR-0107](0107-expire-unpaid-orders-ticket-expired-merch-stock-reservation.md) 결정 4(재고 예약 15분 [가정], 결제 접수 때 승인 기한까지 연장, 정렬 집합 쓸기, 같은 상품에 결제 전 주문 하나) 그대로이고, 그 안의 집행 세부를 정한다)
-- **관련**: [ADR-0299](0299-merch-payments-order-kind-nullable-event-id.md)(굿즈 결제의 원장 길), [ADR-0301](0301-ticket-addons-fulfillment-unclaimed-auto-cancel.md)(부가 상품·수령 방식·미수령), [docs/data.md](../data.md) §2 `merch_order`·`product`·`product_stock`, §3 굿즈 재고 키, §4 경계 5, §5, [docs/planning/03-policies-glossary.md](../planning/03-policies-glossary.md) §2.13, [docs/api/openapi.yaml](../api/openapi.yaml) `shop` 태그, [docs/features/payment.md](../features/payment.md) §11 P-T42·P-T56, [docs/verification.md](../verification.md) V-T46·§4.1, [docs/review/plans/BAT-600.md](../review/plans/BAT-600.md)
-- **관련 ID**: P-T42, P-T56, V-T46, V-T26, FR-015, FR-024, NFR-025, BUILD_ORDER LCH-010
+- **관련**: [ADR-0299](0299-merch-payments-order-kind-nullable-event-id.md)(굿즈 결제의 원장 길), [ADR-0301](0301-ticket-addons-fulfillment-unclaimed-auto-cancel.md)(부가 상품·수령 방식·미수령), [docs/data.md](../data.md) §2 `merch_order`·`product`·`product_stock`, §3 굿즈 재고 키, §4 경계 5, §5, [docs/planning/03-policies-glossary.md](../planning/03-policies-glossary.md) §2.13, [docs/api/openapi.yaml](../api/openapi.yaml) `shop` 태그, [docs/features/payment.md](../features/payment.md) §11 P-T42·P-T57, [docs/verification.md](../verification.md) V-T46·§4.1, [docs/review/plans/BAT-600.md](../review/plans/BAT-600.md)
+- **관련 ID**: P-T42, P-T57, V-T46, V-T26, FR-015, FR-024, NFR-025, BUILD_ORDER LCH-010
 
 ## 맥락
 
