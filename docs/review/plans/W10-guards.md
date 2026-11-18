@@ -202,7 +202,29 @@
 
 ## 리뷰
 
-(리뷰 담당이 채운다: 계획 항목이 다 구현됐나, 정본과 어긋나나, 구현 커밋이 시험 파일을 건드렸나, 자주 놓친 결함에 걸리나. 지적 목록이 그대로 고칠 목록이다.)
+2026-11-18 리뷰 담당 `w10-guards-review-79646c1e`(claude-opus-5-5)가 `git diff 55216411..2930458c`, 이 계획, ADR-0283 결정 1·4, docs/architecture.md §8.6 4의 5(리뷰)·'자주 놓친 결함'으로 짧은 대조 리뷰를 했다. 구현·시험 담당의 설명은 받지 않았다. 코드와 시험은 고치지 않았다.
+
+**대조 결과**
+
+- **계획 항목**: G1 1~8, G2 1~7, G3, 손댈 파일 표, 내보내는 것(`MAX_TIMEOUT_MS`·`inScope`·`dockerCalls`)이 모두 구현됐다. 계획과 다른 점(호출 범위에서 `timeout`을 찾을 때 주석 안 글도 가림)은 계획보다 엄격한 쪽이라 받아들인다(주석의 `timeout: 300_000`이 통과로 새지 않는다).
+- **정본과 어긋남**: 없다. 상한 40,960바이트와 `>` 비교(`tools/ci/records.mjs:304`), CRLF를 LF로 바꿔 잼(`:303`), 정리 목록·보관 파일 뺌, `--check` 1과 맞추기 경고, 상한 300,000ms·정수 숫자만·범위(`apps/`·`services/`·`packages/`의 git 추적 시험 파일)가 ADR-0283 결정 1·4의 글과 같다. 시험 파일 정의는 `tools/ci/roles-check.mjs:36-37`과 같다(`test_*.py`는 확장자 걸러 내기로 빠지며 이 점검과 상관없다).
+- **구현 커밋이 시험 파일을 건드렸나**: 아니다. 구현 커밋 `f4f5c2ca`는 `tools/ci/records.mjs`·`check-docker-timeouts.mjs`·`tools-check.yml`·`tools/ci/README.md`·이 계획만, 시험 커밋 `2930458c`는 시험 파일과 이 계획만 바꿨다. `node tools/ci/roles-check.mjs --base 55216411`도 시험 파일 위반 없이 '리뷰·검증 커밋 없음'만 낸다(이 리뷰 전이라 맞다).
+- **자주 놓친 결함**: 경계 양쪽(RS-01·02, DT-05의 1·0·300,000·300,001), 빈 결과가 통과로 새지 않음(Docker 호출 0곳이면 1, DT-10), 부르는 쪽 확인(DT-13이 실제 저장소를 명령줄로, DT-14가 CI 줄), 단언 값을 코드 상수에서 가져오지 않음에 걸리지 않는다. 다만 RV-01이 '부르는 쪽이 결과를 실제로 쓰는지'의 바깥 경계에 걸친다.
+- **CI 줄**: `.github/workflows/tools-check.yml:50`이 `node tools/ci/check-docker-timeouts.mjs`를 주석이 아닌 `run`으로 돌리고, `ci.yml:59-62`의 `tools-check`가 `js` 범위(`apps/`·`services/`·`packages/`)가 바뀔 때도 부른다. 얕은 checkout에서도 `git ls-files`는 돈다. 이 리뷰 트리에서 `node tools/ci/check-docker-timeouts.mjs` → 0과 `통과: 시험 파일 1078개, Docker 호출 48곳`, `node tools/ci/records.mjs --check` → 0.
+- **범위 밖으로 새는 파일**: `apps/`·`services/`·`packages/`에서 `child_process`를 쓰는 git 추적 파일을 모두 `inScope`·`dockerCalls`로 돌려 보았다. 시험 파일 41개의 Docker 호출 48곳이 모두 잡히고, 범위 밖 7개(`apps/web/server/start.mjs`, `services/bundle/src/main.ts`·`stop-child.ts`, `services/*/scripts/db-generate.mjs` 넷)는 Docker 호출이 0곳이다. 지금 새는 곳은 없다.
+- **5분 시간 제한이 정상 시험을 깨뜨릴 위험**: 낮다. 도우미의 `docker run`은 모두 `-d`이고 이미지는 `postgres:18-alpine`·`valkey/valkey:8.1-alpine`·`apache/kafka:3.9.2`·`motoserver/moto:5.2.5`로 작아 CI의 첫 받기도 5분 안쪽이다. `docker exec`는 `valkey-cli`·짧은 `sh -c`뿐이고 `build`·`pull`·`logs -f`·붙어 도는 `run`은 없다. 대부분의 잡은 vitest `hookTimeout` 120초가 먼저 걸린다. `services/queue-svc/test-sim/cluster.ts:86`의 `dockerAsync`는 전부터 오류를 삼키므로 시간 제한에 걸리면 조용히 끝난다(전에는 영영 멈췄다).
+- **records 크기 경계**: 40,960 그대로 통과, 40,961 막음, CRLF는 LF로 바꿔 잼, 없는 파일은 `경고:` 뒤 건너뜀, `ENOENT` 밖의 읽기 오류는 2. 계획과 같다.
+
+**지적 목록**
+
+이 묶음에서 고칠 지적(높음·보안·통과 기준)은 없다. 그래서 리뷰 반영 시험·구현 커밋 없이 검증으로 간다(ADR-0283 결정 2). 아래는 모두 정리 목록으로 간다.
+
+| # | 심각도 | 파일:줄 | 근거 | 바른 동작 | 처리 |
+| --- | --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `tools/ci/records.mjs:359-368`, `docs/PROGRESS.md:29` | 크기 상한을 넘었을 때 1로 끝나는 길은 `--check`뿐인데, 정해진 절차 가운데 `--check`를 돌리는 곳이 없다. 갈래 1의 턴 규칙(`PROGRESS.md:29`)은 맞추기(인자 없음)만 돌리고, CI는 `records.mjs`를 돌리지 않는다(계획 8 범위 밖). 맞추기의 크기 경고는 지금 저장소에서 매번 나오는 `경고:` 줄 20개 안팎(R 번호 겹침 등) 사이에 섞여 눈에 띄기 어렵다. 결정 1의 '넘기지 않는다'를 지키는 장치가 사실상 눈으로 보는 경고뿐이다 | 기록 커밋 직전에 `records.mjs --check`의 크기 줄을 보게 턴 규칙에 적거나, 기록 표와 상관없이 크기만 보는 꼴을 두어 CI `tools-check`에서 돌린다. 맞추기에서는 크기 경고를 다른 경고와 떨어뜨려(맨 끝에 따로) 찍는다 | 정리 목록으로 |
+| RV-02 | 중간 | `tools/ci/check-docker-timeouts.mjs:25`, `:135` | 호출 이름이 여섯 낱말 그대로이고 첫 인자가 글 조각일 때만 Docker 호출로 센다. 다음 꼴은 막지도 세지도 않고 지나간다(손으로 확인): `const pexec = promisify(execFile); pexec('docker', …)`, `import { execFileSync as run }` 뒤 `run('docker', …)`, `const DOCKER = 'docker'; execFileSync(DOCKER, …)`, `cp['execFileSync']('docker', …)`, `execFileSync?.('docker', …)`, `execSync('sudo docker ps')`. 지금 범위에는 이런 꼴이 없어 지금 도우미를 베낀 새 서비스는 잡히지만, 흔한 `promisify` 변수 꼴로 새로 쓰면 빠진다. 계획 G2 2가 정한 꼴이라 통과 기준 위반은 아니다 | `child_process`를 가져오는 시험 파일에서 `'docker'` 글 조각이 나오는데 판정한 호출이 없으면 '알아보지 못한 Docker 호출'로 막거나, 가져온 이름(별칭·`promisify` 변수)을 따라가 호출 이름 목록에 더한다 | 정리 목록으로 |
+| RV-03 | 낮음 | `tools/ci/check-docker-timeouts.mjs:104-121`, `:76-101` | 호출 괄호 안 어디든 통과하는 `timeout:`이 하나 있으면 통과다. 그래서 다음이 거짓 통과한다(손으로 확인): 뒤에 펼친 옵션 `{ timeout: 300_000, ...opts }`, 같은 키를 뒤에 다시 쓴 `{ timeout: 300_000, timeout: T }`, 다른 인자 속 객체 `execFileSync('docker', mk({ timeout: 300_000 }), {})`, 콜백 몸 안의 객체, 인자 속 정규식 `/\(/`가 괄호 셈을 늘려 범위가 뒤 코드의 `timeout: 300_000`까지 닿는 경우. 반대로 인자 속 정규식 `/'/`는 글 조각으로 잘못 읽혀 바른 호출을 막는다(안전한 쪽). 모두 지금 저장소에는 없는 꼴이다 | 옵션 객체 인자(둘째·셋째 인자의 맨 위 `{ … }`)의 맨 위 속성만 보고, 같은 키는 마지막 것을 쓰며, `timeout` 뒤에 펼침(`...`)이 오면 막는다. 정규식 글은 글 조각처럼 건너뛴다 | 정리 목록으로 |
+| RV-04 | 낮음 | `tools/ci/check-docker-timeouts.mjs:22` | 확장자 목록에 `.jsx`가 없다(계획 G2 1의 목록과는 같다). 역할 확인(`roles-check.mjs:235-238`)의 시험 파일 정의는 확장자를 가리지 않아 두 정의가 조금 다르다. 지금 범위에 `.jsx` 시험 파일은 없다 | `.jsx`를 더하거나, 계획·README에 뺀 까닭을 적는다 | 정리 목록으로 |
 
 ## 검증
 
@@ -219,5 +241,6 @@
 | plan | w10-guards-plan-165e372c | claude-opus-5-5 | 2026-11-18T14:20+09:00 | 2026-11-18T14:55+09:00 |
 | impl | w10-guards-impl-0bbaa2ef | claude-opus-5-5 | 2026-11-18T14:43+09:00 | 2026-11-18T14:50+09:00 |
 | test | w10-guards-test-bd3092cd | claude-opus-5-5 | 2026-11-18T14:56+09:00 | 2026-11-18T15:12+09:00 |
+| review | w10-guards-review-79646c1e | claude-opus-5-5 | 2026-11-18T15:13+09:00 | 2026-11-18T15:21+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행(역할·세션 ID·모델·시작·끝)을 더한다. 세션 ID는 구현 `w10-guards-impl-0bbaa2ef`, 시험 `w10-guards-test-bd3092cd`, 리뷰 `w10-guards-review-79646c1e`, 검증 `w10-guards-verify-c4a72407`이다(지시서). 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
