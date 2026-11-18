@@ -30,6 +30,7 @@ type CompareRow = {
   id: string | null;
   order_id: string | null;
   event_id: string | null;
+  order_kind: string | null;
   attempt_no: number | string | null;
   ledger_pg: string | null;
   ledger_ref: string | null;
@@ -38,7 +39,7 @@ type CompareRow = {
   pg_tx_id: string | null;
   status_changed_at: Date | string | null;
 };
-type LedgerRow = { id: string; order_id: string; event_id: string; attempt_no: number | string; pg: string; pg_payment_ref: string; pg_tx_id: string | null; amount: number | string; status: string; approved_at: Date | string; seen: boolean };
+type LedgerRow = { id: string; order_id: string; event_id: string | null; order_kind: string; attempt_no: number | string; pg: string; pg_payment_ref: string; pg_tx_id: string | null; amount: number | string; status: string; approved_at: Date | string; seen: boolean };
 
 /** 이 실행의 세대가 그대로인가(작업 표를 읽는 문장의 조건) */
 const ownsRun = (run: ReconRun) => sql`exists (select 1 from reconciliation_run r where r.id = ${run.id}::uuid and r.generation = ${run.generation}::int)`;
@@ -125,7 +126,7 @@ export class DrizzleReconciliation implements PaymentReconciliationStore {
     const r = await this.#tx((tx) =>
       tx.execute(sql`
         select s.payment_ref, s.order_ref, s.pg_status, s.amount,
-               l.id::text as id, l.order_id::text as order_id, l.event_id::text as event_id, l.attempt_no, l.pg as ledger_pg, l.pg_payment_ref as ledger_ref, l.amount as ledger_amount, l.status as ledger_status, l.pg_tx_id, l.status_changed_at
+               l.id::text as id, l.order_id::text as order_id, l.event_id::text as event_id, l.order_kind, l.attempt_no, l.pg as ledger_pg, l.pg_payment_ref as ledger_ref, l.amount as ledger_amount, l.status as ledger_status, l.pg_tx_id, l.status_changed_at
         from reconciliation_seen s
         left join lateral (select p.* from payment p where p.pg = any(${sql.param([...PG_NAMES])}::text[]) and p.pg_payment_ref = s.payment_ref order by case when p.pg = ${run.pg} then 0 else 1 end limit 1) l on true
         where s.run_id = ${run.id}::uuid and ${ownsRun(run)} and ${after} and s.seen_at >= ${new Date(fromMs)}::timestamptz and s.seen_at < ${new Date(toMs)}::timestamptz
@@ -143,7 +144,9 @@ export class DrizzleReconciliation implements PaymentReconciliationStore {
             ledger: {
               paymentId: row.id,
               orderId: row.order_id!,
-              eventId: row.event_id!,
+              // 굿즈는 회차가 비어 있다(ADR-0299 결정 1)
+              eventId: row.event_id,
+              orderKind: row.order_kind === 'MERCH' ? 'MERCH' : 'TICKET',
               attemptNo: Number(row.attempt_no),
               pg: row.ledger_pg as PgName,
               paymentRef: row.ledger_ref!,
@@ -204,12 +207,12 @@ export class DrizzleReconciliation implements PaymentReconciliationStore {
     const r = await this.#tx((tx) =>
       tx.execute(sql`
         with page as (
-          select p.id, p.order_id, p.event_id, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_tx_id, p.amount, p.status, p.approved_at
+          select p.id, p.order_id, p.event_id, p.order_kind, p.attempt_no, p.pg, p.pg_payment_ref, p.pg_tx_id, p.amount, p.status, p.approved_at
           from payment p
           where p.status = 'APPROVED' and p.pg = ${run.pg} and p.approved_at >= ${new Date(fromMs)}::timestamptz and p.approved_at < ${new Date(toMs)}::timestamptz and ${after} and ${ownsRun(run)}
           order by p.approved_at, p.id
           limit ${limit}::int)
-        select page.id::text as id, page.order_id::text as order_id, page.event_id::text as event_id, page.attempt_no, page.pg, page.pg_payment_ref, page.pg_tx_id, page.amount, page.status, page.approved_at,
+        select page.id::text as id, page.order_id::text as order_id, page.event_id::text as event_id, page.order_kind, page.attempt_no, page.pg, page.pg_payment_ref, page.pg_tx_id, page.amount, page.status, page.approved_at,
                exists (select 1 from reconciliation_seen s where s.run_id = ${run.id}::uuid and s.payment_ref = page.pg_payment_ref) as seen
         from page
         order by page.approved_at, page.id`),
@@ -218,6 +221,7 @@ export class DrizzleReconciliation implements PaymentReconciliationStore {
       paymentId: row.id,
       orderId: row.order_id,
       eventId: row.event_id,
+      orderKind: row.order_kind === 'MERCH' ? 'MERCH' : 'TICKET',
       attemptNo: Number(row.attempt_no),
       pg: row.pg as PgName,
       paymentRef: row.pg_payment_ref,

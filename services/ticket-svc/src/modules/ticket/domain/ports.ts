@@ -6,6 +6,7 @@ import type {
   EntryRecord,
   EventCancelInput,
   EventCancelOutcome,
+  HeldTicket,
   IssueTicketsInput,
   IssueTicketsResult,
   ListTicketsInput,
@@ -14,6 +15,7 @@ import type {
   OperatorCancelOutcome,
   ReviewEligibilityTicket,
   TicketRecord,
+  TicketStatus,
 } from './ticket.js';
 
 /** 발권 저장 입력: 앱이 만든 멱등 지문을 함께 넘긴다. */
@@ -52,6 +54,11 @@ export interface TicketStore {
 
   /** 후기 자격 판정에 쓰는 그 회차의 티켓(모든 계정·상태). 결제자·유효 상태는 도메인이 가른다(BAT-585) */
   listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]>;
+
+  /**
+   * 그 계정이 지금 보유자(ticket.account_id, 양도 뒤 바뀜)인 그 회차 티켓 가운데 statuses 상태만(ListHeldTickets, ADR-0301 결정 1). 읽기만, 티켓 ID 차례
+   */
+  listHeld(accountId: string, eventId: string, statuses: readonly TicketStatus[]): Promise<readonly HeldTicket[]>;
 }
 
 export interface DeviceKeyRegistrationInput {

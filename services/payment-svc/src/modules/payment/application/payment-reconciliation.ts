@@ -404,5 +404,5 @@ function diffOfLedger(pg: PgName, row: ReconLedgerRow, decision: Extract<ReconDe
 
 /** 원장 값으로 단독 조회 잡기 모양을 만든다(closer의 resolve가 쓴다. 잡기 칸은 답 반영에 쓰지 않는다) */
 function jobOf(ledger: ReconLedger): UnknownQueryJob {
-  return { paymentId: ledger.paymentId, orderId: ledger.orderId, eventId: ledger.eventId, attemptNo: ledger.attemptNo, pg: ledger.pg, paymentRef: ledger.paymentRef, amount: ledger.amount, queryAttempts: 0, claimedNextQueryAtMs: 0, anomalyLogged: false, ...(ledger.txId === undefined ? {} : { txId: ledger.txId }) };
+  return { paymentId: ledger.paymentId, orderId: ledger.orderId, eventId: ledger.eventId, ...(ledger.orderKind === undefined ? {} : { orderKind: ledger.orderKind }), attemptNo: ledger.attemptNo, pg: ledger.pg, paymentRef: ledger.paymentRef, amount: ledger.amount, queryAttempts: 0, claimedNextQueryAtMs: 0, anomalyLogged: false, ...(ledger.txId === undefined ? {} : { txId: ledger.txId }) };
 }

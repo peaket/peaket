@@ -1,6 +1,6 @@
 // 결제사 선택과 결제창 준비의 값과 규칙(docs/features/payment.md §2.2 '선택기의 첫 구현', ADR-0044·0143, BUILD_ORDER PRF-190, 명세 specs/payment.qnt `selected`).
 // 프레임워크·저장소·계약 패키지를 모른다(순수 값과 함수). 요청의 모양(proto 칸 이름·enum 앞머리)은 받는 층이 바꿔 넘긴다.
-import { checkEntryOpensAt, isLowerUuid, PAYMENT_AMOUNT_MAX, PaymentInputError } from './confirm-command.js';
+import { checkEntryOpensAt, isLowerUuid, PAYMENT_AMOUNT_MAX, PaymentInputError, type PaymentOrderKind } from './confirm-command.js';
 import { PAY_METHODS, type PayMethod, type PaymentGatewayPort, type PgName } from './payment-gateway.js';
 import type { PaymentGateways } from './ports.js';
 import { VIRTUAL_ACCOUNT_MIN_LEAD_MS } from './virtual-account.js';
@@ -81,10 +81,11 @@ export class PaymentPgUnavailableError extends Error {
 
 /** 받는 층이 넘기는 값(검사 전). 칸이 없으면 빈 글·NaN·undefined다 */
 export interface PrepareCheckoutInput {
-  /** OrderKind에서 ORDER_KIND_를 뗀 이름 */
+  /** OrderKind에서 ORDER_KIND_를 뗀 이름(TICKET·MERCH만 받는다, ADR-0299 결정 3) */
   readonly orderKind: string;
   readonly orderId: string;
   readonly attemptId: string;
+  /** 굿즈(MERCH)는 비어도 된다 */
   readonly eventId: string;
   readonly amount: number;
   readonly orderName: string;
@@ -99,9 +100,12 @@ export interface PrepareCheckoutInput {
 
 /** 검사를 마친 결제창 준비 명령 */
 export interface PrepareCheckoutCommand {
+  /** 주문 종류(ADR-0299 결정 3) */
+  readonly orderKind: PaymentOrderKind;
   readonly orderId: string;
   readonly attemptId: string;
-  readonly eventId: string;
+  /** 회차 ID. 굿즈(MERCH)에 회차가 없으면 null이고 플랫폼 행·기본·대체만 본다 */
+  readonly eventId: string | null;
   readonly amount: number;
   readonly orderName: string;
   readonly payMethod: PayMethod;
@@ -175,6 +179,15 @@ export function checkoutReturnUrls(origin: string, eventId: string, orderId: str
   return { successUrl: url, failUrl: url };
 }
 
+/**
+ * 굿즈 결제창 복귀 주소(성공·실패 같은 주소): {출처}/shop/checkout/return?order={주문 ID}&pg={결제사}(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 3).
+ * 회차가 있어도(티켓 연동 부가 상품) 주소에 싣지 않는다. 웹 화면 쪽 같은 모양의 함수는 굿즈 결제 화면을 만드는 단계가 둔다
+ */
+export function merchCheckoutReturnUrls(origin: string, orderId: string, pg: PgName): { successUrl: string; failUrl: string } {
+  const url = `${origin}/shop/checkout/return?order=${encodeURIComponent(orderId)}&pg=${pg}`;
+  return { successUrl: url, failUrl: url };
+}
+
 const isPayMethod = (value: string): value is PayMethod => (PAY_METHODS as readonly string[]).includes(value);
 
 function uuidOf(value: string, field: string): string {
@@ -183,26 +196,30 @@ function uuidOf(value: string, field: string): string {
 }
 
 /**
- * 결제창 준비 입력 검사.
+ * 결제창 준비 입력 검사. order_kind는 TICKET·MERCH만 받는다(UNSPECIFIED 포함 그 밖은 INVALID_ARGUMENT). 굿즈(MERCH)는 event_id가 비어도 되고(있으면 소문자 UUID),
+ * 가상계좌를 허용 수단에서 빼므로 pay_method VIRTUAL_ACCOUNT는 INVALID_ARGUMENT다(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 3).
  * @throws PaymentInputError 입력이 틀림(field = proto 칸 이름)
  */
 export function parsePrepareCheckoutInput(input: PrepareCheckoutInput): PrepareCheckoutCommand {
-  // 굿즈의 복귀 주소가 정해지는 wbs 7.1.1까지 입장권만 받는다
-  if (input.orderKind !== 'TICKET') throw new PaymentInputError('order_kind');
+  if (input.orderKind !== 'TICKET' && input.orderKind !== 'MERCH') throw new PaymentInputError('order_kind');
+  const orderKind: PaymentOrderKind = input.orderKind;
   const orderId = uuidOf(input.orderId, 'order_id');
   const attemptId = uuidOf(input.attemptId, 'attempt_id');
-  const eventId = uuidOf(input.eventId, 'event_id');
+  const eventId = orderKind === 'MERCH' && input.eventId === '' ? null : uuidOf(input.eventId, 'event_id');
   if (!(Number.isInteger(input.amount) && input.amount >= 1 && input.amount <= PAYMENT_AMOUNT_MAX)) throw new PaymentInputError('amount');
   const nameLength = [...input.orderName].length;
   if (nameLength < 1 || nameLength > ORDER_NAME_MAX_LENGTH || input.orderName.trim() === '' || ORDER_NAME_FORBIDDEN.test(input.orderName)) throw new PaymentInputError('order_name');
   const payMethod = input.payMethod === '' ? 'CARD' : input.payMethod;
   if (!isPayMethod(payMethod)) throw new PaymentInputError('pay_method');
+  // 굿즈의 입금 대기(O2~O4)는 BAT-605가 정한다. 그때까지 가상계좌를 받지 않는다(ADR-0299 결정 3)
+  if (orderKind === 'MERCH' && payMethod === 'VIRTUAL_ACCOUNT') throw new PaymentInputError('pay_method');
   const { customerKey, entryOpensAtMs } = input;
   const pinned = input.pinnedPg === undefined || input.pinnedPg === '' || input.pinnedPg === 'UNSPECIFIED' ? undefined : input.pinnedPg;
   if (pinned !== undefined && !(PG_NAMES as readonly string[]).includes(pinned)) throw new PaymentInputError('pinned_pg');
   if (customerKey !== undefined && (!CUSTOMER_KEY.test(customerKey) || customerKey === ANONYMOUS_CUSTOMER_KEY)) throw new PaymentInputError('customer_key');
   checkEntryOpensAt(entryOpensAtMs);
   return {
+    orderKind,
     orderId,
     attemptId,
     eventId,
@@ -210,7 +227,8 @@ export function parsePrepareCheckoutInput(input: PrepareCheckoutInput): PrepareC
     orderName: input.orderName,
     payMethod,
     ...(customerKey === undefined ? {} : { customerKey }),
-    virtualAccountAllowed: input.virtualAccountAllowed ?? true,
+    // 굿즈는 가상계좌를 허용 수단에서 뺀다(ADR-0299 결정 3)
+    virtualAccountAllowed: orderKind === 'MERCH' ? false : (input.virtualAccountAllowed ?? true),
     ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
     ...(pinned === undefined ? {} : { pinnedPg: pinned as PgName }),
   };

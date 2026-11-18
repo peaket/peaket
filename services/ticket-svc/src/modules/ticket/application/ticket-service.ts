@@ -8,9 +8,12 @@ import {
   type EntryRecord,
   type EventCancelInput,
   type EventCancelOutcome,
+  HELD_TICKET_STATUSES,
+  type HeldTicket,
   type IssueTicketsInput,
   type IssueTicketsResult,
   issueFingerprint,
+  type ListHeldTicketsInput,
   type ListTicketsInput,
   type ListTicketsResult,
   type OperatorCancelInput,
@@ -20,6 +23,7 @@ import {
   normalizeEntryRecordsInput,
   normalizeEventCancelInput,
   normalizeIssueInput,
+  normalizeListHeldTicketsInput,
   normalizeListInput,
   normalizeOperatorCancelInput,
   normalizeReviewEligibilityInput,
@@ -103,5 +107,11 @@ export class TicketService {
     const n = normalizeReviewEligibilityInput(input);
     const tickets = await this.deps.store.listReviewEligibility(n.eventId);
     return reviewEligibilityOf(tickets, n);
+  }
+
+  /** 보유 티켓 확인(ListHeldTickets, ADR-0301 결정 1): 그 계정이 지금 가진 그 회차의 ISSUED·ACTIVE 티켓. 읽기만. @throws TicketInputError 소문자 UUID가 아님 */
+  async heldTickets(input: ListHeldTicketsInput): Promise<readonly HeldTicket[]> {
+    const n = normalizeListHeldTicketsInput(input);
+    return this.deps.store.listHeld(n.accountId, n.eventId, HELD_TICKET_STATUSES);
   }
 }
