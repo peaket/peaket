@@ -126,6 +126,9 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 | `createCircuitBreaker`·`isBreakerFailure`·`dependencyUnavailable` | 의존성마다 차단기(opossum 10은 상태만, 판정은 감싸개). 10초 창에 끝난 호출 20건 이상·실패 50% 이상이면 열림·5초 뒤 시험 호출 하나 [가정], 열리면 503 `dependency-unavailable`과 `Retry-After`. 시험 호출이 5초 [가정](`trialTimeoutMs`) 안에 끝나지 않으면 다시 열고, 열릴 때 진행 중이던 호출은 판정에 넣지 않는다. 동시 호출 상한(`maxConcurrent`)을 넘으면 429 `server-busy`, 남은 시간이 없으면 504. 업무 거절(4xx·gRPC 업무 코드)은 실패로 세지 않는다. 지표 `circuit_breaker_state`·`circuit_breaker_rejected_total` | ADR-0009 결정 2·5, guidelines §2 |
 | `@PurchaseSigned`·`@CurrentPurchaseSession`·`PurchaseSessionPort`·`purchaseRequestKey`·`purchaseMac`·`purchaseMacInput` | 구매 세션 쓰기 요청의 `X-Purchase-Seq`·`X-Purchase-Mac` 확인(멱등 키 형식 뒤·모양 검사 전, 틀리면 401, 서명이 틀리면 일련번호를 올리지 않음). 두 검사 길의 Nest 장식자는 머리 스키마에서 두 머리를 빼고, 계약이 요구하는데 빠뜨리거나 공개 역할 처리기에 달거나 포트(`createService`의 `purchaseSessions`)가 없으면 시작 실패. 요청 인증 키는 HKDF-SHA256 32바이트. 시험 벡터 `docs/api/vectors/purchase-request-mac.v1.json`(화면과 같은 파일). 거절 지표 `purchase_request_rejections_total{reason}` | ADR-0050 결정 8, frontend §5.3 |
 | `createGrpcClient`·`grpcChannelOptions`·`grpcServerOptions`·`grpcTarget`·`peaketGrpcInterceptor` | 서비스 사이 gRPC 클라이언트를 만드는 유일한 함수. 서비스 설정에 부하 분산 방식만(`service` pick_first·`headless-round-robin` round_robin), DNS 서비스 설정 끔, 의존성마다 따로 연결, `grpc.enable_retries` 없음(투명 재시도만), 잠긴 이름 덮어쓰기 예외. 가로채기가 데드라인(남은 시간·호출 상한)·호출 span·추적 머리·`dep` 소요를 맡는다. 자격 증명은 평문(파드 사이 mTLS는 메시) | ADR-0082 결정 4, guidelines §5 |
+| `startGrpcServer`·`GRPC_SERVER_DEFAULTS` | 업무 gRPC 포트 시작과 우아한 종료. 서버 설정은 `grpcServerOptions(config.grpcLbProfile)`(`headless-round-robin`이면 연결 수명 30초 [가정]), 내부 토큰 검사(`internal`). `close()`는 새 호출을 받지 않고(`tryShutdown`) 처리 중인 호출을 `drainMs`(기본 10초 [가정]) 기다린 뒤에만 끊고(`forceShutdown`), 호출이 먼저 끝나면 바로 돌아온다. `metrics`를 주면 호출마다 `rpc_server_call_duration_seconds{service, method, code}`(등록 밖 메서드는 `method="unknown"`, 끊긴 호출은 `CANCELLED`). 서비스 여섯의 `src/grpc-server.ts`는 이것을 부르는 얇은 파일이다 | docs/devops.md §6.4 ②, D-T27, docs/observability.md §3 |
+| `shutdownInOrder`·`onSigterm` | 종료 차례: 멈추기(gRPC 마감·돌던 일) → 받는 쪽 멈추기(drain) → 앱 닫기(`app.close()`가 모듈 종료 훅을 부른다) → 연결 닫기. 앞 단계가 실패해도 다음 단계를 하고 같은 steps로 두 번 불러도 한 번만 한다. `onSigterm`은 SIGTERM에 한 번만 부르는 감싸개다. NestJS `enableShutdownHooks()`는 켜지 않는다 | docs/devops.md §6.4 ③ |
+| `startDiagnose`·`DIAGNOSE_DEFAULTS`·`s3EvidenceStore` | 진단 수집(RB-31). 주석 `peaket.io/diagnose=<report|heap>@<UTC 시각>`을 Downward API 파일에서 5초 [가정]마다 읽어 준비 내림(`diagnosing`)·새 일 멈춤 → 30초 [가정] 기다림 → 진행 중 일 10초 [가정] 마감 → 보고서(환경 변수·네트워크 칸 없음) → `heap`이면 (메모리 한도 − RSS) > 2 × 쓰는 힙일 때만 힙 스냅샷 → 증거 버킷에 `<서비스>/<파드>/<요청 시각>/<파일>`로 올리기 → 올린 파일만 지우기 → `/diag/.diagnose-handled`에 처리한 값 → 끝내기. 표시 값과 같으면 되풀이하지 않고, 형식이 틀린 값은 값마다 경고 한 번. 시작할 때 `/diag`에 남은 파일을 올리고 지운다. S3는 표준 재시도 3번. 지표 `diagnose_collections_total{service, result}`. `createService`가 환경 값으로 켠다(아래 설정) | ADR-0070 결정 1, D-T18 ①, ASVS v5.0.0-14.2.1·14.2.2 |
 
 하위 경로:
 
@@ -150,6 +153,11 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 | `PEAKET_LOG_SLO_LATENCY_MS` | 500 | 경로에 SLO 지연을 적지 않았을 때 전수로 남기는 지연(NFR-011) |
 | `PEAKET_LOG_LEVEL` | `info` | 서비스 로거 수준. 정규 로그 줄은 이 값과 관계없이 `info`부터 낸다 |
 | `PEAKET_GRPC_LB_PROFILE` | `service` | 서비스 사이 gRPC 부하 분산 프로필. `headless-round-robin`은 메시 없는 로컬 측정 전용이라 `local`·`ci`가 아니면 시작하지 않는다 |
+| `PEAKET_GRPC_PORT` | 50051 [가정] | 업무 gRPC 포트(`config.grpcPort`). 1~65535 정수이고 0(빈 포트)은 `local`·`ci`만 받는다. 틀리면 시작하지 않는다. ticket-svc·payment-svc는 자기 설정도 읽는다(ticket-svc 기본 50052) |
+| `PEAKET_DIAG_ANNOTATIONS_FILE` | 없음 | 진단 주석을 담은 Downward API 파일(차트는 `/etc/podinfo/annotations`). 없으면 진단 수집을 켜지 않는다 |
+| `PEAKET_DIAG_DIR` | `/diag` | 보고서·힙 스냅샷·처리 표시 폴더(차트의 emptyDir, 크기 한도는 메모리 한도의 두 배 [가정]) |
+| `PEAKET_DIAG_BUCKET`·`PEAKET_DIAG_S3_ENDPOINT` | 없음 | 진단 증거 버킷과 흉내 서버 주소(local·ci의 moto S3). 주석 파일이 있는데 버킷이 없으면 `local`·`ci`는 경고 한 줄과 함께 수집을 끄고(둘은 moto 주소도 있어야 켠다), 그 밖의 환경은 빠진 이름을 대며 시작하지 않는다 |
+| `PEAKET_MEMORY_LIMIT_BYTES` | 없음 | 컨테이너 메모리 한도(차트가 `resourceFieldRef limits.memory`로 넣는다). 없으면 힙 스냅샷을 건너뛴다 |
 | `PEAKET_VERSION`·`PEAKET_AZ`·`PEAKET_POD` | `unknown`·없음·호스트 이름 | 로그의 `version`·`az`·`pod`(배포 차트가 넣는다) |
 | `OTEL_SERVICE_NAME` | 없음 | 등록 파일이 쓰는 서비스 이름(필수) |
 | `PEAKET_TRACE_INBOUND` | `mesh` | 들어온 추적 문맥을 잇는가. 앱 서버는 `untrusted`(링크로만) |
@@ -197,6 +205,12 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 | `pnpm --filter @peaket/platform typecheck` | 타입 검사 |
 | `pnpm --filter @peaket/platform build` | `dist/` 빌드 |
 
+## 준비·종료·시간 초과
+
+- 관리 포트 `/ready`는 준비 표시만 읽는다(공유 의존성을 부르지 않는다, D-T19 ①②). 시작 작업이 남으면 503과 `{ status: 'starting', pending }`, SIGTERM 뒤에는 `status: 'shutting-down'`, 진단 수집 중에는 `status: 'diagnosing'`이다. `/livez`는 끝날 때까지 200이다.
+- `createService`는 SIGTERM을 받으면 서비스의 종료 처리기보다 먼저(맨 앞 처리기) 준비 상태를 내린다(`sigtermReadiness: false`로 끈다). 다른 SIGTERM 처리기가 없으면 그 뒤 기본 동작대로 바로 끝난다.
+- 시간 초과 지표(경보가 아니라 원인 가르기, ADR-0070): 풀 대기 초과 429는 `db_pool_wait_timeout_total{service}`(라벨 기본 `applicationName`, `createDatabase`의 `service`로 바꾼다), 문장 시간 초과(SQLSTATE 57014)는 `db_statement_timeout_total{role}`(기본 접속 주소의 사용자 이름, `role`로 바꾼다), Redis 명령 시간 초과·호출 마감 초과는 `redis_command_timeout_total{cluster}`(기본 `default`, `createHotRedis`의 `cluster`로 바꾼다). 프로세스에 하나씩 두고 서비스 뼈대의 `/metrics`에 함께 싣는다.
+
 ## 아직 없는 것
 
-MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), 프로브와 시간 초과 기본값(0.3.6), gRPC 서버 쪽 시작과 우아한 종료(BAS-080, D-T27), 구매 세션 저장소 어댑터와 서버 ECDH 키(BOT-100), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).
+MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), Outbox 릴레이 프로세스의 진단 수집(차트는 실행 옵션·/diag를 넣지만 수집은 서비스 뼈대만 한다), 구매 세션 저장소 어댑터와 서버 ECDH 키(BOT-100), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).

@@ -1,6 +1,6 @@
 // @peaket/platform: 서비스(NestJS·Fastify) 공용 시작 코드(docs/architecture.md §10, openspec 변경 add-service-template).
 export { CLOCK, fakeClock, systemClock, type Clock, type FakeClock } from './clock.js';
-export { DEBUG_ERRORS_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PRODUCTION_PEAKET_ENVS, PlatformConfigError, isProductionLikeEnv, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
+export { DEBUG_ERRORS_ALLOWED, DEFAULT_GRPC_PORT, GRPC_PORT_ZERO_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PRODUCTION_PEAKET_ENVS, PlatformConfigError, isProductionLikeEnv, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
 export { currentDeadline, currentScannerDevice, requestContext, runInRequestContext, type RequestContext } from './context.js';
 export { ADMIN_AUTHZ_CACHE_MS, admitBeforeBody, COOKIE_CHALLENGE, CurrentPrincipal, INTERNAL_TOKEN, INTERNAL_TOKEN_REQUIRED, InternalTokenGuard, PASSWORD_CHANGE_SCOPE, ROLE_VALUES, ROUTE_ROLES_KEY, Roles, ScannerGuard, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
 export { constantTimeEqual } from './secret-compare.js';
@@ -33,7 +33,7 @@ export {
 export { AcceptMultipart, AcceptTextPlain, BodyLimit, Bulkhead, DEFAULT_BODY_LIMIT_BYTES, type RouteBulkhead, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type AcceptMultipartOptions, type ContractRouteSchemaInput } from './request-checks.js';
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline, ROUTE_DEADLINE_KEY, RouteDeadline } from './deadline.js';
 export { HOT_PATH_METRICS, HotPathMetrics, timeHotPath, timeHotPathSync, type HotPathOutcome, type HotPathStage } from './hot-path.js';
-export { LATENCY_BUCKETS_SECONDS, PlatformMetrics } from './metrics.js';
+export { LATENCY_BUCKETS_SECONDS, PlatformMetrics, TIMEOUT_METRICS } from './metrics.js';
 export { MTLS_CONFIRMATION_CLAIM, MTLS_POC_BLOCKERS, mtlsConfirmationOf, mtlsPocBlockers, verifyMtlsConfirmation, type MtlsConfirmationDecision, type MtlsPocBlocker } from './mtls.js';
 export { SCANNER_MTLS_AUTH_HEADER, SCANNER_MTLS_CERT_HEADER, SCANNER_MTLS_CNF_HEADER, type ScannerMtlsOptions } from './scanner-auth.js';
 // 서비스가 자기 지표를 만들 때 쓰는 클래스(서비스마다 지표 라이브러리를 따로 들이지 않게 플랫폼이 다시 내보낸다, ADR-0182)
@@ -42,7 +42,7 @@ export { contractSchema, emitOpenApi, type EmitOpenApiOptions } from './openapi.
 export { PROBLEM_CONTENT_TYPE, PROBLEM_TYPE_BASE, ProblemError, deadlineExceeded, serverBusy, type ProblemInit } from './problem.js';
 export { DATABASE, POOL_DEFAULTS, createDatabase, databaseModule, type Database, type DatabaseOptions, type DatabaseProfile, type DbTransaction, type TransactionOptions } from './database.js';
 export { ProblemFilter } from './problem-filter.js';
-export { createService, type CreateServiceOptions, type PlatformService } from './service.js';
+export { createService, type CreateServiceOptions, type DiagnoseOptions, type PlatformService } from './service.js';
 export { browserFamily, type BrowserFamily, clientFamily } from './client-family.js';
 export { LOG_PSEUDONYM_KEY_ENV, LogPseudonymizer, ipPrefix, loadLogPseudonymizer } from './pseudonym.js';
 export { sampleKeep, sampleThreshold } from './sampling.js';
@@ -120,7 +120,28 @@ export {
   type KeyedPartitionOptions,
 } from './keyed-consumer.js';
 export { HELD_EVENT_KEEP_DAYS, HELD_EVENT_TABLE, deleteReprocessedHeldEvents, drizzleHeldEventStore, heldEventCounts, heldEventTable, reprocessHeldEvents, type ReprocessResult } from './held-events.js';
-export { READINESS, Readiness } from './readiness.js';
+export { READINESS, READINESS_DIAGNOSING, READINESS_SHUTTING_DOWN, Readiness } from './readiness.js';
+export { GRPC_SERVER_DEFAULTS, RPC_UNKNOWN_METHOD, startGrpcServer, type GrpcServiceBinding, type StartedGrpcServer, type StartGrpcServerOptions } from './grpc-server.js';
+export { onSigterm, shutdownInOrder, type ShutdownSteps } from './shutdown.js';
+export {
+  DIAGNOSE_ANNOTATION,
+  DIAGNOSE_DEFAULTS,
+  DIAGNOSE_ENV,
+  DIAGNOSE_HANDLED_FILE,
+  DIAGNOSE_RESULTS,
+  DIAGNOSE_STORE_OPTIONAL,
+  diagnoseAnnotationOf,
+  diagnoseConfigFromEnv,
+  parseDiagnoseRequest,
+  startDiagnose,
+  type DiagnoseEnvConfig,
+  type DiagnoseHeap,
+  type DiagnoseLogger,
+  type DiagnoseRequest,
+  type DiagnoseResult,
+  type StartDiagnoseOptions,
+} from './diagnose.js';
+export { EVIDENCE_S3_RETRY, s3EvidenceStore, type EvidenceStore, type S3EvidenceStoreOptions } from './evidence-store.js';
 export {
   CONTROL_SYNC_DEFAULTS,
   ControlState,

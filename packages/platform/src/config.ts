@@ -28,7 +28,14 @@ export interface PlatformConfig {
   defaultSloLatencyMs: number;
   /** 서비스 사이 gRPC 부하 분산 프로필(PEAKET_GRPC_LB_PROFILE, 기본 service. headless-round-robin은 local·ci만, guidelines §5) */
   grpcLbProfile: GrpcLbProfile;
+  /** 업무 gRPC 포트(PEAKET_GRPC_PORT, 기본 DEFAULT_GRPC_PORT). 1~65535 정수이고 0(빈 포트)은 local·ci 시험에서만 받는다(BUILD_ORDER BAS-080) */
+  grpcPort: number;
 }
+
+/** 업무 gRPC 포트 기본값 [가정](BUILD_ORDER PRF-020이 identity-svc에 둔 값을 공용 설정으로 옮겼다, BAS-080) */
+export const DEFAULT_GRPC_PORT = 50051;
+/** PEAKET_GRPC_PORT=0(빈 포트)을 받는 환경. 시험이 띄운 포트를 읽을 때만 쓴다(payment-svc·ticket-svc 설정과 같은 규칙) */
+export const GRPC_PORT_ZERO_ALLOWED: readonly PeaketEnv[] = ['local', 'ci'];
 
 /** gRPC 부하 분산 프로필(ADR-0082 결정 4). headless-round-robin은 메시 없는 로컬 측정 전용이다 */
 export const GRPC_LB_PROFILES = ['service', 'headless-round-robin'] as const;
@@ -106,7 +113,18 @@ export function loadPlatformConfig(env: Env): PlatformConfig {
       `PEAKET_GRPC_LB_PROFILE=headless-round-robin은 ${HEADLESS_ROUND_ROBIN_ALLOWED.join('·')}에서만 쓴다(지금 ${rawEnv ? peaketEnv : '환경 없음(운영으로 봄)'}, 메시 웨이포인트를 건너뛴다, ADR-0082)`,
     );
   }
-  return { env: peaketEnv, debugErrors, port: appPort, managementPort, maxDeadlineMs, version, logLevel, sampleOneIn, defaultSloLatencyMs, grpcLbProfile };
+  const grpcPort = grpcPortOf(env.PEAKET_GRPC_PORT, GRPC_PORT_ZERO_ALLOWED.includes(peaketEnv));
+  return { env: peaketEnv, debugErrors, port: appPort, managementPort, maxDeadlineMs, version, logLevel, sampleOneIn, defaultSloLatencyMs, grpcLbProfile, grpcPort };
+}
+
+/** 없거나 비면 기본값. 숫자만 받는다(부호·소수점·지수 표기 거절). 틀리면 시작 실패다 */
+function grpcPortOf(raw: string | undefined, allowZero: boolean): number {
+  if (raw === undefined || raw === '') return DEFAULT_GRPC_PORT;
+  const n = Number(raw);
+  if (!/^\d{1,5}$/.test(raw) || n > 65_535 || (n === 0 && !allowZero)) {
+    throw new PlatformConfigError(`PEAKET_GRPC_PORT는 1~65535의 포트 번호여야 한다(0은 ${GRPC_PORT_ZERO_ALLOWED.join('·')} 시험에서만): ${raw}`);
+  }
+  return n;
 }
 
 function positiveInt(env: Env, name: string, fallback: number): number {

@@ -2,6 +2,7 @@
 // 앱 포트는 NestJS + Fastify, 관리 포트는 지표(/metrics)만 내는 작은 Fastify 서버다(ASVS v5.0.0-13.4.5).
 // OTel SDK는 여기서 시작하지 않는다. 실행 명령의 --import @peaket/platform/telemetry/register가 먼저 시작한다(telemetry.ts).
 import 'reflect-metadata';
+import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
 import { type DynamicModule, Global, type LogLevel, Module, type Type } from '@nestjs/common';
 import { APP_GUARD, DiscoveryModule, NestFactory } from '@nestjs/core';
@@ -13,6 +14,8 @@ import { type PurchaseSessionPort, purchaseRejections } from './purchase-auth.js
 import { CLOCK, type Clock, systemClock } from './clock.js';
 import { type PlatformConfig, loadPlatformConfig } from './config.js';
 import { activeTrace } from './context.js';
+import { diagnoseConfigFromEnv, startDiagnose, type StartDiagnoseOptions } from './diagnose.js';
+import { type EvidenceStore, s3EvidenceStore } from './evidence-store.js';
 import type { HotPathMetrics } from './hot-path.js';
 import { installHttpHooks, markServerSpan, requestSideFields } from './http-hooks.js';
 import { NestPinoLogger, PLATFORM_LOGGER, type PlatformLogger, createPlatformLogger } from './log.js';
@@ -22,7 +25,7 @@ import { ProblemFilter, frameworkErrorProblem } from './problem-filter.js';
 import { loadLogPseudonymizer, type LogPseudonymizer } from './pseudonym.js';
 import { CanonicalLog, errorInfoOf } from './request-log.js';
 import { installRequestChecks } from './request-checks.js';
-import { READINESS, Readiness } from './readiness.js';
+import { READINESS, READINESS_SHUTTING_DOWN, Readiness } from './readiness.js';
 import { sampleKeep } from './sampling.js';
 
 /**
@@ -50,6 +53,42 @@ export function platformRoot(module: Type<unknown> | DynamicModule, clock: Clock
   return PlatformRootModule;
 }
 
+/** 진단 수집(RB-31) 옵션. 주지 않은 값은 환경 값(PEAKET_DIAG_*, diagnose.ts DIAGNOSE_ENV)에서 읽는다 */
+export type DiagnoseOptions = Partial<Pick<StartDiagnoseOptions, 'annotationsFile' | 'diagDir' | 'memoryLimitBytes' | 'onStopWork' | 'exit' | 'pollMs' | 'unreadyWaitMs' | 'drainMs' | 'heap' | 'report' | 'sleep' | 'pod'>> & {
+  /** 증거 저장소. 없으면 PEAKET_DIAG_BUCKET(·PEAKET_DIAG_S3_ENDPOINT)으로 S3 저장소를 만든다 */
+  store?: EvidenceStore;
+};
+
+/**
+ * SIGTERM에 준비 상태를 내릴 표시들. 처리기는 프로세스에 하나만 두고 맨 앞에 건다(서비스의 종료 처리기보다 먼저, docs/devops.md §6.4 ①).
+ * 다른 SIGTERM 처리기가 없으면 표시를 내린 뒤 기본 동작(바로 끝내기)을 그대로 한다(처리기를 단 것만으로 끝나지 않게 되지 않도록)
+ */
+const sigtermTargets = new Set<Readiness>();
+let sigtermListener: (() => void) | undefined;
+
+function dropReadinessOnSigterm(readiness: Readiness): () => void {
+  sigtermTargets.add(readiness);
+  if (!sigtermListener) {
+    const listener = () => {
+      for (const r of sigtermTargets) r.register(READINESS_SHUTTING_DOWN);
+      if (process.listenerCount('SIGTERM') === 1) {
+        process.removeListener('SIGTERM', listener);
+        sigtermListener = undefined;
+        process.kill(process.pid, 'SIGTERM');
+      }
+    };
+    sigtermListener = listener;
+    process.prependListener('SIGTERM', listener);
+  }
+  return () => {
+    sigtermTargets.delete(readiness);
+    if (sigtermTargets.size === 0 && sigtermListener) {
+      process.removeListener('SIGTERM', sigtermListener);
+      sigtermListener = undefined;
+    }
+  };
+}
+
 export interface CreateServiceOptions {
   /** 지표의 service 라벨과 로그의 service(예: purchase-svc) */
   name: string;
@@ -72,6 +111,13 @@ export interface CreateServiceOptions {
   requestTimeoutMs?: number;
   /** 핫패스 구간 진단(BAT-028). 서비스가 만든 것을 넘기면 인증·처리기·문제 변환·로그·응답 구간을 잰다 */
   hotPath?: HotPathMetrics;
+  /** SIGTERM을 받으면 서비스의 종료 처리기보다 먼저 준비 상태를 내린다(/ready 503, 남은 작업 shutting-down). 기본 true(BUILD_ORDER BAS-080) */
+  sigtermReadiness?: boolean;
+  /**
+   * 진단 수집(RB-31, D-T18 ①). false면 끈다. 없거나 객체면 PEAKET_DIAG_ANNOTATIONS_FILE이 있을 때 켠다(차트가 넣는다).
+   * 그때 증거 저장소가 없으면 local·ci는 경고 한 줄과 함께 끄고, 그 밖의 환경은 시작하지 않는다
+   */
+  diagnose?: DiagnoseOptions | false;
 }
 
 export interface PlatformService {
@@ -140,6 +186,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     destination: o.logDestination,
   });
   if (warning) logger.warn(warning);
+  const diagnose = o.diagnose === false ? undefined : diagnoseSetup(o.name, config.env, env, o.diagnose ?? {}, logger);
   // 정규 로그 줄은 서비스 로거 수준과 관계없이 info부터 낸다(수준을 올려도 표본 집계가 깨지지 않게)
   const canonical = new CanonicalLog(logger.child({}, { level: 'info' }), {
     sampleOneIn: config.sampleOneIn,
@@ -200,12 +247,26 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   // 생존 프로브: 이벤트 루프가 답하는지만 본다. 준비 상태·의존성과 상관없다(architecture §5 '프로브 규칙', ADR-0070)
   management.get('/livez', async () => ({ status: 'live' }));
   // 준비 프로브: 메모리의 표시만 본다(ADR-0070·0103, D-T29)
+  // 종료 중(SIGTERM 뒤)·진단 수집 중(RB-31)도 같은 표시다. status가 shutting-down·diagnosing으로 그 까닭을 가린다
   management.get('/ready', async (_request, reply) => {
     const pending = readiness.pending();
     if (pending.length === 0) return { status: 'ready' };
-    return reply.status(503).send({ status: 'starting', pending });
+    return reply.status(503).send({ status: readiness.status(), pending });
   });
   await management.ready();
+
+  const releaseSigterm = o.sigtermReadiness === false ? undefined : dropReadinessOnSigterm(readiness);
+  const diagnosing = diagnose
+    ? startDiagnose({
+        ...diagnose,
+        service: o.name,
+        readiness,
+        clock,
+        logger,
+        metrics,
+        exit: diagnose.exit ?? (() => process.kill(process.pid, 'SIGTERM')),
+      })
+    : undefined;
 
   return {
     name: o.name,
@@ -234,8 +295,39 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
       return { port: portOf(http), managementPort: portOf(management) };
     },
     async close() {
+      diagnosing?.stop();
+      releaseSigterm?.();
       await app.close();
       await management.close();
     },
+  };
+}
+
+/** 진단 수집 설정을 맞춘다. 켜지 않으면 undefined. 운영 쪽 환경에서 저장소 설정이 없으면 던진다(시작 실패) */
+function diagnoseSetup(
+  name: string,
+  peaketEnv: PlatformConfig['env'],
+  env: Record<string, string | undefined>,
+  given: DiagnoseOptions,
+  logger: PlatformLogger,
+): (Omit<StartDiagnoseOptions, 'service' | 'readiness' | 'clock' | 'logger' | 'metrics' | 'exit'> & { exit?: () => void }) | undefined {
+  const fromEnv = diagnoseConfigFromEnv(given.annotationsFile ? { ...env, PEAKET_DIAG_ANNOTATIONS_FILE: given.annotationsFile } : env, peaketEnv, { storeGiven: given.store !== undefined });
+  if (!fromEnv) return undefined;
+  let store = given.store;
+  if (!store) {
+    if (fromEnv.missing.length > 0) {
+      logger.warn({ kind: 'diagnose', missing: fromEnv.missing }, `진단 증거 저장소 설정이 없어 진단 수집(RB-31)을 끈다: ${fromEnv.missing.join('·')}`);
+      return undefined;
+    }
+    store = s3EvidenceStore({ bucket: fromEnv.bucket!, ...(env.AWS_REGION ? { region: env.AWS_REGION } : {}), ...(fromEnv.s3Endpoint ? { endpoint: fromEnv.s3Endpoint } : {}) });
+  }
+  const memoryLimitBytes = given.memoryLimitBytes ?? fromEnv.memoryLimitBytes;
+  return {
+    ...given,
+    store,
+    pod: given.pod ?? env.PEAKET_POD ?? hostname(),
+    annotationsFile: fromEnv.annotationsFile,
+    diagDir: given.diagDir ?? fromEnv.diagDir,
+    ...(memoryLimitBytes === undefined ? {} : { memoryLimitBytes }),
   };
 }
