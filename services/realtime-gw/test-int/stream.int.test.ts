@@ -727,7 +727,7 @@ describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', (
   );
 
   test(
-    'S-T14 ① 받기를 멈춘 실제 연결은 보내기 버퍼가 256KiB에 닿으면 그 연결만 1초 간격이 되고(realtime_gw_buffer_slow_connections 1, realtime_gw_degraded 0), 다시 받으면 BatchInterval 1000 뒤 묶음 serverTimeMs가 1,000ms 안팎 간격이며, 버퍼가 빈 뒤 30초 근처에 BatchInterval 100을 받고 게이지가 0이다. 받는 연결은 100 그대로다',
+    'S-T14 ① RF-T12 받기를 멈춘 실제 연결은 보내기 버퍼가 256KiB에 닿으면 그 연결만 1초 간격이 되고(realtime_gw_buffer_slow_connections 1, realtime_gw_degraded 0), 다시 받으면 BatchInterval 1000 뒤 묶음 serverTimeMs가 1,000ms 안팎 간격이며, 버퍼가 빈 뒤 차례 30번(30초 근처) 뒤 BatchInterval 100을 받고 게이지가 0이다. 받는 연결은 100 그대로다',
     async () => {
       // 시작 파일이 게이지 둘을 0으로 낸다(ADR-0298 결정 7)
       const m0 = await svc.metrics();
@@ -785,14 +785,17 @@ describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', (
         }
         expect(await gaugeOf('realtime_gw_buffer_slow_connections')).toBe(1);
 
-        // 버퍼가 빈 뒤(다시 받은 뒤) 30초 근처에 BatchInterval 100. 받기를 멈춘 동안은 버퍼가 256KiB 아래로 내려가지 않으므로 30초 전에는 오지 않는다
+        // 버퍼가 빈 뒤(다시 받은 뒤) 차례 30번(30초 근처) 뒤 BatchInterval 100. 받기를 멈춘 동안은 버퍼가 64KiB 아래로 내려가지 않으므로 30초 전에는 오지 않는다.
+        // 차례 30번은 다시 받은 뒤 첫 낮은 차례(1초 안)부터 세므로 위 허용 폭은 30,000 + 1,500ms다(RF-T12)
         await slow.next(isInterval(100), 40_000, i1000 + 1);
         const back = Date.now() - resumedAt;
         expect(back).toBeGreaterThanOrEqual(30_000 - 50);
-        expect(back).toBeLessThanOrEqual(30_000 + 1_000);
+        expect(back).toBeLessThanOrEqual(30_000 + 1_500);
         expect(await gaugeOf('realtime_gw_buffer_slow_connections')).toBe(0);
         // 되돌린 뒤 묶음은 100ms 박자에 온다(보내는 쪽 타이머가 박자 하나둘을 비울 수 있어 300ms 안쪽으로 본다. 1초 간격이면 950ms 이상이다)
-        const i100 = slow.frames().findIndex(isInterval(100));
+        // 맺은 때의 첫 BatchInterval 100(0번)이 아니라 1000 알림 뒤의 100을 찾는다(RF-T12, CI 실패 PR #27)
+        const i100 = slow.frames().findIndex((f, i) => i > i1000 && isInterval(100)(f));
+        expect(i100).toBeGreaterThan(i1000);
         await sleep(800);
         const after = slow.frames().slice(i100 + 1).filter(isDelta);
         expect(after.length).toBeGreaterThanOrEqual(3);

@@ -422,24 +422,30 @@ describe('S-T42 묶음', () => {
     expect(atLimit.framesFrom(1)[0]).toEqual({ type: 'batchInterval', intervalMs: SPEC.degraded.intervalMs });
     // 다른 연결(버퍼 0)은 BatchInterval을 더 받지 않고 묶음만
     expect(fast.framesFrom(1).map((f) => f.type)).toEqual(['delta']);
+    // atLimit은 연결 번호 1이라 1초 차례가 T + 100 × ((1 mod 10) + 1) = T + 200, 그 뒤 T + 1,200(고정 격자, ADR-0298 결정 5)
     h.clock.advance(SPEC.intervalMs);
     h.sub.publish(channelOf('ev-1', 1), deltaText({ epoch: 1, section: 1, version: 2, changedAtMs: W, seats: [[0, 2]] }));
     h.hub.tick(); // T + 100
     expect(deltas(fast.framesFrom(1))).toHaveLength(2);
     expect(deltas(atLimit.framesFrom(1))).toHaveLength(1);
-    // T + 200 … T + 900, 그리고 T + 999에도 둘째 묶음이 없다
-    for (let t = 200; t <= 900; t += SPEC.intervalMs) {
+    h.clock.advance(99);
+    h.hub.tick(); // T + 199
+    expect(deltas(atLimit.framesFrom(1))).toHaveLength(1);
+    h.clock.advance(1);
+    h.hub.tick(); // T + 200
+    expect(deltas(atLimit.framesFrom(1))).toHaveLength(2);
+    expect(entriesOf(deltas(atLimit.framesFrom(1))[1]!).map((e) => e.sectionVersion)).toEqual([2]);
+    h.sub.publish(channelOf('ev-1', 1), deltaText({ epoch: 1, section: 1, version: 3, changedAtMs: W, seats: [[0, 1]] }));
+    for (let t = 300; t <= 1_100; t += SPEC.intervalMs) {
       h.clock.advance(SPEC.intervalMs);
       h.hub.tick();
     }
     h.clock.advance(99);
-    h.hub.tick(); // T + 999
-    expect(deltas(atLimit.framesFrom(1))).toHaveLength(1);
+    h.hub.tick(); // T + 1,199
+    expect(deltas(atLimit.framesFrom(1))).toHaveLength(2);
     h.clock.advance(1);
-    h.hub.tick(); // T + 1,000
-    const got = deltas(atLimit.framesFrom(1));
-    expect(got).toHaveLength(2);
-    expect(entriesOf(got[1]!).map((e) => e.sectionVersion)).toEqual([2]);
+    h.hub.tick(); // T + 1,200
+    expect(deltas(atLimit.framesFrom(1))).toHaveLength(3);
     expect(atLimit.closed).toBeUndefined();
     expect(slow.sent).toHaveLength(1);
     // 다른 연결은 끝까지 1000을 받지 않는다
