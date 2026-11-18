@@ -782,7 +782,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- | --- |
 | 1 | 서버 → 클라이언트 | `SeatDeltaBatch` | `u64 serverTimeMs`(묶음을 보낸 서버 시각), `u16 maxWaitMs`(묶음 안에서 가장 먼저 바뀐 변경이 보내질 때까지 기다린 시간, ADR-0110), `u32 seatEpoch`(회차 세대. 한 묶음에는 한 세대만 싣는다, 기술 검토 중간-040), `u16 sectionCount`, 구역마다 `u16 sectionIndex`, `u32 sectionVersion`, `u16 count`, 그리고 `count`번 `u16 seatOffset`(그 구역 `seatIndexRange.from`에서의 거리), `u8 state` |
 | 2 | 서버 → 클라이언트 | `Heartbeat` | `u64 serverTimeMs`, `u64 echoClientTimeMs`(15초마다. `TimeSync`를 받으면 바로 보내고 받은 `clientTimeMs`를 싣는다. 그 밖에는 0, ADR-0110) |
-| 3 | 서버 → 클라이언트 | `BatchInterval` | `u16 intervalMs`(100 또는 Degraded 1000, 연결 직후 한 번과 바뀔 때, ADR-0240) |
+| 3 | 서버 → 클라이언트 | `BatchInterval` | `u16 intervalMs`(평시 100, Degraded 1000. `intervalMs` ≥ 1000이면 Degraded, 그 아래는 평시로 본다. 연결 직후 한 번과 바뀔 때 보낸다. 파드가 Degraded면 첫 값이 1000이고, 그 연결의 보내기 버퍼 때문에 그 연결만 1000일 수 있다. 1초 간격이어도 세대가 바뀐 묶음과 크기 상한(64KiB)에 닿은 묶음은 더 일찍 온다, ADR-0240·ADR-0298) |
 | 16 | 클라이언트 → 서버 | `SubscribeSections` | `u16 count`, `count`번 `u16 sectionIndex`. 매번 지금 구독할 전체 집합을 보낸다(증분이 아니다) |
 | 18 | 클라이언트 → 서버 | `TimeSync` | `u64 clientTimeMs`(보낼 때의 `performance.now()`). 연결 직후와 60초 [가정]마다 보낸다(ADR-0110) |
 
