@@ -791,6 +791,7 @@
 | R-691 | 팬 재인증 토큰의 한 번 쓰기가 받는 서비스마다 따로라 같은 토큰을 두 작업에 쓸 수 있었다(BAT-415-reauth RV-01, OPEN[50] (나)) | proto ReauthOperation, packages/platform token-verify, services/identity-svc session, services/purchase-svc refund, apps/web social-login·account-withdraw·login-methods·settings, ADR-0293, identity §3·§7.1, authz-matrix §6, transfer-refund §3.1, frontend §4.1 | 계획·구현·시험·리뷰·검증 다섯 담당(B 짧은 고리) | 끝 |
 | R-696 | BAT-171 재배치 첫 실행 실패·초점 가림·web / reflow 잡 켜기 | apps/web 띠 여백·320px 이하 띠 흐름·월렛 워커, console-host 그래프 상자, ci-web.yml·brief.mjs, frontend.md·devops.md·d5 | 계획·시험·구현·리뷰·검증·브라우저 확인 역할 분리 | HOT-381 끝·HOT-391 BAT-172 |
 | R-698 | develop 푸시 CI가 다음 푸시에 취소돼 갈래 사이 통합을 끝까지 못 봤고, 끝까지 돌리면 큰 러너 비용이 늘었다 | .github/workflows/ci.yml, tools/ci/check-workflows.test.mjs, docs/devops.md, ADR-0187, docs/verification.md | 취소는 PR에서만, 가지 푸시는 spec-check pr 모드(W11-ci-conc) | 적용 |
+| R-699 | BAT-174 CI 흔들림(web / budgets Lighthouse 판정, S-T34 ④ 좌석맵 해석 시간 상한) | tools/web-checks/budgets limits.mjs·playwright.budgets.config.mjs, services/core-svc seatmap-worker pool.ts·parse-thread.ts, test-int/media-support.ts 시작 기다림, docs/features/seat-hold.md·docs/verification.md·ADR-0257 결정 5 | 계획·구현·시험·리뷰·검증 역할 분리(C, 정방향), 한도·상한은 넓히지 않음 | BAT-174 끝(단계 없음)·계획 12는 정리 목록 |
 
 ## 4. 숫자 일치표
 
