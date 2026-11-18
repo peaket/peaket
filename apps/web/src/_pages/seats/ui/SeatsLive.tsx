@@ -12,6 +12,7 @@ import type { PurchaseSigner } from '@peaket/api-client/purchase';
 import Link from 'next/link';
 import { ORIGINS } from '@/shared/config/origins';
 import { holdClock } from '@/shared/lib/hold-clock';
+import { useStickyInset } from '@/shared/lib/sticky-inset';
 import { AppShell } from '@/widgets/app-shell';
 import { canPick, clearAdmission, createGesture, createHoverTracker, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, tierNames, tierRank, wheelFactor, type GestureCommand, type SeatsPhase } from '../model/live';
 import type { Booking, HoldResult } from '../model/booking-runtime';
@@ -133,6 +134,8 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<SeatMapClient | null>(null);
   const mainRef = useRef<HTMLElement>(null);
+  // 아래 요약 띠의 실제 높이를 아래 스크롤 여백으로(docs/frontend.md §5.11 '초점이 가려지지 않게', BAT-171)
+  const summaryBarRef = useStickyInset('bottom');
   const listedRef = useRef<number | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const [listView, setListView] = useState<SeatListView | null>(null);
@@ -499,7 +502,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const showSummary = phase === 'ready' && booking && (auto === null || autoView === 'done');
   const bottomBar =
     showSummary && booking ? (
-      <div className="sticky bottom-0 z-10">
+      <div ref={summaryBarRef} className="sticky bottom-0 z-10">
         <LiveSummary
           picks={booking.picks}
           prices={prices}
