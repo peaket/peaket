@@ -6,7 +6,7 @@
 // 창 맞춤: 정본은 '단조 시계의 10초 창'만 적었다. 허브를 만든 단조 시각(START)을 10초의 배수로 두어, 만든 때부터 재든 10초 배수로 재든 같은 창이 되게 한다.
 // 박자는 대개 창 시작에서 37ms 비낀 시각(START + 37 + 100k)이다. 연결 번호는 허브에 연결을 들인 차례(0부터)다.
 import { describe, expect, test } from 'vitest';
-import { decodeFrame } from '../../../packages/seatmap/src/wire.js';
+import { decodeFrame, type Frame } from '../../../packages/seatmap/src/wire.js';
 import { channelOf, deltas, deltaText, FakeConn, harness, type Harness, settle, SPEC, subscribeBytes, WALL0 } from './hub-fixtures.js';
 
 const D = SPEC.degraded;
@@ -27,18 +27,38 @@ const tickAt = (h: Harness, ms: number): void => {
   moveTo(h, ms);
   h.hub.tick();
 };
+/** 프레임 종류 바이트(둘째 바이트, decodeFrame이 읽는 자리): 1 묶음, 3 BatchInterval(docs/frontend.md §4.4.1) */
+const TYPE_DELTA = 1;
+const TYPE_BATCH_INTERVAL = 3;
+/** from번째 뒤로 보낸 프레임 가운데 종류 바이트가 type인 것만 해독한다(W11-rtgw-flake: 연결 100개의 프레임 전부 해독을 덜어 계산량을 줄인다) */
+const framesOfType = (c: FakeConn, type: number, from = 1): Frame[] => c.sent.slice(from).flatMap((f) => (f[1] === type ? [decodeFrame(f)] : []));
 /** from번째 뒤로 받은 BatchInterval 값 */
-const intervals = (c: FakeConn, from = 1): number[] => c.framesFrom(from).flatMap((f) => (f.type === 'batchInterval' ? [f.intervalMs] : []));
-const deltaCount = (c: FakeConn): number => deltas(c.framesFrom(1)).length;
+const intervals = (c: FakeConn, from = 1): number[] => framesOfType(c, TYPE_BATCH_INTERVAL, from).flatMap((f) => (f.type === 'batchInterval' ? [f.intervalMs] : []));
+const deltaCount = (c: FakeConn): number => deltas(framesOfType(c, TYPE_DELTA)).length;
 /** 게이지의 마지막 값(받은 적 없으면 undefined) */
 const gauge = (h: Harness, name: string): number | undefined => h.metrics.filter((m) => m.name === name).at(-1)?.value;
 const valuesOf = (h: Harness, name: string): number[] => h.metrics.filter((m) => m.name === name).map((m) => m.value);
 
 let version = 0;
+/**
+ * 좌석 n개(좌석 i의 상태 1)인 메시지의 좌석 부분(앞 공백 포함). 좌석 수마다 한 번만 만들어 다시 쓴다(W11-rtgw-flake: 박자마다 3,400좌석 배열과
+ * 글을 새로 만들던 계산량을 덜어 느린 CI 러너에서 벽시계 한도를 넘지 않게 한다). 만든 글은 deltaText와 바이트까지 같다(RF-T6의 단언)
+ */
+const seatTails = new Map<number, string>();
+const seatTail = (n: number): string => {
+  let tail = seatTails.get(n);
+  if (tail === undefined) {
+    tail = Array.from({ length: n }, (_, i) => ` ${i}:1`).join('');
+    seatTails.set(n, tail);
+  }
+  return tail;
+};
+/** deltaText({ …m, seats: 좌석 i의 상태 1인 seats개 })와 같은 글 */
+const messageText = (m: { epoch: number; section: number; version: number; changedAtMs: number }, seats: number): string =>
+  `1 ${m.epoch} ${m.section} ${m.version} ${m.changedAtMs}${seatTail(seats)}`;
 /** 구역 section에 메시지 하나(changedAtMs = 지금 − ago, 좌석 seats개) */
 const publish = (h: Harness, section: number, o: { epoch?: number; ago?: number; seats?: number } = {}): void => {
-  const seats = Array.from({ length: o.seats ?? 1 }, (_, i) => [i, 1] as [number, number]);
-  h.sub.publish(channelOf('ev-1', section), deltaText({ epoch: o.epoch ?? 1, section, version: ++version, changedAtMs: h.clock.now() - (o.ago ?? 0), seats }));
+  h.sub.publish(channelOf('ev-1', section), messageText({ epoch: o.epoch ?? 1, section, version: ++version, changedAtMs: h.clock.now() - (o.ago ?? 0) }, o.seats ?? 1));
 };
 /** 그 연결이 다음에 묶음을 보낼 때 가짜 시계를 ms 민다(박자 처리 시간 → 표본 = 박자 늦음 + ms) */
 const delayNextDelta = (h: Harness, c: FakeConn, ms: number): void => {
@@ -78,6 +98,11 @@ const runWindow = (h: Harness, w: number, o: { driver: FakeConn; section: number
 const OVER_2 = [10, 60] as const;
 /** 51ms가 1/100인 창(a × 100 = n이라 넘음이 아니다) */
 const OVER_1 = [10] as const;
+/**
+ * 계산량을 줄인 뒤에도 로컬 중앙값이 80ms 이상(CI는 로컬보다 11~25배 느렸다)인 시험에만 주는 벽시계 한도(W11-rtgw-flake 계획 ②).
+ * 파일·설정 전체 한도(testTimeout)는 올리지 않는다. 판정과 시나리오 양은 그대로다
+ */
+const SLOW_TEST_MS = 30_000;
 
 /** 창 0~17을 넘음 창으로 돌고 18번째 창이 끝난 정각(180,000ms)의 박자에 Degraded로 바꾼다. 바뀐 박자의 시각을 돌려준다 */
 const enterDegraded = (h: Harness, driver: FakeConn, section: number): number => {
@@ -175,6 +200,7 @@ describe('S-T14 ① 보내기 버퍼로 그 연결만 1초 간격(ADR-0298 결�
     expect(gauge(h, 'realtime_gw_degraded')).toBeUndefined();
   });
 
+  // 가짜 시계로 박자 322개(박자마다 3,400좌석 메시지)를 돌려 느린 CI 러너에서 5초를 넘은 적이 있다(W11-rtgw-flake). 이 시험만 벽시계 한도를 SLOW_TEST_MS로 준다
   test('S-T14 ① RF-T6 들어오는 양(박자마다 약 10KB)보다 빨리 빼 가는(300KiB/s) 연결은 1초 동안 버퍼가 늘 남아도, 한 번 256KiB를 넘긴 뒤 차례 직전 버퍼가 64KiB 이하인 차례 30번 뒤 BatchInterval 100을 받는다(29번에는 아니다)', async () => {
     const h = harness({ monotonic: START });
     const RATE = 300 * 1024; // B/s
@@ -196,6 +222,15 @@ describe('S-T14 ① 보내기 버퍼로 그 연결만 1초 간격(ADR-0298 결�
     h.hub.receive(c, subscribeBytes([1]), true);
     await settle();
     const SEATS = 3_400; // 항목 10,208B
+    // W11-rtgw-flake: 미리 만든 좌석 부분으로 짠 글이 deltaText 글과 같다(허브가 받는 글은 고치기 전과 같다). 이 파일이 쓰는 좌석 수 모두.
+    // 글은 ASCII뿐이라 글자가 같으면 UTF-8 바이트도 같다(바이트 길이도 따로 본다)
+    for (const n of new Set([1, 10, ...BURST_65536, ...BURST_65535, SEATS])) {
+      const m = { epoch: 1, section: 1, version: version + 1, changedAtMs: h.clock.now() };
+      const want = deltaText({ ...m, seats: Array.from({ length: n }, (_, i) => [i, 1] as [number, number]) });
+      const got = messageText(m, n);
+      expect(got).toBe(want);
+      expect(Buffer.byteLength(got)).toBe(Buffer.byteLength(want));
+    }
     const step = (t: number): void => {
       moveTo(h, t);
       publish(h, 1, { seats: SEATS });
@@ -217,7 +252,7 @@ describe('S-T14 ① 보내기 버퍼로 그 연결만 1초 간격(ADR-0298 결�
     step(T + 30_100);
     expect(intervals(c)).toEqual([D.intervalMs, SPEC.intervalMs]);
     expect(c.closed).toBeUndefined();
-  });
+  }, SLOW_TEST_MS);
 
   test('S-T14 ① RF-T10 1초 간격인 연결도 1,048,577B 박자에 1013 slow consumer로 닫히고 게이지에서 빠지며, 1,048,576B인 연결은 열린 채 1초 간격이고, 상대가 닫으면(gone) 게이지가 1 → 0이다', () => {
     const h = harness({ monotonic: START });
@@ -366,6 +401,7 @@ describe('S-T14 ② 파드 전환: 박자 늦음의 10초 창(ADR-0298 결정 1�
     expect(h.degradedChanges).toHaveLength(1);
   });
 
+  // 가짜 시계로 박자 약 8,000개(박자마다 메시지 10개)를 돌려 느린 CI 러너에서 2,416ms(기본 한도 5초의 절반)가 걸렸다(W11-rtgw-flake). 이 시험만 벽시계 한도를 SLOW_TEST_MS로 준다
   test('S-T14 ② RF-T9 Degraded에서 p99 25ms 이하 창이 30개 이어지면 모든 연결이 BatchInterval 100을 받고 0이다. 29개로는 아니고, 26ms 2/100 창이 끼면 처음부터 세며, 25ms 정각 2/100 창은 괜찮음이다. 되돌린 박자의 1초 묶음(maxWaitMs 약 900)은 박자 늦음 0으로 세어 그 창 + 넘음 창 17개로는 들어가지 않는다', async () => {
     const h = harness({ monotonic: START });
     // 연결 번호 0~9가 구역 0~9: Degraded에서 박자마다 한 연결이 차례(흩기) → 창 하나에 n = 100
@@ -428,7 +464,7 @@ describe('S-T14 ② 파드 전환: 박자 늦음의 10초 창(ADR-0298 결정 1�
     runWindow(h, 96, { driver: conns[0]!, section: 0, overAt: OVER_2 });
     tickAt(h, 97 * W);
     expect(intervals(conns[0]!)).toEqual([D.intervalMs, SPEC.intervalMs, D.intervalMs]);
-  });
+  }, SLOW_TEST_MS);
 
   test.each([103, 107])('S-T14 ② RF-T1 Degraded에서 박자가 %ims마다 오고 realtime-gw 안 지연이 없으면 30창 뒤 모든 연결이 BatchInterval 100을 받고 게이지 0이다(29창에는 아니다). realtime_gw_tick_lag_ms에 박자 늦음이 남는다', async (P) => {
     const h = harness({ monotonic: START });
