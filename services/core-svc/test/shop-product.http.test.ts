@@ -130,7 +130,7 @@ describe('파트너 상품', () => {
   });
 });
 
-// ---- BAT-600: 상품 유형 표·유형 스키마(V-T46 ①②, ADR-0300 결정 1)와 한정 수량 고치기(P-T56 ⑧, ADR-0300 결정 3) ----
+// ---- BAT-600: 상품 유형 표·유형 스키마(V-T46 ①②, ADR-0300 결정 1)와 한정 수량 고치기(P-T57 ⑧, ADR-0300 결정 3) ----
 // 단언 값은 정본에서: 422 type 이름(product-type-invalid·product-attributes-invalid·product-limited-qty-invalid), 남은 수 = 남은 수 + (새 수량 − 옛 수량)
 describe('상품 유형과 속성 검사(BAT-600)', () => {
   const typeOf = (res: { payload: string }) => String(JSON.parse(res.payload).type);
@@ -216,7 +216,7 @@ describe('상품 유형과 속성 검사(BAT-600)', () => {
     expect(row(p.productId).attributes).toEqual({ perAccountLimit: 3 });
   });
 
-  test('P-T56 ⑧ 1개 팔린 뒤 한정 수량을 3에서 2로 고치면 남은 수가 1이고 재고 카운터 키가 지워진다', async () => {
+  test('P-T57 ⑧ 1개 팔린 뒤 한정 수량을 3에서 2로 고치면 남은 수가 1이고 재고 카운터 키가 지워진다', async () => {
     const p = JSON.parse((await create(TENANT, { name: '한정 3', limitedQty: 3 })).payload);
     store.rows.get(p.productId)!.stock = 2; // 1개 팔림
     stock.setCounter(p.productId, 2);
@@ -227,7 +227,7 @@ describe('상품 유형과 속성 검사(BAT-600)', () => {
     expect(stock.slots.get(p.productId)?.stock).toBeUndefined();
   });
 
-  test('P-T56 ⑧ 남은 수 식의 결과가 0이면 통과한다(경계)', async () => {
+  test('P-T57 ⑧ 남은 수 식의 결과가 0이면 통과한다(경계)', async () => {
     const p = JSON.parse((await create(TENANT, { name: '한정 3 경계 0', limitedQty: 3 })).payload);
     store.rows.get(p.productId)!.stock = 2;
     const res = await patch(p.productId, { limitedQty: 1 }, '"1"');
@@ -235,7 +235,7 @@ describe('상품 유형과 속성 검사(BAT-600)', () => {
     expect(JSON.parse(res.payload)).toMatchObject({ stockRemaining: 0, stockTotal: 1 });
   });
 
-  test('P-T56 ⑧ 2개 팔린 뒤 0으로(결과 −2), 1개 팔린 뒤 0으로(결과 −1) 고치면 422 product-limited-qty-invalid이고 남은 수·카운터가 그대로다', async () => {
+  test('P-T57 ⑧ 2개 팔린 뒤 0으로(결과 −2), 1개 팔린 뒤 0으로(결과 −1) 고치면 422 product-limited-qty-invalid이고 남은 수·카운터가 그대로다', async () => {
     for (const [sold, remaining] of [
       [2, 1],
       [1, 2],
@@ -252,7 +252,7 @@ describe('상품 유형과 속성 검사(BAT-600)', () => {
     }
   });
 
-  test('P-T56 ⑧ 한정 수량을 늘리면 남은 수에 늘린 만큼 더한다(덮어쓰지 않는다)', async () => {
+  test('P-T57 ⑧ 한정 수량을 늘리면 남은 수에 늘린 만큼 더한다(덮어쓰지 않는다)', async () => {
     const p = JSON.parse((await create(TENANT, { name: '한정 3 늘리기', limitedQty: 3 })).payload);
     store.rows.get(p.productId)!.stock = 1; // 2개 팔림
     const res = await patch(p.productId, { limitedQty: 5 }, '"1"');

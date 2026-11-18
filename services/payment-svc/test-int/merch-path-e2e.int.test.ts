@@ -1,10 +1,10 @@
-// 굿즈 결제 실제 연결 시험(BAT-600, P-T56 ①②, P-T55 ⑤⑥, V-T35 ①, P-T57 ①④⑤). 가짜 API 대신 실제 서비스를 잇는다:
+// 굿즈 결제 실제 연결 시험(BAT-600, P-T57 ①②, P-T56 ⑤⑥, V-T35 ①, P-T58 ①④⑤). 가짜 API 대신 실제 서비스를 잇는다:
 // core-svc HTTP(주문·결제 시도·결제 접수, 실제 PostgreSQL·Valkey 재고 Lua) → 실제 gRPC PrepareCheckout(payment-svc, ORDER_KIND_MERCH)
 // → 시뮬레이터 인증(/sim/authenticate, 결제창 대신) → 실제 gRPC ConfirmPayment → 승인 실행기 → PG 시뮬레이터 승인
 // → core-svc 결과 당기기(MerchPaymentResults, 실제 BatchGetPayments) → 주문 PAID·FAILED. 미수령 자동 취소는 실제 CancelPayment로 시뮬레이터 결제를 취소한다.
 // 부가 상품의 티켓 보유는 실제 ticket-svc gRPC 서버(ListHeldTickets, 메모리 저장소)로 확인한다.
 // Kafka만 빠진다(이 PC에서 네이티브 모듈이 막혀 있어 Outbox 행의 값을 purchase-svc 결과 처리기에 그대로 넘긴다).
-// 단언 값은 정본에서: docs/features/payment.md §11 P-T55·P-T56·P-T57, docs/verification.md V-T35, ADR-0299 결정 1·3·4, ADR-0300 결정 3~6, ADR-0301 결정 1~5.
+// 단언 값은 정본에서: docs/features/payment.md §11 P-T56·P-T57·P-T58, docs/verification.md V-T35, ADR-0299 결정 1·3·4, ADR-0300 결정 3~6, ADR-0301 결정 1~5.
 // 한정 수량은 3(코드 기본값과 상관없는 시험 값), 재고 키 이름은 ADR-0300 결정 3의 글자 그대로 적는다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
@@ -342,7 +342,7 @@ async function pickupOrder(accountId: string, productId: string, slotId: string,
 }
 
 describe('굿즈 결제 실제 연결(core-svc → payment-svc → 시뮬레이터)', () => {
-  test('P-T56 ① P-T55 ⑤⑥ 한정 3개 상품을 주문·결제 시도·접수·승인하면 PAID, product_stock 2, 카운터 2, 예약 원소 0이고 승인 사건은 MERCH·회차 없음·주문 ID 키다', async () => {
+  test('P-T57 ① P-T56 ⑤⑥ 한정 3개 상품을 주문·결제 시도·접수·승인하면 PAID, product_stock 2, 카운터 2, 예약 원소 0이고 승인 사건은 MERCH·회차 없음·주문 ID 키다', async () => {
     const productId = await createProduct({ name: '한정 응원봉' });
     const slotId = await farSlot(productId);
     const account = randomUUID();
@@ -354,7 +354,7 @@ describe('굿즈 결제 실제 연결(core-svc → payment-svc → 시뮬레이�
     expect(await unpaidOf(productId, account)).toBe(orderId);
 
     const a = await pay(account, orderId, 20_000);
-    // P-T55 ⑤: 굿즈 복귀 주소(ADR-0299 결정 3), 회차 주소(/booking/…)가 아니다
+    // P-T56 ⑤: 굿즈 복귀 주소(ADR-0299 결정 3), 회차 주소(/booking/…)가 아니다
     expect(a.successUrl).toBe(`${WEB}/shop/checkout/return?order=${orderId}&pg=SIMULATOR`);
     await accept(account, orderId, a, 20_000);
     // 접수 트랜잭션이 PostgreSQL 재고를 깎는다(조건부 갱신)
@@ -372,7 +372,7 @@ describe('굿즈 결제 실제 연결(core-svc → payment-svc → 시뮬레이�
     const items = (await coreAdmin.pool.query<{ status: string }>('select status from merch_order_item where order_id = $1', [orderId])).rows;
     expect(items.map((i) => i.status)).toEqual(['READY']);
 
-    // P-T55 ⑥: 원장 order_kind MERCH·event_id NULL(ADR-0299 결정 1), Outbox 승인 사건 키 = 주문 ID, orderKind MERCH, eventId 없음
+    // P-T56 ⑥: 원장 order_kind MERCH·event_id NULL(ADR-0299 결정 1), Outbox 승인 사건 키 = 주문 ID, orderKind MERCH, eventId 없음
     const ledger = (await adminPay.pool.query<{ order_kind: string; event_id: string | null; id: string }>('select id, order_kind, event_id from payment where order_id = $1', [orderId])).rows;
     expect(ledger).toEqual([{ id: row!.payment_id, order_kind: 'MERCH', event_id: null }]);
     const outByJson = (await adminPay.pool.query<{ topic: string; msg_key: string; payload: Buffer }>('select topic, msg_key, payload from outbox order by seq')).rows.filter((x) => (JSON.parse(x.payload.toString('utf8')) as { orderId?: string }).orderId === orderId);
@@ -410,7 +410,7 @@ describe('굿즈 결제 실제 연결(core-svc → payment-svc → 시뮬레이�
     expect((await simLedger()).filter((x) => x.order_ref === a.checkoutOrderId)).toHaveLength(1);
   }, 120_000);
 
-  test('P-T56 ② 결제사가 거절하면 주문 FAILED, product_stock과 카운터가 3으로 돌아오고 과금이 0건이다', async () => {
+  test('P-T57 ② 결제사가 거절하면 주문 FAILED, product_stock과 카운터가 3으로 돌아오고 과금이 0건이다', async () => {
     const productId = await createProduct({ name: '한정 머플러' });
     const slotId = await farSlot(productId);
     const account = randomUUID();
@@ -473,7 +473,7 @@ describe('굿즈 결제 실제 연결(core-svc → payment-svc → 시뮬레이�
     expect(await eventPaymentRows(EVENT, paymentId)).toBe(0);
   }, 120_000);
 
-  test('P-T57 ①④⑤ 금요일 21:00 KST에 끝난 현장 수령 주문: 토요일은 그대로, 월요일에 받지 않은 항목 금액만 실제 CancelPayment로 취소하고 두 번 돌려도 시뮬레이터 취소는 1건이다', async () => {
+  test('P-T58 ①④⑤ 금요일 21:00 KST에 끝난 현장 수령 주문: 토요일은 그대로, 월요일에 받지 않은 항목 금액만 실제 CancelPayment로 취소하고 두 번 돌려도 시뮬레이터 취소는 1건이다', async () => {
     // 지금 뒤의 첫 금요일 21:00 KST(= 그날 12:00Z, 지금 + 1시간보다 뒤)
     const now = Date.now();
     let fri = Date.UTC(new Date(now + 9 * 3_600_000).getUTCFullYear(), new Date(now + 9 * 3_600_000).getUTCMonth(), new Date(now + 9 * 3_600_000).getUTCDate(), 12);

@@ -1,4 +1,4 @@
-// 현장 수령 미수령 자동 취소 통합 시험(BUILD_ORDER LCH-020, BAT-600, P-T57 ①~⑤, 장애 주입 F-7, ADR-0301 결정 5).
+// 현장 수령 미수령 자동 취소 통합 시험(BUILD_ORDER LCH-020, BAT-600, P-T58 ①~⑤, 장애 주입 F-7, ADR-0301 결정 5).
 // 실제 PostgreSQL 18(core_app 역할)에 PAID 현장 수령 주문·수령 시간대를 넣고 정비 일 merch-unclaimed-cancel(MerchUnclaimed.run)과 환급 다시 부르기(MerchUnclaimed.retry)를
 // 가짜 시계와 시험 안의 가짜 결제 포트로 돌린다(실제 CancelPayment·시뮬레이터 취소는 payment-svc merch-path-e2e가 본다).
 // 단언 값은 정본에서: 10:00 KST [가정], 은행 영업일(주말 건너뜀), 마지막 시간대가 끝난 날의 다음 영업일, 항목 READY → CANCELLED(cancel_reason UNCLAIMED) → REFUNDED,
@@ -164,7 +164,7 @@ function job(clock: FakeClock, payments: FakePayments) {
 const moveTo = (clock: FakeClock, ms: number) => clock.advance(ms - clock.now());
 
 describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
-  test('P-T57 ① 마지막 시간대가 금요일 21:00 KST에 끝나면 금·토요일에는 바뀐 행이 없고 월요일 10:00 KST에 취소·전액 환급되며 재고는 그대로다', async () => {
+  test('P-T58 ① 마지막 시간대가 금요일 21:00 KST에 끝나면 금·토요일에는 바뀐 행이 없고 월요일 10:00 KST에 취소·전액 환급되며 재고는 그대로다', async () => {
     // 고른 시간대는 목요일 21:00에 끝나지만 그 상품·그 회차의 마지막 시간대는 금요일 21:00에 끝난다
     const o = await paidPickupOrder({ items: [{ quantity: 2, unitAmount: 15_000 }], lastEndsAt: FRI_2100, chosenEndsAt: THU_2100 });
     const clock = fakeClock({ now: FRI_1000 });
@@ -195,7 +195,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(await stocks(o.products)).toEqual([1]);
   });
 
-  test('P-T57 ① 일요일에 끝나면 월요일에, 월요일 08:00 KST에 끝나면 그날 10:00이 아니라 화요일에 취소한다', async () => {
+  test('P-T58 ① 일요일에 끝나면 월요일에, 월요일 08:00 KST에 끝나면 그날 10:00이 아니라 화요일에 취소한다', async () => {
     const sun = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 9_000 }], lastEndsAt: SUN_2100 });
     const mon = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 7_000 }], lastEndsAt: MON_0800 });
     const clock = fakeClock({ now: MON_1000 });
@@ -212,7 +212,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(await items(mon.orderId)).toEqual([{ status: 'REFUNDED', cancelReason: 'UNCLAIMED', refundedAmount: 7_000 }]);
   });
 
-  test('P-T57 ② 월요일 실행 전에 교환권을 확인했으면 바뀐 행이 없고 결제 취소가 0건이다', async () => {
+  test('P-T58 ② 월요일 실행 전에 교환권을 확인했으면 바뀐 행이 없고 결제 취소가 0건이다', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
     await pickUp(o.itemIds[0]!, FRI_2100 - 60_000);
     const clock = fakeClock({ now: MON_1000 });
@@ -224,7 +224,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(await refunds(o.orderId)).toEqual([]);
   });
 
-  test('P-T57 ③ 결제 취소가 CANCEL_PENDING이면 10분 − 1ms에는 부르지 않고 10분에 같은 취소 ID로 다시 불러 REFUNDED가 된다(F-7)', async () => {
+  test('P-T58 ③ 결제 취소가 CANCEL_PENDING이면 10분 − 1ms에는 부르지 않고 10분에 같은 취소 ID로 다시 불러 REFUNDED가 된다(F-7)', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
     const clock = fakeClock({ now: MON_1000 });
     const payments = new FakePayments(['CANCEL_PENDING', 'CANCELLED']);
@@ -249,7 +249,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(payments.calls).toHaveLength(2);
   });
 
-  test('P-T57 ③ 결제 취소 호출이 실패(UNKNOWN)해도 10분 뒤 같은 취소 ID로 다시 불러 끝낸다(F-7)', async () => {
+  test('P-T58 ③ 결제 취소 호출이 실패(UNKNOWN)해도 10분 뒤 같은 취소 ID로 다시 불러 끝낸다(F-7)', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 3, unitAmount: 4_000 }], lastEndsAt: FRI_2100 });
     const clock = fakeClock({ now: MON_1000 });
     const payments = new FakePayments(['UNKNOWN', 'CANCELLED']);
@@ -267,7 +267,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(await items(o.orderId)).toEqual([{ status: 'REFUNDED', cancelReason: 'UNCLAIMED', refundedAmount: 12_000 }]);
   });
 
-  test('P-T57 ③ 환급이 3일 넘게 끝나지 않으면 SEV2 한 줄을 한 번만 남긴다(3일 정각에는 아직 아니다)', async () => {
+  test('P-T58 ③ 환급이 3일 넘게 끝나지 않으면 SEV2 한 줄을 한 번만 남긴다(3일 정각에는 아직 아니다)', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
     const clock = fakeClock({ now: MON_1000 });
     const payments = new FakePayments(Array.from({ length: 10 }, () => 'CANCEL_PENDING' as const));
@@ -287,7 +287,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(new Set(payments.calls.map((c) => c.cancellationId)).size).toBe(1);
   });
 
-  test('P-T57 ③ 결제사가 거절(REJECTED)하면 SEV2 한 줄(kind merch-refund-rejected, 주문 ID만)이고 환급 행은 상태 REJECTED로 금액과 함께 남고 다시 부르지 않는다', async () => {
+  test('P-T58 ③ 결제사가 거절(REJECTED)하면 SEV2 한 줄(kind merch-refund-rejected, 주문 ID만)이고 환급 행은 상태 REJECTED로 금액과 함께 남고 다시 부르지 않는다', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
     const clock = fakeClock({ now: MON_1000 });
     const payments = new FakePayments(['REJECTED']);
@@ -306,7 +306,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(payments.calls).toHaveLength(1);
   });
 
-  test('P-T57 ④ 항목 둘 가운데 하나만 받았으면 받지 않은 항목 금액만 취소한다', async () => {
+  test('P-T58 ④ 항목 둘 가운데 하나만 받았으면 받지 않은 항목 금액만 취소한다', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 12_000 }, { quantity: 2, unitAmount: 8_000 }], lastEndsAt: FRI_2100 });
     await pickUp(o.itemIds[0]!, FRI_2100 - 60_000);
     const clock = fakeClock({ now: MON_1000 });
@@ -323,7 +323,7 @@ describe('현장 수령 미수령 자동 취소(실제 PostgreSQL)', () => {
     expect(await stocks(o.products)).toEqual([1, 1]);
   });
 
-  test('P-T57 ⑤ 월요일에 정비 일을 두 번 돌려도 결제 취소는 1건이다', async () => {
+  test('P-T58 ⑤ 월요일에 정비 일을 두 번 돌려도 결제 취소는 1건이다', async () => {
     const o = await paidPickupOrder({ items: [{ quantity: 1, unitAmount: 15_000 }], lastEndsAt: FRI_2100 });
     const clock = fakeClock({ now: MON_1000 });
     const payments = new FakePayments();

@@ -1,5 +1,5 @@
 // 결제 결과 소비자가 굿즈·티켓 연동 부가 상품 결제 사건(orderKind MERCH, 회차 eventId 없음)을 반영하지 않고 건너뛰는지 본다
-// (P-T55 ⑥, ADR-0299 결정 4, docs/api/asyncapi.yaml PaymentEvent.orderKind·eventId, docs/api/avro/peaket/trade/PaymentEvent.avsc).
+// (P-T56 ⑥, ADR-0299 결정 4, docs/api/asyncapi.yaml PaymentEvent.orderKind·eventId, docs/api/avro/peaket/trade/PaymentEvent.avsc).
 // 정본: orderKind가 TICKET이 아닌 사건은 반영하지 않고 payment_result_skipped_total{reason}(merch·unrecognized)을 1 올린다. 이 칸 전에 낸 사건(칸 없음)은 TICKET이다.
 // 값 바이트는 생산자(payment-svc)의 실제 사건 만들기(buildPaymentEvent)와 값 부호화(jsonPaymentEventCodec, 지금 trade.payments의 값 형식은 JSON 대역이다)로 만든다.
 // Avro null 갈래를 JSON으로 옮긴 꼴(eventId: null)도 따로 넣는다. 반영 쓰임새는 실제 ApplyPaymentResult(포트만 메모리 가짜)라 읽기·쓰기가 0번인지 센다.
@@ -99,7 +99,7 @@ beforeEach(() => {
 });
 
 describe('굿즈 결제 사건 건너뛰기(생산자의 실제 사건 값)', () => {
-  test('P-T55 ⑥ 생산자가 낸 굿즈 승인 사건(eventId null 칸 뺌, orderKind MERCH, Kafka 키 주문 ID)은 반영하지 않고 merch로 1번 센다', async () => {
+  test('P-T56 ⑥ 생산자가 낸 굿즈 승인 사건(eventId null 칸 뺌, orderKind MERCH, Kafka 키 주문 ID)은 반영하지 않고 merch로 1번 센다', async () => {
     const { message, key, bytes } = producedMerch();
     // 시험 재료가 정본 모양인지 먼저 본다(ADR-0299 결정 4)
     expect(message).toMatchObject({ eventId: null, orderKind: 'MERCH', orderId: MERCH_ORDER, type: 'APPROVED' });
@@ -114,7 +114,7 @@ describe('굿즈 결제 사건 건너뛰기(생산자의 실제 사건 값)', ()
     expect(skips).toEqual({ merch: 1, unrecognized: 0 });
   });
 
-  test('P-T55 ⑥ 굿즈 사건은 종류(승인·실패·결과 모름·취소)와 상관없이 모두 건너뛰고 한 건에 1씩 센다', async () => {
+  test('P-T56 ⑥ 굿즈 사건은 종류(승인·실패·결과 모름·취소)와 상관없이 모두 건너뛰고 한 건에 1씩 센다', async () => {
     const { handler, skips, executed } = handlerWith();
     const finishes: Parameters<typeof buildPaymentEvent>[0]['finish'][] = [
       { status: 'APPROVED', result: 'APPROVED', approvedAtMs: APPLY_NOW - 1_000 },
@@ -137,7 +137,7 @@ describe('굿즈 결제 사건 건너뛰기(생산자의 실제 사건 값)', ()
     expect(skips).toEqual({ merch: 4, unrecognized: 0 });
   });
 
-  test('P-T55 ⑥ Avro null 갈래를 옮긴 꼴(eventId: null)의 굿즈 사건도 건너뛴다(보류하지 않는다)', async () => {
+  test('P-T56 ⑥ Avro null 갈래를 옮긴 꼴(eventId: null)의 굿즈 사건도 건너뛴다(보류하지 않는다)', async () => {
     const { handler, skips } = handlerWith();
     const v = wireEvent({ eventId: null, orderId: MERCH_ORDER, orderKind: 'MERCH' });
     const r = handler.decode(consumed(json(v), MERCH_ORDER));
@@ -146,7 +146,7 @@ describe('굿즈 결제 사건 건너뛰기(생산자의 실제 사건 값)', ()
     expect(skips).toEqual({ merch: 1, unrecognized: 0 });
   });
 
-  test('P-T55 ⑥ 굿즈 사건에 회차가 실려 와도(티켓 연동 부가 상품 오해) 반영하지 않고 merch로 센다', async () => {
+  test('P-T56 ⑥ 굿즈 사건에 회차가 실려 와도(티켓 연동 부가 상품 오해) 반영하지 않고 merch로 센다', async () => {
     const { handler, skips, executed } = handlerWith();
     const r = handler.decode(consumed(json(wireEvent({ orderId: MERCH_ORDER, orderKind: 'MERCH' })), EVENT));
     expect(r).toMatchObject({ kind: 'skip', reason: 'merch', key: MERCH_ORDER });
@@ -157,7 +157,7 @@ describe('굿즈 결제 사건 건너뛰기(생산자의 실제 사건 값)', ()
 });
 
 describe('모르는 주문 종류와 티켓 사건(대조)', () => {
-  test('P-T55 ⑥ 모르는 주문 종류는 값마다(UNRECOGNIZED·새 이름·소문자·빈 글·숫자) 반영하지 않고 unrecognized로 센다', async () => {
+  test('P-T56 ⑥ 모르는 주문 종류는 값마다(UNRECOGNIZED·새 이름·소문자·빈 글·숫자) 반영하지 않고 unrecognized로 센다', async () => {
     const { handler, skips, executed } = handlerWith();
     const kinds: unknown[] = ['UNRECOGNIZED', 'VIP', 'ticket', 'merch', '', 1];
     for (const orderKind of kinds) {
@@ -172,7 +172,7 @@ describe('모르는 주문 종류와 티켓 사건(대조)', () => {
     expect(skips).toEqual({ merch: 0, unrecognized: kinds.length });
   });
 
-  test('P-T55 ⑥ 생산자가 낸 티켓 사건(orderKind TICKET, 키 = 회차)은 지금처럼 반영하고 건너뜀 수는 0이다', async () => {
+  test('P-T56 ⑥ 생산자가 낸 티켓 사건(orderKind TICKET, 키 = 회차)은 지금처럼 반영하고 건너뜀 수는 0이다', async () => {
     const { message, key, bytes } = producedTicket();
     const { handler, skips, executed } = handlerWith();
     const r = handler.decode(consumed(bytes, key));
@@ -185,7 +185,7 @@ describe('모르는 주문 종류와 티켓 사건(대조)', () => {
     expect(skips).toEqual({ merch: 0, unrecognized: 0 });
   });
 
-  test('P-T55 ⑥ 주문 종류 칸이 없는 옛 판 사건은 TICKET으로 읽어 반영한다', async () => {
+  test('P-T56 ⑥ 주문 종류 칸이 없는 옛 판 사건은 TICKET으로 읽어 반영한다', async () => {
     const { handler, skips, executed } = handlerWith();
     const v = wireEvent();
     expect(Object.keys(v)).not.toContain('orderKind');
@@ -196,7 +196,7 @@ describe('모르는 주문 종류와 티켓 사건(대조)', () => {
     expect(skips).toEqual({ merch: 0, unrecognized: 0 });
   });
 
-  test('P-T55 ⑥ TICKET인데 회차가 없으면(칸 뺌·null) 반영도 건너뛰기도 하지 않고 모양이 틀린 사건으로 던진다(보류 길)', async () => {
+  test('P-T56 ⑥ TICKET인데 회차가 없으면(칸 뺌·null) 반영도 건너뛰기도 하지 않고 모양이 틀린 사건으로 던진다(보류 길)', async () => {
     const { handler, skips, executed } = handlerWith();
     for (const eventId of [undefined, null]) {
       const v = wireEvent({ orderKind: 'TICKET', eventId });
@@ -212,7 +212,7 @@ describe('모르는 주문 종류와 티켓 사건(대조)', () => {
 });
 
 describe('키 단위 소비자 안에서', () => {
-  test('P-T55 ⑥ 굿즈 사건은 보류 표에 들어가지 않고 파티션을 멈추지 않으며, 같은 주문의 뒤 사건과 다른 티켓 주문 사건도 막지 않는다', async () => {
+  test('P-T56 ⑥ 굿즈 사건은 보류 표에 들어가지 않고 파티션을 멈추지 않으며, 같은 주문의 뒤 사건과 다른 티켓 주문 사건도 막지 않는다', async () => {
     const { handler, skips, executed } = handlerWith();
     const held = fakeHeldStore();
     const pauses = { pause: 0 };
@@ -242,7 +242,7 @@ describe('키 단위 소비자 안에서', () => {
 });
 
 describe('운영 지표(PromPaymentEventSkipSignals)', () => {
-  test('P-T55 ⑥ 굿즈 사건 하나를 건너뛰면 payment_result_skipped_total{reason="merch"}가 정확히 1, unrecognized는 0이다(두 이름표는 처음부터 0으로 보인다)', async () => {
+  test('P-T56 ⑥ 굿즈 사건 하나를 건너뛰면 payment_result_skipped_total{reason="merch"}가 정확히 1, unrecognized는 0이다(두 이름표는 처음부터 0으로 보인다)', async () => {
     const metrics = new PlatformMetrics('purchase-svc');
     const signals = new PromPaymentEventSkipSignals().register(metrics.registry);
     const before = await metrics.registry.getSingleMetric('payment_result_skipped_total')!.get();

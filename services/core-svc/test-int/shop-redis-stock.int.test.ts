@@ -57,14 +57,14 @@ async function fresh(stockValue: number): Promise<string> {
 const reserve = (p: string, orderId: string, accountId: string, quantity: number, untilMs = UNTIL) => stock.reserve({ productId: p, orderId, accountId, quantity, untilMs, ttlSeconds: TTL_S });
 
 describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
-  test('P-T56 ③ RESERVE는 남은 수가 수량과 같으면 받아 남은 수 0을 돌려주고 키 넷에 그 주문을 넣는다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T57 ③ RESERVE는 남은 수가 수량과 같으면 받아 남은 수 0을 돌려주고 키 넷에 그 주문을 넣는다 [ASVS v5.0.0-2.3.4]', async () => {
     const p = await fresh(3);
     const [o, a] = [randomUUID(), randomUUID()];
     expect(await reserve(p, o, a, 3)).toEqual({ kind: 'OK', remaining: 0 });
     expect(await snapshot(p)).toEqual({ stock: '0', resv: { [o]: UNTIL }, qty: { [o]: '3' }, unpaid: { [a]: o } });
   });
 
-  test('P-T56 ③ RESERVE는 남은 수가 수량보다 1 적으면 SOLD_OUT과 남은 수를 돌려주고 키 넷을 바꾸지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T57 ③ RESERVE는 남은 수가 수량보다 1 적으면 SOLD_OUT과 남은 수를 돌려주고 키 넷을 바꾸지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
     const p = await fresh(2);
     const before = await snapshot(p);
     expect(await reserve(p, randomUUID(), randomUUID(), 3)).toEqual({ kind: 'SOLD_OUT', remaining: 2 });
@@ -72,7 +72,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     expect(before).toEqual({ stock: '2', resv: {}, qty: {}, unpaid: {} });
   });
 
-  test('P-T56 ⑤ RESERVE는 카운터 키가 없으면 NO_COUNTER이고 아무 키도 만들지 않는다', async () => {
+  test('P-T57 ⑤ RESERVE는 카운터 키가 없으면 NO_COUNTER이고 아무 키도 만들지 않는다', async () => {
     const p = randomUUID();
     expect(await reserve(p, randomUUID(), randomUUID(), 1)).toEqual({ kind: 'NO_COUNTER' });
     expect(await exists(p)).toBe(0);
@@ -102,7 +102,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     expect(await snapshot(p)).toEqual({ stock: '3', resv: { [o2]: UNTIL }, qty: { [o2]: '1' }, unpaid: { [a]: o2 } });
   });
 
-  test('P-T56 ③ 같은 주문을 다시 RESERVE하면 두 번 깎지 않고 OK와 지금 남은 수다', async () => {
+  test('P-T57 ③ 같은 주문을 다시 RESERVE하면 두 번 깎지 않고 OK와 지금 남은 수다', async () => {
     const p = await fresh(5);
     const [o, a] = [randomUUID(), randomUUID()];
     expect(await reserve(p, o, a, 2)).toEqual({ kind: 'OK', remaining: 3 });
@@ -110,7 +110,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     expect(await snapshot(p)).toEqual({ stock: '3', resv: { [o]: UNTIL }, qty: { [o]: '2' }, unpaid: { [a]: o } });
   });
 
-  test('P-T56 ③ RESERVE는 키 넷 모두에 받은 수명을 다시 건다(모든 키에 TTL, docs/data.md §3)', async () => {
+  test('P-T57 ③ RESERVE는 키 넷 모두에 받은 수명을 다시 건다(모든 키에 TTL, docs/data.md §3)', async () => {
     const p = await fresh(5);
     // 다시 만들기가 건 수명을 줄여 두고 예약이 다시 거는지 본다
     for (const k of Object.values(keys(p))) await cmd(['EXPIRE', k, '100']);
@@ -122,7 +122,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     }
   });
 
-  test('P-T56 ② RELEASE(restore=1)는 원소·수량 칸·그 주문을 가리키는 unpaid 칸을 지우고 카운터를 수량만큼 돌린다. 두 번째는 아무것도 돌리지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T57 ② RELEASE(restore=1)는 원소·수량 칸·그 주문을 가리키는 unpaid 칸을 지우고 카운터를 수량만큼 돌린다. 두 번째는 아무것도 돌리지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
     const p = await fresh(5);
     const [o, a] = [randomUUID(), randomUUID()];
     const [o2, b] = [randomUUID(), randomUUID()];
@@ -134,7 +134,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     expect(await snapshot(p)).toEqual({ stock: '4', resv: { [o2]: UNTIL }, qty: { [o2]: '1' }, unpaid: { [b]: o2 } });
   });
 
-  test('P-T56 ① RELEASE(restore=0)는 원소·수량 칸·unpaid 칸을 지우고 카운터를 돌리지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T57 ① RELEASE(restore=0)는 원소·수량 칸·unpaid 칸을 지우고 카운터를 돌리지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
     const p = await fresh(3);
     const [o, a] = [randomUUID(), randomUUID()];
     await reserve(p, o, a, 2);
@@ -181,7 +181,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     expect(await snapshot(p)).toEqual({ stock: '4', resv: { [o]: UNTIL }, qty: { [o]: '1' }, unpaid: {} });
   });
 
-  test('P-T56 ⑤ 다시 만들기는 카운터 = stock − 예약 합으로 넣고 예약 원소·수량·unpaid 칸을 넣는다', async () => {
+  test('P-T57 ⑤ 다시 만들기는 카운터 = stock − 예약 합으로 넣고 예약 원소·수량·unpaid 칸을 넣는다', async () => {
     const p = randomUUID();
     const [o1, a1, o2, a2] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
     expect(
@@ -199,7 +199,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     for (const k of Object.values(keys(p))) expect(Number(await cmd(['PTTL', k])), k).toBeGreaterThan(TTL_S * 1000 - 5_000);
   });
 
-  test('P-T56 ⑤ 다시 만들기는 카운터가 이미 있으면 false이고 아무것도 바꾸지 않는다(SET NX 꼴)', async () => {
+  test('P-T57 ⑤ 다시 만들기는 카운터가 이미 있으면 false이고 아무것도 바꾸지 않는다(SET NX 꼴)', async () => {
     const p = await fresh(4);
     const [o, a] = [randomUUID(), randomUUID()];
     await reserve(p, o, a, 1, 5_000_000);
@@ -208,7 +208,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     expect(await snapshot(p)).toEqual(before);
   });
 
-  test('P-T56 ⑤ 다시 만들기는 이미 있는 예약 원소의 점수·수량·unpaid 칸을 덮지 않는다', async () => {
+  test('P-T57 ⑤ 다시 만들기는 이미 있는 예약 원소의 점수·수량·unpaid 칸을 덮지 않는다', async () => {
     const p = randomUUID();
     const [o, a] = [randomUUID(), randomUUID()];
     // 카운터만 사라진 상태: 원소는 남아 있다
@@ -242,7 +242,7 @@ describe('굿즈 한정 재고 Redis(실제 Valkey)', () => {
     expect(await resv(p)).toEqual({ [o]: 61_000 });
   });
 
-  test('P-T56 ⑧ clearCounter는 카운터 키만 지우고 예약 원소·수량·unpaid 칸은 남긴다', async () => {
+  test('P-T57 ⑧ clearCounter는 카운터 키만 지우고 예약 원소·수량·unpaid 칸은 남긴다', async () => {
     const p = await fresh(3);
     const [o, a] = [randomUUID(), randomUUID()];
     await reserve(p, o, a, 1);

@@ -1,4 +1,4 @@
-// 굿즈 결제의 결제창 준비와 승인 명령(ADR-0299 결정 1~4, docs/features/payment.md §11 P-T55, BAT-600)을 실제 PostgreSQL 18, 실제 gRPC 서버,
+// 굿즈 결제의 결제창 준비와 승인 명령(ADR-0299 결정 1~4, docs/features/payment.md §11 P-T56, BAT-600)을 실제 PostgreSQL 18, 실제 gRPC 서버,
 // 실제 HTTP 시뮬레이터 결제사(@peaket/pg-simulator)와 승인 실행기로 돈다.
 // 정본 값: 원장 payment.order_kind(TICKET·MERCH, 기본 TICKET)와 CHECK (order_kind = 'TICKET') = (event_id IS NOT NULL)(결정 1),
 // ConfirmPaymentRequest.order_kind = 12, UNSPECIFIED = TICKET, MERCH는 event_id·entry_opens_at이 비어야 함, 다시 부를 때 order_kind 대조와 SEV2 한 줄(kind payment-confirm-mismatch)(결정 2),
@@ -249,7 +249,7 @@ const insertPayment = (over: Record<string, unknown> = {}) => {
 };
 
 describe('마이그레이션 0022(payment.order_kind)', () => {
-  test('P-T55 ① 칸을 주지 않은 행은 TICKET이고, MERCH는 회차가 비어야만 들어간다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T56 ① 칸을 주지 않은 행은 TICKET이고, MERCH는 회차가 비어야만 들어간다 [ASVS v5.0.0-2.3.4]', async () => {
     const ticket = newId();
     await insertPayment({ id: ticket });
     expect((await q<{ order_kind: string }>('select order_kind from payment where id = $1', [ticket]))[0]!.order_kind).toBe('TICKET');
@@ -264,11 +264,11 @@ describe('마이그레이션 0022(payment.order_kind)', () => {
     ['칸 없음(기본 TICKET)에 회차가 없음', { event_id: null }, 'payment_order_kind_event_check'],
     ['목록 밖 주문 종류', { order_kind: 'GIFT' }, 'payment_order_kind_check'],
     ['소문자 merch', { order_kind: 'merch', event_id: null }, 'payment_order_kind_check'],
-  ])('P-T55 ① CHECK가 %s을 23514로 막는다 [ASVS v5.0.0-2.2.1]', async (_n, over, constraint) => {
+  ])('P-T56 ① CHECK가 %s을 23514로 막는다 [ASVS v5.0.0-2.2.1]', async (_n, over, constraint) => {
     await expect(insertPayment(over)).rejects.toMatchObject({ code: '23514', constraint });
   });
 
-  test('P-T55 ① order_kind는 NOT NULL이다', async () => {
+  test('P-T56 ① order_kind는 NOT NULL이다', async () => {
     await expect(insertPayment({ order_kind: null, event_id: null })).rejects.toMatchObject({ code: '23502' });
   });
 });
@@ -276,7 +276,7 @@ describe('마이그레이션 0022(payment.order_kind)', () => {
 // ───────────────────────────── 승인 명령(①~④) ─────────────────────────────
 
 describe('굿즈 승인 명령 접수(ConfirmPayment)', () => {
-  test('P-T55 ① MERCH에 회차 칸이 빈 명령은 IN_PROGRESS이고 원장 1행(order_kind MERCH, event_id NULL)·이력 첫 행 1행·승인 명령 1행이다 [ASVS v5.0.0-2.3.3]', async () => {
+  test('P-T56 ① MERCH에 회차 칸이 빈 명령은 IN_PROGRESS이고 원장 1행(order_kind MERCH, event_id NULL)·이력 첫 행 1행·승인 명령 1행이다 [ASVS v5.0.0-2.3.3]', async () => {
     const f = merchConfirm({ pg: 'SIMULATOR' });
     const before = await tableCounts(admin);
     const reply = await confirm(f.request);
@@ -292,7 +292,7 @@ describe('굿즈 승인 명령 접수(ConfirmPayment)', () => {
     expect(l.jobs[0]!.payment_id).toBe(reply.payment_id);
   });
 
-  test('P-T55 ② 같은 MERCH 명령을 다시 부르면 같은 답이고 행이 그대로다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T56 ② 같은 MERCH 명령을 다시 부르면 같은 답이고 행이 그대로다 [ASVS v5.0.0-2.3.4]', async () => {
     const f = merchConfirm();
     const first = await confirm(f.request);
     const ledger = await ledgerOf(admin, f.orderId);
@@ -307,7 +307,7 @@ describe('굿즈 승인 명령 접수(ConfirmPayment)', () => {
     ['TICKET(회차 넣음)', (f) => ({ ...f.request, order_kind: 'ORDER_KIND_TICKET', event_id: newId() })],
     ['주문 종류 없음(UNSPECIFIED = TICKET, 회차 넣음)', (f) => ({ ...f.request, order_kind: 'ORDER_KIND_UNSPECIFIED', event_id: newId() })],
   ])(
-    'P-T55 ② MERCH로 받은 주문을 %s로 다시 부르면 FAILED_PRECONDITION·SEV2 로그 한 줄(payment-confirm-mismatch)이고 행이 그대로다 [ASVS v5.0.0-2.3.4] [ASVS v5.0.0-16.2.5]',
+    'P-T56 ② MERCH로 받은 주문을 %s로 다시 부르면 FAILED_PRECONDITION·SEV2 로그 한 줄(payment-confirm-mismatch)이고 행이 그대로다 [ASVS v5.0.0-2.3.4] [ASVS v5.0.0-16.2.5]',
     async (_n, build) => {
       const s = await stack();
       const f = merchConfirm();
@@ -328,7 +328,7 @@ describe('굿즈 승인 명령 접수(ConfirmPayment)', () => {
     },
   );
 
-  test('P-T55 ② 티켓으로 받은 주문을 MERCH(회차 비움)로 다시 부르면 FAILED_PRECONDITION·SEV2 한 줄이고 행이 그대로다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T56 ② 티켓으로 받은 주문을 MERCH(회차 비움)로 다시 부르면 FAILED_PRECONDITION·SEV2 한 줄이고 행이 그대로다 [ASVS v5.0.0-2.3.4]', async () => {
     const s = await stack();
     const f = tossConfirm();
     await confirm(f.request);
@@ -347,7 +347,7 @@ describe('굿즈 승인 명령 접수(ConfirmPayment)', () => {
     ['회차를 실음', (f) => ({ ...f.request, event_id: newId() })],
     ['입장 시각을 실음', (f) => ({ ...f.request, entry_opens_at: tsOf(Date.parse('2026-12-20T10:00:00.000Z')) })],
     ['회차와 입장 시각을 둘 다 실음', (f) => ({ ...f.request, event_id: newId(), entry_opens_at: tsOf(Date.parse('2026-12-20T10:00:00.000Z')) })],
-  ])('P-T55 ③ MERCH에 %s면 INVALID_ARGUMENT이고 세 표에 쓴 행이 없다 [ASVS v5.0.0-2.2.1]', async (_n, build) => {
+  ])('P-T56 ③ MERCH에 %s면 INVALID_ARGUMENT이고 세 표에 쓴 행이 없다 [ASVS v5.0.0-2.2.1]', async (_n, build) => {
     const f = merchConfirm();
     const counts = await tableCounts(admin);
     const err = await failure(confirm(build(f)));
@@ -362,7 +362,7 @@ describe('굿즈 승인 명령 접수(ConfirmPayment)', () => {
     ['주문 종류 칸 없음', {}],
     ['ORDER_KIND_UNSPECIFIED', { order_kind: 'ORDER_KIND_UNSPECIFIED' }],
     ['ORDER_KIND_TICKET', { order_kind: 'ORDER_KIND_TICKET' }],
-  ])('P-T55 ④ %s에 회차 칸이 빈 명령은 티켓 규칙대로 INVALID_ARGUMENT이고 쓴 행이 없다 [ASVS v5.0.0-2.2.1]', async (_n, kind) => {
+  ])('P-T56 ④ %s에 회차 칸이 빈 명령은 티켓 규칙대로 INVALID_ARGUMENT이고 쓴 행이 없다 [ASVS v5.0.0-2.2.1]', async (_n, kind) => {
     const f = tossConfirm();
     const counts = await tableCounts(admin);
     const err = await failure(confirm({ ...f.request, ...kind, event_id: '' }));
@@ -370,7 +370,7 @@ describe('굿즈 승인 명령 접수(ConfirmPayment)', () => {
     expect(await tableCounts(admin)).toEqual(counts);
   });
 
-  test('P-T55 ④ 주문 종류 없이 회차를 실은 명령은 지금처럼 티켓으로 적힌다', async () => {
+  test('P-T56 ④ 주문 종류 없이 회차를 실은 명령은 지금처럼 티켓으로 적힌다', async () => {
     const f = tossConfirm();
     expect((await confirm(f.request)).result).toBe(IN_PROGRESS);
     const row = (await ledgerOf(admin, f.orderId)).payments[0] as unknown as Record<string, unknown>;
@@ -400,7 +400,7 @@ const merchCheckout = (over: Record<string, unknown> = {}): Record<string, unkno
 });
 
 describe('굿즈 결제창 준비(PrepareCheckout)', () => {
-  test('P-T55 ⑤ 회차가 없으면 플랫폼 기본 결제사(TOSS)이고 복귀 주소는 /shop/checkout/return?order=…&pg=…이며 허용 수단에 가상계좌가 없다 [ASVS v5.0.0-3.7.2]', async () => {
+  test('P-T56 ⑤ 회차가 없으면 플랫폼 기본 결제사(TOSS)이고 복귀 주소는 /shop/checkout/return?order=…&pg=…이며 허용 수단에 가상계좌가 없다 [ASVS v5.0.0-3.7.2]', async () => {
     await setPlatformSwitch(false);
     const req = merchCheckout();
     const r = await prepare(req);
@@ -414,7 +414,7 @@ describe('굿즈 결제창 준비(PrepareCheckout)', () => {
     expect(r.deposit_due_at ?? null).toBeNull();
   });
 
-  test('P-T55 ⑤ 가상계좌 허용을 참으로 보내도 굿즈 허용 수단에는 가상계좌가 없다(같은 요청을 티켓으로 보내면 있다)', async () => {
+  test('P-T56 ⑤ 가상계좌 허용을 참으로 보내도 굿즈 허용 수단에는 가상계좌가 없다(같은 요청을 티켓으로 보내면 있다)', async () => {
     await setPlatformSwitch(false);
     const merch = await prepare(merchCheckout({ virtual_account_allowed: true }));
     expect(merch.allowed_pay_methods).not.toContain('VIRTUAL_ACCOUNT');
@@ -423,7 +423,7 @@ describe('굿즈 결제창 준비(PrepareCheckout)', () => {
     expect(ticket.allowed_pay_methods).toContain('VIRTUAL_ACCOUNT');
   });
 
-  test('P-T55 ⑤ 회차가 있는 굿즈(부가 상품)는 그 회차의 지정 행을 따르고 복귀 주소는 굿즈 주소다', async () => {
+  test('P-T56 ⑤ 회차가 있는 굿즈(부가 상품)는 그 회차의 지정 행을 따르고 복귀 주소는 굿즈 주소다', async () => {
     await setPlatformSwitch(false);
     const eventId = newId();
     await putConfig(eventId, 'SIMULATOR', 'TOSS');
@@ -438,7 +438,7 @@ describe('굿즈 결제창 준비(PrepareCheckout)', () => {
     expect(JSON.stringify(r)).not.toContain('/booking/');
   });
 
-  test('P-T55 ⑤ 회차가 없으면 회차 행(지정·전환)을 보지 않고, 플랫폼 전환은 따른다', async () => {
+  test('P-T56 ⑤ 회차가 없으면 회차 행(지정·전환)을 보지 않고, 플랫폼 전환은 따른다', async () => {
     await setPlatformSwitch(false);
     expect((await prepare(merchCheckout())).pg).toBe('PG_PROVIDER_TOSS');
     // 빈 UUID 같은 값으로 회차 행을 넣어 두어도 굿즈(회차 없음)는 따르지 않는다
@@ -451,12 +451,12 @@ describe('굿즈 결제창 준비(PrepareCheckout)', () => {
     await setPlatformSwitch(false);
   });
 
-  test('P-T55 ⑤ 굿즈의 VIRTUAL_ACCOUNT 요청은 INVALID_ARGUMENT다(회차 있음·없음) [ASVS v5.0.0-2.2.1]', async () => {
+  test('P-T56 ⑤ 굿즈의 VIRTUAL_ACCOUNT 요청은 INVALID_ARGUMENT다(회차 있음·없음) [ASVS v5.0.0-2.2.1]', async () => {
     expect((await failure(prepare(merchCheckout({ pay_method: 'VIRTUAL_ACCOUNT' })))).code).toBe(grpc.status.INVALID_ARGUMENT);
     expect((await failure(prepare(merchCheckout({ pay_method: 'VIRTUAL_ACCOUNT', event_id: newId() })))).code).toBe(grpc.status.INVALID_ARGUMENT);
   });
 
-  test('P-T55 ⑤ 주문 종류 UNSPECIFIED의 결제창 준비는 INVALID_ARGUMENT다', async () => {
+  test('P-T56 ⑤ 주문 종류 UNSPECIFIED의 결제창 준비는 INVALID_ARGUMENT다', async () => {
     expect((await failure(prepare(merchCheckout({ order_kind: 'ORDER_KIND_UNSPECIFIED', event_id: newId() })))).code).toBe(grpc.status.INVALID_ARGUMENT);
   });
 });
@@ -483,7 +483,7 @@ describe('굿즈 결제를 시뮬레이터로 승인까지', () => {
     await r.whenIdle();
   }
 
-  test('P-T55 ⑥ 승인 사건의 orderKind가 MERCH, eventId가 null(칸 없음)이고 Kafka 키(Outbox msg_key)가 주문 ID다 [ASVS v5.0.0-2.3.3]', async () => {
+  test('P-T56 ⑥ 승인 사건의 orderKind가 MERCH, eventId가 null(칸 없음)이고 Kafka 키(Outbox msg_key)가 주문 ID다 [ASVS v5.0.0-2.3.3]', async () => {
     await q('delete from payment_confirm_job');
     const f = await acceptedVia('MERCH');
     await drive();
@@ -505,7 +505,7 @@ describe('굿즈 결제를 시뮬레이터로 승인까지', () => {
     expect(parsed.eventId ?? null).toBeNull();
   });
 
-  test('P-T55 ⑥ 같은 때 승인한 티켓 결제의 키는 여전히 회차 ID이고 사건의 orderKind는 TICKET이다(짝)', async () => {
+  test('P-T56 ⑥ 같은 때 승인한 티켓 결제의 키는 여전히 회차 ID이고 사건의 orderKind는 TICKET이다(짝)', async () => {
     await q('delete from payment_confirm_job');
     const eventId = newId();
     const t = await acceptedVia('TICKET', { eventId });
@@ -516,7 +516,7 @@ describe('굿즈 결제를 시뮬레이터로 승인까지', () => {
     expect(JSON.parse(rows[0]!.payload.toString('utf8'))).toMatchObject({ eventId, orderKind: 'TICKET', type: 'APPROVED' });
   });
 
-  test('P-T55 ⑥ 결제사가 거절한 굿즈 결제의 FAILED 사건도 orderKind MERCH·키 주문 ID다', async () => {
+  test('P-T56 ⑥ 결제사가 거절한 굿즈 결제의 FAILED 사건도 orderKind MERCH·키 주문 ID다', async () => {
     await q('delete from payment_confirm_job');
     const s = await stack();
     const orderId = newId();
@@ -533,7 +533,7 @@ describe('굿즈 결제를 시뮬레이터로 승인까지', () => {
     expect(value.eventId ?? null).toBeNull();
   });
 
-  test('P-T55 ⑥ 회차 정산서의 결제 읽기(listEventPayments)에 굿즈 결제가 0건이고 같은 회차의 티켓 결제만 나온다', async () => {
+  test('P-T56 ⑥ 회차 정산서의 결제 읽기(listEventPayments)에 굿즈 결제가 0건이고 같은 회차의 티켓 결제만 나온다', async () => {
     // 정산서 읽기는 실제 결제사(TOSS·PORTONE)만 받으므로 승인된 행을 SQL로 넣는다. 굿즈는 접수 경로가 실제로 적은 모양(MERCH, 회차 NULL)과 같다
     const eventId = newId();
     const ticketId = newId();
@@ -548,7 +548,7 @@ describe('굿즈 결제를 시뮬레이터로 승인까지', () => {
     expect(await q('select order_kind, event_id from payment where order_id = $1', [f.orderId])).toEqual([{ order_kind: 'MERCH', event_id: null }]);
   });
 
-  test('P-T55 ⑥ 결과 당기기(BatchGetPayments)가 굿즈 결제의 승인을 돌려준다(core-svc는 당기기로만 받는다, ADR-0299 결정 5)', async () => {
+  test('P-T56 ⑥ 결과 당기기(BatchGetPayments)가 굿즈 결제의 승인을 돌려준다(core-svc는 당기기로만 받는다, ADR-0299 결정 5)', async () => {
     await q('delete from payment_confirm_job');
     const f = await acceptedVia('MERCH');
     await drive();
