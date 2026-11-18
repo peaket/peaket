@@ -1,0 +1,71 @@
+# 갈래 3 — 구간 끝 정리 목록
+
+- 2026-11-18 `docs/lanes/lane3.md`의 같은 이름 절에서 옮겼다(ADR-0283 결정 1). 갈래 3은 구간의 자기 단계를 다 끝낸 뒤, 그 밖에는 이 목록을 고칠 때만 읽는다.
+
+- BOT-055 브라우저 확인: 좌석 화면을 열 때마다 CSP 위반 `script-src eval`이 1건 생긴다. 화면 묶음의 zod 4가 `Function("")`로 평가 가능 여부를 시험하기 때문이다. 콘솔에 찍히지 않고 동작도 막히지 않는다(zod의 `jitless` 설정을 볼 것, apps/web 좌석 화면).
+- HOT-042 브라우저 확인: 검증 화면의 토큰 해시 칸에서 Enter를 눌러도 실행되지 않는다(`ShuffleVerifier.tsx`의 `onSubmit`이 기본 동작만 막는다, HOT-050부터). 입력 칸의 Enter로 다시 계산이 돌게 한다.
+- 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
+- BAT-200(BOT-090): 같은 회차를 취소하고 다시 줄 선 뒤 또 격리되어 이의를 보내면 앞 대기 참여의 이의를 지우고 새로 쓴다(정본 `q:appeal`은 처음 것만). ops-svc가 글을 옮기기 전이면 첫 건의 내용 읽기·결과 반영이 NOT_FOUND가 된다(services/queue-svc `verification-lua.ts`)
+- BAT-200(BOT-090): 이의 결과 반영의 진행 표지가 건·판 하나만 담아, 끊긴 결과 반영과 본인 제출 통과가 겹치면 APPLIED로 잘못 답하고, 한 이의에 다른 건 둘이 겹치면 기록이 섞인다(`appeals.ts`·`verification-lua.ts` BEGIN/COMMIT_RESOLVE)
+- BAT-200(BAS-010): 창 메시지 규칙이 `const w = window; w.addEventListener(…)`·`document.defaultView.addEventListener(…)` 같은 별칭을 잡지 못한다(`packages/config/eslint/web-security.mjs`)
+- BAT-200(BOT-090): 로컬 게이트웨이 대역이 `x-forwarded-for`를 다시 채우지 않아 queue-svc가 빈 IP를 받는다(local 전용, `apps/web/scripts/local-fan-gateway.mjs`). queue-svc `q:dup` 해석이 verification 모듈에 복제됐다(`entry/index.ts`가 `parseHeld`를 내보내게)
+- BAT-200: 화면에서 queue-svc·trust-svc·identity-svc까지 띄우는 로컬 실제 스택 스크립트(세션 scratchpad `realstack/`)를 `tools/local/`에 둘지 감독과 정한다
+- BAT-200(BOT-090): 소셜 로그인 제공자 주소(`PEAKET_OIDC_*_ISSUER`)가 운영에서 틀린 꼴이면 CSP 헤더 만들기가 던져 그 화면이 500이 된다. 본인확인기관 출처처럼 틀린 꼴만 빼고 경고하게 감쌀지 본다(`apps/web/src/_app/security/page-headers.ts`·`proxy.ts`)
+- BAT-200(BAS-010): 응답 스키마 표시가 `z.array(z.any())`·`z.object().passthrough()`처럼 안쪽에서 칸을 거르지 않는 꼴은 아직 막지 않는다. 화면·외부 호출 규칙의 이름 단 예외 목록은 부분집합 고정 시험이 없다(`packages/config/eslint`)
+- BAT-200: queue-svc `entry-store.int`의 `Q-T45④`가 PC 부하로 한 번 대기열 Redis 마감 초과로 흔들렸다(다시 돌려 통과, 이번 변경과 닿지 않는 길)
+- BAT-200 브라우저 확인: 기각 뒤에도 셸의 닫기 링크 이름이 '…(대기는 유지됩니다)'로 남아 대기 참여가 끝난 상황과 맞지 않는다(apps/web SCR-009 셸)
+- BAT-202(BAS-011): Trivy 0.76.2(보안 수정판)는 게시 2주 규칙 때문에 0.76.1로 고정했다. 2026-11-19 뒤 올린다(다이제스트·내장 허용 규칙 목록을 함께 다시 본다, `tools/ci/scan-tools.mjs`·`trivy-secret.yaml`)
+- BAT-202(BAS-011): 화면 JS 묶음(정적 자산)의 비밀 검사를 어느 단계가 맡을지 정하지 않았다. 예약 실행(주 1회 security-scan·scorecard)이 실패했을 때의 알림은 BOT-161(DAST·게이트 검토)에서 정한다
+- BAT-195(BOT-065): 키 회전 이음 기간의 옮기기 왕복(옮길 키 보기·되살리기·마무리)이 요청 데드라인(`deadlineAtMs`)과 묶이지 않아, 이음 기간 판정이 최악 약 400ms 늘 수 있다(services/trust-svc `score-risk.ts`·`redis-feature-store.ts` migrate)
+- BAT-195(BOT-065): 판정 근거 키 `tr:vb`가 회차의 첫 `CHALLENGE`만 담아(`SET NX`), 뒤에 차단 목록으로 다시 걸린 사람의 이의 인정(`APPEAL_ACCEPTED`)은 차단 키를 지우지 않는다(BOT-050부터의 설계, bot-defense §9·§12. 근거 키에 확정 신호를 더해 적을지 볼 것)
+- BAT-195(BOT-065): 회전 이음에서 새 판 판 가드 `tr:blkv`가 먼저 생긴 기기는 옛 판 판 가드를 합치지 않아, 늦게 온 옛 판 라벨이 새 판에서 다시 반영될 수 있다(`redis-feature-store.ts`)
+- BAT-195(BOT-065): `trust_block_list_hits_total`이 `signal` 라벨로 허니팟 적중도 센다(BOT-050부터, 이름과 뜻이 다르다, `prom-trust-signals.ts`)
+- BAT-195(BOT-065): `RESTORE`에 바이트 인자를 넘기려고 `HotRedis` 인자 형을 trust-svc 어댑터 안에서만 넓혔다(`packages/platform/src/redis.ts` 형을 넓힐 후보). 운영 ElastiCache에서 `DUMP`·`RESTORE`를 쓸 수 있는지는 배포 단계에서 본다
+- BAT-195(BOT-065): 조사 적재 `inv-ingest`가 그림자 판정 기록(`shadow` true, `pairedEventKey`)을 어떻게 싣는지 docs/streaming.md §6.4 조사 적재 표에 없다(그 작업자를 만드는 단계에서 정한다)
+- BAT-195(BOT-065) 측정 몫: 그림자 판이 켜진 판정의 지연(p99)과 키 회전 이음 기간 판정의 지연을 측정 창에서 잰다. 핫패스의 기존 Lua 여섯은 바뀌지 않아 `loadtest/micro/lua-compare.mjs`(좌석 Lua 전용)는 돌리지 않았다
+- HOT-011: queue-svc 통합 전체 실행 때만 시간에 기댄 묶음 시험 Q-T52③(test/batch-cases.ts)이 한 번 흔들렸다(따로 돌리면 통과). 부하가 겹쳐 시간이 밀린 것으로 보이나 원인은 확인하지 않았다.
+- BOT-044 뒤처리: 본인확인 복귀·탈퇴·로그인 수단 흐름의 손으로 쓴 fetch도 `fetchOnce`(시간 한도, 쓰지 않는 본문 버리기)로 바꾼다(docs/frontend.md §4.1 'api-client 밖의 호출'의 남는 한계, apps/web features/identity-verify·account-withdraw·login-methods).
+- BOT-047 브라우저 확인: 만 14세 미만 가입 취소 화면의 [홈으로]가 d5 §5.5의 보조 버튼이 아니라 글자 링크다(HOT-323부터, apps/web signup-consent)
+- BOT-047 브라우저 확인: 공연 상세의 콘솔 오류 한 줄. CSP의 `frame-src 'none' https://challenges.cloudflare.com`은 'none'과 출처를 함께 적은 것이다(HOT-290, apps/web security-headers.mjs)
+- BAT-203: 바꾼 Lua(진입 번호 묶음·로비 창·입장)의 옛·새 성능 비교(ADR-0265 결정 10)는 갈래 1 몫이다. `loadtest/micro/lua-compare.mjs`의 `queue` 묶음에 `entry-lua.ts` 원문을 더하는 일을 감독이 갈래 1과 맞춘다
+- BAT-203: queue-svc 전체 시험을 두 번 돌리는 가운데 `GrpcTrustRisk.verify(VERIFICATION)`의 B-T11 시험이 한 번 UNAVAILABLE/ALLOW로 흔들렸다(바로 다시 돌려 665개 통과, 이번 변경과 닿지 않는 trust gRPC 시험)
+- BAT-205: 실제 Schema Registry 컨테이너로 등록·BACKWARD_TRANSITIVE를 확인하는 통합 시험과 ArgoCD PreSync 실행은 배포 단계다. 지금은 `tools/ci/avro-schema.mjs`의 정적·태그 대비 검사와 가짜 HTTP 등록 시험까지다
+- BAT-205: `build-image.yml` 게시 잡의 실제 GHCR 푸시·cosign·SLSA·SBOM 증명은 출시·핫픽스 가지 첫 CI에서 확인한다. `ci.yml` image 잡은 게시 잡 권한을 덮지만 게시 잡 조건이 PR·develop을 막는다
+- BAT-205: D-T32 ② `cache-mode` 규칙은 출시 가지 후보 빌드가 생기는 단계 몫이다. D-T11(서명 없는 이미지 기동 거부)·D-T33(오버레이 레지스트리)·D-T34(비밀 교체)는 Kyverno·배포 단계다
+- BAT-205: `sbom-find`의 조치 기한 표(취약점 공개일 기준)는 BAS-140 승격 차단과 함께 잰다. 지금은 배포 다이제스트→SBOM→패키지 판 찾기까지다
+- W7-audit(R2·N1·S3): 접속지는 입구가 다시 쓴 `x-forwarded-for`를 믿는다. 입구를 거치지 않는 클러스터 안 호출이면 꾸밀 수 있고, 머리가 없으면 입구 파드 주소가 조용히 남는다(`client-ip.ts`, 대체 지표·경고 필요).
+- W7-audit(R4·C2): 탈퇴 사건 보류 감싸기가 처리기와 달리 JSON 해독을 고정으로 쓴다. BAS-030에서 Avro 해독기를 끼우면 보류된 탈퇴 사건이 값 없이 저장된다(`consumers/index.ts`).
+- W7-audit(R7·K7): 명단 내려받기에 쪽 수 상한·전체 시간 한도·요청 끊김 취소가 없고, 원천이 2xx가 아니게 답하면 503이 아니라 500이다(`attendee-exports.ts`).
+- W7-audit(K4): Kafka에 닿지 못할 때 core API 새 파드가 시작에 실패하는지, 소비자 없이 조용히 뜨는지 클라이언트 `connect()` 동작을 확인한다.
+- W7-audit(K5·S6): 읽지 못한 탈퇴 사건의 보류 행을 다시 처리하거나 닫을 길·기한·경보가 없어 영영 '보류 중'으로 남고 그 계정 키도 막힌다(`held_event`).
+- W7-audit(K8·S9): purchase 명단 원천이 페이지마다 회차 전체 합계를 다시 세고, core의 원천 호출이 `promoterId`를 버린다.
+- W7-audit(S5): 0022가 `core_app`에 후기 작성자 칸과 `takedown_action.restored_at` 덮어쓰기를 준다(익명화 역할 분리·한 번 쓰기).
+- W7-audit(S7·S8): CSV 첫 글자 정화에 널 문자가 빠졌고, 받은 커서를 길이·모양 검사 없이 접속기록에 남긴다.
+- W7-audit(C3): 0019 행이 이미 있는 DB에 0021을 적용하는 시험이 없다(원문 시험만 있음).
+- W7-audit(N2·N3·N4): ASVS catalog-review 14.2.7 행이 신고 기록·후기 사진 자동 파기를 한다고 적지만 그 정비 일이 없다. PDF 형식의 503 제목이 오류 목록 값과 다르고 openapi에 없다. 소비자 풀 연결 2개를 동시 처리 둘과 보류 수 세기가 함께 쓴다.
+- W7-audit(판정 기준 대조): `J-T26 ②`는 이름만 단 기존 시험이다(RSS·첫 바이트 단언 없음, BAT-610).
+- 웨이브 7 시험 흔들림: purchase-svc 단위 시험이 몰릴 때 시간 초과 6개가 났다가 다시 돌리면 통과했다(BAT-415 시험 담당 기록).
+- W8-ci-fix(W4): 언젠가 날짜가 지나 터질 고정 날짜 test-int 넷 — core-svc `catalog`(2026-12 무렵, 근거 약함), `queue-sale-eligibility-copy`(2027-01-01, `PEXPIREAT` 절대 시각), `shop-notify`(2027-03, 시스템 시계로 `NOT_STARTED`), purchase-svc `seat-hold-ledger`(2031). 기준 시각을 서버 시각에서 잡게 고친다(docs/review/plans/W8-ci-fix.md (나)).
+- W8-ci-fix(W1·W2): `cancellation.int` 기준 '3일 전'의 까닭 주석이 없고(421·433행 두 시험은 반납이 늘 NOT_READY 길), `priority-hold.int` B1-01·⑦ 만료 회수는 아직 PC 시계 기준이라 컨테이너 시계와 어긋나면 흔들릴 수 있다(⑦ 여유 약 50ms).
+- BAT-415(시험 이의 7): payment 어댑터 `CANCEL_IDEM_KEY`를 취소 ID 규칙(9~64자, 접두 포함 16자 이상)에 맞게 좁히고, 짧은 키를 쓰는 시험 54곳(toss 52·simulator 1·pg-circuit 1)을 늘린다. 입력 검사가 이미 9자 이상만 받아 운영 동작은 같다.
+- W8-audit2a(다시 보기 N2): 이전 판 행 고치기 정비 일(`review-purge-legacy`)이 멈춤 신호로 끝나도 남은 대상 수를 세지만, 플랫폼 정비 반복은 신호가 끊기면 '정비 일 끝' 줄을 적지 않고 빠져나가 그 수가 어디에도 남지 않고, 표 전체를 훑는 세기 한 번만큼 종료·리더 넘김이 늦어진다. 신호가 끊겼으면 세지 않거나 주석을 실제 동작에 맞춘다(services/core-svc `review-maintenance.ts`, packages/platform `maintenance.ts`)
+- W8-audit2a(다시 보기 N4): 메모리 후기 저장소의 새 상수 `ACCOUNTS_WITHDRAWN`이 `isLegacyRow` 설명 주석과 함수 사이에 끼어 주석이 상수에 붙었고, 토픽 글을 `ACCOUNTS_WITHDRAWN_TOPIC`(`account-withdrawn.handler.ts`)과 따로 두 저장소에 적었다. 주석 자리를 바로잡고 한 상수를 함께 쓴다(services/core-svc `memory-review-store.ts`·`drizzle-review-store.ts`, 동작 영향 없음)
+- W8-audit2a(다시 보기 N5, 낮음): 손으로 하는 파기가 `order by id limit … for update`로 잠가, 같은 계정을 거의 동시에 두 번 부르면 보류 행이 50개 넘게 남아도 뒤 호출이 0행으로 409를 낼 수 있다(`drizzle-review-store.ts:327-335`). 정본은 409를 끝 신호로 쓴다. 겹쳐 부르기는 드물고 파기는 이미 끝난 뒤다.
+- W8-audit2a(검증 2 V14, 낮음): C1 대체 예약 때 남기는 경고 줄(`account-withdrawn.handler.ts:81`)을 보는 단언이 없다. 경고 줄은 계획 §9.2에만 있고 정본에는 없다.
+- W8-audit2a(검증 2 V23, 낮음): 손으로 하는 파기의 한 트랜잭션 안에서 파기와 예약의 차례를 바꾸는 변이를 잡는 겹침 시험이 없다(`drizzle-review-store.ts:338-342`, 검증 1 D09와 같은 꼴).
+- BAT-420(GAT-110) 다시 보기 2 N4: 풀지 못한 지난 잡기가 남은 항목은 수동 재개의 '다음 시각 당기기'가 조용히 건너뛴다(돈 문제 없음, 본래 다음 시각까지 기다림). 조건을 `claim_token is null or claimed_until <= now()`로(services/purchase-svc `drizzle-event-refund-store.ts:239`·`event-refund-service.ts:311`)
+- BAT-420(GAT-110) 다시 보기 2 N5: 파트너 넣기 정책의 WITH CHECK가 promoter_id만 보고, 감사 정의자 함수는 그 요청이 있는지만 본다(깊은 방어, 다른 테넌트로는 새지 않음). 정책에 `requested_via = 'PARTNER' AND status = 'REQUESTED'`를 더하고, 함수는 같은 기록 ID의 접수 기록이 이미 있으면 거절한다(services/ops-svc `migrations/0015_event_cancellation_partner_rls.sql:43~69`)
+- BAT-420(GAT-110) 다시 보기 2 N6: ops가 category를 버려 같은 취소 ID의 '환급 실패' 건과 '차액' 건이 `(kind, target_ref)`로 한 건에 모인다(둘이 함께 열려 있을 때만). category를 건에 남길지, 열린 건 키에 넣을지 정한다(services/ops-svc `receive-case-requested.ts:14`)
+- BAT-420(GAT-110) 구현 담당이 남긴 것: 회차 취소 확정 경로의 409 설명에 `already-approved`가 없다(문제 종류 목록에는 있다, docs/api/openapi.yaml ops 회차 취소 확정)
+- BAT-420(다시 보기 3 P1, 낮음): CS 건 다시 열기 목록이 표시 시각 순이라 늘 실패하는 앞 행이 같은 종류의 뒤 행과 뒤 종류(차액·이상 표시)를 굶긴다(`drizzle-cs-case-outbox.ts`, `cs-case-reopen.ts:127`). 지표를 보고 사람이 손대기 전까지만.
+- BAT-420(다시 보기 3 P2, 낮음, 팬 취소를 여는 웨이브 맨 앞): Saga의 '요청 행에는 실패 표시 안 함' 조건이 행이 아니라 입력의 요청 ID를 본다(`cancel-ticket.ts:188·197~213`). 팬 취소가 지금 403으로 닫혀 닿지 않는다.
+- BAT-420(검증 2 낮음 여덟): X02 처리가 던지면 틱 끝 다시 열기 건너뜀, X05 2xx가 무응답 잇따름을 끊지 않음, X07 한 번 답한 뒤 무응답이면 예산을 넘겨 부름, X19 끝난 행의 항목도 다시 엶, X22 실패 표시된 행의 항목도 잡음, X23 남은 잡기를 풀지 않음, X10 Saga 팬 길 시도 상한 경계, X04 어댑터가 200을 거절(ops는 늘 202). 계획 BAT-420.md '## 검증' 검증 2.
+- 웨이브 8 갈래 3 시험 흔들림: purchase-svc 단위 `grpc-new-payment-pause`·`grpc-payment-checkout`이 전체 실행 한 번에 실패했다가 다시 돌리면 통과했다(BAT-420 N1·N2·N7 구현 담당 기록).
+- W9-fix1(R-676) 리뷰 R1 낮음: 업무 거절률 전체 정지(`stop.all`)가 실행 시작 때 읽은 `request.progress.perPg`로 결제사를 고른다. `perPg`가 없는 행이면 던지고, 그 실행 중 쓸어 담기로 처음 생긴 결제사 몫은 '전체' 정지에서 빠진다(다음 실행은 막히므로 돈은 많아야 그 실행 안의 몇 건). 잠근 값·항목의 결제사 합으로 고르고 `?? []`(services/purchase-svc `event-refund-service.ts:512`)
+- W9-fix1(R-676) 리뷰 R2 참고: 환급 서비스는 `deadlineMs`에 시각(지금 + 30초)을 넘기는데 어댑터는 그 값을 길이로 읽어 상한 5초로 자른다. 지금은 표 한 장이 호출 두세 개라 30초 안에 들지만, '표 한도 30초'는 어댑터 상한이 받쳐 주는 값이다. 남은 길이(`deadline − now`)로 넘기거나 정본에 적는다(`grpc-payment-cancellations.ts:48`, `grpc-ticket-cancellations.ts:64·105·170`)
+- W9-fix1(R-676) 리뷰 R3 참고(확인 필요): `dueWindowClosures`가 이미 닫힌 연기 요청도 끝날 때까지 틱마다 다시 고른다. 잠근 쓰기와 SEV3 `REFUND_WINDOW_CLOSED` 경보가 틱마다 되풀이될 수 있다(돈·멈춤 쪽은 안전). 경보 중복을 확인하고 닫힘 표시 칸이나 조건을 둔다(`drizzle-event-refund-store.ts:307~316`)
+- W9-fix1(R-676) 리뷰 R4 낮음(문서): openapi `/v1/ops/event-cancellations/{requestId}/pauses`·`/resumptions` 응답에 끝난 작업의 409가 없다(전부터 409를 돌려줌). 409 `CONFLICT` 한 줄을 더한다(docs/api/openapi.yaml)
+- W9-fix1(R-676) 리뷰 R5 낮음: `services/purchase-svc/src/modules/refund/index.ts:160` 주석이 아직 '빈 뼈대'다. 다음 손질 때 지운다
+- W9-fix1(R-676) 계획 범위 밖: 결제사 몫 하나가 자동 정지하면 요청 전체가 PAUSED가 되어(`statusAfterRun`, 시험 `event-refund-gat130` R-T9) 다른 결제사 몫도 멈춘다. 정본 transfer-refund §5 '다른 결제사 몫은 계속한다'·data `event_cancellation_request.status`와 어긋난다(멈추는 쪽이라 돈은 안전, 상태 규칙을 바꾸면 시험·ops 화면이 함께 바뀜)
+- W9-fix1(R-676) 검증 때 본 것: 통합 전체를 한 번에 돌리면 `identity-grpc.int`의 previousPid 단언이 가끔 실패한다(그 파일만 돌리면 46개 모두 통과, 몰릴 때 흔들리는 시험)
+- W9-fix3(R-675) 리뷰 N3 낮음: pg-simulator의 `authorization` 비교가 옛 꼴(길이 먼저 비교)이다. local·CI용이라 운영 위험은 없다. 원하면 `constantTimeEqual`로(services/pg-simulator/src/server.ts:59)

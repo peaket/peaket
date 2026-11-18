@@ -1,0 +1,226 @@
+# 갈래 1 — 구간 끝 정리 목록
+
+- 2026-11-18 `docs/PROGRESS.md`의 같은 이름 절에서 옮겼다(ADR-0283 결정 1). 매 턴 읽는 PROGRESS를 가볍게 하려는 것이다. 갈래 1은 SEG 단계에서, 그 밖에는 이 목록을 고칠 때만 읽는다.
+
+- 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다(ADR-0190 결정 2).
+- PRF-136: 구매 세션 확인 경로(`StoredPurchaseSessions.advance`)의 좌석 Redis 메모리 부족 503이 `seat_lua_errors_total`에 세어지지 않는다(홀드·만료만 센다. 지표 script 라벨에 session이 없다, adapters/stored-purchase-sessions.ts).
+- PRF-136: queue-svc의 같은 대기표 다시 받기(ADMIT_LUA)가 자리 점수를 `ZADD XX GT 지금 + 5분`으로 올려, 시작된 세션도 최대 체류 끝 5분 안에 되풀이해 다시 받으면 자리가 최대 체류를 넘겨 산다(queue-svc adapters/admission-lua.ts. purchase-svc는 처음 최대 체류에 세션을 끝낸다).
+- PRF-135: 만료 반복의 BACKOFF와 경고 로그 간격을 단조 시계(`clock.monotonicMs()`)로 잰다(application/expiry-sweeper.ts, application/log-gate.ts, inventory.module.ts).
+- PRF-135: 회차 목록을 읽지 못한 틱도 `seat_expiry_ticks_total`에 센다(application/expiry-sweeper.ts `#tick`).
+- PRF-135: Redis의 WRONGTYPE(`bitmap`·`rel`·`ctl`·`idem`·`epoch` 키의 형 오류)도 `seatLuaErrorOf`가 `CORRUPT_KEY`로 센다(domain/lua-errors.ts).
+- PRF-135: 만료 Lua가 좌석마다 `TYPE`과 `HMGET`을 둘 다 부르는 것을 줄인다. S-T27을 다시 재는 PRF-220(측정 창 1)에서 같이 본다(adapters/expire-lua.ts).
+- PRF-137: 스냅샷·홀드 컨트롤러의 메모리 부족 경고 로그(`OOM_WARN_GATE`, 파드마다 1초에 한 줄)와 `queuePhase` 로그 칸을 단언하는 시험이 없다(inbound/snapshot.controller.ts, holds.controller.ts).
+- PRF-137: 시험 ID 접두가 정본과 어긋난 곳이 있다(seat-layout.test.ts의 `ST26_③_` 넓은 사용, 503 시험의 `NFR015_`). seat-hold.md §2가 'S-T35 ⑥'을 이진 본문 시험으로 인용하지만 ⑥은 부하 측정(PRF-220)이다.
+- PRF-137: `LayoutSeatMap`이 처음 읽을 때 5만 석 판 파일의 JSON 해석이 이벤트 루프를 수십 ms 막는다(워커 스레드나 쪼개 해석을 PRF-220 측정 뒤 본다. refresh는 표시(stamp)가 같으면 읽지 않는다).
+- PRF-137: 첫 홀드의 구매 세션 기록이 실패하면 둘째 홀드가 `firstHeldInSession` true로 보고된다(보조 기록이라 생긴다. 이 값을 지표에 쓰는 BAS-030에서 정한다).
+- PRF-137: 인증 가드가 내는 거절의 `no-store`를 purchase-svc의 Nest 미들웨어(app.module.ts)로 달았다. 다른 서비스도 필요하면 플랫폼으로 올린다.
+- PRF-138: 시작 사건 더하기를 다시 하는 재시도(`needsStarted`)가 이미 끝난 세션의 정리 색인 멤버를 `ZADD NX`로 되살릴 수 있다. 다음 점검이 GONE으로 빼고 종료 사건 뒤의 SESSION_STARTED는 같은 `eventKey`라 받는 쪽이 거르므로 해는 없다(adapters/purchase-session-lua.ts APPEND_SESSION_STARTED_LUA).
+- PRF-138: 시작 사건 더하기가 끝내 실패하고 같은 입장 토큰으로 다시 요청도 오지 않은 세션은 정리 색인에 없어 유휴 정리를 못 받는다(최대 체류까지 요청이 통과한다). Redis 장애가 겹쳐야 하는 경우라 설계로 두었다(입장 자리 5분 회수가 덮는다).
+- PRF-138: 점검 Lua(`SWEEP_SESSION_LUA`)의 `now >= idle` 경계는 Redis 시각을 시험이 정하지 못해 원문 글 단언과 메모리 쌍둥이 시험으로만 지킨다.
+- PRF-138: 만료 반복(`ExpirySweeper`)에도 `STOPPED` 결과를 단언하는 시험이 없다(session-sweeper.test.ts에는 더했다).
+- PRF-140 ①: 한도를 되돌리는 `greatest(used - n, 0)`가 `used < n`인 어긋남(손으로 고친 행 등)을 소리 없이 덮는다. 지표나 경고 로그를 단다(adapters/db/drizzle-seat-sales.ts #settle).
+- PRF-140 ①: 경합 결과를 되돌리는 표지 `Rollback`이 Error를 이어받아 경합마다 호출 스택을 만든다. 핫패스 비용을 재고 필요하면 스택 없는 표지로 바꾼다.
+- PRF-140 ①: `reserve`는 한도 행의 `limit_count`를 호출이 준 값으로 맞추므로, 옛 한도를 쥔 파드가 부르면 낮춘 한도를 도로 올린다. 결제 접수 Saga(PRF-160)는 한도를 회차 설정에서 그때그때 읽는다.
+- PRF-140 ①: 통합 시험 전체를 한 번에 돌리면 `seat-store.int.test.ts`의 만료 Lua 모양 시험(ST6)이 PostgreSQL 컨테이너 시험과 겹친 부하에서 100ms 마감으로 한 번 실패했다(혼자·다시 돌리면 통과).
+- PRF-141: 릴레이의 늘려 쉬기는 릴레이 전체에 걸려, 한 회차의 보내기 실패(시간 초과 10초)가 다른 회차도 최대 5초 늦춘다. 회차별 늘려 쉬기는 측정(PRF-220) 뒤 정한다(application/seat-stream-relay.ts #run).
+- PRF-141: 파티션 넘기기 동안 같은 좌석을 두 파드가 동시에 적재하면 부분 유일 위반(23505)이 날 수 있다. 같은 결과일 실패로 5회 다시 하다 풀리는데, 이 경우의 시험이 없다(adapters/db/drizzle-seat-hold-ledger.ts).
+- PRF-141: 우선 구매 보류(PRIORITY) 홀드의 Stream 칸(priorityGrantId)을 쓰는 Lua가 아직 없어 그 바꾸기는 시험하지 않았다. PRIORITY 홀드를 만드는 단계에서 시험을 더한다.
+- PRF-142: 실패 해제가 fence·exp·kind 칸이 빠진 홀드 Hash도 풀어 빈 칸의 RELEASED를 낸다(릴레이가 malformed로 넘기고 원장 행은 HELD로 남는다). 만료 Lua처럼 망가진 Hash는 건너뛰고 지표를 올린다(adapters/pin-lua.ts RELEASE_FAILED_LUA).
+- PRF-142: 묶기·실패 해제의 형이 틀린 키(PEAKET_CORRUPT_KEY)·지난 keepUntil(PEAKET_KEEP_UNTIL_PAST) 경로를 시험이 다루지 않는다(코드 읽기로만 확인).
+- PRF-143: 다시 만들기의 판매·원장 세 읽기가 한 시점이 아니다(트랜잭션 하나의 REPEATABLE READ 읽기로 묶으면 쌉니다, adapters/db/drizzle-seat-rebuild.ts).
+- PRF-143: 다시 만들기가 묶인 우선 구매 보류(PRIORITY) 판매 좌석을 kind FAN으로 되살린다(PRIORITY 홀드를 만드는 단계에서 함께 본다).
+- PRF-143: 판매 뒤 판매 제외석이 된 좌석은 좌석맵 판의 resolve가 주지 않아 다시 만들기가 넘긴다(byIndex로 찾는 길은 판매 행에 좌석 색인이 없어 없다).
+- PRF-150 ①: 진행성 검사(seat_live 17초 등)는 주 1회 전수 검사에서만 돌아, 명세를 고친 PR이 진행성을 깨도 다음 전수 검사까지 드러나지 않는다(짧은 진행성 검사는 PR 때도 TLC로 돌리는 방안, tools/spec-check/spec-check.mjs).
+- PRF-150 ①: 진행성 ②(접수한 결제는 판매나 실패로 끝난다)를 깨는 반례 변형이 없다(지금 변형은 ①만 살아 있음을 보인다). 시도 3개짜리 진행성 모듈은 큰 러너 묶음 후보다.
+- PRF-151: 재생 기록 12개가 모두 loseAll·rebuild를 relay보다 먼저 해, 원장 홀드·판매 좌석을 되살리는 다시 만들기와 K1~K3를 재생이 견주지 않는다('다시 만들기 앞에 relay가 있음' 목격 조건으로 기록을 더 낸다, spec-check traces).
+- PRF-151: 무작위 경합에서 같은 좌석·같은 한도를 두고 겹친 판매 예약이 40번에 0~3번이라 단언하지 않는다(집중 시험이 맡는다). 대기열 하네스와 patient·DUMP/RESTORE·#drive·decode가 겹친다(공용 시험 도우미 후보).
+- FND-160: CI에서 platform `test-int/keyed-consumer.int.test.ts`의 ST_T18 재조정 시험(처리 중에 소비자를 더 띄움)이 한 번 흔들렸다(두 번째 소비자가 받은 것 0, 2026-11-05 PR #5 첫 실행, 실패한 잡만 다시 돌려 통과).
+- 0.2.0 출시: 계약 깨짐 예외 승인 라벨 `breaking-approved`(docs/api/breaking/README.md)가 저장소에 없어 2026-11-05에 손으로 만들었다. Terraform(`infra/modules/github`)은 라벨을 관리하지 않는다(`github_issue_label`로 둘지 본다).
+- PRF-160: `order_event`를 쓰는 DB 역할에서 UPDATE·DELETE 권한을 빼는 일(ADR-0113 결정 2)은 서비스 DB 역할을 만드는 BAS-060·wbs 2.11에서 한다(지금 마이그레이션은 역할이 하나).
+- PRF-160: `db:generate`는 빌드된 `@peaket/platform`을 읽는다. platform 원본을 고치고 빌드하지 않으면 옛 표 정의로 마이그레이션을 만든다(낡은 빌드를 알아채지 못한다).
+- PRF-160: 전이 함수 밖 상태 SQL의 글 검사는 변수에 담아 이어 붙인 SQL·객체 변수로 넘긴 `.set()`을 여전히 놓친다(지연 제약 트리거가 커밋 때 막으므로 낮음).
+- PRF-160: `order_event` BRIN은 5년 뒤 보존 삭제가 시작되면 빈 자리 재사용으로 범위가 넓어질 수 있다(autosummarize만 켰다). 매일 검사의 실행 시간은 성능 장부(wbs 2.12.1)에서 잰다.
+- PRF-161: 본인확인 재확인의 대체 판정 때 끝난 로그인 세션 목록을 보지 못한다(control.sessions-terminated를 받아 채우는 소비자가 purchase-svc에 없다, ADR-0055).
+- PRF-161: 주문 생성 한 번의 왕복(Redis 약 7·DB 약 11·gRPC 2)을 더 줄일 곳: 가드와 쓰임새의 구매 세션 두 번 읽기, 가명 호출과 예매 제한 읽기 함께 돌리기(거절될 요청에도 가명 호출이 나가니 상한과 견줘서). 측정(성능 장부) 뒤에 정한다.
+- PRF-161: 좌석맵 판을 판매 설정 읽기와 홀드 확인에서 두 번 읽어, 그 사이 30초 갱신으로 등급 ID가 바뀌면 잠깐 가격 없음 500이 날 수 있다(추측).
+- PRF-161: 예매 제한 사본에 모르는 칸만 있는 키는 사본 없음으로 본다(HMGET 한 번만 쓴다).
+- PRF-162: 결제 접수 트랜잭션은 주문 행을 한 트랜잭션에서 세 번 고치고 왕복이 약 21번이다(주문·시도 읽기를 한 질의로, seat_gen·작업 행을 한 문장으로 줄일 수 있다). 측정 뒤 정한다.
+- PRF-162: 커밋된 멱등 기록 읽기(findCommitted)가 주문 생성·결제 접수에 같은 코드로 두 번 있다(공용 함수로 뺄 만하다).
+- PRF-165: 모든 판매 예약이 같은 seat_rebuild 회차 행을 FOR SHARE로 잡는다. 인기 회차에서 초당 수백 건이면 행 헤더 쓰기·MultiXact가 쌓일 수 있다(측정 뒤, 대안은 트랜잭션 단위 권고 잠금).
+- PRF-165: 승인 명령이 정해진 거절로 1시간 미뤄진 작업은 결과 당기기(PRF-171)가 맞출 때까지 RESERVED로 남는다. PRF-170에서 그 작업 행과 함께 정리한다. 넘긴 PRF-170은 끝났으나 정리한 근거를 찾지 못했다(2026-11-17 확인, 다시 본다).
+- PRF-165: 실행기가 요청 맥락을 node:async_hooks AsyncResource로 떼어 낸다. 플랫폼 도우미(storage.exit 같은 것)로 두고 추적 연결을 잇는 편이 낫다.
+- PRF-165: 0006의 CHECK 추가가 NOT VALID 없이 표 전체를 훑는다(지금은 표가 작다).
+- PRF-163: 닫힌 주문 과금 보류의 대상은 FAILED·EXPIRED·COMPENSATED다. REFUNDED 주문에 새 APPROVED가 오면 IMPOSSIBLE(SEV2)인데, 환불 뒤 다시 과금이라 SEV1로 올릴지 취소·환불 단계에서 정한다.
+- PRF-163: 커밋 뒤 구매 세션 일이 주문이 아니라 구매 세션 단위라, 한 세션에서 앞 주문(UNKNOWN)의 결과가 뒤 주문의 결제 중에 오면 세션을 끝내거나 Paying을 풀 수 있다(추측, 화면이 UNKNOWN 중 새 주문을 막는지 확인).
+- PRF-163: 보류 로그를 같은 사건·까닭 60초에 한 번으로 줄였지만 처리기가 몇 번째 시도인지 받지 못한다(플랫폼 KeyedHandler에 시도 수를 넘기면 마지막 한 번만 남길 수 있다).
+- PRF-166: 파드가 몰려 이벤트 루프 지연이 2초를 넘으면 25초 기다림 + 다시 읽기가 게이트웨이 27초를 넘을 수 있다(추측, P-T44 ④ 기준과 어긋남). 측정 뒤 여유(지금 1초)를 정한다.
+- PRF-166: 경로별 남은 시간 상한(@RouteDeadline)은 운영이 서비스 상한을 낮춰도 내려가지 않는다(docs/api/guidelines.md §5). 비상 때 낮추려면 장식자 값을 고쳐 배포해야 한다.
+- PRF-167: 묶기 Lua와 `pinned_at` 기록(`recordPinned`) 사이 DB 왕복 하나 동안 전체 유실·다시 만들기가 끼면 그 주문은 원장만 보고 되살려 K1이 그만큼 남는다(결과는 과금 없는 실패, application/order-saga.ts).
+- PRF-167: 판매 주문의 holdId·psid 읽기(`saleOrders`)가 주문 1,000개씩 왕복한다. 판매가 수만 석인 회차면 수십 번이라 다시 만들기 시간을 성능 장부에서 잴 때 같이 본다(adapters/db/drizzle-rebuild-orders.ts).
+- PRF-167: 판 번호가 바뀐 뒤에도 `pinned_at`이 남아 두 번째 전체 유실 때 그 주문 좌석이 7분을 더 가질 수 있다(K5 범위, 안전 문제는 아님, adapters/db/drizzle-saga.ts `recordPinned`).
+- PRF-164: API 파드마다 두 소비자가 보류 수 집계 질의를 30초마다 돌려 같은 지표를 내므로 파드끼리 더하면 N배가 된다. 경보·화면은 합이 아니라 최댓값으로 보거나 집계를 한 곳에서만 한다(src/consumers.ts, 플랫폼 heldEventCounts).
+- PRF-164: 릴레이 프로세스의 회차 목록이 폴더의 판을 모두 LayoutSeatMap에 올리고 빼지 않아, 지난 회차 파일이 쌓이면 메모리와 리더가 바뀐 뒤 첫 틱이 늘어난다(판매 종료 + 1시간이 지난 판은 메모리에서 빼기, adapters/seat-map-event-catalog.ts).
+- PRF-164: relay.ts는 SIGTERM 처리기를 startPurchaseRelay가 끝난 뒤 붙여, 그 사이 신호면 Lease를 놓지 못해 대기 복제가 12초를 기다린다. relay.ts·main.ts의 시작·종료 차례(소비자 시작 실패 종료 코드 1, SIGTERM 때 소비자 먼저)를 보는 시험이 없다.
+- PRF-164: 판매를 연 기록(seat_rebuild 행)을 남기는 운영 코드는 판매 열기를 부르는 LCH-080이 생길 때까지 없어, 그 전 회차는 전체 유실 뒤 손으로 행을 넣어야 다시 만들어진다(SeatRebuildMarks.markOpened).
+- PRF-161: orders-e2e의 201 시험이 조사용 가명 호출 50ms 한도에 기대어, 통합 시험 전체 실행의 부하에서 가끔 refMissing true로 실패한다(2026-11-05 한 번, 따로 두 번 통과, test-int/orders-e2e.int.test.ts).
+- PRF-168: 통합 시험 전체 실행에서 Redis 호출 마감 100ms 시간 초과가 매번 다른 시험 2~5개에서 난다(파일 34개가 동시에 컨테이너를 띄우고, 클러스터 모드 Valkey 묶음이 늘었다. 따로 돌리면 통과). 통합 설정의 동시 파일 수를 줄이거나 시험용 마감을 늘린다(vitest.integration.config.mjs).
+- PRF-168: 좌석을 쓰는 Lua마다 CLUSTER MYID 한 번과 chk 쓰기가 더해졌으니 S-T27(홀드 Lua 처리량)을 PRF-220(측정 창 1)에서 다시 잰다.
+- PRF-168: 접근 문자열에서 cluster 명령이 빠진 것을 시작 때 알아채는 확인(파드 준비 확인에서 노드 표지를 한 번 구하기)과, 운영에서 좌석 Redis가 단일 노드(standalone)면 시작을 거절하는 검사가 없다(복제본이 있는 비클러스터 주소면 장애 조치를 못 잡는다).
+- PRF-168: 쓰는 Lua가 올린 세대는 감시 반복이 bumps 차이로만 센다. 릴레이 리더가 바뀐 뒤 첫 확인은 기준만 잡아 그 사이 올린 수를 지표에서 놓친다(seat-epoch-watch.ts).
+- PRF-170: 실제 gRPC 채널과 차단기를 거친 업무 거절 코드(FAILED_PRECONDITION 등)가 차단기를 실패로 세지 않고 멈춤으로 가는지 함께 보는 시험이 없다(adapters/grpc-ticket-issue.ts, 차단기 판정은 platform CircuitBreaker).
+- PRF-170: ticket-svc가 몇 분 멈춰 큐 행이 수만 개로 쌓이면 ISSUE_DELAYED·기한 넘김·게이지 질의가 큐 표를 훑는다. 그때 1초 틱을 압박하면 data.md §5.1에 적은 부분 인덱스 둘을 더한다(성능 장부에서 잰다).
+- PRF-170: 발권 실행기 전용 풀(연결 4개)로 파드마다 DB 연결이 늘었다. 소비자 풀(4개)·핫패스 풀과 합친 연결 예산을 PgBouncer 배치(wbs 2.11.2)에서 함께 본다.
+- PRF-171: 결제 원장 상태가 ACCEPTED(승인 중)로 오래 이어지면 당기기가 5초마다 끝없이 묻는데 경보가 없다(얼마 뒤 무엇을 낼지 정본이 정해야 한다, application/payment-result-pull.ts).
+- PRF-171: 마이그레이션 0010 전에 접수돼 작업 행이 이미 지워진 주문(RESERVED·UNKNOWN·입금 대기)은 당기기 대상이 아니다. 운영 전이라 채우는 SQL을 두지 않았다(운영 데이터가 생기기 전에 없어도 되는지 배포 전에 본다).
+- PRF-171: payment-svc BatchGetPayments 서버가 없어 대역으로만 시험했다(PRF-180이 서버를 두면 계약 시험을 잇는다). 한 틱의 첫 묶음은 답을 본 뒤 다음 묶음을 잡아 실제 동시 요청은 3개까지다(상한 4개 안, 측정 창에서 본다).
+- PRF-172: 주문 저장소 조립(`DrizzleOrderExpiry`와 재고 다리)이 `main.ts`와 `relay-app.ts` 두 곳에 있다. 한 함수로 모은다.
+- PRF-172: P-T41의 사건 유실 시험은 세 고리가 모두 빠진 뒤 안전망이 끝내는 길을 한 번만 본다. 릴레이가 오래 멈춘 뒤 다시 켜진 경우(하루 넘은 주문이 정비 일로 넘어가는 길)를 끝까지 잇는 시험을 더한다.
+- PRF-172: 통합 전체를 돌리면 부하로 Redis 100ms 기한과 identity gRPC 50ms 기한 시험이 가끔 실패한다(한 파일씩은 통과, `identity-grpc.int` 46/46). 기한을 시험 설정으로 뺄지 정한다.
+- PRF-144: 판정 임대는 먼저 잡은 파드에 몰리고, 임대 시도가 파드 수 × 회차 수로 는다(회차 1,000이면 틱이 1초를 넘을 수 있다). 측정 창 1에서 `purchase_event_sale_tick_seconds`를 본 뒤 회차 해시로 파드를 나눈다.
+- PRF-144: SOLD_OUT을 쓰기 직전에 셈을 다시 읽지 않는다. 읽기와 쓰기 사이에 좌석이 돌아오면 다음 틱에 매진 풀림으로 회복되지만 그 사이 대기가 끝난다.
+- PRF-144: 결제 중 읽기를 가용 0인 등급이 있거나 다시 낼 때만 하면 초당 쿼리를 줄일 수 있다. 통합 시험은 실제 타이머 겹침·임대 만료·읽기 사이 커밋 차례를 보지 않는다(틱을 손으로 부른다).
+- PRF-180: 시험 빈 곳: 앞 트랜잭션이 열린 채 뒤가 기다리는 차례와 앞이 되돌려져 뒤가 만드는 차례를 강제하지 않는다, ConfirmPayment 200ms 안에 끝나는지 재는 시험이 없다, 처리 중인 호출이 있을 때의 종료를 보지 않는다.
+- PRF-180: 문장 시간 한도는 문장마다 걸려 INSERT 셋의 합이 남은 시간을 조금 넘을 수 있고 핫패스에 왕복이 한 번 는다. 측정 창에서 왕복 비용을 재서 정한다. 릴레이 정비 일 가운데 통계 스냅샷(`stat_snapshot`)을 payment DB에 언제 넣을지 정한다.
+- PRF-181: 시험 빈 곳: 실제 프로세스가 시뮬레이터로 승인까지 가는 길, `markSent`와 임대 끝난 잡기의 실제 동시 경합. 결과 반영 처리기는 decode까지만 잇는다(UNKNOWN 뒤 최종 결과 T12→T13은 PRF-182에서 끝까지 잇는다).
+- PRF-181: 원장 읽기가 계속 실패하는 행은 100ms마다 다시 잡혀 로그가 늘 수 있다(종료 유예는 W9-fix2 R-678이, 취소 어댑터의 JSON `code` 없는 4xx는 PRF-184가 고쳤다, 2026-11-17 확인).
+- PRF-182: 시험 빈 곳: 실제 코덱, 조회 중 SIGKILL, 호출이 간격보다 긴 겹침, 대량 적체. 잡기가 빈자리만큼(파드당 초당 16건 상한)이라 결제사가 빠를 때 끝나는 대로 채우면 더 빠르다. SKIP LOCKED는 SQL 글자 검사로만 잡힌다(동작 시험은 0건으로 끝나 빠뜨리지 못한다).
+- PRF-183: `PEAKET_PAYMENT_POD_COUNT`는 파드 수를 고정값으로 나눈다. 정본 값이 2(평시)·6(온세일 목표)·12(DB 예산 최대)로 갈려 12 [가정]로 뒀고, 6개만 띄우면 토큰 합이 초당 150건이라 300 TPS 피크에 못 미친다. wbs 2.12.1·4.6.1에서 값을 정하거나 실제 파드 수를 동적으로 읽는다.
+- PRF-183: `pg_quota_utilization_ratio`(observability.md)는 코드에 없다(어느 단계 몫인지 확인). 파드 합산 상한은 측정 창에서 잰다. 낮춘 상한의 회복 규칙은 PRF-200이다.
+- PRF-184: 실제 토스 응답 모양·API 버전 고정·`DEPOSIT_CALLBACK`의 `paymentKey`·웹훅 전송 ID의 뜻(공식 문서는 사건 ID를 쓰라고 한다)은 HOT-145·HOT-150에서 원문과 대조한다. `customerKey`를 누가 저장할지는 호출자가 생기는 단계에서 정한다. 넘긴 HOT-145·HOT-150은 끝났으나 실제 결제사 계정이 없어 대조하지 못했다(2026-11-17 확인, 계정이 생기면 본다).
+- HOT-140: 실제 포트원 동작은 HOT-145에서 대조한다: 카드 거절·기한 만료의 실제 응답, READY가 이어지는 건의 종결, 틀린 상점의 답, 웹훅 시크릿 형식과 재전송 `webhook-id`, 카드 거절이 502 → UNKNOWN → PG_ERROR로 집계되는 분석 범주. 넘긴 HOT-145는 끝났으나 실제 결제사 계정이 없어 대조하지 못했다(2026-11-17 확인, 계정이 생기면 본다).
+- HOT-145: 실제 결제사로 확인 못 한 것: 토스 가리는 규칙(바뀌면 같은 카드의 값이 갈린다, P-T50 ⑦), 포트원 `issuer` 실제 값과 마스킹 규칙, 웹훅 머리 이름·재전송 ID, 카드 거절의 실제 응답, READY 지속. 시험 빈 곳: 입금 대기 뒤 승인 경로의 연결값, `ALREADY_APPROVED`의 저장, `main.ts` 조립(글자 검사뿐). 실제 결제사 대조는 계정이 생기면 보고, 시험 빈 곳은 아직 남았다(2026-11-17 확인).
+- HOT-150: `deleteInBatches`의 복제 지연·CPU 멈춤은 재는 부품이 플랫폼에 없어 자리만 있다(운영에서는 아직 안 멈춘다). 시험 빈 곳: 풀 고갈의 429 → 503, `main.ts` 웹훅 조립과 종료 중 웹훅, 운영 구성(`allowSimulator` 거짓, 실제 토스 어댑터)의 통합 경로, 정비 DB 역할의 DELETE 권한. 토스 전송 ID는 공식 문서가 형식 검사를 말리지만 글자·길이만 묶었다(길이가 늘면 `invalid` 경보, 결제는 정기 조회로 확정).
+- HOT-151: 은행 코드를 이름으로 맞추지 않아 화면에 코드가 그대로 나온다(포트원은 열거값이라 모양도 다르다). 전 구간(HTTP·gRPC·화면) 시험이 없고 시뮬레이터 입금은 DONE과 통보가 동시라 통보 뒤 지연을 실물처럼 만들지 못한다. 토스 `dueDate`의 시간대는 공식 문서에 없어 KST [가정]이다.
+- HOT-152: 조회가 입금 대기라고 답한 뒤 커밋 전에 재입금 통보가 오면 `STATE_IGNORED`로 버려져 다음 조회가 새 기한까지 밀린다(창은 매우 좁다). 포트원 입금 오류 신호(`Transaction.VirtualAccountIssued`로 추정)와 발급만 된 가상계좌의 일반 취소는 문서로 확인하지 못했다. 티켓 서비스가 대역이라 VOIDED·키 폐기는 HOT-160에서 잇는다. `specs/payment.qnt`에 T21·입금 모델이 없다(PRF-210).
+- HOT-153: 온세일 일정 부품이 없어 운영에서는 대사가 꺼져 있다(그 부품이 생길 때 켠다). 릴레이 배포에 결제사 설정 환경 값이 없으면 그 결제사는 대사를 건너뛴다(배포 값이 생길 때 넣는다). 입금 확정 뒤 해시 보관 90일은 [가정]이다. 실제 포트원 거래 목록 모양은 확인하지 못했다. 전액 취소 닫기와 두 리더 겹침은 시험하지만 자정 경계의 실제 결제사 지연은 시험하지 못한다.
+- PRF-190: 시험 빈 곳: 파드 둘 사이의 전환 전파, `hot` 풀 프로필(통합 시험은 `general`), 실제 SDK의 복귀 쿼리와 기한 전달, 자정 근처 KST 경계. 재입금 불가 건은 재입금 안내 뒤에 실패 안내가 바로 이어진다(알림 단계에서 합친다). `pg_switch` 주기 읽기와 새 파드 준비 조건은 OPS-310이다.
+- PRF-191: 홀드가 풀린 뒤에도 시도를 만든다(정본대로, 만료 조건 ③이 주문을 40분 더 잡고 카드 인증 뒤 RESERVE에서 실패한다. 홀드 없음과 장애를 구분해 409로 답할지 정한다). 행동 신호 전송이 기동 때 연결 실패면 파드 수명 내내 버려질 수 있다. 텔레메트리 클러스터 주소 분리는 BAS-030이다. 실제 purchase↔payment 왕복 시험이 없다(가짜 gRPC 서버). 재생은 저장 응답이 아니라 `pinned_pg`로 값을 다시 만든다(guidelines §4에 예외로 적음).
+- PRF-192: 이그레스는 `enabled`가 환경 값이라 아직 어디서도 켜지지 않았고 공인 대역 전체다(호스트 단위는 앱과 wbs 0.4.2). 켤 때 Pod Identity 에이전트·앰비언트 메시·API 서버(릴레이의 Lease) 허용을 환경 값으로 넣어야 한다. queue-svc 엣지 `entry-viewer-request.js:151`의 `dependency-unavailable` 제목이 오류 목록과 다르다. 실제 차단을 보는 시험(V-T34)에 payment-svc가 없다.
+- PRF-200: 서킷 값(창 10초, 20건·50%, 5초)은 결제사 전용 값이 정본에 없어 공용 기본값이다. 시험 빈 곳: 진짜 차단기로 시험 호출이 멈추는 경우, 두 실행기가 함께 도는 반 열림, 표시 뒤 `reschedule` 실패.
+- PRF-201: 시험 빈 곳: 통합 시험이 일반 풀이라 회차 200개·핫패스 풀 대기를 보지 못한다(503의 남은 시간 문제는 HOT-070이 끝나 풀렸다, 2026-11-17 확인).
+- PRF-202: 로컬 관측 스택에 kube-state-metrics가 없어 `kube_pod_status_ready`를 잇는 PromQL을 가짜 응답으로만 시험했다. 실제 환경에 그 지표가 없으면 입력 없음이 되어 자동으로 다시 열리지 않는다(`deploy/local/observability.yaml`, 실제 PromQL을 한 번 돌려 본다).
+- PRF-202: Prometheus 주소는 저장소 밖 환경 값 파일에 넣어야 한다(local·ci 밖에서 없으면 payment-svc가 시작을 실패한다). NetworkPolicy의 API 서버·Prometheus 나감도 환경 값 몫이라 렌더 시험은 값 파일의 주석까지만 본다(배포 검사가 필요하다).
+- PRF-202: Lease 실패가 로그로 드러나지 않는다(`packages/platform/src/lease.ts`가 실패를 삼키고, 리더 아닌 파드와 구분되지 않는다). 판정자가 없는 상태는 `payment_entry_pause_judge_leader` 합이 0인 것으로만 보인다.
+- PRF-202: P-T43의 실제 11분 멈춤과 실제 쿠버네티스 Lease 판정자 교체는 Game Day G-05 몫이다. 이 단계 시험은 주입 시계·줄인 값·혼자 리더로 돌렸다.
+- 시범 묶음(R-438): 옮기기·되돌리기 Lua 200석이 이 PC에서 p50 1.6ms·p99 2.0ms로 S-T23 ⑥의 1ms [가정]을 넘는다(docs/review/pilot-purchase-path-perf.md, 좌석당 명령 약 7번). 측정 창에서 부하 아래 다시 재고, 그래도 넘으면 `FREEZE_BATCH_SIZE`나 좌석당 명령 수를 줄인다.
+- 시범 묶음(R-438): 결제 SDK 로딩 실패 `sdk_load_failed`가 콘솔 기록까지다(웹에 화면 관측 전송 경로가 아직 없다).
+- 시범 묶음(R-438): 포트원 결제창에 구매자 정보 `customer`를 아직 넘기지 않는다(서버가 보내지 않고, SDK 칸 이름은 openapi가 "연동 때 확인"으로 뒀다).
+- 시범 묶음(R-438): Valkey TIME에 묶인 `exp <= now` 1ms 경계는 틀린 구현 검사로 넣어 보지 못했다. purchase-svc 통합 시험 전체는 틀린 구현 검사 뒤 로컬에서 다시 돌리지 않았다(CI 몫).
+- CI 흔들림(214103ad, 실행 42707868451): 대기실 FE-T3 WebKit "T=0 두 호출(진입·입장 확정)과 대기열 파일 GET에 CORS 사전 요청(OPTIONS)이 없다"가 1.5분 만에 `page.evaluate: Target page, context or browser has been closed`로 실패했다가, 실패한 잡만 다시 돌려 통과했다. 대기실 코드는 바뀌지 않았다(tools/web-checks/queue-room/t0.spec.mjs).
+- CI 흔들림(c9ddbb9c, 실행 42697021230): 월렛 Lighthouse LCP 7,302ms가 한도 7,255ms(기준선 + 25%)를 넘었다가 다음 실행에서 통과했다. 월렛 화면은 바뀌지 않았다(tools/web-checks/budgets/lighthouse.spec.mjs).
+- BAT-020(PRF-203, R-448): 하위 결제사 불일치 SEV2 로그가 관측 표 쓰기 전에 나가, 쓰기가 실패하면 로그는 '뺐다'인데 어느 파드도 빼지 않는다(다음 관측 때 다시 쓴다).
+- BAT-020(PRF-203, R-448): 결제사 답의 `pgProvider` 값을 목록·길이로 검사하지 않고 DB·로그에 싣고, 중복 로그 막기 집합에 상한이 없다(상대가 인증된 포트원이라 위험 낮음).
+- BAT-020(PRF-203, R-448): 포트원형 시뮬레이터가 하위 결제사를 인증 때가 아니라 답할 때 다시 찾아, 표를 바꾸면 이미 인증한 결제의 답도 바뀐다. 시뮬레이터 프로세스는 채널 표 시작 옵션을 받지 않아 다시 띄우면 표가 빈다.
+- BAT-020(PRF-210, R-448): 결제 모델 기반 시험의 스케줄러 문을 `tx.insert`·`tx.select`가 지나지 않는다(차례가 한쪽으로 치우침. 지금 경합 쌍에서 닿는 것은 당기기 읽기뿐).
+- BAT-020(PRF-210, R-448): admission-ctrl 통합 시험이 queue-svc 소스를 가져오는데 CI `--affected` 타입 검사가 그 변경을 따라가지 않는다(purchase-svc는 이 묶음에서 늘 돌게 고쳤다).
+- BAT-020(R-448): 틀린 구현 검사에서 한 겹으로만 잡힌 것: 판 번호 조건(두 파드가 같은 판의 UPDATE를 겨루는 경우는 돌지 않음), 관측 불일치 조건·10,000ms 경계·관측 표 읽기 실패(단위 시험만). 결함 없이도 `payment-new-pause.int.test.ts`의 `P-T43_회차와 시작 시각을 돌려주고…`가 한 번 실패했다가 세 번 통과했다(부하 때 시각 의존으로 보임).
+- BAT-030(R-451): docs/verification.md §2.1 표는 명세 넷을 queue·seat·payment·entry로 적는데, 지금 목록은 entry가 없고(GAT-060 대기) seat_lifecycle이 있다(§2.6에만 나온다). 계획한 넷인지 지금 있는 것인지 문장을 나눈다.
+- BAT-030(R-451): 블로그 M1 글 제목·본문의 "티켓팅"을 용어집 §5.4 표기 "티케팅"으로 고친다(docs/blog/m1-v0-breaking-point.md).
+- BAT-022(PRF-215, R-458): 틀린 구현 표본에서 놓친 셋(합본 SIGTERM의 닫기 신호, 진입 시행이 모자랄 때 무효 합치기, purchase-svc 종료 차례)에 더한 시험은 소스 글을 읽는 시험이라 약하다. 실제 동작은 통합 시험이나 리허설에 경우를 더해 본다. 결과 모름을 끝 상태로 세던 결함(k6 시나리오)은 Docker가 필요한 k6 시험만 잡는다.
+- BAT-051(HOT-252, R-535): core-svc 내부 HTTP `GET /internal/v1/events/{eventId}/sale-config` 호출자 인증은 NetworkPolicy(wbs 0.4.4) 전제다. 운영 배포 때 purchase-svc만 받게 제한하고 `PEAKET_CORE_HTTP_URL` 값을 workloads에 넣는다.
+- BAT-051(HOT-252, R-535): `lst`는 게이트웨이가 서명 확인 뒤 넘기는 계약(seat-hold §2)이지만 purchase-svc에서 구매 세션 jti와 묶는 검사를 후속으로 더한다.
+- BAT-051(HOT-252, R-535): `payment-model` V-T40 확률 경합 시험이 한 번 흔들렸다. 재실행에서 통과했지만 흔들림 원인을 따로 본다.
+- W7-L1-roles-check(R-643, RV-04): 구현 커밋이 시험 설정 파일(`services/*/vitest*.config.mjs`의 include·exclude, 패키지 `package.json`의 시험 스크립트)을 바꿔 시험을 빼도 ⑤가 못 잡는다. 정본에서 시험 설정 파일을 시험 쪽으로 볼지 정한 뒤 시험 → 구현(tools/ci/roles-check.mjs).
+- W7-L1-roles-check(R-643, RV-06): 같은 Finding의 `Fix-By: test` 커밋이 시험 파일을 하나도 바꾸지 않아도(계획 파일만 고치거나 빈 커밋) 뒤의 `Fix-By: impl`이 통과한다. 지적마다 시험 쪽 커밋 하나 이상이 시험 파일을 바꿔야 하는지 정한다(tools/ci/roles-check.mjs).
+- W7-L1-roles-check(R-643): 바꾼 파일이 없는 `Fix-By: impl` 커밋(빈 커밋)이 '.md만 바꾼 구현 쪽 커밋'의 예외에 드는지 정본에 빈칸이 있다(docs/architecture.md §8.6 '합치기 전 역할 확인' 세부, tools/ci/roles-check.mjs).
+- W7-L1-roles-testonly(R-653, RV-02): `tools/web-checks/`의 시각 비교 기준 그림(`visual/__screenshots__/{chromium,webkit}/*.png`), 성능 예산 기준선(`budgets/js-baseline.json`·`lighthouse-baseline.json`), 시험 도우미(`visual/queue-room-states.mjs`·`budgets/pages.mjs`·`lib/*.mjs` 등)가 시험 파일 정의 밖이다. 시험만 묶음에서는 기준 그림 다시 찍기 같은 대표 일을 지나치게 막고, 코드 묶음에서는 구현 커밋이 기댓값을 바꿔도 못 잡는 구멍이다(tools/ci/roles-check.mjs).
+- W7-L1-roles-testonly(R-653, RV-03): 코드 묶음에서 마지막 verify 뒤에 `test` 커밋이 기존 시험의 단언을 바꿔도(느슨하게 해도) 다시 검증하지 않고 통과한다. 시험만 묶음은 같은 변경을 다시 검증받게 해 두 묶음의 선이 다르다(tools/ci/roles-check.mjs).
+- W7-L1-roles-testonly(R-653, RV-04): '절을 바꿨다'는 글이 다르기만 하면 되어, 빈 하위 제목 한 줄을 더하거나 다른 역할 커밋이 지운 '검증' 절 줄을 되살리는 것만으로 다시 검증 없이 마지막 verify를 세게 할 수 있다(tools/ci/roles-check.mjs).
+- W7-L1-roles-testonly(R-653, M-09): 종류를 가를 때 doc을 `Batch-Kind`보다 먼저 보는 틀린 구현을 시험이 못 잡는다. `Batch-Kind: test-only`인데 plan·doc·review뿐인 묶음이 문서 묶음으로 보여 검증 없이 통과한다. RC-55에 묶음 줄 종류 `시험만`과 까닭의 `doc`을 보는 단언이나 새 사례를 더한다(tools/ci/roles-check.test.mjs).
+- W7-L1-roles-testonly(R-653): RC-71('절 비교는 그 커밋의 첫 부모와 한다')의 사례가 첫 부모와 범위 base를 가르지 못한다(그 틀린 구현 M-28은 RC-67·RC-70이 잡는다). 첫 verify가 '검증' 절을 채운 뒤 둘째 verify가 다른 절만 고치는 사례를 더한다(tools/ci/roles-check.test.mjs).
+- W8-L1-roles-implfirst(R-662, M-29): 밝히는 때를 가장 이른 `Batch-Order` plan이 아니라 가장 늦은 것과 견주는 틀린 구현을 시험이 못 잡는다. 두 plan 커밋이 첫 impl·test의 앞과 뒤로 갈리는 사례가 없다. RC-80에 'plan(`Batch-Order`) → impl → test → plan2(`Batch-Order`) → review → verify는 통과' 사례를 더한다(tools/ci/roles-check.test.mjs).
+- W8-L1-roles-implfirst(R-662, M-30): 정방향 시험 쪽 커밋이 막힌 경로를 첫 하나만 찍는 틀린 구현을 시험이 못 잡는다. 한 커밋에 막힌 경로가 둘인 사례가 없다. RC-76에 '한 test 커밋이 `services/a/src/y.ts`와 `package.json`을 함께 더함 → `[코드 경로]` 두 줄' 사례를 더한다(tools/ci/roles-check.test.mjs).
+- W8-L1-roles-implfirst(R-662, RV-01): 시험만·문서 묶음의 plan 커밋에 틀린 `Batch-Order`(값 틀림·둘)가 있으면 `[꼬리말]`과 함께 `[구성] … Batch-Order를 달지 않는다` 줄이 더 나온다. 계획 1의 1 '`[꼬리말]` 실패가 난 꼬리말은 밝힌 것으로 세지 않는다'와 어긋난다(끝 코드는 같다). RC-79에 틀린 값·둘 사례를 더한 뒤 충돌을 바른 꼬리말로만 보거나, 계획·§8.6을 '충돌은 값과 상관없이'로 고친다(tools/ci/roles-check.mjs, docs/architecture.md §8.6).
+- W8-L1-roles-implfirst(R-662, RV-02): ⑤의 시험 파일 정의 `isTestPath`가 넓어 폴더 마디 `test`·`e2e` 아래면 `deploy/charts/…/test/values-prod.yaml`·`services/a/src/test/helper.ts`도 시험 파일로 본다. 정방향 시험 쪽 커밋과 시험만 묶음이 배포·제품 트리 아래 시험 폴더의 시험 이름 아닌 파일을 바꿀 수 있다. `deploy/`·`infra/`·`.github/` 아래를 뺄지 정한다(tools/ci/roles-check.mjs).
+- W8-L1-roles-implfirst(R-662): 다른 묶음 리뷰의 지적을 받아 이 묶음에서 고치는 리뷰 반영 커밋을 나타낼 꼬리말이 없다(BAT-060은 감독 예외로 넘긴 사례). 지적이 온 묶음을 밝히는 `Finding-From: <묶음 ID>` 꼬리말을 둘지와 roles-check가 그것으로 무엇을 볼지 정한다(tools/ci/roles-check.mjs, docs/architecture.md §8.6).
+- W8-L1-roles-implfirst(R-662): 정방향 묶음 계획 파일의 '시험 결과' 절(구현 위에서 시험이 모두 통과했는지, ADR-0281 결정 2)을 `[계획 파일]` 필수 절로 할지 정한다. 지금은 사람이 본다(계획 파일 1의 6과 6 '기계로 보지 않는 것', docs/review/plans/W8-L1-roles-implfirst.md, tools/ci/roles-check.mjs).
+- BAT-055(R-665, RV-06): partner-api CORS의 `X-Requested-With`와 scanner-api의 `WWW-Authenticate`는 들어갔다(2026-11-17 확인). 남은 것: 다섯 호스트의 노출·허용 머리 목록이 정본(guidelines §9)과 같은지 전체를 대조한다(deploy/gateways/gw-partner.yaml, gw-scanner.yaml).
+- BAT-055(R-665, RV-10): gw-fan에 `www`의 `/_t/*` 라우트가 없고, 게이트웨이가 CloudFront의 `X-Peaket-App`을 늘 `web`으로 덮어 partner·console·scanner 화면 지표가 web으로 셈해진다. 텔레메트리 입구 단계에서 고친다(deploy/gateways/gw-fan.yaml).
+- BAT-055(R-665, RV-15): `Vary: Origin`을 CloudFront 뒤 넷의 모든 응답에 붙인다. 정본은 쿠키를 받는 API에만 둔다. CDN 캐시(`queue-files`·www 화면)의 캐시 키·적중률에 닿는지 HOT-450에서 확인한다(deploy/gateways/gw-fan.yaml·gw-partner.yaml·gw-ops.yaml·gw-queue.yaml).
+- BAT-055(R-665, RV-20): 리스너에는 들어왔지만 `Host`가 어느 라우트 호스트와도 맞지 않는 요청은 Lua가 돌지 않아 그 접근 로그 줄에 위조 끝단 머리가 남을 수 있다(CloudFront·NLB 전제로 닿기 어렵다). kind 시험을 두거나 남는 차이로 적는다(deploy/gateways/*.yaml).
+- BAT-055(R-665, RV-21): gw-fan 구매 경로가 core-svc 쪽 정규식보다 앞서는 까닭이 '정규식끼리는 긴 쪽이 앞'이라는 정렬뿐이고, 정본 문장의 '정규식 라우트가 있는 호스트'에 `partner-api`가 빠졌다. HOT-410 생성기가 겹치는 경로를 검사한다(deploy/gateways/gw-fan.yaml, docs/infra.md §4.1 '호스트와 내부 경로').
+- BAT-055(R-665, RV-22): web·partner `instrumentation.ts`의 `catch`가 끝내기 함수를 얻으려고 같은 모듈을 다시 가져와, 처음 실패가 그 모듈 가져오기였다면 프로세스를 끝내지 못한다(apps/web/instrumentation.ts, apps/partner/instrumentation.ts).
+- BAT-055(R-665, RV-23): 계획 파일에 `### 13.`이 둘이다('고른 Envoy Gateway 판'과 '리뷰 반영')(docs/review/plans/BAT-055.md).
+- BAT-055(R-665, RV-24): `exitAfterStartupFailure`가 '서버 안인가'를 Next.js 내부 환경 값 `__NEXT_PRIVATE_ORIGIN`으로 가른다. 판을 올려 이름이 바뀌면 조용히 끝내지 않게 된다(실패에 열림). 가르는 법을 정하거나 Next.js 판 올림 때 boot 시험을 꼭 돌리는 규칙을 적는다(packages/platform/src/telemetry-app-server.ts).
+- BAT-055(R-665, RV-26): VF-02 정적 시험이 '쿠키 인증 쓰기 라우트'를 jwt가 쿠키를 읽는 라우트로 골라, 공개 쓰기 라우트(gw-fan 토큰 갱신, gw-partner·gw-ops `/auth/*` POST)의 csrf를 떼는 결함을 라우트 단위로 보지 않는다(deploy/gateways/test/gateways.test.mjs).
+- BAT-055(R-665, RV-27): gw-queue 프록시 설정(`peaket-proxy-queue`)이 공통 것의 손 사본인데 `filterOrder`·원본 확인 환경 값·`allowedEnvVars`를 두 벌이 같게 갖는지 보는 정적 시험이 없다. BAT-060과 함께 본다(deploy/gateways/00-common.yaml, deploy/gateways/test/gateways.test.mjs).
+- BAT-055(R-665, RV-28): partner-api CORS `allowHeaders`에 결제사 웹훅 서명 머리 일곱이 들어갔다(브라우저가 부르지 않는 작업). 정본 줄(guidelines §9)에 '브라우저가 부르지 않는 작업은 뺀다'를 더하고 BAT-060 생성기에서 라우트마다 채운다(deploy/gateways/gw-partner.yaml).
+- BAT-055(R-665, RV-30): 추적 경계의 경로 쿼리 떼기가 앞 글자가 시작·빈칸·따옴표·`(`일 때만 돈다. `=`·`:`·`,` 뒤의 경로, 상대 경로, `https?` 밖 scheme 주소의 쿼리는 남는다(packages/platform/src/trace-boundary.ts `PATH_WITH_QUERY`).
+- BAT-055(R-665): web `POST /demo/pg-simulator/authenticate`는 출처 확인이 없어, 데모 환경에서 다른 사이트가 이 경로를 부르게 할 수 있다(local·ci·demo에서만 열림)(apps/web/app/(request)/).
+- BAT-055(R-665, U04b): 브라우저 추적 값이 틀린 꼴이면 `traceparent`로 물러나는 결함을 잡는 단위 사례가 없다. 두 층 모두 놓친 틀린 구현 가운데 남은 하나다(게이트웨이가 바깥 `traceparent`를 지워 운영에서는 둘이 함께 오지 않는다)(packages/platform/src/telemetry-app-server.ts).
+- BAT-055(R-665, U15): Envoy Gateway 설치 주소에 판 칸이 든다는 단위 단언이 없다. 지금은 kind 설치의 해시 대조가 막는다(tools/local/cluster.mjs).
+- BAT-055(R-665, W7-SEC-05): 운영 정의가 프록시 이미지를 적지 않아 컨트롤러 기본값(태그)을 쓴다. 다이제스트를 단 이름과 정적 시험 한 줄을 더한다(deploy/gateways/00-common.yaml `envoyDeployment.container`).
+- BAT-055(R-665, W7-SEC-06): 원본 확인 값 Secret이 `optional: true`라 운영에서 빠뜨리면 `ja4`·`asn`·`edgeBotLabels`·`x-peaket-arrival`이 소리 없이 늘 빈다. `optional: false`나 원본 확인 실패 수 지표를 정한다(deploy/gateways/00-common.yaml).
+- BAT-055(R-665, W7-CON-03): 원본 확인 두 값이 프록시 환경 값이라 Secret을 바꿔도 떠 있는 파드에 닿지 않는다. 교체 차례(Secret 고침 → 프록시 다시 띄움 → CloudFront 값 바꿈 → 옛 값 지움)를 정본에 적는다(deploy/gateways/00-common.yaml, tools/local/gateway-objects.mjs).
+- BAT-055(R-665, W7-CON-04): 프록시 Deployment가 게이트웨이마다 복제 1이고 HPA·PDB·영역 고르게 놓기가 없다. 배포 단계 HOT-450 전에 꼭 고친다(deploy/gateways/00-common.yaml `peaket-proxy`).
+- BAT-055(R-665, W7-CON-05): 검색 IP 한도가 IPv6를 주소(/128)마다 세어 주소를 바꿔 가며 보내면 한도가 걸리지 않는다(identity는 /64로 묶음). BAT-056 측정과 함께 정한다(deploy/gateways/gw-fan.yaml). BAT-056 관찰(2026-11-18, 성능 장부 `2026-11-18-bat056-ms-ip-v6-64`): 같은 /64 안 주소 100개가 429 0건 — 지금 모양으로는 걸리지 않음을 확인했다.
+- BAT-055(R-665, W7-CON-06): identity-svc가 멈췄을 때 게이트웨이의 공개키 묶음 다시 읽기 동작(마지막 키를 계속 쓰는 것 밖의 다른 점)을 정본과 운영 확인 표에 맞춘다(deploy/gateways/gw-*.yaml `remoteJWKS`).
+- BAT-055(R-665, W7-CON-07): 요청 중의 Lua 실행 오류는 Envoy가 오류 수만 세고 요청을 그대로 넘긴다(열림). 운영 확인 표와 경보를 정한다(deploy/gateways/00-common.yaml `envoy_on_request`, docs/infra.md §4.1 '운영 확인').
+- BAT-055(R-665, W7-CON-08): `cluster.mjs gateways`가 컨트롤러가 받지 않은 정의를 찍기만 하고 종료 0이라 CI가 그 실패를 보지 못한다(tools/local/cluster.mjs, .github/workflows/ci-kind.yml).
+- BAT-055(R-665, W7-CON-09): identity test-int '한 계정에 동시에 온 시도 10개'가 172개 가운데 한 번 흔들렸다(두 번 다시 돌려 통과). 경합 결함이 아니라 시험 가정(Redis 명령 시간 상한 100ms) 탓으로 판단했다. 시험의 시간 가정을 고친다(services/identity-svc/test-int/admin-login.int.test.ts, packages/platform/src/redis.ts).
+- BAT-055(R-665, W7-COR-03): Envoy가 span을 게이트웨이 수집기 Service로 바로 보내 꼬리 표본의 'trace ID 기준 같은 수집기 복제' 전제와 어긋날 수 있다(확인 필요)(deploy/gateways/00-common.yaml `tracing.provider.backendRefs`).
+- BAT-055(R-665, W7-COR-05): 정적 시험이 요청의 라우트를 고르는 규칙(Exact > PathPrefix > 정규식)이 Envoy Gateway(Exact > 정규식 > PathPrefix)와 반대다. BAT-060 생성기 대조와 함께 본다(deploy/gateways/test/gateways.test.mjs `pathScore`·`routeFor`).
+- BAT-055(R-665, W7-COR-07): `web` 범위 규칙의 platform 모듈 목록에 `deadline.ts`가 실행 때 가져오는 `problem.ts`가 빠졌다. 손 목록이라 사슬이 바뀌면 또 빠진다(tools/ci/changes.mjs).
+- BAT-055(R-665, W7-COR-08): 정본은 출처 확인 필터가 'Origin이 없으면 403'이라 적지만 Envoy 필터는 Origin이 없으면 Referer로 견줄 수 있다(확인 필요). Q-T41 ⑤ 판정이 여기에 기댄다(docs/architecture.md §4 'CSRF 확인 규칙', tools/local/e2e/gateways.e2e.mjs).
+- BAT-055(R-665, W7-COR-09): boot 단계 주석이 'partner(next start)'인데 VF-11 뒤 partner도 standalone이다(.github/workflows/ci-web.yml).
+- BAT-055(R-665, W7-WIR-02): 라우트를 ops-svc로 돌리는 일은 BAT-060이 하고, ticket-svc의 옛 받는 층(`ops-scanner-devices.controller.ts`)을 지우는 일이 남는다(services/ticket-svc).
+- BAT-055(R-665, W7-WIR-07): Lua가 교차 출처 필터보다 앞에서 직접 답해 `typ` 401·`/internal/` 404에 `Access-Control-Allow-Origin`이 없다. 화면의 '401이면 한 번 갱신'이 그 401을 네트워크 오류로 받는다(deploy/gateways/00-common.yaml `filterOrder`·Lua 직접 응답).
+- BAT-055(R-665, W7-WIR-08): 게이트웨이 Problem 본문은 BAT-060(HOT-410)이 하고, 대기실이 `type` 없는 입장 확정 403을 '다른 곳에서 이미' 화면으로 끝내는 화면 쪽 처리가 남는다(apps/web/queue-room/src/live/controller.ts).
+- BAT-055(R-665, W7-WIR-10): 소비자 웹의 후기 운영자 조치가 `ops-api`를 쿠키와 함께 불러 gw-ops 허용 출처(`console` 하나)에 늘 막힌다(운영 빌드에서는 켜는 호출자가 없음)(apps/web/src/widgets/reviews/ui/ReviewModerationActions.tsx).
+- BAT-055(R-665, W7-WIR-11): 화면 코드에 `traceparent`를 싣는 브라우저 계측이 없어 운영의 `x-peaket-browser-traceparent`는 늘 비고 V-T31 ②의 링크 길이 쓰이지 않는다. 텔레메트리 입구 단계와 함께 본다(deploy/gateways/gw-fan.yaml, apps/web/src).
+- BAT-055(R-665): 검증이 제안한 시험 둘을 더한다. ① Lua `direct_headers`와 `HTTPRouteFilter` `directResponse.header`마다 HSTS·nosniff·기본 CSP가 있다는 정적 시험(지금은 `lateResponseHeaders`와 겹친 가드라 하나만 빠지면 kind가 못 본다) ② 따옴표 쿠키 안의 맞는 at+jwt 토큰은 통과한다는 kind 되돌림 가드(deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs).
+- BAT-055(R-665, W7-L1-roles-check R-643에서 넘어옴): kind 클러스터 이름을 고르는 `PEAKET_CLUSTER`(기본 `peaket`)를 BAT-055가 더했으나 그 시험이 없다(tools/local/cluster.mjs).
+- BAT-055(R-665): platform O-T37 스캐너 가드 시험이 한 번 흔들렸다(다시 돌려 통과). 원인을 따로 본다(packages/platform/test/scanner-auth.test.ts).
+- BAT-055(R-665): queue-admission §2 순서도는 로비 참가(`POST /lobby-participants`)에서 게이트웨이가 `ticket:buy`를 확인한다고 그리지만, 게이트웨이 정본(docs/infra.md §4.1 '토큰 확인과 인가')과 구현은 `ticket:buy`를 대기열 진입·입장 확정과 구매 경로에 둔다. 어느 쪽에 맞출지 정한다(docs/features/queue-admission.md, deploy/gateways/gw-queue.yaml).
+- BAT-060(R-666, RV-06): 라우트 생성기가 다섯 API 호스트와 손으로 두는 호스트(`www`·`queue-files`) 어디에도 속하지 않는 계약 경로(경로 `servers`의 호스트 오타, `x-peaket-gateways` 규칙 빠짐)에서 멈추지 않아 라우트 없이 지나간다(운영에서는 404). '생성기가 멈추는 경우'에 더하고 호스트 오타 사본이면 2로 끝나는 단위 시험을 둔다(tools/ci/gateway-routes.mjs, docs/infra.md §4.1).
+- BAT-060(R-666, RV-08): 운영에도 쓰는 컨트롤러 설정이 레이트 리밋 서비스·`shutdownManager` 이미지를 태그로만 적는다. BAT-055 W7-SEC-05와 함께 다이제스트를 단 이름으로 고친다(deploy/gateways/controller/envoy-gateway.yaml).
+- BAT-060(R-666, RV-09): 경로별 시간 상한으로 게이트웨이가 만드는 504(와 502)가 Problem이 아니라 Envoy 기본 글 본문이다. '게이트웨이 오류의 Problem' 상태 목록에 502·504를 더할지 정하고 다섯 게이트웨이 정적 시험을 둔다(docs/infra.md §4.1, deploy/gateways/gw-*.yaml `responseOverride`).
+- BAT-060(R-666, RV-10): 429 `Retry-After`를 요청 머리 `X-User-Id`가 있으면 60, 없으면 1로 고른다. 토큰으로 세는 로컬 한도(대기열 진입 단말당·gw-ops 계정당)를 거는 단계의 지시문과 infra §4.1 확인 줄에 'Retry-After 고르기를 다시 본다'를 적는다(deploy/gateways/gw-*.yaml).
+- BAT-060(R-666, RV-11): 한 경로를 메서드로 나눈 곳(`/v1/orders`, 후기 두 경로)에서 `OPTIONS` 맞춤이 두 라우트에 겹친다. 겹친 `OPTIONS` 라우트들의 CORS가 같다는 정적 시험을 두거나 `OPTIONS`를 한 라우트에만 넣는다(tools/ci/gateway-routes.mjs, deploy/gateways/gw-fan.routes.yaml).
+- BAT-060(R-666, RV-12): `/v1/tickets/{ticketId}/addons`(POST·GET)를 처리할 서비스(core-svc shop인지 ticket-svc인지)를 docs/architecture.md §3.1에서 정한다. 처리기가 아직 없는 작업의 백엔드는 원천 앞부분의 추정이고, 처리기가 생기면 '백엔드 대조'가 잡는다(deploy/gateways/test/route-contract.test.mjs).
+- BAT-060(R-666, RV-17): 묶은 정규식(`peaket.io/match: merged`)의 갈래 수·길이 상한을 보지 않아, 경로가 늘면 `--check`는 통과하고 배포에서 Envoy가 설정을 거절할 수 있다. 상한 [가정](예 32)을 넘으면 2로 멈추고 infra §4.1 '생성기가 멈추는 경우'에 적는다(tools/ci/gateway-routes.mjs `mergeMatches`).
+- BAT-060(R-666, RV-18): Lua가 내는 `/internal/` 404에 `X-Trace-Id`가 없고, 응답 고치기에서 404를 뺀 뒤 라우트를 거치지 않는 Envoy 자체 404(모르는 호스트 등)는 기본 본문일 수 있다(kind에서 보지 않음). D-T43 ①의 '없는 경로 404'에 넣을지 정한다(deploy/gateways/00-common.yaml).
+- BAT-060(R-666, S12·D20): TRACE 라우트의 '원천 앞부분마다의 정규식'은 동작을 바꾸지 않는다(kind에서 모든 경로 맞춤 둘만 남겨도 TRACE가 모두 405). 정본 문장을 '모든 경로 맞춤 둘'로 줄이고 생성기에서 그 줄을 뺄지 정한다(낮음)(docs/infra.md §4.1 '호스트와 내부 경로', tools/ci/gateway-routes.mjs).
+- BAT-060(R-666, D15): kind의 로컬 덧씌우기가 모든 백엔드를 대역 하나로 바꿔 백엔드 차이를 kind가 보지 못한다(정적 '백엔드 대조'만 지킨다). 원래 백엔드 이름을 요청 머리로 대역에 넘겨 W7-WIR-01·W7-WIR-03 K 시험이 단언하게 하거나, 시험 이름의 '(identity-svc 자리)'를 뺀다(tools/local/gateway-objects.mjs, tools/local/e2e/gateway-routes.e2e.mjs).
+- BAT-060(R-666): D-T50 ⑤ 판정 칸의 '주문'은 주문 읽기 셋이 gw-fan-api로 옮겨(W7-COR-04) 계정당 한도가 붙으므로 지금은 '주문 만들기·결제(gw-fan-buy)'만 맞다. 판정 칸 문구를 고친다(docs/devops.md §14 D-T50).
+- BAT-060(R-666): 다음 Docker 차례에 다시 볼 것 둘: D17(VF-D17로 상태를 먼저 단언하게 고친 W7-CON-02 K 시험에 결함 S15(결제 상태 27초 상한 지움)를 넣어 새 실패 글을 본다), D4(컨트롤러 설정 `rateLimit.failClosed: true` 판 V22b를 넣고 `cluster.mjs gateways`를 다시 돌려 kind `D-T50 ③`이 실패하는지 본다)(tools/local/e2e/gateway-routes.e2e.mjs, tools/local/e2e/gateway-limits.e2e.mjs).
+- BAT-060(R-666, RV-16): roles-check가 재현 시험이 이미 있는 시험인 지적(RV-01, 재현은 앞서 실패한 kind D-T42 ④·D-T43 ①)을 받는 길이 없어 `Fix-By: impl` 앞에 `Fix-By: test`가 없다는 `[차례]` 실패를 감독 예외로 남겼다. 예: plan 커밋에 `Finding`과 기존 시험 이름을 적으면 그 지적의 시험 먼저로 센다(tools/ci/roles-check.mjs, docs/architecture.md §8.6).
+- BAT-060(R-666, RV-16): roles-check가 다른 묶음 리뷰에서 넘어온 지적(BAT-055 웨이브 끝 리뷰 → BAT-060)을 받는 길이 없어 '첫 review-fix가 첫 review·verify보다 먼저'라는 `[차례]` 실패를 감독 예외로 남겼다. 넘겨받은 지적의 review 커밋을 가리키는 꼬리말 같은 길을 정한다(tools/ci/roles-check.mjs).
+- BAT-060(R-666): roles-check의 `[구성]` 검사가 review·verify 커밋이 웨이브 끝 관점 리뷰(docs/review/measurements/W*-lane*-review-*.md)·브라우저 확인(docs/review/browser-check/*.md)·측정 문서(docs/review/measurements/*.md)에만 쓴 커밋을 '자기 절을 바꾸지 않음'으로 잡는다(갈래 2 BAT-165 13건, 갈래 3 W7-audit 3건, 이번엔 감독 예외). 그 문서들을 자기 절과 같이 셀지 정한다(tools/ci/roles-check.mjs).
+- BAT-060(R-666): `ledger.mjs --batch <묶음> --require`가 '다른 단계'를 실패로 세어(`--allow-unverified` 없이) BAT-060이 D-T50 ⑦(HOT-173으로 넘김) 하나 때문에 1로 끝난다. docs/architecture.md §8.6 1의 '빈칸과 ID만이 없어야 한다'와 다르다. 다른 묶음으로 넘긴 항목을 받는 법을 정한다(tools/ci/ledger.mjs).
+- BAT-060(R-666): 원격 작업 가지 푸시(소유자 결정 R-656, `3863df67`)가 이 PC 하위 에이전트 세션 권한에 막혀 BAT-055·060의 초안 PR과 CI kind 잡을 쓰지 못했다. 권한 설정은 소유자 몫이다. 그때까지 kind는 이 PC Docker로 하고, 합친 뒤 develop CI kind 잡 결과로 다시 본다.
+- W8-L1-ci-fix2(R-668, 계획 6의 1): 뿌리 ESLint에 `no-dupe-keys`(객체의 같은 키를 막는 규칙)를 켠다. 지금 걸리는 곳은 고친 `apps/web/next.config.ts` 하나뿐이었고, 가지를 다시 올릴 때 생기는 '같은 키 두 번'을 next.config 밖에서도 막는다(따옴표 붙은 키도 같은 키로 본다)(eslint 설정).
+- W8-L1-ci-fix2(R-668, RV-3·계획 6의 2): `loadtest` 범위 규칙이 `loadtest/` 실행 코드가 가져오는 `tools/local/` 모듈을 파일 이름을 손으로 더해 덮어 이번처럼 빠뜨린다. 가져오기 그래프로 덮는지 보는 시험을 두고, 이제 설치에 기대므로 `package.json`(packageManager 판)·`pnpm-lock.yaml`·`.nvmrc`만 바뀐 가지에서도 `loadtest-check`가 돌게 할지 정한다(tools/ci/changes.mjs, tools/ci/changes.test.mjs).
+- W8-L1-ci-fix2(R-668, 계획 6의 3): 의존성을 설치하지 않고 도는 다른 잡(`docs-check` 등)에 같은 꼴(뿌리 개발 의존성을 가져오는 코드가 생기면 실패)의 위험이 있는지 훑는다(.github/workflows/).
+- W8-L1-ci-fix2(R-668, 계획 6의 4): `deploy/gateways/*.yaml`을 읽는 다른 시험·도구가 생성 파일 `*.routes.yaml`을 함께 읽는지 훑는다(이번엔 `gateway-cors.mjs` 주석·parity 시험·`changes.test.mjs`만 봤다)(apps, tools, deploy).
+- W8-L1-ci-fix3(R-669, RV-2): CF3-06 ⓑ′(게이트웨이 쪽 RST 내기)가 정말 게이트웨이 쪽 끊김을 냈는지 단언하지 않는다. Envoy 판·설정이 바뀌어 `Connection: close` 뒤에도 연결을 열어 두면 자극 없이 통과해 포트 전달로 되돌린 꼴(M-13)을 다시 못 잡는다. `resetByGateway`가 닫힘 여부를 돌려주게 하고 게이트웨이마다 닫힌 수가 0이면 '자극이 듣지 않았다'로 실패하게 한다(tools/local/e2e/gateways.e2e.mjs).
+- W8-L1-ci-fix3(R-669, RV-4): `ci-kind.yml` 실패 때 단계의 `docker port peaket-control-plane`이 클러스터 이름을 손으로 적어, CI가 이름을 바꾸면 진단 줄만 조용히 빈다. 잡 `env`에 `PEAKET_CLUSTER: peaket`을 두고 진단 줄과 `kubeconfig-…`를 그 값으로 묶는다(.github/workflows/ci-kind.yml).
+- W8-L1-ci-fix3(R-669, RV-5): 포트 전달을 까닭으로 든 주석과 관용이 남았다. V-T31 ①의 동시 4('Windows kubectl 포트 전달이 동시 연결에 약하다')와 gateway-limits의 `CONN_ERROR`·`sendOrConnError`(포트 전달이 끊긴 꼴의 연결 오류를 '아직'으로 보고 다시 보냄)다. 주석을 새 길에 맞게 고치고, 관용을 남길지(설정 다시 읽기 때 연결 비우기라는 까닭을 실측으로 적고) 뺄지, 동시 수를 되돌릴지 계획 담당이 가린 뒤 시험 담당이 고친다(tools/local/e2e/gateways.e2e.mjs, tools/local/e2e/gateway-limits.e2e.mjs).
+- W8-L1-ci-fix3(R-669, RV-6): 이제 `cluster.mjs`가 만드는 모든 클러스터(게이트웨이를 안 쓰는 무대, 다른 갈래 클러스터 포함)가 127.0.0.1:18441~18445를 잡는다. 남은 클러스터가 있으면 다음 `up`이 Docker의 '포트 이미 씀'으로 실패하는데 메시지에 안내가 없고, `gateways` 때의 `PEAKET_GATEWAY_BASE_PORT`가 실제 공개와 달라도 알리지 않는다. `kind create cluster` 실패 때 '`kind get clusters`로 남은 클러스터를 보거나 `PEAKET_GATEWAY_BASE_PORT`를 바꾼다'를 덧붙이고, 환경 값과 실제 공개가 다르면 경고 한 줄을 찍는다(tools/local/cluster.mjs).
+- W8-L1-ci-fix3(R-669, RV-7·계획 6의 2): `ci-kind.yml`의 e2e 넷이 한 `bash -e` 블록이라 앞 파일이 실패하면 뒤 셋의 결과를 못 본다(원래 실패에서도 뒤 셋이 안 돌았다). 단계 넷으로 나눠 실패 때도 뒤를 돌릴지 정하고, 나누면 CF3-03의 차례·멈춤 조건 단언(RV-7의 `if`·`continue-on-error`·`set +e` 몫은 V-20으로 `43032e32`에서 이미 더함)을 새 꼴에 맞춘다(.github/workflows/ci-kind.yml, tools/ci/check-workflows.test.mjs).
+- W8-L1-ci-fix3(R-669, V-18·V-19): `cluster.mjs`의 잇는 곳 둘을 단위 시험이 못 잡는다. V-18(`gateways`가 `targetPort`를 Envoy Gateway Service에서 읽지 않고 443으로 손으로 적음)은 kind에서 TLS 기다림이 잡았고, V-19(`ensureCluster`가 매핑 없는 `deploy/local/kind.yaml`로 만듦)는 `gateways`의 '`down` 뒤 `up`' 멈춤이 잡을 것이라 코드 읽기로만 봤다(kind 안 돌림). 둘 다 닫히는 쪽 고장이고 이 PC 밖 노출·인증·출처·한도와 상관없어 보안 꼬리표 없음으로 가렸다. 그 줄을 순수 함수로 빼 단위로 보거나, RV-6 경고와 함께 시작 값을 바꾼 kind 한 바퀴를 둔다(tools/local/cluster.mjs, tools/local/cluster.test.mjs).
+- W8-L1-ci-fix3(R-669, 검증 '그 밖에 본 것'): 노드 포트에 받는 것이 없을 때(M-14·V-18) CF3-06은 자기 오류 목록 단언이 아니라 잡히지 않은 TLS 소켓 오류(`ECONNRESET` 127.0.0.1:18441)로 4ms 만에 끝나, ⓐ·ⓑ·ⓑ′·ⓒ 가운데 어디서 샜는지 실패 메시지에 없다. 그 단계들의 소켓에 오류 처리기를 먼저 달아 오류 목록으로 모은다(tools/local/e2e/gateways.e2e.mjs).
+- W8-L1-ci-fix3(R-669, 검증 '마지막 검증'): CF3-08은 `cluster.mjs` `gateways()` 본문의 글자를 읽는 시험이라, 같은 뜻을 다른 글자로 어기는 꼴은 놓치고 이름을 바꾸거나 감싸 같은 뜻을 지키는 꼴은 실패로 볼 수 있다. 공개를 읽어 접속 정보 포트를 만드는 줄을 순수 함수로 빼서 값으로 보는 시험으로 바꿀지 정한다(V-18·V-19 줄과 함께)(tools/local/cluster.mjs, tools/local/cluster.test.mjs).
+- W8-L1-ci-fix3(R-669, 계획 6의 1): v0 입구(`v0-forward`)와 v0 e2e도 kubectl 포트 전달을 쓰므로 같은 위험(파드 쪽 RST 하나에 전달 전체가 끝남)이 있는지 훑고, 있으면 같은 길(kind 포트 매핑과 NodePort)로 옮긴다(tools/local/cluster.mjs, tools/local/e2e/, .github/workflows/ci-kind.yml).
+- W8-L1-ci-fix4(R-670, RV-1): CF4-04가 덩어리가 실제로 부르는 해시 붙은 이름(`@opentelemetry/sdk-node-<해시>`)과 이름 그대로 가운데 어느 하나만 standalone 안에서 풀리면 통과해, 해시 연결이 없고 standalone 뿌리에 이름 그대로의 사본만 있어도 통과한다(리뷰가 재현). CF4-03이 찾은 텔레메트리 덩어리에서 `.y(…)`·`require(…)`로 부르는 이름을 그대로 뽑아 그 이름만 풀게 한다(apps/web/test-int/otel-external.build.test.mjs).
+- W8-L1-ci-fix4(R-670, RV-2·검증 X-08): CF4-02는 한 방향만 본다. ⓐ platform 텔레메트리 길(`telemetry-app-server.ts` → `telemetry-sdk.ts` → `trace-boundary.ts`)이 목록 밖 OTel 패키지를 가져오면 배열에 없어 조용히 다시 묶이고, CF4-03은 고정 여섯과 100kB만 본다(검증 X-08이 빌드로 재현: 덩어리 50,176바이트로 CF4-01~04 통과, 하위 의존성이 풀리지 않아 기존 R170-8이 우연히 잡음). ⓑ 판 적기가 같아도 `^1.10.0`(`api`)은 잠금 파일을 고칠 때 web·platform이 다른 판으로 풀릴 수 있다. 텔레메트리 길의 `@opentelemetry/` 가져오기 모음과 배열의 OTel 이름이 같은지, 잠금 파일 `importers` 두 항목의 `version`이 같은지 보는 시험을 계획 6의 3과 묶어 둔다(apps/web/server/server-external.test.mjs, packages/platform/src/).
+- W8-L1-ci-fix4(R-670, RV-3): docs/frontend.md §5.18 '앱 서버 실행'이 '모듈 수가 늘어 번호가 한 자리 길어진다'를 확인된 규칙처럼 적는다. 확인한 것은 같은 코드의 번호가 다섯 자리에서 여섯 자리가 된 것이고, 모듈 수가 자리 수를 정하는 문턱은 추정이다. 규칙 쪽에만 '추정'을 남긴다(계획 6의 1 문턱 확인과 함께)(docs/frontend.md §5.18).
+- W8-L1-ci-fix4(R-670, RV-4): 계획 파일 '시험 이의' 계획 담당 판정 1이 `.mjs`만 실리는 패키지를 셋(`core`·`resources`·`sdk-trace`)으로 적었으나 `exporter-trace-otlp-proto`까지 넷이다(판정 결론은 바뀌지 않는다)(docs/review/plans/W8-L1-ci-fix4.md).
+- W8-L1-ci-fix4(R-670, 검증 M-02): web 직접 의존성 없이 배열에만 여섯을 넣어도 이 PC 빌드에서는 Turbopack이 여섯을 밖에 두고 standalone에 싣는다(산출물·첫 JS·시작 확인이 구현과 같음, platform 쪽 `node_modules` 실제 경로로 풀리는 것으로 추정). 계획 M-02와 구현 주석·정본이 든 까닭('직접 의존성이 있어야 밖에 둔다')을 고칠지, 판 맞추기 까닭만 남길지 계획 담당이 RV-3과 함께 본다. 보안 꼬리표 없음(docs/frontend.md §5.18, apps/web/next.config.ts).
+- W8-L1-ci-fix4(R-670, 검증 M-11·M-13): 시작 확인(R-2)이 standalone `server.js`를 저장소 안 자리에서 띄워, standalone에서 빠진 모듈이 위로 올라가 standalone 밖 빌드 산출물이나 개발 설치로 풀리고 서버가 그대로 뜬다(X-09처럼 밖의 연결까지 지워야 실패). 그래서 standalone 짐 싣기는 CF4-04가 홀로 지키고 RV-1의 무게가 조금 커진다(감독 판단). R-2를 standalone 밖이 보이지 않는 자리(복사본이나 임시 폴더)에서 띄울지, 계측 훅 싣기 실패 때도 프로세스를 끝낼지 정한다. 보안 꼬리표 없음(tools/web-checks/boot/production-start.test.mjs, apps/web/instrumentation.ts).
+- W8-L1-ci-fix4(R-670, 검증 보탬 관찰 1): 첫 JS(R-1)는 여섯 가운데 하나만 다시 묶이는 꼴(M-04 `sdk-node` 582kB, M-05 `api`)을 잡지 못한다. 모듈 번호가 여섯 자리로 넘어가지 않아 175.6·161.5 그대로이고, 부분 되돌림은 CF4-03이 홀로 막는다. 서버 묶음 크기나 모듈 수를 직접 보는 검사를 계획 6의 1과 함께 정한다(apps/web/test-int/, tools/web-checks/budgets/).
+- W8-L1-ci-fix4(R-670, 계획 6의 1): 고친 뒤에도 첫 JS가 한도에 0.1kB 붙어 있다(`web /` 175.6 한도 175.7, `web /my/tickets` 161.5 한도 161.6, `033bb26d`와 같음). 서버 모듈이 다시 늘어 번호가 여섯 자리가 되면 첫 화면 코드와 상관없이 경로마다 약 0.4~0.5kB가 한꺼번에 늘어 다시 깨진다. Turbopack 번호 자리 수 문턱을 확인하고, 서버 모듈 수의 여유를 재는 검사나 기준선 규칙(§5.8 '첫 JS 열')을 wbs 7.5.2 전에 다시 볼지 정한다(docs/frontend.md §5.8, tools/web-checks/budgets/js-baseline.json).
+- W8-L1-ci-fix4(R-670, 계획 6의 2): 파트너 앱도 `serverExternalPackages`에 `@peaket/platform` 하나만 넣어 OTel SDK가 서버 묶음에 들어 있다(이번 CI에서 파트너 첫 JS는 통과). 같은 고침(SDK 여섯을 직접 의존성 + 밖 패키지)과 같은 시험(CF4-01~04 꼴)을 파트너에 넣는다(apps/partner/next.config.ts, apps/partner/package.json, docs/frontend.md §5.18).
+- W8-L1-ci-fix4(R-670, 계획 6의 3): `serverExternalPackages`에 적은 모든 이름이 실제로 밖 모듈이 됐는지(덩어리에 그 이름의 밖 부르기가 있는지) 산출물로 보는 일반 시험을 둔다. 지금은 redis를 `standalone-scm.build.test.mjs`가, OTel을 CF4-03이 따로 본다(apps/web/test-int/, apps/partner).
+- W8-L1-ci-fix4(R-670, 계획 7): web/budgets Lighthouse 단계에서 standalone 서버가 `…/.next/standalone/apps/web/app/sw.ts`를 해석하지 못한다는 빌드 오류가 27줄 난다(033bb26d·108f029a 같음, 시험은 통과). 운영 빌드에서 서비스 워커(sw.js)가 실제로 나가는지, 오류가 standalone 실행 방식(next start 경고 포함) 탓인지 확인한다. 낮음, 원인 미확인(apps/web/app/serwist/[path]/route.ts, apps/web/app/sw.ts, tools/web-checks/budgets/).
+- W8-L1-ci-fix4(R-670, CI 흔들림): develop CI 실행 43907749815 1차에서 `node / node`의 services/identity-svc `test/trust-login-risk.test.ts` `BOT-050_맥락은LOGIN이고_회차·pid·토큰을비우고_기기·IP·ASN·UA를싣는다`가 `expected { verdict: 'UNKNOWN' } to deeply equal { verdict: 'ALLOW' }`(525ms)로 실패했고, 실패 잡만 다시 돌려(2차) 통과했다. `108f029a..4105bd83`에서 services·packages/platform은 바뀌지 않았다. 원인은 첫 gRPC 호출이 데드라인 300ms에 걸려 UNKNOWN이 된 것이다(바쁜 CI에서 한 번 났고 다시 돌려 통과했다, 감독 확인). 연결을 미리 데울지, 데드라인을 시험 전용 값으로 둘지 정한다(services/identity-svc/test/trust-login-risk.test.ts).
+- W9-fix2(R-678) 리뷰 R3 낮음: 불변식 P4의 반영 시각은 `transition()` 안에서 다시 읽은 시계 값(`order_event.occurred_at`)이고, purchase가 큐 행 기한에 쓰는 `appliedAtMs`는 트랜잭션 전 `clock.now()`라 SQL 기준이 수 ms 늦어 위반을 아주 조금 덜 셀 수 있다. 정본 '같은 규칙' 옆에 반영 시각의 출처를 적거나 한 값으로 맞춘다(services/invariant-checker/sql/p4_issue_deadline_exceeded.sql:12, purchase `apply-payment-result.ts:202`)
+- W9-fix2(R-678) §9 다시 보기 N1 낮음: 합본의 자식 멈추기가 끝남을 `exitCode !== null`로만 본다. 신호로 죽은 자식(OOM 등)은 `exitCode`가 null이라 payment-svc면 이미 죽은 프로세스를 95초 기다린 뒤 SIGKILL하고, 자식 하나가 죽어 합본이 스스로 끝나는 길에서 유예 125초를 넘길 수 있다. `signalCode`도 보고 시험 한 줄을 더한다(services/bundle/src/stop-child.ts:33)
+- W9-fix2(R-678) §9 다시 보기 N2 낮음: 합본 유예 시험(chart G2)과 자식 대기 시험(G4)에 다른 자식 수 2·닫기 10초가 박혀 있어 자식이 늘어도 G2가 깨지지 않고, G4는 소스 글 검사다. `spawnChild` 호출 수를 세어 견준다(tools/local/chart.test.mjs, services/bundle/test/stop-child.test.ts)
+- W9-fix2(R-678) 검증 시험 빈 곳(모두 낮음): `held_at`이 이미 있는 행에 한도만 채우는 경우(M-H2a-where), 틀린 Stream 칸 `holdLimit`이면 `toSeatEvent`가 던지는 변이(M-H3a), 메모리 구현의 SOLD 줄 `lim`(M-H5b)과 자동 배정 HELD 칸(M-H6c-auto), P4에서 반영 시각이 승인 시각보다 이른 경우의 `greatest`(M-P2a), 안 끝난 주문이 `as_of` 정확히 기준 + 30분인 경계(M-P2d). 계획 docs/review/plans/W9-fix2.md '## 검증'
+- W9-ci-route(R-677) 리뷰 낮음: docs/infra.md §4.1 게이트웨이 표(86행)의 gw-partner 백엔드 ops-svc 칸이 '실시간 판매 현황'뿐이다. '회차 취소 요청·상태'(transfer-refund T1)를 더한다
+- BAT-056(R-679) 리뷰 R5 낮음: `loadtest/run.mjs`가 멈춤 신호(Ctrl+C)를 측정 흐름에 넘기지 않아 정리와 본 흐름이 함께 돈다. CPU 묶음 도중 멈추면 정리 뒤 발생기 파드가 만들어져 남을 수 있다(CPU 묶음 못 되돌림은 R6 주석이 드러낸다). 신호를 흐름에 넘기고 U7을 실제 길로 바꾼다(loadtest/run.mjs, runner/gw-run.mjs)
+- BAT-056(R-679) 리뷰 다시 보기 N1 낮음: 과부하 단계의 결과 파일 판정(k6 p99 ≤ 3ms)과 성능 장부 판정(3ms 넘은 503 비율의 통계 상한 ≤ 1%)이 규칙이 달라 경계 근처에서 갈릴 수 있다. 측정(9단계)에서는 모두 같았다(3ms 넘은 503 최대 0.12%). V-T43 ② 판정 규칙을 하나로 정한다(runner/gw-run.mjs `gwCollectArgs`, runner/gw.mjs)
+- BAT-056(R-679) 리뷰 다시 보기 N2 낮음: `gw capacity`가 gw-fan·gw-partner·gw-ops·gw-scanner에서도 돌지만 넷은 EnvoyProxy `peaket-proxy` 하나를 함께 써서 하나를 재면 넷이 함께 CPU 0.5로 묶인다. 함께 쓰는 프록시 설정이면 인자 오류로 막는다(runner/gw-run.mjs)
+- BAT-056(R-679) 시험 빈 곳 낮음: `loadtest/scenarios/gw.js`의 3ms 경계 그 자체(3.0 통과·3.01 넘음)는 망을 거친 k6 시험으로 고를 수 없다. 응답 분류를 순수 모듈로 떼어 경계 단위 시험을 둔다
+- BAT-056(R-679) 측정 M-B: 보류 1·16·64의 503이 1·0·0으로 같지 않았다(1/8과 어긋나지는 않음). 보류 비율 q를 다시 볼지 계획 담당이 정한다(docs/review/measurements/BAT-056-gateway-breaker.md)
