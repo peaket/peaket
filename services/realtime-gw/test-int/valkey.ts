@@ -1,5 +1,6 @@
 // 통합 시험용 Valkey 컨테이너(purchase-svc test-int/valkey.ts와 같은 방식: 라이브러리 없이 docker 명령, BUILD_ORDER HOT-090).
 // 이름은 rtgw-it-로 시작해 이 시험이 띄운 것만 지운다(docker rm -f -v). 장애 주입(S-T42 ⑩)은 docker stop·docker start로 하고 docker restart는 쓰지 않는다.
+// 답하지 않는 Valkey(S-T42 ⑲)는 docker pause·docker unpause로 만든다(연결은 열린 채 답이 없다). 지울 때는 unpause 뒤 rm -f -v 한다.
 // 다시 띄운 뒤 같은 주소로 붙도록 호스트 포트를 시험이 골라 고정한다.
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -18,6 +19,10 @@ export interface ValkeyContainer {
   pause(): void;
   /** 멈춘 컨테이너를 다시 띄우고 PING을 기다린다(docker start) */
   resume(): Promise<void>;
+  /** 프로세스를 얼린다(docker pause): TCP 연결은 열린 채 답이 없다 */
+  freeze(): void;
+  /** 얼린 것을 푼다(docker unpause) */
+  thaw(): void;
   stop(): void;
 }
 
@@ -51,7 +56,16 @@ export async function startValkey(): Promise<ValkeyContainer> {
   const name = `rtgw-it-${randomBytes(4).toString('hex')}`;
   const port = await freePort();
   docker(['run', '-d', '--name', name, '-p', `127.0.0.1:${port}:6379`, VALKEY_IMAGE]);
+  let frozen = false;
   const stop = (): void => {
+    if (frozen) {
+      try {
+        docker(['unpause', name]);
+      } catch {
+        // 이미 풀렸거나 없다
+      }
+      frozen = false;
+    }
     try {
       docker(['rm', '-f', '-v', name]);
     } catch {
@@ -74,6 +88,14 @@ export async function startValkey(): Promise<ValkeyContainer> {
     resume: async () => {
       docker(['start', name]);
       await until(() => cli('PING') === 'PONG', 'Valkey 다시 시작');
+    },
+    freeze: () => {
+      docker(['pause', name]);
+      frozen = true;
+    },
+    thaw: () => {
+      docker(['unpause', name]);
+      frozen = false;
     },
     stop,
   };

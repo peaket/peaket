@@ -122,3 +122,48 @@ describe('S-T42 ② 입장 토큰 확인(platform)', () => {
     expect(() => parseAdmissionJwks(JSON.stringify({ keys: [] }))).toThrow();
   });
 });
+
+describe('S-T42 ② 입장 토큰 확인(platform) — purchase-svc 시험과 같은 경우(BAT-052 리뷰 반영 RF-T9, SEC-08)', () => {
+  test('S-T42 ② 머리의 jwk·jku·x5u·x5c 같은 키 출처는 읽지 않는다: 공격자 키를 jwk로 싣고 그 키로 서명해도 설정한 키로만 확인해 signature다 [ASVS v5.0.0-4.4.3]', () => {
+    const attacker = newKey('k1');
+    const t = token({ header: { jwk: attacker.jwk, jku: 'https://evil.example/jwks.json', x5u: 'https://evil.example/c', x5c: ['AAAA'] }, signWith: attacker.priv });
+    expect(reasonOf(t)).toBe('signature');
+    // 대조: 같은 머리라도 설정한 키로 서명했으면 받는다(머리의 키 칸이 거절 이유가 아니다)
+    expect(reasonOf(token({ header: { jwk: attacker.jwk, jku: 'https://evil.example/jwks.json' } }))).toBeUndefined();
+  });
+
+  test('S-T42 ② 서명 길이가 64바이트가 아니면(63·65바이트) format이다 [ASVS v5.0.0-4.4.3]', () => {
+    const [h, p] = token().split('.') as [string, string, string];
+    expect(reasonOf(`${h}.${p}.${Buffer.alloc(63, 1).toString('base64url')}`)).toBe('format');
+    expect(reasonOf(`${h}.${p}.${Buffer.alloc(65, 1).toString('base64url')}`)).toBe('format');
+  });
+
+  test('S-T42 ② 비정규 base64url(채움 =, 표준 글자 +·/, 남는 비트를 쓴 마지막 글자)은 같은 바이트로 풀려도 format이다 [ASVS v5.0.0-4.4.3]', () => {
+    // 서명에 -와 _가 모두 든 토큰을 고른다(ECDSA 서명은 매번 다르다)
+    let t = token();
+    for (let i = 0; i < 200 && !(t.split('.')[2]!.includes('-') && t.split('.')[2]!.includes('_')); i++) t = token();
+    const [h, p, s] = t.split('.') as [string, string, string];
+    expect(s.includes('-') && s.includes('_')).toBe(true);
+    expect(reasonOf(t)).toBeUndefined();
+    for (const bad of [`${s}==`, s.replace('-', '+'), s.replace('_', '/')]) {
+      expect(Buffer.from(bad.replace(/=+$/, ''), 'base64').equals(Buffer.from(s, 'base64url')), bad).toBe(true);
+      expect(reasonOf(`${h}.${p}.${bad}`), bad).toBe('format');
+    }
+    // 64바이트 = 86글자: 마지막 글자의 아래 4비트는 0이어야 한다. 그 비트를 켠 글은 같은 바이트로 풀리지만 받지 않는다
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const last = alphabet.indexOf(s.at(-1)!);
+    expect(last % 16).toBe(0);
+    const loose = s.slice(0, -1) + alphabet[last + 1]!;
+    expect(Buffer.from(loose, 'base64url').equals(Buffer.from(s, 'base64url'))).toBe(true);
+    expect(reasonOf(`${h}.${p}.${loose}`)).toBe('format');
+    // 머리·본문의 비정규 표기도 format이다
+    expect(reasonOf(`${h}=.${p}.${s}`)).toBe('format');
+    expect(reasonOf(`${h}.${p}+.${s}`)).toBe('format');
+  });
+
+  test('S-T42 ② kid가 __proto__·constructor면(묶음에 없는 이름) kid이고 원형에 새 칸이 없다 [ASVS v5.0.0-15.3.6]', () => {
+    const protoKeys = Object.getOwnPropertyNames(Object.prototype).sort();
+    for (const kid of ['__proto__', 'constructor', 'toString']) expect(reasonOf(token({ header: { kid } })), kid).toBe('kid');
+    expect(Object.getOwnPropertyNames(Object.prototype).sort()).toEqual(protoKeys);
+  });
+});

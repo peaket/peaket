@@ -2,6 +2,7 @@
 // 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현' '틀과 설정'(필수 값 넷, PEAKET_ENV가 local·ci가 아니면 좌석 Redis 주소가 모두 rediss://이고
 // 사용자 이름이 있으며 default가 아니어야 시작, Redis 서버 인증서 확인을 끄는 설정은 두지 않음), §12 S-T42 ⑬(오류 글에 비밀번호가 없다).
 // 허용 목록 밖 값(prod·staging·demo, 그리고 값 없음)마다 거절을 보고, 맞는 값으로 통과하는 대조도 둔다.
+// 리뷰 반영(BAT-052 RF-T6, SEC-02): 파드 연결 상한 PEAKET_REALTIME_MAX_CONNECTIONS(seat-hold §7 '핸드셰이크' ②, ADR-0297 결정 3). 읽은 칸 이름은 maxConnections다.
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { loadRealtimeGwConfig } from '../src/config.js';
@@ -92,7 +93,21 @@ describe('S-T42 ⑬ 환경 값', () => {
 
   test('S-T42 ⑬ 설정에는 Redis 서버 인증서 확인을 끄는 칸이 없다(읽은 설정의 칸은 정본 값뿐이다) [ASVS v5.0.0-12.3.2]', () => {
     const c = loadRealtimeGwConfig(base({ PEAKET_ENV: 'prod', PEAKET_SEAT_REDIS_URL: GOOD_TLS, NODE_TLS_REJECT_UNAUTHORIZED: '0', PEAKET_SEAT_REDIS_TLS_INSECURE: 'true' }));
-    expect(Object.keys(c).sort()).toEqual(['admissionIssuer', 'admissionKeys', 'seatMapDir', 'seatRedisClusterUrls', 'seatRedisUrl', 'webOrigin']);
+    expect(Object.keys(c).sort()).toEqual(['admissionIssuer', 'admissionKeys', 'maxConnections', 'seatMapDir', 'seatRedisClusterUrls', 'seatRedisUrl', 'webOrigin']);
     expect(c.seatRedisUrl).toBe(GOOD_TLS);
+  });
+});
+
+describe('S-T42 ⑯ 파드 연결 상한(ADR-0297 결정 3)', () => {
+  test('S-T42 ⑯ PEAKET_REALTIME_MAX_CONNECTIONS는 1~1,000,000의 정수이고 없으면 5,000 [가정]이다. 0·소수·음수·1,000,001·글자는 던진다 [ASVS v5.0.0-2.4.1]', () => {
+    expect(loadRealtimeGwConfig(base()).maxConnections).toBe(5_000);
+    expect(loadRealtimeGwConfig(base({ PEAKET_REALTIME_MAX_CONNECTIONS: '' })).maxConnections).toBe(5_000);
+    for (const [raw, want] of [['1', 1], ['3', 3], ['5000', 5_000], ['1000000', 1_000_000]] as const) {
+      expect(loadRealtimeGwConfig(base({ PEAKET_REALTIME_MAX_CONNECTIONS: raw })).maxConnections, raw).toBe(want);
+    }
+    for (const raw of ['0', '2.5', '-1', '1000001', 'abc']) {
+      const err = errorOf(base({ PEAKET_REALTIME_MAX_CONNECTIONS: raw }));
+      expect(err, raw).toBeDefined();
+    }
   });
 });
