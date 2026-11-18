@@ -1,5 +1,5 @@
 // 로컬 kind의 게이트웨이 다섯(BUILD_ORDER HOT-400, docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', 묶음 BAT-055 계획 §5).
-// cluster.mjs gateways가 쓰는 순수 함수들: Envoy Gateway 설치 파일 맞추기, deploy/gateways 정의의 로컬 덧씌우기(백엔드·프록시 서비스·이미지만 바꿈),
+// cluster.mjs gateways가 쓰는 순수 함수들: Envoy Gateway 설치 파일 맞추기, deploy/gateways 정의의 로컬 덧씌우기(백엔드·프록시 서비스·이미지·프록시 CPU 요청만 바꿈),
 // 대역 백엔드(echo)·인증서·원본 확인 Secret, 시험이 읽는 접속 정보(tools/local/e2e/gateway-client.mjs 머리 주석의 약속).
 // 호스트와 출처는 운영 값(*.peaket.example) 그대로 쓴다. 시험 클라이언트가 Host·SNI로 이름을 보내고 브라우저는 시험 프록시가 포트로 잇는다.
 import { readFileSync, readdirSync } from 'node:fs';
@@ -16,6 +16,11 @@ export const GATEWAY_ECHO_IMAGE = 'node:24.18.0-bookworm-slim';
 export const GATEWAY_PROXY_IMAGE = 'docker.io/envoyproxy/envoy:distroless-v1.40.2';
 /** 설치 파일의 컨트롤러·인증서 잡 이미지 */
 export const GATEWAY_CONTROLLER_IMAGE = 'envoyproxy/gateway:v1.10.0';
+/**
+ * 로컬·CI kind에서 프록시 envoy 컨테이너의 CPU 요청(Envoy Gateway 기본 요청과 같은 값, ADR-0287 결정 4). 정의의 CPU 요청 2 [가정] × 다섯 파드는
+ * CI kind 잡의 vCPU 4 러너(ubuntu-24.04 표준)에 들어가지 않아 파드가 뜨지 않는다. 일꾼 수·메모리 요청은 정의 그대로다
+ */
+export const LOCAL_PROXY_CPU_REQUEST = '100m';
 /**
  * 이 PC 포트(127.0.0.1)의 기본 시작 값. 게이트웨이마다 1씩 더한다(PEAKET_GATEWAY_BASE_PORT로 바꾼다). 클러스터를 만들 때(cluster.mjs up)
  * kind 포트 매핑으로 정해지므로, 바꾸려면 down 뒤 up을 다시 한다(docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법')
@@ -176,7 +181,9 @@ const echoUrl = (path) => `http://${GATEWAY_ECHO.name}.${GATEWAY_NAMESPACE}.svc.
  * - 라우트·공개키 묶음·추적의 백엔드 → 대역 백엔드(공개키 묶음 주소의 경로는 그대로)
  * - ReferenceGrant는 뺀다(대역 백엔드가 같은 네임스페이스이고, 운영 네임스페이스가 로컬에 없다)
  * - EnvoyProxy: 프록시 Service는 ClusterIP(kind에 부하 분산기가 없다. 이 PC로는 게이트웨이마다 따로 만드는 gatewayNodePortService와 kind 포트 매핑이 잇는다.
- *   EnvoyProxy는 게이트웨이 넷이 함께 쓰므로 여기서 NodePort로 바꾸면 노드 포트를 게이트웨이마다 고정할 수 없다), 이미지는 미리 실은 태그
+ *   EnvoyProxy는 게이트웨이 넷이 함께 쓰므로 여기서 NodePort로 바꾸면 노드 포트를 게이트웨이마다 고정할 수 없다), 이미지는 미리 실은 태그,
+ *   envoy 컨테이너의 CPU 요청은 정의에 있을 때만 LOCAL_PROXY_CPU_REQUEST(100m)로 낮춘다(다섯 파드 × CPU 2가 CI의 vCPU 4 러너에 들어가지 않는다,
+ *   docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 4). 일꾼 수(spec.concurrency)·메모리 요청은 그대로 두고, 한도·일꾼 수 칸을 새로 만들지 않는다
  * @param {Array<Record<string, any>>} objects
  */
 export function localGatewayObjects(objects) {
@@ -197,6 +204,8 @@ export function localGatewayObjects(objects) {
       k.envoyService = { ...(k.envoyService ?? {}), type: 'ClusterIP' };
       const c = ((k.envoyDeployment ??= {}).container ??= {});
       c.image = GATEWAY_PROXY_IMAGE;
+      const req = c.resources?.requests;
+      if (req && req.cpu !== undefined) req.cpu = LOCAL_PROXY_CPU_REQUEST;
       const tracing = o.spec?.telemetry?.tracing?.provider;
       if (tracing?.backendRefs) tracing.backendRefs = [{ name: GATEWAY_ECHO.name, port: GATEWAY_ECHO.port }];
     }

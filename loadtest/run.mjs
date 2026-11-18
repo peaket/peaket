@@ -8,6 +8,7 @@
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통]
 //   node loadtest/run.mjs gw sweep|capacity|ip-limit …(게이트웨이 차단 상한·검색 IP 한도, V-T43·SR-T13 ②. 인자는 loadtest/runner/gw.mjs 머리, 결과 sweep.json·capacity.json·ip-limit.json)
+//   node loadtest/run.mjs gw limits --from <sweep.json,…> --saturation <수> --pod-cpus <수> [--out <폴더>](k와 운영 차단 상한 셈, 클러스터를 쓰지 않음, 결과 limits.json, BAT-058)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--target-cpus N] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
 // - Before 측정(docs/verification.md §3.10): 최고 도착률이 1,000/s를 넘으면 발생기를 나눈다(k6 실행 구간). 장부는 큰 원본을 보낼 폴더로 옮긴다
@@ -43,7 +44,7 @@ import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mer
 import { dbStatsDelta, deltaJudge, deltaSummary, gateOnlineCheck, gateSummary, hpaTimeline } from './runner/probes.mjs';
 import { sideTasks } from './runner/side.mjs';
 import { ADMIN_PORT, GW_NAMESPACE, PROXY_SELECTOR, STEP_OVERHEAD_S, SWEEP_LABEL, gwConsole } from './runner/gw.mjs';
-import { cleanupGw, gwCollectArgs, runGw } from './runner/gw-run.mjs';
+import { cleanupGw, gwCollectArgs, runGw, runLimits } from './runner/gw-run.mjs';
 import { loadContract, token } from '../tools/local/e2e/gateway-client.mjs';
 import { parseAllDocuments } from 'yaml';
 import {
@@ -2165,7 +2166,8 @@ async function runGwCommand(a, runTag) {
     writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary, null, 2));
     const g = combineGenerators(evs.map((e) => e.generator), loadStartMs);
     writeFileSync(join(dir, 'generator.json'), JSON.stringify(g, null, 2));
-    return { summary, marks, retryAfterValues, generator: { valid: g.judge.valid, reasons: g.judge.reasons, dropped: g.dropped, cpuMeanPct: g.cpuMeanPctMax, cpuMaxPct: g.cpuMaxPctMax }, dir };
+    // summaries는 발생기마다의 요약(합치기 전): 2xx 평균을 발생기 2xx 수로 가중하는 데 쓴다(ADR-0287 결정 6, gw.mjs weightedMean2xx)
+    return { summary, summaries: evs.map((e) => e.summary), marks, retryAfterValues, generator: { valid: g.judge.valid, reasons: g.judge.reasons, dropped: g.dropped, cpuMeanPct: g.cpuMeanPctMax, cpuMaxPct: g.cpuMaxPctMax }, dir };
   };
   // 장부 인자는 gw-run.mjs gwCollectArgs가 만든다(0건 판정은 --verdict·notes, 점검은 과부하 3ms 하나, 무효는 --invalid-reason, BAT-056 R1)
   const record = async (o) => {
@@ -2213,6 +2215,18 @@ async function runGwCommand(a, runTag) {
   }
 }
 
+/** gw limits: 측정 결과 sweep.json들로 k와 운영 차단 상한을 센다(클러스터·잠금을 쓰지 않는다, ADR-0287 결정 7). 끝 코드는 runLimits(0·1) */
+async function runGwLimits(a, runTag) {
+  const outDir = resolve(a.out ?? join(OUT_ROOT, `${today()}-gw-limits-${runTag}`));
+  mkdirSync(outDir, { recursive: true });
+  const r = await runLimits(a, {
+    readFile: (p) => readFileSync(resolve(p), 'utf8'),
+    save: (name, v) => writeFileSync(join(outDir, name), JSON.stringify(v, null, 2)),
+    log,
+  });
+  return { outDir, exitCode: r.exitCode };
+}
+
 // ───────────── 시작 ─────────────
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -2222,7 +2236,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment [...] | gw sweep|capacity|ip-limit [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2249,7 +2263,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? await runGwCommand(a, runTag) : a.command === 'v1' ? await runV1(a, runTag) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? await runV1(a, runTag) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {

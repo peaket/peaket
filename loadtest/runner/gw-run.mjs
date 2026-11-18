@@ -2,10 +2,14 @@
 // 실제 것은 loadtest/run.mjs가 넘기고, 단위 시험은 가짜를 넘긴다(가짜 kubectl·관리 포트·부하).
 //
 // deps(모두 필수, 표시한 것만 빼도 된다):
-//   kubectl(args: string[], o?: { input?: string }) → Promise<string>   클러스터 명령(임시 정책 적용·지우기, 파드·정책 읽기, 통계 읽기)
+//   kubectl(args: string[], o?: { input?: string }) → Promise<string>   클러스터 명령(임시 정책 적용·지우기, 파드·정책 읽기, 통계 읽기. 통계는
+//                                                                        get --raw /api/v1/namespaces/<ns>/pods/<파드>:19001/proxy/stats/prometheus이고,
+//                                                                        단계마다 부하 전에 같은 글에서 실제 일꾼 수 envoy_server_concurrency도 읽는다)
 //   readAdmin(pod: string, path: string) → Promise<string>             프록시 관리 포트(127.0.0.1:19000)의 글(/clusters)
 //   routeObject(route: string) → Record<string, any>                   생성 라우트 HTTPRoute 객체(deploy/gateways/*.routes.yaml을 읽기만 한다)
-//   runLoad({ index, label, input, rate, warmS, mainS }) → Promise<{ summary, generator: { valid, reasons, dropped, cpuMeanPct?, cpuMaxPct? }, marks: { main_start, main_end }, retryAfterValues }>
+//   runLoad({ index, label, input, rate, warmS, mainS }) → Promise<{ summary, summaries?, generator: { valid, reasons, dropped, cpuMeanPct?, cpuMaxPct? }, marks: { main_start, main_end }, retryAfterValues }>
+//                                                                        summary는 합친 요약, summaries는 발생기마다의 요약(합치기 전, 2xx 평균을 발생기 2xx 수로 가중하는 데 쓴다.
+//                                                                        없으면 2xx 평균 avg는 null)
 //   readAccessLog(gateway: string, sinceS: number) → Promise<object[]>   프록시 접근 로그 JSON 줄
 //   proxyCpuNs?(pods: string[]) → Promise<Record<string, number>>       (capacity만) 프록시 envoy 컨테이너의 누적 CPU(나노초)
 //   record?(o) → Promise<void>                                           (--record) 성능 장부에 실행 하나를 남긴다
@@ -15,6 +19,10 @@
 //   signal?: AbortSignal                                                 멈춤(이유 객체의 exitCode, 없으면 130)
 //   inputBase: { origin, originVerify, hostNames: { <hosts 키>: 호스트 이름 }, eventId }   시나리오 입력(gw.json)의 공통 칸(접속 정보에서)
 // 끝 코드: 0 실행을 마치고 결과를 씀(판정이 실패·무효여도), 1 도구 오류(부딪히는 정책, 프록시 없음, k6 실패 등), 128+신호(멈춤)
+// 일꾼 수 확인(ADR-0287 결정 10): sweep·capacity는 단계마다 상한이 실린 뒤(capacity는 묶은 뒤) 부하를 넣기 전에 그 게이트웨이의 프록시 파드마다
+// 실제 일꾼 수를 읽고, 기대 값(sweep: --workers, 없으면 EnvoyProxy spec.concurrency / capacity: 묶은 값)과 다르거나 못 읽으면 부하 없이 그 단계를 무효로 한다.
+// 그 단계는 결과 파일에 무효 줄로 남고 성능 장부에는 넘기지 않는다(k6 요약·본구간이 없다. '상한이 실리지 않음'과 같다).
+// gw limits(runLimits)는 클러스터를 쓰지 않고 deps = { readFile(path) → Promise<string>, save, log }만 받는다.
 import {
   GW_NAMESPACE,
   PROXY_SELECTOR,
@@ -26,13 +34,17 @@ import {
   conflictingPolicies,
   delayText,
   combineMetrics,
+  expectedWorkers,
+  gwLimits,
   isOverload,
   judgeIpLimit,
   judgeSweepStep,
   judgeSweepStreams,
+  limitsLines,
   limitsLoaded,
   parseClusterLimits,
   parseClusterStats,
+  parseServerConcurrency,
   rateOf,
   ruleIndexFor,
   runIdOf,
@@ -43,6 +55,9 @@ import {
   streamsFor,
   sweepChecks,
   sweepPolicy,
+  weightedMean2xx,
+  workersProblem,
+  workersText,
 } from './gw.mjs';
 import { collectArgs } from './results.mjs';
 
@@ -85,11 +100,33 @@ async function serviceIp(deps, gateway) {
   return ip;
 }
 
+/** 프록시 파드의 통계 글(Prometheus 꼴)을 읽는 kubectl 인자 */
+const statsArgs = (pod) => ['get', '--raw', `/api/v1/namespaces/${GW_NAMESPACE}/pods/${pod}:${STATS_PORT}/proxy${STATS_PATH}`];
+
 /** 프록시 파드마다 통계를 읽어 그 묶음 값({ <파드>: parseClusterStats 결과 }). 하나라도 못 읽으면 Error */
 async function statsSample(deps, pods, cluster) {
   const out = {};
-  for (const p of pods) out[p] = parseClusterStats(await deps.kubectl(['get', '--raw', `/api/v1/namespaces/${GW_NAMESPACE}/pods/${p}:${STATS_PORT}/proxy${STATS_PATH}`]), cluster);
+  for (const p of pods) out[p] = parseClusterStats(await deps.kubectl(statsArgs(p)), cluster);
   return out;
+}
+
+/**
+ * 프록시 파드마다 실제 일꾼 수(envoy_server_concurrency)를 읽고 기대 값과 견준다(ADR-0287 결정 10). 파드마다 따로 읽어 하나를 못 읽어도 나머지를 읽는다.
+ * 돌려주는 꼴: { workers: { expected, source, pods: { <파드>: 값|null }, errors?: { <파드>: 까닭 } }, problem: workersProblem의 결과(null이면 문제 없음) }
+ */
+export async function readWorkers(deps, pods, exp) {
+  const values = {};
+  const errors = {};
+  for (const p of pods) {
+    try {
+      values[p] = parseServerConcurrency(await deps.kubectl(statsArgs(p)));
+    } catch (e) {
+      values[p] = null;
+      errors[p] = e.message;
+    }
+  }
+  const workers = { expected: exp.expected, source: exp.source, pods: values, ...(Object.keys(errors).length ? { errors } : {}) };
+  return { workers, problem: workersProblem(workers) };
 }
 
 /**
@@ -299,7 +336,7 @@ async function sweep(a, deps, restores) {
   const pods = await proxyPods(deps, a.gateway);
   const serviceIps = await commonInputs(deps, streams);
   restores.push(() => deps.kubectl([...SWEEP_DELETE_ARGS]));
-  const result = { command: 'gw sweep', gateway: a.gateway, route: a.route, cluster, targets: targets.map((t) => t.name), proxyPods: pods, proxy: px0.proxy, rate: a.rate, mix: a.mix, delay: delayText(a.delay), warmS: a.warmS, mainS: a.mainS, steps: [] };
+  const result = { command: 'gw sweep', gateway: a.gateway, route: a.route, cluster, targets: targets.map((t) => t.name), proxyPods: pods, proxy: px0.proxy, workersFlag: a.workers ?? null, rate: a.rate, mix: a.mix, delay: delayText(a.delay), warmS: a.warmS, mainS: a.mainS, steps: [] };
   const save = () => deps.save('sweep.json', result);
   for (const step of a.steps) {
     stopIfAborted(deps);
@@ -315,6 +352,16 @@ async function sweep(a, deps, restores) {
       result.steps.push({ ...base, overload, sent: 0, valid: false, invalid_reason: j.invalid_reason, verdict: j.verdict, item: j.item, reasons: j.reasons, clustersSeen: w.last ?? null });
       save();
       deps.log(`  무효: ${j.invalid_reason}(본 값 ${JSON.stringify(w.last ?? null)})`);
+      continue;
+    }
+    // 부하를 넣기 전에 프록시 파드마다 실제 일꾼 수를 본다(ADR-0287 결정 10). 기대와 다르거나 못 읽으면 부하 없이 무효이고 장부에는 넘기지 않는다
+    const wk = await readWorkers(deps, pods, expectedWorkers({ flag: a.workers, concurrency: proxy.concurrency }));
+    deps.log(`  ${workersText(wk.workers)}`);
+    if (wk.problem) {
+      const j = judgeSweepStep({ step, overload, limitsLoaded: true, workersError: wk.problem });
+      result.steps.push({ ...base, overload, sent: 0, workers: wk.workers, valid: false, invalid_reason: j.invalid_reason, verdict: j.verdict, item: j.item, reasons: j.reasons });
+      save();
+      deps.log(`  무효: ${j.invalid_reason}`);
       continue;
     }
     const input = scenarioInput({ ...deps.inputBase, streams, rate: step.rate, delay: step.delay, serviceIps, memoryMi: a.memoryMi, generators: a.generators });
@@ -346,17 +393,22 @@ async function sweep(a, deps, restores) {
     const all = Object.keys(ms).length ? combineMetrics(Object.values(ms)) : null;
     const m1 = targetNames.length === 1 ? tm : null;
     const ra = r.load.retryAfterValues ?? {};
+    // 흐름마다 2xx 평균: 발생기마다의 요약을 그 발생기 2xx 수로 가중(ADR-0287 결정 6). 합친 요약의 avg(발생기 가운데 큰 값)는 쓰지 않는다
+    const avg2xx = Object.fromEntries(Object.keys(ms).map((n) => [n, weightedMean2xx(r.load.summaries, n)]));
     const row = {
       ...base,
       overload,
       targets: targetNames,
       sent: tm?.sent ?? 0,
       status: tm?.status ?? null,
-      streams: Object.fromEntries(Object.entries(ms).map(([n, v]) => [n, { sent: v.sent, status: v.status, latency503: v.latency['503'], retryAfter503: v.retryAfter['503'], problem503: v.problem['503'] }])),
+      workers: wk.workers,
+      streams: Object.fromEntries(
+        Object.entries(ms).map(([n, v]) => [n, { sent: v.sent, status: v.status, latency2xx: { ...v.latency['2xx'], avg: avg2xx[n] }, latency503: v.latency['503'], retryAfter503: v.retryAfter['503'], problem503: v.problem['503'] }]),
+      ),
       overflow: stats?.overflow ?? null,
       rqActiveMax: stats?.rqActiveMax ?? null,
       rqPendingActiveMax: stats?.rqPendingActiveMax ?? null,
-      latency: m1 ? { '2xx': m1.latency['2xx'], 503: m1.latency['503'] } : null,
+      latency: m1 ? { '2xx': { ...m1.latency['2xx'], avg: avg2xx[targetNames[0]] ?? null }, 503: m1.latency['503'] } : null,
       retryAfter: tm ? { present: tm.retryAfter['503'].num + tm.retryAfter['503'].nonnum, missing: tm.retryAfter['503'].missing, nonNumeric: tm.retryAfter['503'].nonnum, values: [...(ra['503'] ?? [])].sort() } : null,
       problemOk: tm?.problem['503'].ok ?? null,
       problemBad: tm?.problem['503'].bad ?? null,
@@ -384,7 +436,9 @@ async function sweep(a, deps, restores) {
           `흐름 모두 ${countText(all)}`,
           ...Object.entries(ms).map(([n, v]) => `${n} ${countText(v)}`),
           overload ? null : `정상 부하 503 ${all.status['503']}건(세 흐름 합, 허용 0건)`,
+          ...targetNames.map((n) => `${n} 2xx 평균 ${avg2xx[n] ?? '(모름)'}ms(발생기 2xx 수로 가중)`),
           `프록시 ${a.gateway} 파드 ${pods.length}개, ${proxyText(proxy)}`,
+          workersText(wk.workers),
           `묶음 ${cluster}`,
           stats ? `넘침 ${stats.overflowTotal}, 처리 중 최대 ${stats.rqActiveMax}, 보류 최대 ${stats.rqPendingActiveMax}` : null,
         ]),
@@ -458,6 +512,16 @@ async function capacity(a, deps, restores) {
     stopIfAborted(deps);
     deps.log(`단계 ${i + 1}/${a.rates.length}: 도착률 ${rate}/s, 지연 ${delayText(a.delay)}`);
     const proxy = proxyResources(JSON.parse(await deps.kubectl(['-n', GW_NAMESPACE, 'get', 'envoyproxy', ep, '-o', 'json'])));
+    // 묶은 일꾼 수가 실제로 실렸는지 부하 전에 본다(ADR-0287 결정 10). 다르거나 못 읽으면 부하 없이 무효로 남기고 멈춘다(되돌리기는 정리가 한다)
+    const wk = await readWorkers(deps, pods, { expected: bind.spec.concurrency, source: 'capacity' });
+    deps.log(`  ${workersText(wk.workers)}`);
+    if (wk.problem) {
+      result.steps.push({ step: i, rate, proxy, workers: wk.workers, sent: 0, status: null, latency: null, p99Ms: null, proxyCpuPct: null, generator: null, valid: false, invalid_reason: wk.problem, marks: null });
+      result.saturation = saturation(result.steps, a.proxyCpus, a.delay.ms);
+      save();
+      deps.log(`  무효: ${wk.problem}`);
+      break;
+    }
     const input = scenarioInput({ ...deps.inputBase, streams, rate, delay: a.delay, serviceIps, memoryMi: a.memoryMi, generators: a.generators });
     const r = await loadWithSamples(deps, pods, null, { index: i, label: `r${rate}`, input, rate, warmS: a.warmS, mainS: a.mainS }, { cpu: true });
     stopIfAborted(deps);
@@ -481,7 +545,7 @@ async function capacity(a, deps, restores) {
     if (!g.valid) reasons.push(`발생기 무효: ${(g.reasons ?? []).join('; ')}`);
     if (m && !(m.sent > 0)) reasons.push('보낸 요청 0건');
     const valid = reasons.length === 0;
-    const row = { step: i, rate, proxy, sent: m?.sent ?? 0, status: m?.status ?? null, latency: m ? { '2xx': m.latency['2xx'], 503: m.latency['503'] } : null, p99Ms: m?.latency['2xx'].p99 ?? null, proxyCpuPct: cpuPct, generator: { cpuMeanPct: g.cpuMeanPct ?? null, dropped_iterations: g.dropped ?? null }, valid, invalid_reason: valid ? null : reasons.join('; '), marks };
+    const row = { step: i, rate, proxy, workers: wk.workers, sent: m?.sent ?? 0, status: m?.status ?? null, latency: m ? { '2xx': m.latency['2xx'], 503: m.latency['503'] } : null, p99Ms: m?.latency['2xx'].p99 ?? null, proxyCpuPct: cpuPct, generator: { cpuMeanPct: g.cpuMeanPct ?? null, dropped_iterations: g.dropped ?? null }, valid, invalid_reason: valid ? null : reasons.join('; '), marks };
     result.steps.push(row);
     result.saturation = saturation(result.steps, a.proxyCpus, a.delay.ms);
     save();
@@ -493,7 +557,13 @@ async function capacity(a, deps, restores) {
         kpi: 'NFR-001',
         rps: rate,
         scenario: `loadtest/scenarios/gw.js gw capacity ${a.gateway}/${a.route} proxyCpus=${a.proxyCpus} concurrency=${bind.spec.concurrency} delay=${delayText(a.delay)} rate=${rate}/s`,
-        notes: notesOf([`게이트웨이 프록시 포화 처리량(local-gw, V-T43 '값의 식'의 파드 포화 처리량, 계획 docs/review/plans/BAT-056.md §5 M1)`, countText(m), `프록시 ${a.gateway} 파드 ${pods.length}개, ${proxyText(proxy)}`, `프록시 CPU 사용 ${cpuPct}%`]),
+        notes: notesOf([
+          `게이트웨이 프록시 포화 처리량(local-gw, V-T43 '값의 식'의 파드 포화 처리량, 계획 docs/review/plans/BAT-056.md §5 M1)`,
+          countText(m),
+          `프록시 ${a.gateway} 파드 ${pods.length}개, ${proxyText(proxy)}`,
+          workersText(wk.workers),
+          `프록시 CPU 사용 ${cpuPct}%`,
+        ]),
         ...(valid ? { verdict: 'baseline' } : { invalidReason: row.invalid_reason }),
         marks,
       });
@@ -601,6 +671,28 @@ export function gwCollectArgs(o, ctx) {
     if (verdict !== null) args.push('--verdict', verdict);
   }
   return { args, checks };
+}
+
+/**
+ * gw limits(ADR-0287 결정 7, docs/infra.md §4.1 '값의 식'·'측정(V-T43)' ④⑤): a.from의 sweep.json을 읽어 gwLimits로 k와 운영 차단 상한을 세고
+ * 결과 파일 limits.json(deps.save)과 콘솔 글(deps.log)을 낸다. 클러스터를 쓰지 않는다. deps = { readFile(path) → Promise<string>|string, save(name, value), log(m) }.
+ * 끝 코드: 0 정해서 씀, 1 파일을 못 읽음(JSON이 아님 포함)·입력이 섞임·r_min을 정하지 못함(이때도 limits.json에 determined false와 까닭·다음 할 일을 쓴다)
+ * @returns {Promise<{ exitCode: 0|1, result: ReturnType<typeof gwLimits> }>}
+ */
+export async function runLimits(a, deps) {
+  const files = [];
+  const readErrors = [];
+  for (const path of a.from) {
+    try {
+      files.push({ path, data: JSON.parse(await deps.readFile(path)) });
+    } catch (e) {
+      readErrors.push(`파일을 못 읽음: ${path}: ${e.message}`);
+    }
+  }
+  const result = gwLimits(files, { saturation: a.saturation, podCpus: a.podCpus, paths: a.from, readErrors });
+  deps.save('limits.json', result);
+  for (const line of limitsLines(result)) deps.log(line);
+  return { exitCode: result.determined ? 0 : 1, result };
 }
 
 /**

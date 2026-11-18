@@ -7,7 +7,7 @@
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통, --main 기본 180]
 //   node loadtest/run.mjs v1 queue|seat-hold|payment …(v0와 같은 인자, docs/verification.md §3.9 'v1 경로'. --namespace·--settle·--hpa-timeline은 없다)
-//   node loadtest/run.mjs gw sweep|capacity|ip-limit …(게이트웨이 차단 상한·검색 IP 한도, BAT-056. 인자 규칙은 ./gw.mjs parseGwArgs가 맡는다)
+//   node loadtest/run.mjs gw sweep|capacity|ip-limit|limits …(게이트웨이 차단 상한·검색 IP 한도, BAT-056·BAT-058. 인자 규칙은 ./gw.mjs parseGwArgs가 맡는다)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
 //   seat-hold만: [--keep] [--db-stats], payment만: [--db-stats]

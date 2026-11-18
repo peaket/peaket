@@ -1,15 +1,17 @@
 // 게이트웨이 차단 상한 측정 도구의 순수 함수(V-T43, SR-T13 ②, BUILD_ORDER BAS-090, 묶음 BAT-056 계획 §2 '측정 도구'). 클러스터를 건드리지 않는다.
 // 정본: docs/infra.md §4.1 '게이트웨이 차단 상한'(자리와 칸·값의 식·측정(V-T43)), docs/features/search.md §12 SR-T13 ② '측정 판정',
-// docs/perf-ledger.md §4 프로파일 local-gw. 실행 조립은 gw-run.mjs, 명령은 node loadtest/run.mjs gw sweep|capacity|ip-limit(loadtest/README.md).
+// docs/perf-ledger.md §4 프로파일 local-gw. 실행 조립은 gw-run.mjs, 명령은 node loadtest/run.mjs gw sweep|capacity|ip-limit|limits(loadtest/README.md).
+// 일꾼 수 확인·발생기 가중 평균·gw limits는 묶음 BAT-058(ADR-0287 결정 6·7·10, docs/infra.md §4.1 '값의 식'·'측정(V-T43)' 끝 ①~⑤).
 //
 // 명령과 인자(클러스터를 건드리기 전에 모두 검사한다. 틀리면 UsageError, 실행 도구의 끝 코드 2):
 //   gw sweep    [--gateway gw-queue] [--route gw-queue-buy] [--rate 1500] [--mix normal|single] [--delay normal|fixed:<ms>]
-//               --max-parallel <목록> [--max-pending <수 또는 목록>(1024)] [--max-connections same|<수>(same)]
+//               --max-parallel <목록> [--max-pending <수 또는 목록>(1024)] [--max-connections same|<수>(same)] [--workers <1~64>]
 //               [--warm 10] [--main 60] [--repeat 1] [--generators N] [--cpus 4] [--memory-mi 4096] [--record --run-id-prefix <접두>] [--out <폴더>]
 //   gw capacity [--gateway gw-queue] [--route gw-queue-buy] [--proxy-cpus 0.5] [--rates 500,1000,1500,2000,3000] [--delay fixed:5]
 //               [--warm 10] [--main 30] [--generators N] [--cpus 4] [--memory-mi 4096] [--record --run-id-prefix <접두>] [--out <폴더>]
 //   gw ip-limit --case single|many|mixed|v6-64 [--rate <초당>] [--ips <수>] [--warm 10] [--main 60] [--generators N] [--cpus 4] [--memory-mi 4096]
 //               [--record --run-id-prefix <접두>] [--out <폴더>]
+//   gw limits   --from <sweep.json>[,<sweep.json>…] --saturation <vCPU 하나의 초당 건수> --pod-cpus <코어> [--out <폴더>]   (클러스터를 쓰지 않는다)
 import { UsageError } from './args.mjs';
 
 /** 게이트웨이 프록시와 정책의 네임스페이스(deploy/gateways) */
@@ -128,19 +130,25 @@ function proxyCpus(raw) {
 }
 
 const ALLOWED = {
-  sweep: ['--gateway', '--route', '--rate', '--mix', '--delay', '--max-parallel', '--max-pending', '--max-connections', '--warm', '--main', '--repeat', '--generators', '--cpus', '--memory-mi', '--record', '--run-id-prefix', '--out'],
+  sweep: ['--gateway', '--route', '--rate', '--mix', '--delay', '--max-parallel', '--max-pending', '--max-connections', '--workers', '--warm', '--main', '--repeat', '--generators', '--cpus', '--memory-mi', '--record', '--run-id-prefix', '--out'],
   capacity: ['--gateway', '--route', '--proxy-cpus', '--rates', '--delay', '--warm', '--main', '--generators', '--cpus', '--memory-mi', '--record', '--run-id-prefix', '--out'],
   'ip-limit': ['--case', '--rate', '--ips', '--warm', '--main', '--generators', '--cpus', '--memory-mi', '--record', '--run-id-prefix', '--out'],
+  limits: ['--from', '--saturation', '--pod-cpus', '--out'],
 };
+/** gw sweep --workers의 범위(기대 일꾼 수, 1~64 정수) */
+export const WORKERS_MAX = 64;
 const BOOLS = new Set(['--record']);
 
 /**
  * gw 명령의 인자(argv는 'gw' 다음부터)를 읽어 검사한다. 돌려주는 꼴:
  * - sweep: { command: 'gw', sub: 'sweep', gateway, route, rate, mix, delay, maxParallel: number[], maxPending: number[], pendingDefault: boolean, maxConnections: 'same'|number,
- *            warmS, mainS, repeat, generators, cpus, memoryMi, record, runIdPrefix?, out?, steps }(steps는 expandSweepSteps의 결과)
+ *            workers: number|null(--workers, 1~64 정수. 없으면 null이고 기대 일꾼 수는 EnvoyProxy spec.concurrency), warmS, mainS, repeat, generators, cpus, memoryMi, record,
+ *            runIdPrefix?, out?, steps }(steps는 expandSweepSteps의 결과)
  * - capacity: { command: 'gw', sub: 'capacity', gateway, route, proxyCpus, rates, delay, warmS, mainS, generators, cpus, memoryMi, record, runIdPrefix?, out? }
  * - ip-limit: { command: 'gw', sub: 'ip-limit', case, rate, ips, singleRate?, warmS, mainS, generators, cpus, memoryMi, record, runIdPrefix?, out? }
- * 규칙: 인자는 `--이름 값` 꼴만, 모르는 인자·그 명령에 없는 인자·값 없음·두 번은 거부. --record에는 --run-id-prefix가 꼭 있어야 하고
+ * - limits: { command: 'gw', sub: 'limits', from: string[], saturation, podCpus, out? }(--from·--saturation·--pod-cpus는 꼭 있어야 한다. 기본값을 두지 않는다.
+ *           --from은 쉼표 목록(빈 값·겹침 거부, 1~200개), --saturation은 1~1,000,000, --pod-cpus는 1~64 정수)
+ * 규칙: 인자는 `--이름 값` 꼴만, 모르는 인자·그 명령에 없는 인자·값 없음·두 번은 거부. --workers는 sweep에만 있다. --record에는 --run-id-prefix가 꼭 있어야 하고
  * (`^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]{0,40}$`), --run-id-prefix는 --record 없이 주지 않는다. --generators를 주지 않으면 ⌈최고 도착률 ÷ 1,000⌉.
  * 전체 길이(단계 수 × (warm + main + STEP_OVERHEAD_S))가 발생기 파드 실행 시간 상한 11,400초를 넘으면 거부
  * @param {string[]} argv
@@ -148,7 +156,7 @@ const BOOLS = new Set(['--record']);
 export function parseGwArgs(argv) {
   if (!Array.isArray(argv)) fail('인자 목록이 없다');
   const [sub, ...rest] = argv;
-  if (!Object.hasOwn(ALLOWED, sub ?? '')) fail(`gw 명령은 sweep·capacity·ip-limit 가운데 하나다: ${sub ?? '(없음)'}`);
+  if (!Object.hasOwn(ALLOWED, sub ?? '')) fail(`gw 명령은 sweep·capacity·ip-limit·limits 가운데 하나다: ${sub ?? '(없음)'}`);
   const seen = new Map();
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
@@ -164,6 +172,16 @@ export function parseGwArgs(argv) {
     i++;
   }
   const get = (f) => seen.get(f);
+  if (sub === 'limits') {
+    for (const f of ['--from', '--saturation', '--pod-cpus']) if (get(f) === undefined) fail(`gw limits에는 ${f}가 꼭 있어야 한다(기본값이 없다)`);
+    const from = get('--from').split(',');
+    if (from.some((p) => p === '')) fail(`--from 목록에 빈 값이 있다: ${get('--from')}`);
+    if (from.length > 200) fail('--from은 1~200개다');
+    if (new Set(from).size !== from.length) fail(`--from 목록에 같은 파일이 두 번 있다: ${get('--from')}`);
+    const lo = get('--out');
+    if (lo !== undefined && lo.length === 0) fail('--out은 비지 않은 경로다');
+    return { command: 'gw', sub, from, saturation: int('--saturation', get('--saturation'), 1, 1000000), podCpus: int('--pod-cpus', get('--pod-cpus'), 1, 64), ...(lo !== undefined ? { out: lo } : {}) };
+  }
   const record = seen.has('--record');
   const runIdPrefix = get('--run-id-prefix');
   if (record && runIdPrefix === undefined) fail('--record에는 --run-id-prefix가 꼭 있어야 한다');
@@ -209,9 +227,10 @@ export function parseGwArgs(argv) {
     const mc = get('--max-connections') ?? D.maxConnections;
     const maxConnections = mc === 'same' ? 'same' : int('--max-connections', mc, 1, LIMIT_MAX);
     const repeat = get('--repeat') === undefined ? D.repeat : int('--repeat', get('--repeat'), 1, 10);
+    const workers = get('--workers') === undefined ? null : int('--workers', get('--workers'), 1, WORKERS_MAX);
     const routeOf = streamsFor({ sub, gateway, route, mix }).find((s) => s.target);
     if (!routeOf) fail(`--gateway ${gateway} --route ${route}로 보낼 요청 흐름이 없다(아는 짝: ${Object.values(STREAMS).map((s) => `${s.gateway} ${s.route}`).join(', ')})`);
-    const a = { ...common, gateway, route, rate, mix, delay, maxParallel, maxPending, pendingDefault, maxConnections, repeat };
+    const a = { ...common, gateway, route, rate, mix, delay, maxParallel, maxPending, pendingDefault, maxConnections, workers, repeat };
     const steps = expandSweepSteps(a);
     // 과부하 꼴(고정 지연)인데 재는 흐름들의 도착률 × 지연이 동시 상한 이하이면 과부하가 아니다(R8, docs/infra.md §4.1 '측정(V-T43)'). 정수로 견준다
     if (delay.kind === 'fixed') {
@@ -434,6 +453,71 @@ export function parseClusterStats(text, cluster) {
   return { overflow, rqActive: vals.upstream_rq_active, rqPendingActive: vals.upstream_rq_pending_active, rqTotal: vals.upstream_rq ?? null };
 }
 
+// ---- 실제 일꾼 수 확인(ADR-0287 결정 10, docs/infra.md §4.1 '측정(V-T43)' 끝 ①, 묶음 BAT-058) ----
+
+/**
+ * 관리 포트 통계 글(Prometheus 꼴, 통계 포트 STATS_PORT의 STATS_PATH)에서 실제 일꾼 수: Envoy 통계 server.concurrency(지표 이름 envoy_server_concurrency).
+ * 받는 줄 꼴은 `envoy_server_concurrency <값>`과 `envoy_server_concurrency{} <값>` 둘뿐이다(이름이 앞부분만 같은 다른 지표, 꼬리표가 붙은 줄은 읽지 않는다).
+ * 값은 0 이상 10진수 정수다. 그 줄이 없거나, 값이 정수가 아니거나(5.5, -1), 서로 다른 값으로 두 번 이상 있으면 Error(0이나 null로 넘기지 않는다)
+ * @param {string} text @returns {number}
+ */
+export function parseServerConcurrency(text) {
+  const vals = [];
+  for (const raw of String(text ?? '').split('\n')) {
+    const m = /^envoy_server_concurrency(?:\{\})?[ \t]+(\S+)[ \t]*$/.exec(raw.replace(/\r$/, ''));
+    if (!m) continue;
+    if (!/^\d+$/.test(m[1])) throw new Error(`통계의 envoy_server_concurrency 값이 0 이상 정수가 아니다: ${m[1]}`);
+    vals.push(Number(m[1]));
+  }
+  if (!vals.length) throw new Error('통계에 envoy_server_concurrency(server.concurrency) 줄이 없다');
+  if (new Set(vals).size > 1) throw new Error(`통계에 envoy_server_concurrency가 서로 다른 값으로 여러 번 있다: ${vals.join(', ')}`);
+  return vals[0];
+}
+
+/**
+ * 단계의 기대 일꾼 수와 출처: --workers가 있으면 그 값('flag'), 없으면 그 게이트웨이 EnvoyProxy의 spec.concurrency('envoyproxy'),
+ * 둘 다 없으면 { expected: null, source: null }(읽은 값을 적기만 하고 무효로 하지 않는다). gw capacity는 이 함수 대신 자기가 묶은 값(source 'capacity')을 쓴다.
+ * EnvoyProxy 값이 있는데 0 이상 정수가 아니면 Error
+ * @param {{ flag?: number|null, concurrency?: unknown }} o
+ * @returns {{ expected: number|null, source: 'flag'|'envoyproxy'|null }}
+ */
+export function expectedWorkers(o) {
+  if (o?.flag !== undefined && o.flag !== null) return { expected: o.flag, source: 'flag' };
+  const c = o?.concurrency;
+  if (c === undefined || c === null) return { expected: null, source: null };
+  if (!Number.isSafeInteger(c) || c < 0) throw new Error(`EnvoyProxy spec.concurrency가 0 이상 정수가 아니다: ${JSON.stringify(c)}`);
+  return { expected: c, source: 'envoyproxy' };
+}
+
+/**
+ * 단계의 일꾼 수 문제(없으면 null, 있으면 무효 까닭 글):
+ * - 한 파드라도 못 읽음(errors) 또는 파드가 없음: `일꾼 수를 못 읽음: <파드>: <까닭>[; <파드>: <까닭>…]`
+ * - 기대 값이 있고 한 파드라도 다름: `일꾼 수가 <기대>가 아님(<파드> <값>[, <파드> <값>…])`(다른 파드만, 이름 차례)
+ * 기대 값이 null이면 모두 읽힌 것만 본다
+ * @param {{ expected: number|null, pods: Record<string, number|null>, errors?: Record<string, string> }} w
+ * @returns {string|null}
+ */
+export function workersProblem(w) {
+  const errs = Object.entries(w?.errors ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (errs.length) return `일꾼 수를 못 읽음: ${errs.map(([p, m]) => `${p}: ${m}`).join('; ')}`;
+  const names = Object.keys(w?.pods ?? {}).sort();
+  if (!names.length) return '일꾼 수를 못 읽음: 프록시 파드가 없다';
+  const unread = names.filter((p) => !Number.isSafeInteger(w.pods[p]));
+  if (unread.length) return `일꾼 수를 못 읽음: ${unread.map((p) => `${p}: 값 없음`).join('; ')}`;
+  if (w.expected === null || w.expected === undefined) return null;
+  const bad = names.filter((p) => w.pods[p] !== w.expected);
+  return bad.length ? `일꾼 수가 ${w.expected}가 아님(${bad.map((p) => `${p} ${w.pods[p]}`).join(', ')})` : null;
+}
+
+/** 장부 notes의 일꾼 수 글: `일꾼 수(관리 포트) <파드> <값>[, …], 기대 <n>(<출처>)`. 기대 값이 없으면 `기대 없음`, 못 읽은 파드의 값은 `못 읽음` */
+export function workersText(w) {
+  const pods = Object.keys(w?.pods ?? {})
+    .sort()
+    .map((p) => `${p} ${Number.isSafeInteger(w.pods[p]) ? w.pods[p] : '못 읽음'}`);
+  const exp = w?.expected === null || w?.expected === undefined ? '기대 없음' : `기대 ${w.expected}(${w.source})`;
+  return `일꾼 수(관리 포트) ${pods.join(', ') || '(파드 없음)'}, ${exp}`;
+}
+
 /**
  * 통계 표본(시각 오름차순 { atMs, pods: { <파드>: parseClusterStats 결과 } })에서 본구간 [fromMs, toMs]의 값:
  * 넘침은 '본구간 시작 전 마지막 표본'과 '끝난 뒤 첫 표본'의 차이(파드마다 빼서 더함, 이름마다), 처리 중·보류 최대는 그 사이 표본(양 끝 포함)의 파드별 최댓값.
@@ -513,6 +597,31 @@ export function streamMetrics(summary, stream) {
 }
 
 /**
+ * 흐름 하나의 본구간 2xx 평균 응답 시간(ms, ADR-0287 결정 6, docs/infra.md §4.1 '측정(V-T43)' 끝 ⑤): 발생기마다의 k6 요약(합치기 전)에서
+ * gw_dur_2xx{phase:main,stream:<흐름>}의 avg를 그 발생기의 gw_reqs{phase:main,stream:<흐름>,cls:2xx} count로 가중한 평균. 소수 넷째 자리로 반올림한다.
+ * 합친 요약(mergeSummaries)의 avg는 발생기 가운데 큰 값이라 쓰지 않는다(merge.mjs 머리 주석).
+ * 요약 목록이 없거나 비었음, 어느 요약에 그 흐름의 2xx 수 지표가 없음, 2xx가 1건 이상인 요약에 avg가 없음, 2xx 합이 0이면 null(값을 지어내지 않는다)
+ * @param {Array<{ metrics: Record<string, any> }>|undefined|null} summaries @param {string} stream @returns {number|null}
+ */
+export function weightedMean2xx(summaries, stream) {
+  if (!Array.isArray(summaries) || summaries.length === 0) return null;
+  let n = 0;
+  let sum = 0;
+  for (const s of summaries) {
+    const m = s?.metrics;
+    if (!m || typeof m !== 'object') return null;
+    const c = m[`gw_reqs{phase:main,stream:${stream},cls:2xx}`]?.values?.count;
+    if (!Number.isFinite(c) || c < 0) return null;
+    if (c === 0) continue;
+    const avg = m[`gw_dur_2xx{phase:main,stream:${stream}}`]?.values?.avg;
+    if (!Number.isFinite(avg)) return null;
+    n += c;
+    sum += avg * c;
+  }
+  return n > 0 ? Math.round((sum / n) * 1e4) / 1e4 : null;
+}
+
+/**
  * 과부하 단계인가: 계산으로 가르지 않고 부하 꼴로 정한다(docs/infra.md §4.1 '측정(V-T43)', 추천 적용 2026-11-18, BAT-056 R8).
  * 지연이 정본 분포(normal)면 정상 부하(①), 재는 흐름의 지연을 고정 값(fixed:<ms>)으로 바꾼 단계면 과부하(②)다
  */
@@ -553,10 +662,10 @@ export function outsideResponses(m, expected) {
 
 /**
  * 스윕 단계 하나의 판정(정본 docs/infra.md §4.1 '측정(V-T43)'). 입력:
- *   { step, overload, limitsLoaded, statsError?(통계를 못 읽은 까닭), stats?(statsWindow 결과), m?(streamMetrics 결과),
- *     mAll?(보낸 흐름 모두를 합친 것, 그 밖 응답(R2)을 m과 함께 본다), generator: { valid, reasons, dropped }, accessLog?(accessLogDurations 결과 또는 null) }
+ *   { step, overload, limitsLoaded, workersError?(workersProblem의 까닭: 일꾼 수가 기대와 다르거나 못 읽음), statsError?(통계를 못 읽은 까닭), stats?(statsWindow 결과),
+ *     m?(streamMetrics 결과), mAll?(보낸 흐름 모두를 합친 것, 그 밖 응답(R2)을 m과 함께 본다), generator: { valid, reasons, dropped }, accessLog?(accessLogDurations 결과 또는 null) }
  * 돌려주는 꼴: { item: 'V-T43 ①'|'V-T43 ②', verdict: 'pass'|'fail'|'invalid', valid, invalid_reason, reasons: string[] }
- * - 무효(통과로 세지 않음): 상한이 실리지 않음, 통계를 못 읽음, 보낸 수 0, dropped_iterations ≥ 1, 발생기 판정 무효,
+ * - 무효(통과로 세지 않음): 상한이 실리지 않음, 일꾼 수가 기대와 다르거나 못 읽음(ADR-0287 결정 10), 통계를 못 읽음, 보낸 수 0, dropped_iterations ≥ 1, 발생기 판정 무효,
  *   2xx·503 밖의 응답이 한 건이라도 있음(R2: 상한에 닿기 전에 다른 까닭으로 막힘), 과부하인데 503 0건,
  *   발생기 503 p99만 FAST_FAIL_MS를 넘고 접근 로그 p99는 안 넘음('측정 지점 의심')
  * - 실패: (공통) 503 하나라도 Retry-After가 없거나 숫자가 아님, 503 Problem 본문이 틀림, 처리 중 최대 > 동시 상한.
@@ -566,6 +675,7 @@ export function judgeSweepStep(o) {
   const item = o.overload ? 'V-T43 ②' : 'V-T43 ①';
   const invalid = (why) => ({ item, verdict: 'invalid', valid: false, invalid_reason: why, reasons: [why] });
   if (!o.limitsLoaded) return invalid('상한이 실리지 않음');
+  if (o.workersError) return invalid(o.workersError);
   if (o.statsError || !o.stats) return invalid(`통계를 못 읽음: ${o.statsError ?? '표본 없음'}`);
   const m = o.m;
   if (!m || !(m.sent > 0)) return invalid('보낸 요청 0건');
@@ -606,12 +716,12 @@ export function judgeSweepStep(o) {
  * - 정상 부하(①): 보낸 흐름 모두를 합쳐 판정한다(503 0건은 세 흐름 합). 재는 흐름 가운데 보낸 수 0인 것이 있으면 무효
  * - 과부하(②): 재는 흐름(targets)마다 판정해 하나라도 무효면 그 무효, 아니면 하나라도 실패면 실패(흐름이 둘 이상이면 까닭 앞에 흐름 이름)
  * - 2xx·503 밖의 응답은 보낸 흐름 모두에서 본다(R2)
- * 입력: { step, overload, limitsLoaded, statsError?, stats?, streams: { <흐름>: streamMetrics 결과 }, targets: string[], generator, accessLogs?: { <흐름>: accessLogDurations 결과 } }
+ * 입력: { step, overload, limitsLoaded, workersError?, statsError?, stats?, streams: { <흐름>: streamMetrics 결과 }, targets: string[], generator, accessLogs?: { <흐름>: accessLogDurations 결과 } }
  */
 export function judgeSweepStreams(o) {
   const names = Object.keys(o.streams ?? {});
   const all = names.length ? combineMetrics(names.map((n) => o.streams[n])) : null;
-  const base = { step: o.step, overload: o.overload, limitsLoaded: o.limitsLoaded, statsError: o.statsError, stats: o.stats, generator: o.generator };
+  const base = { step: o.step, overload: o.overload, limitsLoaded: o.limitsLoaded, workersError: o.workersError, statsError: o.statsError, stats: o.stats, generator: o.generator };
   const targets = o.targets ?? [];
   const missing = targets.filter((n) => !o.streams?.[n]);
   if (missing.length || !all) return judgeSweepStep({ ...base, m: null });
@@ -769,4 +879,190 @@ export function scenarioInput(o) {
   }
   if (!streams.length) throw new Error('보낼 흐름이 없다(도착률 0)');
   return { origin: o.origin, originVerify: o.originVerify, hosts, fastFailMs: FAST_FAIL_MS, normalDelay: NORMAL_DELAY, streams };
+}
+
+// ---- gw limits: 여유 배수 k와 운영 차단 상한(ADR-0287 결정 6·7, docs/infra.md §4.1 '값의 식'·'측정(V-T43)' 끝 ④⑤, 묶음 BAT-058) ----
+// 정본 값이라 도구 상수로 둔다(시험은 가져오지 않는다): R_pod = 0.6 × 포화 처리량 × 파드 CPU, L_gw는 gw-queue 200ms(NFR-001 p99)·나머지 넷 500ms(NFR-011 p95),
+// 보류 = ⌈동시 ÷ 8⌉(q = 1/8), k는 0.1 단위 올림·하한 2, r_min은 3회 모두 통과(docs/infra.md §4.1 '값의 식'·'측정(V-T43)' ④).
+// 셈은 정수로 하고 마지막에 한 번만 올린다(k는 0.1 단위 정수 k10, 지연은 마이크로초 정수, L_gw는 밀리초. 소수 곱셈의 끝자리 오차로 하나 커지지 않게).
+const R_POD_NUM = 6;
+const R_POD_DEN = 10;
+const L_GW_MS = Object.freeze({ 'gw-queue': 200, others: 500 });
+const PENDING_DIV = 8;
+const K10_MIN = 20;
+const RMIN_RUNS = 3;
+const LIMITS_GATEWAY = 'gw-queue';
+const LIMITS_ROUTE = 'gw-queue-buy';
+/** 되돌릴 조건(ADR-0287): 잰 k(올리기 전)가 이 값보다 크면 알린다 */
+const K_RAW_WARN = 5;
+
+/** 양의 정수 나눗셈의 올림(BigInt로 정확히) */
+const ceilDiv = (a, b) => {
+  const A = BigInt(a);
+  const B = BigInt(b);
+  return Number((A + B - 1n) / B);
+};
+const verdictOf = (s) => (s?.valid === true && (s.verdict === 'pass' || s.verdict === 'fail') ? s.verdict : 'invalid');
+
+/**
+ * gw limits의 입력(sweep.json 여럿)을 단계 목록으로 풀고 섞인 입력을 가른다. files = [{ path, data(sweep.json 객체) }].
+ * 하나라도 어기면 reasons에 까닭을 한 줄씩(조용히 버리지 않는다): gw sweep 결과가 아님, 게이트웨이·라우트가 gw-queue gw-queue-buy가 아님,
+ * 정상 부하(mix normal·delay normal)가 아닌 파일·단계(과부하 단계 포함), 단계가 없음, 연결 ≠ 동시, 보류 ≠ ⌈동시 ÷ 8⌉, 도착률이 없거나 단계끼리 다름,
+ * 판정이 pass·fail·invalid가 아님. 무효 단계(valid가 true가 아니거나 verdict invalid)도 설정은 같은 규칙으로 본다.
+ * 단계의 진입 2xx 평균은 단계 줄의 streams.entry.latency2xx.avg다
+ * @returns {{ steps: Array<{ file: string, index: number, parallel: number, verdict: 'pass'|'fail'|'invalid', avg: number|null }>, rate: number|null, reasons: string[] }}
+ */
+export function limitsSteps(files) {
+  const reasons = [];
+  const steps = [];
+  const rates = new Set();
+  for (const f of files ?? []) {
+    const at = f?.path ?? '(이름 없는 파일)';
+    const d = f?.data;
+    if (d?.command !== 'gw sweep') {
+      reasons.push(`${at}: gw sweep 결과가 아니다(command ${JSON.stringify(d?.command)})`);
+      continue;
+    }
+    if (d.gateway !== LIMITS_GATEWAY || d.route !== LIMITS_ROUTE) reasons.push(`${at}: 게이트웨이·라우트가 ${d.gateway} ${d.route}다(${LIMITS_GATEWAY} ${LIMITS_ROUTE}이어야 한다)`);
+    if (d.mix !== 'normal' || d.delay !== 'normal') reasons.push(`${at}: 정상 부하가 아니다(mix ${d.mix}, delay ${d.delay})`);
+    if (!Array.isArray(d.steps) || d.steps.length === 0) {
+      reasons.push(`${at}: 단계가 없다`);
+      continue;
+    }
+    for (const [i, s] of d.steps.entries()) {
+      const w = `${at} 단계 ${i + 1}`;
+      if (s?.delay !== 'normal' || s?.mix !== 'normal' || s?.overload === true) reasons.push(`${w}: 정상 부하가 아니다(delay ${s?.delay}, mix ${s?.mix}${s?.overload === true ? ', 과부하' : ''})`);
+      const p = s?.maxParallelRequests;
+      if (!Number.isSafeInteger(p) || p < 1) {
+        reasons.push(`${w}: 동시 상한이 1 이상 정수가 아니다(${JSON.stringify(p)})`);
+        continue;
+      }
+      if (s.maxConnections !== p) reasons.push(`${w}: 연결 상한 ${s.maxConnections}이 동시 상한 ${p}와 다르다`);
+      const q = ceilDiv(p, PENDING_DIV);
+      if (s.maxPendingRequests !== q) reasons.push(`${w}: 보류 상한 ${s.maxPendingRequests}이 ⌈${p} ÷ ${PENDING_DIV}⌉ = ${q}가 아니다`);
+      if (!Number.isSafeInteger(s.rate) || s.rate < 1) reasons.push(`${w}: 도착률이 1 이상 정수가 아니다(${JSON.stringify(s.rate)})`);
+      else rates.add(s.rate);
+      if (!['pass', 'fail', 'invalid'].includes(s.verdict)) reasons.push(`${w}: 판정이 pass·fail·invalid가 아니다(${JSON.stringify(s.verdict)})`);
+      const avg = s.streams?.entry?.latency2xx?.avg;
+      steps.push({ file: at, index: i, parallel: p, verdict: verdictOf(s), avg: Number.isFinite(avg) ? avg : null });
+    }
+  }
+  if (rates.size > 1) reasons.push(`단계의 도착률이 서로 다르다(${[...rates].sort((a, b) => a - b).join(', ')}/s)`);
+  return { steps, rate: rates.size === 1 ? [...rates][0] : null, reasons };
+}
+
+/**
+ * r_min(정상 부하 503 0건이 되는 가장 작은 동시 상한, ADR-0287 결정 6): 후보(동시 상한)마다 유효 단계의 통과·실패와 무효 수를 센다(무효는 통과로도 실패로도 세지 않는다).
+ * '한 번이라도 실패한 가장 큰 후보'의 바로 위 후보(잰 후보 가운데)가 c이고, c의 유효 단계가 3개 이상이고 모두 통과면 r_min = c다.
+ * 정하지 못하는 경우(rMin null, reasons·next에 까닭과 다음 할 일): 통과한 단계가 하나도 없음, 실패가 없음(가장 작은 후보부터 통과 → 더 작은 후보를 잰다),
+ * 실패한 가장 큰 후보 위를 재지 않음, c의 유효 단계가 3개 미만(c에서 모자란 만큼 더 잰다)
+ * @param {Array<{ parallel: number, verdict: 'pass'|'fail'|'invalid' }>} steps
+ * @returns {{ runs: Record<string, { pass: number, fail: number, invalid: number }>, rMin: number|null, reasons: string[], next: string[] }}
+ */
+export function limitsRMin(steps) {
+  const by = new Map();
+  for (const s of steps ?? []) {
+    const r = by.get(s.parallel) ?? { pass: 0, fail: 0, invalid: 0 };
+    r[s.verdict === 'pass' || s.verdict === 'fail' ? s.verdict : 'invalid']++;
+    by.set(s.parallel, r);
+  }
+  const cands = [...by.keys()].sort((a, b) => a - b);
+  const runs = Object.fromEntries(cands.map((c) => [String(c), by.get(c)]));
+  const no = (reason, next) => ({ runs, rMin: null, reasons: [reason], next: [next] });
+  if (!cands.some((c) => by.get(c).pass > 0)) return no('통과한 단계가 하나도 없다', cands.length ? `동시 상한 ${cands.at(-1)}보다 큰 후보를 잰다` : '후보를 잰다');
+  const failed = cands.filter((c) => by.get(c).fail > 0);
+  if (!failed.length) return no(`실패한 후보가 없다(가장 작은 후보 ${cands[0]}부터 통과해 경계를 모른다)`, `동시 상한 ${cands[0]}보다 작은 후보를 잰다`);
+  const top = failed.at(-1);
+  const c = cands.find((x) => x > top);
+  if (c === undefined) return no(`실패한 가장 큰 후보 ${top} 위의 후보를 재지 않았다`, `동시 상한 ${top}보다 큰 후보를 잰다`);
+  const r = by.get(c);
+  if (r.pass < RMIN_RUNS) return no(`경계 후보 ${c}(실패한 가장 큰 후보 ${top}의 바로 위)의 유효 단계가 ${r.pass}개다(${RMIN_RUNS}개 모두 통과해야 한다)`, `동시 상한 ${c}에서 ${RMIN_RUNS - r.pass}번 더 잰다`);
+  return { runs, rMin: c, reasons: [], next: [] };
+}
+
+/**
+ * k·r_pc·운영 상한(ADR-0287 결정 7, docs/infra.md §4.1 '값의 식'). 입력은 모두 1 이상 정수: rMin, meanLatencyUs(평균 지연 마이크로초), rate(진입 도착률 /s),
+ * saturation(vCPU 하나의 포화 처리량 /s), podCpus(파드 CPU 코어). 아니면 RangeError.
+ * k10 = max(20, ⌈10 × rMin × 1,000,000 ÷ (rate × meanLatencyUs)⌉), k = k10 ÷ 10,
+ * 동시 = 연결 = ⌈k10 × 6 × saturation × podCpus × L_gw(ms) ÷ 100,000⌉, 보류 = ⌈동시 ÷ 8⌉, r_pc = ⌈k10 × rate × meanLatencyUs ÷ 10,000,000⌉.
+ * kRaw는 올리기 전 k(소수 셋째 자리 반올림), rPod는 0.6 × saturation × podCpus
+ */
+export function limitsValues(o) {
+  for (const k of ['rMin', 'meanLatencyUs', 'rate', 'saturation', 'podCpus']) if (!Number.isSafeInteger(o?.[k]) || o[k] < 1) throw new RangeError(`${k}는 1 이상 정수다: ${o?.[k]}`);
+  const den = o.rate * o.meanLatencyUs;
+  const k10 = Math.max(K10_MIN, ceilDiv(10 * o.rMin * 1_000_000, den));
+  const lim = (lgwMs) => {
+    const p = ceilDiv(k10 * R_POD_NUM * o.saturation * o.podCpus * lgwMs, R_POD_DEN * 10 * 1000);
+    return { maxConnections: p, maxParallelRequests: p, maxPendingRequests: ceilDiv(p, PENDING_DIV) };
+  };
+  return {
+    kRaw: Math.round(((o.rMin * 1_000_000) / den) * 1000) / 1000,
+    k10,
+    k: k10 / 10,
+    rPod: (R_POD_NUM * o.saturation * o.podCpus) / R_POD_DEN,
+    rPc: ceilDiv(k10 * o.rate * o.meanLatencyUs, 10 * 1_000_000),
+    limits: { 'gw-queue': lim(L_GW_MS['gw-queue']), others: lim(L_GW_MS.others) },
+  };
+}
+
+/**
+ * gw limits 전체(파일 읽기 밖의 모든 것): 입력 거르기(limitsSteps) → r_min(limitsRMin) → 평균 지연 L̄ → k와 운영 상한(limitsValues).
+ * L̄은 r_min의 유효 단계(모두 통과) 진입 2xx avg의 평균을 마이크로초 정수로 반올림한 값이다(한 단계라도 avg가 null이면 정하지 못함).
+ * o = { saturation, podCpus, paths?(입력 파일 이름, 없으면 files의 path), readErrors?(파일을 못 읽은 까닭들. 있으면 정하지 못함) }.
+ * 결과(limits.json): { command: 'gw limits', determined, inputs: { files, saturation, podCpus, rate }, constants, runs, rMin, meanLatencyUs, meanLatencyMs,
+ *   kRaw, k, rPod, rPc, limits: { 'gw-queue': { maxConnections, maxParallelRequests, maxPendingRequests }, others: {…} } | null, reasons, next, warnings }.
+ * 정하지 못하면 determined false이고 정하지 못한 값 칸은 null, reasons에 까닭, next에 더 재야 할 것. warnings는 잰 k(올리기 전)가 5보다 클 때(ADR-0287 되돌릴 조건)
+ */
+export function gwLimits(files, o) {
+  const base = {
+    command: 'gw limits',
+    determined: false,
+    inputs: { files: [...(o?.paths ?? (files ?? []).map((f) => f.path))], saturation: o?.saturation ?? null, podCpus: o?.podCpus ?? null, rate: null },
+    constants: { rPodShare: R_POD_NUM / R_POD_DEN, lGwMs: { ...L_GW_MS }, pendingDivisor: PENDING_DIV, kMin: K10_MIN / 10, kStep: 0.1, rMinRuns: RMIN_RUNS },
+    runs: {},
+    rMin: null,
+    meanLatencyUs: null,
+    meanLatencyMs: null,
+    kRaw: null,
+    k: null,
+    rPod: null,
+    rPc: null,
+    limits: null,
+    reasons: [],
+    next: [],
+    warnings: [],
+  };
+  if (o?.readErrors?.length) return { ...base, reasons: [...o.readErrors], next: ['파일 경로를 고쳐 다시 돌린다'] };
+  const input = limitsSteps(files);
+  if (input.reasons.length) return { ...base, reasons: input.reasons, next: ['정상 부하 gw-queue gw-queue-buy, 같은 도착률, 연결 = 동시, 보류 = ⌈동시 ÷ 8⌉인 sweep.json만 준다'] };
+  const r = limitsRMin(input.steps);
+  const withRuns = { ...base, inputs: { ...base.inputs, rate: input.rate }, runs: r.runs };
+  if (r.rMin === null) return { ...withRuns, reasons: r.reasons, next: r.next };
+  const at = input.steps.filter((s) => s.parallel === r.rMin && s.verdict === 'pass');
+  if (at.some((s) => s.avg === null))
+    return { ...withRuns, rMin: r.rMin, reasons: [`r_min ${r.rMin}의 유효 단계에 진입 2xx 평균(streams.entry.latency2xx.avg)이 없는 것이 있다(발생기마다의 요약을 못 읽음)`], next: [`동시 상한 ${r.rMin}에서 다시 잰다`] };
+  const meanLatencyUs = Math.round((at.reduce((s, x) => s + x.avg, 0) / at.length) * 1000);
+  if (meanLatencyUs < 1) return { ...withRuns, rMin: r.rMin, reasons: [`r_min ${r.rMin}의 진입 2xx 평균이 1µs보다 작다(${meanLatencyUs}µs)`], next: [`동시 상한 ${r.rMin}에서 다시 잰다`] };
+  const v = limitsValues({ rMin: r.rMin, meanLatencyUs, rate: input.rate, saturation: o.saturation, podCpus: o.podCpus });
+  const warnings = v.kRaw > K_RAW_WARN ? [`잰 k(올리기 전) ${v.kRaw}가 ${K_RAW_WARN}보다 크다(ADR-0287 '되돌릴 조건': 운영 값을 고치지 않고 감독에게 알린다)`] : [];
+  return { ...withRuns, determined: true, rMin: r.rMin, meanLatencyUs, meanLatencyMs: meanLatencyUs / 1000, kRaw: v.kRaw, k: v.k, rPod: v.rPod, rPc: v.rPc, limits: v.limits, warnings };
+}
+
+/** gw limits 결과의 콘솔 글(한국어 몇 줄) */
+export function limitsLines(r) {
+  const lines = [`입력 ${r.inputs.files.length}개, 포화 처리량 ${r.inputs.saturation}/s(vCPU 하나), 파드 CPU ${r.inputs.podCpus}, 진입 도착률 ${r.inputs.rate ?? '(모름)'}/s`];
+  const runs = Object.entries(r.runs ?? {});
+  if (runs.length) lines.push(`후보(동시 상한)마다 통과·실패·무효: ${runs.map(([c, x]) => `${c} ${x.pass}·${x.fail}·${x.invalid}`).join(', ')}`);
+  if (!r.determined) {
+    lines.push('정하지 못했다:');
+    for (const x of r.reasons) lines.push(`  까닭: ${x}`);
+    for (const x of r.next) lines.push(`  다음: ${x}`);
+    return lines;
+  }
+  const q = r.limits['gw-queue'];
+  const o = r.limits.others;
+  lines.push(`r_min ${r.rMin}, 평균 지연 ${r.meanLatencyMs}ms, k ${r.k}(올리기 전 ${r.kRaw}), R_pod ${r.rPod}/s, r_pc ${r.rPc}`);
+  lines.push(`gw-queue 동시·연결 ${q.maxParallelRequests}·보류 ${q.maxPendingRequests}, 나머지 넷 동시·연결 ${o.maxParallelRequests}·보류 ${o.maxPendingRequests}`);
+  for (const x of r.warnings) lines.push(`주의: ${x}`);
+  return lines;
 }

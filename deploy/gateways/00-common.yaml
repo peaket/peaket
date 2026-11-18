@@ -1,6 +1,7 @@
 # 게이트웨이 다섯이 함께 쓰는 것: GatewayClass·EnvoyProxy·공통 Lua·TRACE 직접 응답·ReferenceGrant(BUILD_ORDER HOT-400, 묶음 BAT-055). 정본: docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현'·§9 '응답 보안 헤더', docs/architecture.md §4 'CSRF 확인 규칙',
 # docs/features/identity.md §3 '발급자와 검증 규칙', docs/security/authz-matrix.md §5.1, docs/observability.md §6 '신뢰 경계의 추적 문맥'.
 # Envoy Gateway v1.10.0의 API(gateway.envoyproxy.io/v1alpha1)와 Gateway API v1로 쓴다. 값은 정본 값 그대로이고 바꾸면 정본을 먼저 고친다.
+# EnvoyProxy 둘의 일꾼 수·CPU 요청은 docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU'(ADR-0287, 묶음 BAT-058): 일꾼 수 = CPU 요청 2 [가정], 한도 없음.
 # 정적 시험: node --test "deploy/gateways/test/*.test.mjs"
 ---
 # 게이트웨이 다섯이 함께 쓰는 GatewayClass. 프록시 설정은 EnvoyProxy peaket-proxy(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현')
@@ -21,12 +22,16 @@ spec:
 # - 조사 칸 ja4·asn·edgeBotLabels는 Lua가 원본 확인 뒤에 남긴 값이다(위조 머리는 지워져 비는 칸, docs/features/bot-defense.md §3.3). 토큰의 jny는 입장 토큰 확인(BAT-057)과 함께 싣는다.
 # - 원본 확인 값(docs/security/secrets-and-keys.md 'CloudFront 원본 확인 헤더 값', 교체 중 두 값)은 Secret peaket-origin-verify에서 받는다. 저장소에는 값이 없다.
 #   Lua 검증(Strict)이 os.getenv로 읽는 이름을 allowedEnvVars에 적는다.
+# - 일꾼(요청을 처리하는 작업 스레드) 수 concurrency는 envoy 컨테이너 CPU 요청과 같은 2 [가정]이다. 정하지 않으면 노드 CPU 수만큼 생긴다
+#   (docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 1~3). extraArgs로 --concurrency·--cpuset-threads를 겹쳐 걸지 않는다.
+#   resources를 적으면 Envoy Gateway 기본 요청이 통째로 바뀌므로 메모리 요청 512Mi(기본값)를 다시 적고, CPU·메모리 한도는 두지 않는다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
   name: peaket-proxy
   namespace: envoy-gateway-system
 spec:
+  concurrency: 2
   provider:
     type: Kubernetes
     kubernetes:
@@ -45,6 +50,10 @@ spec:
                   name: peaket-origin-verify
                   key: previous
                   optional: true
+          resources:
+            requests:
+              cpu: "2"
+              memory: 512Mi
   lua:
     validationType: Strict
     strictValidation:
@@ -89,12 +98,14 @@ spec:
 ---
 # gw-queue 프록시: 공통 peaket-proxy와 같고 추적만 다르다(docs/infra.md §4.1 추적 표본과 속성, ADR-0125 결정 1, 웨이브 끝 리뷰 W7-COR-02).
 # - 진입 경로는 꼬리 표본에서 빼므로 trace를 시작할 때 1/1000만 고르고, 고른 trace에 고정 태그 peaket.sample.mode=head를 단다(docs/observability.md §6).
+# - 일꾼 수·CPU 요청·한도 없음은 peaket-proxy와 같다(docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287).
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:
   name: peaket-proxy-queue
   namespace: envoy-gateway-system
 spec:
+  concurrency: 2
   provider:
     type: Kubernetes
     kubernetes:
@@ -113,6 +124,10 @@ spec:
                   name: peaket-origin-verify
                   key: previous
                   optional: true
+          resources:
+            requests:
+              cpu: "2"
+              memory: 512Mi
   lua:
     validationType: Strict
     strictValidation:
