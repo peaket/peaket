@@ -219,5 +219,37 @@ describe('I-T85 ④ 재인증 토큰의 받는 쪽 작업(op)', () => {
     expect(v).toMatchObject({ jti: 'j-adm', accountId: 'acc-1', act: 'OPS_COMMAND' });
     expect(v.op).toBeUndefined();
   });
+
+  // 리뷰 반영(BAT-408 리뷰 RV-02·RV-03, 2026-11-19, identity §7.1 ④ '관리·현장 스태프 키 셋에 op를 넘긴 부르는 쪽 결함을 토큰을 풀기 전에')
+  test('I-T85 ④-8 현장 스태프 키 셋에 기대 op를 넘기면 부르는 쪽 결함 오류다(op 없이 부르면 토큰 거절로 간다) (RV-02)', async () => {
+    const staffReauth = await sign(admission, { typ: 'reauth+jwt', aud: 'scanner', claims: { act: 'FAN_SENSITIVE', jti: 'j-stf' } });
+    const staffQ = { keySet: 'staff' as const, audience: 'scanner', sessionId: 's-1', act: 'FAN_SENSITIVE' };
+    expect(await callerBug(verifier.verifyReauth(staffReauth, { ...staffQ, op: 'SESSION_END' }))).toBe('error');
+    expect(await callerBug(verifier.verifyReauth(staffReauth, { ...staffQ, op: '' }))).toBe('error');
+    // 대조: op를 넘기지 않으면 결함 오류가 아니라 토큰 확인으로 간다(스태프 공개키 묶음이 비어 kid 거절)
+    expect(await callerBug(verifier.verifyReauth(staffReauth, staffQ))).toBe('rejected:kid');
+  });
+
+  test('I-T85 ④-9 부르는 쪽 결함은 토큰을 풀기 전에 던진다: 형식이 깨진 토큰·서명이 틀린 토큰에도 format·signature 거절이 아니라 결함 오류다 (RV-03)', async () => {
+    const good = await fanReauth({ op: 'ACCOUNT_WITHDRAW' });
+    const badSig = `${good.slice(0, -4)}AAAA`;
+    // 대조: 기대 op를 맞게 넘기면 각각 format·signature 거절이다
+    expect(await callerBug(verifier.verifyReauth('x.y.z', q('ACCOUNT_WITHDRAW')))).toBe('rejected:format');
+    expect(await callerBug(verifier.verifyReauth(badSig, q('ACCOUNT_WITHDRAW')))).toBe('rejected:signature');
+    for (const [what, token] of [
+      ['형식 깨짐', 'x.y.z'],
+      ['JWT 아님', 'not-a-jwt'],
+      ['서명 틀림', badSig],
+    ] as const) {
+      expect(await callerBug(verifier.verifyReauth(token, q(undefined))), `팬·op 없음·${what}`).toBe('error');
+      expect(await callerBug(verifier.verifyReauth(token, q(''))), `팬·op 빈 값·${what}`).toBe('error');
+      expect(await callerBug(verifier.verifyReauth(token, { keySet: 'admin', audience: 'ops', sessionId: 's-1', act: 'OPS_COMMAND', op: 'OPS_COMMAND' })), `관리·op·${what}`).toBe('error');
+    }
+    // 공개키 묶음도 읽지 않는다(풀기 전): 모르는 kid의 토큰을 결함 호출로 넣어도 다시 읽기가 없다
+    const before = fetched.length;
+    const unknownKid = await sign(await key('fan-zz'), { typ: 'reauth+jwt', claims: { act: 'FAN_SENSITIVE', op: 'ACCOUNT_WITHDRAW', jti: 'j-zz' } });
+    expect(await callerBug(verifier.verifyReauth(unknownKid, q(undefined)))).toBe('error');
+    expect(fetched.length).toBe(before);
+  });
 });
 
