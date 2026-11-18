@@ -17,7 +17,7 @@
 
 ## 결정
 
-1. **기록 상한.** `docs/PROGRESS.md`와 갈래 파일(`docs/lanes/lane1.md`~`lane3.md`)은 40KB [가정]를 넘기지 않는다. '다음 할 일'에는 지금 할 묶음과 늘 쓰는 안내만, '진행 로그'에는 최근 줄만(10줄 안쪽) 둔다. 넘으면 그 묶음의 기록 커밋에서 지난 줄을 `docs/progress-archive.md` 끝 절에 그대로 옮긴다. 구간 끝 정리 목록은 구간 마무리 때만 읽으므로 따로 둔다(`docs/lanes/lane1-cleanup.md`·`lane2-cleanup.md`·`lane3-cleanup.md`, 상한 없음). `node tools/ci/records.mjs --check`가 크기를 본다(아래 '확인'의 W10 묶음). 40KB는 40,960바이트(40×1,024, 파일 탐색기가 보이는 KB와 같다)로 센다. 줄 끝을 LF로 바꾼 UTF-8 바이트 수가 40,960을 넘으면(40,960 그대로는 통과) `--check`가 그 파일과 바이트 수를 찍고 1로 끝나며, `--check` 없이 돌리면 경고만 찍는다. 정리 목록 파일과 `docs/progress-archive.md`는 보지 않는다(추천 적용, 2026-11-18, W10-guards 계획).
+1. **기록 상한.** `docs/PROGRESS.md`와 갈래 파일(`docs/lanes/lane1.md`~`lane3.md`, 2026-11-18 [ADR-0286](0286-five-lanes-by-code-area-single-merge-queue.md)로 `lane4.md`·`lane5.md`를 더함. 감독 기록 `coord.md`는 뺀다)은 40KB [가정]를 넘기지 않는다. '다음 할 일'에는 지금 할 묶음과 늘 쓰는 안내만, '진행 로그'에는 최근 줄만(10줄 안쪽) 둔다. 넘으면 그 묶음의 기록 커밋에서 지난 줄을 `docs/progress-archive.md` 끝 절에 그대로 옮긴다. 구간 끝 정리 목록은 구간 마무리 때만 읽으므로 따로 둔다(`docs/lanes/lane1-cleanup.md`·`lane2-cleanup.md`·`lane3-cleanup.md`, 상한 없음). `node tools/ci/records.mjs --check`가 크기를 본다(아래 '확인'의 W10 묶음). 40KB는 40,960바이트(40×1,024, 파일 탐색기가 보이는 KB와 같다)로 센다. 줄 끝을 LF로 바꾼 UTF-8 바이트 수가 40,960을 넘으면(40,960 그대로는 통과) `--check`가 그 파일과 바이트 수를 찍고 1로 끝나며, `--check` 없이 돌리면 경고만 찍는다. 정리 목록 파일과 `docs/progress-archive.md`는 보지 않는다(추천 적용, 2026-11-18, W10-guards 계획).
 2. **B·C 묶음의 짧은 리뷰 고리.** A 등급 묶음은 지금 그대로 한다. B·C 묶음은 역할 다섯을 그대로 나누되 다음을 줄인다.
    - 리뷰 반영 계획 커밋을 따로 두지 않는다. 리뷰 절의 지적 목록이 고칠 목록이다.
    - 시험 담당은 재현 시험과 '실패 확인' 기록을 한 커밋에 넣는다. 구현 담당은 고침과 그 시험 결과 기록을 한 커밋에 넣는다(시험 파일은 지금처럼 건드리지 않는다).
