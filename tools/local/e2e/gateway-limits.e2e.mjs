@@ -25,7 +25,7 @@
 // 끝나면 클러스터를 지우고(kind delete cluster), 시험이 만든 컨테이너는 docker rm -f -v로 지우고 잠금 폴더를 지운다(PROGRESS 턴 규칙 'Docker 차례', R-644).
 // 차단 상한(V-T43, 묶음 BAT-056 계획 §3의 K1~K3)은 D-T43 ④ 뒤·D-T50 ③ 앞에 둔다. K3은 운영 정의의 상한을 프록시 관리 포트 /clusters에서 읽고(관리 포트는 파드 안
 //   127.0.0.1에만 열려 있어 그 읽기만 kubectl 포트 전달을 잠깐 연다. 부하는 거치지 않는다), K1·K2는 gw-queue-buy에 임시 정책(이름표 peaket.io/sweep)을 잠깐 걸고
-//   대역 백엔드 파드 안에서 gw-queue 프록시 Service로 2초 지연 요청을 보낸 뒤 임시 정책을 지운다. 시험 값(Retry-After 2, 첫 값 2,400·300·6,000·750, 65,536)은 정본
+//   대역 백엔드 파드 안에서 gw-queue 프록시 Service로 2초 지연 요청을 보낸 뒤 임시 정책을 지운다. 시험 값(Retry-After 2, 지금 운영 값 2,434·305·6,084·761, 65,536)은 정본
 //   docs/infra.md §4.1 '게이트웨이 차단 상한' 값을 적고, 임시 상한(1·4)은 운영 값과 다르게 고른다.
 // 프록시 일꾼 수(V-T43 ①, 묶음 BAT-058 계획 §7의 WK1, HOT-405)는 K3 앞에 둔다: 다섯 게이트웨이 프록시 파드마다 관리 포트 통계(19001 /stats/prometheus, API 서버 프록시)의
 //   server.concurrency가 2이고 envoy 컨테이너 CPU 요청이 로컬 덧씌우기의 100m·CPU 한도 없음이다(docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 1~4).
@@ -513,13 +513,13 @@ test('D-T43 ④ RV-15 PoC: 계정당 전역 한도 429의 응답 고치기 본�
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 /**
- * 정본 지금 운영 값(docs/infra.md §4.1 '게이트웨이 차단 상한' '지금 값과 잰 값(적용 보류)': 첫 값(측정 전) 그대로, develop 값): Envoy /clusters 칸 이름(max_requests = 동시 처리).
- * BAT-058 측정의 새 값(3,120·390·7,800·975)은 감독 결정(2026-11-19, 리뷰 f8baa272 RV-01·02)으로 적용을 보류했다
+ * 정본 지금 운영 값(docs/infra.md §4.1 '게이트웨이 차단 상한' '지금 값과 잰 값(적용 보류)'·'진단 측정으로 정함', 2026-11-19 BAT-058 진단 측정, ADR-0287 결정 11):
+ * Envoy /clusters 칸 이름(max_requests = 동시 처리). gw-queue 2,434·보류 305, 나머지 넷 6,084·761(이력: 첫 값 2,400·300·6,000·750, 첫 측정의 잰 값(적용 보류) 3,120·390·7,800·975)
  */
 const OPS_LIMITS = {
-  'gw-queue': { max_connections: 2400, max_requests: 2400, max_pending_requests: 300 },
-  'gw-fan': { max_connections: 6000, max_requests: 6000, max_pending_requests: 750 },
-  'gw-ops': { max_connections: 6000, max_requests: 6000, max_pending_requests: 750 },
+  'gw-queue': { max_connections: 2434, max_requests: 2434, max_pending_requests: 305 },
+  'gw-fan': { max_connections: 6084, max_requests: 6084, max_pending_requests: 761 },
+  'gw-ops': { max_connections: 6084, max_requests: 6084, max_pending_requests: 761 },
 };
 /** 프록시 일꾼 수(= 파드 CPU 2)와 로컬·CI kind 덧씌우기의 envoy 컨테이너 CPU 요청(docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 2·4) */
 const PROXY_WORKERS = 2;
@@ -773,7 +773,7 @@ test('V-T43 ① HOT-405 WK1 다섯 게이트웨이 프록시 파드의 실제 �
 });
 
 test('V-T43 ② 운영 정의의 상한이 프록시 설정에 실린다', async () => {
-  // HOT-405 K3: gw-queue 진입·gw-fan 홀드(정본 첫 값), gw-fan 결제 결과 롱 폴링(게이트웨이 값, 감독 결정 2026-11-18), gw-ops 관제 SSE 두 규칙(65,536)과 gw-ops의 다른 규칙(게이트웨이 값)
+  // HOT-405 K3: gw-queue 진입·gw-fan 홀드(정본 지금 값), gw-fan 결제 결과 롱 폴링(게이트웨이 값, 감독 결정 2026-11-18), gw-ops 관제 SSE 두 규칙(65,536)과 gw-ops의 다른 규칙(게이트웨이 값)
   await waitLimits('gw-queue', [[clusterOf('gw-queue-buy', 'POST', '/v1/queues/e1/entries'), OPS_LIMITS['gw-queue']]], 10_000);
   await waitLimits(
     'gw-fan',

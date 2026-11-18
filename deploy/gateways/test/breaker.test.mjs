@@ -2,7 +2,7 @@
 // 파일만 읽는다: deploy/gateways/*.yaml(손으로 쓴 정의와 생성 라우트 *.routes.yaml). S5는 deploy/gateways 아래 모든 YAML을 읽는다.
 // 정본: docs/infra.md §4.1 '게이트웨이 차단 상한'(자리와 칸·넘치면·지금 값과 잰 값(적용 보류)·길게 쥐는 라우트·걸지 않는 것)과 '게이트웨이 오류의 Problem',
 // docs/api/guidelines.md §2(게이트웨이가 과부하로 막으면 503과 Retry-After 필수), ADR-0009 결정 3(게이트웨이는 다시 보내지 않는다), docs/verification.md V-T43.
-// 시험 값(Retry-After 2, gw-queue 2,400·2,400·300, 나머지 넷 6,000·6,000·750, 길게 쥐는 규칙 65,536, 429의 60·1, 상태 문구)은 YAML·코드 상수에서 가져오지 않고
+// 시험 값(Retry-After 2, gw-queue 2,434·2,434·305, 나머지 넷 6,084·6,084·761, 길게 쥐는 규칙 65,536, 429의 60·1, 상태 문구)은 YAML·코드 상수에서 가져오지 않고
 // 정본 값을 적는다(docs/architecture.md §8.6 '자주 놓친 결함').
 // 묶음 BAT-058(HOT-405) 계획 docs/review/plans/BAT-058.md §7의 WS1~WS4: 프록시 일꾼 수와 파드 CPU(docs/infra.md §4.1 '프록시 일꾼 수와 파드 CPU', ADR-0287 결정 1~3).
 // 그 시험 값(일꾼 수 2, CPU 요청 2코어, 메모리 요청 512Mi, 한도 없음, extraArgs의 --concurrency·--cpuset-threads 금지)도 정본에서 적는다.
@@ -24,15 +24,15 @@ const DIR = resolve(HERE, '..');
 // ---- 정본 값(docs/infra.md §4.1 '게이트웨이 차단 상한') ----
 const GATEWAYS = ['gw-queue', 'gw-fan', 'gw-partner', 'gw-ops', 'gw-scanner'];
 /**
- * 지금 운영 값(docs/infra.md §4.1 '지금 값과 잰 값(적용 보류)': 첫 값(측정 전) 그대로, develop 값): gw-queue는 동시·연결 2,400과 보류 300, 나머지 넷은 동시·연결 6,000과 보류 750.
- * BAT-058 측정의 새 값(3,120·390·7,800·975)은 감독 결정(2026-11-19, 리뷰 f8baa272 RV-01·02)으로 적용을 보류했다. 진단 측정으로 다시 정하면 이 표를 그 정본 값으로 고친다
+ * 지금 운영 값(docs/infra.md §4.1 '지금 값과 잰 값(적용 보류)'·'진단 측정으로 정함', 실측(PC) 2026-11-19 BAT-058 진단 측정, ADR-0287 결정 11, k 3.9·R_pod 3,120):
+ * gw-queue는 동시·연결 2,434와 보류 305, 나머지 넷은 동시·연결 6,084와 보류 761. 이력: 첫 값(측정 전) 2,400·300·6,000·750, 첫 측정의 잰 값(적용 보류) 3,120·390·7,800·975
  */
 const LIMITS = {
-  'gw-queue': { maxConnections: 2400, maxParallelRequests: 2400, maxPendingRequests: 300 },
-  'gw-fan': { maxConnections: 6000, maxParallelRequests: 6000, maxPendingRequests: 750 },
-  'gw-partner': { maxConnections: 6000, maxParallelRequests: 6000, maxPendingRequests: 750 },
-  'gw-ops': { maxConnections: 6000, maxParallelRequests: 6000, maxPendingRequests: 750 },
-  'gw-scanner': { maxConnections: 6000, maxParallelRequests: 6000, maxPendingRequests: 750 },
+  'gw-queue': { maxConnections: 2434, maxParallelRequests: 2434, maxPendingRequests: 305 },
+  'gw-fan': { maxConnections: 6084, maxParallelRequests: 6084, maxPendingRequests: 761 },
+  'gw-partner': { maxConnections: 6084, maxParallelRequests: 6084, maxPendingRequests: 761 },
+  'gw-ops': { maxConnections: 6084, maxParallelRequests: 6084, maxPendingRequests: 761 },
+  'gw-scanner': { maxConnections: 6084, maxParallelRequests: 6084, maxPendingRequests: 761 },
 };
 /** 길게 쥐는 규칙(관제 SSE 두 흐름)은 세 칸 65,536 [가정] */
 const LONG_HOLD = { maxConnections: 65536, maxParallelRequests: 65536, maxPendingRequests: 65536 };
@@ -212,7 +212,7 @@ test('V-T43 ② 503에 더한 Retry-After는 429의 두 갈래(토큰으로 센 
 
 // ===================== S2 =====================
 
-test('V-T43 ① HOT-405 S2 다섯 게이트웨이 정책의 circuitBreaker가 정본 첫 값(gw-queue 2,400·2,400·300, 나머지 넷 6,000·6,000·750)이다', () => {
+test('V-T43 ① HOT-405 S2 다섯 게이트웨이 정책의 circuitBreaker가 정본 지금 값(gw-queue 2,434·2,434·305, 나머지 넷 6,084·6,084·761)이다', () => {
   requireDefinitions();
   for (const gw of GATEWAYS) {
     const withBreaker = BTP().filter((p) => p.spec?.circuitBreaker !== undefined && refsOf(p).some((t) => t.kind === 'Gateway' && t.name === gw));
@@ -220,7 +220,7 @@ test('V-T43 ① HOT-405 S2 다섯 게이트웨이 정책의 circuitBreaker가 �
     assert.deepEqual(withBreaker.map(nameOf), [`${gw}-responses`], `${gw}: circuitBreaker를 둔 게이트웨이 정책`);
     const b = withBreaker[0].spec.circuitBreaker;
     assert.deepEqual(Object.keys(b).sort(), [...BREAKER_KEYS].sort(), `${gw}: circuitBreaker 칸은 세 칸뿐이다(${Object.keys(b).join(', ')})`);
-    assert.deepEqual(breakerTriple(b), LIMITS[gw], `${gw}: 첫 값`);
+    assert.deepEqual(breakerTriple(b), LIMITS[gw], `${gw}: 지금 운영 값`);
     // 값의 식: 연결 = 동시, 보류 = ⌈동시 ÷ 8⌉ ≤ 동시(docs/infra.md §4.1 '값의 식', q = 1/8)
     assert.equal(b.maxConnections, b.maxParallelRequests, `${gw}: 연결 ≠ 동시`);
     assert.ok(b.maxPendingRequests <= b.maxParallelRequests, `${gw}: 보류 ${b.maxPendingRequests} > 동시 ${b.maxParallelRequests}`);
@@ -230,7 +230,7 @@ test('V-T43 ① HOT-405 S2 다섯 게이트웨이 정책의 circuitBreaker가 �
 
 // ===================== S3 =====================
 
-test('V-T43 ① HOT-405 S3 관제 SSE 두 규칙만 상한을 65,536으로 올리고 결제 결과 롱 폴링 규칙은 게이트웨이 값(gw-fan 6,000·6,000·750)이며 503 응답 고치기는 그대로 닿는다', () => {
+test('V-T43 ① HOT-405 S3 관제 SSE 두 규칙만 상한을 65,536으로 올리고 결제 결과 롱 폴링 규칙은 게이트웨이 값(gw-fan 6,084·6,084·761)이며 503 응답 고치기는 그대로 닿는다', () => {
   requireDefinitions();
   // 관제 SSE 두 규칙(계약 경로로 고름): 세 칸 65,536, 503 고치기는 S1과 같다
   const sse = SSE_REQUESTS.map(([m, p]) => ({ m, p, ...ruleFor('gw-ops', m, p) }));
@@ -251,10 +251,10 @@ test('V-T43 ① HOT-405 S3 관제 SSE 두 규칙만 상한을 65,536으로 올�
   const payEff = effectiveForRule(pay.route, pay.rule);
   assert.ok(payEff.map(nameOf).includes(FAN_ACCOUNT_LIMIT), `${payWhere}: 계정당 전역 한도 ${FAN_ACCOUNT_LIMIT}이 닿지 않는다(${payEff.map(nameOf).join(', ')})`);
   assert.ok(payEff.some((p) => (p.spec?.rateLimit?.global?.rules ?? []).length > 0), `${payWhere}: 전역 한도 규칙이 없다`);
-  assert.deepEqual(breakerTriple(breakerOf(payEff)), LIMITS['gw-fan'], `${payWhere}: 차단 상한은 게이트웨이 값 6,000·6,000·750이다`);
+  assert.deepEqual(breakerTriple(breakerOf(payEff)), LIMITS['gw-fan'], `${payWhere}: 차단 상한은 게이트웨이 값 6,084·6,084·761이다`);
   assert503Override(payEff, payWhere);
 
-  // 그 밖의 모든 규칙(다섯 게이트웨이의 모든 라우트): 65,536이 닿지 않고 게이트웨이 첫 값 그대로
+  // 그 밖의 모든 규칙(다섯 게이트웨이의 모든 라우트): 65,536이 닿지 않고 게이트웨이 지금 값 그대로
   let others = 0;
   for (const gw of GATEWAYS)
     for (const r of routesOf(gw))
