@@ -62,6 +62,8 @@
 - 건너뜀 3 중 2는 구현 전 트리에 `node_modules`(yaml 패키지)가 없어 YAML 시험이 건너뛴 것이고, 1은 CI 밖이라 건너뛰는 시험이다. 새 시험 셋은 YAML 패키지 없이 줄로 읽어 건너뛰지 않았다.
 
 - 리뷰 반영(VF-A3·A4·A5, 2026-11-19 06:50): 임시 사본(`git worktree add --detach`, `node_modules`는 디렉터리 연결, 끝나고 연결을 끊고 사본을 지움)에 결함을 하나씩 넣었다. 바꾸지 않은 사본은 51개 중 통과 50·건너뜀 1. A3(`ci-kind.yml` 잡 `kind`에 `concurrency:`)·A4(`ci.yml` 잡 `kind`에 따옴표 키 `"concurrency":`)는 CC-04가 각각 실패('ci-kind.yml의 잡 kind에 concurrency가 있다'·'ci.yml의 잡 kind에 concurrency가 있다'), A5(규칙 4가 `cancel-in-progress:` 줄을 건너뜀)는 CC-03 대조 단언이 끝 코드 0으로 실패했다. 셋 다 51개 중 실패 1.
+- CC-05 ★(RV-02, 소유자 결정 (다), 2026-11-19 07:17): 구현 전 머리 `0650d4f6`(`ci.yml` 127줄 `mode:` 그대로)에서 52개 중 통과 50, 실패 1, 건너뜀 1. 실패는 CC-05이고 첫 단언이 `push refs/heads/develop changes=success specs=true specs_full=true: mode`에서 실제 `full`(기대 `pr`)이다. 그 mode면 `spec-check.yml` `runs-on` 식은 `peaket-runner2`다. 임시 사본(`git worktree add --detach`, 끝나고 지움)에 계획 4의 고친 식을 넣으면 52개 중 통과 51, 건너뜀 1로 통과한다(작업 폴더의 `ci.yml`은 고치지 않았다).
+
 ## 시험 결과
 
 - 작업 폴더(`f81981e1` + 이 시험)에서 `node --test tools/ci/check-workflows.test.mjs`: 50개 중 통과 49, 실패 0, 건너뜀 1(CI 밖 시험). CC-01·CC-02·CC-03 모두 통과.
@@ -170,6 +172,6 @@
 | --- | --- | --- | --- | --- |
 | plan | w11ci-plan-1b7c | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T07:14+09:00 |
 | impl | w11ci-impl-4e90 | claude-opus-5-5 | 2026-11-19T06:15+09:00 | 2026-11-19T06:17+09:00 |
-| test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T06:51+09:00 |
+| test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T07:19+09:00 |
 | review | w11ci-review-2c58 | claude-opus-5-5 | 2026-11-19T06:22+09:00 | 2026-11-19T06:30+09:00 |
 | verify | w11ci-verify-9f13 | claude-opus-5-5 | 2026-11-19T06:27+09:00 | 2026-11-19T06:46+09:00 |

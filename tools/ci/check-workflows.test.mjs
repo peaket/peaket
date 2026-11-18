@@ -887,3 +887,124 @@ test('CC-04 ci.yml과 ci.yml이 부르는 워크플로(./.github/workflows/*.yml
   }
   assert.ok(seen.size > 1, `ci.yml이 부르는 워크플로를 찾지 못했다: ${[...seen].join(', ')}`);
 });
+
+/**
+ * GitHub 식(${{ }})의 작은 평가기(CC-05). 문맥 이름은 ctx의 값으로 바꾸고, &&·||·==·!=·!·괄호·작은따옴표 글자·true/false/null·cancelled()만 받는다.
+ * ctx에 없는 이름이나 모르는 꼴이면 던진다(식이 바뀌어 시험이 모르는 값에 기대면 조용히 통과하지 않게).
+ * &&·||는 GitHub처럼 피연산자 값을 낸다. ==는 같은 꼴이면 글자는 대소문자 없이 견주고, 다른 꼴이면 수로 바꿔 견준다(null·false는 0, true는 1)
+ */
+function evalExpr(src, ctx) {
+  const body = src.trim().replace(/^\$\{\{([\s\S]*)\}\}$/, '$1');
+  const toks = body.match(/\s+|&&|\|\||==|!=|!|\(|\)|'(?:[^']|'')*'|[A-Za-z_][\w.-]*\(\)|[A-Za-z_][\w.-]*|./g).filter((t) => !/^\s+$/.test(t));
+  let p = 0;
+  const peek = () => toks[p];
+  const eat = (t) => {
+    if (toks[p] !== t) throw new Error(`식 '${body}'에서 ${t}가 와야 하는데 ${toks[p]}이다`);
+    p++;
+  };
+  const truthy = (v) => !(v === false || v === null || v === 0 || v === '' || v === undefined);
+  const num = (v) => (v === null ? 0 : Number(v));
+  const eq = (a, b) => (typeof a === typeof b && a !== null && b !== null ? (typeof a === 'string' ? a.toLowerCase() === b.toLowerCase() : a === b) : num(a) === num(b));
+  const primary = () => {
+    const t = toks[p++];
+    if (t === undefined) throw new Error(`식 '${body}'이 중간에 끝났다`);
+    if (t === '(') {
+      const v = or();
+      eat(')');
+      return v;
+    }
+    if (t.startsWith("'")) return t.slice(1, -1).replace(/''/g, "'");
+    if (t === 'true' || t === 'false') return t === 'true';
+    if (t === 'null') return null;
+    if (t === 'cancelled()') return false;
+    if (/^[A-Za-z_][\w.-]*$/.test(t)) {
+      if (!Object.hasOwn(ctx, t)) throw new Error(`식 '${body}'의 모르는 이름: ${t}`);
+      return ctx[t];
+    }
+    throw new Error(`식 '${body}'의 모르는 꼴: ${t}`);
+  };
+  const unary = () => {
+    if (peek() === '!') {
+      p++;
+      return !truthy(unary());
+    }
+    return primary();
+  };
+  const cmp = () => {
+    let v = unary();
+    while (peek() === '==' || peek() === '!=') {
+      const op = toks[p++];
+      const r = unary();
+      v = op === '==' ? eq(v, r) : !eq(v, r);
+    }
+    return v;
+  };
+  const and = () => {
+    let v = cmp();
+    while (peek() === '&&') {
+      p++;
+      const r = cmp();
+      v = truthy(v) ? r : v;
+    }
+    return v;
+  };
+  function or() {
+    let v = and();
+    while (peek() === '||') {
+      p++;
+      const r = and();
+      v = truthy(v) ? v : r;
+    }
+    return v;
+  }
+  const v = or();
+  if (p !== toks.length) throw new Error(`식 '${body}'의 ${toks[p]}부터를 읽지 못했다`);
+  return v;
+}
+
+// CC-05 ★(리뷰 RV-02, 소유자 결정 (다) 2026-11-19): 가지 푸시는 spec-check 전수 검사(full)와 큰 러너를 띄우지 않는다. 전수 검사는 PR과 일정 실행이 맡는다.
+// 큰 러너 변수는 peaket-runner2, 큰 러너 묶음(matrix.large)은 참으로 둔다
+test('CC-05 가지 푸시는 spec-check를 full·큰 러너로 돌리지 않고, PR은 changes 실패나 specs_full 참일 때 full·큰 러너, 일정 실행은 full·큰 러너다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const wf = (n) => YAML.parse(readFileSync(join(REPO, '.github', 'workflows', n), 'utf8'));
+  const ci = wf('ci.yml');
+  const sc = wf('spec-check.yml');
+  const job = ci.jobs['spec-check'];
+  assert.equal(job.uses, './.github/workflows/spec-check.yml', 'ci.yml 잡 spec-check가 spec-check.yml을 부르지 않는다');
+  const listMode = sc.jobs.list.steps.map((s) => s.env?.MODE).filter(Boolean);
+  assert.equal(listMode.length, 1, 'spec-check.yml list 잡에서 MODE를 두는 단계가 하나가 아니다');
+  const LARGE = 'peaket-runner2';
+  const base = (event, ref, fork) => ({ 'github.event_name': event, 'github.ref': ref, 'github.event.pull_request.head.repo.fork': fork, 'vars.PEAKET_LARGE_RUNNER': LARGE, 'matrix.large': true });
+  const runsOn = (ctx, mode) => evalExpr(sc.jobs.spec['runs-on'], { ...ctx, 'inputs.mode': mode });
+  const cases = [];
+  for (const event of ['push', 'pull_request'])
+    for (const result of ['success', 'failure'])
+      for (const specsFull of ['true', 'false'])
+        for (const specs of ['true', 'false'])
+          for (const ref of event === 'push' ? ['refs/heads/develop', 'refs/heads/main', 'refs/heads/release/x', 'refs/heads/hotfix/x'] : ['refs/pull/1/merge'])
+            cases.push({ event, result, specsFull, specs, ref });
+  for (const c of cases) {
+    const ctx = { ...base(c.event, c.ref, c.event === 'push' ? null : false), 'needs.changes.result': c.result, 'needs.changes.outputs.specs': c.specs, 'needs.changes.outputs.specs_full': c.specsFull };
+    const what = `${c.event} ${c.ref} changes=${c.result} specs=${c.specs} specs_full=${c.specsFull}`;
+    const runs = evalExpr(job.if, ctx);
+    const mode = evalExpr(job.with.mode, ctx);
+    const listed = evalExpr(listMode[0], { 'inputs.mode': mode });
+    if (c.event === 'push') {
+      if (!runs) continue;
+      assert.equal(mode, 'pr', `${what}: mode`);
+      assert.equal(listed, 'pr', `${what}: list MODE`);
+      assert.equal(runsOn(ctx, mode), 'ubuntu-24.04', `${what}: runs-on`);
+    } else {
+      const full = c.result !== 'success' || c.specsFull === 'true';
+      if (full) assert.ok(runs, `${what}: 잡이 불리지 않는다`);
+      if (!runs) continue;
+      assert.equal(mode, full ? 'full' : 'pr', `${what}: mode`);
+      assert.equal(listed, mode, `${what}: list MODE`);
+      assert.equal(runsOn(ctx, mode), full ? LARGE : 'ubuntu-24.04', `${what}: runs-on`);
+    }
+  }
+  // 일정 실행: spec-check.yml을 직접 돌리고 inputs.mode가 비어 있다
+  assert.ok(Array.isArray(sc.on?.schedule) && sc.on.schedule.length > 0, 'spec-check.yml에 on.schedule이 없다');
+  const sched = base('schedule', 'refs/heads/develop', null);
+  assert.equal(evalExpr(listMode[0], { 'inputs.mode': '' }), 'full', '일정 실행 list MODE');
+  assert.equal(runsOn(sched, ''), LARGE, '일정 실행 runs-on');
+});
