@@ -133,7 +133,7 @@
 | payment-svc | 없음(V1을 사건으로 판정) | 갈래 3 몫 0023~0024는 쓰지 않는다 |
 | purchase-svc | 있음(취소 행 두 칸·CHECK, 일괄 환불 항목 상태 값, 부분 인덱스) | **0029**(감독 확정 2026-11-19, journal `when`은 develop 것보다 크게) |
 | ops-svc | 있음(`core_applied_at`·`core_apply_overdue_at`, 부분 인덱스) | **0016**(감독 확정 2026-11-19, journal `when`은 develop 것보다 크게) |
-| core-svc | 없음(회차 `status`·`starts_at`이 있다) | — |
+| core-svc | 처음 계획은 없음. 구현이 `0029_event_status_ops_grant`(운영 역할에 `event.status` 고치기 권한)를 더했다 | **0029**(감독이 갈래 3에 줌, develop `0daf6434`. 리뷰 RV-09 닫힘) |
 
 - 다른 갈래 영향: docs/api의 payment.proto·openapi와 생성물 두 패키지(깨지지 않는 칸·값 더하기. 새 enum 값은 옛 purchase-svc가 모르는 값이라 배포 차례는 purchase-svc와 payment-svc를 함께, 운영 전이라 지금은 함께 나간다). core-svc 카탈로그 컨트롤러(갈래 2가 검색 표를 만든 곳, BAT-165)·`withSearchSync` 부르는 곳 하나 더함. 메시 허용 정책 원천(ADR-0285, 갈래 1이 만든 도구일 수 있다). 화면 앱은 건드리지 않는다.
 - BAT-408(합치기 대기)과 겹치는 파일: 없다(이 몫은 identity-svc·`packages/platform`을 고치지 않는다).
@@ -416,6 +416,99 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
   - `--require`는 그 1건으로 실패한다(지시서 §1과 같다).
 - **검증 폴더**: `git worktree remove`가 'Filename too long'으로 폴더 지우기에 실패했다. worktree 등록은 풀렸고 `D:/ticketpass-lane3-b420-verify` 폴더(apps·node_modules 등)는 남겨 두었다.
 
+## 리뷰 반영 계획
+
+- **누가·무엇을**: 계획 담당 `l3-b420-plan`(claude-opus-5-5, 2026-11-19). 바탕은 위 '리뷰'(`f21f8034`, RV-01~11)와 '검증'(`94da0926`, 살아남은 A05·I06·O09·O13, 판정 대조 약함 넷)이다. 처리는 감독이 정했다. 정본 빈칸은 이 커밋에서 먼저 썼다(모두 '추천 적용, 2026-11-19, BAT-420-rest 리뷰 반영'): payment §6 '구현에서 정한 것' ②(포트원 대응표)·④(같은 취소 ID = 같은 답)·⑥(같은 멱등키에는 첫 본문만)·⑦(계좌 모양 한 규칙)과 '계좌 대기' 끝(관제 `progress.accountPending`, 계좌 대기 행의 다시 누름), payment §11 P-T73·P-T74·P-T75(새 줄), transfer-refund §3.1 ⑥ '실패 기록'(`accepted: true`), §5 'core 반영의 구현에서 정한 것' ⑥(요청 사이의 차례), §11 R-T40 ⑤·R-T41 ⑥(새 세부), asvs/transfer-refund.md 'BAT-420-rest 계획 메모', ADR-0285 '되돌릴 조건', BUILD_ORDER BAT-420 '장부 범위'에 `P-T73, P-T74, P-T75`(61항목).
+- **차례**: 시험 담당이 먼저 재현 시험을 쓰고 지금 트리 `94da0926`에서 실패를 '실패 확인' 절에 적는다(구현 전 트리) → 구현 담당이 고친다(시험 파일은 고치지 않는다) → 리뷰 다시 보기 → 검증(살아남은 넷과 아래 새 틀린 구현) → 기록. 커밋 꼬리말에 `Fix-By`(시험·구현)를 단다.
+
+### 1. 지적마다 처리
+
+| 지적 | 처리 | 시험 담당 | 구현 담당 | 정본 위치 |
+| --- | --- | --- | --- | --- |
+| RV-01 높음 | 이 묶음에서 고침 | T1 | I1 | transfer-refund §3.1 ⑥ '실패 기록', payment §11 P-T75 |
+| RV-02 높음 | 이 묶음에서 고침. 같은 키에는 첫 본문만, 다른 계좌는 GAT-130 경계 | T2 | I2 | payment §6 '구현에서 정한 것' ⑥, '계좌 대기' 끝, §11 P-T73 ①②⑤ |
+| RV-03 중간 | 이 묶음에서 고침 | T3 | I3 | payment §6 ④, '계좌 대기' 끝, §11 P-T73 ③④ |
+| RV-04 중간 | 이 묶음에서 고침 | T4 | I4 | payment §6 ②⑦, §11 P-T74 |
+| RV-05 중간 | 이 묶음에서 고침(BAT-421 화면이 쓸 칸) | T5 | I5 | payment §6 '계좌 대기' 끝, transfer-refund §11 R-T40 ⑤ |
+| RV-06 중간 | 이 묶음에서 고침 | T6 | I6 | transfer-refund §5 '구현에서 정한 것' ⑥, §11 R-T41 ⑥ |
+| RV-07 낮음 보안 | 이 묶음에서 고침(사실대로 적기) | — | I7 | asvs/transfer-refund.md 메모, ADR-0285 '되돌릴 조건'(이 커밋) |
+| RV-08 낮음 | 정리 목록으로 | — | — | — |
+| RV-09 낮음 | 닫힘: 감독이 core-svc 0029를 갈래 3에 줌(develop `0daf6434`). 계획 §7 core 행을 고쳤다 | — | — | 계획 §7 |
+| RV-10 낮음 | 정리 목록으로(연기 회차의 판매 설정 사본. 맡을 단계가 없으면 문안만) | — | — | — |
+| RV-11 낮음 | 정리 목록으로 | — | — | — |
+| 검증 O13 | 시험 보강(Start 뒤 core 반영의 차례) | T7 | — | transfer-refund §5 'core 회차 상태 반영' 첫 줄, §11 R-T41 ③ |
+| 검증 O09 | 시험 보강(어댑터 연결 실패·시간 초과) | T8 | — | §11 R-T41 ③ |
+| 검증 I06 | 시험 보강(검색 동기화가 같은 트랜잭션) | T9 | — | search §12 SR-T8 ③ |
+| 검증 A05 | 시험 보강 + I2의 '다시 누름은 계좌를 넘기지 않음'이 길을 닫는다 | T10 | (I2) | payment §6 '계좌 대기' 끝, §11 P-T73 ⑤ |
+| 판정 대조 P-T72 ③ | 시험 보강(재시도 실행기 몫을 실제 집은 행으로) | T11 | — | payment §11 P-T72 ③ |
+| 판정 대조 R-T40 ②·P-T72 ⑤ | RV-01과 같은 자리라 T1이 메운다 | (T1) | (I1) | P-T75 |
+| 판정 대조 R-T41 ③·SR-T8 ③ | T7·T8·T9가 메운다 | (T7~T9) | — | — |
+
+### 2. 시험 담당 몫(재현 먼저, `94da0926`에서 실패를 본다)
+
+| # | 시험(이름은 ID로 시작) | 파일 | 단언 | 구현 전 트리에서 |
+| --- | --- | --- | --- | --- |
+| T1 | `P-T75 ①~③ …` | purchase `test/cs-case-adapters-contract.test.ts`(새): CS 건 어댑터 다섯 종류가 보내는 본문을 `test/fixtures/cs-case-bodies.json`(새)과 정확히 견준다. ops `test/cases-contract.test.ts`(새): 같은 JSON을 실제 `CasesController`·`ReceiveCaseRequested`·메모리 저장소에 넣는다. purchase `test/cs-case-response.test.ts`(있으면 더함): 2xx `{ accepted: false }` | ① 다섯 모두 202 `accepted: true`이고 건 한 개씩, 같은 본문 다시 보내도 한 건 ② `accepted: false`면 `CsCaseRejected`, 연 시각 빔, 지표 `purchase_cs_case_open_failures_total{kind="REFUND_ACCOUNT_PENDING"}` +1, 다음 틱 다시 부름 ③ 어댑터 넷(`http-entry-flag-notice`·`http-refund-failure-notice`·`http-deduction-gap-notice`·`http-refund-account-notice`, 일괄 환불 실패 포함) 모두 같은 판정. ops 기존 `test/cases.test.ts:64`의 '셋 밖은 만들지 않는다'는 정본대로 넷(환불 대기 더함)으로 고치고, 넷 밖 종류(예 `DISPUTE`)는 여전히 `accepted: false`를 둔다 | ① 환불 대기 `accepted: false`로 실패 ② 연 시각을 써서 실패 |
+| T2 | `P-T73 ①② …`, `P-T73 ⑤ …` | payment `test/cancel-confirmed-payment-refund-account.test.ts`(더함)·`test-int/payment-cancel-refund-account.int.test.ts`(더함), `test/toss-shaped*.test.ts`(멱등키 재사용 코드), purchase `test/cancel-refund-account-http.test.ts`(더함) | ① 결과 모름 진행 중 행에 다른 계좌(예금주 `김결제`·`김 결제`)로 다시 부름: 결제사 취소 0·조회 1, 결제사 기록 본문 하나 ② 시뮬레이터 `IDEMPOTENCY_KEY_REUSED`(토스 모양 어댑터) → `UNKNOWN`, 행 `REQUESTED` ⑤ purchase 다시 누름(새 멱등 키, ticket 대역이 첫 취소 ID를 알림)에 본문 계좌 → payment 대역 `refundAccount` 없음. 기존 'P-T71 ③ 대조: 계좌를 다시 실은 재시도는 조회 없이 결제사 취소를 한 번 부른다'는 정본 ⑥대로 반대(취소 0·조회 1)로 고친다 | ①②⑤ 실패 |
+| T3 | `P-T73 ③④ …` | payment `test-int/payment-cancel-refund-account.int.test.ts`(더함), purchase `test-int/cancellation.int.test.ts`(더함) | ③ `000` 계좌로 거절된 행을 같은 취소 ID·맞는 계좌로 다시: 결제사 0·`REFUND_ACCOUNT_REQUIRED`·`fail_reason` `REFUND_ACCOUNT_INVALID`. 업무 거절(시뮬레이터의 다른 거절)로 끝난 행은 `REJECTED`·`fail_reason` 빔 ④ 팬이 계좌 거절 뒤 새 키로 같은 표 다시 누름: 202 `REFUND_PENDING`·`refundAccountRequired` 참, payment 호출 0, `refund_failed_at` 빔, 다시 열기 한 틱 뒤 ops 대역이 받은 건은 `REFUND_ACCOUNT_PENDING` 하나뿐. 기존 P-T71 ④의 '같은 취소 ID 다시 부르면 REJECTED'는 ③대로 고친다 | ③④ 실패 |
+| T4 | `P-T74 ①~③ …` | 공용 함수 `packages/validation/test/refund-account.test.ts`(새), purchase `test/cancel-refund-account-http.test.ts`(더함), payment `test/refund-account-shape.test.ts`(새, 같은 표를 읽는다) | ① 틀린 모양 각각 400 `invalid-body`, 재인증 대역 `verify` 0번·결제 수단 읽기 0·Saga 0. 경계 대조 셋은 지남 ② 같은 표를 payment 판정에 넣어 같은 결과 ③ 포트원 대응표 밖 두 자리 코드 → `payment_cancel` 0행·결제사 0·`REFUND_ACCOUNT_REQUIRED`, 같은 취소 ID를 대응표 안 코드로 → 결제사로 감. 기존 시험의 계좌 표본(`bankCode: '088'` 등, R-T39·P-T72)은 정본 ②의 두 자리 코드로 고친다(이름·단언은 그대로) | ①③ 실패(①은 202, ③은 `FAILED` 행) |
+| T5 | `R-T40 ⑤ …` | ops `test/grpc-event-refunds.test.ts`(있으면 더함, 없으면 새), `test/event-cancellations-http.test.ts`(더함) | 어댑터가 `account_pending_orders` 2를 `accountPending` 2로 읽고, 관제 상세 응답 `progress.accountPending` 2. 칸이 없는 옛 답(0)은 0 | 실패 |
+| T6 | `R-T41 ⑥ …` | ops `test/event-cancellation-core-apply.test.ts`(더함, 가짜 시계·core 대역)·`test-int/event-cancellations.int.test.ts`(더함), core `test/event-cancellation-status.test.ts`(더함) | 같은 회차 P1(확정 t1, core 실패)·P2(t2, 반영): 다음 바퀴 core 호출 0, P1 `core_apply_superseded_at` 있음·`core_applied_at` 빔, 회차 시작 P2 값. 같은 바퀴에 둘 다 빔이면 P1 → P2 차례로 부르고 P1 반영 뒤 P2. 늘 4xx 21건 + 새 요청 1: 첫 바퀴에 새 요청 반영, 4xx 행의 다음 볼 시각 = 지금 + 10분(5xx는 + 1분). core: 같은 시각으로 이미 연기된 회차를 그 시각 + 1ms에 다시 받으면 `UNCHANGED`(204) | 실패 |
+| T7 | `R-T41 ③ 확정은 Start를 끝낸 뒤에만 core를 부른다` | ops `test/event-cancellation-core-apply.test.ts`(더함) | Start 대역과 core 대역이 한 기록 배열에 쓰고 `start` 다음 `core` 차례를 `toEqual`로 본다. Start가 실패하는 확정(503)에서 core 호출 0 | 지금 구현은 맞아 통과할 수 있다. 검증 O13 틀린 구현으로 실패를 본다 |
+| T8 | `R-T41 ③ 어댑터는 연결 실패·시간 초과를 실패로 던진다` | ops `test/http-core-event-status.test.ts`(더함) | `request`가 시간 초과 오류·`ECONNREFUSED`로 던지면 `apply`도 던진다(두 경우). 선택: ops 통합에 실제 어댑터를 닫힌 포트로 꽂아 확정 뒤 `core_applied_at` 빔 | O09로 실패를 본다 |
+| T9 | `SR-T8 ③ 검색 쪽 쓰기가 실패하면 회차 상태도 되돌려진다` | core `test-int/search-read-model.int.test.ts`(더함) | 그 공연의 `search_document` 갱신에 지연 제약 트리거(커밋 때 실패)를 걸고 취소 반영: 500(또는 5xx), 회차 `status` SCHEDULED·`version` 그대로, 무효화 0, `search_removed` 0. 트리거를 치운 뒤 정상 | I06으로 실패를 본다 |
+| T10 | `P-T73 ⑤ 공연 시작 뒤 다시 누름의 계좌는 payment로 가지 않는다` | purchase `test/cancel-refund-account-http.test.ts`(더함) | 견적 EVENT_STARTED, ticket 대역 `ALREADY_CANCELLED`·`firstResult: REFUND_NOW`, 본문 계좌 → payment 대역이 받은 호출에 `refundAccount` 없음 | 지금 실패할 수 있다(검증 판단). 아니면 A05로 본다 |
+| T11 | `P-T72 ③ 재시도 실행기는 실제로 집은 행으로도 계좌를 싣지 않는다` | purchase `test-int/cancellation.int.test.ts`(더함) | 입장 시작 뒤 취소(본문에 계좌)를 실제 DB에 쓰고 마감 뒤 실제 `dueRefunds`·실제 실행기로 돌린다. payment 대역 호출에 `refundAccount` 없음 | 지금 구현은 맞아 통과할 수 있다. A05·M10 틀린 구현으로 본다 |
+
+- 단언 값은 정본에서 가져온다(10분·1분·`REFUND_ACCOUNT_INVALID`·`accepted`·모양 규칙). 시험의 시계 값은 코드 상수와 다르게 고른다.
+
+### 3. 구현 담당 몫(시험 커밋 뒤, 시험 파일은 고치지 않는다)
+
+| # | 할 일 | 파일 |
+| --- | --- | --- |
+| I1 | ops `ACCEPTED`에 `REFUND_ACCOUNT_PENDING`을 더하고 머리 주석을 넷으로. purchase `requireAccepted`가 2xx와 본문 `accepted === true`를 함께 보고, 아니면 `CsCaseRejected`(다시 열기가 잇는다). CS 건 어댑터 모두 이 함수를 쓴다 | `services/ops-svc/src/modules/cases/application/receive-case-requested.ts`, `services/purchase-svc/src/modules/refund/adapters/cs-case-response.ts`와 어댑터들 |
+| I2 | payment: 가상계좌 결제에서 그 취소 ID 행이 있으면 계좌와 관계없이 조회 대조로만(⑥). 결제사 멱등키 재사용 답 → `UNKNOWN`(시뮬레이터 `IDEMPOTENCY_KEY_REUSED`, 토스·포트원 코드는 공식 문서 대조 뒤 머리 주석에 날짜). purchase `#replay`는 계좌를 넘기지 않는다 | `cancel-confirmed-payment.ts`, `toss-shaped.ts`·`portone-gateway.ts`·`simulator-gateway.ts`, `services/purchase-svc/src/modules/refund/application/cancel-ticket.ts` |
+| I3 | payment 마이그레이션(아래 §4)으로 `payment_cancel.fail_reason`. 계좌 거절 때 `REFUND_ACCOUNT_INVALID`를 쓰고, 그 행의 다시 부름은 결제사 0·`REFUND_ACCOUNT_REQUIRED`. purchase `#replay`: 행에 `refund_account_required_at`이 있으면 payment를 부르지 않고 실패 표시 없이 202 `REFUND_PENDING`·`refundAccountRequired` 참 | payment `drizzle-confirm-jobs.ts`·`cancel-confirmed-payment.ts`·schema, purchase `cancel-ticket.ts` |
+| I4 | 공용 함수(예 `refundAccountShape(v): { ok: true; value } \| { ok: false }`)를 `packages/validation`에 두고 purchase 본문 검사(zod)와 payment `refundAccountOf`가 쓴다. openapi `RefundAccount`에 `pattern`·`maxLength`·`minLength`와 설명. 포트원 대응표 검사를 `beginConfirmedCancel` 앞으로. 생성물 두 패키지 다시 만들기 | `packages/validation/src/`, purchase `ticket-cancellation.controller.ts`, payment `payment-gateway.ts`·`portone-gateway.ts`·`cancel-confirmed-payment.ts`, `docs/api/openapi.yaml`, `packages/contracts`·`packages/api-client` |
+| I5 | ops 어댑터가 `account_pending_orders`를 읽고 관제 상세 `progress.accountPending`(정수, 필수 아님)에 싣는다. openapi `EventCancellationRequest.progress`에 칸, 생성물 다시 만들기 | `services/ops-svc/src/adapters/grpc-event-refunds.ts`, `…/event-cancellations/inbound/views.ts`, `docs/api/openapi.yaml` |
+| I6 | ops 0016에 `core_apply_superseded_at`(부분 인덱스 조건에도 넣음). 잡기 차례 `core_apply_next_at NULLS FIRST`, 같은 회차는 `approved_at` 차례, 반영 성공과 같은 트랜잭션에서 앞 요청에 대체 표시, 4xx(401 제외) 다음 볼 시각 + 10분. core `decideEventStatus`는 '이미 같은 상태'를 먼저 | `services/ops-svc/migrations/0016_…sql`·journal, `…/adapters/db/drizzle-store.ts`, `…/application/event-cancellations.ts`, `services/core-svc/src/modules/catalog/domain/event-cancellation-status.ts` |
+| I7 | core 컨트롤러 머리 주석을 '부르는 쪽은 ops-svc 하나'에서 '메시는 포트 단위라 core-svc REST 포트를 부르는 다른 서비스도 공유 토큰이 있으면 닿는다(ADR-0285)'로 | `services/core-svc/src/modules/catalog/inbound/internal-event-status.controller.ts` |
+
+- 게이트: 계획 §11 명령에 `packages/validation` 시험·빌드를 더한다(`node / node`가 전체를 돈다, WIDEN_JS). 통합은 감독 잠금 때 payment·purchase·core·ops를 차례로.
+
+### 4. 마이그레이션과 다른 갈래 영향
+
+| 서비스 | 반영 | 번호 |
+| --- | --- | --- |
+| payment-svc | 새로 하나: `payment_cancel.fail_reason text`(CHECK: 빈 값이거나 `status = 'FAILED'`이고 값이 `REFUND_ACCOUNT_INVALID`) | **감독 확인 필요**(감독이 준 목록에 payment가 없다. 첫 지시의 갈래 3 몫 0023~0024 안이면 0023. 이 폴더의 마지막은 0021) |
+| purchase-svc | 0029 그대로(새 칸 없음) | 0029 |
+| ops-svc | 0016에 칸 하나(`core_apply_superseded_at`)와 인덱스 조건을 더한다(아직 develop에 없음) | 0016 |
+| core-svc | 0029 그대로 | 0029 |
+
+- 다른 갈래 영향:
+  - `packages/validation`에 공용 함수를 더한다(더하기만). node 잡이 전체를 돈다.
+  - openapi 공용 `RefundAccount`를 조인다. 이 스키마는 굿즈 주문 취소(core-svc shop)와 탈퇴(`DELETE /v1/identity/account`, identity-svc, PRF-174 갈래 1)도 쓴다. 돈이 같은 결제사 취소로 가므로 셋 다 같은 규칙이 맞다. 다만 그 두 서버의 본문 검사는 이 묶음에서 고치지 않는다(그 단계 몫. PRF-174 넘김 구절에 '계좌 모양은 `packages/validation` 공용 함수'를 감독이 더해 주기를 바란다). 계약 깨짐 검사가 요청 조임을 깨짐으로 보면 감독 확인이 필요하다(운영 전이라 `breaking-approved` 절차).
+  - BAT-421(갈래 2) 화면은 `RefundAccount` 모양과 `progress.accountPending`을 쓴다. 넘김 문안의 선행에 'BAT-420-rest 리뷰 반영(계좌 모양·`accountPending`)'을 더해 주기를 바란다.
+  - 메시 원천·생성물은 이번 반영에서 고치지 않는다(RV-07은 글만).
+
+### 5. 새 틀린 구현(검증 담당이 넣을 것, 살아남은 넷 A05·I06·O09·O13에 더해)
+
+| # | 틀린 구현 | 잡는 시험 |
+| --- | --- | --- |
+| R1 | ops 받는 종류에서 `REFUND_ACCOUNT_PENDING`을 뺀다 | T1 ① |
+| R2 | purchase가 `accepted`를 보지 않고 2xx만 본다 | T1 ② |
+| R3 | payment가 행이 있어도 계좌가 있으면 다시 보낸다(옛 동작) | T2 ① |
+| R4 | 멱등키 재사용 답을 `REJECTED`로 읽는다 | T2 ② |
+| R5 | 계좌 거절 행에 `fail_reason`을 쓰지 않는다(또는 다시 부름에 `REJECTED`) | T3 ③ |
+| R6 | purchase `#replay`가 계좌 대기 행에도 payment를 부르거나 `markRefundFailed`를 쓴다 | T3 ④ |
+| R7 | purchase `#replay`가 본문 계좌를 넘긴다 | T2 ⑤, T10 |
+| R8 | purchase 본문 검사에서 모양 검사를 뺀다(payment가 가린다) | T4 ①(재인증 0·Saga 0) |
+| R9 | 포트원 대응표 검사를 행 만든 뒤로 되돌린다 | T4 ③ |
+| R10 | ops 어댑터가 `account_pending_orders`를 읽지 않는다 | T5 |
+| R11 | 대체 표시를 빼서 앞 연기를 다시 반영한다 | T6 |
+| R12 | 잡기 차례를 `approved_at`만으로 둔다(머리 막힘) | T6(21건) |
+| R13 | core가 '지금보다 이름'을 먼저 본다(옛 동작) | T6 core |
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -425,5 +518,6 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T04:58+09:00 | 2026-11-19T06:10+09:00 |
 | review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:18+09:00 |
 | verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T06:06+09:00 | 2026-11-19T06:50+09:00 |
+| plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T06:52+09:00 | 2026-11-19T07:00+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
