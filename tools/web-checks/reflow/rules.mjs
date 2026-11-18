@@ -83,6 +83,23 @@ export function emptyMeasurement({ requestedPath, finalPath, textCount, controlC
 }
 
 /**
+ * 고정 띠의 스크롤 여백(FE-T18, WCAG 2.4.11, docs/frontend.md §5.11 '초점이 가려지지 않게'): 높이는 띠가 지금 그려진 실제 높이이고,
+ * 그 쪽 여백(문서의 계산된 scroll-padding-top·bottom)이 띠보다 작으면 결함이다(같으면 통과). 위아래 띠와 여백을 빼고도 남는 보이는 높이가 0보다 커야 한다.
+ * bands는 화면 위·아래 끝에 붙은(top·bottom 0) sticky·fixed 띠 [{ id, edge: 'top'|'bottom', height }], padding은 { top, bottom }(px).
+ * 돌려주는 것은 여백이 모자란 띠 [{ id, edge, height, padding }]와, 남는 높이가 0 이하면 { id: '남는 높이', remaining }.
+ * 띠가 0개인 화면은 남는 높이만 본다(빈 결과 판정은 부르는 쪽이 한다). BAT-171 시험 담당(l2-bat171-test)이 구현 뒤에 썼다(계획 §3 T2)
+ */
+export function stickyInsetFindings({ bands, padding, viewportHeight }) {
+  const pad = { top: Number(padding?.top ?? 0), bottom: Number(padding?.bottom ?? 0) };
+  const list = bands ?? [];
+  const out = list.filter((b) => Number(b.height) > pad[b.edge]).map((b) => ({ id: b.id, edge: b.edge, height: Number(b.height), padding: pad[b.edge] }));
+  const tallest = (edge) => Math.max(pad[edge], ...list.filter((b) => b.edge === edge).map((b) => Number(b.height)));
+  const remaining = Number(viewportHeight) - tallest('top') - tallest('bottom');
+  if (!(remaining > 0)) out.push({ id: '남는 높이', remaining });
+  return out;
+}
+
+/**
  * 겹침(FE-T31, docs/frontend.md §5.17 '판정'): 예외 상자 밖에서 보이는 글자 노드 둘의 줄 사각형(문서 좌표)이 가로·세로 모두 1px 넘게 포개진 짝.
  * 항목은 { node, left, top, width, height, hidden?, exception? }(node: 글자 노드 번호). 같은 노드의 줄끼리, 숨긴 글, 예외 상자 안의 글은 세지 않는다.
  * 돌려주는 것은 [{ a, b }](a·b는 포개진 두 항목). 정확히 1px 포갬은 겹침이 아니다(BAT-170 계획 §13 V13-1).

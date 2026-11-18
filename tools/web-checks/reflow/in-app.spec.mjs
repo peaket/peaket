@@ -7,10 +7,28 @@
 import { test, expect } from '@playwright/test';
 import { APPS, HOST, MOCK_API_ORIGIN, portOf } from '../seed-css/apps.mjs';
 import { stubFanApi } from '../csp/pages.mjs';
+import { REFLOW_PAGES } from './rules.mjs';
 
 const WEB = `http://${HOST}:${portOf(APPS.find((a) => a.name === 'web'), 'prod')}`;
-/** 다른 시험이 그리지 않는 회차(ISR이 그린 화면을 기억하므로 로비 단계로 바꾼 회차를 따로 쓴다). 가짜 API 고정 자료 'play'(HYBRID) */
-const EVENT = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e06';
+/**
+ * 로비 단계로 바꿀 회차. beforeAll이 가짜 API 고정 자료에서 고른다(BAT-171 시험 이의 2).
+ * 예전 값 'play' 첫 회차(…4e06)는 고정 자료의 판매 종료(2026-11-09)가 지나 화면이 '판매 종료'라 [로비 입장]을 그리지 않았다.
+ * 공연 상세는 캐시 화면(ISR)이라 처음 그린 일정을 기억하므로, 다른 시험이 열거나 미리 받을 수 있는 회차(홈 피드의 회차·재배치 화면 목록의 공연)는 고르지 않는다
+ * @type {string}
+ */
+let EVENT;
+/** 로비 버튼 퍼뜨림의 상한: 로비 개방 뒤 0~60초(docs/design/d5-screen-blueprint.md §5.2 상태 표 '로비 열림, 이 기기의 버튼은 아직') */
+const LOBBY_SPREAD_MS = 60_000;
+/** 홈 피드 JSON 안의 회차 ID(eventId 칸) */
+const eventIdsIn = (v, out = new Set()) => {
+  if (Array.isArray(v)) for (const x of v) eventIdsIn(x, out);
+  else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) k === 'eventId' && typeof x === 'string' ? out.add(x) : eventIdsIn(x, out);
+  return out;
+};
+const mockJson = async (path) => {
+  const r = await fetch(`${MOCK_API_ORIGIN}${path}`);
+  return r.ok ? r.json() : undefined;
+};
 
 /** apps/web/src/shared/lib/in-app-browser.ts가 아는 인앱 브라우저마다 하나 */
 const IN_APP = {
@@ -39,51 +57,86 @@ const mockState = async (q) => {
 };
 
 test.beforeAll(async () => {
-  // 오픈 5분 전 = 로비 열림(로비는 오픈 10분 전부터, 가짜 API LOBBY_MINUTES)
+  // 오픈 5분 전 = 로비 열림(로비는 오픈 10분 전부터, 가짜 API LOBBY_MINUTES). 로비가 열린 지 5분이라 버튼 퍼뜨림(0~60초)도 지났다
   await mockState('queueOpenIn=300');
+  // 고를 회차: 로비가 있는 순서(FIFO 아님) 공연의 회차 가운데 홈 피드에 없고 재배치 화면 목록의 공연이 아닌 것, 판매 종료가 가장 늦은 것
+  const home = eventIdsIn(await mockJson('/v1/home'));
+  expect(home.size, '가짜 API 홈 피드에 회차가 없다(빈 결과)').toBeGreaterThan(0);
+  const visited = (id) => REFLOW_PAGES.some((p) => p.path.includes(id));
+  const now = Date.now();
+  let best;
+  for (const id of home) {
+    const d = await mockJson(`/v1/events/${id}`);
+    if (!d || d.queueOrder === 'FIFO' || visited(id)) continue;
+    for (const r of d.rounds ?? []) {
+      if (home.has(r.eventId) || visited(r.eventId) || r.status === 'CANCELLED') continue;
+      const ends = Date.parse(r.saleEndsAt);
+      if (ends > now + 24 * 3_600_000 && (!best || ends > best.ends)) best = { id: r.eventId, ends };
+    }
+  }
+  expect(best, '가짜 API 고정 자료에 판매 종료가 하루 넘게 남은 로비 회차가 없다(고정 자료 일정이 지났다)').toBeTruthy();
+  EVENT = best.id;
+  // 고른 회차가 지금 로비 단계이고 이 기기의 버튼도 열렸는지(가짜 API가 queueOpenIn을 그 회차에 걸었는지) 먼저 본다
+  const d = await mockJson(`/v1/events/${EVENT}`);
+  const t = Date.now();
+  expect(d?.lobbyOpensAt, `${EVENT} 로비 시각이 없다`).toBeTruthy();
+  expect(Date.parse(d.lobbyOpensAt) + LOBBY_SPREAD_MS, `${EVENT} 이 기기의 [로비 입장]이 아직 열리지 않을 수 있다`).toBeLessThan(t);
+  expect(Date.parse(d.openAt), `${EVENT} 이미 오픈했다(로비 단계가 아니다)`).toBeGreaterThan(t);
+  expect(Date.parse(d.saleEndsAt), `${EVENT} 판매 종료가 오픈보다 먼저다`).toBeGreaterThan(Date.parse(d.openAt));
 });
 test.afterAll(async () => {
   await mockState('queueOpenIn=');
 });
 
-/** 그 User-Agent로 공연 상세를 열고 [로비 입장] 링크의 주소를 읽는다 */
-async function lobbyHref(browser, userAgent) {
+/** 그 User-Agent로 공연 상세를 열고 보이는 [로비 입장] 링크(하단 띠·오른쪽 패널)의 주소를 모두 읽는다 */
+async function lobbyHrefs(browser, userAgent) {
   const context = await browser.newContext({ userAgent, locale: 'ko-KR' });
   try {
     const page = await context.newPage();
     await stubFanApi(page);
     const res = await page.goto(`${WEB}/events/${EVENT}`, { waitUntil: 'networkidle' });
     expect(res?.status()).toBeLessThan(400);
-    const link = page.getByRole('link', { name: '로비 입장' });
-    await expect(link, '로비 입장 링크가 없다(빈 결과)').toBeVisible({ timeout: 15_000 });
+    const links = page.getByRole('link', { name: '로비 입장' });
+    await expect(links.first(), `${EVENT} 로비 입장 링크가 없다(빈 결과)`).toBeVisible({ timeout: 15_000 });
     // 인앱 판별은 클라이언트가 붙은 뒤에 바뀐다(서버 첫 그리기는 원래 주소). 바뀔 시간을 준 뒤 읽는다
     await page.waitForTimeout(500);
-    return await link.getAttribute('href');
+    return await links.evaluateAll((els) => els.map((e) => e.getAttribute('href')));
   } finally {
     await context.close();
   }
 }
 
-const queuePath = `/queue/${EVENT}`;
-const guided = `/open-in-browser?next=${encodeURIComponent(queuePath)}`;
+const queuePath = () => `/queue/${EVENT}`;
+const guided = () => `/open-in-browser?next=${encodeURIComponent(queuePath())}`;
+/** 링크 주소의 경로와 쿼리 */
+const pathAndQuery = (href) => {
+  const u = new URL(href, WEB);
+  return `${u.pathname}${u.search}`;
+};
 
 test('SCR-058 기본 폭: 인앱 브라우저(KakaoTalk·Instagram·Facebook·NAVER·LINE·Band·TikTok·X)에서 공연 상세 로비 입장은 안내 주소로 간다', async ({ browser, browserName }) => {
   test.skip(browserName !== 'chromium', 'User-Agent로 가르는 화면 판단이라 엔진과 상관없다');
   for (const [name, ua] of Object.entries(IN_APP)) {
-    const href = await lobbyHref(browser, ua);
-    expect(href, name).not.toBeNull();
-    expect(new URL(href, WEB).pathname + new URL(href, WEB).search, name).toBe(guided);
+    const hrefs = await lobbyHrefs(browser, ua);
+    expect(hrefs.length, `${name} 로비 입장 링크(빈 결과)`).toBeGreaterThan(0);
+    for (const href of hrefs) {
+      expect(href, name).not.toBeNull();
+      expect(pathAndQuery(href), name).toBe(guided());
+    }
   }
 });
 
 test('SCR-058 기본 폭: 일반 브라우저(Chrome·Safari·Samsung Internet·Edge·Whale·Firefox)는 그대로 간다', async ({ browser, browserName }) => {
   test.skip(browserName !== 'chromium', 'User-Agent로 가르는 화면 판단이라 엔진과 상관없다');
   for (const [name, ua] of Object.entries(BROWSERS)) {
-    const href = await lobbyHref(browser, ua);
-    expect(href, name).not.toBeNull();
-    const u = new URL(href, WEB);
-    expect(u.pathname, name).toBe(queuePath);
-    expect(u.pathname.startsWith('/open-in-browser'), name).toBe(false);
+    const hrefs = await lobbyHrefs(browser, ua);
+    expect(hrefs.length, `${name} 로비 입장 링크(빈 결과)`).toBeGreaterThan(0);
+    for (const href of hrefs) {
+      expect(href, name).not.toBeNull();
+      const u = new URL(href, WEB);
+      expect(u.pathname, name).toBe(queuePath());
+      expect(u.pathname.startsWith('/open-in-browser'), name).toBe(false);
+    }
   }
 });
 
@@ -153,7 +206,7 @@ test('SCR-058 기본 폭: 다른 출처·두 꼴 밖 next면 [다른 브라우�
 
 test('SCR-058 기본 폭: 고정 자료에 없는 실제 공연 ID의 대기실 경로는 그 주소 그대로 연다(데모 공연으로 바꾸지 않는다)', async ({ browser, browserName }) => {
   test.skip(browserName !== 'chromium', 'CDP 이동 요청 사건은 Chromium만 된다');
-  for (const path of [queuePath, '/my/tickets/tkt-bat170-not-in-fixture']) {
+  for (const path of [queuePath(), '/my/tickets/tkt-bat170-not-in-fixture']) {
     const { copied, opened } = await guideAddresses(browser, path);
     expect(copied, path).toEqual([`${WEB}${path}`]);
     expect(opened, path).toEqual([`${WEB}${path}`]);

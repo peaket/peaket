@@ -23,6 +23,7 @@ import {
 } from './brief.mjs';
 import { collect, judge, selectScope, batchScope } from './ledger.mjs';
 import { repo, commit, tempDir } from './git-fixture.mjs';
+import { APPS } from '../web-checks/seed-css/apps.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'brief.mjs');
@@ -523,7 +524,8 @@ test('CI 잡: 영역마다 그 영역을 보는 잡을 고르고, 통합 시험�
     { path: 'docs/frontend.md', kind: 'doc', count: 1 },
   ]);
   const jobs = (area) => r.rows.find((x) => x.area === area)?.jobs;
-  assert.deepEqual(jobs('apps/web'), ['web / budgets', 'web / seed-css', 'node / node']);
+  // BAT-171(HOT-381): web / reflow가 소비자 웹 운영 빌드를 돈다(아래 'HOT-381 …' 시험이 워크플로와 맞춰 본다)
+  assert.deepEqual(jobs('apps/web'), ['web / budgets', 'web / seed-css', 'web / reflow', 'node / node']);
   assert.deepEqual(jobs('apps/web/queue-room'), ['web / queue-room', 'web / visual', 'web / budgets', 'node / node']);
   assert.deepEqual(jobs('packages/ds'), ['web / tokens', 'web / visual', 'web / ds', 'node / node']);
   assert.deepEqual(jobs('packages/seatmap'), ['web / seatmap-pkg', 'node / node']);
@@ -541,12 +543,13 @@ test('CI 잡: 영역마다 그 영역을 보는 잡을 고르고, 통합 시험�
   assert.equal(purchase.code, 4);
   assert.match(purchase.extra, /@peaket\/purchase-svc test:integration/);
   assert.equal(r.rows.find((x) => x.area === 'services/v0-monolith').extra, '');
-  assert.ok(r.notes.some((n) => /ci-web\.yml의 잡 아홉/.test(n)));
+  // 잡 수 글('잡 아홉·열' 따위)은 수를 박지 않는다. ci-web.yml의 실제 잡 수와 같은지는 아래 'HOT-381 …' 시험이 본다
+  assert.ok(r.notes.some((n) => /ci-web\.yml의 잡 \S+\(/.test(n)));
   assert.ok(r.notes.some((n) => /node \/ node는 .*전체/.test(n)));
   // 지시서: 6절 표
   const sec = section(brief('BAT-010'), '6.');
   assert.match(sec, /^\| services\/purchase-svc \| 코드 8줄\(파일 4개\) \| node \/ node · contract-check \/ contracts \| 통합 시험 `pnpm --filter @peaket\/purchase-svc test:integration` \|$/m);
-  assert.match(sec, /^\| apps\/web \| 코드 1줄\(파일 1개\) \| web \/ budgets · web \/ seed-css · node \/ node \|/m);
+  assert.match(sec, /^\| apps\/web \| 코드 1줄\(파일 1개\) \| web \/ budgets · web \/ seed-css · web \/ reflow · node \/ node \|/m);
   assert.match(sec, /^\| docs\/api \| 정본 \d+곳 \| contract-check \/ contracts · docs-check \/ docs · node \/ node \|/m);
   assert.match(sec, /^- node \/ node \(ci-node\.yml\): /m);
 });
@@ -561,6 +564,39 @@ test('CI 잡 표의 잡 이름이 실제 워크플로에 있고, 통합 시험 �
   }
   const ints = [...wf('ci-node.yml').matchAll(/pnpm --filter @peaket\/([\w-]+) test:integration/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(ints)].sort(), [...INT_PACKAGES].sort());
+});
+
+// BAT-171 시험(계획 §3 T4): 시험 담당(l2-bat171-test)이 구현(9e92ae9d) 뒤에 썼다(ADR-0281 결정 3). BAT-170 리뷰 R170-7(잡 표에 reflow가 없다),
+// BUILD_ORDER HOT-381('tools/ci/brief.mjs 잡 표에 다시 더하기'), docs/devops.md §3.1 ci-web.yml 행. 수와 앱 목록은 시험에 박지 않고 워크플로에서 읽는다
+test('HOT-381 지시서 잡 표에 web / reflow가 있고 web 범위 잡 수 글이 ci-web.yml의 실제 잡 수와 같다', () => {
+  const web = readFileSync(join(ROOT, '.github/workflows/ci-web.yml'), 'utf8').replaceAll('\r\n', '\n');
+  // ci-web.yml의 잡 이름(jobs: 아래 두 칸 들여 쓴 이름, 적힌 차례)
+  const body = web.slice(web.search(/^jobs:\s*$/m));
+  const names = [...body.matchAll(/^ {2}([A-Za-z][\w-]*):\s*$/gm)].map((m) => m[1]);
+  assert.ok(names.includes('reflow'), 'ci-web.yml에 reflow 잡이 없다(빈 결과)');
+  assert.deepEqual(JOBS['web / reflow']?.file, 'ci-web.yml', '지시서 잡 표(JOBS)에 web / reflow가 없다');
+  // reflow 잡이 운영 빌드하는 앱(node seed-css/build.mjs <앱…>)의 폴더를 고치면 web / reflow를 알리고, 그 밖의 앱은 알리지 않는다
+  const reflowJob = body.slice(body.search(/^ {2}reflow:\s*$/m)).split(/\n(?= {2}[A-Za-z][\w-]*:\s*$)/)[0];
+  const built = /node seed-css\/build\.mjs ([\w ]+)$/m.exec(reflowJob)?.[1].trim().split(/\s+/) ?? [];
+  assert.ok(built.length > 0, 'reflow 잡에서 빌드하는 앱을 읽지 못했다(빈 결과)');
+  const dirs = Object.fromEntries(APPS.map((a) => [a.name, a.dir]));
+  for (const app of APPS) {
+    const area = app.dir;
+    const r = ciJobs([{ path: `${area}/src/x.ts`, kind: 'code', count: 1 }]);
+    const jobs = r.rows.find((x) => x.area === area)?.jobs ?? [];
+    assert.equal(jobs.includes('web / reflow'), built.includes(app.name), `${area}: web / reflow ${built.includes(app.name) ? '없음' : '있음'}(reflow 잡이 빌드하는 앱: ${built.map((n) => dirs[n]).join(', ')})`);
+  }
+  // 재배치 시험 자체(tools/web-checks/reflow)를 고쳐도 web / reflow를 알린다
+  const checks = ciJobs([{ path: 'tools/web-checks/reflow/x.spec.mjs', kind: 'code', count: 1 }]);
+  assert.ok(checks.rows.find((x) => x.area === 'tools/web-checks')?.jobs.includes('web / reflow'), 'tools/web-checks를 고칠 때 web / reflow를 알리지 않는다');
+  // web 범위 알림 글: '잡 <수>(<이름·…>)'의 수와 이름이 ci-web.yml과 같다
+  const KO = ['', '하나', '둘', '셋', '넷', '다섯', '여섯', '일곱', '여덟', '아홉', '열', '열하나', '열둘', '열셋', '열넷', '열다섯', '열여섯', '열일곱', '열여덟', '열아홉', '스물'];
+  const note = checks.notes.find((n) => n.includes('ci-web.yml의 잡'));
+  assert.ok(note, 'web 범위 알림 글이 없다(빈 결과)');
+  const m = /ci-web\.yml의 잡 (\S+?)\(([^)]*)\)/.exec(note);
+  assert.ok(m, `잡 수 글의 꼴이 다르다: ${note}`);
+  assert.equal(m[1], KO[names.length], `잡 수 글 '${m[1]}'이 ci-web.yml의 잡 ${names.length}개와 다르다`);
+  assert.deepEqual(m[2].split('·'), names, '잡 수 글의 이름 목록이 ci-web.yml의 잡과 다르다');
 });
 
 // ---------- 자주 놓친 결함 ----------
