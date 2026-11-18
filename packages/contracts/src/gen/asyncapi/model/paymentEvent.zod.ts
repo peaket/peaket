@@ -7,8 +7,9 @@
 import * as zod from 'zod';
 
 export const paymentEventRefMissingDefault = false;
+export const paymentEventOrderKindDefault = `TICKET`;
 export const PaymentEvent = zod.object({
-  "eventId": zod.string(),
+  "eventId": zod.string().optional().describe('회차 ID. 굿즈·티켓 연동 부가 상품(orderKind MERCH)은 비운다(null). 2026-11-18 필수에서 풂(소비자 먼저, 추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 4)'),
   "orderId": zod.string(),
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).describe('결제 접수에서 고정된 결제사(ADR-0044). 결제사 결제 참조(토스 paymentKey, 포트원 paymentId)는 싣지 않고 주문 ID로 잇는다(ADR-0053)'),
   "type": zod.enum(['AWAITING_DEPOSIT', 'APPROVED', 'DEPOSIT_REVERSED', 'FAILED', 'UNKNOWN', 'RESOLVED', 'PARTIAL_CANCELED', 'CANCELED']).describe('AWAITING_DEPOSIT은 가상계좌 발급, APPROVED는 가상계좌면 입금 확인, DEPOSIT_REVERSED는 입금 오류로 결제사가 입금을 되돌림(조회로 확인, payment §6, 추천 적용 2026-10-14, ADR-0062). RESOLVED는 UNKNOWN 해소 기록이고 해소 결과는 result에 싣는다. 결과가 승인이면 APPROVED, 가상계좌 발급이면 AWAITING_DEPOSIT, 미승인이면 FAILED 사건을 따로 낸다(추천 적용 2026-10-20, ADR-0073)'),
@@ -24,7 +25,8 @@ export const PaymentEvent = zod.object({
   "occurredAt": zod.iso.datetime({"offset":true}),
   "eventSeq": zod.int().describe('결제 하나 안에서 늘어나기만 하는 사건 순번(payment_event 행의 순번). 결과 당기기로 받은 결과와 같은 사건인지 가린다(ADR-0140)'),
   "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값'),
-  "depositDueAt": zod.iso.datetime({"offset":true}).optional().describe('입금 대기 사건(AWAITING_DEPOSIT)과 입금 오류 되돌림 사건(DEPOSIT_REVERSED, 새 입금 기한)에만 싣는 입금 기한. 결제사가 답에 주지 않은 입금 대기는 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151·HOT-152)')
+  "depositDueAt": zod.iso.datetime({"offset":true}).optional().describe('입금 대기 사건(AWAITING_DEPOSIT)과 입금 오류 되돌림 사건(DEPOSIT_REVERSED, 새 입금 기한)에만 싣는 입금 기한. 결제사가 답에 주지 않은 입금 대기는 없다. 계좌번호는 사건에 싣지 않는다(payment §6, 추천 적용 2026-11-09, BUILD_ORDER HOT-151·HOT-152)'),
+  "orderKind": zod.enum(['TICKET', 'MERCH']).default(paymentEventOrderKindDefault).describe('주문 종류. TICKET은 공연 예매, MERCH는 굿즈·티켓 연동 부가 상품(core-svc shop)이다. 이 칸 전에 낸 사건은 TICKET으로 읽는다. Kafka 키는 TICKET이면 eventId, MERCH면 orderId다. purchase-svc 소비자는 TICKET이 아닌 사건을 반영하지 않고 건너뛴다(payment_result_skipped_total{reason}, 추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 4)')
 })
 
 export type PaymentEvent = zod.input<typeof PaymentEvent>;
