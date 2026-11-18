@@ -1529,3 +1529,39 @@ test('V-T43 ① HOT-405 RV-04 gw limits 대조: 일꾼 3을 --pod-cpus 3으로 �
   assert.equal((await limitsOf(rv04Three(), { podCpus: '3' })).exitCode, 0, '일꾼 3 · --pod-cpus 3');
   assert.equal((await limitsOf([...rv04Good(), sweepJson([[28, 'invalid']])])).exitCode, 0, '무효 단계의 일꾼 32');
 });
+
+// ===================== BAT-058 검증 반영 V16·V29(HOT-405, 계획 '검증'의 놓친 것) =====================
+// V16 정본: docs/infra.md §4.1 '측정(V-T43)' 끝 ①(기대 값과 다르거나 못 읽으면 부하를 넣지 않고 무효). 기대 값이 없어도(--workers 없음, EnvoyProxy에 concurrency 없음)
+//   못 읽은 파드가 있으면 무효다(기대 값 없음은 '읽은 값을 적기만 함'이지 '못 읽어도 됨'이 아니다).
+// V29 정본: ADR-0287 결정 7 끝(올리기 전 k ≥ 5를 정수로 견줌). 도착률 1,018·r_min 28·L̄ 5.501ms: 28,000,000 < 5 × 1,018 × 5,501 = 28,000,090이라
+//   넘지 않는다(올리기 전 4.999984). 소수 넷째 자리로 반올림하면 5.0000이 되어 넘은 쪽으로 잘못 간다.
+
+test('V-T43 ①② HOT-405 WU4 V16 sweep(기대 값 없음: --workers 없고 EnvoyProxy에 concurrency 없음): 한 파드의 일꾼 수를 못 읽으면 부하 없이 무효', async () => {
+  const rec = [...SWEEP_ARGS, '--record', '--run-id-prefix', '2026-11-19-bat058v16'];
+  const f = fakeDeps({ pods: PODS2, envoyProxy: { spec: {} }, workers: (pod) => (pod === 'envoy-gw-queue-b' ? null : 32) });
+  assert.equal((await runGw(parseGwArgs(rec), f.deps)).exitCode, 0, '끝 코드');
+  assert.equal(f.loads.length, 0, '기대 값이 없는데 일꾼 수를 못 읽은 파드가 있어도 발생기를 띄웠다');
+  const st = f.saved['sweep.json']?.steps?.[0];
+  assert.ok(st, `결과 파일에 단계가 없다 ${JSON.stringify(f.saved)}`);
+  assert.deepEqual([st.verdict, st.valid, st.sent], ['invalid', false, 0]);
+  assert.match(String(st.invalid_reason), /^일꾼 수를 못 읽음: envoy-gw-queue-b/, `까닭 ${st.invalid_reason}`);
+  assert.deepEqual([st.workers?.expected, st.workers?.source], [null, null], '기대 값 없음');
+  assert.equal(st.workers?.pods?.['envoy-gw-queue-a'], 32);
+  assert.equal(st.workers?.pods?.['envoy-gw-queue-b'], null, '못 읽은 파드의 값은 null');
+  assertNoPassRecord(f, '기대 값 없음·못 읽음');
+});
+
+test('V-T43 ① HOT-405 RV-03 V29 gw limits: 올리기 전 k 4.999984(도착률 1,018·r_min 28·L̄ 5.501ms)는 5 아래라 k 5.0으로 정하고 끝 코드 0(정수로 견줌)', async () => {
+  const rate = 1018;
+  const r = await limitsOf([sweepJson([[24, 'fail', 6]], { rate }), sweepJson(rep(28, 'pass', 3, 5.501), { rate })]);
+  assert.equal(r.exitCode, 0, `끝 코드 ${r.exitCode} ${JSON.stringify({ kRaw: r.out.kRaw, reasons: r.out.reasons })}`);
+  assert.equal(r.out.determined, true);
+  assert.equal(r.out.rollback ?? false, false, '되돌릴 조건으로 갔다');
+  assert.deepEqual([r.out.rMin, r.out.k, r.out.inputs?.rate], [28, 5, rate]);
+  // k10 = ⌈280,000,000 ÷ 5,600,018⌉ = 50: gw-queue 3,120·390, 나머지 7,800·975, r_pc ⌈50 × 1,018 × 5,501 ÷ 10,000,000⌉ = ⌈28.00009⌉ = 29
+  assert.deepEqual(r.out.limits, {
+    'gw-queue': { maxConnections: 3120, maxParallelRequests: 3120, maxPendingRequests: 390 },
+    others: { maxConnections: 7800, maxParallelRequests: 7800, maxPendingRequests: 975 },
+  });
+  assert.equal(r.out.rPc, 29);
+});
