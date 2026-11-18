@@ -194,6 +194,8 @@ workloads:
           peaket.purchase.v1.EventRefundService: [ops-svc]
           peaket.purchase.v1.FraudCancellationService: [ops-svc]
           peaket.purchase.v1.PriorityPurchaseService: [ops-svc]
+          # 탈퇴 참여자(ADR-0284 결정 1, docs/api/proto/README.md §3: identity-svc만 부른다)
+          peaket.purchase.v1.WithdrawalParticipantService: [identity-svc]
       control: { port: 50061, callers: [ops-svc, ops-breakglass] }
       metrics: { port: 9464, callers: [prometheus] }
 

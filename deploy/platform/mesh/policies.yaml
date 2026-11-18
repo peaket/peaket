@@ -881,6 +881,14 @@ spec:
         - operation:
             paths:
               - /peaket.purchase.v1.PriorityPurchaseService/*
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/identity-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.purchase.v1.WithdrawalParticipantService/*
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
