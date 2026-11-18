@@ -10,7 +10,8 @@ import { useDetailPersonal } from './DetailPersonal';
 
 /**
  * ⑬ 섹션 바로가기(CMP-030 anchor). 스크롤을 따라 위에 붙고, 보이는 섹션을 aria-current로 표시한다.
- * 휴대폰·태블릿은 작은 탭(.tabs-sm)과 가로 스크롤, 데스크톱은 보통 탭.
+ * 휴대폰·태블릿은 작은 탭(.tabs-sm)과 가로 스크롤, 데스크톱은 보통 탭. 가로로 밀 때 탭이 띠 끝에 딱 붙지 않게 안쪽 여백만큼 스크롤 여백을 둔다
+ * (WebKit은 정수 스크롤이라 끝 탭이 320 폭 밖으로 0.1px 넘었다, FE-T31 닿기, BAT-171).
  */
 export function SectionTabs({ items, initial, stuck = false }: { items: readonly { id: string; label: string }[]; initial: string; stuck?: boolean }) {
   const [active, setActive] = useState(initial);
@@ -32,7 +33,7 @@ export function SectionTabs({ items, initial, stuck = false }: { items: readonly
   return (
     <nav
       ref={navRef}
-      className="tabs tabs-sm tabs-scroll sticky top-0 z-[5] px-2 lg:px-0 lg:[&_.tab]:min-h-11 lg:[&_.tab]:px-3 lg:[&_.tab]:text-[15px] lg:[&_.tab]:leading-5"
+      className="tabs tabs-sm tabs-scroll sticky top-0 z-[5] px-2 scroll-px-2 lg:px-0 lg:scroll-px-0 lg:[&_.tab]:min-h-11 lg:[&_.tab]:px-3 lg:[&_.tab]:text-[15px] lg:[&_.tab]:leading-5"
       aria-label="섹션 바로가기"
       style={{ background: 'var(--surface)', boxShadow: stuck ? 'var(--shadow-md)' : undefined }}
     >
