@@ -1,6 +1,6 @@
 // 홀드 다시 읽기·해제·연장과 주문 표시·세션 끝 해제(docs/features/seat-hold.md §5 '해제·연장·다시 읽기와 결제 정지 멈춤의 첫 구현', BUILD_ORDER HOT-070, ADR-0254).
 import type { Clock, Deadline, PlatformLogger } from '@peaket/platform';
-import { AdmissionTokenRejected, type AdmissionKeys, verifyAdmissionToken } from '../domain/admission-token.js';
+import { admissionKeysFor, AdmissionKeysUnavailable, AdmissionTokenRejected, type AdmissionKeys, type AdmissionKeySource, verifyAdmissionToken } from '../domain/admission-token.js';
 import { type HoldLifecycle, type HoldReleaseReason, type HoldTarget, holdSeatsView } from '../domain/hold-lifecycle.js';
 import { heldSeatIdsOf, KEEP_AFTER_SALE_END_MS, KEY_PART, SEAT_CALL_CAP_MS, SEAT_CALL_MIN_REMAINING_MS, SeatStoreUnavailable, type SeatRef } from '../domain/hold.js';
 import type { EventSeatConfig, PurchaseSessionStore, SeatCallOptions, SeatMap, SeatSignals, SessionHoldLists } from '../domain/ports.js';
@@ -24,7 +24,8 @@ export interface ManageHoldsDeps {
   lifecycle: HoldLifecycle;
   seatMap: SeatMap;
   sessions: Pick<PurchaseSessionStore, 'read'> & SessionHoldLists;
-  keys: AdmissionKeys;
+  /** 입장 토큰 공개키 묶음: 정적 묶음이나 주기 읽기(AdmissionJwksLoader) */
+  keys: AdmissionKeys | AdmissionKeySource;
   issuer: string;
   clock: Clock;
   /** 푼 홀드를 주문 만료 판정에 알리는 고리(BUILD_ORDER PRF-172, onHoldsExpired와 같다). 던져도 해제는 그대로다 */
@@ -81,12 +82,20 @@ export class ManageHolds {
 
   /**
    * GET /v1/holds/{holdId}. 입장 토큰으로 구매 세션을 찾는다(서명 없음, 일련번호·무활동 시간을 바꾸지 않는다).
-   * @throws HoldError ADMISSION_INVALID·SESSION_NOT_FOUND·HOLD_NOT_FOUND·NOT_READY·STORE_UNAVAILABLE·DEADLINE_EXCEEDED
+   * 공개키 묶음을 한 번도 받지 못했으면 ADMISSION_KEYS_UNAVAILABLE(503 dependency-unavailable)이다(seat-hold §2 '입장 토큰 공개키 묶음 주기 읽기').
+   * @throws HoldError ADMISSION_INVALID·ADMISSION_KEYS_UNAVAILABLE·SESSION_NOT_FOUND·HOLD_NOT_FOUND·NOT_READY·STORE_UNAVAILABLE·DEADLINE_EXCEEDED
    */
   async read(c: { token: unknown; accountId: string; holdId: string; deadline?: Deadline }): Promise<HoldBody> {
+    let keys: AdmissionKeys;
+    try {
+      keys = await admissionKeysFor(this.d.keys, c.token);
+    } catch (err) {
+      if (err instanceof AdmissionKeysUnavailable) throw new HoldError('ADMISSION_KEYS_UNAVAILABLE', '입장 토큰 공개키 묶음을 아직 받지 못했다');
+      throw err;
+    }
     let jti: string;
     try {
-      const claims = verifyAdmissionToken(c.token, { keys: this.d.keys, issuer: this.d.issuer, nowMs: this.d.clock.now() });
+      const claims = verifyAdmissionToken(c.token, { keys, issuer: this.d.issuer, nowMs: this.d.clock.now() });
       if (claims.accountId !== c.accountId) throw new HoldError('ADMISSION_INVALID', '입장 토큰의 계정이 요청과 다르다');
       jti = claims.jti;
     } catch (err) {

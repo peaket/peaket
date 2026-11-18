@@ -99,6 +99,23 @@ export interface AdmissionTokens {
   }): { token: string; expiresAtMs: number };
   /** 입장 확정 응답의 서버 ECDH 공개키(설정이 없으면 undefined, BOT-100) */
   serverEcdhPublicKey(): Record<string, string> | undefined;
+  /**
+   * 입장 토큰 공개키 묶음(GET /internal/jwks/admission.json, docs/features/queue-admission.md §6 '입장 토큰 공개키 묶음과 게이트웨이 확인', ADR-0288 결정 2):
+   * 지금 키, 다음 키, 그리고 nowMs ≤ 옛 키 끝 시각일 때만 옛 키(peaket_until). 원소에 개인 성분은 없다
+   */
+  jwks(nowMs: number): { keys: AdmissionJwk[] };
+}
+
+/** 입장 토큰 공개키 묶음의 원소(공개 부분만). 옛 키 원소에만 peaket_until(끝 시각, 초 NumericDate)이 있다 */
+export interface AdmissionJwk {
+  kty: 'EC';
+  crv: 'P-256';
+  x: string;
+  y: string;
+  kid: string;
+  alg: 'ES256';
+  use: 'sig';
+  peaket_until?: number;
 }
 
 export const ADMISSION_SIGNALS = Symbol('queue.AdmissionSignals');

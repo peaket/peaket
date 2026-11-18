@@ -15,6 +15,7 @@ import { PurchaseSessionSlots } from './application/purchase-session-slots.js';
 import { SetPriorityGrant } from './application/set-priority-grant.js';
 import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, BOOKING_RESTRICTIONS, PRIORITY_GRANTS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore, noSignals } from './domain/ports.js';
 import { AdmissionController } from './inbound/admission.controller.js';
+import { AdmissionJwksController } from './inbound/admission-jwks.controller.js';
 import { PriorityGrantInternalController } from './inbound/priority-grant-internal.controller.js';
 
 export type AdmissionModuleOptions = (
@@ -62,7 +63,7 @@ export class AdmissionModule {
           ];
     return {
       module: AdmissionModule,
-      controllers: [AdmissionController, PriorityGrantInternalController],
+      controllers: [AdmissionController, AdmissionJwksController, PriorityGrantInternalController],
       providers: [
         ConfirmAdmission,
         PurchaseSessionSlots,

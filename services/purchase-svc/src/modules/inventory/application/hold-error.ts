@@ -2,6 +2,7 @@
 // 쓰임새(HoldSeats)는 HoldError를 던지고, 받는 층이 throwHoldProblem으로 바꿔 던진다.
 import { ForbiddenException } from '@nestjs/common';
 import { COOKIE_CHALLENGE, ProblemError, RequestValidationError } from '@peaket/platform';
+import { ADMISSION_KEYS_RETRY_AFTER_SEC, ADMISSION_KEYS_UNAVAILABLE_PROBLEM } from '../domain/admission-token.js';
 import { SEAT_STORE_RETRY_AFTER_SEC, SEAT_STORE_UNAVAILABLE_PROBLEM, type SeatStoreUnavailable, type SeatStoreUnavailableReason } from '../domain/hold.js';
 
 /** 응답 머리를 다는 곳(FastifyReply가 이 모양이다. 유스케이스 층은 웹 서버 형을 가져오지 않는다) */
@@ -50,6 +51,8 @@ export type HoldErrorCode =
   | 'SALE_POLICY_DENIED'
   /** GET 홀드의 입장 토큰이 맞지 않음(BUILD_ORDER HOT-070) */
   | 'ADMISSION_INVALID'
+  /** 입장 토큰 공개키 묶음을 한 번도 받지 못해 서명을 확인할 수 없다(503 dependency-unavailable, docs/features/seat-hold.md §2 '입장 토큰 공개키 묶음 주기 읽기', BAT-057) */
+  | 'ADMISSION_KEYS_UNAVAILABLE'
   /** 그 구매 세션의 홀드가 아니거나 끝났다(BOLA 방지로 남의 것·없는 것과 같은 답) */
   | 'HOLD_NOT_FOUND'
   /** 두 번째 연장 */
@@ -131,6 +134,8 @@ export const HOLD_PROBLEMS: Readonly<Record<HoldErrorCode, HoldProblemSpec>> = {
   QUOTA_EXCEEDED: { status: 422, type: 'purchase-limit-exceeded', title: '1인 구매 한도를 넘었습니다' },
   SALE_POLICY_DENIED: { status: 403, type: 'sale-policy-denied', title: '판매 정책에 따라 지금은 예매할 수 없습니다' },
   ADMISSION_INVALID: { status: 401, type: 'admission-token-invalid', title: '입장 확인이 끝났습니다' },
+  // 입장 토큰 공개키 묶음을 한 번도 받지 못했다(queue-svc에 닿지 못함). openapi의 이미 있는 이름이고 Retry-After 1초 [가정](seat-hold §2, ADR-0288 결정 7)
+  ADMISSION_KEYS_UNAVAILABLE: { status: 503, ...ADMISSION_KEYS_UNAVAILABLE_PROBLEM, retryAfterSeconds: ADMISSION_KEYS_RETRY_AFTER_SEC },
   HOLD_NOT_FOUND: { status: 404, type: 'hold-not-found', title: '홀드를 찾을 수 없습니다', normalBranch: true },
   HOLD_ALREADY_EXTENDED: { status: 409, type: 'hold-already-extended', title: '이미 연장한 홀드입니다', normalBranch: true },
   HOLD_IN_PAYMENT: { status: 409, type: 'hold-in-payment', title: '결제가 진행 중인 홀드입니다', normalBranch: true },
