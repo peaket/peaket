@@ -54,9 +54,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/* 진단 수집(RB-31, ADR-0070 결정 1, docs/devops.md D-T18 ①)의 환경 변수. 서비스·릴레이 컨테이너가 받는다.
     NODE_OPTIONS: SIGUSR1 인스펙터 끄기, 치명 오류 보고서를 /diag에(환경 변수·네트워크 칸 없음), V8 힙 상한은 메모리 한도의 heapPercent(기본 75%) [가정].
     값으로 받은 NODE_OPTIONS(env·서비스/릴레이 env)는 안전 옵션 앞에 둔다(같은 옵션은 뒤의 것이 이긴다). 안전 옵션을 끄는 값(--no-…·--inspect…)은 렌더를 멈춘다(ADR-0303 결정 3, 리뷰 SEC-02).
+    Node는 옵션 이름의 '_'를 '-'로 읽으므로 밑줄 꼴(--inspect_brk·--no_report_exclude_env 등)도 같이 막는다(보안 다시 보기 SR-01).
     local·ci 밖(staging·prod·demo)은 증거 버킷 diagnose.bucket이 있어야 하고, 흉내 S3 주소 diagnose.s3Endpoint는 local·ci에서만 받는다(리뷰 SEC-06·SEC-01).
+    local·ci 밖에서는 SDK가 읽는 주소 바꾸기 값(AWS_ENDPOINT_URL·AWS_ENDPOINT_URL_<서비스>)과 공유 설정 파일(AWS_CONFIG_FILE)을 env·컨테이너 env에 두지 못한다(SR-02).
     주석은 Downward API 파일로, 메모리 한도는 resourceFieldRef로 받는다.
-    인자: dict "root" 차트 "resources" 컨테이너 자원 "extra" 덧붙일 NODE_OPTIONS "where" 값 이름 */}}
+    인자: dict "root" 차트 "resources" 컨테이너 자원 "extra" 덧붙일 NODE_OPTIONS "containerEnv" 컨테이너 env "where" 값 이름 */}}
 {{- define "peaket.diagnoseEnv" -}}
 {{- $root := .root -}}
 {{- $limitMi := include "peaket.memoryMi" (dict "limit" (dig "limits" "memory" "" .resources) "where" .where) | atoi -}}
@@ -68,12 +70,19 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if not $testEnv -}}
 {{- $_ := required (printf "diagnose.bucket(진단 증거 버킷)이 필요하다(PEAKET_ENV %s, local·ci 밖은 버킷이 없으면 서비스가 시작하지 않는다, RB-31)" $env) $root.Values.diagnose.bucket -}}
 {{- if $root.Values.diagnose.s3Endpoint -}}{{- fail (printf "diagnose.s3Endpoint(흉내 S3 주소)는 PEAKET_ENV local·ci에서만 쓴다(%s, 증거는 전용 버킷으로만 보낸다)" $env) -}}{{- end -}}
+{{- range $source, $vars := dict "env" ($root.Values.env | default dict) (printf "%s.env" $.where) ($.containerEnv | default dict) -}}
+{{- range $k, $v := $vars -}}
+{{- if or (hasPrefix "AWS_ENDPOINT_URL" $k) (eq $k "AWS_CONFIG_FILE") -}}
+{{- fail (printf "%s.%s는 PEAKET_ENV local·ci에서만 쓴다(%s, AWS 요청 주소를 바꾼다. 증거·키 요청은 정한 주소로만 보낸다)" $source $k $env) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- $opts := list -}}
 {{- with $root.Values.env.NODE_OPTIONS }}{{ $opts = append $opts (toString .) }}{{ end -}}
 {{- with .extra }}{{ $opts = append $opts (toString .) }}{{ end -}}
 {{- range $opts -}}
-{{- if regexMatch "(^|\\s)--(no-disable-sigusr1|no-report-exclude-env|no-report-exclude-network|no-report-on-fatalerror|inspect)(=|-|\\s|$)" . -}}
+{{- if regexMatch "(^|\\s)--(no-disable-sigusr1|no-report-exclude-env|no-report-exclude-network|no-report-on-fatalerror|inspect)(=|-|\\s|$)" (replace "_" "-" .) -}}
 {{- fail (printf "%s.env·env의 NODE_OPTIONS에 진단 안전 옵션을 끄는 값이 있다(%s, --no-disable-sigusr1·--no-report-*·--inspect…는 받지 않는다)" $.where .) -}}
 {{- end -}}
 {{- end -}}

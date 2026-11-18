@@ -176,7 +176,7 @@ flowchart LR
 
 | 지표 | 종류 | 라벨 | 뜻 |
 | --- | --- | --- | --- |
-| `diagnose_collections_total` | 카운터 | `service`·`result` | 진단 수집 결과 수. `result`는 고정 목록이다: `report`(보고서 올림), `heap`(스냅샷 올림), `heap_skipped_low_memory`(메모리 여유가 힙의 두 배 이하라 건너뜀), `heap_skipped_no_limit`(메모리 한도 값이 없어 건너뜀), `heap_failed`, `report_failed`, `upload_failed`, `leftover_uploaded`(시작할 때 남은 보고서를 올림), `interrupted`(지난 수집이 `started`인 채 끊겨 다시 하지 않음), `invalid_request`(형식이 틀린 주석 값, 값마다 한 번). 뒤의 둘은 리뷰 SEC-03·SEC-05(2026-11-19, ADR-0303 결정 3) |
+| `diagnose_collections_total` | 카운터 | `service`·`result` | 진단 수집 결과 수. `result`는 고정 목록이다: `report`(보고서 올림), `heap`(스냅샷 올림), `heap_skipped_low_memory`(메모리 여유가 힙의 두 배 이하라 건너뜀), `heap_skipped_no_limit`(메모리 한도 값이 없어 건너뜀), `heap_failed`, `report_failed`, `upload_failed`, `leftover_uploaded`(시작할 때 남은 보고서를 올림), `leftover_unreadable`(시작할 때 남은 `.json` 보고서를 JSON으로 읽지 못해 환경 변수를 지웠는지 알 수 없어 올리지 않음), `interrupted`(지난 수집이 `started`인 채 끊겨 다시 하지 않음), `invalid_request`(형식이 틀린 주석 값, 값마다 한 번). 뒤의 셋은 리뷰 SEC-02·SEC-03·SEC-05(2026-11-19, ADR-0303 결정 3) |
 
 **핫패스 구간 진단 지표(추천 적용 2026-11-11, BAT-027·HOT-462, R-472)**: K2 2,000/s의 p99 꼬리와 홀드 409 경로, 결제 확정·`payment_status` 롱 폴링, 대기열 진입의 시간을 코드 안 구간별로 가르기 위한 진단 지표다. 동작을 바꾸지 않고, 지표가 던져도 요청을 막지 않는다. 계정·주문·좌석·회차 ID는 이름표에 싣지 않는다(§8).
 

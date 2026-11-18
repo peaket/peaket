@@ -96,7 +96,7 @@ spec:
               value: {{ $v | quote }}
             {{- end }}
             {{- end }}
-            {{- include "peaket.diagnoseEnv" (dict "root" $ "resources" .Values.outboxRelay.resources "extra" .Values.outboxRelay.env.NODE_OPTIONS "where" "outboxRelay") | nindent 12 }}
+            {{- include "peaket.diagnoseEnv" (dict "root" $ "resources" .Values.outboxRelay.resources "extra" .Values.outboxRelay.env.NODE_OPTIONS "containerEnv" .Values.outboxRelay.env "where" "outboxRelay") | nindent 12 }}
           {{- if or .Values.secretEnvFrom .Values.outboxRelay.secretEnvFrom }}
           envFrom:
             {{- if .Values.secretEnvFrom }}
