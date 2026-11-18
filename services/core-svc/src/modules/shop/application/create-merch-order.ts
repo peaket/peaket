@@ -174,7 +174,7 @@ export class CreateMerchOrder {
     // 택배 주문은 결제대금예치 상점이다(BAT-605가 결제를 열면 아래 503을 뺀다)
     const pgStore = c.fulfillment === 'DELIVERY' ? 'ESCROW' : 'STANDARD';
     // 택배(결제대금예치 상점) 주문의 결제는 BAT-605(LCH-030)가 연다. 그때까지 본문·업무 규칙 검사(400·422)를 마친 뒤 재고 예약·행 쓰기 전에 503이다
-    // (ADR-0299 결정 3, ADR-0300 결정 4, ADR-0301 결정 4, P-T56 ⑩)
+    // (ADR-0299 결정 3, ADR-0300 결정 4, ADR-0301 결정 4, P-T57 ⑩)
     if (c.fulfillment === 'DELIVERY') throw pgUnavailable();
     const { amount, shippingFee } = orderAmount(c.fulfillment, c.lines, c.products);
     const orderId = uuidv7(this.d.clock);
