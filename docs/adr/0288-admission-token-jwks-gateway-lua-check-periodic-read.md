@@ -1,6 +1,6 @@
 # ADR-0288: 입장 토큰 공개키 묶음은 queue-svc가 내고, gw-fan은 그 사본으로 공통 Lua에서 확인하며, purchase-svc는 주기로 읽는다(2026-11-19)
 
-- **상태**: 채택(추천 적용, 2026-11-19, BUILD_ORDER BAT-057 계획 `bat057-plan-c33b13d2`). HOT-400 줄의 PRF-110·PRF-137이 넘긴 것(입장 토큰 공개키 묶음 배포, 게이트웨이의 `typ`·`iss`·`aud`·`exp`·주소의 회차 대조, 옛 키 검증 허용, purchase-svc의 주기 읽기)을 구현하기 전에 정한 세부다(docs/architecture.md §8.6 4의 2). 결정 4의 Lua 서명 확인은 kind에서 되는지 보기 전이다(아래 '확인').
+- **상태**: 채택(추천 적용, 2026-11-19, BUILD_ORDER BAT-057 계획 `bat057-plan-c33b13d2`). HOT-400 줄의 PRF-110·PRF-137이 넘긴 것(입장 토큰 공개키 묶음 배포, 게이트웨이의 `typ`·`iss`·`aud`·`exp`·주소의 회차 대조, 옛 키 검증 허용, purchase-svc의 주기 읽기)을 구현하기 전에 정한 세부다(docs/architecture.md §8.6 4의 2). 결정 4의 Lua 서명 확인은 2026-11-19 구현 담당이 같은 프록시 이미지와 kind에서 됨을 봤다(아래 '확인').
 - **관련**: [ADR-0008](0008-client-specific-thin-gateways.md)(클라이언트별 얇은 게이트웨이), [ADR-0050](0050-crypto-corrections-and-key-management.md) 결정 9(키 셋 나누기), [ADR-0183](0183-admission-confirm-first-implementation.md)(입장 확정과 입장 토큰), [docs/features/queue-admission.md](../features/queue-admission.md) §6 '입장 토큰 공개키 묶음과 게이트웨이 확인', [docs/features/seat-hold.md](../features/seat-hold.md) §2 '입장 토큰 공개키 묶음 주기 읽기', [docs/infra.md](../infra.md) §4.1 '입장 토큰 확인', [docs/security/secrets-and-keys.md](../security/secrets-and-keys.md) '대기열 입장 토큰 서명 키' 행, [docs/security/asvs/queue-admission.md](../security/asvs/queue-admission.md) 9.1.3·9.2.1~9.2.3
 - **관련 ID**: Q-T69, S-T28, HOT-400, PRF-110, PRF-137
 
@@ -45,3 +45,4 @@
 ## 확인
 
 - 2026-11-19: Envoy Gateway v1.10.0 `api/v1alpha1/jwt_types.go`의 `JWT.Providers` 설명('any of the providers')과 모두를 요구하는 칸이 없음을 봤다. Lua `importPublicKey`·`verifySignature`의 P-256·DER 지원은 구현 담당이 kind에서 본다(docs/infra.md §4.1 '입장 토큰 확인'의 [확인 필요]).
+- 2026-11-19(구현 담당 `bat057-impl-5f438f5c`): 같은 프록시 이미지(Envoy 1.40.2) 단독 실행과 kind(Envoy Gateway v1.10.0)에서 Lua `importPublicKey`가 P-256 SubjectPublicKeyInfo DER을, `verifySignature`가 DER ECDSA 서명을 받는 것을 봤다. 결정 4는 그대로 간다. v1.40에서는 `importPublicKey`가 돌려준 객체의 `get()` 값을 `verifySignature`에 넘기고, 공개키는 그 요청 안에서만 쓸 수 있다(요청마다 하나만 가져온다, docs/infra.md §4.1 '입장 토큰 확인'의 'Lua 서명 확인').
