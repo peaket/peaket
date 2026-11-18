@@ -722,3 +722,77 @@ describe('S-T14 ③ 1초 간격 연결의 첫 프레임·알림·차례(ADR-0298
     expect(intervals(y)).toEqual([D.intervalMs, SPEC.intervalMs]);
   });
 });
+
+describe('S-T14 ②③ 버퍼 1초 연결의 차례 보내기는 박자 끝, 20ms 몫(SEC-06, ADR-0298 결정 5)', () => {
+  test('S-T14 ② RF-T13 먼저 연 버퍼 1초 연결 a의 차례 send가 70ms씩 걸려도 a의 묶음은 같은 박자의 b 묶음 뒤에 나가 b의 표본을 늦추지 않으므로 20창이 지나도 b는 BatchInterval 1000을 받지 않는다 [ASVS v5.0.0-2.4.1]', async () => {
+    const h = harness({ monotonic: START });
+    const a = h.open(); // 연결 번호 0(b보다 먼저)
+    const b = h.open();
+    for (const c of [a, b]) h.hub.receive(c, subscribeBytes([1]), true);
+    await settle();
+    const order: Array<['a' | 'b', number]> = [];
+    a.bufferedAmount = 300 * 1024;
+    a.onSend = (f) => {
+      if (decodeFrame(f).type !== 'delta') return;
+      order.push(['a', h.clock.monotonicMs()]);
+      h.clock.advance(70);
+    };
+    b.onSend = (f) => {
+      if (decodeFrame(f).type === 'delta') order.push(['b', h.clock.monotonicMs()]);
+    };
+    for (let w = 0; w < 20; w++) runWindow(h, w, { driver: b, section: 1, overAt: [] });
+    tickAt(h, 20 * W);
+    expect(intervals(a)).toEqual([D.intervalMs]);
+    expect(intervals(b)).toEqual([]);
+    expect(h.degradedChanges).toEqual([]);
+    expect(gauge(h, 'realtime_gw_degraded')).toBeUndefined();
+    // a의 차례 박자(OFF + 100 + 1,000j)마다 a의 send는 같은 박자의 b의 send 뒤다
+    const aTurns = order.filter(([who]) => who === 'a');
+    expect(aTurns.length).toBeGreaterThan(150);
+    for (let i = 0; i < order.length; i++) {
+      if (order[i]![0] !== 'a') continue;
+      const prev = order[i - 1];
+      expect(prev?.[0]).toBe('b');
+      expect(order[i]![1] - prev![1]).toBeLessThan(SPEC.intervalMs);
+    }
+  });
+
+  test('S-T14 ③ RF-T14 한 박자에 차례가 된 버퍼 1초 연결 셋의 send가 15ms씩 걸리면 뒤 고리 몫(20ms) 안인 0ms·15ms에 둘을 보내고 30ms에 멈추며, 남은 하나는 다음 박자 뒤 고리에서 보낸다. 다음 차례 격자는 그대로 1,000ms 뒤다', async () => {
+    const h = harness({ monotonic: START });
+    // 연결 번호 0·10·20은 같은 차례 칸(mod 10 = 0)이다
+    const conns = Array.from({ length: 21 }, () => h.open());
+    const slow = [conns[0]!, conns[10]!, conns[20]!];
+    for (const c of slow) {
+      h.hub.receive(c, subscribeBytes([1]), true);
+      c.bufferedAmount = 300 * 1024;
+      c.onSend = (f) => {
+        if (decodeFrame(f).type === 'delta') h.clock.advance(15);
+      };
+    }
+    await settle();
+    tickAt(h, OFF); // 셋 다 버퍼로 1초(T = OFF), 첫 차례 T + 100
+    for (const c of slow) expect(intervals(c)).toEqual([D.intervalMs]);
+    const count = () => slow.map(deltaCount);
+    const T = OFF;
+    moveTo(h, T + 50);
+    publish(h, 1);
+    tickAt(h, T + 99);
+    expect(count()).toEqual([0, 0, 0]);
+    tickAt(h, T + 100);
+    const first = count();
+    expect(first.reduce((x, y) => x + y, 0)).toBe(2);
+    const left = first.indexOf(0);
+    expect(left).toBeGreaterThanOrEqual(0);
+    tickAt(h, T + 200);
+    expect(count()).toEqual([1, 1, 1]);
+    // 다음 차례는 셋 다 T + 1,100(넘어간 연결도 격자가 밀리지 않는다). 몫이 넘지 않게 send 지연을 뺀다
+    for (const c of slow) c.onSend = undefined;
+    moveTo(h, T + 250);
+    publish(h, 1);
+    for (let t = T + 300; t <= T + 1_000; t += 100) tickAt(h, t);
+    tickAt(h, T + 1_099);
+    expect(count()).toEqual([1, 1, 1]);
+    tickAt(h, T + 1_100);
+    expect(count()).toEqual([2, 2, 2]);
+  });
+});
