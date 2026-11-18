@@ -1,5 +1,5 @@
 // seatmap-worker의 작업 스레드 하나(해석 하나, ADR-0257 결정 5). 다 실린 뒤 'ready'를 알리고, 받은 파일 하나를 해석해 답한 뒤 끝난다.
-// 시간 상한(5초 [가정])은 부모가 'ready' 뒤부터 재고 넘으면 이 스레드를 끝낸다. 힙 상한은 부모가 스레드를 만들 때 건다.
+// 시간 상한(5초 [가정])은 부모가 'ready' 뒤 이 스레드가 쓴 CPU 시간으로 재고 넘으면 이 스레드를 끝낸다(BAT-174). 힙 상한은 부모가 스레드를 만들 때 건다.
 import { parentPort } from 'node:worker_threads';
 import type { SeatmapFormat } from '../modules/catalog/domain/seatmap-import.js';
 import { parseSeatmapFile, toReply } from './parse.js';
