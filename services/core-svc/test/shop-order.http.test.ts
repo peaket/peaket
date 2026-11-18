@@ -6,7 +6,7 @@
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import {
   MemoryHeldTickets,
@@ -232,6 +232,73 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(typeOf(more)).toContain('merch-quantity-limit-exceeded');
   });
 
+  // 리뷰 반영 RV-02(ADR-0300 결정 4, P-T56 ⑦): '이 주문 수량'은 상품 ID마다 그 상품의 모든 줄(옵션·수량만 다른 줄 포함) 합이다.
+  test('P-T56 ⑦ 계정당 한도 2: 같은 상품을 수량만 다른 두 줄(1개·2개)로 보내면 422 merch-quantity-limit-exceeded이고 저장·예약이 없다', async () => {
+    const p = product({ name: '한도 2 두 줄', attributes: { perAccountLimit: 2 }, limitedQty: 5, stock: 5 });
+    const writes = orders.writes;
+    const reserve = vi.spyOn(stock, 'reserve');
+    try {
+      const res = await pickupOrder(randomUUID(), [{ productId: p.productId, quantity: 1 }, { productId: p.productId, quantity: 2 }], slot(p.productId));
+      expect(res.statusCode).toBe(422);
+      expect(typeOf(res)).toContain('merch-quantity-limit-exceeded');
+      expect(orders.writes).toBe(writes);
+      expect(reserve).not.toHaveBeenCalled();
+      expect(stock.slots.get(p.productId)?.resv.size ?? 0).toBe(0);
+    } finally {
+      reserve.mockRestore();
+    }
+  });
+
+  test('P-T56 ⑦ 계정당 한도 2: 옵션만 다른 두 줄(1개·2개)도 422 merch-quantity-limit-exceeded다', async () => {
+    const p = product({ name: '한도 2 옵션 두 줄', attributes: { perAccountLimit: 2, options: [{ name: '색상', values: ['빨강', '파랑'] }] } });
+    const writes = orders.writes;
+    const res = await pickupOrder(
+      randomUUID(),
+      [
+        { productId: p.productId, quantity: 1, options: { 색상: '빨강' } },
+        { productId: p.productId, quantity: 2, options: { 색상: '파랑' } },
+      ],
+      slot(p.productId),
+    );
+    expect(res.statusCode).toBe(422);
+    expect(typeOf(res)).toContain('merch-quantity-limit-exceeded');
+    expect(orders.writes).toBe(writes);
+  });
+
+  test('P-T56 ⑦ 계정당 한도 2: 같은 상품 두 줄 합 2(1개·1개)는 201이다', async () => {
+    const p = product({ name: '한도 2 합 2', attributes: { perAccountLimit: 2, options: [{ name: '색상', values: ['빨강', '파랑'] }] } });
+    const res = await pickupOrder(
+      randomUUID(),
+      [
+        { productId: p.productId, quantity: 1, options: { 색상: '빨강' } },
+        { productId: p.productId, quantity: 1, options: { 색상: '파랑' } },
+      ],
+      slot(p.productId),
+    );
+    expect(res.statusCode, res.payload).toBe(201);
+  });
+
+  test('P-T56 ⑦ 계정당 한도 2: 이미 결제한 1개가 있으면 같은 상품 두 줄(1개·1개)은 합 3이라 422 merch-quantity-limit-exceeded다', async () => {
+    const account = randomUUID();
+    const p = product({ name: '한도 2 결제 1 + 두 줄', attributes: { perAccountLimit: 2, options: [{ name: '색상', values: ['빨강', '파랑'] }] } });
+    const s = slot(p.productId);
+    const paid = await pickupOrder(account, [{ productId: p.productId, quantity: 1, options: { 색상: '빨강' } }], s);
+    expect(paid.statusCode).toBe(201);
+    orders.orders.get(JSON.parse(paid.payload).orderId)!.status = 'PAID';
+    const writes = orders.writes;
+    const res = await pickupOrder(
+      account,
+      [
+        { productId: p.productId, quantity: 1, options: { 색상: '빨강' } },
+        { productId: p.productId, quantity: 1, options: { 색상: '파랑' } },
+      ],
+      s,
+    );
+    expect(res.statusCode).toBe(422);
+    expect(typeOf(res)).toContain('merch-quantity-limit-exceeded');
+    expect(orders.writes).toBe(writes);
+  });
+
   test('P-T56 ⑦ 옵션 밖의 값·옵션 빠짐·상품에 없는 옵션은 422 merch-options-invalid이고 맞는 옵션은 통과한다', async () => {
     const p = product({ name: '옵션 상품', attributes: { options: [{ name: '색상', values: ['빨강', '파랑'] }, { name: '사이즈', values: ['S'] }] } });
     const s = slot(p.productId);
@@ -372,21 +439,47 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     }
   });
 
-  test('P-T56 ⑦ 택배 주문 금액은 가격 × 수량 합에 배송비를 한 번만 더하고 수령인·주소·문안 판을 적으며 결제 상점은 결제대금예치다', async () => {
-    const a = product({ name: '택배 A', price: 12_300, shippingFee: 3_000 });
+  // 리뷰 반영 RV-09(ADR-0300 결정 4 새 줄, ADR-0301 결정 4, ADR-0299 결정 3, P-T56 ⑩): 택배 주문은 BAT-605 전까지 본문·업무 규칙 검사(400·422)를 마친 뒤
+  // 재고를 예약하거나 행을 쓰기 전에 503 pg-unavailable이다. 택배 금액(배송비 한 번)은 test/merch-order.test.ts의 orderAmount 시험이 본다.
+  test('P-T56 ⑩ 택배 주문은 BAT-605 전까지 검사를 통과하면 503 pg-unavailable이고 재고 예약·주문 행이 없다', async () => {
+    const a = product({ name: '택배 한정 A', price: 12_300, shippingFee: 3_000, limitedQty: 3, stock: 3 });
     const b = product({ name: '택배 B', price: 4_100, shippingFee: 3_000 });
-    const res = await deliveryOrder(randomUUID(), [{ productId: a.productId, quantity: 2 }, { productId: b.productId, quantity: 1 }], okConsent);
-    expect(res.statusCode).toBe(201);
-    const body = JSON.parse(res.payload);
-    expect(body.paymentStore).toBe('ESCROW');
-    const o = orders.orders.get(body.orderId)!;
-    expect(o.amount).toBe(12_300 * 2 + 4_100 + 3_000);
-    expect(o.shippingFee).toBe(3_000);
-    expect(o.consentVersion).toBe(CONSENT);
-    expect(o.recipientName).toBe('김피켓');
-    expect(o.recipientPhone).toBe('01012345678');
-    expect(o.deliveryAddress).toContain('04001');
-    expect(o.deliveryAddress).toContain('서울특별시 마포구 월드컵로 1');
+    const writes = orders.writes;
+    const count = orders.orders.size;
+    const reserve = vi.spyOn(stock, 'reserve');
+    try {
+      const res = await deliveryOrder(randomUUID(), [{ productId: a.productId, quantity: 2 }, { productId: b.productId, quantity: 1 }], okConsent);
+      expect(res.statusCode, res.payload).toBe(503);
+      expect(typeOf(res)).toContain('pg-unavailable');
+      expect(reserve).not.toHaveBeenCalled();
+      expect(stock.slots.get(a.productId)?.resv.size ?? 0).toBe(0);
+      expect(orders.writes).toBe(writes);
+      expect(orders.orders.size).toBe(count);
+    } finally {
+      reserve.mockRestore();
+    }
+  });
+
+  test('P-T56 ⑩ 택배 주문의 동의 없음은 여전히 422 consent-required이고 본문 검사 400·업무 규칙 422도 503보다 먼저다', async () => {
+    const p = product({ name: '택배 검사 먼저', limitedQty: 3, stock: 3, attributes: { perAccountLimit: 2 } });
+    const noConsent = await deliveryOrder(randomUUID(), [{ productId: p.productId, quantity: 1 }]);
+    expect(noConsent.statusCode).toBe(422);
+    expect(typeOf(noConsent)).toContain('consent-required');
+    const outdated = await deliveryOrder(randomUUID(), [{ productId: p.productId, quantity: 1 }], { provisionToSeller: true, consentVersion: 'v2026.11-9' });
+    expect(outdated.statusCode).toBe(422);
+    expect(typeOf(outdated)).toContain('consent-version-outdated');
+    const overLimit = await deliveryOrder(randomUUID(), [{ productId: p.productId, quantity: 3 }], okConsent);
+    expect(overLimit.statusCode).toBe(422);
+    expect(typeOf(overLimit)).toContain('merch-quantity-limit-exceeded');
+    const unknownField = await post(randomUUID(), '/v1/shop/orders', {
+      fulfillment: 'DELIVERY',
+      items: [{ productId: p.productId, quantity: 1 }],
+      delivery: { recipientName: '김피켓', recipientPhone: '01012345678', postalCode: '04001', address: '서울특별시 마포구 월드컵로 1' },
+      consents: okConsent,
+      amount: 1,
+    });
+    expect(unknownField.statusCode).toBe(400);
+    expect(stock.slots.get(p.productId)?.resv.size ?? 0).toBe(0);
   });
 
   test('P-T56 ⑦ 현장 수령 주문 금액에는 배송비가 없고 결제 상점은 일반이다', async () => {
@@ -402,7 +495,9 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
   test('P-T55 ⑤ 택배 주문의 결제 시도 시작은 503 pg-unavailable이고 결제창 준비를 부르지 않는다(ADR-0299 결정 3)', async () => {
     const account = randomUUID();
     const p = product({ name: '택배 결제' });
-    const orderId = JSON.parse((await deliveryOrder(account, [{ productId: p.productId, quantity: 1 }], okConsent)).payload).orderId as string;
+    // BAT-605 전에는 택배 주문을 HTTP로 만들 수 없으므로(P-T56 ⑩) 현장 수령 주문을 메모리 저장소에서 택배로 바꿔 둔다(시험 준비)
+    const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;
+    orders.orders.get(orderId)!.fulfillment = 'DELIVERY';
     const calls = payments.calls.checkout.length;
     const res = await post(account, `/v1/shop/orders/${orderId}/payments`, {});
     expect(res.statusCode).toBe(503);

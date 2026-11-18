@@ -36,6 +36,8 @@ class FakePayments implements MerchPayments {
   readonly states = new Map<string, PaymentState>();
   confirmAnswer: ConfirmResult = { status: 'ACCEPTED' };
   batchDown = false;
+  /** 참이면 승인 명령을 '적은' 뒤 confirmAnswer로 답한다(payment-svc가 명령을 원장에 적고 시간 초과로만 답한 꼴, 리뷰 RV-01) */
+  recordOnConfirm = false;
 
   async prepareCheckout(q: Parameters<MerchPayments['prepareCheckout']>[0]) {
     const url = `http://localhost:3000/shop/checkout/return?order=${q.orderId}&pg=SIMULATOR`;
@@ -48,6 +50,9 @@ class FakePayments implements MerchPayments {
   }
   async confirm(c: Confirm): Promise<ConfirmResult> {
     this.confirms.push(c);
+    if (this.recordOnConfirm && !this.states.has(c.orderId)) {
+      this.states.set(c.orderId, { orderId: c.orderId, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'ACCEPTED', approvedAtMs: undefined, failureCategory: undefined });
+    }
     return this.confirmAnswer;
   }
   async batchGet(orderIds: readonly string[]): Promise<PaymentState[]> {
@@ -566,5 +571,143 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(await productStock(p.productId)).toBe(3);
     expect(await counter(p.productId)).toBe('3');
     await admin.pool.query('delete from merch_confirm_job where order_id = $1', [orderId]);
+  });
+
+  // ---- 리뷰 반영 RV-01(P-T56 ⑨, ADR-0300 결정 5 넷째 줄·결정 6): 승인 기한(인증 + 10분)이 지난 '받아짐 모름' 작업은 BatchGetPayments로 물어
+  // 결제가 없을 때만 FAILED와 두 재고 복구, 있으면 받아짐으로 바꿔 당기기로 반영, 묻지 못하면 5초 미룸, 기한 뒤에는 ConfirmPayment를 다시 보내지 않는다.
+  const DEADLINE_MS = 10 * 60_000;
+  const jobCount = async (o: string) => Number((await admin.pool.query('select count(*)::int as n from merch_confirm_job where order_id = $1', [o])).rows[0].n);
+  const batchesOf = (o: string) => payments.batches.filter((b) => b.includes(o)).length;
+  /** 승인 기한 1ms 전까지 30초씩 당기기 바퀴를 돌린다(다시 보내기 간격 상한 30초) */
+  async function runUntilJustBeforeDeadline(authAt: number): Promise<void> {
+    while (clock.now() + 30_000 < authAt + DEADLINE_MS - 1) {
+      clock.advance(30_000);
+      await results.tick();
+    }
+    clock.advance(authAt + DEADLINE_MS - 1 - clock.now());
+    await dueAllJobs();
+    await results.tick();
+  }
+
+  test('P-T56 ⑨ F-4 ConfirmPayment가 명령을 적고 시간 초과로만 답한 채 승인 기한이 지나도 FAILED로 끝내지 않고, 뒤에 승인되면 PAID이며 재고를 돌리지 않는다 [ASVS v5.0.0-2.3.3]', async () => {
+    const p = await product({ limitedQty: 3 });
+    const a = randomUUID();
+    payments.confirmAnswer = { status: 'RETRYABLE', reason: 'DEADLINE_EXCEEDED' };
+    payments.recordOnConfirm = true;
+    try {
+      const authAt = clock.now();
+      const orderId = await orderAndAccept(a, p);
+      expect(payments.states.get(orderId)?.status).toBe('ACCEPTED');
+      expect(await productStock(p.productId)).toBe(2);
+      expect(await counter(p.productId)).toBe('2');
+      await runUntilJustBeforeDeadline(authAt);
+      expect(await statusOf(orderId)).toBe('CREATED');
+      // 기한: 끝내기 전에 BatchGetPayments로 묻고, 결제가 있으므로 FAILED로 끝내지 않는다
+      clock.advance(1);
+      await dueAllJobs();
+      const asked = batchesOf(orderId);
+      const sentAtDeadline = payments.confirmsOf(orderId);
+      const t = await results.tick();
+      expect(t.failed).toBe(0);
+      expect(batchesOf(orderId)).toBe(asked + 1);
+      expect(await statusOf(orderId)).toBe('CREATED');
+      expect(await productStock(p.productId)).toBe(2);
+      expect(await counter(p.productId)).toBe('2');
+      expect(await jobCount(orderId)).toBe(1);
+      expect((await admin.pool.query('select status from merch_payment_attempt where order_id = $1', [orderId])).rows.map((r) => r.status)).toEqual(['ACCEPTED']);
+      // 뒤에 승인되면 당기기로 PAID, 재고는 돌아오지 않는다(product_stock 2·카운터 2·예약 원소 0)
+      payments.approve(orderId);
+      clock.advance(2_000);
+      await dueAllJobs();
+      await results.tick();
+      expect(await statusOf(orderId)).toBe('PAID');
+      expect(await productStock(p.productId)).toBe(2);
+      expect(await counter(p.productId)).toBe('2');
+      expect(await resvMembers(p.productId)).toEqual([]);
+      expect(await jobCount(orderId)).toBe(0);
+      // 기한 뒤 ConfirmPayment는 0건이다
+      expect(payments.confirmsOf(orderId)).toBe(sentAtDeadline);
+    } finally {
+      payments.confirmAnswer = { status: 'ACCEPTED' };
+      payments.recordOnConfirm = false;
+    }
+  });
+
+  test('P-T56 ⑨ 기한에 BatchGetPayments가 실패하면 FAILED로 끝내지 않고 5초 뒤 다시 묻는다(4,999ms에는 묻지 않음)', async () => {
+    const p = await product({ limitedQty: 3 });
+    const a = randomUUID();
+    payments.confirmAnswer = { status: 'RETRYABLE', reason: 'UNAVAILABLE' };
+    try {
+      const authAt = clock.now();
+      const orderId = await orderAndAccept(a, p);
+      await runUntilJustBeforeDeadline(authAt);
+      clock.advance(1);
+      await dueAllJobs();
+      const asked = batchesOf(orderId);
+      payments.batchDown = true;
+      try {
+        const t = await results.tick();
+        expect(t.failed).toBe(0);
+        expect(batchesOf(orderId)).toBe(asked + 1);
+      } finally {
+        payments.batchDown = false;
+      }
+      expect(await statusOf(orderId)).toBe('CREATED');
+      expect(await productStock(p.productId)).toBe(2);
+      expect(await counter(p.productId)).toBe('2');
+      expect(await jobCount(orderId)).toBe(1);
+      clock.advance(4_999);
+      await results.tick();
+      expect(batchesOf(orderId)).toBe(asked + 1);
+      expect(await statusOf(orderId)).toBe('CREATED');
+      // 5초에 다시 묻고, 명령이 적히지 않았으므로(답에 없음) 이제 FAILED와 두 재고 복구다
+      clock.advance(1);
+      const t2 = await results.tick();
+      expect(batchesOf(orderId)).toBe(asked + 2);
+      expect(t2.failed).toBe(1);
+      expect(await statusOf(orderId)).toBe('FAILED');
+      expect(await productStock(p.productId)).toBe(3);
+      expect(await counter(p.productId)).toBe('3');
+      expect(await resvMembers(p.productId)).toEqual([]);
+      expect(await jobCount(orderId)).toBe(0);
+    } finally {
+      payments.confirmAnswer = { status: 'ACCEPTED' };
+    }
+  });
+
+  test('P-T56 ⑨ 기한 뒤에는 ConfirmPayment를 다시 보내지 않는다(받아진 작업이 당기기 답에 없으면 기한 전에는 다시 보내고, 기한에는 보내지 않고 FAILED와 두 재고 복구)', async () => {
+    const p = await product({ limitedQty: 3 });
+    const a = randomUUID();
+    const authAt = clock.now();
+    const orderId = await orderAndAccept(a, p);
+    expect(payments.confirmsOf(orderId)).toBe(1);
+    // 기한 전: 답에 없으면 다시 보낸다(ADR-0300 결정 6). 몇 바퀴 만에 보내는지는 정본이 정하지 않으므로 세 바퀴까지 본다
+    clock.advance(2_000);
+    for (let i = 0; i < 3 && payments.confirmsOf(orderId) < 2; i++) {
+      await dueAllJobs();
+      await results.tick();
+    }
+    expect(payments.confirmsOf(orderId)).toBe(2);
+    expect(await statusOf(orderId)).toBe('CREATED');
+    // 기한(인증 + 10분): 답에 없어도 다시 보내지 않고 FAILED로 끝낸다(세 바퀴 안에)
+    clock.advance(authAt + DEADLINE_MS - clock.now());
+    const sent = payments.confirmsOf(orderId);
+    for (let i = 0; i < 3 && (await statusOf(orderId)) !== 'FAILED'; i++) {
+      await dueAllJobs();
+      await results.tick();
+      expect(payments.confirmsOf(orderId)).toBe(sent);
+    }
+    expect(payments.confirmsOf(orderId)).toBe(sent);
+    expect(await statusOf(orderId)).toBe('FAILED');
+    expect(await productStock(p.productId)).toBe(3);
+    expect(await counter(p.productId)).toBe('3');
+    expect(await resvMembers(p.productId)).toEqual([]);
+    expect(await jobCount(orderId)).toBe(0);
+    // 뒤 바퀴에서도 0건
+    for (let i = 0; i < 3; i++) {
+      clock.advance(30_000);
+      await results.tick();
+    }
+    expect(payments.confirmsOf(orderId)).toBe(sent);
   });
 });
