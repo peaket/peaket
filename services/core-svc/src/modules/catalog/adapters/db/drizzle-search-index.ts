@@ -123,9 +123,21 @@ export class DrizzleSearchIndex implements SearchIndex {
     private readonly o: { statementTimeoutMs?: number; correct?: (q: string) => string | null | undefined; keysOf?: NameKeysLookup } = {},
   ) {}
 
+  /**
+   * 한 번의 검색. 검색 전용 연결은 질의 동안만 쥔다(리뷰 R166-1, ADR-0271 결정 23 '주 스레드가 다 차지 않게'):
+   * 1) 짧은 읽기 트랜잭션에서 후보(또는 목록 한 쪽)만 읽고 연결을 돌려준다 → 2) 연결 없이 줄 바꾸기·이름 비교·등급·순위를 한다 →
+   * 3) 관련 공연·필터 이름(·사전이 없을 때의 오타 제안 원천)이 필요할 때만 둘째 짧은 트랜잭션으로 읽는다 → 4) 오타 제안 계산은 연결을 돌려준 뒤에 한다.
+   * 두 트랜잭션은 서로 다른 스냅숏일 수 있다(그 사이 판이 바뀌면 관련 공연이 새 판에서 나온다. 읽기 모델은 원래 몇 초 늦을 수 있다)
+   */
   async search(q: SearchQuery): Promise<SearchOutcome> {
+    const ranked = q.q.trim() === '' ? await this.#list(q) : await this.#query(q);
+    return this.#finish(ranked, q);
+  }
+
+  /** 검색 전용 연결로 짧은 읽기 트랜잭션 하나. 연결 묶음 포화·질의 시간 초과는 SearchUnavailable(503) */
+  async #read<T>(fn: (tx: DbTransaction) => Promise<T>): Promise<T> {
     try {
-      return await this.db.transaction((tx) => (q.q.trim() === '' ? this.#list(tx, q) : this.#query(tx, q)), {
+      return await this.db.transaction(fn, {
         isolationLevel: 'repeatable read',
         accessMode: 'read only',
         statementTimeoutMs: this.o.statementTimeoutMs ?? SEARCH_STATEMENT_TIMEOUT_MS,
@@ -135,30 +147,34 @@ export class DrizzleSearchIndex implements SearchIndex {
     }
   }
 
-  /** 검색어가 있을 때: 후보 공연만 읽는다 */
-  async #query(tx: DbTransaction, q: SearchQuery): Promise<SearchOutcome> {
+  /** 검색어가 있을 때: 후보 공연만 읽고(연결은 그동안만), 등급·순위는 연결을 돌려준 뒤에 */
+  async #query(q: SearchQuery): Promise<RankedSearch> {
     const query = q.q.trim();
-    const candidates = await this.#candidates(tx, keySets(query, q.noConvert));
-    const ranked = rankMatched(candidates, q, matchGrades(indexDocuments(candidates, this.o.keysOf), query, q.noConvert));
-    return this.#finish(tx, ranked, q);
+    const keys = keySets(query, q.noConvert);
+    const rows = keys.length === 0 ? [] : await this.#read((tx) => this.#candidates(tx, keys));
+    const candidates = rows.map((r) => documentOfRow(r, this.origin));
+    return rankMatched(candidates, q, matchGrades(indexDocuments(candidates, this.o.keysOf), query, q.noConvert));
   }
 
   /** 검색어가 없을 때: 필터를 건 정렬 질의의 한 쪽과 1,001줄까지 센 전체 수 */
-  async #list(tx: DbTransaction, q: SearchQuery): Promise<SearchOutcome> {
+  async #list(q: SearchQuery): Promise<RankedSearch> {
     const where = filters(q);
     const sort = q.sort ?? 'OPEN_SOON';
     const order = sort === 'POPULAR' ? sql`interest desc, ${SALE_RANK}, ${BY_TITLE}` : sort === 'RELEVANCE' ? sql`${SALE_RANK}, interest desc, ${BY_TITLE}` : sql`${OPEN_KEY}, ${BY_TITLE}`;
-    const [counted] = rowsOf<{ n: number | string }>(await tx.execute(sql`select count(*) as n from (select 1 from search_document where ${where} limit ${SEARCH_TOTAL_CAP + 1}) x`));
-    const n = Number(counted?.n ?? 0);
-    const rows = n === 0 ? [] : rowsOf<DocumentRow>(await tx.execute(sql`select * from search_document where ${where} order by ${order} limit ${SEARCH_PAGE_SIZE} offset ${(q.page - 1) * SEARCH_PAGE_SIZE}`));
+    const { n, rows, relaxed } = await this.#read(async (tx) => {
+      const [counted] = rowsOf<{ n: number | string }>(await tx.execute(sql`select count(*) as n from (select 1 from search_document where ${where} limit ${SEARCH_TOTAL_CAP + 1}) x`));
+      const n = Number(counted?.n ?? 0);
+      const rows = n === 0 ? [] : rowsOf<DocumentRow>(await tx.execute(sql`select * from search_document where ${where} order by ${order} limit ${SEARCH_PAGE_SIZE} offset ${(q.page - 1) * SEARCH_PAGE_SIZE}`));
+      let relaxed: number | null = null;
+      if (n === 0 && hasFilters(q)) {
+        const [r] = rowsOf<{ n: number | string }>(await tx.execute(sql`select count(*) as n from search_document where ${filters({ includePast: q.includePast })}`));
+        relaxed = Number(r?.n ?? 0);
+      }
+      return { n, rows, relaxed };
+    });
     const total = Math.min(n, SEARCH_TOTAL_CAP);
-    let relaxed: number | null = null;
-    if (n === 0 && hasFilters(q)) {
-      const [r] = rowsOf<{ n: number | string }>(await tx.execute(sql`select count(*) as n from search_document where ${filters({ includePast: q.includePast })}`));
-      relaxed = Number(r?.n ?? 0);
-    }
     const docs = rows.map((r) => documentOfRow(r, this.origin));
-    const ranked: RankedSearch = {
+    return {
       outcome: {
         items: docs.map(card),
         page: q.page,
@@ -174,14 +190,26 @@ export class DrizzleSearchIndex implements SearchIndex {
       hasQuery: false,
       needsDidYouMean: false,
     };
-    return this.#finish(tx, ranked, q);
   }
 
-  async #finish(tx: DbTransaction, ranked: RankedSearch, q: SearchQuery): Promise<SearchOutcome> {
-    const related = await relatedOf(this.#related(tx), ranked);
-    const didYouMean = ranked.needsDidYouMean ? await this.#didYouMean(tx, q.q.trim()) : null;
-    const filterNames = q.placeId !== undefined || q.artistId !== undefined ? await this.#filterNames(tx, q) : { placeName: null, artistName: null };
-    return finishSearch(ranked, q, { didYouMean, related, filterNames });
+  /** 관련 공연·필터 이름(그리고 사전이 없을 때 오타 제안의 공연명 줄)을 필요할 때만 둘째 짧은 트랜잭션으로 읽고, 오타 제안 계산은 그 뒤에 한다 */
+  async #finish(ranked: RankedSearch, q: SearchQuery): Promise<SearchOutcome> {
+    const top = ranked.top;
+    const needsRelated = !top || (ranked.hasQuery && (top.artists.length > 0 || (top.placeId !== undefined && top.placeName !== undefined)));
+    const needsNames = q.placeId !== undefined || q.artistId !== undefined;
+    const needsTitles = ranked.needsDidYouMean && !this.o.correct;
+    const none = { placeName: null, artistName: null };
+    const read =
+      needsRelated || needsNames || needsTitles
+        ? await this.#read(async (tx) => ({
+            related: needsRelated ? await relatedOf(this.#related(tx), ranked) : null,
+            filterNames: needsNames ? await this.#filterNames(tx, q) : none,
+            titles: needsTitles ? await this.#titles(tx) : [],
+          }))
+        : { related: null, filterNames: none, titles: [] };
+    const query = q.q.trim();
+    const didYouMean = !ranked.needsDidYouMean ? null : this.o.correct ? (this.o.correct(query) ?? null) : didYouMeanOf(read.titles, query);
+    return finishSearch(ranked, q, { didYouMean, related: read.related, filterNames: read.filterNames });
   }
 
   #related(tx: DbTransaction): RelatedSource {
@@ -194,16 +222,12 @@ export class DrizzleSearchIndex implements SearchIndex {
     };
   }
 
-  async #didYouMean(tx: DbTransaction, query: string): Promise<string | null> {
-    if (this.o.correct) return this.o.correct(query) ?? null;
-    // 사전을 넘겨받지 않은 어댑터만 공연명 줄(search_term)로 같은 함수를 돌린다
+  /** 사전을 넘겨받지 않은 어댑터만: 오타 제안에 쓰는 공연명 줄(search_term). 계산은 연결을 돌려준 뒤에 한다 */
+  async #titles(tx: DbTransaction): Promise<Array<{ title: string; productionId: string }>> {
     const titles = rowsOf<{ title: string; production_id: string }>(
       await tx.execute(sql`select display_name as title, target_id::text as production_id from search_term where kind = 'PRODUCTION' and alias_of is null`),
     );
-    return didYouMeanOf(
-      titles.map((t) => ({ title: t.title, productionId: t.production_id })),
-      query,
-    );
+    return titles.map((t) => ({ title: t.title, productionId: t.production_id }));
   }
 
   async #filterNames(tx: DbTransaction, q: SearchQuery): Promise<{ placeName: string | null; artistName: string | null }> {
@@ -222,7 +246,7 @@ export class DrizzleSearchIndex implements SearchIndex {
    * (search_document 훑기 한 번 + 줄마다 배열 풀기 + Hash Semi Join. ?| 배열 비교보다 공연 1만에서 약 4.5배 빠르다, BAT-166 구현 메모).
    * 공연 줄마다 되풀이되는 하위 계획(SubPlan)을 두지 않는다. union이 겹침을 없애 여러 갈래로 맞은 공연도 한 번이다
    */
-  async #candidates(tx: DbTransaction, keys: readonly QueryKeys[]): Promise<SearchDocument[]> {
+  async #candidates(tx: DbTransaction, keys: readonly QueryKeys[]): Promise<DocumentRow[]> {
     if (keys.length === 0) return [];
     const conds: SQL[] = [];
     for (const k of keys) {
@@ -242,6 +266,6 @@ export class DrizzleSearchIndex implements SearchIndex {
         )
         select ${DOCUMENT_COLUMNS} from search_document d join ids on d.production_id = ids.id`),
     );
-    return rows.map((r) => documentOfRow(r, this.origin));
+    return rows;
   }
 }
