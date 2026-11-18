@@ -37,6 +37,7 @@ import {
   UnavailableFanProfile,
 } from './modules/review/index.js';
 import { DrizzleWebhookStore, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
+import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
 
 const SERVICE = 'core-svc';
 assertInternalGrpcToken(process.env);
@@ -98,6 +99,32 @@ const ticketGrpc = process.env.PEAKET_TICKET_GRPC_URL;
 const reviewEligibility = ticketGrpc ? new GrpcReviewEligibility(ticketGrpc, lbProfile) : new UnavailableReviewEligibility();
 if (!ticketGrpc) console.warn(JSON.stringify({ level: 'warn', kind: 'review-eligibility', msg: 'PEAKET_TICKET_GRPC_URL이 없어 후기 자격 확인이 503이다' }));
 
+// 굿즈 주문의 바깥 잇기(BAT-600, ADR-0299~0301). 하나라도 없으면 그 경로만 503이고 나머지는 뜬다(후기 자격과 같은 꼴):
+// 재고 Redis(세션·캐시 클러스터 PEAKET_SHOP_REDIS_URL) → 한정 상품 주문 503, payment-svc(PEAKET_PAYMENT_GRPC_ADDR) → 결제 시도 503 pg-unavailable,
+// ticket-svc(PEAKET_TICKET_GRPC_URL, 후기 자격과 같은 주소) → 부가 상품·티켓 소지자 전용 시간대 503, 동의 문안 판(PEAKET_MERCH_CONSENT_VERSION) → 택배 주문 503
+const shopRedis = process.env.PEAKET_SHOP_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_SHOP_REDIS_URL }) : undefined;
+const merchStock = shopRedis ? new RedisMerchStock(shopRedis) : unavailableMerchStock;
+const paymentAddr = process.env.PEAKET_PAYMENT_GRPC_ADDR;
+const grpcPayments = paymentAddr ? new GrpcMerchPayments(paymentAddr, lbProfile) : undefined;
+const heldTickets = ticketGrpc ? new GrpcHeldTickets(ticketGrpc, lbProfile) : undefined;
+const merchConsentVersion = process.env.PEAKET_MERCH_CONSENT_VERSION;
+for (const [name, ok] of [
+  ['PEAKET_SHOP_REDIS_URL', shopRedis !== undefined],
+  ['PEAKET_PAYMENT_GRPC_ADDR', grpcPayments !== undefined],
+  ['PEAKET_TICKET_GRPC_URL', heldTickets !== undefined],
+  ['PEAKET_MERCH_CONSENT_VERSION', merchConsentVersion !== undefined],
+] as const) {
+  if (!ok) console.warn(JSON.stringify({ level: 'warn', kind: 'shop-wiring', msg: `${name}이 없어 굿즈 주문의 그 경로가 503이다` }));
+}
+const shopSignals = new ShopSignals();
+// shop 로그는 서비스 로거로 보낸다(서비스를 만든 뒤에만 불린다)
+let serviceLogger: ShopLogger | undefined;
+const shopLogger: ShopLogger = {
+  info: (o, m) => serviceLogger?.info(o, m),
+  warn: (o, m) => serviceLogger?.warn(o, m),
+  error: (o, m) => serviceLogger?.error(o, m),
+};
+
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
@@ -127,6 +154,14 @@ const service = await createService({
     searchDatabase,
     media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
     review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile() },
+    shop: {
+      stock: merchStock,
+      payments: grpcPayments ?? unavailableMerchPayments,
+      held: heldTickets ?? unavailableHeldTickets,
+      ...(merchConsentVersion !== undefined ? { consentVersion: merchConsentVersion } : {}),
+      signals: shopSignals,
+      logger: shopLogger,
+    },
     ...(process.env.PEAKET_IDENTITY_JWKS_URL ? { exportJwks: { url: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' } } : {}),
     ...(process.env.PEAKET_PURCHASE_HTTP_URL
       ? { purchaseHttp: { url: process.env.PEAKET_PURCHASE_HTTP_URL, ...(process.env.PEAKET_INTERNAL_TOKEN ? { token: process.env.PEAKET_INTERNAL_TOKEN } : {}) } }
@@ -135,6 +170,8 @@ const service = await createService({
     reauthJti: reauthJtiStoreFromEnv(process.env, queueRedis),
   }),
 });
+serviceLogger = service.logger;
+shopSignals.register(service.metrics.registry);
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
 // 검색 읽기 모델 주기 일(ADR-0271 결정 3·6): 1분 정리·1시간 관심도는 판매 승인과 같은 쓰기 역할(core_ops)로, 자동완성 사전은 검색 연결로 10초마다 갱신한다
@@ -214,7 +251,10 @@ function shutdown(): Promise<void> {
         imageProcessing.close();
         seatmapParser.close();
         if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
+        grpcPayments?.close();
+        heldTickets?.close();
         void queueRedis?.close();
+        void shopRedis?.close();
         return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close(), searchDatabase.close()]);
       });
   })();
