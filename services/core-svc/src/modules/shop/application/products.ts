@@ -1,5 +1,9 @@
 // shop 상품 유스케이스(BUILD_ORDER BAT-610 서버 잔여, FR-024, ADR-0101).
+// 만들기·고치기는 유형이 표에 있고 켜져 있는지(422 product-type-invalid), 속성이 그 유형의 최신 판 스키마에 맞는지(422 product-attributes-invalid) 본다.
+// 고치기는 합친 속성을 통째로 다시 검사하고 schema_version을 최신 판으로 적는다. 한정 수량을 고치면 남은 수 + (새 수량 − 옛 수량)으로 바꾸고(음수면 422
+// product-limited-qty-invalid), 커밋한 뒤 그 상품의 Redis 카운터 키만 지운다(다음 주문이 다시 만든다)(BAT-600, ADR-0300 결정 1·3).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
+import { checkProductAttributes } from '@peaket/validation/product-types';
 import {
   productEtag,
   ProductProblem,
@@ -14,14 +18,25 @@ import {
   type ProductStatus,
   type ProductView,
 } from '../domain/product.js';
-import type { CommissionRateSource, ProductEventDirectory, ProductStore } from '../domain/ports.js';
+import type { CommissionRateSource, ProductEventDirectory, ProductStore, StockChange } from '../domain/ports.js';
+import type { MerchStock, ProductTypeDirectory } from '../domain/merch-ports.js';
+import type { ShopLogger } from './shop-signals.js';
 
 export interface ShopDeps {
   readonly store: ProductStore;
   readonly directory: ProductEventDirectory;
   readonly commission: CommissionRateSource;
   readonly clock: Clock;
+  /** 상품 유형 표(product_type) */
+  readonly types: ProductTypeDirectory;
+  /** 한정 재고 Redis(한정 수량을 고친 뒤 카운터 키를 지운다) */
+  readonly stock: MerchStock;
+  readonly logger?: ShopLogger;
 }
+
+const typeInvalid = () => new ProblemError({ type: 'product-type-invalid', status: 422, title: '쓸 수 없는 상품 유형입니다' });
+const attributesInvalid = () => new ProblemError({ type: 'product-attributes-invalid', status: 422, title: '상품 속성이 유형 스키마에 맞지 않습니다' });
+const limitedQtyInvalid = () => new ProblemError({ type: 'product-limited-qty-invalid', status: 422, title: '이미 팔린 수량보다 적게 줄일 수 없습니다' });
 
 export interface ProductPage {
   items: ProductView[];
@@ -74,6 +89,7 @@ export class Products {
   async create(promoterId: string, input: ProductInput): Promise<ProductView> {
     return guard(async () => {
       validateInput(input);
+      const schemaVersion = await this.#checkTyped(input.type, input.attributes ?? {});
       const now = new Date(this.d.clock.now());
       const published = input.status === 'PUBLISHED';
       const record: ProductRecord = {
@@ -96,6 +112,7 @@ export class Products {
         saleEndsAt: dateOrNull(input.saleEndsAt),
         commissionRateBp: published ? await this.d.commission.rateBp(promoterId) : null,
         attributes: input.attributes ?? {},
+        schemaVersion,
         version: 1,
         publishedAt: published ? now : null,
         updatedAt: now,
@@ -122,7 +139,7 @@ export class Products {
         ...(patch.returnAddress !== undefined ? { returnAddress: patch.returnAddress } : {}),
         ...(patch.ticketLinked !== undefined ? { ticketLinked: patch.ticketLinked } : {}),
         ...(patch.linkedEventId !== undefined ? { linkedEventId: patch.linkedEventId } : {}),
-        ...(patch.limitedQty !== undefined ? { limitedQty: patch.limitedQty, stock: patch.limitedQty } : {}),
+        ...(patch.limitedQty !== undefined ? { limitedQty: patch.limitedQty } : {}),
         ...(patch.fulfillments !== undefined ? { fulfillments: patch.fulfillments } : {}),
         ...(patch.transferable !== undefined ? { transferable: patch.transferable } : {}),
         ...(patch.status !== undefined ? { status: patch.status } : {}),
@@ -132,18 +149,48 @@ export class Products {
         updatedAt: now,
       };
       validatePatch(merged);
+      merged.schemaVersion = await this.#checkTyped(merged.type, merged.attributes);
+      const change = stockChangeOf(current, merged.limitedQty);
+      if (change.kind === 'delta' && (current.stock ?? 0) + change.delta < 0) throw limitedQtyInvalid();
       if (merged.status === 'PUBLISHED' && merged.commissionRateBp === null) merged.commissionRateBp = await this.d.commission.rateBp(promoterId);
       if (merged.status === 'PUBLISHED' && merged.publishedAt === null) merged.publishedAt = now;
-      const saved = await this.d.store.save(promoterId, merged, expected);
+      const saved = await this.d.store.save(promoterId, merged, expected, change);
       if (saved === 'conflict') throw preconditionFailed();
+      if (saved === 'stock-negative') throw limitedQtyInvalid();
+      if (change.kind !== 'keep') await this.#clearCounter(productId);
       return this.#view(saved, now);
     });
+  }
+
+  /** 유형 표와 최신 판 스키마로 검사하고 그 판을 돌려준다 */
+  async #checkTyped(type: string, attributes: Record<string, unknown>): Promise<number> {
+    const row = await this.d.types.find(type);
+    if (!row || !row.enabled) throw typeInvalid();
+    if (!checkProductAttributes(type, row.latestSchemaVersion, attributes).ok) throw attributesInvalid();
+    return row.latestSchemaVersion;
+  }
+
+  async #clearCounter(productId: string): Promise<void> {
+    try {
+      await this.d.stock.clearCounter(productId);
+    } catch {
+      // 지우지 못하면 옛 카운터가 남는다. 초과 판매는 결제 접수의 PostgreSQL 조건부 차감이 막는다
+      this.d.logger?.warn({ kind: 'merch-stock-counter-clear-failed', productId }, '한정 수량을 고친 뒤 재고 카운터를 지우지 못했다');
+    }
   }
 
   async #view(p: ProductRecord, now: Date): Promise<ProductView> {
     const linked = p.ticketLinked && p.linkedEventId ? await this.d.directory.productionOf(p.linkedEventId) : undefined;
     return toView(p, now, linked);
   }
+}
+
+/** 한정 수량 바꾸기 → 재고 바꾸기(ADR-0300 결정 3) */
+export function stockChangeOf(current: Pick<ProductRecord, 'limitedQty' | 'stock'>, next: number | null): StockChange {
+  if (current.limitedQty === next) return { kind: 'keep' };
+  if (next === null) return { kind: 'remove' };
+  if (current.limitedQty === null) return { kind: 'set', stock: next };
+  return { kind: 'delta', delta: next - current.limitedQty };
 }
 
 export const statusLabel = (s: ProductStatus): string => s;

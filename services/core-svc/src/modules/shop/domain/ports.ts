@@ -10,9 +10,15 @@ export interface ProductStore {
   list(promoterId: string, filter: ProductFilter): Promise<ProductListPage>;
   find(promoterId: string, productId: string): Promise<ProductRecord | undefined>;
   insert(record: ProductRecord): Promise<void>;
-  /** 전체 행을 덮어쓰고 version을 1 올린다. expectedVersion이 다르면 'conflict' */
-  save(promoterId: string, record: ProductRecord, expectedVersion: number): Promise<ProductRecord | 'conflict'>;
+  /**
+   * 전체 행을 덮어쓰고 version을 1 올린다. expectedVersion이 다르면 'conflict'.
+   * 한정 수량 재고(product_stock)는 stock대로 바꾼다: keep 그대로, set 새로 둠, delta 남은 수 + delta(결과가 음수면 'stock-negative'이고 아무것도 바꾸지 않는다), remove 지움(ADR-0300 결정 3)
+   */
+  save(promoterId: string, record: ProductRecord, expectedVersion: number, stock?: StockChange): Promise<ProductRecord | 'conflict' | 'stock-negative'>;
 }
+
+/** 한정 수량을 고칠 때의 재고 바꾸기(ADR-0300 결정 3: 남은 수 + (새 수량 − 옛 수량), 덮어쓰지 않는다) */
+export type StockChange = { kind: 'keep' } | { kind: 'set'; stock: number } | { kind: 'delta'; delta: number } | { kind: 'remove' };
 
 export interface ProductEventDirectory {
   productionOf(eventId: string): Promise<{ productionId: string; title: string } | undefined>;

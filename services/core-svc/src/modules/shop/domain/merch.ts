@@ -1,10 +1,11 @@
 // 굿즈 주문·상품 정산 원천(BUILD_ORDER BAT-610 잔여, FR-024·062, POL-037·039, settlement §4.5).
-// 정본 표는 docs/data.md merch_order·merch_order_item이다. 이 모듈은 주문을 만들지 않고,
-// 다른 서비스(구매·정산)가 읽는 원천과 정산 기준일 계산만 맡는다.
-export type MerchOrderStatus = 'PENDING' | 'PAID' | 'CANCELLED' | 'REFUNDED';
+// 정본 표는 docs/data.md merch_order·merch_order_item이다. 이 파일은 다른 서비스(정산)가 읽는 원천과 정산 기준일 계산을 맡고,
+// 팬 주문의 규칙은 merch-order.ts에 있다(BAT-600, ADR-0300).
+// 주문 상태는 정본 상태도(docs/planning/03 §2.13 O1~O7) 값이다. 취소·환급은 항목 상태(I2·I16)다(ADR-0300 결정 9).
+export type MerchOrderStatus = 'CREATED' | 'AWAITING_DEPOSIT' | 'PAID' | 'EXPIRED' | 'FAILED';
 export type MerchItemStatus = 'READY' | 'SHIPPED' | 'DELIVERED' | 'PICKED_UP' | 'LOCKED' | 'RETURN_REQUESTED' | 'RETURN_RECEIVED' | 'DISPUTED' | 'CANCELLED' | 'REFUNDED';
 export type MerchFulfillment = 'DELIVERY' | 'PICKUP' | 'WALLET';
-export type MerchPg = 'TOSS' | 'PORTONE';
+export type MerchPg = 'TOSS' | 'PORTONE' | 'SIMULATOR';
 export type MerchPgStore = 'STANDARD' | 'ESCROW';
 
 export class MerchProblem extends Error {
@@ -22,10 +23,12 @@ export interface MerchOrderRecord {
   orderId: string;
   promoterId: string;
   eventId: string | null;
-  buyerName: string;
-  buyerPhone: string;
+  /** BAT-610 코드에만 있던 칸. 새 주문은 채우지 않는다(ADR-0300 결정 9) */
+  buyerName: string | null;
+  buyerPhone: string | null;
   status: MerchOrderStatus;
-  pg: MerchPg;
+  /** 결제 접수 때 고정한 결제사. 접수 전에는 null */
+  pg: MerchPg | null;
   pgStore: MerchPgStore;
   shippingFee: number;
   purchaseConfirmedAt: Date | null;
@@ -53,6 +56,12 @@ export interface MerchOrderItemRecord {
   refundedAmount: number;
   eventEndsAt: Date | null;
   ticketLinked: boolean;
+  /** 티켓 연동 부가 상품만. 그 이용권을 단 티켓(ADR-0301 결정 2) */
+  linkedTicketId?: string | null;
+  /** 취소 사유(I2). 지금은 UNCLAIMED(미수령 자동 취소)만 쓴다(ADR-0301 결정 5) */
+  cancelReason?: string | null;
+  /** 주문 때 고른 옵션과 상품 이름·유형·스키마 판(ADR-0101 결정 7) */
+  optionSnapshot?: Record<string, unknown> | null;
 }
 
 /** 정산서에 실릴 주문 항목 한 줄(payment-svc가 계산한다, settlement §4.5 'shop에서 넘겨받는 값'). */
@@ -105,9 +114,9 @@ export function addDays(date: string, days: number): string {
   return kstDateOnly(new Date(d.getTime() + days * 24 * 60 * 60 * 1000));
 }
 
-/** 그날이 지나야 정산서에 들어간다(settlement §4.5 표). 넣지 않을 항목은 null이다. */
+/** 그날이 지나야 정산서에 들어간다(settlement §4.5 표). 넣지 않을 항목은 null이다. 주문 상태는 PAID만 보고 취소·환급은 항목 상태로 거른다(ADR-0300 결정 9) */
 export function settlementBasisDate(item: MerchOrderItemRecord, order: MerchOrderRecord): string | null {
-  if (order.status === 'CANCELLED' || order.status === 'REFUNDED') return null;
+  if (order.status !== 'PAID' || order.pg === null) return null;
   if (item.status === 'CANCELLED' || item.status === 'REFUNDED') return null;
   if (item.status === 'RETURN_REQUESTED' || item.status === 'RETURN_RECEIVED' || item.status === 'DISPUTED') return null;
   if (item.ticketLinked) {
@@ -135,7 +144,7 @@ export function productSettlementItem(item: MerchOrderItemRecord, order: MerchOr
     orderId: item.orderId,
     promoterId: item.promoterId,
     eventId: item.eventId,
-    pg: order.pg,
+    pg: order.pg!,
     pgStore: order.pgStore,
     productId: item.productId,
     productName: item.productName,
