@@ -271,6 +271,67 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
   - 어댑터 '토큰이 없거나 빈 값이면 false이고 공개키도 jti도 건드리지 않는다'는 `jti`(`SET` 0)만 단언하고 공개키(`jwks.urls`)는 단언하지 않는다. `expect(jwks.urls).toHaveLength(0)` 한 줄이면 이름과 맞는다.
 - 리뷰와 겹침: V8 = RV-09 (가). V7은 RV-05와 방향이 반대인 결함이라 둘을 함께 고칠 때 경계(어느 오류가 503인가)를 시험으로 고정해야 한다. RV-02(600초 토큰을 받는 것)는 V12가 '5분 상한 빼기'만 잡는다는 것과 맞물린다. RV-02대로 고치면 어댑터 수명 시험의 600초 줄 기대가 바뀐다.
 
+## 리뷰 반영 계획
+
+- **담당·바탕**: 계획 담당 `l3-b415r-plan`(claude-opus-5-5, 같은 세션), 2026-11-18, 머리 `f0aab468`. '리뷰' 절 RV-01~09와 '검증' 절 살아남은 V3·V7·V8, 판정 기준 대조의 어긋남 둘에 답한다. 처리는 감독이 정한 대로다. A 등급이라 반영 계획 커밋을 따로 두고(이 커밋), 지적마다 시험 담당이 재현 시험을 먼저 써서 지금 트리(`f0aab468`)에서 실패를 본 뒤 구현 담당이 고친다(커밋 꼬리말 `Fix-By`·`Finding`은 그 담당들이 단다). 고친 뒤에는 리뷰 담당이 고친 곳만 다시 보고, 검증 담당이 마지막 검증을 한다.
+- **정본**: 이 커밋에서 먼저 고쳤다(모두 '추천 적용, 2026-11-18, BAT-415-reauth 리뷰'). docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인'(새 줄 '공개키 묶음 읽기'·'거절 기록', '한 번 쓰기'·'답'·'시작 조립'·'남는 한계' 고침)과 §11 R-T39(②③⑤⑥ 넓힘, ⑦ 새로), docs/data.md §3 `reauth:jti:{jti}`(수명 상한 5분 30초, 서비스 안에서만), docs/BUILD_ORDER.md GAT-090 단계 줄('BAT-415-reauth가 넘긴 것'). openapi `createTicketCancellation` 503 설명은 원인 예 둘만 적은 채 두었다(설명을 바꾸면 생성물이 다시 바뀐다. 원인 목록의 정본은 transfer-refund §3.1이다).
+- **ADR**: 쓰지 않았다. RV-01을 막는 결정은 방향을 바꾸므로 아래 §4 OPEN으로 소유자에게 보낸다(감독이 번호를 받는다).
+- **장부**: `node tools/ci/ledger.mjs --batch BAT-415` → 항목 10개(R-T39 ⑦이 새로 생겨 'ID만' 1), 자동 시험 9.
+
+### 1. 지적마다 처리
+
+| 지적 | 처리 | 담당(차례) | 정본 |
+| --- | --- | --- | --- |
+| RV-01 중간 보안 | 이 묶음에서 막지 않는다. 정본 '남는 한계'에 적고 아래 §4 OPEN 문안을 감독에게 넘긴다 | 계획(이 커밋)만 | transfer-refund §3.1 '남는 한계', data.md §3 |
+| RV-02 낮음 보안 | 고친다. 남은 수명이 5분 30초(5분 + 시계 차이 30초 [가정])를 넘는 토큰은 `jti`를 잡지 않고 거절한다(까닭 `lifetime`). 공용 저장소 상한 `REAUTH_JTI_TTL_MS`를 5분에서 5분 30초로 올려 기록이 토큰보다 먼저 사라지지 않게 한다 | 시험 → 구현 | transfer-refund §3.1 '한 번 쓰기'·'답', data.md §3 |
+| RV-03 낮음 | 정리 목록으로(`docs/lanes/lane3-cleanup.md`, 기록 커밋에서 감독이 넣는다) | — | — |
+| RV-04 낮음 | 정리 목록으로(시작할 때 미리 읽기, 오래된 캐시로 답하고 뒤에서 다시 읽기). 읽기 상한을 1,000ms로 줄이는 것은 RV-09와 함께 이 묶음에서 한다 | — | transfer-refund §3.1 '공개키 묶음 읽기' |
+| RV-05 낮음·검증 V7 | 고친다. 경계: 키 묶음 안 키를 쓸 수 없는 jose 오류(`ERR_JWK_INVALID`·`ERR_JWKS_INVALID`·`ERR_JWKS_MULTIPLE_MATCHING_KEYS`)는 503 `reauth-unavailable`, `ERR_JOSE_NOT_SUPPORTED`는 토큰 거절 403, 그 밖의 뜻밖 오류(`TypeError` 등)는 500이고 `Retry-After`가 없다. 모두 Saga 0 | 시험 → 구현 | transfer-refund §3.1 '답', R-T39 ⑤⑦ |
+| RV-06 낮음 보안(관측) | 고친다. (가) 403마다 `info` 한 줄에 까닭 이름표 하나(`missing`·확인기 까닭 아홉·`sub`·`lifetime`·`replay`), 503은 `warn`에 `keys`·`store`. 토큰·`jti`·계정 ID·세션 ID는 싣지 않는다 (나) `PEAKET_IDENTITY_ISSUER`가 없거나 빈 값이면 local·ci만 기본값을 쓰고 그 밖은 시작 실패 | 시험 → 구현 | transfer-refund §3.1 '거절 기록'·'시작 조립', R-T39 ②⑥ |
+| RV-07 낮음 | 정본 '남는 한계'에 적기만 한다(503 뒤 같은 토큰은 403일 수 있다) | 계획(이 커밋)만 | transfer-refund §3.1 '남는 한계' |
+| RV-08 낮음(다음 단계) | GAT-090 단계 줄에 'BAT-415-reauth가 넘긴 것'으로 적었다(취소 화면의 `X-Reauth-Token`, 계좌면 `purpose` high-risk, 두 재인증 시트의 흐름, frontend.md §4.3 오류 표의 503 `reauth-unavailable`) | 계획(이 커밋)만 | BUILD_ORDER GAT-090 |
+| RV-09 낮음·검증 V8 | 고친다. 공개키 묶음 읽기 한 번의 상한을 1,000ms [가정]로 정본에 적었다(지금 코드는 5,000ms). 시험을 더한다: (가) 답하지 않는 읽기 (나) 같은 토큰 동시 두 요청 (다) `alg` none·HS256 | 시험 → 구현((가)만 코드가 바뀐다. (나)(다)는 지금도 맞을 것이라 시험만) | transfer-refund §3.1 '공개키 묶음 읽기', R-T39 ②③⑤ |
+| 검증 V3 | 정리 목록으로(동치, 시험 필요 없음) | — | — |
+| 검증 대조 어긋남 둘 | 시험 이름과 단언을 고친다 | 시험만 | R-T39 ②·③·⑤ |
+
+### 2. 시험 담당 몫(재현 먼저, `f0aab468`에서 본 실패를 '실패 확인' 절에 적는다)
+
+| # | 시험(이름은 ID로 시작) | 파일 | 단언 | 지금 트리에서 |
+| --- | --- | --- | --- | --- |
+| T1(RV-02) | `R-T39 ② 남은 수명이 5분 30초를 넘는 토큰은 거절하고 jti를 잡지 않는다` | `test/jwks-fan-reauth-gate.test.ts`(기존 '정확한 수명' 시험의 600초 줄을 이것으로 바꾼다. 정본이 바뀌어 뒤집는 것이라 시험 이의가 아니다), HTTP 한 줄은 `test/cancel-reauth-http.test.ts` | 가짜 시계로 남은 수명 330,000ms → true이고 `PX` `'330000'`. 330,001ms·600,000ms → false이고 `command` 0번. 180초 → `'180000'`은 그대로. HTTP: 600초 토큰 → 403·호출 0·`SET` 0 | 330,001ms·600초가 true라 실패, 330초의 `PX`가 `'300000'`이라 실패 |
+| T2(RV-05) | `R-T39 ⑤ 공개키 묶음 안의 키가 깨지면 503 reauth-unavailable이다` | `test/cancel-reauth-http.test.ts`, 어댑터 한 줄 | 같은 `kid`인데 키가 깨진(`x` 좌표가 곡선 밖이거나 `crv`가 빠진) 묶음 → 503·`type` reauth-unavailable·`Retry-After` `5`·호출 0·`SET` 0. 어댑터는 `ReauthUnavailable`을 던진다 | 500이라 실패 |
+| T3(RV-05) | `R-T39 ② 모르는 crit 머리의 토큰은 403이다` | `test/cancel-reauth-http.test.ts`(② 목록에 한 줄) | 403 reauth-required·호출 0·`SET` 0 | 시험 담당이 결과를 적는다(jose가 내는 오류에 따라 지금 500일 수 있다) |
+| T4(V7) | `R-T39 ⑦ 확인기가 뜻밖의 오류를 내면 500이고 Retry-After가 없으며 아무것도 부르지 않는다` | 같은 파일(확인기 대역 묶음, `verify`가 `TypeError`를 던짐) | 500, `Retry-After` 머리 없음, ticket·payment·`writes.create` 0. 대조: 같은 대역이 `ReauthUnavailable`을 던지면 503 | 처음부터 통과할 수 있다(그러면 그렇게 적고 검증이 V7을 다시 넣어 실패를 본다) |
+| T5(RV-06 가) | `R-T39 ② 거절마다 까닭 이름표 하나를 로그에 남기고 토큰·계정 ID는 싣지 않는다` | 같은 파일(서비스 로그를 `logDestination`으로 모은다) | ② 경우마다 정확히 한 줄이고 까닭이 정본 이름표다(없음 `missing`, 만료 `expired`, 다른 세션·다른 act `claims`, 다른 계정 `sub`, 다른 키 `kid` 또는 `signature`, `typ`, `aud`, `iss`, 수명 `lifetime`, 다시 씀 `replay`). 로그 글 전체에 토큰 문자열·`jti`·계정 ID·세션 ID가 없다. ⑤는 `warn` 한 줄에 `keys`·`store` | 로그가 없어 실패 |
+| T6(RV-06 나) | `R-T39 ⑥ 주소는 있고 PEAKET_IDENTITY_ISSUER가 없으면 운영에서 시작하지 않는다` | `test/fan-reauth-wiring.test.ts`(기존 발급자 기본값 시험은 `PEAKET_ENV` prod를 local·ci로 바꾼다) | 발급자 없음·빈 값 × prod·staging·demo·없음 → 던짐(글에 `PEAKET_IDENTITY_ISSUER`). local·ci → 기본값 발급자 토큰만 받는다. start.ts 글 시험: 확인기 조립에 거절 기록을 받는 곳(로거)을 넘긴다 | prod에서 던지지 않아 실패 |
+| T7(RV-09 가·V8) | `R-T39 ⑤ 처음 공개키 읽기가 답하지 않으면 1,000ms 안팎에 503이다` | `test/jwks-fan-reauth-gate.test.ts`, HTTP 한 줄 | `AbortSignal`을 따르는 멈추는 가짜 `fetch`와 실제 시간으로: `ReauthUnavailable`(HTTP는 503)까지 900ms 이상 2,500ms 미만, `fetch` 1번, `SET` 0번. 단언 값 1,000은 정본에서 가져온다(코드 상수를 가져오지 않는다) | 5,000ms라 2,500ms 안에 끝나지 않아 실패 |
+| T8(RV-09 나) | `R-T39 ③ 같은 토큰으로 다른 표 둘을 동시에 보내면 하나만 지난다` | `test/cancel-reauth-http.test.ts` | `Promise.all` 두 요청 → 202 하나·403 하나, ticket `cancel` 1번, `SET` 2번(하나는 `null`을 받음) | 처음부터 통과할 것(그렇게 적고 검증이 `jti` 잡기를 빼 실패를 본다) |
+| T9(RV-09 다) | `R-T39 ② alg none·HS256 토큰은 403이다` | 같은 파일(② 목록에 두 줄) | 403·호출 0·`SET` 0. none은 공개키 읽기 0번 | 처음부터 통과할 것(그렇게 적는다) |
+| T10(대조 ①) | 어댑터 시험 이름 | `test/jwks-fan-reauth-gate.test.ts` | '정확한 수명으로 jti를 잡는다' → `R-T39 ③ …`(한 번 쓰기), 'act·sid·sub가 틀린 토큰을 거절' → `R-T39 ② …`, '빈 값이면 false' → `R-T39 ② …`. 공개키 못 받음·저장소 세 상태는 ⑤ 그대로 | 이름만 |
+| T11(대조 ②) | 빈 토큰 시험 | 같은 파일 | `expect(jwks.urls).toHaveLength(0)` 한 줄을 더한다 | 처음부터 통과할 것 |
+
+### 3. 구현 담당 몫(시험 커밋 뒤, 시험 파일은 고치지 않는다)
+
+| # | 파일 | 고칠 것 |
+| --- | --- | --- |
+| I1(RV-02) | `services/purchase-svc/src/modules/refund/adapters/jwks-fan-reauth-gate.ts` | 확인과 `sub` 대조 뒤, `jti` 잡기 전에 `verified.expiresAt − 지금 > 330_000`이면 false(까닭 `lifetime`). 상수 이름과 주석은 정본 문구대로(5분 + 시계 차이 30초) |
+| I2(RV-02) | `packages/platform/src/reauth-jti.ts` | `REAUTH_JTI_TTL_MS`를 `5 * 60_000 + 30_000`으로, 주석을 '5분 + 시계 차이 30초'로 고친다. **다른 서비스 영향**: core·ops·payment의 `jti` 기록도 최대 30초 길어진다(닫히는 쪽이고 행동은 그대로). `packages/platform`을 바꾸므로 node 잡이 전체를 돌고 kind·image도 돈다 |
+| I3(RV-05·V7) | 같은 어댑터 | 확인기 오류 가운데 `code`가 `ERR_JWK_INVALID`·`ERR_JWKS_INVALID`·`ERR_JWKS_MULTIPLE_MATCHING_KEYS`면 `ReauthUnavailable`(까닭 `keys`), `ERR_JOSE_NOT_SUPPORTED`면 false(까닭 `format`), 그 밖은 그대로 던진다. jose를 새 의존성으로 들이지 않고 `code` 글로 가른다. 컨트롤러는 그대로 둔다(500은 플랫폼 기본) |
+| I4(RV-06 가) | 같은 어댑터, `src/refund-wiring.ts`, `src/start.ts` | 생성자 선택 인자 `onResult?: (r: { outcome: 'rejected'; reason: ReauthRejectReason } \| { outcome: 'unavailable'; reason: 'keys' \| 'store' }) => void`, 이름표 형 `export type ReauthRejectReason = 'missing' \| TokenRejectReason \| 'sub' \| 'lifetime' \| 'replay'`. `fanReauthGateFromEnv`가 받아 넘기고, start.ts가 서비스 로거로 403은 `info`, 503은 `warn` 한 줄(필드는 `reason`만)로 잇는다(늦게 묶는 로거 방식) |
+| I5(RV-06 나) | `src/refund-wiring.ts` | 주소가 있고 `PEAKET_IDENTITY_ISSUER`가 없거나 빈 값이면 local·ci만 기본값, 그 밖은 던짐(글에 `PEAKET_IDENTITY_ISSUER`) |
+| I6(RV-09) | 같은 어댑터 | `JWKS_TIMEOUT_CAP_MS`를 1,000으로, 주석에 정본 자리를 적는다 |
+
+- 구현 담당이 돌릴 것: 계획 §10의 첫 두 줄과 `pnpm lint`, 그리고 I2 때문에 `cd /d/ticketpass-lane3/packages/platform && npx vitest run && npx tsc -p tsconfig.json --noEmit`. 생성물은 바뀌지 않는다(openapi를 고치지 않았다).
+
+### 4. RV-01 OPEN 문안(감독이 전체 감독에게 보내 번호를 받는다)
+
+> **팬 재인증 토큰의 한 번 쓰기가 받는 서비스마다 따로다**(BAT-415-reauth 리뷰 RV-01, 중간 보안). 재인증 토큰(5분, 작업 묶음 `act`)의 한 번 쓰기를 받는 서비스가 각자 기록한다(identity는 PostgreSQL `reauth_token_use`, purchase-svc 팬 취소는 좌석 Redis). 그래서 같은 세션의 `FAN_SENSITIVE` 토큰 하나를 5분 안에 identity 작업(탈퇴, 다른 기기 로그아웃, 로그인 수단 추가·해제)에 한 번, 예매 취소에 한 번 쓸 수 있다. `FAN_HIGH_RISK`도 양도(ticket-svc)와 환급 계좌 입력(purchase-svc)이 함께 받게 되면 같다. 토큰은 화면 메모리에만 있고 같은 세션·5분 안이라 실제 악용은 그 토큰 값을 가로챈 경우로 좁지만, identity.md §3이 묶음을 둔 까닭('다른 작업에 쓰지 못하게')과 어긋난다. 선택지는 셋이다. (가) 팬 취소만의 작업 묶음(예 `FAN_CANCEL`)을 더한다. 바꿀 곳은 적지만 같은 문제가 다른 받는 서비스마다 다시 생긴다. (나) identity가 토큰에 받는 쪽 작업(새 클레임, 예 `op` = `TICKET_CANCEL`·`TRANSFER_REQUEST`·`CANCELLATION_ACCOUNT`)을 싣고, 웹이 재인증 `purpose`로 그 작업을 고르며, 받는 서비스는 자기 작업의 토큰만 받는다. 토큰 하나가 한 받는 곳에서만 쓰이므로 서비스마다 따로인 기록으로도 충분하다. identity·웹 앱 서버·받는 서비스가 모두 바뀌고 ADR이 필요하다. (다) 한 번 쓰기를 identity 한 곳에서 한다(받는 서비스가 identity gRPC로 `jti`를 소비한다). 가장 확실하지만 취소·양도가 identity 동기 호출에 기대게 되어 identity 장애가 그 작업을 막는다(identity.md §10의 무상태 검증과 어긋난다). **추천은 (나)**다. 새 동기 의존이 없고, 지금 받는 쪽 검사(`act`·`sid`·`sub`)에 한 줄을 더하는 꼴이며 (가)를 포함한다. 그때까지는 transfer-refund §3.1 '남는 한계'로 받아들인다. 정할 시점은 취소 화면을 잇는 GAT-090이나 양도 요청을 여는 단계 앞이다.
+
+### 5. 다시 볼 것
+
+- 리뷰 담당: RV-02·RV-05·RV-06·RV-09의 고친 곳만 다시 본다(높음 지적은 없었다).
+- 검증 담당: 고친 곳에 틀린 구현을 넣는다. I1 상한 빼기·경계 `>`를 `>=`로, I2 상수 되돌리기, I3 `ERR_JWK_INVALID`를 500으로·`ERR_JOSE_NOT_SUPPORTED`를 503으로·`TypeError`를 503으로, I4 까닭 이름표 바꾸기·계정 ID 싣기, I5 운영에서 기본값 쓰기, I6 상한 5,000으로 되돌리기.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -280,5 +341,6 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T21:19+09:00 | 2026-11-18T21:36+09:00 |
 | review | l3-b415r-review | claude-opus-5-5 | 2026-11-18T21:37+09:00 | 2026-11-18T21:49+09:00 |
 | verify | l3-b415r-verify | claude-opus-5-5 | 2026-11-18T21:38+09:00 | 2026-11-18T22:05+09:00 |
+| plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:25+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
