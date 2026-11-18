@@ -204,5 +204,6 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w10-guards-plan-165e372c | claude-opus-5-5 | 2026-11-18T14:20+09:00 | 2026-11-18T14:55+09:00 |
+| impl | w10-guards-impl-0bbaa2ef | claude-opus-5-5 | 2026-11-18T14:43+09:00 | 2026-11-18T14:50+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행(역할·세션 ID·모델·시작·끝)을 더한다. 세션 ID는 구현 `w10-guards-impl-0bbaa2ef`, 시험 `w10-guards-test-bd3092cd`, 리뷰 `w10-guards-review-79646c1e`, 검증 `w10-guards-verify-c4a72407`이다(지시서). 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.

@@ -6,9 +6,13 @@
 //   - docs/00-summary.md §4: 없는 R 번호의 줄을 §4 끝에 넣는다(요약 줄이 없으면 문제 → 방법 칸으로 만든다)
 //   - docs/wbs/wbs.csv·wbs.md 상태 칸: BUILD_ORDER 단계 머리의 wbs ID로 예정 → 진행 → 완료로 올리기만 한다
 // 쓰는 법: node tools/ci/records.mjs [--check] [--next-r] [--rev <리비전>] [--root <저장소>]
-//   --check  고칠 것이 있으면 알리고 1로 끝난다(파일은 고치지 않는다)
-//   --next-r 다음 R 번호를 찍는다(정합 점검 표와 커밋 기록 가운데 큰 번호 + 1)
-// 끝 코드: 0 맞음(또는 고침), 1 --check에서 고칠 것 있음, 2 읽기·실행 오류(아무것도 고치지 않는다)
+//   --check  고칠 것이 있거나 기록 파일이 크기 상한을 넘으면 알리고 1로 끝난다(파일은 고치지 않는다)
+//   --next-r 다음 R 번호를 찍는다(정합 점검 표와 커밋 기록 가운데 큰 번호 + 1). 크기는 보지 않는다
+// 기록 크기 점검(ADR-0283 결정 1): docs/PROGRESS.md와 docs/lanes/lane1.md·lane2.md·lane3.md가 40,960바이트(줄 끝을 LF로 바꾼
+//   UTF-8 바이트 수)를 넘으면 걸린다. --check는 걸린 파일마다 한 줄을 찍고 1, 맞추기(인자 없음)는 표준 오류에 경고만 찍고 끝 코드를
+//   바꾸지 않는다. 정리 목록(docs/lanes/lane*-cleanup.md)과 docs/progress-archive.md는 보지 않고, 없는 파일은 경고하고 건너뛴다.
+//   크기는 --root 아래 작업 트리의 파일로 잰다(--rev와 상관없다). 지난 줄을 옮기는 일은 사람이 고르므로 이 스크립트가 하지 않는다
+// 끝 코드: 0 맞음(또는 고침), 1 --check에서 고칠 것 있음(크기 상한 넘음 포함), 2 읽기·실행 오류(아무것도 고치지 않는다)
 // 지난 커밋의 잘못된 행이나 겹친 번호는 경고하고 건너뛴다. develop 기록은 고칠 수 없어서, 오류로 멈추면 영구히 막히기 때문이다.
 import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -280,6 +284,30 @@ export function nextR(reviewText, records) {
   return `R-${max + 1}`;
 }
 
+// ---------- 기록 크기(ADR-0283 결정 1) ----------
+export const RECORD_SIZE_LIMIT = 40_960;
+export const RECORD_SIZE_FILES = ['docs/PROGRESS.md', 'docs/lanes/lane1.md', 'docs/lanes/lane2.md', 'docs/lanes/lane3.md'];
+
+// 상한을 넘은 파일마다 알릴 글. 없는 파일은 warn으로 알리고 건너뛴다(나머지는 본다)
+export function recordSizeProblems(root, warn = () => {}) {
+  const out = [];
+  for (const file of RECORD_SIZE_FILES) {
+    let text;
+    try {
+      text = readFileSync(join(root, file), 'utf8');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+      warn(`${file}: 파일이 없어 크기를 보지 않는다`);
+      continue;
+    }
+    const bytes = Buffer.byteLength(text.replaceAll('\r\n', '\n'), 'utf8');
+    if (bytes > RECORD_SIZE_LIMIT) {
+      out.push(`${file}: 크기 ${bytes}바이트가 상한 ${RECORD_SIZE_LIMIT}바이트를 넘는다(ADR-0283 결정 1). 지난 줄을 정리 목록이나 docs/progress-archive.md로 옮긴다`);
+    }
+  }
+  return out;
+}
+
 // ---------- 명령줄 ----------
 const FILES = {
   review: 'docs/review/consistency-review.md',
@@ -316,6 +344,7 @@ function main(argv) {
   }
   // 표에 넣는 것은 지금 리비전에서 닿는 커밋의 기록뿐이다(합치지 않은 작업 가지의 기록은 넣지 않는다)
   const records = parseRecords(gitLog(opt.rev), warn);
+  const sizes = recordSizeProblems(opt.root, warn);
   const counts = wbsCounts(texts.build);
   const review = applyReview(texts.review, records, warn);
   const summary = applySummary(texts.summary, review.accepted);
@@ -327,12 +356,21 @@ function main(argv) {
     ...csv.changed.map((c) => `${FILES.csv}: ${c}`),
     ...md.changed.map((c) => `${FILES.md}: ${c}`),
   ];
+  if (opt.check) {
+    if (!report.length && !sizes.length) {
+      process.stdout.write('기록 표가 맞다\n');
+      return 0;
+    }
+    process.stdout.write(`${[...report, ...sizes].join('\n')}\n`);
+    return 1;
+  }
+  // 맞추기는 크기 때문에 멈추지 않는다(갈래 1이 커밋 전에 돌린다). 눈에는 보이게 표준 오류에 경고로 찍는다
+  for (const s of sizes) warn(s);
   if (!report.length) {
     process.stdout.write('기록 표가 맞다\n');
     return 0;
   }
   process.stdout.write(`${report.join('\n')}\n`);
-  if (opt.check) return 1;
   const out = { review: review.text, summary: summary.text, csv: csv.text, md: md.text };
   for (const [k, t] of Object.entries(out)) if (t !== texts[k]) writeFileSync(join(opt.root, FILES[k]), t);
   return 0;
