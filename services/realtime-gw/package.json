@@ -1,0 +1,41 @@
+{
+  "name": "@peaket/realtime-gw",
+  "private": true,
+  "version": "0.0.0",
+  "description": "realtime-gw. 좌석 델타 WebSocket: 핸드셰이크의 입장 토큰 확인, 구역 구독, 좌석 Redis 샤드 Pub/Sub 구독, 100ms 묶음·TimeSync·하트비트(BUILD_ORDER HOT-090, ADR-0296).",
+  "type": "module",
+  "exports": {
+    "./start": {
+      "types": "./dist/start.d.ts",
+      "default": "./dist/start.js"
+    },
+    "./stream": {
+      "types": "./dist/modules/stream/index.d.ts",
+      "default": "./dist/modules/stream/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/platform": "workspace:*",
+    "fastify": "^5.12.7",
+    "redis": "6.3.0",
+    "reflect-metadata": "^0.2.2",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@peaket/seatmap": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/ws": "8.18.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
