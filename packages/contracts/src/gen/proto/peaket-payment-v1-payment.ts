@@ -307,6 +307,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                       "options": {
                         "proto3_optional": true
                       }
+                    },
+                    "order_kind": {
+                      "type": "OrderKind",
+                      "id": 12
                     }
                   }
                 },

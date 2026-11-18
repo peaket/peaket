@@ -74,6 +74,8 @@ export function confirmInputOf(request: Record<string, unknown>): ConfirmPayment
     attemptId: text(request.attempt_id),
     attemptNo: typeof request.attempt_no === 'number' ? request.attempt_no : 0,
     eventId: text(request.event_id),
+    // 칸이 없으면 UNSPECIFIED(TICKET으로 본다, ADR-0299 결정 2)
+    orderKind: text(request.order_kind).replace(/^ORDER_KIND_/, '') || 'UNSPECIFIED',
     pg: text(request.pg).replace(/^PG_PROVIDER_/, '') || 'UNSPECIFIED',
     ...(paymentRef ? { paymentRef } : {}),
     amount: typeof krw === 'number' ? krw : Number.NaN,

@@ -9,6 +9,7 @@ import {
   type EntryRecord,
   type EventCancelInput,
   type EventCancelOutcome,
+  type HeldTicket,
   EVENT_CANCEL_ENDED_STATUSES,
   type IssueTicketsResult,
   type ListTicketsInput,
@@ -368,6 +369,17 @@ export class DrizzleTicketStore implements TicketStore {
       .from(ticket)
       .where(eq(ticket.eventId, eventId));
     return rows.map((r) => ({ accountId: r.accountId, payerAccountId: r.payerAccountId, orderId: r.orderId, status: statusOf(r.status), issuedAtMs: r.createdAt.getTime() }));
+  }
+
+  /** 보유 티켓 확인(ListHeldTickets). 지금 보유자 칸 account_id로 찾는다(ticket_wallet_idx의 앞 칸), 회차·상태는 그 안에서 거른다 */
+  async listHeld(accountId: string, eventId: string, statuses: readonly TicketStatus[]): Promise<readonly HeldTicket[]> {
+    if (statuses.length === 0) return [];
+    const rows = await this.o.database.db
+      .select({ id: ticket.id, status: ticket.status })
+      .from(ticket)
+      .where(and(eq(ticket.accountId, accountId), eq(ticket.eventId, eventId), inArray(ticket.status, [...statuses])))
+      .orderBy(asc(ticket.id));
+    return rows.map((r) => ({ ticketId: r.id, status: statusOf(r.status) }));
   }
 
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {

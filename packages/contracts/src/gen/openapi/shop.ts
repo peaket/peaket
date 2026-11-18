@@ -244,7 +244,7 @@ export const CreateShopOrderPaymentResponse = zod.object({
 }).describe('결제 시도(POL-036, ADR-0044). 결제창을 열기 직전에 만든다. 주문당 활성 시도는 1건이고 새 시도는 결제 접수 전의 이전 시도를 대체한다')
 
 /**
- * FR-015, NFR-025, ADR-0015, ADR-0044, ADR-0107 결정 4, P-T42, docs/frontend.md §6.2 30번. 활성 결제 시도의 결제사와 대조하고(다르면 409) 토스는 amount, 포트원은 paymentId를 대조한 뒤 결제 참조를 저장하고 승인 명령을 낸다. 결제사 호출은 응답 밖이다(ADR-0015). 접수 때 재고 예약을 그 결제의 승인 기한(인증 + 10분)까지 늘린다. 재고 예약 만료 작업과 경합하면 하나만 이긴다(P-T42 ③). 승인 직전에 PostgreSQL product_stock을 조건부로 확정한다(data.md §4 5). 지금 payment-svc ConfirmPayment는 event_id가 필수이고 payment.event_id가 NOT NULL이라 굿즈 주문을 받지 못한다. LCH-010이 event_id 필수를 풀거나 다른 길을 정한 뒤에야 이 작업이 동작한다(docs/features/payment.md §2 '받는 주문', BUILD_ORDER LCH-010)
+ * FR-015, NFR-025, ADR-0015, ADR-0044, ADR-0107 결정 4, P-T42, docs/frontend.md §6.2 30번. 활성 결제 시도의 결제사와 대조하고(다르면 409) 토스는 amount, 포트원은 paymentId를 대조한 뒤 결제 참조를 저장하고 승인 명령을 낸다. 결제사 호출은 응답 밖이다(ADR-0015). 접수 때 재고 예약을 그 결제의 승인 기한(인증 + 10분)까지 늘린다. 재고 예약 만료 작업과 경합하면 하나만 이긴다(P-T42 ③). 승인 직전에 PostgreSQL product_stock을 조건부로 확정한다(data.md §4 5). payment-svc ConfirmPayment에는 order_kind MERCH로 회차 칸을 비워 보내고, 결제 원장은 payment.order_kind MERCH·event_id NULL로 적는다(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 1·2). 같은 트랜잭션에서 한정 상품마다 product_stock을 stock >= 수량 조건으로 깎고, 0행이면 주문을 실패로 끝내고 409 merch-sold-out이며 승인 명령을 내지 않는다(ADR-0300 결정 5)
  * @summary 굿즈 주문의 결제 접수(202). 결제사별 본문은 티켓과 같다
  */
 export const CreateShopOrderPaymentAcceptanceParams = zod.object({

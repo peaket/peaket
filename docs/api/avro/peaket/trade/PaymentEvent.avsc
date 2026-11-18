@@ -2,12 +2,16 @@
   "type": "record",
   "name": "PaymentEvent",
   "namespace": "peaket.trade",
-  "doc": "결제 사건(승인·실패·UNKNOWN·취소 등). 토픽 trade.payments, 키 eventId(회차). payment-svc Outbox에서 나간다.",
+  "doc": "결제 사건(승인·실패·UNKNOWN·취소 등). 토픽 trade.payments, 키는 orderKind TICKET이면 eventId(회차), MERCH면 orderId(주문, ADR-0299 결정 4). payment-svc Outbox에서 나간다.",
   "fields": [
     {
       "name": "eventId",
-      "doc": "회차 ID",
-      "type": "string"
+      "doc": "회차 ID. 굿즈·티켓 연동 부가 상품(orderKind MERCH)은 null이다(2026-11-18 필수에서 null 허용으로 풂, 소비자 먼저, ADR-0299 결정 4)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
     },
     {
       "name": "orderId",
@@ -201,6 +205,21 @@
           ]
         }
       ]
+    },
+    {
+      "name": "orderKind",
+      "doc": "주문 종류. TICKET은 공연 예매(purchase-svc), MERCH는 굿즈·티켓 연동 부가 상품(core-svc shop)이다. 이 칸 전에 낸 사건은 기본값 TICKET으로 읽는다. 생산자는 UNRECOGNIZED를 내지 않는다. purchase-svc 소비자는 TICKET이 아닌 사건을 반영하지 않고 건너뛴다(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 4)",
+      "type": {
+        "type": "enum",
+        "name": "PaymentEventOrderKind",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "TICKET",
+          "MERCH"
+        ]
+      },
+      "default": "TICKET"
     }
   ]
 }

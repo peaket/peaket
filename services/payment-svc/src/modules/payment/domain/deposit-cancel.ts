@@ -1,7 +1,7 @@
 // 입금 전 취소의 값과 규칙(docs/features/payment.md §6 '입금 전 취소와 입금 오류 되돌림의 첫 구현', BUILD_ORDER HOT-152, ADR-0062).
 // 프레임워크·저장소를 모른다(순수 값과 함수). 결제사 호출과 쓰기는 application/cancel-deposit-payment.ts가 한다.
 import { createHash } from 'node:crypto';
-import { isLowerUuid, PaymentInputError, type PaymentLedgerStatus } from './confirm-command.js';
+import { isLowerUuid, PaymentInputError, type PaymentLedgerStatus, type PaymentOrderKind } from './confirm-command.js';
 import type { CancelResult, PgName, QueryResult } from './payment-gateway.js';
 
 /** 취소 ID: 결제사 멱등키 cancel-{취소 ID}의 재료(CANCEL_IDEM_KEY와 같은 글자). 9~64자라 멱등키가 포트원 규격 16자 이상이 된다(docs/features/payment.md §4.1 '취소 ID의 길이') */
@@ -33,7 +33,10 @@ export interface DepositCancelInput {
 export interface DepositCancelTarget {
   readonly paymentId: string;
   readonly orderId: string;
-  readonly eventId: string;
+  /** 회차 ID. 굿즈(orderKind MERCH)는 null(ADR-0299 결정 1) */
+  readonly eventId: string | null;
+  /** 주문 종류. 없으면 TICKET(ADR-0299 결정 4) */
+  readonly orderKind?: PaymentOrderKind;
   readonly attemptNo: number;
   readonly pg: PgName;
   readonly paymentRef: string;

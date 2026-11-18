@@ -5,7 +5,7 @@
 // - 금액은 결제사 승인일 때만 견준다(취소 줄의 금액은 취소 금액이다).
 // - 주문 ID가 다르면 금액·상태를 보기 전에 불일치다(다른 주문의 거래로 원장을 바꾸지 않는다).
 // - 원장 없음은 돈이 남아 있는 거래(승인·부분 취소)만 불일치다.
-import type { PaymentLedgerStatus } from './confirm-command.js';
+import type { PaymentLedgerStatus, PaymentOrderKind } from './confirm-command.js';
 import type { PgName, QueryStatus } from './payment-gateway.js';
 
 /** 정비 일 이름 */
@@ -99,7 +99,10 @@ export interface ReconSeen {
 export interface ReconLedger {
   readonly paymentId: string;
   readonly orderId: string;
-  readonly eventId: string;
+  /** 회차 ID. 굿즈(orderKind MERCH)는 null(ADR-0299 결정 1) */
+  readonly eventId: string | null;
+  /** 주문 종류(payment.order_kind). 닫기가 내는 사건의 orderKind·키가 된다. 없으면 TICKET */
+  readonly orderKind?: PaymentOrderKind;
   readonly attemptNo: number;
   readonly pg: PgName;
   readonly paymentRef: string;

@@ -17,6 +17,9 @@ service PaymentService {
   // 고른 결제사를 쓸 수 없으면 UNAVAILABLE이고 글은 pg-unavailable이다(다른 결제사로 넘기지 않는다, 추천 적용 2026-11-09, BUILD_ORDER PRF-190).
   // 고른 결제사가 새 결제 일시 정지거나 채널이 없거나 비활성이면 FAILED_PRECONDITION이고 글은 new-payment-paused다. 이미 받은 시험 재개 주문의 재호출은 다시 통과하고,
   // 멱등 재생(pinned_pg)은 정지를 보지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-201).
+  // order_kind는 ORDER_KIND_TICKET과 ORDER_KIND_MERCH를 받는다(그 밖은 INVALID_ARGUMENT). 굿즈(MERCH)는 event_id가 비어도 되고, 있으면(티켓 연동 부가 상품의 연결 회차)
+  // 그 회차의 전환·지정 행을 보고 비면 플랫폼 행과 플랫폼 기본·대체만 본다. 굿즈의 복귀 주소는 {웹 출처}/shop/checkout/return?order={order_id}&pg={결제사}(성공·실패 같음)이고,
+  // 가상계좌를 허용 수단에서 빼며 pay_method VIRTUAL_ACCOUNT는 INVALID_ARGUMENT다(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 3).
   // 전환이 포트원을 고르면 두 번째 읽기로 포트원 채널의 관측 하위 결제사 표(파드 캐시, 읽지 못하면 10초 안의 마지막 값, 그런 값이 없으면 실패)를 보고,
   // 그 수단의 채널이 하위 결제사 검사로 빠지면 대체가 없을 때처럼 기준 결제사로 간다(switched 거짓, 추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰).
   rpc PrepareCheckout(PrepareCheckoutRequest) returns (PrepareCheckoutResponse);
@@ -166,6 +169,7 @@ message ConfirmPaymentRequest {
   // 서버 금액. 토스는 복귀 금액과 대조하고, 포트원은 승인 API의 totalAmount로 넘겨 포트원이 대조한다.
   peaket.common.v1.Money amount = 6;
   // 회차 ID. 결제 원장 payment.event_id와 결제 사건의 eventId가 이 값이다(추천 적용 2026-11-09, BUILD_ORDER PRF-180).
+  // order_kind가 MERCH면 비운다(ADR-0299 결정 2).
   string event_id = 7;
   // 결제창 인증 시각(결제 시도의 authenticated_at). 승인 기한(인증 + 10분)의 기준이다.
   google.protobuf.Timestamp authenticated_at = 8;
@@ -175,6 +179,11 @@ message ConfirmPaymentRequest {
   google.protobuf.Timestamp entry_opens_at = 10;
   // 이 회차에서 가상계좌를 내도 되는가(선택, 칸이 없으면 지금처럼 받는다). 거짓인데 승인 답이 입금 대기면 payment-svc가 입금 전 취소로 끝낸다(POL-014, BUILD_ORDER HOT-358 리뷰 H2).
   optional bool virtual_account_allowed = 11;
+  // 주문 종류(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 2). UNSPECIFIED는 TICKET으로 본다(지금 purchase-svc는 이 칸을 보내지 않는다).
+  // TICKET은 event_id가 필수다. MERCH(굿즈·티켓 연동 부가 상품)는 event_id와 entry_opens_at이 비어야 하고, 있으면 INVALID_ARGUMENT이며 아무것도 쓰지 않는다.
+  // 원장 payment.order_kind에 적고, 같은 order_id로 다시 부를 때 attempt_id·pg·amount와 함께 대조한다(다르면 FAILED_PRECONDITION).
+  // 굿즈 결제 사건은 eventId가 null, orderKind가 MERCH이고 Kafka 키는 주문 ID다.
+  OrderKind order_kind = 12;
 }
 
 message TossPaymentRef {

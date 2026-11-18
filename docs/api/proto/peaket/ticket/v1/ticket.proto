@@ -53,6 +53,9 @@ service TicketService {
   rpc CheckReviewEligibility(CheckReviewEligibilityRequest) returns (CheckReviewEligibilityResponse);
 
   // 계정이 그 회차의 유효한 티켓을 가지고 있는지. core-svc shop이 티켓 연동 부가 상품에 쓴다.
+  // account_id·event_id는 둘 다 소문자 UUID이고 아니면 INVALID_ARGUMENT다. 그 계정이 지금 가진 그 회차의 티켓 가운데 상태 ISSUED·ACTIVE만
+  // 티켓 ID와 상태로 돌려준다(없으면 빈 목록). 읽기만 하고 티켓 키·좌석은 싣지 않는다. 부르는 쪽 데드라인 300ms [가정]
+  // (추천 적용 2026-11-18, BAT-600 계획, ADR-0301 결정 1).
   rpc ListHeldTickets(ListHeldTicketsRequest) returns (ListHeldTicketsResponse);
 
   // 팬 월렛의 내 티켓 목록(FR-012, openapi GET /v1/tickets). 계정의 티켓을 최근 발권 순으로 커서 페이지로 준다.

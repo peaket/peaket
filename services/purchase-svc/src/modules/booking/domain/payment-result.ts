@@ -129,6 +129,16 @@ export const PAYMENT_RESULT_WRITES: Readonly<Record<PaymentResultTransition, Pay
  */
 export type PaymentResultSkipReason = 'DUPLICATE' | 'ALREADY_THERE' | 'RECORD_ONLY';
 
+/** 건너뛴 까닭: merch 굿즈·부가 상품 결제(orderKind MERCH), unrecognized 모르는 주문 종류(ADR-0299 결정 4) */
+export const PAYMENT_EVENT_SKIP_REASONS = ['merch', 'unrecognized'] as const;
+export type PaymentEventSkipReason = (typeof PAYMENT_EVENT_SKIP_REASONS)[number];
+
+/** 건너뛴 사건을 세는 곳(운영은 PromPaymentEventSkipSignals, payment_result_skipped_total{reason}) */
+export interface PaymentEventSkipSignals {
+  /** 던지지 않는다 */
+  skipped(reason: PaymentEventSkipReason): void;
+}
+
 /**
  * 보류하는 까닭(held_event로 옮기고 같은 주문의 뒤 사건도 보류, RB-11로 원인을 본 뒤 다시 넣는다). 로그 수준·표시는 PAYMENT_RESULT_HOLD_LOG.
  * - IMPOSSIBLE: 표 밖의 조합(예: CONFIRMED 주문에 새 순번 APPROVED), 주문이 없음 [정함: 없는 주문도 같은 까닭으로 묶는다]
