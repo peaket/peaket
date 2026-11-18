@@ -2,13 +2,13 @@
 // 정규화·낱자·초성 비교는 packages/search-normalize를 쓴다. DB·프레임워크를 모르는 순수 함수만 둔다.
 import {
   compareMatch,
-  convertQwertyToHangul,
   GRADE,
   indexNames,
   matchGrade,
   nameKeys,
   normalize,
   queryKeys,
+  qwertyToHangul,
   searchIndexed,
   type Grade,
   type IndexedName,
@@ -128,6 +128,8 @@ export interface SearchIndex {
 
 export const SEARCH_INDEX = Symbol('SEARCH_INDEX');
 
+// searchIndexed의 한/영 변환과 같은 입력 다듬기(제로폭·한글 채움 문자를 지운다)
+const INVISIBLE = /[​-‍⁠﻿ᅟᅠㅤ]/g;
 const SALE_RANK: Record<CardSaleStatus, number> = { ON_SALE: 0, UPCOMING: 1, SOLD_OUT: 2, ENDED: 3 };
 const collator = new Intl.Collator('ko');
 const byTitle = (a: { title: string; productionId: string }, b: { title: string; productionId: string }) => collator.compare(a.title, b.title) || (a.productionId < b.productionId ? -1 : a.productionId > b.productionId ? 1 : 0);
@@ -153,39 +155,68 @@ export const card = (d: SearchDocument): SearchCard => ({
 /** 이름과 다른 이름·공연장·아티스트 이름을 함께 맞춘다. 결과 등급은 가장 좋은 하나 */
 const searchNamesOf = (d: SearchDocument): string[] => [d.title, ...d.aliases, ...(d.placeName ? [d.placeName] : []), ...d.artists.map((a) => a.name)];
 
-/** 문서의 이름 색인(공연명·다른 이름·공연장·아티스트). 요청마다 만들지 않게 어댑터가 들고 있는다(COV2-07) */
+/** 문서의 이름 색인(공연명·다른 이름·공연장·아티스트). 요청마다 만들지 않게 어댑터가 들고 있는다(COV2-07). 차례는 뜻이 없다(matchGrades는 공연마다 등급만 본다) */
 export type DocumentIndex = ReadonlyArray<IndexedName<NameItem>>;
 
-export function indexDocuments(docs: readonly SearchDocument[]): DocumentIndex {
-  return indexNames(docs.map((d) => ({ id: d.productionId, name: d.title, aliases: searchNamesOf(d).slice(1) })));
+/** 이름 하나의 비교 값을 이미 들고 있으면 돌려주는 함수(파드의 자동완성 사전, ADR-0271 결정 23). 없으면 undefined이고 그때는 새로 만든다 */
+export type NameKeysLookup = (name: string) => NameKeys | undefined;
+
+/**
+ * keysOf를 주면 이름 비교 값을 거기서 먼저 찾는다. 비교 값은 이름 글의 순수 함수(nameKeys)라 같은 글이면 같은 값이고,
+ * 판이 바뀌어 이름이 달라진 줄은 새 글로 찾으므로 옛 이름으로 맞지 않는다
+ */
+export function indexDocuments(docs: readonly SearchDocument[], keysOf?: NameKeysLookup): DocumentIndex {
+  const keyOf = keysOf ? (name: string) => keysOf(name) ?? nameKeys(name) : nameKeys;
+  return docs.map((d) => {
+    const names = searchNamesOf(d);
+    return { item: { id: d.productionId, name: d.title, aliases: names.slice(1) }, keys: names.map((n) => keyOf(n)) };
+  });
 }
 
-/** 색인에서 공연마다 가장 좋은 일치 등급. 로마자만 쳤고 0건이면 한/영 변환으로 다시 찾는다(noConvert면 하지 않는다) */
-export function matchGrades(index: DocumentIndex, q: string, noConvert: boolean): Map<string, Grade> {
+/** 입력 하나의 등급과, 한/영 변환으로 찾았으면 그 변환 값(실제로 찾은 값. 아니면 null) */
+export interface Graded {
+  grades: Map<string, Grade>;
+  converted: string | null;
+}
+
+/** 비교 값 하나로 공연마다 가장 좋은 일치 등급 */
+function gradesOf(index: DocumentIndex, qk: QueryKeys): Map<string, Grade> {
   const out = new Map<string, Grade>();
-  if (noConvert) {
-    const qk = queryKeys(q);
-    for (const x of index) {
-      let best: Grade = GRADE.NONE;
-      for (const k of x.keys) {
-        const g = matchGrade(qk, k);
-        if (g < best) best = g;
-      }
-      if (best !== GRADE.NONE) out.set(x.item.id, best);
+  for (const x of index) {
+    let best: Grade = GRADE.NONE;
+    for (const k of x.keys) {
+      const g = matchGrade(qk, k);
+      if (g < best) best = g;
     }
-    return out;
+    if (best !== GRADE.NONE) out.set(x.item.id, best);
   }
-  for (const m of searchIndexed(index, q)) out.set(m.item.id, m.grade);
   return out;
 }
 
+/**
+ * 색인에서 공연마다 가장 좋은 일치 등급. 로마자만 쳤고 0건이면 한/영 변환으로 다시 찾는다(noConvert면 하지 않는다).
+ * 차례는 searchIndexed와 같다: 친 그대로의 변환 → (0건이면) 소문자 값의 변환. 변환 값을 만들 수 없으면 그 단계를 건너뛴다(ADR-0271 결정 24)
+ */
+export function matchGrades(index: DocumentIndex, q: string, noConvert: boolean): Graded {
+  const qk = queryKeys(q);
+  const first = gradesOf(index, qk);
+  if (noConvert || first.size > 0) return { grades: first, converted: null };
+  const raw = q.normalize('NFKC').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
+  if (!/^[a-zA-Z ]+$/.test(raw)) return { grades: first, converted: null };
+  const asTyped = qwertyToHangul(raw);
+  const exact = asTyped === null ? first : gradesOf(index, queryKeys(asTyped));
+  if (exact.size > 0) return { grades: exact, converted: asTyped };
+  if (raw === qk.norm) return { grades: exact, converted: null };
+  const lower = qwertyToHangul(qk.norm);
+  const last = lower === null ? exact : gradesOf(index, queryKeys(lower));
+  return { grades: last, converted: last.size > 0 ? lower : null };
+}
+
 /** 로마자만인 입력이 한/영 변환으로 찾았는지. 변환하지 않았으면 null */
-function convertedQuery(q: string, noConvert: boolean, hit: boolean): { from: string; to: string } | null {
-  if (noConvert || !hit) return null;
+function convertedQuery(q: string, converted: string | null, hit: boolean): { from: string; to: string } | null {
+  if (converted === null || !hit) return null;
   const raw = q.normalize('NFKC').replace(/\s+/g, ' ').trim();
-  if (!/^[a-zA-Z ]+$/.test(raw)) return null;
-  const to = convertQwertyToHangul(raw);
-  return to === normalize(q) ? null : { from: raw, to };
+  return converted === normalize(q) ? null : { from: raw, to: converted };
 }
 
 const overlapDates = (d: SearchDocument, from?: string, to?: string): boolean => {
@@ -211,9 +242,12 @@ function filterDocs(docs: readonly SearchDocument[], q: SearchQuery, grades: Map
   });
 }
 
-function sortDocs(docs: SearchDocument[], q: SearchQuery, grades: Map<string, Grade>): SearchDocument[] {
-  const sort = q.sort ?? (q.q.trim() === '' ? 'OPEN_SOON' : 'RELEVANCE');
-  return [...docs].sort((a, b) => {
+type SortKey = NonNullable<SearchQuery['sort']>;
+const sortOf = (q: SearchQuery): SortKey => q.sort ?? (q.q.trim() === '' ? 'OPEN_SOON' : 'RELEVANCE');
+
+/** 정렬 차례(ADR-0268 결정 3). 마지막은 가나다 → ID라 늘 하나의 차례가 된다 */
+function comparatorOf(sort: SortKey, grades: Map<string, Grade>): (a: SearchDocument, b: SearchDocument) => number {
+  return (a, b) => {
     if (sort === 'RELEVANCE') {
       const g = (grades.get(a.productionId) ?? GRADE.NONE) - (grades.get(b.productionId) ?? GRADE.NONE);
       if (g !== 0) return g;
@@ -230,7 +264,20 @@ function sortDocs(docs: SearchDocument[], q: SearchQuery, grades: Map<string, Gr
     const an = a.nextOpenAt ?? a.periodStart ?? '9999-12-31';
     const bn = b.nextOpenAt ?? b.periodStart ?? '9999-12-31';
     return an < bn ? -1 : an > bn ? 1 : byTitle(a, b);
-  });
+  };
+}
+
+function sortDocs(docs: SearchDocument[], q: SearchQuery, grades: Map<string, Grade>): SearchDocument[] {
+  return [...docs].sort(comparatorOf(sortOf(q), grades));
+}
+
+/** 정확도 순의 맨 위(관련 공연의 근거). 요청 정렬이 정확도 순이면 정렬한 첫째이고, 아니면 한 번 훑어 고른다(같은 후보를 두 번 정렬하지 않는다, ADR-0271 결정 23) */
+function topOf(filtered: readonly SearchDocument[], sorted: readonly SearchDocument[], q: SearchQuery, grades: Map<string, Grade>): SearchDocument | undefined {
+  if (sortOf(q) === 'RELEVANCE') return sorted[0];
+  const cmp = comparatorOf('RELEVANCE', grades);
+  let top: SearchDocument | undefined;
+  for (const d of filtered) if (top === undefined || cmp(d, top) < 0) top = d;
+  return top;
 }
 
 /** 편집 거리(넣기·빼기·바꾸기의 최소 횟수) */
@@ -253,6 +300,25 @@ function distance(x: readonly string[], y: readonly string[]): number {
  * 거리 기준은 '입력의 낱자 길이 ÷ 4(몫), 최소 1' [가정]이다. 가장 가까운 이름 하나, 같으면 가나다 → 대상 ID(이름 목록의 차례와 상관없이 같은 답)
  */
 export function didYouMeanOf(titles: Iterable<{ title: string; productionId: string }>, q: string): string | null {
+  return didYouMeanIndexed(Array.from(titles, (t) => titleKeyOf(t)), q);
+}
+
+/** 오타 제안에 쓰는 공연명 하나의 비교 값(초성 첫 글자와 낱자 배열). 사전이 한 번 만들어 둔다(요청마다 모든 공연명에 만들지 않게, ADR-0271 결정 23) */
+export interface TitleKey {
+  title: string;
+  productionId: string;
+  head: string | undefined;
+  jamo: readonly string[];
+}
+
+/** keys를 주지 않으면 공연명에서 새로 만든다 */
+export function titleKeyOf(t: { title: string; productionId: string }, keys?: NameKeys): TitleKey {
+  const k = keys ?? nameKeys(t.title);
+  return { title: t.title, productionId: t.productionId, head: k.chosung[0], jamo: [...k.jamo] };
+}
+
+/** didYouMeanOf와 같은 답을 미리 만든 공연명 비교 값으로 */
+export function didYouMeanIndexed(titles: Iterable<TitleKey>, q: string): string | null {
   const qk = nameKeys(q);
   const qj = [...qk.jamo];
   if (qj.length === 0) return null;
@@ -260,9 +326,8 @@ export function didYouMeanOf(titles: Iterable<{ title: string; productionId: str
   const head = qk.chosung[0];
   let best: { title: string; productionId: string; d: number } | null = null;
   for (const t of titles) {
-    const k = nameKeys(t.title);
-    const tj = [...k.jamo];
-    if (k.chosung[0] !== head || Math.abs(tj.length - qj.length) > 2) continue;
+    const tj = t.jamo;
+    if (t.head !== head || Math.abs(tj.length - qj.length) > 2) continue;
     const v = distance(qj, tj);
     if (v > limit) continue;
     if (best === null || v < best.d || (v === best.d && byTitle(t, best) < 0)) best = { title: t.title, productionId: t.productionId, d: v };
@@ -345,8 +410,8 @@ export interface RankedSearch {
 export function searchDocuments(docs: readonly SearchDocument[], q: SearchQuery, index?: DocumentIndex): SearchOutcome {
   if (q.page > SEARCH_MAX_PAGE) throw new Error('page');
   const query = q.q.trim();
-  const grades = query === '' ? new Map<string, Grade>() : matchGrades(index ?? indexDocuments(docs), query, q.noConvert);
-  const ranked = rankMatched(docs, q, grades);
+  const graded = query === '' ? { grades: new Map<string, Grade>(), converted: null } : matchGrades(index ?? indexDocuments(docs), query, q.noConvert);
+  const ranked = rankMatched(docs, q, graded);
   const placeName = q.placeId !== undefined ? (docs.find((d) => d.placeId === q.placeId)?.placeName ?? null) : null;
   const artistName = q.artistId !== undefined ? (docs.flatMap((d) => d.artists).find((a) => a.artistId === q.artistId)?.name ?? null) : null;
   return finishSearch(ranked, q, {
@@ -375,8 +440,9 @@ export function finishSearch(
  * matched: 검색어가 있으면 그 후보 공연(등급이 있는 공연을 모두 담은 것), 없으면 모든 공연. grades: 후보의 일치 등급.
  * 필터를 푼 수(relaxedTotal)는 필터 없이 센 후보 수다
  */
-export function rankMatched(matched: readonly SearchDocument[], q: SearchQuery, grades: Map<string, Grade>): RankedSearch {
+export function rankMatched(matched: readonly SearchDocument[], q: SearchQuery, graded: Graded): RankedSearch {
   if (q.page > SEARCH_MAX_PAGE) throw new Error('page');
+  const { grades } = graded;
   const query = q.q.trim();
   const docs = matched;
   const filtered = filterDocs(docs, q, query === '' ? null : grades);
@@ -384,7 +450,7 @@ export function rankMatched(matched: readonly SearchDocument[], q: SearchQuery, 
   const total = Math.min(sorted.length, SEARCH_TOTAL_CAP);
   const pageItems = sorted.slice((q.page - 1) * SEARCH_PAGE_SIZE, q.page * SEARCH_PAGE_SIZE).map(card);
   const relaxed = filtered.length === 0 && hasFilters(q) ? filterDocs(docs, { ...q, genre: undefined, placeId: undefined, artistId: undefined, dateFrom: undefined, dateTo: undefined, status: undefined }, query === '' ? null : grades).length : null;
-  const top = filtered.length > 0 ? sortDocs(filtered, { ...q, sort: 'RELEVANCE' }, grades)[0] : undefined;
+  const top = topOf(filtered, sorted, q, grades);
   return {
     outcome: {
       items: pageItems,
@@ -393,7 +459,7 @@ export function rankMatched(matched: readonly SearchDocument[], q: SearchQuery, 
       total,
       totalCapped: sorted.length > SEARCH_TOTAL_CAP,
       totalPages: Math.ceil(total / SEARCH_PAGE_SIZE),
-      query: { normalized: normalize(query), converted: convertedQuery(query, q.noConvert, filtered.length > 0) },
+      query: { normalized: normalize(query), converted: convertedQuery(query, graded.converted, filtered.length > 0) },
       relaxedTotal: relaxed,
     },
     top,
@@ -456,13 +522,21 @@ function assembleSuggestions(
   const prodItems = productions.slice(0, SUGGESTION_QUOTA.PRODUCTION).map((m) => ({ ...suggestionCard(byId.get(m.item.id)!), matches: positions(m.item.name, q) }));
   const artistItems = artists.slice(0, SUGGESTION_QUOTA.ARTIST).map((m) => ({ kind: 'ARTIST' as const, label: m.item.name, artistId: m.item.id, matches: positions(m.item.name, q) }));
   const placeItems = places.slice(0, SUGGESTION_QUOTA.PLACE).map((m) => ({ kind: 'PLACE' as const, label: m.item.name, placeId: m.item.id, matches: positions(m.item.name, q) }));
-  const items = [...prodItems, ...artistItems, ...placeItems];
-  const rest = [
-    ...productions.slice(SUGGESTION_QUOTA.PRODUCTION).map((m) => ({ ...suggestionCard(byId.get(m.item.id)!), matches: positions(m.item.name, q) })),
-    ...artists.slice(SUGGESTION_QUOTA.ARTIST).map((m) => ({ kind: 'ARTIST' as const, label: m.item.name, artistId: m.item.id, matches: positions(m.item.name, q) })),
-    ...places.slice(SUGGESTION_QUOTA.PLACE).map((m) => ({ kind: 'PLACE' as const, label: m.item.name, placeId: m.item.id, matches: positions(m.item.name, q) })),
-  ];
-  return { query: normalized, items: [...items, ...rest].slice(0, SUGGESTION_MAX) };
+  const items: SuggestionItem[] = [...prodItems, ...artistItems, ...placeItems];
+  // 빈 몫을 채울 만큼만 카드와 일치 위치를 만든다(나머지 일치 전체에 만들지 않는다, ADR-0271 결정 23)
+  const room = SUGGESTION_MAX - items.length;
+  const rest: Array<{ kind: Kind; m: NameMatch<NameItem> }> = [
+    ...productions.slice(SUGGESTION_QUOTA.PRODUCTION, SUGGESTION_QUOTA.PRODUCTION + room).map((m) => ({ kind: 'PRODUCTION' as const, m })),
+    ...artists.slice(SUGGESTION_QUOTA.ARTIST, SUGGESTION_QUOTA.ARTIST + room).map((m) => ({ kind: 'ARTIST' as const, m })),
+    ...places.slice(SUGGESTION_QUOTA.PLACE, SUGGESTION_QUOTA.PLACE + room).map((m) => ({ kind: 'PLACE' as const, m })),
+  ].slice(0, room);
+  for (const { kind, m } of rest) {
+    const matches = positions(m.item.name, q);
+    if (kind === 'PRODUCTION') items.push({ ...suggestionCard(byId.get(m.item.id)!), matches });
+    else if (kind === 'ARTIST') items.push({ kind, label: m.item.name, artistId: m.item.id, matches });
+    else items.push({ kind, label: m.item.name, placeId: m.item.id, matches });
+  }
+  return { query: normalized, items };
 }
 
 /** 메모리 어댑터가 공연·회차에서 문서를 만든다. DB 어댑터는 같은 모양을 SQL에서 만든다 */
@@ -614,10 +688,28 @@ interface DictIndex {
   live: Set<string>;
   liveArtists: Set<string>;
   livePlaces: Set<string>;
+  /** 오타 제안용 공연명 비교 값(모든 문서, correct가 쓴다) */
+  titles: TitleKey[];
+  /** 이름 글 → 비교 값(검색 어댑터가 후보 공연의 이름 비교 값을 다시 만들지 않게, ADR-0271 결정 23). 크기는 이름 줄 수 이하다 */
+  byName: Map<string, NameKeys>;
 }
 
 type Kind = SearchTermRow['kind'];
 type KindMatches = Record<Kind, NameMatch<NameItem>[]>;
+
+const byMatch = (a: NameMatch<NameItem>, b: NameMatch<NameItem>): number => compareMatch({ grade: a.grade, name: a.item.name, id: a.item.id }, { grade: b.grade, name: b.item.name, id: b.item.id });
+
+/** 차례(등급 → 가나다 → ID, 늘 하나의 차례)대로 앞의 SUGGESTION_MAX개만 남기며 넣는다. 다 찼고 마지막보다 뒤면 넣지 않는다 */
+function keepTop(list: NameMatch<NameItem>[], m: NameMatch<NameItem>): void {
+  const full = list.length >= SUGGESTION_MAX;
+  if (full && byMatch(m, list[SUGGESTION_MAX - 1]!) >= 0) return;
+  let i = full ? SUGGESTION_MAX - 1 : list.length;
+  while (i > 0 && byMatch(m, list[i - 1]!) < 0) {
+    list[i] = list[i - 1]!;
+    i--;
+  }
+  list[i] = m;
+}
 
 const byKey = (a: KeyRef, b: KeyRef) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -632,9 +724,6 @@ function prefixIds(keys: readonly KeyRef[], prefix: string, out: Set<string>): v
   }
   for (let i = lo; i < keys.length && keys[i]!.key.startsWith(prefix); i++) out.add(keys[i]!.id);
 }
-
-// searchIndexed의 한/영 변환과 같은 입력 다듬기(제로폭·한글 채움 문자를 지운다)
-const INVISIBLE = /[​-‍⁠﻿ᅟᅠㅤ]/g;
 
 /**
  * 자동완성 메모리 사전(docs/features/search.md §2.3·§4.4, ADR-0271 결정 6). suggest·correct는 DB를 부르지 않고, 한 요청이 사전 전체를 훑지 않는다.
@@ -662,7 +751,7 @@ export class SuggestionDictionary {
     return this.#version;
   }
 
-  /** 처음 통째로 읽기를 마쳤는가(그 전에는 자동완성이 빈 후보로 답하고 준비 확인이 실패한다, ADR-0271 결정 14) */
+  /** 처음 통째로 읽기를 마쳤는가(그 전에는 자동완성이 빈 후보·no-store로 답한다. 준비 확인에는 넣지 않는다, ADR-0271 결정 14) */
   get ready(): boolean {
     return this.#loaded;
   }
@@ -765,13 +854,17 @@ export class SuggestionDictionary {
     const live = new Set<string>();
     const liveArtists = new Set<string>();
     const livePlaces = new Set<string>();
+    const byName = new Map<string, NameKeys>();
+    for (const e of this.#terms.values()) byName.set(e.row.displayName, e.keys);
+    const titles: TitleKey[] = [];
     for (const d of this.#docs.values()) {
+      titles.push(titleKeyOf(d, byName.get(d.title)));
       if (d.saleStatus === 'ENDED') continue;
       live.add(d.productionId);
       for (const a of d.artists) liveArtists.add(a.artistId);
       if (d.placeId && d.placeName) livePlaces.add(d.placeId);
     }
-    this.#index = { jamo, chosung, bigram, live, liveArtists, livePlaces };
+    this.#index = { jamo, chosung, bigram, live, liveArtists, livePlaces, titles, byName };
     return this.#index;
   }
 
@@ -807,8 +900,8 @@ export class SuggestionDictionary {
       const prev = best.get(key);
       if (!prev || grade < prev.grade) best.set(key, { kind, id: targetId, name, grade });
     }
-    for (const b of best.values()) out[b.kind].push({ item: { id: b.id, name: b.name, aliases: [] }, grade: b.grade });
-    for (const k of ['PRODUCTION', 'ARTIST', 'PLACE'] as const) out[k].sort((a, b) => compareMatch({ grade: a.grade, name: a.item.name, id: a.item.id }, { grade: b.grade, name: b.item.name, id: b.item.id }));
+    // 종류마다 앞의 SUGGESTION_MAX개만 차례대로 둔다(자동완성은 종류마다 그보다 많이 쓰지 않는다). 일치 전체를 정렬하지 않는다(ADR-0271 결정 23)
+    for (const b of best.values()) keepTop(out[b.kind], { item: { id: b.id, name: b.name, aliases: [] }, grade: b.grade });
     return out;
   }
 
@@ -824,17 +917,30 @@ export class SuggestionDictionary {
     let lower: KindMatches | undefined;
     const pick = (k: Kind): NameMatch<NameItem>[] => {
       if (first[k].length > 0 || !roman) return first[k];
-      exact ??= this.#run(queryKeys(convertQwertyToHangul(raw)));
+      // 변환 값을 만들 수 없으면 그 단계를 건너뛴다(ADR-0271 결정 24)
+      if (exact === undefined) {
+        const to = qwertyToHangul(raw);
+        exact = to === null ? first : this.#run(queryKeys(to));
+      }
       if (exact[k].length > 0 || raw === qk.norm) return exact[k];
-      lower ??= this.#run(queryKeys(convertQwertyToHangul(qk.norm)));
+      if (lower === undefined) {
+        const to = qwertyToHangul(qk.norm);
+        lower = to === null ? exact : this.#run(queryKeys(to));
+      }
       return lower[k];
     };
     return assembleSuggestions(q, normalized, pick('PRODUCTION'), pick('ARTIST'), pick('PLACE'), this.#docs);
   }
 
-  /** 오타 제안(didYouMean). 검색 결과가 0건일 때만 부른다 */
+  /** 오타 제안(didYouMean). 검색 결과가 0건일 때만 부른다. 공연명 비교 값은 사전 색인을 만들 때 한 번 만든다 */
   correct(input: string): string | null {
-    return didYouMeanOf(this.#docs.values(), input);
+    return didYouMeanIndexed(this.#built().titles, input);
+  }
+
+  /** 이름 글 하나의 비교 값(사전에 그 글의 이름 줄이 있으면). 첫 통째로 읽기 전이나 없는 글이면 undefined */
+  keysOf(name: string): NameKeys | undefined {
+    if (!this.#loaded) return undefined;
+    return this.#built().byName.get(name);
   }
 }
 

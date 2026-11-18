@@ -2,8 +2,18 @@
 // 낱자·초성은 es-hangul을 쓴다. NFD로 풀면 받침 ㅁ과 첫소리 ㅁ이 다른 문자라 조합 중인 글자가 맞지 않는다(§3.1).
 import { canBeChoseong, convertQwertyToHangul, disassemble, getChoseong } from 'es-hangul';
 
-/** 한/영 변환 값(검색 화면의 '바꿔 찾기' 안내와 서버의 변환 감지에 쓴다) */
-export { convertQwertyToHangul };
+/**
+ * 한/영 변환 값(검색 화면의 '바꿔 찾기' 안내와 서버의 변환 감지에 쓴다). 변환 값을 만들 수 없는 입력(첫소리 없이 겹모음 뒤에 자음이 오는 'npt'·'mla' 등.
+ * es-hangul이 오류를 던진다)이면 null이다. 부르는 쪽은 그 변환 단계를 건너뛴다(docs/features/search.md §3.2, ADR-0271 결정 24).
+ * 던지는 원래 함수는 내보내지 않는다
+ */
+export function qwertyToHangul(input: string): string | null {
+  try {
+    return convertQwertyToHangul(input);
+  } catch {
+    return null;
+  }
+}
 
 /** 호환 자모 94자(U+3131~U+318E)를 NFKC로 바꾼 값 → 호환 자모(§3.1 1단계) */
 const JAMO_BACK = new Map<string, string>();
@@ -158,9 +168,11 @@ export function searchIndexed<T extends NameItem>(index: ReadonlyArray<IndexedNa
   // 변환에는 소문자로 바꾸기 전 값을 쓴다(Shift로 친 쌍자음·겹모음이 사라지지 않게)
   const raw = input.normalize('NFKC').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
   if (!/^[a-zA-Z ]+$/.test(raw)) return found;
-  const exact = run(index, queryKeys(convertQwertyToHangul(raw)));
+  const asTyped = qwertyToHangul(raw);
+  const exact = asTyped === null ? found : run(index, queryKeys(asTyped));
   if (exact.length > 0 || raw === q.norm) return exact;
-  return run(index, queryKeys(convertQwertyToHangul(q.norm)));
+  const lower = qwertyToHangul(q.norm);
+  return lower === null ? exact : run(index, queryKeys(lower));
 }
 
 /** 이름 목록에서 찾는다: 등급 → 가나다 → ID 차례 */
