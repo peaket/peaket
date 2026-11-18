@@ -14,9 +14,9 @@
 //   파일(도구 시험 자료)은 뺀다(ledger.mjs와 같다). 파일 40개까지 적는다
 // CI 잡 표(JOBS·CI_AREAS)의 근거(2026-11-10): .github/workflows/ci.yml(범위 잡 changes와 범위마다 부르는 워크플로), tools/ci/changes.mjs의
 //   RULES(경로 → 범위)·WIDEN_JS(node 전체), ci-node.yml(node: typecheck·test·build·lint와 통합 시험 단계), ci-web.yml(tokens·visual·queue-room·
-//   purchase·rich-text·ds·seed-css·budgets·seatmap-pkg. 잡마다 빌드·검사하는 앱과 패키지), contract-check.yml(contracts), docs-check.yml(docs),
+//   purchase·rich-text·ds·seed-css·budgets·seatmap-pkg·reflow. 잡마다 빌드·검사하는 앱과 패키지), contract-check.yml(contracts), docs-check.yml(docs),
 //   tools-check.yml(tools), loadtest-check.yml(loadtest), spec-check.yml(spec), ci-kind.yml(kind), build-image.yml(build).
-//   영역 → 잡은 그 영역을 직접 빌드·검사하는 잡이다. web 범위가 켜지면 ci-web.yml의 잡 아홉이 모두 도는 것은 따로 알린다.
+//   영역 → 잡은 그 영역을 직접 빌드·검사하는 잡이다. web 범위가 켜지면 ci-web.yml의 잡 열이 모두 도는 것은 따로 알린다(reflow는 2026-11-19 BAT-171에서 더함).
 //   brief.test.mjs가 잡 이름과 통합 시험 패키지가 실제 워크플로에 있는지 본다
 // 크기: MAX_CHARS(6만 자)를 넘으면 LEVELS 차례로 3·4·5를 줄이고 끝 '줄임'에 줄인 것을 적는다(항목 이름, 정본 자리의 문서 경로·줄 번호는 남긴다)
 // 쓰는 법: node tools/ci/brief.mjs --batch <묶음 ID> [--out <파일>] [--root <저장소>]
@@ -291,6 +291,7 @@ export const JOBS = {
   'web / seed-css': { file: 'ci-web.yml', what: 'SEED CSS 층(FE-T36, 앱 다섯 PoC 빌드)' },
   'web / budgets': { file: 'ci-web.yml', what: '운영 빌드의 경로별 첫 JS 예산·Lighthouse·대기실 FE-T1·CSP(FE-T35·FE-T30)·정적 자산, @peaket/config 정본 대조' },
   'web / seatmap-pkg': { file: 'ci-web.yml', what: '좌석맵 패키지 세 엔진' },
+  'web / reflow': { file: 'ci-web.yml', what: '재배치·초점 가림(FE-T31·FE-T18)·인앱 브라우저 안내(SCR-058)·월렛 워커(HOT-390) 세 엔진, web·partner·console 운영 빌드' },
   'security-scan / dependencies': { file: 'security-scan.yml', what: 'pnpm 내장 의존성 취약점·라이선스 검사와 조치 기한·예외 만료 판정(tools/ci/vuln-deadline.mjs, BAS-010 ①)' },
 };
 
@@ -310,9 +311,10 @@ const top2 = (p) => {
  */
 export const CI_AREAS = [
   [/^apps\/web\/queue-room\//, () => 'apps/web/queue-room', ['web / queue-room', 'web / visual', 'web / budgets', 'node / node']],
-  [/^apps\/web\//, top2, ['web / budgets', 'web / seed-css', 'node / node']],
-  [/^apps\/partner\//, top2, ['web / rich-text', 'web / budgets', 'web / seed-css', 'node / node']],
-  [/^apps\/(console-host|scanner|forensics)\//, top2, ['web / budgets', 'web / seed-css', 'node / node']],
+  [/^apps\/web\//, top2, ['web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
+  [/^apps\/partner\//, top2, ['web / rich-text', 'web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
+  [/^apps\/console-host\//, top2, ['web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
+  [/^apps\/(scanner|forensics)\//, top2, ['web / budgets', 'web / seed-css', 'node / node']],
   [/^apps\//, top2, ['node / node']],
   [/^packages\/ds\//, top2, ['web / tokens', 'web / visual', 'web / ds', 'node / node']],
   [/^packages\/seatmap\//, top2, ['web / seatmap-pkg', 'node / node']],
@@ -327,7 +329,8 @@ export const CI_AREAS = [
   [/^(specs|tools\/spec-check)\//, (p) => /^(specs|tools\/spec-check)/.exec(p)[1], ['spec-check / spec']],
   [/^tools\/local\//, top2, ['kind / kind', 'tools-check / tools']],
   [/^tools\/doc-check\//, top2, ['docs-check / docs']],
-  [/^tools\/(web-checks|storybook)\//, top2, ['web / visual']],
+  [/^tools\/web-checks\//, top2, ['web / visual', 'web / reflow']],
+  [/^tools\/storybook\//, top2, ['web / visual']],
   [/^tools\//, top2, ['tools-check / tools']],
   [/^loadtest\//, () => 'loadtest', ['loadtest-check / loadtest']],
   [/^docs\/api\//, () => 'docs/api', ['contract-check / contracts', 'docs-check / docs', 'node / node']],
@@ -336,7 +339,7 @@ export const CI_AREAS = [
   [/^docs\/devops\.md$/, (p) => p, ['tools-check / tools', 'docs-check / docs']],
   [/^docs\//, () => 'docs', ['docs-check / docs']],
 ];
-/** changes.mjs의 web 규칙 가운데 찾는 범위에 드는 것: 이 경로가 바뀌면 ci-web.yml의 잡 아홉이 모두 돈다 */
+/** changes.mjs의 web 규칙 가운데 찾는 범위에 드는 것: 이 경로가 바뀌면 ci-web.yml의 잡 열이 모두 돈다 */
 const WEB_SCOPE = /^(apps\/|packages\/(ds|config|seatmap)\/|packages\/api-client\/src\/purchase\/|docs\/api\/vectors\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|tools\/storybook\/)/;
 /** changes.mjs의 문서 점검 규칙: tools/와 점으로 시작하는 폴더 밖의 .md·.yaml·.json·.csv는 docs-check가 읽는다 */
 const DOC_CHECKED = /^(?!tools\/)(?!(?:.*\/)?\.).*\.(md|yaml|json|csv)$/;
@@ -374,7 +377,7 @@ export function ciJobs(paths, specAdrs = new Set()) {
     .map((r) => ({ area: r.area, code: r.code, files: r.files, docs: r.docs, jobs: r.jobs, extra: [...r.extra].join('; ') }));
   const notes = [];
   if (paths.some((p) => WEB_SCOPE.test(p.path))) {
-    notes.push('web 범위(tools/ci/changes.mjs의 web 규칙)에 드는 곳이 있어 그곳을 고치면 ci-web.yml의 잡 아홉(tokens·visual·queue-room·purchase·rich-text·ds·seed-css·budgets·seatmap-pkg)이 모두 돈다. 표의 web 잡은 그 영역을 직접 빌드·검사하는 잡이다');
+    notes.push('web 범위(tools/ci/changes.mjs의 web 규칙)에 드는 곳이 있어 그곳을 고치면 ci-web.yml의 잡 열(tokens·visual·queue-room·purchase·rich-text·ds·seed-css·budgets·seatmap-pkg·reflow)이 모두 돈다. 표의 web 잡은 그 영역을 직접 빌드·검사하는 잡이다');
   }
   if (paths.some((p) => WIDEN_JS.test(p.path))) notes.push('node / node는 넓게 쓰이는 것(packages/platform·contracts·config, docs/api)을 고치면 바뀐 패키지만이 아니라 전체를 돈다(changes.mjs의 WIDEN_JS)');
   const used = new Set(out.flatMap((r) => r.jobs));
