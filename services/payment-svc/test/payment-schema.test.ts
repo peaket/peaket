@@ -189,7 +189,7 @@ describe('표 정의(schema.ts)', () => {
     ]);
   });
 
-  test('PRF180_P-T55_기본값은 payment.order_kind·pg_store·cancelled_amount·created_at·query_attempts·job.attempts·job.created_at뿐이다', () => {
+  test('PRF180_P-T56_기본값은 payment.order_kind·pg_store·cancelled_amount·created_at·query_attempts·job.attempts·job.created_at뿐이다', () => {
     const withDefault = SHAPES.flatMap((s) => s.columns.filter((c) => c.hasDefault).map((c) => `${s.name}.${c.name}`));
     expect(withDefault).toEqual(['payment.order_kind', 'payment.pg_store', 'payment.cancelled_amount', 'payment.created_at', 'payment.query_attempts', 'payment_confirm_job.attempts', 'payment_confirm_job.created_at']);
   });
@@ -827,7 +827,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(fk.map((r) => [r.columns.map((x) => x.name), getTableConfig(r.foreignTable).name, r.foreignColumns.map((x) => x.name)])).toEqual([[['payment_id'], 'payment', ['id']]]);
   });
 
-  test('P-T55 ① 0022 스냅샷의 앞은 0021 스냅샷이고, 표를 더하지 않고 payment에 order_kind를 더하고 event_id의 NOT NULL만 푼다(ADR-0299 결정 1)', () => {
+  test('P-T56 ① 0022 스냅샷의 앞은 0021 스냅샷이고, 표를 더하지 않고 payment에 order_kind를 더하고 event_id의 NOT NULL만 푼다(ADR-0299 결정 1)', () => {
     expect(latestAll.prevId).toBe(snap0021.id);
     expect(Object.keys(latestAll.tables).sort()).toEqual(Object.keys(snap0021.tables).sort());
     const before = snap0021.tables['public.payment']!;
@@ -839,7 +839,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(Object.keys(after.checkConstraints).filter((k) => !Object.keys(before.checkConstraints).includes(k))).toEqual(ADDED_CHECKS_0022);
   });
 
-  test('P-T55 ① 0022 SQL은 event_id NOT NULL 풀기·order_kind 칸(기본 TICKET)·CHECK 둘뿐이고 지우거나 옮기는 문이 없다 [ASVS v5.0.0-2.2.1]', () => {
+  test('P-T56 ① 0022 SQL은 event_id NOT NULL 풀기·order_kind 칸(기본 TICKET)·CHECK 둘뿐이고 지우거나 옮기는 문이 없다 [ASVS v5.0.0-2.2.1]', () => {
     const sqlOf = readFileSync(join(MIGRATIONS, `${TAG_0022}.sql`), 'utf8').replace(/\r\n/g, '\n');
     expect(sqlOf).not.toMatch(/\b(TRUNCATE|DELETE FROM|UPDATE "|RENAME|DROP TABLE|DROP COLUMN)\b/);
     const statements = sqlOf.replace(/^-- .*$/gm, '').split(BREAKPOINT).map((x) => canon(x)).filter((x) => x !== '');
@@ -851,7 +851,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     ]);
   });
 
-  test('P-T55 ① schema.ts의 주문 종류 CHECK가 ADR-0299 결정 1의 값·식과 같다(TICKET만 회차가 있다)', () => {
+  test('P-T56 ① schema.ts의 주문 종류 CHECK가 ADR-0299 결정 1의 값·식과 같다(TICKET만 회차가 있다)', () => {
     expect(literalsOf(checkOf(paymentShape, 'payment_order_kind_check'))).toEqual(['TICKET', 'MERCH']);
     expect(checkOf(paymentShape, 'payment_order_kind_event_check')).toBe("(order_kind = 'TICKET')=(event_id is not null)");
     expect(paymentShape.columns.find((c) => c.name === 'order_kind')).toEqual({ name: 'order_kind', type: 'text', notNull: true, hasDefault: true, primary: false });

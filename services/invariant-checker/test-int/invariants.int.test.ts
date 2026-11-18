@@ -269,7 +269,7 @@ describe('결제(K7, NFR-005·006, ADR-0106)', () => {
     expect(res(r, 'P3').details.map((d) => d.subject)).toEqual([late]);
   });
 
-  it('P-T55 ⑥ ADR-0299 결정 1_굿즈·부가 상품 결제(원장 order_kind MERCH, event_id NULL)는 purchase 주문·발권이 없어도 P3·P4 위반이 아니고, 같은 때의 티켓 결제 위반은 그대로 센다', async () => {
+  it('P-T56 ⑥ ADR-0299 결정 1_굿즈·부가 상품 결제(원장 order_kind MERCH, event_id NULL)는 purchase 주문·발권이 없어도 P3·P4 위반이 아니고, 같은 때의 티켓 결제 위반은 그대로 센다', async () => {
     // 굿즈 주문은 core-svc shop 주문이라 purchase DB에 주문·주문 사건이 없고 발권하지 않는다(ADR-0299 결정 1, ADR-0300)
     const merchOrder = randomUUID();
     await ins('payment', 'payment', { id: randomUUID(), order_id: merchOrder, order_kind: 'MERCH', event_id: null, pg: 'SIMULATOR', amount: 47_000, status: 'APPROVED', approved_at: '2026-11-02T10:00:00+09:00' });
