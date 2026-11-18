@@ -23,6 +23,7 @@ import { ConfirmVerification } from '../src/modules/verification/application/con
 import { StartVerification } from '../src/modules/verification/application/start-verification.js';
 import { phoneContactRefs } from '../src/modules/session/adapters/phone-contact-refs.js';
 import { agencyResult, ISSUER, kit, newKey, testAgency } from './support.js';
+import type { ReauthOperation } from '../src/modules/session/domain/session.js';
 
 const DEVICE_KEY = Buffer.alloc(32, 7);
 const CONTACT_KEY = Buffer.alloc(32, 9);
@@ -170,9 +171,9 @@ describe('기기·연락처 가명 쓰기(I-T63·I-T64)', () => {
     const reauth = new JoseReauthVerifier(t.k.keys, ISSUER, t.k.clock);
     const proposals = new MemoryMergeProposals(t.k.clock);
     const planner = new MergePlanner(t.sessions, { pidsOf: async () => [] }, (['purchase', 'ticket', 'core'] as const).map(noBlockChecker), proposals, t.k.clock);
-    const token = async () => (await t.k.signer.reauth({ accountId: x.accountId, sessionId: x.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, t.k.clock.now())).token;
-    const r = await new AddProvider(t.sessions, reauth, t.k.clock, planner).add({ accountId: x.accountId, sessionId: x.sessionId, reauthToken: await token(), provider: 'google', providerUserId: 'g-y' });
-    await new ConfirmMerge(t.sessions, reauth, planner, proposals, t.k.clock).run({ accountId: x.accountId, sessionId: x.sessionId, proposalId: r.mergeProposalId!, reauthToken: await token() });
+    const token = async (operation: ReauthOperation) => (await t.k.signer.reauth({ accountId: x.accountId, sessionId: x.sessionId, provider: 'kakao', strength: 'verified', operation }, t.k.clock.now())).token;
+    const r = await new AddProvider(t.sessions, reauth, t.k.clock, planner).add({ accountId: x.accountId, sessionId: x.sessionId, reauthToken: await token('LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-y' });
+    await new ConfirmMerge(t.sessions, reauth, planner, proposals, t.k.clock).run({ accountId: x.accountId, sessionId: x.sessionId, proposalId: r.mergeProposalId!, reauthToken: await token('ACCOUNT_MERGE') });
     expect(t.sessions.contactRefsOf(y.accountId)).toEqual([]);
     expect(t.sessions.contactRefsOf(x.accountId)).toHaveLength(1);
   });

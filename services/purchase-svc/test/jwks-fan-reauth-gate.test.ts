@@ -5,7 +5,7 @@
 // 리뷰 반영 재현(RV-02·RV-05·RV-09, 검증 V8·대조 어긋남 둘)과 고친 곳 검증 E7(뜻밖 오류를 덮지 않음)은 같은 시험 담당 세션이 더했다.
 import { fakeClock, RedisReauthJtiStore } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
-import { JwksFanReauthGate, ReauthUnavailable, type FanReauthAct } from '../src/modules/refund/index.js';
+import { JwksFanReauthGate, ReauthUnavailable, type FanReauthAct, type FanReauthOp } from '../src/modules/refund/index.js';
 import { fakeJwksFetch, fakeSeatRedis, fanKey, hs256Reauth, ISS, JWKS_URL, reauthClaims, signReauth, unsignedReauth, type FanKey } from './fan-reauth-fixtures.js';
 
 const NOW = Date.parse('2026-11-13T10:00:00+09:00');
@@ -13,7 +13,8 @@ const NOW_S = NOW / 1000;
 const ACCOUNT = '0193a200-0000-7000-8000-000000000001';
 const LOGIN = '0193a200-0000-7000-8000-000000000002';
 const fan = fanKey('fan-k1');
-const q = (act: FanReauthAct = 'FAN_SENSITIVE') => ({ accountId: ACCOUNT, sessionId: LOGIN, act });
+/** 확인 질의. 받는 쪽 작업 op는 팬 취소의 묶음대로 act에서 고른다(docs/features/transfer-refund.md §3.1 '작업 묶음', ADR-0293) */
+const q = (act: FanReauthAct = 'FAN_SENSITIVE', op: FanReauthOp = act === 'FAN_HIGH_RISK' ? 'TICKET_CANCEL_REFUND_ACCOUNT' : 'TICKET_CANCEL') => ({ accountId: ACCOUNT, sessionId: LOGIN, act, op });
 /** 정본의 남은 수명 상한: 5분 + 시계 차이 30초(docs/features/transfer-refund.md §3.1 '한 번 쓰기') */
 const LIFETIME_CAP_MS = 330_000;
 /** 정본의 공개키 묶음 읽기 한 번의 시간 상한 1,000ms [가정](docs/features/transfer-refund.md §3.1 '공개키 묶음 읽기') */

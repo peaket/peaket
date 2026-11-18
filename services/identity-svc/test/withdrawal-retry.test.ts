@@ -82,7 +82,7 @@ async function setup(o: { fallback?: (accountId: string) => Promise<Answer>; sto
       .run({ accountId, verificationId: st.verificationId, providerResult: agencyResult(clock, st.verificationId, { person, birth }) })
       .catch((e: unknown) => e);
   };
-  const reauth = async (s: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const reauth = async (s: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, clock.now())).token;
   /** 로그인·본인확인한 계정을 요청 경로로 미룬다(지금 시각에 미룸 표시) */
   const deferred = async (id: string) => {
     const s = await login(id);

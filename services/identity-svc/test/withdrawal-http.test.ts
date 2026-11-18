@@ -43,7 +43,7 @@ afterAll(async () => {
 
 const login = () => svc.app.get(CreateSession).run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `w-${newKey().slice(0, 8)}`, email: null, deviceId: null });
 const fanHeaders = (s: { accountId: string; sessionId: string }) => ({ 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '' });
-const reauth = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, svc.clock.now())).token;
+const reauth = async (s: { accountId: string; sessionId: string }) => (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, svc.clock.now())).token;
 const del = async (s: { accountId: string; sessionId: string }) =>
   svc.http.inject({ method: 'DELETE', url: '/v1/identity/account', headers: { ...fanHeaders(s), 'content-type': 'application/json', 'x-reauth-token': await reauth(s) }, payload: '{}' });
 const refresh = (rt: string) => svc.http.inject({ method: 'POST', url: '/v1/identity/access-tokens', headers: { cookie: `__Secure-peaket_rt=${rt}` } });

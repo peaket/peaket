@@ -86,7 +86,7 @@ test('I-T84①②_시작파일(main.ts)은PEAKET_PURCHASE_GRPC_URL의탈퇴참�
   const create = new CreateSession(new DrizzleSessionStore(database, systemClock), signer, testDeviceRefs(), recordingSignals(), noClaims, systemClock);
   const s = await create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `main-w-${newKey().slice(0, 8)}`, email: null, deviceId: null });
   const del = async () => {
-    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, Date.now())).token;
+    const token = (await signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, Date.now())).token;
     return fetch(`http://127.0.0.1:${httpPort}/v1/identity/account`, {
       method: 'DELETE',
       headers: { 'x-user-id': s.accountId, 'x-session-id': s.sessionId, 'x-user-aud': 'fan', 'x-user-scope': '', 'content-type': 'application/json', 'x-reauth-token': token },

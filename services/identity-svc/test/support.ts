@@ -1,9 +1,9 @@
 // 시험 도구: 고정 시계, 시험용 팬 토큰 키(매번 새로 만든다), 운영 신호 기록, 유스케이스 묶음.
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { type Clock, type FakeClock, fakeClock } from '@peaket/platform';
 import { sealTestAgencyResult, type TestAgencyOutcome } from '../src/modules/verification/adapters/test-agency.js';
 import { TestVerificationProvider } from '../src/modules/verification/adapters/test-verification-provider.js';
-import { exportJWK, generateKeyPair, type JWK } from 'jose';
+import { exportJWK, generateKeyPair, type JWK, SignJWT } from 'jose';
 import { CreateSession } from '../src/modules/session/application/create-session.js';
 import { EndSession } from '../src/modules/session/application/end-session.js';
 import { IssueReauthToken } from '../src/modules/session/application/issue-reauth-token.js';
@@ -112,3 +112,23 @@ export function agencyResult(
 let n = 0;
 /** 로그인 시도마다 새 멱등 키(앱 서버가 state를 HMAC한 모양: base64url 43자) */
 export const newKey = (): string => createHmac('sha256', 'k').update(`state-${n++}-${Math.random()}`).digest('base64url');
+
+/**
+ * 받는 쪽 시험용 팬 재인증 토큰을 서명기 없이 직접 만든다(identity §7.1 ④의 모양: typ reauth+jwt, 팬 토큰 키, iss·sub·sid·aud fan·act·op·provider·strength·jti·iat·exp 5분).
+ * op를 undefined로 주면 op 칸이 없는 옛 꼴이다. 받는 쪽(유스케이스·경로)의 op 확인을 서명기와 따로 보려고 쓴다(I-T85 ③)
+ */
+export async function fanReauthToken(keys: TokenKeyRing, c: { accountId: string; sessionId: string; act: string; op: string | undefined; now: number }): Promise<string> {
+  const { kid, key } = keys.signingKey('fan');
+  const iat = Math.floor(c.now / 1000);
+  const claims: Record<string, unknown> = { sid: c.sessionId, act: c.act, provider: 'kakao', strength: 'verified' };
+  if (c.op !== undefined) claims.op = c.op;
+  return new SignJWT(claims)
+    .setProtectedHeader({ alg: 'ES256', typ: 'reauth+jwt', kid })
+    .setIssuer(ISSUER)
+    .setSubject(c.accountId)
+    .setAudience('fan')
+    .setIssuedAt(iat)
+    .setExpirationTime(iat + 300)
+    .setJti(randomUUID())
+    .sign(key);
+}

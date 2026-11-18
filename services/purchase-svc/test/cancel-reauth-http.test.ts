@@ -210,7 +210,7 @@ const rejectCases = (): [string, string | undefined, string][] => [
   ['만료(exp = 지금)', signReauth(fan, good({ exp: NOW_S })), 'expired'],
   ['다른 세션(sid)', signReauth(fan, good({ sid: OTHER_LOGIN })), 'claims'],
   ['다른 계정(sub)', signReauth(fan, good({ sub: OTHER_ACCOUNT })), 'sub'],
-  ['계좌 없는 본문에 FAN_HIGH_RISK', signReauth(fan, good({}, 'FAN_HIGH_RISK')), 'claims'],
+  ['계좌 없는 본문에 FAN_HIGH_RISK(op는 TICKET_CANCEL로 맞춤, act만 다름)', signReauth(fan, good({ op: 'TICKET_CANCEL' }, 'FAN_HIGH_RISK')), 'claims'],
   ['BOOKER_EXPORT', signReauth(fan, good({}, 'BOOKER_EXPORT')), 'claims'],
   ['OPS_COMMAND', signReauth(fan, good({}, 'OPS_COMMAND')), 'claims'],
   ['act 없음', signReauth(fan, good({ act: undefined })), 'claims'],
@@ -621,14 +621,14 @@ describe('팬 취소 재인증: 컨트롤러가 확인기에 묻는 것과 답�
     await h?.svc.close();
   });
 
-  test('R-T39 ④ 컨트롤러는 본문에 환급 계좌가 있으면 FAN_HIGH_RISK, 없으면 FAN_SENSITIVE를 요청 세션·계정과 함께 묻는다', async () => {
+  test('R-T39 ④ 컨트롤러는 본문에 환급 계좌가 있으면 FAN_HIGH_RISK·TICKET_CANCEL_REFUND_ACCOUNT, 없으면 FAN_SENSITIVE·TICKET_CANCEL을 요청 세션·계정과 함께 묻는다', async () => {
     answer = 'pass';
     asked.length = 0;
     expect((await h.send({ token: 'tok-a' })).statusCode).toBe(202);
     expect((await h.send({ token: 'tok-b', body: { refundAccount: REFUND_ACCOUNT } })).statusCode).toBe(202);
     expect(asked).toEqual([
-      { token: 'tok-a', q: { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE' } },
-      { token: 'tok-b', q: { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_HIGH_RISK' } },
+      { token: 'tok-a', q: { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE', op: 'TICKET_CANCEL' } },
+      { token: 'tok-b', q: { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_HIGH_RISK', op: 'TICKET_CANCEL_REFUND_ACCOUNT' } },
     ]);
   });
 
@@ -659,5 +659,89 @@ describe('팬 취소 재인증: 컨트롤러가 확인기에 묻는 것과 답�
     } finally {
       answer = 'pass';
     }
+  });
+});
+
+// R-T39 ⑧(docs/features/transfer-refund.md §3.1 '작업 묶음'·'답'·'거절 기록', §11 R-T39 ⑧, ADR-0293 결정 5):
+// 같은 세션·계정의 토큰이라도 받는 쪽 작업(op)이 팬 취소의 것이 아니면 403이다. act와 op는 겹친 가드라 하나만 다른 토큰을 따로 둔다.
+// 경우마다 새 표·새 멱등 키(send가 매번 새로 만든다)로 보내 앞 경우의 결과가 섞이지 않게 한다. 값은 authz-matrix §6 표에서 옮겨 적는다.
+describe('팬 취소 재인증: 받는 쪽 작업 op [BAT-408]', () => {
+  let h: Harness;
+  let redis: Redis;
+  let results: unknown[];
+  beforeAll(async () => {
+    ({ h, redis, results } = await bootReal());
+  });
+  afterAll(async () => {
+    await h?.svc.close();
+  });
+
+  /** 거절이고 Saga·jti 잡기 0, 거절 기록의 까닭이 claims 하나 */
+  const rejectedAsClaims = async (o: { token: string; body?: unknown }, what: string) => {
+    h.reset();
+    redis.commands.length = 0;
+    results.length = 0;
+    expectRejected(h, redis, await h.send(o), what);
+    expect(results, what).toEqual([{ outcome: 'rejected', reason: 'claims' }]);
+  };
+
+  test('R-T39 ⑧-1 계좌 없는 취소: act FAN_SENSITIVE는 맞고 op만 다르거나 없는 토큰은 403 reauth-required이고 아무것도 부르지 않는다', async () => {
+    const cases: [string, Record<string, unknown>][] = [
+      ['op SESSION_END', { op: 'SESSION_END' }],
+      ['op ACCOUNT_WITHDRAW', { op: 'ACCOUNT_WITHDRAW' }],
+      ['op TICKET_CANCEL_REFUND_ACCOUNT', { op: 'TICKET_CANCEL_REFUND_ACCOUNT' }],
+      ['op 없음', { op: undefined }],
+      // 목록 밖의 꼴(웹 purpose 값·소문자·enum 번호·배열)도 같은 문자열이 아니다
+      ['op ticket-cancel(웹 purpose 꼴)', { op: 'ticket-cancel' }],
+      ['op ticket_cancel(소문자)', { op: 'ticket_cancel' }],
+      ['op 8(숫자)', { op: 8 }],
+      ['op [TICKET_CANCEL](배열)', { op: ['TICKET_CANCEL'] }],
+    ];
+    for (const [what, over] of cases) {
+      const claims = good(over, 'FAN_SENSITIVE');
+      expect(claims.act, what).toBe('FAN_SENSITIVE');
+      await rejectedAsClaims({ token: signReauth(fan, claims) }, what);
+    }
+  });
+
+  test('R-T39 ⑧-2 계좌를 담은 취소: act FAN_HIGH_RISK에 op만 다른 토큰, act만 다른 토큰(op TICKET_CANCEL_REFUND_ACCOUNT)은 403이고 아무것도 부르지 않는다', async () => {
+    const cases: [string, Record<string, unknown>, string][] = [
+      ['FAN_HIGH_RISK + op TICKET_CANCEL(앞부분 일치)', { op: 'TICKET_CANCEL' }, 'FAN_HIGH_RISK'],
+      ['FAN_HIGH_RISK + op TRANSFER_REQUEST', { op: 'TRANSFER_REQUEST' }, 'FAN_HIGH_RISK'],
+      ['FAN_HIGH_RISK + op REFUND_ACCOUNT', { op: 'REFUND_ACCOUNT' }, 'FAN_HIGH_RISK'],
+      ['FAN_HIGH_RISK + op 없음', { op: undefined }, 'FAN_HIGH_RISK'],
+      ['FAN_SENSITIVE + op TICKET_CANCEL_REFUND_ACCOUNT(act만 다름)', { op: 'TICKET_CANCEL_REFUND_ACCOUNT' }, 'FAN_SENSITIVE'],
+    ];
+    for (const [what, over, act] of cases) {
+      await rejectedAsClaims({ token: signReauth(fan, good(over, act)), body: { refundAccount: REFUND_ACCOUNT } }, what);
+    }
+  });
+
+  test('R-T39 ⑧-3 같은 묶음에서 맞는 토큰(계좌 없으면 TICKET_CANCEL, 있으면 TICKET_CANCEL_REFUND_ACCOUNT)만 202이고 jti를 한 번 잡는다', async () => {
+    for (const [what, op, act, body] of [
+      ['계좌 없음', 'TICKET_CANCEL', 'FAN_SENSITIVE', {}],
+      ['계좌 있음', 'TICKET_CANCEL_REFUND_ACCOUNT', 'FAN_HIGH_RISK', { refundAccount: REFUND_ACCOUNT }],
+    ] as const) {
+      h.reset();
+      redis.commands.length = 0;
+      results.length = 0;
+      const claims = good({ op }, act);
+      const r = await h.send({ token: signReauth(fan, claims), body });
+      expect(r.statusCode, what).toBe(202);
+      expect(h.ticketCalls, what).toHaveLength(1);
+      expect(h.paymentCalls, what).toHaveLength(1);
+      expect(h.created, what).toHaveLength(1);
+      expect(redis.commands, what).toEqual([setOf(claims.jti as string, '180000')]);
+    }
+  });
+
+  test('R-T39 ⑧-4 op가 어긋나 거절된 토큰의 jti는 잡히지 않아, identity 작업용 토큰을 먼저 보내도 맞는 새 토큰으로 바로 취소된다', async () => {
+    const wrong = good({ op: 'SESSION_END' });
+    await rejectedAsClaims({ token: signReauth(fan, wrong) }, 'SESSION_END 먼저');
+    expect(redis.keys.has(`reauth:jti:${wrong.jti as string}`)).toBe(false);
+    h.reset();
+    redis.commands.length = 0;
+    expect((await h.send({ token: signReauth(fan, good()) })).statusCode).toBe(202);
+    expect(h.ticketCalls).toHaveLength(1);
   });
 });

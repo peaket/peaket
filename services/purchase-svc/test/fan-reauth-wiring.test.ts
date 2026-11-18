@@ -61,7 +61,7 @@ describe('팬 취소 재인증 시작 조립 [BAT-415-reauth]', () => {
       expect(gate, what).toBeInstanceOf(JwksFanReauthGate);
       expect(warns, what).toHaveLength(0);
       const t = signReauth(fan, reauthClaims({ nowMs: NOW, accountId: ACCOUNT, sessionId: LOGIN }));
-      expect(await gate!.verify(t, { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE' }), what).toBe(true);
+      expect(await gate!.verify(t, { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE', op: 'TICKET_CANCEL' }), what).toBe(true);
       expect(jwks.urls, what).toEqual([ENV_URL]);
     }
   });
@@ -70,7 +70,7 @@ describe('팬 취소 재인증 시작 조립 [BAT-415-reauth]', () => {
     const accepts = async (env: Record<string, string>, iss: string) => {
       const gate = fanReauthGateFromEnv({ env, jti: new RedisReauthJtiStore(fakeSeatRedis()), clock: fakeClock({ now: NOW }), fetch: fakeJwksFetch([fan]).fetch });
       const t = signReauth(fan, reauthClaims({ nowMs: NOW, accountId: ACCOUNT, sessionId: LOGIN }, { iss }));
-      return gate!.verify(t, { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE' });
+      return gate!.verify(t, { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE', op: 'TICKET_CANCEL' });
     };
     for (const peaketEnv of ['local', 'ci']) {
       for (const issuer of [undefined, '']) {
@@ -113,7 +113,7 @@ describe('팬 취소 재인증 시작 조립 [BAT-415-reauth]', () => {
     });
     const other = '0193a300-0000-7000-8000-0000000000ff';
     const t = signReauth(fan, reauthClaims({ nowMs: NOW, accountId: other, sessionId: LOGIN }));
-    expect(await gate!.verify(t, { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE' })).toBe(false);
+    expect(await gate!.verify(t, { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE', op: 'TICKET_CANCEL' })).toBe(false);
     expect(results).toEqual([{ outcome: 'rejected', reason: 'sub' }]);
   });
 });
@@ -221,7 +221,7 @@ describe('팬 취소 재인증 거절 기록을 로그로 잇기 [BAT-415-reauth
       fetch: fakeJwksFetch([fan]).fetch,
       onResult: fanReauthResultLogger(log),
     })!;
-    const q = { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE' } as const;
+    const q = { accountId: ACCOUNT, sessionId: LOGIN, act: 'FAN_SENSITIVE', op: 'TICKET_CANCEL' } as const;
     const other = '0193a300-0000-7000-8000-0000000000ff';
     const t = signReauth(fan, reauthClaims({ nowMs: NOW, accountId: other, sessionId: LOGIN }));
     expect(await gate.verify(t, q)).toBe(false);

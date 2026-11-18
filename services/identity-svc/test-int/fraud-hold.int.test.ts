@@ -69,7 +69,7 @@ test('I-T68_PostgreSQL에서_RESTRICTED보관행은탈퇴뒤에도남고_다시�
   await expect(q("insert into restricted_ci_hold select decode('00', 'hex'), 1, fraud_case_id, state, until, source_account_id, null, 1 from restricted_ci_hold")).rejects.toThrow(/restricted_ci_hold_source_account_id_fraud_case_id_pk/);
   // 상태 CHECK: RELEASED는 행으로 두지 않는다
   await expect(q("update restricted_ci_hold set state = 'RELEASED'")).rejects.toThrow(/restricted_ci_hold_state_check/);
-  const token = (await k.signer.reauth({ accountId: a.accountId, sessionId: a.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const token = (await k.signer.reauth({ accountId: a.accountId, sessionId: a.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, clock.now())).token;
   await withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: { acknowledgeFraudHold: true } });
   expect(await q('select 1 from identity_verification where account_id = $1', [a.accountId])).toHaveLength(0);
   expect(await q('select state, version::int as version from restricted_ci_hold where source_account_id = $1', [a.accountId])).toEqual([{ state: 'RESTRICTED', version: 5 }]);

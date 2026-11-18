@@ -3,7 +3,7 @@
 import { exportJWK, generateKeyPair, type JWK, SignJWT } from 'jose';
 import { beforeAll, describe, expect, test } from 'vitest';
 import { fakeClock } from '../src/clock.js';
-import { TokenRejected, TokenVerifier } from '../src/token-verify.js';
+import { TokenKeysUnavailable, TokenRejected, TokenVerifier } from '../src/token-verify.js';
 
 const ISS = 'https://identity.peaket.test';
 const clock = fakeClock({ now: Date.parse('2026-11-03T03:00:00Z') });
@@ -87,12 +87,12 @@ describe('토큰 확인(받는 쪽)', () => {
   });
 
   test('identity§7.1_재인증토큰은_typ_reauth+jwt이고_세션과작업묶음이요청과같아야한다', async () => {
-    const r = await sign(fan, { typ: 'reauth+jwt', claims: { act: 'FAN_HIGH_RISK', provider: 'kakao', strength: 'verified', jti: 'j-1' } });
-    expect(await verifier.verifyReauth(r, { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_HIGH_RISK' })).toMatchObject({ jti: 'j-1', strength: 'verified', provider: 'kakao' });
-    expect(await reason(verifier.verifyReauth(r, { keySet: 'fan', audience: 'fan', sessionId: 's-2', act: 'FAN_HIGH_RISK' }))).toBe('claims');
-    expect(await reason(verifier.verifyReauth(r, { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_SENSITIVE' }))).toBe('claims');
+    const r = await sign(fan, { typ: 'reauth+jwt', claims: { act: 'FAN_HIGH_RISK', op: 'TRANSFER_REQUEST', provider: 'kakao', strength: 'verified', jti: 'j-1' } });
+    expect(await verifier.verifyReauth(r, { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_HIGH_RISK', op: 'TRANSFER_REQUEST' })).toMatchObject({ jti: 'j-1', strength: 'verified', provider: 'kakao' });
+    expect(await reason(verifier.verifyReauth(r, { keySet: 'fan', audience: 'fan', sessionId: 's-2', act: 'FAN_HIGH_RISK', op: 'TRANSFER_REQUEST' }))).toBe('claims');
+    expect(await reason(verifier.verifyReauth(r, { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_SENSITIVE', op: 'TRANSFER_REQUEST' }))).toBe('claims');
     // 액세스 토큰을 재인증 토큰 자리에 넣으면 typ 불일치
-    expect(await reason(verifier.verifyReauth(await sign(fan), { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_SENSITIVE' }))).toBe('typ');
+    expect(await reason(verifier.verifyReauth(await sign(fan), { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_SENSITIVE', op: 'SESSION_END' }))).toBe('typ');
   });
 
   test('I-T20_공개키묶음은_키셋마다캐시하고_모르는kid가오면한번다시읽는다', async () => {
@@ -140,12 +140,84 @@ describe('공개키 묶음 다시 읽기(새 맥락 리뷰 2026-11-03)', () => {
   });
 
   test('[ASVS v5.0.0-9.2.1]_exp가없는토큰은_거절한다', async () => {
-    const noExp = await new SignJWT({ sid: 's-1', act: 'FAN_SENSITIVE', jti: 'j' })
+    const noExp = await new SignJWT({ sid: 's-1', act: 'FAN_SENSITIVE', op: 'SESSION_END', jti: 'j' })
       .setProtectedHeader({ alg: 'ES256', typ: 'reauth+jwt', kid: fan.kid })
       .setIssuer(ISS)
       .setSubject('acc-1')
       .setAudience('fan')
       .sign(fan.priv);
-    expect(await reason(verifier.verifyReauth(noExp, { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_SENSITIVE' }))).toBe('claims');
+    expect(await reason(verifier.verifyReauth(noExp, { keySet: 'fan', audience: 'fan', sessionId: 's-1', act: 'FAN_SENSITIVE', op: 'SESSION_END' }))).toBe('claims');
   });
 });
+
+// I-T85 ④(docs/features/identity.md §12, ADR-0293 결정 5): 팬 재인증 토큰의 받는 쪽 작업 op를 기대값과 같은 문자열로만 받는다.
+// 값은 docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값' 표에서 옮겨 적는다(코드의 표를 가져오지 않는다).
+describe('I-T85 ④ 재인증 토큰의 받는 쪽 작업(op)', () => {
+  const fanReauth = (claims: Record<string, unknown>) => sign(fan, { typ: 'reauth+jwt', claims: { act: 'FAN_SENSITIVE', jti: 'j-op', ...claims } });
+  const q = (op: string | undefined, act = 'FAN_SENSITIVE') => ({ keySet: 'fan' as const, audience: 'fan', sessionId: 's-1', act, ...(op === undefined ? {} : { op }) });
+  // 부르는 쪽 결함 오류는 TokenRejected도 TokenKeysUnavailable도 아니다
+  const callerBug = async (p: Promise<unknown>) => {
+    try {
+      await p;
+      return 'OK';
+    } catch (e) {
+      if (e instanceof TokenRejected) return `rejected:${e.reason}`;
+      if (e instanceof TokenKeysUnavailable) return 'keys-unavailable';
+      return e instanceof Error ? 'error' : 'non-error';
+    }
+  };
+
+  test('I-T85 ④-1 기대 op와 같은 토큰만 받고 VerifiedReauth.op가 그 값이다', async () => {
+    const v = await verifier.verifyReauth(await fanReauth({ op: 'SESSION_END' }), q('SESSION_END'));
+    expect(v.op).toBe('SESSION_END');
+    expect(v).toMatchObject({ jti: 'j-op', accountId: 'acc-1', sessionId: 's-1', act: 'FAN_SENSITIVE' });
+    const h = await verifier.verifyReauth(await fanReauth({ act: 'FAN_HIGH_RISK', op: 'TICKET_CANCEL_REFUND_ACCOUNT' }), q('TICKET_CANCEL_REFUND_ACCOUNT', 'FAN_HIGH_RISK'));
+    expect(h.op).toBe('TICKET_CANCEL_REFUND_ACCOUNT');
+  });
+
+  test('I-T85 ④-2 act가 같고 op만 다른 토큰은 claims로 거절한다(같은 묶음의 다른 작업마다)', async () => {
+    for (const other of ['ACCOUNT_WITHDRAW', 'SCANNER_SESSION_END', 'LOGIN_METHOD_ADD', 'LOGIN_METHOD_REMOVE', 'ACCOUNT_MERGE', 'CONTACT_CHANGE', 'TICKET_CANCEL', 'DEVICE_KEY_ISSUE', 'TICKET_RETURN']) {
+      expect(await reason(verifier.verifyReauth(await fanReauth({ op: other }), q('SESSION_END'))), other).toBe('claims');
+    }
+    // 대소문자·웹 purpose 꼴은 같은 문자열이 아니다
+    expect(await reason(verifier.verifyReauth(await fanReauth({ op: 'session_end' }), q('SESSION_END')))).toBe('claims');
+    expect(await reason(verifier.verifyReauth(await fanReauth({ op: 'session-end' }), q('SESSION_END')))).toBe('claims');
+  });
+
+  test('I-T85 ④-3 앞부분만 같은 op는 어느 쪽으로도 받지 않는다(TICKET_CANCEL과 TICKET_CANCEL_REFUND_ACCOUNT)', async () => {
+    expect(await reason(verifier.verifyReauth(await fanReauth({ act: 'FAN_HIGH_RISK', op: 'TICKET_CANCEL' }), q('TICKET_CANCEL_REFUND_ACCOUNT', 'FAN_HIGH_RISK')))).toBe('claims');
+    expect(await reason(verifier.verifyReauth(await fanReauth({ op: 'TICKET_CANCEL_REFUND_ACCOUNT' }), q('TICKET_CANCEL')))).toBe('claims');
+    expect(await reason(verifier.verifyReauth(await fanReauth({ op: 'TICKET_CANCEL ' }), q('TICKET_CANCEL')))).toBe('claims');
+  });
+
+  test('I-T85 ④-4 op가 없거나 문자열이 아닌 토큰(숫자·배열·객체·null·참거짓·빈 문자열)은 claims로 거절한다', async () => {
+    expect(await reason(verifier.verifyReauth(await fanReauth({}), q('ACCOUNT_WITHDRAW')))).toBe('claims');
+    for (const bad of [1, 0, ['ACCOUNT_WITHDRAW'], { op: 'ACCOUNT_WITHDRAW' }, null, true, '']) {
+      expect(await reason(verifier.verifyReauth(await fanReauth({ op: bad }), q('ACCOUNT_WITHDRAW'))), JSON.stringify(bad)).toBe('claims');
+    }
+  });
+
+  test('I-T85 ④-5 op가 맞아도 act가 다르면 claims로 거절한다(겹친 가드를 따로 본다)', async () => {
+    expect(await reason(verifier.verifyReauth(await fanReauth({ act: 'FAN_SENSITIVE', op: 'TRANSFER_REQUEST' }), q('TRANSFER_REQUEST', 'FAN_HIGH_RISK')))).toBe('claims');
+    expect(await reason(verifier.verifyReauth(await fanReauth({ act: 'FAN_HIGH_RISK', op: 'SESSION_END' }), q('SESSION_END', 'FAN_SENSITIVE')))).toBe('claims');
+  });
+
+  test('I-T85 ④-6 팬 키 셋에 기대 op가 없거나 빈 문자열이면 부르는 쪽 결함 오류다(토큰을 받지 않는다)', async () => {
+    const t = await fanReauth({ op: 'ACCOUNT_WITHDRAW' });
+    expect(await callerBug(verifier.verifyReauth(t, q(undefined)))).toBe('error');
+    expect(await callerBug(verifier.verifyReauth(t, q('')))).toBe('error');
+    // op 없는 토큰을 op 없이 확인해도 통과하지 않는다(몰래 이음 기간 없음)
+    expect(await callerBug(verifier.verifyReauth(await fanReauth({}), q(undefined)))).toBe('error');
+  });
+
+  test('I-T85 ④-7 관리 키 셋에 기대 op를 넘기면 부르는 쪽 결함 오류이고, op 없는 관리 토큰은 지금처럼 받는다', async () => {
+    const adminReauth = await sign(admin, { typ: 'reauth+jwt', aud: 'ops', claims: { act: 'OPS_COMMAND', jti: 'j-adm' } });
+    const adminQ = { keySet: 'admin' as const, audience: 'ops', sessionId: 's-1', act: 'OPS_COMMAND' };
+    expect(await callerBug(verifier.verifyReauth(adminReauth, { ...adminQ, op: 'OPS_COMMAND' }))).toBe('error');
+    expect(await callerBug(verifier.verifyReauth(adminReauth, { ...adminQ, op: '' }))).toBe('error');
+    const v = await verifier.verifyReauth(adminReauth, adminQ);
+    expect(v).toMatchObject({ jti: 'j-adm', accountId: 'acc-1', act: 'OPS_COMMAND' });
+    expect(v.op).toBeUndefined();
+  });
+});
+

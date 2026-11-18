@@ -10,6 +10,7 @@ import { AddProvider } from '../src/modules/session/application/add-provider.js'
 import { ListProviders } from '../src/modules/session/application/list-providers.js';
 import { UnlinkProvider } from '../src/modules/session/application/unlink-provider.js';
 import { ISSUER, kit, newKey } from './support.js';
+import type { ReauthOperation } from '../src/modules/session/domain/session.js';
 
 async function setup() {
   const sessions = new MemorySessionStore();
@@ -19,8 +20,8 @@ async function setup() {
   const reauth = new JoseReauthVerifier(k.keys, ISSUER, k.clock);
   const login = async (provider: 'kakao' | 'naver' | 'google', sub: string, email: string | null = null, emailVerified = false) =>
     k.create.run({ idempotencyKey: newKey(), provider, providerUserId: sub, email, emailVerified, deviceId: 'dev-1' });
-  const token = async (s: { accountId: string; sessionId: string }, purpose: 'sensitive' | 'high-risk' = 'sensitive') =>
-    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose }, k.clock.now())).token;
+  const token = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) =>
+    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, k.clock.now())).token;
   return {
     sessions,
     k,
@@ -53,7 +54,7 @@ describe('로그인 수단 추가(SCR-040 ②)', () => {
   test('I-T34_재인증뒤새제공자를이계정에이으면LINKED이고_같은트랜잭션에서연결사건을한번적는다', async () => {
     const t = await setup();
     const a = await t.login('kakao', 'k-1');
-    const r = await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-1' });
+    const r = await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-1' });
     expect(r).toBe('LINKED');
     expect((await t.login('google', 'g-1')).accountId).toBe(a.accountId);
     const ev = events(t);
@@ -65,9 +66,9 @@ describe('로그인 수단 추가(SCR-040 ②)', () => {
     const t = await setup();
     const a = await t.login('kakao', 'k-1');
     await t.login('google', 'g-other');
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'kakao', providerUserId: 'k-1' })).toBe('ALREADY_LINKED');
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'kakao', providerUserId: 'k-2' })).toBe('PROVIDER_TYPE_TAKEN');
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-other' })).toBe('OTHER_ACCOUNT');
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'kakao', providerUserId: 'k-1' })).toBe('ALREADY_LINKED');
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'kakao', providerUserId: 'k-2' })).toBe('PROVIDER_TYPE_TAKEN');
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-other' })).toBe('OTHER_ACCOUNT');
     expect(t.sessions.providerCount(a.accountId)).toBe(1);
     expect(events(t)).toEqual([]);
   });
@@ -77,8 +78,8 @@ describe('로그인 수단 추가(SCR-040 ②)', () => {
     const a = await t.login('kakao', 'k-1');
     const b = await t.login('kakao', 'k-1');
     expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: '', provider: 'google', providerUserId: 'g-1' })).toBe('REAUTH_REQUIRED');
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(b), provider: 'google', providerUserId: 'g-1' })).toBe('REAUTH_REQUIRED');
-    const once = await t.token(a);
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(b, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-1' })).toBe('REAUTH_REQUIRED');
+    const once = await t.token(a, 'LOGIN_METHOD_ADD');
     expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: once, provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
     expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: once, provider: 'naver', providerUserId: 'n-1' })).toBe('REAUTH_REQUIRED');
   });
@@ -88,20 +89,21 @@ describe('로그인 수단 해제(SCR-040 ③, I-T33)', () => {
   test('I-T33_마지막하나뿐인로그인수단의해제는409(LAST_LOGIN_METHOD)이고_재인증토큰을쓰지않아다시쓸수있다', async () => {
     const t = await setup();
     const a = await t.login('kakao', 'k-1');
-    const tok = await t.token(a);
+    const tok = await t.token(a, 'LOGIN_METHOD_REMOVE');
     expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: tok, provider: 'kakao' }))).toBe('LAST_LOGIN_METHOD');
     expect(t.sessions.providerCount(a.accountId)).toBe(1);
-    // 되돌린 트랜잭션이라 토큰은 아직 쓰지 않았다
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: tok, provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
+    // 되돌린 트랜잭션이라 토큰은 아직 쓰지 않았다: 수단을 하나 더한 뒤 같은 해제 토큰(op LOGIN_METHOD_REMOVE)으로 해제가 된다
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
+    expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: tok, provider: 'kakao' }))).toBe('OK');
   });
 
   test('I-T33·I-T34_둘이면재인증을통과했을때만해제되어UNLINKED사건을적고_없는종류는NOT_FOUND_재인증없으면REAUTH_REQUIRED다', async () => {
     const t = await setup();
     const a = await t.login('kakao', 'k-1');
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
     expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: 'x', provider: 'google' }))).toBe('REAUTH_REQUIRED');
-    expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'naver' }))).toBe('NOT_FOUND');
-    expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google' }))).toBe('OK');
+    expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_REMOVE'), provider: 'naver' }))).toBe('NOT_FOUND');
+    expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_REMOVE'), provider: 'google' }))).toBe('OK');
     expect((await t.list.run(a.accountId)).map((p) => p.provider)).toEqual(['kakao']);
     expect(events(t).map((e) => [e.change, e.provider])).toEqual([
       ['LINKED', 'google'],
@@ -119,7 +121,7 @@ describe('마지막 로그인 시각과 가입 때 연결의 사건', () => {
     const a = await t.login('kakao', 'k-1');
     const first = t.clock.now();
     t.clock.advance(1_000);
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
     t.clock.advance(60_000);
     await t.login('kakao', 'k-1');
     const list = await t.list.run(a.accountId);
@@ -144,7 +146,7 @@ describe('리뷰 재현(2026-11-04)', () => {
   test('중간1_재인증뒤그세션이끝났으면(다른기기에서로그아웃)_AddProvider는REAUTH_REQUIRED이고잇지않는다', async () => {
     const t = await setup();
     const a = await t.login('kakao', 'k-1');
-    const tok = await t.token(a);
+    const tok = await t.token(a, 'LOGIN_METHOD_ADD');
     await t.k.end.run({ sessionId: a.sessionId, accountId: a.accountId });
     expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: tok, provider: 'google', providerUserId: 'g-1' })).toBe('REAUTH_REQUIRED');
     expect(t.sessions.providerCount(a.accountId)).toBe(1);
@@ -155,7 +157,7 @@ describe('리뷰 재현(2026-11-04)', () => {
     const a = await t.login('kakao', 'k-1', 'fan@peaket.test', true);
     const p = await t.k.create.outcome({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'g-2', email: 'fan@peaket.test', emailVerified: true, deviceId: null });
     if (p.kind !== 'link-proposed') throw new Error(p.kind);
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
     const r = await t.k.create.outcome({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'k-1', email: null, deviceId: null, link: { proposalId: p.proposalId, binding: p.binding } });
     if (r.kind !== 'session') throw new Error(r.kind);
     expect(r).toMatchObject({ accountId: a.accountId, linkedProvider: null });
@@ -167,11 +169,11 @@ describe('리뷰 재현(2026-11-04)', () => {
     const t = await setup();
     const a = await t.login('kakao', 'k-1');
     const b = await t.login('kakao', 'k-1');
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
-    expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(b), provider: 'google' }))).toBe('REAUTH_REQUIRED');
-    const tok = await t.token(a);
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'g-1' })).toBe('LINKED');
+    expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(b, 'LOGIN_METHOD_REMOVE'), provider: 'google' }))).toBe('REAUTH_REQUIRED');
+    const tok = await t.token(a, 'LOGIN_METHOD_REMOVE');
     expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: tok, provider: 'google' }))).toBe('OK');
-    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'naver', providerUserId: 'n-1' })).toBe('LINKED');
+    expect(await t.add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'naver', providerUserId: 'n-1' })).toBe('LINKED');
     expect(await code(t.unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: tok, provider: 'naver' }))).toBe('REAUTH_REQUIRED');
   });
 });

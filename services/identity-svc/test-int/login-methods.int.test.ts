@@ -11,6 +11,7 @@ import { ListProviders } from '../src/modules/session/application/list-providers
 import { UnlinkProvider } from '../src/modules/session/application/unlink-provider.js';
 import { ISSUER, kit, newKey } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import type { ReauthOperation } from '../src/modules/session/domain/session.js';
 
 let pg: PostgresContainer;
 let database: Database;
@@ -36,21 +37,21 @@ test('I-T33·I-T34_PostgreSQL에서_로그인때last_login_at을적고_추가·�
   const reauth = new JoseReauthVerifier(k.keys, ISSUER, clock);
   const add = new AddProvider(sessions, reauth, clock);
   const unlink = new UnlinkProvider(sessions, reauth, clock);
-  const token = async (s: { accountId: string; sessionId: string }) =>
-    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const token = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) =>
+    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, clock.now())).token;
   const a = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-lm-k', email: null, deviceId: null });
   expect(await q('select last_login_at from account_provider where provider_user_id = $1', ['pg-lm-k'])).toEqual([{ last_login_at: new Date(clock.now()) }]);
   // 마지막 하나는 409이고 지우지 않는다
-  const last = await unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await token(a), provider: 'kakao' }).catch((e: unknown) => e);
+  const last = await unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await token(a, 'LOGIN_METHOD_REMOVE'), provider: 'kakao' }).catch((e: unknown) => e);
   expect(last instanceof AccountError && last.code).toBe('LAST_LOGIN_METHOD');
   expect(await q('select 1 from account_provider where account_id = $1', [a.accountId])).toHaveLength(1);
   clock.advance(1_000);
-  expect(await add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await token(a), provider: 'google', providerUserId: 'pg-lm-g' })).toBe('LINKED');
+  expect(await add.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-lm-g' })).toBe('LINKED');
   expect((await new ListProviders(sessions).run(a.accountId)).map((p) => [p.provider, p.lastLoginAt === null])).toEqual([
     ['kakao', false],
     ['google', true],
   ]);
-  await unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await token(a), provider: 'google' });
+  await unlink.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await token(a, 'LOGIN_METHOD_REMOVE'), provider: 'google' });
   const events = await q<{ payload: Buffer }>("select payload from outbox where topic = 'identity.login-methods-changed' and msg_key = $1 order by seq", [a.accountId]);
   expect(events.map((e) => JSON.parse(e.payload.toString()))).toEqual([
     { eventKey: expect.any(String), accountId: a.accountId, change: 'LINKED', provider: 'google', occurredAt: new Date(clock.now()).toISOString() },

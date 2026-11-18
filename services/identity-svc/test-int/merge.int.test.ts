@@ -16,6 +16,7 @@ import type { MergeProposals, SessionStore, SessionTx } from '../src/modules/ses
 import { ISSUER, kit, newKey } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
+import type { ReauthOperation } from '../src/modules/session/domain/session.js';
 
 let pg: PostgresContainer;
 let vk: ValkeyContainer;
@@ -48,8 +49,8 @@ async function setup() {
   const planner = new MergePlanner(sessions, { pidsOf: async () => [] }, (['purchase', 'ticket', 'core'] as const).map(noBlockChecker), proposals, clock);
   const add = new AddProvider(sessions, reauth, clock, planner);
   const confirm = new ConfirmMerge(sessions, reauth, planner, proposals, clock);
-  const token = async (s: { accountId: string; sessionId: string }) =>
-    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', purpose: 'sensitive' }, clock.now())).token;
+  const token = async (s: { accountId: string; sessionId: string }, operation: ReauthOperation) =>
+    (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation }, clock.now())).token;
   return { sessions, k, add, confirm, token, proposals, holds: new SetAccountHold(sessions, clock) };
 }
 
@@ -68,11 +69,11 @@ test('I-T32·I-T34_PostgreSQL에서_확정은로그인수단을옮기고MERGED·
   );
   // 흡수 계정의 프로필(합성 값): 병합하면 모두 지운다(POL-034 '흡수 계정의 프로필은 병합 즉시 파기', 새 맥락 리뷰 중간 2)
   await q("update account set nickname = '시험', phone = '01000000000', saved_booker_name = '시험', saved_booker_phone = '01000000000', member_code = 'PGM0001' where id = $1", [b.accountId]);
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-m-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-m-g' });
   expect(r.result).toBe('OTHER_ACCOUNT');
   // Redis id:merge는 만든 시각 + 10분의 절대 시각에 사라진다
   expect(Number(await redis.command(['PEXPIRETIME', mergeKey(r.mergeProposalId!)], { key: mergeKey(r.mergeProposalId!) }))).toBe(clock.now() + MERGE_PROPOSAL_TTL_MS);
-  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') });
   expect(await q('select status, merged_into_account_id, email, email_verified, nickname, phone, saved_booker_name, saved_booker_phone, member_code from account where id = $1', [b.accountId])).toEqual([
     { status: 'MERGED', merged_into_account_id: a.accountId, email: null, email_verified: false, nickname: null, phone: null, saved_booker_name: null, saved_booker_phone: null, member_code: null },
   ]);
@@ -104,9 +105,9 @@ test('I-T31_PostgreSQL에서_둘다본인확인전이고상대만가입을마쳤
   const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-su-k', email: null, deviceId: null });
   const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-su-g', email: null, deviceId: null });
   await finishSignup(b.accountId);
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-su-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-su-g' });
   expect((await t.proposals.get(r.mergeProposalId!))?.primaryAccountId).toBe(b.accountId);
-  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') });
   expect(await q('select status from account where id = $1', [a.accountId])).toEqual([{ status: 'MERGED' }]);
   expect(await q('select 1 from consent where account_id = $1', [b.accountId])).toHaveLength(2);
 });
@@ -115,10 +116,10 @@ test('I-T31_PostgreSQL에서_제안뒤상대가가입을마쳐대표가바뀌면
   const t = await setup();
   const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-su2-k', email: null, deviceId: null });
   const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-su2-g', email: null, deviceId: null });
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-su2-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-su2-g' });
   expect((await t.proposals.get(r.mergeProposalId!))?.primaryAccountId).toBe(a.accountId);
   await finishSignup(b.accountId);
-  const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+  const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') }).catch((x: unknown) => x);
   expect((e as { code?: string }).code).toBe('NOT_FOUND');
   expect(await q('select status from account where id = $1', [b.accountId])).toEqual([{ status: 'ACTIVE' }]);
 });
@@ -127,7 +128,7 @@ test('새맥락리뷰높음1_PostgreSQL에서_제안뒤흡수계정만본인확�
   const t = await setup();
   const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-v-k', email: null, deviceId: null });
   const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-v-g', email: null, deviceId: null });
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-v-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-v-g' });
   // 확정 앞의 확인(pidsOf 대역은 늘 본인확인 전)은 지나가고, 트랜잭션 안에서 본인확인 기록을 읽는다
   await q(
     "insert into identity_verification (account_id, ci_hmac, ci_hmac_key_version, pid, pid_key_version, verified_at, source_record) values ($1, $2, 1, $3, 1, now(), 'test')",
@@ -135,7 +136,7 @@ test('새맥락리뷰높음1_PostgreSQL에서_제안뒤흡수계정만본인확�
   );
   const used = async () => (await q<{ n: string }>('select count(*) as n from reauth_token_use where account_id = $1', [a.accountId]))[0]!.n;
   const before = await used();
-  const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+  const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') }).catch((x: unknown) => x);
   expect((e as { code?: string }).code).toBe('NOT_FOUND');
   expect(await q('select status from account where id = $1', [b.accountId])).toEqual([{ status: 'ACTIVE' }]);
   // 트랜잭션을 되돌려 재인증 토큰은 쓰지 않은 것이 되고, 병합할 수 없게 된 제안은 지운다(다시 검토 낮음 3)
@@ -147,14 +148,14 @@ test('다시검토낮음3_PostgreSQL에서_제안뒤두계정모두본인확인�
   const t = await setup();
   const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-w-k', email: null, deviceId: null });
   const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-w-g', email: null, deviceId: null });
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-w-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-w-g' });
   for (const [id, n] of [[a.accountId, 9], [b.accountId, 10]] as const) {
     await q(
       "insert into identity_verification (account_id, ci_hmac, ci_hmac_key_version, pid, pid_key_version, verified_at, source_record) values ($1, $2, 1, $3, 1, now(), 'test')",
       [id, Buffer.alloc(32, n), Buffer.alloc(16, n)],
     );
   }
-  const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+  const e = await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') }).catch((x: unknown) => x);
   expect(e).toMatchObject({ code: 'BLOCKED', blockers: ['BOTH_VERIFIED'] });
   expect(await q('select status from account where id = $1', [b.accountId])).toEqual([{ status: 'ACTIVE' }]);
   expect(await t.proposals.get(r.mergeProposalId!)).not.toBeNull();
@@ -168,7 +169,7 @@ test('PostgreSQL에서_account_hold는판번호가클때만반영하고_열린�
   expect(await t.holds.run({ sourceRef: ref, accountId: b.accountId, kind: 'DISPUTE', state: 'OPEN', sourceVersion: 5 })).toBe('APPLIED');
   expect(await t.holds.run({ sourceRef: ref, accountId: b.accountId, kind: 'DISPUTE', state: 'CLOSED', sourceVersion: 4 })).toBe('STALE');
   expect(await t.holds.run({ sourceRef: ref, accountId: a.accountId, kind: 'DISPUTE', state: 'CLOSED', sourceVersion: 6 })).toBe('CONFLICT');
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-h-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-h-g' });
   expect(await t.proposals.get(r.mergeProposalId!)).toMatchObject({ status: 'BLOCKED', blockers: ['APPEAL_PENDING'] });
 });
 
@@ -263,8 +264,8 @@ test('BOT-042넘김_PostgreSQL에서_같은제안을같은재인증토큰으로�
   for (let n = 0; n < 4; n++) {
     const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: `pg-cc-k${n}`, email: null, deviceId: null });
     const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: `pg-cc-g${n}`, email: null, deviceId: null });
-    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: `pg-cc-g${n}` });
-    const token = await t.token(a);
+    const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: `pg-cc-g${n}` });
+    const token = await t.token(a, 'ACCOUNT_MERGE');
     const got = await Promise.allSettled([0, 1].map(() => t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: token })));
     expect(got.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
     const lost = got.find((x) => x.status === 'rejected') as PromiseRejectedResult;
@@ -288,9 +289,9 @@ test('BOT-042넘김_PostgreSQL에서_흡수될쪽이확정을동시에두번보�
   const reauth = new JoseReauthVerifier(t.k.keys, ISSUER, clock);
   const add = new AddProvider(t.sessions, reauth, clock, planner);
   const confirm = new ConfirmMerge(t.sessions, reauth, planner, t.proposals, clock);
-  const r = await add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-ca-g' });
+  const r = await add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-ca-g' });
   expect(await t.proposals.get(r.mergeProposalId!)).toMatchObject({ primaryAccountId: b.accountId, absorbedAccountId: a.accountId });
-  const token = await t.token(a);
+  const token = await t.token(a, 'ACCOUNT_MERGE');
   const got = await Promise.allSettled([0, 1].map(() => confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: token })));
   expect(got.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
   const lost = got.find((x) => x.status === 'rejected') as PromiseRejectedResult;
@@ -310,7 +311,7 @@ test('BOT-042넘김_PostgreSQL에서_병합도중로그인이흡수계정X를잠
     await tx.linkProvider(x.accountId, 'google', 'pg-dl-g', clock.now());
     await tx.linkProvider(x.accountId, 'naver', 'pg-dl-n', clock.now());
   });
-  const r = await t.add.add({ accountId: p.accountId, sessionId: p.sessionId, reauthToken: await t.token(p), provider: 'google', providerUserId: 'pg-dl-g' });
+  const r = await t.add.add({ accountId: p.accountId, sessionId: p.sessionId, reauthToken: await t.token(p, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-dl-g' });
   expect(await t.proposals.get(r.mergeProposalId!)).toMatchObject({ primaryAccountId: p.accountId, absorbedAccountId: x.accountId });
   // 두 번째 확정은 첫 확정이 제안을 지우기 전에 제안을 읽었다
   const snap = (await t.proposals.get(r.mergeProposalId!))!;
@@ -336,7 +337,7 @@ test('BOT-042넘김_PostgreSQL에서_병합도중로그인이흡수계정X를잠
   const lKit = await kit(lStore, { clock });
   const login = lKit.create.run({ idempotencyKey: newKey(), provider: 'naver', providerUserId: 'pg-dl-n', email: null, deviceId: null });
   await lFound.promise;
-  await t.confirm.run({ accountId: p.accountId, sessionId: p.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(p) });
+  await t.confirm.run({ accountId: p.accountId, sessionId: p.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(p, 'ACCOUNT_MERGE') });
   // 두 번째 확정 B: P를 잡은 뒤 L이 X를 잡을 때까지 기다렸다가 X를 잠근다
   const bStore = gated(t.sessions, {
     before: async (k, _n, args) => {
@@ -345,7 +346,7 @@ test('BOT-042넘김_PostgreSQL에서_병합도중로그인이흡수계정X를잠
   });
   const bReauth = new JoseReauthVerifier(t.k.keys, ISSUER, clock);
   const bPlanner = new MergePlanner(bStore, { pidsOf: async () => [] }, (['purchase', 'ticket', 'core'] as const).map(noBlockChecker), stale, clock);
-  const second = new ConfirmMerge(bStore, bReauth, bPlanner, stale, clock).run({ accountId: p.accountId, sessionId: p.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(p) });
+  const second = new ConfirmMerge(bStore, bReauth, bPlanner, stale, clock).run({ accountId: p.accountId, sessionId: p.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(p, 'ACCOUNT_MERGE') });
   aDone.resolve();
   const [l, b] = await Promise.allSettled([login, second]);
   for (const o of [l, b]) if (o.status === 'rejected') expect(pgCode(o.reason)).not.toBe('40P01');
@@ -364,11 +365,11 @@ test('I-T31_OPEN21_PostgreSQL에서_두계정에같은종류의다른로그인�
     await tx.linkProvider(a.accountId, 'naver', 'pg-sk-na', clock.now());
     await tx.linkProvider(b.accountId, 'naver', 'pg-sk-nb', clock.now());
   });
-  const r1 = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-sk-g' });
+  const r1 = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-sk-g' });
   expect(await t.proposals.get(r1.mergeProposalId!)).toMatchObject({ status: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['naver'] });
   // 흡수될 계정에서 네이버를 해제하면 새 제안은 PROPOSED다
   await t.sessions.transaction((tx) => tx.unlinkProvider(b.accountId, 'naver'));
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-sk-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-sk-g' });
   expect(await t.proposals.get(r.mergeProposalId!)).toMatchObject({ status: 'PROPOSED', blockers: [] });
   // 확정 직전 확인 뒤, 확정 트랜잭션이 계정을 잠그기 전에 대표 계정 a가 다른 구글 계정을 잇는다(다른 연결에서 끝냄)
   let armed = true;
@@ -384,7 +385,7 @@ test('I-T31_OPEN21_PostgreSQL에서_두계정에같은종류의다른로그인�
   const confirm = new ConfirmMerge(store, reauth, planner, t.proposals, clock);
   const used = async () => (await q<{ n: number }>('select count(*)::int as n from reauth_token_use where account_id = $1', [a.accountId]))[0]!.n;
   const before = await used();
-  const e = await confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) }).catch((x: unknown) => x);
+  const e = await confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') }).catch((x: unknown) => x);
   expect(armed).toBe(false);
   expect(e).toMatchObject({ code: 'BLOCKED', blockers: ['SAME_PROVIDER_KIND'], sameKindProviders: ['google'] });
   expect(await used()).toBe(before);
@@ -419,8 +420,8 @@ test('I-T32·I-T67_OPEN22_PostgreSQL에서_확정은흡수계정의기기행을�
   await q('update session set device_id = $1 where id = $2', [ids.rot, aRot.sessionId]);
   await q('update session set device_id = $1 where id = $2', [ids.bRot, bRot.sessionId]);
   const movedId = (await q<{ device_id: string }>('select device_id from session where id = $1', [b.sessionId]))[0]!.device_id;
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-dv-g' });
-  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-dv-g' });
+  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') });
   expect(await q('select 1 from device where account_id = $1', [b.accountId])).toHaveLength(0);
   const rows = await q<{ device_ref: string; device_ref_prev: string | null }>('select device_ref, device_ref_prev from device where account_id = $1', [a.accountId]);
   const sort = (x: { device_ref: string; device_ref_prev: string | null }[]) => [...x].sort((p, n) => (p.device_ref < n.device_ref ? -1 : 1));
@@ -490,11 +491,11 @@ test('I-T75_PostgreSQL에서_병합확정은대표계정의다른세션을LOGIN_
   const phone = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-m75-k', email: null, deviceId: 'dev-m75-phone' });
   const a = await t.k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'pg-m75-k', email: null, deviceId: 'dev-m75-pc' });
   const b = await t.k.create.run({ idempotencyKey: newKey(), provider: 'google', providerUserId: 'pg-m75-g', email: null, deviceId: 'dev-m75-b' });
-  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a), provider: 'google', providerUserId: 'pg-m75-g' });
+  const r = await t.add.add({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.token(a, 'LOGIN_METHOD_ADD'), provider: 'google', providerUserId: 'pg-m75-g' });
   expect(r.result).toBe('OTHER_ACCOUNT');
   // 병합 제안으로 갔을 뿐이라 아직 아무 세션도 끝내지 않는다
   expect(await q('select 1 from session where id = any($1::uuid[]) and terminated_at is not null', [[phone.sessionId, b.sessionId]])).toHaveLength(0);
-  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a) });
+  await t.confirm.run({ accountId: a.accountId, sessionId: a.sessionId, proposalId: r.mergeProposalId!, reauthToken: await t.token(a, 'ACCOUNT_MERGE') });
   const rows = await q<{ topic: string; msg_key: string; payload: Buffer }>(
     "select topic, msg_key, payload from outbox where msg_key = any($1::text[]) and topic in ('control.sessions-terminated', 'identity.accounts-merged') order by seq",
     [[a.accountId, b.accountId]],

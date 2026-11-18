@@ -130,7 +130,7 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       // dev-0의 두 세션이 함께 끝난다
       expect(k.signals.seen.at(-1)).toBe('terminated:DEVICE_LIMIT:2');
       expect(await t.sessionCount(first.accountId)).toBe(5);
-      expect(await codeOf(k.reauth.run({ sessionId: sameDevice.sessionId, accountId: first.accountId, provider: 'kakao', providerUserId: '4000001', strength: 'verified', purpose: 'sensitive' }))).toBe('FAILED_PRECONDITION');
+      expect(await codeOf(k.reauth.run({ sessionId: sameDevice.sessionId, accountId: first.accountId, provider: 'kakao', providerUserId: '4000001', strength: 'verified', operation: 'SESSION_END' }))).toBe('FAILED_PRECONDITION');
     });
 
     test('identity§10_기기가명키가없으면_기기행없이세션을만든다', async () => {
@@ -179,11 +179,11 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       const k = await kit(t.store);
       const a = await login(k);
       for (const strength of ['verified', 'requested'] as const) {
-        const r = await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'kakao', providerUserId: '4000001', strength, purpose: 'sensitive' });
+        const r = await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'kakao', providerUserId: '4000001', strength, operation: 'SESSION_END' });
         if (r.result !== 'ISSUED') throw new Error(r.result);
         expect(decodeProtectedHeader(r.token)).toMatchObject({ alg: 'ES256', typ: 'reauth+jwt', kid: k.publicJwk.kid });
         const { payload } = await jwtVerify(r.token, await importJWK(k.publicJwk, 'ES256'), { issuer: ISSUER, audience: 'fan', typ: 'reauth+jwt', currentDate: new Date(k.clock.now()) });
-        expect(payload).toMatchObject({ sub: a.accountId, sid: a.sessionId, act: 'FAN_SENSITIVE', provider: 'kakao', strength });
+        expect(payload).toMatchObject({ sub: a.accountId, sid: a.sessionId, act: 'FAN_SENSITIVE', op: 'SESSION_END', provider: 'kakao', strength });
         expect(typeof payload.jti).toBe('string');
         expect(payload.exp! - payload.iat!).toBe(5 * 60);
         expect(r.expiresAt).toBe(k.clock.now() + 5 * 60_000);
@@ -195,7 +195,7 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       const t = await make();
       const k = await kit(t.store);
       const a = await login(k, { provider: 'naver', providerUserId: 'nv-1', email: null });
-      expect(await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'naver', providerUserId: 'nv-1', strength: 'requested', purpose: 'high-risk' })).toEqual({ result: 'REVERIFY_REQUIRED' });
+      expect(await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'naver', providerUserId: 'nv-1', strength: 'requested', operation: 'TRANSFER_REQUEST' })).toEqual({ result: 'REVERIFY_REQUIRED' });
       expect(k.signals.seen.at(-1)).toBe('reverify:naver');
     });
 
@@ -203,10 +203,10 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       const t = await make();
       const k = await kit(t.store);
       const a = await login(k);
-      const r = await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'kakao', providerUserId: '4000001', strength: 'verified', purpose: 'high-risk' });
+      const r = await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'kakao', providerUserId: '4000001', strength: 'verified', operation: 'TRANSFER_REQUEST' });
       if (r.result !== 'ISSUED') throw new Error(r.result);
       const { payload } = await jwtVerify(r.token, await importJWK(k.publicJwk, 'ES256'), { issuer: ISSUER, audience: 'fan', typ: 'reauth+jwt', currentDate: new Date(k.clock.now()) });
-      expect(payload).toMatchObject({ act: 'FAN_HIGH_RISK', strength: 'verified' });
+      expect(payload).toMatchObject({ act: 'FAN_HIGH_RISK', op: 'TRANSFER_REQUEST', strength: 'verified' });
     });
 
     test('I-T54_다른제공자계정으로재인증하면_ACCOUNT_MISMATCH이고토큰이없다', async () => {
@@ -214,8 +214,8 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       const k = await kit(t.store);
       const a = await login(k);
       // 다른 계정의 카카오, 연결하지 않은 구글
-      expect(await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'kakao', providerUserId: '4000002', strength: 'verified', purpose: 'sensitive' })).toEqual({ result: 'ACCOUNT_MISMATCH' });
-      expect(await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'google', providerUserId: '4000001', strength: 'requested', purpose: 'sensitive' })).toEqual({ result: 'ACCOUNT_MISMATCH' });
+      expect(await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'kakao', providerUserId: '4000002', strength: 'verified', operation: 'SESSION_END' })).toEqual({ result: 'ACCOUNT_MISMATCH' });
+      expect(await k.reauth.run({ sessionId: a.sessionId, accountId: a.accountId, provider: 'google', providerUserId: '4000001', strength: 'requested', operation: 'SESSION_END' })).toEqual({ result: 'ACCOUNT_MISMATCH' });
       expect(k.signals.seen.slice(-2)).toEqual(['mismatch:kakao', 'mismatch:google']);
     });
 
@@ -224,10 +224,10 @@ export function sessionCases(name: string, make: () => Promise<StoreUnderTest>) 
       const k = await kit(t.store);
       const a = await login(k);
       const b = await login(k, { providerUserId: '4000002' });
-      const ask = (sessionId: string, accountId: string) => k.reauth.run({ sessionId, accountId, provider: 'kakao', providerUserId: '4000001', strength: 'verified', purpose: 'sensitive' });
+      const ask = (sessionId: string, accountId: string) => k.reauth.run({ sessionId, accountId, provider: 'kakao', providerUserId: '4000001', strength: 'verified', operation: 'SESSION_END' });
       expect(await codeOf(ask(a.sessionId, b.accountId))).toBe('FAILED_PRECONDITION');
       await k.end.run({ sessionId: b.sessionId, accountId: b.accountId });
-      expect(await codeOf(k.reauth.run({ sessionId: b.sessionId, accountId: b.accountId, provider: 'kakao', providerUserId: '4000002', strength: 'verified', purpose: 'sensitive' }))).toBe('FAILED_PRECONDITION');
+      expect(await codeOf(k.reauth.run({ sessionId: b.sessionId, accountId: b.accountId, provider: 'kakao', providerUserId: '4000002', strength: 'verified', operation: 'SESSION_END' }))).toBe('FAILED_PRECONDITION');
       k.clock.advance(14 * 24 * 3_600_000);
       expect(await codeOf(ask(a.sessionId, a.accountId))).toBe('FAILED_PRECONDITION');
     });
