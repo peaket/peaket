@@ -160,3 +160,48 @@ message GrantPriorityPurchaseResponse {
   // queue-svc q:prio 사본의 판 번호(HTTP 호환과 같은 값)
   int64 version = 6;
 }
+
+// 부르는 쪽: identity-svc만(탈퇴 요청 DELETE /v1/identity/account와 탈퇴 미룸 다시 하기 고리 withdrawal-pending-retry).
+// 탈퇴 참여자 계약(추천 적용 2026-11-18, BAT-010 계획, ADR-0284). 정본은 docs/features/payment.md §4.1 '탈퇴 참여자의 첫 구현'과
+// docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', docs/planning/03-policies-glossary.md §1.5 ⑤⑧.
+// 한 번 부르면 purchase-svc 데이터로 그 계정의 정리를 할 수 있는 만큼 하고(입금 대기 주문의 입금 전 취소), 남은 것이 있는지 돌려준다.
+// 읽기와 멱등 취소(취소 ID withdrawal-{주문 ID})만 하므로 다시 불러도 된다. 다른 계정의 주문은 읽지도 바꾸지도 않는다.
+// 데드라인은 요청 경로 3초, 고리 10초 [가정]이다. 내부 토큰이 설정되면 토큰이 없거나 틀리면 UNAUTHENTICATED, 부르는 쪽이 identity-svc가 아니면 PERMISSION_DENIED.
+// 계정 ID가 소문자 UUID가 아니면 INVALID_ARGUMENT, DB에 닿지 못하면 UNAVAILABLE이다.
+// 뒤에 붙을 참여자(ticket-svc·core-svc)도 같은 모양의 서비스를 연다.
+service WithdrawalParticipantService {
+  rpc ProcessAccountWithdrawal(ProcessAccountWithdrawalRequest) returns (ProcessAccountWithdrawalResponse);
+}
+
+message ProcessAccountWithdrawalRequest {
+  // 탈퇴하는 계정(소문자 UUID)
+  string account_id = 1;
+}
+
+enum WithdrawalParticipantState {
+  WITHDRAWAL_PARTICIPANT_STATE_UNSPECIFIED = 0;
+  // 이 참여자 몫으로 남은 것이 없다
+  WITHDRAWAL_PARTICIPANT_STATE_DONE = 1;
+  // 남은 것이 있어 탈퇴를 미룬다(reasons에 이유)
+  WITHDRAWAL_PARTICIPANT_STATE_PENDING = 2;
+}
+
+enum WithdrawalPendingReason {
+  WITHDRAWAL_PENDING_REASON_UNSPECIFIED = 0;
+  // 결제 결과를 기다리는 주문이 있다(CREATED·AUTHENTICATED·ACCEPTED·RESERVED·UNKNOWN)
+  WITHDRAWAL_PENDING_REASON_PAYMENT_PENDING_ORDER = 1;
+  // 입금 대기 주문의 입금 전 취소가 아직 끝나지 않았다(CANCEL_PENDING·UNKNOWN·REJECTED·호출 실패·부르지 못함)
+  WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING = 2;
+}
+
+message ProcessAccountWithdrawalResponse {
+  WithdrawalParticipantState state = 1;
+  // PENDING일 때만 채운다. 같은 이유를 두 번 싣지 않는다
+  repeated WithdrawalPendingReason reasons = 2;
+  // 결제 결과를 기다리는 주문 수
+  int32 payment_pending_orders = 3;
+  // 이번 호출에서 CancelPayment가 CANCELLED로 답한 입금 대기 주문 수
+  int32 deposit_orders_cancelled = 4;
+  // 취소가 남은 입금 대기 주문 수(부르지 못한 것 포함)
+  int32 deposit_orders_pending = 5;
+}
