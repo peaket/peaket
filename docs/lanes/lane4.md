@@ -7,8 +7,8 @@
 - **ADR 번호(첫 바퀴)**: 0296~0298. 모자라면 전체 감독에게 더 받는다(`docs/lanes/coord.md`).
 
 ## 다음 할 일
-- **첫 일(ADR-0286 '확인')**: `tools/ci/records.mjs`의 `RECORD_SIZE_FILES`에 `docs/lanes/lane4.md`·`lane5.md`를 더하고 시험(`tools/ci/records.test.mjs`)을 고친다. 역할 나누기(ADR-0270·0281)대로, B 등급 짧은 고리(ADR-0283 결정 2).
-- 그다음 묶음 표 차례대로: BAT-052(HOT-090 realtime-gw, A, 새 서비스 선행을 이 갈래가 만든다) → BAT-075(BAS-080·120) → BAT-080(BAS-130·140) → BAT-085(BAS-150·160) → BAT-355·360·365·390(ops-svc 제어 평면) → BAT-245~275(선행 OPS-010~030이 갈래 1에서 `develop`에 들어온 뒤). 선행이 없는 묶음은 건너뛴다.
+- 다음 묶음(묶음 표 차례대로): BAT-052(HOT-090 realtime-gw, A, 새 서비스 선행을 이 갈래가 만든다) → BAT-075(BAS-080·120) → BAT-080(BAS-130·140) → BAT-085(BAS-150·160) → BAT-355·360·365·390(ops-svc 제어 평면) → BAT-245~275(선행 OPS-010~030이 갈래 1에서 `develop`에 들어온 뒤). 선행이 없는 묶음은 건너뛴다.
 - kind 클러스터 이름은 `lane4-`로 시작한다. 갈래 1도 kind를 쓰므로 Docker 잠금을 지키고 무거운 시험은 초안 PR CI로 돌린다(ADR-0286 결정 5).
 
 ## 진행 로그
+- 2026-11-18 W11-lanes(R-686): 기록 크기 점검(`records.mjs --check`)에 `docs/lanes/lane4.md`·`lane5.md`를 더함(ADR-0286 '확인'). B 짧은 고리 커밋 8개, 틀린 구현 22/21(놓친 VF-V10은 시험 RS-14 더함), 리뷰 RV-02는 lane4-cleanup.md. 계획 `docs/review/plans/W11-lanes.md`.
