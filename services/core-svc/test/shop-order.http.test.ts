@@ -1,4 +1,4 @@
-// 굿즈 주문 HTTP 시험(메모리 어댑터, BUILD_ORDER LCH-010·LCH-020, ADR-0300 결정 4·5·8, ADR-0301 결정 4, P-T56 ⑥⑦).
+// 굿즈 주문 HTTP 시험(메모리 어댑터, BUILD_ORDER LCH-010·LCH-020, ADR-0300 결정 4·5·8, ADR-0301 결정 4, P-T57 ⑥⑦).
 // 단언 값은 정본에서 가져온다: openapi createShopOrder 422 ①~⑥·409 type 이름, ADR-0300 결정 4(한도 = 이 주문 + PAID·결제 접수한 주문 ≤ perAccountLimit,
 // 금액 = 가격 × 수량 + 택배 배송비 한 번), 결정 5(시도 3회, 택배 503 pg-unavailable, 가상계좌 뺌), 결정 8(남의 주문·없는 주문은 같은 404 not-found),
 // ADR-0301 결정 4(현장 수령 시간대: 끝난 시간대 ends_at ≤ 지금, 남의 상품 시간대, 티켓 소지자 전용 → 422 pickup-slot-unavailable, 확인 못 함 503).
@@ -126,11 +126,11 @@ async function accept(account: string, orderId: string): Promise<void> {
   expect(res.statusCode).toBe(202);
 }
 
-describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
-  test('P-T56 ⑥ 다른 계정이 그 주문의 상세·결제 시도·결제 접수·결제 상태를 부르면 모두 없는 주문과 같은 404 not-found이고 바뀐 행이 없다 [ASVS v5.0.0-8.2.2]', async () => {
+describe('굿즈 주문 HTTP(P-T57 ⑥⑦)', () => {
+  test('P-T57 ⑥ 다른 계정이 그 주문의 상세·결제 시도·결제 접수·결제 상태를 부르면 모두 없는 주문과 같은 404 not-found이고 바뀐 행이 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const owner = randomUUID();
     const intruder = randomUUID();
-    const p = product({ name: 'P-T56 ⑥ 상품' });
+    const p = product({ name: 'P-T57 ⑥ 상품' });
     const created = await pickupOrder(owner, [{ productId: p.productId, quantity: 1 }], slot(p.productId));
     expect(created.statusCode).toBe(201);
     const orderId = JSON.parse(created.payload).orderId as string;
@@ -180,9 +180,9 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(typeOf(st)).toContain('payment-not-accepted');
   });
 
-  test('P-T56 ⑥ 결제를 접수한 뒤에도 다른 계정의 결제 상태 조회는 404 not-found다(결제 상태의 계정 대조)', async () => {
+  test('P-T57 ⑥ 결제를 접수한 뒤에도 다른 계정의 결제 상태 조회는 404 not-found다(결제 상태의 계정 대조)', async () => {
     const owner = randomUUID();
-    const p = product({ name: 'P-T56 ⑥ 접수 뒤' });
+    const p = product({ name: 'P-T57 ⑥ 접수 뒤' });
     const orderId = JSON.parse((await pickupOrder(owner, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;
     await accept(owner, orderId);
     const mine = await get(owner, `/v1/shop/orders/${orderId}/payment-status`);
@@ -193,7 +193,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(typeOf(other)).toContain('not-found');
   });
 
-  test('P-T56 ⑦ 계정당 한도 2: 한 주문 2개는 통과, 3개는 422 merch-quantity-limit-exceeded다', async () => {
+  test('P-T57 ⑦ 계정당 한도 2: 한 주문 2개는 통과, 3개는 422 merch-quantity-limit-exceeded다', async () => {
     const p = product({ name: '한도 2', attributes: { perAccountLimit: 2 } });
     const s = slot(p.productId);
     const three = await pickupOrder(randomUUID(), [{ productId: p.productId, quantity: 3 }], s);
@@ -202,7 +202,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect((await pickupOrder(randomUUID(), [{ productId: p.productId, quantity: 2 }], s)).statusCode).toBe(201);
   });
 
-  test('P-T56 ⑦ 계정당 한도 2: 결제 접수했지만 아직 CREATED인 주문 1개 + 1개는 통과하고, 2개 접수 뒤 1개 더는 422다', async () => {
+  test('P-T57 ⑦ 계정당 한도 2: 결제 접수했지만 아직 CREATED인 주문 1개 + 1개는 통과하고, 2개 접수 뒤 1개 더는 422다', async () => {
     const account = randomUUID();
     const p = product({ name: '한도 2 접수', attributes: { perAccountLimit: 2 } });
     const s = slot(p.productId);
@@ -219,7 +219,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect((await pickupOrder(randomUUID(), [{ productId: p.productId, quantity: 2 }], s)).statusCode).toBe(201);
   });
 
-  test('P-T56 ⑦ 계정당 한도 2: PAID 주문 2개 뒤 1개 더는 422이고, 결제 접수 전 주문은 한도에 세지 않는다', async () => {
+  test('P-T57 ⑦ 계정당 한도 2: PAID 주문 2개 뒤 1개 더는 422이고, 결제 접수 전 주문은 한도에 세지 않는다', async () => {
     const account = randomUUID();
     const p = product({ name: '한도 2 PAID', attributes: { perAccountLimit: 2 } });
     const s = slot(p.productId);
@@ -232,8 +232,8 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(typeOf(more)).toContain('merch-quantity-limit-exceeded');
   });
 
-  // 리뷰 반영 RV-02(ADR-0300 결정 4, P-T56 ⑦): '이 주문 수량'은 상품 ID마다 그 상품의 모든 줄(옵션·수량만 다른 줄 포함) 합이다.
-  test('P-T56 ⑦ 계정당 한도 2: 같은 상품을 수량만 다른 두 줄(1개·2개)로 보내면 422 merch-quantity-limit-exceeded이고 저장·예약이 없다', async () => {
+  // 리뷰 반영 RV-02(ADR-0300 결정 4, P-T57 ⑦): '이 주문 수량'은 상품 ID마다 그 상품의 모든 줄(옵션·수량만 다른 줄 포함) 합이다.
+  test('P-T57 ⑦ 계정당 한도 2: 같은 상품을 수량만 다른 두 줄(1개·2개)로 보내면 422 merch-quantity-limit-exceeded이고 저장·예약이 없다', async () => {
     const p = product({ name: '한도 2 두 줄', attributes: { perAccountLimit: 2 }, limitedQty: 5, stock: 5 });
     const writes = orders.writes;
     const reserve = vi.spyOn(stock, 'reserve');
@@ -249,7 +249,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     }
   });
 
-  test('P-T56 ⑦ 계정당 한도 2: 옵션만 다른 두 줄(1개·2개)도 422 merch-quantity-limit-exceeded다', async () => {
+  test('P-T57 ⑦ 계정당 한도 2: 옵션만 다른 두 줄(1개·2개)도 422 merch-quantity-limit-exceeded다', async () => {
     const p = product({ name: '한도 2 옵션 두 줄', attributes: { perAccountLimit: 2, options: [{ name: '색상', values: ['빨강', '파랑'] }] } });
     const writes = orders.writes;
     const res = await pickupOrder(
@@ -265,7 +265,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(orders.writes).toBe(writes);
   });
 
-  test('P-T56 ⑦ 계정당 한도 2: 같은 상품 두 줄 합 2(1개·1개)는 201이다', async () => {
+  test('P-T57 ⑦ 계정당 한도 2: 같은 상품 두 줄 합 2(1개·1개)는 201이다', async () => {
     const p = product({ name: '한도 2 합 2', attributes: { perAccountLimit: 2, options: [{ name: '색상', values: ['빨강', '파랑'] }] } });
     const res = await pickupOrder(
       randomUUID(),
@@ -278,7 +278,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(res.statusCode, res.payload).toBe(201);
   });
 
-  test('P-T56 ⑦ 계정당 한도 2: 이미 결제한 1개가 있으면 같은 상품 두 줄(1개·1개)은 합 3이라 422 merch-quantity-limit-exceeded다', async () => {
+  test('P-T57 ⑦ 계정당 한도 2: 이미 결제한 1개가 있으면 같은 상품 두 줄(1개·1개)은 합 3이라 422 merch-quantity-limit-exceeded다', async () => {
     const account = randomUUID();
     const p = product({ name: '한도 2 결제 1 + 두 줄', attributes: { perAccountLimit: 2, options: [{ name: '색상', values: ['빨강', '파랑'] }] } });
     const s = slot(p.productId);
@@ -299,7 +299,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(orders.writes).toBe(writes);
   });
 
-  test('P-T56 ⑦ 옵션 밖의 값·옵션 빠짐·상품에 없는 옵션은 422 merch-options-invalid이고 맞는 옵션은 통과한다', async () => {
+  test('P-T57 ⑦ 옵션 밖의 값·옵션 빠짐·상품에 없는 옵션은 422 merch-options-invalid이고 맞는 옵션은 통과한다', async () => {
     const p = product({ name: '옵션 상품', attributes: { options: [{ name: '색상', values: ['빨강', '파랑'] }, { name: '사이즈', values: ['S'] }] } });
     const s = slot(p.productId);
     const writes = orders.writes;
@@ -316,7 +316,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(item.optionSnapshot.options).toEqual({ 색상: '파랑', 사이즈: 'S' });
   });
 
-  test('P-T56 ⑦ 판매자가 다른 두 상품을 한 주문에 담으면 422 merch-order-mixed다', async () => {
+  test('P-T57 ⑦ 판매자가 다른 두 상품을 한 주문에 담으면 422 merch-order-mixed다', async () => {
     const a = product({ name: '판매자 A' });
     const b = product({ name: '판매자 B', promoterId: OTHER_SELLER });
     const res = await deliveryOrder(randomUUID(), [{ productId: a.productId, quantity: 1 }, { productId: b.productId, quantity: 1 }], okConsent);
@@ -324,7 +324,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(typeOf(res)).toContain('merch-order-mixed');
   });
 
-  test('P-T56 ⑦ 수령 방식이 다른 상품(택배만·현장 수령만)을 한 주문에 담으면 그 수령 방식을 받지 않는 상품이라 422 merch-product-unavailable다', async () => {
+  test('P-T57 ⑦ 수령 방식이 다른 상품(택배만·현장 수령만)을 한 주문에 담으면 그 수령 방식을 받지 않는 상품이라 422 merch-product-unavailable다', async () => {
     const a = product({ name: '택배만', fulfillments: ['DELIVERY'] });
     const b = product({ name: '현장 수령만', fulfillments: ['PICKUP'] });
     const res = await deliveryOrder(randomUUID(), [{ productId: a.productId, quantity: 1 }, { productId: b.productId, quantity: 1 }], okConsent);
@@ -334,7 +334,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(typeOf(res)).not.toContain('merch-order-mixed');
   });
 
-  test('P-T56 ⑦ 판매 중이 아닌 상품(초안·숨김·판매 전·판매 끝)·티켓 연동 상품·그 수령 방식을 받지 않는 상품·없는 상품은 422 merch-product-unavailable다', async () => {
+  test('P-T57 ⑦ 판매 중이 아닌 상품(초안·숨김·판매 전·판매 끝)·티켓 연동 상품·그 수령 방식을 받지 않는 상품·없는 상품은 422 merch-product-unavailable다', async () => {
     const cases: [string, Partial<ProductRecord>][] = [
       ['초안', { status: 'DRAFT' }],
       ['숨김', { status: 'HIDDEN' }],
@@ -356,7 +356,7 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
 });
 
 describe('현장 수령 시간대(ADR-0301 결정 4)', () => {
-  test('P-T56 ⑦ 끝난 시간대(ends_at = 지금)는 422 pickup-slot-unavailable이고 지금 + 1ms에 끝나는 시간대는 통과한다', async () => {
+  test('P-T57 ⑦ 끝난 시간대(ends_at = 지금)는 422 pickup-slot-unavailable이고 지금 + 1ms에 끝나는 시간대는 통과한다', async () => {
     const p = product({ name: '시간대 경계' });
     const ended = await pickupOrder(randomUUID(), [{ productId: p.productId, quantity: 1 }], slot(p.productId, { endsAt: clock.now() }));
     expect(ended.statusCode).toBe(422);
@@ -367,7 +367,7 @@ describe('현장 수령 시간대(ADR-0301 결정 4)', () => {
     expect(live.statusCode).toBe(201);
   });
 
-  test('P-T56 ⑦ 남의 상품 시간대·없는 시간대는 422 pickup-slot-unavailable다', async () => {
+  test('P-T57 ⑦ 남의 상품 시간대·없는 시간대는 422 pickup-slot-unavailable다', async () => {
     const p = product({ name: '내 상품' });
     const q = product({ name: '남의 상품' });
     for (const s of [slot(q.productId), randomUUID()]) {
@@ -377,7 +377,7 @@ describe('현장 수령 시간대(ADR-0301 결정 4)', () => {
     }
   });
 
-  test('P-T56 ⑦ 두 상품 주문은 다른 항목 상품에도 같은 회차의 시간대가 있어야 하고 주문 회차는 시간대의 회차다', async () => {
+  test('P-T57 ⑦ 두 상품 주문은 다른 항목 상품에도 같은 회차의 시간대가 있어야 하고 주문 회차는 시간대의 회차다', async () => {
     const a = product({ name: '두 상품 A' });
     const b = product({ name: '두 상품 B' });
     const c = product({ name: '두 상품 C' });
@@ -392,7 +392,7 @@ describe('현장 수령 시간대(ADR-0301 결정 4)', () => {
     expect(typeOf(bad)).toContain('pickup-slot-unavailable');
   });
 
-  test('P-T56 ⑦ 티켓 소지자 전용 시간대: 보유 있음은 통과, 없음은 422 pickup-slot-unavailable, 확인 못 함은 503 dependency-unavailable이고 주문·예약이 없다', async () => {
+  test('P-T57 ⑦ 티켓 소지자 전용 시간대: 보유 있음은 통과, 없음은 422 pickup-slot-unavailable, 확인 못 함은 503 dependency-unavailable이고 주문·예약이 없다', async () => {
     const p = product({ name: '전용 시간대', limitedQty: 3, stock: 3 });
     stock.setCounter(p.productId, 3);
     const s = slot(p.productId, { ticketHoldersOnly: true, eventId: EVENT });
@@ -419,7 +419,7 @@ describe('현장 수령 시간대(ADR-0301 결정 4)', () => {
 });
 
 describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
-  test('P-T56 ⑦ 동의가 없거나 provisionToSeller가 false·빠짐이거나 문안 판이 없으면 422 consent-required다', async () => {
+  test('P-T57 ⑦ 동의가 없거나 provisionToSeller가 false·빠짐이거나 문안 판이 없으면 422 consent-required다', async () => {
     const p = product({ name: '택배 동의' });
     const before = orders.orders.size;
     for (const c of [undefined, { provisionToSeller: false, consentVersion: CONSENT }, { consentVersion: CONSENT }, { provisionToSeller: true }]) {
@@ -430,7 +430,7 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     expect(orders.orders.size).toBe(before);
   });
 
-  test('P-T56 ⑦ 동의 문안 판이 지금 판과 다르면 422 consent-version-outdated다', async () => {
+  test('P-T57 ⑦ 동의 문안 판이 지금 판과 다르면 422 consent-version-outdated다', async () => {
     const p = product({ name: '택배 문안 판' });
     for (const v of ['v2026.11-1', 'v2026.11-9', '2026-10-30']) {
       const res = await deliveryOrder(randomUUID(), [{ productId: p.productId, quantity: 1 }], { provisionToSeller: true, consentVersion: v });
@@ -439,9 +439,9 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     }
   });
 
-  // 리뷰 반영 RV-09(ADR-0300 결정 4 새 줄, ADR-0301 결정 4, ADR-0299 결정 3, P-T56 ⑩): 택배 주문은 BAT-605 전까지 본문·업무 규칙 검사(400·422)를 마친 뒤
+  // 리뷰 반영 RV-09(ADR-0300 결정 4 새 줄, ADR-0301 결정 4, ADR-0299 결정 3, P-T57 ⑩): 택배 주문은 BAT-605 전까지 본문·업무 규칙 검사(400·422)를 마친 뒤
   // 재고를 예약하거나 행을 쓰기 전에 503 pg-unavailable이다. 택배 금액(배송비 한 번)은 test/merch-order.test.ts의 orderAmount 시험이 본다.
-  test('P-T56 ⑩ 택배 주문은 BAT-605 전까지 검사를 통과하면 503 pg-unavailable이고 재고 예약·주문 행이 없다', async () => {
+  test('P-T57 ⑩ 택배 주문은 BAT-605 전까지 검사를 통과하면 503 pg-unavailable이고 재고 예약·주문 행이 없다', async () => {
     const a = product({ name: '택배 한정 A', price: 12_300, shippingFee: 3_000, limitedQty: 3, stock: 3 });
     const b = product({ name: '택배 B', price: 4_100, shippingFee: 3_000 });
     const writes = orders.writes;
@@ -460,7 +460,7 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     }
   });
 
-  test('P-T56 ⑩ 택배 주문의 동의 없음은 여전히 422 consent-required이고 본문 검사 400·업무 규칙 422도 503보다 먼저다', async () => {
+  test('P-T57 ⑩ 택배 주문의 동의 없음은 여전히 422 consent-required이고 본문 검사 400·업무 규칙 422도 503보다 먼저다', async () => {
     const p = product({ name: '택배 검사 먼저', limitedQty: 3, stock: 3, attributes: { perAccountLimit: 2 } });
     const noConsent = await deliveryOrder(randomUUID(), [{ productId: p.productId, quantity: 1 }]);
     expect(noConsent.statusCode).toBe(422);
@@ -482,7 +482,7 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     expect(stock.slots.get(p.productId)?.resv.size ?? 0).toBe(0);
   });
 
-  test('P-T56 ⑦ 현장 수령 주문 금액에는 배송비가 없고 결제 상점은 일반이다', async () => {
+  test('P-T57 ⑦ 현장 수령 주문 금액에는 배송비가 없고 결제 상점은 일반이다', async () => {
     const a = product({ name: '현장 금액', price: 12_300, shippingFee: 3_000 });
     const res = await pickupOrder(randomUUID(), [{ productId: a.productId, quantity: 3 }], slot(a.productId));
     expect(res.statusCode).toBe(201);
@@ -492,10 +492,10 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     expect(o.shippingFee).toBe(0);
   });
 
-  test('P-T55 ⑤ 택배 주문의 결제 시도 시작은 503 pg-unavailable이고 결제창 준비를 부르지 않는다(ADR-0299 결정 3)', async () => {
+  test('P-T56 ⑤ 택배 주문의 결제 시도 시작은 503 pg-unavailable이고 결제창 준비를 부르지 않는다(ADR-0299 결정 3)', async () => {
     const account = randomUUID();
     const p = product({ name: '택배 결제' });
-    // BAT-605 전에는 택배 주문을 HTTP로 만들 수 없으므로(P-T56 ⑩) 현장 수령 주문을 메모리 저장소에서 택배로 바꿔 둔다(시험 준비)
+    // BAT-605 전에는 택배 주문을 HTTP로 만들 수 없으므로(P-T57 ⑩) 현장 수령 주문을 메모리 저장소에서 택배로 바꿔 둔다(시험 준비)
     const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;
     orders.orders.get(orderId)!.fulfillment = 'DELIVERY';
     const calls = payments.calls.checkout.length;
@@ -507,7 +507,7 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
 });
 
 describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
-  test('P-T55 ⑤ 결제 시도는 PrepareCheckout에 주문 금액과 시간대 회차를 넘기고 응답 허용 수단에서 가상계좌를 뺀다', async () => {
+  test('P-T56 ⑤ 결제 시도는 PrepareCheckout에 주문 금액과 시간대 회차를 넘기고 응답 허용 수단에서 가상계좌를 뺀다', async () => {
     const account = randomUUID();
     const p = product({ name: '결제 시도', price: 12_300 });
     const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 2 }], slot(p.productId, { eventId: OTHER_EVENT }))).payload).orderId as string;
@@ -520,7 +520,7 @@ describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
     expect(body.checkout.successUrl).toContain('/shop/checkout/return?order=');
   });
 
-  test('P-T55 ⑤ 수단 VIRTUAL_ACCOUNT 결제 시도는 400이고 결제창 준비를 부르지 않으며 시도가 생기지 않는다', async () => {
+  test('P-T56 ⑤ 수단 VIRTUAL_ACCOUNT 결제 시도는 400이고 결제창 준비를 부르지 않으며 시도가 생기지 않는다', async () => {
     const account = randomUUID();
     const p = product({ name: '가상계좌' });
     const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;
@@ -531,7 +531,7 @@ describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
     expect([...orders.attempts.values()].filter((a) => a.orderId === orderId)).toEqual([]);
   });
 
-  test('P-T56 ⑦ 결제 시도는 주문마다 3회까지이고 4번째는 409 payment-attempts-exceeded이며 이전 READY 시도는 SUPERSEDED다', async () => {
+  test('P-T57 ⑦ 결제 시도는 주문마다 3회까지이고 4번째는 409 payment-attempts-exceeded이며 이전 READY 시도는 SUPERSEDED다', async () => {
     const account = randomUUID();
     const p = product({ name: '시도 3회' });
     const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;

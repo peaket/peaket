@@ -103,7 +103,7 @@ describe('startPurchaseConsumers(runKeyedConsumer 대역)', () => {
     await c.stop();
   });
 
-  test('P-T55 ⑥ 조립: 레지스트리를 넘기면 결제 결과 처리기가 굿즈 사건(orderKind MERCH, eventId 없음)을 쓰임새에 넘기지 않고 payment_result_skipped_total{reason="merch"}를 1 올린다', async () => {
+  test('P-T56 ⑥ 조립: 레지스트리를 넘기면 결제 결과 처리기가 굿즈 사건(orderKind MERCH, eventId 없음)을 쓰임새에 넘기지 않고 payment_result_skipped_total{reason="merch"}를 1 올린다', async () => {
     const metrics = new PlatformMetrics('purchase-svc');
     const o = { ...options(), registry: metrics.registry };
     const c = startPurchaseConsumers(o);
