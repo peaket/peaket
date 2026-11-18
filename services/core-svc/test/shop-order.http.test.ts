@@ -257,13 +257,14 @@ describe('굿즈 주문 HTTP(P-T56 ⑥⑦)', () => {
     expect(typeOf(res)).toContain('merch-order-mixed');
   });
 
-  test('P-T56 ⑦ 수령 방식이 다른 상품(택배만·현장 수령만)을 한 주문에 담으면 422다', async () => {
+  test('P-T56 ⑦ 수령 방식이 다른 상품(택배만·현장 수령만)을 한 주문에 담으면 그 수령 방식을 받지 않는 상품이라 422 merch-product-unavailable다', async () => {
     const a = product({ name: '택배만', fulfillments: ['DELIVERY'] });
     const b = product({ name: '현장 수령만', fulfillments: ['PICKUP'] });
     const res = await deliveryOrder(randomUUID(), [{ productId: a.productId, quantity: 1 }, { productId: b.productId, quantity: 1 }], okConsent);
     expect(res.statusCode).toBe(422);
-    // openapi 422 ①(수령 방식이 섞임 merch-order-mixed)과 ⑥(그 수령 방식을 받지 않는 상품 merch-product-unavailable)이 함께 걸린다(계획 '시험 이의' 참고)
-    expect(['merch-order-mixed', 'merch-product-unavailable'].some((t) => typeOf(res).includes(t))).toBe(true);
+    // 수령 방식은 본문 하나라 그 수령 방식을 받지 않는 상품은 ⑥, ①(merch-order-mixed)은 판매자가 다를 때만이다(ADR-0300 결정 4, 계획 '시험 이의' E-2 판정)
+    expect(typeOf(res)).toContain('merch-product-unavailable');
+    expect(typeOf(res)).not.toContain('merch-order-mixed');
   });
 
   test('P-T56 ⑦ 판매 중이 아닌 상품(초안·숨김·판매 전·판매 끝)·티켓 연동 상품·그 수령 방식을 받지 않는 상품·없는 상품은 422 merch-product-unavailable다', async () => {
