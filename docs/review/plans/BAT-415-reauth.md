@@ -348,6 +348,7 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | T9(RV-09 다) | `R-T39 ② alg none·HS256 토큰은 403이다` | 같은 파일(② 목록에 두 줄) | 403·호출 0·`SET` 0. none은 공개키 읽기 0번 | 처음부터 통과할 것(그렇게 적는다) |
 | T10(대조 ①) | 어댑터 시험 이름 | `test/jwks-fan-reauth-gate.test.ts` | '정확한 수명으로 jti를 잡는다' → `R-T39 ③ …`(한 번 쓰기), 'act·sid·sub가 틀린 토큰을 거절' → `R-T39 ② …`, '빈 값이면 false' → `R-T39 ② …`. 공개키 못 받음·저장소 세 상태는 ⑤ 그대로 | 이름만 |
 | T11(대조 ②) | 빈 토큰 시험 | 같은 파일 | `expect(jwks.urls).toHaveLength(0)` 한 줄을 더한다 | 처음부터 통과할 것 |
+| T12(RV-05 보완, 2026-11-18 감독 결정) | `R-T39 ⑤ 좌표가 곡선 밖인 키를 담은 공개키 묶음이면 503 reauth-unavailable이다` | `test/cancel-reauth-http.test.ts`, 어댑터 한 줄은 `test/jwks-fan-reauth-gate.test.ts` | 같은 `kid`이고 `x`·`y`가 곡선 밖인 키(jose가 `DOMException` `DataError`를 냄) → HTTP 503·`type` reauth-unavailable·`Retry-After` `5`·호출 0·`SET` 0. 어댑터는 `ReauthUnavailable`을 던지고 `command` 0번. 대조: `crv`가 없는 키는 403(까닭 `kid`) | 500이라 실패할 것(시험 담당이 '실패 확인'에 적는다) |
 
 ### 3. 구현 담당 몫(시험 커밋 뒤, 시험 파일은 고치지 않는다)
 
@@ -355,7 +356,7 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | --- | --- | --- |
 | I1(RV-02) | `services/purchase-svc/src/modules/refund/adapters/jwks-fan-reauth-gate.ts` | 확인과 `sub` 대조 뒤, `jti` 잡기 전에 `verified.expiresAt − 지금 > 330_000`이면 false(까닭 `lifetime`). 상수 이름과 주석은 정본 문구대로(5분 + 시계 차이 30초) |
 | I2(RV-02) | `packages/platform/src/reauth-jti.ts` | `REAUTH_JTI_TTL_MS`를 `5 * 60_000 + 30_000`으로, 주석을 '5분 + 시계 차이 30초'로 고친다. **다른 서비스 영향**: core·ops·payment의 `jti` 기록도 최대 30초 길어진다(닫히는 쪽이고 행동은 그대로). `packages/platform`을 바꾸므로 node 잡이 전체를 돌고 kind·image도 돈다 |
-| I3(RV-05·V7) | 같은 어댑터 | 확인기 오류 가운데 `code`가 `ERR_JWK_INVALID`·`ERR_JWKS_INVALID`·`ERR_JWKS_MULTIPLE_MATCHING_KEYS`면 `ReauthUnavailable`(까닭 `keys`), `ERR_JOSE_NOT_SUPPORTED`면 false(까닭 `format`), 그 밖은 그대로 던진다. jose를 새 의존성으로 들이지 않고 `code` 글로 가른다. 컨트롤러는 그대로 둔다(500은 플랫폼 기본) |
+| I3(RV-05·V7) | 같은 어댑터 | 확인기 오류 가운데 `code`가 `ERR_JWK_INVALID`·`ERR_JWKS_INVALID`·`ERR_JWKS_MULTIPLE_MATCHING_KEYS`면 `ReauthUnavailable`(까닭 `keys`), `ERR_JOSE_NOT_SUPPORTED`면 false(까닭 `claims`, 정본 §3.1 '거절 기록'대로. 처음 계획의 `format`은 틀렸다), 그 밖은 그대로 던진다. 보완(2026-11-18, 감독 결정): jose 6.2.14에서 좌표가 곡선 밖이거나 `y`가 없는 키는 `code` 없이 `DOMException`(name `DataError`)을 내므로, `e instanceof Error && e.name === 'DataError'`(DOMException 포함)도 `ReauthUnavailable`(까닭 `keys`)로 바꾼다. `crv`가 없는 키의 `ERR_JWKS_NO_MATCHING_KEY`는 확인기가 `TokenRejected('kid')`로 바꾸므로 그대로 403(까닭 `kid`)이다. jose를 새 의존성으로 들이지 않고 `code`·`name` 글로 가른다. 컨트롤러는 그대로 둔다(500은 플랫폼 기본) |
 | I4(RV-06 가) | 같은 어댑터, `src/refund-wiring.ts`, `src/start.ts` | 생성자 선택 인자 `onResult?: (r: { outcome: 'rejected'; reason: ReauthRejectReason } \| { outcome: 'unavailable'; reason: 'keys' \| 'store' }) => void`, 이름표 형 `export type ReauthRejectReason = 'missing' \| TokenRejectReason \| 'sub' \| 'lifetime' \| 'replay'`. `fanReauthGateFromEnv`가 받아 넘기고, start.ts가 서비스 로거로 403은 `info`, 503은 `warn` 한 줄(필드는 `reason`만)로 잇는다(늦게 묶는 로거 방식) |
 | I5(RV-06 나) | `src/refund-wiring.ts` | 주소가 있고 `PEAKET_IDENTITY_ISSUER`가 없거나 빈 값이면 local·ci만 기본값, 그 밖은 던짐(글에 `PEAKET_IDENTITY_ISSUER`) |
 | I6(RV-09) | 같은 어댑터 | `JWKS_TIMEOUT_CAP_MS`를 1,000으로, 주석에 정본 자리를 적는다 |
@@ -380,7 +381,7 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T21:19+09:00 | 2026-11-18T21:36+09:00 |
 | review | l3-b415r-review | claude-opus-5-5 | 2026-11-18T21:37+09:00 | 2026-11-18T21:49+09:00 |
 | verify | l3-b415r-verify | claude-opus-5-5 | 2026-11-18T21:38+09:00 | 2026-11-18T22:05+09:00 |
-| plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:25+09:00 |
+| plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:40+09:00 |
 | test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T22:31+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
