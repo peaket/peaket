@@ -22,10 +22,11 @@ managementPort: 9464
 # 진단 수집(RB-31, ADR-0070 결정 1, BUILD_ORDER BAS-080). 서비스·릴레이 컨테이너는 늘 진단 실행 옵션(NODE_OPTIONS)·/diag·주석 파일·메모리 한도 값을 받는다.
 # 운영자가 파드에 peaket.io/diagnose=<report|heap>@<UTC 시각> 주석을 달면 서비스가 준비를 내리고 보고서(·힙 스냅샷)를 증거 버킷에 올린 뒤 다시 뜬다.
 diagnose:
-  # 증거 버킷 이름(운영은 Terraform이 만든 버킷). 비우면 local·ci는 수집을 끄고(경고 한 줄), 그 밖의 환경은 서비스가 시작하지 않는다
+  # 증거 버킷 이름(운영은 Terraform이 만든 버킷). 비우면 local·ci는 수집을 끄고(경고 한 줄), 그 밖의 환경(staging·prod·demo)은 렌더하지 않는다
   bucket: ""
-  # 흉내 서버 주소(local·ci의 AWS 흉내 서버 moto S3). local·ci에서 수집을 켜려면 bucket과 함께 있어야 한다
+  # 흉내 서버 주소(local·ci의 AWS 흉내 서버 moto S3). local·ci에서 수집을 켜려면 bucket과 함께 있어야 한다. 그 밖의 환경에 적으면 렌더하지 않는다
   s3Endpoint: ""
+  # 값으로 받는 NODE_OPTIONS(env·service.env·outboxRelay.env)는 안전 옵션 앞에 붙고, 안전 옵션을 끄는 값(--no-disable-sigusr1·--no-report-*·--inspect…)은 렌더하지 않는다
   # V8 힙 상한(메모리 한도에 대한 백분율, 10~90) [가정]. 나머지는 힙 밖 메모리와 힙 스냅샷 여유다
   heapPercent: 75
 
