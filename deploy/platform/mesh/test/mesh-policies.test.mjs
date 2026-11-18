@@ -143,6 +143,8 @@ const GRPC = {
     'peaket.purchase.v1.EventRefundService': ['ops-svc'],
     'peaket.purchase.v1.FraudCancellationService': ['ops-svc'],
     'peaket.purchase.v1.PriorityPurchaseService': ['ops-svc'],
+    // 탈퇴 참여자: identity-svc만 부른다(ADR-0284 결정 1, docs/features/identity.md §8 '참여자 호출', docs/api/proto/README.md §3)
+    'peaket.purchase.v1.WithdrawalParticipantService': ['identity-svc'],
   },
   'queue-svc': {
     'peaket.queue.v1.BookingRestrictionService': ['ops-svc'],
@@ -757,6 +759,10 @@ test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 �
   assert.deepEqual(pay('ApprovePayoutBatch'), [principalOf('ops-svc')]);
   assert.deepEqual(pay('RegisterPayoutSeller'), [principalOf('core-svc')]);
   assert.ok(!pay('ConfirmPayment').includes(principalOf('ops-svc')), 'ConfirmPayment에 ops-svc가 있다');
+  // 탈퇴 참여자(BAT-010, ADR-0284 결정 1): identity-svc는 받고, 그 밖(web·purchase-svc 자신·ops-svc·게이트웨이)은 받지 않는다
+  const wd = waypointAllowed(mesh, 'purchase-svc', '/peaket.purchase.v1.WithdrawalParticipantService/ProcessAccountWithdrawal');
+  assert.ok(wd.has(principalOf('identity-svc')), 'ProcessAccountWithdrawal에 identity-svc가 없다');
+  for (const n of ['web', 'purchase-svc', 'ops-svc', 'core-svc', ...GATEWAYS]) assert.ok(!wd.has(principalOf(n)) && !wd.has(ALL), `ProcessAccountWithdrawal에 ${n}`);
   // 부르는 쪽 0개(경계): 배상 송금 메서드는 아무도 부르지 못한다
   for (const m of protos().get('peaket.payment.v1.CompensationTransferService').methods)
     assert.equal(waypointAllowed(mesh, 'payment-svc', `/peaket.payment.v1.CompensationTransferService/${m}`).size, 0, `CompensationTransferService/${m}에 규칙이 있다`);
