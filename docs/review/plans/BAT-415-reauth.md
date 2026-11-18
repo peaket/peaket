@@ -505,6 +505,5 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:40+09:00 |
 | test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T23:20+09:00 |
 | impl | l3-b415r-impl | claude-opus-5-5 | 2026-11-18T22:41+09:00 | 2026-11-18T23:24+09:00 |
-| record | l3-supervisor | claude-opus-5-5 | 2026-11-18T23:36+09:00 | 2026-11-18T23:55+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
