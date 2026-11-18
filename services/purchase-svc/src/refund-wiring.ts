@@ -72,3 +72,15 @@ export function fanReauthGateFromEnv(o: {
   o.warn?.(msg);
   return undefined;
 }
+
+/**
+ * 팬 취소 재인증의 403·503 기록을 로그 한 줄로 잇는다(docs/features/transfer-refund.md §3.1 '거절 기록', R-T39 ②, 리뷰 다시 보기 RN-03).
+ * 403은 info, 503은 warn이고 칸은 사건 이름 event와 까닭 이름표 reason뿐이다(넘어온 값에 다른 칸이 있어도 옮기지 않는다.
+ * 토큰·jti·계정 ID·세션 ID는 싣지 않는다). start.ts가 서비스를 만든 뒤 묶이는 로거를 감싸 넘긴다
+ */
+export function fanReauthResultLogger(log: { info(o: object): void; warn(o: object): void }): (r: FanReauthResult) => void {
+  return (r) => {
+    if (r.outcome === 'rejected') log.info({ event: 'fan_reauth_rejected', reason: r.reason });
+    else log.warn({ event: 'fan_reauth_unavailable', reason: r.reason });
+  };
+}
