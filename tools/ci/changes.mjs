@@ -25,7 +25,10 @@ const RULES = [
   [/^(apps|services|packages)\//, ['js']],
   [/^data\//, ['data']],
   [/^infra\//, ['infra']],
-  [/^deploy\//, ['deploy']],
+  // 배포 상태 전체: 메시 정적 시험(deploy/platform/mesh/test, tools-check)이 deploy/ 아래 모든 YAML·템플릿을 훑어 다른 PeerAuthentication·
+  // 인가 정책·웨이포인트 라벨·최소 TLS 판을 막으므로(D-T36, ADR-0285 결정 2·10), 운영 오버레이가 놓일 deploy/envs/와 차트·로컬 정의가 바뀌어도 tools를 고른다
+  // (BAT-061 리뷰 RV-01). ci.yml은 tools 범위일 때 tools-check를 부른다
+  [/^deploy\//, ['deploy', 'tools']],
   // 로컬 kind 클러스터 시험(ci-kind.yml): 클러스터 정의·공용 차트·클러스터 도구, 서비스 이미지에 드는 것 전부(플랫폼 패키지와 서비스 뼈대,
   // 공용 설정 패키지, 작업 공간 파일)(openspec 변경 add-local-cluster-and-relay-deployment). 무거운 잡이라 화면·문서 변경에는 돌지 않고,
   // develop 푸시에서는 늘 돈다
@@ -36,9 +39,10 @@ const RULES = [
   // 게이트웨이 다섯의 정의(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400): 정적 시험(deploy/gateways/test)은 tools-check, 올려 보는 시험(cluster.mjs gateways와 e2e 둘)은 kind가 돈다
   [/^deploy\/gateways\//, ['kind', 'tools']],
   // 메시 포트별 허용 정책(D-T36, ADR-0285, BUILD_ORDER HOT-420): 원천·생성 파일·메시 바탕 매니페스트와 그 정적 시험은 tools-check(생성 대조 mesh-policies.mjs --check),
-  // 메시 없는 NetworkPolicy를 올려 보는 시험(cluster.mjs mesh-netpol과 e2e)은 kind가 돈다. 생성기는 proto 서비스·메서드와 배포 단위 값의 포트·업무 gRPC 주소도 읽는다
+  // 메시 없는 NetworkPolicy를 올려 보는 시험(cluster.mjs mesh-netpol과 e2e)은 kind가 돈다. 생성기는 proto 서비스·메서드와 배포 단위 값(deploy/workloads/,
+  // 위 deploy/ 규칙이 tools를 고른다)의 포트·업무 gRPC 주소도 읽는다
   [/^deploy\/platform\//, ['kind', 'tools']],
-  [/^(docs\/api\/proto\/|deploy\/workloads\/)/, ['tools']],
+  [/^docs\/api\/proto\//, ['tools']],
   // v0 배포(docs/infra.md §3 'v0 배포', BUILD_ORDER BSL-050): v0 이미지에 드는 배포 단위와 로컬 환경 값, 이미지 빌드 단계의 바인딩 대조
   [/^(services\/(v0-monolith|pg-simulator|payment-svc)\/|deploy\/envs\/local\/|tools\/ci\/verify-native-binding\.mjs$)/, ['kind']],
   // 이미지 빌드 시험(build-image.yml, docs/devops.md §3.2 '이미지 빌드 시험(푸시 없이)'): 이미지가 있는 배포 단위와 그 Dockerfile이 담는
