@@ -822,8 +822,12 @@ test('D-T18 ①_흉내S3주소diagnose.s3Endpoint는_local·ci에서만받고_�
   assert.equal(envOf(find(local.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0]).PEAKET_DIAG_S3_ENDPOINT, 'http://aws.peaket-local.svc:5000');
 });
 
-test('D-T18 ①_값으로준NODE_OPTIONS에_안전옵션을끄는값이있으면_렌더하지않는다(SEC-02) [ASVS v5.0.0-14.2.1]', () => {
-  const unsafe = ['--no-disable-sigusr1', '--no-report-exclude-env', '--no-report-exclude-network', '--no-report-on-fatalerror', '--inspect', '--inspect=0.0.0.0:9229', '--inspect-brk', '--inspect-wait'];
+test('D-T18 ①_값으로준NODE_OPTIONS에_안전옵션을끄는값이있으면_밑줄꼴도_렌더하지않는다(SEC-02, SR-01) [ASVS v5.0.0-14.2.1]', () => {
+  const unsafe = [
+    '--no-disable-sigusr1', '--no-report-exclude-env', '--no-report-exclude-network', '--no-report-on-fatalerror', '--inspect', '--inspect=0.0.0.0:9229', '--inspect-brk', '--inspect-wait',
+    // Node는 옵션 이름의 '_'를 '-'로 읽는다: 밑줄 꼴도 같은 옵션이다(보안 다시 보기 SR-01)
+    '--inspect_brk=0.0.0.0:9229', '--inspect_wait', '--no_report_exclude_env', '--no_disable_sigusr1', '--no-report_exclude_network', '--no_report_on_fatalerror',
+  ];
   for (const flag of unsafe) {
     for (const [where, sets] of [
       ['env', [`env.NODE_OPTIONS=${flag}`]],
@@ -835,4 +839,24 @@ test('D-T18 ①_값으로준NODE_OPTIONS에_안전옵션을끄는값이있으면
   }
   // 안전 옵션을 끄지 않는 값은 받는다
   assert.equal(render([...BASE, 'service.env.NODE_OPTIONS=--enable-source-maps --trace-warnings']).error, undefined);
+});
+
+test('D-T18 ①_local·ci밖에서는_S3주소를바꾸는AWS_ENDPOINT_URL*·AWS_CONFIG_FILE값이있으면_렌더하지않는다(SR-02) [ASVS v5.0.0-14.2.1]', () => {
+  const names = ['AWS_ENDPOINT_URL_S3', 'AWS_ENDPOINT_URL', 'AWS_ENDPOINT_URL_KMS', 'AWS_CONFIG_FILE'];
+  for (const env of ['staging', 'prod', 'demo']) {
+    const base = [...STAGING, `env.PEAKET_ENV=${env}`, 'diagnose.bucket=peaket-diag'];
+    assert.equal(render(base).error, undefined, `${env} 기본`);
+    for (const name of names) {
+      const value = name === 'AWS_CONFIG_FILE' ? '/etc/peaket/aws-config' : 'http://evil.example:9000';
+      for (const [where, sets] of [
+        ['env', [`env.${name}=${value}`]],
+        ['service.env', [`service.env.${name}=${value}`]],
+        ['outboxRelay.env', ['outboxRelay.enabled=true', `outboxRelay.env.${name}=${value}`]],
+      ]) {
+        assert.notEqual(render([...base, ...sets]).error, undefined, `${env} ${where}.${name}가 렌더됐다`);
+      }
+    }
+  }
+  // local·ci는 흉내 서버 주소로 쓸 수 있다
+  assert.equal(render([...BASE, 'service.env.AWS_ENDPOINT_URL_S3=http://aws.peaket-local.svc:5000']).error, undefined);
 });
