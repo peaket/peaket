@@ -1,16 +1,27 @@
-// 좌석 델타 허브(docs/features/seat-hold.md §7 'realtime-gw의 첫 구현', ADR-0296 결정 4·5·6, ADR-0110 결정 3·4, ADR-0240 결정 10, BUILD_ORDER HOT-090).
+// 좌석 델타 허브(docs/features/seat-hold.md §7 'realtime-gw의 첫 구현'·'전파 Degraded Mode', ADR-0296 결정 4·5·6, ADR-0110 결정 3·4, ADR-0240 결정 10, ADR-0298, BUILD_ORDER HOT-090·091).
 // 맺은 연결(핸드셰이크를 통과하고 회차가 토큰과 같은 것)마다 구독 집합·받는 프레임 검사·쌓인 묶음·하트비트·만료를 맡고,
 // 파드 안에서 구역 채널마다 구독한 연결 수를 세어 0 → 1이면 구독기의 subscribe, 1 → 0이면 unsubscribe를 한 번 부른다.
 // 원하는 구독 상태의 주인은 구독기 하나다(ADR-0297 결정 1): 허브는 약속의 결과로 상태를 정하지 않고, 다시 보내기·물러서기도 구독기 몫이다.
 // 박자(tick)는 파드에 하나다(100ms [가정], 부르는 쪽의 타이머). 시계는 주입한다: 벽시계(now)는 serverTimeMs·maxWaitMs·토큰 exp에,
-// 단조 시계(monotonicMs)는 간격(구독 바꾸기 1초 창, TimeSync 1,000ms, 하트비트 15초)에 쓴다.
+// 단조 시계(monotonicMs)는 간격(구독 바꾸기 1초 창, TimeSync 1,000ms, 하트비트 15초, 1초 차례, 버퍼 되돌림 30초, 파드 10초 창)에 쓴다.
 // 회차·구역·연결은 Map·Set으로만 찾는다(ASVS v5.0.0-15.3.6). 닫힘 이유 글은 아래 고정 글만 싣는다(받은 값을 넣지 않는다, 1.3.7).
+// 전파 Degraded(ADR-0298): 연결마다 묶음 간격은 100ms 또는 1,000ms다. 파드 판정(degrade.ts, 넘친 대기의 10초 창)이 Degraded이거나
+// 그 연결의 보내기 버퍼가 256KiB 이상이 되어 바뀌었으면 1,000ms다. 간격이 바뀐 박자에 BatchInterval을 한 번 보낸다. 새 타이머는 두지 않는다.
 import type { Clock } from '@peaket/platform';
+import { createDegradeJudge, type DegradedChange } from './degrade.js';
 import { type BatchEntry, decodeInbound, encodeBatchInterval, encodeHeartbeat, encodeSeatDeltaBatch } from './frames.js';
 import { KEY_PART, parseSeatDeltaMessage, sectionChannel, type SeatDeltaMessage } from './message.js';
 
-/** 묶음 박자(ms, [가정] K4·S-T12). 첫 프레임 BatchInterval의 값이다(Degraded 전환이 생기기 전까지 늘 이 값) */
+/** 묶음 박자이자 평시 연결의 묶음 간격(ms, [가정] K4·S-T12). 박자는 Degraded에서도 이 값 그대로다 */
 export const BATCH_INTERVAL_MS = 100;
+/** Degraded 연결의 묶음 간격(ms, seat-hold §7 '전파 Degraded Mode'). 차례에서 이만큼 지난 첫 박자에 보낸다 */
+export const DEGRADED_BATCH_INTERVAL_MS = 1_000;
+/** 보내기 버퍼가 이 값 이상인 박자에 그 연결만 1초 간격으로 바꾼다(256KiB [가정], ADR-0298 결정 3) */
+export const SLOW_BUFFER_ENTER_BYTES = 256 * 1024;
+/** 1초 간격이 된 연결은 보내기 버퍼가 이 값 이하인 박자만 이어지면 되돌린다(64KiB [가정]) */
+export const SLOW_BUFFER_EXIT_BYTES = 64 * 1024;
+/** 되돌리려면 SLOW_BUFFER_EXIT_BYTES 이하 박자가 이만큼 이어져야 한다(ms, 30초 [가정]) */
+export const SLOW_BUFFER_EXIT_MS = 30_000;
 /** 주기 하트비트 간격(ms, [가정]) */
 export const HEARTBEAT_EVERY_MS = 15_000;
 /** 구독 바꾸기를 세는 창(ms). (t − 창, t] 안의 SubscribeSections 수를 센다 */
@@ -75,19 +86,23 @@ export interface StreamHubDeps {
   sectionCount(eventId: string): number | undefined;
   /**
    * 지표 한 번. 이름은 seat-hold §7 '지표와 로그'다. 카운터는 더할 값, 히스토그램은 잰 값이다:
-   * realtime_gw_batches_total·realtime_gw_batch_bytes_total·realtime_gw_batch_wait_ms·realtime_gw_pubsub_messages_total{result}
+   * realtime_gw_batches_total·realtime_gw_batch_bytes_total·realtime_gw_batch_wait_ms·realtime_gw_pubsub_messages_total{result}.
+   * 게이지 둘은 값을 그대로 둔다(바뀔 때만 온다. 시작 값 0은 부르는 쪽이 둔다):
+   * realtime_gw_degraded(파드가 Degraded면 1)·realtime_gw_buffer_slow_connections(버퍼로 1초 간격인 연결 수)
    */
   onMetric?(name: string, labels: Record<string, string>, value: number): void;
+  /** 파드가 Degraded로 바뀌거나 되돌아왔다(마지막 창의 n·a·b). 부르는 쪽이 정규 로그 줄 realtime_gw_degraded 하나를 낸다(ADR-0298 결정 7) */
+  onDegradedChange?(e: { degraded: boolean; batches: number; over60: number; over30: number }): void;
 }
 
 export interface StreamHub {
-  /** 맺은 연결을 들인다. 곧 BatchInterval{100}을 보낸다. 같은 토큰(tokenId = jti)의 연결이 이미 2개면 4429 too many로 닫는다 */
+  /** 맺은 연결을 들인다. 곧 그때의 간격(평시 100, 파드가 Degraded면 1000)의 BatchInterval을 보낸다. 같은 토큰(tokenId = jti)의 연결이 이미 2개면 4429 too many로 닫는다 */
   open(c: StreamConnection, s: { eventId: string; accountId: string; expiresAtMs: number; tokenId: string }): void;
   /** 받은 프레임 하나 */
   receive(c: StreamConnection, data: Uint8Array, isBinary: boolean): void;
   /** 연결이 닫혔다(상대가 닫았거나 끊겼다). 여러 번 불러도 된다 */
   gone(c: StreamConnection): void;
-  /** 박자 하나: 만료(4401) → 보내기 버퍼(1013) → 쌓인 묶음 → 주기 하트비트 */
+  /** 박자 하나: 파드 창 판정 → (연결마다) 만료(4401) → 보내기 버퍼(1013) → 간격 판정과 BatchInterval → 쌓인 묶음 → 주기 하트비트 */
   tick(): void;
   /** 모든 연결을 1012로 닫고, 구독 해제 응답은 1초까지만 기다린다(ADR-0297 결정 5). 그 뒤 open은 곧 1012로 닫는다 */
   shutdown(): Promise<void>;
@@ -99,6 +114,8 @@ type PendingEntry = BatchEntry & { changedAtMs: number };
 interface Pending {
   seatEpoch: number;
   entries: PendingEntry[];
+  /** 쌓기 시작할 때 그 연결의 묶음 간격(넘친 대기 = maxWaitMs − 이 값, ADR-0298 결정 1) */
+  intervalMs: number;
 }
 
 interface Conn {
@@ -115,6 +132,14 @@ interface Conn {
   lastHeartbeatMs: number;
   pending: Pending | undefined;
   closed: boolean;
+  /** 지금 이 연결의 묶음 간격(마지막으로 보낸 BatchInterval의 값) */
+  intervalMs: number;
+  /** 1초 간격의 차례 시작(단조 시각). 처음에는 바뀐 박자(또는 맺은 때)이고, 보낼 차례의 박자로 옮긴다 */
+  turnStartMs: number;
+  /** 보내기 버퍼로 1초 간격이 되었나(파드 판정과 따로 든다) */
+  bufferSlow: boolean;
+  /** bufferSlow인 동안 SLOW_BUFFER_EXIT_BYTES 이하 박자가 이어지기 시작한 단조 시각(넘는 박자가 끼면 지운다) */
+  lowSinceMs: number | undefined;
 }
 
 export function createStreamHub(d: StreamHubDeps): StreamHub {
@@ -126,8 +151,23 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
   /** 부른 구독·해제의 약속(내릴 때 1초까지만 기다린다) */
   const inFlight = new Set<Promise<void>>();
   let stopped = false;
+  /** 파드 판정(창은 허브를 만든 때부터 잰다) */
+  const judge = createDegradeJudge(d.clock.monotonicMs());
+  /** 버퍼로 1초 간격인 연결 수(게이지 realtime_gw_buffer_slow_connections) */
+  let bufferSlowCount = 0;
 
   const metric = (name: string, labels: Record<string, string>, value: number): void => d.onMetric?.(name, labels, value);
+
+  /** 이 연결이 지금 가져야 할 묶음 간격 */
+  const wantedInterval = (conn: Conn): number => (judge.degraded || conn.bufferSlow ? DEGRADED_BATCH_INTERVAL_MS : BATCH_INTERVAL_MS);
+
+  const setBufferSlow = (conn: Conn, slow: boolean): void => {
+    if (conn.bufferSlow === slow) return;
+    conn.bufferSlow = slow;
+    conn.lowSinceMs = undefined;
+    bufferSlowCount += slow ? 1 : -1;
+    metric('realtime_gw_buffer_slow_connections', {}, bufferSlowCount);
+  };
 
   /** 구독기를 한 번 부른다. 결과로 상태를 정하지 않고 거절은 삼킨다(다시 보내기는 구독기 몫, ADR-0297 결정 1) */
   const call = (run: () => Promise<void>): void => {
@@ -177,6 +217,8 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
     for (const s of conn.sections) leave(conn, s);
     conn.sections = new Set();
     conn.pending = undefined;
+    // 닫힌 연결은 버퍼 1초 연결 수에서 뺀다
+    setBufferSlow(conn, false);
   };
 
   const closeConn = (conn: Conn, code: number, reason: string): void => {
@@ -212,6 +254,8 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
     metric('realtime_gw_batches_total', {}, 1);
     metric('realtime_gw_batch_bytes_total', {}, frame.byteLength);
     metric('realtime_gw_batch_wait_ms', {}, maxWaitMs);
+    // 보낸 묶음만 파드 창에 센다. 정한 간격만큼의 대기는 넘침으로 세지 않는다(ADR-0298 결정 1)
+    judge.record(Math.max(0, maxWaitMs - p.intervalMs));
   };
 
   const enqueue = (conn: Conn, m: SeatDeltaMessage): void => {
@@ -220,7 +264,7 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
     if (conn.closed) return;
     let p = conn.pending;
     if (!p) {
-      p = { seatEpoch: m.seatEpoch, entries: [] };
+      p = { seatEpoch: m.seatEpoch, entries: [], intervalMs: conn.intervalMs };
       conn.pending = p;
     }
     // 같은 구역의 메시지는 합치지 않고 받은 차례대로 항목 하나씩(ADR-0296 결정 4)
@@ -278,6 +322,7 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
         c.close(CLOSE.TOO_MANY, CLOSE_REASON.tooMany);
         return;
       }
+      const openedMs = d.clock.monotonicMs();
       const conn: Conn = {
         c,
         eventId: s.eventId,
@@ -286,15 +331,20 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
         sections: new Set(),
         subscribeTimes: [],
         lastTimeSyncAnswerMs: undefined,
-        lastHeartbeatMs: d.clock.monotonicMs(),
+        lastHeartbeatMs: openedMs,
         pending: undefined,
         closed: false,
+        intervalMs: BATCH_INTERVAL_MS,
+        turnStartMs: openedMs,
+        bufferSlow: false,
+        lowSinceMs: undefined,
       };
+      conn.intervalMs = wantedInterval(conn);
       conns.set(c, conn);
       if (!same) byToken.set(tokenId, (same = new Set()));
       same.add(conn);
-      // 첫 프레임은 BatchInterval{100}(ADR-0240 결정 10)
-      sendTo(conn, encodeBatchInterval(BATCH_INTERVAL_MS));
+      // 첫 프레임은 그때의 간격(평시 100, 파드가 Degraded면 1000)의 BatchInterval(ADR-0240 결정 10, ADR-0298 결정 4)
+      sendTo(conn, encodeBatchInterval(conn.intervalMs));
     },
 
     receive(c, data, isBinary) {
@@ -339,6 +389,12 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
     tick() {
       const now = d.clock.now();
       const mono = d.clock.monotonicMs();
+      // 파드 창 판정은 박자 앞에서 한다(이 박자에 보내는 묶음은 새 창에 센다)
+      const changes: DegradedChange[] = judge.advance(mono);
+      for (const e of changes) {
+        metric('realtime_gw_degraded', {}, e.degraded ? 1 : 0);
+        d.onDegradedChange?.({ degraded: e.degraded, batches: e.batches, over60: e.over60, over30: e.over30 });
+      }
       for (const conn of [...conns.values()]) {
         if (conn.closed) continue;
         // 토큰 exp 이상이 된 첫 박자에 4401(늦어도 박자 하나)
@@ -347,11 +403,35 @@ export function createStreamHub(d: StreamHubDeps): StreamHub {
           continue;
         }
         // 보낼 것이 없어도 보내기 버퍼가 상한을 넘은 연결은 닫는다(읽지 않는 연결이 다른 연결을 해치지 않게, ADR-0297 결정 2)
-        if (conn.c.bufferedAmount > MAX_BUFFERED_BYTES) {
+        const buffered = conn.c.bufferedAmount;
+        if (buffered > MAX_BUFFERED_BYTES) {
           closeConn(conn, CLOSE.TRY_AGAIN_LATER, CLOSE_REASON.slowConsumer);
           continue;
         }
-        flush(conn);
+        // 보내기 버퍼로 그 연결만 바꾼다: 256KiB 이상이면 1초, 1초인 동안 64KiB 이하 박자만 30초 이어지면 되돌린다(ADR-0298 결정 3)
+        if (!conn.bufferSlow) {
+          if (buffered >= SLOW_BUFFER_ENTER_BYTES) setBufferSlow(conn, true);
+        } else if (buffered > SLOW_BUFFER_EXIT_BYTES) {
+          conn.lowSinceMs = undefined;
+        } else if (conn.lowSinceMs === undefined) {
+          conn.lowSinceMs = mono;
+        } else if (mono - conn.lowSinceMs >= SLOW_BUFFER_EXIT_MS) {
+          setBufferSlow(conn, false);
+        }
+        // 간격이 바뀐 박자에 BatchInterval을 한 번 보내고, 쌓인 것도 그 박자에 보낸다(같으면 다시 보내지 않는다, 결정 4)
+        const wanted = wantedInterval(conn);
+        if (wanted !== conn.intervalMs) {
+          conn.intervalMs = wanted;
+          conn.turnStartMs = mono;
+          if (!sendTo(conn, encodeBatchInterval(wanted))) continue;
+          flush(conn);
+        } else if (conn.intervalMs === BATCH_INTERVAL_MS) {
+          flush(conn);
+        } else if (mono - conn.turnStartMs >= DEGRADED_BATCH_INTERVAL_MS) {
+          // 1초 간격: 차례에서 1,000ms 이상 지난 첫 박자에 보내고 그 박자를 다음 차례의 시작으로 둔다(쌓인 것이 없어도 넘어간다, 결정 5)
+          conn.turnStartMs = mono;
+          flush(conn);
+        }
         if (conn.closed) continue;
         // 마지막 주기 하트비트(처음에는 맺은 때)에서 15초가 지난 첫 박자(TimeSync 답은 이 주기를 옮기지 않는다)
         if (mono - conn.lastHeartbeatMs >= HEARTBEAT_EVERY_MS) {

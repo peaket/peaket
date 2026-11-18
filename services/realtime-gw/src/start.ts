@@ -1,6 +1,7 @@
 // realtime-gw 조립(docs/features/seat-hold.md §7 'realtime-gw의 첫 구현', ADR-0296, BUILD_ORDER HOT-090). main.ts와 시험이 같은 함수를 부른다.
 // 서비스 템플릿(createService: 앱 포트·관리 포트·로그·지표·준비 확인)에 ws 업그레이드를 붙인다. 업무 규칙과 저장소가 없어 도메인 층을 두지 않는다.
 // 좌석 Redis에 시작 마감 안에 붙지 못하면 시작하지 않는다(docs/api/guidelines.md §8 이 행). 박자(100ms)는 실제 타이머 하나다.
+// 전파 Degraded 자동 전환(ADR-0298, HOT-091)은 허브가 그 박자 안에서 판정하고, 여기서는 게이지 둘과 로그 줄만 잇는다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
 import { type Clock, Counter, createService, Gauge, Histogram, systemClock } from '@peaket/platform';
@@ -60,17 +61,23 @@ export async function start(o: StartOptions): Promise<StartedService> {
 
     // 지표 받는 곳(서비스를 만든 뒤 채운다)
     const sinks = new Map<string, (labels: Record<string, string>, value: number) => void>();
+    let canonical: { info(obj: object, msg: string): void } | undefined;
     const hub = createStreamHub({
       clock,
       subscriber,
       sectionCount: (eventId) => layout.count(eventId),
       onMetric: (name, labels, value) => sinks.get(name)?.(labels, value),
+      // 파드가 바뀔 때 정규 로그 줄 하나(바뀐 쪽, 마지막 창의 n·a·b, ADR-0298 결정 7). 연결마다의 바뀜은 남기지 않는다
+      onDegradedChange: (e) =>
+        canonical?.info(
+          { event: 'realtime_gw_degraded', degraded: e.degraded, batches: e.batches, over60: e.over60, over30: e.over30 },
+          e.degraded ? '좌석 전파를 Degraded(1초 묶음)로 바꿨다' : '좌석 전파를 평시(100ms 묶음)로 되돌렸다',
+        ),
     });
 
     let connections: Gauge | undefined;
     let rejects: Counter<'status'> | undefined;
     let closes: Counter<'code'> | undefined;
-    let canonical: { info(obj: object, msg: string): void } | undefined;
     let accountRef: (accountId: string) => string = () => '';
     const gateway = new StreamGateway({
       hub,
@@ -120,6 +127,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
     redisUpGauge.set(redisUp ? 1 : 0);
     mismatchGauge = new Gauge({ name: 'realtime_gw_subscribe_mismatch', help: '원하는 구독 상태와 실제가 어긋난 좌석 채널 수(ADR-0297 결정 1)', registers });
     mismatchGauge.set(mismatch);
+    // 전파 Degraded 게이지 둘(시작 때 0, 허브가 바뀔 때 값을 준다, ADR-0298 결정 7)
+    const degraded = new Gauge({ name: 'realtime_gw_degraded', help: '파드의 좌석 전파가 Degraded(1초 묶음)면 1(ADR-0298)', registers });
+    degraded.set(0);
+    const bufferSlow = new Gauge({ name: 'realtime_gw_buffer_slow_connections', help: '보내기 버퍼로 1초 묶음 간격이 된 연결 수(ADR-0298)', registers });
+    bufferSlow.set(0);
+    sinks.set('realtime_gw_degraded', (_l, v) => degraded.set(v));
+    sinks.set('realtime_gw_buffer_slow_connections', (_l, v) => bufferSlow.set(v));
     sinks.set('realtime_gw_batches_total', (_l, v) => batches.inc(v));
     sinks.set('realtime_gw_batch_bytes_total', (_l, v) => batchBytes.inc(v));
     sinks.set('realtime_gw_batch_wait_ms', (_l, v) => batchWait.observe(v));
