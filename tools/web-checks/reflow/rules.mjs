@@ -52,6 +52,32 @@ export function clippedTextFindings(items) {
 }
 
 /**
+ * 넘침을 숨긴 조상이 자른 글(FE-T31 '잘림 0', docs/frontend.md §5.17 '판정'). 글을 바로 담은 상자가 아니라 그 바깥 상자(예: 글을 안쪽 span에 둔 버튼)가
+ * overflow-x·y를 hidden·clip으로 두면, 글 줄 사각형이 그 상자의 안쪽(패딩 상자)을 그 방향으로 1px 넘게 벗어날 때 잘림이다.
+ * text-overflow: ellipsis·여러 줄 줄임(-webkit-line-clamp)으로 줄인 상자와, 접혀 크기가 0인 상자(숨긴 내용)는 세지 않는다.
+ * 항목은 { id, text: { left, top, right, bottom }, clips: [{ id, overflowX, overflowY, textOverflow?, lineClamp?, left, top, right, bottom }] }(clips는 조상 상자, 같은 좌표계).
+ * 돌려주는 것은 [{ id, clip }](clip은 자른 조상의 id). BAT-171 검증 V171-09e(시험 담당 l2-bat171-test)
+ */
+export function ancestorClipFindings(items) {
+  const out = [];
+  for (const x of items ?? []) {
+    const t = x?.text;
+    if (!t) continue;
+    for (const c of x.clips ?? []) {
+      if (c.textOverflow === 'ellipsis' || (c.lineClamp !== undefined && c.lineClamp !== 'none')) continue;
+      if (!(Number(c.right) - Number(c.left) > 0) || !(Number(c.bottom) - Number(c.top) > 0)) continue;
+      const cutX = CLIPS.has(c.overflowX) && (Number(t.left) < Number(c.left) - 1 || Number(t.right) > Number(c.right) + 1);
+      const cutY = CLIPS.has(c.overflowY) && (Number(t.top) < Number(c.top) - 1 || Number(t.bottom) > Number(c.bottom) + 1);
+      if (cutX || cutY) {
+        out.push({ id: x.id, clip: c.id });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * 닿기('모든 조작 요소에 닿는다', docs/frontend.md §5.17 화면 매트릭스 세부): 예외 상자 밖 조작 요소마다 scrollIntoView 뒤 잰 상자.
  * 항목은 { id, left, right, width, height, hit }(hit: 상자 가운데 점의 맨 위 요소가 그 요소이거나 그 안쪽). 닿지 않는 항목을 돌려준다.
  * 시험 담당이 먼저 둔 빈 뼈대다(BAT-170 웨이브 7). 판정은 구현 담당이 쓴다.
