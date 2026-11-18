@@ -1,8 +1,10 @@
 // 좌석 델타 허브 단위 시험(BUILD_ORDER HOT-090, BAT-052). 바깥 경계는 createStreamHub(가짜 연결·가짜 구독기·가짜 시계)다.
 // 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현'(맺은 뒤·받는 프레임 검사·좌석 Redis 구독·묶음·느린 연결과 내릴 때·지표와 로그),
-// §12 S-T31 ①~⑤·S-T42 ④~⑪·S-T12 ②, docs/frontend.md §4.4.1(바이트 형식·닫힘 코드·구독 상한 표), ADR-0296 결정 4·5·6, ADR-0110, ADR-0240 결정 10.
+// §12 S-T31 ①~⑤·S-T42 ④~⑪·⑮~⑰·⑲·S-T12 ②, docs/frontend.md §4.4.1(바이트 형식·닫힘 코드·닫힘 이유 글·구독 상한 표), ADR-0296 결정 4·5·6, ADR-0297, ADR-0110, ADR-0240 결정 10.
+// 리뷰 반영(BAT-052 RF-T1·T2·T5·T12·T13): 허브는 0 ↔ 1 전환마다 구독기를 한 번 부르기만 하고 결과로 상태를 정하지 않는다(ADR-0297 결정 1).
 // 단언 값은 hub-fixtures.ts의 SPEC(정본 값)이고 구현 상수를 가져오지 않는다. 시간 경계는 경계 − 1ms와 경계를 둘 다 본다.
 import { describe, expect, test } from 'vitest';
+import { encodeSubscribe, encodeTimeSync } from '../../../packages/seatmap/src/wire.js'; // 화면 인코더(맞물림 시험, WIR-06)
 import { channelOf, deltas, deltaText, entriesOf, FakeConn, harness, MONO0, rawFrame, settle, SPEC, subscribeBytes, timeSyncBytes, WALL0 } from './hub-fixtures.js';
 
 const range = (n: number, from = 0): number[] => Array.from({ length: n }, (_, i) => from + i);
@@ -484,70 +486,231 @@ describe('S-T42 ⑧ 채널 구독 수 세기', () => {
     ]);
   });
 
-  test('S-T42 ⑧ 구독이 끝나지 않은 채 해제가 오면, 끝난 뒤 한 번 더 맞춰 끝난 상태가 원하는 상태(해제)와 같다. 닫힌 연결(gone)도 해제를 부른다', async () => {
+  test('S-T42 ⑧ ⑰ 허브는 구독기의 약속을 기다리지 않는다: 구독이 끝나지 않은 채 마지막 해제가 오면 그 자리에서 unsubscribe를 부르고, 다시 구독하면 그 자리에서 subscribe를 부른다(같은 채널의 차례는 구독기 몫, ADR-0297 결정 1). 닫힌 연결(gone)도 해제를 부른다', async () => {
     const h = harness();
     const a = h.open();
     const ch = channelOf('ev-1', 4);
     h.sub.hold = true;
     h.hub.receive(a, subscribeBytes([4]), true);
     await settle();
-    h.clock.advance(200);
+    expect(h.sub.calls).toEqual([['subscribe', ch]]);
+    h.clock.advance(600); // 구독 바꾸기 빈도 상한(1초 창에 2번)에 걸리지 않게
     h.hub.receive(a, subscribeBytes([]), true);
     await settle();
-    // 같은 채널은 한 번에 하나씩: 구독이 끝나기 전에는 해제를 부르지 않는다
-    expect(h.sub.calls).toEqual([['subscribe', ch]]);
-    h.sub.pending.shift()!.resolve();
-    await settle();
+    // 구독의 약속이 끝나지 않았어도 1 → 0에서 곧 해제를 부른다
     expect(h.sub.calls).toEqual([
       ['subscribe', ch],
       ['unsubscribe', ch],
     ]);
-    h.sub.pending.shift()!.resolve();
+    h.clock.advance(600); // 구독 바꾸기 빈도 상한(1초 창에 2번)에 걸리지 않게
+    h.hub.receive(a, subscribeBytes([4]), true);
     await settle();
-    expect(h.sub.calls).toHaveLength(2);
-    expect(h.sub.listeners.has(ch)).toBe(false);
-
-    // 해제가 끝나기 전에 다시 구독하면, 끝난 뒤 구독한다
-    const b = h.open();
-    h.hub.receive(b, subscribeBytes([6]), true);
-    await settle();
-    h.sub.pending.shift()!.resolve();
-    await settle();
-    h.hub.gone(b);
-    await settle();
-    expect(h.sub.calls.slice(2)).toEqual([
-      ['subscribe', channelOf('ev-1', 6)],
-      ['unsubscribe', channelOf('ev-1', 6)],
+    expect(h.sub.calls).toEqual([
+      ['subscribe', ch],
+      ['unsubscribe', ch],
+      ['subscribe', ch],
     ]);
-    const c = h.open();
-    h.hub.receive(c, subscribeBytes([6]), true);
+    // 약속이 나중에 끝나도 허브는 더 부르지 않는다(결과로 상태를 정하지 않는다)
+    for (const p of h.sub.pending.splice(0)) p.resolve();
     await settle();
-    expect(h.sub.calls).toHaveLength(4);
-    h.sub.pending.shift()!.resolve();
-    await settle();
-    expect(h.sub.calls.slice(4)).toEqual([['subscribe', channelOf('ev-1', 6)]]);
-    h.sub.pending.shift()!.resolve();
-    await settle();
-    expect(h.sub.listeners.has(channelOf('ev-1', 6))).toBe(true);
-  });
+    expect(h.sub.calls).toHaveLength(3);
 
-  test('S-T42 ⑧ 구독이 실패하면 다음 박자에 다시 맞춘다', async () => {
+    // 닫힌 연결(gone)도 0이 되면 해제를 부른다
+    h.hub.gone(a);
+    await settle();
+    expect(h.sub.calls.at(-1)).toEqual(['unsubscribe', ch]);
+    expect(h.sub.calls).toHaveLength(4);
+  });
+});
+
+describe('S-T42 ⑰ 구독 상태의 주인은 구독기 하나(ADR-0297 결정 1)', () => {
+  test('S-T42 ⑰ (가) 마지막 해제의 unsubscribe가 거절된 뒤 박자 전에 다른 연결이 같은 구역을 구독하면 허브가 그 자리에서 subscribe를 다시 부르고, 그 연결이 묶음을 받는다', async () => {
     const h = harness();
     const a = h.open();
+    const b = h.open();
+    const ch = channelOf('ev-1', 4);
+    h.hub.receive(a, subscribeBytes([4]), true);
+    await settle();
+    expect(h.sub.calls).toEqual([['subscribe', ch]]);
+    h.sub.hold = true;
+    h.clock.advance(300);
+    h.hub.receive(a, subscribeBytes([]), true);
+    await settle();
+    h.sub.pending.shift()!.reject(new Error('boom'));
+    await settle();
+    h.sub.hold = false;
+    expect(h.sub.calls).toEqual([
+      ['subscribe', ch],
+      ['unsubscribe', ch],
+    ]);
+    // 박자 전에 b가 같은 구역을 구독한다: 0 → 1이므로 subscribe(실패한 해제의 결과로 '아직 구독 중'이라 보지 않는다)
+    h.hub.receive(b, subscribeBytes([4]), true);
+    await settle();
+    expect(h.sub.calls.at(-1)).toEqual(['subscribe', ch]);
+    expect(h.sub.calls).toHaveLength(3);
+    expect(h.sub.publish(ch, deltaText({ epoch: 1, section: 4, version: 1, changedAtMs: h.clock.now(), seats: [[0, 1]] }))).toBe(true);
+    h.hub.tick();
+    expect(deltas(b.framesFrom(1)).map(entriesOf)).toEqual([[{ sectionIndex: 4, sectionVersion: 1, offsets: [0], states: [1] }]]);
+    expect(a.closed).toBeUndefined();
+  });
+
+  test('S-T42 ⑰ (나) subscribe가 거절된 뒤 그 구역의 연결이 모두 빠지면 허브가 unsubscribe를 부른다(남는 구독이 없다). 해제로 빠져도, 닫혀(gone) 빠져도 같다', async () => {
+    for (const how of ['해제', 'gone'] as const) {
+      const h = harness();
+      const a = h.open();
+      const ch = channelOf('ev-1', 2);
+      h.sub.hold = true;
+      h.hub.receive(a, subscribeBytes([2]), true);
+      await settle();
+      h.sub.pending.shift()!.reject(new Error('boom'));
+      await settle();
+      h.sub.hold = false;
+      h.clock.advance(300);
+      if (how === '해제') h.hub.receive(a, subscribeBytes([]), true);
+      else h.hub.gone(a);
+      await settle();
+      expect(h.sub.calls, how).toEqual([
+        ['subscribe', ch],
+        ['unsubscribe', ch],
+      ]);
+    }
+  });
+
+  test('S-T42 ⑰ (다) 허브는 0 ↔ 1 전환마다 구독기를 한 번만 부르고, 구독이 거절돼도 박자(tick)에서 다시 부르지 않는다(다시 보내기와 물러서기는 구독기 몫)', async () => {
+    const h = harness();
+    const a = h.open();
+    const b = h.open();
     const ch = channelOf('ev-1', 2);
     h.sub.hold = true;
     h.hub.receive(a, subscribeBytes([2]), true);
     await settle();
     h.sub.pending.shift()!.reject(new Error('boom'));
     await settle();
-    expect(h.sub.calls).toEqual([['subscribe', ch]]);
     h.sub.hold = false;
+    // 둘째 연결이 같은 구역을 구독해도(1 → 2) 부르지 않는다
+    h.hub.receive(b, subscribeBytes([2]), true);
+    await settle();
+    for (let i = 0; i < 60; i++) {
+      h.clock.advance(SPEC.intervalMs);
+      h.hub.tick();
+    }
+    await settle();
+    expect(h.sub.calls).toEqual([['subscribe', ch]]);
+    // 첫 연결이 빠져도(2 → 1) 부르지 않고, 마지막이 빠지면(1 → 0) 한 번 부른다
+    h.hub.receive(a, subscribeBytes([]), true);
+    await settle();
+    expect(h.sub.calls).toEqual([['subscribe', ch]]);
+    h.hub.receive(b, subscribeBytes([]), true);
+    await settle();
     h.hub.tick();
     await settle();
     expect(h.sub.calls).toEqual([
       ['subscribe', ch],
-      ['subscribe', ch],
+      ['unsubscribe', ch],
     ]);
+  });
+});
+
+describe('S-T42 ⑮ 받지 않는 연결의 보내기 버퍼(ADR-0297 결정 2)', () => {
+  test('S-T42 ⑮ 구독 없는 연결도 보내기 버퍼가 1MiB + 1이면 보낼 것이 없는 다음 박자에 1013 slow consumer로 닫히고, 1MiB 정각이면 열려 있다 [ASVS v5.0.0-2.4.1]', async () => {
+    const h = harness();
+    const over = h.open();
+    const atLimit = h.open();
+    const subscribedOver = h.open();
+    h.hub.receive(subscribedOver, subscribeBytes([3]), true);
+    await settle();
+    over.bufferedAmount = SPEC.maxBuffered + 1;
+    atLimit.bufferedAmount = SPEC.maxBuffered;
+    subscribedOver.bufferedAmount = SPEC.maxBuffered + 1;
+    // 박자 전에는 닫지 않는다
+    expect(over.closed).toBeUndefined();
+    h.clock.advance(SPEC.intervalMs);
+    h.hub.tick();
+    await settle();
+    expect(over.closes).toEqual([{ code: SPEC.close.slow, reason: SPEC.reason.slow }]);
+    expect(subscribedOver.closes).toEqual([{ code: SPEC.close.slow, reason: SPEC.reason.slow }]);
+    expect(atLimit.closed).toBeUndefined();
+    // 닫은 연결에는 보내지 않았고(첫 BatchInterval뿐), 그 연결의 구역은 풀린다
+    expect(over.sent).toHaveLength(1);
+    expect(subscribedOver.sent).toHaveLength(1);
+    expect(h.sub.calls).toEqual([
+      ['subscribe', channelOf('ev-1', 3)],
+      ['unsubscribe', channelOf('ev-1', 3)],
+    ]);
+    // 다음 박자에도 정각인 연결은 열려 있다
+    h.clock.advance(SPEC.intervalMs);
+    h.hub.tick();
+    expect(atLimit.closed).toBeUndefined();
+  });
+});
+
+describe('S-T42 ⑯ 같은 입장 토큰의 연결 수(ADR-0297 결정 3)', () => {
+  test('S-T42 ⑯ 같은 토큰 jti로 셋째 연결은 맺은 뒤 4429 too many로 닫히고 앞의 둘은 열려 있다. 하나가 빠지면 다시 붙을 수 있고, 다른 토큰은 세지 않는다', async () => {
+    const h = harness();
+    const first = h.open({ tokenId: 'jti-same' });
+    const second = h.open({ tokenId: 'jti-same' });
+    const other = h.open({ tokenId: 'jti-other' });
+    expect([first.closed, second.closed, other.closed]).toEqual([undefined, undefined, undefined]);
+    const third = h.open({ tokenId: 'jti-same' });
+    expect(third.closes).toEqual([{ code: SPEC.close.tooMany, reason: SPEC.reason.tooMany }]);
+    expect([first.closed, second.closed]).toEqual([undefined, undefined]);
+    // 닫힌 셋째는 받는 프레임을 보지 않는다(구독하지 않는다)
+    h.hub.receive(third, subscribeBytes([1]), true);
+    await settle();
+    expect(h.sub.calls).toEqual([]);
+    // 하나가 빠지면 같은 토큰으로 다시 붙는다(다시 붙는 동안의 겹침)
+    h.hub.gone(first);
+    const again = h.open({ tokenId: 'jti-same' });
+    expect(again.closed).toBeUndefined();
+    expect(again.frames()).toEqual([{ type: 'batchInterval', intervalMs: SPEC.intervalMs }]);
+    // 허브가 닫은 연결도 자리를 비운다(4403으로 닫은 뒤 다시 붙음)
+    h.hub.receive(second, rawFrame(1, 17), true);
+    expect(second.closes.map((x) => x.code)).toEqual([SPEC.close.forbidden]);
+    expect(h.open({ tokenId: 'jti-same' }).closed).toBeUndefined();
+    expect(h.open({ tokenId: 'jti-same' }).closes.map((x) => x.code)).toEqual([SPEC.close.tooMany]);
+    expect(SPEC.sameTokenMax).toBe(2);
+  });
+});
+
+describe('S-T42 ⑲ 내릴 때의 마감(ADR-0297 결정 5)', () => {
+  test('S-T42 ⑲ 구독기가 해제 응답을 붙잡아도 shutdown()은 1초 + 여유 안에 끝나고 모든 연결은 1012 server restart로 닫힌다', async () => {
+    const h = harness();
+    const a = h.open();
+    const b = h.open({ eventId: 'ev-2' });
+    h.sub.hold = true;
+    h.hub.receive(a, subscribeBytes([1, 2]), true);
+    h.hub.receive(b, subscribeBytes([1]), true);
+    await settle();
+    const started = Date.now();
+    const result = await Promise.race([
+      h.hub.shutdown().then(() => 'done' as const),
+      new Promise<'late'>((r) => setTimeout(() => r('late'), SPEC.shutdownUnsubscribeWaitMs + 500)),
+    ]);
+    expect(result).toBe('done');
+    expect(Date.now() - started).toBeLessThan(SPEC.shutdownUnsubscribeWaitMs + 500);
+    expect(a.closes).toEqual([{ code: SPEC.close.restart, reason: SPEC.reason.restart }]);
+    expect(b.closes).toEqual([{ code: SPEC.close.restart, reason: SPEC.reason.restart }]);
+    // 내린 뒤의 open은 곧 1012
+    expect(h.open().closes).toEqual([{ code: SPEC.close.restart, reason: SPEC.reason.restart }]);
+  });
+});
+
+describe('S-T31 ④ S-T42 ⑦ 화면 인코더와의 맞물림(WIR-06)', () => {
+  test('S-T31 ④ S-T42 ⑦ 화면 인코더 @peaket/seatmap encodeSubscribe·encodeTimeSync가 만든 바이트를 허브가 받는다: 구독이 되고 곧 Heartbeat로 답한다', async () => {
+    const h = harness();
+    const c = h.open();
+    h.hub.receive(c, encodeSubscribe(range(16, 3)), true);
+    await settle();
+    expect(c.closed).toBeUndefined();
+    expect(h.sub.calls).toEqual(range(16, 3).map((s) => ['subscribe', channelOf('ev-1', s)]));
+    h.hub.receive(c, encodeTimeSync(1_763_441_234_567), true);
+    expect(c.frames().at(-1)).toEqual({ type: 'heartbeat', serverTimeMs: WALL0, echoClientTimeMs: 1_763_441_234_567 });
+    // 빈 목록(구독 모두 뺌)도 받는다
+    h.clock.advance(SPEC.windowMs);
+    h.hub.receive(c, encodeSubscribe([]), true);
+    await settle();
+    expect(c.closed).toBeUndefined();
+    expect(h.sub.calls.filter(([op]) => op === 'unsubscribe')).toHaveLength(16);
   });
 });
 
@@ -589,10 +752,40 @@ describe('닫힘 이유 글', () => {
     expect(Buffer.byteLength(a.closed!.reason)).toBeLessThanOrEqual(123);
     // 상대가 끊은 연결(gone)에는 닫기를 다시 부르지 않는다
     const c = new FakeConn();
-    h.hub.open(c, { eventId: 'ev-zz9', accountId: 'acct-1', expiresAtMs: WALL0 + 60_000 });
+    h.hub.open(c, { eventId: 'ev-zz9', accountId: 'acct-1', expiresAtMs: WALL0 + 60_000, tokenId: 'jti-gone' });
     h.hub.gone(c);
     h.hub.receive(c, subscribeBytes([0]), true);
     expect(c.closes).toEqual([]);
     expect(MONO0 % SPEC.intervalMs).not.toBe(0);
+  });
+});
+
+describe('S-T42 ③ ⑮ ⑯ 닫힘 이유 글은 계약이다(ADR-0297 결정 8)', () => {
+  test("S-T42 ③ ⑮ ⑯ 허브가 닫는 이유 글은 docs/frontend.md §4.4.1 '닫힘 이유 글'과 글자 그대로 같다: bad event·bad frame·bad section·too many·token expired·slow consumer·server restart [ASVS v5.0.0-1.3.7]", async () => {
+    const h = harness({ sections: { 'ev-1': 5 } });
+    const badEvent = new FakeConn();
+    h.hub.open(badEvent, { eventId: 'ev:1', accountId: 'acct-1', expiresAtMs: WALL0 + 60_000, tokenId: 'jti-be' });
+    const badFrame = h.open();
+    h.hub.receive(badFrame, rawFrame(1, 17, [3, 0, 97, 98, 99]), true);
+    const badSection = h.open();
+    h.hub.receive(badSection, subscribeBytes([5]), true);
+    const tooMany = h.open();
+    h.hub.receive(tooMany, subscribeBytes(range(17)), true);
+    const expired = h.open({ expiresAtMs: WALL0 + 150 });
+    const slow = h.open();
+    slow.bufferedAmount = SPEC.maxBuffered + 1;
+    const rest = h.open();
+    h.clock.advance(SPEC.intervalMs * 2);
+    h.hub.tick();
+    await h.hub.shutdown();
+    expect([badEvent, badFrame, badSection, tooMany, expired, slow, rest].map((c) => c.closes)).toEqual([
+      [{ code: SPEC.close.forbidden, reason: SPEC.reason.badEvent }],
+      [{ code: SPEC.close.forbidden, reason: SPEC.reason.badFrame }],
+      [{ code: SPEC.close.forbidden, reason: SPEC.reason.badSection }],
+      [{ code: SPEC.close.tooMany, reason: SPEC.reason.tooMany }],
+      [{ code: SPEC.close.expired, reason: SPEC.reason.expired }],
+      [{ code: SPEC.close.slow, reason: SPEC.reason.slow }],
+      [{ code: SPEC.close.restart, reason: SPEC.reason.restart }],
+    ]);
   });
 });

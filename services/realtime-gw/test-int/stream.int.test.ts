@@ -1,6 +1,7 @@
 // realtime-gw 통합 시험: 실제 Valkey 컨테이너와 start()로 띄운 서비스에 WebSocket 클라이언트로 붙는다(BUILD_ORDER HOT-090, BAT-052).
 // 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현'(핸드셰이크·받는 프레임 검사·좌석 Redis 구독·묶음·느린 연결과 내릴 때·지표와 로그),
-// §12 S-T31 ①③④·S-T42 ①②③⑤⑧⑫⑭·S-T12 ②, docs/frontend.md §4.4.1, docs/data.md §3 `s:{event:E}:sec:{section}` 행, docs/observability.md §7 ts,
+// §12 S-T31 ①②③④·S-T42 ①②③⑤⑧⑪⑫⑭~⑯⑱·S-T12 ②, docs/frontend.md §4.4.1(닫힘 이유 글 포함), docs/data.md §3 `s:{event:E}:sec:{section}` 행, docs/observability.md §7 ts,
+// ADR-0297(리뷰 반영 RF-T1·T4·T6·T7·T8·T11·T13). 시험이 쓰는 좌석 채널 메시지는 시험이 직접 SPUBLISH한 것뿐이다(환불 Lua의 changedAtMs에 기대지 않는다, 감독 지시).
 // docs/security/asvs/seat-hold.md. 묶음은 화면과 같은 해독기(@peaket/seatmap decodeFrame)로 읽는다.
 import { request as httpRequest } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
@@ -12,6 +13,7 @@ import {
   channelOf,
   type Client,
   connect,
+  type DeltaFrame,
   deltaText,
   entriesOf,
   handshake,
@@ -24,10 +26,13 @@ import {
   metricValue,
   ORIGIN,
   PSEUDONYM_KEY,
+  rawRedisReply,
+  rawSocketOf,
   type Running,
   SEATS,
   serviceEnv,
   sleep,
+  startRelay,
   startService,
   streamPath,
   subscribeBytes,
@@ -99,13 +104,17 @@ describe('S-T42 핸드셰이크', () => {
     expect([...c.raw[0]!]).toEqual([1, 3, 100, 0]);
   });
 
-  test('S-T42 ② 경로 틀림·출처 없음·출처 다름·peaket.seats.v1 없음·토큰 없음·토큰 둘·서명 틀림·만료·typ·aud·iss 틀림·판 파일 없음은 차례대로 404·403·403·400·401×7·503이고 업그레이드가 없으며 본문이 비었다 [ASVS v5.0.0-4.4.2] [ASVS v5.0.0-4.4.3] [ASVS v5.0.0-4.4.4] [ASVS v5.0.0-16.5.1]', async () => {
+  test('S-T42 ② 경로 틀림·출처 없음·출처 다름·Sec-WebSocket-Key 틀림·Sec-WebSocket-Version 틀림·하위 프로토콜 겹침·peaket.seats.v1 없음·토큰 없음·토큰 둘·서명 틀림·만료·typ·aud·iss 틀림·판 파일 없음은 차례대로 404·403·403·400×4·401×7·503이고 업그레이드가 없으며 본문이 비었고 상태별로 센다 [ASVS v5.0.0-4.4.2] [ASVS v5.0.0-4.4.3] [ASVS v5.0.0-4.4.4] [ASVS v5.0.0-16.5.1]', async () => {
     const good = admissionToken();
     const now = Date.now();
-    const cases: Array<[string, string, { origin?: string; protocols?: string[] }, number]> = [
+    const cases: Array<[string, string, { origin?: string; protocols?: string[]; headers?: Record<string, string> }, number]> = [
       ['경로 틀림', '/v1/events/ev-1/seats', { origin: ORIGIN, protocols: [SEATS, AUTH + good] }, 404],
       ['출처 없음', streamPath('ev-1'), { protocols: [SEATS, AUTH + good] }, 403],
       ['출처 다름', streamPath('ev-1'), { origin: 'https://evil.example', protocols: [SEATS, AUTH + good] }, 403],
+      // 16바이트가 아닌 키(15바이트의 base64)
+      ['Sec-WebSocket-Key 틀림', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good], headers: { 'Sec-WebSocket-Key': Buffer.alloc(15, 9).toString('base64') } }, 400],
+      ['Sec-WebSocket-Version 틀림', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good], headers: { 'Sec-WebSocket-Version': '8' } }, 400],
+      ['하위 프로토콜 겹침', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, SEATS, AUTH + good] }, 400],
       ['peaket.seats.v1 없음', streamPath('ev-1'), { origin: ORIGIN, protocols: [AUTH + good] }, 400],
       ['토큰 없음', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS] }, 401],
       ['토큰 둘', streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + good, AUTH + admissionToken()] }, 401],
@@ -125,14 +134,16 @@ describe('S-T42 핸드셰이크', () => {
       expect(r.headers.upgrade, name).toBeUndefined();
     }
     expect(got).toEqual(cases.map(([name, , , status]) => [name, status, '']));
-    expect(got.map(([, s]) => s)).toEqual([404, 403, 403, 400, 401, 401, 401, 401, 401, 401, 401, 503]);
-    // 거절 수는 상태 코드별로 센다
+    expect(got.map(([, s]) => s)).toEqual([404, 403, 403, 400, 400, 400, 400, 401, 401, 401, 401, 401, 401, 401, 503]);
+    // 거절 수는 상태 코드별로 센다(ws가 스스로 거절하던 머리 셋도 우리 차례에서 센다, ADR-0297 결정 7)
     const after = await svc.metrics();
     const delta = (status: number) => (metricValue(after, `realtime_gw_handshake_rejects_total{status="${status}"}`) ?? 0) - (metricValue(before, `realtime_gw_handshake_rejects_total{status="${status}"}`) ?? 0);
-    expect([404, 403, 400, 401, 503].map(delta)).toEqual([1, 2, 1, 7, 1]);
+    expect([404, 403, 400, 401, 503].map(delta)).toEqual([1, 2, 4, 7, 1]);
+    // 400 넷은 모두 ws_rejected 줄이 남는다
+    await until(() => svc.logLines().filter((l) => l.includes('"ws_rejected"') && l.includes('"status":400')).length >= 4, 'ws_rejected 400 줄 넷');
   });
 
-  test('S-T42 ② 앞 차례가 걸리면 뒤는 보지 않는다: 회차 ID 모양이 틀린 경로는 출처가 없어도 404, 출처가 없으면 토큰이 없어도 403, 하위 프로토콜이 없으면 토큰이 틀려도 400, 토큰이 틀리면 판 파일이 없어도 401 [ASVS v5.0.0-4.4.2]', async () => {
+  test('S-T42 ② 앞 차례가 걸리면 뒤는 보지 않는다: 회차 ID 모양이 틀린 경로는 출처가 없어도 404, 출처가 없으면 토큰이 없어도 403, 업그레이드 머리나 하위 프로토콜이 틀리면 토큰이 틀려도 400, 토큰이 틀리면 판 파일이 없어도 401 [ASVS v5.0.0-4.4.2] [ASVS v5.0.0-16.5.1]', async () => {
     const tok = AUTH + admissionToken();
     const p = svc.ports.app;
     for (const path of ['/v1/events/ev%3A1/seats/stream', `/v1/events/${'a'.repeat(65)}/seats/stream`, '/v1/events//seats/stream', '/v1/events/ev-1/seats/stream/x', '/v1/events/ev:1/seats/stream']) {
@@ -142,6 +153,12 @@ describe('S-T42 핸드셰이크', () => {
     expect((await handshake(p, streamPath('ev-1'), { origin: `${ORIGIN}/`, protocols: [SEATS, tok] })).status).toBe(403);
     expect((await handshake(p, streamPath('ev-1'), { origin: 'http://www.peaket.example', protocols: [SEATS, tok] })).status).toBe(403);
     expect((await handshake(p, streamPath('ev-1'), { origin: ORIGIN, protocols: [AUTH + 'x.y.z'] })).status).toBe(400);
+    // 업그레이드 머리(④)는 출처(③) 뒤이고 토큰(⑤) 앞이다: 출처가 없으면 키가 틀려도 403, 키가 틀리면 토큰이 틀려도 400(본문 없음)
+    expect((await handshake(p, streamPath('ev-1'), { protocols: [SEATS, tok], headers: { 'Sec-WebSocket-Key': 'not-a-key!!' } })).status).toBe(403);
+    for (const headers of ([{ 'Sec-WebSocket-Key': 'not-a-key!!' }, { 'Sec-WebSocket-Key': Buffer.alloc(17, 1).toString('base64') }, { 'Sec-WebSocket-Version': '14' }] as Array<Record<string, string>>)) {
+      const r = await handshake(p, streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + 'x.y.z'], headers });
+      expect([r.status, r.body], JSON.stringify(headers)).toEqual([400, '']);
+    }
     expect((await handshake(p, streamPath('ev-nolayout'), { origin: ORIGIN, protocols: [SEATS, AUTH + 'x.y.z'] })).status).toBe(401);
     expect((await handshake(p, streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH] })).status).toBe(401);
   });
@@ -317,7 +334,7 @@ describe('S-T42 묶음 전파(실제 Valkey SPUBLISH)', () => {
 });
 
 describe('운영 확인과 로그', () => {
-  test('앱 포트는 업그레이드가 아닌 요청에 404(GET /·/metrics·좌석 경로), TRACE에 405이고 지표는 관리 포트에만 있다 [ASVS v5.0.0-13.4.3] [ASVS v5.0.0-13.4.4] [ASVS v5.0.0-13.4.5]', async () => {
+  test('S-T42 ⑰ 앱 포트는 업그레이드가 아닌 요청에 404(GET /·/metrics·좌석 경로), TRACE에 405이고 지표(realtime_gw_subscribe_mismatch 포함)는 관리 포트에만 있다 [ASVS v5.0.0-13.4.3] [ASVS v5.0.0-13.4.4] [ASVS v5.0.0-13.4.5]', async () => {
     const app = `http://127.0.0.1:${svc.ports.app}`;
     for (const p of ['/', '/metrics', streamPath('ev-1'), '/v1/', '/ready']) expect((await fetch(app + p)).status, p).toBe(404);
     // fetch는 TRACE를 보내지 못해 http.request로 보낸다
@@ -334,10 +351,12 @@ describe('운영 확인과 로그', () => {
     expect(await trace('/metrics')).toBe(405);
     expect(await trace(streamPath('ev-1'))).toBe(405);
     const metrics = await svc.metrics();
-    for (const name of ['realtime_gw_connections', 'realtime_gw_handshake_rejects_total', 'realtime_gw_closes_total', 'realtime_gw_batches_total', 'realtime_gw_batch_bytes_total', 'realtime_gw_batch_wait_ms', 'realtime_gw_pubsub_messages_total', 'realtime_gw_redis_up']) {
+    for (const name of ['realtime_gw_connections', 'realtime_gw_handshake_rejects_total', 'realtime_gw_closes_total', 'realtime_gw_batches_total', 'realtime_gw_batch_bytes_total', 'realtime_gw_batch_wait_ms', 'realtime_gw_pubsub_messages_total', 'realtime_gw_redis_up', 'realtime_gw_subscribe_mismatch']) {
       expect(metrics, name).toContain(`# TYPE ${name} `);
     }
     expect(metricValue(metrics, 'realtime_gw_redis_up')).toBe(1);
+    // 원하는 상태와 실제가 다른 채널 수(ADR-0297 결정 1): 평상시 0
+    expect(metricValue(metrics, 'realtime_gw_subscribe_mismatch')).toBe(0);
   });
 
   test('꾸민 x-user-id·x-forwarded-for를 붙여도 ws_closed의 계정 가명은 토큰 sub의 것이다 [ASVS v5.0.0-4.1.3]', async () => {
@@ -392,18 +411,27 @@ describe('운영 확인과 로그', () => {
 });
 
 describe('S-T42 ⑭ 구독 명령만 허용한 Redis 사용자', () => {
-  test('S-T42 ⑭ s:* 채널과 구독·연결 명령만 허용한 사용자로 단일 노드 Valkey에서 ⑤가 같고 거절된 명령이 없다 [ASVS v5.0.0-13.3.2]', async () => {
+  /** seat-hold §7 '좌석 Redis 구독'의 접근 문자열(ADR-0297 결정 6). BAS-140이 운영 사용자를 이 문자열로 만든다 */
+  const ACL_RULES = ['resetchannels', '&s:{event:*}:sec:*', '-@all', '+ssubscribe', '+sunsubscribe', '+ping', '+hello', '+auth', '+client|setinfo', '+cluster|slots'];
+  /** 첫 구현의 넓은 접근 문자열(리뷰 SEC-03~05가 좁힌 것). 아래 세 명령이 이 문자열이면 통과함을 보여 단언이 접근 문자열에 민감한지 대조한다 */
+  const OLD_RULES = ['resetchannels', '&s:*', '-@all', '+ssubscribe', '+sunsubscribe', '+ping', '+hello', '+auth', '+client'];
+  const PROBES: string[][] = [['CLIENT', 'LIST'], ['CLIENT', 'PAUSE', '1', 'WRITE'], ['SSUBSCRIBE', 's:other']];
+
+  test('S-T42 ⑭ 정본 접근 문자열의 사용자로 CLIENT LIST·CLIENT PAUSE·SSUBSCRIBE s:other는 NOPERM이고(옛 문자열이면 통과한다), 같은 사용자로 띄운 단일 노드 Valkey에서 ⑤가 같고 거절된 명령이 없다 [ASVS v5.0.0-13.2.2] [ASVS v5.0.0-13.3.2]', async () => {
     const pw = 'rtgw-pw-1c8e';
-    await redis.sendCommand(['ACL', 'SETUSER', 'rtgw', 'on', `>${pw}`, 'resetchannels', '&s:*', '-@all', '+ssubscribe', '+sunsubscribe', '+ping', '+hello', '+auth', '+client']);
-    await redis.sendCommand(['ACL', 'LOG', 'RESET']);
-    const aclUrl = `redis://rtgw:${pw}@127.0.0.1:${valkey.port}`;
-    // 대조: 그 사용자는 데이터 명령을 쓰지 못한다
-    const probe = createClient({ url: aclUrl });
-    await probe.connect();
-    await expect(probe.sendCommand(['GET', 'x'])).rejects.toThrow(/NOPERM/);
-    await probe.quit();
+    await redis.sendCommand(['ACL', 'SETUSER', 'rtgw', 'reset', 'on', `>${pw}`, ...ACL_RULES]);
+    await redis.sendCommand(['ACL', 'SETUSER', 'rtgw-old', 'reset', 'on', `>${pw}`, ...OLD_RULES]);
+    // 대조: 옛 문자열이면 세 명령이 통과한다(NOPERM이 아니다)
+    for (const args of PROBES) expect(await rawRedisReply(valkey.port, { user: 'rtgw-old', password: pw }, args), `old ${args.join(' ')}`).not.toMatch(/^-NOPERM/);
+    // 정본 문자열이면 세 명령 모두 NOPERM
+    for (const args of PROBES) expect(await rawRedisReply(valkey.port, { user: 'rtgw', password: pw }, args), args.join(' ')).toMatch(/^-NOPERM/);
+    // 데이터 명령도 쓰지 못한다
+    expect(await rawRedisReply(valkey.port, { user: 'rtgw', password: pw }, ['GET', 'x'])).toMatch(/^-NOPERM/);
+    // 쓰는 채널 모양은 받는다
+    expect(await rawRedisReply(valkey.port, { user: 'rtgw', password: pw }, ['SSUBSCRIBE', channelOf('ev-1', 0)])).toMatch(/^\*3/);
     await redis.sendCommand(['ACL', 'LOG', 'RESET']);
 
+    const aclUrl = `redis://rtgw:${pw}@127.0.0.1:${valkey.port}`;
     const svc2 = await startService(serviceEnv({ redisUrl: aclUrl, seatMapDir: layout.dir }));
     try {
       const c = connect(svc2.url(streamPath('ev-1')), { token: admissionToken() });
@@ -425,16 +453,209 @@ describe('S-T42 ⑭ 구독 명령만 허용한 Redis 사용자', () => {
       ]);
       expect(got.maxWaitMs).toBe(got.serverTimeMs - (W - 50));
       expect(metricValue(await svc2.metrics(), 'realtime_gw_redis_up')).toBe(1);
+      // 구독 연결 살핌(PING 5초)이 한 번 돈 뒤에도 거절된 명령이 없다
+      await sleep(6_000);
       const log = (await redis.sendCommand(['ACL', 'LOG'])) as unknown[];
       expect(JSON.stringify(log)).not.toContain('rtgw');
     } finally {
       await svc2.close();
     }
+  }, 60_000);
+});
+
+describe('S-T42 ⑮ 클라이언트 Ping은 받지 않는다(ADR-0297 결정 2)', () => {
+  test('S-T42 ⑮ 구독하지 않고 받기를 멈춘 연결이 Ping(125바이트)을 퍼부으면 4403 bad frame으로 닫힌다(자동 Pong이 쌓이지 않는다) [ASVS v5.0.0-2.4.1]', async () => {
+    const before = await svc.metrics();
+    const c = await open();
+    const sock = rawSocketOf(c.ws);
+    sock.pause();
+    for (let i = 0; i < 500; i++) c.ws.ping(Buffer.alloc(125, 7));
+    await sleep(100);
+    sock.resume();
+    const got = await Promise.race([c.closed, sleep(2_000).then(() => 'still open' as const)]);
+    expect(got).toEqual({ code: 4403, reason: 'bad frame' });
+    await until(async () => (metricValue(await svc.metrics(), 'realtime_gw_closes_total{code="4403"}') ?? 0) > (metricValue(before, 'realtime_gw_closes_total{code="4403"}') ?? 0), '4403 닫힘 셈', 3_000);
+  });
+});
+
+describe('S-T42 ⑯ 연결 수 상한(ADR-0297 결정 3)', () => {
+  test('S-T42 ⑯ 같은 입장 토큰으로 셋 붙으면 둘은 열리고 셋째는 맺은 뒤 4429 too many다. 첫째를 닫은 뒤 같은 토큰으로 다시 붙으면 열린다 [ASVS v5.0.0-2.4.1]', async () => {
+    const token = admissionToken();
+    const a = await open('ev-1', { token });
+    const b = await open('ev-1', { token });
+    const c = connect(svc.url(streamPath('ev-1')), { token });
+    clients.push(c);
+    await c.opened;
+    expect(await Promise.race([c.closed, sleep(3_000).then(() => 'still open' as const)])).toEqual({ code: 4429, reason: 'too many' });
+    await sleep(200);
+    expect([a.ws.readyState, b.ws.readyState]).toEqual([a.ws.OPEN, b.ws.OPEN]);
+    a.ws.close(1000);
+    await a.closed;
+    await sleep(200);
+    const d = await open('ev-1', { token });
+    await sleep(300);
+    expect(d.ws.readyState).toBe(d.ws.OPEN);
+    // 다른 토큰은 세지 않는다
+    const e = await open();
+    await sleep(200);
+    expect(e.ws.readyState).toBe(e.ws.OPEN);
+  });
+
+  test('S-T42 ⑯ 파드 연결 상한(PEAKET_REALTIME_MAX_CONNECTIONS=3, 시험 값)까지 붙은 뒤 넷째 핸드셰이크는 503·빈 본문·업그레이드 없음이고, 하나를 닫으면 다시 받는다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.5.1]', async () => {
+    const svcMax = await startService(serviceEnv({ redisUrl: valkey.url, seatMapDir: layout.dir, extra: { PEAKET_REALTIME_MAX_CONNECTIONS: '3' } }));
+    const mine: Client[] = [];
+    try {
+      for (const accountId of ['acct-1', 'acct-2', 'acct-3']) {
+        const c = connect(svcMax.url(streamPath('ev-1')), { token: admissionToken({ accountId }) });
+        mine.push(c);
+        await c.opened;
+        await c.next(isBatchInterval);
+      }
+      const before = await svcMax.metrics();
+      const r = await handshake(svcMax.ports.app, streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + admissionToken({ accountId: 'acct-4' })] });
+      expect([r.status, r.body, r.headers.upgrade, r.headers['sec-websocket-accept']]).toEqual([503, '', undefined, undefined]);
+      const after = await svcMax.metrics();
+      const d503 = (metricValue(after, 'realtime_gw_handshake_rejects_total{status="503"}') ?? 0) - (metricValue(before, 'realtime_gw_handshake_rejects_total{status="503"}') ?? 0);
+      expect(d503).toBe(1);
+      expect(mine.every((c) => c.ws.readyState === c.ws.OPEN)).toBe(true);
+      mine[0]!.ws.close(1000);
+      await mine[0]!.closed;
+      await until(async () => metricValue(await svcMax.metrics(), 'realtime_gw_connections') === 2, '연결 수 2');
+      const again = await handshake(svcMax.ports.app, streamPath('ev-1'), { origin: ORIGIN, protocols: [SEATS, AUTH + admissionToken({ accountId: 'acct-5' })] });
+      expect(again.status).toBe(101);
+    } finally {
+      for (const c of mine) c.ws.terminate();
+      await svcMax.close();
+    }
+  });
+});
+
+describe('S-T42 ⑱ 답 없는 구독 연결(ADR-0297 결정 4)', () => {
+  test(
+    'S-T42 ⑱ gw와 Valkey 사이 망이 닫히지 않고 받은 것을 버리면 PING 5초 + 답 2초 뒤 박자 안(10초까지 기다림)에 realtime_gw_redis_up이 0이 되고, 망을 되살리면 1로 돌아와 SPUBLISH가 묶음으로 온다',
+    async () => {
+      const relay = await startRelay(valkey.port);
+      const svcR = await startService(serviceEnv({ redisUrl: relay.url, seatMapDir: layout.dir }));
+      try {
+        const up = async () => metricValue(await svcR.metrics(), 'realtime_gw_redis_up');
+        const ch = channelOf('ev-1', 17);
+        const c = connect(svcR.url(streamPath('ev-1')), { token: admissionToken() });
+        clients.push(c);
+        await c.opened;
+        await c.next(isBatchInterval);
+        c.send(subscribeBytes([17]));
+        await until(async () => (await shardSubs(ch)) === 1, '구역 17 구독');
+        let from = c.raw.length;
+        await spublish(ch, deltaText({ epoch: 1, section: 17, version: 1, changedAtMs: Date.now(), seats: [[0, 1]] }));
+        await c.next(isDelta, 3_000, from);
+        expect(await up()).toBe(1);
+
+        relay.blackhole();
+        const cutAt = Date.now();
+        await until(async () => (await up()) === 0, 'redis_up 0(답 없음)', 10_000, 100);
+        expect(Date.now() - cutAt).toBeLessThanOrEqual(10_000);
+        // 그동안 WebSocket 연결은 열려 있다
+        expect(c.ws.readyState).toBe(c.ws.OPEN);
+
+        relay.restore();
+        await until(async () => (await up()) === 1, 'redis_up 1(되살림)', 20_000, 100);
+        // 다시 구독한 뒤의 메시지가 묶음으로 온다
+        from = c.raw.length;
+        let v = 2;
+        await until(
+          async () => {
+            await spublish(ch, deltaText({ epoch: 1, section: 17, version: v++, changedAtMs: Date.now(), seats: [[1, 2]] }));
+            await sleep(250);
+            return c.frames().slice(from).some(isDelta);
+          },
+          '되살린 뒤 묶음',
+          20_000,
+          0,
+        );
+        expect(c.ws.readyState).toBe(c.ws.OPEN);
+      } finally {
+        await svcR.close().catch(() => {});
+        await relay.close();
+      }
+    },
+    60_000,
+  );
+});
+
+describe('S-T42 ⑪ S-T31 ② 실제 소켓의 바깥 경계(RF-T11, COR-08)', () => {
+  test(
+    'S-T42 ⑪ 받기를 멈춘 실제 연결 하나가 있는 채 큰 묶음을 퍼부으면 그 연결만 1013으로 닫히고(서버의 보내기 버퍼 1MiB) 다른 연결은 묶음을 이어 받는다',
+    async () => {
+      const ch = channelOf('ev-1', 15);
+      const slow = await open();
+      const fast = await open();
+      slow.send(subscribeBytes([15]));
+      fast.send(subscribeBytes([15]));
+      await until(async () => (await shardSubs(ch)) === 1, '구역 15 구독');
+      await sleep(200);
+      rawSocketOf(slow.ws).pause();
+      const before = await svc.metrics();
+      const closes1013 = async () => (metricValue(await svc.metrics(), 'realtime_gw_closes_total{code="1013"}') ?? 0) - (metricValue(before, 'realtime_gw_closes_total{code="1013"}') ?? 0);
+      // 메시지 하나 = 좌석 20,000개(묶음 항목 약 60KB). 박자마다 6개(약 360KB)씩, 받는 연결이 따라오게 쉬며 보낸다
+      const seats = Array.from({ length: 20_000 }, (_, i) => [i, 1] as [number, number]);
+      let version = 0;
+      for (let round = 0; round < 150 && (await closes1013()) === 0; round++) {
+        const m = redis.multi();
+        for (let k = 0; k < 6; k++) m.addCommand(['SPUBLISH', ch, deltaText({ epoch: 3, section: 15, version: ++version, changedAtMs: Date.now(), seats })]);
+        await m.exec();
+        await sleep(60);
+      }
+      await until(async () => (await closes1013()) === 1, '느린 연결 1013', 10_000);
+      // 다른 연결은 열려 있고 그 뒤의 묶음을 받는다
+      expect(fast.ws.readyState).toBe(fast.ws.OPEN);
+      const from = fast.raw.length;
+      await spublish(ch, deltaText({ epoch: 3, section: 15, version: ++version, changedAtMs: Date.now(), seats: [[7, 2]] }));
+      const last = version;
+      const isLast = (f: Parameters<typeof isDelta>[0]): f is DeltaFrame => isDelta(f) && f.sections.some((s) => s.sectionVersion === last);
+      await fast.next(isLast, 10_000, from);
+      expect(await closes1013()).toBe(1);
+      await until(() => svc.logLines().some((l) => l.includes('"ws_closed"') && l.includes('"code":1013')), 'ws_closed 1013 줄');
+    },
+    90_000,
+  );
+
+  test('S-T31 ② 실제 소켓으로 1초 안에 SubscribeSections 셋(0·300·600ms)을 보내면 셋째에 4429 too many다(맺은 뒤 첫 구독도 센다) [ASVS v5.0.0-2.4.1]', async () => {
+    // 정본 경계(0·500·999ms)는 단위 시험(hub)이 가짜 시계로 본다. 실제 소켓은 타이머 지연이 있어 창 안쪽 값으로 본다
+    const c = await open();
+    c.send(subscribeBytes([1]));
+    await sleep(300);
+    c.send(subscribeBytes([2]));
+    await sleep(300);
+    c.send(subscribeBytes([3]));
+    expect(await Promise.race([c.closed, sleep(3_000).then(() => 'still open' as const)])).toEqual({ code: 4429, reason: 'too many' });
+  });
+});
+
+describe('S-T42 ③ ⑮ ⑯ 닫힘 이유 글(ADR-0297 결정 8, RF-T13)', () => {
+  test("S-T42 ③ ⑮ ⑯ 실제 소켓의 닫힘 이유 글은 frontend §4.4.1 '닫힘 이유 글'과 글자 그대로 같다: bad event·bad frame·bad section·too many·token expired [ASVS v5.0.0-1.3.7]", async () => {
+    const wait = (c: Client) => Promise.race([c.closed, sleep(5_000).then(() => 'still open' as const)]);
+    const badEvent = connect(svc.url(streamPath('ev-1')), { token: admissionToken({ eventId: 'ev-2' }) });
+    clients.push(badEvent);
+    const badFrame = await open();
+    badFrame.send(Uint8Array.from([1, 17, 3, 0, 97, 98, 99]));
+    const badSection = await open();
+    badSection.send(subscribeBytes([20]));
+    const tooMany = await open();
+    tooMany.send(subscribeBytes(Array.from({ length: 17 }, (_, i) => i)));
+    const nowS = Math.floor(Date.now() / 1000);
+    const expired = await open('ev-1', { token: admissionToken({ claims: { iat: nowS, exp: nowS + 2 } }) });
+    expect(await Promise.all([badEvent, badFrame, badSection, tooMany, expired].map(wait))).toEqual([
+      { code: 4403, reason: 'bad event' },
+      { code: 4403, reason: 'bad frame' },
+      { code: 4403, reason: 'bad section' },
+      { code: 4429, reason: 'too many' },
+      { code: 4401, reason: 'token expired' },
+    ]);
   });
 });
 
 describe('S-T42 ⑫ 내릴 때', () => {
-  test('S-T42 ⑫ close()(SIGTERM과 같은 길)에 모든 연결이 1012로 닫히고 내리는 중의 새 핸드셰이크는 503이다', async () => {
+  test('S-T42 ⑫ close()(SIGTERM과 같은 길)에 모든 연결이 1012 server restart로 닫히고 내리는 중의 새 핸드셰이크는 503이다 [ASVS v5.0.0-1.3.7]', async () => {
     const a = await open();
     const b = await open('ev-2');
     a.send(subscribeBytes([1]));
@@ -453,7 +674,10 @@ describe('S-T42 ⑫ 내릴 때', () => {
     expect(during.status).toBe(503);
     expect(during.body).toBe('');
     const [ca, cb] = await Promise.all([a.closed, b.closed]);
-    expect([ca.code, cb.code]).toEqual([1012, 1012]);
+    expect([ca, cb]).toEqual([
+      { code: 1012, reason: 'server restart' },
+      { code: 1012, reason: 'server restart' },
+    ]);
     await closing;
     // 답하지 않은 연결도 닫힘 프레임(opcode 8)에 1012를 받았다
     const bytes = Buffer.concat(rawFrames);

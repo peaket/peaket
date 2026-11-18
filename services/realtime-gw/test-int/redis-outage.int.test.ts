@@ -2,6 +2,7 @@
 // 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현' '좌석 Redis 구독'(다시 붙으면 원하는 채널을 모두 다시 구독, 끊긴 동안 WebSocket 연결은
 // 닫지 않고 하트비트를 이어 보냄)·'지표와 로그'(realtime_gw_redis_up 0·1), §12 S-T42 ⑩. 끊긴 사례가 실제로 있었는지(redis_up 0을 봤는지)도 단언한다.
 // docker restart는 쓰지 않고 docker stop·docker start로 한다(같은 호스트 포트로 다시 뜬다).
+// 리뷰 반영(BAT-052 RF-T3, CON-02·COR-05·CON-12): 끊긴 동안 바뀐 원하는 상태를 다시 붙은 뒤 맞추는지(ADR-0297 결정 1, S-T42 ⑰).
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createClient } from 'redis';
 import { admissionToken, channelOf, connect, deltaText, entriesOf, isBatchInterval, isDelta, isHeartbeat, layoutDir, metricValue, type Running, serviceEnv, startService, streamPath, subscribeBytes, timeSyncBytes, until } from './support.js';
@@ -84,5 +85,44 @@ describe('S-T42 ⑩ 좌석 Redis 장애 주입', () => {
       c.ws.terminate();
     },
     90_000,
+  );
+
+  test(
+    'S-T42 ⑩ ⑰ Valkey가 멈춘 동안 한 연결은 새 구역을 구독하고 다른 연결은 구역을 빼면, 다시 띄운 뒤 PUBSUB SHARDNUMSUB가 원하는 상태와 같아지고 새 구역의 메시지가 묶음으로 오며 realtime_gw_subscribe_mismatch가 0으로 돌아온다',
+    async () => {
+      // 시험이 직접 SPUBLISH한 메시지만 쓴다(감독 지시: 환불 Lua의 changedAtMs에 기대지 않는다)
+      const [ch0, ch1, ch3] = [channelOf('ev-1', 0), channelOf('ev-1', 1), channelOf('ev-1', 3)];
+      const a = connect(svc.url(streamPath('ev-1')), { token: admissionToken() });
+      const b = connect(svc.url(streamPath('ev-1')), { token: admissionToken({ accountId: 'acct-2' }) });
+      await Promise.all([a.opened, b.opened]);
+      await Promise.all([a.next(isBatchInterval), b.next(isBatchInterval)]);
+      a.send(subscribeBytes([0]));
+      b.send(subscribeBytes([1]));
+      await until(async () => (await shardSubs(ch0)) === 1 && (await shardSubs(ch1)) === 1, '처음 구독');
+
+      valkey.pause();
+      await until(async () => (await redisUp()) === 0, 'redis_up 0', 20_000, 100);
+      // 끊긴 동안: a는 구역 3을 더하고, b는 구역 1을 뺀다
+      a.send(subscribeBytes([0, 3]));
+      b.send(subscribeBytes([]));
+      await new Promise((r) => setTimeout(r, 1_500));
+      expect(await redisUp()).toBe(0);
+
+      await valkey.resume();
+      await until(async () => (await redisUp()) === 1, 'redis_up 1', 20_000, 100);
+      await until(async () => (await shardSubs(ch0)) === 1 && (await shardSubs(ch3)) === 1 && (await shardSubs(ch1)) === 0, '원하는 상태(0·3 구독, 1 해제)와 같음', 20_000, 200);
+      const fromA = a.raw.length;
+      const fromB = b.raw.length;
+      await withRedis((r) => r.sendCommand(['SPUBLISH', ch3, deltaText({ epoch: 5, section: 3, version: 1, changedAtMs: Date.now(), seats: [[4, 1]] })]));
+      await withRedis((r) => r.sendCommand(['SPUBLISH', ch1, deltaText({ epoch: 5, section: 1, version: 1, changedAtMs: Date.now(), seats: [[4, 1]] })]));
+      expect(entriesOf(await a.next(isDelta, 3_000, fromA))).toEqual([{ sectionIndex: 3, sectionVersion: 1, offsets: [4], states: [1] }]);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(b.frames().slice(fromB).filter(isDelta)).toEqual([]);
+      await until(async () => metricValue(await svc.metrics(), 'realtime_gw_subscribe_mismatch') === 0, 'realtime_gw_subscribe_mismatch 0', 20_000, 200);
+      expect([a.ws.readyState, b.ws.readyState]).toEqual([a.ws.OPEN, b.ws.OPEN]);
+      a.ws.terminate();
+      b.ws.terminate();
+    },
+    120_000,
   );
 });

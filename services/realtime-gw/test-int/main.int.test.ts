@@ -1,13 +1,13 @@
 // realtime-gw 시작 파일(dist/main.js)을 운영 시작 명령 그대로(node --import @peaket/platform/telemetry/register) 자식 프로세스로 띄운다(BUILD_ORDER HOT-090, BAT-052).
 // 시험 조립(start())과 따로 시작 파일의 조립을 본다: 포트 알림(peaket-ports)·준비 확인, 환경 값을 그대로 넘기는지(입장 토큰 발급자로 핸드셰이크 101),
 // 필수 값 하나씩 뺌·운영 값 PEAKET_ENV의 Redis 주소 규칙(시작하지 않고 오류 글에 비밀번호 없음), SIGTERM에 1012로 닫고 스스로 끝남.
-// 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현' '틀과 설정'·'느린 연결과 내릴 때', §12 S-T42 ⑫⑬.
+// 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현' '틀과 설정'·'느린 연결과 내릴 때', §12 S-T42 ⑫⑬⑲(ADR-0297 결정 5: 해제 대기 1초, 내리기 마감 10초).
 // Windows는 child.kill('SIGTERM')이 처리기를 부르지 않아 IPC로 SIGTERM을 낸다(sigterm-bridge.mjs). Linux는 진짜 신호다.
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { admissionToken, connect, isBatchInterval, JWKS, ISS, layoutDir, PSEUDONYM_KEY, streamPath, until } from './support.js';
+import { admissionToken, connect, isBatchInterval, JWKS, ISS, layoutDir, PSEUDONYM_KEY, streamPath, subscribeBytes, until } from './support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -173,6 +173,36 @@ describe('S-T42 ⑫ SIGTERM', () => {
       expect([ca.code, cb.code]).toEqual([1012, 1012]);
       const exit = await Promise.race([p.exited, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 15_000))]);
       expect(exit, p.output().slice(-2000)).toEqual({ code: 0, signal: null });
+    },
+    60_000,
+  );
+});
+
+describe('S-T42 ⑲ 답하지 않는 Valkey와 SIGTERM(ADR-0297 결정 5)', () => {
+  test(
+    'S-T42 ⑲ 구역을 구독한 연결이 있는 채 Valkey를 얼리고(docker pause) SIGTERM을 보내면 연결은 1012로 닫히고 프로세스는 10초 안에 스스로 끝난다',
+    async () => {
+      const p = spawnMain(goodEnv());
+      const ports = await p.ports;
+      expect(ports, p.output().slice(-2000)).toBeDefined();
+      const ch = 's:{event:ev-1}:sec:1';
+      const a = connect(`ws://127.0.0.1:${ports!.app}${streamPath('ev-1')}`, { token: admissionToken() });
+      await a.opened;
+      await a.next(isBatchInterval);
+      a.send(subscribeBytes([1]));
+      await until(() => Number(valkey.cli('PUBSUB', 'SHARDNUMSUB', ch).split('\n').at(-1)) === 1, '구역 1 구독', 20_000, 200);
+      valkey.freeze();
+      try {
+        const sentAt = Date.now();
+        sigterm(p.child);
+        expect(await Promise.race([a.closed, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 5_000))])).toEqual({ code: 1012, reason: 'server restart' });
+        const exit = await Promise.race([p.exited, new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 10_000 - (Date.now() - sentAt)))]);
+        expect(exit, p.output().slice(-2000)).not.toBe('timeout');
+        expect((exit as { signal: NodeJS.Signals | null }).signal).toBeNull();
+        expect(Date.now() - sentAt).toBeLessThanOrEqual(10_000);
+      } finally {
+        valkey.thaw();
+      }
     },
     60_000,
   );
