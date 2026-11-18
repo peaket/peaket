@@ -8,6 +8,11 @@ export const WITHDRAWAL_NEXT_CHECK_MS = 60_000;
 export const WITHDRAWAL_RETRY_INTERVAL_MS = 60_000;
 /** 고리 한 바퀴에 잡는 미룬 계정 수 20개 [가정] */
 export const WITHDRAWAL_RETRY_BATCH = 20;
+/**
+ * 고리 한 바퀴의 마감: 잡은 시각 + 50초 [가정](다음 확인 미루기 60초 − 고리 데드라인 10초). 이때부터 남은 계정을 부르지 않는다
+ * (다음 확인 시각 뒤 다시 잡힌다. 참여자가 느려도 다른 파드가 같은 계정을 다시 잡기 전에 호출이 끝난다, identity §8 '다시 하기 고리', BAT-010 리뷰 RV-03)
+ */
+export const WITHDRAWAL_RETRY_ROUND_MS = 50_000;
 /** 탈퇴 요청 경로의 참여자 호출 데드라인 3초 [가정] */
 export const WITHDRAWAL_REQUEST_DEADLINE_MS = 3_000;
 /** 다시 하기 고리의 참여자 호출 데드라인 10초 [가정] */

@@ -3,7 +3,8 @@
 // 데드라인은 부르는 쪽이 준다(요청 경로 3초·고리 10초 [가정]). 내부 토큰(PEAKET_INTERNAL_GRPC_TOKEN)을 싣고 부르는 쪽 이름은 identity-svc다.
 // 병합 확인과 같은 purchase-svc 차단기 안에서 부른다(main이 같은 의존성 이름의 차단기를 넘긴다). 꼴은 grpc-merge-checkers.ts다.
 // 답의 state가 DONE·PENDING이 아니거나 모르는 이유가 있으면, 또 어떤 gRPC 오류·차단기 열림·기한 초과든 WithdrawalParticipantUnavailable이다(DONE으로 접지 않는다).
-// 주소가 없으면 local·ci만 '늘 DONE' 대역이고, 그 밖의 환경은 '늘 답하지 않음'이라 탈퇴가 늘 202다(시작 로그 경고, 병합 확인과 같은 규칙).
+// 주소가 없으면 local·ci만 '늘 DONE' 대역이고, 그 밖의 환경은 '늘 답하지 않음'이라 탈퇴가 늘 202다(시작 로그 경고).
+// PEAKET_ENV가 없거나 빈 글이면 운영으로 본다(플랫폼 설정과 같은 닫힌 쪽 기본값, identity §8 '참여자 호출', BAT-010 리뷰 RV-01).
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Account } from '@peaket/contracts/proto';
@@ -123,7 +124,8 @@ export function withdrawalParticipantsFromEnv(
   profile: GrpcLbProfile = 'service',
   breakerOf?: (dependency: 'purchase-svc') => Breaker,
 ): { participants: WithdrawalParticipant[]; warnings: string[]; clients: GrpcWithdrawalParticipant[] } {
-  const local = (env.PEAKET_ENV ?? 'local') === 'local' || env.PEAKET_ENV === 'ci';
+  // 값이 없거나 빈 글이면 운영이다: 환경 값과 주소가 함께 빠진 배포가 참여자를 건너뛰고 탈퇴를 끝내지 않게(열린 실패를 막는다, RV-01)
+  const local = env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci';
   const addr = env[PURCHASE_GRPC_URL_ENV];
   if (addr) {
     const breaker = breakerOf?.('purchase-svc');
