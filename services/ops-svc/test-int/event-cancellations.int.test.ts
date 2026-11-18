@@ -23,6 +23,7 @@ import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 // BAT-420-rest R-T41 ③(시험 담당 l3-b420-test)
 import { DrizzleEventCancellationStore, EventCancellations } from '../src/modules/event-cancellations/index.js';
+import { HttpCoreEventStatus } from '../src/adapters/http-core-event-status.js';
 
 const NOW = Date.parse('2026-11-15T08:00:00.000Z');
 /** 공연 시각은 실제 시계로 끝나지 않을 먼 미래로 둔다(요청 시각 셈이 Date.now든 CLOCK이든 같게) */
@@ -726,6 +727,83 @@ describe('R-T41 ③ core 반영 표시와 다시 하기 잡기 실제 DB [BAT-42
       expect(core.calls.filter((c) => c === `${requestId}:CANCEL`)).toHaveLength(2);
     } finally {
       await withCore.close();
+    }
+  });
+});
+
+// BAT-420-rest 리뷰 반영 재현 RV-06·검증 O09(시험 담당 l3-b420-test, 2026-11-19): 같은 회차 요청 사이의 차례(core_apply_superseded_at)와
+// 실제 어댑터의 연결 실패. 정본: docs/features/transfer-refund.md §5 'core 반영의 구현에서 정한 것' ⑥, §11 R-T41 ③⑥.
+describe('R-T41 ⑥·③ 같은 회차의 대체 표시와 실제 어댑터 연결 실패 실제 DB [BAT-420-rest 리뷰 반영]', () => {
+  const MIN = 60_000;
+  const coreService = (core: import('../src/modules/event-cancellations/index.js').CoreEventStatus) =>
+    createService({
+      name: 'ops-svc-event-cancellations-core-rf',
+      module: AppModule.register({
+        database: db,
+        nowMs: NOW,
+        executor: commandExecutor,
+        eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper: { stop: async () => undefined }, owners: ownerLookup, holds: intHolds, core },
+      }),
+      env: { PEAKET_ENV: 'ci' },
+      clock,
+      logDestination: quiet(),
+      adminAuthz: identity,
+    });
+  const approveVia = async (s: Awaited<ReturnType<typeof createService>>, requestId: string) => {
+    const r = await s.http.inject({ method: 'POST', url: `/v1/ops/event-cancellations/${requestId}/approvals`, headers: { ...reauthed(identity.ops('operator')), 'content-type': 'application/json' }, payload: '{}' });
+    expect(json(r).status).toBe('RUNNING');
+  };
+  const row = async (requestId: string) =>
+    (await admin.query<{ core_applied_at: Date | null; core_apply_superseded_at: Date | null }>('select core_applied_at, core_apply_superseded_at from event_cancellation_request where request_id = $1', [requestId])).rows[0]!;
+
+  test('R-T41 ⑥ 같은 회차의 앞 요청 P1(core 실패)과 뒤 요청 P2(반영)가 있으면 그 바퀴에 P1에 core_apply_superseded_at을 쓰고 core_applied_at은 비우며, 다음 바퀴는 P1을 부르지 않는다', async () => {
+    const core = { calls: [] as string[], fail: new Set<string>() };
+    const s = await coreService({
+      apply: async (q) => {
+        core.calls.push(q.requestId);
+        if (core.fail.has(q.requestId)) throw new Error('connect ECONNREFUSED core-svc');
+      },
+    });
+    try {
+      const p1 = await pendingApproval(randomUUID());
+      const p2 = await pendingApproval(randomUUID());
+      core.fail.add(p1);
+      core.fail.add(p2);
+      await approveVia(s, p1);
+      await approveVia(s, p2);
+      // 둘을 같은 회차로 두고 확정 시각을 P1 < P2로 정한다(판매 설정 사본 없이 같은 회차 요청 둘을 만드는 시험 몫)
+      const p1Event = (await admin.query<{ event_id: string }>('select event_id from event_cancellation_request where request_id = $1', [p1])).rows[0]!.event_id;
+      // 회차마다 진행 중 요청은 하나(0011 유일 색인)라 앞 요청 P1을 COMPLETED로 둔다(다시 하기 대상 상태 그대로)
+      await admin.query("update event_cancellation_request set status = 'COMPLETED', approved_at = $2 where request_id = $1", [p1, new Date(NOW)]);
+      await admin.query('update event_cancellation_request set event_id = $2, approved_at = $3 where request_id = $1', [p2, p1Event, new Date(NOW + 1_000)]);
+      // 앞 묶음이 남긴 확정 행은 셈에서 뺀다
+      await admin.query('update event_cancellation_request set core_applied_at = now() where not (request_id = any($1::uuid[])) and core_applied_at is null', [[p1, p2]]);
+      core.fail.delete(p2);
+      core.calls.length = 0;
+      await s.app.get(EventCancellations).retryCoreApply(clock.now() + 2 * MIN);
+      expect(core.calls).toEqual([p1, p2]);
+      expect((await row(p2)).core_applied_at).not.toBeNull();
+      const r1 = await row(p1);
+      expect(r1.core_applied_at).toBeNull();
+      expect(r1.core_apply_superseded_at).not.toBeNull();
+      core.calls.length = 0;
+      await s.app.get(EventCancellations).retryCoreApply(clock.now() + 4 * MIN);
+      await s.app.get(EventCancellations).retryCoreApply(clock.now() + 6 * MIN);
+      expect(core.calls).toEqual([]);
+    } finally {
+      await s.close();
+    }
+  });
+
+  test('R-T41 ③ 실제 HttpCoreEventStatus를 닫힌 포트에 꽂으면 확정 HTTP는 RUNNING이고 core_applied_at이 빈다(연결 실패를 반영으로 보지 않는다, 검증 O09)', async () => {
+    const s = await coreService(new HttpCoreEventStatus(createExternalHttpClient({ provider: 'core-svc', baseUrl: 'http://127.0.0.1:9', timeoutCapMs: 1_000 }), 'it-token'));
+    try {
+      const id = await pendingApproval(randomUUID());
+      await approveVia(s, id);
+      const applied = (await admin.query<{ core_applied_at: Date | null }>('select core_applied_at from event_cancellation_request where request_id = $1', [id])).rows[0]!;
+      expect(applied.core_applied_at).toBeNull();
+    } finally {
+      await s.close();
     }
   });
 });

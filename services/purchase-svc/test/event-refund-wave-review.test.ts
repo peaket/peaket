@@ -190,7 +190,8 @@ describe('차액 건 행마다 다시 열기 [BAT-420 웨이브 끝 리뷰 C2·S
 
 describe('CS 어댑터는 2xx만 연 것으로 본다 [BAT-420 웨이브 끝 리뷰 S1]', () => {
   const answering = (status: number | 'timeout') => ({
-    request: async () => (status === 'timeout' ? Promise.reject(Object.assign(new Error('timeout'), { name: 'TimeoutError' })) : new Response('{}', { status })),
+    // BAT-420-rest 리뷰 반영 RV-01(정본 변경 반영, 시험 담당 l3-b420-test): 받는 쪽은 2xx 본문에 accepted: true를 싣는다(transfer-refund §3.1 ⑥ '실패 기록')
+    request: async () => (status === 'timeout' ? Promise.reject(Object.assign(new Error('timeout'), { name: 'TimeoutError' })) : new Response('{"accepted":true}', { status })),
   });
   const gapOpen = (n: HttpDeductionGapNotice) => n.open({ cancellationId: randomUUID(), orderId: ORDER, deductionAmount: 3_333, requestId: REQUEST, nowMs: NOW });
   const flagOpen = (n: HttpEntryFlagNotice) => n.open({ cancellationId: randomUUID(), orderId: ORDER, ticketId: TICKET, enteredAtMs: NOW - 60_000, nowMs: NOW });
@@ -212,7 +213,8 @@ describe('CS 어댑터는 2xx만 연 것으로 본다 [BAT-420 웨이브 끝 리
       request: async (r: { path: string; headers?: Record<string, string>; body?: unknown }) => {
         sent.push({ path: r.path, token: new Headers(r.headers).get('x-peaket-internal-token'), body: JSON.parse(String(r.body)) });
         if (answer instanceof Error) throw answer;
-        return new Response('{}', { status: answer });
+        // BAT-420-rest 리뷰 반영 RV-01(정본 변경 반영): 받는 쪽의 2xx 본문은 accepted: true다
+        return new Response('{"accepted":true}', { status: answer });
       },
     });
     const open = (n: HttpRefundFailureNotice, cancellationId: string) => n.open({ cancellationId, orderId: ORDER, attempts: 5, lastError: 'REJECTED', nowMs: NOW });

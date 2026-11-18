@@ -1763,3 +1763,66 @@ describe('R-T41·SR-T8 ③ core 회차 상태 반영 [PostgreSQL·실제 HTTP]',
     expect(removedLines(p.productionId)).toHaveLength(1);
   });
 });
+
+// BAT-420-rest 검증 I06 보강(시험 담당 l3-b420-test, 2026-11-19): 검색 쪽 쓰기가 커밋 자리에서 실패하면 회차 상태도 함께 되돌려진다(같은 트랜잭션).
+// 정본: docs/features/search.md §12 SR-T8 ③, docs/features/transfer-refund.md §5 'core 회차 상태 반영'(같은 트랜잭션에서 withSearchSync).
+describe('SR-T8 ③ 검색 쪽 쓰기 실패와 회차 상태 [PostgreSQL·실제 HTTP]', () => {
+  const TOKEN = 'int-test-token-b420-i06';
+  let isvc: Svc;
+  const cdn = new MemoryCdnInvalidation();
+  const lines: Record<string, unknown>[] = [];
+  beforeAll(async () => {
+    process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
+    isvc = await createService({
+      name: 'core-svc',
+      module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ cdn }) }),
+      env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
+      clock,
+      logDestination: new Writable({
+        write: (c, _e, cb) => {
+          for (const l of String(c).split('\n')) {
+            try {
+              if (l.trim()) lines.push(JSON.parse(l) as Record<string, unknown>);
+            } catch {
+              // JSON이 아닌 줄은 버린다
+            }
+          }
+          cb();
+        },
+      }),
+      adminAuthz: identity,
+    });
+  }, 120_000);
+  afterAll(async () => {
+    await isvc?.close();
+  });
+
+  test('SR-T8 ③ 검색 쪽 쓰기가 실패하면 회차 상태도 되돌려진다: 그 공연의 search_document 쓰기를 커밋 자리에서 실패시키면 5xx이고 회차 SCHEDULED·판 그대로, 무효화·search_removed 0이며, 트리거를 치우면 정상으로 빠진다', async () => {
+    const p = await seed({ title: '검색쓰기실패되돌림 공연', events: [{}] });
+    await admin.transaction((tx) => sync.sync(tx, [p.productionId], new Date(now)));
+    expect(await docIds()).toContain(p.productionId);
+    const e = p.eventIds[0]!;
+    const before = (await rows(admin, 'select status, version from event where id = $1', [e]))[0];
+    const paths = cdn.pathCalls.length;
+    await admin.pool.query(
+      `create or replace function i06_fail_commit() returns trigger language plpgsql as $$ begin raise exception 'injected i06 search write failure'; end $$;
+       create constraint trigger i06_fail_commit after update or delete on search_document deferrable initially deferred for each row when (old.production_id = '${p.productionId}') execute function i06_fail_commit();`,
+    );
+    const apply = () =>
+      isvc.http.inject({ method: 'POST', url: `/internal/v1/events/${e}/cancellation-status`, headers: { 'content-type': 'application/json', 'x-peaket-internal-token': TOKEN }, payload: JSON.stringify({ requestId: randomUUID(), kind: 'CANCEL' }) });
+    try {
+      const r = await apply();
+      // 장애 주입이 실제로 끼어들었다: 검색 쪽 쓰기가 커밋 자리에서 실패했다
+      expect(r.statusCode).toBeGreaterThanOrEqual(500);
+    } finally {
+      await admin.pool.query('drop trigger if exists i06_fail_commit on search_document; drop function if exists i06_fail_commit();');
+    }
+    expect((await rows(admin, 'select status, version from event where id = $1', [e]))[0]).toEqual(before);
+    expect(await docIds()).toContain(p.productionId);
+    expect(cdn.pathCalls.length).toBe(paths);
+    expect(lines.filter((l) => l.event === 'search_removed' && l.productionId === p.productionId)).toEqual([]);
+    expect((await apply()).statusCode).toBe(204);
+    expect(await docIds()).not.toContain(p.productionId);
+    expect((await rows(admin, 'select status from event where id = $1', [e]))[0]).toEqual({ status: 'CANCELLED' });
+  });
+});

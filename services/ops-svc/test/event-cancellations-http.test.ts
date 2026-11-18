@@ -21,7 +21,7 @@ const executor: CommandExecutor = {
 };
 const started: string[] = [];
 const stopped: string[] = [];
-const behaviour = { jobFails: false };
+const behaviour = { jobFails: false, accountPending: undefined as number | undefined };
 const refunds: EventRefundStarter = {
   start: async (i) => (started.push(i.requestId), { jobId: i.requestId, state: 'RUNNING' }),
   pause: async (i) => ({ jobId: i.requestId, state: 'PAUSED' }),
@@ -31,7 +31,8 @@ const reader: EventRefundReader = {
   preview: async () => DRY_RUN,
   job: async () => {
     if (behaviour.jobFails) throw new Error('job down');
-    return JOB;
+    // BAT-420-rest 리뷰 반영 RV-05(시험 담당 l3-b420-test): purchase 진행 답의 계좌 대기 수를 읽은 값(어댑터가 accountPending으로 싣는다)
+    return behaviour.accountPending === undefined ? JOB : { ...JOB, accountPending: behaviour.accountPending };
   },
 };
 const stopper: EventSaleStopper = { stop: async (q) => void stopped.push(q.requestId) };
@@ -202,5 +203,21 @@ describe('/v1/ops/event-cancellations [BAT-420 GAT-110]', () => {
     expect(executed.filter((x) => x.type === 'SALE_RESUME')).toEqual([]);
     // 판매 중지는 막지 않는다
     expect((await post('/v1/ops/commands', identity.ops('commander'), { type: 'SALE_STOP', reason: '판매 중지 다시', params: { eventId, reasonCode: 'OTHER' } })).statusCode).toBe(201);
+  });
+
+  // BAT-420-rest 리뷰 반영 RV-05 재현(시험 담당 l3-b420-test, 2026-11-19): 정본 payment §6 '계좌 대기' 끝·transfer-refund §11 R-T40 ⑤
+  test('R-T40 ⑤ 관제 상세 GET /v1/ops/event-cancellations/{requestId}의 progress.accountPending은 진행 답의 계좌 대기 수(2)이고, 결제사별 몫에는 싣지 않으며, 없으면 칸이 없다', async () => {
+    const operator = identity.ops('operator');
+    const requestId = await running(randomUUID());
+    behaviour.accountPending = 2;
+    try {
+      const body = json(await get(`/v1/ops/event-cancellations/${requestId}`, operator));
+      expect(body.progress).toMatchObject({ state: 'RUNNING', total: 30, done: 8, failed: 5, accountPending: 2 });
+      for (const part of (body.progress as { perPg: Record<string, unknown>[] }).perPg) expect(part).not.toHaveProperty('accountPending');
+    } finally {
+      behaviour.accountPending = undefined;
+    }
+    const without = json(await get(`/v1/ops/event-cancellations/${requestId}`, operator));
+    expect(without.progress).not.toHaveProperty('accountPending');
   });
 });

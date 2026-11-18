@@ -270,7 +270,7 @@ describe('P-T72 ⑤ HttpRefundAccountNotice', () => {
   };
   test('P-T72 ⑤ POST /internal/v1/cs-cases에 kind REFUND_ACCOUNT_PENDING·category REFUND·sourceId 취소 ID·eventKey(refund-account:{취소 ID}의 SHA-256 앞 16바이트)와 내부 토큰, 5초 상한으로 보내고 계좌·금액을 싣지 않는다', async () => {
     const seen: Record<string, unknown>[] = [];
-    const notice = new HttpRefundAccountNotice({ request: async (r: Record<string, unknown>) => (seen.push(r), new Response('{}', { status: 202 })) } as never, 'it-token');
+    const notice = new HttpRefundAccountNotice({ request: async (r: Record<string, unknown>) => (seen.push(r), new Response('{"accepted":true}', { status: 202 })) } as never, 'it-token');
     await notice.open({ cancellationId: CANCELLATION, orderId: '0193a000-0000-7000-8000-0000000004e2', nowMs: NOW });
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ method: 'POST', path: '/internal/v1/cs-cases', timeoutCapMs: 5_000, headers: { 'content-type': 'application/json', 'x-peaket-internal-token': 'it-token' } });

@@ -233,6 +233,30 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 - **구현 전 트리에서 통과한 12개(새 동작이 아닌 대조·회귀)**: 시뮬레이터 토스 모양 ①(옛 시뮬레이터가 모르는 칸을 버리고 취소해 통과한다. 계좌가 결제사 본문에 실리는지는 payment 통합 ①이 잡는다)·카드 ⑤·포트원 ①, payment 단위의 대조 둘(계좌를 다시 실은 재시도, 계좌 없는 포트원 본문), payment 통합 ⑤(카드 결제의 본문), purchase HTTP 대조 넷(카드 결제, 가상계좌에 계좌를 실은 취소, 입장 시작 뒤 취소, 결과 모름), 환급 실행기의 업무 거절 대조, purchase 통합 ⑥(계좌 글 누설 0 — 옛 트리도 저장하지 않는다). 계획 §5 끝 줄대로 이 단언들의 실패는 검증의 틀린 구현(M6·M10 등)으로 본다.
 - **구현 전 트리의 실패가 보여 준 것**: R-T40 ①에서 옛 일괄 환불은 가상계좌 주문의 두 표도 계좌 없이 결제사 취소를 불러 done 4였다(돈이 계좌 없이 나가는 길). P-T72 ②는 422 대신 Saga가 돌아 ACCEPTED였다.
 
+### 리뷰 반영 재현
+
+- **누가·어디서**: 시험 담당 `l3-b420-test`(claude-opus-5-5, 2026-11-19T07:00~07:40+09:00). 고치기 전 트리는 지금 트리(`85394ba0`, 제품 코드는 `94da0926`과 같다)이고 이 폴더에서 바로 돌렸다. 통합은 Docker 잠금(`lane3-BAT-420`, 07:30:16~07:36:34+09:00) 안에서 새·바꾼 파일만 차례로 돌렸고 남은 컨테이너는 0이다.
+- **명령**: 서비스마다 `npx vitest run`(payment·core·ops·purchase 단위 전체, `packages/validation`), 통합은 `PEAKET_TEST_CONTAINER_PREFIX=lane3-b420- npx vitest run --config vitest.integration.config.mjs <파일>`(payment `payment-cancel-refund-account`, purchase `event-refund`·`cancellation`·`event-cancel-r-t24`, core `search-read-model`, ops `event-cancellations`). `tsc --noEmit`: payment·purchase·core·ops 오류 0, `packages/validation`은 새 모듈이 없어 오류 1(`../src/refund-account/index`, 구현 I4가 만든다).
+- **결과(새 시험 37개)**: 재현(실패) 24, 처음부터 통과 11(검증이 틀린 구현으로 실패를 본다), 실행 안 됨 2(`packages/validation/test/refund-account.test.ts`, 모듈 없음).
+
+| T | 시험(파일) | 고치기 전 트리 |
+| --- | --- | --- |
+| T1 | `P-T75 ①~③`: purchase `test/cs-case-adapters-contract.test.ts`(새, 공용 표 `test/fixtures/cs-case-bodies.json`)·ops `test/cases-contract.test.ts`(새, 같은 표)·ops `test/cases.test.ts`(더함 1) | 재현 5(ops 다섯 종류 중 환불 대기 `accepted: false`, 어댑터가 2xx `accepted: false`·`{}`·JSON 아님을 연 것으로 봄, 틱 끝 다시 열기가 연 시각을 씀). 처음부터 통과 1(어댑터 다섯의 본문이 표와 같다) |
+| T2 | `P-T73 ①②⑤`: payment 단위 더함 4·통합 더함 2, purchase `test/cancel-refund-account-http.test.ts` 더함 1 | 재현 6(결제사 취소를 다시 보냄, 시뮬레이터 `IDEMPOTENCY_KEY_REUSED`를 REJECTED·행 FAILED로 읽음, 다시 누름에 계좌를 넘김). 처음부터 통과 1(쓰임새가 결제사 UNKNOWN에 행을 끝내지 않는다) |
+| T3 | `P-T73 ③④`: payment 통합 더함 2, purchase `test-int/cancellation.int.test.ts` 더함 1 | 재현 3(`fail_reason` 칸 없음 42703, 다시 누름이 payment를 불러 REJECTED·`refund_failed_at`) |
+| T4 | `P-T74 ①~③`: `packages/validation/test/refund-account.test.ts`(새)·공용 표 `packages/validation/test/fixtures/refund-account-cases.json`(새), payment `test/refund-account-shape.test.ts`(새)·단위 더함 1·통합 더함 1, purchase HTTP 더함 2 | 재현 5(`088`이 202, 31자 계좌가 payment에서 계좌로 읽힘, 포트원 대응표 밖 코드가 `payment_cancel` FAILED 행), 실행 안 됨 2, 처음부터 통과 1(경계 대조가 지난다) |
+| T5 | `R-T40 ⑤`: ops `test/grpc-event-refunds.test.ts`(새), `test/event-cancellations-http.test.ts` 더함 1 | 재현 2. 처음부터 통과 1(칸 없는 옛 답은 0) |
+| T6 | `R-T41 ⑥`: ops `test/event-cancellation-core-apply.test.ts` 더함 4·`test-int/event-cancellations.int.test.ts` 더함 1, core `test/event-cancellation-status.test.ts` 더함 1 | 재현 5(P1을 다시 부름, 4xx 다음 볼 시각 1분, 21건 머리 막힘, 대체 표시 칸 없음 42703, core가 지난 같은 연기를 409). 처음부터 통과 1(둘 다 비면 P1 → P2) |
+| T7 | `R-T41 ③ 확정은 Start를 끝낸 뒤에만 core를 부른다`(ops 단위 더함) | 처음부터 통과(O13로 본다) |
+| T8 | `R-T41 ③ 어댑터는 연결 실패·시간 초과를 실패로 던진다`(ops `test/http-core-event-status.test.ts` 새), ops 통합 '실제 어댑터를 닫힌 포트에' 더함 | 처음부터 통과 2(O09로 본다) |
+| T9 | `SR-T8 ③ 검색 쪽 쓰기가 실패하면 회차 상태도 되돌려진다`(core 통합 더함, `search_document`에 커밋 때 터지는 지연 제약 트리거) | 처음부터 통과(I06로 본다) |
+| T10 | `P-T73 ⑤ 공연 시작 뒤 다시 누름의 계좌는 payment로 가지 않는다`(purchase HTTP 더함) | 처음부터 통과(A05로 본다) |
+| T11 | `P-T72 ③ 재시도 실행기는 실제로 집은 행으로도 계좌를 싣지 않는다`(purchase 통합 더함) | 처음부터 통과(A05·M10로 본다) |
+
+- **정본 변경 반영(시험 이의 아님)**: payment 단위 'P-T71 ③ 대조'를 정본 ⑥대로 결제사 취소 0·조회 1로 뒤집음(재현), payment 통합 'P-T71 ④'의 다시 부름 답을 REJECTED에서 `REFUND_ACCOUNT_REQUIRED`·결제사 0으로(재현), ops `test/cases.test.ts`의 '받는 종류 셋'을 넷(환불 대기 더함, `DISPUTE` 등은 여전히 `accepted: false`)으로, purchase `test/cancel-reauth-http.test.ts`의 계좌 표본 `bankCode '088'`을 `'88'`로. 받는 쪽 대역의 2xx 본문을 `{"accepted":true}`로 바꿈: purchase `test-int/ops-cs-double.ts`(`state.accepted`, 기본 참), `test/event-refund-wave-review.test.ts` 대역 둘, `test/event-refund-account-pending.test.ts`의 202 답(구현 I1 뒤에도 기존 시험이 지나게).
+- **구현이 맞출 이름·모양**(계획 §3): `packages/validation/src/refund-account/index.ts`의 `refundAccountShape(v): { ok: true; value: { bankCode; accountNumber(하이픈 뺀 숫자); holderName } } | { ok: false }`(하위 경로 `@peaket/validation/refund-account`). payment `payment_cancel.fail_reason`(계좌 거절 `REFUND_ACCOUNT_INVALID`, 그 밖 null). ops 진행 `EventRefundJobProgress.accountPending`·관제 상세 `progress.accountPending`(결제사별 몫에는 없음). ops 0016 `event_cancellation_request.core_apply_superseded_at`, 메모리 저장소의 `core.get(id).nextAtMs`·`appliedAtMs`는 지금 이름 그대로 쓴다(4xx 401 제외 + 600,000ms, 5xx·무응답·401 + 60,000ms). purchase 본문 모양 오류는 400 `invalid-body`(문제 유형 접두어 + `invalid-body`). CS 받는 층 답은 2xx 본문 `accepted: true`일 때만 연 것.
+- **알림**: ops `test/event-cancellation-core-apply-main.test.ts`(main.ts를 띄우는 두 시험)가 다섯 서비스 단위를 한꺼번에 돌린 때 시간 초과로 실패했고 혼자 돌리면 통과한다(부하에 따른 흔들림, 이 반영과 무관). 검증 담당이 다시 볼 때 따로 돌리기를 권한다.
+
 ## 시험 결과
 
 - **구현 트리(`2930f8b3` + 이 커밋의 시험)**: 새·바꾼 시험 파일 모두 통과. 단위 전체 — pg-simulator 6파일 109, payment-svc 49파일 3,033, core-svc 80파일 516, ops-svc 41파일 278, purchase-svc 136파일 4,249(모두 통과). 통합(이 PC Docker, 새·바꾼 파일만) — payment `payment-cancel-refund-account` 8·`payment-deposit` 47, purchase `cancellation` 43·`event-cancel-r-t24` 31, core `search-read-model` 32, ops `event-cancellations` 23(모두 통과). 통합 전체는 감독의 초안 PR CI 몫이다.
@@ -519,5 +543,6 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:18+09:00 |
 | verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T06:06+09:00 | 2026-11-19T06:50+09:00 |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T06:52+09:00 | 2026-11-19T07:00+09:00 |
+| test | l3-b420-test | claude-opus-5-5 | 2026-11-19T07:00+09:00 | 2026-11-19T07:42+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.

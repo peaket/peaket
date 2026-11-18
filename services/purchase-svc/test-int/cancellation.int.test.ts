@@ -1500,3 +1500,120 @@ describe('P-T72 예매 취소의 환불 계좌 규칙과 계좌 대기 [실제 P
     expect(await leaks()).toEqual([]);
   });
 });
+
+// BAT-420-rest 리뷰 반영 재현 RV-03·판정 대조 P-T72 ③(시험 담당 l3-b420-test, 2026-11-19).
+// 정본: docs/features/payment.md §6 '계좌 대기' 끝(계좌 대기 행을 같은 표의 다시 누름이 부르면 payment-svc를 부르지 않고 실패 표시 없이 202 REFUND_PENDING·refundAccountRequired),
+// §11 P-T73 ④, P-T72 ③(재시도 실행기의 호출에도 계좌가 없다).
+describe('P-T73 ④·P-T72 ③ 계좌 대기 표의 다시 누름과 재시도 실행기 [실제 PostgreSQL·ticket-svc·payment-svc gRPC]', () => {
+  const REFUND_ACCOUNT = { bankCode: '88', accountNumber: '110-987-654321', holderName: '김환불' };
+  let ops: Awaited<ReturnType<typeof startOpsCsDouble>>;
+  const paymentCalls: { cancellationId: string; refundAccount?: unknown }[] = [];
+  let countingSaga: CancelTicket;
+  beforeAll(async () => {
+    ops = await startOpsCsDouble();
+    countingSaga = new CancelTicket({
+      orders: new DrizzleCancellationOrders(purchaseDb, seatMap),
+      calendar,
+      tickets: ticketCancels!,
+      payments: {
+        cancel: (q) => {
+          paymentCalls.push({ cancellationId: q.cancellationId, ...(q.refundAccount !== undefined ? { refundAccount: q.refundAccount } : {}) });
+          return paymentCancels!.cancel(q);
+        },
+      },
+      writes,
+      seats: new DrizzleSeatReturns(sales, seatMap, new RedisSeatReturnNotices(redis)),
+      paymentMethods: paymentCancels!,
+    });
+  });
+  afterAll(async () => {
+    await ops?.close();
+    gatewayOutcome = 'CANCELLED';
+    gatewayReason = undefined;
+  });
+  const virtualWorld = async (o: { entryOpensAtMs?: number } = {}): Promise<World> => {
+    const w = await world(o);
+    await paymentDb.pool.query(
+      `insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at) values ($1, 1, $2, 'AWAITING_DEPOSIT', true, now()), ($1, 2, $3, 'APPROVED', true, now())`,
+      [w.paymentId, randomUUID(), randomUUID()],
+    );
+    return w;
+  };
+  const press = (w: World, cancellationId: string, refundAccount?: typeof REFUND_ACCOUNT) =>
+    countingSaga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId, reason: 'USER', nowMs: NOW, deadlineMs: 5_000, ...(refundAccount ? { refundAccount } : {}) });
+
+  test("P-T73 ④ 팬이 계좌 거절 뒤 새 멱등 키로 같은 표를 다시 누르면 202 REFUND_PENDING·refundAccountRequired 참이고 payment 호출 0, refund_failed_at 빔, 그 취소의 CS 건은 '환불 대기' 하나뿐이다", async () => {
+    const w = await virtualWorld();
+    gatewayOutcome = 'REJECTED';
+    gatewayReason = 'REFUND_ACCOUNT_INVALID';
+    const first = randomUUID();
+    try {
+      await expect(press(w, first, REFUND_ACCOUNT)).resolves.toMatchObject({ status: 'REFUND_PENDING', refundAccountRequired: true });
+    } finally {
+      gatewayOutcome = 'CANCELLED';
+      gatewayReason = undefined;
+    }
+    paymentCalls.length = 0;
+    gatewayCalls = [];
+    const again = await press(w, randomUUID(), REFUND_ACCOUNT);
+    expect(again).toMatchObject({ status: 'REFUND_PENDING', cancellationId: first, refundAccountRequired: true });
+    expect(paymentCalls).toEqual([]);
+    expect(gatewayCalls).toEqual([]);
+    const row = (await admin.pool.query<{ refund_failed_at: Date | null; refund_account_required_at: Date | null; status: string }>('select status, refund_failed_at, refund_account_required_at from order_cancellation where id = $1', [first])).rows[0]!;
+    expect(row).toMatchObject({ status: 'REFUND_PENDING', refund_failed_at: null });
+    expect(row.refund_account_required_at).not.toBeNull();
+    // 틱 끝 다시 열기 한 번: 그 취소의 건은 '환불 대기' 하나뿐이다(환급 실패 건이 없다)
+    const real = new DrizzleCsCaseOutbox(admin);
+    const mine = new Set<string>([first]);
+    const client = createExternalHttpClient({ provider: 'ops-svc', baseUrl: ops.url, timeoutCapMs: 5_000 });
+    const scopedWrites = Object.create(writes) as typeof writes;
+    scopedWrites.dueRefunds = async (nowMs, limit) => (await writes.dueRefunds(nowMs, limit)).filter((r) => mine.has(r.cancellationId));
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    await new RefundAfterEntry({
+      writes: scopedWrites,
+      payments: { cancel: async () => 'CANCELLED' },
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: writes,
+      failureNotice: new HttpRefundFailureNotice(client, 'it-token'),
+      accountNotice: new HttpRefundAccountNotice(client, 'it-token'),
+      csOutbox: {
+        pendingRefundFailures: async (limit: number) => (await real.pendingRefundFailures(limit)).filter((r) => mine.has(r.cancellationId)),
+        markRefundFailureOpened: (id: string, nowMs: number) => real.markRefundFailureOpened(id, nowMs),
+        pendingFlags: async () => [],
+        markFlagOpened: async () => undefined,
+        pendingRefundAccounts: async (limit: number) => (await real.pendingRefundAccounts(limit)).filter((r) => mine.has(r.cancellationId)),
+        markRefundAccountOpened: (id: string, nowMs: number) => real.markRefundAccountOpened(id, nowMs),
+      },
+      csCaseOpenFailures: { inc: () => undefined, cut: () => undefined },
+      log: { warn: () => undefined, error: () => undefined },
+      nowMs: () => Date.now(),
+    }).run();
+    expect(ops.state.requests.map((r) => [r.body.kind, r.body.sourceId])).toEqual([['REFUND_ACCOUNT_PENDING', first]]);
+    await admin.pool.query("update order_cancellation set status = 'VOIDED', status_changed_at = now() where id = $1 and status = 'REFUND_PENDING'", [first]);
+  }, 60_000);
+
+  test('P-T72 ③ 재시도 실행기는 실제로 집은 행으로도 계좌를 싣지 않는다: 입장 시작 뒤 취소(본문에 계좌)를 실제 DB에 쓰고 마감 뒤 실제 dueRefunds·실제 실행기로 돌리면 payment 호출에 refundAccount가 없다', async () => {
+    const w = await virtualWorld({ entryOpensAtMs: NOW - HOUR });
+    const cancellationId = randomUUID();
+    paymentCalls.length = 0;
+    await expect(press(w, cancellationId, REFUND_ACCOUNT)).resolves.toMatchObject({ status: 'ACCEPTED', refundAfterEntryClose: true });
+    expect(paymentCalls).toEqual([]);
+    const due = (await admin.pool.query<{ refund_due_at: Date }>('select refund_due_at from order_cancellation where id = $1', [cancellationId])).rows[0]!.refund_due_at;
+    const mine = new Set<string>([cancellationId]);
+    const scopedWrites = Object.create(writes) as typeof writes;
+    scopedWrites.dueRefunds = async (nowMs, limit) => (await writes.dueRefunds(nowMs, limit)).filter((r) => mine.has(r.cancellationId));
+    const runnerCalls: Record<string, unknown>[] = [];
+    await new RefundAfterEntry({
+      writes: scopedWrites,
+      payments: { cancel: async (q) => (runnerCalls.push({ ...q }), 'CANCELLED') },
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: writes,
+      log: { warn: () => undefined, error: () => undefined },
+      nowMs: () => due.getTime() + 1,
+    }).run();
+    expect(runnerCalls).toHaveLength(1);
+    expect(runnerCalls[0]).toMatchObject({ cancellationId });
+    expect(runnerCalls[0]).not.toHaveProperty('refundAccount');
+  }, 60_000);
+});
