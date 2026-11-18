@@ -108,7 +108,7 @@
 | S-T34 | ① | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ① DB·Kafka·Redis 자격 증명과 AWS 권한이 0개다 | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
 | S-T34 | ② | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ② 모든 연결이 막힌다 | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
 | S-T34 | ③ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ③ `PERMISSION_DENIED` | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
-| S-T34 | ④ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ④ CPU는 422, 메모리는 파드 재시작과 503이고, core-svc 파드와 다른 가져오기 요청은 영향이 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| S-T34 | ④ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ④ CPU는 422, 메모리는 파드 재시작과 503이고, core-svc 파드와 다른 가져오기 요청은 영향이 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-pool-cpu.test.ts 외 1곳 |
 | S-T34 | ⑤ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑤ 503과 `Retry-After` | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | S-T34 | ⑥ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑥ core-svc가 422로 거절한다(다시 검사) | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | S-T34 | ⑦ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑦ 413이고 작업을 부르지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
