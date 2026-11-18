@@ -785,6 +785,7 @@
 | R-688 | 팬 예매 취소가 재인증 계약 없이 늘 403으로 닫혀 있었다(GAT-080 남은 몫) | services/purchase-svc refund(jwks-fan-reauth-gate·컨트롤러·조립), packages/platform reauth-jti, docs/features/transfer-refund.md §3.1·§11, authz-matrix §6, data §3, openapi | 계획·구현·시험·리뷰·검증 다섯 담당, 리뷰 반영 두 바퀴 | 끝 |
 | R-690 | 좌석 델타를 화면에 전하는 realtime-gw가 없어 HOT-090이 보류였다 | services/realtime-gw, packages/platform, tools/ci/brief.mjs, .github/workflows/ci-node.yml, ADR-0296·0297, docs/features/seat-hold.md, docs/frontend.md, docs/api/asyncapi.yaml, docs/review/plans/BAT-052.md | 새 서비스와 시험 S-T31 ①~⑤·S-T12 ②·S-T42 ①~⑳(BAT-052) | 적용 |
 | R-689 | 환불 좌석 되돌리기 Lua가 좌석 델타 changedAtMs를 epoch 초로 내 realtime-gw 묶음 대기·NFR-004·S-T12 측정을 오염(갈래 4 BAT-052 리뷰 WIR-01) | services/purchase-svc/src/modules/refund/adapters/redis-seat-returns.ts, test-int/seat-returns-time.int.test.ts·cancellation.int.test.ts | 계획·구현·시험·리뷰·검증 다섯 담당, 실제 Valkey 실패 확인 | 끝 |
+| R-692 | 게이트웨이 프록시 Envoy 일꾼 수가 기본(노드 스레드 수 32)이라 차단 상한의 여유 배수 k가 운영과 다른 무대에서 셈해졌다(OPEN[49] (가)) | deploy/gateways(EnvoyProxy 둘 spec.concurrency·resources, 다섯 게이트웨이 차단 상한), tools/local/gateway-objects.mjs, loadtest/runner(gw·gw-run·run·args), docs/infra.md·verification.md·architecture.md·ledger-notes, 측정 보고서, ADR-0287 | 정방향 B 짧은 고리(계획·구현·독립 시험·리뷰·리뷰 반영·검증), 첫 측정(k 5.0)을 리뷰가 무대 탓으로 보류, 미리 커밋한 결정 규칙의 진단 측정(gw-queue CPU 요청 2, k 3.9)으로 상한을 정함, gw limits 되돌릴 조건 정수 비교·일꾼 수 섞임 막기 | 완료(로컬 시험·kind·Docker 시험 통과, 측정 창 둘) |
 
 ## 4. 숫자 일치표
 
