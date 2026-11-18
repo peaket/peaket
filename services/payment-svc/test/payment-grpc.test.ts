@@ -233,6 +233,8 @@ describe('ConfirmPayment: 요청 → 쓰임새 입력', () => {
         attemptId: ATTEMPT_ID,
         attemptNo: 1,
         eventId: EVENT_ID,
+        // order_kind 칸이 없으면 UNSPECIFIED로 넘긴다(쓰임새가 TICKET으로 본다, ADR-0299 결정 2)
+        orderKind: 'UNSPECIFIED',
         pg: 'TOSS',
         paymentRef: { kind: 'toss', paymentKey: SECRET_PAYMENT_KEY },
         amount: 55_000,
@@ -265,7 +267,7 @@ describe('ConfirmPayment: 요청 → 쓰임새 입력', () => {
   test('P-T53_빈 요청은 정해진 빈 값으로 넘긴다(검사는 쓰임새가 한다) [ASVS v5.0.0-2.2.1]', async () => {
     const s = await serve();
     await s.call('ConfirmPayment', {});
-    expect(s.inputs).toEqual([{ orderId: '', attemptId: '', attemptNo: 0, eventId: '', pg: 'UNSPECIFIED', amount: Number.NaN }]);
+    expect(s.inputs).toEqual([{ orderId: '', attemptId: '', attemptNo: 0, eventId: '', orderKind: 'UNSPECIFIED', pg: 'UNSPECIFIED', amount: Number.NaN }]);
     expect(s.inputs[0]!.paymentRef).toBeUndefined();
     expect(s.inputs[0]!.authenticatedAtMs).toBeUndefined();
   });

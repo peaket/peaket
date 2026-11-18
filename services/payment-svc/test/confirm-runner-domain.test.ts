@@ -361,6 +361,8 @@ describe('buildPaymentEvent: trade.payments 값(asyncapi PaymentEvent)', () => {
       occurredAt: new Date(APPROVED_AT_MS).toISOString(),
       eventSeq: 4,
       eventKey: paymentEventKey(PAYMENT_ID, 4),
+      // 대상에 주문 종류가 없으면 티켓 사건이다(ADR-0299 결정 4, 생산자는 UNRECOGNIZED를 내지 않는다)
+      orderKind: 'TICKET',
     });
   });
 

@@ -5,7 +5,7 @@
 // 결제 결과 반영 조립(paymentResultApply, 리뷰 고침)은 booking의 DrizzlePaymentResults만 메모리 가짜(ResultFakes)로 바꿔(vi.mock) 본다. 나머지는 실제 클래스다.
 // 발권 실행기 깨우기(onApproved, PRF-170 변이 검토)는 조립이 넘긴 것을 꽂는지와, 운영 main.ts가 그 자리에 kick을 넘기는지(소스 글)를 본다.
 import { readFileSync } from 'node:fs';
-import { type Database, fakeClock } from '@peaket/platform';
+import { type Database, fakeClock, PlatformMetrics } from '@peaket/platform';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   consumerDatabaseOptions,
@@ -100,6 +100,24 @@ describe('startPurchaseConsumers(runKeyedConsumer 대역)', () => {
     expect(saga.topics).toEqual(['trade.payments']);
     expect(saga.handler).toBeInstanceOf(PaymentResultHandler);
     for (const o of [ledger, saga]) expect([o.service, o.clientId]).toEqual([SERVICE, 'purchase-svc-prod-pod-1']);
+    await c.stop();
+  });
+
+  test('P-T55 ⑥ 조립: 레지스트리를 넘기면 결제 결과 처리기가 굿즈 사건(orderKind MERCH, eventId 없음)을 쓰임새에 넘기지 않고 payment_result_skipped_total{reason="merch"}를 1 올린다', async () => {
+    const metrics = new PlatformMetrics('purchase-svc');
+    const o = { ...options(), registry: metrics.registry };
+    const c = startPurchaseConsumers(o);
+    await c.started;
+    const saga = runs.calls.find((x) => x.groupId === 'peaket.purchase-svc-order-saga.prod')!;
+    const handler = saga.handler as PaymentResultHandler;
+    const merchOrder = '0190f3a1-7c2e-7f00-8000-00000000b001';
+    const merch = { ...paymentEvent({ orderId: merchOrder }), orderKind: 'MERCH' } as Record<string, unknown>;
+    delete merch.eventId;
+    const m = { topic: 'trade.payments', partition: 0, offset: 0n, key: merchOrder, value: Buffer.from(JSON.stringify(merch)), headers: {}, timestamp: 0 };
+    await handler.handle(handler.decode(m));
+    expect(o.applyPaymentResult.execute).not.toHaveBeenCalled();
+    const skipped = await metrics.registry.getSingleMetric('payment_result_skipped_total')!.get();
+    expect(Object.fromEntries(skipped.values.map((v) => [v.labels.reason, v.value]))).toEqual({ merch: 1, unrecognized: 0 });
     await c.stop();
   });
 
