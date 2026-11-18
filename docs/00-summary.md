@@ -728,6 +728,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-687: BAT-061 HOT-420 — 원천 하나(port-allow.yaml)에서 메시 인가 정책과 메시 없는 NetworkPolicy를 만들고 tools-check가 대조, STRICT·TLS 1.3·cacerts, kind에서 D-T36 ①~⑦.
 - 팬 예매 취소가 팬 재인증 토큰(공개키 묶음·act·sid·sub·남은 수명 5분 30초)과 jti 한 번 쓰기로 열린다(R-688)
 - R-690: 좌석 델타 WebSocket 서비스 realtime-gw를 처음 만들고 입장 토큰 확인을 platform에 둔다(BAT-052, ADR-0296·0297).
+- 취소표 좌석 델타의 변경 시각이 다른 좌석 Lua처럼 epoch 밀리초다(R-689)
 
 ## 5. [충돌] 결정 결과
 
