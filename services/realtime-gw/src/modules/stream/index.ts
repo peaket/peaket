@@ -1,6 +1,7 @@
 // stream 모듈의 공개 이름(좌석 델타 WebSocket, BUILD_ORDER HOT-090). 조립(start.ts·app.module.ts)과 시험은 이 파일로만 가져온다.
 export {
   BATCH_INTERVAL_MS,
+  BUFFER_SLOW_SEND_BUDGET_MS,
   CLOSE,
   CLOSE_REASON,
   DEGRADED_BATCH_INTERVAL_MS,
