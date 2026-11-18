@@ -200,7 +200,7 @@ async function orderAndAccept(account: string, p: { productId: string; slotId: s
 const dueAllJobs = () => admin.pool.query('update merch_confirm_job set next_at = $1', [new Date(clock.now())]);
 
 describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () => {
-  test('P-T56 ③ 한정 3개 상품에 계정 10개가 같은 때 1개씩 주문하면 201 3건·409 merch-sold-out 7건이고 모두 결제하면 product_stock 0·카운터 0·예약 원소 0이다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T57 ③ 한정 3개 상품에 계정 10개가 같은 때 1개씩 주문하면 201 3건·409 merch-sold-out 7건이고 모두 결제하면 product_stock 0·카운터 0·예약 원소 0이다 [ASVS v5.0.0-2.3.4]', async () => {
     const p = await product({ limitedQty: 3 });
     const accounts = Array.from({ length: 10 }, () => randomUUID());
     const answers = await Promise.all(accounts.map((a) => order(a, p)));
@@ -229,7 +229,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(sum.rows[0].n).toBe(3);
   });
 
-  test('P-T56 ④ 결제 접수 때 PostgreSQL 남은 수가 0이면(카운터는 1) 409 merch-sold-out, 주문 FAILED, ConfirmPayment 0건, 예약 원소 0이다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('P-T57 ④ 결제 접수 때 PostgreSQL 남은 수가 0이면(카운터는 1) 409 merch-sold-out, 주문 FAILED, ConfirmPayment 0건, 예약 원소 0이다 [ASVS v5.0.0-2.3.4]', async () => {
     const p = await product({ limitedQty: 3 });
     const a = randomUUID();
     const o = await order(a, p);
@@ -252,7 +252,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect((await admin.pool.query('select count(*)::int as n from merch_confirm_job where order_id = $1', [orderId])).rows[0].n).toBe(0);
   });
 
-  test('P-T56 ⑤ 카운터 키를 지운 뒤 주문하면 카운터를 product_stock − 결제 접수 전 예약 합으로 다시 만들고 주문이 201이다', async () => {
+  test('P-T57 ⑤ 카운터 키를 지운 뒤 주문하면 카운터를 product_stock − 결제 접수 전 예약 합으로 다시 만들고 주문이 201이다', async () => {
     const p = await product({ limitedQty: 5 });
     const [x, z, y] = [randomUUID(), randomUUID(), randomUUID()];
     const ox = JSON.parse((await order(x, p, 2)).payload).orderId as string; // 접수 전 예약 2
@@ -268,7 +268,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(await resvMembers(p.productId)).toEqual([ox, oy, oz].sort());
   });
 
-  test('P-T56 ⑤ Redis 키 넷이 모두 사라진 뒤(재시작 흉내) 주문하면 결제 전 예약만 다시 넣고 카운터를 DB로 다시 만든다', async () => {
+  test('P-T57 ⑤ Redis 키 넷이 모두 사라진 뒤(재시작 흉내) 주문하면 결제 전 예약만 다시 넣고 카운터를 DB로 다시 만든다', async () => {
     const p = await product({ limitedQty: 5 });
     const [x, z, y] = [randomUUID(), randomUUID(), randomUUID()];
     const ox = JSON.parse((await order(x, p, 2)).payload).orderId as string;
@@ -284,7 +284,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(Number(await cmd(['HGET', keys(p.productId).qty, ox]))).toBe(2);
   });
 
-  test('P-T56 ③ 재고 키 넷의 수명은 판매 종료 + 1일이고, 판매 종료가 없으면 30일이다(docs/data.md §3)', async () => {
+  test('P-T57 ③ 재고 키 넷의 수명은 판매 종료 + 1일이고, 판매 종료가 없으면 30일이다(docs/data.md §3)', async () => {
     const ends = await product({ limitedQty: 3, saleEndsAt: new Date(NOW + 2 * 86_400_000).toISOString() });
     const open = await product({ limitedQty: 3, saleEndsAt: null });
     expect((await order(randomUUID(), ends)).statusCode).toBe(201);
@@ -301,7 +301,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     }
   });
 
-  test('P-T56 ⑧ 1개 팔린 뒤 한정 수량을 3에서 2로 고치면 남은 수 1이고 카운터 키가 지워진다. 2개 팔린 뒤 0으로 고치면 422 product-limited-qty-invalid이고 남은 수가 그대로다', async () => {
+  test('P-T57 ⑧ 1개 팔린 뒤 한정 수량을 3에서 2로 고치면 남은 수 1이고 카운터 키가 지워진다. 2개 팔린 뒤 0으로 고치면 422 product-limited-qty-invalid이고 남은 수가 그대로다', async () => {
     const p = await product({ limitedQty: 3 });
     const o1 = await orderAndAccept(randomUUID(), p);
     payments.approve(o1);
@@ -461,7 +461,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(await counter(p.productId)).toBe('2');
   });
 
-  test('P-T56 ① F-4 결제 접수 커밋 뒤 ConfirmPayment가 UNAVAILABLE이면 202이고, 작업이 1초 뒤(999ms에는 아님) 다시 보내 받아지면 승인이 반영된다', async () => {
+  test('P-T57 ① F-4 결제 접수 커밋 뒤 ConfirmPayment가 UNAVAILABLE이면 202이고, 작업이 1초 뒤(999ms에는 아님) 다시 보내 받아지면 승인이 반영된다', async () => {
     const p = await product({ limitedQty: 3 });
     const a = randomUUID();
     payments.confirmAnswer = { status: 'RETRYABLE', reason: 'UNAVAILABLE' };
@@ -489,7 +489,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(await resvMembers(p.productId)).toEqual([]);
   });
 
-  test('P-T56 ② F-4 ConfirmPayment가 승인 기한(인증 + 10분)까지 한 번도 받아지지 않으면 기한 1ms 전에는 다시 보내고, 기한에 주문 FAILED와 두 재고 복구다 [ASVS v5.0.0-2.3.3]', async () => {
+  test('P-T57 ② F-4 ConfirmPayment가 승인 기한(인증 + 10분)까지 한 번도 받아지지 않으면 기한 1ms 전에는 다시 보내고, 기한에 주문 FAILED와 두 재고 복구다 [ASVS v5.0.0-2.3.3]', async () => {
     const p = await product({ limitedQty: 3 });
     const a = randomUUID();
     payments.confirmAnswer = { status: 'RETRYABLE', reason: 'UNAVAILABLE' };
@@ -526,7 +526,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     }
   });
 
-  test('P-T56 ① F-5 BatchGetPayments가 실패하면 그 묶음을 5초 미루고(4,999ms에는 묻지 않음) 되살아나면 반영한다', async () => {
+  test('P-T57 ① F-5 BatchGetPayments가 실패하면 그 묶음을 5초 미루고(4,999ms에는 묻지 않음) 되살아나면 반영한다', async () => {
     const p = await product({ limitedQty: 3 });
     const orderId = await orderAndAccept(randomUUID(), p);
     payments.approve(orderId);
@@ -550,7 +550,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(await resvMembers(p.productId)).toEqual([]);
   });
 
-  test('P-T56 ② 결제사 거절을 당겨 오면 주문 FAILED, product_stock과 카운터가 3으로 돌아온다 [ASVS v5.0.0-2.3.3]', async () => {
+  test('P-T57 ② 결제사 거절을 당겨 오면 주문 FAILED, product_stock과 카운터가 3으로 돌아온다 [ASVS v5.0.0-2.3.3]', async () => {
     const p = await product({ limitedQty: 3 });
     const a = randomUUID();
     const orderId = await orderAndAccept(a, p);
@@ -573,7 +573,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     await admin.pool.query('delete from merch_confirm_job where order_id = $1', [orderId]);
   });
 
-  // ---- 리뷰 반영 RV-01(P-T56 ⑨, ADR-0300 결정 5 넷째 줄·결정 6): 승인 기한(인증 + 10분)이 지난 '받아짐 모름' 작업은 BatchGetPayments로 물어
+  // ---- 리뷰 반영 RV-01(P-T57 ⑨, ADR-0300 결정 5 넷째 줄·결정 6): 승인 기한(인증 + 10분)이 지난 '받아짐 모름' 작업은 BatchGetPayments로 물어
   // 결제가 없을 때만 FAILED와 두 재고 복구, 있으면 받아짐으로 바꿔 당기기로 반영, 묻지 못하면 5초 미룸, 기한 뒤에는 ConfirmPayment를 다시 보내지 않는다.
   const DEADLINE_MS = 10 * 60_000;
   const jobCount = async (o: string) => Number((await admin.pool.query('select count(*)::int as n from merch_confirm_job where order_id = $1', [o])).rows[0].n);
@@ -589,7 +589,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     await results.tick();
   }
 
-  test('P-T56 ⑨ F-4 ConfirmPayment가 명령을 적고 시간 초과로만 답한 채 승인 기한이 지나도 FAILED로 끝내지 않고, 뒤에 승인되면 PAID이며 재고를 돌리지 않는다 [ASVS v5.0.0-2.3.3]', async () => {
+  test('P-T57 ⑨ F-4 ConfirmPayment가 명령을 적고 시간 초과로만 답한 채 승인 기한이 지나도 FAILED로 끝내지 않고, 뒤에 승인되면 PAID이며 재고를 돌리지 않는다 [ASVS v5.0.0-2.3.3]', async () => {
     const p = await product({ limitedQty: 3 });
     const a = randomUUID();
     payments.confirmAnswer = { status: 'RETRYABLE', reason: 'DEADLINE_EXCEEDED' };
@@ -633,7 +633,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     }
   });
 
-  test('P-T56 ⑨ 기한에 BatchGetPayments가 실패하면 FAILED로 끝내지 않고 5초 뒤 다시 묻는다(4,999ms에는 묻지 않음)', async () => {
+  test('P-T57 ⑨ 기한에 BatchGetPayments가 실패하면 FAILED로 끝내지 않고 5초 뒤 다시 묻는다(4,999ms에는 묻지 않음)', async () => {
     const p = await product({ limitedQty: 3 });
     const a = randomUUID();
     payments.confirmAnswer = { status: 'RETRYABLE', reason: 'UNAVAILABLE' };
@@ -675,7 +675,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     }
   });
 
-  test('P-T56 ⑨ 기한 뒤에는 ConfirmPayment를 다시 보내지 않는다(받아진 작업이 당기기 답에 없으면 기한 전에는 다시 보내고, 기한에는 보내지 않고 FAILED와 두 재고 복구)', async () => {
+  test('P-T57 ⑨ 기한 뒤에는 ConfirmPayment를 다시 보내지 않는다(받아진 작업이 당기기 답에 없으면 기한 전에는 다시 보내고, 기한에는 보내지 않고 FAILED와 두 재고 복구)', async () => {
     const p = await product({ limitedQty: 3 });
     const a = randomUUID();
     const authAt = clock.now();

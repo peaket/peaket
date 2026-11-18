@@ -100,7 +100,7 @@ async function newOrder(o: { status?: string; fulfillment?: string | null; slot?
 }
 
 describe('굿즈 주문 마이그레이션 0027·0028(실제 PostgreSQL)', () => {
-  test('P-T56 ① 0027이 옛 상태 값을 옮긴다: PENDING → CREATED, CANCELLED·REFUNDED → PAID, PAID는 그대로', async () => {
+  test('P-T57 ① 0027이 옛 상태 값을 옮긴다: PENDING → CREATED, CANCELLED·REFUNDED → PAID, PAID는 그대로', async () => {
     const r = await q('select id, status from merch_order where id = any($1)', [Object.values(OLD)]);
     const by = Object.fromEntries(r.rows.map((x: { id: string; status: string }) => [x.id, x.status]));
     expect(by).toEqual({ [OLD.pending]: 'CREATED', [OLD.paid]: 'PAID', [OLD.cancelled]: 'PAID', [OLD.refunded]: 'PAID' });
@@ -112,12 +112,12 @@ describe('굿즈 주문 마이그레이션 0027·0028(실제 PostgreSQL)', () =>
     ]);
   });
 
-  test('P-T56 ① merch_order 상태 CHECK는 정본 다섯 값만 받고 목록 밖 값마다 거절한다', async () => {
+  test('P-T57 ① merch_order 상태 CHECK는 정본 다섯 값만 받고 목록 밖 값마다 거절한다', async () => {
     for (const s of ['CREATED', 'AWAITING_DEPOSIT', 'PAID', 'EXPIRED', 'FAILED']) expect(await newOrder({ status: s })).toBeTruthy();
     for (const s of ['PENDING', 'CANCELLED', 'REFUNDED', 'created', '']) await rejects(newOrder({ status: s }), '23514');
   });
 
-  test('P-T56 ⑦ 수령 시간대 CHECK: 현장 수령은 시간대가 있어야 하고, 다른 수령 방식은 시간대가 없어야 한다', async () => {
+  test('P-T57 ⑦ 수령 시간대 CHECK: 현장 수령은 시간대가 있어야 하고, 다른 수령 방식은 시간대가 없어야 한다', async () => {
     const productId = randomUUID();
     await q("insert into product (id, promoter_id, type, name, status, price, ticket_linked, fulfillments, transferable, attributes, version, updated_at) values ($1, $2, 'MERCH', '시험', 'PUBLISHED', 1000, false, '{PICKUP}', false, '{}'::jsonb, 1, now())", [
       productId,
@@ -160,7 +160,7 @@ describe('굿즈 주문 마이그레이션 0027·0028(실제 PostgreSQL)', () =>
     for (const s of ['PENDING', 'DONE', '']) await rejects(attempt(9, s), '23514');
   });
 
-  test('P-T57 ① 항목 cancel_reason CHECK는 UNCLAIMED만 받는다(NULL은 받음)', async () => {
+  test('P-T58 ① 항목 cancel_reason CHECK는 UNCLAIMED만 받는다(NULL은 받음)', async () => {
     const orderId = await newOrder({ status: 'PAID' });
     const item = (reason: string | null) =>
       q(
@@ -172,7 +172,7 @@ describe('굿즈 주문 마이그레이션 0027·0028(실제 PostgreSQL)', () =>
     for (const r of ['BUYER', 'unclaimed', '']) await rejects(item(r), '23514');
   });
 
-  test('P-T57 ③ 환급 행은 정본 상태 넷만 받고 금액이 0보다 커야 한다', async () => {
+  test('P-T58 ③ 환급 행은 정본 상태 넷만 받고 금액이 0보다 커야 한다', async () => {
     const orderId = await newOrder({ status: 'PAID' });
     const refund = (status: string, amount: number) =>
       q("insert into merch_refund (id, order_id, item_ids, amount, reason, status, created_at, updated_at) values ($1, $2, '{}', $3, 'UNCLAIMED', $4, now(), now())", [randomUUID(), orderId, amount, status]);
@@ -181,7 +181,7 @@ describe('굿즈 주문 마이그레이션 0027·0028(실제 PostgreSQL)', () =>
     await rejects(refund('REQUESTED', 0), '23514');
   });
 
-  test('P-T56 ⑥ 새 표는 core_app만 읽고 쓰며 core_partner는 결제 시도·승인 명령 작업·환급·유형·수령 시간대 표를 읽지 못한다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('P-T57 ⑥ 새 표는 core_app만 읽고 쓰며 core_partner는 결제 시도·승인 명령 작업·환급·유형·수령 시간대 표를 읽지 못한다 [ASVS v5.0.0-8.2.2]', async () => {
     const orderId = await newOrder();
     await appDb.pool.query("insert into merch_payment_attempt (id, order_id, attempt_no, pg, status, created_at) values ($1, $2, 1, 'SIMULATOR', 'READY', now())", [randomUUID(), orderId]);
     await appDb.pool.query(
