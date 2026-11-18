@@ -14,3 +14,4 @@
 - 2026-11-18 W11-lanes(R-686): 기록 크기 점검(`records.mjs --check`)에 `docs/lanes/lane4.md`·`lane5.md`를 더함(ADR-0286 '확인'). B 짧은 고리 커밋 8개, 틀린 구현 22/21(놓친 VF-V10은 시험 RS-14 더함), 리뷰 RV-02는 lane4-cleanup.md. 계획 `docs/review/plans/W11-lanes.md`.
 - 2026-11-19 BAT-052(R-690): 새 서비스 realtime-gw(좌석 델타 WebSocket, ADR-0296·0297)와 platform `verifyAdmissionToken`. A 등급, 커밋 18개, 관점 리뷰 높음 3 고침, 틀린 구현 80/73, PR #24 CI 초록. 뺀 몫은 BAT-053·066·095·182·BAS-140. 계획 `docs/review/plans/BAT-052.md`.
 - 2026-11-19 BAT-053(R-694): realtime-gw 전파 Degraded 자동 전환(ADR-0298 — 박자 늦음 판정·고정 격자 1초 차례·버퍼 1초 연결은 박자 맨 뒤). A 등급, 커밋 17개, 관점 리뷰 높음 4와 보안 다시 보기 SEC-06 고침, 틀린 구현 61/56, 통합 두 번 35/35. 계획 `docs/review/plans/BAT-053.md`.
+- 2026-11-19 W11-ci-conc(R-698): develop 푸시 CI를 다음 푸시가 취소하지 않게(`cancel-in-progress`는 PR에서만), 소유자 결정 (다)로 가지 푸시는 spec-check 전수 검사(큰 러너)를 돌리지 않음. C, 커밋 13개. 계획 `docs/review/plans/W11-ci-conc.md`.
