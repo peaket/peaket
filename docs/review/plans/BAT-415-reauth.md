@@ -230,6 +230,31 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 
 - 지시서 '자주 놓친 결함' 대조: 저장소 응답 정확한 값(`SET` 인자 전부)·경계 양쪽(`exp` −1ms·`exp`)·계정 대조 뺀 요청(`sub`·`sid`)·목록 밖 값(`BOOKER_EXPORT`·`OPS_COMMAND`·`PAYOUT_ACCOUNT`·없음)·세 상태 가운데('이미 있음' 403)·부르는 쪽이 결과를 씀(호출 0·`writes.create` 0)·시험 값 ≠ 상수(180초, `https://identity.test`)·시작 파일 따로(start.ts 글 읽기)·장애 주입이 실제로 끼어듦(`jwks.urls.length ≥ 1`)은 모두 걸린다. 빠진 것은 RV-09(시간 한도, 경쟁)다.
 
+### 다시 보기
+
+- 담당: 리뷰 `l3-b415r-review`(claude-opus-5-5), 2026-11-18. 본 것: `git diff a9b0abbb..b90b9527`(반영 계획 `44f0d12a`·`3e97790e`, 재현 시험 `ee9ed4f3`·`16f2bc7b`, 구현 `b90b9527`)와 '리뷰 반영 계획' 절. 고친 곳만 봤다. 구현 커밋은 시험 파일을, 시험 커밋 둘은 `src`를 건드리지 않았다. 구현 커밋의 `deploy/gateways/*.routes.yaml` 다섯은 계약 해시 머리줄만 바뀌었고 `node tools/ci/gateway-routes.mjs --check`가 '같다'다(첫 바퀴 openapi 고침의 생성물을 맞춘 것). 바뀐 트리에서 새 시험 세 파일 41/41 통과를 다시 돌려 봤다.
+- jose 오류 경계 확인(일회용 스크립트, 같은 jose 6.2.14): 맞는 `kid`에 서명을 자르거나 비우거나 두 배로 늘린 토큰은 `ERR_JWS_SIGNATURE_VERIFICATION_FAILED`, 서명 글자가 깨진 토큰은 `ERR_JWS_INVALID`였다. 토큰 쪽 값으로는 `DataError`나 키 묶음 오류 코드가 나지 않아, 공격자가 503(`keys`)과 경고 줄을 만들어 내는 길은 찾지 못했다. `ERR_JWKS_MULTIPLE_MATCHING_KEYS`는 `kid`가 겹친 묶음(identity 설정)에서만 난다.
+
+| 지적 | 판정 | 근거 |
+| --- | --- | --- |
+| RV-01 | 남음(문구) | 이 묶음에서 막지 않는 것은 계획대로다. 정본 transfer-refund §3.1 '남는 한계'(128줄)와 data.md §3에 서비스 안에서만이라는 것을 적었다. 다만 그 문구가 '소유자 결정을 기다린다(OPEN 문안은 계획 …)'인 채다. OPEN[50]이 (나)로 정해졌으므로 RN-01로 고친다 |
+| RV-02 | 닫힘 | 어댑터가 `sub` 대조 뒤·`jti` 잡기 전에 `expiresAt − 지금 > 330,000ms`이면 403(까닭 `lifetime`)이고 `jti`를 잡지 않는다. 공용 상한도 330,000ms라, 받은 토큰의 기록 수명은 늘 토큰의 남은 시간 그대로다. 경계 330,000 통과·330,001 거절과 `PX '330000'`을 시험이 본다. 두 상수가 따로인 점은 RN-02 |
+| RV-03 | 남음(정리 목록 이관) | 반영 계획 §1대로 `docs/lanes/lane3-cleanup.md`에 기록 커밋에서 넣는다. 코드는 그대로다(`jwks-fan-reauth-gate.ts` `path: u.pathname`) |
+| RV-04 | 일부 닫힘 | 읽기 상한이 1,000ms가 됐다(정본 §3.1 '공개키 묶음 읽기'). 미리 읽기·오래된 캐시로 답하기는 정리 목록 이관이다 |
+| RV-05 | 닫힘 | 키 묶음 오류 코드 셋과 `DataError`는 503(`keys`), `ERR_JOSE_NOT_SUPPORTED`는 403(`claims`), 그 밖은 500이고 `Retry-After`가 없다(R-T39 ⑦). 위 확인대로 토큰 쪽 값이 503으로 새는 길은 없다. 참고로 `crv`가 빠진 키는 정본대로 403(`kid`)이라, identity 키 설정이 틀린 것이 `warn`이 아니라 `info`의 `kid`로만 보인다(정본 결정이라 지적하지 않는다) |
+| RV-06 | 닫힘(시험 한 군데 남음) | 넘기는 기록은 정해진 이름표 `reason` 하나와 `outcome`뿐이고, 형에 토큰·`jti`·계정 ID·세션 ID가 없다. start.ts가 403은 `info`, 503은 `warn`으로 `{ event, reason }`만 싣는다. 발급자가 없으면 local·ci 밖에서 시작하지 않는다(`PEAKET_ENV` 없음 포함). start.ts의 로그 잇기를 글 대조로만 보는 것은 RN-03 |
+| RV-07 | 닫힘 | 정본 '남는 한계'에 '503 뒤에도 새 재인증'을 적었다 |
+| RV-08 | 닫힘(다음 단계 몫) | GAT-090 단계 줄에 'BAT-415-reauth가 넘긴 것'으로 넷(`X-Reauth-Token`, 계좌면 `high-risk`, 두 재인증 시트의 흐름, frontend.md 오류 표 503)을 적었다 |
+| RV-09 | 닫힘 | (가) 멈추는 읽기가 900ms 이상 2,500ms 미만에 503 (나) 동시 두 요청이 202 하나·403 하나이고 ticket 호출 1 (다) `alg` none·HS256과 모르는 `crit`가 403 |
+
+- 새 지적(높음 0, 중간 0, 낮음 3):
+
+| # | 심각도 | 자리 | 지적 | 근거(정본) | 고칠 방향 |
+| --- | --- | --- | --- | --- | --- |
+| RN-01 | 낮음 | `docs/features/transfer-refund.md:128`('남는 한계' 끝 문장) | RV-01 문구가 '방향을 바꾸는 결정이므로 소유자 결정을 기다린다(OPEN 문안은 계획 …)'인 채다. OPEN[50]이 (나)(identity가 받는 쪽 작업을 토큰에 싣고 받는 서비스는 자기 작업의 토큰만 받음)로 정해졌으므로, 정본이 낡은 상태를 말한다 | 소유자 결정 OPEN[50], 반영 계획 §4 | 기록 커밋에서 'OPEN[50]에서 (나)로 정했다(2026-11-18). GAT-045가 막고, 그때까지 이 한계를 받아들인다'로 바꾼다. GAT-045 단계 줄이 생기면 그 줄에 이 몫(purchase 팬 취소가 자기 작업의 토큰만 받음, R-T39에 줄 하나)을 적는다 |
+| RN-02 | 낮음 | `jwks-fan-reauth-gate.ts:13`, `packages/platform/src/reauth-jti.ts:9` | 받는 수명 상한(`MAX_REMAINING_LIFETIME_MS`)과 공용 기록 상한(`REAUTH_JTI_TTL_MS`)이 같은 330,000을 따로 적는다. 지금은 시험(330,000ms → `PX '330000'`)이 둘이 어긋나는 것을 잡는다. 하지만 RV-02의 틈은 '받는 상한 > 기록 상한'일 때 다시 생기므로 한 값에서 나오는 편이 낫다. 또 core·ops·payment의 받는 쪽은 수명 거절이 없어, 330,000ms보다 긴 토큰이 오면 RV-02와 같은 틈이 그대로다 | transfer-refund §3.1 '한 번 쓰기', data.md §3 | 어댑터가 `@peaket/platform`의 `REAUTH_JTI_TTL_MS`를 가져다 쓴다(또는 받는 상한을 플랫폼 확인기 쪽으로 옮긴다). 세 서비스의 수명 거절은 계획 §4 재쓰기 후보와 함께 정리 목록에 넣는다 |
+| RN-03 | 낮음 | `services/purchase-svc/src/start.ts:335–338`, `test/fan-reauth-wiring.test.ts:157–165` | R-T39 ②의 판정은 '로그에 까닭 이름표 하나가 남고 토큰·계정 ID가 없다'이다. 시험은 `onResult`로 넘긴 값을 모아 볼 뿐이고, start.ts가 그것을 로그로 잇는지는 글 대조(`onResult` 글자가 있는지)로만 본다. `onResult: () => {}`나 403·503의 로그 단계를 바꾼 틀린 구현도 통과한다(지시서 §7 '부르는 쪽이 결과를 실제로 쓰는지') | transfer-refund §3.1 '거절 기록', §11 R-T39 ② | 로그로 잇는 함수를 `refund-wiring.ts`에 이름 붙여 꺼내고(예 `fanReauthResultLog(logger)`), 가짜 로거로 403 → `info` `{ event: 'fan_reauth_rejected', reason }`, 503 → `warn` `{ event: 'fan_reauth_unavailable', reason }`, 다른 필드 없음을 단언한다. start.ts 글 시험은 그 함수를 넘기는지만 본다 |
+
 ## 검증
 
 - 담당: 검증 `l3-b415r-verify`(claude-opus-5-5), 2026-11-18. 계획·시험·구현·리뷰에 관여하지 않았다(ADR-0270 '검증'). 리뷰 `a9b0abbb`와 같은 때 따로 했고 리뷰 지적은 보고 나서 겹침만 적었다.
@@ -380,7 +405,7 @@ cd /d/ticketpass-lane3 && node tools/ci/ledger.mjs --batch BAT-415
 | plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T20:50+09:00 | 2026-11-18T21:08+09:00 |
 | impl | l3-b415r-impl | claude-opus-5-5 | 2026-11-18T21:07+09:00 | 2026-11-18T21:17+09:00 |
 | test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T21:19+09:00 | 2026-11-18T21:36+09:00 |
-| review | l3-b415r-review | claude-opus-5-5 | 2026-11-18T21:37+09:00 | 2026-11-18T21:49+09:00 |
+| review | l3-b415r-review | claude-opus-5-5 | 2026-11-18T21:37+09:00 | 2026-11-18T22:52+09:00 |
 | verify | l3-b415r-verify | claude-opus-5-5 | 2026-11-18T21:38+09:00 | 2026-11-18T22:05+09:00 |
 | plan | l3-b415r-plan | claude-opus-5-5 | 2026-11-18T22:06+09:00 | 2026-11-18T22:40+09:00 |
 | test | l3-b415r-test | claude-opus-5-5 | 2026-11-18T22:16+09:00 | 2026-11-18T22:40+09:00 |
