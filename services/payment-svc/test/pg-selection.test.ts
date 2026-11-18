@@ -230,7 +230,7 @@ describe('parsePrepareCheckoutInput', () => {
   });
 
   test('P-T26_비어 있는 수단은 CARD이고 가상계좌 허용 기본은 참이다', () => {
-    expect(parsePrepareCheckoutInput(raw())).toEqual({ orderId: ORDER, attemptId: ATTEMPT, eventId: EVENT, amount: 55_000, orderName: '공연 티켓', payMethod: 'CARD', virtualAccountAllowed: true });
+    expect(parsePrepareCheckoutInput(raw())).toEqual({ orderKind: 'TICKET', orderId: ORDER, attemptId: ATTEMPT, eventId: EVENT, amount: 55_000, orderName: '공연 티켓', payMethod: 'CARD', virtualAccountAllowed: true });
   });
 
   test('P-T26_선택 칸을 그대로 넘긴다', () => {
@@ -240,7 +240,8 @@ describe('parsePrepareCheckoutInput', () => {
 
   test.each<[string, Partial<PrepareCheckoutInput>, string]>([
     ['주문 종류 없음', { orderKind: 'UNSPECIFIED' }, 'order_kind'],
-    ['굿즈(복귀 주소가 아직 없다)', { orderKind: 'MERCH' }, 'order_kind'],
+    // 굿즈(MERCH)는 ADR-0299 결정 3으로 받는다(BAT-600). 굿즈 입력 검사는 test/merch-pg-selection.test.ts가 본다
+    ['모르는 주문 종류', { orderKind: 'GIFT' }, 'order_kind'],
     ['주문 ID 모양', { orderId: 'ORDER' }, 'order_id'],
     ['시도 ID 모양', { attemptId: '' }, 'attempt_id'],
     ['회차 ID 모양', { eventId: 'x' }, 'event_id'],

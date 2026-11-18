@@ -8,6 +8,7 @@ import {
   type EventCancelInput,
   type EventCancelOutcome,
   EVENT_CANCEL_ENDED_STATUSES,
+  type HeldTicket,
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
@@ -18,6 +19,7 @@ import {
   replayOnlyResultOf,
   type ReviewEligibilityTicket,
   type TicketRecord,
+  type TicketStatus,
   TicketConflictError,
   TicketInputError,
   walletCursorOf,
@@ -193,6 +195,13 @@ export class MemoryTicketStore implements TicketStore {
     return [...this.tickets.values()]
       .filter((t) => t.eventId === eventId)
       .map((t) => ({ accountId: t.accountId, payerAccountId: t.payerAccountId, orderId: t.orderId, status: t.status, issuedAtMs: t.issuedAtMs }));
+  }
+
+  async listHeld(accountId: string, eventId: string, statuses: readonly TicketStatus[]): Promise<readonly HeldTicket[]> {
+    return [...this.tickets.values()]
+      .filter((t) => t.accountId === accountId && t.eventId === eventId && statuses.includes(t.status))
+      .sort((a, b) => a.ticketId.localeCompare(b.ticketId))
+      .map((t) => ({ ticketId: t.ticketId, status: t.status }));
   }
 
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {

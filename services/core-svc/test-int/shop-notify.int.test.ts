@@ -72,7 +72,8 @@ const productBody = (over: Record<string, unknown> = {}) => ({
   fulfillments: ['DELIVERY', 'PICKUP'],
   transferable: false,
   status: 'PUBLISHED',
-  attributes: { options: '인디고' },
+  // MERCH 판 1 스키마(옵션은 이름과 고를 값 목록, ADR-0300 결정 1)
+  attributes: { options: [{ name: '색상', values: ['인디고'] }] },
   ...over,
 });
 const createProduct = (tenant = A, over: Record<string, unknown> = {}) =>

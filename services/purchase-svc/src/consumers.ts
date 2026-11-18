@@ -31,6 +31,7 @@ import {
   LoggerPaymentResultLog,
   type PaymentSessionSource,
   PaymentResultHandler,
+  PromPaymentEventSkipSignals,
   type SagaWake,
   TRADE_PAYMENTS_TOPIC,
 } from './modules/booking/index.js';
@@ -163,7 +164,7 @@ export interface PurchaseConsumers {
 /**
  * 소비자 둘을 건다(runKeyedConsumer 둘, service 'purchase-svc').
  * - 원장 적재: groupId HOLD_LEDGER_GROUP(env), topics [SEAT_TOPIC('trade.seats')], handler new SeatHoldLedgerHandler(ledger)
- * - 결제 결과: groupId ORDER_SAGA_GROUP(env), topics [TRADE_PAYMENTS_TOPIC('trade.payments')], handler new PaymentResultHandler(applyPaymentResult)
+ * - 결제 결과: groupId ORDER_SAGA_GROUP(env), topics [TRADE_PAYMENTS_TOPIC('trade.payments')], handler new PaymentResultHandler(applyPaymentResult, 건너뜀 지표)
  * - 둘 다 held = drizzleHeldEventStore(database, clock), registry가 있으면 heldCounts = heldEventCounts(database), auth·startAt·logger를 그대로 넘긴다
  * 기다리지 않는다(연결은 started로 기다린다)
  */
@@ -184,7 +185,9 @@ export function startPurchaseConsumers(o: PurchaseConsumersOptions): PurchaseCon
   // 결제 결과 소비자는 전용 풀의 보류 표를 쓴다(없으면 기존 공유 풀). 표는 같은 DB의 held_event라 어느 풀이나 써도 된다
   const paymentHeld = o.paymentDatabase ? drizzleHeldEventStore(o.paymentDatabase, clock) : held;
   // 결제 결과는 키(주문)마다 한 건씩 48개까지 동시에 처리한다(BAT-031). 파드마다 파티션 하나를 받으므로 DB 연결 48개와 같다
-  const saga = runKeyedConsumer({ ...base, maxKeys: 48, held: paymentHeld, groupId: ORDER_SAGA_GROUP(o.env), topics: [TRADE_PAYMENTS_TOPIC], handler: new PaymentResultHandler(o.applyPaymentResult) });
+  // 굿즈·부가 상품 결제(orderKind MERCH)는 반영하지 않고 payment_result_skipped_total{reason}로 센다(ADR-0299 결정 4). 레지스트리가 없으면 세지 않는다
+  const skips = o.registry ? new PromPaymentEventSkipSignals().register(o.registry) : undefined;
+  const saga = runKeyedConsumer({ ...base, maxKeys: 48, held: paymentHeld, groupId: ORDER_SAGA_GROUP(o.env), topics: [TRADE_PAYMENTS_TOPIC], handler: new PaymentResultHandler(o.applyPaymentResult, skips) });
   const started = Promise.all([ledger.started, saga.started]).then(() => undefined);
   // 부른 쪽이 started를 기다리지 않고 stop만 불러도 처리되지 않은 거부가 남지 않게 한다(거부는 started를 기다리는 쪽이 받는다)
   started.catch(() => undefined);

@@ -11,7 +11,8 @@ CREATE TEMP TABLE purchase_quota (account_id uuid, event_id uuid, used int, limi
 CREATE TEMP TABLE event_sale (event_id uuid, sellable_seats int);
 CREATE TEMP TABLE ticket_issue_job (order_id uuid, event_id uuid, issue_due_at timestamptz, created_at timestamptz);
 
-CREATE TEMP TABLE payment (id uuid, order_id uuid, event_id uuid, pg text, amount bigint, status text, approved_at timestamptz);
+-- order_kind: 결제 원장의 주문 종류(TICKET·MERCH, payment-svc 0022). 칸 없이 넣은 행은 TICKET이다(P3·P4는 TICKET만, ADR-0299 결정 1)
+CREATE TEMP TABLE payment (id uuid, order_id uuid, event_id uuid, pg text, amount bigint, status text, approved_at timestamptz, order_kind text NOT NULL DEFAULT 'TICKET');
 CREATE TEMP TABLE payment_event (payment_id uuid, seq bigint, type text, occurred_at timestamptz);
 CREATE TEMP TABLE payment_cancel (id uuid, payment_id uuid, amount bigint, status text, canceled_at timestamptz);
 CREATE TEMP TABLE settlement_statement (id uuid, kind text, event_id uuid, pg text, gross_amount bigint, refund_amount bigint, payout_amount bigint, revision int, excluded_payments jsonb, status text);

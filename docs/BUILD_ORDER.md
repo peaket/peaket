@@ -184,7 +184,7 @@
 | BAT-585 | 2 | 4 | B | LCH-150·LCH-160 | 5 | C-T22, catalog-review:v5.0.0-1.3.3, catalog-review:v5.0.0-2.2.3, catalog-review:v5.0.0-2.3.2, catalog-review:v5.0.0-2.3.3, catalog-review:v5.0.0-2.4.1 | 장부 범위는 두 문서 전체에서 이 묶음이 닿는 6개로 좁혔다(계획 docs/review/plans/BAT-585.md). 일부 구현(R-538·R-546·R-550·R-557·R-617). 남은 것은 단계 줄. 보고서 docs/review/measurements/BAT-585-wave.md. |
 | BAT-590 | 2 | 4 | B | LCH-180·LCH-185 | 3.5 | POL-027 | 2026-11-13 웨이브 4: 처리방침 10절(목적·파기·위탁·권리·자동화 결정·쿠키·책임자·국외 이전·가명정보·부정 예매 조사), 약관 10조(정렬·취소 공제·양도·금지·중개자·분쟁·부정 예매), 분쟁·판매 조건·게시물 운영정책, 법률 검토 목록 30~37. 사람 칸·변호사 검토는 소유자. 장부 범위는 POL-027 하나(사람 확인) |
 | BAT-595 | 2 | 4 | B | LCH-040·LCH-130 | 3.5 | docs/features/transfer-refund.md, docs/features/settlement.md, docs/frontend.md | 선행 LCH-010·LCH-020·LCH-030·LCH-120(갈래 3) |
-| BAT-600 | 5 | 4 | A | LCH-010·LCH-020 | 4 | docs/features/payment.md, V-T26, docs/features/settlement.md, docs/security/asvs/payment.md |  |
+| BAT-600 | 5 | 4 | A | LCH-010·LCH-020 | 4 | P-T42, P-T56, P-T57, P-T58, V-T26, V-T35 ①, V-T35 ②, V-T46, payment:v5.0.0-2.2.1, payment:v5.0.0-2.3.1, payment:v5.0.0-2.3.3, payment:v5.0.0-2.3.4, payment:v5.0.0-8.2.2 | 끝(R-697): 굿즈 상품 유형·한정 재고 예약·결제 전 주문·부가 상품·미수령 자동 취소, 결제 원장 주문 종류(ADR-0299~0301). 장부 범위는 두 문서 전체 252개에서 37개로 좁힘. 택배 결제·굿즈 가상계좌는 BAT-605. 계획 `docs/review/plans/BAT-600.md` |
 | BAT-605 | 5 | 4 | A | LCH-030 | 2 | docs/features/payment.md, docs/features/transfer-refund.md, docs/security/asvs/payment.md | 혼자: 7.1.1 셋을 묶으면 6일이고, 이웃 LCH-050과 묶으면 LCH-080이 혼자 남음 |
 | BAT-610 | 3 | 4 | B | LCH-050·LCH-060 | 4.5 | I-T53, J-T18, J-T26, N-T15 | 끝(R-567·R-574·R-588): 파트너 상품·굿즈 주문·배송·반품·웹훅·명단 내보내기 화면과 서버, 정산·지급·KYC 첫 구현. 남은 막힘(다음 웨이브로 넘김): Secrets Manager/KMS·알림함/이메일·Kafka outbox·토스/포트원 실계정·KYC 셀러 조회·SCR-049·PDF·웹훅 리더 Lease·상계 트랜잭션·승인 감사 체인. 계획 `docs/review/plans/BAT-610.md`. 원문: docs/progress-archive.md |
 | BAT-615 | 5 | 4 | B | LCH-070·LCH-080 | 4.25 | S-T41 | 일부 구현(R-528, LCH-080만). 남은 것은 단계 줄. LCH-070은 선행 GAT-290·GAT-300(2인 승인)과 지급대행 어댑터 대기로 보류. 보고서 docs/review/measurements/BAT-615-wave.md. |
@@ -612,8 +612,8 @@
 - [x] LCH-185 wbs 7.4.1 ②: 약관(원문: docs/progress-archive.md)
 - [ ] LCH-040 wbs 7.1.2: 예매·주문 내역 화면(SCR-055) — 티켓·굿즈 주문, 예매 확인서 다시 보기, 굿즈 주문 취소·반품 (1.5일) 갈래 2(루프는 건너뛴다)
 - [ ] LCH-130 wbs 7.2.6: 파트너 콘솔 전 화면과 판매 승인·정산 지급·파트너사 화면의 휴대폰·태블릿 배치 (2일) 갈래 2(루프는 건너뛴다)
-- [ ] LCH-010 wbs 7.1.1 ①: shop — PostgreSQL `product`와 유형 스키마 목록·속성 검증 잡(V-T26, ADR-0101), 한정 재고, 굿즈 재고 예약 만료와 결제 전 주문 하나(ADR-0107) (2일) 갈래 5(루프는 건너뛴다) PRF-180이 넘긴 것(2026-11-09): payment-svc `ConfirmPayment`는 `event_id`가 필수이고 `payment.event_id`가 NOT NULL이라 회차 표(티켓) 주문만 받는다. 굿즈 주문을 결제로 보낼 때 이 단계가 `event_id` 필수를 풀거나 다른 길을 정한다(추천 적용 2026-11-09, BUILD_ORDER PRF-180, 코드 리뷰)
-- [ ] LCH-020 wbs 7.1.1 ②: 티켓 연동 부가 상품, 수령 방식, 미수령 자동 취소 (2일) 갈래 5(루프는 건너뛴다)
+- [x] LCH-010 wbs 7.1.1 ①: shop — PostgreSQL `product`와 유형 스키마 목록·속성 검증 잡(V-T26, ADR-0101), 한정 재고, 굿즈 재고 예약 만료와 결제 전 주문 하나(ADR-0107) (2일) 갈래 5(루프는 건너뛴다) PRF-180이 넘긴 것(2026-11-09): payment-svc `ConfirmPayment`는 `event_id`가 필수이고 `payment.event_id`가 NOT NULL이라 회차 표(티켓) 주문만 받는다. 굿즈 주문을 결제로 보낼 때 이 단계가 `event_id` 필수를 풀거나 다른 길을 정한다(추천 적용 2026-11-09, BUILD_ORDER PRF-180, 코드 리뷰)
+- [x] LCH-020 wbs 7.1.1 ②: 티켓 연동 부가 상품, 수령 방식, 미수령 자동 취소 (2일) 갈래 5(루프는 건너뛴다)
 - [ ] LCH-030 wbs 7.1.1 ③: 굿즈 택배 결제대금예치(별도 상점), 굿즈·부가 상품 취소·반품 상태 기계 (2일) 갈래 5(루프는 건너뛴다)
 - [x] LCH-050 wbs 7.2.1 ①: 파트너 상품 빌더, 웹훅 설정, 정산·명단 내보내기(원문: docs/progress-archive.md)
 - [x] LCH-060 wbs 7.2.1 ②: 배송·반품 처리(원문: docs/progress-archive.md)

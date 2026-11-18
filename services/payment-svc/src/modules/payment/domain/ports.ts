@@ -190,9 +190,9 @@ export interface PrepareCheckoutSignals {
 /** 결제창 준비 로그. 던지지 않는다 */
 export interface PrepareCheckoutLog {
   /** 고른 결제사를 쓸 수 없다(SEV2, kind payment-pg-unavailable). 결제사·까닭마다 1분 [가정]에 한 번 불린다 */
-  pgUnavailable(e: { readonly pg: PgName; readonly reason: Exclude<PgUnavailableReason, 'METHOD_UNSUPPORTED'>; readonly eventId: string }): void;
+  pgUnavailable(e: { readonly pg: PgName; readonly reason: Exclude<PgUnavailableReason, 'METHOD_UNSUPPORTED'>; readonly eventId: string | null }): void;
   /** 고른 결제사가 그 수단을 받지 않는다(결제사 장애가 아니라 경고 한 줄, kind payment-pg-method-unsupported). 결제사·수단마다 1분 [가정]에 한 번 불린다(BUILD_ORDER PRF-190 코드 리뷰) */
-  methodUnsupported(e: { readonly pg: PgName; readonly payMethod: PayMethod; readonly eventId: string }): void;
+  methodUnsupported(e: { readonly pg: PgName; readonly payMethod: PayMethod; readonly eventId: string | null }): void;
 }
 
 /** GetPayment의 저장소(BUILD_ORDER HOT-151) */

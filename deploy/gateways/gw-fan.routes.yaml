@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-fan.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 6ee2804df1a780b4c9dee16840a8ed81ef00bb979162b26458c4d288086f7c32
+# openapi info.version 1.0.0-draft · 계약 sha256 e13964970ee1cb675a6ff69bf384df44828f48b786c2a48dc87261032ba7f176
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -1146,6 +1146,18 @@ spec:
             value: /v1/subscriptions
           method: OPTIONS
         - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/addons
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/addons
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/tickets/[^/]+/addons
+          method: OPTIONS
+        - path:
             type: Exact
             value: /v1/wishes
           method: GET
@@ -1190,18 +1202,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/tickets/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/addons
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/addons
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/tickets/[^/]+/addons
           method: OPTIONS
         - path:
             type: RegularExpression

@@ -36,6 +36,8 @@ export interface ProductRecord {
   saleEndsAt: Date | null;
   commissionRateBp: number | null;
   attributes: Record<string, unknown>;
+  /** 속성 스키마 판(product.schema_version). 없으면 1로 본다 */
+  schemaVersion?: number;
   version: number;
   publishedAt: Date | null;
   updatedAt: Date;

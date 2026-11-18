@@ -155,6 +155,13 @@
       "when": 1794795098552,
       "tag": "0021_payment_cancel",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795004955103,
+      "tag": "0022_merch_order_kind",
+      "breakpoints": true
     }
   ]
 }

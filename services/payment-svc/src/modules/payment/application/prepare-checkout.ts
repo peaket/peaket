@@ -8,9 +8,12 @@ import { admitsEntryTrial, entryTrialDraw } from '../domain/entry-pause-judge.js
 import { LogGate } from '../domain/log-gate.js';
 import type { CheckoutValues, PayMethod, PgName } from '../domain/payment-gateway.js';
 import { type EntryPauses, isEntryPaused, PaymentNewPausedError } from '../domain/entry-pause.js';
-import { allowedPayMethods, checkoutReturnUrls, parsePrepareCheckoutInput, PaymentPgUnavailableError, type PgChannelTable, type PgPlatformDefaults, type PgSelectionState, type PgUnavailableReason, type PrepareCheckoutCommand, type PrepareCheckoutInput, selectPg } from '../domain/pg-selection.js';
+import { allowedPayMethods, checkoutReturnUrls, merchCheckoutReturnUrls, parsePrepareCheckoutInput, PaymentPgUnavailableError, type PgChannelTable, type PgPlatformDefaults, type PgSelectionState, type PgUnavailableReason, type PrepareCheckoutCommand, type PrepareCheckoutInput, selectPg } from '../domain/pg-selection.js';
 import type { CallBudget, EntryPauseReader, EntryTrialSignals, EntryTrialStore, FallbackExclusionReader, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
 import { checkoutDepositDueAtMs } from '../domain/virtual-account.js';
+
+/** 회차가 없는 굿즈의 결제사 선택 읽기에 넘기는 값(빈 UUID). 회차 행은 버리고 플랫폼 행만 쓴다 */
+const NO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
 
 /** 결제사를 고르지 못한 경보 로그의 간격 1분 [가정](결제사·까닭마다) */
 const PG_UNAVAILABLE_LOG_INTERVAL_MS = 60_000;
@@ -84,7 +87,8 @@ export class PrepareCheckout {
     }
     // 시험 행 읽기는 앞의 읽기가 쓴 시간을 뺀 시한으로 한다(BUILD_ORDER PRF-201 코드 리뷰)
     if (pauses !== undefined) await this.#passPause(selection.pg, pauses, command, budget === undefined ? undefined : { remainingMs: budget.remainingMs - (clock.monotonicMs() - startedAtMs) });
-    const urls = checkoutReturnUrls(webOrigin, command.eventId, command.orderId, selection.pg);
+    // 굿즈는 회차가 있어도(티켓 연동 부가 상품) 굿즈 복귀 주소다(ADR-0299 결정 3)
+    const urls = command.orderKind === 'MERCH' || command.eventId === null ? merchCheckoutReturnUrls(webOrigin, command.orderId, selection.pg) : checkoutReturnUrls(webOrigin, command.eventId, command.orderId, selection.pg);
     const checkout = gateway.checkout(
       { orderId: command.orderId, orderName: command.orderName, amount: command.amount, ...(command.customerKey === undefined ? {} : { customerKey: command.customerKey }) },
       { attemptId: command.attemptId, ...urls },
@@ -106,11 +110,21 @@ export class PrepareCheckout {
   /** 재생은 정지를 읽지 않는다(처음 201을 준 요청이다). 두 읽기를 함께 돌려 호출의 시한을 두 번 쓰지 않는다 */
   async #read(command: PrepareCheckoutCommand, budget: CallBudget | undefined): Promise<[PgSelectionState, EntryPauses | undefined]> {
     try {
-      return await Promise.all([this.deps.selection.read(command.eventId, budget), command.pinnedPg === undefined ? this.deps.pauses.read(budget) : undefined]);
+      return await Promise.all([this.#selectionOf(command.eventId, budget), command.pinnedPg === undefined ? this.deps.pauses.read(budget) : undefined]);
     } catch (err) {
       this.deps.signals.prepared('none', 'error');
       throw err;
     }
+  }
+
+  /**
+   * 결제사 선택 상태. 회차가 없는 굿즈(ADR-0299 결정 3)는 플랫폼 행만 본다: 읽기 포트가 회차 단위라 회차 행이 있을 수 없는 값(빈 UUID)으로 읽고
+   * 회차 지정·회차 전환 칸을 버린다(그 값에 행이 생겨도 굿즈가 그 행을 따르지 않는다)
+   */
+  async #selectionOf(eventId: string | null, budget: CallBudget | undefined): Promise<PgSelectionState> {
+    if (eventId !== null) return this.deps.selection.read(eventId, budget);
+    const { platformSwitch } = await this.deps.selection.read(NO_EVENT_ID, budget);
+    return platformSwitch === undefined ? {} : { platformSwitch };
   }
 
   /** 대체 후보에서 뺄 채널을 읽는다. 읽지 못하면 값을 지어내지 않고 실패한다(BUILD_ORDER PRF-203) */

@@ -9,7 +9,7 @@
 // - APPROVED 사건의 occurredAt은 approved_at과 같다(결과 당기기의 답과 사건이 같은 값이어야 한다, ADR-0140).
 // - 재전송의 거절은 결제사가 그 결제에 내린 판정(CARD_DECLINED·USER_ABORTED·EXPIRED)만 FAILED다. PG_ERROR·VALIDATION·범주 없음은 UNKNOWN이다(첫 요청이 그 뒤에도 승인될 수 있다, 명세 pgProcess).
 import { createHash } from 'node:crypto';
-import type { PaymentLedgerStatus } from './confirm-command.js';
+import type { PaymentLedgerStatus, PaymentOrderKind } from './confirm-command.js';
 import type { ConfirmResult, FailureCategory, PayMethodCategory, PgName } from './payment-gateway.js';
 import { linkFinishFields, type PaymentMethodLink } from './payment-method-ref.js';
 import type { DepositWrite } from './virtual-account.js';
@@ -83,8 +83,10 @@ export interface ConfirmJob {
 export interface ConfirmTarget {
   readonly paymentId: string;
   readonly orderId: string;
-  /** 회차 ID(사건의 eventId, Kafka 키) */
-  readonly eventId: string;
+  /** 회차 ID(사건의 eventId, 티켓의 Kafka 키). 굿즈(orderKind MERCH)는 null이다(ADR-0299 결정 1) */
+  readonly eventId: string | null;
+  /** 주문 종류(payment.order_kind). 없으면 TICKET으로 본다(ADR-0299 결정 4) */
+  readonly orderKind?: PaymentOrderKind;
   readonly attemptNo: number;
   readonly pg: PgName;
   /** pg_payment_ref(토스·시뮬레이터 paymentKey, 포트원 paymentId) */
@@ -173,7 +175,8 @@ export type ConfirmDecision =
 
 /** trade.payments 값(asyncapi PaymentEvent의 칸. 값 바이트는 어댑터의 코덱이 만든다) */
 export interface PaymentEventMessage {
-  readonly eventId: string;
+  /** 회차 ID. 굿즈(orderKind MERCH)는 null(ADR-0299 결정 4) */
+  readonly eventId: string | null;
   readonly orderId: string;
   readonly pg: PgName;
   readonly type: 'APPROVED' | 'FAILED' | 'AWAITING_DEPOSIT' | 'DEPOSIT_REVERSED' | 'UNKNOWN' | 'RESOLVED' | 'CANCELED';
@@ -195,10 +198,20 @@ export interface PaymentEventMessage {
   readonly eventKey: string;
   /** 입금 기한(ISO 8601, 입금 대기 사건에만, BUILD_ORDER HOT-151) */
   readonly depositDueAt?: string;
+  /** 주문 종류(TICKET·MERCH, ADR-0299 결정 4). 이 파일의 만드는 함수는 늘 싣는다(UNRECOGNIZED는 내지 않는다). 없으면 TICKET으로 읽는다 */
+  readonly orderKind?: PaymentOrderKind;
+}
+
+/**
+ * 결제 사건의 Kafka 키(Outbox msg_key, ADR-0299 결정 4): 티켓은 회차 ID, 굿즈(MERCH)는 주문 ID다(주문 안의 차례만 지키면 된다).
+ * 티켓인데 회차가 비었으면(CHECK가 막아 생기지 않는다) 주문 ID로 둔다.
+ */
+export function paymentEventKafkaKey(message: Pick<PaymentEventMessage, 'orderKind' | 'eventId' | 'orderId'>): string {
+  return message.orderKind === 'MERCH' ? message.orderId : (message.eventId ?? message.orderId);
 }
 
 export interface BuildPaymentEventInput {
-  readonly target: Pick<ConfirmTarget, 'paymentId' | 'orderId' | 'eventId' | 'attemptNo' | 'pg' | 'amount'>;
+  readonly target: Pick<ConfirmTarget, 'paymentId' | 'orderId' | 'eventId' | 'orderKind' | 'attemptNo' | 'pg' | 'amount'>;
   readonly finish: ConfirmFinish;
   /** payment_event의 순번 */
   readonly seq: number;
@@ -349,6 +362,7 @@ export function buildPaymentEvent(input: BuildPaymentEventInput): PaymentEventMe
     eventSeq: seq,
     eventKey,
     ...depositDueAtField(finish),
+    orderKind: target.orderKind ?? 'TICKET',
   };
 }
 

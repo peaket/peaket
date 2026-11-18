@@ -269,6 +269,31 @@ describe('결제(K7, NFR-005·006, ADR-0106)', () => {
     expect(res(r, 'P3').details.map((d) => d.subject)).toEqual([late]);
   });
 
+  it('P-T56 ⑥ ADR-0299 결정 1_굿즈·부가 상품 결제(원장 order_kind MERCH, event_id NULL)는 purchase 주문·발권이 없어도 P3·P4 위반이 아니고, 같은 때의 티켓 결제 위반은 그대로 센다', async () => {
+    // 굿즈 주문은 core-svc shop 주문이라 purchase DB에 주문·주문 사건이 없고 발권하지 않는다(ADR-0299 결정 1, ADR-0300)
+    const merchOrder = randomUUID();
+    await ins('payment', 'payment', { id: randomUUID(), order_id: merchOrder, order_kind: 'MERCH', event_id: null, pg: 'SIMULATOR', amount: 47_000, status: 'APPROVED', approved_at: '2026-11-02T10:00:00+09:00' });
+    const missing = await order({ status: 'APPROVED' });
+    await payment({ orderId: missing });
+    const r = (await check()).run;
+    expect(res(r, 'P3').details.map((d) => d.subject)).toEqual([missing]);
+    expect(res(r, 'P4').details.map((d) => d.subject)).toEqual([]);
+  });
+
+  it('P-T56 ⑥ ADR-0299 결정 1_P4는 TICKET 결제만 본다: 같은 주문 ID의 사건이 섞여 굿즈 승인 결제가 발권 기한 30분을 넘긴 꼴이어도 P4 위반 0이고, 같은 때 기한을 넘긴 티켓 결제는 위반 1이다', async () => {
+    // 굿즈 결제(원장 order_kind MERCH)는 발권 대상이 아니다(docs/verification.md §2.5 'P3·P4는 TICKET만'). 사건 사본이 섞인 경우에도 order_kind로 거른다
+    const merchOrder = randomUUID();
+    await ins('payment', 'payment', { id: randomUUID(), order_id: merchOrder, order_kind: 'MERCH', event_id: null, pg: 'SIMULATOR', amount: 47_000, status: 'APPROVED', approved_at: '2026-11-02T10:00:00+09:00' });
+    await event(merchOrder, 1, 'APPROVED', '2026-11-02T10:00:05+09:00');
+    await event(merchOrder, 2, 'CONFIRMED', '2026-11-02T10:31:00+09:00');
+    const late = await order();
+    await payment({ orderId: late });
+    await event(late, 1, 'APPROVED', '2026-11-02T10:00:05+09:00');
+    await event(late, 2, 'CONFIRMED', '2026-11-02T10:31:00+09:00');
+    const r = (await check()).run;
+    expect(res(r, 'P4').details.map((d) => d.subject)).toEqual([late]);
+  });
+
   it('P3 시작 시각은 결제사 승인과 결과 모름 해소 가운데 늦은 쪽이다', async () => {
     const approvedAt = '2026-11-02T10:00:00+09:00';
     const passed = await order();

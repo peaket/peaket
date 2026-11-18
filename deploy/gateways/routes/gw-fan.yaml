@@ -373,6 +373,10 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/subscriptions
+        # 티켓 연동 부가 상품(주문·월렛 목록)은 core-svc shop이 맡는다(ADR-0301 결정 2·3, BAT-600)
+        - path:
+            type: PathPrefix
+            value: /v1/tickets/{ticketId}/addons
         - path:
             type: PathPrefix
             value: /v1/wishes
@@ -399,9 +403,6 @@ spec:
         - path:
             type: Exact
             value: /v1/tickets/{ticketId}
-        - path:
-            type: PathPrefix
-            value: /v1/tickets/{ticketId}/addons
         - path:
             type: PathPrefix
             value: /v1/tickets/{ticketId}/booth-requests

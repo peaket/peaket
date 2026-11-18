@@ -52,7 +52,7 @@ export const PAYMENT_UNKNOWN_QUERY_OUTCOMES = ['approved', 'failed', 'waiting', 
 export type PaymentUnknownQueryOutcome = (typeof PAYMENT_UNKNOWN_QUERY_OUTCOMES)[number];
 
 /** 잡은 UNKNOWN 한 행(claimDueQueries의 결과). 답 반영에 필요한 원장 값을 함께 싣는다 */
-export interface UnknownQueryJob extends Pick<ConfirmTarget, 'virtualAccountAllowed' | 'paymentId' | 'orderId' | 'eventId' | 'attemptNo' | 'pg' | 'paymentRef' | 'txId' | 'amount'> {
+export interface UnknownQueryJob extends Pick<ConfirmTarget, 'virtualAccountAllowed' | 'paymentId' | 'orderId' | 'eventId' | 'orderKind' | 'attemptNo' | 'pg' | 'paymentRef' | 'txId' | 'amount'> {
   /** 이번 잡기를 더한 조회 횟수(1부터) */
   readonly queryAttempts: number;
   /** 이 잡기가 쓴 next_query_at(epoch ms). 답을 본 뒤 간격을 다시 쓸 때의 조건이다 */
@@ -318,5 +318,6 @@ export function buildResolvedEvent(paymentId: string, result: PaymentEventMessag
     occurredAt: new Date(nowMs).toISOString(),
     eventSeq: seq,
     eventKey,
+    orderKind: result.orderKind ?? 'TICKET',
   };
 }

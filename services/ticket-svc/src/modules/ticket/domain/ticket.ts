@@ -282,6 +282,26 @@ export function normalizeReviewEligibilityInput(i: ReviewEligibilityInput): Revi
   };
 }
 
+/** 보유 티켓 확인 입력(ListHeldTickets, ADR-0301 결정 1). 둘 다 소문자 UUID다 */
+export interface ListHeldTicketsInput {
+  readonly accountId: string;
+  readonly eventId: string;
+}
+
+/** 보유 티켓 한 장(티켓 ID와 상태만. 티켓 키·좌석은 싣지 않는다) */
+export interface HeldTicket {
+  readonly ticketId: string;
+  readonly status: TicketStatus;
+}
+
+/** 지금 보유자가 쓸 수 있는 유효한 티켓 상태(ADR-0301 결정 1: ISSUED·ACTIVE). 양도 진행 중·취소 접수·환급·무효·신고 보류는 뺀다 */
+export const HELD_TICKET_STATUSES: readonly TicketStatus[] = ['ISSUED', 'ACTIVE'];
+
+/** 소문자 UUID만 받는다(대문자도 거절, ADR-0301 결정 1). @throws TicketInputError */
+export function normalizeListHeldTicketsInput(i: ListHeldTicketsInput): ListHeldTicketsInput {
+  return { accountId: requireLowerUuid('accountId', i.accountId), eventId: requireLowerUuid('eventId', i.eventId) };
+}
+
 export interface WalletTicket {
   readonly ticketId: string;
   readonly orderId: string;

@@ -60,6 +60,8 @@ describe('AcceptPaymentCommand: 처음 받음', () => {
       orderId: ORDER_ID,
       attemptId: ATTEMPT_ID,
       attemptNo: 1,
+      // 주문 종류 칸이 없으면 티켓이다(ADR-0299 결정 2)
+      orderKind: 'TICKET',
       eventId: EVENT_ID,
       pg: 'TOSS',
       pgStore: 'STANDARD',
