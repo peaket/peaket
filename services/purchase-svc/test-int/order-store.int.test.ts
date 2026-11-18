@@ -490,19 +490,23 @@ describe('마이그레이션: 표·칸·키·제약', () => {
     expect(await count('select count(*) as n from purchase_order where id = $1', [parent.id])).toBe(0);
   });
 
-  test('purchase_order의 인덱스는 기본 키, 0004의 hold_id 유일 인덱스(purchase_order_hold_key), 0011의 구매 세션 인덱스(purchase_order_session_idx) 셋뿐이다(쓰기가 많은 표라 그 밖의 인덱스를 두지 않는다, data.md §4·§5.1, payment §2 같은 홀드의 두 주문) [ASVS v5.0.0-2.3.4]', async () => {
+  // BAT-010(PRF-169, ADR-0284)이 0028에서 탈퇴 참여자의 계정 인덱스를 더했다(data.md §5.1 '탈퇴 참여자의 계정 주문 찾기', 0011 다음의 '탈퇴 참여자 마이그레이션' 줄)
+  test('purchase_order의 인덱스는 기본 키, 0004의 hold_id 유일 인덱스(purchase_order_hold_key), 0011의 구매 세션 인덱스(purchase_order_session_idx), 0028의 계정 인덱스(purchase_order_account_idx) 넷뿐이다(쓰기가 많은 표라 그 밖의 인덱스를 두지 않는다, data.md §4·§5.1, payment §2 같은 홀드의 두 주문) [ASVS v5.0.0-2.3.4]', async () => {
     const r = await q<{ primary: boolean; unique: boolean; name: string; def: string }>(
       `select i.indisprimary as primary, i.indisunique as unique, c.relname as name, pg_get_indexdef(i.indexrelid) as def
          from pg_index i join pg_class c on c.oid = i.indexrelid where i.indrelid = 'purchase_order'::regclass order by i.indisprimary desc, c.relname`,
     );
-    expect(r).toHaveLength(3);
+    expect(r).toHaveLength(4);
     expect(r[0]).toMatchObject({ primary: true });
     expect(r[0]!.def).toMatch(/USING btree \(id\)$/);
-    expect(r[1]).toMatchObject({ primary: false, unique: true, name: 'purchase_order_hold_key' });
+    // 0028: 계정·주문 ID 두 열의 유일이 아닌 조건 없는 인덱스(account_id·id는 바뀌지 않아 HOT 갱신을 막지 않는다, data.md §5.1)
+    expect(r[1]).toMatchObject({ primary: false, unique: false, name: 'purchase_order_account_idx' });
+    expect(r[1]!.def).toMatch(/^CREATE INDEX purchase_order_account_idx ON (public\.)?purchase_order USING btree \(account_id, id\)$/);
+    expect(r[2]).toMatchObject({ primary: false, unique: true, name: 'purchase_order_hold_key' });
     // 부분 인덱스가 아니다(모든 주문이 홀드 하나에 묶인다)
-    expect(r[1]!.def).toMatch(/^CREATE UNIQUE INDEX purchase_order_hold_key ON (public\.)?purchase_order USING btree \(hold_id\)$/);
+    expect(r[2]!.def).toMatch(/^CREATE UNIQUE INDEX purchase_order_hold_key ON (public\.)?purchase_order USING btree \(hold_id\)$/);
     // 조건 없는 인덱스다(모양은 purchase-migration.int.test.ts의 0011 시험이 본다)
-    expect(r[2]).toMatchObject({ primary: false, unique: false, name: 'purchase_order_session_idx' });
+    expect(r[3]).toMatchObject({ primary: false, unique: false, name: 'purchase_order_session_idx' });
   });
 
   test('0004: 같은 hold_id로 주문 행을 또 넣으면 23505(purchase_order_hold_key)이고, hold_id·purchase_session_id에 널을 넣으면 거절된다 [ASVS v5.0.0-2.3.4]', async () => {

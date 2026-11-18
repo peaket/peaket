@@ -149,6 +149,12 @@ describe('마이그레이션과 표 모양', () => {
     expect(idx.rows[0]!.indexdef).toBe('CREATE INDEX purchase_order_session_idx ON public.purchase_order USING btree (purchase_session_id)');
   });
 
+  test('P-T55_0028(PRF-169, data.md §5.1 탈퇴 참여자의 계정 주문 찾기·§4 탈퇴 참여자 마이그레이션): purchase_order_account_idx는 purchase_order (account_id, id)의 유일이 아닌 조건 없는 인덱스다(BAT-010) [ASVS v5.0.0-2.3.4]', async () => {
+    const idx = await q<{ indexdef: string }>(`select indexdef from pg_indexes where schemaname = 'public' and tablename = 'purchase_order' and indexname = 'purchase_order_account_idx'`);
+    expect(idx.rows).toHaveLength(1);
+    expect(idx.rows[0]!.indexdef).toBe('CREATE INDEX purchase_order_account_idx ON public.purchase_order USING btree (account_id, id)');
+  });
+
   test('0010(PRF-171, data.md §4 열한 번째 마이그레이션·§2 ERD order_saga_job): pull_next_at은 널 허용 timestamptz이고 기본값이 없으며 그 칸에 걸린 인덱스가 없고(작은 작업 표, data.md §5.1), step CHECK는 RESERVE·CONFIRM·RELEASE·AWAIT를 받는다 [ASVS v5.0.0-2.3.4]', async () => {
     const col = await q<{ data_type: string; is_nullable: string; column_default: string | null }>(
       `select data_type, is_nullable, column_default from information_schema.columns where table_schema = 'public' and table_name = 'order_saga_job' and column_name = 'pull_next_at'`,
