@@ -222,7 +222,7 @@ function chipSuffix(group: Group, p: FiltersProps): string | null {
   return f.artistId ? ` · ${p.artistName ?? '고름'}` : null;
 }
 
-/** 휴대폰·태블릿 칩 줄 */
+/** 휴대폰·태블릿 칩 줄. 가로로 밀어 칩을 보일 때 칩이 줄 끝에 딱 붙지 않게 안쪽 여백만큼 스크롤 여백을 둔다(WebKit 정수 스크롤, FE-T31 닿기, BAT-171) */
 export function FilterChips(props: FiltersProps) {
   const apply = useApply(props.query);
   const base = useId();
@@ -230,7 +230,7 @@ export function FilterChips(props: FiltersProps) {
   return (
     <>
       <div
-        className="relative row gap-2 overflow-x-auto px-4 pt-4 [scrollbar-width:none] md:flex-wrap md:overflow-visible md:px-0 md:pt-0"
+        className="relative row gap-2 overflow-x-auto px-4 pt-4 scroll-px-4 [scrollbar-width:none] md:flex-wrap md:overflow-visible md:px-0 md:pt-0 md:scroll-px-0"
         role="group"
         aria-label="필터"
       >
