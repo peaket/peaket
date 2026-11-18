@@ -77,7 +77,22 @@
 
 ## 리뷰
 
-(아직)
+- 담당 `w11-lanes-review-5f80`(claude-opus-5-5), B 등급 짧은 대조 리뷰(ADR-0283 결정 2). 범위 `08120a67..bb5ecbb4`(계획 `1dd06752`, 구현 `19c9a8ba`, 시험 `bb5ecbb4`). 정본은 ADR-0283 결정 1, ADR-0286 결정 4·'확인', `docs/architecture.md` §8.6 4의 '역할 나누기'·'자주 놓친 결함', 감독이 고친 `docs/PROGRESS.md` 15줄(`658eeb47`).
+- 대조 결과
+  - 계획 항목: 1의 1(경로 여섯을 이름으로 적음, 글롭·훑기 없음)·1의 3(다른 동작 그대로)·1의 4(머리 주석 11~14줄, README `records.mjs` 행)·1의 5(ADR-0283 결정 1, architecture §8.6 4 '10.')가 다 들어갔다. 2의 손댈 파일과 3의 시험 목록(RS-03·04·10·12·13)도 다 있다.
+  - 정본과 코드: `RECORD_SIZE_FILES`(`tools/ci/records.mjs` 290~297줄) 여섯 경로가 ADR-0286 '확인' 둘째 줄, ADR-0283 결정 1, architecture '10.'(`lane1.md`~`lane5.md`), PROGRESS 15줄(`lane1.md`~`lane5.md`, `coord.md`·`lane*-cleanup.md` 뺌)과 맞는다. 머리 주석·README의 '보지 않는다' 목록(정리 목록·`coord.md`·보관 파일)도 PROGRESS·ADR과 맞는다. ADR-0286 결정 4의 '갈래 2~5는 PROGRESS를 고치지 않는다'도 지켰다(PROGRESS는 감독 `658eeb47`).
+  - 구현 커밋 `19c9a8ba`는 `tools/ci/records.mjs`·`tools/ci/README.md`만 바꿨고 시험 파일을 건드리지 않았다. 시험 커밋 `bb5ecbb4`는 시험 파일과 이 계획 파일만 바꿨다(정방향 묶음 규칙).
+  - 시험 단언: RS-03은 걸린 파일 줄이 정확히 1줄인지, RS-10은 'lane4 없음' 경고와 lane5 걸림·모두 없을 때 경고 정확히 6줄을, RS-12는 여섯 경로가 서로 다른 줄에 하나씩 `40961`과 함께 나오는지, RS-13은 `lane6`가 표준 출력·오류 어디에도 없는지 본다. 경로 값은 정본에서 글로 적었고 `records.mjs` 상수를 가져오지 않는다. 계획 4의 M1·M2·M6·M7·M8은 이름만큼 단언하는 시험이 있다(M3~M5는 검증 몫). 이 리뷰에서 `node --test tools/ci/records.test.mjs` 51개 통과.
+  - `node tools/ci/roles-check.mjs --base 08120a67 --head bb5ecbb4`: 리뷰·검증 커밋이 없다는 실패(이 커밋과 검증이 채움) 말고 아래 RV-01이 나온다.
+- 지적(고칠 목록, ADR-0283 결정 2)
+
+| 번호 | 심각도 | 자리 | 내용 | 고칠 것 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `docs/review/plans/W11-lanes.md` '## 담당 표' | 구현 커밋 `19c9a8ba`가 담당 표에 impl 행을 더하지 않았다. `roles-check.mjs`가 '[담당 표] 커밋의 역할 impl·세션 w11-lanes-impl-7e2b가 담당 표에 없다'로 실패하므로 이대로는 합치지 못한다(architecture §8.6 4 '합치기 전 역할 확인') | 구현 담당(`w11-lanes-impl-7e2b`)이 `.md`만 바꾸는 `Role: impl` 커밋으로 impl 행(세션 ID·모델·시작·끝)을 더한다. 검증 전에 넣어 마지막 검증이 그 뒤에 오게 한다 |
+| RV-02 | 낮음 | `docs/adr/0283-cut-batch-overhead-keep-high-yield-checks.md` 20줄 | 정리 목록 예시가 아직 `lane1-cleanup.md`~`lane3-cleanup.md`뿐이다. 규칙('정리 목록 파일은 보지 않는다')과 코드·RS-04는 이름과 상관없이 맞고, 지금 `docs/lanes/`에 `lane4-cleanup.md`·`lane5-cleanup.md`는 없다(계획 '시험 이의'의 작은 빈칸과 같음) | 기록 단계 감독이 예시를 `lane*-cleanup.md`로 넓힐지 정한다. 막지 않으며 정리 목록 몫 |
+| RV-03 | 낮음 | `tools/ci/records.test.mjs` 457~470줄(RS-01·RS-02) | 경계 양쪽(40,960 통과·40,961 걸림)은 `docs/PROGRESS.md`로만 보고, 갈래 파일은 40,961(넘음)만 본다. 상한이 상수 하나라 지금 결함은 없으나 파일별 비교가 갈리는 틀린 구현은 못 잡는다('자주 놓친 결함'의 경계값 양쪽) | 막지 않는다. 다음에 이 점검을 고칠 때 RS-12 옆에 '여섯 파일 모두 40,960이면 0'을 더할지 정리 목록에 적는다 |
+
+- 보안 높음 지적은 없다(다시 리뷰 필요 없음). RV-01은 통과 기준(역할 확인)에 걸리므로 이 묶음 안에서 고친다. RV-02·RV-03은 정리 목록으로 보낸다.
 
 ## 검증
 
@@ -89,5 +104,6 @@
 | --- | --- | --- | --- | --- |
 | plan | w11-lanes-plan-4a1c | claude-opus-5-5 | 2026-11-18T20:44+09:00 | 2026-11-18T20:51+09:00 |
 | test | w11-lanes-test-c3d9 | claude-opus-5-5 | 2026-11-18T20:53+09:00 | 2026-11-18T20:59+09:00 |
+| review | w11-lanes-review-5f80 | claude-opus-5-5 | 2026-11-18T20:59+09:00 | 2026-11-18T21:05+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다.
