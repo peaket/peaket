@@ -86,7 +86,7 @@ import {
   type RefundModuleDeps,
   WeekendBusinessCalendar,
 } from './modules/refund/index.js';
-import { fanReauthGateFromEnv, requireOpsInternalToken } from './refund-wiring.js';
+import { fanReauthGateFromEnv, fanReauthResultLogger, requireOpsInternalToken } from './refund-wiring.js';
 import { startPurchaseGrpcServer } from './grpc-server.js';
 import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabaseOptions, paymentResultApply, type PurchaseConsumersOptions, startPurchaseConsumers } from './consumers.js';
 import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
@@ -338,10 +338,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
       jti: new RedisReauthJtiStore(redis),
       clock: systemClock,
       warn: (m) => void fanReauthWarnings.push(m),
-      onResult: (r) =>
-        r.outcome === 'rejected'
-          ? log?.info({ event: 'fan_reauth_rejected', reason: r.reason }, '팬 취소의 재인증 토큰을 거절했다')
-          : log?.warn({ event: 'fan_reauth_unavailable', reason: r.reason }, '팬 취소의 재인증 토큰을 확인하지 못했다'),
+      onResult: fanReauthResultLogger({
+        info: (o) => log?.info(o, '팬 취소의 재인증 토큰을 거절했다'),
+        warn: (o) => log?.warn(o, '팬 취소의 재인증 토큰을 확인하지 못했다'),
+      }),
     });
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
