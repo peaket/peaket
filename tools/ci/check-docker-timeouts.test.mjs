@@ -170,6 +170,12 @@ test('DT-07 보는 곳: apps·packages·services의 시험 폴더와 시험 이�
     'services/s/src/f.spec.ts',
     'services/s/__tests__/g.ts',
     'apps/w/e2e/h.ts',
+    // 계획 G2 1의 확장자 일곱 가운데 위에 없는 다섯(VF-X21)
+    'services/s/test-int/i.tsx',
+    'services/s/test-int/j.mts',
+    'services/s/test-int/k.cts',
+    'services/s/test-int/l.js',
+    'services/s/test-int/m.cjs',
   ];
   const files = { [OK_FILE]: HEAD + OK_CALL };
   for (const p of paths) files[p] = `${HEAD}execFileSync('docker', ['ps'], { encoding: 'utf8' });\n`;

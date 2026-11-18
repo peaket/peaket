@@ -199,6 +199,7 @@
 - G3: 위 3의 목록 파일 41개·호출 48곳의 옵션에 `timeout: 300_000`을 넣었다(줄마다 한 곳씩, 다른 글자는 그대로). 꼴은 넷이다: `stdio` 배열 뒤(`docker` 도우미 함수 40곳), `promisify(execFile)(…, { encoding: 'utf8', timeout: 300_000 })`(6곳), `{ stdio: 'ignore', timeout: 300_000 }`(`services/core-svc/test-int/local-partner-stack.int.test.ts`), 옵션이 없던 `execFile('docker', args, { timeout: 300_000 }, () => res())`(`services/queue-svc/test-sim/cluster.ts` 86줄). 목록에 없는 곳은 나오지 않았다. 넣은 뒤 `node tools/ci/check-docker-timeouts.mjs` → 끝 코드 0, `통과: 시험 파일 1078개, Docker 호출 48곳`. TS 도우미의 형 검사와 Docker를 띄우는 통합 시험은 이 PC에서 돌리지 않았다(CI 몫, 지시서).
 - `node tools/ci/check-workflows.mjs`: `통과: 워크플로 19개`. `python -I -X utf8 tools/doc-check/check_all.py`: 오류 0, 경고 4(이 묶음과 상관없는 기존 경고).
 - 구현 결함 의심: 없음. 계획과 다르게 구현한 두 점(주석 안의 `timeout` 글을 가림, 범위 밖 값의 까닭에 적은 꼴과 정수를 함께 적음)은 계획의 단언과 어긋나지 않는다(DT-05는 `300_001`·`300001` 어느 꼴이든 받는다).
+- 리뷰 반영(검증이 놓친 VF-M10·VF-X21, 2026-11-18 시험 담당 `w10-guards-test-bd3092cd`): RS-10에 'lane2 없음 + lane3 40,961바이트 → `--check` 1과 `docs/lanes/lane3.md` 줄' 사례를, DT-07에 `services/s/test-int/` 아래 `.tsx`·`.mts`·`.cts`·`.js`·`.cjs` 사례를 더했다. 임시 사본에만 넣은 결함판(크기 점검의 `continue`를 `break`로, 확장자를 `ts|mjs`만으로)에서 RS-10·DT-07이 각각 실패하고, 지금 구현에서는 `check-docker-timeouts.test.mjs` 14/14·`records.test.mjs` 47/47 통과한다.
 
 ## 리뷰
 

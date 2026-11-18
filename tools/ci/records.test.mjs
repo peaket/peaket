@@ -554,6 +554,13 @@ test('RS-10 없는 크기 파일은 건너뛰고 나머지는 본다 / 네 파�
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.ok(lines(r.stdout).some((l) => l.includes('docs/lanes/lane1.md') && l.includes('40961')), r.stdout);
 
+  // 없는 파일 뒤의 파일도 본다(VF-M10: lane2가 없을 때 lane3을 건너뛰면 안 된다)
+  const after = sizedRepo({ 'docs/lanes/lane3.md': sized(LIMIT + 1) });
+  rmSync(join(after, 'docs/lanes/lane2.md'));
+  const a3 = cli(after, '--check');
+  assert.equal(a3.status, 1, a3.stdout + a3.stderr);
+  assert.ok(lines(a3.stdout).some((l) => l.includes('docs/lanes/lane3.md') && l.includes('40961')), a3.stdout);
+
   const none = seedRepo();
   assert.equal(cli(none).status, 0);
   const n = cli(none, '--check');
