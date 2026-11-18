@@ -111,7 +111,7 @@ function assertPassed(r, adm, label) {
 
 // ===================== S-T28 ① 주소의 회차(⑨) =====================
 
-test('S-T28 ① 회차 A의 입장 토큰으로 회차 B 주소의 스냅샷 GET·홀드 POST·구매 세션 DELETE는 403이고 대역에 닿지 않는다. 경계: 앞부분만 같은 회차(e1·e10 양쪽)와 대소문자', async () => {
+test('S-T28 ① R057-8 회차 A의 입장 토큰으로 회차 B 주소의 스냅샷 GET·홀드 POST·구매 세션 DELETE는 403이고 대역에 닿지 않는다. 경계: 앞부분만 같은 회차(e1·e10 양쪽)와 대소문자, event가 숫자 형이거나 없음', async () => {
   const k = keys();
   const A = `${EVENT}-a1`;
   const B = `${EVENT}-b`;
@@ -127,6 +127,11 @@ test('S-T28 ① 회차 A의 입장 토큰으로 회차 B 주소의 스냅샷 GET
   assertForbidden(await snapshot(A, admission(k.current, `${A}0`)), '토큰 a10 → 주소 a1');
   // 대소문자: 글자 그대로 견준다
   assertForbidden(await snapshot(A.toUpperCase(), tA), '토큰 소문자 → 주소 대문자');
+  // R057-8 K1b: 클레임 event의 형(숫자)과 없음. 주소 회차가 숫자 글자여도 글자 그대로 견준다(⑨)
+  const NUM = `${Date.now() % 1_000_000_000}`;
+  assertPassed(await snapshot(NUM, admission(k.current, NUM)), undefined, '숫자 글자 회차 주소 + 같은 글 event(라우트가 받는 꼴인지 대조)');
+  assertForbidden(await snapshot(NUM, admission(k.current, NUM, { over: { event: Number(NUM) } })), 'event가 같은 수(숫자 형)');
+  assertForbidden(await snapshot(A, admission(k.current, A, { over: { event: undefined } })), 'event 칸 없음');
   // 대조군: 같은 토큰으로 같은 회차 주소는 통과한다(위 403이 토큰 탓이 아니다)
   assertPassed(await snapshot(A, tA), tA, '같은 회차');
   // 거절은 접근 로그에 403 줄로 남는다(보안 이벤트)
@@ -291,12 +296,17 @@ test('[ASVS v5.0.0-9.2.2] iss가 없거나 다른 값(identity 발급자·끝 �
   assertPassed(await snapshot(E, admission(k.current, E, { over: { iss: ISSUER } })), undefined, '대조군');
 });
 
-test('[ASVS v5.0.0-9.2.2] 팬 액세스 토큰(팬 키, typ at+jwt)이나 팬 키로 서명한 입장 토큰 꼴을 X-Admission-Token에 넣으면 401이다', async () => {
+test('[ASVS v5.0.0-9.2.2] R057-8 팬 액세스 토큰(팬 키, typ at+jwt)이나 팬·관리·현장 스태프 키로 서명한 입장 토큰 꼴을 X-Admission-Token에 넣으면 401이다', async () => {
   const E = `${EVENT}-k11`;
   const sub = nextSub();
   assertInvalid(await snapshot(E, accessToken(c, 'gw-fan', sub)), '팬 액세스 토큰');
   // 팬 키로 서명하고 typ·aud·iss·event를 입장 토큰처럼 꾸민 것(kid가 팬 키라 목록에 없다)
   assertInvalid(await snapshot(E, token(c, 'fan', { sub, iss: ISSUER, aud: AUD, event: E, jti: randomUUID(), sid: `s-${sub}`, jny: randomUUID() }, { typ: TYP })), '팬 키 + 입장 토큰 꼴');
+  // R057-8: 다른 키 셋(관리·현장 스태프)으로 서명하고 typ·iss·aud·event를 입장 토큰처럼 꾸민 것
+  for (const set of ['admin', 'staff']) {
+    assert.ok(c.keys[set]?.kid, `접속 정보에 ${set} 시험 키가 없다`);
+    assertInvalid(await snapshot(E, token(c, set, { sub, iss: ISSUER, aud: AUD, event: E, jti: randomUUID(), sid: `s-${sub}`, jny: randomUUID() }, { typ: TYP })), `${set} 키 + 입장 토큰 꼴`);
+  }
 });
 
 test('[ASVS v5.0.0-9.2.3] aud가 없거나 fan·["purchase"]·"purchase "·["purchase","fan"]이면 401이다', async () => {
@@ -328,22 +338,35 @@ test('HOT-400 ADR-0288 결정 4 구매 경로 사전 요청(OPTIONS, 입장 토�
   }
 });
 
-test('HOT-400 ADR-0288 결정 6 Lua가 낸 401·403에 www 출처의 교차 출처 머리 넷(Allow-Origin·Allow-Credentials·Vary: Origin·Expose-Headers의 WWW-Authenticate)이 있고, 허용 밖 출처(partner·남의 사이트·null)에는 Allow-Origin·Allow-Credentials가 없다', async () => {
+/** 응답 Vary를 쉼표로 나눈 값 가운데 Origin의 수(같은 이름 머리가 여러 줄이면 손님이 쉼표로 이어 준 것까지 함께 센다) */
+const varyOriginCount = (r) =>
+  [r.headers.vary]
+    .flat()
+    .filter((v) => v !== undefined)
+    .flatMap((v) => String(v).split(','))
+    .filter((v) => v.trim().toLowerCase() === 'origin').length;
+
+test('HOT-400 ADR-0288 결정 6 R057-1 R057-5 Lua가 낸 401·403에 www 출처의 교차 출처 머리 넷(Allow-Origin·Allow-Credentials·Vary: Origin 한 번·Expose-Headers의 WWW-Authenticate)과 보안 머리 셋이 있고 본문은 정본 그대로이며, 허용 밖 출처(partner·남의 사이트·null)에는 Allow-Origin·Allow-Credentials가 없다', async () => {
   const E = `${EVENT}-k15`;
-  // 401: 입장 토큰 없음(키 없이도 본다)
-  const cases = [['401 토큰 없음', (origin) => snapshot(E, undefined, { origin })]];
-  if (c.admission) cases.push(['403 다른 회차', (origin) => snapshot(`${E}-other`, admission(keys().current, E), { origin })]);
-  for (const [label, call] of cases) {
+  // 401: 입장 토큰 없음(키 없이도 본다). 403: 다른 회차 주소(⑨)
+  const cases = [['401 토큰 없음', 401, (origin) => snapshot(E, undefined, { origin })]];
+  if (c.admission) cases.push(['403 다른 회차', 403, (origin) => snapshot(`${E}-other`, admission(keys().current, E), { origin })]);
+  for (const [label, status, call] of cases) {
     const r = await call(c.origins.www);
-    assert.ok(r.status === 401 || r.status === 403, `${label}: ${r.status}`);
-    assert.ok(!isEcho(r), `${label}: 대역에 닿았다`);
+    // 본문·상태·형식(대역에 닿지 않음 포함): 401은 admission-token-invalid, 403은 about:blank Forbidden
+    if (status === 401) assertInvalid(r, label);
+    else assertForbidden(r, label);
+    assert.equal(r.headers['strict-transport-security'], HSTS, `${label}: HSTS`);
+    assert.equal(r.headers['x-content-type-options'], 'nosniff', `${label}: nosniff`);
+    assert.equal(r.headers['content-security-policy'], "default-src 'none'; frame-ancestors 'none'", `${label}: CSP`);
     assert.equal(r.headers['access-control-allow-origin'], c.origins.www, `${label}: Allow-Origin`);
     assert.equal(r.headers['access-control-allow-credentials'], 'true', `${label}: Allow-Credentials`);
-    assert.ok(String(r.headers.vary ?? '').split(/\s*,\s*/).some((v) => v.toLowerCase() === 'origin'), `${label}: Vary ${r.headers.vary}`);
+    assert.equal(varyOriginCount(r), 1, `${label}: Vary의 Origin은 한 번이다(${JSON.stringify(r.headers.vary)})`);
     assert.ok(String(r.headers['access-control-expose-headers'] ?? '').split(/\s*,\s*/).some((v) => v.toLowerCase() === 'www-authenticate'), `${label}: Expose-Headers ${r.headers['access-control-expose-headers']}`);
     for (const bad of [c.origins.partner, 'https://evil.example', 'null']) {
       const x = await call(bad);
-      assert.ok(x.status === 401 || x.status === 403, `${label} ${bad}: ${x.status}`);
+      assert.equal(x.status, status, `${label} ${bad}: ${x.status}`);
+      assert.ok(!isEcho(x), `${label} ${bad}: 대역에 닿았다`);
       assert.equal(x.headers['access-control-allow-origin'], undefined, `${label} ${bad}: Allow-Origin`);
       assert.equal(x.headers['access-control-allow-credentials'], undefined, `${label} ${bad}: Allow-Credentials`);
     }

@@ -182,4 +182,31 @@ describe('Q-T69 ① 키 설정의 시작 검사(fromEnv가 던진다, 값은 문
     expect(thrown(rotating(iso(NOW + UNTIL_MAX_MS))), '정확히 상한').toBeUndefined();
     expect(thrown(rotating(iso(T))), '상한 안').toBeUndefined();
   });
+
+  test('Q-T69 ① R057-6 끝 시각은 날짜·시각(초까지)·시간대가 다 있는 ISO 8601만 받는다: 시간대 없음·날짜만·RFC 2822 글·초 없음이면 시작하지 않고(문구에 키 값 없음), 같은 시각의 Z·+09:00·소수 초 꼴은 시작한다', () => {
+    // 같은 시각 2026-11-19T10:00:00Z(지금 + 9시간, 상한 안)를 여러 꼴로 적는다
+    for (const bad of ['2026-11-19T10:00:00', '2026-11-19', 'Thu, 19 Nov 2026 10:00:00 GMT', '2026-11-19T10:00Z']) {
+      const msg = thrown(rotating(bad));
+      expect(msg, `${bad}: 시작했다`).toBeDefined();
+      for (const v of [K1.priv.d, K2.priv.d, K3.priv.d, K1.pub.x, K2.pub.x]) expect(msg, bad).not.toContain(v);
+    }
+    for (const ok of ['2026-11-19T10:00:00Z', '2026-11-19T19:00:00+09:00', '2026-11-19T10:00:00.000Z']) expect(thrown(rotating(ok)), ok).toBeUndefined();
+  });
+
+  test('[ASVS v5.0.0-9.1.3] R057-7 옛 키·다음 키가 P-256 공개키로 읽히지 않으면(곡선 밖 좌표: 한 키의 x와 다른 키의 y, x가 31바이트) 시작하지 않고 문구에 좌표 값이 없다', () => {
+    const offCurve = (k: { pub: Record<string, string> }, other: { pub: Record<string, string> }) => JSON.stringify({ ...k.pub, y: other.pub.y });
+    const short = (k: { pub: Record<string, string> }) => JSON.stringify({ ...k.pub, x: Buffer.alloc(31, 7).toString('base64url') });
+    const cases: [string, Record<string, string | undefined>][] = [
+      ['옛 키 곡선 밖', { ...rotating(), [PREVIOUS]: offCurve(K1, K3) }],
+      ['옛 키 x 31바이트', { ...rotating(), [PREVIOUS]: short(K1) }],
+      ['다음 키 곡선 밖', { ...rotating(), [NEXT]: offCurve(K3, K1) }],
+      ['다음 키 x 31바이트', { ...rotating(), [NEXT]: short(K3) }],
+    ];
+    for (const [label, env] of cases) {
+      const msg = thrown(env);
+      expect(msg, `${label}: 시작했다`).toBeDefined();
+      for (const v of [K1.pub.x, K1.pub.y, K3.pub.x, K3.pub.y, Buffer.alloc(31, 7).toString('base64url')]) expect(msg, label).not.toContain(v);
+    }
+    expect(thrown(rotating())).toBeUndefined();
+  });
 });
