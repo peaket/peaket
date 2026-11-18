@@ -4,7 +4,7 @@
 // 가짜 스레드(node:worker_threads의 Worker 대역)는 시험이 정한 CPU 사용량(사용자·커널, 마이크로초)을 cpuUsage로 돌려주고, 시계는 가짜라 벽시계 5·10초를 곧바로 넘긴다.
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import type { PoolOutcome } from '../src/seatmap-worker/pool.js';
+import type { Liveness, ParsePoolOptions, PoolOutcome } from '../src/seatmap-worker/pool.js';
 
 interface Cpu {
   user: number;
@@ -17,6 +17,10 @@ interface FakeThread extends EventEmitter {
   terminateCalls: number;
   /** 정하면 terminate()가 이 약속이 풀릴 때까지 끝나지 않는다 */
   exitGate?: Promise<void>;
+  /** 참이면 cpuUsage()가 끝나지 않는다(R174-2 장애 꼴) */
+  cpuHang: boolean;
+  /** terminate()를 처음 부른 가짜 시각(ms) */
+  terminatedAt?: number;
 }
 
 const h = vi.hoisted(() => ({ threads: [] as FakeThread[] }));
@@ -28,6 +32,8 @@ vi.mock('node:worker_threads', async () => {
     posted: unknown[] = [];
     terminateCalls = 0;
     exitGate?: Promise<void>;
+    cpuHang = false;
+    terminatedAt?: number;
     constructor(
       readonly url: URL,
       readonly options: FakeThread['options'],
@@ -39,18 +45,20 @@ vi.mock('node:worker_threads', async () => {
       this.posted.push(m);
     }
     cpuUsage(prev?: Cpu): Promise<Cpu> {
+      if (this.cpuHang) return new Promise<Cpu>(() => {});
       const now = { ...this.cpu };
       return Promise.resolve(prev ? { user: now.user - prev.user, system: now.system - prev.system } : now);
     }
     terminate(): Promise<number> {
       this.terminateCalls++;
+      this.terminatedAt ??= Date.now();
       return (this.exitGate ?? Promise.resolve()).then(() => 1);
     }
   }
   return { Worker };
 });
 
-const { ParsePool } = await import('../src/seatmap-worker/pool.js');
+const { Busy, ParsePool } = await import('../src/seatmap-worker/pool.js');
 
 const MS = 1_000; // 마이크로초
 /** 'ready' 전(스레드가 실리는 동안)에 쓴 CPU: 해석 시간에 넣지 않는다 */
@@ -152,5 +160,127 @@ describe('좌석맵 해석 작업 풀: CPU 5초 상한의 경계', () => {
   test('BAT-174 S-T34 ④ 기본 스레드는 힙 384MiB로 띄우고 환경 값·실행 인자를 넘기지 않는다', async () => {
     const s = await started();
     expect(s.w.options).toMatchObject({ env: {}, execArgv: [], resourceLimits: { maxOldGenerationSizeMb: 384 } });
+  });
+});
+
+// 리뷰 반영(R174-1·R174-2, 정본 f68e59d9: docs/features/seat-hold.md §10, docs/verification.md §4.1 좌석맵 가져오기 해석 줄, ADR-0257 결정 5).
+// 정본 값: 부른 쪽이 끊으면(gRPC 취소, 데드라인으로 끊긴 때 포함) 해석 중이라도 바로 끝낸다. 벽시계 바깥 막이 10초 [가정]는 'ready' 때부터다.
+// 잘린 스레드의 끝내기 기다림 상한 1초 [가정], 넘으면 실패로 답한 뒤 프로세스를 끝 코드 1로 끝낸다. 작업 줄은 기다리는 요청 4개·동시 해석 1 [가정] 그대로다.
+// 프로세스 끝내기는 풀 옵션(exitProcess, 계획이 권한 꼴)이나 process.exit 어느 쪽으로 불러도 센다(이름과 꼴은 구현이 정한다).
+const threadUrl = new URL('file:///pool-test-thread.mjs');
+const svg = () => new TextEncoder().encode('<svg/>');
+
+describe('좌석맵 해석 작업 풀: 리뷰 반영(취소·끝내기 상한·작업 줄)', () => {
+  let exits: unknown[];
+  beforeEach(() => {
+    exits = [];
+    vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exits.push(code);
+    }) as never);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  const pool = () => new ParsePool({ threadUrl, exitProcess: (code: number) => exits.push(code) } as ParsePoolOptions);
+
+  for (const why of ['cancelled', 'deadline'] as const) {
+    test(`BAT-174 R174-1 해석 중에 부른 쪽이 끊으면(${why}) 스레드를 바로 끝내고 다음 차례로 넘긴다`, async () => {
+      const p = pool();
+      let state: ReturnType<Liveness> = 'alive';
+      let first: PoolOutcome | undefined;
+      void p.run(svg(), 'SVG', () => state).then((o) => (first = o));
+      const w = h.threads[0]!;
+      w.emit('message', { kind: 'ready' });
+      await flush();
+      let second: PoolOutcome | undefined;
+      void p.run(svg(), 'SVG').then((o) => (second = o));
+      // CPU를 거의 쓰지 않고 해석 중이다. 1초 동안은 아무 일도 없다
+      w.cpu = { user: 10 * MS, system: 0 };
+      await advance(1_000);
+      expect(first).toBeUndefined();
+      expect(w.terminateCalls).toBe(0);
+      expect(h.threads).toHaveLength(1);
+      // 부른 쪽이 끊었다: 벽시계 바깥 막이(10초)까지 기다리지 않는다
+      state = why;
+      await advance(100);
+      expect(w.terminateCalls).toBe(1);
+      expect(first).toEqual({ kind: 'skipped', why });
+      // 줄에서 기다리던 다음 가져오기가 받는다
+      expect(h.threads).toHaveLength(2);
+      h.threads[1]!.emit('message', { kind: 'ready' });
+      await flush();
+      h.threads[1]!.emit('message', RESULT);
+      await flush();
+      expect(second).toEqual({ kind: 'result', reply: RESULT });
+      expect(exits).toEqual([]);
+    });
+  }
+
+  test('BAT-174 R174-2 잘린 스레드의 terminate가 1초 안에 끝나지 않으면 실패로 답하고 프로세스를 끝 코드 1로 끝낸다', async () => {
+    const p = pool();
+    let first: PoolOutcome | undefined;
+    void p.run(svg(), 'SVG').then((o) => (first = o));
+    const w = h.threads[0]!;
+    w.exitGate = new Promise<void>(() => {}); // 끝나지 않는 스레드
+    w.emit('message', { kind: 'ready' });
+    await flush();
+    let answeredAtExit: boolean | undefined;
+    vi.mocked(process.exit).mockImplementation(((code?: number) => {
+      answeredAtExit ??= first !== undefined;
+      exits.push(code);
+    }) as never);
+    w.cpu = { user: 5_000 * MS, system: 0 };
+    await advance(100);
+    expect(w.terminateCalls).toBeGreaterThanOrEqual(1);
+    const t = w.terminatedAt!;
+    // 끝내기 기다림 999ms: 아직 답도 끝내기도 없다
+    await advance(t + 999 - Date.now());
+    expect(first).toBeUndefined();
+    expect(exits).toEqual([]);
+    // 1초: 실패로 답하고(→ INTERNAL) 프로세스를 끝 코드 1로 끝낸다. 답이 먼저다
+    await advance(1);
+    await advance(100);
+    expect(first).toEqual({ kind: 'failed' });
+    expect(exits).toEqual([1]);
+    expect(answeredAtExit).toBe(true);
+  });
+
+  test("BAT-174 R174-2 'ready' 뒤 기준 CPU 읽기가 끝나지 않아도 벽시계 바깥 막이 10초에 끝난다", async () => {
+    const p = pool();
+    let first: PoolOutcome | undefined;
+    void p.run(svg(), 'SVG').then((o) => (first = o));
+    const w = h.threads[0]!;
+    w.cpuHang = true;
+    const readyAt = Date.now();
+    w.emit('message', { kind: 'ready' });
+    await flush();
+    await advance(readyAt + 10_000 - 1 - Date.now());
+    expect(first).toBeUndefined();
+    expect(w.terminateCalls).toBe(0);
+    await advance(1);
+    expect(w.terminateCalls).toBe(1);
+    expect(first).toEqual({ kind: 'failed' });
+    expect(exits).toEqual([]);
+  });
+
+  test('BAT-174 R174-1 R174-2 작업 줄은 기다리는 요청 4개·동시 해석 1 그대로다', async () => {
+    const p = pool();
+    const outcomes: (PoolOutcome | undefined)[] = [];
+    void p.run(svg(), 'SVG').then((o) => (outcomes[0] = o));
+    for (let i = 1; i <= 4; i++) void p.run(svg(), 'SVG').then((o) => (outcomes[i] = o));
+    await expect(p.run(svg(), 'SVG')).rejects.toBeInstanceOf(Busy);
+    // 다섯이 들어왔어도 스레드는 하나뿐이다
+    expect(h.threads).toHaveLength(1);
+    for (let i = 0; i < 5; i++) {
+      const w = h.threads[i]!;
+      w.emit('message', { kind: 'ready' });
+      await flush();
+      expect(h.threads).toHaveLength(i + 1);
+      w.emit('message', RESULT);
+      await flush();
+      expect(outcomes[i]).toEqual({ kind: 'result', reply: RESULT });
+    }
+    expect(h.threads).toHaveLength(5);
+    expect(exits).toEqual([]);
   });
 });
