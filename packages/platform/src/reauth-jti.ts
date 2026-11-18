@@ -1,9 +1,12 @@
-// 재인증 토큰 jti의 1회용 기록(SEC-03). 같은 재인증 토큰을 5분 안에 두 번 쓰지 못하게 한다.
+// 재인증 토큰 jti의 1회용 기록(SEC-03). 같은 재인증 토큰을 수명(5분, 시계 차이 30초 허용) 안에 두 번 쓰지 못하게 한다.
 // Redis `SET NX PX`로 원자적으로 선점하고, Redis가 없거나 실패하면 닫힌 쪽(사용 불가)으로 본다.
 import type { HotRedis } from './redis.js';
 
-/** 재인증 토큰 jti를 기억하는 시간(5분). 토큰 자체 수명이 더 짧으면 부르는 쪽이 줄인다 */
-export const REAUTH_JTI_TTL_MS = 5 * 60_000;
+/**
+ * 재인증 토큰 jti를 기억하는 시간의 상한(5분 + 시계 차이 30초 [가정], docs/data.md §3 `reauth:jti:{jti}`,
+ * docs/features/transfer-refund.md §3.1 '한 번 쓰기'). 기록이 토큰보다 먼저 사라지지 않게 한다. 토큰의 남은 수명이 더 짧으면 그만큼 줄인다
+ */
+export const REAUTH_JTI_TTL_MS = 5 * 60_000 + 30_000;
 
 export interface ReauthJtiStore {
   /** 처음 쓰는 jti면 true, 이미 쓴 jti면 false. 저장소를 쓸 수 없으면 던진다 */
