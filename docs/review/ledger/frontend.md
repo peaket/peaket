@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 84 | 47 | 8 | 2 | 0 | 5 | 0 | 22 | 35 | 203 |
-| 합계 | 84 | 47 | 8 | 2 | 0 | 5 | 0 | 22 | 35 | 203 |
+| B | 85 | 47 | 8 | 2 | 0 | 4 | 0 | 22 | 35 | 203 |
+| 합계 | 85 | 47 | 8 | 2 | 0 | 4 | 0 | 22 | 35 | 203 |
 
 ## docs/frontend.md
 
@@ -45,7 +45,7 @@
 | FE-T28 | ⑤ | 관제 SSE 흐름 계약 | ⑤ 위젯 흐름만 다시 열고 늘 여는 흐름은 그대로다. 콘솔 번들에 urql·graphql-ws·socket.io-client가 없다 | 빈칸 | B | — |
 | FE-T29 | ③ | 관제 Module Federation과 한 앱 기준선 | ③은 두 빌드 모두 셸·경보 패널과 다른 위젯이 그대로여야 한다 | 빈칸 | B | — |
 | FE-T30 | — | 서버가 그린 SEED 부품의 스타일과 CSP(ADR-0111) | 세 엔진 모두 계산된 스타일 차이 0, style 속성 위반 보고 0, nonce 없는 `<style>`·인라인 스크립트는 막힘 | 자동 시험 | B | 시험: tools/web-checks/csp/web.spec.mjs |
-| FE-T31 | — | 재배치·확대·글자 간격(WCAG 1.4.10·1.4.4·1.4.12… | 예외 영역 밖 가로 스크롤 0, 잘림·겹침 0, 모든 조작 요소에 닿는다 | 다른 단계 | B | BAT-171 · 재배치·글자 확대·글자 간격 시험의 첫 실제 실행(BAT-170 웨이브 끝 게이트, 2026-11-16)이 세 엔진에서 실패해(관제 도착 경로, 좌석맵 예외 상자, 320 폭 닿기, 가린 초점)… |
+| FE-T31 | — | 재배치·확대·글자 간격(WCAG 1.4.10·1.4.4·1.4.12… | 예외 영역 밖 가로 스크롤 0, 잘림·겹침 0, 모든 조작 요소에 닿는다 | 자동 시험 | B | 시험: tools/web-checks/reflow/reflow.spec.mjs, tools/web-checks/reflow/rules.test.mjs |
 | FE-T32 | ① | 시계 표본 규칙과 차례 반영 측정(추천 적용 2026-10-28… | ① 보정값이 바뀌지 않는다 | 측정 | B | 구간 측정 · 시범 범위 표의 분류(차례 반영 측정)를 옮겼다. 판정 ①~④는 가짜 시계로 도는 PR 시험으로도 볼 수 있어, 이 영역을 고치는 묶음에서 다시 본다 |
 | FE-T32 | ② | 시계 표본 규칙과 차례 반영 측정(추천 적용 2026-10-28… | ② `serverTimeMs`로만 바뀐다 | 측정 | B | 구간 측정 · 시범 범위 표의 분류(차례 반영 측정)를 옮겼다. 판정 ①~④는 가짜 시계로 도는 PR 시험으로도 볼 수 있어, 이 영역을 고치는 묶음에서 다시 본다 |
 | FE-T32 | ③ | 시계 표본 규칙과 차례 반영 측정(추천 적용 2026-10-28… | ③ 보정 시계가 흔들리지 않는다 | 측정 | B | 구간 측정 · 시범 범위 표의 분류(차례 반영 측정)를 옮겼다. 판정 ①~④는 가짜 시계로 도는 PR 시험으로도 볼 수 있어, 이 영역을 고치는 묶음에서 다시 본다 |
@@ -149,7 +149,7 @@
 | v5.0.0-3.4.8 | — | L3 | 문서를 그리는 응답에 COOP `same-origin`이나 `same-origin-allow-popups`를 둔다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
 | v5.0.0-3.5.6 | — | L3 | JSONP 기능을 어디에서도 켜지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-3.5.7 | — | L3 | 인가가 필요한 데이터를 JavaScript 파일 같은 스크립트 응답에 넣지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
-| v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 다른 단계 | B | BAT-171 · CSP 시험이 같은 출처 외부 스크립트 26건에서 `integrity` 없음으로 실패했다(BAT-170 웨이브 끝 게이트, 2026-11-16). HOT-391(묶음 BAT-171)로 넘겼고… |
+| v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 다른 단계 | B | BAT-172 · CSP 시험이 같은 출처 외부 스크립트 26건에서 `integrity` 없음으로 실패했다(BAT-170 웨이브 끝 게이트, 2026-11-16). BAT-171 2차 CI(실행… |
 | v5.0.0-3.7.5 | — | L3 | 브라우저가 기대한 보안 기능을 지원하지 않으면 문서대로(경고, 차단) 동작한다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-13.4.7 | — | L3 | 웹 계층은 정한 확장자 파일만 내보내 정보·설정·소스 코드 유출을 막는다. | 자동 시험 | B | 시험: apps/web/scripts/hide-source-maps.test.mjs, tools/web-checks/csp/web.spec.mjs 외 1곳 |
 | v5.0.0-4.1.1 | — | L1 | 본문이 있는 모든 HTTP 응답에 실제 내용과 맞는 `Content-Type`을 두고, 텍스트·XML처럼 IANA 미디어 타입이 정하는 경우 안전한 문자… | ID만 | B | 다른 곳 시험: services/purchase-svc/test/http.test.ts, services/v0-monolith/test-int/queue.int.test.ts (영역:… |

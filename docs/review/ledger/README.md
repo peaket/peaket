@@ -8,16 +8,16 @@
 - 빈칸 849, ID만 1208: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 5(모두 사유가 있다): 완료로 세지 않고 따로 센다
-- 다시 볼 notes 8: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
+- 다시 볼 notes 7: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
 
 ## 등급별 상태
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 354 | 116 | 23 | 2 | 2 | 28 | 1 | 0 | 130 | 656 |
-| B | 951 | 1092 | 19 | 2 | 3 | 66 | 0 | 245 | 718 | 3096 |
+| B | 952 | 1092 | 19 | 2 | 3 | 65 | 0 | 245 | 718 | 3096 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 1305 | 1208 | 42 | 5 | 5 | 94 | 1 | 245 | 849 | 3754 |
+| 합계 | 1306 | 1208 | 42 | 5 | 5 | 93 | 1 | 245 | 849 | 3754 |
 
 ## 분야별 상태
 
@@ -30,7 +30,7 @@
 | delivery | B | 36 | 31 | 0 | 0 | 0 | 0 | 0 | 3 | 7 | 77 |
 | devops | B | 50 | 6 | 0 | 0 | 1 | 1 | 0 | 0 | 56 | 114 |
 | forensic-replay | B | 4 | 121 | 0 | 0 | 0 | 3 | 0 | 19 | 44 | 191 |
-| frontend | B | 84 | 47 | 8 | 2 | 0 | 5 | 0 | 22 | 35 | 203 |
+| frontend | B | 85 | 47 | 8 | 2 | 0 | 4 | 0 | 22 | 35 | 203 |
 | identity | A | 7 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 8 |
 | identity | B | 244 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 393 |
 | notify | B | 2 | 116 | 0 | 0 | 0 | 0 | 0 | 21 | 40 | 179 |
@@ -55,7 +55,7 @@
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | B | 36 | 3 | 8 | 0 | 0 | 0 | 0 | 0 | 56 | 103 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 1305 | 1208 | 42 | 5 | 5 | 94 | 1 | 245 | 849 | 3754 |
+| 합계 |  | 1306 | 1208 | 42 | 5 | 5 | 93 | 1 | 245 | 849 | 3754 |
 
 ## 다시 볼 notes
 
@@ -66,7 +66,6 @@
 | P-T39 ① | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts… |
 | P-T39 ② | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | P-T39 ④ | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
-| FE-T31 | 다른 단계 | tools/web-checks/reflow/reflow.spec.mjs, tools/web-checks/reflow/rules.test.mjs |
 | frontend:v5.0.0-3.6.1 | 다른 단계 | tools/web-checks/csp/web.spec.mjs |
 | payment:v5.0.0-3.4.5 | 다른 단계 | apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 
@@ -100,8 +99,8 @@
 - docs/features/identity.md:781: I-T73 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/queue-admission.md:709: Q-T64 시나리오 칸의 ⑤이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/seat-hold.md:586: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
-- docs/frontend.md:1634: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
-- docs/frontend.md:1639: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
+- docs/frontend.md:1635: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
+- docs/frontend.md:1640: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
 - docs/security/authz-matrix.md:357: AZ-T15 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 - docs/verification.md:646: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 
