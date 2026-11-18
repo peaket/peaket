@@ -1,0 +1,58 @@
+{
+  "run_id": "2026-11-19-bat058-ma-p16-sweep-01-p16-q2-c16-r1",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-gw",
+  "scale": {
+    "users": null,
+    "arrival_rps": 1500.0,
+    "duration_s": 60,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/gw.js gw sweep gw-queue/gw-queue-buy maxConnections=16 maxParallelRequests=16 maxPendingRequests=2 delay=normal rate=1500/s mix=normal",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "26f5ca4419c4629c395b7681a8616a8fc48e7baa",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 4·메모리 2048Mi씩, kind 안, 게이트웨이 프록시 Service로 바로)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-18T16:00:33Z",
+  "ended_at": "2026-11-18T16:01:43Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 6.281895,
+    "p95_ms": 21.25791455,
+    "p99_ms": 100.28360708000002,
+    "error_rate": 0.022946104102851247,
+    "requests": 91083,
+    "rps": 1518.05,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "fail",
+  "notes": "게이트웨이 차단 상한 스윕(local-gw, V-T43, docs/infra.md §4.1): V-T43 ① fail(정상 부하에서 503 2090건; Envoy 넘침 18225(upstream_cx_overflow 16098, upstream_rq_pending_overflow 2127)); 흐름 모두 보낸 91083(2xx 88993·503 2090·429 0·그 밖 0); entry 보낸 90001(2xx 87911·503 2090·429 0·그 밖 0); hold 보낸 901(2xx 901·503 0·429 0·그 밖 0); pay 보낸 181(2xx 181·503 0·429 0·그 밖 0); 정상 부하 503 2090건(세 흐름 합, 허용 0건); entry 2xx 평균 8.7213ms(발생기 2xx 수로 가중); 프록시 gw-queue 파드 1개, 프록시 EnvoyProxy peaket-proxy-queue CPU 요청 100m·한도 (없음), 일꾼 수 2; 일꾼 수(관리 포트) envoy-envoy-gateway-system-gw-queue-38f088e6-5c4d769886-txqjb 2, 기대 2(flag); 묶음 httproute/envoy-gateway-system/gw-queue-buy/rule/0; 넘침 18225, 처리 중 최대 16, 보류 최대 2",
+  "collected_at": "2026-11-18T16:01:48Z",
+  "tool": "tools/perf-ledger/collect.py"
+}
