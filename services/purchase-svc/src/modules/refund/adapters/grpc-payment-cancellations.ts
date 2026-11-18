@@ -1,5 +1,6 @@
 // payment-svc 일반 취소 gRPC 어댑터(GAT-080). 주문 ID로 결제를 찾고(GetPayment) 그 payment_id로 부분 취소를 부른다.
 // payment-svc는 cancel-{cancellationId} 멱등키로 결제사 부분 취소를 하고, 성공한 금액을 원장 cancelled_amount에 더한다.
+// 선택 인자 scope(DEPOSIT_ONLY)가 있으면 요청에 CANCEL_SCOPE_DEPOSIT_ONLY를 싣는다(탈퇴 참여자의 입금 전 취소만, payment §6 '입금 전 취소만 부르기', BAT-010).
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { paymentV1Payment } from '@peaket/contracts/proto';
@@ -65,6 +66,7 @@ export class GrpcPaymentCancellations implements PaymentCancellations {
         cancellation_id: q.cancellationId,
         amount: { krw: q.amount },
         reason: q.reason,
+        ...(q.scope === 'DEPOSIT_ONLY' ? { scope: 'CANCEL_SCOPE_DEPOSIT_ONLY' } : {}),
       });
     } catch {
       return 'UNKNOWN';
