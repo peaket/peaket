@@ -19,7 +19,8 @@ p AS (
      WHERE e.order_id = pay.order_id AND e.to_status = 'APPROVED' AND e.seq > l.last_wait
      ORDER BY e.seq LIMIT 1
   ) a ON true
-  WHERE pay.approved_at IS NOT NULL
+  -- TICKET 결제만(P3와 같다, ADR-0299 결정 1, BAT-600)
+  WHERE pay.approved_at IS NOT NULL AND pay.order_kind = 'TICKET'
 ),
 late AS (
   SELECT p.order_id, format('approved_at=%s base_at=%s ended_at=%s', p.approved_at, p.base_at, coalesce(p.ended_at::text, 'none')) AS detail
