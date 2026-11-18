@@ -35,7 +35,7 @@ export function FunnelWidget({ data, ...base }: FunnelWidgetProps) {
         </>
       }
     >
-      <figure className="col" style={{ gap: 4 }}>
+      <figure data-reflow-exception="" className="col" style={{ gap: 4 }}>
         <figcaption className="row between t-xs">
           <span className="fw-b">입장 → 첫 홀드 성공 → 결제 접수 → 승인 → 발권</span>
           <span className="muted">숫자 · 앞 단계 대비</span>

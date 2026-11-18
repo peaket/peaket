@@ -93,40 +93,42 @@ export function LinkGraph({ graph, selectedId, onSelect, height = 380 }: LinkGra
   const summary = `계정 ${accounts.filter((a) => a.inCluster !== false).length}개(묶음 밖 ${accounts.filter((a) => a.inCluster === false).length}개)가 ${[...kinds].join('·')} 연결 값에 이어진 그림입니다. 같은 내용을 표로 보기에서 볼 수 있습니다.`;
   return (
     // 연결 그래프는 예외 상자다(FE-T31, docs/frontend.md §5.17 '예외 상자')
-    <svg className="chart" data-reflow-exception="" viewBox={`0 0 ${w} ${h}`} role="img" aria-labelledby={`${uid}-t ${uid}-d`} style={{ height: 'auto', maxHeight: h }}>
-      <title id={`${uid}-t`}>연결 그래프</title>
-      <desc id={`${uid}-d`}>{summary}</desc>
-      {graph.edges.map((e, i) => {
-        const a = pos.get(e.from);
-        const b = pos.get(e.to);
-        if (!a || !b) return null;
-        const on = selectedId === e.from || selectedId === e.to;
-        return (
-          <line
-            key={i}
-            x1={a.x}
-            y1={a.y}
-            x2={b.x}
-            y2={b.y}
-            stroke={on ? 'var(--text)' : 'var(--border)'}
-            strokeWidth={on ? 2 : Math.min(1 + e.count * 0.4, 2.4)}
-            strokeDasharray={e.kind === 'IDENTITY_CONFLICT' || e.kind === 'IP' || e.kind === 'ASN' ? '4 3' : undefined}
-          />
-        );
-      })}
-      {graph.nodes.map((n) => {
-        const p = pos.get(n.nodeId);
-        if (!p) return null;
-        return (
-          <g key={n.nodeId} onClick={() => onSelect(n.nodeId)} style={{ cursor: 'pointer' }} aria-hidden="true">
-            <Shape kind={n.kind} x={p.x} y={p.y} selected={selectedId === n.nodeId} dashed={n.kind === 'ACCOUNT' && n.inCluster === false} />
-            <text className="axis" x={p.x} y={p.y + (n.kind === 'ACCOUNT' ? 25 : 28)} textAnchor="middle" style={{ fill: 'var(--text)' }}>
-              {n.label}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+    <div data-reflow-exception="">
+      <svg className="chart" viewBox={`0 0 ${w} ${h}`} role="img" aria-labelledby={`${uid}-t ${uid}-d`} style={{ height: 'auto', maxHeight: h }}>
+        <title id={`${uid}-t`}>연결 그래프</title>
+        <desc id={`${uid}-d`}>{summary}</desc>
+        {graph.edges.map((e, i) => {
+          const a = pos.get(e.from);
+          const b = pos.get(e.to);
+          if (!a || !b) return null;
+          const on = selectedId === e.from || selectedId === e.to;
+          return (
+            <line
+              key={i}
+              x1={a.x}
+              y1={a.y}
+              x2={b.x}
+              y2={b.y}
+              stroke={on ? 'var(--text)' : 'var(--border)'}
+              strokeWidth={on ? 2 : Math.min(1 + e.count * 0.4, 2.4)}
+              strokeDasharray={e.kind === 'IDENTITY_CONFLICT' || e.kind === 'IP' || e.kind === 'ASN' ? '4 3' : undefined}
+            />
+          );
+        })}
+        {graph.nodes.map((n) => {
+          const p = pos.get(n.nodeId);
+          if (!p) return null;
+          return (
+            <g key={n.nodeId} onClick={() => onSelect(n.nodeId)} style={{ cursor: 'pointer' }} aria-hidden="true">
+              <Shape kind={n.kind} x={p.x} y={p.y} selected={selectedId === n.nodeId} dashed={n.kind === 'ACCOUNT' && n.inCluster === false} />
+              <text className="axis" x={p.x} y={p.y + (n.kind === 'ACCOUNT' ? 25 : 28)} textAnchor="middle" style={{ fill: 'var(--text)' }}>
+                {n.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 

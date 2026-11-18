@@ -56,7 +56,7 @@ export function EntryThroughputWidget({ data, ...base }: EntryThroughputWidgetPr
         </>
       }
     >
-      <figure className="col" style={{ gap: 2 }}>
+      <figure data-reflow-exception="" className="col" style={{ gap: 2 }}>
         <figcaption className="row between t-xs">
           <span className="fw-b">진입 요청(초당)</span>
           <span className="num muted">{rps.caption}</span>
@@ -79,7 +79,7 @@ export function EntryThroughputWidget({ data, ...base }: EntryThroughputWidgetPr
           <Ticks ticks={ticks} />
         </svg>
       </figure>
-      <figure className="col" style={{ gap: 2 }}>
+      <figure data-reflow-exception="" className="col" style={{ gap: 2 }}>
         <figcaption className="row between t-xs">
           <span className="fw-b">진입 응답 p99</span>
           <span className="row" style={{ gap: 8 }}>
@@ -105,7 +105,7 @@ export function EntryThroughputWidget({ data, ...base }: EntryThroughputWidgetPr
           <Ticks ticks={ticks} />
         </svg>
       </figure>
-      <figure className="col" style={{ gap: 2 }}>
+      <figure data-reflow-exception="" className="col" style={{ gap: 2 }}>
         <figcaption className="row between t-xs">
           <span className="fw-b">입장 처리량(serving 전진, 초당)</span>
           <span className="num muted">{serving.caption}</span>

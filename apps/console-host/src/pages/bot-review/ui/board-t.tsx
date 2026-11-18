@@ -329,24 +329,26 @@ export function MainT({ v, close, go }: { v: V; close?: () => void; go?: (state:
                     표로 보기
                   </button>
                 </div>
-                <svg className="chart" viewBox="0 0 640 80" role="img" aria-label="놓친 봇 비율 추정 1.5%, 95% 구간 0.2%에서 5.3%, 잠정">
-                  <line className="grid" x1="20" y1="44" x2="620" y2="44" />
-                  <line className="grid" x1="20" y1="39" x2="20" y2="49" />
-                  <line className="grid" x1="140" y1="39" x2="140" y2="49" />
-                  <line className="grid" x1="260" y1="39" x2="260" y2="49" />
-                  <line className="grid" x1="380" y1="39" x2="380" y2="49" />
-                  <line className="grid" x1="500" y1="39" x2="500" y2="49" />
-                  <line className="grid" x1="620" y1="39" x2="620" y2="49" />
-                  <line className="line" x1="30.8" y1="44" x2="337.4" y2="44" style={{ strokeWidth: "6" }} />
-                  <circle cx="109.4" cy="44" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                  <text className="axis" x="109.4" y="24" textAnchor="middle">추정 1.5%</text>
-                  <text className="axis" x="20" y="70" textAnchor="middle">0%</text>
-                  <text className="axis" x="140" y="70" textAnchor="middle">2%</text>
-                  <text className="axis" x="260" y="70" textAnchor="middle">4%</text>
-                  <text className="axis" x="380" y="70" textAnchor="middle">6%</text>
-                  <text className="axis" x="500" y="70" textAnchor="middle">8%</text>
-                  <text className="axis" x="620" y="70" textAnchor="middle">10%</text>
-                </svg>
+                <div data-reflow-exception="">
+                  <svg className="chart" viewBox="0 0 640 80" role="img" aria-label="놓친 봇 비율 추정 1.5%, 95% 구간 0.2%에서 5.3%, 잠정">
+                    <line className="grid" x1="20" y1="44" x2="620" y2="44" />
+                    <line className="grid" x1="20" y1="39" x2="20" y2="49" />
+                    <line className="grid" x1="140" y1="39" x2="140" y2="49" />
+                    <line className="grid" x1="260" y1="39" x2="260" y2="49" />
+                    <line className="grid" x1="380" y1="39" x2="380" y2="49" />
+                    <line className="grid" x1="500" y1="39" x2="500" y2="49" />
+                    <line className="grid" x1="620" y1="39" x2="620" y2="49" />
+                    <line className="line" x1="30.8" y1="44" x2="337.4" y2="44" style={{ strokeWidth: "6" }} />
+                    <circle cx="109.4" cy="44" r="7" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                    <text className="axis" x="109.4" y="24" textAnchor="middle">추정 1.5%</text>
+                    <text className="axis" x="20" y="70" textAnchor="middle">0%</text>
+                    <text className="axis" x="140" y="70" textAnchor="middle">2%</text>
+                    <text className="axis" x="260" y="70" textAnchor="middle">4%</text>
+                    <text className="axis" x="380" y="70" textAnchor="middle">6%</text>
+                    <text className="axis" x="500" y="70" textAnchor="middle">8%</text>
+                    <text className="axis" x="620" y="70" textAnchor="middle">10%</text>
+                  </svg>
+                </div>
                 <figcaption className="t-xs muted">막대는 95% 구간(0.2~5.3%), 점은 추정값(1.5%)입니다.</figcaption>
               </figure>
               <ul className="col t-sm muted" style={{ gap: "4px" }}>

@@ -651,83 +651,87 @@ export function MainD({ v, close, go }: { v: V; close?: () => void; go?: (state:
                   </div>
                   {v.isPaused ? (
                     <>
-                      <svg className="chart" viewBox="0 0 1100 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:01:40입니다.">
-                        <line className="grid" x1="50" y1="20" x2="1080" y2="20" />
-                        <line className="grid" x1="50" y1="40" x2="1080" y2="40" />
-                        <line className="grid" x1="50" y1="65" x2="1080" y2="65" />
-                        <line className="grid" x1="50" y1="90" x2="1080" y2="90" />
-                        <line className="grid" x1="50" y1="115" x2="1080" y2="115" />
-                        <line className="grid" x1="50" y1="140" x2="1080" y2="140" />
-                        <text className="axis" x="44" y="44" textAnchor="end">8초</text>
-                        <text className="axis" x="44" y="69" textAnchor="end">6초</text>
-                        <text className="axis" x="44" y="94" textAnchor="end">4초</text>
-                        <text className="axis" x="44" y="119" textAnchor="end">2초</text>
-                        <text className="axis" x="44" y="144" textAnchor="end">0</text>
-                        <text className="axis" x="50" y="160" textAnchor="middle">11:00</text>
-                        <text className="axis" x="307.5" y="160" textAnchor="middle">11:05</text>
-                        <text className="axis" x="565" y="160" textAnchor="middle">11:10</text>
-                        <text className="axis" x="822.5" y="160" textAnchor="middle">11:15</text>
-                        <text className="axis" x="1080" y="160" textAnchor="middle">11:20</text>
-                        <line className="slo-line" x1="50" y1="77.5" x2="1080" y2="77.5" />
-                        <text className="axis" x="1076" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
-                        <polyline className="line" points="50,125 75.8,123.8 101.5,124.4 127.3,105 135.8,72.5 153,65 178.8,63.8 204.5,66.3 230.3,68.8 256,75 281.8,82.5 333.3,88.8 384.8,95 436.3,102.5 487.8,110 539.3,116.3 590.8,120 642.3,122.5 693.8,122.5 723.8,121.3 745.3,113.8 771,117.5 822.5,121.3 874,122.5 925.5,123.8 977,123.8 1028.5,125 1080,125" />
-                        <circle cx="135.8" cy="20" r="6" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="161.6" cy="20" r="6" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="173.6" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="250" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="590.8" cy="20" r="6" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="723.8" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="978.7" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <text className="axis" x="135.8" y="9" textAnchor="middle">1</text>
-                        <text className="axis" x="161.6" y="9" textAnchor="middle">2</text>
-                        <text className="axis" x="173.6" y="9" textAnchor="middle">3</text>
-                        <text className="axis" x="250" y="9" textAnchor="middle">4</text>
-                        <text className="axis" x="590.8" y="9" textAnchor="middle">5</text>
-                        <text className="axis" x="723.8" y="9" textAnchor="middle">6</text>
-                        <text className="axis" x="978.7" y="9" textAnchor="middle">7</text>
-                        <line className="now" x1="135.8" y1="28" x2="135.8" y2="142" />
-                      </svg>
+                      <div data-reflow-exception="">
+                        <svg className="chart" viewBox="0 0 1100 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:01:40입니다.">
+                          <line className="grid" x1="50" y1="20" x2="1080" y2="20" />
+                          <line className="grid" x1="50" y1="40" x2="1080" y2="40" />
+                          <line className="grid" x1="50" y1="65" x2="1080" y2="65" />
+                          <line className="grid" x1="50" y1="90" x2="1080" y2="90" />
+                          <line className="grid" x1="50" y1="115" x2="1080" y2="115" />
+                          <line className="grid" x1="50" y1="140" x2="1080" y2="140" />
+                          <text className="axis" x="44" y="44" textAnchor="end">8초</text>
+                          <text className="axis" x="44" y="69" textAnchor="end">6초</text>
+                          <text className="axis" x="44" y="94" textAnchor="end">4초</text>
+                          <text className="axis" x="44" y="119" textAnchor="end">2초</text>
+                          <text className="axis" x="44" y="144" textAnchor="end">0</text>
+                          <text className="axis" x="50" y="160" textAnchor="middle">11:00</text>
+                          <text className="axis" x="307.5" y="160" textAnchor="middle">11:05</text>
+                          <text className="axis" x="565" y="160" textAnchor="middle">11:10</text>
+                          <text className="axis" x="822.5" y="160" textAnchor="middle">11:15</text>
+                          <text className="axis" x="1080" y="160" textAnchor="middle">11:20</text>
+                          <line className="slo-line" x1="50" y1="77.5" x2="1080" y2="77.5" />
+                          <text className="axis" x="1076" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
+                          <polyline className="line" points="50,125 75.8,123.8 101.5,124.4 127.3,105 135.8,72.5 153,65 178.8,63.8 204.5,66.3 230.3,68.8 256,75 281.8,82.5 333.3,88.8 384.8,95 436.3,102.5 487.8,110 539.3,116.3 590.8,120 642.3,122.5 693.8,122.5 723.8,121.3 745.3,113.8 771,117.5 822.5,121.3 874,122.5 925.5,123.8 977,123.8 1028.5,125 1080,125" />
+                          <circle cx="135.8" cy="20" r="6" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="161.6" cy="20" r="6" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="173.6" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="250" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="590.8" cy="20" r="6" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="723.8" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="978.7" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <text className="axis" x="135.8" y="9" textAnchor="middle">1</text>
+                          <text className="axis" x="161.6" y="9" textAnchor="middle">2</text>
+                          <text className="axis" x="173.6" y="9" textAnchor="middle">3</text>
+                          <text className="axis" x="250" y="9" textAnchor="middle">4</text>
+                          <text className="axis" x="590.8" y="9" textAnchor="middle">5</text>
+                          <text className="axis" x="723.8" y="9" textAnchor="middle">6</text>
+                          <text className="axis" x="978.7" y="9" textAnchor="middle">7</text>
+                          <line className="now" x1="135.8" y1="28" x2="135.8" y2="142" />
+                        </svg>
+                      </div>
                     </>
                   ) : null}
                   {' '}
                   {v.isPlaying ? (
                     <>
-                      <svg className="chart" viewBox="0 0 1100 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:03:55입니다.">
-                        <line className="grid" x1="50" y1="20" x2="1080" y2="20" />
-                        <line className="grid" x1="50" y1="40" x2="1080" y2="40" />
-                        <line className="grid" x1="50" y1="65" x2="1080" y2="65" />
-                        <line className="grid" x1="50" y1="90" x2="1080" y2="90" />
-                        <line className="grid" x1="50" y1="115" x2="1080" y2="115" />
-                        <line className="grid" x1="50" y1="140" x2="1080" y2="140" />
-                        <text className="axis" x="44" y="44" textAnchor="end">8초</text>
-                        <text className="axis" x="44" y="69" textAnchor="end">6초</text>
-                        <text className="axis" x="44" y="94" textAnchor="end">4초</text>
-                        <text className="axis" x="44" y="119" textAnchor="end">2초</text>
-                        <text className="axis" x="44" y="144" textAnchor="end">0</text>
-                        <text className="axis" x="50" y="160" textAnchor="middle">11:00</text>
-                        <text className="axis" x="307.5" y="160" textAnchor="middle">11:05</text>
-                        <text className="axis" x="565" y="160" textAnchor="middle">11:10</text>
-                        <text className="axis" x="822.5" y="160" textAnchor="middle">11:15</text>
-                        <text className="axis" x="1080" y="160" textAnchor="middle">11:20</text>
-                        <line className="slo-line" x1="50" y1="77.5" x2="1080" y2="77.5" />
-                        <text className="axis" x="1076" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
-                        <polyline className="line" points="50,125 75.8,123.8 101.5,124.4 127.3,105 135.8,72.5 153,65 178.8,63.8 204.5,66.3 230.3,68.8 256,75 281.8,82.5 333.3,88.8 384.8,95 436.3,102.5 487.8,110 539.3,116.3 590.8,120 642.3,122.5 693.8,122.5 723.8,121.3 745.3,113.8 771,117.5 822.5,121.3 874,122.5 925.5,123.8 977,123.8 1028.5,125 1080,125" />
-                        <circle cx="135.8" cy="20" r="6" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="161.6" cy="20" r="6" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="173.6" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="250" cy="20" r="8" style={{ fill: "var(--link)", stroke: "var(--text)", strokeWidth: "2" }} />
-                        <circle cx="590.8" cy="20" r="6" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="723.8" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <circle cx="978.7" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
-                        <text className="axis" x="135.8" y="9" textAnchor="middle">1</text>
-                        <text className="axis" x="161.6" y="9" textAnchor="middle">2</text>
-                        <text className="axis" x="173.6" y="9" textAnchor="middle">3</text>
-                        <text className="axis" x="250" y="9" textAnchor="middle">4</text>
-                        <text className="axis" x="590.8" y="9" textAnchor="middle">5</text>
-                        <text className="axis" x="723.8" y="9" textAnchor="middle">6</text>
-                        <text className="axis" x="978.7" y="9" textAnchor="middle">7</text>
-                        <line className="now" x1="251.7" y1="30" x2="251.7" y2="142" />
-                      </svg>
+                      <div data-reflow-exception="">
+                        <svg className="chart" viewBox="0 0 1100 166" role="img" aria-label="결제 확정 소요 p99(재시도 포함)와 이벤트 7개. 11:01:40 UTC에 RB-07 전환 검토 기준 5초를 넘어 최고 6.1초까지 올랐고 11:04 판매 일시정지 뒤 내려가 11:10:30에 2초 아래로 돌아왔습니다. 재생 위치는 11:03:55입니다.">
+                          <line className="grid" x1="50" y1="20" x2="1080" y2="20" />
+                          <line className="grid" x1="50" y1="40" x2="1080" y2="40" />
+                          <line className="grid" x1="50" y1="65" x2="1080" y2="65" />
+                          <line className="grid" x1="50" y1="90" x2="1080" y2="90" />
+                          <line className="grid" x1="50" y1="115" x2="1080" y2="115" />
+                          <line className="grid" x1="50" y1="140" x2="1080" y2="140" />
+                          <text className="axis" x="44" y="44" textAnchor="end">8초</text>
+                          <text className="axis" x="44" y="69" textAnchor="end">6초</text>
+                          <text className="axis" x="44" y="94" textAnchor="end">4초</text>
+                          <text className="axis" x="44" y="119" textAnchor="end">2초</text>
+                          <text className="axis" x="44" y="144" textAnchor="end">0</text>
+                          <text className="axis" x="50" y="160" textAnchor="middle">11:00</text>
+                          <text className="axis" x="307.5" y="160" textAnchor="middle">11:05</text>
+                          <text className="axis" x="565" y="160" textAnchor="middle">11:10</text>
+                          <text className="axis" x="822.5" y="160" textAnchor="middle">11:15</text>
+                          <text className="axis" x="1080" y="160" textAnchor="middle">11:20</text>
+                          <line className="slo-line" x1="50" y1="77.5" x2="1080" y2="77.5" />
+                          <text className="axis" x="1076" y="73" textAnchor="end">RB-07 전환 검토 5초</text>
+                          <polyline className="line" points="50,125 75.8,123.8 101.5,124.4 127.3,105 135.8,72.5 153,65 178.8,63.8 204.5,66.3 230.3,68.8 256,75 281.8,82.5 333.3,88.8 384.8,95 436.3,102.5 487.8,110 539.3,116.3 590.8,120 642.3,122.5 693.8,122.5 723.8,121.3 745.3,113.8 771,117.5 822.5,121.3 874,122.5 925.5,123.8 977,123.8 1028.5,125 1080,125" />
+                          <circle cx="135.8" cy="20" r="6" style={{ fill: "var(--danger)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="161.6" cy="20" r="6" style={{ fill: "var(--warning)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="173.6" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="250" cy="20" r="8" style={{ fill: "var(--link)", stroke: "var(--text)", strokeWidth: "2" }} />
+                          <circle cx="590.8" cy="20" r="6" style={{ fill: "var(--success)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="723.8" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <circle cx="978.7" cy="20" r="6" style={{ fill: "var(--link)", stroke: "var(--surface)", strokeWidth: "2" }} />
+                          <text className="axis" x="135.8" y="9" textAnchor="middle">1</text>
+                          <text className="axis" x="161.6" y="9" textAnchor="middle">2</text>
+                          <text className="axis" x="173.6" y="9" textAnchor="middle">3</text>
+                          <text className="axis" x="250" y="9" textAnchor="middle">4</text>
+                          <text className="axis" x="590.8" y="9" textAnchor="middle">5</text>
+                          <text className="axis" x="723.8" y="9" textAnchor="middle">6</text>
+                          <text className="axis" x="978.7" y="9" textAnchor="middle">7</text>
+                          <line className="now" x1="251.7" y1="30" x2="251.7" y2="142" />
+                        </svg>
+                      </div>
                     </>
                   ) : null}
                   <ol aria-label="리플레이 이벤트" style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "8px 16px" }}>

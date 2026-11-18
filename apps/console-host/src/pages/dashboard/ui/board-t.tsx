@@ -678,7 +678,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </div>
               </div>
               <div className="widget-body" style={{ gap: "8px" }}>
-                <figure className="col" style={{ gap: "2px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "2px" }}>
                   <figcaption className="row between t-xs">
                     <span className="fw-b">진입 요청(초당)</span>
                     <span className="num muted">지금 4,900건 · 최고 18.1만 건(20:00:15)</span>
@@ -697,7 +697,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                     <text className="axis" x="467.3" y="61" textAnchor="middle">20:04</text>
                   </svg>
                 </figure>
-                <figure className="col" style={{ gap: "2px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "2px" }}>
                   <figcaption className="row between t-xs">
                     <span className="fw-b">진입 응답 p99</span>
                     <span className="row" style={{ gap: "8px" }}>
@@ -719,7 +719,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                     <text className="axis" x="467.3" y="61" textAnchor="middle">20:04</text>
                   </svg>
                 </figure>
-                <figure className="col" style={{ gap: "2px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "2px" }}>
                   <figcaption className="row between t-xs" style={{ gap: "12px" }}>
                     <span className="fw-b">입장 처리량(serving 전진, 초당)</span>
                     <span className="num muted" style={{ textAlign: "right" }}>지금 0명(목표 초과로 멈춤) · 기대 5.6명(목표 1,000 ÷ 평균 체류 3분 [가정])</span>
@@ -786,17 +786,19 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                   <span className="slo slo-ok">정상 · 기준 2초</span>
                   <span className="stat-meta">파일 1초마다 갱신 · 엣지 캐시 1초</span>
                 </div>
-                <svg className="chart" viewBox="0 0 320 72" role="img" aria-label="대기 상태 파일 신선도 p99. 셔플 결과 게시 때 1.7초까지 올랐다가 지금 1.3초로 기준 2초 아래입니다.">
-                  <line className="grid" x1="30" y1="50" x2="312" y2="50" />
-                  <line className="slo-line" x1="30" y1="14.8" x2="312" y2="14.8" />
-                  <text className="axis" x="268" y="11" textAnchor="end">기준 2초</text>
-                  <text className="axis" x="26" y="53" textAnchor="end">0</text>
-                  <polyline className="line" points="30,30.6 77,30.6 88.8,20.1 100.5,23.6 124,27.1 171,28.9 218,27.1 274.4,27.1" />
-                  <line className="now" x1="274.4" y1="3" x2="274.4" y2="52" />
-                  <text className="axis" x="77" y="67" textAnchor="middle">20:00</text>
-                  <text className="axis" x="171" y="67" textAnchor="middle">20:02</text>
-                  <text className="axis" x="265" y="67" textAnchor="middle">20:04</text>
-                </svg>
+                <div data-reflow-exception="">
+                  <svg className="chart" viewBox="0 0 320 72" role="img" aria-label="대기 상태 파일 신선도 p99. 셔플 결과 게시 때 1.7초까지 올랐다가 지금 1.3초로 기준 2초 아래입니다.">
+                    <line className="grid" x1="30" y1="50" x2="312" y2="50" />
+                    <line className="slo-line" x1="30" y1="14.8" x2="312" y2="14.8" />
+                    <text className="axis" x="268" y="11" textAnchor="end">기준 2초</text>
+                    <text className="axis" x="26" y="53" textAnchor="end">0</text>
+                    <polyline className="line" points="30,30.6 77,30.6 88.8,20.1 100.5,23.6 124,27.1 171,28.9 218,27.1 274.4,27.1" />
+                    <line className="now" x1="274.4" y1="3" x2="274.4" y2="52" />
+                    <text className="axis" x="77" y="67" textAnchor="middle">20:00</text>
+                    <text className="axis" x="171" y="67" textAnchor="middle">20:02</text>
+                    <text className="axis" x="265" y="67" textAnchor="middle">20:04</text>
+                  </svg>
+                </div>
                 <ul className="col t-xs" style={{ gap: "6px" }}>
                   <li className="row between">
                     <span>로비 셔플</span>
@@ -916,7 +918,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                   <span className="slo slo-burning">경고: 에러 버짓 3.2× 속도로 소진 중</span>
                   <span className="stat-meta">기준 p99 50ms · 가용성 99.95% · 경합 패배(409)는 오류로 세지 않음</span>
                 </div>
-                <figure className="col" style={{ gap: "2px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "2px" }}>
                   <figcaption className="row between t-xs">
                     <span className="fw-b">5분 창 소진 배수</span>
                     <span className="num muted">지금 3.2×</span>
@@ -1296,7 +1298,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               <>
                 <div className="widget-body">
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "12px", alignItems: "start" }}>
-                    <figure className="col" style={{ gap: "4px", gridColumn: "span 2" }}>
+                    <figure data-reflow-exception="" className="col" style={{ gap: "4px", gridColumn: "span 2" }}>
                       <figcaption className="row between t-xs">
                         <span className="fw-b">퍼널(F3): 입장 → 첫 홀드 성공 → 결제 접수 → 승인 → 발권</span>
                         <span className="muted">숫자 · 앞 단계 대비</span>
@@ -1682,7 +1684,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </div>
               </div>
               <div className="widget-body">
-                <figure className="col" style={{ gap: "4px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "4px" }}>
                   <figcaption className="col t-xs" style={{ gap: "2px" }}>
                     <span className="fw-b">입장 → 첫 홀드 성공 → 결제 접수 → 승인 → 발권</span>
                     <span className="muted">숫자 · 앞 단계 대비</span>
@@ -3066,7 +3068,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </div>
               </div>
               <div className="widget-body" style={{ gap: "6px" }}>
-                <figure className="col" style={{ gap: "4px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "4px" }}>
                   <figcaption className="col t-xs" style={{ gap: "2px" }}>
                     <span className="fw-b">16:30 입장 시작부터 · 분당 입장(통과)</span>
                     <span className="num muted">누계 1,388명 · 동문 778 · 서문 610</span>
@@ -3118,7 +3120,7 @@ export function MainT({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </div>
               </div>
               <div className="widget-body" style={{ gap: "6px" }}>
-                <figure className="col" style={{ gap: "4px" }}>
+                <figure data-reflow-exception="" className="col" style={{ gap: "4px" }}>
                   <figcaption className="col t-xs" style={{ gap: "2px" }}>
                     <span className="fw-b">거부 46건 · 판정 1,434건 중 3.2%</span>
                     <span className="num muted">오거부 후보 19건(거부 뒤 10분 [가정] 안 정상 통과)</span>
