@@ -164,6 +164,21 @@ describe('GrpcIdentityRecheck.check(IdentityService.GetVerificationStatus)', () 
     expect(calls.recheck).toHaveLength(1);
   });
 
+  test('P-T55⑦_verified 거짓·withdrawal_pending 참이면 DENIED와 탈퇴 미룸 표시(withdrawalPending)이고, 거짓이면 표시가 없다(BAT-010, payment §2 탈퇴 미룸 409)', async () => {
+    plan.recheck = [{ reply: { verified: false, pid: '', previous_pid: '', withdrawal_pending: true } }];
+    expect(await withRecheck((c) => ask(c))).toEqual({ status: 'DENIED', withdrawalPending: true });
+    plan.recheck = [{ reply: { verified: false, pid: '', previous_pid: '', withdrawal_pending: false } }];
+    const plain = await withRecheck((c) => ask(c));
+    expect(plain).toMatchObject({ status: 'DENIED' });
+    expect((plain as { withdrawalPending?: boolean }).withdrawalPending).not.toBe(true);
+  });
+
+  test('P-T55⑦_verified 참이면 withdrawal_pending을 보지 않는다(참이 함께 와도 VERIFIED와 pid, 탈퇴 미룸 표시 없음, BAT-010)', async () => {
+    plan.recheck = [{ reply: { verified: true, pid: 'pid-both', previous_pid: '', withdrawal_pending: true } }];
+    const r = await withRecheck((c) => ask(c));
+    expect(r).toEqual({ status: 'VERIFIED', pid: 'pid-both' });
+  });
+
   test('PT35_데드라인 안에 답이 없으면 FAILED deadline이고 다시 묻지 않으며, 데드라인 뒤 곧 돌아온다', async () => {
     plan.recheck = [{ delayMs: 600, reply: { verified: true, pid: 'late' } }];
     const started = Date.now();

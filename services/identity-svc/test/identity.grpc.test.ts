@@ -57,7 +57,7 @@ describe('IdentityService(gRPC)', () => {
   test('I-T49①_GetVerificationStatus는_본인확인한계정의살아있는세션이면verified와pid를_전환중에는previous_pid도준다', async () => {
     const s = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'grpc-1', email: null, deviceId: null });
     const ids = { account_id: s.accountId, session_id: s.sessionId };
-    expect(await call(ids)).toEqual({ verified: false, pid: '', previous_pid: '' });
+    expect(await call(ids)).toEqual({ verified: false, pid: '', previous_pid: '', withdrawal_pending: false });
     const provider = testAgency(clock);
     const st = await new StartVerification(verifications, provider, noClosure, clock).run({ accountId: s.accountId, sessionId: null, purpose: 'FIRST', next: '/' });
     const h1 = new HmacIdentityHashers({ ciKeys: new Map([[1, Buffer.alloc(32, 1)]]), pidKey: Buffer.alloc(32, 41), pidVersion: 1 });
@@ -70,6 +70,19 @@ describe('IdentityService(gRPC)', () => {
     expect(during.verified).toBe(true);
     expect(during.previous_pid).toBe(before.pid);
     expect(during.pid).not.toBe(before.pid);
+  });
+
+  test('I-T84⑥_GetVerificationStatus는살아있는세션의탈퇴미룸(WITHDRAWAL)계정에verified false·withdrawal_pending true이고_UNDER_14정리중·끝난세션은withdrawal_pending false다(BAT-010)', async () => {
+    const s = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'grpc-84-1', email: null, deviceId: null });
+    const gone = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'grpc-84-1', email: null, deviceId: null });
+    const kid = await k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: 'grpc-84-kid', email: null, deviceId: null });
+    await sessions.transaction((tx) => tx.markClosure(s.accountId, 'WITHDRAWAL' as never, clock.now()));
+    await sessions.transaction((tx) => tx.markClosure(kid.accountId, 'UNDER_14', clock.now()));
+    await k.end.run({ sessionId: gone.sessionId, accountId: gone.accountId });
+    expect(await call({ account_id: s.accountId, session_id: s.sessionId })).toEqual({ verified: false, pid: '', previous_pid: '', withdrawal_pending: true });
+    expect(await call({ account_id: s.accountId, session_id: gone.sessionId })).toEqual({ verified: false, pid: '', previous_pid: '', withdrawal_pending: false });
+    expect(await call({ account_id: kid.accountId, session_id: kid.sessionId })).toEqual({ verified: false, pid: '', previous_pid: '', withdrawal_pending: false });
+    expect(errors).toEqual([]);
   });
 
   test('GetVerificationStatus는_ID모양이틀리면INVALID_ARGUMENT다', async () => {

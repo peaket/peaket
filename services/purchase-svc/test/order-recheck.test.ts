@@ -103,6 +103,15 @@ describe('FAILED: 실패 까닭 일곱 × 토큰 넷', () => {
 });
 
 describe('던지지 않는다', () => {
+  test('P-T55⑦_DENIED에withdrawalPending참이면WITHDRAWAL_PENDING(409)이고_없거나거짓이면DENY다(토큰은보지않는다, BAT-010)', () => {
+    expect(judgeRecheck({ status: 'DENIED', withdrawalPending: true }, BUY)).toEqual({ kind: 'WITHDRAWAL_PENDING' });
+    expect(judgeRecheck({ status: 'DENIED', withdrawalPending: true }, { scopes: [] })).toEqual({ kind: 'WITHDRAWAL_PENDING' });
+    expect(judgeRecheck({ status: 'DENIED', withdrawalPending: false }, BUY)).toEqual({ kind: 'DENY' });
+    expect(judgeRecheck({ status: 'DENIED' }, BUY)).toEqual({ kind: 'DENY' });
+    // VERIFIED는 지금처럼 pid로만 판정한다
+    expect(judgeRecheck({ status: 'VERIFIED', pid: PID }, BUY)).toEqual({ kind: 'PASS' });
+  });
+
   test('모든 칸에서 값을 돌려주고 던지지 않는다', () => {
     const answers: RecheckAnswer[] = [
       { status: 'VERIFIED', pid: PID },

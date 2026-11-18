@@ -186,7 +186,7 @@ describe('pid 키 전환(I-T49)', () => {
     expect([st.pid, st.previousPid]).toContain(oldToken.pid);
     t.clock.advance(until - t.clock.now());
     await t.rotation().finish();
-    expect(await t.status.run({ accountId: s.accountId, sessionId: s.sessionId })).toEqual({ verified: true, pid: st.pid, previousPid: '' });
+    expect(await t.status.run({ accountId: s.accountId, sessionId: s.sessionId })).toEqual({ verified: true, pid: st.pid, previousPid: '', withdrawalPending: false });
   });
 
   test('I-T49_GetVerificationStatus는_세션이끝났거나다른계정의세션이거나본인확인전이면_verified false와빈값이다', async () => {
@@ -194,7 +194,7 @@ describe('pid 키 전환(I-T49)', () => {
     const a = await t.login('s-1');
     const b = await t.login('s-2');
     await t.verify(a.accountId, 'status-person');
-    const none = { verified: false, pid: '', previousPid: '' };
+    const none = { verified: false, pid: '', previousPid: '', withdrawalPending: false };
     expect(await t.status.run({ accountId: b.accountId, sessionId: b.sessionId })).toEqual(none);
     expect(await t.status.run({ accountId: a.accountId, sessionId: b.sessionId })).toEqual(none);
     expect((await t.status.run({ accountId: a.accountId, sessionId: a.sessionId })).verified).toBe(true);

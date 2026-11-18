@@ -537,6 +537,27 @@ describe('PT35 본인확인 재확인(403·대체 판정·503)', () => {
     expect(fx.fallbackLogs).toEqual([]);
   });
 
+  test('P-T55⑦_재확인답이DENIED이고withdrawalPending참(탈퇴 미룸 계정)이면_WITHDRAWAL_PENDING(409)이고_예매제한·contactRef·쓰기를부르지않아주문행·멱등기록이없다(BAT-010)', async () => {
+    fx.recheck = { status: 'DENIED', withdrawalPending: true };
+    expect(await run()).toEqual({ status: 'REJECTED', reason: 'WITHDRAWAL_PENDING' });
+    notCalled('restrictions.read', 'contactRefs.compute', 'writes.create');
+    noOrder();
+    expect(fx.fallbackSignals).toEqual([]);
+    expect(fx.payingCalls).toEqual([]);
+  });
+
+  test('P-T55⑦_DENIED에withdrawalPending이없거나거짓이면지금처럼IDENTITY_DENIED이고_답하지못한재확인의토큰판정(ticket:buy·pid)은그대로다(BAT-010)', async () => {
+    fx.recheck = { status: 'DENIED', withdrawalPending: false };
+    expect(await run()).toEqual({ status: 'REJECTED', reason: 'IDENTITY_DENIED' });
+    noOrder();
+    fx.reset();
+    fx.recheck = { status: 'FAILED', reason: 'deadline' };
+    expect(await run(okCommand({ token: { pid: 'pid-0001', scopes: ['ticket:buy'] } }))).toMatchObject({ status: 201 });
+    fx.reset();
+    fx.recheck = { status: 'FAILED', reason: 'deadline' };
+    expect(await run(okCommand({ token: { scopes: ['ticket:buy'] } }))).toEqual({ status: 'REJECTED', reason: 'IDENTITY_DENIED' });
+  });
+
   test('PT35_VERIFIED인데 토큰 pid가 pid·previous_pid와 다르면 IDENTITY_DENIED', async () => {
     fx.recheck = { status: 'VERIFIED', pid: 'pid-other', previousPid: 'pid-older' };
     expect(await run()).toEqual({ status: 'REJECTED', reason: 'IDENTITY_DENIED' });

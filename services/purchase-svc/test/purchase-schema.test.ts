@@ -764,6 +764,25 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
   });
 
+  test('P-T55_PRF-169 0028 SQL은 purchase_order에 조건 없는 비유일 인덱스 purchase_order_account_idx (account_id, id) 하나만 트랜잭션 안에서 만들고, 0028 스냅샷은 0027 뒤에서 표 목록이 같으며 schema.ts와 같은 인덱스다(data.md §5.1, ADR-0284, BAT-010) [ASVS v5.0.0-2.3.4]', () => {
+    const tag = journal.entries.find((e) => e.idx === 28)?.tag;
+    expect(tag).toMatch(/^0028_[a-z0-9_]+$/);
+    const raw = readFileSync(join(MIGRATIONS, `${tag}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    const body = raw
+      .split('\n')
+      .filter((l) => !/^\s*--(?!>)/.test(l))
+      .join('\n');
+    expect(body).not.toMatch(/\b(DROP|TRUNCATE|DELETE|INSERT|UPDATE|RENAME|ALTER)\b/i);
+    expect(body).not.toMatch(/\bUNIQUE\b|\bWHERE\b|\bDEFAULT\b|CONCURRENTLY|PARTITION/i);
+    expect(raw).not.toMatch(/^--\s*peaket:no-transaction\s*$/m);
+    expect(statementsOf(raw).map((x) => canon(x).replace(/;$/, ''))).toEqual(['create index purchase_order_account_idx on purchase_order using btree(account_id,id)']);
+    expect(orderShape.indexes.find((i) => i.name === 'purchase_order_account_idx')).toEqual({ name: 'purchase_order_account_idx', unique: false, columns: ['account_id', 'id'], where: undefined });
+    const before = snapshotOf('0027_snapshot.json');
+    const after = snapshotOf('0028_snapshot.json');
+    expect(after.prevId).toBe(before.id);
+    expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+  });
+
   test('GAT-110 D6 schema.ts의 eventRefundHold는 data.md event_refund_hold의 칸(회차 하나에 한 줄)과 기한 검사 expires_at > held_at이다', () => {
     const h = holdShape();
     expect(h.name).toBe('event_refund_hold');
@@ -1394,9 +1413,11 @@ describe('마이그레이션 SQL 파일(0011_order_session_idx.sql, PRF-172)', (
     expect(journal.entries.map((e) => e.tag)).not.toContain('0011_order_open_session_idx');
   });
 
-  test('쓰기가 많은 주문 표의 인덱스는 0004의 유일 인덱스와 0011의 구매 세션 인덱스 둘뿐이다(예외를 더 늘리지 않는다, data.md §5.1) (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
-    expect(orderShape.indexes.map((i) => i.name)).toEqual(['purchase_order_hold_key', SESSION_INDEX]);
+  // BAT-010(PRF-169, ADR-0284)이 0028에서 탈퇴 참여자의 계정 인덱스를 세 번째 예외로 더했다(docs/data.md §5.1 '탈퇴 참여자의 계정 주문 찾기', 0011 다음의 '탈퇴 참여자 마이그레이션' 줄)
+  test('쓰기가 많은 주문 표의 인덱스는 0004의 유일 인덱스, 0011의 구매 세션 인덱스, 0028의 계정 인덱스 셋뿐이다(정본 data.md §5.1에 적은 예외 밖으로 늘리지 않는다) (ADR0107) [ASVS v5.0.0-2.3.4]', () => {
+    expect(orderShape.indexes.map((i) => i.name).sort()).toEqual(['purchase_order_account_idx', 'purchase_order_hold_key', SESSION_INDEX]);
     expect(orderIndexesAt('0011')).toEqual(['purchase_order_hold_key', SESSION_INDEX]);
+    expect(orderIndexesAt('0028').sort()).toEqual(['purchase_order_account_idx', 'purchase_order_hold_key', SESSION_INDEX]);
   });
 });
 
