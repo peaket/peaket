@@ -28,6 +28,9 @@ import { FakeIdentity, quiet, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { ensureSearchLogin, loginFor } from './roles.js';
 import { assertDatabaseRole } from '../src/modules/catalog/adapters/db/database-role.js';
+// BAT-420-rest R-T41·SR-T8 ③(시험 담당 l3-b420-test)
+import { Writable } from 'node:stream';
+import { MemoryCdnInvalidation } from '../src/modules/catalog/index.js';
 
 type Svc = Awaited<ReturnType<typeof createService>>;
 
@@ -1545,5 +1548,194 @@ describe('V165-R15 사전 준비 전 0건 검색', () => {
       await s.close();
       await counted.close();
     }
+  });
+});
+
+// BAT-420-rest R-T41 ①②④⑤·SR-T8 ③(시험 담당 l3-b420-test, 2026-11-19): core 회차 상태 반영 내부 경로 POST /internal/v1/events/{eventId}/cancellation-status를
+// 운영과 같은 DB 역할(core_app·core_partner·core_ops)로 띄운 서비스에 실제 HTTP(inject)로 부른다. CDN은 경로를 모으는 메모리 대역, 로그는 줄을 모은다.
+// 정본: docs/features/transfer-refund.md §5 'core 회차 상태 반영'·'core 반영의 구현에서 정한 것', §11 R-T41, docs/features/search.md §2.3 '구현 자리'·§12 SR-T8 ③.
+// SR-T8 ③의 되돌림은 커밋 때 터지는 지연 제약 트리거(deferrable initially deferred)로 끊는다: 쓰기·동기화가 다 끝난 뒤 커밋 자리에서 실패시켜
+// 같은 트랜잭션 안의 검색 동기화도 되돌려지는지(커밋 뒤 따로 부르는 틀린 구현이면 검색이 바뀐다) 본다.
+describe('R-T41·SR-T8 ③ core 회차 상태 반영 [PostgreSQL·실제 HTTP]', () => {
+  const TOKEN = 'int-test-token-b420';
+  let esvc: Svc;
+  const cdn = new MemoryCdnInvalidation();
+  const lines: Record<string, unknown>[] = [];
+  beforeAll(async () => {
+    process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
+    esvc = await createService({
+      name: 'core-svc',
+      module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ cdn }) }),
+      env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
+      clock,
+      logDestination: new Writable({
+        write: (c, _e, cb) => {
+          for (const l of String(c).split('\n')) {
+            if (!l.trim()) continue;
+            try {
+              lines.push(JSON.parse(l) as Record<string, unknown>);
+            } catch {
+              // JSON이 아닌 줄은 버린다
+            }
+          }
+          cb();
+        },
+      }),
+      adminAuthz: identity,
+    });
+  }, 120_000);
+  afterAll(async () => {
+    await esvc?.close();
+  });
+
+  const apply = (eventId: string, body: Record<string, unknown>, token: string | null = TOKEN) =>
+    esvc.http.inject({
+      method: 'POST',
+      url: `/internal/v1/events/${eventId}/cancellation-status`,
+      headers: { 'content-type': 'application/json', ...(token === null ? {} : { 'x-peaket-internal-token': token }) },
+      payload: JSON.stringify(body),
+    });
+  const eventRow = async (id: string) =>
+    (await rows(admin, 'select status, starts_at, ends_at, entry_opens_at, open_at, version from event where id = $1', [id]))[0] as { status: string; starts_at: Date; ends_at: Date; entry_opens_at: Date | null; open_at: Date; version: number };
+  const removedLines = (productionId: string) => lines.filter((l) => l.event === 'search_removed' && l.productionId === productionId);
+  const seeded = async (title: string, events = 2) => {
+    const p = await seed({ title, events: Array.from({ length: events }, () => ({})) });
+    await admin.transaction((tx) => sync.sync(tx, [p.productionId], new Date(now)));
+    expect(await docIds()).toContain(p.productionId);
+    return p;
+  };
+
+  test('R-T41 ① 회차 둘 중 하나를 취소하면 CANCELLED이고 공연은 검색에 남으며 무효화·search_removed가 0이고, 둘째도 취소하면 공연이 빠지고 /v1/search* 무효화 1번·search_removed(EVENT_CANCELLED) 1줄이다', async () => {
+    const p = await seeded('회차취소반영 공연');
+    const [e1, e2] = p.eventIds as [string, string];
+    const v1 = (await eventRow(e1)).version;
+    const paths0 = cdn.pathCalls.length;
+    const r1 = await apply(e1, { requestId: randomUUID(), kind: 'CANCEL' });
+    expect(r1.statusCode).toBe(204);
+    expect(r1.headers['cache-control']).toBe('no-store');
+    expect(await eventRow(e1)).toMatchObject({ status: 'CANCELLED', version: v1 + 1 });
+    expect((await eventRow(e2)).status).toBe('SCHEDULED');
+    expect(await docIds()).toContain(p.productionId);
+    expect(cdn.pathCalls.length).toBe(paths0);
+    expect(removedLines(p.productionId)).toEqual([]);
+
+    const sv = await version();
+    const r2 = await apply(e2, { requestId: randomUUID(), kind: 'CANCEL' });
+    expect(r2.statusCode).toBe(204);
+    expect((await eventRow(e2)).status).toBe('CANCELLED');
+    expect(await docIds()).not.toContain(p.productionId);
+    expect(await version()).toBe(sv + 1);
+    expect(cdn.pathCalls.slice(paths0)).toEqual([['/v1/search*']]);
+    const removed = removedLines(p.productionId);
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toMatchObject({ reason: 'EVENT_CANCELLED', searchVersion: sv + 1 });
+    expect(await apiIds('회차취소반영 공연')).toEqual([]);
+    // 이름 줄(search_term)도 함께 빠졌다(같은 동기화)
+    expect(await termCount(p.productionId)).toBe(0);
+  });
+
+  test('R-T41 ② 같은 요청으로 다시 부르면 204이고 회차 판·검색 판·무효화·search_removed가 그대로다(멱등)', async () => {
+    const p = await seeded('회차취소멱등 공연', 1);
+    const e = p.eventIds[0]!;
+    const requestId = randomUUID();
+    expect((await apply(e, { requestId, kind: 'CANCEL' })).statusCode).toBe(204);
+    const row = await eventRow(e);
+    const sv = await version();
+    const paths = cdn.pathCalls.length;
+    const removed = removedLines(p.productionId).length;
+    expect(removed).toBe(1);
+    expect((await apply(e, { requestId, kind: 'CANCEL' })).statusCode).toBe(204);
+    expect(await eventRow(e)).toEqual(row);
+    expect(await version()).toBe(sv);
+    expect(cdn.pathCalls.length).toBe(paths);
+    expect(removedLines(p.productionId)).toHaveLength(removed);
+    // 요청 ID는 로그(event-cancellation-status-applied)에만, 바뀜 여부와 함께 남는다
+    const applied = lines.filter((l) => l.event === 'event-cancellation-status-applied' && l.eventId === e);
+    expect(applied.map((l) => [l.requestId, l.kind, l.changed])).toEqual([
+      [requestId, 'CANCEL', true],
+      [requestId, 'CANCEL', false],
+    ]);
+  });
+
+  test('R-T41 ④ 연기(POSTPONE)는 POSTPONED와 바뀐 시작이고 끝·입장 시작이 같은 만큼 옮겨지며 오픈 시각은 그대로, 공연은 검색에 남는다', async () => {
+    const p = await seeded('회차연기반영 공연', 1);
+    const e = p.eventIds[0]!;
+    await admin.pool.query("update event set entry_opens_at = starts_at - interval '90 minutes' where id = $1", [e]);
+    const before = await eventRow(e);
+    const to = new Date(before.starts_at.getTime() + 7 * D + 3 * H);
+    const paths = cdn.pathCalls.length;
+    const r = await apply(e, { requestId: randomUUID(), kind: 'POSTPONE', postponedTo: to.toISOString() });
+    expect(r.statusCode).toBe(204);
+    const after = await eventRow(e);
+    expect(after.status).toBe('POSTPONED');
+    expect(after.starts_at.getTime()).toBe(to.getTime());
+    expect(after.ends_at.getTime() - after.starts_at.getTime()).toBe(before.ends_at.getTime() - before.starts_at.getTime());
+    expect(after.entry_opens_at!.getTime()).toBe(to.getTime() - 90 * 60_000);
+    expect(after.open_at.getTime()).toBe(before.open_at.getTime());
+    expect(after.version).toBe(before.version + 1);
+    expect(await docIds()).toContain(p.productionId);
+    expect(cdn.pathCalls.length).toBe(paths);
+    // 같은 시각으로 다시 연기하면 바뀐 것이 없다
+    expect((await apply(e, { requestId: randomUUID(), kind: 'POSTPONE', postponedTo: to.toISOString() })).statusCode).toBe(204);
+    expect((await eventRow(e)).version).toBe(after.version);
+  });
+
+  test('R-T41 ⑤ 없는 회차 404 not-found, CANCELLED 회차의 연기·지금보다 이른 연기 409 event-status-conflict, 공유 토큰 없음·틀림 401, 종류와 연기 시작이 맞지 않으면 400이고 모두 core 쓰기·검색 판이 0이다', async () => {
+    const p = await seeded('회차반영거절 공연', 2);
+    const [cancelled, live] = p.eventIds as [string, string];
+    expect((await apply(cancelled, { requestId: randomUUID(), kind: 'CANCEL' })).statusCode).toBe(204);
+    const snapshot = async () => ({ c: await eventRow(cancelled), l: await eventRow(live), v: await version(), paths: cdn.pathCalls.length });
+    const before = await snapshot();
+    const future = new Date(now + 40 * D).toISOString();
+    const missing = await apply(randomUUID(), { requestId: randomUUID(), kind: 'CANCEL' });
+    expect(missing.statusCode).toBe(404);
+    expect((JSON.parse(missing.payload) as { type: string }).type).toMatch(/not-found$/);
+    const conflict = await apply(cancelled, { requestId: randomUUID(), kind: 'POSTPONE', postponedTo: future });
+    expect(conflict.statusCode).toBe(409);
+    expect((JSON.parse(conflict.payload) as { type: string }).type).toMatch(/event-status-conflict$/);
+    const past = await apply(live, { requestId: randomUUID(), kind: 'POSTPONE', postponedTo: new Date(now).toISOString() });
+    expect(past.statusCode).toBe(409);
+    expect((JSON.parse(past.payload) as { type: string }).type).toMatch(/event-status-conflict$/);
+    for (const [what, token] of [
+      ['토큰 없음', null],
+      ['토큰 틀림', 'wrong-token'],
+    ] as const) {
+      expect((await apply(live, { requestId: randomUUID(), kind: 'CANCEL' }, token)).statusCode, what).toBe(401);
+    }
+    const mismatch = await apply(live, { requestId: randomUUID(), kind: 'CANCEL', postponedTo: future });
+    expect(mismatch.statusCode).toBe(400);
+    expect((JSON.parse(mismatch.payload) as { type: string }).type).toMatch(/invalid-body$/);
+    expect((await apply(live, { requestId: randomUUID(), kind: 'POSTPONE' })).statusCode).toBe(400);
+    expect((await apply(live, { requestId: randomUUID(), kind: 'CANCEL', extra: 1 })).statusCode).toBe(400);
+    expect((await apply(live, { requestId: 'not-a-uuid', kind: 'CANCEL' })).statusCode).toBe(400);
+    expect(await snapshot()).toEqual(before);
+  });
+
+  test('SR-T8 ③ 회차 전부 취소가 같은 트랜잭션에서 검색을 고치고 커밋 뒤 무효화와 search_removed를 남긴다: 커밋 자리에서 되돌리면 회차·검색·판이 그대로이고 무효화·줄이 0이다', async () => {
+    const p = await seeded('회차취소되돌림 공연', 1);
+    const e = p.eventIds[0]!;
+    const before = await eventRow(e);
+    const sv = await version();
+    const paths = cdn.pathCalls.length;
+    await admin.pool.query(
+      `create or replace function srt8_fail_commit() returns trigger language plpgsql as $$ begin raise exception 'injected srt8 commit failure'; end $$;
+       create constraint trigger srt8_fail_commit after update on event deferrable initially deferred for each row when (new.id = '${e}') execute function srt8_fail_commit();`,
+    );
+    try {
+      const r = await apply(e, { requestId: randomUUID(), kind: 'CANCEL' });
+      // 장애 주입이 실제로 끼어들었다: 커밋이 실패해 2xx가 아니다
+      expect(r.statusCode).toBeGreaterThanOrEqual(500);
+    } finally {
+      await admin.pool.query('drop trigger if exists srt8_fail_commit on event; drop function if exists srt8_fail_commit();');
+    }
+    expect(await eventRow(e)).toEqual(before);
+    expect(await docIds()).toContain(p.productionId);
+    expect(await version()).toBe(sv);
+    expect(cdn.pathCalls.length).toBe(paths);
+    expect(removedLines(p.productionId)).toEqual([]);
+    // 대조: 트리거를 치운 뒤 같은 회차는 정상으로 빠진다(되돌림이 남긴 것이 없다)
+    expect((await apply(e, { requestId: randomUUID(), kind: 'CANCEL' })).statusCode).toBe(204);
+    expect(await docIds()).not.toContain(p.productionId);
+    expect(removedLines(p.productionId)).toHaveLength(1);
   });
 });
