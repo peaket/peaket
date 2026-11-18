@@ -84,7 +84,7 @@
 | RV-03 | 낮음 | `check-workflows.test.mjs` CC-03 | CC-03은 끝 코드 0만 본다. 규칙 4가 `concurrency` 블록을 아예 보지 않게 바뀌어도 이 시험은 통과하므로, 이름의 '맨 위 concurrency 블록에 두어도' 부분은 실제로 지키지 못한다. | 같은 표본의 `concurrency` 블록에 `${{ github.head_ref == 'x' }}`를 넣으면 끝 코드가 0이 아님을 보는 대조 단언을 하나 더한다(검증 담당 판단, 막는 지적 아님). |
 
 - 막는 지적은 없다. `ci.yml` 고침은 그대로 합쳐도 된다. RV-01·RV-02는 문서 한두 문장과 소유자 확인이고, RV-01의 바로잡기는 다른 묶음 몫이다.
-- RV-02(큰 러너 비용)는 소유자 답 대기다(2026-11-19 전체 감독).
+- RV-02는 소유자 결정 (다)(2026-11-19)로 처리: 가지 푸시는 spec-check 전수 검사를 돌리지 않는다(아래 리뷰 반영 계획 4).
 
 ## 리뷰 반영 계획
 
@@ -100,6 +100,28 @@
 | CC-03 대조 | 같은 표본의 `concurrency` 블록에 `${{ github.head_ref == 'x' }}`(검증 A5, RV-03) | 끝 코드 1. 통과 기준 밖이지만 한 줄이라 함께 더한다 |
 
 - CC-04는 바른 구현에서 통과하고 A3·A4 결함을 넣으면 실패해야 한다. 검증 담당은 고친 뒤 A3~A5를 다시 넣어 본다.
+
+4. RV-02 — 소유자 결정 (다)(2026-11-19): 가지 푸시에서는 spec-check 전수 검사(full, 큰 러너)를 돌리지 않는다. PR(초안 PR 포함)과 일정 실행이 맡는다.
+   - 구현 몫(가장 작은 고침): `ci.yml` 127줄 `mode:` 식 앞에 `github.event_name == 'pull_request' &&`를 붙이고 기존 조건은 괄호째 둔다. `mode: ${{ github.event_name == 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.specs_full == 'true') && 'full' || 'pr' }}`. 가지 푸시는 늘 `pr`(형식 검사·시뮬레이션, 표준 러너)이다. 124줄 `if:`와 `spec-check.yml`은 그대로 둔다. `spec-check.yml` 63줄 `runs-on`은 full에서만 큰 러너를 쓰므로 큰 러너 잡이 뜨지 않는다. 121줄 잡 주석도 'PR에서만 전수 검사'로 맞춘다. 규칙 4: `github.event_name`은 통과한다.
+   - 일정 실행 확인: `spec-check.yml`의 `schedule`(`cron: '0 18 * * 0'`, 월요일 03:00 KST, 주 1회)은 `inputs.mode`가 비어 `list` 잡 `MODE`가 `full`이고 `large` 묶음은 큰 러너로 간다. 그대로 둔다.
+   - 정본(이 커밋): `docs/devops.md` §3.4 concurrency 줄, `docs/verification.md` §2.2 표 CI 행('관련 ADR이 바뀌는 PR에서'), ADR-0187 '결과와 트레이드오프'에 한 줄. RV-01 한계 문장은 §3.4에 이미 있다(확인).
+   - 시험 담당이 더할 CC-05 ★: YAML로 `ci.yml` 잡 `spec-check`의 `if`·`with.mode`, `spec-check.yml`의 `on.schedule`·`list` 잡 `MODE`·`spec` 잡 `runs-on` 식을 읽는다. 시험 안 작은 평가기(문맥 이름을 값으로 바꾸고 `&&`·`||`·`==`·`!=`·`!`·괄호·작은따옴표 글자·`cancelled()`만 받음, 모르는 이름이면 던짐)로 센다. 큰 러너 변수는 `peaket-runner2`, `matrix.large`는 참으로 둔다.
+     - push(`refs/heads/` 아래 `develop`·`main`·`release/x`·`hotfix/x`) × `changes` 결과 success·failure × `specs_full` 참·거짓: 잡이 불리지 않거나(`if` 거짓) `mode`가 `pr`이고, 그 mode의 `runs-on`이 `ubuntu-24.04`.
+     - pull_request(포크 아님): `changes` 실패 또는 `specs_full` 참이면 `full`과 `peaket-runner2`, 둘 다 아니면 `pr`.
+     - schedule(`spec-check.yml` 직접, `inputs.mode` 빔): `on.schedule`이 있고 `MODE`가 `full`, `runs-on`이 `peaket-runner2`.
+     - 구현 전 트리에서는 push + (`specs_full` 참 또는 `changes` 실패) 사례가 `full`이라 실패한다.
+   - 틀린 구현 표본:
+
+| # | 틀린 구현 | 잡을 시험 |
+| --- | --- | --- |
+| S1 | `spec-check.yml` `runs-on`만 고쳐 push에서 표준 러너로 full(잡 130분 넘음) | CC-05(push `mode`) |
+| S2 | 거꾸로 `github.event_name == 'push' &&` | CC-05 |
+| S3 | 괄호 없이 앞에 붙임(push + `specs_full` 참이면 `full`) | CC-05 |
+| S4 | PR에서 `changes` 실패 대비를 뺌 | CC-05(PR + 실패) |
+| S5 | `spec-check.yml` `MODE` 기본값을 `inputs.mode \|\| 'pr'`로(일정 실행이 full 아님) | CC-05(schedule) |
+| S6 | `if:`에 `github.event_name == 'push' &&`를 넣어 PR에서 건너뜀 | CC-05(PR) |
+
+   - 감독에게: 소유자 결정의 '야간'은 지금 주 1회(월요일 03:00 KST) 일정이다. 매일로 바꿀지 정해 주면 따른다(바꾸지 않으면 손대지 않음). 또 이 고침은 `develop`뿐 아니라 `main`·`release/**`·`hotfix/**` 푸시에서도 full을 돌리지 않는다(그 가지에 들어가는 변경은 PR을 거친다).
 
 ## 검증
 
@@ -146,7 +168,7 @@
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | w11ci-plan-1b7c | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T06:46+09:00 |
+| plan | w11ci-plan-1b7c | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T07:14+09:00 |
 | impl | w11ci-impl-4e90 | claude-opus-5-5 | 2026-11-19T06:15+09:00 | 2026-11-19T06:17+09:00 |
 | test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T06:51+09:00 |
 | review | w11ci-review-2c58 | claude-opus-5-5 | 2026-11-19T06:22+09:00 | 2026-11-19T06:30+09:00 |
