@@ -793,6 +793,7 @@
 | R-698 | develop 푸시 CI가 다음 푸시에 취소돼 갈래 사이 통합을 끝까지 못 봤고, 끝까지 돌리면 큰 러너 비용이 늘었다 | .github/workflows/ci.yml, tools/ci/check-workflows.test.mjs, docs/devops.md, ADR-0187, docs/verification.md | 취소는 PR에서만, 가지 푸시는 spec-check pr 모드(W11-ci-conc) | 적용 |
 | R-699 | BAT-174 CI 흔들림(web / budgets Lighthouse 판정, S-T34 ④ 좌석맵 해석 시간 상한) | tools/web-checks/budgets limits.mjs·playwright.budgets.config.mjs, services/core-svc seatmap-worker pool.ts·parse-thread.ts, test-int/media-support.ts 시작 기다림, docs/features/seat-hold.md·docs/verification.md·ADR-0257 결정 5 | 계획·구현·시험·리뷰·검증 역할 분리(C, 정방향), 한도·상한은 넓히지 않음 | BAT-174 끝(단계 없음)·계획 12는 정리 목록 |
 | R-700 | realtime-gw Degraded 시험이 느린 CI 러너에서 벽시계 5초를 넘겨 다른 갈래 PR CI를 흔들었다 | services/realtime-gw/test/degraded.test.ts, docs/review/plans/W11-rtgw-flake.md | 계산량 줄이기와 두 시험만의 한도(W11-rtgw-flake) | 적용 |
+| R-701 | BAT-176 월렛 첫 화면 LCP만 web / budgets 임시 알림(소유자 결정 OPEN[52] (다)) | tools/web-checks/budgets limits.mjs·report.mjs·lighthouse.spec.mjs, docs/frontend.md §5.8·docs/devops.md ci-web.yml ④ | 계획·구현·시험·리뷰·검증 역할 분리(C, 정방향), 한도 7,255ms 그대로·한국 시각 2026-11-30 지나면 저절로 실패 | BAT-176 끝(단계 없음)·리뷰 지적 5·놓침 M7c·M7d는 정리 목록 |
 
 ## 4. 숫자 일치표
 
