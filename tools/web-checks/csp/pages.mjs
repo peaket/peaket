@@ -14,7 +14,8 @@ export const FAN_API_ORIGIN = 'https://api.peaket.example';
  * 화면 스크립트가 부르는 팬 API(계정 요약·토큰 갱신·찜·알림)에 일시 장애(503)로 답한다. HOT-321부터 모든 화면이 계정 요약을 부르는데,
  * 없는 주소로 나간 요청의 실패를 엔진마다 다르게 보고해서다(Firefox BiDi는 페이지 오류로 올린다).
  * 닿지 않는 API와 같은 길(로그인 상태 모름)을 그린다. 비로그인(401)으로 답하면 개인 화면(/my/…)이 로그인 화면으로 보내 검사가 바뀐다
- * @param {import('@playwright/test').Page} page
+ * 페이지(page.route)나 브라우저 문맥(context.route, 서비스 워커가 맡은 요청까지 가로챈다. reflow/wallet-sw.spec.mjs)에 단다
+ * @param {import('@playwright/test').Page | import('@playwright/test').BrowserContext} page
  */
 export async function stubFanApi(page) {
   const cors = { 'access-control-allow-origin': new URL(WEB_BASE).origin, 'access-control-allow-credentials': 'true', vary: 'Origin' };

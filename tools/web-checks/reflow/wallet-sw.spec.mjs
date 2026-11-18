@@ -17,13 +17,32 @@ test.beforeEach(({ browserName }) => {
   test.skip(browserName !== 'chromium', '서비스 워커 요청 가로채기는 Chromium만 된다');
 });
 
-/** /my/tickets를 열고 월렛 워커가 이 화면을 제어할 때까지 기다린다 */
-async function controlled(page) {
-  await stubFanApi(page);
+/** 워커 등록·제어 상태(실패 메시지에 싣는다) */
+const swState = (page) =>
+  page.evaluate(async (scope) => {
+    const r = await navigator.serviceWorker.getRegistration(scope);
+    return { url: location.pathname, controller: navigator.serviceWorker.controller?.scriptURL ?? null, scope: r?.scope ?? null, active: r?.active?.state ?? null, waiting: r?.waiting?.state ?? null, installing: r?.installing?.state ?? null };
+  }, SCOPE);
+
+/**
+ * /my/tickets를 열고 월렛 워커가 이 화면을 제어할 때까지 기다린다.
+ * 팬 API 대역은 페이지가 아니라 브라우저 문맥(context.route)에 단다(BAT-171 시험 이의 3: 첫 CI에서 page.route 아래 다시 불러온 문서에
+ * 제어자가 생기지 않았다. 머리말대로 Chromium의 워커 요청은 context.route로 가로챈다). 다시 불러온 문서를 워커가 맡는지 보고,
+ * 실패하면 등록·제어 상태를 메시지에 싣는다
+ * @param {import('@playwright/test').Page} page
+ * @param {import('@playwright/test').BrowserContext} context
+ */
+async function controlled(page, context) {
+  await stubFanApi(context);
   await page.goto(`${WEB}${SCOPE}`, { waitUntil: 'networkidle' });
   await page.waitForFunction(async (scope) => !!(await navigator.serviceWorker.getRegistration(scope))?.active, SCOPE, { timeout: 30_000 });
+  // 다시 불러오기 전 상태(판정하지 않고 실패 메시지에만 싣는다: 다시 불러온 문서만 워커를 비켜 갔는지 가른다)
+  const before = await swState(page);
   await page.reload({ waitUntil: 'networkidle' });
-  await page.waitForFunction(() => !!navigator.serviceWorker.controller, undefined, { timeout: 10_000 });
+  // 실패하면 받은 값(등록·제어 상태)이 함께 찍힌다
+  await expect
+    .poll(() => swState(page), { timeout: 10_000, message: `다시 불러온 문서를 월렛 워커가 맡지 않았다(다시 불러오기 전 ${JSON.stringify(before)})` })
+    .toEqual(expect.objectContaining({ url: SCOPE, controller: expect.stringContaining('/serwist/sw.js') }));
 }
 
 const html = (title) => `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title></head><body><p>${title}</p></body></html>`;
@@ -45,7 +64,7 @@ test('[ASVS v5.0.0-14.3.2] 기본 폭: 월렛 워커 아래서 연 양도 화면
   await context.route('**/my/tickets/tkt-bat170-ok/transfer', (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', headers: { 'cache-control': 'public, max-age=60' }, body: html('양도') }));
   // 허용 꼴 + 캐시해도 되는 헤더 → 캐시에 들어가야 한다(대조군)
   await context.route('**/my/tickets/tkt-bat170-ok', (r) => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', headers: { 'cache-control': 'public, max-age=60' }, body: html('티켓') }));
-  await controlled(page);
+  await controlled(page, context);
 
   for (const p of ['/my/tickets/tkt-bat170-ok', '/my/tickets/tkt-bat170-nostore', '/my/tickets/tkt-bat170-ok/transfer']) {
     const res = await page.goto(`${WEB}${p}`, { waitUntil: 'networkidle' });
@@ -60,7 +79,7 @@ test('[ASVS v5.0.0-14.3.2] 기본 폭: 월렛 워커 아래서 연 양도 화면
 });
 
 test('HOT-390 기본 폭: 새 워커는 waiting에 머물고 스스로 활성화하지 않는다', async ({ page, context }) => {
-  await controlled(page);
+  await controlled(page, context);
   const original = await (await page.request.get(`${WEB}/serwist/sw.js`)).text();
   expect(original.length, '워커 스크립트를 받지 못했다').toBeGreaterThan(0);
   // 바이트가 다른 새 판을 낸다(새 배포와 같다)

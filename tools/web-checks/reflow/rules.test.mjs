@@ -12,6 +12,7 @@ import {
   hasPageOverflow,
   obscuredFocusFindings,
   overlapFindings,
+  stickyInsetFindings,
   unreachableFindings,
 } from './rules.mjs';
 import { lighthousePages } from '../budgets/pages.mjs';
@@ -167,6 +168,44 @@ test('FE-T31 좌석 화면 항목은 ?state= 없이 성능 예산 좌석 데모�
     assert.equal(typeof p.sessionStorage, 'object', `${p.app} ${p.path}`);
     for (const v of Object.values(p.sessionStorage)) assert.equal(typeof v, 'string', `${p.app} ${p.path}`);
   }
+});
+
+// BAT-171 시험(계획 §3 T1): 시험 담당(l2-bat171-test)이 구현(622e082d) 뒤에 썼다(ADR-0281 결정 3). 기준 docs/frontend.md §5.17 '화면 목록의 경로':
+// 앱이 다른 경로로 넘기지 않고 바로 그리는 도착 경로를 적고, 관제 첫 화면 `/`는 라우터가 `/dashboard`로 넘기므로 `/dashboard`를 적는다
+test('FE-T31 화면 목록의 경로는 넘김 없는 도착 경로다(관제는 /dashboard이고 /는 없다)', () => {
+  const consolePaths = REFLOW_PAGES.filter((p) => p.app === 'console').map((p) => p.path);
+  assert.ok(consolePaths.includes('/dashboard'), `관제 항목에 /dashboard가 없다: ${consolePaths.join(', ')}`);
+  assert.equal(consolePaths.includes('/'), false, '관제 항목에 넘기는 경로 /가 있다(/dashboard로 넘어가 빈 결과가 된다)');
+  // 넘김을 따라간 뒤의 경로는 잰 것으로 치지 않으므로, 목록의 경로는 쿼리·조각 없이 그 화면의 경로 하나다
+  for (const p of REFLOW_PAGES) assert.match(p.path, /^\/[^?#]*$/, `${p.app} ${p.path}`);
+});
+
+// BAT-171 시험(계획 §3 T2의 판정): 시험 담당(l2-bat171-test)이 구현 뒤에 썼다. 기준 docs/frontend.md §5.11 '초점이 가려지지 않게'
+// (여백 = 띠의 실제 높이, 박아 둔 여백이 띠보다 작으면 결함, 위아래 띠와 여백을 빼고도 남는 보이는 높이 > 0). 경계 양쪽을 둔다
+test('FE-T18 고정 띠: 그 쪽 스크롤 여백이 띠의 실제 높이 이상이면 통과하고 1px 모자라면 찾으며, 남는 보이는 높이가 0이면 찾는다', () => {
+  const ids = (x) => stickyInsetFindings(x).map((f) => f.id);
+  const bands = [
+    { id: '탭', edge: 'top', height: 39 },
+    { id: '예매', edge: 'bottom', height: 192 },
+  ];
+  // 같으면 통과(위·아래 따로)
+  assert.deepEqual(ids({ bands, padding: { top: 39, bottom: 192 }, viewportHeight: 321 }), []);
+  // 1px 모자라면 그 띠만 찾는다(위·아래 따로)
+  assert.deepEqual(ids({ bands, padding: { top: 38, bottom: 192 }, viewportHeight: 321 }), ['탭']);
+  assert.deepEqual(ids({ bands, padding: { top: 39, bottom: 191 }, viewportHeight: 321 }), ['예매']);
+  // 소수 높이: 192.5는 192보다 높다(여백을 내림으로 넘기는 결함)
+  assert.deepEqual(ids({ bands: [{ id: '예매', edge: 'bottom', height: 192.5 }], padding: { top: 0, bottom: 192 }, viewportHeight: 321 }), ['예매']);
+  // 예전 고정값 96px(BAT-171 F2): 안내 글 줄바꿈으로 192px가 된 띠를 덮지 못한다
+  const short = stickyInsetFindings({ bands, padding: { top: 56, bottom: 96 }, viewportHeight: 400 });
+  assert.deepEqual(short, [{ id: '예매', edge: 'bottom', height: 192, padding: 96 }]);
+  // 같은 쪽에 띠가 둘이면 높은 것까지 덮어야 한다
+  assert.deepEqual(ids({ bands: [...bands, { id: '안내', edge: 'bottom', height: 200 }], padding: { top: 39, bottom: 192 }, viewportHeight: 400 }), ['안내']);
+  // 남는 보이는 높이: 1px 남으면 통과, 0이면 찾는다(여백이 띠보다 크면 여백으로 센다)
+  assert.deepEqual(ids({ bands, padding: { top: 39, bottom: 192 }, viewportHeight: 232 }), []);
+  assert.deepEqual(stickyInsetFindings({ bands, padding: { top: 39, bottom: 192 }, viewportHeight: 231 }), [{ id: '남는 높이', remaining: 0 }]);
+  assert.deepEqual(ids({ bands, padding: { top: 39, bottom: 230 }, viewportHeight: 268 }), ['남는 높이']);
+  // 띠가 없으면 남는 높이만 본다(여백 0이면 통과)
+  assert.deepEqual(ids({ bands: [], padding: { top: 0, bottom: 0 }, viewportHeight: 320 }), []);
 });
 
 test('FE-T31 주요 흐름은 소비자 웹·파트너·관제의 대표 화면이다', () => {

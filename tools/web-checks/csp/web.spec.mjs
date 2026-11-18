@@ -317,8 +317,8 @@ test.describe('외부 스크립트 출처와 SRI(ASVS 3.6.1, docs/frontend.md §
   const PAGES = [`/events/${DETAIL_EVENT}`, `/queue/${EVENT}/verify`, `/booking/${EVENT}/checkout`];
   for (const path of PAGES) {
     test(`[ASVS v5.0.0-3.6.1] ${path}: 다른 출처 스크립트는 외부 스크립트 결정 표의 출처뿐이고 같은 출처 외부 스크립트에는 integrity가 있다`, async ({ page }) => {
-      // 계획 §17 G-4: 웨이브 끝 게이트에서 같은 출처 외부 스크립트 SRI가 26건 빠져 있었다. 고침은 BAT-171(HOT-391) 몫이라 지우지 않고 건너뛴다
-      test.skip(true, 'BAT-171: 같은 출처 외부 스크립트 SRI 26건, HOT-391');
+      // 계획 §17 G-4: 웨이브 끝 게이트에서 같은 출처 외부 스크립트 SRI가 26건 빠져 있었다. BAT-171(HOT-391, 계획 §3 T5)에서 건너뛰기를 되돌렸다.
+      // 단언 범위는 묶음 계획 '정할 것' 1이 정하기 전이라 그대로 둔다(docs/frontend.md §5.14.2, docs/security/asvs/frontend.md 3.6.1)
       const allowed = loadExternalScriptHosts();
       const requested = [];
       page.on('request', (r) => {
