@@ -85,7 +85,44 @@
 
 ## 검증
 
-(아직)
+2026-11-19 검증 담당 `w11ci-verify-9f13`(claude-opus-5-5)가 `d2e6d20d` 트리로 했다. 계획·시험·구현·리뷰에는 관여하지 않았다. 결함은 작업 폴더 밖 임시 사본(`git worktree add --detach`, `node_modules`는 디렉터리 연결, 끝나고 연결을 끊고 `worktree remove --force`)에서 하나씩 넣고, 넣을 때마다 `node --test tools/ci/check-workflows.test.mjs`와 `node tools/ci/check-workflows.mjs`를 돌린 뒤 바로 되돌렸다. 바꾸지 않은 사본에서는 50개 중 통과 49, 건너뜀 1(CI 밖 시험)이고 검사는 '통과: 워크플로 19개'였다. 사본에 YAML 패키지가 있어 YAML 시험도 돌았다.
+
+**틀린 구현 검사(C 등급, ADR-0283 결정 2)**
+
+- 넣은 수 11, 잡힌 수 8, 놓친 수 3. 계획 4의 표본 M1~M6은 6개 모두 잡혔다. 검증 담당이 더한 A1~A5 가운데 A1·A2가 잡혔다. `check-workflows.mjs`는 열한 결함 모두에서 끝 코드 0이었다(계획 1의 4대로 concurrency 값은 시험만 본다).
+- 잡힌 것(결함 → 실패한 시험):
+
+| # | 넣은 결함 | 실패한 시험 |
+| --- | --- | --- |
+| M1 | `cancel-in-progress: false` | CC-01 |
+| M2 | `${{ github.event_name == 'push' }}` | CC-01 |
+| M3 | 큰따옴표 `"pull_request"` | CC-01 |
+| M4 | `group: ci` | CC-01 |
+| M5 | 맨 위는 `true` 그대로, 잡 `kind`에 `concurrency:`(`cancel-in-progress: false`) 블록 | CC-01, CC-02 |
+| M6 | `cancel-in-progress:` 줄을 지움 | CC-01, CC-02(줄 0개) |
+| A1 | `${{ github.ref != 'refs/heads/develop' }}`(`main`·릴리스·핫픽스 푸시는 취소) | CC-01 |
+| A2 | 바른 줄 아래 `cancel-in-progress: true`를 한 줄 더(같은 키 둘) | CC-01, CC-02, BSL050(YAML 읽기 실패) |
+
+- 시험마다 한 번 이상 실패를 보았다(CC-01·CC-02). CC-03은 아래 A5대로 실패하지 않았다.
+
+**놓친 것과 처리(ADR-0283 결정 2)**
+
+| # | 놓친 결함 | 까닭 | 처리 |
+| --- | --- | --- | --- |
+| A3 | `ci.yml`이 부르는 재사용 워크플로 `ci-kind.yml`의 첫 잡에 `concurrency:`(`group: kind-${{ github.ref }}`, `cancel-in-progress: true`)를 더함. `develop` 푸시가 이어지면 다음 실행의 `kind` 잡이 앞 실행의 `kind` 잡을 취소해 앞 실행의 `ci-summary`가 '취소'를 실패로 센다 | CC-01·CC-02는 `ci.yml` 한 파일만 줄로 읽는다. 리뷰가 '부르는 재사용 워크플로에는 `concurrency:`가 없다'고 확인한 것을 지키는 시험이 없다 | **이 묶음에서 시험 더함**(통과 기준 'develop 푸시는 취소하지 않는다'에 걸린다). 시험 담당에게: CC-04로 `ci.yml`과 `ci.yml`이 `uses: ./.github/workflows/*.yml`로 부르는 워크플로 모두에서 잡 단위 `concurrency` 키가 없고, `concurrency`는 `ci.yml` 맨 위에만 있음을 단언한다(아래 A4도 함께 잡도록 YAML로 읽어 키 이름을 본다) |
+| A4 | `ci.yml` 잡 `kind`에 따옴표 키 `"concurrency":`(`group: kind-${{ github.ref }}`, `"cancel-in-progress": true`)를 더함. YAML로는 보통 키와 같아 A3과 같은 결과다 | CC-02가 줄 앞머리 `concurrency:`·`cancel-in-progress:`만 세어 따옴표 키를 보지 못한다. CC-02 이름의 '잡에 따로 두어 맨 위 규칙을 덮지 않는다'를 이 꼴에서는 지키지 못한다 | **이 묶음에서 시험 더함**(통과 기준에 걸린다). 위 CC-04를 YAML로 읽으면 함께 잡힌다. 꼴이 드물어 CC-02를 고치지 않고 CC-04에 맡겨도 된다 |
+| A5 | RV-03 확인: `check-workflows.mjs` 규칙 4가 맨 위 `concurrency` 블록 줄을 건너뜀 | CC-03은 끝 코드 0만 본다. 대조로 바꾸지 않은 검사에 `ci.yml` 18줄을 `${{ github.head_ref == 'x' }}`로 바꿔 넣으면 끝 코드 1과 '사용자가 고칠 수 있는 값' 줄이 나왔고, 이 결함에서는 끝 코드 0이었다. 시험 50개는 모두 그대로 통과했다. 지금 검사는 맞게 동작한다 | 정리 목록으로(통과 기준 밖, 리뷰 RV-03과 같은 줄기). 고칠 때는 CC-03 표본의 `concurrency` 블록에 `github.head_ref`를 넣어 끝 코드가 0이 아님을 보는 대조 단언을 더한다 |
+
+**기준 대조(정본 값과 시험 단언)**
+
+- 취소 식: CC-01의 기대값 `${{ github.event_name == 'pull_request' }}`가 정본 `docs/devops.md` 267줄의 값과 글자까지 같다. 시험은 코드에서 값을 가져오지 않고 시험 파일 안 글로 적었다.
+- 그룹 값 `ci-${{ github.event.pull_request.number || github.ref }}`은 정본 줄에 적혀 있지 않고 계획 1의 1('그대로 둔다')과 구현 전 `ci.yml`에서 왔다. 정본에 없는 값을 시험이 묶는 것이라 어긋남은 아니지만, 바꿀 일이 생기면 정본 근거가 없다(정리 목록, 막는 일 아님).
+- 정본의 '`develop`·`main`·릴리스·핫픽스 가지 푸시'는 식이 `pull_request`가 아니면 모두 거짓이라 CC-01 하나로 덮인다(A1이 확인). '기다리는 실행은 가장 새 것 하나'는 GitHub 동작이라 시험 대상이 아니다.
+- 이름과 단언이 어긋난 시험 둘: CC-02(따옴표 키·부르는 워크플로를 보지 못함, 위 A3·A4), CC-03(RV-03, 위 A5). 그 밖에는 찾지 못했다.
+
+**고친 곳 확인**
+
+- 이 묶음은 아직 리뷰 반영 고침이 없다(RV-01·RV-02는 문서·소유자 확인, RV-03은 정리 목록). 확인할 고친 곳이 없다.
 
 ## 담당 표
 
@@ -95,3 +132,4 @@
 | impl | w11ci-impl-4e90 | claude-opus-5-5 | 2026-11-19T06:15+09:00 | 2026-11-19T06:17+09:00 |
 | test | w11ci-test-7a35 | claude-opus-5-5 | 2026-11-19T06:17+09:00 | 2026-11-19T06:22+09:00 |
 | review | w11ci-review-2c58 | claude-opus-5-5 | 2026-11-19T06:22+09:00 | 2026-11-19T06:30+09:00 |
+| verify | w11ci-verify-9f13 | claude-opus-5-5 | 2026-11-19T06:27+09:00 | 2026-11-19T06:46+09:00 |
