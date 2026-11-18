@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 43 | 6 | 0 | 0 | 1 | 1 | 0 | 0 | 63 | 114 |
-| 합계 | 43 | 6 | 0 | 0 | 1 | 1 | 0 | 0 | 63 | 114 |
+| B | 50 | 6 | 0 | 0 | 1 | 1 | 0 | 0 | 56 | 114 |
+| 합계 | 50 | 6 | 0 | 0 | 1 | 1 | 0 | 0 | 56 | 114 |
 
 ## docs/devops.md
 
@@ -58,13 +58,13 @@
 | D-T35 | ② | 이미지 처리 작업 격리(추천 적용 2026-10-28, 기술 검토… | ②은 `gitops-check` 정책 시험이 막는다. 작업 신원의 IAM 정책에는 격리 버킷 읽기와 파생본 쓰기만 있어 IAM 정적 검사도 다른 권한을 막는다. | 빈칸 | B | — |
 | D-T35 | ③ | 이미지 처리 작업 격리(추천 적용 2026-10-28, 기술 검토… | ③은 `gitops-check` 정책 시험이 막는다. 작업 신원의 IAM 정책에는 격리 버킷 읽기와 파생본 쓰기만 있어 IAM 정적 검사도 다른 권한을 막는다. | 빈칸 | B | — |
 | D-T35 | ④ | 이미지 처리 작업 격리(추천 적용 2026-10-28, 기술 검토… | ④는 모의 검사기가 `THREATS_FOUND`를 붙여 `MALWARE`로 거절하고, 큰 이미지는 디코딩 전에 `TOO_LARGE`로 거절한다. 두 경우 모두… | 빈칸 | B | — |
-| D-T36 | ① | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ① 연결된다 | 빈칸 | B | — |
-| D-T36 | ② | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ② 거부된다 | 빈칸 | B | — |
-| D-T36 | ③ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ③ 연결된다 | 빈칸 | B | — |
-| D-T36 | ④ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ④ 거부된다 | 빈칸 | B | — |
-| D-T36 | ⑤ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ⑤ 연결된다 | 빈칸 | B | — |
-| D-T36 | ⑥ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ⑥ gw-fan은 연결되고 그 밖의 파드는 거부된다 | 빈칸 | B | — |
-| D-T36 | ⑦ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ⑦ 여덟 서비스와 admission-ctrl의 `GetAdminAuthz` 호출은 연결되고 그 밖의 파드는 거부된다(판정 칸을 번호마다 나눴다. 추천 적용… | 빈칸 | B | — |
+| D-T36 | ① | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ① 연결된다 | 자동 시험 | B | 시험: deploy/platform/mesh/test/mesh-policies.test.mjs, tools/local/e2e/mesh-netpol.e2e.mjs |
+| D-T36 | ② | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ② 거부된다 | 자동 시험 | B | 시험: deploy/platform/mesh/test/mesh-policies.test.mjs, tools/local/e2e/mesh-netpol.e2e.mjs |
+| D-T36 | ③ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ③ 연결된다 | 자동 시험 | B | 시험: deploy/platform/mesh/test/mesh-policies.test.mjs, tools/local/e2e/mesh-netpol.e2e.mjs |
+| D-T36 | ④ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ④ 거부된다 | 자동 시험 | B | 시험: deploy/platform/mesh/test/mesh-policies.test.mjs, tools/local/e2e/mesh-netpol.e2e.mjs |
+| D-T36 | ⑤ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ⑤ 연결된다 | 자동 시험 | B | 시험: deploy/platform/mesh/test/mesh-policies.test.mjs, tools/local/e2e/mesh-netpol.e2e.mjs |
+| D-T36 | ⑥ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ⑥ gw-fan은 연결되고 그 밖의 파드는 거부된다 | 자동 시험 | B | 시험: deploy/platform/mesh/test/mesh-policies.test.mjs, tools/local/e2e/mesh-netpol.e2e.mjs |
+| D-T36 | ⑦ | 메시 포트별 허용 표(추천 적용 2026-10-28, 기술 검토… | ⑦ 여덟 서비스와 admission-ctrl의 `GetAdminAuthz` 호출은 연결되고 그 밖의 파드는 거부된다(메시 없는 kind에서 '그 밖의 파드'는… | 자동 시험 | B | 시험: deploy/platform/mesh/test/mesh-policies.test.mjs, tools/local/e2e/mesh-netpol.e2e.mjs |
 | D-T31 | — | admission-ctrl 롤링의 리더 교체 횟수(추천 적용… | 주석을 단 판은 롤링마다 리더 교체가 보통 1번이고, 2번 넘는 회차가 있으면 그 회차와 이유를 남긴다. 단 적 없는 판은 교체 횟수 분포(최악 3번)를 남겨… | 빈칸 | B | — |
 | D-T40 | ① | 축소 성능 상대 비교(추천 적용 2026-10-28, 기술 검토… | ①은 실행마다 p99 비율을 남기고, 그 가장 큰 벗어남이 기준값의 근거가 된다. | 자동 시험 | B | 시험: tools/perf-ledger/ledger.test.mjs |
 | D-T40 | ② | 축소 성능 상대 비교(추천 적용 2026-10-28, 기술 검토… | ②는 기준값을 넘어 야간 시험이 실패하고 SEV3 알림이 난다. | 자동 시험 | B | 시험: tools/perf-ledger/ledger.test.mjs |
