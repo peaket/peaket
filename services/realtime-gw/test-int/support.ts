@@ -5,6 +5,7 @@
 import { generateKeyPairSync, type KeyObject, randomBytes, sign } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
+import { connect as tcpConnect, createServer as createNetServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -243,3 +244,107 @@ export async function until(ok: () => boolean | Promise<boolean>, what: string, 
     await sleep(everyMs);
   }
 }
+
+/**
+ * gw와 Valkey 사이의 TCP 중계(S-T42 ⑱). blackhole()이면 연결을 닫지 않고 양쪽으로 받은 것을 버린다(반쯤 열린 연결과 같다).
+ * restore()는 그때까지의 연결을 모두 끊고(버린 바이트로 RESP가 어긋난 연결을 남기지 않는다) 새 연결부터 그대로 잇는다.
+ */
+export interface Relay {
+  port: number;
+  url: string;
+  blackhole(): void;
+  restore(): void;
+  close(): Promise<void>;
+}
+
+export async function startRelay(targetPort: number): Promise<Relay> {
+  let dropping = false;
+  const pairs = new Set<[Socket, Socket]>();
+  const server = createNetServer((down) => {
+    const up = tcpConnect({ host: '127.0.0.1', port: targetPort });
+    const pair: [Socket, Socket] = [down, up];
+    pairs.add(pair);
+    const end = (): void => {
+      pairs.delete(pair);
+      down.destroy();
+      up.destroy();
+    };
+    down.on('data', (d: Buffer) => {
+      if (!dropping) up.write(d);
+    });
+    up.on('data', (d: Buffer) => {
+      if (!dropping) down.write(d);
+    });
+    for (const s of [down, up]) {
+      s.on('error', end);
+      s.on('close', end);
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const a = server.address();
+  const port = typeof a === 'object' && a ? a.port : 0;
+  const cut = (): void => {
+    for (const [d, u] of [...pairs]) {
+      d.destroy();
+      u.destroy();
+    }
+    pairs.clear();
+  };
+  return {
+    port,
+    url: `redis://127.0.0.1:${port}`,
+    blackhole: () => {
+      dropping = true;
+    },
+    restore: () => {
+      cut();
+      dropping = false;
+    },
+    close: () =>
+      new Promise<void>((resolve) => {
+        cut();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+/**
+ * 맨 TCP로 AUTH 뒤 명령 하나를 보내고 그 답의 첫 줄을 돌려준다(RESP2). 구독 명령(SSUBSCRIBE)도 클라이언트 모드를 바꾸지 않고 본다(S-T42 ⑭).
+ * 답 첫 글자: '-' 오류(NOPERM 등), '+' 단순 글, '$' 묶음 글, '*' 배열.
+ */
+export function rawRedisReply(port: number, auth: { user: string; password: string }, args: string[]): Promise<string> {
+  const encode = (a: string[]): string => `*${a.length}\r\n` + a.map((x) => `$${Buffer.byteLength(x)}\r\n${x}\r\n`).join('');
+  return new Promise<string>((resolve, reject) => {
+    const s = tcpConnect({ host: '127.0.0.1', port });
+    let text = '';
+    const timer = setTimeout(() => {
+      s.destroy();
+      reject(new Error(`답이 오지 않았다(받은 것 ${JSON.stringify(text.slice(0, 80))})`));
+    }, 5_000);
+    s.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    s.on('data', (d: Buffer) => {
+      text += d.toString('latin1');
+      if (!text.startsWith('+OK\r\n')) {
+        if (text.includes('\r\n')) {
+          clearTimeout(timer);
+          s.destroy();
+          reject(new Error(`AUTH 실패: ${text.split('\r\n')[0]}`));
+        }
+        return;
+      }
+      const rest = text.slice(5);
+      const nl = rest.indexOf('\r\n');
+      if (nl < 0) return;
+      clearTimeout(timer);
+      s.destroy();
+      resolve(rest.slice(0, nl));
+    });
+    s.write(encode(['AUTH', auth.user, auth.password]) + encode(args));
+  });
+}
+
+/** 받기를 멈춘다(커널 버퍼가 차면 서버의 보내기 버퍼가 쌓인다). ws 클라이언트의 밑 소켓 */
+export const rawSocketOf = (ws: WebSocket): Socket => (ws as unknown as { _socket: Socket })._socket;

@@ -15,6 +15,12 @@ export const SPEC = {
   maxFrameBytes: 1024,
   maxWaitCap: 65_535,
   close: { restart: 1012, slow: 1013, expired: 4401, forbidden: 4403, tooMany: 4429 },
+  /** 닫힘 이유 글(docs/frontend.md §4.4.1 '닫힘 이유 글', ADR-0297 결정 8). 글자 그대로 계약이다 */
+  reason: { restart: 'server restart', slow: 'slow consumer', expired: 'token expired', badEvent: 'bad event', badSection: 'bad section', badFrame: 'bad frame', tooMany: 'too many' },
+  /** 같은 입장 토큰(jti)의 파드 연결 상한(seat-hold §7 '핸드셰이크' 뒤 문장, ADR-0297 결정 3, [가정]) */
+  sameTokenMax: 2,
+  /** 내릴 때 구독 해제 응답을 기다리는 상한(ms, ADR-0297 결정 5, [가정]) */
+  shutdownUnsubscribeWaitMs: 1_000,
 } as const;
 
 /** 시작 시각은 박자(100ms)의 배수가 아니게 고른다 */
@@ -48,7 +54,11 @@ export interface Deferred {
   reject(e: unknown): void;
 }
 
-/** 부른 차례를 적는 가짜 구독기. hold가 참이면 끝나지 않은 약속을 돌려주고 pending에 둔다 */
+/**
+ * 부른 차례를 적는 가짜 구독기. hold가 참이면 끝나지 않은 약속을 돌려주고 pending에 둔다.
+ * ADR-0297 결정 1 뒤로 실제 구독기는 원하는 상태를 적고 곧 돌려주며 거절하지 않지만, 허브가 구독기의 약속 결과(거절·끝나지 않음)로
+ * 상태를 정하지 않는지 보려고 이 가짜는 거절하거나 붙잡을 수 있다
+ */
 export class FakeSubscriber implements ChannelSubscriber {
   readonly calls: Array<['subscribe' | 'unsubscribe', string]> = [];
   readonly listeners = new Map<string, (m: string) => void>();
@@ -89,8 +99,8 @@ export interface Harness {
   sub: FakeSubscriber;
   metrics: MetricCall[];
   sections: Map<string, number>;
-  /** 열고 첫 프레임까지 받은 연결 */
-  open(o?: { eventId?: string; accountId?: string; expiresAtMs?: number }): FakeConn;
+  /** 열고 첫 프레임까지 받은 연결. tokenId를 주지 않으면 연결마다 다른 토큰 jti다 */
+  open(o?: { eventId?: string; accountId?: string; expiresAtMs?: number; tokenId?: string }): FakeConn;
 }
 
 export function harness(o: { sections?: Record<string, number> } = {}): Harness {
@@ -98,6 +108,7 @@ export function harness(o: { sections?: Record<string, number> } = {}): Harness 
   const sub = new FakeSubscriber();
   const metrics: MetricCall[] = [];
   const sections = new Map(Object.entries(o.sections ?? { 'ev-1': 20, 'ev-2': 20 }));
+  let tokens = 0;
   const hub = createStreamHub({
     clock,
     subscriber: sub,
@@ -112,7 +123,8 @@ export function harness(o: { sections?: Record<string, number> } = {}): Harness 
     sections,
     open(s = {}) {
       const c = new FakeConn();
-      hub.open(c, { eventId: s.eventId ?? 'ev-1', accountId: s.accountId ?? 'acct-1', expiresAtMs: s.expiresAtMs ?? WALL0 + 3_600_000 });
+      // tokenId는 ADR-0297 결정 3의 새 칸(토큰 jti, 같은 토큰의 파드 연결 상한을 센다)
+      hub.open(c, { eventId: s.eventId ?? 'ev-1', accountId: s.accountId ?? 'acct-1', expiresAtMs: s.expiresAtMs ?? WALL0 + 3_600_000, tokenId: s.tokenId ?? `jti-${++tokens}` });
       return c;
     },
   };
