@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 100 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 148 |
+| A | 126 | 24 | 6 | 0 | 2 | 11 | 0 | 0 | 0 | 169 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 158 | 24 | 6 | 0 | 2 | 47 | 0 | 0 | 0 | 237 |
+| 합계 | 184 | 24 | 6 | 0 | 2 | 42 | 0 | 0 | 0 | 258 |
 
 ## docs/features/payment.md
 
@@ -71,11 +71,11 @@
 | P-T41 | ② | 결제하지 않은 티켓 주문의 만료 | ② 세션 종료와 홀드 해제 뒤 EXPIRED | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
 | P-T41 | ③ | 결제하지 않은 티켓 주문의 만료 | ③ 접수가 먼저면 만료하지 않고 지금 규칙대로 처리, 만료 뒤의 시도·접수는 409 `order-expired` | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
 | P-T41 | ④ | 결제하지 않은 티켓 주문의 만료 | ④ 안전망이 만든 지 90분 [가정] 지난 주문을 끝낸다. 과금 0건 | 자동 시험 | A | 시험: services/purchase-svc/test-int/order-expiry.int.test.ts |
-| P-T42 | ① | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ① 주문 Expired, 재고가 돌아와 다시 살 수 있다 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ② | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ② 연장된 시각까지 만료하지 않는다 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ③ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ③ 하나만 이긴다(승인이면 재고 확정, 만료면 과금 0건) | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ④ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ④이전 주문이 Expired로 끝나고 재고를 돌린 뒤 새 주문이 생긴다 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
-| P-T42 | ⑤ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ⑤ 재고는 한 번만 돌아온다. 모든 경우에 초과 판매 0건 | 다른 단계 | A | 미정 · 굿즈 재고 예약 만료(core-svc shop) |
+| P-T42 | ① | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ① 주문 Expired, 재고가 돌아와 다시 살 수 있다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-expiry.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts 외 2곳 |
+| P-T42 | ② | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ② 연장된 시각까지 만료하지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-expiry.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts 외 1곳 |
+| P-T42 | ③ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ③ 하나만 이긴다(승인이면 재고 확정, 만료면 과금 0건) | 자동 시험 | A | 시험: services/core-svc/test-int/shop-expiry.int.test.ts, services/core-svc/test-int/shop-migration.int.test.ts |
+| P-T42 | ④ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ④이전 주문이 Expired로 끝나고 재고를 돌린 뒤 새 주문이 생긴다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts |
+| P-T42 | ⑤ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ⑤ 재고는 한 번만 돌아온다. 모든 경우에 초과 판매 0건 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-expiry.int.test.ts, services/core-svc/test-int/shop-order.int.test.ts 외 1곳 |
 | P-T43 | ① | 새 결제 진입 정지와 다시 열기 | ① 시험 재개에서 정지로 돌아가고, 시험 결제의 과금은 0원이다 … , PromQL의 `path="direct"`를 본다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
 | P-T43 | ② | 새 결제 진입 정지와 다시 열기 | ② 바로 모두 열리고, 감사 로그에 사유와 commander가 남는다. 실패가 이어지면 연 뒤의 표본으로 다시 멈춘다 … , PromQL의… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
 | P-T43 | ③ | 새 결제 진입 정지와 다시 열기 | ③ 예상 대기가 10초 아래로 1분 이어지면 열리고, 확인 호출은 나가지 않는다 … , PromQL의 `path="direct"`를 본다. … 의 예상 대기를… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-channel-limit.int.test.ts, services/payment-svc/test-int/payment-entry-pause-j… |
@@ -160,6 +160,27 @@
 | P-T75 | ① | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ① 종류 다섯(이상 표시·환급 실패·일괄 환불 실패·공제 차액·환불 대기)마다 ops-svc가 `accepted: true`로 답하고 CS 처리함에 건이 한 번… | 자동 시험 | A | 시험: services/ops-svc/test/cases-contract.test.ts, services/ops-svc/test/cases.test.ts 외 1곳 |
 | P-T75 | ② | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ② ops-svc가 2xx `accepted: false`로 답하면 purchase-svc는 연 시각을 쓰지 않고 실패 지표를 올리며 다음 틱에 다시 연다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
 | P-T75 | ③ | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ③ 그 판정은 CS 건 어댑터 모두 같다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
+| P-T56 | ① | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ① `IN_PROGRESS`이고 원장 1행(`order_kind` `MERCH`, `event_id` NULL)·이력 첫 행 1행·승인 명령 1행이다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts, services/payment-svc/test/merch-confirm-command.test.t… |
+| P-T56 | ② | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ② 다시 부르면 같은 답이고 행이 그대로다. `TICKET`으로 부르면 `FAILED_PRECONDITION`과 SEV2 로그 한 줄이고 행이 바뀌지 않는다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int.test.ts 외 1곳 |
+| P-T56 | ③ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ③ `INVALID_ARGUMENT`이고 쓴 행이 없다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts, services/payment-svc/test/merch-confirm-command.test.t… |
+| P-T56 | ④ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ④ `INVALID_ARGUMENT`다(티켓 규칙 그대로). | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts, services/payment-svc/test/merch-confirm-command.test.t… |
+| P-T56 | ⑤ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ⑤ 복귀 주소가 `/shop/checkout/return?order=…&pg=…`이고, 회차가 없으면 플랫폼 기본 결제사이며, 허용 수단에 가상계좌가 없고… | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts, services/payment-svc/test-int/merch-path-e2e.int.test.ts 외 2곳 |
+| P-T56 | ⑥ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ⑥ 승인 사건의 `orderKind`가 `MERCH`, `eventId`가 null, Kafka 키가 주문 ID다. purchase-svc 소비자는 반영하지… | 자동 시험 | A | 시험: packages/contracts/test/payment-event-order-kind.test.ts, services/invariant-checker/test-int/invariants.int.test.ts… |
+| P-T57 | ① | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ① 주문 `PAID`, `product_stock` 2, 카운터 2, 그 주문의 예약 원소 0이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-order.int.test.ts 외 2곳 |
+| P-T57 | ② | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ② 주문 `FAILED`, `product_stock`과 카운터가 3으로 돌아오고 과금이 0건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts 외 1곳 |
+| P-T57 | ③ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ③ 성공 3건과 409 `merch-sold-out` 7건이고 `product_stock` 0, 초과 판매 0건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts 외 2곳 |
+| P-T57 | ④ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ④ 409 `merch-sold-out`, 주문 `FAILED`이고 `ConfirmPayment`가 0건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts |
+| P-T57 | ⑤ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑤ 카운터를 DB로 다시 만들고 주문이 성공한다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts |
+| P-T57 | ⑥ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑥ 모두 404 `not-found`이고 바뀐 행이 없다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-order.int.test.ts 외 1곳 |
+| P-T57 | ⑦ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑦ 차례로 422 `merch-quantity-limit-exceeded`(두 줄 합 3도 같다. 두 줄 합 2는… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-order.int.test.ts 외 2곳 |
+| P-T57 | ⑧ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑧ 앞은 남은 수 1, 뒤는 422 `product-limited-qty-invalid`이고 남은 수가 그대로다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts 외 1곳 |
+| P-T57 | ⑨ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑨ 기한이 지나도 주문은 `FAILED`가 되지 않고 승인이 오면 `PAID`이며 재고가 돌아오지 않는다. 명령이 적히지 않았으면 기한에 `FAILED`와 두… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts |
+| P-T57 | ⑩ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑩ 본문 검사(400·422)는 그대로이고, 통과하면 503 `pg-unavailable`이며 재고 예약·주문 행이 0이다 | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts |
+| P-T58 | ① | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ① 토요일에는 바뀐 행이 없다. 월요일에 항목이 `CANCELLED`를 거쳐 `REFUNDED`가 되고(`cancel_reason` `UNCLAIMED`) 결제… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-unclaimed.int.test.ts 외 2곳 |
+| P-T58 | ② | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ② 바뀐 행이 없고 결제 취소가 0건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-unclaimed.int.test.ts, services/core-svc/test/merch-unclaimed.test.ts |
+| P-T58 | ③ | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ③ 10분 뒤 같은 취소 ID로 다시 불러 `REFUNDED`가 되고, 결제사 취소는 1건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-unclaimed.int.test.ts 외 1곳 |
+| P-T58 | ④ | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ④ 받지 않은 항목 금액만 취소한다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-unclaimed.int.test.ts, services/core-svc/test/merch-unclaimed.test.ts 외 1곳 |
+| P-T58 | ⑤ | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ⑤ 결제 취소가 1건이다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-unclaimed.int.test.ts, services/core-svc/test/merch-unclaimed.test.ts 외 1곳 |
 
 ## docs/security/asvs/payment.md
 
@@ -168,7 +189,7 @@
 | v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/auto-assign.test.ts, services/purchase-svc/test/end-purchase-session.test.ts 외 4곳 |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
-| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-deposit.int.test.t… |
+| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 68곳 |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/auto-assign.test.ts, services/purchase-svc/test/hold-seats.test.ts 외 2곳 |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-confirm-runner.int… |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 26곳 |
@@ -194,9 +215,9 @@
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
-| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test/pg-selection.test.ts |
+| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int.tes… |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-password-change.int.test.ts, services/identity-svc/test/admin-password-change.t… |
-| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 22곳 |
+| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 33곳 |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 2곳 |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test/payment-method-ref.test.ts |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 다른 단계 | B | 결제 공통 후속 · payment-svc·플랫폼의 TLS·KMS 경로가 맡는다. BAT-050 범위 밖이다. |
