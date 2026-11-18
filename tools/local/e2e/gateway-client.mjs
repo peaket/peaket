@@ -1,4 +1,4 @@
-// 게이트웨이 kind·브라우저 시험(gateways.e2e.mjs·queue-cors.e2e.mjs)이 함께 쓰는 손님 쪽 도구(BUILD_ORDER HOT-400, 묶음 BAT-055 계획 §5·§6).
+// 게이트웨이 kind·브라우저 시험(gateways.e2e.mjs·queue-cors.e2e.mjs, BAT-057의 gateway-admission*.e2e.mjs)이 함께 쓰는 손님 쪽 도구(BUILD_ORDER HOT-400, 묶음 BAT-055 계획 §5·§6).
 // 시험이 기대는 약속(구현 담당이 `node tools/local/cluster.mjs gateways`로 만족시킨다. 이름·모양을 바꾸려면 계획 파일 '시험 이의'에 적는다):
 //
 // 1. 접속 정보 파일: `.cache/peaket-tools/gateways-e2e.json`(환경 값 PEAKET_GATEWAYS_E2E로 다른 경로). 저장소에 두지 않는다.
@@ -9,8 +9,14 @@
 //      "origins": { "www": 출처, "partner": …, "console": …, "scanner": … },  // 브라우저가 보낼 Origin 그대로(포트 포함)
 //      "originVerify": 시험 원본 확인 값,  "issuer": 시험 발급자,
 //      "keys":    { "fan": 개인 JWK(kid 포함), "admin": …, "staff": …, "admission": … },  // 시험 키(대역 공개키 묶음이 공개 부분을 낸다)
-//      "probes":  { "<게이트웨이>": { "host": hosts의 키, "method": "GET", "path": "/v1/…", "scope": "공백으로 이은 스코프", "scheme": "Bearer" } },
+//      "probes":  { "<게이트웨이>": { "host": hosts의 키, "method": "GET", "path": "/v1/…", "scope": "공백으로 이은 스코프", "scheme": "Bearer", "admission": 참·없음 } },
 //                 // 그 게이트웨이의 토큰을 단 요청이 대역 백엔드(echo)에 닿는 경로. path의 {event}는 시험이 회차 ID로 바꾼다. 검색(한도) 경로는 쓰지 않는다
+//                 // admission이 참인 경로(gw-fan 구매 경로, 묶음 BAT-057)는 입장 토큰도 요구한다: probe가 그 회차의 맞는 입장 토큰을 X-Admission-Token에 붙인다
+//      "admission": { "issuer": 입장 토큰 발급자(gw-fan admissionIssuer와 같다), "current": 지금 키 개인 JWK, "next": 다음 키 개인 JWK,
+//                     "previous": { "jwk": 끝 시각이 남은 옛 키 개인 JWK, "until": 끝 시각(초, 지금 + 1시간) },
+//                     "expired":  { "jwk": 끝 시각이 지난 옛 키 개인 JWK, "until": 끝 시각(초, 지금 − 1시간) } },
+//                 // 입장 토큰 시험 키 넷(BAT-057 계획 §5, docs/infra.md §4.1 '입장 토큰 확인'의 '로컬 kind'). 게이트웨이 키 목록 ConfigMap peaket-admission-jwks에
+//                 // 넷의 공개 부분(옛 키 둘에 peaket_until)이 든다. BAT-057 전의 접속 정보에는 이 칸이 없다(그 칸을 쓰는 시험은 단언으로 실패한다)
 //      "appPaths": { "gw-fan": www 앱 서버 경로, "gw-partner": partner 앱 서버 경로 },
 //      "logs":    { "namespace": Envoy 프록시 네임스페이스(기본 envoy-gateway-system), "container": 기본 envoy,
 //                   "selector": 라벨 고르개 틀(기본 gateway.envoyproxy.io/owning-gateway-name={gateway}) },
@@ -22,6 +28,7 @@
 //    `x-e2e-body-b64`(UTF-8 본문을 base64로. 머리에 실을 수 없는 한글 본문용이고, 있으면 `x-e2e-body`보다 먼저 쓴다).
 //    머리를 달 수 없는 브라우저 요청(사전 요청 없는 형식)은 같은 뜻의 쿼리 `e2e-status`·`e2e-header=이름:값`(여럿)을 쓴다.
 // 3. 접근 로그: Envoy 프록시 컨테이너 표준 출력의 JSON 한 줄(docs/infra.md §4.1 '접근 로그'). 시험은 토큰 `sub`나 보낸 고유 값이 든 줄을 찾는다.
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import https from 'node:https';
 import { join } from 'node:path';
@@ -113,11 +120,43 @@ export function accessToken(c, gw, sub, extra = {}) {
   return token(c, KEYSET_OF[gw], { sub, sid: `s-${sub}`, aud: AUD_OF[gw], scope, ...(KEYSET_OF[gw] === 'fan' ? { pid: `p-${sub}` } : {}), ...extra });
 }
 
-/** 확인 경로로 보낸다(토큰은 확인 경로의 방식으로 Authorization에) */
-export function probe(c, gw, { tokenValue, headers = {}, event = 'e2e-event' } = {}) {
+/** 입장 토큰의 대상(aud)과 머리 typ(docs/features/queue-admission.md §6 '입장 토큰', docs/infra.md §4.1 '입장 토큰 확인' ⑤⑦) */
+export const ADMISSION_AUD = 'purchase';
+export const ADMISSION_TYP = 'admission+jwt';
+
+/**
+ * 입장 토큰 시험 키 하나(접속 정보 admission의 current·next·previous·expired, 개인 JWK). 접속 정보에 그 칸이 없으면 던진다(BAT-057 전의 접속 정보)
+ * @param {'current' | 'next' | 'previous' | 'expired'} which
+ */
+export function admissionKey(c, which = 'current') {
+  if (!c.admission) throw new Error('접속 정보에 admission 칸이 없다(입장 토큰 시험 키, 묶음 BAT-057). node tools/local/cluster.mjs gateways를 다시 돌린다');
+  const k = c.admission[which];
+  const jwk = k?.jwk ?? k;
+  if (!jwk || typeof jwk.kid !== 'string' || typeof jwk.d !== 'string') throw new Error(`접속 정보 admission.${which}이 개인 JWK가 아니다`);
+  return jwk;
+}
+
+/**
+ * 그 회차의 맞는 입장 토큰(ES256, 머리 typ admission+jwt·kid, iss admission.issuer, aud purchase, exp 지금 + 600초). queue-svc가 싣는 클레임 꼴(sub·jti·sid·event·jny·iat·exp)이다.
+ * claims·header로 칸을 바꾸거나 더하고, 값을 undefined로 주면 그 칸을 뺀다(JSON에 실리지 않는다)
+ * @param {{ event?: string, key?: 'current' | 'next' | 'previous' | 'expired', sub?: string, claims?: Record<string, unknown>, header?: Record<string, unknown>, nowMs?: number }} [o]
+ */
+export function admissionToken(c, { event = 'e2e-event', key = 'current', sub = 'e2e-admission', claims = {}, header = {}, nowMs = Date.now() } = {}) {
+  const jwk = admissionKey(c, key);
+  const iat = Math.floor(nowMs / 1000);
+  return signV0Token(jwk, { iss: c.admission.issuer, sub, aud: ADMISSION_AUD, jti: randomUUID(), sid: `s-${sub}`, event, jny: randomUUID(), iat, exp: iat + 600, ...claims }, { nowMs, header: { typ: ADMISSION_TYP, ...header } });
+}
+
+/**
+ * 확인 경로로 보낸다(토큰은 확인 경로의 방식으로 Authorization에). 확인 경로가 admission이면(gw-fan 구매 경로) 그 회차의 맞는 입장 토큰을 X-Admission-Token에 붙인다.
+ * admission: undefined면 위대로, null이면 붙이지 않고, 글이면 그 값을 붙인다. headers에 x-admission-token이 있으면 그것을 쓴다
+ */
+export function probe(c, gw, { tokenValue, headers = {}, event = 'e2e-event', admission } = {}) {
   const p = c.probes[gw];
   const auth = tokenValue === undefined ? {} : { authorization: `${p.scheme ?? 'Bearer'} ${tokenValue}` };
-  return send(c, p.host, { method: p.method ?? 'GET', path: p.path.replaceAll('{event}', event), headers: { ...auth, ...headers } });
+  const given = Object.keys(headers).some((h) => h.toLowerCase() === 'x-admission-token');
+  const adm = given || admission === null || (!p.admission && admission === undefined) ? {} : { 'x-admission-token': admission ?? admissionToken(c, { event }) };
+  return send(c, p.host, { method: p.method ?? 'GET', path: p.path.replaceAll('{event}', event), headers: { ...auth, ...adm, ...headers } });
 }
 
 /** CloudFront 몫(원본 확인 머리·x-forwarded-for)을 시험 클라이언트가 붙인다(bot-defense B-T18 '앞단') */

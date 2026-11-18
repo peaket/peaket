@@ -47,7 +47,7 @@ export function openInput(h: { now(): number }, jti: string, over: Partial<OpenS
 const near = (a: number, b: number, skew: number) => Math.abs(a - b) <= skew;
 
 export function purchaseSessionStoreCases(make: () => Promise<SessionHarness> | SessionHarness): void {
-  test('ST28_① 표지가 없으면 CREATED이고 세션 상태에 계정·로그인 세션·회차·여정·임시 공개키·일련번호 0·유휴 시한·최대 체류가 적힌다 [ASVS v5.0.0-8.2.1]', async () => {
+  test('ST28_ 표지가 없으면 CREATED이고 세션 상태에 계정·로그인 세션·회차·여정·임시 공개키·일련번호 0·유휴 시한·최대 체류가 적힌다 [ASVS v5.0.0-8.2.1]', async () => {
     const h = await make();
     const jti = newJti();
     const i = openInput(h, jti);

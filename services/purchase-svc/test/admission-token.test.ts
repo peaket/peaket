@@ -238,3 +238,40 @@ describe('공개키 묶음 읽기 (PEAKET_ADMISSION_JWKS)', () => {
     expect(m.get('k1')!.type).toBe('public');
   });
 });
+
+// 받는 쪽의 끝 시각(Q-T69 ③ '끝 시각이 지난 옛 키는 마지막 묶음에 남아 있어도 받지 않는다', docs/features/queue-admission.md §6 '받는 쪽의 끝 시각',
+// docs/features/seat-hold.md §2 '입장 토큰 공개키 묶음 주기 읽기'의 '끝 시각', ADR-0288 결정 3, BUILD_ORDER HOT-400 묶음 BAT-057 계획 §6 U5).
+// purchase-svc는 지금(밀리초) ≤ peaket_until × 1000일 때만 그 키를 쓴다. u는 시험이 고른 값이다(어느 코드 상수와도 다르다).
+describe('Q-T69 ③ 묶음 원소의 peaket_until(끝 시각)', () => {
+  const jwks = (keysArr: unknown[]) => JSON.stringify({ keys: keysArr });
+  /** 끝 시각(초): 지금부터 20분 34초 뒤. 토큰의 exp(지금 + 45분)보다 앞이라 exp 때문에 거절되지 않는다 */
+  const U = Math.floor(NOW / 1000) + 1234;
+
+  test('Q-T69 ③ [ASVS v5.0.0-9.2.1] peaket_until = u인 키: 지금 = u × 1000 − 1ms·u × 1000은 받고 u × 1000 + 1ms부터는 kid로 거절한다(같은 묶음을 그대로 들고 있어도)', () => {
+    // 옛 키(k1)에만 끝 시각, 지금 키(k2)에는 없다. 한 번 읽은 묶음을 시각만 바꿔 다시 쓴다(마지막 묶음에 남아 있는 경우)
+    const m = parseAdmissionJwks(jwks([{ ...K1.publicJwk, peaket_until: U }, K2.publicJwk]));
+    const old = token();
+    const current = token({ header: { kid: 'k2' }, signWith: K2.priv });
+    const at = (t: string, nowMs: number) => {
+      try {
+        verifyAdmissionToken(t, { keys: m, issuer: ISS, nowMs });
+        return undefined;
+      } catch (e) {
+        if (e instanceof AdmissionTokenRejected) return e.reason;
+        throw e;
+      }
+    };
+    expect(at(old, U * 1000 - 1), 'u × 1000 − 1ms').toBeUndefined();
+    expect(at(old, U * 1000), 'u × 1000').toBeUndefined();
+    expect(at(old, U * 1000 + 1), 'u × 1000 + 1ms').toBe('kid');
+    expect(at(old, U * 1000 + 60_000), 'u × 1000 + 1분').toBe('kid');
+    // 끝 시각이 없는 지금 키는 같은 시각에 그대로 받는다(묶음 전체를 버린 것이 아니다)
+    expect(at(current, U * 1000 + 1), '지금 키').toBeUndefined();
+  });
+
+  test('Q-T69 ③ [ASVS v5.0.0-9.1.3] peaket_until이 정수(초)가 아니면 묶음이 틀린 모양이다: 소수·글·null·참거짓', () => {
+    for (const bad of [U + 0.5, String(U), null, true]) expect(() => parseAdmissionJwks(jwks([{ ...K1.publicJwk, peaket_until: bad }])), JSON.stringify(bad)).toThrow();
+    // 정수는 받는다
+    expect(() => parseAdmissionJwks(jwks([{ ...K1.publicJwk, peaket_until: U }]))).not.toThrow();
+  });
+});

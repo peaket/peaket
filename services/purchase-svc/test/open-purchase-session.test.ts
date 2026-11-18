@@ -177,7 +177,7 @@ describe('거절', () => {
     }
   });
 
-  test('ST28_①③ 주소의 회차가 토큰의 event와 다르면 EVENT_MISMATCH(403)이고 아무것도 열지 않는다. 한가한 회차의 입장 토큰으로 다른 회차를 못 연다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('ST28_③ 주소의 회차가 토큰의 event와 다르면 EVENT_MISMATCH(403)이고 아무것도 열지 않는다. 한가한 회차의 입장 토큰으로 다른 회차를 못 연다 [ASVS v5.0.0-8.2.2]', async () => {
     const { uc, store, log, warnings } = setup();
     const { jti, cmd } = command({ eventId: 'ev-2' });
     expect(await codeOf(uc.execute(cmd))).toBe('EVENT_MISMATCH');

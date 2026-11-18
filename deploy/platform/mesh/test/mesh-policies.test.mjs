@@ -74,7 +74,7 @@ const METRICS_PORT = 9464;
 const CONTROL_CALLERS = ['ops-svc', 'ops-breakglass'];
 /** 관리 경로를 처리하는 여덟 서비스(docs/architecture.md:290, D-T36 ⑦) */
 const ADMIN_EIGHT = ['core-svc', 'identity-svc', 'ticket-svc', 'payment-svc', 'purchase-svc', 'queue-svc', 'trust-svc', 'ops-svc'];
-/** ADR-0285 결정 9: REST 포트의 내부 HTTP 부르는 쪽 14쌍 [부르는 쪽, 받는 쪽] */
+/** ADR-0285 결정 9: REST 포트의 내부 HTTP 부르는 쪽 14쌍과 ADR-0288 결정 8의 purchase-svc → queue-svc(입장 토큰 공개키 묶음, BAT-057) 한 쌍 [부르는 쪽, 받는 쪽] */
 const INTERNAL_HTTP = [
   ['core-svc', 'identity-svc'],
   ['core-svc', 'purchase-svc'],
@@ -87,6 +87,8 @@ const INTERNAL_HTTP = [
   ['payment-svc', 'identity-svc'],
   ['purchase-svc', 'core-svc'],
   ['purchase-svc', 'ops-svc'],
+  // ADR-0288 결정 8: purchase-svc가 queue-svc 앱 포트의 GET /internal/jwks/admission.json을 5분마다 읽는다(docs/features/seat-hold.md §2 '입장 토큰 공개키 묶음 주기 읽기')
+  ['purchase-svc', 'queue-svc'],
   ['ticket-svc', 'core-svc'],
   ['ticket-svc', 'ops-svc'],
   ['web', 'identity-svc'],
@@ -1103,10 +1105,10 @@ test('MS-18 메시 없는 출처 칸의 꼴: 다른 네임스페이스의 부르
   assert.ok(peers > 50, `출처 칸이 너무 적다(${peers})`);
 });
 
-test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 14쌍마다 받는 쪽 REST 규칙에 부르는 쪽이 있고, 표에 없는 서비스 신원은 REST 규칙에 없다(게이트웨이 빼고)', () => {
+test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 14쌍과 ADR-0288 결정 8의 한 쌍(15쌍)마다 받는 쪽 REST 규칙에 부르는 쪽이 있고, 표에 없는 서비스 신원은 REST 규칙에 없다(게이트웨이 빼고)', () => {
   const mesh = meshObjects();
   const meshless = meshlessObjects();
-  assert.equal(INTERNAL_HTTP.length, 14);
+  assert.equal(INTERNAL_HTTP.length, 15);
   for (const [from, to] of INTERNAL_HTTP) {
     assert.ok(allowedOn(meshNodeAllow(mesh, to), REST_PORT(to)).has(principalOf(from)), `policies.yaml ${to} REST에 ${from}가 없다`);
     assert.equal(meshlessAllows(meshless, to, REST_PORT(to), IDENTITY[from]), true, `meshless ${to} REST에 ${from}가 닿지 못한다`);
@@ -1117,5 +1119,19 @@ test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 14쌍마다 받�
     assert.deepEqual(sorted(got), want, `policies.yaml ${w} REST의 게이트웨이 밖 신원`);
     const gotNl = meshlessCallerNames(meshless, w, REST_PORT(w)).filter((n) => !GATEWAYS.includes(n));
     assert.deepEqual(sorted(gotNl), want, `meshless ${w} REST의 게이트웨이 밖 신원`);
+  }
+});
+
+// ===================== BAT-057 S7(계획 §6): purchase-svc → queue-svc 입장 토큰 공개키 묶음 =====================
+
+test('PRF-050 PRF-137 ADR-0288 결정 8 생성 정책이 purchase-svc의 queue-svc 앱 포트(8080) 호출을 메시·메시 없는 둘 다 허용하고, 업무 gRPC·제어·지표 포트는 허용하지 않는다', () => {
+  const mesh = meshObjects();
+  const meshless = meshlessObjects();
+  const allow = meshNodeAllow(mesh, 'queue-svc');
+  assert.ok(allowedOn(allow, REST_PORT('queue-svc')).has(principalOf('purchase-svc')), 'policies.yaml queue-svc REST에 purchase-svc가 없다');
+  assert.equal(meshlessAllows(meshless, 'queue-svc', REST_PORT('queue-svc'), IDENTITY['purchase-svc']), true, 'meshless queue-svc REST에 purchase-svc가 닿지 못한다');
+  for (const port of [GRPC_PORT('queue-svc'), CONTROL_PORT, METRICS_PORT]) {
+    assert.ok(!allowedOn(allow, port).has(principalOf('purchase-svc')), `policies.yaml queue-svc ${port}에 purchase-svc가 닿는다`);
+    assert.equal(meshlessAllows(meshless, 'queue-svc', port, IDENTITY['purchase-svc']), false, `meshless queue-svc ${port}에 purchase-svc가 닿는다`);
   }
 });
