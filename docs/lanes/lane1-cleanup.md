@@ -242,5 +242,4 @@
 - HOT-420(BAT-061 RV-07): 메시 전체 STRICT와 `envoy-gateway-system` 앰비언트 등록을 함께 둘 때 바깥(NLB) 평문을 게이트웨이 파드가 받는지 확인한 기록이 없다(BAS-140 운영 확인 항목).
 - HOT-420(BAT-061 RV-08~11): kind 시험에서 거부 사례만 가진 시험 파드는 자기 연결 대조군이 없다, 생성기가 짧은 이름 공개키 묶음 주소를 조용히 건너뛰고 부르는 쪽 주체·고르개 겹침과 podLabels·차트 라벨 대조를 하지 않는다, 공용 차트 NetworkPolicy와 생성 NetworkPolicy가 같은 파드를 고르면 합집합으로 넓어진다(차트 쪽을 끄라는 정본 없음), 로컬에서 무대를 다시 돌리면 옛 객체가 남는다.
 - HOT-420(BAT-061 구현 메모): Envoy Gateway v1.10의 `envoyServiceAccount.name`을 EnvoyProxy `peaket-proxy`(게이트웨이 넷 공용)에 적으면 넷이 한 신원이 된다(ADR-0285 되돌릴 조건 1이 이미 맞음, 게이트웨이 정의를 바꿔야 함). `docs/api/proto/README.md` §3 호출 목록에 `TicketService/VoidTickets`(purchase-svc) 줄이 없다. ci-kind 시간 상한 70분이 mesh-netpol 단계(대역 13개)로 빠듯하다. MS-13이 istiod 값을 칸까지 견주므로 다른 메시 기본값(wbs 4.6.1)을 더하면 함께 고친다.
-- 문서: `docs/architecture.md` ADR 목록 표에 0284(BAT-010 탈퇴 참여자 계약) 줄이 없다(2026-11-18 BAT-061 다시 쌓기 때 발견).
 - 게이트 교훈(BAT-010): `docs/api/openapi.yaml`을 고치는 묶음은 게이트에 `node tools/ci/gateway-routes.mjs --check`(라우트 생성 파일의 계약 지문)를 넣는다. 계획 커밋이 openapi를 고치고 구현이 다시 만들지 않아 초안 PR tools-check(D-T42 ①②)에서 잡혔다. '자주 놓친 결함' 목록 후보.
