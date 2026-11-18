@@ -1,0 +1,9 @@
+# istiod Helm 값(ADR-0285 결정 10·11, docs/architecture.md §5 '메시 기본값 덮어쓰기', BUILD_ORDER HOT-420). 적용 대상 객체가 아니라 설치 단계가 넣는 값이다.
+# - meshConfig.meshMTLS.minProtocolVersion: 워크로드 사이 TLS의 최소 판. 웨이포인트·사이드카의 Envoy에 걸린다. 노드 프록시(ztunnel)는 따로 거는 값 없이
+#   늘 TLS 1.3만 쓴다(istio/ztunnel README, 2026-11-18 확인). 실제 연결의 판은 메시가 있는 환경에서 확인한다(운영 확인)
+# - meshConfig.trustDomain: 신뢰 도메인. 정책의 주체(cluster.local/ns/<네임스페이스>/sa/<서비스 계정>, deploy/platform/mesh/port-allow.yaml)와 같다
+# Istio 판 고정·설치 차례(cacerts Secret이 먼저)·나머지 기본값 덮어쓰기(재시도·이상 파드 퇴출·추적)는 BAS-140·wbs 4.6.1 몫이다
+meshConfig:
+  trustDomain: cluster.local
+  meshMTLS:
+    minProtocolVersion: TLSV1_3

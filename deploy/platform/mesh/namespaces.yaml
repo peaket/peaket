@@ -1,0 +1,75 @@
+# 앰비언트 메시 등록(ADR-0285 결정 10, BUILD_ORDER HOT-420). 라벨 istio.io/dataplane-mode: ambient를 단 네임스페이스의 파드는 노드 프록시(ztunnel)가
+# 연결을 mTLS로 감싸고 서비스 계정 신원을 얻는다. 서비스 네임스페이스 넷(queue·purchase·ticket·trust)과 core·web·data, 지표 포트에 신원으로 닿는
+# Prometheus의 observability, 비상 런북 Job의 ops-breakglass, 게이트웨이 프록시의 envoy-gateway-system이다(docs/devops.md §5.2 '네임스페이스 지도').
+# istio-system·kube-system에는 달지 않는다. 이 객체를 어느 ArgoCD 앱 묶음이 가질지와 설치 차례는 배포 상태 단계(BAS-140)가 정한다.
+# 손으로 쓴 파일이다(생성 파일이 아니다). 정적 시험 deploy/platform/mesh/test가 본다
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: queue
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: purchase
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ticket
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trust
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: core
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: web
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ops-breakglass
+  labels:
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: envoy-gateway-system
+  labels:
+    istio.io/dataplane-mode: ambient

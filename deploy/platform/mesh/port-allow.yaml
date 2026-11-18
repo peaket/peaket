@@ -1,0 +1,271 @@
+# 포트별 허용 표의 기계 판(원천, 적용 대상이 아니다. ADR-0285 결정 1, BUILD_ORDER HOT-420).
+# 규칙의 정본은 docs/architecture.md §5 '포트별 허용 표'다. 원천이 문서와 다르면 원천을 고친다.
+# node tools/ci/mesh-policies.mjs --write가 이것과 deploy/gateways/ 맨 위 YAML의 라우트·공개키 묶음 주소, docs/api/proto로
+# policies.yaml(운영 오버레이)과 meshless-networkpolicies.yaml(메시 없는 로컬·CI·데모)을 만든다. 고친 뒤 --write로 다시 만든다.
+#
+# 꼴(docs/review/plans/BAT-061.md 4.1의 2):
+# - callers: 부르는 쪽 이름마다 운영 신원(principal, 서비스 계정 주체)과 메시 없는 고르개(meshless: 네임스페이스와 파드 라벨, 한 출처 칸에 함께 둔다).
+#   워크로드가 부르는 쪽이면 같은 이름으로 여기에도 있다(주체·고르개가 워크로드 칸과 같아야 한다).
+# - workloads: 받는 쪽마다 네임스페이스(docs/devops.md §5.2), 서비스 계정(기본은 워크로드 이름), 파드 라벨, 포트와 포트마다 부르는 쪽.
+#   rest.callers는 내부 HTTP를 부르는 신원(ADR-0285 결정 9)만 적는다. 게이트웨이는 생성기가 라우트에서 더한다.
+#   rest.gatewaysWithoutRoute는 라우트가 저장소에 없는 게이트웨이 경로의 예외다(trust-svc 허니팟 경로, ADR-0285 결정 9 끝).
+#   grpc.services는 proto 서비스 전체 이름마다 부르는 쪽이다. 한 서비스 안에서 메서드마다 부르는 쪽이 다르면 methods로 메서드마다 적는다
+#   (docs/api/proto/README.md §3 '호출 목록'). 빈 목록은 아무도 부르지 못한다(규칙을 만들지 않는다).
+# - 포트 번호는 ADR-0285 결정 6이다: REST 8080(화면 앱 서버는 라우트의 포트), 지표 9464, 업무 gRPC 50051(ticket-svc 50052), 제어 50061 [가정, OPS-310에서 확정].
+# - 새 proto 서비스·메서드를 더하면 --check가 막는다. 받는 워크로드의 grpc.services에 부르는 쪽과 함께 한 줄을 더한다.
+version: 1
+
+callers:
+  admission-ctrl:
+    principal: cluster.local/ns/queue/sa/admission-ctrl
+    meshless: { namespace: queue, podLabels: { app.kubernetes.io/name: admission-ctrl, app.kubernetes.io/component: service } }
+  # core-svc 팬 알림 발송 워커(docs/api/proto/README.md §2 '부르는 쪽 확인'). 라벨은 공용 차트 꼴 [가정, 그 배포가 생길 때 확정]
+  core-notify-sender:
+    principal: cluster.local/ns/core/sa/core-notify-sender
+    meshless: { namespace: core, podLabels: { app.kubernetes.io/name: core-notify-sender, app.kubernetes.io/component: service } }
+  core-svc:
+    principal: cluster.local/ns/core/sa/core-svc
+    meshless: { namespace: core, podLabels: { app.kubernetes.io/name: core-svc, app.kubernetes.io/component: service } }
+  # 게이트웨이 프록시: 서비스 계정은 Envoy Gateway v1.10이 만드는 이름 envoy-<네임스페이스>-<게이트웨이>-<sha256("<네임스페이스>/<게이트웨이>") 앞 8자>
+  # (internal/infrastructure/kubernetes/proxy, docs/infra.md §9 '메시 포트별 허용 정책의 첫 구현', 2026-11-18 v1.10.0 소스 확인). 판을 올리면 kind 시험(MK-08)이 본다
+  gw-fan:
+    principal: cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
+    meshless: { namespace: envoy-gateway-system, podLabels: { gateway.envoyproxy.io/owning-gateway-name: gw-fan, gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system } }
+  gw-ops:
+    principal: cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-ops-72791c8c
+    meshless: { namespace: envoy-gateway-system, podLabels: { gateway.envoyproxy.io/owning-gateway-name: gw-ops, gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system } }
+  gw-partner:
+    principal: cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+    meshless: { namespace: envoy-gateway-system, podLabels: { gateway.envoyproxy.io/owning-gateway-name: gw-partner, gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system } }
+  gw-queue:
+    principal: cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-queue-38f088e6
+    meshless: { namespace: envoy-gateway-system, podLabels: { gateway.envoyproxy.io/owning-gateway-name: gw-queue, gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system } }
+  gw-scanner:
+    principal: cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-scanner-1784b03e
+    meshless: { namespace: envoy-gateway-system, podLabels: { gateway.envoyproxy.io/owning-gateway-name: gw-scanner, gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system } }
+  identity-svc:
+    principal: cluster.local/ns/core/sa/identity-svc
+    meshless: { namespace: core, podLabels: { app.kubernetes.io/name: identity-svc, app.kubernetes.io/component: service } }
+  # 조사 적재 작업자(trust 네임스페이스는 docs/streaming.md §2.2, 소유자 결정 2026-11-11). 라벨은 공용 차트 꼴 [가정, 그 배포가 생길 때 확정]
+  inv-ingest:
+    principal: cluster.local/ns/trust/sa/inv-ingest
+    meshless: { namespace: trust, podLabels: { app.kubernetes.io/name: inv-ingest, app.kubernetes.io/component: service } }
+  # 비상 런북 Job: 서비스 계정 [가정, OPS-310에서 확정]. 메시 없는 실행은 네임스페이스만 본다(Job을 만드는 권한이 비상 역할에만 있다, docs/infra.md §9 '비상 런북 통제')
+  ops-breakglass:
+    principal: cluster.local/ns/ops-breakglass/sa/ops-breakglass
+    meshless: { namespace: ops-breakglass }
+  ops-svc:
+    principal: cluster.local/ns/core/sa/ops-svc
+    meshless: { namespace: core, podLabels: { app.kubernetes.io/name: ops-svc, app.kubernetes.io/component: service } }
+  payment-svc:
+    principal: cluster.local/ns/purchase/sa/payment-svc
+    meshless: { namespace: purchase, podLabels: { app.kubernetes.io/name: payment-svc, app.kubernetes.io/component: service } }
+  # 클러스터 Prometheus [가정, 관측 스택 배포에서 확정]
+  prometheus:
+    principal: cluster.local/ns/observability/sa/prometheus
+    meshless: { namespace: observability, podLabels: { app.kubernetes.io/name: prometheus } }
+  purchase-svc:
+    principal: cluster.local/ns/purchase/sa/purchase-svc
+    meshless: { namespace: purchase, podLabels: { app.kubernetes.io/name: purchase-svc, app.kubernetes.io/component: service } }
+  queue-svc:
+    principal: cluster.local/ns/queue/sa/queue-svc
+    meshless: { namespace: queue, podLabels: { app.kubernetes.io/name: queue-svc, app.kubernetes.io/component: service } }
+  ticket-svc:
+    principal: cluster.local/ns/ticket/sa/ticket-svc
+    meshless: { namespace: ticket, podLabels: { app.kubernetes.io/name: ticket-svc, app.kubernetes.io/component: service } }
+  trust-svc:
+    principal: cluster.local/ns/trust/sa/trust-svc
+    meshless: { namespace: trust, podLabels: { app.kubernetes.io/name: trust-svc, app.kubernetes.io/component: service } }
+  # 소비자 웹 앱 서버 [가정, BAS-140에서 확정]
+  web:
+    principal: cluster.local/ns/web/sa/web
+    meshless: { namespace: web, podLabels: { app.kubernetes.io/name: web, app.kubernetes.io/component: service } }
+
+workloads:
+  # 관제 제어 명령을 받는 리더(제어 gRPC만, docs/architecture.md §5 '포트별 허용 표' 제어 행)
+  admission-ctrl:
+    namespace: queue
+    podLabels: { app.kubernetes.io/name: admission-ctrl, app.kubernetes.io/component: service }
+    ports:
+      control: { port: 50061, callers: [ops-svc, ops-breakglass] }
+      metrics: { port: 9464, callers: [prometheus] }
+
+  core-svc:
+    namespace: core
+    podLabels: { app.kubernetes.io/name: core-svc, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 8080, callers: [ops-svc, payment-svc, purchase-svc, ticket-svc] }
+      grpc:
+        port: 50051
+        services:
+          peaket.core.v1.AccountMergeCheckService: [identity-svc]
+          peaket.core.v1.BookingRestrictionViewService: [ops-svc]
+          peaket.core.v1.CatalogAdminService: [ops-svc]
+          peaket.core.v1.FraudAppealViewService: [ops-svc]
+          peaket.core.v1.ReviewModerationService: [ops-svc]
+          peaket.core.v1.SaleReviewService: [ops-svc]
+          peaket.core.v1.SupportCaseService: [ops-svc]
+      metrics: { port: 9464, callers: [prometheus] }
+
+  identity-svc:
+    namespace: core
+    podLabels: { app.kubernetes.io/name: identity-svc, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 8080, callers: [core-svc, ops-svc, payment-svc, web] }
+      grpc:
+        port: 50051
+        services:
+          peaket.identity.v1.AccountHoldService: [ops-svc]
+          peaket.identity.v1.AdminAccountService: [ops-svc]
+          # 관리 경로를 처리하는 서비스의 공통 가드 RolesGuard(docs/architecture.md §3.2 'ADR-0171·0172가 더한 gRPC 호출')
+          peaket.identity.v1.AdminAuthzService: [admission-ctrl, core-svc, identity-svc, ops-svc, payment-svc, purchase-svc, queue-svc, ticket-svc, trust-svc]
+          peaket.identity.v1.AdminDesignationService: [ops-svc]
+          peaket.identity.v1.AdminSessionService: [ops-svc]
+          peaket.identity.v1.ContactRefService: [purchase-svc]
+          peaket.identity.v1.IdentityService: [purchase-svc]
+          peaket.identity.v1.InvestigationRefService: [inv-ingest]
+          peaket.identity.v1.MemberCodeService: [core-svc]
+          peaket.identity.v1.RecipientQueryService: [core-notify-sender]
+          peaket.identity.v1.RestrictedCiHoldService: [ops-svc]
+          peaket.identity.v1.ReverificationCheckService: [queue-svc]
+          peaket.identity.v1.ScannerSessionCheckService: [ticket-svc]
+          peaket.identity.v1.ScannerSessionQueryService: [ops-svc]
+          # 소비자 웹 앱 서버만(proto 서비스 머리 주석, 메서드 모두)
+          peaket.identity.v1.SessionService: [web]
+      metrics: { port: 9464, callers: [prometheus] }
+
+  image-worker:
+    namespace: core
+    podLabels: { app.kubernetes.io/name: image-worker, app.kubernetes.io/component: service }
+    ports:
+      grpc:
+        port: 50051
+        services:
+          peaket.image.v1.ImageService: [core-svc]
+      metrics: { port: 9464, callers: [prometheus] }
+
+  ops-svc:
+    namespace: core
+    podLabels: { app.kubernetes.io/name: ops-svc, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 8080, callers: [purchase-svc, ticket-svc] }
+      metrics: { port: 9464, callers: [prometheus] }
+
+  # 파트너 앱 서버(라우트 gw-partner → web/partner:3001). 지표 포트를 열지 않는다(구현 메모 5)
+  partner:
+    namespace: web
+    podLabels: { app.kubernetes.io/name: partner, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 3001, callers: [] }
+
+  payment-svc:
+    namespace: purchase
+    podLabels: { app.kubernetes.io/name: payment-svc, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 8080, callers: [ops-svc] }
+      grpc:
+        port: 50051
+        services:
+          # 배상 송금은 아직 계약하지 않은 통신이다(docs/api/proto/README.md §3 아래 표). 부르는 쪽이 생기면 적는다
+          peaket.payment.v1.CompensationTransferService: []
+          peaket.payment.v1.PaymentService:
+            methods:
+              ApprovePayoutBatch: [ops-svc]
+              BatchGetPayments: [purchase-svc]
+              CancelPayment: [core-svc, purchase-svc]
+              ConfirmPayment: [core-svc, purchase-svc]
+              GetNewPaymentPause: [purchase-svc]
+              GetPayment: [purchase-svc]
+              PrepareCheckout: [core-svc, purchase-svc]
+              RegisterPayoutSeller: [core-svc]
+      control: { port: 50061, callers: [ops-svc, ops-breakglass] }
+      metrics: { port: 9464, callers: [prometheus] }
+
+  purchase-svc:
+    namespace: purchase
+    podLabels: { app.kubernetes.io/name: purchase-svc, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 8080, callers: [core-svc, ops-svc] }
+      grpc:
+        port: 50051
+        services:
+          peaket.purchase.v1.AccountMergeCheckService: [identity-svc]
+          peaket.purchase.v1.BookingRestrictionService: [ops-svc]
+          peaket.purchase.v1.EventRefundService: [ops-svc]
+          peaket.purchase.v1.FraudCancellationService: [ops-svc]
+          peaket.purchase.v1.PriorityPurchaseService: [ops-svc]
+      control: { port: 50061, callers: [ops-svc, ops-breakglass] }
+      metrics: { port: 9464, callers: [prometheus] }
+
+  queue-svc:
+    namespace: queue
+    podLabels: { app.kubernetes.io/name: queue-svc, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 8080, callers: [ops-svc] }
+      grpc:
+        port: 50051
+        services:
+          peaket.queue.v1.BookingRestrictionService: [ops-svc]
+          peaket.queue.v1.PriorityGrantService: [ops-svc]
+          peaket.queue.v1.QueueService: [trust-svc]
+          peaket.queue.v1.VerificationAppealService: [ops-svc]
+      control: { port: 50061, callers: [ops-svc, ops-breakglass] }
+      metrics: { port: 9464, callers: [prometheus] }
+
+  seatmap-worker:
+    namespace: core
+    podLabels: { app.kubernetes.io/name: seatmap-worker, app.kubernetes.io/component: service }
+    ports:
+      grpc:
+        port: 50051
+        services:
+          peaket.seatmap.v1.SeatmapImportService: [core-svc]
+      metrics: { port: 9464, callers: [prometheus] }
+
+  ticket-svc:
+    namespace: ticket
+    podLabels: { app.kubernetes.io/name: ticket-svc, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 8080, callers: [] }
+      grpc:
+        port: 50052
+        services:
+          peaket.ticket.v1.AccountMergeCheckService: [identity-svc]
+          peaket.ticket.v1.ScannerDeviceLookupService: [identity-svc]
+          peaket.ticket.v1.ScannerDeviceService: [ops-svc]
+          peaket.ticket.v1.TicketReclaimService: [ops-svc]
+          peaket.ticket.v1.TicketService:
+            methods:
+              CancelTickets: [purchase-svc]
+              CheckReviewEligibility: [core-svc]
+              EventCancelTickets: [purchase-svc]
+              GetEntryRecords: [purchase-svc]
+              IssueTickets: [purchase-svc]
+              ListHeldTickets: [core-svc]
+              ListTickets: [web]
+              OperatorCancelTickets: [purchase-svc]
+              # 입금 오류 되돌림의 티켓 무효(docs/features/payment.md §6 '티켓 무효·재발권', 구현 메모 4)
+              VoidTickets: [purchase-svc]
+          peaket.ticket.v1.TransferLockService: [ops-svc]
+      metrics: { port: 9464, callers: [prometheus] }
+
+  trust-svc:
+    namespace: trust
+    podLabels: { app.kubernetes.io/name: trust-svc, app.kubernetes.io/component: service }
+    ports:
+      # 허니팟 기록 경로의 라우트는 공개 경로를 설정으로 넣어 저장소에 없다(docs/infra.md §4.1 '허니팟 경로의 첫 구현', ADR-0285 결정 9 끝)
+      rest: { port: 8080, callers: [], gatewaysWithoutRoute: [gw-fan] }
+      grpc:
+        port: 50051
+        services:
+          peaket.trust.v1.TrustEvidenceService: [ops-svc]
+          peaket.trust.v1.TrustLabelService: [ops-svc]
+          peaket.trust.v1.TrustService: [identity-svc, queue-svc]
+      metrics: { port: 9464, callers: [prometheus] }
+
+  # 소비자 웹 앱 서버(라우트 gw-fan → web/web:3000). 지표 포트를 열지 않는다(구현 메모 5)
+  web:
+    namespace: web
+    podLabels: { app.kubernetes.io/name: web, app.kubernetes.io/component: service }
+    ports:
+      rest: { port: 3000, callers: [] }
