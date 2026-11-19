@@ -31,7 +31,7 @@ const clock = fakeClock({ now: NOW_MS });
 class VaPayments extends MemoryMerchPayments {
   override async prepareCheckout(q: CheckoutQuery): Promise<CheckoutAnswer> {
     const a = await super.prepareCheckout(q);
-    return { ...a, allowedPayMethods: ['CARD', 'VIRTUAL_ACCOUNT', 'EASY_PAY'] };
+    return { ...a, allowedPayMethods: ['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT', 'EASY_PAY'] };
   }
 }
 
@@ -533,7 +533,7 @@ describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
     const q = payments.calls.checkout.at(-1)!;
     expect(q).toMatchObject({ orderId, amount: 24_600, eventId: OTHER_EVENT });
     const body = JSON.parse(res.payload);
-    expect(body.allowedPayMethods).toEqual(['CARD', 'VIRTUAL_ACCOUNT', 'EASY_PAY']);
+    expect(body.allowedPayMethods).toEqual(['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT', 'EASY_PAY']);
     expect(body.checkout.successUrl).toContain('/shop/checkout/return?order=');
   });
 
@@ -606,7 +606,7 @@ describe('택배 결제대금예치·굿즈 가상계좌(P-T59 ①③, P-T60 ①
     expect(body.allowedPayMethods).toContain('VIRTUAL_ACCOUNT');
     expect(body.allowedPayMethods).not.toContain('EASY_PAY');
     expect(body.allowedPayMethods).not.toContain('MOBILE');
-    expect(body.allowedPayMethods).toEqual(['CARD', 'VIRTUAL_ACCOUNT']);
+    expect(body.allowedPayMethods).toEqual(['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT']);
     expect(body).not.toHaveProperty('useEscrow');
     expect(body.checkout).not.toHaveProperty('useEscrow');
   });

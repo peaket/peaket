@@ -19,6 +19,7 @@ import {
   MemoryMerchStock,
   MerchCancel,
   MerchRefundRetry,
+  MerchUnclaimed,
   ShopSignals,
   type CancelInput,
   type CancelOutcome,
@@ -363,7 +364,7 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(payments.cancels[0]!.refundAccount).toBeUndefined();
     expect((await refundsOf(o.orderId)).map((r) => [r.id, r.status, r.amount, r.kind])).toEqual([[body.cancellationId, 'CANCELLED', 24_000, 'USER_CANCEL']]);
     const items = await itemsOf(o.orderId);
-    expect(items.map((i) => i.status)).toEqual(['CANCELLED', 'CANCELLED']);
+    expect(items.map((i) => i.status)).toEqual(['REFUNDED', 'REFUNDED']);
     expect(items.map((i) => i.cancelReason)).toEqual(['USER_CANCEL', 'USER_CANCEL']);
     expect(items.map((i) => i.refundedAmount)).toEqual([12_000, 9_000]);
     expect(await refundItemsOf(o.orderId)).toHaveLength(2);
@@ -393,7 +394,7 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(payments.cancels).toHaveLength(1);
     expect(payments.cancels[0]).toMatchObject({ cancellationId: body.cancellationId, amount: 24_000, reason: 'USER_CANCEL' });
     expect((await itemsOf(o.orderId)).map((i) => [i.status, i.refundedAmount])).toEqual([
-      ['CANCELLED', 24_000],
+      ['REFUNDED', 24_000],
       ['READY', 0],
     ]);
     expect((await admin.pool.query('select status from merch_order where id = $1', [o.orderId])).rows[0].status).toBe('PAID');
@@ -403,6 +404,31 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(bodyOf(replay)).toMatchObject({ cancellationId: body.cancellationId, status: 'REFUNDED', refundAmount: 24_000 });
     expect(payments.cancels).toHaveLength(1);
     expect(await refundsOf(o.orderId)).toHaveLength(1);
+  });
+
+  test('P-T61 ② 두 항목을 하나씩 모두 취소하면 두 번째에서 처음 배송비까지 환급한다', async () => {
+    const first = await seedProduct({ fulfillments: ['DELIVERY'], price: 12_000, shippingFee: 3_000, returnShippingFee: 2_500, returnAddress: '서울특별시 마포구' });
+    const second = await seedProduct({ fulfillments: ['DELIVERY'], price: 9_000, shippingFee: 3_000, returnShippingFee: 2_500, returnAddress: '서울특별시 마포구' });
+    const o = await seedPaidOrder({
+      fulfillment: 'DELIVERY',
+      pgStore: 'ESCROW',
+      shippingFee: 3_000,
+      purchaseConfirmedAt: clock.now() - 3_600_000,
+      items: [
+        { productId: first, quantity: 1, unitAmount: 12_000 },
+        { productId: second, quantity: 1, unitAmount: 9_000 },
+      ],
+    });
+    const one = await cancelOrder(o.accountId, o.orderId, { itemIds: [o.itemIds[0]!] });
+    expect(one.statusCode, one.payload).toBe(202);
+    expect(bodyOf(one).refundAmount).toBe(12_000);
+    const two = await cancelOrder(o.accountId, o.orderId, { itemIds: [o.itemIds[1]!] });
+    expect(two.statusCode, two.payload).toBe(202);
+    // 마지막 남은 항목까지 취소했으므로 처음 배송비 3,000을 더해 12,000을 환급한다
+    expect(bodyOf(two).refundAmount).toBe(12_000);
+    expect(payments.cancels.map((c) => c.amount)).toEqual([12_000, 12_000]);
+    expect((await refundsOf(o.orderId)).reduce((s, r) => s + r.amount, 0)).toBe(o.amount);
+    expect((await itemsOf(o.orderId)).map((i) => i.status)).toEqual(['REFUNDED', 'REFUNDED']);
   });
 
   test('P-T61 ② 전체 취소면 처음 배송비까지 환급한다', async () => {
@@ -422,6 +448,7 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     const ok = await cancelOrder(before.accountId, before.orderId, {});
     expect(ok.statusCode, ok.payload).toBe(202);
     expect(bodyOf(ok)).toMatchObject({ status: 'REFUNDED', refundAmount: 15_000 });
+    expect((await itemsOf(before.orderId))[0]!.status).toBe('REFUNDED');
     expect(payments.cancels).toHaveLength(1);
     const calls = payments.cancels.length;
 
@@ -474,6 +501,21 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(payments.cancels).toHaveLength(1);
     expect(await refundsOf(after.orderId)).toEqual([]);
     expect((await itemsOf(after.orderId))[0]!.status).toBe('READY');
+
+    // 입장 시작 시각을 읽지 못하면(null eventId·event 행 없음) 입장 여부를 모르므로 닫힌 쪽(409 entry-started)으로 답한다
+    const callsNow = payments.cancels.length;
+    for (const [what, eventId] of [
+      ['eventId 없음', null],
+      ['event 행 없음', randomUUID()],
+    ] as const) {
+      const unknown = await seedPaidOrder({ fulfillment: 'WALLET', eventId, items: [{ productId: p, quantity: 1, unitAmount: 25_000 }] });
+      const res = await cancelOrder(unknown.accountId, unknown.orderId, {});
+      expect(res.statusCode, `${what}: ${res.payload}`).toBe(409);
+      expect(problem(res).type, what).toContain('entry-started');
+      expect(payments.cancels.length, what).toBe(callsNow);
+      expect(await refundsOf(unknown.orderId), what).toEqual([]);
+      expect((await itemsOf(unknown.orderId))[0]!.status, what).toBe('READY');
+    }
   });
 
   test('P-T61 ⑤ 같은 Idempotency-Key 재요청은 같은 취소 ID·금액·결제사 1건이고, 동시 두 요청의 두 번째는 409 merch-cancel-not-allowed다', async () => {
@@ -519,7 +561,7 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(payments.cancels.filter((c) => c.paymentId === other.paymentId)).toHaveLength(1);
     expect(await refundsOf(other.orderId)).toMatchObject([{ id: firstId, status: 'CANCELLED' }]);
     expect(await refundItemsOf(other.orderId)).toHaveLength(1);
-    expect((await itemsOf(other.orderId))[0]!.status).toBe('CANCELLED');
+    expect((await itemsOf(other.orderId))[0]!.status).toBe('REFUNDED');
   });
 });
 
@@ -575,7 +617,7 @@ describe('환불 계좌와 재인증(P-T63 ④)', () => {
     expect(ignoredAccounts).toBe(1);
     expect(reauth.calls).toHaveLength(1);
     expect(res.payload).not.toContain(ACCOUNT_KEYS.accountNumber);
-    expect((await itemsOf(o.orderId))[0]!.status).toBe('CANCELLED');
+    expect((await itemsOf(o.orderId))[0]!.status).toBe('REFUNDED');
   });
 });
 
@@ -599,7 +641,7 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
       expect(payments.cancels, answer).toHaveLength(before + 1);
       expect(payments.cancels.at(-1), answer).toMatchObject({ cancellationId: body.cancellationId, amount: 14_000, reason: 'USER_CANCEL' });
       const items = await itemsOf(o.orderId);
-      expect(items[0]!.status, answer).toBe('CANCELLED');
+      expect(items[0]!.status, answer).toBe(answer === 'CANCELLED' ? 'REFUNDED' : 'CANCELLED');
       expect(items[0]!.refundedAmount, answer).toBe(expected.refundedAmount);
       const refund = (await refundsOf(o.orderId))[0]!;
       if (answer === 'CANCELLED') {
@@ -630,7 +672,7 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     expect(retry.statusCode, retry.payload).toBe(202);
     expect(bodyOf(retry)).toMatchObject({ status: 'REFUNDED', refundAmount: 16_000 });
     expect(payments.cancels).toHaveLength(1);
-    expect((await itemsOf(o.orderId))[0]!.status).toBe('CANCELLED');
+    expect((await itemsOf(o.orderId))[0]!.status).toBe('REFUNDED');
   });
 
   test('P-T64 ③ 계좌 거절은 422·merch_refund REJECTED·항목 그대로·결제사 1건이고, 같은 키는 같은 422, 새 키는 새 취소 ID로 1건 더다', async () => {
@@ -673,6 +715,36 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     expect((await itemsOf(o.orderId))[0]!.status).toBe('READY');
   });
 
+  test('P-T64 ④ 결제사 취소 성공 뒤 환급 반영 DB 쓰기가 실패하면 202나 503으로 답하고 같은 취소 ID 재시도가 끝낸다', async () => {
+    const p = await seedProduct({ fulfillments: ['PICKUP'], price: 21_000 });
+    const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 21_000 }] });
+    await admin.pool.query('drop trigger if exists test_refund_fail_trg on merch_refund');
+    await admin.pool.query(`create or replace function test_refund_fail() returns trigger language plpgsql as $f$ begin raise exception '시험: 환급 결과 DB 쓰기 실패'; end $f$`);
+    await admin.pool.query(
+      `create trigger test_refund_fail_trg before update on merch_refund for each row when (old.order_id = '${o.orderId}'::uuid and new.status = 'CANCELLED') execute function test_refund_fail()`,
+    );
+    let res: Awaited<ReturnType<typeof cancelOrder>>;
+    try {
+      res = await cancelOrder(o.accountId, o.orderId, {});
+      // 결제사는 이미 취소했다. 환급 결과만 못 적었으므로 202 REFUND_PENDING이나 503 dependency-unavailable이어야 한다
+      expect([202, 503], res.payload).toContain(res.statusCode);
+      if (res.statusCode === 202) expect(bodyOf(res).status).toBe('REFUND_PENDING');
+      else expect(problem(res).type).toContain('dependency-unavailable');
+      expect(payments.cancels).toHaveLength(1);
+      expect((await refundsOf(o.orderId))[0]!.status).toBe('REQUESTED');
+      expect((await itemsOf(o.orderId))[0]!.status).toBe('READY');
+    } finally {
+      await admin.pool.query('drop trigger if exists test_refund_fail_trg on merch_refund');
+      await admin.pool.query('drop function if exists test_refund_fail()');
+    }
+    // 같은 취소 ID로 다시 불러 끝낸다
+    const retry = new MerchRefundRetry({ store: new DrizzleShopOrderStore(appDb, clock), payments, clock });
+    clock.advance(60_000);
+    expect(await retry.tick()).toMatchObject({ picked: 1, cancelled: 1 });
+    expect(await refundsOf(o.orderId)).toMatchObject([{ id: payments.cancels[0]!.cancellationId, status: 'CANCELLED' }]);
+    expect((await itemsOf(o.orderId))[0]).toMatchObject({ status: 'REFUNDED', refundedAmount: 21_000 });
+  });
+
   test('P-T64 ④ 결제사 취소 커밋 뒤 환급 반영이 실패해도 다음 재시도가 같은 취소 ID로 끝내고 이중 환급은 0건이다', async () => {
     const p = await seedProduct({ fulfillments: ['PICKUP'], price: 21_000 });
     const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 21_000 }] });
@@ -709,7 +781,7 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     expect(new Set(payments.cancelIds)).toEqual(new Set([cancellationId]));
     expect(payments.cancels[1]).toMatchObject({ cancellationId, amount: 21_000, reason: 'USER_CANCEL' });
     // 항목·환급이 끝나고 이중 환급 0건(환급 행 1·환급액 21,000 한 번)
-    expect((await itemsOf(o.orderId))[0]).toMatchObject({ status: 'CANCELLED', refundedAmount: 21_000 });
+    expect((await itemsOf(o.orderId))[0]).toMatchObject({ status: 'REFUNDED', refundedAmount: 21_000 });
     expect(await refundsOf(o.orderId)).toMatchObject([{ id: cancellationId, status: 'CANCELLED', amount: 21_000 }]);
     const resolved = await refundItemsOf(o.orderId);
     expect(resolved).toHaveLength(1);
@@ -718,6 +790,28 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     clock.advance(60_000);
     expect(await retry.tick()).toMatchObject({ picked: 0, cancelled: 0 });
     expect(payments.cancels).toHaveLength(2);
+  });
+
+  test('P-T64 ④ 미수령 자동 취소가 구매자 취소 대기와 겹치면 같은 항목을 두 번 환급하지 않는다', async () => {
+    const p = await seedProduct({ fulfillments: ['PICKUP'], price: 12_000 });
+    const eventId = randomUUID();
+    const o = await seedPaidOrder({ fulfillment: 'PICKUP', eventId, items: [{ productId: p, quantity: 1, unitAmount: 12_000 }] });
+    const slotId = (await admin.pool.query('select pickup_slot_id from merch_order where id = $1', [o.orderId])).rows[0].pickup_slot_id as string;
+    await admin.pool.query('update pickup_slot set starts_at = $2, ends_at = $3 where id = $1', [slotId, new Date(clock.now() - 2 * DAY - 3_600_000), new Date(clock.now() - 2 * DAY)]);
+    // 구매자 취소가 결제사 답을 기다리는 중: 항목은 READY, 활성 환급 자리(merch_refund_item)만 잡혀 있다
+    const buyerRefund = randomUUID();
+    await admin.pool.query(
+      `insert into merch_refund (id, order_id, item_ids, amount, reason, status, kind, attempts, next_at, alerted, created_at, updated_at)
+       values ($1, $2, $3::uuid[], $4, 'USER_CANCEL', 'REQUESTED', 'USER_CANCEL', 0, $5, false, $6, $6)`,
+      [buyerRefund, o.orderId, [o.itemIds[0]!], 12_000, new Date(clock.now() + 60_000), new Date(clock.now())],
+    );
+    await admin.pool.query('insert into merch_refund_item (refund_id, item_id) values ($1, $2)', [buyerRefund, o.itemIds[0]!]);
+    const unclaimed = new MerchUnclaimed({ store: new DrizzleShopOrderStore(appDb, clock), payments, clock });
+    const before = payments.cancels.length;
+    expect(await unclaimed.run()).toEqual({ cancelled: 0, refunds: 0 });
+    expect(payments.cancels.length).toBe(before);
+    expect(await refundsOf(o.orderId)).toMatchObject([{ id: buyerRefund, kind: 'USER_CANCEL', status: 'REQUESTED' }]);
+    expect((await itemsOf(o.orderId))[0]!.status).toBe('READY');
   });
 });
 
@@ -737,7 +831,7 @@ describe('부가 상품 구매자 취소(V-T35 ③)', () => {
     expect(payments.cancels).toHaveLength(1);
     expect(payments.cancels[0]!.amount).toBe(55_500);
     expect((await refundsOf(o.orderId))[0]).toMatchObject({ amount: 55_500, kind: 'USER_CANCEL', status: 'CANCELLED' });
-    expect((await itemsOf(o.orderId))[0]).toMatchObject({ status: 'CANCELLED', refundedAmount: 55_500 });
+    expect((await itemsOf(o.orderId))[0]).toMatchObject({ status: 'REFUNDED', refundedAmount: 55_500 });
     expect(held.calls.length, '티켓 보유·취소·환급 호출 0').toBe(heldBefore);
 
     // 입장 시작 정각: 409 entry-started, 결제사·환급 0

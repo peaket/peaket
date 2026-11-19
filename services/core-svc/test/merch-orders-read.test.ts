@@ -10,6 +10,7 @@ import {
   MemoryProductStore,
   MemoryShopOrderStore,
   ShopProblem,
+  type PaymentDetail,
   type ShopOrder,
   type ShopOrderItem,
 } from '../src/modules/shop/index.js';
@@ -123,6 +124,20 @@ describe('굿즈 결제 상태의 가상계좌 안내(P-T60 ⑤)', () => {
     expect(view).toEqual({ status: 'ACCEPTED', stockReservedUntil: null, pg: 'TOSS' });
     expect(view).not.toHaveProperty('virtualAccount');
     expect(f.payments.calls.getPayment).toEqual([f.orderId]);
+  });
+
+  test('P-T60 ⑤ GetPayment 답의 orderId가 요청 주문과 다르면 계좌를 싣지 않는다', async () => {
+    const f = fixture('AWAITING_DEPOSIT');
+    const otherOrderId = randomUUID();
+    f.payments.details.set(f.orderId, {
+      status: 'AWAITING_DEPOSIT',
+      pg: 'TOSS',
+      orderId: otherOrderId,
+      virtualAccount: { bank: '신한', accountNumber: '110-987-6543', dueAtMs: DUE },
+    } as unknown as PaymentDetail);
+    const view = await f.read.paymentStatus(f.accountId, f.orderId);
+    expect(view).not.toHaveProperty('virtualAccount');
+    expect(view.status).toBe('AWAITING_DEPOSIT');
   });
 
   test('P-T60 ⑤ GetPayment 답에 계좌가 없으면 계좌 칸 없이 AWAITING_DEPOSIT 그대로다', async () => {

@@ -174,4 +174,27 @@ describe('굿즈 반품 요청 HTTP(P-T62 ①)', () => {
     expect(orders.items.get(f.itemId)!.returnRequestedAt ?? null).toBe(null);
     expect(payments.calls.cancel).toEqual([]);
   });
+
+  test('P-T62 ③ 다른 계정·없는 주문·남의 항목은 같은 404 not-found이고 쓰기가 없다', async () => {
+    const owner = deliveredOrder(NOW_MS - DAY);
+    const other = deliveredOrder(NOW_MS - DAY);
+    const writes = orders.writes;
+    const refunds = orders.refunds.size;
+    const calls = payments.calls.cancel.length;
+    const cases: [string, string, string, string[]][] = [
+      ['다른 계정의 주문', other.accountId, owner.orderId, [owner.itemId]],
+      ['없는 주문', owner.accountId, randomUUID(), [randomUUID()]],
+      ['다른 주문의 항목', owner.accountId, owner.orderId, [other.itemId]],
+    ];
+    for (const [what, account, orderId, itemIds] of cases) {
+      const res = await post(account, `/v1/shop/orders/${orderId}/returns`, { itemIds, reason: 'CHANGE_OF_MIND' });
+      expect(res.statusCode, `${what}: ${res.payload}`).toBe(404);
+      expect(typeOf(res), what).toContain('not-found');
+    }
+    expect(orders.writes).toBe(writes);
+    expect(orders.refunds.size).toBe(refunds);
+    expect(payments.calls.cancel.length).toBe(calls);
+    expect(orders.items.get(owner.itemId)!.status).toBe('DELIVERED');
+    expect(orders.items.get(other.itemId)!.status).toBe('DELIVERED');
+  });
 });

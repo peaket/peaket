@@ -441,3 +441,61 @@ describe('반품 요청은 돈을 움직이지 않는다(P-T62 ③)', () => {
     expect(await refundCount(extra.orderId)).toBe(0);
   });
 });
+
+describe('반품의 겹침·소유·입장 시각(RV-02·04·10)', () => {
+  test('P-T62 ③ 취소가 진행 중인 항목에는 반품 요청을 409로 거절하고 쓰기 0이다', async () => {
+    const eventId = await seedEvent(clock.now() + 3_600_000, clock.now() + 5 * 3_600_000);
+    const p = await seedProduct({ fulfillments: ['WALLET'], price: 20_000, ticketLinked: true, linkedEventId: eventId });
+    const o = await seedPaidOrder({ fulfillment: 'WALLET', eventId, items: [{ productId: p, quantity: 1, unitAmount: 20_000, status: 'READY' }] });
+    const refundId = randomUUID();
+    await admin.pool.query(
+      `insert into merch_refund (id, order_id, item_ids, amount, reason, status, kind, attempts, next_at, alerted, created_at, updated_at)
+       values ($1, $2, $3::uuid[], $4, 'USER_CANCEL', 'REQUESTED', 'USER_CANCEL', 0, $5, false, $6, $6)`,
+      [refundId, o.orderId, [o.itemIds[0]!], 20_000, new Date(clock.now() + 60_000), new Date(clock.now())],
+    );
+    await admin.pool.query('insert into merch_refund_item (refund_id, item_id) values ($1, $2)', [refundId, o.itemIds[0]!]);
+    const res = await requestReturn(o.accountId, o.orderId, { itemIds: [o.itemIds[0]!], reason: 'CHANGE_OF_MIND' });
+    expect(res.statusCode, res.payload).toBe(409);
+    expect(problem(res).type).toContain('merch-return-not-allowed');
+    expect((await itemRows(o.orderId))[0]).toMatchObject({ status: 'READY', returnReason: null, returnRequestedAt: null });
+    expect(await refundCount(o.orderId)).toBe(1);
+  });
+
+  test('P-T62 ② WALLET의 입장 시작 시각을 읽지 못하면(eventId 없음·event 행 없음) 단순 변심 반품을 409로 거절한다', async () => {
+    const p = await seedProduct({ fulfillments: ['WALLET'], price: 20_000 });
+    for (const [what, eventId] of [
+      ['eventId 없음', null],
+      ['event 행 없음', randomUUID()],
+    ] as const) {
+      const o = await seedPaidOrder({ fulfillment: 'WALLET', eventId, items: [{ productId: p, quantity: 1, unitAmount: 20_000, status: 'READY' }] });
+      const res = await requestReturn(o.accountId, o.orderId, { itemIds: [o.itemIds[0]!], reason: 'CHANGE_OF_MIND' });
+      expect(res.statusCode, `${what}: ${res.payload}`).toBe(409);
+      expect(problem(res).type, what).toContain('merch-return-not-allowed');
+      expect((await itemRows(o.orderId))[0]!.status, what).toBe('READY');
+      expect(await refundCount(o.orderId), what).toBe(0);
+    }
+  });
+
+  test('P-T62 ③ 다른 계정·없는 주문·남의 항목은 같은 404 not-found이고 쓰기 0이다', async () => {
+    const now = clock.now();
+    const p = await seedProduct({ price: 12_300, shippingFee: 3_000, returnShippingFee: 2_500, returnAddress: '서울특별시 마포구' });
+    const owner = await seedPaidOrder({ fulfillment: 'DELIVERY', shippingFee: 3_000, items: [{ productId: p, quantity: 1, unitAmount: 12_300, status: 'DELIVERED', shippedAt: now - 2 * DAY, deliveredAt: now - DAY }] });
+    const other = await seedPaidOrder({ fulfillment: 'DELIVERY', shippingFee: 3_000, items: [{ productId: p, quantity: 1, unitAmount: 12_300, status: 'DELIVERED', shippedAt: now - 2 * DAY, deliveredAt: now - DAY }] });
+    const idemBefore = Number((await admin.pool.query('select count(*)::int as n from idempotency_record')).rows[0].n);
+    const cases: [string, string, string, string[]][] = [
+      ['다른 계정의 주문', other.accountId, owner.orderId, [owner.itemIds[0]!]],
+      ['없는 주문', owner.accountId, randomUUID(), [randomUUID()]],
+      ['다른 주문의 항목', owner.accountId, owner.orderId, [other.itemIds[0]!]],
+    ];
+    for (const [what, accountId, orderId, itemIds] of cases) {
+      const res = await requestReturn(accountId, orderId, { itemIds, reason: 'CHANGE_OF_MIND' });
+      expect(res.statusCode, `${what}: ${res.payload}`).toBe(404);
+      expect(problem(res).type, what).toContain('not-found');
+    }
+    expect((await itemRows(owner.orderId)).every((i) => i.status === 'DELIVERED' && i.returnRequestedAt === null)).toBe(true);
+    expect((await itemRows(other.orderId)).every((i) => i.status === 'DELIVERED' && i.returnRequestedAt === null)).toBe(true);
+    expect(await refundCount(owner.orderId)).toBe(0);
+    expect(await refundCount(other.orderId)).toBe(0);
+    expect(Number((await admin.pool.query('select count(*)::int as n from idempotency_record')).rows[0].n)).toBe(idemBefore);
+  });
+});
