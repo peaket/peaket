@@ -683,7 +683,7 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T03:43+09:00 | 2026-11-19T04:04+09:00 |
 | impl | l3-b420-impl | claude-opus-5-5 | 2026-11-19T04:05+09:00 | 2026-11-19T04:56+09:00 |
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T04:58+09:00 | 2026-11-19T06:10+09:00 |
-| review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T08:31+09:00(다시 보기 08:27~08:31) |
+| review | l3-b420-review | claude-opus-5-5 | 2026-11-19T06:05+09:00 | 2026-11-19T08:31+09:00 |
 | verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T06:06+09:00 | 2026-11-19T06:50+09:00 |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T06:52+09:00 | 2026-11-19T07:00+09:00 |
 | plan | l3-b420-plan | claude-opus-5-5 | 2026-11-19T08:18+09:00 | 2026-11-19T08:30+09:00 |
