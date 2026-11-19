@@ -689,7 +689,9 @@ describe('시작 파일(main.ts)과 relay 정비 일 조립', () => {
     const exited = new Promise<number | null>((r) => child.once('exit', (c) => r(c)));
     try {
       await waitReady(`http://127.0.0.1:${mgmt}/ready`, child, () => text, 'core-svc 준비', 30_000, 200);
-      const m = await makeProduction({ rules: [presale()] });
+      // 이 시험만 진짜 시계로 서비스를 띄운다. 기본 presale(2026-11-20T20:00+09:00)은 24시간 전인
+      // 2026-11-19T11:00Z부터 명단을 잠그므로, 그 시각이 지나면 409가 된다. 먼 미래 날짜로 시계 의존을 없앤다.
+      const m = await makeProduction({ rules: [presale('2030-01-01T00:00:00+09:00')] });
       const [c1] = known(1, 900);
       const account = randomUUID();
       const session = randomUUID();
