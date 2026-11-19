@@ -3,7 +3,7 @@
 // 서명은 Node 표준 암호 모듈로 한다(RFC 7515 그대로, 서명은 r‖s 64바이트). 키는 환경 값의 개인 JWK다(Secrets Manager → 시작 때 메모리, OPEN[10] 추천 적용).
 // 키 교체(docs/features/queue-admission.md §6 '입장 토큰 공개키 묶음과 게이트웨이 확인', ADR-0288 결정 1·2): 키를 바꾸는 동안만 옛 키(공개 JWK, 검증만)와
 // 그 끝 시각, 다음 키(공개 JWK)를 둔다. 공개키 묶음 jwks(지금 시각)는 지금 키·다음 키와, 지금 ≤ 끝 시각일 때만 옛 키(원소에 peaket_until, 초)를 준다.
-import { createPrivateKey, type KeyObject, sign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, type KeyObject, sign } from 'node:crypto';
 import type { AdmissionJwk, AdmissionTokens } from '../domain/ports.js';
 import { MAX_STAY_MS } from '../domain/admission.js';
 
@@ -25,6 +25,8 @@ export const ADMISSION_PREVIOUS_UNTIL_MAX_MS = MAX_STAY_MS + 24 * 3_600_000 + 3_
 
 const HTTPS = /^https:\/\/[^\s/]+/;
 const KID = /^[A-Za-z0-9_.-]{1,64}$/;
+/** 끝 시각의 꼴: 날짜·시각(초까지)·선택 소수 초·시간대(Z나 ±hh:mm)가 다 있는 ISO 8601(BAT-057 리뷰 반영 R057-6). 반복이 이웃하지 않아 되짚기가 없다 */
+const UNTIL_FORM = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 const b64 = (v: object) => Buffer.from(JSON.stringify(v)).toString('base64url');
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
@@ -54,6 +56,12 @@ function parseJwk(name: string, raw: string): Jwk {
 function parsePublicJwk(name: string, raw: string): Jwk {
   const j = parseJwk(name, raw);
   if ('d' in j) throw new Error(`${name}는 공개 JWK여야 한다(d를 빼고 넣는다)`);
+  // 곡선 위의 점인지 읽어 본다(받는 쪽이 읽지 못하는 키를 묶음에 싣지 않게, BAT-057 리뷰 반영 R057-7). 값은 문구에 싣지 않는다
+  try {
+    createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: j.x!, y: j.y! }, format: 'jwk' });
+  } catch {
+    throw new Error(`${name}가 P-256 공개키로 읽히지 않는다(좌표가 곡선 위의 점이 아니다)`);
+  }
   return j;
 }
 
@@ -113,8 +121,8 @@ export class Es256AdmissionTokens implements AdmissionTokens {
     let previous: { jwk: Jwk; untilMs: number } | undefined;
     if (prevRaw) {
       const jwk = parsePublicJwk(ADMISSION_TOKEN_KEY_PREVIOUS_ENV, prevRaw);
-      const untilMs = untilRaw ? Date.parse(untilRaw) : Number.NaN;
-      if (!Number.isFinite(untilMs)) throw new Error(`${ADMISSION_TOKEN_KEY_PREVIOUS_UNTIL_ENV}가 없거나 틀렸다(옛 키 검증 허용 끝 시각, ISO 8601 초 단위)`);
+      const untilMs = untilRaw && UNTIL_FORM.test(untilRaw) ? Date.parse(untilRaw) : Number.NaN;
+      if (!Number.isFinite(untilMs)) throw new Error(`${ADMISSION_TOKEN_KEY_PREVIOUS_UNTIL_ENV}가 없거나 틀렸다(옛 키 검증 허용 끝 시각, 시간대가 있는 ISO 8601 초 단위, 예 2026-11-20T10:00:00Z·2026-11-20T19:00:00+09:00)`);
       previous = { jwk, untilMs };
     } else if (untilRaw) {
       throw new Error(`${ADMISSION_TOKEN_KEY_PREVIOUS_UNTIL_ENV}만 있고 ${ADMISSION_TOKEN_KEY_PREVIOUS_ENV}가 없다`);

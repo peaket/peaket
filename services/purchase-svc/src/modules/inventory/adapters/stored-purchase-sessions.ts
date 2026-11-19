@@ -5,7 +5,7 @@
 import type { Clock, Principal, PurchaseSession } from '@peaket/platform';
 import { ProblemError, purchaseRequestKey } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
-import { ADMISSION_TOKEN_MAX_CHARS } from '../domain/admission-token.js';
+import { ADMISSION_KEYS_RETRY_AFTER_SEC, ADMISSION_KEYS_UNAVAILABLE_PROBLEM, ADMISSION_TOKEN_MAX_CHARS, AdmissionKeysUnavailable } from '../domain/admission-token.js';
 import { parseClientEphemeralKey } from '../domain/client-key.js';
 import { KEY_PART, SEAT_STORE_RETRY_AFTER_SEC, SEAT_STORE_UNAVAILABLE_PROBLEM, SeatStoreUnavailable } from '../domain/hold.js';
 import { PURCHASE_SESSION_INFO, type PurchaseSessionInfo, type PurchaseSessionStore, type ResolvedPurchaseSessionInfo } from '../domain/ports.js';
@@ -24,6 +24,15 @@ function rethrown(err: unknown): never {
   // 본문·머리는 홀드 응답의 STORE_UNAVAILABLE(HOLD_PROBLEMS)과 같고 까닭('oom')은 싣지 않는다
   if (err instanceof SeatStoreUnavailable) throw new ProblemError({ ...SEAT_STORE_UNAVAILABLE_PROBLEM, status: 503, retryAfterSeconds: SEAT_STORE_RETRY_AFTER_SEC, cause: err });
   throw sessionStoreErrorOf(err);
+}
+
+/**
+ * 첫 홀드 열기(openFirstUse)가 입장 토큰 공개키 묶음을 한 번도 받지 못해 거절했는가: 도메인의 AdmissionKeysUnavailable이나 열기 유스케이스의 OpenSessionError('KEYS_UNAVAILABLE').
+ * 유스케이스 형은 응용 층이라 가져오지 않고 이름과 코드로 본다
+ */
+export function isAdmissionKeysUnavailable(e: unknown): boolean {
+  if (e instanceof AdmissionKeysUnavailable) return true;
+  return e instanceof Error && e.name === 'OpenSessionError' && (e as { code?: unknown }).code === 'KEYS_UNAVAILABLE';
 }
 
 /** get용: SeatStoreUnavailable은 그대로(홀드 유스케이스가 바꾼다), 키 이름이 든 오류 글만 지운다 */
@@ -106,6 +115,9 @@ export class StoredPurchaseSessions implements PurchaseSessionAccess {
         } catch (e) {
           // 좌석 Redis 장애는 401로 숨기지 않고 503으로 올린다(열기가 쓰였는지 모른다. 같은 요청을 다시 보낸다)
           if (e instanceof SeatStoreUnavailable) rethrown(e);
+          // 공개키 묶음을 한 번도 받지 못했다: 401(세션 없음)로 숨기지 않고 503 dependency-unavailable·Retry-After 1초(seat-hold §2 '한 번도 받지 못했을 때',
+          // BAT-057 리뷰 반영 R057-2). 열기는 저장소를 부르기 전에 끝나 구매 세션 표지가 쓰이지 않았다
+          if (isAdmissionKeysUnavailable(e)) throw new ProblemError({ ...ADMISSION_KEYS_UNAVAILABLE_PROBLEM, status: 503, retryAfterSeconds: ADMISSION_KEYS_RETRY_AFTER_SEC, cause: e });
           opened = false;
         }
         if (opened) s = await this.deps.store.read(jti).catch(rethrown);
