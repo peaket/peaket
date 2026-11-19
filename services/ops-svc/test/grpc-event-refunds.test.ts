@@ -9,9 +9,15 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { GrpcEventRefunds } from '../src/adapters/grpc-event-refunds.js';
 
 const REQUEST = '0194b000-0000-7000-8000-0000000c4001';
+const EVENT = '0194b000-0000-7000-8000-0000000c4002';
+const ORDER_A = '0194b000-0000-7000-8000-0000000c4011';
+const ORDER_B = '0194b000-0000-7000-8000-0000000c4012';
 let server: grpc.Server;
 let address = '';
 let answer: Record<string, unknown> = {};
+/** RV-25: preview가 돌려주는 주문별 배상 목록과 Start가 받은 요청을 본다 */
+let previewAnswer: Record<string, unknown> = {};
+const received: { method: string; req: Record<string, unknown> }[] = [];
 
 beforeAll(async () => {
   const def = protoLoader.fromJSON(purchaseV1Refund as Parameters<typeof protoLoader.fromJSON>[0], { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true });
@@ -19,6 +25,14 @@ beforeAll(async () => {
   server = new grpc.Server();
   server.addService(pkg.EventRefundService.service, {
     GetEventRefundJob: (_call: unknown, cb: (e: null, v: unknown) => void) => cb(null, answer),
+    PreviewEventRefund: (call: { request: Record<string, unknown> }, cb: (e: null, v: unknown) => void) => {
+      received.push({ method: 'PreviewEventRefund', req: call.request });
+      cb(null, previewAnswer);
+    },
+    StartEventRefund: (call: { request: Record<string, unknown> }, cb: (e: null, v: unknown) => void) => {
+      received.push({ method: 'StartEventRefund', req: call.request });
+      cb(null, { job_id: call.request.cancellation_request_id, state: 'REFUND_JOB_STATE_RUNNING' });
+    },
   });
   const port = await new Promise<number>((resolve, reject) => server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? reject(e) : resolve(p))));
   address = `127.0.0.1:${port}`;
@@ -54,6 +68,59 @@ describe('R-T40 ⑤ GrpcEventRefunds.job의 계좌 대기 수', () => {
     const a = new GrpcEventRefunds({ address });
     try {
       expect(((await a.job({ requestId: REQUEST })) as { accountPending?: number } | undefined)?.accountPending ?? 0).toBe(0);
+    } finally {
+      a.close();
+    }
+  });
+});
+
+// RV-25(중간): ops-svc는 판정 미리보기의 주문별 배상 목록(compensation_orders)을 dry_run에 저장하고,
+// 확정(승인) 때 StartEventRefund.compensation_orders로 그대로 되보내야 purchase-svc가 금액을 다시 계산하지 않는다.
+// 어댑터가 preview·start 양쪽에서 이 칸을 빠뜨리면 팬이 본 배상액과 실제 저장·송금액이 달라진다.
+describe('R-T46 ②·RV-25 Preview→Start의 compensation_orders 왕복', () => {
+  test('R-T46 ②_RV25_Preview의_주문별_배상_Money를_읽고_Start에_같은_목록을_그대로_싣는다', async () => {
+    previewAnswer = {
+      target_orders: 2,
+      refund_total: { krw: 53_335 },
+      compensation_targets: 2,
+      compensation_total: { krw: 5_335 },
+      compensation_orders: [
+        { order_id: ORDER_A, base_amount: { krw: 20_002 }, amount: { krw: 2_001 } },
+        { order_id: ORDER_B, base_amount: { krw: 33_333 }, amount: { krw: 3_334 } },
+      ],
+      per_pg: [],
+    };
+    const a = new GrpcEventRefunds({ address });
+    try {
+      const preview = await a.preview({ eventId: EVENT, requestId: REQUEST, fault: 'ORGANIZER' });
+      expect(preview.compensationOrders).toEqual([
+        { orderId: ORDER_A, baseAmount: 20_002, amount: 2_001 },
+        { orderId: ORDER_B, baseAmount: 33_333, amount: 3_334 },
+      ]);
+      expect(preview.compensationTargets).toBe(2);
+      expect(preview.compensationTotal).toBe(5_335);
+
+      received.length = 0;
+      await a.start({
+        eventId: EVENT,
+        requestId: REQUEST,
+        fault: 'ORGANIZER',
+        ruledBy: 'operator-1',
+        confirmedBy: 'commander-2',
+        compensationOrders: preview.compensationOrders,
+      });
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        method: 'StartEventRefund',
+        req: {
+          event_id: EVENT,
+          cancellation_request_id: REQUEST,
+          compensation_orders: [
+            { order_id: ORDER_A, base_amount: { krw: 20_002 }, amount: { krw: 2_001 } },
+            { order_id: ORDER_B, base_amount: { krw: 33_333 }, amount: { krw: 3_334 } },
+          ],
+        },
+      });
     } finally {
       a.close();
     }

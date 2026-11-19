@@ -213,6 +213,20 @@ describe('J-T28 ② 계좌 미저장·유일', () => {
     expect(await receivableRows()).toHaveLength(1);
   });
 
+  // RV-23(높음): #inFlight는 프로세스 안 표다. 같은 DB 저장소를 보는 두 파드(=두 인스턴스)가 겹치면 둘 다 행을 못 보고
+  // 포트를 두 번 부른다. 송금 전에 compensation_id를 DB에서 선점해야 두 인스턴스에서도 한 번이다(ADR-0317, B16).
+  test('J-T28 ②_RV23_같은_DB_저장소를_쓰는_두_인스턴스가_겹쳐도_포트_1회·행_1이다', async () => {
+    const other = new CompensationTransfers(port, transfers, { recordCompensationAdvance: async (i) => ({ receivableId: (await settlements.recordCompensationAdvance(i)).receivableId }) });
+    const i = input();
+    port.delayMs = 30;
+    const [a, b] = await Promise.all([service.request(i), other.request(i)]);
+    expect(port.requests).toHaveLength(1);
+    expect(await transferRows()).toHaveLength(1);
+    expect(await receivableRows()).toHaveLength(1);
+    expect(a.compensationId).toBe(i.compensationId);
+    expect(a).toEqual(b);
+  });
+
   // RV-05(높음): 계좌번호 원문을 그대로 자르면 '123-456-789'의 끝 4글자가 '-789'가 되어 DB CHECK(^[0-9]{1,4}$)에 걸린다.
   // 지급대행이 PAID를 먼저 돌려준 뒤 저장이 실패하면 돈은 나갔는데 기록이 없다. 숫자만 남긴 끝 4자리를 저장해야 한다.
   test('R-T47 ②_계좌_끝_4자리는_하이픈을_뺀_숫자다: 123-456-789는_6789로_저장되고_DB_CHECK를_지난다', async () => {

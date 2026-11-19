@@ -15,6 +15,8 @@ interface Row {
   reason: 'USER';
   status: 'REQUESTED' | 'REFUND_PENDING';
   attempts: number;
+  /** 같은 취소 ID의 계좌 다시 받기 시도 번호(BAT-425). 없으면 0 */
+  refundAttempt?: number;
 }
 
 function fixture(rows: Row[], outcomes: Record<string, 'CANCELLED' | 'PENDING' | 'UNKNOWN' | 'REJECTED'>) {
@@ -22,7 +24,8 @@ function fixture(rows: Row[], outcomes: Record<string, 'CANCELLED' | 'PENDING' |
   const retries: { cancellationId: string; attempts: number; nextRetryAtMs: number; lastError: string }[] = [];
   const failures: { cancellationId: string; attempts: number; lastError: string }[] = [];
   const notices: { cancellationId: string; attempts: number; lastError: string }[] = [];
-  const calls: { cancellationId: string; amount: number }[] = [];
+  const calls: { cancellationId: string; amount: number; refundAttempt?: number }[] = [];
+  const accountMarks: { cancellationId: string }[] = [];
   const refund = new RefundAfterEntry({
     nowMs: () => NOW,
     writes: {
@@ -30,10 +33,11 @@ function fixture(rows: Row[], outcomes: Record<string, 'CANCELLED' | 'PENDING' |
       updateStatus: async (q: { cancellationId: string; status: string }) => void updates.push({ cancellationId: q.cancellationId, status: q.status }),
       scheduleRefundRetry: async (q: { cancellationId: string; attempts: number; nextRetryAtMs: number; lastError: string }) => void retries.push(q),
       markRefundFailed: async (q: { cancellationId: string; attempts: number; lastError: string }) => void failures.push(q),
+      markRefundAccountRequired: async (q: { cancellationId: string }) => void accountMarks.push({ cancellationId: q.cancellationId }),
     } as never,
     payments: {
       cancel: async (q) => {
-        calls.push({ cancellationId: q.cancellationId, amount: q.amount });
+        calls.push({ cancellationId: q.cancellationId, amount: q.amount, ...(q.refundAttempt ? { refundAttempt: q.refundAttempt } : {}) });
         return outcomes[q.cancellationId]!;
       },
     },
@@ -41,7 +45,7 @@ function fixture(rows: Row[], outcomes: Record<string, 'CANCELLED' | 'PENDING' |
     entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
     claims: { claimDue: async () => true, markEntryRecorded: async () => true },
   });
-  return { refund, updates, retries, failures, notices, calls };
+  return { refund, updates, retries, failures, notices, calls, accountMarks };
 }
 
 const row = (id: string, status: Row['status'], attempts = 0, amount = 10_000): Row => ({ cancellationId: id, orderId: `o-${id}`, ticketId: `t-${id}`, amount, reason: 'USER', status, attempts });
@@ -63,6 +67,20 @@ describe('환급 실행기', () => {
     const f = fixture([row('c1', 'REFUND_PENDING', 2)], { c1: 'PENDING' });
     await expect(f.refund.run()).resolves.toEqual({ refunded: 0, pending: 1, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
     expect(f.retries[0]).toMatchObject({ cancellationId: 'c1', attempts: 3, nextRetryAtMs: NOW + refundRetryDelayMs(3), lastError: 'PENDING' });
+  });
+
+  // RV-21(높음): 계좌를 실은 시도 a1이 결과 모름으로 남은 뒤의 재시도는 계좌를 싣지 않지만, 같은 시도 번호(1)를 실어
+  // payment-svc가 그 시도의 행을 조회로 정산하게 해야 한다. PENDING·UNKNOWN은 계좌 대기(REFUND_ACCOUNT_REQUIRED)가 아니므로
+  // refund_account_required_at을 쓰지 않고 다음 재시도를 예약한다(ADR-0316 결정 4).
+  test('R-T42 ④_RV21_계좌_시도(1)의_재시도는_같은_시도_번호로_보내고_계좌_대기로_멈추지_않는다', async () => {
+    for (const outcome of ['PENDING', 'UNKNOWN'] as const) {
+      const f = fixture([{ ...row('c1', 'REFUND_PENDING', 0), refundAttempt: 1 }], { c1: outcome });
+      await expect(f.refund.run(), outcome).resolves.toEqual({ refunded: 0, pending: 1, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
+      expect(f.calls, outcome).toEqual([{ cancellationId: 'c1', amount: 10_000, refundAttempt: 1 }]);
+      expect(f.retries[0], outcome).toMatchObject({ cancellationId: 'c1', attempts: 1, lastError: outcome });
+      expect(f.accountMarks, outcome).toEqual([]);
+      expect(f.failures, outcome).toEqual([]);
+    }
   });
 
   test('GAT090_업무거절은_바로_CS처리함_대상으로_남긴다', async () => {

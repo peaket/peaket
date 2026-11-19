@@ -40,21 +40,23 @@ const service = (outcome: 'REFUNDED' | 'REFUND_PENDING' = 'REFUNDED') => {
       return { status: outcome };
     },
   };
-  return { calls, service: new EventRefundService({ store: new MemoryEventRefundStore(), targets, canceller, nowMs: () => NOW, deadlineMs: () => NOW + 5_000, concurrency: 2 }) };
+  const store = new MemoryEventRefundStore();
+  return { calls, store, service: new EventRefundService({ store, targets, canceller, nowMs: () => NOW, deadlineMs: () => NOW + 5_000, concurrency: 2 }) };
 };
 
 let server: Awaited<ReturnType<typeof startPurchaseGrpcServer>>;
 let client: Client;
+let main: ReturnType<typeof service>;
 const call = (method: keyof Client, req: object): Promise<Record<string, unknown>> =>
   new Promise((resolve, reject) => (client[method] as Unary)(req, new grpc.Metadata(), {}, (e, v) => (e ? reject(e) : resolve(v ?? {}))));
 const ts = (ms: number) => ({ seconds: Math.floor(ms / 1000), nanos: 0 });
 
 beforeAll(async () => {
-  const s = service();
+  main = service();
   server = await startPurchaseGrpcServer({
     host: '127.0.0.1',
     port: 0,
-    services: [{ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(s.service).handlers() }],
+    services: [{ definition: eventRefundPackage().EventRefundService.service, handlers: new EventRefundGrpcController(main.service).handlers() }],
   });
   client = new (eventRefundPackage().EventRefundService as unknown as new (address: string, credentials: grpc.ChannelCredentials) => Client)(`127.0.0.1:${server.port}`, grpc.credentials.createInsecure());
 });
@@ -107,6 +109,29 @@ describe('BAT425 refund.proto gRPC', () => {
     await expect(call('StartEventRefund', { event_id: EVENT, cancellation_request_id: 'not-a-uuid', ruling: 'CANCELLATION_RULING_ORGANIZER', ruled_by: 'a', confirmed_by: 'b' })).rejects.toMatchObject({
       code: grpc.status.INVALID_ARGUMENT,
     });
+  });
+
+  // RV-25(중간): ops-svc가 판정 미리보기에서 저장한 주문별 배상 목록을 StartEventRefund.compensation_orders로 되보낸다.
+  // purchase-svc는 그 금액을 다시 계산하지 않고 저장해야 팬이 본 금액과 실제 지급액이 같다(계획 B13, ADR-0317 결정 2).
+  test('R-T46 ②_RV25_StartEventRefund가_받은_compensation_orders_금액을_다시_계산하지_않고_저장한다', async () => {
+    const requestId = '0193a000-0000-7000-8000-000000000051';
+    const orderA = `order-${T1}`;
+    // 대상 표 권면은 10,000원이라 다시 계산하면 1,000원이다. 보낸 2,001원이 그대로 저장돼야 한다
+    await call('StartEventRefund', {
+      event_id: EVENT,
+      cancellation_request_id: requestId,
+      ruling: 'CANCELLATION_RULING_ORGANIZER',
+      ruled_by: 'commander-1',
+      confirmed_by: 'operator-2',
+      kind: 'EVENT_REFUND_KIND_CANCEL',
+      compensation_orders: [{ order_id: orderA, base_amount: { krw: 20_002 }, amount: { krw: 2_001 } }],
+    });
+    const saved = main.store.requests.get(requestId)!;
+    expect(saved.compensationTargets).toBe(1);
+    expect(saved.compensationTotal).toBe(2_001);
+    expect(main.store.compensations.filter((c) => c.eventCancellationRequestId === requestId).map((c) => ({ orderId: c.orderId, baseAmount: c.baseAmount, amount: c.amount }))).toEqual([
+      { orderId: orderA, baseAmount: 20_002, amount: 2_001 },
+    ]);
   });
 });
 

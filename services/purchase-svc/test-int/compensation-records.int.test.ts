@@ -126,6 +126,29 @@ describe('R-T46 ② 확정 배상 행 [실제 PostgreSQL]', () => {
     expect(started.compensationTotal).toBe(preview.compensationTotal);
   });
 
+  // RV-22(중간): 미리보기 목록에는 남아 있지만 확정 때 대상에서 빠진 주문은 compensation 행에서 빠지는데
+  // 요청 행의 compensation_targets/Total은 저장한 목록을 그대로 세어 2건 5,335원으로 남는다. 합계도 실제 행과 같아야 한다.
+  test('R-T46 ②_RV22_미리보기_뒤_대상에서_빠진_주문은_배상_합계와_행에서_함께_빠진다', async () => {
+    await seedOrder(ORDER_A, ACCOUNT_A, [10_001, 10_001]);
+    await seedOrder(ORDER_B, ACCOUNT_B, [33_333]);
+    const { svc } = service();
+    const preview = await svc.preview({ eventId: EVENT, fault: 'ORGANIZER' });
+    expect(preview.compensationOrders).toHaveLength(2);
+    expect(preview.compensationTotal).toBe(5_335);
+
+    // 미리보기 뒤 주문 B의 표가 사라졌다(환불·무효 등). 확정 대상은 주문 A 하나다
+    await db.pool.query('delete from order_item where order_id = $1', [ORDER_B]);
+    const requestId = randomUUID();
+    const started = await start(svc, requestId);
+
+    const rows = await compensationRows();
+    expect(rows.map((r) => ({ orderId: r.order_id, baseAmount: r.base_amount, amount: r.amount }))).toEqual([{ orderId: ORDER_A, baseAmount: 20_002, amount: 2_001 }]);
+    const saved = (await db.pool.query<{ compensation_targets: number; compensation_total: number }>('select compensation_targets, compensation_total from event_cancellation_request where id = $1', [requestId])).rows[0]!;
+    expect(saved).toEqual({ compensation_targets: 1, compensation_total: 2_001 });
+    expect(started.compensationTargets).toBe(1);
+    expect(started.compensationTotal).toBe(2_001);
+  });
+
   test('R-T46 ②_같은_요청을_다시_확정해도_배상_행이_늘지_않고_저장한_금액_그대로다', async () => {
     await seedOrder(ORDER_A, ACCOUNT_A, [33_333]);
     await seedOrder(ORDER_B, ACCOUNT_B, [47_500]);

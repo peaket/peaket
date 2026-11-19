@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'vitest';
 import { CompensationTransfers } from '../src/modules/compensation/application/compensation-transfers.js';
 import { FakeCompensationTransfer } from '../src/modules/compensation/adapters/fake-compensation-transfer.js';
-import type { CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest } from '../src/modules/compensation/domain/ports.js';
+import type { CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest, CompensationTransferStore } from '../src/modules/compensation/domain/ports.js';
 
 const COMP = '01900000-0000-7000-8000-000000000001';
 const ORDER = '01900000-0000-7000-8000-000000000002';
@@ -69,6 +69,20 @@ describe('배상 송금 [BAT-425]', () => {
     port.delayMs = 20;
     const app = new CompensationTransfers(port);
     const [a, b] = await Promise.all([app.request(input), app.request(input)]);
+    expect(port.requests).toHaveLength(1);
+    expect(a).toEqual(b);
+  });
+
+  // RV-23(높음): #inFlight는 프로세스 안 표다. 같은 저장소를 쓰는 두 인스턴스(다른 파드)가 겹치면 둘 다 행을 못 보고
+  // 포트를 두 번 부른다. 송금 전에 저장소에서 compensation_id를 선점해야 두 인스턴스에서도 포트가 한 번이다(ADR-0317, B16).
+  test('R-T47 ②_RV23_같은_저장소를_쓰는_두_인스턴스가_겹쳐도_결제사_포트는_한_번이다', async () => {
+    const port = new CountingPort();
+    port.delayMs = 20;
+    const first = new CompensationTransfers(port);
+    // 첫 인스턴스의 저장소를 그대로 꺼내 둘째 인스턴스에 꽂는다(다른 파드가 같은 DB를 보는 꼴)
+    const store = (first as unknown as { store: CompensationTransferStore }).store;
+    const second = new CompensationTransfers(port, store);
+    const [a, b] = await Promise.all([first.request(input), second.request(input)]);
     expect(port.requests).toHaveLength(1);
     expect(a).toEqual(b);
   });

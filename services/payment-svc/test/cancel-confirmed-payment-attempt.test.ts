@@ -237,6 +237,42 @@ describe('P-T76 ① 앞 진행 중 행이 반영됐으면 새 전송 0', () => {
     expect(f.marks).toEqual([]);
   });
 
+  // RV-21(높음): a1이 CANCEL_PENDING·REQUESTED로 남은 뒤 계좌 없이 같은 시도를 다시 부르고 조회가 아직 '반영 아님'이면,
+  // 지금은 REFUND_ACCOUNT_REQUIRED(422)로 답해 purchase가 next_refund_at을 비우고 재시도 루프를 멈춘다.
+  // 같은 시도의 재시도는 계좌 대기가 아니라 202 REFUND_PENDING(CANCEL_PENDING·UNKNOWN)이어야 a1을 계속 조회한다(ADR-0316 결정 4, B9).
+  test('P-T76 ②_RV21_계좌_시도의_재시도_조회가_반영_아님이면_422_계좌_요구가_아니라_대기이고_새_전송_0이다', async () => {
+    for (const ownStatus of ['REQUESTED', 'CANCEL_PENDING'] as const) {
+      const f = fixture({
+        ownStatus,
+        begin: begun({ replay: true, record: { idemKey: `cancel-${CANCEL}-a1`, attempt: 1 } }),
+        query: found(60_000),
+        settleQuery: { status: 'RESEND' },
+      });
+      const answer = await run(f, { attempt: 1 });
+      expect(answer.result, ownStatus).not.toBe('REFUND_ACCOUNT_REQUIRED');
+      expect(['CANCEL_PENDING', 'UNKNOWN'], ownStatus).toContain(answer.result);
+      expect(f.calls, ownStatus).toEqual(['find-own', 'begin', 'query', 'settle-own']);
+      expect(f.queries(), ownStatus).toBe(1);
+      expect(f.cancels, ownStatus).toHaveLength(0);
+      expect(f.marks, ownStatus).toEqual([]);
+    }
+  });
+
+  test('P-T76 ②_RV21_계좌_시도의_재시도_조회가_반영이면_새_전송_0으로_끝난다', async () => {
+    for (const ownStatus of ['REQUESTED', 'CANCEL_PENDING'] as const) {
+      const f = fixture({
+        ownStatus,
+        begin: begun({ replay: true, record: { idemKey: `cancel-${CANCEL}-a1`, attempt: 1 } }),
+        query: found(12_500),
+        settleQuery: { status: 'APPLIED', cancelledAmount: 47_500 },
+      });
+      await expect(run(f, { attempt: 1 }), ownStatus).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 47_500 });
+      expect(f.calls, ownStatus).toEqual(['find-own', 'begin', 'query', 'settle-own']);
+      expect(f.cancels, ownStatus).toHaveLength(0);
+      expect(f.marks, ownStatus).toEqual([]);
+    }
+  });
+
   test('P-T76 ②_계좌_없이_온_새_시도인데_그_시도의_행이_없으면_지금처럼_계좌_필수로_거절한다', async () => {
     const f = fixture();
     await expect(run(f, { attempt: 1 })).rejects.toMatchObject({ field: 'refund_account' });
@@ -251,6 +287,19 @@ describe('P-T76 ① 앞 진행 중 행이 반영됐으면 새 전송 0', () => {
     expect(f.closes).toEqual([`cancel-${OLD_CANCEL}`]);
     expect(f.begins[0]).toMatchObject({ attempt: 1, hasRefundAccount: true, amount: 47_500 });
     expect(f.cancels).toEqual([expect.objectContaining({ idemKey: `cancel-${CANCEL}-a1`, amount: 47_500, expectedBalance: 60_000, refundAccount: { bankCode: '88', accountNumber: '110987654321', holderName: '김환불' } })]);
+    expect(f.superseded).toEqual(['not_applied']);
+  });
+
+  // RV-21: 앞 a1(REQUESTED)이 결제사에서 아직 반영되지 않았으면 그 행을 닫고 새 계좌 시도 a2가 결제사에 한 번 닿아야 한다.
+  // a2는 첫 시도와 다른 멱등키(-a2)를 쓰고, 옛 행은 조건부로 FAILED(SUPERSEDED)가 된다(ADR-0316 B2·B3).
+  test('P-T76 ①_RV21_앞_a1이_미반영_REQUESTED면_a2는_옛_행을_닫고_결제사에_한_번_닿는다', async () => {
+    const f = fixture({ settlePrior: { status: 'RESEND' }, close: true, query: found(60_000), begin: begun({ record: { idemKey: `cancel-${CANCEL}-a2`, attempt: 2 } }) });
+    await expect(run(f, { attempt: 2, account: ACCOUNT })).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 47_500 });
+    expect(f.calls).toEqual(['list', 'query', 'settle-prior', 'close', 'begin', 'cancel', 'finish']);
+    expect(f.closes).toEqual([`cancel-${OLD_CANCEL}`]);
+    expect(f.begins[0]).toMatchObject({ attempt: 2, hasRefundAccount: true, amount: 47_500 });
+    expect(f.cancels).toEqual([expect.objectContaining({ idemKey: `cancel-${CANCEL}-a2`, amount: 47_500, expectedBalance: 60_000 })]);
+    expect(f.cancels).toHaveLength(1);
     expect(f.superseded).toEqual(['not_applied']);
   });
 
@@ -273,6 +322,19 @@ describe('P-T76 ③ CANCEL_PENDING·둘 이상·조회 실패는 새 전송 0', 
     expect(f.cancels).toHaveLength(0);
     expect(f.begins).toHaveLength(0);
     expect(f.superseded).toEqual(['undecidable']);
+  });
+
+  // RV-21(높음): 앞 a1이 CANCEL_PENDING인데 팬이 새 계좌로 a2를 내도 a2 행을 만들지 않고 결제사도 부르지 않는다.
+  // a2를 만들면 purchase 재시도 루프가 a2의 payment_cancel 행을 찾지 못해 INVALID_ARGUMENT를 5회 소진한다.
+  test('P-T76 ③_RV21_앞_a1이_CANCEL_PENDING이면_a2는_행을_만들지_않고_결제사에_닿지_않는다', async () => {
+    const f = fixture({ inProgress: [prior({ idemKey: `cancel-${CANCEL}-a1`, attempt: 1, status: 'CANCEL_PENDING' })] });
+    await expect(run(f, { attempt: 2, account: ACCOUNT })).resolves.toEqual({ result: 'UNKNOWN', cancelledAmount: 0 });
+    expect(f.calls).toEqual(['list']);
+    expect(f.queries()).toBe(0);
+    expect(f.begins).toHaveLength(0);
+    expect(f.cancels).toHaveLength(0);
+    expect(f.marks).toEqual([]);
+    expect(f.closes).toEqual([]);
   });
 
   test('P-T76 ③_REQUESTED_행이_둘_이면_잔액으로_가르지_않고_새_전송_0·결과_모름이며_행은_그대로다', async () => {

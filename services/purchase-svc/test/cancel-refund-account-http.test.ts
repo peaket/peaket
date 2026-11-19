@@ -86,8 +86,11 @@ const redis = fakeSeatRedis();
 const jwks = fakeJwksFetch([fan]);
 /** 키 묶음을 한 번도 받지 못한 확인기(R-T42 ②): 앞 시험이 키를 받아 둔 같은 게이트로는 첫 읽기 장애를 재현할 수 없다 */
 const coldJwks = fakeJwksFetch([fan]);
+/** RV-24 재시작 시험용 새 프로세스: 앞 시험의 확인기 캐시·jti와 섞이지 않게 따로 둔다 */
+const restartJwks = fakeJwksFetch([fan]);
 let svc: Awaited<ReturnType<typeof createService>>;
 let coldSvc: Awaited<ReturnType<typeof createService>>;
+let restartSvc: Awaited<ReturnType<typeof createService>>;
 let seq = 0;
 
 const writes: CancellationWrites = {
@@ -193,10 +196,15 @@ beforeAll(async () => {
   svc = await make(warmGate);
   const coldGate = new JwksFanReauthGate({ jwksUrl: JWKS_URL, issuer: ISS, jti: new RedisReauthJtiStore(fakeSeatRedis()), clock: fakeClock({ now: NOW }), fetch: coldJwks.fetch });
   coldSvc = await make(coldGate);
+  const restartGate = new JwksFanReauthGate({ jwksUrl: JWKS_URL, issuer: ISS, jti: new RedisReauthJtiStore(fakeSeatRedis()), clock: fakeClock({ now: NOW }), fetch: restartJwks.fetch });
+  restartSvc = await make(restartGate);
 });
 afterAll(async () => {
   await svc?.close();
   await coldSvc?.close();
+});
+afterAll(async () => {
+  await restartSvc?.close();
 });
 afterAll(async () => {
   await svc?.close();
@@ -496,6 +504,26 @@ describe('R-T42 ① 예매 취소의 지연 환급 계좌 다시 받기(202·404
     const second = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
     expect(second.statusCode, second.payload).toBe(202);
     expect(JSON.parse(second.payload)).toEqual(JSON.parse(first.payload));
+    expect(state.accountStarts).toHaveLength(1);
+    expect(state.paymentCalls).toHaveLength(1);
+  });
+
+  // RV-24(중간): 상태 전이(REFUNDED) 커밋과 답 저장(refund_account_answer)은 다른 쓰기다. 그 사이 프로세스가 끊기면
+  // 같은 키의 재시도가 #replayOf를 지나지 못하고 #assertPending에서 409가 된다. 새 프로세스(restartSvc)로 같은 키를 다시 보내도
+  // 첫 202·같은 답이어야 한다(같은 키·같은 지문 = 같은 답).
+  test('R-T42 ④_RV24_상태_전이와_답_저장_사이에_재시작해도_같은_키는_202·같은_답이다', async () => {
+    const id = accountPending();
+    const key = randomUUID();
+    const first = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
+    expect(first.statusCode, first.payload).toBe(202);
+    expect(JSON.parse(first.payload)).toEqual({ cancellationId: id, status: 'REFUNDED', refundAmount: 30_000 });
+    // 메모리 저장소는 saveAnswer를 쓰지 않는다: 상태는 REFUNDED인데 답은 비어 있는 '끊긴 창'과 같다
+    expect(state.records.get(id)).toMatchObject({ state: 'REFUNDED', refundAttempt: 1 });
+    expect(state.records.get(id)!.refundAccountAnswer).toBeUndefined();
+
+    const restarted = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t, svc: restartSvc });
+    expect(restarted.statusCode, restarted.payload).toBe(202);
+    expect(JSON.parse(restarted.payload)).toEqual(JSON.parse(first.payload));
     expect(state.accountStarts).toHaveLength(1);
     expect(state.paymentCalls).toHaveLength(1);
   });
