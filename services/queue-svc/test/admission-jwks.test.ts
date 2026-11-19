@@ -183,7 +183,7 @@ describe('Q-T69 ① 키 설정의 시작 검사(fromEnv가 던진다, 값은 문
     expect(thrown(rotating(iso(T))), '상한 안').toBeUndefined();
   });
 
-  test('Q-T69 ① R057-6 R057-9 끝 시각은 날짜·시각(초까지)·시간대가 다 있는 ISO 8601만 받는다: 시간대 없음·날짜만·RFC 2822 글·초 없음·0이 아닌 소수 초(.0001·.000000001)·달력에 없는 날(2월 30일)·24시면 시작하지 않고(문구에 키 값 없음), 같은 시각의 Z·+09:00·0인 소수 초 꼴은 시작한다', () => {
+  test('Q-T69 ① R057-6 R057-9 끝 시각은 날짜·시각(초까지)·시간대가 다 있는 ISO 8601만 받는다: 시간대 없음·날짜만·RFC 2822 글·초 없음·0이 아닌 소수 초(.0001·.000000001)·달력에 없는 날(2월 30일)·24시면 시작하지 않고(문구에 키 값 없음), 같은 시각의 Z·+09:00·0인 소수 초 꼴과 R057-10의 음수 시간대·날 넘는 시간대·윤년 2월 29일은 시작한다', () => {
     // 같은 시각 2026-11-19T10:00:00Z(지금 + 9시간, 상한 안)를 여러 꼴로 적는다
     // R057-9: 밀리초 아래 자리만 0이 아닌 소수 초(Date.parse가 밀리초로 잘라 0이 된다)와 달력에 없는 날·시각(Date.parse가 다음 날로 넘긴다)도 시작하지 않는다.
     // 끝 시각은 지금(11-19 01:00Z)부터 상한(+ 25시간 45분) 안의 값이라 상한 검사가 아니라 꼴 검사로 거절되는지를 본다(2월 30일은 지난 시각이라 상한에 걸리지 않는다)
@@ -194,6 +194,18 @@ describe('Q-T69 ① 키 설정의 시작 검사(fromEnv가 던진다, 값은 문
       for (const v of [K1.priv.d, K2.priv.d, K3.priv.d, K1.pub.x, K2.pub.x]) expect(msg, bad).not.toContain(v);
     }
     for (const ok of ['2026-11-19T10:00:00Z', '2026-11-19T19:00:00+09:00', '2026-11-19T10:00:00.000Z', '2026-11-19T10:00:00.000000000Z']) expect(thrown(rotating(ok)), ok).toBeUndefined();
+    // R057-10: 받는 쪽 대조(달력 칸 대조가 바른 값을 거절하지 않는다). 시작하고, 묶음의 peaket_until이 그 순간(초)이다. 지금은 상한 안이 되게 고른다
+    const accepted = (until: string, nowMs: number) => {
+      expect(thrown(rotating(until), nowMs), until).toBeUndefined();
+      const prev = Es256AdmissionTokens.fromEnv(rotating(until), nowMs)
+        .jwks(nowMs)
+        .keys.find((k) => k.kid === 'adm-k1');
+      return prev?.peaket_until;
+    };
+    // 음수 시간대(같은 순간 10:00Z), 지역 날짜가 UTC 날짜와 다름(+09:00의 00:30 = 전날 15:30Z), 윤년 2월 29일(지금 2028-02-28T12:00Z)
+    expect(accepted('2026-11-19T05:00:00-05:00', NOW)).toBe(Date.parse('2026-11-19T10:00:00Z') / 1000);
+    expect(accepted('2026-11-19T00:30:00+09:00', NOW - 12 * 3_600_000)).toBe(Date.parse('2026-11-18T15:30:00Z') / 1000);
+    expect(accepted('2028-02-29T10:00:00Z', Date.parse('2028-02-28T12:00:00Z'))).toBe(Date.parse('2028-02-29T10:00:00Z') / 1000);
   });
 
   test('[ASVS v5.0.0-9.1.3] R057-7 옛 키·다음 키가 P-256 공개키로 읽히지 않으면(곡선 밖 좌표: 한 키의 x와 다른 키의 y, x가 31바이트) 시작하지 않고 문구에 좌표 값이 없다', () => {
