@@ -36,31 +36,34 @@ type ConnectCallback = (err: Error | undefined, client: pg.PoolClient | undefine
 const COUNTED = Symbol('peaket.platform.statementTimeoutCounted');
 
 /**
- * 연결 하나의 query가 57014로 실패하면 센다. 약속을 돌려주는 꼴은 같은 거부를 이은 약속을, 콜백 꼴은 감싼 콜백을 쓴다(부른 쪽이 받는 값은 같다).
- * 그 밖의 꼴(Submittable)은 그대로 넘긴다. 연결마다 한 번만 감싼다
+ * 연결 하나의 query가 57014로 실패하면 센다. 부른 쪽이 받는 값은 그대로다: 약속을 돌려주는 꼴은 그 약속 자체를 돌려주고 옆에 관찰만 붙이며,
+ * 콜백 꼴은 콜백 앞에서 오류만 본다. 그 밖의 꼴(Submittable·커서)은 돌려준 값을 그대로 넘긴다. 연결마다 한 번만 감싼다.
+ * 감쌀 때 연결에 이미 자기 query가 있으면(계측·시험이 'connect' 사건에서 단 것) 그것을 부르고, 없으면 부를 때마다 원형(prototype)에서 찾는다
+ * (그 뒤 원형에 건 관찰도 지나게, BAT-075 PR CI)
  */
 function countStatementTimeouts(client: pg.PoolClient, onTimeout: () => void): void {
   const marked = client as pg.PoolClient & { [COUNTED]?: true };
   if (marked[COUNTED]) return;
   marked[COUNTED] = true;
-  // 원래 query는 부를 때마다 원형(prototype)에서 찾는다. 감싸 둘 때 함수를 잡아 두면 그 뒤 원형에 건 관찰(계측·시험의 spyOn)을 건너뛴다(BAT-075 CI)
-  const proto = Object.getPrototypeOf(client) as { query: (...args: unknown[]) => unknown };
-  const query = { apply: (self: unknown, args: unknown[]) => proto.query.apply(self, args) };
-  (client as unknown as { query: (...args: unknown[]) => unknown }).query = function (this: unknown, ...args: unknown[]) {
+  type Query = (...args: unknown[]) => unknown;
+  const own = Object.prototype.hasOwnProperty.call(client, 'query') ? (client.query as Query) : undefined;
+  const proto = Object.getPrototypeOf(client) as { query: Query };
+  const next = (self: unknown, args: unknown[]): unknown => (own ?? proto.query).apply(self, args);
+  (client as unknown as { query: Query }).query = function (this: unknown, ...args: unknown[]) {
     const last = args.length - 1;
     const callback = args[last];
     if (typeof callback === 'function') {
       args[last] = function (this: unknown, err: unknown, ...rest: unknown[]) {
         if (isStatementTimeout(err)) onTimeout();
-        return (callback as (...a: unknown[]) => unknown).call(this, err, ...rest);
+        return (callback as Query).call(this, err, ...rest);
       };
-      return query.apply(this, args);
+      return next(this, args);
     }
-    const r = query.apply(this, args);
+    const r = next(this, args);
     if (r instanceof Promise) {
-      return r.catch((err: unknown) => {
+      // 옆 가지에서만 본다(다시 던지지 않아 이 가지가 처리되지 않은 거부를 만들지 않는다). 돌려주는 것은 원래 약속이다
+      r.then(undefined, (err: unknown) => {
         if (isStatementTimeout(err)) onTimeout();
-        throw err;
       });
     }
     return r;
