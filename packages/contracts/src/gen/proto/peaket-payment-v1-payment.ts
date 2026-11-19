@@ -50,6 +50,13 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "ORDER_KIND_MERCH": 2
                   }
                 },
+                "PaymentStore": {
+                  "values": {
+                    "PAYMENT_STORE_UNSPECIFIED": 0,
+                    "PAYMENT_STORE_STANDARD": 1,
+                    "PAYMENT_STORE_ESCROW": 2
+                  }
+                },
                 "PrepareCheckoutRequest": {
                   "oneofs": {
                     "_virtual_account_allowed": {
@@ -109,6 +116,15 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "pinned_pg": {
                       "type": "peaket.common.v1.PgProvider",
                       "id": 12
+                    },
+                    "payment_store": {
+                      "type": "PaymentStore",
+                      "id": 13
+                    },
+                    "escrow_products": {
+                      "rule": "repeated",
+                      "type": "TossEscrowProduct",
+                      "id": 14
                     }
                   }
                 },
@@ -195,6 +211,35 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "fail_url": {
                       "type": "string",
                       "id": 7
+                    },
+                    "escrow_products": {
+                      "rule": "repeated",
+                      "type": "TossEscrowProduct",
+                      "id": 8
+                    }
+                  }
+                },
+                "TossEscrowProduct": {
+                  "fields": {
+                    "id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "code": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "unit_price": {
+                      "type": "int64",
+                      "id": 4
+                    },
+                    "quantity": {
+                      "type": "int32",
+                      "id": 5
                     }
                   }
                 },
@@ -311,6 +356,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "order_kind": {
                       "type": "OrderKind",
                       "id": 12
+                    },
+                    "payment_store": {
+                      "type": "PaymentStore",
+                      "id": 13
                     }
                   }
                 },

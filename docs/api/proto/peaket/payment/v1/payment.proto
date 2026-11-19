@@ -19,7 +19,8 @@ service PaymentService {
   // 멱등 재생(pinned_pg)은 정지를 보지 않는다(추천 적용 2026-11-09, BUILD_ORDER PRF-201).
   // order_kind는 ORDER_KIND_TICKET과 ORDER_KIND_MERCH를 받는다(그 밖은 INVALID_ARGUMENT). 굿즈(MERCH)는 event_id가 비어도 되고, 있으면(티켓 연동 부가 상품의 연결 회차)
   // 그 회차의 전환·지정 행을 보고 비면 플랫폼 행과 플랫폼 기본·대체만 본다. 굿즈의 복귀 주소는 {웹 출처}/shop/checkout/return?order={order_id}&pg={결제사}(성공·실패 같음)이고,
-  // 가상계좌를 허용 수단에서 빼며 pay_method VIRTUAL_ACCOUNT는 INVALID_ARGUMENT다(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 3).
+  // 굿즈도 가상계좌를 받는다(입금 대기 O2~O4, BAT-605 계획). payment_store가 ESCROW면 결제창에 escrow_products를 싣고
+  // 허용 수단을 카드·계좌이체·가상계좌로 좁힌다(간편결제·휴대폰 제외, docs/features/payment.md §6 '결제대금예치 선택권').
   // 전환이 포트원을 고르면 두 번째 읽기로 포트원 채널의 관측 하위 결제사 표(파드 캐시, 읽지 못하면 10초 안의 마지막 값, 그런 값이 없으면 실패)를 보고,
   // 그 수단의 채널이 하위 결제사 검사로 빠지면 대체가 없을 때처럼 기준 결제사로 간다(switched 거짓, 추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰).
   rpc PrepareCheckout(PrepareCheckoutRequest) returns (PrepareCheckoutResponse);
@@ -78,6 +79,14 @@ enum OrderKind {
   ORDER_KIND_MERCH = 2;
 }
 
+// 결제 상점. 토스페이먼츠는 상점 단위로 결제대금예치(에스크로)를 켠다(docs/features/payment.md §6 '결제대금예치 선택권', ADR-0062).
+// 굿즈 택배 주문만 에스크로 상점(ESCROW)으로 결제하고, 티켓·부가 상품·현장 수령 굿즈는 STANDARD 상점이다(docs/review/plans/BAT-605.md).
+enum PaymentStore {
+  PAYMENT_STORE_UNSPECIFIED = 0;
+  PAYMENT_STORE_STANDARD = 1;
+  PAYMENT_STORE_ESCROW = 2;
+}
+
 message PrepareCheckoutRequest {
   OrderKind order_kind = 1;
   string order_id = 2;
@@ -102,6 +111,11 @@ message PrepareCheckoutRequest {
   // 멱등 재생에서 그 시도의 결제사로 고정한다. 값이 있으면 전환·지정을 보지 않고 이 결제사로 값을 만들고, 쓸 수 없으면 UNAVAILABLE이다.
   // 비우면(UNSPECIFIED) 평소처럼 고른다(추천 적용 2026-11-09, BUILD_ORDER PRF-191).
   peaket.common.v1.PgProvider pinned_pg = 12;
+  // 결제 상점(선택, 비면 STANDARD). ESCROW면 에스크로 상점으로 결제하고 허용 수단을 카드·계좌이체·가상계좌로 좁힌다
+  // (간편결제·휴대폰 제외, docs/features/payment.md §6 '결제대금예치 선택권', BAT-605 계획).
+  PaymentStore payment_store = 13;
+  // 에스크로 상점의 주문 상품(선택). TossCheckout.escrow_products로 그대로 실어 보낸다. useEscrow는 넣지 않아 구매자가 고른다.
+  repeated TossEscrowProduct escrow_products = 14;
 }
 
 message BuyerContact {
@@ -137,6 +151,18 @@ message TossCheckout {
   peaket.common.v1.Money amount = 5;
   string success_url = 6;
   string fail_url = 7;
+  // 에스크로 상점의 주문 상품. 에스크로가 아니면 비어 있다(docs/features/payment.md §6 '결제대금예치 선택권', BAT-605 계획).
+  repeated TossEscrowProduct escrow_products = 8;
+}
+
+// 토스 에스크로 결제창의 주문 상품. 칸 이름·형은 토스페이먼츠 문서로 확인한다 [가정](openapi createShopOrderPayment의 escrowProducts).
+message TossEscrowProduct {
+  string id = 1;
+  string name = 2;
+  // 상품 코드. 없으면 비운다.
+  string code = 3;
+  int64 unit_price = 4;
+  int32 quantity = 5;
 }
 
 // 포트원 V2 결제창 값.
@@ -187,6 +213,9 @@ message ConfirmPaymentRequest {
   // 원장 payment.order_kind에 적고, 같은 order_id로 다시 부를 때 attempt_id·pg·amount와 함께 대조한다(다르면 FAILED_PRECONDITION).
   // 굿즈 결제 사건은 eventId가 null, orderKind가 MERCH이고 Kafka 키는 주문 ID다.
   OrderKind order_kind = 12;
+  // 결제 상점(선택, 비면 STANDARD). 원장 payment.pg_store에 적고, 같은 order_id로 다시 부를 때 대조한다(다르면 FAILED_PRECONDITION).
+  // 값은 PrepareCheckoutRequest.payment_store와 같아야 한다(docs/features/payment.md §6 '결제대금예치 선택권', BAT-605 계획).
+  PaymentStore payment_store = 13;
 }
 
 message TossPaymentRef {
