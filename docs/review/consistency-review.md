@@ -801,6 +801,7 @@
 | R-706 | identity 503 dependency-unavailable 제목이 정본과 달랐다 | services/identity-svc/src/modules/session/inbound/account.controller.ts | 정본 제목으로 고침, platform problem-types 통과 | 완료 |
 | R-707 | BAT-177 기록·브라우저 확인·다음 할 일을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane2.md, docs/review/browser-check/BAT-177.md | 단계 완료 표시·진행 로그·확인 기록 | 완료 |
 | R-697 | 굿즈 주문을 결제로 보낼 길이 없었다(ConfirmPayment가 event_id 필수, PRF-180이 넘긴 것) | services/core-svc(shop), services/payment-svc, services/purchase-svc, services/ticket-svc, services/invariant-checker, packages/contracts·api-client·validation, deploy/gateways, ADR-0299~0301, docs/features/payment.md, docs/data.md, docs/verification.md, docs/security/asvs/payment.md | 굿즈 주문·재고 예약·결제 접수와 시험 P-T42·P-T56~58·V-T35 ①②·V-T46 | 적용 |
+| R-708 | BAT-420-rest·BAT-013의 환급 계좌 계약 깨짐 예외가 빠져 contract-check가 실패했다 | docs/api/breaking/openapi-ignore.txt | oasdiff 문장 24줄과 이유 추가, 깨짐 검사 0 error | 완료 |
 
 ## 4. 숫자 일치표
 
