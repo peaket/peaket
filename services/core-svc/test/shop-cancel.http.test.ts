@@ -211,7 +211,7 @@ describe('구매자 취소의 소유·입력 검사(P-T61 ④)', () => {
     const all = await cancel(twenty.accountId, twenty.orderId, { itemIds: twenty.itemIds });
     expect(all.statusCode, all.payload).toBe(202);
     expect(JSON.parse(all.payload).refundAmount).toBe(20 * UNIT);
-    expect(twenty.itemIds.map((id) => orders.items.get(id)!.status)).toEqual(Array(20).fill('CANCELLED'));
+    expect(twenty.itemIds.map((id) => orders.items.get(id)!.status)).toEqual(Array(20).fill('REFUNDED'));
 
     const bad = paidOrder({ items: 20 });
     cardPayment(bad.orderId);
@@ -284,7 +284,7 @@ describe('가상계좌 결제의 환불 계좌 요구(P-T63 ①)', () => {
     expect(body.cancellationId).toBe(payments.calls.cancel.at(-1)!.cancellationId);
     expect(payments.calls.cancel.at(-1)).toMatchObject({ amount: UNIT, reason: 'USER_CANCEL' });
     expect(payments.calls.cancel.at(-1)!.refundAccount).toBeUndefined();
-    expect(orders.items.get(f.itemIds[0]!)!.status).toBe('CANCELLED');
+    expect(orders.items.get(f.itemIds[0]!)!.status).toBe('REFUNDED');
   });
 });
 
@@ -418,7 +418,7 @@ describe('환불 계좌 모양(P-T63 ③, 공용 표)', () => {
         // 하이픈을 뺀 계좌번호와 앞뒤 공백을 뺀 예금주가 결제사로 간다
         expect(payments.calls.cancel.at(-1)!.refundAccount, row.name).toEqual(row.value);
         expect(redis.commands.length, `${row.name}: 재인증 1회`).toBe(claims + 1);
-        expect(item.status, row.name).toBe('CANCELLED');
+        expect(item.status, row.name).toBe('REFUNDED');
       } else {
         expect(res.statusCode, `${row.name}: ${res.payload}`).toBe(400);
         expect(payments.calls.cancel.length, `${row.name}: 결제사 0`).toBe(calls);

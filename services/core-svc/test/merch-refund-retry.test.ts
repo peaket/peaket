@@ -158,14 +158,14 @@ describe('굿즈 환급 다시 부르기(P-T64 ②)', () => {
     expect(f.payments.calls.cancel).toHaveLength(5);
   });
 
-  test('P-T64 ② CANCELLED면 환급이 끝나고 항목은 CANCELLED·환급액이 남으며 두 번 돌려도 결제사 취소는 1건이다', async () => {
+  test('P-T64 ② CANCELLED면 환급이 끝나고 항목은 REFUNDED·환급액이 남으며 두 번 돌려도 결제사 취소는 1건이다', async () => {
     const f = fixture(CREATED + MIN);
     f.setRefund();
     f.payments.cancelOutcomes = ['CANCELLED'];
     expect(await f.retry.tick()).toEqual({ picked: 1, cancelled: 1, pending: 0, rejected: 0 });
     expect(refundOf(f)).toMatchObject({ status: 'CANCELLED', attempts: 1, nextAtMs: null, resolvedAtMs: f.clock.now() });
-    // 취소 효력은 항목 CANCELLED이고 환급액이 적힌다(정본 P-T61 ①: 모든 항목 CANCELLED)
-    expect(itemOf(f)).toMatchObject({ status: 'CANCELLED', cancelReason: 'USER_CANCEL', refundedAmount: UNIT });
+    // 취소 효력은 항목 CANCELLED이고 결제사 환급이 끝나면 REFUNDED에 환급액이 적힌다(정본 I16·P-T61 ①)
+    expect(itemOf(f)).toMatchObject({ status: 'REFUNDED', cancelReason: 'USER_CANCEL', refundedAmount: UNIT });
     expect(f.payments.calls.cancel).toHaveLength(1);
     expect(f.payments.calls.cancel[0]!.cancellationId).toBe(f.refundId);
     // 같은 시각에 한 번 더 돌려도 끝난 행은 집히지 않는다
