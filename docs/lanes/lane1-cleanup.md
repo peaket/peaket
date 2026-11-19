@@ -248,3 +248,13 @@
 - HOT-405(BAT-058 RV-09·RV-10·V13·보고서): docs/infra.md 'q = 1/8이라 R_pod' 문구(q는 R_pod의 입력이 아님), 성능 장부 첨부 `infra.txt`의 클러스터 이름이 글로 박혀 실제(bench-l1-b058m)와 다름, 일꾼 수 지표 읽기가 꼬리표 붙은 줄도 받음, 측정 보고서 §8의 되돌릴 조건 문구가 옛 '5보다 크면'(지금 '5 이상').
 - HOT-405(BAT-058 RV-05): kind 덧씌우기 값(CPU 요청 100m·512Mi)이 Envoy Gateway 기본값과 같아 kind 시험이 `resources` 칸이 먹었는지를 가르지 못한다(진단 측정에서 CPU 요청 2 패치로 운영 값이 실린 것은 확인). 덧씌우기를 기본값과 다른 값으로 둔다.
 - 시험(2026-11-19 BAT-058 사고): `loadtest/test/`의 `v1`·`gw-scenario`·`manifests090`·`scenarios` 시험이 Docker가 있으면 잠금 없이 `docker run --rm`을 띄운다. 갈래 1 담당이 `node --test loadtest/test/*.test.mjs`를 잠금 없이 돌려 갈래 2 측정(03:16)·갈래 4 잠금(02:29)과 겹쳤다. 그 시험이 스스로 잠금(`lock.sh who docker`)을 보거나 Docker를 쓰는 시험을 따로 표시·분리한다.
+- HOT-400(BAT-057 §13-1): realtime-gw의 입장 토큰 묶음이 아직 정적(`PEAKET_ADMISSION_JWKS`)이고 `peaket_until`을 보지 않는다(packages/platform/src/admission-token.ts, ADR-0296). 배포 전에 purchase-svc와 같은 주기 읽기로 맞추고, 같은 규칙의 두 복사본(purchase-svc 도메인, platform)을 하나로 합칠지 본다.
+- HOT-400(BAT-057 §13-2·5): gw-fan 다른 라우트의 공통 Lua 401(`typ` 확인)과 출처 확인·인가가 낸 Local 403에 교차 출처 머리가 없다(조건 없는 403 고치기가 지움, BAT-055부터, W7-WIR-08). www 출처 403은 R057-1로 남는다. 다른 게이트웨이 넷도 같은지, 화면이 그 본문을 읽어야 하는지 보고 정한다.
+- HOT-400(BAT-057 §13-3): `POST /v1/shop/orders`는 입장 토큰이 선택이라 게이트웨이가 확인하지 않는다. 받는 서비스가 그 머리를 믿으면 안 된다(굿즈 결제 단계가 정한다).
+- HOT-400(BAT-057 §13-4): 입장 토큰 키 교체 런북(게이트웨이 ConfigMap과 queue-svc 설정을 함께 바꾸는 차례)을 런북 문서에 넣는다(OPS 단계).
+- HOT-400(BAT-057 §13-6): 메시 L7(웨이포인트 `AuthorizationPolicy` 경로)로 purchase-svc → queue-svc를 `GET /internal/jwks/admission.json` 하나로 좁힌다(지금 L4라 앱 포트 전체).
+- HOT-460(BAT-057 §13-7): Lua 입장 토큰 확인이 한도·JWT 확인보다 앞이라 틀린 서명 홍수가 프록시 CPU를 쓴다. 부하 측정에 넣는다(ADR-0288 되돌릴 조건 셋째).
+- HOT-400(BAT-057 §13-8): docs/security/asvs/queue-admission.md 9.1.3 행 앞머리 '게이트웨이의 캐시'를 '배포 때 받는 사본(ConfigMap)'으로 고친다.
+- HOT-400(BAT-057 검증 M45): 정적 시험에 'Lua를 쓰는 다섯 게이트웨이의 정책이 같은 공통 Lua를 쓰고 `/internal/` 404 갈래에 조건이 없다'를 더한다(지금은 겹친 가드라 바깥에서 구별할 수 없어 남는 차이).
+- 시험(BAT-057 구현): 이 PC에서 `node --test "tools/ci/*.test.mjs"` 전체가 15분 안에 끝나지 않고 `changes.test.mjs` 하나도 150초 시간 초과였다(다른 갈래 시험과 겹친 때). 원인을 보고 CI와 로컬 시간을 견준다.
+- 흔들림(2026-11-19 전체 감독 넘김): 갈래 2 PR #34 CI(run 44412242338) node 잡에서 purchase-svc V-T40(결제 채널 상한·경합) 시험이 한 번 실패했다. 결제 핵심이라 다시 열면 원인부터 본다.

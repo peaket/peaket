@@ -72,7 +72,7 @@
 | S-T26 | ④ | 회차 세대와 준비 표시(추천 적용 2026-10-28, 기술 검토… | ④ 다시 만들기가 끝나 세대 키가 서기 전에는 모든 홀드가 503이고, 끝난 뒤 판매된 좌석은 '판매', 원장의 만료 전 홀드는 '다른 분 선택'으로 보이며… | 자동 시험 | A | 시험: services/purchase-svc/test-int/saga-e2e.int.test.ts, services/purchase-svc/test/order-saga.test.ts 외 1곳 |
 | S-T27 | ① | 좌석 샤드 하나의 처리량 상한(추천 적용 2026-10-28, 기술… | ① 모두 홀드 Lua 실행 시간 p99 0.3ms 이하 가정, SLOWLOG(기록 기준 10ms로 둔다)에 남은 기록 0, 그 샤드 엔진 CPU 50% 이하… | 측정 | A | 구간 측정 · 좌석 샤드 하나의 처리량 상한. 판정이 부하 수치다 |
 | S-T27 | ② | 좌석 샤드 하나의 처리량 상한(추천 적용 2026-10-28, 기술… | ② 모두 홀드 Lua 실행 시간 p99 0.3ms 이하 가정, SLOWLOG(기록 기준 10ms로 둔다)에 남은 기록 0, 그 샤드 엔진 CPU 50% 이하… | 측정 | A | 구간 측정 · 좌석 샤드 하나의 처리량 상한. 판정이 부하 수치다 |
-| S-T28 | ① | 구매 세션의 회차 묶기(추천 적용 2026-10-30, §2… | ①은 gw-fan에서 모두 403이고 좌석·한도·주문에 변화가 0건이다 | 자동 시험 | A | 시험: services/purchase-svc/test/open-purchase-session.test.ts, services/purchase-svc/test/purchase-session-cases.ts |
+| S-T28 | ① | 구매 세션의 회차 묶기(추천 적용 2026-10-30, §2… | ①은 gw-fan에서 모두 403이고 좌석·한도·주문에 변화가 0건이다 | 자동 시험 | A | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateway-admission.e2e.mjs |
 | S-T28 | ② | 구매 세션의 회차 묶기(추천 적용 2026-10-30, §2… | ②는 닫힘 코드 4403이고 회차 B의 델타를 한 프레임도 받지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/purchase-session-cases.ts |
 | S-T28 | ③ | 구매 세션의 회차 묶기(추천 적용 2026-10-30, §2… | ③은 purchase-svc가 구매 세션 상태의 회차와 대조해 403으로 막는다. 거절은 보안 이벤트로 남는다 | 자동 시험 | A | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts 외 4곳 |
 | S-T28 | ④ | 구매 세션의 회차 묶기(추천 적용 2026-10-30, §2… | ④는 그 구매 세션의 홀드 목록에 없어 404이고 주문이 생기지 않는다(주문·결제 경로는 주소에 회차가 없어 자기 것만 규칙으로 막는다, 추천 적용… | 자동 시험 | A | 시험: services/purchase-svc/test/open-purchase-session.test.ts, services/purchase-svc/test/purchase-session-cases.ts |
