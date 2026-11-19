@@ -814,12 +814,12 @@ test('D-T18 ①_local·ci밖에서는_증거버킷diagnose.bucket이없으면_�
 
 test('D-T18 ①_흉내S3주소diagnose.s3Endpoint는_local·ci에서만받고_그밖에서는렌더하지않는다(SEC-01) [ASVS v5.0.0-14.2.1]', () => {
   for (const env of ['staging', 'prod', 'demo']) {
-    const r = render([...STAGING, `env.PEAKET_ENV=${env}`, 'diagnose.bucket=peaket-diag', 'diagnose.s3Endpoint=http://aws.peaket-local.svc:5000']);
+    const r = render([...STAGING, `env.PEAKET_ENV=${env}`, 'diagnose.bucket=peaket-diag', 'diagnose.s3Endpoint=http://aws.peaket-local.svc.cluster.local:5000']);
     assert.match(r.error ?? '(렌더됨)', /s3Endpoint/, env);
   }
-  const local = render([...BASE, 'diagnose.bucket=peaket-diag', 'diagnose.s3Endpoint=http://aws.peaket-local.svc:5000']);
+  const local = render([...BASE, 'diagnose.bucket=peaket-diag', 'diagnose.s3Endpoint=http://aws.peaket-local.svc.cluster.local:5000']);
   assert.equal(local.error, undefined, local.error);
-  assert.equal(envOf(find(local.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0]).PEAKET_DIAG_S3_ENDPOINT, 'http://aws.peaket-local.svc:5000');
+  assert.equal(envOf(find(local.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0]).PEAKET_DIAG_S3_ENDPOINT, 'http://aws.peaket-local.svc.cluster.local:5000');
 });
 
 test('D-T18 ①_값으로준NODE_OPTIONS에_안전옵션을끄는값이있으면_밑줄꼴도_렌더하지않는다(SEC-02, SR-01) [ASVS v5.0.0-14.2.1]', () => {
@@ -858,5 +858,5 @@ test('D-T18 ①_local·ci밖에서는_S3주소를바꾸는AWS_ENDPOINT_URL*·AWS
     }
   }
   // local·ci는 흉내 서버 주소로 쓸 수 있다
-  assert.equal(render([...BASE, 'service.env.AWS_ENDPOINT_URL_S3=http://aws.peaket-local.svc:5000']).error, undefined);
+  assert.equal(render([...BASE, 'service.env.AWS_ENDPOINT_URL_S3=http://aws.peaket-local.svc.cluster.local:5000']).error, undefined);
 });

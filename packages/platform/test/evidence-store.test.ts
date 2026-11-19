@@ -84,8 +84,8 @@ describe('SR-02 증거 S3 주소는 설정 주소를 따르지 않는다', () =>
 
   test('D-T18 ①_코드로준흉내서버주소(local·ci)는_그대로쓴다(대조)', async () => {
     process.env.AWS_ENDPOINT_URL_S3 = 'http://127.0.0.1:9/evil-s3';
-    await s3EvidenceStore({ bucket: 'peaket-diag', region: 'ap-northeast-2', endpoint: 'http://aws.peaket-local.svc:5000' }).put('k/report.json', file());
+    await s3EvidenceStore({ bucket: 'peaket-diag', region: 'ap-northeast-2', endpoint: 'http://aws.peaket-local.svc.cluster.local:5000' }).put('k/report.json', file());
     expect(sent.urls).toHaveLength(1);
-    expect(sent.urls[0]).toMatch(/^http:\/\/aws\.peaket-local\.svc:5000\/peaket-diag\//);
+    expect(sent.urls[0]).toMatch(/^http:\/\/aws\.peaket-local\.svc\.cluster\.local:5000\/peaket-diag\//);
   });
 });
