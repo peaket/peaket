@@ -11,8 +11,11 @@ import {
   CONFIRM_DEADLINE_MS,
   confirmRetryDelayMs,
   dependencyUnavailable,
+  escrowLinesOf,
   merchSoldOut,
   orderNotFound,
+  payMethodBlockedByStore,
+  payMethodsForStore,
   paymentRefOf,
   pgUnavailable,
   PULL_PENDING_MS,
@@ -37,10 +40,9 @@ export interface PaymentAttemptView {
   holdExpiresAt: string;
   allowedPayMethods: string[];
   checkout: CheckoutValues;
+  /** 입금 기한(가상계좌를 낼 수 있을 때만) */
+  depositDueAt?: string;
 }
-
-/** 굿즈 결제 시도 응답에 내는 결제수단(가상계좌는 뺀다, ADR-0299 결정 3) */
-const PAY_METHODS = new Set(['CARD', 'EASY_PAY', 'TRANSFER', 'MOBILE']);
 
 export class MerchPayment {
   readonly #log: ShopLogger;
@@ -57,15 +59,25 @@ export class MerchPayment {
     const nowMs = this.d.clock.now();
     const blocked = attemptStartBlocker(detail, nowMs);
     if (blocked) throw blocked;
-    // 택배 주문의 결제대금예치 상점 결제창 값은 BAT-605(LCH-030)가 더한다(ADR-0299 결정 3)
-    if (detail.order.fulfillment === 'DELIVERY') throw pgUnavailable();
-    if (body.payMethod === 'VIRTUAL_ACCOUNT') throw badRequest('virtual_account_not_allowed');
+    // 에스크로 상점은 간편결제·휴대폰을 낼 수 없다(코어가 결제사를 부르기 전에 400, P-T59 ③)
+    if (payMethodBlockedByStore(detail.order.pgStore, body.payMethod)) throw badRequest('checkout_invalid');
     const attemptId = uuidv7(this.d.clock);
     const names = detail.items.map((i) => i.productName);
     const orderName = names.length > 1 ? `${names[0]} 외 ${names.length - 1}건` : (names[0] ?? '굿즈 주문');
     let answer;
     try {
-      answer = await this.d.payments.prepareCheckout({ orderId: detail.order.orderId, attemptId, eventId: detail.order.eventId, amount: detail.order.amount, orderName, payMethod: body.payMethod });
+      answer = await this.d.payments.prepareCheckout({
+        orderId: detail.order.orderId,
+        attemptId,
+        eventId: detail.order.eventId,
+        amount: detail.order.amount,
+        orderName,
+        payMethod: body.payMethod,
+        pgStore: detail.order.pgStore,
+        ...(detail.order.pgStore === 'ESCROW' ? { escrowProducts: escrowLinesOf(detail.items) } : {}),
+        // 굿즈는 가상계좌(입금 대기 O2~O4)를 받는다(ADR-0314)
+        virtualAccountAllowed: true,
+      });
     } catch (e) {
       if (!(e instanceof CheckoutFailed)) throw e;
       if (e.reason === 'unavailable') throw pgUnavailable();
@@ -74,14 +86,17 @@ export class MerchPayment {
       this.#log.error({ kind: 'merch-checkout-failed', severity: 'SEV2', orderId: detail.order.orderId }, '굿즈 결제창 준비가 설정 오류로 끝났다');
       throw dependencyUnavailable();
     }
+    const allowed = new Set(payMethodsForStore(detail.order.pgStore));
     const view: PaymentAttemptView = {
       attemptId,
       pg: answer.pg,
       switched: answer.switched,
       holdExpiresAt: detail.order.stockReservedUntil.toISOString(),
-      allowedPayMethods: answer.allowedPayMethods.filter((m) => PAY_METHODS.has(m)),
+      allowedPayMethods: answer.allowedPayMethods.filter((m) => allowed.has(m)),
       checkout: answer.checkout,
+      ...(answer.depositDueAtMs === undefined ? {} : { depositDueAt: new Date(answer.depositDueAtMs).toISOString() }),
     };
+    this.d.signals?.escrowPayment(detail.order.pgStore === 'ESCROW' ? 'prepared' : 'standard');
     const saved = await this.d.store.saveAttempt(once, { orderId: detail.order.orderId, accountId, attemptId, pg: answer.pg, payMethod: body.payMethod ?? null, nowMs: this.d.clock.now(), responseJson: JSON.stringify(view) });
     return saved.kind === 'replay' ? (JSON.parse(saved.resultRef) as PaymentAttemptView) : view;
   }

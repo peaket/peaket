@@ -98,8 +98,21 @@ export class MerchPaymentResults {
         }
       } else if (s.status === 'FAILED') await this.#fail(job.orderId, now, out);
       else if (s.status === 'UNKNOWN') await this.d.store.rescheduleJob(job.orderId, now + PULL_UNKNOWN_MS, sent);
-      else if (s.status === 'AWAITING_DEPOSIT') await this.d.store.rescheduleJob(job.orderId, now + PULL_DEPOSIT_MS, sent);
-      else await this.d.store.rescheduleJob(job.orderId, now + PULL_PENDING_MS, sent);
+      else if (s.status === 'AWAITING_DEPOSIT') {
+        // 입금 대기: 주문을 AWAITING_DEPOSIT으로 바꾸고 재고 예약을 입금 기한 + 10분 [가정]까지 늘린다(EXTEND 1회, ADR-0314)
+        const applied = await this.d.store.applyAwaitingDeposit(job.orderId, { paymentId: s.paymentId, pg: s.pg, depositDueAtMs: s.depositDueAtMs, nowMs: now });
+        if (applied) {
+          this.d.signals?.deposit('waiting');
+          for (const l of applied.limited) {
+            try {
+              await this.d.stock.extend(l.productId, job.orderId, applied.deadline.getTime(), applied.accountId);
+            } catch {
+              this.#log.warn({ kind: 'merch-stock-extend-failed', orderId: job.orderId }, '입금 대기로 바꾼 뒤 재고 예약을 늘리지 못했다');
+            }
+          }
+        }
+        await this.d.store.rescheduleJob(job.orderId, now + PULL_DEPOSIT_MS, sent);
+      } else await this.d.store.rescheduleJob(job.orderId, now + PULL_PENDING_MS, sent);
     }
     return out;
   }

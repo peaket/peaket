@@ -6,8 +6,11 @@ import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN } from '@pea
 import { Products } from './application/products.js';
 import { MerchSettlements } from './application/merch-settlements.js';
 import { CreateMerchOrder } from './application/create-merch-order.js';
-import { MerchPayment } from './application/merch-payment.js';
+import { MerchCancel } from './application/merch-cancel.js';
 import { MerchOrdersRead } from './application/merch-orders-read.js';
+import { MerchPayment } from './application/merch-payment.js';
+import { MerchRefundRetry } from './application/merch-refund-retry.js';
+import { MerchReturn } from './application/merch-return.js';
 import { TicketAddons } from './application/ticket-addons.js';
 import { type ShopLogger, ShopSignals, silentShopLogger } from './application/shop-signals.js';
 import { COMMISSION_RATE_SOURCE, PRODUCT_EVENT_DIRECTORY, PRODUCT_STORE, type CommissionRateSource, type ProductEventDirectory, type ProductStore } from './domain/ports.js';
@@ -19,12 +22,15 @@ import {
   MERCH_STOCK,
   PRODUCT_TYPE_DIRECTORY,
   SHOP_ORDER_STORE,
+  SHOP_REAUTH_GATE,
   type HeldTicketsPort,
   type MerchOrderStore,
   type MerchPayments,
   type MerchStock,
   type ProductTypeDirectory,
   type ShopOrderStore,
+  type ShopReauthGate,
+  closedShopReauthGate,
 } from './domain/merch-ports.js';
 import { DrizzleProductEventDirectory, DrizzleProductStore } from './adapters/db/drizzle-product-store.js';
 import { DrizzleMerchOrderStore } from './adapters/db/drizzle-merch-store.js';
@@ -57,6 +63,8 @@ export interface MemoryShopWiring {
   stock?: MerchStock;
   payments?: MerchPayments;
   held?: HeldTicketsPort;
+  /** 굿즈 취소 재인증 확인기(기본: 닫힌 대역, 늘 403) */
+  reauth?: ShopReauthGate;
   types?: ProductTypeDirectory;
   /** 택배 주문 동의 문안 판(기본 MEMORY_MERCH_CONSENT_VERSION) */
   consentVersion?: string;
@@ -74,6 +82,8 @@ export interface DatabaseShopWiring {
   payments: MerchPayments;
   /** ticket-svc ListHeldTickets(PEAKET_TICKET_GRPC_URL). 없으면 unavailableHeldTickets */
   held: HeldTicketsPort;
+  /** 굿즈 취소 재인증 확인기(PEAKET_IDENTITY_FAN_JWKS_URL). 없으면 닫힌 대역 */
+  reauth?: ShopReauthGate;
   /** PEAKET_MERCH_CONSENT_VERSION. 없으면 택배 주문만 503 */
   consentVersion?: string;
   logger?: ShopLogger;
@@ -116,8 +126,23 @@ export class ShopModule {
       },
       {
         provide: MerchOrdersRead,
-        useFactory: (store: ShopOrderStore, clock: Clock, sleep: Sleep | undefined) => new MerchOrdersRead({ store, clock, ...(sleep ? { sleep } : {}) }),
-        inject: [SHOP_ORDER_STORE, CLOCK, SHOP_SLEEP],
+        useFactory: (store: ShopOrderStore, payments: MerchPayments, clock: Clock, sleep: Sleep | undefined) => new MerchOrdersRead({ store, payments, clock, ...(sleep ? { sleep } : {}) }),
+        inject: [SHOP_ORDER_STORE, MERCH_PAYMENTS, CLOCK, SHOP_SLEEP],
+      },
+      {
+        provide: MerchCancel,
+        useFactory: (store: ShopOrderStore, payments: MerchPayments, reauth: ShopReauthGate, clock: Clock, logger: ShopLogger) => new MerchCancel({ store, payments, reauth, clock, signals, logger }),
+        inject: [SHOP_ORDER_STORE, MERCH_PAYMENTS, SHOP_REAUTH_GATE, CLOCK, SHOP_LOGGER],
+      },
+      {
+        provide: MerchReturn,
+        useFactory: (store: ShopOrderStore, read: MerchOrdersRead, clock: Clock, logger: ShopLogger) => new MerchReturn({ store, read, clock, signals, logger }),
+        inject: [SHOP_ORDER_STORE, MerchOrdersRead, CLOCK, SHOP_LOGGER],
+      },
+      {
+        provide: MerchRefundRetry,
+        useFactory: (store: ShopOrderStore, payments: MerchPayments, clock: Clock, logger: ShopLogger) => new MerchRefundRetry({ store, payments, clock, signals, logger }),
+        inject: [SHOP_ORDER_STORE, MERCH_PAYMENTS, CLOCK, SHOP_LOGGER],
       },
       {
         provide: TicketAddons,
@@ -141,6 +166,7 @@ export class ShopModule {
           { provide: MERCH_STOCK, useValue: o.stock },
           { provide: MERCH_PAYMENTS, useValue: o.payments },
           { provide: HELD_TICKETS, useValue: o.held },
+          { provide: SHOP_REAUTH_GATE, useValue: o.reauth ?? closedShopReauthGate },
           { provide: MERCH_CONSENT_VERSION, useFactory: () => o.consentVersion },
           { provide: SHOP_SLEEP, useFactory: () => undefined },
         ],
@@ -162,6 +188,7 @@ export class ShopModule {
         { provide: MERCH_STOCK, useValue: w.stock ?? new MemoryMerchStock() },
         { provide: MERCH_PAYMENTS, useValue: w.payments ?? new MemoryMerchPayments() },
         { provide: HELD_TICKETS, useValue: w.held ?? new MemoryHeldTickets() },
+        { provide: SHOP_REAUTH_GATE, useValue: w.reauth ?? closedShopReauthGate },
         { provide: MERCH_CONSENT_VERSION, useValue: w.consentVersion ?? MEMORY_MERCH_CONSENT_VERSION },
         { provide: SHOP_SLEEP, useFactory: () => w.sleep },
       ],

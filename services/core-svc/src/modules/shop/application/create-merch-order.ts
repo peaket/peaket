@@ -15,7 +15,7 @@ import {
   merchSoldOut,
   orderAmount,
   orderNotFound,
-  pgUnavailable,
+  pgStoreOf,
   quantitiesByProduct,
   type OrderableProduct,
   type OrderLineInput,
@@ -171,11 +171,8 @@ export class CreateMerchOrder {
   }): Promise<CreatedOrderView> {
     const committed = await this.d.store.committedQuantities(c.accountId, [...c.products.keys()]);
     checkPerAccountLimit(c.lines, c.products, committed);
-    // 택배 주문은 결제대금예치 상점이다(BAT-605가 결제를 열면 아래 503을 뺀다)
-    const pgStore = c.fulfillment === 'DELIVERY' ? 'ESCROW' : 'STANDARD';
-    // 택배(결제대금예치 상점) 주문의 결제는 BAT-605(LCH-030)가 연다. 그때까지 본문·업무 규칙 검사(400·422)를 마친 뒤 재고 예약·행 쓰기 전에 503이다
-    // (ADR-0299 결정 3, ADR-0300 결정 4, ADR-0301 결정 4, P-T57 ⑩)
-    if (c.fulfillment === 'DELIVERY') throw pgUnavailable();
+    // 결제 상점: 택배만 에스크로, 현장 수령·부가 상품은 일반 상점(ADR-0313)
+    const pgStore = pgStoreOf(c.fulfillment);
     const { amount, shippingFee } = orderAmount(c.fulfillment, c.lines, c.products);
     const orderId = uuidv7(this.d.clock);
     const reservedUntil = new Date(c.nowMs + STOCK_RESERVATION_MS);
@@ -223,6 +220,13 @@ export class CreateMerchOrder {
         refundedAmount: 0,
         pickedUpAt: null,
         eventEndsAt,
+        shippedAt: null,
+        deliveredAt: null,
+        returnRequestedAt: null,
+        returnReason: null,
+        returnTrackingNo: null,
+        returnReceivedAt: null,
+        rejectReason: null,
       };
     });
     // 한정 상품은 상품 ID 오름차순으로 하나씩 예약한다(같은 상품이 두 줄이면 합친다)

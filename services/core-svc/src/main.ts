@@ -38,7 +38,7 @@ import {
   UnavailableFanProfile,
 } from './modules/review/index.js';
 import { DrizzleWebhookStore, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
-import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
+import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
 
 const SERVICE = 'core-svc';
 assertInternalGrpcToken(process.env);
@@ -62,7 +62,8 @@ if (!searchUrl) throw new Error('PEAKET_SEARCH_DATABASE_URL이 없다(검색 전
 const identityGrpc = process.env.PEAKET_IDENTITY_GRPC_URL;
 if (!identityGrpc) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(identity AdminAuthzService host:port)');
 // 부하 분산 프로필은 다른 서비스와 같은 설정(PEAKET_GRPC_LB_PROFILE)을 따른다
-const lbProfile = loadPlatformConfig(process.env).grpcLbProfile;
+const platformConfig = loadPlatformConfig(process.env);
+const lbProfile = platformConfig.grpcLbProfile;
 const adminAuthz = new GrpcAdminAuthz(identityGrpc, lbProfile);
 // 판매 자격 명단의 회원 코드 변환(identity MemberCodeService)도 같은 주소다(ADR-0261 결정 6). 서버(GAT-050) 전에는 UNIMPLEMENTED라 올리기가 503이다
 const memberCodes = new GrpcMemberCodeDirectory(identityGrpc, lbProfile);
@@ -126,6 +127,17 @@ const shopLogger: ShopLogger = {
   error: (o, m) => serviceLogger?.error(o, m),
 };
 
+// 굿즈 취소의 재인증 확인기(ADR-0315, ADR-0293). 팬 공개키 묶음 주소가 없으면 local·ci는 닫힌 대역(늘 403), 그 밖 환경은 시작 실패.
+// jti 한 번 쓰기는 샵 Redis(PEAKET_SHOP_REDIS_URL)를 쓰고, 없으면 local·ci는 메모리·그 밖은 닫힌 저장소다.
+const shopReauth =
+  shopReauthGateFromEnv({
+    env: process.env,
+    jti: reauthJtiStoreFromEnv(process.env, shopRedis),
+    clock: systemClock,
+    warn: (m) => console.warn(JSON.stringify({ level: 'warn', kind: 'shop-reauth', msg: m })),
+    onResult: (r) => (r.outcome === 'unavailable' ? shopLogger.warn({ kind: 'shop-reauth-unavailable', reason: r.reason }, '굿즈 취소 재인증 토큰을 확인하지 못했다') : shopLogger.info({ kind: 'shop-reauth-rejected', reason: r.reason }, '굿즈 취소 재인증 토큰을 거절했다')),
+  }) ?? closedShopReauthGate;
+
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
@@ -159,6 +171,7 @@ const service = await createService({
       stock: merchStock,
       payments: grpcPayments ?? unavailableMerchPayments,
       held: heldTickets ?? unavailableHeldTickets,
+      reauth: shopReauth,
       ...(merchConsentVersion !== undefined ? { consentVersion: merchConsentVersion } : {}),
       signals: shopSignals,
       logger: shopLogger,

@@ -9,6 +9,7 @@ import { paymentV1Payment } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import { hostPort } from '../../catalog/index.js';
 import {
+  type CancelInput,
   type CancelOutcome,
   type CheckoutAnswer,
   CheckoutFailed,
@@ -17,16 +18,17 @@ import {
   type ConfirmCommand,
   type ConfirmOutcome,
   type MerchPayments,
+  type PaymentDetail,
   type PaymentState,
 } from '../domain/merch-ports.js';
-import type { ShopPg } from '../domain/merch-order.js';
+import { nextDay2359KstMs, type ShopPg } from '../domain/merch-order.js';
 
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
-const DEADLINE = { checkout: 300, confirm: 200, batch: 500, cancel: 1_000 } as const;
+const DEADLINE = { checkout: 300, confirm: 200, batch: 500, getPayment: 300, cancel: 1_000 } as const;
 const CAP_MS = 1_000;
 
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
-type Client = grpc.Client & { PrepareCheckout: Unary; ConfirmPayment: Unary; BatchGetPayments: Unary; CancelPayment: Unary };
+type Client = grpc.Client & { PrepareCheckout: Unary; ConfirmPayment: Unary; BatchGetPayments: Unary; GetPayment: Unary; CancelPayment: Unary };
 
 const PG_PROVIDER: Readonly<Record<ShopPg, string>> = { TOSS: 'PG_PROVIDER_TOSS', PORTONE: 'PG_PROVIDER_PORTONE', SIMULATOR: 'PG_PROVIDER_SIMULATOR' };
 const pgOf = (v: unknown): ShopPg | undefined => {
@@ -63,7 +65,19 @@ function checkoutOf(v: Record<string, unknown>): CheckoutValues | undefined {
       ...(customData && typeof customData.order_id === 'string' && customData.order_id !== '' ? { customData: { orderId: customData.order_id } } : {}),
     };
   }
-  return { clientKey: str(m.client_key), customerKey: str(m.customer_key), orderId: str(m.order_id), orderName: str(m.order_name), amount: krw(m.amount), successUrl: str(m.success_url), failUrl: str(m.fail_url) };
+  const escrow = Array.isArray(m.escrow_products) ? (m.escrow_products as Record<string, unknown>[]) : [];
+  return {
+    clientKey: str(m.client_key),
+    customerKey: str(m.customer_key),
+    orderId: str(m.order_id),
+    orderName: str(m.order_name),
+    amount: krw(m.amount),
+    successUrl: str(m.success_url),
+    failUrl: str(m.fail_url),
+    ...(escrow.length === 0
+      ? {}
+      : { escrowProducts: escrow.map((p) => ({ id: str(p.id), name: str(p.name), code: str(p.code), unitPrice: Number(p.unit_price ?? 0), quantity: Number(p.quantity ?? 0) })) }),
+  };
 }
 
 const PAYMENT_STATUSES = new Set(['ACCEPTED', 'AWAITING_DEPOSIT', 'APPROVED', 'UNKNOWN', 'FAILED', 'PARTIAL_CANCELED', 'CANCELED']);
@@ -78,7 +92,7 @@ export class GrpcMerchPayments implements MerchPayments {
     this.#client = createGrpcClient(pkg.PaymentService as grpc.ServiceClientConstructor, { host, port, profile, dependency: 'payment-svc', timeoutCapMs: CAP_MS }) as unknown as Client;
   }
 
-  #call(method: 'PrepareCheckout' | 'ConfirmPayment' | 'BatchGetPayments' | 'CancelPayment', req: object, ms: number): Promise<Record<string, unknown>> {
+  #call(method: 'PrepareCheckout' | 'ConfirmPayment' | 'BatchGetPayments' | 'GetPayment' | 'CancelPayment', req: object, ms: number): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       this.#client[method](req, new grpc.Metadata(), { deadline: Date.now() + ms }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
     });
@@ -99,7 +113,9 @@ export class GrpcMerchPayments implements MerchPayments {
           attempt_id: q.attemptId,
           // 토스 구매자 키는 계정 ID를 쓰지 않는다(proto 주석). 비우면 payment-svc가 만든다
           customer_key: '',
-          virtual_account_allowed: false,
+          virtual_account_allowed: q.virtualAccountAllowed,
+          payment_store: q.pgStore === 'ESCROW' ? 'PAYMENT_STORE_ESCROW' : 'PAYMENT_STORE_STANDARD',
+          ...(q.escrowProducts === undefined ? {} : { escrow_products: q.escrowProducts.map((p) => ({ id: p.id, name: p.name, code: p.code, unit_price: p.unitPrice, quantity: p.quantity })) }),
         },
         DEADLINE.checkout,
       );
@@ -114,7 +130,8 @@ export class GrpcMerchPayments implements MerchPayments {
     const checkout = checkoutOf(v);
     if (!pg || !checkout) throw new CheckoutFailed('error');
     const allowed = Array.isArray(v.allowed_pay_methods) ? v.allowed_pay_methods.map(String) : [];
-    return { pg, switched: v.switched === true, checkout, allowedPayMethods: allowed };
+    const depositDueAtMs = msOf(v.deposit_due_at);
+    return { pg, switched: v.switched === true, checkout, allowedPayMethods: allowed, ...(depositDueAtMs === undefined ? {} : { depositDueAtMs }) };
   }
 
   async confirm(c: ConfirmCommand, deadlineMs: number): Promise<ConfirmOutcome> {
@@ -130,8 +147,10 @@ export class GrpcMerchPayments implements MerchPayments {
           amount: { krw: c.amount },
           authenticated_at: ts(c.authenticatedAtMs),
           attempt_no: c.attemptNo,
-          virtual_account_allowed: false,
+          // 굿즈는 가상계좌를 받는다(입금 대기 O2~O4, ADR-0314)
+          virtual_account_allowed: true,
           order_kind: 'ORDER_KIND_MERCH',
+          payment_store: c.pgStore === 'ESCROW' ? 'PAYMENT_STORE_ESCROW' : 'PAYMENT_STORE_STANDARD',
         },
         Math.min(deadlineMs, DEADLINE.confirm),
       );
@@ -157,15 +176,53 @@ export class GrpcMerchPayments implements MerchPayments {
         status: (PAYMENT_STATUSES.has(status) ? status : 'UNSPECIFIED') as PaymentState['status'],
         approvedAtMs: msOf(r.approved_at),
         failureCategory: failure === '' || failure === 'UNSPECIFIED' ? undefined : failure,
+        ...(msOf(r.deposit_due_at) === undefined ? {} : { depositDueAtMs: msOf(r.deposit_due_at) }),
       };
     });
   }
 
-  async cancel(c: { paymentId: string; cancellationId: string; amount: number; reason: string }): Promise<CancelOutcome> {
+  async getPayment(orderId: string, deadlineMs: number): Promise<PaymentDetail | undefined> {
+    let v: Record<string, unknown>;
     try {
-      const v = await this.#call('CancelPayment', { payment_id: c.paymentId, cancellation_id: c.cancellationId, amount: { krw: c.amount }, reason: c.reason }, DEADLINE.cancel);
+      v = await this.#call('GetPayment', { order_id: orderId }, Math.min(deadlineMs, DEADLINE.getPayment));
+    } catch (e) {
+      if (isServiceError(e) && e.code === grpc.status.NOT_FOUND) return undefined;
+      throw e;
+    }
+    const status = str(v.status).replace(/^PAYMENT_STATUS_/, '');
+    const account = v.virtual_account as Record<string, unknown> | undefined;
+    const bank = account === undefined ? undefined : str(account.bank);
+    const accountNumber = account === undefined ? undefined : str(account.account_number);
+    const dueAtMs = account === undefined ? undefined : msOf(account.due_at);
+    return {
+      status: (PAYMENT_STATUSES.has(status) ? status : 'UNSPECIFIED') as PaymentDetail['status'],
+      pg: pgOf(v.pg),
+      depositDueAtMs: msOf(v.deposit_due_at),
+      ...(account === undefined
+        ? {}
+        : { virtualAccount: { ...(bank === '' ? {} : { bank }), ...(accountNumber === '' ? {} : { accountNumber }), ...(dueAtMs === undefined ? {} : { dueAtMs }) } }),
+      virtualAccountPaid: v.virtual_account_paid === true,
+    };
+  }
+
+  async cancel(c: CancelInput): Promise<CancelOutcome> {
+    try {
+      const v = await this.#call(
+        'CancelPayment',
+        {
+          payment_id: c.paymentId,
+          cancellation_id: c.cancellationId,
+          amount: { krw: c.amount },
+          reason: c.reason,
+          ...(c.scope === undefined ? {} : { scope: 'CANCEL_SCOPE_DEPOSIT_ONLY' }),
+          ...(c.refundAccount === undefined
+            ? {}
+            : { refund_account: { bank_code: c.refundAccount.bankCode, account_number: c.refundAccount.accountNumber, holder_name: c.refundAccount.holderName } }),
+        },
+        DEADLINE.cancel,
+      );
       const r = str(v.result).replace(/^CANCEL_RESULT_/, '');
-      return r === 'CANCELLED' || r === 'CANCEL_PENDING' || r === 'REJECTED' ? r : 'UNKNOWN';
+      return r === 'CANCELLED' || r === 'CANCEL_PENDING' || r === 'REFUND_ACCOUNT_REQUIRED' || r === 'REJECTED' ? r : 'UNKNOWN';
     } catch {
       return 'UNKNOWN';
     }
@@ -176,13 +233,16 @@ export class GrpcMerchPayments implements MerchPayments {
   }
 }
 
-/** 주소가 없을 때: 결제창 준비는 pg-unavailable, 승인 명령은 다시 보내기, 당기기는 실패, 취소는 결과 모름(다시 부른다) */
+/** 주소가 없을 때: 결제창 준비는 pg-unavailable, 승인 명령은 다시 보내기, 당기기·원장 읽기는 실패, 취소는 결과 모름(다시 부른다) */
 export const unavailableMerchPayments: MerchPayments = {
   prepareCheckout: async () => {
     throw new CheckoutFailed('unavailable');
   },
   confirm: async () => ({ status: 'RETRYABLE', reason: 'unwired' }),
   batchGet: async () => {
+    throw new Error('payment-svc 주소(PEAKET_PAYMENT_GRPC_ADDR)가 없다');
+  },
+  getPayment: async () => {
     throw new Error('payment-svc 주소(PEAKET_PAYMENT_GRPC_ADDR)가 없다');
   },
   cancel: async () => 'UNKNOWN',
@@ -193,12 +253,24 @@ export const unavailableMerchPayments: MerchPayments = {
  * 부른 기록(calls)을 남긴다. 결과·실패는 시험이 바꾼다
  */
 export class MemoryMerchPayments implements MerchPayments {
-  readonly calls = { checkout: [] as CheckoutQuery[], confirm: [] as ConfirmCommand[], batch: [] as string[][], cancel: [] as { paymentId: string; cancellationId: string; amount: number; reason: string }[] };
+  readonly calls = {
+    checkout: [] as CheckoutQuery[],
+    confirm: [] as ConfirmCommand[],
+    batch: [] as string[][],
+    getPayment: [] as string[],
+    cancel: [] as CancelInput[],
+  };
   readonly states = new Map<string, PaymentState>();
+  /** GetPayment 답. 넣지 않은 주문은 상태에서 만든 답을 쓴다(없으면 undefined) */
+  readonly details = new Map<string, PaymentDetail>();
   checkoutFailure: CheckoutFailed | undefined;
   confirmOutcome: ConfirmOutcome = { status: 'ACCEPTED' };
   batchFails = false;
+  getPaymentFails = false;
   cancelOutcomes: CancelOutcome[] = [];
+
+  /** 입금 기한 계산에 쓸 시계(시험은 가짜 시계를 넣는다) */
+  constructor(private readonly now: () => number = () => Date.now()) {}
 
   async prepareCheckout(q: CheckoutQuery): Promise<CheckoutAnswer> {
     this.calls.checkout.push(q);
@@ -207,8 +279,19 @@ export class MemoryMerchPayments implements MerchPayments {
     return {
       pg: 'SIMULATOR',
       switched: false,
-      checkout: { clientKey: 'test_ck_local_simulator', customerKey: randomBytes(16).toString('base64url'), orderId: q.orderId, orderName: q.orderName, amount: q.amount, successUrl: url, failUrl: url },
-      allowedPayMethods: ['CARD'],
+      checkout: {
+        clientKey: 'test_ck_local_simulator',
+        customerKey: randomBytes(16).toString('base64url'),
+        orderId: q.orderId,
+        orderName: q.orderName,
+        amount: q.amount,
+        successUrl: url,
+        failUrl: url,
+        ...(q.escrowProducts === undefined ? {} : { escrowProducts: q.escrowProducts }),
+      },
+      // 상점마다 허용 수단이 다르다. 입금 기한은 가상계좌를 낼 수 있으면 늘 싣는다(openapi PaymentAttempt.depositDueAt)
+      allowedPayMethods: q.pgStore === 'ESCROW' ? ['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT'] : ['CARD', 'EASY_PAY', 'TRANSFER', 'MOBILE', 'VIRTUAL_ACCOUNT'],
+      depositDueAtMs: nextDay2359KstMs(this.now()),
     };
   }
 
@@ -223,7 +306,16 @@ export class MemoryMerchPayments implements MerchPayments {
     return orderIds.flatMap((id) => (this.states.has(id) ? [this.states.get(id)!] : []));
   }
 
-  async cancel(c: { paymentId: string; cancellationId: string; amount: number; reason: string }): Promise<CancelOutcome> {
+  async getPayment(orderId: string, _deadlineMs: number): Promise<PaymentDetail | undefined> {
+    this.calls.getPayment.push(orderId);
+    if (this.getPaymentFails) throw new Error('payment-svc 멈춤(시험)');
+    const detail = this.details.get(orderId);
+    if (detail !== undefined) return detail;
+    const s = this.states.get(orderId);
+    return s === undefined ? undefined : { status: s.status, pg: s.pg, depositDueAtMs: s.depositDueAtMs, virtualAccountPaid: false };
+  }
+
+  async cancel(c: CancelInput): Promise<CancelOutcome> {
     this.calls.cancel.push(c);
     return this.cancelOutcomes.shift() ?? 'CANCELLED';
   }

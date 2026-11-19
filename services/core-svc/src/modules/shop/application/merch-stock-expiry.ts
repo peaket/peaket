@@ -68,6 +68,16 @@ export class MerchStockExpiry {
       await this.d.afterExpireCommit?.(orderId);
       for (const l of released.limited) if ((await this.d.stock.release(l.productId, orderId, true, released.accountId)).removed) out.released++;
     }
+    // 입금 기한 + 10분 [가정]이 지난 입금 대기 주문(ADR-0314, P-T60 ④)
+    for (const orderId of await this.d.store.dueDepositOrders(now, EXPIRY_BATCH)) {
+      const released = await this.d.store.expireDeposit(orderId, now);
+      if (!released) continue;
+      out.expired++;
+      this.d.signals?.deposit('expired');
+      this.d.signals?.order('expired');
+      await this.d.afterExpireCommit?.(orderId);
+      for (const l of released.limited) if ((await this.d.stock.release(l.productId, orderId, true, released.accountId)).removed) out.released++;
+    }
     if (out.unavailable > 0) this.#log.warn({ kind: 'merch-stock-unavailable', products: out.unavailable }, '재고 Redis를 읽지 못해 일부 상품의 만료를 미뤘다');
     return out;
   }
@@ -96,6 +106,12 @@ export class MerchStockExpiry {
     }
     if (st.status === 'CREATED') {
       await this.d.stock.defer(productId, orderId, now + ACCEPTED_EXPIRY_DEFER_MS);
+      out.deferred++;
+      return;
+    }
+    if (st.status === 'AWAITING_DEPOSIT') {
+      // DB 만료 작업이 입금 기한 + 10분에 끝낸다. 여기서 원소를 풀면 카운터를 두 번 돌릴 수 있어 미룬다(ADR-0314)
+      await this.d.stock.defer(productId, orderId, Math.max(st.stockReservedUntilMs, now + 1));
       out.deferred++;
       return;
     }

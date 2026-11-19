@@ -1,14 +1,22 @@
 // 받는 층: 팬 굿즈 주문(openapi shop 태그 createShopOrder·listShopOrders·getShopOrder·createShopOrderPayment·createShopOrderPaymentAcceptance·getShopOrderPaymentStatus,
 // BUILD_ORDER LCH-010, ADR-0300). 팬 쿠키의 계정으로만 처리하고, 남의 주문과 없는 주문은 같은 404다. 쓰기 셋은 Idempotency-Key를 플랫폼 멱등 모듈로 다룬다.
-import { Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import {
   CreateShopOrderBody,
+  CreateShopOrderCancellationBody,
+  CreateShopOrderCancellationHeader,
+  CreateShopOrderCancellationParams,
+  CreateShopOrderCancellationResponse,
   CreateShopOrderPaymentAcceptanceBody,
   CreateShopOrderPaymentAcceptanceParams,
   CreateShopOrderPaymentBody,
   CreateShopOrderPaymentParams,
   CreateShopOrderPaymentResponse,
   CreateShopOrderResponse,
+  CreateShopOrderReturnBody,
+  CreateShopOrderReturnParams,
+  CreateShopOrderReturnResponse,
   GetShopOrderParams,
   GetShopOrderPaymentStatusParams,
   GetShopOrderPaymentStatusResponse,
@@ -16,11 +24,13 @@ import {
   ListShopOrdersQueryParams,
   ListShopOrdersResponse,
 } from '@peaket/contracts/openapi/shop';
-import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, Idempotent, type Principal, Roles } from '@peaket/platform';
+import { ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, Idempotent, type Principal, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { CreateMerchOrder, type CreatedOrderView, type CreateShopOrderInput } from '../application/create-merch-order.js';
+import { MerchCancel, type CancellationView } from '../application/merch-cancel.js';
 import { MerchOrdersRead, type PaymentStatusView } from '../application/merch-orders-read.js';
 import { MerchPayment, type PaymentAttemptView } from '../application/merch-payment.js';
+import { MerchReturn } from '../application/merch-return.js';
 import type { AcceptBody } from '../domain/merch-order.js';
 import { shopGuard } from '../application/shop-problems.js';
 
@@ -32,6 +42,8 @@ export class ShopOrderController {
     private readonly orders: CreateMerchOrder,
     private readonly payment: MerchPayment,
     private readonly read: MerchOrdersRead,
+    private readonly cancelOrder: MerchCancel,
+    private readonly returnOrder: MerchReturn,
   ) {}
 
   @Post()
@@ -90,5 +102,36 @@ export class ShopOrderController {
   @Roles(['fan'])
   async status(@ContractParams(GetShopOrderPaymentStatusParams) p: z.output<typeof GetShopOrderPaymentStatusParams>, @CurrentPrincipal() me: Principal): Promise<PaymentStatusView> {
     return shopGuard(() => this.read.paymentStatus(me.accountId, p.orderId));
+  }
+
+  @Post(':orderId/cancellations')
+  @ContractRouteSchema({ params: CreateShopOrderCancellationParams, headers: CreateShopOrderCancellationHeader, body: CreateShopOrderCancellationBody, responses: { 202: CreateShopOrderCancellationResponse } })
+  @Roles(['fan'])
+  @HttpCode(202)
+  @Idempotent({ operation: 'CANCEL_MERCH_ORDER' })
+  async cancel(
+    @ContractParams(CreateShopOrderCancellationParams) p: z.output<typeof CreateShopOrderCancellationParams>,
+    @ContractBody(CreateShopOrderCancellationBody) body: z.output<typeof CreateShopOrderCancellationBody>,
+    @ContractHeaders(CreateShopOrderCancellationHeader) headers: z.output<typeof CreateShopOrderCancellationHeader>,
+    @CurrentPrincipal() me: Principal,
+    @IdempotencyRequest() once: IdempotencyRequest,
+    @Req() request: FastifyRequest,
+  ): Promise<CancellationView> {
+    const token = typeof request.headers['x-reauth-token'] === 'string' ? request.headers['x-reauth-token'] : headers['X-Reauth-Token'];
+    return shopGuard(() => this.cancelOrder.run(me.accountId, me.sessionId, p.orderId, { itemIds: body.itemIds, refundAccount: body.refundAccount }, once, token));
+  }
+
+  @Post(':orderId/returns')
+  @ContractRouteSchema({ params: CreateShopOrderReturnParams, body: CreateShopOrderReturnBody, responses: { 200: CreateShopOrderReturnResponse } })
+  @Roles(['fan'])
+  @HttpCode(200)
+  @Idempotent({ operation: 'RETURN_MERCH_ORDER' })
+  async requestReturn(
+    @ContractParams(CreateShopOrderReturnParams) p: z.output<typeof CreateShopOrderReturnParams>,
+    @ContractBody(CreateShopOrderReturnBody) body: z.output<typeof CreateShopOrderReturnBody>,
+    @CurrentPrincipal() me: Principal,
+    @IdempotencyRequest() once: IdempotencyRequest,
+  ) {
+    return shopGuard(() => this.returnOrder.run(me.accountId, p.orderId, { itemIds: body.itemIds, reason: body.reason, returnTrackingNo: body.returnTrackingNo }, once));
   }
 }

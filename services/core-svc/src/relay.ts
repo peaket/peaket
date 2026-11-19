@@ -23,6 +23,7 @@ import {
   MERCH_LOOP_INTERVAL_MS,
   MERCH_REFUND_LOOP_INTERVAL_MS,
   MerchPaymentResults,
+  MerchRefundRetry,
   MerchStockExpiry,
   MerchUnclaimed,
   RedisMerchStock,
@@ -90,10 +91,12 @@ const relay = await startOutboxRelayProcess({
     const expiry = new MerchStockExpiry(deps);
     const results = new MerchPaymentResults(deps);
     const unclaimed = new MerchUnclaimed(deps);
+    const refundRetry = new MerchRefundRetry(deps);
     return [
       intervalLoop({ name: 'merch-stock-expiry', everyMs: MERCH_LOOP_INTERVAL_MS, leader, logger, tick: () => expiry.tick() }),
       intervalLoop({ name: 'merch-payment-results', everyMs: MERCH_LOOP_INTERVAL_MS, leader, logger, tick: () => results.tick() }),
       intervalLoop({ name: 'merch-refund-retry', everyMs: MERCH_REFUND_LOOP_INTERVAL_MS, leader, logger, tick: () => unclaimed.retry() }),
+      intervalLoop({ name: 'merch-user-refund-retry', everyMs: MERCH_REFUND_LOOP_INTERVAL_MS, leader, logger, tick: () => refundRetry.tick() }),
     ];
   },
 });

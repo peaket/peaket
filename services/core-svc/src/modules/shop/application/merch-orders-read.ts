@@ -3,11 +3,24 @@
 // 결제 상태는 결과가 정해지면 바로, 아니면 최대 25초 [가정] 동안 DB를 1초 [가정]마다 다시 읽고 그때의 상태로 답한다.
 import type { Clock } from '@peaket/platform';
 import { maskPhone } from '../domain/merch.js';
-import { orderExpired, orderNotFound, orderNumberOf, PAYMENT_STATUS_POLL_MS, PAYMENT_STATUS_WAIT_MS, paymentNotAccepted, type ShopOrderDetail } from '../domain/merch-order.js';
-import type { ShopOrderStore } from '../domain/merch-ports.js';
+import {
+  defectReturnDueAtMs,
+  GET_PAYMENT_DEADLINE_MS,
+  orderExpired,
+  orderNotFound,
+  orderNumberOf,
+  PAYMENT_STATUS_POLL_MS,
+  PAYMENT_STATUS_WAIT_MS,
+  paymentNotAccepted,
+  returnDueAtMs,
+  returnableOf,
+  type ShopOrderDetail,
+} from '../domain/merch-order.js';
+import type { MerchPayments, ShopOrderStore } from '../domain/merch-ports.js';
 
 export interface MerchReadDeps {
   store: ShopOrderStore;
+  payments: MerchPayments;
   clock: Clock;
   /** 기다리기(시험은 바꿔 끼운다) */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -18,6 +31,8 @@ export type PaymentStatusView = {
   stockReservedUntil: string | null;
   pg?: 'TOSS' | 'PORTONE' | 'SIMULATOR';
   reason?: string;
+  /** 입금 대기일 때만. 입금처 번호라 구매자 계좌가 아니고, 로그·사건·지표에 싣지 않는다 */
+  virtualAccount?: { bank?: string; accountNumber?: string; dueAt?: string };
 };
 
 const realSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
@@ -56,6 +71,11 @@ export class MerchOrdersRead {
 
   async get(accountId: string, orderId: string) {
     const d = await this.#owned(accountId, orderId);
+    const nowMs = this.d.clock.now();
+    const entry = d.order.eventId === null ? null : await this.d.store.eventEntryOpensAt(d.order.eventId);
+    const entryMs = entry?.getTime();
+    const products = await this.d.store.products([...new Set(d.items.map((i) => i.productId))]);
+    const returnFees = products.map((p) => p.returnShippingFee).filter((x): x is number => x !== null && x !== undefined);
     return {
       ...summaryOf(d),
       items: d.items.map((i) => ({
@@ -66,7 +86,14 @@ export class MerchOrdersRead {
         status: i.status,
         unitPrice: i.unitAmount,
         options: i.optionSnapshot.options,
+        shipment: i.shippedAt === null || i.shippedAt === undefined ? null : { trackingNo: i.trackingNo ?? '', ...(i.deliveredAt ? { deliveredAt: i.deliveredAt.toISOString() } : {}) },
         pickedUpAt: i.pickedUpAt?.toISOString() ?? null,
+        cancellable: i.status === 'READY' && (i.fulfillment !== 'WALLET' || entryMs === undefined || nowMs < entryMs),
+        returnable: returnableOf(i, i.eventEndsAt, nowMs),
+        returnDueAt: returnDueAtMs(i) === null ? null : new Date(returnDueAtMs(i)!).toISOString(),
+        defectReturnDueAt: defectReturnDueAtMs(i) === null ? null : new Date(defectReturnDueAtMs(i)!).toISOString(),
+        returnReason: i.returnReason ?? null,
+        returnTrackingNo: i.returnTrackingNo ?? null,
       })),
       shippingFee: d.order.shippingFee,
       stockReservedUntil: d.order.status === 'CREATED' ? d.order.stockReservedUntil.toISOString() : null,
@@ -75,6 +102,9 @@ export class MerchOrdersRead {
         d.order.fulfillment === 'DELIVERY'
           ? { recipientName: d.order.recipientName ?? '', recipientPhoneMasked: maskPhone(d.order.recipientPhone ?? ''), address: d.order.deliveryAddress ?? '' }
           : null,
+      ...(d.order.fulfillment === 'DELIVERY'
+        ? { returnPolicy: { returnShippingFee: Math.max(0, ...returnFees), returnAddress: products.find((p) => p.returnAddress !== null)?.returnAddress ?? '' } }
+        : {}),
     };
   }
 
@@ -83,7 +113,7 @@ export class MerchOrdersRead {
     return { items: page.items.map(summaryOf), nextCursor: page.nextCursor };
   }
 
-  /** 결제 상태(long polling). 접수 전이면 409 payment-not-accepted, 만료면 409 order-expired */
+  /** 결제 상태(long polling). 접수 전이면 409 payment-not-accepted, 만료면 409 order-expired. 입금 대기면 GetPayment로 입금 안내를 읽는다 */
   async paymentStatus(accountId: string, orderId: string, signal?: AbortSignal): Promise<PaymentStatusView> {
     const sleep = this.d.sleep ?? realSleep;
     let view = this.#judge(await this.#owned(accountId, orderId));
@@ -91,7 +121,25 @@ export class MerchOrdersRead {
       await sleep(PAYMENT_STATUS_POLL_MS, signal);
       view = this.#judge(await this.#owned(accountId, orderId));
     }
-    return view;
+    if (view.status !== 'AWAITING_DEPOSIT') return view;
+    // B6: 읽지 못하면 계좌 없는 ACCEPTED로 답하고 화면이 계속 묻는다(모르는 채 입금 대기로 끝내지 않는다)
+    try {
+      const getPayment = this.d.payments.getPayment;
+      if (getPayment === undefined) throw new Error('결제 원장 읽기 포트가 없다');
+      const p = await getPayment.call(this.d.payments, orderId.toLowerCase(), GET_PAYMENT_DEADLINE_MS);
+      const va = p?.virtualAccount;
+      if (va === undefined) return view;
+      return {
+        ...view,
+        virtualAccount: {
+          ...(va.bank === undefined ? {} : { bank: va.bank }),
+          ...(va.accountNumber === undefined ? {} : { accountNumber: va.accountNumber }),
+          ...(va.dueAtMs === undefined ? {} : { dueAt: new Date(va.dueAtMs).toISOString() }),
+        },
+      };
+    } catch {
+      return { status: 'ACCEPTED', stockReservedUntil: view.stockReservedUntil, ...(view.pg === undefined ? {} : { pg: view.pg }) };
+    }
   }
 
   #judge(d: ShopOrderDetail): PaymentStatusView {
