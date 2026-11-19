@@ -202,7 +202,7 @@ describe('P-T26: 전환 켜짐 전후의 선택', () => {
     expect(r.switched).toBe(false);
     expect(r.checkout).toBe('toss');
     const url = `${WEB_ORIGIN}/booking/${String(req.event_id)}/checkout/return?order=${String(req.order_id)}&pg=TOSS`;
-    expect(r.toss).toEqual({ client_key: 'test_ck_integration', customer_key: 'cust-key-1', order_id: req.order_id, order_name: '공연 티켓', amount: { krw: 88_000 }, success_url: url, fail_url: url });
+    expect(r.toss).toEqual({ client_key: 'test_ck_integration', customer_key: 'cust-key-1', order_id: req.order_id, order_name: '공연 티켓', amount: { krw: 88_000 }, success_url: url, fail_url: url, escrow_products: [] });
     expect(JSON.stringify(r)).not.toContain('test_sk_integration');
   });
 
