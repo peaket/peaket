@@ -794,6 +794,7 @@
 | R-699 | BAT-174 CI 흔들림(web / budgets Lighthouse 판정, S-T34 ④ 좌석맵 해석 시간 상한) | tools/web-checks/budgets limits.mjs·playwright.budgets.config.mjs, services/core-svc seatmap-worker pool.ts·parse-thread.ts, test-int/media-support.ts 시작 기다림, docs/features/seat-hold.md·docs/verification.md·ADR-0257 결정 5 | 계획·구현·시험·리뷰·검증 역할 분리(C, 정방향), 한도·상한은 넓히지 않음 | BAT-174 끝(단계 없음)·계획 12는 정리 목록 |
 | R-700 | realtime-gw Degraded 시험이 느린 CI 러너에서 벽시계 5초를 넘겨 다른 갈래 PR CI를 흔들었다 | services/realtime-gw/test/degraded.test.ts, docs/review/plans/W11-rtgw-flake.md | 계산량 줄이기와 두 시험만의 한도(W11-rtgw-flake) | 적용 |
 | R-701 | BAT-176 월렛 첫 화면 LCP만 web / budgets 임시 알림(소유자 결정 OPEN[52] (다)) | tools/web-checks/budgets limits.mjs·report.mjs·lighthouse.spec.mjs, docs/frontend.md §5.8·docs/devops.md ci-web.yml ④ | 계획·구현·시험·리뷰·검증 역할 분리(C, 정방향), 한도 7,255ms 그대로·한국 시각 2026-11-30 지나면 저절로 실패 | BAT-176 끝(단계 없음)·리뷰 지적 5·놓침 M7c·M7d는 정리 목록 |
+| R-704 | 서비스마다 gRPC 서버·종료가 따로였고 준비 프로브가 정본과 달랐으며 진단 수집·시간 초과 지표가 없었다 | packages/platform, services/*-svc/src/grpc-server.ts, deploy/charts/peaket-service, .github/workflows/ci-kind.yml, ADR-0303, docs/devops.md, docs/architecture.md, docs/observability.md, docs/review/plans/BAT-075.md | 공용 gRPC 서버·종료 차례·준비 프로브 5·3·6·진단 수집(BAT-075) | 적용 |
 
 ## 4. 숫자 일치표
 
