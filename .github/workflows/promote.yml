@@ -1,0 +1,119 @@
+# 승격 PR(docs/devops.md §5.3, ADR-0169, BUILD_ORDER BAS-140, 묶음 BAT-080 G7). 릴리스 봇이 부르거나 사람이 수동으로 돌린다.
+# - 같은 다이제스트만 쓴다. 이미지를 다시 빌드하지 않는다(tools/ci/promote-plan.mjs).
+# - 데모는 검사를 통과하면 자동 병합하고, 운영은 사람이 병합한다.
+# - 체크아웃 자격 증명을 남기지 않는다(persist-credentials: false). 가지·커밋·PR은 GitHub API로 만들고, 비밀은 PR 본문·로그에 싣지 않는다.
+name: promote
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: 승격 환경(demo 또는 prod)
+        required: true
+        type: string
+      tag:
+        description: 출시 태그(vX.Y.Z)
+        required: true
+        type: string
+      candidates:
+        description: 후보 다이제스트 목록 파일 경로(비우면 .cache/release-candidates.json)
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 승격 환경
+        required: true
+        type: choice
+        options: [demo, prod]
+      tag:
+        description: 출시 태그(vX.Y.Z)
+        required: true
+        type: string
+      candidates:
+        description: 후보 다이제스트 목록 파일 경로(비우면 .cache/release-candidates.json)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-${{ inputs.env }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: 도구 설치
+        run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+          pnpm install --frozen-lockfile
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: 승격 계획과 본문
+        env:
+          ENV_NAME: ${{ inputs.env }}
+          TAG: ${{ inputs.tag }}
+          CANDIDATES: ${{ inputs.candidates }}
+        run: |
+          set -euo pipefail
+          case "$ENV_NAME" in demo|prod) ;; *) echo "::error::승격 환경은 demo·prod다: $ENV_NAME"; exit 1 ;; esac
+          file="${CANDIDATES:-.cache/release-candidates.json}"
+          test -f "$file" || { echo "::error::후보 다이제스트 목록이 없다: $file"; exit 1; }
+          node tools/ci/promote-plan.mjs --env "$ENV_NAME" --tag "$TAG" --candidates "$file" --write \
+            --body "$RUNNER_TEMP/promote-body.md" --summary "$RUNNER_TEMP/promote-summary.json"
+      - name: 가지와 PR(같은 다이제스트만)
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ENV_NAME: ${{ inputs.env }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          branch="promote/${ENV_NAME}-${TAG}"
+          base=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/develop" --jq .object.sha)
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" > /dev/null 2>&1 || true
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$branch" -f sha="$base" > /dev/null
+          # 바뀐 배포 단위만 develop 위에 올린다. 다시 빌드하지 않고, 비밀 값을 본문·로그에 싣지 않는다
+          node -e "for (const c of require(process.env.RUNNER_TEMP + '/promote-summary.json').changed) console.log(c.file)" > "$RUNNER_TEMP/promote-files.txt"
+          while read -r path; do
+            [ -n "$path" ] || continue
+            content=$(base64 -w0 "$path")
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=develop" --jq .sha 2>/dev/null || true)
+            if [ -n "$sha" ]; then
+              gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/$path" \
+                -f message="chore(promote): $ENV_NAME $TAG" -f branch="$branch" -f content="$content" -f sha="$sha" > /dev/null
+            else
+              gh api -X PUT "repos/$GITHUB_REPOSITORY/contents/$path" \
+                -f message="chore(promote): $ENV_NAME $TAG" -f branch="$branch" -f content="$content" > /dev/null
+            fi
+          done < "$RUNNER_TEMP/promote-files.txt"
+          gh pr create --repo "$GITHUB_REPOSITORY" --base develop --head "$branch" \
+            --title "chore(promote): $ENV_NAME $TAG" --body-file "$RUNNER_TEMP/promote-body.md" > /dev/null
+          pr=$(gh pr view "$branch" --repo "$GITHUB_REPOSITORY" --json number --jq .number)
+          if [ "$ENV_NAME" = demo ]; then
+            # 데모는 검사를 통과하면 자동 병합한다. 운영은 사람이 병합한다
+            gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --squash --auto
+          fi

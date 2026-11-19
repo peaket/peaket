@@ -45,7 +45,9 @@ jobs:
       # example-svc 이미지·PostgreSQL·AWS 흉내 서버(peaket-local/svc/aws)와 실행기의 AWS CLI를 쓰고 이름공간 probes-e2e·diagnose-e2e를 따로 쓴다.
       # 증거 버킷은 diagnose 시험이 만든다. 결과 줄(docs/review/measurements 폴더의 BAT-075-probes.md·BAT-075-diagnose.md)은 커밋하지 않고 산출물로 올린다
       - run: node --test --test-timeout=900000 tools/local/e2e/probes.e2e.mjs
-      # BAT-075 진단 e2e 둘(heap·report 주석 → moto 증거 객체)은 BAT-080으로 넘김. OPEN 없음, 원인 미확인(moto 업로드 실패), 초안 PR peaket/peaket#36
+      # 진단 수집 e2e 둘(heap·report 주석 → moto 증거 객체, D-T18 ①, docs/infra.md RB-31, BAT-080 G1). 앞 단계가 만든 example-svc 이미지·moto를 쓰고
+      # 이름공간 diagnose-e2e와 버킷 peaket-diag-e2e를 스스로 만든다. 실패하면 아래 수집 단계가 파드 전·현재 로그·/diag 목록·버킷 전체·moto 로그를 남긴다
+      - run: node --test --test-timeout=900000 tools/local/e2e/diagnose.e2e.mjs
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -113,5 +115,25 @@ jobs:
           for ns in core purchase queue ticket trust web ops-breakglass observability envoy-gateway-system; do
             "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n "$ns" get networkpolicies,pods -o wide || true
           done
+          # 진단 수집 e2e(BAT-080 G1): 실패한 시험은 릴리스·파드를 지우지 않는다. 파드가 남아 있으면 전·현재 컨테이너 로그, 이벤트, 설명,
+          # /diag 목록(표시 파일·남은 보고서·스냅샷)을 남긴다. 첫 실행의 원인(예: moto 업로드 실패)을 이 로그로 가른다
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e get pods,events -o wide || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e describe pods || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e logs -l app.kubernetes.io/component=service --all-containers --tail=500 --prefix || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e logs -l app.kubernetes.io/component=service --all-containers --previous --tail=500 --prefix || true
+          for p in $("$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e get pods -l app.kubernetes.io/component=service -o name); do
+            "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e exec "$p" -- sh -c 'ls -la /diag; for f in /diag/*; do [ -f "$f" ] && { echo "== $f"; head -c 4000 "$f"; echo; }; done' || true
+          done
+          # helm 값·상태(릴리스 diag). 파드가 지워졌어도 어떤 값으로 떴는지 남긴다
+          h=$(node tools/local/tools.mjs helm | cut -d' ' -f2)
+          "$h" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e status diag || true
+          "$h" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e get values diag -a || true
+          "$h" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e get manifest diag || true
+          # 증거 버킷 전체 객체(moto). 흉내 서버 컨테이너 안에서 같은 서버에 물어 나열한다(포트 전달을 쓰지 않는다).
+          # 목록을 못 읽으면 그 사실만 남긴다
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n peaket-local exec deploy/aws -- \
+            python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/peaket-diag-e2e?list-type=2').read().decode())" || true
+          # moto 로그(AWS 흉내 서버). S3 업로드 거절의 원인을 가른다
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n peaket-local logs deploy/aws --tail=500 --prefix || true
       - if: ${{ always() }}
         run: node tools/local/cluster.mjs down || true
