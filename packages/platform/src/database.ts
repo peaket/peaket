@@ -43,7 +43,9 @@ function countStatementTimeouts(client: pg.PoolClient, onTimeout: () => void): v
   const marked = client as pg.PoolClient & { [COUNTED]?: true };
   if (marked[COUNTED]) return;
   marked[COUNTED] = true;
-  const query = client.query as (...args: unknown[]) => unknown;
+  // 원래 query는 부를 때마다 원형(prototype)에서 찾는다. 감싸 둘 때 함수를 잡아 두면 그 뒤 원형에 건 관찰(계측·시험의 spyOn)을 건너뛴다(BAT-075 CI)
+  const proto = Object.getPrototypeOf(client) as { query: (...args: unknown[]) => unknown };
+  const query = { apply: (self: unknown, args: unknown[]) => proto.query.apply(self, args) };
   (client as unknown as { query: (...args: unknown[]) => unknown }).query = function (this: unknown, ...args: unknown[]) {
     const last = args.length - 1;
     const callback = args[last];
