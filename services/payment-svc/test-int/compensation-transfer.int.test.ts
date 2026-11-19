@@ -31,9 +31,12 @@ type Answer = { transferId: string; status: 'REQUESTED' | 'PAID' | 'FAILED' | 'U
 class FakePort implements CompensationTransferPort {
   readonly requests: CompensationTransferRequest[] = [];
   answer: Answer = { transferId: 'tr_bat425_paid', status: 'PAID' };
+  /** RV-06: 겹친 두 요청이 포트에 닿는 차례를 실제로 만들기 위해 답을 붙잡는다 */
+  delayMs = 0;
   async request(input: CompensationTransferRequest): Promise<CompensationTransferRecord> {
     this.requests.push(input);
-    return { ...this.answer, compensationId: input.compensationId, orderId: input.orderId, accountId: input.accountId, amount: input.amount, accountLast4: input.accountNumber.slice(-4) };
+    if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    return { ...this.answer, compensationId: input.compensationId, orderId: input.orderId, accountId: input.accountId, amount: input.amount, accountLast4: input.accountNumber.replace(/-/g, '').slice(-4) };
   }
   async get(): Promise<undefined> {
     return undefined;
@@ -86,6 +89,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await database.pool.query('truncate compensation_transfer, receivable_move, partner_receivable');
   port.requests.length = 0;
+  port.delayMs = 0;
   port.answer = { transferId: 'tr_bat425_paid', status: 'PAID' };
 });
 
@@ -199,10 +203,28 @@ describe('J-T28 ② 계좌 미저장·유일', () => {
     expect(found).toEqual([]);
   });
 
-  test('J-T28 ②_같은_compensation_id의_겨친_두_요청도_유일_인덱스로_1행이다 [ASVS v5.0.0-2.3.4]', async () => {
+  test('J-T28 ②_같은_compensation_id의_겨친_두_요청은_유일_인덱스로_1행이고_결제사_포트도_한_번만_부른다 [ASVS v5.0.0-2.3.4]', async () => {
     const i = input();
+    // 두 요청이 행을 읽는 차례를 겹치게 한다(RV-06: 행 1개만 보면 포트 호출 2를 놓친다)
+    port.delayMs = 30;
     await Promise.all([service.request(i), service.request(i)]);
+    expect(port.requests).toHaveLength(1);
     expect(await transferRows()).toHaveLength(1);
     expect(await receivableRows()).toHaveLength(1);
+  });
+
+  // RV-05(높음): 계좌번호 원문을 그대로 자르면 '123-456-789'의 끝 4글자가 '-789'가 되어 DB CHECK(^[0-9]{1,4}$)에 걸린다.
+  // 지급대행이 PAID를 먼저 돌려준 뒤 저장이 실패하면 돈은 나갔는데 기록이 없다. 숫자만 남긴 끝 4자리를 저장해야 한다.
+  test('R-T47 ②_계좌_끝_4자리는_하이픈을_뺀_숫자다: 123-456-789는_6789로_저장되고_DB_CHECK를_지난다', async () => {
+    const i = input({ accountNumber: '123-456-789' });
+    const r = await service.request(i);
+    expect(r.accountLast4).toBe('6789');
+    const rows = await transferRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ account_last4: '6789', status: 'PAID' });
+    for (const table of ['compensation_transfer', 'partner_receivable']) {
+      const lines = (await database.pool.query(`select t::text as line from "${table}" t`)).rows as { line: string }[];
+      expect(lines.some((x) => x.line.includes('123-456-789') || x.line.includes('123456789'))).toBe(false);
+    }
   });
 });

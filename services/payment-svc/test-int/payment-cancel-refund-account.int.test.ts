@@ -178,8 +178,15 @@ async function portoneVirtualPaid(): Promise<{ paymentId: string; portonePayment
 }
 
 /** CancelPayment 답의 결과·누적 취소액(remaining_cancellable은 시뮬레이터 토스 모양에서 비어 견주지 않는다) */
-const cancel = async (paymentId: string, cancellationId: string, o: { amount?: number; account?: Record<string, string> } = {}) => {
-  const r = await unary(client!, 'CancelPayment', { payment_id: paymentId, cancellation_id: cancellationId, reason: '관객 취소', amount: { krw: o.amount ?? 25_000 }, ...(o.account ? { refund_account: o.account } : {}) });
+const cancel = async (paymentId: string, cancellationId: string, o: { amount?: number; account?: Record<string, string>; attempt?: number } = {}) => {
+  const r = await unary(client!, 'CancelPayment', {
+    payment_id: paymentId,
+    cancellation_id: cancellationId,
+    reason: '관객 취소',
+    amount: { krw: o.amount ?? 25_000 },
+    ...(o.attempt === undefined ? {} : { refund_attempt: o.attempt }),
+    ...(o.account ? { refund_account: o.account } : {}),
+  });
   return { result: r.result, cancelled_amount: r.cancelled_amount };
 };
 const ledger = async (paymentId: string) => (await admin.pool.query('select status, cancelled_amount from payment where id = $1', [paymentId])).rows[0] as { status: string; cancelled_amount: number };
@@ -369,6 +376,32 @@ describe('P-T73·P-T74 같은 취소 ID의 다시 부름과 계좌 [실제 Postg
     // 결제사(시뮬레이터) 쪽에는 첫 본문만 닿았다: 다른 계좌 본문이 멱등키 재사용으로 걸린 적이 없고 잔액도 그대로다
     expect(first[0]!.body).toMatchObject({ refundReceiveAccount: { bank: '88', accountNumber: ACCOUNT_DIGITS, holderName: HOLDER } });
     expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
+  });
+
+  test('P-T76 ② 계좌를 실은 시도(1)가 결과 모름으로 남은 뒤 계좌 없이 같은 시도를 다시 부르면 새 전송 0·조회 1로 정산하고 이중 환급이 없다 [ASVS v5.0.0-2.3.3]', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    // 결제사 커밋 뒤 끊김: 돈은 나갔고 payment_cancel은 REQUESTED(시도 1)로 남는다
+    expect((await control('POST', '/sim/faults', { op: 'cancel', times: 1, orderId: p.orderId, kind: 'drop', applied: true })).status).toBe(204);
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT, attempt: 1 })).toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN' });
+    expect(calls(`POST /v1/payments/${p.paymentKey}/cancel`).map((s) => s.status)).toEqual(['dropped']);
+    expect(await simBalance(p.paymentKey)).toBe(35_000);
+    const before = await admin.pool.query<{ idempotency_key: string; amount: number; expected_balance: number; status: string; attempt: number }>(
+      'select idempotency_key, amount, expected_balance, status, attempt from payment_cancel where payment_id = $1',
+      [p.paymentId],
+    );
+    expect(before.rows).toEqual([{ idempotency_key: `cancel-${cancellationId}-a1`, amount: 25_000, expected_balance: 60_000, status: 'REQUESTED', attempt: 1 }]);
+    sent.length = 0;
+
+    // RV-01(높음): purchase의 재시도는 계좌를 저장하지 않아 계좌 없이 온다. 같은 시도의 행이 있으면 거절이 아니라 조회로 정산해야 한다
+    expect(await cancel(p.paymentId, cancellationId, { attempt: 1 })).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
+    expect(calls('POST ')).toEqual([]);
+    expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+    const after = await admin.pool.query<{ status: string; attempt: number }>('select status, attempt from payment_cancel where payment_id = $1', [p.paymentId]);
+    expect(after.rows).toEqual([{ status: 'CANCELED', attempt: 1 }]);
+    expect(await ledger(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 25_000 });
+    // 새 전송이 없었으므로 돈은 첫 시도 한 번만 나갔다(이중 환급 0)
+    expect(await simBalance(p.paymentKey)).toBe(35_000);
   });
 
   test('P-T73 ② 결제사가 멱등키 재사용(IDEMPOTENCY_KEY_REUSED)으로 답하면 UNKNOWN이고 행은 진행 중(REQUESTED) 그대로다(FAILED 아님)', async () => {

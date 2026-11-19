@@ -500,6 +500,22 @@ describe('R-T42 ① 예매 취소의 지연 환급 계좌 다시 받기(202·404
     expect(state.paymentCalls).toHaveLength(1);
   });
 
+  // RV-03(높음): 첫 답이 CANCEL_PENDING이어도 같은 키의 재요청은 처음 202(REFUND_PENDING)를 재생해야 한다.
+  // 지금은 RequestRefundAccount가 idempotencyKey를 쓰지 않아 beginAttempt가 0행을 받고 409가 되며, 재시도마다 3회 상한을 갉아먹는다.
+  test('R-T42 ④_같은_Idempotency-Key는_첫_답이_CANCEL_PENDING이어도_같은_202를_재생하고_시도를_더_올리지_않는다', async () => {
+    const id = accountPending();
+    const key = randomUUID();
+    state.payment = 'PENDING';
+    const first = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
+    expect(first.statusCode, first.payload).toBe(202);
+    expect(JSON.parse(first.payload)).toEqual({ cancellationId: id, status: 'REFUND_PENDING', refundAmount: 30_000 });
+    const second = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
+    expect(second.statusCode, second.payload).toBe(202);
+    expect(JSON.parse(second.payload)).toEqual(JSON.parse(first.payload));
+    expect(state.accountStarts).toHaveLength(1);
+    expect(state.paymentCalls).toHaveLength(1);
+  });
+
   test('R-T42 ④_시도_3회를_넘으면(저장된_시도_3)_409이고_payment가_0이다', async () => {
     const id = accountPending({ refundAttempt: 3 });
     const r = await postAccount(id, REFUND_ACCOUNT, { token: accountToken().t });

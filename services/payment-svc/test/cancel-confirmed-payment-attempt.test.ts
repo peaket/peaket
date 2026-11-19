@@ -225,6 +225,25 @@ describe('P-T76 ① 앞 진행 중 행이 반영됐으면 새 전송 0', () => {
     expect(f.closes).toEqual([]);
   });
 
+  // RV-01(높음): 계좌를 실은 시도가 CANCEL_PENDING·UNKNOWN으로 남은 뒤의 재시도는 계좌를 저장하지 않으므로 계좌 없이 온다.
+  // 같은 시도의 행이 있으면 INVALID_ARGUMENT가 아니라 그 행의 멱등키로 조회·정산해야 한다(ADR-0316 결정 4, B9 '같은 시도의 재시도는 같은 멱등키').
+  // 지금 코드는 attempt > 0 && account === undefined를 행 조회보다 먼저 거절해, purchase가 5회를 다 쓰고 '환급 실패'로 끝낸다.
+  test('P-T76 ②_계좌_시도가_결과_모름으로_남은_뒤_계좌_없이_같은_시도를_다시_부르면_새_전송_0·조회_한_번으로_정산한다', async () => {
+    const f = fixture({ ownStatus: 'REQUESTED', begin: begun({ replay: true, record: { idemKey: `cancel-${CANCEL}-a1`, attempt: 1 } }), query: found(12_500), settleQuery: { status: 'APPLIED', cancelledAmount: 47_500 } });
+    await expect(run(f, { attempt: 1 })).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 47_500 });
+    expect(f.calls).toEqual(['find-own', 'begin', 'query', 'settle-own']);
+    expect(f.cancels).toHaveLength(0);
+    expect(f.closes).toEqual([]);
+    expect(f.marks).toEqual([]);
+  });
+
+  test('P-T76 ②_계좌_없이_온_새_시도인데_그_시도의_행이_없으면_지금처럼_계좌_필수로_거절한다', async () => {
+    const f = fixture();
+    await expect(run(f, { attempt: 1 })).rejects.toMatchObject({ field: 'refund_account' });
+    expect(f.begins).toHaveLength(0);
+    expect(f.cancels).toHaveLength(0);
+  });
+
   test('P-T76 ①_조회가_반영_아님이면_옛_행을_SUPERSEDED로_닫고_새_키로_한_번_보낸다', async () => {
     const f = fixture({ settlePrior: { status: 'RESEND' }, close: true, query: found(60_000), begin: begun({ record: { idemKey: `cancel-${CANCEL}-a1`, attempt: 1 } }) });
     await expect(run(f, { attempt: 1, account: ACCOUNT })).resolves.toEqual({ result: 'CANCELLED', cancelledAmount: 47_500 });
