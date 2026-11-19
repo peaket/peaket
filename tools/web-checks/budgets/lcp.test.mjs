@@ -44,6 +44,43 @@ test('BAT-177 T1 ② 표와 node의 차례를 뒤집어도 같은 값을 읽는�
   assert.deepEqual(readLcp(breakdown([NODE, TABLE])), readLcp(breakdown([TABLE, NODE])));
 });
 
+test('BAT-177 T1 ③ LCP 발견 경로와 그리기를 막는 자원도 기록 모양으로 읽는다', () => {
+  const audits = {
+    ...breakdown([TABLE, NODE]),
+    'lcp-discovery-insight': {
+      details: {
+        items: [
+          {
+            type: 'checklist',
+            items: {
+              a: { label: 'LCP 이미지를 미리 받지 않는다', value: true },
+              b: { label: { i18nId: 'lighthouse-core/audits/lcp-discovery|LCP 텍스트인가' }, value: false },
+            },
+          },
+        ],
+      },
+    },
+    'render-blocking-insight': {
+      details: { items: [{ url: 'https://peaket.example/static/app.css', totalBytes: 12345, wastedMs: 678 }] },
+    },
+  };
+  const lcp = readLcp(audits);
+  assert.deepEqual(
+    lcp.discovery,
+    [
+      { label: 'LCP 이미지를 미리 받지 않는다', value: true },
+      { label: 'LCP 텍스트인가', value: false },
+    ],
+    '발견 경로의 체크 목록을 라벨·값으로 읽는다',
+  );
+  assert.deepEqual(lcp.renderBlocking, [{ url: 'https://peaket.example/static/app.css', totalBytes: 12345, wastedMs: 678 }], '그리기를 막는 자원의 URL·바이트·지연을 읽는다');
+  // 진단 감사가 오류면 null로 두고 LCP 기록은 잃지 않는다
+  const broken = readLcp({ ...breakdown([TABLE, NODE]), 'lcp-discovery-insight': { errorMessage: 'x' }, 'render-blocking-insight': { errorMessage: 'y' } });
+  assert.equal(broken.discovery, null);
+  assert.equal(broken.renderBlocking, null);
+  assert.deepEqual(broken.phases, PHASES);
+});
+
 test('BAT-177 T2 ① LCP 분해가 없거나 오류면 null을 돌려주고 던지지 않는다', () => {
   const cases = [
     undefined,

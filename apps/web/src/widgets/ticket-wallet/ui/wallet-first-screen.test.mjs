@@ -75,3 +75,36 @@ test('BAT-177 T6 ③ QR·오프라인 덩어리는 load 뒤에 한 번 받고 �
   // 오프라인 배너(서비스 워커 등록)는 Wallet의 게으른 조각으로 그려진다
   assert.match(wallet, /<OfflineBannerLazy/, '서비스 워커 등록 조각도 load 뒤로 밀린다');
 });
+
+test('BAT-177 T6 ④ QR 뼈대 PNG의 IHDR 폭·높이는 312×156이다', () => {
+  const qrSkeleton = read(join(here, 'qr-skeleton.ts'));
+  const match = /'(data:image\/png;base64,[A-Za-z0-9+/=]+)'/.exec(qrSkeleton);
+  assert.ok(match, 'WALLET_QR_SKELETON이 data URI다');
+  const bytes = Buffer.from(match[1].slice('data:image/png;base64,'.length), 'base64');
+  // PNG: 서명 8바이트 → IHDR 길이(4) → 'IHDR'(4) → 폭(4) → 높이(4)
+  assert.equal(bytes.subarray(12, 16).toString('latin1'), 'IHDR', 'IHDR 청크가 있다');
+  assert.equal(bytes.readUInt32BE(16), 312, 'IHDR 폭이 312다');
+  assert.equal(bytes.readUInt32BE(20), 156, 'IHDR 높이가 156이다');
+});
+
+test('BAT-177 T6 ⑤ QR·오프라인 조각은 정적 import하지 않고 load 전에는 fallback만 그린다', () => {
+  const walletClient = read(join(here, 'WalletClient.tsx'));
+  // DeviceQr·OfflineBanner는 import type만 허용한다(값을 정적으로 가져오면 첫 JS에 든다)
+  const staticImports = [...walletClient.matchAll(/^import\s+(.+?)\s+from\s+'([^']+)';$/gm)].filter(([, , path]) =>
+    /\/(?:DeviceQr|OfflineBanner)$/.test(path),
+  );
+  assert.equal(staticImports.length, 2, '두 조각은 정적 import가 타입 둘뿐이다');
+  for (const [, clause, path] of staticImports) assert.match(clause, /^type\b/, `${path}는 type import만 한다`);
+  assert.doesNotMatch(walletClient, /<DeviceQr[\s>]/, 'DeviceQr를 직접 그리지 않는다');
+  assert.doesNotMatch(walletClient, /<OfflineBanner[\s>]/, 'OfflineBanner를 직접 그리지 않는다');
+  // 받기 전에는 fallback(QR)과 자리(오프라인 배너)만 그린다
+  assert.match(walletClient, /useState<ComponentType<P> \| null>\(null\)/, '처음에는 조각이 없다');
+  assert.match(walletClient, /export function DeviceQrLazy[\s\S]*?if \(!Component\) return <>\{fallback\}<\/>;/, 'QR은 load 전에 fallback만 그린다');
+  assert.match(
+    walletClient,
+    /export function OfflineBannerLazy[\s\S]*?if \(!Component\) return <div style=\{\{ height: 40 \}\} aria-hidden="true" \/>;/,
+    '오프라인 배너는 load 전에 자리만 잡는다',
+  );
+  // 동적 import를 부르는 곳은 afterLoad 콜백 하나뿐이다(T6 ③과 겹쳐 확인)
+  assert.equal(walletClient.match(/void load\(\)/g)?.length, 1);
+});

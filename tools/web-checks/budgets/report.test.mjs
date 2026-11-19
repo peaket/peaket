@@ -124,6 +124,24 @@ test('BAT-177 T4 ② LCP 분해가 없는 옛 기록은 표에서 빼고, 모두
   assert.match(report, /\| 월렛 \| 월렛 \| 6990 \/ 7255 \| 0\.020 \/ 0\.1 \| 90 \/ 200 \| 한도 안 \|/);
 });
 
+test('BAT-177 T4 ③ LCP 분해 표는 기록을 화면 이름 차례로 늘어놓는다', async () => {
+  const { lcpTable } = await import('./report.mjs');
+  const home = {
+    ...WALLET,
+    name: '홈',
+    row: '홈·공연 상세·굿즈(ISR)',
+    lcpSummary: { ...WALLET.lcpSummary, run: 4, lcpMs: 5800, element: { ...WALLET.lcpSummary.element, selector: 'h1.hero' } },
+  };
+  // 이름 차례([월렛, 홈])와 반대로 넣어 정렬을 본다
+  const input = [home, WALLET];
+  const expected = input.map((r) => r.name).sort((a, b) => a.localeCompare(b));
+  assert.notDeepEqual(input.map((r) => r.name), expected, '넣은 차례와 이름 차례가 다르다');
+  const got = lcpTable(input)
+    .slice(2)
+    .map((line) => cellsOf(line)[0]);
+  assert.deepEqual(got, expected, '화면 이름 차례로 늘어놓는다');
+});
+
 const WALLET_WARN = {
   ...WALLET,
   lcpSummary: null,

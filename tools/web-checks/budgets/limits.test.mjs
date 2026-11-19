@@ -240,6 +240,18 @@ test('BAT-177 T8 ① 한도 7,255ms·기준선 5,804ms·RUNS 5·여유는 그대
   assert.deepEqual(LOAD_MARGIN, { ms: 0.25, cls: 0.02 });
 });
 
+test('BAT-177 T7 ⑥ spec의 경고 분기는 continue로 끝나 월렛 초과를 expect.soft로 보내지 않는다', () => {
+  const spec = stripComments(readFileSync(new URL('./lighthouse.spec.mjs', import.meta.url), 'utf8'));
+  const start = spec.indexOf("if (verdict[k] === 'warn')");
+  const assertAt = spec.indexOf('expect.soft(got[k]', start);
+  assert.ok(start >= 0 && assertAt > start, '경고 분기 뒤에 지표 판정이 있다');
+  const branch = spec.slice(start, assertAt);
+  assert.match(branch, /warnOnly\.find\(/, '경고 사유를 찾는다');
+  assert.match(branch, /warnLine\(text\)/, '잡 로그에 경고 줄을 남긴다');
+  assert.match(branch, /continue;/, '경고는 실패 갈래로 가지 않고 다음 지표로 넘어간다');
+  assert.equal(spec.match(/expect\.soft\(got\[k\], msg\)\.toBeLessThanOrEqual\(limit\[k\]\);/g)?.length, 1, '경고가 아닌 지표만 한도와 견준다');
+});
+
 test('BAT-177 T9 ① 월렛 CLS·총 차단 시간과 다른 일곱 화면의 세 지표는 경고 없이 실패다', () => {
   const now = at('2026-11-19T12:00:00+09:00');
   const pages = lighthousePages('h').map((p) => p.name);
@@ -265,6 +277,33 @@ test('BAT-177 T9 ① 월렛 CLS·총 차단 시간과 다른 일곱 화면의 �
   assert.equal(loadVerdict({ ...WALLET_LCP_OVER, metric: 'LCP', now }).verdict, 'fail');
 });
 
+test('BAT-177 T9 ③ spec은 모든 화면 × 세 지표를 판정하고 지표 loop에서 화면별로 건너뛰지 않는다', () => {
+  const spec = stripComments(readFileSync(new URL('./lighthouse.spec.mjs', import.meta.url), 'utf8'));
+  const loopStart = spec.indexOf('for (const [k, ko, fmt, unit] of METRICS) {');
+  assert.ok(loopStart >= 0, '지표 판정 loop가 있다');
+  // 중괄호 균형으로 loop 본문을 꺼낸다(템플릿 리터럴의 ${}도 서로 상쇄된다)
+  let depth = 0;
+  let loopEnd = -1;
+  for (let i = spec.indexOf('{', loopStart); i < spec.length; i++) {
+    if (spec[i] === '{') depth += 1;
+    else if (spec[i] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        loopEnd = i;
+        break;
+      }
+    }
+  }
+  assert.ok(loopEnd > loopStart, '지표 loop의 끝을 찾는다');
+  const body = spec.slice(loopStart, loopEnd + 1);
+  assert.equal(body.match(/continue;/g)?.length, 1, '지표 loop의 continue는 경고 분기 하나뿐이다');
+  assert.doesNotMatch(body, /if \(page\.name/, '화면 이름으로 지표 판정을 건너뛰지 않는다');
+  assert.match(body, /if \(verdict\[k\] === 'warn'\) \{[\s\S]*?continue;[\s\S]*?\}/, '경고인 지표만 건너뛴다');
+  assert.match(body, /expect\.soft\(got\[k\], msg\)\.toBeLessThanOrEqual\(limit\[k\]\);/, '나머지 지표는 한도와 견준다');
+  // 세 지표를 모두 돈다
+  for (const key of ['lcpMs', 'cls', 'tbtMs']) assert.ok(spec.includes(`['${key}',`), `METRICS에 ${key}가 있다`);
+});
+
 test('BAT-177 T10 ① /my/tickets 첫 JS 한도는 161.6kB이고 js.spec이 그 한도로 막는다', () => {
   const budget = loadJsBudgets().get('월렛');
   assert.equal(budget, 120, "§5.8 월렛 행의 첫 JS 예산은 120KB [가정]");
@@ -274,4 +313,13 @@ test('BAT-177 T10 ① /my/tickets 첫 JS 한도는 161.6kB이고 js.spec이 그 
   const spec = readFileSync(new URL('./js.spec.mjs', import.meta.url), 'utf8');
   assert.match(spec, /const limit = jsLimit\(budget, baseline\[key\]\)/);
   assert.match(spec, /expect\(kb,[\s\S]{0,300}\)\.toBeLessThanOrEqual\(limit\)/);
+});
+
+test('BAT-177 T10 ② js.spec.mjs는 jsLimit를 곱하거나 더하지 않고 그대로 한도로 쓴다', () => {
+  const spec = readFileSync(new URL('./js.spec.mjs', import.meta.url), 'utf8');
+  assert.match(spec, /const budget = budgets\.get\(page\.row\);/, '예산은 §5.8에서 읽는다');
+  assert.match(spec, /const limit = jsLimit\(budget, baseline\[key\]\);/, '한도는 jsLimit 결과를 그대로 쓴다');
+  assert.doesNotMatch(spec, /jsLimit\([^)]*\)\s*[-+*/%]/, '한도에 산술 접미사를 붙이지 않는다');
+  assert.doesNotMatch(spec, /limit\s*[-+*/%]\s*\d/, '한도를 곱하거나 더해 비교하지 않는다');
+  assert.match(spec, /expect\(kb,[\s\S]{0,300}\)\.toBeLessThanOrEqual\(limit\)/, '그 한도로 kb를 막는다');
 });
