@@ -796,6 +796,7 @@
 | R-701 | BAT-176 월렛 첫 화면 LCP만 web / budgets 임시 알림(소유자 결정 OPEN[52] (다)) | tools/web-checks/budgets limits.mjs·report.mjs·lighthouse.spec.mjs, docs/frontend.md §5.8·docs/devops.md ci-web.yml ④ | 계획·구현·시험·리뷰·검증 역할 분리(C, 정방향), 한도 7,255ms 그대로·한국 시각 2026-11-30 지나면 저절로 실패 | BAT-176 끝(단계 없음)·리뷰 지적 5·놓침 M7c·M7d는 정리 목록 |
 | R-704 | 서비스마다 gRPC 서버·종료가 따로였고 준비 프로브가 정본과 달랐으며 진단 수집·시간 초과 지표가 없었다 | packages/platform, services/*-svc/src/grpc-server.ts, deploy/charts/peaket-service, .github/workflows/ci-kind.yml, ADR-0303, docs/devops.md, docs/architecture.md, docs/observability.md, docs/review/plans/BAT-075.md | 공용 gRPC 서버·종료 차례·준비 프로브 5·3·6·진단 수집(BAT-075) | 적용 |
 | R-703 | 입장 토큰을 게이트웨이가 확인하지 않았고(공개키 묶음 배포 없음), purchase-svc는 정적 묶음만 읽었으며, queue-svc·purchase-svc 배포 단위가 없었다(HOT-400 나머지, PRF-110·PRF-137·PRF-050) | deploy/gateways(공통 Lua 입장 토큰 확인·EnvoyProxy 환경 값·gw-fan-buy-edge·www 403 고치기), services/queue-svc(묶음 끝점·키 교체 설정·끝 시각 꼴), services/purchase-svc(주기 읽기·받기 전 503), deploy/workloads, deploy/platform/mesh, docs/api/openapi.yaml, ADR-0288 | 정방향 A 묶음(계획·구현·독립 시험·리뷰 세 바퀴·리뷰 반영·검증), 리뷰 R057-1~10 모두 고침, 틀린 구현 113번 중 108 잡힘(M45 남는 차이) | 완료(로컬 단위·정적·kind·T1·T2 통과, 다시 쌓은 트리 전체는 초안 PR CI) |
+| R-705 | BAT-013 기록·장부·진행 상태를 맞춘다 | docs/PROGRESS.md, docs/BUILD_ORDER.md, docs/review/ledger | 장부 재생성·단계 체크·진행 로그 | 완료 |
 
 ## 4. 숫자 일치표
 
