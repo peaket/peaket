@@ -692,6 +692,15 @@ test('공용 차트는 모든 템플릿 맨 위 if 조건을 켜는 CI 값 파�
   assert.ok(values.name.length > 0);
 });
 
+test('RV-21 trivy 차트 값 파일은 externalSecret.environment를 채운다(차트가 required로 묻는다)', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const ROOT = join(HERE, '..', '..');
+  const ci = YAML.parse(readFileSync(join(ROOT, 'tools', 'ci', 'trivy-chart-values.yaml'), 'utf8'));
+  // BAT-080 RV-01·RV-21: externalsecret.yaml이 externalSecret.environment를 required로 묻고 remoteRef 경로 앞에 붙인다.
+  // 이 값이 없거나 비면 scan-tools의 helm 렌더가 멈춰 차트 취약점 검사가 통째로 건너뛰어진다.
+  assert.equal(typeof ci.externalSecret?.environment, 'string', 'trivy-chart-values.yaml이 externalSecret.environment를 채우지 않는다');
+  assert.notEqual(ci.externalSecret.environment.trim(), '', 'trivy-chart-values.yaml의 externalSecret.environment가 비었다');
+});
+
 test('공용 차트의 CI 값 파일은 템플릿의 required 값을 모두 채우고 fail 조건에 걸리지 않는다(다시 보기 1)', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const ROOT = join(HERE, '..', '..');
   const chart = join(ROOT, 'deploy', 'charts', 'peaket-service');
