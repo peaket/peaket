@@ -193,6 +193,21 @@ function productOf(r: Row): OrderableProduct {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/**
+ * PostgreSQL 오류 코드(SQLSTATE). Drizzle 0.44는 드라이버 오류를 `DrizzleQueryError`로 감싸므로
+ * 실제 코드가 `cause`에 있다. 직접 `code`와 `cause` 사슬을 차례로 본다(다른 오류는 그대로 던진다).
+ */
+function isUniqueViolation(e: unknown): boolean {
+  let cur: unknown = e;
+  for (let depth = 0; depth < 5; depth++) {
+    if (typeof cur !== 'object' || cur === null) return false;
+    const code = (cur as { code?: unknown }).code;
+    if (code === '23505') return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 /** 커서: 주문 시각(ms):주문 ID */
 const encodeCursor = (o: ShopOrder): string => Buffer.from(`${o.orderedAt.getTime()}:${o.orderId}`).toString('base64url');
 const decodeCursor = (c: string): { at: number; id: string } | undefined => {
@@ -745,7 +760,7 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
         try {
           for (const id of ids) await tx.execute(sql`insert into merch_refund_item (refund_id, item_id) values (${i.refundId}, ${id})`);
         } catch (e) {
-          if ((e as { code?: unknown }).code === '23505') throw merchCancelNotAllowed();
+          if (isUniqueViolation(e)) throw merchCancelNotAllowed();
           throw e;
         }
         const refund: RefundRow = {
