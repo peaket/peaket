@@ -29,7 +29,7 @@
 | D-T15 | — | 옛 HTML을 연 탭이 새 배포 뒤 자산을 요청 | 옛 정적 자산이 그대로 응답되고(404 없음), 클라이언트 탐색에서는 `deploymentId`가 달라 페이지 전체를 새로 고친다 | 빈칸 | B | — |
 | D-T16 | — | `ttl` 6시간이 지난 스테이징 스택 | 다음 정리 실행 때 삭제된다. 삭제가 실패하면 SEV2 경보가 난다 | 빈칸 | B | — |
 | D-T17 | — | 오픈 시각을 수요일 04:10(KST)으로 등록 | 오픈 간격 규칙 검사와 같은 자리에서 거부된다(관리형 유지보수 창) | 빈칸 | B | — |
-| D-T18 | ① | 로컬 kind에서 파드 하나에 peaket.io/diagnose=hea… | ① 그 파드가 준비 상태를 내리고 진행 중인 요청을 마친다. 그 뒤 진단 보고서와 힙 스냅샷을 증거 저장소(AWS 흉내 서버 moto의 S3)에 올리고 다시… | 자동 시험 | B | 시험: packages/platform/test/diagnose.test.ts, tools/local/chart.test.mjs 외 1곳 |
+| D-T18 | ① | 로컬 kind에서 파드 하나에 peaket.io/diagnose=hea… | ① 그 파드가 준비 상태를 내리고 진행 중인 요청을 마친다. 그 뒤 진단 보고서와 힙 스냅샷을 증거 저장소(AWS 흉내 서버 moto의 S3)에 올리고 다시… | 자동 시험 | B | 시험: packages/platform/test/diagnose.test.ts, packages/platform/test/evidence-store.test.ts 외 2곳 |
 | D-T18 | ② | 로컬 kind에서 파드 하나에 peaket.io/diagnose=hea… | ② `--disable-sigusr1`이 없는 Node 파드는 Kyverno가 거부한다(Kyverno 정책은 BUILD_ORDER BAS-150. … 로 나눈… | 다른 단계 | B | BAS-150 · `--disable-sigusr1`이 없는 Node 파드를 거부하는 Kyverno 정책은 Kyverno CEL 정책 단계(BUILD_ORDER BAS-150, 묶음 BAT-085)가 만든다… |
 | D-T19 | ① | 서비스 템플릿의 준비 조건에 Redis 호출을 넣은 판과, 정상 판에서… | ① 앞의 판은 템플릿 시험이 실패해 PR이 막힌다. … 로 나누고 | 자동 시험 | B | 시험: packages/platform/test/control.test.ts, packages/platform/test/readiness-deps.test.ts |
 | D-T19 | ② | 서비스 템플릿의 준비 조건에 Redis 호출을 넣은 판과, 정상 판에서… | ② 정상 판은 Redis가 멈춰도 준비 상태가 그대로이고 생존 프로브 재시작은 0이다. 요청에는 즉시 실패나 대체 경로로 답한다. … 로 나누고 | 자동 시험 | B | 시험: packages/platform/test-int/probes.int.test.ts |
