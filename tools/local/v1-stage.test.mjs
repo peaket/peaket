@@ -239,8 +239,12 @@ test('PRF215_합본값파일은_복제3·Lease둘·서비스포트(V1_PORTS와�
   assert.equal(env.NODE_EXTRA_CA_CERTS, `${V1_PATHS.redisCaDir}/ca.crt`);
   assert.equal(env.OTEL_SERVICE_NAME, 'bundle');
   const mounts = Object.fromEntries(c.volumeMounts.map((m) => [m.name, m.mountPath]));
-  assert.deepEqual(mounts, { tmp: '/tmp', 'bundle-env': V1_PATHS.envDir, 'redis-tls': V1_PATHS.redisCaDir, seatmaps: V1_PATHS.seatmapDir, 'batch-results': V1_PATHS.batchResultDir });
+  // 진단 수집 볼륨 둘(/diag·주석 파일)은 공용 차트가 늘 붙인다(ADR-0070 결정 1, ADR-0303 결정 3, chart.test.mjs PRF215와 같은 고침)
+  assert.deepEqual(mounts, { tmp: '/tmp', diag: '/diag', podinfo: '/etc/podinfo', 'bundle-env': V1_PATHS.envDir, 'redis-tls': V1_PATHS.redisCaDir, seatmaps: V1_PATHS.seatmapDir, 'batch-results': V1_PATHS.batchResultDir });
   const vols = Object.fromEntries(spec.volumes.map((v) => [v.name, v]));
+  // /diag 크기 한도는 메모리 한도의 두 배 [가정]
+  assert.deepEqual(vols.diag, { name: 'diag', emptyDir: { sizeLimit: `${Number(/^(\d+)Mi$/.exec(c.resources.limits.memory)[1]) * 2}Mi` } });
+  assert.deepEqual(vols.podinfo.downwardAPI.items, [{ path: 'annotations', fieldRef: { fieldPath: 'metadata.annotations' } }]);
   assert.equal(vols['bundle-env'].secret.secretName, 'v1-bundle-env');
   assert.equal(vols.seatmaps.hostPath.path, V1_HOST_DIRS.seatmaps);
   assert.equal(vols['batch-results'].hostPath.path, V1_HOST_DIRS.batchResults);
