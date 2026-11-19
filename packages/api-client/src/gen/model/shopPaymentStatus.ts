@@ -23,7 +23,7 @@ export interface ShopPaymentStatus {
      * @nullable
      */
   stockReservedUntil?: string | null;
-  /** 가상계좌 입금 안내(입금 대기일 때만). 입금처 번호라 구매자의 계좌가 아니다. 입금 확정·만료 뒤에는 칸이 없다(authz-matrix §4.1 '결제 상태', data.md payment.virtual_account_no) */
+  /** 가상계좌 입금 안내(입금 대기일 때만). 입금처 번호라 구매자의 계좌가 아니다. 입금 확정·만료 뒤에는 칸이 없다(authz-matrix §4.1 '결제 상태', data.md payment.virtual_account_no). payment-svc GetPayment 읽기가 일시 실패하면 AWAITING_DEPOSIT이 아니라 계좌 없는 ACCEPTED로 답해 화면이 계속 묻는다(값을 모르는 채 입금 대기로 끝내지 않는다, BAT-605, ADR-0314, P-T60 ⑤) */
   virtualAccount?: ShopPaymentStatusVirtualAccount;
   /** FAILED일 때 실패 범주(payment §4). 결제사 오류 원문은 싣지 않는다 */
   reason?: string;

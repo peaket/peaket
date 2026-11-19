@@ -2518,7 +2518,7 @@ components:
         stockReservedUntil: { type: [string, 'null'], format: date-time, description: "한정 재고 상품의 재고 예약이 끝나는 지금 시각(접수 뒤 승인 기한까지 늘어난 값). 한정 재고가 아니면 null" }
         virtualAccount:
           type: object
-          description: "가상계좌 입금 안내(입금 대기일 때만). 입금처 번호라 구매자의 계좌가 아니다. 입금 확정·만료 뒤에는 칸이 없다(authz-matrix §4.1 '결제 상태', data.md payment.virtual_account_no)"
+          description: "가상계좌 입금 안내(입금 대기일 때만). 입금처 번호라 구매자의 계좌가 아니다. 입금 확정·만료 뒤에는 칸이 없다(authz-matrix §4.1 '결제 상태', data.md payment.virtual_account_no). payment-svc GetPayment 읽기가 일시 실패하면 AWAITING_DEPOSIT이 아니라 계좌 없는 ACCEPTED로 답해 화면이 계속 묻는다(값을 모르는 채 입금 대기로 끝내지 않는다, BAT-605, ADR-0314, P-T60 ⑤)"
           properties:
             bank: { type: string }
             accountNumber: { type: string }
@@ -5816,13 +5816,13 @@ paths:
         '202': { description: "접수(결제사 취소는 응답 밖)", content: { application/json: { schema: { $ref: '#/components/schemas/Cancellation' } } } }
         '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류, 모르는 칸" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "로그인 필요" }
-        '403': { $ref: '#/components/responses/Problem', description: "refundAccount를 보냈는데 재인증이 없거나 만료·재사용(reauth-required)" }
+        '403': { $ref: '#/components/responses/Problem', description: "refundAccount를 보냈는데 재인증이 없거나 만료·재사용(reauth-required). 재인증 토큰은 같은 세션·계정이고 작업 묶음 FAN_HIGH_RISK·받는 쪽 작업 SHOP_CANCEL_REFUND_ACCOUNT여야 하며 한 번만 쓴다(BAT-605, ADR-0293·ADR-0315, P-T63 ②)" }
         '404': { $ref: '#/components/responses/Problem', description: "없는 주문이거나 이 계정 묶음의 주문이 아니다, 또는 itemIds에 이 주문의 항목이 아닌 값이 있다(not-found)" }
         '409': { $ref: '#/components/responses/Problem', description: "이미 보냈거나 받은 상품, 결제 전 주문(merch-cancel-not-allowed), 연결 회차의 입장이 시작된 부가 상품(entry-started), 구매 확정 전 에스크로 주문의 일부 취소(escrow-partial-not-allowed)" }
         '415': { $ref: '#/components/responses/Problem', description: "application/json이 아닌 본문" }
         '422': { $ref: '#/components/responses/Problem', description: "가상계좌 결제인데 refundAccount가 없다(refund-account-required), 결제사가 계좌를 거절했다(입력 칸 다시 받음)" }
         '429': { $ref: '#/components/responses/TooManyRequests', description: "요청 한도 초과" }
-        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "결제 서비스를 잠시 쓸 수 없다(dependency-unavailable)" }
+        '503': { $ref: '#/components/responses/ServiceUnavailable', description: "reauth-unavailable: 재인증 토큰을 확인하지 못함(팬 공개키 묶음을 한 번도 받지 못함, jti 기록 저장소 오류). 아무것도 쓰지 않는다. Retry-After 5초 [가정]. dependency-unavailable: 결제 원장(가상계좌였는지)을 읽지 못함. 환급 행·항목 전이·결제사 취소가 0이다(BAT-605, ADR-0314·ADR-0315, P-T63 ②)" }
   /v1/shop/orders/{orderId}/returns:
     post:
       operationId: createShopOrderReturn
@@ -5840,7 +5840,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: "본문 형식 오류, 모르는 칸" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "로그인 필요" }
         '404': { $ref: '#/components/responses/Problem', description: "없는 주문이거나 이 계정 묶음의 주문이 아니다, 또는 itemIds에 이 주문의 항목이 아닌 값이 있다(not-found)" }
-        '409': { $ref: '#/components/responses/Problem', description: "반품할 수 없는 상태이거나 기한이 지난 항목이 있다(merch-return-not-allowed, 줄마다의 기한은 items[].returnDueAt), 구매 확정 전 에스크로 주문의 일부 반품(escrow-partial-not-allowed)" }
+        '409': { $ref: '#/components/responses/Problem', description: "반품할 수 없는 상태이거나 기한이 지난 항목이 있다(merch-return-not-allowed, 줄마다의 기한은 items[].returnDueAt·defectReturnDueAt. SHIPPED는 수취 거부로 받고 READY·SHIPPED 이외의 배송 전 항목은 받지 않는다), 입장이 시작된 부가 상품에 단순 변심을 보냄(같은 merch-return-not-allowed, 이상·다름만 받는다), 구매 확정 전 에스크로 주문의 일부 반품(escrow-partial-not-allowed). BAT-605, ADR-0315, P-T62" }
         '415': { $ref: '#/components/responses/Problem', description: "application/json이 아닌 본문" }
         '429': { $ref: '#/components/responses/TooManyRequests', description: "요청 한도 초과" }
   # ── 4. 티켓 ──────────────────────────────────────────────────

@@ -18,7 +18,7 @@ export const ShopPaymentStatus = zod.object({
   "bank": zod.string().optional(),
   "accountNumber": zod.string().optional(),
   "dueAt": zod.iso.datetime({"offset":true}).optional()
-}).optional().describe('가상계좌 입금 안내(입금 대기일 때만). 입금처 번호라 구매자의 계좌가 아니다. 입금 확정·만료 뒤에는 칸이 없다(authz-matrix §4.1 \'결제 상태\', data.md payment.virtual_account_no)'),
+}).optional().describe('가상계좌 입금 안내(입금 대기일 때만). 입금처 번호라 구매자의 계좌가 아니다. 입금 확정·만료 뒤에는 칸이 없다(authz-matrix §4.1 \'결제 상태\', data.md payment.virtual_account_no). payment-svc GetPayment 읽기가 일시 실패하면 AWAITING_DEPOSIT이 아니라 계좌 없는 ACCEPTED로 답해 화면이 계속 묻는다(값을 모르는 채 입금 대기로 끝내지 않는다, BAT-605, ADR-0314, P-T60 ⑤)'),
   "reason": zod.string().optional().describe('FAILED일 때 실패 범주(payment §4). 결제사 오류 원문은 싣지 않는다'),
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional().describe('결제 접수에서 고정된 결제사(ADR-0044)')
 }).describe('굿즈 결제 결과(GET /v1/shop/orders/{orderId}/payment-status). 티켓 PaymentStatus와 같은 뜻의 칸이고 상태 값만 굿즈 상태도에 맞춘다(docs/planning/03 §2.13). UNKNOWN은 결제사 답을 아직 모르는 동안이다(결제 원장 상태). 재고 예약이 끝난 주문은 이 응답 대신 409 order-expired다')
