@@ -5,6 +5,7 @@
 // 휴대폰은 대화상자 대신 아래 시트로 연다(보드 SCR-020-m·062-m).
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { renderLinkOrAnchor, type RenderLink } from "../../lib/link";
+import { SkipLink } from "../SkipLink";
 import { useFocusTrap } from "./focus-trap";
 
 export type PartnerRole = "partner_admin" | "partner_member";
@@ -135,12 +136,7 @@ export function PartnerShell({
         "max-md:[&_.page-head_h1]:text-[20px] max-md:[&_.page-head_h1]:leading-[28px]",
       ].join(" ")}
     >
-      <a
-        className="sr-only focus:not-sr-only focus:!absolute focus:!left-2 focus:!top-2 focus:!z-[300] focus:!rounded-[var(--r-md)] focus:!bg-[var(--surface-raised)] focus:!p-2"
-        href="#main"
-      >
-        본문 바로가기
-      </a>
+      <SkipLink />
       <header className="ps-top relative max-lg:min-h-14 max-lg:gap-1 max-lg:pl-1 max-lg:pr-2">
         <button
           className="icon-btn lg:hidden"

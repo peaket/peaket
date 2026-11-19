@@ -1,6 +1,7 @@
 // 셸 없는 가운데 카드 틀(보드 SCR-020-m·t·d). 휴대폰은 카드 없이 바탕(surface) 위에 바로(바깥 여백 32·16·40, 사이 24),
 // 태블릿·데스크톱은 바탕(surface-basement) 가운데 카드(폭 440, 초대 수락 480·lg 520, 안쪽 여백 32).
 import type { ReactNode } from 'react';
+import { SkipLink } from '@peaket/ds/SkipLink';
 import { cx } from '@/shared/lib/cx';
 
 export interface AuthFrameProps {
@@ -19,12 +20,7 @@ export interface AuthFrameProps {
 export function AuthFrame({ dark, titleId, wide = false, gap = 20, children, after }: AuthFrameProps) {
   return (
     <div className={cx('pk min-h-dvh bg-[var(--surface)] md:bg-[var(--surface-basement)]', dark && 'dark')}>
-      <a
-        className="sr-only focus:not-sr-only focus:!absolute focus:!left-2 focus:!top-2 focus:!z-[300] focus:!rounded-[var(--r-md)] focus:!bg-[var(--surface-raised)] focus:!p-2"
-        href="#main"
-      >
-        본문 바로가기
-      </a>
+      <SkipLink />
       <main
         id="main"
         tabIndex={-1}

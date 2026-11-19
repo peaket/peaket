@@ -14,6 +14,7 @@ import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent as Rea
 import { cx } from "../../lib/cx";
 import { renderLinkOrAnchor, type RenderLink, type RenderLinkProps } from "../../lib/link";
 import { focusableIn, useFocusTrap, useOutsidePress } from "./focus-trap";
+import { SkipLink } from "../SkipLink";
 import { LogoutDialog } from "./LogoutDialog";
 import { WebFooter, type WebFooterHrefs } from "./WebFooter";
 import { WebSearchBox, type WebSearchPopup, type WebSearchSuggestion } from "./WebSearchBox";
@@ -267,12 +268,7 @@ export function WebShell({
 
   return (
     <div className={cx("pk page min-h-dvh", dark && "dark", className)}>
-      <a
-        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[300] focus:rounded-(--r-md) focus:bg-(--surface-raised) focus:px-3 focus:py-2 focus:shadow-lg"
-        href="#main"
-      >
-        본문 바로가기
-      </a>
+      <SkipLink />
       {banner}
 
       {variant === "default" && (
