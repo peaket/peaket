@@ -3,11 +3,12 @@
 // 결제 접수의 한정 재고 차감은 상품 ID 차례로 product_stock을 stock >= quantity 조건부로 깎는다(0행이면 저장점으로 되돌리고 주문을 FAILED로 끝낸다).
 // 멱등 기록은 플랫폼 IdempotencyStore를 같은 트랜잭션의 첫 쓰기로 쓴다. 결제 참조(payment_ref)는 로그에 싣지 않는다.
 import { timingSafeEqual } from 'node:crypto';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { type Clock, type Database, type DbTransaction, IdempotencyStore, type IdempotencyRequest, idempotencyKeyReused } from '@peaket/platform';
 import type {
   AcceptOutcome,
   AddonItemRow,
+  BeginRefundAccountRetry,
   CancelOutcome,
   CancelRowView,
   ConfirmJob,
@@ -22,6 +23,7 @@ import type {
 } from '../../domain/merch-ports.js';
 import {
   acceptBlocker,
+  assertRefundAccountRetryable,
   attemptStartBlocker,
   type AcceptBody,
   depositDeadlineMs,
@@ -35,9 +37,12 @@ import {
   orderNotFound,
   type PaymentRef,
   type PickupSlotRecord,
+  REFUND_ACCOUNT_RETRY_MS,
+  refundAccountRetryTarget,
   REFUND_RETRY_DELAYS_MIN,
   REFUND_RETRY_MAX,
   REFUND_RETRY_MS,
+  type RefundAccountRetryTarget,
   type ReleasedOrder,
   reservedUntilAfterAccept,
   resolveCancelItems,
@@ -151,6 +156,7 @@ function refundOf(r: Row): RefundRow {
     refundId: String(r.id),
     orderId: String(r.order_id),
     paymentId: (r.payment_id as string | null) ?? null,
+    itemIds: ((r.item_ids as string[] | null) ?? []).map(String),
     amount: n(r.amount),
     reason: String(r.reason),
     status: r.status as RefundRow['status'],
@@ -160,6 +166,10 @@ function refundOf(r: Row): RefundRow {
     attempts: n(r.attempts ?? 0),
     nextAtMs: d(r.next_at)?.getTime() ?? null,
     accountRequiredAtMs: d(r.account_required_at)?.getTime() ?? null,
+    replacesRefundId: (r.replaces_refund_id as string | null) ?? null,
+    // 사슬 깊이(원래 행 0). dueRefunds·dueUserRefunds가 재귀 질의로 `refund_depth`를 싣고, 나머지는 0이다
+    refundAttempt: n(r.refund_depth ?? 0),
+    failReason: (r.fail_reason as string | null) ?? null,
   };
 }
 
@@ -688,20 +698,49 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
         insert into merch_refund (id, order_id, item_ids, amount, reason, status, kind, attempts, next_at, alerted, created_at, updated_at)
         values (${refundId}, ${orderId}, ${sql.param(ids)}::uuid[], ${amount}, ${UNCLAIMED_REASON}, 'REQUESTED', 'UNCLAIMED', 0, ${new Date(nowMs + REFUND_RETRY_MS)}, false, ${now}, ${now})`);
       const p = rowsOf(await tx.execute(sql`select payment_id from merch_order where id = ${orderId}`));
-      return { refundId, orderId, paymentId: (p[0]?.payment_id as string | null) ?? null, amount, reason: UNCLAIMED_REASON, status: 'REQUESTED', createdAtMs: nowMs, alerted: false, kind: 'UNCLAIMED', attempts: 0, nextAtMs: nowMs + REFUND_RETRY_MS, accountRequiredAtMs: null };
+      return {
+        refundId,
+        orderId,
+        paymentId: (p[0]?.payment_id as string | null) ?? null,
+        itemIds: ids,
+        amount,
+        reason: UNCLAIMED_REASON,
+        status: 'REQUESTED',
+        createdAtMs: nowMs,
+        alerted: false,
+        kind: 'UNCLAIMED',
+        attempts: 0,
+        nextAtMs: nowMs + REFUND_RETRY_MS,
+        accountRequiredAtMs: null,
+        replacesRefundId: null,
+        refundAttempt: 0,
+        failReason: null,
+      };
     });
   }
 
   async dueRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
     const r = await this.db.db.execute(sql`
-      select f.*, o.payment_id from merch_refund f join merch_order o on o.id = f.order_id
+      with recursive refund_chain(id, depth) as (
+        select id, 0 from merch_refund where replaces_refund_id is null
+        union all
+        select f.id, c.depth + 1 from merch_refund f join refund_chain c on f.replaces_refund_id = c.id
+      )
+      select f.*, o.payment_id, coalesce(rc.depth, 0) as refund_depth from merch_refund f join merch_order o on o.id = f.order_id
+      left join refund_chain rc on rc.id = f.id
       where f.kind = 'UNCLAIMED' and f.status in ('REQUESTED', 'CANCEL_PENDING') and f.next_at <= ${new Date(nowMs)} order by f.next_at limit ${limit}`);
     return rowsOf(r).map(refundOf);
   }
 
   async dueUserRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
     const r = await this.db.db.execute(sql`
-      select f.*, o.payment_id from merch_refund f join merch_order o on o.id = f.order_id
+      with recursive refund_chain(id, depth) as (
+        select id, 0 from merch_refund where replaces_refund_id is null
+        union all
+        select f.id, c.depth + 1 from merch_refund f join refund_chain c on f.replaces_refund_id = c.id
+      )
+      select f.*, o.payment_id, coalesce(rc.depth, 0) as refund_depth from merch_refund f join merch_order o on o.id = f.order_id
+      left join refund_chain rc on rc.id = f.id
       where f.kind in ('USER_CANCEL', 'RETURN') and f.status in ('REQUESTED', 'CANCEL_PENDING')
         and f.account_required_at is null and f.next_at <= ${new Date(nowMs)} order by f.next_at limit ${limit}`);
     return rowsOf(r).map(refundOf);
@@ -781,6 +820,7 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
           refundId: i.refundId,
           orderId: i.orderId,
           paymentId: detail.order.paymentId,
+          itemIds: ids,
           amount,
           reason: 'USER_CANCEL',
           status: 'REQUESTED',
@@ -790,6 +830,9 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
           attempts: 0,
           nextAtMs: i.nowMs + REFUND_RETRY_DELAYS_MIN[0] * 60_000,
           accountRequiredAtMs: null,
+          replacesRefundId: null,
+          refundAttempt: 0,
+          failReason: null,
         };
         return { resultRef: `cancel:${i.refundId}`, value: { kind: 'created' as const, refund } };
       }),
@@ -808,6 +851,68 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
       refundAccountRequired: r.account_required_at !== null && r.account_required_at !== undefined,
       state: r.status === 'CANCELLED' ? 'CANCELLED' : r.status === 'REJECTED' ? 'REJECTED' : r.status === 'REQUESTED' ? 'REQUESTED' : 'PENDING',
     };
+  }
+
+  // ---- 굿즈 지연 환급 계좌 다시 받기(ADR-0316 결정 5, R-T43) ----
+
+  async findRejectedAccountRequired(orderId: string, accountId: string, cancellationId: string): Promise<RefundAccountRetryTarget | undefined> {
+    if (!UUID.test(orderId) || !UUID.test(cancellationId)) return undefined;
+    const owns = rowsOf(await this.db.db.execute(sql`select id from merch_order where id = ${orderId} and account_id = ${accountId}`));
+    if (!owns[0]) return undefined;
+    return refundAccountRetryTarget(await this.#refundsOf(this.db.db, orderId), cancellationId);
+  }
+
+  async beginAccountRetry(once: IdempotencyRequest, i: BeginRefundAccountRetry): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }> {
+    const r = await this.db.transaction((tx) =>
+      this.#once(tx, once, async () => {
+        // 주문 행 잠금(미수령 자동 취소·구매자 취소와 같은 줄). 소유는 잠근 행에서 다시 본다
+        const own = rowsOf(await tx.execute(sql`select id, payment_id from merch_order where id = ${i.orderId} and account_id = ${i.accountId} for update`));
+        if (!own[0]) throw orderNotFound();
+        const target = refundAccountRetryTarget(await this.#refundsOf(tx, i.orderId), i.cancellationId);
+        if (!target) throw orderNotFound();
+        // 그사이 다른 요청이 새 행을 만들었으면 끝 행이 REQUESTED라 409다(자격 다시 보기)
+        assertRefundAccountRetryable(target);
+        const tip = target.row;
+        const now = new Date(i.nowMs);
+        const paymentId = (own[0].payment_id as string | null) ?? null;
+        await tx.execute(sql`
+          insert into merch_refund (id, order_id, item_ids, amount, reason, status, kind, attempts, next_at, alerted, created_at, updated_at, replaces_refund_id)
+          values (${i.refundId}, ${i.orderId}, ${sql.param(tip.itemIds)}::uuid[], ${tip.amount}, ${tip.reason}, 'REQUESTED', ${tip.kind}, 0,
+            ${new Date(i.nowMs + REFUND_ACCOUNT_RETRY_MS)}, false, ${now}, ${now}, ${tip.refundId})`);
+        // 항목 하나에 진행 중 환급 하나(부분 유일). 옛 행의 자리는 거절 때 이미 풀렸다
+        try {
+          for (const id of tip.itemIds) await tx.execute(sql`insert into merch_refund_item (refund_id, item_id) values (${i.refundId}, ${id})`);
+        } catch (e) {
+          if (isUniqueViolation(e)) throw merchCancelNotAllowed();
+          throw e;
+        }
+        const refund: RefundRow = {
+          refundId: i.refundId,
+          orderId: i.orderId,
+          paymentId,
+          itemIds: tip.itemIds,
+          amount: tip.amount,
+          reason: tip.reason,
+          status: 'REQUESTED',
+          createdAtMs: i.nowMs,
+          alerted: false,
+          kind: tip.kind,
+          attempts: 0,
+          nextAtMs: i.nowMs + REFUND_ACCOUNT_RETRY_MS,
+          accountRequiredAtMs: null,
+          replacesRefundId: tip.refundId,
+          refundAttempt: target.attemptNo + 1,
+          failReason: null,
+        };
+        return { resultRef: `cancel:${i.refundId}`, value: { kind: 'created' as const, refund } };
+      }),
+    );
+    return 'replay' in r ? { kind: 'replay', resultRef: r.replay } : r.value;
+  }
+
+  /** 그 주문의 환급 행 전부(사슬 따라가기용). 적은 수라 한 번에 읽는다 */
+  async #refundsOf(db: { execute: (q: SQL) => Promise<{ rows: unknown[] }> }, orderId: string): Promise<RefundRow[]> {
+    return rowsOf(await db.execute(sql`select * from merch_refund where order_id = ${orderId} order by created_at, id`)).map(refundOf);
   }
 
   async applyReturn(once: IdempotencyRequest, i: NewReturn): Promise<{ kind: 'created'; orderId: string } | { kind: 'replay'; resultRef: string }> {

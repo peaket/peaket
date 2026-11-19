@@ -66,7 +66,7 @@ export class MerchUnclaimed {
       this.#log.error({ kind: 'merch-refund-overdue', severity: 'SEV2', orderId: r.orderId }, '미수령 환급이 3일 넘게 끝나지 않았다');
       alerted = true;
     }
-    const outcome: CancelOutcome = r.paymentId ? await this.d.payments.cancel({ paymentId: r.paymentId, cancellationId: r.refundId, amount: r.amount, reason: UNCLAIMED_REASON }) : 'UNKNOWN';
+    const outcome: CancelOutcome = r.paymentId ? await this.d.payments.cancel({ paymentId: r.paymentId, cancellationId: r.refundId, amount: r.amount, reason: UNCLAIMED_REASON, refundAttempt: r.refundAttempt }) : 'UNKNOWN';
     if (outcome === 'REJECTED') this.#log.error({ kind: 'merch-refund-rejected', severity: 'SEV2', orderId: r.orderId }, '미수령 환급을 결제사가 거절했다');
     this.d.signals?.refund(outcome === 'CANCELLED' ? 'cancelled' : outcome === 'REJECTED' ? 'rejected' : 'pending');
     await this.d.store.refundResult(r.refundId, outcome, now, alerted === undefined ? {} : { alerted });

@@ -13,6 +13,7 @@ export { CreateMerchOrder, type CreatedOrderView, type CreateShopOrderInput, typ
 export { MerchPayment, type MerchPaymentDeps, type PaymentAttemptView } from './application/merch-payment.js';
 export { MerchPaymentResults, type MerchResultsDeps, type ResultsTick } from './application/merch-payment-results.js';
 export { MerchCancel, type CancellationBody, type CancellationView, type MerchCancelDeps } from './application/merch-cancel.js';
+export { MerchRefundAccount, type MerchRefundAccountDeps, type MerchRefundAccountInput } from './application/merch-refund-account.js';
 export { MerchReturn, type MerchReturnDeps, type ReturnBody } from './application/merch-return.js';
 export { MerchRefundRetry, type MerchRefundRetryDeps, type RefundRetryTick, REFUND_RETRY_BATCH } from './application/merch-refund-retry.js';
 export { MerchStockExpiry, LIMITED_PRODUCTS_REFRESH_MS, type ExpiryTick, type MerchExpiryDeps } from './application/merch-stock-expiry.js';
@@ -39,6 +40,7 @@ export {
   StockUnavailable,
   ReauthUnavailable,
   closedShopReauthGate,
+  type BeginRefundAccountRetry,
   type CancelInput,
   type CancelOutcome,
   type CancelRowView,
@@ -51,6 +53,7 @@ export {
   type PaymentDetail,
   type PaymentState,
   type ProductTypeDirectory,
+  type RefundRow,
   type ReserveResult,
   type ShopOrderStore,
   type ShopReauthAct,

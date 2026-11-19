@@ -3,6 +3,9 @@
 import { Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import {
+  CreateShopCancellationAccountBody,
+  CreateShopCancellationAccountParams,
+  CreateShopCancellationAccountResponse,
   CreateShopOrderBody,
   CreateShopOrderCancellationBody,
   CreateShopOrderCancellationHeader,
@@ -30,11 +33,15 @@ import { CreateMerchOrder, type CreatedOrderView, type CreateShopOrderInput } fr
 import { MerchCancel, RefundResultWriteFailed, type CancellationView } from '../application/merch-cancel.js';
 import { MerchOrdersRead, type PaymentStatusView } from '../application/merch-orders-read.js';
 import { MerchPayment, type PaymentAttemptView } from '../application/merch-payment.js';
+import { MerchRefundAccount } from '../application/merch-refund-account.js';
 import { MerchReturn } from '../application/merch-return.js';
-import { refundAccountRequired, type AcceptBody } from '../domain/merch-order.js';
+import { MerchCancelNotAllowed, ReauthRequired, merchCancelNotAllowed, reauthRequired, reauthUnavailable, refundAccountRequired, refundRejected, type AcceptBody } from '../domain/merch-order.js';
+import { ReauthUnavailable } from '../domain/merch-ports.js';
 import { shopGuard, toPlatformProblem } from '../application/shop-problems.js';
 
 const NoBody = z.null();
+// 재인증 토큰은 없으면 403 reauth-required로 답해야 하므로 계약의 필수 머리 대신 선택 칸으로 받는다(사용 사례가 본다, R-T43 ②)
+const ShopAccountHeaders = z.object({ 'Idempotency-Key': z.uuid(), 'X-Reauth-Token': z.string().optional() });
 
 @Controller('v1/shop/orders')
 export class ShopOrderController {
@@ -43,6 +50,7 @@ export class ShopOrderController {
     private readonly payment: MerchPayment,
     private readonly read: MerchOrdersRead,
     private readonly cancelOrder: MerchCancel,
+    private readonly refundAccount: MerchRefundAccount,
     private readonly returnOrder: MerchReturn,
   ) {}
 
@@ -125,6 +133,51 @@ export class ShopOrderController {
       // 결제사 취소 성공(CANCELLED·CANCEL_PENDING·UNKNOWN)의 DB 실패만 202 REFUND_PENDING이고 재시도가 끝낸다.
       if (e instanceof RefundResultWriteFailed) {
         if (e.outcome === 'REFUND_ACCOUNT_REQUIRED' || e.outcome === 'REJECTED') throw toPlatformProblem(refundAccountRequired());
+        return { cancellationId: e.cancellationId, status: 'REFUND_PENDING', refundAmount: e.refundAmount };
+      }
+      throw e;
+    }
+  }
+
+  @Post(':orderId/cancellations/:cancellationId/account')
+  @ContractRouteSchema({
+    params: CreateShopCancellationAccountParams,
+    headers: ShopAccountHeaders,
+    body: CreateShopCancellationAccountBody,
+    responses: { 202: CreateShopCancellationAccountResponse },
+  })
+  @Roles(['fan'])
+  @HttpCode(202)
+  @Idempotent({ operation: 'SHOP_CANCEL_REFUND_ACCOUNT' })
+  async retryCancellationAccount(
+    @ContractParams(CreateShopCancellationAccountParams) p: z.output<typeof CreateShopCancellationAccountParams>,
+    @ContractBody(CreateShopCancellationAccountBody) body: z.output<typeof CreateShopCancellationAccountBody>,
+    @CurrentPrincipal() me: Principal,
+    @IdempotencyRequest() once: IdempotencyRequest,
+    @Req() request: FastifyRequest,
+  ): Promise<CancellationView> {
+    const token = typeof request.headers['x-reauth-token'] === 'string' ? request.headers['x-reauth-token'] : undefined;
+    try {
+      return await shopGuard(() =>
+        this.refundAccount.run({
+          accountId: me.accountId,
+          sessionId: me.sessionId,
+          orderId: p.orderId,
+          cancellationId: p.cancellationId,
+          account: { bankCode: body.bankCode, accountNumber: body.accountNumber, holderName: body.holderName },
+          reauthToken: token,
+          idempotencyKey: once.key,
+          once,
+        }),
+      );
+    } catch (e) {
+      if (e instanceof MerchCancelNotAllowed) throw toPlatformProblem(merchCancelNotAllowed());
+      if (e instanceof ReauthRequired) throw toPlatformProblem(reauthRequired());
+      if (e instanceof ReauthUnavailable) throw toPlatformProblem(reauthUnavailable());
+      // 계좌 필요·PG 거절 결과의 DB 실패는 422로 답해 422를 숨기지 않는다(결제사 취소가 나간 경우만 202 REFUND_PENDING)
+      if (e instanceof RefundResultWriteFailed) {
+        if (e.outcome === 'REFUND_ACCOUNT_REQUIRED') throw toPlatformProblem(refundAccountRequired());
+        if (e.outcome === 'REJECTED') throw toPlatformProblem(refundRejected());
         return { cancellationId: e.cancellationId, status: 'REFUND_PENDING', refundAmount: e.refundAmount };
       }
       throw e;

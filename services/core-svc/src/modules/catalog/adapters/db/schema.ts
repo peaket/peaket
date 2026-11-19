@@ -451,7 +451,18 @@ export const wish = pgTable(
 
 /** 멱등 기록 표(ADR-0146 결정 1). 작업 이름은 openapi가 멱등 키를 요구하는 core-svc 쓰기다 */
 // 굿즈 주문의 네 작업(주문·결제 시도·결제 접수·부가 상품 주문)은 core_app이 쓴다(BAT-600, ADR-0300 결정 4·5, ADR-0301 결정 2)
-export const idempotencyRecord = idempotencyRecordTable(['CREATE_PRODUCTION', 'CREATE_PRODUCTION_EVENT', 'CREATE_MERCH_ORDER', 'START_MERCH_PAYMENT', 'ACCEPT_MERCH_PAYMENT', 'CREATE_TICKET_ADDON']);
+export const idempotencyRecord = idempotencyRecordTable([
+  'CREATE_PRODUCTION',
+  'CREATE_PRODUCTION_EVENT',
+  'CREATE_MERCH_ORDER',
+  'START_MERCH_PAYMENT',
+  'ACCEPT_MERCH_PAYMENT',
+  'CREATE_TICKET_ADDON',
+  // BAT-605·BAT-425(굿즈 취소·반품·지연 환급 계좌 다시 받기). 0030이 손으로 더한 값을 스키마에 맞춘다
+  'CANCEL_MERCH_ORDER',
+  'RETURN_MERCH_ORDER',
+  'SHOP_CANCEL_REFUND_ACCOUNT',
+]);
 
 /** 서비스 소비자의 보류 표(ADR-0142 결정 2). 소비자가 없는 서비스도 같은 표를 둔다(정비 잡이 지운다) */
 export const heldEvent = heldEventTable();

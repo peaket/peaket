@@ -215,6 +215,8 @@ export class GrpcMerchPayments implements MerchPayments {
           cancellation_id: c.cancellationId,
           amount: { krw: c.amount },
           reason: c.reason,
+          // 계좌 다시 받기 시도 번호. 0/없음은 첫 시도라 싣지 않는다(멱등키 cancel-{id}, ADR-0316)
+          ...(c.refundAttempt === undefined || c.refundAttempt === 0 ? {} : { refund_attempt: c.refundAttempt }),
           ...(c.scope === undefined ? {} : { scope: 'CANCEL_SCOPE_DEPOSIT_ONLY' }),
           ...(c.refundAccount === undefined
             ? {}

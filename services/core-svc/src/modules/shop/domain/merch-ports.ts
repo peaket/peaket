@@ -11,6 +11,7 @@ import type {
   OrderState,
   PaymentRef,
   PickupSlotRecord,
+  RefundAccountRetryTarget,
   RefundKind,
   ReleasedOrder,
   ReturnReason,
@@ -192,6 +193,8 @@ export interface CancelInput {
   amount: number;
   reason: string;
   refundAccount?: RefundAccountValue | undefined;
+  /** 계좌 다시 받기 시도 번호(0/없음 = 첫 시도, 1~3 [가정]). payment-svc가 멱등키를 가른다(ADR-0316) */
+  refundAttempt?: number | undefined;
   /** 입금 전 취소만. 굿즈 구매자 취소는 결제 후 일반 취소라 쓰지 않는다 */
   scope?: 'DEPOSIT_ONLY' | undefined;
 }
@@ -303,6 +306,8 @@ export interface RefundRow {
   refundId: string;
   orderId: string;
   paymentId: string | null;
+  /** 이 환급이 덮는 항목 ID들. 계좌 다시 받기의 새 행이 같은 항목 자리를 다시 잡는다 */
+  itemIds: string[];
   amount: number;
   reason: string;
   status: 'REQUESTED' | 'CANCEL_PENDING' | 'CANCELLED' | 'REJECTED';
@@ -316,6 +321,12 @@ export interface RefundRow {
   nextAtMs: number | null;
   /** 계좌를 기다리는 시각(있으면 자동 재시도를 멈춘다) */
   accountRequiredAtMs: number | null;
+  /** 이 행을 대신한 새 환급 행의 ID(계좌 다시 받기, ADR-0316 결정 5). 옛 시험 대역은 비운다 */
+  replacesRefundId?: string | null | undefined;
+  /** 계좌 다시 받기 시도 번호(원래 행 0, `replaces_refund_id` 사슬의 깊이). 결제사 멱등키를 가른다 */
+  refundAttempt?: number | undefined;
+  /** 값 없는 실패 이름표(REFUND_ACCOUNT_REQUIRED·PG_REJECTED·RETRY_EXHAUSTED) */
+  failReason?: string | null | undefined;
 }
 
 /** 구매자 취소 한 건의 응답 값(openapi Cancellation) */
@@ -349,6 +360,17 @@ export interface NewReturn {
   returnTrackingNo?: string | undefined;
   nowMs: number;
   entryOpensAtMs?: number | undefined;
+}
+
+/** 굿즈 지연 환급 계좌 다시 받기(새 행·새 자리). 계좌는 받지 않는다(저장하지 않는다, POL-014) */
+export interface BeginRefundAccountRetry {
+  /** 경로의 취소 ID. 옛 행이면 `replaces_refund_id` 사슬을 따라 끝 행을 다시 본다 */
+  cancellationId: string;
+  orderId: string;
+  accountId: string;
+  /** 새 환급 행 ID(새 결제사 취소 ID, UUIDv7) */
+  refundId: string;
+  nowMs: number;
 }
 
 export interface AddonItemRow {
@@ -439,6 +461,18 @@ export interface ShopOrderStore {
   createCancellation(once: IdempotencyRequest, i: NewCancellation): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }>;
   /** 멱등 다시 오기의 결과 참조 `cancel:{환급 ID}`를 응답으로 바꾼다. 없으면 undefined */
   cancelView(refundId: string): Promise<CancelRowView | undefined>;
+  // ---- 굿즈 지연 환급 계좌 다시 받기(ADR-0316 결정 5, R-T43) ----
+  /**
+   * 그 주문(세션 계정 소유)의 환급 행을 읽어 경로의 취소 ID에서 `replaces_refund_id` 사슬 끝 행을 찾는다.
+   * 없거나 남의 주문·다른 주문의 취소 ID면 undefined(받는 층이 같은 404). 자격·시도 상한은 `assertRefundAccountRetryable`이 본다
+   */
+  findRejectedAccountRequired(orderId: string, accountId: string, cancellationId: string): Promise<RefundAccountRetryTarget | undefined>;
+  /**
+   * 한 트랜잭션: 주문 행 잠금 → 소유·사슬 끝 행 자격·시도 상한 다시 보기 → 새 `merch_refund` 행(`replaces_refund_id` = 끝 행, 같은 kind·amount·사유)
+   * 과 새 `merch_refund_item` 자리, 멱등 기록. 옛 행은 `REJECTED` 그대로 둔다. 항목 상태는 바꾸지 않는다.
+   * @throws ShopProblem 404 not-found · MerchCancelNotAllowed(409, 자격·상한·자리 경합)
+   */
+  beginAccountRetry(once: IdempotencyRequest, i: BeginRefundAccountRetry): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }>;
   /** 반품 요청: 주문 행·항목을 잠그고 자격을 다시 본 뒤 항목 RETURN_REQUESTED·사유·송장·기한과 멱등 기록을 한 트랜잭션으로 쓴다 */
   applyReturn(once: IdempotencyRequest, i: NewReturn): Promise<{ kind: 'created'; orderId: string } | { kind: 'replay'; resultRef: string }>;
   /** 다음 시각이 된 구매자 취소 환급(USER_CANCEL·RETURN, 계좌를 기다리지 않음) */

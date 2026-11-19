@@ -1,7 +1,7 @@
 // shop Drizzle 스키마(docs/data.md product·product_stock, BUILD_ORDER BAT-610 서버 잔여).
 // 표의 정본은 migrations/0014_shop.sql이다.
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { type AnyPgColumn, boolean, check, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -247,6 +247,8 @@ export const merchRefund = pgTable(
     failReason: text('fail_reason'),
     /** 계좌를 기다리기 시작한 시각(있으면 자동 재시도를 멈춘다) */
     accountRequiredAt: at('account_required_at'),
+    /** 이 행을 대신한 새 환급 행(계좌 다시 받기, ADR-0316 결정 5). 옛 행은 REJECTED 그대로다 */
+    replacesRefundId: uuid('replaces_refund_id').references((): AnyPgColumn => merchRefund.id, { onDelete: 'set null' }),
     nextAt: at('next_at'),
     alerted: boolean('alerted').notNull().default(false),
     createdAt: at('created_at').notNull(),
@@ -257,9 +259,12 @@ export const merchRefund = pgTable(
     check('merch_refund_kind_check', sql`${t.kind} in ('UNCLAIMED', 'USER_CANCEL', 'RETURN')`),
     check('merch_refund_amount_check', sql`${t.amount} > 0`),
     check('merch_refund_attempts_check', sql`${t.attempts} >= 0`),
+    check('merch_refund_replaces_check', sql`${t.replacesRefundId} is null or ${t.replacesRefundId} <> ${t.id}`),
     index('merch_refund_due_idx').on(t.nextAt).where(sql`${t.status} in ('REQUESTED', 'CANCEL_PENDING')`),
     index('merch_refund_order_idx').on(t.orderId),
     index('merch_refund_kind_due_idx').on(t.kind, t.nextAt).where(sql`${t.status} in ('REQUESTED', 'CANCEL_PENDING')`),
+    // 옛 행 하나는 새 행 하나로만 대신한다(계좌 다시 받기를 두 번 눌러도 새 행이 둘이 되지 않는다)
+    uniqueIndex('merch_refund_replaces_uq').on(t.replacesRefundId).where(sql`${t.replacesRefundId} is not null`),
   ],
 );
 

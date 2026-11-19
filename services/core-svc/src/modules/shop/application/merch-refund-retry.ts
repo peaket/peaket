@@ -41,7 +41,9 @@ export class MerchRefundRetry {
   }
 
   async #one(r: RefundRow, now: number, out: RefundRetryTick): Promise<void> {
-    const outcome: CancelOutcome = r.paymentId === null ? 'UNKNOWN' : await this.d.payments.cancel({ paymentId: r.paymentId, cancellationId: r.refundId, amount: r.amount, reason: r.reason });
+    // 계좌 다시 받기 뒤의 행은 같은 취소 ID·같은 시도 번호로 다시 부른다(멱등키 cancel-{id}-a{n}, ADR-0316)
+    const outcome: CancelOutcome =
+      r.paymentId === null ? 'UNKNOWN' : await this.d.payments.cancel({ paymentId: r.paymentId, cancellationId: r.refundId, amount: r.amount, reason: r.reason, refundAttempt: r.refundAttempt });
     const attempts = r.attempts + 1;
     if (outcome === 'CANCELLED') {
       await this.d.store.refundResult(r.refundId, outcome, now, { attempts });

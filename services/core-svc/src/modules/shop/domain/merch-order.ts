@@ -3,6 +3,7 @@
 import { commonAttributesOf, optionsMatch } from '@peaket/validation/product-types';
 import { nextBusinessDay, kstDateOf } from './business-day.js';
 import type { MerchItemStatus, MerchPgStore } from './merch.js';
+import type { RefundRow } from './merch-ports.js';
 import { statusOf, type Fulfillment, type ProductRecord } from './product.js';
 
 /** 재고 예약 시간 15분 [가정](ADR-0107 결정 4, ADR-0300 결정 4) */
@@ -255,6 +256,8 @@ export const escrowPartialNotAllowed = () => conflict('escrow-partial-not-allowe
 export const merchReturnNotAllowed = () => conflict('merch-return-not-allowed', '지금은 반품을 요청할 수 없는 항목입니다');
 /** 가상계좌 결제인데 환불 계좌가 없다(ADR-0050 결정 3, P-T63 ①) */
 export const refundAccountRequired = () => new ShopProblem('refund-account-required', 422, '환불받을 계좌를 입력해 주세요');
+/** 계좌를 실어 다시 보낸 환급을 결제사가 업무상 거절했다(ADR-0315, R-T43 ③) */
+export const refundRejected = () => new ShopProblem('refund-rejected', 422, '환급이 거절되었습니다');
 /** 재인증 토큰이 없거나 틀렸다(ADR-0293, P-T63 ②) */
 export const reauthRequired = () => new ShopProblem('reauth-required', 403, '다시 인증해 주세요');
 /** 재인증 확인기·jti 저장소를 쓸 수 없다(Retry-After 5초 [가정]) */
@@ -599,4 +602,69 @@ export function sellerReturnTransition(from: MerchItemStatus, action: SellerRetu
 export function refundRetryNextDelayMs(attempts: number): number | null {
   if (attempts >= REFUND_RETRY_MAX) return null;
   return REFUND_RETRY_DELAYS_MIN[attempts]! * 60 * 1000;
+}
+
+// ---- 지연 환급 계좌 다시 받기(ADR-0316 결정 5, P-T63 ③, R-T43) ----
+
+/** 굿즈 지연 환급 계좌 다시 받기 시도 상한 3회 [가정](ADR-0316 결정 5) */
+export const REFUND_ACCOUNT_MAX_ATTEMPTS = 3;
+/** 계좌를 다시 받은 시도의 첫 재시도 간격 1분 [가정](MerchCancel 첫 시도와 같다) */
+export const REFUND_ACCOUNT_RETRY_MS = 60 * 1000;
+
+/** 계좌를 다시 받을 수 없는 취소다(409 merch-cancel-not-allowed, R-T43 ①) */
+export class MerchCancelNotAllowed extends Error {
+  constructor(message = '지금은 환급 계좌를 다시 받을 수 없는 취소입니다') {
+    super(message);
+    this.name = 'MerchCancelNotAllowed';
+  }
+}
+
+/** 재인증 토큰이 없거나 틀렸다(403 reauth-required, R-T43 ②) */
+export class ReauthRequired extends Error {
+  constructor(message = '다시 인증해 주세요') {
+    super(message);
+    this.name = 'ReauthRequired';
+  }
+}
+
+/** 계좌 다시 받기 대상: 사슬의 끝 행과 그 행까지 새로 받은 횟수 */
+export interface RefundAccountRetryTarget {
+  /** 지금 다시 받아야 할 환급 행. 옛 행을 가리키면 그 사슬을 따라 앞으로 간 끝 행이다 */
+  row: RefundRow;
+  /** 원래 행이 0이고, 계좌를 다시 받을 때마다 1씩 는다(0~2가 다시 받을 수 있고 3은 상한) */
+  attemptNo: number;
+}
+
+/**
+ * 경로의 취소 ID(옛 행일 수 있다)에서 `replaces_refund_id` 사슬을 따라 지금 끝 행을 찾는다.
+ * 없으면 undefined(404). 한 번의 다시 받기가 새 행을 만들면 그 뒤 같은 옛 ID로 온 요청은 새 행을 본다.
+ * 사슬이 둘로 갈라지는 것은 부분 유일 인덱스가 막지만, 방어적으로 첫 앞 행만 따라가고 100단계에서 멈춘다.
+ */
+export function refundAccountRetryTarget(rows: readonly RefundRow[], cancellationId: string): RefundAccountRetryTarget | undefined {
+  const byId = new Map(rows.map((r) => [r.refundId, r]));
+  let row = byId.get(cancellationId);
+  if (!row) return undefined;
+  for (let i = 0; i < 100; i++) {
+    const next = rows.find((r) => r.replacesRefundId === row!.refundId);
+    if (!next) break;
+    row = next;
+  }
+  let attemptNo = 0;
+  let walk: RefundRow | undefined = row;
+  while (walk?.replacesRefundId) {
+    attemptNo++;
+    walk = byId.get(walk.replacesRefundId);
+    if (attemptNo > 100) break;
+  }
+  return { row, attemptNo };
+}
+
+/**
+ * 계좌를 다시 받을 수 있는 상태인가(ADR-0316 결정 5, R-T43 ①): 결제사 계좌 거절로 끝난
+ * `REJECTED`·`fail_reason = REFUND_ACCOUNT_REQUIRED`·`account_required_at` 있음이고 시도 상한 3회 [가정] 안이다.
+ * @throws MerchCancelNotAllowed 409
+ */
+export function assertRefundAccountRetryable(t: RefundAccountRetryTarget): void {
+  if (t.row.status !== 'REJECTED' || t.row.failReason !== 'REFUND_ACCOUNT_REQUIRED' || t.row.accountRequiredAtMs === null) throw new MerchCancelNotAllowed();
+  if (t.attemptNo >= REFUND_ACCOUNT_MAX_ATTEMPTS) throw new MerchCancelNotAllowed();
 }

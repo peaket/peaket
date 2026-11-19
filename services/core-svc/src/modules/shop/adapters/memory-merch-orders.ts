@@ -6,6 +6,7 @@ import { idempotencyKeyReused, type IdempotencyRequest } from '@peaket/platform'
 import type {
   AcceptOutcome,
   AddonItemRow,
+  BeginRefundAccountRetry,
   CancelOutcome,
   CancelRowView,
   ConfirmJob,
@@ -20,6 +21,7 @@ import type {
 } from '../domain/merch-ports.js';
 import {
   acceptBlocker,
+  assertRefundAccountRetryable,
   attemptStartBlocker,
   type AcceptBody,
   depositDeadlineMs,
@@ -33,6 +35,9 @@ import {
   orderNotFound,
   type PaymentRef,
   type PickupSlotRecord,
+  REFUND_ACCOUNT_RETRY_MS,
+  type RefundAccountRetryTarget,
+  refundAccountRetryTarget,
   REFUND_RETRY_DELAYS_MIN,
   REFUND_RETRY_MS,
   type ReleasedOrder,
@@ -101,6 +106,25 @@ export class MemoryShopOrderStore implements ShopOrderStore {
 
   #attemptsOf(orderId: string): MerchAttempt[] {
     return [...this.attempts.values()].filter((a) => a.orderId === orderId).sort((a, b) => a.attemptNo - b.attemptNo);
+  }
+
+  /** 계좌 다시 받기 사슬의 깊이(원래 행 0). `replaces_refund_id`를 거꾸로 따라 센다 */
+  #refundDepthOf(refundId: string): number {
+    let depth = 0;
+    let cur = this.refunds.get(refundId);
+    while (cur?.replacesRefundId && depth < 100) {
+      depth++;
+      cur = this.refunds.get(cur.replacesRefundId);
+    }
+    return depth;
+  }
+
+  /** 그 주문의 환급 행 전부(사슬 따라가기용). 시각 차례 */
+  #refundsOf(orderId: string): RefundRow[] {
+    return [...this.refunds.values()]
+      .filter((r) => r.orderId === orderId)
+      .sort((a, b) => a.createdAtMs - b.createdAtMs || a.refundId.localeCompare(b.refundId))
+      .map((r) => ({ ...r, refundAttempt: this.#refundDepthOf(r.refundId) }));
   }
 
   #accepted(orderId: string): boolean {
@@ -458,10 +482,12 @@ export class MemoryShopOrderStore implements ShopOrderStore {
         itemIds: changed.map((i) => i.itemId),
         failReason: null,
         resolvedAtMs: null,
+        replacesRefundId: null,
+        refundAttempt: 0,
       };
       this.refunds.set(refundId, row);
       this.writes++;
-      const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
+      const { resolvedAtMs: _r, ...out } = row;
       return { ...out };
     });
   }
@@ -471,7 +497,7 @@ export class MemoryShopOrderStore implements ShopOrderStore {
       .filter((r) => r.kind === 'UNCLAIMED' && (r.status === 'REQUESTED' || r.status === 'CANCEL_PENDING') && r.nextAtMs !== null && r.nextAtMs <= nowMs)
       .sort((a, b) => (a.nextAtMs ?? 0) - (b.nextAtMs ?? 0))
       .slice(0, limit)
-      .map(({ itemIds: _i, failReason: _f, resolvedAtMs: _r, ...r }) => ({ ...r }));
+      .map(({ resolvedAtMs: _r, ...r }) => ({ ...r, refundAttempt: this.#refundDepthOf(r.refundId) }));
   }
 
   async dueUserRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
@@ -479,7 +505,7 @@ export class MemoryShopOrderStore implements ShopOrderStore {
       .filter((r) => r.kind !== 'UNCLAIMED' && (r.status === 'REQUESTED' || r.status === 'CANCEL_PENDING') && r.accountRequiredAtMs === null && r.nextAtMs !== null && r.nextAtMs <= nowMs)
       .sort((a, b) => (a.nextAtMs ?? 0) - (b.nextAtMs ?? 0))
       .slice(0, limit)
-      .map(({ itemIds: _i, failReason: _f, resolvedAtMs: _r, ...r }) => ({ ...r }));
+      .map(({ resolvedAtMs: _r, ...r }) => ({ ...r, refundAttempt: this.#refundDepthOf(r.refundId) }));
   }
 
   async refundResult(
@@ -569,12 +595,14 @@ export class MemoryShopOrderStore implements ShopOrderStore {
         itemIds: selection.items.map((x) => x.itemId),
         failReason: null,
         resolvedAtMs: null,
+        replacesRefundId: null,
+        refundAttempt: 0,
       };
       this.refunds.set(i.refundId, row);
       for (const id of row.itemIds) this.refundItems.set(`${i.refundId}|${id}`, { refundId: i.refundId, itemId: id, resolvedAtMs: null });
       this.#remember(once, `cancel:${i.refundId}`);
       this.writes++;
-      const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
+      const { resolvedAtMs: _r, ...out } = row;
       return { kind: 'created' as const, refund: { ...out } };
     });
   }
@@ -589,6 +617,55 @@ export class MemoryShopOrderStore implements ShopOrderStore {
       refundAccountRequired: r.accountRequiredAtMs !== null,
       state: r.status === 'CANCELLED' ? 'CANCELLED' : r.status === 'REJECTED' ? 'REJECTED' : r.status === 'REQUESTED' ? 'REQUESTED' : 'PENDING',
     };
+  }
+
+  // ---- 굿즈 지연 환급 계좌 다시 받기(ADR-0316 결정 5, R-T43) ----
+
+  async findRejectedAccountRequired(orderId: string, accountId: string, cancellationId: string): Promise<RefundAccountRetryTarget | undefined> {
+    const o = this.orders.get(orderId);
+    if (!o || o.accountId !== accountId) return undefined;
+    return refundAccountRetryTarget(this.#refundsOf(orderId), cancellationId);
+  }
+
+  async beginAccountRetry(once: IdempotencyRequest, i: BeginRefundAccountRetry): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }> {
+    return this.#withOrderLock(i.orderId, () => {
+      const seen = this.#seen(once);
+      if (seen !== undefined) return { kind: 'replay', resultRef: seen };
+      const o = this.orders.get(i.orderId);
+      if (!o || o.accountId !== i.accountId) throw orderNotFound();
+      const target = refundAccountRetryTarget(this.#refundsOf(i.orderId), i.cancellationId);
+      if (!target) throw orderNotFound();
+      assertRefundAccountRetryable(target);
+      const tip = target.row;
+      // 항목 하나에 진행 중 환급 하나(부분 유일 인덱스와 같은 규칙)
+      const busy = new Set([...this.refundItems.values()].filter((c) => c.resolvedAtMs === null).map((c) => c.itemId));
+      if (tip.itemIds.some((id) => busy.has(id))) throw merchCancelNotAllowed();
+      const row: RefundState = {
+        refundId: i.refundId,
+        orderId: i.orderId,
+        paymentId: o.paymentId,
+        itemIds: [...tip.itemIds],
+        amount: tip.amount,
+        reason: tip.reason,
+        status: 'REQUESTED',
+        createdAtMs: i.nowMs,
+        alerted: false,
+        kind: tip.kind,
+        attempts: 0,
+        nextAtMs: i.nowMs + REFUND_ACCOUNT_RETRY_MS,
+        accountRequiredAtMs: null,
+        replacesRefundId: tip.refundId,
+        refundAttempt: target.attemptNo + 1,
+        failReason: null,
+        resolvedAtMs: null,
+      };
+      this.refunds.set(i.refundId, row);
+      for (const id of row.itemIds) this.refundItems.set(`${i.refundId}|${id}`, { refundId: i.refundId, itemId: id, resolvedAtMs: null });
+      this.#remember(once, `cancel:${i.refundId}`);
+      this.writes++;
+      const { resolvedAtMs: _r, ...out } = row;
+      return { kind: 'created' as const, refund: { ...out } };
+    });
   }
 
   async applyReturn(once: IdempotencyRequest, i: NewReturn): Promise<{ kind: 'created'; orderId: string } | { kind: 'replay'; resultRef: string }> {

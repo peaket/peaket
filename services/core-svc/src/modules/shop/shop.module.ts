@@ -9,6 +9,7 @@ import { CreateMerchOrder } from './application/create-merch-order.js';
 import { MerchCancel } from './application/merch-cancel.js';
 import { MerchOrdersRead } from './application/merch-orders-read.js';
 import { MerchPayment } from './application/merch-payment.js';
+import { MerchRefundAccount } from './application/merch-refund-account.js';
 import { MerchRefundRetry } from './application/merch-refund-retry.js';
 import { MerchReturn } from './application/merch-return.js';
 import { TicketAddons } from './application/ticket-addons.js';
@@ -132,6 +133,12 @@ export class ShopModule {
       {
         provide: MerchCancel,
         useFactory: (store: ShopOrderStore, payments: MerchPayments, reauth: ShopReauthGate, clock: Clock, logger: ShopLogger) => new MerchCancel({ store, payments, reauth, clock, signals, logger }),
+        inject: [SHOP_ORDER_STORE, MERCH_PAYMENTS, SHOP_REAUTH_GATE, CLOCK, SHOP_LOGGER],
+      },
+      {
+        provide: MerchRefundAccount,
+        useFactory: (store: ShopOrderStore, payments: MerchPayments, reauth: ShopReauthGate, clock: Clock, logger: ShopLogger) =>
+          new MerchRefundAccount({ store, payments, reauth, clock, signals, logger }),
         inject: [SHOP_ORDER_STORE, MERCH_PAYMENTS, SHOP_REAUTH_GATE, CLOCK, SHOP_LOGGER],
       },
       {
