@@ -76,7 +76,7 @@ export class AccountController {
       }
       // 견적을 받지 못했으면 상태·토큰을 바꾸지 않고 503과 Retry-After 1초 [가정](identity §8 '미사용 티켓 확인과 취소')
       if (e instanceof AccountError && e.code === 'DEPENDENCY_UNAVAILABLE') {
-        throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '잠시 뒤 다시 시도해 주세요', retryAfterSeconds: 1 });
+        throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1 });
       }
       // 토큰이 없거나 만료·재사용이거나 세션·작업 묶음이 맞지 않으면 403 reauth-required(이유는 응답에 싣지 않는다)
       if (e instanceof AccountError) throw new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
