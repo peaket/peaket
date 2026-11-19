@@ -750,8 +750,14 @@ test('공용 차트의 CI 값 파일은 템플릿의 required 값을 모두 채�
       const names = ['http', 'management', ...(values.service.extraPorts ?? []).map((p) => String(p.name))];
       return new Set(ports).size === ports.length && new Set(names).size === names.length;
     })(),
+    // 진단 수집(BAT-075, ADR-0303 결정 3): 메모리 한도 꼴, 힙 상한 백분율, local·ci 밖의 흉내 S3 주소·AWS 주소 환경 값, 안전 옵션을 끄는 NODE_OPTIONS
+    '메모리 한도는 <정수>Mi·<정수>Gi(서비스·릴레이)': [values.service.resources?.limits?.memory, values.outboxRelay.resources?.limits?.memory].every((m) => /^[1-9][0-9]*(Mi|Gi)$/.test(String(m))),
+    'diagnose.heapPercent 10~90': values.diagnose.heapPercent >= 10 && values.diagnose.heapPercent <= 90,
+    'diagnose.s3Endpoint는 local·ci만': !values.diagnose.s3Endpoint || ['local', 'ci'].includes(values.env.PEAKET_ENV),
+    'AWS_ENDPOINT_URL*·AWS_CONFIG_FILE은 local·ci만': ['local', 'ci'].includes(values.env.PEAKET_ENV) || [values.env, values.service.env, values.outboxRelay.env].every((e) => Object.keys(e ?? {}).every((k) => !k.startsWith('AWS_ENDPOINT_URL') && k !== 'AWS_CONFIG_FILE')),
+    'NODE_OPTIONS에 안전 옵션을 끄는 값이 없다': [values.env, values.service.env, values.outboxRelay.env].every((e) => !/(^|\s)--(no-disable-sigusr1|no-report-exclude-env|no-report-exclude-network|no-report-on-fatalerror|inspect)(=|-|\s|$)/.test(String(e?.NODE_OPTIONS ?? '').replaceAll('_', '-'))),
   };
   for (const [what, ok] of Object.entries(checks)) assert.equal(ok, true, what);
-  // 지금 차트의 fail 수(값 꼴·태그 환경·HPA 넷·이그레스 칸, 갈래 1 PRF-215가 더한 Lease 이름·볼륨·추가 포트 검사). 늘면 위 목록에 그 조건을 더한다
-  assert.equal(failCount, 30, `fail ${failCount}개`);
+  // 지금 차트의 fail 수(값 꼴·태그 환경·HPA 넷·이그레스 칸, 갈래 1 PRF-215가 더한 Lease 이름·볼륨·추가 포트 검사, BAT-075 진단 수집 다섯). 늘면 위 목록에 그 조건을 더한다
+  assert.equal(failCount, 35, `fail ${failCount}개`);
 });
