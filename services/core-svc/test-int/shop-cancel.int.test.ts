@@ -476,7 +476,7 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect((await itemsOf(after.orderId))[0]!.status).toBe('READY');
   });
 
-  test('P-T61 ⑤ 같은 Idempotency-Key 재요청은 같은 취소 ID·금액·결제사 1건이고, 동시 두 요청도 한 건만 환급한다', async () => {
+  test('P-T61 ⑤ 같은 Idempotency-Key 재요청은 같은 취소 ID·금액·결제사 1건이고, 동시 두 요청의 두 번째는 409 merch-cancel-not-allowed다', async () => {
     const p = await seedProduct({ fulfillments: ['PICKUP'], price: 13_000 });
     const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 2, unitAmount: 13_000 }] });
     const key = randomUUID();
@@ -505,11 +505,11 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     let firstResult: Awaited<typeof firstConcurrent>;
     try {
       second = await cancelOrder(other.accountId, other.orderId, {});
-      // 정본은 409 merch-cancel-not-allowed다. 지금은 저장소가 Drizzle 오류의 cause.code를 풀지 못해 500이 온다
-      // (계획 '시험 결과'의 발견한 구현 결함). 이 시험은 '한 건만 환급' 불변식을 보고, 409 단언은 구현 고침 뒤로 미룬다
-      expect([409, 500], second.payload).toContain(second.statusCode);
-      expect(second.statusCode).not.toBe(202);
+      // 두 번째는 부분 유일(merch_refund_item)을 업무 409로 바꾼 답이어야 한다
+      expect(second.statusCode, second.payload).toBe(409);
+      expect(problem(second).type).toContain('merch-cancel-not-allowed');
       expect(await refundsOf(other.orderId)).toHaveLength(1);
+      expect(await refundItemsOf(other.orderId)).toHaveLength(1);
     } finally {
       release();
       firstResult = await firstConcurrent;
@@ -518,6 +518,7 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(bodyOf(firstResult)).toMatchObject({ cancellationId: firstId, status: 'REFUNDED', refundAmount: 13_000 });
     expect(payments.cancels.filter((c) => c.paymentId === other.paymentId)).toHaveLength(1);
     expect(await refundsOf(other.orderId)).toMatchObject([{ id: firstId, status: 'CANCELLED' }]);
+    expect(await refundItemsOf(other.orderId)).toHaveLength(1);
     expect((await itemsOf(other.orderId))[0]!.status).toBe('CANCELLED');
   });
 });
