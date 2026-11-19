@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 39 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 131 |
+| A | 50 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 142 |
 | B | 0 | 97 | 0 | 0 | 0 | 0 | 0 | 20 | 9 | 126 |
-| 합계 | 39 | 116 | 0 | 0 | 0 | 0 | 0 | 20 | 82 | 257 |
+| 합계 | 50 | 116 | 0 | 0 | 0 | 0 | 0 | 20 | 82 | 268 |
 
 ## docs/features/transfer-refund.md
 
@@ -143,6 +143,17 @@
 | R-T39 | ⑥ | 예매 취소의 재인증 토큰(추천 적용 2026-11-18, §3.1 '팬… | ⑥ 둘 다 시작하지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/fan-reauth-wiring.test.ts |
 | R-T39 | ⑦ | 예매 취소의 재인증 토큰(추천 적용 2026-11-18, §3.1 '팬… | ⑦ 500이고 `Retry-After`가 없으며 호출 0 | 자동 시험 | A | 시험: services/purchase-svc/test/cancel-reauth-http.test.ts, services/purchase-svc/test/jwks-fan-reauth-gate.test.ts |
 | R-T39 | ⑧ | 예매 취소의 재인증 토큰(추천 적용 2026-11-18, §3.1 '팬… | ⑧ 모두 403 `reauth-required`이고 ticket-svc·payment-svc 호출, `order_cancellation` 쓰기, `jti`… | 자동 시험 | A | 시험: services/purchase-svc/test/cancel-reauth-http.test.ts |
+| R-T40 | ① | 회차 취소 일괄 환불의 가상계좌 항목(추천 적용, 2026-11-19… | ① 카드 주문은 환급되고 가상계좌 주문의 두 표는 결제사 호출 0으로 항목이 `ACCOUNT_PENDING`, 취소 행은… | 자동 시험 | A | 시험: services/purchase-svc/test-int/event-cancel-r-t24.int.test.ts, services/purchase-svc/test/event-refund-account-pendi… |
+| R-T40 | ② | 회차 취소 일괄 환불의 가상계좌 항목(추천 적용, 2026-11-19… | ② 그 두 취소마다 CS 처리함 '환불 대기'(`REFUND_ACCOUNT_PENDING`) 건이 한 번씩 열리고(같은 틱을 다시 돌려도 한 건)… | 자동 시험 | A | 시험: services/purchase-svc/test-int/event-cancel-r-t24.int.test.ts |
+| R-T40 | ③ | 회차 취소 일괄 환불의 가상계좌 항목(추천 적용, 2026-11-19… | ③ 계좌 대기 항목은 자동 정지의 실패율·연속 실패·실패 금액에 들지 않고, 다음 틱에 결제사로 다시 가지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/event-cancel-r-t24.int.test.ts, services/purchase-svc/test/event-refund-account-pendi… |
+| R-T40 | ④ | 회차 취소 일괄 환불의 가상계좌 항목(추천 적용, 2026-11-19… | ④ 남은 항목이 계좌 대기뿐이면 요청이 COMPLETED이고 진행 합계에 계좌 대기 2가 따로 있다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/event-cancel-r-t24.int.test.ts, services/purchase-svc/test/event-refund-account-pendi… |
+| R-T40 | ⑤ | 회차 취소 일괄 환불의 가상계좌 항목(추천 적용, 2026-11-19… | ⑤ 관제 상세 `GET /v1/ops/event-cancellations/{requestId}`의 `progress.accountPending`이… | 자동 시험 | A | 시험: services/ops-svc/test/event-cancellations-http.test.ts, services/ops-svc/test/grpc-event-refunds.test.ts |
+| R-T41 | ① | core 회차 상태 반영(추천 적용, 2026-11-19… | ① 첫 확정 뒤 core 회차가 CANCELLED이고 공연은 검색에 남으며 무효화·`search_removed`가 0이다. 둘째 확정 뒤 공연이 검색에서 빠지고… | 자동 시험 | A | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-cancellation-status.test.ts |
+| R-T41 | ② | core 회차 상태 반영(추천 적용, 2026-11-19… | ② 같은 요청으로 다시 부르면 바뀐 것·무효화·줄이 0이다 | 자동 시험 | A | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-cancellation-status.test.ts |
+| R-T41 | ③ | core 회차 상태 반영(추천 적용, 2026-11-19… | ③ core가 실패하면 확정은 202 그대로이고 `core_applied_at`이 비며, core가 살아나면 다시 하기가 한 번 반영하고 칸을 쓴다. 10분이… | 자동 시험 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-core-apply-main… |
+| R-T41 | ④ | core 회차 상태 반영(추천 적용, 2026-11-19… | ④ 연기 확정 뒤 core 회차가 POSTPONED와 바뀐 시작이고 판매 멈춤은 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-cancellation-status.test.ts… |
+| R-T41 | ⑤ | core 회차 상태 반영(추천 적용, 2026-11-19… | ⑤ 없는 회차는 404, CANCELLED 회차의 연기는 409 `event-status-conflict`, 공유 토큰이 없거나 틀리면 401이고 셋 다… | 자동 시험 | A | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-cancellation-status.test.ts |
+| R-T41 | ⑥ | core 회차 상태 반영(추천 적용, 2026-11-19… | ⑥ 같은 회차의 연기 P1이 반영 못 한 채 뒤 연기 P2(또는 CANCEL)가 반영되면 다음 바퀴가 P1을 부르지 않고… | 자동 시험 | A | 시험: services/core-svc/test/event-cancellation-status.test.ts, services/ops-svc/test-int/event-cancellations.int.test.ts… |
 
 ## docs/security/asvs/transfer-refund.md
 
@@ -238,7 +249,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 (영역: 아직 코드가… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/platform/test/telemetry.test.ts 외 4곳… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 16곳 (영역: 아직 코드가 없다) |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 19곳 (영역: 아직 코드가 없다) |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs (영역: 아직 코드가 없다) |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs (영역: 아직 코드가 없다) |
@@ -260,7 +271,7 @@
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: 아직 코드가 없다) |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: 아직 코드가 없다) |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: 아직 코드가 없다) |
-| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | ID만 | B | 다른 곳 시험: loadtest/test/before090.test.mjs, loadtest/test/lib.test.mjs 외 80곳 (영역: 아직 코드가 없다) |
+| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | ID만 | B | 다른 곳 시험: loadtest/test/before090.test.mjs, loadtest/test/lib.test.mjs 외 81곳 (영역: 아직 코드가 없다) |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외… |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
