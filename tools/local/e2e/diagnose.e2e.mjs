@@ -81,7 +81,7 @@ async function stageDiag(t) {
       '--set', `name=${SERVICE}`, '--set', `image.repository=${repo}`, '--set', `image.tag=${tag}`, '--set', 'image.pullPolicy=Never',
       '--set', 'env.PEAKET_ENV=local', '--set', 'service.replicas=2',
       '--set', 'service.env.PEAKET_DATABASE_URL=postgres://postgres:peaket-local@postgres.peaket-local.svc:5432/diag_example',
-      '--set', `diagnose.bucket=${BUCKET}`, '--set', 'diagnose.s3Endpoint=http://aws.peaket-local.svc:5000',
+      '--set', `diagnose.bucket=${BUCKET}`, '--set', 'diagnose.s3Endpoint=http://aws.peaket-local.svc.cluster.local:5000',
       '--set', 'service.env.AWS_ACCESS_KEY_ID=test', '--set', 'service.env.AWS_SECRET_ACCESS_KEY=test', '--set', 'service.env.AWS_REGION=ap-northeast-2',
     ],
     { stdio: 'inherit' },

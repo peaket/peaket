@@ -467,7 +467,7 @@ describe('BAS-080 증거 저장소 설정이 없을 때(ADR-0303 결정 3, 구�
 
     test(`${peaketEnv}에서_흉내S3주소를주면_증거를전용버킷밖으로보내지않게_시작하지않는다(SEC-01)`, () => {
       const env = { PEAKET_DIAG_ANNOTATIONS_FILE: '/etc/podinfo/annotations', PEAKET_DIAG_BUCKET: 'b' };
-      for (const endpoint of ['http://aws.peaket-local.svc:5000', 'https://s3.example.net']) {
+      for (const endpoint of ['http://aws.peaket-local.svc.cluster.local:5000', 'https://s3.example.net']) {
         expect(() => diagnoseConfigFromEnv({ ...env, PEAKET_DIAG_S3_ENDPOINT: endpoint }, peaketEnv), endpoint).toThrow(PlatformConfigError);
         expect(() => diagnoseConfigFromEnv({ ...env, PEAKET_DIAG_S3_ENDPOINT: endpoint }, peaketEnv), endpoint).toThrow(/PEAKET_DIAG_S3_ENDPOINT/);
       }
