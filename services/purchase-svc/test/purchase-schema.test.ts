@@ -32,7 +32,7 @@ import { orderCancellation, orderEvent, orderIdempotency, orderItem, orderSagaJo
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { priorityGrant } from '../src/modules/priority/adapters/db/schema.js';
-import { eventCancellationRequest, eventRefundAttempt, eventRefundItem, fraudCancellationRequest, fraudCancellationTicket } from '../src/modules/refund/adapters/db/schema.js';
+import { compensation, eventCancellationRequest, eventRefundAttempt, eventRefundItem, fraudCancellationRequest, fraudCancellationTicket } from '../src/modules/refund/adapters/db/schema.js';
 import { saleControl } from '../src/modules/sale-control/adapters/db/schema.js';
 // BAT-420 몫 D: 새 표 eventRefundHold는 구현 담당이 만든다. 아직 없어도 이 파일이 컴파일되게 이름공간으로 읽는다(쓰는 시험만 실패한다)
 import * as refundSchema from '../src/modules/refund/adapters/db/schema.js';
@@ -654,13 +654,15 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const ORDER_TABLES = [purchaseOrder, orderItem, orderEvent, orderIdempotency, paymentAttempt, orderSagaJob, ticketIssueJob, ticketVoidJob, orderCancellation];
   const ORDER_SHAPES = ORDER_TABLES.map(shapeOf);
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
+  /** BAT-425 배상금 표(purchase 0030) */
+  const compensationShape = shapeOf(compensation);
 
   // 마지막 스냅샷은 기록의 마지막 마이그레이션 것이다(수를 고정하지 않는다, W9-fix2 시험 이의 4)
-  test('마지막 스냅샷(기록의 마지막, 지금 0027_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘, 환급 미룸 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
+  test('마지막 스냅샷(기록의 마지막, 지금 0030_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘, 환급 미룸 표 하나, 배상금 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
     expect(snapshotFiles.at(-1)).toBe(`${String(journal.entries.at(-1)!.idx).padStart(4, '0')}_snapshot.json`);
-    expect(Number(snapshotFiles.at(-1)!.slice(0, 4))).toBeGreaterThanOrEqual(27);
+    expect(Number(snapshotFiles.at(-1)!.slice(0, 4))).toBeGreaterThanOrEqual(30);
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    const all = [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes, holdShape()];
+    const all = [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes, holdShape(), compensationShape];
     expect(Object.keys(snap.tables).sort()).toEqual(all.map((s) => `public.${s.name}`).sort());
     for (const s of all) {
       const t = snap.tables[`public.${s.name}`]!;

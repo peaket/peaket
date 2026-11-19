@@ -10,6 +10,8 @@ import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { PaymentEvent } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
 import { payment, paymentCancel, paymentConfirmJob, paymentEvent, reconciliationDiff, reconciliationRun, reconciliationSeen, webhookReceipt, pgSwitch, eventPgConfig, paymentEntryPause, paymentEntryTrial, paymentChannelLimit, paymentPgChannelObserved } from '../src/modules/payment/adapters/db/schema.js';
+import { compensationTransfer } from '../src/modules/compensation/adapters/db/schema.js';
+import { partnerReceivable } from '../src/modules/settlement/adapters/db/schema.js';
 import { PAYMENT_LEDGER_STATUSES } from '../src/modules/payment/domain/confirm-command.js';
 
 const SERVICE = fileURLToPath(new URL('..', import.meta.url));
@@ -43,6 +45,8 @@ const ADDED_COLUMN_0022 = 'order_kind';
 const ADDED_CHECKS_0022 = ['payment_order_kind_check', 'payment_order_kind_event_check'];
 /** payment_cancel.fail_reason(BAT-420-rest 리뷰 반영 RV-03, docs/features/payment.md §6 '구현에서 정한 것' ④, docs/data.md payment_cancel) */
 const TAG_0023 = '0023_payment_cancel_fail_reason';
+/** 같은 취소 ID 시도 번호·SUPERSEDED·배상 송금 표(BAT-425, ADR-0316·0317, docs/data.md payment_cancel·compensation_transfer) */
+const TAG_0024 = '0024_payment_cancel_attempt_compensation';
 /** 비워 둔 번호(docs/lanes/coord.md)가 있으면 그 자리를 건너 견준다. 지금은 없다(0022를 BAT-600이 채웠다) */
 const RESERVED_ELSEWHERE = new Set<number>([]);
 const reservedFile = (f: string) => [...RESERVED_ELSEWHERE].some((n) => f.startsWith(`${String(n).padStart(4, '0')}_`));
@@ -92,6 +96,8 @@ const selectionShapes = [shapeOf(pgSwitch), shapeOf(eventPgConfig)];
 const entryShapes = [shapeOf(paymentEntryPause), shapeOf(paymentEntryTrial)];
 const limitShapes = [shapeOf(paymentChannelLimit), shapeOf(paymentPgChannelObserved)];
 const cancelShape = shapeOf(paymentCancel);
+const compensationShape = shapeOf(compensationTransfer);
+const receivableShape = shapeOf(partnerReceivable);
 const TABLES = [payment, paymentEvent, paymentConfirmJob];
 const SHAPES = [paymentShape, eventShape, jobShape];
 const cols = (s: ReturnType<typeof shapeOf>): [string, string, boolean][] => s.columns.map((c) => [c.name, c.type, c.notNull]);
@@ -577,6 +583,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const snap0021 = snapshotOf('0021_snapshot.json');
   // 마지막 스냅샷(0023, BAT-420-rest 리뷰 반영 RV-03). 그 앞은 0022(BAT-600 굿즈 원장)다
   const latestAll = snapshotOf('0023_snapshot.json');
+  const latest24 = snapshotOf('0024_snapshot.json');
   const snap0022 = snapshotOf('0022_snapshot.json');
 
   test('P-T43_리뷰 고침 H4: 0011 스냅샷의 앞은 0010 스냅샷이고, SQL은 reopened_at과 first_call_at 칸만 더한다', () => {
@@ -629,7 +636,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
 
   // BAT-420-rest 리뷰 반영 RV-03(정본 변경 반영, 시험 담당 l3-b420-test): 0023 payment_cancel.fail_reason을 더했다.
   // BAT-600이 비워 두었던 0022(payment.order_kind)를 채웠다. 비워 둔 번호가 다시 생기면 reservedFile이 그 자리를 건너 견준다
-  test('PRF182_PRF183_기록은 0000~0023 차례이고 SQL 파일과 맞는다(0021은 GAT-080 payment_cancel, 0022는 BAT-600 주문 종류, 0023은 fail_reason)', () => {
+  test('PRF182_PRF183_기록은 0000~0024 차례이고 SQL 파일과 맞는다(0021은 GAT-080 payment_cancel, 0022는 BAT-600 주문 종류, 0023은 fail_reason, 0024는 BAT-425 시도 번호·배상 송금)', () => {
     expect(journal.dialect).toBe('postgresql');
     for (const e of journal.entries.filter((x) => RESERVED_ELSEWHERE.has(x.idx))) expect(e.tag, `${e.idx}`).toMatch(new RegExp(`^${String(e.idx).padStart(4, '0')}_`));
     expect(journal.entries.map((e) => e.idx)).toEqual([...journal.entries.map((e) => e.idx)].sort((a, b) => a - b));
@@ -660,6 +667,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [21, TAG_0021],
       [22, TAG_0022],
       [23, TAG_0023],
+      [24, TAG_0024],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -688,16 +696,17 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[21]!.when).toBeGreaterThan(journal.entries[20]!.when);
     expect(journal.entries[22]!.when).toBeGreaterThan(journal.entries[21]!.when);
     expect(journal.entries[23]!.when).toBeGreaterThan(journal.entries[22]!.when);
-    // 0023은 0022보다 뒤에 만들었다
-    expect(known.at(-1)!.tag).toBe(TAG_0023);
+    expect(journal.entries[24]!.when).toBeGreaterThan(journal.entries[23]!.when);
+    // 0024는 0023보다 뒤에 만들었다
+    expect(known.at(-1)!.tag).toBe(TAG_0024);
     expect(known.at(-1)!.when).toBeGreaterThan(known.at(-2)!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
     // 비워 둔 번호는 지금 없다(0022는 BAT-600이 채웠다). reservedFile은 그 자리를 지키는 장치로 남긴다
     for (const f of readdirSync(MIGRATIONS).filter((x) => x.endsWith('.sql') && reservedFile(x))) expect(journal.entries.map((e) => `${e.tag}.sql`), f).toContain(f);
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql') && !reservedFile(f))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`, `${TAG_0021}.sql`, `${TAG_0022}.sql`, `${TAG_0023}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json') && !reservedFile(f))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json', '0021_snapshot.json', '0022_snapshot.json', '0023_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql') && !reservedFile(f))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`, `${TAG_0021}.sql`, `${TAG_0022}.sql`, `${TAG_0023}.sql`, `${TAG_0024}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json') && !reservedFile(f))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json', '0021_snapshot.json', '0022_snapshot.json', '0023_snapshot.json', '0024_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {
@@ -789,8 +798,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     const shapes = [...SHAPES, receiptShape, ...reconShapes, ...selectionShapes, ...entryShapes, ...limitShapes, cancelShape];
     expect(Object.keys(latestAll.tables).filter((t) => shapes.some((s) => `public.${s.name}` === t)).sort()).toEqual(shapes.map((s) => `public.${s.name}`).sort());
     for (const s of shapes) {
-      // 0023은 0021에서 갈라진 스냅샷이라 0022의 order_kind가 없다. payment_cancel은 0023, 나머지는 0022에서 본다
-      const snapshot = s.name === 'payment_cancel' ? latestAll : snap0022;
+      // 0023은 0021에서 갈라진 스냅샷이라 0022의 order_kind가 없다. payment_cancel은 0024, 나머지는 0022에서 본다
+      const snapshot = s.name === 'payment_cancel' ? latest24 : snap0022;
       const t = snapshot.tables[`public.${s.name}`]!;
       expect(Object.entries(t.columns).map(([n, c]) => [n, c.type, c.notNull]), s.name).toEqual(cols(s));
       expect(Object.entries(t.columns).filter(([, c]) => c.primaryKey).map(([n]) => n), s.name).toEqual(s.columns.filter((c) => c.primary).map((c) => c.name));
@@ -820,16 +829,17 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(statements[1]).toBe('alter table payment_cancel add constraint payment_cancel_payment_id_payment_id_fk foreign key(payment_id)references payment(id)on delete no action on update no action;');
     expect(statements[2]).toBe('create unique index payment_cancel_payment_idempotency_key on payment_cancel using btree(payment_id,idempotency_key);');
     expect(statements[3]).toBe("create index payment_cancel_in_progress_idx on payment_cancel using btree(payment_id)where status in('REQUESTED','CANCEL_PENDING');");
-    // fail_reason 칸과 그 검사는 0023이 더한다(아래 시험)
-    for (const c of cancelShape.columns.filter((x) => x.name !== 'fail_reason')) expect(statements[0], c.name).toContain(`${c.name} ${c.type}${c.primary ? ' primary key' : ''}${c.notNull ? ' not null' : ''}`);
-    for (const k of cancelShape.checks.filter((x) => x.name !== 'payment_cancel_fail_reason_check')) expect(statements[0], k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+    // fail_reason·attempt 칸과 그 검사는 0023·0024가 더한다(아래 시험)
+    for (const c of cancelShape.columns.filter((x) => x.name !== 'fail_reason' && x.name !== 'attempt')) expect(statements[0], c.name).toContain(`${c.name} ${c.type}${c.primary ? ' primary key' : ''}${c.notNull ? ' not null' : ''}`);
+    for (const k of cancelShape.checks.filter((x) => x.name !== 'payment_cancel_fail_reason_check' && x.name !== 'payment_cancel_attempt_check')) expect(statements[0], k.name).toContain(`constraint ${k.name} check(${k.expr})`);
     expect(statements[0]).not.toContain('fail_reason');
+    expect(statements[0]).not.toContain('attempt');
     expect(Object.keys(snap0021.tables['public.payment_cancel']!.columns)).not.toContain('fail_reason');
   });
 
-  test('RV-03 0023 스냅샷의 앞은 0021 스냅샷이고, SQL은 payment_cancel.fail_reason 칸(빈 값 허용)과 payment_cancel_fail_reason_check 둘만 더한다(지우거나 바꾸는 문 없음)', () => {
-    expect(latestAll.prevId).toBe(snap0021.id);
-    expect(Object.keys(latestAll.tables).sort()).toEqual(Object.keys(snap0021.tables).sort());
+  test('RV-03 0023 스냅샷의 앞은 0022 스냅샷이고, SQL은 payment_cancel.fail_reason 칸(빈 값 허용)과 payment_cancel_fail_reason_check 둘만 더한다(지우거나 바꾸는 문 없음)', () => {
+    expect(latestAll.prevId).toBe(snap0022.id);
+    expect(Object.keys(latestAll.tables).sort()).toEqual(Object.keys(snap0022.tables).sort());
     expect(latestAll.tables['public.payment_cancel']!.columns['fail_reason']).toMatchObject({ type: 'text', notNull: false, primaryKey: false });
     expect(Object.keys(latestAll.tables['public.payment_cancel']!.checkConstraints)).toContain('payment_cancel_fail_reason_check');
     const sqlOf = readFileSync(join(MIGRATIONS, `${TAG_0023}.sql`), 'utf8').replace(/\r\n/g, '\n');
@@ -837,7 +847,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     const statements = sqlOf.replace(/^--.*$/gm, '').split(BREAKPOINT).map((x) => canon(x)).filter((x) => x !== '');
     expect(statements).toEqual([
       'alter table payment_cancel add column fail_reason text;',
-      `alter table payment_cancel add constraint payment_cancel_fail_reason_check check(${checkOf(cancelShape, 'payment_cancel_fail_reason_check')});`,
+      "alter table payment_cancel add constraint payment_cancel_fail_reason_check check(fail_reason is null or(status = 'FAILED' and fail_reason = 'REFUND_ACCOUNT_INVALID'));",
     ]);
   });
 
@@ -846,6 +856,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       ['id', 'uuid', true],
       ['payment_id', 'uuid', true],
       ['idempotency_key', 'text', true],
+      // BAT-425(ADR-0316): 같은 취소 ID의 계좌 다시 받기 시도 번호. 0024가 기본 0으로 더한다
+      ['attempt', 'integer', true],
       ['amount', 'integer', true],
       ['reason', 'text', true],
       ['full_cancel', 'boolean', true],
@@ -857,8 +869,8 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       ['fail_reason', 'text', false],
     ]);
     expect(cancelShape.columns.filter((c) => c.primary).map((c) => c.name)).toEqual(['id']);
-    // 빈 값이거나 status = 'FAILED'이고 값이 REFUND_ACCOUNT_INVALID(docs/features/payment.md §6 '구현에서 정한 것' ④, 계획 '리뷰 반영 계획' §4)
-    expect(checkOf(cancelShape, 'payment_cancel_fail_reason_check')).toBe("fail_reason is null or(status = 'FAILED' and fail_reason = 'REFUND_ACCOUNT_INVALID')");
+    // 빈 값이거나 status = 'FAILED'이고 값이 REFUND_ACCOUNT_INVALID·SUPERSEDED다(0023·0024, payment §4.1·§6)
+    expect(checkOf(cancelShape, 'payment_cancel_fail_reason_check')).toBe("fail_reason is null or(status = 'FAILED' and fail_reason in('REFUND_ACCOUNT_INVALID','SUPERSEDED'))");
     expect(checkOf(cancelShape, 'payment_cancel_amount_check')).toBe('amount > 0');
     expect(checkOf(cancelShape, 'payment_cancel_expected_balance_check')).toBe('expected_balance >= amount');
     expect(literalsOf(checkOf(cancelShape, 'payment_cancel_status_check'))).toEqual(['REQUESTED', 'CANCEL_PENDING', 'CANCELED', 'FAILED']);
@@ -898,5 +910,48 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(literalsOf(checkOf(paymentShape, 'payment_order_kind_check'))).toEqual(['TICKET', 'MERCH']);
     expect(checkOf(paymentShape, 'payment_order_kind_event_check')).toBe("(order_kind = 'TICKET')=(event_id is not null)");
     expect(paymentShape.columns.find((c) => c.name === 'order_kind')).toEqual({ name: 'order_kind', type: 'text', notNull: true, hasDefault: true, primary: false });
+  });
+
+  test('BAT-425 0024 스냅샷의 앞은 0023 스냅샷이고, payment_cancel.attempt·fail_reason SUPERSEDED·compensation_transfer 표·partner_receivable의 배상 미수금 칸을 더한다', () => {
+    expect(latest24.prevId).toBe(latestAll.id);
+    // payment_cancel: attempt 칸과 확장한 fail_reason CHECK
+    const cancel24 = latest24.tables['public.payment_cancel']!;
+    expect(Object.entries(cancel24.columns).map(([n, c]) => [n, c.type, c.notNull])).toEqual(cols(cancelShape));
+    expect(cancel24.columns['attempt']).toMatchObject({ type: 'integer', notNull: true });
+    expect(Object.keys(cancel24.checkConstraints)).toEqual(cancelShape.checks.map((k) => k.name));
+    expect(checkOf(cancelShape, 'payment_cancel_attempt_check')).toBe('attempt >= 0 and attempt <= 3');
+    expect(literalsOf(checkOf(cancelShape, 'payment_cancel_fail_reason_check'))).toEqual(['FAILED', 'REFUND_ACCOUNT_INVALID', 'SUPERSEDED']);
+    // 0021의 유일 인덱스는 그대로다(부분 취소가 여럿일 수 있어 (payment_id, attempt) 유일은 두지 않는다)
+    expect(cancel24.indexes['payment_cancel_payment_idempotency_key']).toMatchObject({ isUnique: true });
+    expect(Object.keys(cancel24.indexes)).toEqual(cancelShape.indexes.map((i) => i.name));
+
+    // compensation_transfer: compensation_id 유일, 계좌는 끝 4자리만
+    const transfer = latest24.tables['public.compensation_transfer']!;
+    expect(transfer).toBeDefined();
+    expect(Object.entries(transfer.columns).map(([n, c]) => [n, c.type, c.notNull])).toEqual(cols(compensationShape));
+    expect(Object.entries(transfer.columns).filter(([, c]) => c.primaryKey).map(([n]) => n)).toEqual(['id']);
+    expect(Object.keys(transfer.checkConstraints)).toEqual(compensationShape.checks.map((k) => k.name));
+    expect(Object.entries(transfer.indexes).map(([n, x]) => [n, x.isUnique])).toEqual(compensationShape.indexes.map((x) => [x.name, x.unique]));
+    expect(transfer.indexes['compensation_transfer_compensation_id_key']).toMatchObject({ isUnique: true });
+    expect(transfer.columns['account_last4']).toMatchObject({ type: 'text', notNull: true });
+    expect(Object.keys(transfer.columns)).not.toContain('account_number');
+
+    // partner_receivable: pg 빈 값 허용, event_id·source_ref, source_ref 부분 유일
+    const receivable = latest24.tables['public.partner_receivable']!;
+    expect(Object.entries(receivable.columns).map(([n, c]) => [n, c.type, c.notNull])).toEqual(cols(receivableShape));
+    expect(receivable.columns['pg']).toMatchObject({ type: 'text', notNull: false });
+    expect(Object.keys(receivable.columns)).toEqual(expect.arrayContaining(['event_id', 'source_ref']));
+    expect(receivable.indexes['partner_receivable_source_ref_uidx']).toMatchObject({ isUnique: true });
+    expect(Object.keys(receivable.checkConstraints)).toEqual(receivableShape.checks.map((k) => k.name));
+  });
+
+  test('BAT-425 0024 SQL은 새 표·칸·유일 인덱스와 CHECK 교체만 하고 표·행을 지우지 않는다 [ASVS v5.0.0-2.3.4]', () => {
+    const sqlOf = readFileSync(join(MIGRATIONS, `${TAG_0024}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(sqlOf).not.toMatch(/\b(TRUNCATE|DELETE FROM|UPDATE "|RENAME|DROP TABLE|DROP COLUMN)\b/);
+    expect(sqlOf).toContain('CREATE TABLE "compensation_transfer"');
+    expect(sqlOf).toContain('ALTER TABLE "payment_cancel" ADD COLUMN "attempt" integer DEFAULT 0 NOT NULL');
+    expect(sqlOf).toContain("'SUPERSEDED'");
+    expect(sqlOf).toContain('CREATE UNIQUE INDEX "compensation_transfer_compensation_id_key"');
+    expect(sqlOf).toContain('CREATE UNIQUE INDEX "partner_receivable_source_ref_uidx"');
   });
 });

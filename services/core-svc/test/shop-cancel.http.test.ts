@@ -430,6 +430,36 @@ describe('환불 계좌 모양(P-T63 ③, 공용 표)', () => {
     }
   });
 
+  test('P-T63 ③ 목록 밖 은행 코드(99·04)는 400이고 재인증·결제사를 부르지 않는다. 토스 은행 코드 표 26개는 모두 통과한다(경계)', async () => {
+    const codes = ['02', '03', '06', '07', '11', '12', '20', '23', '27', '31', '32', '34', '35', '37', '39', '45', '48', '50', '54', '64', '71', '81', '88', '89', '90', '92'];
+    expect(codes).toHaveLength(26);
+    for (const bankCode of codes) {
+      const f = paidOrder();
+      vaPayment(f.orderId);
+      const sessionId = randomUUID();
+      const tk = tokenFor({ accountId: f.accountId, sessionId });
+      const res = await cancel(f.accountId, f.orderId, { refundAccount: { ...ACCOUNT_BODY, bankCode } }, { sessionId, token: tk.t });
+      expect(res.statusCode, `${bankCode}: ${res.payload}`).toBe(202);
+      expect(payments.calls.cancel.at(-1)!.refundAccount, bankCode).toMatchObject({ bankCode });
+    }
+    for (const bankCode of ['99', '04']) {
+      const f = paidOrder();
+      vaPayment(f.orderId);
+      const sessionId = randomUUID();
+      const tk = tokenFor({ accountId: f.accountId, sessionId });
+      const writes = orders.writes;
+      const refunds = orders.refunds.size;
+      const calls = payments.calls.cancel.length;
+      const claims = redis.commands.length;
+      const res = await cancel(f.accountId, f.orderId, { refundAccount: { ...ACCOUNT_BODY, bankCode } }, { sessionId, token: tk.t });
+      expect(res.statusCode, `${bankCode}: ${res.payload}`).toBe(400);
+      expect(payments.calls.cancel.length, bankCode).toBe(calls);
+      expect(redis.commands.length, `${bankCode}: 재인증 0`).toBe(claims);
+      expect(orders.writes, bankCode).toBe(writes);
+      expect(orders.refunds.size, bankCode).toBe(refunds);
+    }
+  });
+
   test('P-T63 ③ 예금주에 제어 문자가 있으면 400이고 재인증·결제사를 부르지 않는다', async () => {
     const f = paidOrder();
     vaPayment(f.orderId);

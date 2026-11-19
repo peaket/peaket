@@ -181,17 +181,23 @@ describe('P-T71 쓰임새의 가상계좌 갈래(저장소 판정을 쓰는 쪽)
     }
   });
 
-  test('P-T74 ③ 포트원 결제에 대응표 밖 은행 코드(04)가 오면 모양이 틀린 계좌와 같다: 저장소에 hasRefundAccount를 알리지 않는다. 토스 결제의 같은 코드는 계좌다(대조)', async () => {
-    const portone = fixture({ target: { ...TARGET, pg: 'PORTONE' }, begin: { status: 'ACCOUNT_REQUIRED' } });
-    await expect(run(portone, { ...RAW_ACCOUNT, bankCode: '04' })).resolves.toEqual({ result: 'REFUND_ACCOUNT_REQUIRED', cancelledAmount: 0 });
-    expect(portone.begins[0]).not.toHaveProperty('hasRefundAccount');
-    expect(portone.cancels).toHaveLength(0);
-    const portoneMapped = fixture({ target: { ...TARGET, pg: 'PORTONE' }, begin: { status: 'ACCOUNT_REQUIRED' } });
-    await run(portoneMapped, { ...RAW_ACCOUNT, bankCode: '88' });
-    expect(portoneMapped.begins[0]).toMatchObject({ hasRefundAccount: true });
-    const toss = fixture({ begin: { status: 'ACCOUNT_REQUIRED' } });
-    await run(toss, { ...RAW_ACCOUNT, bankCode: '04' });
-    expect(toss.begins[0]).toMatchObject({ hasRefundAccount: true });
+  test('P-T74 ③ 목록 밖 은행 코드(04·99)는 결제사와 관계없이 모양이 틀린 계좌와 같다: hasRefundAccount를 알리지 않고 결제사 0. 토스 은행 코드 표 26개는 모두 계좌다', async () => {
+    for (const pg of ['PORTONE', 'TOSS'] as const) {
+      for (const bankCode of ['04', '99']) {
+        const f = fixture({ target: { ...TARGET, pg }, begin: { status: 'ACCOUNT_REQUIRED' } });
+        await expect(run(f, { ...RAW_ACCOUNT, bankCode }), `${pg}:${bankCode}`).resolves.toEqual({ result: 'REFUND_ACCOUNT_REQUIRED', cancelledAmount: 0 });
+        expect(f.begins[0], `${pg}:${bankCode}`).not.toHaveProperty('hasRefundAccount');
+        expect(f.cancels, `${pg}:${bankCode}`).toHaveLength(0);
+      }
+    }
+    // 정본 26개(02·03·06·07·11·12·20·23·27·31·32·34·35·37·39·45·48·50·54·64·71·81·88·89·90·92)
+    const codes = ['02', '03', '06', '07', '11', '12', '20', '23', '27', '31', '32', '34', '35', '37', '39', '45', '48', '50', '54', '64', '71', '81', '88', '89', '90', '92'];
+    expect(codes).toHaveLength(26);
+    for (const bankCode of codes) {
+      const f = fixture({ target: { ...TARGET, pg: 'PORTONE' }, begin: { status: 'ACCOUNT_REQUIRED' } });
+      await run(f, { ...RAW_ACCOUNT, bankCode });
+      expect(f.begins[0], bankCode).toMatchObject({ hasRefundAccount: true });
+    }
   });
 
   test('P-T71 ④ 결제사가 계좌를 거절하면(REJECTED·REFUND_ACCOUNT_INVALID) 행을 FAILED로 끝내고 REFUND_ACCOUNT_REQUIRED다. 까닭 없는 거절은 REJECTED다', async () => {
