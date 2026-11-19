@@ -805,6 +805,7 @@
 | R-709 | 판매 자격 명단 시작 조립 시험이 고정 날짜의 24시간 전 잠금 시각을 지나 409로 실패했다 | services/core-svc/test-int/sale-eligibility.int.test.ts | 그 시험만 presale 시작을 2030년으로 옮김, 23/23 통과 | 완료 |
 | R-710 | I-T26 ③ 시험이 공연 +2시간이 자정을 넘는 밤에 POL-032 공제 밴드가 달라져 실패했다 | services/purchase-svc/test-int/withdrawal-participant.int.test.ts | 기대 공제를 실제 공연 날짜의 정책 함수로 계산, I-T26 4건 통과 | 완료 |
 | R-711 | BAT-080 완료 표시·BAT-081 분리·lane4 로그를 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane4.md, docs/review/plans/BAT-080.md | 단계 완료·다음 묶음 행·진행 로그 | 완료 |
+| R-712 | BAT-605 완료 표시·lane5 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane5.md, docs/review/plans/BAT-605.md | 단계 완료·진행 로그·검증 기록 | 완료 |
 
 ## 4. 숫자 일치표
 
