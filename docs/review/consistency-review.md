@@ -800,6 +800,7 @@
 | R-702 | 가상계좌 결제의 환불 계좌 전달이 없어 결제사가 계좌 없는 취소를 거절하고, 회차 취소 확정이 core 회차 상태·검색에 반영되지 않았다(GAT-090·GAT-110 서버 몫) | services/payment-svc·purchase-svc·ops-svc·core-svc·pg-simulator, packages/validation, proto·openapi·생성물, docs/features/payment.md §6·§11, transfer-refund.md §3.1·§5·§11, data.md, guidelines, ADR-0285 | 계획·구현·시험·리뷰·검증 다섯 담당, 리뷰 반영 한 바퀴와 다시 보기 | 끝(화면 몫 BAT-421) |
 | R-706 | identity 503 dependency-unavailable 제목이 정본과 달랐다 | services/identity-svc/src/modules/session/inbound/account.controller.ts | 정본 제목으로 고침, platform problem-types 통과 | 완료 |
 | R-707 | BAT-177 기록·브라우저 확인·다음 할 일을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane2.md, docs/review/browser-check/BAT-177.md | 단계 완료 표시·진행 로그·확인 기록 | 완료 |
+| R-697 | 굿즈 주문을 결제로 보낼 길이 없었다(ConfirmPayment가 event_id 필수, PRF-180이 넘긴 것) | services/core-svc(shop), services/payment-svc, services/purchase-svc, services/ticket-svc, services/invariant-checker, packages/contracts·api-client·validation, deploy/gateways, ADR-0299~0301, docs/features/payment.md, docs/data.md, docs/verification.md, docs/security/asvs/payment.md | 굿즈 주문·재고 예약·결제 접수와 시험 P-T42·P-T56~58·V-T35 ①②·V-T46 | 적용 |
 
 ## 4. 숫자 일치표
 
