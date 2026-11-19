@@ -190,5 +190,13 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 | 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
 | --- | --- | --- | --- | --- |
 | P-T76 |  | A | BAT-425 | 지연 환급 계좌 다시 받기의 새 시도 번호·`FAILED(SUPERSEDED)`·앞 진행 중 행 조회 닫기(ADR-0316). 돈이 나가는 이중 환불 가드라 A다. 정본 표는 `docs/features/payment.md` §11 P-T76이고 시험 이름으로 상태를 정한다 |
+| P-T74 ③ |  | A | BAT-425 | 지연 환급 계좌·배상 계좌의 은행 코드 26개 허용 목록(목록 밖 `99`는 400). 돈이 나갈 계좌를 가리는 입력이라 A다. 정본은 `docs/features/payment.md` §11 P-T74 ③(2026-11-20 고침) |
+| P-T63 ③ |  | A | BAT-425 | 굿즈 지연 환급 계좌의 같은 26개 허용 목록(목록 밖 400, 계좌 거절은 422·새 행 `REJECTED`). 정본은 `docs/features/transfer-refund.md` §11 P-T63 ③(2026-11-20 고침) |
+| R-T42 |  | A | BAT-425 | 예매 취소의 지연 환급 계좌 다시 받기(본인·계좌 대기·시도 상한·재인증 `REFUND_ACCOUNT`·계좌 미저장·시도별 멱등키). 돈이 나가는 환급 경로라 A다. 정본 표는 `docs/features/transfer-refund.md` §11 R-T42이고 시험 이름으로 상태를 정한다(ADR-0316) |
+| R-T43 |  | A | BAT-425 | 굿즈 취소의 지연 환급 계좌 다시 받기(core-svc shop 새 경로·새 `merch_refund` 행·`SHOP_CANCEL_REFUND_ACCOUNT`). 돈이 나가는 환급 경로라 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T43(ADR-0315·0316) |
+| R-T45 |  | B | BAT-425 | 일괄 환불 자동 정지의 결제사 서킷 연결(10초 캐시·`open`만 멈춤·읽기 실패는 계속). 환급을 멈추는 운영 동작이라 B다. 정본은 `docs/features/transfer-refund.md` §11 R-T45 |
+| R-T46 |  | A | BAT-425 | 배상 대상 행·목록(주문 단위 10%·원 미만 올림, 결제자 본인만, 계좌 끝 4자리만). 금액과 개인정보에 닿아 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T46(ADR-0317) |
+| R-T47 |  | A | BAT-425 | 배상 계좌 입력·송금(재인증 `COMPENSATION_ACCOUNT`, `UNAVAILABLE` 503, `FAILED` 422·CS `COMPENSATION_PENDING`). 돈이 나가는 송금 경로라 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T47(ADR-0317) |
+| J-T28 |  | A | BAT-425 | 배상금 미리 지급의 `COMPENSATION_ADVANCE` 미수금 생성·결제사 무관 상계·이중 상계 금지. 파트너 정산 금액에 닿아 A다. 정본은 `docs/features/settlement.md` §13 J-T28(ADR-0317) |
 
-- R-T42·R-T43·R-T45·R-T46·R-T47·J-T28의 notes 줄은 그 ID를 `docs/features/transfer-refund.md` §11·`docs/features/settlement.md` §11에 더하는 B·기록 담당이 같은 때 넣는다. 지금 넣으면 장부가 '정본에 없는 항목'으로 멈춘다(2026-11-20 A 확인).
+- ASVS 여섯 행(transfer-refund 2.3.3·2.3.4·8.2.2·8.2.3·16.2.5, payment 2.3.4·8.2.3·16.2.5)은 구현 위치가 이미 있고, 새 시험이 같은 태그를 달아 근거를 더한다(2026-11-20 B·기록 담당 확인). P-T74 ③·P-T63 ③은 기존 시나리오의 세부 번호를 고친 것이라 같은 줄에 적는다.

@@ -954,6 +954,7 @@ erDiagram
         int deduction_bp "공제율 기준점(1% = 100, 10% = 1000). 소수 numeric을 쓰지 않는다(추천 적용 2026-10-28, 기술 검토 낮음-095)"
         int deduction_amount "⌊티켓 금액 × deduction_bp ÷ 10000⌋. 원 미만 버림(POL-032)"
         int refund_amount "티켓 금액 − deduction_amount. 공용 함수 한 곳에서만 계산"
+        int refund_attempt "같은 취소 ID의 환급 시도 번호(0~3 [가정]). 0은 첫 시도(cancel-{id})이고 1~3은 지연 환급 계좌를 다시 받은 시도(cancel-{id}-a{n})다. 4 이상은 받지 않는다(BAT-425, ADR-0316, purchase 0030)"
         text status "REQUESTED|REFUND_PENDING|REFUNDED|VOIDED"
         timestamptz refund_due_at "입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다. core event.entry_closed_at 연결 전에는 공연 시작 + 50시간(공연 24 + 역할 유효 끝 2 + 미보고 24)의 보수적 상한이다(추천 적용 2026-11-13, R-540)"
         int refund_attempts "결제사 취소를 다시 시도한 횟수(REFUND_PENDING). 기본 0. 5회 [가정]를 넘으면 refund_failed_at을 남긴다(추천 적용 2026-11-13, R-547)"
@@ -1037,14 +1038,20 @@ erDiagram
     }
     compensation {
         uuid id PK
+        uuid event_cancellation_request_id "회차 취소 확정 요청(외래 키 없이 둔다). (event_cancellation_request_id, order_id) 유일이라 다시 확정해도 한 행이다(추천 적용 2026-11-20, BAT-425, ADR-0317, purchase 0030)"
         uuid order_id
-        uuid event_id
-        int base_amount "실제 결제 금액"
-        int amount "10%"
-        uuid receivable_id "이 배상금을 돌려받을 미수금(partner_receivable, 원인 COMPENSATION_ADVANCE). 상계·보증·청구로 어떻게 돌려받았는지는 미수금 이동 기록 하나에만 둔다. 예전 funding(OFFSET|GUARANTEE|ADVANCE) 칸은 지웠다(추천 적용 2026-10-28, 기술 검토 낮음-088)"
-        text status "ACCOUNT_PENDING|REQUESTED|PAID|FAILED"
-        text account_last4 "끝 4자리만, 계좌번호 저장 안 함"
-        text payout_ref
+        uuid event_id "원래 회차"
+        uuid account_id "그 주문의 결제자. 목록·상세는 이 계정의 건만 준다"
+        uuid promoter_id "배상금을 상계할 주최 측. purchase-svc가 파트너 ID를 읽는 길이 생기기 전에는 빈 값 허용"
+        int base_amount "그 주문의 대상 표 권면 합"
+        int amount "base_amount의 10%, 원 미만 올림(한 번만 계산해 저장). 0원 주문은 행 0"
+        uuid receivable_id "이 배상금을 돌려받을 미수금(partner_receivable, 원인 COMPENSATION_ADVANCE). PAID일 때만 있다. 회수 방식은 미수금 이동 기록 하나에만 둔다(추천 적용 2026-10-28, 기술 검토 낮음-088)"
+        text status "ACCOUNT_PENDING|REQUESTED|PAID|FAILED. PAID일 때 payment-svc가 COMPENSATION_ADVANCE 미수금을 만든다"
+        text account_last4 "끝 4자리만(짧은 계좌는 1~4자리), 계좌번호 원문은 저장하지 않는다(POL-014)"
+        text transfer_id "payment-svc가 준 송금 ID(ACCOUNT_PENDING이면 null). payment compensation_transfer와 compensation_id로 잇는다"
+        text failure_reason "FAILED의 개인정보 없는 까닭 이름표"
+        timestamptz created_at
+        timestamptz updated_at
     }
     order_item {
         uuid order_id PK "기본 키 (order_id, line_no). 표는 나누지 않는다(ADR-0114)"
