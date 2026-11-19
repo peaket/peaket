@@ -14,6 +14,7 @@ import { ProductionPoster } from '@/entities/production';
 import { cx } from '@/shared/lib/cx';
 import { InAppBrowserNotice } from '@/shared/ui/InAppBrowserNotice';
 import { PAST, T1, T2, T3, WALLET, walletView, type WalletState, type WalletView } from '../model/wallet';
+import { WALLET_QR_SKELETON } from './qr-skeleton';
 import { BoothReissue, CopyNoButton, DeviceQrLazy, GoButton, OfflineBannerLazy, ReturnToPayerButton, ToastButton, type DeviceQrSnapshot } from './WalletClient';
 
 export interface WalletProps {
@@ -155,7 +156,7 @@ function Poster() {
 
 /**
  * QR 조각을 받기 전에 서버가 먼저 그리는 자리(R-563). QR과 같은 400px 높이를 잡아 layout shift를 막고,
- * QR 모양 뼈대 그림을 첫 HTML에 넣어 LCP를 폰트 교체 뒤로 미루지 않는다. 그림은 public 정적 파일이라 첫 JS에 들어가지 않는다.
+ * QR 모양 뼈대 그림을 첫 HTML data URI로 넣어 LCP가 그림 요청·폰트 교체에 기대지 않게 한다(BAT-177). 그림은 첫 JS에 들어가지 않는다.
  */
 function DeviceQrFallback() {
   return (
@@ -166,12 +167,12 @@ function DeviceQrFallback() {
       <p className="t-md fw-b">입장할 때 쓸 휴대폰을 등록해야 QR이 나옵니다</p>
       <p className="t-sm muted">등록한 휴대폰에서만 입장 QR이 만들어집니다. 공연장에 가져갈 휴대폰에서 등록하세요.</p>
       <img
-        src="/wallet-qr-skeleton.png"
+        src={WALLET_QR_SKELETON}
         alt=""
         width={312}
         height={156}
         fetchPriority="high"
-        className="w-full max-w-[312px] rounded-(--r-lg)"
+        className="wallet-qr-skeleton w-full max-w-[312px] rounded-(--r-lg)"
         style={{ height: 'auto' }}
       />
     </div>

@@ -14,7 +14,7 @@ export async function MyTicketsPage({ searchParams }: PageProps) {
   const path = '/my/tickets';
   return (
     <>
-      <link rel="preload" as="image" href="/wallet-qr-skeleton.png" fetchPriority="high" />
+      {/* QR 뼈대는 Wallet의 DeviceQrFallback이 첫 HTML data URI로 그린다. 미리 받을 그림 요청이 없다(BAT-177). */}
       <AppShell dark={dark}>
         <Wallet state={state} path={path} dark={dark} />
         {process.env.NODE_ENV !== 'production' ? (

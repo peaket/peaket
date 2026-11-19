@@ -1,5 +1,5 @@
 // 성능 예산 기록(reports/sizes-js/*.json은 js.spec.mjs, reports/lighthouse/*.json은 lighthouse.spec.mjs가 남긴다)을
-// Markdown 표 둘로 표준 출력에 낸다(BUILD_ORDER BAS-220, docs/frontend.md §5.8). CSS 열의 표는 seed-css/report.mjs다.
+// Markdown 표 셋(첫 JS·Lighthouse·LCP 분해)으로 표준 출력에 낸다(BUILD_ORDER BAS-220, docs/frontend.md §5.8). CSS 열의 표는 seed-css/report.mjs다.
 //   node budgets/report.mjs [--reports <폴더>]   기본 폴더는 이 패키지의 reports/
 // 기록이 하나도 없으면(두 폴더 다 없거나 비었다) 멈춘다(종료 코드 2). 한쪽만 있으면 다른 쪽은 '기록이 없다'로 적는다.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -67,6 +67,27 @@ export function lighthouseTable(records) {
   return [row(head), sep(head.length), ...rows];
 }
 
+/** 분해 칸의 수. 없으면 '-' */
+const numCell = (v) => (typeof v === 'number' && Number.isFinite(v) ? String(Math.round(v)) : '-');
+
+/**
+ * LCP 분해 표(docs/frontend.md §5.8 'Lighthouse CI', BAT-177). 화면별 가운데 값 회차의 LCP 요소와 네 구간(ms)을 적는다.
+ * lcpSummary가 없는 옛 기록은 빼고, 모두 없으면 한 줄로 알린다
+ * @param {{ name: string, lcpSummary?: { run: number, lcpMs: number, element: { selector?: string | null } | null, phases: { ttfbMs: number, loadDelayMs: number, loadDurationMs: number, renderDelayMs: number } | null } | null }[]} records
+ */
+export function lcpTable(records) {
+  const head = ['화면', '가운데 회차', 'LCP(ms)', '요소', 'TTFB(ms)', '불러오기 지연(ms)', '불러오기(ms)', '그리기 지연(ms)'];
+  const rows = [...(records ?? [])]
+    .filter((r) => r?.lcpSummary)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((r) => {
+      const s = r.lcpSummary;
+      const p = s.phases;
+      return row([r.name, s.run, numCell(s.lcpMs), s.element?.selector ?? '-', numCell(p?.ttfbMs), numCell(p?.loadDelayMs), numCell(p?.loadDurationMs), numCell(p?.renderDelayMs)]);
+    });
+  return rows.length ? [row(head), sep(head.length), ...rows] : ['(LCP 분해 기록이 없다)'];
+}
+
 /** 폴더의 *.json 기록. 폴더가 없으면 null */
 function readRecords(dir) {
   if (!existsSync(dir)) return null;
@@ -75,12 +96,14 @@ function readRecords(dir) {
     .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')));
 }
 
-/** 표 둘을 이은 Markdown(끝 줄바꿈 없음) */
+/** 표 셋을 이은 Markdown(끝 줄바꿈 없음). LCP 분해 표는 기존 동작을 바꾸지 않고 뒤에 더한다(BAT-177) */
 export function renderReport({ js, lighthouse }) {
   const out = ['### 첫 JS(§5.8 첫 JS 열)', ''];
   out.push(...(js?.length ? jsTable(js) : ['(첫 JS 기록이 없다: reports/sizes-js/)']));
   out.push('', '### Lighthouse(§5.8 체감 목표, 가운데 값)', '');
   out.push(...(lighthouse?.length ? lighthouseTable(lighthouse) : ['(Lighthouse 기록이 없다: reports/lighthouse/)']));
+  out.push('', '### Lighthouse LCP 분해(가운데 값 회차)', '');
+  out.push(...lcpTable(lighthouse));
   return out.join('\n');
 }
 

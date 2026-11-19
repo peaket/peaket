@@ -6,17 +6,17 @@ import { useEffect, useId, useState, type ComponentType, type ReactNode } from '
 import { WebShellModal } from '@peaket/ds/WebShell';
 import type { DeviceQrProps, DeviceQrSnapshot } from '@/features/wallet-device-key/ui/DeviceQr';
 import type { OfflineBannerProps } from '@/features/wallet-device-key/ui/OfflineBanner';
+import { afterLoad } from '@/shared/lib/after-load';
 import { useToast } from '@/shared/ui/toast';
 
 // 월렛의 무거운 클라이언트 조각(QR·오프라인 배너)을 첫 화면 번들에서 뺀다(R-562).
-// next/dynamic의 런타임을 첫 묶음에 넣지 않으려고 import()와 상태만 쓰고, 마운트 뒤 별도 덩어리를 받는다.
-// 첫 HTML에는 QR 자리(400px)와 같은 모양의 등록 안내를 그려 LCP를 앞당기고 layout shift를 막는다.
-function useLazyComponent<P>(load: () => Promise<ComponentType<P>>, delayMs = 0): ComponentType<P> | null {
+// next/dynamic의 런타임을 첫 묶음에 넣지 않으려고 import()와 상태만 쓴다.
+// 첫 화면은 서버가 그린 QR 뼈대·안내로 그리고, 무거운 조각은 첫 화면이 다 그려진(load) 뒤에 받는다(BAT-177).
+function useLazyComponent<P>(load: () => Promise<ComponentType<P>>): ComponentType<P> | null {
   const [Component, setComponent] = useState<ComponentType<P> | null>(null);
   useEffect(() => {
     let cancelled = false;
-    // 동적 조각을 한 번에 받아 한 긴 작업으로 묶이지 않게 조금씩 나눈다(R-589).
-    const timer = setTimeout(() => {
+    const cancel = afterLoad(() => {
       void load()
         .then((loaded) => {
           if (!cancelled) setComponent(() => loaded);
@@ -24,12 +24,12 @@ function useLazyComponent<P>(load: () => Promise<ComponentType<P>>, delayMs = 0)
         .catch(() => {
           // 청크를 받지 못하면 화면을 막지 않는다. 다음 방문에서 다시 시도한다.
         });
-    }, delayMs);
+    });
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      cancel();
     };
-  }, [load, delayMs]);
+  }, [load]);
   return Component;
 }
 
@@ -37,13 +37,13 @@ const loadDeviceQr = () => import('@/features/wallet-device-key/ui/DeviceQr').th
 const loadOfflineBanner = () => import('@/features/wallet-device-key/ui/OfflineBanner').then((m) => m.OfflineBanner);
 
 export function DeviceQrLazy({ fallback, ...props }: DeviceQrProps & { fallback?: ReactNode }) {
-  const Component = useLazyComponent(loadDeviceQr, 300);
+  const Component = useLazyComponent(loadDeviceQr);
   if (!Component) return <>{fallback}</>;
   return <Component {...props} />;
 }
 
 export function OfflineBannerLazy(props: OfflineBannerProps) {
-  const Component = useLazyComponent(loadOfflineBanner, 1500);
+  const Component = useLazyComponent(loadOfflineBanner);
   if (!Component) return <div style={{ height: 40 }} aria-hidden="true" />;
   return <Component {...props} />;
 }
