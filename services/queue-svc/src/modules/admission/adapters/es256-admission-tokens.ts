@@ -25,8 +25,27 @@ export const ADMISSION_PREVIOUS_UNTIL_MAX_MS = MAX_STAY_MS + 24 * 3_600_000 + 3_
 
 const HTTPS = /^https:\/\/[^\s/]+/;
 const KID = /^[A-Za-z0-9_.-]{1,64}$/;
-/** 끝 시각의 꼴: 날짜·시각(초까지)·선택 소수 초·시간대(Z나 ±hh:mm)가 다 있는 ISO 8601(BAT-057 리뷰 반영 R057-6). 반복이 이웃하지 않아 되짚기가 없다 */
-const UNTIL_FORM = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+/**
+ * 끝 시각의 꼴: 날짜·시각(초까지)·선택 소수 초(적으면 0만)·시간대(Z나 ±hh:mm)가 다 있는 ISO 8601(BAT-057 리뷰 반영 R057-6·R057-9).
+ * 칸마다 묶음으로 잡는다. 반복이 이웃하지 않아 되짚기가 없다
+ */
+const UNTIL_FORM = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.0{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+
+/**
+ * 끝 시각(epoch ms)을 읽는다. 꼴이 아니거나, 읽은 시각에서 다시 만든 날짜·시각 칸(적은 시간대 차이를 되돌린 지역 칸)이 적은 값과 다르면
+ * (달력에 없는 날 2월 30일·24시처럼 Date.parse가 다음 날로 넘긴 것) NaN이다(R057-9)
+ */
+function parseUntil(raw: string): number {
+  const m = UNTIL_FORM.exec(raw);
+  if (!m) return Number.NaN;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return Number.NaN;
+  const offsetMin = m[7] ? (m[7] === '-' ? -1 : 1) * (Number(m[8]) * 60 + Number(m[9])) : 0;
+  const local = new Date(ms + offsetMin * 60_000);
+  const fields = [local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate(), local.getUTCHours(), local.getUTCMinutes(), local.getUTCSeconds()];
+  const written = [m[1], m[2], m[3], m[4], m[5], m[6]].map(Number);
+  return fields.every((v, i) => v === written[i]) ? ms : Number.NaN;
+}
 const b64 = (v: object) => Buffer.from(JSON.stringify(v)).toString('base64url');
 const seconds = (ms: number) => Math.floor(ms / 1000);
 
@@ -121,7 +140,7 @@ export class Es256AdmissionTokens implements AdmissionTokens {
     let previous: { jwk: Jwk; untilMs: number } | undefined;
     if (prevRaw) {
       const jwk = parsePublicJwk(ADMISSION_TOKEN_KEY_PREVIOUS_ENV, prevRaw);
-      const untilMs = untilRaw && UNTIL_FORM.test(untilRaw) ? Date.parse(untilRaw) : Number.NaN;
+      const untilMs = untilRaw ? parseUntil(untilRaw) : Number.NaN;
       if (!Number.isFinite(untilMs)) throw new Error(`${ADMISSION_TOKEN_KEY_PREVIOUS_UNTIL_ENV}가 없거나 틀렸다(옛 키 검증 허용 끝 시각, 시간대가 있는 ISO 8601 초 단위, 예 2026-11-20T10:00:00Z·2026-11-20T19:00:00+09:00)`);
       previous = { jwk, untilMs };
     } else if (untilRaw) {
