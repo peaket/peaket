@@ -75,7 +75,7 @@ test('DP-01 AppProject가_가상팀아홉_peaket-<팀>이고_각destinations가_
   }
 });
 
-test('DP-02 ApplicationSet이_환경마다_peaket-<환경>이고_develop만읽으며_자동동기화prune·selfHeal과_HTTPRouteignoreDifferences를켠다', () => {
+test('DP-02 ApplicationSet이_환경마다_peaket-<환경>이고_Git파일생성기로_deploy/envs/<환경>/*.yaml을_읽으며_develop만·prune/selfHeal·HTTPRouteignoreDifferences를켠다', () => {
   const sets = byKind(docs('applicationsets.yaml'), 'ApplicationSet');
   assert.deepEqual(namesOf(sets), ENVS.map((e) => `peaket-${e}`).sort());
   for (const s of sets) {
@@ -90,23 +90,27 @@ test('DP-02 ApplicationSet이_환경마다_peaket-<환경>이고_develop만읽�
     // main은 출시 뒤의 사본이다. develop만 읽는다(docs/devops.md §5.2 401행)
     assert.equal(git.revision, 'develop', `${env}: revision`);
     assert.notEqual(git.revision, 'main', `${env}: main을 읽는다`);
-    assert.ok(Array.isArray(git.directories) && git.directories.length > 0, `${env}: directories`);
-    for (const d of git.directories) {
-      assert.ok(typeof d.path === 'string' && d.path.startsWith('deploy/envs/'), `${env}: 경로 ${d.path}`);
-      const parts = d.path.split('/');
-      assert.ok(parts[2] === '*' || parts[2] === env, `${env}: 경로가 다른 환경을 읽는다: ${d.path}`);
+    // 파일 생성기다. 디렉터리 생성기는 폴더만 찾아 deploy/envs/<환경>/*.yaml 값 파일을 만들지 못한다(BAT-080 DP-03)
+    assert.equal(git.directories, undefined, `${env}: 디렉터리 생성기를 쓴다`);
+    assert.ok(Array.isArray(git.files) && git.files.length > 0, `${env}: git.files`);
+    assert.deepEqual(git.files.map((f) => f.path), [`deploy/envs/${env}/*.yaml`], `${env}: 경로 glob`);
+    for (const f of git.files) {
+      // 값 파일만 고른다(폴더·flags/는 파일 생성기가 만들지 않는다)
+      assert.match(f.path, /^deploy\/envs\/[a-z]+\/\*\.yaml$/, `${env}: 경로 ${f.path}`);
+      assert.equal(f.exclude, undefined, `${env}: 값 파일 glob에 exclude`);
     }
-    // flags/는 릴리스 플래그 정의라 Application으로 만들지 않는다
-    assert.ok(
-      git.directories.some((d) => d.exclude === true && d.path === `deploy/envs/${env}/flags`),
-      `${env}: flags/ 제외가 없다`,
-    );
     const t = s.spec.template.spec;
+    // Application 이름: 파일 이름에서 .yaml만 뺀다(Go 템플릿이라 goTemplate이 켜져 있어야 한다)
+    assert.equal(s.spec.goTemplate, true, `${env}: goTemplate`);
+    assert.equal(s.spec.template.metadata.name, '{{ .path.basename | trimSuffix ".yaml" }}', `${env}: Application 이름`);
     assert.ok(TEAMS.map((x) => `peaket-${x}`).includes(t.project), `${env}: project ${t.project}`);
-    assert.equal(t.source.repoURL, REPO_URL, `${env}: source.repoURL`);
-    assert.equal(t.source.targetRevision, 'develop', `${env}: source.targetRevision`);
-    assert.equal(t.source.path, 'deploy/charts/peaket-service', `${env}: 차트 경로`);
-    assert.deepEqual(t.source.helm.valueFiles, ['{{ .path.path }}'], `${env}: valueFiles`);
+    // 차트는 source 하나이고, 그 파일 경로를 valueFiles로 받는다(파일 생성기의 .path.path)
+    const sources = t.sources ?? (t.source ? [t.source] : []);
+    assert.equal(sources.length, 1, `${env}: source 하나`);
+    assert.equal(sources[0].repoURL, REPO_URL, `${env}: source.repoURL`);
+    assert.equal(sources[0].targetRevision, 'develop', `${env}: source.targetRevision`);
+    assert.equal(sources[0].path, 'deploy/charts/peaket-service', `${env}: 차트 경로`);
+    assert.deepEqual(sources[0].helm.valueFiles, ['{{ .path.path }}'], `${env}: valueFiles`);
     assert.equal(t.destination.server, 'https://kubernetes.default.svc', `${env}: destination.server`);
     assert.notEqual(t.destination.namespace, '*', `${env}: destination.namespace *`);
     assert.equal(t.syncPolicy.automated.prune, true, `${env}: prune`);
@@ -119,71 +123,48 @@ test('DP-02 ApplicationSet이_환경마다_peaket-<환경>이고_develop만읽�
   }
 });
 
-/** Git 디렉터리 생성기가 보는 것: 저장소에 실제로 있는 '폴더'만. '*'는 한 마디(segment) 전체를 뜻한다 */
-function walkDirectories(parts, acc, out) {
-  if (parts.length === 0) {
-    out.push(acc);
-    return;
-  }
-  const [head, ...rest] = parts;
-  if (head.includes('*')) {
-    assert.equal(head, '*', `이 시험은 마디 전체 별표만 다룬다: ${parts.join('/')}`);
-    const base = join(REPO, ...acc);
-    if (!existsSync(base) || !statSync(base).isDirectory()) return;
-    for (const d of readdirSync(base, { withFileTypes: true })) {
-      if (!d.isDirectory()) continue;
-      walkDirectories(rest, [...acc, d.name], out);
-    }
-    return;
-  }
-  const next = [...acc, head];
-  const full = join(REPO, ...next);
-  if (existsSync(full) && statSync(full).isDirectory()) walkDirectories(rest, next, out);
+/** Git 파일 생성기의 패턴(마지막 마디의 *.yaml)에 저장소에서 실제로 맞는 '파일' 경로. '*'는 한 마디 안의 글자들이다 */
+function filesMatching(pattern) {
+  const parts = pattern.split('/');
+  const name = parts.at(-1);
+  assert.ok(name.includes('*'), `파일 패턴이 아니다: ${pattern}`);
+  const dir = join(REPO, ...parts.slice(0, -1));
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
+  const re = new RegExp(`^${name.replace(/[.+^${}()|[\]\\]/g, '\\$&').replaceAll('*', '[^/]*')}$`);
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isFile() && re.test(d.name))
+    .map((d) => `${parts.slice(0, -1).join('/')}/${d.name}`)
+    .sort();
 }
-/** 생성기 설정에서 실제로 만들어지는 Application 이름(path.basenameNormalized: 소문자·'-') */
-function generatedApps(s) {
-  const include = new Set();
-  const exclude = new Set();
-  for (const d of s.spec.generators[0].git.directories) {
-    if (!d.path.includes('*') && !d.exclude) continue;
-    if (!d.path.includes('*') && d.exclude) {
-      exclude.add(d.path.split('/').at(-1).toLowerCase().replaceAll('_', '-'));
-      continue;
-    }
-    const found = [];
-    walkDirectories(d.path.split('/'), [], found);
-    for (const p of found) {
-      const name = p.at(-1).toLowerCase().replaceAll('_', '-');
-      if (d.exclude === true) exclude.add(name);
-      else include.add(name);
-    }
-  }
-  for (const name of exclude) include.delete(name);
-  return include;
-}
+/** Go 템플릿 `{{ .path.basename | trimSuffix ".yaml" }}`가 파일 경로에 주는 Application 이름 */
+const applicationName = (file) => file.split('/').at(-1).replace(/\.yaml$/, '');
 
-test('DP-03 ApplicationSet이_deploy/envs/local의값파일모두를찾는다(디렉터리생성기와파일구조의불일치를드러낸다)', () => {
+test('DP-03 ApplicationSet 파일 생성기가 deploy/envs/local의 값 파일 여섯을 모두 찾고 각 파일 경로를 valueFiles로 받는다', () => {
   const sets = byKind(docs('applicationsets.yaml'), 'ApplicationSet');
   for (const env of ENVS) {
     const dir = join(REPO, 'deploy', 'envs', env);
     if (!existsSync(dir)) continue; // 아직 값이 없는 환경(demo·prod는 첫 승격 PR이 만든다)
-    const files = readdirSync(dir, { withFileTypes: true })
+    const expected = readdirSync(dir, { withFileTypes: true })
       .filter((d) => d.isFile() && d.name.endsWith('.yaml'))
-      .map((d) => d.name)
+      .map((d) => `deploy/envs/${env}/${d.name}`)
       .sort();
     const s = sets.find((x) => x.metadata.name === `peaket-${env}`);
     assert.ok(s, `${env}: ApplicationSet peaket-${env}이 없다`);
-    const apps = generatedApps(s);
-    const expected = files.map((f) => f.slice(0, -'.yaml'.length).toLowerCase().replaceAll('_', '-'));
-    // 값 파일 6개(v0-gateway·v0-monolith·v1-bundle·v1-payment-relay·v1-purchase-relay·v1-realtime-gw)마다
-    // Application 하나가 있어야 한다. 없으면 ApplicationSet이 그 서비스를 배포하지 않는다
-    assert.deepEqual(
-      [...apps].sort(),
-      expected.sort(),
-      `${env}: Git 디렉터리 생성기는 폴더만 찾는다. deploy/envs/${env}/*.yaml 값 파일은 생성되지 않는다` +
-        '(파일 생성기로 바꾸거나 환경 값을 디렉터리로 재구성해야 한다, BAT-080 시험 이의)',
-    );
-    // flags/는 값 파일이 아니므로 Application으로 만들지 않는다
-    for (const name of apps) assert.notEqual(name, 'flags', `${env}: flags/를 Application으로 만들었다`);
+    const git = s.spec.generators[0].git;
+    // 생성기가 실제로 내놓는 파일이 env의 값 파일 전부와 같아야 한다(하나라도 빠지면 그 서비스는 배포되지 않는다)
+    const matched = git.files.flatMap((f) => filesMatching(f.path)).sort();
+    assert.deepEqual(matched, expected, `${env}: 파일 생성기가 값 파일과 다르다`);
+    if (env === 'local') {
+      // v0-gateway·v0-monolith·v1-bundle·v1-payment-relay·v1-purchase-relay·v1-realtime-gw
+      assert.equal(expected.length, 6, `local 값 파일 ${expected.length}개`);
+      assert.ok(expected.includes('deploy/envs/local/v1-realtime-gw.yaml'), 'v1-realtime-gw.yaml');
+    }
+    // 파일마다 Application 하나: 이름은 파일 이름에서 .yaml을 뺀 것, valueFiles는 그 파일 경로(.path.path)다
+    const t = s.spec.template.spec;
+    const sources = t.sources ?? (t.source ? [t.source] : []);
+    assert.deepEqual(sources.flatMap((x) => x.helm.valueFiles), ['{{ .path.path }}'], `${env}: valueFiles`);
+    assert.deepEqual(matched.map(applicationName), expected.map(applicationName), `${env}: Application 이름`);
+    // 폴더(flags/)는 파일 생성기의 결과가 아니다
+    for (const file of matched) assert.ok(file.endsWith('.yaml') && statSync(join(REPO, ...file.split('/'))).isFile(), `${env}: ${file}`);
   }
 });
