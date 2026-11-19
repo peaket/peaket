@@ -333,5 +333,5 @@ test('FE-T18 T3 셸 셋의 본문 바로가기는 SkipLink를 쓰고 focus:not-s
   const css = readFileSync(resolve(root, 'packages/ds/src/styles/ds.css'), 'utf8');
   const block = (selector) => new RegExp(`${selector}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
   assert.match(block('\\.pk-skip-link'), /clip:\s*auto/, '.pk-skip-link(초점 때)에 clip: auto가 없다');
-  assert.match(block('\\.pk-skip-link:not\\(:focus\\)'), /clip:\s*rect\\(0 0 0 0\\)/, '.pk-skip-link:not(:focus)(평소)에 clip: rect(0 0 0 0)이 없다');
+  assert.match(block('\\.pk-skip-link:not\\(:focus\\)'), /clip:\s*rect\(0 0 0 0\)/, '.pk-skip-link:not(:focus)(평소)에 clip: rect(0 0 0 0)이 없다');
 });
