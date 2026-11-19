@@ -74,6 +74,8 @@ schemaRegistry:
 # ExternalSecret(BAS-140, externalsecret.yaml)도 CI에서 켜서 그린다. remoteRef 경로만 두고 값은 두지 않는다.
 externalSecret:
   enabled: true
+  # 차트가 remoteRef 경로 앞에 붙이는 환경(BAT-080 RV-01·RV-21). 이 파일은 CI 무대만 그린다
+  environment: ci
   secretStoreRef: { name: trivy-ci-store, kind: ClusterSecretStore }
   target: { name: trivy-ci-secrets }
   data:
