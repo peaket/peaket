@@ -476,4 +476,109 @@ describe('굿즈 재고 예약 만료(실제 PostgreSQL·Valkey)', () => {
     expect(await counter(p.productId)).toBe('3');
     expect(await productStock(p.productId)).toBe(LIMITED);
   });
+
+  // ---- BAT-605: 굿즈 가상계좌 입금 기한 + 10분 만료(ADR-0314, P-T60 ④) ----
+
+  test('P-T60 ④ 입금 기한 + 10분 − 1ms에는 만료하지 않고 정각에 EXPIRED·RELEASE(restore=1)·재고 복구이며, 다시 돌려도 한 번만 반영한다 [ASVS v5.0.0-2.3.3]', async () => {
+    const clock = fakeClock({ now: T0 });
+    const w = world(clock);
+    const p = await limitedProduct(T0);
+    const a = A();
+    const o = await order(w, a, p);
+    clock.advance(60_000);
+    await startPayment(w, a, o);
+    clock.advance(60_000);
+    await accept(w, a, o);
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+    // 입금 기한은 코드 상수(다음 날 23:59)와 다른 값으로 고른다
+    const depositDueAt = clock.now() + 2 * 3_600_000 + 47 * 60_000;
+    w.payments.states.set(o, { orderId: o, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'AWAITING_DEPOSIT', approvedAtMs: undefined, failureCategory: undefined, depositDueAtMs: depositDueAt });
+    const results = new MerchPaymentResults({ store: w.store, stock, payments: w.payments, clock });
+    clock.advance(2_000);
+    await results.tick();
+    const deadline = depositDueAt + 10 * 60_000;
+    expect((await orderRow(o))!.status).toBe('AWAITING_DEPOSIT');
+    expect((await orderRow(o))!.stock_reserved_until.getTime()).toBe(deadline);
+    expect(await score(p.productId, o)).toBe(deadline);
+
+    const expiry = new MerchStockExpiry({ store: w.store, stock, clock });
+    clock.advance(deadline - 1 - clock.now());
+    expect(await expiry.tick()).toEqual({ expired: 0, released: 0, deferred: 0, unavailable: 0 });
+    expect((await orderRow(o))!.status).toBe('AWAITING_DEPOSIT');
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+    expect(await score(p.productId, o)).toBe(deadline);
+
+    clock.advance(1);
+    expect(await expiry.tick()).toEqual({ expired: 1, released: 1, deferred: 1, unavailable: 0 });
+    expect((await orderRow(o))!.status).toBe('EXPIRED');
+    expect(await productStock(p.productId)).toBe(LIMITED);
+    expect(await counter(p.productId)).toBe('3');
+    expect(await score(p.productId, o)).toBeNull();
+    expect(await resvQty(p.productId, o)).toBeNull();
+    expect(await unpaidOf(p.productId, a)).toBeNull();
+    expect(await attemptStatuses(o)).toEqual(['EXPIRED']);
+    expect(await jobCount(o)).toBe(0);
+    // 한 번만 반영한다
+    clock.advance(1_000);
+    expect(await expiry.tick()).toEqual({ expired: 0, released: 0, deferred: 0, unavailable: 0 });
+    expect(await counter(p.productId)).toBe('3');
+    expect(await productStock(p.productId)).toBe(LIMITED);
+  });
+
+  test('P-T60 ④ 입금 완료 결과가 기한 정각에 늦게 와 만료와 겹쳐도 먼저 커밋한 PAID가 이기고 재고를 두 번 돌리지 않는다 [ASVS v5.0.0-2.3.3]', async () => {
+    const clock = fakeClock({ now: T0 });
+    const w = world(clock);
+    const p = await limitedProduct(T0);
+    const a = A();
+    const o = await order(w, a, p);
+    clock.advance(60_000);
+    await startPayment(w, a, o);
+    clock.advance(60_000);
+    await accept(w, a, o);
+    const depositDueAt = clock.now() + 3 * 3_600_000 + 11 * 60_000;
+    w.payments.states.set(o, { orderId: o, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'AWAITING_DEPOSIT', approvedAtMs: undefined, failureCategory: undefined, depositDueAtMs: depositDueAt });
+    const results = new MerchPaymentResults({ store: w.store, stock, payments: w.payments, clock });
+    clock.advance(2_000);
+    await results.tick();
+    const deadline = depositDueAt + 10 * 60_000;
+    expect((await orderRow(o))!.status).toBe('AWAITING_DEPOSIT');
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+    expect(await score(p.productId, o)).toBe(deadline);
+
+    // 기한 정각에 입금 완료 결과가 늦게 도착한다(승인 시각은 기한 정각)
+    clock.advance(deadline - clock.now());
+    w.payments.states.set(o, { orderId: o, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'APPROVED', approvedAtMs: clock.now(), failureCategory: undefined });
+    await admin.pool.query('update merch_confirm_job set next_at = $1 where order_id = $2', [new Date(clock.now()), o]);
+    const expiry = new MerchStockExpiry({ store: w.store, stock, clock });
+
+    // 입금 확인이 주문 행을 먼저 기다리고, 그 뒤 만료가 기다린다(기다린 차례대로 잠금을 잡는다)
+    const lock = await holdOrderRow(o);
+    const paying = results.tick();
+    await waitForLockWaiters(1);
+    const expiring = expiry.tick();
+    await waitForLockWaiters(2);
+    await lock.release();
+
+    const paidTick = await paying;
+    const expiredTick = await expiring;
+    expect(paidTick.paid).toBe(1);
+    expect(expiredTick).toEqual({ expired: 0, released: 0, deferred: 1, unavailable: 0 });
+    expect((await orderRow(o))!.status).toBe('PAID');
+    // 만료가 덮어쓰지 않았고 재고도 두 번 돌지 않았다(접수 때 깎인 2 그대로, 카운터는 돌아오지 않음)
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+    expect(await score(p.productId, o)).toBeNull();
+    expect(await resvQty(p.productId, o)).toBeNull();
+    expect(await attemptStatuses(o)).toEqual(['ACCEPTED']);
+    expect(await jobCount(o)).toBe(0);
+    // 뒤 바퀴도 아무것도 바꾸지 않는다
+    clock.advance(1_000);
+    expect(await expiry.tick()).toEqual({ expired: 0, released: 0, deferred: 0, unavailable: 0 });
+    expect((await orderRow(o))!.status).toBe('PAID');
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+  });
 });

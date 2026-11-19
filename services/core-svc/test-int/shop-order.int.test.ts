@@ -29,13 +29,19 @@ import { DrizzleProductStore } from '../src/modules/shop/adapters/db/drizzle-pro
 
 type Confirm = Parameters<MerchPayments['confirm']>[0];
 type ConfirmResult = Awaited<ReturnType<MerchPayments['confirm']>>;
+type Cancel = Parameters<MerchPayments['cancel']>[0];
+type CancelResult = Awaited<ReturnType<MerchPayments['cancel']>>;
 
 /** 가짜 payment-svc(시험 대역). 승인 명령·당기기·취소의 부른 기록을 남기고 결과는 시험이 정한다 */
 class FakePayments implements MerchPayments {
   readonly confirms: Confirm[] = [];
   readonly batches: string[][] = [];
+  readonly cancels: Cancel[] = [];
   readonly states = new Map<string, PaymentState>();
+  /** 가상계좌로 받은 결제(취소에 환불 계좌가 필요한지) */
+  readonly virtualAccountPaidOrders = new Set<string>();
   confirmAnswer: ConfirmResult = { status: 'ACCEPTED' };
+  cancelAnswer: CancelResult = 'CANCELLED';
   batchDown = false;
   /** 참이면 승인 명령을 '적은' 뒤 confirmAnswer로 답한다(payment-svc가 명령을 원장에 적고 시간 초과로만 답한 꼴, 리뷰 RV-01) */
   recordOnConfirm = false;
@@ -61,8 +67,19 @@ class FakePayments implements MerchPayments {
     if (this.batchDown) throw new Error('payment-svc 멈춤(시험)');
     return orderIds.flatMap((id) => (this.states.has(id) ? [this.states.get(id)!] : []));
   }
-  async cancel(): Promise<'CANCELLED'> {
-    return 'CANCELLED';
+  async getPayment(orderId: string) {
+    const s = this.states.get(orderId);
+    if (!s) return undefined;
+    return {
+      status: s.status,
+      pg: s.pg,
+      ...(s.depositDueAtMs === undefined ? {} : { depositDueAtMs: s.depositDueAtMs }),
+      virtualAccountPaid: this.virtualAccountPaidOrders.has(orderId),
+    };
+  }
+  async cancel(c: Cancel): Promise<CancelResult> {
+    this.cancels.push(c);
+    return this.cancelAnswer;
   }
   approve(orderId: string): void {
     this.states.set(orderId, { orderId, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'APPROVED', approvedAtMs: clock.now(), failureCategory: undefined });
@@ -79,6 +96,8 @@ const held = new MemoryHeldTickets();
 const identity = new FakeIdentity();
 const SELLER = randomUUID();
 const SLOT_EVENT = randomUUID();
+/** 택배 동의 문안 판(시험 값. 코드 상수와 다르게 고른다) */
+const CONSENT = 'v2026.11-19-bat605';
 
 let pg: PostgresContainer;
 let admin: Database;
@@ -89,6 +108,7 @@ let redis: HotRedis;
 let stock: RedisMerchStock;
 let store: DrizzleShopOrderStore;
 let results: MerchPaymentResults;
+let ordering: CreateMerchOrder;
 let svc: Awaited<ReturnType<typeof createService>>;
 
 beforeAll(async () => {
@@ -104,6 +124,7 @@ beforeAll(async () => {
   stock = new RedisMerchStock(redis);
   store = new DrizzleShopOrderStore(appDb, clock);
   results = new MerchPaymentResults({ store, stock, payments, clock });
+  ordering = new CreateMerchOrder({ store, stock, held, clock, consentVersion: CONSENT });
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia(), shop: { stock, payments, held } }),
@@ -142,7 +163,7 @@ const statusOf = async (o: string) => (await orderRow(o))?.status;
 
 let seq = 0;
 /** 파트너 상품 만들기(HTTP, core_partner) + 현장 수령 시간대 한 줄(시험 데이터, 파트너 경로는 계약에 없음) */
-async function product(o: { limitedQty?: number | null; price?: number; attributes?: Record<string, unknown>; saleEndsAt?: string | null } = {}): Promise<{ productId: string; slotId: string }> {
+async function product(o: { limitedQty?: number | null; price?: number; attributes?: Record<string, unknown>; saleEndsAt?: string | null; fulfillments?: string[] } = {}): Promise<{ productId: string; slotId: string }> {
   seq++;
   const r = await svc.http.inject({
     method: 'POST',
@@ -158,7 +179,7 @@ async function product(o: { limitedQty?: number | null; price?: number; attribut
       ticketLinked: false,
       linkedEventId: null,
       limitedQty: o.limitedQty === undefined ? 3 : o.limitedQty,
-      fulfillments: ['PICKUP'],
+      fulfillments: o.fulfillments ?? ['PICKUP'],
       transferable: false,
       status: 'PUBLISHED',
       attributes: o.attributes ?? {},
@@ -199,6 +220,37 @@ async function orderAndAccept(account: string, p: { productId: string; slotId: s
 
 /** 당기기 한 바퀴를 확실히 돌리려고 모든 작업의 다음 시각을 지금으로 당긴다(시험 준비) */
 const dueAllJobs = () => admin.pool.query('update merch_confirm_job set next_at = $1', [new Date(clock.now())]);
+
+const cancelOrder = (account: string, orderId: string, body: unknown) =>
+  svc.http.inject({ method: 'POST', url: `/v1/shop/orders/${orderId}/cancellations`, headers: fanHeaders(account), payload: JSON.stringify(body) });
+const itemRows = async (orderId: string) =>
+  (await admin.pool.query('select id, status, cancel_reason from merch_order_item where order_id = $1 order by id', [orderId])).rows as { id: string; status: string; cancel_reason: string | null }[];
+const refundCount = async (orderId: string) => Number((await admin.pool.query('select count(*)::int as n from merch_refund where order_id = $1', [orderId])).rows[0].n);
+
+/** 택배(에스크로) 주문 하나를 공개 유스케이스로 만들고 결제 접수 → PAID까지. 주문 ID를 돌려준다(HTTP 받는 층은 결제대금예치 동의 판이 없어 직접 만든다) */
+async function deliveryPaid(account: string, lines: { productId: string; quantity: number }[]): Promise<string> {
+  const v = await ordering.shop(
+    account,
+    {
+      fulfillment: 'DELIVERY',
+      items: lines,
+      delivery: { recipientName: '김배송', recipientPhone: '01098765432', postalCode: '04524', address: '서울특별시 중구 세종대로 1' },
+      consents: { provisionToSeller: true, consentVersion: CONSENT },
+    },
+    { accountRef: account, operation: 'CREATE_MERCH_ORDER', key: randomUUID(), requestHash: createHash('sha256').update(randomUUID()).digest() },
+  );
+  const orderId = v.orderId;
+  expect(v.paymentStore).toBe('ESCROW');
+  const s = await startPayment(account, orderId);
+  expect(s.statusCode, s.payload).toBe(201);
+  const a = await acceptPayment(account, orderId, (await orderRow(orderId))!.amount, JSON.parse(s.payload).attemptId);
+  expect(a.statusCode, a.payload).toBe(202);
+  payments.approve(orderId);
+  clock.advance(2_000);
+  await results.tick();
+  expect(await statusOf(orderId)).toBe('PAID');
+  return orderId;
+}
 
 describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () => {
   test('P-T57 ③ 한정 3개 상품에 계정 10개가 같은 때 1개씩 주문하면 201 3건·409 merch-sold-out 7건이고 모두 결제하면 product_stock 0·카운터 0·예약 원소 0이다 [ASVS v5.0.0-2.3.4]', async () => {
@@ -804,5 +856,116 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(await statusOf(orderId)).toBe('FAILED');
     expect(await productStock(p.productId)).toBe(3);
     expect(await counter(p.productId)).toBe('3');
+  });
+
+  // ---- BAT-605: 에스크로 주문 취소·굿즈 가상계좌 입금 대기(ADR-0313·ADR-0314, P-T59 ④·P-T60 ③) ----
+
+  test('P-T59 ④ 에스크로 주문 전체 취소는 202·CancelPayment 1건이고, 부분 취소는 409 escrow-partial-not-allowed·결제사 0건, 발송 뒤 취소는 409 merch-cancel-not-allowed다 [ASVS v5.0.0-2.3.4]', async () => {
+    const first = await product({ limitedQty: null, price: 12_000, fulfillments: ['DELIVERY'] });
+    const second = await product({ limitedQty: null, price: 9_000, fulfillments: ['DELIVERY'] });
+    const a = randomUUID();
+    const orderId = await deliveryPaid(a, [
+      { productId: first.productId, quantity: 1 },
+      { productId: second.productId, quantity: 1 },
+    ]);
+    const head = (await admin.pool.query('select amount, pg_store, purchase_confirmed_at from merch_order where id = $1', [orderId])).rows[0];
+    expect(head.amount).toBe(24_000); // 12,000 + 9,000 + 택배 배송비 3,000
+    expect(head.pg_store).toBe('ESCROW');
+    expect(head.purchase_confirmed_at).toBeNull();
+    const items = await itemRows(orderId);
+    expect(items.map((i) => i.status)).toEqual(['READY', 'READY']);
+    const cancelsBefore = payments.cancels.length;
+    // 구매 확정 전 에스크로는 주문 전체만: 부분 취소는 결제사를 부르지 않는다
+    const partial = await cancelOrder(a, orderId, { itemIds: [items[0]!.id] });
+    expect(partial.statusCode, partial.payload).toBe(409);
+    expect(problem(partial)).toBe('escrow-partial-not-allowed');
+    expect(payments.cancels.length).toBe(cancelsBefore);
+    expect(await refundCount(orderId)).toBe(0);
+    expect((await itemRows(orderId)).map((i) => i.status)).toEqual(['READY', 'READY']);
+    // 전체 취소: 배송비까지 202이고 결제사 취소는 한 번, 취소 ID는 응답과 같다
+    const full = await cancelOrder(a, orderId, {});
+    expect(full.statusCode, full.payload).toBe(202);
+    const body = JSON.parse(full.payload) as { cancellationId: string; status: string; refundAmount: number };
+    expect(body.status).toBe('REFUNDED');
+    expect(body.refundAmount).toBe(24_000);
+    expect(payments.cancels.length).toBe(cancelsBefore + 1);
+    expect(payments.cancels[cancelsBefore]).toMatchObject({ cancellationId: body.cancellationId, amount: 24_000, reason: 'USER_CANCEL' });
+    expect(payments.cancels[cancelsBefore]!.refundAccount).toBeUndefined();
+    expect((await itemRows(orderId)).map((i) => i.status)).toEqual(['CANCELLED', 'CANCELLED']);
+    expect((await admin.pool.query('select status, amount from merch_refund where order_id = $1', [orderId])).rows).toEqual([{ status: 'CANCELLED', amount: 24_000 }]);
+
+    // 발송 뒤(READY가 아님): 409 merch-cancel-not-allowed이고 결제사 0건, 쓰기 0
+    const third = await product({ limitedQty: null, price: 15_000, fulfillments: ['DELIVERY'] });
+    const b = randomUUID();
+    const shippedOrder = await deliveryPaid(b, [{ productId: third.productId, quantity: 1 }]);
+    const [shippedItem] = await itemRows(shippedOrder);
+    await admin.pool.query("update merch_order_item set status = 'SHIPPED', shipped_at = $2 where id = $1", [shippedItem!.id, new Date(clock.now())]);
+    const beforeShipped = payments.cancels.length;
+    const shipped = await cancelOrder(b, shippedOrder, {});
+    expect(shipped.statusCode, shipped.payload).toBe(409);
+    expect(problem(shipped)).toBe('merch-cancel-not-allowed');
+    expect(payments.cancels.length).toBe(beforeShipped);
+    expect(await refundCount(shippedOrder)).toBe(0);
+    expect((await itemRows(shippedOrder)).map((i) => i.status)).toEqual(['SHIPPED']);
+  });
+
+  test('P-T60 ③ 입금 대기면 주문은 AWAITING_DEPOSIT에 머물고 재고 예약은 입금 기한 + 10분까지 한 번 늘며, 입금 확인이 오면 PAID·RELEASE(restore=0)·예약 원소 0이다 [ASVS v5.0.0-2.3.3]', async () => {
+    const p = await product({ limitedQty: 3 });
+    const a = randomUUID();
+    const orderId = await orderAndAccept(a, p);
+    expect(await statusOf(orderId)).toBe('CREATED');
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+    // 입금 기한은 코드 상수(다음 날 23:59)와 다른 값으로 고른다
+    const depositDueAt = clock.now() + 7 * 3_600_000 + 17 * 60_000 + 13_000;
+    payments.states.set(orderId, { orderId, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'AWAITING_DEPOSIT', approvedAtMs: undefined, failureCategory: undefined, depositDueAtMs: depositDueAt });
+    const extended: { productId: string; untilMs: number }[] = [];
+    const released: { productId: string; restore: boolean }[] = [];
+    const counting: MerchStock = new Proxy(stock, {
+      get(t, k) {
+        if (k === 'extend')
+          return async (productId: string, id: string, untilMs: number, accountId?: string) => {
+            extended.push({ productId, untilMs });
+            return t.extend.bind(t)(productId, id, untilMs, accountId);
+          };
+        if (k === 'release')
+          return async (productId: string, id: string, restore: boolean, accountId?: string) => {
+            released.push({ productId, restore });
+            return t.release.bind(t)(productId, id, restore, accountId);
+          };
+        const v = Reflect.get(t, k, t) as unknown;
+        return typeof v === 'function' ? (v as (...args: never[]) => unknown).bind(t) : v;
+      },
+    });
+    const local = new MerchPaymentResults({ store, stock: counting, payments, clock });
+    clock.advance(2_000);
+    await local.tick();
+    expect(await statusOf(orderId)).toBe('AWAITING_DEPOSIT');
+    const deadline = depositDueAt + 10 * 60_000;
+    expect((await orderRow(orderId))!.stock_reserved_until.getTime()).toBe(deadline);
+    expect(extended).toHaveLength(1);
+    expect(extended[0]).toMatchObject({ productId: p.productId, untilMs: deadline });
+    expect(await resvScore(p.productId, orderId)).toBe(deadline);
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+    expect(await unpaidOf(p.productId, a)).toBeNull();
+    // 같은 입금 대기를 다시 받아도 더 늘리지 않는다(EXTEND 1회)
+    clock.advance(60_000);
+    await local.tick();
+    expect(await statusOf(orderId)).toBe('AWAITING_DEPOSIT');
+    expect(extended).toHaveLength(1);
+    expect(await resvScore(p.productId, orderId)).toBe(deadline);
+    // 입금 확인: PAID, 재고는 깎인 채(RELEASE restore=0), 예약 원소 0
+    payments.approve(orderId);
+    clock.advance(60_000);
+    const tick = await local.tick();
+    expect(tick.paid).toBeGreaterThanOrEqual(1);
+    expect(await statusOf(orderId)).toBe('PAID');
+    expect(released).toEqual([{ productId: p.productId, restore: false }]);
+    expect(extended).toHaveLength(1);
+    expect(await productStock(p.productId)).toBe(2);
+    expect(await counter(p.productId)).toBe('2');
+    expect(await resvMembers(p.productId)).toEqual([]);
+    expect(await cmd(['HGET', keys(p.productId).qty, orderId])).toBeNull();
   });
 });
