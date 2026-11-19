@@ -109,7 +109,7 @@ process.on('exit', () => {
 function renderFiles(files, sets = [], ns = 'v0') {
   const r = spawnSync(helm, ['template', 'rel', CHART, '--namespace', ns, ...files.flatMap((f) => ['-f', f]), ...sets.flatMap((s) => ['--set', s])], { encoding: 'utf8' });
   if (r.status !== 0) return { error: r.stderr };
-  return { objects: parseAllDocuments(r.stdout).map((d) => d.toJS()).filter(Boolean) };
+  return { objects: parseAllDocuments(r.stdout).map((d) => d.toJS()).filter(Boolean), text: r.stdout };
 }
 /** 임시 값 파일 */
 function valuesFile(text) {
@@ -860,3 +860,152 @@ test('D-T18 ①_local·ci밖에서는_S3주소를바꾸는AWS_ENDPOINT_URL*·AWS
   // local·ci는 흉내 서버 주소로 쓸 수 있다
   assert.equal(render([...BASE, 'service.env.AWS_ENDPOINT_URL_S3=http://aws.peaket-local.svc.cluster.local:5000']).error, undefined);
 });
+
+// --- BAS-140 공용 차트 확장: Rollout·PDB·KEDA·ExternalSecret·우선순위(묶음 BAT-080 G3, ADR-0311) ---
+// 정본: docs/devops.md §5.2·§6.2, docs/infra.md §4, docs/observability.md §5 G-21, 계획 BAT-080 B8·B9·12.
+// 값은 정본에서 적는다(롤아웃 10%·50%·100%, 일시 정지 60·120초 [가정], revisionHistoryLimit 5, rollbackWindow.revisions 3,
+// PDB maxUnavailable 1, KEDA fallback.failureThreshold 3·replicas -1, ExternalSecret external-secrets.io/v1 [가정]).
+
+const ROLLOUT_ON = [...BASE, 'service.rollout.enabled=true'];
+
+test('CH-01 Rollout을켜면_Deployment없이Rollout하나이고_카나리10·50·100%·일시정지60·120초·revisionHistoryLimit5·rollbackWindow3이다', () => {
+  const { objects, error } = render(ROLLOUT_ON);
+  assert.equal(error, undefined, error);
+  assert.equal(all(objects, 'Deployment').filter((o) => o.metadata.name === 'example-svc').length, 0, 'Rollout과 Deployment가 함께 렌더됐다');
+  const rollouts = all(objects, 'Rollout');
+  assert.equal(rollouts.length, 1, 'Rollout 하나');
+  const r = rollouts[0];
+  assert.equal(r.apiVersion, 'argoproj.io/v1alpha1');
+  assert.equal(r.metadata.name, 'example-svc');
+  assert.equal(r.spec.revisionHistoryLimit, 5);
+  assert.deepEqual(r.spec.strategy.canary.steps, [
+    { setWeight: 10, pause: { duration: '60s' } },
+    { setWeight: 50, pause: { duration: '120s' } },
+    { setWeight: 100 },
+  ]);
+  assert.equal(r.spec.strategy.canary.rollbackWindow.revisions, 3);
+  // 파드 템플릿(프로브·진단·포트·계정)은 Deployment와 같다
+  const dep = find(render(BASE).objects, 'Deployment', 'example-svc');
+  assert.deepEqual(r.spec.template.spec, dep.spec.template.spec);
+  assert.deepEqual(r.spec.template.metadata.labels, dep.spec.template.metadata.labels);
+  assert.deepEqual(r.spec.selector.matchLabels, dep.spec.selector.matchLabels);
+  // 단계 순서와 값의 경계: 0%는 받지 않고, 일시 정지 없이 100%로 끝난다(마지막 단계에 pause가 붙으면 끝나지 않는다)
+  assert.equal(r.spec.strategy.canary.steps.at(-1).setWeight, 100);
+  assert.equal('pause' in r.spec.strategy.canary.steps.at(-1), false);
+});
+
+test('CH-02 Rollout기본값(false)은_지금처럼Deployment하나이고_HPA·NetworkPolicy·릴레이렌더가그대로다', () => {
+  for (const sets of [BASE, [...BASE, 'service.rollout.enabled=false']]) {
+    const { objects, error } = render(sets);
+    assert.equal(error, undefined, error);
+    assert.equal(all(objects, 'Rollout').length, 0, '기본값에서 Rollout을 렌더했다(local·CI는 CRD가 없다)');
+    assert.ok(find(objects, 'Deployment', 'example-svc'), 'Deployment example-svc');
+  }
+  const on = render([...BASE, 'outboxRelay.enabled=true', 'service.autoscaling.enabled=true', 'service.networkPolicy.enabled=true']);
+  assert.equal(on.error, undefined, on.error);
+  assert.equal(all(on.objects, 'Rollout').length, 0);
+  assert.ok(find(on.objects, 'Deployment', 'example-svc'));
+  assert.ok(find(on.objects, 'Deployment', 'example-svc-outbox-relay'));
+  assert.equal(all(on.objects, 'HorizontalPodAutoscaler').length, 1);
+  assert.equal(all(on.objects, 'NetworkPolicy').length, 1);
+});
+
+test('CH-03 PDB를켜면_PodDisruptionBudget하나_maxUnavailable1·unhealthyPodEvictionPolicyAlwaysAllow이고_서비스파드만고른다', () => {
+  const { objects, error } = render([...BASE, 'service.pdb.enabled=true']);
+  assert.equal(error, undefined, error);
+  const pdbs = all(objects, 'PodDisruptionBudget');
+  assert.equal(pdbs.length, 1);
+  const p = pdbs[0];
+  assert.equal(p.apiVersion, 'policy/v1');
+  assert.equal(p.metadata.name, 'example-svc');
+  assert.equal(p.spec.maxUnavailable, 1);
+  assert.equal(p.spec.unhealthyPodEvictionPolicy, 'AlwaysAllow');
+  assert.deepEqual(p.spec.selector.matchLabels, SERVICE_PODS('example-svc'));
+  // 기본값은 꺼짐
+  assert.equal(all(render(BASE).objects, 'PodDisruptionBudget').length, 0);
+  // 경계: 복제 2에서 maxUnavailable 2(모두 축출)는 정본 값이 아니다
+  assert.notEqual(p.spec.maxUnavailable, 2);
+});
+
+test('CH-04 KEDA를켜면_ScaledObject하나_scaleTargetRef가차트이름이고_triggers를그대로_passed_fallback은3·-1이다', () => {
+  const file = valuesFile(
+    ['service:', '  keda:', '    enabled: true', '    triggers:', '      - type: prometheus', '        metadata:', '          serverAddress: http://prom.observability.svc:9090', '          query: sum(peaket_realtime_gw_connections)', '          threshold: "100"', ''].join('\n'),
+  );
+  const { objects, error } = renderFiles([file], BASE);
+  assert.equal(error, undefined, error);
+  const scaled = all(objects, 'ScaledObject');
+  assert.equal(scaled.length, 1);
+  const s = scaled[0];
+  assert.equal(s.apiVersion, 'keda.sh/v1alpha1');
+  assert.deepEqual(s.spec.scaleTargetRef, { name: 'example-svc' });
+  assert.deepEqual(s.spec.triggers, [{ type: 'prometheus', metadata: { serverAddress: 'http://prom.observability.svc:9090', query: 'sum(peaket_realtime_gw_connections)', threshold: '100' } }]);
+  // 지표를 못 읽으면 0으로 줄이지 않고 지금 복제 수를 유지한다(-1)
+  assert.deepEqual(s.spec.fallback, { failureThreshold: 3, replicas: -1 });
+  assert.equal(all(render(BASE).objects, 'ScaledObject').length, 0);
+});
+
+test('CH-05 ExternalSecret을켜면_remoteRef만낸다_값(kty·PEM·value)은렌더에없다 [ASVS v5.0.0-13.1.4] [ASVS v5.0.0-13.3.4]', () => {
+  const file = valuesFile(
+    [
+      'externalSecret:',
+      '  enabled: true',
+      '  secretStoreRef: { name: peaket-secrets, kind: ClusterSecretStore }',
+      '  target: { name: example-svc-secrets }',
+      '  data:',
+      '    - { secretKey: PEAKET_FAN_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/fan-token-key } }',
+      '    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/fan-token-key-previous } }',
+      '',
+    ].join('\n'),
+  );
+  const { objects, error, text } = renderFiles([file], BASE);
+  assert.equal(error, undefined, error);
+  const es = all(objects, 'ExternalSecret');
+  assert.equal(es.length, 1);
+  const e = es[0];
+  assert.equal(e.apiVersion, 'external-secrets.io/v1');
+  assert.equal(e.metadata.name, 'example-svc');
+  assert.deepEqual(e.spec.secretStoreRef, { name: 'peaket-secrets', kind: 'ClusterSecretStore' });
+  assert.equal(e.spec.target.name, 'example-svc-secrets');
+  assert.deepEqual(e.spec.data, [
+    { secretKey: 'PEAKET_FAN_TOKEN_KEY', remoteRef: { key: 'peaket/prod/identity/fan-token-key' } },
+    { secretKey: 'PEAKET_FAN_TOKEN_KEY_PREVIOUS', remoteRef: { key: 'peaket/prod/identity/fan-token-key-previous' } },
+  ]);
+  // 값이 들어갈 수 있는 칸(value·valueFrom·dataFrom)과 키 본문이 없다
+  for (const d of e.spec.data) assert.deepEqual(Object.keys(d).sort(), ['remoteRef', 'secretKey']);
+  assert.equal('dataFrom' in e.spec, false);
+  assert.doesNotMatch(text ?? '', /"kty"|BEGIN [A-Z ]*PRIVATE KEY/);
+  // 이름이 없으면 렌더를 멈춘다(빈 저장소·빈 Secret을 만들지 않는다)
+  assert.match(
+    renderFiles([valuesFile('externalSecret:\n  enabled: true\n  data: []\n')], BASE).error ?? '(렌더됨)',
+    /externalSecret/,
+  );
+  assert.equal(all(render(BASE).objects, 'ExternalSecret').length, 0);
+});
+
+test('CH-06 priorityClassName을주면_서비스와릴레이파드에그이름이붙고_비우면칸이없다', () => {
+  const on = render([...BASE, 'outboxRelay.enabled=true', 'service.priorityClassName=peaket-control'], 'purchase');
+  assert.equal(on.error, undefined, on.error);
+  assert.equal(find(on.objects, 'Deployment', 'example-svc').spec.template.spec.priorityClassName, 'peaket-control');
+  assert.equal(find(on.objects, 'Deployment', 'example-svc-outbox-relay').spec.template.spec.priorityClassName, 'peaket-control');
+  const off = render([...BASE, 'outboxRelay.enabled=true'], 'purchase');
+  assert.equal(off.error, undefined, off.error);
+  assert.equal('priorityClassName' in find(off.objects, 'Deployment', 'example-svc').spec.template.spec, false);
+  assert.equal('priorityClassName' in find(off.objects, 'Deployment', 'example-svc-outbox-relay').spec.template.spec, false);
+});
+
+test('CH-07 local·ci밖에서는_태그만으로렌더하지않고_다이제스트를요구한다', () => {
+  const release = (env) => ['name=example-svc', 'image.repository=peaket/example-svc', `env.PEAKET_ENV=${env}`, 'diagnose.bucket=peaket-diag'];
+  for (const env of ['staging', 'demo', 'prod']) {
+    assert.match(render([...release(env), 'image.tag=v1.2.3']).error ?? '(렌더됨)', /digest/, `${env} 태그만`);
+    const ok = render([...release(env), `image.digest=sha256:${'b'.repeat(64)}`]);
+    assert.equal(ok.error, undefined, `${env}: ${ok.error}`);
+    assert.equal(find(ok.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0].image, `peaket/example-svc@sha256:${'b'.repeat(64)}`);
+  }
+  // local·ci는 태그로 고정한다
+  for (const env of ['local', 'ci']) {
+    const r = render(['name=example-svc', 'image.repository=peaket/example-svc', `env.PEAKET_ENV=${env}`, 'image.tag=local']);
+    assert.equal(r.error, undefined, `${env}: ${r.error}`);
+    assert.match(find(r.objects, 'Deployment', 'example-svc').spec.template.spec.containers[0].image, /:local$/);
+  }
+});
+

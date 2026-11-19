@@ -10,6 +10,7 @@ import { Module } from '@nestjs/common';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
   DIAGNOSE_DEFAULTS,
+  DIAGNOSE_HANDLED_FILE,
   PlatformConfigError,
   PlatformMetrics,
   Readiness,
@@ -352,6 +353,65 @@ describe('D-T18 ① 증거 이름·내용과 지우기', () => {
     await settle(200);
     expect(puts).toHaveLength(0);
     expect(lines.some((l) => l.level === 'warn')).toBe(true);
+  });
+
+  // --- BAT-080 DG-09: 남은 증거의 객체 키는 파일 이름의 '요청 시각'이다(시작 시각·표시 파일의 처리 시각이 아니다) ---
+  // 정본: ADR-0303 결정 3, 계획 BAT-080 B5·12 — <서비스>/<파드>/<요청 시각>/<파일>. 시작 시각을 쓰면 다시 뜰 때마다
+  // 같은 증거가 다른 접두사에 쌓인다. 파일 이름의 시각을 읽지 못하면 올리지 않고 leftover_unreadable로 센다.
+
+  test('DG-09 D-T18 ①_남은보고서키는_파일이름의요청시각이고_시작시각(02:00)·표시파일시각(09:09)이아니다', async () => {
+    const s = stage();
+    // 표시 파일은 '이미 처리한' 다른 요청이다. 남은 파일의 요청 시각과 다르다
+    writeFileSync(join(s.diagDir, DIAGNOSE_HANDLED_FILE), 'report@2026-11-19T09:09:09Z');
+    writeFileSync(join(s.diagDir, 'report-2026-11-19T01-02-03Z.json'), JSON.stringify({ header: { nodejsVersion: 'v24' } }));
+    const { store, puts } = memoryStore();
+    boot({ ...s, store }); // clock.now는 2026-11-19T02:00:00Z다
+    await until('남은 보고서 올림', () => puts.length === 1);
+    expect(puts[0]!.key).toBe('example-svc/p-1/2026-11-19T01:02:03Z/report-2026-11-19T01-02-03Z.json');
+    expect(puts[0]!.key).not.toContain('2026-11-19T02:00:00');
+    expect(puts[0]!.key).not.toContain('2026-11-19T09:09:09Z');
+    // 표시 파일은 그대로 두고, 올린 파일은 지운다. 다음에 떠도 두 번 올리지 않는다
+    expect(readFileSync(join(s.diagDir, DIAGNOSE_HANDLED_FILE), 'utf8')).toBe('report@2026-11-19T09:09:09Z');
+    await until('올린 파일 지움', () => !existsSync(join(s.diagDir, 'report-2026-11-19T01-02-03Z.json')));
+    expect(existsSync(join(s.diagDir, 'report-2026-11-19T01-02-03Z.json'))).toBe(false);
+    const first = boot({ ...s, store });
+    await settle(200);
+    expect(puts).toHaveLength(1);
+    expect(first.exits.n).toBe(0);
+  });
+
+  test('DG-09 D-T18 ①_Node치명오류보고서이름(report.YYYYMMDD.HHMMSS)의시각을_요청시각으로쓴다', async () => {
+    const s = stage();
+    writeFileSync(join(s.diagDir, 'report.20261119.010203.1.001.json'), JSON.stringify({ header: {} }));
+    const { store, puts } = memoryStore();
+    boot({ ...s, store });
+    await until('남은 보고서 올림', () => puts.length === 1);
+    expect(puts[0]!.key).toBe('example-svc/p-1/2026-11-19T01:02:03Z/report.20261119.010203.1.001.json');
+    expect(puts[0]!.key).not.toContain('2026-11-19T02:00:00');
+  });
+
+  test('DG-09 D-T18 ①_파일이름에시각이없으면_표시파일의@시각을쓰고_그것도없으면올리지않고leftover_unreadable로센다', async () => {
+    // 표시 파일의 @ 시각으로 올린다
+    const s = stage();
+    writeFileSync(join(s.diagDir, DIAGNOSE_HANDLED_FILE), 'report@2026-11-19T05:06:07Z');
+    writeFileSync(join(s.diagDir, 'leftover.bin'), 'saved');
+    const withMarker = memoryStore();
+    const first = boot({ ...s, store: withMarker.store });
+    await until('표시 파일 시각으로 올림', () => withMarker.puts.length === 1);
+    expect(withMarker.puts[0]!.key).toBe('example-svc/p-1/2026-11-19T05:06:07Z/leftover.bin');
+    await settle(150);
+    expect(await results(first.metrics, 'leftover_uploaded')).toBe(1);
+
+    // 둘 다 없으면 올리지 않고 남긴다(이름을 지어내지 않는다)
+    const t = stage();
+    writeFileSync(join(t.diagDir, 'report.json'), JSON.stringify({ header: {} }));
+    const none = memoryStore();
+    const second = boot({ ...t, store: none.store });
+    await settle(200);
+    expect(none.puts).toHaveLength(0);
+    expect(await results(second.metrics, 'leftover_unreadable')).toBe(1);
+    expect(second.logs.some((l) => l.level === 'warn')).toBe(true);
+    expect(existsSync(join(t.diagDir, 'report.json'))).toBe(true);
   });
 
   test('D-T18 ①_진단을켜면시작하자마자_process.report의excludeEnv·excludeNetwork를켠다(SEC-02, 치명오류보고서도두겹) [ASVS v5.0.0-14.2.1]', async () => {

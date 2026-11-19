@@ -1008,3 +1008,66 @@ test('CC-05 가지 푸시는 spec-check를 full·큰 러너로 돌리지 않고,
   assert.equal(evalExpr(listMode[0], { 'inputs.mode': '' }), 'full', '일정 실행 list MODE');
   assert.equal(runsOn(sched, ''), LARGE, '일정 실행 runs-on');
 });
+
+// --- BAT-080 KE-01·KE-02(D-T18 ①, BAT-075 TO-2·TO-5): ci-kind.yml의 진단 e2e 복귀와 실패 수집(정적 시험) ---
+// 실제 판정은 kind에서 diagnose.e2e.mjs가 도는 것이다. 여기서는 워크플로가 그 시험을 빼먹지 않았는지,
+// 실패 때 파드(전·현재 컨테이너)·moto·/diag·버킷 전체를 남기는 단계가 있는지만 지킨다.
+const ciKind = () => YAML.parse(readFileSync(join(REPO, '.github', 'workflows', 'ci-kind.yml'), 'utf8'));
+
+test('KE-01 ci-kind.yml이_cluster_up·image뒤에_diagnose.e2e.mjs를_15분상한으로_돈다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const steps = ciKind().jobs.kind.steps;
+  const runs = steps.map((s) => (typeof s.run === 'string' ? s.run : '')).filter(Boolean);
+  const at = (needle) => runs.findIndex((t) => t.includes(needle));
+  const up = at('tools/local/cluster.mjs up');
+  const image = at('tools/local/cluster.mjs image');
+  const probes = at('tools/local/e2e/probes.e2e.mjs');
+  const diagnose = at('tools/local/e2e/diagnose.e2e.mjs');
+  assert.ok(up >= 0, 'cluster up 단계');
+  assert.ok(image > up, 'cluster up 뒤 image 단계');
+  assert.ok(probes > image, 'image 뒤 probes e2e');
+  // diagnose는 이미지·moto·버킷을 만드는 앞 단계 뒤에 돈다(앞에 두면 무대가 없다)
+  assert.ok(diagnose > probes, `diagnose e2e가 probes 뒤에 없다(probes ${probes}, diagnose ${diagnose})`);
+  assert.match(runs[diagnose], /--test-timeout=900000/, 'diagnose e2e 시험 상한 15분');
+  // 넘겨 둔 줄이 아니다(주석으로 빼 두지 않는다)
+  assert.doesNotMatch(readFileSync(join(REPO, '.github', 'workflows', 'ci-kind.yml'), 'utf8'), /diagnose\.e2e\.mjs.*넘김/, 'diagnose e2e가 아직 주석이다');
+});
+
+test('KE-02 ci-kind.yml의_실패수집이_diagnose-e2e파드전·현재로그_이벤트_/diag목록_helm값_버킷전체_moto로그를남긴다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const steps = ciKind().jobs.kind.steps;
+  const failure = steps.findIndex((s) => typeof s.if === 'string' && s.if.includes('failure()'));
+  assert.ok(failure >= 0, 'if: failure() 수집 단계');
+  const runs = steps.map((s) => (typeof s.run === 'string' ? s.run : ''));
+  const diagnose = runs.findIndex((t) => t.includes('tools/local/e2e/diagnose.e2e.mjs'));
+  assert.ok(failure > diagnose, '실패 수집이 diagnose e2e 뒤에 있다');
+  const collect = runs[failure];
+  for (const want of [
+    '-n diagnose-e2e get pods,events',
+    'describe pods',
+    'get values diag',
+    'get manifest diag',
+    '--previous',
+    'app.kubernetes.io/component=service',
+    'ls -la /diag',
+    'peaket-diag-e2e?list-type=2',
+    '-n peaket-local logs deploy/aws',
+    '-n peaket-local exec deploy/aws',
+    'cluster.mjs status',
+  ]) {
+    assert.ok(collect.includes(want), `실패 수집에 "${want}"가 없다`);
+  }
+  // 릴리스가 지워졌어도 무엇으로 떴는지 남긴다
+  assert.match(collect, /helm/);
+  assert.match(collect, /status diag/);
+  // 마지막 내리기는 실패해도 돈다
+  const down = steps.findIndex((s) => typeof s.run === 'string' && s.run.includes('cluster.mjs down'));
+  assert.ok(down >= 0, 'cluster down 단계');
+  assert.match(String(steps[down].if), /always\(\)/, 'cluster down은 always()');
+  // 측정 파일은 커밋하지 않고 산출물로 올린다
+  const artifact = steps.find((s) => typeof s.uses === 'string' && s.uses.startsWith('actions/upload-artifact@'));
+  assert.ok(artifact, '산출물 단계');
+  assert.equal(artifact.with.name, 'kind-bat075-measurements');
+  for (const p of ['docs/review/measurements/BAT-075-probes.md', 'docs/review/measurements/BAT-075-diagnose.md']) {
+    assert.ok(artifact.with.path.includes(p), `산출물에 ${p}가 없다`);
+  }
+});
+
