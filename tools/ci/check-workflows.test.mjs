@@ -1055,6 +1055,11 @@ test('KE-02 ci-kind.yml의_실패수집이_diagnose-e2e파드전·현재로그_�
   ]) {
     assert.ok(collect.includes(want), `실패 수집에 "${want}"가 없다`);
   }
+  // M3(검증): 증거 버킷은 전체를 나열해야 한다. prefix=로 좁히면 다른 시각 접두사의 객체를 못 본다(계획 B2, KE-01 '다른 접두사 없음')
+  const bucketUrl = /peaket-diag-e2e\?([^"'\s]*)/.exec(collect);
+  assert.ok(bucketUrl, '증거 버킷 나열 주소가 없다');
+  assert.doesNotMatch(bucketUrl[1], /(?:^|&)prefix=/, '버킷 나열이 prefix=로 좁혀졌다(다른 시각 접두사 객체를 못 본다)');
+  assert.match(bucketUrl[1], /(?:^|&)list-type=2(?:&|$)/, '버킷 나열이 list-type=2가 아니다');
   // 릴리스가 지워졌어도 무엇으로 떴는지 남긴다
   assert.match(collect, /helm/);
   assert.match(collect, /status diag/);
@@ -1068,6 +1073,33 @@ test('KE-02 ci-kind.yml의_실패수집이_diagnose-e2e파드전·현재로그_�
   assert.equal(artifact.with.name, 'kind-bat075-measurements');
   for (const p of ['docs/review/measurements/BAT-075-probes.md', 'docs/review/measurements/BAT-075-diagnose.md']) {
     assert.ok(artifact.with.path.includes(p), `산출물에 ${p}가 없다`);
+  }
+});
+
+test('M8 diagnose.e2e.mjs는 실패 때 dumpDiagnose를 부르고 stageDiag·실패경로에서 helm uninstall을 먼저 부르지 않는다', () => {
+  const text = readFileSync(join(REPO, 'tools', 'local', 'e2e', 'diagnose.e2e.mjs'), 'utf8');
+  const lines = text.split(/\r?\n/);
+  // (a) 실패 수집: dumpDiagnose 정의와 두 시험의 실패 경로 호출
+  assert.match(text, /async function dumpDiagnose\(/, 'dumpDiagnose 정의가 없다');
+  for (const what of ['heap', 'report']) {
+    assert.match(text, new RegExp(`if \\(!passed\\) await dumpDiagnose\\('${what}'\\)`), `${what} 실패 때 dumpDiagnose 호출이 없다`);
+  }
+  // (b) 앞 시험이 실패했을 때 지우지 않는다: stageDiag 본문에 uninstall이 없다
+  const stageAt = lines.findIndex((l) => /^async function stageDiag\(t\) \{/.test(l));
+  assert.ok(stageAt >= 0, 'stageDiag 함수가 없다');
+  const stageEnd = lines.findIndex((l, i) => i > stageAt && l === '}');
+  assert.ok(stageEnd > stageAt, 'stageDiag 함수 끝을 찾지 못했다');
+  assert.doesNotMatch(lines.slice(stageAt, stageEnd + 1).join('\n'), /uninstall/, 'stageDiag가 helm uninstall을 부른다(앞 시험의 실패 파드를 지운다)');
+  // 실패 경로(t.after 훅)에도 uninstall이 없다
+  const hooks = [...text.matchAll(/t\.after\(async \(\) => \{[\s\S]*?\n {2}\}\);/g)].map((m) => m[0]);
+  assert.ok(hooks.length >= 2, `실패 수집 훅 ${hooks.length}개`);
+  for (const hook of hooks) assert.doesNotMatch(hook, /uninstall/, '실패 경로에서 helm uninstall을 먼저 부른다');
+  // uninstall은 성공한 시험의 끝(모든 단언 뒤 passed = true 바로 앞)에만 둔다
+  const got = lines.map((l, i) => ({ i, l })).filter(({ l }) => /execFileSync\(helm,/.test(l) && l.includes("'uninstall'"));
+  assert.equal(got.length, 2, `uninstall 호출 ${got.length}개(성공 정리 둘)`);
+  for (const { i, l } of got) {
+    assert.match(l, /'uninstall', 'diag'/, `uninstall ${i + 1}행이 diag 릴리스 정리가 아니다`);
+    assert.match(lines[i + 1] ?? '', /^\s*passed = true;\s*$/, `uninstall ${i + 1}행이 성공 표시(passed = true) 앞이다(실패 경로에서 지울 수 있다)`);
   }
 });
 
