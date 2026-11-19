@@ -13,6 +13,7 @@ import { FinishWithdrawals } from '../src/modules/session/application/finish-wit
 import { GetVerificationStatus } from '../src/modules/session/application/get-verification-status.js';
 import { completeWithdrawal, WithdrawAccount } from '../src/modules/session/application/withdraw-account.js';
 import type { AccountEraser, SessionStore } from '../src/modules/session/domain/ports.js';
+import { type UnusedTicketsQuote, WithdrawalParticipantUnavailable } from '../src/modules/session/domain/withdrawal.js';
 import { CreateSession } from '../src/modules/session/application/create-session.js';
 import { plusOneYear } from '../src/modules/verification/domain/verification.js';
 import { HmacIdentityHashers } from '../src/modules/verification/adapters/hmac-identity-hashers.js';
@@ -732,5 +733,161 @@ describe('탈퇴 참여자와 탈퇴 미룸의 응용 층(I-T84, BAT-010)', () =
     expect(r).toEqual({ outcome: 'WITHDRAWN' });
     expect(t.calls).toEqual([]);
     expect(t.sessions.accountOf(kid.accountId)?.status).toBe('DELETED');
+  });
+});
+
+// ---- 미사용 티켓 확인 409·503의 응용 층(I-T26 ①, identity §8 '미사용 티켓 확인과 취소', BAT-013) ----
+// 값은 정본에서 적는다: 견적 데드라인 2초 [가정], POL-032 예(33,333원 20% = 6,666/26,667, 132,500원 10% = 13,250/119,250).
+// 코드 상수를 가져오지 않는다.
+const QUOTE_DEADLINE_MS = 2_000;
+const TWO_TICKETS: UnusedTicketsQuote = {
+  count: 2,
+  ticketAmount: 165_833,
+  deductionAmount: 19_916,
+  refundAmount: 145_917,
+  transferableCount: 1,
+  deferredRefundCount: 1,
+};
+
+interface QuoteCall {
+  accountId: string;
+  deadlineMs: number;
+}
+
+/** 견적 대역(이름·답을 정한다. answer가 던지면 견적 실패) */
+function quotingParticipant(name: string, answer: () => Promise<UnusedTicketsQuote | undefined>) {
+  const quotes: QuoteCall[] = [];
+  let processes = 0;
+  const participant = {
+    name,
+    process: async () => {
+      processes++;
+      return { state: 'DONE' as const };
+    },
+    unusedTickets: async (accountId: string, o: { deadlineMs: number }): Promise<UnusedTicketsQuote | undefined> => {
+      quotes.push({ accountId, deadlineMs: o.deadlineMs });
+      return answer();
+    },
+  };
+  return { participant, quotes, processes: () => processes };
+}
+
+/** 참여자 목록을 넣은 탈퇴(생성자 뒤 두 칸은 구현 전 트리에 없어도 넘겨진다) */
+function withdrawWith(t: Awaited<ReturnType<typeof setup>>, participants: unknown[], holds?: VerificationHolds) {
+  return new (WithdrawAccount as unknown as new (...a: unknown[]) => WithdrawAccount)(
+    t.sessions,
+    new JoseReauthVerifier(t.k.keys, ISSUER, t.clock),
+    new VerificationEraser(t.verifications),
+    t.clock,
+    holds,
+    t.staff,
+    undefined,
+    participants,
+    undefined,
+  );
+}
+
+const errorOf = async (p: Promise<unknown>): Promise<AccountError> => {
+  const e = await p.then(
+    () => undefined,
+    (x: unknown) => x,
+  );
+  expect(e).toBeInstanceOf(AccountError);
+  return e as AccountError;
+};
+
+describe('미사용 티켓 확인의 응용 층(I-T26 ①, BAT-013)', () => {
+  test('I-T26 ①_견적이0장(undefined)이면확인없이진행하고_견적은미룸표시전에2초데드라인으로부른다', async () => {
+    const t = await setup();
+    const p = quotingParticipant('purchase', async () => undefined);
+    const withdraw = withdrawWith(t, [p.participant]);
+    const a = await t.login('q26-1');
+    const r = await withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauthToken(a), body: {} });
+    expect(r).toEqual({ outcome: 'WITHDRAWN' });
+    expect(p.quotes).toEqual([{ accountId: a.accountId, deadlineMs: QUOTE_DEADLINE_MS }]);
+    expect(p.processes()).toBe(1);
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
+  });
+
+  test('I-T26 ①_견적에값이있으면CONFIRMATION_REQUIRED에값이실리고_재인증토큰을쓰지않으며_확인뒤같은토큰으로진행하고견적을다시부르지않는다', async () => {
+    const t = await setup();
+    const p = quotingParticipant('purchase', async () => TWO_TICKETS);
+    const withdraw = withdrawWith(t, [p.participant]);
+    const a = await t.login('q26-2');
+    const token = await t.reauthToken(a);
+    const e = await errorOf(withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} }));
+    expect(e.code).toBe('CONFIRMATION_REQUIRED');
+    expect(e.unusedTickets).toEqual(TWO_TICKETS);
+    // 409는 토큰도 계정도 쓰지 않는다
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('ACTIVE');
+    expect(p.processes()).toBe(0);
+    // 같은 토큰에 확인을 실으면 진행한다. 확인을 지난 요청은 견적을 다시 부르지 않는다
+    expect(await withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: { confirmCancelUnusedTickets: true } })).toEqual({ outcome: 'WITHDRAWN' });
+    expect(p.quotes).toHaveLength(1);
+    expect(p.processes()).toBe(1);
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
+  });
+
+  test('I-T26 ①_견적참여자가던지면DEPENDENCY_UNAVAILABLE이고_트랜잭션을열지않으며계정은ACTIVE그대로다', async () => {
+    const t = await setup();
+    let transactions = 0;
+    const counting = new Proxy(t.sessions, {
+      get(target, prop) {
+        if (prop === 'transaction')
+          return (fn: Parameters<SessionStore['transaction']>[0]) => {
+            transactions++;
+            return target.transaction(fn);
+          };
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const p = quotingParticipant('purchase', async () => {
+      throw new WithdrawalParticipantUnavailable('purchase', new Error('주입한 견적 실패'));
+    });
+    const withdraw = new (WithdrawAccount as unknown as new (...a: unknown[]) => WithdrawAccount)(counting, new JoseReauthVerifier(t.k.keys, ISSUER, t.clock), new VerificationEraser(t.verifications), t.clock, undefined, t.staff, undefined, [p.participant], undefined);
+    const a = await t.login('q26-3');
+    const token = await t.reauthToken(a);
+    expect(await code(withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} }))).toBe('DEPENDENCY_UNAVAILABLE');
+    expect(transactions).toBe(0);
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('ACTIVE');
+    // 토큰을 쓰지 않았으므로 같은 토큰으로 다시 보낼 수 있다
+    expect((await t.k.refresh.run({ refreshToken: a.refreshToken })).result).toBe('OK');
+  });
+
+  test('I-T26 ①_견적참여자가둘이면값을더한다(지금은purchase하나지만포트계약)', async () => {
+    const t = await setup();
+    const one = (n: number): UnusedTicketsQuote => ({ count: 1, ticketAmount: 33_333, deductionAmount: 6_666, refundAmount: 26_667, transferableCount: n === 1 ? 1 : 0, deferredRefundCount: n === 1 ? 0 : 1 });
+    const a = quotingParticipant('purchase', async () => one(1));
+    const b = quotingParticipant('other', async () => one(2));
+    const withdraw = withdrawWith(t, [a.participant, b.participant]);
+    const s = await t.login('q26-4');
+    const e = await errorOf(withdraw.run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await t.reauthToken(s), body: {} }));
+    expect(e.code).toBe('CONFIRMATION_REQUIRED');
+    expect(e.unusedTickets).toEqual({ count: 2, ticketAmount: 66_666, deductionAmount: 13_332, refundAmount: 53_334, transferableCount: 1, deferredRefundCount: 1 });
+    expect(a.processes()).toBe(0);
+    expect(b.processes()).toBe(0);
+  });
+
+  test('I-T26 ①_보관409와견적409가겹치면보관안내가먼저이고_보관을확인하면견적409다_두값을함께실으면진행한다', async () => {
+    const t = await setup();
+    const holds = new VerificationHolds(t.verifications);
+    const p = quotingParticipant('purchase', async () => TWO_TICKETS);
+    const withdraw = withdrawWith(t, [p.participant], holds);
+    const a = await t.login('q26-5');
+    await t.verify(a.accountId, 'q26-5-person');
+    expect(await new SetRestrictedCiHold(t.verifications, t.clock).run({ accountId: a.accountId, fraudCaseId: '0190f3a1-7c2e-7a00-8000-0000000026a1', state: 'CASE_OPEN', until: t.clock.now() + 30 * DAY, version: 1 })).toBe('OK');
+    const token = await t.reauthToken(a);
+    const first = await errorOf(withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: {} }));
+    expect(first.code).toBe('CONFIRMATION_REQUIRED');
+    expect(first.fraudHold).toBeDefined();
+    expect(first.unusedTickets).toBeUndefined();
+    // 보관을 확인하면 이번엔 견적 409다(같은 토큰, 토큰을 쓰지 않는다). 견적은 아직 부르지 않았다
+    const second = await errorOf(withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: { acknowledgeFraudHold: true } }));
+    expect(second.code).toBe('CONFIRMATION_REQUIRED');
+    expect(second.fraudHold).toBeUndefined();
+    expect(second.unusedTickets).toEqual(TWO_TICKETS);
+    // 두 값을 함께 실으면 진행한다
+    expect(await withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: { acknowledgeFraudHold: true, confirmCancelUnusedTickets: true } })).toEqual({ outcome: 'WITHDRAWN' });
   });
 });

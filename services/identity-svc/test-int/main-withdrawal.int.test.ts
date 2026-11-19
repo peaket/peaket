@@ -54,6 +54,9 @@ beforeAll(async () => {
       seen.push({ accountId: String(call.request.account_id), token: call.metadata.get('x-peaket-internal-grpc-token')[0], caller: call.metadata.get('x-peaket-internal-grpc-caller')[0], deadlineLeftMs: (d instanceof Date ? d.getTime() : Number(d)) - Date.now() });
       cb(null, answer === 'DONE' ? { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE' } : { state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: ['WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING'], deposit_orders_pending: 1 });
     },
+    // 미사용 티켓 견적(0장): 시작 파일의 클라이언트가 미룸 표시 전에 부른다(BAT-013, I-T26 ①)
+    QuoteAccountWithdrawal: (_call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) =>
+      cb(null, { unused_tickets: 0, ticket_amount: 0, deduction_amount: 0, refund_amount: 0, transferable_tickets: 0, refund_deferred_tickets: 0 }),
   });
   const doublePort = await new Promise<number>((res, rej) => double.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))));
   const fan = await fanKey();

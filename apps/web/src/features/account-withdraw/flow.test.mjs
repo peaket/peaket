@@ -1,4 +1,5 @@
-// 탈퇴 흐름(flow.ts) 시험(docs/features/identity.md §8 '탈퇴 화면 연결', BUILD_ORDER BOT-036, I-T16·I-T68 ⑨). 가짜 fetch·저장소로 본다.
+// 탈퇴 흐름(flow.ts) 시험(docs/features/identity.md §8 '탈퇴 화면 연결' '미사용 티켓 확인과 취소', BUILD_ORDER BOT-036·PRF-174,
+// I-T16·I-T68 ⑨·I-T26 ②). 가짜 fetch·저장소로 본다. 값은 정본(openapi unusedTickets, POL-032 예)에서 적는다.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -185,10 +186,12 @@ test('I-T16_확인창이열린동안의제공자채우기는목록이실패해�
 
 test('I-T16_탈퇴요청이도는동안창을닫았으면늦게온응답가운데완료(204·202)만반영하고_보관안내·재인증·오류·로그인필요는버린다(새맥락마지막검토)', () => {
   const hold = { kind: 'fraudHold', state: 'RESTRICTED', until: '2027-01-03T15:00:00.000Z' };
+  const tickets = { kind: 'unusedTickets', count: 2, ticketAmount: 165_833, deductionAmount: 19_916, refundAmount: 145_917, transferableCount: 1, deferredRefundCount: 1 };
   for (const [r, open, closed] of [
     [{ kind: 'done' }, 'done', 'done'],
     [{ kind: 'deferred' }, 'deferred', 'deferred'],
     [hold, 'hold', 'ignore'],
+    [tickets, 'tickets', 'ignore'],
     [{ kind: 'reauth' }, 'reauth', 'ignore'],
     [{ kind: 'login' }, 'login', 'ignore'],
     [{ kind: 'error' }, 'error', 'ignore'],
@@ -196,6 +199,51 @@ test('I-T16_탈퇴요청이도는동안창을닫았으면늦게온응답가운�
     assert.equal(afterWithdraw(r, { closed: false }), open, r.kind);
     assert.equal(afterWithdraw(r, { closed: true }), closed, `${r.kind}(닫은 뒤)`);
   }
+});
+
+// ---- I-T26 ②: 409 unusedTickets를 읽고 두 번째 누름에만 확인 값을 싣는다(identity §8 '미사용 티켓 확인과 취소', BAT-013) ----
+test('I-T26 ②_409unusedTickets면환급예상여섯칸을돌려주고_첫요청본문에는확인값이없으며_확인뒤같은토큰에confirmCancelUnusedTickets를싣는다', async () => {
+  const quote = { count: 2, ticketAmount: 165_833, deductionAmount: 19_916, refundAmount: 145_917, transferableCount: 1, deferredRefundCount: 1 };
+  const f = fakeFetch((_u, _i, n) => (n === 1 ? problem(409, 'withdrawal-confirmation-required', { unusedTickets: quote }) : new Response(null, { status: 204 })));
+  const api = createWithdrawApi({ origin: 'https://api.test', fetch: f });
+  assert.deepEqual(await api.withdraw('tok-1', false), { kind: 'unusedTickets', ...quote });
+  // 첫 누름은 안내만 받는다: 확인 값을 싣지 않는다(안내 없이 취소하지 않는다)
+  assert.equal(f.calls[0].body, '{}');
+  assert.equal(f.calls[0].headers['x-reauth-token'], 'tok-1');
+  // 두 번째 누름은 같은 토큰에 확인 값을 싣는다
+  assert.deepEqual(await api.withdraw('tok-1', false, { confirmCancelUnusedTickets: true }), { kind: 'done' });
+  assert.equal(f.calls[1].body, JSON.stringify({ confirmCancelUnusedTickets: true }));
+  assert.equal(f.calls[1].headers['x-reauth-token'], 'tok-1');
+  // 보관 안내를 지났으면 두 값을 함께 실어도 된다
+  const both = fakeFetch(() => new Response(null, { status: 204 }));
+  await createWithdrawApi({ origin: '', fetch: both }).withdraw('t', true, { confirmCancelUnusedTickets: true });
+  assert.equal(both.calls[0].body, JSON.stringify({ acknowledgeFraudHold: true, confirmCancelUnusedTickets: true }));
+  // 세 번째 인자를 주지 않는 옛 호출은 지금처럼 빈 본문이다
+  const old = fakeFetch(() => new Response(null, { status: 204 }));
+  await createWithdrawApi({ origin: '', fetch: old }).withdraw('t', false);
+  assert.equal(old.calls[0].body, '{}');
+});
+
+test('I-T26 ②_409unusedTickets의모양이틀리면(0장·음수·빠진칸·정수아님)오류로보고_낮은금액을보이지않는다', async () => {
+  const bad = [
+    {},
+    { count: 0, ticketAmount: 0, deductionAmount: 0, refundAmount: 0, transferableCount: 0, deferredRefundCount: 0 },
+    { count: -1, ticketAmount: 1, deductionAmount: 0, refundAmount: 1, transferableCount: 0, deferredRefundCount: 0 },
+    { count: 1, ticketAmount: 1, deductionAmount: 0, refundAmount: 1, transferableCount: 0 },
+    { count: 1, ticketAmount: 1.5, deductionAmount: 0, refundAmount: 1.5, transferableCount: 0, deferredRefundCount: 0 },
+    { count: 1, ticketAmount: '1', deductionAmount: 0, refundAmount: 1, transferableCount: 0, deferredRefundCount: 0 },
+  ];
+  for (const unusedTickets of bad) {
+    const r = await createWithdrawApi({ origin: '', fetch: fakeFetch(() => problem(409, 'withdrawal-confirmation-required', { unusedTickets })) }).withdraw('t', false);
+    assert.deepEqual(r, { kind: 'error' }, JSON.stringify(unusedTickets));
+  }
+  // 보관 안내와 겹치면 보관 안내가 먼저다(서버가 둘 다 싣지 않아도 화면 규칙은 같다)
+  const both = { fraudHold: { state: 'CASE_OPEN', until: '2027-01-03T15:00:00.000Z' }, unusedTickets: { count: 2, ticketAmount: 1, deductionAmount: 0, refundAmount: 1, transferableCount: 0, deferredRefundCount: 0 } };
+  assert.deepEqual(await createWithdrawApi({ origin: '', fetch: fakeFetch(() => problem(409, 'withdrawal-confirmation-required', both)) }).withdraw('t', false), {
+    kind: 'fraudHold',
+    state: 'CASE_OPEN',
+    until: '2027-01-03T15:00:00.000Z',
+  });
 });
 
 test('I-T74_탈퇴재인증표시의남긴시각을한번만돌려준다(원격로그아웃표시와견준다, BOT-044)', () => {

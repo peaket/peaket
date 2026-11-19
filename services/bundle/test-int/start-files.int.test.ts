@@ -13,7 +13,7 @@ import { migratePayment } from '../../payment-svc/scripts/migrate.mjs';
 import { createDatabase, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { envFileText, v1EnvFiles, v1Keys } from '../../../tools/local/v1-stage.mjs';
 import { build, freePort, logLines, type Postgres, type Running, SERVICES_DIR, sigterm, spawnMain, startPostgres, startValkey, type Container, waitReady } from './support.js';
-import { processAccountWithdrawal } from '../../purchase-svc/test-int/withdrawal-grpc-client.js';
+import { processAccountWithdrawal, quoteAccountWithdrawal } from '../../purchase-svc/test-int/withdrawal-grpc-client.js';
 
 type Svc = 'payment-svc' | 'purchase-svc' | 'admission-ctrl' | 'queue-svc';
 const SERVICES: Svc[] = ['payment-svc', 'purchase-svc', 'admission-ctrl', 'queue-svc'];
@@ -135,8 +135,11 @@ describe('purchase-svc 시작 파일의 탈퇴 참여자 gRPC(P-T55 ⑥, BAT-010
         const done = (text: string) => Number(/^purchase_withdrawal_participant_total\{[^}]*state="done"[^}]*\} (\d+)$/m.exec(text)?.[1] ?? 0);
         expect(await processAccountWithdrawal(address, account, { token: TOKEN, caller: 'identity-svc' })).toEqual({
           ok: true,
-          reply: { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE', reasons: [], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 0 },
+          reply: { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE', reasons: [], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 0, unused_tickets_cancelled: 0, unused_tickets_pending: 0 },
         });
+        // 견적 RPC도 시작 조립에 붙고 같은 부르는 쪽 검사를 한다(티켓 서비스 주소가 없어 이 든 시험 조립은 UNAVAILABLE이다, BAT-013 계획 10)
+        expect(await quoteAccountWithdrawal(address, account, { caller: 'identity-svc' })).toEqual({ ok: false, code: 'UNAUTHENTICATED' });
+        expect(await quoteAccountWithdrawal(address, account, { token: TOKEN, caller: 'identity-svc' })).toEqual({ ok: false, code: 'UNAVAILABLE' });
         const metrics = await (await fetch(`http://127.0.0.1:${p['purchase-svc'].management}/metrics`)).text();
         expect(metrics).toMatch(/^# TYPE purchase_withdrawal_participant_total counter$/m);
         expect(done(metrics)).toBe(done(before) + 1);

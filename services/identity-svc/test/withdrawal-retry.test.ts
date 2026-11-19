@@ -363,6 +363,70 @@ describe('요청 경로와 고리의 끝내기(I-T84 ①⑦)', () => {
     expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'DELETED' });
   });
 
+  test('I-T26 ③_티켓환급대기(TICKET_REFUND_PENDING)는202·WITHDRAWAL_PENDING으로남고다음확인60초이며_한계정의대기가다른계정의끝내기를막지않는다_끝나면다음바퀴가204로끝낸다', async () => {
+    const t = await setup();
+    const a = await t.login('t26-1-a');
+    await t.verify(a.accountId, 't26-1-a-person');
+    const b = await t.login('t26-1-b');
+    await t.verify(b.accountId, 't26-1-b-person');
+    const at = t.clock.now();
+    // 둘 다 미사용 티켓의 환급이 남았다(참여자 답의 새 이유)
+    t.p.byAccount.set(a.accountId, async () => ({ state: 'PENDING', reasons: ['TICKET_REFUND_PENDING'] }));
+    t.p.byAccount.set(b.accountId, async () => ({ state: 'PENDING', reasons: ['TICKET_REFUND_PENDING'] }));
+    expect(await t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauth(a), body: {} })).toEqual({ outcome: 'DEFERRED' });
+    t.clock.advance(7_123);
+    const atB = t.clock.now();
+    expect(await t.withdraw.run({ accountId: b.accountId, sessionId: b.sessionId, reauthToken: await t.reauth(b), body: {} })).toEqual({ outcome: 'DEFERRED' });
+    for (const [id, started] of [
+      [a.accountId, at],
+      [b.accountId, atB],
+    ] as const) {
+      expect(t.sessions.accountOf(id)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureStartedAt: started, closureNextCheckAt: started + NEXT_CHECK_MS });
+    }
+    expect(t.sessions.withdrawnMessages()).toEqual([]);
+    // 다음 바퀴에 b의 환급만 끝났다: b는 끝나고 a는 그대로다(한 계정의 대기가 다른 계정을 막지 않는다)
+    t.p.byAccount.set(b.accountId, DONE);
+    t.clock.advance(NEXT_CHECK_MS);
+    expect(await t.retry.run()).toEqual({ claimed: 2, withdrawn: 1, deferred: 1, failed: 0 });
+    expect(t.sessions.accountOf(b.accountId)).toMatchObject({ status: 'DELETED' });
+    expect(t.sessions.activeCount(b.accountId)).toBe(0);
+    expect(t.sessions.withdrawnMessages().map((m) => m.key)).toEqual([b.accountId]);
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureStartedAt: at, closureNextCheckAt: t.clock.now() + NEXT_CHECK_MS });
+    expect(t.sessions.activeCount(a.accountId)).toBe(1);
+    expect(t.sessions.terminations(a.accountId)).toEqual([]);
+    // a의 환급도 끝나면 다음 바퀴가 끝낸다(204)
+    t.p.byAccount.set(a.accountId, DONE);
+    t.clock.advance(NEXT_CHECK_MS);
+    expect(await t.retry.run()).toEqual({ claimed: 1, withdrawn: 1, deferred: 0, failed: 0 });
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
+    expect(t.sessions.terminations(a.accountId).map(([, r]) => r)).toEqual(['DELETE']);
+    expect(t.sessions.withdrawnMessages().map((m) => m.key)).toEqual([b.accountId, a.accountId]);
+  });
+
+  test('I-T26 ③_요청경로와고리가겹쳐도끝내기는한번이다_요청경로가티켓환급대기로남은사이_고리가DONE을받아끝내면_요청경로는이미끝난계정에204(WITHDRAWN)다', async () => {
+    const t = await setup();
+    const a = await t.login('t26-2');
+    await t.verify(a.accountId, 't26-2-person');
+    let release!: (x: Answer) => void;
+    const held = new Promise<Answer>((r) => (release = r));
+    let calls = 0;
+    // 요청 경로의 첫 호출은 붙잡아 두고(티켓 환급 대기), 고리는 바로 DONE으로 끝낸다
+    t.p.byAccount.set(a.accountId, async () => (++calls === 1 ? held : { state: 'DONE' }));
+    const request = t.withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: await t.reauth(a), body: {} });
+    for (let i = 0; i < 500 && calls === 0; i++) await new Promise((r) => setTimeout(r, 2));
+    expect(calls).toBe(1);
+    expect(t.sessions.accountOf(a.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closureReason: 'WITHDRAWAL', closureNextCheckAt: t.clock.now() + NEXT_CHECK_MS });
+    t.clock.advance(NEXT_CHECK_MS);
+    expect(await t.retry.run()).toMatchObject({ claimed: 1, withdrawn: 1 });
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
+    release({ state: 'DONE' });
+    await expect(request).resolves.toEqual({ outcome: 'WITHDRAWN' });
+    // 끝내기와 세션 종료·탈퇴 사건은 한 번뿐이다
+    expect(t.sessions.withdrawnMessages()).toHaveLength(1);
+    expect(t.sessions.terminations(a.accountId).map(([, r]) => r)).toEqual(['DELETE']);
+    expect(t.sessions.activeCount(a.accountId)).toBe(0);
+  });
+
   test('I-T84①_장애주입_요청경로에서참여자DONE뒤끝내기트랜잭션이실패해202로미룬계정은_다음확인시각에고리가끝낸다', async () => {
     let failNext = false;
     let injected = 0;

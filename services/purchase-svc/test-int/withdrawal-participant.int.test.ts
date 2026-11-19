@@ -1,6 +1,8 @@
-// 탈퇴 참여자(purchase-svc WithdrawalParticipantService.ProcessAccountWithdrawal)를 실제 PostgreSQL 18과 실제 payment-svc gRPC(운영 처리기·저장소)로 돈다.
-// 정본: docs/features/payment.md §4.1 '탈퇴 참여자의 첫 구현'·§11 P-T55, §6 '입금 전 취소와 입금 오류 되돌림의 첫 구현'(CancelPayment 쪽), ADR-0284,
-// docs/data.md §5.1 '탈퇴 참여자의 계정 주문 찾기', docs/api/proto/peaket/purchase/v1/account.proto(BAT-010 시험 담당).
+// 탈퇴 참여자(purchase-svc WithdrawalParticipantService.ProcessAccountWithdrawal·QuoteAccountWithdrawal)를 실제 PostgreSQL 18과
+// 실제 ticket-svc·payment-svc gRPC(운영 처리기·저장소)로 돈다.
+// 정본: docs/features/payment.md §4.1 '탈퇴 참여자의 첫 구현' '미사용 티켓 견적' '미사용 티켓 취소'·§11 P-T55·I-T26, §6 '입금 전 취소와 입금 오류 되돌림의 첫 구현'(CancelPayment 쪽),
+// docs/features/identity.md §8 '미사용 티켓 확인과 취소', ADR-0284, docs/data.md §5.1 '탈퇴 참여자의 계정 주문 찾기',
+// docs/api/proto/peaket/purchase/v1/account.proto(BAT-010·BAT-013 시험 담당).
 //
 // 약속:
 // - 컨테이너 하나를 파일 전체가 나눠 쓰고 purchase·payment는 서로 다른 데이터베이스다. 계정·주문·결제 ID는 시험마다 새 UUID라 서로 닿지 않는다.
@@ -32,9 +34,27 @@ import {
   paymentPackage,
   paymentServiceHandlers,
 } from '../../payment-svc/src/modules/payment/server.js';
+import { startGrpcServer } from '../../ticket-svc/src/grpc-server.js';
+import { DrizzleTicketStore } from '../../ticket-svc/src/modules/ticket/adapters/db/drizzle-ticket-store.js';
+import { TicketService } from '../../ticket-svc/src/modules/ticket/application/ticket-service.js';
+import { ticketPackage, ticketServiceHandlers } from '../../ticket-svc/src/modules/ticket/inbound/ticket.grpc.js';
+import { migrateTicket } from '../../ticket-svc/scripts/migrate.mjs';
 import { GrpcWithdrawalParticipant } from '../../identity-svc/src/modules/session/adapters/grpc-withdrawal-participants.js';
-import { DrizzleWithdrawalOrders, ProcessAccountWithdrawal, type WithdrawalDepositCancellations, withdrawalParticipantHandlers } from '../src/modules/booking/index.js';
-import { GrpcPaymentCancellations } from '../src/modules/refund/index.js';
+import { DrizzleOrderStore, DrizzleWithdrawalOrders, ProcessAccountWithdrawal, QuoteAccountWithdrawal, type WithdrawalDepositCancellations, type WithdrawalOrder, withdrawalParticipantHandlers } from '../src/modules/booking/index.js';
+import {
+  AccountWithdrawalTickets,
+  CancelTicket,
+  DrizzleCancellationOrders,
+  DrizzleCancellationWrites,
+  DrizzleWithdrawalTickets,
+  GrpcPaymentCancellations,
+  GrpcTicketCancellations,
+  type CancellationConfigs,
+  RefundAfterEntry,
+  type SeatReturns,
+  WeekendBusinessCalendar,
+  withdrawalTicketCancellationId,
+} from '../src/modules/refund/index.js';
 import { migratePurchase } from '../scripts/migrate.mjs';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -45,7 +65,8 @@ const accountPkg = (() => {
   const def = protoLoader.fromJSON(purchaseV1Account as Parameters<typeof protoLoader.fromJSON>[0], LOAD);
   return (grpc.loadPackageDefinition(def) as unknown as { peaket: { purchase: { v1: Pkg } } }).peaket.purchase.v1;
 })();
-type Client = grpc.Client & { ProcessAccountWithdrawal(req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void): void };
+type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => void;
+type Client = grpc.Client & { ProcessAccountWithdrawal: Unary; QuoteAccountWithdrawal: Unary };
 
 // ---- 결제사 대역 ----
 type Mode = 'CANCEL' | 'CANCEL_PENDING' | 'UNKNOWN' | 'DEPOSITED' | 'LOSE_AFTER_CANCEL';
@@ -97,18 +118,28 @@ const openGuard = { circuitClosed: () => true, tryTakeToken: () => true, admitsQ
 let pgc: PostgresContainer | undefined;
 let purchaseDb: Database;
 let paymentDb: Database;
+let ticketDb: Database;
 let admin: Database;
 let payAdmin: Database;
+let ticketAdmin: Database;
 let deadDb: Database;
 let paymentServer: grpc.Server;
 let purchaseServer: grpc.Server;
 let brokenServer: grpc.Server;
+let ticketServer: { port: number; close(): Promise<void> } | undefined;
 let client: Client;
 let brokenClient: Client;
 let paymentAddress: string;
 let purchaseAddress: string;
 let realCancels: GrpcPaymentCancellations;
 let deadCancels: GrpcPaymentCancellations;
+let ticketCancels: GrpcTicketCancellations;
+let ticketService: TicketService;
+/** 회차 판매 설정(공연 시작 = 판매 종료 + 24시간). 시험마다 넣는다 */
+const eventConfigs = new Map<string, { saleEndsAtMs: number; entryOpensAtMs?: number }>();
+const ticketConfigs: CancellationConfigs = { config: async (eventId) => eventConfigs.get(eventId) };
+/** 좌석 반환 기록(운영 DrizzleSeatReturns 대신 seat_sale 행을 RETURNED로 바꾸고 부른 값을 적는다) */
+const seatReturns: Array<{ eventId: string; orderId: string; seatId: string; accountId: string }> = [];
 /** CancelPayment가 받은 입력(payment-svc 쪽) */
 const cancelInputs: { paymentId: string; cancellationId: string; reason: string; amount?: number }[] = [];
 /** purchase가 payment-svc에 보내는 길: 'real'(그대로)·'dead'(듣는 곳 없는 주소)·'lose'(payment-svc의 답을 받은 뒤 버리고 UNKNOWN) */
@@ -140,7 +171,7 @@ async function freePort(): Promise<number> {
 }
 const bind = (s: grpc.Server) => new Promise<number>((res, rej) => s.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))));
 
-function purchaseService(orders: DrizzleWithdrawalOrders) {
+function purchaseService(orders: DrizzleWithdrawalOrders, tickets?: AccountWithdrawalTickets) {
   const deposits: WithdrawalDepositCancellations = {
     cancel: async (q) => {
       if (route === 'dead') return deadCancels.cancel(q);
@@ -152,18 +183,55 @@ function purchaseService(orders: DrizzleWithdrawalOrders) {
       return r;
     },
   };
-  return new ProcessAccountWithdrawal({ orders, deposits, clock: systemClock, log: { warn: (obj, msg) => void warns.push(JSON.stringify({ obj, msg })) } });
+  return new ProcessAccountWithdrawal({ orders, deposits, ...(tickets ? { tickets } : {}), clock: systemClock, log: { warn: (obj, msg) => void warns.push(JSON.stringify({ obj, msg })) } });
+}
+
+/** 미사용 티켓 포트(실제 purchase DB·실제 ticket-svc 취소 Saga·실제 payment-svc 취소) */
+function withdrawalTickets(database: Database) {
+  const seats: SeatReturns = {
+    returnSold: async (q) => {
+      seatReturns.push({ eventId: q.eventId, orderId: q.orderId, seatId: q.seatId, accountId: q.accountId });
+      const r = await admin.pool.query("update seat_sale set status = 'RETURNED' where event_id = $1 and seat_id = $2 and order_id = $3 and status = 'SOLD'", [q.eventId, q.seatId, q.orderId]);
+      return r.rowCount ?? 0;
+    },
+  };
+  const cancelTicket = new CancelTicket({
+    orders: new DrizzleCancellationOrders(database, ticketConfigs),
+    calendar: new WeekendBusinessCalendar(),
+    tickets: ticketCancels,
+    payments: realCancels,
+    writes: new DrizzleCancellationWrites(database, new DrizzleOrderStore({ clock: systemClock })),
+    seats,
+  });
+  return new AccountWithdrawalTickets({
+    store: new DrizzleWithdrawalTickets(database),
+    configs: ticketConfigs,
+    calendar: new WeekendBusinessCalendar(),
+    cancelTicket,
+    log: { warn: (obj, msg) => void warns.push(JSON.stringify({ obj, msg })) },
+  });
+}
+/** 받는 층에 견적(읽기 전용)까지 연 조립 */
+function participantHandlers(database: Database) {
+  const orders = new DrizzleWithdrawalOrders(database);
+  const tickets = withdrawalTickets(database);
+  const process = purchaseService(orders, tickets);
+  return withdrawalParticipantHandlers({ run: (i) => process.run(i), quote: new QuoteAccountWithdrawal({ tickets, clock: systemClock }) }, { internalToken: TOKEN, onError: () => {} });
 }
 
 beforeAll(async () => {
   pgc = await startPostgres();
   const paymentUrl = await createNamedDatabase(pgc.url, 'payment');
+  const ticketUrl = await createNamedDatabase(pgc.url, 'ticket');
   await migratePurchase(pgc.url);
   await migratePayment(paymentUrl);
+  await migrateTicket(ticketUrl);
   purchaseDb = createDatabase({ url: pgc.url, profile: 'general', max: 8, applicationName: 'withdrawal-it-purchase' });
   paymentDb = createDatabase({ url: paymentUrl, profile: 'general', max: 8, applicationName: 'withdrawal-it-payment' });
+  ticketDb = createDatabase({ url: ticketUrl, profile: 'general', max: 6, applicationName: 'withdrawal-it-ticket' });
   admin = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'withdrawal-it-admin' });
   payAdmin = createDatabase({ url: paymentUrl, profile: 'general', max: 4, applicationName: 'withdrawal-it-pay-admin' });
+  ticketAdmin = createDatabase({ url: ticketUrl, profile: 'general', max: 4, applicationName: 'withdrawal-it-ticket-admin' });
   // 듣는 곳 없는 포트의 purchase DB(닿지 못함)
   deadDb = createDatabase({ url: pgc.urlFor('postgres', 'peaket-test').replace(/:(\d+)\/peaket$/, `:${await freePort()}/peaket`), profile: 'general', max: 2, applicationName: 'withdrawal-it-dead' });
   await ensureOutboxPartitions(admin, systemClock);
@@ -210,13 +278,22 @@ beforeAll(async () => {
   realCancels = new GrpcPaymentCancellations({ address: paymentAddress });
   deadCancels = new GrpcPaymentCancellations({ address: `127.0.0.1:${await freePort()}` });
 
-  // purchase-svc 받는 층(내부 토큰을 설정한 운영 꼴)
+  // 실제 ticket-svc(발권·취소 Saga의 티켓 단계)
+  ticketService = new TicketService({ store: new DrizzleTicketStore({ database: ticketDb }), clock: systemClock });
+  ticketServer = await startGrpcServer({
+    host: '127.0.0.1',
+    port: 0,
+    services: [{ definition: ticketPackage().TicketService.service, handlers: ticketServiceHandlers({ ticket: ticketService, nowMs: () => systemClock.now() }, () => {}) }],
+  });
+  ticketCancels = new GrpcTicketCancellations({ address: `127.0.0.1:${ticketServer.port}` });
+
+  // purchase-svc 받는 층(내부 토큰을 설정한 운영 꼴). 견적까지 연다
   purchaseServer = new grpc.Server();
-  purchaseServer.addService(accountPkg.WithdrawalParticipantService.service, withdrawalParticipantHandlers(purchaseService(new DrizzleWithdrawalOrders(purchaseDb)), { internalToken: TOKEN, onError: () => {} }));
+  purchaseServer.addService(accountPkg.WithdrawalParticipantService.service, participantHandlers(purchaseDb));
   purchaseAddress = `127.0.0.1:${await bind(purchaseServer)}`;
   client = new accountPkg.WithdrawalParticipantService(purchaseAddress, grpc.credentials.createInsecure()) as unknown as Client;
   brokenServer = new grpc.Server();
-  brokenServer.addService(accountPkg.WithdrawalParticipantService.service, withdrawalParticipantHandlers(purchaseService(new DrizzleWithdrawalOrders(deadDb)), { internalToken: TOKEN, onError: () => {} }));
+  brokenServer.addService(accountPkg.WithdrawalParticipantService.service, participantHandlers(deadDb));
   brokenClient = new accountPkg.WithdrawalParticipantService(`127.0.0.1:${await bind(brokenServer)}`, grpc.credentials.createInsecure()) as unknown as Client;
 }, 180_000);
 
@@ -225,8 +302,10 @@ afterAll(async () => {
   brokenClient?.close();
   realCancels?.close();
   deadCancels?.close();
+  ticketCancels?.close();
   for (const s of [purchaseServer, brokenServer, paymentServer]) if (s) await new Promise<void>((r) => s.tryShutdown(() => r()));
-  await Promise.allSettled([purchaseDb?.close(), paymentDb?.close(), admin?.close(), payAdmin?.close(), deadDb?.close()]);
+  await ticketServer?.close();
+  await Promise.allSettled([purchaseDb?.close(), paymentDb?.close(), ticketDb?.close(), admin?.close(), payAdmin?.close(), ticketAdmin?.close(), deadDb?.close()]);
   pgc?.stop();
 });
 
@@ -235,6 +314,7 @@ beforeEach(() => {
   cancelInputs.length = 0;
   lostAnswers.length = 0;
   warns.length = 0;
+  seatReturns.length = 0;
   route = 'real';
 });
 
@@ -250,7 +330,8 @@ const call = (accountId: string, o: { md?: grpc.Metadata; deadlineMs?: number; v
     (o.via ?? client).ProcessAccountWithdrawal({ account_id: accountId }, o.md ?? metadata(), { deadline: new Date(Date.now() + (o.deadlineMs ?? 10_000)) }, (e, v) => (e ? rej(e) : res(v!))),
   );
 const codeOf = async (p: Promise<unknown>) => p.then(() => 'OK', (e: grpc.ServiceError) => grpc.status[e.code]);
-const DONE = { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE', reasons: [], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 0 };
+const DONE = { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE', reasons: [], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 0, unused_tickets_cancelled: 0, unused_tickets_pending: 0 };
+const TICKET_PENDING = 'WITHDRAWAL_PENDING_REASON_TICKET_REFUND_PENDING';
 const PAY = 'WITHDRAWAL_PENDING_REASON_PAYMENT_PENDING_ORDER';
 const DEP = 'WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING';
 
@@ -262,17 +343,18 @@ interface Order {
   status: string;
 }
 /** 주문과 첫 이력 행을 한 트랜잭션에 넣는다(지연 제약 order_status_has_event) */
-async function order(accountId: string, status: string, amount = 70_000 + Math.floor(Math.random() * 9_000)): Promise<Order> {
-  const o = { orderId: randomUUID(), accountId, eventId: randomUUID(), amount, status };
+async function order(accountId: string, status: string, amount = 70_000 + Math.floor(Math.random() * 9_000), o2: { eventId?: string; createdAtMs?: number } = {}): Promise<Order> {
+  const o = { orderId: randomUUID(), accountId, eventId: o2.eventId ?? randomUUID(), amount, status };
+  const createdAt = new Date(o2.createdAtMs ?? Date.now() - 60 * 60_000);
   const c = await admin.pool.connect();
   try {
     await c.query('begin');
     await c.query(
       `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
-       values ($1, $2, $3, $4, $5, 1, $6, 'v1', 'PICK', now() - interval '1 hour', $7, 'ps-withdrawal-test')`,
-      [o.orderId, accountId, o.eventId, status, amount, randomUUID(), randomUUID()],
+       values ($1, $2, $3, $4, $5, 1, $6, 'v1', 'PICK', $7, $8, 'ps-withdrawal-test')`,
+      [o.orderId, accountId, o.eventId, status, amount, randomUUID(), createdAt, randomUUID()],
     );
-    await c.query(`insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, $2, 'T1', 'test', now() - interval '1 hour')`, [o.orderId, status]);
+    await c.query(`insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, $2, 'T1', 'test', $3)`, [o.orderId, status, createdAt]);
     await c.query('commit');
   } catch (err) {
     await c.query('rollback').catch(() => {});
@@ -304,6 +386,50 @@ const paymentsOf = async (orderIds: string[]) => (await payAdmin.pool.query('sel
 const paymentRowOf = async (orderId: string) => (await payAdmin.pool.query<{ status: string; failure_category: string | null }>('select status, failure_category from payment where order_id = $1', [orderId])).rows[0]!;
 const cancelsFor = (paymentRef: string) => gatewayCancels.filter((c) => c.paymentRef === paymentRef);
 
+// ---- 미사용 티켓(I-T26) 자료 만들기: 실제 ticket-svc 발권·purchase DB 주문 항목·payment 원장 ----
+const DAY = 86_400_000;
+const HOUR = 3_600_000;
+interface TicketOrder extends Order {
+  ticketId: string;
+  seatId: string;
+  payment: { paymentId: string; paymentRef: string };
+  eventStartsAtMs: number;
+}
+/** 주문·티켓 발권·주문 항목·좌석 판매·결제 원장 APPROVED를 한 회차에 맞춰 넣는다(미사용 티켓의 취소 Saga가 도는 조건) */
+async function ticketOrder(accountId: string, o: { eventStartsAtMs: number; entryOpensAtMs?: number; status?: string; price?: number }): Promise<TicketOrder> {
+  const eventId = randomUUID();
+  const price = o.price ?? 33_333;
+  const eventStartsAtMs = o.eventStartsAtMs;
+  eventConfigs.set(eventId, { saleEndsAtMs: eventStartsAtMs - DAY, ...(o.entryOpensAtMs !== undefined ? { entryOpensAtMs: o.entryOpensAtMs } : {}) });
+  // 예매 뒤 영업시간 24시간 특례를 피하려고 20일 전에 예매한 주문이다
+  const base = await order(accountId, o.status ?? 'CONFIRMED', price, { eventId, createdAtMs: Date.now() - 20 * DAY });
+  const seatId = randomUUID();
+  const issued = await ticketService.issue({ orderId: base.orderId, eventId, payerAccountId: accountId, seatIds: [seatId], issueGeneration: 0 });
+  const ticketId = issued.tickets[0]!.ticketId;
+  await admin.pool.query(`insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id) values ($1, 1, $2, 'R', 'A', $3, $4)`, [base.orderId, seatId, price, ticketId]);
+  await admin.pool.query(`insert into seat_sale (event_id, seat_id, order_id, account_id, status) values ($1, $2, $3, $4, 'SOLD')`, [eventId, seatId, base.orderId, accountId]);
+  const payment = await ledger(base, 'APPROVED');
+  return { ...base, ticketId, seatId, payment, eventStartsAtMs };
+}
+const ticketRow = async (ticketId: string) => (await ticketAdmin.pool.query('select status, key_revoked_at from ticket where id = $1', [ticketId])).rows[0] as { status: string; key_revoked_at: Date | null };
+const seatRow = async (t: TicketOrder) => (await admin.pool.query('select status from seat_sale where event_id = $1 and seat_id = $2', [t.eventId, t.seatId])).rows[0]?.status as string | undefined;
+interface CancellationRow {
+  status: string;
+  reason: string;
+  deduction_bp: number;
+  deduction_amount: number;
+  refund_amount: number;
+  refund_due_at: Date | null;
+}
+const cancellationOf = async (cancellationId: string): Promise<CancellationRow | undefined> =>
+  (await admin.pool.query('select status, reason, deduction_bp, deduction_amount, refund_amount, refund_due_at from order_cancellation where id = $1', [cancellationId])).rows[0] as CancellationRow | undefined;
+const cancellationCount = async () => (await admin.pool.query('select count(*)::int as n from order_cancellation')).rows[0].n as number;
+/** 받는 층의 견적 RPC(실제 서버·내부 토큰) */
+const quoteCall = (accountId: string, o: { md?: grpc.Metadata; deadlineMs?: number; via?: Client } = {}) =>
+  new Promise<Record<string, unknown>>((res, rej) =>
+    (o.via ?? client).QuoteAccountWithdrawal({ account_id: accountId }, o.md ?? metadata(), { deadline: new Date(Date.now() + (o.deadlineMs ?? 2_000)) }, (e, v) => (e ? rej(e) : res(v!))),
+  );
+
 describe('결제 결과를 기다리는 주문(P-T55 ①②)', () => {
   test('P-T55①_주문이없는계정은DONE이고이유가없고세수가0이다', async () => {
     expect(await call(randomUUID())).toEqual(DONE);
@@ -322,7 +448,7 @@ describe('결제 결과를 기다리는 주문(P-T55 ①②)', () => {
     const a = randomUUID();
     await order(a, status);
     await order(a, 'CONFIRMED');
-    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [PAY], payment_pending_orders: 1, deposit_orders_cancelled: 0, deposit_orders_pending: 0 });
+    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [PAY], payment_pending_orders: 1, deposit_orders_cancelled: 0, deposit_orders_pending: 0, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
     expect(cancelInputs).toEqual([]);
   });
 
@@ -335,7 +461,7 @@ describe('결제 결과를 기다리는 주문(P-T55 ①②)', () => {
     await ledger(r, 'ACCEPTED');
     await ledger(u, 'UNKNOWN');
     const before = { orders: await ordersOf(a), sales: await salesOf(a), payments: await paymentsOf([r.orderId, u.orderId]) };
-    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [PAY], payment_pending_orders: 2, deposit_orders_cancelled: 0, deposit_orders_pending: 0 });
+    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [PAY], payment_pending_orders: 2, deposit_orders_cancelled: 0, deposit_orders_pending: 0, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
     expect({ orders: await ordersOf(a), sales: await salesOf(a), payments: await paymentsOf([r.orderId, u.orderId]) }).toEqual(before);
     expect(gatewayCancels).toEqual([]);
   });
@@ -382,7 +508,7 @@ describe('입금 대기 주문의 입금 전 취소(P-T55 ③④)', () => {
     const ok = await order(a, 'AWAITING_DEPOSIT');
     await ledger(d, 'AWAITING_DEPOSIT', mode);
     await ledger(ok, 'AWAITING_DEPOSIT');
-    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 1, deposit_orders_pending: 1 });
+    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 1, deposit_orders_pending: 1, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
     if (mode === 'DEPOSITED') expect(warns.filter((w) => w.includes('withdrawal-deposit-cancel-rejected') && w.includes(d.orderId))).toHaveLength(1);
   });
 
@@ -390,7 +516,7 @@ describe('입금 대기 주문의 입금 전 취소(P-T55 ③④)', () => {
     const a = randomUUID();
     const d = await order(a, 'AWAITING_DEPOSIT');
     const p = await ledger(d, 'APPROVED');
-    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1 });
+    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
     expect(cancelsFor(p.paymentRef)).toEqual([]);
     expect(await paymentRowOf(d.orderId)).toMatchObject({ status: 'APPROVED' });
   });
@@ -399,7 +525,7 @@ describe('입금 대기 주문의 입금 전 취소(P-T55 ③④)', () => {
     const a = randomUUID();
     const d = await order(a, 'AWAITING_DEPOSIT');
     const p = await ledger(d, 'AWAITING_DEPOSIT', 'LOSE_AFTER_CANCEL');
-    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1 });
+    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
     // 끊긴 자리가 결제사 취소 뒤였다(결제사 쪽은 이미 취소됨)
     expect(gatewayCanceled.has(p.paymentRef)).toBe(true);
     expect(lostOnce.has(p.paymentRef)).toBe(true);
@@ -414,7 +540,7 @@ describe('입금 대기 주문의 입금 전 취소(P-T55 ③④)', () => {
     const d = await order(a, 'AWAITING_DEPOSIT');
     const p = await ledger(d, 'AWAITING_DEPOSIT');
     route = 'lose';
-    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1 });
+    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
     // 버린 답은 CANCELLED였고 원장은 이미 끝났다(끊는 자리가 커밋 뒤까지 닿았다)
     expect(lostAnswers).toEqual(['CANCELLED']);
     expect(await paymentRowOf(d.orderId)).toMatchObject({ status: 'FAILED', failure_category: 'DEPOSIT_CANCELED' });
@@ -429,7 +555,7 @@ describe('입금 대기 주문의 입금 전 취소(P-T55 ③④)', () => {
     const d = await order(a, 'AWAITING_DEPOSIT');
     const p = await ledger(d, 'AWAITING_DEPOSIT');
     route = 'dead';
-    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1 });
+    expect(await call(a)).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP], payment_pending_orders: 0, deposit_orders_cancelled: 0, deposit_orders_pending: 1, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
     expect(cancelInputs).toEqual([]);
     expect(cancelsFor(p.paymentRef)).toEqual([]);
     expect(await paymentRowOf(d.orderId)).toMatchObject({ status: 'AWAITING_DEPOSIT' });
@@ -445,7 +571,7 @@ describe('입금 대기 주문의 입금 전 취소(P-T55 ③④)', () => {
     const d = await order(a, 'AWAITING_DEPOSIT');
     await ledger(d, 'AWAITING_DEPOSIT', 'CANCEL_PENDING');
     const r = await call(a);
-    expect({ ...r, reasons: [...(r.reasons as string[])].sort() }).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP, PAY].sort(), payment_pending_orders: 2, deposit_orders_cancelled: 0, deposit_orders_pending: 1 });
+    expect({ ...r, reasons: [...(r.reasons as string[])].sort() }).toEqual({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [DEP, PAY].sort(), payment_pending_orders: 2, deposit_orders_cancelled: 0, deposit_orders_pending: 1, unused_tickets_cancelled: 0, unused_tickets_pending: 0 });
   });
 });
 
@@ -506,6 +632,102 @@ describe('계정 대조·부르는 쪽·저장소 장애(P-T55 ⑥)', () => {
       await c.query('rollback').catch(() => {});
       c.release();
     }
+  });
+});
+
+// ---- I-T26 ②: 실제 ticket-svc·payment-svc로 미사용 티켓 취소·환급·미룸(BAT-013) ----
+// 값은 정본에서 적는다: 33,333원 10% = 3,333/30,000, 당일 90% = 29,999/3,334. 취소 ID는 표 ID에서 만든 고정 UUID,
+// 결제사 멱등키 cancel-{취소 ID}, 사유 ACCOUNT_WITHDRAWAL, 마감 뒤 환급 시각 = 공연 시작 + 50시간.
+describe('미사용 티켓의 취소·환급·미룸(I-T26 ②, 실제 ticket-svc·payment-svc)', () => {
+  test('I-T26②_입장전표는결제사취소까지하고_입장시작뒤표는REQUESTED로접수하며_다시불러도취소는늘지않고_환급기가끝낸뒤DONE이고_다른계정은그대로다 [ASVS v5.0.0-2.3.1] [ASVS v5.0.0-8.2.2]', async () => {
+    const a = randomUUID();
+    const before = Date.now();
+    const t1 = await ticketOrder(a, { eventStartsAtMs: before + 7 * DAY });
+    const t2 = await ticketOrder(a, { eventStartsAtMs: before + 2 * HOUR, entryOpensAtMs: before - HOUR });
+    const b = randomUUID();
+    const b1 = await ticketOrder(b, { eventStartsAtMs: before + 7 * DAY });
+    const bBefore = { orders: await ordersOf(b), ticket: await ticketRow(b1.ticketId), cancellations: await cancellationCount() };
+    gatewayCancels.length = 0;
+    cancelInputs.length = 0;
+
+    const r1 = await call(a);
+    expect({ ...r1, reasons: [...(r1.reasons as string[])].sort() }).toEqual({
+      state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING',
+      reasons: [TICKET_PENDING],
+      payment_pending_orders: 0,
+      deposit_orders_cancelled: 0,
+      deposit_orders_pending: 0,
+      unused_tickets_cancelled: 1,
+      unused_tickets_pending: 1,
+    });
+    const id1 = withdrawalTicketCancellationId(t1.ticketId);
+    const id2 = withdrawalTicketCancellationId(t2.ticketId);
+    // ① 입장 전 표: 기존 취소 Saga가 사유 ACCOUNT_WITHDRAWAL·POL-032 10%로 결제사 취소까지 하고 좌석을 되돌린다
+    expect(await cancellationOf(id1)).toMatchObject({ status: 'REFUNDED', reason: 'ACCOUNT_WITHDRAWAL', deduction_bp: 1_000, deduction_amount: 3_333, refund_amount: 30_000, refund_due_at: null });
+    expect(cancelsFor(t1.payment.paymentRef).map((c) => [c.idemKey, c.reason, c.amount])).toEqual([[`cancel-${id1}`, 'ACCOUNT_WITHDRAWAL', 30_000]]);
+    expect(await seatRow(t1)).toBe('RETURNED');
+    expect(await ticketRow(t1.ticketId)).toMatchObject({ status: 'REFUNDED' });
+    // ② 입장 시작 뒤 표: 접수만 하고(REQUESTED) 환급은 입장 기록 마감 뒤로 미룬다. 좌석은 취소표로 되돌린다
+    expect(await cancellationOf(id2)).toMatchObject({ status: 'REQUESTED', reason: 'ACCOUNT_WITHDRAWAL', deduction_bp: 9_000, deduction_amount: 29_999, refund_amount: 3_334 });
+    expect((await cancellationOf(id2))!.refund_due_at?.getTime()).toBe(t2.eventStartsAtMs + 50 * HOUR);
+    expect(cancelsFor(t2.payment.paymentRef)).toEqual([]);
+    expect(await seatRow(t2)).toBe('RETURNED');
+    expect(await ticketRow(t2.ticketId)).toMatchObject({ status: 'REFUNDED' });
+
+    // ③ 다시 부르면 결제사 취소가 늘지 않고 같은 수다(취소 ID 고정)
+    expect(await call(a)).toMatchObject({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', unused_tickets_cancelled: 0, unused_tickets_pending: 1 });
+    expect(gatewayCancels).toHaveLength(1);
+
+    // ⑤ 다른 계정 B의 표·주문은 그대로다
+    expect(await ordersOf(b)).toEqual(bBefore.orders);
+    expect(await ticketRow(b1.ticketId)).toEqual(bBefore.ticket);
+    expect(await cancellationCount()).toBe(bBefore.cancellations + 2);
+    expect(cancelsFor(b1.payment.paymentRef)).toEqual([]);
+
+    // ④ 환급 실행기가 마감 뒤 후자를 REFUNDED로 바꾸면 다시 부르는 답은 DONE이다
+    const writes = new DrizzleCancellationWrites(purchaseDb, new DrizzleOrderStore({ clock: systemClock }));
+    const refund = new RefundAfterEntry({ writes, payments: realCancels, entries: ticketCancels, claims: writes, nowMs: () => t2.eventStartsAtMs + 50 * HOUR });
+    expect(await refund.run()).toMatchObject({ refunded: 1 });
+    expect(await cancellationOf(id2)).toMatchObject({ status: 'REFUNDED', refund_amount: 3_334 });
+    expect(cancelsFor(t2.payment.paymentRef).map((c) => [c.idemKey, c.amount])).toEqual([[`cancel-${id2}`, 3_334]]);
+    expect(await call(a)).toEqual(DONE);
+    // B는 여전히 그대로다
+    expect(await ordersOf(b)).toEqual(bBefore.orders);
+    expect(await ticketRow(b1.ticketId)).toEqual(bBefore.ticket);
+  });
+
+  test('I-T26①_PostgreSQL에서견적RPC는그계정이결제한미사용표만세고_취소기록·REFUNDED주문·다른계정표는빼며_POL-032금액을돌려준다 [ASVS v5.0.0-8.2.2]', async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    const event = Date.now() + 7 * DAY;
+    const t1 = await ticketOrder(a, { eventStartsAtMs: event });
+    const t2 = await ticketOrder(a, { eventStartsAtMs: event, status: 'PARTIALLY_REFUNDED' });
+    // 취소 기록이 있는 표(어떤 사유든)와 REFUNDED 주문은 견적에서 뺀다
+    const t3 = await ticketOrder(a, { eventStartsAtMs: event });
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+       values ($1, $2, $3, 'USER', 0, false, 9000, 29999, 3334, 'REFUNDED', now(), now())`,
+      [randomUUID(), t3.orderId, t3.ticketId],
+    );
+    const t4 = await ticketOrder(a, { eventStartsAtMs: event, status: 'REFUNDED' });
+    const b1 = await ticketOrder(b, { eventStartsAtMs: event });
+    const before = { orders: await ordersOf(a), cancellations: await cancellationCount() };
+
+    // t1·t2만 센다: 결제 66,666원, 10% 공제 6,666원, 환급 60,000원. 양도 마감 전이라 둘 다 양도 가능하다
+    expect(await quoteCall(a)).toEqual({ unused_tickets: 2, ticket_amount: 66_666, deduction_amount: 6_666, refund_amount: 60_000, transferable_tickets: 2, refund_deferred_tickets: 0 });
+    expect(await quoteCall(b)).toEqual({ unused_tickets: 1, ticket_amount: 33_333, deduction_amount: 3_333, refund_amount: 30_000, transferable_tickets: 1, refund_deferred_tickets: 0 });
+    // 읽기 전용이다(주문·취소 행이 그대로)
+    expect(await ordersOf(a)).toEqual(before.orders);
+    expect(await cancellationCount()).toBe(before.cancellations);
+    // 0장 계정은 모두 0이다
+    expect(await quoteCall(randomUUID())).toEqual({ unused_tickets: 0, ticket_amount: 0, deduction_amount: 0, refund_amount: 0, transferable_tickets: 0, refund_deferred_tickets: 0 });
+    // 견적도 같은 부르는 쪽 검사를 한다
+    expect(await codeOf(quoteCall(a, { md: metadata({ token: null }) }))).toBe('UNAUTHENTICATED');
+    expect(await codeOf(quoteCall(a.toUpperCase()))).toBe('INVALID_ARGUMENT');
+    void t1;
+    void t2;
+    void t4;
+    void b1;
   });
 });
 

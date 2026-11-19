@@ -105,6 +105,33 @@ test('I-T74_돌아와받은재인증토큰으로그기기를끄고결과를고�
   });
 });
 
+// ---- I-T26 ②: 실제 흐름의 견적이 최종 확인 버튼보다 먼저이고, 두 번째 누름에만 확인 값을 싣는다(identity §8 '미사용 티켓 확인과 취소', BAT-013) ----
+test('I-T26②_실제흐름의환급예상은최종확인버튼보다앞에낭독되고_버튼의설명으로이어지며_목업수는실제처럼보이지않는다', () => {
+  const liveQuoteAt = FLOWS.indexOf('{live && liveQuote ? (');
+  const confirmAt = FLOWS.indexOf('className="btn btn-danger btn-lg btn-block"');
+  assert.ok(liveQuoteAt >= 0, '실제 견적 카드가 있다');
+  assert.ok(confirmAt > liveQuoteAt, '견적 카드가 최종 확인 버튼보다 앞에 있다');
+  // 낭독기가 바로 읽게 alert로 두고 [탈퇴합니다]의 설명(aria-describedby)으로 잇는다
+  const card = FLOWS.slice(liveQuoteAt, FLOWS.indexOf('/* 환급 예상(CMP-054)을 결과 버튼보다 먼저 읽게 둔다', liveQuoteAt));
+  assert.match(card, /role="alert"/);
+  assert.match(FLOWS, /환급 내용을 확인하고 탈퇴합니다/);
+  assert.match(card, /지금 양도할 수 있는 티켓이 \{liveQuote\.transferableCount\}장/);
+  assert.match(card, /입장이 시작된 티켓 \{liveQuote\.deferredRefundCount\}장/);
+  assert.match(FLOWS, /aria-describedby=\{describedBy \|\| undefined\}/);
+  assert.match(FLOWS, /const describedBy = \[liveQuote \? `\$\{descId\}-rq` : null, fraudHold \? `\$\{descId\}-hold` : null\]/);
+  // 목업 견적 카드는 실제 흐름에서 그리지 않는다(목업 수를 실제처럼 보이지 않게)
+  assert.match(FLOWS, /\{live \? null : \(\s*\n\s*<section className="card-flat col px-4 py-3\.5 md:p-4" style=\{\{ gap: 10 \}\} aria-labelledby=\{`\$\{descId\}-rq`\}>/);
+});
+
+test('I-T26②_견적은첫누름에싣지않고_409tickets를받은뒤에만상태로두며_두번째누름에confirmCancelUnusedTickets를싣는다', () => {
+  // 확인 값은 liveQuote가 있을 때만(두 번째 누름) 실린다
+  assert.match(FLOWS, /api\.withdraw\(token, liveHold !== null, \{ confirmCancelUnusedTickets: liveQuote !== null \}\)/);
+  // 409 unusedTickets를 받은 갈래에서만 상태로 둔다
+  assert.match(FLOWS, /else if \(step === 'tickets' && r\.kind === 'unusedTickets'\) \{\s*\n\s*\/\/[^\n]*\n\s*setLiveQuote\(\{ count: r\.count/);
+  // 창을 닫으면 견적 상태도 지운다(다시 열면 재인증·안내부터)
+  assert.match(FLOWS.match(/const close = \(\) => \{([\s\S]*?)\n  \};/)?.[1] ?? '', /setLiveQuote\(null\);/);
+});
+
 test('I-T74_설정화면은돌아오기·원격로그아웃을위모델로잇고_지금이기기줄에다른로그인이있을때만[이기기의다른로그인끝내기]를보인다(BOT-044, d5 §5.17)', () => {
   assert.match(FLOWS, /returnOnMount\(tabStore, /);
   assert.match(FLOWS, /resumeDeviceLogout\(\{/);

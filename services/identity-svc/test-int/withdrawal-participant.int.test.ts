@@ -1,6 +1,7 @@
-// 탈퇴 참여자와 탈퇴 미룸의 PostgreSQL 통합 시험(실제 PostgreSQL 18, 루프백 gRPC 참여자 대역, BAT-010 시험 담당).
-// 정본: docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현'·§12 I-T84, ADR-0284, docs/data.md account(closure_reason·closure_next_check_at)·
-// §5 경합 행·§5.1 '탈퇴 미룸 다시 하기 고리', docs/api/proto/peaket/purchase/v1/account.proto WithdrawalParticipantService.
+// 탈퇴 참여자와 탈퇴 미룸의 PostgreSQL 통합 시험(실제 PostgreSQL 18, 루프백 gRPC 참여자 대역, BAT-010·BAT-013 시험 담당).
+// 정본: docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현' '미사용 티켓 확인과 취소'·§12 I-T84·I-T26, ADR-0284,
+// docs/data.md account(closure_reason·closure_next_check_at)·§5 경합 행·§5.1 '탈퇴 미룸 다시 하기 고리',
+// docs/api/proto/peaket/purchase/v1/account.proto WithdrawalParticipantService(QuoteAccountWithdrawal·TICKET_REFUND_PENDING).
 //
 // 약속:
 // - 컨테이너 하나를 파일 전체가 나눠 쓴다. 계정은 시험마다 새 소셜 ID라 서로 닿지 않는다. 고리 시험은 앞 시험이 남긴 미룬 계정을 먼 뒤로 밀어 둔다(isolate).
@@ -35,7 +36,11 @@ import { type PostgresContainer, startPostgres } from './postgres.js';
 const NEXT_CHECK_MS = 60_000;
 const BATCH = 20;
 const REQUEST_DEADLINE_MS = 3_000;
+/** 탈퇴 전 미사용 티켓 견적의 데드라인 2초 [가정](identity §8 '미사용 티켓 확인과 취소') */
+const QUOTE_DEADLINE_MS = 2_000;
 const DAY = 86_400_000;
+const ZERO_QUOTE = { unused_tickets: 0, ticket_amount: 0, deduction_amount: 0, refund_amount: 0, transferable_tickets: 0, refund_deferred_tickets: 0 };
+const TWO_TICKETS_QUOTE = { unused_tickets: 2, ticket_amount: 165_833, deduction_amount: 19_916, refund_amount: 145_917, transferable_tickets: 1, refund_deferred_tickets: 1 };
 
 const LOAD: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Pkg = { WithdrawalParticipantService: grpc.ServiceClientConstructor };
@@ -49,6 +54,8 @@ interface Step {
   delayMs?: number;
   code?: grpc.status;
   state?: 'DONE' | 'PENDING' | 'UNSPECIFIED';
+  /** PENDING일 때 싣는 이유(기본 PAYMENT_PENDING_ORDER). TICKET_REFUND_PENDING은 BAT-013 */
+  reason?: 'PAYMENT_PENDING_ORDER' | 'DEPOSIT_CANCEL_PENDING' | 'TICKET_REFUND_PENDING';
   /** 답을 늦출 약속(풀리면 그때 state로 답한다) */
   hold?: Promise<void>;
 }
@@ -59,9 +66,18 @@ interface Seen {
   reason: string | null | undefined;
   deadlineLeftMs: number;
 }
+interface QuoteSeen {
+  accountId: string;
+  deadlineLeftMs: number;
+}
 /** 계정마다의 답(차례대로 꺼내고 마지막 것을 되풀이). 없으면 PENDING */
 const answers = new Map<string, Step[]>();
 const seen: Seen[] = [];
+/** 계정마다의 견적 답. 없으면 0장(모든 칸 0)이다 */
+const quoteReplies = new Map<string, Record<string, unknown>>();
+/** 계정마다의 견적 gRPC 오류 */
+const quoteCodes = new Map<string, grpc.status>();
+const quoteSeen: QuoteSeen[] = [];
 
 let pg: PostgresContainer;
 let database: Database;
@@ -92,8 +108,21 @@ beforeAll(async () => {
         if (step.delayMs) await new Promise((r) => setTimeout(r, step.delayMs));
         if (step.code !== undefined) return cb({ code: step.code, details: '가짜 오류', metadata: new grpc.Metadata(), name: 'Error', message: 'x' } as grpc.ServiceError);
         const state = step.state ?? 'PENDING';
-        cb(null, state === 'PENDING' ? { state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: ['WITHDRAWAL_PENDING_REASON_PAYMENT_PENDING_ORDER'], payment_pending_orders: 1 } : { state: `WITHDRAWAL_PARTICIPANT_STATE_${state}` });
+        cb(
+          null,
+          state === 'PENDING'
+            ? { state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [`WITHDRAWAL_PENDING_REASON_${step.reason ?? 'PAYMENT_PENDING_ORDER'}`], payment_pending_orders: 1 }
+            : { state: `WITHDRAWAL_PARTICIPANT_STATE_${state}` },
+        );
       })();
+    },
+    QuoteAccountWithdrawal: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
+      const accountId = String(call.request.account_id);
+      const d = call.getDeadline();
+      quoteSeen.push({ accountId, deadlineLeftMs: (d instanceof Date ? d.getTime() : Number(d)) - Date.now() });
+      const code = quoteCodes.get(accountId);
+      if (code !== undefined) return cb({ code, details: '가짜 견적 오류', metadata: new grpc.Metadata(), name: 'Error', message: 'x' } as grpc.ServiceError);
+      cb(null, quoteReplies.get(accountId) ?? ZERO_QUOTE);
     },
   });
   address = `127.0.0.1:${await new Promise<number>((res, rej) => server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))))}`;
@@ -109,6 +138,9 @@ afterAll(async () => {
 beforeEach(() => {
   seen.length = 0;
   answers.clear();
+  quoteSeen.length = 0;
+  quoteReplies.clear();
+  quoteCodes.clear();
 });
 
 /** failErase: 참이면 그 계정의 본인확인 기록 파기(끝내기 뒤 정리)를 실패시킨다(검증 M11, pid가 남은 채 겹치게) */
@@ -150,7 +182,7 @@ async function world(o: { failErase?: (accountId: string) => boolean } = {}) {
       .catch((e: unknown) => e);
   };
   const reauth = async (x: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: x.accountId, sessionId: x.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, clock.now())).token;
-  const run = async (x: { accountId: string; sessionId: string }, token?: string, body: { acknowledgeFraudHold?: boolean } = {}) =>
+  const run = async (x: { accountId: string; sessionId: string }, token?: string, body: { acknowledgeFraudHold?: boolean; confirmCancelUnusedTickets?: boolean } = {}) =>
     withdraw.run({ accountId: x.accountId, sessionId: x.sessionId, reauthToken: token ?? (await reauth(x)), body }).catch((e: unknown) => (e instanceof AccountError ? e.code : Promise.reject(e)));
   /** 로그인·본인확인한 계정을 요청 경로로 미룬다 */
   const deferred = async (id: string) => {
@@ -280,6 +312,76 @@ describe('탈퇴 요청(I-T84 ①②③⑤⑦)', () => {
     expect(await t.run(a)).toBe('CONFIRMATION_REQUIRED');
     expect(seen).toEqual([]);
     expect(await accountOf(a.accountId)).toMatchObject({ status: 'ACTIVE', closure_reason: null, closure_next_check_at: null });
+  });
+});
+
+// ---- 미사용 티켓 확인 409·확인 뒤 차례(I-T26 ②, identity §8 '미사용 티켓 확인과 취소', BAT-013) ----
+// 값은 정본에서 적는다: 견적 데드라인 2초 [가정], 다음 확인 60초 [가정], POL-032 예(33,333원 20% = 6,666/26,667, 132,500원 10% = 13,250/119,250).
+describe('미사용 티켓 확인과 확인 뒤 차례(I-T26 ②)', () => {
+  test('I-T26②_PostgreSQL에서확인없는요청은409로계정ACTIVE를지키고_같은토큰의확인요청은202로미룬뒤_환급이끝난고리가204로끝낸다 [ASVS v5.0.0-2.3.1]', async () => {
+    const t = await world();
+    // 앞 시험이 남긴 미룬 계정을 고리가 잡지 않게 먼 뒤로 민다(고리 시험과 같은 방식)
+    await isolate();
+    const a = await t.login('i26-1');
+    await t.login('i26-1');
+    await t.verify(a.accountId, 'i26-1-person');
+    quoteReplies.set(a.accountId, TWO_TICKETS_QUOTE);
+    const token = await t.reauth(a);
+    // 확인 없이: 409 견적이고 계정·세션·참여자 그대로다(participant process는 부르지 않는다)
+    expect(await t.run(a, token)).toBe('CONFIRMATION_REQUIRED');
+    expect(await accountOf(a.accountId)).toMatchObject({ status: 'ACTIVE', closure_reason: null, closure_next_check_at: null });
+    expect(await liveSessions(a.accountId)).toBe(2);
+    expect(seen).toEqual([]);
+    expect(quoteSeen).toEqual([{ accountId: a.accountId, deadlineLeftMs: expect.any(Number) }]);
+    expect(quoteSeen[0]!.deadlineLeftMs).toBeLessThanOrEqual(QUOTE_DEADLINE_MS);
+    // 같은 재인증 토큰에 확인을 실으면 202(미룸)다. 미룸 표시가 먼저 커밋되고, 견적은 다시 부르지 않는다
+    answers.set(a.accountId, [{ state: 'PENDING', reason: 'TICKET_REFUND_PENDING' }]);
+    const at = clock.now();
+    expect(await t.run(a, token, { confirmCancelUnusedTickets: true })).toEqual({ outcome: 'DEFERRED' });
+    expect(await accountOf(a.accountId)).toEqual({ status: 'WITHDRAWAL_PENDING', closure_reason: 'WITHDRAWAL', closure_started_at: new Date(at), closure_next_check_at: new Date(at + NEXT_CHECK_MS), deleted_at: null });
+    expect(await liveSessions(a.accountId)).toBe(2);
+    expect(await withdrawnEvents(a.accountId)).toBe(0);
+    expect(quoteSeen).toHaveLength(1);
+    expect(seen).toEqual([{ accountId: a.accountId, status: 'WITHDRAWAL_PENDING', reason: 'WITHDRAWAL', deadlineLeftMs: expect.any(Number) }]);
+    // 티켓 2장 가운데 환급이 남았으면(1장만 끝났어도) 아직 미룸이다. 다 끝난 뒤 고리가 204(끝냄)로 끝낸다
+    answers.set(a.accountId, [{ state: 'PENDING', reason: 'TICKET_REFUND_PENDING' }]);
+    clock.advance(NEXT_CHECK_MS);
+    expect(await t.retry.run()).toMatchObject({ claimed: 1, withdrawn: 0, deferred: 1 });
+    expect(await accountOf(a.accountId)).toMatchObject({ status: 'WITHDRAWAL_PENDING', closure_next_check_at: new Date(clock.now() + NEXT_CHECK_MS) });
+    answers.set(a.accountId, [{ state: 'DONE' }]);
+    clock.advance(NEXT_CHECK_MS);
+    expect(await t.retry.run()).toEqual({ claimed: 1, withdrawn: 1, deferred: 0, failed: 0 });
+    expect(await accountOf(a.accountId)).toMatchObject({ status: 'DELETED', deleted_at: new Date(clock.now()) });
+    expect(await liveSessions(a.accountId)).toBe(0);
+    expect(await terminations(a.accountId)).toEqual(['DELETE', 'DELETE']);
+    expect(await withdrawnEvents(a.accountId)).toBe(1);
+  });
+
+  test('I-T26②_확인을지난요청은견적을부르지않고_티켓이0장일때와같은204(끝냄)다', async () => {
+    const t = await world();
+    const a = await t.login('i26-2');
+    quoteReplies.set(a.accountId, TWO_TICKETS_QUOTE);
+    answers.set(a.accountId, [{ state: 'DONE' }]);
+    expect(await t.run(a, await t.reauth(a), { confirmCancelUnusedTickets: true })).toEqual({ outcome: 'WITHDRAWN' });
+    expect(quoteSeen).toEqual([]);
+    expect(await accountOf(a.accountId)).toMatchObject({ status: 'DELETED' });
+    expect(await liveSessions(a.accountId)).toBe(0);
+  });
+
+  test('I-T26①_PostgreSQL에서견적이UNAVAILABLE이면503(DEPENDENCY_UNAVAILABLE)이고_계정·세션·같은토큰이그대로다', async () => {
+    const t = await world();
+    const a = await t.login('i26-3');
+    await t.verify(a.accountId, 'i26-3-person');
+    quoteCodes.set(a.accountId, grpc.status.UNAVAILABLE);
+    const token = await t.reauth(a);
+    expect(await t.run(a, token)).toBe('DEPENDENCY_UNAVAILABLE');
+    expect(await accountOf(a.accountId)).toMatchObject({ status: 'ACTIVE', closure_reason: null });
+    expect(await liveSessions(a.accountId)).toBe(1);
+    expect(seen).toEqual([]);
+    // 견적이 돌아오면 같은 토큰으로 다시 보낼 수 있다(503은 토큰을 쓰지 않는다)
+    quoteCodes.delete(a.accountId);
+    quoteReplies.set(a.accountId, TWO_TICKETS_QUOTE);
+    expect(await t.run(a, token)).toBe('CONFIRMATION_REQUIRED');
   });
 });
 

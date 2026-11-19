@@ -1,5 +1,7 @@
 // 탈퇴 참여자 클라이언트(adapters/grpc-withdrawal-participants.ts)를 루프백의 가짜 purchase-svc WithdrawalParticipantService로 돈다
-// (docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현' '참여자 호출', docs/api/proto/peaket/purchase/v1/account.proto, ADR-0284 결정 1·3, I-T84 ③⑦, BAT-010 시험 담당).
+// (docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현' '참여자 호출' '미사용 티켓 확인과 취소', docs/api/proto/peaket/purchase/v1/account.proto,
+// ADR-0284 결정 1·3·7, I-T84 ③⑦, I-T26 ①, BAT-010·BAT-013 시험 담당).
+// 견적(QuoteAccountWithdrawal)은 시험마다 quotePlan으로 답을 정하고, 정하지 않으면 0장(모든 칸 0)이다. 그래야 I-T84 시험이 409 없이 지금 길을 본다.
 //
 // 약속:
 // - 가짜 서버는 실제 @grpc/grpc-js Server에 계약 설명자(@peaket/contracts/proto의 purchaseV1Account)를 실어 띄운다. 답은 시험마다 plan으로 정한다.
@@ -29,6 +31,8 @@ const pkg = (() => {
 
 const REQUEST_DEADLINE_MS = 3_000;
 const RETRY_DEADLINE_MS = 10_000;
+/** 탈퇴 전 미사용 티켓 견적의 데드라인 2초 [가정](identity §8 '미사용 티켓 확인과 취소') */
+const QUOTE_DEADLINE_MS = 2_000;
 const TOKEN = 'bat010-internal-grpc-token';
 
 interface Step {
@@ -45,6 +49,10 @@ interface Seen {
 }
 const plan: Step[] = [];
 const seen: Seen[] = [];
+/** 견적 답(없으면 0장). I-T26 ① 시험만 채운다 */
+const quotePlan: Step[] = [];
+const quoteSeen: Seen[] = [];
+const ZERO_QUOTE = { unused_tickets: 0, ticket_amount: 0, deduction_amount: 0, refund_amount: 0, transferable_tickets: 0, refund_deferred_tickets: 0 };
 
 let server: grpc.Server;
 let address: string;
@@ -66,6 +74,17 @@ beforeAll(async () => {
       if (step.delayMs) setTimeout(answer, step.delayMs);
       else answer();
     },
+    QuoteAccountWithdrawal: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
+      const d = call.getDeadline();
+      quoteSeen.push({ request: { ...call.request }, at: Date.now(), deadlineMs: d instanceof Date ? d.getTime() : Number(d), token: call.metadata.get('x-peaket-internal-grpc-token')[0], caller: call.metadata.get('x-peaket-internal-grpc-caller')[0] });
+      const step: Step = (quotePlan.length > 1 ? quotePlan.shift() : quotePlan[0]) ?? { reply: ZERO_QUOTE };
+      const answer = () => {
+        if (step.code !== undefined) cb({ code: step.code, details: `가짜 ${grpc.status[step.code]}`, metadata: new grpc.Metadata(), name: 'Error', message: 'x' } as grpc.ServiceError);
+        else cb(null, step.reply ?? ZERO_QUOTE);
+      };
+      if (step.delayMs) setTimeout(answer, step.delayMs);
+      else answer();
+    },
   });
   address = `127.0.0.1:${await bind(server)}`;
   const dead = new grpc.Server();
@@ -80,6 +99,8 @@ afterAll(async () => {
 beforeEach(() => {
   plan.length = 0;
   seen.length = 0;
+  quotePlan.length = 0;
+  quoteSeen.length = 0;
   vi.stubEnv('PEAKET_INTERNAL_GRPC_TOKEN', TOKEN);
 });
 afterEach(() => {
@@ -162,6 +183,104 @@ describe('GrpcWithdrawalParticipant.process(I-T84 ③)', () => {
   });
 });
 
+describe('QuoteAccountWithdrawal의 답 해석(I-T26 ①, BAT-013)', () => {
+  const TWO = { unused_tickets: 2, ticket_amount: 165_833, deduction_amount: 19_916, refund_amount: 145_917, transferable_tickets: 1, refund_deferred_tickets: 1 };
+  const QUOTE = { count: 2, ticketAmount: 165_833, deductionAmount: 19_916, refundAmount: 145_917, transferableCount: 1, deferredRefundCount: 1 };
+
+  test('I-T26①_견적답여섯칸을그대로읽고_요청은그계정ID·내부토큰·부르는쪽identity-svc를싣는다_데드라인은받은deadlineMs다 [ASVS v5.0.0-8.2.1]', async () => {
+    quotePlan.push({ reply: TWO });
+    expect(await client().unusedTickets(ACCOUNT, { deadlineMs: 1_700 })).toEqual(QUOTE);
+    expect(quoteSeen).toHaveLength(1);
+    expect(quoteSeen[0]!.request).toMatchObject({ account_id: ACCOUNT });
+    expect(quoteSeen[0]!.token).toBe(TOKEN);
+    expect(quoteSeen[0]!.caller).toBe('identity-svc');
+    const left = quoteSeen[0]!.deadlineMs - quoteSeen[0]!.at;
+    expect(left).toBeGreaterThan(1_200);
+    expect(left).toBeLessThanOrEqual(1_700);
+  });
+
+  test('I-T26①_0장이면모든칸이0인견적이다', async () => {
+    expect(await client().unusedTickets(ACCOUNT, { deadlineMs: 2_000 })).toEqual({ count: 0, ticketAmount: 0, deductionAmount: 0, refundAmount: 0, transferableCount: 0, deferredRefundCount: 0 });
+    expect(quoteSeen).toHaveLength(1);
+  });
+
+  test.each<[string, grpc.status]>([
+    ['UNAVAILABLE', grpc.status.UNAVAILABLE],
+    ['DEADLINE_EXCEEDED', grpc.status.DEADLINE_EXCEEDED],
+    ['INVALID_ARGUMENT', grpc.status.INVALID_ARGUMENT],
+    ['INTERNAL', grpc.status.INTERNAL],
+    ['UNAUTHENTICATED', grpc.status.UNAUTHENTICATED],
+    ['PERMISSION_DENIED', grpc.status.PERMISSION_DENIED],
+  ])('I-T26①_gRPC 오류 %s는 0장으로 접지 않고 WithdrawalParticipantUnavailable이다 [ASVS v5.0.0-8.2.1]', async (_name, code) => {
+    quotePlan.push({ code });
+    expect(await rejection(client().unusedTickets(ACCOUNT, { deadlineMs: 2_000 }))).toBeInstanceOf(WithdrawalParticipantUnavailable);
+  });
+
+  // gRPC int32는 없는 칸을 0(기본값)으로 채우고 소수는 버리므로, 전선에서 실제로 실을 수 있는 모순만 본다
+  test.each<[string, Record<string, unknown>]>([
+    ['수가 음수', { ...TWO, unused_tickets: -1 }],
+    ['금액이 음수', { ...TWO, refund_amount: -1 }],
+    ['양도 가능 수가 표 수보다 큼', { ...TWO, transferable_tickets: 3 }],
+    ['마감 뒤 환급 수가 표 수보다 큼', { ...TWO, refund_deferred_tickets: 3 }],
+    ['공제+환급이 결제 금액과 다름', { ...TWO, refund_amount: 145_918 }],
+    ['0장인데 금액이 있음', { ...ZERO_QUOTE, ticket_amount: 1 }],
+  ])('I-T26①_견적답이 %s이면 낮은 금액을 보이지 않고 WithdrawalParticipantUnavailable이다', async (_name, reply) => {
+    quotePlan.push({ reply });
+    expect(await rejection(client().unusedTickets(ACCOUNT, { deadlineMs: 2_000 }))).toBeInstanceOf(WithdrawalParticipantUnavailable);
+  });
+
+  test('I-T26①_데드라인안에답이없으면(늦은답) WithdrawalParticipantUnavailable이고곧돌아온다', async () => {
+    quotePlan.push({ delayMs: 900, reply: TWO });
+    const started = Date.now();
+    expect(await rejection(client().unusedTickets(ACCOUNT, { deadlineMs: 150 }))).toBeInstanceOf(WithdrawalParticipantUnavailable);
+    expect(Date.now() - started).toBeLessThan(800);
+  });
+
+  test('I-T26①_차단기가열렸으면견적을부르지않고WithdrawalParticipantUnavailable이다', async () => {
+    const breaker = createCircuitBreaker({ service: 'identity-svc', dependency: 'purchase-svc', minCalls: 1, buckets: 1, failureRatePercent: 1, openMs: 60_000 });
+    await breaker.run(() => Promise.reject(new Error('주입한 장애'))).catch(() => undefined);
+    quotePlan.push({ reply: TWO });
+    expect(await rejection(client({ breaker }).unusedTickets(ACCOUNT, { deadlineMs: 2_000 }))).toBeInstanceOf(WithdrawalParticipantUnavailable);
+    expect(quoteSeen).toEqual([]);
+  });
+
+  test('I-T26①_요청경로는견적을2초데드라인으로부르고_표가있으면409(확인없이참여자를부르지않는다)_같은토큰의확인요청은견적을다시부르지않는다', async () => {
+    const t = await app([client()]);
+    const s = await t.login('q-request-deadline');
+    quotePlan.push({ reply: TWO });
+    plan.push({ reply: { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE' } });
+    const token = await t.reauth(s);
+    const run = (body: Record<string, unknown>) => t.withdraw.run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: token, body });
+    const e = await run({}).catch((x: unknown) => x);
+    expect(e).toMatchObject({ code: 'CONFIRMATION_REQUIRED', unusedTickets: QUOTE });
+    expect(quoteSeen).toHaveLength(1);
+    const left = quoteSeen[0]!.deadlineMs - quoteSeen[0]!.at;
+    expect(left).toBeGreaterThan(QUOTE_DEADLINE_MS - 500);
+    expect(left).toBeLessThanOrEqual(QUOTE_DEADLINE_MS);
+    expect(seen).toEqual([]);
+    expect(t.sessions.accountOf(s.accountId)?.status).toBe('ACTIVE');
+    // 같은 토큰에 확인을 실으면 참여자를 부르고 끝낸다. 견적은 다시 부르지 않는다
+    expect(await run({ confirmCancelUnusedTickets: true })).toEqual({ outcome: 'WITHDRAWN' });
+    expect(quoteSeen).toHaveLength(1);
+    expect(seen.map((x) => x.request)).toEqual([{ account_id: s.accountId }]);
+  });
+
+  test('I-T26①_요청경로에서견적이실패하면DEPENDENCY_UNAVAILABLE(503)이고계정·재인증토큰이그대로다', async () => {
+    const t = await app([client()]);
+    const s = await t.login('q-request-fail');
+    quotePlan.push({ code: grpc.status.UNAVAILABLE });
+    const token = await t.reauth(s);
+    const e = await t.withdraw.run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: token, body: {} }).catch((x: unknown) => x);
+    expect(e).toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE' });
+    expect(t.sessions.accountOf(s.accountId)?.status).toBe('ACTIVE');
+    expect(seen).toEqual([]);
+    // 토큰을 쓰지 않았다: 같은 토큰으로 견적이 돌아오면 204(WITHDRAWN)다
+    quotePlan.length = 0;
+    plan.push({ reply: { state: 'WITHDRAWAL_PARTICIPANT_STATE_DONE' } });
+    expect(await t.withdraw.run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: token, body: {} })).toEqual({ outcome: 'WITHDRAWN' });
+  });
+});
+
 // ---- 응용 층과 이어 부를 때의 데드라인과 202(I-T84 ③) ----
 
 async function app(participants: WithdrawalParticipant[]) {
@@ -173,8 +292,8 @@ async function app(participants: WithdrawalParticipant[]) {
   const retry = new RetryPendingWithdrawals(sessions, eraser, clock, participants);
   const login = (id: string) => k.create.run({ idempotencyKey: newKey(), provider: 'kakao', providerUserId: id, email: null, deviceId: null });
   const reauth = async (s: { accountId: string; sessionId: string }) => (await k.signer.reauth({ accountId: s.accountId, sessionId: s.sessionId, provider: 'kakao', strength: 'verified', operation: 'ACCOUNT_WITHDRAW' }, clock.now())).token;
-  const run = async (s: { accountId: string; sessionId: string }) => withdraw.run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauth(s), body: {} });
-  return { clock, sessions, withdraw, retry, login, run };
+  const run = async (s: { accountId: string; sessionId: string }, body: Record<string, unknown> = {}) => withdraw.run({ accountId: s.accountId, sessionId: s.sessionId, reauthToken: await reauth(s), body });
+  return { clock, sessions, withdraw, retry, login, run, reauth };
 }
 
 describe('참여자 호출의 데드라인(요청 경로 3초·고리 10초)과 실패의 202', () => {
