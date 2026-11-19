@@ -693,11 +693,11 @@ data:
       -- ① 값이 정확히 하나이고 2,048자 이하의 JWT 꼴
       local values = values_of(headers, ADMISSION_HEADER)
       if #values ~= 1 then return 401 end
-      local token = values[1]
-      if #token > ADMISSION_MAX or string.find(token, JWT_FORM) == nil then return 401 end
-      local d1 = string.find(token, ".", 1, true)
-      local d2 = string.find(token, ".", d1 + 1, true)
-      local head_json = b64url_strict(string.sub(token, 1, d1 - 1))
+      local jwt = values[1]
+      if #jwt > ADMISSION_MAX or string.find(jwt, JWT_FORM) == nil then return 401 end
+      local d1 = string.find(jwt, ".", 1, true)
+      local d2 = string.find(jwt, ".", d1 + 1, true)
+      local head_json = b64url_strict(string.sub(jwt, 1, d1 - 1))
       local head = head_json and json_decode(head_json)
       if not is_obj(head) then return 401 end
       -- ② alg ES256(머리의 jku·x5u·jwk·x5c는 읽지 않는다)
@@ -711,17 +711,17 @@ data:
       -- ④ 서명(r‖s 64바이트를 DER로 바꿔 확인한다). Envoy v1.40은 가져온 공개키를 그 요청의 저장소에 두고 importPublicKey가 돌려준 객체의 get()을
       --    verifySignature에 넘긴다. 그 저장소는 요청이 끝나면 사라지고 한 요청에서 두 번째 importPublicKey는 첫 키를 돌려주므로,
       --    요청마다 쓸 키 하나만 가져온다(2026-11-19 같은 프록시 이미지에서 확인, docs/infra.md §4.1 '입장 토큰 확인')
-      local sig = b64url_strict(string.sub(token, d2 + 1))
+      local sig = b64url_strict(string.sub(jwt, d2 + 1))
       if sig == nil or #sig ~= 64 then return 401 end
       local der = der_signature(sig)
-      local signed = string.sub(token, 1, d2 - 1)
+      local signed = string.sub(jwt, 1, d2 - 1)
       local pub = handle:importPublicKey(key.der, #key.der):get()
       if type(pub) ~= "string" or pub == "" then return 401 end
       local ok = handle:verifySignature("sha256", pub, der, #der, signed, #signed)
       if ok ~= true then return 401 end
       -- ⑤ typ(글자 그대로)
       if head.typ ~= ADMISSION_TYP then return 401 end
-      local body_json = b64url_strict(string.sub(token, d1 + 1, d2 - 1))
+      local body_json = b64url_strict(string.sub(jwt, d1 + 1, d2 - 1))
       local body = body_json and json_decode(body_json)
       if not is_obj(body) then return 401 end
       -- ⑥ iss
