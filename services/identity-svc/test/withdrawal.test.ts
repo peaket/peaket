@@ -828,6 +828,38 @@ describe('미사용 티켓 확인의 응용 층(I-T26 ①, BAT-013)', () => {
     expect(t.sessions.accountOf(a.accountId)?.status).toBe('DELETED');
   });
 
+  test('I-T26 ①_확인값이거짓(false)인409는트랜잭션을열지않고재인증토큰을쓰지않으며_같은토큰의참(true)으로진행한다', async () => {
+    const t = await setup();
+    let transactions = 0;
+    const counting = new Proxy(t.sessions, {
+      get(target, prop) {
+        if (prop === 'transaction')
+          return (fn: Parameters<SessionStore['transaction']>[0]) => {
+            transactions++;
+            return target.transaction(fn);
+          };
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const p = quotingParticipant('purchase', async () => TWO_TICKETS);
+    const withdraw = new (WithdrawAccount as unknown as new (...a: unknown[]) => WithdrawAccount)(counting, new JoseReauthVerifier(t.k.keys, ISSUER, t.clock), new VerificationEraser(t.verifications), t.clock, undefined, t.staff, undefined, [p.participant], undefined);
+    const a = await t.login('q26-false');
+    const token = await t.reauthToken(a);
+    const e = await errorOf(withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: { confirmCancelUnusedTickets: false } }));
+    expect(e.code).toBe('CONFIRMATION_REQUIRED');
+    expect(e.unusedTickets).toEqual(TWO_TICKETS);
+    // 거짓은 확인이 아니다: 토큰을 커밋하는 트랜잭션을 열지 않고, 참여자(정리)도 부르지 않는다
+    expect(transactions).toBe(0);
+    expect(p.processes()).toBe(0);
+    expect(t.sessions.accountOf(a.accountId)?.status).toBe('ACTIVE');
+    // 같은 토큰에 참을 실으면 진행한다(견적은 다시 부르지 않는다). 미룸 표시 커밋 + 끝내기 커밋 두 번이다
+    expect(await withdraw.run({ accountId: a.accountId, sessionId: a.sessionId, reauthToken: token, body: { confirmCancelUnusedTickets: true } })).toEqual({ outcome: 'WITHDRAWN' });
+    expect(transactions).toBe(2);
+    expect(p.quotes).toHaveLength(1);
+    expect(p.processes()).toBe(1);
+  });
+
   test('I-T26 ①_견적참여자가던지면DEPENDENCY_UNAVAILABLE이고_트랜잭션을열지않으며계정은ACTIVE그대로다', async () => {
     const t = await setup();
     let transactions = 0;

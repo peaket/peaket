@@ -773,6 +773,48 @@ describe('미사용 티켓의 취소·환급·미룸(I-T26 ②, 실제 ticket-sv
     expect(await cancellationOf(aCancellation)).toMatchObject({ status: 'REFUND_PENDING' });
     expect(await cancellationOf(bCancellation)).toMatchObject({ status: 'REQUESTED' });
   });
+
+  // M16-a(검증): pendingRefunds가 실제 order_cancellation 행에서 ACCOUNT_WITHDRAWAL의 REQUESTED만 세고,
+  // REFUNDED·VOIDED와 다른 사유(USER)의 REFUND_PENDING·다른 계정 행은 세지 않는지 실제 PostgreSQL로 본다.
+  test('I-T26 ③_M16-a_대기수는ACCOUNT_WITHDRAWAL의REQUESTED만세고_REFUNDED·VOIDED·USER의REFUND_PENDING·다른계정행은세지않는다 [ASVS v5.0.0-8.2.2]', async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    const aOrder = await order(a, 'CONFIRMED');
+    const bOrder = await order(b, 'CONFIRMED');
+    const insert = async (orderId: string, reason: string, status: string): Promise<string> => {
+      const id = randomUUID();
+      await admin.pool.query(
+        `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+         values ($1, $2, $3, $4, 0, false, 0, 0, 33333, $5, now(), now())`,
+        [id, orderId, randomUUID(), reason, status],
+      );
+      return id;
+    };
+    const requested = await insert(aOrder.orderId, 'ACCOUNT_WITHDRAWAL', 'REQUESTED');
+    const refunded = await insert(aOrder.orderId, 'ACCOUNT_WITHDRAWAL', 'REFUNDED');
+    const voided = await insert(aOrder.orderId, 'ACCOUNT_WITHDRAWAL', 'VOIDED');
+    const fanPending = await insert(aOrder.orderId, 'USER', 'REFUND_PENDING');
+    const otherAccount = await insert(bOrder.orderId, 'ACCOUNT_WITHDRAWAL', 'REQUESTED');
+    const before = new Map<string, unknown>();
+    for (const id of [requested, refunded, voided, fanPending, otherAccount]) before.set(id, await cancellationOf(id));
+
+    // A의 5행 가운데 ACCOUNT_WITHDRAWAL의 REQUESTED 1행만 센다(REFUNDED·VOIDED·USER·B는 0)
+    expect(await call(a)).toEqual({
+      state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING',
+      reasons: [TICKET_PENDING],
+      payment_pending_orders: 0,
+      deposit_orders_cancelled: 0,
+      deposit_orders_pending: 0,
+      unused_tickets_cancelled: 0,
+      unused_tickets_pending: 1,
+    });
+    // 대기 행이 있어도 새 표를 부르지 않는다(취소 Saga·결제사 호출 0). 행은 하나도 바뀌지 않는다
+    expect(cancelInputs).toEqual([]);
+    expect(gatewayCancels).toEqual([]);
+    for (const id of [requested, refunded, voided, fanPending, otherAccount]) expect({ id, row: await cancellationOf(id) }).toEqual({ id, row: before.get(id) });
+    // B도 자기 계정의 REQUESTED 1행만 센다
+    expect(await call(b)).toMatchObject({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [TICKET_PENDING], unused_tickets_pending: 1 });
+  });
 });
 
 describe('identity-svc 클라이언트와 잇기(I-T84 ③ · P-T55, 계약 양쪽)', () => {

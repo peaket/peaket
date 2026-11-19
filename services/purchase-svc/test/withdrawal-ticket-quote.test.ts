@@ -136,6 +136,14 @@ describe('POL-032 구간과 끝수(I-T26 ①)', () => {
     expect(over).toMatchObject({ deductionAmount: 6_666, refundAmount: 26_667 });
   });
 
+  test('I-T26①_공연시작1ms전은아직세고정각은빼며_1ms전은당일90%공제다', async () => {
+    const eventStartsAtMs = Date.parse('2026-11-20T03:00:00Z');
+    const eventId = `ev-start-edge-${seq++}`;
+    const h = harness({ rows: [row(eventId)], configs: new Map([[eventId, eventAt(eventStartsAtMs)]]) });
+    expect(await h.quote(eventStartsAtMs - 1)).toEqual({ count: 1, ticketAmount: 33_333, deductionAmount: 29_999, refundAmount: 3_334, transferableCount: 0, deferredRefundCount: 0 });
+    expect(await h.quote(eventStartsAtMs)).toEqual({ count: 0, ticketAmount: 0, deductionAmount: 0, refundAmount: 0, transferableCount: 0, deferredRefundCount: 0 });
+  });
+
   test('I-T26①_24시간특례는공연3일전까지만이다(2일전이면24시간이내여도30%)', async () => {
     // 공연 11/20(금) 12:00, 지금 11/18(수) 10:00 → 관람일 2일 전이라 24시간 특례 밖이다
     const now = Date.parse('2026-11-18T01:00:00Z');

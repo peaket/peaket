@@ -142,6 +142,29 @@ describe('미사용 티켓 409 견적과 503(I-T26 ①)', () => {
     expect((await refresh(s.refreshToken)).statusCode).toBe(401);
   });
 
+  test('I-T26 ①_확인값이거짓(false)이면참과같이409이고_계정·세션·참여자그대로며_같은토큰으로다시409또는확인뒤204다', async () => {
+    answer = { state: 'DONE' };
+    quote = TWO;
+    const s = await login();
+    const token = await reauth(s);
+    const r = await delWith(s, token, { confirmCancelUnusedTickets: false });
+    expect(r.statusCode).toBe(409);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(r.payload)).toMatchObject({
+      type: 'https://peaket.example/problems/withdrawal-confirmation-required',
+      status: 409,
+      unusedTickets: TWO,
+    });
+    // 확인값이 거짓이면 참(true)과 같은 409다: 참여자(정리)를 부르지 않고 세션도 산다. 견적은 한 번만 불렀다
+    expect(asked).toEqual([]);
+    expect(quoted).toEqual([{ accountId: s.accountId, deadlineMs: QUOTE_DEADLINE_MS }]);
+    expect((await refresh(s.refreshToken)).statusCode).toBe(204);
+    // 같은 토큰으로 거짓을 다시 보내도 403이 아니라 409이고, 참으로 바꾸면 204다
+    expect((await delWith(s, token, { confirmCancelUnusedTickets: false })).statusCode).toBe(409);
+    expect((await delWith(s, token, { confirmCancelUnusedTickets: true })).statusCode).toBe(204);
+    expect(asked).toEqual([s.accountId]);
+  });
+
   test('I-T26 ①_티켓이0장이면409가없고지금처럼204다(견적은불렀다)', async () => {
     answer = { state: 'DONE' };
     quote = undefined;

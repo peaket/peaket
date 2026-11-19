@@ -267,6 +267,12 @@ function ticketService(
     pending?: number;
     results?: Array<CancelTicketResult | CancelTicketResult['status'] | 'THROW'>;
     statusOf?: (cancellationId: string) => Promise<string | undefined>;
+    /** 그 계정 주문의 취소 행(시험용 표). 있으면 pendingRefunds가 ACCOUNT_WITHDRAWAL의 REQUESTED·REFUND_PENDING만 센다 */
+    cancellationRows?: Array<{ accountId: string; reason: string; status: string }>;
+    /** pendingRefunds 답(기본 pending). R3처럼 문장 시간 초과를 주입할 때 던진다 */
+    pendingRefunds?: () => number | Promise<number>;
+    /** cancelTicket.execute가 불린 뒤(표 하나가 끝난 것처럼 시험 자료를 옮길 때) */
+    onCancel?: (call: TicketCall) => void;
     advancePerCancelMs?: number;
   } = {},
 ) {
@@ -276,7 +282,12 @@ function ticketService(
   const service = new AccountWithdrawalTickets({
     store: {
       unusedTicketsOf: async () => (typeof o.rows === 'function' ? o.rows() : (o.rows ?? [])),
-      pendingRefunds: async () => o.pending ?? 0,
+      pendingRefunds: async () => {
+        if (o.pendingRefunds) return o.pendingRefunds();
+        if (o.cancellationRows)
+          return o.cancellationRows.filter((r) => r.accountId === ACCOUNT && r.reason === 'ACCOUNT_WITHDRAWAL' && (r.status === 'REQUESTED' || r.status === 'REFUND_PENDING')).length;
+        return o.pending ?? 0;
+      },
       cancellationStatus: async (cancellationId) => o.statusOf?.(cancellationId),
     },
     configs: { config: async () => ({ saleEndsAtMs: SALE_END }) },
@@ -284,6 +295,7 @@ function ticketService(
     cancelTicket: {
       execute: async (i) => {
         calls.push(i);
+        o.onCancel?.(i);
         if (o.advancePerCancelMs) clock.advance(o.advancePerCancelMs);
         const r = (queue.length > 1 ? queue.shift() : queue[0]) ?? 'ACCEPTED';
         if (r === 'THROW') throw new Error('주입한 티켓 취소 실패');
@@ -366,17 +378,25 @@ describe('미사용 티켓 취소(I-T26 ②)', () => {
 });
 
 describe('미사용 티켓의 남은 환급과 재시도(I-T26 ③)', () => {
-  test('I-T26③_결제사답CANCEL_PENDING·UNKNOWN·REJECTED는REFUND_PENDING행이라pendingRefunds가세고_남은이유TICKET_REFUND_PENDING·pending1이다', async () => {
-    for (const status of ['REFUND_PENDING'] as const) {
-      const h0 = harness({ orders: [] });
-      const tickets = ticketService(h0.clock, { rows: [ticketRow()], results: [{ status, cancellationId: 'x', refundAmount: 30_000, payment: 'UNKNOWN' }], pending: 1 });
-      const h = harness({ orders: [], tickets: tickets.port });
-      expect({ status, r: await h.run(60_000) }).toEqual({
-        status,
-        r: { state: 'PENDING', reasons: ['TICKET_REFUND_PENDING'], paymentPendingOrders: 0, depositOrdersCancelled: 0, depositOrdersPending: 0, unusedTicketsCancelled: 0, unusedTicketsPending: 1 },
-      });
-      expect(tickets.calls).toHaveLength(1);
-    }
+  test.each<[string, CancelTicketResult]>([
+    // CancelTicket이 결제사 답 CANCEL_PENDING·UNKNOWN·REJECTED를 받았을 때 실제로 돌려주는 값(REFUND_PENDING)과 그 payment다
+    ['CANCEL_PENDING', { status: 'REFUND_PENDING', cancellationId: 'x', refundAmount: 30_000, payment: 'PENDING' }],
+    ['UNKNOWN', { status: 'REFUND_PENDING', cancellationId: 'x', refundAmount: 30_000, payment: 'UNKNOWN' }],
+    ['REJECTED', { status: 'REFUND_PENDING', cancellationId: 'x', refundAmount: 30_000, payment: 'REJECTED' }],
+  ])('I-T26③_결제사답%s는REFUND_PENDING행이라pendingRefunds가세고_남은이유TICKET_REFUND_PENDING·pending1이다', async (_answer, result) => {
+    const h0 = harness({ orders: [] });
+    const tickets = ticketService(h0.clock, { rows: [ticketRow()], results: [result], pending: 1 });
+    const h = harness({ orders: [], tickets: tickets.port });
+    expect(await h.run(60_000)).toEqual({
+      state: 'PENDING',
+      reasons: ['TICKET_REFUND_PENDING'],
+      paymentPendingOrders: 0,
+      depositOrdersCancelled: 0,
+      depositOrdersPending: 0,
+      unusedTicketsCancelled: 0,
+      unusedTicketsPending: 1,
+    });
+    expect(tickets.calls).toHaveLength(1);
   });
 
   test('I-T26③_입장기록마감뒤환급(REQUESTED)은행이있어pending1이고_새표를부르지않는다', async () => {
@@ -387,14 +407,12 @@ describe('미사용 티켓의 남은 환급과 재시도(I-T26 ③)', () => {
     expect(tickets.calls).toEqual([]);
   });
 
-  test('I-T26③_취소행이REFUNDED·VOIDED면끝난것으로보아DONE이다', async () => {
-    for (const _state of ['REFUNDED', 'VOIDED']) {
-      const h0 = harness({ orders: [] });
-      const tickets = ticketService(h0.clock, { rows: [], pending: 0 });
-      const h = harness({ orders: [], tickets: tickets.port });
-      expect(await h.run(60_000)).toEqual({ state: 'DONE', reasons: [], paymentPendingOrders: 0, depositOrdersCancelled: 0, depositOrdersPending: 0, unusedTicketsCancelled: 0, unusedTicketsPending: 0 });
-      expect(tickets.calls).toEqual([]);
-    }
+  test.each(['REFUNDED', 'VOIDED'] as const)('I-T26③_취소행이%s면대기로세지않고DONE이다', async (state) => {
+    const h0 = harness({ orders: [] });
+    const tickets = ticketService(h0.clock, { rows: [], cancellationRows: [{ accountId: ACCOUNT, reason: 'ACCOUNT_WITHDRAWAL', status: state }] });
+    const h = harness({ orders: [], tickets: tickets.port });
+    expect(await h.run(60_000)).toEqual({ state: 'DONE', reasons: [], paymentPendingOrders: 0, depositOrdersCancelled: 0, depositOrdersPending: 0, unusedTicketsCancelled: 0, unusedTicketsPending: 0 });
+    expect(tickets.calls).toEqual([]);
   });
 
   test('I-T26③_행이있는대기1장과이번에부르지못한1장이면pending2이고_같은표를두번세지않는다', async () => {
@@ -425,12 +443,62 @@ describe('미사용 티켓의 남은 환급과 재시도(I-T26 ③)', () => {
     expect(await h.run(60_000)).toMatchObject({ state: 'PENDING', reasons: ['TICKET_REFUND_PENDING'], unusedTicketsCancelled: 0, unusedTicketsPending: 2 });
   });
 
-  test('I-T26③_기존대기행이있으면결제사를다시부르지않는다(재시도는환급고리몫)', async () => {
+  test('I-T26③_기존대기행(ACCOUNT_WITHDRAWAL의REQUESTED)이있으면새표를부르지않고대기1이다(재시도는환급고리몫)', async () => {
     const h0 = harness({ orders: [] });
-    const tickets = ticketService(h0.clock, { rows: [], pending: 2 });
+    // 실제 행은 purchase 통합 시험이 본다. 여기서는 표 모양의 대기 행이 포트를 거쳐 세어지는지와 취소 Saga 미호출을 본다
+    const tickets = ticketService(h0.clock, { rows: [], cancellationRows: [{ accountId: ACCOUNT, reason: 'ACCOUNT_WITHDRAWAL', status: 'REQUESTED' }] });
     const h = harness({ orders: [], tickets: tickets.port });
-    expect(await h.run(60_000)).toMatchObject({ state: 'PENDING', reasons: ['TICKET_REFUND_PENDING'], unusedTicketsPending: 2 });
+    expect(await h.run(60_000)).toMatchObject({ state: 'PENDING', reasons: ['TICKET_REFUND_PENDING'], unusedTicketsPending: 1 });
     expect(tickets.calls).toEqual([]);
+  });
+
+  test('I-T26③_팬이먼저취소한(USER)REFUND_PENDING행은탈퇴를막지않는다', async () => {
+    const h0 = harness({ orders: [] });
+    const tickets = ticketService(h0.clock, { rows: [], cancellationRows: [{ accountId: ACCOUNT, reason: 'USER', status: 'REFUND_PENDING' }] });
+    const h = harness({ orders: [], tickets: tickets.port });
+    expect(await h.run(60_000)).toEqual({ state: 'DONE', reasons: [], paymentPendingOrders: 0, depositOrdersCancelled: 0, depositOrdersPending: 0, unusedTicketsCancelled: 0, unusedTicketsPending: 0 });
+    expect(tickets.calls).toEqual([]);
+  });
+
+  test('I-T26③_다른계정의ACCOUNT_WITHDRAWAL대기행은이계정의수에넣지않는다', async () => {
+    const h0 = harness({ orders: [] });
+    const tickets = ticketService(h0.clock, { rows: [], cancellationRows: [{ accountId: '0190f3a1-7c2e-7a00-8000-0000000026b2', reason: 'ACCOUNT_WITHDRAWAL', status: 'REQUESTED' }] });
+    const h = harness({ orders: [], tickets: tickets.port });
+    expect(await h.run(60_000)).toEqual({ state: 'DONE', reasons: [], paymentPendingOrders: 0, depositOrdersCancelled: 0, depositOrdersPending: 0, unusedTicketsCancelled: 0, unusedTicketsPending: 0 });
+  });
+
+  // R3(복구): 첫 표의 취소가 끝난 뒤 pendingRefunds(DB 문장)가 시간 초과로 실패하면 UNAVAILABLE(WithdrawalOrdersUnavailable)이고,
+  // 다음 호출은 첫 표를 다시 부르지 않고 남은 표만 같은 취소 ID로 끝낸다.
+  test('I-T26③_R3_취소도중DB문장시간초과면UNAVAILABLE이고_다음호출이같은취소ID로남은표만끝낸다', async () => {
+    const rows = [ticketRow(), ticketRow()];
+    const remaining = [...rows];
+    let pendingReads = 0;
+    const h0 = harness({ orders: [] });
+    const tickets = ticketService(h0.clock, {
+      rows: () => remaining,
+      results: ['ACCEPTED'],
+      pendingRefunds: async () => {
+        pendingReads++;
+        if (pendingReads === 1) throw new WithdrawalOrdersUnavailable(new Error('문장 시간 초과(주입)'));
+        return 0;
+      },
+      // 첫 표는 취소 행이 생겨 다음 읽기에서 빠진다
+      onCancel: (c) => {
+        const at = remaining.findIndex((r) => r.ticketId === c.ticketId);
+        if (at >= 0) remaining.splice(at, 1);
+      },
+    });
+    const h = harness({ orders: [], tickets: tickets.port });
+    await expect(h.run(60_000)).rejects.toBeInstanceOf(WithdrawalOrdersUnavailable);
+    expect(h.signals.participant).toEqual(['error']);
+    expect(tickets.calls.map((c) => [c.ticketId, c.cancellationId])).toEqual([[rows[0]!.ticketId, withdrawalTicketCancellationId(rows[0]!.ticketId)]]);
+    // 다음 호출: 첫 표는 다시 부르지 않고 둘째 표만 부른다. 취소 ID는 표마다 고정이다
+    expect(await h.run(60_000)).toMatchObject({ state: 'DONE', unusedTicketsCancelled: 1, unusedTicketsPending: 0 });
+    expect(tickets.calls.map((c) => [c.ticketId, c.cancellationId])).toEqual([
+      [rows[0]!.ticketId, withdrawalTicketCancellationId(rows[0]!.ticketId)],
+      [rows[1]!.ticketId, withdrawalTicketCancellationId(rows[1]!.ticketId)],
+    ]);
+    expect(tickets.calls.filter((c) => c.ticketId === rows[0]!.ticketId)).toHaveLength(1);
   });
 
   test('I-T26③_저장소가pendingRefunds에서실패하면DONE으로접지않고WithdrawalOrdersUnavailable이다', async () => {
