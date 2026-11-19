@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 77 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 125 |
+| A | 100 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 148 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 135 | 24 | 6 | 0 | 2 | 47 | 0 | 0 | 0 | 214 |
+| 합계 | 158 | 24 | 6 | 0 | 2 | 47 | 0 | 0 | 0 | 237 |
 
 ## docs/features/payment.md
 
@@ -137,6 +137,29 @@
 | P-T55 | ⑤ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ⑤ 남은 시간이 50ms보다 모자라면 `CancelPayment`를 부르지 않고 그 주문을 남은 것으로 센다(50ms면 부른다). 입금 대기 주문이 11개면… | 자동 시험 | A | 시험: services/purchase-svc/test/process-account-withdrawal.test.ts |
 | P-T55 | ⑥ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ⑥ B의 주문은 읽지도 바꾸지도 않는다(B의 입금 대기 주문 취소 0건). 계정 ID가 대문자이거나 UUID가 아니면 `INVALID_ARGUMENT`이고… | 자동 시험 | A | 시험: services/bundle/test-int/start-files.int.test.ts, services/purchase-svc/test-int/withdrawal-participant.int.test.ts… |
 | P-T55 | ⑦ | 탈퇴 참여자와 탈퇴 미룸 409(추천 적용, 2026-11-18… | ⑦ 주문 생성은 재확인 답이 verified 거짓·`withdrawal_pending` 참이면 409 `withdrawal-pending`이고 주문 행·멱등… | 자동 시험 | A | 시험: services/purchase-svc/test-int/identity-grpc.int.test.ts, services/purchase-svc/test/create-order.test.ts 외 2곳 |
+| P-T71 | ① | 결제 후 일반 취소의 가상계좌 갈래(추천 적용, 2026-11-19… | ①가상계좌 결제에 계좌를 실은 취소는 결제사 본문에 그 계좌가 정확히 실리고(토스 모양·포트원 각각)… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T71 | ② | 결제 후 일반 취소의 가상계좌 갈래(추천 적용, 2026-11-19… | ② 계좌 없는 취소는 결제사 호출 0이고 `REFUND_ACCOUNT_REQUIRED`이며 `payment_cancel` 행이 생기지 않는다 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T71 | ③ | 결제 후 일반 취소의 가상계좌 갈래(추천 적용, 2026-11-19… | ③ 계좌를 실어 보낸 뒤 결과를 모르는 행을 계좌 없이 다시 부르면 결제사 취소 호출 0이고 조회 1번이며, 조회가 반영이면 `CANCELLED`, 아니면… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T71 | ④ | 결제 후 일반 취소의 가상계좌 갈래(추천 적용, 2026-11-19… | ④ 결제사가 계좌를 거절하면 행이 `FAILED`이고 `REFUND_ACCOUNT_REQUIRED`다 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T71 | ⑤ | 결제 후 일반 취소의 가상계좌 갈래(추천 적용, 2026-11-19… | ⑤ 카드 결제에 온 계좌는 결제사 본문에 없고 지표가 1 오른다 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T71 | ⑥ | 결제 후 일반 취소의 가상계좌 갈래(추천 적용, 2026-11-19… | ⑥ `GetPayment`의 `virtual_account_paid`는 입금 확정 뒤·부분 취소 뒤에도 참이고, 카드 결제와 입금 기한이 지나 끝난 결제(승인… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T72 | ① | 예매 취소의 환불 계좌 규칙과 계좌 대기(추천 적용… | ① 견적의 `refundAccountRequired`는 가상계좌·입장 시작 전에만 참이고 가상계좌·입장 시작 뒤와 카드는 거짓이다. `GetPayment`가… | 자동 시험 | A | 시험: services/purchase-svc/test/cancel-refund-account-http.test.ts |
+| P-T72 | ② | 예매 취소의 환불 계좌 규칙과 계좌 대기(추천 적용… | ②가상계좌·입장 시작 전에 계좌 없이 취소하면 422 `refund-account-required`이고 ticket·payment 취소와… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-refund-account-http.test… |
+| P-T72 | ③ | 예매 취소의 환불 계좌 규칙과 계좌 대기(추천 적용… | ③ 계좌를 실으면 payment 대역이 받은 계좌가 본문과 같다. 입장 시작 뒤 취소에 실은 계좌는 payment 대역이 받지 않는다(재시도 실행기의 호출에도… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-refund-account-http.test… |
+| P-T72 | ④ | 예매 취소의 환불 계좌 규칙과 계좌 대기(추천 적용… | ④ payment가 `REFUND_ACCOUNT_REQUIRED`로 답하면 202 `REFUND_PENDING`·`refundAccountRequired`… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-refund-account-http.test… |
+| P-T72 | ⑤ | 예매 취소의 환불 계좌 규칙과 계좌 대기(추천 적용… | ⑤ 틱 끝 다시 열기가 '환불 대기' 건을 한 번 열고 2xx 뒤에만 `refund_account_case_opened_at`을 쓴다. 실패하면 다음 틱에 다시… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/event-refund-account-pending.tes… |
+| P-T72 | ⑥ | 예매 취소의 환불 계좌 규칙과 계좌 대기(추천 적용… | ⑥로그·Outbox·`order_cancellation`에 계좌번호 글이 없다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-refund-account-http.test… |
+| P-T73 | ① | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ① 계좌를 실어 보낸 취소가 결과 모름으로 진행 중일 때 같은 취소 ID를 다른 계좌(예금주 띄어쓰기만 다른 것 포함)로 다시 부르면 결제사 취소 호출 0·조회… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T73 | ② | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ② 결제사가 멱등키 재사용으로 답하면 `UNKNOWN`이고 행은 진행 중 그대로다(`FAILED` 아님) | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T73 | ③ | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ③ 계좌 거절로 끝난 행을 같은 취소 ID로 맞는 계좌와 함께 다시 부르면 결제사 호출 0이고 `REFUND_ACCOUNT_REQUIRED`다. 다른 업무… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts |
+| P-T73 | ④ | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ④ 팬이 계좌 거절 뒤 새 멱등 키로 같은 표를 다시 누르면 202 `REFUND_PENDING`·`refundAccountRequired` 참이고… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts |
+| P-T73 | ⑤ | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ⑤ 다시 누름(공연 시작 뒤 포함)에 실은 계좌를 payment 대역이 받지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/cancel-refund-account-http.test.ts |
+| P-T74 | ① | 환불 계좌 모양(추천 적용, 2026-11-19… | ①은행 코드 세 자리(`088`)·한 자리·글자, 계좌번호의 글자·하이픈 뺀 숫자 21자·31자 글, 예금주 빈 값·61자 각각은 400… | 자동 시험 | A | 시험: packages/validation/test/refund-account.test.ts, services/purchase-svc/test/cancel-refund-account-http.test.ts |
+| P-T74 | ② | 환불 계좌 모양(추천 적용, 2026-11-19… | ② 같은 경우마다 payment-svc의 판정이 purchase와 같다(같은 표로 두 서비스를 돈다) | 자동 시험 | A | 시험: services/payment-svc/test/refund-account-shape.test.ts |
+| P-T74 | ③ | 환불 계좌 모양(추천 적용, 2026-11-19… | ③ 포트원 대응표에 없는 은행 코드는 `payment_cancel` 0행·결제사 0이고 `REFUND_ACCOUNT_REQUIRED`이며, 같은 취소 ID를… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T75 | ① | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ① 종류 다섯(이상 표시·환급 실패·일괄 환불 실패·공제 차액·환불 대기)마다 ops-svc가 `accepted: true`로 답하고 CS 처리함에 건이 한 번… | 자동 시험 | A | 시험: services/ops-svc/test/cases-contract.test.ts, services/ops-svc/test/cases.test.ts 외 1곳 |
+| P-T75 | ② | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ② ops-svc가 2xx `accepted: false`로 답하면 purchase-svc는 연 시각을 쓰지 않고 실패 지표를 올리며 다음 틱에 다시 연다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
+| P-T75 | ③ | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ③ 그 판정은 CS 건 어댑터 모두 같다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
 
 ## docs/security/asvs/payment.md
 
@@ -201,7 +224,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: services/payment-svc/test/pg-selection.test.ts |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | 다른 단계 | B | core-svc 좌석맵 후속 · core-svc 좌석맵 저장 시험이 맡는다. BAT-050은 ticket-svc 발권만 본다. |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | 자동 시험 | B | 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, services/payment-svc/test/portone-gateway.test.ts 외 1곳 |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test-int/payment-method-ref.int.test… |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/purchase-svc/test/accept-http.test.ts 외 2곳 |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
