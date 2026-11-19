@@ -196,13 +196,14 @@ export class EventRefundService {
     // 확정 요청이 목록을 싣지 않는 옛 호출은 같은 프로세스의 미리보기를 쓰고, 그것도 없으면 지금처럼 같은 함수로 다시 계산한다
     const savedPreview = i.compensationOrders === undefined ? this.#previewOrdersOf(i.eventId, i.fault, nowMs) : undefined;
     const compensationOrders = i.compensationOrders ?? savedPreview?.orders ?? preview.compensationOrders;
-    const compensationTargets = compensationOrders?.length ?? 0;
-    const compensationTotal = (compensationOrders ?? []).reduce((sum, o) => sum + o.amount, 0);
     const items: EventRefundItem[] = targets.map((t) => itemOf(i.requestId, t, kind, nowMs));
     // 배상 행(BAT-425, ADR-0317 결정 2): 회차 취소(CANCEL)이고 주최 측 귀책·공연 내용 변경일 때 대상 주문마다 한 행을 요청·항목과 같은 트랜잭션에 만든다.
     // 미리보기 목록이 있으면 그 금액을 쓰고, 불가항력·0원 주문은 행이 없다
     const compensationRows =
       kind === 'CANCEL' ? compensationRowsOf({ requestId: i.requestId, eventId: i.eventId, fault: i.fault, targets, ...(compensationOrders === undefined ? {} : { orders: compensationOrders }), nowMs, idOf: () => randomUUID() }) : [];
+    // 요약 수·합계는 실제 배상 행에서 센다(RV-22). 미리보기 뒤 확정 대상에서 빠진 주문은 행과 함께 요약에서도 빠진다
+    const compensationTargets = compensationRows.length;
+    const compensationTotal = compensationRows.reduce((sum, row) => sum + row.amount, 0);
     const progress = progressOf(items, [], kind === 'POSTPONE');
     const request: EventCancellationRequest = {
       requestId: i.requestId,

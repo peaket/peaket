@@ -1,7 +1,10 @@
 // 배상 송금 유스케이스(BAT-425 GAT-130 잔여, ADR-0317). 모양을 보고 포트로 넘기고, 기록·멱등·PAID 미수금을 맡는다.
-// 차례: 저장한 행이 있으면 그대로 답한다(compensation_id = 멱등 키) → 포트에 송금 요청(계좌는 이 호출 안에서만) →
-// compensation_transfer 한 행 저장(계좌 끝 4자리만) → PAID면 partner_receivable(COMPENSATION_ADVANCE) 한 행과 receivable_id.
-// UNAVAILABLE은 저장한 뒤 UNAVAILABLE로 답하고 받는 쪽이 503으로 드러낸다. 계좌 원문은 저장·응답에 싣지 않는다(POL-014).
+// 차례: 저장한 행이 있으면 그대로 답한다(compensation_id = 멱등 키) → 없으면 저장소에서 compensation_id 행을 선점한다 →
+// 선점한 쪽만 포트에 송금 요청(계좌는 이 호출 안에서만) → compensation_transfer 한 행에 답 저장(계좌 끝 4자리만) →
+// PAID면 partner_receivable(COMPENSATION_ADVANCE) 한 행과 receivable_id. UNAVAILABLE은 저장한 뒤 UNAVAILABLE로 답하고 받는 쪽이 503으로 드러낸다.
+// 선점은 DB 유일 인덱스라 같은 저장소를 보는 두 파드가 겹쳐도 포트를 부르는 쪽은 하나다(RV-23). 진 쪽은 그 행의 답을 기다린다.
+// 계좌 원문은 저장·응답에 싣지 않는다(POL-014).
+import { randomUUID } from 'node:crypto';
 import type { CompensationReceivables, CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest, CompensationTransferStore } from '../domain/ports.js';
 
 export class CompensationTransferProblem extends Error {
@@ -17,6 +20,17 @@ export class CompensationTransferProblem extends Error {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** 옛 호출자(파트너를 싣지 않는 단위 시험)가 REQUESTED만 볼 때 쓰는 자리 표시자. PAID면 미수금을 만들지 않고 UNAVAILABLE이다 */
 const UNKNOWN_PROMOTER = '00000000-0000-0000-0000-000000000000';
+/** 송금 전 선점 행의 transfer_id 접두어. 지급대행이 돌려준 진짜 ID와 겹치지 않게 예약한다 */
+const CLAIM_PREFIX = 'claim:';
+/** 다른 파드가 선점한 송금의 답을 기다리는 시간 6초 [가정](포트 호출 기한 5초 [가정]보다 조금 길다) */
+const CLAIM_WAIT_MS = 6_000;
+/** 선점한 송금의 답을 다시 읽는 간격 20ms [가정] */
+const CLAIM_POLL_MS = 20;
+
+/** 아직 포트 답을 받지 못한 선점 행인가 */
+const isPendingClaim = (r: CompensationTransferRecord): boolean => r.transferId.startsWith(CLAIM_PREFIX);
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 저장소를 넘기지 않는 옛 호출자(단위 시험)를 위한 메모리 기록. 운영 조립은 DrizzleCompensationTransfers를 넘긴다 */
 class MemoryCompensationTransferStore implements CompensationTransferStore {
@@ -32,12 +46,45 @@ class MemoryCompensationTransferStore implements CompensationTransferStore {
     return this.#rows.get(transferId);
   }
 
-  async save(record: CompensationTransferRecord & { readonly accountLast4: string; readonly promoterId: string; readonly eventId?: string }): Promise<CompensationTransferRecord> {
-    const existing = await this.findByCompensationId(record.compensationId);
-    if (existing !== undefined) return existing;
-    this.#rows.set(record.transferId, record);
-    this.#byCompensation.set(record.compensationId, record.transferId);
-    return record;
+  async claim(record: { readonly compensationId: string; readonly orderId: string; readonly accountId: string; readonly amount: number; readonly accountLast4: string; readonly promoterId: string; readonly eventId?: string }): Promise<{ readonly record: CompensationTransferRecord; readonly claimed: boolean }> {
+    // 이벤트 루프 안에서 확인과 쓰기 사이에 await가 없어 두 호출이 겹쳐도 한 번만 선점한다(운영은 유일 인덱스)
+    const claimedTransferId = this.#byCompensation.get(record.compensationId);
+    const existing = claimedTransferId === undefined ? undefined : this.#rows.get(claimedTransferId);
+    if (existing !== undefined) return { record: existing, claimed: false };
+    const row: CompensationTransferRecord = {
+      transferId: `${CLAIM_PREFIX}${randomUUID()}`,
+      compensationId: record.compensationId,
+      orderId: record.orderId,
+      accountId: record.accountId,
+      amount: record.amount,
+      status: 'REQUESTED',
+      accountLast4: record.accountLast4,
+    };
+    this.#rows.set(row.transferId, row);
+    this.#byCompensation.set(record.compensationId, row.transferId);
+    return { record: row, claimed: true };
+  }
+
+  async settle(compensationId: string, record: CompensationTransferRecord & { readonly accountLast4: string; readonly promoterId: string; readonly eventId?: string }): Promise<CompensationTransferRecord> {
+    const existing = await this.findByCompensationId(compensationId);
+    if (existing === undefined) throw new Error('배상 송금 기록을 찾지 못했습니다');
+    if (!isPendingClaim(existing)) return existing;
+    // 선점 행을 답으로 바꾼다. transfer_id 색인도 함께 옮긴다(옛 선점 키는 지운다)
+    this.#rows.delete(existing.transferId);
+    const saved: CompensationTransferRecord = {
+      transferId: record.transferId,
+      compensationId,
+      orderId: record.orderId,
+      accountId: record.accountId,
+      amount: record.amount,
+      status: record.status,
+      ...(record.failureReason === undefined ? {} : { failureReason: record.failureReason }),
+      accountLast4: record.accountLast4,
+      ...(record.receivableId === undefined ? {} : { receivableId: record.receivableId }),
+    };
+    this.#rows.set(saved.transferId, saved);
+    this.#byCompensation.set(compensationId, saved.transferId);
+    return saved;
   }
 
   async attachReceivable(compensationId: string, receivableId: string): Promise<CompensationTransferRecord> {
@@ -51,9 +98,6 @@ class MemoryCompensationTransferStore implements CompensationTransferStore {
 }
 
 export class CompensationTransfers {
-  /** 같은 compensation_id의 겹친 요청을 한 번의 포트 호출로 합친다(RV-06). 저장한 행이 있기 전의 겹침을 막는다 */
-  readonly #inFlight = new Map<string, Promise<CompensationTransferRecord>>();
-
   constructor(
     private readonly port: CompensationTransferPort,
     private readonly store: CompensationTransferStore = new MemoryCompensationTransferStore(),
@@ -68,21 +112,41 @@ export class CompensationTransfers {
     if (input.eventId !== undefined && !UUID.test(input.eventId)) throw new CompensationTransferProblem('INVALID', 'ID 모양이 올바르지 않습니다');
     if (!Number.isSafeInteger(input.amount) || input.amount < 1) throw new CompensationTransferProblem('INVALID', '금액이 올바르지 않습니다');
     if (!input.bankCode || !input.accountNumber || !input.holderName) throw new CompensationTransferProblem('INVALID', '계좌 정보가 필요합니다');
-    // 같은 compensation_id의 다시 부름은 저장한 상태·transfer_id를 그대로 준다(계좌가 달라도 새 송금을 만들지 않는다)
+    // 같은 compensation_id의 다시 부름은 저장한 상태·transfer_id를 그대로 준다(계좌가 달라도 새 송금을 만들지 않는다).
+    // 아직 답이 없는 선점 행이면 아래 선점·대기로 내려가 그 답을 기다린다
     const existing = await this.store.findByCompensationId(input.compensationId);
-    if (existing !== undefined) return existing;
-    // 행을 읽은 뒤 저장 전에 겹친 요청: 같은 compensation_id의 진행 중 호출에 합류한다(포트 한 번, RV-06).
-    // 실제 지급대행 어댑터도 compensation_id를 멱등 키로 써야 한다(포트 계약, ADR-0317)
-    const running = this.#inFlight.get(input.compensationId);
-    if (running !== undefined) return running;
-    const pending = this.#send(input, promoterId).finally(() => this.#inFlight.delete(input.compensationId));
-    this.#inFlight.set(input.compensationId, pending);
-    return pending;
+    if (existing !== undefined && !isPendingClaim(existing)) return existing;
+    // 송금 전에 DB 유일 행을 잡는다(RV-23): 두 파드가 겹쳐도 이긴 쪽만 포트를 부른다. 계좌 끝 4자리는 하이픈을 뺀 숫자다(123-456-789 → 6789, RV-05)
+    const accountLast4 = input.accountNumber.replace(/-/g, '').slice(-4);
+    const claim = await this.store.claim({
+      compensationId: input.compensationId,
+      orderId: input.orderId,
+      accountId: input.accountId,
+      amount: input.amount,
+      accountLast4,
+      promoterId: promoterId ?? UNKNOWN_PROMOTER,
+      ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
+    });
+    if (!claim.claimed) return this.#awaitSettled(input.compensationId);
+    return this.#send(input, promoterId, accountLast4);
   }
 
-  async #send(input: CompensationTransferRequest, promoterId: string | undefined): Promise<CompensationTransferRecord> {
+  /** 다른 파드가 선점한 송금의 답을 기다린다. 포트를 부르지 않는다 */
+  async #awaitSettled(compensationId: string): Promise<CompensationTransferRecord> {
+    const deadlineAtMs = Date.now() + CLAIM_WAIT_MS;
+    for (;;) {
+      const row = await this.store.findByCompensationId(compensationId);
+      if (row === undefined) throw new Error('배상 송금 기록을 찾지 못했습니다');
+      // 선점이 끝났고, PAID면 미수금 ID까지 붙었는지 본다(이긴 쪽이 그 둘을 차례로 쓴다)
+      const waiting = isPendingClaim(row) || (row.status === 'PAID' && row.receivableId === undefined);
+      if (!waiting || Date.now() >= deadlineAtMs) return row;
+      await sleep(CLAIM_POLL_MS);
+    }
+  }
+
+  async #send(input: CompensationTransferRequest, promoterId: string | undefined, accountLast4: string): Promise<CompensationTransferRecord> {
     const sent = await this.port.request(input);
-    const saved = await this.store.save({
+    const saved = await this.store.settle(input.compensationId, {
       ...sent,
       compensationId: input.compensationId,
       orderId: input.orderId,
@@ -90,8 +154,7 @@ export class CompensationTransfers {
       amount: input.amount,
       promoterId: promoterId ?? UNKNOWN_PROMOTER,
       ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
-      // 계좌 끝 4자리는 하이픈을 뺀 숫자다(123-456-789 → 6789). 원문을 그대로 자르면 DB CHECK(^[0-9]{1,4}$)에 걸린다(RV-05)
-      accountLast4: input.accountNumber.replace(/-/g, '').slice(-4),
+      accountLast4,
     });
     if (saved.status !== 'PAID' || saved.receivableId !== undefined) return saved;
     // PAID일 때만 미수금 한 행(REQUESTED·FAILED·UNAVAILABLE은 0행). 같은 PAID를 다시 받아도 source_ref 유일로 1행이다

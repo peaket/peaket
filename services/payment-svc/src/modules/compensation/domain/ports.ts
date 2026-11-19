@@ -45,10 +45,25 @@ export interface CompensationTransferStore {
   /** 지급대행 송금 ID로 한 행. 없으면 undefined */
   findByTransferId(transferId: string): Promise<CompensationTransferRecord | undefined>;
   /**
-   * 첫 행을 쓴다. compensation_id 유일 충돌이면 새로 쓰지 않고 있는 행을 돌려준다(같은 멱등 키 = 같은 답).
+   * 송금 전에 compensation_id 행을 선점한다(BAT-425 RV-23). 유일 인덱스로 한 쪽만 claimed=true를 받으므로
+   * 같은 저장소를 보는 두 파드가 겹쳐도 결제사 포트를 부르는 쪽은 하나다.
+   * 이미 행이 있으면 그 행을, 선점했으면 아직 답이 없는 REQUESTED 행(transfer_id가 `claim:`로 시작)을 돌려준다.
    * accountLast4는 필수이고 계좌 원문은 받지 않는다.
    */
-  save(record: CompensationTransferRecord & { readonly accountLast4: string; readonly promoterId: string; readonly eventId?: string }): Promise<CompensationTransferRecord>;
+  claim(record: {
+    readonly compensationId: string;
+    readonly orderId: string;
+    readonly accountId: string;
+    readonly amount: number;
+    readonly accountLast4: string;
+    readonly promoterId: string;
+    readonly eventId?: string;
+  }): Promise<{ readonly record: CompensationTransferRecord; readonly claimed: boolean }>;
+  /**
+   * 선점한 행에 포트 답을 쓴다. 그사이 다른 파드가 먼저 썼으면 그 행을 그대로 돌려준다(같은 멱등 키 = 같은 답).
+   * 이미 답이 있는 행은 덮지 않는다.
+   */
+  settle(compensationId: string, record: CompensationTransferRecord & { readonly accountLast4: string; readonly promoterId: string; readonly eventId?: string }): Promise<CompensationTransferRecord>;
   /** PAID 뒤 미수금 ID를 한 번만 적는다(이미 있으면 그대로). 바뀐 행을 돌려준다 */
   attachReceivable(compensationId: string, receivableId: string): Promise<CompensationTransferRecord>;
 }

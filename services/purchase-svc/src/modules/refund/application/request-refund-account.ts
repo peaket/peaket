@@ -2,7 +2,8 @@
 // 결제자 본인·REFUND_PENDING·refund_account_required_at 있음·refund_attempt < 3 [가정]일 때만 받는다. 재인증 op REFUND_ACCOUNT·act FAN_HIGH_RISK.
 // 차례: 본인·상태 확인 → 재인증(모든 확인 뒤에만 jti를 잡는다) → 행 잠금 안에서 시도 1 올리고 커밋 → 결제사 취소(새 멱등키 cancel-{id}-a{n}) → 답 반영.
 // 계좌는 이 호출 안에서만 쓰고 저장·로그·사건·Outbox·지표 어디에도 남기지 않는다(POL-014).
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { idempotencyKeyReused } from '@peaket/platform';
 import { refundAccountShape } from '@peaket/validation/refund-account';
 import {
   RefundAccountAttemptsExceeded,
@@ -94,8 +95,9 @@ export class RequestRefundAccount {
       if (!passed) throw new ReauthRequired();
     }
     // 같은 Idempotency-Key의 다시 부름: 첫 답(202 REFUNDED·REFUND_PENDING, 422 계좌 거절·업무 거절)을 그대로 준다.
-    // 상태 확인보다 먼저 본다. 첫 답이 CANCEL_PENDING이면 clearWaiting이 계좌 대기 표시를 지워 다시 202를 줄 수 없기 때문이다
-    const replayed = this.#replayOf(record, i);
+    // 상태 확인보다 먼저 본다. 첫 답이 CANCEL_PENDING이면 clearWaiting이 계좌 대기 표시를 지워 다시 202를 줄 수 없기 때문이다.
+    // 같은 키에 다른 본문(다른 requestHash)이면 422 idempotency-key-reused다(RV-24)
+    const replayed = await this.#replayOf(record, i);
     if (replayed !== undefined) return replayed;
     this.#assertPending(record);
     const oldAttempt = record.refundAttempt ?? 0;
@@ -132,39 +134,61 @@ export class RequestRefundAccount {
       deadlineMs: CANCEL_DEADLINE_MS,
     });
     if (payment === 'CANCELLED') {
-      await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs });
-      await this.#remember(i, attempt.refundAmount, 'REFUNDED', nowMs);
+      // 상태 전이와 답을 한 문장으로 쓴다(RV-24). 재시작·다른 파드에서도 같은 키가 같은 202를 재생한다
+      await this.o.writes.updateStatus({ cancellationId: i.cancellationId, status: 'REFUNDED', nowMs, answer: { idempotencyKey: i.idempotencyKey, answer: 'REFUNDED' } });
+      this.#rememberLocal(i, attempt.refundAmount, 'REFUNDED');
       this.o.signals?.inc('refunded');
       return { cancellationId: i.cancellationId, status: 'REFUNDED', refundAmount: attempt.refundAmount };
     }
     if (payment === 'REFUND_ACCOUNT_REQUIRED') {
-      // 계좌 대기 유지: 표시를 지우지 않고 다음 재시도 시각도 비운다. 팬은 다른 계좌로 새 시도를 낼 수 있다
-      await this.#remember(i, attempt.refundAmount, 'REFUND_ACCOUNT_REQUIRED', nowMs);
+      // 계좌 대기 유지: 표시를 지우지 않고 다음 재시도 시각도 비운다. 팬은 다른 계좌로 새 시도를 낼 수 있다.
+      // 상태 전이가 없으므로 답만 한 번에 쓴다(단일 쓰기). 재생은 상태·계좌 대기로도 가를 수 있다
+      await this.o.writes.saveAnswer?.({ cancellationId: i.cancellationId, idempotencyKey: i.idempotencyKey, answer: 'REFUND_ACCOUNT_REQUIRED', nowMs });
+      this.#rememberLocal(i, attempt.refundAmount, 'REFUND_ACCOUNT_REQUIRED');
       this.o.signals?.inc('rejected');
       throw new RefundAccountRequiredAgain();
     }
     if (payment === 'REJECTED') {
-      await this.o.writes.clearWaiting({ cancellationId: i.cancellationId, nowMs, lastError: 'REJECTED' });
-      await this.o.writes.markFailed({ cancellationId: i.cancellationId, attempts: attempt.retryAttempts + 1, lastError: 'REJECTED', nowMs });
-      await this.#remember(i, attempt.refundAmount, 'REJECTED', nowMs);
+      // 계좌 대기 지우기·CS '환급 실패' 표시·답을 한 문장으로 쓴다(RV-24)
+      await this.o.writes.markFailed({ cancellationId: i.cancellationId, attempts: attempt.retryAttempts + 1, lastError: 'REJECTED', nowMs, answer: { idempotencyKey: i.idempotencyKey, answer: 'REJECTED' } });
+      this.#rememberLocal(i, attempt.refundAmount, 'REJECTED');
       this.o.signals?.inc('rejected');
       throw new RefundAccountRejected();
     }
-    // PENDING·UNKNOWN: 계좌 대기 표시를 지우고 1분 [가정] 뒤 다시 본다. 같은 시도의 재시도는 같은 멱등키를 쓴다
-    await this.o.writes.clearWaiting({ cancellationId: i.cancellationId, nextRefundAtMs: nowMs + REFUND_ACCOUNT_RETRY_DELAY_MS, lastError: payment, nowMs });
-    await this.#remember(i, attempt.refundAmount, 'REFUND_PENDING', nowMs);
+    // PENDING·UNKNOWN: 계좌 대기 표시를 지우고 1분 [가정] 뒤 다시 본다. 같은 시도의 재시도는 같은 멱등키를 쓴다.
+    // 답도 같은 문장에서 쓴다(RV-24)
+    await this.o.writes.clearWaiting({ cancellationId: i.cancellationId, nextRefundAtMs: nowMs + REFUND_ACCOUNT_RETRY_DELAY_MS, lastError: payment, nowMs, answer: { idempotencyKey: i.idempotencyKey, answer: 'REFUND_PENDING' } });
+    this.#rememberLocal(i, attempt.refundAmount, 'REFUND_PENDING');
     this.o.signals?.inc('pending');
     return { cancellationId: i.cancellationId, status: 'REFUND_PENDING', refundAmount: attempt.refundAmount };
   }
 
-  /** 저장한 답(DB 행 우선, 단위·시험 대역은 프로세스 안 표)을 202·422로 되돌린다 */
-  #replayOf(record: CancellationRecord, i: RequestRefundAccountInput): RequestRefundAccountResult | undefined {
-    if (record.refundAccountIdemKey === i.idempotencyKey && record.refundAccountAnswer !== undefined) {
-      return this.#answerOf(record.refundAccountAnswer, i.cancellationId, record.refundAmount);
-    }
+  /**
+   * 저장한 답(DB 행 우선, 단위·시험 대역은 프로세스 안 표)을 202·422로 되돌린다.
+   * 같은 키가 맞으면 저장한 requestHash와 현재 지문을 먼저 견주고, 다르면 422 idempotency-key-reused다(RV-24).
+   * 답 칸이 빈 끊긴 창은 상태에서 되돌릴 수 있는 REFUNDED만 재생한다(다른 답은 저장이 상태 전이와 같은 문장이라 이 창이 없다)
+   */
+  async #replayOf(record: CancellationRecord, i: RequestRefundAccountInput): Promise<RequestRefundAccountResult | undefined> {
+    const keyed = record.refundAccountIdemKey === i.idempotencyKey;
     const local = this.#answers.get(`${i.accountId}:${i.idempotencyKey}`);
-    if (local === undefined || local.cancellationId !== i.cancellationId) return undefined;
-    return this.#answerOf(local.answer, local.cancellationId, local.refundAmount);
+    const localHit = local !== undefined && local.cancellationId === i.cancellationId;
+    if (!keyed && !localHit) {
+      // 키를 적지 않는 옛 저장소(메모리 대역)에서도 REFUNDED·시도>0은 같은 키의 성공 답으로 재생한다.
+      // 실제 저장소는 refund_account_idem_key로 가르므로 새 키는 여기 오지 않는다
+      if (record.refundAccountIdemKey === undefined && record.state === 'REFUNDED' && (record.refundAttempt ?? 0) > 0) {
+        return { cancellationId: i.cancellationId, status: 'REFUNDED', refundAmount: record.refundAmount };
+      }
+      return undefined;
+    }
+    if (i.requestHash !== undefined) {
+      const stored = await this.o.writes.requestHashOf?.({ accountRef: i.accountId, key: i.idempotencyKey, operation: 'REFUND_ACCOUNT' });
+      if (stored !== undefined && !sameHash(stored, i.requestHash)) throw idempotencyKeyReused();
+    }
+    if (keyed && record.refundAccountAnswer !== undefined) return this.#answerOf(record.refundAccountAnswer, i.cancellationId, record.refundAmount);
+    if (localHit) return this.#answerOf(local.answer, local.cancellationId, local.refundAmount);
+    // 답 칸이 빈 끊긴 창(이전 판·주입 시험): REFUNDED는 상태만으로 같은 답임을 알 수 있다
+    if (keyed && record.state === 'REFUNDED') return { cancellationId: i.cancellationId, status: 'REFUNDED', refundAmount: record.refundAmount };
+    return undefined;
   }
 
   #answerOf(answer: RefundAccountAnswer, cancellationId: string, refundAmount: number): RequestRefundAccountResult {
@@ -173,12 +197,17 @@ export class RequestRefundAccount {
     throw new RefundAccountRejected();
   }
 
-  async #remember(i: RequestRefundAccountInput, refundAmount: number, answer: RefundAccountAnswer, nowMs: number): Promise<void> {
+  /** 이 프로세스 안의 답 재생 표. 운영 재생은 상태 전이와 같은 문장에서 쓴 DB 답이 맡는다 */
+  #rememberLocal(i: RequestRefundAccountInput, refundAmount: number, answer: RefundAccountAnswer): void {
     this.#answers.set(`${i.accountId}:${i.idempotencyKey}`, { cancellationId: i.cancellationId, answer, refundAmount });
-    await this.o.writes.saveAnswer?.({ cancellationId: i.cancellationId, idempotencyKey: i.idempotencyKey, answer, nowMs });
   }
 
   #assertPending(record: CancellationRecord): void {
     if (record.state !== 'REFUND_PENDING' || record.refundAccountRequired !== true) throw new RefundAccountNotPending();
   }
+}
+
+/** 저장한 지문과 현재 지문이 같은가(길이가 다르면 timingSafeEqual이 던지므로 먼저 본다) */
+function sameHash(stored: Uint8Array, current: Uint8Array): boolean {
+  return stored.length === current.length && timingSafeEqual(Buffer.from(stored), Buffer.from(current));
 }

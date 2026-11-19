@@ -207,18 +207,35 @@ export interface RefundAccountWrites {
   >;
   /**
    * 계좌 대기 표시를 지운다(REFUND_PENDING만). nextRefundAtMs가 있으면 다음 재시도 시각도 쓴다(결과 모름 1분 [가정]).
-   * 계좌 거절·업무 거절은 부르는 쪽이 markRefundFailed를 이어 부른다
+   * answer가 있으면 그 답을 같은 문장(같은 트랜잭션)에서 쓴다(RV-24). 계좌 거절·업무 거절은 부르는 쪽이 markFailed를 이어 부른다
    */
-  clearWaiting(q: { readonly cancellationId: string; readonly nextRefundAtMs?: number; readonly lastError?: string; readonly nowMs: number }): Promise<void>;
-  /** 결제사가 환급했다: REFUND_PENDING 행을 REFUNDED로 바꾼다(주문 전이는 CancellationWrites.updateStatus와 같은 규칙) */
-  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<boolean | void>;
-  /** 결제사 업무 거절: 계좌 대기 표시를 지운 뒤 CS '환급 실패' 대상 표시(refund_failed_at)를 남긴다 */
-  markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
+  clearWaiting(q: {
+    readonly cancellationId: string;
+    readonly nextRefundAtMs?: number;
+    readonly lastError?: string;
+    readonly nowMs: number;
+    readonly answer?: RefundAccountAnswerWrite;
+  }): Promise<void>;
+  /** 결제사가 환급했다: REFUND_PENDING 행을 REFUNDED로 바꾼다(주문 전이는 CancellationWrites.updateStatus와 같은 규칙). answer는 같은 문장에서 쓴다 */
+  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number; readonly answer?: RefundAccountAnswerWrite }): Promise<boolean | void>;
+  /** 결제사 업무 거절: 계좌 대기 표시를 지운 뒤 CS '환급 실패' 대상 표시(refund_failed_at)를 한 문장으로 남긴다(answer 포함) */
+  markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number; readonly answer?: RefundAccountAnswerWrite }): Promise<boolean | void>;
   /**
-   * 같은 키의 첫 답을 취소 행에 적는다(0031, BAT-425 RV-03). 없으면 메모리 답 재생만 한다(단위·시험 대역).
-   * 계좌 원문이 아닌 상태 이름표만 쓴다
+   * 같은 키의 첫 답을 취소 행에 적는다(0031, BAT-425 RV-03). 상태 전이가 없는 422 답(REFUND_ACCOUNT_REQUIRED)에 쓴다.
+   * 없으면 메모리 답 재생만 한다(단위·시험 대역). 계좌 원문이 아닌 상태 이름표만 쓴다
    */
   saveAnswer?(q: { readonly cancellationId: string; readonly idempotencyKey: string; readonly answer: RefundAccountAnswer; readonly nowMs: number }): Promise<void>;
+  /**
+   * 같은 계정·작업(REFUND_ACCOUNT)·키의 멱등 기록 지문(플랫폼 IdempotencyStore, order_idempotency).
+   * 같은 키의 답을 재생하기 전에 현재 지문과 견주어 다르면 422 idempotency-key-reused를 던진다(RV-24). 없으면(대역) 견주지 않는다
+   */
+  requestHashOf?(q: { readonly accountRef: string; readonly key: string; readonly operation: 'REFUND_ACCOUNT' }): Promise<Uint8Array | undefined>;
+}
+
+/** 상태 전이와 같은 문장에서 쓰는 계좌 다시 받기 답(취소 행의 Idempotency-Key와 그 답) */
+export interface RefundAccountAnswerWrite {
+  readonly idempotencyKey: string;
+  readonly answer: RefundAccountAnswer;
 }
 
 // ---- 배상 기록·계좌 입력·송금(BAT-425 GAT-130 잔여, ADR-0317) ----

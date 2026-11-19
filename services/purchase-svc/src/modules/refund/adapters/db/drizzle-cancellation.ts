@@ -150,7 +150,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     });
   }
 
-  async updateStatus(q: { readonly cancellationId: string; readonly status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; readonly nowMs: number }): Promise<boolean> {
+  async updateStatus(q: { readonly cancellationId: string; readonly status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; readonly nowMs: number; readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer } }): Promise<boolean> {
     return this.database.transaction(async (tx) => {
       const [row] = await tx
         .select({ orderId: orderCancellation.orderId })
@@ -171,7 +171,13 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
             : and(ne(orderCancellation.status, 'REFUNDED'), ne(orderCancellation.status, 'VOIDED'));
       const updated = await tx
         .update(orderCancellation)
-        .set({ status: q.status, statusChangedAt: new Date(q.nowMs), nextRefundAt: null })
+        .set({
+          status: q.status,
+          statusChangedAt: new Date(q.nowMs),
+          nextRefundAt: null,
+          // 답은 상태 전이와 같은 문장에서 쓴다(재시작·다른 파드 재생, RV-24)
+          ...(q.answer === undefined ? {} : { refundAccountAnswer: q.answer.answer }),
+        })
         .where(guard ? and(eq(orderCancellation.id, q.cancellationId), guard) : eq(orderCancellation.id, q.cancellationId))
         .returning({ id: orderCancellation.id });
       if (updated.length === 0) return false;
@@ -209,17 +215,20 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     return updated.length > 0;
   }
 
-  /** REFUND_PENDING 행에만 CS 처리함 대상 표시를 남긴다(BAT-420 A3) */
-  async markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean> {
+  /** REFUND_PENDING 행에만 CS 처리함 대상 표시를 남긴다(BAT-420 A3). 계좌 대기 표시와 답은 같은 문장에서 쓴다(RV-24) */
+  async markRefundFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number; readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer } }): Promise<boolean> {
     const updated = await this.database.db
       .update(orderCancellation)
       .set({
         status: 'REFUND_PENDING',
         refundAttempts: q.attempts,
         nextRefundAt: null,
+        // 계좌 거절 뒤의 업무 거절은 계좌 대기를 풀고 CS '환급 실패'로 넘긴다
+        refundAccountRequiredAt: null,
         refundFailedAt: new Date(q.nowMs),
         refundLastError: q.lastError,
         statusChangedAt: new Date(q.nowMs),
+        ...(q.answer === undefined ? {} : { refundAccountAnswer: q.answer.answer }),
       })
       .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.status, 'REFUND_PENDING')))
       .returning({ id: orderCancellation.id });
@@ -354,8 +363,14 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.refundAccountIdemKey, q.idempotencyKey)));
   }
 
-  /** 계좌 대기 표시를 지운다(REFUND_PENDING만). 결과 모름이면 다음 재시도 시각을 함께 쓴다(BAT-425, ADR-0316 결정 4) */
-  async clearWaiting(q: { readonly cancellationId: string; readonly nextRefundAtMs?: number; readonly lastError?: string; readonly nowMs: number }): Promise<void> {
+  /** 계좌 대기 표시를 지운다(REFUND_PENDING만). 결과 모름이면 다음 재시도 시각을 함께 쓰고, 답도 같은 문장에서 쓴다(BAT-425 RV-24) */
+  async clearWaiting(q: {
+    readonly cancellationId: string;
+    readonly nextRefundAtMs?: number;
+    readonly lastError?: string;
+    readonly nowMs: number;
+    readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer };
+  }): Promise<void> {
     await this.database.db
       .update(orderCancellation)
       .set({
@@ -363,13 +378,26 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         nextRefundAt: q.nextRefundAtMs === undefined ? null : new Date(q.nextRefundAtMs),
         ...(q.lastError !== undefined ? { refundLastError: q.lastError } : {}),
         statusChangedAt: new Date(q.nowMs),
+        ...(q.answer === undefined ? {} : { refundAccountAnswer: q.answer.answer }),
       })
       .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.status, 'REFUND_PENDING')));
   }
 
-  /** RefundAccountWrites.markFailed: 계좌 다시 받기의 업무 거절을 기존 CS '환급 실패' 표시로 잇는다 */
-  async markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean> {
+  /** RefundAccountWrites.markFailed: 계좌 다시 받기의 업무 거절을 기존 CS '환급 실패' 표시로 잇는다(답도 같은 문장) */
+  async markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number; readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer } }): Promise<boolean> {
     return this.markRefundFailed(q);
+  }
+
+  /**
+   * 같은 계정·작업·키의 멱등 기록 지문(플랫폼 IdempotencyStore, order_idempotency). 없으면 undefined.
+   * 같은 키의 답을 재생하기 전에 현재 지문과 견주어 다르면 422 idempotency-key-reused다(RV-24)
+   */
+  async requestHashOf(q: { readonly accountRef: string; readonly key: string; readonly operation: 'REFUND_ACCOUNT' }): Promise<Uint8Array | undefined> {
+    const r = await this.database.db.execute(sql`
+      select request_hash from order_idempotency
+      where account_ref = ${q.accountRef} and operation = ${q.operation} and idempotency_key = ${q.key}::uuid
+      limit 1`);
+    return (r.rows[0] as { request_hash: Buffer } | undefined)?.request_hash;
   }
 
   async dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]> {

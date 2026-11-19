@@ -151,7 +151,13 @@ export class CancelConfirmedPayment {
       if (query.kind !== 'FOUND') return unknownOf(target);
       const settled = await store.settleConfirmedCancelByQuery(target, parsed.cancellationId, query.balanceAmount, budget, record.attempt ?? 0);
       if (settled.status === 'APPLIED') return { result: 'CANCELLED', cancelledAmount: settled.cancelledAmount };
-      if (settled.status === 'RESEND') return { result: 'REFUND_ACCOUNT_REQUIRED', cancelledAmount: target.cancelledAmount };
+      // 같은 계좌 시도의 재시도(계좌 없음)가 아직 '반영 아님'이면 계좌 대기가 아니라 결과 모름이다(재시도 루프가 같은 시도를 계속 조회한다, RV-21·ADR-0316 결정 4).
+      // 첫 시도(attempt 0)의 계좌 없음은 지금처럼 계좌 대기다: 팬이 계좌 다시 받기 경로로 새 시도를 내야 한다
+      if (settled.status === 'RESEND') {
+        return (record.attempt ?? 0) > 0 && refundAccount === undefined
+          ? { result: 'CANCEL_PENDING', cancelledAmount: target.cancelledAmount }
+          : { result: 'REFUND_ACCOUNT_REQUIRED', cancelledAmount: target.cancelledAmount };
+      }
       return unknownOf(target);
     }
 
