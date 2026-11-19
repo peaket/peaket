@@ -78,6 +78,8 @@ export class MemoryShopOrderStore implements ShopOrderStore {
   readonly eventEntries = new Map<string, Date>();
   /** 쓰기 횟수(시험이 '바뀐 행 없음'을 본다) */
   writes = 0;
+  /** 주문별 쓰기 차례(미커밋 구매자 취소와 미수령 자동 취소를 직렬화한다, RV-29) */
+  readonly #orderLocks = new Map<string, Promise<unknown>>();
 
   constructor(
     readonly productStore: MemoryProductStore,
@@ -132,6 +134,25 @@ export class MemoryShopOrderStore implements ShopOrderStore {
 
   #remember(once: IdempotencyRequest, resultRef: string): void {
     this.idempotency.set(this.#idemKey(once), { hash: Buffer.from(once.requestHash), resultRef });
+  }
+
+  /**
+   * 주문 하나의 쓰기를 차례대로 실행한다(메모리 어댑터의 행 잠금). 구매자 취소와 미수령 자동 취소가
+   * 겹쳐도 앞선 쓰기가 끝난 뒤 다음 쓰기가 상태를 다시 본다(RV-29).
+   */
+  async #withOrderLock<T>(orderId: string, run: () => Promise<T> | T): Promise<T> {
+    const prev = this.#orderLocks.get(orderId) ?? Promise.resolve();
+    const next = prev.then(run, run);
+    const tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#orderLocks.set(orderId, tail);
+    try {
+      return await next;
+    } finally {
+      if (this.#orderLocks.get(orderId) === tail) this.#orderLocks.delete(orderId);
+    }
   }
 
   async products(ids: readonly string[]): Promise<OrderableProduct[]> {
@@ -410,36 +431,39 @@ export class MemoryShopOrderStore implements ShopOrderStore {
   }
 
   async cancelUnclaimed(orderId: string, itemIds: readonly string[], refundId: string, nowMs: number): Promise<RefundRow | undefined> {
-    // 구매자 취소가 진행 중인 항목(활성 환급 자리)은 건너뛴다(RV-03, 이중 환급 0)
-    const busy = new Set([...this.refundItems.values()].filter((c) => c.resolvedAtMs === null).map((c) => c.itemId));
-    const changed = [...this.items.values()].filter((i) => i.orderId === orderId && itemIds.includes(i.itemId) && i.status === 'READY' && !busy.has(i.itemId));
-    if (changed.length === 0) return undefined;
-    for (const i of changed) {
-      i.status = 'CANCELLED';
-      i.cancelReason = UNCLAIMED_REASON;
-    }
-    const amount = changed.reduce((s, i) => s + i.quantity * i.unitAmount, 0);
-    const row: RefundState = {
-      refundId,
-      orderId,
-      paymentId: this.orders.get(orderId)?.paymentId ?? null,
-      amount,
-      reason: UNCLAIMED_REASON,
-      status: 'REQUESTED',
-      createdAtMs: nowMs,
-      alerted: false,
-      kind: 'UNCLAIMED',
-      attempts: 0,
-      nextAtMs: nowMs + REFUND_RETRY_MS,
-      accountRequiredAtMs: null,
-      itemIds: changed.map((i) => i.itemId),
-      failReason: null,
-      resolvedAtMs: null,
-    };
-    this.refunds.set(refundId, row);
-    this.writes++;
-    const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
-    return { ...out };
+    // 구매자 취소(createCancellation)와 같은 주문 잠금 차례를 지킨다(RV-29)
+    return this.#withOrderLock(orderId, () => {
+      // 구매자 취소가 진행 중인 항목(활성 환급 자리)은 건너뛴다(RV-03, 이중 환급 0)
+      const busy = new Set([...this.refundItems.values()].filter((c) => c.resolvedAtMs === null).map((c) => c.itemId));
+      const changed = [...this.items.values()].filter((i) => i.orderId === orderId && itemIds.includes(i.itemId) && i.status === 'READY' && !busy.has(i.itemId));
+      if (changed.length === 0) return undefined;
+      for (const i of changed) {
+        i.status = 'CANCELLED';
+        i.cancelReason = UNCLAIMED_REASON;
+      }
+      const amount = changed.reduce((s, i) => s + i.quantity * i.unitAmount, 0);
+      const row: RefundState = {
+        refundId,
+        orderId,
+        paymentId: this.orders.get(orderId)?.paymentId ?? null,
+        amount,
+        reason: UNCLAIMED_REASON,
+        status: 'REQUESTED',
+        createdAtMs: nowMs,
+        alerted: false,
+        kind: 'UNCLAIMED',
+        attempts: 0,
+        nextAtMs: nowMs + REFUND_RETRY_MS,
+        accountRequiredAtMs: null,
+        itemIds: changed.map((i) => i.itemId),
+        failReason: null,
+        resolvedAtMs: null,
+      };
+      this.refunds.set(refundId, row);
+      this.writes++;
+      const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
+      return { ...out };
+    });
   }
 
   async dueRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
@@ -487,6 +511,17 @@ export class MemoryShopOrderStore implements ShopOrderStore {
       r.resolvedAtMs = nowMs;
       for (const c of this.refundItems.values()) if (c.refundId === refundId) c.resolvedAtMs = nowMs;
     } else if (outcome === 'REJECTED' || outcome === 'REFUND_ACCOUNT_REQUIRED') {
+      // 성공 전 거절이면 취소 효력도 되돌린다(READY, 환급액 0). 새 키로 다시 취소할 수 있다(RV-30)
+      if (r.kind !== 'UNCLAIMED') {
+        for (const id of r.itemIds) {
+          const i = this.items.get(id);
+          if (i && i.status === 'CANCELLED') {
+            i.status = 'READY';
+            i.cancelReason = null;
+            i.refundedAmount = 0;
+          }
+        }
+      }
       r.status = 'REJECTED';
       r.nextAtMs = null;
       r.failReason = o.failReason ?? (outcome === 'REFUND_ACCOUNT_REQUIRED' ? 'REFUND_ACCOUNT_REQUIRED' : 'PG_REJECTED');
@@ -509,37 +544,39 @@ export class MemoryShopOrderStore implements ShopOrderStore {
   }
 
   async createCancellation(once: IdempotencyRequest, i: NewCancellation): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }> {
-    const seen = this.#seen(once);
-    if (seen !== undefined) return { kind: 'replay', resultRef: seen };
-    const detail = this.#owned(i.orderId, i.accountId);
-    if (detail.order.fulfillment === 'WALLET' && i.entryOpensAtMs === undefined) throw entryStarted();
-    const selection = resolveCancelItems(detail, i.itemIds, i.entryOpensAtMs, i.nowMs);
-    for (const item of selection.items) {
-      if ([...this.refundItems.values()].some((c) => c.itemId === item.itemId && c.resolvedAtMs === null)) throw merchCancelNotAllowed();
-    }
-    const row: RefundState = {
-      refundId: i.refundId,
-      orderId: i.orderId,
-      paymentId: detail.order.paymentId,
-      amount: selection.amount,
-      reason: 'USER_CANCEL',
-      status: 'REQUESTED',
-      createdAtMs: i.nowMs,
-      alerted: false,
-      kind: 'USER_CANCEL',
-      attempts: 0,
-      nextAtMs: i.nowMs + REFUND_RETRY_DELAYS_MIN[0] * 60_000,
-      accountRequiredAtMs: null,
-      itemIds: selection.items.map((x) => x.itemId),
-      failReason: null,
-      resolvedAtMs: null,
-    };
-    this.refunds.set(i.refundId, row);
-    for (const id of row.itemIds) this.refundItems.set(`${i.refundId}|${id}`, { refundId: i.refundId, itemId: id, resolvedAtMs: null });
-    this.#remember(once, `cancel:${i.refundId}`);
-    this.writes++;
-    const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
-    return { kind: 'created', refund: { ...out } };
+    return this.#withOrderLock(i.orderId, async () => {
+      const seen = this.#seen(once);
+      if (seen !== undefined) return { kind: 'replay', resultRef: seen };
+      const detail = this.#owned(i.orderId, i.accountId);
+      if (detail.order.fulfillment === 'WALLET' && i.entryOpensAtMs === undefined) throw entryStarted();
+      const selection = resolveCancelItems(detail, i.itemIds, i.entryOpensAtMs, i.nowMs);
+      for (const item of selection.items) {
+        if ([...this.refundItems.values()].some((c) => c.itemId === item.itemId && c.resolvedAtMs === null)) throw merchCancelNotAllowed();
+      }
+      const row: RefundState = {
+        refundId: i.refundId,
+        orderId: i.orderId,
+        paymentId: detail.order.paymentId,
+        amount: selection.amount,
+        reason: 'USER_CANCEL',
+        status: 'REQUESTED',
+        createdAtMs: i.nowMs,
+        alerted: false,
+        kind: 'USER_CANCEL',
+        attempts: 0,
+        nextAtMs: i.nowMs + REFUND_RETRY_DELAYS_MIN[0] * 60_000,
+        accountRequiredAtMs: null,
+        itemIds: selection.items.map((x) => x.itemId),
+        failReason: null,
+        resolvedAtMs: null,
+      };
+      this.refunds.set(i.refundId, row);
+      for (const id of row.itemIds) this.refundItems.set(`${i.refundId}|${id}`, { refundId: i.refundId, itemId: id, resolvedAtMs: null });
+      this.#remember(once, `cancel:${i.refundId}`);
+      this.writes++;
+      const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
+      return { kind: 'created' as const, refund: { ...out } };
+    });
   }
 
   async cancelView(refundId: string): Promise<CancelRowView | undefined> {

@@ -48,6 +48,7 @@ export class RefundResultWriteFailed extends Error {
   constructor(
     readonly cancellationId: string,
     readonly refundAmount: number,
+    readonly outcome: CancelOutcome,
     cause: unknown,
   ) {
     super(cause instanceof Error ? cause.message : '환급 결과를 적지 못했다', { cause });
@@ -88,6 +89,11 @@ export class MerchCancel {
       throw dependencyUnavailable();
     }
     if (payment === undefined) throw dependencyUnavailable();
+    // 다른 주문의 결제 상세면 계좌 필요 판정에 쓰지 않는다(다른 주문 계좌 사용 금지, RV-34)
+    if (payment.orderId !== undefined && payment.orderId.toLowerCase() !== detail.order.orderId.toLowerCase()) {
+      this.d.signals?.cancellation('invalid');
+      throw dependencyUnavailable();
+    }
     if (payment.virtualAccountPaid === true && account === undefined) {
       this.d.signals?.cancellation('invalid');
       throw refundAccountRequired();
@@ -172,7 +178,7 @@ export class MerchCancel {
     } catch (e) {
       this.d.signals?.userRefund('error');
       this.#log.error({ kind: 'merch-cancel-refund-write-failed', cancellationId: refundId, err: e instanceof Error ? e.name : 'unknown' }, '결제사 취소는 나갔는데 환급 결과를 적지 못했다(재시도가 같은 취소 ID로 끝낸다)');
-      throw new RefundResultWriteFailed(refundId, amount, e);
+      throw new RefundResultWriteFailed(refundId, amount, outcome, e);
     }
   }
 

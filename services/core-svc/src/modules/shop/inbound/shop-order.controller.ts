@@ -31,8 +31,8 @@ import { MerchCancel, RefundResultWriteFailed, type CancellationView } from '../
 import { MerchOrdersRead, type PaymentStatusView } from '../application/merch-orders-read.js';
 import { MerchPayment, type PaymentAttemptView } from '../application/merch-payment.js';
 import { MerchReturn } from '../application/merch-return.js';
-import type { AcceptBody } from '../domain/merch-order.js';
-import { shopGuard } from '../application/shop-problems.js';
+import { refundAccountRequired, type AcceptBody } from '../domain/merch-order.js';
+import { shopGuard, toPlatformProblem } from '../application/shop-problems.js';
 
 const NoBody = z.null();
 
@@ -121,8 +121,12 @@ export class ShopOrderController {
     try {
       return await shopGuard(() => this.cancelOrder.run(me.accountId, me.sessionId, p.orderId, { itemIds: body.itemIds, refundAccount: body.refundAccount }, once, token));
     } catch (e) {
-      // 결제사 취소는 성공했는데 환급 결과 DB 쓰기만 실패했다. 202 REFUND_PENDING으로 답하고 재시도가 같은 취소 ID로 끝낸다(RV-07)
-      if (e instanceof RefundResultWriteFailed) return { cancellationId: e.cancellationId, status: 'REFUND_PENDING', refundAmount: e.refundAmount };
+      // 계좌 필요·PG 거절 outcome의 DB 실패는 422로 답해 422를 숨기지 않는다(RV-35).
+      // 결제사 취소 성공(CANCELLED·CANCEL_PENDING·UNKNOWN)의 DB 실패만 202 REFUND_PENDING이고 재시도가 끝낸다.
+      if (e instanceof RefundResultWriteFailed) {
+        if (e.outcome === 'REFUND_ACCOUNT_REQUIRED' || e.outcome === 'REJECTED') throw toPlatformProblem(refundAccountRequired());
+        return { cancellationId: e.cancellationId, status: 'REFUND_PENDING', refundAmount: e.refundAmount };
+      }
       throw e;
     }
   }

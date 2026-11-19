@@ -669,6 +669,9 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
   async cancelUnclaimed(orderId: string, itemIds: readonly string[], refundId: string, nowMs: number): Promise<RefundRow | undefined> {
     return this.db.transaction(async (tx) => {
       const now = new Date(nowMs);
+      // 구매자 취소(createCancellation)와 같은 주문 행 잠금으로 줄을 세운다(RV-29).
+      // 구매자의 미커밋 환급 행·자리는 이 잠금이 풀린 뒤의 문장에서 보인다.
+      await tx.execute(sql`select id from merch_order where id = ${orderId} for update`);
       // 교환권 확인(READY → PICKED_UP)과 같은 항목에 겹쳐도 READY일 때만 바꾸므로 하나만 이긴다(docs/data.md §5).
       // 구매자 취소가 진행 중인 항목(활성 merch_refund_item)은 건너뛴다(RV-03, 이중 환급 0)
       const changed = rowsOf(
@@ -733,6 +736,12 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
       } else if (outcome === 'REJECTED' || outcome === 'REFUND_ACCOUNT_REQUIRED') {
         const fail = o.failReason ?? (outcome === 'REFUND_ACCOUNT_REQUIRED' ? 'REFUND_ACCOUNT_REQUIRED' : 'PG_REJECTED');
         const account = outcome === 'REFUND_ACCOUNT_REQUIRED' ? sql`, account_required_at = ${new Date(o.accountRequiredAtMs ?? nowMs)}` : sql``;
+        // 성공 전 거절이면 취소 효력도 되돌린다(READY, 환급액 0). 새 키로 다시 취소할 수 있다(RV-30)
+        if (kind !== 'UNCLAIMED') {
+          await tx.execute(sql`
+            update merch_order_item set status = 'READY', cancel_reason = null, refunded_amount = 0
+            where id = any(${ids}::uuid[]) and status = 'CANCELLED'`);
+        }
         await tx.execute(sql`update merch_refund set status = 'REJECTED', next_at = null, fail_reason = ${fail}, updated_at = ${now} ${attempts} ${alerted} ${account} where id = ${refundId}`);
         await tx.execute(sql`update merch_refund_item set resolved_at = ${now} where refund_id = ${refundId} and resolved_at is null`);
       } else {
