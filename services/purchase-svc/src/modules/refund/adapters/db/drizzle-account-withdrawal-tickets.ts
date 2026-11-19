@@ -12,7 +12,8 @@ import type { WithdrawalTicket, WithdrawalTicketStore } from '../../domain/accou
 /** 읽는 주문 상태: 결제가 끝나 표를 가진 주문(취소가 일부 끝난 주문 포함) */
 const UNUSED_ORDER_STATUSES = sql.raw(`o.status in ('CONFIRMED', 'PARTIALLY_REFUNDED')`);
 
-type Row = { ticket_id: string; order_id: string; event_id: string; unit_price: number | string; created_at: Date };
+// drizzle-orm/node-postgres의 tx.execute는 TIMESTAMPTZ를 Date가 아니라 글이나 Date로 돌려준다(같은 저장소의 drizzle-event-refund-targets.ts와 같은 꼴로 읽는다)
+type Row = { ticket_id: string; order_id: string; event_id: string; unit_price: number | string; created_at: Date | string };
 
 export class DrizzleWithdrawalTickets implements WithdrawalTicketStore {
   constructor(private readonly database: Database) {}
@@ -39,7 +40,7 @@ export class DrizzleWithdrawalTickets implements WithdrawalTicketStore {
       if (isTransientError(e)) throw new WithdrawalOrdersUnavailable(e);
       throw e;
     }
-    return rows.map((row) => ({ ticketId: row.ticket_id, orderId: row.order_id, eventId: row.event_id, ticketPrice: Number(row.unit_price), bookedAtMs: row.created_at.getTime() }));
+    return rows.map((row) => ({ ticketId: row.ticket_id, orderId: row.order_id, eventId: row.event_id, ticketPrice: Number(row.unit_price), bookedAtMs: new Date(row.created_at).getTime() }));
   }
 
   /** 그 계정 주문의 order_cancellation 가운데 사유 ACCOUNT_WITHDRAWAL이고 상태가 REQUESTED·REFUND_PENDING인 표 수 */
