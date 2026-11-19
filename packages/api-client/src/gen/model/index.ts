@@ -901,6 +901,7 @@ export * from './problemFraudHoldState';
 export * from './problemLock';
 export * from './problemRemoveReason';
 export * from './problemResponse';
+export * from './problemUnusedTickets';
 export * from './productionCard';
 export * from './productionCardBadgesItem';
 export * from './productionCardSaleStatus';

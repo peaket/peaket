@@ -1,6 +1,8 @@
 // 받는 층: 팬 탈퇴(openapi DELETE /v1/identity/account, docs/features/identity.md §8 '탈퇴의 첫 구현', BUILD_ORDER BOT-030, FR-017, POL-033).
 // gw-fan이 넘긴 신원(계정·세션)과 재인증 토큰 머리(X-Reauth-Token, docs/api/guidelines.md 재인증 토큰)를 쓴다. 응답은 캐시하지 않는다.
 // 끝냈으면 204, 탈퇴 참여자를 기다려 미뤘으면 본문 없는 202다(BUILD_ORDER PRF-169, ADR-0284).
+// 결제한 미사용 티켓이 있으면 409 withdrawal-confirmation-required의 extensions.unusedTickets로 환급 예상을 보이고(PRF-174, I-T26),
+// 견적을 받지 못하면 503 dependency-unavailable과 Retry-After 1초 [가정]다. 두 409 모두 재인증 토큰을 쓰지 않는다.
 import { Controller, Delete, Get, Headers, HttpCode, Param, Res } from '@nestjs/common';
 import { ContractBody, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
@@ -53,6 +55,28 @@ export class AccountController {
           title: '탈퇴 전에 확인해 주세요',
           extensions: { fraudHold: { state: e.fraudHold.state, until: new Date(e.fraudHold.until).toISOString() } },
         });
+      }
+      // 결제한 미사용 티켓이 있으면 409 '탈퇴 전 확인'과 unusedTickets(수·결제 금액·공제액·환급 예상액·양도 가능 수·마감 뒤 환급 수, identity §8 '미사용 티켓 확인과 취소')
+      if (e instanceof AccountError && e.code === 'CONFIRMATION_REQUIRED' && e.unusedTickets) {
+        throw new ProblemError({
+          type: 'withdrawal-confirmation-required',
+          status: 409,
+          title: '탈퇴 전에 확인해 주세요',
+          extensions: {
+            unusedTickets: {
+              count: e.unusedTickets.count,
+              ticketAmount: e.unusedTickets.ticketAmount,
+              deductionAmount: e.unusedTickets.deductionAmount,
+              refundAmount: e.unusedTickets.refundAmount,
+              transferableCount: e.unusedTickets.transferableCount,
+              deferredRefundCount: e.unusedTickets.deferredRefundCount,
+            },
+          },
+        });
+      }
+      // 견적을 받지 못했으면 상태·토큰을 바꾸지 않고 503과 Retry-After 1초 [가정](identity §8 '미사용 티켓 확인과 취소')
+      if (e instanceof AccountError && e.code === 'DEPENDENCY_UNAVAILABLE') {
+        throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '잠시 뒤 다시 시도해 주세요', retryAfterSeconds: 1 });
       }
       // 토큰이 없거나 만료·재사용이거나 세션·작업 묶음이 맞지 않으면 403 reauth-required(이유는 응답에 싣지 않는다)
       if (e instanceof AccountError) throw new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });

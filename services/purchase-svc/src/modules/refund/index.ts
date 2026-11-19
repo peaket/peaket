@@ -76,6 +76,10 @@ export { GrpcTicketCancellations, type GrpcTicketCancellationsOptions } from './
 export { GrpcPaymentCancellations, type GrpcPaymentCancellationsOptions } from './adapters/grpc-payment-cancellations.js';
 export { RedisSeatReturnNotices } from './adapters/redis-seat-returns.js';
 export { CancelTicket, zeroDeductionFor, type CancelTicketInput } from './application/cancel-ticket.js';
+// 탈퇴 참여자의 결제한 미사용 티켓(BAT-013, I-T26, payment §4.1 '미사용 티켓 견적'·'미사용 티켓 취소')
+export { TRANSFER_CLOSE_BEFORE_START_MS, withdrawalTicketCancellationId, type WithdrawalTicket, type WithdrawalTicketStore } from './domain/account-withdrawal-tickets.js';
+export { AccountWithdrawalTickets, type AccountWithdrawalTicketsDeps } from './application/account-withdrawal-tickets.js';
+export { DrizzleWithdrawalTickets } from './adapters/db/drizzle-account-withdrawal-tickets.js';
 export { RefundModule, type RefundModuleDeps } from './refund.module.js';
 export { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
 // BAT-415-reauth(팬 취소의 재인증 확인, docs/features/transfer-refund.md §3.1)

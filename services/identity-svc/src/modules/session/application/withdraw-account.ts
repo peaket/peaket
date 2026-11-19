@@ -4,6 +4,9 @@
 // 탈퇴 참여자와 탈퇴 미룸(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', ADR-0284, BUILD_ORDER PRF-169, I-T84): 참여자가 있으면
 // 재인증 토큰을 쓰는 트랜잭션에서 계정을 WITHDRAWAL_PENDING(WITHDRAWAL)으로 먼저 커밋하고, 트랜잭션 밖에서 참여자를 부른다.
 // 모두 DONE이면 끝내기 트랜잭션 뒤 204, 하나라도 PENDING이거나 답하지 못하면 202다(다시 하기 고리 retry-pending-withdrawals.ts가 끝낸다).
+// 결제한 미사용 티켓(identity §8 '미사용 티켓 확인과 취소', I-T26, ADR-0284 결정 7): 확인(confirmCancelUnusedTickets)이 참이 아닌 요청은
+// 미룸 표시 전에 참여자의 견적을 부른다(동시에, 데드라인 2초 [가정]). 견적이 실패하면 503(DEPENDENCY_UNAVAILABLE)이고, 표가 있으면 409로 환급 예상을 보인다.
+// 두 409(보관·미사용 티켓) 모두 재인증 토큰을 쓰지 않아 같은 토큰으로 다시 보낼 수 있다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { ACCOUNT_ERASER, type AccountEraser, FRAUD_HOLDS, type FraudHolds, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_STORE, type SessionStore, type SessionTx } from '../domain/ports.js';
@@ -12,8 +15,10 @@ import { WITHDRAWAL_REAUTH_ACT } from '../domain/session.js';
 import {
   WITHDRAWAL_NEXT_CHECK_MS,
   WITHDRAWAL_PARTICIPANTS,
+  WITHDRAWAL_QUOTE_DEADLINE_MS,
   WITHDRAWAL_REQUEST_DEADLINE_MS,
   WITHDRAWAL_SIGNALS,
+  type UnusedTicketsQuote,
   type WithdrawalParticipant,
   type WithdrawalPath,
   type WithdrawalSignals,
@@ -163,6 +168,9 @@ export class WithdrawAccount {
     // 미룸 표시보다 먼저 본다(identity §8 '차례')
     const hold = this.holds ? await this.holds.activeHold(accountId, now) : null;
     if (hold && i.body.acknowledgeFraudHold !== true) throw new AccountError('CONFIRMATION_REQUIRED', '탈퇴 전 대조값 보관 안내', hold);
+    // 미사용 티켓 확인 409(견적)도 미룸 표시보다 먼저다(identity §8 '차례'). 확인을 지난 요청은 견적을 다시 부르지 않고,
+    // 미룬 계정에 다시 요청해도 확인을 한 번 더 받는다(미룸 표시를 지난 요청은 고리가 취소를 이어 간다)
+    await this.#quoteUnusedTickets(accountId, i.body.confirmCancelUnusedTickets);
     // 탈퇴 사건에 실을 pid는 트랜잭션을 열기 전에 읽는다: 계정을 잠근 채 DB 연결을 하나 더 빌리지 않게(activeHoldOf와 같은 까닭, 재검토 낮음 1).
     // 그 사이에 끝난 첫 본인확인의 pid는 빠질 수 있지만, 그 pid로 받은 토큰이 없어 대기열 키도 아직 없다(BOT-037)
     const pids = await this.eraser.pidsOf(accountId);
@@ -207,4 +215,54 @@ export class WithdrawAccount {
       return { outcome: 'DEFERRED' };
     }
   }
+
+  /**
+   * 미사용 티켓 환급 안내(409)를 위한 견적(identity §8 '미사용 티켓 확인과 취소' 확인(견적), I-T26 ①).
+   * 확인을 지난 요청은 부르지 않는다. 견적을 낼 수 있는 참여자를 동시에 부르고 값을 더한다(지금은 purchase 하나).
+   * 하나라도 실패하면 503이고, 표가 1장 이상이면 409다. 계정 상태를 바꾸지 않고 재인증 토큰도 쓰지 않는다
+   */
+  async #quoteUnusedTickets(accountId: string, confirmed?: boolean): Promise<void> {
+    if (confirmed === true) return;
+    const quoters = (this.participants ?? []).filter((p) => typeof p.unusedTickets === 'function');
+    if (quoters.length === 0) return;
+    let quotes: Array<UnusedTicketsQuote | undefined>;
+    try {
+      quotes = await Promise.all(quoters.map((p) => p.unusedTickets!(accountId, { deadlineMs: WITHDRAWAL_QUOTE_DEADLINE_MS })));
+    } catch (err) {
+      this.signals?.ticketQuote?.('error');
+      this.logger?.warn({ err, accountId }, '탈퇴 전 미사용 티켓 견적을 받지 못했다(탈퇴를 진행하지 않는다)');
+      throw new AccountError('DEPENDENCY_UNAVAILABLE', '미사용 티켓 견적을 받지 못했다');
+    }
+    const sums = { count: 0, ticketAmount: 0, deductionAmount: 0, refundAmount: 0, transferableCount: 0, deferredRefundCount: 0 };
+    for (const q of quotes) {
+      if (!q) continue;
+      // 참여자가 모르는 모양(음수·정수가 아님)을 주면 확인 없이 지나가지 않는다(견적 실패와 같게 503)
+      if (!isUnusedTicketsQuote(q)) {
+        this.signals?.ticketQuote?.('error');
+        this.logger?.warn({ accountId, quote: q }, '탈퇴 참여자가 모르는 모양의 미사용 티켓 견적을 줬다(탈퇴를 진행하지 않는다)');
+        throw new AccountError('DEPENDENCY_UNAVAILABLE', '미사용 티켓 견적을 받지 못했다');
+      }
+      sums.count += q.count;
+      sums.ticketAmount += q.ticketAmount;
+      sums.deductionAmount += q.deductionAmount;
+      sums.refundAmount += q.refundAmount;
+      sums.transferableCount += q.transferableCount;
+      sums.deferredRefundCount += q.deferredRefundCount;
+    }
+    if (sums.count > 0) {
+      this.signals?.ticketQuote?.('ok');
+      throw new AccountError('CONFIRMATION_REQUIRED', '탈퇴 전 미사용 티켓 환급 안내', undefined, sums);
+    }
+    this.signals?.ticketQuote?.('none');
+  }
+}
+
+/** 참여자의 견적이 0 이상의 정수 여섯 칸이고 서로 맞는가(모르는 모양은 견적 실패로 본다) */
+function isUnusedTicketsQuote(q: UnusedTicketsQuote): boolean {
+  const values = [q.count, q.ticketAmount, q.deductionAmount, q.refundAmount, q.transferableCount, q.deferredRefundCount];
+  if (!values.every((v) => Number.isInteger(v) && v >= 0)) return false;
+  if (q.transferableCount > q.count || q.deferredRefundCount > q.count) return false;
+  // 0장이면 금액도 0이다(어긋난 답을 확인 없이 지나가지 않는다)
+  if (q.count === 0 && (q.ticketAmount !== 0 || q.deductionAmount !== 0 || q.refundAmount !== 0)) return false;
+  return true;
 }

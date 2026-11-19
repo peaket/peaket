@@ -235,9 +235,49 @@ export const purchaseV1Account: Record<string, unknown> = {
                 },
                 "WithdrawalParticipantService": {
                   "methods": {
+                    "QuoteAccountWithdrawal": {
+                      "requestType": "QuoteAccountWithdrawalRequest",
+                      "responseType": "QuoteAccountWithdrawalResponse"
+                    },
                     "ProcessAccountWithdrawal": {
                       "requestType": "ProcessAccountWithdrawalRequest",
                       "responseType": "ProcessAccountWithdrawalResponse"
+                    }
+                  }
+                },
+                "QuoteAccountWithdrawalRequest": {
+                  "fields": {
+                    "account_id": {
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "QuoteAccountWithdrawalResponse": {
+                  "fields": {
+                    "unused_tickets": {
+                      "type": "int32",
+                      "id": 1
+                    },
+                    "ticket_amount": {
+                      "type": "int64",
+                      "id": 2
+                    },
+                    "deduction_amount": {
+                      "type": "int64",
+                      "id": 3
+                    },
+                    "refund_amount": {
+                      "type": "int64",
+                      "id": 4
+                    },
+                    "transferable_tickets": {
+                      "type": "int32",
+                      "id": 5
+                    },
+                    "refund_deferred_tickets": {
+                      "type": "int32",
+                      "id": 6
                     }
                   }
                 },
@@ -260,7 +300,8 @@ export const purchaseV1Account: Record<string, unknown> = {
                   "values": {
                     "WITHDRAWAL_PENDING_REASON_UNSPECIFIED": 0,
                     "WITHDRAWAL_PENDING_REASON_PAYMENT_PENDING_ORDER": 1,
-                    "WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING": 2
+                    "WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING": 2,
+                    "WITHDRAWAL_PENDING_REASON_TICKET_REFUND_PENDING": 3
                   }
                 },
                 "ProcessAccountWithdrawalResponse": {
@@ -285,6 +326,14 @@ export const purchaseV1Account: Record<string, unknown> = {
                     "deposit_orders_pending": {
                       "type": "int32",
                       "id": 5
+                    },
+                    "unused_tickets_cancelled": {
+                      "type": "int32",
+                      "id": 6
+                    },
+                    "unused_tickets_pending": {
+                      "type": "int32",
+                      "id": 7
                     }
                   }
                 }

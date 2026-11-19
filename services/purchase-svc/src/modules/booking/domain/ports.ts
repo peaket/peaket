@@ -1981,9 +1981,67 @@ export interface WithdrawalParticipantSignals {
   participant(state: 'done' | 'pending' | 'error'): void;
   /** purchase_withdrawal_deposit_cancel_total{result}(cancelled·pending·unknown·rejected·skipped) */
   depositCancel(result: 'cancelled' | 'pending' | 'unknown' | 'rejected' | 'skipped'): void;
+  /** purchase_withdrawal_ticket_cancel_total{result}(cancelled·refund_pending·skipped·error). 옛 대역을 깨지 않게 선택이다 */
+  ticketCancel?(result: 'cancelled' | 'refund_pending' | 'skipped' | 'error'): void;
 }
 
-/** 탈퇴 참여자 경고 로그(주문 ID만 싣는다. 계좌번호·결제 키는 싣지 않는다) */
+/** 탈퇴 참여자 경고 로그(주문 ID·표 ID만 싣는다. 계좌번호·결제 키는 싣지 않는다) */
 export interface WithdrawalParticipantLogger {
   warn(obj: object, msg: string): void;
+}
+
+// ---- 탈퇴 참여자: 결제한 미사용 티켓(payment §4.1 '미사용 티켓 견적'·'미사용 티켓 취소', identity §8 '미사용 티켓 확인과 취소', I-T26) ----
+
+/**
+ * 탈퇴 전에 보여 줄 결제한 미사용 티켓의 환급 예상(identity의 같은 이름과 같은 모양, `QuoteAccountWithdrawal` 답).
+ * 금액은 원 단위이고 POL-032(공제액=금액×공제율, 원 미만 버림)로 계산한다
+ */
+export interface UnusedTicketsQuote {
+  /** 취소할 미사용 티켓 수 */
+  readonly count: number;
+  /** 그 표들의 결제 금액 합(원) */
+  readonly ticketAmount: number;
+  /** POL-032 공제액 합(원) */
+  readonly deductionAmount: number;
+  /** 환급 예상액 합(원) */
+  readonly refundAmount: number;
+  /** 지금 양도할 수 있는 표 수(양도 마감 전) */
+  readonly transferableCount: number;
+  /** 입장이 시작돼 환급이 입장 기록 마감 뒤로 미뤄지는 표 수 */
+  readonly deferredRefundCount: number;
+}
+
+/** 미사용 티켓 취소 한 번의 셈(payment §4.1 '미사용 티켓 취소' '답') */
+export interface WithdrawalTicketsCancelResult {
+  /** 이번 호출에서 취소가 끝난(환급까지 끝났거나 이미 환급된) 표 수 */
+  readonly cancelled: number;
+  /** 이번 호출에 취소 행을 만들지 못한 표 수(부르지 못함·TRANSFER_PENDING·CONFLICT·행 쓰기 전 실패). 행을 쓴 뒤 실패한 표는 여기에 넣지 않는다(pendingRefunds가 센다) */
+  readonly pendingUncanceled: number;
+  /** 그대로 두는 표 수(NOT_PAYER_HOLDER·EVENT_STARTED·ALREADY_ENDED 등) */
+  readonly skipped: number;
+}
+
+/**
+ * 탈퇴 참여자의 결제한 미사용 티켓(운영은 refund 모듈 AccountWithdrawalTickets가 구현한다. payment §4.1 '미사용 티켓 견적'·'미사용 티켓 취소').
+ * 미사용 티켓 = 그 계정이 결제한 주문(CONFIRMED·PARTIALLY_REFUNDED)의 표 가운데 취소 기록이 없고 공연이 시작되기 전인 표다.
+ * DB에 닿지 못하거나 판매 설정(회차 시각)을 읽지 못하면 WithdrawalOrdersUnavailable(gRPC UNAVAILABLE)을 던진다
+ */
+export interface WithdrawalTickets {
+  /** 견적(읽기 전용, 아무것도 바꾸지 않는다) */
+  quote(q: { readonly accountId: string; readonly nowMs: number; readonly statementTimeoutMs: number }): Promise<UnusedTicketsQuote>;
+  /**
+   * 미사용 티켓마다 기존 예매 취소 Saga(CancelTicket, 사유 ACCOUNT_WITHDRAWAL, POL-032 공제, 표마다 고정 취소 ID)를 돈다.
+   * limit건까지만 부르고 남은 시간이 minRemainingMs보다 모자라면 부르지 않는다(호출 데드라인은 min(남은 시간 − marginMs, cancelDeadlineCapMs))
+   */
+  cancel(q: {
+    readonly accountId: string;
+    readonly nowMs: number;
+    readonly deadlineAtMs: number;
+    readonly limit: number;
+    readonly minRemainingMs: number;
+    readonly marginMs: number;
+    readonly cancelDeadlineCapMs: number;
+  }): Promise<WithdrawalTicketsCancelResult>;
+  /** 그 계정 주문의 order_cancellation 가운데 사유 ACCOUNT_WITHDRAWAL이고 상태가 REQUESTED·REFUND_PENDING인 표 수 */
+  pendingRefunds(q: { readonly accountId: string; readonly statementTimeoutMs: number }): Promise<number>;
 }

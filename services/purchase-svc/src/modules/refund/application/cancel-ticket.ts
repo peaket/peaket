@@ -1,6 +1,7 @@
 // 예매 취소 Saga(POST /v1/tickets/{ticketId}/cancellation, docs/features/payment.md §4.1, docs/features/transfer-refund.md §3.1, POL-032·POL-038, BUILD_ORDER GAT-080).
 // 차례: 주문·결제자 확인 → 견적(공제) → ticket-svc 키 폐기·취소표·양도 확인 → order_cancellation → payment-svc 부분 취소 → 상태.
 // ticket-svc가 멈추면 아무것도 쓰지 않는다. 결제사가 결과 모름이면 REFUND_PENDING으로 두고 재시도 큐가 이어 간다.
+// 회원 탈퇴(ACCOUNT_WITHDRAWAL)도 이 Saga를 쓴다: 공제는 POL-032, 취소 ID는 표마다 고정 UUID(탈퇴 참여자는 refund/application/account-withdrawal-tickets.ts).
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type CancellationReason, type CancellationStatus, type CancelTicketResult, type RefundAccount } from '../domain/cancellation.js';
 import type { CancellationOrders, CancellationWrites, EventCancellationLookup, PaymentCancellations, SeatReturns, TicketCancellations } from '../domain/ports.js';
 import type { BusinessCalendar, RefundQuote } from '../domain/refund-policy.js';
@@ -27,9 +28,12 @@ export interface CancelTicketInput {
   readonly eventCancellationRequestId?: string;
 }
 
-/** 회차 취소·부정 예매·미성년자 계약 취소·탈퇴는 공제하지 않는다(POL-032·POL-038·POL-046) */
+/**
+ * 공제하지 않는 사유(회차 취소·부정 예매·미성년자 계약 취소는 POL-032·POL-038·POL-046).
+ * 회원 탈퇴(ACCOUNT_WITHDRAWAL)는 여기 없다: POL-032 공제율을 그대로 쓴다(공제 0원이 아니다, docs/planning/03 §1.5 ①, payment §4.1 '회원 탈퇴 연동', BAT-013)
+ */
 export function zeroDeductionFor(reason: CancellationReason): boolean {
-  return reason === 'FRAUD' || reason === 'EVENT_CANCELLED' || reason === 'EVENT_POSTPONED' || reason === 'ACCOUNT_WITHDRAWAL' || reason === 'MINOR_CONTRACT_CANCEL';
+  return reason === 'FRAUD' || reason === 'EVENT_CANCELLED' || reason === 'EVENT_POSTPONED' || reason === 'MINOR_CONTRACT_CANCEL';
 }
 
 export class CancelTicket {

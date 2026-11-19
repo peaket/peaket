@@ -28,16 +28,27 @@ export class PromSessionSignals implements SessionSignals, WithdrawalSignals {
     registers: [],
   });
   readonly #withdrawalOldest = new Gauge({ name: 'identity_withdrawal_pending_oldest_seconds', help: '가장 오래 미룬 탈퇴(WITHDRAWAL)의 closure_started_at부터 지금까지의 초(없으면 0)', registers: [] });
+  /** 탈퇴 전 미사용 티켓 견적 결과(identity §8 '지표', PRF-174, I-T26) */
+  readonly #withdrawalTicketQuote = new Counter({
+    name: 'identity_withdrawal_ticket_quote_total',
+    help: '탈퇴 전 미사용 티켓 견적 결과(result: ok 409로 안내·none 0장·error 견적 실패)',
+    labelNames: ['result'] as const,
+    registers: [],
+  });
 
   /** 서비스의 지표 모음(/metrics)에 단다 */
   register(registry: Registry): this {
-    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#loginVerdict, this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded, this.#withdrawalParticipant, this.#withdrawalOldest];
+    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#loginVerdict, this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded, this.#withdrawalParticipant, this.#withdrawalOldest, this.#withdrawalTicketQuote];
     for (const m of all) registry.registerMetric(m);
     return this;
   }
 
   participant(participant: string, path: WithdrawalPath, outcome: WithdrawalOutcome): void {
     this.#withdrawalParticipant.inc({ participant, path, outcome });
+  }
+
+  ticketQuote(result: 'ok' | 'none' | 'error'): void {
+    this.#withdrawalTicketQuote.inc({ result });
   }
 
   pendingOldest(seconds: number): void {

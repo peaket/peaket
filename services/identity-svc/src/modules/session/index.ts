@@ -9,17 +9,19 @@ export { WithdrawAccount, type WithdrawResult } from './application/withdraw-acc
 export {
   WITHDRAWAL_NEXT_CHECK_MS,
   WITHDRAWAL_PARTICIPANTS,
+  WITHDRAWAL_QUOTE_DEADLINE_MS,
   WITHDRAWAL_REQUEST_DEADLINE_MS,
   WITHDRAWAL_RETRY_BATCH,
   WITHDRAWAL_RETRY_DEADLINE_MS,
   WITHDRAWAL_RETRY_INTERVAL_MS,
   WITHDRAWAL_SIGNALS,
   WithdrawalParticipantUnavailable,
+  type UnusedTicketsQuote,
   type WithdrawalParticipant,
   type WithdrawalParticipantAnswer,
   type WithdrawalSignals,
 } from './domain/withdrawal.js';
-export { doneWithdrawalParticipant, GrpcWithdrawalParticipant, toWithdrawalAnswer, unavailableWithdrawalParticipant, withdrawalParticipantsFromEnv } from './adapters/grpc-withdrawal-participants.js';
+export { doneWithdrawalParticipant, GrpcWithdrawalParticipant, toUnusedTicketsQuote, toWithdrawalAnswer, unavailableWithdrawalParticipant, withdrawalParticipantsFromEnv } from './adapters/grpc-withdrawal-participants.js';
 export { DrizzleSessionStore, writeContactRef } from './adapters/db/drizzle-session-store.js';
 export { CreateSession } from './application/create-session.js';
 export { GetLinkProposal } from './application/get-link-proposal.js';

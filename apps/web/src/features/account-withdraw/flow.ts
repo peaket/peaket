@@ -26,14 +26,40 @@ export interface StorageLike {
 export type ProvidersAnswer = { kind: 'ok'; providers: Provider[] } | { kind: 'login' } | { kind: 'error' };
 export type ReauthAnswer = { kind: 'token'; token: string; provider?: Provider } | { kind: 'failed'; reason: ReauthFailure };
 export type FraudHold = { state: 'RESTRICTED' | 'CASE_OPEN'; until: string };
-export type WithdrawAnswer = { kind: 'done' } | { kind: 'deferred' } | ({ kind: 'fraudHold' } & FraudHold) | { kind: 'reauth' } | { kind: 'login' } | { kind: 'error' };
+/** 탈퇴 409의 미사용 티켓 환급 예상(openapi unusedTickets, identity §8 '미사용 티켓 확인과 취소') */
+export type UnusedTicketsQuote = {
+  /** 취소될 미사용 티켓 수 */
+  count: number;
+  /** 결제 금액 합(원) */
+  ticketAmount: number;
+  /** POL-032 공제액 합(원) */
+  deductionAmount: number;
+  /** 환급 예상액 합(원) */
+  refundAmount: number;
+  /** 지금 양도할 수 있는 수 */
+  transferableCount: number;
+  /** 입장 기록 마감 뒤로 환급이 미뤄지는 수 */
+  deferredRefundCount: number;
+};
+export type WithdrawAnswer =
+  | { kind: 'done' }
+  | { kind: 'deferred' }
+  | ({ kind: 'fraudHold' } & FraudHold)
+  | ({ kind: 'unusedTickets' } & UnusedTicketsQuote)
+  | { kind: 'reauth' }
+  | { kind: 'login' }
+  | { kind: 'error' };
 
 export interface WithdrawApi {
   providers(): Promise<ProvidersAnswer>;
   /** 액세스 토큰 갱신. 재인증 양식을 보내기 직전에 불러, 만료된 토큰으로 제공자로 떠나 막다른 페이지가 되지 않게 한다(새 맥락 리뷰 중간 1) */
   refresh(): Promise<RefreshResult>;
   pickupReauth(): Promise<ReauthAnswer>;
-  withdraw(token: string, acknowledgeFraudHold: boolean): Promise<WithdrawAnswer>;
+  /**
+   * 탈퇴 요청. confirmCancelUnusedTickets는 409 unusedTickets(환급 예상)를 본 뒤 최종 확인으로 싣는다(두 번째 누름).
+   * 세 번째 인자를 주지 않는 옛 호출을 깨지 않게 선택 인자다
+   */
+  withdraw(token: string, acknowledgeFraudHold: boolean, o?: { confirmCancelUnusedTickets?: boolean }): Promise<WithdrawAnswer>;
 }
 
 const isProvider = (v: unknown): v is Provider => typeof v === 'string' && (PROVIDERS as readonly string[]).includes(v);
@@ -113,13 +139,17 @@ export function createWithdrawApi(o: { origin: string; fetch: FetchLike; lock?: 
       return { kind: 'failed', reason: reauthFailureOf(await problemType(r)) };
     },
 
-    async withdraw(token, acknowledgeFraudHold) {
+    async withdraw(token, acknowledgeFraudHold, o) {
       let r: Response | 'login' | 'unavailable';
       try {
         r = await call('/v1/identity/account', {
           method: 'DELETE',
           headers: { accept: 'application/json', 'content-type': 'application/json', 'x-reauth-token': token },
-          body: JSON.stringify(acknowledgeFraudHold ? { acknowledgeFraudHold: true } : {}),
+          // 싣는 값만 넣는다(없으면 빈 객체: 기존 요청 본문 그대로)
+          body: JSON.stringify({
+            ...(acknowledgeFraudHold ? { acknowledgeFraudHold: true } : {}),
+            ...(o?.confirmCancelUnusedTickets ? { confirmCancelUnusedTickets: true } : {}),
+          }),
         });
       } catch {
         return { kind: 'error' };
@@ -131,10 +161,13 @@ export function createWithdrawApi(o: { origin: string; fetch: FetchLike; lock?: 
       if (r.status === 202) return { kind: 'deferred' };
       if (r.status === 409) {
         try {
-          const b = (await r.json()) as { type?: unknown; fraudHold?: { state?: unknown; until?: unknown } };
-          const h = b.fraudHold;
-          if (typeof b.type === 'string' && b.type.endsWith('/withdrawal-confirmation-required') && h && (h.state === 'RESTRICTED' || h.state === 'CASE_OPEN') && typeof h.until === 'string') {
-            return { kind: 'fraudHold', state: h.state, until: h.until };
+          const b = (await r.json()) as { type?: unknown; fraudHold?: { state?: unknown; until?: unknown }; unusedTickets?: Record<string, unknown> };
+          if (typeof b.type === 'string' && b.type.endsWith('/withdrawal-confirmation-required')) {
+            const h = b.fraudHold;
+            // 보관 안내와 견적이 겹치면 보관 안내가 먼저다(다시 보낼 때 두 값을 함께 실어도 된다)
+            if (h && (h.state === 'RESTRICTED' || h.state === 'CASE_OPEN') && typeof h.until === 'string') return { kind: 'fraudHold', state: h.state, until: h.until };
+            const q = unusedTicketsOf(b.unusedTickets);
+            if (q) return { kind: 'unusedTickets', ...q };
           }
         } catch {
           // 아래 오류로
@@ -145,6 +178,21 @@ export function createWithdrawApi(o: { origin: string; fetch: FetchLike; lock?: 
       return { kind: 'error' };
     },
   };
+}
+
+/** 409 unusedTickets의 여섯 칸을 읽는다. 모양이 틀리면 null(오류로 본다: 낮은 금액을 보이지 않는다) */
+function unusedTicketsOf(v: unknown): UnusedTicketsQuote | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const q = v as Record<string, unknown>;
+  const n = (k: string): number | null => (typeof q[k] === 'number' && Number.isInteger(q[k]) && (q[k] as number) >= 0 ? (q[k] as number) : null);
+  const count = n('count');
+  const ticketAmount = n('ticketAmount');
+  const deductionAmount = n('deductionAmount');
+  const refundAmount = n('refundAmount');
+  const transferableCount = n('transferableCount');
+  const deferredRefundCount = n('deferredRefundCount');
+  if (count === null || count < 1 || ticketAmount === null || deductionAmount === null || refundAmount === null || transferableCount === null || deferredRefundCount === null) return null;
+  return { count, ticketAmount, deductionAmount, refundAmount, transferableCount, deferredRefundCount };
 }
 
 /** 재인증으로 떠나기 전에 표시를 남긴다 */
@@ -210,16 +258,16 @@ export async function linkedProvidersQuietly(api: Pick<WithdrawApi, 'providers'>
 }
 
 /** 탈퇴 응답 뒤 화면이 할 일. ignore: 창을 닫은 뒤 온 응답이라 버린다 */
-export type WithdrawStep = 'done' | 'deferred' | 'hold' | 'reauth' | 'login' | 'error' | 'ignore';
+export type WithdrawStep = 'done' | 'deferred' | 'hold' | 'tickets' | 'reauth' | 'login' | 'error' | 'ignore';
 
 /**
  * 탈퇴 응답 → 화면이 할 일. 요청이 도는 동안 창을 닫았으면(closed) 완료(204·202)만 반영한다(계정이 이미 바뀌었다).
- * 409 보관 안내·403·오류·로그인 필요는 버린다(닫은 창을 다시 열지 않는다, identity §8 '탈퇴 화면 연결', 새 맥락 마지막 검토)
+ * 409 보관 안내·미사용 티켓 안내·403·오류·로그인 필요는 버린다(닫은 창을 다시 열지 않는다, identity §8 '탈퇴 화면 연결', 새 맥락 마지막 검토)
  */
 export function afterWithdraw(r: WithdrawAnswer, o: { closed: boolean }): WithdrawStep {
   if (r.kind === 'done' || r.kind === 'deferred') return r.kind;
   if (o.closed) return 'ignore';
-  return r.kind === 'fraudHold' ? 'hold' : r.kind === 'reauth' ? 'reauth' : r.kind === 'login' ? 'login' : 'error';
+  return r.kind === 'fraudHold' ? 'hold' : r.kind === 'unusedTickets' ? 'tickets' : r.kind === 'reauth' ? 'reauth' : r.kind === 'login' ? 'login' : 'error';
 }
 
 /**

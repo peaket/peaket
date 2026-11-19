@@ -23,7 +23,7 @@ import { afterWithdraw, browserWithdrawApi, type FraudHold, leaveForReauth, link
 import { browserDevicesApi, type DeviceRow, endResultText, leaveForDeviceReauth, type LogoutScope, otherLoginsOf, type PendingLogout, toDeviceSessions } from '@/features/device-sessions';
 import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
 import { useToast } from '@/shared/ui/toast';
-import { PROVIDER_INFO, type WithdrawQuote } from '../model/account';
+import { PROVIDER_INFO, type LiveWithdrawQuote, type WithdrawQuote } from '../model/account';
 import { resumeDeviceLogout, returnOnMount } from '../model/devices';
 import type { SettingsOverlay } from '../model/state';
 
@@ -101,9 +101,10 @@ export function SettingsFlows({
     leaveRef.current?.cancel();
     leaveRef.current = null;
     setLeaving(false);
-    // 탈퇴 확인 창을 닫으면 메모리의 재인증 토큰과 보관 안내 상태도 지운다. 다시 열면 재인증부터 한다(새 맥락 재검토)
+    // 탈퇴 확인 창을 닫으면 메모리의 재인증 토큰과 보관 안내·미사용 티켓 견적 상태도 지운다. 다시 열면 재인증부터 한다(새 맥락 재검토)
     setToken(null);
     setLiveHold(null);
+    setLiveQuote(null);
     setOverlay(null);
   };
   // 실제 탈퇴(identity §8 '탈퇴 화면 연결'): 재인증할 제공자, 메모리에만 둔 재인증 토큰, 409 fraudHold, 완료
@@ -113,6 +114,8 @@ export function SettingsFlows({
   const [liveProviders, setLiveProviders] = useState<WithdrawProvider[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [liveHold, setLiveHold] = useState<FraudHold | null>(null);
+  /** 실제 탈퇴의 409 unusedTickets로 받은 환급 예상(두 번째 누름에 confirmCancelUnusedTickets를 싣는다) */
+  const [liveQuote, setLiveQuote] = useState<LiveWithdrawQuote | null>(null);
   const [liveDone, setLiveDone] = useState<'done' | 'deferred' | null>(null);
   const [busy, setBusy] = useState(false);
   /** 재인증 실패 문구(이유마다, 없으면 기본 문구) */
@@ -311,8 +314,9 @@ export function SettingsFlows({
       }
       setBusy(true);
       const opened = closedRef.current;
-      // 보관 안내(fraudHold)를 보인 뒤 다시 누르면 같은 토큰에 acknowledgeFraudHold를 싣는다(ADR-0173 결정 7)
-      const r = await api.withdraw(token, liveHold !== null);
+      // 보관 안내(fraudHold)와 미사용 티켓 견적(unusedTickets)을 본 뒤 다시 누르면 같은 토큰에 확인 값을 함께 싣는다.
+      // 견적을 보기 전(첫 누름)에는 confirmCancelUnusedTickets를 싣지 않는다(안내 없이 취소하지 않는다, identity §8 '탈퇴 화면 연결')
+      const r = await api.withdraw(token, liveHold !== null, { confirmCancelUnusedTickets: liveQuote !== null });
       setBusy(false);
       // 요청이 도는 동안 창을 닫았으면 완료만 반영하고 나머지는 버린다(닫은 창을 다시 열지 않는다)
       const step = afterWithdraw(r, { closed: opened !== closedRef.current });
@@ -321,7 +325,10 @@ export function SettingsFlows({
         setOverlay(null);
         setLiveDone(step);
       } else if (step === 'hold' && r.kind === 'fraudHold') setLiveHold({ state: r.state, until: r.until });
-      else if (step === 'reauth') {
+      else if (step === 'tickets' && r.kind === 'unusedTickets') {
+        // 환급 예상을 최종 확인 버튼보다 먼저 보인다(CMP-054 account). 다시 누르면 확인 값이 실린다
+        setLiveQuote({ count: r.count, ticketAmount: r.ticketAmount, deductionAmount: r.deductionAmount, refundAmount: r.refundAmount, transferableCount: r.transferableCount, deferredRefundCount: r.deferredRefundCount });
+      } else if (step === 'reauth') {
         setToken(null);
         failWith(reauthFailureText('expired'));
       } else if (step === 'login') toLogin();
@@ -450,6 +457,7 @@ export function SettingsFlows({
           }
           // 실제 탈퇴에서 제공자를 아직 모르면 이름 없이 '다시 로그인했습니다'(목업 제공자 이름을 보이지 않게)
           provider={api && !liveProvider ? null : shown.label}
+          liveQuote={api ? liveQuote : null}
           quote={quote}
           live={api !== null}
           busy={busy}
@@ -534,6 +542,7 @@ function WithdrawSheet({
   fraudHold,
   provider,
   quote,
+  liveQuote = null,
   live = false,
   busy = false,
   descId,
@@ -546,6 +555,8 @@ function WithdrawSheet({
   busy?: boolean;
   /** 탈퇴 409 fraudHold(있으면 대조값 보관 안내를 보이고 '바로 다시 가입' 줄을 숨긴다, d5 §5.17, ADR-0173 결정 7) */
   fraudHold?: { state: 'RESTRICTED' | 'CASE_OPEN'; untilText: string };
+  /** 실제 탈퇴의 409 unusedTickets(수·결제 금액·공제액·환급 예상액·양도 가능 수·마감 뒤 환급 수). 없으면 그 카드를 보이지 않는다 */
+  liveQuote?: LiveWithdrawQuote | null;
   /** 다시 로그인한 제공자 이름. null이면 이름 없이 보인다 */
   provider: string | null;
   quote: WithdrawQuote;
@@ -554,6 +565,8 @@ function WithdrawSheet({
   onConfirm: () => void;
 }) {
   const basic = refund === 'none';
+  // 확인 버튼의 설명: 환급 예상(견적)과 보관 안내를 낭독기가 버튼보다 먼저 읽고 버튼에 잇는다(CMP-054 account, d5 §5.17)
+  const describedBy = [liveQuote ? `${descId}-rq` : null, fraudHold ? `${descId}-hold` : null].filter(Boolean).join(' ');
   return (
     <WebShellModal
       open
@@ -573,6 +586,27 @@ function WithdrawSheet({
       <p className="t-sm" id={descId}>
         탈퇴하면 주문·결제 기록은 법에 따라 5년간 분리 보관 후 파기됩니다
       </p>
+      {/* 실제 흐름: 409 unusedTickets로 받은 환급 예상(CMP-054 account)을 결과 버튼보다 먼저 읽게 둔다(identity §8 '미사용 티켓 확인과 취소') */}
+      {live && liveQuote ? (
+        <section className="card-flat col px-4 py-3.5 md:p-4" style={{ gap: 10 }} aria-labelledby={`${descId}-rq`}>
+          <h3 className="t-sm fw-b" id={`${descId}-rq`}>
+            미사용 티켓 환급 예상
+          </h3>
+          <p className="t-sm" role="alert">
+            미사용 티켓 {liveQuote.count}장은 취소되고 예상 환급액은 {formatWon(liveQuote.refundAmount)}입니다. 다른 분에게 넘기려면 탈퇴 전에 양도해 주세요(받는 분이 수락해야 넘어갑니다).
+          </p>
+          <dl className="kv">
+            <dt>결제 금액</dt>
+            <dd>{formatWon(liveQuote.ticketAmount)}</dd>
+            <dt>취소 수수료</dt>
+            <dd>{formatWon(liveQuote.deductionAmount)}</dd>
+            <dt className="kv-total">예상 환급액</dt>
+            <dd className="kv-total">{formatWon(liveQuote.refundAmount)}</dd>
+          </dl>
+          {liveQuote.transferableCount > 0 ? <p className="t-xs muted">지금 양도할 수 있는 티켓이 {liveQuote.transferableCount}장 있습니다. 양도한 티켓은 탈퇴해도 취소되지 않습니다.</p> : null}
+          {liveQuote.deferredRefundCount > 0 ? <p className="t-xs muted">입장이 시작된 티켓 {liveQuote.deferredRefundCount}장은 입장 기록이 마감된 뒤 결제한 수단으로 환급합니다. 그때까지 탈퇴가 처리되지 않습니다.</p> : null}
+        </section>
+      ) : null}
       {/* 환급 예상(CMP-054)을 결과 버튼보다 먼저 읽게 둔다(d2 §4) */}
       {live ? null : (
       <section className="card-flat col px-4 py-3.5 md:p-4" style={{ gap: 10 }} aria-labelledby={`${descId}-rq`}>
@@ -662,9 +696,14 @@ function WithdrawSheet({
           // 처리 중에도 초점이 버튼에 남게 disabled 대신 aria-disabled(누름은 처리기가 막는다)
           aria-disabled={busy || undefined}
           aria-busy={busy || undefined}
-          aria-describedby={fraudHold ? `${descId}-hold` : undefined}
+          aria-describedby={describedBy || undefined}
         >
-          <span>탈퇴합니다.</span> <span className="t-sm fw-m">주문·결제 기록은 법에 따라 분리 보관 후 파기됩니다</span>
+          {liveQuote ? (
+            <span>환급 내용을 확인하고 탈퇴합니다.</span>
+          ) : (
+            <span>탈퇴합니다.</span>
+          )}{' '}
+          <span className="t-sm fw-m">{liveQuote ? `미사용 티켓 ${liveQuote.count}장을 취소하고 ${formatWon(liveQuote.refundAmount)}을 환급합니다` : '주문·결제 기록은 법에 따라 분리 보관 후 파기됩니다'}</span>
         </button>
         <button className="btn btn-ghost btn-block" type="button" onClick={onClose}>
           탈퇴하지 않고 닫기

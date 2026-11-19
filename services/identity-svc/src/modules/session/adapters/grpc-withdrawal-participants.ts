@@ -1,15 +1,22 @@
-// 탈퇴 참여자 클라이언트: purchase-svc WithdrawalParticipantService.ProcessAccountWithdrawal(docs/api/proto/peaket/purchase/v1/account.proto,
-// docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현' '참여자 호출', ADR-0284, BUILD_ORDER PRF-169, I-T84 ③).
-// 데드라인은 부르는 쪽이 준다(요청 경로 3초·고리 10초 [가정]). 내부 토큰(PEAKET_INTERNAL_GRPC_TOKEN)을 싣고 부르는 쪽 이름은 identity-svc다.
+// 탈퇴 참여자 클라이언트: purchase-svc WithdrawalParticipantService.ProcessAccountWithdrawal·QuoteAccountWithdrawal(docs/api/proto/peaket/purchase/v1/account.proto,
+// docs/features/identity.md §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현' '참여자 호출' '미사용 티켓 확인과 취소', ADR-0284, BUILD_ORDER PRF-169·PRF-174, I-T84 ③·I-T26 ①).
+// 데드라인은 부르는 쪽이 준다(요청 경로 3초·고리 10초·견적 2초 [가정]). 내부 토큰(PEAKET_INTERNAL_GRPC_TOKEN)을 싣고 부르는 쪽 이름은 identity-svc다.
 // 병합 확인과 같은 purchase-svc 차단기 안에서 부른다(main이 같은 의존성 이름의 차단기를 넘긴다). 꼴은 grpc-merge-checkers.ts다.
 // 답의 state가 DONE·PENDING이 아니거나 모르는 이유가 있으면, 또 어떤 gRPC 오류·차단기 열림·기한 초과든 WithdrawalParticipantUnavailable이다(DONE으로 접지 않는다).
+// 견적 답이 0 이상의 정수가 아니거나 금액이 맞지 않아도(공제액 + 환급액 ≠ 결제 금액) 같은 오류다(낮은 금액을 보이지 않는다).
 // 주소가 없으면 local·ci만 '늘 DONE' 대역이고, 그 밖의 환경은 '늘 답하지 않음'이라 탈퇴가 늘 202다(시작 로그 경고).
 // PEAKET_ENV가 없거나 빈 글이면 운영으로 본다(플랫폼 설정과 같은 닫힌 쪽 기본값, identity §8 '참여자 호출', BAT-010 리뷰 RV-01).
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { purchaseV1Account } from '@peaket/contracts/proto';
 import { type CircuitBreaker, createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
-import { WITHDRAWAL_RETRY_DEADLINE_MS, type WithdrawalParticipant, type WithdrawalParticipantAnswer, WithdrawalParticipantUnavailable } from '../domain/withdrawal.js';
+import {
+  WITHDRAWAL_RETRY_DEADLINE_MS,
+  type UnusedTicketsQuote,
+  type WithdrawalParticipant,
+  type WithdrawalParticipantAnswer,
+  WithdrawalParticipantUnavailable,
+} from '../domain/withdrawal.js';
 
 /** 설명자를 읽는 선택지(받는 층과 같은 값: 필드 이름은 proto 그대로, enum은 이름, int64는 숫자, oneof 이름 칸) */
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
@@ -31,6 +38,7 @@ const STATES: Readonly<Record<string, 'DONE' | 'PENDING'>> = {
 const REASONS: Readonly<Record<string, string>> = {
   WITHDRAWAL_PENDING_REASON_PAYMENT_PENDING_ORDER: 'PAYMENT_PENDING_ORDER',
   WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING: 'DEPOSIT_CANCEL_PENDING',
+  WITHDRAWAL_PENDING_REASON_TICKET_REFUND_PENDING: 'TICKET_REFUND_PENDING',
 };
 
 /**
@@ -62,9 +70,38 @@ export interface GrpcWithdrawalParticipantOptions {
   breaker?: Breaker;
 }
 
+/**
+ * 견적 답 → 값(identity §8 '미사용 티켓 확인과 취소' 확인(견적)). 여섯 칸이 모두 0 이상의 정수이고
+ * 공제액 + 환급액이 결제 금액과 같아야 한다. 아니면 모르는 답이라 WithdrawalParticipantUnavailable이다(빠뜨린 채 낮은 금액을 보이지 않는다)
+ */
+export function toUnusedTicketsQuote(r: Record<string, unknown>): UnusedTicketsQuote {
+  const n = (key: string): number => {
+    const v = r[key];
+    return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : Number.NaN;
+  };
+  const quote: UnusedTicketsQuote = {
+    count: n('unused_tickets'),
+    ticketAmount: n('ticket_amount'),
+    deductionAmount: n('deduction_amount'),
+    refundAmount: n('refund_amount'),
+    transferableCount: n('transferable_tickets'),
+    deferredRefundCount: n('refund_deferred_tickets'),
+  };
+  const values = [quote.count, quote.ticketAmount, quote.deductionAmount, quote.refundAmount, quote.transferableCount, quote.deferredRefundCount];
+  const bad =
+    values.some((v) => !Number.isInteger(v)) ||
+    quote.transferableCount > quote.count ||
+    quote.deferredRefundCount > quote.count ||
+    quote.deductionAmount + quote.refundAmount !== quote.ticketAmount ||
+    // 0장이면 금액도 0이다(어긋난 답으로 낮은 금액을 보이지 않는다)
+    (quote.count === 0 && (quote.ticketAmount !== 0 || quote.deductionAmount !== 0 || quote.refundAmount !== 0));
+  if (bad) throw new WithdrawalParticipantUnavailable(PURCHASE_PARTICIPANT, new Error(`모르는 견적 ${JSON.stringify(r)}`));
+  return quote;
+}
+
 export class GrpcWithdrawalParticipant implements WithdrawalParticipant {
   readonly name = PURCHASE_PARTICIPANT;
-  readonly #client: grpc.Client & { ProcessAccountWithdrawal: Unary };
+  readonly #client: grpc.Client & { ProcessAccountWithdrawal: Unary; QuoteAccountWithdrawal: Unary };
 
   constructor(private readonly o: GrpcWithdrawalParticipantOptions) {
     const def = protoLoader.fromJSON(purchaseV1Account as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
@@ -80,23 +117,33 @@ export class GrpcWithdrawalParticipant implements WithdrawalParticipant {
       dependency: 'purchase-svc',
       timeoutCapMs: WITHDRAWAL_RETRY_DEADLINE_MS,
       caller: WITHDRAWAL_CALLER,
-    }) as unknown as grpc.Client & { ProcessAccountWithdrawal: Unary };
+    }) as unknown as grpc.Client & { ProcessAccountWithdrawal: Unary; QuoteAccountWithdrawal: Unary };
   }
 
   /** 한 번 묻는다. gRPC 오류는 차단기 안에서 던져 차단기가 실패로 센다. 차단기 거절·gRPC 오류·모르는 답은 모두 WithdrawalParticipantUnavailable이다 */
   async process(accountId: string, o: { deadlineMs: number }): Promise<WithdrawalParticipantAnswer> {
-    const ms = Math.max(1, Math.floor(Number.isFinite(o.deadlineMs) ? o.deadlineMs : WITHDRAWAL_RETRY_DEADLINE_MS));
+    const v = await this.#call('ProcessAccountWithdrawal', accountId, o.deadlineMs);
+    return toWithdrawalAnswer(v);
+  }
+
+  /** 탈퇴 전 미사용 티켓 견적(읽기 전용, 데드라인 2초 [가정]). 모르는 답·실패는 WithdrawalParticipantUnavailable이다 */
+  async unusedTickets(accountId: string, o: { deadlineMs: number }): Promise<UnusedTicketsQuote | undefined> {
+    const v = await this.#call('QuoteAccountWithdrawal', accountId, o.deadlineMs);
+    return toUnusedTicketsQuote(v);
+  }
+
+  /** 한 번 부르고 답을 돌려준다(차단기 안). 실패는 모두 WithdrawalParticipantUnavailable이다 */
+  async #call(method: 'ProcessAccountWithdrawal' | 'QuoteAccountWithdrawal', accountId: string, deadlineMs: number): Promise<Record<string, unknown>> {
+    const ms = Math.max(1, Math.floor(Number.isFinite(deadlineMs) ? deadlineMs : WITHDRAWAL_RETRY_DEADLINE_MS));
     const call = () =>
       new Promise<Record<string, unknown>>((resolve, reject) => {
-        this.#client.ProcessAccountWithdrawal({ account_id: accountId }, new grpc.Metadata(), { deadline: new Date(Date.now() + ms) }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
+        this.#client[method]({ account_id: accountId }, new grpc.Metadata(), { deadline: new Date(Date.now() + ms) }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
       });
-    let v: Record<string, unknown>;
     try {
-      v = await (this.o.breaker ? this.o.breaker.run(call) : call());
+      return await (this.o.breaker ? this.o.breaker.run(call) : call());
     } catch (e) {
       throw new WithdrawalParticipantUnavailable(this.name, e);
     }
-    return toWithdrawalAnswer(v);
   }
 
   close(): void {

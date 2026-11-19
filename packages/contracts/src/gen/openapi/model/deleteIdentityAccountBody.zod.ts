@@ -12,7 +12,7 @@
 import * as zod from 'zod';
 
 export const DeleteIdentityAccountBody = zod.object({
-  "confirmCancelUnusedTickets": zod.boolean().optional(),
+  "confirmCancelUnusedTickets": zod.boolean().optional().describe('결제한 미사용 티켓의 취소·환급을 확인했다. 409의 unusedTickets(환급 예상)를 본 뒤 true로 다시 보낸다. 없거나 거짓이고 티켓이 있으면 409다. 409는 재인증 토큰을 쓰지 않아 같은 토큰으로 다시 보낸다(추천 적용 2026-11-19, BAT-013 계획)'),
   "acknowledgeFraudHold": zod.boolean().optional().describe('보관 안내(409의 fraudHold)를 본 뒤 true로 다시 보낸다. 보관 행이 있는데 없으면 다른 확인할 것이 없어도 409다(추천 적용 2026-10-31, ADR-0173)'),
   "refundAccount": zod.object({
   "bankCode": zod.string(),

@@ -13,6 +13,7 @@ import type { ProblemEnded } from './problemEnded';
 import type { ProblemFraudHold } from './problemFraudHold';
 import type { ProblemLock } from './problemLock';
 import type { ProblemRemoveReason } from './problemRemoveReason';
+import type { ProblemUnusedTickets } from './problemUnusedTickets';
 
 /**
  * RFC 9457 Problem Details(guidelines §2). 오류 식별자는 type URI다. 아래 선택 확장 필드는 적힌 응답에만 싣는다
@@ -42,6 +43,8 @@ export interface Problem {
   ended?: ProblemEnded;
   /** 탈퇴(DELETE /v1/identity/account)의 409 '탈퇴 전 확인'에만. 그 계정에 부정 예매 연계정보 대조값 보관 행(docs/data.md restricted_ci_hold)이 살아 있을 때 상태와 끝 시각을 싣고, 화면(SCR-017)이 보관 안내를 보인다. RESTRICTED면 이용 제한 끝, CASE_OPEN이면 그 회차 공연일 + 30일 [가정](docs/features/identity.md §8(추천 적용 2026-10-31, ADR-0173)) */
   fraudHold?: ProblemFraudHold;
+  /** 탈퇴(DELETE /v1/identity/account)의 409 '탈퇴 전 확인'에만. 결제한 미사용 티켓이 있을 때 수·결제 금액·POL-032 공제액·환급 예상액·지금 양도 가능한 수·입장 기록 마감 뒤 환급 수를 싣고, 화면(SCR-017)이 CMP-054로 최종 확인 버튼보다 먼저 보인다. 확인하면 같은 재인증 토큰으로 `confirmCancelUnusedTickets: true`를 실어 다시 보낸다(409는 토큰을 쓰지 않는다). fraudHold와 겹치면 fraudHold가 먼저다(docs/features/identity.md §8 '미사용 티켓 확인과 취소', 추천 적용 2026-11-19, BAT-013 계획, ADR-0284 결정 7) */
+  unusedTickets?: ProblemUnusedTickets;
   /**
      * 관리 계정 로그인 401 admin-login-failed·admin-login-code-invalid와 본인 해제 422 unlock-code-invalid(그 링크로 남은 수, BOT-121)에만. 잠금까지 남은 실패 수(계정 실패 수와 출발지 묶음 실패 수 가운데 잠금에 가까운 쪽). 없는 이메일도 같은 규칙으로 센 값이다(docs/security/auth-controls.md §2.2, 추천 적용 2026-11-05, BUILD_ORDER BOT-111)
      * @minimum 0

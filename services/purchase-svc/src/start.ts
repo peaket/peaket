@@ -48,6 +48,7 @@ import {
 import { DrizzleSaleControlStore, RedisSaleControlCopies, SetSaleSuspension, type SaleControlModuleDeps } from './modules/sale-control/index.js';
 import { startControlServer } from './control/control-server.js';
 import {
+  AccountWithdrawalTickets,
   CancelFraudTickets,
   CancelTicket,
   CancelTicketEventRefund,
@@ -65,6 +66,7 @@ import {
   DrizzleFraudCancellationStore,
   DrizzlePendingCancellationConversions,
   DrizzleSeatReturns,
+  DrizzleWithdrawalTickets,
   EVENT_REFUND_TICKET_DEADLINE_MS,
   EventRefundCancellerRouter,
   EventRefundGrpcController,
@@ -149,7 +151,9 @@ import {
   DrizzleWithdrawalOrders,
   ProcessAccountWithdrawal,
   PromWithdrawalParticipantSignals,
+  QuoteAccountWithdrawal,
   type WithdrawalDepositCancellations,
+  type WithdrawalTickets,
   withdrawalParticipantHandlers,
   withdrawalParticipantPackage,
   SeatMapSagaConfigs,
@@ -330,9 +334,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let refundPayments: GrpcPaymentCancellations | undefined;
   const ticketGrpcAddr = env.PEAKET_TICKET_GRPC_ADDR;
   const paymentGrpcAddr = env.PEAKET_PAYMENT_GRPC_ADDR;
+  // 탈퇴 참여자의 미사용 티켓 견적도 같은 달력을 쓴다(공제 없음 24시간 특례의 비영업일 계산). refund가 없으면(주소 없는 local·ci) 여기서 만든다
+  const holidayFile = env.PEAKET_HOLIDAY_CALENDAR_FILE;
+  const withdrawalCalendar = holidayFile ? parseHolidayCalendar(readFileSync(holidayFile, 'utf8')) : new WeekendBusinessCalendar();
   if (database && ticketGrpcAddr && paymentGrpcAddr) {
-    const holidayFile = env.PEAKET_HOLIDAY_CALENDAR_FILE;
-    const calendar = holidayFile ? parseHolidayCalendar(readFileSync(holidayFile, 'utf8')) : new WeekendBusinessCalendar();
+    const calendar = withdrawalCalendar;
     // ticket-svc 운영자 취소는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
     refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) });
     refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
@@ -893,16 +899,32 @@ export async function start(o: StartOptions): Promise<StartedService> {
     withdrawalPayments = refundPayments ? undefined : paymentGrpcAddr ? new GrpcPaymentCancellations({ address: paymentGrpcAddr }) : undefined;
     const deposits: WithdrawalDepositCancellations = refundPayments ?? withdrawalPayments ?? { cancel: async () => 'UNKNOWN' };
     if (!paymentGrpcAddr) service.logger.warn({ dep: 'payment-svc' }, 'PEAKET_PAYMENT_GRPC_ADDR가 없어 탈퇴 참여자가 입금 대기 주문을 취소하지 못한다(그런 탈퇴는 늘 미뤄진다)');
+    const withdrawalSignals = new PromWithdrawalParticipantSignals().register(service.metrics.registry);
+    // 결제한 미사용 티켓(payment §4.1 '미사용 티켓 견적'·'미사용 티켓 취소', I-T26). 견적은 DB와 판매 설정만 읽고,
+    // 취소는 예매 취소 Saga(CancelTicket)를 그대로 쓴다. ticket-svc 주소가 없으면 취소할 표가 있는 탈퇴만 UNAVAILABLE이다
+    const withdrawalTickets: WithdrawalTickets = new AccountWithdrawalTickets({
+      store: new DrizzleWithdrawalTickets(database),
+      configs: new SeatMapSaleConfigs(seatMap),
+      calendar: refund?.calendar ?? withdrawalCalendar,
+      ...(refund && refundTickets && refundPayments ? { cancelTicket: new CancelTicket(refund) } : {}),
+      signals: withdrawalSignals,
+      log: { warn: (obj, msg) => service.logger.warn(obj, msg) },
+    });
+    if (!ticketGrpcAddr) {
+      service.logger.warn({ dep: 'ticket-svc' }, 'PEAKET_TICKET_GRPC_ADDR가 없어 탈퇴 참여자가 미사용 티켓을 취소하지 못한다(미사용 티켓이 있는 탈퇴는 미뤄진다)');
+    }
     const withdrawalParticipant = new ProcessAccountWithdrawal({
       orders: new DrizzleWithdrawalOrders(database),
       deposits,
+      tickets: withdrawalTickets,
       clock: systemClock,
-      signals: new PromWithdrawalParticipantSignals().register(service.metrics.registry),
+      signals: withdrawalSignals,
       log: { warn: (obj, msg) => service.logger.warn(obj, msg) },
     });
+    const quote = new QuoteAccountWithdrawal({ tickets: withdrawalTickets, clock: systemClock });
     grpcServices.push({
       definition: withdrawalParticipantPackage().WithdrawalParticipantService.service,
-      handlers: withdrawalParticipantHandlers(withdrawalParticipant, {
+      handlers: withdrawalParticipantHandlers({ run: (i) => withdrawalParticipant.run(i), quote }, {
         ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}),
         onError: (method, err) => service.logger.error({ err: errorSummary(err), method }, 'WithdrawalParticipantService 처리 실패'),
       }),

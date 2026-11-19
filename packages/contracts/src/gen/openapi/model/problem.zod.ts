@@ -11,6 +11,17 @@
  */
 import * as zod from 'zod';
 
+
+export const problemUnusedTicketsTicketAmountMin = 0;
+
+export const problemUnusedTicketsDeductionAmountMin = 0;
+
+export const problemUnusedTicketsRefundAmountMin = 0;
+
+export const problemUnusedTicketsTransferableCountMin = 0;
+
+export const problemUnusedTicketsDeferredRefundCountMin = 0;
+
 export const problemRemainingAttemptsMin = 0;
 
 
@@ -34,6 +45,14 @@ export const Problem = zod.object({
   "state": zod.enum(['CASE_OPEN', 'RESTRICTED']).optional(),
   "until": zod.iso.datetime({"offset":true}).optional()
 }).optional().describe('탈퇴(DELETE /v1/identity/account)의 409 \'탈퇴 전 확인\'에만. 그 계정에 부정 예매 연계정보 대조값 보관 행(docs/data.md restricted_ci_hold)이 살아 있을 때 상태와 끝 시각을 싣고, 화면(SCR-017)이 보관 안내를 보인다. RESTRICTED면 이용 제한 끝, CASE_OPEN이면 그 회차 공연일 + 30일 [가정](docs/features/identity.md §8(추천 적용 2026-10-31, ADR-0173))'),
+  "unusedTickets": zod.object({
+  "count": zod.int().min(1).optional(),
+  "ticketAmount": zod.int().min(problemUnusedTicketsTicketAmountMin).optional(),
+  "deductionAmount": zod.int().min(problemUnusedTicketsDeductionAmountMin).optional(),
+  "refundAmount": zod.int().min(problemUnusedTicketsRefundAmountMin).optional(),
+  "transferableCount": zod.int().min(problemUnusedTicketsTransferableCountMin).optional(),
+  "deferredRefundCount": zod.int().min(problemUnusedTicketsDeferredRefundCountMin).optional()
+}).optional().describe('탈퇴(DELETE /v1/identity/account)의 409 \'탈퇴 전 확인\'에만. 결제한 미사용 티켓이 있을 때 수·결제 금액·POL-032 공제액·환급 예상액·지금 양도 가능한 수·입장 기록 마감 뒤 환급 수를 싣고, 화면(SCR-017)이 CMP-054로 최종 확인 버튼보다 먼저 보인다. 확인하면 같은 재인증 토큰으로 `confirmCancelUnusedTickets: true`를 실어 다시 보낸다(409는 토큰을 쓰지 않는다). fraudHold와 겹치면 fraudHold가 먼저다(docs/features/identity.md §8 \'미사용 티켓 확인과 취소\', 추천 적용 2026-11-19, BAT-013 계획, ADR-0284 결정 7)'),
   "remainingAttempts": zod.int().min(problemRemainingAttemptsMin).optional().describe('관리 계정 로그인 401 admin-login-failed·admin-login-code-invalid와 본인 해제 422 unlock-code-invalid(그 링크로 남은 수, BOT-121)에만. 잠금까지 남은 실패 수(계정 실패 수와 출발지 묶음 실패 수 가운데 잠금에 가까운 쪽). 없는 이메일도 같은 규칙으로 센 값이다(docs/security/auth-controls.md §2.2, 추천 적용 2026-11-05, BUILD_ORDER BOT-111)'),
   "humanCheckRequired": zod.boolean().optional().describe('관리 계정 로그인 401 admin-login-failed에만. 다음 시도에 사람 확인 토큰이 필요한지(auth-controls §2.3, 추천 적용 2026-11-05)'),
   "lock": zod.enum(['TIMED', 'PROTECT']).optional().describe('관리 계정 로그인 423 admin-account-locked에만. TIMED는 시간 잠금이나 출발지 묶음 잠금(Retry-After와 retryAfterSeconds를 함께 준다), PROTECT는 보호 잠금(원인은 싣지 않는다, auth-controls §3.2, 추천 적용 2026-11-05)'),

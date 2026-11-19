@@ -77,6 +77,25 @@ function seatsText(labels: readonly string[]): string {
   return parts.join(', ');
 }
 
+/**
+ * 실제 탈퇴의 미사용 티켓 환급 예상(SCR-017 실제 흐름의 409 unusedTickets, identity §8 '미사용 티켓 확인과 취소', CMP-054 account).
+ * 목업 WithdrawQuote와 따로 둔다: 목업 흐름은 지금처럼 목업 티켓 수를 쓰고 실제 수를 보이지 않는다
+ */
+export interface LiveWithdrawQuote {
+  /** 취소될 미사용 티켓 수 */
+  count: number;
+  /** 결제 금액 합(원) */
+  ticketAmount: number;
+  /** POL-032 공제액 합(원) */
+  deductionAmount: number;
+  /** 환급 예상액 합(원) */
+  refundAmount: number;
+  /** 지금 양도할 수 있는 수 */
+  transferableCount: number;
+  /** 입장 기록 마감 뒤로 환급이 미뤄지는 수 */
+  deferredRefundCount: number;
+}
+
 export function withdrawQuote(): WithdrawQuote {
   const tickets = TICKETS.filter((t) => UNUSED_TICKET_IDS.includes(t.id));
   const first = tickets[0];

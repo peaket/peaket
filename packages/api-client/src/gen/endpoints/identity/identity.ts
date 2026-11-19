@@ -2920,10 +2920,15 @@ export type deleteIdentityAccountResponse409 = {
   status: 409
 }
 
+export type deleteIdentityAccountResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type deleteIdentityAccountResponseSuccess = (deleteIdentityAccountResponse202 | deleteIdentityAccountResponse204) & {
   headers: Headers;
 };
-export type deleteIdentityAccountResponseError = (deleteIdentityAccountResponse403 | deleteIdentityAccountResponse409) & {
+export type deleteIdentityAccountResponseError = (deleteIdentityAccountResponse403 | deleteIdentityAccountResponse409 | deleteIdentityAccountResponse503) & {
   headers: Headers;
 };
 
@@ -2936,7 +2941,7 @@ export const getDeleteIdentityAccountUrl = () => {
 }
 
 /**
- * FR-017, POL-019, POL-023, POL-033. 소셜 제공자 재인증 토큰 필요(403 REAUTH_REQUIRED). 미사용 티켓이 있으면 confirmCancelUnusedTickets=true가 있어야 하고 티켓을 취소·환급한 뒤 탈퇴. 결제 확정 대기 주문이 있으면 202 후 처리. 받은 티켓·양도 요청·가상계좌 결제·입금 대기·양도 완료 티켓·굿즈 주문은 docs/planning/03 §1.5대로 처리하고, 가상계좌 결제 티켓을 지금 환급할 수 없으면 환급을 실행할 때까지 탈퇴를 미룬다(202, 추천 적용 2026-10-14, ADR-0062)
+ * FR-017, POL-019, POL-023, POL-033. 소셜 제공자 재인증 토큰 필요(403 REAUTH_REQUIRED). 결제한 미사용 티켓이 있으면 409의 unusedTickets로 수·결제 금액·POL-032 공제액·환급 예상액·양도 가능 수·마감 뒤 환급 수를 먼저 보이고, confirmCancelUnusedTickets=true로 다시 보낸 요청만 티켓을 취소·환급한 뒤 탈퇴한다. 취소는 표마다 사유 ACCOUNT_WITHDRAWAL·POL-032 공제로 나가고, 환급이 끝나지 않았으면 202로 미룬다(추천 적용 2026-11-19, BAT-013 계획, ADR-0284 결정 7). 결제 확정 대기 주문이 있으면 202 후 처리. 받은 티켓·양도 요청·가상계좌 결제·입금 대기·양도 완료 티켓·굿즈 주문은 docs/planning/03 §1.5대로 처리하고, 가상계좌 결제 티켓을 지금 환급할 수 없으면 환급을 실행할 때까지 탈퇴를 미룬다(202, 추천 적용 2026-10-14, ADR-0062)
  * @summary 탈퇴(모든 세션 종료, 계정 정보·연계정보 HMAC 파기, 거래 기록 분리 보관, 바로 재가입 가능)
  */
 export const deleteIdentityAccount = async (deleteIdentityAccountBody?: DeleteIdentityAccountBody, options?: Parameters<typeof orvalFetch>[1]): Promise<deleteIdentityAccountResponseSuccess> => {
@@ -2970,7 +2975,7 @@ return orvalFetch<deleteIdentityAccountResponseSuccess>(getDeleteIdentityAccount
 
 export const getDeleteIdentityAccountMutationKey = () => ['deleteIdentityAccount'] as const;
 
-export const getDeleteIdentityAccountMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getDeleteIdentityAccountMutationOptions = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityAccount>>, TError,DeleteIdentityAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityAccount>>, TError,DeleteIdentityAccountMutationVariables, TContext> => {
 
@@ -2999,13 +3004,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteIdentityAccountMutationResult = NonNullable<Awaited<ReturnType<typeof deleteIdentityAccount>>>
     export type DeleteIdentityAccountMutationBody = BodyType<DeleteIdentityAccountBody> | undefined
-    export type DeleteIdentityAccountMutationError = ErrorType<ProblemResponse>
+    export type DeleteIdentityAccountMutationError = ErrorType<ProblemResponse | ServiceUnavailableResponse>
     export type DeleteIdentityAccountMutationVariables = {data?: BodyType<DeleteIdentityAccountBody>}
 
     /**
  * @summary 탈퇴(모든 세션 종료, 계정 정보·연계정보 HMAC 파기, 거래 기록 분리 보관, 바로 재가입 가능)
  */
-export const useDeleteIdentityAccount = <TError = ErrorType<ProblemResponse>,
+export const useDeleteIdentityAccount = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIdentityAccount>>, TError,DeleteIdentityAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteIdentityAccount>>,
