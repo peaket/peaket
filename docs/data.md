@@ -1179,15 +1179,32 @@ erDiagram
     payment_cancel {
         uuid id PK
         uuid payment_id FK "UNIQUE (payment_id, idempotency_key). 결제 후 일반 취소 한 건(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액')"
+        int attempt "0~3 [가정]. 같은 취소 ID의 환급 시도 번호. 0은 첫 시도, 1~3은 지연 환급 계좌를 다시 받은 시도다. 4 이상은 받지 않는다(BAT-425, ADR-0316, payment 0024). CHECK 0 이상 3 이하"
         int amount "CHECK > 0. 이번 취소 금액. 첫 전송 때 정하고 재시도에도 그대로 보낸다"
-        text idempotency_key "cancel-{cancellationId}"
+        text idempotency_key "cancel-{cancellationId}(첫 시도) 또는 cancel-{cancellationId}-a{n}(계좌 다시 받기 시도). 결제사 멱등키다"
         text reason "결제사에 보낸 취소 사유. 재시도에도 그대로 보낸다(같은 멱등키의 본문)"
         bool full_cancel "금액을 생략한 전액 취소로 보냈는가. 진행 중인 다른 취소가 없고 금액이 남은 전부일 때만 참"
         int expected_balance "CHECK >= amount. 첫 전송 직전의 결제 금액 - 누적 취소액. 포트원 currentCancellableAmount로 보내고, 3시간 지난 재시도의 조회 대조에 쓴다(HOT-140이 넘긴 것, P-T21)"
-        text status "REQUESTED|CANCEL_PENDING|CANCELED|FAILED. REQUESTED·CANCEL_PENDING이 진행 중이다. 진행 중 행이 있고 만든 지 10분 [가정] 안이면 같은 결제의 다른 취소를 보내지 않는다. CANCELED는 반영으로, FAILED는 거절로 끝난 건이다. FAILED는 같은 취소 ID로 다시 보내지 않고 첫 답을 다시 준다(리뷰 B3. 계좌 거절이면 REFUND_ACCOUNT_REQUIRED, 그 밖 REJECTED, fail_reason)"
+        text status "REQUESTED|CANCEL_PENDING|CANCELED|FAILED. REQUESTED·CANCEL_PENDING이 진행 중이다. CANCELED는 반영으로, FAILED는 거절로 끝난 건이다. 새 계좌 시도 전 앞 행이 반영이면 그 행을 CANCELED로, 반영이 아니면 FAILED(SUPERSEDED)로 닫는다. 앞 행의 반영으로 이미 끝난 새 시도 행은 원장에 더하지 않는 CANCELED 표시다(같은 시도 재시도가 다시 보내지 않게, BAT-425)"
         timestamptz created_at "첫 전송 직전에 행을 만든 시각"
         timestamptz canceled_at "결제사 취소 완료 시각(ADR-0086)"
-        text fail_reason "FAILED의 개인정보 없는 까닭. 계좌 거절(은행·계좌번호·예금주 확인 실패)이면 REFUND_ACCOUNT_INVALID이고 그 밖 업무 거절은 비운다(CHECK: FAILED에만). 같은 취소 ID를 다시 부르면 이 값으로 첫 답(REFUND_ACCOUNT_REQUIRED·REJECTED)을 그대로 준다(payment 0023, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-03, docs/features/payment.md §6 '구현에서 정한 것' ④)"
+        text fail_reason "FAILED의 개인정보 없는 까닭. 계좌 거절(은행·계좌번호·예금주 확인 실패)이면 REFUND_ACCOUNT_INVALID, 앞 시도를 닫았으면 SUPERSEDED이고 그 밖 업무 거절은 비운다(CHECK: FAILED에만). 같은 취소 ID·같은 시도의 다시 부름은 이 값으로 첫 답(REFUND_ACCOUNT_REQUIRED·REJECTED)을 그대로 준다(payment 0023·0024, BAT-425)"
+    }
+    compensation_transfer {
+        uuid id PK
+        uuid compensation_id "UNIQUE. purchase compensation.id. 멱등 키이고 한 행이다(추천 적용 2026-11-20, BAT-425, ADR-0317, payment 0024)"
+        text transfer_id "지급대행이 준 송금 ID. UNAVAILABLE이면 빈 글자다"
+        uuid order_id
+        uuid account_id "결제자 계정"
+        uuid promoter_id "상계할 파트너(주최 측). PAID일 때 partner_receivable.promoter_id"
+        uuid event_id "원래 회차. 상품 배상은 null"
+        bigint amount "CHECK > 0. 배상금(10%·원 미만 올림, purchase가 계산해 저장한 값)"
+        text account_last4 "CHECK 숫자 4자리. 계좌번호 끝 4자리만. 원문은 저장하지 않는다(POL-014)"
+        text status "REQUESTED|PAID|FAILED|UNAVAILABLE. PAID일 때만 partner_receivable(COMPENSATION_ADVANCE) 한 행을 만든다"
+        text failure_reason "개인정보 없는 실패 이름표만"
+        uuid receivable_id "PAID일 때 만든 partner_receivable.id. REQUESTED·FAILED·UNAVAILABLE이면 null"
+        timestamptz created_at
+        timestamptz updated_at
     }
     settlement_statement {
         uuid id PK
@@ -1303,7 +1320,7 @@ erDiagram
         uuid id PK
         uuid promoter_id
         text cause "REFUND_AFTER_PAYOUT|CHARGEBACK|COMPENSATION_ADVANCE|NEGATIVE_STATEMENT. NEGATIVE_STATEMENT는 감액 수기 조정으로 지급액이 0 아래가 된 정산서(기술 검토 중간-043)"
-        text pg "돈이 빠진 결제사 TOSS|PORTONE. 이 미수금은 같은 결제사 정산서에서만 상계한다. COMPENSATION_ADVANCE는 null(결제사 무관)"
+        text pg "돈이 빠진 결제사 TOSS|PORTONE. 이 미수금은 같은 결제사 정산서에서만 상계한다. COMPENSATION_ADVANCE는 null(결제사 무관, BAT-425 ADR-0317)"
         uuid event_id "원래 회차(상품 환급은 null)"
         uuid statement_id "원래 정산서"
         int commission_rate_bp "원래 회차·주문 항목의 고정 수수료율"
@@ -1313,7 +1330,7 @@ erDiagram
         bigint amount
         bigint remaining "amount − receivable_movement 합. 같은 트랜잭션에서 함께 고치고 불변식 검사가 본다"
         text status "OPEN|OFFSET|GUARANTEE|BILLED|CLOSED|WRITTEN_OFF"
-        text source_ref
+        text source_ref "원천 참조. 배상금 미리 지급은 compensation:{id}이고 부분 유일(source_ref is not null)이라 같은 배상의 미수금은 한 행이다(payment 0024, ADR-0317)"
     }
     receivable_movement {
         uuid id PK

@@ -184,3 +184,11 @@
 payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`·`statement_source`·`statement_dispute`·`payout_batch`·`payout`·`seller_kyc`·`payout_account` 표(0015)를 넣었다. J-T18의 회차 정산서·이의·KYC·지급 묶음·수기 포트원 실행은 `services/payment-svc/test/settlement.test.ts`가 본다. 상품 정산서 원천·토스 지급대행 JWE·포트원 지급 내역/출금 대사·KYC 원천·ops-svc 승인·core-svc export는 위 사유대로 막혀 있다.
 잔여(R-588)는 core-svc `merch_order`·`merch_order_item`·`attendee_export`(0016)와 `BOOKER_EXPORT` 재인증, notify 발송기·DLQ, payment-svc 상품 정산서·미수금 상계(0016), ops-svc `payout_approval`(0009), 토스 지급 웹훅 서명·포트원 출금 대사 규칙을 넣었다. 실제 키·계정이 없어 토스 실행은 503이고, KYC 셀러 조회·Secrets Manager·지급 실행 화면은 남았다.
 - Q-T59(2026-11-15, R-593): queue-svc·purchase-svc가 `SetBookingRestriction` gRPC로 `q:rst:{account}`·`s:rst:{account}`에 판 번호가 클 때만 사본을 쓴다. 시험은 단위 `services/queue-svc/test/booking-restriction.test.ts`·`services/purchase-svc/test/booking-restriction.test.ts`와 실제 Valkey·gRPC test-int `services/queue-svc/test-int/booking-restriction.int.test.ts`·`services/purchase-svc/test-int/booking-restrictions.int.test.ts`가 본다. heavy gate에서 변이 6/6을 잡았다. ops-svc 승인 업무·10분 재전송 작업 워커와 화면은 아직 없다.
+
+## BAT-425(2026-11-20)
+
+| 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
+| --- | --- | --- | --- | --- |
+| P-T76 |  | A | BAT-425 | 지연 환급 계좌 다시 받기의 새 시도 번호·`FAILED(SUPERSEDED)`·앞 진행 중 행 조회 닫기(ADR-0316). 돈이 나가는 이중 환불 가드라 A다. 정본 표는 `docs/features/payment.md` §11 P-T76이고 시험 이름으로 상태를 정한다 |
+
+- R-T42·R-T43·R-T45·R-T46·R-T47·J-T28의 notes 줄은 그 ID를 `docs/features/transfer-refund.md` §11·`docs/features/settlement.md` §11에 더하는 B·기록 담당이 같은 때 넣는다. 지금 넣으면 장부가 '정본에 없는 항목'으로 멈춘다(2026-11-20 A 확인).
