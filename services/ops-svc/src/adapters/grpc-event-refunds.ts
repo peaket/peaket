@@ -38,6 +38,8 @@ export interface StartEventRefundCommand {
   readonly fanNoticeReason?: string;
   readonly postponedToMs?: number;
   readonly refundWindowClosesAtMs?: number;
+  /** 판정 미리보기의 주문별 배상 목록. 있으면 purchase-svc가 금액을 다시 계산하지 않는다(BAT-425 RV-02) */
+  readonly compensationOrders?: EventCancellationDryRun['compensationOrders'];
 }
 
 export interface EventRefundJobView {
@@ -107,6 +109,11 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, 
       ...(q.fanNoticeReason !== undefined ? { fan_notice_reason: q.fanNoticeReason } : {}),
       ...(q.postponedToMs !== undefined ? { postponed_to: timestampOf(q.postponedToMs) } : {}),
       ...(q.refundWindowClosesAtMs !== undefined ? { refund_window_closes_at: timestampOf(q.refundWindowClosesAtMs) } : {}),
+      ...(q.compensationOrders !== undefined
+        ? {
+            compensation_orders: q.compensationOrders.map((o) => ({ order_id: o.orderId, base_amount: { krw: o.baseAmount }, amount: { krw: o.amount } })),
+          }
+        : {}),
     });
     return viewOf(answer);
   }
@@ -137,11 +144,17 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, 
   /** PreviewEventRefund(BAT-420 GAT-110 W): 판정 미리보기. 금액(Money)은 원으로, 결제사별 주문 수·예상 시간(초)을 읽는다 */
   async preview(q: { eventId: string; requestId: string; fault: EventCancellationFault }): Promise<EventCancellationDryRun> {
     const a = await this.#call('PreviewEventRefund', { event_id: q.eventId, cancellation_request_id: q.requestId, ruling: FAULT[q.fault] });
+    const compensationOrders = rows(a.compensation_orders).map((o) => ({
+      orderId: typeof o.order_id === 'string' ? o.order_id : '',
+      baseAmount: krwOf(o.base_amount),
+      amount: krwOf(o.amount),
+    }));
     return {
       targetOrders: intOf(a.target_orders),
       refundTotal: krwOf(a.refund_total),
       compensationTargets: intOf(a.compensation_targets),
       compensationTotal: krwOf(a.compensation_total),
+      ...(compensationOrders.length > 0 ? { compensationOrders } : {}),
       perPg: rows(a.per_pg).flatMap((p) => {
         const pg = typeof p.pg === 'string' ? PG_OF[p.pg] : undefined;
         return pg ? [{ pg, orders: intOf(p.orders), estimatedSeconds: intOf(p.estimated_seconds) }] : [];

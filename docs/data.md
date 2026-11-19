@@ -810,7 +810,7 @@ erDiagram
     }
     order_idempotency {
         text account_ref PK "부른 계정 ID. 키 범위는 계정 × 작업이라 다른 계정의 같은 키는 다른 행이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046). 칸은 서비스마다 둔 멱등 기록 표와 같은 꼴이다(packages/platform idempotencyRecordTable, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
-        text operation PK "CREATE_ORDER|START_PAYMENT|ACCEPT_PAYMENT(주문 생성·결제 시도 시작·결제 접수)"
+        text operation PK "CREATE_ORDER|START_PAYMENT|ACCEPT_PAYMENT(주문 생성·결제 시도 시작·결제 접수)|CANCEL_TICKET|REFUND_ACCOUNT|COMPENSATION_ACCOUNT(예매 취소·지연 환급 계좌 다시 받기·배상 계좌 입력, BAT-425 RV-03으로 CHECK 확장, purchase 0031)"
         uuid idempotency_key PK "클라이언트 Idempotency-Key(소문자로 맞춘 v4), 파티션하지 않음"
         bytea request_hash "요청 지문(메서드·실제 경로·본문 바이트의 SHA-256). 같은 키에 지문이 다르면 422 idempotency-key-reused"
         text result_ref "다시 돌려줄 응답의 대상(주문 생성·결제 접수는 주문 ID, 결제 시도 시작은 결제 시도 ID). 업무 쓰기를 커밋할 때 채운다"
@@ -955,6 +955,8 @@ erDiagram
         int deduction_amount "⌊티켓 금액 × deduction_bp ÷ 10000⌋. 원 미만 버림(POL-032)"
         int refund_amount "티켓 금액 − deduction_amount. 공용 함수 한 곳에서만 계산"
         int refund_attempt "같은 취소 ID의 환급 시도 번호(0~3 [가정]). 0은 첫 시도(cancel-{id})이고 1~3은 지연 환급 계좌를 다시 받은 시도(cancel-{id}-a{n})다. 4 이상은 받지 않는다(BAT-425, ADR-0316, purchase 0030)"
+        uuid refund_account_idem_key "마지막 지연 환급 계좌 다시 받기 요청의 Idempotency-Key. 계좌 원문이 아니다(purchase 0031, BAT-425 RV-03)"
+        text refund_account_answer "그 키의 첫 답(REFUNDED|REFUND_PENDING|REFUND_ACCOUNT_REQUIRED|REJECTED). 같은 키의 다시 부름은 이 답을 그대로 준다. 키 없이 쓰지 않는다(CHECK, purchase 0031, BAT-425 RV-03)"
         text status "REQUESTED|REFUND_PENDING|REFUNDED|VOIDED"
         timestamptz refund_due_at "입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다. core event.entry_closed_at 연결 전에는 공연 시작 + 50시간(공연 24 + 역할 유효 끝 2 + 미보고 24)의 보수적 상한이다(추천 적용 2026-11-13, R-540)"
         int refund_attempts "결제사 취소를 다시 시도한 횟수(REFUND_PENDING). 기본 0. 5회 [가정]를 넘으면 refund_failed_at을 남긴다(추천 적용 2026-11-13, R-547)"

@@ -9,11 +9,20 @@ export type EventCancellationPg = 'TOSS' | 'PORTONE' | 'SIMULATOR';
 export type EventCancellationVia = 'PARTNER' | 'COMMANDER';
 
 /** 판정 때 purchase-svc PreviewEventRefund로 계산한 미리보기(주문 단위, transfer-refund §5 '판정·미리보기·확정의 차례') */
+/** 미리보기의 주문별 배상 한 줄. 확정(StartEventRefund)이 그대로 실어 purchase-svc가 다시 계산하지 않게 한다(BAT-425 RV-02) */
+export interface EventCancellationCompensationOrder {
+  readonly orderId: string;
+  readonly baseAmount: number;
+  readonly amount: number;
+}
+
 export interface EventCancellationDryRun {
   readonly targetOrders: number;
   readonly refundTotal: number;
   readonly compensationTargets: number;
   readonly compensationTotal: number;
+  /** 주문별 배상 목록. 배상 행이 있을 때만 있다 */
+  readonly compensationOrders?: readonly EventCancellationCompensationOrder[];
   readonly perPg: readonly { readonly pg: EventCancellationPg; readonly orders: number; readonly estimatedSeconds: number }[];
 }
 

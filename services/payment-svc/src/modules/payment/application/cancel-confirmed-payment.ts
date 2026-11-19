@@ -78,24 +78,26 @@ export class CancelConfirmedPayment {
     if (target === undefined) throw new PaymentNotFoundError();
     // 포트원 대응표 밖 은행 코드는 모양이 틀린 계좌와 같다(행을 만들기 전, 같은 취소 ID를 맞는 계좌로 다시 쓸 수 있다, RV-04)
     if (account !== undefined && target.pg === 'PORTONE' && portoneBankOf(account.bankCode) === undefined) account = undefined;
-    // 새 시도는 계좌가 있어야 한다(계좌를 다시 받는 시도이므로, ADR-0316)
-    if (attempt > 0 && account === undefined) throw new PaymentInputError('refund_account');
 
     const newIdemKey = confirmedCancelIdemKey(parsed.cancellationId, attempt);
+    // 같은 시도의 행이 있는지 먼저 본다. 계좌를 실은 시도가 결과 모름(CANCEL_PENDING·UNKNOWN)으로 남은 뒤의 재시도는
+    // 계좌를 저장하지 않으므로 계좌 없이 온다. 그때는 거절하지 않고 같은 시도의 멱등키로 조회·정산한다(RV-01, ADR-0316 결정 4, B9)
+    const needsOwnLookup = target.virtualAccount === true || attempt > 0;
+    const own = needsOwnLookup ? await store.findCancelStatus?.(target.paymentId, newIdemKey, budget) : undefined;
+    // 계좌 없이 온 새 시도(그 시도의 행도 없다)만 계좌가 필요하다. 계좌를 다시 받는 시도이므로 거절한다(ADR-0316)
+    if (attempt > 0 && account === undefined && own === undefined) throw new PaymentInputError('refund_account');
+
     // 새 계좌 시도 전 앞 진행 중 행 정리(B1~B5, P-T76 ①③④). 가상계좌가 아니거나 계좌가 없거나 이미 있는 행의 재시도면 지금 그대로다
-    if (target.virtualAccount === true && account !== undefined) {
-      const own = await store.findCancelStatus?.(target.paymentId, newIdemKey, budget);
-      if (own === undefined) {
-        const prior = await this.#priorAttempts(target, newIdemKey, budget);
-        if (prior !== undefined) {
-          const outcome = await this.#settlePrior(
-            target,
-            prior,
-            { cancellationId: parsed.cancellationId, attempt, ...(parsed.amount === undefined ? {} : { amount: parsed.amount }), reason: parsed.reason },
-            budget,
-          );
-          if (outcome.action === 'RETURN') return outcome.answer;
-        }
+    if (target.virtualAccount === true && account !== undefined && own === undefined) {
+      const prior = await this.#priorAttempts(target, newIdemKey, budget);
+      if (prior !== undefined) {
+        const outcome = await this.#settlePrior(
+          target,
+          prior,
+          { cancellationId: parsed.cancellationId, attempt, ...(parsed.amount === undefined ? {} : { amount: parsed.amount }), reason: parsed.reason },
+          budget,
+        );
+        if (outcome.action === 'RETURN') return outcome.answer;
       }
     }
 

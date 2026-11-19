@@ -90,6 +90,22 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     }
                   }
                 },
+                "CompensationOrder": {
+                  "fields": {
+                    "order_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "base_amount": {
+                      "type": "peaket.common.v1.Money",
+                      "id": 2
+                    },
+                    "amount": {
+                      "type": "peaket.common.v1.Money",
+                      "id": 3
+                    }
+                  }
+                },
                 "PreviewEventRefundResponse": {
                   "fields": {
                     "target_orders": {
@@ -112,6 +128,11 @@ export const purchaseV1Refund: Record<string, unknown> = {
                       "rule": "repeated",
                       "type": "PgRefundEstimate",
                       "id": 5
+                    },
+                    "compensation_orders": {
+                      "rule": "repeated",
+                      "type": "CompensationOrder",
+                      "id": 6
                     }
                   }
                 },
@@ -156,6 +177,11 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "fan_notice_reason": {
                       "type": "string",
                       "id": 10
+                    },
+                    "compensation_orders": {
+                      "rule": "repeated",
+                      "type": "CompensationOrder",
+                      "id": 11
                     }
                   }
                 },

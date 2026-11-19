@@ -1,13 +1,16 @@
 // 예매 취소 Saga의 purchase DB 어댑터(GAT-080, docs/data.md order_cancellation).
 // 주문·티켓·좌석은 purchase DB에서 읽고, 취소 행은 한 트랜잭션에 쓴다. 좌석 되돌리기는 inventory의 SeatSales를 쓴다.
 import { Inject, Injectable } from '@nestjs/common';
-import { DATABASE, type Database } from '@peaket/platform';
+import { DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
 import { and, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { SeatMap, SeatSales } from '../../../inventory/index.js';
-import type { CancellationOrderView, CancellationReason, CancellationRecord, CancellationWriteOutcome, DueRefund } from '../../domain/cancellation.js';
+import type { CancellationOrderView, CancellationReason, CancellationRecord, CancellationWriteOutcome, DueRefund, RefundAccountAnswer } from '../../domain/cancellation.js';
 import { REFUND_ACCOUNT_MAX_ATTEMPTS } from '../../domain/cancellation.js';
 import type { CancellationClaims, CancellationConfigs, CancellationOrders, CancellationWrites, RefundAccountWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
 import { DrizzleOrderStore, orderCancellation, orderItem, purchaseOrder } from '../../../booking/index.js';
+
+/** 같은 트랜잭션의 시도 올리기가 0행일 때 멱등 키 행까지 되돌리는 표지 */
+class BeginAttemptNotApplied extends Error {}
 
 /** 주문·항목·회차 설정을 읽는 어댑터. 티켓 ID로 주문 한 장을 찾는다 */
 @Injectable()
@@ -61,13 +64,21 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         refundAttempts: orderCancellation.refundAttempts,
         refundAttempt: orderCancellation.refundAttempt,
         accountRequiredAt: orderCancellation.refundAccountRequiredAt,
+        refundAccountIdemKey: orderCancellation.refundAccountIdemKey,
+        refundAccountAnswer: orderCancellation.refundAccountAnswer,
       })
       .from(orderCancellation)
       .where(eq(orderCancellation.id, cancellationId))
       .limit(1);
     if (!row) return undefined;
-    const { accountRequiredAt, ...rest } = row;
-    return { ...rest, state: row.state as CancellationRecord['state'], ...(accountRequiredAt ? { refundAccountRequired: true } : {}) };
+    const { accountRequiredAt, refundAccountIdemKey, refundAccountAnswer, ...rest } = row;
+    return {
+      ...rest,
+      state: row.state as CancellationRecord['state'],
+      ...(accountRequiredAt ? { refundAccountRequired: true } : {}),
+      ...(refundAccountIdemKey !== null ? { refundAccountIdemKey } : {}),
+      ...(refundAccountAnswer !== null ? { refundAccountAnswer: refundAccountAnswer as RefundAccountAnswer } : {}),
+    };
   }
 }
 
@@ -238,36 +249,109 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
    * 3회 [가정] 미만일 때만 1 올린다. 커밋한 뒤에 부르는 쪽이 결제사를 부른다(결제사를 트랜잭션 안에서 부르지 않는다).
    * 그사이 다른 요청이 올렸으면(조건부 0행) undefined라 동시 두 요청에서 하나만 오른다
    */
-  async beginAttempt(q: { readonly cancellationId: string; readonly oldAttempt: number; readonly nowMs: number }): Promise<
+  async beginAttempt(q: {
+    readonly cancellationId: string;
+    readonly oldAttempt: number;
+    readonly nowMs: number;
+    readonly idempotency?: { readonly accountRef: string; readonly key: string; readonly requestHash: Uint8Array; readonly operation: 'REFUND_ACCOUNT' };
+  }): Promise<
     | { readonly attempt: number; readonly orderId: string; readonly ticketId: string; readonly refundAmount: number; readonly reason: CancellationReason; readonly retryAttempts: number }
     | undefined
   > {
     return this.database.transaction(async (tx) => {
-      const [row] = await tx
-        .select({
-          orderId: orderCancellation.orderId,
-          ticketId: orderCancellation.ticketId,
-          refundAmount: orderCancellation.refundAmount,
-          reason: orderCancellation.reason,
-          status: orderCancellation.status,
-          refundAttempts: orderCancellation.refundAttempts,
-          refundAttempt: orderCancellation.refundAttempt,
-          accountRequiredAt: orderCancellation.refundAccountRequiredAt,
-        })
-        .from(orderCancellation)
-        .where(eq(orderCancellation.id, q.cancellationId))
-        .for('update');
-      if (!row || row.status !== 'REFUND_PENDING' || row.accountRequiredAt === null) return undefined;
-      if (row.refundAttempt !== q.oldAttempt || row.refundAttempt >= REFUND_ACCOUNT_MAX_ATTEMPTS) return undefined;
-      const attempt = row.refundAttempt + 1;
-      const updated = await tx
-        .update(orderCancellation)
-        .set({ refundAttempt: attempt, nextRefundAt: null, statusChangedAt: new Date(q.nowMs) })
-        .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.refundAttempt, q.oldAttempt), eq(orderCancellation.status, 'REFUND_PENDING')))
-        .returning({ id: orderCancellation.id });
-      if (updated.length === 0) return undefined;
-      return { attempt, orderId: row.orderId, ticketId: row.ticketId, refundAmount: row.refundAmount, reason: row.reason as CancellationReason, retryAttempts: row.refundAttempts };
+      if (q.idempotency === undefined) return this.#beginAttemptTx(tx, q);
+      // 같은 계정·작업·키를 같은 트랜잭션의 첫 쓰기로 잡는다(플랫폼 IdempotencyStore, BAT-425 RV-03).
+      // 같은 키의 다시 부름은 시도를 올리지 않고 그 시도의 값으로 조회·정산 길을 이어 간다
+      const idempotency = new IdempotencyStore({ clock: { now: () => q.nowMs, monotonicMs: () => q.nowMs }, table: 'order_idempotency' });
+      try {
+        return await idempotency.run(
+          tx,
+          { accountRef: q.idempotency.accountRef, operation: q.idempotency.operation, key: q.idempotency.key, requestHash: q.idempotency.requestHash },
+          {
+            execute: async () => {
+              const value = await this.#beginAttemptTx(tx, q, q.idempotency!.key);
+              // 다른 요청이 먼저 시도를 올렸다: 키 행도 남기지 않고 되돌린다(다음 요청이 처음부터 다시 본다)
+              if (value === undefined) throw new BeginAttemptNotApplied();
+              return { resultRef: q.cancellationId, value };
+            },
+            replay: async () => this.#replayAttempt(tx, q.cancellationId),
+          },
+        );
+      } catch (err) {
+        if (err instanceof BeginAttemptNotApplied) return undefined;
+        throw err;
+      }
     });
+  }
+
+  /** 시도를 1 올린다. idemKey가 있으면 그 키도 같은 행에 적는다(같은 키 재요청은 이 시도를 그대로 쓴다) */
+  async #beginAttemptTx(
+    tx: DbTransaction,
+    q: { readonly cancellationId: string; readonly oldAttempt: number; readonly nowMs: number },
+    idemKey?: string,
+  ): Promise<
+    | { readonly attempt: number; readonly orderId: string; readonly ticketId: string; readonly refundAmount: number; readonly reason: CancellationReason; readonly retryAttempts: number }
+    | undefined
+  > {
+    const [row] = await tx
+      .select({
+        orderId: orderCancellation.orderId,
+        ticketId: orderCancellation.ticketId,
+        refundAmount: orderCancellation.refundAmount,
+        reason: orderCancellation.reason,
+        status: orderCancellation.status,
+        refundAttempts: orderCancellation.refundAttempts,
+        refundAttempt: orderCancellation.refundAttempt,
+        accountRequiredAt: orderCancellation.refundAccountRequiredAt,
+      })
+      .from(orderCancellation)
+      .where(eq(orderCancellation.id, q.cancellationId))
+      .for('update');
+    if (!row || row.status !== 'REFUND_PENDING' || row.accountRequiredAt === null) return undefined;
+    if (row.refundAttempt !== q.oldAttempt || row.refundAttempt >= REFUND_ACCOUNT_MAX_ATTEMPTS) return undefined;
+    const attempt = row.refundAttempt + 1;
+    const updated = await tx
+      .update(orderCancellation)
+      .set({
+        refundAttempt: attempt,
+        nextRefundAt: null,
+        statusChangedAt: new Date(q.nowMs),
+        ...(idemKey === undefined ? {} : { refundAccountIdemKey: idemKey }),
+      })
+      .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.refundAttempt, q.oldAttempt), eq(orderCancellation.status, 'REFUND_PENDING')))
+      .returning({ id: orderCancellation.id });
+    if (updated.length === 0) return undefined;
+    return { attempt, orderId: row.orderId, ticketId: row.ticketId, refundAmount: row.refundAmount, reason: row.reason as CancellationReason, retryAttempts: row.refundAttempts };
+  }
+
+  /** 같은 키의 다시 부름: 시도를 올리지 않고 그 행의 시도 값으로 결제사 조회·정산을 이어 간다 */
+  async #replayAttempt(
+    tx: DbTransaction,
+    cancellationId: string,
+  ): Promise<{ readonly attempt: number; readonly orderId: string; readonly ticketId: string; readonly refundAmount: number; readonly reason: CancellationReason; readonly retryAttempts: number } | undefined> {
+    const [row] = await tx
+      .select({
+        orderId: orderCancellation.orderId,
+        ticketId: orderCancellation.ticketId,
+        refundAmount: orderCancellation.refundAmount,
+        reason: orderCancellation.reason,
+        status: orderCancellation.status,
+        refundAttempts: orderCancellation.refundAttempts,
+        refundAttempt: orderCancellation.refundAttempt,
+      })
+      .from(orderCancellation)
+      .where(eq(orderCancellation.id, cancellationId))
+      .for('update');
+    if (row === undefined || row.status !== 'REFUND_PENDING') return undefined;
+    return { attempt: row.refundAttempt, orderId: row.orderId, ticketId: row.ticketId, refundAmount: row.refundAmount, reason: row.reason as CancellationReason, retryAttempts: row.refundAttempts };
+  }
+
+  /** 같은 키의 첫 답을 취소 행에 적는다(0031, BAT-425 RV-03). 그 사이 다른 키가 덮었으면 쓰지 않는다 */
+  async saveAnswer(q: { readonly cancellationId: string; readonly idempotencyKey: string; readonly answer: RefundAccountAnswer; readonly nowMs: number }): Promise<void> {
+    await this.database.db
+      .update(orderCancellation)
+      .set({ refundAccountAnswer: q.answer, statusChangedAt: new Date(q.nowMs) })
+      .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.refundAccountIdemKey, q.idempotencyKey)));
   }
 
   /** 계좌 대기 표시를 지운다(REFUND_PENDING만). 결과 모름이면 다음 재시도 시각을 함께 쓴다(BAT-425, ADR-0316 결정 4) */

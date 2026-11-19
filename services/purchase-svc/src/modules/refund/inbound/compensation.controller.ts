@@ -150,6 +150,7 @@ export class CancellationAccountController {
         account,
         reauthToken: tokenOf(request),
         idempotencyKey: idem.key,
+        requestHash: idem.requestHash,
         sessionId: me.sessionId,
         nowMs: this.clock.now(),
       });

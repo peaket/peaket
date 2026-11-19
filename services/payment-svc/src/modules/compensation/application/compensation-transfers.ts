@@ -51,6 +51,9 @@ class MemoryCompensationTransferStore implements CompensationTransferStore {
 }
 
 export class CompensationTransfers {
+  /** 같은 compensation_id의 겹친 요청을 한 번의 포트 호출로 합친다(RV-06). 저장한 행이 있기 전의 겹침을 막는다 */
+  readonly #inFlight = new Map<string, Promise<CompensationTransferRecord>>();
+
   constructor(
     private readonly port: CompensationTransferPort,
     private readonly store: CompensationTransferStore = new MemoryCompensationTransferStore(),
@@ -68,7 +71,16 @@ export class CompensationTransfers {
     // 같은 compensation_id의 다시 부름은 저장한 상태·transfer_id를 그대로 준다(계좌가 달라도 새 송금을 만들지 않는다)
     const existing = await this.store.findByCompensationId(input.compensationId);
     if (existing !== undefined) return existing;
+    // 행을 읽은 뒤 저장 전에 겹친 요청: 같은 compensation_id의 진행 중 호출에 합류한다(포트 한 번, RV-06).
+    // 실제 지급대행 어댑터도 compensation_id를 멱등 키로 써야 한다(포트 계약, ADR-0317)
+    const running = this.#inFlight.get(input.compensationId);
+    if (running !== undefined) return running;
+    const pending = this.#send(input, promoterId).finally(() => this.#inFlight.delete(input.compensationId));
+    this.#inFlight.set(input.compensationId, pending);
+    return pending;
+  }
 
+  async #send(input: CompensationTransferRequest, promoterId: string | undefined): Promise<CompensationTransferRecord> {
     const sent = await this.port.request(input);
     const saved = await this.store.save({
       ...sent,
@@ -78,7 +90,8 @@ export class CompensationTransfers {
       amount: input.amount,
       promoterId: promoterId ?? UNKNOWN_PROMOTER,
       ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
-      accountLast4: input.accountNumber.slice(-4),
+      // 계좌 끝 4자리는 하이픈을 뺀 숫자다(123-456-789 → 6789). 원문을 그대로 자르면 DB CHECK(^[0-9]{1,4}$)에 걸린다(RV-05)
+      accountLast4: input.accountNumber.replace(/-/g, '').slice(-4),
     });
     if (saved.status !== 'PAID' || saved.receivableId !== undefined) return saved;
     // PAID일 때만 미수금 한 행(REQUESTED·FAILED·UNAVAILABLE은 0행). 같은 PAID를 다시 받아도 source_ref 유일로 1행이다

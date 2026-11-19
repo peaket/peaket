@@ -8,7 +8,7 @@ import { purchaseV1Refund } from '@peaket/contracts/proto';
 import { verifyInternalGrpcActor } from '@peaket/platform';
 import { EventRefundError, type EventRefundService } from '../application/event-refund-service.js';
 import { EventRefundHoldError } from '../domain/event-refund-hold.js';
-import type { EventCancellationRequest, EventRefundFault, EventRefundKind, EventRefundProgress, RefundJobState, RefundPauseReason, RefundPgProvider } from '../domain/event-refund.js';
+import type { CompensationOrder, EventCancellationRequest, EventRefundFault, EventRefundKind, EventRefundProgress, RefundJobState, RefundPauseReason, RefundPgProvider } from '../domain/event-refund.js';
 
 export interface EventRefundPackage {
   EventRefundService: grpc.ServiceClientConstructor;
@@ -34,6 +34,19 @@ const msOf = (v: unknown): number | undefined => {
   return t ? Number(t.seconds) * 1000 + Math.floor(Number(t.nanos) / 1_000_000) : undefined;
 };
 const timestampOf = (ms: number): { seconds: number; nanos: number } => ({ seconds: Math.floor(ms / 1000), nanos: (ms % 1000) * 1_000_000 });
+/** peaket.common.v1.Money(krw)를 원으로 */
+const krwOf = (v: unknown): number => {
+  const m = childOf(v);
+  return m ? Number(m.krw) || 0 : 0;
+};
+/** 주문별 배상 목록(proto CompensationOrder). 빈 목록은 없는 칸으로 읽는다 */
+const compensationOrdersOf = (v: unknown): readonly CompensationOrder[] | undefined => {
+  const rows = Array.isArray(v) ? (v.filter((x) => typeof x === 'object' && x !== null) as Req[]) : [];
+  if (rows.length === 0) return undefined;
+  return rows.map((r) => ({ orderId: text(r.order_id), baseAmount: krwOf(r.base_amount), amount: krwOf(r.amount) }));
+};
+const compensationOrdersView = (orders: readonly CompensationOrder[] | undefined): Record<string, unknown>[] =>
+  (orders ?? []).map((o) => ({ order_id: o.orderId, base_amount: { krw: o.baseAmount }, amount: { krw: o.amount } }));
 
 const FAULTS: Record<string, EventRefundFault> = {
   CANCELLATION_RULING_ORGANIZER: 'ORGANIZER',
@@ -139,12 +152,14 @@ export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, o?
         compensation_targets: p.compensationTargets,
         compensation_total: { krw: p.compensationTotal },
         per_pg: p.perPg.map((x) => ({ pg: `PG_PROVIDER_${x.pg}`, orders: x.orders, estimated_seconds: x.estimatedSeconds })),
+        compensation_orders: compensationOrdersView(p.compensationOrders),
       };
     }),
     StartEventRefund: unary(async (r) => {
       const kind = KINDS[text(r.kind)] ?? 'CANCEL';
       const postponedToMs = msOf(r.postponed_to);
       const closesAtMs = msOf(r.refund_window_closes_at);
+      const compensationOrders = compensationOrdersOf(r.compensation_orders);
       const result = await useCases.start({
         eventId: text(r.event_id),
         requestId: text(r.cancellation_request_id),
@@ -155,6 +170,7 @@ export function eventRefundServiceHandlers(useCases: EventRefundGrpcUseCases, o?
         ...(text(r.fan_notice_reason) !== '' ? { fanNoticeReason: text(r.fan_notice_reason) } : {}),
         ...(postponedToMs !== undefined ? { postponedToMs } : {}),
         ...(closesAtMs !== undefined ? { refundWindowClosesAtMs: closesAtMs } : {}),
+        ...(compensationOrders !== undefined ? { compensationOrders } : {}),
       });
       return requestView(result);
     }),

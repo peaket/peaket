@@ -348,6 +348,8 @@ export class EventCancellations {
         kind: running.kind,
         ...(running.fanNoticeReason !== null ? { fanNoticeReason: running.fanNoticeReason } : {}),
         ...(running.kind === 'POSTPONE' && running.newStartsAt ? { postponedToMs: running.newStartsAt.getTime() } : {}),
+        // 판정 때 저장한 미리보기의 주문별 배상 금액을 그대로 보낸다(확정은 다시 계산하지 않는다, BAT-425 RV-02)
+        ...(running.dryRun?.compensationOrders !== undefined ? { compensationOrders: running.dryRun.compensationOrders } : {}),
       });
       const status = job.state === 'COMPLETED' ? 'COMPLETED' : job.state === 'REFUND_WINDOW' ? 'REFUND_WINDOW' : 'RUNNING';
       const doneMs = this.now();

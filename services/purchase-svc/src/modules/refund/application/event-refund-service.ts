@@ -22,6 +22,8 @@ import {
   type EventRefundItem,
   type EventRefundKind,
   type EventRefundPreview,
+  type CompensationOrder,
+  type EventRefundFault,
   type EventRefundProgress,
   type EventRefundTarget,
   type RefundPgProvider,
@@ -123,7 +125,18 @@ function outcomeOf(status: 'REFUNDED' | 'REFUND_PENDING' | 'FAILED', error: stri
   return error !== undefined && FAILURE_ERRORS.has(error) ? 'REJECT' : 'FAILURE';
 }
 
+/** 미리보기의 주문별 배상 목록을 확정까지 들고 있는 시간 1시간 [가정]. 그 뒤 확정은 옛 호출과 같이 다시 계산한다 */
+export const EVENT_REFUND_PREVIEW_TTL_MS = 60 * 60_000;
+/** 프로세스 안에 들고 있는 미리보기 수 상한 [가정] */
+const EVENT_REFUND_PREVIEW_CACHE = 100;
+
 export class EventRefundService {
+  /**
+   * 판정 미리보기의 주문별 배상 목록(BAT-425 RV-02). 정본은 ops-svc dry_run이고 확정 요청이 그 목록을 싣는다.
+   * 같은 프로세스에서 미리보기 뒤 확정하는 옛 호출자를 위해 마지막 미리보기를 잠시 들고 있다가 쓴다
+   */
+  readonly #previews = new Map<string, { readonly orders?: readonly CompensationOrder[]; readonly atMs: number }>();
+
   constructor(private readonly o: EventRefundServiceDeps) {}
 
   /**
@@ -138,7 +151,28 @@ export class EventRefundService {
 
   async preview(i: EventRefundPreviewInput): Promise<EventRefundPreview> {
     const targets = await this.#targets(i.eventId);
-    return eventRefundPreviewOf(targets, i.fault);
+    const preview = eventRefundPreviewOf(targets, i.fault);
+    this.#rememberPreview(i.eventId, i.fault, preview.compensationOrders, this.o.nowMs());
+    return preview;
+  }
+
+  #rememberPreview(eventId: string, fault: EventRefundFault, orders: readonly CompensationOrder[] | undefined, nowMs: number): void {
+    const key = `${eventId}:${fault}`;
+    // 같은 키를 다시 쓰면 차례를 뒤로 옮긴다(오래된 것부터 버린다)
+    this.#previews.delete(key);
+    this.#previews.set(key, { ...(orders === undefined ? {} : { orders }), atMs: nowMs });
+    while (this.#previews.size > EVENT_REFUND_PREVIEW_CACHE) {
+      const oldest = this.#previews.keys().next().value;
+      if (oldest === undefined) break;
+      this.#previews.delete(oldest);
+    }
+  }
+
+  /** 미리보기 목록이 아직 신선하면 준다. 없거나 지났으면 undefined(옛 호출은 다시 계산한다) */
+  #previewOrdersOf(eventId: string, fault: EventRefundFault, nowMs: number): { readonly orders?: readonly CompensationOrder[] } | undefined {
+    const found = this.#previews.get(`${eventId}:${fault}`);
+    if (found === undefined || nowMs - found.atMs > EVENT_REFUND_PREVIEW_TTL_MS) return undefined;
+    return found;
   }
 
   async start(i: EventRefundStartInput): Promise<EventCancellationRequest> {
@@ -158,10 +192,17 @@ export class EventRefundService {
     // 연기(POSTPONE) 신청 환급은 예매 취소 Saga로 하므로 보류 취소(REQUESTED) 표를 넣지 않는다(그 표는 마감 뒤 환급으로 끝난다, GAT-110 E5)
     const targets = kind === 'POSTPONE' ? listed.filter((t) => t.pendingCancellationId === undefined) : listed;
     const preview = eventRefundPreviewOf(targets, i.fault);
+    // 배상 금액은 미리보기(dry_run)에서 주문 단위로 계산한 값을 그대로 쓴다(B13, BAT-425 RV-02). 확정 때 표·주문이 바뀌어도 흔들리지 않는다.
+    // 확정 요청이 목록을 싣지 않는 옛 호출은 같은 프로세스의 미리보기를 쓰고, 그것도 없으면 지금처럼 같은 함수로 다시 계산한다
+    const savedPreview = i.compensationOrders === undefined ? this.#previewOrdersOf(i.eventId, i.fault, nowMs) : undefined;
+    const compensationOrders = i.compensationOrders ?? savedPreview?.orders ?? preview.compensationOrders;
+    const compensationTargets = compensationOrders?.length ?? 0;
+    const compensationTotal = (compensationOrders ?? []).reduce((sum, o) => sum + o.amount, 0);
     const items: EventRefundItem[] = targets.map((t) => itemOf(i.requestId, t, kind, nowMs));
     // 배상 행(BAT-425, ADR-0317 결정 2): 회차 취소(CANCEL)이고 주최 측 귀책·공연 내용 변경일 때 대상 주문마다 한 행을 요청·항목과 같은 트랜잭션에 만든다.
-    // 금액은 미리보기와 같은 주문 단위 함수로 한 번만 계산하고, 불가항력·0원 주문은 행이 없다
-    const compensationRows = kind === 'CANCEL' ? compensationRowsOf({ requestId: i.requestId, eventId: i.eventId, fault: i.fault, targets, nowMs, idOf: () => randomUUID() }) : [];
+    // 미리보기 목록이 있으면 그 금액을 쓰고, 불가항력·0원 주문은 행이 없다
+    const compensationRows =
+      kind === 'CANCEL' ? compensationRowsOf({ requestId: i.requestId, eventId: i.eventId, fault: i.fault, targets, ...(compensationOrders === undefined ? {} : { orders: compensationOrders }), nowMs, idOf: () => randomUUID() }) : [];
     const progress = progressOf(items, [], kind === 'POSTPONE');
     const request: EventCancellationRequest = {
       requestId: i.requestId,
@@ -173,8 +214,8 @@ export class EventRefundService {
       ...(window ? { postponedToMs: window.postponedToMs, refundWindowClosesAtMs: window.refundWindowClosesAtMs } : {}),
       targetOrders: preview.targetOrders,
       refundTotal: preview.refundTotal,
-      compensationTargets: preview.compensationTargets,
-      compensationTotal: preview.compensationTotal,
+      compensationTargets,
+      compensationTotal,
       progress,
       ruledBy: i.ruledBy,
       confirmedBy: i.confirmedBy,

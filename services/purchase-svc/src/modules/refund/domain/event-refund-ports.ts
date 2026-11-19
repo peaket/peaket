@@ -3,6 +3,7 @@ import type { EventRefundHoldInput, EventRefundHoldState } from './event-refund-
 import type { CompensationRow } from './compensation.js';
 import type { CancellationConfigs } from './ports.js';
 import type {
+  CompensationOrder,
   EventCancellationRequest,
   EventRefundAttempt,
   EventRefundFault,
@@ -366,6 +367,8 @@ export interface EventRefundStartInput {
   readonly confirmedBy: string;
   readonly fanNoticeReason?: string;
   readonly kind?: EventRefundKind;
+  /** 판정 미리보기(dry_run)의 주문별 배상 목록. 있으면 확정은 이 금액을 다시 계산하지 않는다(BAT-425 RV-02) */
+  readonly compensationOrders?: readonly CompensationOrder[];
   /** 연기(POSTPONE)의 새 시작 시각. 신청 창의 기본 닫힘 시각이다 */
   readonly postponedToMs?: number;
   /** 연기(POSTPONE)의 신청 창 닫힘 시각. 없으면 postponedToMs를 쓴다 */

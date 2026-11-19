@@ -280,7 +280,9 @@ export const ASVS_DEFAULT_AREA = {
   'seat-hold': ['apps/partner', 'apps/web', 'packages/seatmap', 'services/purchase-svc'],
   settlement: [],
   support: [],
-  'transfer-refund': [],
+  // 2026-11-20 BAT-425: 양도·환불 기능의 코드가 core-svc shop·purchase-svc refund·ticket-svc·payment-svc·ops-svc에 있다.
+  // 빈 목록이면 구현 위치 칸이 경로를 가리켜도 코드 영역이 비어 ASVS 태그를 세지 못한다(위 codeArea의 빈 목록 규칙).
+  'transfer-refund': ['services/core-svc', 'services/ops-svc', 'services/payment-svc', 'services/purchase-svc', 'services/ticket-svc'],
   'v0-baseline': ['services/v0-monolith'],
   'verification-tools': ['loadtest', 'services/invariant-checker', 'services/pg-simulator', 'tools/perf-ledger'],
 };

@@ -1,0 +1,5 @@
+ALTER TABLE "order_idempotency" DROP CONSTRAINT "order_idempotency_operation_check";--> statement-breakpoint
+ALTER TABLE "order_cancellation" ADD COLUMN "refund_account_idem_key" uuid;--> statement-breakpoint
+ALTER TABLE "order_cancellation" ADD COLUMN "refund_account_answer" text;--> statement-breakpoint
+ALTER TABLE "order_cancellation" ADD CONSTRAINT "order_cancellation_refund_account_answer_check" CHECK ("order_cancellation"."refund_account_answer" is null or ("order_cancellation"."refund_account_idem_key" is not null and "order_cancellation"."refund_account_answer" in ('REFUNDED', 'REFUND_PENDING', 'REFUND_ACCOUNT_REQUIRED', 'REJECTED')));--> statement-breakpoint
+ALTER TABLE "order_idempotency" ADD CONSTRAINT "order_idempotency_operation_check" CHECK ("order_idempotency"."operation" in ('CREATE_ORDER', 'START_PAYMENT', 'ACCEPT_PAYMENT', 'CANCEL_TICKET', 'REFUND_ACCOUNT', 'COMPENSATION_ACCOUNT'));

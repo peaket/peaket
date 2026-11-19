@@ -38,7 +38,15 @@ export interface CancellationRecord {
   readonly refundAttempt?: number;
   /** 계좌 대기 행(refund_account_required_at 있음, BUILD_ORDER GAT-090). 다시 누름은 payment를 부르지 않는다(BAT-420-rest 리뷰 반영 RV-03). 없으면 거짓 */
   readonly refundAccountRequired?: boolean;
+  /** 마지막 계좌 다시 받기 요청의 Idempotency-Key(0031, BAT-425 RV-03). 계좌 원문이 아니다 */
+  readonly refundAccountIdemKey?: string;
+  /** 그 키의 첫 답(같은 키 재요청은 같은 202·422를 준다, BAT-425 RV-03). 계좌 원문이 아니다 */
+  readonly refundAccountAnswer?: RefundAccountAnswer;
 }
+
+/** 계좌 다시 받기의 저장한 답(202 REFUNDED·REFUND_PENDING, 422 REFUND_ACCOUNT_REQUIRED·REJECTED) */
+export const REFUND_ACCOUNT_ANSWERS = ['REFUNDED', 'REFUND_PENDING', 'REFUND_ACCOUNT_REQUIRED', 'REJECTED'] as const;
+export type RefundAccountAnswer = (typeof REFUND_ACCOUNT_ANSWERS)[number];
 
 /** 같은 취소 ID의 지연 환급 계좌 다시 받기 시도 상한 [가정](ADR-0316 결정 1). 4 이상은 받지 않는다 */
 export const REFUND_ACCOUNT_MAX_ATTEMPTS = 3;

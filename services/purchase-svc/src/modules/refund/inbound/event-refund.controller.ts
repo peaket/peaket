@@ -15,6 +15,7 @@ import {
   REFUND_PG_PROVIDERS,
 } from '../domain/event-refund.js';
 
+const CompensationOrderBody = z.object({ orderId: z.uuid(), baseAmount: z.number().int().min(0), amount: z.number().int().min(0) }).strict();
 const PreviewBody = z.object({ eventId: z.uuid(), fault: z.enum(EVENT_REFUND_FAULTS) }).strict();
 const StartBody = z
   .object({
@@ -27,6 +28,8 @@ const StartBody = z
     kind: z.enum(EVENT_REFUND_KINDS).optional(),
     postponedToMs: z.number().int().positive().optional(),
     refundWindowClosesAtMs: z.number().int().positive().optional(),
+    /** 미리보기(dry_run)의 주문별 배상 목록. 있으면 확정은 금액을 다시 계산하지 않는다(BAT-425 RV-02) */
+    compensationOrders: z.array(CompensationOrderBody).max(10_000).optional(),
   })
   .strict();
 const PauseBody = z.object({ pg: z.enum(REFUND_PG_PROVIDERS).optional(), reason: z.string().min(1) }).strict();
@@ -38,6 +41,7 @@ const PreviewView = z.object({
   refundTotal: z.number().int(),
   compensationTargets: z.number().int(),
   compensationTotal: z.number().int(),
+  compensationOrders: z.array(CompensationOrderBody).optional(),
   perPg: z.array(z.object({ pg: z.enum(REFUND_PG_PROVIDERS), orders: z.number().int(), estimatedSeconds: z.number().int() })),
 });
 const ProgressView = z.object({

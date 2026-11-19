@@ -8,6 +8,7 @@ import type {
   DueRefund,
   PaymentCancelOutcome,
   RefundAccount,
+  RefundAccountAnswer,
   TicketCancelAnswer,
 } from './cancellation.js';
 import type { FraudCancelTarget, FraudRefundProgress, FraudTicketResult } from './fraud-cancellation.js';
@@ -178,8 +179,22 @@ export interface EntryFlagNotice {
  * oldAttempt는 유스케이스가 읽은 값이다. 그사이 다른 요청이 시도를 올렸으면(조건부 0행) undefined라 하나만 오른다(R-T42 ④)
  */
 export interface RefundAccountWrites {
-  /** REFUND_PENDING·refund_account_required_at 있음·refund_attempt = oldAttempt·oldAttempt < 3일 때만 올린다 */
-  beginAttempt(q: { readonly cancellationId: string; readonly oldAttempt: number; readonly nowMs: number }): Promise<
+  /**
+   * REFUND_PENDING·refund_account_required_at 있음·refund_attempt = oldAttempt·oldAttempt < 3일 때만 올린다.
+   * idempotency가 있으면 같은 계정·작업·키를 플랫폼 멱등 기록(order_idempotency)에 같은 트랜잭션의 첫 쓰기로 잡고,
+   * 같은 키의 다시 부름은 시도를 올리지 않고 그 시도의 값을 돌려준다(BAT-425 RV-03)
+   */
+  beginAttempt(q: {
+    readonly cancellationId: string;
+    readonly oldAttempt: number;
+    readonly nowMs: number;
+    readonly idempotency?: {
+      readonly accountRef: string;
+      readonly key: string;
+      readonly requestHash: Uint8Array;
+      readonly operation: 'REFUND_ACCOUNT';
+    };
+  }): Promise<
     | {
         readonly attempt: number;
         readonly orderId: string;
@@ -199,6 +214,11 @@ export interface RefundAccountWrites {
   updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<boolean | void>;
   /** 결제사 업무 거절: 계좌 대기 표시를 지운 뒤 CS '환급 실패' 대상 표시(refund_failed_at)를 남긴다 */
   markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
+  /**
+   * 같은 키의 첫 답을 취소 행에 적는다(0031, BAT-425 RV-03). 없으면 메모리 답 재생만 한다(단위·시험 대역).
+   * 계좌 원문이 아닌 상태 이름표만 쓴다
+   */
+  saveAnswer?(q: { readonly cancellationId: string; readonly idempotencyKey: string; readonly answer: RefundAccountAnswer; readonly nowMs: number }): Promise<void>;
 }
 
 // ---- 배상 기록·계좌 입력·송금(BAT-425 GAT-130 잔여, ADR-0317) ----

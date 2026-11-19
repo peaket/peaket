@@ -48,6 +48,8 @@ export interface EventRefundStartInput {
   readonly fanNoticeReason?: string;
   /** POSTPONE 확정 때 바뀐 공연 시작(new_starts_at, BAT-420) */
   readonly postponedToMs?: number;
+  /** 판정 미리보기(dry_run)의 주문별 배상 목록. 있으면 purchase-svc가 금액을 다시 계산하지 않는다(BAT-425 RV-02) */
+  readonly compensationOrders?: EventCancellationDryRun['compensationOrders'];
 }
 
 export interface EventRefundJobView {

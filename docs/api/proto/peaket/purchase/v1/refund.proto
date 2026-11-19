@@ -77,12 +77,21 @@ message PgRefundEstimate {
   int32 estimated_seconds = 3;
 }
 
+// 주문 단위 배상 한 줄(dry_run.compensationOrders, BAT-425, ADR-0317). 확정은 이 금액을 다시 계산하지 않는다.
+message CompensationOrder {
+  string order_id = 1;
+  peaket.common.v1.Money base_amount = 2;
+  peaket.common.v1.Money amount = 3;
+}
+
 message PreviewEventRefundResponse {
   int32 target_orders = 1;
   peaket.common.v1.Money refund_total = 2;
   int32 compensation_targets = 3;
   peaket.common.v1.Money compensation_total = 4;
   repeated PgRefundEstimate per_pg = 5;
+  // 판정 미리보기의 주문별 배상 목록. 확정(StartEventRefund)이 그대로 쓴다(BAT-425 RV-02)
+  repeated CompensationOrder compensation_orders = 6;
 }
 
 message StartEventRefundRequest {
@@ -102,6 +111,9 @@ message StartEventRefundRequest {
   google.protobuf.Timestamp refund_window_closes_at = 9;
   // 팬 통지 문안에 쓸 사유 요약(선택).
   string fan_notice_reason = 10;
+  // 미리보기(dry_run)의 주문별 배상 목록. 있으면 확정은 이 금액을 그대로 쓴다(다시 계산하지 않는다, BAT-425 RV-02).
+  // 옛 호출자는 비운다: purchase-svc가 같은 프로세스의 미리보기를 쓰거나 같은 함수로 다시 계산한다.
+  repeated CompensationOrder compensation_orders = 11;
 }
 
 message StartEventRefundResponse {

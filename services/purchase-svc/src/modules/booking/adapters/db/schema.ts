@@ -147,6 +147,10 @@ export const orderCancellation = pgTable(
     refundAccountRequiredAt: at('refund_account_required_at'),
     /** CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건을 ops-svc가 2xx로 받은 시각(0029). 계좌 대기 표시 없이 쓰지 않는다. 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다 */
     refundAccountCaseOpenedAt: at('refund_account_case_opened_at'),
+    /** 마지막 계좌 다시 받기 요청의 Idempotency-Key(0031, BAT-425 RV-03). 계좌 원문이 아니다 */
+    refundAccountIdemKey: uuid('refund_account_idem_key'),
+    /** 그 키의 첫 답(REFUNDED·REFUND_PENDING·REFUND_ACCOUNT_REQUIRED·REJECTED, 0031, BAT-425 RV-03) */
+    refundAccountAnswer: text('refund_account_answer'),
   },
   (t) => [
     uniqueIndex('order_cancellation_active_key')
@@ -181,6 +185,11 @@ export const orderCancellation = pgTable(
     index('order_cancellation_refund_account_open_idx')
       .on(t.refundAccountRequiredAt)
       .where(sql`${t.refundAccountRequiredAt} is not null and ${t.refundAccountCaseOpenedAt} is null`),
+    // 계좌 다시 받기의 저장한 답은 키와 함께 쓴다(0031, BAT-425 RV-03). 계좌 원문이 아닌 이름표만
+    check(
+      'order_cancellation_refund_account_answer_check',
+      sql`${t.refundAccountAnswer} is null or (${t.refundAccountIdemKey} is not null and ${t.refundAccountAnswer} in ('REFUNDED', 'REFUND_PENDING', 'REFUND_ACCOUNT_REQUIRED', 'REJECTED'))`,
+    ),
   ],
 );
 
@@ -238,7 +247,11 @@ export const orderEvent = pgTable(
 );
 
 /** 주문 생성·결제 시도 시작·결제 접수의 멱등 기록(계정 × 작업 범위, 기술 검토 중간-046) */
-export const orderIdempotency = idempotencyRecordTable(['CREATE_ORDER', 'START_PAYMENT', 'ACCEPT_PAYMENT'], 'order_idempotency');
+export const orderIdempotency = idempotencyRecordTable(
+  // BAT-425 RV-03: 지연 환급 계좌 다시 받기·배상 계좌 입력도 같은 표를 쓴다(0031에서 CHECK 확장)
+  ['CREATE_ORDER', 'START_PAYMENT', 'ACCEPT_PAYMENT', 'CANCEL_TICKET', 'REFUND_ACCOUNT', 'COMPENSATION_ACCOUNT'],
+  'order_idempotency',
+);
 
 export const paymentAttempt = pgTable(
   'payment_attempt',

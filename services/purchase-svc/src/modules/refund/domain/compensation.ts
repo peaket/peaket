@@ -3,7 +3,7 @@
 // 금액은 그 주문의 대상 표 권면 합의 10%를 원 미만 올림해 한 번만 계산·저장하고(FORCE_MAJEURE는 행 0),
 // 팬이 계좌를 넣으면 purchase-svc가 payment-svc 배상 송금을 compensation_id 멱등으로 부른다.
 // 계좌번호 원문은 저장·로그·사건·Outbox·지표에 싣지 않고 끝 4자리만 남긴다(POL-014).
-import type { EventRefundFault, EventRefundTarget } from './event-refund.js';
+import type { CompensationOrder, EventRefundFault, EventRefundTarget } from './event-refund.js';
 import { compensationOrdersOf } from './event-refund.js';
 
 /** compensation.status. ACCOUNT_PENDING(계좌 입력 대기)·REQUESTED(송금 요청됨)·PAID(송금 완료)·FAILED(송금 실패) */
@@ -111,17 +111,20 @@ export function compensationRowsOf(q: {
   readonly eventId: string;
   readonly fault: EventRefundFault;
   readonly targets: readonly EventRefundTarget[];
+  /** 미리보기에서 저장한 주문별 금액. 있으면 다시 계산하지 않는다(B13, BAT-425 RV-02). 대상에서 사라진 주문은 뺀다 */
+  readonly orders?: readonly CompensationOrder[];
   readonly nowMs: number;
   readonly idOf: () => string;
 }): readonly CompensationRow[] {
   const accountOf = new Map<string, string>();
   for (const t of q.targets) if (!accountOf.has(t.orderId)) accountOf.set(t.orderId, t.payerAccountId);
-  return compensationOrdersOf(q.targets, q.fault).map((o) => ({
+  const orders = q.orders === undefined ? compensationOrdersOf(q.targets, q.fault) : q.orders.filter((o) => accountOf.has(o.orderId));
+  return orders.map((o) => ({
     id: q.idOf(),
     eventCancellationRequestId: q.requestId,
     orderId: o.orderId,
     eventId: q.eventId,
-    accountId: accountOf.get(o.orderId) ?? '',
+    accountId: accountOf.get(o.orderId)!,
     baseAmount: o.baseAmount,
     amount: o.amount,
     createdAtMs: q.nowMs,
