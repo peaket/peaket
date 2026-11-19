@@ -778,7 +778,8 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
     const b = await seedOrder({ eventId, accountId: randomUUID(), amount: 10_000, pg: 'TOSS' });
     const idA = eventRefundCancellationId(requestId, a.ticketId);
     const idB = eventRefundCancellationId(requestId, b.ticketId);
-    // 실제 어댑터(HttpRefundFailureNotice)에 건마다 답을 고르는 HTTP 대역: A는 202, B는 처음 500
+    // 실제 어댑터(HttpRefundFailureNotice)에 건마다 답을 고르는 HTTP 대역: A는 202, B는 처음 500.
+    // RV-01부터 2xx라도 본문 accepted: true여야 연 것으로 보므로(requireAccepted), 2xx 답은 그 최소 모양을 싣는다
     const sent: { sourceId: string; status: number }[] = [];
     let rejectB = true;
     const client = {
@@ -786,7 +787,7 @@ describe('BAT-420 다시 보기 2 N1·N2 일괄 환불의 CS 건 다시 열기 [
         const body = JSON.parse(String(r.body)) as { sourceId: string; category: string };
         const status = body.sourceId === idB && rejectB ? 500 : 202;
         sent.push({ sourceId: body.sourceId, status });
-        return new Response('{}', { status });
+        return new Response(JSON.stringify({ accepted: true }), { status });
       },
     };
     const service = new EventRefundService({

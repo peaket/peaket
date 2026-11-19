@@ -267,6 +267,7 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 - `npx tsc -p tsconfig.json --noEmit`(test·test-int 포함) payment·purchase·core·ops·pg-simulator 오류 0. `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(이 커밋이 닿지 않은 openapi 응답 설명 셋, mermaid 건너뜀). 시험 파일은 eslint 설정 밖이다(경고 'File ignored').
 - **시험을 고치며 정한 것**: CancelPayment 답의 `remaining_cancellable`(시뮬레이터 토스 모양은 비어 있음)은 견주지 않는다. 결제 후 전액이 되는 카드 일괄 환불의 결제사 금액은 'ALL'이고 금액은 payment_cancel 행(33,333)으로 본다. 잡기·늦음 표시의 돌려주는 줄 차례는 견주지 않는다(UPDATE … RETURNING은 차례를 정하지 않는다, 고르는 차례는 limit으로 본다). 검색 어긋난 줄(drift)은 같은 DB를 나눠 쓰는 앞 묶음 때문에 0이 아니어서 이 묶음에서는 그 공연의 이름 줄 0으로 대신했다.
 - **구현 결함 의심(시험으로 확인하지 않음, 리뷰·검증 판단)**: ① 팬 취소가 계좌 거절로 계좌 대기(REFUND_PENDING·refund_account_required_at)가 된 뒤 팬이 같은 표를 새 키로 다시 누르면, ticket-svc가 첫 취소 ID를 알려 `CancelTicket.#replay`가 같은 취소 ID로 payment를 다시 부르고, payment-svc는 FAILED 행이라 REJECTED를 돌려 그 행에 환급 실패 표시(refund_failed_at)까지 남는 것으로 읽힌다(CS 건이 '환불 대기'와 '환급 실패' 둘). ② core-svc에 계획 §7이 '없음'으로 둔 마이그레이션 `0029_event_status_ops_grant.sql`이 생겼다(구현 주석 '번호 감독 확인 대기'). ③ 시뮬레이터는 모르는 칸을 거절하지 않고 버린다(옛 동작, 결함 아님).
+- **합치기 전 전체 통합·기대값 수정(2026-11-19, `2f18e694` 위, 시험 담당)**: payment 24파일 529통과(2 건너뜀), core 33파일 325통과(1 건너뜀), ops 13파일 95통과. purchase 61파일은 첫 전체에서 기대값 2건이 실패해 시험만 고쳤다 — 0014 CHECK 목록에 0029가 더한 `order_cancellation_refund_account_case_check`를 넣고, N2 HTTP 대역을 RV-01이 요구하는 `{ accepted: true }`로 바꿨다(두 파일 125통과). 전체 재실행은 2,003통과·6실패였고, 6건 모두 단독 재실행에서 통과한 Valkey 100ms 마감·시계 흔들림이다. 제품 코드는 고치지 않았고, Docker 컨테이너를 정리하고 잠금을 놓았다.
 
 ## 리뷰
 
@@ -692,5 +693,6 @@ cd /d/ticketpass-lane3-b420 && node tools/ci/ledger.mjs --batch BAT-420
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T08:18+09:00 | 2026-11-19T08:22+09:00 |
 | verify | l3-b420-verify | claude-opus-5-5 | 2026-11-19T08:27+09:00 | 2026-11-19T09:08+09:00 |
 | test | l3-b420-test | claude-opus-5-5 | 2026-11-19T09:10+09:00 | 2026-11-19T09:25+09:00 |
+| test | ses_e0ce75a13ffeRmwI4yj9OTbwMo | deepseek-v4.1-flash | 2026-11-19T18:44+09:00 | 2026-11-19T18:55+09:00 |
 
 - 다른 담당은 자기 커밋에서 이 표에 자기 행을 더한다. 리뷰 반영 커밋은 `Fix-By`의 역할(시험·구현) 행으로 센다.
