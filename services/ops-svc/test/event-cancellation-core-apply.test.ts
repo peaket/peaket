@@ -355,3 +355,24 @@ describe('R-T41 ③ 확정 직후 반영의 차례(검증 O13)', () => {
     expect(coreCalls).toEqual([]);
   });
 });
+
+// BAT-420-rest 고친 곳 검증 Q22 보강(시험 담당 l3-b420-test, 2026-11-19): 정본 transfer-refund §5 '구현에서 정한 것' ⑥(잡기는 core_apply_next_at 차례, 빈 값 먼저), §11 R-T41 ⑥
+describe('R-T41 ⑥ 늘 503인 요청 21건과 새 요청(메모리 저장소)', () => {
+  test('R-T41 ⑥ 늘 503인 요청 21건이 1분마다 다시 잡혀도 그 뒤 확정한 새 요청(다음 볼 시각 빈 값)은 다음 바퀴(+60,000ms)에 잡혀 반영된다', async () => {
+    const old = Array.from({ length: 21 }, (_, i) => approvedRecord({ eventId: randomUUID(), approvedAt: new Date(NOW - 60 * MIN + i) }));
+    const fresh = approvedRecord({ eventId: randomUUID(), approvedAt: new Date(NOW - 30 * MIN) });
+    const { f, c } = withScripted((id) => (id === fresh.requestId ? 'ok' : 503));
+    for (const r of old) f.store.rows.set(r.requestId, r);
+    await f.app.retryCoreApply(NOW);
+    await f.app.retryCoreApply(NOW);
+    // 장애 주입이 끼어들었다: 21건 모두 503이었고 다음 볼 시각은 1분 뒤다(4xx 10분 미룸이 아니다)
+    expect(c.calls).toHaveLength(21);
+    for (const r of old) expect(f.store.core.get(r.requestId)?.nextAtMs, r.requestId).toBe(NOW + 60_000);
+    f.store.rows.set(fresh.requestId, fresh);
+    c.calls.length = 0;
+    await f.app.retryCoreApply(NOW + MIN);
+    expect(c.calls).toHaveLength(20);
+    expect(c.calls).toContain(fresh.requestId);
+    expect(f.store.core.get(fresh.requestId)?.appliedAtMs).toBe(NOW);
+  });
+});
