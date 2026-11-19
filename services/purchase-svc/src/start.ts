@@ -195,6 +195,7 @@ import {
   ServerEcdhKey,
   OpenPurchaseSession,
   StoredPurchaseSessions,
+  isAdmissionKeysUnavailable,
   SeatStoreUnavailable,
   discardBehaviorSignals as discardSeatBehaviorSignals,
   discardHoldAttempts,
@@ -289,7 +290,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
         .execute({ token: i.token, accountId: i.accountId, loginSessionId: i.loginSessionId, eventId: i.eventId, clientKey: i.clientKey })
         .then((r) => r.sessionId === i.jti)
         .catch((e: unknown) => {
-          if (e instanceof SeatStoreUnavailable) throw e;
+          // 좌석 Redis 장애와 공개키 묶음을 받지 못함(503 dependency-unavailable, BAT-057 리뷰 반영 R057-2)은 그대로 올리고, 그 밖의 열기 거절은 세션 없음(401)이다
+          if (e instanceof SeatStoreUnavailable || isAdmissionKeysUnavailable(e)) throw e;
           return false;
         }),
   });

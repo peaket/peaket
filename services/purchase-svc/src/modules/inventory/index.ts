@@ -140,7 +140,7 @@ export {
 } from './domain/sale-state.js';
 export { RedisSweepLeases } from './adapters/redis-sweep-leases.js';
 export { PURCHASE_ECDH_KEY_ENV, PURCHASE_ECDH_KEY_PREV_ENV, ServerEcdhKey, type ServerEcdhJwk } from './adapters/server-ecdh.js';
-export { ADMISSION_TOKEN_HEADER, admissionJtiOf, StoredPurchaseSessions, type StoredPurchaseSessionsDeps } from './adapters/stored-purchase-sessions.js';
+export { ADMISSION_TOKEN_HEADER, admissionJtiOf, StoredPurchaseSessions, isAdmissionKeysUnavailable, type StoredPurchaseSessionsDeps } from './adapters/stored-purchase-sessions.js';
 export {
   ExpirySweeper,
   systemSweepTimer,
