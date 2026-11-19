@@ -2,7 +2,8 @@
 // 실제 HTTP 시뮬레이터 결제사(@peaket/pg-simulator)와 승인 실행기로 돈다.
 // 정본 값: 원장 payment.order_kind(TICKET·MERCH, 기본 TICKET)와 CHECK (order_kind = 'TICKET') = (event_id IS NOT NULL)(결정 1),
 // ConfirmPaymentRequest.order_kind = 12, UNSPECIFIED = TICKET, MERCH는 event_id·entry_opens_at이 비어야 함, 다시 부를 때 order_kind 대조와 SEV2 한 줄(kind payment-confirm-mismatch)(결정 2),
-// PrepareCheckout MERCH: 복귀 주소 {PEAKET_WEB_ORIGIN}/shop/checkout/return?order={orderId}&pg={결제사}, 회차 없으면 플랫폼 행·기본만, 가상계좌 뺌(결정 3),
+// PrepareCheckout MERCH: 복귀 주소 {PEAKET_WEB_ORIGIN}/shop/checkout/return?order={orderId}&pg={결제사}, 회차 없으면 플랫폼 행·기본만, 가상계좌 허용·입금 기한(ADR-0314, BAT-605),
+// 에스크로 상점(payment_store=ESCROW): 토스 고정·허용 수단 카드·계좌이체·가상계좌·escrow_products 그대로·useEscrow 없음, 원장 pg_store=ESCROW(ADR-0313, BAT-605),
 // 결제 사건 orderKind MERCH·eventId null·Kafka 키 = 주문 ID(결정 4), 회차 정산서 결제 읽기(event_id = $1)에 굿즈가 걸리지 않음(결정 1).
 //
 // 약속:
@@ -22,15 +23,19 @@ import { startGrpcServer } from '../src/grpc-server.js';
 import {
   AcceptPaymentCommand,
   BatchGetPaymentStates,
+  CancelDepositPayment,
   channelTableOf,
   DrizzleConfirmJobs,
   DrizzleEntryPause,
   DrizzlePaymentStore,
   DrizzlePgSelection,
+  GetPaymentDetail,
+  LocalVirtualAccountCipher,
   PaymentConfirmRunner,
   paymentCheckoutLog,
   paymentCommandLog,
   paymentConfirmLog,
+  paymentDepositLog,
   paymentPackage,
   paymentServiceHandlers,
   PgCallGuards,
@@ -40,6 +45,7 @@ import {
   PromPaymentCheckoutSignals,
   PromPaymentCommandSignals,
   PromPaymentConfirmSignals,
+  PromPaymentDepositSignals,
   PromPgCallGuardSignals,
   StaticPaymentGateways,
   TossPaymentGateway,
@@ -47,10 +53,13 @@ import {
 import { SimulatorPaymentGateway } from '../src/modules/payment/adapters/pg/simulator-gateway.js';
 import { DrizzleSettlementPaymentSource } from '../src/modules/settlement/adapters/db/drizzle-payment-source.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
-import { failure, ledgerOf, newId, paymentClient, type PaymentClient, tableCounts, tossConfirm, unary } from './support.js';
+import { failure, ledgerOf, msOf, newId, paymentClient, type PaymentClient, tableCounts, tossConfirm, unary } from './support.js';
 
 const WEB_ORIGIN = 'https://www.merch-it.example';
-const SIM_NOW_MS = Date.parse('2026-11-18T01:00:00.000Z');
+/** 시뮬레이터 시계. 입금 기한이 이 실행의 지금보다 뒤가 되게 스택 시계와 같은 값에서 시작한다 */
+const SIM_NOW_MS = Date.now();
+/** 가상계좌 번호 필드 암호화 키(시험마다 새 값) */
+const KEY = randomBytes(32);
 const IN_PROGRESS = 'CONFIRM_RESULT_IN_PROGRESS';
 const MERCH = 'ORDER_KIND_MERCH';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -69,8 +78,10 @@ interface Sim {
   url: string;
   key: string;
   confirmCalls: string[];
+  /** 취소 호출의 결제 키(입금 전 취소가 결제사에 닿았는지 본다) */
+  cancelCalls: string[];
   fetch: typeof fetch;
-  authenticate(orderId: string, amount: number): Promise<string>;
+  authenticate(orderId: string, amount: number, method?: '카드' | '계좌이체' | '가상계좌'): Promise<string>;
   fault(orderId: string, f: Record<string, unknown>): Promise<void>;
 }
 
@@ -82,8 +93,10 @@ async function startSim(): Promise<Sim> {
   const control = (method: string, path: string, body?: unknown) =>
     fetch(`${url}${path}`, { method, headers: { authorization: auth, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) });
   const confirmCalls: string[] = [];
+  const cancelCalls: string[] = [];
   const counting: typeof fetch = async (input, init) => {
     if (init?.method === 'POST' && String(input).endsWith('/v1/payments/confirm')) confirmCalls.push((JSON.parse(String(init.body)) as { orderId: string }).orderId);
+    if (init?.method === 'POST' && String(input).includes('/v1/payments/') && String(input).endsWith('/cancel')) cancelCalls.push(String(input));
     return fetch(input, init);
   };
   return {
@@ -91,9 +104,10 @@ async function startSim(): Promise<Sim> {
     url,
     key,
     confirmCalls,
+    cancelCalls,
     fetch: counting,
-    async authenticate(orderId, amount) {
-      const r = await control('POST', '/sim/authenticate', { orderId, amount, orderName: '공식 응원봉' });
+    async authenticate(orderId, amount, method) {
+      const r = await control('POST', '/sim/authenticate', { orderId, amount, orderName: '공식 응원봉', ...(method === undefined ? {} : { method }) });
       expect(r.status).toBe(200);
       return ((await r.json()) as { paymentKey: string }).paymentKey;
     },
@@ -109,6 +123,7 @@ interface Stack {
   client: PaymentClient;
   clock: FakeClock;
   logs: string[];
+  metrics(): Promise<string>;
   runner(): PaymentConfirmRunner;
   close(): Promise<void>;
 }
@@ -129,6 +144,9 @@ async function startStack(): Promise<Stack> {
   const checkoutSignals = new PromPaymentCheckoutSignals().register(metrics.registry);
   const store = new DrizzlePaymentStore({ database: hot, batchDatabase: hot });
   const entry = new DrizzleEntryPause({ database: hot });
+  const cipher = new LocalVirtualAccountCipher(KEY);
+  const depositLog = paymentDepositLog(logger);
+  const depositSignals = new PromPaymentDepositSignals().register(metrics.registry);
   // 결제창 값 만들기는 HTTP를 부르지 않는 실제 어댑터. 시뮬레이터 어댑터는 승인 실행기와 같은 실제 시뮬레이터를 가리킨다
   const simGateway = new SimulatorPaymentGateway({ baseUrl: sim.url, secretKey: sim.key, clientKey: 'sim_ck_merch_it', fetch: sim.fetch });
   const gateways = new StaticPaymentGateways([
@@ -155,6 +173,7 @@ async function startStack(): Promise<Stack> {
       accept: new AcceptPaymentCommand({ store, clock, log: paymentCommandLog(logger), signals }),
       batchGet: new BatchGetPaymentStates({ reader: store, signals }),
       prepareCheckout,
+      getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher, depositLog, depositSignals, clock }),
     },
     () => undefined,
   );
@@ -164,11 +183,18 @@ async function startStack(): Promise<Stack> {
   const guardSignals = new PromPgCallGuardSignals().register(metrics.registry);
   const runnerGateways = new StaticPaymentGateways([simGateway]);
   const jobs = new DrizzleConfirmJobs({ database: runnerDb, clock });
+  const guards = new PgCallGuards({ gateways: runnerGateways, podCount: 1, clock, signals: guardSignals, log: pgCallGuardLog(logger) });
+  const depositCancel = new CancelDepositPayment({ store: jobs, gateways: runnerGateways, guards, signals: depositSignals, clock });
+  // 가상계좌를 허용하지 않은 굿즈 주문의 입금 대기 답은 입금 전 취소로 끝낸다(기존 HOT-358 동작, BAT-605)
+  const disallowedDeposit = async (x: { readonly paymentId: string; readonly orderId: string }): Promise<void> => {
+    await depositCancel.execute({ paymentId: x.paymentId, cancellationId: x.paymentId, reason: '가상계좌를 허용하지 않는 굿즈 주문의 입금 대기' });
+  };
   const silent = { setInterval: () => 0, clearInterval: () => {} };
   return {
     client,
     clock,
     logs,
+    metrics: async () => metrics.registry.metrics(),
     runner: () =>
       new PaymentConfirmRunner({
         jobs,
@@ -177,8 +203,10 @@ async function startStack(): Promise<Stack> {
         signals: confirmSignals,
         clock,
         podId: 'pod-merch',
-        guards: new PgCallGuards({ gateways: runnerGateways, podCount: 1, clock, signals: guardSignals, log: pgCallGuardLog(logger) }),
+        guards,
         timer: silent,
+        deposit: { cipher, log: depositLog, signals: depositSignals },
+        disallowedDeposit,
       }),
     close: async () => {
       client.close();
@@ -399,9 +427,16 @@ const merchCheckout = (over: Record<string, unknown> = {}): Record<string, unkno
   ...over,
 });
 
+/** 다음 날 23:59 KST(docs/planning/03 §2.4 [가정]). 시험 값은 코드 상수를 가져오지 않고 정본의 식으로 적는다 */
+const nextKstDayEndMs = (nowMs: number): number => {
+  const kst = new Date(nowMs + 9 * 3_600_000);
+  return Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + 1, 23, 59) - 9 * 3_600_000;
+};
+
 describe('굿즈 결제창 준비(PrepareCheckout)', () => {
-  test('P-T56 ⑤ 회차가 없으면 플랫폼 기본 결제사(TOSS)이고 복귀 주소는 /shop/checkout/return?order=…&pg=…이며 허용 수단에 가상계좌가 없다 [ASVS v5.0.0-3.7.2]', async () => {
+  test('P-T56 ⑤ 회차가 없으면 플랫폼 기본 결제사(TOSS)이고 복귀 주소는 /shop/checkout/return?order=…&pg=…이며 허용 수단에 가상계좌가 있고 입금 기한이 실린다 [ASVS v5.0.0-3.7.2]', async () => {
     await setPlatformSwitch(false);
+    const s = await stack();
     const req = merchCheckout();
     const r = await prepare(req);
     expect(r.pg).toBe('PG_PROVIDER_TOSS');
@@ -409,18 +444,24 @@ describe('굿즈 결제창 준비(PrepareCheckout)', () => {
     const url = `https://www.merch-it.example/shop/checkout/return?order=${String(req.order_id)}&pg=TOSS`;
     expect((r.toss as Record<string, unknown>).success_url).toBe(url);
     expect((r.toss as Record<string, unknown>).fail_url).toBe(url);
-    expect(r.allowed_pay_methods).not.toContain('VIRTUAL_ACCOUNT');
-    expect((r.allowed_pay_methods as string[]).length).toBeGreaterThan(0);
-    expect(r.deposit_due_at ?? null).toBeNull();
+    // 굿즈도 가상계좌를 받는다(입금 대기 O2~O4, BAT-605). 기한은 다음 날 23:59 KST [가정]
+    expect(r.allowed_pay_methods).toContain('VIRTUAL_ACCOUNT');
+    expect(msOf(r.deposit_due_at)).toBe(nextKstDayEndMs(s.clock.now()));
   });
 
-  test('P-T56 ⑤ 가상계좌 허용을 참으로 보내도 굿즈 허용 수단에는 가상계좌가 없다(같은 요청을 티켓으로 보내면 있다)', async () => {
+  test('P-T56 ⑤ 굿즈도 가상계좌 허용이 기본 참이고, 허용을 끄면 허용 수단과 입금 기한에서 빠진다(티켓과 같은 규칙)', async () => {
     await setPlatformSwitch(false);
-    const merch = await prepare(merchCheckout({ virtual_account_allowed: true }));
-    expect(merch.allowed_pay_methods).not.toContain('VIRTUAL_ACCOUNT');
-    // 짝: 가상계좌가 이 조립에서 실제로 열려 있음을 티켓으로 확인한다(가상계좌가 아예 없는 조립이면 위 단언이 빈 단언이 된다)
-    const ticket = await prepare(merchCheckout({ order_kind: 'ORDER_KIND_TICKET', event_id: newId(), virtual_account_allowed: true }));
+    const s = await stack();
+    const merch = await prepare(merchCheckout());
+    expect(merch.allowed_pay_methods).toContain('VIRTUAL_ACCOUNT');
+    expect(msOf(merch.deposit_due_at)).toBe(nextKstDayEndMs(s.clock.now()));
+    // 짝: 같은 조립에서 티켓도 가상계좌가 열린다(가상계좌가 아예 없는 조립이면 위 단언이 빈 단언이 된다)
+    const ticket = await prepare(merchCheckout({ order_kind: 'ORDER_KIND_TICKET', event_id: newId() }));
     expect(ticket.allowed_pay_methods).toContain('VIRTUAL_ACCOUNT');
+    // 거짓이면 가상계좌도 기한도 없다(가상계좌를 끄는 길이 남아 있다)
+    const off = await prepare(merchCheckout({ virtual_account_allowed: false }));
+    expect(off.allowed_pay_methods).not.toContain('VIRTUAL_ACCOUNT');
+    expect(off.deposit_due_at ?? null).toBeNull();
   });
 
   test('P-T56 ⑤ 회차가 있는 굿즈(부가 상품)는 그 회차의 지정 행을 따르고 복귀 주소는 굿즈 주소다', async () => {
@@ -451,13 +492,200 @@ describe('굿즈 결제창 준비(PrepareCheckout)', () => {
     await setPlatformSwitch(false);
   });
 
-  test('P-T56 ⑤ 굿즈의 VIRTUAL_ACCOUNT 요청은 INVALID_ARGUMENT다(회차 있음·없음) [ASVS v5.0.0-2.2.1]', async () => {
-    expect((await failure(prepare(merchCheckout({ pay_method: 'VIRTUAL_ACCOUNT' })))).code).toBe(grpc.status.INVALID_ARGUMENT);
-    expect((await failure(prepare(merchCheckout({ pay_method: 'VIRTUAL_ACCOUNT', event_id: newId() })))).code).toBe(grpc.status.INVALID_ARGUMENT);
+  test('P-T56 ⑤ 굿즈의 VIRTUAL_ACCOUNT 요청은 받고 그 수단으로 결제창 값을 만들며 입금 기한을 싣는다(회차 있음·없음) [ASVS v5.0.0-2.2.1]', async () => {
+    await setPlatformSwitch(false);
+    const s = await stack();
+    for (const eventId of [undefined, newId()]) {
+      const r = await prepare(merchCheckout({ pay_method: 'VIRTUAL_ACCOUNT', ...(eventId === undefined ? {} : { event_id: eventId }) }));
+      expect(r.checkout).toBe('toss');
+      expect(r.allowed_pay_methods).toContain('VIRTUAL_ACCOUNT');
+      expect(msOf(r.deposit_due_at)).toBe(nextKstDayEndMs(s.clock.now()));
+    }
   });
 
   test('P-T56 ⑤ 주문 종류 UNSPECIFIED의 결제창 준비는 INVALID_ARGUMENT다', async () => {
     expect((await failure(prepare(merchCheckout({ order_kind: 'ORDER_KIND_UNSPECIFIED', event_id: newId() })))).code).toBe(grpc.status.INVALID_ARGUMENT);
+  });
+});
+
+// ───────────────────────────── 에스크로 상점(P-T59) ─────────────────────────────
+
+describe('에스크로 상점의 결제창과 승인 원장(P-T59 ②③)', () => {
+  test('P-T59 ②_에스크로_결제창은_상품을_그대로_싣고_원장에_ESCROW·MERCH를_적는다 [ASVS v5.0.0-2.3.4]', async () => {
+    await setPlatformSwitch(false);
+    const products = [
+      { id: 'merch-7c1e', name: '한정 응원봉', code: 'SKU-BAT605-1', unit_price: 27_500, quantity: 2 },
+      { id: 'merch-7c1f', name: '응원 타월', code: '', unit_price: 9_900, quantity: 1 },
+    ];
+    const r = await prepare(merchCheckout({ payment_store: 'PAYMENT_STORE_ESCROW', escrow_products: products }));
+    // 에스크로 상점은 토스로만 결제하고, 상품은 결제창에 그대로 실린다
+    expect(r.pg).toBe('PG_PROVIDER_TOSS');
+    expect(r.checkout).toBe('toss');
+    expect((r.toss as Record<string, unknown>).escrow_products).toEqual(products);
+    expect(r.allowed_pay_methods).toEqual(['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT']);
+    // useEscrow는 넣지 않는다(구매자가 고른다)
+    expect(JSON.stringify(r)).not.toContain('use_escrow');
+    expect(JSON.stringify(r)).not.toContain('useEscrow');
+
+    // 승인 명령도 같은 상점이면 원장에 ESCROW·MERCH·회차 없음으로 적는다
+    const f = merchConfirm({ pg: 'SIMULATOR' });
+    const confirmReq = { ...f.request, payment_store: 'PAYMENT_STORE_ESCROW' };
+    const first = await confirm(confirmReq);
+    expect(first.result).toBe(IN_PROGRESS);
+    const ledgerRow = { pg_store: 'ESCROW', order_kind: 'MERCH', event_id: null };
+    expect(await q('select pg_store, order_kind, event_id from payment where order_id = $1', [f.orderId])).toEqual([ledgerRow]);
+
+    // 같은 명령은 같은 답이고 행이 그대로다
+    const ledger = await ledgerOf(admin, f.orderId);
+    expect(await confirm(confirmReq)).toEqual(first);
+    expect(await ledgerOf(admin, f.orderId)).toEqual(ledger);
+
+    // 상점을 STANDARD로 바꾼 재호출은 거절하고 행을 바꾸지 않는다
+    expect((await failure(confirm({ ...confirmReq, payment_store: 'PAYMENT_STORE_STANDARD' }))).code).toBe(grpc.status.FAILED_PRECONDITION);
+    expect(await ledgerOf(admin, f.orderId)).toEqual(ledger);
+
+    // 짝: STANDARD로 받은 주문을 ESCROW로 바꿔 불러도 거절한다(한쪽만 보지 않는다)
+    const t = merchConfirm({ pg: 'SIMULATOR' });
+    await confirm({ ...t.request, payment_store: 'PAYMENT_STORE_STANDARD' });
+    expect((await failure(confirm({ ...t.request, payment_store: 'PAYMENT_STORE_ESCROW' }))).code).toBe(grpc.status.FAILED_PRECONDITION);
+    expect(await q('select pg_store from payment where order_id = $1', [t.orderId])).toEqual([{ pg_store: 'STANDARD' }]);
+  });
+
+  test.each(['EASY_PAY', 'MOBILE'])('P-T59 ③_에스크로_상점의_%s는_결제창_값을_만들지_않고_pg-unavailable이다', async (payMethod) => {
+    const err = await failure(prepare(merchCheckout({ payment_store: 'PAYMENT_STORE_ESCROW', pay_method: payMethod })));
+    expect(err.code).toBe(grpc.status.UNAVAILABLE);
+    expect(err.details).toBe('pg-unavailable');
+  });
+
+  test('P-T59 ③_에스크로_상점의_가상계좌는_허용하고_응답에_useEscrow가_없다', async () => {
+    const r = await prepare(merchCheckout({ payment_store: 'PAYMENT_STORE_ESCROW', pay_method: 'VIRTUAL_ACCOUNT' }));
+    expect(r.checkout).toBe('toss');
+    expect(r.allowed_pay_methods).toEqual(['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT']);
+    expect((r.toss as Record<string, unknown>).success_url).toContain('/shop/checkout/return');
+    expect(JSON.stringify(r)).not.toContain('use_escrow');
+    expect(JSON.stringify(r)).not.toContain('useEscrow');
+  });
+});
+
+// ───────────────────────────── 굿즈 가상계좌 입금 대기(P-T60) ─────────────────────────────
+
+describe('굿즈 가상계좌 입금 대기(P-T60 ②⑥)', () => {
+  const drive = async (): Promise<void> => {
+    const r = (await stack()).runner();
+    await r.tick();
+    await r.whenIdle();
+  };
+
+  /** 시뮬레이터에서 가상계좌로 인증하고 굿즈 승인 명령을 넣는다. allowed를 주지 않으면 칸을 비운다 */
+  async function vaAccepted(o: { allowed?: boolean; amount?: number } = {}) {
+    const s = await stack();
+    const orderId = newId();
+    const amount = o.amount ?? 47_500;
+    const paymentKey = await sim.authenticate(orderId, amount, '가상계좌');
+    const base = tossConfirm({ pg: 'SIMULATOR', orderId, paymentKey, amount, authenticatedAtMs: s.clock.now() - 1_000 });
+    const reply = await unary(s.client, 'ConfirmPayment', { ...base.request, event_id: '', order_kind: MERCH, ...(o.allowed === undefined ? {} : { virtual_account_allowed: o.allowed }) });
+    expect(reply.result).toBe(IN_PROGRESS);
+    return { s, ...base, paymentId: reply.payment_id as string };
+  }
+
+  interface LedgerVaRow extends pg.QueryResultRow {
+    status: string;
+    order_kind: string;
+    event_id: string | null;
+    virtual_account_no: string | null;
+    virtual_account_bank: string | null;
+    deposit_due_at: Date | null;
+    failure_category: string | null;
+  }
+  const ledgerVaOf = async (orderId: string): Promise<LedgerVaRow> =>
+    (await q<LedgerVaRow>('select status, order_kind, event_id, virtual_account_no, virtual_account_bank, deposit_due_at, failure_category from payment where order_id = $1', [orderId]))[0]!;
+
+  test('P-T60 ②_virtual_account_allowed=true면_AWAITING_DEPOSIT과_가상계좌칸·입금기한을_적고_결과당기기에_싣는다 [ASVS v5.0.0-2.3.3]', async () => {
+    await q('delete from payment_confirm_job');
+    const f = await vaAccepted({ allowed: true });
+    await drive();
+
+    const row = await ledgerVaOf(f.orderId);
+    expect(row.status).toBe('AWAITING_DEPOSIT');
+    expect(row.order_kind).toBe('MERCH');
+    expect(row.event_id).toBeNull();
+    expect(row.virtual_account_no).not.toBeNull();
+    expect(row.virtual_account_bank).not.toBeNull();
+    expect(row.deposit_due_at).not.toBeNull();
+    // 입금 기한은 지금보다 뒤이고 시뮬레이터가 준 3일 창 안이다
+    expect(row.deposit_due_at!.getTime()).toBeGreaterThan(f.s.clock.now());
+    expect(row.deposit_due_at!.getTime()).toBeLessThanOrEqual(f.s.clock.now() + 4 * 86_400_000);
+
+    const r = await unary(f.s.client, 'BatchGetPayments', { order_ids: [f.orderId] });
+    const payments = r.payments as Record<string, unknown>[];
+    expect(payments).toHaveLength(1);
+    expect(String(payments[0]!.status)).toContain('AWAITING_DEPOSIT');
+    expect(msOf(payments[0]!.deposit_due_at)).toBe(row.deposit_due_at!.getTime());
+    expect(payments[0]!.payment_id).toBe(f.paymentId);
+  });
+
+  test('P-T60 ②_virtual_account_allowed=false면_입금_대기를_남기지_않고_최종_FAILED다', async () => {
+    await q('delete from payment_confirm_job');
+    const f = await vaAccepted({ allowed: false });
+    await drive();
+
+    const row = await ledgerVaOf(f.orderId);
+    expect(row.status).toBe('FAILED');
+    expect(row.failure_category).toBe('DEPOSIT_CANCELED');
+    expect(row.order_kind).toBe('MERCH');
+    expect(row.event_id).toBeNull();
+    // 가상계좌 칸과 입금 기한이 남지 않는다
+    expect(row.virtual_account_no).toBeNull();
+    expect(row.virtual_account_bank).toBeNull();
+    expect(row.deposit_due_at).toBeNull();
+    const r = await unary(f.s.client, 'BatchGetPayments', { order_ids: [f.orderId] });
+    const payment = (r.payments as Record<string, unknown>[])[0]!;
+    expect(String(payment.status)).toContain('FAILED');
+    expect(payment.deposit_due_at ?? null).toBeNull();
+  });
+
+  test('P-T60 ⑥_가상계좌_번호는_원장에_암호화_저장되고_GetPayment로만_복호하며_원문이_사건·로그·지표에_없다 [ASVS v5.0.0-11.3.3] [ASVS v5.0.0-16.2.5]', async () => {
+    await q('delete from payment_confirm_job');
+    const f = await vaAccepted({ allowed: true });
+    await drive();
+
+    const row = await ledgerVaOf(f.orderId);
+    const d = await unary(f.s.client, 'GetPayment', { order_id: f.orderId });
+    const va = d.virtual_account as { bank: string; account_number: string; due_at: unknown };
+    expect(d.status).toBe('PAYMENT_STATUS_AWAITING_DEPOSIT');
+    expect(va.account_number).toMatch(/^\d{8,20}$/);
+    expect(va.bank).toBe(row.virtual_account_bank);
+    expect(msOf(va.due_at)).toBe(row.deposit_due_at!.getTime());
+
+    // 원장에는 암호문만 있고, 이 결제 행으로만 열린다
+    expect(row.virtual_account_no).not.toBe(va.account_number);
+    expect(row.virtual_account_no).not.toContain(va.account_number);
+    await expect(new LocalVirtualAccountCipher(KEY).open(f.paymentId, row.virtual_account_no!)).resolves.toBe(va.account_number);
+    await expect(new LocalVirtualAccountCipher(KEY).open(newId(), row.virtual_account_no!)).rejects.toBeInstanceOf(Error);
+
+    // 결과 당기기·사건·로그·지표에는 원문이 없다
+    const batch = await unary(f.s.client, 'BatchGetPayments', { order_ids: [f.orderId] });
+    expect(JSON.stringify(batch)).not.toContain(va.account_number);
+    expect((batch.payments as Record<string, unknown>[])[0]).not.toHaveProperty('virtual_account');
+    const events = (await outboxMentioning(f.orderId)).map((e) => e.payload.toString('utf8')).join('\n');
+    expect(events).toContain('AWAITING_DEPOSIT');
+    expect(events).not.toContain(va.account_number);
+    expect(f.s.logs.join('\n')).not.toContain(va.account_number);
+    expect(await f.s.metrics()).not.toContain(va.account_number);
+  });
+
+  test('P-T60 ⑥_가상계좌를_허용하지_않은_입금_대기는_입금_전_취소로_결제사에_한_번_닿는다(기존_동작)', async () => {
+    await q('delete from payment_confirm_job');
+    const f = await vaAccepted({ allowed: false });
+    await drive();
+
+    // 결제사에는 입금 전 취소가 한 번 나갔다(원장은 AWAITING_DEPOSIT → FAILED)
+    const cancels = sim.cancelCalls.filter((url) => url.includes(f.paymentKey));
+    expect(cancels).toHaveLength(1);
+    const types = (await q<{ type: string }>('select type from payment_event where payment_id = $1 order by seq', [f.paymentId])).map((e) => e.type);
+    expect(types).toEqual(['ACCEPTED', 'CONFIRM_SENT', 'AWAITING_DEPOSIT', 'DEPOSIT_CANCEL_SENT', 'FAILED']);
+    const row = await ledgerVaOf(f.orderId);
+    expect(row).toMatchObject({ status: 'FAILED', failure_category: 'DEPOSIT_CANCELED', virtual_account_no: null, deposit_due_at: null });
   });
 });
 

@@ -1,12 +1,12 @@
 // 굿즈 결제의 결제창 준비(ADR-0299 결정 3, docs/features/payment.md §2 '선택기의 첫 구현'·§11 P-T56 ⑤, BAT-600).
 // 공개 도메인 함수 parsePrepareCheckoutInput과 쓰임새 PrepareCheckout(결제사 어댑터·선택 읽기는 대역)를 바깥 경계로 본다.
-// 값은 정본에서 적는다: 굿즈 복귀 주소 `{PEAKET_WEB_ORIGIN}/shop/checkout/return?order={orderId}&pg={결제사}`(성공·실패 같은 주소), 가상계좌 뺌.
+// 값은 정본에서 적는다: 굿즈 복귀 주소 `{PEAKET_WEB_ORIGIN}/shop/checkout/return?order={orderId}&pg={결제사}`(성공·실패 같은 주소), 가상계좌·입금 기한은 굿즈에도 있다(ADR-0314, BAT-605).
 import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { PrepareCheckout } from '../src/modules/payment/application/prepare-checkout.js';
 import { PaymentInputError } from '../src/modules/payment/domain/confirm-command.js';
 import { type CheckoutAttempt, type CheckoutOrder, type CheckoutValues, PAY_METHODS, type PaymentGatewayPort, type PgCapabilities, type PgName } from '../src/modules/payment/domain/payment-gateway.js';
-import { channelTableOf, parsePrepareCheckoutInput, type PgSelectionState, type PgSwitchRow, type PrepareCheckoutInput } from '../src/modules/payment/domain/pg-selection.js';
+import { channelTableOf, channelsForStore, escrowProductsOf, parsePrepareCheckoutInput, paymentStoreOf, type PgChannelTable, type PgSelectionState, type PgSwitchRow, type PrepareCheckoutInput } from '../src/modules/payment/domain/pg-selection.js';
 import type { PaymentGateways } from '../src/modules/payment/domain/ports.js';
 
 const ORDER = '22222222-2222-7222-8222-222222222222';
@@ -95,15 +95,17 @@ describe('굿즈 결제창 준비 입력(ADR-0299 결정 3)', () => {
     expect(fieldOf(() => parsePrepareCheckoutInput(merchRaw({ eventId: 'x' })))).toBe('event_id');
   });
 
-  test('P-T56 ⑤ MERCH의 VIRTUAL_ACCOUNT 요청은 INVALID_ARGUMENT(pay_method)이고 그 밖의 수단은 받는다 [ASVS v5.0.0-2.2.1]', () => {
-    expect(fieldOf(() => parsePrepareCheckoutInput(merchRaw({ payMethod: 'VIRTUAL_ACCOUNT' })))).toBe('pay_method');
-    expect(fieldOf(() => parsePrepareCheckoutInput(merchRaw({ eventId: EVENT, payMethod: 'VIRTUAL_ACCOUNT' })))).toBe('pay_method');
-    for (const m of PAY_METHODS.filter((x) => x !== 'VIRTUAL_ACCOUNT')) expect(parsePrepareCheckoutInput(merchRaw({ payMethod: m })).payMethod, m).toBe(m);
+  test('P-T56 ⑤ MERCH의 VIRTUAL_ACCOUNT 요청도 받고 다섯 수단을 모두 받는다(굿즈 입금 대기, BAT-605) [ASVS v5.0.0-2.2.1]', () => {
+    expect(parsePrepareCheckoutInput(merchRaw({ payMethod: 'VIRTUAL_ACCOUNT' })).payMethod).toBe('VIRTUAL_ACCOUNT');
+    expect(parsePrepareCheckoutInput(merchRaw({ eventId: EVENT, payMethod: 'VIRTUAL_ACCOUNT' })).payMethod).toBe('VIRTUAL_ACCOUNT');
+    for (const m of PAY_METHODS) expect(parsePrepareCheckoutInput(merchRaw({ payMethod: m })).payMethod, m).toBe(m);
   });
 
-  test('P-T56 ⑤ MERCH는 가상계좌 허용을 참으로 보내도 거짓이다(굿즈 입금 대기는 BAT-605)', () => {
-    expect(parsePrepareCheckoutInput(merchRaw({ virtualAccountAllowed: true })).virtualAccountAllowed).toBe(false);
-    expect(parsePrepareCheckoutInput(merchRaw()).virtualAccountAllowed).toBe(false);
+  test('P-T56 ⑤ MERCH는 가상계좌 허용이 기본 참이고 보낸 값을 따른다', () => {
+    expect(parsePrepareCheckoutInput(merchRaw()).virtualAccountAllowed).toBe(true);
+    expect(parsePrepareCheckoutInput(merchRaw({ virtualAccountAllowed: true })).virtualAccountAllowed).toBe(true);
+    // 끄는 쪽(거짓)도 그대로 받는다
+    expect(parsePrepareCheckoutInput(merchRaw({ virtualAccountAllowed: false })).virtualAccountAllowed).toBe(false);
   });
 
   test('P-T56 ⑤ 주문 종류는 TICKET·MERCH만 받고 그 밖은 값마다 INVALID_ARGUMENT(order_kind)다 [ASVS v5.0.0-2.2.1]', () => {
@@ -153,18 +155,71 @@ describe('굿즈 결제창 준비 쓰임새(ADR-0299 결정 3)', () => {
     expect((await s.uc.execute(merchRaw())).pg).toBe('TOSS');
   });
 
-  test('P-T56 ⑤ 굿즈 답의 허용 수단에 가상계좌가 없고 입금 기한도 없다(계좌 키가 있어도)', async () => {
+  test('P-T56 ⑤ 굿즈 답의 허용 수단에 가상계좌가 있고 입금 기한은 다음 날 23:59 KST다(계좌 키가 없으면 빠진다)', async () => {
     const s = setup({ virtualAccountReady: true });
-    const a = await s.uc.execute(merchRaw({ virtualAccountAllowed: true }));
-    expect(a.allowedPayMethods).not.toContain('VIRTUAL_ACCOUNT');
-    expect([...a.allowedPayMethods].sort()).toEqual(PAY_METHODS.filter((m) => m !== 'VIRTUAL_ACCOUNT').sort());
-    expect(a).not.toHaveProperty('depositDueAtMs');
+    const a = await s.uc.execute(merchRaw());
+    expect(a.allowedPayMethods).toContain('VIRTUAL_ACCOUNT');
+    expect([...a.allowedPayMethods].sort()).toEqual([...PAY_METHODS].sort());
+    // 2026-11-18T03:00Z = 2026-11-18 12:00 KST → 다음 날 23:59 KST = 2026-11-19T14:59Z
+    expect(a.depositDueAtMs).toBe(Date.parse('2026-11-19T14:59:00.000Z'));
+    // 키가 없으면 입금 기한도 싣지 않는다
+    const noKey = setup({ virtualAccountReady: false });
+    const b = await noKey.uc.execute(merchRaw());
+    expect(b.allowedPayMethods).not.toContain('VIRTUAL_ACCOUNT');
+    expect(b).not.toHaveProperty('depositDueAtMs');
+    // 허용을 끄면 가상계좌도 기한도 없다
+    const off = await s.uc.execute(merchRaw({ virtualAccountAllowed: false }));
+    expect(off.allowedPayMethods).not.toContain('VIRTUAL_ACCOUNT');
+    expect(off).not.toHaveProperty('depositDueAtMs');
   });
 
-  test('P-T56 ⑤ 굿즈의 VIRTUAL_ACCOUNT 요청은 결제사 어댑터를 부르지 않고 거절한다 [ASVS v5.0.0-2.2.1]', async () => {
+  test('P-T56 ⑤ 굿즈의 VIRTUAL_ACCOUNT 요청은 결제사 어댑터를 부르고 그 수단으로 결제창 값을 만든다 [ASVS v5.0.0-2.2.1]', async () => {
     const s = setup();
-    await expect(s.uc.execute(merchRaw({ payMethod: 'VIRTUAL_ACCOUNT' }))).rejects.toBeInstanceOf(PaymentInputError);
-    expect(s.toss.checkouts).toEqual([]);
+    const a = await s.uc.execute(merchRaw({ payMethod: 'VIRTUAL_ACCOUNT' }));
+    expect(a.allowedPayMethods).toContain('VIRTUAL_ACCOUNT');
+    expect(s.toss.checkouts).toHaveLength(1);
+    expect(s.toss.checkouts[0]!.payMethod).toBe('VIRTUAL_ACCOUNT');
     expect(s.portone.checkouts).toEqual([]);
+  });
+});
+
+describe('에스크로 상점의 값 검사(ADR-0313, BAT-605)', () => {
+  test('P-T59 ②_결제_상점_이름은_비면_STANDARD이고_STANDARD·ESCROW만_받는다', () => {
+    expect(paymentStoreOf(undefined)).toBe('STANDARD');
+    expect(paymentStoreOf('')).toBe('STANDARD');
+    expect(paymentStoreOf('UNSPECIFIED')).toBe('STANDARD');
+    expect(paymentStoreOf('STANDARD')).toBe('STANDARD');
+    expect(paymentStoreOf('ESCROW')).toBe('ESCROW');
+    for (const value of ['escrow', 'GIFT', 'PAYMENT_STORE_ESCROW']) expect(fieldOf(() => paymentStoreOf(value)), value).toBe('payment_store');
+  });
+
+  test('P-T59 ②_에스크로_상품은_상품마다_값을_검사하고_목록_상한을_지킨다 [ASVS v5.0.0-2.2.1]', () => {
+    const product = { id: 'merch-1', name: '응원봉', code: '', unitPrice: 12_300, quantity: 3 };
+    expect(escrowProductsOf([product])).toEqual([product]);
+    expect(escrowProductsOf(undefined)).toBeUndefined();
+    expect(fieldOf(() => escrowProductsOf([]))).toBe('escrow_products');
+    const invalid = [
+      { ...product, id: '' },
+      { ...product, name: '' },
+      { ...product, name: 'a\u0007b' },
+      { ...product, code: 'x'.repeat(201) },
+      { ...product, unitPrice: 0 },
+      { ...product, unitPrice: 1.5 },
+      { ...product, quantity: 0 },
+      { ...product, quantity: 10_000 },
+    ];
+    for (const value of invalid) expect(fieldOf(() => escrowProductsOf([value])), JSON.stringify(value)).toBe('escrow_products');
+    // 목록 경계: 100건은 받고 101건은 거절한다(정본 상한)
+    expect(escrowProductsOf(Array.from({ length: 100 }, () => product))).toHaveLength(100);
+    expect(fieldOf(() => escrowProductsOf(Array.from({ length: 101 }, () => product)))).toBe('escrow_products');
+  });
+
+  test('P-T59 ③_에스크로_상점의_채널은_카드·계좌이체·가상계좌만_남기고_원래_표를_바꾸지_않는다', () => {
+    const channels: PgChannelTable = new Map([['TOSS', { active: true, payMethods: new Set(PAY_METHODS) }]]);
+    const escrow = channelsForStore(channels, 'ESCROW');
+    expect([...escrow.get('TOSS')!.payMethods]).toEqual(['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT']);
+    // 표준 상점은 같은 표를 그대로 돌려주고, 에스크로는 새 표를 만든다(원래 표의 수단이 줄지 않는다)
+    expect(channelsForStore(channels, 'STANDARD')).toBe(channels);
+    expect([...channels.get('TOSS')!.payMethods]).toEqual([...PAY_METHODS]);
   });
 });
