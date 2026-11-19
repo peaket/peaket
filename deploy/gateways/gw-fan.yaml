@@ -184,6 +184,40 @@ spec:
               value: nosniff
             - name: Content-Security-Policy
               value: default-src 'none'; frame-ancestors 'none'
+    # www 출처의 403(입장 토큰 ⑨ 다른 회차를 Lua가 낸 것, 교차 출처 필터가 머리를 단 출처 확인·인가 403): 고친 응답은 머리를 새로 써
+    # Lua·교차 출처 필터가 단 머리가 빠지므로 같은 머리 넷을 고정 값으로 다시 단다(docs/infra.md §4.1 '거절 응답의 교차 출처 머리', ADR-0288 결정 6,
+    # BAT-057 리뷰 반영 R057-1). 조건 없는 403 고치기보다 앞에 둔다(먼저 맞는 것이 이긴다). 허용 밖 출처는 머리가 없어 아래 조건 없는 403으로 간다
+    - match:
+        statusCodes:
+          - type: Value
+            value: 403
+        responseHeaders:
+          - name: Access-Control-Allow-Origin
+            value:
+              type: Exact
+              value: https://www.peaket.example
+      source: Local
+      response:
+        contentType: application/problem+json
+        body:
+          type: Inline
+          inline: '{"type":"about:blank","title":"Forbidden","status":403}'
+        header:
+          set:
+            - name: Strict-Transport-Security
+              value: max-age=31536000; includeSubDomains
+            - name: X-Content-Type-Options
+              value: nosniff
+            - name: Content-Security-Policy
+              value: default-src 'none'; frame-ancestors 'none'
+            - name: Access-Control-Allow-Origin
+              value: https://www.peaket.example
+            - name: Access-Control-Allow-Credentials
+              value: "true"
+            - name: Vary
+              value: Origin
+            - name: Access-Control-Expose-Headers
+              value: WWW-Authenticate
     - match:
         statusCodes:
           - type: Value

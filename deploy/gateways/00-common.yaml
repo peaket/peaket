@@ -211,7 +211,9 @@ data:
     --    요청마다 X-Admission-Token을 JWT 확인보다 앞에서 차례 ①~⑨로 본다. ①~⑧에 걸리면 401 admission-token-invalid, ⑨(주소의 회차)는 403이다.
     --    키 목록은 프록시 환경 값 PEAKET_ADMISSION_JWKS(ConfigMap peaket-admission-jwks)다. 없거나 읽지 못하거나 쓸 키가 없거나 확인 중 오류가 나면
     --    모두 거절한다(닫힌 쪽. Envoy는 Lua 오류를 만나면 요청을 그대로 넘기므로 확인 전체를 pcall로 감싼다).
-    -- 5. 거절 응답의 교차 출처 머리(ADR-0288 결정 6): corsOrigin을 받은 라우트에서 요청 Origin이 그 값 하나와 같으면 Lua가 낸 401·403에 교차 출처 머리를 단다.
+    -- 5. 거절 응답의 교차 출처 머리(ADR-0288 결정 6): corsOrigin을 받은 라우트에서 요청 Origin이 그 값 하나와 같으면 Lua가 낸 401·403에 교차 출처 머리 셋
+    --    (Allow-Origin·Allow-Credentials·Expose-Headers)을 단다. Vary: Origin은 달지 않는다: 401에는 gw-fan lateResponseHeaders가 덧붙이고(Lua도 달면 겹친다),
+    --    403은 응답 고치기가 머리를 새로 쓰므로 gw-fan-responses의 www 출처 403 고치기가 넷을 고정 값으로 다시 단다(BAT-057 리뷰 반영 R057-1·R057-5).
     -- 설정(filterContext): originVerify(참이면 1의 견주기를 한다), checkTyp(참이면 2를 한다, 토큰을 요구하는 라우트), tokenCookie(액세스 쿠키 이름, 없으면 ""), tokenScheme(Authorization 앞말),
     -- admission(참이면 4를 한다), admissionIssuer(입장 토큰 발급자 iss), corsOrigin(5의 화면 출처)
 
@@ -404,7 +406,6 @@ data:
       return {
         ["access-control-allow-origin"] = allowed,
         ["access-control-allow-credentials"] = "true",
-        ["vary"] = "Origin",
         ["access-control-expose-headers"] = "WWW-Authenticate",
       }
     end
