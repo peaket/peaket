@@ -81,61 +81,60 @@ test('도구 명령줄은 reports/sizes-js·reports/lighthouse를 읽어 표 둘
   }
 });
 
-// BAT-176: 월렛 LCP만 임시 알림(docs/frontend.md §5.8 'Lighthouse CI', 소유자 결정 2026-11-19 OPEN[52]). 단언 값은 정본 문장과 계획 docs/review/plans/BAT-176.md 3의 숫자다.
-// 판정 칸이 없는 옛 기록(계획 T9)은 위 '도구 Lighthouse 기록을 이름 차례로 …' 시험이 이미 본다(결제 데모 '한도 초과: LCP·총 차단 시간').
-const WALLET_WARN = {
+// BAT-177: LCP 분해 표와 한도 초과 판정(docs/frontend.md §5.8 'Lighthouse CI',
+// 계획 docs/review/plans/BAT-177.md 5의 T4·T7·T9). 단언 값은 계획 5의 대역(요소 img.wallet-qr-skeleton,
+// 1,200·300·200·400ms, 가운데 회차 6,990ms, 한도 7,255ms)이다.
+const cellsOf = (line) => line.slice(2, -2).split(' | ');
+const WALLET = {
   name: '월렛',
   url: 'http://127.0.0.1:4101/my/tickets',
   row: '월렛',
   runs: [],
-  median: { lcpMs: 8040, cls: 0.02, tbtMs: 90 },
+  median: { lcpMs: 6990, cls: 0.02, tbtMs: 90 },
   target: { cls: 0.1, tbtMs: 200 },
   limit: { lcpMs: 7255, cls: 0.1, tbtMs: 200 },
-  verdict: { lcpMs: 'warn', cls: 'pass', tbtMs: 'pass' },
-  warnOnly: [{ metric: 'lcpMs', until: '2026-11-30', reason: '임시, 되돌릴 날: (나)를 합치는 날, 늦어도 2026-11-30 [가정], OPEN[52]' }],
+  lcpSummary: {
+    run: 3,
+    lcpMs: 6990,
+    element: { selector: 'img.wallet-qr-skeleton', snippet: 'data:image/png;base64,…', nodeLabel: 'img', boundingRect: { width: 312, height: 156 } },
+    phases: { ttfbMs: 1200, loadDelayMs: 300, loadDurationMs: 200, renderDelayMs: 400 },
+    elements: ['img.wallet-qr-skeleton'],
+  },
 };
-const cellsOf = (line) => line.slice(2, -2).split(' | ');
 
-test("BAT-176 잡 요약 표는 알림만 지표를 '알림만'으로, 넘은 다른 지표는 '한도 초과'로 적는다", () => {
-  const [, , line] = lighthouseTable([WALLET_WARN]);
-  const cells = cellsOf(line);
-  assert.equal(cells.length, 6);
-  assert.equal(cells[0], '월렛');
-  assert.equal(cells[2], '8040 / 7255', 'LCP 칸은 한도 7,255ms를 그대로 보인다');
-  const verdict = cells[5];
-  assert.ok(verdict.startsWith('알림만'), verdict);
-  for (const s of ['LCP', 'OPEN[52]', '2026-11-30']) assert.ok(verdict.includes(s), `판정 칸에 '${s}'가 없다: ${verdict}`);
-  assert.ok(!verdict.includes('한도 초과'), verdict);
-  assert.ok(!verdict.includes('한도 안'), verdict);
-
-  // 같은 기록에 CLS가 넘어 실패면 둘 다 적는다
-  const both = { ...WALLET_WARN, median: { ...WALLET_WARN.median, cls: 0.2 }, verdict: { ...WALLET_WARN.verdict, cls: 'fail' } };
-  const v2 = cellsOf(lighthouseTable([both])[2])[5];
-  assert.ok(v2.includes('한도 초과: CLS'), v2);
-  assert.ok(v2.includes('알림만'), v2);
-  assert.ok(!/한도 초과: [^;]*LCP/.test(v2), `LCP는 한도 초과에 들지 않는다: ${v2}`);
-  assert.equal(cellsOf(lighthouseTable([both])[2])[3], '0.200 / 0.1');
-
-  // 기록의 판정 칸이 fail이면 '알림만'이 아니다(되돌릴 날이 지난 뒤의 월렛 기록)
-  const after = { ...WALLET_WARN, verdict: { lcpMs: 'fail', cls: 'pass', tbtMs: 'pass' }, warnOnly: [] };
-  assert.equal(cellsOf(lighthouseTable([after])[2])[5], '한도 초과: LCP');
+test('BAT-177 T4 ① LCP 분해 표가 화면별 가운데 값 회차의 요소·네 구간을 보인다', async () => {
+  const { lcpTable } = await import('./report.mjs');
+  assert.equal(typeof lcpTable, 'function', 'report.mjs가 lcpTable을 내놓는다');
+  const lines = lcpTable([WALLET, LH[0]]);
+  assert.equal(lines[0], '| 화면 | 가운데 회차 | LCP(ms) | 요소 | TTFB(ms) | 불러오기 지연(ms) | 불러오기(ms) | 그리기 지연(ms) |');
+  assert.equal(lines[1], '| --- | --- | --- | --- | --- | --- | --- | --- |');
+  assert.deepEqual(lines.slice(2), ['| 월렛 | 3 | 6990 | img.wallet-qr-skeleton | 1200 | 300 | 200 | 400 |']);
 });
 
-test('BAT-176 명령줄도 기록 파일의 판정 칸을 읽어 알림만을 적고, 다른 화면의 한도 초과는 그대로 적는다', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'web-checks-budgets-176-'));
-  try {
-    mkdirSync(join(dir, 'sizes-js'));
-    for (const r of JS) writeFileSync(join(dir, 'sizes-js', `${r.key.replace(/[^A-Za-z0-9-]+/g, '_')}.json`), `${JSON.stringify(r)}\n`);
-    mkdirSync(join(dir, 'lighthouse'));
-    for (const r of [...LH, WALLET_WARN]) writeFileSync(join(dir, 'lighthouse', `${r.name.replace(/\s+/g, '_')}.json`), `${JSON.stringify(r)}\n`);
-    const script = fileURLToPath(new URL('./report.mjs', import.meta.url));
-    const out = spawnSync(process.execPath, [script, '--reports', dir], { encoding: 'utf8' });
-    assert.equal(out.status, 0, out.stderr);
-    const wallet = out.stdout.split('\n').find((l) => l.startsWith('| 월렛 | 월렛 |'));
-    assert.ok(wallet, out.stdout);
-    assert.ok(cellsOf(wallet)[5].startsWith('알림만'), wallet);
-    assert.match(out.stdout, /\| 결제 데모 \| 결제 화면 \| 12539 \/ 2750 \| 0\.000 \/ 0\.1 \| 245 \/ 200 \| 한도 초과: LCP·총 차단 시간 \|/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+test('BAT-177 T4 ② LCP 분해가 없는 옛 기록은 표에서 빼고, 모두 없으면 한 줄로 알리며 기본 표는 그대로다', async () => {
+  const { lcpTable } = await import('./report.mjs');
+  assert.deepEqual(lcpTable(LH), ['(LCP 분해 기록이 없다)']);
+  const report = renderReport({ js: JS, lighthouse: [WALLET] });
+  assert.match(report, /### Lighthouse LCP 분해\(가운데 값 회차\)/);
+  assert.match(report, /\| 월렛 \| 3 \| 6990 \| img\.wallet-qr-skeleton \| 1200 \| 300 \| 200 \| 400 \|/);
+  assert.match(report, /### Lighthouse\(§5\.8 체감 목표, 가운데 값\)/, '기본 Lighthouse 표도 그대로 낸다');
+  assert.match(report, /\| 월렛 \| 월렛 \| 6990 \/ 7255 \| 0\.020 \/ 0\.1 \| 90 \/ 200 \| 한도 안 \|/);
+});
+
+test('BAT-177 T7 ① 한도를 넘는 기록은 실패로 적고 알림만을 쓰지 않는다', () => {
+  const over = { ...WALLET, lcpSummary: null, median: { ...WALLET.median, lcpMs: 8040 } };
+  const line = lighthouseTable([over])[2];
+  assert.equal(cellsOf(line)[5], '한도 초과: LCP');
+  assert.ok(!line.includes('알림만'), line);
+  // 한도와 같으면 통과(여유를 더하지 않는다)
+  const atLimit = { ...over, median: { ...over.median, lcpMs: 7255 } };
+  assert.equal(cellsOf(lighthouseTable([atLimit])[2])[5], '한도 안');
+});
+
+test('BAT-177 T9 ① 월렛의 CLS·총 차단 시간만 넘으면 그 둘만 한도 초과로 적는다', () => {
+  const record = { ...WALLET, lcpSummary: null, median: { lcpMs: 6990, cls: 0.2, tbtMs: 300 } };
+  const cells = cellsOf(lighthouseTable([record])[2]);
+  assert.equal(cells[3], '0.200 / 0.1');
+  assert.equal(cells[4], '300 / 200');
+  assert.equal(cells[5], '한도 초과: CLS·총 차단 시간');
 });
