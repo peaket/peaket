@@ -968,9 +968,11 @@ test('CH-05 ExternalSecret을켜면_remoteRef만낸다_값(kty·PEM·value)은�
   assert.deepEqual(e.spec.secretStoreRef, { name: 'peaket-secrets', kind: 'ClusterSecretStore' });
   assert.equal(e.spec.target.name, 'example-svc-secrets');
   // RV-06: refreshInterval이 없으면 External Secrets가 한 번만 만들고 갱신하지 않아 90일 토큰 키 교체가 Secret에 닿지 않는다.
-  // creationPolicy: Owner로 ExternalSecret을 지울 때 Secret도 함께 지운다(docs/security/asvs/delivery.md 13.3.4)
+  // RV-22: creationPolicy는 External Secrets 스키마에서 spec.target 아래에만 있다. top-level에 두면 알 수 없는 필드다.
+  // Owner면 ExternalSecret을 지울 때 Secret도 함께 지운다(docs/security/asvs/delivery.md 13.3.4)
   assert.equal(e.spec.refreshInterval, '1h', 'refreshInterval(1h)');
-  assert.equal(e.spec.creationPolicy, 'Owner', 'creationPolicy: Owner');
+  assert.equal(e.spec.target.creationPolicy, 'Owner', 'target.creationPolicy: Owner');
+  assert.equal('creationPolicy' in e.spec, false, 'spec 최상위 creationPolicy를 냈다(External Secrets 스키마에 없는 칸이다)');
   assert.equal(parse(readFileSync(join(CHART, 'values.yaml'), 'utf8')).externalSecret?.refreshInterval, '1h', '차트 기본값 externalSecret.refreshInterval');
   // RV-01: data의 remoteRef.key는 환경 안쪽 경로만이고, 차트가 peaket/<externalSecret.environment>/를 붙여 만든다
   assert.deepEqual(e.spec.data, [
