@@ -3,6 +3,8 @@
 // 그 파드는 준비 아님 → 다시 뜸(재시작 +1) → 다시 준비. moto에 보고서·힙 스냅샷 객체(<서비스>/<파드>/<요청 시각>/<파일>, 보고서에 환경 변수 없음),
 // 다시 뜬 뒤 30초 동안 객체 수 그대로(되풀이 없음), 그동안 Service로 보낸 요청의 오류 0. 주석부터 올리기까지 걸린 시간은
 // docs/review/measurements 폴더의 새 파일 BAT-075-diagnose.md에 한 줄 더한다(devops.md 944행 '운영 진단 경로').
+// 실패하면 시험 출력에 dumpDiagnose()가 파드(현재·이전 컨테이너)·이벤트·설명·/diag·버킷 전체를 남기고, 앞 시험이 남긴
+// 릴리스·파드는 지우지 않는다(계획 B2, RV-04). 성공한 시험만 끝에서 helm uninstall을 한다.
 // 자격 증명은 가짜 값이다(흉내 서버는 서명을 검사하지 않는다). 버킷은 AWS CLI v2로 만든다(aws-emulator.e2e.mjs와 같은 길).
 // 실행(저장소 뿌리): node tools/local/cluster.mjs up && node tools/local/cluster.mjs image && node --test --test-timeout=900000 tools/local/e2e/diagnose.e2e.mjs
 import { test } from 'node:test';
@@ -40,6 +42,52 @@ const podOf = async (name) => (await pods()).find((p) => p.metadata.name === nam
 const isReady = (p) => p?.status.conditions?.some((c) => c.type === 'Ready' && c.status === 'True') ?? false;
 const restartsOf = (p) => p?.status.containerStatuses?.[0]?.restartCount ?? 0;
 const objects = (prefix) => (aws(['s3api', 'list-objects-v2', '--bucket', BUCKET, '--prefix', prefix]).Contents ?? []).map((o) => o.Key);
+const DIAG_HANDLED = '.diagnose-handled';
+
+/**
+ * 실패 수집(계획 B2 ①, ADR-0303): 포트 전달이 살아 있을 때 파드(현재·이전 컨테이너)·이벤트·설명, /diag 목록과 표시 파일,
+ * 버킷 전체 객체를 시험 출력에 남긴다. CI의 `if: failure()` 단계(2차 수집)와 별개로 시험 로그만으로 원인을 가를 수 있게 한다.
+ * 수집 자체가 시험을 더 실패시키지 않게 모든 호출을 감싼다.
+ */
+async function dumpDiagnose(what) {
+  const out = [];
+  const line = (s) => out.push(String(s ?? ''));
+  const safe = async (fn) => {
+    try {
+      return await fn();
+    } catch (e) {
+      return `(수집 실패: ${e?.stderr?.toString?.() ?? e?.message ?? e})`;
+    }
+  };
+  line(`\n===== 진단 수집(${what}) =====`);
+  line('--- 파드 ---');
+  line(await safe(() => kubectl(['-n', NS, 'get', 'pods', '-o', 'wide'])));
+  line('--- 이벤트 ---');
+  line(await safe(() => kubectl(['-n', NS, 'get', 'events', '--sort-by=.lastTimestamp'])));
+  const list = await safe(() => pods());
+  if (!Array.isArray(list)) {
+    line('--- 파드 설명 ---');
+    line(list);
+  } else {
+    for (const p of list) {
+      const name = p.metadata.name;
+      line(`--- ${name}: 설명 ---`);
+      line(await safe(() => kubectl(['-n', NS, 'describe', 'pod', name])));
+      line(`--- ${name}: 로그(현재 컨테이너) ---`);
+      line(await safe(() => kubectl(['-n', NS, 'logs', name, '-c', 'app', '--tail=500'])));
+      line(`--- ${name}: 로그(이전 컨테이너) ---`);
+      line(await safe(() => kubectl(['-n', NS, 'logs', name, '-c', 'app', '--previous', '--tail=500'])));
+      line(`--- ${name}: /diag 목록 ---`);
+      line(await safe(() => kubectl(['-n', NS, 'exec', name, '-c', 'app', '--', 'ls', '-la', '/diag'])));
+      line(`--- ${name}: /diag/${DIAG_HANDLED} ---`);
+      line(await safe(() => kubectl(['-n', NS, 'exec', name, '-c', 'app', '--', 'cat', `/diag/${DIAG_HANDLED}`])));
+    }
+  }
+  line('--- 증거 버킷 전체 객체(접두사 없음) ---');
+  line(await safe(async () => JSON.stringify(aws(['s3api', 'list-objects-v2', '--bucket', BUCKET]), null, 2)));
+  console.log(out.join('\n'));
+}
+
 
 /** 다른 파드 안에서 Service 주소로 요청을 흘리고, 끝나면 { ok, errors, errorAtMs(시작부터 오류 시각들) }를 표준 출력에 낸다 */
 function trafficFrom(pod, seconds) {
@@ -65,37 +113,58 @@ async function stageDiag(t) {
   }
 
   // ---- 서비스 2복제(DB는 뼈대 마이그레이션을 건 example) ----
-  execFileSync(helm, ['--kubeconfig', KUBECONFIG, 'uninstall', 'diag', '-n', NS, '--wait', '--ignore-not-found'], { stdio: 'inherit' });
-  const psql = (sqlText, db = 'peaket') => kubectl(['-n', 'peaket-local', 'exec', '-i', 'deploy/postgres', '--', 'psql', '-U', 'postgres', '-d', db, '-v', 'ON_ERROR_STOP=1', '-qtA', '-f', '-'], { input: sqlText });
-  await psql('drop database if exists diag_example with (force); create database diag_example;');
-  await psql(
-    ['0000_example_note.sql', '0001_idempotency_record.sql', '0002_outbox.sql', '0003_held_event_and_stat_snapshot.sql'].map((f) => readFileSync(join(REPO, 'packages', 'platform', 'template', 'migrations', f), 'utf8')).join('\n'),
-    'diag_example',
-  );
-  const [repo, tag] = IMAGE.split(':');
-  execFileSync(
-    helm,
-    [
-      '--kubeconfig', KUBECONFIG, 'upgrade', '--install', 'diag', join(REPO, 'deploy', 'charts', 'peaket-service'),
-      '-n', NS, '--create-namespace', '--wait', '--timeout', '300s',
-      '--set', `name=${SERVICE}`, '--set', `image.repository=${repo}`, '--set', `image.tag=${tag}`, '--set', 'image.pullPolicy=Never',
-      '--set', 'env.PEAKET_ENV=local', '--set', 'service.replicas=2',
-      '--set', 'service.env.PEAKET_DATABASE_URL=postgres://postgres:peaket-local@postgres.peaket-local.svc:5432/diag_example',
-      '--set', `diagnose.bucket=${BUCKET}`, '--set', 'diagnose.s3Endpoint=http://aws.peaket-local.svc.cluster.local:5000',
-      '--set', 'service.env.AWS_ACCESS_KEY_ID=test', '--set', 'service.env.AWS_SECRET_ACCESS_KEY=test', '--set', 'service.env.AWS_REGION=ap-northeast-2',
-    ],
-    { stdio: 'inherit' },
-  );
-  const [target, other] = (await pods()).map((p) => p.metadata.name).sort();
+  // 앞 시험이 실패했으면 그 릴리스·파드를 지우지 않는다(계획 B2, RV-04). CI의 `if: failure()` 수집 단계가
+  // 파드 로그·/diag를 볼 수 있어야 한다. 남아 있으면 값이 같은 릴리스라 그대로 쓰고, 없을 때만 새로 만든다.
+  let reused = false;
+  try {
+    execFileSync(helm, ['--kubeconfig', KUBECONFIG, 'status', 'diag', '-n', NS], { stdio: 'ignore' });
+    reused = true;
+  } catch {
+    reused = false;
+  }
+  if (reused) {
+    console.error('[diag] 앞 시험이 남긴 릴리스 diag를 지우지 않고 그대로 쓴다(실패 수집용).');
+  } else {
+    const psql = (sqlText, db = 'peaket') => kubectl(['-n', 'peaket-local', 'exec', '-i', 'deploy/postgres', '--', 'psql', '-U', 'postgres', '-d', db, '-v', 'ON_ERROR_STOP=1', '-qtA', '-f', '-'], { input: sqlText });
+    await psql('drop database if exists diag_example with (force); create database diag_example;');
+    await psql(
+      ['0000_example_note.sql', '0001_idempotency_record.sql', '0002_outbox.sql', '0003_held_event_and_stat_snapshot.sql'].map((f) => readFileSync(join(REPO, 'packages', 'platform', 'template', 'migrations', f), 'utf8')).join('\n'),
+      'diag_example',
+    );
+    const [repo, tag] = IMAGE.split(':');
+    execFileSync(
+      helm,
+      [
+        '--kubeconfig', KUBECONFIG, 'upgrade', '--install', 'diag', join(REPO, 'deploy', 'charts', 'peaket-service'),
+        '-n', NS, '--create-namespace', '--wait', '--timeout', '300s',
+        '--set', `name=${SERVICE}`, '--set', `image.repository=${repo}`, '--set', `image.tag=${tag}`, '--set', 'image.pullPolicy=Never',
+        '--set', 'env.PEAKET_ENV=local', '--set', 'service.replicas=2',
+        '--set', 'service.env.PEAKET_DATABASE_URL=postgres://postgres:peaket-local@postgres.peaket-local.svc:5432/diag_example',
+        '--set', `diagnose.bucket=${BUCKET}`, '--set', 'diagnose.s3Endpoint=http://aws.peaket-local.svc.cluster.local:5000',
+        '--set', 'service.env.AWS_ACCESS_KEY_ID=test', '--set', 'service.env.AWS_SECRET_ACCESS_KEY=test', '--set', 'service.env.AWS_REGION=ap-northeast-2',
+      ],
+      { stdio: 'inherit' },
+    );
+  }
+  const names = (await pods()).map((p) => p.metadata.name).sort();
+  assert.equal(names.length, 2, `서비스 파드 둘(${JSON.stringify(names)})`);
+  const [target, other] = names;
   return { helm, target, other };
 }
 
 test('D-T18 ①_kind_heap주석을단파드는_준비를내리고·보고서와스냅샷을moto에올리고·다시뜨며_되풀이없고_다른파드로간요청오류는0이다', { timeout: 900_000 }, async (t) => {
+  let passed = false;
+  // 실패하면 지우기 전에 시험 출력으로 1차 수집을 남긴다(계획 B2 ①, RV-04). stageDiag의 포트 전달은 이 뒤에 죽는다(t.after는 건 순서대로)
+  t.after(async () => {
+    if (!passed) await dumpDiagnose('heap');
+  });
   const { helm, target, other } = await stageDiag(t);
   assert.ok(target && other, '파드 둘');
+  const before = objects(`${SERVICE}/`);
   const restarts0 = restartsOf(await podOf(target));
   const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const prefix = `${SERVICE}/${target}/${at}/`;
+  const keyPattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9._-]+$`);
 
   // ---- 주석을 단다(다른 파드에서 Service로 요청을 흘리면서) ----
   const traffic = trafficFrom(other, 150);
@@ -111,7 +180,9 @@ test('D-T18 ①_kind_heap주석을단파드는_준비를내리고·보고서와�
   await until('다시 준비', async () => isReady(await podOf(target)), 180_000);
 
   // 객체 이름은 <서비스>/<파드>/<요청 시각>/<파일>뿐이다
-  for (const key of uploaded) assert.match(key, new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9._-]+$`));
+  for (const key of uploaded) assert.match(key, keyPattern);
+  // 이 시험이 만든 객체도 그 시각 접두사 밖으로 새지 않는다(앞선 시험이 남긴 객체는 그대로 둔다)
+  for (const key of objects(`${SERVICE}/`).filter((k) => !before.includes(k))) assert.match(key, keyPattern, `요청 시각 ${at} 접두사 밖에 객체가 생겼다: ${key}`);
   // 보고서에 환경 변수 칸이 없다
   const dir = mkdtempSync(join(tmpdir(), 'peaket-diag-e2e-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -142,20 +213,31 @@ test('D-T18 ①_kind_heap주석을단파드는_준비를내리고·보고서와�
   }
   appendFileSync(MEASUREMENTS, `| ${new Date().toISOString().slice(0, 10)} | heap | ${uploadMs} | ${uploaded.length} | ${ok}·${errors} |\n`);
   execFileSync(helm, ['--kubeconfig', KUBECONFIG, 'uninstall', 'diag', '-n', NS, '--wait', '--ignore-not-found'], { stdio: 'inherit' });
+  passed = true;
 });
 
 test('D-T18 ①_kind_report주석도_준비를내린뒤40초를기다려_Service에서빠진다음에끝내므로_주석뒤28~40초를포함해Service로간요청오류는0이다(RV-01)', { timeout: 900_000 }, async (t) => {
+  let passed = false;
+  t.after(async () => {
+    if (!passed) await dumpDiagnose('report');
+  });
   const { helm, target, other } = await stageDiag(t);
+  const before = objects(`${SERVICE}/`);
   const restarts0 = restartsOf(await podOf(target));
   const at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const prefix = `${SERVICE}/${target}/${at}/`;
+  const keyPattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-z0-9._-]+$`);
   // 주석을 달기 직전부터 90초 동안 다른 파드에서 Service로 요청을 흘린다(자기 SIGTERM으로 앱을 닫는 때가 이 창 안이다)
   const traffic = trafficFrom(other, 90);
   await kubectl(['-n', NS, 'annotate', 'pod', target, `peaket.io/diagnose=report@${at}`, '--overwrite']);
   await until('보고서 객체', async () => (objects(`${SERVICE}/${target}/${at}/`).some((key) => /\/report[^/]*\.json$/.test(key)) ? true : undefined), 180_000);
+  // 이 시험이 만든 객체가 그 시각 접두사 밖으로 새지 않았다
+  for (const key of objects(`${SERVICE}/`).filter((k) => !before.includes(k))) assert.match(key, keyPattern, `요청 시각 ${at} 접두사 밖에 객체가 생겼다: ${key}`);
   await until('다시 뜸', async () => restartsOf(await podOf(target)) === restarts0 + 1, 180_000);
   const { ok, errors, errorAtMs } = await traffic;
   assert.ok(ok > 0, '요청이 흘렀다');
   assert.equal(errors, 0, `Service로 보낸 요청 오류 ${errors}(요청을 흘리기 시작한 뒤 ${JSON.stringify(errorAtMs)}ms, 주석은 시작 직후)`);
   assert.equal(objects(`${SERVICE}/${target}/${at}/`).some((key) => /heapsnapshot/.test(key)), false, 'report 요청은 스냅샷을 뜨지 않는다');
   execFileSync(helm, ['--kubeconfig', KUBECONFIG, 'uninstall', 'diag', '-n', NS, '--wait', '--ignore-not-found'], { stdio: 'inherit' });
+  passed = true;
 });

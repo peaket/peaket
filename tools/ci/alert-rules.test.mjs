@@ -2,7 +2,8 @@
 // 정본: docs/observability.md §5 SEV2·G-06, docs/features/seat-hold.md §7 '전파 Degraded 자동 전환', ADR-0298.
 // - realtime_gw_degraded == 1이면 for 0m으로 바로 SEV2
 // - realtime_gw_buffer_slow_connections / realtime_gw_connections >= 0.05가 30초면 SEV2(분모는 realtime_gw_connections)
-// - Degraded 동안 '묶음 대기 p99 150ms' 경보는 이 경보로 갈음한다(그 경보의 식이 degraded == 0일 때만 참)
+// - 묶음 대기 p99 150ms 경보는 경고(5분)이고, docs/observability.md §5 512행대로 histogram_quantile 대신
+//   le="150" 경계 칸의 비율(150ms 넘는 비율 > 1%)로 계산한다. Degraded 동안에는 realtime_gw_degraded가 갈음한다
 // 실행(저장소 뿌리): node --test tools/ci/alert-rules.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,26 +57,43 @@ test('RG-02 realtime_gw_degraded는 ==1에_for0m으로바로SEV2이고_버퍼포
 
   // 경보 이름이 겹치지 않고, 모든 경보는 런북과 게임데이를 가리킨다
   assert.equal(new Set(all.map((r) => r.alert)).size, all.length);
+  // 심각도: Degraded·버퍼는 SEV2, 묶음 대기 p99는 경고(docs/features/seat-hold.md §7 443행)
+  assert.deepEqual(
+    all.map((r) => [r.alert, r.labels?.severity]).sort(),
+    [
+      ['realtime_gw_batch_wait_p99_high', 'warning'],
+      ['realtime_gw_buffer_slow_connections', 'sev2'],
+      ['realtime_gw_degraded', 'sev2'],
+    ],
+    '경보 셋의 심각도',
+  );
   for (const r of all) {
-    assert.equal(r.labels?.severity, 'sev2', `${r.alert}: SEV2`);
     assert.match(r.annotations?.summary ?? '', /\S/, `${r.alert}: summary`);
     assert.match(r.annotations?.runbook_url ?? '', /^https:\/\/github\.com\/peaket\/peaket\/blob\/develop\/docs\//, `${r.alert}: runbook_url`);
   }
 });
 
-test('RG-02 Degraded동안_묶음대기p99경보는_realtime_gw_degraded==0일때만울려_갈음한다', () => {
+test('RG-02 묶음대기p99경보는_histogram_quantile대신_le150경계칸비율1%가_5분이면울리는_경고다', () => {
   const all = rules();
   const p99 = all.filter((r) => r.alert === 'realtime_gw_batch_wait_p99_high');
   assert.equal(p99.length, 1, '묶음 대기 p99 경보가 하나가 아니다');
   const r = p99[0];
   assert.equal(String(r.for), '5m');
-  assert.equal(r.labels.severity, 'sev2');
-  // 150ms [가정] 넘음
-  assert.match(r.expr, /histogram_quantile\(0\.99/);
-  assert.match(r.expr, />\s*0\.15/);
+  // 150ms [가정]를 5분 넘는다는 경고(docs/features/seat-hold.md §7 443행). SEV2가 아니다
+  assert.equal(r.labels.severity, 'warning', '묶음 대기 p99 경보는 경고다(SEV2 아님)');
+  // 정본 docs/observability.md §5 512행: 지연 경보는 histogram_quantile 대신 경계 칸(le=150)의 비율로 쓴다
+  assert.doesNotMatch(r.expr, /histogram_quantile/, 'histogram_quantile을 썼다(경계 칸 비율로 계산해야 한다)');
+  assert.match(r.expr, /realtime_gw_batch_wait_ms_bucket\{[^}]*le\s*=\s*["']150["']/, 'le="150" 경계 칸이 없다');
+  assert.match(r.expr, /realtime_gw_batch_wait_ms_count/, '분모가 realtime_gw_batch_wait_ms_count가 아니다');
+  assert.match(r.expr, /\/\s*sum\(/, '경계 칸 비율(나눗셈)이 아니다');
+  // 150ms 넘는 비율 > 1% (또는 150ms 이하 비율 < 99%)
+  assert.ok(/>\s*0?\.01\b/.test(r.expr) || /<\s*0?\.99\b/.test(r.expr), `1% 기준이 없다: ${r.expr}`);
+  assert.match(r.expr, /\[5m\]/, '5분 창이 아니다');
   // Degraded가 아닐 때만 참이어야 한다(아니면 Degraded 동안 두 경보가 함께 울린다)
   assert.match(r.expr, /and on\(\)\s*\(sum\(realtime_gw_degraded\) == 0\)/);
-  assert.match(r.annotations?.description ?? '', /갈음/);
+  const desc = r.annotations?.description ?? '';
+  for (const want of ['150ms', '1%', '5분']) assert.ok(desc.includes(want), `설명에 ${want}가 없다: ${desc}`);
+  assert.match(desc, /갈음/);
 });
 
 test('RG-02 경보 규칙 주석에_RB-23·G-06과_SEV2근거가있고_비밀값이없다 [ASVS v5.0.0-13.1.4]', () => {

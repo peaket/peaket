@@ -11,10 +11,13 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, parseAllDocuments } from 'yaml';
+import { ensureTool } from '../../../tools/local/tools.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKLOADS = resolve(HERE, '..');
 const REPO = resolve(WORKLOADS, '..', '..');
+const CHART = join(REPO, 'deploy', 'charts', 'peaket-service');
+const helm = await ensureTool('helm');
 
 // ---- 정본 값 ----
 const REST_PORT = 8080;
@@ -36,6 +39,22 @@ function load(name) {
   assert.ok(existsSync(file), `배포 단위 값이 없다: deploy/workloads/${name}/values.yaml`);
   return parse(readFileSync(file, 'utf8'));
 }
+/** 차트를 identity 배포 단위 값으로 렌더한다(RV-01: 환경 값 계약, RV-07: secretEnvFrom/ExternalSecret만 쓰는지) */
+function renderIdentity(sets) {
+  const r = spawnSync(
+    helm,
+    [
+      'template', 'identity', CHART, '--namespace', 'core',
+      '-f', join(WORKLOADS, 'identity-svc', 'values.yaml'),
+      '--set', 'image.repository=peaket/identity-svc', '--set', 'image.tag=local', '--set', 'env.PEAKET_ENV=local',
+      ...sets.flatMap((s) => ['--set', s]),
+    ],
+    { encoding: 'utf8' },
+  );
+  if (r.status !== 0) return { error: r.stderr };
+  return { objects: parseAllDocuments(r.stdout).map((d) => d.toJS()).filter(Boolean) };
+}
+const findObject = (objs, kind, name) => objs.find((o) => o.kind === kind && o.metadata?.name === name);
 /** 두 Deployment가 받는 env와 서비스 Deployment만 받는 service.env를 합친 것(같은 이름이 둘에 있으면 던진다) */
 function envOf(v, label) {
   const top = v?.env ?? {};
@@ -231,16 +250,63 @@ test('ID-03 identity 토큰 키 세벌과 교체 값: _KEY·_NEXT·_PREVIOUS·_P
     // remoteRef(Secrets Manager 경로)만 온다. 값(value·valueFrom)은 두지 않는다
     assert.deepEqual(Object.keys(d).sort(), ['remoteRef', 'secretKey'], d.secretKey);
     assert.deepEqual(Object.keys(d.remoteRef ?? {}), ['key'], d.secretKey);
-    assert.match(d.remoteRef.key, /^peaket\//, d.secretKey);
+    assert.equal(typeof d.remoteRef.key, 'string', d.secretKey);
+    // 환경은 차트가 externalSecret.environment로 붙인다: 값 파일의 경로는 환경 안쪽(identity/...)만 적는다
+    assert.doesNotMatch(d.remoteRef.key, /^peaket\//, `${d.secretKey}: 값 파일에 peaket/ 경로가 박혀 있다(환경은 차트가 붙인다)`);
   }
+
+  // ---- RV-01: 환경(peaket/<환경>/...)은 배포 단위 값이 아니라 차트 계약이 정한다 ----
+  // 정본: docs/security/asvs/delivery.md 13.3.2(환경 비밀 최소 권한), docs/security/secrets-and-keys.md 51행
+  const chartValues = parse(readFileSync(join(CHART, 'values.yaml'), 'utf8'));
+  assert.ok(chartValues.externalSecret, '차트에 externalSecret 기본 값이 없다');
+  assert.equal(chartValues.externalSecret.environment, '', '차트 기본값 externalSecret.environment(환경 값이 채운다)');
   const text = repoText('deploy', 'workloads', 'identity-svc', 'values.yaml');
+  // 모든 환경이 함께 쓰는 배포 단위 기본 값에 운영 경로를 박으면 첫 데모 승격이 운영 키를 가리킨다
+  assert.doesNotMatch(text, /peaket\/prod/, '배포 단위 기본 값에 peaket/prod가 박혀 있다');
+  // 환경 값이 없으면 렌더를 멈춘다(빈 환경으로 Secrets Manager 경로를 만들지 않는다)
+  const missing = renderIdentity([]);
+  assert.notEqual(missing.error, undefined, 'externalSecret.environment 없이 ExternalSecret을 렌더했다');
+  assert.match(missing.error, /externalSecret\.environment/, `환경 값이 없을 때의 렌더 오류: ${missing.error}`);
+  // 환경이 local이면 모든 remoteRef가 peaket/local/로 시작한다
+  const local = renderIdentity(['externalSecret.environment=local']);
+  assert.equal(local.error, undefined, local.error);
+  const rendered = findObject(local.objects, 'ExternalSecret', 'identity-svc');
+  assert.ok(rendered, '렌더한 ExternalSecret identity-svc가 없다');
+  assert.equal(rendered.spec.target.name, v.secretEnvFrom, '렌더한 target.name');
+  const keys = (rendered.spec.data ?? []).map((d) => d.remoteRef.key);
+  assert.equal(keys.length, data.length, '렌더한 remoteRef 수');
+  for (const key of keys) assert.match(key, /^peaket\/local\//, `환경 local의 remoteRef ${key}`);
+
+  // ---- RV-07: 토큰 키는 ConfigMap·값 인라인이 아니라 secretEnvFrom/ExternalSecret으로만 온다 ----
+  const env = envOf(v, 'identity-svc');
+  for (const key of want) assert.equal(env[key], undefined, `${key}를 env에 인라인으로 두었다`);
+  assert.equal(Array.isArray(v.service?.envFrom), false, 'service.envFrom은 차트가 secretEnvFrom으로 만든다');
+  const dep = findObject(local.objects, 'Deployment', 'identity-svc');
+  assert.ok(dep, 'Deployment identity-svc');
+  assert.deepEqual(dep.spec.template.spec.containers[0].envFrom, [{ secretRef: { name: v.secretEnvFrom } }], '서비스가 받는 Secret은 secretEnvFrom 하나다');
+  for (const e of dep.spec.template.spec.containers[0].env ?? []) assert.doesNotMatch(e.name, /^PEAKET_(FAN|ADMIN|STAFF)_TOKEN_KEY/, `${e.name}를 env에 두었다`);
+  for (const o of local.objects) {
+    if (o.kind === 'ConfigMap') assert.doesNotMatch(JSON.stringify(o), /PEAKET_(FAN|ADMIN|STAFF)_TOKEN_KEY/, `ConfigMap ${o.metadata?.name}에 토큰 키가 있다`);
+  }
+  // 값 파일에는 경로만 있다: value·valueFrom·개인 JWK(kty·d)·PEM이 없다
+  assert.doesNotMatch(text, /^\s*(value|valueFrom)\s*:/m, '값 파일에 value/valueFrom이 있다');
   assert.doesNotMatch(text, /"kty"|BEGIN [A-Z ]*PRIVATE KEY|"d"\s*:/, '키 값(개인 JWK·PEM)이 파일에 있다');
-  // 교체 차례: 다음 키의 공개 JWK를 먼저(_NEXT), 받는 쪽 캐시 5분을 기다린 뒤 지금 키를 옮기고(_PREVIOUS), 끝 시각이 지나면 지운다
-  const next = text.indexOf('_TOKEN_KEY_NEXT');
-  const prev = text.indexOf('_TOKEN_KEY_PREVIOUS');
-  const until = text.indexOf('_TOKEN_KEY_PREVIOUS_UNTIL');
-  assert.ok(next > 0 && prev > next && until > prev, '교체 차례(_NEXT → _PREVIOUS → _PREVIOUS_UNTIL)가 주석에 없다');
-  assert.match(text, /캐시 5분/, '받는 쪽 캐시 5분(docs/features/identity.md §3)을 기다린다는 글이 없다');
+  // 교체 차례(정본과 같은 순서): ① _NEXT(공개 JWK) → ② 다음 키를 지금 키로, 지금 키를 _PREVIOUS로(_PREVIOUS_UNTIL 설정) → ③ 끝 시각 뒤 지운다
+  // 정본: docs/features/identity.md §3 189행, docs/security/secrets-and-keys.md 51행('팬 액세스 토큰 서명 키')
+  const comments = text.split(/\r?\n/).filter((l) => /^\s*#/.test(l)).join('\n');
+  const at = (re) => {
+    const m = re.exec(comments);
+    return m ? m.index : -1;
+  };
+  const nextAt = at(/_TOKEN_KEY_NEXT/);
+  const currentAt = at(/_TOKEN_KEY\b/);
+  const prevAt = at(/_TOKEN_KEY_PREVIOUS\b/);
+  const untilAt = at(/_TOKEN_KEY_PREVIOUS_UNTIL/);
+  assert.ok(nextAt >= 0 && currentAt > nextAt && prevAt > currentAt && untilAt > prevAt, `교체 차례(_NEXT → 현재 → _PREVIOUS → _PREVIOUS_UNTIL)가 주석에 없다(${[nextAt, currentAt, prevAt, untilAt]})`);
+  assert.match(comments, /캐시 5분/, '받는 쪽 캐시 5분(docs/features/identity.md §3)을 기다린다는 글이 없다');
+  const doc = repoText('docs', 'security', 'secrets-and-keys.md');
+  for (const wantDoc of ['_KEY_NEXT', '캐시(5분)', '_KEY_PREVIOUS', '_KEY_PREVIOUS_UNTIL']) assert.ok(doc.includes(wantDoc), `정본 secrets-and-keys.md에 ${wantDoc}`);
+  assert.match(repoText('docs', 'features', 'identity.md'), /교체는 두 단계다/);
 });
 
 test('ID-04 identity PEAKET_COOKIE_DOMAIN은 값 파일에 있고 비밀 목록에 없다(도메인은 비밀이 아니다)', () => {

@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseAllDocuments } from 'yaml';
+import { parseAllDocuments, parse } from 'yaml';
 import { V0_ALLOWED_ORIGINS, V0_PG_URL } from './cluster.mjs';
 import { ensureTool } from './tools.mjs';
 import { V0_TOKEN_ISSUER } from './v0-token.mjs';
@@ -949,11 +949,12 @@ test('CH-05 ExternalSecret을켜면_remoteRef만낸다_값(kty·PEM·value)은�
     [
       'externalSecret:',
       '  enabled: true',
+      '  environment: local',
       '  secretStoreRef: { name: peaket-secrets, kind: ClusterSecretStore }',
       '  target: { name: example-svc-secrets }',
       '  data:',
-      '    - { secretKey: PEAKET_FAN_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/fan-token-key } }',
-      '    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/fan-token-key-previous } }',
+      '    - { secretKey: PEAKET_FAN_TOKEN_KEY, remoteRef: { key: identity/fan-token-key } }',
+      '    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS, remoteRef: { key: identity/fan-token-key-previous } }',
       '',
     ].join('\n'),
   );
@@ -966,9 +967,15 @@ test('CH-05 ExternalSecret을켜면_remoteRef만낸다_값(kty·PEM·value)은�
   assert.equal(e.metadata.name, 'example-svc');
   assert.deepEqual(e.spec.secretStoreRef, { name: 'peaket-secrets', kind: 'ClusterSecretStore' });
   assert.equal(e.spec.target.name, 'example-svc-secrets');
+  // RV-06: refreshInterval이 없으면 External Secrets가 한 번만 만들고 갱신하지 않아 90일 토큰 키 교체가 Secret에 닿지 않는다.
+  // creationPolicy: Owner로 ExternalSecret을 지울 때 Secret도 함께 지운다(docs/security/asvs/delivery.md 13.3.4)
+  assert.equal(e.spec.refreshInterval, '1h', 'refreshInterval(1h)');
+  assert.equal(e.spec.creationPolicy, 'Owner', 'creationPolicy: Owner');
+  assert.equal(parse(readFileSync(join(CHART, 'values.yaml'), 'utf8')).externalSecret?.refreshInterval, '1h', '차트 기본값 externalSecret.refreshInterval');
+  // RV-01: data의 remoteRef.key는 환경 안쪽 경로만이고, 차트가 peaket/<externalSecret.environment>/를 붙여 만든다
   assert.deepEqual(e.spec.data, [
-    { secretKey: 'PEAKET_FAN_TOKEN_KEY', remoteRef: { key: 'peaket/prod/identity/fan-token-key' } },
-    { secretKey: 'PEAKET_FAN_TOKEN_KEY_PREVIOUS', remoteRef: { key: 'peaket/prod/identity/fan-token-key-previous' } },
+    { secretKey: 'PEAKET_FAN_TOKEN_KEY', remoteRef: { key: 'peaket/local/identity/fan-token-key' } },
+    { secretKey: 'PEAKET_FAN_TOKEN_KEY_PREVIOUS', remoteRef: { key: 'peaket/local/identity/fan-token-key-previous' } },
   ]);
   // 값이 들어갈 수 있는 칸(value·valueFrom·dataFrom)과 키 본문이 없다
   for (const d of e.spec.data) assert.deepEqual(Object.keys(d).sort(), ['remoteRef', 'secretKey']);
@@ -1009,3 +1016,37 @@ test('CH-07 local·ci밖에서는_태그만으로렌더하지않고_다이제스
   }
 });
 
+// --- RV-03: Rollout+HPA/KEDA의 scaleTargetRef(계획 BAT-080 G3, 리뷰 RV-03) ---
+// Rollout을 켜면 Deployment를 내지 않으므로(rollout.yaml), 오토스케일러가 없는 Deployment를 가리키면 복제 수가 조절되지 않는다.
+// local·CI는 지금처럼 Deployment라 scaleTargetRef도 그대로다.
+
+test('CH-08 Rollout과HPA를함께켜면_scaleTargetRef가argoproj.io/v1alpha1_Rollout이고_Deployment때는apps/v1_Deployment다', () => {
+  const on = render([...ROLLOUT_ON, 'service.autoscaling.enabled=true']);
+  assert.equal(on.error, undefined, on.error);
+  assert.equal(all(on.objects, 'Deployment').filter((o) => o.metadata.name === 'example-svc').length, 0, 'Rollout과 Deployment가 함께 렌더됐다');
+  assert.equal(all(on.objects, 'Rollout').length, 1);
+  const hpa = find(on.objects, 'HorizontalPodAutoscaler', 'example-svc');
+  assert.ok(hpa, 'HorizontalPodAutoscaler example-svc');
+  assert.deepEqual(hpa.spec.scaleTargetRef, { apiVersion: 'argoproj.io/v1alpha1', kind: 'Rollout', name: 'example-svc' });
+  // Deployment일 때는 지금 그대로다
+  const off = render([...BASE, 'service.autoscaling.enabled=true']);
+  assert.equal(off.error, undefined, off.error);
+  assert.deepEqual(find(off.objects, 'HorizontalPodAutoscaler', 'example-svc').spec.scaleTargetRef, { apiVersion: 'apps/v1', kind: 'Deployment', name: 'example-svc' });
+});
+
+test('CH-09 Rollout과KEDA를함께켜면_scaleTargetRef가argoproj.io/v1alpha1_Rollout이고_Deployment때는지금처럼이름만이다', () => {
+  const file = valuesFile(
+    ['service:', '  keda:', '    enabled: true', '    triggers:', '      - type: prometheus', '        metadata:', '          serverAddress: http://prom.observability.svc:9090', '          query: sum(peaket_realtime_gw_connections)', '          threshold: "100"', ''].join('\n'),
+  );
+  const on = renderFiles([file], [...BASE, 'service.rollout.enabled=true']);
+  assert.equal(on.error, undefined, on.error);
+  assert.equal(all(on.objects, 'Deployment').filter((o) => o.metadata.name === 'example-svc').length, 0, 'Rollout과 Deployment가 함께 렌더됐다');
+  assert.equal(all(on.objects, 'Rollout').length, 1);
+  const scaled = find(on.objects, 'ScaledObject', 'example-svc');
+  assert.ok(scaled, 'ScaledObject example-svc');
+  assert.deepEqual(scaled.spec.scaleTargetRef, { apiVersion: 'argoproj.io/v1alpha1', kind: 'Rollout', name: 'example-svc' });
+  // Deployment일 때는 지금처럼 이름만 적는다(KEDA 기본값이 apps/v1 Deployment다)
+  const off = renderFiles([file], BASE);
+  assert.equal(off.error, undefined, off.error);
+  assert.deepEqual(find(off.objects, 'ScaledObject', 'example-svc').spec.scaleTargetRef, { name: 'example-svc' });
+});
