@@ -21,6 +21,7 @@ import {
   type EvidenceStore,
   type StartDiagnoseOptions,
 } from '../src/index.js';
+import * as diagnoseModule from '../src/diagnose.js';
 import { collector, sample } from './fixture.js';
 
 const AT = '2026-11-19T01:02:03Z';
@@ -190,6 +191,46 @@ describe('D-T18 ① 진단 수집 차례(RB-31)', () => {
     sl.pending[1]!.resolve();
     await until('끝내기', () => exits.n === 1);
     expect(events).toEqual(['sleep:40000', 'sleep:10000', 'report', 'put', 'exit']);
+  });
+});
+
+// --- BAT-080 RV-20: --report-directory가 켜진 Node 24에서 writeReport에 절대 경로를 넘기면 보고서를 쓰지 못한다(PR #43 kind 로그) ---
+// 차트는 NODE_OPTIONS=--report-directory=/diag를 준다. 같은 옵션에서 상대 파일 이름은 /diag 아래에 정상으로 쓰인다.
+// 정본: ADR-0070 결정 1(RB-31), ADR-0303 결정 3. reportTarget이 report-directory 안의 파일을 상대 이름으로 바꾼다.
+describe('BAT-080 RV-20 report-directory 아래 보고서 경로', () => {
+  const reportTargetOf = () => (diagnoseModule as unknown as { reportTarget?: (file: string, directory: string) => string }).reportTarget;
+
+  test('RV-20 reportTarget은 report-directory 안의 절대 경로를 그 디렉터리 기준 상대 이름으로 바꾼다', () => {
+    const reportTarget = reportTargetOf();
+    expect(reportTarget, 'diagnose.ts가 reportTarget을 내지 않는다').toBeTypeOf('function');
+    expect(reportTarget!('/diag/report-2026-11-19T11-11-56Z.json', '/diag')).toBe('report-2026-11-19T11-11-56Z.json');
+  });
+
+  test('RV-20 reportTarget은 directory가 비면 파일 경로를 그대로 돌려준다', () => {
+    const reportTarget = reportTargetOf();
+    expect(reportTarget, 'diagnose.ts가 reportTarget을 내지 않는다').toBeTypeOf('function');
+    expect(reportTarget!('/diag/report-x.json', '')).toBe('/diag/report-x.json');
+  });
+
+  test('RV-20 reportTarget은 디렉터리 밖 파일과 디렉터리 자체를 그대로 돌려준다', () => {
+    const reportTarget = reportTargetOf();
+    expect(reportTarget, 'diagnose.ts가 reportTarget을 내지 않는다').toBeTypeOf('function');
+    expect(reportTarget!('/tmp/x.json', '/diag')).toBe('/tmp/x.json');
+    expect(reportTarget!('/diag', '/diag')).toBe('/diag');
+  });
+
+  test('RV-20 보고서콜백이파일을만들지않으면_report_failed로세고_올리지않으며_처리값을남긴다', async () => {
+    const s = stage();
+    const { store, puts } = memoryStore();
+    const { exits, metrics } = boot({ ...s, store, report: () => {} }); // 파일을 만들지 않는 콜백
+    s.annotate(`report@${AT}`);
+    await until('끝내기', () => exits.n === 1);
+    expect(puts).toHaveLength(0);
+    expect(await results(metrics, 'report_failed')).toBe(1);
+    expect(await results(metrics, 'report')).toBeUndefined();
+    expect(await results(metrics, 'upload_failed')).toBeUndefined();
+    // 처리한 값으로 남겨 다시 뜨면 같은 수집을 되풀이하지 않는다
+    expect(readFileSync(join(s.diagDir, DIAGNOSE_HANDLED_FILE), 'utf8')).toBe(`report@${AT}`);
   });
 });
 
