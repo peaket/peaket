@@ -22,6 +22,7 @@ import {
   type CancellationRecord,
   type CancellationWrites,
   type PaymentCancelOutcome,
+  type RefundAccountWrites,
 } from '../src/modules/refund/index.js';
 import { fakeJwksFetch, fakeSeatRedis, fanKey, ISS, JWKS_URL, reauthClaims, signReauth } from './fan-reauth-fixtures.js';
 
@@ -63,11 +64,16 @@ const state = {
   lookups: [] as { orderId: string; deadlineMs: number }[],
   payment: 'CANCELLED' as PaymentCancelOutcome,
   ticketCalls: [] as unknown[],
-  paymentCalls: [] as { cancellationId: string; refundAccount?: unknown }[],
+  paymentCalls: [] as { cancellationId: string; refundAccount?: unknown; refundAttempt?: number; amount?: number; reason?: string }[],
   created: [] as Record<string, unknown>[],
   accountMarks: [] as { cancellationId: string; nowMs: number }[],
   retries: [] as unknown[],
   failures: [] as unknown[],
+  /** R-T42: 계좌 다시 받기 시도 올리기·상태 전이 기록 */
+  accountStarts: [] as { cancellationId: string; oldAttempt: number; attempt: number }[],
+  accountClears: [] as { cancellationId: string; nextRefundAtMs?: number; lastError?: string }[],
+  accountUpdates: [] as { cancellationId: string; status: string }[],
+  accountFailures: [] as { cancellationId: string; attempts: number; lastError: string }[],
   /** 표 ID → 입장 시작 시각 */
   entryOf: new Map<string, number>(),
   records: new Map<string, CancellationRecord>(),
@@ -77,13 +83,17 @@ const state = {
   saleEndsOf: new Map<string, number>(),
 };
 const redis = fakeSeatRedis();
+const jwks = fakeJwksFetch([fan]);
+/** 키 묶음을 한 번도 받지 못한 확인기(R-T42 ②): 앞 시험이 키를 받아 둔 같은 게이트로는 첫 읽기 장애를 재현할 수 없다 */
+const coldJwks = fakeJwksFetch([fan]);
 let svc: Awaited<ReturnType<typeof createService>>;
+let coldSvc: Awaited<ReturnType<typeof createService>>;
 let seq = 0;
 
 const writes: CancellationWrites = {
   create: async (q) => {
     state.created.push({ ...q });
-    state.records.set(q.cancellationId, { cancellationId: q.cancellationId, orderId: q.orderId, ticketId: q.ticketId, refundAmount: q.refundAmount, state: q.status, refundAttempts: 0 });
+    state.records.set(q.cancellationId, { cancellationId: q.cancellationId, orderId: q.orderId, ticketId: q.ticketId, refundAmount: q.refundAmount, state: q.status, refundAttempts: 0, refundAttempt: 0, refundAccountRequired: false });
     return { status: 'CREATED' };
   },
   updateStatus: async (q) => {
@@ -96,57 +106,97 @@ const writes: CancellationWrites = {
   dueRefunds: async () => [],
 };
 
+/** R-T42: 계좌 다시 받기 쓰기 대역. 행 잠금 안에서 조건을 다시 보고 시도를 1 올린다 */
+const refundAccountWrites: RefundAccountWrites = {
+  beginAttempt: async (q) => {
+    const r = state.records.get(q.cancellationId);
+    const old = r?.refundAttempt ?? 0;
+    if (!r || r.state !== 'REFUND_PENDING' || r.refundAccountRequired !== true || old !== q.oldAttempt || old >= 3) return undefined;
+    const attempt = old + 1;
+    state.records.set(q.cancellationId, { ...r, refundAttempt: attempt });
+    state.accountStarts.push({ cancellationId: q.cancellationId, oldAttempt: old, attempt });
+    return { attempt, orderId: r.orderId, ticketId: r.ticketId, refundAmount: r.refundAmount, reason: 'USER', retryAttempts: r.refundAttempts };
+  },
+  clearWaiting: async (q) => {
+    const r = state.records.get(q.cancellationId);
+    if (r?.state === 'REFUND_PENDING') state.records.set(q.cancellationId, { ...r, refundAccountRequired: false });
+    state.accountClears.push({ cancellationId: q.cancellationId, ...(q.nextRefundAtMs === undefined ? {} : { nextRefundAtMs: q.nextRefundAtMs }), ...(q.lastError === undefined ? {} : { lastError: q.lastError }) });
+  },
+  updateStatus: async (q) => {
+    const r = state.records.get(q.cancellationId);
+    if (r) state.records.set(q.cancellationId, { ...r, state: q.status });
+    state.accountUpdates.push({ cancellationId: q.cancellationId, status: q.status });
+  },
+  markFailed: async (q) => {
+    state.accountFailures.push({ cancellationId: q.cancellationId, attempts: q.attempts, lastError: q.lastError });
+  },
+};
+
 beforeAll(async () => {
   const sessions = new MemoryPurchaseSessions();
   sessions.open({ sessionId: PSID, accountId: ACCOUNT, eventId: EVENT, journeyId: 'journey', loginSessionId: LOGIN, key: KEY });
-  const jwks = fakeJwksFetch([fan]);
-  const reauth = new JwksFanReauthGate({ jwksUrl: JWKS_URL, issuer: ISS, jti: new RedisReauthJtiStore(redis), clock: fakeClock({ now: NOW }), fetch: jwks.fetch });
-  svc = await createService({
-    name: 'purchase-svc',
-    module: AppModule.register({
-      memory: true,
-      sessions,
-      refund: {
-        orders: {
-          findByTicket: async (id) => viewOf(id, state.entryOf.get(id) ?? Date.parse('2026-11-20T18:00:00+09:00'), state.saleEndsOf.get(id)),
-          findCancellation: async (id) => state.records.get(id),
-        },
-        tickets: {
-          cancel: async (q) => {
-            state.ticketCalls.push(q);
-            const answer = state.ticketAnswer.get(q.ticketIds[0]!);
-            if (answer !== undefined) return answer as never;
-            return (state.entryOf.get(q.ticketIds[0]!) ?? Number.POSITIVE_INFINITY) <= NOW ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
-          },
-        },
-        payments: {
-          cancel: async (q) => {
-            state.paymentCalls.push({ cancellationId: q.cancellationId, ...(q.refundAccount !== undefined ? { refundAccount: q.refundAccount } : {}) });
-            return state.payment;
-          },
-        },
-        writes,
-        calendar: new WeekendBusinessCalendar(),
-        reauth: { verify: (t, q) => (state.verifies++, reauth.verify(t, q)) },
-        paymentMethods: {
-          virtualAccountPaid: async (q) => {
-            state.lookups.push({ orderId: q.orderId, deadlineMs: q.deadlineMs });
-            if (state.lookup === 'FAIL') throw new Error('payment-svc GetPayment 시간 초과(시험의 장애 주입)');
-            return state.lookup === 'VIRTUAL';
-          },
-        },
+  const refund = {
+    orders: {
+      findByTicket: async (id: string) => viewOf(id, state.entryOf.get(id) ?? Date.parse('2026-11-20T18:00:00+09:00'), state.saleEndsOf.get(id)),
+      findCancellation: async (id: string) => state.records.get(id),
+    },
+    tickets: {
+      cancel: async (q: { ticketIds: readonly string[] }) => {
+        state.ticketCalls.push(q);
+        const answer = state.ticketAnswer.get(q.ticketIds[0]!);
+        if (answer !== undefined) return answer as never;
+        return (state.entryOf.get(q.ticketIds[0]!) ?? Number.POSITIVE_INFINITY) <= NOW ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
       },
-    }),
-    purchaseSessions: sessions,
-    env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'debug' },
-    clock: fakeClock({ now: NOW }),
-    logDestination: new Writable({
-      write: (c, _e, cb) => {
-        logs.push(String(c));
-        cb();
+    },
+    payments: {
+      cancel: async (q: { cancellationId: string; refundAccount?: unknown; refundAttempt?: number; amount: number; reason: string }) => {
+        state.paymentCalls.push({
+          cancellationId: q.cancellationId,
+          ...(q.refundAccount !== undefined ? { refundAccount: q.refundAccount } : {}),
+          ...(q.refundAttempt === undefined ? {} : { refundAttempt: q.refundAttempt }),
+          amount: q.amount,
+          reason: q.reason,
+        });
+        return state.payment;
       },
-    }),
-  });
+    },
+    writes,
+    refundAccountWrites,
+    calendar: new WeekendBusinessCalendar(),
+    paymentMethods: {
+      virtualAccountPaid: async (q: { orderId: string; deadlineMs: number }) => {
+        state.lookups.push({ orderId: q.orderId, deadlineMs: q.deadlineMs });
+        if (state.lookup === 'FAIL') throw new Error('payment-svc GetPayment 시간 초과(시험의 장애 주입)');
+        return state.lookup === 'VIRTUAL';
+      },
+    },
+  };
+  const warmGate = new JwksFanReauthGate({ jwksUrl: JWKS_URL, issuer: ISS, jti: new RedisReauthJtiStore(redis), clock: fakeClock({ now: NOW }), fetch: jwks.fetch });
+  const make = (reauth: typeof warmGate) =>
+    createService({
+      name: 'purchase-svc',
+      module: AppModule.register({
+        memory: true,
+        sessions,
+        refund: { ...refund, reauth: { verify: (t: string | undefined, q) => (state.verifies++, reauth.verify(t, q)) } },
+      }),
+      purchaseSessions: sessions,
+      env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'debug' },
+      clock: fakeClock({ now: NOW }),
+      logDestination: new Writable({
+        write: (c, _e, cb) => {
+          logs.push(String(c));
+          cb();
+        },
+      }),
+    });
+  svc = await make(warmGate);
+  const coldGate = new JwksFanReauthGate({ jwksUrl: JWKS_URL, issuer: ISS, jti: new RedisReauthJtiStore(fakeSeatRedis()), clock: fakeClock({ now: NOW }), fetch: coldJwks.fetch });
+  coldSvc = await make(coldGate);
+});
+afterAll(async () => {
+  await svc?.close();
+  await coldSvc?.close();
 });
 afterAll(async () => {
   await svc?.close();
@@ -154,7 +204,7 @@ afterAll(async () => {
 beforeEach(() => {
   state.lookup = 'VIRTUAL';
   state.payment = 'CANCELLED';
-  for (const a of [state.lookups, state.ticketCalls, state.paymentCalls, state.created, state.accountMarks, state.retries, state.failures]) a.length = 0;
+  for (const a of [state.lookups, state.ticketCalls, state.paymentCalls, state.created, state.accountMarks, state.retries, state.failures, state.accountStarts, state.accountClears, state.accountUpdates, state.accountFailures]) a.length = 0;
   state.verifies = 0;
   redis.commands.length = 0;
 });
@@ -256,7 +306,7 @@ describe('P-T72 ② Saga 앞의 계좌 규칙', () => {
     expect(r.statusCode).toBe(202);
     expect(r.body).toEqual({ cancellationId: r.idem, status: 'REFUNDED', refundAmount: 30_000 });
     expect(state.ticketCalls).toHaveLength(1);
-    expect(state.paymentCalls).toEqual([{ cancellationId: r.idem }]);
+    expect(state.paymentCalls.map((c) => c.cancellationId)).toEqual([r.idem]);
   });
 });
 
@@ -265,7 +315,8 @@ describe('P-T72 ③ 계좌를 싣는 자리', () => {
     const r = await send(ticket(), { refundAccount: REFUND_ACCOUNT });
     expect(r.statusCode).toBe(202);
     expect(r.body).toEqual({ cancellationId: r.idem, status: 'REFUNDED', refundAmount: 30_000 });
-    expect(state.paymentCalls).toEqual([{ cancellationId: r.idem, refundAccount: REFUND_ACCOUNT }]);
+    expect(state.paymentCalls).toHaveLength(1);
+    expect(state.paymentCalls[0]).toMatchObject({ cancellationId: r.idem, refundAccount: REFUND_ACCOUNT });
     // 취소 행 쓰기에는 계좌가 없다(저장하지 않는다)
     expect(JSON.stringify(state.created)).not.toContain(ACCOUNT_NO);
   });
@@ -274,7 +325,7 @@ describe('P-T72 ③ 계좌를 싣는 자리', () => {
     state.lookup = 'CARD';
     const r = await send(ticket(), { refundAccount: REFUND_ACCOUNT });
     expect(r.statusCode).toBe(202);
-    expect(state.paymentCalls).toEqual([{ cancellationId: r.idem }]);
+    expect(state.paymentCalls.map((c) => c.cancellationId)).toEqual([r.idem]);
   });
 
   test('P-T72 ③ 입장 시작 뒤 취소에 실은 계좌는 버리고 202 REQUESTED이며(결제 수단을 읽지 않는다), 마감 뒤 재시도 실행기의 호출에도 계좌가 없다', async () => {
@@ -340,7 +391,289 @@ describe('P-T72 ⑥ 계좌 글 누설', () => {
   });
 });
 
-// ---- BAT-420-rest 리뷰 반영 재현(시험 담당 l3-b420-test, 2026-11-19) ----
+// ---- BAT-425 R-T42: 지연 환급 계좌 다시 받기 HTTP ----
+
+/** 계좌 대기(REFUND_PENDING·refund_account_required_at 있음) 취소 하나를 메모리에 넣는다 */
+const accountPending = (o: { cancellationId?: string; ticketId?: string; refundAttempt?: number; required?: boolean; state?: CancellationRecord['state'] } = {}): string => {
+  const ticketId = o.ticketId ?? randomUUID();
+  state.entryOf.set(ticketId, Date.parse('2026-11-20T18:00:00+09:00'));
+  const cancellationId = o.cancellationId ?? randomUUID();
+  state.records.set(cancellationId, {
+    cancellationId,
+    orderId: ORDER,
+    ticketId,
+    refundAmount: 30_000,
+    state: o.state ?? 'REFUND_PENDING',
+    refundAttempts: 0,
+    refundAttempt: o.refundAttempt ?? 0,
+    refundAccountRequired: o.required ?? true,
+  });
+  return cancellationId;
+};
+
+const accountToken = (o: { accountId?: string; sessionId?: string; act?: string; op?: string; lifeS?: number; jti?: string } = {}): { t: string; jti: string } => {
+  const claims = reauthClaims({
+    nowMs: NOW,
+    accountId: o.accountId ?? ACCOUNT,
+    sessionId: o.sessionId ?? LOGIN,
+    act: o.act ?? 'FAN_HIGH_RISK',
+    op: o.op ?? 'REFUND_ACCOUNT',
+    lifeS: o.lifeS ?? 180,
+    ...(o.jti === undefined ? {} : { jti: o.jti }),
+  });
+  return { t: signReauth(fan, claims), jti: claims.jti as string };
+};
+
+const postAccount = async (
+  cancellationId: string,
+  body: Record<string, unknown> = REFUND_ACCOUNT,
+  o: { accountId?: string; sessionId?: string; token?: string; key?: string; svc?: typeof svc } = {},
+) =>
+  (o.svc ?? svc).http.inject({
+    method: 'POST',
+    url: `/v1/cancellations/${cancellationId}/account`,
+    headers: {
+      ...fanHeaders,
+      'x-user-id': o.accountId ?? ACCOUNT,
+      'x-session-id': o.sessionId ?? LOGIN,
+      'content-type': 'application/json',
+      'idempotency-key': o.key ?? randomUUID(),
+      ...(o.token === undefined ? {} : { 'x-reauth-token': o.token }),
+    },
+    payload: JSON.stringify(body),
+  });
+
+const accountProblem = (r: { statusCode: number; payload: string }) => {
+  const b = JSON.parse(r.payload) as { type?: string; title?: string };
+  return { status: r.statusCode, type: String(b.type ?? '').replace(/^.*\/problems\//, ''), title: b.title };
+};
+
+describe('R-T42 ① 예매 취소의 지연 환급 계좌 다시 받기(202·404·409)', () => {
+  test('R-T42 ①_결제자_본인의_REFUND_PENDING_계좌_대기_행에_계좌를_보내면_202_REFUNDED이고_payment에_새_시도_번호가_간다', async () => {
+    const id = accountPending();
+    const tk = accountToken();
+    const r = await postAccount(id, REFUND_ACCOUNT, { token: tk.t });
+    expect(r.statusCode, r.payload).toBe(202);
+    expect(JSON.parse(r.payload)).toEqual({ cancellationId: id, status: 'REFUNDED', refundAmount: 30_000 });
+    // 정확한 금액(33,333원의 10% 공제 = 30,000원)·시도 1·계좌는 하이픈을 뺀 세 칸
+    expect(state.accountStarts).toEqual([{ cancellationId: id, oldAttempt: 0, attempt: 1 }]);
+    expect(state.paymentCalls).toEqual([{ cancellationId: id, amount: 30_000, reason: 'USER', refundAttempt: 1, refundAccount: { bankCode: '88', accountNumber: ACCOUNT_NO, holderName: HOLDER } }]);
+    expect(state.accountUpdates).toEqual([{ cancellationId: id, status: 'REFUNDED' }]);
+  });
+
+  test('R-T42 ①_다른_계정과_없는_취소는_같은_404_not-found이고_시도_올리기·payment가_0이다', async () => {
+    const id = accountPending();
+    const other = await postAccount(id, REFUND_ACCOUNT, { accountId: LOGIN, token: accountToken().t });
+    const missing = await postAccount(randomUUID(), REFUND_ACCOUNT, { token: accountToken().t });
+    expect(accountProblem(other)).toEqual(accountProblem(missing));
+    expect(other.statusCode).toBe(404);
+    expect(accountProblem(other).type).toContain('not-found');
+    expect(state.accountStarts).toEqual([]);
+    expect(state.paymentCalls).toEqual([]);
+  });
+
+  test('R-T42 ①_REFUNDED·REQUESTED·계좌_대기_아님은_409_cancellation-not-account-pending이고_쓰기가_0이다', async () => {
+    const cases: [string, string, boolean][] = [
+      ['REFUNDED', 'REFUNDED', false],
+      ['REQUESTED', 'REQUESTED', false],
+      ['계좌 대기 아님', 'REFUND_PENDING', false],
+    ];
+    for (const [what, status, required] of cases) {
+      const id = accountPending({ state: status as CancellationRecord['state'], required });
+      const r = await postAccount(id, REFUND_ACCOUNT, { token: accountToken().t });
+      expect(r.statusCode, `${what}: ${r.payload}`).toBe(409);
+      expect(accountProblem(r).type, what).toContain('cancellation-not-account-pending');
+    }
+    expect(state.accountStarts).toEqual([]);
+    expect(state.paymentCalls).toEqual([]);
+  });
+
+  test('R-T42 ①_같은_Idempotency-Key_다시_보냄은_같은_202이고_시도_1·payment_1건이다', async () => {
+    const id = accountPending();
+    const key = randomUUID();
+    const first = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
+    expect(first.statusCode, first.payload).toBe(202);
+    const second = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
+    expect(second.statusCode, second.payload).toBe(202);
+    expect(JSON.parse(second.payload)).toEqual(JSON.parse(first.payload));
+    expect(state.accountStarts).toHaveLength(1);
+    expect(state.paymentCalls).toHaveLength(1);
+  });
+
+  test('R-T42 ④_시도_3회를_넘으면(저장된_시도_3)_409이고_payment가_0이다', async () => {
+    const id = accountPending({ refundAttempt: 3 });
+    const r = await postAccount(id, REFUND_ACCOUNT, { token: accountToken().t });
+    expect(r.statusCode, r.payload).toBe(409);
+    expect(accountProblem(r).type).toContain('cancellation-not-account-pending');
+    expect(state.accountStarts).toEqual([]);
+    expect(state.paymentCalls).toEqual([]);
+  });
+});
+
+describe('R-T42 ② 재인증(REFUND_ACCOUNT·FAN_HIGH_RISK)', () => {
+  test('R-T42 ②_토큰_없음·틀림·만료·sid/sub/act/op_어긋남·TICKET_CANCEL은_403_reauth-required이고_시도·payment가_0이다', async () => {
+    const cases: [string, (o: { accountId: string; sessionId: string }) => { sessionId: string; token?: string }][] = [
+      ['없음', ({ sessionId }) => ({ sessionId })],
+      ['틀림', ({ sessionId }) => ({ sessionId, token: 'not-a-jwt' })],
+      ['만료', ({ accountId, sessionId }) => ({ sessionId, token: accountToken({ accountId, sessionId, lifeS: -5 }).t })],
+      ['sid 어긋남', ({ accountId, sessionId }) => ({ sessionId, token: accountToken({ accountId, sessionId: randomUUID() }).t })],
+      ['sub 어긋남', ({ sessionId }) => ({ sessionId, token: accountToken({ accountId: randomUUID(), sessionId }).t })],
+      ['act 어긋남', ({ accountId, sessionId }) => ({ sessionId, token: accountToken({ accountId, sessionId, act: 'FAN_SENSITIVE' }).t })],
+      ['op 티켓 취소', ({ accountId, sessionId }) => ({ sessionId, token: accountToken({ accountId, sessionId, op: 'TICKET_CANCEL' }).t })],
+      ['op 계좌 재입력(굿즈)', ({ accountId, sessionId }) => ({ sessionId, token: accountToken({ accountId, sessionId, op: 'SHOP_CANCEL_REFUND_ACCOUNT' }).t })],
+    ];
+    for (const [what, make] of cases) {
+      const id = accountPending();
+      const r = await postAccount(id, REFUND_ACCOUNT, make({ accountId: ACCOUNT, sessionId: LOGIN }));
+      expect(r.statusCode, `${what}: ${r.payload}`).toBe(403);
+      expect(accountProblem(r).type, what).toContain('reauth-required');
+      expect(state.accountStarts, what).toEqual([]);
+      expect(state.paymentCalls, what).toEqual([]);
+    }
+  });
+
+  test('R-T42 ②_이미_쓴_jti는_403_reauth-required이고_두_번째_취소는_시도가_오르지_않는다', async () => {
+    const first = accountPending();
+    const second = accountPending();
+    const tk = accountToken();
+    expect((await postAccount(first, REFUND_ACCOUNT, { token: tk.t })).statusCode).toBe(202);
+    const reused = await postAccount(second, REFUND_ACCOUNT, { token: tk.t });
+    expect(reused.statusCode, reused.payload).toBe(403);
+    expect(accountProblem(reused).type).toContain('reauth-required');
+    expect(state.accountStarts).toHaveLength(1);
+    expect(state.paymentCalls).toHaveLength(1);
+  });
+
+  test('R-T42 ②_팬_공개키_묶음_장애는_503_reauth-unavailable·Retry-After_5초이고_쓰기가_0이다', async () => {
+    const id = accountPending();
+    const tk = accountToken();
+    coldJwks.mode = 'throw';
+    try {
+      const r = await postAccount(id, REFUND_ACCOUNT, { token: tk.t, svc: coldSvc });
+      expect(r.statusCode, r.payload).toBe(503);
+      expect(accountProblem(r).type).toContain('reauth-unavailable');
+      expect(r.headers['retry-after']).toBe('5');
+      expect(coldJwks.urls.length, '장애가 실제로 끼어들었다').toBeGreaterThanOrEqual(1);
+    } finally {
+      coldJwks.mode = 'up';
+    }
+    expect(state.accountStarts).toEqual([]);
+    expect(state.paymentCalls).toEqual([]);
+  });
+
+  test('R-T42 ②_jti_저장소_장애는_503_reauth-unavailable·Retry-After_5초이고_쓰기가_0이다', async () => {
+    // 공개키를 미리 받아 둔다
+    const warm = accountPending();
+    expect((await postAccount(warm, REFUND_ACCOUNT, { token: accountToken().t })).statusCode).toBe(202);
+    const id = accountPending();
+    const tk = accountToken();
+    redis.mode = 'throw';
+    try {
+      const r = await postAccount(id, REFUND_ACCOUNT, { token: tk.t });
+      expect(r.statusCode, r.payload).toBe(503);
+      expect(accountProblem(r).type).toContain('reauth-unavailable');
+      expect(r.headers['retry-after']).toBe('5');
+    } finally {
+      redis.mode = 'real';
+    }
+    expect(state.accountStarts).toHaveLength(1);
+    expect(state.paymentCalls).toHaveLength(1);
+  });
+});
+
+describe('R-T42 ③ 계좌 모양 경계와 결제사 답', () => {
+  const CODES = ['02', '03', '06', '07', '11', '12', '20', '23', '27', '31', '32', '34', '35', '37', '39', '45', '48', '50', '54', '64', '71', '81', '88', '89', '90', '92'];
+
+  test('R-T42 ③_토스_은행_코드_26개는_모두_202이고_목록_밖_99·04는_400_invalid-body이며_재인증·payment·행_쓰기가_0이다', async () => {
+    expect(CODES).toHaveLength(26);
+    for (const bankCode of CODES) {
+      const id = accountPending();
+      const r = await postAccount(id, { ...REFUND_ACCOUNT, bankCode }, { token: accountToken().t });
+      expect(r.statusCode, `${bankCode}: ${r.payload}`).toBe(202);
+      expect(state.paymentCalls.at(-1)!.refundAccount).toMatchObject({ bankCode });
+    }
+    const afterOk = { starts: state.accountStarts.length, pays: state.paymentCalls.length, verifies: state.verifies };
+    for (const bankCode of ['99', '04']) {
+      const id = accountPending();
+      const r = await postAccount(id, { ...REFUND_ACCOUNT, bankCode }, { token: accountToken().t });
+      expect(r.statusCode, `${bankCode}: ${r.payload}`).toBe(400);
+      expect(accountProblem(r).type, bankCode).toContain('invalid-body');
+    }
+    expect(state.accountStarts).toHaveLength(afterOk.starts);
+    expect(state.paymentCalls).toHaveLength(afterOk.pays);
+    expect(state.verifies).toBe(afterOk.verifies);
+  });
+
+  test('R-T42 ③_계좌번호_20자·하이픈_섞인_30자·예금주_60자는_202이고_21자·31자·61자는_400이다', async () => {
+    const good = [
+      { ...REFUND_ACCOUNT, accountNumber: '1'.repeat(20) },
+      { ...REFUND_ACCOUNT, accountNumber: '12-34-56-78-90-12-34-56-78-9-0' },
+      { ...REFUND_ACCOUNT, holderName: '가'.repeat(60) },
+    ];
+    for (const body of good) {
+      const id = accountPending();
+      const r = await postAccount(id, body, { token: accountToken().t });
+      expect(r.statusCode, `${JSON.stringify(body).slice(0, 80)}: ${r.payload}`).toBe(202);
+    }
+    const before = { starts: state.accountStarts.length, pays: state.paymentCalls.length, verifies: state.verifies };
+    const bad = [
+      { ...REFUND_ACCOUNT, accountNumber: '1'.repeat(21) },
+      { ...REFUND_ACCOUNT, accountNumber: '1-2-3-4-5-6-7-8-9-0-1-2-3-4-5-6' },
+      { ...REFUND_ACCOUNT, holderName: '가'.repeat(61) },
+    ];
+    for (const body of bad) {
+      const id = accountPending();
+      const r = await postAccount(id, body, { token: accountToken().t });
+      expect(r.statusCode, `${JSON.stringify(body).slice(0, 80)}: ${r.payload}`).toBe(400);
+      expect(accountProblem(r).type).toContain('invalid-body');
+    }
+    expect(state.accountStarts).toHaveLength(before.starts);
+    expect(state.paymentCalls).toHaveLength(before.pays);
+    expect(state.verifies).toBe(before.verifies);
+  });
+
+  test('R-T42 ⑤_결제사_답_다섯을_행_상태로_옮긴다: CANCELLED→REFUNDED, PENDING/UNKNOWN→REFUND_PENDING·1분, REFUND_ACCOUNT_REQUIRED→422·대기 유지, REJECTED→422·CS', async () => {
+    const cancelled = accountPending();
+    state.payment = 'CANCELLED';
+    expect((await postAccount(cancelled, REFUND_ACCOUNT, { token: accountToken().t })).statusCode).toBe(202);
+    expect(state.accountUpdates.at(-1)).toEqual({ cancellationId: cancelled, status: 'REFUNDED' });
+
+    for (const outcome of ['PENDING', 'UNKNOWN'] as const) {
+      const id = accountPending();
+      state.payment = outcome;
+      const r = await postAccount(id, REFUND_ACCOUNT, { token: accountToken().t });
+      expect(r.statusCode, `${outcome}: ${r.payload}`).toBe(202);
+      expect(JSON.parse(r.payload)).toEqual({ cancellationId: id, status: 'REFUND_PENDING', refundAmount: 30_000 });
+      expect(state.accountClears.find((c) => c.cancellationId === id)).toMatchObject({ nextRefundAtMs: NOW + 60_000, lastError: outcome });
+    }
+
+    const required = accountPending();
+    state.payment = 'REFUND_ACCOUNT_REQUIRED';
+    const again = await postAccount(required, REFUND_ACCOUNT, { token: accountToken().t });
+    expect(again.statusCode, again.payload).toBe(422);
+    expect(accountProblem(again).type).toContain('refund-account-required');
+    expect(state.records.get(required)!.refundAccountRequired).toBe(true);
+
+    const rejected = accountPending();
+    state.payment = 'REJECTED';
+    const no = await postAccount(rejected, REFUND_ACCOUNT, { token: accountToken().t });
+    expect(no.statusCode, no.payload).toBe(422);
+    expect(accountProblem(no).type).toContain('refund-rejected');
+    expect(state.accountFailures).toEqual([{ cancellationId: rejected, attempts: 1, lastError: 'REJECTED' }]);
+  });
+
+  test('R-T42 ⑤_계좌번호_원문은_응답과_행_기록에_없다 [ASVS v5.0.0-8.2.3] [ASVS v5.0.0-16.2.5]', async () => {
+    const id = accountPending();
+    const r = await postAccount(id, REFUND_ACCOUNT, { token: accountToken().t });
+    expect(r.statusCode, r.payload).toBe(202);
+    expect(r.payload).not.toContain(ACCOUNT_NO);
+    expect(r.payload).not.toContain(HOLDER);
+    expect(JSON.stringify(state.records.get(id))).not.toContain(ACCOUNT_NO);
+    expect(JSON.stringify(state.accountStarts)).not.toContain(ACCOUNT_NO);
+    expect(logs.join('\n')).not.toContain(ACCOUNT_NO);
+  });
+});
+
 
 describe('P-T73 ⑤ 다시 누름의 계좌는 payment로 가지 않는다(RV-02, 검증 A05)', () => {
   /** 앞 팬 취소(첫 취소 ID)가 REFUND_PENDING으로 남은 표: ticket-svc 대역은 새 키에 ALREADY_CANCELLED로 첫 취소를 알린다 */
@@ -356,7 +689,7 @@ describe('P-T73 ⑤ 다시 누름의 계좌는 payment로 가지 않는다(RV-02
     const first = pressedBefore(t);
     const r = await send(t, { refundAccount: REFUND_ACCOUNT });
     expect(r.statusCode).toBe(202);
-    expect(state.paymentCalls).toEqual([{ cancellationId: first }]);
+    expect(state.paymentCalls.map((c) => c.cancellationId)).toEqual([first]);
   });
 
   test('P-T73 ⑤ 공연 시작 뒤 다시 누름(견적 EVENT_STARTED, ticket 대역 ALREADY_CANCELLED·REFUND_NOW)에 실은 계좌도 payment 대역이 받지 않는다', async () => {
@@ -366,7 +699,7 @@ describe('P-T73 ⑤ 다시 누름의 계좌는 payment로 가지 않는다(RV-02
     const first = pressedBefore(t);
     const r = await send(t, { refundAccount: REFUND_ACCOUNT });
     expect(r.statusCode).toBe(202);
-    expect(state.paymentCalls).toEqual([{ cancellationId: first }]);
+    expect(state.paymentCalls.map((c) => c.cancellationId)).toEqual([first]);
   });
 });
 
