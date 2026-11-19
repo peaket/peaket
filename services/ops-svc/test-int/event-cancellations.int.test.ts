@@ -621,7 +621,8 @@ describe('R-T41 ③ core 반영 표시와 다시 하기 잡기 실제 DB [BAT-42
     for (const [i, id] of mine.entries()) await admin.query('update event_cancellation_request set approved_at = $2 where request_id = $1', [id, new Date(T0 + i)]);
   });
 
-  test('R-T41 ③ 0016은 core_applied_at·core_apply_next_at·core_apply_overdue_at(빈 값 허용)과 반영하지 않은 확정 뒤 요청만 받치는 부분 색인을 만든다', async () => {
+  // BAT-420-rest 리뷰 반영 RV-06(정본 변경 반영, 시험 담당 l3-b420-test): docs/data.md event_cancellation_request·transfer-refund §5 '구현에서 정한 것' ⑥대로 0016에 core_apply_superseded_at이 더해져 칸이 넷이다
+  test('R-T41 ③ 0016은 core_applied_at·core_apply_next_at·core_apply_overdue_at·core_apply_superseded_at(빈 값 허용)과 반영하지 않고 대체되지 않은 확정 뒤 요청만 받치는 부분 색인을 만든다', async () => {
     const cols = await admin.query<{ column_name: string; data_type: string; is_nullable: string }>(
       "select column_name, data_type, is_nullable from information_schema.columns where table_name = 'event_cancellation_request' and column_name like 'core_%' order by column_name",
     );
@@ -629,9 +630,11 @@ describe('R-T41 ③ core 반영 표시와 다시 하기 잡기 실제 DB [BAT-42
       { column_name: 'core_applied_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
       { column_name: 'core_apply_next_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
       { column_name: 'core_apply_overdue_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      { column_name: 'core_apply_superseded_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
     ]);
     const idx = await admin.query<{ indexdef: string }>("select indexdef from pg_indexes where indexname = 'event_cancellation_request_core_apply_idx'");
     expect(idx.rows[0]!.indexdef).toMatch(/core_applied_at IS NULL/);
+    expect(idx.rows[0]!.indexdef).toMatch(/core_apply_superseded_at IS NULL/);
     expect(idx.rows[0]!.indexdef).toMatch(/refund_job_state IS NOT NULL/);
     for (const id of mine) expect(await coreRow(id), id).toEqual({ core_applied_at: null, core_apply_next_at: null, core_apply_overdue_at: null });
   });
@@ -802,6 +805,91 @@ describe('R-T41 ⑥·③ 같은 회차의 대체 표시와 실제 어댑터 연�
       await approveVia(s, id);
       const applied = (await admin.query<{ core_applied_at: Date | null }>('select core_applied_at from event_cancellation_request where request_id = $1', [id])).rows[0]!;
       expect(applied.core_applied_at).toBeNull();
+    } finally {
+      await s.close();
+    }
+  });
+});
+
+// BAT-420-rest 고친 곳 검증 Q22 보강(시험 담당 l3-b420-test, 2026-11-19): 잡기 차례의 '다음 볼 시각이 빈 것 먼저'.
+// 정본: docs/features/transfer-refund.md §5 '구현에서 정한 것' ⑥(잡기는 core_apply_next_at 차례(빈 값 먼저)라 실패를 이어 가는 요청이 뒤로 돌아 새 요청을 막지 않는다), §11 R-T41 ⑥.
+// 늘 5xx(503)라 1분마다 다시 잡히는 요청 21건이 있어도, 그 뒤 확정한 새 요청(다음 볼 시각 빈 값)은 다음 바퀴에 반영된다(4xx 10분 미룸에 기대지 않는다).
+describe('R-T41 ⑥ 늘 503인 요청 21건과 새 요청 실제 DB [BAT-420-rest 고친 곳 검증 Q22]', () => {
+  const MIN = 60_000;
+  test('R-T41 ⑥ 늘 503인 요청 21건이 1분마다 다시 잡혀도 새 요청은 다음 바퀴(+60,000ms)에 잡혀 반영된다(잡기 차례는 다음 볼 시각 빈 값 먼저)', async () => {
+    const calls: string[] = [];
+    const failOnce = new Set<string>();
+    const ok = new Set<string>();
+    const s = await createService({
+      name: 'ops-svc-event-cancellations-q22',
+      module: AppModule.register({
+        database: db,
+        nowMs: NOW,
+        executor: commandExecutor,
+        eventCancellations: {
+          refunds,
+          reauth: fakeReauth(),
+          reader,
+          stopper: { stop: async () => undefined },
+          owners: ownerLookup,
+          holds: intHolds,
+          core: {
+            apply: async (q) => {
+              calls.push(q.requestId);
+              if (failOnce.delete(q.requestId)) throw new Error('core-svc 회차 상태 반영 503');
+              if (!ok.has(q.requestId)) throw new Error('core-svc 회차 상태 반영 503');
+            },
+          },
+        },
+      }),
+      env: { PEAKET_ENV: 'ci' },
+      clock,
+      logDestination: quiet(),
+      adminAuthz: identity,
+    });
+    const approve = async (requestId: string) => {
+      const r = await s.http.inject({ method: 'POST', url: `/v1/ops/event-cancellations/${requestId}/approvals`, headers: { ...reauthed(identity.ops('operator')), 'content-type': 'application/json' }, payload: '{}' });
+      expect(json(r).status).toBe('RUNNING');
+    };
+    try {
+      // 늘 503인 요청 하나를 HTTP로 확정하고(즉시 반영 실패) 같은 행을 20건 더 복사한다(회차·요청 ID만 새 값, 확정 시각은 1ms씩)
+      const base = await pendingApproval(randomUUID());
+      await approve(base);
+      const colsOf = (await admin.query<{ column_name: string }>("select column_name from information_schema.columns where table_name = 'event_cancellation_request' order by ordinal_position")).rows.map((r) => r.column_name);
+      const others = colsOf.filter((c) => c !== 'request_id' && c !== 'event_id');
+      const old: string[] = [base];
+      for (let i = 1; i <= 20; i++) {
+        const id = randomUUID();
+        await admin.query(
+          `insert into event_cancellation_request (request_id, event_id, ${others.join(', ')}) select $2::uuid, $3::uuid, ${others.join(', ')} from event_cancellation_request where request_id = $1`,
+          [base, id, randomUUID()],
+        );
+        old.push(id);
+      }
+      const T0 = clock.now() - 60 * MIN;
+      for (const [i, id] of old.entries()) await admin.query('update event_cancellation_request set approved_at = $2, core_apply_next_at = null, core_applied_at = null where request_id = $1', [id, new Date(T0 + i)]);
+      // 앞 묶음이 남긴 확정 행은 셈에서 뺀다
+      await admin.query('update event_cancellation_request set core_applied_at = now() where not (request_id = any($1::uuid[])) and core_applied_at is null', [old]);
+      const app = s.app.get(EventCancellations);
+      const t = clock.now() + 120 * MIN;
+      calls.length = 0;
+      await app.retryCoreApply(t);
+      await app.retryCoreApply(t);
+      // 장애 주입이 끼어들었다: 21건 모두 한 번씩 불렸고 503이었다
+      expect(new Set(calls)).toEqual(new Set(old));
+      expect(calls).toHaveLength(21);
+      // 새 요청: 확정 직후 반영은 실패하고(다음 볼 시각 빈 값), 그 뒤로는 받는다
+      const fresh = await pendingApproval(randomUUID());
+      failOnce.add(fresh);
+      ok.add(fresh);
+      await approve(fresh);
+      await admin.query('update event_cancellation_request set approved_at = $2 where request_id = $1', [fresh, new Date(T0 + 30 * MIN)]);
+      expect((await admin.query('select core_applied_at, core_apply_next_at from event_cancellation_request where request_id = $1', [fresh])).rows[0]).toEqual({ core_applied_at: null, core_apply_next_at: null });
+      calls.length = 0;
+      await app.retryCoreApply(t + MIN);
+      expect(calls).toContain(fresh);
+      expect((await admin.query<{ core_applied_at: Date | null }>('select core_applied_at from event_cancellation_request where request_id = $1', [fresh])).rows[0]!.core_applied_at).not.toBeNull();
+      expect(calls).toHaveLength(20);
     } finally {
       await s.close();
     }
