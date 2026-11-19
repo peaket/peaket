@@ -1,12 +1,15 @@
 // 성능 예산 기록을 Markdown 표로 바꾸는 report.mjs 시험(BUILD_ORDER BAS-220, docs/frontend.md §5.8)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { loadLoadTargets, loadTbtLimitMs } from '../lib/canon.mjs';
 import { jsTable, lighthouseTable, renderReport } from './report.mjs';
+import { loadLimit } from './limits.mjs';
+import { lighthousePages } from './pages.mjs';
 
 const JS = [
   { key: 'web /my/tickets', row: '월렛', kB: 158.2, budget: 120, limit: 159.2, overBudget: true, files: 10 },
@@ -121,20 +124,51 @@ test('BAT-177 T4 ② LCP 분해가 없는 옛 기록은 표에서 빼고, 모두
   assert.match(report, /\| 월렛 \| 월렛 \| 6990 \/ 7255 \| 0\.020 \/ 0\.1 \| 90 \/ 200 \| 한도 안 \|/);
 });
 
-test('BAT-177 T7 ① 한도를 넘는 기록은 실패로 적고 알림만을 쓰지 않는다', () => {
-  const over = { ...WALLET, lcpSummary: null, median: { ...WALLET.median, lcpMs: 8040 } };
-  const line = lighthouseTable([over])[2];
-  assert.equal(cellsOf(line)[5], '한도 초과: LCP');
-  assert.ok(!line.includes('알림만'), line);
-  // 한도와 같으면 통과(여유를 더하지 않는다)
-  const atLimit = { ...over, median: { ...over.median, lcpMs: 7255 } };
+const WALLET_WARN = {
+  ...WALLET,
+  lcpSummary: null,
+  median: { ...WALLET.median, lcpMs: 8040 },
+  verdict: { lcpMs: 'warn', cls: 'pass', tbtMs: 'pass' },
+  warnOnly: [{ metric: 'lcpMs', until: '2026-11-30', reason: '임시, 되돌릴 날: (나)를 합치는 날, 늦어도 2026-11-30 [가정], OPEN[52]' }],
+};
+
+test('BAT-177 T7 ① 월렛 LCP 초과는 알림만으로 적고 다른 화면의 초과는 한도 초과로 적는다', () => {
+  const wallet = cellsOf(lighthouseTable([WALLET_WARN])[2]);
+  assert.equal(wallet[2], '8040 / 7255', 'LCP 칸은 한도 7,255ms를 그대로 보인다');
+  assert.equal(wallet[5], '알림만: LCP(임시, 되돌릴 날: (나)를 합치는 날, 늦어도 2026-11-30 [가정], OPEN[52])');
+  assert.ok(!wallet[5].includes('한도 초과'), wallet[5]);
+  // 한도와 같으면 알림이 아니다(판정 칸이 pass인 기록)
+  const atLimit = { ...WALLET_WARN, median: { ...WALLET_WARN.median, lcpMs: 7255 }, verdict: { lcpMs: 'pass', cls: 'pass', tbtMs: 'pass' }, warnOnly: [] };
   assert.equal(cellsOf(lighthouseTable([atLimit])[2])[5], '한도 안');
+  // 다른 화면은 같은 초과라도 경고 없이 한도 초과다(홈 LCP 한도 2,500ms)
+  const otherOver = { ...LH[0], median: { ...LH[0].median, lcpMs: 2600 } };
+  assert.equal(cellsOf(lighthouseTable([otherOver])[2])[5], '한도 초과: LCP');
 });
 
-test('BAT-177 T9 ① 월렛의 CLS·총 차단 시간만 넘으면 그 둘만 한도 초과로 적는다', () => {
-  const record = { ...WALLET, lcpSummary: null, median: { lcpMs: 6990, cls: 0.2, tbtMs: 300 } };
-  const cells = cellsOf(lighthouseTable([record])[2]);
-  assert.equal(cells[3], '0.200 / 0.1');
-  assert.equal(cells[4], '300 / 200');
-  assert.equal(cells[5], '한도 초과: CLS·총 차단 시간');
+const baselinePages = JSON.parse(readFileSync(new URL('./lighthouse-baseline.json', import.meta.url), 'utf8')).pages;
+const limitsOf = (page) => {
+  const target = { cls: 0.1, ...loadLoadTargets().get(page.row) };
+  const base = baselinePages[page.name] ?? {};
+  return {
+    lcpMs: loadLimit(target.lcpMs, base.lcpMs, 'lcpMs'),
+    cls: loadLimit(target.cls, base.cls, 'cls'),
+    tbtMs: loadLimit(loadTbtLimitMs(), base.tbtMs, 'tbtMs'),
+  };
+};
+
+test('BAT-177 T9 ② 화면마다 실제 한도에서 한 지표만 넘으면 그 지표만 한도 초과다', () => {
+  const pages = lighthousePages('h');
+  assert.equal(pages.length, 8, '대표 주소는 여덟이다');
+  for (const page of pages) {
+    const limit = limitsOf(page);
+    // 월렛 LCP만 경고 대상이므로 표 판정은 월렛의 CLS·총 차단 시간만 본다(T7이 경고를 본다)
+    const metrics = page.name === '월렛' ? [['cls', 'CLS'], ['tbtMs', '총 차단 시간']] : [['lcpMs', 'LCP'], ['cls', 'CLS'], ['tbtMs', '총 차단 시간']];
+    for (const [key, ko] of metrics) {
+      const record = { name: page.name, row: page.row, runs: [], median: { lcpMs: 0, cls: 0, tbtMs: 0 }, limit };
+      record.median[key] = Math.round((limit[key] + (key === 'cls' ? 0.01 : 1)) * 1000) / 1000;
+      assert.equal(cellsOf(lighthouseTable([record])[2])[5], `한도 초과: ${ko}`, `${page.name} ${ko}: 한도 + 1은 실패다`);
+      record.median[key] = limit[key];
+      assert.equal(cellsOf(lighthouseTable([record])[2])[5], '한도 안', `${page.name} ${ko}: 한도 그대로는 통과다`);
+    }
+  }
 });
