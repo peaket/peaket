@@ -803,6 +803,7 @@
 | R-697 | 굿즈 주문을 결제로 보낼 길이 없었다(ConfirmPayment가 event_id 필수, PRF-180이 넘긴 것) | services/core-svc(shop), services/payment-svc, services/purchase-svc, services/ticket-svc, services/invariant-checker, packages/contracts·api-client·validation, deploy/gateways, ADR-0299~0301, docs/features/payment.md, docs/data.md, docs/verification.md, docs/security/asvs/payment.md | 굿즈 주문·재고 예약·결제 접수와 시험 P-T42·P-T56~58·V-T35 ①②·V-T46 | 적용 |
 | R-708 | BAT-420-rest·BAT-013의 환급 계좌 계약 깨짐 예외가 빠져 contract-check가 실패했다 | docs/api/breaking/openapi-ignore.txt | oasdiff 문장 24줄과 이유 추가, 깨짐 검사 0 error | 완료 |
 | R-709 | 판매 자격 명단 시작 조립 시험이 고정 날짜의 24시간 전 잠금 시각을 지나 409로 실패했다 | services/core-svc/test-int/sale-eligibility.int.test.ts | 그 시험만 presale 시작을 2030년으로 옮김, 23/23 통과 | 완료 |
+| R-710 | I-T26 ③ 시험이 공연 +2시간이 자정을 넘는 밤에 POL-032 공제 밴드가 달라져 실패했다 | services/purchase-svc/test-int/withdrawal-participant.int.test.ts | 기대 공제를 실제 공연 날짜의 정책 함수로 계산, I-T26 4건 통과 | 완료 |
 
 ## 4. 숫자 일치표
 
