@@ -240,3 +240,100 @@ for (const p of BAR_PAGES) {
     expect(spaced.bands.filter((b) => b.edge === 'bottom'), `${p.path} 글자 간격 뒤 아래에 붙는 띠가 없다(빈 결과)`).not.toEqual([]);
   });
 }
+
+// BAT-178 T1·T2(계획 docs/review/plans/BAT-178.md §4·§5, Role: test). 기준 docs/frontend.md §5.11 '경로 바뀜·랜드마크',
+// docs/design/d2-design-system.md CMP-065, NFR-020. 본문 바로가기(CMP-065)는 키보드로 초점을 받으면 화면에 보여야 하고(WCAG 2.4.7),
+// 누르면 #main으로 초점이 옮겨져야 한다(WCAG 2.4.1). 지금 셸 셋은 sr-only의 clip: rect(0 0 0 0)이 초점 때 풀리지 않아 T1이 실패한다.
+// 화면 목록은 계획 §4: web은 WebShell, partner는 PartnerShell(/events)·AuthFrame(/login), console은 ConsoleShell(/dashboard).
+const SKIP_LINK_PAGES = [
+  { app: 'web', locale: 'ko', path: '/' },
+  { app: 'web', locale: 'ko', path: '/my/tickets' },
+  { app: 'partner', locale: 'ko', path: '/events' },
+  { app: 'partner', locale: 'ko', path: '/login' },
+  { app: 'console', locale: 'ko', path: '/dashboard' },
+];
+
+/** 글 '본문 바로가기'를 담은 a[href="#main"](CMP-065) 하나 */
+const skipLink = (page) => page.locator('a[href="#main"]', { hasText: '본문 바로가기' }).first();
+
+/**
+ * 본문 바로가기의 지금 모양: 계산된 clip·clip-path, 그려진 상자(뷰포트 좌표), 상자 가운데 점의 맨 위 요소.
+ * clip은 키트 .sr-only(clip: rect(...))와 Tailwind not-sr-only가 엇갈리는 곳이고, 가운데 점 적중은 덮인 요소를 잡는다
+ */
+const skipLinkState = (page) =>
+  page.evaluate(() => {
+    const links = [...document.querySelectorAll('a[href="#main"]')].filter((a) => (a.textContent ?? '').trim() === '본문 바로가기');
+    if (links.length === 0) return { count: 0 };
+    const link = links[0];
+    const cs = getComputedStyle(link);
+    const r = link.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    const label = (e) => `${e.tagName.toLowerCase()}${e.id ? `#${e.id}` : ''}${typeof e.className === 'string' && e.className ? `.${e.className.split(/\s+/).slice(0, 2).join('.')}` : ''}`;
+    return {
+      count: links.length,
+      clip: cs.clip,
+      clipPath: cs.clipPath,
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      hit: !!hit && (hit === link || link.contains(hit)),
+      hitLabel: hit ? label(hit) : null,
+    };
+  });
+
+for (const p of SKIP_LINK_PAGES) {
+  test(`FE-T18 T1 ${p.app} ${p.locale} ${p.path} 기본 폭: 본문 바로가기가 초점을 받으면 잘리지 않고 화면에 보인다`, async ({ page }) => {
+    expect(await openReflowPage(page, p), '도착 경로가 다르다(빈 결과)').toBe(p.path);
+    // 평소: 1×1로 잘려 화면을 가리지 않는다(.sr-only·.pk-skip-link:not(:focus)의 clip 규칙)
+    const hidden = await skipLinkState(page);
+    expect(hidden.count, '글 본문 바로가기를 담은 a[href="#main"]이 없다(빈 결과)').toBeGreaterThan(0);
+    expect(hidden.clip, '초점 전에는 clip으로 잘려 있어야 한다(평소 숨김)').toMatch(/^rect\(/);
+    // 초점: 클립이 풀리고, 그려진 상자가 1×1보다 크며, 뷰포트 안이고, 가운데 점이 링크다
+    await skipLink(page).focus();
+    const shown = await skipLinkState(page);
+    expect(shown.clip, '초점을 받아도 clip이 풀리지 않았다(0×0으로 잘림)').toBe('auto');
+    expect(['none', ''], `초점을 받아도 clip-path가 남아 있다(${shown.clipPath})`).toContain(shown.clipPath);
+    expect(shown.rect.width, '그려진 폭이 1px 이하다').toBeGreaterThan(1);
+    expect(shown.rect.height, '그려진 높이가 1px 이하다').toBeGreaterThan(1);
+    expect(
+      shown.rect.left >= 0 && shown.rect.top >= 0 && shown.rect.left + shown.rect.width <= shown.viewport.width && shown.rect.top + shown.rect.height <= shown.viewport.height,
+      `그려진 상자가 뷰포트 밖이다(${JSON.stringify(shown.rect)} / ${JSON.stringify(shown.viewport)})`,
+    ).toBe(true);
+    expect(shown.hit, `상자 가운데 점이 링크가 아니라 ${shown.hitLabel}이다(가려짐)`).toBe(true);
+  });
+
+  test(`FE-T18 T2 ${p.app} ${p.locale} ${p.path} 기본 폭: 본문 바로가기를 누르면 초점이 #main으로 옮겨지고 본문이 보인다`, async ({ page }) => {
+    expect(await openReflowPage(page, p), '도착 경로가 다르다(빈 결과)').toBe(p.path);
+    const link = skipLink(page);
+    await expect(link, '글 본문 바로가기를 담은 a[href="#main"]이 없다(빈 결과)').toHaveCount(1);
+    await link.focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.evaluate(() => location.hash), { timeout: 5_000, message: 'Enter 뒤 location.hash가 #main이 아니다' }).toBe('#main');
+    const after = await page.evaluate(() => {
+      const main = document.getElementById('main');
+      const el = document.activeElement;
+      const r = main?.getBoundingClientRect() ?? null;
+      // 첫 '보이는' h1: 화면 낭독기용 h1(.sr-only, 1×1)은 본문이 보이는지의 기준이 아니다(web /의 'PEAKET 홈')
+      const heading = [...(main?.querySelectorAll('h1') ?? [])].find((x) => {
+        const b = x.getBoundingClientRect();
+        return b.width > 1 && b.height > 1;
+      });
+      const h = heading?.getBoundingClientRect() ?? null;
+      const inView = (b) => b.bottom > 0 && b.top < window.innerHeight && b.right > 0 && b.left < window.innerWidth;
+      return {
+        active: el ? `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}` : null,
+        isMain: !!main && el === main,
+        tabIndex: main ? main.tabIndex : null,
+        main: r && { top: r.top, bottom: r.bottom },
+        mainTopInView: !!r && r.top >= -1 && r.top < window.innerHeight,
+        mainBottomInView: !!r && r.bottom > 0,
+        h1: h && { top: h.top, bottom: h.bottom },
+        h1InView: !!h && inView(h),
+      };
+    });
+    expect(after.isMain, `Enter 뒤 초점이 main이 아니라 ${after.active}에 있다`).toBe(true);
+    expect(after.tabIndex, '#main의 tabIndex가 -1이 아니다').toBe(-1);
+    expect(after.mainTopInView, `main의 위쪽 끝이 뷰포트 안에 없다(${JSON.stringify(after.main)})`).toBe(true);
+    expect(after.mainBottomInView, 'main의 아래쪽 끝이 0보다 위에 있다').toBe(true);
+    if (after.h1) expect(after.h1InView, `main의 첫 h1이 뷰포트와 겹치지 않는다(${JSON.stringify(after.h1)})`).toBe(true);
+  });
+}

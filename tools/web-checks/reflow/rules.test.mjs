@@ -310,3 +310,28 @@ test('FE-T18 소비자 웹의 sticky·fixed 하단 띠(.bottom-bar)는 모두 �
     "그려진 높이를 재지 않는 하단 띠(ref가 useStickyInset('bottom')의 결과가 아니다. 96px 기본 여백에 기댄다)",
   );
 });
+
+// BAT-178 T3(계획 docs/review/plans/BAT-178.md §4·§5, Role: test). 기준 docs/frontend.md §5.11 '경로 바뀜·랜드마크',
+// docs/design/d2-design-system.md CMP-065, NFR-020. 셸 셋(WebShell·PartnerShell·AuthFrame)은 디에스의 SkipLink를 쓰고,
+// kit.css의 .sr-only(clip: rect)와 Tailwind not-sr-only가 엇갈리는 낡은 조합(focus:not-sr-only)을 남기지 않는다.
+// 숨김·보임 규칙은 한 곳(.pk-skip-link / .pk-skip-link:not(:focus))에 모여 있고 그대로여야 한다(제품 변경은 셸 셋뿐)
+const SHELL_SKIP_LINKS = [
+  'packages/ds/src/components/WebShell/WebShell.tsx',
+  'packages/ds/src/components/PartnerShell/PartnerShell.tsx',
+  'apps/partner/src/_pages/partner-auth/ui/AuthFrame.tsx',
+];
+test('FE-T18 T3 셸 셋의 본문 바로가기는 SkipLink를 쓰고 focus:not-sr-only를 남기지 않는다', () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+  for (const f of SHELL_SKIP_LINKS) {
+    const text = readFileSync(resolve(root, f), 'utf8');
+    assert.match(text, /<SkipLink\b/, `${f}: 디에스 SkipLink를 쓰지 않는다(날 <a href="#main">)`);
+    assert.doesNotMatch(text, /focus:not-sr-only/, `${f}: focus:not-sr-only를 남겼다(kit.css의 clip이 초점 때도 남는다)`);
+  }
+  // SkipLink 부품과 그 숨김·보임 규칙: 초점 때 clip: auto, 평소 clip: rect(0 0 0 0)
+  const skip = readFileSync(resolve(root, 'packages/ds/src/components/SkipLink/SkipLink.tsx'), 'utf8');
+  assert.match(skip, /pk-skip-link/, 'SkipLink.tsx가 pk-skip-link를 쓰지 않는다');
+  const css = readFileSync(resolve(root, 'packages/ds/src/styles/ds.css'), 'utf8');
+  const block = (selector) => new RegExp(`${selector}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+  assert.match(block('\\.pk-skip-link'), /clip:\s*auto/, '.pk-skip-link(초점 때)에 clip: auto가 없다');
+  assert.match(block('\\.pk-skip-link:not\\(:focus\\)'), /clip:\s*rect\\(0 0 0 0\\)/, '.pk-skip-link:not(:focus)(평소)에 clip: rect(0 0 0 0)이 없다');
+});
