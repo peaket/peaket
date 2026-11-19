@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 104 | 52 | 2 | 0 | 0 | 2 | 0 | 0 | 36 | 196 |
+| A | 110 | 51 | 2 | 0 | 0 | 2 | 0 | 0 | 31 | 196 |
 | B | 36 | 13 | 0 | 0 | 0 | 3 | 0 | 2 | 5 | 59 |
-| 합계 | 140 | 65 | 2 | 0 | 0 | 5 | 0 | 2 | 41 | 255 |
+| 합계 | 146 | 64 | 2 | 0 | 0 | 5 | 0 | 2 | 36 | 255 |
 
 ## docs/features/queue-admission.md
 
@@ -89,7 +89,7 @@
 | Q-T41 | ③ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ③ 415 | 자동 시험 | A | 시험: services/queue-svc/test/http.test.ts |
 | Q-T41 | ④ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ④ 거절 | 자동 시험 | A | 시험: tools/local/e2e/gateways.e2e.mjs, tools/local/e2e/queue-cors.e2e.mjs |
 | Q-T41 | ⑤ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ⑤ 거절 | 자동 시험 | A | 시험: tools/local/e2e/gateways.e2e.mjs |
-| Q-T41 | ⑥ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ⑥ 거절(대기표 미발급) | ID만 | A | 시험: deploy/gateways/test/gateways.test.mjs, services/queue-svc/test/admission.test.ts 외 3곳 |
+| Q-T41 | ⑥ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ⑥ 거절(대기표 미발급) | 자동 시험 | A | 시험: services/queue-svc/test/http.test.ts |
 | Q-T41 | ⑦ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ⑦ 읽힌다, `Access-Control-Allow-Credentials`는 없다 | 자동 시험 | A | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs 외 1곳 |
 | Q-T41 | ⑧ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ⑧ 서버가 받은 OPTIONS 요청 수와 진입 지연을 기록한다(k6는 브라우저가 아니라 형식만 따르므로, '브라우저가 사전 요청을 보내지 않는다'는 것은 … 은… | ID만 | A | 시험: deploy/gateways/test/gateways.test.mjs, services/queue-svc/test/admission.test.ts 외 3곳 |
 | Q-T42 | — | 제어 입력 없음과 증액 주기 | 입력 없음으로 판정하고 목표를 바꾸지 않는다(증가 0, 감소 0). 4분 전 값도 입력 없음이다. 명령 1은 반영되고, 결제사 상한으로는 줄어든다. 입력이… | 자동 시험 | A | 시험: services/admission-ctrl/test-int/leader-store.int.test.ts, services/admission-ctrl/test-sim/admission-loop.sim.test… |
@@ -203,11 +203,11 @@
 | Q-T68 | ⑧ | 대기 취소·로비 참가 취소와 다른 기기에서 다시 참가(추천 적용… | ⑧ 503이고 다시 보내면 끝난다 | 자동 시험 | A | 시험: services/queue-svc/test/leave-cases.ts |
 | Q-T68 | ⑨ | 대기 취소·로비 참가 취소와 다른 기기에서 다시 참가(추천 적용… | ⑨ 다른 사람의 기록과 새 기록은 그대로이고 추가 검증 표시가 되살아나지 않는다 | 자동 시험 | A | 시험: services/queue-svc/test/leave-cases.ts |
 | Q-T68 | ⑩ | 대기 취소·로비 참가 취소와 다른 기기에서 다시 참가(추천 적용… | ⑩ 새 번호 없이 410 `queue-ticket-removed`이고 화면은 '다른 기기에서 취소'다. 다른 기기가 다시 참가한 뒤면 409다. 원래 칸의… | 자동 시험 | A | 시험: apps/web/queue-room/test/controller.test.mjs, services/queue-svc/test/leave-cases.ts 외 1곳 |
-| Q-T69 | ① | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ① T − 1ms·T의 묶음에는 K2·K3·K1이 있고 K1 원소에만 `peaket_until`(T의 초)이 있으며, T + 1ms의 묶음에는 K2·K3만… | 빈칸 | A | — |
-| Q-T69 | ② | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ② K2·K3 토큰은 받고(백엔드에 닿는다) K1 토큰은 T의 초까지 받고 그 뒤에는 401 `admission-token-invalid`이며, 묶음에 없는… | 빈칸 | A | — |
-| Q-T69 | ③ | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ③ 실패·시간 초과·빈 묶음·틀린 묶음이면 마지막으로 받은 키로 계속 확인하고 30초 뒤에 다시 읽는다. 끝 시각이 지난 옛 키는 마지막 묶음에 남아 있어도… | 빈칸 | A | — |
-| Q-T69 | ④ | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ④ 503 `dependency-unavailable`이고 구매 세션을 열지 않는다(jti를 쓰지 않는다) | 빈칸 | A | — |
-| Q-T69 | ⑤ | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ⑤ 다시 읽기는 30초에 한 번이고 동시에 온 요청은 한 번만 읽는다 | 빈칸 | A | — |
+| Q-T69 | ① | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ① T − 1ms·T의 묶음에는 K2·K3·K1이 있고 K1 원소에만 `peaket_until`(T의 초)이 있으며, T + 1ms의 묶음에는 K2·K3만… | 자동 시험 | A | 시험: services/queue-svc/test-int/main-jwks.int.test.ts, services/queue-svc/test/admission-jwks.test.ts |
+| Q-T69 | ② | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ② K2·K3 토큰은 받고(백엔드에 닿는다) K1 토큰은 T의 초까지 받고 그 뒤에는 401 `admission-token-invalid`이며, 묶음에 없는… | 자동 시험 | A | 시험: tools/local/cluster.test.mjs, tools/local/e2e/gateway-admission-fault.e2e.mjs 외 1곳 |
+| Q-T69 | ③ | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ③ 실패·시간 초과·빈 묶음·틀린 묶음이면 마지막으로 받은 키로 계속 확인하고 30초 뒤에 다시 읽는다. 끝 시각이 지난 옛 키는 마지막 묶음에 남아 있어도… | 자동 시험 | A | 시험: services/purchase-svc/test-int/start-admission-jwks.int.test.ts, services/purchase-svc/test/admission-jwks-loader.te… |
+| Q-T69 | ④ | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ④ 503 `dependency-unavailable`이고 구매 세션을 열지 않는다(jti를 쓰지 않는다) | 자동 시험 | A | 시험: deploy/workloads/test/workloads.test.mjs, services/purchase-svc/test-int/start-admission-jwks.int.test.ts 외 3곳 |
+| Q-T69 | ⑤ | 입장 토큰 공개키 묶음과 키 교체(추천 적용, 2026-11-19… | ⑤ 다시 읽기는 30초에 한 번이고 동시에 온 요청은 한 번만 읽는다 | 자동 시험 | A | 시험: services/purchase-svc/test/admission-jwks-loader.test.ts |
 
 ## docs/security/asvs/queue-admission.md
 
@@ -234,10 +234,10 @@
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 5곳 |
 | v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외… |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
-| v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, services/queue-svc/test/tokens.test.ts |
-| v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 5곳 |
-| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
-| v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, services/queue-svc/test/entry-cases.ts |
+| v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, services/purchase-svc/test/admission-token.test.ts 외 5곳 |
+| v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 6곳 |
+| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, tools/local/e2e/gateway-admission.e2e.mjs |
+| v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, services/purchase-svc/test/admission-token.test.ts 외 3곳 |
 | v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, packages/platform/test/token-verify.test.ts (영역: apps/web… |
 | v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: services/queue-svc |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
