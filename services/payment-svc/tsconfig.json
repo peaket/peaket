@@ -10,7 +10,8 @@
     "emitDecoratorMetadata": true,
     "paths": {
       "@peaket/platform": ["../../packages/platform/src/index.ts"],
-      "@peaket/pg-simulator": ["../pg-simulator/src/index.ts"]
+      "@peaket/pg-simulator": ["../pg-simulator/src/index.ts"],
+      "@peaket/search-normalize": ["../../packages/search-normalize/src/index.ts"]
     },
     "allowJs": true,
     "checkJs": true
