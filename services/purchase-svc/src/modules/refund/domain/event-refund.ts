@@ -79,10 +79,33 @@ export interface EventRefundTarget {
 /** 미리보기 예상 시간의 결제사 처리 한도 초당 300건 [가정](BAT-420 GAT-110 W) */
 export const EVENT_REFUND_ESTIMATE_TPS = 300;
 
+/** 미리보기의 주문 단위 배상 한 줄(dry_run.compensationOrders, BAT-425 ADR-0317). owner가 compensation.ts를 거쳐 내보낸다 */
+export interface CompensationOrder {
+  readonly orderId: string;
+  readonly baseAmount: number;
+  readonly amount: number;
+}
+
+/**
+ * 배상 대상 주문을 주문 단위로 묶어 금액을 한 번만 계산한다(transfer-refund §5 '미리보기 값', §6).
+ * FORCE_MAJEURE·0원 주문은 목록에 넣지 않는다(배상 행 0). 차례는 주문 ID 오름차순이라 같은 대상이면 늘 같은 목록이다
+ */
+export function compensationOrdersOf(targets: readonly EventRefundTarget[], fault: EventRefundFault): readonly CompensationOrder[] {
+  const byOrder = new Map<string, number>();
+  for (const t of targets) byOrder.set(t.orderId, (byOrder.get(t.orderId) ?? 0) + t.ticketPrice);
+  const orders: CompensationOrder[] = [];
+  for (const [orderId, baseAmount] of [...byOrder.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const amount = compensationAmount(baseAmount, fault);
+    if (amount > 0) orders.push({ orderId, baseAmount, amount });
+  }
+  return orders;
+}
+
 /**
  * 주문 단위 미리보기(BAT-420 GAT-110 W, R-T37 ①, docs/features/transfer-refund.md §5 '판정·미리보기·확정의 차례'):
  * 대상 주문 수 = 주문 수, 환급 총액 = 대상 표 권면 합, 배상 = 주문마다 그 주문의 대상 표 권면 합에 compensationAmount(원 미만 올림 한 번),
- * 결제사별 주문 수(그 결제사의 대상 표가 있는 주문)·예상 시간 ceil(그 결제사의 대상 표 수 / 초당 300건)
+ * 결제사별 주문 수(그 결제사의 대상 표가 있는 주문)·예상 시간 ceil(그 결제사의 대상 표 수 / 초당 300건).
+ * BAT-425: 주문별 배상 목록(compensationOrders)은 배상 행이 있을 때만 싣는다(빈 목록이면 칸이 없다)
  */
 export function eventRefundPreviewOf(targets: readonly EventRefundTarget[], fault: EventRefundFault): EventRefundPreview {
   const orderTotals = new Map<string, number>();
@@ -96,18 +119,15 @@ export function eventRefundPreviewOf(targets: readonly EventRefundTarget[], faul
     p.tickets++;
     byPg.set(t.pg, p);
   }
-  let compensationTargets = 0;
+  const compensationOrders = compensationOrdersOf(targets, fault);
   let compensationTotal = 0;
-  for (const total of orderTotals.values()) {
-    const compensation = compensationAmount(total, fault);
-    if (compensation > 0) compensationTargets++;
-    compensationTotal += compensation;
-  }
+  for (const o of compensationOrders) compensationTotal += o.amount;
   return {
     targetOrders: orderTotals.size,
     refundTotal,
-    compensationTargets,
+    compensationTargets: compensationOrders.length,
     compensationTotal,
+    ...(compensationOrders.length > 0 ? { compensationOrders } : {}),
     perPg: [...byPg.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([pg, p]) => ({ pg, orders: p.orders.size, estimatedSeconds: Math.ceil(p.tickets / EVENT_REFUND_ESTIMATE_TPS) })),
@@ -202,6 +222,8 @@ export interface EventRefundPreview {
   readonly refundTotal: number;
   readonly compensationTargets: number;
   readonly compensationTotal: number;
+  /** 주문별 배상 목록(BAT-425, ADR-0317). 배상 행이 있을 때만 있다(dry_run.compensationOrders) */
+  readonly compensationOrders?: readonly CompensationOrder[];
   readonly perPg: readonly { readonly pg: RefundPgProvider; readonly orders: number; readonly estimatedSeconds: number }[];
 }
 

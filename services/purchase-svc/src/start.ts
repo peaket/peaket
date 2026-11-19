@@ -54,6 +54,7 @@ import {
   CancelTicketEventRefund,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
+  DrizzleCompensations,
   DrizzleCsCaseOutbox,
   DrizzleDeductionGapCancellations,
   DrizzleEventCancellationLookup,
@@ -76,14 +77,18 @@ import {
   fraudCancellationHandlers,
   fraudCancellationPackage,
   GetFraudCancellation,
+  GrpcCompensationTransfer,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  HttpCompensationCaseNotice,
   HttpDeductionGapNotice,
   HttpEventRefundAlert,
+  HttpPgCircuits,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
   parseHolidayCalendar,
   PromCsCaseSignals,
+  PromRefundAccountSignals,
   RedisSeatReturnNotices,
   type RefundModuleDeps,
   WeekendBusinessCalendar,
@@ -332,6 +337,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const fanReauthWarnings: string[] = [];
   let refundTickets: GrpcTicketCancellations | undefined;
   let refundPayments: GrpcPaymentCancellations | undefined;
+  /** BAT-425 지표: 계좌 다시 받기·배상·서킷 멈춤. 서비스를 만든 뒤 레지스트리에 붙인다 */
+  const refundSignals = new PromRefundAccountSignals();
+  let compensationTransfers: GrpcCompensationTransfer | undefined;
+  let pgCircuits: HttpPgCircuits | undefined;
   const ticketGrpcAddr = env.PEAKET_TICKET_GRPC_ADDR;
   const paymentGrpcAddr = env.PEAKET_PAYMENT_GRPC_ADDR;
   // 탈퇴 참여자의 미사용 티켓 견적도 같은 달력을 쓴다(공제 없음 24시간 특례의 비영업일 계산). refund가 없으면(주소 없는 local·ci) 여기서 만든다
@@ -342,6 +351,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
     // ticket-svc 운영자 취소는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
     refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) });
     refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
+    // BAT-425: 배상 송금(같은 payment-svc gRPC)과 서킷 읽기(payment-svc 내부 HTTP). 주소가 없으면 local·ci는 닫힌 대역이고 그 밖은 시작 실패다(아래)
+    compensationTransfers = new GrpcCompensationTransfer({ address: paymentGrpcAddr });
+    const refundOpsUrl = env.PEAKET_OPS_HTTP_URL;
+    const refundOpsClient = refundOpsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: refundOpsUrl, timeoutCapMs: 5_000 }) : undefined;
     // 403·503마다 까닭 이름표 하나만 남긴다(403 info, 503 warn. 토큰·jti·계정 ID·세션 ID는 싣지 않는다, §3.1 '거절 기록'). 로거는 서비스를 만든 뒤 묶인다
     const fanReauth = fanReauthGateFromEnv({
       env,
@@ -353,9 +366,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
         warn: (o) => log?.warn(o, '팬 취소의 재인증 토큰을 확인하지 못했다'),
       }),
     });
+    const cancellationWrites = new DrizzleCancellationWrites(database, new DrizzleOrderStore({ clock: systemClock }));
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
-      writes: new DrizzleCancellationWrites(database, new DrizzleOrderStore({ clock: systemClock })),
+      writes: cancellationWrites,
       seats: new DrizzleSeatReturns(new DrizzleSeatSales(database), seatMap, new RedisSeatReturnNotices(redis)),
       tickets: refundTickets,
       payments: refundPayments,
@@ -364,11 +378,32 @@ export async function start(o: StartOptions): Promise<StartedService> {
       eventCancellations: new DrizzleEventCancellationLookup(database),
       // 견적·팬 취소의 가상계좌 판정은 같은 payment-svc 클라이언트의 GetPayment다(BUILD_ORDER GAT-090). 차단기 payment-svc-get은 서비스를 만든 뒤 묶는다
       paymentMethods: refundPayments,
+      // BAT-425: 지연 환급 계좌 다시 받기·배상 목록·계좌 입력(ADR-0316·0317). 송금 기록은 purchase compensation 표에 남긴다
+      refundAccountWrites: cancellationWrites,
+      compensationStore: new DrizzleCompensations(database),
+      compensationTransfer: compensationTransfers,
+      ...(refundOpsClient ? { compensationNotice: new HttpCompensationCaseNotice(refundOpsClient, env.PEAKET_INTERNAL_TOKEN) } : {}),
+      refundAccountSignals: { inc: (result) => refundSignals.refundAccount(result) },
+      compensationSignals: { inc: (result) => refundSignals.compensation(result) },
       ...(fanReauth ? { reauth: fanReauth } : {}),
     };
   }
   if (database && (!ticketGrpcAddr || !paymentGrpcAddr) && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {
     throw new Error('PEAKET_TICKET_GRPC_ADDR·PEAKET_PAYMENT_GRPC_ADDR가 없다(예매 취소, 운영 필수)');
+  }
+  // BAT-425 GAT-120: 회차 취소 일괄 환불의 자동 정지가 payment-svc 내부 `GET /internal/v1/circuits`를 읽는다.
+  // 주소가 없으면 local·ci는 닫힌 대역(늘 거짓)이고 그 밖 환경은 시작하지 않는다(서킷이 늘 닫힌 채 조용히 도는 것을 막는다)
+  const paymentHttpUrl = env.PEAKET_PAYMENT_HTTP_URL;
+  if (paymentHttpUrl) {
+    pgCircuits = new HttpPgCircuits({
+      client: createExternalHttpClient({ provider: 'payment-svc', baseUrl: paymentHttpUrl, timeoutCapMs: 3_000 }),
+      ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}),
+      nowMs: () => systemClock.now(),
+      log: { warn: (o: object, msg: string) => log?.warn(o, msg) },
+    });
+  }
+  if (database && !paymentHttpUrl && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {
+    throw new Error('PEAKET_PAYMENT_HTTP_URL이 없다(회차 취소 서킷 읽기, 운영 필수)');
   }
   // 회차 취소 일괄 환불(BAT-425 GAT-120·GAT-130). 기존 예매 취소 Saga를 티켓마다 부르고, 진행률·부분 실패·수동 일시정지·재개,
   // 자동 정지(실패율·실패 금액·연속 실패·거절률), 연기 신청 창, 백그라운드 실행기, 팬 알림 Outbox를 남긴다.
@@ -417,6 +452,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
           },
       configs: new SeatMapSaleConfigs(seatMap),
       log: { warn: (obj: object, msg: string) => log?.warn(obj, msg) },
+      // BAT-425 GAT-120: 결제사 서킷이 열린 몫만 AUTO_CIRCUIT_OPEN으로 멈춘다. 읽기 실패는 거짓(환급은 계속한다, R-T45)
+      ...(pgCircuits ? { circuitOpen: (pg) => pgCircuits!.circuitOpen(pg) } : {}),
+      circuitPauses: { inc: (pg) => refundSignals.circuitPause(pg) },
       // 다시 열기 포트가 꽂히면 Start·Resume·Apply·CloseWindow는 표시만 하고 건은 릴레이 리더 틱 끝이 연다(다시 보기 2 N1). 내부 토큰은 생성자로 넘긴다(N2)
       notice: opsClient
         ? new HttpRefundFailureNotice(opsClient, env.PEAKET_INTERNAL_TOKEN)
@@ -624,6 +662,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
   signals.register(service.metrics.registry);
   hotPath.register(service.metrics.registry);
   csCaseSignals.register(service.metrics.registry);
+  refundSignals.register(service.metrics.registry);
+  // 첫 환급 판정 전에 서킷 상태를 한 번 읽는다(기다리지 않는다). 읽기 실패는 모든 몫을 거짓으로 두고 경고만 남긴다
+  if (pgCircuits) void pgCircuits.refresh();
   // 주문 생성의 identity-svc 클라이언트(듣기 전에 붙인다). 재확인은 차단기로 감싼다(열리면 부르지 않고 토큰 판정, ADR-0055). 주소가 없으면 대역과 경고 한 줄
   // 가명 계산은 재확인과 따로인 차단기다(identity-svc-contact-ref: 가명이 막혀도 재확인 차단기를 열지 않는다). local·ci가 아닌데 주소가 없으면 여기서 던진다(시작 실패, 듣기 전)
   let identity: ReturnType<typeof identityClientsFromEnv> | undefined;
@@ -1035,6 +1076,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         try {
           refundTickets?.close();
           refundPayments?.close();
+          compensationTransfers?.close();
           withdrawalPayments?.close();
         } catch (err) {
           service.logger.error({ err: errorSummary(err) }, '취소 gRPC 클라이언트 닫기 실패');

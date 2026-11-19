@@ -163,12 +163,13 @@ workloads:
     namespace: purchase
     podLabels: { app.kubernetes.io/name: payment-svc, app.kubernetes.io/component: service }
     ports:
-      rest: { port: 8080, callers: [ops-svc] }
+      # purchase-svc는 회차 취소 자동 정지의 결제사 서킷 상태를 GET /internal/v1/circuits로 읽는다(BAT-425 GAT-120, ADR-0316)
+      rest: { port: 8080, callers: [ops-svc, purchase-svc] }
       grpc:
         port: 50051
         services:
-          # 배상 송금은 아직 계약하지 않은 통신이다(docs/api/proto/README.md §3 아래 표). 부르는 쪽이 생기면 적는다
-          peaket.payment.v1.CompensationTransferService: []
+          # 배상 송금은 purchase-svc가 compensation_id 멱등으로 부른다(BAT-425 GAT-130, ADR-0317)
+          peaket.payment.v1.CompensationTransferService: [purchase-svc]
           peaket.payment.v1.PaymentService:
             methods:
               ApprovePayoutBatch: [ops-svc]

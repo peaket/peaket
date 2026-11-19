@@ -61,10 +61,12 @@ import {
   HttpDeductionGapNotice,
   HttpEntryFlagNotice,
   HttpEventRefundAlert,
+  HttpPgCircuits,
   HttpRefundAccountNotice,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
   PromCsCaseSignals,
+  PromRefundAccountSignals,
   RedisSeatReturnNotices,
   RefundAfterEntry,
   RefundRetryLoop,
@@ -214,6 +216,20 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   // CS 건 열기 실패·다시 열기 멈춤 지표(purchase_cs_case_open_failures_total{kind}·purchase_cs_case_reopen_cut_total{reason}, 다시 보기 2 N1).
   // 두 실행기의 틱 끝 다시 열기가 함께 쓰고, leaderLoops에서 프로세스 레지스트리에 붙인다
   const csCaseSignals = new PromCsCaseSignals();
+  const refundSignals = new PromRefundAccountSignals();
+  // BAT-425 GAT-120: 결제사 서킷 읽기(payment-svc 내부 HTTP). 주소가 없으면 local·ci는 늘 거짓이고 그 밖은 시작 실패다
+  const paymentHttpUrl = o.env?.PEAKET_PAYMENT_HTTP_URL;
+  const pgCircuits = paymentHttpUrl
+    ? new HttpPgCircuits({
+        client: createExternalHttpClient({ provider: 'payment-svc', baseUrl: paymentHttpUrl, timeoutCapMs: 3_000 }),
+        ...(o.env?.PEAKET_INTERNAL_TOKEN ? { internalToken: o.env.PEAKET_INTERNAL_TOKEN } : {}),
+        nowMs: () => clock.now(),
+        log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg) },
+      })
+    : undefined;
+  if (!paymentHttpUrl && o.env?.PEAKET_ENV !== 'local' && o.env?.PEAKET_ENV !== 'ci' && o.env?.PEAKET_ENV !== 'demo') {
+    throw new Error('PEAKET_PAYMENT_HTTP_URL이 없다(회차 취소 서킷 읽기, 운영 필수)');
+  }
   // 입장 기록이 나온 취소의 CS '이상 표시'. ops-svc 주소가 없으면 로그 대역이다
   const entryFlagNotice = opsClient
     ? new HttpEntryFlagNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN)
@@ -268,6 +284,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           ...(csOutbox ? { csOutbox } : {}),
           csCaseOpenFailures: csCaseSignals,
           log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg) },
+          ...(pgCircuits ? { circuitOpen: (pg) => pgCircuits!.circuitOpen(pg) } : {}),
+          circuitPauses: { inc: (pg) => refundSignals.circuitPause(pg) },
           canceller: new EventRefundCancellerRouter({
             cancel: new EventTicketCanceller({
               tickets: refundTicketCancels,
@@ -330,6 +348,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       orderSignals.register(ctx.registry);
       orderExpirySignals.register(ctx.registry);
       csCaseSignals.register(ctx.registry);
+      refundSignals.register(ctx.registry);
+      if (pgCircuits) void pgCircuits.refresh();
       const store = new RedisSeatStore(o.redis, ctx.logger, ctx.clock);
       // 다시 만들기의 DB 쪽(임대·판 번호·읽기)이자 판매를 연 기록(seat_rebuild 행). 기록이 있는 회차만 다시 만든다(리뷰 고침 M3)
       const rebuildSource = new DrizzleSeatRebuildSource(o.serviceDatabase);

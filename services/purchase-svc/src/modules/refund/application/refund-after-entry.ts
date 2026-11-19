@@ -128,7 +128,7 @@ export class RefundAfterEntry {
         // 다른 실행기가 먼저 집었거나 그사이 상태가 바뀌었으면 결제사를 부르지 않는다
         if (!(await this.#claims.claimDue(c.cancellationId, this.deps.nowMs()))) continue;
       }
-      const r = await this.deps.payments.cancel({ cancellationId: c.cancellationId, orderId: c.orderId, amount: c.amount, reason: c.reason, deadlineMs: 5_000 });
+      const r = await this.deps.payments.cancel({ cancellationId: c.cancellationId, orderId: c.orderId, amount: c.amount, reason: c.reason, refundAttempt: c.refundAttempt ?? 0, deadlineMs: 5_000 });
       if (r === 'CANCELLED') {
         const applied = await this.deps.writes.updateStatus({ cancellationId: c.cancellationId, status: 'REFUNDED', nowMs: this.deps.nowMs() });
         if (applied === false) {

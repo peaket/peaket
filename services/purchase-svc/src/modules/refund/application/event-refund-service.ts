@@ -7,6 +7,7 @@
 // 다시 보기 2 N1·N2(transfer-refund §3.1 ⑥): 일괄 환불 실패 건(failure_case_at)과 공제 차액 대상(deduction_gap_at)은 확정·항목 끝내기 트랜잭션에서 표시만 하고,
 // 다시 열기 포트(csOutbox)가 꽂힌 조립에서는 처리 중에 ops-svc를 부르지 않는다. 건은 runDue 틱 끝 한 곳에서 일괄 환불 실패 → 차액 차례로,
 // 5초 [가정] 예산과 잇따른 무응답 멈춤 안에서 행마다 연다(cs-case-reopen.ts, 실패해도 항목 상태는 그대로). 포트가 없는 옛 조립만 처리 중에 한 번 연다.
+import { randomUUID } from 'node:crypto';
 import {
   EventRefundActiveConflict,
   eventRefundCancellationId,
@@ -27,6 +28,7 @@ import {
   type RefundPauseReason,
 } from '../domain/event-refund.js';
 import { CsCaseReopenTick } from './cs-case-reopen.js';
+import { compensationRowsOf } from '../domain/compensation.js';
 import {
   EVENT_REFUND_CLAIM_EXTEND_BELOW_MS,
   type EventRefundApplyInput,
@@ -157,6 +159,9 @@ export class EventRefundService {
     const targets = kind === 'POSTPONE' ? listed.filter((t) => t.pendingCancellationId === undefined) : listed;
     const preview = eventRefundPreviewOf(targets, i.fault);
     const items: EventRefundItem[] = targets.map((t) => itemOf(i.requestId, t, kind, nowMs));
+    // 배상 행(BAT-425, ADR-0317 결정 2): 회차 취소(CANCEL)이고 주최 측 귀책·공연 내용 변경일 때 대상 주문마다 한 행을 요청·항목과 같은 트랜잭션에 만든다.
+    // 금액은 미리보기와 같은 주문 단위 함수로 한 번만 계산하고, 불가항력·0원 주문은 행이 없다
+    const compensationRows = kind === 'CANCEL' ? compensationRowsOf({ requestId: i.requestId, eventId: i.eventId, fault: i.fault, targets, nowMs, idOf: () => randomUUID() }) : [];
     const progress = progressOf(items, [], kind === 'POSTPONE');
     const request: EventCancellationRequest = {
       requestId: i.requestId,
@@ -181,7 +186,10 @@ export class EventRefundService {
     const gapRows = kind === 'CANCEL' ? await this.#findDeductionGaps(request) : [];
     let created: EventCancellationRequest;
     try {
-      created = await this.o.store.create(request, items, confirmed, gapRows.length > 0 ? { deductionGaps: gapRows.map((r) => r.cancellationId) } : {});
+      created = await this.o.store.create(request, items, confirmed, {
+        ...(gapRows.length > 0 ? { deductionGaps: gapRows.map((r) => r.cancellationId) } : {}),
+        ...(compensationRows.length > 0 ? { compensations: compensationRows } : {}),
+      });
     } catch (err) {
       // 같은 회차의 진행 중 요청(0016 active key)과 부딪히면 500이 아니라 409다
       if (err instanceof EventRefundActiveConflict) throw new EventRefundError('CONFLICT', `같은 회차에 진행 중인 회차 취소 요청이 있습니다: ${err.requestId}`);
@@ -648,6 +656,7 @@ export class EventRefundService {
       return { ...current, status, progress, updatedAtMs: writtenAtMs };
     });
     for (const p of newlyPaused) {
+      if (p.reason === 'AUTO_CIRCUIT_OPEN') this.o.circuitPauses?.inc(p.pg);
       await this.o.alert?.raise({
         requestId: request.requestId,
         eventId: request.eventId,

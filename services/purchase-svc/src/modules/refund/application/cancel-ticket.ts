@@ -64,7 +64,7 @@ export class CancelTicket {
     const existing = await this.o.orders.findCancellation(i.cancellationId);
     if (existing) {
       if (existing.orderId !== order.orderId || existing.ticketId !== i.ticketId) return { status: 'CONFLICT' };
-      return this.#replay(existing.state, existing.refundAmount, existing.refundAttempts, order.orderId, i, existing.refundAccountRequired === true);
+      return this.#replay(existing.state, existing.refundAmount, existing.refundAttempts, existing.refundAttempt ?? 0, order.orderId, i, existing.refundAccountRequired === true);
     }
     // 회차 취소 일괄 환불이 확정된 회차(CANCEL RUNNING·PAUSED·COMPLETED)의 팬 취소는 키를 폐기하기 전에 막는다. 일괄 환불이 공제 없이 돌려주고,
     // 티켓을 끝낸 뒤에 거절하면 키는 폐기됐는데 환급할 행이 없는 표가 생긴다(BAT-420 리뷰 D5, transfer-refund §5 '확정 뒤 팬 취소').
@@ -128,7 +128,7 @@ export class CancelTicket {
       const before = await this.o.orders.findCancellation(run.cancellationId);
       if (before) {
         if (before.orderId !== order.orderId || before.ticketId !== i.ticketId) return { status: 'CONFLICT' };
-        return this.#replay(before.state, before.refundAmount, before.refundAttempts, order.orderId, run, before.refundAccountRequired === true);
+        return this.#replay(before.state, before.refundAmount, before.refundAttempts, before.refundAttempt ?? 0, order.orderId, run, before.refundAccountRequired === true);
       }
       const atFirst = quoteRefund({
         ticketPrice: order.ticketPrice,
@@ -179,7 +179,7 @@ export class CancelTicket {
       ...(i.eventCancellationRequestId !== undefined ? { eventCancellationRequestId: i.eventCancellationRequestId } : {}),
     });
     if (write.status === 'CONFLICT') return { status: 'CONFLICT' };
-    if (write.status === 'REPLAYED') return this.#replay(write.state, write.refundAmount, write.refundAttempts, order.orderId, run);
+    if (write.status === 'REPLAYED') return this.#replay(write.state, write.refundAmount, write.refundAttempts, 0, order.orderId, run);
 
     // 입장 시작 뒤 취소는 키만 폐기하고 환급은 입장 기록 마감 뒤에 한다(ADR-0051 결정 13).
     if (afterClose) return { status: 'ACCEPTED', cancellationId: run.cancellationId, refundAmount: quote.refundAmount, refundAfterEntryClose: true };
@@ -190,6 +190,7 @@ export class CancelTicket {
       amount: quote.refundAmount,
       reason: i.reason,
       ...(run.refundAccount !== undefined ? { refundAccount: run.refundAccount } : {}),
+      refundAttempt: 0,
       deadlineMs: i.deadlineMs,
     });
     if (payment === 'CANCELLED') {
@@ -238,7 +239,7 @@ export class CancelTicket {
    * 다시 누름은 계좌를 넘기지 않는다(같은 멱등키에는 첫 본문만, docs/features/payment.md §6 '구현에서 정한 것' ⑥, BAT-420-rest 리뷰 반영 RV-02).
    * 계좌 대기 행(refund_account_required_at 있음)은 payment를 부르지 않고 실패 표시 없이 계좌 대기 답을 다시 준다(RV-03, '계좌 대기' 끝). 다른 계좌를 받는 길은 GAT-130이다
    */
-  async #replay(state: CancellationStatus, refundAmount: number, refundAttempts: number, orderId: string, i: CancelTicketInput, accountWaiting = false): Promise<CancelTicketResult> {
+  async #replay(state: CancellationStatus, refundAmount: number, refundAttempts: number, refundAttempt: number, orderId: string, i: CancelTicketInput, accountWaiting = false): Promise<CancelTicketResult> {
     // CS가 무효로 끝낸 취소는 되살리지 않는다
     if (state === 'VOIDED') return { status: 'CONFLICT' };
     if (state === 'REFUND_PENDING' && accountWaiting) {
@@ -250,6 +251,7 @@ export class CancelTicket {
         orderId,
         amount: refundAmount,
         reason: i.reason,
+        refundAttempt,
         deadlineMs: i.deadlineMs,
       });
       if (payment === 'CANCELLED') {

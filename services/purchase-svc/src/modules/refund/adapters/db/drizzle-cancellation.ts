@@ -5,7 +5,8 @@ import { DATABASE, type Database } from '@peaket/platform';
 import { and, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { SeatMap, SeatSales } from '../../../inventory/index.js';
 import type { CancellationOrderView, CancellationReason, CancellationRecord, CancellationWriteOutcome, DueRefund } from '../../domain/cancellation.js';
-import type { CancellationClaims, CancellationConfigs, CancellationOrders, CancellationWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
+import { REFUND_ACCOUNT_MAX_ATTEMPTS } from '../../domain/cancellation.js';
+import type { CancellationClaims, CancellationConfigs, CancellationOrders, CancellationWrites, RefundAccountWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
 import { DrizzleOrderStore, orderCancellation, orderItem, purchaseOrder } from '../../../booking/index.js';
 
 /** 주문·항목·회차 설정을 읽는 어댑터. 티켓 ID로 주문 한 장을 찾는다 */
@@ -58,6 +59,7 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         refundAmount: orderCancellation.refundAmount,
         state: orderCancellation.status,
         refundAttempts: orderCancellation.refundAttempts,
+        refundAttempt: orderCancellation.refundAttempt,
         accountRequiredAt: orderCancellation.refundAccountRequiredAt,
       })
       .from(orderCancellation)
@@ -71,7 +73,7 @@ export class DrizzleCancellationOrders implements CancellationOrders {
 
 /** order_cancellation 쓰기. 같은 취소 ID는 REPLAYED, 같은 티켓의 다른 진행 중 취소는 CONFLICT다 */
 @Injectable()
-export class DrizzleCancellationWrites implements CancellationWrites, CancellationClaims {
+export class DrizzleCancellationWrites implements CancellationWrites, CancellationClaims, RefundAccountWrites {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     @Inject('REFUND_ORDER_STORE') private readonly orders: DrizzleOrderStore,
@@ -231,6 +233,61 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     return updated.length > 0;
   }
 
+  /**
+   * 지연 환급 계좌 다시 받기 시도(0030, BAT-425, ADR-0316 결정 4): 취소 행을 잠그고 REFUND_PENDING·계좌 대기·refund_attempt = oldAttempt·
+   * 3회 [가정] 미만일 때만 1 올린다. 커밋한 뒤에 부르는 쪽이 결제사를 부른다(결제사를 트랜잭션 안에서 부르지 않는다).
+   * 그사이 다른 요청이 올렸으면(조건부 0행) undefined라 동시 두 요청에서 하나만 오른다
+   */
+  async beginAttempt(q: { readonly cancellationId: string; readonly oldAttempt: number; readonly nowMs: number }): Promise<
+    | { readonly attempt: number; readonly orderId: string; readonly ticketId: string; readonly refundAmount: number; readonly reason: CancellationReason; readonly retryAttempts: number }
+    | undefined
+  > {
+    return this.database.transaction(async (tx) => {
+      const [row] = await tx
+        .select({
+          orderId: orderCancellation.orderId,
+          ticketId: orderCancellation.ticketId,
+          refundAmount: orderCancellation.refundAmount,
+          reason: orderCancellation.reason,
+          status: orderCancellation.status,
+          refundAttempts: orderCancellation.refundAttempts,
+          refundAttempt: orderCancellation.refundAttempt,
+          accountRequiredAt: orderCancellation.refundAccountRequiredAt,
+        })
+        .from(orderCancellation)
+        .where(eq(orderCancellation.id, q.cancellationId))
+        .for('update');
+      if (!row || row.status !== 'REFUND_PENDING' || row.accountRequiredAt === null) return undefined;
+      if (row.refundAttempt !== q.oldAttempt || row.refundAttempt >= REFUND_ACCOUNT_MAX_ATTEMPTS) return undefined;
+      const attempt = row.refundAttempt + 1;
+      const updated = await tx
+        .update(orderCancellation)
+        .set({ refundAttempt: attempt, nextRefundAt: null, statusChangedAt: new Date(q.nowMs) })
+        .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.refundAttempt, q.oldAttempt), eq(orderCancellation.status, 'REFUND_PENDING')))
+        .returning({ id: orderCancellation.id });
+      if (updated.length === 0) return undefined;
+      return { attempt, orderId: row.orderId, ticketId: row.ticketId, refundAmount: row.refundAmount, reason: row.reason as CancellationReason, retryAttempts: row.refundAttempts };
+    });
+  }
+
+  /** 계좌 대기 표시를 지운다(REFUND_PENDING만). 결과 모름이면 다음 재시도 시각을 함께 쓴다(BAT-425, ADR-0316 결정 4) */
+  async clearWaiting(q: { readonly cancellationId: string; readonly nextRefundAtMs?: number; readonly lastError?: string; readonly nowMs: number }): Promise<void> {
+    await this.database.db
+      .update(orderCancellation)
+      .set({
+        refundAccountRequiredAt: null,
+        nextRefundAt: q.nextRefundAtMs === undefined ? null : new Date(q.nextRefundAtMs),
+        ...(q.lastError !== undefined ? { refundLastError: q.lastError } : {}),
+        statusChangedAt: new Date(q.nowMs),
+      })
+      .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.status, 'REFUND_PENDING')));
+  }
+
+  /** RefundAccountWrites.markFailed: 계좌 다시 받기의 업무 거절을 기존 CS '환급 실패' 표시로 잇는다 */
+  async markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean> {
+    return this.markRefundFailed(q);
+  }
+
   async dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]> {
     const now = new Date(nowMs);
     const held = holdOpenFor(now);
@@ -244,6 +301,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         reason: orderCancellation.reason,
         status: orderCancellation.status,
         attempts: orderCancellation.refundAttempts,
+        refundAttempt: orderCancellation.refundAttempt,
         refundDueAt: orderCancellation.refundDueAt,
         nextRefundAt: orderCancellation.nextRefundAt,
         createdAt: orderCancellation.createdAt,
@@ -278,6 +336,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       reason: r.reason as CancellationReason,
       status: r.status as 'REQUESTED' | 'REFUND_PENDING',
       attempts: r.attempts,
+      refundAttempt: r.refundAttempt,
     }));
     // 미룸 때문에 집지 않은 마감 지난 보류 취소는 따로 읽어 held로 싣는다(실행기가 세기만 한다). 따로 읽어 위 묶음 자리를 차지하지 않는다
     const heldRows = await this.database.db

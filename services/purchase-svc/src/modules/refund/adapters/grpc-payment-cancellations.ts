@@ -96,6 +96,8 @@ export class GrpcPaymentCancellations implements PaymentCancellations, PaymentMe
         amount: { krw: q.amount },
         reason: q.reason,
         ...(q.scope === 'DEPOSIT_ONLY' ? { scope: 'CANCEL_SCOPE_DEPOSIT_ONLY' } : {}),
+        // 같은 취소 ID의 계좌 다시 받기 시도는 새 멱등키(cancel-{id}-a{n})다. 0은 첫 시도라 싣지 않는다(BAT-425, ADR-0316)
+        ...(q.refundAttempt !== undefined && q.refundAttempt > 0 ? { refund_attempt: q.refundAttempt } : {}),
         ...(q.refundAccount !== undefined
           ? { refund_account: { bank_code: q.refundAccount.bankCode, account_number: q.refundAccount.accountNumber, holder_name: q.refundAccount.holderName } }
           : {}),

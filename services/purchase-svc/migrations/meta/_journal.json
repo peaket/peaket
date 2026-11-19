@@ -211,6 +211,13 @@
       "when": 1795030124445,
       "tag": "0029_refund_account_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795116316329,
+      "tag": "0030_compensation_and_refund_attempt",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 // 회차 취소 일괄 환불의 포트(BAT-425 GAT-120·GAT-130). 도메인은 DB·HTTP·gRPC를 모른다.
 import type { EventRefundHoldInput, EventRefundHoldState } from './event-refund-hold.js';
+import type { CompensationRow } from './compensation.js';
 import type { CancellationConfigs } from './ports.js';
 import type {
   EventCancellationRequest,
@@ -26,13 +27,14 @@ export interface EventRefundStore {
   /**
    * 요청과 대상 항목을 한 트랜잭션에 만든다. 같은 requestId가 있으면 REPLAYED다. 팬 알림 Outbox도 같은 트랜잭션에 넣는다.
    * extra.deductionGaps는 확정 때 찾은 공제 차액 대상 취소 ID다. 같은 트랜잭션에서 그 행에 deduction_gap_at·deduction_gap_request_id를 쓴다
-   * (이미 표시한 행은 그대로, 웨이브 끝 리뷰 C2·S1, transfer-refund §5 '그래도 남는 건'). CS 건은 일괄 환불 실행기 틱이 연다
+   * (이미 표시한 행은 그대로, 웨이브 끝 리뷰 C2·S1, transfer-refund §5 '그래도 남는 건'). CS 건은 일괄 환불 실행기 틱이 연다.
+   * extra.compensations는 확정 때 만드는 배상 행이다(BAT-425, ADR-0317). 같은 요청·주문은 유일 인덱스가 한 행으로 막는다
    */
   create(
     request: EventCancellationRequest,
     items: readonly EventRefundItem[],
     outbox?: readonly EventRefundOutboxMessage[],
-    extra?: { readonly deductionGaps?: readonly string[] },
+    extra?: { readonly deductionGaps?: readonly string[]; readonly compensations?: readonly CompensationRow[] },
   ): Promise<EventCancellationRequest>;
   /** 진행률·상태·일시정지 표시를 통째로 바꾼다. 서비스의 진행률 쓰기는 W9-fix1 N8부터 updateLocked만 쓴다(겹친 쓰기가 남의 멈춤을 지우지 않게) */
   update(request: EventCancellationRequest): Promise<void>;
@@ -161,6 +163,8 @@ export interface EventRefundServiceDeps {
   readonly attempts?: EventRefundAttemptStore;
   /** 그 결제사의 서킷이 열렸는지. 없으면 열리지 않은 것으로 본다 */
   readonly circuitOpen?: (pg: RefundPgProvider) => boolean;
+  /** 결제사 서킷이 열려 그 몫을 멈춘 수(event_refund_circuit_pause_total{pg}, BAT-425, R-T45) */
+  readonly circuitPauses?: { inc(pg: RefundPgProvider): void };
   readonly nowMs: () => number;
   readonly deadlineMs: () => number;
   /** 한 번에 결제사에 보내는 수. 기본 8 [가정] */

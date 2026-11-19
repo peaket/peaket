@@ -1,7 +1,7 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/platform/mesh/port-allow.yaml과 deploy/gateways/*.yaml의 라우트·공개키 묶음 주소, docs/api/proto에서 node tools/ci/mesh-policies.mjs --write가 만든다, ADR-0285 결정 2)
 # 운영 오버레이 몫: 받는 쪽 노드 프록시 인가 정책 <워크로드>-ports(포트마다 허용 주체, 업무 gRPC 포트는 그 워크로드의 웨이포인트 하나), 업무 gRPC 워크로드의
 # 웨이포인트 <워크로드>-waypoint와 업무 gRPC Service <워크로드>-grpc, 웨이포인트 인가 정책 <워크로드>-waypoint-callers(서비스·메서드 경로마다 부르는 쪽, docs/architecture.md §5 '포트별 허용 표')
-# 부르는 쪽이 없어 규칙을 만들지 않은 업무 gRPC(아무도 부르지 못함): peaket.payment.v1.CompensationTransferService
+# 부르는 쪽이 없어 규칙을 만들지 않은 업무 gRPC(아무도 부르지 못함): 없음
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
@@ -590,6 +590,7 @@ spec:
               - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
               - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
               - cluster.local/ns/core/sa/ops-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
       to:
         - operation:
             ports:
@@ -671,6 +672,14 @@ spec:
       name: payment-svc-waypoint
   action: ALLOW
   rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.CompensationTransferService/*
     - from:
         - source:
             principals:

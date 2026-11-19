@@ -1,6 +1,7 @@
 // 회차 취소 일괄 환불의 메모리 저장소(단위 시험·로컬 대역).
 import { EventRefundActiveConflict, type EventCancellationRequest, type EventRefundAttempt, type EventRefundItem, type EventRefundWindowStats, type RefundPgProvider } from '../domain/event-refund.js';
 import type { EventRefundAttemptStore, EventRefundItemAdder, EventRefundOutboxMessage, EventRefundStore } from '../domain/event-refund-ports.js';
+import type { CompensationRow } from '../domain/compensation.js';
 
 export class MemoryEventRefundStore implements EventRefundStore, EventRefundItemAdder {
   readonly requests = new Map<string, EventCancellationRequest>();
@@ -12,6 +13,8 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
   readonly deductionGaps = new Map<string, string>();
   /** 일괄 환불 실패 건을 열 대상으로 표시한 항목(`요청 ID/표 ID`, 다시 보기 2 N2 failure_case_at). FAILED 쓰기와 함께 남긴다 */
   readonly failureCases = new Set<string>();
+  /** 확정 때 만든 배상 행(BAT-425, ADR-0317). (요청, 주문) 하나만 둔다 */
+  readonly compensations: CompensationRow[] = [];
 
   async find(requestId: string): Promise<EventCancellationRequest | undefined> {
     return this.requests.get(requestId);
@@ -21,7 +24,7 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     request: EventCancellationRequest,
     items: readonly EventRefundItem[],
     outbox: readonly EventRefundOutboxMessage[] = [],
-    extra: { readonly deductionGaps?: readonly string[] } = {},
+    extra: { readonly deductionGaps?: readonly string[]; readonly compensations?: readonly CompensationRow[] } = {},
   ): Promise<EventCancellationRequest> {
     const existing = this.requests.get(request.requestId);
     if (existing) return existing;
@@ -33,6 +36,9 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
     this.byRequest.set(request.requestId, new Map(items.map((i) => [i.ticketId, i])));
     this.outbox.push(...outbox);
     for (const id of extra.deductionGaps ?? []) if (!this.deductionGaps.has(id)) this.deductionGaps.set(id, request.requestId);
+    for (const c of extra.compensations ?? []) {
+      if (!this.compensations.some((x) => x.eventCancellationRequestId === c.eventCancellationRequestId && x.orderId === c.orderId)) this.compensations.push(c);
+    }
     return request;
   }
 

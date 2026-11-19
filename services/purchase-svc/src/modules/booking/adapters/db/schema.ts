@@ -103,6 +103,11 @@ export const orderCancellation = pgTable(
     deductionAmount: integer('deduction_amount').notNull(),
     refundAmount: integer('refund_amount').notNull(),
     status: text('status').notNull(),
+    /**
+     * 같은 취소 ID의 환급 시도 번호(BAT-425, ADR-0316, purchase 0030). 0은 첫 시도, 1~3 [가정]은 지연 환급 계좌를 다시 받은 시도다.
+     * 결제사 멱등키 cancel-{id}·cancel-{id}-a{n}를 가른다. 다른 호출자(회차 취소·부정 예매·탈퇴)는 0 그대로다
+     */
+    refundAttempt: integer('refund_attempt').notNull().default(0),
     /** 입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다 */
     refundDueAt: at('refund_due_at'),
     /** 결제사 취소를 다시 시도한 횟수(REFUND_PENDING) */
@@ -155,6 +160,8 @@ export const orderCancellation = pgTable(
     check('order_cancellation_status_check', sql`${t.status} in ('REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED')`),
     check('order_cancellation_amounts_check', sql`${t.daysBefore} >= 0 and ${t.deductionBp} between 0 and 10000 and ${t.deductionAmount} >= 0 and ${t.refundAmount} >= 0`),
     check('order_cancellation_refund_attempts_check', sql`${t.refundAttempts} >= 0`),
+    // 같은 취소 ID의 환급 시도 번호는 0~3 [가정]이다(0030, BAT-425, ADR-0316)
+    check('order_cancellation_refund_attempt_check', sql`${t.refundAttempt} >= 0 and ${t.refundAttempt} <= 3`),
     // 차액 대상 표시 시각과 그 요청 ID는 함께 있거나 함께 없다(0025)
     check('order_cancellation_deduction_gap_check', sql`(${t.deductionGapAt} is null) = (${t.deductionGapRequestId} is null)`),
     // 다시 열기 목록(열지 않은 이상 표시·차액 건)만 받치는 부분 색인(0025)

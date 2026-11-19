@@ -172,3 +172,45 @@ export const fraudCancellationTicket = pgTable(
     check('fraud_cancellation_ticket_failed_check', sql`(${t.outcome} = 'FAILED') = (${t.failureCode} is not null)`),
   ],
 );
+
+/**
+ * 배상금 한 건(BAT-425 GAT-130 잔여, FR-056, ADR-0046 결정 5, ADR-0317, purchase 0030, docs/data.md compensation).
+ * 회차 취소 확정 때 주최 측 귀책·공연 내용 변경이면 대상 주문마다 한 행을 만든다((request_id, order_id) 유일).
+ * 금액은 그 주문의 대상 표 권면 합의 10%를 원 미만 올림해 한 번만 계산·저장한다(FORCE_MAJEURE는 0행).
+ * 계좌번호 원문은 저장하지 않고 끝 4자리(account_last4)만 남긴다(POL-014)
+ */
+export const compensation = pgTable(
+  'compensation',
+  {
+    id: uuid('id').primaryKey(),
+    eventCancellationRequestId: uuid('event_cancellation_request_id').notNull(),
+    orderId: uuid('order_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    /** 그 주문의 결제자 계정. 목록·상세의 소유 확인에 쓴다 */
+    accountId: uuid('account_id').notNull(),
+    /** 배상금을 상계할 파트너(주최 측). purchase-svc가 파트너 ID를 읽는 길이 생기기 전에는 빈 값 허용 */
+    promoterId: uuid('promoter_id'),
+    baseAmount: integer('base_amount').notNull(),
+    amount: integer('amount').notNull(),
+    status: text('status').notNull(),
+    accountLast4: text('account_last4'),
+    /** 지급대행 송금 ID(REQUESTED·PAID·FAILED일 때) */
+    transferId: text('transfer_id'),
+    /** PAID일 때 만들어진 partner_receivable(COMPENSATION_ADVANCE) ID */
+    receivableId: uuid('receivable_id'),
+    /** FAILED의 개인정보 없는 까닭 이름표 */
+    failureReason: text('failure_reason'),
+    createdAt: at('created_at').notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('compensation_request_order_key').on(t.eventCancellationRequestId, t.orderId),
+    index('compensation_account_created_idx').on(t.accountId, t.createdAt, t.id),
+    check('compensation_status_check', sql`${t.status} in ('ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED')`),
+    check('compensation_amounts_check', sql`${t.baseAmount} >= 0 and ${t.amount} >= 0`),
+    check('compensation_account_last4_check', sql`${t.accountLast4} is null or ${t.accountLast4} ~ '^[0-9]{1,4}$'`),
+    // ACCOUNT_PENDING에는 송금 ID가 없다(계좌를 넣은 뒤 REQUESTED·PAID·FAILED에 쓴다)
+    check('compensation_transfer_check', sql`${t.status} <> 'ACCOUNT_PENDING' or ${t.transferId} is null`),
+    check('compensation_receivable_check', sql`${t.receivableId} is null or ${t.status} = 'PAID'`),
+  ],
+);

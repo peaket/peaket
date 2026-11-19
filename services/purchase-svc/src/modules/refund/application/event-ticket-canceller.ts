@@ -79,7 +79,7 @@ export class EventTicketCanceller implements EventRefundCanceller {
 
   /** ③ 결제사 취소. 끝나면 환급 상태(REFUND_PENDING 행만), 업무 거절은 실패, 모름·대기는 재시도(상태를 쓰지 않는다) */
   async #pay(target: EventRefundTarget, q: Parameters<EventRefundCanceller['cancel']>[1], amount: number): Promise<Result> {
-    const payment = await this.o.payments.cancel({ cancellationId: q.cancellationId, orderId: target.orderId, amount, reason: 'EVENT_CANCELLED', deadlineMs: q.deadlineMs });
+    const payment = await this.o.payments.cancel({ cancellationId: q.cancellationId, orderId: target.orderId, amount, reason: 'EVENT_CANCELLED', refundAttempt: 0, deadlineMs: q.deadlineMs });
     if (payment === 'CANCELLED') {
       await this.o.writes.updateStatus({ cancellationId: q.cancellationId, status: 'REFUNDED', nowMs: q.nowMs });
       return { status: 'REFUNDED' };

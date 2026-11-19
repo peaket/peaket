@@ -15,6 +15,7 @@ import {
   type RefundPgProvider,
 } from '../../domain/event-refund.js';
 import type { EventRefundItemAdder, EventRefundOutboxMessage, EventRefundStore } from '../../domain/event-refund-ports.js';
+import type { CompensationRow } from '../../domain/compensation.js';
 
 interface RequestRow {
   id: string;
@@ -110,7 +111,7 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
     request: EventCancellationRequest,
     items: readonly EventRefundItem[],
     outbox: readonly EventRefundOutboxMessage[] = [],
-    extra: { readonly deductionGaps?: readonly string[] } = {},
+    extra: { readonly deductionGaps?: readonly string[]; readonly compensations?: readonly CompensationRow[] } = {},
   ): Promise<EventCancellationRequest> {
     return this.database.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
@@ -155,6 +156,15 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
       }
       // 확정 때 찾은 공제 차액 대상을 요청 행과 같은 트랜잭션에서 표시한다(웨이브 끝 리뷰 C2·S1). CS 건은 일괄 환불 실행기 틱이 연다
       await markDeductionGaps(tx, extra.deductionGaps ?? [], request.requestId, this.clock.now());
+      // 배상 행(BAT-425, ADR-0317): 요청·항목과 같은 트랜잭션이다. 같은 요청·주문의 다시 확정은 유일 인덱스가 한 행으로 막는다
+      for (const c of extra.compensations ?? []) {
+        await tx.execute(sql`
+          insert into compensation (id, event_cancellation_request_id, order_id, event_id, account_id, promoter_id, base_amount, amount, status, account_last4, transfer_id, receivable_id, failure_reason, created_at, updated_at)
+          values (${c.id}::uuid, ${c.eventCancellationRequestId}::uuid, ${c.orderId}::uuid, ${c.eventId}::uuid, ${c.accountId}::uuid, ${c.promoterId ?? null}::uuid,
+                  ${c.baseAmount}, ${c.amount}, 'ACCOUNT_PENDING', null, null, null, null,
+                  ${new Date(c.createdAtMs)}::timestamptz, ${new Date(c.updatedAtMs)}::timestamptz)
+          on conflict (event_cancellation_request_id, order_id) do nothing`);
+      }
       return toRequest(inserted.rows[0] as unknown as RequestRow);
     });
   }

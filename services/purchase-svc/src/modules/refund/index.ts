@@ -15,7 +15,14 @@ export {
 export {
   CANCELLATION_REASONS,
   CANCELLATION_STATUSES,
+  REFUND_ACCOUNT_MAX_ATTEMPTS,
   REFUND_RETRY_MAX_ATTEMPTS,
+  RefundAccountAttemptsExceeded,
+  RefundAccountNotPending,
+  RefundAccountNotFound,
+  RefundAccountRejected,
+  RefundAccountRequiredAgain,
+  ReauthRequired,
   refundRetryDelayMs,
   type CancellationOrderView,
   type CancellationReason,
@@ -26,12 +33,17 @@ export {
   type DueRefund,
   type PaymentCancelOutcome,
   type RefundAccount,
+  type RequestRefundAccountResult,
   type TicketCancelAnswer,
   type TicketCancelOutcome,
 } from './domain/cancellation.js';
 export type {
   CancellationConfigs,
   CancellationOrders,
+  CompensationCaseNotice,
+  CompensationStore,
+  CompensationTransfer,
+  CompensationTransferResult,
   EventCancellationLookup,
   CancellationWrites,
   FraudCancellationRequestRecord,
@@ -42,7 +54,9 @@ export type {
   FanReauthAct,
   FanReauthOp,
   PaymentCancellations,
+  PgCircuits,
   ReauthGate,
+  RefundAccountWrites,
   RefundDeps,
   RefundFailureNotice,
   SeatReturnNotices,
@@ -74,6 +88,29 @@ export { fraudCancellationHandlers, fraudCancellationPackage, type FraudCancella
 export { DrizzleCancellationOrders, DrizzleCancellationWrites, DrizzleSeatReturns } from './adapters/db/drizzle-cancellation.js';
 export { GrpcTicketCancellations, type GrpcTicketCancellationsOptions } from './adapters/grpc-ticket-cancellations.js';
 export { GrpcPaymentCancellations, type GrpcPaymentCancellationsOptions } from './adapters/grpc-payment-cancellations.js';
+export { GrpcCompensationTransfer, type GrpcCompensationTransferOptions } from './adapters/grpc-compensation-transfer.js';
+export { HttpPgCircuits, PG_CIRCUIT_CACHE_MS, type HttpPgCircuitsOptions } from './adapters/http-pg-circuits.js';
+export { HttpCompensationCaseNotice, compensationCaseEventKey } from './adapters/http-compensation-case-notice.js';
+export { DrizzleCompensations } from './adapters/db/drizzle-compensations.js';
+export {
+  accountLast4Of,
+  COMPENSATION_REASONS,
+  COMPENSATION_STATUSES,
+  CompensationNotAccountPending,
+  CompensationNotFound,
+  CompensationTransferRejected,
+  CompensationTransferUnavailable,
+  compensationRowsOf,
+  type CompensationPage,
+  type CompensationReason,
+  type CompensationRecord,
+  type CompensationRow,
+  type CompensationStatus,
+  type CompensationView,
+} from './domain/compensation.js';
+export { Compensations, RequestCompensationAccount, type RequestCompensationAccountDeps, type RequestCompensationAccountInput } from './application/compensations.js';
+export { InvalidRefundAccount, REFUND_ACCOUNT_RETRY_DELAY_MS, RequestRefundAccount, type RequestRefundAccountInput } from './application/request-refund-account.js';
+export { CancellationAccountController, CompensationController } from './inbound/compensation.controller.js';
 export { RedisSeatReturnNotices } from './adapters/redis-seat-returns.js';
 export { CancelTicket, zeroDeductionFor, type CancelTicketInput } from './application/cancel-ticket.js';
 // 탈퇴 참여자의 결제한 미사용 티켓(BAT-013, I-T26, payment §4.1 '미사용 티켓 견적'·'미사용 티켓 취소')
@@ -90,6 +127,7 @@ export { RefundAfterEntry, type RefundAfterEntryDeps, refundAfterEntryTask } fro
 export { REFUND_RETRY_TICK_MS, RefundRetryLoop, type RefundRetryLoopDeps, type RefundRetryTick } from './application/refund-retry-loop.js';
 export {
   compensationAmount,
+  compensationOrdersOf,
   eventRefundCancellationId,
   eventRefundRetryDelayMs,
   progressOf,
@@ -103,6 +141,7 @@ export {
   REFUND_JOB_STATES,
   REFUND_PAUSE_REASONS,
   REFUND_PG_PROVIDERS,
+  type CompensationOrder,
   type EventCancellationRequest,
   type EventRefundAttempt,
   type EventRefundAttemptOutcome,
@@ -172,6 +211,7 @@ export { EVENT_REFUND_CLAIM_EXTEND_BELOW_MS, EVENT_REFUND_TICKET_DEADLINE_MS } f
 export { mergePauses } from './domain/event-refund.js';
 export { DrizzleCsCaseOutbox } from './adapters/db/drizzle-cs-case-outbox.js';
 export { PromCsCaseSignals } from './adapters/prom-cs-case-signals.js';
+export { PromRefundAccountSignals } from './adapters/prom-refund-signals.js';
 export { CS_CASE_REOPEN_BUDGET_MS, CS_CASE_REOPEN_MAX_UNREACHABLE, CsCaseReopenBudget } from './application/cs-case-reopen.js';
 export { CsCaseRejected } from './adapters/cs-case-response.js';
 export { HttpDeductionGapNotice } from './adapters/http-deduction-gap-notice.js';

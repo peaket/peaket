@@ -11,6 +11,7 @@ import type {
   TicketCancelAnswer,
 } from './cancellation.js';
 import type { FraudCancelTarget, FraudRefundProgress, FraudTicketResult } from './fraud-cancellation.js';
+import type { CompensationPage, CompensationRecord, CompensationStatus, CompensationView } from './compensation.js';
 import type { BusinessCalendar } from './refund-policy.js';
 
 /** 취소가 읽는 주문·티켓(운영은 purchase DB order_item.ticket_id → purchase_order, 판매 설정) */
@@ -46,6 +47,11 @@ export interface PaymentCancellations {
     readonly reason: CancellationReason;
     readonly refundAccount?: RefundAccount;
     readonly deadlineMs: number;
+    /**
+     * 같은 취소 ID의 환급 시도 번호(BAT-425, ADR-0316). 0/빈 값은 첫 시도이고 멱등키 `cancel-{id}`,
+     * 1~3 [가정]은 계좌를 다시 받은 시도이고 멱등키 `cancel-{id}-a{n}`이다. 결제사 취소를 부르기 전에 커밋한다
+     */
+    readonly refundAttempt?: number;
     /**
      * 취소 범위(payment.proto CancelScope). DEPOSIT_ONLY면 payment-svc가 입금 전 취소만 하고 입금 대기가 아니면 REJECTED다(탈퇴 참여자만 싣는다,
      * docs/features/payment.md §6 '입금 전 취소만 부르기', BAT-010). 없으면 원장 상태로 고른다(예매 취소·회차 취소·부정 예매 취소)
@@ -164,6 +170,100 @@ export interface EntryFlagNotice {
   open(q: { readonly cancellationId: string; readonly orderId: string; readonly ticketId: string; readonly enteredAtMs: number; readonly nowMs: number }): Promise<void>;
 }
 
+// ---- 지연 환급 계좌 다시 받기(BAT-425 GAT-130, ADR-0316) ----
+
+/**
+ * 계좌 다시 받기 시도 쓰기(운영은 purchase DB order_cancellation). 행 잠금 안에서 조건을 다시 보고 refund_attempt를 1 올린 뒤
+ * 커밋하고, 유스케이스가 그 뒤에 결제사를 부른다(ASVS 2.3.3 '새 행·시도 올리기·payment 호출·답 반영의 경계').
+ * oldAttempt는 유스케이스가 읽은 값이다. 그사이 다른 요청이 시도를 올렸으면(조건부 0행) undefined라 하나만 오른다(R-T42 ④)
+ */
+export interface RefundAccountWrites {
+  /** REFUND_PENDING·refund_account_required_at 있음·refund_attempt = oldAttempt·oldAttempt < 3일 때만 올린다 */
+  beginAttempt(q: { readonly cancellationId: string; readonly oldAttempt: number; readonly nowMs: number }): Promise<
+    | {
+        readonly attempt: number;
+        readonly orderId: string;
+        readonly ticketId: string;
+        readonly refundAmount: number;
+        readonly reason: CancellationReason;
+        readonly retryAttempts: number;
+      }
+    | undefined
+  >;
+  /**
+   * 계좌 대기 표시를 지운다(REFUND_PENDING만). nextRefundAtMs가 있으면 다음 재시도 시각도 쓴다(결과 모름 1분 [가정]).
+   * 계좌 거절·업무 거절은 부르는 쪽이 markRefundFailed를 이어 부른다
+   */
+  clearWaiting(q: { readonly cancellationId: string; readonly nextRefundAtMs?: number; readonly lastError?: string; readonly nowMs: number }): Promise<void>;
+  /** 결제사가 환급했다: REFUND_PENDING 행을 REFUNDED로 바꾼다(주문 전이는 CancellationWrites.updateStatus와 같은 규칙) */
+  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<boolean | void>;
+  /** 결제사 업무 거절: 계좌 대기 표시를 지운 뒤 CS '환급 실패' 대상 표시(refund_failed_at)를 남긴다 */
+  markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
+}
+
+// ---- 배상 기록·계좌 입력·송금(BAT-425 GAT-130 잔여, ADR-0317) ----
+
+/** 배상 행 저장소(운영은 purchase DB compensation) */
+export interface CompensationStore {
+  /** 그 계정이 결제한 주문의 배상만 최근 순으로 준다. 커서는 불투명 글자다(guidelines §3) */
+  list(accountId: string, q?: { readonly cursor?: string; readonly limit?: number }): Promise<CompensationPage>;
+  /** 그 계정이 결제한 주문의 배상 하나. 없거나 남의 건이면 undefined(같은 404) */
+  get(accountId: string, compensationId: string): Promise<CompensationView | undefined>;
+  /** 계좌 입력 전 상태 확인용. 없거나 남의 건이면 undefined */
+  findForAccount(accountId: string, compensationId: string): Promise<CompensationRecord | undefined>;
+  /**
+   * ACCOUNT_PENDING 행에만 계좌 끝 4자리·송금 결과를 쓴다. 바뀐 행을 돌려준다. 그사이 다른 요청이 끝냈으면(0행) 지금 행을 돌려준다.
+   * 계좌번호 원문은 받지 않는다(POL-014)
+   */
+  saveTransfer(q: {
+    readonly compensationId: string;
+    readonly status: Exclude<CompensationStatus, 'ACCOUNT_PENDING'>;
+    readonly accountLast4: string;
+    readonly transferId?: string;
+    readonly receivableId?: string;
+    readonly failureReason?: string;
+    readonly nowMs: number;
+  }): Promise<CompensationRecord | undefined>;
+}
+
+/** payment-svc CompensationTransferService.RequestCompensationTransfer의 결과(payment 응답과 같은 뜻) */
+export interface CompensationTransferResult {
+  readonly transferId: string;
+  readonly status: 'REQUESTED' | 'PAID' | 'FAILED';
+  readonly receivableId?: string;
+  readonly accountLast4?: string;
+  readonly failureReason?: string;
+}
+
+/**
+ * payment-svc 배상 송금 포트(ADR-0317). compensationId가 멱등 키다. 계좌는 이 호출에만 싣고 저장하지 않는다.
+ * UNAVAILABLE이면 CompensationTransferUnavailable을 던진다(503 compensation-transfer-unavailable, Retry-After 5초 [가정])
+ */
+export interface CompensationTransfer {
+  request(q: {
+    readonly compensationId: string;
+    readonly orderId: string;
+    readonly accountId: string;
+    readonly promoterId?: string;
+    readonly eventId?: string;
+    readonly amount: number;
+    readonly account: RefundAccount;
+  }): Promise<CompensationTransferResult>;
+}
+
+/** 송금이 FAILED일 때 CS 처리함 '배상 대기'(COMPENSATION_PENDING) 한 건을 여는 포트. eventKey = compensation:{id} */
+export interface CompensationCaseNotice {
+  open(q: { readonly compensationId: string; readonly orderId: string; readonly nowMs: number }): Promise<void>;
+}
+
+/**
+ * payment-svc 내부 `GET /internal/v1/circuits`의 결제사 서킷 상태를 읽는 포트(BAT-425 GAT-120, transfer-refund §5 '스스로 멈춤' 3).
+ * `open`만 참이다. 10초 [가정] 캐시하고, 읽기 실패는 모든 몫을 거짓으로 둔다(환급을 읽기 장애로 세우지 않는다)
+ */
+export interface PgCircuits {
+  circuitOpen(pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'): boolean;
+}
+
 /** 좌석 Redis 비트맵을 끄고 구역 델타를 내는 포트(취소표 즉시 재판매) */
 export interface SeatReturnNotices {
   returnSold(q: {
@@ -178,10 +278,11 @@ export const REAUTH_GATE = Symbol('purchase.REAUTH_GATE');
 /** 팬 취소가 받는 재인증 작업 묶음(docs/security/authz-matrix.md §6). 본문에 환급 계좌가 있으면 FAN_HIGH_RISK, 없으면 FAN_SENSITIVE */
 export type FanReauthAct = 'FAN_SENSITIVE' | 'FAN_HIGH_RISK';
 /**
- * 팬 취소가 받는 재인증 토큰의 받는 쪽 작업 op(docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293).
- * 본문에 환급 계좌가 없으면 TICKET_CANCEL(FAN_SENSITIVE), 있으면 TICKET_CANCEL_REFUND_ACCOUNT(FAN_HIGH_RISK)
+ * 팬 재인증 토큰의 받는 쪽 작업 op(docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293).
+ * 본문에 환급 계좌가 없으면 TICKET_CANCEL(FAN_SENSITIVE), 있으면 TICKET_CANCEL_REFUND_ACCOUNT(FAN_HIGH_RISK).
+ * 지연 환급 계좌 다시 받기는 REFUND_ACCOUNT, 배상 계좌 입력은 COMPENSATION_ACCOUNT이고 둘 다 FAN_HIGH_RISK다(BAT-425, ADR-0316·0317)
  */
-export type FanReauthOp = 'TICKET_CANCEL' | 'TICKET_CANCEL_REFUND_ACCOUNT';
+export type FanReauthOp = 'TICKET_CANCEL' | 'TICKET_CANCEL_REFUND_ACCOUNT' | 'REFUND_ACCOUNT' | 'COMPENSATION_ACCOUNT';
 
 /** 재인증 토큰을 확인하지 못함(팬 공개키 묶음을 한 번도 받지 못함, jti 저장소 오류). 받는 층은 503 reauth-unavailable로 답한다 */
 export class ReauthUnavailable extends Error {
