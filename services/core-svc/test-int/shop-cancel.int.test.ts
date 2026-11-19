@@ -554,6 +554,10 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(replay.statusCode, replay.payload).toBe(202);
     expect(bodyOf(replay)).toMatchObject({ cancellationId: bodyOf(first).cancellationId, refundAmount: 26_000, status: 'REFUNDED' });
     expect(payments.cancels).toHaveLength(1);
+    // 같은 키 재요청은 새 환급 행을 만들지 않는다(M-26)
+    expect(await refundsOf(o.orderId)).toHaveLength(1);
+    expect((await refundsOf(o.orderId))[0]!.id).toBe(bodyOf(first).cancellationId);
+    expect(await refundItemsOf(o.orderId)).toHaveLength(1);
 
     // 동시 두 요청(서로 다른 키, 같은 주문): 첫 요청이 결제사 취소에서 기다리는 사이 두 번째를 보내면
     // merch_refund_item 부분 유일이 두 번째를 409로 막고, 첫 요청만 환급한다
@@ -569,6 +573,7 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     payments.cancelGate = { started, wait: gate };
     const firstConcurrent = cancelOrder(other.accountId, other.orderId, {});
     const firstId = await called;
+    const callsBeforeSecond = payments.cancels.length;
     let second: Awaited<ReturnType<typeof cancelOrder>>;
     let firstResult: Awaited<typeof firstConcurrent>;
     try {
@@ -576,6 +581,8 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
       // 두 번째는 부분 유일(merch_refund_item)을 업무 409로 바꾼 답이어야 한다
       expect(second.statusCode, second.payload).toBe(409);
       expect(problem(second).type).toContain('merch-cancel-not-allowed');
+      // 두 번째는 결제사 앞에서 막혔다(부분 유일·주문 잠금). 결제사 호출 수가 늘지 않는다(M-48)
+      expect(payments.cancels, '두 번째 요청은 결제사에 닿지 않는다').toHaveLength(callsBeforeSecond);
       expect(await refundsOf(other.orderId)).toHaveLength(1);
       expect(await refundItemsOf(other.orderId)).toHaveLength(1);
     } finally {
@@ -783,6 +790,47 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     }
   });
 
+  test('M-43 재시도 5회 소진과 결제사 REJECTED 뒤에는 결제사를 더 부르지 않는다', async () => {
+    const p = await seedProduct({ fulfillments: ['PICKUP'], price: 26_000 });
+    const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 26_000 }] });
+    payments.cancelAnswers = ['CANCEL_PENDING', 'CANCEL_PENDING', 'CANCEL_PENDING', 'CANCEL_PENDING', 'CANCEL_PENDING', 'CANCEL_PENDING'];
+    const first = await cancelOrder(o.accountId, o.orderId, {});
+    expect(first.statusCode, first.payload).toBe(202);
+    expect(bodyOf(first).status).toBe('REFUND_PENDING');
+    const initialCalls = payments.cancels.length;
+    const retry = new MerchRefundRetry({ store: new DrizzleShopOrderStore(appDb, clock), payments, clock });
+    // 1분 → 5분 → 15분 → 1시간 → 6시간. 다섯 번째 재시도에서 5회를 채워 REJECTED(RETRY_EXHAUSTED)로 끝난다
+    for (const [i, interval] of [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 360 * 60_000].entries()) {
+      clock.advance(interval);
+      const tick = await retry.tick();
+      expect(tick.picked, `재시도 ${i + 1}`).toBe(1);
+      if (i < 4) expect(tick.pending, `재시도 ${i + 1}`).toBe(1);
+      else expect(tick.rejected, `재시도 ${i + 1}`).toBe(1);
+    }
+    expect(payments.cancels).toHaveLength(initialCalls + 5);
+    expect(await refundsOf(o.orderId)).toMatchObject([{ status: 'REJECTED', failReason: 'RETRY_EXHAUSTED', attempts: 5 }]);
+    expect((await itemsOf(o.orderId))[0]!.status).toBe('READY');
+    // 소진 뒤에는 다음 시각이 없어 6회째에도 결제사를 부르지 않는다
+    const callsAfterExhaustion = payments.cancels.length;
+    clock.advance(1);
+    expect(await retry.tick()).toEqual({ picked: 0, cancelled: 0, pending: 0, rejected: 0 });
+    expect(payments.cancels).toHaveLength(callsAfterExhaustion);
+
+    // 결제사 REJECTED도 종결이다. 그 뒤 재시도는 0건이고 호출이 늘지 않는다
+    const p2 = await seedProduct({ fulfillments: ['PICKUP'], price: 27_000 });
+    const o2 = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p2, quantity: 1, unitAmount: 27_000 }] });
+    payments.cancelAnswers = ['CANCEL_PENDING', 'REJECTED'];
+    const second = await cancelOrder(o2.accountId, o2.orderId, {});
+    expect(second.statusCode, second.payload).toBe(202);
+    clock.advance(60_000);
+    expect(await retry.tick()).toMatchObject({ picked: 1, rejected: 1 });
+    const callsAfterRejected = payments.cancels.filter((c) => c.paymentId === o2.paymentId).length;
+    expect(callsAfterRejected).toBe(2);
+    clock.advance(1);
+    expect(await retry.tick()).toEqual({ picked: 0, cancelled: 0, pending: 0, rejected: 0 });
+    expect(payments.cancels.filter((c) => c.paymentId === o2.paymentId)).toHaveLength(callsAfterRejected);
+  });
+
   test('P-T64 ③ 계좌 거절은 422·merch_refund REJECTED·항목 그대로·결제사 1건이고, 같은 키는 같은 422, 새 키는 새 취소 ID로 1건 더다', async () => {
     const p = await seedProduct({ fulfillments: ['PICKUP'], price: 19_000 });
     const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 19_000 }] });
@@ -851,6 +899,35 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     expect(await retry.tick()).toMatchObject({ picked: 1, cancelled: 1 });
     expect(await refundsOf(o.orderId)).toMatchObject([{ id: payments.cancels[0]!.cancellationId, status: 'CANCELLED' }]);
     expect((await itemsOf(o.orderId))[0]).toMatchObject({ status: 'REFUNDED', refundedAmount: 21_000 });
+  });
+
+  test('M-47 취소 행·merch_refund_item만 커밋된 채 멈춰도 재시도가 같은 취소 ID로 끝내고 이중 환급 0건이다', async () => {
+    const p = await seedProduct({ fulfillments: ['PICKUP'], price: 25_000 });
+    const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 25_000 }] });
+    const store = new DrizzleShopOrderStore(appDb, clock);
+    const refundId = randomUUID();
+    const created = await store.createCancellation(once(o.accountId), {
+      refundId,
+      orderId: o.orderId,
+      accountId: o.accountId,
+      itemIds: [o.itemIds[0]!],
+      nowMs: clock.now(),
+    });
+    expect(created.kind).toBe('created');
+    // 취소 행과 항목 자리는 커밋됐고, 결제사 취소·항목 전이는 아직 없다
+    expect(await refundsOf(o.orderId)).toMatchObject([{ id: refundId, status: 'REQUESTED' }]);
+    expect(await refundItemsOf(o.orderId)).toHaveLength(1);
+    expect((await itemsOf(o.orderId))[0]!.status).toBe('READY');
+    expect(payments.cancels).toHaveLength(0);
+
+    const retry = new MerchRefundRetry({ store, payments, clock });
+    clock.advance(60_000);
+    expect(await retry.tick()).toMatchObject({ picked: 1, cancelled: 1 });
+    expect(payments.cancels).toHaveLength(1);
+    expect(payments.cancels[0]!.cancellationId).toBe(refundId);
+    expect(await refundsOf(o.orderId)).toMatchObject([{ id: refundId, status: 'CANCELLED' }]);
+    expect((await itemsOf(o.orderId))[0]!.status).toBe('REFUNDED');
+    expect(await refundItemsOf(o.orderId)).toHaveLength(1);
   });
 
   test('P-T64 ④ 결제사 취소 커밋 뒤 환급 반영이 실패해도 다음 재시도가 같은 취소 ID로 끝내고 이중 환급은 0건이다', async () => {

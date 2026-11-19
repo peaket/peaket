@@ -585,6 +585,44 @@ describe('굿즈 재고 예약 만료(실제 PostgreSQL·Valkey)', () => {
     expect(await counter(p.productId)).toBe('2');
   });
 
+  test('M-14 만료 문장은 주문 행을 잠근 트랜잭션을 기다린다(구매자 취소가 잠근 동안 만료 0건)', async () => {
+    const clock = fakeClock({ now: T0 });
+    const w = world(clock);
+    const p = await limitedProduct(T0);
+    const a = A();
+    const o = await order(w, a, p);
+    clock.advance(60_000);
+    await startPayment(w, a, o);
+    clock.advance(60_000);
+    await accept(w, a, o);
+    const depositDueAt = clock.now() + 3 * 3_600_000;
+    w.payments.states.set(o, { orderId: o, paymentId: randomUUID(), pg: 'SIMULATOR', status: 'AWAITING_DEPOSIT', approvedAtMs: undefined, failureCategory: undefined, depositDueAtMs: depositDueAt });
+    const results = new MerchPaymentResults({ store: w.store, stock, payments: w.payments, clock });
+    clock.advance(2_000);
+    await results.tick();
+    expect((await orderRow(o))!.status).toBe('AWAITING_DEPOSIT');
+    clock.advance(depositDueAt + 10 * 60_000 - clock.now());
+    const expiry = new MerchStockExpiry({ store: w.store, stock, clock });
+    // 구매자 취소가 주문 행을 잡고 있는 동안 만료를 돌린다
+    const lock = await holdOrderRow(o);
+    let released = false;
+    let tick: Awaited<ReturnType<MerchStockExpiry['tick']>> | undefined;
+    try {
+      const expiring = expiry.tick();
+      await waitForLockWaiters(1);
+      expect((await orderRow(o))!.status).toBe('AWAITING_DEPOSIT');
+      await lock.release();
+      released = true;
+      tick = await expiring;
+    } finally {
+      if (!released) await lock.release().catch(() => {});
+    }
+    expect(tick!.expired).toBe(1);
+    expect((await orderRow(o))!.status).toBe('EXPIRED');
+    expect(await productStock(p.productId)).toBe(LIMITED);
+    expect(await counter(p.productId)).toBe(String(LIMITED));
+  });
+
   test('RV-29 미수령 자동 취소가 아직 커밋되지 않은 구매자 취소와 겹쳐도 이중 환급 0건이다', async () => {
     const clock = fakeClock({ now: T0 });
     const w = world(clock);
