@@ -7,8 +7,11 @@ import type {
   AcceptOutcome,
   AddonItemRow,
   CancelOutcome,
+  CancelRowView,
   ConfirmJob,
   NewAttempt,
+  NewCancellation,
+  NewReturn,
   NewShopOrder,
   RebuildReservation,
   RefundRow,
@@ -19,16 +22,21 @@ import {
   acceptBlocker,
   attemptStartBlocker,
   type AcceptBody,
+  depositDeadlineMs,
   type LimitedLine,
   type MerchAttempt,
+  merchCancelNotAllowed,
   type OrderableProduct,
   type OrderState,
   orderNotFound,
   type PaymentRef,
   type PickupSlotRecord,
+  REFUND_RETRY_DELAYS_MIN,
   REFUND_RETRY_MS,
   type ReleasedOrder,
   reservedUntilAfterAccept,
+  resolveCancelItems,
+  resolveReturnItems,
   type ShopOrder,
   type ShopOrderDetail,
   type ShopOrderItem,
@@ -42,7 +50,14 @@ interface JobRow extends ConfirmJob {
 }
 interface RefundState extends RefundRow {
   itemIds: string[];
-  nextAtMs: number | null;
+  failReason: string | null;
+  resolvedAtMs: number | null;
+}
+/** 항목 하나에 진행 중인 환급 하나(merch_refund_item) */
+interface RefundItemState {
+  refundId: string;
+  itemId: string;
+  resolvedAtMs: number | null;
 }
 
 export class MemoryShopOrderStore implements ShopOrderStore {
@@ -51,10 +66,14 @@ export class MemoryShopOrderStore implements ShopOrderStore {
   readonly attempts = new Map<string, MerchAttempt>();
   readonly jobs = new Map<string, JobRow>();
   readonly refunds = new Map<string, RefundState>();
+  /** 진행 중·끝난 항목 환급 자리. 키 `${refundId}|${itemId}` */
+  readonly refundItems = new Map<string, RefundItemState>();
   readonly slots = new Map<string, PickupSlotRecord>();
   readonly idempotency = new Map<string, { hash: Buffer; resultRef: string }>();
   /** 회차 → 끝 시각(시험이 넣는다) */
   readonly eventEnds = new Map<string, Date>();
+  /** 회차 → 입장 시작 시각(시험이 넣는다) */
+  readonly eventEntries = new Map<string, Date>();
   /** 쓰기 횟수(시험이 '바뀐 행 없음'을 본다) */
   writes = 0;
 
@@ -138,6 +157,10 @@ export class MemoryShopOrderStore implements ShopOrderStore {
 
   async eventEndsAt(eventId: string): Promise<Date | null> {
     return this.eventEnds.get(eventId) ?? null;
+  }
+
+  async eventEntryOpensAt(eventId: string): Promise<Date | null> {
+    return this.eventEntries.get(eventId) ?? null;
   }
 
   async pickupSlotsOf(productIds: readonly string[]): Promise<PickupSlotRecord[]> {
@@ -256,7 +279,7 @@ export class MemoryShopOrderStore implements ShopOrderStore {
     attempt.acceptedAt = new Date(i.nowMs);
     order.pg = attempt.pg;
     order.stockReservedUntil = reservedUntilAfterAccept(order.stockReservedUntil, i.nowMs);
-    const job: ConfirmJob = { orderId: i.orderId, attemptId: attempt.attemptId, attemptNo: attempt.attemptNo, pg: attempt.pg, ref: i.ref, amount: order.amount, authenticatedAtMs: i.nowMs, sent: false, tries: 0 };
+    const job: ConfirmJob = { orderId: i.orderId, attemptId: attempt.attemptId, attemptNo: attempt.attemptNo, pg: attempt.pg, pgStore: order.pgStore, ref: i.ref, amount: order.amount, authenticatedAtMs: i.nowMs, sent: false, tries: 0 };
     this.jobs.set(i.orderId, { ...job, nextAtMs: i.nowMs });
     this.#remember(once, 'accepted');
     return { kind: 'accepted', job, limited, reservedUntil: order.stockReservedUntil };
@@ -287,7 +310,7 @@ export class MemoryShopOrderStore implements ShopOrderStore {
   async applyPaid(orderId: string, r: { paymentId: string; pg: ShopPg | undefined; approvedAtMs: number }): Promise<ReleasedOrder | undefined> {
     this.jobs.delete(orderId);
     const o = this.orders.get(orderId);
-    if (!o || o.status !== 'CREATED') return undefined;
+    if (!o || (o.status !== 'CREATED' && o.status !== 'AWAITING_DEPOSIT')) return undefined;
     o.status = 'PAID';
     o.paymentId = r.paymentId;
     o.paidAt = new Date(r.approvedAtMs);
@@ -299,16 +322,52 @@ export class MemoryShopOrderStore implements ShopOrderStore {
   async applyFailed(orderId: string, _nowMs: number): Promise<ReleasedOrder | undefined> {
     this.jobs.delete(orderId);
     const o = this.orders.get(orderId);
-    if (!o || o.status !== 'CREATED') return undefined;
+    if (!o || (o.status !== 'CREATED' && o.status !== 'AWAITING_DEPOSIT')) return undefined;
     const accepted = this.#accepted(orderId);
-    o.status = 'FAILED';
-    for (const a of this.#attemptsOf(orderId)) if (a.status === 'READY' || a.status === 'ACCEPTED') a.status = 'FAILED';
+    const from = o.status;
+    o.status = from === 'AWAITING_DEPOSIT' ? 'EXPIRED' : 'FAILED';
+    for (const a of this.#attemptsOf(orderId)) if (a.status === 'READY' || a.status === 'ACCEPTED') a.status = from === 'AWAITING_DEPOSIT' ? 'EXPIRED' : 'FAILED';
     const limited = this.#limitedOf(orderId);
     if (accepted)
       for (const l of limited) {
         const p = this.#product(l.productId)!;
         p.stock = (p.stock ?? 0) + l.quantity;
       }
+    this.writes++;
+    return { orderId, accountId: o.accountId, limited };
+  }
+
+  async applyAwaitingDeposit(orderId: string, x: { paymentId: string; pg: ShopPg | undefined; depositDueAtMs: number | undefined; nowMs: number }): Promise<{ orderId: string; accountId: string; deadline: Date; limited: LimitedLine[] } | undefined> {
+    const o = this.orders.get(orderId);
+    if (!o || o.status !== 'CREATED') return undefined;
+    o.status = 'AWAITING_DEPOSIT';
+    o.paymentId = x.paymentId;
+    if (x.pg) o.pg = x.pg;
+    const deadline = new Date(depositDeadlineMs(x.depositDueAtMs, x.nowMs));
+    o.stockReservedUntil = deadline;
+    this.writes++;
+    return { orderId, accountId: o.accountId, deadline, limited: this.#limitedOf(orderId) };
+  }
+
+  async dueDepositOrders(nowMs: number, limit: number): Promise<string[]> {
+    return [...this.orders.values()]
+      .filter((o) => o.status === 'AWAITING_DEPOSIT' && o.stockReservedUntil.getTime() <= nowMs)
+      .sort((a, b) => a.stockReservedUntil.getTime() - b.stockReservedUntil.getTime())
+      .slice(0, limit)
+      .map((o) => o.orderId);
+  }
+
+  async expireDeposit(orderId: string, _nowMs: number): Promise<ReleasedOrder | undefined> {
+    const o = this.orders.get(orderId);
+    if (!o || o.status !== 'AWAITING_DEPOSIT') return undefined;
+    o.status = 'EXPIRED';
+    this.jobs.delete(orderId);
+    for (const a of this.#attemptsOf(orderId)) if (a.status === 'READY' || a.status === 'ACCEPTED') a.status = 'EXPIRED';
+    const limited = this.#limitedOf(orderId);
+    for (const l of limited) {
+      const p = this.#product(l.productId)!;
+      p.stock = (p.stock ?? 0) + l.quantity;
+    }
     this.writes++;
     return { orderId, accountId: o.accountId, limited };
   }
@@ -365,44 +424,148 @@ export class MemoryShopOrderStore implements ShopOrderStore {
       status: 'REQUESTED',
       createdAtMs: nowMs,
       alerted: false,
-      itemIds: changed.map((i) => i.itemId),
+      kind: 'UNCLAIMED',
+      attempts: 0,
       nextAtMs: nowMs + REFUND_RETRY_MS,
+      accountRequiredAtMs: null,
+      itemIds: changed.map((i) => i.itemId),
+      failReason: null,
+      resolvedAtMs: null,
     };
     this.refunds.set(refundId, row);
     this.writes++;
-    const { itemIds: _i, nextAtMs: _n, ...out } = row;
+    const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
     return { ...out };
   }
 
   async dueRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
     return [...this.refunds.values()]
-      .filter((r) => (r.status === 'REQUESTED' || r.status === 'CANCEL_PENDING') && r.nextAtMs !== null && r.nextAtMs <= nowMs)
+      .filter((r) => r.kind === 'UNCLAIMED' && (r.status === 'REQUESTED' || r.status === 'CANCEL_PENDING') && r.nextAtMs !== null && r.nextAtMs <= nowMs)
       .sort((a, b) => (a.nextAtMs ?? 0) - (b.nextAtMs ?? 0))
       .slice(0, limit)
-      .map(({ itemIds: _i, nextAtMs: _n, ...r }) => ({ ...r }));
+      .map(({ itemIds: _i, failReason: _f, resolvedAtMs: _r, ...r }) => ({ ...r }));
   }
 
-  async refundResult(refundId: string, outcome: CancelOutcome, nowMs: number, o: { alerted?: boolean } = {}): Promise<void> {
+  async dueUserRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
+    return [...this.refunds.values()]
+      .filter((r) => r.kind !== 'UNCLAIMED' && (r.status === 'REQUESTED' || r.status === 'CANCEL_PENDING') && r.accountRequiredAtMs === null && r.nextAtMs !== null && r.nextAtMs <= nowMs)
+      .sort((a, b) => (a.nextAtMs ?? 0) - (b.nextAtMs ?? 0))
+      .slice(0, limit)
+      .map(({ itemIds: _i, failReason: _f, resolvedAtMs: _r, ...r }) => ({ ...r }));
+  }
+
+  async refundResult(
+    refundId: string,
+    outcome: CancelOutcome,
+    nowMs: number,
+    o: { alerted?: boolean; attempts?: number; nextAtMs?: number | null; failReason?: string; accountRequiredAtMs?: number } = {},
+  ): Promise<void> {
     const r = this.refunds.get(refundId);
     if (!r || r.status === 'CANCELLED' || r.status === 'REJECTED') return;
     if (o.alerted !== undefined) r.alerted = o.alerted;
+    if (o.attempts !== undefined) r.attempts = o.attempts;
     if (outcome === 'CANCELLED') {
       for (const id of r.itemIds) {
         const i = this.items.get(id);
-        if (i && i.status === 'CANCELLED') {
+        if (!i) continue;
+        if (r.kind === 'UNCLAIMED' && i.status === 'CANCELLED') {
           i.status = 'REFUNDED';
+          i.refundedAmount = i.quantity * i.unitAmount;
+        } else if (r.kind !== 'UNCLAIMED' && i.status === 'READY') {
+          i.status = 'CANCELLED';
+          i.cancelReason = 'USER_CANCEL';
+          i.refundedAmount = i.quantity * i.unitAmount;
+        } else if (r.kind !== 'UNCLAIMED' && i.status === 'CANCELLED') {
           i.refundedAmount = i.quantity * i.unitAmount;
         }
       }
       r.status = 'CANCELLED';
       r.nextAtMs = null;
-    } else if (outcome === 'REJECTED') {
+      r.failReason = null;
+      r.resolvedAtMs = nowMs;
+      for (const c of this.refundItems.values()) if (c.refundId === refundId) c.resolvedAtMs = nowMs;
+    } else if (outcome === 'REJECTED' || outcome === 'REFUND_ACCOUNT_REQUIRED') {
       r.status = 'REJECTED';
       r.nextAtMs = null;
+      r.failReason = o.failReason ?? (outcome === 'REFUND_ACCOUNT_REQUIRED' ? 'REFUND_ACCOUNT_REQUIRED' : 'PG_REJECTED');
+      if (outcome === 'REFUND_ACCOUNT_REQUIRED') r.accountRequiredAtMs = o.accountRequiredAtMs ?? nowMs;
+      r.resolvedAtMs = nowMs;
+      for (const c of this.refundItems.values()) if (c.refundId === refundId) c.resolvedAtMs = nowMs;
     } else {
+      if (r.kind !== 'UNCLAIMED') {
+        for (const id of r.itemIds) {
+          const i = this.items.get(id);
+          if (i && i.status === 'READY') {
+            i.status = 'CANCELLED';
+            i.cancelReason = 'USER_CANCEL';
+          }
+        }
+      }
       r.status = 'CANCEL_PENDING';
-      r.nextAtMs = nowMs + REFUND_RETRY_MS;
+      r.nextAtMs = o.nextAtMs === undefined ? nowMs + REFUND_RETRY_MS : o.nextAtMs;
     }
+  }
+
+  async createCancellation(once: IdempotencyRequest, i: NewCancellation): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }> {
+    const seen = this.#seen(once);
+    if (seen !== undefined) return { kind: 'replay', resultRef: seen };
+    const detail = this.#owned(i.orderId, i.accountId);
+    const selection = resolveCancelItems(detail, i.itemIds, i.entryOpensAtMs, i.nowMs);
+    for (const item of selection.items) {
+      if ([...this.refundItems.values()].some((c) => c.itemId === item.itemId && c.resolvedAtMs === null)) throw merchCancelNotAllowed();
+    }
+    const row: RefundState = {
+      refundId: i.refundId,
+      orderId: i.orderId,
+      paymentId: detail.order.paymentId,
+      amount: selection.amount,
+      reason: 'USER_CANCEL',
+      status: 'REQUESTED',
+      createdAtMs: i.nowMs,
+      alerted: false,
+      kind: 'USER_CANCEL',
+      attempts: 0,
+      nextAtMs: i.nowMs + REFUND_RETRY_DELAYS_MIN[0] * 60_000,
+      accountRequiredAtMs: null,
+      itemIds: selection.items.map((x) => x.itemId),
+      failReason: null,
+      resolvedAtMs: null,
+    };
+    this.refunds.set(i.refundId, row);
+    for (const id of row.itemIds) this.refundItems.set(`${i.refundId}|${id}`, { refundId: i.refundId, itemId: id, resolvedAtMs: null });
+    this.#remember(once, `cancel:${i.refundId}`);
+    this.writes++;
+    const { itemIds: _i, failReason: _f, resolvedAtMs: _r, ...out } = row;
+    return { kind: 'created', refund: { ...out } };
+  }
+
+  async cancelView(refundId: string): Promise<CancelRowView | undefined> {
+    const r = this.refunds.get(refundId);
+    if (!r) return undefined;
+    return {
+      cancellationId: refundId,
+      status: 'REFUND_PENDING',
+      refundAmount: r.amount,
+      refundAccountRequired: r.accountRequiredAtMs !== null,
+      state: r.status === 'CANCELLED' ? 'CANCELLED' : r.status === 'REJECTED' ? 'REJECTED' : r.status === 'REQUESTED' ? 'REQUESTED' : 'PENDING',
+    };
+  }
+
+  async applyReturn(once: IdempotencyRequest, i: NewReturn): Promise<{ kind: 'created'; orderId: string } | { kind: 'replay'; resultRef: string }> {
+    const seen = this.#seen(once);
+    if (seen !== undefined) return { kind: 'replay', resultRef: seen };
+    const detail = this.#owned(i.orderId, i.accountId);
+    const selected = resolveReturnItems(detail, i.itemIds, i.reason, i.entryOpensAtMs, i.nowMs);
+    for (const item of selected) {
+      const stored = this.items.get(item.itemId)!;
+      stored.status = 'RETURN_REQUESTED';
+      stored.returnReason = i.reason;
+      stored.returnTrackingNo = i.returnTrackingNo ?? null;
+      stored.returnRequestedAt = new Date(i.nowMs);
+    }
+    this.#remember(once, `return:${i.orderId}`);
+    this.writes++;
+    return { kind: 'created', orderId: i.orderId };
   }
 
   async productAttributesPage(afterId: string | undefined, limit: number): Promise<{ productId: string; type: string; schemaVersion: number; attributes: unknown }[]> {

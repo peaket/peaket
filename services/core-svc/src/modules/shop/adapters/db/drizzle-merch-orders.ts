@@ -9,8 +9,11 @@ import type {
   AcceptOutcome,
   AddonItemRow,
   CancelOutcome,
+  CancelRowView,
   ConfirmJob,
   NewAttempt,
+  NewCancellation,
+  NewReturn,
   NewShopOrder,
   RebuildReservation,
   RefundRow,
@@ -21,16 +24,23 @@ import {
   acceptBlocker,
   attemptStartBlocker,
   type AcceptBody,
+  depositDeadlineMs,
   type LimitedLine,
   type MerchAttempt,
+  merchCancelNotAllowed,
+  merchReturnNotAllowed,
   type OrderableProduct,
   type OrderState,
   orderNotFound,
   type PaymentRef,
   type PickupSlotRecord,
+  REFUND_RETRY_DELAYS_MIN,
+  REFUND_RETRY_MAX,
   REFUND_RETRY_MS,
   type ReleasedOrder,
   reservedUntilAfterAccept,
+  resolveCancelItems,
+  resolveReturnItems,
   type ShopOrder,
   type ShopOrderDetail,
   type ShopOrderItem,
@@ -92,6 +102,14 @@ function itemOf(r: Row): ShopOrderItem {
     refundedAmount: n(r.refunded_amount ?? 0),
     pickedUpAt: d(r.picked_up_at),
     eventEndsAt: d(r.event_ends_at),
+    shippedAt: d(r.shipped_at),
+    deliveredAt: d(r.delivered_at),
+    returnRequestedAt: d(r.return_requested_at),
+    returnReason: (r.return_reason as string | null) ?? null,
+    returnTrackingNo: (r.return_tracking_no as string | null) ?? null,
+    returnReceivedAt: d(r.return_received_at),
+    rejectReason: (r.reject_reason as string | null) ?? null,
+    trackingNo: (r.tracking_no as string | null) ?? null,
   };
 }
 
@@ -118,6 +136,7 @@ function jobOf(r: Row): ConfirmJob {
     attemptId: String(r.attempt_id),
     attemptNo: n(r.attempt_no),
     pg: r.pg as ShopPg,
+    pgStore: (r.pg_store as ConfirmJob['pgStore'] | undefined) ?? 'STANDARD',
     ref: refOf(r.payment_ref as Record<string, string>),
     amount: n(r.amount),
     authenticatedAtMs: d(r.authenticated_at)!.getTime(),
@@ -136,6 +155,10 @@ function refundOf(r: Row): RefundRow {
     status: r.status as RefundRow['status'],
     createdAtMs: d(r.created_at)!.getTime(),
     alerted: r.alerted === true,
+    kind: (r.kind as RefundRow['kind'] | undefined) ?? 'UNCLAIMED',
+    attempts: n(r.attempts ?? 0),
+    nextAtMs: d(r.next_at)?.getTime() ?? null,
+    accountRequiredAtMs: d(r.account_required_at)?.getTime() ?? null,
   };
 }
 
@@ -224,6 +247,12 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
     if (!UUID.test(eventId)) return null;
     const r = rowsOf(await this.db.db.execute(sql`select ends_at from event where id = ${eventId}`));
     return r[0] ? d(r[0].ends_at) : null;
+  }
+
+  async eventEntryOpensAt(eventId: string): Promise<Date | null> {
+    if (!UUID.test(eventId)) return null;
+    const r = rowsOf(await this.db.db.execute(sql`select coalesce(entry_opens_at, starts_at) as at from event where id = ${eventId}`));
+    return r[0] ? d(r[0].at) : null;
   }
 
   async pickupSlotsOf(productIds: readonly string[]): Promise<PickupSlotRecord[]> {
@@ -413,14 +442,17 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
   }
 
   /** 주문 행을 FOR UPDATE로 잠그고 시도까지 읽는다. 없거나 남의 주문이면 404 */
-  async #lockedDetail(tx: DbTransaction, orderId: string, accountId: string): Promise<ShopOrderDetail> {
+  async #lockedDetail(tx: DbTransaction, orderId: string, accountId: string, withItems = false): Promise<ShopOrderDetail> {
     if (!UUID.test(orderId)) throw orderNotFound();
     const o = rowsOf(await tx.execute(sql`select * from merch_order where id = ${orderId} for update`));
     if (!o[0] || o[0].account_id !== accountId) throw orderNotFound();
     const attempts = rowsOf(await tx.execute(sql`select * from merch_payment_attempt where order_id = ${orderId} order by attempt_no`)).map(attemptOf);
+    const items = withItems
+      ? rowsOf(await tx.execute(sql`select i.*, (p.limited_qty is not null) as limited from merch_order_item i left join product p on p.id = i.product_id where i.order_id = ${orderId} order by i.id`)).map(itemOf)
+      : [];
     return {
       order: orderOf(o[0]),
-      items: [],
+      items,
       activeAttempt: attempts.find((x) => x.status === 'ACCEPTED') ?? attempts.find((x) => x.status === 'READY'),
       attemptCount: attempts.length,
       pickupWindow: null,
@@ -460,6 +492,7 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
           attemptId: attempt.attemptId,
           attemptNo: attempt.attemptNo,
           pg: attempt.pg,
+          pgStore: detail.order.pgStore,
           ref: i.ref,
           amount: detail.order.amount,
           authenticatedAtMs: i.nowMs,
@@ -492,9 +525,10 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
       const r = rowsOf(
         await tx.execute(sql`
           update merch_confirm_job j set next_at = ${new Date(leaseUntilMs)}
-          from (select order_id from merch_confirm_job where next_at <= ${new Date(nowMs)} order by next_at limit ${limit} for update skip locked) due
+          from (select k.order_id, o.pg_store from merch_confirm_job k join merch_order o on o.id = k.order_id
+                 where k.next_at <= ${new Date(nowMs)} order by k.next_at limit ${limit} for update of k skip locked) due
           where j.order_id = due.order_id
-          returning j.*`),
+          returning j.*, due.pg_store`),
       );
       return r.map(jobOf);
     });
@@ -506,7 +540,7 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
       const changed = rowsOf(
         await tx.execute(sql`
           update merch_order set status = 'PAID', payment_id = ${x.paymentId}, paid_at = ${new Date(x.approvedAtMs)} ${x.pg ? sql`, pg = ${x.pg}` : sql``}
-          where id = ${orderId} and status = 'CREATED' returning id, account_id`),
+          where id = ${orderId} and status in ('CREATED', 'AWAITING_DEPOSIT') returning id, account_id`),
       );
       await tx.execute(sql`delete from merch_confirm_job where order_id = ${orderId}`);
       if (!changed[0]) return undefined;
@@ -514,17 +548,59 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
     });
   }
 
+  /**
+   * 결과 실패 반영. CREATED면 FAILED(O6), 입금 대기면 EXPIRED(입금 기한 + 10분 경과, T17과 같은 끝).
+   * 접수한 주문이면 product_stock을 되돌린다(ASVS 2.3.3)
+   */
   async applyFailed(orderId: string, nowMs: number): Promise<ReleasedOrder | undefined> {
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql`select id from merch_order where id = ${orderId} for update`);
+      const locked = rowsOf(await tx.execute(sql`select status, account_id from merch_order where id = ${orderId} for update`))[0];
+      if (!locked) return undefined;
+      const from = String(locked.status);
+      if (from !== 'CREATED' && from !== 'AWAITING_DEPOSIT') return undefined;
       const accepted = rowsOf(await tx.execute(sql`select 1 from merch_payment_attempt where order_id = ${orderId} and status = 'ACCEPTED'`)).length > 0;
-      const changed = rowsOf(await tx.execute(sql`update merch_order set status = 'FAILED' where id = ${orderId} and status = 'CREATED' returning id, account_id`));
+      const to = from === 'AWAITING_DEPOSIT' ? 'EXPIRED' : 'FAILED';
+      const changed = rowsOf(await tx.execute(sql`update merch_order set status = ${to} where id = ${orderId} and status = ${from} returning id, account_id`));
       await tx.execute(sql`delete from merch_confirm_job where order_id = ${orderId}`);
       if (!changed[0]) return undefined;
-      await tx.execute(sql`update merch_payment_attempt set status = 'FAILED' where order_id = ${orderId} and status in ('READY', 'ACCEPTED')`);
+      await tx.execute(sql`update merch_payment_attempt set status = ${from === 'AWAITING_DEPOSIT' ? 'EXPIRED' : 'FAILED'} where order_id = ${orderId} and status in ('READY', 'ACCEPTED')`);
       const limited = await limitedOf(tx, orderId);
-      // 접수 때 깎은 product_stock을 같은 트랜잭션에서 돌린다(ASVS 2.3.3)
+      // 접수 때 깎은 product_stock을 같은 트랜잭션에서 되돌린다(ASVS 2.3.3)
       if (accepted) for (const l of limited) await tx.execute(sql`update product_stock set stock = stock + ${l.quantity}, updated_at = ${new Date(nowMs)} where product_id = ${l.productId}`);
+      return { orderId, accountId: String(changed[0].account_id ?? ''), limited };
+    });
+  }
+
+  async applyAwaitingDeposit(orderId: string, x: { paymentId: string; pg: ShopPg | undefined; depositDueAtMs: number | undefined; nowMs: number }): Promise<{ orderId: string; accountId: string; deadline: Date; limited: LimitedLine[] } | undefined> {
+    const deadline = new Date(depositDeadlineMs(x.depositDueAtMs, x.nowMs));
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select id from merch_order where id = ${orderId} for update`);
+      const changed = rowsOf(
+        await tx.execute(sql`
+          update merch_order set status = 'AWAITING_DEPOSIT', payment_id = ${x.paymentId}, stock_reserved_until = ${deadline} ${x.pg ? sql`, pg = ${x.pg}` : sql``}
+          where id = ${orderId} and status = 'CREATED' returning id, account_id`),
+      );
+      if (!changed[0]) return undefined;
+      return { orderId, accountId: String(changed[0].account_id ?? ''), deadline, limited: await limitedOf(tx, orderId) };
+    });
+  }
+
+  async dueDepositOrders(nowMs: number, limit: number): Promise<string[]> {
+    const r = await this.db.db.execute(sql`
+      select id from merch_order where status = 'AWAITING_DEPOSIT' and stock_reserved_until <= ${new Date(nowMs)}
+      order by stock_reserved_until limit ${limit}`);
+    return rowsOf(r).map((x) => String(x.id));
+  }
+
+  async expireDeposit(orderId: string, nowMs: number): Promise<ReleasedOrder | undefined> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select id from merch_order where id = ${orderId} for update`);
+      const changed = rowsOf(await tx.execute(sql`update merch_order set status = 'EXPIRED' where id = ${orderId} and status = 'AWAITING_DEPOSIT' returning id, account_id`));
+      if (!changed[0]) return undefined;
+      await tx.execute(sql`delete from merch_confirm_job where order_id = ${orderId}`);
+      await tx.execute(sql`update merch_payment_attempt set status = 'EXPIRED' where order_id = ${orderId} and status in ('READY', 'ACCEPTED')`);
+      const limited = await limitedOf(tx, orderId);
+      for (const l of limited) await tx.execute(sql`update product_stock set stock = stock + ${l.quantity}, updated_at = ${new Date(nowMs)} where product_id = ${l.productId}`);
       return { orderId, accountId: String(changed[0].account_id ?? ''), limited };
     });
   }
@@ -588,37 +664,142 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
       const amount = changed.reduce((s, x) => s + n(x.quantity) * n(x.unit_amount), 0);
       const ids = changed.map((x) => String(x.id));
       await tx.execute(sql`
-        insert into merch_refund (id, order_id, item_ids, amount, reason, status, next_at, alerted, created_at, updated_at)
-        values (${refundId}, ${orderId}, ${sql.param(ids)}::uuid[], ${amount}, ${UNCLAIMED_REASON}, 'REQUESTED', ${new Date(nowMs + REFUND_RETRY_MS)}, false, ${now}, ${now})`);
+        insert into merch_refund (id, order_id, item_ids, amount, reason, status, kind, attempts, next_at, alerted, created_at, updated_at)
+        values (${refundId}, ${orderId}, ${sql.param(ids)}::uuid[], ${amount}, ${UNCLAIMED_REASON}, 'REQUESTED', 'UNCLAIMED', 0, ${new Date(nowMs + REFUND_RETRY_MS)}, false, ${now}, ${now})`);
       const p = rowsOf(await tx.execute(sql`select payment_id from merch_order where id = ${orderId}`));
-      return { refundId, orderId, paymentId: (p[0]?.payment_id as string | null) ?? null, amount, reason: UNCLAIMED_REASON, status: 'REQUESTED', createdAtMs: nowMs, alerted: false };
+      return { refundId, orderId, paymentId: (p[0]?.payment_id as string | null) ?? null, amount, reason: UNCLAIMED_REASON, status: 'REQUESTED', createdAtMs: nowMs, alerted: false, kind: 'UNCLAIMED', attempts: 0, nextAtMs: nowMs + REFUND_RETRY_MS, accountRequiredAtMs: null };
     });
   }
 
   async dueRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
     const r = await this.db.db.execute(sql`
       select f.*, o.payment_id from merch_refund f join merch_order o on o.id = f.order_id
-      where f.status in ('REQUESTED', 'CANCEL_PENDING') and f.next_at <= ${new Date(nowMs)} order by f.next_at limit ${limit}`);
+      where f.kind = 'UNCLAIMED' and f.status in ('REQUESTED', 'CANCEL_PENDING') and f.next_at <= ${new Date(nowMs)} order by f.next_at limit ${limit}`);
     return rowsOf(r).map(refundOf);
   }
 
-  async refundResult(refundId: string, outcome: CancelOutcome, nowMs: number, o: { alerted?: boolean } = {}): Promise<void> {
+  async dueUserRefunds(nowMs: number, limit: number): Promise<RefundRow[]> {
+    const r = await this.db.db.execute(sql`
+      select f.*, o.payment_id from merch_refund f join merch_order o on o.id = f.order_id
+      where f.kind in ('USER_CANCEL', 'RETURN') and f.status in ('REQUESTED', 'CANCEL_PENDING')
+        and f.account_required_at is null and f.next_at <= ${new Date(nowMs)} order by f.next_at limit ${limit}`);
+    return rowsOf(r).map(refundOf);
+  }
+
+  async refundResult(
+    refundId: string,
+    outcome: CancelOutcome,
+    nowMs: number,
+    o: { alerted?: boolean; attempts?: number; nextAtMs?: number | null; failReason?: string; accountRequiredAtMs?: number } = {},
+  ): Promise<void> {
     await this.db.transaction(async (tx) => {
       const now = new Date(nowMs);
       const f = rowsOf(await tx.execute(sql`select * from merch_refund where id = ${refundId} for update`))[0];
       if (!f || f.status === 'CANCELLED' || f.status === 'REJECTED') return;
+      const kind = (f.kind as RefundRow['kind'] | undefined) ?? 'UNCLAIMED';
+      const ids = sql.param(f.item_ids as string[]);
+      const attempts = o.attempts === undefined ? sql`` : sql`, attempts = ${o.attempts}`;
       const alerted = o.alerted === undefined ? sql`` : sql`, alerted = ${o.alerted}`;
       if (outcome === 'CANCELLED') {
-        await tx.execute(sql`
-          update merch_order_item set status = 'REFUNDED', refunded_amount = quantity * unit_amount
-          where id = any(${sql.param(f.item_ids as string[])}::uuid[]) and status = 'CANCELLED'`);
-        await tx.execute(sql`update merch_refund set status = 'CANCELLED', next_at = null, updated_at = ${now} ${alerted} where id = ${refundId}`);
-      } else if (outcome === 'REJECTED') {
-        await tx.execute(sql`update merch_refund set status = 'REJECTED', next_at = null, updated_at = ${now} ${alerted} where id = ${refundId}`);
+        if (kind === 'UNCLAIMED') {
+          await tx.execute(sql`
+            update merch_order_item set status = 'REFUNDED', refunded_amount = quantity * unit_amount
+            where id = any(${ids}::uuid[]) and status = 'CANCELLED'`);
+        } else {
+          await tx.execute(sql`
+            update merch_order_item set status = 'CANCELLED', cancel_reason = 'USER_CANCEL', refunded_amount = quantity * unit_amount
+            where id = any(${ids}::uuid[]) and status in ('READY', 'CANCELLED')`);
+        }
+        await tx.execute(sql`update merch_refund set status = 'CANCELLED', next_at = null, fail_reason = null, updated_at = ${now} ${attempts} ${alerted} where id = ${refundId}`);
+        await tx.execute(sql`update merch_refund_item set resolved_at = ${now} where refund_id = ${refundId} and resolved_at is null`);
+      } else if (outcome === 'REJECTED' || outcome === 'REFUND_ACCOUNT_REQUIRED') {
+        const fail = o.failReason ?? (outcome === 'REFUND_ACCOUNT_REQUIRED' ? 'REFUND_ACCOUNT_REQUIRED' : 'PG_REJECTED');
+        const account = outcome === 'REFUND_ACCOUNT_REQUIRED' ? sql`, account_required_at = ${new Date(o.accountRequiredAtMs ?? nowMs)}` : sql``;
+        await tx.execute(sql`update merch_refund set status = 'REJECTED', next_at = null, fail_reason = ${fail}, updated_at = ${now} ${attempts} ${alerted} ${account} where id = ${refundId}`);
+        await tx.execute(sql`update merch_refund_item set resolved_at = ${now} where refund_id = ${refundId} and resolved_at is null`);
       } else {
-        await tx.execute(sql`update merch_refund set status = 'CANCEL_PENDING', next_at = ${new Date(nowMs + REFUND_RETRY_MS)}, updated_at = ${now} ${alerted} where id = ${refundId}`);
+        if (kind !== 'UNCLAIMED') {
+          // 취소 효력은 결제사 답을 받은 즉시다(REFUND_PENDING·UNKNOWN). 항목은 다시 팔지 않는다
+          await tx.execute(sql`
+            update merch_order_item set status = 'CANCELLED', cancel_reason = 'USER_CANCEL'
+            where id = any(${ids}::uuid[]) and status = 'READY'`);
+        }
+        const next = o.nextAtMs === undefined ? nowMs + REFUND_RETRY_MS : o.nextAtMs;
+        await tx.execute(sql`update merch_refund set status = 'CANCEL_PENDING', next_at = ${next === null ? null : new Date(next)}, updated_at = ${now} ${attempts} ${alerted} where id = ${refundId}`);
       }
     });
+  }
+
+  async createCancellation(once: IdempotencyRequest, i: NewCancellation): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }> {
+    const r = await this.db.transaction((tx) =>
+      this.#once(tx, once, async () => {
+        const detail = await this.#lockedDetail(tx, i.orderId, i.accountId, true);
+        const selection = resolveCancelItems(detail, i.itemIds, i.entryOpensAtMs, i.nowMs);
+        const ids = selection.items.map((x) => x.itemId);
+        const amount = selection.amount;
+        const now = new Date(i.nowMs);
+        await tx.execute(sql`
+          insert into merch_refund (id, order_id, item_ids, amount, reason, status, kind, attempts, next_at, alerted, created_at, updated_at)
+          values (${i.refundId}, ${i.orderId}, ${sql.param(ids)}::uuid[], ${amount}, 'USER_CANCEL', 'REQUESTED', 'USER_CANCEL', 0, ${new Date(i.nowMs + REFUND_RETRY_DELAYS_MIN[0] * 60_000)}, false, ${now}, ${now})`);
+        // 항목 하나에 진행 중 환급 하나(부분 유일). 같은 항목에 다른 환급이 겹치면 409로 끝난다
+        try {
+          for (const id of ids) await tx.execute(sql`insert into merch_refund_item (refund_id, item_id) values (${i.refundId}, ${id})`);
+        } catch (e) {
+          if ((e as { code?: unknown }).code === '23505') throw merchCancelNotAllowed();
+          throw e;
+        }
+        const refund: RefundRow = {
+          refundId: i.refundId,
+          orderId: i.orderId,
+          paymentId: detail.order.paymentId,
+          amount,
+          reason: 'USER_CANCEL',
+          status: 'REQUESTED',
+          createdAtMs: i.nowMs,
+          alerted: false,
+          kind: 'USER_CANCEL',
+          attempts: 0,
+          nextAtMs: i.nowMs + REFUND_RETRY_DELAYS_MIN[0] * 60_000,
+          accountRequiredAtMs: null,
+        };
+        return { resultRef: `cancel:${i.refundId}`, value: { kind: 'created' as const, refund } };
+      }),
+    );
+    return 'replay' in r ? { kind: 'replay', resultRef: r.replay } : r.value;
+  }
+
+  async cancelView(refundId: string): Promise<CancelRowView | undefined> {
+    if (!UUID.test(refundId)) return undefined;
+    const r = rowsOf(await this.db.db.execute(sql`select * from merch_refund where id = ${refundId}`))[0];
+    if (!r) return undefined;
+    return {
+      cancellationId: refundId,
+      status: 'REFUND_PENDING',
+      refundAmount: n(r.amount),
+      refundAccountRequired: r.account_required_at !== null && r.account_required_at !== undefined,
+      state: r.status === 'CANCELLED' ? 'CANCELLED' : r.status === 'REJECTED' ? 'REJECTED' : r.status === 'REQUESTED' ? 'REQUESTED' : 'PENDING',
+    };
+  }
+
+  async applyReturn(once: IdempotencyRequest, i: NewReturn): Promise<{ kind: 'created'; orderId: string } | { kind: 'replay'; resultRef: string }> {
+    const r = await this.db.transaction((tx) =>
+      this.#once(tx, once, async () => {
+        const detail = await this.#lockedDetail(tx, i.orderId, i.accountId, true);
+        const selected = resolveReturnItems(detail, i.itemIds, i.reason, i.entryOpensAtMs, i.nowMs);
+        const now = new Date(i.nowMs);
+        for (const item of selected) {
+          const changed = rowsOf(
+            await tx.execute(sql`
+              update merch_order_item set status = 'RETURN_REQUESTED', return_reason = ${i.reason}, return_tracking_no = ${i.returnTrackingNo ?? null},
+                return_requested_at = ${now}, return_resolved_at = null
+              where id = ${item.itemId} and status = ${item.status} returning id`),
+          );
+          if (!changed[0]) throw merchReturnNotAllowed();
+        }
+        return { resultRef: `return:${i.orderId}`, value: { kind: 'created' as const, orderId: i.orderId } };
+      }),
+    );
+    return 'replay' in r ? { kind: 'replay', resultRef: r.replay } : r.value;
   }
 
   async productAttributesPage(afterId: string | undefined, limit: number): Promise<{ productId: string; type: string; schemaVersion: number; attributes: unknown }[]> {

@@ -123,6 +123,8 @@ export const merchOrder = pgTable(
     index('merch_order_promoter_event_idx').on(t.promoterId, t.eventId, t.orderedAt),
     // 만료 작업의 DB 쓸기(결제 전 주문, ADR-0300 결정 9)와 팬 주문 목록(최근 순)
     index('merch_order_reserved_idx').on(t.stockReservedUntil).where(sql`${t.status} = 'CREATED'`),
+    // 입금 기한 + 10분 만료 작업(ADR-0314)
+    index('merch_order_deposit_due_idx').on(t.stockReservedUntil).where(sql`${t.status} = 'AWAITING_DEPOSIT'`),
     index('merch_order_account_idx').on(t.accountId, t.orderedAt, t.id),
   ],
 );
@@ -148,6 +150,20 @@ export const merchOrderItem = pgTable(
     pickedUpAt: at('picked_up_at'),
     returnRequestedAt: at('return_requested_at'),
     returnResolvedAt: at('return_resolved_at'),
+    /** 판매자가 등록한 송장(배송, I3) */
+    trackingNo: text('tracking_no'),
+    /** 반품 사유(CHANGE_OF_MIND·DEFECT_OR_MISMATCH, I7~I10) */
+    returnReason: text('return_reason'),
+    /** 반품 송장(선택) */
+    returnTrackingNo: text('return_tracking_no'),
+    /** 판매자 도착 확인(I11) */
+    returnReceivedAt: at('return_received_at'),
+    /** 판매자 거절 사유(I13) */
+    rejectReason: text('reject_reason'),
+    /** 상품 정산 기준일(POL-039 ②) */
+    settleEligibleAt: at('settle_eligible_at'),
+    /** 들어간 상품 정산서 */
+    statementId: uuid('statement_id'),
     refundedAmount: integer('refunded_amount').notNull().default(0),
     eventEndsAt: at('event_ends_at'),
     optionSnapshot: jsonb('option_snapshot').$type<Record<string, unknown>>(),
@@ -163,7 +179,10 @@ export const merchOrderItem = pgTable(
     index('merch_order_item_promoter_event_idx').on(t.promoterId, t.eventId),
     index('merch_order_item_order_idx').on(t.orderId),
     index('merch_order_item_linked_ticket_idx').on(t.linkedTicketId),
-    check('merch_order_item_cancel_reason_check', sql`${t.cancelReason} in ('UNCLAIMED')`),
+    check('merch_order_item_cancel_reason_check', sql`${t.cancelReason} in ('UNCLAIMED', 'USER_CANCEL')`),
+    check('merch_order_item_return_reason_check', sql`${t.returnReason} in ('CHANGE_OF_MIND', 'DEFECT_OR_MISMATCH')`),
+    // 반품 처리 지연(3영업일) 감시가 여는 대상(ADR-0315, BAT-610 잔여)
+    index('merch_order_item_return_idx').on(t.returnRequestedAt).where(sql`${t.status} = 'RETURN_REQUESTED'`),
   ],
 );
 
@@ -210,7 +229,7 @@ export const merchConfirmJob = pgTable(
   (t) => [index('merch_confirm_job_next_idx').on(t.nextAt)],
 );
 
-// 굿즈 결제 취소 요청(ADR-0301 결정 5). ID가 결제 취소 ID(결제사 멱등키 cancel-{ID})다
+// 굿즈 결제 취소 요청(ADR-0301 결정 5, ADR-0315). ID가 결제 취소 ID(결제사 멱등키 cancel-{ID})다
 export const merchRefund = pgTable(
   'merch_refund',
   {
@@ -220,6 +239,14 @@ export const merchRefund = pgTable(
     amount: integer('amount').notNull(),
     reason: text('reason').notNull(),
     status: text('status').notNull(),
+    /** UNCLAIMED(미수령)·USER_CANCEL(구매자 취소)·RETURN(반품). 0030 이전 행은 UNCLAIMED다 */
+    kind: text('kind').notNull().default('UNCLAIMED'),
+    /** 다시 부른 횟수(처음 요청 안의 호출은 세지 않는다) */
+    attempts: integer('attempts').notNull().default(0),
+    /** 계좌 값 없이 이름표만 둔다(REFUND_ACCOUNT_REQUIRED·PG_REJECTED·RETRY_EXHAUSTED) */
+    failReason: text('fail_reason'),
+    /** 계좌를 기다리기 시작한 시각(있으면 자동 재시도를 멈춘다) */
+    accountRequiredAt: at('account_required_at'),
     nextAt: at('next_at'),
     alerted: boolean('alerted').notNull().default(false),
     createdAt: at('created_at').notNull(),
@@ -227,8 +254,29 @@ export const merchRefund = pgTable(
   },
   (t) => [
     check('merch_refund_status_check', sql`${t.status} in ('REQUESTED', 'CANCEL_PENDING', 'CANCELLED', 'REJECTED')`),
+    check('merch_refund_kind_check', sql`${t.kind} in ('UNCLAIMED', 'USER_CANCEL', 'RETURN')`),
     check('merch_refund_amount_check', sql`${t.amount} > 0`),
+    check('merch_refund_attempts_check', sql`${t.attempts} >= 0`),
     index('merch_refund_due_idx').on(t.nextAt).where(sql`${t.status} in ('REQUESTED', 'CANCEL_PENDING')`),
     index('merch_refund_order_idx').on(t.orderId),
+    index('merch_refund_kind_due_idx').on(t.kind, t.nextAt).where(sql`${t.status} in ('REQUESTED', 'CANCEL_PENDING')`),
+  ],
+);
+
+// 항목 하나에 진행 중인 환급 하나(ADR-0315). 끝난 환급은 resolved_at을 채워 같은 항목의 다음 환급을 받는다
+export const merchRefundItem = pgTable(
+  'merch_refund_item',
+  {
+    refundId: uuid('refund_id')
+      .notNull()
+      .references(() => merchRefund.id, { onDelete: 'cascade' }),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => merchOrderItem.id, { onDelete: 'cascade' }),
+    resolvedAt: at('resolved_at'),
+  },
+  (t) => [
+    uniqueIndex('merch_refund_item_active_uq').on(t.itemId).where(sql`${t.resolvedAt} is null`),
+    index('merch_refund_item_refund_idx').on(t.refundId),
   ],
 );

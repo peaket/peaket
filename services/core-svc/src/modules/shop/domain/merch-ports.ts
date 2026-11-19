@@ -1,6 +1,25 @@
-// shop 주문·정산 원천·재고·결제 포트(BAT-610, BAT-600, ADR-0300·ADR-0301). 메모리(단위 시험)와 Drizzle·Redis·gRPC(운영)가 같은 모양을 쓴다.
+// shop 주문·정산 원천·재고·결제 포트(BAT-610, BAT-600, BAT-605, ADR-0300·ADR-0301·ADR-0313~0315). 메모리(단위 시험)와 Drizzle·Redis·gRPC(운영)가 같은 모양을 쓴다.
+import type { RefundAccountValue } from '@peaket/validation/refund-account';
 import type { MerchOrderItemRecord, MerchOrderRecord, ProductSettlementItem } from './merch.js';
-import type { AcceptBody, IdempotencyRef as IdempotencyRequest, LimitedLine, OrderableProduct, OrderState, PaymentRef, PickupSlotRecord, ReleasedOrder, ShopOrder, ShopOrderDetail, ShopOrderItem, ShopPg } from './merch-order.js';
+import type {
+  AcceptBody,
+  CancelStatus,
+  EscrowLine,
+  IdempotencyRef as IdempotencyRequest,
+  LimitedLine,
+  OrderableProduct,
+  OrderState,
+  PaymentRef,
+  PickupSlotRecord,
+  RefundKind,
+  ReleasedOrder,
+  ReturnReason,
+  ShopOrder,
+  ShopOrderDetail,
+  ShopOrderItem,
+  ShopPaymentStore,
+  ShopPg,
+} from './merch-order.js';
 
 // 명단 원천(listAttendees·countAttendees)은 이 포트에 두지 않는다. 운영은 purchase-svc 내부 HTTP(A2-03), 메모리 조립은 MemoryMerchOrderStore를 직접 쓴다(W7-audit A2-17)
 export interface MerchOrderStore {
@@ -83,11 +102,27 @@ export interface CheckoutQuery {
   amount: number;
   orderName: string;
   payMethod?: string | undefined;
+  /** 결제 상점(택배는 ESCROW, ADR-0313) */
+  pgStore: ShopPaymentStore;
+  /** 에스크로 상점의 주문 상품. 에스크로가 아니면 없다 */
+  escrowProducts?: EscrowLine[] | undefined;
+  /** 이 결제에서 가상계좌를 내도 되는가(굿즈는 늘 참, ADR-0314) */
+  virtualAccountAllowed: boolean;
 }
 
 /** 결제창 값(openapi PaymentAttempt.checkout 모양) */
 export type CheckoutValues =
-  | { clientKey: string; customerKey: string; orderId: string; orderName: string; amount: number; successUrl: string; failUrl: string }
+  | {
+      clientKey: string;
+      customerKey: string;
+      orderId: string;
+      orderName: string;
+      amount: number;
+      successUrl: string;
+      failUrl: string;
+      /** 에스크로 상점만. 결제창 주문 상품(openapi checkout escrowProducts, ADR-0313) */
+      escrowProducts?: EscrowLine[];
+    }
   | { storeId: string; channelKey: string; paymentId: string; orderName: string; totalAmount: number; currency: string; redirectUrl: string; customData?: { orderId: string } };
 
 export interface CheckoutAnswer {
@@ -95,6 +130,8 @@ export interface CheckoutAnswer {
   switched: boolean;
   checkout: CheckoutValues;
   allowedPayMethods: string[];
+  /** 입금 기한. 가상계좌를 낼 수 있을 때만 있다(openapi PaymentAttempt.depositDueAt) */
+  depositDueAtMs?: number;
 }
 
 /** 결제창 준비 실패: unavailable → 503 pg-unavailable, invalid → 400, paused → 503 new-payment-paused, error → 503 dependency-unavailable */
@@ -113,6 +150,8 @@ export interface ConfirmCommand {
   ref: PaymentRef;
   amount: number;
   authenticatedAtMs: number;
+  /** 결제 상점. 원장 `payment.pg_store`에 적힌다(ADR-0313) */
+  pgStore: ShopPaymentStore;
 }
 
 /** ACCEPTED: payment-svc가 받아 적음. RETRYABLE: 시간 초과·연결 실패(다시 보낸다). REJECTED: 그 밖의 gRPC 오류 */
@@ -126,9 +165,34 @@ export interface PaymentState {
   status: 'ACCEPTED' | 'AWAITING_DEPOSIT' | 'APPROVED' | 'UNKNOWN' | 'FAILED' | 'PARTIAL_CANCELED' | 'CANCELED' | 'UNSPECIFIED';
   approvedAtMs: number | undefined;
   failureCategory: string | undefined;
+  /** 입금 대기일 때만: 입금 기한(ms). core가 재고 예약을 기한 + 10분까지 늘린다(ADR-0314) */
+  depositDueAtMs?: number | undefined;
 }
 
-export type CancelOutcome = 'CANCELLED' | 'CANCEL_PENDING' | 'REJECTED' | 'UNKNOWN';
+/** GetPayment 답(입금 대기 화면과 가상계좌 결제 판정에 쓴다, ADR-0314·0315) */
+export interface PaymentDetail {
+  status: PaymentState['status'];
+  pg?: ShopPg | undefined;
+  depositDueAtMs?: number | undefined;
+  /** 입금처 계좌(입금 대기일 때만). 로그·사건·지표에 싣지 않는다 */
+  virtualAccount?: { bank?: string | undefined; accountNumber?: string | undefined; dueAtMs?: number | undefined } | undefined;
+  /** 가상계좌로 받은 결제인가(payment-svc `virtual_account_paid`). 취소에 환불 계좌가 필요한지 정한다 */
+  virtualAccountPaid?: boolean | undefined;
+}
+
+/** CancelPayment 결과. REFUND_ACCOUNT_REQUIRED는 가상계좌 결제에 계좌가 없거나 결제사가 계좌를 거절한 것이다 */
+export type CancelOutcome = 'CANCELLED' | 'CANCEL_PENDING' | 'REFUND_ACCOUNT_REQUIRED' | 'REJECTED' | 'UNKNOWN';
+
+/** 결제사 취소 입력. 계좌는 이 호출 안에서만 쓰고 저장하지 않는다(ADR-0050 결정 3) */
+export interface CancelInput {
+  paymentId: string;
+  cancellationId: string;
+  amount: number;
+  reason: string;
+  refundAccount?: RefundAccountValue | undefined;
+  /** 입금 전 취소만. 굿즈 구매자 취소는 결제 후 일반 취소라 쓰지 않는다 */
+  scope?: 'DEPOSIT_ONLY' | undefined;
+}
 
 export interface MerchPayments {
   /** @throws CheckoutFailed */
@@ -137,11 +201,36 @@ export interface MerchPayments {
   confirm(c: ConfirmCommand, deadlineMs: number): Promise<ConfirmOutcome>;
   /** 답에 없는 주문은 빠진다. @throws Error payment-svc가 답하지 못함 */
   batchGet(orderIds: readonly string[]): Promise<PaymentState[]>;
+  /** 결제 원장 하나. 없으면 undefined. @throws Error payment-svc가 답하지 못함(호출 쪽이 503). 포트가 없는 조립(옛 시험 대역)은 부르지 않는다 */
+  getPayment?(orderId: string, deadlineMs: number): Promise<PaymentDetail | undefined>;
   /** 호출 실패는 UNKNOWN(다시 부른다). 던지지 않는다 */
-  cancel(c: { paymentId: string; cancellationId: string; amount: number; reason: string }): Promise<CancelOutcome>;
+  cancel(c: CancelInput): Promise<CancelOutcome>;
 }
 
 export const MERCH_PAYMENTS = Symbol.for('peaket.shop.merch-payments');
+
+// ---- 재인증(ADR-0293, ADR-0315, purchase-svc JwksFanReauthGate와 같은 꼴) ----
+
+export type ShopReauthAct = 'FAN_HIGH_RISK';
+export type ShopReauthOp = 'SHOP_CANCEL_REFUND_ACCOUNT';
+
+/** 재인증 확인기·jti 저장소를 쓸 수 없다(받는 층이 503 reauth-unavailable) */
+export class ReauthUnavailable extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'ReauthUnavailable';
+  }
+}
+
+/** false = 거절(403 reauth-required). 확인기를 쓸 수 없으면 ReauthUnavailable을 던진다(503) */
+export interface ShopReauthGate {
+  verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: ShopReauthAct; readonly op: ShopReauthOp }): Promise<boolean>;
+}
+
+export const SHOP_REAUTH_GATE = Symbol.for('peaket.shop.reauth-gate');
+
+/** 확인기를 꽂지 않은 조립의 닫힌 기본값(늘 403). local·ci가 주소 없이 뜰 때 쓴다 */
+export const closedShopReauthGate: ShopReauthGate = { verify: async () => false };
 
 // ---- 티켓 보유(ticket-svc ListHeldTickets, ADR-0301 결정 1) ----
 
@@ -183,6 +272,8 @@ export interface ConfirmJob {
   attemptId: string;
   attemptNo: number;
   pg: ShopPg;
+  /** 주문의 결제 상점(승인 명령 payment_store, ADR-0313) */
+  pgStore: ShopPaymentStore;
   ref: PaymentRef;
   amount: number;
   authenticatedAtMs: number;
@@ -215,6 +306,47 @@ export interface RefundRow {
   status: 'REQUESTED' | 'CANCEL_PENDING' | 'CANCELLED' | 'REJECTED';
   createdAtMs: number;
   alerted: boolean;
+  /** 미수령(UNCLAIMED)·구매자 취소(USER_CANCEL)·반품(RETURN). 0030 이전 행은 UNCLAIMED다 */
+  kind: RefundKind;
+  /** 다시 부른 횟수(처음 요청 안의 호출은 세지 않는다) */
+  attempts: number;
+  /** 다음 호출 시각. 끝났거나 계좌를 기다리면 null */
+  nextAtMs: number | null;
+  /** 계좌를 기다리는 시각(있으면 자동 재시도를 멈춘다) */
+  accountRequiredAtMs: number | null;
+}
+
+/** 구매자 취소 한 건의 응답 값(openapi Cancellation) */
+export interface CancelRowView {
+  cancellationId: string;
+  status: CancelStatus;
+  refundAmount: number;
+  refundAccountRequired: boolean;
+  /** 환급 행의 지금 상태. 같은 키 다시 오기가 거절을 그대로 돌려주는 데 쓴다 */
+  state: 'REQUESTED' | 'PENDING' | 'CANCELLED' | 'REJECTED';
+}
+
+/** 구매자 취소 만들기. 저장소가 주문·항목을 잠그고 자격을 다시 보고 금액을 계산한다 */
+export interface NewCancellation {
+  /** 환급 행 ID = 결제사 취소 ID(UUIDv7) */
+  refundId: string;
+  orderId: string;
+  accountId: string;
+  itemIds: string[];
+  nowMs: number;
+  /** 부가 상품의 연결 회차 입장 시작(ms). 모르면 없다 */
+  entryOpensAtMs?: number | undefined;
+}
+
+/** 반품 요청 만들기. 결제사를 부르지 않고 계좌도 받지 않는다 */
+export interface NewReturn {
+  orderId: string;
+  accountId: string;
+  itemIds: string[];
+  reason: ReturnReason;
+  returnTrackingNo?: string | undefined;
+  nowMs: number;
+  entryOpensAtMs?: number | undefined;
 }
 
 export interface AddonItemRow {
@@ -237,6 +369,8 @@ export interface ShopOrderStore {
   pickupSlot(slotId: string): Promise<PickupSlotRecord | undefined>;
   /** 회차 끝 시각(catalog event.ends_at, 부가 상품 정산 기준일). 없으면 null */
   eventEndsAt(eventId: string): Promise<Date | null>;
+  /** 회차 입장 시작(event.entry_opens_at, 없으면 starts_at). 부가 상품 취소·반품 자격의 기준이다(ADR-0315) */
+  eventEntryOpensAt(eventId: string): Promise<Date | null>;
   pickupSlotsOf(productIds: readonly string[]): Promise<PickupSlotRecord[]>;
   orderState(orderId: string): Promise<OrderState | undefined>;
   /** 다시 만들기 값: product_stock.stock과 결제 접수 전이고 예약이 끝나지 않은 CREATED 주문의 예약. 한정 상품이 아니면 undefined */
@@ -286,10 +420,33 @@ export interface ShopOrderStore {
   unclaimedCandidates(nowMs: number, limit: number): Promise<UnclaimedCandidate[]>;
   /** 한 트랜잭션: 항목 READY → CANCELLED(cancel_reason UNCLAIMED, 조건부)와 환급 행 REQUESTED. 바뀐 항목이 없으면 undefined */
   cancelUnclaimed(orderId: string, itemIds: readonly string[], refundId: string, nowMs: number): Promise<RefundRow | undefined>;
-  /** 다음 시각이 된 REQUESTED·CANCEL_PENDING 환급 */
+  /** 다음 시각이 된 REQUESTED·CANCEL_PENDING 환급(미수령 자동 취소 몫) */
   dueRefunds(nowMs: number, limit: number): Promise<RefundRow[]>;
-  /** 환급 결과 반영. CANCELLED면 항목 CANCELLED → REFUNDED와 환급 금액. 그 밖은 상태와 다음 시각 */
-  refundResult(refundId: string, outcome: CancelOutcome, nowMs: number, o?: { alerted?: boolean }): Promise<void>;
+  /**
+   * 환급 결과 반영. 미수령은 항목이 이미 CANCELLED다. 구매자 취소·반품은 CANCELLED·CANCEL_PENDING·UNKNOWN이면 항목 READY → CANCELLED,
+   * CANCELLED 결과면 → REFUNDED. 계좌 거절·거절은 항목을 바꾸지 않고 환급 행만 REJECTED로 끝낸다(ADR-0315)
+   */
+  refundResult(
+    refundId: string,
+    outcome: CancelOutcome,
+    nowMs: number,
+    o?: { alerted?: boolean; attempts?: number; nextAtMs?: number | null; failReason?: string; accountRequiredAtMs?: number },
+  ): Promise<void>;
+  // ---- 구매자 취소·반품(BAT-605, ADR-0315) ----
+  /** 주문 행·항목을 잠그고 자격을 다시 본 뒤 환급 행(REQUESTED)·항목 환급 자리(merch_refund_item)·멱등 기록을 한 트랜잭션으로 쓴다. 항목 상태는 바꾸지 않는다 */
+  createCancellation(once: IdempotencyRequest, i: NewCancellation): Promise<{ kind: 'created'; refund: RefundRow } | { kind: 'replay'; resultRef: string }>;
+  /** 멱등 다시 오기의 결과 참조 `cancel:{환급 ID}`를 응답으로 바꾼다. 없으면 undefined */
+  cancelView(refundId: string): Promise<CancelRowView | undefined>;
+  /** 반품 요청: 주문 행·항목을 잠그고 자격을 다시 본 뒤 항목 RETURN_REQUESTED·사유·송장·기한과 멱등 기록을 한 트랜잭션으로 쓴다 */
+  applyReturn(once: IdempotencyRequest, i: NewReturn): Promise<{ kind: 'created'; orderId: string } | { kind: 'replay'; resultRef: string }>;
+  /** 다음 시각이 된 구매자 취소 환급(USER_CANCEL·RETURN, 계좌를 기다리지 않음) */
+  dueUserRefunds(nowMs: number, limit: number): Promise<RefundRow[]>;
+  /** 입금 대기로 바꾼다(CREATED일 때만). 재고 예약을 입금 기한 + 10분 [가정]까지 늘릴 값을 돌려준다(ADR-0314) */
+  applyAwaitingDeposit(orderId: string, x: { paymentId: string; pg: ShopPg | undefined; depositDueAtMs: number | undefined; nowMs: number }): Promise<{ orderId: string; accountId: string; deadline: Date; limited: LimitedLine[] } | undefined>;
+  /** 입금 기한 + 10분이 지난 AWAITING_DEPOSIT 주문(끝낼 대상) */
+  dueDepositOrders(nowMs: number, limit: number): Promise<string[]>;
+  /** 한 트랜잭션: AWAITING_DEPOSIT → EXPIRED(조건부), product_stock 복구, 시도 EXPIRED, 작업 지움 */
+  expireDeposit(orderId: string, nowMs: number): Promise<ReleasedOrder | undefined>;
   // ---- 속성 검증 잡(ADR-0300 결정 2) ----
   productAttributesPage(afterId: string | undefined, limit: number): Promise<{ productId: string; type: string; schemaVersion: number; attributes: unknown }[]>;
 }

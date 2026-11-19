@@ -197,6 +197,20 @@
       "when": 1795030642784,
       "tag": "0029_event_status_ops_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795087661284,
+      "tag": "0030_merch_cancel_return",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795087707322,
+      "tag": "0031_merch_return_guards",
+      "breakpoints": true
     }
   ]
 }

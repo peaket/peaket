@@ -9,6 +9,19 @@ import { statusOf, type Fulfillment, type ProductRecord } from './product.js';
 export const STOCK_RESERVATION_MS = 15 * 60 * 1000;
 /** 승인 기한: 인증(결제 접수) + 10분(ADR-0300 결정 5) */
 export const CONFIRM_WINDOW_MS = 10 * 60 * 1000;
+/** 입금 기한 + 10분 [가정]까지 재고를 쥐고, 그때까지 입금이 없으면 끝낸다(ADR-0314, P-T60) */
+export const DEPOSIT_GRACE_MS = 10 * 60 * 1000;
+/** 입금 기한을 읽지 못했을 때 재고를 쥐는 시간 1시간 [가정](payment §6 '입금 확인의 첫 구현') */
+export const DEPOSIT_FALLBACK_MS = 60 * 60 * 1000;
+/** 단순 변심 반품 기한: 받은 날부터 7일(POL-016 §1.4) */
+export const RETURN_CHANGE_OF_MIND_MS = 7 * 24 * 60 * 60 * 1000;
+/** 상품 이상·설명과 다름의 반품 기한: 받은 날부터 3개월(POL-016 §1.4) */
+export const RETURN_DEFECT_MONTHS = 3;
+/** 굿즈 취소·환급 다시 부르기 간격(분): 1 → 5 → 15 → 60 → 360, 5회 [가정](ADR-0315, P-T64) */
+export const REFUND_RETRY_DELAYS_MIN = [1, 5, 15, 60, 360] as const;
+export const REFUND_RETRY_MAX = REFUND_RETRY_DELAYS_MIN.length;
+/** 결제 상태 조회(GetPayment) 데드라인 300ms [가정](payment §6, ADR-0314) */
+export const GET_PAYMENT_DEADLINE_MS = 300;
 /** 주문마다 결제 시도 상한 3회 [가정](ADR-0300 결정 5) */
 export const MAX_PAYMENT_ATTEMPTS = 3;
 /** 접수한 주문의 예약 원소를 만료 작업이 다시 읽기까지 미루는 시간 60초 [가정](ADR-0300 결정 7) */
@@ -44,6 +57,15 @@ export const UNCLAIMED_REASON = 'UNCLAIMED';
 export type ShopOrderStatus = 'CREATED' | 'AWAITING_DEPOSIT' | 'PAID' | 'EXPIRED' | 'FAILED';
 export type ShopPg = 'TOSS' | 'PORTONE' | 'SIMULATOR';
 export type AttemptStatus = 'READY' | 'ACCEPTED' | 'SUPERSEDED' | 'EXPIRED' | 'FAILED';
+/** 결제 상점. 택배만 에스크로 상점이다(ADR-0313, payment §6 '결제대금예치 선택권') */
+export type ShopPaymentStore = MerchPgStore;
+/** 에스크로 상점의 허용 수단: 간편결제·휴대폰은 토스 에스크로가 받지 않는다(ADR-0313) */
+export const ESCROW_PAY_METHODS = ['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT'] as const;
+/** 일반 상점의 허용 수단: 굿즈는 가상계좌도 받는다(ADR-0314) */
+export const STANDARD_PAY_METHODS = ['CARD', 'EASY_PAY', 'TRANSFER', 'MOBILE', 'VIRTUAL_ACCOUNT'] as const;
+export type CancelStatus = 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED';
+export type ReturnReason = 'CHANGE_OF_MIND' | 'DEFECT_OR_MISMATCH';
+export type RefundKind = 'UNCLAIMED' | 'USER_CANCEL' | 'RETURN';
 
 export interface ShopOrder {
   orderId: string;
@@ -94,6 +116,18 @@ export interface ShopOrderItem {
   refundedAmount: number;
   pickedUpAt: Date | null;
   eventEndsAt: Date | null;
+  /** 판매자가 송장을 등록한 시각(I3). BAT-605가 읽는다 */
+  shippedAt?: Date | null;
+  /** 배송 완료 기록(I6). 반품 기한의 기준이다 */
+  deliveredAt?: Date | null;
+  /** 반품 요청(I7~I10) */
+  returnRequestedAt?: Date | null;
+  returnReason?: ReturnReason | string | null;
+  returnTrackingNo?: string | null;
+  returnReceivedAt?: Date | null;
+  rejectReason?: string | null;
+  /** 배송 송장(판매자 등록, I3). 읽기만 한다 */
+  trackingNo?: string | null;
 }
 
 export interface MerchAttempt {
@@ -211,6 +245,20 @@ export const amountMismatch = () => new ShopProblem('amount_mismatch', 400, '결
 /** 이름 없는 400(요청 오류) */
 export const badRequest = (reason: string) => new ShopProblem(reason, 400, '요청이 올바르지 않습니다');
 export const orderNotFound = () => new ShopProblem('not-found', 404, '찾을 수 없습니다');
+/** 굿즈 취소를 받을 수 없다(발송·수령 뒤, 결제 전 주문, 이미 취소된 항목, P-T61) */
+export const merchCancelNotAllowed = () => conflict('merch-cancel-not-allowed', '지금은 취소할 수 없는 주문입니다');
+/** 부가 상품의 연결 회차 입장이 시작됐다(I5, V-T35 ③) */
+export const entryStarted = () => conflict('entry-started', '입장이 시작되어 취소할 수 없습니다');
+/** 구매 확정 전 에스크로 주문은 주문 전체만 취소·반품한다(ADR-0313, P-T59 ④·P-T62 ③) */
+export const escrowPartialNotAllowed = () => conflict('escrow-partial-not-allowed', '결제대금예치 주문은 구매 확정 전에 주문 전체만 취소할 수 있습니다');
+/** 반품을 받을 수 없다(수령 전, 기한 경과, 상태 밖, P-T62) */
+export const merchReturnNotAllowed = () => conflict('merch-return-not-allowed', '지금은 반품을 요청할 수 없는 항목입니다');
+/** 가상계좌 결제인데 환불 계좌가 없다(ADR-0050 결정 3, P-T63 ①) */
+export const refundAccountRequired = () => new ShopProblem('refund-account-required', 422, '환불받을 계좌를 입력해 주세요');
+/** 재인증 토큰이 없거나 틀렸다(ADR-0293, P-T63 ②) */
+export const reauthRequired = () => new ShopProblem('reauth-required', 403, '다시 인증해 주세요');
+/** 재인증 확인기·jti 저장소를 쓸 수 없다(Retry-After 5초 [가정]) */
+export const reauthUnavailable = () => new ShopProblem('reauth-unavailable', 503, '재인증 검증기를 쓸 수 없습니다', 5);
 
 /** 주문 경로(일반 굿즈·부가 상품) */
 export type OrderPath = 'shop' | 'addon';
@@ -342,4 +390,201 @@ export const orderNumberOf = (orderId: string): string => `M${orderId.replace(/-
 export function unclaimedDue(lastSlotEndsAtMs: number, nowMs: number): boolean {
   if (lastSlotEndsAtMs > nowMs) return false;
   return kstDateOf(nowMs) >= nextBusinessDay(kstDateOf(lastSlotEndsAtMs));
+}
+
+// ---- 결제 상점·허용 수단(ADR-0313·ADR-0314, P-T59 ⑤) ----
+
+/** 수령 방식 → 결제 상점: 택배만 에스크로 상점, 현장 수령·부가 상품은 일반 상점 */
+export function pgStoreOf(fulfillment: Fulfillment): ShopPaymentStore {
+  return fulfillment === 'DELIVERY' ? 'ESCROW' : 'STANDARD';
+}
+
+/** 그 결제 상점에서 낼 수 있는 결제수단(에스크로는 간편결제·휴대폰을 뺀다) */
+export function payMethodsForStore(store: ShopPaymentStore): readonly string[] {
+  return store === 'ESCROW' ? ESCROW_PAY_METHODS : STANDARD_PAY_METHODS;
+}
+
+/** 그 상점에서 고를 수 없는 수단인가(에스크로 주문에 EASY_PAY·MOBILE) */
+export function payMethodBlockedByStore(store: ShopPaymentStore, payMethod: string | undefined): boolean {
+  return payMethod !== undefined && payMethod !== '' && !payMethodsForStore(store).includes(payMethod);
+}
+
+// ---- 결제대금예치 상품·가상계좌(ADR-0313·ADR-0314) ----
+
+/** 결제창에 싣는 에스크로 상품(토스 escrowProducts와 같은 모양) */
+export interface EscrowLine {
+  id: string;
+  name: string;
+  code: string;
+  unitPrice: number;
+  quantity: number;
+}
+
+/** 주문 항목 → 에스크로 상품 목록(상품 ID·이름·단가·수량, 상품 코드는 비운다) */
+export function escrowLinesOf(items: readonly ShopOrderItem[]): EscrowLine[] {
+  return items.map((i) => ({ id: i.productId, name: i.productName, code: '', unitPrice: i.unitAmount, quantity: i.quantity }));
+}
+
+/** 입금 기한 + 10분 [가정]. 기한을 모르면 지금 + 1시간 [가정] + 10분 */
+export function depositDeadlineMs(depositDueAtMs: number | undefined, nowMs: number): number {
+  return (depositDueAtMs ?? nowMs + DEPOSIT_FALLBACK_MS) + DEPOSIT_GRACE_MS;
+}
+
+/** 다음 날 23:59 KST(ms). 굿즈 가상계좌의 입금 기한 [가정](ADR-0314, docs/planning/03 §2.4) */
+export function nextDay2359KstMs(nowMs: number): number {
+  const kst = new Date(nowMs + 9 * 60 * 60 * 1000);
+  const next = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + 1, 23, 59, 0, 0);
+  return next - 9 * 60 * 60 * 1000;
+}
+
+// ---- 취소 자격·금액(ADR-0315, POL-016 §1.4, P-T59 ④·P-T61) ----
+
+/** 취소할 항목 고르기 결과 */
+export interface CancelSelection {
+  items: ShopOrderItem[];
+  /** 환급 금액(원). 주문 전체 취소면 처음 배송비 포함 */
+  amount: number;
+  /** 이 요청이 주문의 모든 항목을 취소하는가 */
+  full: boolean;
+}
+
+/**
+ * 구매자 취소의 항목·자격·금액(ADR-0315). 결제 완료(PAID) 주문의 READY 항목만 받는다.
+ * 발송·수령 전 = READY, 부가 상품(WALLET)은 연결 회차 입장 시작 전이다. itemIds가 없으면 READY 항목 전부다.
+ * 에스크로 주문은 구매 확정 전에 주문 전체만 받는다(부분이면 escrow-partial-not-allowed).
+ * @throws ShopProblem 400 invalid-body(목록 모양) · 404 not-found(그 주문의 항목이 아님) · 409 merch-cancel-not-allowed·entry-started·escrow-partial-not-allowed
+ */
+export function resolveCancelItems(d: Pick<ShopOrderDetail, 'order' | 'items'>, itemIds: readonly string[] | undefined, entryOpensAtMs: number | undefined, nowMs: number): CancelSelection {
+  if (d.order.status !== 'PAID') throw merchCancelNotAllowed();
+  if (itemIds !== undefined && (itemIds.length < 1 || itemIds.length > 20 || new Set(itemIds).size !== itemIds.length)) throw badRequest('invalid-body');
+  const byId = new Map(d.items.map((i) => [i.itemId, i]));
+  let selected: ShopOrderItem[];
+  if (itemIds !== undefined) {
+    for (const id of itemIds) if (!byId.has(id)) throw orderNotFound();
+    selected = itemIds.map((id) => byId.get(id)!);
+  } else {
+    selected = d.items.filter((i) => i.status === 'READY');
+    if (selected.length === 0) throw merchCancelNotAllowed();
+  }
+  for (const item of selected) {
+    if (item.status !== 'READY') throw merchCancelNotAllowed();
+    if (item.fulfillment === 'WALLET' && entryOpensAtMs !== undefined && nowMs >= entryOpensAtMs) throw entryStarted();
+  }
+  const full = selected.length === d.items.length;
+  if (d.order.pgStore === 'ESCROW' && d.order.purchaseConfirmedAt === null && !full) throw escrowPartialNotAllowed();
+  const amount = full ? d.order.amount : selected.reduce((s, i) => s + i.quantity * i.unitAmount, 0);
+  return { items: selected, amount, full };
+}
+
+/** 그 항목을 지금 취소할 수 있는가(openapi `ShopOrderItem.cancellable`, 최종 판정은 서버) */
+export function cancellableOf(item: Pick<ShopOrderItem, 'status' | 'fulfillment'>, entryOpensAtMs: number | undefined, nowMs: number): boolean {
+  if (item.status !== 'READY') return false;
+  return item.fulfillment !== 'WALLET' || entryOpensAtMs === undefined || nowMs < entryOpensAtMs;
+}
+
+// ---- 반품 자격·기한(ADR-0315, POL-016 §1.4, P-T62·V-T35 ③) ----
+
+/** KST 달력 기준으로 개월을 더한다(월말은 그 달 마지막 날로 자른다) */
+export function addCalendarMonthsKst(ms: number, months: number): number {
+  const kst = new Date(ms + 9 * 60 * 60 * 1000);
+  const year = kst.getUTCFullYear();
+  const month = kst.getUTCMonth() + months;
+  const day = kst.getUTCDate();
+  const firstOfTarget = Date.UTC(year, month, 1);
+  const daysInTarget = new Date(Date.UTC(new Date(firstOfTarget).getUTCFullYear(), new Date(firstOfTarget).getUTCMonth() + 1, 0)).getUTCDate();
+  const target = Date.UTC(new Date(firstOfTarget).getUTCFullYear(), new Date(firstOfTarget).getUTCMonth(), Math.min(day, daysInTarget));
+  return target - 9 * 60 * 60 * 1000;
+}
+
+/** 반품 기한의 기준 시각: 배송 완료(DELIVERY)·수령 완료(PICKUP). 없으면 null(기한 안으로 받는다) */
+export function returnBaseAtMs(item: Pick<ShopOrderItem, 'fulfillment' | 'deliveredAt' | 'pickedUpAt'>): number | null {
+  if (item.fulfillment === 'DELIVERY') return item.deliveredAt?.getTime() ?? null;
+  if (item.fulfillment === 'PICKUP') return item.pickedUpAt?.getTime() ?? null;
+  return null;
+}
+
+/** 단순 변심 반품 기한(받은 날 + 7일). 기준 기록이 없으면 null */
+export function returnDueAtMs(item: Pick<ShopOrderItem, 'fulfillment' | 'deliveredAt' | 'pickedUpAt'>): number | null {
+  const base = returnBaseAtMs(item);
+  return base === null ? null : base + RETURN_CHANGE_OF_MIND_MS;
+}
+
+/** 상품 이상·설명과 다름의 반품 기한(받은 날 + 3개월). 기준 기록이 없으면 null */
+export function defectReturnDueAtMs(item: Pick<ShopOrderItem, 'fulfillment' | 'deliveredAt' | 'pickedUpAt'>): number | null {
+  const base = returnBaseAtMs(item);
+  return base === null ? null : addCalendarMonthsKst(base, RETURN_DEFECT_MONTHS);
+}
+
+/** 그 항목이 지금 반품을 요청할 수 있는 상태인가(기한 포함. 최종 판정은 resolveReturnItems) */
+export function returnableOf(item: ShopOrderItem, eventEndsAt: Date | null | undefined, nowMs: number): boolean {
+  if (item.fulfillment === 'WALLET') {
+    if (item.status !== 'READY' && item.status !== 'LOCKED') return false;
+    if (eventEndsAt !== undefined && eventEndsAt !== null && eventEndsAt.getTime() <= nowMs) return false;
+    return true;
+  }
+  if (item.fulfillment === 'DELIVERY') {
+    if (item.status === 'SHIPPED') return true;
+    if (item.status !== 'DELIVERED') return false;
+  } else if (item.status !== 'PICKED_UP') return false;
+  const due = defectReturnDueAtMs(item);
+  return due === null || nowMs <= due;
+}
+
+/**
+ * 반품 요청의 항목·자격(ADR-0315). `itemIds`는 1~20개·중복 없음·그 주문의 항목이어야 한다.
+ * DELIVERY는 SHIPPED(수취 거부)·DELIVERED, PICKUP은 PICKED_UP, WALLET은 READY·LOCKED이고 입장 시작 뒤에는 이상·다름만 받는다.
+ * 단순 변심은 받은 날 + 7일, 이상·다름은 받은 날 + 3개월 안이다. 받은 날 기록이 없으면 기한 안으로 받는다.
+ * 에스크로 주문은 구매 확정 전에 주문 전체 항목만 받는다.
+ * @throws ShopProblem 400 invalid-body · 404 not-found · 409 merch-return-not-allowed·escrow-partial-not-allowed
+ */
+export function resolveReturnItems(
+  d: Pick<ShopOrderDetail, 'order' | 'items'>,
+  itemIds: readonly string[],
+  reason: ReturnReason,
+  entryOpensAtMs: number | undefined,
+  nowMs: number,
+): ShopOrderItem[] {
+  if (d.order.status !== 'PAID') throw merchReturnNotAllowed();
+  if (itemIds.length < 1 || itemIds.length > 20 || new Set(itemIds).size !== itemIds.length) throw badRequest('invalid-body');
+  const byId = new Map(d.items.map((i) => [i.itemId, i]));
+  for (const id of itemIds) if (!byId.has(id)) throw orderNotFound();
+  const selected = itemIds.map((id) => byId.get(id)!);
+  for (const item of selected) {
+    if (item.fulfillment === 'WALLET') {
+      const started = entryOpensAtMs !== undefined && nowMs >= entryOpensAtMs;
+      if (item.status !== 'READY' && item.status !== 'LOCKED') throw merchReturnNotAllowed();
+      if (started && reason !== 'DEFECT_OR_MISMATCH') throw merchReturnNotAllowed();
+    } else if (item.fulfillment === 'DELIVERY') {
+      if (item.status !== 'SHIPPED' && item.status !== 'DELIVERED') throw merchReturnNotAllowed();
+    } else if (item.status !== 'PICKED_UP') throw merchReturnNotAllowed();
+    const base = returnBaseAtMs(item);
+    if (base === null) continue;
+    if (reason === 'CHANGE_OF_MIND' && nowMs > base + RETURN_CHANGE_OF_MIND_MS) throw merchReturnNotAllowed();
+    if (reason === 'DEFECT_OR_MISMATCH' && nowMs > addCalendarMonthsKst(base, RETURN_DEFECT_MONTHS)) throw merchReturnNotAllowed();
+  }
+  const full = selected.length === d.items.length;
+  if (d.order.pgStore === 'ESCROW' && d.order.purchaseConfirmedAt === null && !full) throw escrowPartialNotAllowed();
+  return selected;
+}
+
+/** 판매자·CS 전이 동작(I11~I15). HTTP는 BAT-610 잔여(7.2.1)가 연다 */
+export type SellerReturnAction = 'RECEIVE' | 'REFUND' | 'REJECT' | 'CS_ACCEPT' | 'CS_DENY';
+
+/**
+ * 판매자·CS 전이의 도착 상태(I11~I15, planning/03 §2.13). 없으면 그 전이는 받지 않는다.
+ * RETURN_REQUESTED에서 바로 REFUNDED로 가지 않고 도착 확인(I11)을 거치며, DISPUTED의 환급은 CS 인정(I14)뿐이다.
+ */
+export function sellerReturnTransition(from: MerchItemStatus, action: SellerReturnAction): MerchItemStatus | undefined {
+  if (from === 'RETURN_REQUESTED' && action === 'RECEIVE') return 'RETURN_RECEIVED';
+  if (from === 'RETURN_RECEIVED' && action === 'REFUND') return 'REFUNDED';
+  if (from === 'RETURN_RECEIVED' && action === 'REJECT') return 'DISPUTED';
+  if (from === 'DISPUTED' && action === 'CS_ACCEPT') return 'REFUNDED';
+  if (from === 'DISPUTED' && action === 'CS_DENY') return 'DELIVERED';
+  return undefined;
+}
+
+/** 굿즈 환급 다시 부르기 다음 간격(ms). attempts는 이미 부른 횟수(처음 요청 뒤 다시 부른 횟수)다. 5회면 null */
+export function refundRetryNextDelayMs(attempts: number): number | null {
+  if (attempts >= REFUND_RETRY_MAX) return null;
+  return REFUND_RETRY_DELAYS_MIN[attempts]! * 60 * 1000;
 }
