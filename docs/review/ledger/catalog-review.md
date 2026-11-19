@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 66 | 24 | 0 | 0 | 0 | 0 | 0 | 16 | 10 | 116 |
-| 합계 | 66 | 24 | 0 | 0 | 0 | 0 | 0 | 16 | 10 | 116 |
+| B | 67 | 23 | 0 | 0 | 0 | 0 | 0 | 16 | 10 | 116 |
+| 합계 | 67 | 23 | 0 | 0 | 0 | 0 | 0 | 16 | 10 | 116 |
 
 ## docs/security/asvs/catalog-review.md
 
@@ -44,7 +44,7 @@
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/media-rules.test.ts 외 5곳 |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/save-answer.test.mjs, services/core-svc/test-int/seatmap-import.int.tes… |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/core-svc/test-int/catalog.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 7곳 |
-| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-deposit.int.t… |
+| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/internal-sale-config.int.test.ts, services/core-svc/test-int/production-image.int.test.ts… |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test/review.test.ts |
 | v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 해당 없음 | B | 해당 없음(이 범위에 한정 수량 자원이 없다. 좌석은 seat-hold에서 다루고, 회차당 후기 하나는 2.3.2의 유일 인덱스로 지킨다) |

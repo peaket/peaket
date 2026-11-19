@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 7 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 8 |
+| A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
 | B | 244 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 393 |
-| 합계 | 251 | 51 | 0 | 0 | 0 | 7 | 0 | 7 | 85 | 401 |
+| 합계 | 254 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 403 |
 
 ## docs/features/identity.md
 
@@ -51,7 +51,9 @@
 | I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 빈칸 | B | — |
 | I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 빈칸 | B | — |
 | I-T25 | — | 현장 책임자 권한 통제 | `gate_staff` 토큰과 대리 승인 토큰으로 예외 통과·기기 배치·부스 허용·확인 스캔을 시도하면 403이 돌아온다. 이 작업은 `gate_lead`… | 빈칸 | B | — |
-| I-T26 | — | 미사용 티켓 보유 회원의 탈퇴 | 남은 티켓의 환불 예상액과 양도 가능 여부 안내를 투명하게 보여 준다. 사용자가 최종 확인하면 취소·환불·탈퇴가 차례로 끝난다. | 다른 단계 | A | PRF-174 · 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(§1.5 ①, 돈)은 PRF-174(BAT-013)가 맡는다(2026-11-18 BAT-010 계획이 빈칸을 찾음, ADR-0283 결정 6). |
+| I-T26 | ① | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ① 환불 예상액·양도 가능 여부 안내: 탈퇴 요청이 409 `withdrawal-confirmation-required`와 `unusedTickets`(티켓… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal-http.test.t… |
+| I-T26 | ② | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ② 최종 확인 뒤 차례: `confirmCancelUnusedTickets: true`로 다시 보내면 표마다 사유… | 자동 시험 | A | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/account-withdraw/flow.test.mjs 외 5곳 |
+| I-T26 | ③ | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ③ 환급 실패·미룸 유지: 결제사 `CANCEL_PENDING`·`UNKNOWN`·`REJECTED`이거나 입장 기록 마감 뒤 환급이면 202이고 계정은… | 자동 시험 | A | 시험: services/identity-svc/test/withdrawal-retry.test.ts, services/purchase-svc/test-int/withdrawal-participant.int.test… |
 | I-T27 | — | 탈퇴 후 재가입 및 온세일 방어 | 탈퇴 때 CI 해시가 파기됐는지 확인한다. 바로 재가입하고 본인확인을 하는 것은 정상적으로 되지만, 탈퇴 뒤 5일 안에는 진행 중인 같은 공연에서 중복 순번이… | 자동 시험 | B | 시험: services/identity-svc/test-int/withdrawal.int.test.ts, services/identity-svc/test/withdrawal.test.ts 외 4곳 |
 | I-T28 | — | PBKDF2 비밀번호 해시 규격 검증 | DB에 저장된 해시 문자열에 `pbkdf2-sha256` 식별자, 600,000회 이상의 반복 파라미터, 페퍼 키 버전이 들어 있는지 검증한다. 다른 관리 계정… | 빈칸 | B | — |
 | I-T29 | — | 계정 연결 제안 발동 조건 | 검증된 이메일이 일치하는 활성 계정이 정확히 1개일 때만 연결 제안(`CreateSession`의 `link_proposal_id`, 웹은 SCR-039로… | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, services/identity-svc/test-int/link-proposal.int.te… |
