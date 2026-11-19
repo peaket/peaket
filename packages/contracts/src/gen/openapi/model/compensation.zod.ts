@@ -14,13 +14,13 @@ import * as zod from 'zod';
 export const Compensation = zod.object({
   "compensationId": zod.string().optional(),
   "orderId": zod.string().optional(),
-  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "amount": zod.int().optional().describe('그 주문의 대상 표 권면 합의 10%를 원 미만 올림한 값(예 33,333원 → 3,334원). 확정 때 계산해 저장하고 다시 확정해도 바뀌지 않는다'),
   "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
-  "accountLast4": zod.string().optional(),
-  "eventId": zod.string().optional(),
+  "accountLast4": zod.string().optional().describe('배상 계좌번호 끝 4자리. 계좌를 넣기 전에는 비어 있다'),
+  "eventId": zod.string().optional().describe('원래 회차. 상품 배상은 비어 있다'),
   "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5, BAT-425, ADR-0317). 회차 취소 확정이 주최 측 귀책(ORGANIZER)·공연 내용 변경(CONTENT_CHANGE)일 때 대상 주문마다 한 행이고, 금액은 그 주문의 대상 표 권면 합의 10%를 원 미만 올림해 한 번만 계산·저장한다(FORCE_MAJEURE는 행 0). 계좌번호 원문은 응답·로그·사건·Outbox에 싣지 않고 끝 4자리만 남긴다(POL-014). 상태는 ACCOUNT_PENDING(계좌 입력 대기)·REQUESTED(송금 요청됨)·PAID(송금 완료, payment-svc가 COMPENSATION_ADVANCE 미수금을 만든다)·FAILED(송금 실패, CS COMPENSATION_PENDING 한 건). 응답은 Cache-Control: private, no-store다')
 
 export type Compensation = zod.input<typeof Compensation>;
 export type CompensationOutput = zod.output<typeof Compensation>;

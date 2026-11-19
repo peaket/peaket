@@ -10,6 +10,11 @@ const CANCELLATION_ID = /^[A-Za-z0-9_-]{9,64}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 /** 취소 사유 길이 상한 200자 [가정](토스 cancelReason 상한과 같다) */
 export const CONFIRMED_CANCEL_REASON_MAX = 200;
+/**
+ * 같은 취소 ID의 계좌 다시 받기 시도 상한(BAT-425, ADR-0316). 0은 첫 시도, 1~3 [가정]은 계좌를 다시 받은 시도다.
+ * 4 이상은 payment-svc가 결제사·저장소에 가기 전에 INVALID_ARGUMENT로 거절한다.
+ */
+export const CONFIRMED_CANCEL_MAX_ATTEMPT = 3;
 /** payment_event의 내부 표시: 결제사 일반 취소 호출 앞에 남긴다(exported = false) */
 export const CONFIRMED_CANCEL_SENT_EVENT_TYPE = 'CONFIRMED_CANCEL_SENT';
 
@@ -20,6 +25,8 @@ export interface ConfirmedCancelInput {
   readonly reason: string;
   /** 환급액(원). 없으면 남은 전액이다 */
   readonly amount?: number;
+  /** 같은 취소 ID의 계좌 다시 받기 시도 번호. 없으면 0(첫 시도)이다(ADR-0316) */
+  readonly refundAttempt?: number;
   /**
    * 가상계좌 결제의 환불 계좌(검사 전, 선택). 모양이 맞을 때만 결제사 본문에 싣고 저장·기록하지 않는다
    * (docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090)
@@ -41,6 +48,8 @@ export interface ConfirmedCancelTarget {
   readonly amount: number;
   readonly cancelledAmount: number;
   readonly status: PaymentLedgerStatus;
+  /** 가상계좌 결제인가(AWAITING_DEPOSIT 사건이 있다). 새 계좌 시도 전 앞 진행 중 행 정리의 조건이다(BAT-425) */
+  readonly virtualAccount?: boolean;
 }
 
 /** 같은 결제의 다른 진행 중 취소 건이 이보다 어리면 보내지 않는다(10분 [가정], docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액') */
@@ -53,13 +62,25 @@ export type PaymentCancelStatus = 'REQUESTED' | 'CANCEL_PENDING' | 'CANCELED' | 
 
 /** 첫 전송 직전에 저장한 취소 건(payment_cancel 한 행). 재시도는 이 값을 그대로 보낸다 */
 export interface ConfirmedCancelRecord {
-  /** cancel-{cancellationId} */
+  /** cancel-{cancellationId}(첫 시도) 또는 cancel-{cancellationId}-a{n}(계좌 다시 받기 시도) */
   readonly idemKey: string;
+  /** 같은 취소 ID의 시도 번호(0~3 [가정], ADR-0316). 옛 값에는 없어 0으로 본다 */
+  readonly attempt?: number;
   readonly amount: number;
   readonly reason: string;
   readonly fullCancel: boolean;
   readonly expectedBalance: number;
   readonly status: PaymentCancelStatus;
+  readonly createdAtMs: number;
+}
+
+/** 앞 진행 중 취소 행(새 계좌 시도 전에 조회로 닫을지 가른다, BAT-425, ADR-0316) */
+export interface ConfirmedCancelInProgress {
+  readonly idemKey: string;
+  readonly attempt: number;
+  readonly amount: number;
+  readonly expectedBalance: number;
+  readonly status: 'REQUESTED' | 'CANCEL_PENDING';
   readonly createdAtMs: number;
 }
 
@@ -110,18 +131,19 @@ export interface ConfirmedCancelAnswer {
   readonly cancelledAmount: number;
 }
 
-/** 입력을 검사한다. @throws PaymentInputError 결제 ID·취소 ID·사유·금액이 틀림 */
+/** 입력을 검사한다. @throws PaymentInputError 결제 ID·취소 ID·사유·금액·시도 번호가 틀림 */
 export function parseConfirmedCancel(input: ConfirmedCancelInput): ConfirmedCancelInput {
   if (!isLowerUuid(input.paymentId)) throw new PaymentInputError('payment_id');
   if (!CANCELLATION_ID.test(input.cancellationId)) throw new PaymentInputError('cancellation_id');
   if (input.reason.length === 0 || input.reason.length > CONFIRMED_CANCEL_REASON_MAX || CONTROL.test(input.reason)) throw new PaymentInputError('reason');
   if (input.amount !== undefined && (!Number.isSafeInteger(input.amount) || input.amount < 1)) throw new PaymentInputError('amount');
+  if (input.refundAttempt !== undefined && (!Number.isSafeInteger(input.refundAttempt) || input.refundAttempt < 0 || input.refundAttempt > CONFIRMED_CANCEL_MAX_ATTEMPT)) throw new PaymentInputError('refund_attempt');
   return input;
 }
 
-/** 결제사 멱등키 cancel-{cancellationId}(입금 전 취소와 같은 규칙) */
-export function confirmedCancelIdemKey(cancellationId: string): string {
-  return `cancel-${cancellationId}`;
+/** 결제사 멱등키. 첫 시도는 cancel-{cancellationId}, 계좌 다시 받기 시도는 cancel-{cancellationId}-a{n}이다(ADR-0316) */
+export function confirmedCancelIdemKey(cancellationId: string, attempt = 0): string {
+  return attempt === 0 ? `cancel-${cancellationId}` : `cancel-${cancellationId}-a${attempt}`;
 }
 
 /** 내부 표시의 event_key(UUID 버전 8, 결제 ID·취소 ID에서 정해진다) */

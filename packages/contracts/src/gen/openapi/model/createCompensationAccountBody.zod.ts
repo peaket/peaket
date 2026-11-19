@@ -20,10 +20,10 @@ export const createCompensationAccountBodyHolderNameMax = 60;
 
 
 export const CreateCompensationAccountBody = zod.object({
-  "bankCode": zod.string().regex(createCompensationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
+  "bankCode": zod.string().regex(createCompensationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 두 자리 숫자 26개만 받는다: 02 KDB산업·03 IBK기업·06 KB국민·07 수협·11 농협·12 지역농협·20 우리·23 SC제일·27 씨티·31 대구·32 부산·34 광주·35 제주·37 전북·39 경남·45 새마을금고·48 신협·50 저축은행·54 HSBC·64 산림조합·71 우체국·81 하나·88 신한·89 케이뱅크·90 카카오뱅크·92 토스뱅크(토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 목록 밖 두 자리(예 04·99)와 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾼다(payment §6 \'구현에서 정한 것\' ②, RN-01)'),
   "accountNumber": zod.string().min(1).max(createCompensationAccountBodyAccountNumberMax).regex(createCompensationAccountBodyAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
   "holderName": zod.string().min(1).max(createCompensationAccountBodyHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
-}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드는 토스 은행 코드 표의 두 자리 26개 허용 목록, 계좌번호는 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주는 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 재인증 확인·Saga·행 쓰기 전에 400 invalid-body다. payment-svc refundAccountOf도 같은 목록으로 한 번 더 막고, 틀리면 계좌가 없는 것과 같게 다룬다(깊은 방어, docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-20, BAT-425, ADR-0316)')
 
 export type CreateCompensationAccountBody = zod.input<typeof CreateCompensationAccountBody>;
 export type CreateCompensationAccountBodyOutput = zod.output<typeof CreateCompensationAccountBody>;

@@ -1,6 +1,6 @@
 {
   "id": "36a6b976-9cff-43f5-9afa-dab95b079937",
-  "prevId": "f2b73e66-2242-4a38-98f3-b4cd8afe40db",
+  "prevId": "bce2400c-fed8-4e37-81ab-8556dad7eea5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -74,7 +74,14 @@
           "name": "event_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "order_kind": {
+          "name": "order_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'TICKET'"
         },
         "attempt_id": {
           "name": "attempt_id",
@@ -395,6 +402,14 @@
         "payment_pg_store_check": {
           "name": "payment_pg_store_check",
           "value": "\"payment\".\"pg_store\" IN ('STANDARD', 'ESCROW')"
+        },
+        "payment_order_kind_check": {
+          "name": "payment_order_kind_check",
+          "value": "\"payment\".\"order_kind\" IN ('TICKET', 'MERCH')"
+        },
+        "payment_order_kind_event_check": {
+          "name": "payment_order_kind_event_check",
+          "value": "(\"payment\".\"order_kind\" = 'TICKET') = (\"payment\".\"event_id\" IS NOT NULL)"
         },
         "payment_amount_check": {
           "name": "payment_amount_check",

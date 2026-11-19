@@ -15,8 +15,13 @@ export type ReceivableStatus = 'OPEN' | 'OFFSET' | 'GUARANTEE' | 'BILLED' | 'CLO
 export interface ReceivableRecord {
   receivableId: string;
   promoterId: string;
-  pg: Pg;
+  /** 돈이 빠진 결제사. COMPENSATION_ADVANCE(배상금 미리 지급)는 결제사 무관이라 null이다(ADR-0317) */
+  pg: Pg | null;
   cause: ReceivableCause;
+  /** 원래 회차. 상품 환급은 null */
+  eventId?: string | null;
+  /** 원천 참조. 배상은 `compensation:{id}`이고 부분 유일 인덱스의 재료다(0024) */
+  sourceRef?: string | null;
   amount: number;
   remaining: number;
   status: ReceivableStatus;

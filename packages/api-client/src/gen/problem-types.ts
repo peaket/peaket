@@ -35,6 +35,7 @@ export type ProblemType =
   | 'booth-not-authorized'
   | 'cancel-deadline-passed'
   | 'cancellation-conflict'
+  | 'cancellation-not-account-pending'
   | 'case-not-actioned'
   | 'checkpoint-empty'
   | 'command-not-executable'
@@ -44,6 +45,9 @@ export type ProblemType =
   | 'command-role-forbidden'
   | 'commander-removal-needs-role-change'
   | 'commander-required'
+  | 'compensation-not-account-pending'
+  | 'compensation-transfer-failed'
+  | 'compensation-transfer-unavailable'
   | 'consent-required'
   | 'consent-version-outdated'
   | 'current-password-invalid'
@@ -232,6 +236,7 @@ export type ProblemType =
   | 'reauth-unavailable'
   | 'refresh-token-invalid'
   | 'refund-account-required'
+  | 'refund-rejected'
   | 'rejection-not-allowed'
   | 'report-limited'
   | 'research-export-not-ready'
@@ -356,6 +361,7 @@ export const PROBLEM_TYPES = {
   'booth-not-authorized': { status: 403, title: "부스 재발급 허용이 없거나 10분이 지났습니다" },
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
+  'cancellation-not-account-pending': { status: 409, title: "환급 계좌를 기다리는 취소가 아닙니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
   'checkpoint-empty': { status: 409, title: "묶을 감사 기록이 없습니다" },
   'command-not-executable': { status: 409, title: "실행할 수 있는 명령이 아닙니다" },
@@ -365,6 +371,9 @@ export const PROBLEM_TYPES = {
   'command-role-forbidden': { status: 403, title: "이 명령을 할 수 있는 역할이 아닙니다" },
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },
   'commander-required': { status: 403, title: "간격 예외는 commander만 쓸 수 있습니다" },
+  'compensation-not-account-pending': { status: 409, title: "배상 계좌를 기다리는 건이 아닙니다" },
+  'compensation-transfer-failed': { status: 422, title: "배상금 송금이 실패했습니다. 고객센터가 이어 봅니다" },
+  'compensation-transfer-unavailable': { status: 503, title: "지금은 배상금을 보낼 수 없습니다" },
   'consent-required': { status: 422, title: "동의가 필요합니다" },
   'consent-version-outdated': { status: 422, title: "동의 문안이 바뀌었습니다. 다시 확인해 주세요" },
   'current-password-invalid': { status: 422, title: "지금 비밀번호가 맞지 않습니다" },
@@ -553,6 +562,7 @@ export const PROBLEM_TYPES = {
   'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },
+  'refund-rejected': { status: 422, title: "결제사가 환급을 거절했습니다. 고객센터가 이어 봅니다" },
   'rejection-not-allowed': { status: 403, title: "판정 전 반려는 commander만 할 수 있습니다" },
   'report-limited': { status: 429, title: "오늘은 더 신고할 수 없습니다" },
   'research-export-not-ready': { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" },

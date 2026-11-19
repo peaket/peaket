@@ -38,6 +38,7 @@ import type {
   PaymentAccept,
   PaymentAttempt,
   ProblemResponse,
+  RefundAccount,
   ServiceUnavailableResponse,
   ShopOrderCancellationInput,
   ShopOrderDetail,
@@ -1131,6 +1132,149 @@ export const useCreateShopOrderCancellation = <TError = ErrorType<ProblemRespons
         TContext
       > => {
       return useMutation(getCreateShopOrderCancellationMutationOptions(options), queryClient);
+    }
+    export type createShopCancellationAccountResponse202 = {
+  data: Cancellation
+  status: 202
+}
+
+export type createShopCancellationAccountResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createShopCancellationAccountResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createShopCancellationAccountResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createShopCancellationAccountResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createShopCancellationAccountResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createShopCancellationAccountResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
+export type createShopCancellationAccountResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createShopCancellationAccountResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createShopCancellationAccountResponseSuccess = (createShopCancellationAccountResponse202) & {
+  headers: Headers;
+};
+export type createShopCancellationAccountResponseError = (createShopCancellationAccountResponse400 | createShopCancellationAccountResponse401 | createShopCancellationAccountResponse403 | createShopCancellationAccountResponse404 | createShopCancellationAccountResponse409 | createShopCancellationAccountResponse415 | createShopCancellationAccountResponse422 | createShopCancellationAccountResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateShopCancellationAccountUrl = (orderId: string,
+    cancellationId: string,) => {
+
+
+
+
+  return `/v1/shop/orders/${encodeURIComponent(String(orderId))}/cancellations/${encodeURIComponent(String(cancellationId))}/account`
+}
+
+/**
+ * FR-015, POL-014, POL-016, ADR-0050 결정 3, ADR-0293, ADR-0315, BAT-425(추천 적용 2026-11-20). 배송·수령 전 취소나 미수령 자동 취소가 결제사 계좌 거절로 끝나 merch_refund가 REJECTED·fail_reason REFUND_ACCOUNT_REQUIRED·account_required_at 있음일 때만 받는다. 그 밖은 409 merch-cancel-not-allowed이고, 없거나 남의 주문은 같은 404다. 재인증은 op SHOP_CANCEL_REFUND_ACCOUNT·act FAN_HIGH_RISK이고 한 번만 쓴다(403 reauth-required, 확인기·jti 저장소 장애 503 reauth-unavailable·Retry-After 5초 [가정]). 같은 트랜잭션이 새 merch_refund 행(새 UUIDv7 취소 ID, replaces_refund_id = 옛 ID, kind·amount 그대로, 처음 REQUESTED)과 새 merch_refund_item 자리를 만들고, 옛 행은 REJECTED 그대로 둔다. 커밋 뒤 새 취소 ID로 payment-svc CancelPayment를 부른다. 계좌는 merch_refund·로그·사건·Outbox·지표에 저장하지 않는다. CANCELLED면 항목 REFUNDED·환급 행 CANCELLED, CANCEL_PENDING·UNKNOWN이면 항목 CANCELLED·환급 행 CANCEL_PENDING·재시도·202 REFUND_PENDING, REFUND_ACCOUNT_REQUIRED면 422 refund-account-required·새 행 REJECTED·account_required_at, 그 밖 REJECTED면 422 refund-rejected다. 같은 Idempotency-Key는 같은 답이고 새 행을 두 번 만들지 않는다
+ * @summary 굿즈 지연 환급 계좌 다시 받기(주문 계정 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
+ */
+export const createShopCancellationAccount = async (orderId: string,
+    cancellationId: string,
+    refundAccount: RefundAccount, options?: Parameters<typeof orvalFetch>[1]): Promise<createShopCancellationAccountResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createShopCancellationAccountResponseSuccess>(getCreateShopCancellationAccountUrl(orderId,cancellationId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(refundAccount)
+  }
+);}
+
+
+
+
+
+export const getCreateShopCancellationAccountMutationKey = () => ['createShopCancellationAccount'] as const;
+
+export const getCreateShopCancellationAccountMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createShopCancellationAccount>>, TError,CreateShopCancellationAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createShopCancellationAccount>>, TError,CreateShopCancellationAccountMutationVariables, TContext> => {
+
+const mutationKey = getCreateShopCancellationAccountMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createShopCancellationAccount>>, CreateShopCancellationAccountMutationVariables> = (props) => {
+          const {orderId,cancellationId,data} = props ?? {};
+
+          return  createShopCancellationAccount(orderId,cancellationId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateShopCancellationAccountMutationResult = NonNullable<Awaited<ReturnType<typeof createShopCancellationAccount>>>
+    export type CreateShopCancellationAccountMutationBody = BodyType<RefundAccount>
+    export type CreateShopCancellationAccountMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
+    export type CreateShopCancellationAccountMutationVariables = {orderId: string;cancellationId: string;data: BodyType<RefundAccount>}
+
+    /**
+ * @summary 굿즈 지연 환급 계좌 다시 받기(주문 계정 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
+ */
+export const useCreateShopCancellationAccount = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createShopCancellationAccount>>, TError,CreateShopCancellationAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createShopCancellationAccount>>,
+        TError,
+        CreateShopCancellationAccountMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateShopCancellationAccountMutationOptions(options), queryClient);
     }
     export type createShopOrderReturnResponse200 = {
   data: ShopOrderDetail

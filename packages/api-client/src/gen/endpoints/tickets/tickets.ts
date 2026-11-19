@@ -1665,9 +1665,24 @@ export type createCompensationAccountResponse202 = {
   status: 202
 }
 
+export type createCompensationAccountResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createCompensationAccountResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
 export type createCompensationAccountResponse403 = {
   data: ProblemResponse
   status: 403
+}
+
+export type createCompensationAccountResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type createCompensationAccountResponse409 = {
@@ -1675,10 +1690,25 @@ export type createCompensationAccountResponse409 = {
   status: 409
 }
 
+export type createCompensationAccountResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
+export type createCompensationAccountResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createCompensationAccountResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createCompensationAccountResponseSuccess = (createCompensationAccountResponse202) & {
   headers: Headers;
 };
-export type createCompensationAccountResponseError = (createCompensationAccountResponse403 | createCompensationAccountResponse409) & {
+export type createCompensationAccountResponseError = (createCompensationAccountResponse400 | createCompensationAccountResponse401 | createCompensationAccountResponse403 | createCompensationAccountResponse404 | createCompensationAccountResponse409 | createCompensationAccountResponse415 | createCompensationAccountResponse422 | createCompensationAccountResponse503) & {
   headers: Headers;
 };
 
@@ -1691,11 +1721,11 @@ export const getCreateCompensationAccountUrl = (compensationId: string,) => {
 }
 
 /**
- * FR-056, POL-014, POL-019, ADR-0046 결정 5. 돈이 나갈 계좌를 정하는 작업이라 재인증을 요구한다(추천 적용 2026-10-26, ADR-0089)
+ * FR-056, POL-014, POL-019, ADR-0046 결정 5, ADR-0293, ADR-0317(추천 적용 2026-11-20, BAT-425). 돈이 나갈 계좌를 정하는 작업이라 재인증(op COMPENSATION_ACCOUNT·act FAN_HIGH_RISK)을 요구하고 계좌는 저장하지 않으며 account_last4만 남긴다. ACCOUNT_PENDING일 때만 받고(PAID·FAILED·REQUESTED는 409 compensation-not-account-pending), 없거나 남의 건은 같은 404다. 계좌 모양은 RefundAccount와 같고 26개 허용 목록 밖이면 400이다. purchase-svc가 payment-svc RequestCompensationTransfer를 compensation_id 멱등으로 부른다. REQUESTED·PAID면 202 Compensation, UNAVAILABLE이면 503 compensation-transfer-unavailable(Retry-After 5초 [가정]), FAILED면 422 compensation-transfer-failed·status FAILED·CS COMPENSATION_PENDING 한 건이다
  * @summary 배상금 받을 계좌 입력(결제자 본인). 저장하지 않고 송금 요청에 바로 넘김
  */
 export const createCompensationAccount = async (compensationId: string,
-    refundAccount?: RefundAccount, options?: Parameters<typeof orvalFetch>[1]): Promise<createCompensationAccountResponseSuccess> => {
+    refundAccount: RefundAccount, options?: Parameters<typeof orvalFetch>[1]): Promise<createCompensationAccountResponseSuccess> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1726,7 +1756,7 @@ return orvalFetch<createCompensationAccountResponseSuccess>(getCreateCompensatio
 
 export const getCreateCompensationAccountMutationKey = () => ['createCompensationAccount'] as const;
 
-export const getCreateCompensationAccountMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateCompensationAccountMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCompensationAccount>>, TError,CreateCompensationAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCompensationAccount>>, TError,CreateCompensationAccountMutationVariables, TContext> => {
 
@@ -1754,14 +1784,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type CreateCompensationAccountMutationResult = NonNullable<Awaited<ReturnType<typeof createCompensationAccount>>>
-    export type CreateCompensationAccountMutationBody = BodyType<RefundAccount> | undefined
-    export type CreateCompensationAccountMutationError = ErrorType<ProblemResponse>
-    export type CreateCompensationAccountMutationVariables = {compensationId: string;data?: BodyType<RefundAccount>}
+    export type CreateCompensationAccountMutationBody = BodyType<RefundAccount>
+    export type CreateCompensationAccountMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
+    export type CreateCompensationAccountMutationVariables = {compensationId: string;data: BodyType<RefundAccount>}
 
     /**
  * @summary 배상금 받을 계좌 입력(결제자 본인). 저장하지 않고 송금 요청에 바로 넘김
  */
-export const useCreateCompensationAccount = <TError = ErrorType<ProblemResponse>,
+export const useCreateCompensationAccount = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCompensationAccount>>, TError,CreateCompensationAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCompensationAccount>>,
@@ -1774,6 +1804,16 @@ export const useCreateCompensationAccount = <TError = ErrorType<ProblemResponse>
     export type createCancellationAccountResponse202 = {
   data: Cancellation
   status: 202
+}
+
+export type createCancellationAccountResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createCancellationAccountResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
 }
 
 export type createCancellationAccountResponse403 = {
@@ -1791,15 +1831,25 @@ export type createCancellationAccountResponse409 = {
   status: 409
 }
 
+export type createCancellationAccountResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
 export type createCancellationAccountResponse422 = {
   data: ProblemResponse
   status: 422
 }
 
+export type createCancellationAccountResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createCancellationAccountResponseSuccess = (createCancellationAccountResponse202) & {
   headers: Headers;
 };
-export type createCancellationAccountResponseError = (createCancellationAccountResponse403 | createCancellationAccountResponse404 | createCancellationAccountResponse409 | createCancellationAccountResponse422) & {
+export type createCancellationAccountResponseError = (createCancellationAccountResponse400 | createCancellationAccountResponse401 | createCancellationAccountResponse403 | createCancellationAccountResponse404 | createCancellationAccountResponse409 | createCancellationAccountResponse415 | createCancellationAccountResponse422 | createCancellationAccountResponse503) & {
   headers: Headers;
 };
 
@@ -1812,8 +1862,8 @@ export const getCreateCancellationAccountUrl = (cancellationId: string,) => {
 }
 
 /**
- * FR-047, POL-014, POL-019, ADR-0050 결정 3, ADR-0089(추천 적용 2026-10-26). 환급을 미뤘던 취소(입장 시작 뒤 취소, 결제사 취소 장애, 회차 취소·연기)의 환급을 실행할 수 있게 되면 알림이 SCR-060을 연다. 취소 상태가 REFUND_PENDING이고 계좌를 기다리는 건(CS 처리함 REFUND_ACCOUNT_PENDING)만 받는다. 계좌는 저장하지 않고 같은 요청 안의 즉시 재시도에만 쓴다(payment §6). 돈이 나갈 계좌를 정하는 작업이라 재인증을 요구한다
- * @summary 지연 환급 계좌 입력(가상계좌로 결제한 결제자 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
+ * FR-047, POL-014, POL-019, ADR-0050 결정 3, ADR-0293, ADR-0316(추천 적용 2026-11-20, BAT-425). 환급을 미뤘던 취소(입장 시작 뒤 취소, 결제사 취소 장애, 회차 취소·연기)의 환급을 실행할 수 있게 되면 알림이 SCR-060을 연다. 결제자 본인이고 order_cancellation이 REFUND_PENDING이며 refund_account_required_at이 있고 refund_attempt < 3 [가정]일 때만 받는다. 그 밖은 409 cancellation-not-account-pending(이미 환급했거나 진행 중이거나 계좌가 필요 없는 결제 수단)이고, 없는 취소와 남의 취소는 같은 404 not-found이며 쓰기가 0이다. 재인증은 op REFUND_ACCOUNT·act FAN_HIGH_RISK이고 한 번만 쓴다(403 reauth-required, 확인기·jti 저장소 장애 503 reauth-unavailable·Retry-After 5초 [가정]). 계좌는 purchase DB·payment DB·로그·사건·Outbox·지표 어디에도 저장하지 않고, 같은 요청의 결제사 취소에만 쓴다. 같은 Idempotency-Key는 시도를 올리지 않고 같은 답을 주며, 다른 키는 refund_attempt를 1 올려 새 멱등키 cancel-{cancellationId}-a{n}으로 payment-svc CancelPayment를 부른다. CANCELLED면 202 REFUNDED, CANCEL_PENDING·UNKNOWN이면 202 REFUND_PENDING·next_refund_at 1분 [가정], REFUND_ACCOUNT_REQUIRED면 422 refund-account-required·계좌 대기 유지, 그 밖 REJECTED면 422 refund-rejected·CS '환급 실패'다
+ * @summary 지연 환급 계좌 다시 받기(가상계좌로 결제한 결제자 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
  */
 export const createCancellationAccount = async (cancellationId: string,
     refundAccount: RefundAccount, options?: Parameters<typeof orvalFetch>[1]): Promise<createCancellationAccountResponseSuccess> => {
@@ -1847,7 +1897,7 @@ return orvalFetch<createCancellationAccountResponseSuccess>(getCreateCancellatio
 
 export const getCreateCancellationAccountMutationKey = () => ['createCancellationAccount'] as const;
 
-export const getCreateCancellationAccountMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateCancellationAccountMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCancellationAccount>>, TError,CreateCancellationAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCancellationAccount>>, TError,CreateCancellationAccountMutationVariables, TContext> => {
 
@@ -1876,13 +1926,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCancellationAccountMutationResult = NonNullable<Awaited<ReturnType<typeof createCancellationAccount>>>
     export type CreateCancellationAccountMutationBody = BodyType<RefundAccount>
-    export type CreateCancellationAccountMutationError = ErrorType<ProblemResponse>
+    export type CreateCancellationAccountMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
     export type CreateCancellationAccountMutationVariables = {cancellationId: string;data: BodyType<RefundAccount>}
 
     /**
- * @summary 지연 환급 계좌 입력(가상계좌로 결제한 결제자 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
+ * @summary 지연 환급 계좌 다시 받기(가상계좌로 결제한 결제자 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
  */
-export const useCreateCancellationAccount = <TError = ErrorType<ProblemResponse>,
+export const useCreateCancellationAccount = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCancellationAccount>>, TError,CreateCancellationAccountMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCancellationAccount>>,

@@ -218,8 +218,11 @@ export const partnerReceivable = pgTable(
   {
     id: uuid('id').primaryKey(),
     promoterId: uuid('promoter_id').notNull(),
-    pg: text('pg').notNull(),
+    // 배상금 미리 지급(COMPENSATION_ADVANCE)은 결제사 무관이라 null이다(ADR-0317)
+    pg: text('pg'),
     cause: text('cause').notNull(),
+    eventId: uuid('event_id'),
+    sourceRef: text('source_ref'),
     amount: amount('amount').notNull(),
     remaining: amount('remaining').notNull(),
     status: text('status').notNull().default('OPEN'),
@@ -227,11 +230,13 @@ export const partnerReceivable = pgTable(
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [
-    check('partner_receivable_pg_check', sql`${t.pg} in (${PG})`),
+    check('partner_receivable_pg_check', sql`${t.pg} is null or ${t.pg} in (${PG})`),
     check('partner_receivable_cause_check', sql`${t.cause} in ('REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT')`),
     check('partner_receivable_status_check', sql`${t.status} in ('OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF')`),
     check('partner_receivable_amount_check', sql`${t.amount} >= 0 and ${t.remaining} >= 0 and ${t.remaining} <= ${t.amount}`),
     index('partner_receivable_open_idx').on(t.promoterId, t.pg, t.status, t.createdAt),
+    // 배상 미수금 하나에 source_ref 하나(0024). 다른 원천은 null이라 걸리지 않는다
+    uniqueIndex('partner_receivable_source_ref_uidx').on(t.sourceRef).where(sql`${t.sourceRef} is not null`),
   ],
 );
 

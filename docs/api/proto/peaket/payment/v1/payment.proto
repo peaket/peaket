@@ -359,6 +359,12 @@ message CancelPaymentRequest {
   // (ADR-0050 결정 3, docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', 추천 적용 2026-11-19, BUILD_ORDER GAT-090).
   // 가상계좌가 아닌 결제에 온 계좌는 결제사로 보내지 않고 버린다.
   RefundAccount refund_account = 6;
+  // 같은 취소 ID의 계좌 다시 받기 시도 번호(추천 적용 2026-11-20, BAT-425, ADR-0316, docs/features/payment.md §4.1).
+  // 0/빈 값 = 첫 시도이고 멱등키는 cancel-{cancellation_id}다. 1~3 [가정] = 지연 환급 계좌를 다시 받은 시도이고 멱등키는
+  // cancel-{cancellation_id}-a{n}이다. 4 이상은 INVALID_ARGUMENT다(시도 상한 3회 [가정]).
+  // 시도 0이 CANCELED면 같은 취소 ID의 새 시도는 만들지 않고 CANCELLED다. FAILED(SUPERSEDED)로 닫은 옛 시도를 다시 부르면
+  // 결제사 0·REJECTED다. 다른 취소 ID의 시도 0(회차 취소·부정 예매·탈퇴)은 지금 그대로다.
+  uint32 refund_attempt = 7;
 }
 
 // 가상계좌 환불을 받을 구매자 계좌. 이 호출 안에서만 쓰고 저장하지 않는다. 로그에 싣지 않는다.
@@ -505,12 +511,20 @@ message RequestCompensationTransferRequest {
   string holder_name = 7;
   // 요청한 관리 계정(감사 기록용)
   string requested_by = 8;
+  // 배상금을 상계할 파트너(주최 측). PAID일 때 COMPENSATION_ADVANCE 미수금의 promoter_id가 된다(BAT-425, ADR-0317, settlement §7).
+  string promoter_id = 9;
+  // 원래 회차. 상품 배상은 비운다. PAID일 때 미수금의 event_id가 된다.
+  string event_id = 10;
 }
 
 message RequestCompensationTransferResponse {
   string transfer_id = 1;
   CompensationTransferStatus status = 2;
   string failure_reason = 3;
+  // PAID일 때 만든 partner_receivable(COMPENSATION_ADVANCE)의 ID. REQUESTED·FAILED·UNAVAILABLE이면 비운다(BAT-425, ADR-0317).
+  string receivable_id = 4;
+  // 계좌번호 끝 4자리만. 계좌 원문은 저장·응답에 싣지 않는다(POL-014).
+  string account_last4 = 5;
 }
 
 message GetCompensationTransferRequest {

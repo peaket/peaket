@@ -96,6 +96,10 @@ export interface SettlementStore {
   findProductStatement(promoterId: string, pg: Pg, pgStore: PgStore, periodStart: string, periodEnd: string): Promise<StatementRecord | undefined>;
   // ---- 미수금 상계(settlement §7) ----
   insertReceivable(record: ReceivableRecord): Promise<void>;
+  /** source_ref 부분 유일(0024)에 걸리면 새로 쓰지 않고 false. 배상 미수금의 겹친 두 요청은 한 행만 남긴다 */
+  insertReceivableIfAbsent(record: ReceivableRecord): Promise<boolean>;
+  /** source_ref로 한 행(배상 미수금 멱등). 없으면 undefined */
+  findReceivableBySourceRef(sourceRef: string): Promise<ReceivableRecord | undefined>;
   saveReceivable(record: ReceivableRecord): Promise<void>;
   listReceivables(filter: { promoterId?: string | undefined; pg?: Pg | undefined; status?: readonly ReceivableStatus[] | undefined; limit: number }): Promise<ReceivableRecord[]>;
   listOpenReceivables(promoterId: string, pg: Pg): Promise<ReceivableRecord[]>;

@@ -414,13 +414,49 @@ export const CreateShopOrderCancellationBody = zod.object({
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('취소할 항목. 없으면 READY 항목 전부'),
   "refundAccount": zod.object({
-  "bankCode": zod.string().regex(createShopOrderCancellationBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
+  "bankCode": zod.string().regex(createShopOrderCancellationBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 두 자리 숫자 26개만 받는다: 02 KDB산업·03 IBK기업·06 KB국민·07 수협·11 농협·12 지역농협·20 우리·23 SC제일·27 씨티·31 대구·32 부산·34 광주·35 제주·37 전북·39 경남·45 새마을금고·48 신협·50 저축은행·54 HSBC·64 산림조합·71 우체국·81 하나·88 신한·89 케이뱅크·90 카카오뱅크·92 토스뱅크(토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 목록 밖 두 자리(예 04·99)와 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾼다(payment §6 \'구현에서 정한 것\' ②, RN-01)'),
   "accountNumber": zod.string().min(1).max(createShopOrderCancellationBodyRefundAccountAccountNumberMax).regex(createShopOrderCancellationBodyRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
   "holderName": zod.string().min(1).max(createShopOrderCancellationBodyRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
 }).strict().optional().describe('가상계좌 결제일 때 필수. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014). 보내면 X-Reauth-Token이 필수다')
 }).strict().describe('굿즈·부가 상품 주문 취소 본문(POL-016 §1.4)')
 
 export const CreateShopOrderCancellationResponse = zod.object({
+  "cancellationId": zod.string().optional(),
+  "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
+  "refundAmount": zod.int().optional(),
+  "refundAccountRequired": zod.boolean().optional().describe('REFUND_PENDING이고 환불 계좌를 기다리는 건(결제사가 계좌를 거절했거나 계좌 없이 일괄 환불에 든 가상계좌 결제). 화면은 SCR-060 안내를 보인다. 없으면 거짓으로 본다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BUILD_ORDER GAT-090)')
+})
+
+/**
+ * FR-015, POL-014, POL-016, ADR-0050 결정 3, ADR-0293, ADR-0315, BAT-425(추천 적용 2026-11-20). 배송·수령 전 취소나 미수령 자동 취소가 결제사 계좌 거절로 끝나 merch_refund가 REJECTED·fail_reason REFUND_ACCOUNT_REQUIRED·account_required_at 있음일 때만 받는다. 그 밖은 409 merch-cancel-not-allowed이고, 없거나 남의 주문은 같은 404다. 재인증은 op SHOP_CANCEL_REFUND_ACCOUNT·act FAN_HIGH_RISK이고 한 번만 쓴다(403 reauth-required, 확인기·jti 저장소 장애 503 reauth-unavailable·Retry-After 5초 [가정]). 같은 트랜잭션이 새 merch_refund 행(새 UUIDv7 취소 ID, replaces_refund_id = 옛 ID, kind·amount 그대로, 처음 REQUESTED)과 새 merch_refund_item 자리를 만들고, 옛 행은 REJECTED 그대로 둔다. 커밋 뒤 새 취소 ID로 payment-svc CancelPayment를 부른다. 계좌는 merch_refund·로그·사건·Outbox·지표에 저장하지 않는다. CANCELLED면 항목 REFUNDED·환급 행 CANCELLED, CANCEL_PENDING·UNKNOWN이면 항목 CANCELLED·환급 행 CANCEL_PENDING·재시도·202 REFUND_PENDING, REFUND_ACCOUNT_REQUIRED면 422 refund-account-required·새 행 REJECTED·account_required_at, 그 밖 REJECTED면 422 refund-rejected다. 같은 Idempotency-Key는 같은 답이고 새 행을 두 번 만들지 않는다
+ * @summary 굿즈 지연 환급 계좌 다시 받기(주문 계정 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
+ */
+export const CreateShopCancellationAccountParams = zod.object({
+  "orderId": zod.string(),
+  "cancellationId": zod.string()
+})
+
+export const CreateShopCancellationAccountHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+export const createShopCancellationAccountBodyBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createShopCancellationAccountBodyAccountNumberMax = 30;
+
+
+export const createShopCancellationAccountBodyAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const createShopCancellationAccountBodyHolderNameMax = 60;
+
+
+
+export const CreateShopCancellationAccountBody = zod.object({
+  "bankCode": zod.string().regex(createShopCancellationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 두 자리 숫자 26개만 받는다: 02 KDB산업·03 IBK기업·06 KB국민·07 수협·11 농협·12 지역농협·20 우리·23 SC제일·27 씨티·31 대구·32 부산·34 광주·35 제주·37 전북·39 경남·45 새마을금고·48 신협·50 저축은행·54 HSBC·64 산림조합·71 우체국·81 하나·88 신한·89 케이뱅크·90 카카오뱅크·92 토스뱅크(토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 목록 밖 두 자리(예 04·99)와 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾼다(payment §6 \'구현에서 정한 것\' ②, RN-01)'),
+  "accountNumber": zod.string().min(1).max(createShopCancellationAccountBodyAccountNumberMax).regex(createShopCancellationAccountBodyAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(createShopCancellationAccountBodyHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드는 토스 은행 코드 표의 두 자리 26개 허용 목록, 계좌번호는 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주는 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 재인증 확인·Saga·행 쓰기 전에 400 invalid-body다. payment-svc refundAccountOf도 같은 목록으로 한 번 더 막고, 틀리면 계좌가 없는 것과 같게 다룬다(깊은 방어, docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-20, BAT-425, ADR-0316)')
+
+export const CreateShopCancellationAccountResponse = zod.object({
   "cancellationId": zod.string().optional(),
   "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
   "refundAmount": zod.int().optional(),

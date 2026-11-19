@@ -772,7 +772,8 @@ API_VERBS = {'get', 'create', 'update', 'delete', 'approve', 'reject', 'accept',
              'lookup', 'suggest', 'preverify', 'separate', 'return', 'cancel'}
 # 규칙의 예외(guidelines §10 '예외'): 경로 → 이유
 API_EXCEPTIONS = {'/graphql': 'GraphQL(REST 밖)', '/v1/scanner/token': 'RFC 8628 토큰 엔드포인트',
-                  '/v1/search': '전역 검색', '/v1/search/suggestions': '전역 검색의 하위'}
+                  '/v1/search': '전역 검색', '/v1/search/suggestions': '전역 검색의 하위',
+                  '/v1/shop/orders/{orderId}/cancellations/{cancellationId}/account': '굿즈 환급 행의 소유가 core-svc shop에 있어 계좌 다시 받기를 그 아래에 둔다(ADR-0316)'}
 API_PLURAL_EXEMPT = {'staff'}  # 집합 명사
 # 문서가 이름을 대도 openapi에 없어도 되는 경로 접두사: 이유
 API_REF_ALLOW = {'/v1/payments/': '토스페이먼츠 API(외부)', '/v1/transactions': '토스페이먼츠 API(외부)',

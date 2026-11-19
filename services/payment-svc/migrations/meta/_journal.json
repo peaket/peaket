@@ -169,6 +169,13 @@
       "when": 1795042313782,
       "tag": "0023_payment_cancel_fail_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795113426497,
+      "tag": "0024_payment_cancel_attempt_compensation",
+      "breakpoints": true
     }
   ]
 }

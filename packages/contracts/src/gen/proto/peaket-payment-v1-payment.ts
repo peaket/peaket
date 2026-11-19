@@ -605,6 +605,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "refund_account": {
                       "type": "RefundAccount",
                       "id": 6
+                    },
+                    "refund_attempt": {
+                      "type": "uint32",
+                      "id": 7
                     }
                   }
                 },
@@ -848,6 +852,14 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "requested_by": {
                       "type": "string",
                       "id": 8
+                    },
+                    "promoter_id": {
+                      "type": "string",
+                      "id": 9
+                    },
+                    "event_id": {
+                      "type": "string",
+                      "id": 10
                     }
                   }
                 },
@@ -864,6 +876,14 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "failure_reason": {
                       "type": "string",
                       "id": 3
+                    },
+                    "receivable_id": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "account_last4": {
+                      "type": "string",
+                      "id": 5
                     }
                   }
                 },

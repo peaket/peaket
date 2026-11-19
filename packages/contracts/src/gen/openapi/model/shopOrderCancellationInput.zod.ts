@@ -28,7 +28,7 @@ export const ShopOrderCancellationInput = zod.object({
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('취소할 항목. 없으면 READY 항목 전부'),
   "refundAccount": zod.object({
-  "bankCode": zod.string().regex(shopOrderCancellationInputRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
+  "bankCode": zod.string().regex(shopOrderCancellationInputRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 두 자리 숫자 26개만 받는다: 02 KDB산업·03 IBK기업·06 KB국민·07 수협·11 농협·12 지역농협·20 우리·23 SC제일·27 씨티·31 대구·32 부산·34 광주·35 제주·37 전북·39 경남·45 새마을금고·48 신협·50 저축은행·54 HSBC·64 산림조합·71 우체국·81 하나·88 신한·89 케이뱅크·90 카카오뱅크·92 토스뱅크(토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 목록 밖 두 자리(예 04·99)와 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾼다(payment §6 \'구현에서 정한 것\' ②, RN-01)'),
   "accountNumber": zod.string().min(1).max(shopOrderCancellationInputRefundAccountAccountNumberMax).regex(shopOrderCancellationInputRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
   "holderName": zod.string().min(1).max(shopOrderCancellationInputRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
 }).strict().optional().describe('가상계좌 결제일 때 필수. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014). 보내면 X-Reauth-Token이 필수다')

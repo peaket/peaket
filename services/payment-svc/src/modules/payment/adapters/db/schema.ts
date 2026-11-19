@@ -157,8 +157,10 @@ export const paymentCancel = pgTable(
     paymentId: uuid('payment_id')
       .notNull()
       .references(() => payment.id),
-    // cancel-{cancellationId}(결제사 멱등키)
+    // cancel-{cancellationId}(첫 시도) 또는 cancel-{cancellationId}-a{n}(계좌 다시 받기 시도). 결제사 멱등키다
     idempotencyKey: text('idempotency_key').notNull(),
+    // 같은 취소 ID의 시도 번호(0은 첫 시도, 1~3 [가정]은 계좌 다시 받기, BAT-425 ADR-0316)
+    attempt: integer('attempt').notNull().default(0),
     // 이번 취소 금액(원). 첫 전송 때 정하고 재시도에도 그대로 보낸다
     amount: integer('amount').notNull(),
     // 결제사에 보낸 취소 사유(같은 멱등키의 본문)
@@ -181,8 +183,9 @@ export const paymentCancel = pgTable(
     check('payment_cancel_amount_check', sql`${t.amount} > 0`),
     check('payment_cancel_expected_balance_check', sql`${t.expectedBalance} >= ${t.amount}`),
     check('payment_cancel_status_check', sql`${t.status} IN ('REQUESTED', 'CANCEL_PENDING', 'CANCELED', 'FAILED')`),
-    // 까닭은 FAILED 행에만, 값은 계좌 거절 하나다(0023)
-    check('payment_cancel_fail_reason_check', sql`${t.failReason} IS NULL OR (${t.status} = 'FAILED' AND ${t.failReason} = 'REFUND_ACCOUNT_INVALID')`),
+    // 까닭은 FAILED 행에만, 값은 계좌 거절(REFUND_ACCOUNT_INVALID)과 앞 시도를 닫음(SUPERSEDED) 둘이다(0023·0024)
+    check('payment_cancel_fail_reason_check', sql`${t.failReason} IS NULL OR (${t.status} = 'FAILED' AND ${t.failReason} IN ('REFUND_ACCOUNT_INVALID', 'SUPERSEDED'))`),
+    check('payment_cancel_attempt_check', sql`${t.attempt} >= 0 AND ${t.attempt} <= 3`),
   ],
 );
 

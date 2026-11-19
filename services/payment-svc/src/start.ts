@@ -13,7 +13,7 @@ import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
-import { CompensationTransfers, FakeCompensationTransfer, compensationTransferHandlers, compensationTransferPackage } from './modules/compensation/index.js';
+import { CompensationTransfers, DrizzleCompensationTransfers, FakeCompensationTransfer, compensationTransferHandlers, compensationTransferPackage } from './modules/compensation/index.js';
 import {
   AcceptPaymentCommand,
   assertPlatformSubProviders,
@@ -282,7 +282,13 @@ let circuitsRef: PgCircuits | undefined;
   service.readiness.register('grpc');
   if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
 
-  const compensationTransfers = new CompensationTransfers(new FakeCompensationTransfer(env));
+  // 배상 송금(ADR-0317): 가짜 지급대행이 REQUESTED/UNAVAILABLE을 답하고, 기록은 compensation_transfer에 남긴다.
+  // PAID일 때만 정산 모듈이 partner_receivable(COMPENSATION_ADVANCE) 한 행을 만든다. 계좌 원문은 저장하지 않는다(POL-014)
+  const compensationTransfers = new CompensationTransfers(
+    new FakeCompensationTransfer(env),
+    new DrizzleCompensationTransfers({ database: batchDatabase, clock: systemClock }),
+    { recordCompensationAdvance: (i) => service.app.get(Settlements).recordCompensationAdvance(i) },
+  );
   const httpPorts = await service.listen();
   const grpc = await startGrpcServer({
     host: config.grpcHost,

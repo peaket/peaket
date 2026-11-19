@@ -195,6 +195,14 @@ export class MemorySettlementStore implements SettlementStore {
   async insertReceivable(record: ReceivableRecord) {
     this.receivables.set(record.receivableId, record);
   }
+  async insertReceivableIfAbsent(record: ReceivableRecord) {
+    if (record.sourceRef && [...this.receivables.values()].some((r) => r.sourceRef === record.sourceRef)) return false;
+    this.receivables.set(record.receivableId, record);
+    return true;
+  }
+  async findReceivableBySourceRef(sourceRef: string) {
+    return [...this.receivables.values()].find((r) => r.sourceRef === sourceRef);
+  }
   async saveReceivable(record: ReceivableRecord) {
     this.receivables.set(record.receivableId, record);
   }

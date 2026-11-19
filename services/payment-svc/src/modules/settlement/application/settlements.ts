@@ -193,15 +193,18 @@ export class Settlements {
     return this.d.store.listReceivables(filter);
   }
 
-  async recordReceivable(input: { promoterId: string; pg: Pg; cause: ReceivableRecord['cause']; amount: number }): Promise<ReceivableRecord> {
+  async recordReceivable(input: { promoterId: string; pg: Pg | null; cause: ReceivableRecord['cause']; amount: number; eventId?: string | undefined; sourceRef?: string | undefined }): Promise<ReceivableRecord> {
     return guard(async () => {
       if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new SettlementProblem('invalid-query', 422, '미수금 금액이 맞지 않습니다');
+      if (input.pg === null && input.cause !== 'COMPENSATION_ADVANCE') throw new SettlementProblem('invalid-query', 422, '결제사 없는 미수금은 배상금 미리 지급뿐입니다');
       const now = new Date(this.d.clock.now());
       const record: ReceivableRecord = {
         receivableId: uuidv7(this.d.clock),
         promoterId: input.promoterId,
         pg: input.pg,
         cause: input.cause,
+        ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
+        ...(input.sourceRef === undefined ? {} : { sourceRef: input.sourceRef }),
         amount: input.amount,
         remaining: input.amount,
         status: 'OPEN',
@@ -210,6 +213,35 @@ export class Settlements {
       };
       await this.d.store.insertReceivable(record);
       return record;
+    });
+  }
+
+  /**
+   * 배상금 미리 지급의 미수금(payment §6, settlement §7, ADR-0317): cause = COMPENSATION_ADVANCE, pg = NULL,
+   * source_ref = compensation:{id}. 같은 compensation_id의 겹친 두 요청도 source_ref 유일로 한 행이다.
+   */
+  async recordCompensationAdvance(input: { compensationId: string; promoterId: string; eventId?: string | undefined; amount: number }): Promise<ReceivableRecord> {
+    return guard(async () => {
+      if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new SettlementProblem('invalid-query', 422, '미수금 금액이 맞지 않습니다');
+      const sourceRef = `compensation:${input.compensationId}`;
+      const existing = await this.d.store.findReceivableBySourceRef(sourceRef);
+      if (existing !== undefined) return existing;
+      const now = new Date(this.d.clock.now());
+      const record: ReceivableRecord = {
+        receivableId: uuidv7(this.d.clock),
+        promoterId: input.promoterId,
+        pg: null,
+        cause: 'COMPENSATION_ADVANCE',
+        ...(input.eventId === undefined ? {} : { eventId: input.eventId }),
+        sourceRef,
+        amount: input.amount,
+        remaining: input.amount,
+        status: 'OPEN',
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.d.store.insertReceivableIfAbsent(record);
+      return (await this.d.store.findReceivableBySourceRef(sourceRef)) ?? record;
     });
   }
 

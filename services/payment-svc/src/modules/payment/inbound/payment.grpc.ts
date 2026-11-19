@@ -169,14 +169,22 @@ export function cancelInputOf(request: Record<string, unknown>): DepositCancelIn
   const account = childOf(request.refund_account);
   const refundAccount =
     account === undefined ? undefined : { bankCode: text(account.bank_code), accountNumber: text(account.account_number), holderName: text(account.holder_name) };
+  const refundAttempt = refundAttemptOf(request.refund_attempt);
   return {
     paymentId: text(request.payment_id),
     cancellationId: text(request.cancellation_id),
     reason: text(request.reason),
     ...(typeof krw === 'number' ? { amount: krw } : {}),
     ...(scope === undefined ? {} : { scope }),
+    ...(refundAttempt === undefined ? {} : { refundAttempt }),
     ...(refundAccount === undefined ? {} : { refundAccount }),
   };
+}
+
+/** refund_attempt(proto uint32) → 시도 번호. 0·빈 값은 첫 시도라 칸을 뺀다. 숫자가 아니면 NaN을 넘겨 검사가 거절하게 한다(BAT-425) */
+function refundAttemptOf(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === '' || v === 0 || v === '0') return undefined;
+  return typeof v === 'number' ? v : Number(v);
 }
 
 /** 답 → CancelPaymentResponse(proto 칸 이름, result는 CANCEL_RESULT_ 앞머리를 붙인다) */

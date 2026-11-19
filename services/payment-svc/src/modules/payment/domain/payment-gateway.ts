@@ -243,7 +243,8 @@ export function refundAccountOf(raw: { readonly bankCode?: unknown; readonly acc
   const { bankCode, accountNumber, holderName } = raw;
   if (typeof bankCode !== 'string' || typeof accountNumber !== 'string' || typeof holderName !== 'string') return undefined;
   const compact = accountNumber.replace(/\s/g, '');
-  if (!REFUND_BANK_CODE.test(bankCode) || !REFUND_ACCOUNT_RAW.test(compact)) return undefined;
+  // 은행 코드는 토스 은행 코드 표의 두 자리 26개만 받는다(공용 refundAccountShape와 같은 목록, BAT-425 RN-01). 목록 밖은 계좌가 없는 것과 같다
+  if (!REFUND_BANK_CODE.test(bankCode) || portoneBankOf(bankCode) === undefined || !REFUND_ACCOUNT_RAW.test(compact)) return undefined;
   const number = compact.replace(/-/g, '');
   const holder = holderName.trim();
   const holderLength = [...holder].length;

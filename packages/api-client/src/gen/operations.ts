@@ -169,6 +169,7 @@ export type OperationId =
   | 'createScannerFlagResolution'
   | 'createScannerScan'
   | 'createScannerToken'
+  | 'createShopCancellationAccount'
   | 'createShopOrder'
   | 'createShopOrderCancellation'
   | 'createShopOrderPayment'
@@ -564,6 +565,7 @@ export const OPERATIONS = {
   createScannerFlagResolution: {operationId: "createScannerFlagResolution",method: "POST",path: "/v1/scanner/flags/{flagId}/resolution",host: "scanner-api",kind: "write",cookie: false},
   createScannerScan: {operationId: "createScannerScan",method: "POST",path: "/v1/scanner/scans",host: "scanner-api",kind: "write",cookie: false},
   createScannerToken: {operationId: "createScannerToken",method: "POST",path: "/v1/scanner/token",host: "scanner-api",kind: "write",cookie: false},
+  createShopCancellationAccount: {operationId: "createShopCancellationAccount",method: "POST",path: "/v1/shop/orders/{orderId}/cancellations/{cancellationId}/account",host: "api",kind: "write",idempotent: true,cookie: true},
   createShopOrder: {operationId: "createShopOrder",method: "POST",path: "/v1/shop/orders",host: "api",kind: "write",idempotent: true,cookie: true},
   createShopOrderCancellation: {operationId: "createShopOrderCancellation",method: "POST",path: "/v1/shop/orders/{orderId}/cancellations",host: "api",kind: "write",idempotent: true,cookie: true},
   createShopOrderPayment: {operationId: "createShopOrderPayment",method: "POST",path: "/v1/shop/orders/{orderId}/payments",host: "api",kind: "write",idempotent: true,cookie: true},

@@ -36,6 +36,8 @@ export interface DepositCancelInput {
   readonly amount?: number;
   /** 취소 범위. 칸이 없으면 UNSPECIFIED다(받는 층은 모르는 값을 그대로 넘겨 검사가 INVALID_ARGUMENT로 거절한다) */
   readonly scope?: DepositCancelScope;
+  /** 같은 취소 ID의 계좌 다시 받기 시도 번호(0~3 [가정]). 없으면 0이다(BAT-425, ADR-0316). 입금 전 취소는 쓰지 않는다 */
+  readonly refundAttempt?: number;
   /** 가상계좌 환불 계좌(검사 전). 결제 후 일반 취소만 쓴다. 입금 전 취소는 돈이 들어오지 않아 쓰지 않는다(BUILD_ORDER GAT-090) */
   readonly refundAccount?: { readonly bankCode: string; readonly accountNumber: string; readonly holderName: string };
 }

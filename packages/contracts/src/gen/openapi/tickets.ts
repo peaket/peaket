@@ -280,10 +280,10 @@ export const createTicketCancellationBodyRefundAccountHolderNameMax = 60;
 
 export const CreateTicketCancellationBody = zod.object({
   "refundAccount": zod.object({
-  "bankCode": zod.string().regex(createTicketCancellationBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
+  "bankCode": zod.string().regex(createTicketCancellationBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 두 자리 숫자 26개만 받는다: 02 KDB산업·03 IBK기업·06 KB국민·07 수협·11 농협·12 지역농협·20 우리·23 SC제일·27 씨티·31 대구·32 부산·34 광주·35 제주·37 전북·39 경남·45 새마을금고·48 신협·50 저축은행·54 HSBC·64 산림조합·71 우체국·81 하나·88 신한·89 케이뱅크·90 카카오뱅크·92 토스뱅크(토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 목록 밖 두 자리(예 04·99)와 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾼다(payment §6 \'구현에서 정한 것\' ②, RN-01)'),
   "accountNumber": zod.string().min(1).max(createTicketCancellationBodyRefundAccountAccountNumberMax).regex(createTicketCancellationBodyRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
   "holderName": zod.string().min(1).max(createTicketCancellationBodyRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
-}).strict().optional().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
+}).strict().optional().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드는 토스 은행 코드 표의 두 자리 26개 허용 목록, 계좌번호는 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주는 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 재인증 확인·Saga·행 쓰기 전에 400 invalid-body다. payment-svc refundAccountOf도 같은 목록으로 한 번 더 막고, 틀리면 계좌가 없는 것과 같게 다룬다(깊은 방어, docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-20, BAT-425, ADR-0316)')
 }).strict()
 
 export const CreateTicketCancellationResponse = zod.object({
@@ -350,7 +350,7 @@ export const ListTicketAddonsResponse = zod.object({
 })
 
 /**
- * FR-056, POL-014, POL-019, ADR-0046 결정 5. 돈이 나갈 계좌를 정하는 작업이라 재인증을 요구한다(추천 적용 2026-10-26, ADR-0089)
+ * FR-056, POL-014, POL-019, ADR-0046 결정 5, ADR-0293, ADR-0317(추천 적용 2026-11-20, BAT-425). 돈이 나갈 계좌를 정하는 작업이라 재인증(op COMPENSATION_ACCOUNT·act FAN_HIGH_RISK)을 요구하고 계좌는 저장하지 않으며 account_last4만 남긴다. ACCOUNT_PENDING일 때만 받고(PAID·FAILED·REQUESTED는 409 compensation-not-account-pending), 없거나 남의 건은 같은 404다. 계좌 모양은 RefundAccount와 같고 26개 허용 목록 밖이면 400이다. purchase-svc가 payment-svc RequestCompensationTransfer를 compensation_id 멱등으로 부른다. REQUESTED·PAID면 202 Compensation, UNAVAILABLE이면 503 compensation-transfer-unavailable(Retry-After 5초 [가정]), FAILED면 422 compensation-transfer-failed·status FAILED·CS COMPENSATION_PENDING 한 건이다
  * @summary 배상금 받을 계좌 입력(결제자 본인). 저장하지 않고 송금 요청에 바로 넘김
  */
 export const CreateCompensationAccountParams = zod.object({
@@ -372,25 +372,25 @@ export const createCompensationAccountBodyHolderNameMax = 60;
 
 
 export const CreateCompensationAccountBody = zod.object({
-  "bankCode": zod.string().regex(createCompensationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
+  "bankCode": zod.string().regex(createCompensationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 두 자리 숫자 26개만 받는다: 02 KDB산업·03 IBK기업·06 KB국민·07 수협·11 농협·12 지역농협·20 우리·23 SC제일·27 씨티·31 대구·32 부산·34 광주·35 제주·37 전북·39 경남·45 새마을금고·48 신협·50 저축은행·54 HSBC·64 산림조합·71 우체국·81 하나·88 신한·89 케이뱅크·90 카카오뱅크·92 토스뱅크(토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 목록 밖 두 자리(예 04·99)와 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾼다(payment §6 \'구현에서 정한 것\' ②, RN-01)'),
   "accountNumber": zod.string().min(1).max(createCompensationAccountBodyAccountNumberMax).regex(createCompensationAccountBodyAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
   "holderName": zod.string().min(1).max(createCompensationAccountBodyHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
-}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드는 토스 은행 코드 표의 두 자리 26개 허용 목록, 계좌번호는 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주는 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 재인증 확인·Saga·행 쓰기 전에 400 invalid-body다. payment-svc refundAccountOf도 같은 목록으로 한 번 더 막고, 틀리면 계좌가 없는 것과 같게 다룬다(깊은 방어, docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-20, BAT-425, ADR-0316)')
 
 export const CreateCompensationAccountResponse = zod.object({
   "compensationId": zod.string().optional(),
   "orderId": zod.string().optional(),
-  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "amount": zod.int().optional().describe('그 주문의 대상 표 권면 합의 10%를 원 미만 올림한 값(예 33,333원 → 3,334원). 확정 때 계산해 저장하고 다시 확정해도 바뀌지 않는다'),
   "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
-  "accountLast4": zod.string().optional(),
-  "eventId": zod.string().optional(),
+  "accountLast4": zod.string().optional().describe('배상 계좌번호 끝 4자리. 계좌를 넣기 전에는 비어 있다'),
+  "eventId": zod.string().optional().describe('원래 회차. 상품 배상은 비어 있다'),
   "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5, BAT-425, ADR-0317). 회차 취소 확정이 주최 측 귀책(ORGANIZER)·공연 내용 변경(CONTENT_CHANGE)일 때 대상 주문마다 한 행이고, 금액은 그 주문의 대상 표 권면 합의 10%를 원 미만 올림해 한 번만 계산·저장한다(FORCE_MAJEURE는 행 0). 계좌번호 원문은 응답·로그·사건·Outbox에 싣지 않고 끝 4자리만 남긴다(POL-014). 상태는 ACCOUNT_PENDING(계좌 입력 대기)·REQUESTED(송금 요청됨)·PAID(송금 완료, payment-svc가 COMPENSATION_ADVANCE 미수금을 만든다)·FAILED(송금 실패, CS COMPENSATION_PENDING 한 건). 응답은 Cache-Control: private, no-store다')
 
 /**
- * FR-047, POL-014, POL-019, ADR-0050 결정 3, ADR-0089(추천 적용 2026-10-26). 환급을 미뤘던 취소(입장 시작 뒤 취소, 결제사 취소 장애, 회차 취소·연기)의 환급을 실행할 수 있게 되면 알림이 SCR-060을 연다. 취소 상태가 REFUND_PENDING이고 계좌를 기다리는 건(CS 처리함 REFUND_ACCOUNT_PENDING)만 받는다. 계좌는 저장하지 않고 같은 요청 안의 즉시 재시도에만 쓴다(payment §6). 돈이 나갈 계좌를 정하는 작업이라 재인증을 요구한다
- * @summary 지연 환급 계좌 입력(가상계좌로 결제한 결제자 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
+ * FR-047, POL-014, POL-019, ADR-0050 결정 3, ADR-0293, ADR-0316(추천 적용 2026-11-20, BAT-425). 환급을 미뤘던 취소(입장 시작 뒤 취소, 결제사 취소 장애, 회차 취소·연기)의 환급을 실행할 수 있게 되면 알림이 SCR-060을 연다. 결제자 본인이고 order_cancellation이 REFUND_PENDING이며 refund_account_required_at이 있고 refund_attempt < 3 [가정]일 때만 받는다. 그 밖은 409 cancellation-not-account-pending(이미 환급했거나 진행 중이거나 계좌가 필요 없는 결제 수단)이고, 없는 취소와 남의 취소는 같은 404 not-found이며 쓰기가 0이다. 재인증은 op REFUND_ACCOUNT·act FAN_HIGH_RISK이고 한 번만 쓴다(403 reauth-required, 확인기·jti 저장소 장애 503 reauth-unavailable·Retry-After 5초 [가정]). 계좌는 purchase DB·payment DB·로그·사건·Outbox·지표 어디에도 저장하지 않고, 같은 요청의 결제사 취소에만 쓴다. 같은 Idempotency-Key는 시도를 올리지 않고 같은 답을 주며, 다른 키는 refund_attempt를 1 올려 새 멱등키 cancel-{cancellationId}-a{n}으로 payment-svc CancelPayment를 부른다. CANCELLED면 202 REFUNDED, CANCEL_PENDING·UNKNOWN이면 202 REFUND_PENDING·next_refund_at 1분 [가정], REFUND_ACCOUNT_REQUIRED면 422 refund-account-required·계좌 대기 유지, 그 밖 REJECTED면 422 refund-rejected·CS '환급 실패'다
+ * @summary 지연 환급 계좌 다시 받기(가상계좌로 결제한 결제자 본인). 저장하지 않고 결제사 취소 요청에 바로 넘김
  */
 export const CreateCancellationAccountParams = zod.object({
   "cancellationId": zod.string()
@@ -411,10 +411,10 @@ export const createCancellationAccountBodyHolderNameMax = 60;
 
 
 export const CreateCancellationAccountBody = zod.object({
-  "bankCode": zod.string().regex(createCancellationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
+  "bankCode": zod.string().regex(createCancellationAccountBodyBankCodeRegExp).describe('토스 은행 코드 표의 두 자리 숫자 26개만 받는다: 02 KDB산업·03 IBK기업·06 KB국민·07 수협·11 농협·12 지역농협·20 우리·23 SC제일·27 씨티·31 대구·32 부산·34 광주·35 제주·37 전북·39 경남·45 새마을금고·48 신협·50 저축은행·54 HSBC·64 산림조합·71 우체국·81 하나·88 신한·89 케이뱅크·90 카카오뱅크·92 토스뱅크(토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 목록 밖 두 자리(예 04·99)와 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾼다(payment §6 \'구현에서 정한 것\' ②, RN-01)'),
   "accountNumber": zod.string().min(1).max(createCancellationAccountBodyAccountNumberMax).regex(createCancellationAccountBodyAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
   "holderName": zod.string().min(1).max(createCancellationAccountBodyHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
-}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드 숫자 두 자리, 계좌번호 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 400 invalid-body다(docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-04)')
+}).strict().describe('환불·배상 계좌. 저장하지 않고 결제사 취소·송금 요청에 바로 넘긴다(POL-014). 모양은 한 규칙이다: 은행 코드는 토스 은행 코드 표의 두 자리 26개 허용 목록, 계좌번호는 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, 예금주는 1~60자(앞뒤 공백을 뺀 길이). 서버는 공용 함수(packages/validation refundAccountShape)로 같은 규칙을 보고 틀리면 재인증 확인·Saga·행 쓰기 전에 400 invalid-body다. payment-svc refundAccountOf도 같은 목록으로 한 번 더 막고, 틀리면 계좌가 없는 것과 같게 다룬다(깊은 방어, docs/features/payment.md §6 \'구현에서 정한 것\' ②⑦, 추천 적용 2026-11-20, BAT-425, ADR-0316)')
 
 export const CreateCancellationAccountResponse = zod.object({
   "cancellationId": zod.string().optional(),
@@ -511,13 +511,13 @@ export const ListCompensationsResponse = zod.object({
   "items": zod.array(zod.object({
   "compensationId": zod.string().optional(),
   "orderId": zod.string().optional(),
-  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "amount": zod.int().optional().describe('그 주문의 대상 표 권면 합의 10%를 원 미만 올림한 값(예 33,333원 → 3,334원). 확정 때 계산해 저장하고 다시 확정해도 바뀌지 않는다'),
   "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
-  "accountLast4": zod.string().optional(),
-  "eventId": zod.string().optional(),
+  "accountLast4": zod.string().optional().describe('배상 계좌번호 끝 4자리. 계좌를 넣기 전에는 비어 있다'),
+  "eventId": zod.string().optional().describe('원래 회차. 상품 배상은 비어 있다'),
   "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')).optional(),
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5, BAT-425, ADR-0317). 회차 취소 확정이 주최 측 귀책(ORGANIZER)·공연 내용 변경(CONTENT_CHANGE)일 때 대상 주문마다 한 행이고, 금액은 그 주문의 대상 표 권면 합의 10%를 원 미만 올림해 한 번만 계산·저장한다(FORCE_MAJEURE는 행 0). 계좌번호 원문은 응답·로그·사건·Outbox에 싣지 않고 끝 4자리만 남긴다(POL-014). 상태는 ACCOUNT_PENDING(계좌 입력 대기)·REQUESTED(송금 요청됨)·PAID(송금 완료, payment-svc가 COMPENSATION_ADVANCE 미수금을 만든다)·FAILED(송금 실패, CS COMPENSATION_PENDING 한 건). 응답은 Cache-Control: private, no-store다')).optional(),
   "nextCursor": zod.string().nullish()
 })
 
@@ -532,11 +532,11 @@ export const GetCompensationParams = zod.object({
 export const GetCompensationResponse = zod.object({
   "compensationId": zod.string().optional(),
   "orderId": zod.string().optional(),
-  "amount": zod.int().optional().describe('실제 결제 금액의 10%'),
+  "amount": zod.int().optional().describe('그 주문의 대상 표 권면 합의 10%를 원 미만 올림한 값(예 33,333원 → 3,334원). 확정 때 계산해 저장하고 다시 확정해도 바뀌지 않는다'),
   "status": zod.enum(['ACCOUNT_PENDING', 'REQUESTED', 'PAID', 'FAILED']).optional(),
-  "accountLast4": zod.string().optional(),
-  "eventId": zod.string().optional(),
+  "accountLast4": zod.string().optional().describe('배상 계좌번호 끝 4자리. 계좌를 넣기 전에는 비어 있다'),
+  "eventId": zod.string().optional().describe('원래 회차. 상품 배상은 비어 있다'),
   "reason": zod.enum(['ORGANIZER', 'CONTENT_CHANGE']).optional().describe('배상 사유(회차 취소의 귀책 판정 event_cancellation_request.fault, 불가항력은 배상 없음). compensation에는 이 칸이 없어 취소 요청에서 읽는다 [가정]'),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5)')
+}).describe('분쟁해결기준에 따른 배상금(ADR-0046 결정 5, BAT-425, ADR-0317). 회차 취소 확정이 주최 측 귀책(ORGANIZER)·공연 내용 변경(CONTENT_CHANGE)일 때 대상 주문마다 한 행이고, 금액은 그 주문의 대상 표 권면 합의 10%를 원 미만 올림해 한 번만 계산·저장한다(FORCE_MAJEURE는 행 0). 계좌번호 원문은 응답·로그·사건·Outbox에 싣지 않고 끝 4자리만 남긴다(POL-014). 상태는 ACCOUNT_PENDING(계좌 입력 대기)·REQUESTED(송금 요청됨)·PAID(송금 완료, payment-svc가 COMPENSATION_ADVANCE 미수금을 만든다)·FAILED(송금 실패, CS COMPENSATION_PENDING 한 건). 응답은 Cache-Control: private, no-store다')
 

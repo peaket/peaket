@@ -13,6 +13,7 @@ const GET_OUTCOMES: readonly GetPaymentOutcome[] = ['ok', 'not_found', 'invalid'
  * - payment_virtual_account_field_failures_total{op, reason}: 계좌번호를 암호화·복호하지 못한 수. 값은 싣지 않는다
  * - payment_get_requests_total{outcome}: GetPayment 결과별 수
  * - payment_cancel_refund_account_ignored_total{pg}: 가상계좌가 아닌 결제의 취소에 온 환불 계좌를 결제사로 보내지 않고 버린 수(BUILD_ORDER GAT-090). 계좌 값은 싣지 않는다
+ * - payment_cancel_supersede_total{result}: 새 계좌 시도 전 앞 진행 중 취소 행을 닫은 결과(BAT-425, ADR-0316). applied·not_applied·undecidable
  * 이름표를 모두 0으로 미리 보인다
  */
 export class PromPaymentDepositSignals implements PaymentDepositSignals, PaymentGetSignals, RefundAccountSignals {
@@ -25,12 +26,15 @@ export class PromPaymentDepositSignals implements PaymentDepositSignals, Payment
 
   readonly #accountIgnored = new Counter({ name: 'payment_cancel_refund_account_ignored_total', help: '가상계좌가 아닌 결제의 취소에 온 환불 계좌를 결제사로 보내지 않고 버린 수(결제사별)', labelNames: ['pg'] as const, registers: [] });
 
+  readonly #supersede = new Counter({ name: 'payment_cancel_supersede_total', help: '새 계좌 시도 전 앞 진행 중 취소 행을 닫은 결과별 수(적용·미적용·판정 불가)', labelNames: ['result'] as const, registers: [] });
+
   constructor() {
     for (const outcome of DEPOSIT_CANCEL_OUTCOMES) this.#cancel.inc({ outcome }, 0);
     for (const op of OPS) for (const reason of REASONS) this.#field.inc({ op, reason }, 0);
     for (const outcome of GET_OUTCOMES) this.#get.inc({ outcome }, 0);
     this.#dueCapped.inc(0);
     for (const pg of ['TOSS', 'PORTONE', 'SIMULATOR'] as const) this.#accountIgnored.inc({ pg }, 0);
+    for (const result of ['applied', 'not_applied', 'undecidable'] as const) this.#supersede.inc({ result }, 0);
   }
 
   /** 지표를 registry에 붙이고 자신을 돌려준다 */
@@ -40,11 +44,16 @@ export class PromPaymentDepositSignals implements PaymentDepositSignals, Payment
     registry.registerMetric(this.#cancel);
     registry.registerMetric(this.#dueCapped);
     registry.registerMetric(this.#accountIgnored);
+    registry.registerMetric(this.#supersede);
     return this;
   }
 
   refundAccountIgnored(pg: PgName): void {
     this.#accountIgnored.inc({ pg });
+  }
+
+  cancelSuperseded(result: 'applied' | 'not_applied' | 'undecidable'): void {
+    this.#supersede.inc({ result });
   }
 
   dueCapped(): void {

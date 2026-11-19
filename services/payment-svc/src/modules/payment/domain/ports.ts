@@ -9,7 +9,7 @@ import type { PgSelectionState, PgSwitchRow, PgUnavailableReason } from './pg-se
 import type { PgLimitKind, PgSaturationReason } from './pg-call-guard.js';
 import type { PgChannelLimitRow, PgLimitLowering } from './pg-channel-limit.js';
 import type { DepositCancelBegin, DepositCancelTarget, DepositCancelOutcome } from './deposit-cancel.js';
-import type { ConfirmedCancelBegin, ConfirmedCancelTarget } from './confirmed-cancel.js';
+import type { ConfirmedCancelBegin, ConfirmedCancelInProgress, ConfirmedCancelTarget, PaymentCancelStatus } from './confirmed-cancel.js';
 import type { QueryStatus } from './payment-gateway.js';
 import type { ReconDiffKind, ReconDiffState, ReconLedger, ReconRunRef, ReconRunStatus, ReconSeen, ReconStage } from './reconciliation.js';
 import type { PaymentUnknownQueryOutcome, ResolvedFinish, UnknownQueryJob } from './unknown-resolver.js';
@@ -655,38 +655,79 @@ export interface PaymentDepositCancels {
 export interface RefundAccountSignals {
   /** payment_cancel_refund_account_ignored_total{pg}를 1 올린다: 가상계좌가 아닌 결제에 온 계좌를 버렸다 */
   refundAccountIgnored(pg: PgName): void;
+  /**
+   * payment_cancel_supersede_total{result}를 1 올린다(BAT-425, ADR-0316). applied는 앞 행의 반영을 확인, not_applied는 FAILED(SUPERSEDED)로 닫음,
+   * undecidable은 CANCEL_PENDING·진행 중 행 둘 이상·조회 실패·닫기 0행으로 새 전송을 보내지 않음이다. 없으면 내지 않는다
+   */
+  cancelSuperseded?(result: 'applied' | 'not_applied' | 'undecidable'): void;
 }
 
 export interface PaymentConfirmedCancels {
   /** 원장 행을 읽는다. 없으면 undefined */
   readConfirmedCancelTarget(paymentId: string, budget?: CallBudget): Promise<ConfirmedCancelTarget | undefined>;
   /**
-   * 한 트랜잭션(payment 행 FOR UPDATE): 이 취소 ID의 payment_cancel 행을 찾거나 처음이면 만든다(금액·사유·전액 여부·기대 잔액).
-   * 결과의 뜻은 ConfirmedCancelBegin. 내부 표시(CONFIRMED_CANCEL_SENT)도 남긴다
+   * 한 트랜잭션(payment 행 FOR UPDATE): 이 취소 ID·시도 번호의 payment_cancel 행을 찾거나 처음이면 만든다(금액·사유·전액 여부·기대 잔액).
+   * 결과의 뜻은 ConfirmedCancelBegin. 내부 표시(CONFIRMED_CANCEL_SENT)도 남긴다.
+   * 같은 취소 ID의 앞 시도가 CANCELED면 새 행을 만들지 않고 DONE이다(BAT-425, ADR-0316).
    */
   beginConfirmedCancel(
     target: ConfirmedCancelTarget,
-    /** hasRefundAccount: 모양이 맞는 환불 계좌가 왔다. 가상계좌 결제인데 거짓이고 행이 없으면 행을 만들지 않고 ACCOUNT_REQUIRED다(BUILD_ORDER GAT-090) */
-    q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string; readonly hasRefundAccount?: boolean },
+    /** hasRefundAccount: 모양이 맞는 환불 계좌가 왔다. 가상계좌 결제인데 거짓이고 행이 없으면 행을 만들지 않고 ACCOUNT_REQUIRED다(BUILD_ORDER GAT-090). attempt: 0~3 [가정] */
+    q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string; readonly hasRefundAccount?: boolean; readonly attempt?: number },
     budget?: CallBudget,
   ): Promise<ConfirmedCancelBegin>;
   /** 결제사 취소 성공 반영. 금액은 그 행에서 읽는다. 행이 이미 CANCELED면 더하지 않고 APPLIED. STALE이면 그사이 원장 상태가 바뀌었다 */
-  finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
+  finishConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, budget?: CallBudget, attempt?: number): Promise<{ readonly status: 'APPLIED' | 'STALE'; readonly cancelledAmount: number }>;
   /**
    * 결제사 비동기 처리(CANCEL_PENDING)·업무 거절(FAILED)을 그 행에 남긴다. 원장은 바꾸지 않는다.
-   * failReason은 FAILED의 개인정보 없는 까닭(계좌 거절 REFUND_ACCOUNT_INVALID만, payment_cancel.fail_reason 0023, BAT-420-rest 리뷰 반영 RV-03)
+   * failReason은 FAILED의 개인정보 없는 까닭(계좌 거절 REFUND_ACCOUNT_INVALID, 앞 시도를 닫은 SUPERSEDED. payment_cancel.fail_reason 0023·0024)
    */
-  markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget, failReason?: 'REFUND_ACCOUNT_INVALID'): Promise<void>;
+  markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget, failReason?: 'REFUND_ACCOUNT_INVALID' | 'SUPERSEDED', attempt?: number): Promise<void>;
   /**
    * 3시간 지난 재시도의 조회 결과를 결제 행 잠금 안에서 가른다(리뷰 B1): 행이 진행 중인지 → canSettleByBalance → settleByBalance 차례.
-   * APPLIED면 같은 트랜잭션에서 finishConfirmedCancel처럼 반영한다. RESEND는 같은 본문으로 다시 보낸다, UNDECIDABLE은 결과 모름(결제사 0)
+   * APPLIED면 같은 트랜잭션에서 finishConfirmedCancel처럼 반영한다. RESEND는 같은 본문으로 다시 보낸다, UNDECIDABLE은 결과 모름(결제사 0).
    */
   settleConfirmedCancelByQuery(
     target: ConfirmedCancelTarget,
     cancellationId: string,
     balanceAmount: number,
     budget?: CallBudget,
+    attempt?: number,
   ): Promise<{ readonly status: 'APPLIED'; readonly cancelledAmount: number } | { readonly status: 'RESEND' } | { readonly status: 'UNDECIDABLE' }>;
+  /**
+   * 앞 시도 행(다른 멱등키)의 조회 결과를 같은 잠금 규칙으로 가른다(BAT-425, ADR-0316). 완성된 멱등키를 받는다.
+   */
+  settlePriorConfirmedCancel?(
+    target: ConfirmedCancelTarget,
+    idemKey: string,
+    balanceAmount: number,
+    budget?: CallBudget,
+  ): Promise<{ readonly status: 'APPLIED'; readonly cancelledAmount: number } | { readonly status: 'RESEND' } | { readonly status: 'UNDECIDABLE' }>;
+  /**
+   * 이 취소 ID·시도 번호의 행 상태. 없으면 undefined다(BAT-425, ADR-0316). 새 시도인지(재시도인지)를 가르는 데 쓴다.
+   * 선택 메서드다(옛 시험 대역은 없으면 재시도로 보고 지금 그대로 간다).
+   */
+  findCancelStatus?(paymentId: string, idemKey: string, budget?: CallBudget): Promise<PaymentCancelStatus | undefined>;
+  /**
+   * 그 결제의 진행 중(REQUESTED·CANCEL_PENDING) 취소 행을 새 키를 빼고 모두 읽는다(BAT-425, ADR-0316).
+   * 새 계좌 시도 전에 조회로 닫을 앞 행을 찾는다. 선택 메서드다(옛 시험 대역은 없으면 진행 중 0으로 본다).
+   */
+  listInProgressCancels?(paymentId: string, excludeIdemKey: string, budget?: CallBudget): Promise<readonly ConfirmedCancelInProgress[]>;
+  /**
+   * 앞 행의 반영으로 이 새 시도가 이미 끝났음을 `CANCELED` 행 하나로 남긴다(원장은 더하지 않는다, BAT-425 ADR-0316).
+   * 같은 시도의 재시도가 결제사를 다시 부르지 않게 하는 표시다. 이미 그 시도의 행이 있으면 CANCELED일 때만 답한다.
+   * 선택 메서드다(옛 시험 대역은 없으면 표시 없이 답한다).
+   */
+  satisfyWithPriorCancel?(
+    target: ConfirmedCancelTarget,
+    q: { readonly cancellationId: string; readonly attempt?: number; readonly amount?: number; readonly reason: string },
+    prior: ConfirmedCancelInProgress,
+    budget?: CallBudget,
+  ): Promise<{ readonly cancelledAmount: number } | undefined>;
+  /**
+   * 앞 시도를 `FAILED(SUPERSEDED)`로 조건부로 닫는다(REQUESTED만, CANCEL_PENDING은 닫지 않는다). 0행이면 false다(BAT-425, ADR-0316).
+   */
+  closeSupersededCancel?(paymentId: string, idemKey: string, budget?: CallBudget): Promise<boolean>;
 }
 
 // ---- 결제사 호출 보호(BUILD_ORDER PRF-183, docs/features/payment.md §2 '결제사 호출 보호의 첫 구현') ----

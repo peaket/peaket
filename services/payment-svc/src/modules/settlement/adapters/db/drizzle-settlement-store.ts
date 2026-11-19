@@ -5,6 +5,20 @@ import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, Settlement
 import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
 import { partnerReceivable, payout, payoutAccount, payoutBatch, receivableMove, sellerKyc, settlementStatement, settlementStatementAudit, statementDispute, statementSource } from './schema.js';
 
+const receivableRecord = (r: typeof partnerReceivable.$inferSelect): ReceivableRecord => ({
+  receivableId: r.id,
+  promoterId: r.promoterId,
+  pg: r.pg as Pg | null,
+  cause: r.cause as ReceivableRecord['cause'],
+  eventId: r.eventId,
+  sourceRef: r.sourceRef,
+  amount: r.amount,
+  remaining: r.remaining,
+  status: r.status as ReceivableRecord['status'],
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+});
+
 const statementRecord = (r: typeof settlementStatement.$inferSelect): StatementRecord => ({
   statementId: r.id,
   promoterId: r.promoterId,
@@ -614,12 +628,41 @@ export class DrizzleSettlementStore implements SettlementStore {
       promoterId: record.promoterId,
       pg: record.pg,
       cause: record.cause,
+      eventId: record.eventId ?? null,
+      sourceRef: record.sourceRef ?? null,
       amount: record.amount,
       remaining: record.remaining,
       status: record.status,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });
+  }
+
+  async insertReceivableIfAbsent(record: ReceivableRecord): Promise<boolean> {
+    const rows = await this.db.db
+      .insert(partnerReceivable)
+      .values({
+        id: record.receivableId,
+        promoterId: record.promoterId,
+        pg: record.pg,
+        cause: record.cause,
+        eventId: record.eventId ?? null,
+        sourceRef: record.sourceRef ?? null,
+        amount: record.amount,
+        remaining: record.remaining,
+        status: record.status,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      })
+      // source_ref 부분 유일(또는 기본 키)에 걸리면 아무것도 쓰지 않는다(0024)
+      .onConflictDoNothing()
+      .returning({ id: partnerReceivable.id });
+    return rows.length > 0;
+  }
+
+  async findReceivableBySourceRef(sourceRef: string): Promise<ReceivableRecord | undefined> {
+    const rows = await this.db.db.select().from(partnerReceivable).where(eq(partnerReceivable.sourceRef, sourceRef)).limit(1);
+    return rows[0] === undefined ? undefined : receivableRecord(rows[0]);
   }
 
   async saveReceivable(record: ReceivableRecord): Promise<void> {
@@ -643,8 +686,10 @@ export class DrizzleSettlementStore implements SettlementStore {
     return rows.map((r) => ({
       receivableId: r.id,
       promoterId: r.promoterId,
-      pg: r.pg as Pg,
+      pg: r.pg as Pg | null,
       cause: r.cause as ReceivableRecord['cause'],
+      eventId: r.eventId,
+      sourceRef: r.sourceRef,
       amount: r.amount,
       remaining: r.remaining,
       status: r.status as ReceivableRecord['status'],
@@ -670,8 +715,10 @@ export class DrizzleSettlementStore implements SettlementStore {
     return rows.map((r) => ({
       receivableId: r.id,
       promoterId: r.promoterId,
-      pg: r.pg as Pg,
+      pg: r.pg as Pg | null,
       cause: r.cause as ReceivableRecord['cause'],
+      eventId: r.eventId,
+      sourceRef: r.sourceRef,
       amount: r.amount,
       remaining: r.remaining,
       status: r.status as ReceivableRecord['status'],

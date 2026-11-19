@@ -32,7 +32,8 @@ const STATUS: Readonly<Record<CompensationTransferStatus, string>> = {
 
 const statusOf = (err: unknown): grpc.ServiceError => {
   if (err instanceof CompensationTransferProblem) {
-    return { code: err.code === 'NOT_FOUND' ? grpc.status.NOT_FOUND : grpc.status.INVALID_ARGUMENT, details: err.message } as grpc.ServiceError;
+    const code = err.code === 'NOT_FOUND' ? grpc.status.NOT_FOUND : err.code === 'UNAVAILABLE' ? grpc.status.UNAVAILABLE : grpc.status.INVALID_ARGUMENT;
+    return { code, details: err.message } as grpc.ServiceError;
   }
   return { code: grpc.status.UNAVAILABLE, details: '지금은 배상 송금을 할 수 없습니다' } as grpc.ServiceError;
 };
@@ -57,8 +58,16 @@ export function compensationTransferHandlers(useCases: Pick<CompensationTransfer
         accountNumber: text(r.account_number),
         holderName: text(r.holder_name),
         requestedBy: text(r.requested_by),
+        promoterId: text(r.promoter_id),
+        ...(text(r.event_id) === '' ? {} : { eventId: text(r.event_id) }),
       });
-      return { transfer_id: out.transferId, status: STATUS[out.status], ...(out.failureReason !== undefined ? { failure_reason: out.failureReason } : {}) };
+      return {
+        transfer_id: out.transferId,
+        status: STATUS[out.status],
+        ...(out.failureReason !== undefined ? { failure_reason: out.failureReason } : {}),
+        ...(out.receivableId !== undefined ? { receivable_id: out.receivableId } : {}),
+        ...(out.accountLast4 !== undefined ? { account_last4: out.accountLast4 } : {}),
+      };
     }),
     GetCompensationTransfer: unary(async (r) => {
       const out = await useCases.get(text(r.transfer_id));
