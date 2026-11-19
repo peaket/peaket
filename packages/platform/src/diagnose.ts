@@ -11,8 +11,9 @@
 //   <서비스>/<파드>/<요청 시각>/<파일>뿐이다(ASVS v5.0.0-14.2.1)
 // - 올리기에 성공한 파일만 지운다. 시작할 때 /diag에 남은 파일(치명 오류 보고서, 올리지 못한 파일)을 올리고 지운다. 남은 *.partial(끝내지 못한
 //   스냅샷)은 올리지 않고 지운다(ASVS v5.0.0-14.2.2)
+import { existsSync } from 'node:fs';
 import { readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { writeHeapSnapshot } from 'node:v8';
 import type { Clock } from './clock.js';
 import { PlatformConfigError, type PeaketEnv } from './config.js';
@@ -135,10 +136,24 @@ function excludeReportSecrets(): void {
   report.excludeNetwork = true;
 }
 
-/** 환경 변수·네트워크 칸을 빼고 진단 보고서를 쓴다 */
+/**
+ * process.report.writeReport에 넘길 경로를 고른다(BAT-080 RV-20). `--report-directory`가 켜진 Node 24(차트의
+ * NODE_OPTIONS=--report-directory=/diag)는 절대 경로를 받으면 보고서를 쓰지 못하고 errno 2로 실패한다(PR #43 kind 로그).
+ * 디렉터리 안의 파일은 그 디렉터리 기준 상대 이름(같은 디렉터리면 basename)으로 바꾸고, 디렉터리 밖이거나 디렉터리가 비면 그대로 둔다
+ */
+export function reportTarget(file: string, directory: string): string {
+  if (!directory) return file;
+  const rel = relative(directory, file);
+  // 빈 값은 file이 directory 자체인 때다. ..으로 시작하거나(디렉터리 밖) 다른 드라이브의 절대 경로면 바꾸지 않는다
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return file;
+  return rel;
+}
+
+/** 환경 변수·네트워크 칸을 빼고 진단 보고서를 쓴다. 파일이 실제로 생겼는지까지 확인한다(RV-20) */
 function writeSafeReport(file: string): void {
   excludeReportSecrets();
-  process.report.writeReport(file);
+  process.report.writeReport(reportTarget(file, process.report.directory ?? ''));
+  if (!existsSync(file)) throw new Error('report-not-written');
 }
 
 /**
@@ -314,6 +329,8 @@ export function startDiagnose(o: StartDiagnoseOptions): { stop(): void } {
     const reportFile = join(o.diagDir, `report-${stamp}.json`);
     try {
       report(reportFile);
+      // 바꿔 끼운 report 콜백이 파일을 만들지 않았으면 성공으로 세지 않고 올리지도 않는다(BAT-080 RV-20)
+      if (!existsSync(reportFile)) throw new Error('report-not-written');
       await scrubReport(reportFile); // JSON이 아니면(바꿔 끼운 쓰는 함수) 그대로 둔다
       files.push(reportFile);
       count('report');
