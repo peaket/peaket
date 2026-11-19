@@ -9,8 +9,13 @@ import {
   confirmRetryDelayMs,
   orderAmount,
   type OrderableProduct,
+  payMethodBlockedByStore,
+  payMethodsForStore,
+  pgStoreOf,
   reservedUntilAfterAccept,
+  resolveCancelItems,
   type ShopOrderDetail,
+  type ShopOrderItem,
   ShopProblem,
   stockKeyTtlSeconds,
 } from '../src/modules/shop/index.js';
@@ -145,5 +150,80 @@ describe('승인 명령 다시 보내기 간격과 재고 키 수명', () => {
     expect(stockKeyTtlSeconds(new Date(T + 2 * DAY), T)).toBe((3 * DAY) / 1000);
     expect(stockKeyTtlSeconds(new Date(T + 7 * DAY + 500), T)).toBe(Math.ceil((8 * DAY + 500) / 1000));
     expect(stockKeyTtlSeconds(null, T)).toBe((30 * DAY) / 1000);
+  });
+});
+
+// ---- 결제 상점·에스크로 전체 취소(BAT-605, ADR-0313, P-T59 ⑤) ----
+
+/** 취소 판정에 필요한 항목만 채운다 */
+function cancelItem(itemId: string, o: Partial<ShopOrderItem> = {}): ShopOrderItem {
+  return {
+    itemId,
+    orderId: 'o',
+    promoterId: 'seller',
+    eventId: null,
+    productId: 'p',
+    productName: '상품',
+    quantity: 1,
+    unitAmount: 10_000,
+    commissionRateBp: 0,
+    status: 'READY',
+    fulfillment: 'DELIVERY',
+    ticketLinked: false,
+    limited: false,
+    optionSnapshot: { options: {}, name: '상품', type: 'MERCH', schemaVersion: 1 },
+    linkedTicketId: null,
+    cancelReason: null,
+    refundedAmount: 0,
+    pickedUpAt: null,
+    eventEndsAt: null,
+    ...o,
+  };
+}
+
+function cancelDetail(items: ShopOrderItem[], o: { pgStore?: 'STANDARD' | 'ESCROW'; purchaseConfirmedAt?: Date | null; amount?: number } = {}): Pick<ShopOrderDetail, 'order' | 'items'> {
+  return {
+    order: {
+      orderId: 'o',
+      accountId: 'a',
+      status: 'PAID',
+      pgStore: o.pgStore ?? 'ESCROW',
+      purchaseConfirmedAt: o.purchaseConfirmedAt ?? null,
+      amount: o.amount ?? items.reduce((s, i) => s + i.quantity * i.unitAmount, 0),
+    },
+    items,
+  } as unknown as Pick<ShopOrderDetail, 'order' | 'items'>;
+}
+
+describe('결제 상점과 구매 확정 전 전체 취소(P-T59 ⑤)', () => {
+  test('P-T59 ⑤ 결제 상점은 수령 방식으로만 가른다: 택배 ESCROW, 현장 수령·부가 상품 STANDARD', () => {
+    expect(pgStoreOf('DELIVERY')).toBe('ESCROW');
+    expect(pgStoreOf('PICKUP')).toBe('STANDARD');
+    expect(pgStoreOf('WALLET')).toBe('STANDARD');
+  });
+
+  test('P-T59 ⑤ 에스크로 상점의 허용 수단은 카드·계좌이체·가상계좌이고 간편결제·휴대폰은 막는다', () => {
+    expect(payMethodsForStore('ESCROW')).toEqual(['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT']);
+    expect(payMethodsForStore('STANDARD')).toContain('EASY_PAY');
+    expect(payMethodsForStore('STANDARD')).toContain('MOBILE');
+    expect(payMethodBlockedByStore('ESCROW', 'VIRTUAL_ACCOUNT')).toBe(false);
+    expect(payMethodBlockedByStore('ESCROW', 'EASY_PAY')).toBe(true);
+    expect(payMethodBlockedByStore('ESCROW', 'MOBILE')).toBe(true);
+    // 수단을 안 보내면(결제창에서 고른다) 막지 않는다
+    expect(payMethodBlockedByStore('ESCROW', undefined)).toBe(false);
+  });
+
+  test('P-T59 ⑤ 구매 확정 전 에스크로 주문은 주문 전체만 취소하고 부분은 escrow-partial-not-allowed이며, 확정 뒤에는 부분도 받는다', () => {
+    const a = cancelItem('a');
+    const b = cancelItem('b');
+    expect(typeOfThrow(() => resolveCancelItems(cancelDetail([a, b]), ['a'], undefined, T))).toBe('escrow-partial-not-allowed');
+    // 전체(두 항목)는 금액에 배송비까지 더한 주문 금액이다
+    const full = resolveCancelItems(cancelDetail([a, b], { amount: 23_000 }), ['a', 'b'], undefined, T);
+    expect(full).toMatchObject({ full: true, amount: 23_000 });
+    // 구매 확정 뒤에는 부분 취소를 받고 그 항목 금액만 환급한다
+    const partial = resolveCancelItems(cancelDetail([a, b], { purchaseConfirmedAt: new Date(T) }), ['b'], undefined, T);
+    expect(partial).toMatchObject({ full: false, amount: 10_000 });
+    // 일반 상점은 구매 확정과 무관하게 부분 취소를 받는다
+    expect(typeOfThrow(() => resolveCancelItems(cancelDetail([a, b], { pgStore: 'STANDARD' }), ['a'], undefined, T))).toBeUndefined();
   });
 });

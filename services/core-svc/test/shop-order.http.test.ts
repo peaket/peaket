@@ -1,8 +1,9 @@
-// 굿즈 주문 HTTP 시험(메모리 어댑터, BUILD_ORDER LCH-010·LCH-020, ADR-0300 결정 4·5·8, ADR-0301 결정 4, P-T57 ⑥⑦).
+// 굿즈 주문 HTTP 시험(메모리 어댑터, BUILD_ORDER LCH-010·LCH-020, ADR-0300 결정 4·5·8, ADR-0301 결정 4, ADR-0313·0314, P-T57 ⑥⑦, P-T56 ⑤, P-T59 ①③, P-T60 ①).
 // 단언 값은 정본에서 가져온다: openapi createShopOrder 422 ①~⑥·409 type 이름, ADR-0300 결정 4(한도 = 이 주문 + PAID·결제 접수한 주문 ≤ perAccountLimit,
-// 금액 = 가격 × 수량 + 택배 배송비 한 번), 결정 5(시도 3회, 택배 503 pg-unavailable, 가상계좌 뺌), 결정 8(남의 주문·없는 주문은 같은 404 not-found),
+// 금액 = 가격 × 수량 + 택배 배송비 한 번), 결정 5(시도 3회), ADR-0313(택배는 에스크로 상점, 간편결제·휴대폰 제외, 결제창에 escrowProducts),
+// ADR-0314(굿즈 가상계좌, 입금 기한 = 다음 날 23:59 KST [가정]), 결정 8(남의 주문·없는 주문은 같은 404 not-found),
 // ADR-0301 결정 4(현장 수령 시간대: 끝난 시간대 ends_at ≤ 지금, 남의 상품 시간대, 티켓 소지자 전용 → 422 pickup-slot-unavailable, 확인 못 함 503).
-// 한도·가격은 코드 기본값과 다르게 고른다(한도 2, 가격 12,300원, 동의 문안 판 'v2026.11-10').
+// 한도·가격은 코드 기본값과 다르게 고른다(한도 2, 가격 12,300원, 동의 문안 판 'v2026.11-10', 입금 기한은 시계에서 계산).
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -26,7 +27,7 @@ const EVENT = randomUUID();
 const OTHER_EVENT = randomUUID();
 const clock = fakeClock({ now: NOW_MS });
 
-/** 결제사가 가상계좌까지 허용 수단으로 돌려줘도 굿즈 응답에서는 빠져야 한다(ADR-0299 결정 3) */
+/** 결제사가 돌려준 허용 수단을 상점별로 거르는지 본다(에스크로면 EASY_PAY가 빠지고 가상계좌가 남는다, ADR-0313) */
 class VaPayments extends MemoryMerchPayments {
   override async prepareCheckout(q: CheckoutQuery): Promise<CheckoutAnswer> {
     const a = await super.prepareCheckout(q);
@@ -37,7 +38,7 @@ class VaPayments extends MemoryMerchPayments {
 const products = new MemoryProductStore();
 const orders = new MemoryShopOrderStore(products);
 const stock = new MemoryMerchStock();
-const payments = new VaPayments();
+const payments = new VaPayments(() => clock.now());
 const held = new MemoryHeldTickets();
 let svc: Awaited<ReturnType<typeof createService>>;
 
@@ -115,6 +116,12 @@ const problem = (res: { statusCode: number; payload: string }) => {
   const b = JSON.parse(res.payload);
   return { status: res.statusCode, type: b.type, title: b.title };
 };
+
+/** 다음 날 23:59 KST(ms). 정본의 식(ADR-0314)으로 계산하고 구현 상수를 가져오지 않는다 */
+function nextDay2359Kst(ms: number): number {
+  const kst = new Date(ms + 9 * 3_600_000);
+  return Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + 1, 23, 59, 0, 0) - 9 * 3_600_000;
+}
 
 /** 결제 시도 → 결제 접수까지(시뮬레이터 결제사, 메모리 결제 대역) */
 async function accept(account: string, orderId: string): Promise<void> {
@@ -439,28 +446,32 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     }
   });
 
-  // 리뷰 반영 RV-09(ADR-0300 결정 4 새 줄, ADR-0301 결정 4, ADR-0299 결정 3, P-T57 ⑩): 택배 주문은 BAT-605 전까지 본문·업무 규칙 검사(400·422)를 마친 뒤
-  // 재고를 예약하거나 행을 쓰기 전에 503 pg-unavailable이다. 택배 금액(배송비 한 번)은 test/merch-order.test.ts의 orderAmount 시험이 본다.
-  test('P-T57 ⑩ 택배 주문은 BAT-605 전까지 검사를 통과하면 503 pg-unavailable이고 재고 예약·주문 행이 없다', async () => {
+  // BAT-605가 503을 지웠다(ADR-0313, P-T57 ⑩ 뒤집힘). 택배 주문은 201로 만들어지고 paymentStore가 ESCROW이며 한정 상품은 예약된다.
+  test('P-T57 ⑩ 택배 주문은 201로 만들어지고 paymentStore가 ESCROW이며 한정 상품이 예약된다(503 pg-unavailable 없음)', async () => {
     const a = product({ name: '택배 한정 A', price: 12_300, shippingFee: 3_000, limitedQty: 3, stock: 3 });
     const b = product({ name: '택배 B', price: 4_100, shippingFee: 3_000 });
+    stock.setCounter(a.productId, 3);
     const writes = orders.writes;
     const count = orders.orders.size;
     const reserve = vi.spyOn(stock, 'reserve');
     try {
       const res = await deliveryOrder(randomUUID(), [{ productId: a.productId, quantity: 2 }, { productId: b.productId, quantity: 1 }], okConsent);
-      expect(res.statusCode, res.payload).toBe(503);
-      expect(typeOf(res)).toContain('pg-unavailable');
-      expect(reserve).not.toHaveBeenCalled();
-      expect(stock.slots.get(a.productId)?.resv.size ?? 0).toBe(0);
-      expect(orders.writes).toBe(writes);
-      expect(orders.orders.size).toBe(count);
+      expect(res.statusCode, res.payload).toBe(201);
+      const body = JSON.parse(res.payload);
+      expect(body.paymentStore).toBe('ESCROW');
+      expect(reserve).toHaveBeenCalledTimes(1);
+      expect(orders.writes).toBe(writes + 1);
+      expect(orders.orders.size).toBe(count + 1);
+      const o = orders.orders.get(body.orderId)!;
+      expect(o).toMatchObject({ fulfillment: 'DELIVERY', pgStore: 'ESCROW', escrow: false, status: 'CREATED' });
+      expect(o.amount).toBe(12_300 * 2 + 4_100 + 3_000);
+      expect(stock.slots.get(a.productId)!.resv.size).toBe(1);
     } finally {
       reserve.mockRestore();
     }
   });
 
-  test('P-T57 ⑩ 택배 주문의 동의 없음은 여전히 422 consent-required이고 본문 검사 400·업무 규칙 422도 503보다 먼저다', async () => {
+  test('P-T57 ⑩ 택배 주문의 동의 없음은 여전히 422 consent-required이고 본문 검사 400·업무 규칙 422도 결제 시도보다 먼저다', async () => {
     const p = product({ name: '택배 검사 먼저', limitedQty: 3, stock: 3, attributes: { perAccountLimit: 2 } });
     const noConsent = await deliveryOrder(randomUUID(), [{ productId: p.productId, quantity: 1 }]);
     expect(noConsent.statusCode).toBe(422);
@@ -492,22 +503,28 @@ describe('택배 주문(ADR-0301 결정 4, ADR-0300 결정 4·5)', () => {
     expect(o.shippingFee).toBe(0);
   });
 
-  test('P-T56 ⑤ 택배 주문의 결제 시도 시작은 503 pg-unavailable이고 결제창 준비를 부르지 않는다(ADR-0299 결정 3)', async () => {
+  // BAT-605가 뒤집었다(ADR-0313). 택배 주문의 결제 시도 시작은 201이고 결제창 준비에 에스크로 상점·상품·가상계좌 허용을 넘긴다.
+  test('P-T56 ⑤ 택배 주문의 결제 시도는 201이고 PrepareCheckout에 ESCROW 상점·에스크로 상품·가상계좌 허용을 넘긴다', async () => {
     const account = randomUUID();
-    const p = product({ name: '택배 결제' });
-    // BAT-605 전에는 택배 주문을 HTTP로 만들 수 없으므로(P-T57 ⑩) 현장 수령 주문을 메모리 저장소에서 택배로 바꿔 둔다(시험 준비)
-    const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;
-    orders.orders.get(orderId)!.fulfillment = 'DELIVERY';
+    const p = product({ name: '택배 결제', price: 12_300, shippingFee: 3_000 });
+    const created = await deliveryOrder(account, [{ productId: p.productId, quantity: 2 }], okConsent);
+    expect(created.statusCode, created.payload).toBe(201);
+    const orderId = JSON.parse(created.payload).orderId as string;
     const calls = payments.calls.checkout.length;
     const res = await post(account, `/v1/shop/orders/${orderId}/payments`, {});
-    expect(res.statusCode).toBe(503);
-    expect(typeOf(res)).toContain('pg-unavailable');
-    expect(payments.calls.checkout.length).toBe(calls);
+    expect(res.statusCode, res.payload).toBe(201);
+    expect(payments.calls.checkout.length).toBe(calls + 1);
+    const q = payments.calls.checkout.at(-1)!;
+    expect(q).toMatchObject({ orderId, amount: 27_600, pgStore: 'ESCROW', virtualAccountAllowed: true });
+    expect(q.escrowProducts).toEqual([{ id: p.productId, name: '택배 결제', code: '', unitPrice: 12_300, quantity: 2 }]);
+    const body = JSON.parse(res.payload);
+    expect(body.depositDueAt).toBe(new Date(nextDay2359Kst(clock.now())).toISOString());
+    expect([...orders.attempts.values()].filter((a) => a.orderId === orderId).map((a) => a.status)).toEqual(['READY']);
   });
 });
 
 describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
-  test('P-T56 ⑤ 결제 시도는 PrepareCheckout에 주문 금액과 시간대 회차를 넘기고 응답 허용 수단에서 가상계좌를 뺀다', async () => {
+  test('P-T56 ⑤ 결제 시도는 PrepareCheckout에 주문 금액과 시간대 회차를 넘기고 응답 허용 수단에 가상계좌가 있다(ADR-0314)', async () => {
     const account = randomUUID();
     const p = product({ name: '결제 시도', price: 12_300 });
     const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 2 }], slot(p.productId, { eventId: OTHER_EVENT }))).payload).orderId as string;
@@ -516,19 +533,21 @@ describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
     const q = payments.calls.checkout.at(-1)!;
     expect(q).toMatchObject({ orderId, amount: 24_600, eventId: OTHER_EVENT });
     const body = JSON.parse(res.payload);
-    expect(body.allowedPayMethods).toEqual(['CARD', 'EASY_PAY']);
+    expect(body.allowedPayMethods).toEqual(['CARD', 'VIRTUAL_ACCOUNT', 'EASY_PAY']);
     expect(body.checkout.successUrl).toContain('/shop/checkout/return?order=');
   });
 
-  test('P-T56 ⑤ 수단 VIRTUAL_ACCOUNT 결제 시도는 400이고 결제창 준비를 부르지 않으며 시도가 생기지 않는다', async () => {
+  test('P-T56 ⑤ 수단 VIRTUAL_ACCOUNT 결제 시도는 201이고 결제창 준비를 부르며 READY 시도·입금 기한이 생긴다', async () => {
     const account = randomUUID();
     const p = product({ name: '가상계좌' });
     const orderId = JSON.parse((await pickupOrder(account, [{ productId: p.productId, quantity: 1 }], slot(p.productId))).payload).orderId as string;
     const calls = payments.calls.checkout.length;
     const res = await post(account, `/v1/shop/orders/${orderId}/payments`, { payMethod: 'VIRTUAL_ACCOUNT' });
-    expect(res.statusCode).toBe(400);
-    expect(payments.calls.checkout.length).toBe(calls);
-    expect([...orders.attempts.values()].filter((a) => a.orderId === orderId)).toEqual([]);
+    expect(res.statusCode, res.payload).toBe(201);
+    expect(payments.calls.checkout.length).toBe(calls + 1);
+    expect(payments.calls.checkout.at(-1)).toMatchObject({ payMethod: 'VIRTUAL_ACCOUNT', virtualAccountAllowed: true });
+    expect(JSON.parse(res.payload).depositDueAt).toBe(new Date(nextDay2359Kst(clock.now())).toISOString());
+    expect([...orders.attempts.values()].filter((a) => a.orderId === orderId).map((a) => a.status)).toEqual(['READY']);
   });
 
   test('P-T57 ⑦ 결제 시도는 주문마다 3회까지이고 4번째는 409 payment-attempts-exceeded이며 이전 READY 시도는 SUPERSEDED다', async () => {
@@ -558,6 +577,81 @@ describe('굿즈 결제 시도(ADR-0300 결정 5, ADR-0299 결정 3)', () => {
     const late = await post(account, `/v1/shop/orders/${orderId}/payments`, {});
     expect(late.statusCode).toBe(409);
     expect(typeOf(late)).toContain('order-expired');
+  });
+});
+
+// BAT-605 택배 에스크로·굿즈 가상계좌(ADR-0313·0314, P-T59 ①③, P-T60 ①). 값은 정본에서:
+// 에스크로 허용 수단은 카드·계좌이체·가상계좌(간편결제·휴대폰 없음), 결제창 상품은 상품 ID·이름·단가·수량, 입금 기한은 다음 날 23:59 KST [가정]이다.
+// 결제사 대역은 EASY_PAY까지 돌려주어 코어가 상점별로 거르는지 본다.
+describe('택배 결제대금예치·굿즈 가상계좌(P-T59 ①③, P-T60 ①)', () => {
+  test('P-T59 ① 택배 결제 시도는 201이고 paymentStore=ESCROW·checkout.escrowProducts(이름·단가·수량)·허용 수단(가상계좌 있음, EASY_PAY·MOBILE 없음)이다', async () => {
+    const account = randomUUID();
+    const a = product({ name: '응원봉', price: 12_300, shippingFee: 3_000 });
+    const b = product({ name: '포토카드', price: 4_100, shippingFee: 3_000 });
+    const created = await deliveryOrder(account, [{ productId: a.productId, quantity: 2 }, { productId: b.productId, quantity: 1 }], okConsent);
+    expect(created.statusCode, created.payload).toBe(201);
+    expect(JSON.parse(created.payload).paymentStore).toBe('ESCROW');
+    const orderId = JSON.parse(created.payload).orderId as string;
+    const res = await post(account, `/v1/shop/orders/${orderId}/payments`, {});
+    expect(res.statusCode, res.payload).toBe(201);
+    const body = JSON.parse(res.payload);
+    expect(body.pg).toBe('SIMULATOR');
+    expect(body.checkout.escrowProducts).toHaveLength(2);
+    expect(body.checkout.escrowProducts).toEqual(
+      expect.arrayContaining([
+        { id: a.productId, name: '응원봉', code: '', unitPrice: 12_300, quantity: 2 },
+        { id: b.productId, name: '포토카드', code: '', unitPrice: 4_100, quantity: 1 },
+      ]),
+    );
+    expect(body.allowedPayMethods).toContain('VIRTUAL_ACCOUNT');
+    expect(body.allowedPayMethods).not.toContain('EASY_PAY');
+    expect(body.allowedPayMethods).not.toContain('MOBILE');
+    expect(body.allowedPayMethods).toEqual(['CARD', 'VIRTUAL_ACCOUNT']);
+    expect(body).not.toHaveProperty('useEscrow');
+    expect(body.checkout).not.toHaveProperty('useEscrow');
+  });
+
+  test('P-T59 ③ 에스크로 주문에 EASY_PAY·MOBILE을 보내면 결제사 호출 전 400 checkout_invalid이고 VIRTUAL_ACCOUNT는 201이며 useEscrow가 없다', async () => {
+    const account = randomUUID();
+    const p = product({ name: '에스크로 수단', shippingFee: 3_000 });
+    const orderId = JSON.parse((await deliveryOrder(account, [{ productId: p.productId, quantity: 1 }], okConsent)).payload).orderId as string;
+    const writes = orders.writes;
+    const calls = payments.calls.checkout.length;
+    // 400 본문은 guidelines §2대로 about:blank이고, 코어의 업무 이름표는 checkout_invalid다(결제사를 부르기 전에 막는다)
+    for (const payMethod of ['EASY_PAY', 'MOBILE']) {
+      const res = await post(account, `/v1/shop/orders/${orderId}/payments`, { payMethod });
+      expect(res.statusCode, payMethod).toBe(400);
+    }
+    expect(payments.calls.checkout.length, '코어가 결제사를 부르기 전에 막는다').toBe(calls);
+    expect([...orders.attempts.values()].filter((a) => a.orderId === orderId)).toEqual([]);
+    expect(orders.writes).toBe(writes);
+    const ok = await post(account, `/v1/shop/orders/${orderId}/payments`, { payMethod: 'VIRTUAL_ACCOUNT' });
+    expect(ok.statusCode, ok.payload).toBe(201);
+    const body = JSON.parse(ok.payload);
+    expect(body.allowedPayMethods).toContain('VIRTUAL_ACCOUNT');
+    expect(body).not.toHaveProperty('useEscrow');
+    expect(body.checkout).not.toHaveProperty('useEscrow');
+  });
+
+  test('P-T60 ① 굿즈 현장 수령·택배 주문의 VIRTUAL_ACCOUNT 결제 시도는 201이고 허용 수단에 가상계좌, depositDueAt = 다음 날 23:59 KST다', async () => {
+    const expected = new Date(nextDay2359Kst(clock.now())).toISOString();
+    const pickupAccount = randomUUID();
+    const pickProduct = product({ name: '현장 VA', fulfillments: ['PICKUP'] });
+    const pickupId = JSON.parse((await pickupOrder(pickupAccount, [{ productId: pickProduct.productId, quantity: 1 }], slot(pickProduct.productId))).payload).orderId as string;
+    const pick = await post(pickupAccount, `/v1/shop/orders/${pickupId}/payments`, { payMethod: 'VIRTUAL_ACCOUNT' });
+    expect(pick.statusCode, pick.payload).toBe(201);
+    const pickBody = JSON.parse(pick.payload);
+    expect(pickBody.allowedPayMethods).toContain('VIRTUAL_ACCOUNT');
+    expect(pickBody.depositDueAt).toBe(expected);
+
+    const deliveryAccount = randomUUID();
+    const deliveryProduct = product({ name: '택배 VA', shippingFee: 3_000 });
+    const deliveryId = JSON.parse((await deliveryOrder(deliveryAccount, [{ productId: deliveryProduct.productId, quantity: 1 }], okConsent)).payload).orderId as string;
+    const del = await post(deliveryAccount, `/v1/shop/orders/${deliveryId}/payments`, { payMethod: 'VIRTUAL_ACCOUNT' });
+    expect(del.statusCode, del.payload).toBe(201);
+    const delBody = JSON.parse(del.payload);
+    expect(delBody.allowedPayMethods).toContain('VIRTUAL_ACCOUNT');
+    expect(delBody.depositDueAt).toBe(expected);
   });
 });
 
