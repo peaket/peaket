@@ -2,7 +2,7 @@
 // 접수만 한다: 결제사를 부르지 않고 계좌도 받지 않으며 merch_refund 행을 만들지 않는다. 항목을 RETURN_REQUESTED로 바꾸고 바뀐 주문을 200으로 돌려준다.
 // 판매자 전이(I11~I15)의 순수 함수는 sellerReturnTransition에 두되 HTTP는 열지 않는다(BAT-610 잔여, 7.2.1).
 import type { Clock, IdempotencyRequest } from '@peaket/platform';
-import { orderNotFound, resolveReturnItems, type ReturnReason } from '../domain/merch-order.js';
+import { merchReturnNotAllowed, orderNotFound, resolveReturnItems, type ReturnReason } from '../domain/merch-order.js';
 import type { ShopOrderStore } from '../domain/merch-ports.js';
 import type { MerchOrdersRead } from './merch-orders-read.js';
 import { type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
@@ -37,6 +37,8 @@ export class MerchReturn {
     if (!detail || detail.order.accountId !== accountId) throw orderNotFound();
     const nowMs = this.d.clock.now();
     const entryOpensAtMs = await this.#entryOf(detail);
+    // WALLET인데 연결 회차 입장 시각을 읽지 못하면 단순 변심 반품을 받지 않는다(RV-04). 이상·다름은 입장 뒤에도 받는다
+    if (detail.order.fulfillment === 'WALLET' && entryOpensAtMs === undefined && body.reason === 'CHANGE_OF_MIND') throw merchReturnNotAllowed();
     // 자격을 먼저 보고, 저장소가 트랜잭션 안에서 다시 본다(같은 항목에 반품 요청 둘이 겹치면 하나만 이긴다)
     resolveReturnItems(detail, body.itemIds, body.reason, entryOpensAtMs, nowMs);
     const saved = await this.d.store.applyReturn(once, {

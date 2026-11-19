@@ -27,7 +27,7 @@ import {
 import { ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, Idempotent, type Principal, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { CreateMerchOrder, type CreatedOrderView, type CreateShopOrderInput } from '../application/create-merch-order.js';
-import { MerchCancel, type CancellationView } from '../application/merch-cancel.js';
+import { MerchCancel, RefundResultWriteFailed, type CancellationView } from '../application/merch-cancel.js';
 import { MerchOrdersRead, type PaymentStatusView } from '../application/merch-orders-read.js';
 import { MerchPayment, type PaymentAttemptView } from '../application/merch-payment.js';
 import { MerchReturn } from '../application/merch-return.js';
@@ -118,7 +118,13 @@ export class ShopOrderController {
     @Req() request: FastifyRequest,
   ): Promise<CancellationView> {
     const token = typeof request.headers['x-reauth-token'] === 'string' ? request.headers['x-reauth-token'] : headers['X-Reauth-Token'];
-    return shopGuard(() => this.cancelOrder.run(me.accountId, me.sessionId, p.orderId, { itemIds: body.itemIds, refundAccount: body.refundAccount }, once, token));
+    try {
+      return await shopGuard(() => this.cancelOrder.run(me.accountId, me.sessionId, p.orderId, { itemIds: body.itemIds, refundAccount: body.refundAccount }, once, token));
+    } catch (e) {
+      // 결제사 취소는 성공했는데 환급 결과 DB 쓰기만 실패했다. 202 REFUND_PENDING으로 답하고 재시도가 같은 취소 ID로 끝낸다(RV-07)
+      if (e instanceof RefundResultWriteFailed) return { cancellationId: e.cancellationId, status: 'REFUND_PENDING', refundAmount: e.refundAmount };
+      throw e;
+    }
   }
 
   @Post(':orderId/returns')

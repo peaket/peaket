@@ -8,6 +8,7 @@ import { refundAccountShape, type RefundAccountValue } from '@peaket/validation/
 import {
   badRequest,
   dependencyUnavailable,
+  entryStarted,
   GET_PAYMENT_DEADLINE_MS,
   orderNotFound,
   refundAccountRequired,
@@ -18,7 +19,7 @@ import {
   type CancelStatus,
   type ShopOrderDetail,
 } from '../domain/merch-order.js';
-import { type MerchPayments, ReauthUnavailable, type ShopOrderStore, type ShopReauthGate } from '../domain/merch-ports.js';
+import { type CancelOutcome, type MerchPayments, ReauthUnavailable, type ShopOrderStore, type ShopReauthGate } from '../domain/merch-ports.js';
 import { type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
 
 export interface MerchCancelDeps {
@@ -37,6 +38,21 @@ export interface CancellationView {
   status: CancelStatus;
   refundAmount: number;
   refundAccountRequired?: boolean;
+}
+
+/**
+ * 결제사 취소는 성공했는데 환급 결과 DB 쓰기가 실패했다(RV-07). 유스케이스는 이 오류를 던져
+ * 호출 쪽이 202 REFUND_PENDING으로 답하게 한다(원인 메시지·스택은 보존).
+ */
+export class RefundResultWriteFailed extends Error {
+  constructor(
+    readonly cancellationId: string,
+    readonly refundAmount: number,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : '환급 결과를 적지 못했다', { cause });
+    this.name = 'RefundResultWriteFailed';
+  }
 }
 
 export class MerchCancel {
@@ -58,6 +74,8 @@ export class MerchCancel {
     if (shape !== undefined && !shape.ok) throw badRequest('invalid-body');
     const account = shape?.value;
     const entryOpensAtMs = await this.#entryOf(detail);
+    // WALLET인데 연결 회차 입장 시각을 읽지 못하면(eventId 없음·event 행 없음) 닫힌 쪽으로 답한다(RV-04)
+    if (detail.order.fulfillment === 'WALLET' && entryOpensAtMs === undefined) throw entryStarted();
     const selection = resolveCancelItems(detail, body.itemIds, entryOpensAtMs, nowMs);
     // 결제 수단(가상계좌였는지)을 읽는다. 읽지 못하면 아무것도 쓰지 않고 503이다
     let payment;
@@ -118,12 +136,12 @@ export class MerchCancel {
     });
     const settledAt = this.d.clock.now();
     if (outcome === 'CANCELLED') {
-      await this.d.store.refundResult(refundId, outcome, settledAt, { attempts: 0 });
+      await this.#record(refundId, amount, outcome, settledAt, { attempts: 0 });
       this.d.signals?.cancellation('refunded');
       return { cancellationId: refundId, status: 'REFUNDED', refundAmount: amount };
     }
     if (outcome === 'REFUND_ACCOUNT_REQUIRED' || outcome === 'REJECTED') {
-      await this.d.store.refundResult(refundId, outcome, settledAt, {
+      await this.#record(refundId, amount, outcome, settledAt, {
         attempts: 0,
         failReason: outcome === 'REFUND_ACCOUNT_REQUIRED' ? 'REFUND_ACCOUNT_REQUIRED' : 'PG_REJECTED',
         ...(outcome === 'REFUND_ACCOUNT_REQUIRED' ? { accountRequiredAtMs: settledAt } : {}),
@@ -133,9 +151,29 @@ export class MerchCancel {
       throw refundAccountRequired();
     }
     // CANCEL_PENDING·UNKNOWN: 취소 효력은 즉시, 환급은 다시 부른다
-    await this.d.store.refundResult(refundId, outcome, settledAt, { attempts: 0, nextAtMs: settledAt + (refundRetryNextDelayMs(0) ?? 0) });
+    await this.#record(refundId, amount, outcome, settledAt, { attempts: 0, nextAtMs: settledAt + (refundRetryNextDelayMs(0) ?? 0) });
     this.d.signals?.cancellation('pending');
     return { cancellationId: refundId, status: 'REFUND_PENDING', refundAmount: amount };
+  }
+
+  /**
+   * 환급 결과 반영. DB 쓰기가 실패하면 RefundResultWriteFailed를 던져 받는 층이 202 REFUND_PENDING으로 답한다
+   * (결제사 취소는 이미 나갔고, 재시도가 같은 취소 ID로 끝낸다, RV-07)
+   */
+  async #record(
+    refundId: string,
+    amount: number,
+    outcome: CancelOutcome,
+    nowMs: number,
+    o: { attempts?: number; nextAtMs?: number | null; failReason?: string; accountRequiredAtMs?: number },
+  ): Promise<void> {
+    try {
+      await this.d.store.refundResult(refundId, outcome, nowMs, o);
+    } catch (e) {
+      this.d.signals?.userRefund('error');
+      this.#log.error({ kind: 'merch-cancel-refund-write-failed', cancellationId: refundId, err: e instanceof Error ? e.name : 'unknown' }, '결제사 취소는 나갔는데 환급 결과를 적지 못했다(재시도가 같은 취소 ID로 끝낸다)');
+      throw new RefundResultWriteFailed(refundId, amount, e);
+    }
   }
 
   async #entryOf(detail: ShopOrderDetail): Promise<number | undefined> {

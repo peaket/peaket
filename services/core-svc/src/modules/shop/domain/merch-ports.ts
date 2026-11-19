@@ -171,6 +171,8 @@ export interface PaymentState {
 
 /** GetPayment 답(입금 대기 화면과 가상계좌 결제 판정에 쓴다, ADR-0314·0315) */
 export interface PaymentDetail {
+  /** 결제 원장의 주문 ID. 요청 주문과 다르면 응답에 계좌를 싣지 않는다(RV-11) */
+  orderId?: string | undefined;
   status: PaymentState['status'];
   pg?: ShopPg | undefined;
   depositDueAtMs?: number | undefined;

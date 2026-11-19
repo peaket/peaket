@@ -25,6 +25,7 @@ import {
   attemptStartBlocker,
   type AcceptBody,
   depositDeadlineMs,
+  entryStarted,
   type LimitedLine,
   type MerchAttempt,
   merchCancelNotAllowed,
@@ -668,11 +669,13 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
   async cancelUnclaimed(orderId: string, itemIds: readonly string[], refundId: string, nowMs: number): Promise<RefundRow | undefined> {
     return this.db.transaction(async (tx) => {
       const now = new Date(nowMs);
-      // 교환권 확인(READY → PICKED_UP)과 같은 항목에 겹쳐도 READY일 때만 바꾸므로 하나만 이긴다(docs/data.md §5)
+      // 교환권 확인(READY → PICKED_UP)과 같은 항목에 겹쳐도 READY일 때만 바꾸므로 하나만 이긴다(docs/data.md §5).
+      // 구매자 취소가 진행 중인 항목(활성 merch_refund_item)은 건너뛴다(RV-03, 이중 환급 0)
       const changed = rowsOf(
         await tx.execute(sql`
           update merch_order_item set status = 'CANCELLED', cancel_reason = ${UNCLAIMED_REASON}
           where order_id = ${orderId} and id = any(${sql.param([...itemIds])}::uuid[]) and status = 'READY'
+            and not exists (select 1 from merch_refund_item ri where ri.item_id = merch_order_item.id and ri.resolved_at is null)
           returning id, quantity, unit_amount`),
       );
       if (changed.length === 0) return undefined;
@@ -722,7 +725,7 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
             where id = any(${ids}::uuid[]) and status = 'CANCELLED'`);
         } else {
           await tx.execute(sql`
-            update merch_order_item set status = 'CANCELLED', cancel_reason = 'USER_CANCEL', refunded_amount = quantity * unit_amount
+            update merch_order_item set status = 'REFUNDED', cancel_reason = 'USER_CANCEL', refunded_amount = quantity * unit_amount
             where id = any(${ids}::uuid[]) and status in ('READY', 'CANCELLED')`);
         }
         await tx.execute(sql`update merch_refund set status = 'CANCELLED', next_at = null, fail_reason = null, updated_at = ${now} ${attempts} ${alerted} where id = ${refundId}`);
@@ -749,6 +752,8 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
     const r = await this.db.transaction((tx) =>
       this.#once(tx, once, async () => {
         const detail = await this.#lockedDetail(tx, i.orderId, i.accountId, true);
+        // 입장 시작을 읽지 못한 부가 상품은 닫힌 쪽으로 답한다(RV-04)
+        if (detail.order.fulfillment === 'WALLET' && i.entryOpensAtMs === undefined) throw entryStarted();
         const selection = resolveCancelItems(detail, i.itemIds, i.entryOpensAtMs, i.nowMs);
         const ids = selection.items.map((x) => x.itemId);
         const amount = selection.amount;
@@ -800,7 +805,16 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
     const r = await this.db.transaction((tx) =>
       this.#once(tx, once, async () => {
         const detail = await this.#lockedDetail(tx, i.orderId, i.accountId, true);
+        // 입장 시작을 읽지 못한 부가 상품의 단순 변심 반품은 받지 않는다(RV-04). 이상·다름은 입장 뒤에도 받는다
+        if (detail.order.fulfillment === 'WALLET' && i.entryOpensAtMs === undefined && i.reason === 'CHANGE_OF_MIND') throw merchReturnNotAllowed();
         const selected = resolveReturnItems(detail, i.itemIds, i.reason, i.entryOpensAtMs, i.nowMs);
+        // 구매자 취소가 진행 중인 항목(활성 merch_refund_item)에는 반품을 받지 않는다(RV-02, docs/data.md §5)
+        const ids = selected.map((x) => x.itemId);
+        const active = rowsOf(
+          await tx.execute(sql`
+            select 1 from merch_refund_item where item_id = any(${sql.param(ids)}::uuid[]) and resolved_at is null limit 1`),
+        );
+        if (active.length > 0) throw merchReturnNotAllowed();
         const now = new Date(i.nowMs);
         for (const item of selected) {
           const changed = rowsOf(

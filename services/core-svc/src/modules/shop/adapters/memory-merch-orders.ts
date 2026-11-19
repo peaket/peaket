@@ -23,9 +23,11 @@ import {
   attemptStartBlocker,
   type AcceptBody,
   depositDeadlineMs,
+  entryStarted,
   type LimitedLine,
   type MerchAttempt,
   merchCancelNotAllowed,
+  merchReturnNotAllowed,
   type OrderableProduct,
   type OrderState,
   orderNotFound,
@@ -408,7 +410,9 @@ export class MemoryShopOrderStore implements ShopOrderStore {
   }
 
   async cancelUnclaimed(orderId: string, itemIds: readonly string[], refundId: string, nowMs: number): Promise<RefundRow | undefined> {
-    const changed = [...this.items.values()].filter((i) => i.orderId === orderId && itemIds.includes(i.itemId) && i.status === 'READY');
+    // 구매자 취소가 진행 중인 항목(활성 환급 자리)은 건너뛴다(RV-03, 이중 환급 0)
+    const busy = new Set([...this.refundItems.values()].filter((c) => c.resolvedAtMs === null).map((c) => c.itemId));
+    const changed = [...this.items.values()].filter((i) => i.orderId === orderId && itemIds.includes(i.itemId) && i.status === 'READY' && !busy.has(i.itemId));
     if (changed.length === 0) return undefined;
     for (const i of changed) {
       i.status = 'CANCELLED';
@@ -471,11 +475,9 @@ export class MemoryShopOrderStore implements ShopOrderStore {
         if (r.kind === 'UNCLAIMED' && i.status === 'CANCELLED') {
           i.status = 'REFUNDED';
           i.refundedAmount = i.quantity * i.unitAmount;
-        } else if (r.kind !== 'UNCLAIMED' && i.status === 'READY') {
-          i.status = 'CANCELLED';
+        } else if (r.kind !== 'UNCLAIMED' && (i.status === 'READY' || i.status === 'CANCELLED')) {
+          i.status = 'REFUNDED';
           i.cancelReason = 'USER_CANCEL';
-          i.refundedAmount = i.quantity * i.unitAmount;
-        } else if (r.kind !== 'UNCLAIMED' && i.status === 'CANCELLED') {
           i.refundedAmount = i.quantity * i.unitAmount;
         }
       }
@@ -510,6 +512,7 @@ export class MemoryShopOrderStore implements ShopOrderStore {
     const seen = this.#seen(once);
     if (seen !== undefined) return { kind: 'replay', resultRef: seen };
     const detail = this.#owned(i.orderId, i.accountId);
+    if (detail.order.fulfillment === 'WALLET' && i.entryOpensAtMs === undefined) throw entryStarted();
     const selection = resolveCancelItems(detail, i.itemIds, i.entryOpensAtMs, i.nowMs);
     for (const item of selection.items) {
       if ([...this.refundItems.values()].some((c) => c.itemId === item.itemId && c.resolvedAtMs === null)) throw merchCancelNotAllowed();
@@ -555,7 +558,9 @@ export class MemoryShopOrderStore implements ShopOrderStore {
     const seen = this.#seen(once);
     if (seen !== undefined) return { kind: 'replay', resultRef: seen };
     const detail = this.#owned(i.orderId, i.accountId);
+    if (detail.order.fulfillment === 'WALLET' && i.entryOpensAtMs === undefined && i.reason === 'CHANGE_OF_MIND') throw merchReturnNotAllowed();
     const selected = resolveReturnItems(detail, i.itemIds, i.reason, i.entryOpensAtMs, i.nowMs);
+    if (selected.some((item) => [...this.refundItems.values()].some((c) => c.itemId === item.itemId && c.resolvedAtMs === null))) throw merchReturnNotAllowed();
     for (const item of selected) {
       const stored = this.items.get(item.itemId)!;
       stored.status = 'RETURN_REQUESTED';

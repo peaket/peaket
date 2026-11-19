@@ -197,6 +197,7 @@ export class GrpcMerchPayments implements MerchPayments {
     return {
       status: (PAYMENT_STATUSES.has(status) ? status : 'UNSPECIFIED') as PaymentDetail['status'],
       pg: pgOf(v.pg),
+      ...(str(v.order_id) === '' ? {} : { orderId: str(v.order_id).toLowerCase() }),
       depositDueAtMs: msOf(v.deposit_due_at),
       ...(account === undefined
         ? {}

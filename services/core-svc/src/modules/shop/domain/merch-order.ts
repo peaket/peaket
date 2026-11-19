@@ -470,10 +470,22 @@ export function resolveCancelItems(d: Pick<ShopOrderDetail, 'order' | 'items'>, 
     if (item.status !== 'READY') throw merchCancelNotAllowed();
     if (item.fulfillment === 'WALLET' && entryOpensAtMs !== undefined && nowMs >= entryOpensAtMs) throw entryStarted();
   }
-  const full = selected.length === d.items.length;
+  const full = cancelCompletesOrder(d, selected);
   if (d.order.pgStore === 'ESCROW' && d.order.purchaseConfirmedAt === null && !full) throw escrowPartialNotAllowed();
-  const amount = full ? d.order.amount : selected.reduce((s, i) => s + i.quantity * i.unitAmount, 0);
+  const goods = selected.reduce((s, i) => s + i.quantity * i.unitAmount, 0);
+  // 처음 취소가 주문 전체면 주문 금액(처음 배송비 포함)을 쓴다. 앞서 항목을 나눠 취소했으면 이미 환급한 금액을 다시 세지 않고
+  // 남은 항목 합 + 처음 배송비를 쓴다(RV-01).
+  const anyAlreadyDone = d.items.some((i) => i.status === 'CANCELLED' || i.status === 'REFUNDED');
+  const amount = full ? (anyAlreadyDone ? goods + (d.order.shippingFee ?? 0) : d.order.amount) : goods;
   return { items: selected, amount, full };
+}
+
+/** 이 요청이 주문의 남은 항목(이미 CANCELLED·REFUNDED가 아닌 항목)을 모두 덮는가(배송비 환급 판정, RV-01) */
+export function cancelCompletesOrder(d: Pick<ShopOrderDetail, 'items'>, selected: readonly ShopOrderItem[]): boolean {
+  const remaining = d.items.filter((i) => i.status !== 'CANCELLED' && i.status !== 'REFUNDED');
+  if (remaining.length === 0) return false;
+  const ids = new Set(selected.map((i) => i.itemId));
+  return remaining.every((i) => ids.has(i.itemId));
 }
 
 /** 그 항목을 지금 취소할 수 있는가(openapi `ShopOrderItem.cancellable`, 최종 판정은 서버) */

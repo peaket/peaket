@@ -127,6 +127,8 @@ export class MerchOrdersRead {
       const getPayment = this.d.payments.getPayment;
       if (getPayment === undefined) throw new Error('결제 원장 읽기 포트가 없다');
       const p = await getPayment.call(this.d.payments, orderId.toLowerCase(), GET_PAYMENT_DEADLINE_MS);
+      // 다른 주문의 원장 답이면 계좌를 싣지 않는다(다른 주문 계좌 노출 금지, RV-11)
+      if (p?.orderId !== undefined && p.orderId !== orderId.toLowerCase()) return view;
       const va = p?.virtualAccount;
       if (va === undefined) return view;
       return {
