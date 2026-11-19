@@ -55,6 +55,7 @@ import {
   WeekendBusinessCalendar,
   withdrawalTicketCancellationId,
 } from '../src/modules/refund/index.js';
+import { calendarDaysBefore, deductionBpFor } from '../src/modules/refund/domain/refund-policy.js';
 import { migratePurchase } from '../scripts/migrate.mjs';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -644,6 +645,12 @@ describe('미사용 티켓의 취소·환급·미룸(I-T26 ②, 실제 ticket-sv
     const before = Date.now();
     const t1 = await ticketOrder(a, { eventStartsAtMs: before + 7 * DAY });
     const t2 = await ticketOrder(a, { eventStartsAtMs: before + 2 * HOUR, entryOpensAtMs: before - HOUR });
+    // POL-032 공제는 실제 공연 날짜의 '며칠 전'으로 정해진다. +2시간이 자정을 넘으면 다음 날(30%)이 되므로,
+    // 기대값을 고정하지 않고 같은 정책 함수로 계산한다(밴드 자체는 refund-policy 단위 시험이 본다).
+    const t2DaysBefore = calendarDaysBefore(t2.eventStartsAtMs, before);
+    const t2DeductionBp = deductionBpFor(t2DaysBefore, false);
+    const t2DeductionAmount = Math.floor((33_333 * t2DeductionBp) / 10_000);
+    const t2RefundAmount = 33_333 - t2DeductionAmount;
     const b = randomUUID();
     const b1 = await ticketOrder(b, { eventStartsAtMs: before + 7 * DAY });
     const bBefore = { orders: await ordersOf(b), ticket: await ticketRow(b1.ticketId), cancellations: await cancellationCount() };
@@ -668,7 +675,7 @@ describe('미사용 티켓의 취소·환급·미룸(I-T26 ②, 실제 ticket-sv
     expect(await seatRow(t1)).toBe('RETURNED');
     expect(await ticketRow(t1.ticketId)).toMatchObject({ status: 'REFUNDED' });
     // ② 입장 시작 뒤 표: 접수만 하고(REQUESTED) 환급은 입장 기록 마감 뒤로 미룬다. 좌석은 취소표로 되돌린다
-    expect(await cancellationOf(id2)).toMatchObject({ status: 'REQUESTED', reason: 'ACCOUNT_WITHDRAWAL', deduction_bp: 9_000, deduction_amount: 29_999, refund_amount: 3_334 });
+    expect(await cancellationOf(id2)).toMatchObject({ status: 'REQUESTED', reason: 'ACCOUNT_WITHDRAWAL', deduction_bp: t2DeductionBp, deduction_amount: t2DeductionAmount, refund_amount: t2RefundAmount });
     expect((await cancellationOf(id2))!.refund_due_at?.getTime()).toBe(t2.eventStartsAtMs + 50 * HOUR);
     expect(cancelsFor(t2.payment.paymentRef)).toEqual([]);
     expect(await seatRow(t2)).toBe('RETURNED');
@@ -688,8 +695,8 @@ describe('미사용 티켓의 취소·환급·미룸(I-T26 ②, 실제 ticket-sv
     const writes = new DrizzleCancellationWrites(purchaseDb, new DrizzleOrderStore({ clock: systemClock }));
     const refund = new RefundAfterEntry({ writes, payments: realCancels, entries: ticketCancels, claims: writes, nowMs: () => t2.eventStartsAtMs + 50 * HOUR });
     expect(await refund.run()).toMatchObject({ refunded: 1 });
-    expect(await cancellationOf(id2)).toMatchObject({ status: 'REFUNDED', refund_amount: 3_334 });
-    expect(cancelsFor(t2.payment.paymentRef).map((c) => [c.idemKey, c.amount])).toEqual([[`cancel-${id2}`, 3_334]]);
+    expect(await cancellationOf(id2)).toMatchObject({ status: 'REFUNDED', refund_amount: t2RefundAmount });
+    expect(cancelsFor(t2.payment.paymentRef).map((c) => [c.idemKey, c.amount])).toEqual([[`cancel-${id2}`, t2RefundAmount]]);
     expect(await call(a)).toEqual(DONE);
     // B는 여전히 그대로다
     expect(await ordersOf(b)).toEqual(bBefore.orders);
