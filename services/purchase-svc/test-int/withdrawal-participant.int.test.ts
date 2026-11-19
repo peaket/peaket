@@ -729,6 +729,50 @@ describe('미사용 티켓의 취소·환급·미룸(I-T26 ②, 실제 ticket-sv
     void t4;
     void b1;
   });
+
+  // RV-02(보안, BAT-013 리뷰): pendingRefunds가 그 계정 주문의 취소 행만 세는지 실제 PostgreSQL로 본다.
+  // A·B에 각각 사유 ACCOUNT_WITHDRAWAL의 대기 행을 두고, A의 답이 B의 행을 세지 않는지(B를 넣으면 2가 된다)와 두 행이 그대로인지 본다.
+  test('I-T26 ③_RV-02_A의미사용티켓대기수는A의주문취소행만세고_B의ACCOUNT_WITHDRAWAL대기행은세지않으며_B의행은그대로다 [ASVS v5.0.0-8.2.2]', async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    const aOrder = await order(a, 'CONFIRMED');
+    const bOrder = await order(b, 'CONFIRMED');
+    const aCancellation = randomUUID();
+    const bCancellation = randomUUID();
+    // A는 자기 대기 행 1장(REFUND_PENDING), B는 대기 행 1장(REQUESTED)을 가진다
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+       values ($1, $2, $3, 'ACCOUNT_WITHDRAWAL', 0, false, 0, 0, 33333, 'REFUND_PENDING', now(), now())`,
+      [aCancellation, aOrder.orderId, randomUUID()],
+    );
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+       values ($1, $2, $3, 'ACCOUNT_WITHDRAWAL', 0, false, 0, 0, 30000, 'REQUESTED', now(), now())`,
+      [bCancellation, bOrder.orderId, randomUUID()],
+    );
+    const bBefore = await cancellationOf(bCancellation);
+    expect(bBefore).toMatchObject({ status: 'REQUESTED', reason: 'ACCOUNT_WITHDRAWAL', refund_amount: 30_000 });
+
+    // A의 답은 A의 1장만 센다. B의 행을 세면 2가 되고, 두 계정을 섞으면 이 단언이 잡는다
+    expect(await call(a)).toEqual({
+      state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING',
+      reasons: [TICKET_PENDING],
+      payment_pending_orders: 0,
+      deposit_orders_cancelled: 0,
+      deposit_orders_pending: 0,
+      unused_tickets_cancelled: 0,
+      unused_tickets_pending: 1,
+    });
+    // 읽기 전용이다: A·B의 취소 행과 주문 행이 그대로다
+    expect(await cancellationOf(aCancellation)).toMatchObject({ status: 'REFUND_PENDING', reason: 'ACCOUNT_WITHDRAWAL', refund_amount: 33_333 });
+    expect(await cancellationOf(bCancellation)).toEqual(bBefore);
+    expect(await ordersOf(b)).toHaveLength(1);
+    expect((await ordersOf(b))[0]).toMatchObject({ id: bOrder.orderId, status: 'CONFIRMED' });
+    // B도 자기 행만 1장으로 센다(반대 방향 격리)
+    expect(await call(b)).toMatchObject({ state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: [TICKET_PENDING], unused_tickets_cancelled: 0, unused_tickets_pending: 1 });
+    expect(await cancellationOf(aCancellation)).toMatchObject({ status: 'REFUND_PENDING' });
+    expect(await cancellationOf(bCancellation)).toMatchObject({ status: 'REQUESTED' });
+  });
 });
 
 describe('identity-svc 클라이언트와 잇기(I-T84 ③ · P-T55, 계약 양쪽)', () => {
