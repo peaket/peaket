@@ -332,6 +332,13 @@ test('FE-T18 T3 셸 셋의 본문 바로가기는 SkipLink를 쓰고 focus:not-s
   assert.match(skip, /pk-skip-link/, 'SkipLink.tsx가 pk-skip-link를 쓰지 않는다');
   const css = readFileSync(resolve(root, 'packages/ds/src/styles/ds.css'), 'utf8');
   const block = (selector) => new RegExp(`${selector}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
-  assert.match(block('\\.pk-skip-link'), /clip:\s*auto/, '.pk-skip-link(초점 때)에 clip: auto가 없다');
+  const shown = block('\\.pk-skip-link');
+  assert.match(shown, /clip:\s*auto/, '.pk-skip-link(초점 때)에 clip: auto가 없다');
   assert.match(block('\\.pk-skip-link:not\\(:focus\\)'), /clip:\s*rect\(0 0 0 0\)/, '.pk-skip-link:not(:focus)(평소)에 clip: rect(0 0 0 0)이 없다');
+  // M5(z-index 낮춤·position: static)는 T1이 잡지 못한다(RV-01): 기본 폭 화면에는 8,8의 링크를 덮는 고정 띠가 없어
+  // static 상자도 가운데 점이 링크로 남는다. 초점 때 링크가 화면 위에 붙어(fixed) 키트의 가장 높은 겹침 층(.scrim, z-index 100)보다
+  // 위에 그려지는지를 소스로 본다. 낮추거나 static으로 두면 여기서 실패한다
+  assert.match(shown, /position:\s*fixed/, '.pk-skip-link(초점 때)가 position: fixed가 아니다(M5: static이면 흐름 상자로 내려가 고정 머리가 덮는다)');
+  const zIndex = Number(/z-index:\s*(-?\d+)/.exec(shown)?.[1]);
+  assert.ok(Number.isFinite(zIndex) && zIndex > 100, `.pk-skip-link(초점 때)의 z-index(${Number.isFinite(zIndex) ? zIndex : '없음'})가 콘텐츠·겹침 층(.scrim 100) 위가 아니다(M5: 낮추면 고정 머리·배너가 링크를 덮는다)`);
 });
