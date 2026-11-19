@@ -1,0 +1,35 @@
+# realtime-gw 배포 단위 기본 값(docs/devops.md §5.2, BUILD_ORDER BAS-140, 묶음 BAT-080 G5). 환경 값은 deploy/envs/<환경>/realtime-gw.yaml에 둔다.
+# 앱 8080(WebSocket)·관리 9464·복제 2. 종료 유예 30초 [가정]는 내리기 마감 10초(docs/features/seat-hold.md §7, ADR-0297 결정 5)보다 길다:
+# preStop 5초 동안 새 연결을 받지 않고, SIGTERM 뒤 10초 안에 연결을 1012로 닫고 구독을 푼다.
+# 좌석 Redis 주소·입장 토큰 공개키 묶음·ACL 사용자 비밀은 env에 두지 않고 Secret(secretEnvFrom)으로만 받는다.
+# 비밀 키: PEAKET_SEAT_REDIS_URL(로컬·CI 단일 노드) 또는 PEAKET_SEAT_REDIS_CLUSTER_URLS(운영), PEAKET_ADMISSION_JWKS, Redis ACL 사용자 이름·비밀번호
+# 좌석 Redis 구독 ACL 사용자: 채널 `s:{event:*}:sec:*`, `CLIENT`는 `SETINFO`만, `CLUSTER`는 `SLOTS`만(docs/features/seat-hold.md §7, ADR-0297 결정 6)
+name: realtime-gw
+
+managementPort: 9464
+
+secretEnvFrom: realtime-gw-secrets
+
+service:
+  enabled: true
+  replicas: 2
+  port: 8080
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  preStopSleepSeconds: 5
+  # 내리기 마감 10초보다 길어야 한다(ADR-0297 결정 5). 30초는 [가정]이다
+  terminationGracePeriodSeconds: 30
+  env:
+    # 허용 출처 하나와 입장 토큰 발급자. 회차별 좌석맵 판 폴더는 회차 설정을 받는 단계(LCH-080)가 채운다
+    PEAKET_WEB_ORIGIN: https://www.peaket.example
+    PEAKET_ADMISSION_ISSUER: https://queue.peaket.example
+    PEAKET_SEATMAP_DIR: /etc/peaket/seatmaps
+  volumes:
+    - name: seatmaps
+      configMap:
+        name: realtime-gw-seatmaps
+        optional: true
+  volumeMounts:
+    - { name: seatmaps, mountPath: /etc/peaket/seatmaps, readOnly: true }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

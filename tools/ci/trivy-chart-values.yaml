@@ -32,6 +32,15 @@ service:
       readOnly: true
   autoscaling:
     enabled: true
+  rollout:
+    enabled: true
+  pdb:
+    enabled: true
+  keda:
+    enabled: true
+    triggers:
+      - type: cpu
+        metadata: { type: Utilization, value: "70" }
   networkPolicy:
     enabled: true
     appFromPodLabels: { app.kubernetes.io/name: trivy-ci-gateway }
@@ -61,3 +70,12 @@ schemaRegistry:
   registryUrl: http://schema-registry.ci:8081
   topics: {}
   serviceAccountName: trivy-ci-schema-register
+
+# ExternalSecret(BAS-140, externalsecret.yaml)도 CI에서 켜서 그린다. remoteRef 경로만 두고 값은 두지 않는다.
+externalSecret:
+  enabled: true
+  secretStoreRef: { name: trivy-ci-store, kind: ClusterSecretStore }
+  target: { name: trivy-ci-secrets }
+  data:
+    - secretKey: TRIVY_CI_KEY
+      remoteRef: { key: trivy/ci/key }

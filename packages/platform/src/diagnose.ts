@@ -165,6 +165,26 @@ async function scrubReport(file: string): Promise<boolean> {
 
 const fileStamp = (at: string): string => at.replace(/:/g, '-');
 
+/** 진단 파일 이름의 시각(`report-<stamp>.json`·`heap-<stamp>.heapsnapshot`, stamp는 ':'를 '-'로 바꾼 요청 시각) */
+const STAMPED_FILE = /^(?:report|heap)-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}(?:-\d{2}(?:\.\d{3})?)?Z)\.(?:json|heapsnapshot)$/;
+/** Node가 치명 오류 때 쓰는 보고서 이름(`report.YYYYMMDD.HHMMSS.<pid>.<seq>.json`, --report-on-fatalerror) */
+const NODE_REPORT_FILE = /^report\.(\d{4})(\d{2})(\d{2})\.(\d{2})(\d{2})(\d{2})\.\d+\.\d+\.json$/;
+
+/**
+ * 남은 파일 이름에서 요청 시각을 읽는다(ADR-0303 결정 3, BAT-080 DG-09). 진단 수집이 쓴 파일은 요청 시각을 이름에 담고,
+ * Node의 치명 오류 보고서는 시각이 다른 꼴(YYYYMMDD.HHMMSS)로 담는다. 읽지 못하면 undefined다
+ */
+export function requestTimeOfFile(name: string): string | undefined {
+  const stamped = STAMPED_FILE.exec(name);
+  if (stamped) {
+    const [date, time] = stamped[1]!.split('T');
+    return parseDiagnoseRequest(`report@${date}T${time!.replaceAll('-', ':')}`)?.at;
+  }
+  const node = NODE_REPORT_FILE.exec(name);
+  if (node) return parseDiagnoseRequest(`report@${node[1]}-${node[2]}-${node[3]}T${node[4]}:${node[5]}:${node[6]}Z`)?.at;
+  return undefined;
+}
+
 /**
  * 진단 수집을 시작한다. 시작하자마자 /diag에 남은 파일을 올리고, 주석 파일을 pollMs마다 읽는다.
  * stop()은 읽기를 멈춘다(돌던 수집은 끝내기를 부르지 않고 멈춘다)
@@ -224,7 +244,10 @@ export function startDiagnose(o: StartDiagnoseOptions): { stop(): void } {
       if ((err as { code?: unknown }).code !== 'ENOENT') o.logger.warn({ err, kind: 'diagnose' }, '진단 폴더를 읽지 못했다');
       return;
     }
-    const at = new Date(o.clock.now()).toISOString();
+    const mark = await readHandled();
+    const markerValue = mark?.endsWith(DIAGNOSE_STARTED_SUFFIX) ? mark.slice(0, -DIAGNOSE_STARTED_SUFFIX.length) : mark;
+    const markerAt = markerValue ? parseDiagnoseRequest(markerValue)?.at : undefined;
+    let unreadable = 0;
     for (const name of names.sort()) {
       if (stopped) return;
       const file = join(o.diagDir, name);
@@ -236,12 +259,22 @@ export function startDiagnose(o: StartDiagnoseOptions): { stop(): void } {
       // 남은 보고서도 환경 변수·네트워크 칸을 지운 뒤 올린다. 읽지 못하면 올리지 않는다(리뷰 SEC-02)
       if (name.endsWith('.json') && !(await scrubReport(file))) {
         count('leftover_unreadable');
+        unreadable += 1;
         o.logger.warn({ kind: 'diagnose', file: name }, '남은 진단 보고서를 읽지 못해 올리지 않는다(환경 변수를 지웠는지 알 수 없다)');
+        continue;
+      }
+      // 객체 키의 요청 시각은 파일 이름(진단 수집·치명 오류 보고서)이나 표시 파일의 @ 시각에서 읽는다.
+      // 시작 시각을 쓰면 다시 뜰 때마다 같은 증거가 다른 접두사에 쌓인다(BAT-080 DG-09, ADR-0303 결정 3)
+      const at = requestTimeOfFile(name) ?? markerAt;
+      if (!at) {
+        count('leftover_unreadable');
+        unreadable += 1;
+        o.logger.warn({ kind: 'diagnose', file: name }, '남은 진단 파일 이름에서 요청 시각을 읽지 못해 올리지 않는다(표시 파일에도 없다)');
         continue;
       }
       if (await upload(keyOf(at, name), file)) count('leftover_uploaded');
     }
-    if (names.length > 0) o.logger.info({ kind: 'diagnose', files: names.length }, '시작할 때 남은 진단 파일을 올렸다');
+    if (names.length > 0) o.logger.info({ kind: 'diagnose', files: names.length, unreadable }, '시작할 때 남은 진단 파일을 처리했다');
   };
 
   const readHandled = async (): Promise<string | null> => {

@@ -17,6 +17,7 @@
 //   node tools/local/cluster.mjs mesh-netpol  메시 없는 실행의 포트별 허용 NetworkPolicy 무대(BUILD_ORDER HOT-420, D-T36, ADR-0285): 원천
 //                                         deploy/platform/mesh/port-allow.yaml의 워크로드마다 받는 쪽 대역 파드와 생성 NetworkPolicy를 올리고 시험 접속 정보
 //                                         .cache/peaket-tools/mesh-netpol-e2e.json을 쓴다. 다시 돌려도 된다(덮어쓰기). 내리는 명령은 없다(down이 클러스터를 지운다)
+//   node tools/local/cluster.mjs realtime-gw [--image <이름:태그>]  realtime-gw를 kind에 올린다(좌석 Redis·입장 토큰 공개키 묶음은 Secret, BUILD_ORDER BAS-140)
 //   node tools/local/cluster.mjs status  파드 목록
 //   node tools/local/cluster.mjs down    클러스터를 지운다
 // - 클러스터 이름은 PEAKET_CLUSTER(기본 peaket)다. 여러 작업 폴더가 한 PC에서 따로 띄울 때 바꾼다(kubeconfig 기본 이름도 따라 바뀐다)
@@ -975,11 +976,52 @@ async function down() {
   await kind(['delete', 'cluster', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
 }
 
+/**
+ * realtime-gw를 kind에 올린다(BUILD_ORDER BAS-140, BAT-080 G5). 좌석 Redis는 로컬 Valkey(peaket-local)를 쓰고,
+ * 좌석 Redis 주소와 입장 토큰 공개키 묶음(시험용 키)은 Secret v1-realtime-gw에만 넣는다(deploy/envs/local/v1-realtime-gw.yaml).
+ * 이미지는 `--image <이름:태그>`나 `PEAKET_REALTIME_GW_IMAGE`로 받는다. 서비스 Dockerfile이 아직 없어 여기서 빌드하지 않는다
+ * @param {string[]} [argv]
+ */
+async function realtimeGw(argv = []) {
+  let image = process.env.PEAKET_REALTIME_GW_IMAGE || '';
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--image') image = argv[++i] ?? '';
+    else throw new Error(`realtime-gw의 모르는 인자: ${argv[i]}(쓰는 법: realtime-gw [--image <이름:태그>])`);
+  }
+  if (!/^[a-z0-9./_-]+:[A-Za-z0-9._-]+$/.test(image)) throw new RangeError('realtime-gw 이미지는 <이름>:<태그>로 준다(--image나 PEAKET_REALTIME_GW_IMAGE)');
+  step('Docker 엔진과 도구');
+  run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
+  for (const t of ['kind', 'kubectl', 'helm']) await ensureTool(t);
+  if (!existsSync(KUBECONFIG)) await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
+  await preloadLocalImages([image]);
+  step('네임스페이스 realtime-gw·로컬 Valkey·시험용 Secret');
+  await kubectl(['apply', '-f', join(REPO, 'deploy', 'local', 'valkey.yaml')]);
+  await kubectl(['-n', 'peaket-local', 'rollout', 'status', 'deploy/valkey', '--timeout=300s']);
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'Namespace', metadata: { name: 'realtime-gw' } }) });
+  const secret = {
+    apiVersion: 'v1',
+    kind: 'Secret',
+    metadata: { name: 'v1-realtime-gw', namespace: 'realtime-gw' },
+    type: 'Opaque',
+    stringData: {
+      PEAKET_SEAT_REDIS_URL: 'redis://valkey.peaket-local.svc.cluster.local:6379',
+      PEAKET_ADMISSION_JWKS: JSON.stringify(generateV0TokenKey().jwks),
+    },
+  };
+  await kubectl(['-n', 'realtime-gw', 'delete', 'secret', 'v1-realtime-gw', '--ignore-not-found']);
+  await kubectl(['create', '-f', '-'], { input: JSON.stringify(secret) });
+  step('realtime-gw(공용 차트, deploy/envs/local/v1-realtime-gw.yaml)');
+  const at = image.lastIndexOf(':');
+  await helm(['upgrade', '--install', 'realtime-gw', join(REPO, 'deploy', 'charts', 'peaket-service'), '-n', 'realtime-gw', '-f', join(REPO, 'deploy', 'envs', 'local', 'v1-realtime-gw.yaml'), '--set', `image.repository=${image.slice(0, at)},image.tag=${image.slice(at + 1)}`, '--wait', '--timeout', '300s']);
+  await kubectl(['-n', 'realtime-gw', 'rollout', 'status', 'deploy/realtime-gw', '--timeout=300s']);
+  step('준비됨');
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
-  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
+  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, 'realtime-gw': realtimeGw, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|realtime-gw [--image <이름:태그>]|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();

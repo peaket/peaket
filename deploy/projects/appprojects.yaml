@@ -1,0 +1,137 @@
+# ArgoCD AppProject, 가상 팀 아홉(docs/devops.md §5.2, ADR-0169). 이름은 `peaket-<팀>`이다.
+# - sourceRepos: 저장소 하나(공개 모노레포 `peaket/peaket`)만. 다른 저장소의 차트·매니페스트는 받지 않는다(ASVS v5.0.0-13.2.5)
+# - destinations: 그 팀의 네임스페이스와 애드온 네임스페이스. 네임스페이스 지도(docs/devops.md §5.2)와 같다.
+#   platform 프로젝트는 애드온이 쓰는 otel·ops-breakglass·envoy-gateway-system도 맡는다.
+# - clusterResourceWhitelist: 필요한 클러스터 범위 종류만. `*`는 쓰지 않는다(팀이 다른 팀의 네임스페이스를 만들지 못하게).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-queue
+  namespace: argocd
+spec:
+  description: 대기열 팀(queue-svc·admission-ctrl)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: queue, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-purchase
+  namespace: argocd
+spec:
+  description: 구매 팀(purchase-svc·realtime-gw·payment-svc)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: purchase, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-ticket
+  namespace: argocd
+spec:
+  description: 티켓 팀(ticket-svc)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: ticket, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-trust
+  namespace: argocd
+spec:
+  description: 신뢰 팀(trust-svc·trust-reassess·inv-ingest)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: trust, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-core
+  namespace: argocd
+spec:
+  description: 코어 팀(identity-svc·core-svc·notify·image-worker·seatmap-worker·ops-svc)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: core, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-frontend
+  namespace: argocd
+spec:
+  description: 프론트엔드 팀(웹 앱 서버·파트너 앱 서버, 네임스페이스 web)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: web, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-data
+  namespace: argocd
+spec:
+  description: 데이터 팀(스트림 작업자·ClickHouse·마감 실행기·dbt Job·랭킹 게시 잡)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: data, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-observability
+  namespace: argocd
+spec:
+  description: 관측 팀(Prometheus·Mimir·Loki·Tempo·Pyroscope·Alertmanager·Grafana)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: observability, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist: []
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: peaket-platform
+  namespace: argocd
+spec:
+  description: 플랫폼 팀(애드온·OTel 수집기·비상 런북 Job·변경 동결 달력·증거 수집기)
+  sourceRepos:
+    - https://github.com/peaket/peaket
+  destinations:
+    - { namespace: platform, server: https://kubernetes.default.svc }
+    - { namespace: otel, server: https://kubernetes.default.svc }
+    - { namespace: ops-breakglass, server: https://kubernetes.default.svc }
+    - { namespace: envoy-gateway-system, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+    - { group: apiextensions.k8s.io, kind: CustomResourceDefinition }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRole }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRoleBinding }
+    - { group: scheduling.k8s.io, kind: PriorityClass }

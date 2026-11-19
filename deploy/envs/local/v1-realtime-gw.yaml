@@ -1,0 +1,33 @@
+# realtime-gw의 로컬 kind 값(docs/features/seat-hold.md §7, BUILD_ORDER BAS-140, 묶음 BAT-080 G5).
+# 올리는 법: node tools/local/cluster.mjs realtime-gw [--image <이름:태그>]. 좌석 Redis 주소·입장 토큰 공개키 묶음은 Secret(v1-realtime-gw)에만 둔다.
+# 이미지 태그는 local만 쓴다(운영·데모·스테이징은 digest로 고정한다).
+name: realtime-gw
+
+image:
+  repository: peaket/realtime-gw
+  tag: local
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+
+secretEnvFrom: v1-realtime-gw
+
+service:
+  replicas: 2
+  port: 8080
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+  env:
+    PEAKET_WEB_ORIGIN: https://127.0.0.1:3000
+    PEAKET_ADMISSION_ISSUER: https://queue.peaket.example
+    PEAKET_SEATMAP_DIR: /etc/peaket/seatmaps
+  volumes:
+    - name: seatmaps
+      emptyDir: {}
+  volumeMounts:
+    - { name: seatmaps, mountPath: /etc/peaket/seatmaps, readOnly: true }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

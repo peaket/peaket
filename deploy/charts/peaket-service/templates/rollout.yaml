@@ -1,0 +1,35 @@
+{{- if and .Values.service.enabled .Values.service.rollout.enabled }}
+{{- $name := include "peaket.name" . }}
+{{- include "peaket.extraPorts" . }}
+# Argo Rollouts 카나리(docs/devops.md §6.2, BUILD_ORDER BAS-140). 켜면 Deployment 대신 이 Rollout 하나만 낸다.
+# 단계는 값(service.rollout.steps)의 weight·pauseSeconds를 그대로 옮긴다. 되돌리기는 rollbackWindow.revisions(3) 안에서 Git 되돌리기로 한다
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+spec:
+  {{- if not .Values.service.autoscaling.enabled }}
+  replicas: {{ .Values.service.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: service
+  template:
+    {{- include "peaket.servicePodTemplate" . | nindent 4 }}
+  strategy:
+    canary:
+      steps:
+        {{- range .Values.service.rollout.steps }}
+        - setWeight: {{ int .weight }}
+          {{- if .pauseSeconds }}
+          pause: { duration: {{ printf "%ds" (int .pauseSeconds) }} }
+          {{- end }}
+        {{- end }}
+      rollbackWindow:
+        revisions: 3
+{{- end }}

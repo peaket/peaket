@@ -1,0 +1,55 @@
+# realtime-gw 경보 규칙(BUILD_ORDER BAS-140, BAT-052·BAT-053이 넘긴 것, 묶음 BAT-080 G5).
+# 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현' 운영 확인 표(전파 Degraded 자동 전환 행),
+# docs/observability.md §5 SEV2 '핵심 사용자 여정의 Degraded Mode 진입'·G-06, ADR-0298.
+# SEV2: 파드가 Degraded(1초 묶음)이면 바로 울리고, 그동안 '묶음 대기 p99 150ms' 경보는 이 경보로 갈음한다(아래 셋째 규칙의 and 조건).
+# 런북 RB-23(배포 되돌리기)·RB-06(좌석 Redis 페일오버), Game Day G-06(버퍼 포화로 1초 간격 연결 비율 경보가 60초 안에 울리는지).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: realtime-gw
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: realtime-gw
+      rules:
+        - alert: realtime_gw_degraded
+          # 파드가 Degraded로 바뀐 즉시(0m) SEV2. 그동안 묶음 대기 p99 경보는 이 경보가 대신한다
+          expr: realtime_gw_degraded == 1
+          for: 0m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: realtime-gw
+          annotations:
+            summary: realtime-gw 좌석 전파가 Degraded(1초 묶음)다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-23-배포-되돌리기와-동결-중-긴급-변경
+            game_day: G-06
+            description: '{{ $labels.namespace }}/{{ $labels.pod }}가 좌석 전파를 1초 묶음으로 바꿨다. 좌석 변경 p99가 50ms를 넘는 창이 18개(3분) 이어졌거나 박자가 돌지 않았다. 묶음 대기 p99 경보는 이 경보로 갈음한다.'
+        - alert: realtime_gw_buffer_slow_connections
+          # 버퍼로 1초 간격이 된 연결 비율이 5% [가정] 이상으로 30초. 분모는 realtime_gw_connections다(0이면 NaN이라 울리지 않는다)
+          expr: realtime_gw_buffer_slow_connections / realtime_gw_connections >= 0.05
+          for: 30s
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: realtime-gw
+          annotations:
+            summary: realtime-gw 연결의 5% 이상이 보내기 버퍼 때문에 1초 묶음이다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-06-좌석-redis-페일오버-대응
+            game_day: G-06
+            description: '버퍼로 1초 간격이 된 연결 비율이 30초 동안 5% [가정] 이상이다. G-06에서 60초 안에 이 경보가 울리는지 본다. 분모는 realtime_gw_connections다.'
+        - alert: realtime_gw_batch_wait_p99_high
+          # Degraded가 아닐 때만 울린다. Degraded 동안은 위 realtime_gw_degraded가 갈음한다(ADR-0298)
+          expr: histogram_quantile(0.99, sum by (le) (rate(realtime_gw_batch_wait_ms_bucket[5m]))) > 0.15 and on() (sum(realtime_gw_degraded) == 0)
+          for: 5m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: realtime-gw
+          annotations:
+            summary: realtime-gw 묶음 대기 p99가 150ms를 넘는다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-23-배포-되돌리기와-동결-중-긴급-변경
+            game_day: G-06
+            description: 'Degraded가 아닌데 묶음 대기 p99가 150ms [가정]를 넘는다. 파드가 Degraded가 되면 이 경보는 realtime_gw_degraded로 갈음한다.'

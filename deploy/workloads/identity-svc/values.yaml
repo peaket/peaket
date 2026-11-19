@@ -1,0 +1,62 @@
+# identity-svc 배포 단위 기본 값(docs/devops.md §5.2, BUILD_ORDER BAS-140, 묶음 BAT-080 G4). 환경 값은 deploy/envs/<환경>/identity-svc.yaml에 둔다.
+# 포트: 앱 8080·업무 gRPC 50051·관리 9464, 릴레이 `identity-outbox-relay`는 같은 이미지의 dist/relay.js·복제 2·Lease 리더 하나.
+# 비밀(토큰 서명 키 세 벌과 교체 값, DB 주소, 내부 토큰)은 env에 두지 않고 Secret(secretEnvFrom)으로만 받는다.
+# 토큰 키의 교체 차례(docs/security/secrets-and-keys.md '팬 액세스 토큰 서명 키', docs/features/identity.md §3):
+#   1) 다음 키의 공개 JWK를 `…_TOKEN_KEY_NEXT`로 먼저 배포한다(받는 쪽 캐시 5분 + 배포 완료를 기다린다).
+#   2) 다음 키를 지금 키로, 지금 키의 공개 부분을 `…_TOKEN_KEY_PREVIOUS`로 옮겨 배포하고 `…_PREVIOUS_UNTIL`을 정한다.
+#   3) 끝 시각이 지나면 `…_PREVIOUS`·`…_PREVIOUS_UNTIL`과 지난 `…_NEXT`를 지운다.
+# ExternalSecret의 remoteRef는 Secrets Manager 경로만 가리킨다. 값(개인 JWK·PEM)은 저장소에 두지 않는다.
+name: identity-svc
+
+managementPort: 9464
+
+secretEnvFrom: identity-svc-secrets
+
+service:
+  enabled: true
+  replicas: 2
+  port: 8080
+  # 업무 gRPC 50051(메시 없는 실행의 NetworkPolicy 허용 목록은 생성 파일 meshless-networkpolicies.yaml이 지킨다, ADR-0285)
+  extraPorts:
+    - { name: grpc, port: 50051 }
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  env:
+    PEAKET_GRPC_PORT: "50051"
+    # 도메인은 비밀이 아니다(쿠키가 붙을 상위 도메인). 값은 환경 값과 같다
+    PEAKET_COOKIE_DOMAIN: peaket.example
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+# 세션 종료·기기 한도 사건을 내보내는 Outbox 릴레이. 이 파드가 돌지 않으면 마이그레이션 때 만든 Outbox 일 파티션이 끝난다.
+# DB 역할은 `<서비스>_outbox_relay`(Outbox 읽기·sent_at 고치기)와 정비 역할이다. 주소는 Secret 이름으로만 받는다:
+# PEAKET_OUTBOX_DATABASE_URL·PEAKET_MAINTENANCE_DATABASE_URL·PEAKET_KAFKA_BROKERS는 identity-svc-relay-secrets에서 온다(env에 값을 두지 않는다)
+outboxRelay:
+  enabled: true
+  replicas: 2
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/relay.js"]
+  secretEnvFrom: identity-svc-relay-secrets
+  env: {}
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 384Mi }
+
+# 토큰 서명 키 세 벌(fan·admin·staff)과 교체 값. `_NEXT`는 공개 JWK, `_PREVIOUS`는 공개 JWK, `_PREVIOUS_UNTIL`은 허용 끝 시각이다.
+# 지금 키(`PEAKET_<FAN|ADMIN|STAFF>_TOKEN_KEY`)만 개인 JWK다. 모두 Secrets Manager 경로에서 ExternalSecret이 채운다
+externalSecret:
+  enabled: true
+  secretStoreRef: { name: peaket-secrets, kind: ClusterSecretStore }
+  target: { name: identity-svc-secrets }
+  data:
+    - { secretKey: PEAKET_FAN_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/fan-token-key } }
+    - { secretKey: PEAKET_FAN_TOKEN_KEY_NEXT, remoteRef: { key: peaket/prod/identity/fan-token-key-next } }
+    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/fan-token-key-previous } }
+    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: peaket/prod/identity/fan-token-key-previous-until } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/admin-token-key } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_NEXT, remoteRef: { key: peaket/prod/identity/admin-token-key-next } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/admin-token-key-previous } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: peaket/prod/identity/admin-token-key-previous-until } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/staff-token-key } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY_NEXT, remoteRef: { key: peaket/prod/identity/staff-token-key-next } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/staff-token-key-previous } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: peaket/prod/identity/staff-token-key-previous-until } }

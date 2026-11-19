@@ -1,0 +1,18 @@
+{{- if and .Values.service.enabled .Values.service.pdb.enabled }}
+{{- $name := include "peaket.name" . }}
+# 강제 축출(노드 정비) 때 준비된 파드를 최소 하나 남긴다(docs/devops.md §6.1). 복제 2 이상에서 쓴다
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+spec:
+  maxUnavailable: {{ int .Values.service.pdb.maxUnavailable }}
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: service
+{{- end }}

@@ -21,6 +21,76 @@ app.kubernetes.io/part-of: peaket
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
+{{/* 서비스 파드 템플릿(Deployment와 Rollout이 함께 쓴다). 파드 라벨·어노테이션·계정·종료 유예·컨테이너(프로브·진단·볼륨)를 담는다.
+    우선순위 클래스는 값이 있을 때만 넣는다(빈 값이면 칸을 만들지 않는다, docs/devops.md §5.2) */}}
+{{- define "peaket.servicePodTemplate" -}}
+{{- $name := include "peaket.name" . }}
+{{- $leases := include "peaket.leaderLeases" . | fromJsonArray }}
+metadata:
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+  # 로컬 관측 최소의 Prometheus가 관리 포트 /metrics를 긁는다(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드').
+  # 운영은 PodMonitor로 수집하므로(ADR-0076) 이 주석은 쓰지 않을 뿐 해가 없다
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.managementPort }}"
+    prometheus.io/path: /metrics
+spec:
+  serviceAccountName: {{ $name }}
+  {{- /* 리더를 뽑는 파드만 Lease API를 부르므로 토큰을 붙인다(BUILD_ORDER PRF-202) */}}
+  automountServiceAccountToken: {{ if $leases }}true{{ else }}false{{ end }}
+  {{- with .Values.service.priorityClassName }}
+  priorityClassName: {{ . | quote }}
+  {{- end }}
+  terminationGracePeriodSeconds: {{ .Values.service.terminationGracePeriodSeconds }}
+  securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: app
+      image: {{ include "peaket.image" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command: {{- toYaml .Values.service.command | nindent 8 }}
+      ports:
+        - { name: http, containerPort: {{ .Values.service.port }} }
+        - { name: management, containerPort: {{ .Values.managementPort }} }
+        {{- range .Values.service.extraPorts }}
+        - { name: {{ .name }}, containerPort: {{ int .port }} }
+        {{- end }}
+      env:
+        {{- include "peaket.commonEnv" . | nindent 8 }}
+        - name: PORT
+          value: {{ .Values.service.port | quote }}
+        {{- range $k, $v := .Values.service.env }}
+        {{- if ne $k "NODE_OPTIONS" }}
+        - name: {{ $k }}
+          value: {{ $v | quote }}
+        {{- end }}
+        {{- end }}
+        {{- include "peaket.diagnoseEnv" (dict "root" $ "resources" .Values.service.resources "extra" .Values.service.env.NODE_OPTIONS "containerEnv" .Values.service.env "where" "service") | nindent 8 }}
+      {{- if .Values.secretEnvFrom }}
+      envFrom:
+        - secretRef: { name: {{ .Values.secretEnvFrom }} }
+      {{- end }}
+      {{- include "peaket.probes" . | nindent 6 }}
+      lifecycle:
+        preStop:
+          sleep: { seconds: {{ .Values.service.preStopSleepSeconds }} }
+      resources: {{- toYaml .Values.service.resources | nindent 8 }}
+      securityContext: {{- include "peaket.containerSecurity" . | nindent 8 }}
+      volumeMounts:
+        - { name: tmp, mountPath: /tmp }
+        {{- include "peaket.diagnoseMounts" . | nindent 8 }}
+        {{- with .Values.service.volumeMounts }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  volumes:
+    - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+    {{- include "peaket.diagnoseVolumes" (dict "resources" .Values.service.resources "where" "service") | nindent 4 }}
+    {{- with .Values.service.volumes }}
+    {{- include "peaket.volumes" (dict "volumes" . "env" $.Values.env.PEAKET_ENV "where" "service.volumes") | nindent 4 }}
+    {{- end }}
+{{- end -}}
+
 {{/* 두 Deployment가 함께 받는 환경 변수. PEAKET_POD는 파드 이름(Lease 보유자·소비자 그룹 이름, R-224·R-225) */}}
 {{- define "peaket.commonEnv" -}}
 - name: PEAKET_POD

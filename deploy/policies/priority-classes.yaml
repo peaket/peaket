@@ -1,0 +1,18 @@
+# 클러스터 애드온의 우선순위 클래스(docs/devops.md §5.2 네임스페이스 지도, ADR-0078 결정 8, ADR-0102 결정 3).
+# 값은 [가정](wbs 0.4.4에서 확정)이다. globalDefault를 두지 않는다: 클러스터의 기본 우선순위를 바꾸면
+# 우선순위를 적지 않은 모든 파드(핫패스 포함)의 축출 순서가 함께 바뀐다.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: peaket-control
+# 확장·제어 길(관제·비상 런북·ArgoCD·Karpenter)이 밀리지 않게 한다
+value: 100000
+description: PEAKET 제어·확장 길(관제, 비상 런북, 배포 도구). [가정]
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: peaket-addon
+# 나머지 애드온(관측·정책·메시 제어 평면)이 서비스보다 먼저 떠 있게 한다
+value: 10000
+description: PEAKET 나머지 클러스터 애드온. [가정]

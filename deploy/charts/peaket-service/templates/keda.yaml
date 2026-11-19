@@ -1,0 +1,18 @@
+{{- if and .Values.service.enabled .Values.service.keda.enabled }}
+{{- $name := include "peaket.name" . }}
+# KEDA ScaledObject(wbs 0.4.4, docs/observability.md §5 G-21). 지표를 읽지 못하면 fallback.replicas(-1)로 지금 복제 수를 유지한다
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "peaket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  triggers: {{- toYaml .Values.service.keda.triggers | nindent 4 }}
+  fallback:
+    failureThreshold: {{ int .Values.service.keda.fallback.failureThreshold }}
+    replicas: {{ int .Values.service.keda.fallback.replicas }}
+{{- end }}
