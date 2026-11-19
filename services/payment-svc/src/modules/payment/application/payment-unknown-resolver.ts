@@ -622,7 +622,7 @@ export class PaymentUnknownResolver {
     }
   }
 
-  /** 입금 대기 결과(T14)에 가상계좌 칸을 붙인다(트랜잭션에 들어가기 전에 암호화한다, BUILD_ORDER HOT-151). 던지지 않는다 */
+  /** 입금 대기 결과(T14)에 가상계좌 칸을 붙인다(트랜잭션에 들어가기 전에 암호화한다, BUILD_ORDER HOT-151). 굿즈(MERCH)도 티켓과 같은 전이를 쓴다(order_kind 분기 없음, BAT-605). 던지지 않는다 */
   async #withDeposit(job: UnknownQueryJob, finish: ResolvedFinish, va: ConfirmVirtualAccount | undefined): Promise<ResolvedFinish> {
     if (finish.status !== 'AWAITING_DEPOSIT' || this.deps.deposit === undefined) return finish;
     const deposit = await depositWriteOf(this.deps.deposit, { paymentId: job.paymentId, orderId: job.orderId }, va, job.entryOpensAtMs);

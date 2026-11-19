@@ -1,7 +1,7 @@
 // 결제사 선택과 결제창 준비의 값과 규칙(docs/features/payment.md §2.2 '선택기의 첫 구현', ADR-0044·0143, BUILD_ORDER PRF-190, 명세 specs/payment.qnt `selected`).
 // 프레임워크·저장소·계약 패키지를 모른다(순수 값과 함수). 요청의 모양(proto 칸 이름·enum 앞머리)은 받는 층이 바꿔 넘긴다.
 import { checkEntryOpensAt, isLowerUuid, PAYMENT_AMOUNT_MAX, PaymentInputError, type PaymentOrderKind } from './confirm-command.js';
-import { PAY_METHODS, type PayMethod, type PaymentGatewayPort, type PgName } from './payment-gateway.js';
+import { ESCROW_PAY_METHODS, type EscrowProduct, PAY_METHODS, type PayMethod, PAYMENT_STORES, type PaymentGatewayPort, type PaymentStore, type PgName } from './payment-gateway.js';
 import type { PaymentGateways } from './ports.js';
 import { VIRTUAL_ACCOUNT_MIN_LEAD_MS } from './virtual-account.js';
 
@@ -96,6 +96,10 @@ export interface PrepareCheckoutInput {
   readonly entryOpensAtMs?: number;
   /** PgProvider에서 PG_PROVIDER_를 뗀 이름. 멱등 재생에서 그 시도의 결제사로 고정한다(BUILD_ORDER PRF-191). 비었으면 평소처럼 고른다 */
   readonly pinnedPg?: string;
+  /** PaymentStore에서 PAYMENT_STORE_를 뗀 이름. 비면 STANDARD다(BAT-605) */
+  readonly paymentStore?: string;
+  /** 에스크로 상점의 주문 상품. ESCROW일 때만 쓴다(BAT-605) */
+  readonly escrowProducts?: readonly EscrowProduct[];
 }
 
 /** 검사를 마친 결제창 준비 명령 */
@@ -114,6 +118,10 @@ export interface PrepareCheckoutCommand {
   readonly entryOpensAtMs?: number;
   /** 멱등 재생의 결제사 고정(BUILD_ORDER PRF-191) */
   readonly pinnedPg?: PgName;
+  /** 결제 상점. 없으면 STANDARD다(BAT-605) */
+  readonly paymentStore?: PaymentStore;
+  /** 에스크로 상점의 주문 상품. ESCROW가 아니면 없다 */
+  readonly escrowProducts?: readonly EscrowProduct[];
 }
 
 /**
@@ -197,7 +205,8 @@ function uuidOf(value: string, field: string): string {
 
 /**
  * 결제창 준비 입력 검사. order_kind는 TICKET·MERCH만 받는다(UNSPECIFIED 포함 그 밖은 INVALID_ARGUMENT). 굿즈(MERCH)는 event_id가 비어도 되고(있으면 소문자 UUID),
- * 가상계좌를 허용 수단에서 빼므로 pay_method VIRTUAL_ACCOUNT는 INVALID_ARGUMENT다(추천 적용 2026-11-18, BAT-600 계획, ADR-0299 결정 3).
+ * 가상계좌도 받는다(입금 대기 O2~O4, BAT-605). payment_store는 STANDARD·ESCROW이고 비면 STANDARD다.
+ * 에스크로 상점의 주문 상품(escrow_products)은 ESCROW일 때만 검사해 싣고, 틀리면 INVALID_ARGUMENT다.
  * @throws PaymentInputError 입력이 틀림(field = proto 칸 이름)
  */
 export function parsePrepareCheckoutInput(input: PrepareCheckoutInput): PrepareCheckoutCommand {
@@ -211,8 +220,8 @@ export function parsePrepareCheckoutInput(input: PrepareCheckoutInput): PrepareC
   if (nameLength < 1 || nameLength > ORDER_NAME_MAX_LENGTH || input.orderName.trim() === '' || ORDER_NAME_FORBIDDEN.test(input.orderName)) throw new PaymentInputError('order_name');
   const payMethod = input.payMethod === '' ? 'CARD' : input.payMethod;
   if (!isPayMethod(payMethod)) throw new PaymentInputError('pay_method');
-  // 굿즈의 입금 대기(O2~O4)는 BAT-605가 정한다. 그때까지 가상계좌를 받지 않는다(ADR-0299 결정 3)
-  if (orderKind === 'MERCH' && payMethod === 'VIRTUAL_ACCOUNT') throw new PaymentInputError('pay_method');
+  const paymentStore = paymentStoreOf(input.paymentStore);
+  const escrowProducts = paymentStore === 'ESCROW' ? escrowProductsOf(input.escrowProducts) : undefined;
   const { customerKey, entryOpensAtMs } = input;
   const pinned = input.pinnedPg === undefined || input.pinnedPg === '' || input.pinnedPg === 'UNSPECIFIED' ? undefined : input.pinnedPg;
   if (pinned !== undefined && !(PG_NAMES as readonly string[]).includes(pinned)) throw new PaymentInputError('pinned_pg');
@@ -227,9 +236,55 @@ export function parsePrepareCheckoutInput(input: PrepareCheckoutInput): PrepareC
     orderName: input.orderName,
     payMethod,
     ...(customerKey === undefined ? {} : { customerKey }),
-    // 굿즈는 가상계좌를 허용 수단에서 뺀다(ADR-0299 결정 3)
-    virtualAccountAllowed: orderKind === 'MERCH' ? false : (input.virtualAccountAllowed ?? true),
+    // 티켓·굿즈 모두 가상계좌를 받는다(굿즈는 입금 대기 O2~O4, BAT-605)
+    virtualAccountAllowed: input.virtualAccountAllowed ?? true,
     ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
     ...(pinned === undefined ? {} : { pinnedPg: pinned as PgName }),
+    ...(paymentStore === 'STANDARD' ? {} : { paymentStore }),
+    ...(escrowProducts === undefined ? {} : { escrowProducts }),
   };
+}
+
+/** 에스크로 상품 목록 상한 100건 [가정](한 주문의 항목 상한과 같게) */
+export const ESCROW_PRODUCTS_MAX = 100;
+/** 에스크로 상품 값의 글 길이 상한 200자 [가정](토스 상품 이름·코드 상한을 확인할 때 고친다) */
+export const ESCROW_PRODUCT_TEXT_MAX = 200;
+/** 에스크로 상품 수량 상한 9,999 [가정](주문 항목 수량 상한과 같게) */
+export const ESCROW_PRODUCT_QUANTITY_MAX = 9_999;
+const ESCROW_PRODUCT_TEXT = /^[\x20-\x7e\u00a0-\uffff]*$/;
+
+/** PaymentStore 이름 → 값. 비었거나 UNSPECIFIED면 STANDARD다(BAT-605) */
+export function paymentStoreOf(value: string | undefined): PaymentStore {
+  if (value === undefined || value === '' || value === 'UNSPECIFIED') return 'STANDARD';
+  if ((PAYMENT_STORES as readonly string[]).includes(value)) return value as PaymentStore;
+  throw new PaymentInputError('payment_store');
+}
+
+/**
+ * 에스크로 상품 검사. id·name은 1~200자(제어 문자 없음), code는 비어도 되고 200자 이하, 단가는 1 이상 PAYMENT_AMOUNT_MAX 이하 정수,
+ * 수량은 1 이상 9,999 이하 정수이고 목록은 100건 이하일 때만 값으로 돌려준다. 틀리면 INVALID_ARGUMENT다.
+ * @throws PaymentInputError field = 'escrow_products'
+ */
+export function escrowProductsOf(value: readonly EscrowProduct[] | undefined): EscrowProduct[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length < 1 || value.length > ESCROW_PRODUCTS_MAX) throw new PaymentInputError('escrow_products');
+  return value.map((product) => {
+    if (product === null || typeof product !== 'object') throw new PaymentInputError('escrow_products');
+    const { id, name, code, unitPrice, quantity } = product;
+    const validText = (text: unknown, min: number): text is string => typeof text === 'string' && [...text].length >= min && [...text].length <= ESCROW_PRODUCT_TEXT_MAX && ESCROW_PRODUCT_TEXT.test(text);
+    if (!validText(id, 1) || !validText(name, 1) || !validText(code, 0)) throw new PaymentInputError('escrow_products');
+    if (!(Number.isInteger(unitPrice) && unitPrice >= 1 && unitPrice <= PAYMENT_AMOUNT_MAX)) throw new PaymentInputError('escrow_products');
+    if (!(Number.isInteger(quantity) && quantity >= 1 && quantity <= ESCROW_PRODUCT_QUANTITY_MAX)) throw new PaymentInputError('escrow_products');
+    return { id, name, code, unitPrice, quantity };
+  });
+}
+
+/** 이 결제 상점에서 고를 수 있는 결제수단으로 채널 표를 좁힌다(에스크로는 간편결제·휴대폰을 빼고 카드·계좌이체·가상계좌만, BAT-605) */
+export function channelsForStore(channels: PgChannelTable, store: PaymentStore): PgChannelTable {
+  if (store !== 'ESCROW') return channels;
+  const table = new Map<PgName, PgChannel>();
+  for (const [pg, channel] of channels) {
+    table.set(pg, { active: channel.active, payMethods: new Set([...channel.payMethods].filter((method) => ESCROW_PAY_METHODS.includes(method))) });
+  }
+  return table;
 }

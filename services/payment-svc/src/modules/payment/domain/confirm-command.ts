@@ -81,6 +81,8 @@ export interface PaymentRecord {
   readonly amount: number;
   /** 주문 종류(payment.order_kind, 마이그레이션 0022). 다시 부를 때 대조한다. 저장소는 늘 채운다. 없으면 TICKET으로 본다 */
   readonly orderKind?: PaymentOrderKind;
+  /** 결제 상점(payment.pg_store, 마이그레이션 0018). 다시 부를 때 대조한다. 없으면 STANDARD로 본다(BAT-605) */
+  readonly pgStore?: 'STANDARD' | 'ESCROW';
   readonly status: PaymentLedgerStatus;
   /** 승인 시각(epoch ms). 비었으면 undefined */
   readonly approvedAtMs?: number;
@@ -268,10 +270,11 @@ export function parseConfirmPaymentInput(input: ConfirmPaymentInput, nowMs: numb
   const authenticatedAtMs = input.authenticatedAtMs;
   if (authenticatedAtMs === undefined || !(Number.isInteger(authenticatedAtMs) && authenticatedAtMs > 0 && authenticatedAtMs <= nowMs + AUTHENTICATED_AT_MAX_FUTURE_MS)) throw new PaymentInputError('authenticated_at');
   if (!isPgName(input.pg)) throw new PaymentInputError('pg');
-  if (input.pgStore !== undefined && input.pgStore !== 'STANDARD' && input.pgStore !== 'ESCROW') throw new PaymentInputError('pg_store');
+  const pgStore = input.pgStore === undefined || input.pgStore === '' || input.pgStore === 'UNSPECIFIED' ? undefined : input.pgStore;
+  if (pgStore !== undefined && pgStore !== 'STANDARD' && pgStore !== 'ESCROW') throw new PaymentInputError('payment_store');
   const { entryOpensAtMs } = input;
   checkEntryOpensAt(entryOpensAtMs);
-  return { orderId, attemptId, attemptNo: input.attemptNo, orderKind, eventId, pg: input.pg, pgStore: input.pgStore ?? 'STANDARD', paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }), ...(input.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: input.virtualAccountAllowed }) };
+  return { orderId, attemptId, attemptNo: input.attemptNo, orderKind, eventId, pg: input.pg, pgStore: pgStore ?? 'STANDARD', paymentRef: checkedRef(input.pg, orderId, input.paymentRef), amount: input.amount, authenticatedAtMs, ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }), ...(input.virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed: input.virtualAccountAllowed }) };
 }
 
 /**
@@ -293,9 +296,15 @@ export function parseGetPaymentKey(paymentId: string | undefined, orderId: strin
   return { kind: 'orderId', orderId: uuidOf(orderId!, 'order_id') };
 }
 
-/** 이미 있는 결제와 같은 명령인가(attempt_id·pg·amount·order_kind가 모두 같다, ADR-0299 결정 2) */
+/** 이미 있는 결제와 같은 명령인가(attempt_id·pg·amount·order_kind·pg_store가 모두 같다, ADR-0299 결정 2, BAT-605) */
 export function isSameCommand(existing: PaymentRecord, command: ConfirmPaymentCommand): boolean {
-  return existing.attemptId === command.attemptId && existing.pg === command.pg && existing.amount === command.amount && (existing.orderKind ?? 'TICKET') === (command.orderKind ?? 'TICKET');
+  return (
+    existing.attemptId === command.attemptId &&
+    existing.pg === command.pg &&
+    existing.amount === command.amount &&
+    (existing.orderKind ?? 'TICKET') === (command.orderKind ?? 'TICKET') &&
+    (existing.pgStore ?? 'STANDARD') === (command.pgStore ?? 'STANDARD')
+  );
 }
 
 const ANSWER_OF: Readonly<Record<PaymentLedgerStatus, ConfirmAnswerResult>> = {

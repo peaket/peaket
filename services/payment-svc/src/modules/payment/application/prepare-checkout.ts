@@ -8,12 +8,15 @@ import { admitsEntryTrial, entryTrialDraw } from '../domain/entry-pause-judge.js
 import { LogGate } from '../domain/log-gate.js';
 import type { CheckoutValues, PayMethod, PgName } from '../domain/payment-gateway.js';
 import { type EntryPauses, isEntryPaused, PaymentNewPausedError } from '../domain/entry-pause.js';
-import { allowedPayMethods, checkoutReturnUrls, merchCheckoutReturnUrls, parsePrepareCheckoutInput, PaymentPgUnavailableError, type PgChannelTable, type PgPlatformDefaults, type PgSelectionState, type PgUnavailableReason, type PrepareCheckoutCommand, type PrepareCheckoutInput, selectPg } from '../domain/pg-selection.js';
+import { allowedPayMethods, channelsForStore, checkoutReturnUrls, merchCheckoutReturnUrls, parsePrepareCheckoutInput, PaymentPgUnavailableError, type PgChannelTable, type PgPlatformDefaults, type PgSelectionState, type PgUnavailableReason, type PrepareCheckoutCommand, type PrepareCheckoutInput, selectPg } from '../domain/pg-selection.js';
 import type { CallBudget, EntryPauseReader, EntryTrialSignals, EntryTrialStore, FallbackExclusionReader, PaymentGateways, PgSelectionReader, PrepareCheckoutLog, PrepareCheckoutSignals } from '../domain/ports.js';
 import { checkoutDepositDueAtMs } from '../domain/virtual-account.js';
 
 /** 회차가 없는 굿즈의 결제사 선택 읽기에 넘기는 값(빈 UUID). 회차 행은 버리고 플랫폼 행만 쓴다 */
 const NO_EVENT_ID = '00000000-0000-0000-0000-000000000000';
+
+/** 에스크로 상점은 토스로만 결제한다(openapi createShopOrderPayment, docs/features/payment.md §6 '결제대금예치 선택권') */
+const ESCROW_DEFAULTS: PgPlatformDefaults = Object.freeze({ primary: 'TOSS' });
 
 /** 결제사를 고르지 못한 경보 로그의 간격 1분 [가정](결제사·까닭마다) */
 const PG_UNAVAILABLE_LOG_INTERVAL_MS = 60_000;
@@ -65,8 +68,13 @@ export class PrepareCheckout {
     const startedAtMs = clock.monotonicMs();
     const command = this.#parse(input);
     const [state, pauses] = await this.#read(command, budget);
-    const selectionInput = { ...state, defaults, channels, payMethod: command.payMethod, ...(command.pinnedPg === undefined ? {} : { pinnedPg: command.pinnedPg }) };
+    const store = command.paymentStore ?? 'STANDARD';
+    // 에스크로 상점은 간편결제·휴대폰을 채널에서 빼고 카드·계좌이체·가상계좌만 고른다(BAT-605)
+    const storeChannels = channelsForStore(channels, store);
+    const selectionInput = { ...state, defaults, channels: storeChannels, payMethod: command.payMethod, ...(command.pinnedPg === undefined ? {} : { pinnedPg: command.pinnedPg }) };
     let selection = selectPg(selectionInput);
+    // 에스크로 상점은 토스로만 결제한다(openapi createShopOrderPayment). 지정·전환이 다른 결제사를 골랐으면 토스로 다시 고르고, 토스를 쓸 수 없으면 그 까닭으로 실패한다
+    if (store === 'ESCROW' && (selection.kind === 'UNAVAILABLE' || selection.pg !== 'TOSS')) selection = selectPg({ defaults: ESCROW_DEFAULTS, channels: storeChannels, payMethod: command.payMethod });
     const exclusions = this.deps.fallbackExclusions;
     // 빼기는 전환이 그 판단 결제사(포트원)를 고른 때만 읽는다(코드 리뷰 F1). 기준 결제사는 회차 지정 → 플랫폼 기본이다(selectPg와 같다)
     if (selection.kind === 'SELECTED' && selection.switched && command.pinnedPg === undefined && exclusions !== undefined && selection.pg === exclusions.pg) {
@@ -90,7 +98,7 @@ export class PrepareCheckout {
     // 굿즈는 회차가 있어도(티켓 연동 부가 상품) 굿즈 복귀 주소다(ADR-0299 결정 3)
     const urls = command.orderKind === 'MERCH' || command.eventId === null ? merchCheckoutReturnUrls(webOrigin, command.orderId, selection.pg) : checkoutReturnUrls(webOrigin, command.eventId, command.orderId, selection.pg);
     const checkout = gateway.checkout(
-      { orderId: command.orderId, orderName: command.orderName, amount: command.amount, ...(command.customerKey === undefined ? {} : { customerKey: command.customerKey }) },
+      { orderId: command.orderId, orderName: command.orderName, amount: command.amount, ...(command.customerKey === undefined ? {} : { customerKey: command.customerKey }), ...(command.escrowProducts === undefined ? {} : { escrowProducts: command.escrowProducts }) },
       { attemptId: command.attemptId, ...urls },
       command.payMethod,
     );

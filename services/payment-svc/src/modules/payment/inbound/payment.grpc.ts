@@ -14,7 +14,7 @@ import { type DepositCancelInput, type DepositCancelScope, PaymentCancelStateErr
 import type { CancelPayment } from '../application/cancel-payment.js';
 import { type ConfirmAnswer, type ConfirmPaymentInput, type ConfirmPaymentRef, isLowerUuid, MIN_CALL_REMAINING_MS, PaymentCommandMismatchError, PaymentDeadlineError, type PaymentDetail, PaymentInputError, PaymentNotFoundError, type PaymentState } from '../domain/confirm-command.js';
 import type { CallBudget } from '../domain/ports.js';
-import type { CheckoutValues, TossCheckoutValues } from '../domain/payment-gateway.js';
+import type { CheckoutValues, EscrowProduct, TossCheckoutValues } from '../domain/payment-gateway.js';
 import { PaymentPgUnavailableError, type PrepareCheckoutInput } from '../domain/pg-selection.js';
 import type { PrepareCheckout, PrepareCheckoutAnswer } from '../application/prepare-checkout.js';
 import type { EventPaymentPause, GetNewPaymentPause } from '../application/get-new-payment-pause.js';
@@ -62,6 +62,27 @@ function msOf(v: unknown): number | undefined {
 
 const timestampOf = (ms: number): { seconds: number; nanos: number } => ({ seconds: Math.floor(ms / 1000), nanos: (ms % 1000) * 1_000_000 });
 
+/** PaymentStore 이름 → 입력의 결제 상점. 칸이 없거나 UNSPECIFIED면 undefined(STANDARD로 본다, BAT-605) */
+const paymentStoreOf = (v: unknown): string | undefined => {
+  const store = text(v).replace(/^PAYMENT_STORE_/, '');
+  return store === '' || store === 'UNSPECIFIED' ? undefined : store;
+};
+
+/** repeated TossEscrowProduct → 입력의 에스크로 상품. 비어 있으면 undefined(에스크로가 아닌 요청) */
+function escrowProductsOf(v: unknown): EscrowProduct[] | undefined {
+  if (!Array.isArray(v) || v.length === 0) return undefined;
+  return v.map((raw) => {
+    const p = childOf(raw) ?? {};
+    return {
+      id: text(p.id),
+      name: text(p.name),
+      code: text(p.code),
+      unitPrice: typeof p.unit_price === 'number' ? p.unit_price : Number.NaN,
+      quantity: typeof p.quantity === 'number' ? p.quantity : Number.NaN,
+    };
+  });
+}
+
 /** 요청(proto 칸 이름) → 검사 전 입력. 앞머리 PG_PROVIDER_를 떼고, Money.krw와 Timestamp를 수로 바꾼다. 칸이 없으면 ConfirmPaymentInput의 규칙대로 둔다 */
 export function confirmInputOf(request: Record<string, unknown>): ConfirmPaymentInput {
   const krw = childOf(request.amount)?.krw;
@@ -69,6 +90,7 @@ export function confirmInputOf(request: Record<string, unknown>): ConfirmPayment
   const authenticatedAtMs = msOf(request.authenticated_at);
   const entryOpensAtMs = msOf(request.entry_opens_at);
   const virtualAccountAllowed = typeof request.virtual_account_allowed === 'boolean' ? request.virtual_account_allowed : undefined;
+  const pgStore = paymentStoreOf(request.payment_store);
   return {
     orderId: text(request.order_id),
     attemptId: text(request.attempt_id),
@@ -82,6 +104,7 @@ export function confirmInputOf(request: Record<string, unknown>): ConfirmPayment
     ...(authenticatedAtMs === undefined ? {} : { authenticatedAtMs }),
     ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
     ...(virtualAccountAllowed === undefined ? {} : { virtualAccountAllowed }),
+    ...(pgStore === undefined ? {} : { pgStore }),
   };
 }
 
@@ -161,7 +184,16 @@ export function cancelResponseOf(answer: { readonly result: string; readonly can
   return { result: `CANCEL_RESULT_${answer.result}`, cancelled_amount: { krw: answer.cancelledAmount ?? 0 } };
 }
 
-const tossCheckoutOf = (v: TossCheckoutValues): Record<string, unknown> => ({ client_key: v.clientKey, customer_key: v.customerKey, order_id: v.orderId, order_name: v.orderName, amount: { krw: v.amount }, success_url: v.successUrl, fail_url: v.failUrl });
+const tossCheckoutOf = (v: TossCheckoutValues): Record<string, unknown> => ({
+  client_key: v.clientKey,
+  customer_key: v.customerKey,
+  order_id: v.orderId,
+  order_name: v.orderName,
+  amount: { krw: v.amount },
+  success_url: v.successUrl,
+  fail_url: v.failUrl,
+  ...(v.escrowProducts === undefined ? {} : { escrow_products: v.escrowProducts.map((p) => ({ id: p.id, name: p.name, code: p.code, unit_price: p.unitPrice, quantity: p.quantity })) }),
+});
 
 /** 결제창 값 → oneof checkout의 칸 하나 */
 function checkoutFieldsOf(values: CheckoutValues): Record<string, unknown> {
@@ -178,6 +210,8 @@ export function prepareCheckoutInputOf(request: Record<string, unknown>): Prepar
   const entryOpensAtMs = msOf(request.entry_opens_at);
   // UNSPECIFIED(칸 없음)는 입력 검사가 '고정 안 함'으로 읽는다
   const pinnedPg = text(request.pinned_pg).replace(/^PG_PROVIDER_/, '');
+  const paymentStore = paymentStoreOf(request.payment_store);
+  const escrowProducts = escrowProductsOf(request.escrow_products);
   return {
     orderKind: text(request.order_kind).replace(/^ORDER_KIND_/, '') || 'UNSPECIFIED',
     orderId: text(request.order_id),
@@ -191,6 +225,8 @@ export function prepareCheckoutInputOf(request: Record<string, unknown>): Prepar
     ...(typeof request.virtual_account_allowed === 'boolean' ? { virtualAccountAllowed: request.virtual_account_allowed } : {}),
     ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
     ...(pinnedPg === '' || pinnedPg === 'UNSPECIFIED' ? {} : { pinnedPg }),
+    ...(paymentStore === undefined ? {} : { paymentStore }),
+    ...(escrowProducts === undefined ? {} : { escrowProducts }),
   };
 }
 

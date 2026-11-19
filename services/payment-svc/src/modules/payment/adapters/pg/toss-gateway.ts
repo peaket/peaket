@@ -86,6 +86,7 @@ export class TossPaymentGateway extends TossShapedGateway {
         amount: order.amount,
         successUrl: attempt.successUrl,
         failUrl: attempt.failUrl,
+        ...(order.escrowProducts === undefined ? {} : { escrowProducts: order.escrowProducts }),
       },
     };
   }

@@ -25,6 +25,22 @@ export interface PgCapabilities {
 export const PAY_METHODS = ['CARD', 'EASY_PAY', 'TRANSFER', 'VIRTUAL_ACCOUNT', 'MOBILE'] as const;
 export type PayMethod = (typeof PAY_METHODS)[number];
 
+/** 결제 상점(proto PaymentStore, payment.pg_store). 굿즈 택배만 ESCROW다(BAT-605 계획) */
+export const PAYMENT_STORES = ['STANDARD', 'ESCROW'] as const;
+export type PaymentStore = (typeof PAYMENT_STORES)[number];
+
+/** 에스크로 상점의 허용 수단: 토스 에스크로가 받는 카드·계좌이체·가상계좌뿐이다(간편결제·휴대폰 제외, docs/features/payment.md §6) */
+export const ESCROW_PAY_METHODS: readonly PayMethod[] = ['CARD', 'TRANSFER', 'VIRTUAL_ACCOUNT'];
+
+/** 에스크로 결제창의 주문 상품(proto TossEscrowProduct, openapi createShopOrderPayment의 escrowProducts) */
+export interface EscrowProduct {
+  readonly id: string;
+  readonly name: string;
+  readonly code: string;
+  readonly unitPrice: number;
+  readonly quantity: number;
+}
+
 export interface CheckoutOrder {
   orderId: string;
   orderName: string;
@@ -32,6 +48,8 @@ export interface CheckoutOrder {
   amount: number;
   /** 결제사 구매자 키(없으면 비회원 표시) */
   customerKey?: string;
+  /** 에스크로 상점의 주문 상품. 에스크로가 아니면 없다 */
+  escrowProducts?: readonly EscrowProduct[];
 }
 
 export interface CheckoutAttempt {
@@ -49,6 +67,8 @@ export interface TossCheckoutValues {
   amount: number;
   successUrl: string;
   failUrl: string;
+  /** 에스크로 상점의 주문 상품. 에스크로가 아니면 없다(proto TossCheckout.escrow_products) */
+  escrowProducts?: readonly EscrowProduct[];
 }
 
 export interface PortoneCheckoutValues {

@@ -75,7 +75,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
       if (inserted.length === 0) {
         // 겹친 쪽은 앞 쪽이 커밋할 때까지 유일 확인에서 기다렸다가 0행을 받는다. READ COMMITTED의 다음 문장은 커밋된 행을 본다
         const [row] = await tx
-          .select({ paymentId: payment.id, orderId: payment.orderId, attemptId: payment.attemptId, pg: payment.pg, amount: payment.amount, orderKind: payment.orderKind, status: payment.status, approvedAt: payment.approvedAt, failureCategory: payment.failureCategory })
+          .select({ paymentId: payment.id, orderId: payment.orderId, attemptId: payment.attemptId, pg: payment.pg, amount: payment.amount, orderKind: payment.orderKind, pgStore: payment.pgStore, status: payment.status, approvedAt: payment.approvedAt, failureCategory: payment.failureCategory })
           .from(payment)
           .where(eq(payment.orderId, command.orderId));
         if (!row) throw new Error('유일 제약에 걸린 결제 행을 읽지 못했다');
@@ -84,6 +84,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
           ...rest,
           pg: rest.pg as PgName,
           orderKind: rest.orderKind as PaymentOrderKind,
+          pgStore: rest.pgStore as 'STANDARD' | 'ESCROW',
           status: rest.status as PaymentLedgerStatus,
           ...(approvedAt ? { approvedAtMs: approvedAt.getTime() } : {}),
           ...(failureCategory ? { failureCategory: failureCategory as FailureCategory } : {}),
@@ -93,7 +94,7 @@ export class DrizzlePaymentStore implements PaymentCommandStore, PaymentStateRea
 
       await tx.insert(paymentEvent).values({ paymentId: values.paymentId, seq: 1, eventKey: values.eventKey, type: 'ACCEPTED', exported: false, occurredAt: now });
       await tx.insert(paymentConfirmJob).values({ paymentId: values.paymentId, pg: command.pg, nextAttemptAt: now, createdAt: now });
-      return { kind: 'CREATED', record: { paymentId: values.paymentId, orderId: command.orderId, attemptId: command.attemptId, pg: command.pg, amount: command.amount, orderKind: command.orderKind ?? 'TICKET', status: 'ACCEPTED' } };
+      return { kind: 'CREATED', record: { paymentId: values.paymentId, orderId: command.orderId, attemptId: command.attemptId, pg: command.pg, amount: command.amount, orderKind: command.orderKind ?? 'TICKET', pgStore: command.pgStore ?? 'STANDARD', status: 'ACCEPTED' } };
     }, CONFIRM_TRANSACTION);
   }
 
