@@ -31,6 +31,8 @@ export interface CancellationRecord {
   readonly refundAmount: number;
   readonly state: CancellationStatus;
   readonly refundAttempts: number;
+  /** 계좌 대기 행(refund_account_required_at 있음, BUILD_ORDER GAT-090). 다시 누름은 payment를 부르지 않는다(BAT-420-rest 리뷰 반영 RV-03). 없으면 거짓 */
+  readonly refundAccountRequired?: boolean;
 }
 
 /** 취소가 보는 주문·티켓 한 장. ticket-svc가 소유한 보유자·양도 상태는 여기 없다(티켓 취소 포트가 본다) */
@@ -65,8 +67,11 @@ export type TicketCancelAnswer =
   | TicketCancelOutcome
   | { readonly result: 'ALREADY_CANCELLED'; readonly firstCancellationId: string; readonly firstResult: 'REFUND_NOW' | 'REFUND_AFTER_CLOSE'; readonly firstCancelledAtMs: number };
 
-/** 결제사 취소 포트 결과(payment.proto CancelResult와 같은 뜻) */
-export type PaymentCancelOutcome = 'CANCELLED' | 'PENDING' | 'REJECTED' | 'UNKNOWN';
+/**
+ * 결제사 취소 포트 결과(payment.proto CancelResult와 같은 뜻). REFUND_ACCOUNT_REQUIRED는 가상계좌 결제인데 환불 계좌가 없거나 결제사가 계좌를 거절했다는 뜻이다.
+ * 돈은 나가지 않았고 부른 쪽은 그 취소를 계좌 대기로 둔다(재시도·자동 정지 셈 밖, docs/features/payment.md §6 '계좌 대기', BUILD_ORDER GAT-090)
+ */
+export type PaymentCancelOutcome = 'CANCELLED' | 'PENDING' | 'REJECTED' | 'UNKNOWN' | 'REFUND_ACCOUNT_REQUIRED';
 
 /** 환급 재시도 횟수 상한 [가정]. 넘으면 CS 처리함 '환급 실패' 대상이다(transfer-refund §7.1) */
 export const REFUND_RETRY_MAX_ATTEMPTS = 5;
@@ -114,7 +119,14 @@ export type CancellationWriteOutcome =
 export type CancelTicketResult =
   | { readonly status: 'ACCEPTED'; readonly cancellationId: string; readonly refundAmount: number; readonly refundAfterEntryClose: boolean }
   | { readonly status: 'REPLAYED'; readonly cancellationId: string; readonly refundAmount: number; readonly refundAfterEntryClose: boolean }
-  | { readonly status: 'REFUND_PENDING'; readonly cancellationId: string; readonly refundAmount: number; readonly payment: 'PENDING' | 'UNKNOWN' | 'REJECTED' }
+  /** refundAccountRequired: payment가 REFUND_ACCOUNT_REQUIRED라 계좌 대기로 둔 건(응답 Cancellation.refundAccountRequired 참, BUILD_ORDER GAT-090) */
+  | {
+      readonly status: 'REFUND_PENDING';
+      readonly cancellationId: string;
+      readonly refundAmount: number;
+      readonly payment: 'PENDING' | 'UNKNOWN' | 'REJECTED' | 'REFUND_ACCOUNT_REQUIRED';
+      readonly refundAccountRequired?: true;
+    }
   | { readonly status: 'NOT_FOUND' }
   | { readonly status: 'NOT_PAYER' }
   | { readonly status: 'ALREADY_ENDED' }
@@ -123,4 +135,8 @@ export type CancelTicketResult =
   | { readonly status: 'TRANSFER_PENDING' }
   | { readonly status: 'EVENT_STARTED' }
   /** 그 회차의 회차 취소가 확정됐다(409 event-cancelled, 티켓 단계를 부르지 않는다, BAT-420 리뷰 D5) */
-  | { readonly status: 'EVENT_CANCELLED' };
+  | { readonly status: 'EVENT_CANCELLED' }
+  /** 가상계좌 결제이고 지금 환급할 취소인데 본문에 환불 계좌가 없다(422 refund-account-required, Saga를 돌리지 않는다, BUILD_ORDER GAT-090) */
+  | { readonly status: 'REFUND_ACCOUNT_REQUIRED' }
+  /** 결제 수단(가상계좌였는지)을 읽지 못했다(503 dependency-unavailable, Saga를 돌리지 않는다, BUILD_ORDER GAT-090) */
+  | { readonly status: 'DEPENDENCY_UNAVAILABLE' };

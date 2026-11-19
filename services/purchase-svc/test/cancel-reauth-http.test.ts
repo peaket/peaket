@@ -39,7 +39,8 @@ const quiet = new Writable({ write: (_c, _e, cb) => cb() });
 const fan = fanKey('fan-2026-11');
 const admin = fanKey('admin-2026-11');
 const impostor = fanKey('fan-2026-11'); // 같은 kid, 다른 키
-const REFUND_ACCOUNT = { bankCode: '088', accountNumber: '110-123-456789', holderName: '김결제' };
+// BAT-420-rest 리뷰 반영 RV-04(정본 변경 반영, 시험 담당 l3-b420-test): 계좌 표본을 정본 §6 '구현에서 정한 것' ②의 두 자리 은행 코드로 고쳤다(이름·단언은 그대로)
+const REFUND_ACCOUNT = { bankCode: '88', accountNumber: '110-123-456789', holderName: '김결제' };
 /** 정본의 공개키 묶음 읽기 한 번의 시간 상한 1,000ms [가정](transfer-refund §3.1 '공개키 묶음 읽기') */
 const JWKS_READ_CAP_MS = 1_000;
 

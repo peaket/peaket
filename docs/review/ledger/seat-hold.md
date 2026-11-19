@@ -108,7 +108,7 @@
 | S-T34 | ① | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ① DB·Kafka·Redis 자격 증명과 AWS 권한이 0개다 | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
 | S-T34 | ② | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ② 모든 연결이 막힌다 | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
 | S-T34 | ③ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ③ `PERMISSION_DENIED` | 다른 단계 | A | HOT-420·BAS-140 · 좌석맵 해석 작업 배포의 자격 증명·나가는 통신·메시 신원은 배포 상태(BAS-140)와 메시·NetworkPolicy(HOT-420, D-T36)가 정한다. 코드 몫(자격 증명… |
-| S-T34 | ④ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ④ CPU는 422, 메모리는 파드 재시작과 503이고, core-svc 파드와 다른 가져오기 요청은 영향이 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
+| S-T34 | ④ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ④ CPU는 422, 메모리는 파드 재시작과 503이고, core-svc 파드와 다른 가져오기 요청은 영향이 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-pool-cpu.test.ts 외 1곳 |
 | S-T34 | ⑤ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑤ 503과 `Retry-After` | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | S-T34 | ⑥ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑥ core-svc가 422로 거절한다(다시 검사) | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
 | S-T34 | ⑦ | 좌석맵 해석 작업 격리(소유자 결정 2026-10-30… | ⑦ 413이고 작업을 부르지 않는다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
@@ -291,7 +291,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.test.m… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-save.int.test.ts, services/core-svc/test/seatmap-layout.test.ts |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | 자동 시험 | B | 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 5곳 |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/cancellation.int.test.ts 외 7곳 |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/purchase-svc/test/accept-http.test.ts 외 2곳 |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |

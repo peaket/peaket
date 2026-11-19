@@ -8,6 +8,9 @@
 // transfer-refund §5 '회차 취소 요청 중 보류 취소의 환급 미룸'). 걸거나 늘리지 못하면 503 event-refund-unavailable이고 상태를 바꾸지 않는다.
 // 웨이브 끝 리뷰 K4: 확정 중 끊겨 RUNNING인데 purchase-svc에 일괄 환불이 없으면 approve가 같은 요청 ID로 다시 확정한다. 되돌리기 저장 실패는 오류 로그·지표다.
 // 웨이브 끝 리뷰 S2(authz-matrix §5.3 'ops-svc 구현'): 파트너 경로는 파트너 저장소(파트너 DB 풀, 세션 테넌트로 행 보안)만 쓰고, commander 요청도 회차의 promoterId를 적는다.
+// core 회차 상태 반영(BAT-420-rest GAT-110, R-T41, transfer-refund §5 'core 회차 상태 반영'): 확정이 Start까지 끝낸 뒤 core-svc를 한 번 부른다. 실패해도 확정은 그대로이고
+// (경고 event-cancellation-core-apply-failed·지표, 4xx는 오류 로그) core_applied_at을 비운 채 두어 1분 [가정] 다시 하기(retryCoreApply)가 잇는다.
+// 확정 뒤 10분 [가정]이 지나도 비어 있으면 SEV2 event-cancellation-core-apply-overdue를 요청마다 한 번 남긴다. 연기는 판매를 멈추지 않고 core 반영만 한다(ADR-0280 결정 1).
 import { randomUUID } from 'node:crypto';
 import type { IdempotencyRequest } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
@@ -41,6 +44,13 @@ import {
   type EventRefundHolds,
   type EventCancellationInsert,
   type PartnerEventCancellationStore,
+  CORE_APPLY_BATCH,
+  CORE_APPLY_OVERDUE_MS,
+  CORE_APPLY_REJECTED_RETRY_MS,
+  CORE_APPLY_RETRY_MS,
+  type CoreApplyStore,
+  type CoreEventStatus,
+  CoreEventStatusRejected,
 } from '../domain/ports.js';
 
 const audit = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
@@ -103,6 +113,19 @@ export interface EventCancellationExtra {
   readonly revertFailures?: { inc(): void };
   /** 웨이브 끝 리뷰 S2(빈 뼈대, 아직 쓰지 않는다): 파트너 경로(requestByPartner·partnerStatus)는 이 저장소만 쓴다 */
   readonly partnerStore?: PartnerEventCancellationStore;
+  /** core 회차 상태 반영(BAT-420-rest GAT-110). 없으면 부르지 않는다(local·ci에 주소가 없을 때, 시작 경고) */
+  readonly core?: CoreEventStatus;
+  /** core 반영 표시(ops 0016). 없으면 성공을 적지 못하고 다시 하기도 하지 않는다 */
+  readonly coreApplies?: CoreApplyStore;
+  /** 지표 ops_event_cancellation_core_apply_failures_total(반영 실패마다 하나) */
+  readonly coreApplyFailures?: { inc(): void };
+}
+
+/** 다시 하기 한 바퀴의 결과 */
+export interface CoreApplyRetryResult {
+  readonly applied: number;
+  readonly failed: number;
+  readonly overdue: number;
 }
 
 const conflict = () => new EventCancellationProblem('event-cancellation-conflict', 409, '다른 사람이 먼저 처리했습니다');
@@ -236,7 +259,7 @@ export class EventCancellations {
     if (!PROGRESS_STATUSES.has(r.status) || !this.extra.reader) return eventCancellationDetailView(r);
     const job = await this.#job(r.requestId);
     const progress: EventCancellationProgress = job
-      ? { state: job.state, total: job.total, done: job.done, failed: job.failed, perPg: job.perPg.map((p) => ({ pg: p.pg, state: p.state, ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}), done: p.done, failed: p.failed, unknown: p.unknown })) }
+      ? { state: job.state, total: job.total, done: job.done, failed: job.failed, ...(job.accountPending !== undefined ? { accountPending: job.accountPending } : {}), perPg: job.perPg.map((p) => ({ pg: p.pg, state: p.state, ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}), done: p.done, failed: p.failed, unknown: p.unknown })) }
       : { state: r.refundJobState ?? r.status };
     return eventCancellationDetailView(r, progress);
   }
@@ -330,12 +353,81 @@ export class EventCancellations {
       const doneMs = this.now();
       const next: EventCancellationRecord = { ...running, status, refundJobState: job.state, version: running.version + 1, updatedAt: new Date(doneMs) };
       if (!(await this.store.save(next, audit('EVENT_CANCELLATION_STARTED', next.requestId, { ...eventBase(next), status: next.status, jobState: job.state }, doneMs)))) throw conflict();
+      // Start까지 끝났다: core 회차 상태를 반영한다. 실패는 확정을 되돌리지 않는다(던지지 않는다, 다시 하기가 잇는다)
+      await this.#applyCore({ requestId: next.requestId, eventId: next.eventId, kind: next.kind, ...(next.newStartsAt ? { newStartsAt: next.newStartsAt } : {}) }, this.now());
       return eventCancellationDetailView(next);
     } catch (err) {
       // 외부 호출이 실패하면 다시 확정할 수 있게 PENDING_APPROVAL로 되돌린다(외부 시작은 요청 ID 멱등에 기댄다).
       await this.#backToPendingApproval(running, 'event-refund-start-failed', err);
       throw err;
     }
+  }
+
+  /**
+   * core 반영 다시 하기 한 바퀴(1분 [가정]마다 시작 조립이 부른다, R-T41 ③): 반영하지 않은 요청을 20건 [가정]까지 잡아 다시 부르고, 성공하면 core_applied_at을 쓴다.
+   * 그 뒤 확정 뒤 10분 [가정]이 지나도 비어 있는 요청마다 SEV2 로그를 한 번 남긴다. 던지지 않는다(저장소 실패는 경고 뒤 다음 바퀴)
+   */
+  async retryCoreApply(nowMs: number = this.now()): Promise<CoreApplyRetryResult> {
+    const { core, coreApplies } = this.extra;
+    if (!core || !coreApplies) return { applied: 0, failed: 0, overdue: 0 };
+    let applied = 0;
+    let failed = 0;
+    let due: Awaited<ReturnType<CoreApplyStore['claimCoreApplies']>> = [];
+    try {
+      due = await coreApplies.claimCoreApplies(nowMs, CORE_APPLY_BATCH, CORE_APPLY_RETRY_MS);
+    } catch (err) {
+      this.extra.log?.warn({ event: 'event-cancellation-core-apply-claim-failed', err: err instanceof Error ? err.name : 'unknown' }, 'event-cancellation-core-apply-claim-failed: 다시 할 core 반영을 읽지 못했다(다음 바퀴)');
+    }
+    for (const d of due) {
+      if (await this.#applyCore(d, nowMs)) applied++;
+      else failed++;
+    }
+    let overdue: Awaited<ReturnType<CoreApplyStore['markCoreApplyOverdue']>> = [];
+    try {
+      overdue = await coreApplies.markCoreApplyOverdue(this.now(), CORE_APPLY_OVERDUE_MS, 100);
+    } catch (err) {
+      this.extra.log?.warn({ event: 'event-cancellation-core-apply-claim-failed', err: err instanceof Error ? err.name : 'unknown' }, 'event-cancellation-core-apply-claim-failed: 늦은 core 반영을 표시하지 못했다(다음 바퀴)');
+    }
+    for (const o of overdue) {
+      this.extra.log?.error?.(
+        { event: 'event-cancellation-core-apply-overdue', severity: 'SEV2', requestId: o.requestId, eventId: o.eventId },
+        'event-cancellation-core-apply-overdue: 확정 뒤 10분이 지나도 core 회차 상태를 반영하지 못했다(SEV2)',
+      );
+    }
+    return { applied, failed, overdue: overdue.length };
+  }
+
+  /**
+   * core 반영 한 번. 성공하면 core_applied_at을 쓰고(같은 회차의 앞 요청은 대체 표시) true. 실패는 경고(4xx는 오류)·지표 뒤 false다. 던지지 않는다.
+   * 4xx(401 제외, 계약 결함)는 다음 볼 시각을 지금 + 10분 [가정]으로 미뤄 늘 거절되는 요청이 새 요청의 자리를 막지 않게 한다(RV-06). 5xx·무응답·401은 잡기의 1분 그대로다
+   */
+  async #applyCore(r: { readonly requestId: string; readonly eventId: string; readonly kind: EventCancellationKind; readonly newStartsAt?: Date }, nowMs: number): Promise<boolean> {
+    const core = this.extra.core;
+    if (!core) return false;
+    try {
+      await core.apply({ eventId: r.eventId, requestId: r.requestId, kind: r.kind, ...(r.kind === 'POSTPONE' && r.newStartsAt ? { postponedTo: r.newStartsAt } : {}) });
+    } catch (err) {
+      const fields = { event: 'event-cancellation-core-apply-failed', requestId: r.requestId };
+      const msg = 'event-cancellation-core-apply-failed: core 회차 상태 반영이 실패했다(확정은 그대로, 다시 하기가 잇는다)';
+      if (err instanceof CoreEventStatusRejected && this.extra.log?.error) this.extra.log.error({ ...fields, status: err.status }, msg);
+      else this.extra.log?.warn(fields, msg);
+      this.extra.coreApplyFailures?.inc();
+      if (err instanceof CoreEventStatusRejected && err.status !== 401) {
+        try {
+          await this.extra.coreApplies?.deferCoreApply(r.requestId, nowMs + CORE_APPLY_REJECTED_RETRY_MS);
+        } catch {
+          // 미루기를 못 써도 잡기의 1분 뒤 다시 본다
+        }
+      }
+      return false;
+    }
+    try {
+      await this.extra.coreApplies?.markCoreApplied(r.requestId, this.now());
+    } catch (err) {
+      // core는 반영했고 표시만 못 썼다. 다음 바퀴가 다시 부르고 core가 멱등이라 바뀐 것이 없다
+      this.extra.log?.warn({ event: 'event-cancellation-core-apply-mark-failed', requestId: r.requestId, err: err instanceof Error ? err.name : 'unknown' }, 'event-cancellation-core-apply-mark-failed: core 반영 표시를 쓰지 못했다');
+    }
+    return true;
   }
 
   /**

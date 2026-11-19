@@ -61,6 +61,7 @@ import {
   HttpDeductionGapNotice,
   HttpEntryFlagNotice,
   HttpEventRefundAlert,
+  HttpRefundAccountNotice,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
   PromCsCaseSignals,
@@ -236,6 +237,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         holds: new DrizzleEventRefundHolds(o.serviceDatabase),
         orders: new DrizzleCancellationOrders(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
         log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg), error: (obj: object, msg: string) => bound().logger.error(obj, msg) },
+        // 가상계좌 계좌 대기의 CS '환불 대기' 건(BUILD_ORDER GAT-090). ops 주소가 있을 때만 틱 끝 다시 열기가 연다
+        ...(opsClient ? { accountNotice: new HttpRefundAccountNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN) } : {}),
       })
     : undefined;
   // 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D). ops-svc 주소가 없으면 로그 대역이다

@@ -10,10 +10,12 @@
 // CS 건(환급 실패·이상 표시)은 ops-svc가 2xx로 받아야 연 것이다(웨이브 끝 리뷰 S1, 다시 보기 2 N2). 다시 열기 포트(csOutbox)가 꽂힌 조립에서는 처리 중에
 // ops-svc를 부르지 않고 행에 표시(refund_failed_at·entry_recorded_at)만 남기며, 건은 그 틱의 집기·결제사 호출이 끝난 뒤 틱 끝 한 곳에서 환급 실패 → 이상 표시
 // 차례로, 5초 [가정] 예산과 잇따른 무응답 멈춤 안에서 연다(다시 보기 2 N1, transfer-refund §3.1 ⑥, cs-case-reopen.ts). 포트가 없는 옛 조립만 처리 중에 한 번 연다.
-// 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기가 처리하지 못한다(CS 알림 대상).
+// 카드 결제는 계좌가 필요 없고, 가상계좌는 환불 계좌를 저장하지 않으므로(POL-014) 이 실행기는 계좌를 싣지 않는다. payment-svc가 REFUND_ACCOUNT_REQUIRED로 답하면
+// 그 행을 계좌 대기(refund_account_required_at, next_refund_at 빔, 재시도 횟수 그대로)로 두고 더 집지 않는다. CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건은
+// 틱 끝 다시 열기가 환급 실패 다음 차례로 연다(회차 취소 요청 ID가 달린 계좌 대기 행도 여기서 연다, BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기').
 import type { MaintenanceTask } from '@peaket/platform';
 import { REFUND_RETRY_MAX_ATTEMPTS, refundRetryDelayMs, type DueRefund } from '../domain/cancellation.js';
-import type { CsCaseOpenSignals, CsCaseOutbox, EventRefundHolds } from '../domain/event-refund-ports.js';
+import type { CsCaseOpenSignals, CsCaseOutbox, EventRefundHolds, RefundAccountNotice } from '../domain/event-refund-ports.js';
 import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationOrders, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
 import { CsCaseReopenTick } from './cs-case-reopen.js';
 
@@ -43,7 +45,9 @@ export interface RefundAfterEntryDeps {
    * (entry_recorded_at 있음·entry_flag_opened_at 빔)을 틱 끝에서 종류마다 100건 [가정]까지 행마다 다시 열고, ops-svc가 2xx로 받은 행만 연 시각을 쓴다.
    * 꽂히면 처리 중에는 ops-svc를 부르지 않는다. 없으면(옛 조립) 실패 표시·입장 기록을 남길 때 한 번만 연다
    */
-  csOutbox?: Pick<CsCaseOutbox, 'pendingFlags' | 'markFlagOpened' | 'pendingRefundFailures' | 'markRefundFailureOpened'>;
+  csOutbox?: Pick<CsCaseOutbox, 'pendingFlags' | 'markFlagOpened' | 'pendingRefundFailures' | 'markRefundFailureOpened' | 'pendingRefundAccounts' | 'markRefundAccountOpened'>;
+  /** CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건 열기(BUILD_ORDER GAT-090). csOutbox의 계좌 대기 목록과 함께 있을 때만 틱 끝에 연다 */
+  accountNotice?: RefundAccountNotice;
   /** 웨이브 끝 리뷰 C2·S1: 지표 purchase_cs_case_open_failures_total{kind}. 이상 표시 건 열기가 실패한 행마다 FLAGGED 하나(다시 보기 2: 환급 실패는 REFUND_FAILED, 멈춤은 cut) */
   csCaseOpenFailures?: CsCaseOpenSignals;
 }
@@ -65,6 +69,8 @@ export interface RefundAfterEntryResult {
   readonly unverified: number;
   /** 회차 취소 요청의 미룸 때문에 이번 틱에 집지 않은 마감 지난 보류 취소(BAT-420 몫 D). 진행 중 일괄 환불로 건너뛴 행은 세지 않는다 */
   readonly held: number;
+  /** payment가 REFUND_ACCOUNT_REQUIRED로 답해 계좌 대기로 둔 취소(BUILD_ORDER GAT-090). 있을 때만 싣는다 */
+  readonly accountPending?: number;
 }
 
 export class RefundAfterEntry {
@@ -95,6 +101,7 @@ export class RefundAfterEntry {
     let entryRecorded = 0;
     let unverified = 0;
     let held = 0;
+    let accountPending = 0;
     const records = await this.#lookup(due.filter((c) => c.status === 'REQUESTED' && c.held !== true));
     for (const c of due) {
       if (c.held === true) {
@@ -131,6 +138,15 @@ export class RefundAfterEntry {
         refunded++;
         continue;
       }
+      if (r === 'REFUND_ACCOUNT_REQUIRED') {
+        // 계좌 대기: 재시도 횟수·실패 표시에 넣지 않고 next_refund_at을 비워 다시 집지 않는다(건은 틱 끝이 연다)
+        const nowMs = this.deps.nowMs();
+        const marked = this.deps.writes.markRefundAccountRequired
+          ? await this.deps.writes.markRefundAccountRequired({ cancellationId: c.cancellationId, nowMs })
+          : await this.deps.writes.markRefundFailed({ cancellationId: c.cancellationId, attempts: c.attempts, lastError: r, nowMs });
+        if (marked !== false) accountPending++;
+        continue;
+      }
       const attempts = c.attempts + 1;
       if (r === 'REJECTED' || attempts >= REFUND_RETRY_MAX_ATTEMPTS) {
         const marked = await this.deps.writes.markRefundFailed({ cancellationId: c.cancellationId, attempts, lastError: r, nowMs: this.deps.nowMs() });
@@ -150,7 +166,7 @@ export class RefundAfterEntry {
       if (scheduled === false) continue;
       pending++;
     }
-    return { refunded, pending, failed, entryRecorded, unverified, held };
+    return { refunded, pending, failed, entryRecorded, unverified, held, ...(accountPending > 0 ? { accountPending } : {}) };
   }
 
   /** 기한이 지난 미룸을 풀고 풀린 줄마다 SEV2를 한 번 남긴다(조건부 갱신이라 같은 줄은 한 번만 나온다). 실패는 경고만 남기고 틱을 이어 간다 */
@@ -277,6 +293,20 @@ export class RefundAfterEntry {
         list: (limit) => csOutbox.pendingRefundFailures(limit),
         open: (row, nowMs) => failureNotice.open({ cancellationId: row.cancellationId, orderId: row.orderId, attempts: row.attempts, lastError: row.lastError, nowMs }),
         markOpened: (row, nowMs) => csOutbox.markRefundFailureOpened(row.cancellationId, nowMs),
+        ids: (row) => ({ cancellationId: row.cancellationId }),
+      });
+    }
+    // 환불 대기(REFUND_ACCOUNT_PENDING)는 환급 실패 다음이다(돈을 돌려받지 못한 건 먼저, transfer-refund §3.1 ⑥ 다섯째 종류, BUILD_ORDER GAT-090)
+    const accountNotice = this.deps.accountNotice;
+    const pendingAccounts = csOutbox.pendingRefundAccounts?.bind(csOutbox);
+    const markAccountOpened = csOutbox.markRefundAccountOpened?.bind(csOutbox);
+    if (accountNotice && pendingAccounts && markAccountOpened) {
+      await tick.reopen({
+        kind: 'REFUND_ACCOUNT_PENDING',
+        failedEvent: 'cancellation-refund-account-notice-failed',
+        list: (limit) => pendingAccounts(limit),
+        open: (row, nowMs) => accountNotice.open({ cancellationId: row.cancellationId, orderId: row.orderId, nowMs }),
+        markOpened: (row, nowMs) => markAccountOpened(row.cancellationId, nowMs),
         ids: (row) => ({ cancellationId: row.cancellationId }),
       });
     }

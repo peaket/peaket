@@ -179,11 +179,19 @@ async function lockLedger(tx: DbTransaction, paymentId: string): Promise<{ statu
   const row = r.rows[0] as { status: PaymentLedgerStatus; amount: number | string; cancelled_amount: number | string } | undefined;
   return row === undefined ? undefined : { status: row.status, amount: Number(row.amount), cancelledAmount: Number(row.cancelled_amount) };
 }
-type CancelRow = { id: string; idempotency_key: string; amount: number; reason: string; full_cancel: boolean; expected_balance: number | string; status: PaymentCancelStatus; created_at: Date | string };
+/**
+ * 가상계좌 결제인가: 수출 사건 AWAITING_DEPOSIT(T10·T14)이 한 번이라도 있다(docs/features/payment.md §6 '가상계좌였는지', BUILD_ORDER GAT-090).
+ * 가상계좌 칸은 입금 확정 때 지워 판정에 쓸 수 없다. payment 행 잠금을 쥔 뒤에 부른다
+ */
+export async function hasDepositEvent(tx: DbTransaction, paymentId: string): Promise<boolean> {
+  const r = await tx.execute(sql`select 1 from payment_event where payment_id = ${paymentId}::uuid and type = 'AWAITING_DEPOSIT' and exported limit 1`);
+  return r.rows.length > 0;
+}
+type CancelRow = { id: string; idempotency_key: string; amount: number; reason: string; full_cancel: boolean; expected_balance: number | string; status: PaymentCancelStatus; created_at: Date | string; fail_reason: string | null };
 /** 이 취소 ID의 payment_cancel 행(lock이면 FOR UPDATE) */
 async function readCancelRow(tx: DbTransaction, paymentId: string, idemKey: string, lock = false): Promise<CancelRow | undefined> {
   const r = await tx.execute(sql`
-    select id::text as id, idempotency_key, amount, reason, full_cancel, expected_balance, status, created_at
+    select id::text as id, idempotency_key, amount, reason, full_cancel, expected_balance, status, created_at, fail_reason
     from payment_cancel where payment_id = ${paymentId}::uuid and idempotency_key = ${idemKey}${lock ? sql` for update` : sql``}`);
   const row = r.rows[0] as (Omit<CancelRow, 'amount'> & { amount: number | string }) | undefined;
   return row === undefined ? undefined : { ...row, amount: Number(row.amount) };
@@ -623,17 +631,24 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
    * 0021 payment_cancel 행 만들기·찾기(docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액', BAT-415 몫 P).
    * 잠금 차례는 payment 행 → payment_cancel 행이다(finish와 같다). 같은 취소 ID의 겹친 재시도는 payment 행 잠금으로 줄을 서서 한 행만 만든다.
    * 이미 있는 행의 재시도(replay)에도 같은 결제의 다른 진행 중 행이 10분 안이면 BUSY다(한 번에 하나씩, 3시간 뒤 잔액 대조의 전제).
-   * 차례: CANCELED → DONE, FAILED → REJECTED(되살리지 않는다, 리뷰 B3), 그다음 금액·BUSY 검사
+   * 차례: CANCELED → DONE, FAILED → REJECTED(되살리지 않는다, 리뷰 B3), 그다음 금액·BUSY 검사.
+   * 가상계좌 판정(BUILD_ORDER GAT-090, docs/features/payment.md §6 '가상계좌였는지'): 같은 잠금 안에서 AWAITING_DEPOSIT 사건을 한 번 읽는다.
+   * 가상계좌인데 계좌가 없고 이 취소 ID의 행도 없으면 행·표시를 만들지 않고 ACCOUNT_REQUIRED다(남은 금액 검사 뒤)
    */
-  async beginConfirmedCancel(target: ConfirmedCancelTarget, q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string }, budget?: CallBudget): Promise<ConfirmedCancelBegin> {
+  async beginConfirmedCancel(
+    target: ConfirmedCancelTarget,
+    q: { readonly cancellationId: string; readonly amount?: number; readonly reason: string; readonly hasRefundAccount?: boolean },
+    budget?: CallBudget,
+  ): Promise<ConfirmedCancelBegin> {
     const idemKey = confirmedCancelIdemKey(q.cancellationId);
     return this.#tx(async (tx): Promise<ConfirmedCancelBegin> => {
       const ledger = await lockLedger(tx, target.paymentId);
       if (ledger === undefined) return { status: 'NOT_CONFIRMED' };
       const own = await readCancelRow(tx, target.paymentId, idemKey);
       if (own?.status === 'CANCELED') return { status: 'DONE', cancelledAmount: ledger.cancelledAmount };
-      // 거절(FAILED)은 그 건의 끝이다. 되살리지 않고 BUSY·금액 검사보다 먼저 거절을 다시 준다(리뷰 B3)
-      if (own?.status === 'FAILED') return { status: 'REJECTED' };
+      // 거절(FAILED)은 그 건의 끝이다. 되살리지 않고 BUSY·금액 검사보다 먼저 첫 답을 다시 준다(리뷰 B3).
+      // 계좌 거절로 끝낸 행은 계좌 대기, 그 밖 업무 거절은 거절이다(같은 취소 ID = 같은 답, BAT-420-rest 리뷰 반영 RV-03)
+      if (own?.status === 'FAILED') return own.fail_reason === 'REFUND_ACCOUNT_INVALID' ? { status: 'ACCOUNT_REQUIRED' } : { status: 'REJECTED' };
       if (own !== undefined && q.amount !== undefined && q.amount !== own.amount) return { status: 'AMOUNT_MISMATCH' };
       if (!isConfirmedStatus(ledger.status)) return { status: 'NOT_CONFIRMED' };
       const now = this.o.clock.now();
@@ -645,8 +660,10 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
       if (pending.some((p) => now - p.createdAtMs < CONFIRMED_CANCEL_BUSY_WINDOW_MS)) return { status: 'BUSY' };
       const remaining = ledger.amount - ledger.cancelledAmount;
       const room = remaining - pending.reduce((sum, p) => sum + p.amount, 0);
-      if (own !== undefined) return { status: 'BEGUN', record: recordOf(own), replay: true };
+      const virtualAccount = await hasDepositEvent(tx, target.paymentId);
+      if (own !== undefined) return { status: 'BEGUN', record: recordOf(own), replay: true, virtualAccount };
       if (remaining <= 0) return { status: 'NO_BALANCE' };
+      if (virtualAccount && q.hasRefundAccount !== true) return { status: 'ACCOUNT_REQUIRED' };
       let amount: number;
       if (q.amount === undefined) {
         // 금액을 비운 요청은 남은 전부에서 10분 지난 진행 중 다른 취소의 합을 뺀 값이다(0 이하면 보내지 않는다)
@@ -670,7 +687,7 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
           insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at)
           values (${target.paymentId}::uuid, ${seq}, ${key}::uuid, ${CONFIRMED_CANCEL_SENT_EVENT_TYPE}, false, ${new Date(now)}::timestamptz)`);
       }
-      return { status: 'BEGUN', record, replay: false };
+      return { status: 'BEGUN', record, replay: false, virtualAccount };
     }, budget);
   }
 
@@ -744,12 +761,14 @@ export class DrizzleConfirmJobs implements PaymentConfirmJobs, PaymentUnknownQue
   }
 
   /** 결제사 비동기 처리·업무 거절을 그 행에 남긴다. 끝난(CANCELED) 행은 바꾸지 않는다(겹친 재시도가 먼저 반영했을 수 있다). 원장은 그대로다 */
-  async markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget): Promise<void> {
+  async markConfirmedCancel(target: ConfirmedCancelTarget, cancellationId: string, status: 'CANCEL_PENDING' | 'FAILED', budget?: CallBudget, failReason?: 'REFUND_ACCOUNT_INVALID'): Promise<void> {
     const idemKey = confirmedCancelIdemKey(cancellationId);
+    // 까닭은 FAILED에만 싣는다(0023 CHECK)
+    const reason = status === 'FAILED' ? (failReason ?? null) : null;
     await this.#tx(
       (tx) =>
         tx.execute(sql`
-        update payment_cancel set status = ${status}
+        update payment_cancel set status = ${status}, fail_reason = ${reason}
         where payment_id = ${target.paymentId}::uuid and idempotency_key = ${idemKey} and status <> 'CANCELED'`),
       budget,
     );

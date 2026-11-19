@@ -194,8 +194,81 @@ export interface CancelResult {
   outcome: CancelOutcome;
   balanceAmount?: number;
   pgCode?: string;
+  /** REJECTED의 까닭이 환불 계좌 확인 실패(은행·계좌번호·예금주)일 때만 싣는다(docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090) */
+  reason?: 'REFUND_ACCOUNT_INVALID';
 }
 
+/**
+ * 가상계좌 결제의 환불 계좌(docs/features/payment.md §6 '구현에서 정한 것' ②, ADR-0050 결정 3). 결제사 취소 본문에만 싣는다.
+ * 저장·로그·사건·지표에 싣지 않는다. bankCode는 토스 은행 코드 표의 두 자리 숫자, accountNumber는 숫자 1~20자, holderName은 1~60자다
+ */
+export interface RefundAccount {
+  readonly bankCode: string;
+  readonly accountNumber: string;
+  readonly holderName: string;
+}
+
+// 계좌 모양 한 규칙(docs/features/payment.md §6 '구현에서 정한 것' ②⑦, P-T74): packages/validation의 refundAccountShape와 같은 규칙이다.
+// 이 파일은 v0 이미지(build:lib, 결제 포트·시뮬레이터만 설치)에도 들어가 그 패키지를 가져오지 못해 규칙을 여기에 같이 두고,
+// 같은 표(packages/validation/test/fixtures/refund-account-cases.json)를 두 쪽 시험이 돌아 어긋남을 잡는다. gRPC로 온 값의 공백은 먼저 뺀다(겹친 가드).
+const REFUND_BANK_CODE = /^[0-9]{2}$/;
+const REFUND_ACCOUNT_RAW = /^[0-9-]{1,30}$/;
+const REFUND_ACCOUNT_NUMBER = /^[0-9]{1,20}$/;
+const REFUND_HOLDER_MAX = 60;
+const REFUND_CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** 모양이 맞는 계좌만 돌려준다. 계좌번호의 공백·하이픈은 뺀다. 틀리면 undefined(계좌가 없는 것과 같게 다룬다). 던지지 않고 값을 글에 싣지 않는다 */
+export function refundAccountOf(raw: { readonly bankCode?: unknown; readonly accountNumber?: unknown; readonly holderName?: unknown } | undefined): RefundAccount | undefined {
+  if (raw === undefined || raw === null || typeof raw !== 'object') return undefined;
+  const { bankCode, accountNumber, holderName } = raw;
+  if (typeof bankCode !== 'string' || typeof accountNumber !== 'string' || typeof holderName !== 'string') return undefined;
+  const compact = accountNumber.replace(/\s/g, '');
+  if (!REFUND_BANK_CODE.test(bankCode) || !REFUND_ACCOUNT_RAW.test(compact)) return undefined;
+  const number = compact.replace(/-/g, '');
+  const holder = holderName.trim();
+  const holderLength = [...holder].length;
+  if (!REFUND_ACCOUNT_NUMBER.test(number)) return undefined;
+  if (holderLength === 0 || holderLength > REFUND_HOLDER_MAX || REFUND_CONTROL.test(holder)) return undefined;
+  return { bankCode, accountNumber: number, holderName: holder };
+}
+
+/**
+ * 토스 은행 코드(두 자리) → 포트원 Bank 열거값(docs/features/payment.md §6 '구현에서 정한 것' ②, 2026-11-19 [가정]: 포트원 공식 스키마의 Bank 값 이름과 토스 은행 코드 표를 맞춘 것이다.
+ * 실제 서버 대조 때 고친다). 포트원은 계좌 거절을 따로 나타내는 오류 유형을 공식 문서에서 찾지 못해 계좌를 실은 취소의 거절도 일반 거절로 읽는다([가정])
+ */
+const PORTONE_BANK_OF = new Map<string, string>([
+  ['02', 'KDB'],
+  ['03', 'IBK'],
+  ['06', 'KOOKMIN'],
+  ['07', 'SUHYUP'],
+  ['11', 'NONGHYUP'],
+  ['12', 'LOCAL_NONGHYUP'],
+  ['20', 'WOORI'],
+  ['23', 'SC_FIRST'],
+  ['27', 'CITI'],
+  ['31', 'DAEGU'],
+  ['32', 'BUSAN'],
+  ['34', 'GWANGJU'],
+  ['35', 'JEJU'],
+  ['37', 'JEONBUK'],
+  ['39', 'KYONGNAM'],
+  ['45', 'KFCC'],
+  ['48', 'SHINHYUP'],
+  ['50', 'SAVINGS_BANK'],
+  ['54', 'HSBC'],
+  ['64', 'NFCF'],
+  ['71', 'POST'],
+  ['81', 'HANA'],
+  ['88', 'SHINHAN'],
+  ['89', 'K_BANK'],
+  ['90', 'KAKAO'],
+  ['92', 'TOSS'],
+]);
+
+/** 토스 은행 코드 → 포트원 Bank. 대응표에 없으면 undefined */
+export function portoneBankOf(bankCode: string): string | undefined {
+  return PORTONE_BANK_OF.get(bankCode);
+}
 /** 웹훅은 확정 데이터가 아니라 조회를 부르는 신호다(ADR-0029 결정 5). 상태를 싣지 않는다 */
 export interface WebhookTrigger {
   kind: 'TRIGGER';
@@ -243,7 +316,11 @@ export interface PaymentGatewayPort {
    * idemKey는 cancel-{cancellationId}. amount 'ALL'은 전액.
    * expectedBalance는 이 취소 앞의 취소 가능 금액(포트원 currentCancellableAmount). 호출자가 첫 전송 전에 저장한 값을 재시도에도 그대로 넘긴다. 같은 멱등키의 본문이 달라지면 안 되기 때문이다(BUILD_ORDER HOT-140, 코드 리뷰)
    */
-  cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult>;
+  /**
+   * refundAccount는 가상계좌 결제의 환불 계좌다(있을 때만 본문에 싣는다, 저장하지 않는다). 계좌 확인 실패는 REJECTED + reason REFUND_ACCOUNT_INVALID다
+   * (docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', BUILD_ORDER GAT-090)
+   */
+  cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number; refundAccount?: RefundAccount }): Promise<CancelResult>;
   /** 본문은 원문 바이트를 UTF-8로 읽은 글이다. 던지지 않는다 */
   parseWebhook(headers: HeaderBag, body: string): WebhookParseResult;
 }

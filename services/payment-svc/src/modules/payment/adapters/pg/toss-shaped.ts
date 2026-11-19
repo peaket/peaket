@@ -32,6 +32,7 @@ import {
   type QueryOptions,
   type QueryResult,
   type QueryStatus,
+  type RefundAccount,
   type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
 import { tossCardOf } from './card-fields.js';
@@ -94,6 +95,17 @@ const TRANSIENT_CODES = new Set([
   'FAILED_METHOD_HANDLING_CANCEL',
   'FAILED_REFUND_PROCESS',
 ]);
+/**
+ * 취소 답의 환불 계좌 확인 실패 코드(토스 오류 코드 문서 '결제 취소', 2026-11-19 확인): 계좌번호·예금주 불일치, 틀린 계좌번호, 틀린 은행, 입금이 안 되는 계좌, 해약 계좌.
+ * 계좌를 실어 보낸 취소에서만 계좌 거절로 읽는다(docs/features/payment.md §6 '구현에서 정한 것' ③)
+ */
+/**
+ * 취소 답의 멱등키 재사용(같은 멱등키에 다른 본문). 업무 거절이 아니라 결과 모름이다(앞 본문이 처리됐는지 모른다, docs/features/payment.md §6 '구현에서 정한 것' ⑥,
+ * BAT-420-rest 리뷰 반영 RV-02). 토스 공식 글(멱등성 설명, 2026-11-19 확인)은 같은 키·다른 본문을 422로 답한다고만 적고 코드 이름은 적지 않아,
+ * 코드 IDEMPOTENCY_KEY_REUSED(시뮬레이터와 같은 이름)는 [가정]이다. 422이고 이 코드면 UNKNOWN이다
+ */
+const CANCEL_IDEM_REUSED = 'IDEMPOTENCY_KEY_REUSED';
+const REFUND_ACCOUNT_REJECTED = new Set(['INVALID_REFUND_ACCOUNT_INFO', 'INVALID_REFUND_ACCOUNT_NUMBER', 'INVALID_BANK', 'FORBIDDEN_BANK_REFUND_REQUEST', 'FAILED_CLOSED_ACCOUNT_REFUND']);
 /** 토스 거래 조회의 시각 모양(KST, 초까지, 2026-11-09 공식 문서 확인. 오프셋을 받지 않는다) */
 const kstDateTime = (ms: number): string => new Date(ms + 9 * 3_600_000).toISOString().slice(0, 19);
 /** 웹훅의 결제 키·주문 ID 모양: 공백·제어 문자가 없는 ASCII 1~200자 */
@@ -233,9 +245,14 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     return { kind: 'PAGE', items, ...(last === undefined ? {} : { nextCursor: last }), ...(unreadable.length === 0 ? {} : { unreadable }) };
   }
 
-  async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string }): Promise<CancelResult> {
+  async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; refundAccount?: RefundAccount }): Promise<CancelResult> {
     if (!CANCEL_IDEM_KEY.test(c.idemKey)) throw new TypeError(`취소 멱등키는 cancel-{취소 ID}여야 한다: ${c.idemKey}`);
-    const body = { cancelReason: c.reason, ...(c.amount === 'ALL' ? {} : { cancelAmount: c.amount }) };
+    // 가상계좌 환불 계좌는 refundReceiveAccount(bank·accountNumber·holderName)다(토스 결제 취소 API 공식 문서, 2026-11-19 확인). 이 본문을 로그에 싣지 않는다
+    const body = {
+      cancelReason: c.reason,
+      ...(c.amount === 'ALL' ? {} : { cancelAmount: c.amount }),
+      ...(c.refundAccount === undefined ? {} : { refundReceiveAccount: { bank: c.refundAccount.bankCode, accountNumber: c.refundAccount.accountNumber, holderName: c.refundAccount.holderName } }),
+    };
     const r = await this.#call('POST', '/v1/payments/{paymentKey}/cancel', { paymentKey: c.paymentRef }, body, c.idemKey);
     if (r === 'NO_ANSWER' || r.status >= 500 || r.status === 429) return { outcome: 'UNKNOWN' };
     if (r.status === 200) {
@@ -246,9 +263,11 @@ export abstract class TossShapedGateway implements PaymentGatewayPort {
     const code = str(r.json?.code);
     // 승인과 같은 규칙이다(PRF-184 코드 리뷰): 결제사가 코드로 답한 4xx만 거절로 읽고, 일시 오류 코드는 취소가 됐는지 모른다
     if (r.status < 400 || r.status === 408 || !code || TRANSIENT_CODES.has(code)) return { outcome: 'UNKNOWN' };
+    if (code === CANCEL_IDEM_REUSED) return { outcome: 'UNKNOWN', pgCode: code };
     if (r.status === 409) return { outcome: 'CANCEL_PENDING', pgCode: code };
     // 이미 전액 취소된 결제를 전액 취소하면 바라는 상태와 같다
     if (code === 'ALREADY_CANCELED_PAYMENT' && c.amount === 'ALL') return { outcome: 'CANCELLED', balanceAmount: 0, pgCode: code };
+    if (c.refundAccount !== undefined && REFUND_ACCOUNT_REJECTED.has(code)) return { outcome: 'REJECTED', pgCode: code, reason: 'REFUND_ACCOUNT_INVALID' };
     return { outcome: 'REJECTED', pgCode: code };
   }
 

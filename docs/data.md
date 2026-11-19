@@ -965,6 +965,8 @@ erDiagram
         uuid deduction_gap_request_id "차액 대상으로 정한 회차 취소 요청"
         timestamptz deduction_gap_opened_at "차액 CS 건(REFUND_FAILED·DEDUCTION_GAP)을 ops-svc가 2xx로 받은 시각. deduction_gap_at이 있는데 비어 있으면 일괄 환불 실행기 틱이 다시 연다"
         timestamptz refund_failed_opened_at "환급 실패 CS 건(REFUND_FAILED·REFUND)을 ops-svc가 2xx로 받은 시각. 회차 취소 요청 ID가 없는 행만 쓴다(그 행은 일괄 환불 항목의 failure_case_opened_at이 맡는다). refund_failed_at이 있고 REFUND_PENDING인데 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다(추천 적용 2026-11-17, BAT-420 다시 보기 2 N2)"
+        timestamptz refund_account_required_at "계좌 대기: payment-svc가 REFUND_ACCOUNT_REQUIRED로 답한 시각(REFUND_PENDING만, 가상계좌 결제의 계좌 없음·계좌 거절). 있으면 환급 실행기가 집지 않고(next_refund_at 빔) 재시도 횟수·자동 정지 셈에 넣지 않는다. 계좌는 저장하지 않는다(purchase 0029, 추천 적용 2026-11-19, BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기')"
+        timestamptz refund_account_case_opened_at "CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건을 ops-svc가 2xx로 받은 시각. refund_account_required_at 없이 쓰지 않는다(CHECK). 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다(purchase 0029)"
         timestamptz entry_recorded_at "입장 시작 뒤 취소(REQUESTED)의 마감 뒤 대조에서 찾은 가장 이른 들어감·통과 시각. 있으면 환급 실행기가 결제사를 부르지 않고 refund_due_at을 비우며 CS 처리함 FLAGGED 건을 연다. 무효·환급은 CS가 정한다(추천 적용 2026-11-16, BUILD_ORDER GAT-090, docs/features/transfer-refund.md §3.1 '입장 기록 대조')"
     }
     fraud_cancellation_request {
@@ -1017,7 +1019,7 @@ erDiagram
         uuid order_id
         uuid cancellation_id "같은 요청·티켓이면 같은 결정적 UUID. 결제사 멱등키 cancel-{cancellation_id}"
         text pg "TOSS|PORTONE|SIMULATOR"
-        text status "PENDING|REFUNDED|FAILED|UNKNOWN"
+        text status "PENDING|REFUNDED|FAILED|UNKNOWN|NOT_APPLIED|ACCOUNT_PENDING. ACCOUNT_PENDING은 가상계좌 결제의 계좌 대기로 다시 보내지 않고 COMPLETED 셈에서 끝난 항목이다(purchase 0029, 추천 적용 2026-11-19, BUILD_ORDER GAT-090, R-T40)"
         int attempts "환급 재시도 횟수"
         text last_error "마지막 실패 결과 코드. 계좌·결제 참조는 싣지 않는다"
         uuid claim_token "주문 단위로 잡은 처리자의 무작위 값. 잡은 쪽만 처리하고 끝내기는 이 값이 같고 상태가 PENDING·UNKNOWN일 때만 쓴다(추천 적용 2026-11-16, 웨이브 끝 리뷰 K2)"
@@ -1182,9 +1184,10 @@ erDiagram
         text reason "결제사에 보낸 취소 사유. 재시도에도 그대로 보낸다(같은 멱등키의 본문)"
         bool full_cancel "금액을 생략한 전액 취소로 보냈는가. 진행 중인 다른 취소가 없고 금액이 남은 전부일 때만 참"
         int expected_balance "CHECK >= amount. 첫 전송 직전의 결제 금액 - 누적 취소액. 포트원 currentCancellableAmount로 보내고, 3시간 지난 재시도의 조회 대조에 쓴다(HOT-140이 넘긴 것, P-T21)"
-        text status "REQUESTED|CANCEL_PENDING|CANCELED|FAILED. REQUESTED·CANCEL_PENDING이 진행 중이다. 진행 중 행이 있고 만든 지 10분 [가정] 안이면 같은 결제의 다른 취소를 보내지 않는다. CANCELED는 반영으로, FAILED는 거절로 끝난 건이다. FAILED는 같은 취소 ID로 다시 보내지 않고 REJECTED를 다시 준다(리뷰 B3)"
+        text status "REQUESTED|CANCEL_PENDING|CANCELED|FAILED. REQUESTED·CANCEL_PENDING이 진행 중이다. 진행 중 행이 있고 만든 지 10분 [가정] 안이면 같은 결제의 다른 취소를 보내지 않는다. CANCELED는 반영으로, FAILED는 거절로 끝난 건이다. FAILED는 같은 취소 ID로 다시 보내지 않고 첫 답을 다시 준다(리뷰 B3. 계좌 거절이면 REFUND_ACCOUNT_REQUIRED, 그 밖 REJECTED, fail_reason)"
         timestamptz created_at "첫 전송 직전에 행을 만든 시각"
         timestamptz canceled_at "결제사 취소 완료 시각(ADR-0086)"
+        text fail_reason "FAILED의 개인정보 없는 까닭. 계좌 거절(은행·계좌번호·예금주 확인 실패)이면 REFUND_ACCOUNT_INVALID이고 그 밖 업무 거절은 비운다(CHECK: FAILED에만). 같은 취소 ID를 다시 부르면 이 값으로 첫 답(REFUND_ACCOUNT_REQUIRED·REJECTED)을 그대로 준다(payment 0023, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-03, docs/features/payment.md §6 '구현에서 정한 것' ④)"
     }
     settlement_statement {
         uuid id PK
@@ -2004,6 +2007,10 @@ erDiagram
         text judged_by
         text approved_by "판정자와 다르다"
         bigint version "조건부 갱신"
+        timestamptz core_applied_at "core 회차 상태 반영(POST /internal/v1/events/{eventId}/cancellation-status)에 core-svc가 2xx로 답한 시각. 비어 있으면 1분 [가정] 다시 하기가 잇는다(판과 따로 쓴다, ops 0016, 추천 적용 2026-11-19, BUILD_ORDER GAT-110, R-T41)"
+        timestamptz core_apply_next_at "다시 하기가 잡은 뒤 다음에 볼 시각(잡기 뒤 미루기, 파드 여럿이 겹쳐 부르지 않게, ops 0016)"
+        timestamptz core_apply_overdue_at "확정 뒤 10분 [가정]이 지나도 반영하지 못해 SEV2 로그를 남긴 시각(요청마다 한 번, ops 0016)"
+        timestamptz core_apply_superseded_at "같은 회차의 뒤 요청(확정 시각이 더 늦은 것)이 먼저 반영돼 이 요청은 더 부르지 않는다고 정한 시각(뒤 요청의 반영 표시와 같은 트랜잭션, ops 0016, 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-06). 잡기 차례는 core_apply_next_at(빈 값 먼저) → approved_at이고 4xx(401 제외)는 다음 볼 시각 + 10분이다"
     }
     ops_alert {
         uuid id PK "BAT-425 GAT-130(2026-11-15, R-583). purchase-svc 회차 취소 환불 자동 정지·신청 창 닫힘 경보"

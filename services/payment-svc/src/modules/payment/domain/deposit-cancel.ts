@@ -36,6 +36,8 @@ export interface DepositCancelInput {
   readonly amount?: number;
   /** 취소 범위. 칸이 없으면 UNSPECIFIED다(받는 층은 모르는 값을 그대로 넘겨 검사가 INVALID_ARGUMENT로 거절한다) */
   readonly scope?: DepositCancelScope;
+  /** 가상계좌 환불 계좌(검사 전). 결제 후 일반 취소만 쓴다. 입금 전 취소는 돈이 들어오지 않아 쓰지 않는다(BUILD_ORDER GAT-090) */
+  readonly refundAccount?: { readonly bankCode: string; readonly accountNumber: string; readonly holderName: string };
 }
 
 /** 저장소가 읽은 원장 값 */

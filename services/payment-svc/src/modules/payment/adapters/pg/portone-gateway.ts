@@ -30,8 +30,13 @@ import {
   type QueryOptions,
   type QueryResult,
   type QueryStatus,
+  portoneBankOf,
+  type RefundAccount,
   type WebhookParseResult,
 } from '../../domain/payment-gateway.js';
+
+/** 대응표는 도메인(payment-gateway.ts)에 있다. 쓰임새가 행을 만들기 전에 같은 표로 거른다(BAT-420-rest 리뷰 반영 RV-04) */
+export { portoneBankOf };
 import { portoneCardOfMethod } from './card-fields.js';
 import type { PayMethod } from '../../domain/payment-gateway.js';
 import { num, pgRequest, str, unreadableRowOf, type PgReply } from './pg-reply.js';
@@ -331,11 +336,21 @@ export class PortoneGateway implements PaymentGatewayPort {
     return { kind: 'PAGE', items, ...(cursor === undefined || cursor === '' ? {} : { nextCursor: cursor }), ...(unreadable.length === 0 ? {} : { unreadable }) };
   }
 
-  async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number }): Promise<CancelResult> {
+  async cancel(c: { paymentRef: string; amount: number | 'ALL'; reason: string; idemKey: string; expectedBalance?: number; refundAccount?: RefundAccount }): Promise<CancelResult> {
     if (!CANCEL_IDEM_KEY.test(c.idemKey)) throw new TypeError('취소 멱등키는 cancel-{취소 ID}여야 한다');
     const idem = idempotencyHeader(c.idemKey);
+    // 가상계좌 환불 계좌는 refundAccount(bank·number·holderName)다(CancelPaymentBodyRefundAccount, 공식 스키마 2026-11-19 확인). 은행은 Bank 열거값으로 바꾼다.
+    // 대응표에 없는 은행 코드는 호출자가 미리 거른다(portoneBankOf). 이 본문을 로그에 싣지 않는다
+    const bank = c.refundAccount === undefined ? undefined : portoneBankOf(c.refundAccount.bankCode);
+    if (c.refundAccount !== undefined && bank === undefined) return { outcome: 'REJECTED', reason: 'REFUND_ACCOUNT_INVALID' };
     // 검증값은 호출자가 첫 전송 전에 저장한 값만 보낸다(payment §2.1 결제 취소 API). 직전 조회로 읽으면 재시도마다 값이 달라져 같은 멱등키에 다른 본문을 보내게 된다
-    const body = { storeId: this.#storeId, reason: c.reason, ...(c.amount === 'ALL' ? {} : { amount: c.amount }), ...(c.expectedBalance === undefined ? {} : { currentCancellableAmount: c.expectedBalance }) };
+    const body = {
+      storeId: this.#storeId,
+      reason: c.reason,
+      ...(c.amount === 'ALL' ? {} : { amount: c.amount }),
+      ...(c.expectedBalance === undefined ? {} : { currentCancellableAmount: c.expectedBalance }),
+      ...(c.refundAccount === undefined || bank === undefined ? {} : { refundAccount: { bank, number: c.refundAccount.accountNumber, holderName: c.refundAccount.holderName } }),
+    };
     const r = await this.#post('/payments/{paymentId}/cancel', c.paymentRef, body, idem);
     if (r === 'NO_ANSWER' || r.status >= 500 || r.status === 429) return { outcome: 'UNKNOWN' };
     if (r.status === 200) {
@@ -348,6 +363,8 @@ export class PortoneGateway implements PaymentGatewayPort {
     }
     const code = str(r.json?.type);
     if (r.status < 400 || r.status === 408 || !code) return { outcome: 'UNKNOWN' };
+    // 멱등키 재사용(같은 키·다른 본문)은 거절 목록(CANCEL_REJECTED)에 없어 아래에서 UNKNOWN으로 읽는다. 포트원 공식 스키마에서 그 뜻의 오류 유형 이름을 찾지 못했다
+    // (2026-11-19 확인, [가정]. docs/features/payment.md §6 '구현에서 정한 것' ⑥, BAT-420-rest 리뷰 반영 RV-02)
     if (code === OUTSTANDING) return { outcome: 'CANCEL_PENDING', pgCode: code };
     // 이미 전액 취소된 결제를 전액 취소하면 바라는 상태와 같다
     if (code === ALREADY_CANCELLED && c.amount === 'ALL') return { outcome: 'CANCELLED', pgCode: code };

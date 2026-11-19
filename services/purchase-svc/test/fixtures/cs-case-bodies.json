@@ -1,0 +1,41 @@
+{
+  "_comment": "P-T75(BAT-420-rest 리뷰 반영 RV-01, 시험 담당 l3-b420-test): purchase-svc CS 건 어댑터 다섯 종류가 ops-svc POST /internal/v1/cs-cases로 보내는 본문. purchase test/cs-case-adapters-contract.test.ts는 어댑터가 보낸 본문을 이 값과 정확히 견주고, ops test/cases-contract.test.ts는 같은 본문을 실제 받는 층에 넣는다. eventKey는 '{접두어}:{취소 ID}'의 SHA-256 앞 16바이트(환급 실패·일괄 환불 실패는 취소 ID 그대로). 정본 docs/features/transfer-refund.md §3.1 ⑥, docs/features/payment.md §11 P-T75",
+  "nowMs": 1795050000000,
+  "cases": [
+    {
+      "name": "FLAGGED 이상 표시",
+      "adapter": "HttpEntryFlagNotice",
+      "metricKind": "FLAGGED",
+      "input": { "cancellationId": "0193a000-0000-7000-8000-0000000c0001", "orderId": "0193a000-0000-7000-8000-0000000d0001", "ticketId": "0193a000-0000-7000-8000-0000000e0001", "enteredAtMs": 1795049940000 },
+      "body": { "eventKey": "b7b3e210-9584-49d0-ee4f-dc763ab2e8ba", "kind": "FLAGGED", "sourceId": "0193a000-0000-7000-8000-0000000c0001", "category": "ENTRY_AFTER_CANCEL", "createdAt": "2026-11-19T01:00:00.000Z" }
+    },
+    {
+      "name": "REFUND_FAILED 환급 실패",
+      "adapter": "HttpRefundFailureNotice",
+      "metricKind": "REFUND_FAILED",
+      "input": { "cancellationId": "0193a000-0000-7000-8000-0000000c0002", "orderId": "0193a000-0000-7000-8000-0000000d0002", "attempts": 5, "lastError": "REJECTED" },
+      "body": { "eventKey": "0193a000-0000-7000-8000-0000000c0002", "kind": "REFUND_FAILED", "sourceId": "0193a000-0000-7000-8000-0000000c0002", "category": "REFUND", "createdAt": "2026-11-19T01:00:00.000Z" }
+    },
+    {
+      "name": "EVENT_REFUND_FAILED 일괄 환불 실패",
+      "adapter": "HttpRefundFailureNotice(event)",
+      "metricKind": "EVENT_REFUND_FAILED",
+      "input": { "cancellationId": "0193a000-0000-7000-8000-0000000c0003", "orderId": "0193a000-0000-7000-8000-0000000d0003", "requestId": "0193a000-0000-7000-8000-0000000f0003", "ticketId": "0193a000-0000-7000-8000-0000000e0003", "attempts": 1, "lastError": "REJECTED" },
+      "body": { "eventKey": "0193a000-0000-7000-8000-0000000c0003", "kind": "REFUND_FAILED", "sourceId": "0193a000-0000-7000-8000-0000000c0003", "category": "REFUND", "createdAt": "2026-11-19T01:00:00.000Z" }
+    },
+    {
+      "name": "DEDUCTION_GAP 공제 차액",
+      "adapter": "HttpDeductionGapNotice",
+      "metricKind": "DEDUCTION_GAP",
+      "input": { "cancellationId": "0193a000-0000-7000-8000-0000000c0004", "orderId": "0193a000-0000-7000-8000-0000000d0004", "deductionAmount": 29999, "requestId": "0193a000-0000-7000-8000-0000000f0004" },
+      "body": { "eventKey": "e7df926c-a1e7-85ff-362c-58750f976105", "kind": "REFUND_FAILED", "sourceId": "0193a000-0000-7000-8000-0000000c0004", "category": "DEDUCTION_GAP", "createdAt": "2026-11-19T01:00:00.000Z" }
+    },
+    {
+      "name": "REFUND_ACCOUNT_PENDING 환불 대기",
+      "adapter": "HttpRefundAccountNotice",
+      "metricKind": "REFUND_ACCOUNT_PENDING",
+      "input": { "cancellationId": "0193a000-0000-7000-8000-0000000c0005", "orderId": "0193a000-0000-7000-8000-0000000d0005" },
+      "body": { "eventKey": "adfce1ad-f982-6539-3b86-013300a1aa8b", "kind": "REFUND_ACCOUNT_PENDING", "sourceId": "0193a000-0000-7000-8000-0000000c0005", "category": "REFUND", "createdAt": "2026-11-19T01:00:00.000Z" }
+    }
+  ]
+}

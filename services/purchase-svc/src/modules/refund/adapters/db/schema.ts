@@ -89,7 +89,8 @@ export const eventRefundItem = pgTable(
     index('event_refund_item_status_idx').on(t.requestId, t.status),
     index('event_refund_item_due_idx').on(t.status, t.nextAttemptAt),
     check('event_refund_item_pg_check', sql`${t.pg} in ('TOSS', 'PORTONE', 'SIMULATOR')`),
-    check('event_refund_item_status_check', sql`${t.status} in ('PENDING', 'REFUNDED', 'FAILED', 'UNKNOWN', 'NOT_APPLIED')`),
+    // ACCOUNT_PENDING: 가상계좌 결제의 계좌 대기(0029, BUILD_ORDER GAT-090)
+    check('event_refund_item_status_check', sql`${t.status} in ('PENDING', 'REFUNDED', 'FAILED', 'UNKNOWN', 'NOT_APPLIED', 'ACCOUNT_PENDING')`),
     check('event_refund_item_attempts_check', sql`${t.attempts} >= 0`),
     // 잡기 값과 기한은 함께 있거나 함께 없다(0025)
     check('event_refund_item_claim_check', sql`(${t.claimToken} is null) = (${t.claimedUntil} is null)`),

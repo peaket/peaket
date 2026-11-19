@@ -120,6 +120,8 @@ export interface PaymentDetailRow {
   readonly virtualAccountBank?: string;
   readonly virtualAccountNoSealed?: string;
   readonly depositDueAtMs?: number;
+  /** AWAITING_DEPOSIT 사건이 한 번이라도 있다(없으면 거짓으로 본다, BUILD_ORDER GAT-090) */
+  readonly depositEvent?: boolean;
 }
 
 /** GetPayment 답 */
@@ -134,6 +136,16 @@ export interface PaymentDetail {
   readonly approvedAtMs?: number;
   /** 입금 대기일 때만. 계좌번호는 복호하지 못했거나 저장하지 않았으면 없다. 로그에 싣지 않는다 */
   readonly virtualAccount?: { readonly bank?: string; readonly accountNumber?: string; readonly dueAtMs?: number };
+  /**
+   * 가상계좌로 받은 결제인가: AWAITING_DEPOSIT 사건이 있고 원장이 승인·부분 취소·전액 취소(입금 확정 뒤)다. 입금 대기·기한 만료는 거짓이다
+   * (docs/features/payment.md §6 '구현에서 정한 것' ①, BUILD_ORDER GAT-090)
+   */
+  readonly virtualAccountPaid?: boolean;
+}
+
+/** 가상계좌로 받은 결제인가(GetPayment virtual_account_paid) */
+export function virtualAccountPaidOf(row: Pick<PaymentDetailRow, 'status' | 'depositEvent'>): boolean {
+  return row.depositEvent === true && (row.status === 'APPROVED' || row.status === 'PARTIAL_CANCELED' || row.status === 'CANCELED');
 }
 
 /** 원장이 없다(gRPC NOT_FOUND). 글에는 값을 싣지 않는다 */

@@ -31,4 +31,6 @@ export interface CancellationQuote {
   refundAmount?: number;
   /** 입장 시작 뒤 취소라 환급을 입장 기록 마감 뒤 실행(ADR-0051 결정 13) */
   refundAfterEntryClose?: boolean;
+  /** 취소 본문에 환불 계좌(refundAccount)를 실어야 하는지. 가상계좌 결제이고 지금 환급할 때(입장 시작 전 취소)만 참이다. 서버가 payment-svc GetPayment의 virtual_account_paid로 정하고, 읽지 못하면 견적은 503 dependency-unavailable이다(docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', 추천 적용 2026-11-19, BUILD_ORDER GAT-090) */
+  refundAccountRequired?: boolean;
 }

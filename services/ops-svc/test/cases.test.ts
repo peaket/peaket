@@ -61,15 +61,29 @@ describe('CS 처리함 건 접수', () => {
     expect(store.cases.size).toBe(2);
   });
 
-  test('GAT-090 A4 받는 종류 셋(REFUND_FAILED·FLAGGED·JUDGEMENT_PENDING) 밖은 종류마다 건을 만들지 않는다', async () => {
-    const accepted = new Set(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING']);
+  // BAT-420-rest 리뷰 반영 RV-01(시험 담당 l3-b420-test, 2026-11-19): 정본(transfer-refund §3.1 ⑥ '실패 기록', P-T75)이 환불 대기(REFUND_ACCOUNT_PENDING)를 받는 종류에 더해 셋에서 넷으로 바꿨다(정본 변경 반영)
+  test('GAT-090 A4 받는 종류 넷(REFUND_FAILED·FLAGGED·JUDGEMENT_PENDING·REFUND_ACCOUNT_PENDING) 밖은 종류마다 건을 만들지 않는다', async () => {
+    const accepted = new Set(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING']);
     const others = CS_CASE_KINDS.filter((k) => !accepted.has(k));
-    expect(others.length).toBe(CS_CASE_KINDS.length - 3);
+    expect(others.length).toBe(CS_CASE_KINDS.length - 4);
+    expect(others).toContain('DISPUTE');
     for (const kind of others) {
       const store = new MemoryCsCaseStore();
       const r = await new ReceiveCaseRequested(store).handle({ ...payload, kind }, NOW);
       expect({ kind, accepted: r.accepted }).toEqual({ kind, accepted: false });
       expect(store.cases.size).toBe(0);
     }
+  });
+
+  test('P-T75 ① 환불 대기 REFUND_ACCOUNT_PENDING은 대상 취소 ID로 건 하나를 열고 같은 취소의 다시 온 요청은 같은 건이다', async () => {
+    const store = new MemoryCsCaseStore();
+    const handler = new ReceiveCaseRequested(store);
+    const cancellationId = '0194b000-0000-7000-8000-0000000a0009';
+    const pending = { eventKey: cancellationId, kind: 'REFUND_ACCOUNT_PENDING' as const, sourceId: cancellationId, category: 'REFUND', createdAt: new Date(NOW).toISOString() };
+    const a = await handler.handle(pending, NOW);
+    expect(a.accepted).toBe(true);
+    expect(a.case).toMatchObject({ kind: 'REFUND_ACCOUNT_PENDING', targetRef: cancellationId, status: 'OPEN' });
+    expect((await handler.handle(pending, NOW + 1)).case!.caseId).toBe(a.case!.caseId);
+    expect(store.cases.size).toBe(1);
   });
 });

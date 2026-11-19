@@ -3,9 +3,10 @@
 // purchase gRPC 클라이언트가 있으면 미리보기·진행률 읽기(reader)와 환급 미룸(holds, SetEventRefundHold, BAT-420 몫 D)을 넣는다. 없는 것은 그 경로가 503으로 닫힌다.
 import { createExternalHttpClient } from '@peaket/platform';
 import { HttpCoreEventOwners } from './adapters/http-core-event-owners.js';
+import { HttpCoreEventStatus } from './adapters/http-core-event-status.js';
 import { HttpEventSaleStopper } from './adapters/event-sale-stopper.js';
 import type { CommandExecutor } from './modules/commands/domain/ports.js';
-import type { EventOwnerLookup, EventRefundHolds, EventRefundReader, EventSaleStopper } from './modules/event-cancellations/domain/ports.js';
+import type { CoreEventStatus, EventOwnerLookup, EventRefundHolds, EventRefundReader, EventSaleStopper } from './modules/event-cancellations/domain/ports.js';
 
 export interface EventCancellationDepsInput {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -22,6 +23,8 @@ export interface EventCancellationDeps {
   readonly owners?: EventOwnerLookup;
   /** purchase gRPC 클라이언트가 미룸(hold)도 하면 그것(BAT-420 몫 D). 없으면 CANCEL 요청·판정·확정이 503이다 */
   readonly holds?: EventRefundHolds;
+  /** core 회차 상태 반영(BAT-420-rest GAT-110, PEAKET_CORE_HTTP_URL이 있을 때). 없으면 확정이 core를 부르지 않는다(주소가 없어도 되는지는 requireCoreEventStatusUrl) */
+  readonly core?: CoreEventStatus;
 }
 
 const has = (v: string | undefined): v is string => typeof v === 'string' && v.trim() !== '';
@@ -58,7 +61,26 @@ export function eventCancellationDepsFromEnv(i: EventCancellationDepsInput): Eve
     ...(i.refunds ? { reader: i.refunds } : {}),
     ...(i.refunds && typeof i.refunds.hold === 'function' ? { holds: i.refunds as EventRefundHolds } : {}),
     ...(has(coreUrl)
-      ? { owners: new HttpCoreEventOwners(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 5_000 }), i.internalToken) }
+      ? {
+          owners: new HttpCoreEventOwners(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 5_000 }), i.internalToken),
+          // core 회차 상태 반영은 3초 [가정] 한도의 따로 된 클라이언트다(transfer-refund §5 'core 회차 상태 반영')
+          core: new HttpCoreEventStatus(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 3_000 }), i.internalToken),
+        }
       : {}),
   };
+}
+
+/** core 주소 없이 시작해도 되는 환경(core 반영 없이 시작 경고만, 판매 설정 읽기와 같은 규칙) */
+const CORE_OPTIONAL_ENVS: ReadonlySet<string> = new Set(['local', 'ci']);
+
+/**
+ * core 회차 상태 반영 주소 검사(BAT-420-rest GAT-110, transfer-refund §5 'core 회차 상태 반영'). main.ts가 시작 때 부른다.
+ * PEAKET_CORE_HTTP_URL이 있으면 undefined. 없으면 local·ci만 시작 경고 글을 돌려주고(그때 확정은 core를 부르지 않고 다시 하기도 돌지 않는다),
+ * 그 밖(prod·staging·demo·PEAKET_ENV 없음)은 시작 실패다(던짐). 회차가 core에 SCHEDULED로 남아 검색·판매 설정이 어긋나는 것을 조용히 두지 않는다
+ */
+export function requireCoreEventStatusUrl(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  if (has(env.PEAKET_CORE_HTTP_URL)) return undefined;
+  const envName = env.PEAKET_ENV;
+  if (envName !== undefined && CORE_OPTIONAL_ENVS.has(envName)) return 'PEAKET_CORE_HTTP_URL이 없어 회차 취소·연기 확정이 core 회차 상태를 반영하지 않는다(local·ci만)';
+  throw new Error('PEAKET_CORE_HTTP_URL이 없다(회차 취소 확정의 core 회차 상태 반영, 운영 필수)');
 }

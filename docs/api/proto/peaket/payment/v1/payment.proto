@@ -260,6 +260,10 @@ message GetPaymentResponse {
   google.protobuf.Timestamp approved_at = 7;
   // 입금 대기일 때만 채운다. 입금이 확정되거나 입금 기한이 지나면 칸이 없다(추천 적용 2026-11-09, BUILD_ORDER HOT-151).
   VirtualAccountInfo virtual_account = 8;
+  // 가상계좌로 받은 결제인지. 그 결제에 수출 사건 AWAITING_DEPOSIT이 한 번이라도 있으면 참이다. 입금 확정·부분 취소 뒤에도 참이고,
+  // 카드 결제와 입금 기한이 지나 끝난 결제(승인 없음)는 거짓이다(docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현',
+  // 추천 적용 2026-11-19, BUILD_ORDER GAT-090).
+  bool virtual_account_paid = 9;
 }
 
 // 가상계좌 입금 안내(docs/features/payment.md §6). 입금처 번호라 구매자의 계좌가 아니다.
@@ -313,6 +317,18 @@ message CancelPaymentRequest {
   string reason = 4;
   // 어느 취소를 받을지. 비우면(UNSPECIFIED) 원장 상태로 고른다(추천 적용 2026-11-18, BAT-010 계획).
   CancelScope scope = 5;
+  // 가상계좌 결제의 환불 계좌(선택). 결제사 취소 본문에만 싣고 payment_cancel·사건·Outbox·로그·지표 어디에도 저장·기록하지 않는다
+  // (ADR-0050 결정 3, docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', 추천 적용 2026-11-19, BUILD_ORDER GAT-090).
+  // 가상계좌가 아닌 결제에 온 계좌는 결제사로 보내지 않고 버린다.
+  RefundAccount refund_account = 6;
+}
+
+// 가상계좌 환불을 받을 구매자 계좌. 이 호출 안에서만 쓰고 저장하지 않는다. 로그에 싣지 않는다.
+message RefundAccount {
+  // 은행 코드(결제사 은행 코드 표의 두 자리 숫자 등)
+  string bank_code = 1;
+  string account_number = 2;
+  string holder_name = 3;
 }
 
 // CancelPayment가 받는 취소의 범위(docs/features/payment.md §6 '입금 전 취소만 부르기').
@@ -331,6 +347,9 @@ enum CancelResult {
   CANCEL_RESULT_CANCEL_PENDING = 2;
   CANCEL_RESULT_REJECTED = 3;
   CANCEL_RESULT_UNKNOWN = 4;
+  // 가상계좌 결제인데 환불 계좌가 없거나 결제사가 계좌를 거절했다. 결제사로 돈이 나가지 않았다. 부르는 쪽은 계좌 대기로 둔다
+  // (docs/features/payment.md §6 '가상계좌 환불 계좌 전달의 첫 구현', 추천 적용 2026-11-19, BUILD_ORDER GAT-090).
+  CANCEL_RESULT_REFUND_ACCOUNT_REQUIRED = 5;
 }
 
 message CancelPaymentResponse {

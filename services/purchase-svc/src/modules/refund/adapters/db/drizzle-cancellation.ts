@@ -58,11 +58,14 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         refundAmount: orderCancellation.refundAmount,
         state: orderCancellation.status,
         refundAttempts: orderCancellation.refundAttempts,
+        accountRequiredAt: orderCancellation.refundAccountRequiredAt,
       })
       .from(orderCancellation)
       .where(eq(orderCancellation.id, cancellationId))
       .limit(1);
-    return row ? { ...row, state: row.state as CancellationRecord['state'] } : undefined;
+    if (!row) return undefined;
+    const { accountRequiredAt, ...rest } = row;
+    return { ...rest, state: row.state as CancellationRecord['state'], ...(accountRequiredAt ? { refundAccountRequired: true } : {}) };
   }
 }
 
@@ -210,6 +213,24 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     return updated.length > 0;
   }
 
+  /**
+   * 계좌 대기(BUILD_ORDER GAT-090): REFUND_PENDING 행에만 refund_account_required_at을 쓰고(이미 있으면 그대로) next_refund_at을 비운다.
+   * 재시도 횟수·실패 표시는 그대로다(재시도·자동 정지 셈 밖, docs/features/payment.md §6 '계좌 대기')
+   */
+  async markRefundAccountRequired(q: { readonly cancellationId: string; readonly nowMs: number }): Promise<boolean> {
+    const updated = await this.database.db
+      .update(orderCancellation)
+      .set({
+        nextRefundAt: null,
+        refundAccountRequiredAt: sql`coalesce(${orderCancellation.refundAccountRequiredAt}, ${new Date(q.nowMs)}::timestamptz)`,
+        refundLastError: 'REFUND_ACCOUNT_REQUIRED',
+        statusChangedAt: new Date(q.nowMs),
+      })
+      .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.status, 'REFUND_PENDING')))
+      .returning({ id: orderCancellation.id });
+    return updated.length > 0;
+  }
+
   async dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]> {
     const now = new Date(nowMs);
     const held = holdOpenFor(now);
@@ -231,6 +252,8 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       .where(
         and(
           isNull(orderCancellation.refundFailedAt),
+          // 계좌 대기 행은 계좌를 다시 받기 전까지 집지 않는다(BUILD_ORDER GAT-090, next_refund_at이 비어 있어도)
+          isNull(orderCancellation.refundAccountRequiredAt),
           or(
             // 입장 기록이 나온 보류 취소(entry_recorded_at)는 CS 처리함 '이상 표시'가 처리하므로 더 집지 않는다(BAT-420 P-T19 ①)
             // 회차 취소 요청의 미룸이 걸렸거나(BAT-420 몫 D) 그 회차의 일괄 환불이 진행 중(RUNNING·PAUSED)이면 집지 않는다. 결과 모름 재시도(REFUND_PENDING)는 미루지 않는다

@@ -122,6 +122,7 @@ export function getPaymentResponseOf(detail: PaymentDetail): Record<string, unkn
     ...(va === undefined
       ? {}
       : { virtual_account: { ...(va.bank === undefined ? {} : { bank: va.bank }), ...(va.accountNumber === undefined ? {} : { account_number: va.accountNumber }), ...(va.dueAtMs === undefined ? {} : { due_at: timestampOf(va.dueAtMs) }) } }),
+    ...(detail.virtualAccountPaid === true ? { virtual_account_paid: true } : {}),
   };
 }
 
@@ -139,12 +140,17 @@ function cancelScopeOf(v: unknown): DepositCancelScope | undefined {
 export function cancelInputOf(request: Record<string, unknown>): DepositCancelInput {
   const krw = childOf(request.amount)?.krw;
   const scope = cancelScopeOf(request.scope);
+  // 환불 계좌(선택, BUILD_ORDER GAT-090). 칸 세 개를 글로만 옮기고 검사는 쓰임새가 한다. 값을 로그·오류 글에 싣지 않는다
+  const account = childOf(request.refund_account);
+  const refundAccount =
+    account === undefined ? undefined : { bankCode: text(account.bank_code), accountNumber: text(account.account_number), holderName: text(account.holder_name) };
   return {
     paymentId: text(request.payment_id),
     cancellationId: text(request.cancellation_id),
     reason: text(request.reason),
     ...(typeof krw === 'number' ? { amount: krw } : {}),
     ...(scope === undefined ? {} : { scope }),
+    ...(refundAccount === undefined ? {} : { refundAccount }),
   };
 }
 

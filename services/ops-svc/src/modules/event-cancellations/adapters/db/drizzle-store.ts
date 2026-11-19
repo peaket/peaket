@@ -16,7 +16,7 @@ import {
   type EventCancellationVia,
   type EventCancellationView,
 } from '../../domain/event-cancellation.js';
-import type { EventCancellationIdempotency, EventCancellationInsert, EventCancellationStore } from '../../domain/ports.js';
+import type { CoreApplyDue, CoreApplyStore, EventCancellationIdempotency, EventCancellationInsert, EventCancellationStore } from '../../domain/ports.js';
 
 /** event_cancellation_request 행(파트너 저장소도 같은 꼴로 읽는다) */
 export interface Row {
@@ -106,7 +106,12 @@ export const insertValues = (r: EventCancellationRecord) => sql`(${r.requestId}:
               ${r.requestedVia ?? 'COMMANDER'}, ${r.promoterId ?? null}::uuid, ${r.faultOpinion ?? null}, ${r.evidenceRef ?? null}, ${r.newStartsAt ?? null}::timestamptz,
               ${jsonOf(r.dryRun)}::jsonb, ${r.rejectionReason ?? null})`;
 
-export class DrizzleEventCancellationStore implements EventCancellationStore {
+/** core 반영 다시 하기 대상(Start까지 끝낸 확정 뒤 요청, ops 0016 부분 색인과 같은 조건) */
+const CORE_APPLY_TARGET = sql.raw(
+  `core_applied_at is null and core_apply_superseded_at is null and refund_job_state is not null and status in ('APPROVED', 'RUNNING', 'PAUSED', 'REFUND_WINDOW', 'COMPLETED')`,
+);
+
+export class DrizzleEventCancellationStore implements EventCancellationStore, CoreApplyStore {
   readonly #idempotency: IdempotencyStore;
   readonly #clock: Clock;
 
@@ -116,6 +121,79 @@ export class DrizzleEventCancellationStore implements EventCancellationStore {
   ) {
     this.#idempotency = new IdempotencyStore({ clock });
     this.#clock = clock;
+  }
+
+  /**
+   * core가 2xx로 답한 뒤에만 부른다(BAT-420-rest GAT-110). 판(version)은 바꾸지 않는다.
+   * 같은 트랜잭션에서 같은 회차의 앞 요청(확정 시각이 더 이르고 반영·대체되지 않은 것)에 대체 표시를 쓴다(리뷰 반영 RV-06)
+   */
+  async markCoreApplied(requestId: string, nowMs: number): Promise<void> {
+    const now = new Date(nowMs);
+    await this.database.transaction(async (tx) => {
+      const r = await tx.execute(sql`
+        update event_cancellation_request set core_applied_at = ${now}::timestamptz
+         where request_id = ${requestId}::uuid and core_applied_at is null
+        returning event_id::text as event_id, approved_at`);
+      const row = r.rows[0] as { event_id: string; approved_at: Date | string | null } | undefined;
+      if (!row || row.approved_at === null) return;
+      await tx.execute(sql`
+        update event_cancellation_request set core_apply_superseded_at = ${now}::timestamptz
+         where event_id = ${row.event_id}::uuid and request_id <> ${requestId}::uuid
+           and core_applied_at is null and core_apply_superseded_at is null
+           and approved_at < ${new Date(row.approved_at)}::timestamptz`);
+    });
+  }
+
+  /** 반영하지 않은 행의 다음 볼 시각을 미룬다(4xx의 10분, 리뷰 반영 RV-06) */
+  async deferCoreApply(requestId: string, untilMs: number): Promise<void> {
+    await this.database.db.execute(sql`
+      update event_cancellation_request set core_apply_next_at = ${new Date(untilMs)}::timestamptz
+       where request_id = ${requestId}::uuid and core_applied_at is null`);
+  }
+
+  /** 잡기 뒤 미루기 한 문장: 다음 볼 시각이 지났거나 빈 대상을 확정 시각 순으로 잠그고(SKIP LOCKED) 다음 볼 시각을 지금 + retryAfterMs로 쓴다 */
+  async claimCoreApplies(nowMs: number, limit: number, retryAfterMs: number): Promise<readonly CoreApplyDue[]> {
+    const now = new Date(nowMs);
+    const r = await this.database.db.execute(sql`
+      with picked as (
+        select request_id from event_cancellation_request
+         where ${CORE_APPLY_TARGET} and (core_apply_next_at is null or core_apply_next_at <= ${now}::timestamptz)
+         order by core_apply_next_at nulls first, approved_at, request_id
+         limit ${limit}::int
+         for update skip locked)
+      update event_cancellation_request e
+         set core_apply_next_at = ${new Date(nowMs + retryAfterMs)}::timestamptz
+        from picked
+       where e.request_id = picked.request_id
+      returning e.request_id::text as request_id, e.event_id::text as event_id, e.kind, e.new_starts_at, e.approved_at`);
+    const rows = r.rows as { request_id: string; event_id: string; kind: string; new_starts_at: Date | string | null; approved_at: Date | string | null }[];
+    // 한 바퀴 안에서는 확정 시각 차례로 부른다(같은 회차는 앞 요청 먼저, 뒤 요청이 마지막 상태를 남긴다)
+    return rows
+      .map((x) => ({
+        requestId: x.request_id,
+        eventId: x.event_id,
+        kind: x.kind as EventCancellationKind,
+        ...(x.new_starts_at !== null ? { newStartsAt: new Date(x.new_starts_at) } : {}),
+        ...(x.approved_at !== null ? { approvedAtMs: new Date(x.approved_at).getTime() } : {}),
+      }))
+      .sort((a, b) => (a.approvedAtMs ?? 0) - (b.approvedAtMs ?? 0) || a.requestId.localeCompare(b.requestId));
+  }
+
+  /** 확정 시각 + overdueAfterMs ≤ 지금인 대상에 core_apply_overdue_at을 한 번만 쓴다(빈 행만, SKIP LOCKED) */
+  async markCoreApplyOverdue(nowMs: number, overdueAfterMs: number, limit: number): Promise<readonly { requestId: string; eventId: string }[]> {
+    const r = await this.database.db.execute(sql`
+      with picked as (
+        select request_id from event_cancellation_request
+         where ${CORE_APPLY_TARGET} and core_apply_overdue_at is null and approved_at <= ${new Date(nowMs - overdueAfterMs)}::timestamptz
+         order by approved_at, request_id
+         limit ${limit}::int
+         for update skip locked)
+      update event_cancellation_request e
+         set core_apply_overdue_at = ${new Date(nowMs)}::timestamptz
+        from picked
+       where e.request_id = picked.request_id
+      returning e.request_id::text as request_id, e.event_id::text as event_id`);
+    return (r.rows as { request_id: string; event_id: string }[]).map((x) => ({ requestId: x.request_id, eventId: x.event_id }));
   }
 
   /** 같은 멱등 키의 커밋된 처음 응답(보관 기간 안). 넣기의 멱등 규칙(platform IdempotencyStore)과 같은 표·범위·지문 비교다 */

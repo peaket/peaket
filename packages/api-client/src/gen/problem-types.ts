@@ -69,6 +69,7 @@ export type ProblemType =
   | 'event-refund-unavailable'
   | 'event-schedule-invalid'
   | 'event-settlement-source-unavailable'
+  | 'event-status-conflict'
   | 'event-suspended'
   | 'export-format-unavailable'
   | 'first-partner-account-must-be-admin'
@@ -381,6 +382,7 @@ export const PROBLEM_TYPES = {
   'event-refund-unavailable': { status: 503, title: "일괄 환불 실행기를 쓸 수 없습니다" },
   'event-schedule-invalid': { status: 422, title: "회차 일정이 맞지 않습니다" },
   'event-settlement-source-unavailable': { status: 503, title: "회차 정산 원천을 읽을 수 없습니다" },
+  'event-status-conflict': { status: 409, title: "회차 상태와 맞지 않습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
   'export-format-unavailable': { status: 503, title: "이 파일 형식은 아직 만들 수 없습니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },

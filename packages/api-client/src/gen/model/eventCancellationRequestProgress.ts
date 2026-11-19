@@ -15,6 +15,11 @@ export type EventCancellationRequestProgress = {
   total?: number;
   done?: number;
   failed?: number;
+  /**
+     * 가상계좌 결제라 환불 계좌를 기다리는 항목 수(ACCOUNT_PENDING, 다시 보내지 않고 COMPLETED 셈에서는 끝난 항목). 있을 때만 싣고 결제사별 몫에는 없다(docs/features/payment.md §6 '계좌 대기', 추천 적용 2026-11-19, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤)
+     * @minimum 0
+     */
+  accountPending?: number;
   /** 결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045) */
   perPg?: EventCancellationRequestProgressPerPgItem[];
 };

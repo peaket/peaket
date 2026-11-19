@@ -1,0 +1,133 @@
+{
+  "_comment": "P-T74(BAT-420-rest 리뷰 반영 RV-04, 시험 담당 l3-b420-test): 환불 계좌 모양 한 규칙(docs/features/payment.md §6 '구현에서 정한 것' ②⑦, §11 P-T74). bankCode 숫자 두 자리, accountNumber 숫자와 하이픈 1~30자이고 하이픈을 뺀 숫자 1~20자, holderName 1~60자. packages/validation 공용 함수(refundAccountShape)·purchase-svc 본문 검사(400 invalid-body)·payment-svc refundAccountOf가 같은 표를 돈다. ok면 value는 하이픈을 뺀 값",
+  "cases": [
+    {
+      "name": "기본(하이픈 섞인 12자리)",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "110-987-6543",
+        "holderName": "김환불"
+      },
+      "ok": true,
+      "value": {
+        "bankCode": "88",
+        "accountNumber": "1109876543",
+        "holderName": "김환불"
+      }
+    },
+    {
+      "name": "은행 코드 세 자리(088)",
+      "input": {
+        "bankCode": "088",
+        "accountNumber": "110-987-6543",
+        "holderName": "김환불"
+      },
+      "ok": false
+    },
+    {
+      "name": "은행 코드 한 자리",
+      "input": {
+        "bankCode": "8",
+        "accountNumber": "110-987-6543",
+        "holderName": "김환불"
+      },
+      "ok": false
+    },
+    {
+      "name": "은행 코드 글자",
+      "input": {
+        "bankCode": "AB",
+        "accountNumber": "110-987-6543",
+        "holderName": "김환불"
+      },
+      "ok": false
+    },
+    {
+      "name": "계좌번호에 글자",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "110-98a-654321",
+        "holderName": "김환불"
+      },
+      "ok": false
+    },
+    {
+      "name": "하이픈 뺀 숫자 21자",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "111111111111111111111",
+        "holderName": "김환불"
+      },
+      "ok": false
+    },
+    {
+      "name": "31자 글(숫자 16·하이픈 15)",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "1-2-3-4-5-6-7-8-9-0-1-2-3-4-5-6",
+        "holderName": "김환불"
+      },
+      "ok": false
+    },
+    {
+      "name": "예금주 빈 값",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "110-987-6543",
+        "holderName": ""
+      },
+      "ok": false
+    },
+    {
+      "name": "예금주 61자",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "110-987-6543",
+        "holderName": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"
+      },
+      "ok": false
+    },
+    {
+      "name": "경계: 숫자 20자",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "11111111111111111111",
+        "holderName": "김환불"
+      },
+      "ok": true,
+      "value": {
+        "bankCode": "88",
+        "accountNumber": "11111111111111111111",
+        "holderName": "김환불"
+      }
+    },
+    {
+      "name": "경계: 하이픈 섞인 30자(숫자 20)",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "12-34-56-78-90-12-34-56-78-9-0",
+        "holderName": "김환불"
+      },
+      "ok": true,
+      "value": {
+        "bankCode": "88",
+        "accountNumber": "12345678901234567890",
+        "holderName": "김환불"
+      }
+    },
+    {
+      "name": "경계: 예금주 60자",
+      "input": {
+        "bankCode": "88",
+        "accountNumber": "110-987-6543",
+        "holderName": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"
+      },
+      "ok": true,
+      "value": {
+        "bankCode": "88",
+        "accountNumber": "1109876543",
+        "holderName": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가"
+      }
+    }
+  ]
+}

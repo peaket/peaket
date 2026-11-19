@@ -232,6 +232,7 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
       readonly cancellationFailure?: { readonly lastError: string };
       readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
       readonly failureCase?: true;
+      readonly accountPending?: true;
     } = {},
   ): Promise<boolean> {
     const { failureCase, ...side } = extra;
@@ -353,9 +354,20 @@ export async function finishSideWrites(
     readonly outbox?: readonly EventRefundOutboxMessage[];
     readonly cancellationFailure?: { readonly lastError: string };
     readonly deductionGap?: { readonly cancellationId: string; readonly requestId: string };
+    /** 항목을 ACCOUNT_PENDING으로 끝냈다: 그 취소 행을 계좌 대기로 둔다(BUILD_ORDER GAT-090) */
+    readonly accountPending?: true;
   },
 ): Promise<void> {
   const nowMs = clock.now();
+  if (w.accountPending) {
+    // 계좌 대기(docs/features/payment.md §6 '계좌 대기'): 재시도 횟수는 그대로, next_refund_at 빔. 이미 쓴 시각은 두고(coalesce) CS '환불 대기' 건은 틱 끝 다시 열기가 연다
+    await tx.execute(sql`
+      update order_cancellation
+         set refund_account_required_at = coalesce(refund_account_required_at, ${new Date(nowMs)}::timestamptz), next_refund_at = null
+       where id = ${w.cancellationId}::uuid
+         and event_cancellation_request_id = ${w.requestId}::uuid
+         and status = 'REFUND_PENDING'`);
+  }
   if (w.cancellationFailure) {
     await tx.execute(sql`
       update order_cancellation

@@ -80,6 +80,8 @@ export interface EventRefundJobProgress {
   readonly total: number;
   readonly done: number;
   readonly failed: number;
+  /** 계좌 대기 항목 수(GetEventRefundJob.account_pending_orders, 0이면 싣지 않는다, BAT-420-rest 리뷰 반영 RV-05) */
+  readonly accountPending?: number;
   readonly perPg: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string; readonly done: number; readonly failed: number; readonly unknown: number }[];
   readonly appliedOrders?: number;
   /** ISO 8601 */
@@ -99,6 +101,60 @@ export interface EventRefundReader {
 /** core-svc 내부 판매 설정(GET /internal/v1/events/{eventId}/sale-config). 없으면 undefined, 실패는 던진다 */
 export interface EventOwnerLookup {
   find(eventId: string): Promise<{ promoterId: string; startsAtMs: number; endsAtMs?: number } | undefined>;
+}
+
+// ---- BAT-420-rest GAT-110: core 회차 상태 반영(transfer-refund §5 'core 회차 상태 반영', R-T41) ----
+
+/** core-svc POST /internal/v1/events/{eventId}/cancellation-status. 2xx가 아니거나 시간 초과·연결 실패면 던진다(4xx는 CoreEventStatusRejected) */
+export interface CoreEventStatus {
+  apply(q: { readonly eventId: string; readonly requestId: string; readonly kind: EventCancellationKind; readonly postponedTo?: Date }): Promise<void>;
+}
+
+/** core가 4xx로 답했다(계약 결함, 경고 대신 오류 로그, guidelines §8.1). 상태 코드만 싣는다 */
+export class CoreEventStatusRejected extends Error {
+  constructor(readonly status: number) {
+    super(`core-svc가 회차 상태 반영을 받지 않았다(status ${status})`);
+    this.name = 'CoreEventStatusRejected';
+  }
+}
+
+/** 다시 하기 간격 1분 [가정], 한 번에 20건 [가정], 확정 뒤 SEV2까지 10분 [가정](transfer-refund §5) */
+export const CORE_APPLY_RETRY_MS = 60_000;
+export const CORE_APPLY_BATCH = 20;
+export const CORE_APPLY_OVERDUE_MS = 600_000;
+/** 4xx(401 제외, 계약 결함)로 실패한 요청의 다음 볼 시각은 지금 + 10분 [가정]이다(머리 막힘 막기, BAT-420-rest 리뷰 반영 RV-06). 그 밖 실패는 CORE_APPLY_RETRY_MS */
+export const CORE_APPLY_REJECTED_RETRY_MS = 600_000;
+
+/** 반영을 다시 할 요청 한 건 */
+export interface CoreApplyDue {
+  readonly requestId: string;
+  /** 확정 시각(epoch ms). 한 바퀴 안에서 이 차례로 부른다 */
+  readonly approvedAtMs?: number;
+  readonly eventId: string;
+  readonly kind: EventCancellationKind;
+  readonly newStartsAt?: Date;
+}
+
+/**
+ * core 반영 표시(ops 0016 core_applied_at·core_apply_next_at·core_apply_overdue_at). 요청 행의 판(version)과 따로 쓴다(확정·진행률 저장과 겹치지 않게).
+ * 대상은 Start까지 끝낸(refund_job_state 있음) APPROVED·RUNNING·PAUSED·REFUND_WINDOW·COMPLETED 요청이다
+ */
+export interface CoreApplyStore {
+  /**
+   * core가 2xx로 답한 뒤에만 부른다. 이미 쓴 행은 그대로다. 같은 트랜잭션에서 같은 회차의 앞 요청(확정 시각이 더 이르고 반영하지 않은 것)에
+   * core_apply_superseded_at을 쓴다(앞 요청이 뒤 상태를 덮지 않게, RV-06)
+   */
+  markCoreApplied(requestId: string, nowMs: number): Promise<void>;
+  /** 다음 볼 시각을 untilMs로 미룬다(반영하지 않은 행만, 4xx의 10분 미룸) */
+  deferCoreApply(requestId: string, untilMs: number): Promise<void>;
+  /**
+   * 반영하지 않았고 대체되지 않았으며 다음 볼 시각이 지난(또는 빈) 요청을 다음 볼 시각(빈 값 먼저) → 확정 시각 차례로 limit건 잡아
+   * 다음 볼 시각을 지금 + retryAfterMs로 미룬다(한 문장, FOR UPDATE SKIP LOCKED). 돌려주는 차례는 확정 시각 순이다(같은 회차는 앞 요청 먼저).
+   * 파드 여럿이 함께 돌려도 한 요청은 한쪽만 잡는다
+   */
+  claimCoreApplies(nowMs: number, limit: number, retryAfterMs: number): Promise<readonly CoreApplyDue[]>;
+  /** 확정 뒤 overdueAfterMs 이상(경계 포함) 지나도 반영하지 않은 요청에 core_apply_overdue_at을 쓰고 그 요청들을 돌려준다(요청마다 한 번) */
+  markCoreApplyOverdue(nowMs: number, overdueAfterMs: number, limit: number): Promise<readonly { readonly requestId: string; readonly eventId: string }[]>;
 }
 
 /** CS 처리함 JUDGEMENT_PENDING(대상 요청 ID). 같은 대상은 한 건 */

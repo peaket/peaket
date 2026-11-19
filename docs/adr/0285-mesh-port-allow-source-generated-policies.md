@@ -37,7 +37,7 @@
    | --- | --- | --- |
    | core-svc | identity-svc | 관리 공개키 묶음 `/internal/jwks/admin.json`(`PEAKET_IDENTITY_JWKS_URL`, 예매자 내보내기 재인증) |
    | core-svc | purchase-svc | 예매자 명단 `/internal/v1/events/{eventId}/attendees`(`PEAKET_PURCHASE_HTTP_URL`) |
-   | ops-svc | core-svc | 판매 설정 사본 `/internal/v1/events/{eventId}/sale-config`, 회차 규모 변경 `/v1/ops/events/{eventId}/scale-changes`(`PEAKET_CORE_HTTP_URL`) |
+   | ops-svc | core-svc | 판매 설정 사본 `/internal/v1/events/{eventId}/sale-config`, 회차 규모 변경 `/v1/ops/events/{eventId}/scale-changes`, 회차 취소·연기의 core 회차 상태 반영 `/internal/v1/events/{eventId}/cancellation-status`(2026-11-19 더함, BUILD_ORDER GAT-110, docs/features/transfer-refund.md §5 'core 회차 상태 반영')(`PEAKET_CORE_HTTP_URL`) |
    | ops-svc | identity-svc | 관리 공개키 묶음(`PEAKET_IDENTITY_JWKS_URL`) |
    | ops-svc | payment-svc | 정산·지급 `/internal/v1/settlements/*`, 결제사 차단기 상태 `/internal/v1/circuits`(`PEAKET_PAYMENT_HTTP_URL`) |
    | ops-svc | purchase-svc | 일괄 환불 `/internal/v1/event-refunds`, 판매 중지 `/internal/v1/event-sales/*`, 우선 구매 `/internal/v1/priority-grants`(`PEAKET_PURCHASE_HTTP_URL`) |
@@ -78,7 +78,7 @@
 ## 되돌릴 조건
 
 - Envoy Gateway가 프록시 서비스 계정 이름을 정하는 설정을 주면 그 이름으로 고정한다.
-- 내부 HTTP를 경로로 거를 필요가 커지면(내부 HTTP 부르는 쪽이 바깥 경로를 부른 사고나 검토 지적) 대안 2를 새 ADR로 다시 본다.
+- 내부 HTTP를 경로로 거를 필요가 커지면(내부 HTTP 부르는 쪽이 바깥 경로를 부른 사고나 검토 지적) 대안 2를 새 ADR로 다시 본다. 상태를 바꾸는 내부 HTTP가 늘면 그 경로를 여기 적는다. 2026-11-19: core-svc `POST /internal/v1/events/{eventId}/cancellation-status`(회차 취소·연기 반영). 부르는 쪽은 ops-svc뿐이지만 포트 단위라 core-svc REST 포트를 부르는 다른 서비스도 공유 토큰만 있으면 닿는다(BAT-420-rest 리뷰 RV-07).
 
 ## 확인
 

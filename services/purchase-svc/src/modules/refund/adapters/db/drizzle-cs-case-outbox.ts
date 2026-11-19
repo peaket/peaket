@@ -106,6 +106,26 @@ export class DrizzleCsCaseOutbox implements CsCaseOutbox {
     }));
   }
 
+  /**
+   * 계좌 대기 표시가 있는데 '환불 대기' 건을 아직 열지 않은 행(표시 시각·취소 ID 순, BUILD_ORDER GAT-090). 회차 취소 요청 ID와 관계없이 넣고,
+   * CS가 이미 끝낸 행(REFUND_PENDING이 아님)은 다시 열지 않는다. 부분 색인 order_cancellation_refund_account_open_idx(0029)가 받친다
+   */
+  async pendingRefundAccounts(limit: number): Promise<readonly { cancellationId: string; orderId: string }[]> {
+    const r = await this.database.db.execute(sql`
+      select id, order_id
+        from order_cancellation
+       where refund_account_required_at is not null and refund_account_case_opened_at is null and status = 'REFUND_PENDING'
+       order by refund_account_required_at, id
+       limit ${limit}`);
+    return (r.rows as { id: string; order_id: string }[]).map((x) => ({ cancellationId: x.id, orderId: x.order_id }));
+  }
+
+  async markRefundAccountOpened(cancellationId: string, nowMs: number): Promise<void> {
+    await this.database.db.execute(sql`
+      update order_cancellation set refund_account_case_opened_at = ${new Date(nowMs)}::timestamptz
+       where id = ${cancellationId}::uuid and refund_account_required_at is not null and refund_account_case_opened_at is null`);
+  }
+
   async markRefundFailureOpened(cancellationId: string, nowMs: number): Promise<void> {
     await this.database.db.execute(sql`
       update order_cancellation set refund_failed_opened_at = ${new Date(nowMs)}::timestamptz

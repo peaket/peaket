@@ -400,6 +400,13 @@ export const createShopOrderCancellationBodyItemIdsItemMax = 64;
 
 export const createShopOrderCancellationBodyItemIdsMax = 20;
 
+export const createShopOrderCancellationBodyRefundAccountBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createShopOrderCancellationBodyRefundAccountAccountNumberMax = 30;
+
+
+export const createShopOrderCancellationBodyRefundAccountAccountNumberRegExp = new RegExp('^[0-9-]{1,30}$');
+export const createShopOrderCancellationBodyRefundAccountHolderNameMax = 60;
+
 
 
 export const CreateShopOrderCancellationBody = zod.object({
@@ -407,16 +414,17 @@ export const CreateShopOrderCancellationBody = zod.object({
   ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
   : val)))).size === v.length)).meta({ "uniqueItems": true }).optional().describe('취소할 항목. 없으면 READY 항목 전부'),
   "refundAccount": zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
+  "bankCode": zod.string().regex(createShopOrderCancellationBodyRefundAccountBankCodeRegExp).describe('토스 은행 코드 표의 숫자 코드 두 자리(예 88 신한, 06 KB국민, 03 IBK기업. 토스페이먼츠 문서 \'은행 코드 및 증권사 코드\', 2026-11-19 확인). 금융결제원 세 자리 코드(예 004·088)는 받지 않고 400 invalid-body다(두 꼴은 앞의 0을 떼는 관계가 아니다). 토스는 이 값을 그대로 싣고, 포트원 결제는 payment-svc 대응표(payment-gateway.ts)로 열거값으로 바꾸며 대응표에 없는 코드는 결제사로 가지 않는다(docs/features/payment.md §6 \'구현에서 정한 것\' ②)'),
+  "accountNumber": zod.string().min(1).max(createShopOrderCancellationBodyRefundAccountAccountNumberMax).regex(createShopOrderCancellationBodyRefundAccountAccountNumberRegExp).describe('숫자와 하이픈. 하이픈을 뺀 숫자는 1~20자'),
+  "holderName": zod.string().min(1).max(createShopOrderCancellationBodyRefundAccountHolderNameMax).describe('예금주(앞뒤 공백을 뺀 길이 1~60자, 제어 문자 없음)')
 }).strict().optional().describe('가상계좌 결제일 때 필수. 저장하지 않고 결제사 취소 요청에 바로 넘긴다(POL-014). 보내면 X-Reauth-Token이 필수다')
 }).strict().describe('굿즈·부가 상품 주문 취소 본문(POL-016 §1.4)')
 
 export const CreateShopOrderCancellationResponse = zod.object({
   "cancellationId": zod.string().optional(),
   "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
-  "refundAmount": zod.int().optional()
+  "refundAmount": zod.int().optional(),
+  "refundAccountRequired": zod.boolean().optional().describe('REFUND_PENDING이고 환불 계좌를 기다리는 건(결제사가 계좌를 거절했거나 계좌 없이 일괄 환불에 든 가상계좌 결제). 화면은 SCR-060 안내를 보인다. 없으면 거짓으로 본다(docs/features/payment.md §6 \'계좌 대기\', 추천 적용 2026-11-19, BUILD_ORDER GAT-090)')
 })
 
 /**

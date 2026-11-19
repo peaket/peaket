@@ -4,20 +4,20 @@
 
 ## 완성 판정
 
-- 항목 3754개: 시험 시나리오(세부 단위) 1714, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2025
+- 항목 3788개: 시험 시나리오(세부 단위) 1748, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2025
 - 빈칸 849, ID만 1208: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 5(모두 사유가 있다): 완료로 세지 않고 따로 센다
-- 다시 볼 notes 7: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
+- 다시 볼 notes 8: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
 
 ## 등급별 상태
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 354 | 116 | 23 | 2 | 2 | 28 | 1 | 0 | 130 | 656 |
+| A | 388 | 116 | 23 | 2 | 2 | 28 | 1 | 0 | 130 | 690 |
 | B | 952 | 1092 | 19 | 2 | 3 | 65 | 0 | 245 | 718 | 3096 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 1306 | 1208 | 42 | 5 | 5 | 93 | 1 | 245 | 849 | 3754 |
+| 합계 | 1340 | 1208 | 42 | 5 | 5 | 93 | 1 | 245 | 849 | 3788 |
 
 ## 분야별 상태
 
@@ -35,7 +35,7 @@
 | identity | B | 244 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 393 |
 | notify | B | 2 | 116 | 0 | 0 | 0 | 0 | 0 | 21 | 40 | 179 |
 | offline-gate | B | 27 | 112 | 0 | 0 | 0 | 3 | 0 | 19 | 71 | 232 |
-| payment | A | 77 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 125 |
+| payment | A | 100 | 24 | 6 | 0 | 2 | 16 | 0 | 0 | 0 | 148 |
 | payment | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
 | queue-admission | A | 104 | 52 | 2 | 0 | 0 | 2 | 0 | 0 | 31 | 191 |
 | queue-admission | B | 36 | 13 | 0 | 0 | 0 | 3 | 0 | 2 | 5 | 59 |
@@ -50,12 +50,12 @@
 | settlement | B | 0 | 112 | 0 | 0 | 0 | 0 | 0 | 23 | 18 | 153 |
 | streaming | B | 4 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 22 | 27 |
 | support | B | 0 | 73 | 0 | 0 | 0 | 0 | 0 | 22 | 6 | 101 |
-| transfer-refund | A | 39 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 131 |
+| transfer-refund | A | 50 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 142 |
 | transfer-refund | B | 0 | 97 | 0 | 0 | 0 | 0 | 0 | 20 | 9 | 126 |
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | B | 36 | 3 | 8 | 0 | 0 | 0 | 0 | 0 | 56 | 103 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 1306 | 1208 | 42 | 5 | 5 | 93 | 1 | 245 | 849 | 3754 |
+| 합계 |  | 1340 | 1208 | 42 | 5 | 5 | 93 | 1 | 245 | 849 | 3788 |
 
 ## 다시 볼 notes
 
@@ -66,6 +66,7 @@
 | P-T39 ① | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts… |
 | P-T39 ② | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | P-T39 ④ | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
+| SR-T8 ③ | 다른 단계 | services/core-svc/test-int/search-read-model.int.test.ts |
 | frontend:v5.0.0-3.6.1 | 다른 단계 | tools/web-checks/csp/web.spec.mjs |
 | payment:v5.0.0-3.4.5 | 다른 단계 | apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 
@@ -97,6 +98,8 @@
 
 - docs/features/identity.md:759: I-T51 시나리오 칸의 ①⑥이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/identity.md:781: I-T73 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
+- docs/features/payment.md:910: P-T73 시나리오 칸의 ⑥이 판정 칸에 없어 세부로 세지 않는다
+- docs/features/payment.md:911: P-T74 시나리오 칸의 ⑦이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/queue-admission.md:709: Q-T64 시나리오 칸의 ⑤이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/seat-hold.md:586: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
 - docs/frontend.md:1635: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다

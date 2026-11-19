@@ -114,6 +114,7 @@ export class DrizzleEventRefundClaims implements EventRefundClaims {
         ...(q.outbox ? { outbox: q.outbox } : {}),
         ...(q.cancellationFailure ? { cancellationFailure: q.cancellationFailure } : {}),
         ...(q.deductionGap ? { deductionGap: q.deductionGap } : {}),
+        ...(q.accountPending ? { accountPending: true as const } : {}),
       });
       return true;
     });

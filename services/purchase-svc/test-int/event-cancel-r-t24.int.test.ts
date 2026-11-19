@@ -54,6 +54,20 @@ import { MemoryEventRefundAttemptStore } from '../src/modules/refund/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 // W9-fix1 N3·N8·P3(시험 담당 w9f1-test)
 import type { EventRefundCanceller } from '../src/modules/refund/index.js';
+// BAT-420-rest R-T40(시험 담당 l3-b420-test): 실제 payment-svc gRPC
+import {
+  CancelConfirmedPayment,
+  CancelPayment,
+  DrizzleConfirmJobs,
+  DrizzlePaymentStore,
+  GetPaymentDetail,
+  NoKeyVirtualAccountCipher,
+  paymentPackage,
+  paymentServiceHandlers,
+} from '../../payment-svc/src/modules/payment/server.js';
+import type { PaymentGatewayPort } from '../../payment-svc/src/modules/payment/domain/payment-gateway.js';
+import { migratePayment } from '../../payment-svc/scripts/migrate.mjs';
+import { GrpcPaymentCancellations, HttpRefundAccountNotice } from '../src/modules/refund/index.js';
 
 const NOW = Date.parse('2026-11-20T18:30:00+09:00');
 const MINUTE = 60_000;
@@ -1538,5 +1552,251 @@ describe('W9-fix1 잡기 늘리기·멈춤 합치기·그 밖 실패 알림 [Pos
     expect(await fanFailures(eventId, ticketId, requestId)).toHaveLength(1);
     expect(warns.filter((w) => JSON.stringify(w).includes('event-refund-item-claim-lost'))).toHaveLength(1);
     expect(ops.state.requests.filter((r) => r.body.sourceId === item!.cancellation_id)).toHaveLength(1);
+  }, 60_000);
+});
+
+// BAT-420-rest R-T40 ①~④(시험 담당 l3-b420-test, 2026-11-19): 회차 취소 일괄 환불의 가상계좌 항목을 실제 PostgreSQL(purchase·ticket·payment)·실제 ticket-svc·
+// 실제 payment-svc gRPC(운영 처리기·저장소, 결제사만 기록 대역)로 돈다. 카드 주문 둘(표 하나씩)과 가상계좌로 결제한 주문 하나(표 둘)가 있는 회차를 확정한다.
+// 정본: docs/features/transfer-refund.md §11 R-T40, docs/features/payment.md §6 '계좌 대기'. 일괄 환불에는 계좌가 없으므로 payment-svc가 결제사를 부르지 않고
+// REFUND_ACCOUNT_REQUIRED로 답해야 한다(결제사 호출 0). CS '환불 대기' 건은 마감 뒤 환급 실행기의 틱 끝 다시 열기가 연다(ops 대역은 실제 HTTP).
+describe('R-T40 회차 취소 일괄 환불의 가상계좌 항목 [PostgreSQL·실제 ticket-svc·payment-svc gRPC]', () => {
+  let paymentDb: Database;
+  let paymentServer: { port: number; close(): Promise<void> } | undefined;
+  let paymentCancels: GrpcPaymentCancellations | undefined;
+  let ops: Awaited<ReturnType<typeof startOpsCsDouble>>;
+  const gatewayCalls: Parameters<PaymentGatewayPort['cancel']>[0][] = [];
+  const PAY_NOW = NOW;
+
+  beforeAll(async () => {
+    const paymentUrl = await createNamedDatabase(pgc!.url, 'payment_rt40');
+    await migratePayment(paymentUrl);
+    paymentDb = createDatabase({ url: paymentUrl, profile: 'general', max: 6, applicationName: 'event-cancel-r-t40-payment' });
+    const payClock = fakeClock({ now: PAY_NOW });
+    const jobs = new DrizzleConfirmJobs({ database: paymentDb, clock: payClock });
+    const gateway = {
+      pg: 'TOSS',
+      cancel: async (c: Parameters<PaymentGatewayPort['cancel']>[0]) => {
+        gatewayCalls.push(c);
+        return { outcome: 'CANCELLED' };
+      },
+      query: async () => ({ kind: 'UNKNOWN' }),
+    } as unknown as PaymentGatewayPort;
+    const confirmed = new CancelConfirmedPayment({ store: jobs, gateways: { of: () => gateway }, guards: { of: () => ({ circuitClosed: () => true, tryTakeToken: () => true }) as never }, clock: payClock });
+    const getPayment = new GetPaymentDetail({
+      reader: new DrizzlePaymentStore({ database: paymentDb, batchDatabase: paymentDb }),
+      signals: { getPayment: () => {} },
+      cipher: new NoKeyVirtualAccountCipher(),
+      depositLog: { infoMissing: () => {}, accountUnsaved: () => {}, accountUnopened: () => {} },
+      depositSignals: { fieldFailure: () => {} },
+      clock: payClock,
+    });
+    paymentServer = await startGrpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      services: [
+        {
+          definition: paymentPackage().PaymentService.service,
+          handlers: paymentServiceHandlers(
+            {
+              accept: { execute: async () => Promise.reject(new Error('이 시험은 승인 명령을 부르지 않는다')) } as never,
+              batchGet: { execute: async () => Promise.reject(new Error('이 시험은 결과 당기기를 부르지 않는다')) } as never,
+              getPayment,
+              cancelPayment: new CancelPayment({ execute: async () => Promise.reject(new Error('입금 전 취소 갈래가 아니다')) } as never, confirmed, jobs),
+            },
+            () => {},
+          ),
+        },
+      ],
+    });
+    paymentCancels = new GrpcPaymentCancellations({ address: `127.0.0.1:${paymentServer.port}` });
+    ops = await startOpsCsDouble();
+  }, 180_000);
+  afterAll(async () => {
+    paymentCancels?.close();
+    await paymentServer?.close();
+    await ops?.close();
+    await paymentDb?.close();
+  });
+
+  /** 주문 하나에 표 n장(실제 발권)과 payment 원장(가상계좌면 수출 사건 AWAITING_DEPOSIT·APPROVED) */
+  async function paidOrder(eventId: string, seats: number, virtual: boolean): Promise<{ orderId: string; ticketIds: string[]; paymentId: string }> {
+    const orderId = randomUUID();
+    const accountId = randomUUID();
+    const seatIds = Array.from({ length: seats }, () => randomUUID());
+    const client = await purchaseDb.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(
+        `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+         values ($1, $2, $3, 'CONFIRMED', $4, 1, $5, 'v1', 'PICK', $6, $7, 'ps-test')`,
+        [orderId, accountId, eventId, PRICE * seats, randomUUID(), new Date(NOW - 10 * DAY), randomUUID()],
+      );
+      await client.query("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, 'CONFIRMED', 'T8', 'test', $2)", [orderId, new Date(NOW - 10 * DAY)]);
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+    const issued = await ticketService.issue({ orderId, eventId, payerAccountId: accountId, seatIds, issueGeneration: 0, eventStartsAtMs: STARTS });
+    const ticketIds = issued.tickets.map((t) => t.ticketId);
+    for (const [i, t] of issued.tickets.entries()) {
+      await purchaseDb.pool.query("insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id) values ($1, $2, $3, 'R', 'A', $4, $5)", [orderId, i + 1, t.seatId, PRICE, t.ticketId]);
+    }
+    await purchaseDb.pool.query("insert into payment_attempt (id, order_id, pg, status, created_at) values ($1, $1, 'TOSS', 'ACCEPTED', now())", [orderId]);
+    expect(await sales.reserve({ eventId, accountId, orderId, seatIds, limit: 4 })).toEqual({ status: 'RESERVED' });
+    expect(await sales.markSold({ eventId, orderId, seatIds })).toBe(seats);
+    const paymentId = randomUUID();
+    await paymentDb.pool.query(
+      `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_payment_ref, amount, status, idempotency_key, authenticated_at, created_at, approved_at, status_changed_at)
+       values ($1, $2, $3, $4, 1, 'TOSS', $5, $6, 'APPROVED', $7, $8, $8, $8, $8)`,
+      [paymentId, orderId, eventId, randomUUID(), `ref-${orderId}`, PRICE * seats, `confirm-${orderId}`, new Date(NOW - 10 * DAY)],
+    );
+    if (virtual) {
+      await paymentDb.pool.query(`insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at) values ($1, 1, $2, 'AWAITING_DEPOSIT', true, now()), ($1, 2, $3, 'APPROVED', true, now())`, [paymentId, randomUUID(), randomUUID()]);
+    }
+    return { orderId, ticketIds, paymentId };
+  }
+
+  let eventId: string;
+  let requestId: string;
+  let cards: Awaited<ReturnType<typeof paidOrder>>[];
+  let va: Awaited<ReturnType<typeof paidOrder>>;
+  let vaCancellations: string[];
+  const attempts = () => new DrizzleEventRefundAttempts(purchaseDb);
+  const rt40Service = () =>
+    new EventRefundService({
+      store: new DrizzleEventRefundStore(purchaseDb, clock),
+      targets: new DrizzleEventRefundTargets(purchaseDb, configs),
+      canceller: new EventTicketCanceller({
+        tickets: ticketCancels!,
+        conversions: new DrizzlePendingCancellationConversions(purchaseDb),
+        orders: new DrizzleCancellationOrders(purchaseDb, configs),
+        writes,
+        payments: paymentCancels!,
+        calendar: new WeekendBusinessCalendar(),
+      }),
+      items: new DrizzleEventRefundStore(purchaseDb, clock),
+      openOrders: new DrizzleEventOpenOrders(purchaseDb),
+      attempts: attempts(),
+      notice: { open: async (q) => void notices.push(`${q.ticketId}:${q.lastError}`) },
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 30_000,
+      concurrency: 2,
+    });
+
+  beforeAll(async () => {
+    eventId = randomUUID();
+    requestId = randomUUID();
+    cards = [await paidOrder(eventId, 1, false), await paidOrder(eventId, 1, false)];
+    va = await paidOrder(eventId, 2, true);
+    vaCancellations = va.ticketIds.map((t) => eventRefundCancellationId(requestId, t));
+    gatewayCalls.length = 0;
+    notices.length = 0;
+  });
+
+  const vaRows = async () =>
+    (
+      await purchaseDb.pool.query<{ id: string; status: string; next_refund_at: Date | null; refund_account_required_at: Date | null; refund_attempts: number; refund_failed_at: Date | null; refund_account_case_opened_at: Date | null }>(
+        'select id, status, next_refund_at, refund_account_required_at, refund_attempts, refund_failed_at, refund_account_case_opened_at from order_cancellation where id = any($1::uuid[]) order by id',
+        [vaCancellations],
+      )
+    ).rows;
+
+  test('R-T40 ① 카드 주문 둘은 환급되고(결제사 33,333원 두 번) 가상계좌 주문의 두 표는 결제사 호출 0으로 항목 ACCOUNT_PENDING, 취소 행은 REFUND_PENDING·next_refund_at 빔·refund_account_required_at 있음이다', async () => {
+    const started = await rt40Service().start({ eventId, requestId, fault: 'ORGANIZER', ruledBy: 'commander-1', confirmedBy: 'operator-2' });
+    expect(started.progress).toMatchObject({ total: 4, done: 2, failed: 0 });
+    // 카드 주문 둘(표 하나씩, 권면 전액)만 결제사로 갔다: 멱등키는 그 표의 결정적 취소 ID, 전액 취소
+    expect(gatewayCalls.map((c) => c.idemKey).sort()).toEqual(cards.map((c) => `cancel-${eventRefundCancellationId(requestId, c.ticketIds[0]!)}`).sort());
+    expect(gatewayCalls.map((c) => c.amount)).toEqual(['ALL', 'ALL']);
+    expect((await paymentDb.pool.query<{ amount: number; status: string }>('select amount, status from payment_cancel where payment_id = any($1::uuid[]) order by amount', [cards.map((c) => c.paymentId)])).rows).toEqual([
+      { amount: 33_333, status: 'CANCELED' },
+      { amount: 33_333, status: 'CANCELED' },
+    ]);
+    expect(gatewayCalls.every((c) => c.refundAccount === undefined)).toBe(true);
+    const items = await purchaseDb.pool.query<{ order_id: string; status: string; attempts: number }>('select order_id, status, attempts from event_refund_item where request_id = $1 order by order_id', [requestId]);
+    for (const i of items.rows) expect([i.order_id, i.status]).toEqual([i.order_id, i.order_id === va.orderId ? 'ACCOUNT_PENDING' : 'REFUNDED']);
+    expect(items.rows.filter((i) => i.status === 'ACCOUNT_PENDING')).toHaveLength(2);
+    const rows = await vaRows();
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r).toMatchObject({ status: 'REFUND_PENDING', next_refund_at: null, refund_attempts: 0, refund_failed_at: null });
+      expect(r.refund_account_required_at?.getTime()).toBe(NOW);
+    }
+    // payment-svc는 가상계좌 결제에 payment_cancel 행을 만들지 않았다(원장 그대로)
+    expect((await paymentDb.pool.query('select 1 from payment_cancel where payment_id = $1', [va.paymentId])).rows).toEqual([]);
+    expect((await paymentDb.pool.query('select status, cancelled_amount from payment where id = $1', [va.paymentId])).rows[0]).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+    // 일괄 환불 실패 알림은 없다
+    expect(notices).toEqual([]);
+  });
+
+  test('R-T40 ③ 계좌 대기 항목은 자동 정지 기록(event_refund_attempt)에 들지 않고(카드 둘만 SUCCESS), 다음 틱 두 번에 결제사로 다시 가지 않는다', async () => {
+    const rows = await purchaseDb.pool.query<{ ticket_id: string; outcome: string; amount: number }>('select ticket_id, outcome, amount from event_refund_attempt where request_id = $1 order by ticket_id', [requestId]);
+    expect(rows.rows.map((r) => [r.outcome, r.amount])).toEqual([
+      ['SUCCESS', 33_333],
+      ['SUCCESS', 33_333],
+    ]);
+    expect(rows.rows.map((r) => r.ticket_id)).not.toEqual(expect.arrayContaining(va.ticketIds));
+    const s = rt40Service();
+    await s.runDue();
+    await s.runDue();
+    expect(gatewayCalls).toHaveLength(2);
+    expect((await purchaseDb.pool.query<{ n: number }>('select count(*)::int as n from event_refund_attempt where request_id = $1', [requestId])).rows[0]!.n).toBe(2);
+  });
+
+  test('R-T40 ④ 남은 항목이 계좌 대기뿐이면 요청이 COMPLETED이고 진행 합계에 계좌 대기 2가 따로 있다', async () => {
+    const r = await purchaseDb.pool.query<{ status: string; progress: { total: number; done: number; failed: number; accountPending?: number } }>('select status, progress from event_cancellation_request where id = $1', [requestId]);
+    expect(r.rows[0]!.status).toBe('COMPLETED');
+    expect(r.rows[0]!.progress).toMatchObject({ total: 4, done: 2, failed: 0, accountPending: 2 });
+  });
+
+  test("R-T40 ② 두 취소마다 CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건이 한 번씩 열리고(틱을 다시 돌려도 한 건), ops-svc가 내려가 있으면 다음 틱에 다시 연다", async () => {
+    const real = new DrizzleCsCaseOutbox(purchaseDb);
+    const mine = new Set<string>(vaCancellations);
+    const client = createExternalHttpClient({ provider: 'ops-svc', baseUrl: ops.url, timeoutCapMs: 5_000 });
+    const scopedWrites = Object.create(writes) as typeof writes;
+    scopedWrites.dueRefunds = async (nowMs, limit) => (await writes.dueRefunds(nowMs, limit)).filter((x) => mine.has(x.cancellationId));
+    const paid: string[] = [];
+    const runner = () =>
+      new RefundAfterEntry({
+        writes: scopedWrites,
+        payments: { cancel: async (q) => (paid.push(q.cancellationId), 'CANCELLED') },
+        entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+        claims: writes,
+        failureNotice: new HttpRefundFailureNotice(client, 'it-token'),
+        accountNotice: new HttpRefundAccountNotice(client, 'it-token'),
+        csOutbox: {
+          pendingRefundFailures: async (limit: number) => (await real.pendingRefundFailures(limit)).filter((x) => mine.has(x.cancellationId)),
+          markRefundFailureOpened: (id: string, nowMs: number) => real.markRefundFailureOpened(id, nowMs),
+          pendingFlags: async () => [],
+          markFlagOpened: async () => undefined,
+          pendingRefundAccounts: async (limit: number) => (await real.pendingRefundAccounts(limit)).filter((x) => mine.has(x.cancellationId)),
+          markRefundAccountOpened: (id: string, nowMs: number) => real.markRefundAccountOpened(id, nowMs),
+        },
+        csCaseOpenFailures: { inc: () => undefined, cut: () => undefined },
+        log: { warn: () => undefined, error: () => undefined },
+        nowMs: () => Date.now(),
+      });
+    const accountRequests = () => ops.state.requests.filter((x) => x.body.kind === 'REFUND_ACCOUNT_PENDING');
+    // ops 내려감(500): 두 건 모두 불렀지만 연 시각은 빔
+    ops.state.requests.length = 0;
+    ops.state.mode = 500;
+    await runner().run();
+    expect(accountRequests().map((x) => x.body.sourceId).sort()).toEqual([...vaCancellations].sort());
+    expect((await vaRows()).every((x) => x.refund_account_case_opened_at === null)).toBe(true);
+    // 다음 틱 202: 두 건이 열리고, 다시 돌려도 더 부르지 않는다
+    ops.state.requests.length = 0;
+    ops.state.mode = 202;
+    await runner().run();
+    await runner().run();
+    const opened = accountRequests();
+    expect(opened.map((x) => x.body.sourceId).sort()).toEqual([...vaCancellations].sort());
+    expect(opened.every((x) => x.body.category === 'REFUND' && x.token === 'it-token')).toBe(true);
+    expect(new Set(opened.map((x) => x.body.eventKey)).size).toBe(2);
+    expect((await vaRows()).every((x) => x.refund_account_case_opened_at !== null)).toBe(true);
+    // 계좌 대기 행은 마감 뒤 환급 실행기도 결제사로 보내지 않는다
+    expect(paid).toEqual([]);
+    expect(gatewayCalls).toHaveLength(2);
   }, 60_000);
 });
