@@ -37,7 +37,7 @@
     "@tosspayments/tosspayments-sdk": "2.10.0",
     "dexie": "4.4.7",
     "jose": "6.2.14",
-    "next": "^16.4.3",
+    "next": "^16.4.5",
     "openid-client": "6.8.8",
     "pretendard": "^1.3.9",
     "qrcode": "1.5.4",
