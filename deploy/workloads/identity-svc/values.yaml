@@ -3,8 +3,8 @@
 # 비밀(토큰 서명 키 세 벌과 교체 값, DB 주소, 내부 토큰)은 env에 두지 않고 Secret(secretEnvFrom)으로만 받는다.
 # 토큰 키의 교체 차례(docs/security/secrets-and-keys.md '팬 액세스 토큰 서명 키', docs/features/identity.md §3):
 #   1) 다음 키의 공개 JWK를 `…_TOKEN_KEY_NEXT`로 먼저 배포한다(받는 쪽 캐시 5분 + 배포 완료를 기다린다).
-#   2) 다음 키를 지금 키로, 지금 키의 공개 부분을 `…_TOKEN_KEY_PREVIOUS`로 옮겨 배포하고 `…_PREVIOUS_UNTIL`을 정한다.
-#   3) 끝 시각이 지나면 `…_PREVIOUS`·`…_PREVIOUS_UNTIL`과 지난 `…_NEXT`를 지운다.
+#   2) 다음 키를 지금 키(`…_TOKEN_KEY`)로, 지금 키의 공개 부분을 `…_TOKEN_KEY_PREVIOUS`로 옮겨 배포하고 `…_TOKEN_KEY_PREVIOUS_UNTIL`을 정한다.
+#   3) 끝 시각이 지나면 `…_TOKEN_KEY_PREVIOUS`·`…_TOKEN_KEY_PREVIOUS_UNTIL`과 지난 `…_TOKEN_KEY_NEXT`를 지운다.
 # ExternalSecret의 remoteRef는 Secrets Manager 경로만 가리킨다. 값(개인 JWK·PEM)은 저장소에 두지 않는다.
 name: identity-svc
 
@@ -42,21 +42,22 @@ outboxRelay:
     limits: { memory: 384Mi }
 
 # 토큰 서명 키 세 벌(fan·admin·staff)과 교체 값. `_NEXT`는 공개 JWK, `_PREVIOUS`는 공개 JWK, `_PREVIOUS_UNTIL`은 허용 끝 시각이다.
-# 지금 키(`PEAKET_<FAN|ADMIN|STAFF>_TOKEN_KEY`)만 개인 JWK다. 모두 Secrets Manager 경로에서 ExternalSecret이 채운다
+# 지금 키(`PEAKET_<FAN|ADMIN|STAFF>_TOKEN_KEY`)만 개인 JWK다. 모두 Secrets Manager 경로에서 ExternalSecret이 채운다.
+# remoteRef.key는 환경 안쪽 상대 경로만 적는다. 차트가 externalSecret.environment로 `peaket/<환경>/`를 붙인다(값 파일에 운영 경로를 박지 않는다, BAT-080 RV-01)
 externalSecret:
   enabled: true
   secretStoreRef: { name: peaket-secrets, kind: ClusterSecretStore }
   target: { name: identity-svc-secrets }
   data:
-    - { secretKey: PEAKET_FAN_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/fan-token-key } }
-    - { secretKey: PEAKET_FAN_TOKEN_KEY_NEXT, remoteRef: { key: peaket/prod/identity/fan-token-key-next } }
-    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/fan-token-key-previous } }
-    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: peaket/prod/identity/fan-token-key-previous-until } }
-    - { secretKey: PEAKET_ADMIN_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/admin-token-key } }
-    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_NEXT, remoteRef: { key: peaket/prod/identity/admin-token-key-next } }
-    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/admin-token-key-previous } }
-    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: peaket/prod/identity/admin-token-key-previous-until } }
-    - { secretKey: PEAKET_STAFF_TOKEN_KEY, remoteRef: { key: peaket/prod/identity/staff-token-key } }
-    - { secretKey: PEAKET_STAFF_TOKEN_KEY_NEXT, remoteRef: { key: peaket/prod/identity/staff-token-key-next } }
-    - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS, remoteRef: { key: peaket/prod/identity/staff-token-key-previous } }
-    - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: peaket/prod/identity/staff-token-key-previous-until } }
+    - { secretKey: PEAKET_FAN_TOKEN_KEY, remoteRef: { key: identity/fan-token-key } }
+    - { secretKey: PEAKET_FAN_TOKEN_KEY_NEXT, remoteRef: { key: identity/fan-token-key-next } }
+    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS, remoteRef: { key: identity/fan-token-key-previous } }
+    - { secretKey: PEAKET_FAN_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: identity/fan-token-key-previous-until } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY, remoteRef: { key: identity/admin-token-key } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_NEXT, remoteRef: { key: identity/admin-token-key-next } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_PREVIOUS, remoteRef: { key: identity/admin-token-key-previous } }
+    - { secretKey: PEAKET_ADMIN_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: identity/admin-token-key-previous-until } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY, remoteRef: { key: identity/staff-token-key } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY_NEXT, remoteRef: { key: identity/staff-token-key-next } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS, remoteRef: { key: identity/staff-token-key-previous } }
+    - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: identity/staff-token-key-previous-until } }

@@ -120,6 +120,13 @@ outboxRelay:
 # data 칸은 remoteRef(Secrets Manager 경로)만 받고 값은 두지 않는다. 시크릿 저장소 이름·대상 Secret 이름은 값 파일이 준다
 externalSecret:
   enabled: false
+  # remoteRef 경로 앞에 붙는 환경 이름(peaket/<환경>/...). 배포 단위 값은 환경 안쪽 경로만 적고 환경 값이 이 칸을 채운다.
+  # 비우면 ExternalSecret 렌더를 멈춘다(환경 없이 운영 경로를 만들지 않는다, BAT-080 RV-01)
+  environment: ""
+  # External Secrets가 Secret을 다시 읽는 주기. 없거나 0이면 한 번만 만들고 갱신하지 않아 키 교체가 Secret에 닿지 않는다(BAT-080 RV-06)
+  refreshInterval: 1h
+  # 만들 Secret의 소유권. ExternalSecret을 지우면 Secret도 함께 지운다(docs/security/asvs/delivery.md 13.3.4)
+  creationPolicy: Owner
   secretStoreRef: { name: "", kind: ClusterSecretStore }
   target: { name: "" }
   data: []

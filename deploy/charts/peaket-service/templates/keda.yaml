@@ -10,6 +10,11 @@ metadata:
     app.kubernetes.io/component: service
 spec:
   scaleTargetRef:
+    {{- /* KEDA 기본값은 apps/v1 Deployment다. Rollout을 켜면 없는 Deployment가 아니라 Rollout을 가리킨다(BAT-080 RV-03) */}}
+    {{- if .Values.service.rollout.enabled }}
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    {{- end }}
     name: {{ $name }}
   triggers: {{- toYaml .Values.service.keda.triggers | nindent 4 }}
   fallback:

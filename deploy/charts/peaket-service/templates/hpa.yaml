@@ -16,8 +16,14 @@ metadata:
     app.kubernetes.io/component: service
 spec:
   scaleTargetRef:
+    {{- /* Rollout을 켜면 Deployment를 내지 않으므로(templates/rollout.yaml) 오토스케일러도 Rollout을 가리킨다(BAT-080 RV-03) */}}
+    {{- if .Values.service.rollout.enabled }}
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    {{- else }}
     apiVersion: apps/v1
     kind: Deployment
+    {{- end }}
     name: {{ $name }}
   minReplicas: {{ int $a.minReplicas }}
   maxReplicas: {{ int $a.maxReplicas }}

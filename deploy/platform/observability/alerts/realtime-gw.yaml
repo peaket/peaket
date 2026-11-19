@@ -1,7 +1,7 @@
 # realtime-gw 경보 규칙(BUILD_ORDER BAS-140, BAT-052·BAT-053이 넘긴 것, 묶음 BAT-080 G5).
 # 정본: docs/features/seat-hold.md §7 'realtime-gw의 첫 구현' 운영 확인 표(전파 Degraded 자동 전환 행),
 # docs/observability.md §5 SEV2 '핵심 사용자 여정의 Degraded Mode 진입'·G-06, ADR-0298.
-# SEV2: 파드가 Degraded(1초 묶음)이면 바로 울리고, 그동안 '묶음 대기 p99 150ms' 경보는 이 경보로 갈음한다(아래 셋째 규칙의 and 조건).
+# SEV2: 파드가 Degraded(1초 묶음)이면 바로 울리고, 그동안 '묶음 대기 150ms 초과 비율' 경보(경고)는 이 경보로 갈음한다(아래 셋째 규칙의 and 조건).
 # 런북 RB-23(배포 되돌리기)·RB-06(좌석 Redis 페일오버), Game Day G-06(버퍼 포화로 1초 간격 연결 비율 경보가 60초 안에 울리는지).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -42,14 +42,17 @@ spec:
             description: '버퍼로 1초 간격이 된 연결 비율이 30초 동안 5% [가정] 이상이다. G-06에서 60초 안에 이 경보가 울리는지 본다. 분모는 realtime_gw_connections다.'
         - alert: realtime_gw_batch_wait_p99_high
           # Degraded가 아닐 때만 울린다. Degraded 동안은 위 realtime_gw_degraded가 갈음한다(ADR-0298)
-          expr: histogram_quantile(0.99, sum by (le) (rate(realtime_gw_batch_wait_ms_bucket[5m]))) > 0.15 and on() (sum(realtime_gw_degraded) == 0)
+          # 지연 기준 경보는 histogram_quantile 대신 경계 칸의 비율로 쓴다(docs/observability.md §5 512행).
+          # 이 히스토그램은 ms 단위라(realtime_gw_batch_wait_ms) le="150" 칸이 150ms 이하다. 1에서 빼 150ms 초과 비율을 구한다
+          expr: (1 - sum(rate(realtime_gw_batch_wait_ms_bucket{le="150"}[5m])) / sum(rate(realtime_gw_batch_wait_ms_count[5m]))) > 0.01 and on() (sum(realtime_gw_degraded) == 0)
           for: 5m
           labels:
-            severity: sev2
+            # docs/features/seat-hold.md §7 443행: 이 경보는 경고다(SEV2는 Degraded·버퍼 두 경보)
+            severity: warning
             kind: cause
             dependency: realtime-gw
           annotations:
-            summary: realtime-gw 묶음 대기 p99가 150ms를 넘는다
+            summary: realtime-gw 묶음 대기의 150ms 초과 비율이 1%를 넘는다
             runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-23-배포-되돌리기와-동결-중-긴급-변경
             game_day: G-06
-            description: 'Degraded가 아닌데 묶음 대기 p99가 150ms [가정]를 넘는다. 파드가 Degraded가 되면 이 경보는 realtime_gw_degraded로 갈음한다.'
+            description: 'Degraded가 아닌데 5분 동안 묶음 대기 150ms [가정]를 넘은 비율이 1%를 넘는다. 지연 경보는 histogram_quantile 대신 le="150" 경계 칸의 비율로 계산한다(docs/observability.md §5). 파드가 Degraded가 되면 이 경보는 realtime_gw_degraded로 갈음한다.'
