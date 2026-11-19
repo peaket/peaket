@@ -15,6 +15,7 @@ import {
   MerchPayment,
   MerchPaymentResults,
   MerchStockExpiry,
+  MerchUnclaimed,
   RedisMerchStock,
   ShopProblem,
   type ConfirmJob,
@@ -62,7 +63,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   // 사례마다 주문·예약을 비우고 앞 사례의 상품을 만료 작업 대상에서 뺀다(틱의 셈을 정확히 보려고)
-  await admin.pool.query('delete from merch_confirm_job; delete from merch_payment_attempt; delete from merch_order_item; delete from merch_order');
+  await admin.pool.query('delete from merch_refund_item; delete from merch_refund; delete from merch_confirm_job; delete from merch_payment_attempt; delete from merch_order_item; delete from merch_order');
   await admin.pool.query(`update product set status = 'DRAFT'`);
   await redis.command(['FLUSHALL']);
 });
@@ -72,6 +73,7 @@ beforeEach(async () => {
 class FakePayments implements MerchPayments {
   readonly confirms: ConfirmJob[] = [];
   readonly batchCalls: string[][] = [];
+  readonly cancels: Parameters<MerchPayments['cancel']>[0][] = [];
   states = new Map<string, PaymentState>();
   async prepareCheckout(q: Parameters<MerchPayments['prepareCheckout']>[0]) {
     return {
@@ -89,8 +91,9 @@ class FakePayments implements MerchPayments {
     this.batchCalls.push([...ids]);
     return ids.flatMap((id) => (this.states.has(id) ? [this.states.get(id)!] : []));
   }
-  async cancel(): Promise<'CANCELLED'> {
-    throw new Error('이 시험에서는 부르지 않는다');
+  async cancel(c: Parameters<MerchPayments['cancel']>[0]): Promise<'CANCELLED'> {
+    this.cancels.push(c);
+    return 'CANCELLED';
   }
 }
 
@@ -580,5 +583,50 @@ describe('굿즈 재고 예약 만료(실제 PostgreSQL·Valkey)', () => {
     expect((await orderRow(o))!.status).toBe('PAID');
     expect(await productStock(p.productId)).toBe(2);
     expect(await counter(p.productId)).toBe('2');
+  });
+
+  test('RV-29 미수령 자동 취소가 아직 커밋되지 않은 구매자 취소와 겹쳐도 이중 환급 0건이다', async () => {
+    const clock = fakeClock({ now: T0 });
+    const w = world(clock);
+    const p = await limitedProduct(T0);
+    const a = A();
+    const o = await order(w, a, p);
+    // 미수령 대상이 되도록 주문을 PAID로 두고 시간대를 지난 날로 옮긴다(주문 만들기 검사를 피하려고 만든 뒤 고친다)
+    await admin.pool.query('update merch_order set status = $2, payment_id = $3, paid_at = $4 where id = $1', [o, 'PAID', randomUUID(), new Date(T0)]);
+    await admin.pool.query('update pickup_slot set starts_at = $2, ends_at = $3 where id = $1', [p.slotId, new Date(T0 - 2 * 86_400_000 - 3_600_000), new Date(T0 - 2 * 86_400_000)]);
+    const itemId = (await admin.pool.query('select id from merch_order_item where order_id = $1', [o])).rows[0].id as string;
+    // 구매자 취소 트랜잭션을 열어 주문 행을 잠그고 환급 행·자리를 커밋하지 않은 채 둔다
+    const buyer = new pg.Client({ connectionString: pgc.url });
+    await buyer.connect();
+    await buyer.query('begin');
+    await buyer.query('select id from merch_order where id = $1 for update', [o]);
+    const buyerRefund = randomUUID();
+    await buyer.query(
+      `insert into merch_refund (id, order_id, item_ids, amount, reason, status, kind, attempts, next_at, alerted, created_at, updated_at)
+       values ($1, $2, $3::uuid[], $4, 'USER_CANCEL', 'REQUESTED', 'USER_CANCEL', 0, $5, false, $6, $6)`,
+      [buyerRefund, o, [itemId], PRICE, new Date(T0 + 60_000), new Date(T0)],
+    );
+    await buyer.query('insert into merch_refund_item (refund_id, item_id) values ($1, $2)', [buyerRefund, itemId]);
+    const unclaimed = new MerchUnclaimed({ store: w.store, payments: w.payments, clock });
+    const running = unclaimed.run();
+    let committed = false;
+    let result: Awaited<typeof running> | undefined;
+    try {
+      // 미수령 쪽이 구매자 주문 행 잠금(또는 외래키 확인)을 기다린다
+      await waitForLockWaiters(1);
+      await buyer.query('commit');
+      committed = true;
+      result = await running;
+    } finally {
+      if (!committed) await buyer.query('rollback').catch(() => {});
+      await buyer.end();
+      if (!committed) await running.catch(() => {});
+    }
+    // 구매자 취소가 먼저 자리를 잡았으므로 미수령 쪽은 0건이고, 환급 행은 구매자 것 하나뿐이다
+    expect(result).toEqual({ cancelled: 0, refunds: 0 });
+    expect(w.payments.cancels).toHaveLength(0);
+    const refunds = (await admin.pool.query('select id, status from merch_refund where order_id = $1', [o])).rows;
+    expect(refunds).toEqual([{ id: buyerRefund, status: 'REQUESTED' }]);
+    expect((await admin.pool.query('select status from merch_order_item where id = $1', [itemId])).rows[0].status).toBe('READY');
   });
 });

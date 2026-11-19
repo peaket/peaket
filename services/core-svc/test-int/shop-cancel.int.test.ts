@@ -48,6 +48,7 @@ class FakePayments implements MerchPayments {
   readonly virtualAccountOrders = new Set<string>();
   cancelAnswers: CancelOutcome[] = [];
   getPaymentDown = false;
+  readonly wrongOrderIds = new Set<string>();
   /** 첫 요청이 결제사 취소에서 기다리게 해 두 번째 요청을 그 사이에 보낸다(부분 유일 경합 시험) */
   cancelGate: { started: (cancellationId: string) => void; wait: Promise<void> } | undefined;
 
@@ -63,7 +64,12 @@ class FakePayments implements MerchPayments {
   async getPayment(orderId: string, deadlineMs: number) {
     this.getPaymentCalls.push({ orderId, deadlineMs });
     if (this.getPaymentDown) throw new Error('payment-svc 원장 읽기 실패(시험)');
-    return { status: 'APPROVED' as const, pg: 'SIMULATOR' as const, virtualAccountPaid: this.virtualAccountOrders.has(orderId) };
+    return {
+      status: 'APPROVED' as const,
+      pg: 'SIMULATOR' as const,
+      orderId: this.wrongOrderIds.has(orderId) ? randomUUID() : orderId,
+      virtualAccountPaid: this.virtualAccountOrders.has(orderId),
+    };
   }
   async cancel(c: Cancel): Promise<CancelOutcome> {
     this.cancels.push(c);
@@ -156,6 +162,7 @@ beforeEach(async () => {
   payments.virtualAccountOrders.clear();
   payments.cancelAnswers.length = 0;
   payments.getPaymentDown = false;
+  payments.wrongOrderIds.clear();
   payments.cancelGate = undefined;
   reauth.calls.length = 0;
   reauth.answer = true;
@@ -375,10 +382,9 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     const second = await seedProduct({ fulfillments: ['DELIVERY'], price: 9_000, shippingFee: 3_000, returnShippingFee: 2_500, returnAddress: '서울특별시 마포구' });
     const o = await seedPaidOrder({
       fulfillment: 'DELIVERY',
-      pgStore: 'ESCROW',
+      // BAT-610이 구매 확정을 읽기 전에는 에스크로 부분 취소가 열리지 않는다. 금액 규칙만 보려고 일반 상점 택배 주문을 쓴다
+      pgStore: 'STANDARD',
       shippingFee: 3_000,
-      // 이 묶음은 구매 확정 시각을 채우지 않는다. 금액 규칙(부분은 배송비 제외)만 보려고 확정된 주문을 시험 값으로 둔다
-      purchaseConfirmedAt: clock.now() - 3_600_000,
       items: [
         { productId: first, quantity: 2, unitAmount: 12_000 },
         { productId: second, quantity: 1, unitAmount: 9_000 },
@@ -411,9 +417,8 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     const second = await seedProduct({ fulfillments: ['DELIVERY'], price: 9_000, shippingFee: 3_000, returnShippingFee: 2_500, returnAddress: '서울특별시 마포구' });
     const o = await seedPaidOrder({
       fulfillment: 'DELIVERY',
-      pgStore: 'ESCROW',
+      pgStore: 'STANDARD',
       shippingFee: 3_000,
-      purchaseConfirmedAt: clock.now() - 3_600_000,
       items: [
         { productId: first, quantity: 1, unitAmount: 12_000 },
         { productId: second, quantity: 1, unitAmount: 9_000 },
@@ -429,6 +434,27 @@ describe('구매자 취소의 자격·금액(P-T61 ①~③·V-T35 ③)', () => {
     expect(payments.cancels.map((c) => c.amount)).toEqual([12_000, 12_000]);
     expect((await refundsOf(o.orderId)).reduce((s, r) => s + r.amount, 0)).toBe(o.amount);
     expect((await itemsOf(o.orderId)).map((i) => i.status)).toEqual(['REFUNDED', 'REFUNDED']);
+  });
+
+  test('RV-36 실제 에스크로(구매 확정 전, purchase_confirmed_at null) 주문의 첫 부분 취소는 409 escrow-partial-not-allowed이고 결제사 0건이다', async () => {
+    const first = await seedProduct({ fulfillments: ['DELIVERY'], price: 12_000, shippingFee: 3_000, returnShippingFee: 2_500, returnAddress: '서울특별시 마포구' });
+    const second = await seedProduct({ fulfillments: ['DELIVERY'], price: 9_000, shippingFee: 3_000, returnShippingFee: 2_500, returnAddress: '서울특별시 마포구' });
+    const o = await seedPaidOrder({
+      fulfillment: 'DELIVERY',
+      pgStore: 'ESCROW',
+      shippingFee: 3_000,
+      purchaseConfirmedAt: null,
+      items: [
+        { productId: first, quantity: 1, unitAmount: 12_000 },
+        { productId: second, quantity: 1, unitAmount: 9_000 },
+      ],
+    });
+    const res = await cancelOrder(o.accountId, o.orderId, { itemIds: [o.itemIds[0]!] });
+    expect(res.statusCode, res.payload).toBe(409);
+    expect(problem(res).type).toContain('escrow-partial-not-allowed');
+    expect(payments.cancels).toHaveLength(0);
+    expect(await refundsOf(o.orderId)).toEqual([]);
+    expect((await itemsOf(o.orderId)).map((i) => i.status)).toEqual(['READY', 'READY']);
   });
 
   test('P-T61 ② 전체 취소면 처음 배송비까지 환급한다', async () => {
@@ -607,6 +633,20 @@ describe('환불 계좌와 재인증(P-T63 ④)', () => {
     expect(payments.cancels.filter((c) => c.paymentId === other.paymentId)).toHaveLength(0);
   });
 
+  test('RV-34 취소도 GetPayment 답의 orderId가 요청 주문과 다르면 계좌를 쓰지 않고 503 dependency-unavailable로 닫는다', async () => {
+    const p = await seedProduct({ fulfillments: ['PICKUP'], price: 18_000 });
+    const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 18_000 }] });
+    payments.virtualAccountOrders.add(o.orderId);
+    payments.wrongOrderIds.add(o.orderId);
+    const res = await cancelOrder(o.accountId, o.orderId, { refundAccount: ACCOUNT_KEYS }, { token: 'reauth-rv34' });
+    expect(res.statusCode, res.payload).toBe(503);
+    expect(problem(res).type).toContain('dependency-unavailable');
+    expect(payments.cancels).toHaveLength(0);
+    expect(await refundsOf(o.orderId)).toEqual([]);
+    expect((await itemsOf(o.orderId))[0]).toMatchObject({ status: 'READY', refundedAmount: 0 });
+    expect(res.payload).not.toContain(ACCOUNT_KEYS.accountNumber);
+  });
+
   test('P-T63 ④ 카드 결제에 온 계좌는 결제사로 보내지 않고 지표 1을 올린다', async () => {
     const p = await seedProduct({ fulfillments: ['PICKUP'], price: 12_000 });
     const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 12_000 }] });
@@ -653,6 +693,42 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     }
   });
 
+  test('RV-30 CANCEL_PENDING 뒤 거절이 오면 항목을 READY로 되돌려 새 키 재시도가 가능하다', async () => {
+    const cardProduct = await seedProduct({ fulfillments: ['PICKUP'], price: 22_000 });
+    const card = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: cardProduct, quantity: 1, unitAmount: 22_000 }] });
+    payments.cancelAnswers = ['CANCEL_PENDING', 'REJECTED'];
+    const pending = await cancelOrder(card.accountId, card.orderId, {});
+    expect(pending.statusCode, pending.payload).toBe(202);
+    expect(bodyOf(pending).status).toBe('REFUND_PENDING');
+    expect((await itemsOf(card.orderId))[0]!.status).toBe('CANCELLED');
+    clock.advance(60_000);
+    const retry = new MerchRefundRetry({ store: new DrizzleShopOrderStore(appDb, clock), payments, clock });
+    expect(await retry.tick()).toMatchObject({ rejected: 1 });
+    // 성공 전이 전 거절이므로 취소 효력도 되돌린다
+    expect((await itemsOf(card.orderId))[0]).toMatchObject({ status: 'READY', refundedAmount: 0 });
+    expect((await refundsOf(card.orderId))[0]!.status).toBe('REJECTED');
+    // 새 키로 다시 취소할 수 있다(옛 환급 자리는 풀렸다)
+    const again = await cancelOrder(card.accountId, card.orderId, {});
+    expect(again.statusCode, again.payload).toBe(202);
+    expect(bodyOf(again).status).toBe('REFUNDED');
+    expect((await itemsOf(card.orderId))[0]!.status).toBe('REFUNDED');
+
+    const vaProduct = await seedProduct({ fulfillments: ['PICKUP'], price: 23_000 });
+    const va = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: vaProduct, quantity: 1, unitAmount: 23_000 }] });
+    payments.virtualAccountOrders.add(va.orderId);
+    payments.cancelAnswers = ['CANCEL_PENDING', 'REFUND_ACCOUNT_REQUIRED'];
+    const vaPending = await cancelOrder(va.accountId, va.orderId, { refundAccount: ACCOUNT_KEYS }, { token: 'reauth-rv30' });
+    expect(vaPending.statusCode, vaPending.payload).toBe(202);
+    expect(bodyOf(vaPending).status).toBe('REFUND_PENDING');
+    clock.advance(60_000);
+    expect(await retry.tick()).toMatchObject({ rejected: 1 });
+    expect((await itemsOf(va.orderId))[0]!.status).toBe('READY');
+    // 계좌가 필요한 주문은 새 키로 다시 보내면 409가 아니라 422다
+    const noAccount = await cancelOrder(va.accountId, va.orderId, {});
+    expect(noAccount.statusCode, noAccount.payload).toBe(422);
+    expect(problem(noAccount).type).toContain('refund-account-required');
+  });
+
   test('P-T64 ④ 결제 원장 읽기가 실패하면 503 dependency-unavailable이고 쓰기 0이며, 같은 키 재시도가 202 REFUNDED로 끝난다', async () => {
     const p = await seedProduct({ fulfillments: ['PICKUP'], price: 16_000 });
     const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 16_000 }] });
@@ -673,6 +749,37 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
     expect(bodyOf(retry)).toMatchObject({ status: 'REFUNDED', refundAmount: 16_000 });
     expect(payments.cancels).toHaveLength(1);
     expect((await itemsOf(o.orderId))[0]!.status).toBe('REFUNDED');
+  });
+
+  test('RV-35 계좌 거절·PG 거절 outcome의 환급 결과 DB 쓰기 실패는 202가 아니라 422다', async () => {
+    const cases = [
+      { label: 'REFUND_ACCOUNT_REQUIRED', outcome: 'REFUND_ACCOUNT_REQUIRED' as const, virtualAccount: true },
+      { label: 'REJECTED', outcome: 'REJECTED' as const, virtualAccount: false },
+    ];
+    for (const c of cases) {
+      const p = await seedProduct({ fulfillments: ['PICKUP'], price: 24_000 });
+      const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 24_000 }] });
+      if (c.virtualAccount) payments.virtualAccountOrders.add(o.orderId);
+      payments.cancelAnswers = [c.outcome];
+      await admin.pool.query('drop trigger if exists test_reject_fail_trg on merch_refund');
+      await admin.pool.query(`create or replace function test_reject_fail() returns trigger language plpgsql as $f$ begin raise exception '시험: 거절 결과 DB 쓰기 실패'; end $f$`);
+      await admin.pool.query(
+        `create trigger test_reject_fail_trg before update on merch_refund for each row when (old.order_id = '${o.orderId}'::uuid and new.status = 'REJECTED') execute function test_reject_fail()`,
+      );
+      try {
+        const res = c.virtualAccount
+          ? await cancelOrder(o.accountId, o.orderId, { refundAccount: ACCOUNT_KEYS }, { token: `reauth-rv35-${c.label}` })
+          : await cancelOrder(o.accountId, o.orderId, {});
+        expect(res.statusCode, `${c.label}: ${res.payload}`).toBe(422);
+        expect(problem(res).type, c.label).toContain('refund-account-required');
+        expect(payments.cancels, c.label).toHaveLength(1);
+        expect((await refundsOf(o.orderId))[0]!.status, c.label).toBe('REQUESTED');
+        expect((await itemsOf(o.orderId))[0]!.status, c.label).toBe('READY');
+      } finally {
+        await admin.pool.query('drop trigger if exists test_reject_fail_trg on merch_refund');
+        await admin.pool.query('drop function if exists test_reject_fail()');
+      }
+    }
   });
 
   test('P-T64 ③ 계좌 거절은 422·merch_refund REJECTED·항목 그대로·결제사 1건이고, 같은 키는 같은 422, 새 키는 새 취소 ID로 1건 더다', async () => {

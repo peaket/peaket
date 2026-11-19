@@ -891,7 +891,7 @@ describe('굿즈 주문·한정 재고 실제 연결(PostgreSQL·Valkey)', () =>
     expect(payments.cancels.length).toBe(cancelsBefore + 1);
     expect(payments.cancels[cancelsBefore]).toMatchObject({ cancellationId: body.cancellationId, amount: 24_000, reason: 'USER_CANCEL' });
     expect(payments.cancels[cancelsBefore]!.refundAccount).toBeUndefined();
-    expect((await itemRows(orderId)).map((i) => i.status)).toEqual(['CANCELLED', 'CANCELLED']);
+    expect((await itemRows(orderId)).map((i) => i.status)).toEqual(['REFUNDED', 'REFUNDED']);
     expect((await admin.pool.query('select status, amount from merch_refund where order_id = $1', [orderId])).rows).toEqual([{ status: 'CANCELLED', amount: 24_000 }]);
 
     // 발송 뒤(READY가 아님): 409 merch-cancel-not-allowed이고 결제사 0건, 쓰기 0
