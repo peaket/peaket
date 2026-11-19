@@ -413,7 +413,7 @@ deploy/
   calendar/freeze.json        변경 동결 달력이 쓴 창 목록(§8.2, 봇이 갱신)
 ```
 
-- ArgoCD는 클러스터마다 하나 둔다. ApplicationSet(Git 디렉터리 생성기)이 `peaket`의 `develop`에서 `deploy/envs/<환경>/*`를 읽어 Application을 만든다. AppProject는 가상 팀별(queue, purchase, ticket, trust, core, frontend, data, observability, platform)로 배포할 수 있는 네임스페이스와 자원 종류를 제한한다.
+- ArgoCD는 클러스터마다 하나 둔다. ApplicationSet(Git 파일 생성기)이 `peaket`의 `develop`에서 `deploy/envs/<환경>/*.yaml` 값 파일을 읽어 Application을 만든다. AppProject는 가상 팀별(queue, purchase, ticket, trust, core, frontend, data, observability, platform)로 배포할 수 있는 네임스페이스와 자원 종류를 제한한다.
 - 자동 동기화(prune, selfHeal)를 켠다. 되돌리기는 Git 되돌리기로 한다. 자동 동기화를 켠 앱에서는 ArgoCD의 롤백(이전 버전으로 되돌리는 것) API가 거부된다(2026-10-13 소스 확인).
 - 비밀 값은 저장소에 없다. ExternalSecret은 Secrets Manager의 경로만 가리킨다.
 - Gateway API 트래픽 플러그인이 HTTPRoute에 넣는 규칙은 ArgoCD `ignoreDifferences`로 비교에서 뺀다. 빼지 않으면 ArgoCD가 플러그인이 넣은 규칙을 되돌린다(플러그인 문서).

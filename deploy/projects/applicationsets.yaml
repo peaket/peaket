@@ -1,8 +1,9 @@
 # ArgoCD ApplicationSet, 환경마다 하나(docs/devops.md §5.2, ADR-0169). 이름은 `peaket-<환경>`이다.
-# - Git 디렉터리 생성기로 `deploy/envs/<환경>/*`를 읽는다. 가지는 `develop`만 읽는다(`main`의 `deploy/`는 출시 때의 사본이다).
-# - `flags/`는 릴리스 플래그 정의라 Application으로 만들지 않는다(exclude).
+# - Git 파일 생성기로 `deploy/envs/<환경>/*.yaml` 값 파일을 읽는다. 디렉터리 생성기는 폴더만 찾아 값 파일을 만들지 못한다(BAT-080 DP-03).
+# - 가지는 `develop`만 읽는다(`main`의 `deploy/`는 출시 때의 사본이다).
 # - 자동 동기화(prune·selfHeal)를 켠다. 되돌리기는 Git 되돌리기로 한다.
 # - Gateway API 트래픽 플러그인이 HTTPRoute에 넣는 규칙은 `ignoreDifferences`로 비교에서 뺀다(플러그인이 넣은 규칙을 ArgoCD가 되돌리지 않게).
+# - 각 값 파일은 Application 하나가 되고, 그 파일 경로가 Helm valueFiles로 들어간다.
 # 첫 구현의 한계: 환경 값 파일에는 아직 서비스의 project·namespace 칸이 없어, 모든 Application이 platform 프로젝트·platform 네임스페이스로 간다.
 # 서비스별 팀 프로젝트·네임스페이스로 나누는 일은 환경 값 파일에 그 칸을 더하는 묶음에서 한다(계획 BAT-080 범위 밖).
 apiVersion: argoproj.io/v1alpha1
@@ -17,13 +18,11 @@ spec:
     - git:
         repoURL: https://github.com/peaket/peaket
         revision: develop
-        directories:
-          - path: deploy/envs/local/*
-          - path: deploy/envs/local/flags
-            exclude: true
+        files:
+          - path: deploy/envs/local/*.yaml
   template:
     metadata:
-      name: '{{ .path.basenameNormalized }}'
+      name: '{{ .path.basename | trimSuffix ".yaml" }}'
       labels:
         app.kubernetes.io/part-of: peaket
         peaket.io/environment: local
@@ -59,13 +58,11 @@ spec:
     - git:
         repoURL: https://github.com/peaket/peaket
         revision: develop
-        directories:
-          - path: deploy/envs/ci/*
-          - path: deploy/envs/ci/flags
-            exclude: true
+        files:
+          - path: deploy/envs/ci/*.yaml
   template:
     metadata:
-      name: '{{ .path.basenameNormalized }}'
+      name: '{{ .path.basename | trimSuffix ".yaml" }}'
       labels:
         app.kubernetes.io/part-of: peaket
         peaket.io/environment: ci
@@ -101,13 +98,11 @@ spec:
     - git:
         repoURL: https://github.com/peaket/peaket
         revision: develop
-        directories:
-          - path: deploy/envs/staging/*
-          - path: deploy/envs/staging/flags
-            exclude: true
+        files:
+          - path: deploy/envs/staging/*.yaml
   template:
     metadata:
-      name: '{{ .path.basenameNormalized }}'
+      name: '{{ .path.basename | trimSuffix ".yaml" }}'
       labels:
         app.kubernetes.io/part-of: peaket
         peaket.io/environment: staging
@@ -143,13 +138,11 @@ spec:
     - git:
         repoURL: https://github.com/peaket/peaket
         revision: develop
-        directories:
-          - path: deploy/envs/demo/*
-          - path: deploy/envs/demo/flags
-            exclude: true
+        files:
+          - path: deploy/envs/demo/*.yaml
   template:
     metadata:
-      name: '{{ .path.basenameNormalized }}'
+      name: '{{ .path.basename | trimSuffix ".yaml" }}'
       labels:
         app.kubernetes.io/part-of: peaket
         peaket.io/environment: demo
@@ -185,13 +178,11 @@ spec:
     - git:
         repoURL: https://github.com/peaket/peaket
         revision: develop
-        directories:
-          - path: deploy/envs/prod/*
-          - path: deploy/envs/prod/flags
-            exclude: true
+        files:
+          - path: deploy/envs/prod/*.yaml
   template:
     metadata:
-      name: '{{ .path.basenameNormalized }}'
+      name: '{{ .path.basename | trimSuffix ".yaml" }}'
       labels:
         app.kubernetes.io/part-of: peaket
         peaket.io/environment: prod
