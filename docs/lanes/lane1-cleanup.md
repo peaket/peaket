@@ -258,3 +258,13 @@
 - HOT-400(BAT-057 검증 M45): 정적 시험에 'Lua를 쓰는 다섯 게이트웨이의 정책이 같은 공통 Lua를 쓰고 `/internal/` 404 갈래에 조건이 없다'를 더한다(지금은 겹친 가드라 바깥에서 구별할 수 없어 남는 차이).
 - 시험(BAT-057 구현): 이 PC에서 `node --test "tools/ci/*.test.mjs"` 전체가 15분 안에 끝나지 않고 `changes.test.mjs` 하나도 150초 시간 초과였다(다른 갈래 시험과 겹친 때). 원인을 보고 CI와 로컬 시간을 견준다.
 - 흔들림(2026-11-19 전체 감독 넘김): 갈래 2 PR #34 CI(run 44412242338) node 잡에서 purchase-svc V-T40(결제 채널 상한·경합) 시험이 한 번 실패했다. 결제 핵심이라 다시 열면 원인부터 본다.
+- BAT-013(R-705, RV-03): `services/purchase-svc/src/modules/refund/application/account-withdrawal-tickets.ts`의 취소 loop가 `left`·`nowMs`를 시작 때 한 번만 계산하고 상한·남은 시간 검사보다 `#configOf`/`#price`를 먼저 부른다. loop마다 다시 계산하고 검사를 앞으로 옮기며, 49/50ms와 11번째 미호출을 시험한다.
+- BAT-013(R-705, RV-04): `quote`가 표를 읽기 전에 `cancelTicket`을 요구해 주소 하나가 빠지면 0장 계정까지 503이 된다. `quote`가 티켓을 먼저 읽어 0장이면 0을 돌려주고, 표가 있을 때만 취소 능력을 요구한다. `start.ts` 경고에 payment 주소 없음도 넣고 `start-files` 기대를 고친다.
+- BAT-013(R-705, RV-05): 주소 없음 운영 참여자 `unavailableWithdrawalParticipant`에 `unusedTickets`가 없어 견적 실패 503이 아니라 202 미룸으로 간다. 견적 능력 없는 참여자를 503으로 보거나 `unusedTickets`를 더하고, I-T84⑦ 202 기대를 503으로 고치는 결정을 함께 한다.
+- BAT-013(R-705, RV-06): `QuoteAccountWithdrawal`을 identity가 먼저 배포하면 옛 purchase-svc `UNIMPLEMENTED`로 모든 탈퇴가 503이 된다. proto README·ADR-0284·배포 절차에 'purchase-svc 먼저'를 적거나 `UNIMPLEMENTED` 배포 호환을 ADR로 정한다.
+- BAT-013(R-705, RV-07): `cancellationStatus`가 read-only 트랜잭션·문장 시간 한도 없이 돈다. `statementTimeoutMs`를 넘기고 read-only로 실행하며, DB 시간 초과 주입에서 UNAVAILABLE·202를 본다.
+- BAT-013(R-705, RV-08): 견적 0장으로 미룬 계정에 나중에 표가 발권되면 고리가 사용자가 409를 본 적 없는 표를 취소한다. 이 경우를 ADR/정본에 수용으로 명시하거나, 고리가 표를 발견하면 409/재견적을 다시 받는 차례를 정한다.
+- BAT-013(R-705, RV-09): ASVS 8.2.1 테스트 결과가 identity 클라이언트 시험만 가리킨다. 서버의 토큰 없음/틀림·다른 호출자 거부를 보는 purchase `test/withdrawal-participant.grpc.test.ts` I-T26 ①-4도 함께 가리킨다.
+- BAT-013(R-705, RV-10): ③-1 `I-T26③_결제사답CANCEL_PENDING·UNKNOWN·REJECTED...`가 한 값만 돌고 `REFUNDED`/`VOIDED` 제외를 실제 행으로 보지 않으며, HTTP→identity→purchase 전체 사슬 시험이 없다. 세 답과 실제 행을 만들거나 시험 이름을 실제 범위로 줄이고, 전체 사슬 시험의 필요성과 자리를 검증 담당이 정한다.
+- BAT-013(R-705, RV-11): `EVENT_CANCELLED` skip은 `ACCOUNT_WITHDRAWAL`에서 도달하지 않는다(`CancelTicket`은 `USER`+회차 취소 확정 때만). 도달하지 않는 case/주석을 지우거나 미래 결과로 표시하고 정본 skip 목록과 맞춘다.
+- BAT-013(R-705, RV-12): 게이트 결과(`gen:check`·`trace-check`·`lint`·`doc-check`)를 계획/커밋 본문에 다 적지 않았다. 다음 기록부터 게이트 결과를 계획 '시험 결과'에 함께 적는다.
