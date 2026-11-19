@@ -5884,7 +5884,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized', description: "로그인 필요" }
         '403': { $ref: '#/components/responses/Problem', description: "reauth-required: 재인증 토큰이 없거나 만료·재사용·sid/sub/act/op가 다르다(op SHOP_CANCEL_REFUND_ACCOUNT·act FAN_HIGH_RISK만). 막히면 새 행·payment 호출 0" }
         '404': { $ref: '#/components/responses/Problem', description: "없는 주문·환급 행이거나 이 계정의 주문이 아니다(같은 404, not-found). 쓰기 0" }
-        '409': { $ref: '#/components/responses/Problem', description: "merch-cancel-not-allowed: 결제사 계좌 거절로 끝난 환급 행이 아니거나(REQUESTED·CANCELLED·CANCEL_PENDING·PAID 등) account_required_at이 없다" }
+        '409': { $ref: '#/components/responses/Problem', description: "merch-cancel-not-allowed: 결제사 계좌 거절로 끝난 환급 행이 아니거나(REQUESTED·CANCELLED·CANCEL_PENDING·PAID 등) account_required_at이 없거나, 다시 받은 횟수가 3회 [가정]을 넘었다(ADR-0316 결정 5). 쓰기·payment 호출 0" }
         '415': { $ref: '#/components/responses/Problem', description: "application/json이 아닌 본문" }
         '422': { $ref: '#/components/responses/Problem', description: "refund-account-required(새 행 REJECTED·account_required_at, 다시 입력받는다)·refund-rejected(결제사 업무 거절)" }
         '503': { $ref: '#/components/responses/ServiceUnavailable', description: "reauth-unavailable(재인증 확인기·jti 저장소 장애, Retry-After 5초 [가정]). dependency-unavailable(payment-svc 연결 실패)" }

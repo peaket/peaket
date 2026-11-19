@@ -211,6 +211,13 @@
       "when": 1795087707322,
       "tag": "0031_merch_return_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795118255887,
+      "tag": "0032_merch_refund_replaces",
+      "breakpoints": true
     }
   ]
 }

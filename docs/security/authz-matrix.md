@@ -305,7 +305,7 @@ docs/api/openapi.yaml의 모든 작업은 허용 역할 칸 `x-peaket-roles`를 
   | `TRANSFER_REQUEST` | `FAN_HIGH_RISK` | ticket-svc | `POST /v1/tickets/{ticketId}/transfers` | `transfer-request` |
   | `REFUND_ACCOUNT` | `FAN_HIGH_RISK` | payment-svc | `POST /v1/cancellations/{cancellationId}/account` | `refund-account` |
   | `COMPENSATION_ACCOUNT` | `FAN_HIGH_RISK` | payment-svc | `POST /v1/compensations/{compensationId}/account` | `compensation-account` |
-  | `SHOP_CANCEL_REFUND_ACCOUNT` | `FAN_HIGH_RISK` | core-svc | `POST /v1/shop/orders/{orderId}/cancellations`(본문에 환급 계좌 있음) | `shop-cancel-refund-account` |
+  | `SHOP_CANCEL_REFUND_ACCOUNT` | `FAN_HIGH_RISK` | core-svc | `POST /v1/shop/orders/{orderId}/cancellations`(본문에 환급 계좌 있음), `POST /v1/shop/orders/{orderId}/cancellations/{cancellationId}/account`(지연 환급 계좌 다시 받기, BAT-425) | `shop-cancel-refund-account` |
 
   - 2026-11-18에 받는 쪽이 있는 것은 identity 다섯(`SCANNER_SESSION_END`·`CONTACT_CHANGE` 밖)과 purchase-svc 둘이다. 나머지는 받는 쪽을 만드는 단계가 이 값으로 확인한다. 새 받는 작업이 생기면 이 표에 줄을 더한다. 운영 중에 값을 더할 때의 배포 차례는 identity → 웹 앱 서버 → 받는 서비스다(ADR-0293 결정 6). 시험은 I-T85와 R-T39 ⑧이다.
 - **계정 보안 설정 `ACCOUNT_SECURITY`(추천 적용 2026-11-05, BUILD_ORDER BOT-122, ADR-0206)**: 관리 계정이 자기 패스키를 등록하거나 지울 때 쓰는 묶음이다. 받는 쪽은 identity다. 토큰의 `factors`에 password·totp가 있어야 하고, 그 계정에 패스키가 이미 있으면 passkey도 있어야 한다. 비밀번호·TOTP만 가로챈 사람이 자기 패스키를 더하지 못하게 하려는 것이다. 관리 재인증 토큰은 identity의 `POST /v1/partner/auth/reauthentications`·`POST /v1/ops/auth/reauthentications`가 준다. 파트너 콘솔은 `PAYOUT_ACCOUNT`·`BOOKER_EXPORT`·`ACCOUNT_SECURITY`만, 관제 콘솔은 `OPS_COMMAND`·`APPROVAL`·`PERMISSION_CHANGE`·`AUTHORITY_DATA`·`ACCOUNT_SECURITY`만 받는다. identity는 확인한 요소만 `factors`에 싣고, 그 작업에 패스키가 필요한지는 위 표대로 받는 서비스가 본다(docs/features/identity.md §6 '관리 계정 패스키의 첫 구현').

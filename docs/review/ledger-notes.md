@@ -200,3 +200,4 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 | J-T28 |  | A | BAT-425 | 배상금 미리 지급의 `COMPENSATION_ADVANCE` 미수금 생성·결제사 무관 상계·이중 상계 금지. 파트너 정산 금액에 닿아 A다. 정본은 `docs/features/settlement.md` §13 J-T28(ADR-0317) |
 
 - ASVS 여섯 행(transfer-refund 2.3.3·2.3.4·8.2.2·8.2.3·16.2.5, payment 2.3.4·8.2.3·16.2.5)은 구현 위치가 이미 있고, 새 시험이 같은 태그를 달아 근거를 더한다(2026-11-20 B·기록 담당 확인). P-T74 ③·P-T63 ③은 기존 시나리오의 세부 번호를 고친 것이라 같은 줄에 적는다.
+- **R-T43 구현 몫(core-svc shop, 2026-11-20 C)**: core 0032가 `merch_refund.replaces_refund_id`(자기 참조, nullable)와 부분 유일 인덱스 `merch_refund_replaces_uq`(`replaces_refund_id is not null`)를 더하고, 멱등 작업 목록에 `SHOP_CANCEL_REFUND_ACCOUNT`를 넣었다. `MerchRefundAccount`는 주문 행 잠금 안에서 사슬 끝 행을 다시 보고 새 행·새 항목 자리·멱등 기록을 커밋한 뒤 새 취소 ID·시도 번호(`refund_attempt`)로 `CancelPayment`를 부른다. 시험은 R-T43 ①~③이 시험 담당 몫이고, 이 줄은 구현 위치만 남긴다.
