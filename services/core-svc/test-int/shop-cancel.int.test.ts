@@ -757,6 +757,7 @@ describe('환급 멱등·재시도·계좌 거절(P-T64)', () => {
       { label: 'REJECTED', outcome: 'REJECTED' as const, virtualAccount: false },
     ];
     for (const c of cases) {
+      payments.cancels.length = 0;
       const p = await seedProduct({ fulfillments: ['PICKUP'], price: 24_000 });
       const o = await seedPaidOrder({ fulfillment: 'PICKUP', items: [{ productId: p, quantity: 1, unitAmount: 24_000 }] });
       if (c.virtualAccount) payments.virtualAccountOrders.add(o.orderId);
