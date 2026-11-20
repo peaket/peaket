@@ -5,7 +5,7 @@ import { hiddenLinkHref } from '../src/live/hidden-link.ts';
 
 const PATH = '/_t/synthetic-path-for-test';
 
-test('[Q-T40] 설정한 경로가 있으면 회차를 싣고, 없거나 틀리면 링크를 그리지 않는다', () => {
+test('[Q-T40 ①] 설정한 경로가 있으면 회차를 싣고, 없거나 틀리면 링크를 그리지 않는다', () => {
   assert.equal(hiddenLinkHref('e1', PATH), `${PATH}?e=e1`);
   assert.equal(hiddenLinkHref('e1', ''), null);
   assert.equal(hiddenLinkHref('e1', undefined), null);

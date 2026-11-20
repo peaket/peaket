@@ -243,7 +243,7 @@ describe('ScoreRisk 통합', () => {
     expect(await w.redis.command(['EXISTS', `tr:devacct:{${dev('ref')}}`], slow(`tr:devacct:{${dev('ref')}}`))).toBe(0);
   });
 
-  test('[Q-T40] 허니팟적중표시는_tr:hp에24시간쓰이고_다음사전검증의확정신호가된다', async () => {
+  test('[B-T8 ④] [Q-T40 ①] 허니팟적중표시는_tr:hp에24시간쓰이고_다음사전검증의확정신호가된다', async () => {
     const pid = 'pid-honeypot';
     await new RedisFeatureStore(w.redis).recordHoneypot({ pid, eventId: 'ev-1', now: Date.now() });
     expect(await w.redis.command(['GET', keys.honeypot(pid)], slow(keys.honeypot(pid)))).toMatch(/"eventId":"ev-1"/);

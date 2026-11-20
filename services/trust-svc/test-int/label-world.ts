@@ -168,6 +168,8 @@ export async function labelWorld(url: string, o: LabelWorldOptions = {}) {
   return {
     direct,
     serviceRedis,
+    /** 시험 서버의 gRPC 주소(ops-svc 같은 다른 서비스 시험이 ApplyLabel 클라이언트를 붙일 때) */
+    target,
     human,
     signals,
     offered,

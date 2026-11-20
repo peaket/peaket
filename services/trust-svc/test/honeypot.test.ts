@@ -62,7 +62,7 @@ async function hit(headers: Record<string, string> = {}, query = `e=${EVENT}`) {
 }
 
 describe('허니팟 기록 조건(Q-T40)', () => {
-  test('[Q-T40] [ASVS v5.0.0-3.5.3] 같은출처의로그인클릭만_적중이고_표시와판정기록이남는다', async () => {
+  test('[B-T8 ①] [Q-T40 ①] [ASVS v5.0.0-3.5.3] 같은출처의로그인클릭만_적중이고_표시와판정기록이남는다', async () => {
     const r = await hit({ ...SAME, 'x-user-pid': PID });
     expect([r.statusCode, r.body]).toEqual([204, '']);
     expect(await features.honeypotOf(PID)).toEqual({ atMs: clock.now(), eventId: EVENT });
@@ -71,14 +71,14 @@ describe('허니팟 기록 조건(Q-T40)', () => {
     expect(verdicts[0]).toMatchObject({ eventId: EVENT, occurredAtMs: clock.now() });
   });
 
-  test('[Q-T40] 로그인하지않은클릭은_지표만오른다', async () => {
+  test('[B-T8 ②] [B-T8 ⑤] 로그인하지않은클릭은_지표만오른다', async () => {
     const r = await hit(SAME);
     expect(r.statusCode).toBe(204);
     expect(hits).toEqual([false]);
     expect(verdicts).toEqual([]);
   });
 
-  test('[Q-T40] [ASVS v5.0.0-3.5.3] 다른사이트·미리가져오기·미리그리기·라우터미리가져오기·헤더없는요청은_기록되지않는다', async () => {
+  test('[Q-T40 ②③④⑤] [B-T8 ⑤] [ASVS v5.0.0-3.5.3] 다른사이트·미리가져오기·미리그리기·라우터미리가져오기·헤더없는요청은_기록되지않는다', async () => {
     const cases: Record<string, string>[] = [
       { 'sec-fetch-site': 'cross-site', 'x-user-pid': PID },
       { 'sec-fetch-site': 'same-site', 'x-user-pid': PID },
@@ -103,7 +103,7 @@ describe('허니팟 기록 조건(Q-T40)', () => {
     expect(verdicts).toEqual([]);
   });
 
-  test('[Q-T40] 같은사람의같은회차반복적중은_24시간에판정기록한번이고_다른회차는따로낸다', async () => {
+  test('[B-T8 ③] [B-T8 ④] 같은사람의같은회차반복적중은_24시간에판정기록한번이고_다른회차는따로낸다', async () => {
     await hit({ ...SAME, 'x-user-pid': PID });
     await hit({ ...SAME, 'x-user-pid': PID });
     expect(verdicts).toHaveLength(1);
@@ -179,7 +179,7 @@ describe('허니팟 기록 조건(Q-T40)', () => {
     expect(r.statusCode).toBe(204);
   });
 
-  test('[Q-T40] 다음사전검증은_확정신호를읽는다', async () => {
+  test('[B-T8 ①] 다음사전검증은_확정신호를읽는다', async () => {
     await hit({ ...SAME, 'x-user-pid': PID });
     const read = await features.read({ deviceRef: undefined, pid: PID, now: NOW });
     expect(read.honeypot).toBe(true);

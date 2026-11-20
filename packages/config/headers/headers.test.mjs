@@ -164,3 +164,15 @@ test('nonce·해시·출처 자리 표시를 채우고, 빠지거나 꼴이 틀�
   assert.ok(dev.includes("connect-src 'self' http://127.0.0.1:4010;"));
   assert.throws(() => renderCsp('Z'), /묶음/);
 });
+
+test('[ASVS v5.0.0-3.4.3] 관제 콘솔 CSP(C 묶음)가 /bot-review에도 적용되고 관제 API만 연결한다', () => {
+  // 화면 경로는 콘솔 앱 라우터에 있다(같은 출처라 정적 헤더가 경로와 상관없이 모든 문서에 붙는다)
+  const router = readFileSync(new URL('../../../apps/console-host/src/app/router.tsx', import.meta.url), 'utf8');
+  assert.match(router, /path: 'bot-review'/);
+  const csp = staticAppHeaders('console', { origins: IDENTITY })['Content-Security-Policy'];
+  assert.match(csp, /^default-src 'none'; /);
+  assert.match(csp, /connect-src 'self' https:\/\/ops-api\.peaket\.example;/);
+  assert.match(csp, /object-src 'none'; base-uri 'none'; frame-ancestors 'none';/);
+  assert.equal(/unsafe-inline|unsafe-eval/.test(csp), false);
+  assert.equal(staticAppHeaders('console', { origins: IDENTITY })['Reporting-Endpoints'], 'csp="/_t/csp"');
+});
