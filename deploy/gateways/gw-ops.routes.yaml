@@ -761,6 +761,65 @@ spec:
           port: 8080
       timeouts:
         request: 0s
+    - name: ops-promoters
+      matches:
+        - path:
+            type: Exact
+            value: /v1/ops/promoters
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/ops/promoters
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/promoters
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-term-changes
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-term-changes
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-terms
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-terms
+          method: OPTIONS
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Trace-Id
+                value: "%TRACE_ID%"
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: core-svc
+          namespace: core
+          port: 8080
     - matches:
         - path:
             type: Exact
@@ -1735,42 +1794,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/ops/productions/[^/]+/aliases
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/promoters
-          method: GET
-        - path:
-            type: Exact
-            value: /v1/ops/promoters
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/promoters
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-term-changes
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-term-changes
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-terms
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-terms
           method: OPTIONS
         - path:
             type: Exact
