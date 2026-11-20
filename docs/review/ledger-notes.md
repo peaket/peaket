@@ -284,3 +284,10 @@ BAT-197(BOT-080의 REST·화면 몫)이 2026-11-21에 끝났다. 아래 FR-049�
 | ASVS 3.5.3 | `services/ops-svc/test/bot-review-http.test.ts`의 `[ASVS v5.0.0-3.5.3] 판정은 POST만 받고 GET·HEAD로는 바꿀 수 없다`가 판정 경로의 POST만 허용과 GET·HEAD 거절을 본다. BAT-197 완료(2026-11-21, R-725). |
 | ASVS 16.3.3 | `services/ops-svc/test/bot-review-judgement.test.ts`의 `[ASVS v5.0.0-16.3.3] 판정과 라벨 반영 결과를 보안 로그 줄로 남기고 pid·기기 가명은 싣지 않는다`가 판정·라벨 로그 줄과 가림을 본다. BAT-197 완료(2026-11-21, R-725). |
 | ASVS 16.3.4 | `services/ops-svc/test/bot-review-judgement.test.ts`의 `[ASVS v5.0.0-16.3.4] 라벨 실패와 원천 실패를 지표·경고 줄로 남긴다`가 `ops_bot_review_label_failures_total`과 경고 로그 줄을 본다. BAT-197 완료(2026-11-21, R-725). |
+## BAT-616 판매 승인 요청·판매 열기(2026-11-20)
+
+| ID | 상태 | 등급 | 담당 | 근거·이유 |
+| --- | --- | --- | --- | --- |
+| S-T41 | 구현(시험 대기) | A | core-svc 판매 승인·purchase-svc 판매 열기·대기열 사본 | 판매 승인 요청·변경 취소·반려 사유·관제 목록·상세는 `services/core-svc/test/sale-review-request.http.test.ts`·`services/core-svc/test/ops-sale-review.http.test.ts`(메모리)가, 승인 뒤 판매 열기·대기열 사본·CDN은 `services/core-svc/test-int/sale-open.int.test.ts`·`services/core-svc/test-int/queue-sale-config.int.test.ts`(실제 PostgreSQL·Valkey)가, purchase의 UPCOMING·`seat_rebuild` 판 1·비트맵·세대 키·오픈 경계는 `services/purchase-svc/test-int/sale-open.int.test.ts`(실제 PostgreSQL·Valkey)가 본다. S-T41은 seat-hold 장부에서 A라 판매 열기·UPCOMING·세대 키에 A 증명(장애 주입·경계)을 붙인다. 화면 ⑫는 BAT-617로 넘겼다. 시험 이름에 `[ASVS v5.0.0-8.2.2]`·`[ASVS v5.0.0-8.2.3]`을 단다. 2026-11-20 BAT-616 구현, 시험은 시험 담당이 쓴다. |
+| 코드 영역 | — | — | `services/core-svc/src/modules/catalog/**`·`services/purchase-svc/src/modules/inventory/**` | `tools/ci/ledger.mjs`의 기능별 코드 영역은 넓히지 않았다. purchase-svc·queue-svc 파일이 다른 기능의 태그를 잘못 세는 것을 막으려는 것이고(BAT-615 RV-11), 이 묶음 시험 파일 목록은 위 S-T41 줄에 적었다. |
+| 범위 밖 | — | — | LCH-090·LCH-110·BAT-617 | 5분·대형 30분 간격, 휠체어석 수·위치 재계산, 결제사 지정 고정, 판매 중지·재개 2인 승인과 SCR-048 단추는 LCH-090, 지급대행 등록·예금주·KYC는 LCH-110, SCR-021 5단계·SCR-048 화면은 BAT-617이다. 이 항목은 장부 범위에 넣지 않는다. |

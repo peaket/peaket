@@ -11,5 +11,9 @@
  */
 
 export type CreateOpsSaleReviewRejectionBody = {
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
   reason: string;
 };

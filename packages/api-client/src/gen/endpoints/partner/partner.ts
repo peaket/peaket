@@ -59,6 +59,7 @@ import type {
   CreatePartnerEventStaffInvitationBody,
   CreatePartnerMerchShipmentImportBody,
   CreatePartnerProductionImageBody,
+  CreatePartnerProductionSaleReview202,
   CreatePartnerProductionSaleReviewBody,
   CreatePartnerProductionSeatmapBody,
   CreatePartnerProductionSeatmapImportBody,
@@ -118,6 +119,7 @@ import type {
   PartnerProductionPage,
   PartnerProductionUpdate,
   PartnerReauthPasswordStep,
+  PartnerSaleReviewStatus,
   PartnerSalesReport,
   PartnerSettlementExportCreate,
   PartnerTeamAccountPage,
@@ -2583,8 +2585,13 @@ export function useGetPartnerEventCancellation<TData = Awaited<ReturnType<typeof
 
 
 export type createPartnerProductionSaleReviewResponse202 = {
-  data: void
+  data: CreatePartnerProductionSaleReview202
   status: 202
+}
+
+export type createPartnerProductionSaleReviewResponse400 = {
+  data: ProblemResponse
+  status: 400
 }
 
 export type createPartnerProductionSaleReviewResponse403 = {
@@ -2592,15 +2599,30 @@ export type createPartnerProductionSaleReviewResponse403 = {
   status: 403
 }
 
+export type createPartnerProductionSaleReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createPartnerProductionSaleReviewResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type createPartnerProductionSaleReviewResponse422 = {
   data: ProblemResponse
   status: 422
 }
 
+export type createPartnerProductionSaleReviewResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createPartnerProductionSaleReviewResponseSuccess = (createPartnerProductionSaleReviewResponse202) & {
   headers: Headers;
 };
-export type createPartnerProductionSaleReviewResponseError = (createPartnerProductionSaleReviewResponse403 | createPartnerProductionSaleReviewResponse422) & {
+export type createPartnerProductionSaleReviewResponseError = (createPartnerProductionSaleReviewResponse400 | createPartnerProductionSaleReviewResponse403 | createPartnerProductionSaleReviewResponse404 | createPartnerProductionSaleReviewResponse409 | createPartnerProductionSaleReviewResponse422 | createPartnerProductionSaleReviewResponse503) & {
   headers: Headers;
 };
 
@@ -2613,7 +2635,7 @@ export const getCreatePartnerProductionSaleReviewUrl = (productionId: string,) =
 }
 
 /**
- * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 저장하지 않고 결제사 지급대행 등록 요청에 바로 넘기고 은행·끝 4자리만 남긴다(ADR-0047). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
+ * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 모양만 보고 저장하지 않는다(지급대행 연동 전, LCH-110). 지급대행 등록이 없어도 승인을 막지 않고 화면에 '연동 전'이라고 적는다(ADR-0327 결정 6). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 판매 승인 요청(판매자 신원정보 포함). 승인 전에는 공개되지 않음
  */
 export const createPartnerProductionSaleReview = async (productionId: string,
@@ -2794,7 +2816,130 @@ export const useDeletePartnerProductionSaleReview = <TError = ErrorType<ProblemR
       > => {
       return useMutation(getDeletePartnerProductionSaleReviewMutationOptions(options), queryClient);
     }
-    export type getPartnerEventSettlementsResponse200 = {
+    export type getPartnerProductionSaleReviewResponse200 = {
+  data: PartnerSaleReviewStatus
+  status: 200
+}
+
+export type getPartnerProductionSaleReviewResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerProductionSaleReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getPartnerProductionSaleReviewResponseSuccess = (getPartnerProductionSaleReviewResponse200) & {
+  headers: Headers;
+};
+export type getPartnerProductionSaleReviewResponseError = (getPartnerProductionSaleReviewResponse401 | getPartnerProductionSaleReviewResponse404) & {
+  headers: Headers;
+};
+
+export const getGetPartnerProductionSaleReviewUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/partner/productions/${encodeURIComponent(String(productionId))}/sale-review`
+}
+
+/**
+ * BAT-616 LCH-080, FR-052. 판매 승인 상태·반려 사유·제출 시각·판매자 정보·회차(오픈·시작·규모)를 준다. 계좌번호 전체는 싣지 않는다. Cache-Control: no-store
+ * @summary 파트너 판매 승인 현황(SCR-021 5단계)
+ */
+export const getPartnerProductionSaleReview = async (productionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerProductionSaleReviewResponseSuccess> => {
+
+  return orvalFetch<getPartnerProductionSaleReviewResponseSuccess>(getGetPartnerProductionSaleReviewUrl(productionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerProductionSaleReviewQueryKey = (productionId: string,) => {
+    return [
+    `/v1/partner/productions/${productionId}/sale-review`
+    ] as const;
+    }
+
+
+export const getGetPartnerProductionSaleReviewQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerProductionSaleReviewQueryKey(productionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>> = ({ signal }) => getPartnerProductionSaleReview(productionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: productionId !== null && productionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerProductionSaleReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>>
+export type GetPartnerProductionSaleReviewQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerProductionSaleReview<TData = Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerProductionSaleReview>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerProductionSaleReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerProductionSaleReview<TData = Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerProductionSaleReview>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerProductionSaleReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerProductionSaleReview<TData = Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 파트너 판매 승인 현황(SCR-021 5단계)
+ */
+
+export function useGetPartnerProductionSaleReview<TData = Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerProductionSaleReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerProductionSaleReviewQueryOptions(productionId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getPartnerEventSettlementsResponse200 = {
   data: SettlementStatement[]
   status: 200
 }

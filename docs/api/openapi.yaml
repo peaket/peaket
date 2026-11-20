@@ -311,12 +311,15 @@ x-peaket-problem-types:
     sale-eligibility-upload-too-large: { status: 413, title: "명단 파일은 8MB까지 올릴 수 있습니다" }
     sale-ended: { status: 410, title: "판매 시간이 끝났습니다" }
     sale-not-suspended: { status: 409, title: "판매 중지된 공연이 아닙니다" }
+    sale-not-publishable: { status: 409, title: "판매를 열 수 없는 회차입니다" }
     sale-paused: { status: 423, title: "판매가 잠시 멈췄습니다" }
     sale-policy-denied: { status: 403, title: "판매 정책에 따라 지금은 예매할 수 없습니다" }
     sale-policy-invalid: { status: 422, title: "판매 정책 규칙에 고칠 곳이 있습니다" }
     sale-review-list-missing: { status: 422, title: "판매 정책이 쓰는 명단이 없습니다" }
+    sale-review-not-cancellable: { status: 409, title: "거둘 판매 승인 변경 요청이 없습니다" }
     sale-review-not-approved: { status: 409, title: "판매 승인된 공연만 회차 설정을 쓸 수 있습니다" }
     sale-review-not-submitted: { status: 409, title: "판매 승인 대기 중인 공연이 아닙니다" }
+    sale-review-request-invalid: { status: 422, title: "판매 승인 요청을 받을 수 없습니다" }
     sale-review-scales-missing: { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" }
     sale-setting-locked: { status: 409, title: "지금은 바꿀 수 없는 항목입니다" }
     scale-change-closed: { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" }
@@ -3605,6 +3608,67 @@ components:
           type: array
           items: { $ref: '#/components/schemas/OpsSaleReviewItem' }
         nextCursor: { type: [string, 'null'] }
+    OpsSaleReviewEvent:
+      type: object
+      description: "판매 승인 확인 패널의 회차 한 줄(SCR-048). 수요 예측은 링크로 가리킨다"
+      properties:
+        eventId: { type: string }
+        openAt: { type: string, format: date-time }
+        startsAt: { type: string, format: date-time }
+        status: { type: string, enum: [SCHEDULED, CANCELLED, POSTPONED] }
+        scale: { type: [string, 'null'], enum: [LARGE, MEDIUM, SMALL, null], description: "판매 승인 때 정한 규모. 승인 전이면 null" }
+        demandForecastPath: { type: string, description: "GET /v1/ops/events/{eventId}/demand-forecast" }
+    OpsSaleReviewDetail:
+      type: object
+      description: "관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 '연동 전'이라고 적는다(ADR-0327 결정 6)"
+      properties:
+        productionId: { type: string }
+        title: { type: string }
+        promoterId: { type: string }
+        promoterName: { type: string }
+        status:
+          type: string
+          enum: [SUBMITTED, APPROVED, REJECTED, SUSPENDED]
+        reapproval: { type: boolean, description: "승인 이력이 있는 공연의 변경 재승인인지" }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        rejectionReason: { type: [string, 'null'], description: "마지막 반려 사유" }
+        seller:
+          oneOf:
+            - $ref: '#/components/schemas/SellerInfo'
+            - type: 'null'
+          description: "판매자 신원정보. 아직 받지 않았으면 null"
+        verifiedAt: { type: [string, 'null'], format: date-time }
+        salePolicy:
+          type: array
+          description: "확인 패널이 보는 판매 정책 규칙(재승인 대기 변경분이 있으면 그 규칙). 읽기 전용이다"
+          items: { type: object, additionalProperties: true }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/OpsSaleReviewEvent' }
+        suspensionApprovalPending: { type: boolean, description: "LCH-090 전에는 늘 false다" }
+    PartnerSaleReviewStatus:
+      type: object
+      description: "파트너가 보는 판매 승인 현황(SCR-021 5단계, BAT-616). 계좌번호 전체는 없다"
+      properties:
+        saleReview:
+          type: string
+          enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, SUSPENDED]
+        rejectionReason: { type: [string, 'null'] }
+        hasApprovalHistory: { type: boolean }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        seller:
+          oneOf:
+            - $ref: '#/components/schemas/SellerInfo'
+            - type: 'null'
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              eventId: { type: string }
+              openAt: { type: string, format: date-time }
+              startsAt: { type: string, format: date-time }
+              scale: { type: [string, 'null'], enum: [LARGE, MEDIUM, SMALL, null] }
 
     OpsPromoterCreate:
       type: object
@@ -4957,8 +5021,9 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/Problem', description: "not-found: 요청이 아직 없음, 또는 없는 회차·다른 파트너 회차(같은 응답)" }
   /v1/partner/productions/{productionId}/sale-review:
-    post: { operationId: createPartnerProductionSaleReview, tags: [partner], x-peaket-roles: [partner_admin], summary: "판매 승인 요청(판매자 신원정보 포함). 승인 전에는 공개되지 않음", description: "FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 저장하지 않고 결제사 지급대행 등록 요청에 바로 넘기고 은행·끝 4자리만 남긴다(ADR-0047). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [seller, payoutAccount, accessibleSeating], properties: { seller: { $ref: '#/components/schemas/SellerInfoInput' }, payoutAccount: { $ref: '#/components/schemas/PayoutAccountChange' }, accessibleSeating: { additionalProperties: false, type: object, description: "휠체어석 확인(FR-023). 서버는 저장된 좌석맵으로 수량·위치·온라인 판매 경고를 다시 센다(추천 적용 2026-10-14, ADR-0062)", required: [confirmed], properties: { confirmed: { type: boolean, enum: [true], description: "휠체어석의 수와 위치를 공연장 좌석 배치도와 대조함(FR-023)" }, shortfallReason: { type: string, enum: [RELAXED_STANDARD, RECOMMENDED_FACILITY, NOT_USED_THIS_SHOW, OTHER], description: "휠체어석 수가 기준 min(⌈전체 좌석÷100⌉, 20)보다 적을 때 필수" }, note: { type: string, maxLength: 500, description: "OTHER일 때 필수" } } } } } } } }, responses: { '202': { description: "승인 대기" }, '403': { $ref: '#/components/responses/Problem', description: "파트너 관리자가 아님(partner_member)" }, '422': { $ref: '#/components/responses/Problem', description: "판매자 정보 누락·예금주 불일치·휠체어석 확인·부족 이유 누락" } } }
+    post: { operationId: createPartnerProductionSaleReview, tags: [partner], x-peaket-roles: [partner_admin], summary: "판매 승인 요청(판매자 신원정보 포함). 승인 전에는 공개되지 않음", description: "FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 모양만 보고 저장하지 않는다(지급대행 연동 전, LCH-110). 지급대행 등록이 없어도 승인을 막지 않고 화면에 '연동 전'이라고 적는다(ADR-0327 결정 6). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [seller, payoutAccount, accessibleSeating], properties: { seller: { $ref: '#/components/schemas/SellerInfoInput' }, payoutAccount: { $ref: '#/components/schemas/PayoutAccountChange' }, accessibleSeating: { additionalProperties: false, type: object, description: "휠체어석 확인(FR-023). 서버는 저장된 좌석맵으로 수량·위치·온라인 판매 경고를 다시 센다(추천 적용 2026-10-14, ADR-0062)", required: [confirmed], properties: { confirmed: { type: boolean, enum: [true], description: "휠체어석의 수와 위치를 공연장 좌석 배치도와 대조함(FR-023)" }, shortfallReason: { type: string, enum: [RELAXED_STANDARD, RECOMMENDED_FACILITY, NOT_USED_THIS_SHOW, OTHER], description: "휠체어석 수가 기준 min(⌈전체 좌석÷100⌉, 20)보다 적을 때 필수" }, note: { type: string, maxLength: 500, description: "OTHER일 때 필수" } } } } } } } }, responses: { '202': { description: "승인 대기", content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [SUBMITTED] } } } } } }, '400': { $ref: '#/components/responses/Problem', description: "invalid-body: 본문 모양 오류·모르는 칸" }, '403': { $ref: '#/components/responses/Problem', description: "파트너 관리자가 아님(partner_member)" }, '404': { $ref: '#/components/responses/Problem', description: "not-found: 없는 공연과 다른 파트너 공연(같은 응답)" }, '409': { $ref: '#/components/responses/Problem', description: "production-suspended: 판매 중지 중" }, '422': { $ref: '#/components/responses/Problem', description: "sale-review-request-invalid: 신고번호와 면제 근거 가운데 하나가 아님·휠체어석 확인 거짓·회차 0개·공연장 없음" }, '503': { $ref: '#/components/responses/Problem', description: "authz-unavailable: 테넌트를 확인하지 못함" } } }
     delete: { operationId: deletePartnerProductionSaleReview, tags: [partner], x-peaket-roles: [partner_admin], summary: "판매 승인 요청 변경 취소(승인 이력이 있을 때만, 마지막 승인 내용으로 되돌림)", description: "docs/planning/03 §2.14의 변경 취소(Submitted·Rejected → Approved), FR-052, POL-037. 승인 이력이 있는 공연에서 승인 대기 중이거나 반려된 변경 요청을 거두고 마지막 승인 내용으로 돌아간다. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(추천 적용 2026-10-23)", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], responses: { '204': { description: 변경 취소됨 }, '403': { $ref: '#/components/responses/Problem', description: "파트너 관리자가 아님(partner_member)·다른 테넌트 공연" }, '404': { $ref: '#/components/responses/Problem', description: "없는 공연" }, '409': { $ref: '#/components/responses/Problem', description: "승인 이력이 없거나 거둘 변경 요청이 없음" } } }
+    get: { operationId: getPartnerProductionSaleReview, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "파트너 판매 승인 현황(SCR-021 5단계)", description: "BAT-616 LCH-080, FR-052. 판매 승인 상태·반려 사유·제출 시각·판매자 정보·회차(오픈·시작·규모)를 준다. 계좌번호 전체는 싣지 않는다. Cache-Control: no-store", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], responses: { '200': { description: "판매 승인 현황", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: '#/components/schemas/PartnerSaleReviewStatus' } } } }, '401': { $ref: '#/components/responses/Unauthorized' }, '404': { $ref: '#/components/responses/Problem', description: "not-found: 없는 공연과 다른 파트너 공연(같은 응답)" } } }
   /v1/partner/events/{eventId}/settlements:
     get: { operationId: getPartnerEventSettlements, tags: [partner], x-peaket-roles: [partner_admin, partner_member], summary: "회차·결제사별 정산서와 지급 상태", description: "FR-027, FR-062, POL-039. 소속 테넌트만, 계좌는 끝 4자리만", security: [{ partnerCookie: [] }], parameters: [{ $ref: '#/components/parameters/EventId' }], responses: { '200': { description: 정산서 목록, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SettlementStatement' } } } } } } }
   /v1/partner/product-settlements:
@@ -5595,9 +5660,9 @@ paths:
   /v1/ops/event-cancellations/{requestId}/resumptions:
     post: { operationId: createOpsEventCancellationResumption, tags: [ops], x-peaket-roles: [commander], summary: "일괄 환불 작업 재개(commander, 확정 범위 안, 사유 필수)", description: "FR-055. 스스로 멈춘 몫과 수동으로 멈춘 몫을 다시 시작한다(pg를 비우면 멈춘 몫 모두). 결과 모름 건을 결제사 조회로 먼저 끝낸 뒤 새 취소를 보낸다. 화면은 그 결제사의 서킷 상태와 최근 5분 실패율로 '재개 조건 충족'을 보이고, 자동 정지 기준은 재개 뒤에도 살아 있다(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)", security: [{ opsCookie: [] }], parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, required: [reason], properties: { pg: { type: [string, 'null'], enum: [TOSS, PORTONE, SIMULATOR, null], description: "다시 시작할 결제사 몫. 비우면 멈춘 몫 모두" }, reason: { type: string } } } } } }, responses: { '200': { description: "재개", content: { application/json: { schema: { $ref: '#/components/schemas/EventCancellationRequest' } } } }, '403': { $ref: '#/components/responses/Problem', description: "commander가 아님" } } }
   /v1/ops/sale-reviews/{productionId}/approvals:
-    post: { operationId: createOpsSaleReviewApproval, tags: [ops], x-peaket-roles: [operator, commander], summary: "판매 승인(operator). 판매 조건은 고치지 않음", description: "FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078)", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, required: [scales, placeId, artistIds], properties: { scales: { type: array, minItems: 1, description: "그 공연의 회차마다 규모(architecture §9.5). 빠진 회차가 있으면 422. LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격 검사", items: { additionalProperties: false, type: object, required: [eventId, scale], properties: { eventId: { type: string }, scale: { type: string, enum: [LARGE, MEDIUM, SMALL] } } } }, placeId: { type: string, description: "확인한 공연장" }, artistIds: { type: array, items: { type: string }, description: "확인한 아티스트(보이는 순서, 없으면 빈 배열)" }, aliases: { type: array, maxItems: 5, items: { type: string, minLength: 1, maxLength: 100 }, description: "공연의 다른 이름 최종 목록(파트너가 적은 것에서 고친다, POL-045)" } } } } } }, responses: { '200': { description: "공개·오픈 가능" }, '409': { $ref: '#/components/responses/Problem', description: "open-interval-conflict: LARGE로 승인하려는 회차가 다른 LARGE 공연의 회차와 오픈 시각 30분 안" }, '422': { $ref: '#/components/responses/Problem', description: "회차 규모가 빠짐, 없는 공연장·아티스트, 신고번호·면제 근거 없음, 결제사 지급대행 등록 미완료·예금주 불일치(POL-039 ①), 지정 결제사 채널이 서버 승인 미지원·비활성" } } }
+    post: { operationId: createOpsSaleReviewApproval, tags: [ops], x-peaket-roles: [operator, commander], summary: "판매 승인(operator). 판매 조건은 고치지 않음", description: "FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, required: [scales, placeId, artistIds], properties: { scales: { type: array, minItems: 1, description: "그 공연의 회차마다 규모(architecture §9.5). 빠진 회차가 있으면 422. LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격 검사", items: { additionalProperties: false, type: object, required: [eventId, scale], properties: { eventId: { type: string }, scale: { type: string, enum: [LARGE, MEDIUM, SMALL] } } } }, placeId: { type: string, description: "확인한 공연장" }, artistIds: { type: array, items: { type: string }, description: "확인한 아티스트(보이는 순서, 없으면 빈 배열)" }, aliases: { type: array, maxItems: 5, items: { type: string, minLength: 1, maxLength: 100 }, description: "공연의 다른 이름 최종 목록(파트너가 적은 것에서 고친다, POL-045)" } } } } } }, responses: { '200': { description: "공개·오픈 가능" }, '409': { $ref: '#/components/responses/Problem', description: "open-interval-conflict: LARGE로 승인하려는 회차가 다른 LARGE 공연의 회차와 오픈 시각 30분 안" }, '422': { $ref: '#/components/responses/Problem', description: "회차 규모가 빠짐, 없는 공연장·아티스트, 신고번호·면제 근거 없음, 회차 규모 누락, 판매 정책이 쓰는 명단 없음(지급대행 등록은 LCH-110 전이라 승인을 막지 않는다, ADR-0327 결정 6)" } } }
   /v1/ops/sale-reviews/{productionId}/rejections:
-    post: { operationId: createOpsSaleReviewRejection, tags: [ops], x-peaket-roles: [operator, commander], summary: "판매 승인 반려(사유 필수)", description: "FR-052, POL-037. 공연 단위(ADR-0093)", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [reason], properties: { reason: { type: string } } } } } }, responses: { '200': { description: "반려됨" } } }
+    post: { operationId: createOpsSaleReviewRejection, tags: [ops], x-peaket-roles: [operator, commander], summary: "판매 승인 반려(사유 필수)", description: "FR-052, POL-037. 공연 단위(ADR-0093). 사유 1~1,000자를 production.rejection_reason에 남기고 파트너 화면과 관제 상세가 읽는다(BAT-616, ADR-0327). 반려는 공개본·재승인 대기 변경분을 고치지 않는다", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 1000 } } } } } }, responses: { '200': { description: "반려됨" }, '400': { $ref: '#/components/responses/Problem', description: "invalid-body: 사유 없음·1,000자 초과·모르는 칸" }, '409': { $ref: '#/components/responses/Problem', description: "sale-review-not-submitted: 승인 대기 중이 아님" } } }
   /v1/ops/artists:
     get: { operationId: listOpsArtists, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "아티스트 찾기(판매 승인 화면, viewer 이상과 CS 담당자 조회, 소유자 결정 2026-10-30, open-items 82번 ③)", description: "추천 적용 2026-10-27, ADR-0093. 이름과 다른 이름으로 찾는다(정규화·낱자·초성)", security: [{ opsCookie: [] }], parameters: [{ name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 50 } }, { $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }], responses: { '200': { description: 목록, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { type: object, properties: { artistId: { type: string }, name: { type: string }, aliases: { type: array, items: { type: string } } } } }, nextCursor: { type: [string, 'null'] } } } } } } } }
     post: { operationId: createOpsArtist, tags: [ops], x-peaket-roles: [operator, commander], summary: "아티스트 만들기(operator, 사유 필수, 감사 로그)", description: "추천 적용 2026-10-27, ADR-0093. 판매 승인 때 파트너가 적은 새 이름이 기존 아티스트가 아닐 때 만든다. 정규화한 이름이 같은 아티스트가 이미 있으면 409와 그 ID를 준다(같은 아티스트가 둘로 갈라지지 않게)", security: [{ opsCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name, reason], properties: { name: { type: string, minLength: 1, maxLength: 100 }, reason: { type: string, minLength: 1, maxLength: 500 } } } } } }, responses: { '201': { description: "만듦(artistId)" }, '409': { $ref: '#/components/responses/Problem', description: "artist-exists: 같은 정규화 이름(확장 필드 artistId)" } } }
@@ -6598,6 +6663,8 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: "모르는 상태 값, limit 100 초과" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }
         '403': { $ref: '#/components/responses/Problem', description: "허용 역할이 아님" }
+  /v1/ops/sale-reviews/{productionId}:
+    get: { operationId: getOpsSaleReview, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "판매 승인 상세(SCR-048 확인 패널)", description: "BAT-616 LCH-080, FR-052, SCR-048, ADR-0093·ADR-0327. 공연·파트너 상호·판매자 정보·회차(오픈·시작·규모)·판매 정책 읽기 전용·제출 시각·재승인 여부·반려 사유를 준다. viewer·CS도 읽는다. 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 '연동 전'이라고 적는다. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/ProductionId' }], responses: { '200': { description: "판매 승인 상세", headers: { Cache-Control: { schema: { type: string, enum: [no-store] } } }, content: { application/json: { schema: { $ref: '#/components/schemas/OpsSaleReviewDetail' } } } }, '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }, '403': { $ref: '#/components/responses/Problem', description: "허용 역할이 아님" }, '404': { $ref: '#/components/responses/Problem', description: "없는 공연(not-found)" } } }
   # ---------- 3-9. 파트너사 계약·수수료율·보증(SCR-065) ----------
   /v1/ops/promoters:
     get:

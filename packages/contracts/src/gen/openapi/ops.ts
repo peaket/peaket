@@ -3319,7 +3319,7 @@ export const CreateOpsEventCancellationResumptionResponse = zod.object({
 }).describe('회차 취소 요청(ADR-0046 결정 4)')
 
 /**
- * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078)
+ * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
  * @summary 판매 승인(operator). 판매 조건은 고치지 않음
  */
 export const CreateOpsSaleReviewApprovalParams = zod.object({
@@ -3346,15 +3346,19 @@ export const CreateOpsSaleReviewApprovalBody = zod.object({
 export const CreateOpsSaleReviewApprovalResponse = zod.unknown()
 
 /**
- * FR-052, POL-037. 공연 단위(ADR-0093)
+ * FR-052, POL-037. 공연 단위(ADR-0093). 사유 1~1,000자를 production.rejection_reason에 남기고 파트너 화면과 관제 상세가 읽는다(BAT-616, ADR-0327). 반려는 공개본·재승인 대기 변경분을 고치지 않는다
  * @summary 판매 승인 반려(사유 필수)
  */
 export const CreateOpsSaleReviewRejectionParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
+export const createOpsSaleReviewRejectionBodyReasonMax = 1000;
+
+
+
 export const CreateOpsSaleReviewRejectionBody = zod.object({
-  "reason": zod.string()
+  "reason": zod.string().min(1).max(createOpsSaleReviewRejectionBodyReasonMax)
 }).strict()
 
 export const CreateOpsSaleReviewRejectionResponse = zod.unknown()
@@ -4551,6 +4555,46 @@ export const ListOpsSaleReviewsResponse = zod.object({
 }).describe('판매 승인 목록의 한 줄(공연 단위, ADR-0093). 확인 패널의 내용은 싣지 않는다')).optional(),
   "nextCursor": zod.string().nullish()
 })
+
+/**
+ * BAT-616 LCH-080, FR-052, SCR-048, ADR-0093·ADR-0327. 공연·파트너 상호·판매자 정보·회차(오픈·시작·규모)·판매 정책 읽기 전용·제출 시각·재승인 여부·반려 사유를 준다. viewer·CS도 읽는다. 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 '연동 전'이라고 적는다. Cache-Control: no-store
+ * @summary 판매 승인 상세(SCR-048 확인 패널)
+ */
+export const GetOpsSaleReviewParams = zod.object({
+  "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
+})
+
+export const GetOpsSaleReviewResponse = zod.object({
+  "productionId": zod.string().optional(),
+  "title": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "promoterName": zod.string().optional(),
+  "status": zod.enum(['SUBMITTED', 'APPROVED', 'REJECTED', 'SUSPENDED']).optional(),
+  "reapproval": zod.boolean().optional().describe('승인 이력이 있는 공연의 변경 재승인인지'),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "rejectionReason": zod.string().nullish().describe('마지막 반려 사유'),
+  "seller": zod.union([zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).describe('판매자 신원정보(전자상거래법 §20②, POL-037)'),zod.null()]).optional().describe('판매자 신원정보. 아직 받지 않았으면 null'),
+  "verifiedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "salePolicy": zod.array(zod.record(zod.string(), zod.unknown())).optional().describe('확인 패널이 보는 판매 정책 규칙(재승인 대기 변경분이 있으면 그 규칙). 읽기 전용이다'),
+  "events": zod.array(zod.object({
+  "eventId": zod.string().optional(),
+  "openAt": zod.iso.datetime({"offset":true}).optional(),
+  "startsAt": zod.iso.datetime({"offset":true}).optional(),
+  "status": zod.enum(['SCHEDULED', 'CANCELLED', 'POSTPONED']).optional(),
+  "scale": zod.union([zod.literal('LARGE'),zod.literal('MEDIUM'),zod.literal('SMALL'),zod.literal(null)]).nullish().describe('판매 승인 때 정한 규모. 승인 전이면 null'),
+  "demandForecastPath": zod.string().optional().describe('GET /v1/ops/events/{eventId}/demand-forecast')
+}).describe('판매 승인 확인 패널의 회차 한 줄(SCR-048). 수요 예측은 링크로 가리킨다')).optional(),
+  "suspensionApprovalPending": zod.boolean().optional().describe('LCH-090 전에는 늘 false다')
+}).describe('관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 \'연동 전\'이라고 적는다(ADR-0327 결정 6)')
 
 /**
  * SCR-065, docs/design/d5 §1.6 9번, docs/planning/03 §3 '파트너사·계약' 행(CS는 읽기, viewer는 쓰지 않는다). q는 상호를 찾는 검색어다. 정렬은 상호 가나다순 [가정]. Cache-Control: no-store

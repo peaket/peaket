@@ -11,8 +11,11 @@
  */
 import * as zod from 'zod';
 
+export const createOpsSaleReviewRejectionBodyReasonMax = 1000;
+
+
 export const CreateOpsSaleReviewRejectionBody = zod.object({
-  "reason": zod.string()
+  "reason": zod.string().min(1).max(createOpsSaleReviewRejectionBodyReasonMax)
 }).strict()
 
 export type CreateOpsSaleReviewRejectionBody = zod.input<typeof CreateOpsSaleReviewRejectionBody>;

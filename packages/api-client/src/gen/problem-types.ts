@@ -272,13 +272,16 @@ export type ProblemType =
   | 'sale-eligibility-upload-rejected'
   | 'sale-eligibility-upload-too-large'
   | 'sale-ended'
+  | 'sale-not-publishable'
   | 'sale-not-suspended'
   | 'sale-paused'
   | 'sale-policy-denied'
   | 'sale-policy-invalid'
   | 'sale-review-list-missing'
   | 'sale-review-not-approved'
+  | 'sale-review-not-cancellable'
   | 'sale-review-not-submitted'
+  | 'sale-review-request-invalid'
   | 'sale-review-scales-missing'
   | 'sale-setting-locked'
   | 'sale-stop-unavailable'
@@ -611,13 +614,16 @@ export const PROBLEM_TYPES = {
   'sale-eligibility-upload-rejected': { status: 422, title: "명단 파일을 읽지 않았습니다" },
   'sale-eligibility-upload-too-large': { status: 413, title: "명단 파일은 8MB까지 올릴 수 있습니다" },
   'sale-ended': { status: 410, title: "판매 시간이 끝났습니다" },
+  'sale-not-publishable': { status: 409, title: "판매를 열 수 없는 회차입니다" },
   'sale-not-suspended': { status: 409, title: "판매 중지된 공연이 아닙니다" },
   'sale-paused': { status: 423, title: "판매가 잠시 멈췄습니다" },
   'sale-policy-denied': { status: 403, title: "판매 정책에 따라 지금은 예매할 수 없습니다" },
   'sale-policy-invalid': { status: 422, title: "판매 정책 규칙에 고칠 곳이 있습니다" },
   'sale-review-list-missing': { status: 422, title: "판매 정책이 쓰는 명단이 없습니다" },
   'sale-review-not-approved': { status: 409, title: "판매 승인된 공연만 회차 설정을 쓸 수 있습니다" },
+  'sale-review-not-cancellable': { status: 409, title: "거둘 판매 승인 변경 요청이 없습니다" },
   'sale-review-not-submitted': { status: 409, title: "판매 승인 대기 중인 공연이 아닙니다" },
+  'sale-review-request-invalid': { status: 422, title: "판매 승인 요청을 받을 수 없습니다" },
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
   'sale-stop-unavailable': { status: 503, title: "판매를 멈추지 못해 확정하지 않았습니다" },

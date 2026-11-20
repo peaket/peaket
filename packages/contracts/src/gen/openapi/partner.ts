@@ -763,7 +763,7 @@ export const GetPartnerEventCancellationResponse = zod.object({
 }).describe('파트너가 보는 회차 취소·연기 요청 상태(SCR-044 ④). 운영자용 EventCancellationRequest의 미리보기·결제사별 몫을 빼고, 파트너가 낸 값과 합계만 싣는다')
 
 /**
- * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 저장하지 않고 결제사 지급대행 등록 요청에 바로 넘기고 은행·끝 4자리만 남긴다(ADR-0047). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
+ * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 모양만 보고 저장하지 않는다(지급대행 연동 전, LCH-110). 지급대행 등록이 없어도 승인을 막지 않고 화면에 '연동 전'이라고 적는다(ADR-0327 결정 6). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 판매 승인 요청(판매자 신원정보 포함). 승인 전에는 공개되지 않음
  */
 export const CreatePartnerProductionSaleReviewParams = zod.object({
@@ -797,7 +797,9 @@ export const CreatePartnerProductionSaleReviewBody = zod.object({
 }).strict().describe('휠체어석 확인(FR-023). 서버는 저장된 좌석맵으로 수량·위치·온라인 판매 경고를 다시 센다(추천 적용 2026-10-14, ADR-0062)')
 }).strict()
 
-export const CreatePartnerProductionSaleReviewResponse = zod.void()
+export const CreatePartnerProductionSaleReviewResponse = zod.object({
+  "status": zod.enum(['SUBMITTED'])
+})
 
 /**
  * docs/planning/03 §2.14의 변경 취소(Submitted·Rejected → Approved), FR-052, POL-037. 승인 이력이 있는 공연에서 승인 대기 중이거나 반려된 변경 요청을 거두고 마지막 승인 내용으로 돌아간다. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(추천 적용 2026-10-23)
@@ -808,6 +810,37 @@ export const DeletePartnerProductionSaleReviewParams = zod.object({
 })
 
 export const DeletePartnerProductionSaleReviewResponse = zod.void()
+
+/**
+ * BAT-616 LCH-080, FR-052. 판매 승인 상태·반려 사유·제출 시각·판매자 정보·회차(오픈·시작·규모)를 준다. 계좌번호 전체는 싣지 않는다. Cache-Control: no-store
+ * @summary 파트너 판매 승인 현황(SCR-021 5단계)
+ */
+export const GetPartnerProductionSaleReviewParams = zod.object({
+  "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
+})
+
+export const GetPartnerProductionSaleReviewResponse = zod.object({
+  "saleReview": zod.enum(['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'SUSPENDED']).optional(),
+  "rejectionReason": zod.string().nullish(),
+  "hasApprovalHistory": zod.boolean().optional(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "seller": zod.union([zod.object({
+  "legalName": zod.string(),
+  "representative": zod.string(),
+  "address": zod.string(),
+  "phone": zod.string(),
+  "email": zod.email(),
+  "businessRegNo": zod.string(),
+  "mailOrderReportNo": zod.string().optional().describe('통신판매업 신고번호. 없으면 exemptionBasis 필수'),
+  "exemptionBasis": zod.string().optional()
+}).describe('판매자 신원정보(전자상거래법 §20②, POL-037)'),zod.null()]).optional(),
+  "events": zod.array(zod.object({
+  "eventId": zod.string().optional(),
+  "openAt": zod.iso.datetime({"offset":true}).optional(),
+  "startsAt": zod.iso.datetime({"offset":true}).optional(),
+  "scale": zod.union([zod.literal('LARGE'),zod.literal('MEDIUM'),zod.literal('SMALL'),zod.literal(null)]).nullish()
+})).optional()
+}).describe('파트너가 보는 판매 승인 현황(SCR-021 5단계, BAT-616). 계좌번호 전체는 없다')
 
 /**
  * FR-027, FR-062, POL-039. 소속 테넌트만, 계좌는 끝 4자리만

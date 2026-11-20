@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-ops.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 5328aaf924536b84bb3120b68ed635defa8ce4ef7e371684d8a326492fdeba70
+# openapi info.version 1.0.0-draft · 계약 sha256 147fcb37ed0964be5e3cfff22a822fa4a5d3a1836e6d779e1c20d948fe7380b9
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -488,58 +488,10 @@ spec:
             type: Exact
             value: /v1/ops/auth/reauthentications
           method: OPTIONS
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: console
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-        - type: ResponseHeaderModifier
-          responseHeaderModifier:
-            set:
-              - name: X-Trace-Id
-                value: "%TRACE_ID%"
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: identity-svc
-          namespace: core
-          port: 8080
-    - matches:
         - path:
             type: Exact
             value: /v1/ops/auth/sessions/me
           method: GET
-        - path:
-            type: Exact
-            value: /v1/ops/auth/sessions/me
-          method: OPTIONS
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: console
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-        - type: ResponseHeaderModifier
-          responseHeaderModifier:
-            set:
-              - name: X-Trace-Id
-                value: "%TRACE_ID%"
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: ops-svc
-          namespace: core
-          port: 8080
-    - matches:
         - path:
             type: Exact
             value: /v1/ops/auth/sessions/me
@@ -660,6 +612,14 @@ spec:
           method: OPTIONS
         - path:
             type: RegularExpression
+            value: /v1/ops/sale-reviews/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/sale-reviews/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
             value: /v1/ops/sale-reviews/[^/]+/approvals
           method: POST
         - path:
@@ -761,65 +721,6 @@ spec:
           port: 8080
       timeouts:
         request: 0s
-    - name: ops-promoters
-      matches:
-        - path:
-            type: Exact
-            value: /v1/ops/promoters
-          method: GET
-        - path:
-            type: Exact
-            value: /v1/ops/promoters
-          method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/promoters
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-term-changes
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-term-changes
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-terms
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/ops/promoters/[^/]+/contract-terms
-          method: OPTIONS
-      filters:
-        - type: RequestHeaderModifier
-          requestHeaderModifier:
-            set:
-              - name: x-peaket-app
-                value: console
-              - name: x-forwarded-for
-                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
-            remove:
-              - x-peaket-browser-traceparent
-        - type: ResponseHeaderModifier
-          responseHeaderModifier:
-            set:
-              - name: X-Trace-Id
-                value: "%TRACE_ID%"
-      backendRefs:
-        - group: ""
-          kind: Service
-          name: core-svc
-          namespace: core
-          port: 8080
     - matches:
         - path:
             type: Exact
@@ -1794,6 +1695,42 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/ops/productions/[^/]+/aliases
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/promoters
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/ops/promoters
+          method: POST
+        - path:
+            type: Exact
+            value: /v1/ops/promoters
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-term-changes
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-term-changes
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-terms
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/promoters/[^/]+/contract-terms
           method: OPTIONS
         - path:
             type: Exact

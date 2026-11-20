@@ -266,6 +266,7 @@ export type OperationId =
   | 'getOpsPromoter'
   | 'getOpsResearchExport'
   | 'getOpsReview'
+  | 'getOpsSaleReview'
   | 'getOpsWidget'
   | 'getOrder'
   | 'getOrderPaymentStatus'
@@ -279,6 +280,7 @@ export type OperationId =
   | 'getPartnerMerchOrderDelivery'
   | 'getPartnerProduct'
   | 'getPartnerProduction'
+  | 'getPartnerProductionSaleReview'
   | 'getPartnerProductionSeatmap'
   | 'getPartnerSalePolicy'
   | 'getPartnerSeatmapTemplate'
@@ -662,6 +664,7 @@ export const OPERATIONS = {
   getOpsPromoter: {operationId: "getOpsPromoter",method: "GET",path: "/v1/ops/promoters/{promoterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsResearchExport: {operationId: "getOpsResearchExport",method: "GET",path: "/v1/ops/research-exports/{exportId}",host: "ops-api",kind: "read",cookie: true},
   getOpsReview: {operationId: "getOpsReview",method: "GET",path: "/v1/ops/reviews/{reviewId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsSaleReview: {operationId: "getOpsSaleReview",method: "GET",path: "/v1/ops/sale-reviews/{productionId}",host: "ops-api",kind: "read",cookie: true},
   getOpsWidget: {operationId: "getOpsWidget",method: "GET",path: "/v1/ops/widgets/{widgetKey}",host: "ops-api",kind: "read",cookie: true,query: ["eventId","from","to"]},
   getOrder: {operationId: "getOrder",method: "GET",path: "/v1/orders/{orderId}",host: "api",kind: "read",cookie: true},
   getOrderPaymentStatus: {operationId: "getOrderPaymentStatus",method: "GET",path: "/v1/orders/{orderId}/payment-status",host: "api",kind: "longpoll",cookie: true},
@@ -675,6 +678,7 @@ export const OPERATIONS = {
   getPartnerMerchOrderDelivery: {operationId: "getPartnerMerchOrderDelivery",method: "GET",path: "/v1/partner/merch-orders/{orderId}/delivery",host: "partner-api",kind: "read",cookie: true},
   getPartnerProduct: {operationId: "getPartnerProduct",method: "GET",path: "/v1/partner/products/{productId}",host: "partner-api",kind: "read",cookie: true},
   getPartnerProduction: {operationId: "getPartnerProduction",method: "GET",path: "/v1/partner/productions/{productionId}",host: "partner-api",kind: "read",cookie: true},
+  getPartnerProductionSaleReview: {operationId: "getPartnerProductionSaleReview",method: "GET",path: "/v1/partner/productions/{productionId}/sale-review",host: "partner-api",kind: "read",cookie: true},
   getPartnerProductionSeatmap: {operationId: "getPartnerProductionSeatmap",method: "GET",path: "/v1/partner/productions/{productionId}/seatmap",host: "partner-api",kind: "read",cookie: true,query: ["fromTemplate"]},
   getPartnerSalePolicy: {operationId: "getPartnerSalePolicy",method: "GET",path: "/v1/partner/productions/{productionId}/sale-policy",host: "partner-api",kind: "read",cookie: true},
   getPartnerSeatmapTemplate: {operationId: "getPartnerSeatmapTemplate",method: "GET",path: "/v1/partner/seatmap-templates/{templateId}",host: "partner-api",kind: "read",cookie: true},

@@ -391,6 +391,13 @@ stateDiagram-v2
 | SCR-069 포렌식 리플레이(조사 원천) | 작업대에서 회차·묶음을 넘겨 새 탭으로 연다(§7. 주소와 넘기는 값은 docs/features/forensic-replay.md) | 묶음 계정의 좌석과 단계별 걸린 시간을 다시 본다. 연구 원천과 한 화면에 섞지 않는다 | `GET /v1/ops/fraud-cases/{caseId}/replay-export`(열 단위 공개 파일 형식인 Arrow 파일, `Cache-Control: no-store`, `Content-Disposition` 없음, `Sec-Fetch-Mode: navigate`면 403) |
 | SCR-046 승인 업무(승인자 쪽) | `/cs/approvals` | 부정 예매 조치 요청을 사건 요약만 보고, 판단 이유를 적어 승인(범위를 줄여 승인 포함)·반려한다(아래 '조치 요청과 승인'). 계약 조건 변경(`CONTRACT_TERMS_CHANGE`) 카드는 지금 값·요청 값·사유를 보이고, 요청자가 아닌 commander가 `act=APPROVAL` 재인증 뒤 승인·반려한다(2026-11-20 BAT-615, ADR-0320. 이 묶음은 API만, 화면은 다음 묶음) | `GET /v1/ops/approval-requests/{approvalId}`(`fraudCaseSummary`), `POST /v1/ops/approval-requests/{approvalId}/approvals`(본문 `ApprovalDecisionBody`, ADR-0173), `POST /v1/ops/approval-requests/{approvalId}/rejections`, 계약이면 `POST …/withdrawals`(요청자) |
 
+**판매 승인(SCR-048, 2026-11-20 BAT-616, ADR-0327)**
+
+- 목록 `GET /v1/ops/sale-reviews`는 상태(기본 SUBMITTED)를 주지 않으면 승인 대기만, `status`에 쉼표로 여럿을 주면 그 상태들을 제출·승인·등록 시각 오래된 순으로 준다. 상세 `GET /v1/ops/sale-reviews/{productionId}`는 판매자 정보·회차(오픈·시작·규모)·판매 정책 읽기 전용·제출 시각·재승인 여부·반려 사유를 준다. viewer·operator·commander·`cs_agent`·`cs_lead`가 읽고(CS·viewer는 읽기만), 승인·반려는 operator·commander만 한다. 두 응답은 `no-store`이고 계좌번호 전체·연락처·사업자번호를 싣지 않는다.
+- 승인은 공연 단위다(ADR-0093). 승인 커밋 뒤 core-svc가 비취소 회차마다 purchase 내부 판매 열기를 부르고, 성공한 회차만 `q:cfg`·`q:epoch`를 쓴 뒤 `event:{id}`·`production:{id}` CDN 태그를 무효화한다. 열기·사본·무효화가 실패해도 승인은 200으로 남고 정비 일 `sale-config-publish`가 다시 시도한다.
+- 반려는 사유 1~1,000자를 `production.rejection_reason`에 남기고 파트너 화면·관제 상세가 읽는다.
+- 판매 중지·재개(2인 승인)와 SCR-048의 그 단추는 LCH-090 몫이다(ADR-0123). 이 묶음은 자리 안내만 둔다. 지급대행 등록은 LCH-110 전이라 "연동 전"으로 보인다. 화면 연결은 BAT-617이다.
+
 **누가 여는가**
 
 - 조사 경로(위 표의 SCR-070·071·069 경로)는 모두 `x-peaket-roles: [commander, cs_lead]`다. ops-svc의 `RolesGuard`가 요청마다 판정한 역할로 먼저 거르고(ADR-0172), identity-svc `GetAdminDesignations`로 그 계정에 살아 있는 `FRAUD_INVESTIGATOR`(부정 거래 조사관) 지정이 있는지 본다. 지정은 토큰에 싣지 않고, 확인 결과는 5초 [가정] 캐시한다(docs/security/authz-matrix.md §3.7). 지정이 없거나 identity-svc가 답하지 않으면 403 `investigator-required`다. 그 거절도 감사 기록과 관리 계정 접속기록(`admin_data_access`)에 권한 밖 조회 시도로 남아, 접속기록 점검(§9 '접속기록 점검(FR-064)' 행)이 센다.

@@ -195,6 +195,7 @@ import type {
   OpsPromoterPage,
   OpsReauthPasswordStep,
   OpsReviewDetail,
+  OpsSaleReviewDetail,
   OpsSaleReviewPage,
   PartnerNotice,
   PartnerNoticeCreate,
@@ -9664,7 +9665,7 @@ export const getCreateOpsSaleReviewApprovalUrl = (productionId: string,) => {
 }
 
 /**
- * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078)
+ * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
  * @summary 판매 승인(operator). 판매 조건은 고치지 않음
  */
 export const createOpsSaleReviewApproval = async (productionId: string,
@@ -9749,10 +9750,22 @@ export const useCreateOpsSaleReviewApproval = <TError = ErrorType<ProblemRespons
   status: 200
 }
 
+export type createOpsSaleReviewRejectionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsSaleReviewRejectionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type createOpsSaleReviewRejectionResponseSuccess = (createOpsSaleReviewRejectionResponse200) & {
   headers: Headers;
 };
-;
+export type createOpsSaleReviewRejectionResponseError = (createOpsSaleReviewRejectionResponse400 | createOpsSaleReviewRejectionResponse409) & {
+  headers: Headers;
+};
 
 export const getCreateOpsSaleReviewRejectionUrl = (productionId: string,) => {
 
@@ -9763,7 +9776,7 @@ export const getCreateOpsSaleReviewRejectionUrl = (productionId: string,) => {
 }
 
 /**
- * FR-052, POL-037. 공연 단위(ADR-0093)
+ * FR-052, POL-037. 공연 단위(ADR-0093). 사유 1~1,000자를 production.rejection_reason에 남기고 파트너 화면과 관제 상세가 읽는다(BAT-616, ADR-0327). 반려는 공개본·재승인 대기 변경분을 고치지 않는다
  * @summary 판매 승인 반려(사유 필수)
  */
 export const createOpsSaleReviewRejection = async (productionId: string,
@@ -9798,7 +9811,7 @@ return orvalFetch<createOpsSaleReviewRejectionResponseSuccess>(getCreateOpsSaleR
 
 export const getCreateOpsSaleReviewRejectionMutationKey = () => ['createOpsSaleReviewRejection'] as const;
 
-export const getCreateOpsSaleReviewRejectionMutationOptions = <TError = ErrorType<unknown>,
+export const getCreateOpsSaleReviewRejectionMutationOptions = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsSaleReviewRejection>>, TError,CreateOpsSaleReviewRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createOpsSaleReviewRejection>>, TError,CreateOpsSaleReviewRejectionMutationVariables, TContext> => {
 
@@ -9827,13 +9840,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateOpsSaleReviewRejectionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsSaleReviewRejection>>>
     export type CreateOpsSaleReviewRejectionMutationBody = BodyType<CreateOpsSaleReviewRejectionBody> | undefined
-    export type CreateOpsSaleReviewRejectionMutationError = ErrorType<unknown>
+    export type CreateOpsSaleReviewRejectionMutationError = ErrorType<ProblemResponse>
     export type CreateOpsSaleReviewRejectionMutationVariables = {productionId: string;data?: BodyType<CreateOpsSaleReviewRejectionBody>}
 
     /**
  * @summary 판매 승인 반려(사유 필수)
  */
-export const useCreateOpsSaleReviewRejection = <TError = ErrorType<unknown>,
+export const useCreateOpsSaleReviewRejection = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsSaleReviewRejection>>, TError,CreateOpsSaleReviewRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createOpsSaleReviewRejection>>,
@@ -14409,6 +14422,134 @@ export function useListOpsSaleReviews<TData = Awaited<ReturnType<typeof listOpsS
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListOpsSaleReviewsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsSaleReviewResponse200 = {
+  data: OpsSaleReviewDetail
+  status: 200
+}
+
+export type getOpsSaleReviewResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsSaleReviewResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsSaleReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsSaleReviewResponseSuccess = (getOpsSaleReviewResponse200) & {
+  headers: Headers;
+};
+export type getOpsSaleReviewResponseError = (getOpsSaleReviewResponse401 | getOpsSaleReviewResponse403 | getOpsSaleReviewResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsSaleReviewUrl = (productionId: string,) => {
+
+
+
+
+  return `/v1/ops/sale-reviews/${encodeURIComponent(String(productionId))}`
+}
+
+/**
+ * BAT-616 LCH-080, FR-052, SCR-048, ADR-0093·ADR-0327. 공연·파트너 상호·판매자 정보·회차(오픈·시작·규모)·판매 정책 읽기 전용·제출 시각·재승인 여부·반려 사유를 준다. viewer·CS도 읽는다. 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 '연동 전'이라고 적는다. Cache-Control: no-store
+ * @summary 판매 승인 상세(SCR-048 확인 패널)
+ */
+export const getOpsSaleReview = async (productionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsSaleReviewResponseSuccess> => {
+
+  return orvalFetch<getOpsSaleReviewResponseSuccess>(getGetOpsSaleReviewUrl(productionId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsSaleReviewQueryKey = (productionId: string,) => {
+    return [
+    `/v1/ops/sale-reviews/${productionId}`
+    ] as const;
+    }
+
+
+export const getGetOpsSaleReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsSaleReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsSaleReviewQueryKey(productionId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsSaleReview>>> = ({ signal }) => getOpsSaleReview(productionId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: productionId !== null && productionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsSaleReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsSaleReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsSaleReview>>>
+export type GetOpsSaleReviewQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsSaleReview<TData = Awaited<ReturnType<typeof getOpsSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsSaleReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsSaleReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsSaleReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsSaleReview<TData = Awaited<ReturnType<typeof getOpsSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsSaleReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsSaleReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsSaleReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsSaleReview<TData = Awaited<ReturnType<typeof getOpsSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsSaleReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 판매 승인 상세(SCR-048 확인 패널)
+ */
+
+export function useGetOpsSaleReview<TData = Awaited<ReturnType<typeof getOpsSaleReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ productionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsSaleReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsSaleReviewQueryOptions(productionId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

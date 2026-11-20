@@ -59,6 +59,7 @@ import type {
   CreatePartnerEventStaffInvitationBody,
   CreatePartnerMerchShipmentImportBody,
   CreatePartnerProductionImageBody,
+  CreatePartnerProductionSaleReview202,
   CreatePartnerProductionSaleReviewBody,
   CreatePartnerProductionSeatmapBody,
   CreatePartnerProductionSeatmapImportBody,
@@ -104,6 +105,7 @@ import type {
   PartnerProductionPage,
   PartnerProductionUpdate,
   PartnerReauthPasswordStep,
+  PartnerSaleReviewStatus,
   PartnerSalesReport,
   PartnerSettlementExportCreate,
   PartnerTeamAccountPage,
@@ -125,6 +127,7 @@ import type {
   SeatmapTemplate,
   SellerChangeRequest,
   SellerChangeRequestState,
+  SellerInfo,
   SellerProfile,
   SettlementStatement,
   StaffAssignment,
@@ -171,6 +174,12 @@ export const getCreatePartnerEventCancellationResponseOpsActorMock = (overrideRe
 export const getCreatePartnerEventCancellationResponseMock = (overrideResponse: Partial<Extract<EventCancellationRequest, object>> = {}): EventCancellationRequest => ({requestId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['CANCEL','POSTPONE'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['REQUESTED','JUDGED','PENDING_APPROVAL','APPROVED','RUNNING','PAUSED','REFUND_WINDOW','COMPLETED','REJECTED'] as const), undefined]), fault: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','FORCE_MAJEURE','CONTENT_CHANGE'] as const), undefined]), fanNoticeReason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 200}}), undefined]), dryRun: faker.helpers.arrayElement([{}, undefined]), progress: faker.helpers.arrayElement([{total: faker.helpers.arrayElement([faker.number.int(), undefined]), done: faker.helpers.arrayElement([faker.number.int(), undefined]), failed: faker.helpers.arrayElement([faker.number.int(), undefined]), accountPending: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), perPg: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({pg: faker.helpers.arrayElement([faker.helpers.arrayElement(['TOSS','PORTONE','SIMULATOR'] as const), undefined]), state: faker.helpers.arrayElement([faker.helpers.arrayElement(['RUNNING','PAUSED','COMPLETED'] as const), undefined]), pauseReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['AUTO_FAILURE_RATE','AUTO_FAILED_AMOUNT','AUTO_CONSECUTIVE_FAILURES','AUTO_CIRCUIT_OPEN','AUTO_REJECT_RATE','MANUAL'] as const), null]), done: faker.helpers.arrayElement([faker.number.int(), undefined]), failed: faker.helpers.arrayElement([faker.number.int(), undefined]), unknown: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined])}, undefined]), promoterId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), title: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), partnerReason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), faultOpinion: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','FORCE_MAJEURE','CONTENT_CHANGE'] as const), null]), evidenceRef: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), newStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), requestedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), judgedBy: faker.helpers.arrayElement([{...getCreatePartnerEventCancellationResponseOpsActorMock()},null,]), ...overrideResponse})
 
 export const getGetPartnerEventCancellationResponseMock = (overrideResponse: Partial<Extract<PartnerEventCancellationStatus, object>> = {}): PartnerEventCancellationStatus => ({requestId: faker.string.alpha({length: {min: 10, max: 20}}), eventId: faker.string.uuid(), kind: faker.helpers.arrayElement(['CANCEL','POSTPONE'] as const), status: faker.helpers.arrayElement(['REQUESTED','JUDGED','PENDING_APPROVAL','APPROVED','RUNNING','PAUSED','REFUND_WINDOW','COMPLETED','REJECTED'] as const), requestedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), evidenceRef: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), faultOpinion: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','FORCE_MAJEURE','CONTENT_CHANGE'] as const), null]), newStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), judgementDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), fault: faker.helpers.arrayElement([faker.helpers.arrayElement(['ORGANIZER','FORCE_MAJEURE','CONTENT_CHANGE'] as const), null]), judgementSummary: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectionReason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), refundProgress: faker.helpers.arrayElement([{total: faker.number.int(), done: faker.number.int(), failed: faker.number.int()},null,]), pausedBy: faker.helpers.arrayElement([faker.helpers.arrayElement(['AUTOMATIC','OPERATOR'] as const), null]), postponement: faker.helpers.arrayElement([{refundApplicationCount: faker.number.int(), refundDeadlineAt: faker.date.past().toISOString().slice(0, 19) + 'Z'},null,]), compensation: faker.helpers.arrayElement([{targetCount: faker.number.int(), totalAmount: faker.number.int()},null,]), ...overrideResponse})
+
+export const getCreatePartnerProductionSaleReviewResponseMock = (overrideResponse: Partial<Extract<CreatePartnerProductionSaleReview202, object>> = {}): CreatePartnerProductionSaleReview202 => ({status: faker.helpers.arrayElement(['SUBMITTED'] as const), ...overrideResponse})
+
+export const getGetPartnerProductionSaleReviewResponseSellerInfoMock = (overrideResponse: Partial<SellerInfo> = {}): SellerInfo => ({...{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, ...overrideResponse});
+
+export const getGetPartnerProductionSaleReviewResponseMock = (overrideResponse: Partial<Extract<PartnerSaleReviewStatus, object>> = {}): PartnerSaleReviewStatus => ({saleReview: faker.helpers.arrayElement([faker.helpers.arrayElement(['DRAFT','SUBMITTED','APPROVED','REJECTED','SUSPENDED'] as const), undefined]), rejectionReason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), hasApprovalHistory: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), seller: faker.helpers.arrayElement([{...getGetPartnerProductionSaleReviewResponseSellerInfoMock()},null,]), events: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), openAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), startsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), scale: faker.helpers.arrayElement([faker.helpers.arrayElement(['LARGE','MEDIUM','SMALL'] as const), null])})), undefined]), ...overrideResponse})
 
 export const getGetPartnerEventSettlementsResponseMock = (): SettlementStatement[] => (Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({statementId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['EVENT','PRODUCT'] as const), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), pg: faker.helpers.arrayElement([faker.helpers.arrayElement(['TOSS','PORTONE'] as const), undefined]), pgStore: faker.helpers.arrayElement([faker.helpers.arrayElement(['STANDARD','ESCROW'] as const), undefined]), periodStart: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 10), undefined]), periodEnd: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 10), undefined]), grossAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), refundAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), commissionAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), commissionVat: faker.helpers.arrayElement([faker.number.int(), undefined]), offsetAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), payoutAmount: faker.helpers.arrayElement([faker.number.int(), undefined]), revision: faker.helpers.arrayElement([faker.number.int(), undefined]), supersedesId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), excludedPayments: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['CALCULATED','NOTIFIED','DISPUTED','CONFIRMED','HELD','SCHEDULED','FAILED','PAID','CARRIED_OVER','SUPERSEDED'] as const), undefined]), holdReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['KYC','ACCOUNT_CHANGE','BALANCE','ACCOUNT_MISMATCH','SALE_SUSPENDED'] as const), undefined]), disputeDueAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), payoutDate: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 10), undefined]), payoutBankCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), payoutAccountLast4: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})))
 
@@ -523,11 +532,13 @@ export const getGetPartnerEventCancellationMockHandler = (overrideResponse?: Par
   }, options)
 }
 
-export const getCreatePartnerProductionSaleReviewMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ productionId: string }, CreatePartnerProductionSaleReviewBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getCreatePartnerProductionSaleReviewMockHandler = (overrideResponse?: CreatePartnerProductionSaleReview202 | ((info: Parameters<HttpResponseResolver<{ productionId: string }, CreatePartnerProductionSaleReviewBody>>[0]) => Promise<CreatePartnerProductionSaleReview202> | CreatePartnerProductionSaleReview202), options?: RequestHandlerOptions) => {
   return http.post<{ productionId: string }, CreatePartnerProductionSaleReviewBody>('*/v1/partner/productions/:productionId/sale-review', async (info: Parameters<HttpResponseResolver<{ productionId: string }, CreatePartnerProductionSaleReviewBody>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerProductionSaleReviewResponseMock(),
       { status: 202
       })
   }, options)
@@ -539,6 +550,18 @@ export const getDeletePartnerProductionSaleReviewMockHandler = (overrideResponse
 
     return new HttpResponse(null,
       { status: 204
+      })
+  }, options)
+}
+
+export const getGetPartnerProductionSaleReviewMockHandler = (overrideResponse?: PartnerSaleReviewStatus | ((info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => Promise<PartnerSaleReviewStatus> | PartnerSaleReviewStatus), options?: RequestHandlerOptions) => {
+  return http.get<{ productionId: string }>('*/v1/partner/productions/:productionId/sale-review', async (info: Parameters<HttpResponseResolver<{ productionId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetPartnerProductionSaleReviewResponseMock(),
+      { status: 200
       })
   }, options)
 }
@@ -1315,6 +1338,7 @@ export const getPartnerMock = () => [
   getGetPartnerEventCancellationMockHandler(),
   getCreatePartnerProductionSaleReviewMockHandler(),
   getDeletePartnerProductionSaleReviewMockHandler(),
+  getGetPartnerProductionSaleReviewMockHandler(),
   getGetPartnerEventSettlementsMockHandler(),
   getListPartnerProductSettlementsMockHandler(),
   getGetPartnerEventReportMockHandler(),
