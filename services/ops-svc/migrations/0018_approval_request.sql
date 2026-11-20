@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS approval_request (
   amount bigint,
   reason_code text,
   reason_text text NOT NULL DEFAULT '',
-  evidenceChecked text,
+  evidence_checked text,
   requested_by uuid NOT NULL,
   requester_role text NOT NULL DEFAULT '',
   required_approvals integer NOT NULL DEFAULT 2,

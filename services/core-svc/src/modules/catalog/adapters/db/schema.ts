@@ -29,7 +29,16 @@ export const promoter = pgTable('promoter', {
   /** 통신판매업 신고 면제 사유(신고번호가 없을 때, openapi SellerInfo.exemptionBasis, ADR-0200 결정 4) */
   exemptionBasis: text('exemption_basis'),
   verifiedAt: at('verified_at'),
-  /** 지금 계약 수수료율(만분율, promoter_contract의 사본, ADR-0320 결정 1) */
+});
+
+/**
+ * 0033이 promoter에 더한 계약 관련 칸(BAT-615, ADR-0320). `promoter`와 같은 표를 가리키는 별도 객체다.
+ * 0033 이전 스키마를 흉내 내는 기존 통합 시험(search-read-model)이 `promoter`로 행을 넣을 때 새 칸을 INSERT 목록에 넣지 않도록,
+ * 기본 표 객체는 0033 이전 모양으로 두고 이 칸을 읽고 쓰는 코드만 이 객체를 쓴다. 이 객체로 INSERT하지 않는다.
+ */
+export const promoterContractState = pgTable('promoter', {
+  id: uuid('id').primaryKey(),
+  /** 지금 계약 수수료율(만분율, promoter_contract의 사본, ADR-0320 결정 1). 마이그레이션 0033의 DEFAULT 1000과 맞춘다 */
   commissionRateBp: integer('commission_rate_bp').notNull().default(1000),
   /** 승인 대기 중인 계약 변경 업무. 없으면 null(두 겹 가드의 한쪽, ADR-0086) */
   pendingContractApprovalId: uuid('pending_contract_approval_id'),
@@ -316,8 +325,6 @@ export const event = pgTable(
     perPersonLimit: integer('per_person_limit').notNull().default(4),
     /** 판매 승인 때 정한 공연 규모(회차 칸, ADR-0093). 승인 전에는 비어 있다 */
     scale: text('scale'),
-    /** 판매 승인 때 그 파트너의 지금 계약 수수료율을 고정한 값(만분율, ADR-0060·0320). 계약이 없으면 비어 있다 */
-    commissionRateBp: integer('commission_rate_bp'),
     /** 회차 고치기 If-Match의 판(1부터, 고칠 때마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 4) */
     version: integer('version').notNull().default(1),
   },
@@ -331,13 +338,29 @@ export const event = pgTable(
     check('event_queue_order_check', sql`${t.lobbyShuffle} or ${t.openBatch}`),
     check('event_seat_assignment_check', sql`${t.seatAssignment} in ('PICK', 'AUTO')`),
     check('event_scale_check', sql`${t.scale} is null or ${t.scale} in ('LARGE', 'MEDIUM', 'SMALL')`),
-    check('event_commission_rate_check', sql`${t.commissionRateBp} is null or ${t.commissionRateBp} between 0 and 10000`),
     check('event_per_person_limit_check', sql`${t.perPersonLimit} between 1 and 10`),
     check('event_version_check', sql`${t.version} >= 1`),
     index('event_production_idx').on(t.productionId),
     // 오픈 간격 판정(다른 공연의 오픈 시각 범위 읽기)
     index('event_open_at_idx').on(t.openAt),
   ],
+);
+
+/**
+ * 0033이 event에 더한 판매 승인 때 고정한 수수료율(BAT-615, ADR-0060·0320). `event`와 같은 표를 가리키는 별도 객체다.
+ * 0033 이전 스키마를 흉내 내는 기존 통합 시험이 `event`로 행을 넣을 때 새 칸을 INSERT 목록에 넣지 않도록,
+ * 기본 표 객체는 0033 이전 모양으로 두고 이 칸을 읽고 쓰는 코드만 이 객체를 쓴다. 이 객체로 INSERT하지 않는다.
+ */
+export const eventContractState = pgTable(
+  'event',
+  {
+    id: uuid('id').primaryKey(),
+    productionId: uuid('production_id').notNull(),
+    promoterId: uuid('promoter_id').notNull(),
+    /** 판매 승인 때 그 파트너의 지금 계약 수수료율을 고정한 값(만분율, ADR-0060·0320). 계약이 없으면 비어 있다 */
+    commissionRateBp: integer('commission_rate_bp'),
+  },
+  (t) => [check('event_commission_rate_check', sql`${t.commissionRateBp} is null or ${t.commissionRateBp} between 0 and 10000`)],
 );
 
 /**

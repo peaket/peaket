@@ -8,7 +8,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
-import { and, asc, count, eq, gt, gte, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, getTableColumns, gt, gte, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { EventStatus, SaleReview } from '../../domain/production.js';
 import type { PendingEvent } from '../../domain/registration.js';
 import { destroyTime, listEventIds, MEMBER_CHUNK } from '../../domain/sale-eligibility.js';
@@ -19,7 +19,7 @@ import { layoutVenueId } from '../../domain/seatmap-layout.js';
 import { SEARCH_READ_MODEL_SYNC, type SearchReadModelSync } from '../../domain/search.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { pendingOf } from './layout-rows.js';
-import { event, priceTier, production, promoter, promoterContract, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
+import { event, eventContractState, priceTier, production, promoterContract, promoterContractState, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** 규모 올리기·판매 승인의 오픈 간격 검사를 직렬화하는 잠금 종류(하나의 문) */
@@ -65,7 +65,7 @@ const listRow = (l: typeof saleEligibilityList.$inferSelect): StoredList => ({
   destroyDueAt: l.destroyDueAt,
 });
 
-const eventRow = (e: typeof event.$inferSelect): SaleEventRow => ({
+const eventRow = (e: typeof event.$inferSelect & { commissionRateBp: number | null }): SaleEventRow => ({
   eventId: e.id,
   status: e.status as EventStatus,
   version: e.version,
@@ -110,7 +110,7 @@ async function deleteMembers(tx: Tx, listId: string, chunk: number, promoterId?:
 /** 잠근(또는 읽기 전용 트랜잭션의) 공연에서 판매 상태를 읽는다 */
 async function readState(tx: Tx, p: ProductionRow, tenantId: string): Promise<SaleState> {
   const events = await tx
-    .select()
+    .select({ ...getTableColumns(event), commissionRateBp: sql<number | null>`${eventContractState.commissionRateBp}` })
     .from(event)
     .where(and(eq(event.productionId, p.id), eq(event.promoterId, tenantId)))
     .orderBy(asc(event.startsAt), asc(event.id));
@@ -337,9 +337,11 @@ export class DrizzleSaleStore implements SaleStore {
                 perPersonLimit: e.perPersonLimit,
                 version: e.version,
                 ...(e.scale !== undefined ? { scale: e.scale } : {}),
-                ...(e.commissionRateBp !== undefined ? { commissionRateBp: e.commissionRateBp } : {}),
               })
               .where(and(eq(event.id, e.eventId), eq(event.productionId, p.id), eq(event.promoterId, tenantId)));
+            if (e.commissionRateBp !== undefined) {
+              await tx.update(eventContractState).set({ commissionRateBp: e.commissionRateBp }).where(and(eq(eventContractState.id, e.eventId), eq(eventContractState.productionId, p.id), eq(eventContractState.promoterId, tenantId)));
+            }
           } else {
             await tx.insert(event).values({
               id: e.eventId,
@@ -358,8 +360,10 @@ export class DrizzleSaleStore implements SaleStore {
               perPersonLimit: e.perPersonLimit,
               version: e.version,
               ...(e.scale !== undefined ? { scale: e.scale } : {}),
-              ...(e.commissionRateBp !== undefined ? { commissionRateBp: e.commissionRateBp } : {}),
             });
+            if (e.commissionRateBp !== undefined) {
+              await tx.update(eventContractState).set({ commissionRateBp: e.commissionRateBp }).where(and(eq(eventContractState.id, e.eventId), eq(eventContractState.productionId, p.id), eq(eventContractState.promoterId, tenantId)));
+            }
           }
         }
         await tx
@@ -391,7 +395,7 @@ export class DrizzleSaleStore implements SaleStore {
           .where(and(eq(promoterContract.promoterId, promoterId), sql`upper_inf(${promoterContract.validDuring})`))
           .limit(1);
         if (rows[0]) return rows[0].commissionRateBp;
-        const [r] = await tx.select({ bp: promoter.commissionRateBp }).from(promoter).where(eq(promoter.id, promoterId)).limit(1);
+        const [r] = await tx.select({ bp: promoterContractState.commissionRateBp }).from(promoterContractState).where(eq(promoterContractState.id, promoterId)).limit(1);
         return r?.bp ?? undefined;
       },
       largeOpenTimes: async (from, to, exclude) => {

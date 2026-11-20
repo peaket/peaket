@@ -16,7 +16,7 @@ import {
   type PromoterSummary,
 } from '../../domain/promoter-contract.js';
 import type { OpsPromoterActor, PromoterCreateInput, PromoterStore, PromoterTermsQuery, ReservedContractChange } from '../../domain/promoter-ports.js';
-import { promoter, promoterContract } from './schema.js';
+import { promoter, promoterContract, promoterContractState } from './schema.js';
 
 /** PostgreSQL 범위 글자. 끝이 없으면 빈 칸이다([시작,)) */
 export function rangeLiteral(from: Date, until: Date | null): string {
@@ -42,21 +42,25 @@ const decodeTermCursor = (cursor: string): Date | undefined => {
   return Number.isNaN(d.getTime()) ? undefined : d;
 };
 
+// Drizzle의 node-postgres 드라이버는 timestamptz를 날짜로 바꾸지 않고 글자 그대로 돌려준다(칸 타입이 직접 변환을 맡는다).
+// 범위 함수 결과에는 그 변환이 붙지 않으므로 여기서 Date로 바꿔 응답의 toISOString()이 깨지지 않게 한다.
+const toDate = (value: Date | string): Date => (value instanceof Date ? value : new Date(value));
+
 const contractFields = {
   commissionRateBp: promoterContract.commissionRateBp,
   guaranteeRateBp: promoterContract.guaranteeRateBp,
   guaranteeKind: promoterContract.guaranteeKind,
-  validFrom: sql<Date>`lower(${promoterContract.validDuring})`,
-  validUntil: sql<Date | null>`upper(${promoterContract.validDuring})`,
+  validFrom: sql<Date | string>`lower(${promoterContract.validDuring})`,
+  validUntil: sql<Date | string | null>`upper(${promoterContract.validDuring})`,
   approvalId: promoterContract.approvalId,
 };
 
-const periodOf = (row: { commissionRateBp: number; guaranteeRateBp: number; guaranteeKind: string; validFrom: Date; validUntil: Date | null; approvalId: string | null }): PromoterContractPeriod => ({
+const periodOf = (row: { commissionRateBp: number; guaranteeRateBp: number; guaranteeKind: string; validFrom: Date | string; validUntil: Date | string | null; approvalId: string | null }): PromoterContractPeriod => ({
   commissionRateBp: row.commissionRateBp,
   guaranteeRateBp: row.guaranteeRateBp,
   guaranteeKind: row.guaranteeKind as GuaranteeKind,
-  validFrom: row.validFrom,
-  validUntil: row.validUntil,
+  validFrom: toDate(row.validFrom),
+  validUntil: row.validUntil === null ? null : toDate(row.validUntil),
   approvalId: row.approvalId,
 });
 
@@ -83,8 +87,8 @@ export class DrizzlePromoterStore implements PromoterStore {
       .select({
         promoterId: promoter.id,
         legalName: promoter.legalName,
-        pending: promoter.pendingContractApprovalId,
-        commissionRateBp: sql<number>`coalesce(${promoterContract.commissionRateBp}, ${promoter.commissionRateBp})`,
+        pending: promoterContractState.pendingContractApprovalId,
+        commissionRateBp: sql<number>`coalesce(${promoterContract.commissionRateBp}, ${promoterContractState.commissionRateBp})`,
         guaranteeRateBp: sql<number>`coalesce(${promoterContract.guaranteeRateBp}, 0)`,
       })
       .from(promoter)
@@ -116,7 +120,7 @@ export class DrizzlePromoterStore implements PromoterStore {
         mailOrderReportNo: promoter.mailOrderReportNo,
         exemptionBasis: promoter.exemptionBasis,
         verifiedAt: promoter.verifiedAt,
-        pending: promoter.pendingContractApprovalId,
+        pending: promoterContractState.pendingContractApprovalId,
         ...contractFields,
       })
       .from(promoter)
@@ -155,7 +159,8 @@ export class DrizzlePromoterStore implements PromoterStore {
   async create(input: PromoterCreateInput, actor: OpsPromoterActor, now: Date, once?: IdempotencyRequest | undefined): Promise<PromoterDetail> {
     const promoterId = uuidv7(this.clock);
     const build = async (tx: DbTransaction): Promise<string> => {
-      await tx.insert(promoter).values({ id: promoterId, legalName: input.legalName, commissionRateBp: input.commissionRateBp, pendingContractApprovalId: null });
+      await tx.insert(promoter).values({ id: promoterId, legalName: input.legalName });
+      await tx.update(promoterContractState).set({ commissionRateBp: input.commissionRateBp }).where(eq(promoterContractState.id, promoterId));
       await tx.insert(promoterContract).values({
         id: uuidv7(this.clock),
         promoterId,
@@ -192,14 +197,14 @@ export class DrizzlePromoterStore implements PromoterStore {
       const periods = await tx.select(contractFields).from(promoterContract).where(and(eq(promoterContract.promoterId, promoterId), sql`upper_inf(${promoterContract.validDuring})`));
       const current = periods[0] ? periodOf(periods[0]) : undefined;
       if (!current) return 'no-contract';
-      await tx.update(promoter).set({ pendingContractApprovalId: approvalId }).where(and(eq(promoter.id, promoterId), sql`${promoter.pendingContractApprovalId} is null`));
+      await tx.update(promoterContractState).set({ pendingContractApprovalId: approvalId }).where(and(eq(promoterContractState.id, promoterId), sql`${promoterContractState.pendingContractApprovalId} is null`));
       return { current, requested };
     });
   }
 
   async clearPending(promoterId: string, approvalId: string): Promise<void> {
     if (!UUID.test(promoterId)) return;
-    await this.db.db.update(promoter).set({ pendingContractApprovalId: null }).where(and(eq(promoter.id, promoterId), eq(promoter.pendingContractApprovalId, approvalId)));
+    await this.db.db.update(promoterContractState).set({ pendingContractApprovalId: null }).where(and(eq(promoterContractState.id, promoterId), eq(promoterContractState.pendingContractApprovalId, approvalId)));
   }
 
   async applyChange(promoterId: string, approvalId: string, requested: Partial<ContractTerms>, approvedAt: Date, approverId: string): Promise<{ kind: 'applied' | 'already'; validFrom: Date } | 'not-found' | 'conflict'> {
@@ -222,7 +227,7 @@ export class DrizzlePromoterStore implements PromoterStore {
         guaranteeRateBp: requested.guaranteeRateBp ?? current.guaranteeRateBp,
         guaranteeKind: requested.guaranteeKind && isGuaranteeKind(requested.guaranteeKind) ? requested.guaranteeKind : (current.guaranteeKind as GuaranteeKind),
       };
-      await tx.update(promoterContract).set({ validDuring: rangeLiteral(current.validFrom, approvedAt) }).where(eq(promoterContract.id, current.id));
+      await tx.update(promoterContract).set({ validDuring: rangeLiteral(toDate(current.validFrom), approvedAt) }).where(eq(promoterContract.id, current.id));
       await tx.insert(promoterContract).values({
         id: uuidv7(this.clock),
         promoterId,
@@ -234,7 +239,7 @@ export class DrizzlePromoterStore implements PromoterStore {
         createdAt: approvedAt,
         createdBy: approverId,
       });
-      await tx.update(promoter).set({ commissionRateBp: next.commissionRateBp, pendingContractApprovalId: null }).where(eq(promoter.id, promoterId));
+      await tx.update(promoterContractState).set({ commissionRateBp: next.commissionRateBp, pendingContractApprovalId: null }).where(eq(promoterContractState.id, promoterId));
       return { kind: 'applied', validFrom: approvedAt };
     });
   }
@@ -245,8 +250,8 @@ export class DrizzlePromoterStore implements PromoterStore {
       .select({
         promoterId: promoter.id,
         legalName: promoter.legalName,
-        pending: promoter.pendingContractApprovalId,
-        commissionRateBp: sql<number>`coalesce(${promoterContract.commissionRateBp}, ${promoter.commissionRateBp})`,
+        pending: promoterContractState.pendingContractApprovalId,
+        commissionRateBp: sql<number>`coalesce(${promoterContract.commissionRateBp}, ${promoterContractState.commissionRateBp})`,
         guaranteeRateBp: sql<number>`coalesce(${promoterContract.guaranteeRateBp}, 0)`,
       })
       .from(promoter)
@@ -265,7 +270,7 @@ export class DrizzlePromoterStore implements PromoterStore {
       .where(and(eq(promoterContract.promoterId, promoterId), sql`upper_inf(${promoterContract.validDuring})`))
       .limit(1);
     if (rows[0]) return rows[0].commissionRateBp;
-    const [p] = await this.db.db.select({ bp: promoter.commissionRateBp }).from(promoter).where(eq(promoter.id, promoterId));
+    const [p] = await this.db.db.select({ bp: promoterContractState.commissionRateBp }).from(promoterContractState).where(eq(promoterContractState.id, promoterId));
     return p?.bp;
   }
 }

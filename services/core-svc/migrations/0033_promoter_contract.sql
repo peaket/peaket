@@ -6,13 +6,16 @@
 -- 5) 관제(core_ops)·파트너(core_partner) 역할 권한과 행 보안. core_app은 계약 표를 읽지 못한다(ADR-0320 결정 8).
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 --> statement-breakpoint
-ALTER TABLE "promoter" ADD COLUMN IF NOT EXISTS "commission_rate_bp" integer;
+ALTER TABLE "promoter" ADD COLUMN IF NOT EXISTS "commission_rate_bp" integer DEFAULT 1000;
 --> statement-breakpoint
 ALTER TABLE "promoter" ADD COLUMN IF NOT EXISTS "pending_contract_approval_id" uuid;
 --> statement-breakpoint
 UPDATE "promoter" SET "commission_rate_bp" = 1000 WHERE "commission_rate_bp" IS NULL;
 --> statement-breakpoint
 ALTER TABLE "promoter" ALTER COLUMN "commission_rate_bp" SET NOT NULL;
+--> statement-breakpoint
+-- 칸을 빼고 넣는 기존 시드·도구가 23502로 죽지 않게 스키마(schema.ts default(1000))와 같은 기본값을 둔다
+ALTER TABLE "promoter" ALTER COLUMN "commission_rate_bp" SET DEFAULT 1000;
 --> statement-breakpoint
 ALTER TABLE "promoter" DROP CONSTRAINT IF EXISTS "promoter_commission_rate_check";
 --> statement-breakpoint
@@ -67,9 +70,7 @@ GRANT SELECT, INSERT, UPDATE ON "idempotency_record" TO core_ops;
 --> statement-breakpoint
 GRANT UPDATE ("commission_rate_bp") ON "event" TO core_ops;
 --> statement-breakpoint
--- 파트너 경로(core_partner): 자기 계약만 읽는다(상품 게시 때 수수료율 원천)
-GRANT SELECT ON "promoter" TO core_partner;
---> statement-breakpoint
+-- 파트너 경로(core_partner): 자기 계약만 읽는다(상품 게시 때 수수료율 원천). promoter 표는 파트너에게 열지 않는다
 GRANT SELECT ON "promoter_contract" TO core_partner;
 --> statement-breakpoint
 -- 팬·앱 경로(core_app)는 계약 표를 읽지 않는다(ADR-0320 결정 8). 기본 권한으로 생길 수 있는 SELECT를 회수한다
