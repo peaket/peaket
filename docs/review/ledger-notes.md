@@ -270,3 +270,17 @@ BAT-421(SCR-038·SCR-044·SCR-047 화면 잇기, 갈래 2)이 2026-11-21에 끝�
 | --- | --- |
 | transfer-refund:v5.0.0-3.2.2 | 세 화면이 서버·사용자 글(공연명·사유·증빙 참조·반려·판정·팬 통지 사유·미리보기 숫자)을 React 텍스트 노드로만 그리고 `dangerouslySetInnerHTML`·`innerHTML`을 쓰지 않는 것을 `[ASVS v5.0.0-3.2.2] SCR038_견적·결과·오류는_서버_글을_텍스트로만_그린다`·`[ASVS v5.0.0-3.2.2] SCR044_사유·증명·반려_사유는_텍스트로만_그린다`·`[ASVS v5.0.0-3.2.2] SCR047_파트너_사유·판정_사유·미리보기_숫자는_텍스트로만_그린다`·`[ASVS v5.0.0-3.2.2] SCR047_서버_글은_텍스트로만_그리고_모르는_값은_알_수_없음으로_둔다`가 본다. 모르는 칸·모양 틀린 값은 버리고(`previewOf`·`detailView`), 계좌번호는 입력 칸 밖(URL·저장소·로그·HTML)으로 내지 않는다(M7 주입이 `SCR038_계좌_칸은_재인증_뒤에_견적이_필요할_때만_보이고_본문에만_실린다`에 잡힘). BAT-421 완료(2026-11-21, R-723). |
 | transfer-refund:v5.0.0-3.5.3 | 취소·회차 취소 요청·판정·확정·재인증은 POST만 쓰고 GET(견적·티켓·파트너 상태·관제 상세·목록)은 읽기 전용인 것을 `[ASVS v5.0.0-3.5.3] SCR038_취소는_POST로만_보낸다`·`SCR044_요청은_POST·상태는_GET이고_멱등키를_보낸다`·`[ASVS v5.0.0-3.5.3] SCR047_판정·확정은_POST·조회는_GET이다`가 본다. ASVS 3.5.3 구현 위치에 세 앱 경로를 더했다(감독 결정 8). `trace-check`가 두 ID 각각 통과 3, 시험 41개 대조로 통과했다. BAT-421 완료(2026-11-21, R-723). |
+
+## BAT-197 완료(2026-11-21, R-725)
+
+BAT-197(BOT-080의 REST·화면 몫)이 2026-11-21에 끝났다. 아래 FR-049와 ASVS 여섯 행의 상태·수는 바꾸지 않고 근거만 더한다(장부 29항목: 자동 시험 28·측정 1 그대로). BOT-080 단계 줄은 표본 후보 원장(OPS-220)과 운영 표본 배정이 남아 체크하지 않았다.
+
+| 항목 | 근거 |
+| --- | --- |
+| FR-049 | ops-svc `bot-review` 모듈이 REST 3경로(진행·목록·판정)를 내고, `cs_agent`·`cs_lead`만 부르며 viewer·operator·commander는 403이다. 판정은 HUMAN·BOT만 `ApplyLabel`(SAMPLE_REVIEW·판 1·묶음·적용 판정·판정 사건 키)을 부르고 UNDECIDED는 부르지 않으며, 실패는 503이고 판정 행을 쓰지 않는다. 같은 표본 두 번째 판정은 409, 같은 `Idempotency-Key` 재시도는 같은 200이고, 표본 단위 선점으로 동시 두 판정은 200 하나·409 하나·판정 행 1·ApplyLabel 1이다. 진행은 UNDECIDED를 뺀 BOT 비율의 Wilson 95%, 0건이면 null이고 30일·7일 기한을 넘으면 410이다. 배정은 200+200을 섞고 모집단이 작으면 전수하며 같은 회차·종류에 두 번 돌려도 하나다. 시험은 `services/ops-svc/test/bot-review-http.test.ts` 13·`bot-review-progress.test.ts` 5·`bot-review-judgement.test.ts` 9·`bot-review-assign.test.ts` 4, 통합 `test-int/bot-review.int.test.ts` 8·`bot-review-label.int.test.ts` 4·`bot-review-wiring.int.test.ts` 3(15/15), 화면 `apps/console-host/src/pages/bot-review/model/review.test.mjs` 4·`ui/wiring.test.mjs` 5다. 장부 `ledger --batch BAT-197 --require`가 29항목(자동 시험 28·측정 1·ID만 0·빈칸 0)으로 통과했고, 허니팟 정밀도 표본 검토(Q-T22)는 OPS-220 측정 행 그대로다. BAT-197 완료(2026-11-21, R-725). |
+| ASVS 3.2.1 | `services/ops-svc/test/bot-review-http.test.ts`의 `[ASVS v5.0.0-3.2.1] 표본 검토 응답은 JSON뿐이고 다른 형식은 415·400이다`가 진행·목록·판정 응답의 형식과 415·400을 본다. BAT-197 완료(2026-11-21, R-725). |
+| ASVS 3.2.2 | `apps/console-host/src/pages/bot-review/ui/wiring.test.mjs`의 `[ASVS v5.0.0-3.2.2] 카드의 세션 가명·범주·타임라인은 글자 노드로만 그린다`가 카드 값이 `innerHTML`이 아니라 글자 노드로만 그려지는 것을 본다. BAT-197 완료(2026-11-21, R-725). |
+| ASVS 3.4.3 | `packages/config/headers/headers.test.mjs`의 `[ASVS v5.0.0-3.4.3] 관제 콘솔 CSP(C 묶음)가 /bot-review에도 적용되고 관제 API만 연결한다`가 `/bot-review` 라우트의 CSP를 본다(11건 가운데 새 사례). 실제 브라우저의 위반 보고 0은 로컬 스택이 없어 확인하지 못했고 `docs/review/browser-check/BOT-080.md`의 미확인 그대로다. BAT-197 완료(2026-11-21, R-725). |
+| ASVS 3.5.3 | `services/ops-svc/test/bot-review-http.test.ts`의 `[ASVS v5.0.0-3.5.3] 판정은 POST만 받고 GET·HEAD로는 바꿀 수 없다`가 판정 경로의 POST만 허용과 GET·HEAD 거절을 본다. BAT-197 완료(2026-11-21, R-725). |
+| ASVS 16.3.3 | `services/ops-svc/test/bot-review-judgement.test.ts`의 `[ASVS v5.0.0-16.3.3] 판정과 라벨 반영 결과를 보안 로그 줄로 남기고 pid·기기 가명은 싣지 않는다`가 판정·라벨 로그 줄과 가림을 본다. BAT-197 완료(2026-11-21, R-725). |
+| ASVS 16.3.4 | `services/ops-svc/test/bot-review-judgement.test.ts`의 `[ASVS v5.0.0-16.3.4] 라벨 실패와 원천 실패를 지표·경고 줄로 남긴다`가 `ops_bot_review_label_failures_total`과 경고 로그 줄을 본다. BAT-197 완료(2026-11-21, R-725). |
