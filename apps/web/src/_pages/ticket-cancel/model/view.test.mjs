@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { errorOf } from './cancel-flow.ts';
-import { quoteView, resultView, resultViewOf } from './view.ts';
+import { quoteView, resultView, resultViewOf, refundMethodText } from './view.ts';
 
 const live = readFileSync(new URL('../ui/TicketCancelLive.tsx', import.meta.url), 'utf8');
 const viewSource = readFileSync(new URL('./view.ts', import.meta.url), 'utf8');
@@ -95,6 +95,23 @@ test('SCR038_202_결과는_아는_칸만_옮기고_모르는_상태는_쉬게_�
   assert.equal(resultViewOf({ status: 'REFUND_PENDING', refundAccountRequired: true }), 'pending-account');
   assert.equal(resultViewOf({ status: 'REFUND_PENDING', refundAccountRequired: false }), 'pending');
   assert.equal(resultViewOf({ status: 'UNKNOWN' }), 'pending');
+});
+
+test('RV-13_환급_수단은_계좌를_입력하기_전에는_입력한_계좌로_쓰지_않는다', () => {
+  // 견적 ③은 계좌를 받기 전이다. 참·거짓만으로 '입력한' 계좌라고 쓰면 거짓말이 된다(d5 §5.20 ③·⑤→⑦).
+  assert.equal(refundMethodText(true, false), '환불 계좌(다시 로그인한 뒤 입력)');
+  assert.equal(refundMethodText(true, true), '입력한 환불 계좌');
+  assert.equal(refundMethodText(false, false), '원결제 수단');
+  assert.equal(refundMethodText(false, true), '원결제 수단');
+  // 화면은 이 한 벌을 쓰고, 계좌 입력 여부를 따로 판정한다
+  assert.match(
+    readFileSync(new URL('../ui/TicketCancelLive.tsx', import.meta.url), 'utf8'),
+    /refundMethodText\(needAccount, accountReady\)/,
+  );
+  assert.doesNotMatch(
+    readFileSync(new URL('../ui/TicketCancelLive.tsx', import.meta.url), 'utf8'),
+    /needAccount \? '입력한 환불 계좌' : '원결제 수단'/,
+  );
 });
 
 test('[ASVS v5.0.0-3.2.2] transfer-refund:v5.0.0-3.2.2 SCR038_견적·결과·오류는_서버_글을_텍스트로만_그린다', () => {

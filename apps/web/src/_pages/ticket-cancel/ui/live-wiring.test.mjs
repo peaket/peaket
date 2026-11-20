@@ -58,7 +58,9 @@ test('SCR038_계좌_칸은_재인증_뒤에_견적이_필요할_때만_보이고
   // 재인증 왕복은 전체 페이지 이동이라 미리 적은 계좌가 사라지므로, 돌아온 뒤에 받는다.
   assert.match(live, /\{needAccount && token && awaitingConfirm \? \(\s*<section/);
   assert.equal(count(live, /\{needAccount \? \(\s*<section/g), 0, '재인증 전에 계좌 칸을 그리지 않는다');
-  assert.match(live, /needAccount \? '입력한 환불 계좌' : '원결제 수단'/);
+  // 견적 줄은 계좌를 입력하기 전에 '입력한 환불 계좌'라고 쓰지 않는다(RV-13)
+  assert.match(live, /refundMethodText\(needAccount, accountReady\)/);
+  assert.doesNotMatch(live, /needAccount \? '입력한 환불 계좌' : '원결제 수단'/);
   // 은행 목록은 공용 표만 쓰고 화면에 복제하지 않는다
   assert.match(live, /REFUND_BANKS\.map\(\(b\) => \(\{ value: b\.code, label: b\.label \}\)\)/);
   assert.doesNotMatch(live, /신한은행|국민은행|카카오뱅크/);

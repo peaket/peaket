@@ -4,6 +4,7 @@
 // dryRun(열린 객체) 디코더·진행률 done/total·accountPending 따로·409/403 문구·내부 값 미표시를 본다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { detailView, errorOf, pauseReasonText, percentOf, previewOf, progressOf, stateLabel } from './live.ts';
 
 const DRY_RUN = {
@@ -205,7 +206,22 @@ test('[ASVS v5.0.0-3.2.2] transfer-refund:v5.0.0-3.2.2 SCR047_파트너_사유·
   // 모양이 틀린 값은 화면 값으로 올리지 않는다
   assert.equal(detailView({ dryRun: { targetOrders: '1' }, progress: { total: '10' } }).dryRun, null);
   assert.equal(detailView({ dryRun: { targetOrders: '1' }, progress: { total: '10' } }).progress, null);
-  assert.equal(detailView({ judgedBy: { adminAccountId: 'adm-1' } }).judgedBy, '삭제된 계정');
+  assert.equal(detailView({ judgedBy: { adminAccountId: 'adm-1' } }).judgedBy, '계정 ID adm-1');
   assert.equal(detailView({ kind: 'OTHER' }).kind, null);
   assert.equal(detailView({ fault: 'OTHER' }).fault, null);
+});
+
+test('RV-12_판정자_표시_이름이_없으면_삭제된_계정_대신_계정_ID를_보인다', () => {
+  // 계정 읽기 계약이 없어 서버는 displayName을 늘 null로 보낸다. 같은 응답의 adminAccountId를 보인다.
+  const noName = detailView({ judgedBy: { displayName: null, adminAccountId: 'adm-9' } });
+  assert.equal(noName.judgedBy, '계정 ID adm-9');
+  assert.equal(noName.judgedById, 'adm-9');
+  assert.equal(detailView({ judgedBy: { displayName: '수진', adminAccountId: 'adm-1' } }).judgedBy, '수진');
+  // 이름도 ID도 없으면 지어내지 않는다
+  assert.equal(detailView({ judgedBy: null }).judgedBy, null);
+  assert.equal(detailView({ judgedBy: { displayName: null } }).judgedBy, null);
+  assert.equal(detailView({ judgedBy: { displayName: '   ', adminAccountId: '  ' } }).judgedBy, null);
+  // '삭제된 계정'이라는 잘못된 문구를 화면 값 어디에도 남기지 않는다
+  const source = readFileSync(new URL('./live.ts', import.meta.url), 'utf8');
+  assert.equal(source.includes('삭제된 계정'), false);
 });
