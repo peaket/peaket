@@ -19,6 +19,9 @@ import type { CsCaseOpenSignals, CsCaseOutbox, EventRefundHolds, RefundAccountNo
 import { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type CancellationOrders, type CancellationWrites, type EntryFlagNotice, type EntryRecords, type EntryRecordView, type PaymentCancellations, type RefundFailureNotice } from '../domain/ports.js';
 import { CsCaseReopenTick } from './cs-case-reopen.js';
 
+/** 계좌를 다시 받은 시도(a1~)의 재확인이 결제사 비동기 처리로 남았을 때 다음 확인까지 15분 [가정]. 1분 사다리를 처음부터 다시 시작하지 않는다 */
+export const REFUND_ACCOUNT_ATTEMPT_RETRY_DELAY_MS = 15 * 60_000;
+
 export interface RefundAfterEntryDeps {
   writes: CancellationWrites;
   payments: PaymentCancellations;
@@ -159,7 +162,8 @@ export class RefundAfterEntry {
       const scheduled = await this.deps.writes.scheduleRefundRetry({
         cancellationId: c.cancellationId,
         attempts,
-        nextRetryAtMs: this.deps.nowMs() + refundRetryDelayMs(attempts),
+        // 계좌를 다시 받은 시도는 1분 사다리를 처음부터 다시 시작하지 않는다. 결제사가 비동기로 받아들인 취소는 15분 [가정] 뒤에 다시 본다
+        nextRetryAtMs: this.deps.nowMs() + ((c.refundAttempt ?? 0) > 0 ? REFUND_ACCOUNT_ATTEMPT_RETRY_DELAY_MS : refundRetryDelayMs(attempts)),
         lastError: r,
         nowMs: this.deps.nowMs(),
       });

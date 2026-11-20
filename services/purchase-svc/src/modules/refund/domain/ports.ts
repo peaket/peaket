@@ -59,6 +59,17 @@ export interface PaymentCancellations {
      */
     readonly scope?: 'DEPOSIT_ONLY';
   }): Promise<PaymentCancelOutcome>;
+  /**
+   * 그 취소 ID·시도의 payment_cancel 행이 있는가(BAT-425 RV-28). 계좌 다시 받기의 새 시도가 UNKNOWN일 때
+   * payment가 새 시도 행을 만들지 않았는지(앞 시도 CANCEL_PENDING)를 가른다. 없으면 false, 확인하지 못하면 undefined다.
+   * 없으면(옛 어댑터·단위 대역) 새 시도를 만들지 않은 것으로 본다. 계좌를 싣지 않고 조회만 하는 확인 요청이다
+   */
+  attemptExists?(q: {
+    readonly cancellationId: string;
+    readonly orderId: string;
+    readonly refundAttempt: number;
+    readonly deadlineMs: number;
+  }): Promise<boolean | undefined>;
 }
 
 /** payment-svc GetPayment 한 번의 데드라인 300ms [가정](docs/features/payment.md §6 'purchase-svc 견적', 차단기 payment-svc-get) */
@@ -207,7 +218,9 @@ export interface RefundAccountWrites {
   >;
   /**
    * 계좌 대기 표시를 지운다(REFUND_PENDING만). nextRefundAtMs가 있으면 다음 재시도 시각도 쓴다(결과 모름 1분 [가정]).
-   * answer가 있으면 그 답을 같은 문장(같은 트랜잭션)에서 쓴다(RV-24). 계좌 거절·업무 거절은 부르는 쪽이 markFailed를 이어 부른다
+   * answer가 있으면 그 답을 같은 문장(같은 트랜잭션)에서 쓴다(RV-24). 계좌 거절·업무 거절은 부르는 쪽이 markFailed를 이어 부른다.
+   * refundAttempt가 있으면 시도 번호도 같은 문장에서 되돌린다(RV-28: payment가 새 시도 행을 만들지 않았을 때 oldAttempt로).
+   * onlyIfAttempt가 있으면 지금 시도 번호가 그 값일 때만 되돌린다(그사이 다른 요청이 시도를 올렸으면 덮지 않는다)
    */
   clearWaiting(q: {
     readonly cancellationId: string;
@@ -215,6 +228,8 @@ export interface RefundAccountWrites {
     readonly lastError?: string;
     readonly nowMs: number;
     readonly answer?: RefundAccountAnswerWrite;
+    readonly refundAttempt?: number;
+    readonly onlyIfAttempt?: number;
   }): Promise<void>;
   /** 결제사가 환급했다: REFUND_PENDING 행을 REFUNDED로 바꾼다(주문 전이는 CancellationWrites.updateStatus와 같은 규칙). answer는 같은 문장에서 쓴다 */
   updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number; readonly answer?: RefundAccountAnswerWrite }): Promise<boolean | void>;

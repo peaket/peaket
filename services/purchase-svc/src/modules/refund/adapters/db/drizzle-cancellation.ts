@@ -370,6 +370,8 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     readonly lastError?: string;
     readonly nowMs: number;
     readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer };
+    readonly refundAttempt?: number;
+    readonly onlyIfAttempt?: number;
   }): Promise<void> {
     await this.database.db
       .update(orderCancellation)
@@ -377,10 +379,19 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         refundAccountRequiredAt: null,
         nextRefundAt: q.nextRefundAtMs === undefined ? null : new Date(q.nextRefundAtMs),
         ...(q.lastError !== undefined ? { refundLastError: q.lastError } : {}),
+        // payment가 새 시도 행을 만들지 않았으면 시도 번호를 되돌린다(RV-28). 다음 재시도가 앞 시도(a0)를 계속 조회한다
+        ...(q.refundAttempt === undefined ? {} : { refundAttempt: q.refundAttempt }),
         statusChangedAt: new Date(q.nowMs),
         ...(q.answer === undefined ? {} : { refundAccountAnswer: q.answer.answer }),
       })
-      .where(and(eq(orderCancellation.id, q.cancellationId), eq(orderCancellation.status, 'REFUND_PENDING')));
+      .where(
+        and(
+          eq(orderCancellation.id, q.cancellationId),
+          eq(orderCancellation.status, 'REFUND_PENDING'),
+          // 그사이 다른 요청이 시도를 더 올렸으면 이 요청의 되돌리기를 덮어쓰지 않는다
+          q.onlyIfAttempt === undefined ? undefined : eq(orderCancellation.refundAttempt, q.onlyIfAttempt),
+        ),
+      );
   }
 
   /** RefundAccountWrites.markFailed: 계좌 다시 받기의 업무 거절을 기존 CS '환급 실패' 표시로 잇는다(답도 같은 문장) */

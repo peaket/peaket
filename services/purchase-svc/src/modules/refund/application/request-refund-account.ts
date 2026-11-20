@@ -156,17 +156,41 @@ export class RequestRefundAccount {
       throw new RefundAccountRejected();
     }
     // PENDING·UNKNOWN: 계좌 대기 표시를 지우고 1분 [가정] 뒤 다시 본다. 같은 시도의 재시도는 같은 멱등키를 쓴다.
-    // 답도 같은 문장에서 쓴다(RV-24)
-    await this.o.writes.clearWaiting({ cancellationId: i.cancellationId, nextRefundAtMs: nowMs + REFUND_ACCOUNT_RETRY_DELAY_MS, lastError: payment, nowMs, answer: { idempotencyKey: i.idempotencyKey, answer: 'REFUND_PENDING' } });
+    // 답도 같은 문장에서 쓴다(RV-24). payment가 앞 시도 CANCEL_PENDING 때문에 새 시도 행을 만들지 않았으면(UNKNOWN)
+    // 시도 번호를 oldAttempt로 되돌려 다음 재시도가 앞 시도(a0)를 계속 조회하게 한다(RV-28)
+    const restore = payment === 'UNKNOWN' && !(await this.#attemptCreated(i, attempt)) ? oldAttempt : undefined;
+    await this.o.writes.clearWaiting({
+      cancellationId: i.cancellationId,
+      nextRefundAtMs: nowMs + REFUND_ACCOUNT_RETRY_DELAY_MS,
+      lastError: payment,
+      nowMs,
+      answer: { idempotencyKey: i.idempotencyKey, answer: 'REFUND_PENDING' },
+      ...(restore === undefined ? {} : { refundAttempt: restore, onlyIfAttempt: attempt.attempt }),
+    });
     this.#rememberLocal(i, attempt.refundAmount, 'REFUND_PENDING');
     this.o.signals?.inc('pending');
     return { cancellationId: i.cancellationId, status: 'REFUND_PENDING', refundAmount: attempt.refundAmount };
   }
 
   /**
+   * payment가 이번에 올린 시도의 payment_cancel 행을 만들었는가(RV-28). 앞 시도가 CANCEL_PENDING이면 만들지 않고 UNKNOWN을 준다.
+   * 어댑터가 없으면(단위 대역·옛 조립) 만들지 않은 것으로 본다. 확인 요청이 실패하면 만든 것으로 보아 시도를 되돌리지 않는다(이중 환급 쪽을 피한다)
+   */
+  async #attemptCreated(i: RequestRefundAccountInput, attempt: { readonly attempt: number; readonly orderId: string }): Promise<boolean> {
+    const payments = this.o.payments;
+    if (payments.attemptExists === undefined) return false;
+    try {
+      const answer = await payments.attemptExists({ cancellationId: i.cancellationId, orderId: attempt.orderId, refundAttempt: attempt.attempt, deadlineMs: CANCEL_DEADLINE_MS });
+      return answer !== false;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
    * 저장한 답(DB 행 우선, 단위·시험 대역은 프로세스 안 표)을 202·422로 되돌린다.
    * 같은 키가 맞으면 저장한 requestHash와 현재 지문을 먼저 견주고, 다르면 422 idempotency-key-reused다(RV-24).
-   * 답 칸이 빈 끊긴 창은 상태에서 되돌릴 수 있는 REFUNDED만 재생한다(다른 답은 저장이 상태 전이와 같은 문장이라 이 창이 없다)
+   * 답 칸이 빈 끊긴 창은 상태에서 되돌릴 수 있는 REFUNDED와, 시도를 올린 채 아직 답이 없는 진행 중(REFUND_PENDING)만 재생한다(RV-30)
    */
   async #replayOf(record: CancellationRecord, i: RequestRefundAccountInput): Promise<RequestRefundAccountResult | undefined> {
     const keyed = record.refundAccountIdemKey === i.idempotencyKey;
@@ -188,6 +212,11 @@ export class RequestRefundAccount {
     if (localHit) return this.#answerOf(local.answer, local.cancellationId, local.refundAmount);
     // 답 칸이 빈 끊긴 창(이전 판·주입 시험): REFUNDED는 상태만으로 같은 답임을 알 수 있다
     if (keyed && record.state === 'REFUNDED') return { cancellationId: i.cancellationId, status: 'REFUNDED', refundAmount: record.refundAmount };
+    // 같은 키가 이미 시도를 올렸는데 답을 아직 적지 않았다(겹친 요청·답 저장 전 끊김, RV-30). 그 시도는 진행 중이므로
+    // 첫 답과 같은 202 REFUND_PENDING을 재생하고 payment를 다시 부르지 않는다. 답을 적은 422는 위에서 그대로 재생한다
+    if (keyed && (record.refundAttempt ?? 0) > 0 && record.state === 'REFUND_PENDING') {
+      return { cancellationId: i.cancellationId, status: 'REFUND_PENDING', refundAmount: record.refundAmount };
+    }
     return undefined;
   }
 

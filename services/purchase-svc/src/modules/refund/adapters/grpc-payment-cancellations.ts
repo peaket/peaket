@@ -2,6 +2,8 @@
 // payment-svc는 cancel-{cancellationId} 멱등키로 결제사 부분 취소를 하고, 성공한 금액을 원장 cancelled_amount에 더한다.
 // 선택 인자 scope(DEPOSIT_ONLY)가 있으면 요청에 CANCEL_SCOPE_DEPOSIT_ONLY를 싣는다(탈퇴 참여자의 입금 전 취소만, payment §6 '입금 전 취소만 부르기', BAT-010).
 // 환불 계좌가 있으면 요청의 refund_account에 싣는다(이 호출에만, 로그·오류 글에 싣지 않는다). 결과 REFUND_ACCOUNT_REQUIRED는 계좌 대기다(BUILD_ORDER GAT-090).
+// BAT-425 RV-28: 계좌를 실은 새 시도가 UNKNOWN이면 attemptExists로 그 시도의 payment_cancel 행이 만들어졌는지 확인한다
+// (계좌 없이 같은 시도를 부르면 행이 없을 때 payment가 INVALID_ARGUMENT(refund_account)로 답한다. 그 답만 '행 없음'이다).
 // 결제 수단 읽기(PaymentMethodLookup): GetPayment의 virtual_account_paid를 300ms [가정] 안에 읽고, 차단기(payment-svc-get)가 꽂혔으면 그 안에서 부른다.
 // 실패·결제 없음·다른 주문의 답은 던진다(모르는 것을 '계좌 필요 없음'으로 보지 않는다, docs/features/payment.md §6 'purchase-svc 견적').
 import * as grpc from '@grpc/grpc-js';
@@ -76,10 +78,7 @@ export class GrpcPaymentCancellations implements PaymentCancellations, PaymentMe
   cancel(q: Parameters<PaymentCancellations['cancel']>[0]): Promise<PaymentCancelOutcome>;
   async cancel(q: Parameters<PaymentCancellations['cancel']>[0]): Promise<PaymentCancelOutcome> {
     const ms = Math.min(5_000, Math.max(1, Math.floor(Number.isFinite(q.deadlineMs) ? q.deadlineMs : 5_000)));
-    const call = (method: 'GetPayment' | 'CancelPayment', req: object): Promise<Record<string, unknown>> =>
-      new Promise((resolve, reject) => {
-        this.#client[method](req, new grpc.Metadata(), { deadline: new Date(Date.now() + ms) }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
-      });
+    const call = (method: 'GetPayment' | 'CancelPayment', req: object): Promise<Record<string, unknown>> => this.#call(method, req, ms);
     let paymentId: string;
     try {
       const found = await call('GetPayment', { order_id: q.orderId });
@@ -109,6 +108,45 @@ export class GrpcPaymentCancellations implements PaymentCancellations, PaymentMe
     const outcome = raw === 'CANCEL_PENDING' ? 'PENDING' : raw;
     if (outcome === 'REFUND_ACCOUNT_REQUIRED' && q.scope === 'DEPOSIT_ONLY') return 'REJECTED';
     return RESULTS.has(outcome as PaymentCancelOutcome) ? (outcome as PaymentCancelOutcome) : 'UNKNOWN';
+  }
+
+  /**
+   * 같은 취소 ID·시도의 payment_cancel 행이 있는가(BAT-425 RV-28). 계좌를 싣지 않은 CancelPayment는 payment-svc가
+   * 새 행을 만들지 않고, 행이 없으면 INVALID_ARGUMENT(refund_account)로 답한다. 그 답만 false이고
+   * 그 밖의 답(반영·대기·거절·결과 모름)은 행이 있다는 뜻이다. 확인 자체를 못 하면 undefined다
+   */
+  async attemptExists(q: Parameters<NonNullable<PaymentCancellations['attemptExists']>>[0]): Promise<boolean | undefined> {
+    const ms = Math.min(5_000, Math.max(1, Math.floor(Number.isFinite(q.deadlineMs) ? q.deadlineMs : 5_000)));
+    let paymentId: string;
+    try {
+      const found = await this.#call('GetPayment', { order_id: q.orderId }, ms);
+      paymentId = typeof found.payment_id === 'string' ? found.payment_id : '';
+    } catch {
+      return undefined;
+    }
+    if (paymentId === '') return undefined;
+    try {
+      await this.#call(
+        'CancelPayment',
+        {
+          payment_id: paymentId,
+          cancellation_id: q.cancellationId,
+          reason: '환급 시도 확인',
+          ...(q.refundAttempt > 0 ? { refund_attempt: q.refundAttempt } : {}),
+        },
+        ms,
+      );
+      return true;
+    } catch (err) {
+      const e = err as grpc.ServiceError;
+      return e.code === grpc.status.INVALID_ARGUMENT && typeof e.details === 'string' && e.details.includes('refund_account') ? false : undefined;
+    }
+  }
+
+  #call(method: 'GetPayment' | 'CancelPayment', req: object, ms: number): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      this.#client[method](req, new grpc.Metadata(), { deadline: new Date(Date.now() + ms) }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
+    });
   }
 
   close(): void {
