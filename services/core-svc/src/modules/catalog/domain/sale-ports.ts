@@ -6,6 +6,7 @@ import type { EventStatus, SaleReview } from './production.js';
 import type { SaleApprovalInput } from './sale-approval.js';
 import type { ShowScale } from './demand-forecast.js';
 import type { PendingEvent } from './registration.js';
+import type { OpsSaleReviewDetail, OpsSaleReviewPage, OpsSaleReviewQuery, PartnerSaleReviewView, SaleReviewRequestBody } from './sale-review.js';
 
 /** 회차 고치기로 바꿀 수 있는 칸(openapi PartnerEventUpdate) */
 export interface EventEditable {
@@ -67,6 +68,12 @@ export interface SaleState {
     /** pending_revision.salePolicy(재승인 대기 변경분의 규칙). 없으면 undefined */
     pendingRules: SalePolicyRule[] | undefined;
     salePolicyVersion: number;
+    /** 마지막 판매 승인 요청 시각(production.sale_submitted_at, BAT-616). 승인·변경 취소 뒤에는 null */
+    saleSubmittedAt?: Date | null;
+    /** 마지막 반려 사유(production.rejection_reason, BAT-616). REJECTED가 아니면 null */
+    rejectionReason?: string | null;
+    /** 등록 공연장이나 새 공연장 요청이 있는지(판매 승인 요청 422 검사). 손으로 만든 옛 상태에는 없을 수 있다 */
+    hasPlace?: boolean;
   };
   /** event 행(공개본) */
   events: SaleEventRow[];
@@ -123,6 +130,16 @@ export interface SaleTx {
   reject(reason: string, now: Date): Promise<void>;
   /** 그 파트너의 지금 계약 수수료율(만분율). 계약이 없으면 undefined(임의 1000bp를 만들지 않는다) */
   currentCommissionRateBp(promoterId: string): Promise<number | undefined>;
+  /**
+   * 판매 승인 요청(BAT-616, ADR-0327): 판매자 정보를 promoter에 쓰고 production을 SUBMITTED로, sale_submitted_at을 지금으로 쓴다.
+   * 반려 사유는 지우고 휠체어석 확인을 남긴다. 같은 상태에서 다시 불러도 행·시각을 새로 만들지 않는다(부르는 쪽이 먼저 가른다).
+   */
+  requestReview(body: SaleReviewRequestBody, now: Date): Promise<void>;
+  /**
+   * 변경 취소(승인 이력이 있는 공연): pending_revision을 비우고 APPROVED로 돌아간다. sale_submitted_at·rejection_reason도 비운다.
+   * 부를 수 있는 상태인지는 유스케이스가 먼저 본다.
+   */
+  cancelReview(): Promise<void>;
 }
 
 /** 잠금 밖에서 먼저 보는 공연(소속·승인 이력·판매 중지). 잠금 안에서 다시 본다 */
@@ -157,6 +174,12 @@ export interface SaleStore {
   takeUploadSlot(productionId: string, tenantId: string, now: Date, limit: number, windowMs: number): Promise<{ ok: true } | { ok: false; retryAfterMs: number } | 'not-found'>;
   /** 사본 지우기가 끝난 지운 기록을 지운다 */
   dropDone(productionId: string, tenantId: string, listKey: string, copySeq: number): Promise<void>;
+  /** 파트너 판매 승인 현황(얇은 읽기, BAT-616). 없거나 남의 공연이면 undefined */
+  partnerReview(productionId: string, tenantId: string): Promise<PartnerSaleReviewView | undefined>;
+  /** 관제 판매 승인 목록(모든 테넌트, core_ops, BAT-616). 없으면 빈 쪽 */
+  opsReviews(q: OpsSaleReviewQuery): Promise<OpsSaleReviewPage>;
+  /** 관제 판매 승인 상세(모든 테넌트, core_ops, BAT-616). 없으면 undefined */
+  opsReviewDetail(productionId: string): Promise<OpsSaleReviewDetail | undefined>;
 }
 
 /** 정비 일이 다룰 명단 하나 */

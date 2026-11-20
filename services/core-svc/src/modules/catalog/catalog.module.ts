@@ -38,6 +38,11 @@ import { PublishSaleConfigs } from './application/publish-sale-configs.js';
 import { RejectSaleReview } from './application/reject-sale-review.js';
 import { OpsSaleReviewController } from './inbound/ops-sale-review.controller.js';
 import { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_READER, SALE_CONFIG_STORE, type SaleConfigStore } from './domain/sale-config-ports.js';
+import { SALE_OPEN, type SaleOpen } from './domain/sale-open-port.js';
+import { MemorySaleOpen } from './adapters/http-purchase-sale-open.js';
+import { SALE_CONFIG_METRICS, SaleConfigMetrics } from './application/sale-config-metrics.js';
+import { OpsSaleReviews, RequestSaleReview } from './application/request-sale-review.js';
+import { PartnerSaleReviewController } from './inbound/partner-sale-review.controller.js';
 import { DrizzleSaleConfigReader, DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
 import { MemorySaleConfigStore } from './adapters/memory-sale-config-store.js';
 import { NoopSaleConfigFacts } from './adapters/noop-sale-config-facts.js';
@@ -190,11 +195,24 @@ export class CatalogModule implements NestModule {
    */
   static register(
     o:
-      | { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; searchDatabase?: Database; media: MediaWiring; opsApprovals?: OpsApprovalClient }
-      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient },
+      | {
+          storage: 'database';
+          partnerDatabase: Database;
+          opsDatabase?: Database;
+          searchDatabase?: Database;
+          media: MediaWiring;
+          opsApprovals?: OpsApprovalClient;
+          /** 판매 승인 사본을 DB와 대기열에 함께 쓰는 합성 저장소(BAT-616). 없으면 DB만 쓴다 */
+          saleConfigStore?: SaleConfigStore;
+          /** 판매 열기 클라이언트(BAT-616). 없으면 열기가 끝난 것으로 보는 메모리 어댑터(시험·직접 조립) */
+          saleOpen?: SaleOpen;
+          /** 판매 승인 부수 효과 지표(BAT-616). main.ts가 등록한다 */
+          saleConfigMetrics?: SaleConfigMetrics;
+        }
+      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics },
   ): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, OpsEventController, OpsPromoterController, InternalPromoterController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, OpsEventController, OpsPromoterController, InternalPromoterController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -214,9 +232,11 @@ export class CatalogModule implements NestModule {
           { provide: OPS_SALE_STORE, useFactory: (db: Database, sync: DrizzleSearchReadModel) => new DrizzleSaleStore(db, sync), inject: [OPS_DATABASE, SEARCH_READ_MODEL_SYNC] },
           { provide: PROMOTER_STORE, useFactory: (db: Database, clock: Clock) => new DrizzlePromoterStore(db, clock), inject: [OPS_DATABASE, CLOCK] },
           { provide: OPS_APPROVAL_CLIENT, useValue: o.opsApprovals ?? new UnavailableOpsApprovals() },
-          { provide: SALE_CONFIG_STORE, useClass: DrizzleSaleConfigStore },
+          ...(o.saleConfigStore ? [{ provide: SALE_CONFIG_STORE, useValue: o.saleConfigStore }] : [{ provide: SALE_CONFIG_STORE, useClass: DrizzleSaleConfigStore }]),
           { provide: SALE_CONFIG_READER, useClass: DrizzleSaleConfigReader },
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
+          { provide: SALE_OPEN, useValue: o.saleOpen ?? new MemorySaleOpen() },
+          { provide: SALE_CONFIG_METRICS, useValue: o.saleConfigMetrics ?? new SaleConfigMetrics() },
           { provide: SEARCH_DATABASE, useFactory: (db: Database) => o.searchDatabase ?? db, inject: [DATABASE] },
           // 0건 제안은 메모리 사전이 답한다(ADR-0271 결정 13). 사전이 아직 준비되지 않았으면 search_term으로 대신한다.
           // 한 글자 입력의 단계별 후보 읽기(결정 25)는 사전이 첫 통째로 읽기를 마친 뒤에만 쓴다(그 전에는 지금 질의)
@@ -248,6 +268,8 @@ export class CatalogModule implements NestModule {
         { provide: SALE_CONFIG_STORE, useValue: o.saleConfigs ?? new MemorySaleConfigStore() },
         { provide: SALE_CONFIG_READER, useExisting: SALE_CONFIG_STORE },
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
+        { provide: SALE_OPEN, useValue: o.saleOpen ?? new MemorySaleOpen() },
+        { provide: SALE_CONFIG_METRICS, useValue: o.saleConfigMetrics ?? new SaleConfigMetrics() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
         { provide: SEARCH_DICTIONARY_SOURCE, useFactory: (index: MemorySearchIndex) => new MemorySearchDictionarySource(index), inject: [SEARCH_INDEX] },
         { provide: SEARCH_DICTIONARY, useFactory: (source: SearchDictionarySource, clock: Clock) => new SuggestionDictionary(source, clock), inject: [SEARCH_DICTIONARY_SOURCE, CLOCK] },

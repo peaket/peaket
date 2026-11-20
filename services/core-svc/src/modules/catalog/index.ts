@@ -50,8 +50,12 @@ export { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_MAINTENANCE_STORE, SALE_CO
 export { PublishSaleConfigs } from './application/publish-sale-configs.js';
 export { saleConfigMaintenanceTasks } from './application/sale-config-maintenance.js';
 export { MemorySaleConfigStore } from './adapters/memory-sale-config-store.js';
-export { QueueSaleConfigStore } from './adapters/queue-sale-config-store.js';
+export { QueueSaleConfigStore, SALE_CONFIG_LUA, saleEpochKey } from './adapters/queue-sale-config-store.js';
 export { CompositeSaleConfigStore } from './adapters/composite-sale-config-store.js';
+export { HttpPurchaseSaleOpen, MemorySaleOpen, SALE_OPEN_TIMEOUT_MS, UnwiredSaleOpen } from './adapters/http-purchase-sale-open.js';
+export { SALE_OPEN, type SaleOpen, type SaleOpenInput, type SaleOpenResult } from './domain/sale-open-port.js';
+export { SALE_CONFIG_METRICS, SaleConfigMetrics, type SaleOpenMetricResult } from './application/sale-config-metrics.js';
+export { OpsSaleReviews, RequestSaleReview } from './application/request-sale-review.js';
 export { NoopSaleConfigFacts } from './adapters/noop-sale-config-facts.js';
 export { DrizzleSaleConfigReader, DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
 export { DrizzleSaleConfigMaintenanceStore } from './adapters/db/drizzle-sale-config-maintenance-store.js';

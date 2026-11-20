@@ -225,6 +225,13 @@
       "when": 1795118255888,
       "tag": "0033_promoter_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795118255889,
+      "tag": "0034_sale_review_request",
+      "breakpoints": true
     }
   ]
 }

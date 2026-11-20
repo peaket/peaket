@@ -99,6 +99,10 @@ export const production = pgTable(
     descriptionDoc: jsonb('description_doc'),
     saleReview: text('sale_review').notNull().default('DRAFT'),
     saleApprovedAt: at('sale_approved_at'),
+    /** 마지막 판매 승인 요청 시각(BAT-616, ADR-0327). 승인·변경 취소 뒤에는 NULL */
+    saleSubmittedAt: at('sale_submitted_at'),
+    /** 마지막 반려 사유 1~1,000자(BAT-616). REJECTED가 아니면 NULL */
+    rejectionReason: text('rejection_reason'),
     /** 공연예술통합전산망 항목 가운데 공연에 딸린 것(HOT-180이 채운다) */
     kopisFields: jsonb('kopis_fields'),
     /** 재승인 대기 변경분. 승인 뒤 더한 회차는 addedEvents, 고친 판매 정책 규칙은 salePolicy, 고친 회차 칸은 eventChanges[회차 ID]에만 둔다(ADR-0198 결정 3, ADR-0261 결정 1·4) */
@@ -119,6 +123,8 @@ export const production = pgTable(
     check('production_title_check', sql`char_length(${t.title}) between 1 and 100`),
     check('production_genre_check', sql`${t.genre} in ('콘서트', '뮤지컬', '연극', '클래식', '페스티벌', '팬미팅', '기타')`),
     check('production_sale_review_check', sql`${t.saleReview} in ('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'SUSPENDED')`),
+    check('production_rejection_reason_check', sql`${t.rejectionReason} is null or (char_length(${t.rejectionReason}) between 1 and 1000)`),
+    check('production_rejection_reason_state_check', sql`${t.rejectionReason} is null or ${t.saleReview} = 'REJECTED'`),
     // 승인 이력과 상태가 맞아야 한다(planning/03 §2.14): Draft는 승인 이력이 없고, Approved와 판매 중지(T9·T10은 승인 이력이 있을 때만)는 있다.
     // 승인 대기·반려는 둘 다 될 수 있다(첫 요청이거나 재승인). HOT-170의 첫 제약은 판매 중지를 빠뜨렸다(ADR-0198 결정 7)
     check('production_sale_approved_check', sql`(${t.saleReview} <> 'DRAFT' or ${t.saleApprovedAt} is null) and (${t.saleReview} not in ('APPROVED', 'SUSPENDED') or ${t.saleApprovedAt} is not null)`),

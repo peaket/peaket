@@ -19,7 +19,9 @@ import { layoutVenueId } from '../../domain/seatmap-layout.js';
 import { SEARCH_READ_MODEL_SYNC, type SearchReadModelSync } from '../../domain/search.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { pendingOf } from './layout-rows.js';
-import { event, eventContractState, priceTier, production, promoterContract, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
+import { event, eventContractState, priceTier, production, promoter, promoterContract, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
+import { sellerInfoOf } from '../../domain/promoter-contract.js';
+import { decodeSaleReviewCursor, encodeSaleReviewCursor, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView } from '../../domain/sale-review.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** 규모 올리기·판매 승인의 오픈 간격 검사를 직렬화하는 잠금 종류(하나의 문) */
@@ -133,6 +135,9 @@ async function readState(tx: Tx, p: ProductionRow, tenantId: string): Promise<Sa
       title: p.title,
       saleReview: p.saleReview as SaleReview,
       saleApprovedAt: p.saleApprovedAt,
+      saleSubmittedAt: p.saleSubmittedAt,
+      rejectionReason: p.rejectionReason,
+      hasPlace: p.placeId !== null || p.requestedPlace !== null,
       rules: rulesOf(p.salePolicy),
       pendingRules: Array.isArray(rev.salePolicy) ? rev.salePolicy : undefined,
       salePolicyVersion: p.salePolicyVersion,
@@ -244,6 +249,188 @@ export class DrizzleSaleStore implements SaleStore {
         .delete(saleEligibilityDrop)
         .where(and(eq(saleEligibilityDrop.productionId, productionId), eq(saleEligibilityDrop.promoterId, tenantId), eq(saleEligibilityDrop.listKey, listKey), eq(saleEligibilityDrop.copySeq, copySeq)));
     }, { tenantId });
+  }
+
+  /** 파트너 판매 승인 현황(얇은 읽기, BAT-616). 행 보안에 더해 테넌트 조건을 넣는다 */
+  async partnerReview(productionId: string, tenantId: string): Promise<PartnerSaleReviewView | undefined> {
+    if (!UUID.test(productionId)) return undefined;
+    return this.db.transaction(
+      async (tx) => {
+        const r = await tx.execute(sql`
+          select p.sale_review, p.sale_approved_at, p.sale_submitted_at, p.rejection_reason,
+                 pr.legal_name, pr.representative, pr.address, pr.phone, pr.email, pr.business_reg_no, pr.mail_order_report_no, pr.exemption_basis
+            from production p
+            join promoter pr on pr.id = p.promoter_id
+           where p.id = ${productionId}::uuid and p.promoter_id = ${tenantId}::uuid`);
+        const p = r.rows[0] as
+          | {
+              sale_review: SaleReview;
+              sale_approved_at: Date | string | null;
+              sale_submitted_at: Date | string | null;
+              rejection_reason: string | null;
+              legal_name: string;
+              representative: string | null;
+              address: string | null;
+              phone: string | null;
+              email: string | null;
+              business_reg_no: string | null;
+              mail_order_report_no: string | null;
+              exemption_basis: string | null;
+            }
+          | undefined;
+        if (!p) return undefined;
+        const ev = await tx.execute(sql`
+          select id, open_at, starts_at, scale
+            from event
+           where production_id = ${productionId}::uuid and promoter_id = ${tenantId}::uuid and status <> 'CANCELLED'
+           order by starts_at asc, id asc`);
+        const seller = sellerInfoOf({
+          legalName: p.legal_name,
+          representative: p.representative,
+          address: p.address,
+          phone: p.phone,
+          email: p.email,
+          businessRegNo: p.business_reg_no,
+          mailOrderReportNo: p.mail_order_report_no,
+          exemptionBasis: p.exemption_basis,
+        });
+        return {
+          saleReview: p.sale_review,
+          rejectionReason: p.rejection_reason,
+          hasApprovalHistory: p.sale_approved_at !== null,
+          submittedAt: p.sale_submitted_at === null ? null : new Date(p.sale_submitted_at),
+          seller,
+          events: (ev.rows as { id: string; open_at: Date | string; starts_at: Date | string; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]).map((e) => ({
+            eventId: e.id,
+            openAt: new Date(e.open_at),
+            startsAt: new Date(e.starts_at),
+            ...(e.scale !== null ? { scale: e.scale } : {}),
+          })),
+        };
+      },
+      { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
+
+  /** 관제 판매 승인 목록(모든 테넌트, core_ops). 제출·승인·등록 시각 오래된 순이고 커서는 그 시각과 공연 ID다 */
+  async opsReviews(q: OpsSaleReviewQuery): Promise<OpsSaleReviewPage> {
+    const statuses = q.statuses.length > 0 ? q.statuses : (['SUBMITTED'] as const);
+    const inList = sql.join(
+      statuses.map((s) => sql`${s}`),
+      sql`, `,
+    );
+    const cursor = q.cursor ? decodeSaleReviewCursor(q.cursor) : undefined;
+    const after = cursor ? sql`and (coalesce(p.sale_submitted_at, p.sale_approved_at, p.created_at), p.id) > (${cursor.at.toISOString()}::timestamptz, ${cursor.productionId}::uuid)` : sql``;
+    const r = await this.db.db.execute(sql`
+      select p.id, p.title, p.promoter_id, pr.legal_name as promoter_name, p.sale_review, p.sale_approved_at, p.sale_submitted_at,
+             coalesce(p.sale_submitted_at, p.sale_approved_at, p.created_at) as sort_at,
+             (select min(e.open_at) from event e where e.production_id = p.id and e.status <> 'CANCELLED') as first_open_at,
+             (select count(*)::int from event e where e.production_id = p.id and e.status <> 'CANCELLED') as event_count
+        from production p
+        join promoter pr on pr.id = p.promoter_id
+       where p.sale_review in (${inList}) ${after}
+       order by sort_at asc, p.id asc
+       limit ${q.limit + 1}`);
+    const rows = r.rows as {
+      id: string;
+      title: string;
+      promoter_id: string;
+      promoter_name: string;
+      sale_review: Exclude<SaleReview, 'DRAFT'>;
+      sale_approved_at: Date | string | null;
+      sale_submitted_at: Date | string | null;
+      sort_at: Date | string;
+      first_open_at: Date | string | null;
+      event_count: number;
+    }[];
+    const page = rows.slice(0, q.limit);
+    const items = page.map((x) => ({
+      productionId: x.id,
+      title: x.title,
+      promoterId: x.promoter_id,
+      promoterName: x.promoter_name,
+      status: x.sale_review,
+      reapproval: x.sale_approved_at !== null,
+      submittedAt: x.sale_submitted_at === null ? null : new Date(x.sale_submitted_at),
+      firstOpenAt: x.first_open_at === null ? null : new Date(x.first_open_at),
+      eventCount: x.event_count,
+      suspensionApprovalPending: false,
+    }));
+    const last = items[items.length - 1];
+    return { items, nextCursor: rows.length > q.limit && last ? encodeSaleReviewCursor(new Date(page[page.length - 1]!.sort_at), last.productionId) : null };
+  }
+
+  /** 관제 판매 승인 상세(모든 테넌트, core_ops). 판매 정책은 재승인 대기 변경분이 있으면 그 규칙을 준다 */
+  async opsReviewDetail(productionId: string): Promise<OpsSaleReviewDetail | undefined> {
+    if (!UUID.test(productionId)) return undefined;
+    const r = await this.db.db.execute(sql`
+      select p.id, p.title, p.promoter_id, pr.legal_name as promoter_name, p.sale_review, p.sale_approved_at, p.sale_submitted_at, p.rejection_reason,
+             p.sale_policy, p.pending_revision,
+             pr.legal_name, pr.representative, pr.address, pr.phone, pr.email, pr.business_reg_no, pr.mail_order_report_no, pr.exemption_basis, pr.verified_at
+        from production p
+        join promoter pr on pr.id = p.promoter_id
+       where p.id = ${productionId}::uuid`);
+    const p = r.rows[0] as
+      | {
+          id: string;
+          title: string;
+          promoter_id: string;
+          promoter_name: string;
+          sale_review: Exclude<SaleReview, 'DRAFT'>;
+          sale_approved_at: Date | string | null;
+          sale_submitted_at: Date | string | null;
+          rejection_reason: string | null;
+          sale_policy: unknown;
+          pending_revision: unknown;
+          legal_name: string;
+          representative: string | null;
+          address: string | null;
+          phone: string | null;
+          email: string | null;
+          business_reg_no: string | null;
+          mail_order_report_no: string | null;
+          exemption_basis: string | null;
+          verified_at: Date | string | null;
+        }
+      | undefined;
+    if (!p) return undefined;
+    const ev = await this.db.db.execute(sql`
+      select id, open_at, starts_at, status, scale
+        from event
+       where production_id = ${productionId}::uuid
+       order by starts_at asc, id asc`);
+    const pending = (p.pending_revision ?? {}) as { salePolicy?: SalePolicyRule[] };
+    return {
+      productionId: p.id,
+      title: p.title,
+      promoterId: p.promoter_id,
+      promoterName: p.promoter_name,
+      status: p.sale_review,
+      reapproval: p.sale_approved_at !== null,
+      submittedAt: p.sale_submitted_at === null ? null : new Date(p.sale_submitted_at),
+      rejectionReason: p.rejection_reason,
+      seller: sellerInfoOf({
+        legalName: p.legal_name,
+        representative: p.representative,
+        address: p.address,
+        phone: p.phone,
+        email: p.email,
+        businessRegNo: p.business_reg_no,
+        mailOrderReportNo: p.mail_order_report_no,
+        exemptionBasis: p.exemption_basis,
+      }),
+      verifiedAt: p.verified_at === null ? null : new Date(p.verified_at),
+      salePolicy: Array.isArray(pending.salePolicy) ? pending.salePolicy : rulesOf(p.sale_policy),
+      events: (ev.rows as { id: string; open_at: Date | string; starts_at: Date | string; status: EventStatus; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]).map((e) => ({
+        eventId: e.id,
+        openAt: new Date(e.open_at),
+        startsAt: new Date(e.starts_at),
+        status: e.status,
+        ...(e.scale !== null ? { scale: e.scale } : {}),
+        demandForecastPath: `/v1/ops/events/${e.id}/demand-forecast`,
+      })),
+      suspensionApprovalPending: false,
+    };
   }
 
   #tx(tx: DbTransaction, p: ProductionRow, tenantId: string): SaleTx {
@@ -372,6 +559,8 @@ export class DrizzleSaleStore implements SaleStore {
           .set({
             saleReview: 'APPROVED',
             saleApprovedAt: input.now,
+            saleSubmittedAt: null,
+            rejectionReason: null,
             salePolicy: after.production.rules,
             pendingRevision: null,
             ...(input.placeId !== undefined ? { placeId: input.placeId, requestedPlace: null } : {}),
@@ -382,8 +571,28 @@ export class DrizzleSaleStore implements SaleStore {
         await this.search?.sync(tx, [p.id], input.now);
         return after;
       },
-      reject: async (_reason, _now) => {
-        await tx.update(production).set({ saleReview: 'REJECTED' }).where(mineProduction);
+      reject: async (reason, _now) => {
+        await tx.update(production).set({ saleReview: 'REJECTED', rejectionReason: reason }).where(mineProduction);
+      },
+      requestReview: async (body, now) => {
+        // 판매자 정보는 promoter의 마지막 값으로 덮는다. verified_at(운영자 확인 시각)은 바꾸지 않는다(settlement §3)
+        await tx
+          .update(promoter)
+          .set({
+            legalName: body.seller.legalName,
+            representative: body.seller.representative,
+            address: body.seller.address,
+            phone: body.seller.phone,
+            email: body.seller.email,
+            businessRegNo: body.seller.businessRegNo,
+            mailOrderReportNo: body.seller.mailOrderReportNo ?? null,
+            exemptionBasis: body.seller.exemptionBasis ?? null,
+          })
+          .where(eq(promoter.id, tenantId));
+        await tx.update(production).set({ saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null, accessibleSeatingCheck: true }).where(mineProduction);
+      },
+      cancelReview: async () => {
+        await tx.update(production).set({ pendingRevision: null, saleReview: 'APPROVED', saleSubmittedAt: null, rejectionReason: null }).where(mineProduction);
       },
       setEventScale: async (eventId, scale, version) => {
         await tx.update(event).set({ scale, version }).where(and(eq(event.id, eventId), eq(event.productionId, p.id), eq(event.promoterId, tenantId)));

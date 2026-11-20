@@ -2,6 +2,8 @@
 // 공연마다 한 줄로 세워 잠금을 흉내 내고, 쓰기는 fn이 끝난 뒤에만 반영한다(던지면 버린다, DB 트랜잭션과 같게 답한다). 운영은 Drizzle 저장소다.
 import type { EventEditable, ListWrite, SaleEventRow, SaleOwnerView, SaleState, SaleStore, SaleTx } from '../domain/sale-ports.js';
 import { applyApproval, type SaleApprovalInput } from '../domain/sale-approval.js';
+import { sellerInfoOf } from '../domain/promoter-contract.js';
+import { decodeSaleReviewCursor, encodeSaleReviewCursor, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView } from '../domain/sale-review.js';
 import type { MemoryCatalogRepository } from './memory-catalog-repository.js';
 
 export class MemorySaleStore implements SaleStore {
@@ -114,6 +116,8 @@ export class MemorySaleStore implements SaleStore {
               ...p,
               saleReview: 'APPROVED',
               saleApprovedAt: input.now,
+              saleSubmittedAt: null,
+              rejectionReason: null,
               ...(input.placeId !== undefined ? { placeId: input.placeId } : {}),
             });
             const policy = this.repo.salePolicies.get(productionId);
@@ -140,10 +144,42 @@ export class MemorySaleStore implements SaleStore {
           });
           return after;
         },
-        reject: async (_reason, _now) => {
+        reject: async (reason, _now) => {
           writes.push(() => {
             const p = this.repo.productions.get(productionId)!;
-            this.repo.productions.set(productionId, { ...p, saleReview: 'REJECTED' });
+            this.repo.productions.set(productionId, { ...p, saleReview: 'REJECTED', rejectionReason: reason });
+          });
+        },
+        requestReview: async (body, now) => {
+          writes.push(() => {
+            const prev = this.repo.promoters.get(tenantId);
+            this.repo.promoters.set(tenantId, {
+              promoterId: tenantId,
+              legalName: body.seller.legalName,
+              representative: body.seller.representative,
+              address: body.seller.address,
+              phone: body.seller.phone,
+              email: body.seller.email,
+              businessRegNo: body.seller.businessRegNo,
+              mailOrderReportNo: body.seller.mailOrderReportNo ?? null,
+              exemptionBasis: body.seller.exemptionBasis ?? null,
+              verifiedAt: prev?.verifiedAt ?? null,
+              commissionRateBp: prev?.commissionRateBp ?? 0,
+              pendingContractApprovalId: prev?.pendingContractApprovalId ?? null,
+            });
+            this.repo.sellerNames.set(tenantId, body.seller.legalName);
+            const p = this.repo.productions.get(productionId)!;
+            this.repo.productions.set(productionId, { ...p, saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null });
+          });
+        },
+        cancelReview: async () => {
+          writes.push(() => {
+            this.repo.pending.delete(productionId);
+            this.repo.eventChanges.delete(productionId);
+            const policy = this.repo.salePolicies.get(productionId);
+            if (policy) this.repo.salePolicies.set(productionId, { rules: policy.rules, version: policy.version });
+            const p = this.repo.productions.get(productionId)!;
+            this.repo.productions.set(productionId, { ...p, saleReview: 'APPROVED', saleSubmittedAt: null, rejectionReason: null });
           });
         },
         setEventScale: async (eventId, scale, version) => {
@@ -208,6 +244,99 @@ export class MemorySaleStore implements SaleStore {
     if (i >= 0) this.repo.saleDrops.splice(i, 1);
   }
 
+  async partnerReview(productionId: string, tenantId: string): Promise<PartnerSaleReviewView | undefined> {
+    const p = this.repo.productions.get(productionId);
+    if (!p || p.promoterId !== tenantId) return undefined;
+    const seller = this.#seller(tenantId);
+    return {
+      saleReview: p.saleReview,
+      rejectionReason: p.rejectionReason ?? null,
+      hasApprovalHistory: p.saleApprovedAt !== null,
+      submittedAt: p.saleSubmittedAt ?? null,
+      seller,
+      events: this.#events(productionId).map((e) => ({
+        eventId: e.id,
+        openAt: e.openAt,
+        startsAt: e.startsAt,
+        ...(this.repo.eventScales.get(e.id) !== undefined ? { scale: this.repo.eventScales.get(e.id)! } : {}),
+      })),
+    };
+  }
+
+  async opsReviews(q: OpsSaleReviewQuery): Promise<OpsSaleReviewPage> {
+    const statuses = new Set<string>(q.statuses.length > 0 ? q.statuses : ['SUBMITTED']);
+    const cursor = q.cursor ? decodeSaleReviewCursor(q.cursor) : undefined;
+    const rows = [...this.repo.productions.values()]
+      .filter((p) => p.saleReview !== 'DRAFT' && statuses.has(p.saleReview))
+      .map((p) => {
+        const events = this.#events(p.id);
+        const at = p.saleSubmittedAt ?? p.saleApprovedAt ?? new Date(0);
+        return { p, at, events };
+      })
+      .filter((r) => !cursor || r.at.getTime() > cursor.at.getTime() || (r.at.getTime() === cursor.at.getTime() && r.p.id > cursor.productionId))
+      .sort((a, b) => a.at.getTime() - b.at.getTime() || (a.p.id < b.p.id ? -1 : 1));
+    const page = rows.slice(0, q.limit);
+    const items = page.map(({ p, events }) => ({
+      productionId: p.id,
+      title: p.title,
+      promoterId: p.promoterId,
+      promoterName: this.repo.promoters.get(p.promoterId)?.legalName ?? this.repo.sellerNames.get(p.promoterId) ?? '',
+      status: p.saleReview as Exclude<typeof p.saleReview, 'DRAFT'>,
+      reapproval: p.saleApprovedAt !== null,
+      submittedAt: p.saleSubmittedAt ?? null,
+      firstOpenAt: events.length > 0 ? events[0]!.openAt : null,
+      eventCount: events.length,
+      suspensionApprovalPending: false,
+    }));
+    const last = page[page.length - 1];
+    return { items, nextCursor: rows.length > q.limit && last ? encodeSaleReviewCursor(last.at, last.p.id) : null };
+  }
+
+  async opsReviewDetail(productionId: string): Promise<OpsSaleReviewDetail | undefined> {
+    const p = this.repo.productions.get(productionId);
+    if (!p || p.saleReview === 'DRAFT') return undefined;
+    const policy = this.repo.salePolicies.get(productionId);
+    const events = this.#events(productionId);
+    return {
+      productionId: p.id,
+      title: p.title,
+      promoterId: p.promoterId,
+      promoterName: this.repo.promoters.get(p.promoterId)?.legalName ?? this.repo.sellerNames.get(p.promoterId) ?? '',
+      status: p.saleReview,
+      reapproval: p.saleApprovedAt !== null,
+      submittedAt: p.saleSubmittedAt ?? null,
+      rejectionReason: p.rejectionReason ?? null,
+      seller: this.#seller(p.promoterId),
+      verifiedAt: this.repo.promoters.get(p.promoterId)?.verifiedAt ?? null,
+      salePolicy: policy?.pending ?? policy?.rules ?? [],
+      events: events.map((e) => ({
+        eventId: e.id,
+        openAt: e.openAt,
+        startsAt: e.startsAt,
+        status: e.status,
+        ...(this.repo.eventScales.get(e.id) !== undefined ? { scale: this.repo.eventScales.get(e.id)! } : {}),
+        demandForecastPath: `/v1/ops/events/${e.id}/demand-forecast`,
+      })),
+      suspensionApprovalPending: false,
+    };
+  }
+
+  #seller(promoterId: string): OpsSaleReviewDetail['seller'] {
+    const p = this.repo.promoters.get(promoterId);
+    if (!p) {
+      const name = this.repo.sellerNames.get(promoterId);
+      return name === undefined ? null : { legalName: name, representative: null, address: null, phone: null, email: null, businessRegNo: null, mailOrderReportNo: null, exemptionBasis: null };
+    }
+    return sellerInfoOf(p);
+  }
+
+  /** 취소되지 않은 회차를 시작 시각 차례로(목록·상세·파트너 현황이 같은 차례를 쓴다) */
+  #events(productionId: string): { id: string; openAt: Date; startsAt: Date; status: 'SCHEDULED' | 'CANCELLED' | 'POSTPONED' }[] {
+    return [...this.repo.events.values()]
+      .filter((e) => e.productionId === productionId && e.status !== 'CANCELLED')
+      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.id < b.id ? -1 : 1));
+  }
+
   #row(eventId: string): SaleEventRow {
     const e = this.repo.events.get(eventId)!;
     const draft = this.repo.eventDrafts.get(eventId);
@@ -247,7 +376,19 @@ export class MemorySaleStore implements SaleStore {
     const layout = this.repo.layouts.get(productionId);
     const doc = layout?.pending?.doc ?? layout?.rows?.doc;
     return {
-      production: { id: p.id, promoterId: p.promoterId, title: p.title, saleReview: p.saleReview, saleApprovedAt: p.saleApprovedAt, rules: policy?.rules ?? [], pendingRules: policy?.pending, salePolicyVersion: policy?.version ?? 1 },
+      production: {
+        id: p.id,
+        promoterId: p.promoterId,
+        title: p.title,
+        saleReview: p.saleReview,
+        saleApprovedAt: p.saleApprovedAt,
+        saleSubmittedAt: p.saleSubmittedAt ?? null,
+        rejectionReason: p.rejectionReason ?? null,
+        hasPlace: p.placeId !== null || p.requestedPlace != null,
+        rules: policy?.rules ?? [],
+        pendingRules: policy?.pending,
+        salePolicyVersion: policy?.version ?? 1,
+      },
       events: [...this.repo.events.values()]
         .filter((e) => e.productionId === productionId)
         .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.id < b.id ? -1 : 1))

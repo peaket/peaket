@@ -18,6 +18,12 @@ export interface Production {
   saleReview: SaleReview;
   /** 마지막 판매 승인 시각. 없으면 비공개 */
   saleApprovedAt: Date | null;
+  /** 마지막 판매 승인 요청 시각(BAT-616). 승인·변경 취소 뒤에는 null/없음 */
+  saleSubmittedAt?: Date | null;
+  /** 마지막 반려 사유(BAT-616). REJECTED가 아니면 null/없음 */
+  rejectionReason?: string | null;
+  /** 새 공연장 요청(승인 전). 등록 공연장과 함께 판매 승인 요청의 422 검사에 쓴다 */
+  requestedPlace?: unknown | null;
 }
 
 /** 회차 상태(docs/data.md event.status) */
