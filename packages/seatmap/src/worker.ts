@@ -311,17 +311,20 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
       clearTimer(subscribeTimer);
       subscribeTimer = undefined;
     }
+    // 새로 보이는 구역이 1초를 채우기 전에는 바꾸지 않는다. 바꾸기 간격이 이미 지나도 머묾을 기다린다
+    const pending = visible.filter((s) => !subscribed.includes(s) && !want.includes(s));
+    let dwellWait = 0;
+    if (pending.length > 0) {
+      let earliest = Number.POSITIVE_INFINITY;
+      for (const s of pending) earliest = Math.min(earliest, (seenAt.get(s) ?? now) + SUBSCRIBE_DWELL_MS);
+      if (earliest > now) dwellWait = earliest - now;
+    }
     if (changed) {
-      const wait = lastSubscribeAt + SUBSCRIBE_MIN_INTERVAL_MS - now;
+      const wait = Math.max(lastSubscribeAt + SUBSCRIBE_MIN_INTERVAL_MS - now, dwellWait);
       if (wait <= 0) commitSections(want, now);
       else subscribeTimer = setTimer(evaluate, wait);
-    } else {
-      let earliest = Number.POSITIVE_INFINITY;
-      for (const s of visible) {
-        if (want.includes(s)) continue;
-        earliest = Math.min(earliest, (seenAt.get(s) ?? now) + SUBSCRIBE_DWELL_MS);
-      }
-      if (earliest > now && earliest !== Number.POSITIVE_INFINITY) subscribeTimer = setTimer(evaluate, Math.max(1, earliest - now));
+    } else if (dwellWait > 0) {
+      subscribeTimer = setTimer(evaluate, dwellWait);
     }
     postSections();
     scheduleRefresh();
