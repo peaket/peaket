@@ -189,15 +189,16 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 
 | 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
 | --- | --- | --- | --- | --- |
-| P-T76 |  | A | BAT-425 | 지연 환급 계좌 다시 받기의 새 시도 번호·`FAILED(SUPERSEDED)`·앞 진행 중 행 조회 닫기(ADR-0316). 돈이 나가는 이중 환불 가드라 A다. 정본 표는 `docs/features/payment.md` §11 P-T76이고 시험 이름으로 상태를 정한다 |
-| P-T74 ③ |  | A | BAT-425 | 지연 환급 계좌·배상 계좌의 은행 코드 26개 허용 목록(목록 밖 `99`는 400). 돈이 나갈 계좌를 가리는 입력이라 A다. 정본은 `docs/features/payment.md` §11 P-T74 ③(2026-11-20 고침) |
-| P-T63 ③ |  | A | BAT-425 | 굿즈 지연 환급 계좌의 같은 26개 허용 목록(목록 밖 400, 계좌 거절은 422·새 행 `REJECTED`). 정본은 `docs/features/transfer-refund.md` §11 P-T63 ③(2026-11-20 고침) |
-| R-T42 |  | A | BAT-425 | 예매 취소의 지연 환급 계좌 다시 받기(본인·계좌 대기·시도 상한·재인증 `REFUND_ACCOUNT`·계좌 미저장·시도별 멱등키). 돈이 나가는 환급 경로라 A다. 정본 표는 `docs/features/transfer-refund.md` §11 R-T42이고 시험 이름으로 상태를 정한다(ADR-0316) |
-| R-T43 |  | A | BAT-425 | 굿즈 취소의 지연 환급 계좌 다시 받기(core-svc shop 새 경로·새 `merch_refund` 행·`SHOP_CANCEL_REFUND_ACCOUNT`). 돈이 나가는 환급 경로라 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T43(ADR-0315·0316) |
-| R-T45 |  | B | BAT-425 | 일괄 환불 자동 정지의 결제사 서킷 연결(10초 캐시·`open`만 멈춤·읽기 실패는 계속). 환급을 멈추는 운영 동작이라 B다. 정본은 `docs/features/transfer-refund.md` §11 R-T45 |
-| R-T46 |  | A | BAT-425 | 배상 대상 행·목록(주문 단위 10%·원 미만 올림, 결제자 본인만, 계좌 끝 4자리만). 금액과 개인정보에 닿아 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T46(ADR-0317) |
-| R-T47 |  | A | BAT-425 | 배상 계좌 입력·송금(재인증 `COMPENSATION_ACCOUNT`, `UNAVAILABLE` 503, `FAILED` 422·CS `COMPENSATION_PENDING`). 돈이 나가는 송금 경로라 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T47(ADR-0317) |
-| J-T28 |  | A | BAT-425 | 배상금 미리 지급의 `COMPENSATION_ADVANCE` 미수금 생성·결제사 무관 상계·이중 상계 금지. 파트너 정산 금액에 닿아 A다. 정본은 `docs/features/settlement.md` §13 J-T28(ADR-0317) |
+| P-T76 |  | A | BAT-425 | 지연 환급 계좌 다시 받기의 새 시도 번호·`FAILED(SUPERSEDED)`·앞 진행 중 행 조회 닫기(ADR-0316). 돈이 나가는 이중 환불 가드라 A다. 정본 표는 `docs/features/payment.md` §11 P-T76이고 시험 이름으로 상태를 정한다. BAT-425 완료(2026-11-20, R-716). |
+| P-T74 ③ |  | A | BAT-425 | 지연 환급 계좌·배상 계좌의 은행 코드 26개 허용 목록(목록 밖 `99`는 400). 돈이 나갈 계좌를 가리는 입력이라 A다. 정본은 `docs/features/payment.md` §11 P-T74 ③(2026-11-20 고침). BAT-425 완료(2026-11-20, R-716). |
+| P-T63 ③ |  | A | BAT-425 | 굿즈 지연 환급 계좌의 같은 26개 허용 목록(목록 밖 400, 계좌 거절은 422·새 행 `REJECTED`). 정본은 `docs/features/transfer-refund.md` §11 P-T63 ③(2026-11-20 고침). BAT-425 완료(2026-11-20, R-716). |
+| R-T42 |  | A | BAT-425 | 예매 취소의 지연 환급 계좌 다시 받기(본인·계좌 대기·시도 상한·재인증 `REFUND_ACCOUNT`·계좌 미저장·시도별 멱등키). 돈이 나가는 환급 경로라 A다. 정본 표는 `docs/features/transfer-refund.md` §11 R-T42이고 시험 이름으로 상태를 정한다(ADR-0316). BAT-425 완료(2026-11-20, R-716). |
+| R-T43 |  | A | BAT-425 | 굿즈 취소의 지연 환급 계좌 다시 받기(core-svc shop 새 경로·새 `merch_refund` 행·`SHOP_CANCEL_REFUND_ACCOUNT`). 돈이 나가는 환급 경로라 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T43(ADR-0315·0316). BAT-425 완료(2026-11-20, R-716). |
+| R-T45 |  | B | BAT-425 | 일괄 환불 자동 정지의 결제사 서킷 연결(10초 캐시·`open`만 멈춤·읽기 실패는 계속). 환급을 멈추는 운영 동작이라 B다. 정본은 `docs/features/transfer-refund.md` §11 R-T45. BAT-425 완료(2026-11-20, R-716). |
+| R-T46 |  | A | BAT-425 | 배상 대상 행·목록(주문 단위 10%·원 미만 올림, 결제자 본인만, 계좌 끝 4자리만). 금액과 개인정보에 닿아 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T46(ADR-0317). BAT-425 완료(2026-11-20, R-716). |
+| R-T47 |  | A | BAT-425 | 배상 계좌 입력·송금(재인증 `COMPENSATION_ACCOUNT`, `UNAVAILABLE` 503, `FAILED` 422·CS `COMPENSATION_PENDING`). 돈이 나가는 송금 경로라 A다. 정본은 `docs/features/transfer-refund.md` §11 R-T47(ADR-0317). BAT-425 완료(2026-11-20, R-716). |
+| J-T28 |  | A | BAT-425 | 배상금 미리 지급의 `COMPENSATION_ADVANCE` 미수금 생성·결제사 무관 상계·이중 상계 금지. 파트너 정산 금액에 닿아 A다. 정본은 `docs/features/settlement.md` §13 J-T28(ADR-0317). BAT-425 완료(2026-11-20, R-716). |
 
-- ASVS 여섯 행(transfer-refund 2.3.3·2.3.4·8.2.2·8.2.3·16.2.5, payment 2.3.4·8.2.3·16.2.5)은 구현 위치가 이미 있고, 새 시험이 같은 태그를 달아 근거를 더한다(2026-11-20 B·기록 담당 확인). P-T74 ③·P-T63 ③은 기존 시나리오의 세부 번호를 고친 것이라 같은 줄에 적는다.
+- ASVS 여덟 행(transfer-refund 2.3.3·2.3.4·8.2.2·8.2.3·16.2.5, payment 2.3.4·8.2.3·16.2.5)은 구현 위치가 이미 있고, 새 시험이 같은 태그를 달아 근거를 더한다(2026-11-20 B·기록 담당 확인. RV-15에 따라 '여섯'을 '여덟'으로 고침). P-T74 ③·P-T63 ③은 기존 시나리오의 세부 번호를 고친 것이라 같은 줄에 적는다.
+- **BAT-425가 닫은 장부 항목(2026-11-20, R-716)**: GAT-120의 자동 정지 서킷 연결을 BAT-425가 끝냈다. R-T9의 '서킷 열림이면 그 몫만 멈춘다' 갈래는 `services/purchase-svc/test/pg-circuits.test.ts`(R-T45)와 `services/purchase-svc/test/event-refund-gat130.test.ts`(R-T9)가 보고, R-T22의 수동 일시정지·재개는 기존 시험이 그대로 본다. 이 절 표의 아홉 항목은 시험 이름으로 상태를 정하므로 상태 칸은 비워 두고 근거만 더했다(항목 수·상태는 바꾸지 않았다).
 - **R-T43 구현 몫(core-svc shop, 2026-11-20 C)**: core 0032가 `merch_refund.replaces_refund_id`(자기 참조, nullable)와 부분 유일 인덱스 `merch_refund_replaces_uq`(`replaces_refund_id is not null`)를 더하고, 멱등 작업 목록에 `SHOP_CANCEL_REFUND_ACCOUNT`를 넣었다. `MerchRefundAccount`는 주문 행 잠금 안에서 사슬 끝 행을 다시 보고 새 행·새 항목 자리·멱등 기록을 커밋한 뒤 새 취소 ID·시도 번호(`refund_attempt`)로 `CancelPayment`를 부른다. 시험은 R-T43 ①~③이 시험 담당 몫이고, 이 줄은 구현 위치만 남긴다.
