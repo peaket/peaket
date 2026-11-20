@@ -11,6 +11,7 @@ import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { GrpcIdentityAdminAccounts } from './modules/admin-accounts/adapters/grpc-identity-admin-accounts.js';
 import { HttpCommandExecutor } from './adapters/http-command-executor.js';
 import { assertOpsPartnerRole } from './adapters/db/database-role.js';
+import { reauthWiring } from './reauth-wiring.js';
 import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
@@ -23,6 +24,7 @@ import { HttpCoreContract } from './adapters/http-core-contract.js';
 
 const SERVICE = 'ops-svc';
 assertInternalGrpcToken(process.env);
+const reauthStartup = reauthWiring(process.env);
 const url = process.env.PEAKET_DATABASE_URL;
 if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣는다)');
 const identityUrl = process.env.PEAKET_IDENTITY_GRPC_URL;
@@ -159,6 +161,7 @@ if (!cancellationDeps.owners) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 �
 if (!cancellationDeps.stopper) service.logger.warn({}, '판매 중지 집행 길(purchase·queue HTTP 또는 제어 gRPC)이 없어 회차 취소 확정이 503 sale-stop-unavailable이다');
 if (!cancellationDeps.reader) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 판정 미리보기가 503 event-refund-unavailable이다');
 if (!reauth) service.logger.warn({}, 'PEAKET_IDENTITY_JWKS_URL이 없어 회차 취소 요청·확정이 503 reauth-unavailable이다');
+for (const warning of reauthStartup.warnings) service.logger.warn({}, warning);
 if (coreEventStatusWarning) service.logger.warn({}, coreEventStatusWarning);
 await service.listen();
 // core 회차 상태 반영 다시 하기(1분 [가정], BAT-420-rest GAT-110, R-T41 ③). 잡기 뒤 미루기(SKIP LOCKED)라 파드 여럿이 함께 돌려도 한 요청은 한쪽만 부른다

@@ -1,4 +1,4 @@
-// 관리 재인증 토큰 확인(identity GET /internal/jwks/admin.json, act APPROVAL, passkey 필수).
+// 관리 재인증 토큰 확인(identity GET /internal/jwks/admin.json, act APPROVAL·PERMISSION_CHANGE·OPS_COMMAND, passkey 필수).
 import { createExternalHttpClient, ProblemError, type ReauthJtiStore, systemClock, TokenRejected, TokenVerifier, type Clock, type TokenVerifierOptions } from '@peaket/platform';
 import { type ApprovalReauthVerifier, type ReauthAct } from '../domain/ports.js';
 

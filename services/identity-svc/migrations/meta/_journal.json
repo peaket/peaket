@@ -246,6 +246,13 @@
       "when": 1794992400000,
       "tag": "0034_withdrawal_participant",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795078800000,
+      "tag": "0035_admin_session_termination",
+      "breakpoints": true
     }
   ]
 }

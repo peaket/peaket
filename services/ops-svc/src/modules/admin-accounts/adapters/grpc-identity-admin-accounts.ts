@@ -138,11 +138,11 @@ export class GrpcIdentityAdminAccounts implements AdminIdentity {
     this.#sessions = client('AdminSessionService') as unknown as SessionsClient;
   }
 
-  #call(client: grpc.Client, method: string, req: object): Promise<Record<string, unknown>> {
+  #call(client: grpc.Client, method: string, req: object, notFoundType = 'not-found'): Promise<Record<string, unknown>> {
     const fn = (client as unknown as Record<string, Unary>)[method];
     return new Promise((res, rej) => {
-      fn(req, new grpc.Metadata(), { deadline: Date.now() + DEADLINE_CAP_MS }, (e, v) => {
-        if (e) return rej(e);
+      fn.call(client, req, new grpc.Metadata(), { deadline: Date.now() + DEADLINE_CAP_MS }, (e, v) => {
+        if (e) return rej(problemOfGrpcError(e, notFoundType));
         res(v ?? {});
       });
     });
@@ -173,7 +173,7 @@ export class GrpcIdentityAdminAccounts implements AdminIdentity {
         }),
       };
     } catch (e) {
-      if (grpcCode(e) === grpc.status.NOT_FOUND) return null;
+      if (e instanceof AdminAccountProblem && e.status === 404) return null;
       throw e;
     }
   }
@@ -224,7 +224,7 @@ export class GrpcIdentityAdminAccounts implements AdminIdentity {
   }
 
   async designate(i: Parameters<AdminIdentity['designate']>[0]): Promise<AdminDesignationView> {
-    const out = await this.#call(this.#designations, 'SetAdminDesignation', {
+    const out = await this.#call(this.#accounts, 'SetAdminDesignation', {
       request_id: i.requestId,
       acted_by: i.actedBy,
       admin_account_id: i.adminAccountId,
@@ -237,7 +237,7 @@ export class GrpcIdentityAdminAccounts implements AdminIdentity {
   }
 
   async revokeDesignation(i: Parameters<AdminIdentity['revokeDesignation']>[0]): Promise<void> {
-    const out = await this.#call(this.#designations, 'RevokeAdminDesignation', {
+    const out = await this.#call(this.#accounts, 'RevokeAdminDesignation', {
       request_id: i.requestId,
       acted_by: i.actedBy,
       admin_account_id: i.adminAccountId,
@@ -248,12 +248,17 @@ export class GrpcIdentityAdminAccounts implements AdminIdentity {
   }
 
   async terminateSessions(i: Parameters<AdminIdentity['terminateSessions']>[0]) {
-    const out = await this.#call(this.#sessions, 'TerminateAdminSessions', {
-      request_id: i.requestId,
-      acted_by: i.actedBy,
-      admin_account_id: i.adminAccountId,
-      ...(i.sessionId ? { session_id: i.sessionId } : {}),
-    });
+    const out = await this.#call(
+      this.#sessions,
+      'TerminateAdminSessions',
+      {
+        request_id: i.requestId,
+        acted_by: i.actedBy,
+        admin_account_id: i.adminAccountId,
+        ...(i.sessionId ? { session_id: i.sessionId } : {}),
+      },
+      'session-not-found',
+    );
     return { endedCount: num(out.ended_count), alreadyDone: out.already_done === true };
   }
 
@@ -270,6 +275,24 @@ export class GrpcIdentityAdminAccounts implements AdminIdentity {
 }
 
 const grpcCode = (e: unknown): number | undefined => (typeof e === 'object' && e !== null && typeof (e as { code?: unknown }).code === 'number' ? (e as { code: number }).code : undefined);
+
+/**
+ * gRPC 오류를 openapi Problem으로 바꾼다(RV-02). NOT_FOUND는 404(세션은 session-not-found),
+ * INVALID_ARGUMENT는 400 invalid-query, UNAVAILABLE·DEADLINE_EXCEEDED와 모르는 오류는 503 닫힌 실패다.
+ */
+export function problemOfGrpcError(e: unknown, notFoundType = 'not-found'): AdminAccountProblem {
+  switch (grpcCode(e)) {
+    case grpc.status.NOT_FOUND:
+      return new AdminAccountProblem(notFoundType, 404, notFoundType === 'session-not-found' ? '세션을 찾을 수 없습니다' : '관리 계정을 찾을 수 없습니다');
+    case grpc.status.INVALID_ARGUMENT:
+      return new AdminAccountProblem('invalid-query', 400, '요청 값이 맞지 않습니다');
+    case grpc.status.UNAVAILABLE:
+    case grpc.status.DEADLINE_EXCEEDED:
+      return new AdminAccountProblem('admin-account-unavailable', 503, '관리 계정 서비스에 닿지 못했습니다', 1);
+    default:
+      return new AdminAccountProblem('admin-account-unavailable', 503, '관리 계정 서비스를 쓸 수 없습니다', 1);
+  }
+}
 
 /** identity 주소가 없을 때(시작 조립 실패) 닫힌 대역: 모든 호출이 503 */
 export class UnavailableAdminIdentity implements AdminIdentity {

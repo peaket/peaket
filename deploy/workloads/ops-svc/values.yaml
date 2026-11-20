@@ -4,6 +4,7 @@
 name: ops-svc
 
 # 비밀(DB 주소, 내부 토큰, 재인증 Redis·테넌트 Redis 주소)은 env에 두지 않고 Secret(secretEnvFrom)으로 받는다.
+# 재인증 jti 1회용 Redis 주소는 Secret 키 PEAKET_REAUTH_REDIS_URL로 온다(ops-svc-secrets, env에 값을 두지 않는다).
 # 테넌트 한도 Redis(BAT-173 리뷰 RV-01): PEAKET_TENANT_REDIS_URL은 세션·캐시 클러스터를 가리키고 재인증 jti Redis(PEAKET_REAUTH_REDIS_URL)와 별개다.
 # staging·prod·demo는 이 값이 없으면 시작하지 않는다. local·ci만 재인증 Redis로 닫힌 대역을 쓴다.
 secretEnvFrom: ops-svc-secrets
@@ -27,6 +28,8 @@ service:
     # 관제 역할(operator·commander·viewer)은 요청마다 identity AdminAuthzService.GetAdminAuthz로 본다(ADR-0172).
     # 업무 gRPC는 웨이포인트를 붙인 전용 Service <워크로드>-grpc로 부른다(ADR-0285 결정 5, deploy/platform/mesh/policies.yaml)
     PEAKET_IDENTITY_GRPC_URL: identity-svc-grpc:50051
+    # 관리 계정 쓰기·위험 명령 재인증의 JWKS(identity-svc 앱 포트의 관리 공개키 묶음, 클러스터 안에서만)
+    PEAKET_IDENTITY_JWKS_URL: http://identity-svc.core.svc.cluster.local:8080/internal/jwks/admin.json
     # purchase-svc 내부 HTTP 주소(BAT-425). EVENT_CANCEL 전달에 쓴다
     PEAKET_PURCHASE_HTTP_URL: http://purchase-svc:8080
     # core-svc 내부 HTTP 주소: 판매 설정 사본·회차 규모 변경·회차 취소 core 상태 반영(GAT-110). 운영은 없으면 시작하지 않는다

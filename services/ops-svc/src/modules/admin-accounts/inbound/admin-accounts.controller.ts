@@ -8,8 +8,9 @@ import { z } from 'zod';
 import { AdminAccountProblem, DESIGNATION_KINDS, type DesignationKind, etagOf } from '../domain/admin-account.js';
 import { AdminAccounts } from '../application/admin-accounts.js';
 
-const IdParams = z.object({ adminAccountId: z.string().min(1).max(64) });
-const SessionParams = IdParams.extend({ sessionId: z.string().min(1).max(64) });
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IdParams = z.object({ adminAccountId: z.string().regex(UUID, '관리 계정 ID는 UUID다') });
+const SessionParams = IdParams.extend({ sessionId: z.string().regex(UUID, '세션 ID는 UUID다') });
 const DesignationParams = IdParams.extend({ kind: z.enum(['ACCESS_REVIEWER', 'PSEUDONYM_HANDLER', 'FRAUD_INVESTIGATOR']) });
 const InviteBody = z
   .object({

@@ -37,6 +37,7 @@ x-peaket-problem-types:
   types:
     admin-account-locked: { status: 423, title: "계정이 잠겼습니다" }
     admin-account-state-conflict: { status: 409, title: "지금 계정 상태에서는 할 수 없습니다" }
+    admin-account-unavailable: { status: 503, title: "관리 계정 서비스에 닿지 못했습니다" }
     admin-email-in-use: { status: 409, title: "이미 쓰는 이메일입니다" }
     admin-login-busy: { status: 429, title: "잠시 뒤 다시 시도해 주세요" }
     admin-login-code-invalid: { status: 401, title: "인증 앱 코드가 맞지 않습니다" }

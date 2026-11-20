@@ -7,7 +7,7 @@ import type { AuditChain, AuditChainReader } from '../../audit/index.js';
 import { ReauthUnavailable } from '../../payouts/index.js';
 import { type AdminAccountDetail, type AdminAccountView, type AdminPermissionChangeView, type AdminRole, type AdminStatus, type DesignationKind, isPartnerRole, parseIfMatch } from '../domain/admin-account.js';
 import type { AdminIdentity, AdminReauth } from '../domain/ports.js';
-import { roleChangeApprovalView, type RoleChangeApprovalView } from '../../approvals/domain/approval.js';
+import { roleChangeApprovalView, type RoleChangeApprovalView } from '../domain/role-change-approval.js';
 import type { RoleChangeApprovals } from './role-change-approvals.js';
 
 export interface OpsActor {
@@ -29,10 +29,33 @@ const notFound = () => new ProblemError({ type: 'not-found', status: 404, title:
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
 const reauthUnavailable = () => new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
 
-/** 멱등 키에서 정해진 request_id(UUID 꼴)를 만든다. 같은 키·작업·대상이면 같은 값이라 identity 멱등 기록이 두 번째를 알아본다 */
-export function requestIdOf(operation: string, accountRef: string, idempotencyKey: string): string {
-  const h = createHash('sha256').update(`BAT-045|${operation}|${accountRef}|${idempotencyKey}`).digest('hex');
+/** 멱등 키에서 정해진 request_id(UUID 꼴)를 만든다. 같은 키·작업·대상·본문이면 같은 값이라 identity 멱등 기록이 두 번째를 알아본다 */
+export function requestIdOf(operation: string, accountRef: string, idempotencyKey: string, bodyHash: string): string {
+  const h = createHash('sha256').update(`BAT-045|${operation}|${accountRef}|${idempotencyKey.toLowerCase()}|${bodyHash}`).digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${((Number.parseInt(h[16]!, 16) & 0x3) | 0x8).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+const IDEMPOTENCY_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Idempotency-Key는 필수 UUID v4다(guidelines §4). 없거나 틀리면 400이고 쓰지 않는다 */
+export function idempotencyKeyOf(raw: string | undefined): string {
+  if (!raw || !IDEMPOTENCY_KEY.test(raw)) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: 'Idempotency-Key는 UUID v4여야 합니다' });
+  return raw.toLowerCase();
+}
+
+const stableJson = (v: unknown): string => {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`)
+    .join(',')}}`;
+};
+
+/** 같은 키에 다른 본문이 오면 422다. 본문 칸의 순서에 기대지 않도록 정렬해 SHA-256을 낸다 */
+export function bodyHashOf(body: unknown): string {
+  return createHash('sha256').update(stableJson(body)).digest('hex');
 }
 
 const reasonOf = (raw: string): string => {
@@ -64,18 +87,26 @@ export class AdminAccounts {
   }
 
   async invite(actor: OpsActor, body: { email: string; displayName: string; role: AdminRole; promoterId?: string }, reauthToken: string | undefined, idempotencyKey: string | undefined): Promise<AdminAccountView> {
+    // operator는 파트너 계정만 초대한다(authz-matrix §6.1, RV-07). identity를 부르기 전에 거른다
+    if (actor.role !== 'commander' && !isPartnerRole(body.role)) {
+      throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '그 역할의 계정을 다룰 수 없습니다' });
+    }
+    const key = idempotencyKeyOf(idempotencyKey);
+    const bodyHash = bodyHashOf({ email: body.email, displayName: body.displayName, role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}) });
     await this.#reauth(reauthToken, actor);
-    const requestId = idempotencyKey ? requestIdOf('admin-invite', actor.accountId, idempotencyKey) : uuidv7(this.d.clock);
-    const prior = await this.#prior(actor.accountId, requestId);
+    const requestId = requestIdOf('admin-invite', actor.accountId, key, bodyHash);
+    const prior = await this.#prior(actor.accountId, 'admin-invite', key, bodyHash);
     if (typeof prior?.createdAccountId === 'string') {
       const a = await this.d.identity.get(prior.createdAccountId);
       if (a) return a;
     }
-    const payload = { action: 'INVITED', role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}) };
+    const payload = { action: 'INVITED', role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}), idempotencyKey: key, bodyHash, operation: 'admin-invite' };
     await this.#audit('ADMIN_ACCOUNT_INVITED', actor.accountId, actor, { ...payload, requestId, status: 'REQUESTED' });
     try {
       const account = await this.d.identity.invite({ requestId, actedBy: actor.accountId, email: body.email, displayName: body.displayName, role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}) });
       await this.#audit('ADMIN_ACCOUNT_INVITED', account.adminAccountId, actor, { ...payload, accountId: account.adminAccountId, createdAccountId: account.adminAccountId, requestId, status: 'SUCCEEDED' });
+      // 재전송은 대상 계정 ID를 알아야 하므로 요청자 기록에 성공 표지를 남긴다(권한 변경 내역에는 action이 없어 뜨지 않는다)
+      await this.#audit('ADMIN_ACCOUNT_IDEMPOTENT', actor.accountId, actor, { ...payload, createdAccountId: account.adminAccountId, requestId, status: 'SUCCEEDED' });
       return account;
     } catch (e) {
       await this.#audit('ADMIN_ACCOUNT_INVITED', actor.accountId, actor, { ...payload, requestId, status: 'FAILED', error: typeOf(e) });
@@ -94,19 +125,21 @@ export class AdminAccounts {
     if (target.status === 'REMOVED') throw new ProblemError({ type: 'admin-account-state-conflict', status: 409, title: '삭제한 계정입니다' });
     const reason = reasonOf(body.reason);
     await this.#reauth(reauthToken, actor);
-    const requestId = idempotencyKey ? requestIdOf('admin-role', accountId, idempotencyKey) : uuidv7(this.d.clock);
+    const key = idempotencyKey === undefined ? undefined : idempotencyKeyOf(idempotencyKey);
+    const bodyHash = bodyHashOf({ role: body.role, reason });
+    const requestId = key ? requestIdOf('admin-role', accountId, key, bodyHash) : uuidv7(this.d.clock);
     const commanderChange = target.role === 'commander' || body.role === 'commander';
     if (commanderChange) {
-      const prior = await this.#prior(accountId, requestId);
+      const prior = key ? await this.#prior(accountId, 'admin-role', key, bodyHash) : null;
       if (typeof prior?.approvalId === 'string') {
         const approval = await this.d.approvals.get(prior.approvalId, actor);
         return { kind: 'approval', approval };
       }
       const r = await this.d.approvals.create({ targetRef: accountId, targetVersion: target.version, fromRole: target.role, requestedRole: body.role, reason, requestedBy: actor.accountId });
-      await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, requestId, approvalId: r.approvalId, status: 'REQUESTED' });
+      await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, ...(key ? { idempotencyKey: key, bodyHash, operation: 'admin-role' } : {}), requestId, approvalId: r.approvalId, status: 'REQUESTED' });
       return { kind: 'approval', approval: roleChangeApprovalView(r, actor) };
     }
-    await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, requestId, status: 'REQUESTED' });
+    await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, ...(key ? { idempotencyKey: key, bodyHash, operation: 'admin-role' } : {}), requestId, status: 'REQUESTED' });
     try {
       const account = await this.d.identity.changeRole({ requestId, actedBy: actor.accountId, adminAccountId: accountId, role: body.role, expectedVersion: version });
       await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, requestId, accountVersion: account.version, status: 'SUCCEEDED' });
@@ -122,9 +155,12 @@ export class AdminAccounts {
     if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정은 재초대할 수 없습니다' });
     if (actor.role !== 'commander' && !isPartnerRole(target.role)) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '그 역할의 계정을 다룰 수 없습니다' });
     const reason = reasonOf(body.reason);
+    const key = idempotencyKeyOf(idempotencyKey);
+    const bodyHash = bodyHashOf({ reasonCode: body.reasonCode, reason });
     await this.#reauth(reauthToken, actor);
-    const requestId = idempotencyKey ? requestIdOf('admin-reinvite', accountId, idempotencyKey) : uuidv7(this.d.clock);
-    const payload = { action: 'REINVITED', reasonCode: body.reasonCode, reason };
+    const requestId = requestIdOf('admin-reinvite', accountId, key, bodyHash);
+    if (await this.#prior(accountId, 'admin-reinvite', key, bodyHash)) return this.get(accountId);
+    const payload = { action: 'REINVITED', reasonCode: body.reasonCode, reason, idempotencyKey: key, bodyHash, operation: 'admin-reinvite' };
     await this.#audit('ADMIN_ACCOUNT_REINVITED', accountId, actor, { ...payload, requestId, status: 'REQUESTED' });
     try {
       const account = await this.d.identity.reinvite({ requestId, actedBy: actor.accountId, adminAccountId: accountId, reason: body.reasonCode });
@@ -139,6 +175,8 @@ export class AdminAccounts {
   async remove(actor: OpsActor, accountId: string, body: { reason: string }, reauthToken: string | undefined): Promise<AdminAccountView | null> {
     const target = await this.get(accountId);
     if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정은 지울 수 없습니다' });
+    // 이미 지운 계정은 같은 200 계정 뷰다(openapi POST .../removal, RV-05). 삭제된 commander도 이 갈래가 먼저다
+    if (target.status === 'REMOVED') return target;
     if (target.role === 'commander') throw new ProblemError({ type: 'commander-removal-needs-role-change', status: 409, title: 'commander 계정은 먼저 역할을 내려야 합니다' });
     if (actor.role !== 'commander' && !isPartnerRole(target.role)) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '그 역할의 계정을 지울 수 없습니다' });
     const reason = reasonOf(body.reason);
@@ -158,13 +196,17 @@ export class AdminAccounts {
 
   async designate(actor: OpsActor, accountId: string, body: { kind: DesignationKind; basis: string }, reauthToken: string | undefined, idempotencyKey: string | undefined) {
     if (accountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기에게 지정할 수 없습니다' });
+    const key = idempotencyKeyOf(idempotencyKey);
+    const bodyHash = bodyHashOf({ kind: body.kind, basis: body.basis });
     await this.#reauth(reauthToken, actor);
-    const requestId = idempotencyKey ? requestIdOf('admin-designate', accountId, idempotencyKey) : uuidv7(this.d.clock);
-    const payload = { action: 'DESIGNATED', designationKind: body.kind, basis: body.basis };
+    const requestId = requestIdOf('admin-designate', accountId, key, bodyHash);
+    const prior = await this.#prior(accountId, 'admin-designate', key, bodyHash);
+    if (prior) return { kind: body.kind, basis: String(prior.basis ?? body.basis), designatedBy: String(prior.actorAdminAccountId ?? actor.accountId), designatedAt: String(prior.designatedAt ?? new Date(this.d.clock.now()).toISOString()) };
+    const payload = { action: 'DESIGNATED', designationKind: body.kind, basis: body.basis, idempotencyKey: key, bodyHash, operation: 'admin-designate' };
     await this.#audit('ADMIN_ACCOUNT_DESIGNATED', accountId, actor, { ...payload, requestId, status: 'REQUESTED' });
     try {
       const d = await this.d.identity.designate({ requestId, actedBy: actor.accountId, adminAccountId: accountId, kind: body.kind, basis: body.basis });
-      await this.#audit('ADMIN_ACCOUNT_DESIGNATED', accountId, actor, { ...payload, requestId, status: 'SUCCEEDED' });
+      await this.#audit('ADMIN_ACCOUNT_DESIGNATED', accountId, actor, { ...payload, designatedAt: d.designatedAt, requestId, status: 'SUCCEEDED' });
       return d;
     } catch (e) {
       await this.#audit('ADMIN_ACCOUNT_DESIGNATED', accountId, actor, { ...payload, requestId, status: 'FAILED', error: typeOf(e) });
@@ -244,13 +286,15 @@ export class AdminAccounts {
     await this.d.audit.append({ recordType, recordId, payload: { ...payload, actorAdminAccountId: actor.accountId, actorRole: actor.role }, nowMs: this.d.clock.now() });
   }
 
-  /** 같은 request_id로 이미 성공한 기록(멱등). 감사 기록 원문에서 찾는다 */
-  async #prior(accountId: string, requestId: string): Promise<Record<string, unknown> | null> {
+  /** 같은 키·작업으로 이미 성공한 기록(멱등). 본문 해시가 다르면 422 idempotency-key-reused다 */
+  async #prior(accountId: string, operation: string, idempotencyKey: string, bodyHash: string): Promise<Record<string, unknown> | null> {
     if (!this.d.reader?.entriesOfRecord) return null;
     const page = await this.d.reader.entriesOfRecord(accountId, { limit: 100 });
     for (const e of page.entries) {
       const p = e.record.payload as Record<string, unknown>;
-      if (p.requestId === requestId && p.status === 'SUCCEEDED') return p;
+      if (p.operation !== operation || p.idempotencyKey !== idempotencyKey || p.status !== 'SUCCEEDED') continue;
+      if (p.bodyHash !== bodyHash) throw new ProblemError({ type: 'idempotency-key-reused', status: 422, title: '같은 Idempotency-Key로 다른 본문을 보냈습니다' });
+      return p;
     }
     return null;
   }

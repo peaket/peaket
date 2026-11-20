@@ -1,5 +1,5 @@
 // 받는 층: 운영 명령 접수·목록·2인 승인·거부(openapi /v1/ops/commands, GAT-110 첫 몫).
-// 제어 gRPC 전달·ack·되돌리기·사후 검토는 후속이다. 재인증 토큰 확인 계약도 아직 없어 위험 명령의 fresh 검사를 하지 않는다(known gap).
+// 제어 gRPC 전달·ack·되돌리기·사후 검토는 후속이다. 위험 명령의 재인증(X-Reauth-Token, act=OPS_COMMAND)은 BAT-045가 더했다.
 import { Controller, Get, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { CLOCK, type Clock, ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
