@@ -34,15 +34,13 @@ export class ApprovalRouter {
 
   async approve(approvalId: string, actor: OpsActor, reauthToken: string | undefined, reason?: string): Promise<Record<string, unknown>> {
     if (await this.contracts.exists(approvalId)) return (await this.contracts.approve(approvalId, actor, reauthToken, reason)) as unknown as Record<string, unknown>;
-    const role = await this.roleChanges.tryGet(approvalId, actor);
-    if (role) return (await this.roleChanges.approve(approvalId, actor, reauthToken)) as unknown as Record<string, unknown>;
+    if (await this.roleChanges.exists(approvalId)) return (await this.roleChanges.approve(approvalId, actor, reauthToken)) as unknown as Record<string, unknown>;
     return (await this.payouts.approve(approvalId, actor, reauthToken)) as unknown as Record<string, unknown>;
   }
 
   async reject(approvalId: string, actor: OpsActor, reason: string): Promise<Record<string, unknown>> {
     if (await this.contracts.exists(approvalId)) return (await this.contracts.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
-    const role = await this.roleChanges.tryGet(approvalId, actor);
-    if (role) return (await this.roleChanges.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
+    if (await this.roleChanges.exists(approvalId)) return (await this.roleChanges.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
     return (await this.payouts.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
   }
 

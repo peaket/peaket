@@ -58,6 +58,11 @@ export class RoleChangeApprovals {
     return roleChangeApprovalView(r, actor);
   }
 
+  /** 이 ID의 승인 업무인가(볼 수 있는지는 보지 않는다). 승인·반려 갈래를 고르는 데만 쓴다 */
+  async exists(approvalId: string): Promise<boolean> {
+    return (await this.d.store.find(approvalId)) !== null;
+  }
+
   async get(approvalId: string, actor: { accountId: string; role: string }): Promise<RoleChangeApprovalView> {
     const r = await this.d.store.find(approvalId);
     if (!r) throw notFound();
