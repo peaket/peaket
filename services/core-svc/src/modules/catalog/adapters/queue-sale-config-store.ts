@@ -14,6 +14,19 @@ export const saleConfigKey = (eventId: string) => `q:{event:${eventId}}:cfg`;
 export const saleEpochKey = (eventId: string) => `q:{event:${eventId}}:epoch`;
 export const ADMISSION_EVENTS_KEY = 'q:{admission}:events';
 
+// HGETALL 응답은 클라이언트에 따라 다르다: node-redis 6.3(RESP3)은 객체, RESP2는 [칸, 값, …], 클러스터 경로는 Map.
+// 셋 다 받아 칸 이름 → 글자 값으로 편다(다른 어댑터의 fieldsOf와 같은 규칙).
+function fieldsOf(raw: unknown): Record<string, string> {
+  if (raw instanceof Map) return Object.fromEntries([...raw].map(([k, v]) => [String(k), String(v)]));
+  if (Array.isArray(raw)) {
+    const o: Record<string, string> = {};
+    for (let i = 0; i + 1 < raw.length; i += 2) o[String(raw[i])] = String(raw[i + 1]);
+    return o;
+  }
+  if (raw && typeof raw === 'object') return Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, String(v)]));
+  return {};
+}
+
 // KEYS: 1 q:cfg, 2 q:epoch. ARGV: 1 rev, 2 키 만료 시각(ms), 3.. 칸 이름·값 쌍.
 // rev가 없거나 새 rev가 더 클 때만 HSET·PEXPIREAT을 한다(같은 rev·낮은 rev는 아무것도 바꾸지 않는다). q:epoch의 node는 없을 때만 쓰고 수명은 더 늦은 쪽으로만 늘린다.
 export const SALE_CONFIG_LUA = `#!lua
@@ -95,11 +108,7 @@ export class QueueSaleConfigStore implements SaleConfigStore {
   }
 
   async get(eventId: string): Promise<EventSaleConfig | undefined> {
-    const raw = (await this.redis.sendCommand(['HGETALL', saleConfigKey(eventId)])) as string[] | null;
-    if (!raw || raw.length === 0) return undefined;
-    const h = new Map<string, string>();
-    for (let i = 0; i + 1 < raw.length; i += 2) h.set(raw[i]!, raw[i + 1]!);
-    const config = h.get('config');
+    const config = fieldsOf(await this.redis.sendCommand(['HGETALL', saleConfigKey(eventId)])).config;
     return config === undefined ? undefined : (JSON.parse(config) as EventSaleConfig);
   }
 
