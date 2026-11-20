@@ -15,8 +15,16 @@ import {
   type PromoterPage,
   type PromoterSummary,
 } from '../../domain/promoter-contract.js';
-import type { OpsPromoterActor, PromoterCreateInput, PromoterStore, PromoterTermsQuery, ReservedContractChange } from '../../domain/promoter-ports.js';
+import type { OpsPromoterActor, PromoterCreateInput, PromoterStore, PromoterTermsQuery, ReservedContractChange, ReserveChangeResult } from '../../domain/promoter-ports.js';
+import { CONTRACT_CHANGE_IDEMPOTENCY_SCOPE } from '../../domain/promoter-ports.js';
 import { promoter, promoterContract, promoterContractState } from './schema.js';
+
+/** 예약이 도중에 거절됐다(멱등 트랜잭션을 되돌리고 앱에 그 뜻을 돌려준다) */
+class ReservationRejected extends Error {
+  constructor(readonly result: 'not-found' | 'pending' | 'no-contract') {
+    super(result);
+  }
+}
 
 /** PostgreSQL 범위 글자. 끝이 없으면 빈 칸이다([시작,)) */
 export function rangeLiteral(from: Date, until: Date | null): string {
@@ -187,24 +195,67 @@ export class DrizzlePromoterStore implements PromoterStore {
     return detail;
   }
 
-  async reserveChange(promoterId: string, approvalId: string, requested: ContractTerms, _now: Date): Promise<ReservedContractChange | 'not-found' | 'pending' | 'no-contract'> {
+  async reserveChange(
+    promoterId: string,
+    approvalId: string,
+    requested: ContractTerms,
+    _now: Date,
+    once?: IdempotencyRequest | undefined,
+    render?: (r: ReservedContractChange) => string,
+  ): Promise<ReserveChangeResult> {
     if (!UUID.test(promoterId)) return 'not-found';
-    return this.db.transaction(async (tx) => {
+    const reserve = async (tx: DbTransaction): Promise<ReservedContractChange | 'pending' | 'no-contract'> => {
       const locked = await tx.execute(sql`select pending_contract_approval_id from promoter where id = ${promoterId}::uuid for update`);
       const row = (locked.rows as { pending_contract_approval_id: string | null }[])[0];
-      if (!row) return 'not-found';
+      if (!row) throw new ReservationRejected('not-found');
       if (row.pending_contract_approval_id !== null) return 'pending';
       const periods = await tx.select(contractFields).from(promoterContract).where(and(eq(promoterContract.promoterId, promoterId), sql`upper_inf(${promoterContract.validDuring})`));
       const current = periods[0] ? periodOf(periods[0]) : undefined;
       if (!current) return 'no-contract';
       await tx.update(promoterContractState).set({ pendingContractApprovalId: approvalId }).where(and(eq(promoterContractState.id, promoterId), sql`${promoterContractState.pendingContractApprovalId} is null`));
       return { current, requested };
-    });
+    };
+    if (!once) {
+      try {
+        return await this.db.transaction(reserve);
+      } catch (e) {
+        if (e instanceof ReservationRejected) return e.result;
+        throw e;
+      }
+    }
+    if (!render) throw new Error('멱등 변경 요청에는 처음 응답을 만드는 render가 필요하다');
+    const scoped: IdempotencyRequest = { ...once, accountRef: CONTRACT_CHANGE_IDEMPOTENCY_SCOPE };
+    try {
+      // 예약과 멱등 기록을 같은 트랜잭션에 쓴다. 같은 키·같은 본문 재요청은 저장한 응답을 그대로 재생하고,
+      // 같은 키·다른 본문은 플랫폼 IdempotencyStore가 422(idempotency-key-reused)로 가린다(RV-03).
+      return await this.db.transaction((tx) =>
+        this.#idem.run<ReserveChangeResult>(tx, scoped, {
+          execute: async () => {
+            const out = await reserve(tx);
+            if (out === 'pending' || out === 'no-contract') throw new ReservationRejected(out);
+            return { resultRef: render(out), value: out };
+          },
+          replay: async (resultRef) => ({ replay: resultRef }),
+        }),
+      );
+    } catch (e) {
+      if (e instanceof ReservationRejected) return e.result;
+      throw e;
+    }
   }
 
-  async clearPending(promoterId: string, approvalId: string): Promise<void> {
+  async clearPending(promoterId: string, approvalId: string, once?: IdempotencyRequest | undefined): Promise<void> {
     if (!UUID.test(promoterId)) return;
-    await this.db.db.update(promoterContractState).set({ pendingContractApprovalId: null }).where(and(eq(promoterContractState.id, promoterId), eq(promoterContractState.pendingContractApprovalId, approvalId)));
+    if (!once) {
+      await this.db.db.update(promoterContractState).set({ pendingContractApprovalId: null }).where(and(eq(promoterContractState.id, promoterId), eq(promoterContractState.pendingContractApprovalId, approvalId)));
+      return;
+    }
+    await this.db.transaction(async (tx) => {
+      await tx.update(promoterContractState).set({ pendingContractApprovalId: null }).where(and(eq(promoterContractState.id, promoterId), eq(promoterContractState.pendingContractApprovalId, approvalId)));
+      // ops 호출이 실패해 예약을 풀면 멱등 기록도 지운다. 그러지 않으면 같은 키 재시도가 승인 없는 202를 재생한다
+      const scoped = { ...once, accountRef: CONTRACT_CHANGE_IDEMPOTENCY_SCOPE };
+      await tx.execute(sql`delete from idempotency_record where account_ref = ${scoped.accountRef} and operation = ${scoped.operation} and idempotency_key = ${scoped.key}::uuid`);
+    });
   }
 
   async applyChange(promoterId: string, approvalId: string, requested: Partial<ContractTerms>, approvedAt: Date, approverId: string): Promise<{ kind: 'applied' | 'already'; validFrom: Date } | 'not-found' | 'conflict'> {
@@ -264,13 +315,12 @@ export class DrizzlePromoterStore implements PromoterStore {
 
   async currentCommissionRateBp(promoterId: string): Promise<number | undefined> {
     if (!UUID.test(promoterId)) return undefined;
+    // 계약 기간이 없으면 undefined다. promoter.commission_rate_bp(0033의 기본 1000)로 물러나지 않는다(ADR-0320 결정 4, RV-01)
     const rows = await this.db.db
       .select({ commissionRateBp: promoterContract.commissionRateBp })
       .from(promoterContract)
       .where(and(eq(promoterContract.promoterId, promoterId), sql`upper_inf(${promoterContract.validDuring})`))
       .limit(1);
-    if (rows[0]) return rows[0].commissionRateBp;
-    const [p] = await this.db.db.select({ bp: promoterContractState.commissionRateBp }).from(promoterContractState).where(eq(promoterContractState.id, promoterId));
-    return p?.bp;
+    return rows[0]?.commissionRateBp;
   }
 }

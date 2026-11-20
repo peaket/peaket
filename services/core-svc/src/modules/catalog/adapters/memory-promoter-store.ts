@@ -4,7 +4,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { idempotencyKeyReused, type IdempotencyRequest } from '@peaket/platform';
 import { currentPeriod, isSameApproval, sellerInfoOf, type ContractTerms, type PromoterContractPage, type PromoterDetail, type PromoterPage, type PromoterSummary } from '../domain/promoter-contract.js';
-import type { OpsPromoterActor, PromoterCreateInput, PromoterStore, PromoterTermsQuery, ReservedContractChange } from '../domain/promoter-ports.js';
+import type { OpsPromoterActor, PromoterCreateInput, PromoterStore, PromoterTermsQuery, ReservedContractChange, ReserveChangeResult } from '../domain/promoter-ports.js';
+import { CONTRACT_CHANGE_IDEMPOTENCY_SCOPE } from '../domain/promoter-ports.js';
 import type { MemoryCatalogRepository, MemoryPromoter, MemoryPromoterContract } from './memory-catalog-repository.js';
 
 const encodeCursor = (p: PromoterSummary): string => Buffer.from(JSON.stringify([p.legalName, p.promoterId])).toString('base64url');
@@ -85,6 +86,11 @@ export class MemoryPromoterStore implements PromoterStore {
     return `${once.accountRef}|${once.operation}|${once.key}`;
   }
 
+  /** 계약 변경 요청은 계정이 아니라 작업 범위로 멱등을 맞춘다(같은 키를 다른 운영자가 재시도해도 같은 202, RV-03) */
+  #changeKey(once: IdempotencyRequest): IdempotencyRequest {
+    return { ...once, accountRef: CONTRACT_CHANGE_IDEMPOTENCY_SCOPE };
+  }
+
   #replay(once: IdempotencyRequest): string | undefined {
     const seen = this.#idempotency.get(this.#idemKey(once));
     if (!seen) return undefined;
@@ -123,19 +129,34 @@ export class MemoryPromoterStore implements PromoterStore {
     return detail;
   }
 
-  async reserveChange(promoterId: string, approvalId: string, requested: ContractTerms, _now: Date): Promise<ReservedContractChange | 'not-found' | 'pending' | 'no-contract'> {
+  async reserveChange(
+    promoterId: string,
+    approvalId: string,
+    requested: ContractTerms,
+    _now: Date,
+    once?: IdempotencyRequest | undefined,
+    render?: (r: ReservedContractChange) => string,
+  ): Promise<ReserveChangeResult> {
+    // 같은 키·같은 본문 재요청은 예약(대기 표시)보다 먼저 처음 응답을 재생한다
+    const scoped = once ? this.#changeKey(once) : undefined;
+    const replayed = scoped ? this.#replay(scoped) : undefined;
+    if (replayed) return { replay: replayed };
     const p = this.repo.promoters.get(promoterId);
     if (!p) return 'not-found';
     if (p.pendingContractApprovalId !== null) return 'pending';
     const current = currentPeriod(this.repo.promoterContracts.get(promoterId) ?? []);
     if (!current) return 'no-contract';
     this.repo.promoters.set(promoterId, { ...p, pendingContractApprovalId: approvalId });
-    return { current: { ...current }, requested };
+    const reserved: ReservedContractChange = { current: { ...current }, requested };
+    if (scoped) this.#idempotency.set(this.#idemKey(scoped), { hash: Buffer.from(scoped.requestHash), resultRef: render ? render(reserved) : approvalId });
+    return reserved;
   }
 
-  async clearPending(promoterId: string, approvalId: string): Promise<void> {
+  async clearPending(promoterId: string, approvalId: string, once?: IdempotencyRequest | undefined): Promise<void> {
     const p = this.repo.promoters.get(promoterId);
     if (p?.pendingContractApprovalId === approvalId) this.repo.promoters.set(promoterId, { ...p, pendingContractApprovalId: null });
+    // ops 호출이 실패해 예약을 풀면 멱등 기록도 지워 같은 키 재시도를 새 요청으로 받는다
+    if (once) this.#idempotency.delete(this.#idemKey(this.#changeKey(once)));
   }
 
   async applyChange(promoterId: string, approvalId: string, requested: Partial<ContractTerms>, approvedAt: Date, _approverId: string): Promise<{ kind: 'applied' | 'already'; validFrom: Date } | 'not-found' | 'conflict'> {
@@ -166,7 +187,8 @@ export class MemoryPromoterStore implements PromoterStore {
   }
 
   async currentCommissionRateBp(promoterId: string): Promise<number | undefined> {
+    // 계약 기간이 없으면 undefined다. promoter.commission_rate_bp(0033의 기본 1000)로 물러나지 않는다(ADR-0320 결정 4, RV-01)
     const current = currentPeriod(this.repo.promoterContracts.get(promoterId) ?? []);
-    return current?.commissionRateBp ?? this.repo.promoters.get(promoterId)?.commissionRateBp;
+    return current?.commissionRateBp;
   }
 }

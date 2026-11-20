@@ -15,7 +15,7 @@ import {
   type PromoterDetail,
   type PromoterPage,
 } from '../domain/promoter-contract.js';
-import { OPS_APPROVAL_CLIENT, PROMOTER_STORE, type OpsApprovalClient, type OpsPromoterActor, type PromoterCreateInput, type PromoterStore } from '../domain/promoter-ports.js';
+import { OPS_APPROVAL_CLIENT, PROMOTER_STORE, type OpsApprovalClient, type OpsPromoterActor, type PromoterCreateInput, type PromoterStore, type ReservedContractChange } from '../domain/promoter-ports.js';
 
 export interface PromoterListQuery {
   q?: string | undefined;
@@ -138,9 +138,10 @@ export class Promoters {
 
   /**
    * 변경 요청: 지금 계약을 읽어 바꿀 칸을 검사하고, 승인 ID를 먼저 예약한 뒤 ops에 승인 업무를 만든다.
-   * ops 호출이 실패하면 예약을 풀고 503을 낸다(임의로 성공한 척하지 않는다).
+   * 같은 Idempotency-Key·같은 본문 재요청은 예약과 함께 저장한 처음 202 응답을 그대로 돌려준다(RV-03).
+   * ops 호출이 실패하면 예약과 멱등 기록을 풀고 503을 낸다(임의로 성공한 척하지 않는다).
    */
-  async requestChange(promoterId: string, body: PromoterChangeBody, actor: OpsPromoterActor) {
+  async requestChange(promoterId: string, body: PromoterChangeBody, actor: OpsPromoterActor, once?: IdempotencyRequest | undefined) {
     return guard(async () => {
       const d = await this.store.detail(promoterId);
       if (!d) throw notFound();
@@ -154,11 +155,13 @@ export class Promoters {
       const requested = requestedTerms(d.contract, change);
       const approvalId = uuidv7(this.clock);
       const now = new Date(this.clock.now());
-      const reserved = await this.store.reserveChange(promoterId, approvalId, requested, now);
+      const reasonText = change.reason.trim();
+      const render = (r: ReservedContractChange) => JSON.stringify(approvalView({ approvalId, promoterId, actor, reasonText, current: r.current, requested: r.requested, now }));
+      const reserved = await this.store.reserveChange(promoterId, approvalId, requested, now, once, render);
+      if (typeof reserved === 'object' && 'replay' in reserved) return JSON.parse(reserved.replay) as unknown;
       if (reserved === 'not-found') throw notFound();
       if (reserved === 'pending') throw new ProblemError({ type: 'contract-change-pending', status: 409, title: '이미 승인 대기 중인 계약 변경이 있습니다' });
       if (reserved === 'no-contract') throw new ProblemError({ type: 'contract-terms-missing', status: 409, title: '지금 계약 조건이 없습니다' });
-      const reasonText = change.reason.trim();
       try {
         await this.approvals.createContractTermsChange({
           approvalId,
@@ -169,7 +172,7 @@ export class Promoters {
           requested,
         });
       } catch (err) {
-        await this.store.clearPending(promoterId, approvalId);
+        await this.store.clearPending(promoterId, approvalId, once);
         this.logger?.warn({ event: 'contract_change_request_failed', promoterId, err: (err as Error).name }, 'ops 승인 업무를 만들지 못해 예약을 풀었다');
         throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다' });
       }

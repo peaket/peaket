@@ -521,6 +521,8 @@ export const idempotencyRecord = idempotencyRecordTable([
   'CANCEL_MERCH_ORDER',
   'RETURN_MERCH_ORDER',
   'SHOP_CANCEL_REFUND_ACCOUNT',
+  'CREATE_OPS_PROMOTER',
+  'CREATE_OPS_PROMOTER_CONTRACT_CHANGE',
 ]);
 
 /** 서비스 소비자의 보류 표(ADR-0142 결정 2). 소비자가 없는 서비스도 같은 표를 둔다(정비 잡이 지운다) */

@@ -156,12 +156,16 @@ export function ConnectedPage() {
     setBusy(true);
     try {
       const [{ createOpsPromoterContractTermChange }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
-      await createOpsPromoterContractTermChange(selectedId, {
-        ...(rate !== undefined ? { commissionRateBp: rate } : {}),
-        ...(guarantee !== undefined ? { guaranteeRateBp: guarantee } : {}),
-        ...(changeKind ? { guaranteeKind: changeKind } : {}),
-        reason: changeReason.trim(),
-      });
+      await createOpsPromoterContractTermChange(
+        selectedId,
+        {
+          ...(rate !== undefined ? { commissionRateBp: rate } : {}),
+          ...(guarantee !== undefined ? { guaranteeRateBp: guarantee } : {}),
+          ...(changeKind ? { guaranteeKind: changeKind } : {}),
+          reason: changeReason.trim(),
+        },
+        { headers: { 'idempotency-key': crypto.randomUUID() } },
+      );
       setChangeOpen(false);
       setChangeRate('');
       setChangeGuarantee('');

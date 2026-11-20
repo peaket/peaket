@@ -82,7 +82,7 @@ export const contractApprovalView = (r: ContractApprovalRecord, actor: OpsActor)
   status: r.status,
   requestedBy: { adminAccountId: r.requestedBy, displayName: null, role: r.requesterRole },
   requestedAt: r.createdAt.toISOString(),
-  canApprove: (r.status === 'PENDING_APPROVAL' || r.status === 'FAILED') && r.requestedBy !== actor.accountId && actor.role === 'commander',
+  canApprove: (r.status === 'PENDING_APPROVAL' || r.status === 'FAILED' || r.status === 'EXECUTING') && r.requestedBy !== actor.accountId && actor.role === 'commander',
   dueAt: null,
   closeReason: r.status === 'REJECTED' || r.status === 'WITHDRAWN' ? r.closeReason : r.status === 'FAILED' ? r.closeReason : null,
   contractTerms: {
@@ -98,9 +98,11 @@ export const canSeeContractApproval = (r: ContractApprovalRecord, actor: OpsActo
 
 export const openContractApproval = (r: ContractApprovalRecord): boolean => r.status === 'PENDING_APPROVAL' || r.status === 'EXECUTING' || r.status === 'FAILED';
 
-/** 재인증을 마친 승인자가 지금 상태를 바꿀 수 있는가 */
+/** 재인증을 마친 승인자가 지금 상태를 바꿀 수 있는가. EXECUTING은 core 적용 성공 뒤 저장이 실패해 남은 상태로, 같은 승인 ID 재시도만 허용한다(RV-06) */
 export function assertCanDecide(r: ContractApprovalRecord, actor: OpsActor, action: 'approve' | 'reject'): void {
-  if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new ContractApprovalProblem('contract-approval-not-pending', 409, '승인 대기 중인 계약 변경이 아닙니다');
+  if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED' && !(action === 'approve' && r.status === 'EXECUTING')) {
+    throw new ContractApprovalProblem('contract-approval-not-pending', 409, '승인 대기 중인 계약 변경이 아닙니다');
+  }
   if (r.requestedBy === actor.accountId) throw new ContractApprovalProblem('approval-self-not-allowed', 403, `요청자는 ${action === 'approve' ? '승인' : '반려'}할 수 없습니다`);
   if (actor.role !== 'commander') throw new ContractApprovalProblem('approval-role-required', 403, 'commander만 계약 변경을 판정할 수 있습니다');
 }

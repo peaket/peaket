@@ -145,11 +145,15 @@ export class ContractApprovals {
     if (voteReason !== undefined && voteReason.length > 1_000) throw invalid('판단 이유는 1,000자까지입니다');
     const nowMs = this.d.clock.now();
     const now = new Date(nowMs);
+    // EXECUTING에 남은 승인은 core 적용까지 끝났지만 DONE·투표·감사 저장이 실패한 상태다.
+    // 같은 승인 ID로 다시 승인하면 core 적용은 멱등이라 그대로 두고 남은 저장만 마친다(RV-06). EXECUTING 감사는 다시 쓰지 않는다.
+    const alreadyExecuting = r.status === 'EXECUTING';
     const executing: ContractApprovalRecord = { ...r, status: 'EXECUTING', approverId: actor.accountId, updatedAt: now, version: r.version + 1 };
     // EXECUTING과 감사를 같은 트랜잭션에 쓴다. 감사가 실패하면 상태도 PENDING_APPROVAL로 남는다
-    if (!(await this.d.store.save(executing, auditOf('CONTRACT_CHANGE_EXECUTING', executing, { approverId: actor.accountId }, nowMs)))) {
+    if (!alreadyExecuting && !(await this.d.store.save(executing, auditOf('CONTRACT_CHANGE_EXECUTING', executing, { approverId: actor.accountId }, nowMs)))) {
       throw new ProblemError({ type: 'contract-approval-conflict', status: 409, title: '다른 사람이 먼저 처리했습니다' });
     }
+    const base = alreadyExecuting ? { ...r, approverId: actor.accountId, updatedAt: now } : executing;
     try {
       await this.d.core.apply({
         promoterId: r.promoterId,
@@ -162,12 +166,12 @@ export class ContractApprovals {
       });
     } catch (e) {
       const failedMs = this.d.clock.now();
-      const failed: ContractApprovalRecord = { ...executing, status: 'FAILED', closeReason: e instanceof Error ? e.message.slice(0, 500) : 'contract-apply-failed', updatedAt: new Date(failedMs), version: executing.version + 1 };
+      const failed: ContractApprovalRecord = { ...base, status: 'FAILED', closeReason: e instanceof Error ? e.message.slice(0, 500) : 'contract-apply-failed', updatedAt: new Date(failedMs), version: base.version + 1 };
       await this.d.store.save(failed, auditOf('CONTRACT_CHANGE_FAILED', failed, { failure: failed.closeReason }, failedMs));
       throw new ProblemError({ type: 'contract-apply-failed', status: 503, title: '계약 조건을 적용하지 못했습니다' });
     }
     const doneMs = this.d.clock.now();
-    const done: ContractApprovalRecord = { ...executing, status: 'DONE', approvedAt: new Date(doneMs), updatedAt: new Date(doneMs), version: executing.version + 1 };
+    const done: ContractApprovalRecord = { ...base, status: 'DONE', approvedAt: new Date(doneMs), updatedAt: new Date(doneMs), version: base.version + 1 };
     const vote: ApprovalVote = { approvalId: done.approvalId, approverId: actor.accountId, requesterId: r.requestedBy, approvedAt: done.approvedAt ?? new Date(doneMs), reason: voteReason ? voteReason : null };
     // 성공 상태·투표·감사를 같은 트랜잭션에 쓴다. 이 쓰기가 실패하면 DONE은 롤백되고 EXECUTING이 남는다.
     // core는 이미 적용했으므로 실패로 보고하지 않는다(같은 승인 ID 재적용은 멱등).

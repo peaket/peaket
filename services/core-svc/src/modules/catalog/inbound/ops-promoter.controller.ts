@@ -105,8 +105,14 @@ export class OpsPromoterController {
   @Post(':promoterId/contract-term-changes')
   @HttpCode(202)
   @Roles(['operator', 'commander'])
+  @Idempotent({ operation: 'CREATE_OPS_PROMOTER_CONTRACT_CHANGE' })
   @ContractRouteSchema({ params: PromoterParams, body: PromoterChangeBodySchema, responses: { 202: ApprovalView } })
-  async change(@ContractParams(PromoterParams) params: z.output<typeof PromoterParams>, @ContractBody(PromoterChangeBodySchema) body: z.output<typeof PromoterChangeBodySchema>, @CurrentPrincipal() me: Principal) {
-    return this.promoters.requestChange(params.promoterId, body, actorOf(me));
+  async change(
+    @ContractParams(PromoterParams) params: z.output<typeof PromoterParams>,
+    @ContractBody(PromoterChangeBodySchema) body: z.output<typeof PromoterChangeBodySchema>,
+    @CurrentPrincipal() me: Principal,
+    @IdempotencyRequest() once: IdempotencyRequestValue,
+  ) {
+    return this.promoters.requestChange(params.promoterId, body, actorOf(me), once);
   }
 }
