@@ -160,8 +160,8 @@ describe('승인 뒤 판매 열기·대기열 사본(실제 PostgreSQL·Valkey)'
       const row = await configRow(eventId);
       expect(row?.rev).toBe(4);
       const epoch = await epochOf(eventId);
-      expect(epoch.node).toBe('standalone');
-      expect(Number(epoch.epoch ?? 0)).toBeGreaterThan(0);
+      // 대기열 세대 키의 칸은 node뿐이다(epoch 칸은 좌석 저장소 s:{event:E}:epoch의 것, ADR-0181·data.md)
+      expect(epoch).toEqual({ node: 'standalone' });
     }
 
     // 같은 승인을 다시 보내면 409이고 sale-open 호출·사본·행이 늘지 않는다
