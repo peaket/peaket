@@ -30,7 +30,9 @@ ENV NEXT_PUBLIC_API_ORIGIN=https://api.peaket.example:18441 \
     NEXT_PUBLIC_SCANNER_ORIGIN=https://scanner.peaket.example:18445 \
     NEXT_PUBLIC_PEAKET_PG_SIMULATOR=1 \
     PEAKET_ENV=local
-RUN pnpm --filter @peaket/web build \
+# 점 세 개(`...`)는 작업 공간 의존 패키지(@peaket/search-normalize 등)까지 먼저 빌드한다.
+# 점이 없으면 Next의 모듈 해석이 `@peaket/search-normalize/refine`을 찾지 못해 빌드가 실패한다
+RUN pnpm --filter @peaket/web... build \
  && mkdir -p /out-next \
  && for p in next redis @redis; do if [ -e "apps/web/node_modules/$p" ]; then cp -aL "apps/web/node_modules/$p" /out-next/; fi; done
 
