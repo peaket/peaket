@@ -61,7 +61,7 @@ function state(over: Partial<SaleState> = {}): SaleState {
 }
 
 describe('회차 판매 설정 사본(LCH-080)', () => {
-  test('S-T41 승인된규칙으로_salePolicy_eligGates_eligLists를_만든다', () => {
+  test('S-T41 ⑫_승인된규칙으로_salePolicy_eligGates_eligLists를_만든다', () => {
     const [c] = buildEventSaleConfigs(state(), new Map([['ev-1', { layoutVersion: 7, pgKey: 'toss-a', pgTps: 300 }]]), new Date());
     expect(c).toMatchObject({
       eventId: 'ev-1',
@@ -89,7 +89,7 @@ describe('회차 판매 설정 사본(LCH-080)', () => {
     expect(c!.title).toBe('LUMEN 콘서트 2026 서울');
   });
 
-  test('S-T41 취소회차는_빼고_규칙의명단키를_중첩조건에서도_모은다', () => {
+  test('S-T41 ⑫_취소회차는_빼고_규칙의명단키를_중첩조건에서도_모은다', () => {
     const nested: SalePolicyRule = {
       version: 1,
       name: '중첩',
@@ -103,14 +103,14 @@ describe('회차 판매 설정 사본(LCH-080)', () => {
     expect(eligibleListKeys([nested], 'ev-1').sort()).toEqual(['a-list', 'b-list']);
   });
 
-  test('S-T41 승인전공연은_회차설정을_쓰지않는다', async () => {
+  test('S-T41 ⑫_승인전공연은_회차설정을_쓰지않는다', async () => {
     const store = new MemorySaleConfigStore();
     const sales = { read: async () => state({ production: { ...state().production, saleReview: 'SUBMITTED', saleApprovedAt: null } }) } as unknown as SaleStore;
     const publish = new PublishSaleConfigs(sales, store, new NoopSaleConfigFacts(), fakeClock());
     await expect(publish.run({ productionId: 'prod-1', tenantId: 'prom-1' })).rejects.toBeInstanceOf(ProblemError);
   });
 
-  test('S-T41 승인공연은_coreDB와_대기열사본에_같은값을_쓴다', async () => {
+  test('S-T41 ⑫_승인공연은_coreDB와_대기열사본에_같은값을_쓴다', async () => {
     const store = new MemorySaleConfigStore();
     const sales = { read: async () => state() } as unknown as SaleStore;
     const clock = fakeClock();

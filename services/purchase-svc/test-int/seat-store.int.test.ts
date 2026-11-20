@@ -20,15 +20,18 @@ import {
   type AutoHoldInput,
   autoCandidatesOf,
   autoFingerprint,
+  CoreSaleConfigs,
   EXPIRE_LUA,
   ExpirySweeper,
   HOLD_LUA,
   HOLD_TTL_MS,
+  KEEP_AFTER_SALE_END_MS,
   MemorySeatMap,
   OPEN_SALE_LUA,
   PromSeatSignals,
   RedisSeatStore,
   RedisSweepLeases,
+  SaleConfigUnavailable,
   SeatEpochWatch,
   SeatStoreUnavailable,
   seatKeys,
@@ -646,6 +649,47 @@ describe('홀드 Lua의 모양(ADR-0086, seat-hold.md §3 키 목록·입력값)
     expect(await h.store.hold(holdInput(e, ['A01'], { keepUntilMs }))).toEqual({ kind: 'NOT_READY' });
     expect(await h.bit(e, idx('A01'))).toBe(0);
     expect(await h.stream(e)).toHaveLength(0);
+  });
+
+  test('S-T41 ⑪_ 승인 공연의 core sale-config 사본이 판매 열기 뒤에도 홀드 1인 한도·판매 종료를 덮고, 사본이 없으면 파일 설정, 사본 오류는 SaleConfigUnavailable로 닫힌다', async () => {
+    const h = harness();
+    const now = Date.now();
+    const startsAtMs = now + 3 * DAY;
+    const withOverlay = newEvent();
+    const withoutOverlay = newEvent();
+    const broken = newEvent();
+    const answers: (() => Response | Promise<Response>)[] = [
+      () => new Response(JSON.stringify({ rev: 10, perPersonLimit: 2, saleEndsAtMs: startsAtMs - DAY, salePolicy: [], eligLists: [], layoutVersion: 3 }), { status: 200 }),
+      () => new Response('{}', { status: 404 }),
+      () => new Response('{}', { status: 503 }),
+    ];
+    const core = new CoreSaleConfigs({
+      client: {
+        async request() {
+          const next = answers.shift();
+          if (!next) throw new Error('답이 준비되지 않았다');
+          return next();
+        },
+      },
+      clock: fakeClock({ now }),
+    });
+    await h.store.openSale({ eventId: withOverlay, seatCount: SEAT_COUNT, keepUntilMs: now + 5 * DAY });
+
+    // core 사본이 파일 설정(4매·파일 판매 종료)을 덮는다
+    const overlay = await core.get(withOverlay);
+    expect(overlay).toMatchObject({ rev: 10, perPersonLimit: 2, saleEndsAtMs: startsAtMs - DAY });
+    const merged = { perAccountLimit: overlay!.perPersonLimit, saleEndsAtMs: overlay!.saleEndsAtMs };
+    const keepUntilMs = merged.saleEndsAtMs + KEEP_AFTER_SALE_END_MS;
+    expect(await h.store.hold(holdInput(withOverlay, ['A01', 'A02', 'A03'], { limit: merged.perAccountLimit, keepUntilMs }))).toEqual({ kind: 'QUOTA_EXCEEDED' });
+    expect(await h.store.hold(holdInput(withOverlay, ['A01', 'A02'], { limit: merged.perAccountLimit, keepUntilMs }))).toMatchObject({ kind: 'OK' });
+
+    // 사본이 없으면(404) 파일 설정 4매를 그대로 쓴다
+    await h.store.openSale({ eventId: withoutOverlay, seatCount: SEAT_COUNT, keepUntilMs: now + 5 * DAY });
+    expect(await core.get(withoutOverlay)).toBeUndefined();
+    expect(await h.store.hold(holdInput(withoutOverlay, ['B01', 'B02', 'B03'], { limit: 4, keepUntilMs: now + 5 * DAY }))).toMatchObject({ kind: 'OK' });
+
+    // 사본 오류(5xx)는 닫힌 쪽이다. HoldSeats는 이 오류를 503 store-unavailable로 바꾼다
+    await expect(core.get(broken)).rejects.toBeInstanceOf(SaleConfigUnavailable);
   });
 });
 
