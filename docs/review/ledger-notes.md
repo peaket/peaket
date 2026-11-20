@@ -214,6 +214,7 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 - ASVS 여덟 행(transfer-refund 2.3.3·2.3.4·8.2.2·8.2.3·16.2.5, payment 2.3.4·8.2.3·16.2.5)은 구현 위치가 이미 있고, 새 시험이 같은 태그를 달아 근거를 더한다(2026-11-20 B·기록 담당 확인. RV-15에 따라 '여섯'을 '여덟'으로 고침). P-T74 ③·P-T63 ③은 기존 시나리오의 세부 번호를 고친 것이라 같은 줄에 적는다.
 - **BAT-425가 닫은 장부 항목(2026-11-20, R-716)**: GAT-120의 자동 정지 서킷 연결을 BAT-425가 끝냈다. R-T9의 '서킷 열림이면 그 몫만 멈춘다' 갈래는 `services/purchase-svc/test/pg-circuits.test.ts`(R-T45)와 `services/purchase-svc/test/event-refund-gat130.test.ts`(R-T9)가 보고, R-T22의 수동 일시정지·재개는 기존 시험이 그대로 본다. 이 절 표의 아홉 항목은 시험 이름으로 상태를 정하므로 상태 칸은 비워 두고 근거만 더했다(항목 수·상태는 바꾸지 않았다).
 - **R-T43 구현 몫(core-svc shop, 2026-11-20 C)**: core 0032가 `merch_refund.replaces_refund_id`(자기 참조, nullable)와 부분 유일 인덱스 `merch_refund_replaces_uq`(`replaces_refund_id is not null`)를 더하고, 멱등 작업 목록에 `SHOP_CANCEL_REFUND_ACCOUNT`를 넣었다. `MerchRefundAccount`는 주문 행 잠금 안에서 사슬 끝 행을 다시 보고 새 행·새 항목 자리·멱등 기록을 커밋한 뒤 새 취소 ID·시도 번호(`refund_attempt`)로 `CancelPayment`를 부른다. 시험은 R-T43 ①~③이 시험 담당 몫이고, 이 줄은 구현 위치만 남긴다.
+<<<<<<< HEAD
 ## BAT-615 계약 조건·수수료율(2026-11-20)
 
 | ID | 상태 | 등급 | 담당 | 근거·이유 |
@@ -235,3 +236,9 @@ BAT-182(HOT-357)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바
 | S-T13 | `packages/seatmap/test/s-t13-gap.test.ts`(T7): 버전 갭 3,000번, 실패 0, 가장 느린 회복 2,650ms(한도 30,000ms), 503 주입 21번, 정확 이항 단측 95% 상한 0.0998%(판정 0.0999% 이하). 측정 근거는 `docs/review/measurements/BAT-182-wave.md` §2. A등급이라 M5(갭 스냅샷 요청 0)로 틀린 구현도 확인했다. BAT-182 완료(2026-11-20, R-721). |
 | S-T21 | `tools/web-checks/seats/s-t21.spec.mjs`(T9·T10): 5만 석에서 전체 보기 0·확대 1·옆 구역 이동 1(A 빠짐)·축소 0구독, p99 20~44.6ms(판정 300ms 이하, 표본 100), Long Task 0, 전체 보기 4,999ms 요청 0·5,000ms 1. 측정 근거는 `docs/review/measurements/BAT-182-wave.md` §4. BAT-182 완료(2026-11-20, R-721). |
 | S-T31 ⑥ | 같은 화면 시나리오(T11): 최대 구독 1(상한 16), 4403·4429·1013·1009 닫힘 0, `TimeSync` 1(연결 직후, 다음 60초), `BatchInterval` 100 유지. 서버는 Docker 없는 realtime-gw 대역이고 Chromium 1엔진이다. 측정 근거는 `docs/review/measurements/BAT-182-wave.md` §4. BAT-182 완료(2026-11-20, R-721). |
+
+## BAT-045(2026-11-20)
+
+- **장부 범위**: 이 묶음은 BUILD_ORDER BAT-045 행의 범위를 `I-T46 ④⑤, I-T52 ①②③, I-T53 ②③⑤, I-T61 ①~④, AZ-T14 ①~⑥, C-T69, auth:v5.0.0-7.4.5, auth:v5.0.0-7.5.1, auth:v5.0.0-8.2.1, auth:v5.0.0-8.2.2, auth:v5.0.0-8.2.3, auth:v5.0.0-9.2.2`로 좁혔다. `Batch-Order: impl-first`라 구현 커밋에는 시험이 없고, `ledger --batch BAT-045`가 시험 전 '다른 단계'로 남는 것은 정상이다. 시험 담당(다음 커밋)이 시험 이름에 ID·세부 번호와 ASVS 태그를 달면 상태가 자동·ID만으로 정해진다.
+- **ASVS 여섯 행**(auth 7.4.5·7.5.1·8.2.1·8.2.2·8.2.3·9.2.2)은 구현 위치를 채웠고, 결과 칸은 시험 담당이 채운다. delivery 15.2.1·16.3.1·16.3.2도 DAST·관리 계정 감사·허용 IP 거절 기록을 더했다.
+- **남은 몫**: I-T46 ④·I-T52 ②는 기존 `csrf`가 있어 구현 전 트리에서도 통과할 수 있고, I-T52 ③은 파트너 앱 정적 시험, AZ-T14 ⑦은 doc-check `roles` 규칙이 이미 본다(장부 범위 밖). BOT-140의 AWS 자원과 BOT-152의 초대 수락·SCR-064 화면, BOT-161의 데모·운영 실제 점검은 다른 묶음·소유자 몫이고, BOT-140·152·161 줄은 '끝'으로 체크하지 않았다.

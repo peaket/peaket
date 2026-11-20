@@ -2481,6 +2481,8 @@ erDiagram
     }
 ```
 
+- **구현 칸(2026-11-20, BAT-045 BOT-152, ADR-0322)**: ops-svc의 `approval_request`에는 구현에 필요한 `from_role`(권한 변경 내역의 이전 역할)과 `target_version`(승인 때 다시 보는 대상 계정의 판, If-Match)을 더한다(마이그레이션 ops 0019). 이 묶음의 kind는 `COMMANDER_ROLE_CHANGE` 하나이고, 요청자 역할은 이 종류에서 늘 commander다. `approval_vote`는 `(request_id, approver_id)` 기본 키, `requester_id`, `approved_at`, `reason`을 쓰고 `approver_id <> requester_id` CHECK로 요청자 본인 승인을 DB에서도 막는다.
+
 `event` 테이블의 행 하나는 자기 좌석 재고를 가진 회차 하나를 나타낸다. 이 단위는 Redis의 `{event:E}` 키 샤딩 단위와 같다. 같은 공연에 회차가 여럿이면 회차별로 따로 `event` 행을 만든다. `seat_sale` 테이블의 유니크 제약은 활성 상태(PENDING·SOLD)에만 적용되는 부분 유니크 인덱스(`UNIQUE (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`)다. 그래서 예매 취소로 `RETURNED` 상태가 된 좌석은 이력 행을 남기면서도 재판매를 허용한다.
 
 큰 원장 표의 보존 삭제(추천 적용 2026-10-28, ADR-0114. 2026-10-22 ADR-0083의 월 파티션을 다시 봤다): 주문(`purchase_order`)·결제(`payment`)·티켓(`ticket`)과 그 자식 표는 나누지 않는다. 5년 누적(주문 약 1,700만·티켓 약 3,500만)이 한 표로 감당할 크기이기 때문이다. 유일 규칙은 보통 UNIQUE로 건다(주문당 결제 1건은 `payment.order_id` UNIQUE). 주문 멱등키는 멱등 기록 표 `order_idempotency`가 맡는다(계정 × 작업 범위, 기술 검토 중간-046).
