@@ -201,6 +201,11 @@ function runNodeJson(script, args, extraEnv = {}) {
   return { status: r.status ?? 1, json, text };
 }
 
+/** 데모 클러스터 이름을 자식 프로세스와 같은 환경 값으로 맞춘다 */
+function demoEnv(o) {
+  return { ...process.env, PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster };
+}
+
 function measurementOf(report, o, cleanup, outcome) {
   return {
     commit: gitHead(),
@@ -274,7 +279,7 @@ async function runAll(o, log) {
     return 0;
   }
   log('③ S1~S9 재생');
-  const stage = stageProblems();
+  const stage = stageProblems({ env: demoEnv(o) });
   if (!stage.ok) {
     outcome = `실패(${stage.reason})`;
     report = { coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: stage.reason })) };
@@ -400,7 +405,7 @@ async function main() {
       return r.code;
     }
     if (o.cmd === 'status') {
-      const r = stageProblems();
+      const r = stageProblems({ env: demoEnv(o) });
       jsonOut(o, r);
       if (!r.ok) {
         if (!o.json) console.error(r.problems.join('\n'));
@@ -427,7 +432,7 @@ async function main() {
     }
     if (o.cmd === 'up') {
       // 이미 준비됐으면 그대로 쓴다(중복 클러스터 없음, V-T7 ⑤)
-      const ready = stageProblems();
+      const ready = stageProblems({ env: demoEnv(o) });
       if (ready.ok) {
         if (!o.json) console.log(`무대가 이미 준비됐다(클러스터 ${o.cluster}). 다시 올리지 않는다`);
         jsonOut(o, { ok: true, reused: true, cluster: o.cluster });
@@ -445,7 +450,7 @@ async function main() {
       return r.status === 0 ? 0 : 1;
     }
     if (o.cmd === 'play') {
-      const stage = stageProblems();
+      const stage = stageProblems({ env: demoEnv(o) });
       if (!stage.ok) {
         jsonOut(o, { ok: false, reason: stage.reason, problems: stage.problems });
         if (!o.json) console.error(`${stage.reason}: ${stage.problems.join('; ')}`);
