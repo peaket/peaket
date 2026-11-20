@@ -13,6 +13,7 @@ import { renderCsp } from '../../../packages/config/headers/security-headers.mjs
 import { HOST, MOCK_API } from '../seed-css/apps.mjs';
 import { WEB_BASE, WEB_BUILD_DIR, stubFanApi } from './pages.mjs';
 import { loadExternalScriptHosts } from '../lib/canon.mjs';
+import { integrityOfBytes, judgeScripts, parseSriManifest, scriptTagsFromHtml, scriptUrlOf } from '../test/sri.mjs';
 
 // 팬 API는 일시 장애(503)로 답한다(없는 주소로 요청을 내보내지 않는다, pages.mjs)
 test.beforeEach(({ page }) => stubFanApi(page));
@@ -26,6 +27,33 @@ const DETAIL_EVENT = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 const REQUEST_PAGES = ['/my/settings', '/login', `/booking/${EVENT}/seats`, `/booking/${EVENT}/checkout`, `/queue/${EVENT}/verify`, '/shop/checkout', '/signup/consent'];
 /** (request) 묶음의 사전 렌더 목록 이름(빌드 산출물의 정적 셸 검사) */
 const REQUEST_ROUTES = ['/my/settings', '/login', '/booking/[eventId]/seats', '/booking/[eventId]/checkout', '/queue/[eventId]/verify', '/shop/checkout', '/signup/consent'];
+
+/** BAT-172: 같은 빌드 SRI 표와 받은 바이트를 대조한다(ASVS 3.6.1, ADR-0326). 60초를 넘으면 표 키 대조만 남긴다(감독 결정 5) */
+const SRI_MANIFEST_FILE = join(WEB_BUILD_DIR, 'server/subresource-integrity-manifest.json');
+const SEED_COLOR_MODE_PUBLIC_FILE = new URL('../../../apps/web/public/seed-color-mode.js', import.meta.url);
+const BYTE_COMPARE_BUDGET_MS = 60_000;
+
+/**
+ * 같은 출처 스크립트 주소마다 한 번 받아 SHA-256을 센다(쿼리 `?dpl=`은 버린다).
+ * 우리 문서가 싣는 스크립트(/_next/ 밖)를 먼저 받아 한계에 걸려도 그 바이트 대조는 남긴다. 넘으면 덩어리는 표 키만 본다.
+ */
+async function hashReceivedScripts(request, tags) {
+  const hashes = new Map();
+  const deadline = Date.now() + BYTE_COMPARE_BUDGET_MS;
+  let compareBytes = true;
+  const ownFirst = [...tags].sort((a, b) => Number(scriptUrlOf(a.src, WEB_BASE).pathname.startsWith('/_next/')) - Number(scriptUrlOf(b.src, WEB_BASE).pathname.startsWith('/_next/')));
+  for (const tag of ownFirst) {
+    const { key } = scriptUrlOf(tag.src, WEB_BASE);
+    if (hashes.has(key)) continue;
+    if (Date.now() > deadline) {
+      compareBytes = false;
+      continue;
+    }
+    const res = await request.get(key);
+    hashes.set(key, res.status() === 200 ? integrityOfBytes(await res.body()) : null);
+  }
+  return { hashes, compareBytes };
+}
 
 /** 페이지가 받은 CSP 위반(브라우저 securitypolicyviolation 사건)을 모은다. 보고 모드 위반도 사건이 나서 disposition으로 가른다 */
 async function trackViolations(page) {
@@ -313,13 +341,16 @@ test.describe('SRI 값과 소스 맵 링크(HOT-291 숨김 소스 맵)', () => {
 });
 
 // BAT-170 웨이브 7 T9: 시험 담당(l2w7-BAT170-test)이 썼다(ADR-0270 결정 3). 허용 출처는 정본 표(docs/frontend.md §5.14.2 외부 스크립트 결정)에서 읽는다.
+// BAT-172: 같은 출처를 둘로 나눈다(ADR-0326). 우리 문서가 싣는 스크립트(/_next/ 밖)는 빌드 SHA-256 integrity,
+// Next.js /_next/static/ 덩어리는 같은 빌드 SRI 표 키와 받은 바이트 SHA-256으로 본다. 건너뛰기는 없다.
 test.describe('외부 스크립트 출처와 SRI(ASVS 3.6.1, docs/frontend.md §5.14.2)', () => {
   const PAGES = [`/events/${DETAIL_EVENT}`, `/queue/${EVENT}/verify`, `/booking/${EVENT}/checkout`];
   for (const path of PAGES) {
-    test(`[ASVS v5.0.0-3.6.1] ${path}: 다른 출처 스크립트는 외부 스크립트 결정 표의 출처뿐이고 같은 출처 외부 스크립트에는 integrity가 있다`, async ({ page }) => {
-      // 계획 §17 G-4: 웨이브 끝 게이트에서 같은 출처 외부 스크립트 SRI가 26건 빠져 있었다. BAT-171 2차 CI에서도 세 화면 모두 실패했고(공연 상세 24·추가 검증 16·결제 14,
-      // 실행 중 넣는 덩어리 포함), HOT-391은 소유자 질문(OPEN[51])으로 올라 새 묶음 BAT-172로 넘겼다. 지우지 않고 건너뛴다(단언 범위는 그 결정대로 고친다)
-      test.skip(true, 'BAT-172(OPEN[51], HOT-391): 같은 출처 외부 스크립트 SRI');
+    test(`[ASVS v5.0.0-3.6.1] ${path}: 다른 출처는 표의 출처뿐이고, 우리가 싣는 같은 출처 스크립트에는 integrity가 있으며, 빌드 덩어리는 SRI 표와 바이트가 같다`, async ({ page, request }) => {
+      // 응답 HTML과 DOM을 세고 같은 출처 파일을 한 번씩 받는다. 바이트 대조에 60초를 넘기면 표 키 대조만 남긴다(감독 결정 5)
+      test.setTimeout(180_000);
+      const manifest = parseSriManifest(JSON.parse(readFileSync(SRI_MANIFEST_FILE, 'utf8')));
+      const publicSri = integrityOfBytes(readFileSync(SEED_COLOR_MODE_PUBLIC_FILE));
       const allowed = loadExternalScriptHosts();
       const requested = [];
       page.on('request', (r) => {
@@ -330,10 +361,26 @@ test.describe('외부 스크립트 출처와 SRI(ASVS 3.6.1, docs/frontend.md §
       const origin = new URL(WEB_BASE).origin;
       const foreign = requested.filter((u) => new URL(u).origin !== origin);
       expect(foreign.filter((u) => !allowed.has(new URL(u).hostname)), `${path} 표에 없는 다른 출처 스크립트`).toEqual([]);
-      const tags = await page.evaluate(() => [...document.querySelectorAll('script[src]')].map((s) => ({ src: s.src, integrity: s.getAttribute('integrity') ?? '' })));
-      const same = tags.filter((t) => new URL(t.src).origin === origin);
-      expect(same.length, `${path} 같은 출처 외부 스크립트가 없다(빈 결과)`).toBeGreaterThan(0);
-      expect(same.filter((t) => !/^sha(256|384|512)-[A-Za-z0-9+/=]+$/.test(t.integrity)).map((t) => t.src), `${path} integrity 없는 같은 출처 스크립트`).toEqual([]);
+
+      const rawTags = scriptTagsFromHtml(await res.text());
+      const domTags = await page.evaluate(() => [...document.querySelectorAll('script[src]')].map((s) => ({ src: s.src, integrity: s.getAttribute('integrity') ?? '' })));
+      const sameTags = [...rawTags, ...domTags].filter((t) => scriptUrlOf(t.src, WEB_BASE).origin === origin);
+      const { hashes, compareBytes } = await hashReceivedScripts(request, sameTags);
+
+      const raw = judgeScripts(rawTags, { origin, manifest, hashes, compareBytes });
+      const dom = judgeScripts(domTags, { origin, manifest, hashes, compareBytes });
+      expect(raw.problems, `${path} 응답 HTML`).toEqual([]);
+      expect(dom.problems, `${path} DOM`).toEqual([]);
+
+      // 우리 문서가 직접 싣는 /seed-color-mode.js는 응답 HTML·DOM에 있고, integrity가 public 파일 바이트 SHA-256과 같다
+      const seedTags = sameTags.filter((t) => scriptUrlOf(t.src, WEB_BASE).pathname === '/seed-color-mode.js');
+      expect(seedTags.length, `${path} 우리 문서가 싣는 /seed-color-mode.js 태그가 없다`).toBeGreaterThan(0);
+      for (const tag of seedTags) expect(tag.integrity, `${path} /seed-color-mode.js integrity`).toBe(publicSri);
+
+      const urls = new Set(sameTags.map((t) => scriptUrlOf(t.src, WEB_BASE).key));
+      console.log(
+        `BAT-172 ${path}: 같은 출처 ${urls.size}개(우리 것 ${raw.own.length}·덩어리 ${raw.framework.length}, DOM 우리 것 ${dom.own.length}·덩어리 ${dom.framework.length}), 받은 바이트 ${hashes.size}개, 본 표 키 ${new Set([...raw.keys, ...dom.keys]).size}개${compareBytes ? '' : ' (60초 한계: 표 키 대조만)'}`,
+      );
     });
   }
 });
