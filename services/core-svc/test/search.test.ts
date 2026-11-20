@@ -56,6 +56,19 @@ describe('검색 순위·쪽', () => {
     expect(converted.query.converted).toEqual({ from: 'fnaps', to: '루멘' });
     expect(searchDocuments(docs, q({ q: 'fnaps', noConvert: true })).items).toEqual([]);
   });
+
+  test('SR-T13 ① 한 글자 입력은 친 그대로 단계가 등급을 내면 변환 결과를 더하지 않고, 없으면 변환 단계로 간다(메모리 어댑터도 같은 규칙)', () => {
+    // 'a'의 친 그대로 단계(SQL `%a%`에 해당)와 변환 'ㅁ' 단계에 각각 걸리는 이름
+    const both = [doc('direct', 'Aurora 콘서트'), doc('converted', '뮤지컬 밤')];
+    const direct = searchDocuments(both, q({ q: 'a' }));
+    expect(direct.items.map((x) => x.productionId)).toEqual(['direct']);
+    expect(direct.query.converted).toBeNull();
+    const onlyConverted = searchDocuments(both.slice(1), q({ q: 'a' }));
+    expect(onlyConverted.items.map((x) => x.productionId)).toEqual(['converted']);
+    expect(onlyConverted.query.converted).toEqual({ from: 'a', to: 'ㅁ' });
+    // 두 글자 이상은 중간 일치가 실제 결과다(새 단계별 읽기를 쓰지 않는 이유)
+    expect(searchDocuments([doc('middle', '별빛나는 공연')], q({ q: '빛나' })).items.map((x) => x.productionId)).toEqual(['middle']);
+  });
 });
 
 describe('자동완성 몫', () => {

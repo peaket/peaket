@@ -96,4 +96,19 @@ describe('SR-T4 바꿔 찾았을 때만 query.converted(§3.2 ④)', () => {
     expect(run('DnPt')).toEqual({ ids: ['wet'], converted: { from: 'DnPt', to: '웻' } });
     expect(run('FNAPS')).toEqual({ ids: ['lumen'], converted: { from: 'FNAPS', to: '루멘' } });
   });
+
+  test('SR-T13 ① 한 글자 입력도 친 그대로 단계가 0건일 때만 한/영 변환하고, 있으면 변환 결과를 더하지 않는다', () => {
+    // 'a'의 친 그대로 단계와 변환 'ㅁ' 단계에 각각 걸리는 이름
+    const one = [doc('direct', 'Aurora 쇼'), doc('converted', '뮤지컬 밤')];
+    const go = (s: string, docs = one) => {
+      const out = searchDocuments(docs, q(s));
+      return { ids: out.items.map((x) => x.productionId), converted: out.query.converted };
+    };
+    expect(go('a')).toEqual({ ids: ['direct'], converted: null });
+    expect(go('a', one.slice(1))).toEqual({ ids: ['converted'], converted: { from: 'a', to: 'ㅁ' } });
+    // noConvert면 변환 단계를 보지 않는다
+    const off = (s: string, docs = one) => searchDocuments(docs, { ...q(s), noConvert: true });
+    expect(off('a', one.slice(1)).items).toEqual([]);
+    expect(off('a', one.slice(1)).query.converted).toBeNull();
+  });
 });
