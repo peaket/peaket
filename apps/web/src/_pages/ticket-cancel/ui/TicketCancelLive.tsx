@@ -7,18 +7,21 @@
 // URL의 티켓 한 장만 취소한다(같은 주문의 여러 좌석은 지갑·주문 읽기 계약이 생기는 다음 묶음).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { Button } from '@peaket/ds/Button';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
-import { Select } from '@peaket/ds/Select';
-import { TextField } from '@peaket/ds/TextField';
-import { REFUND_BANKS, refundAccountShape } from '@peaket/validation/refund-account';
+import { refundAccountShape } from '@peaket/validation/refund-account';
 import { reauthFailureText } from '@/shared/lib/reauth-failure';
 import { pickupReauthToken, submitReauthForm } from '@/shared/lib/reauth-return';
 import { AppShell } from '@/widgets/app-shell';
-import { errorOf, keyForBody, reauthPurposeOf, takePending, writePending, type AttemptKey, type CancelError, type CancelPurpose, type StorageLike } from '../model/cancel-flow';
+import { errorOf, keyForBody, reauthPurposeOf, sendFailureOf, takePending, writePending, type AttemptKey, type CancelError, type CancelPurpose, type ProblemLike, type StorageLike } from '../model/cancel-flow';
 import { quoteView, resultView, refundMethodText, type QuoteView, type ResultView } from '../model/view';
 
 const won = (n: number) => `₩${new Intl.NumberFormat('ko-KR').format(n)}`;
+
+// 계좌 입력과 결과 카드는 그릴 때만 받는다(첫 묶음·실제 화면 첫 묶음에서 뺀다, frontend §5.8)
+const AccountSection = dynamic(() => import('./AccountSection').then((m) => m.AccountSection), { ssr: false });
+const ResultCard = dynamic(() => import('./ResultCard').then((m) => m.ResultCard), { ssr: false });
 
 interface TicketLine {
   seatLabel: string;
@@ -68,7 +71,7 @@ const tabStore: StorageLike = {
   },
 };
 
-type Load = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; text: string };
+type Load = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; text: string; traceId?: string };
 
 export function TicketCancelLive({ ticketId }: { ticketId: string }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
@@ -109,8 +112,8 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
       setNeedAccount(qv.refundAccountRequired);
       setLoad({ kind: 'ready' });
     } catch (e) {
-      const mapped = errorOf(e as { status?: unknown; type?: unknown });
-      setLoad({ kind: 'error', text: mapped.text });
+      const mapped = errorOf(e as ProblemLike);
+      setLoad({ kind: 'error', text: mapped.text, traceId: mapped.traceId });
     }
   }, [ticketId]);
 
@@ -182,23 +185,27 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
         attemptRef.current = null;
         keyRef.current = null;
       } catch (e) {
-        const mapped = errorOf(e as { status?: unknown; type?: unknown });
+        const mapped = errorOf(e as ProblemLike);
         setError(mapped);
+        // 503 reauth-unavailable을 포함한 모든 오류에서 토큰 폐기·확인 화면 소멸은 조건 없이 한다.
+        // 403 reauth-required·503은 토큰만 버리고 새 재인증을 받는다. 처리기가 던지면 멱등 키 행이
+        // 되돌아가므로 같은 본문은 같은 키로 다시 보낸다(RV-04, platform/idempotency.ts).
+        const failed = sendFailureOf(mapped.kind, reauthToken);
+        setToken(failed.token);
+        setAwaitingConfirm(failed.awaitingConfirm);
+        if (failed.resetAttempt) {
+          attemptRef.current = null;
+          keyRef.current = null;
+        }
         if (mapped.kind === 'account-invalid') {
           // 400은 재인증 앞에서 막히므로 토큰을 쓰지 않았다. 계좌만 고쳐 같은 토큰으로 다시 보낼 수 있다
           setAccountError(mapped.text);
-          attemptRef.current = null;
-          keyRef.current = null;
           return;
         }
-        setToken(null);
-        setAwaitingConfirm(false);
-        if (mapped.kind === 'account-required') {
+        if (failed.needAccount) {
           setNeedAccount(true);
           setAccountError(null);
         }
-        // 403 reauth-required·503 reauth-unavailable은 토큰만 버리고 새 재인증을 받는다.
-        // 처리기가 던지면 멱등 키 행이 되돌아가므로 같은 본문은 같은 키로 다시 보낸다(RV-04, platform/idempotency.ts).
       } finally {
         setBusy(false);
       }
@@ -226,7 +233,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
         writePending(tabStore, { ticketId, key: keyRef.current });
         submitReauthForm(provider, `/my/tickets/${encodeURIComponent(ticketId)}/cancel`, purpose);
       } catch (e) {
-        const mapped = errorOf(e as { status?: unknown; type?: unknown });
+        const mapped = errorOf(e as ProblemLike);
         setNotice(mapped.text);
       } finally {
         setBusy(false);
@@ -279,6 +286,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
                     </Link>
                   </>
                 ) : null}
+                {error.traceId ? <TraceLine traceId={error.traceId} /> : null}
               </NoticeBanner>
             ) : null}
           </div>
@@ -287,6 +295,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
           {load.kind === 'error' ? (
             <div className="card col gap-3 p-4 md:p-5" role="alert">
               <p className="t-md">{load.text}</p>
+              {load.traceId ? <TraceLine traceId={load.traceId} /> : null}
               <Button variant="secondary" onClick={() => void loadTicket()}>
                 다시 시도
               </Button>
@@ -344,37 +353,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
                           환급합니다. 취소하면 되돌릴 수 없습니다.
                         </p>
                         {needAccount && token && awaitingConfirm ? (
-                          <section className="col gap-3.5" aria-labelledby="h-account">
-                            <h3 className="t-sm fw-b" id="h-account">
-                              환불받을 계좌
-                            </h3>
-                            <Select
-                              id="tc-bank"
-                              label="은행"
-                              placeholder="은행을 고르세요"
-                              options={REFUND_BANKS.map((b) => ({ value: b.code, label: b.label }))}
-                              value={account.bankCode}
-                              onChange={(e) => setAccount((a) => ({ ...a, bankCode: e.target.value }))}
-                            />
-                            <TextField
-                              id="tc-account"
-                              label="계좌번호"
-                              inputMode="numeric"
-                              autoComplete="off"
-                              placeholder="숫자와 하이픈"
-                              value={account.accountNumber}
-                              onChange={(e) => setAccount((a) => ({ ...a, accountNumber: e.target.value }))}
-                              hint="계좌번호는 저장하지 않고 환불 요청에만 씁니다"
-                            />
-                            <TextField
-                              id="tc-holder"
-                              label="예금주"
-                              autoComplete="off"
-                              value={account.holderName}
-                              onChange={(e) => setAccount((a) => ({ ...a, holderName: e.target.value }))}
-                              error={accountError ?? undefined}
-                            />
-                          </section>
+                          <AccountSection account={account} error={accountError} onChange={setAccount} />
                         ) : null}
                         <div className="col gap-2">
                           <Button variant="danger" size="lg" block loading={busy} onClick={() => void send(token)} disabled={canceled}>
@@ -433,50 +412,11 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
   );
 }
 
-/** 202 결과 카드. `pending-account`에만 SCR-060 안내 문구를 둔다(SCR-060 실제 연결은 BAT-422 후보) */
-function ResultCard({ result, accountUsed }: { result: ResultView; accountUsed: boolean }) {
-  const meta =
-    result.kind === 'refunded'
-      ? { badge: '환급 완료', tone: 'badge-success', title: '환급을 마쳤습니다' }
-      : result.kind === 'deferred'
-        ? { badge: '환급 보류', tone: 'badge-warning', title: '입장 기록 마감 뒤 환급합니다' }
-        : result.kind === 'pending-account'
-          ? { badge: '환급 대기', tone: 'badge-warning', title: '환불받을 계좌가 필요합니다' }
-          : { badge: '환급 지연', tone: 'badge-warning', title: '환급이 지연되고 있습니다' };
+/** 5xx에서만 보이는 문의용 번호(G3). 서버 title·detail은 그리지 않는다 */
+function TraceLine({ traceId }: { traceId: string }) {
   return (
-    <section className="card col gap-3.5 p-4 md:px-5 md:py-[18px]" aria-labelledby="h-result">
-      <div className="row between gap-2">
-        <h2 className="t-md fw-b lg:text-lg" id="h-result">
-          취소 결과
-        </h2>
-        <span className={`badge ${meta.tone}`}>{meta.badge}</span>
-      </div>
-      <p className="t-sm">{meta.title}</p>
-      <dl className="kv">
-        <dt>환급액</dt>
-        <dd className="num">{won(result.refundAmount)}</dd>
-        <dt>환급 수단</dt>
-        <dd>{accountUsed ? '입력한 환불 계좌' : '원결제 수단'}</dd>
-      </dl>
-      {result.kind === 'pending-account' ? (
-        <NoticeBanner tone="info" role={null}>
-          환급할 때 알림으로 계좌를 다시 받습니다. 알림을 받으면 환불 계좌를 입력해 주세요
-        </NoticeBanner>
-      ) : null}
-      {result.kind === 'pending' ? (
-        <NoticeBanner tone="warning" role="status">
-          결제사 응답이 늦어 환급 요청을 자동으로 다시 보내고 있습니다. 따로 하실 일은 없습니다
-        </NoticeBanner>
-      ) : null}
-      {result.kind === 'deferred' ? (
-        <NoticeBanner tone="info" role={null}>
-          입장 기록 마감 뒤 입장하지 않은 것이 확인되면 환급합니다
-        </NoticeBanner>
-      ) : null}
-      <Link className="link-more" href="/my/tickets">
-        예매·주문 내역에서 진행 상태 보기
-        <i className="ic ic-chevron-right" aria-hidden="true" />
-      </Link>
-    </section>
+    <span className="t-xs muted block">
+      문의 번호 <span className="mono">{traceId}</span>
+    </span>
   );
 }

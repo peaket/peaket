@@ -38,7 +38,7 @@ import {
   type CancelResult,
 } from '../model/view';
 import { CancelBar, CancelProvider, CancelSheets, QuoteAside, QuoteInline, SeatChoices } from './CancelFlow';
-import { TicketCancelLive } from './TicketCancelLive';
+import { TicketCancelLiveLoader } from './TicketCancelLiveLoader';
 
 type Props = PageProps<{ ticketId: string }>;
 
@@ -68,7 +68,7 @@ export async function TicketCancelPage({ params, searchParams }: Props) {
   // 실제 경로는 서버 값으로 그린다(목업 자료를 쓰지 않는다). UUID가 아니고 목업도 없으면 404
   if (!getTicket(ticketId)) {
     if (!TICKET_ID.test(ticketId)) notFound();
-    return <TicketCancelLive ticketId={ticketId} />;
+    return <TicketCancelLiveLoader ticketId={ticketId} />;
   }
   const d = load(ticketId);
   if (!d) notFound();

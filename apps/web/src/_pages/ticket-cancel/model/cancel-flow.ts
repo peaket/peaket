@@ -50,11 +50,14 @@ export type CancelErrorKind =
 export interface CancelError {
   kind: CancelErrorKind;
   text: string;
+  /** 5xx일 때만 서버가 준 문의용 번호(frontend §4.1 '오류 모양'). title·detail은 쓰지 않는다 */
+  traceId?: string;
 }
 
 export interface ProblemLike {
   readonly status?: unknown;
   readonly type?: unknown;
+  readonly traceId?: unknown;
 }
 
 const REAUTH_REQUIRED_TEXT = '다시 로그인한 확인이 만료되었거나 이미 쓰였습니다. 다시 로그인해 주세요';
@@ -77,22 +80,48 @@ function typeOf(v: unknown): string {
 /**
  * ApiError(또는 같은 모양)를 화면 문구로 바꾼다. 차례: 403 reauth-required → 403 not-payer → 503
  * reauth-unavailable → 503 dependency-unavailable → 422/400 계좌 → 409 넷 → 404 → 그 밖.
+ * 5xx는 문의용 traceId만 함께 싣고 서버 title·detail은 어디에도 옮기지 않는다(G3, frontend §4.1).
  */
 export function errorOf(e: ProblemLike | null | undefined): CancelError {
   const status = typeof e?.status === 'number' ? e.status : 0;
   const type = typeOf(e?.type);
-  if (status === 403 && type === 'reauth-required') return { kind: 'reauth', text: REAUTH_REQUIRED_TEXT };
-  if (status === 403 && type === 'not-payer') return { kind: 'not-payer', text: NOT_PAYER_TEXT };
-  if (status === 503 && type === 'reauth-unavailable') return { kind: 'reauth-unavailable', text: REAUTH_UNAVAILABLE };
-  if (status === 503 && type === 'dependency-unavailable') return { kind: 'dependency', text: DEPENDENCY_TEXT };
-  if (status === 422 && type === 'refund-account-required') return { kind: 'account-required', text: ACCOUNT_REQUIRED_TEXT };
-  if (status === 400 && type === 'invalid-body') return { kind: 'account-invalid', text: ACCOUNT_INVALID_TEXT };
-  if (status === 409 && type === 'transfer-pending') return { kind: 'transfer', text: TRANSFER_TEXT };
-  if (status === 409 && type === 'entry-started') return { kind: 'entry-started', text: ENTRY_STARTED_TEXT };
-  if (status === 409 && type === 'event-cancelled') return { kind: 'event-cancelled', text: EVENT_CANCELLED_TEXT };
-  if (status === 409) return { kind: 'conflict', text: CONFLICT_TEXT };
-  if (status === 404) return { kind: 'not-found', text: NOT_FOUND_TEXT };
-  return { kind: 'other', text: OTHER_TEXT };
+  const traceId = status >= 500 && typeof e?.traceId === 'string' && e.traceId ? e.traceId : undefined;
+  const withTrace = (error: CancelError): CancelError => (traceId ? { ...error, traceId } : error);
+  if (status === 403 && type === 'reauth-required') return withTrace({ kind: 'reauth', text: REAUTH_REQUIRED_TEXT });
+  if (status === 403 && type === 'not-payer') return withTrace({ kind: 'not-payer', text: NOT_PAYER_TEXT });
+  if (status === 503 && type === 'reauth-unavailable') return withTrace({ kind: 'reauth-unavailable', text: REAUTH_UNAVAILABLE });
+  if (status === 503 && type === 'dependency-unavailable') return withTrace({ kind: 'dependency', text: DEPENDENCY_TEXT });
+  if (status === 422 && type === 'refund-account-required') return withTrace({ kind: 'account-required', text: ACCOUNT_REQUIRED_TEXT });
+  if (status === 400 && type === 'invalid-body') return withTrace({ kind: 'account-invalid', text: ACCOUNT_INVALID_TEXT });
+  if (status === 409 && type === 'transfer-pending') return withTrace({ kind: 'transfer', text: TRANSFER_TEXT });
+  if (status === 409 && type === 'entry-started') return withTrace({ kind: 'entry-started', text: ENTRY_STARTED_TEXT });
+  if (status === 409 && type === 'event-cancelled') return withTrace({ kind: 'event-cancelled', text: EVENT_CANCELLED_TEXT });
+  if (status === 409) return withTrace({ kind: 'conflict', text: CONFLICT_TEXT });
+  if (status === 404) return withTrace({ kind: 'not-found', text: NOT_FOUND_TEXT });
+  return withTrace({ kind: 'other', text: OTHER_TEXT });
+}
+
+/** 보내기 실패 뒤 화면 상태 전이. 토큰 폐기·확인 화면 소멸을 한 곳에서 정해 503도 건너뛰지 않는다 */
+export interface SendFailure {
+  /** 다음 토큰. 400 account-invalid만 지금 토큰을 지킨다(서버가 재인증 앞에서 막아 쓰지 않았다) */
+  token: string | null;
+  awaitingConfirm: boolean;
+  /** 멱등 키·본문 지문을 버리는가. 400만 버리고, 그 밖은 같은 본문·같은 키로 다시 보낸다(RV-04) */
+  resetAttempt: boolean;
+  /** 422 refund-account-required 뒤 계좌 칸을 여는가 */
+  needAccount: boolean;
+}
+
+/**
+ * 취소 POST가 실패했을 때의 상태 전이(SCR-038, d5 §5.20).
+ * 403 reauth-required·503 reauth-unavailable은 확인기를 못 썼거나 토큰이 만료·재사용된 것이라
+ * 새 재인증을 받아야 하므로 토큰을 버리고 마지막 확인 화면도 닫는다. 같은 본문은 같은 키로 다시 보낸다.
+ * 400 invalid-body는 재인증 앞에서 막혀 토큰을 쓰지 않았으므로 토큰을 지키고 계좌만 고치게 한다.
+ */
+export function sendFailureOf(kind: CancelErrorKind, token: string | null): SendFailure {
+  if (kind === 'account-invalid') return { token, awaitingConfirm: true, resetAttempt: true, needAccount: false };
+  if (kind === 'account-required') return { token: null, awaitingConfirm: false, resetAttempt: false, needAccount: true };
+  return { token: null, awaitingConfirm: false, resetAttempt: false, needAccount: false };
 }
 
 /** 재인증 왕복 표시(sessionStorage). 계좌 칸은 없다(재인증 왕복 동안 계좌를 저장하지 않는다) */
