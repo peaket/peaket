@@ -414,6 +414,7 @@ deploy/
 ```
 
 - ArgoCD는 클러스터마다 하나 둔다. ApplicationSet(Git 파일 생성기)이 `peaket`의 `develop`에서 `deploy/envs/<환경>/*.yaml` 값 파일을 읽어 Application을 만든다. AppProject는 가상 팀별(queue, purchase, ticket, trust, core, frontend, data, observability, platform)로 배포할 수 있는 네임스페이스와 자원 종류를 제한한다.
+- **승격 값의 배치 값(추천 적용 2026-11-20, BAT-085, ADR-0319)**: 승격 CLI가 만드는 새 환경 값 파일(`deploy/envs/<환경>/<서비스>.yaml`)은 배치(`service.nodeSelector`·`tolerations`·`priorityClassName`)를 `deploy/workloads/<서비스>/values.yaml`에서 이어받는다. ArgoCD가 Helm 값으로 쓰는 것은 이 환경 값 파일 하나이므로, 셋이 빠지면 차트 기본값으로 돌아가 `peaket-hotpath-placement`(§4.3)가 승격 파드를 거부한다. 이미 있는 값 파일은 승격 PR이 배치 값을 갱신하지 않고 이미지 다이제스트 줄만 바꾼다.
 - 자동 동기화(prune, selfHeal)를 켠다. 되돌리기는 Git 되돌리기로 한다. 자동 동기화를 켠 앱에서는 ArgoCD의 롤백(이전 버전으로 되돌리는 것) API가 거부된다(2026-10-13 소스 확인).
 - 비밀 값은 저장소에 없다. ExternalSecret은 Secrets Manager의 경로만 가리킨다.
 - Gateway API 트래픽 플러그인이 HTTPRoute에 넣는 규칙은 ArgoCD `ignoreDifferences`로 비교에서 뺀다. 빼지 않으면 ArgoCD가 플러그인이 넣은 규칙을 되돌린다(플러그인 문서).
@@ -461,6 +462,7 @@ flowchart LR
 - 같은 다이제스트만 승격한다. 환경마다 다시 빌드하지 않고, `main`에 병합한 뒤에도 다시 빌드하지 않는다(병합 결과 트리 검사, §2.2.4).
 - **승격 PR의 정적 검사(추천 적용 2026-11-20, BAT-085, ADR-0319)**: `.github/workflows/gitops-check.yml`이 `deploy/` 변경에서 돈다. `tools/ci/gitops-check.mjs`가 최종 오버레이를 만들고 메시 필수(D-T28)·환경별 허용 레지스트리(D-T33)·이미지 다이제스트(태그 금지)를 보고, `deploy/envs/staging|prod`에 다이제스트 값이 생기면 cosign 서명·SLSA 출처 증명(D-T32 ③)까지 본다. 값이 없으면 '아직 승격 없음'을 남기고 건너뛴다.
 - 승격 PR은 `develop`의 `deploy/envs/<환경>`을 고친다(ADR-0169). 운영 승격도 `develop`으로 간다. 출시 확정은 `main`의 태그이고, `deploy/`는 그 출시 후보 다이제스트를 어느 환경에 올렸는지만 적는다.
+- **승격 값의 배치 값(추천 적용 2026-11-20, BAT-085, ADR-0319)**: 새 환경 값 파일은 배치(`service.nodeSelector`·`tolerations`·`priorityClassName`)를 `deploy/workloads/<서비스>/values.yaml`에서 이어받는다(§5.2). ArgoCD와 `gitops-check`는 이 파일 하나만 Helm 값으로 쓰므로, 배치 값이 없으면 차트 기본값으로 돌아가 `peaket-hotpath-placement`가 운영 승격 파드를 거부한다. 이미 있는 값 파일은 배치 값을 다시 쓰지 않고 다이제스트 줄만 바꾼다.
 - **이벤트 스키마 등록(추천 적용 2026-10-28, 기술 검토 중간-088)**: 데모·운영 레지스트리 등록은 GitOps가 한다. Avro로 내는 서비스의 ArgoCD 동기화 앞(PreSync 훅)에 등록 Job이 돌아, 그 서비스가 내는 주제를 그 환경의 레지스트리에 등록하고 주제별 스키마 ID를 그 네임스페이스의 ConfigMap `schema-ids`에 쓴다. 호환 검사에 걸리면 Job이 실패하고 동기화가 멈춰 생산자가 배포되지 않는다. 생산자는 이 ID로 Avro 바이트를 만들어 실행 중에 레지스트리를 부르지 않는다. CI는 운영 레지스트리에 닿지 않는다(§3.1 `contract-check`, §10.1). 소비자를 먼저, 생산자를 나중에 배포하는 순서(§6.5)는 그대로다(docs/api/avro/README.md §3, D-T39).
 - 한 환경에서 동시에 돌리는 카나리는 하나다(SRE Workbook 16장: 한 번에 하나의 카나리를 권한다. 신호가 섞이고 사람의 판단 부담이 커지기 때문이다). `gitops-check`는 그 환경에 진행 중인 롤아웃이 있으면 다음 승격 PR의 병합을 기다리게 한다.
 - **운영 승격 필수 조건**: 그 다이제스트가 출시 태그 `vX.Y.Z`의 후보일 것, 데모 카나리 통과, 데모 체류 1시간 이상 [가정], 운영 28일 오류 예산이 남아 있을 것(다 쓰면 신뢰성 수정만, POL-022. 남은 예산은 클러스터 Prometheus(15일 보존)가 아니라 Mimir `raw`(90일)에서 Mimir 규칙 평가기가 계산한 `slo:error_budget_remaining:ratio28d` 하나를 읽는다. 그 값을 읽지 못하거나 15분 [가정]보다 낡으면 잠금 상태를 지금대로 유지한다. 추천 적용 2026-10-28, 기술 검토 높음-13, observability §8), 동결 창 밖일 것(§8), 조치 기한을 넘긴 취약점이 없을 것(§4.4), 제공자 Pact 검증 통과(§3.3), 그 후보의 arm64 이미지가 한 번은 돌았을 것(추천 적용 2026-10-28, 기술 검토 낮음-167). 데모(로컬 kind)는 amd64 이미지만 돌리므로, 운영 플랫폼인 arm64 이미지는 출시 후보마다 `ubuntu-24.04-arm` 러너에서 스모크(컨테이너 시작, 준비 프로브, 계약 시험 일부)를 통과해야 한다. 선택 보정 측정(docs/verification.md §6, c7g.xlarge)도 arm64 이미지로 돈다.
