@@ -93,11 +93,11 @@ async function seedOrder(): Promise<void> {
 }
 
 /** 계좌 대기(REFUND_PENDING·refund_account_required_at 있음) 취소 하나를 심는다 */
-async function seedCancellation(cancellationId = randomUUID()): Promise<string> {
+async function seedCancellation(cancellationId = randomUUID(), refundAttempt = 0): Promise<string> {
   await db.pool.query(
     `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at, refund_account_required_at, refund_attempts, refund_attempt)
-     values ($1, $2, $3, 'USER', 7, false, 1000, 3333, $4, 'REFUND_PENDING', $5, $5, $5, 0, 0)`,
-    [cancellationId, ORDER, TICKET, REFUND_AMOUNT, new Date(NOW)],
+     values ($1, $2, $3, 'USER', 7, false, 1000, 3333, $4, 'REFUND_PENDING', $5, $5, $5, 0, $6)`,
+    [cancellationId, ORDER, TICKET, REFUND_AMOUNT, new Date(NOW), refundAttempt],
   );
   return cancellationId;
 }
@@ -201,5 +201,23 @@ describe('R-T42 ④·RV-24 계좌 다시 받기의 재시작 재생 [실제 Post
     expect(calls, '같은 키의 답 재생은 payment를 다시 부르지 않는다').toEqual([]);
     expect(await rowOf(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempt: 1, refund_account_idem_key: key, refund_account_answer: null });
     expect(await idempotencyRows()).toHaveLength(1);
+  });
+
+  // BAT-425 검증 M17a: HTTP 시험의 메모리 `beginAttempt` 대역이 상한을 스스로 막아, 제품 상한(3)을 바꿔도 409가 유지됐다.
+  // 실제 Drizzle 저장소의 조건부 UPDATE와 사용 사례가 같은 상한을 보는지 DB로 확인한다.
+  test('M17a_R-T42 ④_시도 상한 3 뒤 네 번째는 실제 저장소가 0행이고 사용 사례는 409·payment 0이다', async () => {
+    await seedOrder();
+    const cancellationId = await seedCancellation(randomUUID(), 3);
+    const writes = new DrizzleCancellationWrites(db, new DrizzleOrderStore({ clock }));
+    // 실제 저장소: oldAttempt=3·refund_attempt=3이면 올리지 않는다(0행)
+    expect(await writes.beginAttempt({ cancellationId, oldAttempt: 3, nowMs: NOW })).toBeUndefined();
+    // 사용 사례: 같은 행에 네 번째 계좌를 내면 시도 상한 초과이고 payment·멱등 기록·행 쓰기가 0이다
+    const key = randomUUID();
+    await expect(
+      service().run({ accountId: ACCOUNT, cancellationId, account: REFUND_ACCOUNT, reauthToken: undefined, idempotencyKey: key, requestHash: hashOf('{"bankCode":"88","accountNumber":"110-987-654321","holderName":"김환불"}') }),
+    ).rejects.toMatchObject({ name: 'RefundAccountAttemptsExceeded' });
+    expect(paymentCalls).toEqual([]);
+    expect(await rowOf(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempt: 3, refund_account_idem_key: null, refund_account_answer: null });
+    expect(await idempotencyRows()).toEqual([]);
   });
 });

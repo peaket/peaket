@@ -63,7 +63,7 @@ afterAll(async () => {
 });
 
 describe('A1V-01 PostgreSQL 지급 묶음 미수금 상계', () => {
-  test('정산서 2개(각 89,000)와 미수금 50,000이면 총액 128,000·이동 기록 한 줄이다', async () => {
+  test('J-T28 ② A1V-01 정산서 2개(각 89,000)와 미수금 50,000이면 총액 128,000·이동 기록 한 줄이다', async () => {
     const promoterId = randomUUID();
     const payoutDate = '2026-11-20';
     await settlements.recordKyc(promoterId, 'VERIFIED');

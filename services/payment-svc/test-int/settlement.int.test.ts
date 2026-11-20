@@ -277,7 +277,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(moves.rows[0].n).toBe(0);
   });
 
-  test('M1-F2 TOSS 배상금 미리 지급 미수금은 PORTONE 묶음에서도 상계되고 다른 결제사 환불 미수금은 남는다', async () => {
+  test('J-T28 ① TOSS 배상금 미리 지급 미수금은 PORTONE 묶음에서도 상계되고 다른 결제사 환불 미수금은 남는다', async () => {
     const promoterId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
     await statementRow({ promoterId, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-28', payoutAmount: 100_000 });

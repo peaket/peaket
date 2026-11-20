@@ -154,6 +154,74 @@ describe('purchase-svc 시작 파일의 탈퇴 참여자 gRPC(P-T55 ⑥, BAT-010
   );
 });
 
+// BAT-425 검증 보강(M46, 2026-11-20 732d2437): 시작 조립의 주소 없음 규칙과 닫힌 대역.
+// 지금 시작 파일 시험은 PEAKET_ENV=ci 하나만 띄워, staging/prod에서 PEAKET_PAYMENT_HTTP_URL(서킷 읽기)이 없는데
+// 조용히 뜨는지(M46a)와 배상 송금 클라이언트를 안 꽂는지(M46b)를 보지 못했다.
+describe('purchase-svc 시작 파일의 BAT-425 조립(M46, 시작 파일)', () => {
+  /** staging/prod 규칙: 정적 입장 JWKS는 local·ci만이라 주소로 바꾸고, 취소·배상 조립에 필요한 주소를 채운다 */
+  function stageEnv(p: Awaited<ReturnType<typeof ports>>, tag: string): Record<string, string> {
+    const out: Record<string, string> = { ...envFiles(p, tag)['purchase-svc'] };
+    delete out.PEAKET_ADMISSION_JWKS;
+    return {
+      ...out,
+      PEAKET_ADMISSION_JWKS_URL: 'https://queue.peaket.test/internal/jwks/admission.json',
+      PEAKET_CORE_HTTP_URL: 'http://127.0.0.1:1',
+      PEAKET_TICKET_GRPC_ADDR: '127.0.0.1:1',
+      PEAKET_IDENTITY_FAN_JWKS_URL: 'https://identity.peaket.test/internal/jwks/fan.json',
+      PEAKET_IDENTITY_ISSUER: 'https://identity.peaket.test',
+      PEAKET_INTERNAL_GRPC_TOKEN: 'm46-internal-grpc-token',
+    };
+  }
+
+  test.each(['staging', 'prod'])('M46_%s에서_PEAKET_PAYMENT_HTTP_URL이_없으면_서킷이_늘_거짓인_채_뜨지_않고_시작_실패다', async (envName) => {
+    build(join(SERVICES_DIR, 'purchase-svc'));
+    const p = await ports();
+    const env = stageEnv(p, `m46-http-${envName}`);
+    expect(env.PEAKET_PAYMENT_HTTP_URL).toBeUndefined();
+    const r: Running = spawnMain(join(SERVICES_DIR, 'purchase-svc'), { PEAKET_ENV: envName, OTEL_SERVICE_NAME: 'purchase-svc', ...env });
+    const left = await Promise.race([r.exited, new Promise<'timeout'>((res) => setTimeout(() => res('timeout'), 30_000))]);
+    expect(left).toEqual({ code: 1, signal: null });
+    expect(r.output()).toContain('PEAKET_PAYMENT_HTTP_URL이 없다');
+    expect(r.output()).not.toMatch(/"step":"starting"/);
+  }, 60_000);
+
+  test.each(['staging', 'prod'])('M46_%s에서_배상_송금_gRPC_주소가_없으면_조용히_503이_되는_대신_시작_실패다', async (envName) => {
+    build(join(SERVICES_DIR, 'purchase-svc'));
+    const p = await ports();
+    const env = stageEnv(p, `m46-grpc-${envName}`);
+    env.PEAKET_PAYMENT_HTTP_URL = 'http://127.0.0.1:1';
+    delete env.PEAKET_PAYMENT_GRPC_ADDR;
+    const r: Running = spawnMain(join(SERVICES_DIR, 'purchase-svc'), { PEAKET_ENV: envName, OTEL_SERVICE_NAME: 'purchase-svc', ...env });
+    const left = await Promise.race([r.exited, new Promise<'timeout'>((res) => setTimeout(() => res('timeout'), 30_000))]);
+    expect(left).toEqual({ code: 1, signal: null });
+    expect(r.output()).toContain('PEAKET_PAYMENT_GRPC_ADDR가 없다');
+  }, 60_000);
+
+  test('M46_ci는_PEAKET_PAYMENT_HTTP_URL이_없어도_닫힌_대역으로_뜨고_배상_계좌_입력_클라이언트와_계좌_다시_받기_경로가_조립된다', async () => {
+    const p = await ports();
+    // ticket 주소가 있어야 환급 모듈(refund)이 조립되고, 그 안에 배상 송금 클라이언트와 계좌 경로가 함께 온다
+    const env: Record<string, string> = { ...envFiles(p, 'm46-ci')['purchase-svc'], PEAKET_TICKET_GRPC_ADDR: '127.0.0.1:1' };
+    expect(env.PEAKET_PAYMENT_HTTP_URL).toBeUndefined();
+    const r: Running = spawnMain(join(SERVICES_DIR, 'purchase-svc'), { PEAKET_ENV: 'ci', OTEL_SERVICE_NAME: 'purchase-svc', ...env });
+    try {
+      await waitReady(r, p['purchase-svc'].management);
+      const id = '0193a000-0000-7000-8000-000000000001';
+      const init = {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'Idempotency-Key': id, 'X-Reauth-Token': 'reauth-less' },
+        body: JSON.stringify({ bankCode: '88', accountNumber: '110-987-654321', holderName: '김환불' }),
+      };
+      // 경로가 없으면 404다. 401은 컨트롤러(배상 송금 클라이언트·계좌 다시 받기 쓰임새)가 조립됐다는 뜻이다
+      expect((await fetch(`http://127.0.0.1:${p['purchase-svc'].app}/v1/compensations/${id}/account`, init)).status).toBe(401);
+      expect((await fetch(`http://127.0.0.1:${p['purchase-svc'].app}/v1/cancellations/${id}/account`, init)).status).toBe(401);
+      const left = await sigterm(r);
+      expect(left, r.output().slice(-2000)).toEqual({ code: 0, signal: null });
+    } finally {
+      if (!r.gone()) r.child.kill('SIGKILL');
+    }
+  }, 180_000);
+});
+
 describe('한 프로세스 합본(services/bundle dist/main.js)', () => {
   /** 합본 하나를 띄운다(서비스별 환경 파일을 폴더에 쓴다) */
   function spawnBundle(p: Awaited<ReturnType<typeof ports>>, files: Record<Svc, Record<string, string>>, extra: Record<string, string> = {}) {

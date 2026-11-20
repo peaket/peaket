@@ -7,6 +7,7 @@
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
+import * as grpc from '@grpc/grpc-js';
 import { buildSimulatorApp, type SimulatorApp } from '@peaket/pg-simulator';
 import { createDatabase, createPlatformLogger, type Database, fakeClock, PlatformMetrics } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
@@ -27,7 +28,7 @@ import {
   StaticPaymentGateways,
 } from '../src/modules/payment/server.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
-import { type PaymentClient, paymentClient, putPayment, unary } from './support.js';
+import { failure, type PaymentClient, paymentClient, putPayment, unary } from './support.js';
 
 const NOW = Date.parse('2026-11-19T01:00:00.000Z');
 const KEY = `sim_sk_${randomBytes(16).toString('hex')}`;
@@ -50,13 +51,17 @@ let metrics: PlatformMetrics;
 const logs: string[] = [];
 const clock = fakeClock({ now: NOW });
 
-/** 어댑터가 보낸 HTTP 한 번 */
+/**
+ * 어댑터가 보낸 HTTP 한 번
+ */
 interface Sent {
   call: string;
   body: unknown;
   status: number | 'dropped';
 }
 const sent: Sent[] = [];
+/** 취소 호출이 실어 보낸 멱등키(시도별 키를 확인한다. `sent`의 정확 일치 단언은 그대로 둔다) */
+const sentIdem: { call: string; idempotencyKey: string | null }[] = [];
 
 const basic = `Basic ${Buffer.from(`${KEY}:`).toString('base64')}`;
 const control = async (method: string, path: string, body?: unknown, headers: Record<string, string> = { authorization: basic }): Promise<{ status: number; body: Record<string, unknown> }> => {
@@ -76,6 +81,7 @@ beforeAll(async () => {
     const call = `${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`;
     const raw = init?.body === undefined || init.body === null ? undefined : String(init.body);
     const body: unknown = raw === undefined ? undefined : JSON.parse(raw);
+    sentIdem.push({ call, idempotencyKey: new Headers(init?.headers).get('idempotency-key') });
     try {
       const res = await fetch(input, init);
       sent.push({ call, body, status: res.status });
@@ -142,6 +148,7 @@ beforeEach(async () => {
   await admin.pool.query('truncate payment, payment_cancel, payment_event, payment_confirm_job');
   expect((await control('DELETE', '/sim/faults')).status).toBe(204);
   sent.length = 0;
+  sentIdem.length = 0;
   logs.length = 0;
 });
 
@@ -192,6 +199,18 @@ const cancel = async (paymentId: string, cancellationId: string, o: { amount?: n
 const ledger = async (paymentId: string) => (await admin.pool.query('select status, cancelled_amount from payment where id = $1', [paymentId])).rows[0] as { status: string; cancelled_amount: number };
 const cancelRows = async (paymentId: string) =>
   (await admin.pool.query('select idempotency_key, amount, expected_balance, status from payment_cancel where payment_id = $1 order by created_at', [paymentId])).rows as { idempotency_key: string; amount: number; expected_balance: number; status: string }[];
+/** BAT-425: 실패 까닭(SUPERSEDED)과 시도 번호까지 읽는다. 새 시험만 쓴다(기존 정확 일치 단언은 cancelRows 그대로) */
+const cancelRowsFull = async (paymentId: string) =>
+  (
+    await admin.pool.query(
+      'select idempotency_key, attempt, amount, expected_balance, status, fail_reason from payment_cancel where payment_id = $1 order by idempotency_key',
+      [paymentId],
+    )
+  ).rows as { idempotency_key: string; attempt: number; amount: number; expected_balance: number; status: string; fail_reason: string | null }[];
+/** 앞 진행 중 행을 10분 창 밖(11분 전)으로 옮긴다. 새 계좌 시도는 창을 기다리지 않고 조회로 닫는다 */
+const ageCancelRow = async (paymentId: string, idempotencyKey: string) => {
+  await admin.pool.query('update payment_cancel set created_at = $3 where payment_id = $1 and idempotency_key = $2', [paymentId, idempotencyKey, new Date(NOW - 11 * 60_000)]);
+};
 const eventTypes = async (paymentId: string) => (await admin.pool.query('select type from payment_event where payment_id = $1 order by seq', [paymentId])).rows.map((r) => (r as { type: string }).type);
 const simBalance = async (key: string) => Number((await control('GET', `/v1/payments/${key}`)).body.balanceAmount);
 const calls = (prefix: string) => sent.filter((s) => s.call.startsWith(prefix));
@@ -500,5 +519,285 @@ describe('P-T73·P-T74 같은 취소 ID의 다시 부름과 계좌 [실제 Postg
     expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT })).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
     expect(calls(`POST /payments/${p.portonePaymentId}/cancel`)).toHaveLength(1);
     expect(await simBalance(p.portonePaymentId)).toBe(35_000);
+  });
+});
+
+// BAT-425 검증 보강(2026-11-20, 732d2437): 계획 §9 M1~M5·M9a의 실제 PostgreSQL 경로.
+// 지금까지 P-T76 ①③④는 단위 대역(`listInProgressCancels`·`settlePriorConfirmedCancel` 호출 차례)만 봤다.
+// 여기서는 새 SQL(조건부 UPDATE·부분 유일·시도별 멱등키)을 실제 payment_cancel 행과 결제사 조회로 지나가게 한다.
+describe('P-T76 이중 환불 가드와 시도별 멱등키 [실제 PostgreSQL·gRPC·어댑터·시뮬레이터]', () => {
+  const OTHER_ACCOUNT = { bank_code: '88', account_number: '220-111-222333', holder_name: '김결제' };
+
+  /** 앞 진행 중 행을 심는다(11분 전). 실제 흐름으로는 첫 계좌 시도가 결과 모름으로 남긴 행이다 */
+  const seedInProgress = async (paymentId: string, idempotencyKey: string, status: 'REQUESTED' | 'CANCEL_PENDING', attempt = 0) => {
+    await admin.pool.query(
+      `insert into payment_cancel (id, payment_id, idempotency_key, attempt, amount, reason, full_cancel, expected_balance, status, created_at)
+       values ($1, $2, $3, $4, 25000, '관객 취소', false, 60000, $5, $6)`,
+      [randomUUID(), paymentId, idempotencyKey, attempt, status, new Date(NOW - 11 * 60_000)],
+    );
+  };
+
+  test('P-T76 ①_새_취소_ID의_계좌_시도는_앞_진행중_행을_조회로_닫고_새_전송_0·이중_환급_0이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const firstCancel = randomUUID();
+    // 결제사는 취소를 반영했지만 응답이 끊겨 payment_cancel은 REQUESTED로 남는다
+    expect((await control('POST', '/sim/faults', { op: 'cancel', times: 1, orderId: p.orderId, kind: 'drop', applied: true })).status).toBe(204);
+    expect(await cancel(p.paymentId, firstCancel, { account: REFUND_ACCOUNT })).toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN' });
+    expect(calls(`POST /v1/payments/${p.paymentKey}/cancel`).map((s) => s.status)).toEqual(['dropped']);
+    expect(await simBalance(p.paymentKey)).toBe(35_000);
+    expect(await cancelRowsFull(p.paymentId)).toEqual([
+      { idempotency_key: `cancel-${firstCancel}`, attempt: 0, amount: 25_000, expected_balance: 60_000, status: 'REQUESTED', fail_reason: null },
+    ]);
+    await ageCancelRow(p.paymentId, `cancel-${firstCancel}`);
+    sent.length = 0;
+    sentIdem.length = 0;
+
+    // 다른 계좌·새 취소 ID. 결제사에 새 전송을 보내기 전에 앞 행을 조회로 닫아야 한다
+    const secondCancel = randomUUID();
+    expect(await cancel(p.paymentId, secondCancel, { account: OTHER_ACCOUNT })).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
+    expect(calls('POST ')).toEqual([]);
+    expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+    const rows = await cancelRowsFull(p.paymentId);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.idempotency_key === `cancel-${firstCancel}`)).toEqual({
+      idempotency_key: `cancel-${firstCancel}`,
+      attempt: 0,
+      amount: 25_000,
+      expected_balance: 60_000,
+      status: 'CANCELED',
+      fail_reason: null,
+    });
+    // 새 시도는 앞 행의 반영으로 끝났음을 CANCELED 행으로 남긴다(원장은 더하지 않는다)
+    expect(rows.find((r) => r.idempotency_key === `cancel-${secondCancel}`)).toEqual({
+      idempotency_key: `cancel-${secondCancel}`,
+      attempt: 0,
+      amount: 25_000,
+      expected_balance: 60_000,
+      status: 'CANCELED',
+      fail_reason: null,
+    });
+    expect(await ledger(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 25_000 });
+    expect(await simBalance(p.paymentKey)).toBe(35_000);
+    expect(await leakIn()).toEqual([]);
+  });
+
+  test('P-T76 ①_M9a_앞_행이_반영_아니면_FAILED(SUPERSEDED)로_닫고_새_시도는_새_멱등키로_한_번만_보낸다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const firstCancel = randomUUID();
+    expect((await control('POST', '/sim/faults', { op: 'cancel', times: 1, orderId: p.orderId, kind: 'drop', applied: false })).status).toBe(204);
+    expect(await cancel(p.paymentId, firstCancel, { account: REFUND_ACCOUNT })).toMatchObject({ result: 'CANCEL_RESULT_UNKNOWN' });
+    expect(calls(`POST /v1/payments/${p.paymentKey}/cancel`).map((s) => s.status)).toEqual(['dropped']);
+    expect(await simBalance(p.paymentKey)).toBe(60_000);
+    await ageCancelRow(p.paymentId, `cancel-${firstCancel}`);
+    sent.length = 0;
+    sentIdem.length = 0;
+
+    const secondCancel = randomUUID();
+    expect(await cancel(p.paymentId, secondCancel, { account: REFUND_ACCOUNT })).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
+    // 결제사 1회 조회 + 1회 새 전송. 조회가 '반영 아님'이라 옛 행을 닫은 뒤 새 본문을 보낸다
+    expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+    expect(calls(`POST /v1/payments/${p.paymentKey}/cancel`)).toHaveLength(1);
+    expect(sentIdem.filter((s) => s.call.startsWith('POST /v1/payments/')).map((s) => s.idempotencyKey)).toEqual([`cancel-${secondCancel}`]);
+    const rows = await cancelRowsFull(p.paymentId);
+    expect(rows.find((r) => r.idempotency_key === `cancel-${firstCancel}`)).toEqual({
+      idempotency_key: `cancel-${firstCancel}`,
+      attempt: 0,
+      amount: 25_000,
+      expected_balance: 60_000,
+      status: 'FAILED',
+      fail_reason: 'SUPERSEDED',
+    });
+    expect(rows.find((r) => r.idempotency_key === `cancel-${secondCancel}`)).toMatchObject({ attempt: 0, status: 'CANCELED' });
+    expect(await ledger(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 25_000 });
+    expect(await simBalance(p.paymentKey)).toBe(35_000);
+
+    // 옛 시도(0)를 다시 부르면 결제사 0·REJECTED다(ADR-0316 B4)
+    sent.length = 0;
+    expect(await cancel(p.paymentId, firstCancel)).toEqual({ result: 'CANCEL_RESULT_REJECTED', cancelled_amount: { krw: 25_000 } });
+    expect(calls('POST ')).toEqual([]);
+  });
+
+  test('P-T76 ②_같은_취소_ID의_새_시도는_-a2_키로_나가고_같은_시도의_재시도·옛_시도는_결제사_0이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    // 시도 1은 결제사 업무 거절로 FAILED가 된다
+    expect((await control('POST', '/sim/faults', { op: 'cancel', times: 1, orderId: p.orderId, kind: 'decline', code: 'NOT_CANCELABLE_PAYMENT' })).status).toBe(204);
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT, attempt: 1 })).toMatchObject({ result: 'CANCEL_RESULT_REJECTED' });
+    expect((await cancelRowsFull(p.paymentId)).find((r) => r.idempotency_key === `cancel-${cancellationId}-a1`)).toMatchObject({ attempt: 1, status: 'FAILED' });
+    sent.length = 0;
+    sentIdem.length = 0;
+
+    // 시도 2는 새 멱등키로 결제사에 한 번 나간다
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT, attempt: 2 })).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
+    expect(sentIdem.filter((s) => s.call.startsWith('POST /v1/payments/')).map((s) => s.idempotencyKey)).toEqual([`cancel-${cancellationId}-a2`]);
+    expect((await cancelRowsFull(p.paymentId)).find((r) => r.idempotency_key === `cancel-${cancellationId}-a2`)).toMatchObject({ attempt: 2, status: 'CANCELED' });
+
+    // 같은 시도(2)의 재시도는 자기 행이 CANCELED라 결제사 0이다
+    sent.length = 0;
+    expect(await cancel(p.paymentId, cancellationId, { attempt: 2 })).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
+    expect(calls('POST ')).toEqual([]);
+
+    // 옛 시도(1)를 다시 부르면 결제사 0·REJECTED다
+    expect(await cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT, attempt: 1 })).toEqual({ result: 'CANCEL_RESULT_REJECTED', cancelled_amount: { krw: 25_000 } });
+    expect(calls('POST ')).toEqual([]);
+    expect(await simBalance(p.paymentKey)).toBe(35_000);
+  });
+
+  test('P-T76 ③_앞_행이_CANCEL_PENDING이면_새_계좌_시도는_새_전송_0·결과_모름이고_행은_그대로다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const prior = `cancel-${randomUUID()}`;
+    await seedInProgress(p.paymentId, prior, 'CANCEL_PENDING');
+    sent.length = 0;
+    sentIdem.length = 0;
+
+    const answer = await cancel(p.paymentId, randomUUID(), { account: OTHER_ACCOUNT });
+    expect(answer.result).toBe('CANCEL_RESULT_UNKNOWN');
+    expect(calls('POST ')).toEqual([]);
+    expect(calls('GET ')).toEqual([]);
+    expect(await cancelRowsFull(p.paymentId)).toEqual([{ idempotency_key: prior, attempt: 0, amount: 25_000, expected_balance: 60_000, status: 'CANCEL_PENDING', fail_reason: null }]);
+    expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+    expect(await simBalance(p.paymentKey)).toBe(60_000);
+  });
+
+  test('P-T76 ③_앞_진행중_행이_둘이면_잔액으로_가르지_않고_새_전송_0·결과_모름이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const first = `cancel-${randomUUID()}`;
+    const second = `cancel-${randomUUID()}`;
+    await seedInProgress(p.paymentId, first, 'REQUESTED');
+    await seedInProgress(p.paymentId, second, 'REQUESTED');
+    sent.length = 0;
+    sentIdem.length = 0;
+
+    expect((await cancel(p.paymentId, randomUUID(), { account: OTHER_ACCOUNT })).result).toBe('CANCEL_RESULT_UNKNOWN');
+    expect(calls('POST ')).toEqual([]);
+    expect(calls('GET ')).toEqual([]);
+    expect((await cancelRowsFull(p.paymentId)).map((r) => [r.idempotency_key, r.status]).sort()).toEqual(
+      [
+        [first, 'REQUESTED'],
+        [second, 'REQUESTED'],
+      ].sort(),
+    );
+    expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+  });
+
+  test('P-T76 ③_앞_행_조회가_실패하면_닫지_않고_새_전송_0·결과_모름이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const prior = `cancel-${randomUUID()}`;
+    await seedInProgress(p.paymentId, prior, 'REQUESTED');
+    expect((await control('POST', '/sim/faults', { op: 'query', times: 1, orderId: p.orderId, kind: 'pg-error', applied: false })).status).toBe(204);
+    sent.length = 0;
+    sentIdem.length = 0;
+
+    expect((await cancel(p.paymentId, randomUUID(), { account: OTHER_ACCOUNT })).result).toBe('CANCEL_RESULT_UNKNOWN');
+    expect(calls('POST ')).toEqual([]);
+    expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+    expect((await cancelRowsFull(p.paymentId)).find((r) => r.idempotency_key === prior)).toMatchObject({ status: 'REQUESTED', fail_reason: null });
+    expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+    expect(await simBalance(p.paymentKey)).toBe(60_000);
+  });
+
+  test('P-T76 ④_조회가_반영이어도_다른_취소가_원장에_반영됐으면_새_전송_0·원장_그대로·결과_모름이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const prior = `cancel-${randomUUID()}`;
+    await seedInProgress(p.paymentId, prior, 'REQUESTED');
+    // 결제사 잔액은 25,000원이 나간 35,000원이지만, 원장에는 다른 취소 10,000원이 먼저 반영돼 잔액으로 어느 행인지 가를 수 없다
+    expect(
+      (
+        await control(
+          'POST',
+          `/v1/payments/${p.paymentKey}/cancel`,
+          { cancelReason: '다른 취소', cancelAmount: 25_000, refundReceiveAccount: { bank: '88', accountNumber: ACCOUNT_DIGITS, holderName: HOLDER } },
+          { authorization: basic, 'idempotency-key': `other-${randomUUID()}` },
+        )
+      ).status,
+    ).toBe(200);
+    await admin.pool.query("update payment set cancelled_amount = 10000, status = 'PARTIAL_CANCELED' where id = $1", [p.paymentId]);
+    sent.length = 0;
+    sentIdem.length = 0;
+
+    expect((await cancel(p.paymentId, randomUUID(), { account: OTHER_ACCOUNT })).result).toBe('CANCEL_RESULT_UNKNOWN');
+    expect(calls('POST ')).toEqual([]);
+    expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+    expect(await cancelRowsFull(p.paymentId)).toEqual([{ idempotency_key: prior, attempt: 0, amount: 25_000, expected_balance: 60_000, status: 'REQUESTED', fail_reason: null }]);
+    expect(await ledger(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 10_000 });
+    expect(await simBalance(p.paymentKey)).toBe(35_000);
+  });
+
+  test('P-T76 ④_옛_행을_조건부로_닫지_못하면(0행)_새_전송_0·결과_모름이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const prior = `cancel-${randomUUID()}`;
+    await seedInProgress(p.paymentId, prior, 'REQUESTED');
+    // 조건부 UPDATE가 0행이 되는 경합을 DB에서 만든다(REQUESTED→FAILED만 건너뛴다)
+    await admin.pool.query(`
+      create or replace function p_t76_keep_requested() returns trigger language plpgsql as $$
+      begin
+        if old.status = 'REQUESTED' and new.status = 'FAILED' then return null; end if;
+        return new;
+      end $$;
+      create trigger p_t76_keep_requested before update on payment_cancel for each row execute function p_t76_keep_requested();
+    `);
+    try {
+      sent.length = 0;
+      sentIdem.length = 0;
+      expect((await cancel(p.paymentId, randomUUID(), { account: OTHER_ACCOUNT })).result).toBe('CANCEL_RESULT_UNKNOWN');
+      expect(calls('POST ')).toEqual([]);
+      expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+      expect(await cancelRowsFull(p.paymentId)).toEqual([{ idempotency_key: prior, attempt: 0, amount: 25_000, expected_balance: 60_000, status: 'REQUESTED', fail_reason: null }]);
+      expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+    } finally {
+      await admin.pool.query('drop trigger if exists p_t76_keep_requested on payment_cancel; drop function if exists p_t76_keep_requested();');
+    }
+  });
+});
+
+// BAT-425 계획 §9 M47: 결제사 취소는 성공했는데 그 결과를 DB에 쓰는 트랜잭션이 실패하는 장면.
+// 결제사에 돈은 나갔고 payment_cancel은 REQUESTED로 남는다. 재시도는 같은 취소 ID로 조회만 해 끝내야 하고(새 전송 0),
+// 원장은 한 번만 줄어야 한다(이중 환급 0). DB 쓰기 실패는 payment UPDATE 트리거가 첫 한 번만 던져 끼어든다.
+describe('M47 결제사 성공 뒤 DB 쓰기 실패 [실제 PostgreSQL·gRPC·시뮬레이터]', () => {
+  test('M47_취소_성공_뒤_원장_쓰기가_실패해도_같은_취소_ID_재시도가_조회로_끝내고_이중_환급_0이다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    // nextval은 롤백돼도 남으므로 첫 UPDATE만 실패하고 재시도는 지나간다
+    await admin.pool.query(`
+      create sequence m47_payment_finish_seq start 1;
+      create or replace function m47_fail_payment_finish() returns trigger language plpgsql as $$
+      begin
+        if old.cancelled_amount = 0 and new.cancelled_amount > 0 and nextval('m47_payment_finish_seq') = 1 then
+          raise exception 'M47 injected DB write failure';
+        end if;
+        return new;
+      end $$;
+      create trigger m47_fail_payment_finish before update on payment for each row execute function m47_fail_payment_finish();
+    `);
+    try {
+      const err = await failure(cancel(p.paymentId, cancellationId, { account: REFUND_ACCOUNT }));
+      // 트리거 예외는 결제사 호출 실패가 아니라 서버 결함(INTERNAL) 또는 재시도 가능(UNAVAILABLE)로 답한다.
+      // purchase 어댑터는 둘 다 UNKNOWN으로 읽어 202 REFUND_PENDING을 답한다(M47 purchase 통합 시험)
+      expect([grpc.status.INTERNAL, grpc.status.UNAVAILABLE]).toContain(err.code);
+      // 장애 주입이 실제로 끼어들었다: 결제사 취소 200, 원장 쓰기는 실패, 행은 진행 중 그대로
+      expect(calls(`POST /v1/payments/${p.paymentKey}/cancel`).map((s) => s.status)).toEqual([200]);
+      expect(await simBalance(p.paymentKey)).toBe(35_000);
+      expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+      expect(await cancelRowsFull(p.paymentId)).toEqual([
+        { idempotency_key: `cancel-${cancellationId}`, attempt: 0, amount: 25_000, expected_balance: 60_000, status: 'REQUESTED', fail_reason: null },
+      ]);
+      expect(Number((await admin.pool.query("select last_value from m47_payment_finish_seq")).rows[0]!.last_value)).toBe(1);
+
+      // 같은 취소 ID 재시도: 새 전송 0·조회 1로 정산하고 돈은 한 번만 나간다
+      sent.length = 0;
+      sentIdem.length = 0;
+      expect(await cancel(p.paymentId, cancellationId)).toEqual({ result: 'CANCEL_RESULT_CANCELLED', cancelled_amount: { krw: 25_000 } });
+      expect(calls('POST ')).toEqual([]);
+      expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+      expect(await cancelRowsFull(p.paymentId)).toEqual([
+        { idempotency_key: `cancel-${cancellationId}`, attempt: 0, amount: 25_000, expected_balance: 60_000, status: 'CANCELED', fail_reason: null },
+      ]);
+      expect(await ledger(p.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 25_000 });
+      expect(await simBalance(p.paymentKey)).toBe(35_000);
+      // 재시도는 두 번째 finish 시도(nextval=2)라 트리거를 지나갔다. 첫 시도만 실패했다
+      expect(Number((await admin.pool.query("select last_value from m47_payment_finish_seq")).rows[0]!.last_value)).toBe(2);
+    } finally {
+      await admin.pool.query('drop trigger if exists m47_fail_payment_finish on payment; drop function if exists m47_fail_payment_finish(); drop sequence if exists m47_payment_finish_seq;');
+    }
   });
 });

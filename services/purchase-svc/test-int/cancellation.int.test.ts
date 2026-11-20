@@ -1822,3 +1822,71 @@ describe('P-T76 ② 계좌 시도의 재시도 [실제 PostgreSQL·ticket-svc·p
     expect(await accountRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempt: 0, refund_attempts: 1, next_refund_at: null, refund_failed_at: null });
   }, 60_000);
 });
+
+// BAT-425 계획 §9 M47(검증 보강, 732d2437): 결제사 취소는 성공했는데 payment-svc가 그 결과를 원장에 쓰는 트랜잭션이 실패한다.
+// purchase는 gRPC UNAVAILABLE을 UNKNOWN으로 읽어 202 REFUND_PENDING을 답하고, 재시도가 같은 취소 ID로 조회만 해 끝내야 한다(새 전송 0·이중 환급 0).
+describe('M47 결제사 성공 뒤 DB 쓰기 실패 [실제 PostgreSQL·ticket-svc·payment-svc gRPC]', () => {
+  const REFUND_ACCOUNT = { bankCode: '88', accountNumber: '110-987-654321', holderName: '김환불' };
+  const cancelRows = async (paymentId: string) =>
+    (await paymentDb.pool.query<{ idempotency_key: string; attempt: number; status: string }>('select idempotency_key, attempt, status from payment_cancel where payment_id = $1 order by idempotency_key', [paymentId])).rows;
+  const cancellationRow = async (cancellationId: string) =>
+    (
+      await admin.pool.query<{ status: string; refund_attempt: number; refund_failed_at: Date | null }>('select status, refund_attempt, refund_failed_at from order_cancellation where id = $1', [cancellationId])
+    ).rows[0]!;
+
+  test('M47_payment_원장_쓰기가_실패해도_202_REFUND_PENDING_뒤_같은_취소_ID_재시도가_조회로_끝내고_이중_환급_0이다', async () => {
+    const w = await world();
+    await paymentDb.pool.query(
+      `insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at) values ($1, 1, $2, 'AWAITING_DEPOSIT', true, now()), ($1, 2, $3, 'APPROVED', true, now())`,
+      [w.paymentId, randomUUID(), randomUUID()],
+    );
+    const cancellationId = randomUUID();
+    gatewayCalls = [];
+    gatewayQueries = [];
+    gatewayOutcome = 'CANCELLED';
+    gatewayQuery = { kind: 'UNKNOWN' };
+    // nextval은 롤백돼도 남으므로 첫 원장 UPDATE만 실패하고 재시도(조회 정산)는 지나간다
+    await paymentDb.pool.query(`
+      create sequence m47_purchase_finish_seq start 1;
+      create or replace function m47_fail_purchase_finish() returns trigger language plpgsql as $$
+      begin
+        if old.cancelled_amount = 0 and new.cancelled_amount > 0 and nextval('m47_purchase_finish_seq') = 1 then
+          raise exception 'M47 injected DB write failure';
+        end if;
+        return new;
+      end $$;
+      create trigger m47_fail_purchase_finish before update on payment for each row execute function m47_fail_purchase_finish();
+    `);
+    try {
+      await expect(
+        saga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId, reason: 'USER', nowMs: NOW, deadlineMs: 5_000, refundAccount: REFUND_ACCOUNT }),
+      ).resolves.toMatchObject({ status: 'REFUND_PENDING', payment: 'UNKNOWN' });
+      // 장애 주입이 실제로 끼어들었다: 결제사 취소는 1회 나갔고 원장은 그대로, 행은 진행 중이다
+      expect(gatewayCalls).toHaveLength(1);
+      expect(gatewayCalls[0]).toMatchObject({ idemKey: `cancel-${cancellationId}`, refundAccount: { bankCode: '88', accountNumber: '110987654321', holderName: '김환불' } });
+      expect(await paymentRow(w.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+      expect(await cancelRows(w.paymentId)).toEqual([{ idempotency_key: `cancel-${cancellationId}`, attempt: 0, status: 'REQUESTED' }]);
+      expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempt: 0, refund_failed_at: null });
+      expect(Number((await paymentDb.pool.query("select last_value from m47_purchase_finish_seq")).rows[0]!.last_value)).toBe(1);
+    } finally {
+      await paymentDb.pool.query('drop trigger if exists m47_fail_purchase_finish on payment; drop function if exists m47_fail_purchase_finish(); drop sequence if exists m47_purchase_finish_seq;');
+    }
+
+    // 같은 취소 ID 재시도: 새 전송 0·조회 1로 정산하고 돈은 한 번만 나간다
+    gatewayQuery = { kind: 'FOUND', paymentRef: `ref-${w.orderId}`, orderRef: w.orderId, status: 'APPROVED', amount: PRICE, balanceAmount: PRICE - 90_000 };
+    gatewayQueries = [];
+    const retry = new RefundAfterEntry({
+      writes,
+      payments: paymentCancels!,
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: writes,
+      nowMs: () => NOW + 60_000,
+    });
+    await expect(retry.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
+    expect(gatewayCalls, '새 전송 0(이중 환급 0)').toHaveLength(1);
+    expect(gatewayQueries, '같은 취소 ID 조회 1').toHaveLength(1);
+    expect(await cancelRows(w.paymentId)).toEqual([{ idempotency_key: `cancel-${cancellationId}`, attempt: 0, status: 'CANCELED' }]);
+    expect(await paymentRow(w.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 90_000 });
+    expect(await cancellationRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempt: 0, refund_failed_at: null });
+  }, 60_000);
+});
