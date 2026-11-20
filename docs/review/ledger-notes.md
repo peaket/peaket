@@ -224,3 +224,14 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 | settlement:v5.0.0-2.3.4 | 자동 시험 | B | core-svc 계약 기간·ops-svc 부분 유일 | 한 파트너에 열린 변경 하나(core 대기 ID + ops 부분 유일 인덱스)와 기간 겹침 없음(`WITHOUT OVERLAPS`)을 동시 요청·동시 승인 시험이 본다. 시험 이름에 `[ASVS v5.0.0-2.3.4]`을 단다(J-T29 ④ ⑨, J-T30 ⑤). BAT-615 완료(2026-11-20, R-719). |
 | settlement:v5.0.0-8.2.2 | 자동 시험 | B | core-svc 관제 경로 | 계약 승인 상세는 요청자·commander만, 파트너사 상세는 viewer 403·CS 읽기다. 시험 이름에 `[ASVS v5.0.0-8.2.2]`을 단다(J-T29 ⑦ ⑧). BAT-615 완료(2026-11-20, R-719). |
 | settlement:v5.0.0-8.2.3 | 자동 시험 | B | core-svc 관제 경로 | 응답에 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID가 없고 `payoutAccount`는 null이다. 시험 이름에 `[ASVS v5.0.0-8.2.3]`을 단다(J-T29 ⑧). BAT-615 완료(2026-11-20, R-719). |
+
+## BAT-182 완료(2026-11-20, R-721)
+
+BAT-182(HOT-357)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바꾸지 않고 근거만 더한다(자동 시험 4·다른 단계 0, 등급 A 3·B 1 그대로). 네 항목 모두 시험 이름이 상태를 정하는 자동 시험이라 상태 칸은 두지 않는다.
+
+| 항목 | 근거 |
+| --- | --- |
+| FE-T11 | 화면 배선 시험을 더했다: `packages/seatmap/test/stream-worker.test.ts`(T1~T6), `apps/web/src/_pages/seats/{model/connection-view,ui/seat-stream-wiring}.test.mjs`(T8), `apps/web/scripts/mock-api.test.mjs`(T12). 기존 연결·갭·재시도·상태 기계 시험은 그대로다. seatmap 128·web 1,010 통과. BAT-182 완료(2026-11-20, R-721). |
+| S-T13 | `packages/seatmap/test/s-t13-gap.test.ts`(T7): 버전 갭 3,000번, 실패 0, 가장 느린 회복 2,650ms(한도 30,000ms), 503 주입 21번, 정확 이항 단측 95% 상한 0.0998%(판정 0.0999% 이하). 측정 근거는 `docs/review/measurements/BAT-182-wave.md` §2. A등급이라 M5(갭 스냅샷 요청 0)로 틀린 구현도 확인했다. BAT-182 완료(2026-11-20, R-721). |
+| S-T21 | `tools/web-checks/seats/s-t21.spec.mjs`(T9·T10): 5만 석에서 전체 보기 0·확대 1·옆 구역 이동 1(A 빠짐)·축소 0구독, p99 20~44.6ms(판정 300ms 이하, 표본 100), Long Task 0, 전체 보기 4,999ms 요청 0·5,000ms 1. 측정 근거는 `docs/review/measurements/BAT-182-wave.md` §4. BAT-182 완료(2026-11-20, R-721). |
+| S-T31 ⑥ | 같은 화면 시나리오(T11): 최대 구독 1(상한 16), 4403·4429·1013·1009 닫힘 0, `TimeSync` 1(연결 직후, 다음 60초), `BatchInterval` 100 유지. 서버는 Docker 없는 realtime-gw 대역이고 Chromium 1엔진이다. 측정 근거는 `docs/review/measurements/BAT-182-wave.md` §4. BAT-182 완료(2026-11-20, R-721). |
