@@ -47,7 +47,23 @@
 | V-T28 | 측정 |  | HOT-480 | Outbox 릴레이의 순서와 유실 |
 | NFR-007 | 측정 |  | 출시 뒤 운영 측정 | 공연 페이지 30만 RPS는 CloudFront 서버 엣지 계측과 RUM으로 판정한다. 2026-11-12 BAT-210이 30만 RPS의 셈 근거(100만 × 30% × 2회 ÷ 10초 × 5건 [가정])를 docs/architecture.md §9.1에 적었다. 실제 CloudFront·RUM 측정은 출시 뒤 클라우드 계정이 있을 때 한다 |
 | D-T19 ④ | 측정 |  | BAT-075 | 쿠버네티스 기본 준비 프로브(10초·시간 초과 1초·연속 3회)로 이벤트 루프를 2초씩 막는 비교를 로컬 kind에서 돌려, Service에서 빠진 파드 수와 그 시각을 적는다(판정이 아니라 값의 근거 기록, docs/devops.md D-T19 ④). 결과 docs/review/measurements 폴더의 새 파일 `BAT-075-probes.md`. ①~③은 BAT-075 시험이다(2026-11-19 계획) |
-| D-T33 ③ | 측정 |  | BAT-085 | 로컬 kind가 끌어오기 비밀 없이 공개 GHCR 이미지의 다이제스트를 받는지 잰다(예: Kyverno 이미지). 우리 패키지의 실제 익명 끌어오기는 첫 출시 후보 게시와 패키지 공개 설정(소유자 몫) 뒤로 미룬다(docs/devops.md D-T33, ADR-0318 결정 6). 결과 docs/review/measurements/BAT-085-ghcr.md. 2026-11-20 구현 시점에는 Docker/kind를 돌리지 않았다(시험·검증 담당 몫, Docker 잠금 필요) |
+| D-T33 ③ | 측정 |  | BAT-085 | 로컬 kind가 끌어오기 비밀 없이 공개 GHCR 이미지의 다이제스트를 받는지 잰다(예: Kyverno 이미지). 우리 패키지의 실제 익명 끌어오기는 첫 출시 후보 게시와 패키지 공개 설정(소유자 몫) 뒤로 미룬다(docs/devops.md D-T33, ADR-0318 결정 6). 결과 docs/review/measurements/BAT-085-ghcr.md. 2026-11-20 구현 시점에는 Docker/kind를 돌리지 않았다(시험·검증 담당 몫, Docker 잠금 필요). 2026-11-20 BAT-085 완료(R-717) 때도 재지 않았다: 검증 2의 kind e2e 5/5는 GHCR 익명 끌어오기를 넣지 않았고, 계획·감독 결정대로 첫 출시 뒤로 미룬다 |
+
+## BAT-085 완료(2026-11-20, R-717)
+
+BAT-085(BAS-150)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바꾸지 않고 근거만 더한다(자동 시험 8·측정 1 그대로).
+
+| 항목 | 근거 |
+| --- | --- |
+| D-T11 ② | kind e2e: 테스트 키로 서명한 로컬 이미지 입장, 서명 없음·다른 키·초기 컨테이너 서명 없음 거부(검증 2, `tools/local/e2e/kyverno.e2e.mjs`) |
+| D-T18 ② | kind e2e: command·`NODE_OPTIONS`·`sh -c "node …"`·`--inspect` 다섯 사례 판정(검증 2) |
+| D-T28 | `gitops-check --check`: prod 오버레이 렌더와 메시 필수 검사 통과(통과 2·건너뜀 3) |
+| D-T32 ② | 단위 시험 GV-02·RV-05(빌드 잡 캐시 금지·release/hotfix `--no-cache`) |
+| D-T32 ③ | 단위 시험 GV-03·GV-04(고정물). 실제 cosign 출력은 승격 이미지가 없어 첫 승격 PR에서 더 본다 |
+| D-T33 ① | 정적 `GV-05 [ASVS v5.0.0-13.2.5]` + kind 데모 Audit 입장 |
+| D-T33 ② | 정적 `GV-06` + kind 운영 Deny(GHCR·`peaket-evil`·다른 계정 ECR 거부, PEAKET ECR 입장) |
+| delivery:v5.0.0-13.2.5 | `[ASVS v5.0.0-13.2.5]` 태그가 붙은 GV-05·GV-06 + 정책 적용 |
+| D-T33 ③ | 측정은 미룸(첫 출시 뒤). 위 측정 표의 행 그대로 |
 
 ## 다른 단계
 
