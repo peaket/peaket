@@ -398,6 +398,7 @@ allowBuilds: {}             # 설치 스크립트를 허용할 패키지. 빈 �
 | 운영 | 데모에서 카나리를 통과하고 `main`에 출시 태그가 붙은 후보 다이제스트 | 승격 PR(릴리스 봇이 연다), 필수 검사, 동결 게이트 | §8 |
 
 - 환경의 정의와 크기는 infra §3이 정본이다. 늘 켜 두는 데모는 두지 않는다(질문 24 결론, ADR-0057). 운영·스테이징은 설계로만 둔다. 이 절의 승격 흐름은 로컬 kind의 환경 오버레이에서 그대로 보여 준다(docs/verification.md §5.1).
+- **로컬 데모 경로(추천 적용 2026-11-20, BAT-087)**: 로컬 kind 데모는 GHCR의 서명 다이제스트가 아니라 `peaket/<워크로드>:demo` 이미지와 `deploy/envs/local/demo/` 오버레이로 올린다(`node tools/local/cluster.mjs demo`). 그래서 첫 출시 전에도 재현 스크립트를 돌릴 수 있고, 임시 클라우드 데모(서명 다이제스트·TTL)는 첫 출시 뒤 승격 묶음이 처음 켠다. 이미지 열의 목록·빌드·정적 점검은 `tools/local/demo-images.mjs --check|--build`가 맡고, 기본 합성 시드는 `deploy/envs/demo/seed/base.yaml` 하나를 `tools/local/demo-seed.mjs`가 적용한다. 시드의 첫 관리자·promoter만 부트스트랩 예외이고(감사 기록 없음), 공연·회차·좌석·스태프·기기·판매 승인은 공개·관리 API로 넣는다. 로컬 데모의 `PEAKET_ENV`는 `local`이고, 데모 표시가 필요한 클라우드 판만 `demo`다.
 
 ### 5.2 배포 상태 구조(`deploy/`)
 
@@ -408,6 +409,8 @@ deploy/
   charts/peaket-service/     공용 Helm 차트(Rollout·Service·PDB·KEDA·NetworkPolicy·ExternalSecret·우선순위. 스트림 작업자는 Service 없는 Deployment 모드와 PodMonitor로 쓴다, docs/streaming.md §13)
   workloads/<배포 단위>/values.yaml   배포 단위 기본 값(화면 앱 폴더 `apps/`와 헷갈리지 않게 이름을 바꿨다)
   envs/<환경>/<서비스>.yaml    환경 값(이미지 다이제스트, 복제본, 자원)
+  envs/local/demo/            로컬 kind 데모 오버레이(BAT-087: PEAKET_ENV local, :demo 이미지, 포트 붙은 출처)
+  envs/demo/seed/             기본 합성 시드(BAT-087, 클라우드 데모와 로컬 데모가 같은 파일을 쓴다)
   envs/<환경>/flags/          릴리스 플래그 정의(§5.4)
   platform/                   클러스터 애드온(ArgoCD, Argo Rollouts, Kyverno(설치 값 `platform/kyverno/`), KEDA, Karpenter, External Secrets, cert-manager, OTel 수집기 3종과 exporter(ADR-0076), 메시(Istio 앰비언트, ADR-0082))
   gateways/                   게이트웨이 다섯의 Gateway·HTTPRoute·Envoy Gateway 정책(ADR-0008, docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', 추천 적용 2026-11-16, BUILD_ORDER HOT-400)

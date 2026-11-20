@@ -106,6 +106,34 @@ node --test "tools/local/*.test.mjs"
 | `e2e/v0-deploy.e2e.mjs` | v0 배포를 실제 kind에서 봅니다(docs/infra.md §3 'v0 배포'의 '확인') |
 | `e2e/aws-emulator.e2e.mjs` | AWS 흉내 서버가 우리가 쓰는 기능을 흉내 내는지 봅니다 |
 | `e2e/relay-takeover.e2e.mjs` | V-T28 ①의 kind 부분: 쓰기를 흘리며 Outbox 릴레이 리더를 SIGSTOP으로 멈추고 이어받기·빠짐·순서를 봅니다 |
+| `demo-images.mjs` | BAT-087 데모 이미지 10개의 계획·정적 점검(`--check`)·빌드(`--build`). 기존 `bundle`·`ops-svc`·`pg-simulator`는 재사용합니다 |
+| `demo-objects.mjs` | 데모 무대의 순수 객체·값: 워크로드 표, 네임스페이스, PostgreSQL·Valkey·Kafka 토픽, Secret, 모의 기관, 실제 백엔드를 보는 게이트웨이 객체(출처 포트·bundle 네임스페이스) |
+| `demo-auth.mjs` | 데모 인증 도우미: 팬 gRPC `CreateSession`, 관리·파트너 공개 로그인(비밀번호+TOTP), 패스키 CDP 입력, 데모 비밀 생성(`prepare`) |
+| `demo-seed.mjs` | `deploy/envs/demo/seed/base.yaml` 검사(`--check`)·적용(`--apply`). 부트스트랩 Job 뒤 공개·관리 API로 시드하고 개수를 다시 읽습니다 |
+| `e2e/demo-stage.e2e.mjs` | `demo`→`demo-seed`→게이트웨이 응답→`demo-down` 연기 시험(시험 담당 몫, 계획 §6 DS-07~10) |
+
+```bash
+node tools/local/cluster.mjs demo [--skip-build] [--only <목록>]
+node tools/local/cluster.mjs demo-seed [--check|--apply] [--json]
+node tools/local/cluster.mjs demo-status [--json]
+node tools/local/cluster.mjs demo-down
+```
+
+BAT-086 재현 스크립트가 도는 **로컬 데모 무대**를 올립니다(계획 `docs/review/plans/BAT-087.md`, 정본 `docs/infra.md` §3 '로컬 데모 무대'). 클러스터는 `lane4-demo`, kubeconfig는 `.cache/peaket-tools/kubeconfig-lane4-demo`이고 다른 갈래의 `peaket`·`lane4-*` 클러스터는 건드리지 않습니다. `demo`가 ① 이미지 13개(새 이미지 10개 + `bundle`·`ops-svc`·`pg-simulator`) 빌드·kind 적재 ② 네임스페이스 여섯(`queue`·`purchase`·`ticket`·`trust`·`core`·`web`) ③ PostgreSQL 하나(논리 DB 여섯)·Valkey·Kafka 토픽·Secret ④ 마이그레이션 잡 ⑤ 공용 차트 ⑥ 실제 백엔드를 보는 게이트웨이 ⑦ 준비 대기까지 합니다. 중간에 하나라도 실패하면 그 자리에서 멈추고 exit 1이며 '준비됨'을 찍지 않습니다.
+
+- **이미지**: `peaket/<워크로드>:demo`, `pullPolicy: Never`. 새 이미지는 `services/{identity-svc,ticket-svc,trust-svc,core-svc,realtime-gw}`와 `apps/{web,partner,console-host,scanner}`,`apps/web/queue-room`의 Dockerfile 10개입니다. `node tools/local/demo-images.mjs --check`가 폴더·기본 이미지 다이제스트·`latest` 없음·비루트 사용자·`.dockerignore` 예외를 정적으로 보고, `--build`는 Docker 잠금 안에서만 부릅니다. `bundle`(queue·admission·purchase·payment), `ops-svc`, `pg-simulator`는 기존 이미지를 그대로 씁니다.
+- **환경**: `PEAKET_ENV=local`입니다(`demo`가 아닙니다: 합본은 `local`·`ci`에서만 시작하고 identity KMS·웹 모의 OIDC 제공자도 local 전제입니다).
+- **호스트·포트**: 정본 이름에 이 PC 포트를 붙입니다(`https://www.peaket.example:18441`~`https://scanner.peaket.example:18445`). identity gRPC는 `127.0.0.1:19051`, 모의 본인확인기관은 `127.0.0.1:18920`입니다. 브라우저는 Playwright `--host-resolver-rules=MAP *.peaket.example 127.0.0.1`·`ignoreHTTPSErrors: true`, 사람은 hosts 파일을 씁니다(아래 표).
+- **인증**: `node tools/local/demo-auth.mjs fan <accountKey>`·`admin <accountKey>`가 표준 출력 한 줄 JSON `{ accountKey, kind, cookies, passkey? }`를 냅니다. 팬은 identity gRPC `CreateSession`, 관리·파트너는 공개 로그인 API(비밀번호→TOTP)입니다. 모의 OIDC 제공자는 올리지 않습니다. 값은 `.cache/peaket-tools/demo-secrets/`(0600)에만 있습니다.
+- **시드**: `demo-seed --check`가 참조·비밀 없음·개수 계약을 보고, `--apply`가 부트스트랩 Job 둘 뒤 공개·관리 API로 공연·회차·좌석맵·스태프·기기·판매 승인을 넣습니다. 두 번 적용해도 개수가 같습니다. 첫 관리자·promoter만 부트스트랩 예외이고 **감사 기록이 남지 않습니다(한계)**.
+- **정리**: `demo-down`은 데모 네임스페이스 여섯만 지우고 `lane4-demo` 클러스터는 남깁니다. 두 번 불러도 exit 0입니다.
+- **한계**: 합본 재사용(운영 모양과 다름), 로컬 전용 이미지(GHCR·서명 없음), 부트스트랩 감사 없음, OTel 수집기·`image-worker` 없음. 자세한 것은 `deploy/envs/local/demo/README.md`.
+
+```bash
+node tools/local/demo-images.mjs --check
+node tools/local/demo-seed.mjs --check
+node tools/local/cluster.mjs demo-status --json
+```
 
 ## 고정 판(2026-11-01)
 

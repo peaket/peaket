@@ -305,6 +305,7 @@ flowchart LR
 - 늘 켜 두는 유휴 dev 클러스터는 비용을 줄이려고 운영하지 않는다. 분산 구성 요소 사이의 통합 테스트와 계약 테스트는 CI 단계의 로컬 컨테이너(앱과 실행 환경을 한 묶음으로 만든 실행 단위) 환경에서 한다. 실제 브라우저로 하는 E2E 검증은 로컬·CI의 데모 오버레이에서 한다(ADR-0031, ADR-0057).
 - Terraform 원격 상태 파일(State)은 환경별로 물리적으로 나눠 서로의 간섭을 막는다(23장). 운영 환경의 실제 데이터를 스테이징이나 데모 환경으로 덤프하거나 복사하는 일은 개인정보 보호 원칙에 따라 엄격히 금지한다(POL-026).
 - 클라우드에서 부하를 내는 선택 보정(ADR-0057) 전에는 AWS의 네트워크 스트레스 테스트 정책을 미리 점검한다. 트래픽은 반드시 회사 계정이 소유한 테스트 자원에만 보내야 한다.
+- **로컬 데모 무대(추천 적용 2026-11-20, BAT-087)**: 데모 환경의 로컬 판은 `node tools/local/cluster.mjs demo` 하나로 올린다. 클러스터 이름은 `lane4-demo`(kubeconfig `.cache/peaket-tools/kubeconfig-lane4-demo`)이고 다른 갈래의 `peaket`·`lane4-*` 클러스터는 건드리지 않는다. 서비스 이미지 다섯(identity·ticket·trust·core·realtime-gw)과 앱 이미지 다섯(web·partner·console-host·scanner·queue-room)은 `peaket/<워크로드>:demo`로 이 PC에서만 만들고, queue·admission·purchase·payment는 기존 합본 `bundle` 한 파드로 덮는다(운영 모양과 다름). 게이트웨이 다섯은 대역 백엔드가 아니라 실제 서비스(`deploy/gateways`의 HTTPRoute·ReferenceGrant, bundle이 사는 `purchase` 네임스페이스로 backendRef만 바꿈)를 본다. 정본 호스트에 이 PC 포트를 붙여 `https://www.peaket.example:18441`~`https://scanner.peaket.example:18445`로 열고, identity gRPC는 `127.0.0.1:19051`, 모의 본인확인기관은 `127.0.0.1:18920`이다. `PEAKET_ENV`는 `local`이다(합본·identity KMS·웹 모의 OIDC 제공자의 local 전제). 정리 `demo-down`은 데모 네임스페이스 여섯만 지운다. 이미지는 GHCR에 올리지 않는다(첫 출시 뒤 승격 묶음 몫).
 
 ## 4. 구성 요소별 가용성·이중화
 
@@ -572,6 +573,7 @@ flowchart LR
 - 값싼 규칙을 Bot Control 앞에 둔다. Bot Control은 그 앞의 규칙을 지나온 요청을 모두 검사해 과금하기 때문이다(AWS WAF 모범 사례 문서).
 - **대기열 경로의 Bot Control(추천 적용 2026-10-31, ADR-0171 결정 4)**: ADR-0171은 끝단의 봇 점수를 조사에 받으라고 했고, docs/features/bot-defense.md §3.3은 대기열 경로에 Bot Control Common을 세기(Count, 막지 않고 라벨만 붙이는) 모드로 걸지를 이 표에 맡겼다. **지금은 걸지 않는다.** 이유는 셋이다. ① 값어치가 낮다: Bot Control은 숫자 점수 없이 라벨만 준다(2026-10-31 AWS 문서 확인). Common 단계의 라벨은 User-Agent·머리 모양·데이터센터 IP로 붙는데, 조사는 같은 요청의 JA4·원문 IP·ASN(호스팅·프록시 분류)을 이미 받고, 로비 입장·사전 검증은 Turnstile과 trust-svc가 이미 본다. ② 비용 원칙(이 표 머리)은 WAF를 값싼 규칙으로 큰 덩어리만 거르는 데 쓰고 Bot Control은 로그인 경로에만 좁힌다. ③ 진입·입장 확정은 T=0 몰림(초당 20만 건)의 핫패스라, 측정하지 않은 관리 규칙 평가를 더하지 않는다. **다시 볼 조건**: 첫 세 회차의 조사에서 JA4·IP·ASN·연결 그래프로 묶이지 않았는데 소명·게시물 대조로 자동화 도구임이 확인된 묶음이 나오면 다시 본다. 그때도 로비 입장·사전 검증 두 경로에만(범위 축소문) Common을 세기 모드로 걸고, 진입·입장 확정에는 걸지 않는다. 라벨은 라벨 맞춤 규칙의 요청 머리 넣기(`x-amzn-waf-bot-labels`, 라벨 끼워 넣기)로 원본에 넘긴다. **그때의 비용(추정)**: 대기열 API 웹 ACL에 Bot Control 구독 월 10달러와 규칙 둘(Bot Control 규칙 묶음, 머리 넣기 규칙) 월 2달러가 더해진다. 검사 요청은 100만 명 회차 하나에 로비 입장·사전 검증 약 200만~300만 건 [추정]이라, 계정 전체의 Common 월 무료 1,000만 건(공연 페이지 로그인 경로와 함께 센다) 안이면 0달러, 넘으면 회차당 약 3달러다(AWS WAF 요금 2026-10-31 확인, §11). 상시 기본 비용 어림표의 WAF 행은 그때 고친다.
 - 로그는 S3로 보내고, 허용 판정은 남기지 않는다(docs/observability.md §9).
+- **로컬 데모의 비밀(추천 적용 2026-11-20, BAT-087)**: 데모 인증 도우미와 부트스트랩 값(관리자 비밀번호·TOTP 시드·패스키 개인키·토큰 서명 키·DB 비밀번호·모의 기관 비밀)은 `.cache/peaket-tools/demo-secrets/`(0600)에만 만들고, 클러스터에는 Secret으로만 넣는다. 저장소·로그·측정 파일·화면에 싣지 않는다. 첫 관리자·promoter는 공개 API가 없어 부트스트랩 스크립트가 직접 넣고, 그 경로에는 감사 기록이 남지 않는다(로컬 데모 전용 예외, 운영·클라우드 데모에서는 쓰지 않는다). 패스키 개인키는 Playwright CDP 가상 인증기로만 쓰고, 데모가 끝나면 `demo-down` 뒤 `.cache` 폴더째 지운다.
 - 규칙표와 배포 설정이 같은지는 정적 검사 D-T37(docs/devops.md)이 본다.
 
 ## 10. 런북 목차 (예정: `runbooks/` 작성 대상)
