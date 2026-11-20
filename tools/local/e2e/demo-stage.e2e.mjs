@@ -1,10 +1,10 @@
 // BAT-087 데모 무대 연기 시험(DS-02·07~10). 실제 kind·Docker를 쓰므로 Docker 잠금 안에서만 돌린다(ADR-0283 결정 4).
 // 준비: bash D:/ticketpass-locks/lock.sh take docker lane4-BAT-087
 // 실행: node --test --test-timeout=3600000 tools/local/e2e/demo-stage.e2e.mjs
-// - DS-02: 이미지 10개가 실제로 빌드되고 실행 이미지에 원본·시험·.git이 없다
+// - DS-02: 이미지 10개가 실제로 빌드되고(서비스·Next 앱은 node --version, nginx 앱은 nginx -t) 실행 이미지에 원본·시험·.git이 없다
 // - DS-07: demo가 모든 워크로드(기대 15)를 준비하고 마이그레이션 잡이 끝났다. 하나를 0으로 줄이면 demo-status가 exit 1
 // - DS-08: 게이트웨이 다섯이 실제 서비스로 답한다(www·api 200, 인증 없는 API 4xx, 502·503 아님, 대역 응답 아님)
-// - DS-09: 시드를 두 번 적용해도 공연·회차·좌석·스태프·기기 수가 같고, 공개 조회가 판매 승인 뒤 값이다. 시나리오 상태는 0
+// - DS-09: 시드를 두 번 적용해도 공연·회차·좌석·스태프·기기 수가 같고(시드 total·DB), 공개 조회가 판매 승인 뒤 값이다. 시나리오 상태는 0
 // - DS-10: demo-down 두 번 exit 0, 데모 네임스페이스만 지우고 클러스터·다른 갈래는 남긴다
 // 이미지가 이미 있으면 demo에 --skip-build를 준다(PEAKET_DEMO_E2E_BUILD=1이면 다시 빌드한다).
 // 결과는 docs/review/measurements/BAT-087-demo-stage.md에 적는다(시험은 파일을 쓰지 않는다).
@@ -40,6 +40,7 @@ const state = {
   contract: undefined,
   eventId: undefined,
   firstTotals: undefined,
+  firstSeedCounts: undefined,
   baselineNamespaces: [],
   baselineClusters: [],
   seedFirst: undefined,
@@ -149,38 +150,27 @@ function adminSession(key) {
   return jsonOf(out.stdout);
 }
 
-async function partnerProductions(session) {
-  const res = await httpsJson({
-    host: state.contract.hosts['partner-api'],
-    port: state.contract.ports['partner-api'],
-    method: 'GET',
-    path: '/v1/partner/productions?limit=100',
-    headers: { cookie: cookieHeader(session.cookies), origin: demoOrigins()['partner'], 'sec-fetch-site': 'same-origin' },
-  });
-  assert.equal(res.status, 200, `파트너 공연 목록 → ${res.status} ${tail(res.text, 500)}`);
-  return res.json;
+async function psqlIn(db, sql) {
+  return (await kc(['-n', 'purchase', 'exec', 'deploy/demo-postgres', '--', 'psql', '-U', 'postgres', '-d', db, '-tAc', sql])).trim();
 }
 
-/** 파트너 상세에서 회차 ID를 모은다(시드의 7회차) */
-async function partnerEvents(session, productions) {
-  const out = [];
-  for (const p of productions.items ?? productions.productions ?? []) {
-    const id = p.productionId ?? p.id;
-    const res = await httpsJson({
-      host: state.contract.hosts['partner-api'],
-      port: state.contract.ports['partner-api'],
-      method: 'GET',
-      path: `/v1/partner/productions/${id}`,
-      headers: { cookie: cookieHeader(session.cookies), origin: demoOrigins()['partner'], 'sec-fetch-site': 'same-origin' },
-    });
-    assert.equal(res.status, 200, `파트너 공연 상세 ${id} → ${res.status} ${tail(res.text, 500)}`);
-    for (const e of res.json.events ?? []) out.push({ productionId: id, eventId: e.eventId ?? e.id, status: e.status });
-  }
-  return out;
+/** 구매 DB의 시나리오 상태(주문·홀드) */
+const psql = (sql) => psqlIn('peaket_demo_purchase', sql);
+
+/**
+ * core DB의 공연·회차 수. 파트너 공연 목록 API는 core-svc에 없다(HOT-260).
+ * 계획 §6 DS-09대로 시드 `--json`의 total과 이 수를 견준다.
+ */
+async function coreSeedCounts() {
+  const row = await psqlIn('peaket_demo_core', `select (select count(*) from production) || '|' || (select count(*) from "event")`);
+  const [productions, events] = row.split('|').map(Number);
+  assert.ok(Number.isInteger(productions) && Number.isInteger(events), `core DB의 공연·회차 수를 읽지 못했다: ${JSON.stringify(row)}`);
+  return { productions, events };
 }
 
-async function psql(sql) {
-  return (await kc(['-n', 'purchase', 'exec', 'deploy/demo-postgres', '--', 'psql', '-U', 'postgres', '-d', 'peaket_demo_purchase', '-tAc', sql])).trim();
+/** 공개 조회에 쓸 회차 ID 하나(가장 이른 회차). 시드가 만든 회차는 모두 판매 승인 뒤라 공개 200이다 */
+async function coreEventId() {
+  return psqlIn('peaket_demo_core', `select id from "event" order by starts_at, id limit 1`);
 }
 
 before(async () => {
@@ -223,13 +213,17 @@ test('DS-02 이미지 열 개가 실제로 빌드되고 실행 이미지에 원�
   };
   for (const i of DEMO_IMAGES) {
     check('image', ['inspect', i.image]);
-    check('run', ['--rm', '--entrypoint', 'node', i.image, '--version']);
     if (i.kind === 'service') {
+      // 서비스 이미지(node): 계획 §6 DS-02는 node --version·dist/main.js를 본다
+      check('run', ['--rm', '--entrypoint', 'node', i.image, '--version']);
       check('run', ['--rm', '--entrypoint', 'test', i.image, '-f', 'dist/main.js']);
       check('run', ['--rm', '--entrypoint', 'sh', i.image, '-c', 'test ! -d /app/src && test ! -d /app/test && test ! -d /app/.git']);
     } else if (i.workload === 'web' || i.workload === 'partner') {
+      // Next.js standalone(node) 이미지
+      check('run', ['--rm', '--entrypoint', 'node', i.image, '--version']);
       check('run', ['--rm', '--entrypoint', 'sh', i.image, '-c', 'test ! -d /app/apps/web/src && test ! -d /app/.git && test ! -d /app/apps/web/.git']);
     } else {
+      // nginx 정적 이미지에는 node가 없다(console-host·scanner·queue-room). 계획 §6/§9대로 nginx -t만 본다
       check('run', ['--rm', '--entrypoint', 'nginx', i.image, '-t']);
       check('run', ['--rm', '--entrypoint', 'sh', i.image, '-c', 'test ! -d /usr/share/nginx/html/.git && test ! -d /usr/share/nginx/html/src']);
     }
@@ -250,17 +244,23 @@ test('DS-09① 첫 시드가 공연·회차·좌석맵·스태프·기기를 만
   }
   state.seedFirst = jsonOf(seed.stdout);
   assert.equal(state.seedFirst.ok, true, `첫 시드 ok ${JSON.stringify(state.seedFirst)}`);
-  // 시드 파일은 4공연·7회차·7좌석맵·2스태프·3기기다. 첫 적용의 created는 이미 있으면 0일 수 있으므로 API의 총수로 견준다
-  const session = adminSession('stella-admin');
-  const productions = await partnerProductions(session);
-  state.firstTotals = { productions: (productions.items ?? []).length };
-  const events = await partnerEvents(session, productions);
-  state.firstTotals.events = events.length;
-  assert.equal(state.firstTotals.productions, 4, `시드 뒤 파트너 공연 수 ${state.firstTotals.productions}`);
-  assert.equal(state.firstTotals.events, 7, `시드 뒤 회차 수 ${state.firstTotals.events}`);
+  // 파트너 공연 목록·상세 API는 core-svc에 없다(HOT-260). 계획 §6 DS-09대로 시드 --json의 total과 DB로 센다
+  const total = state.seedFirst.total;
+  assert.equal(total.productions, 4, `시드 total 공연 수 ${total.productions}`);
+  assert.equal(total.events, 7, `시드 total 회차 수 ${total.events}`);
+  const seedCounts = await coreSeedCounts();
+  assert.deepEqual(
+    seedCounts,
+    { productions: total.productions, events: total.events },
+    `DB 공연·회차 수 ${JSON.stringify(seedCounts)}가 시드 total ${JSON.stringify(total)}과 다르다`,
+  );
+  state.firstTotals = seedCounts;
+  state.firstSeedCounts = { ...seedCounts };
+  console.log(`첫 시드: ${JSON.stringify(state.seedFirst.counts)} / total ${JSON.stringify(total)}`);
 
-  const eventId = events[0]?.eventId;
-  assert.ok(eventId, '파트너 상세에서 회차 ID를 얻지 못했다');
+  // 공개 회차 ID도 DB에서 얻는다(시드 출력은 회차 개수만 낸다)
+  const eventId = await coreEventId();
+  assert.match(eventId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, `DB 회차 ID ${JSON.stringify(eventId)}`);
   state.eventId = eventId;
 
   // 공개 조회(GET /v1/events/{id})가 200이고 판매 승인 뒤 값(회차 상태 SCHEDULED·판매 구간 있음)이다
@@ -377,6 +377,8 @@ test('DS-09② 두 번째 시드가 개수를 늘리지 않고 공개 조회 값
   const second = must(run(SEED_CLI, ['--apply', '--json'], { timeout: SEED_TIMEOUT }), '두 번째 demo-seed --apply');
   state.seedSecond = jsonOf(second.stdout);
   assert.equal(state.seedSecond.ok, true);
+  // 두 번째 total이 같아야 한다(계획 §5 연기 시험 계약)
+  assert.deepEqual(state.seedSecond.total, state.seedFirst.total, `두 번째 시드의 total ${JSON.stringify(state.seedSecond.total)}이 첫 번째와 다르다`);
   // 계정·공연·회차·스태프·기기는 새로 만들지 않는다. 좌석맵 PUT은 같은 내용을 다시 써도 되므로 7까지 허용한다
   const c = state.seedSecond.counts;
   assert.equal(c.productions, 0, `두 번째 시드가 공연을 만들었다(${c.productions})`);
@@ -385,11 +387,10 @@ test('DS-09② 두 번째 시드가 개수를 늘리지 않고 공개 조회 값
   assert.equal(c.devices, 0, `두 번째 시드가 기기를 만들었다(${c.devices})`);
   assert.ok(c.seatMaps <= 7, `두 번째 시드의 좌석맵 재적용 수 ${c.seatMaps}`);
 
-  const session = adminSession('stella-admin');
-  const productions = await partnerProductions(session);
-  const events = await partnerEvents(session, productions);
-  assert.equal((productions.items ?? []).length, state.firstTotals.productions, '두 번째 시드 뒤 공연 수가 달라졌다');
-  assert.equal(events.length, state.firstTotals.events, '두 번째 시드 뒤 회차 수가 달라졌다');
+  // 공연·회차 수는 DB에서 다시 센다(파트너 목록 API 없음, HOT-260)
+  const seedCounts = await coreSeedCounts();
+  assert.deepEqual(seedCounts, state.firstSeedCounts, `두 번째 시드 뒤 DB 공연·회차 수 ${JSON.stringify(seedCounts)}`);
+  console.log(`두 번째 시드: ${JSON.stringify(c)} / DB ${JSON.stringify(seedCounts)}`);
 
   const ops = adminSession('sujin');
   const devices = await httpsJson({
