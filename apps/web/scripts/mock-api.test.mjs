@@ -29,6 +29,7 @@ import { GetFanSaleEligibilityResponse, GetSearchSuggestionsResponse, ListSearch
 import { CreatePartnerProductionImageResponse, UpdatePartnerProductionImageResponse } from '@peaket/contracts/openapi/partner';
 import { productionImage } from './mock-api/partner.mjs';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
+import { decodeFrame, encodeSubscribe, encodeTimeSync } from '../../../packages/seatmap/src/wire.ts';
 
 const ORIGIN = 'http://127.0.0.1:4010';
 const NOW = new Date('2026-11-05T03:00:00Z');
@@ -903,6 +904,148 @@ test('가짜 API의 판매 단계(detailSale)·팬별 판매 자격(eligibility)
     assert.equal((await eligibility()).status, 503);
     await state('eligibility=eligible&fan=guest');
     assert.equal((await eligibility()).status, 401);
+  } finally {
+    server.close();
+  }
+});
+
+// ── 좌석 스트림 대역(BAT-182, HOT-357, docs/frontend.md §4.4.1) ─────────────
+const SEAT_STREAM_PROTOCOLS = ['peaket.seats.v1', 'peaket.auth.test.token'];
+
+/** 열린 WebSocket에서 온 이진 프레임을 차례로 꺼낸다(첫 프레임을 놓치지 않게 만들자마자 붙인다) */
+function seatStreamClient(url, protocols) {
+  const ws = new WebSocket(url, protocols);
+  ws.binaryType = 'arraybuffer';
+  const queue = [];
+  const waiters = [];
+  let opened = false;
+  let close = null;
+  ws.addEventListener('open', () => void (opened = true));
+  // 거절(401)은 error로만 알려 온다. 처리기가 없으면 Node가 미처리 사건으로 본다
+  ws.addEventListener('error', () => undefined);
+  ws.addEventListener('message', (e) => {
+    const frame = new Uint8Array(e.data);
+    const w = waiters.shift();
+    if (w) w(frame);
+    else queue.push(frame);
+  });
+  const closed = new Promise((resolve) => ws.addEventListener('close', (e) => resolve(void (close = { code: e.code, reason: e.reason }))));
+  return {
+    ws,
+    opened: () => opened,
+    close: () => close,
+    closed,
+    next(timeout = 3_000) {
+      if (queue.length) return Promise.resolve(queue.shift());
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('스트림 프레임이 오지 않는다')), timeout);
+        waiters.push((f) => {
+          clearTimeout(t);
+          resolve(f);
+        });
+      });
+    },
+  };
+}
+
+test('FE-T11 개발용 스트림 대역이 하위 프로토콜·TimeSync·구독 상한·닫힘 코드를 지킨다', async () => {
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const stream = `ws://127.0.0.1:${port}/v1/events/evt-1/seats/stream`;
+  const state = (q) => fetch(`${base}/__mock/seat-state?${q}`).then((r) => r.json());
+  const log = () => fetch(`${base}/__mock/seat-stream`).then((r) => r.json());
+  const until = async (fn, label) => {
+    const end = Date.now() + 3_000;
+    for (;;) {
+      if (await fn()) return;
+      if (Date.now() > end) throw new Error(`${label}: 시간이 지났다`);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+  try {
+    await state('op=reset');
+    // 입장 토큰 하위 프로토콜이 없으면 핸드셰이크를 거절한다(401)
+    const denied = seatStreamClient(stream, ['peaket.seats.v1']);
+    await denied.closed;
+    assert.equal(denied.opened(), false, '토큰 없는 연결은 열리지 않는다');
+    // Node의 WebSocket이 거절 뒤 한 번 더 시도할 수 있어 '모두 401'로 본다
+    const rejected = (await log()).rejected;
+    assert.ok(rejected.length >= 1);
+    assert.ok(rejected.every((r) => r.status === 401));
+
+    // 서버가 peaket.seats.v1을 고르고 첫 프레임은 BatchInterval 100이다
+    const c = seatStreamClient(stream, SEAT_STREAM_PROTOCOLS);
+    await new Promise((resolve) => c.ws.addEventListener('open', resolve, { once: true }));
+    assert.equal(c.ws.protocol, 'peaket.seats.v1');
+    assert.deepEqual([...(await c.next())], [1, 3, 100, 0], 'BatchInterval(4바이트)');
+
+    // TimeSync는 Heartbeat로 clientTime을 그대로 되돌려 준다(시계 맞추기)
+    c.ws.send(encodeTimeSync(123_456));
+    const hb = decodeFrame(await c.next());
+    assert.equal(hb.type, 'heartbeat');
+    assert.equal(hb.echoClientTimeMs, 123_456);
+    assert.ok(hb.serverTimeMs > 0);
+
+    // 구독은 전체 집합으로 기록된다
+    c.ws.send(encodeSubscribe([0, 2]));
+    await until(async () => (await log()).subscribed.length === 1, '구독 기록');
+    const afterSubscribe = await log();
+    assert.deepEqual(afterSubscribe.subscribed, [[0, 2]]);
+    assert.equal(afterSubscribe.maxSubscribed, 2);
+
+    // 델타는 보낸 판 + 1로 와서 화면이 갭 없이 반영한다
+    const delta = await state('op=delta&section=0&seat=3&state=1');
+    assert.equal(delta.ok, true);
+    assert.equal(delta.section, 0);
+    assert.equal(delta.sectionVersion, 2);
+    assert.equal(delta.sent, 1);
+    const batch = decodeFrame(await c.next());
+    assert.equal(batch.type, 'delta');
+    assert.equal(batch.sections[0].sectionVersion, 2);
+    assert.deepEqual([...batch.sections[0].offsets], [3]);
+    assert.deepEqual([...batch.sections[0].states], [1]);
+
+    // Degraded는 BatchInterval 1,000으로 알린다
+    const interval = await state('op=interval&ms=1000');
+    assert.deepEqual(interval, { ok: true, op: 'interval', ms: 1_000, sent: 1 });
+    assert.deepEqual(decodeFrame(await c.next()), { type: 'batchInterval', intervalMs: 1_000 });
+
+    // 17개 구독은 서버 상한을 넘어 4429로 닫는다
+    const tooMany = seatStreamClient(stream, SEAT_STREAM_PROTOCOLS);
+    await new Promise((resolve) => tooMany.ws.addEventListener('open', resolve, { once: true }));
+    await tooMany.next();
+    const raw = new Uint8Array(4 + 17 * 2);
+    raw[0] = 1;
+    raw[1] = 16;
+    new DataView(raw.buffer).setUint16(2, 17, true);
+    for (let i = 0; i < 17; i++) new DataView(raw.buffer).setUint16(4 + i * 2, i, true);
+    tooMany.ws.send(raw);
+    await tooMany.closed;
+    assert.deepEqual(tooMany.close(), { code: 4429, reason: 'too many' });
+
+    // 알 수 없는 프레임은 4403으로 닫는다
+    const bad = seatStreamClient(stream, SEAT_STREAM_PROTOCOLS);
+    await new Promise((resolve) => bad.ws.addEventListener('open', resolve, { once: true }));
+    await bad.next();
+    bad.ws.send(Uint8Array.of(2, 0));
+    await bad.closed;
+    assert.deepEqual(bad.close(), { code: 4403, reason: 'bad frame' });
+
+    // 제어 경로의 4401(토큰 만료)도 계약 그대로 닫는다
+    const closed = await state('op=close&code=4401');
+    assert.equal(closed.ok, true);
+    assert.equal(closed.code, 4401);
+    await c.closed;
+    assert.deepEqual(c.close(), { code: 4401, reason: 'mock close' });
+
+    const final = await log();
+    // 열린 연결 셋(거절 1은 opened에 들지 않는다), 최대 구독 2, 간격은 접속 때 100과 제어 1,000
+    assert.equal(final.opened, 3);
+    assert.ok(final.maxSubscribed <= 16);
+    assert.equal(final.intervals[0], 100);
+    assert.ok(final.intervals.includes(1_000));
+    assert.ok(final.timeSyncs.some((t) => t.clientTimeMs === 123_456));
   } finally {
     server.close();
   }
