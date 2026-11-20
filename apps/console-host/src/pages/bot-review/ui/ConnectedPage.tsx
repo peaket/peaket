@@ -21,6 +21,7 @@ import {
   parseReviewKind,
   REVIEW_KINDS,
   reviewKindHint,
+  reviewKindIntro,
   reviewKindLabel,
   stepLabel,
   submitBlockReason,
@@ -103,6 +104,16 @@ export function ConnectedPage() {
     void refresh();
   }, [refresh]);
 
+  /** 첫 표본 ID. 수동 새로 고침·409 뒤 refresh로 표본이 바뀌면 아래 효과가 앞 표본의 입력을 지운다 */
+  const currentSampleId = load.kind === 'ready' ? (load.samples[0]?.sampleId ?? null) : null;
+
+  useEffect(() => {
+    // 표본이 바뀌었는데 판정·근거를 남겨 두면 다른 표본에 그대로 기록하게 된다
+    setVerdict(null);
+    setEvidence([]);
+    idempotency.current = null;
+  }, [currentSampleId]);
+
   const samples = load.kind === 'ready' ? load.samples : [];
   const sample = samples[0] ?? null;
   const progress = load.kind === 'ready' ? load.progress : null;
@@ -164,7 +175,7 @@ export function ConnectedPage() {
       <div className="page-head">
         <div className="col" style={{ gap: 4 }}>
           <h1>{TITLE}</h1>
-          <p className="t-sm muted">온세일이 끝난 뒤 검증을 통과한 세션에서 무작위로 뽑은 표본을 사람이 검토합니다. 개인 식별 정보와 판정 가중치는 보이지 않습니다.</p>
+          <p className="t-sm muted">{reviewKindIntro(reviewKind)}</p>
         </div>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
           {REVIEW_KINDS.map((kind) => (

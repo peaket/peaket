@@ -1,9 +1,9 @@
 // 표본 검토 Drizzle 저장소(ops DB, 마이그레이션 0020).
 // 판정 행과 표본 상태(RECORDED)를 같은 트랜잭션에 쓰고, 표본 ID 기본 키가 마지막 가드다.
 // 멱등은 공용 idempotency_record(platform IdempotencyStore)를 업무 쓰기와 같은 트랜잭션에서 쓴다.
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, lte, or, sql } from 'drizzle-orm';
 import { type Clock, type Database, type DbTransaction, IdempotencyStore, idempotencyKeyReused } from '@peaket/platform';
-import { alreadyRecorded, type BotReviewBatch, type BotReviewJudgement, type BotReviewSample } from '../../domain/bot-review.js';
+import { alreadyRecorded, claimInProgress, type BotReviewBatch, type BotReviewJudgement, type BotReviewSample } from '../../domain/bot-review.js';
 import type { BotReviewStore, BotReviewStorePage, JudgementIdempotency, RecordJudgementCommand, RecordJudgementResult } from '../../domain/ports.js';
 import { botReviewBatch, botReviewJudgement, botReviewSample } from './schema.js';
 
@@ -180,6 +180,31 @@ export class DrizzleBotReviewStore implements BotReviewStore {
     return { human, bot, undecided };
   }
 
+  async claimJudgement(input: { sampleId: string; claimId: string; nowMs: number; expiresAtMs: number }): Promise<boolean> {
+    if (!UUID.test(input.sampleId)) return false;
+    // 상태·선점을 한 문장에서 조건부로 바꾼다. 두 요청이 동시에 와도 하나만 참이 된다(원자적 UPDATE)
+    const rows = await this.db.db
+      .update(botReviewSample)
+      .set({ judgementClaim: input.claimId, judgementClaimExpiresAt: new Date(input.expiresAtMs) })
+      .where(
+        and(
+          eq(botReviewSample.id, input.sampleId.toLowerCase()),
+          eq(botReviewSample.status, 'PENDING'),
+          or(isNull(botReviewSample.judgementClaim), lte(botReviewSample.judgementClaimExpiresAt, new Date(input.nowMs))),
+        ),
+      )
+      .returning({ id: botReviewSample.id });
+    return rows.length > 0;
+  }
+
+  async releaseJudgementClaim(input: { sampleId: string; claimId: string }): Promise<void> {
+    if (!UUID.test(input.sampleId)) return;
+    await this.db.db
+      .update(botReviewSample)
+      .set({ judgementClaim: null, judgementClaimExpiresAt: null })
+      .where(and(eq(botReviewSample.id, input.sampleId.toLowerCase()), eq(botReviewSample.judgementClaim, input.claimId)));
+  }
+
   async recordJudgement(command: RecordJudgementCommand): Promise<RecordJudgementResult> {
     if (!UUID.test(command.sampleId)) throw alreadyRecorded();
     const hash = Buffer.from(command.idem.requestHash);
@@ -193,6 +218,20 @@ export class DrizzleBotReviewStore implements BotReviewStore {
         }
         const judgement = await this.#idem.run(tx, command.idem, {
           execute: async () => {
+            // 선점이 아직 내 것이어야 한다. 수명이 지나 다른 요청이 가져갔으면 여기서 409다(라벨과 판정의 불일치 방지)
+            if (!command.claimId) throw claimInProgress();
+            const updated = await tx
+              .update(botReviewSample)
+              .set({ status: 'RECORDED', judgementClaim: null, judgementClaimExpiresAt: null })
+              .where(
+                and(
+                  eq(botReviewSample.id, command.sampleId),
+                  eq(botReviewSample.status, 'PENDING'),
+                  eq(botReviewSample.judgementClaim, command.claimId),
+                ),
+              )
+              .returning({ id: botReviewSample.id });
+            if (!updated[0]) throw claimInProgress();
             const inserted = await tx
               .insert(botReviewJudgement)
               .values({
@@ -206,12 +245,6 @@ export class DrizzleBotReviewStore implements BotReviewStore {
               .returning();
             const value = inserted[0] ? judgementOf(inserted[0]) : undefined;
             if (!value) throw alreadyRecorded();
-            const updated = await tx
-              .update(botReviewSample)
-              .set({ status: 'RECORDED' })
-              .where(eq(botReviewSample.id, command.sampleId))
-              .returning({ id: botReviewSample.id });
-            if (!updated[0]) throw alreadyRecorded();
             return { resultRef: command.sampleId, value };
           },
           replay: async () => {

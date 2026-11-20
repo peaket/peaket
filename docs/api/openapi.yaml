@@ -64,6 +64,7 @@ x-peaket-problem-types:
     booking-restricted: { status: 403, title: "예매가 제한된 계정입니다" }
     bot-review-already-recorded: { status: 409, title: "이미 판정을 기록한 표본입니다" }
     bot-review-assign-conflict: { status: 409, title: "표본 배치를 만드는 요청이 겹쳤습니다" }
+    bot-review-claim-in-progress: { status: 409, title: "다른 요청이 이 표본의 판정을 반영하는 중입니다" }
     bot-review-evidence-required: { status: 422, title: "사람 기준 표본을 봇으로 판정하려면 행동 요약 밖의 근거가 필요합니다" }
     bot-review-label-unavailable: { status: 503, title: "봇 라벨을 반영하지 못했습니다" }
     bot-review-source-unavailable: { status: 503, title: "표본 후보 원장에 닿지 못했습니다" }
@@ -3850,12 +3851,12 @@ components:
 
     OpsBotReview:
       type: object
-      description: "회차의 봇 표본 검토 진행(SCR-067). 목표 건수는 [가정]"
+      description: "회차의 봇 표본 검토 진행(SCR-067). targetCount는 목표 건수이되 모집단이 더 작으면 모집단 수(전수 검토)다"
       properties:
         eventId: { type: string }
         reviewKind: { type: string, enum: [PASSED_SAMPLE, HUMAN_BASELINE], description: "통과 세션 표본(FR-049)·출시 뒤 실제 사람 기준 표본(ADR-0174)" }
         reviewedCount: { type: integer }
-        targetCount: { type: integer, description: "표본 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정]" }
+        targetCount: { type: integer, description: "검토 목표 건수. PASSED_SAMPLE 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정]이되, 모집단이 더 작으면 그 수(전수 검토)다" }
         deadlineAt: { type: string, format: date-time, description: "행동 신호 삭제 전(오픈 + 30일)" }
         r2DueAt: { type: [string, 'null'], format: date-time, description: "R2 마감(오픈 7일 뒤)" }
         interim:
@@ -6972,9 +6973,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OpsBotReview' }
+        '400': { $ref: '#/components/responses/Problem', description: "reviewKind가 PASSED_SAMPLE·HUMAN_BASELINE이 아님(invalid-query)" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }
         '403': { $ref: '#/components/responses/Problem', description: "CS 담당자가 아님" }
         '404': { $ref: '#/components/responses/Problem', description: "이 회차의 표본이 없다(not-found)" }
+        '410': { $ref: '#/components/responses/Problem', description: "retention-ended(행동 신호 삭제 뒤, 오픈 + 30일)" }
         '503': { $ref: '#/components/responses/Problem', description: "bot-review-source-unavailable(표본 배치가 없고 후보 원장에 닿지 못했다). 404(표본 없음)와 구분한다. Retry-After" }
   /v1/ops/events/{eventId}/bot-review-samples:
     get:
@@ -7000,7 +7003,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OpsBotReviewSamplePage' }
-        '400': { $ref: '#/components/responses/Problem', description: "모르는 상태 값, limit 100 초과" }
+        '400': { $ref: '#/components/responses/Problem', description: "모르는 상태 값, limit 100 초과, 잘못된 커서" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }
         '403': { $ref: '#/components/responses/Problem', description: "CS 담당자가 아님" }
         '410': { $ref: '#/components/responses/Problem', description: "retention-ended(행동 신호 삭제 뒤, 오픈 + 30일)" }
@@ -7010,7 +7013,7 @@ paths:
       tags: [ops]
       x-peaket-roles: [cs_agent, cs_lead]
       summary: "표본 판정 기록(세션 ID와 판정 결과·근거 종류만)"
-      description: "FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174). ApplyLabel이 실패하면 판정 행을 쓰지 않고 503 bot-review-label-unavailable이다(같은 Idempotency-Key로 다시 보낸다, B15). Cache-Control: no-store"
+      description: "FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖'은 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). 같은 표본에 두 검토자가 동시에 오면 ApplyLabel 전에 표본 단위 선점을 잡아 한 요청만 라벨을 부르고 다른 요청은 409 bot-review-claim-in-progress다. reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174). ApplyLabel이 실패하면 판정 행을 쓰지 않고 503 bot-review-label-unavailable이다(같은 Idempotency-Key로 다시 보낸다, B15). Cache-Control: no-store"
       security:
         - opsCookie: []
       parameters:
@@ -7034,7 +7037,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }
         '403': { $ref: '#/components/responses/Problem', description: "CS 담당자가 아님" }
         '404': { $ref: '#/components/responses/Problem', description: "없는 표본(not-found)" }
-        '409': { $ref: '#/components/responses/Problem', description: "이미 기록한 표본, idempotency-request-in-progress" }
+        '409': { $ref: '#/components/responses/Problem', description: "이미 기록한 표본(bot-review-already-recorded), 다른 요청이 같은 표본의 라벨을 반영하는 중(bot-review-claim-in-progress), idempotency-request-in-progress" }
         '410': { $ref: '#/components/responses/Problem', description: "retention-ended(행동 신호 삭제 뒤, 오픈 + 30일)" }
         '422': { $ref: '#/components/responses/Problem', description: "HUMAN_BASELINE의 BOT인데 근거 없음, idempotency-key-reused" }
         '503': { $ref: '#/components/responses/Problem', description: "bot-review-label-unavailable(trust-svc ApplyLabel 실패·원장에서 pid를 읽지 못함). 판정 행을 쓰지 않았으니 같은 Idempotency-Key로 다시 보낸다. Retry-After" }

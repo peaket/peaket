@@ -74,6 +74,8 @@ export interface RecordJudgementCommand {
   readonly evidenceKinds: readonly JudgementEvidenceKind[];
   readonly labelResult: LabelResultValue;
   readonly recordedAtMs: number;
+  /** 판정 선점 ID. 기록할 때 이 선점이 아직 내 것이어야 한다(겹친 요청은 409) */
+  readonly claimId?: string;
   /** 계정 × 작업 × 키 범위의 멱등 키. 같은 키·같은 본문 재시도는 같은 판정을 돌려준다 */
   readonly idem: JudgementIdempotency;
 }
@@ -95,6 +97,13 @@ export interface BotReviewStore {
   findSample(sampleId: string): Promise<{ readonly sample: BotReviewSample; readonly batch: BotReviewBatch } | undefined>;
   findJudgement(sampleId: string): Promise<BotReviewJudgement | undefined>;
   countJudgements(batchId: string): Promise<{ readonly human: number; readonly bot: number; readonly undecided: number }>;
+  /**
+   * 표본 단위 판정 선점. ApplyLabel을 부르기 전에 한 요청만 참이 된다.
+   * 이미 기록했거나 다른 요청이 선점 중(수명이 안 지남)이면 거짓이다.
+   */
+  claimJudgement(input: { readonly sampleId: string; readonly claimId: string; readonly nowMs: number; readonly expiresAtMs: number }): Promise<boolean>;
+  /** 선점을 푼다. 내 선점일 때만 지운다(다른 요청의 선점을 지우지 않는다) */
+  releaseJudgementClaim(input: { readonly sampleId: string; readonly claimId: string }): Promise<void>;
   recordJudgement(command: RecordJudgementCommand): Promise<RecordJudgementResult>;
 }
 

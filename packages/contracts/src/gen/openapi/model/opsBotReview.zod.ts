@@ -15,7 +15,7 @@ export const OpsBotReview = zod.object({
   "eventId": zod.string().optional(),
   "reviewKind": zod.enum(['PASSED_SAMPLE', 'HUMAN_BASELINE']).optional().describe('통과 세션 표본(FR-049)·출시 뒤 실제 사람 기준 표본(ADR-0174)'),
   "reviewedCount": zod.int().optional(),
-  "targetCount": zod.int().optional().describe('표본 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정]'),
+  "targetCount": zod.int().optional().describe('검토 목표 건수. PASSED_SAMPLE 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정]이되, 모집단이 더 작으면 그 수(전수 검토)다'),
   "deadlineAt": zod.iso.datetime({"offset":true}).optional().describe('행동 신호 삭제 전(오픈 + 30일)'),
   "r2DueAt": zod.iso.datetime({"offset":true}).nullish().describe('R2 마감(오픈 7일 뒤)'),
   "interim": zod.object({
@@ -23,7 +23,7 @@ export const OpsBotReview = zod.object({
   "ci95Low": zod.number().optional(),
   "ci95High": zod.number().optional()
 }).nullish().describe('중간 결과(잠정). HUMAN_BASELINE은 null')
-}).describe('회차의 봇 표본 검토 진행(SCR-067). 목표 건수는 [가정]')
+}).describe('회차의 봇 표본 검토 진행(SCR-067). targetCount는 목표 건수이되 모집단이 더 작으면 모집단 수(전수 검토)다')
 
 export type OpsBotReview = zod.input<typeof OpsBotReview>;
 export type OpsBotReviewOutput = zod.output<typeof OpsBotReview>;

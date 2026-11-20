@@ -36,6 +36,7 @@ export type ProblemType =
   | 'booth-not-authorized'
   | 'bot-review-already-recorded'
   | 'bot-review-assign-conflict'
+  | 'bot-review-claim-in-progress'
   | 'bot-review-evidence-required'
   | 'bot-review-label-unavailable'
   | 'bot-review-source-unavailable'
@@ -374,6 +375,7 @@ export const PROBLEM_TYPES = {
   'booth-not-authorized': { status: 403, title: "부스 재발급 허용이 없거나 10분이 지났습니다" },
   'bot-review-already-recorded': { status: 409, title: "이미 판정을 기록한 표본입니다" },
   'bot-review-assign-conflict': { status: 409, title: "표본 배치를 만드는 요청이 겹쳤습니다" },
+  'bot-review-claim-in-progress': { status: 409, title: "다른 요청이 이 표본의 판정을 반영하는 중입니다" },
   'bot-review-evidence-required': { status: 422, title: "사람 기준 표본을 봇으로 판정하려면 행동 요약 밖의 근거가 필요합니다" },
   'bot-review-label-unavailable': { status: 503, title: "봇 라벨을 반영하지 못했습니다" },
   'bot-review-source-unavailable': { status: 503, title: "표본 후보 원장에 닿지 못했습니다" },

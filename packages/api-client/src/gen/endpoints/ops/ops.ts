@@ -16231,6 +16231,11 @@ export type getOpsEventBotReviewResponse200 = {
   status: 200
 }
 
+export type getOpsEventBotReviewResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type getOpsEventBotReviewResponse401 = {
   data: UnauthorizedResponse
   status: 401
@@ -16246,6 +16251,11 @@ export type getOpsEventBotReviewResponse404 = {
   status: 404
 }
 
+export type getOpsEventBotReviewResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
 export type getOpsEventBotReviewResponse503 = {
   data: ProblemResponse
   status: 503
@@ -16254,7 +16264,7 @@ export type getOpsEventBotReviewResponse503 = {
 export type getOpsEventBotReviewResponseSuccess = (getOpsEventBotReviewResponse200) & {
   headers: Headers;
 };
-export type getOpsEventBotReviewResponseError = (getOpsEventBotReviewResponse401 | getOpsEventBotReviewResponse403 | getOpsEventBotReviewResponse404 | getOpsEventBotReviewResponse503) & {
+export type getOpsEventBotReviewResponseError = (getOpsEventBotReviewResponse400 | getOpsEventBotReviewResponse401 | getOpsEventBotReviewResponse403 | getOpsEventBotReviewResponse404 | getOpsEventBotReviewResponse410 | getOpsEventBotReviewResponse503) & {
   headers: Headers;
 };
 
@@ -16302,7 +16312,7 @@ export const getGetOpsEventBotReviewQueryKey = (eventId: string,
     }
 
 
-export const getGetOpsEventBotReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string,
+export const getGetOpsEventBotReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(eventId: string,
     params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
@@ -16322,10 +16332,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetOpsEventBotReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsEventBotReview>>>
-export type GetOpsEventBotReviewQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+export type GetOpsEventBotReviewQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
 
 
-export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  eventId: string,
     params: undefined |  GetOpsEventBotReviewParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -16336,7 +16346,7 @@ export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOps
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  eventId: string,
     params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -16347,7 +16357,7 @@ export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOps
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  eventId: string,
     params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
@@ -16356,7 +16366,7 @@ export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOps
  * @summary 회차의 봇 표본 검토 진행(건수, 기한, 중간 결과)
  */
 
-export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
  eventId: string,
     params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
@@ -16583,7 +16593,7 @@ export const getCreateOpsBotReviewSampleJudgementUrl = (sampleId: string,) => {
 }
 
 /**
- * FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174). ApplyLabel이 실패하면 판정 행을 쓰지 않고 503 bot-review-label-unavailable이다(같은 Idempotency-Key로 다시 보낸다, B15). Cache-Control: no-store
+ * FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖'은 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). 같은 표본에 두 검토자가 동시에 오면 ApplyLabel 전에 표본 단위 선점을 잡아 한 요청만 라벨을 부르고 다른 요청은 409 bot-review-claim-in-progress다. reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174). ApplyLabel이 실패하면 판정 행을 쓰지 않고 503 bot-review-label-unavailable이다(같은 Idempotency-Key로 다시 보낸다, B15). Cache-Control: no-store
  * @summary 표본 판정 기록(세션 ID와 판정 결과·근거 종류만)
  */
 export const createOpsBotReviewSampleJudgement = async (sampleId: string,

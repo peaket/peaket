@@ -5098,7 +5098,7 @@ export const GetOpsEventBotReviewResponse = zod.object({
   "eventId": zod.string().optional(),
   "reviewKind": zod.enum(['PASSED_SAMPLE', 'HUMAN_BASELINE']).optional().describe('통과 세션 표본(FR-049)·출시 뒤 실제 사람 기준 표본(ADR-0174)'),
   "reviewedCount": zod.int().optional(),
-  "targetCount": zod.int().optional().describe('표본 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정]'),
+  "targetCount": zod.int().optional().describe('검토 목표 건수. PASSED_SAMPLE 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정]이되, 모집단이 더 작으면 그 수(전수 검토)다'),
   "deadlineAt": zod.iso.datetime({"offset":true}).optional().describe('행동 신호 삭제 전(오픈 + 30일)'),
   "r2DueAt": zod.iso.datetime({"offset":true}).nullish().describe('R2 마감(오픈 7일 뒤)'),
   "interim": zod.object({
@@ -5106,7 +5106,7 @@ export const GetOpsEventBotReviewResponse = zod.object({
   "ci95Low": zod.number().optional(),
   "ci95High": zod.number().optional()
 }).nullish().describe('중간 결과(잠정). HUMAN_BASELINE은 null')
-}).describe('회차의 봇 표본 검토 진행(SCR-067). 목표 건수는 [가정]')
+}).describe('회차의 봇 표본 검토 진행(SCR-067). targetCount는 목표 건수이되 모집단이 더 작으면 모집단 수(전수 검토)다')
 
 /**
  * FR-049, POL-006, SCR-067, ADR-0174, authz-matrix §4.1 봇 판정 범주 행. reviewKind 질의로 표본 종류를 고른다(기본 PASSED_SAMPLE, BAT-197 2026-11-21). 개인 식별 정보(계정·이름·연락처·IP·기기 가명)와 판정 기준의 세부 가중치를 싣지 않는다. 서버가 정한 무작위 순서로 준다. HUMAN_BASELINE이면 riskBand·behaviorSummaryBand를 null로 두고 묶음과 판정을 싣지 않는다. status를 주지 않으면 아직 기록하지 않은 표본만 준다 [가정]. Cache-Control: no-store
@@ -5145,7 +5145,7 @@ export const ListOpsEventBotReviewSamplesResponse = zod.object({
 })
 
 /**
- * FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174). ApplyLabel이 실패하면 판정 행을 쓰지 않고 503 bot-review-label-unavailable이다(같은 Idempotency-Key로 다시 보낸다, B15). Cache-Control: no-store
+ * FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖'은 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). 같은 표본에 두 검토자가 동시에 오면 ApplyLabel 전에 표본 단위 선점을 잡아 한 요청만 라벨을 부르고 다른 요청은 409 bot-review-claim-in-progress다. reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174). ApplyLabel이 실패하면 판정 행을 쓰지 않고 503 bot-review-label-unavailable이다(같은 Idempotency-Key로 다시 보낸다, B15). Cache-Control: no-store
  * @summary 표본 판정 기록(세션 ID와 판정 결과·근거 종류만)
  */
 export const CreateOpsBotReviewSampleJudgementParams = zod.object({

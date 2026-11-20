@@ -10,13 +10,13 @@ export type TimelineStep = 'ENTRY' | 'HOLD' | 'PAYMENT';
 export const REVIEW_KINDS: readonly ReviewKind[] = ['PASSED_SAMPLE', 'HUMAN_BASELINE'];
 export const VERDICTS: readonly Verdict[] = ['HUMAN', 'BOT', 'UNDECIDED'];
 
-/** 봇 근거(사람 기준 표본에서 BOT일 때 하나 이상 필수). '그 밖'은 근거 종류 OTHER다 */
+/** 봇 근거(사람 기준 표본에서 BOT일 때 하나 이상 필수). '그 밖'은 근거 종류 OTHER다(메모 칸은 계약에 없다) */
 export const EVIDENCE_KINDS: readonly { readonly kind: EvidenceKind; readonly label: string }[] = [
   { kind: 'CONFIRMED_SIGNAL', label: '확정 신호(차단 기기 목록·허니팟)' },
   { kind: 'SHARED_DEVICE_OR_PAYMENT', label: '같은 기기·결제 수단 공유' },
   { kind: 'POST_LABEL', label: '사후 라벨' },
   { kind: 'VERIFICATION_FAILED', label: '추가 검증 실패' },
-  { kind: 'OTHER', label: '그 밖(메모)' },
+  { kind: 'OTHER', label: '그 밖' },
 ];
 
 export const DEFAULT_REVIEW_KIND: ReviewKind = 'PASSED_SAMPLE';
@@ -75,6 +75,13 @@ export function reviewKindHint(kind: ReviewKind): string {
   return kind === 'HUMAN_BASELINE'
     ? '두 묶음을 섞어 무작위 순서로 보입니다. 이 세션이 어느 묶음인지, 판정이 무엇이었는지는 보이지 않습니다.'
     : '검증을 통과한 세션에서 무작위로 뽑은 표본입니다. 위험 점수 범주와 행동 신호 요약 범주만 보입니다.';
+}
+
+/** 화면 머리 설명. HUMAN_BASELINE은 통과 세션과 그림자 추가 검증 세션을 섞은 표본이다(d5 §7.15) */
+export function reviewKindIntro(kind: ReviewKind): string {
+  return kind === 'HUMAN_BASELINE'
+    ? '출시 뒤 실제 사람 기준을 세우려고 통과 세션과 그림자 추가 검증 세션을 섞어 뽑은 표본을 사람이 검토합니다. 어느 묶음인지와 개인 식별 정보·판정 가중치는 보이지 않습니다.'
+    : '온세일이 끝난 뒤 검증을 통과한 세션에서 무작위로 뽑은 표본을 사람이 검토합니다. 개인 식별 정보와 판정 가중치는 보이지 않습니다.';
 }
 
 export function mapReview(raw: RawReview, fallbackKind: ReviewKind): ReviewProgress {

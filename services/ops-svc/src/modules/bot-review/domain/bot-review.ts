@@ -16,7 +16,7 @@ export type SampleStatus = (typeof SAMPLE_STATUSES)[number];
 export const BOT_REVIEW_VERDICTS = ['HUMAN', 'BOT', 'UNDECIDED'] as const;
 export type BotReviewVerdict = (typeof BOT_REVIEW_VERDICTS)[number];
 
-/** 판정에 실을 수 있는 근거 종류. OTHER는 d5의 '그 밖(메모)' 자리다 */
+/** 판정에 실을 수 있는 근거 종류. OTHER는 d5의 '그 밖' 자리다(메모 칸은 계약에 없다) */
 export const JUDGEMENT_EVIDENCE_KINDS = ['CONFIRMED_SIGNAL', 'SHARED_DEVICE_OR_PAYMENT', 'POST_LABEL', 'VERIFICATION_FAILED', 'OTHER'] as const;
 export type JudgementEvidenceKind = (typeof JUDGEMENT_EVIDENCE_KINDS)[number];
 
@@ -148,6 +148,11 @@ export const REVIEW_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const REVIEW_R2_DUE_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEFAULT_SAMPLE_LIMIT = 50;
 export const MAX_SAMPLE_LIMIT = 100;
+/**
+ * 판정 선점(claim) 수명. 같은 표본에 두 검토자가 겹칠 때 한 요청만 ApplyLabel을 부르게 한다.
+ * ApplyLabel 데드라인(5초 [가정])과 DB 쓰기를 넉넉히 덮되, 요청이 죽어도 이 시간 뒤에는 다시 시도할 수 있다.
+ */
+export const JUDGEMENT_CLAIM_MS = 30_000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -275,6 +280,9 @@ export class BotReviewProblem extends Error {
 export const notFound = (): BotReviewProblem => new BotReviewProblem('not-found', 404, '표본을 찾을 수 없습니다');
 export const retentionEnded = (): BotReviewProblem => new BotReviewProblem('retention-ended', 410, '행동 신호 보존 기한이 지나 표본을 검토할 수 없습니다');
 export const alreadyRecorded = (): BotReviewProblem => new BotReviewProblem('bot-review-already-recorded', 409, '이미 판정을 기록한 표본입니다');
+/** 같은 표본에 두 요청이 겹쳤고 다른 요청이 라벨을 반영하는 중이다. 한 요청만 ApplyLabel을 부른다 */
+export const claimInProgress = (): BotReviewProblem =>
+  new BotReviewProblem('bot-review-claim-in-progress', 409, '다른 요청이 이 표본의 판정을 반영하는 중입니다. 잠시 뒤 다시 확인해 주세요', 1);
 export const evidenceRequired = (): BotReviewProblem =>
   new BotReviewProblem('bot-review-evidence-required', 422, '사람 기준 표본을 봇으로 판정하려면 행동 요약 밖의 근거를 하나 이상 골라야 합니다');
 export const labelUnavailable = (): BotReviewProblem =>

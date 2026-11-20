@@ -43,6 +43,12 @@ export const botReviewSample = pgTable(
     ordinal: integer('ordinal').notNull(),
     reviewBatch: text('review_batch').notNull().$type<ReviewBatch>(),
     appliedVerdict: text('applied_verdict').notNull().$type<AppliedVerdict>(),
+    /**
+     * 판정 선점. ApplyLabel 전에 조건부 UPDATE로 한 요청만 잡는다.
+     * 기록이 끝나거나 실패하면 비우고, 요청이 죽으면 수명이 지나 다음 요청이 잡는다.
+     */
+    judgementClaim: uuid('judgement_claim'),
+    judgementClaimExpiresAt: at('judgement_claim_expires_at'),
     createdAt: at('created_at').notNull(),
   },
   (t) => [

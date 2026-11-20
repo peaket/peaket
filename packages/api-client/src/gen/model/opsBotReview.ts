@@ -13,14 +13,14 @@ import type { OpsBotReviewInterim } from './opsBotReviewInterim';
 import type { OpsBotReviewReviewKind } from './opsBotReviewReviewKind';
 
 /**
- * 회차의 봇 표본 검토 진행(SCR-067). 목표 건수는 [가정]
+ * 회차의 봇 표본 검토 진행(SCR-067). targetCount는 목표 건수이되 모집단이 더 작으면 모집단 수(전수 검토)다
  */
 export interface OpsBotReview {
   eventId?: string;
   /** 통과 세션 표본(FR-049)·출시 뒤 실제 사람 기준 표본(ADR-0174) */
   reviewKind?: OpsBotReviewReviewKind;
   reviewedCount?: number;
-  /** 표본 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정] */
+  /** 검토 목표 건수. PASSED_SAMPLE 200건 [가정], HUMAN_BASELINE은 두 묶음 합 400건 [가정]이되, 모집단이 더 작으면 그 수(전수 검토)다 */
   targetCount?: number;
   /** 행동 신호 삭제 전(오픈 + 30일) */
   deadlineAt?: string;

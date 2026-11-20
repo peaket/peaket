@@ -34,11 +34,15 @@ CREATE TABLE IF NOT EXISTS bot_review_sample (
   ordinal integer NOT NULL,
   review_batch text NOT NULL,
   applied_verdict text NOT NULL,
+  judgement_claim uuid,
+  judgement_claim_expires_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL,
   CONSTRAINT bot_review_sample_status_check CHECK (status IN ('PENDING', 'RECORDED')),
   CONSTRAINT bot_review_sample_review_batch_check CHECK (review_batch IN ('PASSED', 'SHADOW_CHALLENGED')),
   CONSTRAINT bot_review_sample_applied_verdict_check CHECK (applied_verdict IN ('ALLOW', 'CHALLENGE')),
-  CONSTRAINT bot_review_sample_ordinal_check CHECK (ordinal >= 0)
+  CONSTRAINT bot_review_sample_ordinal_check CHECK (ordinal >= 0),
+  -- 판정 선점은 ID와 수명을 함께 둔다(반쪽만 남으면 풀 수 없다)
+  CONSTRAINT bot_review_sample_claim_pair_check CHECK ((judgement_claim IS NULL) = (judgement_claim_expires_at IS NULL))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS bot_review_sample_batch_ref_uq ON bot_review_sample (batch_id, sample_ref);
