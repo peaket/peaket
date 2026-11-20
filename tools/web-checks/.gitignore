@@ -3,3 +3,4 @@ reports/
 test-results/
 playwright-report/
 seatmap/page/gen/
+seats/gen/
