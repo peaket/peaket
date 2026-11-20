@@ -212,6 +212,45 @@ export function matchGrades(index: DocumentIndex, q: string, noConvert: boolean)
   return { grades: last, converted: last.size > 0 ? lower : null };
 }
 
+/** 한 글자 입력의 변환 단계 하나(친 그대로 → 한/영 변환 → 소문자 변환). matchGrades와 같은 차례다 */
+export interface MatchStage {
+  /** 그 단계의 비교 값 */
+  keys: QueryKeys;
+  /** 그 단계의 검색어(친 그대로 단계는 입력, 변환 단계는 변환 값) */
+  value: string;
+  /** 그 단계가 결과를 냈을 때 query.converted에 실을 값. 친 그대로 단계는 null */
+  converted: string | null;
+}
+
+/**
+ * 한 글자 입력의 변환 단계 목록(친 그대로 → 한/영 변환 → 소문자 변환). 차례·건너뜀·중복 제거가 matchGrades와 같다:
+ * 변환 값을 만들 수 없는 단계는 건너뛰고(ADR-0271 결정 24), 소문자 단계는 친 그대로의 값이 정규화 값과 다를 때만 본다.
+ * 두 글자 이상은 중간 일치가 실제 결과라 이 길을 쓰지 않는다(docs/features/search.md §3.2 ④, ADR-0271 결정 25)
+ */
+export function matchStagesOf(q: string, noConvert: boolean): MatchStage[] {
+  const qk = queryKeys(q);
+  const out: MatchStage[] = [{ keys: qk, value: q, converted: null }];
+  if (noConvert) return out;
+  const raw = q.normalize('NFKC').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
+  if (!/^[a-zA-Z ]+$/.test(raw)) return out;
+  const add = (to: string | null): void => {
+    if (to === null) return;
+    const keys = queryKeys(to);
+    // 같은 비교 값이 되는 단계(예: 'A'의 두 변환)는 앞 단계 하나로 족하다
+    if (out.some((s) => s.keys.nospace === keys.nospace && s.keys.jamo === keys.jamo && s.keys.chosung === keys.chosung)) return;
+    out.push({ keys, value: to, converted: to });
+  };
+  add(qwertyToHangul(raw));
+  if (raw === qk.norm) return out;
+  add(qwertyToHangul(qk.norm));
+  return out;
+}
+
+/** 이름 하나의 한 단계 등급(이름 줄 우선 등급). 사전의 비교 값이 있으면 그 값을 쓰고, 없으면 새로 만든다 */
+export function nameGradeOf(qk: QueryKeys, name: string, keysOf?: NameKeysLookup): Grade {
+  return matchGrade(qk, keysOf?.(name) ?? nameKeys(name));
+}
+
 /** 로마자만인 입력이 한/영 변환으로 찾았는지. 변환하지 않았으면 null */
 function convertedQuery(q: string, converted: string | null, hit: boolean): { from: string; to: string } | null {
   if (converted === null || !hit) return null;

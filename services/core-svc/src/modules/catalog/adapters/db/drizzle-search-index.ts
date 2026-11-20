@@ -9,7 +9,7 @@
 // - 이름 차례는 ICU 한국어 정렬(COLLATE "ko-x-icu")로 메모리의 Intl.Collator('ko')와 같게 견준다.
 // - 검색 전용 연결 묶음(운영은 읽기 전용 복제본): 연결 대기를 넘기면 SearchUnavailable('pool-timeout'), 질의 시간 상한을 넘기면 'statement-timeout'(503).
 import { type Database, type DbTransaction, Gauge, type Registry } from '@peaket/platform';
-import { normalize, queryKeys, qwertyToHangul, type QueryKeys } from '@peaket/search-normalize';
+import { GRADE, normalize, queryKeys, qwertyToHangul, type Grade, type QueryKeys } from '@peaket/search-normalize';
 import { sql, type SQL } from 'drizzle-orm';
 import {
   card,
@@ -17,6 +17,8 @@ import {
   finishSearch,
   indexDocuments,
   matchGrades,
+  matchStagesOf,
+  nameGradeOf,
   rankMatched,
   relatedOf,
   RELATED_MAX,
@@ -77,6 +79,20 @@ const yieldToIo = (): Promise<void> => new Promise((resolve) => setImmediate(res
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
+/** 한 글자 입력의 이름 줄 한 줄(search_term). 등급은 display_name으로 매기고, 대상은 kind마다 다르다 */
+interface NameRow {
+  kind: 'PRODUCTION' | 'ARTIST' | 'PLACE';
+  target_id: string;
+  display_name: string;
+}
+
+/** 등급이 붙은 이름 줄의 대상(공연명 줄은 공연 ID, 아티스트·공연장 줄은 그 ID) */
+interface GradedTargets {
+  productions: string[];
+  places: string[];
+  artists: string[];
+}
+
 /** 입력의 비교 값들(입력 그대로, 로마자면 한/영 변환 둘). matchGrades가 볼 수 있는 모든 꼴이다. 변환 값을 만들 수 없는 꼴은 뺀다(ADR-0271 결정 24) */
 function keySets(query: string, noConvert: boolean): QueryKeys[] {
   const qk = queryKeys(query);
@@ -122,11 +138,12 @@ export class DrizzleSearchIndex implements SearchIndex {
   /**
    * o.correct: 메모리 사전의 오타 제안. 사전이 아직 준비되지 않았으면 undefined이고 그때 제안은 null이다.
    * o.keysOf: 메모리 사전이 들고 있는 이름 비교 값(후보 공연마다 다시 만들지 않게, ADR-0271 결정 23). 없는 이름은 새로 만든다
+   * o.ready: 사전이 첫 통째로 읽기를 마쳤는가(ADR-0271 결정 25). 없으면 준비된 것으로 본다. false면 한 글자 단계별 읽기를 쓰지 않고 지금 질의로 답한다
    */
   constructor(
     private readonly db: Database,
     private readonly origin: string,
-    private readonly o: { statementTimeoutMs?: number; correct?: (q: string) => string | null | undefined; keysOf?: NameKeysLookup } = {},
+    private readonly o: { statementTimeoutMs?: number; correct?: (q: string) => string | null | undefined; keysOf?: NameKeysLookup; ready?: () => boolean } = {},
   ) {}
 
   /**
@@ -157,6 +174,9 @@ export class DrizzleSearchIndex implements SearchIndex {
   async #query(q: SearchQuery): Promise<RankedSearch> {
     const query = q.q.trim();
     const keys = keySets(query, q.noConvert);
+    // 한 글자 입력은 중간 일치를 보지 않으므로 변환 단계마다 이름 줄을 따로 읽고 등급이 붙은 이름 줄만 공연으로 펼친다(ADR-0271 결정 25).
+    // 사전 비교 값을 쓰지 못하면(준비 전) 지금 질의로 답한다 — 결과는 같다
+    if (keys.length > 0 && [...keys[0]!.nospace].length === 1 && this.o.keysOf !== undefined && (this.o.ready === undefined || this.o.ready())) return this.#staged(q, query);
     const rows = keys.length === 0 ? [] : await this.#read((tx) => this.#candidates(tx, keys));
     // 후보가 많으면(한두 글자 입력은 수천~수만) 줄 바꾸기·이름 색인을 끊어 하며 사이사이 다른 요청의 I/O(연결 반환·자동완성)를 먼저 돌린다.
     // 한 요청의 긴 계산이 주 스레드를 한 덩이로 막아 다른 검색이 연결 대기 100ms를 넘기지 않게 한다(BAT-166 측정 §5 4). 답은 같다
@@ -172,6 +192,83 @@ export class DrizzleSearchIndex implements SearchIndex {
     const graded = matchGrades(index, query, q.noConvert);
     if (rows.length > SEARCH_YIELD_ROWS) await yieldToIo();
     return rankMatched(candidates, q, graded);
+  }
+
+  /**
+   * 한 글자 입력: 변환 단계(친 그대로 → 한/영 → 소문자)를 차례로 본다(ADR-0271 결정 25).
+   * 단계마다 ① 짧은 읽기로 이름 줄만 읽고 연결을 돌려준 뒤 ② 이름 줄에 matchGrade를 매겨 등급이 붙은 줄의 대상만
+   * ③ 둘째 짧은 읽기로 공연 줄을 펼쳐 읽고 ④ 그 단계의 질의로 최종 등급을 다시 매긴다.
+   * 최종 등급이 하나라도 붙으면 그 단계에서 멈춘다. 이름 줄에 등급이 붙어도 공연 줄에서 0이면 다음 단계로 간다
+   * (아티스트·공연장의 다른 이름 줄처럼 공연 줄 이름에 없는 줄). 두 읽기는 서로 다른 스냅숏일 수 있다(결정 23, 리뷰 R166-1)
+   */
+  async #staged(q: SearchQuery, query: string): Promise<RankedSearch> {
+    for (const stage of matchStagesOf(query, q.noConvert)) {
+      const names = await this.#read((tx) => this.#nameRows(tx, stage.keys));
+      if (names.length === 0) continue;
+      const targets = await this.#gradedTargets(names, stage.keys);
+      if (targets.productions.length + targets.places.length + targets.artists.length === 0) continue;
+      const rows = await this.#read((tx) => this.#documentsFor(tx, targets));
+      const candidates: SearchDocument[] = [];
+      const index: Array<DocumentIndex[number]> = [];
+      for (let i = 0; i < rows.length; i += SEARCH_YIELD_ROWS) {
+        if (i > 0) await yieldToIo();
+        const part = rows.slice(i, i + SEARCH_YIELD_ROWS).map((r) => documentOfRow(r, this.origin));
+        candidates.push(...part);
+        index.push(...indexDocuments(part, this.o.keysOf));
+      }
+      if (rows.length > SEARCH_YIELD_ROWS) await yieldToIo();
+      // 최종 등급은 그 단계의 질의로만 매긴다(noConvert=false로 매기면 다음 단계로 넘어가 그 단계의 결과가 빠진다)
+      const { grades } = matchGrades(index, stage.value, true);
+      if (rows.length > SEARCH_YIELD_ROWS) await yieldToIo();
+      if (grades.size > 0) return rankMatched(candidates, q, { grades, converted: stage.converted });
+    }
+    // 어느 단계도 공연 줄에서 등급을 내지 못했다: 지금 질의와 같은 0건(0건 제안·관련 공연은 #finish가 채운다)
+    return rankMatched([], q, { grades: new Map(), converted: null });
+  }
+
+  /** 한 단계의 이름 줄(search_term)만 읽는다(kind·target_id·display_name). 등급은 연결을 돌려준 뒤에 매긴다 */
+  async #nameRows(tx: DbTransaction, key: QueryKeys): Promise<NameRow[]> {
+    const conds: SQL[] = [sql`t.jamo like ${`%${escapeLike(key.jamo)}%`} escape '\\'`];
+    if (key.chosung !== null) conds.push(sql`t.chosung like ${`%${escapeLike(key.chosung)}%`} escape '\\'`);
+    return rowsOf<NameRow>(await tx.execute(sql`select distinct t.kind, t.target_id, t.display_name from search_term t where ${sql.join(conds, sql` or `)}`));
+  }
+
+  /** 이름 줄 가운데 그 단계에서 등급이 붙은 줄의 대상. 이름 줄이 많으면 2,000줄마다 I/O를 돌린다 */
+  async #gradedTargets(rows: readonly NameRow[], key: QueryKeys): Promise<GradedTargets> {
+    const byName = new Map<string, Grade>();
+    const productions = new Set<string>();
+    const places = new Set<string>();
+    const artists = new Set<string>();
+    for (let i = 0; i < rows.length; i += SEARCH_YIELD_ROWS) {
+      if (i > 0) await yieldToIo();
+      for (const r of rows.slice(i, i + SEARCH_YIELD_ROWS)) {
+        let grade = byName.get(r.display_name);
+        if (grade === undefined) {
+          grade = nameGradeOf(key, r.display_name, this.o.keysOf);
+          byName.set(r.display_name, grade);
+        }
+        if (grade === GRADE.NONE) continue;
+        if (r.kind === 'PRODUCTION') productions.add(r.target_id);
+        else if (r.kind === 'PLACE') places.add(r.target_id);
+        else artists.add(r.target_id);
+      }
+    }
+    return { productions: [...productions], places: [...places], artists: [...artists] };
+  }
+
+  /**
+   * 등급이 붙은 이름 줄의 대상만 공연 줄로 펼쳐 읽는다(공연명·다른 이름 줄은 그 공연, 공연장 줄은 place_id,
+   * 아티스트 줄은 artist_ids). 갈래마다 따로 찾아 union으로 합치고 공연 줄마다 도는 하위 계획을 두지 않는다(ADR-0271 결정 22).
+   * 빈 갈래는 질의에 넣지 않는다
+   */
+  async #documentsFor(tx: DbTransaction, t: GradedTargets): Promise<DocumentRow[]> {
+    const branches: SQL[] = [];
+    if (t.productions.length > 0) branches.push(sql`select unnest(${sql.param(t.productions)}::uuid[]) as id`);
+    if (t.places.length > 0) branches.push(sql`select p.production_id from search_document p where p.place_id = any(${sql.param(t.places)}::uuid[])`);
+    if (t.artists.length > 0)
+      branches.push(sql`select a.production_id from search_document a cross join lateral jsonb_array_elements_text(a.artist_ids) x(artist_id) where x.artist_id = any(${sql.param(t.artists)}::text[])`);
+    if (branches.length === 0) return [];
+    return rowsOf<DocumentRow>(await tx.execute(sql`with ids as (${sql.join(branches, sql` union `)}) select ${DOCUMENT_COLUMNS} from search_document d join ids on d.production_id = ids.id`));
   }
 
   /** 검색어가 없을 때: 필터를 건 정렬 질의의 한 쪽과 1,001줄까지 센 전체 수 */
