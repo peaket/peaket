@@ -8,7 +8,7 @@ import { ProgressBar } from '@peaket/ds/ProgressBar';
 import { Select } from '@peaket/ds/Select';
 import { TextArea } from '@peaket/ds/TextArea';
 import { TextField } from '@peaket/ds/TextField';
-import { formatWon, requireProduction, type Production } from '@/entities/production';
+import { formatWon, getProduction, requireProduction, type Production } from '@/entities/production';
 import { routes } from '@/shared/config/routes';
 import { CANCELLATION_STATES, type CancellationState } from '@/shared/config/states/scr044';
 import { readPreview, type RouteProps } from '@/shared/lib/preview';
@@ -17,6 +17,7 @@ import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { Modal } from '@/shared/ui/Modal';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { EventContextHeader } from '@/widgets/event-context';
+import { LiveCancellationRequest } from './LiveCancellationRequest';
 import { FAULT_OPTIONS, decision, postponeRequest as req, refundProgress as rp, rejectedRequest } from '../model/request';
 
 /** 요청을 파트너 관리자만 할 수 있다는 이유 글(d5 §6.12 '실무자 보기', 추천 적용 2026-10-28) */
@@ -36,6 +37,8 @@ interface Ctx {
 
 export default async function CancellationRequestPage({ params, searchParams }: RouteProps<{ id: string }>) {
   const { id } = await params;
+  // 실제 공연(UUID)은 서버 값으로 그린다. 목업 공연(prd-…)이면 지금 퍼블리싱 화면을 그대로 본다(BAT-421)
+  if (!getProduction(id)) return <LiveCancellationRequest productionId={id} />;
   const pv = readPreview(await searchParams, CANCELLATION_STATES, '요청 폼');
   const production = requireProduction(id);
   const path = routes.eventTab(id, 'cancellation');

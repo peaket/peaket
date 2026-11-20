@@ -4,11 +4,13 @@
 // '제2 승인 대기'는 데스크톱·태블릿 보드에 없어 '확정 직전 확인'의 본문을 대화상자 없이 그린다(추천안).
 // 역할(d5 §3.3): viewer·CS 두 역할은 읽기, operator는 제2 승인, commander는 판정·제2 승인.
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
+import { useSearchParams } from 'react-router';
 import { useBoardPage } from '@/shared/lib/board';
 import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE, ReadOnlyScope, type Access } from '@/features/screen-access';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { DEFAULT, STATES, type State } from '../states';
+import { ConnectedPage } from './ConnectedPage';
 import { MainD, OverlaysD, valsD } from './board-d';
 import { MainM, OverlaysM, valsM } from './board-m';
 import { MainT, OverlaysT, valsT } from './board-t';
@@ -20,6 +22,11 @@ const ROLE_STATE: Partial<Record<ConsoleRole, State>> = { operator: '제2 승인
 const PHONE: Partial<Record<State, string>> = { 판정: '판정 대기', '일괄 환불 진행': '일괄 환불 진행 중', '반려·연기 처리': '판정 대기' };
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const chosen = useChosenRole();
   const roleDef = chosen ? ROLE_STATE[chosen] : undefined;
   const { state, layout, close, go } = useBoardPage(TITLE, STATES, roleDef ?? DEFAULT);

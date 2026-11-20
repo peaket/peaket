@@ -490,3 +490,78 @@ export async function createAttendeeExport(
 
 /** 시험·화면이 같은 모양으로 오류를 읽도록 내보낸다. */
 export type PartnerApiProblem = ProblemShape;
+
+/* ---------- 회차 취소·연기(SCR-044, BAT-421) ---------- */
+
+export type EventCancellationKind = 'CANCEL' | 'POSTPONE';
+export type FaultOpinion = 'ORGANIZER' | 'FORCE_MAJEURE' | 'CONTENT_CHANGE';
+export type EventCancellationStatus =
+  | 'REQUESTED'
+  | 'JUDGED'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'RUNNING'
+  | 'PAUSED'
+  | 'REFUND_WINDOW'
+  | 'COMPLETED'
+  | 'REJECTED';
+
+/** 파트너가 보는 회차 취소·연기 요청 상태(openapi PartnerEventCancellationStatus). 미리보기·결제사별 몫·판정자는 없다 */
+export interface PartnerEventCancellationStatus {
+  requestId: string;
+  eventId: string;
+  kind: EventCancellationKind;
+  status: EventCancellationStatus | string;
+  requestedAt: string;
+  reason?: string | null;
+  evidenceRef?: string | null;
+  faultOpinion?: FaultOpinion | null;
+  newStartsAt?: string | null;
+  judgementDueAt?: string | null;
+  fault?: FaultOpinion | null;
+  judgementSummary?: string | null;
+  rejectionReason?: string | null;
+  refundProgress?: { total: number; done: number; failed: number } | null;
+  pausedBy?: 'AUTOMATIC' | 'OPERATOR' | null;
+  postponement?: { refundApplicationCount: number; refundDeadlineAt: string } | null;
+  compensation?: { targetCount: number; totalAmount: number } | null;
+}
+
+/** 파트너 공연 개요에서 회차를 고르는 데 쓰는 값만 */
+export interface PartnerProductionDetail {
+  productionId: string;
+  title: string;
+  saleReview?: string;
+  events: { eventId: string; startsAt: string; status?: string }[];
+}
+
+export interface CreatePartnerEventCancellationBody {
+  kind: EventCancellationKind;
+  faultOpinion?: FaultOpinion;
+  reason: string;
+  evidenceRef?: string;
+  newStartsAt?: string;
+}
+
+/** 회차 취소·연기 요청(파트너 관리자, Idempotency-Key 필수). 같은 키·같은 본문의 다시 보내기는 처음 답을 준다 */
+export async function requestEventCancellation(eventId: string, body: CreatePartnerEventCancellationBody, idempotencyKey: string): Promise<{ requestId?: string }> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<{ requestId?: string }>(OPERATIONS.createPartnerEventCancellation, {
+    params: { eventId },
+    body,
+    idempotencyKey,
+  });
+}
+
+/** 그 회차의 가장 최근 요청 하나. 없으면 404다(화면은 '요청 없음') */
+export async function getEventCancellation(eventId: string, signal?: AbortSignal): Promise<PartnerEventCancellationStatus> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<PartnerEventCancellationStatus>(OPERATIONS.getPartnerEventCancellation, { params: { eventId }, signal });
+}
+
+/** 공연과 회차(최대 50). 화면은 이 값으로 회차를 고른다(목업 자료를 쓰지 않는다) */
+export async function getProductionDetail(productionId: string, signal?: AbortSignal): Promise<PartnerProductionDetail> {
+  const { partnerApi, OPERATIONS } = await load();
+  const r = await partnerApi().request<PartnerProductionDetail>(OPERATIONS.getPartnerProduction, { params: { productionId }, signal });
+  return { productionId: r.productionId, title: r.title, ...(r.saleReview ? { saleReview: r.saleReview } : {}), events: Array.isArray(r.events) ? r.events : [] };
+}
