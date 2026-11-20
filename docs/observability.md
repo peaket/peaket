@@ -164,7 +164,7 @@ flowchart LR
 
 | 지표 | 종류 | 라벨 | 뜻 |
 | --- | --- | --- | --- |
-| `tenant_rate_limit_total` | 카운터 | `service`·`result` | 파트너 테넌트 한도 판정 결과. `result`는 `allowed`(600 이하 통과)·`limited`(601부터 429)·`unavailable`(Redis 판정 실패로 열림)다 |
+| `tenant_rate_limit_total` | 카운터 | `service`·`result` | 파트너 테넌트 한도 판정 결과. `result`는 `allowed`(600 이하 통과)·`limited`(601부터 429)·`unavailable`(`PEAKET_TENANT_REDIS_URL`의 세션·캐시 Redis에 20ms 안에 닿지 못했거나 스크립트가 실패해 열림)다 |
 
 - `route`는 경로 틀을 계약 표기로 쓴 값이다(`/v1/events/{eventId}`). 맞는 경로가 없는 요청과 처리기를 찾기 전에 거절한 요청(잘못된 URL 등)은 `unmatched` 하나로 묶는다. 실제 자원 ID는 들어가지 않는다(§8).
 - 처리 중 요청 게이지는 응답을 보냈을 때와 연결이 끊겼을 때(본문을 다 받은 뒤 끊긴 경우 포함) 한 번만 내린다. 끊긴 요청은 지연 히스토그램에 들지 않는다.

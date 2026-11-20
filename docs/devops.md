@@ -417,6 +417,11 @@ deploy/
 - **승격 값의 배치 값(추천 적용 2026-11-20, BAT-085, ADR-0319)**: 승격 CLI가 만드는 새 환경 값 파일(`deploy/envs/<환경>/<서비스>.yaml`)은 배치(`service.nodeSelector`·`tolerations`·`priorityClassName`)를 `deploy/workloads/<서비스>/values.yaml`에서 이어받는다. ArgoCD가 Helm 값으로 쓰는 것은 이 환경 값 파일 하나이므로, 셋이 빠지면 차트 기본값으로 돌아가 `peaket-hotpath-placement`(§4.3)가 승격 파드를 거부한다. 이미 있는 값 파일은 승격 PR이 배치 값을 갱신하지 않고 이미지 다이제스트 줄만 바꾼다.
 - 자동 동기화(prune, selfHeal)를 켠다. 되돌리기는 Git 되돌리기로 한다. 자동 동기화를 켠 앱에서는 ArgoCD의 롤백(이전 버전으로 되돌리는 것) API가 거부된다(2026-10-13 소스 확인).
 - 비밀 값은 저장소에 없다. ExternalSecret은 Secrets Manager의 경로만 가리킨다.
+- **서비스 환경 값 표(추가, 2026-11-20 BAT-173 리뷰 RV-01)**: 파트너 테넌트 한도 카운터가 붙는 Redis는 서비스마다 다른 재인증 Redis와 분리한다. 주소는 저장소에 두지 않고 Secret(`secretEnvFrom`)으로 받는다.
+
+  | 환경 값 | 받는 배포 단위 | 받는 길 | 없을 때 |
+  | --- | --- | --- | --- |
+  | `PEAKET_TENANT_REDIS_URL` | ops-svc·payment-svc(나머지 core·ticket·identity는 기존 세션·캐시 Redis 주소를 쓴다) | `deploy/workloads/<서비스>/values.yaml`의 `secretEnvFrom`이 가리키는 Secret | staging·prod·demo는 시작 실패, local·ci는 재인증 Redis로 닫힌 대역(둘 다 없으면 가드 없이 시작) |
 - Gateway API 트래픽 플러그인이 HTTPRoute에 넣는 규칙은 ArgoCD `ignoreDifferences`로 비교에서 뺀다. 빼지 않으면 ArgoCD가 플러그인이 넣은 규칙을 되돌린다(플러그인 문서).
 - **네임스페이스 지도(추천 적용 2026-10-21, ADR-0078 결정 8)**: 네임스페이스는 AppProject(가상 팀)에 맞춘다. 클러스터 애드온은 차트의 기본 네임스페이스를 쓴다. 표 전체가 [가정, wbs 0.4.4에서 확정]이다.
 

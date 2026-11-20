@@ -8,7 +8,7 @@
 import 'reflect-metadata';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
-import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
+import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, reauthJtiStoreFromEnv, systemClock, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
@@ -125,7 +125,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
   const config = loadPaymentServiceConfig(env);
   const internalGrpcToken = internalGrpcTokenFromEnv(env);
-  const reauthRedis = env.PEAKET_REAUTH_REDIS_URL ? await createHotRedis({ url: env.PEAKET_REAUTH_REDIS_URL }) : undefined;
+  const reauthRedisUrl = env.PEAKET_REAUTH_REDIS_URL;
+  const reauthRedis = reauthRedisUrl ? await createHotRedis({ url: reauthRedisUrl }) : undefined;
+  // 테넌트 한도 Redis(BAT-173 리뷰 RV-01): 재인증 jti Redis는 서비스별 Redis일 수 있어 테넌트 카운터를 두면 `rl:tenant:*`가 쪼개진다.
+  // `PEAKET_TENANT_REDIS_URL`(세션·캐시 클러스터)이 먼저이고 staging·prod·demo는 없으면 시작하지 않는다. local·ci만 재인증 Redis로 닫힌 대역을 쓴다.
+  const tenantRedisUrl = tenantRateLimitRedisUrlFromEnv(env, { fallbackUrl: reauthRedisUrl });
+  const tenantRedis = tenantRedisUrl ? await createHotRedis({ url: tenantRedisUrl }) : undefined;
   // 잘못된 주소·빠진 키·환경과 어긋난 키 접두사는 여기서, 듣기 전에 시작 실패다. 어댑터 없이 켜지는 것은 local·ci뿐이다(아래 경고 한 줄과 no_adapter 지표, BUILD_ORDER PRF-184)
   const simulator = loadSimulatorGatewayConfig(env);
   const toss = loadTossGatewayConfig(env);
@@ -208,8 +213,8 @@ let circuitsRef: PgCircuits | undefined;
     name: SERVICE,
     env,
     hotPath,
-    // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). 재인증 Redis는 세션·캐시 클러스터다(docs/data.md §3)
-    ...(reauthRedis ? { tenantRateLimit: { redis: reauthRedis } } : {}),
+    // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). 재인증 Redis가 아니라 `PEAKET_TENANT_REDIS_URL`의 세션·캐시 Redis다(RV-01)
+    ...(tenantRedis ? { tenantRateLimit: { redis: tenantRedis } } : {}),
     adminAuthz: env.PEAKET_IDENTITY_GRPC_URL
       ? new GrpcAdminAuthz(env.PEAKET_IDENTITY_GRPC_URL)
       : env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci'
@@ -386,7 +391,7 @@ let circuitsRef: PgCircuits | undefined;
       stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), (settlementDueWorker?.stop() ?? Promise.resolve()).then(() => settlementDueElector.stop())],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve()],
       closeService: () => service.close(),
-      closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), reauthRedis?.close()],
+      closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), tenantRedis?.close(), reauthRedis?.close()],
       onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),
     });
   };

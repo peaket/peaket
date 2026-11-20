@@ -1,5 +1,7 @@
 # v1 한 프로세스 합본의 로컬 kind 값(docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215, ADR-0262 결정 4). 공용 차트의 릴리스 bundle.
 # 올리는 법: node tools/local/cluster.mjs v1 [--redis-tls on|off] (네임스페이스 v1). 서비스별 환경 파일(키·주소)은 Secret v1-bundle-env에만 있다.
+# 테넌트 한도 Redis(BAT-173 리뷰 RV-01): payment-svc는 staging·prod·demo에서 PEAKET_TENANT_REDIS_URL(세션·캐시 Redis)을 Secret으로 받는다.
+# 이 무대는 PEAKET_ENV local이라 재인증 Redis로 닫힌 대역을 쓰므로 PEAKET_TENANT_REDIS_URL을 넣지 않는다.
 # 시험 도구다: 합본은 PEAKET_ENV local·ci에서만 시작한다. 운영 배포 단위가 아니다
 name: bundle
 

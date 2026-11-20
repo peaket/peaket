@@ -3,7 +3,7 @@
 // 회차 취소 환불 gRPC(PEAKET_PURCHASE_GRPC_ADDR, BAT-425 GAT-130)와 판매 중지·재개 제어 gRPC(PEAKET_*_CONTROL_GRPC_ADDR, BAT-465 R-584)를 싣는다.
 // 명령 요청·결과 사건은 Kafka(ops.command-events)로도 받는다(HTTP /internal/v1/ops/command-events와 같은 처리기).
 import 'reflect-metadata';
-import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, reauthJtiStoreFromEnv } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
@@ -76,7 +76,12 @@ const priority =
     : undefined;
 // 재인증 검증기는 결제사 HTTP URL과 분리한다(OPSV-05). identity JWKS만 있으면 회차 취소 확정의 패스키 재인증이 결제 URL 없이도 돈다.
 // 재인증 jti 1회용(SEC-03). 주소가 없으면 local·ci용 메모리 기록을 쓰고, 운영은 닫힌 저장소를 쓴다.
-const reauthRedis = process.env.PEAKET_REAUTH_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_REAUTH_REDIS_URL }) : undefined;
+const reauthRedisUrl = process.env.PEAKET_REAUTH_REDIS_URL;
+const reauthRedis = reauthRedisUrl ? await createHotRedis({ url: reauthRedisUrl }) : undefined;
+// 테넌트 한도 Redis(BAT-173 리뷰 RV-01): 재인증 jti Redis는 서비스별 Redis일 수 있어 테넌트 카운터를 두면 `rl:tenant:*`가 쪼개진다.
+// `PEAKET_TENANT_REDIS_URL`(세션·캐시 클러스터)이 먼저이고 staging·prod·demo는 없으면 시작하지 않는다. local·ci만 재인증 Redis로 닫힌 대역을 쓴다.
+const tenantRedisUrl = tenantRateLimitRedisUrlFromEnv(process.env, { fallbackUrl: reauthRedisUrl });
+const tenantRedis = tenantRedisUrl ? await createHotRedis({ url: tenantRedisUrl }) : undefined;
 const reauth = process.env.PEAKET_IDENTITY_JWKS_URL
   ? new JwksApprovalVerifier({
       jwksUrl: process.env.PEAKET_IDENTITY_JWKS_URL,
@@ -115,8 +120,8 @@ const anchor = auditAnchorSignerFromEnv(process.env);
 const service = await createService({
   name: SERVICE,
   adminAuthz,
-  // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). 재인증 Redis는 세션·캐시 클러스터다(docs/data.md §3)
-  ...(reauthRedis ? { tenantRateLimit: { redis: reauthRedis } } : {}),
+  // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). 재인증 Redis가 아니라 `PEAKET_TENANT_REDIS_URL`의 세션·캐시 Redis다(RV-01)
+  ...(tenantRedis ? { tenantRateLimit: { redis: tenantRedis } } : {}),
   module: AppModule.register({
     database,
     partnerDatabase,
@@ -207,6 +212,7 @@ process.once('SIGTERM', () => {
       }
       scannerDevices?.close();
       adminAuthz.close();
+      await tenantRedis?.close();
       await reauthRedis?.close();
       if (partnerDatabase !== database) await partnerDatabase.close();
       await database.close();

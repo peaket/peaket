@@ -1,6 +1,11 @@
 # payment-svc 배포 단위 기본 값(docs/devops.md §5.2). 환경 값은 deploy/envs/<환경>/payment-svc.yaml에 둔다.
 name: payment-svc
 
+# 비밀(DB 주소, 내부 토큰, 재인증 Redis·테넌트 Redis 주소)은 env에 두지 않고 Secret(secretEnvFrom)으로 받는다.
+# 테넌트 한도 Redis(BAT-173 리뷰 RV-01): PEAKET_TENANT_REDIS_URL은 세션·캐시 클러스터를 가리키고 재인증 jti Redis(PEAKET_REAUTH_REDIS_URL)와 별개다.
+# staging·prod·demo는 이 값이 없으면 시작하지 않는다. local·ci만 재인증 Redis로 닫힌 대역을 쓴다.
+secretEnvFrom: payment-svc-secrets
+
 service:
   # 새 결제 진입 정지 판정자를 뽑는 Lease(ADR-0105 결정 8, BUILD_ORDER PRF-202). 입력을 읽을 클러스터 Prometheus 주소 PEAKET_PROMETHEUS_URL은 환경 값이다(local·ci 밖에서 없으면 시작이 실패한다, 코드 리뷰)
   leaderLease: payment-entry-pause

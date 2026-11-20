@@ -45,13 +45,16 @@ export { ProblemFilter } from './problem-filter.js';
 export { createService, type CreateServiceOptions, type DiagnoseOptions, type PlatformService } from './service.js';
 export {
   TENANT_RATE_LIMIT_PER_MINUTE,
+  TENANT_RATE_LIMIT_REDIS_URL_ENV,
   TENANT_RATE_LIMIT_TIMEOUT_MS,
   TENANT_RATE_LIMIT_WINDOW_MS,
   redisTenantRateLimiter,
   tenantRateLimitKey,
+  tenantRateLimitRedisUrlFromEnv,
   type RedisTenantRateLimiterOptions,
   type TenantRateLimitAnswer,
   type TenantRateLimitPort,
+  type TenantRateLimitRedisUrlOptions,
   type TenantRateLimitResult,
 } from './tenant-rate-limit.js';
 export { browserFamily, type BrowserFamily, clientFamily } from './client-family.js';

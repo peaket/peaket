@@ -12,6 +12,34 @@ export const TENANT_RATE_LIMIT_PER_MINUTE = 600;
 export const TENANT_RATE_LIMIT_WINDOW_MS = 60_000;
 /** 판정 시간 상한 [가정](넘으면 세지 않고 통과, docs/architecture.md §4) */
 export const TENANT_RATE_LIMIT_TIMEOUT_MS = 20;
+/**
+ * 테넌트 한도 카운터가 붙는 세션·캐시 Redis 주소 환경 값(BAT-173 리뷰 RV-01).
+ * 재인증 jti Redis(`PEAKET_REAUTH_REDIS_URL`)는 서비스마다 다른 Redis일 수 있어 이 값을 따로 받는다.
+ */
+export const TENANT_RATE_LIMIT_REDIS_URL_ENV = 'PEAKET_TENANT_REDIS_URL';
+
+export interface TenantRateLimitRedisUrlOptions {
+  /**
+   * `PEAKET_TENANT_REDIS_URL`이 없을 때 local·ci에서만 쓰는 대역 주소.
+   * 그 서비스가 이미 만드는 세션·캐시 Redis(예: ops·payment의 재인증 Redis)를 넘긴다.
+   */
+  fallbackUrl?: string;
+}
+
+/**
+ * 테넌트 한도 Redis 주소를 고른다(BAT-173 리뷰 RV-01).
+ * - `PEAKET_TENANT_REDIS_URL`이 있으면 그 주소다. 다섯 서비스가 같은 세션·캐시 클러스터를 보게 하는 값이다.
+ * - staging·prod·demo에서 없으면 시작 실패다. 서비스별 재인증 Redis로 대신하면 `rl:tenant:*`가 쪼개진다.
+ * - local·ci만 `fallbackUrl`로 닫힌 대역을 쓴다. 둘 다 없으면 `undefined`이고 가드를 만들지 않는다(시험·개발).
+ */
+export function tenantRateLimitRedisUrlFromEnv(env: Record<string, string | undefined>, o: TenantRateLimitRedisUrlOptions = {}): string | undefined {
+  const url = env[TENANT_RATE_LIMIT_REDIS_URL_ENV]?.trim();
+  if (url) return url;
+  if (env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci') return o.fallbackUrl?.trim() || undefined;
+  throw new Error(
+    `${TENANT_RATE_LIMIT_REDIS_URL_ENV}이 없다(파트너 테넌트 한도 카운터는 다섯 서비스가 같은 세션·캐시 Redis를 봐야 한다. 재인증 Redis로 대신하지 않는다. staging·prod·demo는 비밀 관리에서 넣는다)`,
+  );
+}
 
 /** 판정 결과(지표 `tenant_rate_limit_total{result}`의 고정 값, docs/observability.md §3) */
 export type TenantRateLimitResult = 'allowed' | 'limited' | 'unavailable';
