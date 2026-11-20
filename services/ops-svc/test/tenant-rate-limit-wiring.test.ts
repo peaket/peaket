@@ -1,7 +1,9 @@
 // BAT-173 T10: ops-svc가 파트너 테넌트당 600회/분 공용 가드를 조립하는지(D-T50 ⑦, docs/api/guidelines.md §6 '조립과 시작').
-// 두 층으로 본다: (1) 시작 파일 src/main.ts가 세션·캐시 Redis(PEAKET_REAUTH_REDIS_URL로 만든 reauthRedis)를 tenantRateLimit으로 넘기는지 소스 경계로,
+// 두 층으로 본다: (1) 시작 파일 src/main.ts가 테넌트 한도 Redis(PEAKET_TENANT_REDIS_URL)를 tenantRateLimit으로 넘기는지 소스 경계로,
 // (2) 그 조립으로 선 서비스가 파트너 요청만 한도 Redis로 세고 tenant_rate_limit_total{service="ops-svc",result}에 붙는지 실제 createService로.
 // local·ci 밖에서 파트너 역할 처리기가 있는데 가드가 없으면 시작이 실패하는지도 본다(한도가 조용히 꺼지지 않게).
+// BAT-173 리뷰 RV-01: 재인증 jti Redis(PEAKET_REAUTH_REDIS_URL)는 세션·캐시 클러스터가 아닐 수 있어 테넌트 카운터에 쓰지 않는다.
+// PEAKET_TENANT_REDIS_URL이 먼저이고, staging·prod·demo는 없으면 시작하지 않는다. local·ci만 재인증 Redis로 닫힌 대역을 쓴다.
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { Controller, Get, Module } from '@nestjs/common';
@@ -11,6 +13,7 @@ import {
   Roles,
   createService,
   fakeClock,
+  tenantRateLimitRedisUrlFromEnv,
   type AdminAuthz,
   type AdminAuthzPort,
   type HotRedis,
@@ -91,10 +94,11 @@ const partner = { 'x-user-id': 'acc-a1', 'x-session-id': 's-a1', 'x-user-aud': '
 const fan = { 'x-user-id': 'acc-fan', 'x-session-id': 's-fan', 'x-user-aud': 'fan' };
 
 describe('ops-svc 테넌트 한도 조립(D-T50 ⑦)', () => {
-  test('D-T50 ⑦ 시작 파일이 reauthRedis(PEAKET_REAUTH_REDIS_URL)를 tenantRateLimit으로 넘긴다', () => {
+  test('D-T50 ⑦ 시작 파일이 테넌트 Redis(PEAKET_TENANT_REDIS_URL)를 tenantRateLimit으로 넘기고 reauthRedis를 넘기지 않는다', () => {
     const source = readFileSync(SOURCE, 'utf8');
-    expect(source).toContain('PEAKET_REAUTH_REDIS_URL');
-    expect(source).toMatch(/tenantRateLimit:\s*\{\s*redis:\s*reauthRedis\s*\}/);
+    expect(source).toMatch(/tenantRateLimitRedisUrlFromEnv\(process\.env,\s*\{\s*fallbackUrl:\s*reauthRedisUrl\s*\}\)/);
+    expect(source).toMatch(/tenantRateLimit:\s*\{\s*redis:\s*tenantRedis\s*\}/);
+    expect(source).not.toMatch(/tenantRateLimit:\s*\{\s*redis:\s*reauthRedis\s*\}/);
   });
 
   test('D-T50 ⑦ 파트너 요청만 한도 Redis를 부르고 팬 요청은 부르지 않으며 지표에 service=ops-svc로 붙는다', async () => {
@@ -114,6 +118,30 @@ describe('ops-svc 테넌트 한도 조립(D-T50 ⑦)', () => {
     for (const env of ['local', 'ci']) {
       const svc = await boot({ env: { PEAKET_ENV: env } });
       expect(svc.name, env).toBe(SERVICE);
+    }
+  });
+});
+
+describe('ops-svc 테넌트 Redis 환경 값(BAT-173 RV-01)', () => {
+  const TENANT = 'redis://tenant-redis:6379';
+  const REAUTH = 'redis://reauth-redis:6379';
+
+  test('D-T50 ⑦ PEAKET_TENANT_REDIS_URL이 있으면 그 주소로 가드를 만든다', () => {
+    for (const env of ['staging', 'prod', 'demo']) {
+      expect(tenantRateLimitRedisUrlFromEnv({ PEAKET_ENV: env, PEAKET_TENANT_REDIS_URL: TENANT, PEAKET_REAUTH_REDIS_URL: REAUTH }), env).toBe(TENANT);
+    }
+  });
+
+  test('D-T50 ⑦ staging·prod에서 PEAKET_TENANT_REDIS_URL이 없으면 시작하지 않고 재인증 Redis로 대신하지 않는다', () => {
+    for (const env of ['staging', 'prod']) {
+      expect(() => tenantRateLimitRedisUrlFromEnv({ PEAKET_ENV: env, PEAKET_REAUTH_REDIS_URL: REAUTH }, { fallbackUrl: REAUTH }), env).toThrow(/PEAKET_TENANT_REDIS_URL/);
+    }
+  });
+
+  test('D-T50 ⑦ local·ci만 재인증 Redis로 닫힌 대역을 쓰고, 둘 다 없으면 가드를 만들지 않는다', () => {
+    for (const env of ['local', 'ci']) {
+      expect(tenantRateLimitRedisUrlFromEnv({ PEAKET_ENV: env, PEAKET_REAUTH_REDIS_URL: REAUTH }, { fallbackUrl: REAUTH }), env).toBe(REAUTH);
+      expect(tenantRateLimitRedisUrlFromEnv({ PEAKET_ENV: env }), env).toBeUndefined();
     }
   });
 });
