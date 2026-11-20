@@ -14,6 +14,8 @@
     "lint": "eslint --no-error-on-unmatched-pattern services packages/platform/template packages/platform/src packages/shuffle/src packages/search-normalize/src apps packages/ds/src packages/api-client/src packages/telemetry/src packages/validation/src packages/console-contract/src packages/seatmap/src"
   },
   "devDependencies": {
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
     "eslint": "^10.13.0",
     "turbo": "^2.11.10",
     "yaml": "^2.9.1"

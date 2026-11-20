@@ -108,6 +108,17 @@ export function prepareDemoSecrets(o = {}) {
   const seed = readSeed(seedFile);
   if (existsSync(DEMO_SECRETS_FILE)) {
     const secrets = JSON.parse(readFileSync(DEMO_SECRETS_FILE, 'utf8'));
+    // 예전 파일(이 묶음 전)에는 identity의 연계정보·pid 키가 없다. 새로 만들지 않고 채워 넣는다(멱등)
+    let changed = false;
+    if (!secrets.pidHmacKey) {
+      secrets.pidHmacKey = randomBytes(32).toString('base64');
+      changed = true;
+    }
+    if (!secrets.ciHmacKey) {
+      secrets.ciHmacKey = randomBytes(32).toString('base64');
+      changed = true;
+    }
+    if (changed) writeFileSync(DEMO_SECRETS_FILE, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
     return { secrets, bootstrap: bootstrapOf(seed, secrets, seedFile) };
   }
   const fan = randomJwk();
@@ -129,6 +140,9 @@ export function prepareDemoSecrets(o = {}) {
     },
     pepperKey: randomBytes(32).toString('base64'),
     totpKey: randomBytes(32).toString('base64'),
+    // identity의 연계정보(CI)·pid HMAC 키(local·ci·demo 전용, 운영은 KMS). 둘은 달라야 한다
+    pidHmacKey: randomBytes(32).toString('base64'),
+    ciHmacKey: randomBytes(32).toString('base64'),
     internalToken: randomBytes(32).toString('base64url'),
     queueTokenKey: `demoq${randomBytes(8).toString('hex')}:${randomBytes(32).toString('base64')}`,
     admission: { privateJwk: admission.privateJwk, jwks: publicJwksOf(admission.privateJwk) },
@@ -298,14 +312,23 @@ export async function adminLogin(aud, email, password, totpSeed) {
   const c = readContract();
   const key = aud === 'partner' ? 'partner-api' : 'ops-api';
   const base = { host: c.hosts[key], port: c.ports[key] };
+  // 브라우저와 같은 출처 머리를 보낸다(게이트웨이 CSRF·CORS가 출처를 본다)
+  const headers = { origin: c.origins?.[aud === 'partner' ? 'partner' : 'console'] ?? (aud === 'partner' ? 'https://partner.peaket.example:18443' : 'https://console.peaket.example:18444'), 'sec-fetch-site': 'same-origin' };
   const path = aud === 'partner' ? '/v1/partner/auth/sessions' : '/v1/ops/auth/sessions';
-  const first = await httpsJson({ ...base, method: 'POST', path, body: { email, password } });
-  if (first.status !== 401 && first.status !== 200) return { ok: false, reason: `1단계 ${first.status}`, response: first };
-  const loginStep = first.json?.loginStep ?? first.json?.challenge?.loginStep;
-  if (!loginStep) return { ok: false, reason: `1단계 응답에 loginStep이 없다(${first.status})`, response: first };
-  const second = await httpsJson({ ...base, method: 'POST', path, body: { loginStep, code: totpAt(totpSeed) } });
-  if (second.status < 200 || second.status >= 300) return { ok: false, reason: `2단계 ${second.status}`, response: second };
-  return { ok: true, status: second.status, cookies: cookiesOf(second.headers['set-cookie'], base.host) };
+  // 같은 TOTP 칸(30초)의 코드를 두 번 쓰면 서버가 재사용으로 401을 낸다.
+  // 시드 직후 재생기가 곧바로 로그인하는 경우가 있어, 401이면 다음 칸까지 기다렸다가 1단계부터 다시 한다
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const first = await httpsJson({ ...base, headers, method: 'POST', path, body: { email, password } });
+    if (first.status !== 401 && first.status !== 200) return { ok: false, reason: `1단계 ${first.status}`, response: first };
+    const loginStep = first.json?.loginStep ?? first.json?.challenge?.loginStep;
+    if (!loginStep) return { ok: false, reason: `1단계 응답에 loginStep이 없다(${first.status})`, response: first };
+    const second = await httpsJson({ ...base, headers, method: 'POST', path, body: { loginStep, code: totpAt(totpSeed) } });
+    if (second.status >= 200 && second.status < 300) return { ok: true, status: second.status, cookies: cookiesOf(second.headers['set-cookie'], base.host) };
+    if (second.status !== 401 || attempt > 0) return { ok: false, reason: `2단계 ${second.status}`, response: second };
+    const waitMs = 30_000 - (Date.now() % 30_000) + 1_000;
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+  return { ok: false, reason: '2단계 401' };
 }
 
 /** gRPC CreateSession 클라이언트(팬). @grpc 모듈은 뿌리 개발 의존성이다 */

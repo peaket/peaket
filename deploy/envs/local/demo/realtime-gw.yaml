@@ -11,13 +11,16 @@ secretEnvFrom: demo-realtime
 
 env:
   PEAKET_ENV: local
-  PEAKET_WEB_ORIGIN: https://www.peaket.example:18441
-  PEAKET_ADMISSION_ISSUER: https://queue.v1.peaket.local
-  PEAKET_SEATMAP_DIR: /etc/peaket/seatmaps
 
 service:
   replicas: 1
-  nodeSelector: {}
+  # 워크로드 기본 값의 service.env(포트 없는 출처)를 같은 칸에서 덮는다
+  env:
+    PEAKET_WEB_ORIGIN: https://www.peaket.example:18441
+    PEAKET_ADMISSION_ISSUER: https://queue.peaket.example:18442
+    PEAKET_SEATMAP_DIR: /etc/peaket/seatmaps
+  # 단일 노드 kind에는 karpenter 온디맨드 노드 라벨이 없다. null로 차트 기본값을 지운다
+  nodeSelector: null
   tolerations: []
   volumes:
     - { name: seatmaps, emptyDir: {} }

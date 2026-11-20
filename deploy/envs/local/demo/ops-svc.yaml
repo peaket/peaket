@@ -11,20 +11,24 @@ secretEnvFrom: demo-ops
 
 env:
   PEAKET_ENV: local
-  PEAKET_IDENTITY_GRPC_URL: identity-svc.core.svc.cluster.local:50051
   PEAKET_TICKET_GRPC_URL: ticket-svc.ticket.svc.cluster.local:50051
-  PEAKET_PURCHASE_HTTP_URL: http://bundle.purchase.svc.cluster.local:8081
   PEAKET_QUEUE_HTTP_URL: http://bundle.purchase.svc.cluster.local:8080
-  PEAKET_CORE_HTTP_URL: http://core-svc.core.svc.cluster.local:8080
   PEAKET_IDENTITY_JWKS_URL: http://identity-svc.core.svc.cluster.local:8080/internal/jwks/admin.json
   PEAKET_IDENTITY_ISSUER: https://identity.peaket.example
   PEAKET_KAFKA_BROKERS: peaket-kafka-bootstrap.kafka.svc.cluster.local:9092
 
 service:
   replicas: 1
-  # 단일 노드 kind에는 관제 전용 노드 풀이 없다
+  # 워크로드 기본 값(deploy/workloads/ops-svc/values.yaml)의 service.env와 같은 칸에 덮어야 이긴다.
+  # 최상위 env에 두면 기본 값(identity-svc-grpc:50051)이 이겨 메시 없는 로컬에서 DNS가 풀리지 않는다
+  env:
+    PEAKET_IDENTITY_GRPC_URL: identity-svc.core.svc.cluster.local:50051
+    PEAKET_PURCHASE_HTTP_URL: http://bundle.purchase.svc.cluster.local:8081
+    PEAKET_CORE_HTTP_URL: http://core-svc.core.svc.cluster.local:8080
+  # 단일 노드 kind에는 관제 전용 노드 풀이 없다. null로 차트 기본값을 지운다
+  # (빈 {}는 Helm 병합에서 기본값을 지우지 못한다)
   priorityClassName: ""
-  nodeSelector: {}
+  nodeSelector: null
   tolerations: []
   resources:
     requests: { cpu: 100m, memory: 256Mi }

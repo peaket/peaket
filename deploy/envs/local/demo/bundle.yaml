@@ -11,10 +11,14 @@ env:
   PEAKET_ENV: local
   PEAKET_BUNDLE_SERVICES: payment-svc,purchase-svc,admission-ctrl,queue-svc
   PEAKET_BUNDLE_ENV_DIR: /etc/peaket/bundle
-  PEAKET_BUNDLE_MODE: single
+  # single 모드면 payment·purchase·queue의 기본 gRPC가 모두 50051이라 한 파드 안에서 포트가 겹친다.
+  # v1 무대처럼 split으로 나눠 프로세스를 나눈다(파드는 여전히 하나다, 감독 결정 2)
+  PEAKET_BUNDLE_MODE: split
   NODE_OPTIONS: --max-semi-space-size=32
 
 service:
+  # 합본의 시작 명령은 v1 값과 같다. 차트 기본값(template/dist/main.js)을 그대로 두면 그 파일이 없어 죽는다
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
   # queue·admission·purchase·payment를 한 파드로 덮는다(감독 결정 2). 운영 모양(서비스별 1복제)과 다르다
   replicas: 1
   port: 8080

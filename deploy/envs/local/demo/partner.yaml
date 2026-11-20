@@ -7,6 +7,8 @@ image:
   tag: demo
   pullPolicy: Never
 
+secretEnvFrom: demo-partner
+
 env:
   PEAKET_ENV: local
 

@@ -84,11 +84,15 @@ export const DEMO_DATABASES = Object.freeze({ identity: 'peaket_demo_identity', 
 export const DEMO_DB_USERS = Object.freeze({
   identity: 'identity_app',
   ticket: 'ticket_app',
-  ops: 'ops_app',
+  ops: 'ops_app_login',
+  opsPartner: 'ops_partner_login',
   purchase: 'purchase_app',
   payment: 'payment_app',
   core: ['core_app_login', 'core_partner_login', 'core_ops_login', 'core_search_login'],
 });
+
+/** Next 서버 액션 암호화 키(데모 전용 상수). apps/partner/Dockerfile의 ENV와 같아야 한다 */
+export const DEMO_SERVER_ACTIONS_KEY = 'cGVha2V0LWRlbW8tc2VydmVyLWFjdGlvbnMta2V5LS0=';
 
 /** 데모 네임스페이스 객체 */
 export function demoNamespaces() {
@@ -114,6 +118,7 @@ export function demoDatabaseUrls(password) {
     identity: url(DEMO_DB_USERS.identity, DEMO_DATABASES.identity),
     ticket: url(DEMO_DB_USERS.ticket, DEMO_DATABASES.ticket),
     ops: url(DEMO_DB_USERS.ops, DEMO_DATABASES.ops),
+    opsPartner: url(DEMO_DB_USERS.opsPartner, DEMO_DATABASES.ops),
     purchase: url(DEMO_DB_USERS.purchase, DEMO_DATABASES.purchase),
     payment: url(DEMO_DB_USERS.payment, DEMO_DATABASES.payment),
     core: url(DEMO_DB_USERS.core[0], DEMO_DATABASES.core),
@@ -212,6 +217,25 @@ export function demoTopics() {
   return [...V1_KAFKA_TOPICS];
 }
 
+/**
+ * bundle 한 파드가 덮는 서비스의 Service 별칭(데모 전용). 게이트웨이 HTTPRoute는 이름을 그대로 두고
+ * 네임스페이스만 purchase로 바꾸므로, 같은 이름·포트(8080)의 Service가 bundle 파드를 가리켜야 한다.
+ * targetPort는 합본 안 각 서비스의 앱 포트다(V1_PORTS: queue 8080·purchase 8081·admission 8082·payment 8084).
+ */
+export function bundleServiceAliases() {
+  return [
+    ['queue-svc', 'queue'],
+    ['purchase-svc', 'purchase'],
+    ['payment-svc', 'payment'],
+    ['admission-ctrl', 'admission'],
+  ].map(([name, key]) => ({
+    apiVersion: 'v1',
+    kind: 'Service',
+    metadata: { name, namespace: 'purchase', labels: { 'app.kubernetes.io/name': name, 'app.kubernetes.io/part-of': 'peaket-demo' } },
+    spec: { selector: { 'app.kubernetes.io/name': 'bundle' }, ports: [{ name: 'http', port: 8080, targetPort: V1_PORTS[key === 'admission' ? 'admission-ctrl' : `${key}-svc`].app }] },
+  }));
+}
+
 /** 데모 무대의 클러스터 안 주소 묶음(env 파일·Secret이 쓴다) */
 export function demoLayout() {
   return {
@@ -282,6 +306,9 @@ export function demoSecrets(o) {
       PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken,
       PEAKET_INTERNAL_TOKEN: k.internalToken,
       PEAKET_TEST_VERIFICATION_SECRET: k.idvSecret,
+      // 연계정보·pid HMAC 키(local 전용 설정값 키, 운영은 KMS)
+      PEAKET_PID_HMAC_KEY: k.pidHmacKey,
+      PEAKET_CI_HMAC_KEY: k.ciHmacKey,
     }),
     secret('demo-core', 'core', {
       PEAKET_DATABASE_URL: urls.core,
@@ -289,19 +316,27 @@ export function demoSecrets(o) {
       PEAKET_OPS_DATABASE_URL: urls.coreOps,
       PEAKET_SEARCH_DATABASE_URL: urls.coreSearch,
       PEAKET_INTERNAL_TOKEN: k.internalToken,
+      // 서비스 사이 gRPC 공유 토큰(identity AdminAuthzService가 요구한다)
+      PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken,
       // 부트스트랩(첫 promoter)만 슈퍼유저 주소를 쓴다. 실행 서비스는 위의 역할 주소만 본다
       PEAKET_BOOTSTRAP_DATABASE_URL: `postgres://postgres:${k.dbPassword}@${L.postgresHost}/${DEMO_DATABASES.core}`,
     }),
     secret('demo-ops', 'core', {
       PEAKET_DATABASE_URL: urls.ops,
-      PEAKET_PARTNER_DATABASE_URL: urls.ops,
+      // 파트너 회차 취소 경로는 ops_partner 역할 사용자로 따로 접속한다(ops_app을 겸하지 않는다, 행 보안 2차 방어)
+      PEAKET_PARTNER_DATABASE_URL: urls.opsPartner,
       PEAKET_INTERNAL_TOKEN: k.internalToken,
+      PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken,
     }),
-    secret('demo-ticket', 'ticket', { PEAKET_DATABASE_URL: urls.ticket, PEAKET_TICKET_REDIS_URL: L.redisUrl }),
-    secret('demo-trust', 'trust', { PEAKET_TRUST_REDIS_URL: L.redisUrl }),
-    secret('demo-bundle-env', 'purchase', Object.fromEntries(Object.entries(files).map(([svc, values]) => [`${svc}.env`, `${Object.entries(values).sort(([a], [b]) => a.localeCompare(b)).map(([n, v]) => `${n}=${v}`).join('\n')}\n`]))),
+    secret('demo-partner', 'web', {
+      // Next 서버 액션 암호화 키. 빌드와 실행이 같은 값이어야 해서 Dockerfile의 ENV와 같은 데모 전용 상수를 쓴다(비밀이 아니다)
+      NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: DEMO_SERVER_ACTIONS_KEY,
+    }),
+    secret('demo-ticket', 'ticket', { PEAKET_DATABASE_URL: urls.ticket, PEAKET_TICKET_REDIS_URL: L.redisUrl, PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken, PEAKET_INTERNAL_TOKEN: k.internalToken }),
+    secret('demo-trust', 'trust', { PEAKET_TRUST_REDIS_URL: L.redisUrl, PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken }),
+    secret('demo-bundle-env', 'purchase', Object.fromEntries(Object.entries(files).map(([svc, values]) => [`${svc}.env`, `${Object.entries({ ...values, PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken }).sort(([a], [b]) => a.localeCompare(b)).map(([n, v]) => `${n}=${v}`).join('\n')}\n`]))),
     secret('demo-pg-simulator', 'purchase', { PG_SIMULATOR_SECRET_KEY: k.pgSim.secretKey }),
-    secret('demo-realtime', 'purchase', { PEAKET_SEAT_REDIS_URL: L.redisUrl, PEAKET_ADMISSION_JWKS: JSON.stringify(admissionKeys.jwks ?? { keys: [] }) }),
+    secret('demo-realtime', 'purchase', { PEAKET_SEAT_REDIS_URL: L.redisUrl, PEAKET_ADMISSION_JWKS: JSON.stringify(admissionKeys.jwks ?? { keys: [] }), PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken }),
     secret('demo-idv', 'core', { PEAKET_TEST_VERIFICATION_SECRET: k.idvSecret }),
     secret('demo-bootstrap', 'core', { 'bootstrap.json': JSON.stringify(o.bootstrap) }),
   ];
@@ -312,6 +347,9 @@ export function demoAppObjects() {
   const name = 'mock-idv';
   const l = labels(name);
   return [
+    // bundle 한 파드가 덮는 네 서비스를 게이트웨이 HTTPRoute가 쓰는 이름(purchase-svc·payment-svc·queue-svc)으로도 연다.
+    // HTTPRoute backendRef는 이름을 그대로 두고 네임스페이스만 purchase로 바꾸므로(계획 B7), 같은 이름의 Service가 필요하다
+    ...bundleServiceAliases(),
     { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'demo-trust-rules', namespace: 'trust', labels: labels('trust-rules') }, data: { 'rules.json': JSON.stringify(DEMO_TRUST_RULES) } },
     {
       apiVersion: 'apps/v1',
@@ -451,6 +489,8 @@ export function demoGatewayObjects(objects, origins = demoOrigins()) {
   const copy = rewriteOrigins(JSON.parse(JSON.stringify(objects)));
   const out = [];
   for (const o of copy) {
+    // 로컬 데모에는 OTel 수집기가 없다(추적을 끈다). otel 네임스페이스의 ReferenceGrant는 대상이 없어 싣지 않는다
+    if (o.metadata?.namespace === 'otel') continue;
     if (o.kind === 'HTTPRoute') {
       for (const rule of o.spec?.rules ?? []) {
         for (const ref of rule.backendRefs ?? []) if (BUNDLE_SERVICES.has(ref.name)) ref.namespace = 'purchase';
@@ -554,7 +594,9 @@ export function demoDatabaseInitSql(password) {
     `CREATE DATABASE ${DEMO_DATABASES.identity} OWNER ${DEMO_DB_USERS.identity};`,
     `CREATE USER ${DEMO_DB_USERS.ticket} PASSWORD '${p}';`,
     `CREATE DATABASE ${DEMO_DATABASES.ticket} OWNER ${DEMO_DB_USERS.ticket};`,
+    // ops 로그인 사용자 둘: 관제(ops_app)와 파트너 회차 취소(ops_partner). 그룹 역할 둘은 마이그레이션이 만든다
     `CREATE USER ${DEMO_DB_USERS.ops} PASSWORD '${p}';`,
+    `CREATE USER ${DEMO_DB_USERS.opsPartner} PASSWORD '${p}';`,
     `CREATE DATABASE ${DEMO_DATABASES.ops} OWNER ${DEMO_DB_USERS.ops};`,
     `CREATE USER ${DEMO_DB_USERS.purchase} PASSWORD '${p}';`,
     `CREATE DATABASE ${DEMO_DATABASES.purchase} OWNER ${DEMO_DB_USERS.purchase};`,
@@ -562,6 +604,11 @@ export function demoDatabaseInitSql(password) {
     `CREATE DATABASE ${DEMO_DATABASES.payment} OWNER ${DEMO_DB_USERS.payment};`,
     `CREATE DATABASE ${DEMO_DATABASES.core};`,
   ].join('\n');
+}
+
+/** ops 마이그레이션 뒤 로그인 사용자를 그룹 역할에 넣는다(행 보안 정책은 그룹 역할에 걸린다) */
+export function demoOpsRolesSql() {
+  return [`GRANT ops_app TO ${DEMO_DB_USERS.ops};`, `GRANT ops_partner TO ${DEMO_DB_USERS.opsPartner};`].join('\n');
 }
 
 /** core 마이그레이션 뒤 로그인 사용자를 그룹 역할에 넣는다(통합 시험 roles.ts와 같은 꼴) */

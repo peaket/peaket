@@ -9,11 +9,26 @@ image:
 
 env:
   PEAKET_ENV: local
+  # 빌드와 같은 값이어야 한다(apps/web/Dockerfile, tools/local/demo-objects.mjs의 DEMO_SERVER_ACTIONS_KEY)
+  NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: cGVha2V0LWRlbW8tc2VydmVyLWFjdGlvbnMta2V5LS0=
 
 service:
   replicas: 1
   port: 3000
   command: ["node", "server/start.mjs", "--port", "3000", "--host", "0.0.0.0"]
+  # 차트는 루트 파일 시스템을 읽기 전용으로 둔다(readOnlyRootFilesystem: true, ASVS 12.5.2).
+  # server/start.mjs는 시작할 때 .next/static·.next/serwist·public을 standalone 자리로 복사하므로
+  # 그 자리를 빈 볼륨으로 열어 준다(데모 전용 예외, deploy/envs/local/demo/README.md)
+  volumes:
+    - { name: next-static, emptyDir: {} }
+    - { name: next-serwist, emptyDir: {} }
+    - { name: next-cache, emptyDir: {} }
+    - { name: next-public, emptyDir: {} }
+  volumeMounts:
+    - { name: next-static, mountPath: /app/apps/web/.next/standalone/apps/web/.next/static }
+    - { name: next-serwist, mountPath: /app/apps/web/.next/standalone/apps/web/.next/serwist }
+    - { name: next-cache, mountPath: /app/apps/web/.next/standalone/apps/web/.next/cache }
+    - { name: next-public, mountPath: /app/apps/web/.next/standalone/apps/web/public }
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }

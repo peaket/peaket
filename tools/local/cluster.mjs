@@ -36,9 +36,9 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
-import { admissionJwks, admissionJwksConfigMap, admissionKeySet, ADMISSION_JWKS_CONFIGMAP, assertRatelimitBackend, echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, GATEWAY_RATELIMIT, gatewayCertArgs, gatewayContract, gatewayHostPorts, gatewayInstall, gatewayNodePortService, gatewayPortMappings, gatewaysAdmissionMode, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, RATELIMIT_REDIS, RATELIMIT_REDIS_IMAGE, ratelimitRedisObjects, ratelimitRedisSecret, ratelimitRedisTlsNames, readGatewayObjects } from './gateway-objects.mjs';
+import { admissionJwks, admissionJwksConfigMap, admissionKeySet, ADMISSION_JWKS_CONFIGMAP, assertRatelimitBackend, echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_NODE_PORTS, GATEWAY_PROXY_IMAGE, GATEWAY_RATELIMIT, gatewayCertArgs, gatewayContract, gatewayHostPorts, gatewayInstall, gatewayNodePortService, gatewayPortMappings, gatewaysAdmissionMode, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, RATELIMIT_REDIS, RATELIMIT_REDIS_IMAGE, ratelimitRedisObjects, ratelimitRedisSecret, ratelimitRedisTlsNames, readGatewayObjects } from './gateway-objects.mjs';
 import { MESH_NETPOL_POLICIES, MESH_NETPOL_SOURCE, meshNetpolContract, meshNetpolLayout, meshNetpolStandIns } from './mesh-netpol-objects.mjs';
-import { DEMO_CLUSTER, DEMO_DATABASES, DEMO_IMAGES as DEMO_WORKLOAD_IMAGES, DEMO_NAMESPACES, DEMO_PORTS, DEMO_WORKLOADS, demoAppObjects, demoCoreRolesSql, demoDatabaseInitSql, demoDatabaseUrls, demoExpectedWorkloads, demoGatewayObjects, demoGrpcNodePortService, demoNamespaces, demoOrigins, demoPostgresObjects, demoSecrets, demoTopics, demoValkeyObjects } from './demo-objects.mjs';
+import { DEMO_CLUSTER, DEMO_DATABASES, DEMO_GATEWAY_BASE_PORT, DEMO_IMAGES as DEMO_WORKLOAD_IMAGES, DEMO_NAMESPACES, DEMO_PORTS, DEMO_WORKLOADS, demoAppObjects, demoCoreRolesSql, demoDatabaseInitSql, demoDatabaseUrls, demoExpectedWorkloads, demoGatewayObjects, demoGrpcNodePortService, demoNamespaces, demoOpsRolesSql, demoOrigins, demoPostgresObjects, demoSecrets, demoTopics, demoValkeyObjects } from './demo-objects.mjs';
 import { DEMO_IMAGES as DEMO_NEW_IMAGES, buildImage as buildDemoImage } from './demo-images.mjs';
 import { DEMO_CONTRACT_FILE, prepareDemoSecrets } from './demo-auth.mjs';
 import { applySeed, checkSeed } from './demo-seed.mjs';
@@ -167,6 +167,16 @@ async function up(argv = []) {
 const gatewayBasePort = () => Number(process.env.PEAKET_GATEWAY_BASE_PORT || GATEWAY_BASE_PORT);
 
 /**
+ * 데모의 정본 호스트 차례대로 이 PC 포트를 매긴다: gw-fan 18441, gw-queue 18442, gw-partner 18443, gw-ops 18444, gw-scanner 18445.
+ * (GATEWAY_NAMES 차례는 queue가 먼저라 `gateways`·v1 명령과 값이 다르다. 데모만 이 차례를 쓴다)
+ * @param {number} basePort
+ */
+export function demoGatewayPortMappings(basePort) {
+  const order = ['gw-fan', 'gw-queue', 'gw-partner', 'gw-ops', 'gw-scanner'];
+  return order.map((gw, i) => ({ containerPort: GATEWAY_NODE_PORTS[gw], hostPort: basePort + i, listenAddress: '127.0.0.1', protocol: 'TCP' }));
+}
+
+/**
  * kind 클러스터 설정: deploy/local/kind.yaml을 그대로 두고 control-plane 노드에 게이트웨이 포트 매핑 다섯(gatewayPortMappings)만 더한다
  * (docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법'). up(--v0-only 포함)·v0·v1·gateways 어느 것이 클러스터를 만들어도 같은 설정이다
  * @param {number} basePort 이 PC 포트의 시작 값
@@ -175,7 +185,10 @@ export function kindClusterConfig(basePort, o = {}) {
   const config = parseYaml(readFileSync(join(REPO, 'deploy', 'local', 'kind.yaml'), 'utf8'));
   const node = (config.nodes ?? []).find((n) => n.role === 'control-plane');
   if (!node) throw new Error('deploy/local/kind.yaml에 control-plane 노드가 없다');
-  node.extraPortMappings = [...(node.extraPortMappings ?? []), ...gatewayPortMappings(basePort)];
+  // 데모는 정본 호스트 차례(www·api 18441 → queue 18442 → partner 18443 → ops 18444 → scanner 18445)로 매핑한다.
+  // 다른 명령(gateways·v1)은 지금처럼 GATEWAY_NAMES 차례(= queue가 먼저)를 쓴다
+  const mappings = o.demo ? demoGatewayPortMappings(basePort) : gatewayPortMappings(basePort);
+  node.extraPortMappings = [...(node.extraPortMappings ?? []), ...mappings];
   if (o.demo) {
     // identity gRPC 19051 → 노드 30051, 모의 기관 18920 → 노드 30189(127.0.0.1만)
     node.extraPortMappings.push(
@@ -1236,7 +1249,12 @@ function demoHostPorts() {
   };
   check(DEMO_PORTS.grpcNodePort, DEMO_PORTS.grpc, 'identity gRPC');
   check(DEMO_PORTS.idvNodePort, DEMO_PORTS.idv, '모의 기관');
-  return gatewayHostPorts(bindings);
+  const gateways = gatewayHostPorts(bindings);
+  const expected = { 'gw-fan': DEMO_GATEWAY_BASE_PORT, 'gw-queue': DEMO_GATEWAY_BASE_PORT + 1, 'gw-partner': DEMO_GATEWAY_BASE_PORT + 2, 'gw-ops': DEMO_GATEWAY_BASE_PORT + 3, 'gw-scanner': DEMO_GATEWAY_BASE_PORT + 4 };
+  for (const [gw, port] of Object.entries(expected)) {
+    if (gateways[gw] !== port) throw new Error(`게이트웨이 ${gw}의 이 PC 포트가 ${port}가 아니다: ${gateways[gw]}. 이 클러스터는 데모 포트 차례(www 18441·queue 18442…)로 만들지 않았다. \`node tools/local/cluster.mjs down\` 뒤 \`demo\`로 다시 만든다`);
+  }
+  return gateways;
 }
 
 /** 객체 목록을 apply(목록은 List 하나) */
@@ -1417,11 +1435,13 @@ export async function demo(argv = []) {
   await demoKafka();
   step('마이그레이션 잡(identity·ticket·core·ops·purchase·payment)');
   const su = `postgres://postgres:${secrets.dbPassword}@demo-postgres.purchase.svc.cluster.local:5432/${DEMO_DATABASES.core}`;
+  const suOps = `postgres://postgres:${secrets.dbPassword}@demo-postgres.purchase.svc.cluster.local:5432/${DEMO_DATABASES.ops}`;
   const dbUrls = demoDatabaseUrls(secrets.dbPassword);
   await demoJob({ name: 'demo-migrate-identity', namespace: 'core', image: DEMO_WORKLOAD_IMAGES['identity-svc'], secret: 'demo-identity', command: ['node', 'scripts/migrate.mjs'] });
   await demoJob({ name: 'demo-migrate-ticket', namespace: 'ticket', image: DEMO_WORKLOAD_IMAGES['ticket-svc'], secret: 'demo-ticket', command: ['node', 'scripts/migrate.mjs'] });
   await demoJob({ name: 'demo-migrate-core', namespace: 'core', image: DEMO_WORKLOAD_IMAGES['core-svc'], env: [{ name: 'PEAKET_DATABASE_URL', value: su }], command: ['node', 'scripts/migrate.mjs'] });
-  await demoJob({ name: 'demo-migrate-ops', namespace: 'core', image: DEMO_WORKLOAD_IMAGES['ops-svc'], secret: 'demo-ops', command: ['node', 'scripts/migrate.mjs'] });
+  // ops 마이그레이션은 ops_app·ops_partner 그룹 역할을 만든다. 역할을 만들 수 있는 슈퍼유저 주소로 돌린다
+  await demoJob({ name: 'demo-migrate-ops', namespace: 'core', image: DEMO_WORKLOAD_IMAGES['ops-svc'], env: [{ name: 'PEAKET_DATABASE_URL', value: suOps }], command: ['node', 'scripts/migrate.mjs'] });
   for (const svc of ['purchase', 'payment']) {
     await demoJob({
       name: `demo-migrate-${svc}`,
@@ -1432,6 +1452,7 @@ export async function demo(argv = []) {
     });
   }
   for (const stmt of demoCoreRolesSqlExport(secrets.dbPassword).split('\n')) if (stmt.trim()) await psqlDemo(stmt);
+  for (const stmt of demoOpsRolesSql().split('\n')) if (stmt.trim()) await psqlDemo(stmt);
 
   step(`워크로드 ${workloads.length}개(공용 차트, deploy/envs/local/demo)`);
   for (const w of workloads) {

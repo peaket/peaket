@@ -14,9 +14,16 @@ env:
   PG_SIMULATOR_HOST: 0.0.0.0
   PG_SIMULATOR_PORT: "8790"
 
+# pg-simulator는 관리 포트(/ready·/livez)가 없다. 차트 기본 프로브를 끄고 준비 판정은 파드 Running으로 본다
+probes:
+  enabled: false
+
 service:
   replicas: 1
   port: 8790
+  # 차트 기본 명령(template/dist/main.js)은 pg-simulator 이미지에 없는 파일이라 죽는다.
+  # 이미지가 가진 dist/main.js를 직접 부른다
+  command: ["node", "dist/main.js"]
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 128Mi }
