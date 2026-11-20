@@ -1,6 +1,8 @@
 # Kyverno 공식 Helm 차트 값(차트 3.10.0, appVersion v1.20.0, BUILD_ORDER BAS-150·BAT-085, ADR-0318).
 # 정본: docs/devops.md §4.3 '이미지 입장 정책'·'온세일 확장을 막지 않기', docs/infra-handover.md §3.1, ADR-0102 결정 3.
 # kind 시험은 이 파일을 `helm upgrade --install kyverno kyverno/kyverno -n kyverno -f <이 파일>`로 쓴다.
+# kind 노드에는 관제 풀 라벨이 없어 tools/local/cluster.mjs의 kyverno 명령이 노드에 peaket.io/pool=ops 라벨과
+# peaket-control 우선순위 클래스를 붙인다. 운영 값(nodeSelector·priorityClassName)은 그대로다(BAT-085 RV-01).
 # 운영 설치는 ArgoCD Application(deploy/platform/kyverno/application.yaml)이 맡는다. 정책은 deploy/policies/kyverno/envs/<환경>을 적용한다.
 # 이미지는 판(v1.20.0)과 다이제스트를 함께 고정한다. 차트가 `<repository>:<tag>`로 렌더하므로 tag 칸에 `v1.20.0@sha256:…`를 적는다.
 # 다이제스트는 2026-11-20 GHCR의 여러 플랫폼 목록(index) 다이제스트다.

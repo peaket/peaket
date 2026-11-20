@@ -988,6 +988,9 @@ async function meshNetpol() {
  * Kyverno CEL 정책을 kind에 설치하고 그 환경의 정책을 적용한다(BUILD_ORDER BAS-150·BAT-085, ADR-0318).
  * 배포 값은 deploy/platform/kyverno/values.yaml(복제 3·PDB·관제 풀·이미지 다이제스트)이고, 정책은
  * deploy/policies/kyverno/envs/<환경>/policies.yaml(생성 파일)이다. e2e 시험은 이 명령 뒤에 파드를 만들어 입장을 본다.
+ * kind 노드에는 운영의 관제 풀 라벨(peaket.io/pool=ops)이 없어 네 컨트롤러가 Pending이 된다. 운영 값을 그대로 두고
+ * 노드에 같은 라벨을 달고 우선순위 클래스(peaket-control)를 적용해 스케줄되게 한다(BAT-085 RV-01. kind 노드는 테인트가 없어
+ * toleration은 무해하다).
  * `--env demo|staging|prod`(기본 demo). 데모는 감사 모드라 위반을 기록하고, 스테이징·운영은 거부한다.
  * @param {string[]} argv
  */
@@ -1008,6 +1011,11 @@ async function kyverno(argv = []) {
   run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
   for (const t of ['kind', 'kubectl', 'helm']) await ensureTool(t);
   if (!existsSync(KUBECONFIG)) await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
+  // 운영 values.yaml의 nodeSelector(peaket.io/pool: ops)·priorityClassName(peaket-control)을 그대로 쓰기 위해
+  // kind 노드에 같은 라벨을 달고 우선순위 클래스를 적용한다(운영 값은 고치지 않는다, BAT-085 RV-01)
+  step('kind 노드에 관제 풀 라벨(peaket.io/pool=ops)과 우선순위 클래스(peaket-control)');
+  await kubectl(['label', 'nodes', '--all', 'peaket.io/pool=ops', '--overwrite']);
+  await kubectl(['apply', '-f', join(REPO, 'deploy', 'policies', 'priority-classes.yaml')]);
   await preloadLocalImages(PINNED.kyvernoImages);
   step(`Kyverno 차트 ${PINNED.kyvernoChartVersion}(appVersion ${PINNED.kyvernoVersion}) 설치: 복제 3·PDB minAvailable 2·관제 풀·이미지 다이제스트 고정`);
   await helm(['repo', 'add', 'kyverno', PINNED.kyvernoChartRepo, '--force-update']);

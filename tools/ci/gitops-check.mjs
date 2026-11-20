@@ -7,6 +7,7 @@
 //   --image  값 파일과 별개로 확인할 이미지(여러 번 쓸 수 있다). 이름=저장소@다이제스트 꼴
 // 출력: 검사마다 `ok <검사>`·`skip <검사>: <까닭>`·`fail <검사>: <까닭>` 한 줄, 마지막에 요약.
 // 검사: render(최종 오버레이) · D-T28(운영 메시 필수) · D-T33(환경별 허용 레지스트리) · digest(태그 금지) · signature(서명·출처).
+// Helm 렌더는 ArgoCD ApplicationSet과 같은 값 파일(환경 값 하나)로 한다(deploy/projects/applicationsets.yaml, docs/devops.md §5.2).
 // 값 파일(deploy/envs/<환경>)이 아직 없으면 '아직 승격 없음'을 남기고 건너뛴다(조용한 통과가 아니다).
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -114,7 +115,8 @@ export function imageOfValues(name, values) {
 }
 
 /**
- * 최종 오버레이를 읽는다. 메시 객체는 늘 읽고, 환경 값이 있으면 배포 단위 값과 합쳐 Helm으로 렌더한다.
+ * 최종 오버레이를 읽는다. 메시 객체는 늘 읽고, 환경 값이 있으면 ArgoCD와 같은 값 파일(환경 값 하나)로 Helm 렌더한다.
+ * ArgoCD ApplicationSet도 valueFiles에 `{{ .path.path }}`(deploy/envs/<환경>/<서비스>.yaml) 하나만 쓴다(docs/devops.md §5.2, RV-02).
  * 환경 값이 없으면 배포 단위 값으로 만든 가벼운 Deployment(환경 변수만)를 쓴다. Helm이 없거나 실패하면 문제로 돌려준다.
  * @param {string} root
  * @param {string} env
@@ -160,7 +162,9 @@ export function renderOverlay(root, env, o = {}) {
       const base = workloads.values.get(e.name);
       if (!base) continue; // 위에서 문제로 남겼다
       const namespace = e.values.namespace ?? 'platform';
-      const args = ['template', e.name, join(root, CHART_DIR), '--namespace', namespace, '-f', join(root, WORKLOAD_VALUES_DIR, e.name, 'values.yaml'), '-f', join(root, e.file)];
+      // ArgoCD와 같은 값 파일 하나. 배포 단위 값(deploy/workloads/<서비스>/values.yaml)의 배치 값은
+      // 승격 값 파일이 이미 이어받았다(tools/ci/promote-plan.mjs, RV-02). 둘을 함께 넘기면 ArgoCD가 보는 것과 달라진다
+      const args = ['template', e.name, join(root, CHART_DIR), '--namespace', namespace, '-f', join(root, e.file)];
       try {
         const text = run(helm, args);
         for (const d of text.split(/^---$/m)) {

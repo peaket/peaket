@@ -6,11 +6,15 @@
 //   또는 { "services": [...] }. `repository`는 새 파일을 만들 때만 쓴다.
 // - `--check`는 후보의 다이제스트가 이미 값 파일에 있는지 본다. 다르거나 파일이 없으면 실패(종료 코드 1)다.
 // - `--write`는 바뀐 배포 단위의 파일만 고친다(주석을 지우지 않게 digest 줄만 바꾼다).
+// - 새로 만드는 환경 값 파일은 배포 단위 값(deploy/workloads/<서비스>/values.yaml)의
+//   service.nodeSelector·tolerations·priorityClassName을 이어받는다. ArgoCD ApplicationSet이 환경 값 파일 하나만
+//   Helm 값으로 쓰므로(deploy/projects/applicationsets.yaml) 노드 배치 값이 그 파일에 있어야 한다(docs/devops.md §5.2, RV-02).
 // 쓰는 법: node tools/ci/promote-plan.mjs --env demo --tag v1.2.3 [--candidates <파일>] [--write] [--body <파일>] [--summary <파일>]
 //           node tools/ci/promote-plan.mjs --env prod --tag v1.2.3 --check
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 /** 승격 환경(docs/devops.md §5.1·§5.2). local·ci는 kind 시험이라 승격 PR을 만들지 않는다 */
 export const PROMOTE_ENVS = ['local', 'ci', 'staging', 'demo', 'prod'];
@@ -21,6 +25,8 @@ export const PROD_MANUAL_MERGE = true;
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const SERVICE = /^[a-z][a-z0-9-]*$/;
+/** 배포 단위 기본 값 자리(ArgoCD ApplicationSet은 환경 값 하나만 Helm 값으로 쓴다) */
+const WORKLOAD_VALUES_DIR = 'deploy/workloads';
 
 /** 후보 목록 하나를 { service, repository?, digest }로 맞춘다. 꼴이 틀리면 던진다 */
 function normaliseEntry(raw) {
@@ -125,9 +131,33 @@ export function setDigest(text, digest) {
   return lines.join('\n');
 }
 
+/**
+ * 새 환경 값 파일이 이어받을 배치 값(deploy/workloads/<서비스>/values.yaml의 service 칸 가운데 셋).
+ * ArgoCD ApplicationSet은 환경 값 파일 하나만 Helm 값으로 쓰므로(deploy/projects/applicationsets.yaml, `{{ .path.path }}`),
+ * 노드 배치 값이 환경 값에 없으면 차트 기본값으로 돌아가 `peaket-hotpath-placement` 정책이 거부한다(BAT-085 RV-02).
+ * @param {any} workloadValues
+ */
+export function placementOf(workloadValues) {
+  const service = workloadValues?.service;
+  if (!service || typeof service !== 'object' || Array.isArray(service)) return {};
+  const out = {};
+  if (service.nodeSelector && typeof service.nodeSelector === 'object' && !Array.isArray(service.nodeSelector) && Object.keys(service.nodeSelector).length > 0) out.nodeSelector = service.nodeSelector;
+  if (Array.isArray(service.tolerations) && service.tolerations.length > 0) out.tolerations = service.tolerations;
+  if (typeof service.priorityClassName === 'string' && service.priorityClassName !== '') out.priorityClassName = service.priorityClassName;
+  return out;
+}
+
+/** 배포 단위 값 파일에서 배치 값을 읽는다(파일이 없으면 빈 값). YAML이 깨졌으면 던진다 */
+function readPlacement(root, service) {
+  const file = join(root, WORKLOAD_VALUES_DIR, service, 'values.yaml');
+  if (!existsSync(file)) return {};
+  return placementOf(parseYaml(readFileSync(file, 'utf8')));
+}
+
 /** 새 환경 값 파일(첫 승격 PR). 같은 다이제스트만 쓴다. repository가 없으면 GHCR의 공개 패키지 이름을 쓴다 */
-function newFileText(entry, env) {
+function newFileText(entry, env, placement = {}) {
   const repository = entry.repository ?? `ghcr.io/peaket/${entry.service}`;
+  const placementLines = Object.keys(placement).length === 0 ? [] : ['', ...stringifyYaml({ service: placement }).trimEnd().split('\n')];
   return [
     `# 승격 PR이 만든 환경 값(docs/devops.md §5.3, ADR-0169). 같은 다이제스트만 쓰고 다시 빌드하지 않는다.`,
     `name: ${entry.service}`,
@@ -135,6 +165,7 @@ function newFileText(entry, env) {
     'image:',
     `  repository: ${repository}`,
     `  digest: ${entry.digest}`,
+    ...placementLines,
     '',
     'env:',
     `  PEAKET_ENV: ${env}`,
@@ -159,7 +190,16 @@ export function promotionPlan(o) {
     const before = existsSync(full) ? readFileSync(full, 'utf8') : undefined;
     const beforeDigest = before === undefined ? undefined : readDigest(before);
     const action = before === undefined ? 'create' : beforeDigest === c.digest ? 'unchanged' : 'update';
-    return { ...c, file, action, ...(beforeDigest ? { before: beforeDigest } : {}), ...(before === undefined ? {} : { text: before }) };
+    // 새 파일만 배포 단위 값의 배치 값을 이어받는다(있는 파일은 손으로 고친 칸을 지키려 digest 줄만 바꾼다)
+    const placement = before === undefined ? readPlacement(root, c.service) : {};
+    return {
+      ...c,
+      file,
+      action,
+      ...(beforeDigest ? { before: beforeDigest } : {}),
+      ...(before === undefined ? { placement } : {}),
+      ...(before === undefined ? {} : { text: before }),
+    };
   });
   return {
     env,
@@ -176,7 +216,7 @@ export function applyPlan(plan, root = '.') {
   for (const entry of plan.changes) {
     const full = join(resolve(root), entry.file);
     mkdirSync(dirname(full), { recursive: true });
-    const text = entry.text === undefined ? newFileText(entry, plan.env) : setDigest(entry.text, entry.digest);
+    const text = entry.text === undefined ? newFileText(entry, plan.env, entry.placement ?? {}) : setDigest(entry.text, entry.digest);
     writeFileSync(full, text);
     out.push({ service: entry.service, file: entry.file, digest: entry.digest, action: entry.action });
   }
