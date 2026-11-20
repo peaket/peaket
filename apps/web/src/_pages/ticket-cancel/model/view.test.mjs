@@ -8,6 +8,7 @@ import { errorOf } from './cancel-flow.ts';
 import { quoteView, resultView, resultViewOf, refundMethodText } from './view.ts';
 
 const live = readFileSync(new URL('../ui/TicketCancelLive.tsx', import.meta.url), 'utf8');
+const resultCard = readFileSync(new URL('../ui/ResultCard.tsx', import.meta.url), 'utf8');
 const viewSource = readFileSync(new URL('./view.ts', import.meta.url), 'utf8');
 const flowSource = readFileSync(new URL('./cancel-flow.ts', import.meta.url), 'utf8');
 
@@ -133,7 +134,8 @@ test('[ASVS v5.0.0-3.2.2] transfer-refund:v5.0.0-3.2.2 SCR038_견적·결과·�
   assert.match(live, /writePending\(tabStore, \{ ticketId, key: keyRef\.current \}\)/);
   assert.doesNotMatch(live, /sessionStorage\.setItem\([^)]*(?:account|refund)/i);
   // 결과 카드의 SCR-060 안내는 계좌가 필요한 202에만 붙는다
-  const notice = live.indexOf('환급할 때 알림으로 계좌를 다시 받습니다');
+  const notice = resultCard.indexOf('환급할 때 알림으로 계좌를 다시 받습니다');
   assert.ok(notice > 0, 'SCR-060 안내 문구가 없다');
-  assert.ok(live.lastIndexOf("result.kind === 'pending-account'", notice) > 0, '안내 문구가 pending-account 분기 밖에 있다');
+  assert.ok(resultCard.lastIndexOf("result.kind === 'pending-account'", notice) > 0, '안내 문구가 pending-account 분기 밖에 있다');
+  assert.doesNotMatch(resultCard, /dangerouslySetInnerHTML|\.innerHTML\b/);
 });

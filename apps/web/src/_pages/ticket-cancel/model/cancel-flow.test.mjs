@@ -3,7 +3,7 @@
 // 재인증 purpose·202 세 상태·403/503/422/409 문구·멱등키 규칙·재인증 왕복 표시(계좌 없음)를 본다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { errorOf, keyForBody, PENDING_KEY, reauthPurposeOf, resultViewOf, takePending, writePending } from './cancel-flow.ts';
+import { errorOf, keyForBody, PENDING_KEY, reauthPurposeOf, resultViewOf, sendFailureOf, takePending, writePending } from './cancel-flow.ts';
 
 const PROBLEM = 'https://problems.peaket.example';
 
@@ -130,4 +130,52 @@ test('SCR038_재인증_왕복_표시에는_계좌가_없다', () => {
   };
   assert.doesNotThrow(() => writePending(broken, { ticketId: 't1', key: 'k1' }));
   assert.equal(takePending(broken), null);
+});
+
+test('SCR038_503_reauth-unavailable은_토큰을_버리고_새_재인증을_받는다', () => {
+  // 503 reauth-unavailable은 확인기(공개키·jti 저장소)를 못 쓴 것이라 같은 토큰으로 다시 보내지 않는다.
+  // 화면이 실제로 쓰는 상태 전이(토큰 폐기·마지막 확인 화면 소멸·멱등 키 유지)를 값으로 직접 단언한다.
+  for (const kind of ['reauth-unavailable', 'reauth']) {
+    assert.deepEqual(sendFailureOf(kind, 'tok-old'), { token: null, awaitingConfirm: false, resetAttempt: false, needAccount: false }, kind);
+  }
+  // 422 refund-account-required도 토큰을 버리고 계좌 칸을 연다
+  assert.deepEqual(sendFailureOf('account-required', 'tok-old'), { token: null, awaitingConfirm: false, resetAttempt: false, needAccount: true });
+  // 400 invalid-body는 재인증 앞에서 막혀 토큰을 쓰지 않았다. 토큰은 지키고 키만 버린다(계좌만 고쳐 같은 토큰으로 다시 보낸다)
+  assert.deepEqual(sendFailureOf('account-invalid', 'tok-old'), { token: 'tok-old', awaitingConfirm: true, resetAttempt: true, needAccount: false });
+  // 409·404·의존성 오류는 토큰을 버리고, 같은 본문·같은 키로 다시 보낼 수 있게 키는 지킨다(RV-04)
+  for (const kind of ['transfer', 'entry-started', 'event-cancelled', 'conflict', 'not-payer', 'not-found', 'dependency', 'other']) {
+    const failed = sendFailureOf(kind, 'tok-old');
+    assert.equal(failed.token, null, `${kind}: 토큰을 버린다`);
+    assert.equal(failed.awaitingConfirm, false, `${kind}: 마지막 확인 화면을 닫는다`);
+    assert.equal(failed.resetAttempt, false, `${kind}: 같은 본문은 같은 키로 다시 보낸다`);
+  }
+  // 토큰이 없던 때도 null로 두고 확인 화면을 열지 않는다
+  assert.deepEqual(sendFailureOf('reauth-unavailable', null), { token: null, awaitingConfirm: false, resetAttempt: false, needAccount: false });
+});
+
+test('SCR038_5xx_오류는_문의용_traceId만_보인다', () => {
+  // G3: 5xx는 서버 title·detail 대신 문의용 traceId만 그린다(frontend §4.1 '오류 모양')
+  const reauth = errorOf({ status: 503, type: 'reauth-unavailable', traceId: 'trc-503', title: '서버 제목', detail: '서버 설명' });
+  assert.equal(reauth.kind, 'reauth-unavailable');
+  assert.equal(reauth.traceId, 'trc-503');
+  assert.equal(reauth.text.includes('trc-503'), false, '본문 문구에 섞지 않는다');
+  assert.equal(reauth.text.includes('서버 제목'), false);
+  assert.equal(reauth.text.includes('서버 설명'), false);
+  assert.equal(errorOf({ status: 503, type: 'dependency-unavailable', traceId: 'trc-dep' }).traceId, 'trc-dep');
+  const internal = errorOf({ status: 500, type: `${PROBLEM}/internal`, traceId: 'trc-500' });
+  assert.equal(internal.kind, 'other');
+  assert.equal(internal.traceId, 'trc-500');
+  // 4xx에는 traceId를 붙이지 않는다(문의용 번호는 서버 오류에만)
+  for (const problem of [
+    { status: 403, type: 'reauth-required', traceId: 'trc-403' },
+    { status: 409, type: 'transfer-pending', traceId: 'trc-409' },
+    { status: 422, type: 'refund-account-required', traceId: 'trc-422' },
+    { status: 400, type: 'invalid-body', traceId: 'trc-400' },
+  ]) {
+    assert.equal(errorOf(problem).traceId, undefined, `${problem.status} ${problem.type}`);
+  }
+  // 모양이 틀린 값은 버린다
+  for (const traceId of ['', 7, null, undefined, {}, ['trc']]) {
+    assert.equal(errorOf({ status: 503, type: 'dependency-unavailable', traceId }).traceId, undefined, JSON.stringify(traceId));
+  }
 });

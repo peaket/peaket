@@ -8,6 +8,9 @@ import { readFileSync } from 'node:fs';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 const live = read('./TicketCancelLive.tsx');
+const loader = read('./TicketCancelLiveLoader.tsx');
+const accountSection = read('./AccountSection.tsx');
+const resultCard = read('./ResultCard.tsx');
 const page = read('./TicketCancelPage.tsx');
 const reauthReturn = read('../../../shared/lib/reauth-return.ts');
 const tickets = read('../../../../../../packages/api-client/src/gen/endpoints/tickets/tickets.ts');
@@ -56,14 +59,17 @@ test('[ASVS v5.0.0-3.5.3] transfer-refund:v5.0.0-3.5.3 SCR038_취소는_POST로�
 test('SCR038_계좌_칸은_재인증_뒤에_견적이_필요할_때만_보이고_본문에만_실린다', () => {
   // 계좌 칸은 견적이 필요하고 재인증에서 돌아와 확인하는 중일 때만 그린다(d5 §5.20 ⑤ → ⑦).
   // 재인증 왕복은 전체 페이지 이동이라 미리 적은 계좌가 사라지므로, 돌아온 뒤에 받는다.
-  assert.match(live, /\{needAccount && token && awaitingConfirm \? \(\s*<section/);
+  // 무거운 입력 부품(Select·TextField·은행 목록)은 늦게 싣는 AccountSection에 둔다.
+  assert.match(live, /\{needAccount && token && awaitingConfirm \? \(\s*<AccountSection/);
   assert.equal(count(live, /\{needAccount \? \(\s*<section/g), 0, '재인증 전에 계좌 칸을 그리지 않는다');
+  assert.match(live, /dynamic\(\(\) => import\('\.\/AccountSection'\)\.then\(\(m\) => m\.AccountSection\)/);
+  assert.doesNotMatch(live, /from '@peaket\/ds\/(?:Select|TextField)'/);
   // 견적 줄은 계좌를 입력하기 전에 '입력한 환불 계좌'라고 쓰지 않는다(RV-13)
   assert.match(live, /refundMethodText\(needAccount, accountReady\)/);
   assert.doesNotMatch(live, /needAccount \? '입력한 환불 계좌' : '원결제 수단'/);
   // 은행 목록은 공용 표만 쓰고 화면에 복제하지 않는다
-  assert.match(live, /REFUND_BANKS\.map\(\(b\) => \(\{ value: b\.code, label: b\.label \}\)\)/);
-  assert.doesNotMatch(live, /신한은행|국민은행|카카오뱅크/);
+  assert.match(accountSection, /REFUND_BANKS\.map\(\(b\) => \(\{ value: b\.code, label: b\.label \}\)\)/);
+  assert.doesNotMatch(accountSection, /신한은행|국민은행|카카오뱅크/);
   // 계좌는 요청 본문에만 실리고, 저장 표시·주소·로그로 내보내지 않는다
   assert.match(live, /refundAccountShape\(body\.refundAccount\)/);
   assert.match(live, /body\.refundAccount = shape\.value/);
@@ -83,7 +89,9 @@ test('SCR038_재인증_뒤에만_POST하고_503은_새_재인증을_받는다', 
   assert.match(live, /if \(r\.kind === 'token'\) \{\s*setToken\(r\.token\);\s*setAwaitingConfirm\(true\);/);
   // 403 reauth-required·503 reauth-unavailable은 토큰만 버리고 새 재인증을 받는다.
   // 같은 본문이므로 멱등 키·본문 지문은 그대로 둔다(처리기가 던지면 키 행이 남지 않는다, RV-04).
-  assert.match(live, /setToken\(null\);\s*setAwaitingConfirm\(false\);/);
+  assert.match(live, /sendFailureOf\(mapped\.kind, reauthToken\)/);
+  assert.match(live, /setToken\(failed\.token\);/);
+  assert.match(live, /setAwaitingConfirm\(failed\.awaitingConfirm\);/);
   assert.doesNotMatch(
     live,
     /if \(mapped\.kind === 'reauth' \|\| mapped\.kind === 'reauth-unavailable'\) \{\s*attemptRef\.current = null;\s*keyRef\.current = null;/,
@@ -96,17 +104,60 @@ test('SCR038_재인증_뒤에만_POST하고_503은_새_재인증을_받는다', 
   assert.match(live, /writePending\(tabStore, \{ ticketId, key: keyRef\.current \}\)/);
 });
 
+/**
+ * M4: 503 reauth-unavailable 뒤 토큰을 버리지 않고 같은 토큰으로 다시 보내는 틀린 구현은
+ * 이 16개 시험과 web 전체를 통과했다(계획 `## 검증`). 그래서 토큰 폐기·확인 화면 소멸이
+ * '어딘가에 있는지'가 아니라 send의 catch에서 조건 없이 실행되는지를 본다.
+ */
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+function blockBody(src, openAt) {
+  assert.equal(src[openAt], '{', `${openAt} 위치가 여는 중괄호가 아니다`);
+  let depth = 0;
+  for (let i = openAt; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return src.slice(openAt + 1, i);
+  }
+  throw new Error('닫는 중괄호를 찾지 못했다');
+}
+/** 문자열 안이 아닌 곳에서 needle이 중괄호 깊이 0에 있는지(if·삼항 안에 있으면 깊이 1 이상) */
+function topLevelHas(body, needle) {
+  let depth = 0;
+  for (let i = 0; i <= body.length - needle.length; i++) {
+    const c = body[i];
+    if (c === '{') depth++;
+    else if (c === '}') depth--;
+    else if (depth === 0 && body.startsWith(needle, i)) return true;
+  }
+  return false;
+}
+
+test('SCR038_503_reauth-unavailable_뒤_토큰_폐기와_확인_화면_소멸을_직접_단언한다', () => {
+  const code = stripComments(live);
+  const sendAt = code.indexOf('async (reauthToken: string) => {');
+  assert.ok(sendAt > 0, 'send 함수를 찾지 못했다');
+  const sendBody = blockBody(code, code.indexOf('{', sendAt));
+  // 503·403 전용 분기를 send 안에 두지 않는다: 어떤 오류도 토큰 폐기를 건너뛰지 않는다
+  assert.doesNotMatch(sendBody, /reauth-unavailable|status\s*===\s*503/, 'send가 503을 따로 가른다');
+  const catchAt = sendBody.indexOf('catch (e) {');
+  assert.ok(catchAt > 0, 'catch를 찾지 못했다');
+  const catchBody = blockBody(sendBody, sendBody.indexOf('{', catchAt));
+  // 503을 포함한 모든 오류에서 토큰 폐기·확인 화면 소멸은 catch 최상위에서 무조건 한다
+  assert.ok(topLevelHas(catchBody, 'setToken(failed.token)'), 'setToken이 조건 안에 있다');
+  assert.ok(topLevelHas(catchBody, 'setAwaitingConfirm(failed.awaitingConfirm)'), 'setAwaitingConfirm이 조건 안에 있다');
+  assert.match(catchBody, /sendFailureOf\(mapped\.kind, reauthToken\)/);
+});
+
 test('SCR038_202_세_상태와_409_안내를_화면이_쓴다', () => {
   for (const text of ['환급 완료', '환급 보류', '환급 대기', '환급 지연']) {
-    assert.ok(live.includes(text), `결과 카드에 '${text}'가 없다`);
+    assert.ok(resultCard.includes(text), `결과 카드에 '${text}'가 없다`);
   }
-  assert.match(live, /result\.kind === 'refunded'/);
-  assert.match(live, /result\.kind === 'deferred'/);
-  assert.match(live, /result\.kind === 'pending-account'/);
-  assert.match(live, /result\.kind === 'pending'/);
+  assert.match(resultCard, /result\.kind === 'refunded'/);
+  assert.match(resultCard, /result\.kind === 'deferred'/);
+  assert.match(resultCard, /result\.kind === 'pending-account'/);
+  assert.match(resultCard, /result\.kind === 'pending'/);
   // SCR-060 안내는 pending-account에만
-  const notice = live.indexOf('환급할 때 알림으로 계좌를 다시 받습니다');
-  assert.ok(live.lastIndexOf("result.kind === 'pending-account'", notice) > 0);
+  const notice = resultCard.indexOf('환급할 때 알림으로 계좌를 다시 받습니다');
+  assert.ok(resultCard.lastIndexOf("result.kind === 'pending-account'", notice) > 0);
   // 409 안내 링크: 양도 요청 중은 양도 화면, 나머지는 예매 내역
   assert.match(live, /error\.kind === 'transfer' \?/);
   assert.match(live, /href=\{`\/my\/tickets\/\$\{encodeURIComponent\(ticketId\)\}\/transfer`\}/);
@@ -115,18 +166,39 @@ test('SCR038_202_세_상태와_409_안내를_화면이_쓴다', () => {
   // 공제율은 서버 비율(0.2)을 퍼센트(20%)로 보인다
   assert.match(live, /Math\.round\(quote\.deductionRate \* 100\)/);
   // 환급 수단은 '원결제 수단'으로만 쓰고 카드 끝 4자리는 그리지 않는다
-  assert.match(live, /'원결제 수단'/);
-  assert.doesNotMatch(live, /끝 ?\d{4}|카드\(끝/);
+  assert.match(resultCard, /'원결제 수단'/);
+  assert.doesNotMatch(resultCard, /끝 ?\d{4}|카드\(끝/);
 });
 
 test('SCR038_미리보기는_?state와_목업_티켓으로_남고_UUID만_실제_화면이다', () => {
   assert.match(page, /const TICKET_ID = \/\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{12\}\$\//);
   assert.match(page, /if \(!getTicket\(ticketId\)\) \{/);
   assert.match(page, /if \(!TICKET_ID\.test\(ticketId\)\) notFound\(\);/);
-  assert.match(page, /return <TicketCancelLive ticketId=\{ticketId\} \/>;/);
+  assert.match(page, /return <TicketCancelLiveLoader ticketId=\{ticketId\} \/>;/);
   assert.match(page, /resolvePreviewState\(sp, SCR038_STATES, fallback\)/);
   assert.match(page, /<PreviewSwitcher/);
   assert.match(page, /REFUND_BANKS/);
   // 실제 화면은 목업 좌석·요금 상수를 쓰지 않는다
   assert.doesNotMatch(live, /CANCEL_SEATS|FEE_TABLE|tkt-lumen/);
+});
+
+test('SCR038_첫_JS를_줄이려고_실제_화면과_계좌·결과를_늦게_싣는다', () => {
+  // 첫 화면(HTML)은 실행부를 늦게 싣는다. 실제 화면도 동적 import라야 첫 JS에 안 실린다(frontend §5.8)
+  assert.match(loader, /dynamic\(\(\) => import\('\.\/TicketCancelLive'\)\.then\(\(m\) => m\.TicketCancelLive\)/);
+  assert.match(loader, /ssr: false/);
+  assert.match(loader, /TicketCancelLive/);
+  // 계좌 입력(Select·TextField·은행 목록)과 결과 카드는 그릴 때만 받는다
+  assert.match(live, /dynamic\(\(\) => import\('\.\/AccountSection'\)\.then\(\(m\) => m\.AccountSection\)/);
+  assert.match(live, /dynamic\(\(\) => import\('\.\/ResultCard'\)\.then\(\(m\) => m\.ResultCard\)/);
+  assert.equal(count(live, /function ResultCard\(/g), 0, '결과 카드를 첫 묶음에 두지 않는다');
+  assert.match(resultCard, /export function ResultCard\(/);
+  assert.match(resultCard, /환급할 때 알림으로 계좌를 다시 받습니다/);
+});
+
+test('SCR038_5xx_오류는_문의용_traceId를_그린다', () => {
+  // G3: 5xx에서 서버 title·detail 대신 문의용 traceId만 보인다(frontend §4.1 '오류 모양')
+  assert.match(live, /error\.traceId/);
+  assert.match(live, /load\.traceId/);
+  assert.match(live, /문의 번호/);
+  assert.doesNotMatch(live, /(?:error|load)\.(?:title|detail)/);
 });
