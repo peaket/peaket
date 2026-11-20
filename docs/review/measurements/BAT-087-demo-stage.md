@@ -80,3 +80,24 @@
 - **정리**: `demo-down` 두 번 exit 0, 데모 네임스페이스 여섯 0, `demo-status` exit 1(15개 `missing`), `lane4-demo` 클러스터 유지, Docker 잠금 `drop`, `docker ps -a --filter name=peaket` 0건.
 - **BAT-616**: 이 가지의 바탕 `57de13831`에는 파트너 판매 심사 제출 경로가 없다(`feature/lane5-BAT-616`에만 있다). 그래서 시드는 404일 때만 `sale_review`를 직접 `SUBMITTED`로 바꾸는 예외를 그대로 썼다.
 - **문서 점검**: `python -I -X utf8 tools/doc-check/check_all.py`는 오류 2건이 난다. 둘 다 develop의 `docs/review/plans/BAT-182.md`가 없는 `tools/web-checks/reports/...` 경로를 가리키는 기존 결함이고, 이 묶음의 파일과 무관하다.
+
+## 2026-11-21 리뷰 반영 재실행(RV-01~09, 6/6)
+
+- **무엇**: 리뷰 RV-01~09를 고친 뒤(시험 커밋 `0218c4f9a`, 구현 커밋은 이 절을 포함한 커밋) `origin/develop` `a3e874700` 위에서 다시 돌렸다. 시드는 오픈 시각을 실행 시점 기준 상대값(`+2h`·`+1d`·`+2d`·`+3h`)으로 펼치고, 기기는 일곱 대다.
+- **게이트**: `node tools/local/demo-images.mjs --check` exit 0, `node tools/local/demo-seed.mjs --check` exit 0(기기 7), `node --test "tools/local/*.test.mjs"` **210개 중 206 통과·4 건너뜀·0 실패**(60.1초), `demo-*` 다섯 파일 45/45, `node --test "deploy/workloads/test/*.test.mjs"` 17/17, `mesh-policies --check` exit 0, `pnpm typecheck` 43/43, `pnpm lint` exit 0, `check-docker-timeouts` 통과(시험 파일 1,209개·Docker 호출 50곳), doc-check 오류 0·경고 4.
+- **Docker 잠금**: `lane4-BAT-087`(01:58:20~02:32:58). `lane3-BAT-045`가 01:40~01:58에 잡고 있어 기다린 뒤 잡았다.
+
+| 단계 | 시각(KST) | 시간 | 결과 |
+| --- | --- | --- | --- |
+| `demo --skip-build` 1회 | 01:58:24~02:10:21 | 719초 | 게이트웨이 단계에서 `spawnSync openssl ENOENT`로 멈춤(PATH에 Git `usr\bin`이 없었다). 그 앞(네임스페이스·Secret·DB·Kafka·마이그레이션·워크로드 13)은 끝났다 |
+| `demo --skip-build` 2회 | 02:10:30~02:18:27 | 477초 | **준비됨**. 게이트웨이 조건 모두 참 |
+| `demo-seed --apply --json` | 02:18:33~02:18:55 | 22초 | `created {productions:4, events:7, seatMaps:4, staff:2, devices:7}`, `total {accounts:11, passkeys:3, promoters:1, productions:4, events:7, seatMaps:7, staff:2, devices:7}`. 오픈 상대 시각으로 422 없이 끝났다 |
+| `demo-status --json` | 02:18:59~02:19:03 | 4초 | **15/15 준비**, `problems: []`, exit 0 |
+| `node --test tools/local/e2e/demo-stage.e2e.mjs` | 02:19:09~02:32:35 | 805.9초 | **6/6 통과** |
+| `demo-down` 두 번 | 02:32 | — | 둘 다 exit 0. 데모 네임스페이스 여섯 0. `demo-status` exit 1(15개 `missing`). `lane4-demo` 클러스터 유지 |
+
+- **e2e 세부**: `demo` 준비 495초. DS-02 523.8초(준비 포함, 이미지 10개 `node --version`·`dist/main.js`·`nginx -t`·원본 없음, partner는 `/app/apps/partner/server.js`), DS-09① 36.7초, DS-07 13.6초, DS-08 0.1초, DS-09② 46.3초, DS-10 183.2초.
+- **값**: 게이트웨이 응답 `{"www":200,"queue":401,"partner-api":401,"ops-api":404,"scanner-api":404,"api":200}`. 두 번째 시드 `created {productions:0, events:0, seatMaps:0, staff:0, devices:0}`, DB 4/7. 기기 7대. 첫 시드의 오픈은 상대값이 `2026-11-21T03:18~04:18+09:00` 무렵으로 펼쳐졌다(실행 시각 02:18).
+- **남은 한계**: 판매 심사는 여전히 BAT-616 미병합 404 예외다(경고 넷). `demo`는 `openssl`이 PATH에 있어야 게이트웨이 단계를 지난다(README 24행).
+- **e2e 뒤 값 변경**: 다섯 앱 값의 `managementPort: 19464` 제거는 e2e 뒤에 했다(mesh 정책이 web·partner를 지적해 `deploy/workloads/test`가 빨간불이었다). 차트의 Deployment 템플릿은 이 값을 쓰지 않고 프로브도 꺼져 있어 앱 동작이 바뀌지 않으므로 kind를 다시 돌리지 않았고, `deploy/workloads/test` **17/17**·`mesh-policies --check` exit 0으로 확인했다.
+- **정리 뒤**: `docker ps -a --filter name=peaket` 0건, `lane4-demo-control-plane`만 남았다. Docker 잠금은 02:32:58에 놓았다.

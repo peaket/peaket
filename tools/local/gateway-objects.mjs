@@ -433,10 +433,11 @@ export function gatewayNodePortService(gw, targetPort) {
  * kind 노드 컨테이너의 포트 공개(docker inspect의 HostConfig.PortBindings)에서 게이트웨이마다 이 PC 포트를 읽는다(접속 정보의 ports).
  * 하나라도 없으면(포트 매핑 없이 만든 클러스터) 또는 127.0.0.1 밖(0.0.0.0·빈 값 = 모든 주소)에 열렸으면 다시 만들라는 말과 함께 던진다
  * @param {Record<string, Array<{ HostIp?: string, HostPort?: string }> | null> | null | undefined} portBindings
+ * @param {{ again?: string }} [o] 다시 만드는 안내. 데모는 다른 클러스터를 지우지 않는 명령을 넘긴다(RV-04)
  * @returns {Record<string, number>}
  */
-export function gatewayHostPorts(portBindings) {
-  const again = '`node tools/local/cluster.mjs down` 뒤 `up`으로 클러스터를 다시 만든다';
+export function gatewayHostPorts(portBindings, o = {}) {
+  const again = o.again ?? '`node tools/local/cluster.mjs down` 뒤 `up`으로 클러스터를 다시 만든다';
   const out = {};
   for (const gw of GATEWAY_NAMES) {
     const key = `${GATEWAY_NODE_PORTS[gw]}/tcp`;

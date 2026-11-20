@@ -22,7 +22,7 @@
 //   node tools/local/cluster.mjs down    클러스터를 지운다
 // - 클러스터 이름은 PEAKET_CLUSTER(기본 peaket)다. 여러 작업 폴더가 한 PC에서 따로 띄울 때 바꾼다(kubeconfig 기본 이름도 따라 바뀐다)
 // - 클러스터를 만들 때 게이트웨이 포트 매핑(이 PC 127.0.0.1:<PEAKET_GATEWAY_BASE_PORT, 기본 18441>부터 다섯)을 건다. 시작 값을 바꾸거나 매핑 없이 만든
-//   옛 클러스터를 쓰려면 down 뒤 up을 다시 한다(docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법')
+//   옛 클러스터를 쓰려면 `PEAKET_CLUSTER=<이름> down` 뒤 `up`(데모는 `PEAKET_CLUSTER=lane4-demo down` 뒤 `demo`)으로 다시 한다(docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법')
 // - 도구(kind·kubectl·helm)는 tools.mjs가 고정 판으로 받는다. 사용자의 ~/.kube/config는 건드리지 않고 전용 kubeconfig를 쓴다
 // - 운영·CI 공급망은 다이제스트로 고정한다. 로컬 kind 무대는 `preloadLocalImages`가 태그 이미지를 노드에 미리 싣고 파드는 태그로 찾는다(BAT-028).
 //   관측(Prometheus·Grafana) 매니페스트는 한 플랫폼(amd64) 매니페스트 다이제스트까지 고정하고, 같은 태그 이미지를 미리 실어 IfNotPresent로 찾게 한다
@@ -49,7 +49,10 @@ import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** demo 계열 명령은 기본 클러스터를 lane4-demo로 쓴다(다른 갈래의 peaket·lane4-* 클러스터를 건드리지 않는다) */
 const demoCommand = /^demo(?:-|$)/.test(process.argv[2] ?? '');
-export const CLUSTER = process.env.PEAKET_CLUSTER || (demoCommand ? DEMO_CLUSTER : 'peaket');
+/** demo 계열은 PEAKET_DEMO_CLUSTER를 먼저 읽는다. 다른 명령은 지금처럼 PEAKET_CLUSTER(기본 peaket)다(RV-05) */
+export const CLUSTER = demoCommand
+  ? process.env.PEAKET_DEMO_CLUSTER || process.env.PEAKET_CLUSTER || DEMO_CLUSTER
+  : process.env.PEAKET_CLUSTER || 'peaket';
 export const KUBECONFIG = process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, `kubeconfig-${CLUSTER}`);
 export const IMAGE = 'peaket/example-svc:local';
 
@@ -1237,22 +1240,28 @@ export function demoPlan(argv = []) {
   return { skipBuild, only };
 }
 
+/** 데모 명령이 데모 클러스터를 지우고 다시 만들 때 쓰는 안내. 다른 클러스터(기본 peaket)를 지우지 않게 이름을 명시한다 */
+export function demoRecreateHint() {
+  return `\`PEAKET_CLUSTER=${CLUSTER} node tools/local/cluster.mjs down\` 뒤 \`node tools/local/cluster.mjs demo\`로 다시 만든다(다른 클러스터는 건드리지 않는다)`;
+}
+
 /** kind 노드의 포트 공개에서 demo 포트(19051·18920)를 확인한다. 매핑 없이 만든 클러스터면 다시 만들라고 멈춘다 */
-function demoHostPorts() {
+export function demoHostPorts() {
   const bindings = nodePortBindings();
+  const again = demoRecreateHint();
   const check = (nodePort, hostPort, what) => {
     const b = bindings?.[`${nodePort}/tcp`];
-    if (!Array.isArray(b) || b.length === 0) throw new Error(`${what}의 노드 포트 ${nodePort}가 이 PC에 공개되지 않았다: 이 클러스터는 데모 포트 매핑 없이 만들었다. \`node tools/local/cluster.mjs down\` 뒤 \`up\`으로 다시 만든다`);
-    for (const x of b) if (x?.HostIp !== '127.0.0.1') throw new Error(`${what}의 노드 포트 ${nodePort}가 127.0.0.1이 아닌 주소(${x?.HostIp || '모든 주소'})에 공개되었다`);
+    if (!Array.isArray(b) || b.length === 0) throw new Error(`${what}의 노드 포트 ${nodePort}가 이 PC에 공개되지 않았다: 이 클러스터는 데모 포트 매핑 없이 만들었다. ${again}`);
+    for (const x of b) if (x?.HostIp !== '127.0.0.1') throw new Error(`${what}의 노드 포트 ${nodePort}가 127.0.0.1이 아닌 주소(${x?.HostIp || '모든 주소'})에 공개되었다: ${again}`);
     const got = Number(b[0].HostPort);
-    if (got !== hostPort) throw new Error(`${what}의 이 PC 포트가 ${hostPort}가 아니다: ${got}`);
+    if (got !== hostPort) throw new Error(`${what}의 이 PC 포트가 ${hostPort}가 아니다: ${got}. ${again}`);
   };
   check(DEMO_PORTS.grpcNodePort, DEMO_PORTS.grpc, 'identity gRPC');
   check(DEMO_PORTS.idvNodePort, DEMO_PORTS.idv, '모의 기관');
-  const gateways = gatewayHostPorts(bindings);
+  const gateways = gatewayHostPorts(bindings, { again });
   const expected = { 'gw-fan': DEMO_GATEWAY_BASE_PORT, 'gw-queue': DEMO_GATEWAY_BASE_PORT + 1, 'gw-partner': DEMO_GATEWAY_BASE_PORT + 2, 'gw-ops': DEMO_GATEWAY_BASE_PORT + 3, 'gw-scanner': DEMO_GATEWAY_BASE_PORT + 4 };
   for (const [gw, port] of Object.entries(expected)) {
-    if (gateways[gw] !== port) throw new Error(`게이트웨이 ${gw}의 이 PC 포트가 ${port}가 아니다: ${gateways[gw]}. 이 클러스터는 데모 포트 차례(www 18441·queue 18442…)로 만들지 않았다. \`node tools/local/cluster.mjs down\` 뒤 \`demo\`로 다시 만든다`);
+    if (gateways[gw] !== port) throw new Error(`게이트웨이 ${gw}의 이 PC 포트가 ${port}가 아니다: ${gateways[gw]}. 이 클러스터는 데모 포트 차례(www 18441·queue 18442…)로 만들지 않았다. ${again}`);
   }
   return gateways;
 }

@@ -370,10 +370,12 @@ export async function demoAuth(kind, accountKey) {
   const account = seed.accounts.find((a) => a.key === accountKey);
   if (!account) throw new Error(`시드에 없는 계정: ${accountKey}`);
   const { secrets } = prepareDemoSecrets();
+  // 패스키 rpId는 계정 역할이 속한 콘솔의 호스트다(파트너 관리자는 partner, 나머지는 console, RV-07)
+  const rpIdOf = (a) => (a.role === 'partner_admin' || a.role === 'partner_member' ? 'partner.peaket.example' : 'console.peaket.example');
   if (kind === 'passkey') {
     const pk = secrets.passkeys[accountKey];
     if (!pk) throw new Error(`${accountKey}에 패스키 시드가 없다`);
-    return { accountKey, kind: 'passkey', passkey: { rpId: 'console.peaket.example', credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64'), name: pk.name } };
+    return { accountKey, kind: 'passkey', passkey: { rpId: rpIdOf(account), credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64'), name: pk.name } };
   }
   if (account.kind === 'fan') {
     if (kind !== 'fan') throw new Error(`${accountKey}는 팬 계정이다(demo-auth fan …)`);
@@ -401,7 +403,7 @@ export async function demoAuth(kind, accountKey) {
     kind: 'admin',
     aud,
     cookies: login.cookies,
-    ...(pk ? { passkey: { rpId: aud === 'partner' ? 'partner.peaket.example' : 'console.peaket.example', credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64'), name: pk.name } } : {}),
+    ...(pk ? { passkey: { rpId: rpIdOf(account), credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64'), name: pk.name } } : {}),
   };
 }
 

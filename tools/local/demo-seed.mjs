@@ -7,6 +7,7 @@
 //   공개 API로만 만들어 감사 기록·Outbox를 남긴다(계획 B12, M8).
 // - 두 번 적용해도 계정·공연·회차·promoter·스태프·기기 수가 같다(키·제목·시작 시각·이메일로 찾아 없을 때만 만든다).
 //   두 번째에는 좌석맵을 다시 PUT하지 않는다(같은 배치를 덮어쓰지 않는다)
+// - 회차 오픈 시각은 실행 시각 기준 상대 표기(`+2h`)를 절대 ISO로 펼친다(지난 시각이면 --check·--apply가 먼저 실패한다)
 // - 비밀·개인정보는 출력하지 않는다. 실패하면 exit 1이고 어느 단계가 실패했는지만 낸다
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -17,6 +18,40 @@ import { demoUuid, demoAuth, httpsJson, prepareDemoSecrets, readSeed, DEMO_CONTR
 import { DEFAULT_ROOT, ensureTool } from './tools.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** 상대 시각 표기(+2h·-30m·+1d). 실행 시각 기준으로 펼쳐 시드가 오늘 이후에도 유효하게 한다(RV-01) */
+const RELATIVE_TIME = /^([+-])(\d+)([mhd])$/;
+const TIME_UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
+/** 판매는 회차 시작 24시간 전에 끝난다(core `registration.ts`의 `SALE_END_BEFORE_START_MS`와 같은 값) */
+const SALE_END_BEFORE_START_MS = 24 * 60 * 60_000;
+
+/**
+ * 시드의 시각 값 하나를 Date로 읽는다. 상대 표기(`+2h`)는 now 기준이고, 절대 ISO는 그대로 쓴다.
+ * @param {string} value @param {Date} now @param {string} what 오류 메시지에 쓸 자리
+ */
+export function seedTime(value, now = new Date(), what = '시각') {
+  const text = String(value ?? '').trim();
+  if (!text) throw new Error(`${what}이 비었다`);
+  const rel = RELATIVE_TIME.exec(text);
+  if (rel) return new Date(now.getTime() + (rel[1] === '-' ? -1 : 1) * Number(rel[2]) * TIME_UNIT_MS[rel[3]]);
+  const at = Date.parse(text);
+  if (Number.isNaN(at)) throw new Error(`${what}을 읽지 못했다: ${text}(상대 표기 '+2h'나 절대 ISO를 쓴다)`);
+  return new Date(at);
+}
+
+/** 시드의 회차 시각을 실행 시각 기준 절대 ISO로 펼친다(원본 시드 객체는 바꾸지 않는다) */
+export function resolveSeedTimes(seed, now = new Date()) {
+  return {
+    ...seed,
+    events: (seed.events ?? []).map((e) => ({
+      ...e,
+      openAt: seedTime(e.openAt, now, `회차 ${e.key}의 openAt`).toISOString(),
+      startAt: seedTime(e.startAt, now, `회차 ${e.key}의 startAt`).toISOString(),
+      endAt: seedTime(e.endAt, now, `회차 ${e.key}의 endAt`).toISOString(),
+      ...(e.entryOpensAt === undefined ? {} : { entryOpensAt: seedTime(e.entryOpensAt, now, `회차 ${e.key}의 entryOpensAt`).toISOString() }),
+    })),
+  };
+}
 
 /** 시드 파일 하나를 읽고 검사한다. password·totp·privateKey 같은 값 칸이 있으면 실패(DS-05) */
 export function checkSeed(file = DEMO_SEED_FILE) {
@@ -38,6 +73,24 @@ export function checkSeed(file = DEMO_SEED_FILE) {
   }
   for (const p of seed.adminPasskeys ?? []) {
     if (!p.credentialEnv || !p.privateKeyEnv) problems.push(`패스키 ${p.accountKey}에 credentialEnv·privateKeyEnv가 없다`);
+  }
+  // 오픈 시각은 적용 시점 기준으로 펼쳐 지금보다 미래인지 본다(RV-01). 지났으면 --apply가 422로 멈추기 전에 알린다
+  const now = new Date();
+  let events = seed.events ?? [];
+  let timesResolved = true;
+  try {
+    events = resolveSeedTimes(seed, now).events;
+  } catch (e) {
+    timesResolved = false;
+    problems.push(e instanceof Error ? e.message : String(e));
+  }
+  for (const e of timesResolved ? events : []) {
+    const open = Date.parse(e.openAt);
+    const start = Date.parse(e.startAt);
+    const saleEnd = start - SALE_END_BEFORE_START_MS;
+    const source = seed.events.find((x) => x.key === e.key)?.openAt;
+    if (!(now.getTime() < open)) problems.push(`회차 ${e.key}의 openAt(${source})이 지난 시각이다: 오픈은 지금보다 미래여야 등록된다`);
+    else if (!(open < saleEnd)) problems.push(`회차 ${e.key}의 openAt(${source})이 판매 종료(시작 24시간 전)보다 늦다`);
   }
   const seatCounts = seatCountsOf(seed);
   return {
@@ -131,7 +184,7 @@ function canvasOf(base) {
   return { width, height };
 }
 
-const kubeconfig = () => process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, `kubeconfig-${process.env.PEAKET_DEMO_CLUSTER || DEMO_CLUSTER}`);
+const kubeconfig = () => process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, `kubeconfig-${process.env.PEAKET_DEMO_CLUSTER || process.env.PEAKET_CLUSTER || DEMO_CLUSTER}`);
 /** kubectl 한 번(전용 kubeconfig) */
 async function kubectl(args, o = {}) {
   const k = await ensureTool('kubectl');
@@ -287,9 +340,10 @@ export async function applySeed(o = {}) {
   const checked = checkSeed(seedFile);
   if (!checked.ok) throw new Error(`시드 검사에 실패했다: ${checked.problems.join('; ')}`);
   const { bootstrap } = prepareDemoSecrets({ seedFile });
-  const seed = readSeed(seedFile);
+  const seed = resolveSeedTimes(readSeed(seedFile));
   const c = contract();
-  await runBootstrapJob({ name: 'demo-bootstrap-core', image: 'peaket/core-svc:demo', secret: 'demo-core' });
+  // core 부트스트랩(첫 promoter)만 슈퍼유저 주소를 쓴다. 실행 파드는 demo-core의 역할 주소만 받는다(RV-03)
+  await runBootstrapJob({ name: 'demo-bootstrap-core', image: 'peaket/core-svc:demo', secret: 'demo-bootstrap-core' });
   await runBootstrapJob({ name: 'demo-bootstrap-identity', image: 'peaket/identity-svc:demo', secret: 'demo-identity' });
 
   // 팬 계정: gRPC CreateSession → 가입 마무리(이미 마무리했으면 409·422를 넘긴다)

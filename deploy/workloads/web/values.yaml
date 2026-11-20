@@ -1,8 +1,6 @@
 # web 배포 단위 기본 값(BAT-087 데모 무대, docs/devops.md §5.2). 환경 값은 deploy/envs/<환경>/web.yaml에 둔다.
 name: web
 
-managementPort: 19464
-
 # 정적·Next 앱은 관리 포트 /ready·/livez가 없다. 데모 값에서 프로브를 끈다(BAT-087)
 probes:
   enabled: false

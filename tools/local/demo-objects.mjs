@@ -265,6 +265,7 @@ export function demoLayout() {
  * - demo-bundle-env: 합본의 서비스별 환경 파일 넷(`<서비스>.env`)
  * - demo-pg-simulator·demo-idv: 결제 시뮬레이터·모의 기관 시험 키
  * - demo-bootstrap: 첫 관리자·패스키·promoter 부트스트랩 값(감사 기록 없음, 로컬 데모 전용)
+ * - demo-bootstrap-core: 첫 promoter 부트스트랩 Job 전용 슈퍼유저 DSN(실행 파드는 받지 않는다)
  * @param {{ keys: { dbPassword: string, idvSecret: string, pgSim: { secretKey: string, clientKey: string }, tokenKeys: Record<string, { privateJwk: unknown }>, pepperKey: string, totpKey: string, internalToken: string, queueTokenKey?: string, admission?: any, ecdh?: any, batchRandomness?: string }, bootstrap: unknown }} o
  */
 export function demoSecrets(o) {
@@ -293,6 +294,11 @@ export function demoSecrets(o) {
     kafkaBrokers: L.kafkaBrokers,
     paymentPodCount: 1,
   });
+  // 결제창 복귀(payment-svc)와 대기열 파일 CORS(queue-svc)가 브라우저 Origin(포트 포함)을 쓰게 한다(RV-02).
+  // 포트 없는 기본값(https://www.peaket.example)·http://localhost:3000은 브라우저 출처와 달라 막힌다
+  const webOrigin = demoOrigins().www;
+  files['queue-svc'].PEAKET_WEB_ORIGIN = webOrigin;
+  files['payment-svc'].PEAKET_WEB_ORIGIN = webOrigin;
   return [
     secret('demo-postgres', 'purchase', { POSTGRES_PASSWORD: k.dbPassword }),
     secret('demo-identity', 'core', {
@@ -318,7 +324,9 @@ export function demoSecrets(o) {
       PEAKET_INTERNAL_TOKEN: k.internalToken,
       // 서비스 사이 gRPC 공유 토큰(identity AdminAuthzService가 요구한다)
       PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken,
-      // 부트스트랩(첫 promoter)만 슈퍼유저 주소를 쓴다. 실행 서비스는 위의 역할 주소만 본다
+    }),
+    // 첫 promoter 부트스트랩 Job만 슈퍼유저 주소를 받는다(core-svc 실행 파드는 demo-core의 역할 주소만 받는다, RV-03)
+    secret('demo-bootstrap-core', 'core', {
       PEAKET_BOOTSTRAP_DATABASE_URL: `postgres://postgres:${k.dbPassword}@${L.postgresHost}/${DEMO_DATABASES.core}`,
     }),
     secret('demo-ops', 'core', {

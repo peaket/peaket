@@ -38,17 +38,19 @@ productions:
   - { key: e4, promoterKey: stella, title: 팬미팅, genre: 팬미팅, ageRating: 만 15세 이상, runningMinutes: 90, placeName: 피켓 홀, placeAddress: 서울특별시 예시구 홀로 4 }
 
 events:
+  # 오픈 시각은 적용 시점 기준 상대 표기다(`+2h` = 지금+2시간). demo-seed.mjs가 절대 ISO로 펼친다.
+  # 오픈은 지금보다 미래이고 판매 종료(시작 24시간 전)보다 일러야 등록된다. 지난 시각이면 --check가 먼저 실패한다(RV-01).
   # E-1 하이브리드: 10/25(일) 18:00·10/26(월) 17:00, 오픈 10/14(수) 20:00
-  - { key: e1-1025, productionKey: e1, mode: HYBRID, openAt: '2026-11-21T20:00:00+09:00', startAt: '2026-11-25T18:00:00+09:00', endAt: '2026-11-25T20:00:00+09:00', entryOpensAt: '2026-11-25T16:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 4, seatAssignment: PICK, reentryAllowed: false, prices: { R: 154000, S: 132000, A: 110000 } }
-  - { key: e1-1026, productionKey: e1, mode: HYBRID, openAt: '2026-11-21T20:00:00+09:00', startAt: '2026-11-26T17:00:00+09:00', endAt: '2026-11-26T19:00:00+09:00', entryOpensAt: '2026-11-26T15:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 4, seatAssignment: PICK, reentryAllowed: false, prices: { R: 154000, S: 132000, A: 110000 } }
+  - { key: e1-1025, productionKey: e1, mode: HYBRID, openAt: '+2h', startAt: '2026-11-25T18:00:00+09:00', endAt: '2026-11-25T20:00:00+09:00', entryOpensAt: '2026-11-25T16:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 4, seatAssignment: PICK, reentryAllowed: false, prices: { R: 154000, S: 132000, A: 110000 } }
+  - { key: e1-1026, productionKey: e1, mode: HYBRID, openAt: '+2h', startAt: '2026-11-26T17:00:00+09:00', endAt: '2026-11-26T19:00:00+09:00', entryOpensAt: '2026-11-26T15:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 4, seatAssignment: PICK, reentryAllowed: false, prices: { R: 154000, S: 132000, A: 110000 } }
   # E-2 선착순·자동 배정, 재입장 허용(퇴장 모드 시연), 가상계좌 허용
-  - { key: e2-01, productionKey: e2, mode: FIFO, openAt: '2026-11-22T12:00:00+09:00', startAt: '2026-11-28T15:00:00+09:00', endAt: '2026-11-28T18:00:00+09:00', entryOpensAt: '2026-11-28T13:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: AUTO, reentryAllowed: true, prices: { R: 99000, S: 77000 } }
+  - { key: e2-01, productionKey: e2, mode: FIFO, openAt: '+1d', startAt: '2026-11-28T15:00:00+09:00', endAt: '2026-11-28T18:00:00+09:00', entryOpensAt: '2026-11-28T13:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: AUTO, reentryAllowed: true, prices: { R: 99000, S: 77000 } }
   # E-3 소극장 뮤지컬: 회차 3개, 전석 매진(시드 뒤 판매 상태로 만든다), 전석 같은 가격
-  - { key: e3-01, productionKey: e3, mode: FIFO, openAt: '2026-11-22T19:00:00+09:00', startAt: '2026-11-29T14:00:00+09:00', endAt: '2026-11-29T15:40:00+09:00', entryOpensAt: '2026-11-29T13:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
-  - { key: e3-02, productionKey: e3, mode: FIFO, openAt: '2026-11-22T19:00:00+09:00', startAt: '2026-11-29T19:00:00+09:00', endAt: '2026-11-29T20:40:00+09:00', entryOpensAt: '2026-11-29T18:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
-  - { key: e3-03, productionKey: e3, mode: FIFO, openAt: '2026-11-22T19:00:00+09:00', startAt: '2026-11-30T14:00:00+09:00', endAt: '2026-11-30T15:40:00+09:00', entryOpensAt: '2026-11-30T13:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
-  # E-4 팬미팅: 오픈 오프닝 장면을 위해 오픈을 내일로 둔다(오픈은 지금보다 미래여야 등록된다). 회차 시작 24시간 전 판매 종료
-  - { key: e4-01, productionKey: e4, mode: PREQUEUE_SHUFFLE, openAt: '2026-11-21T12:00:00+09:00', startAt: '2026-11-24T19:00:00+09:00', endAt: '2026-11-24T20:30:00+09:00', entryOpensAt: '2026-11-24T18:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { R: 88000, S: 66000 } }
+  - { key: e3-01, productionKey: e3, mode: FIFO, openAt: '+2d', startAt: '2026-11-29T14:00:00+09:00', endAt: '2026-11-29T15:40:00+09:00', entryOpensAt: '2026-11-29T13:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
+  - { key: e3-02, productionKey: e3, mode: FIFO, openAt: '+2d', startAt: '2026-11-29T19:00:00+09:00', endAt: '2026-11-29T20:40:00+09:00', entryOpensAt: '2026-11-29T18:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
+  - { key: e3-03, productionKey: e3, mode: FIFO, openAt: '+2d', startAt: '2026-11-30T14:00:00+09:00', endAt: '2026-11-30T15:40:00+09:00', entryOpensAt: '2026-11-30T13:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
+  # E-4 팬미팅: 오픈 오프닝 장면을 위해 오픈을 3시간 뒤로 둔다(오픈은 지금보다 미래여야 등록된다). 회차 시작 24시간 전 판매 종료
+  - { key: e4-01, productionKey: e4, mode: PREQUEUE_SHUFFLE, openAt: '+3h', startAt: '2026-11-24T19:00:00+09:00', endAt: '2026-11-24T20:30:00+09:00', entryOpensAt: '2026-11-24T18:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { R: 88000, S: 66000 } }
 
 # 좌석맵: 좌석을 하나씩 나열하지 않고 구역·줄·번 범위로 적는다. 적용기가 펼쳐 API 모양으로 만든다
 seatMaps:
@@ -71,7 +73,7 @@ seatMaps:
   - { key: e3-hall-3, eventKey: e3-03, copyOf: e1-arena }
   - { key: e4-hall, eventKey: e4-01, copyOf: e1-arena }
 
-# 현장 스태프와 기기(동문 4·서문 3). 계정은 위의 팬 계정을 쓴다(초대 수락은 끝난 상태로 시드한다)
+# 현장 스태프와 기기(동문 4·서문 3, d5 §10.3). 계정은 위의 팬 계정을 쓴다(초대 수락은 끝난 상태로 시드한다)
 staff:
-  - { key: haneul-lead, eventKey: e1-1025, accountKey: haneul, role: gate_lead, devices: [{ key: east-01, name: 동문-01, booth: 동문 }, { key: west-01, name: 서문-01, booth: 서문 }] }
-  - { key: doyun-staff, eventKey: e1-1025, accountKey: doyun, role: gate_staff, devices: [{ key: east-02, name: 동문-02, booth: 동문 }] }
+  - { key: haneul-lead, eventKey: e1-1025, accountKey: haneul, role: gate_lead, devices: [{ key: east-01, name: 동문-01, booth: 동문 }, { key: east-02, name: 동문-02, booth: 동문 }, { key: east-03, name: 동문-03, booth: 동문 }, { key: east-04, name: 동문-04, booth: 동문 }] }
+  - { key: doyun-staff, eventKey: e1-1025, accountKey: doyun, role: gate_staff, devices: [{ key: west-01, name: 서문-01, booth: 서문 }, { key: west-02, name: 서문-02, booth: 서문 }, { key: west-03, name: 서문-03, booth: 서문 }] }

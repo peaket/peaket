@@ -23,7 +23,7 @@ bash D:/ticketpass-locks/lock.sh drop docker lane4-BAT-087
 
 `demo`의 게이트웨이 단계는 자체 서명 인증서를 만들려고 `openssl`을 부른다. Windows PowerShell에서 Git for Windows를 쓰면 `C:\Program Files\Git\usr\bin`을 PATH에 앞에 둔다(없으면 `spawnSync openssl ENOENT`로 멈춘다).
 
-클러스터는 `lane4-demo`(kubeconfig `.cache/peaket-tools/kubeconfig-lane4-demo`)이고, 이 PC의 다른 `peaket`·`lane4-*` 클러스터는 건드리지 않는다. 처음 만들 때 게이트웨이 포트 18441~18445와 gRPC 19051·모의 기관 18920의 포트 매핑을 건다. 매핑 없이 만든 옛 클러스터면 `down` 뒤 `up`으로 다시 만든다.
+클러스터는 `lane4-demo`(kubeconfig `.cache/peaket-tools/kubeconfig-lane4-demo`)이고, 이 PC의 다른 `peaket`·`lane4-*` 클러스터는 건드리지 않는다. 처음 만들 때 게이트웨이 포트 18441~18445와 gRPC 19051·모의 기관 18920의 포트 매핑을 건다. 매핑 없이 만든 옛 클러스터면 `PEAKET_CLUSTER=lane4-demo node tools/local/cluster.mjs down` 뒤 `node tools/local/cluster.mjs demo`로 다시 만든다(클러스터 이름을 명시하지 않은 `down`은 기본 `peaket`을 지운다).
 
 ## 운영과 무엇이 다른가
 
