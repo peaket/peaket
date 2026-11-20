@@ -159,6 +159,9 @@ const REQUEST_TIMEOUT_MS = 100_000;
 const service = await createService({
   name: SERVICE,
   adminAuthz,
+  // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). 세션·캐시 클러스터(샵 Redis)의 rl:tenant:{tenantId}를 센다.
+  // local·ci 밖에서 이 값이 없으면 파트너 경로가 조용히 한도를 빠져나가므로 createService가 시작을 막는다
+  ...(shopRedis ? { tenantRateLimit: { redis: shopRedis } } : {}),
   requestTimeoutMs: REQUEST_TIMEOUT_MS,
   module: AppModule.register({
     database,

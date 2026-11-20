@@ -115,6 +115,8 @@ const anchor = auditAnchorSignerFromEnv(process.env);
 const service = await createService({
   name: SERVICE,
   adminAuthz,
+  // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). 재인증 Redis는 세션·캐시 클러스터다(docs/data.md §3)
+  ...(reauthRedis ? { tenantRateLimit: { redis: reauthRedis } } : {}),
   module: AppModule.register({
     database,
     partnerDatabase,

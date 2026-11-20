@@ -95,6 +95,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     service = await createService({
       name: SERVICE,
       env,
+      // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). ticket-svc의 Redis는 세션·캐시 클러스터다(architecture §3.1)
+      ...(redis ? { tenantRateLimit: { redis } } : {}),
       module: AppModule.register({
         scanner: {
           store: scannerStore,

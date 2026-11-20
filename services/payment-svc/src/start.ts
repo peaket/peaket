@@ -208,6 +208,8 @@ let circuitsRef: PgCircuits | undefined;
     name: SERVICE,
     env,
     hotPath,
+    // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). 재인증 Redis는 세션·캐시 클러스터다(docs/data.md §3)
+    ...(reauthRedis ? { tenantRateLimit: { redis: reauthRedis } } : {}),
     adminAuthz: env.PEAKET_IDENTITY_GRPC_URL
       ? new GrpcAdminAuthz(env.PEAKET_IDENTITY_GRPC_URL)
       : env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci'
