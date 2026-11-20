@@ -38,12 +38,18 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { DEFAULT_ROOT, ensureTool, httpsDownload } from './tools.mjs';
 import { admissionJwks, admissionJwksConfigMap, admissionKeySet, ADMISSION_JWKS_CONFIGMAP, assertRatelimitBackend, echoObjects, GATEWAY_BASE_PORT, GATEWAY_CONTROLLER_IMAGE, GATEWAY_ECHO, GATEWAY_ECHO_IMAGE, GATEWAY_NAMES, GATEWAY_NAMESPACE, GATEWAY_PROXY_IMAGE, GATEWAY_RATELIMIT, gatewayCertArgs, gatewayContract, gatewayHostPorts, gatewayInstall, gatewayNodePortService, gatewayPortMappings, gatewaysAdmissionMode, gatewaySecrets, hostsOf, listenerCertificates, localGatewayObjects, RATELIMIT_REDIS, RATELIMIT_REDIS_IMAGE, ratelimitRedisObjects, ratelimitRedisSecret, ratelimitRedisTlsNames, readGatewayObjects } from './gateway-objects.mjs';
 import { MESH_NETPOL_POLICIES, MESH_NETPOL_SOURCE, meshNetpolContract, meshNetpolLayout, meshNetpolStandIns } from './mesh-netpol-objects.mjs';
+import { DEMO_CLUSTER, DEMO_DATABASES, DEMO_IMAGES as DEMO_WORKLOAD_IMAGES, DEMO_NAMESPACES, DEMO_PORTS, DEMO_WORKLOADS, demoAppObjects, demoCoreRolesSql, demoDatabaseInitSql, demoDatabaseUrls, demoExpectedWorkloads, demoGatewayObjects, demoGrpcNodePortService, demoNamespaces, demoOrigins, demoPostgresObjects, demoSecrets, demoTopics, demoValkeyObjects } from './demo-objects.mjs';
+import { DEMO_IMAGES as DEMO_NEW_IMAGES, buildImage as buildDemoImage } from './demo-images.mjs';
+import { DEMO_CONTRACT_FILE, prepareDemoSecrets } from './demo-auth.mjs';
+import { applySeed, checkSeed } from './demo-seed.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey } from './v0-token.mjs';
 import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-export const CLUSTER = process.env.PEAKET_CLUSTER || 'peaket';
+/** demo 계열 명령은 기본 클러스터를 lane4-demo로 쓴다(다른 갈래의 peaket·lane4-* 클러스터를 건드리지 않는다) */
+const demoCommand = /^demo(?:-|$)/.test(process.argv[2] ?? '');
+export const CLUSTER = process.env.PEAKET_CLUSTER || (demoCommand ? DEMO_CLUSTER : 'peaket');
 export const KUBECONFIG = process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, `kubeconfig-${CLUSTER}`);
 export const IMAGE = 'peaket/example-svc:local';
 
@@ -165,11 +171,18 @@ const gatewayBasePort = () => Number(process.env.PEAKET_GATEWAY_BASE_PORT || GAT
  * (docs/infra.md §4.1 '로컬 kind에서 이 PC로 잇는 법'). up(--v0-only 포함)·v0·v1·gateways 어느 것이 클러스터를 만들어도 같은 설정이다
  * @param {number} basePort 이 PC 포트의 시작 값
  */
-export function kindClusterConfig(basePort) {
+export function kindClusterConfig(basePort, o = {}) {
   const config = parseYaml(readFileSync(join(REPO, 'deploy', 'local', 'kind.yaml'), 'utf8'));
   const node = (config.nodes ?? []).find((n) => n.role === 'control-plane');
   if (!node) throw new Error('deploy/local/kind.yaml에 control-plane 노드가 없다');
   node.extraPortMappings = [...(node.extraPortMappings ?? []), ...gatewayPortMappings(basePort)];
+  if (o.demo) {
+    // identity gRPC 19051 → 노드 30051, 모의 기관 18920 → 노드 30189(127.0.0.1만)
+    node.extraPortMappings.push(
+      { containerPort: DEMO_PORTS.grpcNodePort, hostPort: DEMO_PORTS.grpc, listenAddress: '127.0.0.1', protocol: 'TCP' },
+      { containerPort: DEMO_PORTS.idvNodePort, hostPort: DEMO_PORTS.idv, listenAddress: '127.0.0.1', protocol: 'TCP' },
+    );
+  }
   return config;
 }
 
@@ -180,7 +193,7 @@ async function ensureCluster() {
   if (!clusters.includes(CLUSTER)) {
     const configFile = join(DEFAULT_ROOT, `kind-${CLUSTER}.yaml`);
     mkdirSync(DEFAULT_ROOT, { recursive: true });
-    writeFileSync(configFile, `# cluster.mjs가 deploy/local/kind.yaml에 게이트웨이 포트 매핑을 더해 만든 파일(커밋하지 않는다)\n${stringifyYaml(kindClusterConfig(gatewayBasePort()))}`);
+    writeFileSync(configFile, `# cluster.mjs가 deploy/local/kind.yaml에 게이트웨이 포트 매핑을 더해 만든 파일(커밋하지 않는다)\n${stringifyYaml(kindClusterConfig(gatewayBasePort(), { demo: CLUSTER === DEMO_CLUSTER }))}`);
     await kind(['create', 'cluster', '--config', configFile, '--name', CLUSTER, '--kubeconfig', KUBECONFIG, '--wait', '180s']);
   } else if (!existsSync(KUBECONFIG)) {
     await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
@@ -1191,15 +1204,328 @@ async function realtimeGw(argv = []) {
   step('준비됨');
 }
 
+// --- BAT-087 데모 무대(서비스·앱 이미지·로컬 오버레이·기본 시드) ---
+
+/** demo 인자: --skip-build(이미지 빌드 건너뜀), --only <쉼표 목록>(워크로드 일부만 올림), --json */
+export function demoPlan(argv = []) {
+  let skipBuild = false;
+  let only;
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--skip-build') skipBuild = true;
+    else if (a === '--json') continue;
+    else if (a === '--only') {
+      const v = argv[++i] ?? '';
+      const names = v.split(',').map((s) => s.trim()).filter(Boolean);
+      if (names.length === 0) throw new Error('--only에는 워크로드 이름을 쉼표로 준다');
+      only = names;
+    } else throw new Error(`demo의 모르는 인자: ${a}(쓰는 법: demo [--skip-build] [--only <목록>] [--json])`);
+  }
+  return { skipBuild, only };
+}
+
+/** kind 노드의 포트 공개에서 demo 포트(19051·18920)를 확인한다. 매핑 없이 만든 클러스터면 다시 만들라고 멈춘다 */
+function demoHostPorts() {
+  const bindings = nodePortBindings();
+  const check = (nodePort, hostPort, what) => {
+    const b = bindings?.[`${nodePort}/tcp`];
+    if (!Array.isArray(b) || b.length === 0) throw new Error(`${what}의 노드 포트 ${nodePort}가 이 PC에 공개되지 않았다: 이 클러스터는 데모 포트 매핑 없이 만들었다. \`node tools/local/cluster.mjs down\` 뒤 \`up\`으로 다시 만든다`);
+    for (const x of b) if (x?.HostIp !== '127.0.0.1') throw new Error(`${what}의 노드 포트 ${nodePort}가 127.0.0.1이 아닌 주소(${x?.HostIp || '모든 주소'})에 공개되었다`);
+    const got = Number(b[0].HostPort);
+    if (got !== hostPort) throw new Error(`${what}의 이 PC 포트가 ${hostPort}가 아니다: ${got}`);
+  };
+  check(DEMO_PORTS.grpcNodePort, DEMO_PORTS.grpc, 'identity gRPC');
+  check(DEMO_PORTS.idvNodePort, DEMO_PORTS.idv, '모의 기관');
+  return gatewayHostPorts(bindings);
+}
+
+/** 객체 목록을 apply(목록은 List 하나) */
+async function applyList(items) {
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items }) });
+}
+
+/** Secret은 create로만 만든다(apply는 last-applied 주석에 비밀 값을 남긴다) */
+async function createSecret(o) {
+  await kubectl(['-n', o.metadata.namespace, 'delete', 'secret', o.metadata.name, '--ignore-not-found']);
+  await kubectl(['create', '-f', '-'], { input: JSON.stringify(o) });
+}
+
+/** demo PostgreSQL에서 SQL 문 하나(이미 있으면 넘긴다) */
+async function psqlDemo(statement) {
+  try {
+    await kubectl(['-n', 'purchase', 'exec', 'deploy/demo-postgres', '--', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', statement]);
+  } catch (e) {
+    const text = String(e.stderr ?? e.message ?? '');
+    if (/already exists/i.test(text)) return;
+    throw new Error(`SQL 실패: ${statement}\n${text}`);
+  }
+}
+
+/** 마이그레이션·부트스트랩 잡 하나를 만들고 기다린다 */
+async function demoJob(o) {
+  const job = {
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: { name: o.name, namespace: o.namespace, labels: { 'app.kubernetes.io/part-of': 'peaket-demo' } },
+    spec: {
+      backoffLimit: 0,
+      ttlSecondsAfterFinished: 600,
+      template: {
+        metadata: { labels: { 'app.kubernetes.io/name': o.name, 'app.kubernetes.io/part-of': 'peaket-demo' } },
+        spec: {
+          restartPolicy: 'Never',
+          automountServiceAccountToken: false,
+          securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: { type: 'RuntimeDefault' } },
+          containers: [
+            {
+              name: 'job',
+              image: o.image,
+              imagePullPolicy: 'Never',
+              command: o.command,
+              env: [{ name: 'PEAKET_ENV', value: 'local' }, ...(o.env ?? [])],
+              ...(o.secret ? { envFrom: [{ secretRef: { name: o.secret } }] } : {}),
+              resources: { requests: { cpu: '100m', memory: '256Mi' }, limits: { memory: '768Mi' } },
+              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true, capabilities: { drop: ['ALL'] }, seccompProfile: { type: 'RuntimeDefault' } },
+            },
+          ],
+        },
+      },
+    },
+  };
+  await kubectl(['-n', o.namespace, 'delete', 'job', o.name, '--ignore-not-found', '--wait=true']);
+  await kubectl(['-n', o.namespace, 'create', '-f', '-'], { input: JSON.stringify(job) });
+  await waitJob(o.namespace, o.name, 600_000);
+}
+
+/** demo Kafka(Strimzi)와 토픽. 이미 있으면 그대로 쓴다 */
+async function demoKafka() {
+  step('Kafka 3.9.1(Strimzi)와 토픽');
+  await kubectl(['apply', '-f', '-'], { input: 'apiVersion: v1\nkind: Namespace\nmetadata: { name: kafka }\n' });
+  await preloadLocalImages(['quay.io/strimzi/operator:0.47.0', 'quay.io/strimzi/kafka:0.47.0-kafka-3.9.1']);
+  await kubectl(['apply', '--server-side', '--force-conflicts', '-n', 'kafka', '-f', '-'], { input: strimziInstall(await strimziFile(), 'kafka') });
+  await kubectl(['-n', 'kafka', 'rollout', 'status', 'deploy/strimzi-cluster-operator', '--timeout=300s']);
+  await kubectl(['apply', '-f', join(REPO, 'deploy', 'local', 'kafka.yaml')]);
+  await kubectl(['-n', 'kafka', 'wait', 'kafka/peaket', '--for=condition=Ready', '--timeout=600s']);
+  for (const topic of demoTopics()) await kubectl(kafkaTopicArgs(topic));
+}
+
+/** 게이트웨이 다섯(실제 백엔드)과 데모 접속 정보. Envoy Gateway가 없으면 설치하고, 부하 분산은 로컬 전용 NodePort로 잇는다 */
+async function demoGateways() {
+  step('게이트웨이 다섯(실제 백엔드, deploy/gateways의 정의)');
+  await preloadLocalImages([GATEWAY_CONTROLLER_IMAGE, GATEWAY_PROXY_IMAGE, PINNED.envoyGatewayRatelimitImage, RATELIMIT_REDIS_IMAGE]);
+  const controller = readFileSync(join(REPO, 'deploy', 'gateways', 'controller', 'envoy-gateway.yaml'), 'utf8');
+  assertRatelimitBackend(controller);
+  await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: gatewayInstall(await gatewayInstallFile(), controller), maxBuffer: 64 * 1024 * 1024 });
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'delete', 'secret', RATELIMIT_REDIS.secret, '--ignore-not-found']);
+  await kubectl(['create', '-f', '-'], { input: JSON.stringify(ratelimitRedisSecret(ratelimitRedisTls())) });
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: ratelimitRedisObjects() }) });
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', `deploy/${RATELIMIT_REDIS.name}`]);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', `deploy/${RATELIMIT_REDIS.name}`, '--timeout=300s']);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', 'deploy/envoy-gateway']);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', 'deploy/envoy-gateway', '--timeout=300s']);
+
+  const defs = remoteDemoGatewayObjects();
+  const certs = listenerCertificates(defs);
+  const tls = gatewayTls([...new Set(certs.map((c) => c.host))]);
+  const keys = Object.fromEntries(['fan', 'admin', 'staff', 'admission'].map((k) => [k, generateV0TokenKey()]));
+  const admission = admissionKeySet({ current: keys.admission.privateJwk, next: generateV0TokenKey().privateJwk, previous: generateV0TokenKey().privateJwk, expired: generateV0TokenKey().privateJwk }, Math.floor(Date.now() / 1000));
+  const originVerify = randomBytes(32).toString('base64url');
+  for (const o of gatewaySecrets(certs, tls, originVerify)) await createSecret(o);
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify(admissionJwksConfigMap(admissionJwks(admission))) });
+  await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: defs }) });
+  for (const gw of GATEWAY_NAMES) await kubectl(['-n', GATEWAY_NAMESPACE, 'wait', `gateway/${gw}`, '--for=condition=Programmed', '--timeout=300s']);
+  const proxies = (await kubectl(['-n', GATEWAY_NAMESPACE, 'get', 'deploy', '-l', 'app.kubernetes.io/managed-by=envoy-gateway', '-o', 'name'], { quiet: true })).split('\n').filter(Boolean);
+  if (proxies.length) {
+    await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'restart', ...proxies]);
+    for (const d of proxies) await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', d, '--timeout=300s']);
+  }
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'wait', `deploy/${GATEWAY_RATELIMIT.deployment}`, '--for=create', '--timeout=120s']);
+  await kubectl(['-n', GATEWAY_NAMESPACE, 'rollout', 'status', `deploy/${GATEWAY_RATELIMIT.deployment}`, '--timeout=300s']);
+  for (const gw of GATEWAY_NAMES) await kubectl(['apply', '-f', '-'], { input: JSON.stringify(gatewayNodePortService(gw, await gatewayHttpsTargetPort(gw))) });
+
+  const gwPorts = gatewayHostPorts(nodePortBindings());
+  const hosts = Object.fromEntries(listenerCertificates(defs).map((c) => [c.listener, c.host]));
+  const listeners = Object.fromEntries(listenerCertificates(defs).map((c) => [c.listener, c.gateway]));
+  const ports = Object.fromEntries(Object.entries(listeners).map(([key, gw]) => [key, gwPorts[gw]]));
+  const contract = { cluster: CLUSTER, hosts, ports, origins: demoOrigins(ports), grpcPort: DEMO_PORTS.grpc, idvPort: DEMO_PORTS.idv, caPem: tls.cert, originVerify };
+  mkdirSync(dirname(DEMO_CONTRACT_FILE), { recursive: true });
+  writeFileSync(DEMO_CONTRACT_FILE, `${JSON.stringify(contract, null, 2)}\n`, { mode: 0o600 });
+  const deadline = Date.now() + 60_000;
+  const left = new Map(Object.entries(hosts).map(([k, host]) => [k, { host, why: '아직 시도하지 않았다' }]));
+  while (Date.now() < deadline && left.size) {
+    for (const [key, v] of [...left]) {
+      try {
+        await tlsHandshake(ports[key], v.host, tls.cert);
+        left.delete(key);
+      } catch (e) {
+        v.why = e.message;
+      }
+    }
+    if (left.size) await new Promise((r) => setTimeout(r, 2000));
+  }
+  if (left.size) throw new Error(`게이트웨이 TLS 손 맞잡기가 끝나지 않았다: ${[...left].map(([k, v]) => `${k}=${v.why}`).join(', ')}`);
+  const problems = await gatewayConditionProblems();
+  console.log(problems.length ? problems.join('\n') : '게이트웨이 조건: 모두 참');
+  console.log(`접속 정보: ${DEMO_CONTRACT_FILE}`);
+  return contract;
+}
+
+/** deploy/gateways를 읽어 데모 객체로 바꾼다(demo-objects가 순수 함수로 만든다) */
+function remoteDemoGatewayObjects() {
+  return demoGatewayObjects(readGatewayObjects(join(REPO, 'deploy', 'gateways')));
+}
+
+/** demo 명령: 이미지 → 네임스페이스·저장소·Secret → 마이그레이션 → 차트 → 게이트웨이 → 준비 대기 */
+export async function demo(argv = []) {
+  const plan = demoPlan(argv);
+  step('Docker 엔진과 도구');
+  run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
+  for (const t of ['kind', 'kubectl', 'helm']) await ensureTool(t);
+  await ensureCluster();
+  const gwPorts = demoHostPorts();
+  const only = plan.only ? new Set(plan.only) : undefined;
+  const workloads = DEMO_WORKLOADS.filter((w) => !only || only.has(w.name));
+
+  if (!plan.skipBuild) {
+    step(`이미지 ${DEMO_NEW_IMAGES.length + 3}개 빌드(${DEMO_NEW_IMAGES.map((i) => i.workload).join('·')}·bundle·ops-svc·pg-simulator)`);
+    for (const i of DEMO_NEW_IMAGES) buildDemoImage(i);
+    for (const [file, image] of [
+      ['services/bundle/Dockerfile', DEMO_WORKLOAD_IMAGES.bundle],
+      ['services/ops-svc/Dockerfile', DEMO_WORKLOAD_IMAGES['ops-svc']],
+      ['services/pg-simulator/Dockerfile', DEMO_WORKLOAD_IMAGES['pg-simulator']],
+    ]) {
+      console.log(`\n== ${image}`);
+      execFileSync('docker', ['build', '-f', join(REPO, file), '-t', image, REPO], { stdio: 'inherit' });
+    }
+  }
+  step('이미지 미리 싣기(kind 노드)');
+  await preloadLocalImages([...DEMO_NEW_IMAGES.map((i) => i.image), ...Object.values(DEMO_WORKLOAD_IMAGES), ...V1_PRELOAD_IMAGES]);
+
+  step('네임스페이스 여섯과 Secret');
+  await applyList(demoNamespaces());
+  const { secrets, bootstrap } = prepareDemoSecrets();
+  for (const o of demoSecrets({ keys: secrets, bootstrap })) await createSecret(o);
+
+  step('PostgreSQL 하나(논리 DB 넷)·Valkey 하나·모의 기관·좌석맵 작업자');
+  await applyList([...demoPostgresObjects(), ...demoValkeyObjects(), ...demoAppObjects(), demoGrpcNodePortService()]);
+  for (const [ns, d] of [['purchase', 'demo-postgres'], ['purchase', 'demo-valkey'], ['core', 'mock-idv'], ['core', 'core-seatmap-worker']]) {
+    await kubectl(['-n', ns, 'rollout', 'restart', `deploy/${d}`]);
+    await kubectl(['-n', ns, 'rollout', 'status', `deploy/${d}`, '--timeout=300s']);
+  }
+  step(`DB ${Object.keys(DEMO_DATABASES).length}개와 로그인 사용자`);
+  for (const stmt of demoDatabaseInitSql(secrets.dbPassword).split('\n')) if (stmt.trim()) await psqlDemo(stmt);
+  await demoKafka();
+  step('마이그레이션 잡(identity·ticket·core·ops·purchase·payment)');
+  const su = `postgres://postgres:${secrets.dbPassword}@demo-postgres.purchase.svc.cluster.local:5432/${DEMO_DATABASES.core}`;
+  const dbUrls = demoDatabaseUrls(secrets.dbPassword);
+  await demoJob({ name: 'demo-migrate-identity', namespace: 'core', image: DEMO_WORKLOAD_IMAGES['identity-svc'], secret: 'demo-identity', command: ['node', 'scripts/migrate.mjs'] });
+  await demoJob({ name: 'demo-migrate-ticket', namespace: 'ticket', image: DEMO_WORKLOAD_IMAGES['ticket-svc'], secret: 'demo-ticket', command: ['node', 'scripts/migrate.mjs'] });
+  await demoJob({ name: 'demo-migrate-core', namespace: 'core', image: DEMO_WORKLOAD_IMAGES['core-svc'], env: [{ name: 'PEAKET_DATABASE_URL', value: su }], command: ['node', 'scripts/migrate.mjs'] });
+  await demoJob({ name: 'demo-migrate-ops', namespace: 'core', image: DEMO_WORKLOAD_IMAGES['ops-svc'], secret: 'demo-ops', command: ['node', 'scripts/migrate.mjs'] });
+  for (const svc of ['purchase', 'payment']) {
+    await demoJob({
+      name: `demo-migrate-${svc}`,
+      namespace: 'purchase',
+      image: DEMO_WORKLOAD_IMAGES.bundle,
+      env: [{ name: 'PEAKET_DATABASE_URL', value: dbUrls[svc] }],
+      command: ['sh', '-c', `cd "$(readlink -f node_modules/@peaket/${svc}-svc)" && exec node scripts/migrate.mjs`],
+    });
+  }
+  for (const stmt of demoCoreRolesSqlExport(secrets.dbPassword).split('\n')) if (stmt.trim()) await psqlDemo(stmt);
+
+  step(`워크로드 ${workloads.length}개(공용 차트, deploy/envs/local/demo)`);
+  for (const w of workloads) {
+    const args = ['upgrade', '--install', w.name, join(REPO, 'deploy', 'charts', 'peaket-service'), '-n', w.namespace];
+    const unit = join(REPO, 'deploy', 'workloads', w.name, 'values.yaml');
+    if (existsSync(unit)) args.push('-f', unit);
+    args.push('-f', join(REPO, 'deploy', 'envs', 'local', 'demo', `${w.name}.yaml`), '--wait', '--timeout', '300s');
+    await helm(args);
+  }
+  for (const w of workloads) await kubectl(['-n', w.namespace, 'rollout', 'status', `deploy/${w.name}`, '--timeout=300s']);
+
+  await demoGateways();
+  step('준비됨');
+  const contract = JSON.parse(readFileSync(DEMO_CONTRACT_FILE, 'utf8'));
+  const hosts = Object.entries(contract.origins).map(([k, v]) => `${k} ${v}`).join('\n  ');
+  console.log(`데모 무대(${CLUSTER}):\n  ${hosts}`);
+  console.log(`identity gRPC 127.0.0.1:${DEMO_PORTS.grpc}, 모의 기관 127.0.0.1:${DEMO_PORTS.idv}, kubeconfig ${KUBECONFIG}`);
+  console.log('다음: node tools/local/cluster.mjs demo-seed --apply');
+}
+
+/** demo-seed 명령(--check 기본, --apply) */
+export async function demoSeed(argv = []) {
+  const json = argv.includes('--json');
+  const apply = argv.includes('--apply');
+  const check = argv.includes('--check') || !apply;
+  const unknown = argv.filter((a) => !['--check', '--apply', '--json'].includes(a));
+  if (unknown.length) {
+    console.error(`demo-seed의 모르는 인자: ${unknown.join(', ')}`);
+    process.exit(2);
+  }
+  if (check) {
+    const result = checkSeed();
+    if (json) console.log(JSON.stringify(result, null, 2));
+    else if (result.ok) console.log(`시드가 맞다: ${JSON.stringify(result.counts)}`);
+    else console.error(result.problems.join('\n'));
+    if (!result.ok) process.exit(1);
+    if (!apply) return;
+  }
+  const result = await applySeed();
+  console.log(json ? JSON.stringify(result, null, 2) : `시드를 적용했다: ${JSON.stringify(result.counts)}`);
+}
+
+/** demoCoreRolesSql은 demo-objects의 export를 그대로 쓴다(위에서 import 이름을 줄이지 않았다) */
+function demoCoreRolesSqlExport(password) {
+  return demoCoreRolesSql(password);
+}
+
+/** demo 상태: 기대 워크로드와 readyReplicas를 견준다. 0건은 통과가 아니다(DS-11) */
+export async function demoStatus(argv = []) {
+  const json = argv.includes('--json');
+  const expected = demoExpectedWorkloads();
+  if (expected.length === 0) {
+    if (json) console.log(JSON.stringify({ ok: false, reason: 'no-workloads' }));
+    else console.error('no-workloads: 기대 워크로드 목록이 비었다');
+    process.exit(1);
+  }
+  const missing = [];
+  const rows = [];
+  for (const e of expected) {
+    let deploy;
+    try {
+      deploy = JSON.parse(await kubectl(['-n', e.namespace, 'get', 'deploy', e.name, '-o', 'json'], { quiet: true }));
+    } catch {
+      missing.push(`missing ${e.namespace}/${e.name}`);
+      rows.push({ ...e, ready: 0, total: 0 });
+      continue;
+    }
+    const ready = Number(deploy.status?.readyReplicas ?? 0);
+    const total = Number(deploy.status?.replicas ?? 0);
+    rows.push({ ...e, ready, total });
+    if (ready < e.expected) missing.push(`pods-not-ready ${e.namespace}/${e.name} ready ${ready}/${e.expected}`);
+  }
+  if (json) console.log(JSON.stringify({ ok: missing.length === 0, workloads: rows, problems: missing }, null, 2));
+  else if (missing.length === 0) console.log(`데모 워크로드 ${rows.length}개가 준비됐다`);
+  else console.error(missing.join('\n'));
+  process.exit(missing.length === 0 ? 0 : 1);
+}
+
+/** 데모 네임스페이스만 지운다(클러스터·다른 갈래는 그대로). 두 번 불러도 exit 0 */
+export async function demoDown() {
+  step(`데모 네임스페이스 ${DEMO_NAMESPACES.length}개 삭제(클러스터 ${CLUSTER}는 남긴다)`);
+  for (const ns of DEMO_NAMESPACES) await kubectl(['delete', 'namespace', ns, '--ignore-not-found', '--wait=true', '--timeout=300s']);
+  console.log(`데모 무대를 내렸다(네임스페이스 ${DEMO_NAMESPACES.join(', ')}). 클러스터 ${CLUSTER}는 그대로다`);
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
-  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, kyverno, 'realtime-gw': realtimeGw, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
+  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, kyverno, 'realtime-gw': realtimeGw, demo, 'demo-seed': demoSeed, 'demo-status': demoStatus, 'demo-down': demoDown, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|kyverno [--env demo|staging|prod]|realtime-gw [--image <이름:태그>]|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|kyverno [--env demo|staging|prod]|realtime-gw [--image <이름:태그>]|demo [--skip-build] [--only <목록>]|demo-seed [--check|--apply]|demo-status|demo-down|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();
-  const withArgs = { up: upPlan, v1: v1Plan, 'gateways-admission': gatewaysAdmissionMode, kyverno: kyvernoPlan };
+  const withArgs = { up: upPlan, v1: v1Plan, 'gateways-admission': gatewaysAdmissionMode, kyverno: kyvernoPlan, demo: demoPlan };
   if (withArgs[cmd]) {
     try {
       withArgs[cmd](process.argv.slice(3));
@@ -1208,5 +1534,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       usage();
     }
   }
-  await (withArgs[cmd] ? cmds[cmd](process.argv.slice(3)) : cmds[cmd]());
+  await cmds[cmd](process.argv.slice(3));
 }

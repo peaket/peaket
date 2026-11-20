@@ -116,12 +116,15 @@ async function formOf(req) {
 
 /**
  * 모의 기관을 띄운다
- * @param {{ port?: number, returnUrl: string, secret?: Uint8Array, env?: Record<string, string | undefined>, now?: () => number }} o
+ * @param {{ port?: number, host?: string, returnUrl: string, secret?: Uint8Array, env?: Record<string, string | undefined>, now?: () => number }} o
  * @returns {Promise<{ url: string, close: () => Promise<void> }>}
  */
 export async function startMockIdv(o) {
   const peaketEnv = o.env?.PEAKET_ENV;
   if (peaketEnv !== 'local' && peaketEnv !== 'ci' && peaketEnv !== 'demo') throw new Error(`모의 기관은 PEAKET_ENV가 local·ci·demo일 때만 돈다(지금 ${peaketEnv ?? '없음'})`);
+  // 들을 주소: 기본은 127.0.0.1(개발 PC). kind 데모는 0.0.0.0으로 파드 밖(NodePort)에서 받는다. Host 검사는 그대로 127.0.0.1·localhost만 받는다
+  const host = o.host ?? '127.0.0.1';
+  if (!/^(?:127\.0\.0\.1|localhost|0\.0\.0\.0|::)$/.test(host)) throw new Error(`모의 기관이 들을 주소는 127.0.0.1·localhost·0.0.0.0만 받는다: ${host}`);
   // 개발용 값은 공개 저장소에 있어 누구나 결과 값을 서명할 수 있다. demo에서는 쓰지 않는다(시험 어댑터와 같다)
   if (peaketEnv === 'demo' && !o.secret) throw new Error('demo에서는 PEAKET_TEST_VERIFICATION_SECRET가 있어야 한다(개발용 값을 쓰지 않는다)');
   if (o.secret && o.secret.length < MIN_SECRET_BYTES) throw new Error(`시험 기관 비밀은 ${MIN_SECRET_BYTES}바이트 이상이다`);
@@ -188,7 +191,7 @@ export async function startMockIdv(o) {
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(o.port ?? 0, '127.0.0.1', () => resolve(undefined));
+    server.listen(o.port ?? 0, host, () => resolve(undefined));
   });
   const addr = server.address();
   if (!addr || typeof addr === 'string') throw new Error('주소를 얻지 못했다');
@@ -204,6 +207,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (!returnUrl) throw new Error('PEAKET_TEST_VERIFICATION_RETURN_URL이 없다(예: http://localhost:3000/verify/return)');
   const started = await startMockIdv({
     port: Number(process.argv[2] ?? 18920),
+    host: process.env.PEAKET_MOCK_IDV_HOST || '127.0.0.1',
     returnUrl,
     secret: secretFromEnv(process.env.PEAKET_TEST_VERIFICATION_SECRET),
     env: process.env,

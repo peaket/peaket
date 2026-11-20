@@ -1,0 +1,77 @@
+# BAT-087 기본 합성 시드(docs/review/plans/BAT-087.md §5, 값은 docs/design/d5-screen-blueprint.md §10.3을 가리킨다).
+# - 모든 이름·회사·장소·금액은 가상이다. 실제 개인정보·이메일·전화번호·비밀 키를 넣지 않는다.
+# - 비밀번호·TOTP·패스키 개인키는 값이 아니라 환경 값 이름만 적는다. 실제 값은 이 PC의
+#   `.cache/peaket-tools/demo-secrets/`(0600)에만 두고, 부트스트랩 Secret으로만 클러스터에 넣는다.
+# - `node tools/local/demo-seed.mjs --check`가 참조·비밀 없음·두 번 적용의 개수 계약을 본다.
+# - 첫 관리자·파트너사(promoter)는 공개 API가 없어 부트스트랩 예외다(감사 기록 없음, 로컬 데모 전용).
+version: 1
+
+accounts:
+  # 팬(지민·하늘)은 identity gRPC CreateSession으로 계정과 세션을 만든다(데모 인증 도우미)
+  - { key: jimin, kind: fan, provider: KAKAO, providerUserId: demo-kakao-jimin, email: jimin@example.test, nickname: 지민 }
+  - { key: haneul, kind: fan, provider: GOOGLE, providerUserId: demo-google-haneul, email: haneul@example.test, nickname: 하늘 }
+  - { key: doyun, kind: fan, provider: KAKAO, providerUserId: demo-kakao-doyun, email: doyun@example.test, nickname: 도윤 }
+  - { key: newbie, kind: fan, provider: GOOGLE, providerUserId: demo-google-newbie, email: newbie@example.test, nickname: 새 사용자 }
+  # 운영자 다섯(수진·민호·서연·다은·준)과 두 번째 commander(2인 승인 상대)
+  - { key: sujin, kind: admin, provider: LOCAL, providerUserId: sujin, email: sujin@peaket.test, displayName: 수진, role: commander, passwordEnv: DEMO_SUJIN_PASSWORD, totpEnv: DEMO_SUJIN_TOTP }
+  - { key: minho, kind: admin, provider: LOCAL, providerUserId: minho, email: minho@peaket.test, displayName: 민호, role: operator, passwordEnv: DEMO_MINHO_PASSWORD, totpEnv: DEMO_MINHO_TOTP }
+  - { key: seoyeon, kind: admin, provider: LOCAL, providerUserId: seoyeon, email: seoyeon@peaket.test, displayName: 서연, role: viewer, passwordEnv: DEMO_SEOYEON_PASSWORD, totpEnv: DEMO_SEOYEON_TOTP }
+  - { key: daeun, kind: admin, provider: LOCAL, providerUserId: daeun, email: daeun@peaket.test, displayName: 다은, role: cs_agent, passwordEnv: DEMO_DAEUN_PASSWORD, totpEnv: DEMO_DAEUN_TOTP }
+  - { key: jun, kind: admin, provider: LOCAL, providerUserId: jun, email: jun@peaket.test, displayName: 준, role: cs_lead, passwordEnv: DEMO_JUN_PASSWORD, totpEnv: DEMO_JUN_TOTP }
+  - { key: second-commander, kind: admin, provider: LOCAL, providerUserId: second-commander, email: second@peaket.test, displayName: 두 번째 commander, role: commander, passwordEnv: DEMO_SECOND_COMMANDER_PASSWORD, totpEnv: DEMO_SECOND_COMMANDER_TOTP }
+  # 파트너 관리자(스텔라엔터테인먼트). promoterId는 부트스트랩이 만든 promoter 행과 같다
+  - { key: stella-admin, kind: admin, provider: LOCAL, providerUserId: stella-admin, email: stella-admin@peaket.test, displayName: 스텔라 관리자, role: partner_admin, promoterKey: stella, passwordEnv: DEMO_STELLA_ADMIN_PASSWORD, totpEnv: DEMO_STELLA_ADMIN_TOTP }
+
+# 2인 승인·판매 재개에 필요한 패스키(공개키·자격 ID·서명 횟수 0). 개인키는 .cache에만 두고 CDP 가상 인증기가 쓴다
+adminPasskeys:
+  - { accountKey: sujin, credentialEnv: DEMO_SUJIN_PASSKEY_CREDENTIAL, privateKeyEnv: DEMO_SUJIN_PASSKEY_PRIVATE_KEY, name: 수진 패스키 }
+  - { accountKey: second-commander, credentialEnv: DEMO_SECOND_COMMANDER_PASSKEY_CREDENTIAL, privateKeyEnv: DEMO_SECOND_COMMANDER_PASSKEY_PRIVATE_KEY, name: 두 번째 commander 패스키 }
+  - { accountKey: stella-admin, credentialEnv: DEMO_STELLA_ADMIN_PASSKEY_CREDENTIAL, privateKeyEnv: DEMO_STELLA_ADMIN_PASSKEY_PRIVATE_KEY, name: 스텔라 관리자 패스키 }
+
+promoters:
+  - { key: stella, legalName: (주)스텔라엔터테인먼트, representative: 예시 대표, address: 서울특별시 예시구 예시로 1, email: stella@example.test, phone: 02-0000-0000, businessRegNo: 000-00-00000, mailOrderReportNo: 제0000-예시호, partnerAdminKey: stella-admin }
+
+productions:
+  - { key: e1, promoterKey: stella, title: LUMEN 콘서트 2026 서울, genre: 콘서트, ageRating: 만 7세 이상, runningMinutes: 120, placeName: 피켓 아레나, placeAddress: 서울특별시 예시구 아레나로 1, aliases: [LUMEN CONCERT 2026 SEOUL] }
+  - { key: e2, promoterKey: stella, title: 가을 야외 페스티벌, genre: 페스티벌, ageRating: 전체 관람가, runningMinutes: 180, placeName: 피켓 야외무대, placeAddress: 서울특별시 예시구 공원로 2 }
+  - { key: e3, promoterKey: stella, title: 소극장 뮤지컬, genre: 뮤지컬, ageRating: 만 12세 이상, runningMinutes: 100, placeName: 피켓 소극장, placeAddress: 서울특별시 예시구 극장로 3 }
+  - { key: e4, promoterKey: stella, title: 팬미팅, genre: 팬미팅, ageRating: 만 15세 이상, runningMinutes: 90, placeName: 피켓 홀, placeAddress: 서울특별시 예시구 홀로 4 }
+
+events:
+  # E-1 하이브리드: 10/25(일) 18:00·10/26(월) 17:00, 오픈 10/14(수) 20:00
+  - { key: e1-1025, productionKey: e1, mode: HYBRID, openAt: '2026-11-21T20:00:00+09:00', startAt: '2026-11-25T18:00:00+09:00', endAt: '2026-11-25T20:00:00+09:00', entryOpensAt: '2026-11-25T16:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 4, seatAssignment: PICK, reentryAllowed: false, prices: { R: 154000, S: 132000, A: 110000 } }
+  - { key: e1-1026, productionKey: e1, mode: HYBRID, openAt: '2026-11-21T20:00:00+09:00', startAt: '2026-11-26T17:00:00+09:00', endAt: '2026-11-26T19:00:00+09:00', entryOpensAt: '2026-11-26T15:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 4, seatAssignment: PICK, reentryAllowed: false, prices: { R: 154000, S: 132000, A: 110000 } }
+  # E-2 선착순·자동 배정, 재입장 허용(퇴장 모드 시연), 가상계좌 허용
+  - { key: e2-01, productionKey: e2, mode: FIFO, openAt: '2026-11-22T12:00:00+09:00', startAt: '2026-11-28T15:00:00+09:00', endAt: '2026-11-28T18:00:00+09:00', entryOpensAt: '2026-11-28T13:30:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: AUTO, reentryAllowed: true, prices: { R: 99000, S: 77000 } }
+  # E-3 소극장 뮤지컬: 회차 3개, 전석 매진(시드 뒤 판매 상태로 만든다), 전석 같은 가격
+  - { key: e3-01, productionKey: e3, mode: FIFO, openAt: '2026-11-22T19:00:00+09:00', startAt: '2026-11-29T14:00:00+09:00', endAt: '2026-11-29T15:40:00+09:00', entryOpensAt: '2026-11-29T13:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
+  - { key: e3-02, productionKey: e3, mode: FIFO, openAt: '2026-11-22T19:00:00+09:00', startAt: '2026-11-29T19:00:00+09:00', endAt: '2026-11-29T20:40:00+09:00', entryOpensAt: '2026-11-29T18:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
+  - { key: e3-03, productionKey: e3, mode: FIFO, openAt: '2026-11-22T19:00:00+09:00', startAt: '2026-11-30T14:00:00+09:00', endAt: '2026-11-30T15:40:00+09:00', entryOpensAt: '2026-11-30T13:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { A: 66000 } }
+  # E-4 팬미팅: 오픈 뒤 진입이 로비 참가자 뒤에 도착 순으로 선다(PREQUEUE_SHUFFLE 연기), 회차 시작 24시간 전 판매 종료 상태
+  - { key: e4-01, productionKey: e4, mode: PREQUEUE_SHUFFLE, openAt: '2026-11-20T12:00:00+09:00', startAt: '2026-11-24T19:00:00+09:00', endAt: '2026-11-24T20:30:00+09:00', entryOpensAt: '2026-11-24T18:00:00+09:00', lobbyMinutes: 10, perPersonLimit: 2, seatAssignment: PICK, reentryAllowed: false, prices: { R: 88000, S: 66000 } }
+
+# 좌석맵: 좌석을 하나씩 나열하지 않고 구역·줄·번 범위로 적는다. 적용기가 펼쳐 API 모양으로 만든다
+seatMaps:
+  - key: e1-arena
+    eventKey: e1-1025
+    templateVenueId: peaket-arena-2400
+    canvas: { width: 1400, height: 1000 }
+    sections:
+      - { code: R1, name: R구역 1, level: 1, rows: 20, seatsPerRow: 15, grade: R, fillRule: { method: GRID, rows: 1, seatsPerRow: 1 }, gateZone: 동문 }
+      - { code: R2, name: R구역 2, level: 1, rows: 20, seatsPerRow: 15, grade: R, fillRule: { method: GRID, rows: 1, seatsPerRow: 1 }, gateZone: 서문 }
+      - { code: S1, name: S구역 1, level: 1, rows: 30, seatsPerRow: 15, grade: S, fillRule: { method: GRID, rows: 1, seatsPerRow: 1 }, gateZone: 동문 }
+      - { code: S2, name: S구역 2, level: 1, rows: 30, seatsPerRow: 15, grade: S, fillRule: { method: GRID, rows: 1, seatsPerRow: 1 }, gateZone: 서문 }
+      - { code: A1, name: A구역 1, level: 2, rows: 30, seatsPerRow: 15, grade: A, fillRule: { method: GRID, rows: 1, seatsPerRow: 1 }, gateZone: 동문, wheelchairSeats: 10 }
+      - { code: A2, name: A구역 2, level: 2, rows: 30, seatsPerRow: 15, grade: A, fillRule: { method: GRID, rows: 1, seatsPerRow: 1 }, gateZone: 서문, wheelchairSeats: 10 }
+  # 나머지 회차는 같은 배치를 복제한다(좌석 수를 회차마다 따로 적지 않는다)
+  - { key: e1-1026, eventKey: e1-1026, copyOf: e1-arena }
+  - { key: e2-arena, eventKey: e2-01, copyOf: e1-arena }
+  - { key: e3-hall, eventKey: e3-01, copyOf: e1-arena }
+  - { key: e3-hall-2, eventKey: e3-02, copyOf: e1-arena }
+  - { key: e3-hall-3, eventKey: e3-03, copyOf: e1-arena }
+  - { key: e4-hall, eventKey: e4-01, copyOf: e1-arena }
+
+# 현장 스태프와 기기(동문 4·서문 3). 계정은 위의 팬 계정을 쓴다(초대 수락은 끝난 상태로 시드한다)
+staff:
+  - { key: haneul-lead, eventKey: e1-1025, accountKey: haneul, role: gate_lead, devices: [{ key: east-01, name: 동문-01, booth: 동문 }, { key: west-01, name: 서문-01, booth: 서문 }] }
+  - { key: doyun-staff, eventKey: e1-1025, accountKey: doyun, role: gate_staff, devices: [{ key: east-02, name: 동문-02, booth: 동문 }] }
