@@ -182,6 +182,30 @@ describe('관제 판매 승인 목록·상세·반려·CDN(S-T41 ④⑤⑩)', ()
     expect((await list(ops(), '?limit=101')).statusCode).toBe(400);
   });
 
+  test('S-T41 ⑤_ 잘못된 커서 UUID·반복 쿼리·limit 범위 밖은 400이고 500이 아니다', async () => {
+    const nonUuid = Buffer.from(JSON.stringify(['2026-11-07T00:00:00.000Z', 'x'])).toString('base64url');
+    const badTime = Buffer.from(JSON.stringify(['언젠가', randomUUID()])).toString('base64url');
+    const repeated = Buffer.from(JSON.stringify(['2026-11-07T00:00:00.000Z', randomUUID()])).toString('base64url');
+    const cases = [
+      `?cursor=${nonUuid}`,
+      `?cursor=${badTime}`,
+      '?cursor=not-a-cursor',
+      '?cursor=',
+      '?status=SUBMITTED&status=REJECTED',
+      `?cursor=${repeated}&cursor=${repeated}`,
+      '?limit=1&limit=2',
+      '?limit=0',
+      '?limit=101',
+      '?limit=abc',
+      '?limit=1.5',
+      '?unknown=1',
+    ];
+    for (const q of cases) {
+      const r = await list(ops('viewer'), q);
+      expect({ q, status: r.statusCode }).toEqual({ q, status: 400 });
+    }
+  });
+
   test('S-T41 ⑤_ 상세는 판매자 정보·회차·규모·판매 정책·수요 예측 링크를 주고 DRAFT·없는 공연은 404이며 no-store다', async () => {
     const p = production({ events: 2, rules: [general], pendingRules: [{ ...general, name: '재승인 대기 규칙' }] });
     repo.eventScales.set(p.eventIds[0]!, 'MEDIUM');
