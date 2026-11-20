@@ -160,6 +160,12 @@ flowchart LR
 | `http_server_business_rejections_total` | 카운터 | 히스토그램과 같다 | 업무상 정상 분기로 표시한 오류 응답(예: 좌석 경합 409). 오류 카운터에 넣지 않고 따로 센다(docs/api/guidelines.md §2, NFR-003). 정상 분기 표시는 오류를 내는 코드가 Problem에 단다. 같은 409라도 처리 중 재요청(`idempotency-request-in-progress`)은 정상 분기가 아니어서 상태 코드만으로는 가를 수 없기 때문이다 |
 | Node 기본 지표(`nodejs_eventloop_lag_seconds` 등) | 여럿 | 없음 | 포화도(이벤트 루프 지연, 힙, GC). `@prometheus-io/client`의 기본 지표 모음이다 |
 
+**테넌트 레이트 리밋 지표(추천 적용 2026-11-20, BAT-173)**: 파트너 API를 받는 서비스의 공용 가드가 테넌트 카운터 판정 결과를 센다. 테넌트 ID는 라벨에 싣지 않는다(§8).
+
+| 지표 | 종류 | 라벨 | 뜻 |
+| --- | --- | --- | --- |
+| `tenant_rate_limit_total` | 카운터 | `service`·`result` | 파트너 테넌트 한도 판정 결과. `result`는 `allowed`(600 이하 통과)·`limited`(601부터 429)·`unavailable`(Redis 판정 실패로 열림)다 |
+
 - `route`는 경로 틀을 계약 표기로 쓴 값이다(`/v1/events/{eventId}`). 맞는 경로가 없는 요청과 처리기를 찾기 전에 거절한 요청(잘못된 URL 등)은 `unmatched` 하나로 묶는다. 실제 자원 ID는 들어가지 않는다(§8).
 - 처리 중 요청 게이지는 응답을 보냈을 때와 연결이 끊겼을 때(본문을 다 받은 뒤 끊긴 경우 포함) 한 번만 내린다. 끊긴 요청은 지연 히스토그램에 들지 않는다.
 - 지연은 서비스에 주입한 시계(단조 시계)로 잰다. 시험은 `packages/platform/test/metrics.test.ts`(5xx는 오류 카운터, 409 경합 패배는 정상 분기 카운터, docs/verification.md §2.7의 지표 내보내기 층)다.
