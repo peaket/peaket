@@ -235,6 +235,21 @@ export function readContract() {
 }
 
 /**
+ * 로컬 데모 요청에 붙이는 게이트웨이 머리(ADR-0321). 데모는 CloudFront를 거치지 않으므로
+ * 원본 확인 머리를 계약 값으로 직접 보내고, 관제 호스트(gw-ops)는 허용 IP 검사를 지나도록
+ * CloudFront-Viewer-Address(로컬 시험 대역 127.0.0.0/8)를 함께 보낸다.
+ * @param {string} host 요청 Host(정본 이름)
+ */
+function demoEdgeHeaders(host) {
+  const c = readContract();
+  const h = String(host);
+  return {
+    ...(c.originVerify ? { 'x-peaket-origin-verify': c.originVerify } : {}),
+    ...(h.startsWith('ops-api.') || h.startsWith('console.') ? { 'cloudfront-viewer-address': '127.0.0.1:443' } : {}),
+  };
+}
+
+/**
  * HTTPS 요청(자체 서명 인증서, Host로 정본 이름을 보낸다). 303·302를 따라가지 않는다(로그인 응답의 Set-Cookie만 본다).
  * @param {{ host: string, port: number, method: string, path: string, body?: unknown, headers?: Record<string,string> }} o
  */
@@ -252,6 +267,7 @@ export function httpsJson(o) {
         headers: {
           host: `${o.host}:${o.port}`,
           accept: 'application/json',
+          ...demoEdgeHeaders(o.host),
           ...(payload ? { 'content-type': 'application/json', 'content-length': payload.length } : {}),
           ...o.headers,
         },

@@ -1340,6 +1340,9 @@ async function demoKafka() {
 async function demoGateways() {
   step('게이트웨이 다섯(실제 백엔드, deploy/gateways의 정의)');
   await preloadLocalImages([GATEWAY_CONTROLLER_IMAGE, GATEWAY_PROXY_IMAGE, PINNED.envoyGatewayRatelimitImage, RATELIMIT_REDIS_IMAGE]);
+  // gw-ops 허용 IP(로컬 시험 값 127.0.0.0/8, ADR-0321 결정 3). 프록시가 뜨기 전에 두어야 환경 값으로 읽는다.
+  // 없으면 공통 Lua가 관제 요청을 모두 거절한다(닫힌 쪽): demo-seed의 관리자 로그인·승인이 403이 된다
+  await kubectl(['apply', '-f', join(REPO, 'deploy', 'envs', 'local', 'gateways', 'peaket-ops-allow.yaml')]);
   const controller = readFileSync(join(REPO, 'deploy', 'gateways', 'controller', 'envoy-gateway.yaml'), 'utf8');
   assertRatelimitBackend(controller);
   await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: gatewayInstall(await gatewayInstallFile(), controller), maxBuffer: 64 * 1024 * 1024 });

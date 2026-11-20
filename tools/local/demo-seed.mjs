@@ -5,9 +5,11 @@
 // - 예외(로컬 데모 전용, 계획 '고침' 절·deploy/envs/demo/README.md): 공연장(place) 행과 스태프 배정(staff_assignment)은
 //   공개 API가 없어 직접 SQL로 넣고, 기존 공연·회차·스태프를 찾는 읽기도 직접 SQL로 한다. 공연·회차·좌석맵은
 //   공개 API로만 만들어 감사 기록·Outbox를 남긴다(계획 B12, M8).
-// - 두 번 적용해도 계정·공연·회차·promoter·스태프·기기 수가 같다(키·제목·시작 시각·이메일로 찾아 없을 때만 만든다).
+// - 두 번 적용해도 계정·공연·회차·promoter·스태프·기기 수가 같다(키·제목·차례·이메일로 찾아 없을 때만 만든다).
+//   회차는 시작 시각 차례로 찾는다(상대 시각은 적용마다 값이 달라져 epoch로 찾을 수 없다, RV-01).
 //   두 번째에는 좌석맵을 다시 PUT하지 않는다(같은 배치를 덮어쓰지 않는다)
-// - 회차 오픈 시각은 실행 시각 기준 상대 표기(`+2h`)를 절대 ISO로 펼친다(지난 시각이면 --check·--apply가 먼저 실패한다)
+// - 회차 시각 넷(오픈·시작·종료·입장 시작)은 실행 시각 기준 상대 표기(`+2h`·`+1d6h`)만 쓰고 절대 ISO로 펼친다.
+//   차례(지금 < 오픈 < 판매 종료 < 시작 < 종료, 입장 시작 <= 시작)를 --check가 먼저 보고 어기면 --apply도 멈춘다
 // - 비밀·개인정보는 출력하지 않는다. 실패하면 exit 1이고 어느 단계가 실패했는지만 낸다
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -19,21 +21,36 @@ import { DEFAULT_ROOT, ensureTool } from './tools.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** 상대 시각 표기(+2h·-30m·+1d). 실행 시각 기준으로 펼쳐 시드가 오늘 이후에도 유효하게 한다(RV-01) */
-const RELATIVE_TIME = /^([+-])(\d+)([mhd])$/;
-const TIME_UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
+/** 상대 시각 표기(+2h·+1d·+1d6h·+30m). 단위는 d·h·m 차례로 붙인다. 모든 회차 시각은 이 표기만 쓴다(RV-01) */
+const RELATIVE_TIME = /^([+-])(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/;
+const TIME_UNIT_MS = { d: 86_400_000, h: 3_600_000, m: 60_000 };
+/** 회차 시각 칸 넷. entryOpensAt만 없어도 된다 */
+const EVENT_TIME_FIELDS = ['openAt', 'startAt', 'endAt', 'entryOpensAt'];
 /** 판매는 회차 시작 24시간 전에 끝난다(core `registration.ts`의 `SALE_END_BEFORE_START_MS`와 같은 값) */
 const SALE_END_BEFORE_START_MS = 24 * 60 * 60_000;
 
 /**
+ * 상대 표기 하나를 밀리초로 읽는다. 상대 표기가 아니면 null이다(절대 ISO·'내일' 같은 값).
+ * @param {string} value
+ */
+export function relativeSeedTimeMs(value) {
+  const text = String(value ?? '').trim();
+  const m = RELATIVE_TIME.exec(text);
+  if (!m || !/\d/.test(text)) return null;
+  const total = Number(m[2] ?? 0) * TIME_UNIT_MS.d + Number(m[3] ?? 0) * TIME_UNIT_MS.h + Number(m[4] ?? 0) * TIME_UNIT_MS.m;
+  return (m[1] === '-' ? -1 : 1) * total;
+}
+
+/**
  * 시드의 시각 값 하나를 Date로 읽는다. 상대 표기(`+2h`)는 now 기준이고, 절대 ISO는 그대로 쓴다.
+ * `checkSeed`는 절대 ISO를 받지 않는다(시드가 늙지 않게 모든 시각을 상대 표기로 둔다).
  * @param {string} value @param {Date} now @param {string} what 오류 메시지에 쓸 자리
  */
 export function seedTime(value, now = new Date(), what = '시각') {
   const text = String(value ?? '').trim();
   if (!text) throw new Error(`${what}이 비었다`);
-  const rel = RELATIVE_TIME.exec(text);
-  if (rel) return new Date(now.getTime() + (rel[1] === '-' ? -1 : 1) * Number(rel[2]) * TIME_UNIT_MS[rel[3]]);
+  const rel = relativeSeedTimeMs(text);
+  if (rel !== null) return new Date(now.getTime() + rel);
   const at = Date.parse(text);
   if (Number.isNaN(at)) throw new Error(`${what}을 읽지 못했다: ${text}(상대 표기 '+2h'나 절대 ISO를 쓴다)`);
   return new Date(at);
@@ -54,7 +71,7 @@ export function resolveSeedTimes(seed, now = new Date()) {
 }
 
 /** 시드 파일 하나를 읽고 검사한다. password·totp·privateKey 같은 값 칸이 있으면 실패(DS-05) */
-export function checkSeed(file = DEMO_SEED_FILE) {
+export function checkSeed(file = DEMO_SEED_FILE, now = new Date()) {
   const seed = readSeed(file);
   const problems = [];
   const text = readFileSync(file, 'utf8');
@@ -74,23 +91,36 @@ export function checkSeed(file = DEMO_SEED_FILE) {
   for (const p of seed.adminPasskeys ?? []) {
     if (!p.credentialEnv || !p.privateKeyEnv) problems.push(`패스키 ${p.accountKey}에 credentialEnv·privateKeyEnv가 없다`);
   }
-  // 오픈 시각은 적용 시점 기준으로 펼쳐 지금보다 미래인지 본다(RV-01). 지났으면 --apply가 422로 멈추기 전에 알린다
-  const now = new Date();
-  let events = seed.events ?? [];
-  let timesResolved = true;
+  // 모든 회차 시각(오픈·시작·종료·입장 시작)은 상대 표기여야 한다. 절대 날짜가 하나라도 남으면 시드가 늙어
+  // 언젠가 422로 멈춘다(RV-01). 읽지 못하는 표기도 여기서 잡는다
+  for (const e of seed.events ?? []) {
+    for (const field of EVENT_TIME_FIELDS) {
+      const value = e[field];
+      if (value === undefined) {
+        if (field !== 'entryOpensAt') problems.push(`회차 ${e.key}에 ${field}가 없다`);
+        continue;
+      }
+      if (relativeSeedTimeMs(value) === null) problems.push(`회차 ${e.key}의 ${field}(${value})가 절대 시각이다: 상대 표기('+2h'·'+1d'·'+1d6h')만 쓴다`);
+    }
+  }
+  // 펼친 시각의 차례를 본다: 지금 < 오픈 < 판매 종료(시작 24시간 전) < 시작 < 종료, 입장 시작 <= 시작.
+  // 어기면 --apply가 422로 멈추기 전에 --check가 먼저 알린다
+  let events = [];
   try {
     events = resolveSeedTimes(seed, now).events;
   } catch (e) {
-    timesResolved = false;
     problems.push(e instanceof Error ? e.message : String(e));
   }
-  for (const e of timesResolved ? events : []) {
+  for (const e of events) {
+    const raw = (field) => seed.events.find((x) => x.key === e.key)?.[field] ?? e[field];
     const open = Date.parse(e.openAt);
     const start = Date.parse(e.startAt);
-    const saleEnd = start - SALE_END_BEFORE_START_MS;
-    const source = seed.events.find((x) => x.key === e.key)?.openAt;
-    if (!(now.getTime() < open)) problems.push(`회차 ${e.key}의 openAt(${source})이 지난 시각이다: 오픈은 지금보다 미래여야 등록된다`);
-    else if (!(open < saleEnd)) problems.push(`회차 ${e.key}의 openAt(${source})이 판매 종료(시작 24시간 전)보다 늦다`);
+    const end = Date.parse(e.endAt);
+    const entry = e.entryOpensAt === undefined ? null : Date.parse(e.entryOpensAt);
+    if (!(start < end)) problems.push(`회차 ${e.key}의 startAt(${raw('startAt')})이 endAt(${raw('endAt')})보다 늦거나 같다`);
+    if (entry !== null && !(entry <= start)) problems.push(`회차 ${e.key}의 entryOpensAt(${raw('entryOpensAt')})이 startAt(${raw('startAt')})보다 늦다`);
+    if (!(now.getTime() < open)) problems.push(`회차 ${e.key}의 openAt(${raw('openAt')})이 지난 시각이다: 오픈은 지금보다 미래여야 등록된다`);
+    else if (!(open < start - SALE_END_BEFORE_START_MS)) problems.push(`회차 ${e.key}의 openAt(${raw('openAt')})이 판매 종료(시작 24시간 전)보다 늦다`);
   }
   const seatCounts = seatCountsOf(seed);
   return {
@@ -293,13 +323,26 @@ async function readProductions(promoterId) {
   });
 }
 
-/** 한 공연의 회차를 SQL로 읽는다(시작 시각 epoch 초로 시드와 잇는다) */
+/** 한 공연의 회차를 SQL로 읽는다(시작 시각 차례로 시드 회차와 잇는다) */
 async function readEvents(productionId) {
-  const rows = await psql('peaket_demo_core', `select id, extract(epoch from starts_at)::bigint from event where production_id = ${sqlLiteral(productionId)}`);
+  const rows = await psql('peaket_demo_core', `select id, extract(epoch from starts_at)::bigint from event where production_id = ${sqlLiteral(productionId)} order by starts_at, id`);
   return rows.map((line) => {
     const [id, epoch] = line.split('|');
     return { id, epoch: Number(epoch) };
   });
+}
+
+/**
+ * 기존 회차 행과 시드 회차를 시작 시각 차례로 잇는다. 시드 시각이 상대 표기라 적용마다 펼친 값이 달라져
+ * epoch로 찾을 수 없다(RV-01). 한 공연의 회차는 한 요청으로 모두 만들어지므로 개수와 차례가 같다
+ * @param {Array<{ key: string, startAt: string }>} events 펼친 시드 회차
+ * @param {Array<{ id: string, epoch: number }>} rows DB 회차
+ * @returns {Array<[string, string]>} 시드 key → 회차 ID(모자라면 있는 것만)
+ */
+export function matchSeedEvents(events, rows) {
+  const wanted = [...events].sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
+  const ordered = [...rows].sort((a, b) => a.epoch - b.epoch);
+  return wanted.flatMap((e, i) => (ordered[i] ? [[e.key, ordered[i].id]] : []));
 }
 
 /** 공연에 배치본(좌석맵)이 이미 있는지(회차의 venue_id가 채워졌는지) */
@@ -337,10 +380,12 @@ async function insertStaffAssignment(o) {
  */
 export async function applySeed(o = {}) {
   const seedFile = o.seedFile ?? DEMO_SEED_FILE;
-  const checked = checkSeed(seedFile);
+  // 검사와 적용이 같은 시계를 쓴다(상대 표기를 두 번 펼쳐 값이 어긋나지 않게)
+  const now = new Date();
+  const checked = checkSeed(seedFile, now);
   if (!checked.ok) throw new Error(`시드 검사에 실패했다: ${checked.problems.join('; ')}`);
   const { bootstrap } = prepareDemoSecrets({ seedFile });
-  const seed = resolveSeedTimes(readSeed(seedFile));
+  const seed = resolveSeedTimes(readSeed(seedFile), now);
   const c = contract();
   // core 부트스트랩(첫 promoter)만 슈퍼유저 주소를 쓴다. 실행 파드는 demo-core의 역할 주소만 받는다(RV-03)
   await runBootstrapJob({ name: 'demo-bootstrap-core', image: 'peaket/core-svc:demo', secret: 'demo-bootstrap-core' });
@@ -409,10 +454,7 @@ export async function applySeed(o = {}) {
       known.set(prod.title, { id: created.productionId, title: prod.title, saleReview: 'DRAFT' });
     } else {
       const rows = await readEvents(row.id);
-      for (const e of events) {
-        const hit = rows.find((x) => x.epoch === Math.floor(Date.parse(e.startAt) / 1000));
-        if (hit) eventIds[e.key] = hit.id;
-      }
+      for (const [key, id] of matchSeedEvents(events, rows)) eventIds[key] = id;
     }
   }
 
