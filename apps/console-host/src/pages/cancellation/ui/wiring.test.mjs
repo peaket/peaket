@@ -36,6 +36,9 @@ test('SCR047_판정은_세_귀책과_팬_통지_사유를_보내고_확정은_�
   assert.match(connected, /const FAULTS: readonly \{ value: 'ORGANIZER' \| 'FORCE_MAJEURE' \| 'CONTENT_CHANGE'; label: string \}\[\]/);
   assert.match(connected, /createOpsEventCancellationJudgement\(detail\.requestId, \{ fault, reason: reason\.trim\(\), fanNoticeReason: fanNotice\.trim\(\) \}\)/);
   assert.match(connected, /createOpsEventCancellationRejection\(detail\.requestId, \{ reason: rejectReason\.trim\(\) \}\)/);
+  // RV-06 팬 통지 사유는 서버 필수다. 빈 값을 보내지 않고 칸 오류로 막는다(400을 기다리지 않는다)
+  assert.match(connected, /if \(!fanNotice\.trim\(\)\) \{\s*setNotice\(\{ tone: 'bad', text: '팬 통지 사유를 적어 주세요' \}\);\s*return;/);
+  assert.match(connected, /팬 통지 사유 \(필수, 200자까지\)/);
   // 확정은 토큰을 인자로 받는 함수 하나에서만 부르고, 재인증 대화상자가 토큰을 넘긴다
   assert.match(connected, /const approve = async \(token: string\) =>/);
   assert.match(connected, /createOpsEventCancellationApproval\(detail\.requestId, \{ headers: \{ 'X-Reauth-Token': token \} \}\)/);
@@ -49,6 +52,8 @@ test('SCR047_판정은_세_귀책과_팬_통지_사유를_보내고_확정은_�
   assert.match(connected, /disabled=\{!canApprove \|\| busy !== null\}/);
   assert.match(connected, /detail\.judgedBy \? `판정자: \$\{detail\.judgedBy\}` : '아직 판정자가 없습니다\.'/);
   assert.match(connected, /\{detail\.judgedBy \?\? '아직 판정 전'\}/);
+  // RV-07 판정 전(REQUESTED) 반려는 commander만 할 수 있다(서버 403 rejection-not-allowed와 같은 가드)
+  assert.match(connected, /const canReject = \(status === 'REQUESTED' \? canJudge : canWrite\) && \(status === 'REQUESTED' \|\| status === 'JUDGED' \|\| status === 'PENDING_APPROVAL'\)/);
 });
 
 test('SCR047_요청_고르기와_상세를_실제_API로_읽고_dryRun을_디코더로_푼다', () => {

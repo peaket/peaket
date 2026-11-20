@@ -84,6 +84,11 @@ describe('회차 판매 설정 사본(LCH-080)', () => {
     expect(c!.eligLists).toEqual(['lumen-fanclub-2026']);
   });
 
+  test('RV-01 회차 판매 설정 사본은 공연 제목을 함께 실어 관제가 회차 제목을 보인다', () => {
+    const [c] = buildEventSaleConfigs(state({ production: { ...state().production, title: 'LUMEN 콘서트 2026 서울' } }), new Map(), new Date());
+    expect(c!.title).toBe('LUMEN 콘서트 2026 서울');
+  });
+
   test('S-T41 취소회차는_빼고_규칙의명단키를_중첩조건에서도_모은다', () => {
     const nested: SalePolicyRule = {
       version: 1,

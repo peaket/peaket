@@ -106,7 +106,9 @@ test('SCR047_409_셋과_403_판정자_본인을_가른다', () => {
     [{ status: 503, type: 'sale-stop-unavailable' }, 'sale-stop-unavailable', '판매를 멈추지 못해 확정하지 않았습니다. 잠시 뒤 다시 시도해 주세요'],
     [{ status: 503, type: 'event-refund-unavailable' }, 'event-refund-unavailable', '일괄 환불을 시작하지 못했습니다. 잠시 뒤 다시 시도해 주세요'],
     [{ status: 403, type: 'reauth-required' }, 'reauth', '다시 인증해야 합니다. 비밀번호·인증 앱 코드와 패스키로 확인해 주세요'],
-    [{ status: 503, type: 'reauth-unavailable' }, 'reauth-unavailable', '지금은 다시 인증하지 못했습니다. 잠시 뒤 다시 시도해 주세요'],
+    [{ status: 503, type: 'reauth-unavailable' }, 'reauth-unavailable', '지금은 다시 로그인한 확인을 하지 못했습니다. 잠시 뒤 다시 로그인해 주세요'],
+    [{ status: 403, type: 'rejection-not-allowed' }, 'rejection-not-allowed', '판정 전 반려는 commander만 할 수 있습니다'],
+    [{ status: 400, type: 'invalid-body' }, 'invalid-body', '판정 내용을 다시 확인해 주세요. 팬 통지 사유는 꼭 적어야 합니다'],
     [{ status: 404, type: 'not-found' }, 'not-found', '찾을 수 없습니다'],
     [{ status: 403, type: 'role' }, 'forbidden', '이 작업을 할 권한이 없습니다'],
     [{ status: 409, type: 'new-state' }, 'conflict', '지금 상태에서는 할 수 없습니다. 새로 고친 뒤 다시 시도해 주세요'],
@@ -150,6 +152,8 @@ test('SCR047_상태_아홉과_멈춤_사유를_글로_가른다', () => {
 });
 
 test('[ASVS v5.0.0-3.2.2] transfer-refund:v5.0.0-3.2.2 SCR047_파트너_사유·판정_사유·미리보기_숫자는_텍스트로만_그린다', () => {
+  // 이 모양은 openapi EventCancellationRequest이고, ops-svc가 실제 HTTP로 이 칸들을 답하는지는
+  // services/ops-svc/test/partner-event-cancellation-http.test.ts 'RV-01'이 실제 응답으로 확인한다(흉내 낸 fixture가 아니다).
   const raw = {
     requestId: 'req-1',
     eventId: 'evt-1',

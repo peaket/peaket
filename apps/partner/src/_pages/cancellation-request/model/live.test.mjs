@@ -123,6 +123,7 @@ test('SCR044_409·404·422·403을_정본_문구로_가른다', () => {
     [{ status: 409, type: 'event-ended' }, 'ended', '종료된 회차는 요청할 수 없습니다'],
     [{ status: 404, type: 'not-found' }, 'not-found', '찾을 수 없습니다'],
     [{ status: 422, type: 'postponement-date-invalid' }, 'date-invalid', '바뀐 일시는 지금 공연 시작보다 늦어야 합니다'],
+    [{ status: 403, type: 'partner-admin-required' }, 'member', '회차 취소·연기 요청은 파트너 관리자만 할 수 있습니다'],
     [{ status: 403, type: 'partner_member' }, 'member', '회차 취소·연기 요청은 파트너 관리자만 할 수 있습니다'],
     [{ status: 403, type: 'reauth-required' }, 'reauth', '다시 인증해야 합니다. 파트너 관리자로 다시 로그인한 뒤 시도해 주세요'],
     [{ status: 409, type: 'new-state' }, 'conflict', '지금 상태에서는 요청할 수 없습니다. 새로 고친 뒤 다시 시도해 주세요'],

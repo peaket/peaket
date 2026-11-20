@@ -61,7 +61,7 @@ test('OPS_재인증_오류는_403·409·503을_정본_문구로_가른다', () =
     reauthErrorMessage({ status: 409, type: 'passkey-not-registered' }),
     '이 계정에는 등록한 패스키가 없습니다. 내 계정에서 패스키를 등록한 뒤 다시 시도해 주세요',
   );
-  assert.equal(reauthErrorMessage({ status: 503, type: 'reauth-unavailable' }), '지금은 다시 인증하지 못했습니다. 잠시 뒤 다시 시도해 주세요');
+  assert.equal(reauthErrorMessage({ status: 503, type: 'reauth-unavailable' }), '지금은 다시 로그인한 확인을 하지 못했습니다. 잠시 뒤 다시 로그인해 주세요');
   assert.equal(reauthErrorMessage({ status: 410 }), '패스키 확인 시간이 지났습니다. 처음부터 다시 해 주세요');
   assert.equal(reauthErrorMessage({ status: 403, type: 'password-change-required' }), '비밀번호를 바꾼 뒤 다시 시도해 주세요');
   assert.equal(reauthErrorMessage({ status: 423 }), '계정이 잠겨 있습니다. 운영자에게 잠금 해제를 요청해 주세요');

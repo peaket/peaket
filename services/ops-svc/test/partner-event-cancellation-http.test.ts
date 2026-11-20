@@ -6,11 +6,13 @@ import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import type { EventOwnerLookup, EventRefundReader, EventRefundStarter, EventSaleStopper } from '../src/modules/event-cancellations/index.js';
-import { DRY_RUN, JOB, NOW, OTHER_TENANT, TENANT, fakeReauth, okHolds } from './event-cancellation-fixtures.js';
+// RV-01: 화면이 보는 응답은 이 파일이 실제 HTTP로 받은 것이다(시험 안에서 모양을 흉내 내지 않는다).
+import { detailView } from '../../../apps/console-host/src/pages/cancellation/model/live.js';
+import { DRY_RUN, JOB, NOW, OTHER_TENANT, TENANT, fakeReauth, okHolds, tokenFor } from './event-cancellation-fixtures.js';
 import { FakeIdentity, quiet } from './support.js';
 
 const identity = new FakeIdentity();
-const ownersAnswer = new Map<string, { promoterId: string; startsAtMs: number; endsAtMs?: number } | 'throw'>();
+const ownersAnswer = new Map<string, { promoterId: string; startsAtMs: number; endsAtMs?: number; title?: string } | 'throw'>();
 const ownerCalls: string[] = [];
 const owners: EventOwnerLookup = {
   find: async (eventId) => {
@@ -52,7 +54,7 @@ const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string,
 const own = (promoterId: string = TENANT): string => {
   const eventId = randomUUID();
   const startsAtMs = NOW + 10 * 86_400_000;
-  ownersAnswer.set(eventId, { promoterId, startsAtMs, endsAtMs: startsAtMs + 3 * 3_600_000 });
+  ownersAnswer.set(eventId, { promoterId, startsAtMs, endsAtMs: startsAtMs + 3 * 3_600_000, title: `LUMEN 콘서트 ${eventId.slice(0, 8)}` });
   return eventId;
 };
 const CANCEL = { kind: 'CANCEL', reason: '공연장 대관 취소', faultOpinion: 'FORCE_MAJEURE', evidenceRef: '공연장 대관 취소 통지 제2026-118호 2026-11-15' };
@@ -69,7 +71,10 @@ describe('/v1/partner/events/{eventId}/cancellation [BAT-420 GAT-110 P]', () => 
     const eventId = own();
     const calls = ownerCalls.length;
     const member = identity.partner(TENANT, 'partner_member');
-    expect((await post(eventId, member, CANCEL)).statusCode).toBe(403);
+    const denied = await post(eventId, member, CANCEL);
+    expect(denied.statusCode).toBe(403);
+    // RV-02: 화면이 d5 §6.12 문구와 버튼 끔을 고를 수 있게 역할 실패를 붙은 이름의 Problem으로 답한다(about:blank가 아니다)
+    expect(json(denied).type).toMatch(/(^|\/)partner-admin-required$/);
     expect(ownerCalls.length).toBe(calls);
     expect((await post(eventId, identity.partner(TENANT), CANCEL)).statusCode).toBe(202);
     const status = await get(url(eventId), member);
@@ -146,6 +151,69 @@ describe('/v1/partner/events/{eventId}/cancellation [BAT-420 GAT-110 P]', () => 
     for (const key of ['dryRun', 'perPg', 'judgedBy', 'judgementReason']) expect(body).not.toHaveProperty(key);
     expect(status.payload).not.toContain('내부 판정 메모');
     expect(status.payload).not.toContain(commander['x-user-id']);
+  });
+
+  test('RV-01 관제 상세 HTTP 응답은 openapi의 judgedBy(OpsActor)·title·partnerReason·faultOpinion·evidenceRef·newStartsAt을 싣고 화면이 그대로 읽는다', async () => {
+    const admin = identity.partner(TENANT);
+    const eventId = own();
+    const starts = new Date(NOW + 25 * 86_400_000).toISOString();
+    const created = await post(eventId, admin, { kind: 'POSTPONE', reason: '공연장 화재', evidenceRef: '소방서 통보 2026-77호', faultOpinion: 'FORCE_MAJEURE', newStartsAt: starts });
+    expect(created.statusCode).toBe(202);
+    const requestId = json(created).requestId as string;
+    const commander = identity.ops('commander');
+    const judged = await svc.http.inject({
+      method: 'POST',
+      url: `/v1/ops/event-cancellations/${requestId}/judgement`,
+      headers: { ...commander, 'content-type': 'application/json' },
+      payload: JSON.stringify({ fault: 'FORCE_MAJEURE', reason: '불가항력', fanNoticeReason: '공연이 연기되었습니다' }),
+    });
+    expect(judged.statusCode).toBe(200);
+
+    const body = json(await get(`/v1/ops/event-cancellations/${requestId}`, identity.ops('operator')));
+    const answer = ownersAnswer.get(eventId);
+    const title = typeof answer === 'object' ? answer.title : undefined;
+    expect(body).toMatchObject({
+      requestId,
+      title,
+      partnerReason: '공연장 화재',
+      faultOpinion: 'FORCE_MAJEURE',
+      evidenceRef: '소방서 통보 2026-77호',
+      newStartsAt: starts,
+    });
+    expect(body.judgedBy).toEqual({ adminAccountId: commander['x-user-id'], displayName: null, role: 'commander' });
+
+    // 화면 디코더가 실제 HTTP 응답을 그대로 읽는다(서버 모양과 화면 모양이 갈라지지 않게)
+    const d = detailView(body);
+    expect(d.title).toBe(title);
+    expect(d.partnerReason).toBe('공연장 화재');
+    expect(d.faultOpinion).toBe('FORCE_MAJEURE');
+    expect(d.evidenceRef).toBe('소방서 통보 2026-77호');
+    expect(d.newStartsAt).toBe(starts);
+    expect(d.judgedById).toBe(commander['x-user-id']);
+  });
+
+  test('RV-08 파트너 상태의 compensation은 확정 뒤 미리보기의 배상 대상 수·합계이고 그 전에는 null이다', async () => {
+    const admin = identity.partner(TENANT);
+    const eventId = own();
+    const requestId = json(await post(eventId, admin, CANCEL)).requestId as string;
+    const commander = identity.ops('commander');
+    await svc.http.inject({
+      method: 'POST',
+      url: `/v1/ops/event-cancellations/${requestId}/judgement`,
+      headers: { ...commander, 'content-type': 'application/json' },
+      payload: JSON.stringify({ fault: 'ORGANIZER', reason: '주최 측 귀책', fanNoticeReason: '공연이 취소되었습니다' }),
+    });
+    const before = json(await get(url(eventId), admin));
+    expect(before).toHaveProperty('compensation', null);
+    const operator = identity.ops('operator');
+    const approved = await svc.http.inject({
+      method: 'POST',
+      url: `/v1/ops/event-cancellations/${requestId}/approvals`,
+      headers: { ...operator, 'x-reauth-token': tokenFor(operator['x-user-id']!) },
+    });
+    expect(approved.statusCode).toBe(200);
+    const after = json(await get(url(eventId), admin));
+    expect(after.compensation).toEqual({ targetCount: DRY_RUN.compensationTargets, totalAmount: DRY_RUN.compensationTotal });
   });
 
   test('GAT-110 P1 소속 확인은 세션 테넌트만 쓴다(본문 promoterId 400, 쿼리 promoterId 무시, 테넌트 없는 세션 503)', async () => {

@@ -127,7 +127,7 @@ export interface FixtureOptions {
   readonly partnerStore?: PartnerEventCancellationStore;
 }
 
-export type OwnerAnswer = { promoterId: string; startsAtMs: number; endsAtMs?: number } | 'throw';
+export type OwnerAnswer = { promoterId: string; startsAtMs: number; endsAtMs?: number; title?: string } | 'throw';
 
 export function fixture(o: FixtureOptions = {}) {
   const clock = { now: NOW };
@@ -277,10 +277,15 @@ export async function pendingApproval(f: Fixture, eventId: string = EVENT, judge
 export const approveBy = (f: Fixture, requestId: string, actor: OpsActor = OPERATOR_B) => f.app.approve(requestId, actor, tokenFor(actor.accountId));
 
 /** 파트너 소속 회차 하나를 판매 설정 대역에 둔다 */
-export function ownEvent(f: Fixture, o: { eventId?: string; promoterId?: string; startsAtMs?: number; endsAtMs?: number } = {}): string {
+export function ownEvent(f: Fixture, o: { eventId?: string; promoterId?: string; startsAtMs?: number; endsAtMs?: number; title?: string } = {}): string {
   const eventId = o.eventId ?? randomUUID();
   const startsAtMs = o.startsAtMs ?? NOW + 10 * 86_400_000;
-  f.behaviour.owners.set(eventId, { promoterId: o.promoterId ?? TENANT, startsAtMs, ...(o.endsAtMs !== undefined ? { endsAtMs: o.endsAtMs } : { endsAtMs: startsAtMs + 3 * 3_600_000 }) });
+  f.behaviour.owners.set(eventId, {
+    promoterId: o.promoterId ?? TENANT,
+    startsAtMs,
+    ...(o.endsAtMs !== undefined ? { endsAtMs: o.endsAtMs } : { endsAtMs: startsAtMs + 3 * 3_600_000 }),
+    ...(o.title !== undefined ? { title: o.title } : {}),
+  });
   return eventId;
 }
 

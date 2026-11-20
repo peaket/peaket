@@ -152,7 +152,7 @@ describe('판정·미리보기·확정 [BAT-420 GAT-110 W]', () => {
       { eventId: EVENT, requestId, fault: 'ORGANIZER' },
       { eventId: EVENT, requestId, fault: 'FORCE_MAJEURE' },
     ]);
-    expect(again).toMatchObject({ status: 'PENDING_APPROVAL', judgedBy: COMMANDER_C.accountId, fault: 'FORCE_MAJEURE' });
+    expect(again).toMatchObject({ status: 'PENDING_APPROVAL', judgedBy: { adminAccountId: COMMANDER_C.accountId, displayName: null, role: 'commander' }, fault: 'FORCE_MAJEURE' });
     expect(f.store.rows.get(requestId)!.dryRun).toMatchObject({ targetOrders: 4, refundTotal: 166_665 });
     await expect(approveBy(f, requestId, COMMANDER_C)).rejects.toMatchObject(problem('approver-ineligible', 403));
     expect((await approveBy(f, requestId, COMMANDER_A)).status).toBe('RUNNING');

@@ -8,6 +8,17 @@ import { errorOf } from './cancel-flow.ts';
 import { quoteView, resultView, resultViewOf } from './view.ts';
 
 const live = readFileSync(new URL('../ui/TicketCancelLive.tsx', import.meta.url), 'utf8');
+const viewSource = readFileSync(new URL('./view.ts', import.meta.url), 'utf8');
+const flowSource = readFileSync(new URL('./cancel-flow.ts', import.meta.url), 'utf8');
+
+test('RV-09 결과 판정과 재인증 503 문구는 한 곳에만 둔다', () => {
+  // 결과 판정은 cancel-flow.ts 한 벌만 두고 view.ts가 가져다 쓴다
+  assert.match(viewSource, /import \{ resultViewOf, type CancelResultKind \} from '\.\/cancel-flow\.ts'/);
+  assert.equal((viewSource.match(/export function resultViewOf/g) ?? []).length, 0, 'view.ts에 결과 판정을 복제하지 않는다');
+  // 503 문구는 공용 reauth-failure.ts의 REAUTH_UNAVAILABLE만 쓴다
+  assert.match(flowSource, /import \{ REAUTH_UNAVAILABLE \} from '\.\.\/\.\.\/\.\.\/shared\/lib\/reauth-failure\.ts'/);
+  assert.equal((flowSource.match(/지금은 다시 로그인한 확인을 하지 못했습니다/g) ?? []).length, 0, '문구를 복제하지 않는다');
+});
 
 test('SCR038_견적_응답은_아는_칸만_옮기고_모양_틀린_값은_버린다', () => {
   const raw = {
