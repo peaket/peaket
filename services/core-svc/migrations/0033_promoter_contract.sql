@@ -69,9 +69,10 @@ WHERE e."production_id" = p."id"
   AND p."sale_approved_at" IS NOT NULL;
 --> statement-breakpoint
 -- 파트너사 등록(POST /v1/ops/promoters)·계약 변경 요청(POST /v1/ops/promoters/{promoterId}/contract-term-changes)의 멱등 키 작업을 더한다
+-- CHECK를 다시 만들 때 0032(BAT-425)가 더한 SHOP_CANCEL_REFUND_ACCOUNT도 지우지 않고 스키마 목록 그대로 유지한다(RV-14)
 ALTER TABLE "idempotency_record" DROP CONSTRAINT IF EXISTS "idempotency_record_operation_check";
 --> statement-breakpoint
-ALTER TABLE "idempotency_record" ADD CONSTRAINT "idempotency_record_operation_check" CHECK ("operation" in ('CREATE_PRODUCTION', 'CREATE_PRODUCTION_EVENT', 'CREATE_MERCH_ORDER', 'START_MERCH_PAYMENT', 'ACCEPT_MERCH_PAYMENT', 'CREATE_TICKET_ADDON', 'CANCEL_MERCH_ORDER', 'RETURN_MERCH_ORDER', 'CREATE_OPS_PROMOTER', 'CREATE_OPS_PROMOTER_CONTRACT_CHANGE'));
+ALTER TABLE "idempotency_record" ADD CONSTRAINT "idempotency_record_operation_check" CHECK ("operation" in ('CREATE_PRODUCTION', 'CREATE_PRODUCTION_EVENT', 'CREATE_MERCH_ORDER', 'START_MERCH_PAYMENT', 'ACCEPT_MERCH_PAYMENT', 'CREATE_TICKET_ADDON', 'CANCEL_MERCH_ORDER', 'RETURN_MERCH_ORDER', 'SHOP_CANCEL_REFUND_ACCOUNT', 'CREATE_OPS_PROMOTER', 'CREATE_OPS_PROMOTER_CONTRACT_CHANGE'));
 --> statement-breakpoint
 -- 관제 경로(core_ops): 파트너사·계약을 읽고 쓰며, 판매 승인 때 event 수수료율을 쓴다
 GRANT SELECT, INSERT ON "promoter" TO core_ops;
