@@ -63,7 +63,7 @@ interface Harness {
   ticketCalls: unknown[];
   paymentCalls: { refundAccount?: unknown }[];
   created: unknown[];
-  send(o: { ticketId?: string; token?: string; body?: unknown; idem?: string; badMac?: boolean }): Promise<{ statusCode: number; payload: string; headers: Record<string, unknown> }>;
+  send(o: { ticketId?: string; token?: string; body?: unknown; idem?: string; badMac?: boolean; noPurchase?: boolean }): Promise<{ statusCode: number; payload: string; headers: Record<string, unknown> }>;
   reset(): void;
 }
 
@@ -146,8 +146,12 @@ async function boot(reauth: ReauthGate): Promise<Harness> {
           'x-user-scope': 'ticket:buy',
           'content-type': 'application/json',
           'idempotency-key': o.idem ?? randomUUID(),
-          'x-purchase-seq': String(seq),
-          'x-purchase-mac': o.badMac ? purchaseMac(Buffer.alloc(32, 9), purchaseMacInput('POST', url, seq, Buffer.from(payload, 'utf8'))) : mac,
+          ...(o.noPurchase
+            ? {}
+            : {
+                'x-purchase-seq': String(seq),
+                'x-purchase-mac': o.badMac ? purchaseMac(Buffer.alloc(32, 9), purchaseMacInput('POST', url, seq, Buffer.from(payload, 'utf8'))) : mac,
+              }),
           ...(o.token !== undefined ? { 'x-reauth-token': o.token } : {}),
         },
         payload,
@@ -355,19 +359,21 @@ describe('팬 취소 재인증: 실제 확인기 조립 [BAT-415-reauth]', () =>
     expect(redis.commands).toEqual([setOf(claims.jti as string, '180000'), setOf(claims.jti as string, '180000')]);
   });
 
-  test('R-T39 ③ 구매 서명에서 막힌 요청(401)은 토큰을 잡지 않아 같은 토큰으로 바른 요청이 202다', async () => {
-    h.reset();
-    redis.commands.length = 0;
-    const token = signReauth(fan, good());
-    const ticketId = randomUUID();
-    const bad = await h.send({ ticketId, token, badMac: true });
-    expect(bad.statusCode).toBe(401);
-    expect(redis.commands, '401 요청은 jti를 잡지 않는다').toHaveLength(0);
-    expect(h.ticketCalls).toHaveLength(0);
-    const ok = await h.send({ ticketId, token });
-    expect(ok.statusCode).toBe(202);
-    expect(h.ticketCalls).toHaveLength(1);
-    expect(redis.commands).toHaveLength(1);
+  test('R-T39 ③ 구매 서명 머리가 없거나 틀려도 재인증만 보고 202이며 토큰을 한 번 쓴다', async () => {
+    // BAT-421(ADR-0328): 이 처리기에서 @PurchaseSigned를 떼었다. 취소는 gw-fan Origin·재인증 토큰·멱등 키로 지킨다.
+    for (const [what, o] of [
+      ['틀린 MAC', { badMac: true }],
+      ['서명 머리 없음', { noPurchase: true }],
+    ] as const) {
+      h.reset();
+      redis.commands.length = 0;
+      const r = await h.send({ token: signReauth(fan, good()), ...o });
+      expect(r.statusCode, what).toBe(202);
+      expect(h.ticketCalls, what).toHaveLength(1);
+      expect(h.paymentCalls, what).toHaveLength(1);
+      expect(h.created, what).toHaveLength(1);
+      expect(redis.commands, what).toHaveLength(1);
+    }
   });
 
   test('R-T39 ③ 본문 검사에서 막힌 요청(400)은 토큰을 잡지 않아 같은 토큰으로 바른 요청이 202다', async () => {

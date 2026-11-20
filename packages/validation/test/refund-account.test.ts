@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { refundAccountShape } from '../src/refund-account/index';
+import { REFUND_BANKS, REFUND_BANK_CODES, refundAccountShape } from '../src/refund-account/index';
 
 interface Row {
   name: string;
@@ -29,5 +29,34 @@ describe('P-T74 환불 계좌 모양 한 규칙', () => {
     for (const v of [undefined, null, 'x', 1, {}, { bankCode: 88, accountNumber: '110987654321', holderName: '김환불' }, { bankCode: '88', accountNumber: 110987654321, holderName: '김환불' }]) {
       expect(refundAccountShape(v as never), JSON.stringify(v)).toEqual({ ok: false });
     }
+  });
+});
+
+describe('REFUND_BANKS 화면·검사 공용 목록(BAT-421)', () => {
+  it('REFUND_BANKS_26개와_검사_목록이_같다', () => {
+    // 토스페이먼츠 두 자리 은행 코드 26개(payment §6 '구현에서 정한 것' ②, BAT-421)
+    expect(REFUND_BANKS).toHaveLength(26);
+    const codes = REFUND_BANKS.map((b) => b.code);
+    // 코드는 두 자리·중복 없음·오름차순이고 화면은 이 순서대로 보인다
+    for (const code of codes) expect(code).toMatch(/^[0-9]{2}$/);
+    expect(new Set(codes).size).toBe(26);
+    expect(codes).toEqual([...codes].sort());
+    // 검사용 집합과 화면 목록이 같은 표다
+    expect([...REFUND_BANK_CODES].sort()).toEqual([...codes].sort());
+    // 한국어 이름은 빈 값이 아니고 HTML을 담지 않는다
+    for (const bank of REFUND_BANKS) {
+      expect(bank.label.trim().length).toBeGreaterThan(0);
+      expect(bank.label).not.toMatch(/[<>]/);
+    }
+    // 목록의 모든 코드는 검사를 지나고, 목록 밖 두 자리(99·04)는 거부한다
+    for (const bank of REFUND_BANKS) {
+      expect(refundAccountShape({ bankCode: bank.code, accountNumber: '110-123-456789', holderName: '김환불' })).toEqual({
+        ok: true,
+        value: { bankCode: bank.code, accountNumber: '110123456789', holderName: '김환불' },
+      });
+    }
+    expect(REFUND_BANK_CODES.has('99')).toBe(false);
+    expect(REFUND_BANK_CODES.has('04')).toBe(false);
+    expect(refundAccountShape({ bankCode: '99', accountNumber: '110123456789', holderName: '김환불' })).toEqual({ ok: false });
   });
 });

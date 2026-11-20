@@ -1,4 +1,5 @@
 // 예매 취소 HTTP 조립 시험(GAT-070·GAT-080): RefundModule을 메모리 조립에 꽂아 견적 200과 취소의 닫힌 재인증 403을 본다.
+// BAT-421(ADR-0328): 취소 POST에서 구매 세션 서명을 뗐으므로 서명 머리가 없어도 401이 아니라 재인증 403이다.
 // BAT-415 몫 S: 재인증 대역을 통과로 꽂은 두 번째 조립에서 R-T3(양도 요청 중·남이 보유 → 409 transfer-pending과 안내 문구)과 S1을 본다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
@@ -80,7 +81,7 @@ describe('예매 취소 HTTP', () => {
     expect(JSON.parse(r.payload)).toMatchObject({ ticketId: TICKET, deductionRate: 0.1, deductionAmount: 3_333, refundAmount: 30_000 });
   });
 
-  test('GAT080_취소는_구매서명을_지나지만_재인증_계약이_없어_403_reauth-required다', async () => {
+  test('GAT080_취소는_구매서명_없이_본문검사를_지나_재인증_계약이_없어_403_reauth-required다', async () => {
     const url = `/v1/tickets/${TICKET}/cancellation`;
     const payload = '{}';
     const seq = 1;
@@ -100,9 +101,10 @@ describe('예매 취소 HTTP', () => {
     expect(JSON.parse(r.payload).type).toBe(`${PROBLEM_TYPE_BASE}reauth-required`);
   });
 
-  test('GAT080_구매서명이_없으면_401이다', async () => {
+  test('GAT080_구매서명이_없어도_401이_아니라_403_reauth-required다', async () => {
     const r = await svc.http.inject({ method: 'POST', url: `/v1/tickets/${TICKET}/cancellation`, headers: { ...fanHeaders, 'content-type': 'application/json', 'idempotency-key': IDEM }, payload: '{}' });
-    expect(r.statusCode).toBe(401);
+    expect(r.statusCode).toBe(403);
+    expect(JSON.parse(r.payload).type).toBe(`${PROBLEM_TYPE_BASE}reauth-required`);
   });
 });
 
