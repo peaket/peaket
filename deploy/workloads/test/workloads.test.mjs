@@ -478,3 +478,29 @@ test('NS-03 docs/devops.md §5.2 네임스페이스 지도와 deploy/projects가
   assert.deepEqual(quotas.map((q) => q.metadata.namespace).sort(), ['data', 'observability']);
 });
 
+
+// --- BAT-197 봇 표본 검토 배포 값(리뷰 RV-05, BOT-080) ---
+// 정본: docs/features/bot-defense.md §9·§13, docs/security/secrets-and-keys.md(분석 저장소 읽기 비밀), 계획 BAT-197 §7.5.
+
+test('BAT-197 ops-svc 배포 단위: 표본 검토 trust gRPC·ClickHouse 읽기 값이 있고 분석 저장소 비밀은 secretEnvFrom에만 있다', () => {
+  const v = load('ops-svc');
+  assert.equal(v.name, 'ops-svc');
+  assert.equal(v.secretEnvFrom, 'ops-svc-secrets', 'secretEnvFrom');
+  const env = envOf(v, 'ops-svc');
+  // 판정 HUMAN·BOT을 trust-svc ApplyLabel로 보내는 업무 gRPC 주소(ADR-0285 결정 5)
+  assert.equal(env.PEAKET_TRUST_GRPC_URL, `trust-svc-grpc:${GRPC_PORT}`, 'PEAKET_TRUST_GRPC_URL');
+  // 후보 원장은 분석 저장소 ClickHouse다. local·ci는 fixture로 대신하고 운영만 clickhouse다
+  assert.equal(env.PEAKET_BOT_REVIEW_SOURCE, 'clickhouse', 'PEAKET_BOT_REVIEW_SOURCE');
+  assert.equal(env.PEAKET_ANALYTICS_CLICKHOUSE_URL, 'http://clickhouse.analytics.svc.cluster.local:8123', 'PEAKET_ANALYTICS_CLICKHOUSE_URL');
+  // 읽기 전용 사용자다(카드·판정 표를 쓰지 않는다)
+  assert.equal(env.PEAKET_ANALYTICS_CLICKHOUSE_USER, 'an_ops_reader', 'PEAKET_ANALYTICS_CLICKHOUSE_USER');
+  // 비밀번호는 env에 두지 않고 Secret(ops-svc-secrets)의 같은 이름 키로만 받는다
+  assertNoSecrets(v, ['PEAKET_ANALYTICS_CLICKHOUSE_PASSWORD'], 'ops-svc');
+  for (const o of overlays('ops-svc')) {
+    assert.equal(envOf(o.v, o.file).PEAKET_ANALYTICS_CLICKHOUSE_PASSWORD, undefined, `${o.file}: 분석 저장소 비밀을 env에 두었다`);
+  }
+  // 배포 담당이 Secret 키 이름을 알 수 있게 비밀 목록에 자리가 있다
+  const doc = repoText('docs', 'security', 'secrets-and-keys.md');
+  assert.ok(doc.includes('PEAKET_ANALYTICS_CLICKHOUSE_PASSWORD'), '비밀 목록에 PEAKET_ANALYTICS_CLICKHOUSE_PASSWORD 자리가 없다');
+  assert.match(doc, /an_ops_reader/, '비밀 목록에 읽기 사용자 an_ops_reader가 없다');
+});

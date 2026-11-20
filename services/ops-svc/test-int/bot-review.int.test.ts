@@ -19,12 +19,18 @@ const NOW = Date.parse('2026-11-21T07:00:00.000Z');
 const DAY = 86_400_000;
 const EVENT = '0194b197-0000-7000-8000-0000000000d1';
 const EXPIRED_EVENT = '0194b197-0000-7000-8000-0000000000d2';
+const RACE_EVENT = '0194b197-0000-7000-8000-0000000000d3';
 const id = (n: number) => `0194b197-0000-7000-8000-${n.toString(16).padStart(12, '0')}`;
 
 class FakeLabels implements TrustLabels {
   readonly calls: ApplySampleLabelInput[] = [];
+  /** 첫 ApplyLabel만 붙잡는 자리(동시 판정 시험). 없으면 바로 답한다 */
+  holdFirst: (() => Promise<void>) | null = null;
   async apply(input: ApplySampleLabelInput): Promise<AppliedSampleLabel> {
     this.calls.push(input);
+    const hold = this.holdFirst;
+    this.holdFirst = null;
+    if (hold) await hold();
     return { changed: true, blockList: 'ADDED' };
   }
 }
@@ -72,6 +78,7 @@ const sampleOf = (batch: BotReviewBatch, ordinal: number, o: Partial<BotReviewSa
 let passedSamples: BotReviewSample[];
 let humanSamples: BotReviewSample[];
 let expiredSample: BotReviewSample;
+let raceSample: BotReviewSample;
 
 beforeAll(async () => {
   container = await startPostgres();
@@ -83,16 +90,19 @@ beforeAll(async () => {
   const passed = batchOf({ batchId: id(1), targetCount: 200 });
   const human = batchOf({ batchId: id(2), reviewKind: 'HUMAN_BASELINE', targetCount: 400 });
   const expired = batchOf({ batchId: id(3), eventId: EXPIRED_EVENT, retentionUntilMs: NOW - 1, r2DueAtMs: NOW - 20 * DAY });
+  const race = batchOf({ batchId: id(4), eventId: RACE_EVENT, targetCount: 1, populationCount: 1 });
   passedSamples = [sampleOf(passed, 0), sampleOf(passed, 1), sampleOf(passed, 2)];
   humanSamples = [
     sampleOf(human, 0, { riskBand: 'HIGH', behaviorSummaryBand: 'ENTRY_FAST', reviewBatch: 'SHADOW_CHALLENGED', appliedVerdict: 'CHALLENGE' }),
     sampleOf(human, 1, { riskBand: 'LOW', behaviorSummaryBand: 'SLOW' }),
   ];
   expiredSample = sampleOf(expired, 0);
+  raceSample = sampleOf(race, 0);
   await store.insertBatch(passed, passedSamples);
   await store.insertBatch(human, humanSamples);
   await store.insertBatch(expired, [expiredSample]);
-  for (const s of [...passedSamples, ...humanSamples, expiredSample]) {
+  await store.insertBatch(race, [raceSample]);
+  for (const s of [...passedSamples, ...humanSamples, expiredSample, raceSample]) {
     candidates.push({
       sessionRef: s.sessionRef,
       verdictEventKey: s.verdictEventKey,
@@ -232,6 +242,42 @@ describe('FR-049 표본 검토(PostgreSQL)', () => {
     }
     expect((await post(expiredSample.sampleId, { verdict: 'HUMAN' })).statusCode).toBe(410);
     expect(labels.calls.some((c) => c.sampleId === expiredSample.sampleId)).toBe(false);
+  });
+
+  test('FR-049 같은 표본에 두 검토자가 동시에 오면 한 요청만 ApplyLabel을 부르고 다른 요청은 409다', async () => {
+    let started!: () => void;
+    const startedAt = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const before = labels.calls.length;
+    labels.holdFirst = async () => {
+      started();
+      await gate;
+    };
+    const first = post(raceSample.sampleId, { verdict: 'HUMAN' });
+    await startedAt;
+    // 첫 요청이 라벨을 부르는 동안 두 번째 검토자(다른 계정·다른 본문·다른 키)가 들어온다
+    const second = await post(raceSample.sampleId, { verdict: 'BOT' }, randomUUID());
+    release();
+    const firstDone = await first;
+    expect(second.statusCode, second.payload).toBe(409);
+    expect(String(json(second).type)).toMatch(/bot-review-(claim-in-progress|already-recorded)$/);
+    expect(firstDone.statusCode, firstDone.payload).toBe(200);
+    // 판정 행 하나, 라벨도 한 번뿐이다
+    expect(labels.calls.filter((c) => c.sampleId === raceSample.sampleId)).toHaveLength(1);
+    const { rows } = (await adminDb.query('select verdict, count(*)::int as n from bot_review_judgement where sample_id = $1 group by verdict', [raceSample.sampleId])) as {
+      rows: { verdict: string; n: number }[];
+    };
+    expect(rows).toEqual([{ verdict: 'HUMAN', n: 1 }]);
+    // 선점 칸은 기록 뒤 비어 다음 표본 판정을 막지 않는다
+    const sample = (await adminDb.query('select status, judgement_claim, judgement_claim_expires_at from bot_review_sample where id = $1', [raceSample.sampleId])) as {
+      rows: { status: string; judgement_claim: string | null; judgement_claim_expires_at: Date | null }[];
+    };
+    expect(sample.rows).toEqual([{ status: 'RECORDED', judgement_claim: null, judgement_claim_expires_at: null }]);
   });
 
   test('FR-049 진행은 실제 판정 행을 세고 UNDECIDED를 분모에서 뺀 잠정 중간 결과를 준다', async () => {

@@ -321,6 +321,82 @@ describe('FR-049 표본 판정 기록', () => {
     expect((await rejectionOf(broken.run({ sampleId: REPLAY_SAMPLE, verdict: 'HUMAN', evidenceKinds: [], actedBy: ACTOR, idem: idem(randomUUID(), { sample: REPLAY_SAMPLE }) }))).status).toBe(503);
   });
 
+  test('FR-049 첫 라벨 응답을 잃은 재시도는 changed false면 blockList가 ADDED·REMOVED여도 UNCHANGED다', async () => {
+    // trust는 성공한 판 1을 다시 부를 때 DONE(changed false)과 처음 결과(ADDED/REMOVED)를 함께 준다.
+    // 계획 B15·§7.3은 그때 판정 행을 UNCHANGED로 남기라고 정한다(지표도 APPLIED로 세지 않는다)
+    labels.answer = { changed: false, blockList: 'ADDED' };
+    await run({ sample: HUMAN_SAMPLE, verdict: 'HUMAN' });
+    expect(await store.findJudgement(HUMAN_SAMPLE)).toMatchObject({ verdict: 'HUMAN', labelResult: 'UNCHANGED' });
+    expect(signals.judgements.at(-1)).toEqual({ verdict: 'HUMAN', label: 'UNCHANGED' });
+
+    labels.answer = { changed: false, blockList: 'REMOVED' };
+    await run({ sample: BOT_SAMPLE, verdict: 'BOT', evidenceKinds: ['CONFIRMED_SIGNAL'] });
+    expect(await store.findJudgement(BOT_SAMPLE)).toMatchObject({ verdict: 'BOT', labelResult: 'UNCHANGED' });
+
+    // changed true는 blockList대로 APPLIED·DEVICE_NOT_FOUND다
+    labels.answer = { changed: true, blockList: 'NONE' };
+    await run({ sample: REPLAY_SAMPLE, verdict: 'HUMAN' });
+    expect(await store.findJudgement(REPLAY_SAMPLE)).toMatchObject({ verdict: 'HUMAN', labelResult: 'APPLIED' });
+
+    labels.answer = { changed: true, blockList: 'DEVICE_NOT_FOUND' };
+    await run({ sample: FAIL_SAMPLE, verdict: 'HUMAN' });
+    expect(await store.findJudgement(FAIL_SAMPLE)).toMatchObject({ verdict: 'HUMAN', labelResult: 'DEVICE_NOT_FOUND' });
+  });
+
+  test('FR-049 같은 표본에 두 검토자가 동시에 오면 한 요청만 ApplyLabel을 부르고 다른 요청은 409다', async () => {
+    let started!: () => void;
+    const startedAt = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // 첫 호출만 붙잡아 두 번째 요청이 그 사이에 들어오게 한다
+    let held = false;
+    const gated: TrustLabels = {
+      apply: async (input) => {
+        labels.calls.push(input);
+        if (!held) {
+          held = true;
+          started();
+          await gate;
+        }
+        return { changed: true, blockList: 'ADDED' };
+      },
+    };
+    const app2 = new RecordBotReviewJudgement({ store, source, labels: gated, now: () => NOW, signals, log });
+    const first = app2.run({ sampleId: HUMAN_SAMPLE, verdict: 'HUMAN', evidenceKinds: [], actedBy: ACTOR, idem: idem(randomUUID(), { sampleId: HUMAN_SAMPLE }) });
+    await startedAt;
+    let secondError: BotReviewProblem | undefined;
+    let secondOutcome: unknown;
+    try {
+      secondOutcome = await app2.run({
+        sampleId: HUMAN_SAMPLE,
+        verdict: 'BOT',
+        evidenceKinds: ['CONFIRMED_SIGNAL'],
+        actedBy: ACTOR,
+        idem: idem(randomUUID(), { sampleId: HUMAN_SAMPLE, verdict: 'BOT' }),
+      });
+    } catch (e) {
+      secondError = e as BotReviewProblem;
+    }
+    release();
+    const firstOutcome = await first.then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    // 두 요청의 라벨은 한 번뿐이고, 하나만 200이고 다른 하나는 409다(판정 행도 하나)
+    expect(labels.calls).toHaveLength(1);
+    expect(secondOutcome).toBeUndefined();
+    expect(secondError).toBeInstanceOf(BotReviewProblem);
+    expect(secondError).toMatchObject({ status: 409 });
+    expect(['bot-review-claim-in-progress', 'bot-review-already-recorded']).toContain(secondError?.type);
+    expect(firstOutcome.ok, `첫 요청이 200이어야 한다: ${JSON.stringify(firstOutcome)}`).toBe(true);
+    if (firstOutcome.ok) expect(firstOutcome.value).toMatchObject({ sampleId: HUMAN_SAMPLE, verdict: 'HUMAN' });
+    expect(await store.findJudgement(HUMAN_SAMPLE)).toMatchObject({ verdict: 'HUMAN', labelResult: 'APPLIED' });
+  });
+
   test('FR-049 같은 Idempotency-Key 재시도는 같은 판정이고 라벨을 다시 부르지 않는다', async () => {
     const key = randomUUID();
     const body = { sampleId: REPLAY_SAMPLE, verdict: 'HUMAN', evidenceKinds: [] };

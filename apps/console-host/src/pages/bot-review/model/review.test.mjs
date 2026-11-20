@@ -19,6 +19,7 @@ import {
   needsEvidence,
   parseReviewKind,
   reviewKindHint,
+  reviewKindIntro,
   reviewKindLabel,
   stepLabel,
   submitBlockReason,
@@ -71,6 +72,13 @@ test('FR-049 진행률·남은 수·기한 문구·BOT 근거 필수·가림을 
   assert.equal(reviewKindLabel('HUMAN_BASELINE'), '출시 뒤 사람 기준');
   assert.match(reviewKindHint('HUMAN_BASELINE'), /어느 묶음인지/);
   assert.match(reviewKindHint('PASSED_SAMPLE'), /위험 점수 범주/);
+  // 머리 설명은 종류마다 다르다: HUMAN_BASELINE은 그림자 추가 검증 묶음도 섞여 있다
+  assert.match(reviewKindIntro('HUMAN_BASELINE'), /그림자 추가 검증/);
+  assert.match(reviewKindIntro('PASSED_SAMPLE'), /검증을 통과한 세션/);
+  assert.notEqual(reviewKindIntro('HUMAN_BASELINE'), reviewKindIntro('PASSED_SAMPLE'));
+  // 근거 이름 '그 밖'에는 메모 칸이 없다(openapi 판정 본문에 메모 칸이 없다)
+  assert.equal(EVIDENCE_KINDS.find((e) => e.kind === 'OTHER')?.label, '그 밖');
+  assert.equal(EVIDENCE_KINDS.some((e) => e.label.includes('메모')), false);
 
   // 표기: 퍼센트·비율·구간·시각(KST)
   assert.equal(formatPercent(25.5), '25.5%');
@@ -149,4 +157,21 @@ test('FR-049 화면 모델 계약은 reviewKind·PENDING·판정 400·422·409·
   assert.match(OPENAPI, /reviewKind/);
   const model = readFileSync(join(ROOT, 'apps/console-host/src/pages/bot-review/model/review.ts'), 'utf8');
   for (const text of ["status: 'PENDING'", 'HUMAN', 'BOT', 'UNDECIDED', 'CONFIRMED_SIGNAL', 'VERIFICATION_FAILED']) assert.ok(model.includes(text), text);
+});
+
+test('FR-049 계약은 진행 GET의 400·410, 목록 400의 잘못된 커서, targetCount의 실제 모집단 수를 적는다', () => {
+  const start = OPENAPI.indexOf('  /v1/ops/events/{eventId}/bot-review:');
+  const samplesAt = OPENAPI.indexOf('  /v1/ops/events/{eventId}/bot-review-samples:');
+  const judgementAt = OPENAPI.indexOf('  /v1/ops/bot-review-samples/{sampleId}/judgement:');
+  assert.ok(start >= 0 && samplesAt > start && judgementAt > samplesAt, 'openapi에서 세 경로 자리를 찾지 못했다');
+  const progress = OPENAPI.slice(start, samplesAt);
+  // 진행 GET도 reviewKind가 틀리면 400, 기한이 지나면 410이다(구현이 내는 응답)
+  assert.match(progress, /'400'/);
+  assert.match(progress, /'410'/);
+  assert.match(progress, /retention-ended/);
+  // 목록 400에는 잘못된 커서가 들어간다
+  const list = OPENAPI.slice(samplesAt, judgementAt);
+  assert.match(list, /잘못된 커서/);
+  // targetCount는 고정 200·400이 아니라 모집단이 더 작으면 그 수(전수 검토)다(계획 B18)
+  assert.match(OPENAPI, /targetCount:.*모집단이 더 작으면 그 수/);
 });

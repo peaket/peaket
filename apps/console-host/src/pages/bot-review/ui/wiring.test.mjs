@@ -64,6 +64,19 @@ test('FR-049 화면은 서버가 섞은 순서를 그대로 쓰고 판정·표�
   assert.match(model, /kind === 'HUMAN_BASELINE' && verdict === 'BOT'/);
 });
 
+test('FR-049 표본이 바뀌면 판정·근거·멱등 키를 초기화하고 머리 설명은 종류별이다', () => {
+  // 표본 ID가 바뀌면(수동 새로 고침·409 뒤 refresh) 앞 표본의 판정·근거·멱등 키를 지운다
+  assert.match(page, /const currentSampleId = load\.kind === 'ready' \? \(load\.samples\[0\]\?\.sampleId \?\? null\) : null;/);
+  assert.match(page, /\}, \[currentSampleId\]\);/);
+  assert.match(page, /setVerdict\(null\);\s*\n\s*setEvidence\(\[\]\);\s*\n\s*idempotency\.current = null;/);
+  // 머리 설명은 reviewKind에 따라 다르고 HUMAN_BASELINE은 그림자 추가 검증 묶음을 말한다
+  assert.match(page, /reviewKindIntro\(reviewKind\)/);
+  assert.match(model, /kind === 'HUMAN_BASELINE'/);
+  // 근거 이름에 메모 칸이 없다(계약에 메모 칸이 없다)
+  assert.equal(page.includes('그 밖(메모)'), false, '메모 칸이 없는 계약과 다른 근거 이름');
+  assert.equal(model.includes('그 밖(메모)'), false, '메모 칸이 없는 계약과 다른 근거 이름');
+});
+
 test('[ASVS v5.0.0-3.2.2] 카드의 세션 가명·범주·타임라인은 글자 노드로만 그린다', () => {
   // React 기본 이스케이프를 쓰는 JSX 값으로만 그린다
   assert.equal(/dangerouslySetInnerHTML|innerHTML\s*=/.test(page), false, 'HTML을 직접 넣는다');
