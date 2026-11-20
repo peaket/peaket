@@ -1189,7 +1189,7 @@ erDiagram
     payment_cancel {
         uuid id PK
         uuid payment_id FK "UNIQUE (payment_id, idempotency_key). 결제 후 일반 취소 한 건(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/payment.md §4.1 '취소 건 기록과 기대 잔액')"
-        int attempt "0~3 [가정]. 같은 취소 ID의 환급 시도 번호. 0은 첫 시도, 1~3은 지연 환급 계좌를 다시 받은 시도다. 4 이상은 받지 않는다(BAT-425, ADR-0316, payment 0024). CHECK 0 이상 3 이하"
+        int attempt "0부터 3까지. 같은 취소 ID의 환급 시도 번호. 0은 첫 시도, 1부터 3은 지연 환급 계좌를 다시 받은 시도다. 4 이상은 받지 않는다. BAT-425, ADR-0316, payment 0024. CHECK 0 이상 3 이하"
         int amount "CHECK > 0. 이번 취소 금액. 첫 전송 때 정하고 재시도에도 그대로 보낸다"
         text idempotency_key "cancel-{cancellationId}(첫 시도) 또는 cancel-{cancellationId}-a{n}(계좌 다시 받기 시도). 결제사 멱등키다"
         text reason "결제사에 보낸 취소 사유. 재시도에도 그대로 보낸다(같은 멱등키의 본문)"
