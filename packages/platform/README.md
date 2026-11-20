@@ -88,6 +88,7 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 | 내보내는 것 | 하는 일 | 정본 |
 | --- | --- | --- |
 | `createService` | 시작 설정을 검사하고, 앱 포트(NestJS·Fastify)와 관리 포트(`/metrics`)를 만든다. 요청마다 네 신호를 재고 요청 맥락(trace-id, 남은 시간)을 열며, 요청이 끝나면 정규 로그 줄 하나를 쓴다. `logger`(서비스 로거)와 `logs.setSampleOneIn`(정상 줄 표본 비율)을 돌려준다 | docs/observability.md §3·§7 |
+| `redisTenantRateLimiter`·`TenantRateLimitPort`·`tenantRateLimitKey` | 파트너 테넌트당 600회/분 공용 가드. 세션·캐시 Redis의 `rl:tenant:{tenantId}`를 Lua 한 번(`INCR`·첫 증가 `PEXPIRE` 60초·`PTTL`)으로 세고, 601번째부터 429 `about:blank`·`Retry-After`·`no-store`다. 판정이 20ms [가정] 안에 끝나지 않거나 Redis가 실패하면 세지 않고 통과한다(열림). `createService`의 `tenantRateLimit`으로 넘기고, local·ci 밖에서 파트너 역할 처리기에 이 값이 없으면 시작하지 않는다 | docs/api/guidelines.md §6, docs/data.md §3·§5 |
 | `requestLog()`·`LogPolicy` | 정규 로그 줄에 회차·결제사·대기 단계·플래그·의존성 소요·가명을 더하고, 표본과 관계없이 남길 응답을 표시한다. `LogPolicy`는 경로의 진입 경로 표시와 SLO 지연 | docs/observability.md §6·§7, ADR-0069·0125 |
 | `PLATFORM_LOGGER`·`createPlatformLogger` | 서비스 로거(Pino). 요청 안이면 `traceId`·`spanId`를 넣고, 연락처·인증 값·결제 값·원문 식별값 칸을 가린다 | docs/observability.md §7 |
 | `ipPrefix`·`LogPseudonymizer` | IP 앞부분(IPv4 /24, IPv6 /48)과 로그 가명(HMAC-SHA256 앞 16바이트) | ADR-0053 결정 1 |

@@ -7,6 +7,7 @@ import {
   type CanActivate,
   type ExecutionContext,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   type OnApplicationBootstrap,
@@ -29,6 +30,7 @@ import { constantTimeEqual } from './secret-compare.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
 import { IDEMPOTENCY_KEY_BY_MODULE, PURCHASE_SIGNATURE_BY_MODULE, throwAttachedValidationError } from './request-checks.js';
+import type { TenantRateLimitPort } from './tenant-rate-limit.js';
 import {
   athOf,
   DpopRejected,
@@ -287,6 +289,13 @@ export class AuthState {
     readonly hotPath?: HotPathMetrics,
     /** 스캐너 기기 증명·세션 판정 포트(GAT-170). 없으면 스캐너 역할 처리기가 시작하지 않는다 */
     readonly scanner?: ScannerAuthState,
+    /**
+     * 파트너 테넌트 한도(BAT-173, D-T50 ⑦). 신원·역할 판정 뒤에 테넌트별로 센다.
+     * 없으면 local·ci에서는 세지 않고, 그 밖의 환경에서 파트너 역할 처리기가 있으면 시작하지 않는다
+     */
+    readonly tenantRateLimit?: TenantRateLimitPort,
+    /** local·ci 밖에서 파트너 역할 처리기에 테넌트 한도가 없으면 시작을 막는다(RolesCheck) */
+    readonly requireTenantRateLimit = true,
   ) {
     this.terminated = new TerminatedSessions(clock);
     this.#cache = new AdminAuthzCache(clock);
@@ -436,6 +445,19 @@ export class AuthGuard implements CanActivate {
     if (rc) {
       rc.principal = principal;
       rc.log.identify({ pid: principal.pid, sessionId: principal.sessionId, accountId: principal.accountId });
+    }
+    // 파트너 테넌트 한도(BAT-173, D-T50 ⑦): 신원·역할 판정 뒤에 센다. 클라이언트가 보낸 테넌트 머리·본문은 믿지 않고
+    // identity GetAdminAuthz가 준 principal.tenantId만 쓴다(ADR-0172). 601번째부터 429 about:blank + Retry-After + no-store.
+    // 판정 실패(Redis 마감·연결·스크립트)는 포트가 열림으로 답하므로 여기서 5xx로 닫지 않는다.
+    if (principal.aud === 'partner' && principal.tenantId !== undefined && this.state.tenantRateLimit) {
+      const verdict = await this.state.tenantRateLimit.check(principal.tenantId);
+      if (!verdict.allowed) {
+        const reply = http.getResponse<FastifyReply>();
+        void reply.header('retry-after', String(verdict.retryAfterSeconds));
+        void reply.header('cache-control', 'no-store');
+        // ProblemError는 about:blank를 만들 수 없다(슬러그 규칙). 전역 필터가 about:blank·Too Many Requests·instance·traceId로 바꾼다
+        throw new HttpException('Too Many Requests', 429);
+      }
     }
     // 멱등 키는 신원 판정 뒤, 모양 검사 실패보다 먼저 본다(두 검사 길의 순서가 같다, add-idempotency-and-outbox 결정 1)
     const idempotent = this.reflector.get<IdempotentOptions | undefined>(IDEMPOTENT_METADATA, ctx.getHandler());
@@ -679,6 +701,11 @@ export class RolesCheck implements OnApplicationBootstrap {
         const admin = policy.roles.some((r) => AUDIENCE_OF[r as Exclude<RoleValue, 'public'>] === 'partner' || AUDIENCE_OF[r as Exclude<RoleValue, 'public'>] === 'ops');
         if (admin && !this.state.adminAuthz && this.state.requireAdminAuthz) {
           problems.push(`${where}: 관리 역할을 판정할 identity 조회(createService의 adminAuthz)가 없다`);
+        }
+        // 파트너 역할 처리기가 있는데 테넌트 한도 가드가 없으면 운영에서 조용히 한도가 꺼진다. local·ci 밖은 시작을 막는다(BAT-173)
+        const partnerRole = policy.roles.some((r) => r !== 'public' && AUDIENCE_OF[r as Exclude<RoleValue, 'public'>] === 'partner');
+        if (partnerRole && !this.state.tenantRateLimit && this.state.requireAdminAuthz && this.state.requireTenantRateLimit) {
+          problems.push(`${where}: 파트너 역할을 단 처리기인데 테넌트 한도 가드(createService의 tenantRateLimit)가 없다`);
         }
       }
     }

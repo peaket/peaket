@@ -42,6 +42,8 @@ export class PlatformMetrics {
   readonly rpcServerDuration: Histogram<(typeof RPC_LABELS)[number]>;
   /** 진단 수집(RB-31) 결과. result는 고정 목록이다(diagnose.ts DIAGNOSE_RESULTS) */
   readonly diagnoseResults: Counter<'service' | 'result'>;
+  /** 파트너 테넌트 한도 판정 결과(allowed·limited·unavailable, BAT-173, docs/observability.md §3). 테넌트 ID는 라벨에 싣지 않는다 */
+  readonly tenantRateLimit: Counter<'service' | 'result'>;
 
   constructor(readonly service: string) {
     const registers = [this.registry];
@@ -80,6 +82,12 @@ export class PlatformMetrics {
     this.diagnoseResults = new Counter({
       name: 'diagnose_collections_total',
       help: '진단 수집(RB-31) 결과 수. 힙 스냅샷을 건너뛴 까닭도 result로 센다',
+      labelNames: ['service', 'result'] as const,
+      registers,
+    });
+    this.tenantRateLimit = new Counter({
+      name: 'tenant_rate_limit_total',
+      help: '파트너 테넌트 한도 판정 결과(allowed·limited·unavailable, docs/api/guidelines.md §6)',
       labelNames: ['service', 'result'] as const,
       registers,
     });

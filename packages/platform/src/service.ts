@@ -27,6 +27,8 @@ import { CanonicalLog, errorInfoOf } from './request-log.js';
 import { installRequestChecks } from './request-checks.js';
 import { READINESS, READINESS_SHUTTING_DOWN, Readiness } from './readiness.js';
 import { sampleKeep } from './sampling.js';
+import { redisTenantRateLimiter } from './tenant-rate-limit.js';
+import type { HotRedis } from './redis.js';
 
 /**
  * 사용자 모듈 위에 공용 제공자(시계·서비스 로거·인증 상태)를 전역으로 얹은 뿌리 모듈.
@@ -107,6 +109,11 @@ export interface CreateServiceOptions {
   purchaseSessions?: PurchaseSessionPort;
   /** 스캐너 기기 증명·세션 판정 포트(GAT-170). @ScannerAuth()를 단 처리기가 있으면 꼭 있어야 한다 */
   scanner?: ScannerAuthWiring;
+  /**
+   * 파트너 테넌트 한도(BAT-173, D-T50 ⑦). 세션·캐시 Redis 연결을 넘긴다.
+   * local·ci 밖에서 파트너 역할 처리기가 있는데 이 값이 없으면 서비스가 시작하지 않는다(조용히 한도가 꺼지지 않게)
+   */
+  tenantRateLimit?: { redis: HotRedis; limit?: number; windowMs?: number; timeoutMs?: number };
   /** 앱 포트가 요청 하나(머리·본문)를 다 받는 시한(ms). 기본은 Fastify 기본(시한 없음)이다. 서버 전체에 걸리므로 그 포트의 경로를 모두 보고 정한다 */
   requestTimeoutMs?: number;
   /** 핫패스 구간 진단(BAT-028). 서비스가 만든 것을 넘기면 인증·처리기·문제 변환·로그·응답 구간을 잰다 */
@@ -164,6 +171,14 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   const metrics = new PlatformMetrics(o.name);
   const rejections = purchaseRejections(metrics.registry);
   const scanner = o.scanner ? new ScannerAuthState(o.scanner, clock) : undefined;
+  const internalTokenRequired = config.env !== 'local' && config.env !== 'ci';
+  // 테넌트 한도(BAT-173): 넘긴 Redis 연결을 포트로 바꾸고, 판정 결과를 tenant_rate_limit_total{service,result}에 잇는다
+  const tenantRateLimit = o.tenantRateLimit
+    ? redisTenantRateLimiter({
+        ...o.tenantRateLimit,
+        onResult: (result) => metrics.tenantRateLimit.inc({ service: o.name, result }),
+      })
+    : undefined;
   const auth = new AuthState(
     clock,
     o.adminAuthz,
@@ -174,6 +189,8 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     },
     o.hotPath,
     scanner,
+    tenantRateLimit,
+    internalTokenRequired,
   );
   const logger = createPlatformLogger({
     service: o.name,
@@ -223,7 +240,6 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     },
   });
   const nestLevels = o.nestLogLevels ?? ['error', 'warn'];
-  const internalTokenRequired = config.env !== 'local' && config.env !== 'ci';
   // 준비 표시는 모듈이 시작 작업을 걸 수 있게 앱보다 먼저 만든다(@Inject(READINESS))
   const readiness = new Readiness();
   const app = await NestFactory.create<NestFastifyApplication>(platformRoot(o.module, clock, logger, auth, internalTokenRequired, readiness), adapter, {
