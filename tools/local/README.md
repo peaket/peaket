@@ -111,6 +111,12 @@ node --test "tools/local/*.test.mjs"
 | `demo-auth.mjs` | 데모 인증 도우미: 팬 gRPC `CreateSession`, 관리·파트너 공개 로그인(비밀번호+TOTP), 패스키 CDP 입력, 데모 비밀 생성(`prepare`) |
 | `demo-seed.mjs` | `deploy/envs/demo/seed/base.yaml` 검사(`--check`)·적용(`--apply`). 부트스트랩 Job 뒤 공개·관리 API로 시드하고 개수를 다시 읽습니다. 로컬 데모 예외로 공연장·스태프 배정은 직접 SQL로 넣습니다(README '로컬 데모 전용 예외') |
 | `e2e/demo-stage.e2e.mjs` | `demo`→`demo-seed`→게이트웨이 응답→`demo-down` 연기 시험(시험 담당 몫, 계획 §6 DS-07~10) |
+| `demo.mjs` | BAT-086 한 명령 데모 재현: `all`·`doctor`·`plan`·`up`·`seed`·`play`·`status`·`compat`·`cloud-plan`·`down`. 선행이 없으면 닫힌 실패(exit 1), 모르는 인자·시나리오는 exit 2 |
+| `demo/scenarios.mjs` | S1~S9 정의(화면 번호·계정·선행·결과 확인). `plan --check`가 정본 d5 §10.6 표와 대조 |
+| `demo/runner.mjs` | Playwright 재생기: 시나리오마다 새 맥락, 조건 기다리기, 실패 그림, S1·S3·S4·S6 구매 API 재생 |
+| `demo/measure.mjs` | 측정 Markdown(`docs/review/measurements/BAT-086-demo.md`)과 비밀 가리기 |
+| `demo/compat.mjs` | 운영 판 호환 검사 시연(D-T48): 임시 복제본에서 같은 커밋 통과·마지막 출시 태그 실패 |
+| `demo/cloud-plan.mjs` | `deploy/demo/cloud-plan.yaml` 값 검사(TTL·예산 산술·정리 차례·서명 GHCR) |
 
 ```bash
 node tools/local/cluster.mjs demo [--skip-build] [--only <목록>]
@@ -135,6 +141,25 @@ node tools/local/demo-images.mjs --check
 node tools/local/demo-seed.mjs --check
 node tools/local/cluster.mjs demo-status --json
 ```
+
+## 한 명령 데모 재현(BAT-086)
+
+빈 PC에서 무대·시드·시연 S1~S9·측정·정리까지 한 번에 합니다(계획 `docs/review/plans/BAT-086.md`, ADR-0325). Node 24와 Docker가 있어야 하고, Playwright는 `tools/web-checks`의 1.64.1을 빌려 씁니다(새 패키지 없음).
+
+```bash
+pnpm --dir tools/web-checks install --frozen-lockfile
+pnpm --dir tools/web-checks exec playwright install chromium
+node tools/local/demo.mjs doctor
+node tools/local/demo.mjs all
+```
+
+- **명령**: `all`(무대 → 시드 → S1~S9 → 측정 → 정리), `down`, `status`, `up`, `seed`, `play`, `doctor`, `plan`, `compat`, `cloud-plan`. `all`은 `--skip-build`(이미지가 이미 있으면), `--seed-only`, `--skip-play`, `--keep`(무대를 남김), `--scenarios S1,S4`, `--headed`, `--video`, `--measure <파일>`을 받습니다.
+- **두 경로**: 로컬(기본, 0원)은 BAT-087의 `peaket/<워크로드>:demo`와 `deploy/envs/local/demo` 오버레이를, 클라우드(선택)는 `deploy/envs/demo/*.yaml`의 서명 GHCR 다이제스트를 씁니다. 클라우드는 이 묶음에서 실행하지 않고 `deploy/demo/cloud-plan.yaml`의 값 검사(TTL 6시간 [가정]·예산 5만 원 상한·정리 차례)와 `docs/devops.md` §5.1 절차로만 둡니다. 같은 `play`가 두 경로에 쓰입니다.
+- **시나리오**: 정본은 `docs/design/d5-screen-blueprint.md` §10.6입니다. `node tools/local/demo.mjs plan --check`가 화면 번호·순서를 대조합니다. S1·S3·S4·S6은 구매 세션 서명(ECDH+HKDF)과 데모 PG 시뮬레이터로 실제 API를 끝까지 부르고, S2·S5·S7·S8·S9는 화면 증거와 실패 사유를 남깁니다(사람 확인·재인증·스캐너 기기 등록·매진 픽스처는 다음 몫). 확인하지 못한 시나리오는 통과로 세지 않습니다.
+- **데모 시계**: 회차 오픈을 지금+30초로 당기고(파트너 회차 고치기, 공개 전에만), 화면의 조건을 기다립니다. 고정 `sleep`으로 화면을 넘기지 않습니다.
+- **측정**: `all`은 `docs/review/measurements/BAT-086-demo.md`에 커밋·날짜·PC·도구 판·콜드 스타트·시나리오별 결과·정리 결과를 씁니다. 실패한 실행도 지우지 않고 실패 단계를 남깁니다. 비밀·토큰·쿠키는 싣지 않습니다.
+- **호환 시연**: `node tools/local/demo.mjs compat`는 임시 `git clone --shared`에서 같은 커밋 통과와 `v0.0.0` 태그와 견준 깨짐(응답 필드 하나 삭제) 검출을 보입니다(계획의 `v0.0.0-demo`는 출시 태그 규칙 vX.Y.Z 밖이라 v0.0.0을 씁니다). 실제 저장소·원격·태그는 건드리지 않고, Docker가 없으면 exit 2입니다.
+- **한계**: S7의 2인 승인은 계획상 브라우저 맥락 둘로 재생하지만, 콘솔 패스키 재인증 조작은 아직 자동화하지 못했습니다. S8은 시드가 스캐너 등록 코드를 보관하지 않아 기기 로그인을 재현하지 못합니다. S2의 매진 상태도 기본 시드에 없습니다. Docker·kind 실행과 측정은 시험 담당 몫입니다.
 
 ## 고정 판(2026-11-01)
 
