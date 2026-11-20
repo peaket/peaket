@@ -655,14 +655,10 @@ erDiagram
         text mail_order_report_no "통신판매업 신고번호"
         text exemption_basis "신고 면제 사유(신고번호가 없을 때, openapi SellerInfo.exemptionBasis, 2026-11-09 HOT-306)"
         timestamptz verified_at "판매 승인 때 사업자 진위 확인"
-        text toss_seller_id "토스페이먼츠 지급대행 셀러(ADR-0047)"
-        text toss_seller_status "APPROVAL_REQUIRED|PARTIALLY_APPROVED|KYC_REQUIRED|APPROVED"
-        text portone_partner_id "포트원 파트너"
-        text payout_bank_code "정산 은행"
-        text payout_account_last4 "끝 4자리만, 계좌번호 저장 안 함"
-        timestamptz payout_account_changed_at "변경 뒤 3영업일 지급 보류"
-        int commission_rate_bp "계약 중개수수료율(만분율). 지금 계약값이고, 판매 승인 때 event.commission_rate_bp로 복사한다(ADR-0060)"
+        int commission_rate_bp "계약 중개수수료율(만분율). 지금 계약값의 사본이고, 판매 승인 때 event.commission_rate_bp로 복사한다(ADR-0060·0320)"
+        uuid pending_contract_approval_id "승인 대기 중인 CONTRACT_TERMS_CHANGE 업무. 한 파트너에 열린 변경은 하나다(ADR-0320, 두 겹 가드의 한쪽)"
     }
+    %% 지급 계좌(은행·끝 4자리)·토스 셀러 상태·포트원 파트너 ID는 payment-svc payout_account·seller_kyc가 정본이다(ADR-0320 결정 7). core promoter에 복제하지 않는다.
     seat {
         uuid venue_id PK
         uuid seat_key PK "계약의 seatId. 판매·홀드 기록의 좌석 ID(소문자 UUID, docs/features/seat-hold.md §5 '좌석 ID 글')와 같은 값이라 저장마다 행을 바꿔 넣어도 그대로다. 서버가 정한다(이 배치본에 이미 있는 UUID는 그대로, 아니면 새 UUIDv7, ADR-0260 결정 2, 추천 적용 2026-11-10 리뷰)"
@@ -743,10 +739,15 @@ erDiagram
         timestamptz approved_at
     }
     promoter_contract {
+        uuid id PK
         uuid promoter_id
-        int commission_rate_bp
-        tstzrange valid_during "UNIQUE (promoter_id, valid_during WITHOUT OVERLAPS), btree_gist(ADR-0086)"
-        uuid approval_id "계약 조건 변경 승인 업무"
+        int commission_rate_bp "중개수수료율(만분율, 10%=1000)"
+        int guarantee_rate_bp "계약 보증 비율(회차 예상 매출 대비 만분율, ADR-0320)"
+        text guarantee_kind "DEPOSIT|PERFORMANCE_BOND(보증금·이행보증보험, ADR-0320)"
+        tstzrange valid_during "UNIQUE (promoter_id, valid_during WITHOUT OVERLAPS), btree_gist(ADR-0086). 지금 계약은 상한 없음"
+        uuid approval_id "계약 조건 변경 승인 업무. 첫 계약은 NULL"
+        timestamptz created_at
+        uuid created_by "등록·적용한 관리 계정"
     }
     seller_profile_change {
         uuid id PK
@@ -2183,10 +2184,28 @@ erDiagram
         text reason_text
         text evidence_checked "확인한 증빙 종류만(내용·파일 없음)"
         uuid requested_by
+        text requester_role "요청한 관리 계정의 역할(화면 표시, ADR-0320)"
         int required_approvals "1|2(POL-038). 승인은 자식 표 approval_vote(ADR-0086)"
         text status "REQUESTED|PENDING_APPROVAL|APPROVED|REJECTED|ESCALATED|EXECUTING|DONE|FAILED|WITHDRAWN|EXPIRED. FAILED는 원인을 고친 뒤 승인자가 같은 approve를 다시 부르면(재인증) EXECUTING으로 다시 실행(추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한(due_at)이 지나 시스템이 끝냄(docs/planning/03 §2.10·POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)"
-        text close_reason "WITHDRAWN의 요청자 사유, EXPIRED의 TARGET_CHANGED|DEADLINE_PASSED(낮음-087)"
+        text close_reason "WITHDRAWN의 요청자 사유, EXPIRED의 TARGET_CHANGED|DEADLINE_PASSED, FAILED의 적용 실패 사유(낮음-087, ADR-0320)"
         timestamptz due_at "종류별 만료 시각(POL-038 공통). 정하지 않은 종류는 요청 뒤 5영업일 [가정]"
+        uuid approver_id "마지막으로 판정한 승인자. 승인 투표 원본은 approval_vote다(ADR-0320)"
+        timestamptz created_at
+        timestamptz updated_at
+        int version "상태 판. 동시 승인에서 한 번만 반영한다(버전 조건부 갱신, ADR-0320)"
+    }
+    promoter_contract_change {
+        uuid approval_id PK "승인 업무(approval_request.id). CONTRACT_TERMS_CHANGE만"
+        uuid promoter_id
+        int current_commission_rate_bp "요청 때 지금 계약의 수수료율(적용 판정·화면 대조)"
+        int current_guarantee_rate_bp
+        text current_guarantee_kind "DEPOSIT|PERFORMANCE_BOND"
+        timestamptz current_valid_from "요청 때 지금 계약의 시작"
+        int requested_commission_rate_bp "바꿀 칸만. 그대로면 NULL"
+        int requested_guarantee_rate_bp
+        text requested_guarantee_kind
+        text reason_text "변경 사유(1~2,000자)"
+        timestamptz created_at
     }
     approval_summary_view {
         uuid approval_id PK "승인 업무(approval_request.id). 기본 키 (approval_id, admin_account_id). 승인자마다 사건 요약을 처음 연 시각을 따로 둔다(추천 적용 2026-10-31, ADR-0173)"

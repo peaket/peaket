@@ -50,6 +50,12 @@ export type ProblemType =
   | 'compensation-transfer-unavailable'
   | 'consent-required'
   | 'consent-version-outdated'
+  | 'contract-apply-failed'
+  | 'contract-approval-conflict'
+  | 'contract-approval-not-pending'
+  | 'contract-change-pending'
+  | 'contract-terms-changed'
+  | 'contract-terms-missing'
   | 'current-password-invalid'
   | 'data-request-required'
   | 'deadline-exceeded'
@@ -376,6 +382,12 @@ export const PROBLEM_TYPES = {
   'compensation-transfer-unavailable': { status: 503, title: "지금은 배상금을 보낼 수 없습니다" },
   'consent-required': { status: 422, title: "동의가 필요합니다" },
   'consent-version-outdated': { status: 422, title: "동의 문안이 바뀌었습니다. 다시 확인해 주세요" },
+  'contract-apply-failed': { status: 503, title: "계약 조건을 적용하지 못했습니다" },
+  'contract-approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
+  'contract-approval-not-pending': { status: 409, title: "승인 대기 중인 계약 변경이 아닙니다" },
+  'contract-change-pending': { status: 409, title: "이미 승인 대기 중인 계약 변경이 있습니다" },
+  'contract-terms-changed': { status: 409, title: "그 사이 지금 계약이 바뀌었습니다" },
+  'contract-terms-missing': { status: 409, title: "지금 계약 조건이 없습니다" },
   'current-password-invalid': { status: 422, title: "지금 비밀번호가 맞지 않습니다" },
   'data-request-required': { status: 422, title: "접수된 기관 요청이 필요합니다" },
   'deadline-exceeded': { status: 504, title: "남은 처리 시간이 모자라 요청을 끝내지 못했습니다" },

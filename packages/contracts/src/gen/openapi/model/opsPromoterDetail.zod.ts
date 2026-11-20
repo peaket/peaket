@@ -38,14 +38,14 @@ export const OpsPromoterDetail = zod.object({
   "bankCode": zod.string().optional(),
   "last4": zod.string().optional(),
   "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝')
-}).nullish().describe('은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1)'),
+}).nullish().describe('은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1). 2026-11-20 BAT-615는 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7)'),
   "pgRegistration": zod.object({
   "tossSellers": zod.array(zod.object({
   "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
   "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal(null)]).nullish()
 })).optional().describe('결제 상점마다 하나(일반·에스크로, settlement §3)'),
   "portonePartnerRegistered": zod.boolean().optional()
-}).optional().describe('결제사 지급대행 등록 상태')
+}).optional().describe('결제사 지급대행 등록 상태. 2026-11-20 BAT-615는 연동 전이라 빈 목록과 false만 준다(가짜 상태 금지, ADR-0320 결정 7)')
 }).describe('파트너사 상세(SCR-065). 결제사의 셀러·파트너 ID 원문은 없다')
 
 export type OpsPromoterDetail = zod.input<typeof OpsPromoterDetail>;

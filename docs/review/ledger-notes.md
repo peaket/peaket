@@ -218,3 +218,13 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 - ASVS 여덟 행(transfer-refund 2.3.3·2.3.4·8.2.2·8.2.3·16.2.5, payment 2.3.4·8.2.3·16.2.5)은 구현 위치가 이미 있고, 새 시험이 같은 태그를 달아 근거를 더한다(2026-11-20 B·기록 담당 확인. RV-15에 따라 '여섯'을 '여덟'으로 고침). P-T74 ③·P-T63 ③은 기존 시나리오의 세부 번호를 고친 것이라 같은 줄에 적는다.
 - **BAT-425가 닫은 장부 항목(2026-11-20, R-716)**: GAT-120의 자동 정지 서킷 연결을 BAT-425가 끝냈다. R-T9의 '서킷 열림이면 그 몫만 멈춘다' 갈래는 `services/purchase-svc/test/pg-circuits.test.ts`(R-T45)와 `services/purchase-svc/test/event-refund-gat130.test.ts`(R-T9)가 보고, R-T22의 수동 일시정지·재개는 기존 시험이 그대로 본다. 이 절 표의 아홉 항목은 시험 이름으로 상태를 정하므로 상태 칸은 비워 두고 근거만 더했다(항목 수·상태는 바꾸지 않았다).
 - **R-T43 구현 몫(core-svc shop, 2026-11-20 C)**: core 0032가 `merch_refund.replaces_refund_id`(자기 참조, nullable)와 부분 유일 인덱스 `merch_refund_replaces_uq`(`replaces_refund_id is not null`)를 더하고, 멱등 작업 목록에 `SHOP_CANCEL_REFUND_ACCOUNT`를 넣었다. `MerchRefundAccount`는 주문 행 잠금 안에서 사슬 끝 행을 다시 보고 새 행·새 항목 자리·멱등 기록을 커밋한 뒤 새 취소 ID·시도 번호(`refund_attempt`)로 `CancelPayment`를 부른다. 시험은 R-T43 ①~③이 시험 담당 몫이고, 이 줄은 구현 위치만 남긴다.
+## BAT-615 계약 조건·수수료율(2026-11-20)
+
+| ID | 상태 | 등급 | 담당 | 근거·이유 |
+| --- | --- | --- | --- | --- |
+| J-T29 | 자동 시험 | B | core-svc·ops-svc 승인 업무·SCR-065 | 계약 조건 저장·기간 이력·2인 승인·반려·철회·동시 요청을 `services/core-svc/test/ops-promoter.http.test.ts`·`services/ops-svc/test/contract-approval.test.ts`·`services/ops-svc/test/approval-visibility.test.ts`가 보고, 실제 PostgreSQL 부분 유일 인덱스·계약 기간 겹침은 `services/ops-svc/test-int/approval-request.int.test.ts`·`services/core-svc/test-int/promoter-contract.int.test.ts`가 본다. J-T29 ⑨의 장애 주입(감사·core 적용)은 단위 시험이 맡는다. |
+| J-T30 | 자동 시험 | B | core-svc 판매 승인·상품·payment-svc 정산 | 첫 승인·재승인의 수수료율 고정과 설정 사본을 `services/core-svc/test/event-sale-config.test.ts`·`services/core-svc/test-int/sale-approval.int.test.ts`가, 상품 게시 원천을 `services/core-svc/test/product-commission.test.ts`가, 회차 정산이 503으로 닫히지 않는 길을 `services/payment-svc/test/settlement.test.ts`가 본다. 기존 파트너 백필·기간 겹침은 `services/core-svc/test-int/promoter-contract.int.test.ts`가 본다. |
+| settlement:v5.0.0-2.3.3 | 자동 시험 | B | core-svc 계약 적용·ops-svc 승인 | 승인 상태·투표·감사와 계약 기간·현재 값·대기 표시를 같은 트랜잭션에 쓰고 같은 승인 ID로 멱등을 맞춘다. 시험 이름에 `[ASVS v5.0.0-2.3.3]`을 단다(J-T29 ⑨, J-T30 ①~③). |
+| settlement:v5.0.0-2.3.4 | 자동 시험 | B | core-svc 계약 기간·ops-svc 부분 유일 | 한 파트너에 열린 변경 하나(core 대기 ID + ops 부분 유일 인덱스)와 기간 겹침 없음(`WITHOUT OVERLAPS`)을 동시 요청·동시 승인 시험이 본다. 시험 이름에 `[ASVS v5.0.0-2.3.4]`을 단다(J-T29 ④ ⑨, J-T30 ⑤). |
+| settlement:v5.0.0-8.2.2 | 자동 시험 | B | core-svc 관제 경로 | 계약 승인 상세는 요청자·commander만, 파트너사 상세는 viewer 403·CS 읽기다. 시험 이름에 `[ASVS v5.0.0-8.2.2]`을 단다(J-T29 ⑦ ⑧). |
+| settlement:v5.0.0-8.2.3 | 자동 시험 | B | core-svc 관제 경로 | 응답에 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID가 없고 `payoutAccount`는 null이다. 시험 이름에 `[ASVS v5.0.0-8.2.3]`을 단다(J-T29 ⑧). |

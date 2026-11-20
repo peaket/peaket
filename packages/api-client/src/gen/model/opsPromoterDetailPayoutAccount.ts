@@ -11,7 +11,7 @@
  */
 
 /**
- * 은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1)
+ * 은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1). 2026-11-20 BAT-615는 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7)
  * @nullable
  */
 export type OpsPromoterDetailPayoutAccount = {

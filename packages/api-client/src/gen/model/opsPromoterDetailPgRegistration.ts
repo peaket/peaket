@@ -12,7 +12,7 @@
 import type { OpsPromoterDetailPgRegistrationTossSellersItem } from './opsPromoterDetailPgRegistrationTossSellersItem';
 
 /**
- * 결제사 지급대행 등록 상태
+ * 결제사 지급대행 등록 상태. 2026-11-20 BAT-615는 연동 전이라 빈 목록과 false만 준다(가짜 상태 금지, ADR-0320 결정 7)
  */
 export type OpsPromoterDetailPgRegistration = {
   /** 결제 상점마다 하나(일반·에스크로, settlement §3) */

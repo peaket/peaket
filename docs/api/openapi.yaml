@@ -76,6 +76,12 @@ x-peaket-problem-types:
     audit-chain-broken: { status: 409, title: "감사 체인 구간이 비었습니다" }
     consent-required: { status: 422, title: "동의가 필요합니다" }
     consent-version-outdated: { status: 422, title: "동의 문안이 바뀌었습니다. 다시 확인해 주세요" }
+    contract-approval-conflict: { status: 409, title: "다른 사람이 먼저 처리했습니다" }
+    contract-approval-not-pending: { status: 409, title: "승인 대기 중인 계약 변경이 아닙니다" }
+    contract-apply-failed: { status: 503, title: "계약 조건을 적용하지 못했습니다" }
+    contract-change-pending: { status: 409, title: "이미 승인 대기 중인 계약 변경이 있습니다" }
+    contract-terms-changed: { status: 409, title: "그 사이 지금 계약이 바뀌었습니다" }
+    contract-terms-missing: { status: 409, title: "지금 계약 조건이 없습니다" }
     current-password-invalid: { status: 422, title: "지금 비밀번호가 맞지 않습니다" }
     data-request-required: { status: 422, title: "접수된 기관 요청이 필요합니다" }
     deadline-exceeded: { status: 504, title: "남은 처리 시간이 모자라 요청을 끝내지 못했습니다" }
@@ -3661,14 +3667,14 @@ components:
         verifiedAt: { type: [string, 'null'], format: date-time, description: "사업자 진위 확인 시각" }
         payoutAccount:
           type: [object, 'null']
-          description: "은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1)"
+          description: "은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1). 2026-11-20 BAT-615는 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7)"
           properties:
             bankCode: { type: string }
             last4: { type: string }
             holdUntil: { type: [string, 'null'], format: date-time, description: "변경 뒤 3영업일 지급 보류의 끝" }
         pgRegistration:
           type: object
-          description: "결제사 지급대행 등록 상태"
+          description: "결제사 지급대행 등록 상태. 2026-11-20 BAT-615는 연동 전이라 빈 목록과 false만 준다(가짜 상태 금지, ADR-0320 결정 7)"
           properties:
             tossSellers:
               type: array
@@ -6720,8 +6726,9 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }
         '403': { $ref: '#/components/responses/Problem', description: "operator·commander가 아님" }
         '404': { $ref: '#/components/responses/Problem', description: "없는 파트너사(not-found)" }
-        '409': { $ref: '#/components/responses/Problem', description: "같은 파트너사에 승인 대기 중인 변경이 있음, idempotency-request-in-progress" }
-        '422': { $ref: '#/components/responses/Problem', description: "바꿀 칸 없음, 지금 값과 같음, idempotency-key-reused" }
+        '409': { $ref: '#/components/responses/Problem', description: "같은 파트너사에 승인 대기 중인 변경이 있음(contract-change-pending), idempotency-request-in-progress" }
+        '422': { $ref: '#/components/responses/Problem', description: "바꿀 칸 없음, 지금 값과 같음, 수수료율·보증이 0~10,000bp 밖, 사유 없음·2,001자, 모르는 칸, idempotency-key-reused" }
+        '503': { $ref: '#/components/responses/Problem', description: "ops-svc 승인 업무를 만들 수 없음(dependency-unavailable)" }
   # ---------- 3-10. 팬 조회(SCR-066) ----------
   /v1/ops/fan-lookups:
     post:

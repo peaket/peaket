@@ -14990,10 +14990,15 @@ export type createOpsPromoterContractTermChangeResponse422 = {
   status: 422
 }
 
+export type createOpsPromoterContractTermChangeResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsPromoterContractTermChangeResponseSuccess = (createOpsPromoterContractTermChangeResponse202) & {
   headers: Headers;
 };
-export type createOpsPromoterContractTermChangeResponseError = (createOpsPromoterContractTermChangeResponse400 | createOpsPromoterContractTermChangeResponse401 | createOpsPromoterContractTermChangeResponse403 | createOpsPromoterContractTermChangeResponse404 | createOpsPromoterContractTermChangeResponse409 | createOpsPromoterContractTermChangeResponse422) & {
+export type createOpsPromoterContractTermChangeResponseError = (createOpsPromoterContractTermChangeResponse400 | createOpsPromoterContractTermChangeResponse401 | createOpsPromoterContractTermChangeResponse403 | createOpsPromoterContractTermChangeResponse404 | createOpsPromoterContractTermChangeResponse409 | createOpsPromoterContractTermChangeResponse422 | createOpsPromoterContractTermChangeResponse503) & {
   headers: Headers;
 };
 
