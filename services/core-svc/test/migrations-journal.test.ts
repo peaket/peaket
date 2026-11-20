@@ -26,6 +26,17 @@ describe('마이그레이션 저널', () => {
     expect(files.filter((f) => !e.some((x) => x.tag === f))).toEqual([]);
   });
 
+  // BAT-615 리뷰 2 RV-13: 0033의 when이 0032보다 작으면 Drizzle는 마지막 적용 시각보다 작은 마이그레이션을 조용히 건너뛴다.
+  // 그러면 새 DB와 0032가 적용된 DB 모두에서 promoter_contract·수수료율 칸·새 멱등 작업이 생기지 않는다.
+  test('0033_promoter_contract의 when은 0032보다 크다(RV-13)', () => {
+    const e = journal.entries;
+    // 저널 배열에는 번호가 빈 칸(0024·0025)이 있어 배열 위치가 아니라 idx로 찾는다
+    const e32 = e.find((x) => x.tag === '0032_merch_refund_replaces');
+    const e33 = e.find((x) => x.tag === '0033_promoter_contract');
+    expect({ idx32: e32?.idx, idx33: e33?.idx }).toEqual({ idx32: 32, idx33: 33 });
+    expect({ tag: e33!.tag, later: e33!.when > e32!.when }).toEqual({ tag: '0033_promoter_contract', later: true });
+  });
+
   test('검색 표 마이그레이션은 갈래 2 몫 번호 0023이고 when이 갈래 3의 마지막 값보다 크다(R165-7)', () => {
     const search = journal.entries.filter((x) => x.tag.endsWith('_search_read_model_tables'));
     expect(search.map((x) => x.tag)).toEqual(['0023_search_read_model_tables']);
