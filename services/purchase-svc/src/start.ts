@@ -178,6 +178,7 @@ import {
   CoreSaleConfigs,
   DrizzleEventSale,
   DrizzleSeatHoldLedger,
+  DrizzleSeatRebuildSource,
   DrizzleSeatSales,
   EndPurchaseSession,
   ExpirySweeper,
@@ -622,6 +623,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
       onHoldsExpired: (e) => orderExpiry?.onHoldsExpired(e),
       holdFreeze: { pauseView: holdPauseView, lifecycle: holdLifecycle },
       ...(database ? { seatSales: new DrizzleSeatSales(database) } : {}),
+      // 판매 열기 내부 경로(BAT-616): core-svc 승인이 부르면 event_sale UPCOMING·seat_rebuild 판 1·좌석 Redis를 차례로 연다
+      ...(database ? { saleOpen: { events: new DrizzleEventSale({ database, clock: systemClock }), marks: new DrizzleSeatRebuildSource(database) } } : {}),
       ...(booking ? { booking } : {}),
       ...(refund ? { refund } : {}),
       ...(priority ? { priority } : {}),

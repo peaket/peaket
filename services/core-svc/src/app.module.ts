@@ -1,7 +1,7 @@
 // 뿌리 모듈: 컨텍스트 모듈과 공용 설정(DB)을 모은다. catalog·review·shop·notify·export를 싣는다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import { type Database, databaseModule } from '@peaket/platform';
-import { CatalogModule, type MediaWiring, type MemoryCatalogRepository, type OpsApprovalClient, type SaleConfigStore } from './modules/catalog/index.js';
+import { CatalogModule, type MediaWiring, type MemoryCatalogRepository, type OpsApprovalClient, type SaleConfigMetrics, type SaleConfigStore, type SaleOpen } from './modules/catalog/index.js';
 import { ReviewModule, type DatabaseReviewWiring, type MemoryReviewWiring } from './modules/review/index.js';
 import { ShopModule, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock, type DatabaseShopWiring, type MemoryShopWiring } from './modules/shop/index.js';
 import { NotifyModule } from './modules/notify/index.js';
@@ -33,6 +33,12 @@ export class AppModule {
           reauthJti?: import('@peaket/platform').ReauthJtiStore;
           /** 계약 변경 요청이 부르는 ops-svc 내부 승인 생성 클라이언트(BAT-615). 없으면 그 경로만 503 */
           opsApprovals?: OpsApprovalClient;
+          /** 판매 승인 사본을 DB와 대기열에 함께 쓰는 합성 저장소(BAT-616) */
+          saleConfigStore?: SaleConfigStore;
+          /** 판매 열기 클라이언트(BAT-616). 없으면 열기가 끝난 것으로 보는 메모리 어댑터 */
+          saleOpen?: SaleOpen;
+          /** 판매 승인 부수 효과 지표(BAT-616) */
+          saleConfigMetrics?: SaleConfigMetrics;
         }
       | {
           memory: true;
@@ -45,6 +51,9 @@ export class AppModule {
           export?: MemoryExportWiring;
           /** 시험이 넘기는 ops 승인 대역. 없으면 메모리 대역(기록만) */
           opsApprovals?: OpsApprovalClient;
+          /** 시험이 넘기는 판매 열기 대역(BAT-616). 없으면 부른 값을 모으는 메모리 대역 */
+          saleOpen?: SaleOpen;
+          saleConfigMetrics?: SaleConfigMetrics;
         },
   ): DynamicModule {
     if ('database' in o)
@@ -52,7 +61,7 @@ export class AppModule {
         module: AppModule,
         imports: [
           databaseModule(o.database),
-          CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), ...(o.searchDatabase ? { searchDatabase: o.searchDatabase } : {}), media: o.media, ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}) }),
+          CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), ...(o.searchDatabase ? { searchDatabase: o.searchDatabase } : {}), media: o.media, ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}), ...(o.saleConfigStore ? { saleConfigStore: o.saleConfigStore } : {}), ...(o.saleOpen ? { saleOpen: o.saleOpen } : {}), ...(o.saleConfigMetrics ? { saleConfigMetrics: o.saleConfigMetrics } : {}) }),
           ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}) }),
           ShopModule.register({
             storage: 'database',
@@ -78,7 +87,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [
-        CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}), ...(o.media ? { media: o.media } : {}), ...(o.saleConfigs ? { saleConfigs: o.saleConfigs } : {}), ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}) }),
+        CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}), ...(o.media ? { media: o.media } : {}), ...(o.saleConfigs ? { saleConfigs: o.saleConfigs } : {}), ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}), ...(o.saleOpen ? { saleOpen: o.saleOpen } : {}), ...(o.saleConfigMetrics ? { saleConfigMetrics: o.saleConfigMetrics } : {}) }),
         ReviewModule.register({ storage: 'memory', wiring: { ...(o.catalog ? { catalogRepository: o.catalog } : {}), ...(o.review ?? {}) } }),
         ShopModule.register({ storage: 'memory', ...(o.shop ? { wiring: o.shop } : {}) }),
         NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),

@@ -449,6 +449,17 @@ export interface EventSaleCreate extends SaleSeatCounts {
   avgTicketsPerOrder?: number;
 }
 
+/** 판매 열기가 미리 만드는 UPCOMING 행(BAT-616, ADR-0327). status UPCOMING, version 1, previous_status 비움, open_at·sellable_seats를 쓴다 */
+export interface EventSaleUpcoming {
+  eventId: string;
+  /** 회차 오픈 시각(epoch ms) */
+  openAtMs: number;
+  /** 판매 대상 좌석 수 */
+  sellableSeats: number;
+  /** changed_at·counted_at(epoch ms) */
+  nowMs: number;
+}
+
 /** 판 올리기(EventSaleStore.applyChange) */
 export interface EventSaleChange extends SaleSeatCounts {
   eventId: string;
@@ -502,6 +513,13 @@ export interface EventSaleStore {
    * @throws purchase DB 오류
    */
   create(input: EventSaleCreate): Promise<EventSaleRow | undefined>;
+  /**
+   * 판매 열기 전에 UPCOMING 행을 만든다(BAT-616, ADR-0327): `INSERT … ON CONFLICT DO NOTHING RETURNING` + Outbox `EventSaleChanged(UPCOMING)`.
+   * 오픈 전에 행이 없으면 판정 첫 틱이 ON_SALE 행을 만들어 판매 중으로 보인다. 이미 있으면 undefined(Outbox도 쓰지 않는다).
+   * 손으로 만든 시험 대역은 이 메서드를 갖지 않아도 된다(판매 열기 유스케이스는 없으면 잘못된 조립으로 본다).
+   * @throws purchase DB 오류
+   */
+  createUpcoming?(input: EventSaleUpcoming): Promise<EventSaleRow | undefined>;
   /**
    * `UPDATE … SET status, previous_status, version = version + 1, available, held, paying, sold_out_tiers, first_sold_out_at = coalesce(first_sold_out_at, 매진 시각), reopen_count, changed_at = now, counted_at = now WHERE event_id AND version = expectedVersion` + Outbox.
    * @returns 바꾼 행. 0행이면 undefined(다른 파드에 짐, Outbox도 쓰지 않는다)

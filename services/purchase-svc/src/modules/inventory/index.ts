@@ -413,6 +413,7 @@ export {
   type EventSaleCreate,
   type EventSaleRepublish,
   type EventSaleStore,
+  type EventSaleUpcoming,
   type EventSeatConfig,
   type SaleCountsRead,
   type SaleHoldPage,
@@ -468,6 +469,8 @@ export {
   type SweepLeases,
 } from './domain/ports.js';
 export { PurchaseSessionController } from './inbound/purchase-session.controller.js';
+export { InternalSaleOpenController } from './inbound/internal-sale-open.controller.js';
+export { OpenSale, OpenSaleError, SALE_NOT_PUBLISHABLE, SEAT_STORE_UNAVAILABLE, type OpenSaleDeps, type OpenSaleResult } from './application/open-sale.js';
 export { SeatHoldLedgerHandler, type LedgerRecord } from './inbound/seat-hold-ledger.handler.js';
 export { SnapshotController } from './inbound/snapshot.controller.js';
 export { HOLD_OPERATION, HoldHeaders, HoldParams, HoldRequest, HoldResponseBody, HoldsController, SeatLuaFailure, sanitizedStoreError } from './inbound/holds.controller.js';

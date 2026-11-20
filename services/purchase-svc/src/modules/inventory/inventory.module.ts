@@ -1,8 +1,9 @@
 // 모듈 조립 파일: inventory 포트에 어댑터를 묶는다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock, HOT_PATH_METRICS, type HotPathMetrics, type HotRedis, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
+import { CLOCK, type Clock, HOT_PATH_METRICS, type HotPathMetrics, type HotRedis, INTERNAL_TOKEN, InternalTokenGuard, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { PurchaseSessionAccess } from './adapters/memory-purchase-sessions.js';
 import { OpenPurchaseSession } from './application/open-purchase-session.js';
+import { OpenSale } from './application/open-sale.js';
 import { EndPurchaseSession, type EndPurchaseSessionDeps } from './application/end-purchase-session.js';
 import { ReadSeatSnapshot } from './application/read-seat-snapshot.js';
 import { SessionSweeper } from './application/session-sweeper.js';
@@ -37,9 +38,11 @@ import {
   type SessionStartedLog,
   SEAT_SIGNALS,
   SEAT_STORE,
+  type EventSaleStore,
   type SeatMap,
   type SeatMapAuto,
   type SeatMapIndex,
+  type SeatRebuildMarks,
   type SeatSignals,
   type SeatStore,
   SWEEP_LEASES,
@@ -47,6 +50,7 @@ import {
 } from './domain/ports.js';
 import { HoldLifecycleController } from './inbound/hold-lifecycle.controller.js';
 import { HoldsController } from './inbound/holds.controller.js';
+import { InternalSaleOpenController } from './inbound/internal-sale-open.controller.js';
 import { PurchaseSessionController } from './inbound/purchase-session.controller.js';
 import { SnapshotController } from './inbound/snapshot.controller.js';
 
@@ -104,6 +108,11 @@ export type InventoryModuleOptions = (
   sessions: PurchaseSessionAccess;
   /** 판매 확정(Hard Sale) 저장소(BUILD_ORDER PRF-140 ①, 운영은 DrizzleSeatSales). 부르는 쪽(결제 접수 Saga)은 PRF-160이다. 없으면 SEAT_SALES를 내놓지 않는다 */
   seatSales?: SeatSales;
+  /**
+   * 판매 열기(BAT-616 LCH-080, ADR-0327): core-svc 판매 승인이 부르는 내부 경로. 넘기면 컨트롤러와 유스케이스를 연다.
+   * 운영은 purchase DB가 있을 때만 넘긴다(start.ts). 없으면 경로 자체를 열지 않는다
+   */
+  saleOpen?: { events: EventSaleStore; marks: SeatRebuildMarks };
   /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
   hotPath?: HotPathMetrics;
 };
@@ -203,11 +212,27 @@ export class InventoryModule {
             },
           ]
         : [];
+    // 판매 열기(BAT-616): core-svc 승인이 부르는 내부 경로. 좌석 저장소·좌석맵 판·purchase DB 저장소를 함께 쓴다
+    const saleOpenProviders: Provider[] = o.saleOpen
+      ? [
+          {
+            provide: OpenSale,
+            useFactory: (store: SeatStore, seatMap: SeatMap, clock: Clock) => new OpenSale({ events: o.saleOpen!.events, marks: o.saleOpen!.marks, seats: store, seatMap, clock }),
+            inject: [SEAT_STORE, SEAT_MAP, CLOCK],
+          },
+          { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
+          InternalTokenGuard,
+        ]
+      : [];
+    const saleOpenControllers = o.saleOpen ? [InternalSaleOpenController] : [];
     return {
       module: InventoryModule,
-      controllers: o.admission ? [HoldsController, SnapshotController, ...(o.admission.manageHolds ? [HoldLifecycleController] : []), ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController],
-      providers: [HoldSeats, ...(o.admission?.manageHolds ? [{ provide: ManageHolds, useValue: o.admission.manageHolds }] : []), ...storage, ...seatBehavior, ...snapshotProviders, ...sessionSweeperProvider, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, ...(o.hotPath ? [{ provide: HOT_PATH_METRICS, useValue: o.hotPath }] : []), { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
-      exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper, ...(sessionSweeperProvider.length > 0 ? [SessionSweeper] : [])] : [HoldSeats],
+      controllers: [
+        ...(o.admission ? [HoldsController, SnapshotController, ...(o.admission.manageHolds ? [HoldLifecycleController] : []), ...(o.admission.endedLog ? [PurchaseSessionController] : [])] : [HoldsController]),
+        ...saleOpenControllers,
+      ],
+      providers: [HoldSeats, ...(o.admission?.manageHolds ? [{ provide: ManageHolds, useValue: o.admission.manageHolds }] : []), ...storage, ...seatBehavior, ...snapshotProviders, ...sessionSweeperProvider, ...saleOpenProviders, ...(o.seatSales ? [{ provide: SEAT_SALES, useValue: o.seatSales }] : []), signals, oomGate, ...(o.hotPath ? [{ provide: HOT_PATH_METRICS, useValue: o.hotPath }] : []), { provide: PURCHASE_SESSIONS, useValue: o.sessions }],
+      exports: o.storage === 'redis' ? [HoldSeats, ExpirySweeper, ...(sessionSweeperProvider.length > 0 ? [SessionSweeper] : []), ...(o.saleOpen ? [OpenSale] : [])] : [HoldSeats, ...(o.saleOpen ? [OpenSale] : [])],
     };
   }
 }

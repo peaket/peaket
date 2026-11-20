@@ -3,6 +3,7 @@
 // 배포는 `<서비스>-outbox-relay` Deployment(복제 2, deploy/charts/peaket-service의 outboxRelay)다. Lease 리더만 보내고 정비를 돈다.
 import {
   createDatabase,
+  createExternalHttpClient,
   createHotRedis,
   createPlatformLogger,
   inClusterLeaseApi,
@@ -14,7 +15,7 @@ import {
   systemClock,
 } from '@peaket/platform';
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
-import { assertDatabaseRole, CompositeSaleConfigStore, DrizzleSaleConfigStore, QueueSaleConfigStore } from './modules/catalog/index.js';
+import { assertDatabaseRole, CompositeSaleConfigStore, DrizzleSaleConfigStore, HttpPurchaseSaleOpen, QueueSaleConfigStore, SaleConfigMetrics, UnwiredSaleOpen } from './modules/catalog/index.js';
 import { coreMaintenanceTasks } from './maintenance-tasks.js';
 import {
   DrizzleShopOrderStore,
@@ -56,6 +57,12 @@ const saleConfigStore = opsDatabase
     ? new CompositeSaleConfigStore(new DrizzleSaleConfigStore(opsDatabase), new QueueSaleConfigStore(queueRedis))
     : new DrizzleSaleConfigStore(opsDatabase)
   : undefined;
+// 정비 일도 판매 열기를 먼저 부른다(BAT-616, ADR-0327). purchase-svc 주소가 없으면 열기·사본은 'unwired'로 남는다
+const saleOpenUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
+const saleOpen = saleOpenUrl
+  ? new HttpPurchaseSaleOpen(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: saleOpenUrl, timeoutCapMs: 3_000 }), process.env.PEAKET_INTERNAL_TOKEN)
+  : new UnwiredSaleOpen();
+const saleConfigMetrics = new SaleConfigMetrics();
 // 굿즈 주문의 리더 반복 셋(재고 예약 만료·결과 당기기와 승인 명령 다시 보내기·미수령 환급 다시 부르기)과 shop 정비 일 둘(BAT-600, ADR-0300 결정 2·6·7, ADR-0301 결정 5).
 // 서비스 역할 연결(core_app, PEAKET_DATABASE_URL)이 있을 때만 돈다. 재고 Redis(PEAKET_SHOP_REDIS_URL)나 payment-svc(PEAKET_PAYMENT_GRPC_ADDR)가 없으면 그 호출이 실패로 끝나고
 // 반복은 다음 바퀴에 다시 한다(경고 로그)
@@ -75,6 +82,8 @@ const shopSignals = new ShopSignals();
 const core = coreMaintenanceTasks(maintenanceDatabase, systemClock, process.env, {
   ...(saleConfigStore ? { saleConfigStore } : {}),
   ...(opsDatabase ? { opsDatabase } : {}),
+  saleOpen,
+  saleConfigMetrics,
   ...(shopDatabase ? { shop: { database: shopDatabase, payments: merchPayments, signals: shopSignals } } : {}),
 });
 const relay = await startOutboxRelayProcess({
@@ -102,6 +111,7 @@ const relay = await startOutboxRelayProcess({
 });
 core.copy.register(relay.registry);
 core.metrics.register(relay.registry);
+saleConfigMetrics.register(relay.registry);
 shopSignals.register(relay.registry);
 
 // 종료: 보내던 묶음을 마치고 Lease를 놓은 뒤 연결을 닫는다(종료 대기 30초 안, docs/devops.md §6.4).

@@ -5,6 +5,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger, ProblemError } from '@peaket/platform';
 import type { SaleApprovalInput, ShowScale } from '../domain/sale-approval.js';
 import { eligibleListKeys } from '../domain/event-sale-config.js';
+import { CDN_INVALIDATION, type CdnInvalidation } from '../domain/media-ports.js';
 import { OPS_SALE_STORE, type SaleStore } from '../domain/sale-ports.js';
 import { PublishSaleConfigs } from './publish-sale-configs.js';
 import { notFound, productionSuspended } from './problems.js';
@@ -22,6 +23,7 @@ export class ApproveSaleReview {
     @Inject(OPS_SALE_STORE) private readonly store: SaleStore,
     private readonly publish: PublishSaleConfigs,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Optional() @Inject(CDN_INVALIDATION) private readonly cdn?: Pick<CdnInvalidation, 'invalidate'>,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'info' | 'warn'>,
   ) {}
 
@@ -61,6 +63,13 @@ export class ApproveSaleReview {
     } catch (err) {
       // 승인은 커밋됐다. 사본은 정비 일이 다시 쓰므로 응답을 실패로 바꾸지 않는다(로그만 남긴다)
       this.logger?.warn({ event: 'sale_config_publish_failed', productionId: q.productionId, err: (err as Error).name }, '판매 승인 뒤 회차 판매 설정 사본을 쓰지 못했다(정비 일이 다시 쓴다)');
+    }
+    // 승인 커밋 뒤 공개 요약의 CDN 태그를 무효화한다(ADR-0200 결정 5). 실패는 로그만 남기고 승인은 성공이다
+    try {
+      const tags = [...new Set(out.events.flatMap((e) => [`event:${e.eventId.toLowerCase()}`, `production:${out.production.id.toLowerCase()}`]))];
+      if (tags.length > 0) await this.cdn?.invalidate(tags);
+    } catch (err) {
+      this.logger?.warn({ event: 'cdn_invalidate_failed', productionId: q.productionId, err: (err as Error).name }, '판매 승인 뒤 CDN 태그를 무효화하지 못했다(승인은 그대로다)');
     }
     this.logger?.info({ event: 'sale_review_approved', productionId: q.productionId, events: out.events.length }, '판매 승인을 적용했다');
     return { applied: true, events: out.events.length };

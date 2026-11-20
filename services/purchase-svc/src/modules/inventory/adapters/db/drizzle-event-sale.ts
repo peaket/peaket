@@ -4,7 +4,7 @@
 // 구현에서 정한 것: 쓰기 트랜잭션은 READ COMMITTED·문장 시간 한도 5초 [가정]이다(요청 밖의 다른 반복과 같다).
 import { type Clock, type Database, type DatabaseOptions, writeOutbox } from '@peaket/platform';
 import { sql, type SQL } from 'drizzle-orm';
-import type { EventSaleChange, EventSaleCreate, EventSaleRepublish, EventSaleStore, TradeEventCodec } from '../../domain/ports.js';
+import type { EventSaleChange, EventSaleCreate, EventSaleRepublish, EventSaleStore, EventSaleUpcoming, TradeEventCodec } from '../../domain/ports.js';
 import { avgTicketsOf, type EventSaleRow, SALE_STATEMENT_TIMEOUT_MS, saleChangedPayload, type SaleStatus } from '../../domain/sale-state.js';
 import { SEAT_TOPIC } from '../../domain/seat-event.js';
 import { jsonTradeEventCodec } from '../trade-events.js';
@@ -110,6 +110,18 @@ export class DrizzleEventSale implements EventSaleStore {
           on conflict (event_id) do nothing
           returning ${COLUMNS}`,
       input.avgTicketsPerOrder,
+    );
+  }
+
+  /** 판매 열기 전에 UPCOMING 행을 만든다(BAT-616, ADR-0327). 오픈 전에는 판정이 상태·판을 바꾸지 않는다 */
+  async createUpcoming(input: EventSaleUpcoming): Promise<EventSaleRow | undefined> {
+    const at = new Date(input.nowMs);
+    return this.#writeAndPublish(
+      sql`insert into event_sale (event_id, status, previous_status, version, sellable_seats, available, held, paying, sold_out_tiers, open_at, changed_at, counted_at)
+          values (${input.eventId}::uuid, 'UPCOMING', null, 1, ${input.sellableSeats}::int, ${input.sellableSeats}::int, 0, 0, '{}'::text[], ${new Date(input.openAtMs)}::timestamptz, ${at}::timestamptz, ${at}::timestamptz)
+          on conflict (event_id) do nothing
+          returning ${COLUMNS}`,
+      undefined,
     );
   }
 

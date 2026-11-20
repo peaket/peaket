@@ -8,6 +8,7 @@ import { RefundModule, type RefundModuleDeps } from './modules/refund/index.js';
 import { SaleControlModule, type SaleControlModuleDeps } from './modules/sale-control/index.js';
 import {
   type AdmissionOptions,
+  type EventSaleStore,
   type ExpirySweeperDeps,
   type HoldAttempts,
   type SeatBehaviorReporter,
@@ -17,6 +18,7 @@ import {
   type SeatMapAuto,
   type SeatMapIndex,
   type SeatMapSections,
+  type SeatRebuildMarks,
   type SeatSales,
   type SeatSignals,
   type SeatStore,
@@ -63,6 +65,8 @@ export class AppModule implements NestModule {
       admission?: AdmissionOptions;
       /** 판매 확정(Hard Sale) 저장소(BUILD_ORDER PRF-140 ①). 운영은 purchase DB가 있을 때만 넘긴다 */
       seatSales?: SeatSales;
+      /** 판매 열기 내부 경로(BAT-616). 넘기면 InternalSaleOpenController를 연다 */
+      saleOpen?: { events: EventSaleStore; marks: SeatRebuildMarks };
       /**
        * 주문 생성(booking, BUILD_ORDER PRF-161). 넘기면 BookingModule.register(booking)을 함께 넣고, 없으면 주문 경로를 열지 않는다.
        * 운영은 purchase DB가 있을 때만 넘긴다(main.ts)
@@ -91,6 +95,7 @@ export class AppModule implements NestModule {
             sessions: o.sessions,
             ...(o.admission ? { admission: o.admission } : {}),
             ...(o.seatSales ? { seatSales: o.seatSales } : {}),
+            ...(o.saleOpen ? { saleOpen: o.saleOpen } : {}),
             ...(o.signals ? { signals: o.signals } : {}),
             ...(o.seatBehavior ? { seatBehavior: o.seatBehavior } : {}),
             ...(o.onHoldsExpired ? { onHoldsExpired: o.onHoldsExpired } : {}),
@@ -104,6 +109,7 @@ export class AppModule implements NestModule {
             sessions: o.sessions,
             ...(o.admission ? { admission: o.admission } : {}),
             ...(o.seatSales ? { seatSales: o.seatSales } : {}),
+            ...(o.saleOpen ? { saleOpen: o.saleOpen } : {}),
             ...(o.store ? { store: o.store } : {}),
             ...(o.seatMap ? { seatMap: o.seatMap } : {}),
             ...(o.attempts ? { attempts: o.attempts } : {}),

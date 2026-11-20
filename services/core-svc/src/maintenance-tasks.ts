@@ -10,11 +10,13 @@ import {
   DrizzleSaleStore,
   NoopSaleConfigFacts,
   PublishSaleConfigs,
+  SaleConfigMetrics,
   SaleEligibilityMetrics,
   saleConfigMaintenanceTasks,
   saleEligibilityMaintenanceTasks,
   UnwiredSaleEligibilityCopy,
   type SaleConfigStore,
+  type SaleOpen,
 } from './modules/catalog/index.js';
 import { DrizzleReviewStore, reviewMaintenanceTasks } from './modules/review/index.js';
 import { DrizzleShopOrderStore, type MerchPayments, MerchUnclaimed, MERCH_UNCLAIMED_TASK, PRODUCT_ATTRIBUTES_TASK, ProductAttributesCheck, type ShopSignals } from './modules/shop/index.js';
@@ -30,7 +32,7 @@ export function coreMaintenanceTasks(
   database: Database,
   clock: Clock,
   env: NodeJS.ProcessEnv = process.env,
-  o: { saleConfigStore?: SaleConfigStore; opsDatabase?: Database; shop?: { database: Database; payments: MerchPayments; signals: ShopSignals } } = {},
+  o: { saleConfigStore?: SaleConfigStore; opsDatabase?: Database; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics; shop?: { database: Database; payments: MerchPayments; signals: ShopSignals } } = {},
 ): { tasks: MaintenanceTask[]; copy: UnwiredSaleEligibilityCopy; metrics: SaleEligibilityMetrics } {
   const config = loadPlatformConfig(env);
   const logger = createPlatformLogger({ service: 'core-svc', env: config.env, version: config.version, clock, level: config.logLevel });
@@ -40,7 +42,7 @@ export function coreMaintenanceTasks(
   const tasks = saleEligibilityMaintenanceTasks(new DrizzleSaleMaintenanceStore(database), copy, clock, logger, metrics);
   if (o.opsDatabase) {
     const store = o.saleConfigStore ?? new DrizzleSaleConfigStore(o.opsDatabase);
-    const publish = new PublishSaleConfigs(new DrizzleSaleStore(o.opsDatabase), store, new NoopSaleConfigFacts(), clock);
+    const publish = new PublishSaleConfigs(new DrizzleSaleStore(o.opsDatabase), store, new NoopSaleConfigFacts(), clock, o.saleOpen, o.saleConfigMetrics);
     tasks.push(...saleConfigMaintenanceTasks(new DrizzleSaleConfigMaintenanceStore(o.opsDatabase), publish, logger));
   }
   tasks.push(...reviewMaintenanceTasks(new DrizzleReviewStore(database), clock));

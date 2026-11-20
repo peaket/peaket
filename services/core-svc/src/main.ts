@@ -8,6 +8,12 @@ import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
 import {
+  CompositeSaleConfigStore,
+  DrizzleSaleConfigStore,
+  HttpPurchaseSaleOpen,
+  QueueSaleConfigStore,
+  SaleConfigMetrics,
+  UnwiredSaleOpen,
   assertDatabaseRole,
   DrizzleCommissionRate,
   DrizzleSearchReadModel,
@@ -147,9 +153,20 @@ const opsApprovals = opsHttpUrl
   : undefined;
 if (!opsApprovals) console.warn(JSON.stringify({ level: 'warn', kind: 'promoter-contract-wiring', msg: 'PEAKET_OPS_HTTP_URL이 없어 계약 변경 요청이 503 dependency-unavailable이다' }));
 
+// 판매 승인 뒤 purchase-svc 내부 판매 열기(BAT-616, ADR-0327). 주소가 없으면 승인은 되고 열기·사본은 'unwired' 경고만 남긴다(대기열은 닫힌 채로 남는다)
+const purchaseHttpUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
+const saleOpen = purchaseHttpUrl
+  ? new HttpPurchaseSaleOpen(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseHttpUrl, timeoutCapMs: 3_000 }), process.env.PEAKET_INTERNAL_TOKEN)
+  : new UnwiredSaleOpen();
+if (!purchaseHttpUrl) console.warn(JSON.stringify({ level: 'warn', kind: 'sale-open-wiring', msg: 'PEAKET_PURCHASE_HTTP_URL이 없어 판매 승인 뒤 판매 열기·사본 쓰기가 unwired다(대기열은 닫힌 채로 남는다)' }));
+// 판매 승인 부수 효과 지표(sale_open_total·sale_config_publish_total). 서비스를 만든 뒤 등록부에 단다
+const saleConfigMetrics = new SaleConfigMetrics();
+
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
+// 판매 승인 사본을 core DB와 대기열 Redis에 함께 쓴다(BAT-616). 대기열 주소가 없으면 DB 사본만 쓴다
+const saleConfigStore = queueRedis ? new CompositeSaleConfigStore(new DrizzleSaleConfigStore(opsDatabase), new QueueSaleConfigStore(queueRedis)) : undefined;
 // Kafka 소비자(탈퇴 파기·다시 정리 예약·보류 표) 전용 core_app 풀. 사건이 몰려도 팬·관제 HTTP 경로의 연결을 빼앗지 않게 따로 작게 둔다(최대 2개 [가정], docs/streaming.md §2.6, 리뷰 K2)
 const consumerDatabase = createDatabase({ url, applicationName: `${SERVICE}-consumer`, max: 2 });
 // 검색 전용 연결 묶음(ADR-0271 결정 5·18, docs/features/search.md §7.2: 연결 10개·대기 100ms [가정]). 운영은 읽기 전용 복제본 주소(PEAKET_SEARCH_DATABASE_URL).
@@ -190,6 +207,9 @@ const service = await createService({
       logger: shopLogger,
     },
     ...(opsApprovals ? { opsApprovals } : {}),
+    ...(saleConfigStore ? { saleConfigStore } : {}),
+    saleOpen,
+    saleConfigMetrics,
     ...(process.env.PEAKET_IDENTITY_JWKS_URL ? { exportJwks: { url: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' } } : {}),
     ...(process.env.PEAKET_PURCHASE_HTTP_URL
       ? { purchaseHttp: { url: process.env.PEAKET_PURCHASE_HTTP_URL, ...(process.env.PEAKET_INTERNAL_TOKEN ? { token: process.env.PEAKET_INTERNAL_TOKEN } : {}) } }
@@ -200,6 +220,7 @@ const service = await createService({
 });
 serviceLogger = service.logger;
 shopSignals.register(service.metrics.registry);
+saleConfigMetrics.register(service.metrics.registry);
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
 // 검색 전용 연결 묶음의 대기 수(게이지 search_pool_waiting, SR-T13 ①). 기본 core_app 묶음이 아니라 검색 묶음을 넘긴다
