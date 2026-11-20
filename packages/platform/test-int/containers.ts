@@ -180,6 +180,10 @@ export async function startKafka(o: { oauth?: boolean } = {}): Promise<KafkaCont
 
 export interface ValkeyContainer {
   url: string;
+  /** 프로세스를 멈춘다. 컨테이너와 연결은 남고 명령에만 답하지 않는다(장애 중 판정 시험, BAT-173) */
+  pause(): void;
+  /** 멈춘 프로세스를 다시 움직인다 */
+  resume(): void;
   stop(): void;
 }
 
@@ -189,6 +193,8 @@ export async function startValkey(): Promise<ValkeyContainer> {
   const port = Number(mapped.slice(mapped.lastIndexOf(':') + 1));
   return {
     url: `redis://127.0.0.1:${port}`,
+    pause: () => void docker(['pause', id]),
+    resume: () => void docker(['unpause', id]),
     stop: () => {
       try {
         docker(['rm', '-f', '-v', id]);
