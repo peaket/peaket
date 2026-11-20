@@ -128,6 +128,8 @@ spec:
         checkTyp: false
         tokenCookie: __Secure-peaket_partner_at
         tokenScheme: Bearer
+        refreshCookie: __Secure-peaket_partner_rt
+        refreshPath: /v1/partner/auth/access-tokens
 ---
 # gw-partner: 토큰 확인이 대상(aud)으로 거절한 응답(Envoy는 403과 WWW-Authenticate error="invalid_token")을 401로 바꾼다
 # (docs/features/identity.md §3 발급자와 검증 규칙, I-T36: 다른 대상의 토큰은 역할과 상관없이 401. 2026-11-16 kind 확인). 출처 확인·인가의 403은 그 머리가 없어 그대로다.

@@ -68,6 +68,20 @@ function answer(req, res, chunks) {
       const i = h.indexOf(':');
       if (i > 0) out[h.slice(0, i).trim().toLowerCase()] = h.slice(i + 1).trim();
     }
+    // Set-Cookie 전달 시험(게이트웨이가 지우거나 다시 쓰지 않는지, I-T52 ①). 값이 'two'면 관리 쿠키 둘을, JSON이면 그 값을 쓴다
+    const cookieHeader = headers['x-e2e-set-cookie'];
+    if (cookieHeader !== undefined) {
+      if (cookieHeader === '' || cookieHeader === 'two') {
+        out['set-cookie'] = ['__Host-peaket_ops_at=e2e-access; Path=/; HttpOnly; Secure; SameSite=Lax', '__Host-peaket_ops_rt=e2e-refresh; Path=/v1/ops/auth/access-tokens; HttpOnly; Secure; SameSite=Lax'];
+      } else {
+        try {
+          const parsed = JSON.parse(cookieHeader);
+          out['set-cookie'] = Array.isArray(parsed) ? parsed : [String(parsed)];
+        } catch {
+          out['set-cookie'] = [cookieHeader];
+        }
+      }
+    }
     const b64 = headers['x-e2e-body-b64'];
     const body = b64 !== undefined ? Buffer.from(b64, 'base64') : headers['x-e2e-body'] ?? JSON.stringify({ method: req.method, path: req.url, headers, bodyBytes: Buffer.concat(chunks).length });
     res.writeHead(status, out);

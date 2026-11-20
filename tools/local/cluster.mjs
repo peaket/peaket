@@ -957,6 +957,8 @@ async function gateways() {
     await kubectl(['create', '-f', '-'], { input: JSON.stringify(o) });
   }
   await kubectl(['apply', '-f', '-'], { input: JSON.stringify(admissionJwksConfigMap(admissionJwks(admission))) });
+  // gw-ops 허용 IP 시험 값(배포/envs/local/gateways/peaket-ops-allow.yaml, ADR-0321 결정 3). 프록시를 다시 띄울 때 환경 값으로 읽는다
+  await kubectl(['apply', '-f', join(REPO, 'deploy', 'envs', 'local', 'gateways', 'peaket-ops-allow.yaml')]);
   step(`대역 백엔드 ${GATEWAY_ECHO.name}(받은 요청을 돌려주고 시험 공개키 묶음을 낸다)`);
   const script = readFileSync(join(REPO, 'tools', 'local', 'gateway-echo.mjs'), 'utf8');
   const jwks = Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.jwks]));

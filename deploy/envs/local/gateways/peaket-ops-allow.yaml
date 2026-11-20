@@ -1,0 +1,13 @@
+# local·ci kind의 gw-ops 허용 IP(시험 값). 정본: docs/infra.md §9 '관제 입구 경로', ADR-0321 결정 3.
+# 운영 값(사내망·VPN 출구)은 이 파일에 두지 않는다. 소유자가 deploy/envs/<환경>/gateways/peaket-ops-allow.yaml에 채운다.
+# EnvoyProxy peaket-proxy가 이 ConfigMap의 cidrs를 PEAKET_OPS_ALLOWED_IPS로 받는다(optional: true).
+# 값이 없거나 CIDR이 하나라도 틀리면 공통 Lua가 모든 관제 요청을 거절한다(닫힌 쪽).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: peaket-ops-allow
+  namespace: envoy-gateway-system
+  labels:
+    app.kubernetes.io/part-of: peaket-local
+data:
+  cidrs: 127.0.0.0/8,203.0.113.0/24
