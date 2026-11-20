@@ -278,7 +278,9 @@ export const ASVS_DEFAULT_AREA = {
   payment: ['apps/web', 'services/payment-svc', 'services/pg-simulator', 'services/purchase-svc', 'services/ticket-svc'],
   'queue-admission': ['apps/web', 'packages/shuffle', 'services/admission-ctrl', 'services/queue-svc', 'tools/edge'],
   'seat-hold': ['apps/partner', 'apps/web', 'packages/seatmap', 'services/purchase-svc'],
-  settlement: [],
+  // 계약 조건·수수료율(BAT-615)부터 정산 기능 코드가 core-svc·ops-svc·payment-svc에 흩어져 있다.
+  // 이 세 곳의 ID 태그를 정산 ASVS 행의 코드 영역으로 인정한다(2026-11-20 BAT-615 시험 담당).
+  settlement: ['services/core-svc', 'services/ops-svc', 'services/payment-svc'],
   support: [],
   // 2026-11-20 BAT-425: 양도·환불 기능의 코드가 core-svc shop·purchase-svc refund·ticket-svc·payment-svc·ops-svc에 있다.
   // 빈 목록이면 구현 위치 칸이 경로를 가리켜도 코드 영역이 비어 ASVS 태그를 세지 못한다(위 codeArea의 빈 목록 규칙).
