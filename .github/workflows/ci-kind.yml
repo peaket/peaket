@@ -95,6 +95,24 @@ jobs:
       # (게이트웨이 라벨을 단 시험 파드가 로컬 전용 NodePort Service의 끝점이 될 수 있어서다. 실제 프록시 파드의 서비스 계정도 본다)
       - run: node tools/local/cluster.mjs mesh-netpol
       - run: node --test --test-timeout=300000 tools/local/e2e/mesh-netpol.e2e.mjs
+      # Kyverno CEL 입장 정책(docs/devops.md §4.3, D-T11·D-T18 ②·D-T33, BUILD_ORDER BAS-150·BAT-085, ADR-0318): 차트 3.10.0을
+      # 관제 풀 값(복제 3·PDB 2·이미지 다이제스트)으로 설치하고 데모 정책(감사)을 적용한다. 입장 시험 파일은 시험 담당이 더하면 돈다.
+      # 이 워크플로를 먼저 develop에 넣는 분리 커밋에서는 정책·도구가 아직 없으므로 건너뛴다(branch-policy, ADR-0169)
+      - run: |
+          set -euo pipefail
+          if [ -f deploy/policies/kyverno/policy-values.yaml ] && [ -f tools/local/cluster.mjs ]; then
+            node tools/local/cluster.mjs kyverno --env demo
+          else
+            echo "Kyverno 정책·도구가 아직 없다(워크플로 분리 커밋). 설치·정책 적용을 건너뛴다"
+          fi
+      - name: Kyverno 입장 시험
+        run: |
+          set -euo pipefail
+          if [ -f tools/local/e2e/kyverno.e2e.mjs ]; then
+            node --test --test-timeout=900000 tools/local/e2e/kyverno.e2e.mjs
+          else
+            echo "Kyverno 입장 e2e 시험 파일이 아직 없다(시험 담당 몫). 설치·정책 적용까지만 확인했다"
+          fi
       - if: ${{ failure() }}
         run: |
           node tools/local/cluster.mjs status || true
@@ -115,6 +133,10 @@ jobs:
           for ns in core purchase queue ticket trust web ops-breakglass observability envoy-gateway-system; do
             "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n "$ns" get networkpolicies,pods -o wide || true
           done
+          # Kyverno 입장 정책(BAT-085): 정책 상태·입장 로그·이벤트를 남긴다
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket get imagevalidatingpolicies,validatingpolicies -o wide || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n kyverno logs deploy/kyverno-admission-controller --tail=300 || true
+          "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket get events -A --field-selector reason=PolicyViolation || true
           # 진단 수집 e2e(BAT-080 G1): 실패한 시험은 릴리스·파드를 지우지 않는다. 파드가 남아 있으면 전·현재 컨테이너 로그, 이벤트, 설명,
           # /diag 목록(표시 파일·남은 보고서·스냅샷)을 남긴다. 첫 실행의 원인(예: moto 업로드 실패)을 이 로그로 가른다
           "$k" --kubeconfig .cache/peaket-tools/kubeconfig-peaket -n diagnose-e2e get pods,events -o wide || true

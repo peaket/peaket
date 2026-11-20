@@ -1,0 +1,60 @@
+# 배포 상태(GitOps) 정적 검사(docs/devops.md §3.2 '배포 상태', §4.3, D-T28·D-T32 ③·D-T33, ADR-0319).
+# ci.yml이 바뀐 범위에 gitops가 있을 때 부른다. 비밀 값이 필요 없어 포크 PR에서도 돈다.
+# 검사는 tools/ci/gitops-check.mjs가 한다: 최종 오버레이 렌더(Helm), 운영 메시 필수(D-T28), 환경별 허용 레지스트리(D-T33),
+# 배포 값의 다이제스트(태그 금지), 승격 값의 cosign 서명·SLSA 출처 증명(D-T32 ③).
+name: gitops-check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # Helm은 tools/local/tools.mjs가 판·SHA-256으로 고정해 받는다(새 액션을 들이지 않는다, ADR-0263)
+      - name: Helm 받기
+        run: |
+          set -euo pipefail
+          h=$(node tools/local/tools.mjs helm | cut -d' ' -f2)
+          echo "$(dirname "$h")" >> "$GITHUB_PATH"
+          "$h" version --short
+      # 승격 값이 실제로 생기면 cosign으로 서명·출처 증명을 본다. build-image.yml 게시 잡과 같은 판·체크섬 고정 방식이다
+      - name: cosign 받기
+        env:
+          COSIGN_VERSION: v2.4.1
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION"
+          curl -fsSL -o "$RUNNER_TEMP/cosign-linux-amd64" "$base/cosign-linux-amd64"
+          curl -fsSL -o "$RUNNER_TEMP/cosign_checksums.txt" "$base/cosign_checksums.txt"
+          (cd "$RUNNER_TEMP" && grep " cosign-linux-amd64$" cosign_checksums.txt | sha256sum -c -)
+          mv "$RUNNER_TEMP/cosign-linux-amd64" "$RUNNER_TEMP/cosign"
+          chmod +x "$RUNNER_TEMP/cosign"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      # 검사 스크립트가 YAML 해석기(뿌리 개발 의존성 yaml)를 쓴다. 잠금 파일대로만 설치한다(§4.4)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      - name: 오버레이·정책 검사
+        run: node tools/ci/gitops-check.mjs --check
+      # 시험 파일은 시험 담당이 더한다. 있으면 돌리고, 없으면 생성기 대조만 한다
+      - name: 검사 도구 시험
+        run: |
+          set -euo pipefail
+          found=0
+          for f in tools/ci/gitops-check.test.mjs tools/ci/supply-chain-verify.test.mjs tools/ci/kyverno-policies.test.mjs; do
+            if [ -f "$f" ]; then node --test "$f"; found=1; fi
+          done
+          [ "$found" -eq 1 ] || echo "검사 도구 시험 파일이 아직 없다(시험 담당 몫)"

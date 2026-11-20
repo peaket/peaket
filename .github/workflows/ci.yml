@@ -35,6 +35,7 @@ jobs:
       image: ${{ steps.scope.outputs.image }}
       loadtest: ${{ steps.scope.outputs.loadtest }}
       web: ${{ steps.scope.outputs.web }}
+      gitops: ${{ steps.scope.outputs.gitops }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,6 +67,13 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.loadtest == 'true') }}
     uses: ./.github/workflows/loadtest-check.yml
+
+  # 배포 상태(GitOps) 정적 검사(docs/devops.md §3.2, D-T28·D-T32 ③·D-T33, ADR-0319): deploy/ 변경이면 최종 오버레이를
+  # Helm으로 렌더해 메시 필수·허용 레지스트리·다이제스트·서명/출처 증명을 본다. kubeconform·ArgoCD 차이는 뒤 묶음이다
+  gitops-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.gitops == 'true') }}
+    uses: ./.github/workflows/gitops-check.yml
 
   contract-check:
     needs: changes
@@ -175,7 +183,7 @@ jobs:
     uses: ./.github/workflows/iac-check.yml
 
   ci-summary:
-    needs: [changes, docs-check, tools-check, loadtest-check, contract-check, node, iac-check, kind, spec-check, image, web, security-scan, lint-guard]
+    needs: [changes, docs-check, tools-check, loadtest-check, gitops-check, contract-check, node, iac-check, kind, spec-check, image, web, security-scan, lint-guard]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
