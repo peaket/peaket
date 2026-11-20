@@ -293,6 +293,24 @@ describe('J-T29 ⑥ core 적용 실패와 재시도·감사 원자성', () => {
     expect(audit.entries.filter((e) => e.recordId === approvalId).map((e) => e.recordType)).toEqual(['CONTRACT_CHANGE_REQUESTED', 'CONTRACT_CHANGE_EXECUTING']);
   });
 
+  test('[ASVS v5.0.0-2.3.3] [ASVS v5.0.0-16.3.3] J-T29 ⑥_RV-06_감사_실패로_EXECUTING에_남은_승인도_같은_승인_ID로_다시_끝낸다', async () => {
+    const { approvalId } = await createApproval();
+    audit.failOn.add('CONTRACT_CHANGE_APPROVED');
+    expect((await approve(approvalId, headers('commander', 'approval-token'))).statusCode).toBe(500);
+    expect(store.rows.get(approvalId)).toMatchObject({ status: 'EXECUTING', version: 2 });
+    expect(store.votes).toHaveLength(0);
+
+    // core는 이미 적용했다. 감사 저장소가 돌아오면 같은 승인 ID로 다시 승인해 DONE까지 간다.
+    audit.failOn.clear();
+    const retried = await approve(approvalId, headers('commander', 'approval-token'));
+    expect(retried.statusCode, retried.payload).toBe(200);
+    expect(json(retried)).toMatchObject({ status: 'DONE', canApprove: false });
+    expect(store.rows.get(approvalId)).toMatchObject({ status: 'DONE' });
+    expect(store.votes).toHaveLength(1);
+    expect(core.applied.size).toBe(1);
+    expect(audit.entries.filter((e) => e.recordId === approvalId && e.recordType === 'CONTRACT_CHANGE_APPROVED')).toHaveLength(1);
+  });
+
   test('J-T29 ⑥_이미_끝난_승인은_다시_승인할_수_없다', async () => {
     const { approvalId } = await createApproval();
     expect((await approve(approvalId, headers('commander', 'approval-token'))).statusCode).toBe(200);

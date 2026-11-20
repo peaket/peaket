@@ -237,6 +237,49 @@ describe('J-T29 ② 계약 변경 요청과 core 적용', () => {
   });
 });
 
+describe('J-T29 ② RV-03 계약 변경 요청의 Idempotency-Key', () => {
+  test('J-T29 ②_RV-03_키가_없거나_UUID가_아니면_400이고_예약·승인_업무를_만들지_않는다', async () => {
+    const { promoterId } = await created();
+    const payload = JSON.stringify({ commissionRateBp: 900, reason: '키 없음' });
+    for (const h of [
+      { ...identity.ops('operator'), 'content-type': 'application/json' },
+      { ...identity.ops('operator'), 'content-type': 'application/json', 'idempotency-key': 'not-a-uuid' },
+    ]) {
+      const r = await svc.http.inject({ method: 'POST', url: `/v1/ops/promoters/${promoterId}/contract-term-changes`, headers: h, payload });
+      expect(r.statusCode, r.payload).toBe(400);
+      expect(json(r).type).toContain('idempotency-key-invalid');
+    }
+    expect(ops.requests).toHaveLength(0);
+    expect(json(await detail(promoterId))).toMatchObject({ pendingContractApprovalId: null });
+    expect((json(await terms(promoterId)).items as unknown[]).length).toBe(1);
+  });
+
+  test('J-T29 ②_RV-03_같은_키_같은_본문_재요청은_같은_202와_같은_답이고_새_변경_행이_없다', async () => {
+    const { promoterId } = await created();
+    const key = randomUUID();
+    const body = { commissionRateBp: 900, reason: '같은 키 재시도' };
+    const first = await change(promoterId, body, 'operator', key);
+    const second = await change(promoterId, body, 'operator', key);
+    expect(first.statusCode, first.payload).toBe(202);
+    expect(second.statusCode, second.payload).toBe(202);
+    expect(json(second).approvalId).toBe(json(first).approvalId);
+    expect(json(second)).toEqual(json(first));
+    expect(ops.requests).toHaveLength(1);
+    expect(json(await detail(promoterId))).toMatchObject({ pendingContractApprovalId: json(first).approvalId });
+    expect((json(await terms(promoterId)).items as unknown[]).length).toBe(1);
+  });
+
+  test('J-T29 ②_RV-03_같은_키에_다른_본문은_422이고_새_업무를_만들지_않는다', async () => {
+    const { promoterId } = await created();
+    const key = randomUUID();
+    expect((await change(promoterId, { commissionRateBp: 900, reason: '첫 본문' }, 'operator', key)).statusCode).toBe(202);
+    const different = await change(promoterId, { commissionRateBp: 925, reason: '다른 본문' }, 'operator', key);
+    expect(different.statusCode, different.payload).toBe(422);
+    expect(json(different).type).toContain('idempotency-key-reused');
+    expect(ops.requests).toHaveLength(1);
+  });
+});
+
 describe('J-T29 ③ 열린 변경 하나와 취소', () => {
   test('[ASVS v5.0.0-2.3.4] J-T29 ④_같은_파트너의_두_번째_변경_요청은_409다', async () => {
     const { promoterId } = await created();

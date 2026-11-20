@@ -258,6 +258,42 @@ describe('J-T30 ①~③ 판매 승인 트랜잭션의 수수료율 고정', () =
       expect(config?.commissionRateBp).toBeUndefined();
     });
   });
+
+  test('J-T30 ⑤_RV-01_계약_기간이_없는_파트너_행은_판매_승인에_1000bp를_고정하지_않는다', async () => {
+    const w = saleWorld();
+    // 계약 기간(promoter_contract)은 없고 파트너 행(promoter.commission_rate_bp=1000)만 있다.
+    // 0033의 기본값은 기존 행 백필에만 쓰고, 계약이 없는 판매 승인의 수수료율로 쓰지 않는다(ADR-0320 결정 4, 계획 B15·M-32).
+    w.repo.promoters.set('p-row-only', {
+      promoterId: 'p-row-only',
+      legalName: '계약없는파트너',
+      representative: null,
+      address: null,
+      phone: null,
+      email: null,
+      businessRegNo: null,
+      mailOrderReportNo: null,
+      exemptionBasis: null,
+      verifiedAt: null,
+      commissionRateBp: 1000,
+      pendingContractApprovalId: null,
+    });
+    w.repo.sellerNames.set('p-row-only', '계약없는파트너');
+    addProduction(w.repo, 'prod-1', 'p-row-only', ['ev-1']);
+
+    const sales = new MemorySaleStore(w.repo);
+    await sales.withLockedProduction('prod-1', 'p-row-only', async (tx) => {
+      expect(await tx.currentCommissionRateBp('p-row-only')).toBeUndefined();
+    });
+
+    // 승인이 진행되면 회차·설정 사본에 1000bp를 쓰지 않는다. 거절(409/422)이면 아예 쓰지 않는다.
+    const result = await w.approve.run({ productionId: 'prod-1', scales: [{ eventId: 'ev-1', scale: 'SMALL' }], placeId: randomUUID() }).then(
+      (r) => ({ ok: true as const, r }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    if (!result.ok) expect([409, 422]).toContain((result.e as ProblemError).status);
+    expect(w.repo.eventCommissionRates.get('ev-1')).toBeUndefined();
+    expect(w.configs.configs.get('ev-1')?.commissionRateBp).toBeUndefined();
+  });
 });
 
 describe('J-T30 ① 대기열 사본 q:{event:E}:cfg의 config JSON', () => {

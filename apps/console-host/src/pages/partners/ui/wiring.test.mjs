@@ -73,6 +73,16 @@ test('SCR065_오류_문구는_409·422·503을_구분하고_서버_원문을_그
   assert.match(model, /10,000bp = 100%|10_000bp = 100%|875bp → 8\.75%/);
 });
 
+test('SCR065_RV-03_계약_변경_요청은_멱등_키를_보낸다', () => {
+  const src = read('./ConnectedPage.tsx');
+  assert.match(src, /crypto\.randomUUID\(\)/, '멱등 키를 만들지 않는다');
+  const at = src.indexOf('createOpsPromoterContractTermChange(');
+  assert.ok(at >= 0, 'createOpsPromoterContractTermChange 호출이 없다');
+  const call = src.slice(at, at + 900);
+  assert.match(call, /headers\s*:/, '생성 호출에 머리(options)를 넘기지 않는다');
+  assert.match(call, /['"]idempotency-key['"]\s*:/i, '생성 호출이 Idempotency-Key를 싣지 않는다');
+});
+
 test('SCR065_실제_경로는_연결_화면을_쓰고_디자인_보드는_미리보기에만_남긴다', () => {
   const src = read('./Page.tsx');
   assert.match(src, /__PREVIEW__ && sp\.get\('state'\) \? <BoardPage \/> : <ConnectedPage \/>/);

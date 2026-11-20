@@ -15,7 +15,7 @@ import pgClient from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
-import { DrizzleCommissionRate, MemoryOpsApprovals } from '../src/modules/catalog/index.js';
+import { DrizzleCommissionRate, DrizzleSaleConfigMaintenanceStore, DrizzleSaleConfigStore, DrizzleSaleStore, MemoryOpsApprovals, NoopSaleConfigFacts, PublishSaleConfigs, saleConfigMaintenanceTasks } from '../src/modules/catalog/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { loginFor } from './roles.js';
 import { FakeIdentity, quiet, testMedia } from '../test/support.js';
@@ -33,12 +33,12 @@ let opsDb: Database;
 let svc: Awaited<ReturnType<typeof createService>>;
 let migDir: string | undefined;
 
-/** 0033만 빼고 마이그레이션을 적용해 '기존 파트너'를 심을 수 있는 DB를 만든다 */
+/** 0033과 그 뒤 마이그레이션을 빼고 적용해 '기존 파트너'를 심을 수 있는 DB를 만든다 */
 async function migrateBeforePromoterContract(url: string): Promise<string> {
   const source = fileURLToPath(new URL('../migrations', import.meta.url));
   const dir = await mkdtemp(join(tmpdir(), 'peaket-core-0033-'));
   const journal = JSON.parse(await readFile(join(source, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] };
-  const kept = journal.entries.filter((e) => e.tag !== '0033_promoter_contract');
+  const kept = journal.entries.filter((e) => e.tag < '0033_promoter_contract');
   await mkdir(join(dir, 'meta'), { recursive: true });
   for (const e of kept) await copyFile(join(source, `${e.tag}.sql`), join(dir, `${e.tag}.sql`));
   await writeFile(join(dir, 'meta', '_journal.json'), JSON.stringify({ ...journal, entries: kept }));
@@ -54,6 +54,10 @@ async function migrateBeforePromoterContract(url: string): Promise<string> {
 
 const OLD_A = randomUUID();
 const OLD_B = randomUUID();
+/** 0033 이전에 이미 판매 승인된 회차(백필 시험용) */
+const OLD_PLACE = randomUUID();
+const OLD_PRODUCTION = randomUUID();
+const OLD_EVENT = randomUUID();
 const PLACE = randomUUID();
 const general = { version: 1, name: '일반', rounds: 'ALL', rule: { then: { limitPerPerson: 4 } } };
 
@@ -65,6 +69,24 @@ beforeAll(async () => {
   await seed.connect();
   try {
     await seed.query('insert into promoter (id, legal_name) values ($1, $2), ($3, $4)', [OLD_A, '(주)먼저온파트너', OLD_B, '(주)옛계약']);
+    // 0033 이전에 이미 판매 승인된 공연·회차와 그때의 설정 사본(수수료율 없음)을 심는다.
+    // 0033이 이 회차들의 event.commission_rate_bp를 계약(백필 1000bp)으로 채우는지 본다(RV-02).
+    await seed.query('insert into place (id, name, address, region, created_by) values ($1, $2, $3, $4, $5)', [OLD_PLACE, '옛공연장', '서울 옛길 1', '서울', randomUUID()]);
+    await seed.query(
+      `insert into production (id, promoter_id, place_id, title, genre, sale_review, sale_approved_at, sale_policy, sale_policy_version)
+       values ($1, $2, $3, $4, '콘서트', 'APPROVED', $5, $6::jsonb, 1)`,
+      [OLD_PRODUCTION, OLD_A, OLD_PLACE, '0033 이전 승인 공연', new Date(NOW - 86_400_000), JSON.stringify([general])],
+    );
+    await seed.query(
+      `insert into event (id, production_id, promoter_id, open_at, starts_at, ends_at, version)
+       values ($1, $2, $3, $4, $5, $6, 1)`,
+      [OLD_EVENT, OLD_PRODUCTION, OLD_A, new Date(NOW - 43_200_000), new Date(NOW + 9 * 86_400_000), new Date(NOW + 9 * 86_400_000 + 9_000_000)],
+    );
+    await seed.query(
+      `insert into event_sale_config (event_id, production_id, promoter_id, rev, payload, updated_at)
+       values ($1, $2, $3, 1, $4::jsonb, $5)`,
+      [OLD_EVENT, OLD_PRODUCTION, OLD_A, JSON.stringify({ eventId: OLD_EVENT, productionId: OLD_PRODUCTION, promoterId: OLD_A, rev: 1 }), new Date(NOW - 86_400_000)],
+    );
   } finally {
     await seed.end();
   }
@@ -224,6 +246,21 @@ describe('J-T30 ⑤ 마이그레이션 백필과 기간 제약(실제 PostgreSQL
       expect((await promoterRow(promoterId)).commission_rate_bp).toBe(1000);
     }
     expect(await overlapCount()).toBe(0);
+  });
+
+  test('J-T30 ⑤_RV-02_0033_이전_승인_회차는_계약_수수료율로_백필되고_정산_503이_풀린다', async () => {
+    // 0033 이전에 승인된 회차는 event.commission_rate_bp가 없고 설정 사본에도 수수료율이 없어 payment-svc 정산이 503으로 닫혔다.
+    // 0033이 그 파트너의 지금 계약(기존 행 백필 1000bp)으로 한 번 채우고, 정비 일이 사본을 다시 쓰면 내부 경로가 200이 된다.
+    expect((await eventRow(OLD_EVENT))?.commission_rate_bp).toBe(1000);
+
+    const publish = new PublishSaleConfigs(new DrizzleSaleStore(opsDb), new DrizzleSaleConfigStore(opsDb), new NoopSaleConfigFacts(), clock);
+    const [task] = saleConfigMaintenanceTasks(new DrizzleSaleConfigMaintenanceStore(opsDb), publish);
+    await expect(task!.run()).resolves.toMatchObject({ failed: 0 });
+
+    expect((await configRow(OLD_EVENT))?.payload).toMatchObject({ commissionRateBp: 1000 });
+    const rate = await internalRate(OLD_EVENT);
+    expect(rate.statusCode).toBe(200);
+    expect(json(rate)).toEqual({ commissionRateBp: 1000 });
   });
 
   test('J-T30 ⑤_btree_gist와_WITHOUT_OVERLAPS가_있고_겹치는_기간은_거절한다', async () => {
@@ -458,5 +495,20 @@ describe('J-T30 ①~③ 판매 승인 트랜잭션의 수수료율 고정(실제
     const r = await internalRate(eventId);
     expect(r.statusCode).toBe(404);
     expect(json(r).type).toContain('not-found');
+  });
+
+  test('J-T30 ⑤_RV-01_계약_기간이_없는_파트너_행의_판매_승인은_1000bp를_고정하지_않는다', async () => {
+    // 파트너 행은 있고 0033 기본값(1000bp)도 있지만 promoter_contract 기간이 없다(직접 넣은 데이터·옛 데이터·계약 삭제).
+    // 그 값을 계약으로 대신 쓰면 임의 10%를 만드는 것이라, 승인은 수수료율을 비우거나(회차 NULL) 409/422로 거절해야 한다(ADR-0320 결정 4).
+    const promoterId = randomUUID();
+    await admin.pool.query('insert into promoter (id, legal_name, commission_rate_bp) values ($1, $2, 1000)', [promoterId, '계약기간없는파트너']);
+    const eventId = randomUUID();
+    const productionId = await makeSubmitted(promoterId, [eventId]);
+
+    const approved = await approveSale(productionId, [eventId]);
+    if (approved.statusCode !== 200) expect([409, 422]).toContain(approved.statusCode);
+    expect((await eventRow(eventId))?.commission_rate_bp).toBeNull();
+    expect((await configRow(eventId))?.payload?.commissionRateBp).toBeUndefined();
+    expect((await internalRate(eventId)).statusCode).toBe(404);
   });
 });

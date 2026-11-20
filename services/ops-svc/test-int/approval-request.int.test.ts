@@ -236,6 +236,26 @@ describe('J-T29 ⑨ 승인 상태·투표·감사의 한 트랜잭션(실제 Pos
     expect(await count("select count(*) as n from audit_chain where record_type = 'CONTRACT_CHANGE_APPROVED' and record_id = $1", [approvalId])).toBe(1);
   });
 
+  test('[ASVS v5.0.0-2.3.3] J-T29 ⑥_RV-06_core_적용_뒤_감사가_실패해_EXECUTING에_남아도_같은_승인_ID로_다시_끝낸다', async () => {
+    const { approvalId } = await newContract();
+    core.applied.clear();
+    await failAudit('CONTRACT_CHANGE_APPROVED');
+    const failed = await approve(approvalId);
+    expect(failed.statusCode).toBe(500);
+    expect((await admin.query('select status from approval_request where id = $1', [approvalId])).rows[0]).toMatchObject({ status: 'EXECUTING' });
+    expect(core.applied.size).toBe(1);
+    expect(await count('select count(*) as n from approval_vote where request_id = $1', [approvalId])).toBe(0);
+
+    // 감사 저장소가 돌아오면 같은 승인 ID로 다시 승인해 DONE까지 간다(core 적용은 멱등).
+    await clearAuditFailure();
+    const retried = await approve(approvalId);
+    expect(retried.statusCode, retried.payload).toBe(200);
+    expect(json(retried)).toMatchObject({ status: 'DONE' });
+    expect((await admin.query('select status from approval_request where id = $1', [approvalId])).rows[0]).toMatchObject({ status: 'DONE' });
+    expect(await count('select count(*) as n from approval_vote where request_id = $1', [approvalId])).toBe(1);
+    expect(await count("select count(*) as n from audit_chain where record_type = 'CONTRACT_CHANGE_APPROVED' and record_id = $1", [approvalId])).toBe(1);
+  });
+
   test('J-T29 ⑨_같은_승인_ID를_다시_보내도_한_행이고_요청_감사도_한_번이다', async () => {
     const { body } = contractBody();
     const approvalId = randomUUID();
