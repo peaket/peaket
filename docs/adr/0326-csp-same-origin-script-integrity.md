@@ -23,7 +23,7 @@
    - CSP 시험 `tools/web-checks/csp/web.spec.mjs`의 `[ASVS v5.0.0-3.6.1]`이 세 화면을 세 엔진에서 연다. 응답 HTML과 `networkidle` 뒤 DOM의 같은 출처 `script[src]`를 나눠, `/_next/` 밖 태그는 `integrity` 값 형식과 받은 바이트 SHA-256을 맞춘다.
    - `/_next/` 태그는 `integrity`가 있으면 값이 SRI 표·바이트와 같아야 하고, 없어도 경로가 `/_next/static/…js`이며 SRI 표 키가 있고 받은 바이트 SHA-256이 표와 같아야 한다. 실행 중 `import()`·화면 데이터가 넣은 태그도 같은 규칙이다.
    - 같은 출처 태그가 0개이거나 본 `/_next/` 표 키가 0개이면 '검사할 것이 없다'가 아니라 실패다.
-   - 바이트 대조는 `/_next/` 고유 URL마다 한 번 한다(26개 안쪽). 60초를 넘으면 SRI 표 키 대조만 남기고 그 한계를 기록한다. 그때는 바이트 변조(계획 V172-06)가 잡히지 않는다.
+   - 바이트 대조는 `/_next/` 고유 URL마다 한 번 한다(2026-11-20 실측: 공연 상세 30·추가 검증 20·결제 18, 엔진에 따라 15~30개). 60초를 넘으면 SRI 표 키 대조만 남기고 그 한계를 기록한다. 그때는 바이트 변조(계획 V172-06)가 잡히지 않는다.
 4. **CSP 정책·nonce·응답 때 인라인 해시는 바꾸지 않는다.** 외부 스크립트 SRI는 CSP의 허용 근거(nonce·응답 때 해시·`'self'`)와 별개다. `packages/config/headers/security-headers.mjs`·`apps/web/proxy.ts`·`apps/web/server/csp-hash-server.mjs`·`next.config.ts`의 `experimental.sri`를 그대로 둔다.
 5. **모든 HTML 태그의 브라우저 SRI는 별도 묶음이다.** 요청 화면의 HTML을 앞 서버가 모아 `integrity`를 채우는 일은 스트리밍·TTFB·2MiB 상한·HTML 파싱 위험이 있어 성능 측정을 먼저 한다. Next.js 실행 코드를 고쳐 클라이언트 참조·실행 중 덩어리에 `integrity`를 다는 일도 Next.js 판 올림마다 깨질 수 있어 이 묶음에서 하지 않는다.
 6. **브라우저 `integrity`를 붙일 수 있는 새 같은 출처 스크립트가 생기면 같은 방법을 쓴다.** 빌드 보조 스크립트가 해시를 만들고, 생성 상수를 문서가 가져오며, `--check`와 시험이 public 파일 해시와 맞춘다.
