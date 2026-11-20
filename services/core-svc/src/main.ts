@@ -3,17 +3,19 @@
 // 듣기 시작한 뒤 Kafka 소비자(탈퇴 사건의 후기 파기와 16분 뒤 다시 정리, W7-audit COV2-06·ADR-0278, docs/streaming.md §2.6 'core-svc 소비자')를 켠다. 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면
 // local·ci만 경고 한 줄로 소비자 없이 뜨고 그 밖의 환경은 시작하지 않는다. 소비자를 켜지 못하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1을 둔다.
 import { fileURLToPath } from 'node:url';
-import { assertInternalGrpcToken, createDatabase, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
 import {
   assertDatabaseRole,
+  DrizzleCommissionRate,
   DrizzleSearchReadModel,
   GrpcAdminAuthz,
   GrpcImageProcessing,
   GrpcMemberCodeDirectory,
   GrpcSeatmapParser,
+  HttpOpsApprovals,
   LocalFolderImageStore,
   LocalFolderPublicFileStore,
   QueueSaleEligibilityCopy,
@@ -138,6 +140,13 @@ const shopReauth =
     onResult: (r) => (r.outcome === 'unavailable' ? shopLogger.warn({ kind: 'shop-reauth-unavailable', reason: r.reason }, '굿즈 취소 재인증 토큰을 확인하지 못했다') : shopLogger.info({ kind: 'shop-reauth-rejected', reason: r.reason }, '굿즈 취소 재인증 토큰을 거절했다')),
   }) ?? closedShopReauthGate;
 
+// 계약 변경 요청(BAT-615): ops-svc 내부 승인 업무 생성. 주소가 없으면 그 경로만 503이고 시작은 막지 않는다(ADR-0320)
+const opsHttpUrl = process.env.PEAKET_OPS_HTTP_URL;
+const opsApprovals = opsHttpUrl
+  ? new HttpOpsApprovals(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsHttpUrl, timeoutCapMs: 3_000 }), process.env.PEAKET_INTERNAL_TOKEN)
+  : undefined;
+if (!opsApprovals) console.warn(JSON.stringify({ level: 'warn', kind: 'promoter-contract-wiring', msg: 'PEAKET_OPS_HTTP_URL이 없어 계약 변경 요청이 503 dependency-unavailable이다' }));
+
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
@@ -175,10 +184,12 @@ const service = await createService({
       payments: grpcPayments ?? unavailableMerchPayments,
       held: heldTickets ?? unavailableHeldTickets,
       reauth: shopReauth,
+      commission: new DrizzleCommissionRate(partnerDatabase),
       ...(merchConsentVersion !== undefined ? { consentVersion: merchConsentVersion } : {}),
       signals: shopSignals,
       logger: shopLogger,
     },
+    ...(opsApprovals ? { opsApprovals } : {}),
     ...(process.env.PEAKET_IDENTITY_JWKS_URL ? { exportJwks: { url: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' } } : {}),
     ...(process.env.PEAKET_PURCHASE_HTTP_URL
       ? { purchaseHttp: { url: process.env.PEAKET_PURCHASE_HTTP_URL, ...(process.env.PEAKET_INTERNAL_TOKEN ? { token: process.env.PEAKET_INTERNAL_TOKEN } : {}) } }

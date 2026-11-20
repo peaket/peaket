@@ -218,6 +218,13 @@
       "when": 1795118255887,
       "tag": "0032_merch_refund_replaces",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795087708000,
+      "tag": "0033_promoter_contract",
+      "breakpoints": true
     }
   ]
 }

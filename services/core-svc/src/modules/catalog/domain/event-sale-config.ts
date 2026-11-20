@@ -113,6 +113,7 @@ function configOf(productionId: string, promoterId: string, e: SaleEventRow, rul
     entryOpensAtMs: e.entryOpensAt?.getTime() ?? null,
     endsAtMs: e.endsAt.getTime(),
     entryClosedAtMs: e.entryClosedAt?.getTime() ?? null,
+    ...(e.commissionRateBp !== undefined ? { commissionRateBp: e.commissionRateBp } : {}),
     ...(facts.layoutVersion !== undefined ? { layoutVersion: facts.layoutVersion } : {}),
     ...(facts.pgKey !== undefined ? { pgKey: facts.pgKey } : {}),
     ...(facts.pgTps !== undefined ? { pgTps: facts.pgTps } : {}),

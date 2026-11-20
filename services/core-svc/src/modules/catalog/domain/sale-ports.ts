@@ -33,6 +33,8 @@ export interface SaleEventRow extends EventEditable {
   venueId?: string | null;
   /** 판매 승인 때 정한 공연 규모(회차 칸, ADR-0093). 승인 전에는 없다 */
   scale?: 'LARGE' | 'MEDIUM' | 'SMALL';
+  /** 판매 승인 때 그 파트너의 지금 계약 수수료율을 고정한 값(만분율, ADR-0060·0320). 계약이 없으면 없다 */
+  commissionRateBp?: number;
 }
 
 /** 저장한 명단 정보(구성원은 싣지 않는다) */
@@ -117,6 +119,8 @@ export interface SaleTx {
   largeOpenTimes(from: Date, to: Date, excludeProductionId: string): Promise<Date[]>;
   /** 판매 승인 반려: 사유를 남기고 상태만 바꾼다. pending_revision은 다음 수정·재요청에 남긴다 */
   reject(reason: string, now: Date): Promise<void>;
+  /** 그 파트너의 지금 계약 수수료율(만분율). 계약이 없으면 undefined(임의 1000bp를 만들지 않는다) */
+  currentCommissionRateBp(promoterId: string): Promise<number | undefined>;
 }
 
 /** 잠금 밖에서 먼저 보는 공연(소속·승인 이력·판매 중지). 잠금 안에서 다시 본다 */

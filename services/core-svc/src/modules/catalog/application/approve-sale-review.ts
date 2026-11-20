@@ -36,6 +36,10 @@ export class ApproveSaleReview {
         if (st.production.saleReview !== 'SUBMITTED' && st.production.saleReview !== 'REJECTED') {
           throw new ProblemError({ type: 'sale-review-not-submitted', status: 409, title: '판매 승인 대기 중인 공연이 아닙니다' });
         }
+        // 같은 잠금·같은 트랜잭션에서 지금 계약 수수료율을 읽어 회차에 고정한다(ADR-0060·0320).
+        // 계약이 없으면 비워 두고, payment-svc 회차 정산이 503으로 닫는 쪽을 유지한다(임의 10% 금지).
+        const commissionRateBp = await tx.currentCommissionRateBp(tenantId);
+        const withRate: SaleApprovalInput = { ...input, ...(commissionRateBp !== undefined ? { commissionRateBp } : {}) };
         const targets = new Set([...st.events.map((e) => e.eventId), ...st.addedEvents.map((e) => e.eventId)]);
         const given = new Set(q.scales.map((s) => s.eventId));
         if (given.size !== targets.size || [...targets].some((id) => !given.has(id))) {
@@ -48,7 +52,7 @@ export class ApproveSaleReview {
             if (!available.has(key)) throw new ProblemError({ type: 'sale-review-list-missing', status: 422, title: '판매 정책이 쓰는 명단이 없습니다' });
           }
         }
-        return tx.approve(input);
+        return tx.approve(withRate);
       }),
     );
     if (out === 'not-found') throw notFound();

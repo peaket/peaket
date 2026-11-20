@@ -1,7 +1,7 @@
 // 뿌리 모듈: 컨텍스트 모듈과 공용 설정(DB)을 모은다. catalog·review·shop·notify·export를 싣는다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import { type Database, databaseModule } from '@peaket/platform';
-import { CatalogModule, type MediaWiring, type MemoryCatalogRepository, type SaleConfigStore } from './modules/catalog/index.js';
+import { CatalogModule, type MediaWiring, type MemoryCatalogRepository, type OpsApprovalClient, type SaleConfigStore } from './modules/catalog/index.js';
 import { ReviewModule, type DatabaseReviewWiring, type MemoryReviewWiring } from './modules/review/index.js';
 import { ShopModule, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock, type DatabaseShopWiring, type MemoryShopWiring } from './modules/shop/index.js';
 import { NotifyModule } from './modules/notify/index.js';
@@ -31,6 +31,8 @@ export class AppModule {
           purchaseHttp?: { url: string; token?: string };
           /** 재인증 jti 1회용 저장소(Redis). 없으면 local·ci는 메모리 */
           reauthJti?: import('@peaket/platform').ReauthJtiStore;
+          /** 계약 변경 요청이 부르는 ops-svc 내부 승인 생성 클라이언트(BAT-615). 없으면 그 경로만 503 */
+          opsApprovals?: OpsApprovalClient;
         }
       | {
           memory: true;
@@ -41,6 +43,8 @@ export class AppModule {
           shop?: MemoryShopWiring;
           notify?: { store?: WebhookStore; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> };
           export?: MemoryExportWiring;
+          /** 시험이 넘기는 ops 승인 대역. 없으면 메모리 대역(기록만) */
+          opsApprovals?: OpsApprovalClient;
         },
   ): DynamicModule {
     if ('database' in o)
@@ -48,7 +52,7 @@ export class AppModule {
         module: AppModule,
         imports: [
           databaseModule(o.database),
-          CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), ...(o.searchDatabase ? { searchDatabase: o.searchDatabase } : {}), media: o.media }),
+          CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), ...(o.searchDatabase ? { searchDatabase: o.searchDatabase } : {}), media: o.media, ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}) }),
           ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}) }),
           ShopModule.register({
             storage: 'database',
@@ -74,7 +78,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [
-        CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}), ...(o.media ? { media: o.media } : {}), ...(o.saleConfigs ? { saleConfigs: o.saleConfigs } : {}) }),
+        CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}), ...(o.media ? { media: o.media } : {}), ...(o.saleConfigs ? { saleConfigs: o.saleConfigs } : {}), ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}) }),
         ReviewModule.register({ storage: 'memory', wiring: { ...(o.catalog ? { catalogRepository: o.catalog } : {}), ...(o.review ?? {}) } }),
         ShopModule.register({ storage: 'memory', ...(o.shop ? { wiring: o.shop } : {}) }),
         NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),

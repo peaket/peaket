@@ -13,12 +13,21 @@ export interface SaleApprovalInput {
   placeId?: string;
   /** 휠체어석 확인(LCH-090). 지금은 승인 본문이 true만 받는다 */
   accessibleSeatingCheck?: boolean;
+  /** 승인 트랜잭션 안에서 읽은 그 파트너의 지금 계약 수수료율(만분율). 계약이 없으면 없다 */
+  commissionRateBp?: number;
 }
 
-/** 승인 결과의 공개본. 이 값을 저장소가 쓰고 설정 사본이 읽는다 */
+/**
+ * 승인 결과의 공개본. 이 값을 저장소가 쓰고 설정 사본이 읽는다.
+ * 수수료율은 첫 승인이면 그 공연의 모든 회차에, 재승인이면 새로 더한 회차에만 쓴다(ADR-0060·0320).
+ * 이미 승인된 회차의 값은 계약이 바뀌어도 그대로 둔다.
+ */
 export function applyApproval(st: SaleState, input: SaleApprovalInput): SaleState {
   const rules = st.production.pendingRules ?? st.production.rules;
   const scaleOf = new Map(input.scales.map((s) => [s.eventId, s.scale]));
+  const firstApproval = st.production.saleApprovedAt === null;
+  const rate = input.commissionRateBp;
+  const withRate = (e: SaleEventRow): Partial<SaleEventRow> => (rate === undefined ? {} : e.commissionRateBp === undefined && firstApproval ? { commissionRateBp: rate } : {});
   const events = st.events
     .map((e) => {
       const change = st.eventChanges[e.eventId] ?? {};
@@ -28,6 +37,7 @@ export function applyApproval(st: SaleState, input: SaleApprovalInput): SaleStat
         ...change,
         version: e.version + 1,
         ...(scale !== undefined ? { scale } : {}),
+        ...withRate(e),
       } as SaleEventRow;
     })
     .concat(
@@ -46,6 +56,7 @@ export function applyApproval(st: SaleState, input: SaleApprovalInput): SaleStat
         seatAssignment: e.seatAssignment,
         perPersonLimit: e.perPersonLimit,
         ...(scaleOf.get(e.eventId) !== undefined ? { scale: scaleOf.get(e.eventId) } : {}),
+        ...(rate !== undefined ? { commissionRateBp: rate } : {}),
       })),
     )
     .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.eventId < b.eventId ? -1 : 1));

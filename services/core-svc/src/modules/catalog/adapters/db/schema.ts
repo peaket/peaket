@@ -14,6 +14,8 @@ import { bigint, boolean, check, customType, foreignKey, index, integer, jsonb, 
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+/** 계약 기간(PostgreSQL 18 tstzrange). 값은 `[시작,끝)` 글자로 넣고 읽을 때 lower/upper를 꺼낸다 */
+const tstzrange = customType<{ data: string; driverData: string }>({ dataType: () => 'tstzrange' });
 
 export const promoter = pgTable('promoter', {
   id: uuid('id').primaryKey(),
@@ -27,7 +29,38 @@ export const promoter = pgTable('promoter', {
   /** 통신판매업 신고 면제 사유(신고번호가 없을 때, openapi SellerInfo.exemptionBasis, ADR-0200 결정 4) */
   exemptionBasis: text('exemption_basis'),
   verifiedAt: at('verified_at'),
+  /** 지금 계약 수수료율(만분율, promoter_contract의 사본, ADR-0320 결정 1) */
+  commissionRateBp: integer('commission_rate_bp').notNull().default(1000),
+  /** 승인 대기 중인 계약 변경 업무. 없으면 null(두 겹 가드의 한쪽, ADR-0086) */
+  pendingContractApprovalId: uuid('pending_contract_approval_id'),
 });
+
+/**
+ * 파트너사 계약 조건 한 기간(BAT-615 LCH-070, ADR-0320, docs/data.md promoter_contract).
+ * 기간은 겹치지 않는다(UNIQUE (promoter_id, valid_during WITHOUT OVERLAPS), 마이그레이션이 만든다).
+ * 지금 계약은 상한이 없는 기간 하나이고, 변경 승인은 옛 기간의 끝과 새 기간의 시작을 같은 시각으로 맞춘다.
+ */
+export const promoterContract = pgTable(
+  'promoter_contract',
+  {
+    id: uuid('id').primaryKey(),
+    promoterId: uuid('promoter_id').notNull().references(() => promoter.id),
+    commissionRateBp: integer('commission_rate_bp').notNull(),
+    guaranteeRateBp: integer('guarantee_rate_bp').notNull(),
+    guaranteeKind: text('guarantee_kind').notNull(),
+    validDuring: tstzrange('valid_during').notNull(),
+    /** 변경 승인 업무. 첫 계약(등록)은 null */
+    approvalId: uuid('approval_id'),
+    createdAt: at('created_at').notNull().defaultNow(),
+    createdBy: uuid('created_by'),
+  },
+  (t) => [
+    check('promoter_contract_rate_check', sql`${t.commissionRateBp} between 0 and 10000 and ${t.guaranteeRateBp} between 0 and 10000`),
+    check('promoter_contract_kind_check', sql`${t.guaranteeKind} in ('DEPOSIT', 'PERFORMANCE_BOND')`),
+    index('promoter_contract_promoter_idx').on(t.promoterId),
+    index('promoter_contract_approval_idx').on(t.approvalId),
+  ],
+);
 
 export const place = pgTable(
   'place',
@@ -283,6 +316,8 @@ export const event = pgTable(
     perPersonLimit: integer('per_person_limit').notNull().default(4),
     /** 판매 승인 때 정한 공연 규모(회차 칸, ADR-0093). 승인 전에는 비어 있다 */
     scale: text('scale'),
+    /** 판매 승인 때 그 파트너의 지금 계약 수수료율을 고정한 값(만분율, ADR-0060·0320). 계약이 없으면 비어 있다 */
+    commissionRateBp: integer('commission_rate_bp'),
     /** 회차 고치기 If-Match의 판(1부터, 고칠 때마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 4) */
     version: integer('version').notNull().default(1),
   },
@@ -296,6 +331,7 @@ export const event = pgTable(
     check('event_queue_order_check', sql`${t.lobbyShuffle} or ${t.openBatch}`),
     check('event_seat_assignment_check', sql`${t.seatAssignment} in ('PICK', 'AUTO')`),
     check('event_scale_check', sql`${t.scale} is null or ${t.scale} in ('LARGE', 'MEDIUM', 'SMALL')`),
+    check('event_commission_rate_check', sql`${t.commissionRateBp} is null or ${t.commissionRateBp} between 0 and 10000`),
     check('event_per_person_limit_check', sql`${t.perPersonLimit} between 1 and 10`),
     check('event_version_check', sql`${t.version} >= 1`),
     index('event_production_idx').on(t.productionId),

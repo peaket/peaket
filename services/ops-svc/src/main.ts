@@ -18,6 +18,7 @@ import type { HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
+import { HttpCoreContract } from './adapters/http-core-contract.js';
 
 const SERVICE = 'ops-svc';
 assertInternalGrpcToken(process.env);
@@ -96,6 +97,12 @@ const payouts = paymentUrl
       ...(reauth ? { reauth } : {}),
     }
   : undefined;
+// 계약 조건 변경 승인(BAT-615): core 계약 적용·취소. 주소가 없으면 그 경로가 503이고 시작은 막지 않는다
+const approvals = {
+  ...(coreUrl ? { core: new HttpCoreContract(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 3_000 }), internalToken) } : {}),
+  ...(reauth ? { reauth } : {}),
+};
+if (!coreUrl) console.warn(JSON.stringify({ level: 'warn', kind: 'approval-wiring', msg: 'PEAKET_CORE_HTTP_URL이 없어 계약 승인 적용·반려가 503이다' }));
 // core 회차 상태 반영(BAT-420-rest GAT-110): 주소가 없으면 local·ci만 경고로 시작하고 그 밖은 여기서 시작 실패다
 const coreEventStatusWarning = requireCoreEventStatusUrl(process.env);
 // 회차 취소 요청(BAT-420 GAT-110): 파트너 소속 확인(core 판매 설정)·확정 때 판매 멈춤(판매 중지 집행)·판정 미리보기와 진행률(purchase gRPC).
@@ -130,6 +137,7 @@ const service = await createService({
     ...(priority ? { priority } : {}),
     ...(scannerDevices ? { scannerDevices } : {}),
     ...(payouts ? { payouts } : {}),
+    approvals,
     eventCancellations,
     onCommandEvent: (h) => (commandEvents = h),
   }),

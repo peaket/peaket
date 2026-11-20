@@ -9,7 +9,8 @@ import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore } from './modul
 import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
-import { PayoutsModule, type PayoutsModuleDeps } from './modules/payouts/index.js';
+import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } from './modules/payouts/index.js';
+import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
 import {
   CsCaseEventCancellationCases,
   DrizzleEventCancellationStore,
@@ -46,6 +47,8 @@ interface CommonWiring {
   readonly auditChain?: AuditChain & AuditChainReader;
   /** 지급 승인 업무(BAT-610 잔여). 없으면 메모리 저장·503 payment 클라이언트로 조립한다 */
   readonly payouts?: PayoutsModuleDeps;
+  /** 계약 조건 변경 승인 업무(BAT-615). 없으면 메모리 저장·메모리 core 대역, 재인증은 닫힌 대역이다 */
+  readonly approvals?: ApprovalsModuleDeps;
   /**
    * 회차 취소 요청(BAT-425 GAT-130 잔여, BAT-420 GAT-110). refunds·reauth가 없으면 요청·확정이 503이다.
    * reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속)는 시작 조립(event-cancellation-wiring)이 고른다. 없으면 그 경로가 503이다.
@@ -121,6 +124,13 @@ export class AppModule {
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
           PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts, audit: chain } : { storage: 'memory', deps: { audit: chain } }),
+          ApprovalsModule.register({
+            storage: 'database',
+            database: o.database,
+            audit: chain,
+            ...(o.approvals ?? {}),
+            reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
+          }),
           EventCancellationsModule.register(
             eventCancellationDeps(
               o,
@@ -153,6 +163,14 @@ export class AppModule {
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
         PayoutsModule.register({ storage: 'memory', deps: { ...(o.payouts ?? {}), audit: chain } }),
+        ApprovalsModule.register({
+          storage: 'memory',
+          audit: chain,
+          deps: {
+            ...(o.approvals ?? {}),
+            reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
+          },
+        }),
         EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(csCases) }, chain)),
       ],
     };

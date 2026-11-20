@@ -108,6 +108,7 @@ export class MemorySaleStore implements SaleStore {
           const after = applyApproval(before, input);
           writes.push(() => {
             for (const e of after.events) if (e.scale !== undefined) this.repo.eventScales.set(e.eventId, e.scale);
+            for (const e of after.events) if (e.commissionRateBp !== undefined) this.repo.eventCommissionRates.set(e.eventId, e.commissionRateBp);
             const p = this.repo.productions.get(productionId)!;
             this.repo.productions.set(productionId, {
               ...p,
@@ -150,6 +151,11 @@ export class MemorySaleStore implements SaleStore {
             this.repo.eventScales.set(eventId, scale);
             this.repo.eventVersions.set(eventId, version);
           });
+        },
+        currentCommissionRateBp: async (promoterId) => {
+          const periods = [...(this.repo.promoterContracts.get(promoterId) ?? [])].filter((x) => x.validUntil === null);
+          const current = periods[0] ?? [...(this.repo.promoterContracts.get(promoterId) ?? [])].at(-1);
+          return current?.commissionRateBp ?? this.repo.promoters.get(promoterId)?.commissionRateBp;
         },
         largeOpenTimes: async (from, to, exclude) =>
           [...this.repo.events.values()]
@@ -219,6 +225,7 @@ export class MemorySaleStore implements SaleStore {
       seatAssignment: d?.seatAssignment ?? draft?.seatAssignment ?? 'PICK',
       perPersonLimit: d?.perPersonLimit ?? draft?.perPersonLimit ?? 4,
       ...(this.repo.eventScales.get(eventId) !== undefined ? { scale: this.repo.eventScales.get(eventId) } : {}),
+      ...(this.repo.eventCommissionRates.get(eventId) !== undefined ? { commissionRateBp: this.repo.eventCommissionRates.get(eventId) } : {}),
     };
   }
 

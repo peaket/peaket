@@ -63,6 +63,13 @@ import { CATALOG_REPOSITORY } from './domain/ports.js';
 import { SEARCH_DICTIONARY, SEARCH_DICTIONARY_SOURCE, SEARCH_INDEX, SEARCH_READ_MODEL_SYNC, type SearchDictionarySource, SuggestionDictionary } from './domain/search.js';
 import type { TemplateCatalog } from './domain/seatmap-templates.js';
 import { OPS_SALE_STORE, SALE_STORE } from './domain/sale-ports.js';
+import { DrizzlePromoterStore } from './adapters/db/drizzle-promoter-store.js';
+import { MemoryPromoterStore } from './adapters/memory-promoter-store.js';
+import { MemoryOpsApprovals, UnavailableOpsApprovals } from './adapters/http-ops-approvals.js';
+import { OPS_APPROVAL_CLIENT, PROMOTER_STORE, type OpsApprovalClient } from './domain/promoter-ports.js';
+import { ApplyContractApproval, Promoters } from './application/promoters.js';
+import { OpsPromoterController } from './inbound/ops-promoter.controller.js';
+import { InternalPromoterController } from './inbound/internal-promoter.controller.js';
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
 import { EventSummaryController } from './inbound/event-summary.controller.js';
 import { InternalSaleConfigController } from './inbound/internal-sale-config.controller.js';
@@ -183,11 +190,11 @@ export class CatalogModule implements NestModule {
    */
   static register(
     o:
-      | { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; searchDatabase?: Database; media: MediaWiring }
-      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore },
+      | { storage: 'database'; partnerDatabase: Database; opsDatabase?: Database; searchDatabase?: Database; media: MediaWiring; opsApprovals?: OpsApprovalClient }
+      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient },
   ): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, OpsEventController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, OpsEventController, OpsPromoterController, InternalPromoterController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -205,6 +212,8 @@ export class CatalogModule implements NestModule {
           { provide: SALE_STORE, useClass: DrizzleSaleStore },
           { provide: OPS_DATABASE, useFactory: (db: Database) => o.opsDatabase ?? db, inject: [DATABASE] },
           { provide: OPS_SALE_STORE, useFactory: (db: Database, sync: DrizzleSearchReadModel) => new DrizzleSaleStore(db, sync), inject: [OPS_DATABASE, SEARCH_READ_MODEL_SYNC] },
+          { provide: PROMOTER_STORE, useFactory: (db: Database, clock: Clock) => new DrizzlePromoterStore(db, clock), inject: [OPS_DATABASE, CLOCK] },
+          { provide: OPS_APPROVAL_CLIENT, useValue: o.opsApprovals ?? new UnavailableOpsApprovals() },
           { provide: SALE_CONFIG_STORE, useClass: DrizzleSaleConfigStore },
           { provide: SALE_CONFIG_READER, useClass: DrizzleSaleConfigReader },
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
@@ -234,6 +243,8 @@ export class CatalogModule implements NestModule {
         { provide: SEATMAP_LAYOUT_STORE, useValue: new MemorySeatmapLayoutStore(repo) },
         { provide: SALE_STORE, useValue: new MemorySaleStore(repo) },
         { provide: OPS_SALE_STORE, useExisting: SALE_STORE },
+        { provide: PROMOTER_STORE, useFactory: () => new MemoryPromoterStore(repo) },
+        { provide: OPS_APPROVAL_CLIENT, useValue: o.opsApprovals ?? new MemoryOpsApprovals() },
         { provide: SALE_CONFIG_STORE, useValue: o.saleConfigs ?? new MemorySaleConfigStore() },
         { provide: SALE_CONFIG_READER, useExisting: SALE_CONFIG_STORE },
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },

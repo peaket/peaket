@@ -27,6 +27,7 @@ const SaleConfigResponse = z
     entryOpensAtMs: z.number().nullable().optional(),
     endsAtMs: z.number().optional(),
     entryClosedAtMs: z.number().nullable().optional(),
+    commissionRateBp: z.number().optional(),
     layoutVersion: z.number().optional(),
     pgKey: z.string().optional(),
     pgTps: z.number().optional(),
@@ -39,6 +40,7 @@ const SaleConfigResponse = z
 const DueEventsResponse = z
   .object({ items: z.array(z.object({ eventId: z.string(), promoterId: z.string(), endsAt: z.string() })) })
   .strict();
+const CommissionRateResponse = z.object({ commissionRateBp: z.number() }).strict();
 
 /**
  * 내부 토큰이 없거나 틀리면 401(공용 InternalTokenGuard의 403과 달리 이 경로의 계약이다).
@@ -85,5 +87,16 @@ export class InternalSaleConfigController {
     const config = typeof eventId === 'string' ? await this.configs.get(eventId) : undefined;
     if (!config) throw notFound();
     return config;
+  }
+
+  /** 회차 정산의 수수료율(bp). 판매 승인 때 event.commission_rate_bp에 고정한 값이고, 없으면 404다(A1-H10) */
+  @Get(':eventId/commission-rate')
+  @ContractRouteSchema({ responses: { 200: CommissionRateResponse } })
+  @Roles(['public'])
+  async commissionRate(@Param('eventId') eventId: string, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ commissionRateBp: number }> {
+    void reply.header('cache-control', 'no-store');
+    const rate = typeof eventId === 'string' ? await this.configs.commissionRateBp(eventId) : undefined;
+    if (rate === undefined) throw notFound();
+    return { commissionRateBp: rate };
   }
 }

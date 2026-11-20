@@ -37,6 +37,7 @@ export class PayoutsModule {
     if (o.storage === 'database') {
       return {
         module: PayoutsModule,
+        global: true,
         controllers: [PayoutsController],
         providers: [
           ...providers,
@@ -44,10 +45,12 @@ export class PayoutsModule {
           { provide: PAYOUT_PAYMENT_CLIENT, useValue: o.payments },
           { provide: APPROVAL_REAUTH_VERIFIER, useValue: o.reauth ?? new UnavailableApprovalVerifier() },
         ],
+        exports: [PayoutApprovals],
       };
     }
     return {
       module: PayoutsModule,
+      global: true,
       controllers: [PayoutsController],
       providers: [
         ...providers,
@@ -55,6 +58,7 @@ export class PayoutsModule {
         { provide: PAYOUT_PAYMENT_CLIENT, useValue: o.deps?.payments ?? new UnavailablePayoutPaymentClient() },
         { provide: APPROVAL_REAUTH_VERIFIER, useValue: o.deps?.reauth ?? new UnavailableApprovalVerifier() },
       ],
+      exports: [PayoutApprovals],
     };
   }
 }

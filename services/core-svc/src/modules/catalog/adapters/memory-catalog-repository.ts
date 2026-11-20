@@ -9,6 +9,7 @@ import type { ProductionImageRow } from '../domain/production-image.js';
 import type { EventDraft, PendingEvent } from '../domain/registration.js';
 import { destroyTime, lockTime } from '../domain/sale-eligibility.js';
 import type { EventEditable, StoredList } from '../domain/sale-ports.js';
+import type { PromoterContractPeriod } from '../domain/promoter-contract.js';
 import type { LayoutDoc } from '../domain/seatmap-layout.js';
 
 /** 공연 하나의 배치본(메모리, ADR-0260): 판 차례·행 판·대기 판·복제한 틀 */
@@ -40,6 +41,28 @@ export interface MemorySaleList extends StoredList {
   members: Set<string>;
 }
 
+/** 파트너사 행 하나(메모리, promoter + 지금 계약 값의 사본) */
+export interface MemoryPromoter {
+  promoterId: string;
+  legalName: string;
+  representative: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  businessRegNo: string | null;
+  mailOrderReportNo: string | null;
+  exemptionBasis: string | null;
+  verifiedAt: Date | null;
+  commissionRateBp: number;
+  pendingContractApprovalId: string | null;
+}
+
+/** 계약 기간 하나(메모리, promoter_contract) */
+export interface MemoryPromoterContract extends PromoterContractPeriod {
+  id: string;
+  createdBy: string;
+}
+
 export class MemoryCatalogRepository implements CatalogRepository {
   readonly productions = new Map<string, Production>();
   readonly events = new Map<string, CatalogEvent>();
@@ -47,6 +70,10 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly saleStates = new Map<string, EventSaleState>();
   /** 판매자(promoter) ID → 상호. 판매자 행이 있다는 뜻이기도 하다 */
   readonly sellerNames = new Map<string, string>();
+  /** 파트너사 행(계약 조건·승인 대기, BAT-615). sellerNames와 같은 공간을 채운다 */
+  readonly promoters = new Map<string, MemoryPromoter>();
+  /** 파트너사 ID → 계약 기간(오래된 차례) */
+  readonly promoterContracts = new Map<string, MemoryPromoterContract[]>();
   /** 회차 ID → 공연 상세의 나머지 칸(시험이 넣는다. 없으면 기본값) */
   readonly details = new Map<string, Partial<Pick<EventSummaryRow, 'place' | 'artists'>> & { event?: Partial<EventPublicFields>; production?: Partial<ProductionPublicFields>; seller?: Partial<EventSummaryRow['seller']> }>();
   /** 찾기 목록(시험이 넣는다) */
@@ -73,6 +100,8 @@ export class MemoryCatalogRepository implements CatalogRepository {
   readonly eventVersions = new Map<string, number>();
   /** 회차 ID → 판매 승인 때 정한 규모(ADR-0078 규모 올리기) */
   readonly eventScales = new Map<string, 'LARGE' | 'MEDIUM' | 'SMALL'>();
+  /** 회차 ID → 판매 승인 때 고정한 계약 수수료율(만분율, BAT-615) */
+  readonly eventCommissionRates = new Map<string, number>();
   /** 공연 ID → pending_revision.eventChanges */
   readonly eventChanges = new Map<string, Record<string, Partial<EventEditable>>>();
   /** 명단 ID → 판매 자격 명단 */

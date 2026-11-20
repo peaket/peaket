@@ -19,7 +19,7 @@ import { layoutVenueId } from '../../domain/seatmap-layout.js';
 import { SEARCH_READ_MODEL_SYNC, type SearchReadModelSync } from '../../domain/search.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { pendingOf } from './layout-rows.js';
-import { event, priceTier, production, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
+import { event, priceTier, production, promoter, promoterContract, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** 규모 올리기·판매 승인의 오픈 간격 검사를 직렬화하는 잠금 종류(하나의 문) */
@@ -82,6 +82,7 @@ const eventRow = (e: typeof event.$inferSelect): SaleEventRow => ({
   reentryAllowed: e.reentryAllowed,
   entryClosedAt: e.entryClosedAt,
   ...(e.scale !== null ? { scale: e.scale as 'LARGE' | 'MEDIUM' | 'SMALL' } : {}),
+  ...(e.commissionRateBp !== null ? { commissionRateBp: e.commissionRateBp } : {}),
 });
 
 /**
@@ -336,6 +337,7 @@ export class DrizzleSaleStore implements SaleStore {
                 perPersonLimit: e.perPersonLimit,
                 version: e.version,
                 ...(e.scale !== undefined ? { scale: e.scale } : {}),
+                ...(e.commissionRateBp !== undefined ? { commissionRateBp: e.commissionRateBp } : {}),
               })
               .where(and(eq(event.id, e.eventId), eq(event.productionId, p.id), eq(event.promoterId, tenantId)));
           } else {
@@ -356,6 +358,7 @@ export class DrizzleSaleStore implements SaleStore {
               perPersonLimit: e.perPersonLimit,
               version: e.version,
               ...(e.scale !== undefined ? { scale: e.scale } : {}),
+              ...(e.commissionRateBp !== undefined ? { commissionRateBp: e.commissionRateBp } : {}),
             });
           }
         }
@@ -379,6 +382,17 @@ export class DrizzleSaleStore implements SaleStore {
       },
       setEventScale: async (eventId, scale, version) => {
         await tx.update(event).set({ scale, version }).where(and(eq(event.id, eventId), eq(event.productionId, p.id), eq(event.promoterId, tenantId)));
+      },
+      currentCommissionRateBp: async (promoterId) => {
+        // 승인 잠금 안에서 지금 계약을 읽는다(계약 변경과 겹치지 않게). core_ops 연결이라 모든 테넌트를 본다
+        const rows = await tx
+          .select({ commissionRateBp: promoterContract.commissionRateBp })
+          .from(promoterContract)
+          .where(and(eq(promoterContract.promoterId, promoterId), sql`upper_inf(${promoterContract.validDuring})`))
+          .limit(1);
+        if (rows[0]) return rows[0].commissionRateBp;
+        const [r] = await tx.select({ bp: promoter.commissionRateBp }).from(promoter).where(eq(promoter.id, promoterId)).limit(1);
+        return r?.bp ?? undefined;
       },
       largeOpenTimes: async (from, to, exclude) => {
         const rows = await tx

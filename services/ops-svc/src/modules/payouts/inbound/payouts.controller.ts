@@ -1,7 +1,6 @@
 // 받는 층: 지급 묶음 승인 업무·정산서·미수금(openapi ops payout-batches·approval-requests·settlements·receivables).
-import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Query } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
-import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { PayoutApprovals, type OpsActor } from '../application/payout-approvals.js';
 import { PAYOUT_PAYMENT_CLIENT, type PayoutPaymentClient } from '../domain/ports.js';
@@ -14,9 +13,7 @@ const BatchBody = z
     portoneBalance: z.object({ amount: z.number().int().min(0), observedAt: z.string() }).optional(),
   })
   .strict();
-const ApprovalParams = z.object({ approvalId: z.string().min(1) });
 const BatchParams = z.object({ batchId: z.string().min(1) });
-const RejectBody = z.object({ reason: z.string().min(1) });
 const PortoneBody = z.object({ bulkPayoutId: z.string().min(1) });
 
 const BatchView = z
@@ -33,21 +30,6 @@ const BatchView = z
   })
   .passthrough();
 const BatchPage = z.object({ items: z.array(BatchView), nextCursor: z.string().nullable() });
-const ApprovalView = z
-  .object({
-    approvalId: z.string(),
-    kind: z.literal('PAYOUT_BATCH'),
-    targetRef: z.string(),
-    amount: z.number(),
-    status: z.string(),
-    requiredApprovals: z.number(),
-    approvals: z.array(z.string()),
-    requestedBy: z.object({ adminAccountId: z.string(), displayName: z.string().nullable(), role: z.string() }),
-    requestedAt: z.string(),
-    canApprove: z.boolean(),
-  })
-  .passthrough();
-const ApprovalPage = z.object({ items: z.array(ApprovalView), nextCursor: z.string().nullable() });
 const UnknownPage = z.object({ items: z.array(z.record(z.string(), z.unknown())), nextCursor: z.string().nullable() });
 
 const actorOf = (me: Principal): OpsActor => ({ accountId: me.accountId, sessionId: me.sessionId, role: me.role ?? 'operator' });
@@ -99,40 +81,6 @@ export class PayoutsController {
   @ContractRouteSchema({ params: BatchParams, body: PortoneBody, responses: { 200: BatchView } })
   async portoneExecution(@ContractParams(BatchParams) params: z.output<typeof BatchParams>, @ContractBody(PortoneBody) body: z.output<typeof PortoneBody>, @CurrentPrincipal() me: Principal) {
     return this.approvals.recordPortoneExecution(params.batchId, body.bulkPayoutId, me.accountId);
-  }
-
-  @Get('approval-requests')
-  @Header('Cache-Control', 'no-store')
-  @Roles(['operator', 'commander', 'cs_agent', 'cs_lead'])
-  @ContractRouteSchema({ responses: { 200: ApprovalPage } })
-  async listApprovals(@Query() q: Record<string, string | undefined>, @CurrentPrincipal() me: Principal) {
-    const status = q.status ? q.status.split(',') : undefined;
-    return this.approvals.list({ ...(status ? { status } : {}), ...(q.awaitingMyApproval === 'true' ? { awaitingMyApproval: true } : {}), ...(q.requestedByMe === 'true' ? { requestedByMe: true } : {}), limit: num(q.limit, 50) }, actorOf(me));
-  }
-
-  @Get('approval-requests/:approvalId')
-  @Header('Cache-Control', 'no-store')
-  @Roles(['operator', 'commander', 'cs_agent', 'cs_lead'])
-  @ContractRouteSchema({ params: ApprovalParams, responses: { 200: ApprovalView } })
-  async getApproval(@ContractParams(ApprovalParams) params: z.output<typeof ApprovalParams>, @CurrentPrincipal() me: Principal) {
-    return this.approvals.get(params.approvalId, actorOf(me));
-  }
-
-  @Post('approval-requests/:approvalId/approvals')
-  @HttpCode(200)
-  @Roles(['commander', 'cs_lead'])
-  @ContractRouteSchema({ params: ApprovalParams, responses: { 200: ApprovalView } })
-  async approve(@ContractParams(ApprovalParams) params: z.output<typeof ApprovalParams>, @CurrentPrincipal() me: Principal, @Req() request: FastifyRequest) {
-    const token = request.headers['x-reauth-token'];
-    return this.approvals.approve(params.approvalId, actorOf(me), typeof token === 'string' ? token : undefined);
-  }
-
-  @Post('approval-requests/:approvalId/rejections')
-  @HttpCode(200)
-  @Roles(['commander', 'cs_lead'])
-  @ContractRouteSchema({ params: ApprovalParams, body: RejectBody, responses: { 200: ApprovalView } })
-  async reject(@ContractParams(ApprovalParams) params: z.output<typeof ApprovalParams>, @ContractBody(RejectBody) body: z.output<typeof RejectBody>, @CurrentPrincipal() me: Principal) {
-    return this.approvals.reject(params.approvalId, actorOf(me), body.reason);
   }
 
   @Get('settlements')
