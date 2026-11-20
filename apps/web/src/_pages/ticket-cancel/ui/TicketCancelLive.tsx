@@ -263,6 +263,22 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
             {error ? (
               <NoticeBanner tone={error.kind === 'reauth' || error.kind === 'reauth-unavailable' ? 'warning' : 'danger'} role="alert">
                 {error.text}
+                {error.kind === 'transfer' ? (
+                  <>
+                    {' '}
+                    <Link className="link" href={`/my/tickets/${encodeURIComponent(ticketId)}/transfer`}>
+                      요청 보기
+                    </Link>
+                  </>
+                ) : null}
+                {error.kind === 'event-cancelled' || error.kind === 'conflict' || error.kind === 'entry-started' || error.kind === 'not-payer' ? (
+                  <>
+                    {' '}
+                    <Link className="link" href="/my/tickets">
+                      예매 내역 보기
+                    </Link>
+                  </>
+                ) : null}
               </NoticeBanner>
             ) : null}
           </div>
@@ -298,7 +314,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
                     <dl className="kv">
                       <dt>결제 금액</dt>
                       <dd className="num">{won(quote.ticketPrice)}</dd>
-                      <dt>취소 수수료{quote.deductionRate > 0 ? `(${Math.round(quote.deductionRate)}%)` : ''}</dt>
+                      <dt>취소 수수료{quote.deductionRate > 0 ? `(${Math.round(quote.deductionRate * 100)}%)` : ''}</dt>
                       <dd className="num">{quote.deductionAmount > 0 ? `−${won(quote.deductionAmount)}` : '없음'}</dd>
                       <dt className="kv-total">환급 예상액</dt>
                       <dd className="kv-total num">{won(quote.refundAmount)}</dd>
