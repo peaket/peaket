@@ -37,8 +37,8 @@ export const OBSERVABILITY_IMAGES = Object.freeze(['prom/prometheus:v3.14.0', 'g
 
 /**
  * 새 kind 클러스터에 미리 넣을 로컬 이미지 태그(BAT-028 로컬 수정). deploy/local/*.yaml의 태그와 같아야 한다.
- * `cluster.mjs`가 `docker save --platform linux/amd64`→`kind load image-archive`로 싣고, 파드는 태그로 찾는다.
- * 고정 다이제스트는 문서·공급망 확인용으로 남기고, 로컬 kind 무대의 파드 참조에는 쓰지 않는다.
+ * `cluster.mjs`가 `docker save --platform linux/amd64`→`docker cp`→`ctr images import --platform`으로 싣고(태그가 없으면 붙인다, BAT-085 V-03),
+ * 파드는 태그로 찾는다. 고정 다이제스트는 문서·공급망 확인용으로 남기고, 로컬 kind 무대의 파드 참조에는 쓰지 않는다.
  */
 export const V1_PRELOAD_IMAGES = Object.freeze([
   'quay.io/strimzi/operator:0.47.0',

@@ -194,29 +194,145 @@ async function image() {
 }
 
 /**
- * 로컬 Docker 이미지를 새 kind 노드에 미리 넣는다(BAT-028 로컬 수정).
- * `kind load docker-image`는 여러 플랫폼 이미지에서 목록 다이제스트의 내용을 찾지 못해 실패할 수 있다.
- * 그래서 이 PC의 플랫폼 이미지만 `docker save --platform`으로 저장하고 `kind load image-archive`로 넣는다.
+ * 이미지 참조를 저장소와 태그로 가른다(레지스트리 포트의 `:`는 저장소 쪽이다)
+ * @param {string} ref
+ * @returns {{ repo: string, tag: string }}
+ */
+export function splitImageRef(ref) {
+  const slash = ref.lastIndexOf('/');
+  const colon = ref.lastIndexOf(':');
+  return colon > slash ? { repo: ref.slice(0, colon), tag: ref.slice(colon + 1) } : { repo: ref, tag: 'latest' };
+}
+
+/**
+ * `이름:태그@sha256:…`에서 노드에 붙일 태그(`이름:태그`)를 고른다. 태그 없이 다이제스트만 있는 참조는 null이다(노드에 태그로 실을 수 없다)
+ * @param {string} ref
+ * @returns {string|null}
+ */
+export function tagOf(ref) {
+  const at = ref.indexOf('@');
+  const name = at < 0 ? ref : ref.slice(0, at);
+  const slash = name.lastIndexOf('/');
+  const colon = name.lastIndexOf(':');
+  if (colon > slash) return name;
+  return at < 0 ? name : null;
+}
+
+/**
+ * containerd가 붙이는 정규화 이름까지 함께 돌려준다(`postgres:18-alpine` → `docker.io/library/postgres:18-alpine`).
+ * 짧은 이름으로 실어도 노드에는 정규화된 이름으로 남으므로 두 꼴을 모두 본다(BAT-085 V-03)
+ * @param {string} ref
+ * @returns {string[]}
+ */
+export function normalizedImageNames(ref) {
+  const { repo, tag } = splitImageRef(ref);
+  const first = repo.split('/')[0];
+  const isRegistry = repo.includes('/') && (first.includes('.') || first.includes(':') || first === 'localhost');
+  const qualified = isRegistry ? repo : repo.includes('/') ? `docker.io/${repo}` : `docker.io/library/${repo}`;
+  return [`${repo}:${tag}`, `${qualified}:${tag}`];
+}
+
+/**
+ * 노드(containerd)에 태그가 없을 때 `ctr images tag`에 쓸 원본 이름을 고른다(BAT-085 V-03).
+ * 예전 kind 적재 경로는 여러 플랫폼 목록을 가져오며 태그를 잃어 `import-<날짜>@sha256:…` 꼴로만 남겼다.
+ * 이번에 새로 생긴 이름(added)에서 같은 저장소의 다이제스트 이름을 먼저 고르고, 다이제스트 이름이 하나뿐이면 그것을 쓴다.
+ * 붙일 원본을 고르지 못하면 null이다(부르는 쪽이 시작을 멈춘다)
+ * @param {string[]} names 지금 노드의 이미지 이름
+ * @param {string[]} added 이번 가져오기로 새로 생긴 이름
+ * @param {string} tag 붙이려는 태그
+ * @returns {string|null}
+ */
+export function nodeTagSource(names, added, tag) {
+  const aliases = normalizedImageNames(tag);
+  if (aliases.some((a) => names.includes(a))) return null;
+  const repos = [...new Set(aliases.map((a) => splitImageRef(a).repo))];
+  const sameRepo = added.find((n) => aliases.includes(n) || repos.some((r) => n.startsWith(`${r}@`)));
+  if (sameRepo) return sameRepo;
+  const digests = added.filter((n) => n.includes('@sha256:'));
+  if (digests.length === 1) return digests[0];
+  return added.length === 1 ? added[0] : null;
+}
+
+/** 노드(containerd의 k8s.io 네임스페이스) 이미지 이름 목록 */
+function nodeImages(node) {
+  return run('docker', ['exec', node, 'ctr', '-n', 'k8s.io', 'images', 'ls', '-q'], { quiet: true })
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** 노드에 그 태그가 있는가(containerd 정규화 이름 포함) */
+function nodeHasTag(node, tag) {
+  const names = nodeImages(node);
+  return normalizedImageNames(tag).some((a) => names.includes(a));
+}
+
+/**
+ * docker 보관 파일을 kind 노드에 넣고 태그가 있는지 확인한다(BAT-085 V-03).
+ * docker cp → `ctr -n k8s.io images import --platform`으로 넣고, containerd가 태그를 잃었으면
+ * `ctr images tag`로 붙인다. 끝내 태그가 없으면 던진다(파드가 이미지를 풀지 못한 채 helm --wait가 600초를 기다리게 두지 않는다).
+ * 이 PC의 Docker Desktop에서 노드 `/tmp`로는 docker cp가 들어가지 않아 `/var/tmp`를 쓴다.
+ * 짧은 이름(postgres:18-alpine)은 노드에서 docker.io/library/…로 정규화되므로 두 꼴을 모두 보고 태그를 확인한다.
+ * @param {string} node 노드 컨테이너 이름(`${CLUSTER}-control-plane`)
+ * @param {string} archive 이 PC의 docker 보관 파일
+ * @param {string} tag 노드에 있어야 하는 태그
+ * @param {string} platform `linux/amd64` 같은 플랫폼
+ */
+function importImageToNode(node, archive, tag, platform) {
+  const before = new Set(nodeImages(node));
+  run('docker', ['cp', archive, `${node}:/var/tmp/peaket-image.tar`], { quiet: true });
+  try {
+    run('docker', ['exec', node, 'ctr', '-n', 'k8s.io', 'images', 'import', '--platform', platform, '/var/tmp/peaket-image.tar']);
+  } finally {
+    try {
+      run('docker', ['exec', node, 'rm', '-f', '/var/tmp/peaket-image.tar'], { quiet: true });
+    } catch {
+      // 임시 파일을 지우지 못해도 시작을 막지 않는다
+    }
+  }
+  if (nodeHasTag(node, tag)) return;
+  const names = nodeImages(node);
+  const source = nodeTagSource(names, names.filter((n) => !before.has(n)), tag);
+  if (source) run('docker', ['exec', node, 'ctr', '-n', 'k8s.io', 'images', 'tag', source, tag], { quiet: true });
+  if (!nodeHasTag(node, tag)) {
+    throw new Error(`${node}에 ${tag} 태그가 없다(containerd가 태그를 잃었고 붙일 원본도 찾지 못했다). 파드가 이미지를 찾지 못하므로 시작을 멈춘다`);
+  }
+}
+
+/**
+ * 로컬 Docker 이미지를 새 kind 노드에 미리 넣는다(BAT-028 로컬 수정, BAT-085 V-03).
+ * 예전 적재 경로는 여러 플랫폼 이미지에서 목록 다이제스트의 내용을 찾지 못하고, 한 플랫폼만 실으면서
+ * 태그를 잃는다(`docker.io/library/import-2026-11-20@sha256:…`). 그래서 이 PC의 플랫폼 이미지만 `docker save --platform`으로
+ * 저장하고 `docker cp` → `ctr images import --platform` → 태그 확인·복구 순서로 넣는다.
  * 로컬에 없으면 받아 온다(CI 러너처럼 처음부터 비어 있는 환경에서도 observability·v1이 서게).
  * 파드는 태그로 찾고(imagePullPolicy IfNotPresent/Never), 고정 다이제스트는 문서·공급망 확인용으로만 남긴다.
- * @param {readonly string[]} tags
+ * @param {readonly string[]} refs 태그(또는 `이름:태그@sha256:…`)
  */
-async function preloadLocalImages(tags) {
-  const unique = [...new Set(tags)];
+async function preloadLocalImages(refs) {
+  const unique = [...new Set(refs)];
   step(`로컬 이미지 ${unique.length}개를 kind에 미리 싣기`);
   const platform = dockerPlatform(run('docker', ['info', '--format', '{{.Architecture}}'], { quiet: true }));
-  for (const tag of unique) {
+  const node = `${CLUSTER}-control-plane`;
+  for (const ref of unique) {
+    const tag = tagOf(ref);
+    if (!tag) throw new Error(`${ref}: 태그 없는 다이제스트 참조는 노드에 태그로 실을 수 없다(이름:태그로 준다)`);
+    try {
+      run('docker', ['image', 'inspect', '--format', '{{.Id}}', ref], { quiet: true });
+    } catch {
+      step(`로컬에 ${ref}가 없어 받는다`);
+      execFileSync('docker', ['pull', '--platform', platform, ref], { stdio: 'inherit' });
+    }
+    // 다이제스트로만 받은 이미지는 로컬 RepoTags가 비어 docker save가 태그를 잃는다. 실을 태그를 먼저 붙인다(V-03)
     try {
       run('docker', ['image', 'inspect', '--format', '{{.Id}}', tag], { quiet: true });
     } catch {
-      step(`로컬에 ${tag}가 없어 받는다`);
-      execFileSync('docker', ['pull', '--platform', platform, tag], { stdio: 'inherit' });
+      run('docker', ['tag', ref, tag], { quiet: true });
     }
     const dir = mkdtempSync(join(tmpdir(), 'peaket-image-'));
     const archive = join(dir, 'image.tar');
     try {
       execFileSync('docker', ['save', '--platform', platform, tag, '-o', archive], { stdio: ['ignore', 'ignore', 'pipe'] });
-      await kind(['load', 'image-archive', archive, '--name', CLUSTER]);
+      importImageToNode(node, archive, tag, platform);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

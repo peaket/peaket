@@ -28,9 +28,9 @@ spec:
           - UPDATE
         resources:
           - pods
-    matchConditions:
-      - name: peaket-service-namespace
-        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  matchConditions:
+    - name: peaket-service-namespace
+      expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
   matchImageReferences:
     - glob: "*"
   validationConfigurations:
@@ -51,8 +51,6 @@ spec:
     - name: peaketSlsa
       intoto:
         type: https://slsa.dev/provenance/v1
-      attestors:
-        - name: peaketCosign
   validations:
     - expression: images.containers.map(image, verifyImageSignatures(image, [attestors.peaketCosign])).all(result, result > 0)
       message: PEAKET 이미지 서명을 확인하지 못했다(출시·핫픽스 빌드만 서명한다, docs/devops.md §4.2)
@@ -89,9 +87,9 @@ spec:
           - UPDATE
         resources:
           - pods
-    matchConditions:
-      - name: peaket-service-namespace
-        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  matchConditions:
+    - name: peaket-service-namespace
+      expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
   variables:
     - name: images
       expression: "object.spec.containers.map(c, c.image) + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers.map(c, c.image) : [])"
@@ -123,9 +121,9 @@ spec:
           - UPDATE
         resources:
           - pods
-    matchConditions:
-      - name: peaket-service-namespace
-        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  matchConditions:
+    - name: peaket-service-namespace
+      expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
   variables:
     - name: allContainers
       expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])"
@@ -177,9 +175,9 @@ spec:
           - UPDATE
         resources:
           - pods
-    matchConditions:
-      - name: peaket-service-namespace
-        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  matchConditions:
+    - name: peaket-service-namespace
+      expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
   variables:
     - name: appName
       expression: "has(object.metadata.labels) && 'app.kubernetes.io/name' in object.metadata.labels ? object.metadata.labels['app.kubernetes.io/name'] : ''"

@@ -171,9 +171,16 @@ function meta(name, env) {
 function podMatch(namespaces) {
   return {
     resourceRules: [{ apiGroups: [''], apiVersions: ['v1'], operations: ['CREATE', 'UPDATE'], resources: ['pods'] }],
-    // kube-* 같은 넓은 제외를 쓰지 않고 이름 목록으로 고정한다. 시스템·애드온 네임스페이스는 목록에 없다
-    matchConditions: [{ name: 'peaket-service-namespace', expression: `object.metadata.namespace in ${celList(namespaces)}` }],
   };
+}
+
+/**
+ * 파드에 거는 정책의 matchConditions. Kyverno v1.20의 CEL 정책 CRD는 matchConditions를 matchConstraints의 칸이 아니라
+ * spec 바로 아래에 둔다. matchConstraints 안에 넣으면 strict decoding이 모르는 칸이라며 정책 전체를 거부한다(BAT-085 V-01).
+ * kube-* 같은 넓은 제외를 쓰지 않고 이름 목록으로 고정한다. 시스템·애드온 네임스페이스는 목록에 없다
+ */
+function podMatchConditions(namespaces) {
+  return [{ name: 'peaket-service-namespace', expression: `object.metadata.namespace in ${celList(namespaces)}` }];
 }
 
 /** 정책 공통 모드 값 */
@@ -193,6 +200,7 @@ export function policiesFor(values, env) {
   const { namespaces, demoImages, hotPathWorkloads, image, environments } = values;
   const e = environments[env];
   const match = podMatch(namespaces);
+  const matchConditions = podMatchConditions(namespaces);
   const identitySubjects = image.workflowRefs.map((ref) => `${image.workflowRepository}/${image.workflowPath}@${ref}`);
 
   const imagePolicy = {
@@ -202,6 +210,7 @@ export function policiesFor(values, env) {
     spec: {
       ...common(e, env, e.failurePolicy),
       matchConstraints: match,
+      matchConditions,
       // 서명·출처 검증은 이 정책이 맡고, 허용 레지스트리는 peaket-registry-allowlist가 본다(D-T33 ⑤와 분리)
       matchImageReferences: [{ glob: '*' }],
       // required: 검증을 한 번도 하지 않은 이미지를 통과시키지 않는다. verifyDigest: 태그가 아니라 다이제스트로 검증한다
@@ -220,8 +229,8 @@ export function policiesFor(values, env) {
       attestations: [
         {
           name: 'peaketSlsa',
+          // attestations[] 항목은 name·intoto·referrer만 받는다. 서명자는 spec.attestors에 있고 검증식이 이름으로 부른다(V-01)
           intoto: { type: image.provenanceType },
-          attestors: [{ name: 'peaketCosign' }],
         },
       ],
       validations: [
@@ -277,6 +286,7 @@ export function policiesFor(values, env) {
     spec: {
       ...common(e, env, e.failurePolicy),
       matchConstraints: match,
+      matchConditions,
       variables: [
         {
           name: 'images',
@@ -316,6 +326,7 @@ export function policiesFor(values, env) {
     spec: {
       ...common(e, env, e.failurePolicy),
       matchConstraints: match,
+      matchConditions,
       variables: [
         { name: 'allContainers', expression: allContainers },
         { name: 'nodeContainers', expression: nodeFilter },
@@ -385,6 +396,7 @@ export function policiesFor(values, env) {
     spec: {
       ...common(e, env, e.failurePolicy),
       matchConstraints: match,
+      matchConditions,
       variables: [
         {
           name: 'appName',
