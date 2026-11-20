@@ -60,6 +60,26 @@ describe('지정 주기(I-T66의 identity 쪽)', () => {
     expect((await t.manage.designationsOf(CMD2)).recentlyRevoked).toEqual([]);
   });
 
+  test('C-T69_조사관(F)에게가명정보취급자를겹쳐주면CONFLICT이고반대순서도같으며_operator·cs_agent는NOT_ELIGIBLE이고_cs_lead가cs_agent로내려가면같은트랜잭션에서조사관지정을거둔다', async () => {
+    const t = harness();
+    // F: 조사관 → 가명 취급자, G: 가명 취급자 → 조사관 (둘 다 함께 둘 수 없다)
+    expect((await t.give(CMD, CMD2, 'FRAUD_INVESTIGATOR')).result).toBe('OK');
+    expect((await t.give(CMD, CMD2, 'PSEUDONYM_HANDLER')).result).toBe('DESIGNATION_CONFLICT');
+    // 반대 순서: CMD에게 가명 취급자를 준 뒤 조사관을 주면 CONFLICT
+    expect((await t.give(CMD2, CMD, 'PSEUDONYM_HANDLER')).result).toBe('OK');
+    expect((await t.give(CMD2, CMD, 'FRAUD_INVESTIGATOR')).result).toBe('DESIGNATION_CONFLICT');
+    expect((await t.give(CMD, CMD2, 'ACCESS_REVIEWER')).result).toBe('OK');
+    expect((await t.give(CMD, OPR, 'FRAUD_INVESTIGATOR')).result).toBe('DESIGNATION_TARGET_NOT_ELIGIBLE');
+    expect((await t.give(CMD, AGENT, 'FRAUD_INVESTIGATOR')).result).toBe('DESIGNATION_TARGET_NOT_ELIGIBLE');
+    // H: cs_lead I가 조사관을 받은 뒤 cs_agent로 내려가면 같은 트랜잭션에서 거둔다
+    expect((await t.give(CMD, LEAD, 'FRAUD_INVESTIGATOR')).result).toBe('OK');
+    const changed = await t.manage.changeRole({ requestId: rid(), actedBy: CMD, accountId: LEAD, role: 'cs_agent', expectedVersion: 1 });
+    expect(changed.account).toMatchObject({ role: 'cs_agent', designations: [] });
+    expect((await t.manage.designationsOf(LEAD)).recentlyRevoked).toEqual([{ kind: 'FRAUD_INVESTIGATOR', revokedAt: t.clock.now() }]);
+    // 지정이 없는 operator·cs_agent에게는 지정 자체가 422다
+    expect((await t.give(CMD, OPR, 'ACCESS_REVIEWER')).result).toBe('DESIGNATION_TARGET_NOT_COMMANDER');
+  });
+
   test('요청자는활성commander여야하고_자기계정은SELF_TARGET·없는대상은NOT_FOUND·활성아닌대상은NOT_ELIGIBLE·근거꼴은입력오류다', async () => {
     const t = harness();
     expect((await t.give(OPR, LEAD, 'FRAUD_INVESTIGATOR')).result).toBe('ROLE_NOT_ALLOWED');

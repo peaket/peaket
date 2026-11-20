@@ -1156,3 +1156,77 @@ test('RV-05 D-T32 ② actions/cache/restore·save 하위 경로도 빌드 잡에
   }
 });
 
+
+// ===================== DAST 야간·보안 검사 예약 실패 알림(BAT-045 BOT-161, ADR-0323) =====================
+
+const wfFile = (n) => join(REPO, '.github', 'workflows', n);
+const wfText = (n) => readFileSync(wfFile(n), 'utf8');
+const wfDoc = (n) => YAML.parse(wfText(n));
+
+test('BOT-161 dast-nightly.yml은 예약(03:00 KST)·수동·workflow_call에만 돌고 PR마다 돌지 않는다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const d = wfDoc('dast-nightly.yml');
+  assert.deepEqual(d.on.schedule, [{ cron: '0 18 * * *' }], '03:00 KST [가정] 예약이 아니다');
+  assert.ok('workflow_dispatch' in d.on);
+  assert.ok('workflow_call' in d.on);
+  assert.ok(!('pull_request' in d.on) && !('push' in d.on), 'PR·푸시마다 돈다');
+  assert.equal(d.permissions.contents, 'read');
+});
+
+test('BOT-161 dast-nightly.yml은 kind에 v0·게이트웨이를 올리고 www·api·partner만 ZAP으로 점검하며 ops-api·scanner-api는 뺀다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const d = wfDoc('dast-nightly.yml');
+  const steps = d.jobs.dast.steps;
+  const runs = steps.map((s) => s.run ?? '').join('\n');
+  for (const cmd of ['node tools/local/cluster.mjs up', 'node tools/local/cluster.mjs v0', 'node tools/local/cluster.mjs gateways']) assert.ok(runs.includes(cmd), `${cmd}가 없다`);
+  assert.match(runs, /node tools\/ci\/scan-tools\.mjs dast/, 'ZAP 점검을 부르지 않는다');
+  assert.match(runs, /node tools\/ci\/dast-gate\.mjs --report/, 'dast-gate 판정이 없다');
+  assert.match(runs, /node tools\/ci\/scan-gate\.mjs --tool zap/, 'High 7.0 판정(scan-gate --tool zap)이 없다');
+  for (const host of ['www.peaket.example', 'api.peaket.example', 'partner.peaket.example']) assert.ok(runs.includes(host), `${host}를 점검하지 않는다`);
+  assert.doesNotMatch(runs, /ops-api\.peaket\.example|scanner-api\.peaket\.example/, '관제·스캐너 입구까지 점검한다');
+  assert.match(runs, /run_one www /);
+  assert.match(runs, /run_one api /);
+  assert.match(runs, /run_one partner /);
+  // 결과는 산출물로 남긴다
+  const artifact = steps.find((s) => String(s.uses ?? '').startsWith('actions/upload-artifact@'));
+  assert.ok(artifact, '산출물 업로드가 없다');
+  assert.ok(String(artifact.uses).split('@')[1].match(/^[0-9a-f]{40}$/), '산출물 액션이 SHA 고정이 아니다');
+  assert.match(String(artifact.with.path), /\$\{\{ runner\.temp \}\}\/dast\//);
+});
+
+test('BOT-161 dast-nightly.yml의 예약 실패만 SEV3 이슈를 열고, issues: write는 그 잡에만 있다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const d = wfDoc('dast-nightly.yml');
+  const withIssues = Object.entries(d.jobs).filter(([, j]) => j.permissions?.['issues'] === 'write');
+  assert.deepEqual(withIssues.map(([name]) => name), ['notify-scheduled-failure']);
+  const notify = d.jobs['notify-scheduled-failure'];
+  assert.deepEqual(notify.needs, ['dast']);
+  assert.match(String(notify.if), /failure\(\)/);
+  assert.match(String(notify.if), /github\.event_name == 'schedule'/);
+  const run = notify.steps.map((s) => s.run ?? '').join('\n');
+  assert.match(run, /gh issue create/);
+  assert.match(run, /\[SEV3\]/);
+  assert.match(run, /dast-zap/);
+});
+
+test('BOT-161 security-scan.yml은 예약 실행에도 issues: write를 두지 않고(workflow_call 권한 규칙), security-scan-notify.yml이 예약 실패만 SEV3 이슈로 연다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const scan = YAML.parse(wfText('security-scan.yml'));
+  assert.ok(!JSON.stringify(scan).includes('issues: write'), 'security-scan.yml에 issues: write가 있다(부르는 쪽 권한을 넘는다)');
+  const notify = wfDoc('security-scan-notify.yml');
+  assert.deepEqual(notify.on.workflow_run.workflows, ['security-scan']);
+  assert.deepEqual(notify.on.workflow_run.types, ['completed']);
+  const job = notify.jobs.notify;
+  assert.match(String(job.if), /conclusion == 'failure'/);
+  assert.match(String(job.if), /event == 'schedule'/);
+  assert.equal(job.permissions['issues'], 'write');
+  const run = job.steps.map((s) => s.run ?? '').join('\n');
+  assert.match(run, /gh issue create/);
+  assert.match(run, /\[SEV3\]/);
+});
+
+test('BOT-161 두 워크플로의 모든 actions는 40자리 SHA로 고정된다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  for (const name of ['dast-nightly.yml', 'security-scan-notify.yml', 'security-scan.yml']) {
+    for (const m of wfText(name).matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)) {
+      const ref = m[1];
+      if (ref.startsWith('./')) continue;
+      assert.match(ref, /@[0-9a-f]{40}$/, `${name}: ${ref}가 SHA 고정이 아니다`);
+    }
+  }
+});

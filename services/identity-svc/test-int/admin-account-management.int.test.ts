@@ -140,3 +140,16 @@ test('PostgreSQL에서_지운계정은마지막접속·유출대조·잠금·셈
   expect(await q('select 1 from admin_unlock_link where admin_account_id = $1', [v])).toHaveLength(0);
   expect(await q('select 1 from admin_login_step where admin_account_id = $1', [v])).toHaveLength(0);
 });
+
+test('AZ-T14 ④ [ASVS v5.0.0-8.2.2] 지정을 거둔 직후 그 계정의 지정 조회는 캐시 없이 바로 비고, 분석 경로의 권한 판정이 같은 요청에서 403(지정 없음)이 된다', async () => {
+  const store = new DrizzleAdminAccountStore(database, clock);
+  const manage = new ManageAdminAccounts(store, clock);
+  const f = '0190f3a1-7c2e-7a00-8000-00000000c040';
+  await store.create({ id: f, role: 'commander', email: 'investigator@peaket.example', status: 'ACTIVE', now: clock.now() });
+  expect((await manage.designate({ requestId: 'az14-1', actedBy: CMD, accountId: f, kind: 'FRAUD_INVESTIGATOR', basis: '조사관 지정서 2026-11' })).result).toBe('OK');
+  expect((await manage.designationsOf(f)).kinds).toContain('FRAUD_INVESTIGATOR');
+  expect((await manage.revokeDesignation({ requestId: 'az14-2', actedBy: CMD, accountId: f, kind: 'FRAUD_INVESTIGATOR' })).result).toBe('OK');
+  // 캐시 5초를 기다리지 않고 바로 읽는다(분석 실버 경로가 요청마다 읽는 자리)
+  expect((await manage.designationsOf(f)).kinds).toEqual([]);
+  expect((await manage.designationsOf(f)).recentlyRevoked).toEqual([{ kind: 'FRAUD_INVESTIGATOR', revokedAt: clock.now() }]);
+});

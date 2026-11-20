@@ -133,7 +133,7 @@ describe('gRPC AdminAccountService(BOT-150)', () => {
 });
 
 describe('파트너 팀 계정 REST(GET /v1/partner/team-accounts)', () => {
-  test('partner_admin은자기파트너사의지우지않은계정만가린이메일로받고계정ID는없으며캐시하지않고_partner_member는403·틀린커서는400이다', async () => {
+  test('AZ-T14 ⑥ partner_admin은자기파트너사의지우지않은계정만가린이메일로받고계정ID는없으며캐시하지않고_partner_member는403·틀린커서는400이다', async () => {
     const pa = '0190f3a1-7c2e-7a00-8000-00000000e110';
     const pm = '0190f3a1-7c2e-7a00-8000-00000000e111';
     store.create({ id: pa, role: 'partner_admin', email: 'boss@stella.example', status: 'ACTIVE', promoterId: PROMOTER, displayName: '대표 담당', now: clock.now() });

@@ -14,6 +14,7 @@ import { AppModule } from '../src/app.module.js';
 import { ephemeralAuditAnchorSigner } from '../src/modules/audit/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { adminAccountsForCommands, reauthFor } from './reauth.js';
 
 const NOW = Date.parse('2026-11-15T03:00:00.000Z');
 const identity = new FakeIdentity();
@@ -31,7 +32,7 @@ const callOrder: string[] = [];
 
 const bodyOf = (raw: string): Record<string, unknown> => (raw ? (JSON.parse(raw) as Record<string, unknown>) : {});
 const post = (url: string, headers: Record<string, string>, body: unknown) =>
-  svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  svc.http.inject({ method: 'POST', url, headers: { ...reauthFor(url, headers), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 
 beforeAll(async () => {
@@ -72,7 +73,7 @@ beforeAll(async () => {
   });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db, executor, nowMs: NOW, signer: ephemeralAuditAnchorSigner('it') }),
+    module: AppModule.register({ database: db, executor, nowMs: NOW, signer: ephemeralAuditAnchorSigner('it'), adminAccounts: adminAccountsForCommands }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),

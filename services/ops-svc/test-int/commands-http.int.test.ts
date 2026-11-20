@@ -8,6 +8,7 @@ import { migrateOps } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { adminAccountsForCommands, reauthFor } from './reauth.js';
 
 const NOW = Date.parse('2026-11-14T01:00:00.000Z');
 const identity = new FakeIdentity();
@@ -21,7 +22,7 @@ beforeAll(async () => {
   db = createDatabase({ url: container.url, applicationName: 'ops-svc-http-it' });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db }),
+    module: AppModule.register({ database: db, adminAccounts: adminAccountsForCommands }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -36,7 +37,7 @@ afterAll(async () => {
 });
 
 const post = (url: string, headers: Record<string, string>, body: unknown) =>
-  svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  svc.http.inject({ method: 'POST', url, headers: { ...reauthFor(url, headers), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 
 describe('/v1/ops/commands 실제 DB HTTP', () => {

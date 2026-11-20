@@ -16,6 +16,7 @@ import { AppModule } from '../src/app.module.js';
 import { DrizzleCommandStore } from '../src/modules/commands/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { adminAccountsForCommands, reauthFor } from './reauth.js';
 
 const NOW = Date.parse('2026-11-14T08:00:00.000Z');
 const identity = new FakeIdentity();
@@ -71,7 +72,7 @@ beforeAll(async () => {
   });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db, executor, nowMs: NOW }),
+    module: AppModule.register({ database: db, executor, nowMs: NOW, adminAccounts: adminAccountsForCommands }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -93,7 +94,7 @@ afterAll(async () => {
 const q = <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params?: unknown[]) => admin.query<R>(text, params);
 const count = async (text: string, params: unknown[] = []): Promise<number> => Number((await q<{ n: string }>(text, params)).rows[0]!.n);
 const post = (url: string, headers: Record<string, string>, body: unknown) =>
-  svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  svc.http.inject({ method: 'POST', url, headers: { ...reauthFor(url, headers), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 
 const createScale = async (operator: Record<string, string>, eventId: string) => {

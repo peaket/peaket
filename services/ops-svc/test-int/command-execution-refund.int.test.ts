@@ -11,6 +11,7 @@ import type { EventRefundStarter } from '../src/adapters/grpc-event-refunds.js';
 import { AppModule } from '../src/app.module.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { adminAccountsForCommands, reauthFor } from './reauth.js';
 
 const NOW = Date.parse('2026-11-15T01:00:00.000Z');
 const identity = new FakeIdentity();
@@ -48,7 +49,7 @@ beforeAll(async () => {
   const executor = new HttpCommandExecutor({ refunds });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db, executor, nowMs: NOW }),
+    module: AppModule.register({ database: db, executor, nowMs: NOW, adminAccounts: adminAccountsForCommands }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -64,7 +65,7 @@ afterAll(async () => {
 });
 
 const post = (url: string, headers: Record<string, string>, body: unknown) =>
-  svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  svc.http.inject({ method: 'POST', url, headers: { ...reauthFor(url, headers), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 
 describe('BAT-425 회차 취소 환불 명령', () => {
   test('GAT130_EVENT_CANCEL_2인_승인은_gRPC_Start로_가고_SUCCEEDED다', async () => {

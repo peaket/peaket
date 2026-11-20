@@ -21,6 +21,7 @@ import { DRY_RUN, JOB, fakeReauth, tokenFor } from '../test/event-cancellation-f
 import type { EventRefundHolds } from '../src/modules/event-cancellations/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { adminAccountsForCommands, reauthFor } from './reauth.js';
 // BAT-420-rest R-T41 ③(시험 담당 l3-b420-test)
 import { DrizzleEventCancellationStore, EventCancellations } from '../src/modules/event-cancellations/index.js';
 import { HttpCoreEventStatus } from '../src/adapters/http-core-event-status.js';
@@ -115,7 +116,7 @@ beforeAll(async () => {
   );
   svc = await createService({
     name: 'ops-svc-event-cancellations',
-    module: AppModule.register({ database: db, nowMs: NOW, executor: commandExecutor, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, owners: ownerLookup, holds: intHolds } }),
+    module: AppModule.register({ database: db, nowMs: NOW, executor: commandExecutor, adminAccounts: adminAccountsForCommands, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, owners: ownerLookup, holds: intHolds } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),
@@ -135,7 +136,7 @@ afterAll(async () => {
 
 type Headers = Record<string, string>;
 const post = (url: string, headers: Headers, body: unknown) =>
-  svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  svc.http.inject({ method: 'POST', url, headers: { ...reauthFor(url, headers), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Headers) => svc.http.inject({ method: 'GET', url, headers });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 /** 재인증 토큰(act APPROVAL·패스키)과 새 멱등 키를 붙인다 */
@@ -693,6 +694,7 @@ describe('R-T41 ③ core 반영 표시와 다시 하기 잡기 실제 DB [BAT-42
         database: db,
         nowMs: NOW,
         executor: commandExecutor,
+        adminAccounts: adminAccountsForCommands,
         eventCancellations: {
           refunds,
           reauth: fakeReauth(),
@@ -745,6 +747,7 @@ describe('R-T41 ⑥·③ 같은 회차의 대체 표시와 실제 어댑터 연�
         database: db,
         nowMs: NOW,
         executor: commandExecutor,
+        adminAccounts: adminAccountsForCommands,
         eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper: { stop: async () => undefined }, owners: ownerLookup, holds: intHolds, core },
       }),
       env: { PEAKET_ENV: 'ci' },
@@ -826,6 +829,7 @@ describe('R-T41 ⑥ 늘 503인 요청 21건과 새 요청 실제 DB [BAT-420-res
         database: db,
         nowMs: NOW,
         executor: commandExecutor,
+        adminAccounts: adminAccountsForCommands,
         eventCancellations: {
           refunds,
           reauth: fakeReauth(),

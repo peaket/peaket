@@ -159,8 +159,15 @@ export function probe(c, gw, { tokenValue, headers = {}, event = 'e2e-event', ad
   return send(c, p.host, { method: p.method ?? 'GET', path: p.path.replaceAll('{event}', event), headers: { ...auth, ...adm, ...headers } });
 }
 
-/** CloudFront 몫(원본 확인 머리·x-forwarded-for)을 시험 클라이언트가 붙인다(bot-defense B-T18 '앞단') */
-export const edge = (c, ip, extra = {}) => ({ 'x-peaket-origin-verify': c.originVerify, 'x-forwarded-for': ip, ...extra });
+/** CloudFront 몫(원본 확인 머리·x-forwarded-for)을 시험 클라이언트가 붙인다(bot-defense B-T18 '앞단').
+ * viewer를 주면 CloudFront-Viewer-Address(IPv4, IP:port)도 붙인다(gw-ops 허용 IP 시험, ADR-0321).
+ * 주지 않으면 x-forwarded-for와 같은 값을 쓴다(기존 시험의 gw-ops 요청이 허용 IP(127.0.0.0/8·203.0.113.0/24)를 지나게) */
+export const edge = (c, ip, extra = {}, viewer = ip) => ({
+  'x-peaket-origin-verify': c.originVerify,
+  'x-forwarded-for': ip,
+  'cloudfront-viewer-address': String(viewer).includes(':') ? String(viewer) : `${viewer}:443`,
+  ...extra,
+});
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

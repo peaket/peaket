@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { UnavailableAdminIdentity } from '../src/modules/admin-accounts/index.js';
 import type { Command, CommandExecutor } from '../src/modules/commands/index.js';
 import type { EventRefundReader, EventRefundStarter, EventSaleStopper } from '../src/modules/event-cancellations/index.js';
 import { DRY_RUN, JOB, NOW, fakeReauth, okHolds, tokenFor } from './event-cancellation-fixtures.js';
@@ -41,7 +42,7 @@ let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, executor, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, holds: okHolds() } }),
+    module: AppModule.register({ memory: true, executor, adminAccounts: { identity: new UnavailableAdminIdentity(), reauth: fakeReauth() }, eventCancellations: { refunds, reauth: fakeReauth(), reader, stopper, holds: okHolds() } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -57,12 +58,14 @@ const post = (url: string, headers: Headers, body: unknown) => svc.http.inject({
 const get = (url: string, headers: Headers) => svc.http.inject({ method: 'GET', url, headers });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const withReauth = (who: Headers, key: string = randomUUID()): Headers => ({ ...who, 'idempotency-key': key, 'x-reauth-token': tokenFor(who['x-user-id']!) });
+/** 위험 명령(2인 승인·멈추는 쪽)은 act=OPS_COMMAND 토큰을 함께 보낸다(BAT-045 BOT-140) */
+const withCommandReauth = (who: Headers): Headers => ({ ...who, 'x-reauth-token': tokenFor(who['x-user-id']!, { act: 'OPS_COMMAND' }) });
 
 /** 실제 운영 명령 SALE_STOP(2인 승인)으로 판매를 멈춘다 */
 async function suspend(eventId: string): Promise<void> {
-  const created = await post('/v1/ops/commands', identity.ops('commander'), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId, reasonCode: 'LEGAL_REQUEST' } });
+  const created = await post('/v1/ops/commands', withCommandReauth(identity.ops('commander')), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId, reasonCode: 'LEGAL_REQUEST' } });
   expect(created.statusCode).toBe(201);
-  const approved = await post(`/v1/ops/commands/${json(created).commandId as string}/approvals`, identity.ops('commander'), {});
+  const approved = await post(`/v1/ops/commands/${json(created).commandId as string}/approvals`, withCommandReauth(identity.ops('commander')), {});
   expect(json(approved).state).toBe('SUCCEEDED');
 }
 
@@ -184,7 +187,7 @@ describe('/v1/ops/event-cancellations [BAT-420 GAT-110]', () => {
   test('R-T37 ⑤ 회차 취소가 확정된 회차의 판매 재개 명령은 만들 때 409 event-cancelled이고 확정 전에 만든 재개는 실행 때 FAILED다(HTTP)', async () => {
     const eventId = randomUUID();
     await suspend(eventId);
-    const early = await post('/v1/ops/commands', identity.ops('commander'), { type: 'SALE_RESUME', reason: '판매 재개 준비', params: { eventId } });
+    const early = await post('/v1/ops/commands', withCommandReauth(identity.ops('commander')), { type: 'SALE_RESUME', reason: '판매 재개 준비', params: { eventId } });
     expect(early.statusCode).toBe(201);
     expect(json(early).state).toBe('PENDING_APPROVAL');
     const commander = identity.ops('commander');
@@ -193,16 +196,16 @@ describe('/v1/ops/event-cancellations [BAT-420 GAT-110]', () => {
     await post(`/v1/ops/event-cancellations/${requestId}/judgement`, commander, { fault: 'ORGANIZER', reason: '주최 측 귀책', fanNoticeReason: '공연이 취소되었습니다' });
     expect(json(await post(`/v1/ops/event-cancellations/${requestId}/approvals`, withReauth(identity.ops('operator')), {})).status).toBe('RUNNING');
 
-    const late = await post('/v1/ops/commands', identity.ops('commander'), { type: 'SALE_RESUME', reason: '판매 재개', params: { eventId } });
+    const late = await post('/v1/ops/commands', withCommandReauth(identity.ops('commander')), { type: 'SALE_RESUME', reason: '판매 재개', params: { eventId } });
     expect(late.statusCode).toBe(409);
     expect(json(late).type).toMatch(/event-cancelled$/);
 
-    const approved = await post(`/v1/ops/commands/${json(early).commandId as string}/approvals`, identity.ops('commander'), {});
+    const approved = await post(`/v1/ops/commands/${json(early).commandId as string}/approvals`, withCommandReauth(identity.ops('commander')), {});
     expect(approved.statusCode).toBe(200);
     expect(json(approved)).toMatchObject({ state: 'FAILED', lastError: 'event-cancelled' });
     expect(executed.filter((x) => x.type === 'SALE_RESUME')).toEqual([]);
     // 판매 중지는 막지 않는다
-    expect((await post('/v1/ops/commands', identity.ops('commander'), { type: 'SALE_STOP', reason: '판매 중지 다시', params: { eventId, reasonCode: 'OTHER' } })).statusCode).toBe(201);
+    expect((await post('/v1/ops/commands', withCommandReauth(identity.ops('commander')), { type: 'SALE_STOP', reason: '판매 중지 다시', params: { eventId, reasonCode: 'OTHER' } })).statusCode).toBe(201);
   });
 
   // BAT-420-rest 리뷰 반영 RV-05 재현(시험 담당 l3-b420-test, 2026-11-19): 정본 payment §6 '계좌 대기' 끝·transfer-refund §11 R-T40 ⑤

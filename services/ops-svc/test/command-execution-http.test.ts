@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { UnavailableAdminIdentity } from '../src/modules/admin-accounts/index.js';
+import { fakeReauth, tokenFor } from './event-cancellation-fixtures.js';
 import { FakeIdentity, quiet } from './support.js';
 import type { CommandExecutionResult, CommandExecutor } from '../src/modules/commands/index.js';
 
@@ -26,7 +28,7 @@ const executor: CommandExecutor = {
 beforeAll(async () => {
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, executor, nowMs: NOW }),
+    module: AppModule.register({ memory: true, executor, nowMs: NOW, adminAccounts: { identity: new UnavailableAdminIdentity(), reauth: fakeReauth() } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -40,6 +42,8 @@ afterAll(async () => {
 const post = (url: string, headers: Record<string, string>, body: unknown) =>
   svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
+/** 위험 명령(EVENT_CANCEL은 2인 승인)은 X-Reauth-Token(act=OPS_COMMAND)을 함께 보낸다(BAT-045 BOT-140) */
+const withReauth = (h: Record<string, string>) => ({ ...h, 'x-reauth-token': tokenFor(h['x-user-id']!, { act: 'OPS_COMMAND' }) });
 
 describe('BAT-465 명령 실행·감사 체크포인트', () => {
   test('GAT300_SCALE_CHANGE는_접수_뒤_실행되어_SUCCEEDED다', async () => {
@@ -54,14 +58,14 @@ describe('BAT-465 명령 실행·감사 체크포인트', () => {
   test('GAT300_EVENT_CANCEL은_2인_승인_뒤_실행되고_실패는_재시도한다', async () => {
     const operator = identity.ops('operator');
     const commander = identity.ops('commander');
-    const created = await post('/v1/ops/commands', operator, { type: 'EVENT_CANCEL', reason: '회차 취소', params: { eventId: randomUUID(), fault: 'ORGANIZER' } });
+    const created = await post('/v1/ops/commands', withReauth(operator), { type: 'EVENT_CANCEL', reason: '회차 취소', params: { eventId: randomUUID(), fault: 'ORGANIZER' } });
     expect(created.statusCode).toBe(201);
     const { commandId } = JSON.parse(created.payload) as { commandId: string };
     failNext = true;
-    const approved = await post(`/v1/ops/commands/${commandId}/approvals`, commander, {});
+    const approved = await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(commander), {});
     expect(approved.statusCode).toBe(200);
     expect(JSON.parse(approved.payload)).toMatchObject({ commandId, state: 'FAILED', lastError: 'core-svc 409', attempts: 1 });
-    const retried = await post(`/v1/ops/commands/${commandId}/retries`, commander, {});
+    const retried = await post(`/v1/ops/commands/${commandId}/retries`, withReauth(commander), {});
     expect(retried.statusCode).toBe(200);
     expect(JSON.parse(retried.payload)).toMatchObject({ commandId, state: 'SUCCEEDED', attempts: 2 });
   });

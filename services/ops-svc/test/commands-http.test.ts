@@ -4,6 +4,8 @@ import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import { UnavailableAdminIdentity } from '../src/modules/admin-accounts/index.js';
+import { fakeReauth, tokenFor } from './event-cancellation-fixtures.js';
 import { FakeIdentity, quiet } from './support.js';
 
 const NOW = Date.parse('2026-11-14T01:00:00.000Z');
@@ -11,19 +13,28 @@ const identity = new FakeIdentity();
 let svc: Awaited<ReturnType<typeof createService>>;
 
 beforeAll(async () => {
-  svc = await createService({ name: 'ops-svc', module: AppModule.register({ memory: true }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW }), logDestination: quiet(), adminAuthz: identity });
+  svc = await createService({
+    name: 'ops-svc',
+    module: AppModule.register({ memory: true, adminAccounts: { identity: new UnavailableAdminIdentity(), reauth: fakeReauth() } }),
+    env: { PEAKET_ENV: 'ci' },
+    clock: fakeClock({ now: NOW }),
+    logDestination: quiet(),
+    adminAuthz: identity,
+  });
 });
 afterAll(async () => {
   await svc?.close();
 });
 
+/** 위험 명령(2인 승인·멈추는 쪽 3·11)은 X-Reauth-Token(act=OPS_COMMAND)을 함께 보낸다(BAT-045 BOT-140) */
+const withReauth = (h: Record<string, string>) => ({ ...h, 'x-reauth-token': tokenFor(h['x-user-id']!, { act: 'OPS_COMMAND' }) });
 const post = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 
 describe('/v1/ops/commands', () => {
   test('GAT110_commander가_2인_명령을_접수하면_PENDING_APPROVAL이다', async () => {
     const commander = identity.ops('commander');
-    const r = await post('/v1/ops/commands', commander, { type: 'BOT_LEVEL', reason: '봇 급증', params: { level: 'AGGRESSIVE' } });
+    const r = await post('/v1/ops/commands', withReauth(commander), { type: 'BOT_LEVEL', reason: '봇 급증', params: { level: 'AGGRESSIVE' } });
     expect(r.statusCode).toBe(201);
     expect(JSON.parse(r.payload)).toMatchObject({
       type: 'BOT_LEVEL',
@@ -37,17 +48,17 @@ describe('/v1/ops/commands', () => {
   test('B3H01_operator는_commander_전용_명령을_요청하거나_승인할_수_없다', async () => {
     const operator = identity.ops('operator');
     const commander = identity.ops('commander');
-    expect((await post('/v1/ops/commands', operator, { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } })).statusCode).toBe(403);
-    expect((await post('/v1/ops/commands', operator, { type: 'KILL_SWITCH', reason: '긴급 정지', params: {} })).statusCode).toBe(403);
-    const created = await post('/v1/ops/commands', commander, { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
+    expect((await post('/v1/ops/commands', withReauth(operator), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } })).statusCode).toBe(403);
+    expect((await post('/v1/ops/commands', withReauth(operator), { type: 'KILL_SWITCH', reason: '긴급 정지', params: {} })).statusCode).toBe(403);
+    const created = await post('/v1/ops/commands', withReauth(commander), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
     expect(created.statusCode).toBe(201);
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     expect(JSON.parse(created.payload)).toMatchObject({ state: 'PENDING_APPROVAL' });
-    expect((await post(`/v1/ops/commands/${commandId}/approvals`, operator, {})).statusCode).toBe(403);
+    expect((await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(operator), {})).statusCode).toBe(403);
     const detail = await get(`/v1/ops/commands/${commandId}`, operator);
     expect(JSON.parse(detail.payload)).toMatchObject({ canApprove: false });
     const approver = identity.ops('commander');
-    const approved = await post(`/v1/ops/commands/${commandId}/approvals`, approver, {});
+    const approved = await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(approver), {});
     expect(approved.statusCode).toBe(200);
   });
 
@@ -73,26 +84,26 @@ describe('/v1/ops/commands', () => {
     expect((await get('/v1/ops/commands', viewer)).statusCode).toBe(200);
     expect((await get('/v1/ops/commands?limit=101', viewer)).statusCode).toBe(400);
     expect((await post('/v1/ops/commands', viewer, { type: 'LOG_LEVEL', reason: 'x' })).statusCode).toBe(403);
-    const created = await post('/v1/ops/commands', identity.ops('commander'), { type: 'BOT_LEVEL', reason: '권한 확인' });
+    const created = await post('/v1/ops/commands', withReauth(identity.ops('commander')), { type: 'BOT_LEVEL', reason: '권한 확인' });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
-    expect((await post(`/v1/ops/commands/${commandId}/approvals`, viewer, {})).statusCode).toBe(403);
+    expect((await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(viewer), {})).statusCode).toBe(403);
   });
 
   test('GAT110_다른_commander가_승인하면_APPROVED이고_요청자는_승인할_수_없다', async () => {
     const requester = identity.ops('commander');
-    const created = await post('/v1/ops/commands', requester, { type: 'DEGRADED_MODE', reason: '결제사 장애', params: { mode: 'PAYMENT' } });
+    const created = await post('/v1/ops/commands', withReauth(requester), { type: 'DEGRADED_MODE', reason: '결제사 장애', params: { mode: 'PAYMENT' } });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
-    const same = await post(`/v1/ops/commands/${commandId}/approvals`, requester, {});
+    const same = await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(requester), {});
     expect(same.statusCode).toBe(403);
     const approver = identity.ops('commander');
-    const approved = await post(`/v1/ops/commands/${commandId}/approvals`, approver, {});
+    const approved = await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(approver), {});
     expect(approved.statusCode).toBe(200);
     expect(JSON.parse(approved.payload)).toMatchObject({ commandId, state: 'APPROVED', approvals: [approver['x-user-id']] });
   });
 
   test('GAT110_거부는_사유를_남기고_REJECTED다', async () => {
     const requester = identity.ops('operator');
-    const created = await post('/v1/ops/commands', requester, { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: { asn: 1234 } });
+    const created = await post('/v1/ops/commands', withReauth(requester), { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: { asn: 1234 } });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     const approver = identity.ops('operator');
     const rejected = await post(`/v1/ops/commands/${commandId}/rejections`, approver, { reason: '근거 부족' });

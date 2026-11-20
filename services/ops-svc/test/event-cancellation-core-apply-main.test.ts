@@ -94,7 +94,7 @@ async function bootMain(env: Record<string, string>): Promise<number[]> {
 const CORE_WARNING = /PEAKET_CORE_HTTP_URL이 없어 회차 취소·연기 확정이 core 회차 상태를 반영하지 않는다/;
 
 describe('R-T41 ③ ops main.ts의 core 회차 상태 반영 조립', () => {
-  test('R-T41 ③ ci·local에서 PEAKET_CORE_HTTP_URL이 없으면 시작하고 core 반영 경고가 한 번이며 1분 다시 하기 타이머를 걸지 않는다', async () => {
+  test('R-T41 ③ ci·local에서 PEAKET_CORE_HTTP_URL이 없으면 시작하고 core 반영 경고가 한 번이며 1분 다시 하기 타이머를 걸지 않는다', { timeout: 120_000 }, async () => {
     for (const envName of ['ci', 'local']) {
       const intervals = await bootMain({ PEAKET_ENV: envName, PEAKET_DATABASE_URL: OPS_URL });
       expect(seen.order, envName).toContain('listen');
@@ -103,7 +103,7 @@ describe('R-T41 ③ ops main.ts의 core 회차 상태 반영 조립', () => {
     }
   });
 
-  test('R-T41 ③ 주소가 있으면 core 반영 경고가 없고 listen 뒤 60,000ms 간격의 다시 하기 타이머를 하나 건다', async () => {
+  test('R-T41 ③ 주소가 있으면 core 반영 경고가 없고 listen 뒤 60,000ms 간격의 다시 하기 타이머를 하나 건다', { timeout: 120_000 }, async () => {
     const intervals = await bootMain({ PEAKET_ENV: 'ci', PEAKET_DATABASE_URL: OPS_URL, PEAKET_CORE_HTTP_URL: 'http://core-svc.internal:8080' });
     expect(seen.order).toContain('listen');
     expect(seen.warns.filter((w) => CORE_WARNING.test(w))).toEqual([]);

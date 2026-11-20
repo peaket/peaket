@@ -12,6 +12,7 @@ import { HttpCommandExecutor } from '../src/adapters/http-command-executor.js';
 import { AppModule } from '../src/app.module.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { adminAccountsForCommands, reauthFor } from './reauth.js';
 
 const NOW = Date.parse('2026-11-14T08:00:00.000Z');
 const identity = new FakeIdentity();
@@ -44,7 +45,7 @@ beforeAll(async () => {
   const executor = new HttpCommandExecutor({ purchase: createExternalHttpClient({ provider: 'purchase-svc', baseUrl: `http://127.0.0.1:${port}`, timeoutCapMs: 5_000 }) });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db, executor, nowMs: NOW }),
+    module: AppModule.register({ database: db, executor, nowMs: NOW, adminAccounts: adminAccountsForCommands }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -61,7 +62,7 @@ afterAll(async () => {
 });
 
 const post = (url: string, headers: Record<string, string>, body: unknown) =>
-  svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  svc.http.inject({ method: 'POST', url, headers: { ...reauthFor(url, headers), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 
 const createEventCancel = async (operator: Record<string, string>, eventId: string) => {
   const r = await post('/v1/ops/commands', operator, { type: 'EVENT_CANCEL', reason: '회차 취소', params: { eventId, fault: 'ORGANIZER', fanNoticeReason: '공연 취소' } });

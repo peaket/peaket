@@ -770,3 +770,85 @@ test('공용 차트의 CI 값 파일은 템플릿의 required 값을 모두 채�
   // 지금 차트의 fail 수(값 꼴·태그 환경·HPA 넷·이그레스 칸, 갈래 1 PRF-215가 더한 Lease 이름·볼륨·추가 포트 검사, BAT-075 진단 수집 다섯). 늘면 위 목록에 그 조건을 더한다
   assert.equal(failCount, 35, `fail ${failCount}개`);
 });
+
+// ===================== ZAP 기준선(DAST, BAT-045 BOT-161, ADR-0323) =====================
+
+const zapReport = (riskcodes) => ({
+  site: [
+    {
+      '@name': 'https://decoy.example',
+      alerts: riskcodes.map((riskcode, i) => ({ pluginid: String(40000 + i), alert: `부류 ${i}`, name: `부류 ${i}`, riskcode, instances: [{ uri: `https://decoy.example/${i}` }] })),
+    },
+  ],
+});
+
+/** 가짜 docker: 인자에서 -v <out>:/zap/wrk와 -J <report>를 읽어 그 자리에 결과를 쓴다 */
+function fakeDastDocker(riskcodesOf) {
+  const calls = [];
+  const docker = async (args) => {
+    calls.push(args);
+    const v = args[args.indexOf('-v') + 1];
+    const out = v.slice(0, v.indexOf(':/zap/wrk'));
+    const report = args[args.indexOf('-J') + 1];
+    writeFileSync(join(out, report), JSON.stringify(zapReport(riskcodesOf(report))));
+    return { code: 0 };
+  };
+  return { calls, docker };
+}
+
+test('BOT-161 PINS.zap은 공식 이미지·판·다이제스트를 함께 두고, DAST 인자는 태그가 아니라 다이제스트 이미지를 네트워크 밖으로 띄운다', async () => {
+  const { DAST_DECOY_PATHS, DECOY_EXIT, PINS: p, dastArgs, zapImage } = await import('./scan-tools.mjs');
+  assert.equal(p.zap.image, 'zaproxy/zap-stable');
+  assert.equal(p.zap.version, '2.17.0');
+  assert.equal(p.zap.tag, '2.17.0');
+  assert.match(p.zap.digest, /^sha256:[0-9a-f]{64}$/);
+  assert.ok(Object.isFrozen(p.zap));
+  assert.equal(zapImage(p), `zaproxy/zap-stable@${p.zap.digest}`);
+  assert.ok(!zapImage(p).includes(':2.17.0'), '태그로 이미지를 가리킨다');
+  assert.equal(DECOY_EXIT, 3);
+  assert.deepEqual([...DAST_DECOY_PATHS], ['/.git/config', '/WEB-INF/web.xml', '/server-status', '/phpinfo.php']);
+
+  const out = tempDir('dast-args-');
+  const plain = dastArgs({ target: 'https://127.0.0.1:18442/', out });
+  assert.ok(plain.includes('--network'), '네트워크 밖으로 띄우지 않는다');
+  assert.equal(plain[plain.indexOf('--network') + 1], 'host');
+  assert.ok(plain.includes(zapImage(p)), '다이제스트 이미지가 아니다');
+  assert.ok(!plain.some((a) => /^zaproxy\/zap-stable:/.test(a)), '태그 이미지를 쓴다');
+  assert.equal(plain[plain.indexOf('-J') + 1], 'zap.json');
+  assert.equal(plain[plain.indexOf('-t') + 1], 'https://127.0.0.1:18442/');
+  assert.ok(!plain.includes('--add-host'), 'host를 주지 않았는데 --add-host가 붙었다');
+
+  const routed = dastArgs({ target: 'https://127.0.0.1:18442/', out, host: 'api.peaket.example' });
+  assert.equal(routed[routed.indexOf('-t') + 1], 'https://api.peaket.example:18442/');
+  assert.deepEqual(routed.slice(routed.indexOf('--add-host'), routed.indexOf('--add-host') + 2), ['--add-host', 'api.peaket.example:127.0.0.1']);
+});
+
+test('BOT-161 미끼 점검이 High를 못 찾으면 대상을 보지 않고 DecoyError(종료 코드 3)로 끝난다', async () => {
+  const { DecoyError, runDast } = await import('./scan-tools.mjs');
+  const { calls, docker } = fakeDastDocker((report) => (report === 'zap-decoy.json' ? [2] : [3]));
+  const out = tempDir('dast-decoy-miss-');
+  await assert.rejects(runDast({ target: 'https://www.peaket.example/', out, docker }), (e) => e instanceof DecoyError && /High/.test(e.message));
+  assert.equal(calls.length, 1, '미끼를 못 찾았는데 대상까지 점검했다');
+  assert.ok(!calls.some((a) => a.includes('zap.json')), '대상 결과 파일을 썼다');
+});
+
+test('BOT-161 미끼가 High를 찾으면 그때만 www·api·partner 대상을 점검하고 결과 경로를 돌려준다', async () => {
+  const { runDast } = await import('./scan-tools.mjs');
+  const { calls, docker } = fakeDastDocker((report) => (report === 'zap-decoy.json' ? [3] : [2]));
+  const out = tempDir('dast-decoy-hit-');
+  const file = await runDast({ target: 'https://partner.peaket.example/', out, docker });
+  assert.equal(file, join(out, 'zap.json'));
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].includes('zap.json'));
+  assert.ok(calls[1].includes('https://partner.peaket.example/'));
+  assert.ok(existsSync(file));
+});
+
+test('BOT-161 decoy:false면 미끼 점검을 건너뛰고 대상만 본다(호출부가 이미 미끼를 본 경우)', async () => {
+  const { runDast } = await import('./scan-tools.mjs');
+  const { calls, docker } = fakeDastDocker(() => [0]);
+  const out = tempDir('dast-no-decoy-');
+  await runDast({ target: 'https://www.peaket.example/', out, docker, decoy: false });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].includes('zap.json'));
+});
