@@ -246,3 +246,18 @@ BAT-182(HOT-357)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바
 - **남은 결함(제품, 시험 담당이 고치지 않음)**: ① 게이트웨이 수준 `EnvoyExtensionPolicy`의 `filterContext`(`requireOriginVerify`·`opsAllowedIpsEnv`·`refreshCookie`)가 라우트 수준 정책에 덮여 `/v1/ops/commands`·`/v1/partner/events/...`에 적용되지 않는다(kind 8개 중 6개 실패, 공개 로그인 라우트는 통과). ② Envoy csrf가 끝 슬래시 `Origin: https://console.peaket.example/`을 같은 출처로 본다. ③ `route-contract.test.mjs`의 `/v1/ops/auth/sessions/me`는 문서·처리기가 ops-svc인데 라우트 원천이 identity-svc다(시험에 표류로 기록, BAT-425 배상 경로 4건도 이 묶음 전부터 표류). ④ DAST e2e 미끼 점검은 Docker Desktop에서 Windows 호스트 127.0.0.1에 ZAP 컨테이너가 닿지 못해 종료 코드 3이다(미끼 없이 www 직접 점검은 High 0·Low 2·Info 2). Linux CI 야간 점검은 이 환경 문제가 없다.
 - **리뷰 반영(2026-11-21, `ses_pending_fix2_test_bat045`·`ses_pending_fix2_impl_bat045`)**: 위 ①②③은 구현 고침 커밋(`fix(gateways,ops)`)에서 고쳤고 kind `gateway-admin-auth.e2e.mjs`가 8/8로 확인됐다. 리뷰 지적 RV-01(개발 위로 다시 쌓기·approval_request ALTER 병합)·RV-02(gRPC 오류→404·400·503)·RV-03(승인 412·409·감사 일관성)·RV-04(Idempotency-Key 필수·본문 해시)·RV-05(재삭제 200)·RV-06(FAILED 재승인)·RV-07(초대 역할 선검사)·RV-08(배포 JWKS·Redis·시작 실패)·RV-09(세션 종료 PostgreSQL 시험)을 고쳤다. ④(DAST e2e Docker Desktop 환경)만 남는다.
 
+
+## BAT-045 완료(2026-11-21, R-722)
+
+BAT-045(BOT-132·BOT-140·BOT-152·BOT-161)가 2026-11-21에 끝났다. 아래 항목의 상태·수는 바꾸지 않고 근거만 더한다(자동 시험 25·다른 단계 0 그대로). 여섯 항목 모두 시험 이름이 상태를 정하는 자동 시험이라 상태 칸은 두지 않는다.
+
+| 항목 | 근거 |
+| --- | --- |
+| I-T46 ④⑤ | kind `tools/local/e2e/gateway-admin-auth.e2e.mjs`가 다른 출처·빈 값·`null`·다른 콘솔·끝 슬래시 `Origin`을 403으로 막고, 갱신 경로 밖에서 `__Host-peaket_ops_rt`를 지우면서 `at`는 남기며(Cookie 머리 둘·큰따옴표·빈칸 포함), 파트너 `rt`도 갱신 경로 밖에서 빠지는 것을 본다. 정적 `deploy/gateways/test/admin-auth.test.mjs`(I-T46 ⑤·W-02)가 같은 규칙을 본다. `trace-check` I-T46 4 통과. BAT-045 완료(2026-11-21, R-722). |
+| I-T52 ①②③ | kind I-T52 ①②가 파트너 로그인 응답의 `Set-Cookie` 둘을 그대로 넘기고 본문 토큰 0·`Cache-Control: no-store`이며, 운영자·파트너 로그인의 `Origin` 다섯 상태를 403/통과로 가른다. `apps/partner/src/_pages/partner-auth/no-authjs-cookies.test.mjs` 2건이 Auth.js·`authjs.*` 쿠키 0과 쿠키 이름 둘만을 본다. `trace-check` I-T52 4 통과. BAT-045 완료(2026-11-21, R-722). |
+| I-T53 ②③⑤ | `services/ops-svc/test/admin-reauth.test.ts` 5건이 패스키 없는 토큰을 403 `reauth-required`로 막고 identity·감사 0을 확인하며 act·sid·aud·exp·typ과 같은 `jti` 재사용 403·`503` Retry-After를 본다. `admin-command-reauth.test.ts` 4건이 위험 명령 셋(킬스위치·`BLOCK_ASN_IP`·`SALE_STOP`)의 재인증과 `LOG_LEVEL` 201·승인·재시도를 본다. `trace-check` I-T53 9 통과. BAT-045 완료(2026-11-21, R-722). |
+| I-T61 ①~④ | `services/identity-svc/test/admin-session-termination.test.ts` 4건과 `test-int/admin-session-termination.int.test.ts` 3건이 전체/하나 종료, `ended_count`·가드 401·`ADMIN_FORCE` 사건, 남의·없는 세션 404, 같은 `request_id` 멱등, 계정 상태 불변을 본다. ops `admin-accounts-authz.test.ts`의 I-T61 ④가 viewer 403·identity 0, operator·commander 204를 본다. `trace-check` I-T61 8 통과. BAT-045 완료(2026-11-21, R-722). |
+| AZ-T14 ①~⑥ | ops `admin-accounts-authz.test.ts`·`admin-accounts-regressions.test.ts`가 viewer·CS의 11경로 403, operator의 관제·CS 계정 변경 403(identity 호출 0), 자기 지정 403·commander 아닌 대상 422, 세션 강제 종료 권한을 본다. identity 통합이 지정을 거둔 직후 분석 경로 403(AZ-T14 ④)과 A 파트너 계정만·이메일 가림(AZ-T14 ⑥)을 본다. ⑦은 장부 범위 밖이고 doc-check `roles` 규칙이 본다. `trace-check` AZ-T14 13 통과. BAT-045 완료(2026-11-21, R-722). |
+| C-T69 | identity 통합이 `FRAUD_INVESTIGATOR`·`PSEUDONYM_HANDLER` 충돌 두 순서를 422로 거절하고 `cs_lead` 역할 변경 때 같은 트랜잭션에서 지정을 거두는 것을 본다. ops가 identity의 `DESIGNATION_CONFLICT`·`DESIGNATION_TARGET_NOT_ELIGIBLE`을 409·422 Problem으로 바꾸고 감사 `FAILED` 1·성공 내역 0을 남기는 것을 같은 장부 범위에서 본다. `trace-check` C-T69 2 통과. BAT-045 완료(2026-11-21, R-722). |
+
+- 위 `## BAT-045(2026-11-20)` 절의 "`trace-check`는 … I-T46만 없음"은 시험 담당 때 상태다. 리뷰 반영(RV-01~09) 뒤 검증에서 I-T46 4를 포함한 6개 ID·68시험이 통과했고, 이 절이 그 근거다(RV-14). 항목 수·상태는 바꾸지 않았다.
