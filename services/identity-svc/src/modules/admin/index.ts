@@ -25,6 +25,8 @@ export { CheckPasswordOnlyLogins } from './application/check-password-only-login
 export { GetAdminAuthz } from './application/get-admin-authz.js';
 export { adminAuthzHandlers } from './inbound/admin-authz.grpc.js';
 export { adminAccountHandlers, adminDesignationHandlers } from './inbound/admin-account.grpc.js';
+export { adminSessionHandlers } from './inbound/admin-session.grpc.js';
+export { TerminateAdminSessions } from './application/terminate-admin-sessions.js';
 export { ManageAdminAccounts } from './application/manage-admin-accounts.js';
 export { DrizzleAdminAccountStore as AdminAccountStoreForMaintenance } from './adapters/db/drizzle-admin-account-store.js';
 export { relyingPartiesOf, type RelyingParties } from './domain/passkey.js';

@@ -6,7 +6,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database, ProblemError } from '@peaket/platform';
 import { sql, type SQL } from 'drizzle-orm';
 import type { AuditAnchorSigner } from './anchor.js';
-import { appendAuditIn, auditHash, type AuditChain, type AuditRecord } from './audit.js';
+import { appendAuditIn, auditHash, type AuditChain, type AuditEntry, type AuditRecord } from './audit.js';
 
 export interface AuditChainEntry {
   readonly seq: number;
@@ -26,6 +26,8 @@ export interface AuditChainReader {
   hashAt(seq: number): Promise<string | undefined>;
   /** 기록 종류·ID가 가리키는 원본 행이 아직 같은 내용인가. 저장소가 없으면 해당 없음(참) */
   sourceMatches?(entry: AuditChainEntry): Promise<boolean>;
+  /** 한 대상(record_id)의 기록을 최근 순으로 읽는다(권한 변경 내역, ops 배치 2026-11-20 BOT-152). 커서는 seq다 */
+  entriesOfRecord?(recordId: string, o: { cursor?: string; limit: number }): Promise<{ entries: import('./audit.js').AuditEntry[]; nextCursor: string | null }>;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -330,6 +332,26 @@ export class DrizzleAuditChain implements AuditChain, AuditChainReader {
     if (seq <= 0) return '';
     const [row] = (await this.database.db.execute(sql`select encode(record_sha256, 'hex') as hash from audit_chain where seq = ${seq}::bigint`)).rows as { hash: string }[];
     return row?.hash;
+  }
+
+  /** 한 대상의 기록을 최근 순으로(권한 변경 내역). audit_chain(record_id, seq desc) 색인을 쓴다 */
+  async entriesOfRecord(recordId: string, o: { cursor?: string; limit: number }): Promise<{ entries: AuditEntry[]; nextCursor: string | null }> {
+    const after = o.cursor && /^\d+$/.test(o.cursor) ? Number(o.cursor) : null;
+    const rows = (
+      await this.database.db.execute(sql`
+        select seq, record_type, record_id, encode(record_sha256, 'hex') as hash, encode(prev_hash, 'hex') as prev_hash, record_json, created_at
+        from audit_chain
+        where record_id = ${recordId}::uuid and (${after}::bigint is null or seq < ${after}::bigint)
+        order by seq desc limit ${o.limit + 1}`)
+    ).rows as { seq: number | string; record_type: string; record_id: string; hash: string; prev_hash: string | null; record_json: unknown; created_at: Date | string }[];
+    const page = rows.slice(0, o.limit);
+    const entries = page.flatMap((r) => {
+      const record = r.record_json === null ? undefined : auditRecordFromJson(r.record_json);
+      return record === undefined
+        ? []
+        : [{ seq: Number(r.seq), recordType: r.record_type, recordId: r.record_id, hash: r.hash, prevHash: r.prev_hash ?? '', createdAtMs: new Date(r.created_at).getTime(), record }];
+    });
+    return { entries, nextCursor: rows.length > o.limit ? String(page[page.length - 1]!.seq) : null };
   }
 
   /**

@@ -1,4 +1,4 @@
-// 받는 층: 지급 묶음 승인 업무·정산서·미수금(openapi ops payout-batches·approval-requests·settlements·receivables).
+// 받는 층: 지급 묶음 승인 업무·정산서·미수금(openapi ops payout-batches·settlements·receivables). 승인함 경로는 approvals 모듈이 맡는다.
 import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Query } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';

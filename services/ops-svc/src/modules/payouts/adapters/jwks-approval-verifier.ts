@@ -1,6 +1,6 @@
 // 관리 재인증 토큰 확인(identity GET /internal/jwks/admin.json, act APPROVAL, passkey 필수).
 import { createExternalHttpClient, ProblemError, type ReauthJtiStore, systemClock, TokenRejected, TokenVerifier, type Clock, type TokenVerifierOptions } from '@peaket/platform';
-import type { ApprovalReauthVerifier } from '../domain/ports.js';
+import { type ApprovalReauthVerifier, ReauthUnavailable, type ReauthAct } from '../domain/ports.js';
 
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
 
@@ -19,25 +19,27 @@ export class JwksApprovalVerifier implements ApprovalReauthVerifier {
       jwks: async () => (await (await client.request({ method: 'GET', path: u.pathname })).json()) as unknown as Awaited<ReturnType<TokenVerifierOptions['jwks']>>,
     });
   }
-  async verify(token: string | undefined, o: { sessionId: string; act: 'APPROVAL' }) {
+  async verify(token: string | undefined, o: { sessionId: string; act: ReauthAct }) {
     if (!token) throw reauthRequired();
     try {
       const v = await this.#verifier.verifyReauth(token, { keySet: 'admin', audience: 'ops', sessionId: o.sessionId, act: o.act });
       const factors = v.factors ?? [];
       if (!factors.includes('passkey')) throw reauthRequired();
       if (this.#jti) {
+        let claimed: boolean;
         try {
-          if (!(await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now()))) throw reauthRequired();
+          claimed = await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now());
         } catch (e) {
-          if (e instanceof ProblemError) throw e;
-          throw reauthRequired();
+          throw new ReauthUnavailable(e);
         }
+        if (!claimed) throw reauthRequired();
       }
       return { accountId: v.accountId, factors };
     } catch (e) {
-      if (e instanceof ProblemError) throw e;
+      if (e instanceof ProblemError || e instanceof ReauthUnavailable) throw e;
       if (e instanceof TokenRejected) throw reauthRequired();
-      throw e;
+      // 키 묶음을 받지 못하는 등 확인기 장애는 통과가 아니라 503이다(닫힌 쪽)
+      throw new ReauthUnavailable(e);
     }
   }
 }

@@ -9,12 +9,19 @@ import { DecideCommand } from '../application/decide-command.js';
 import { GetCommand } from '../application/get-command.js';
 import { ListCommands } from '../application/list-commands.js';
 import { RetryCommand } from '../application/retry-command.js';
-import { COMMAND_STATES, COMMAND_TYPES } from '../domain/command.js';
+import { approvalModeOf, COMMAND_STATES, COMMAND_TYPES, type CommandType } from '../domain/command.js';
+import { COMMAND_REAUTH } from '../tokens.js';
+import { ReauthUnavailable, type ApprovalReauthVerifier } from '../../payouts/index.js';
 import { CommandBody, CommandIdParams, CommandPageView, CommandView, RejectBody, baseViewOf, viewOf } from './command-view.js';
 
 const badQuery = (): never => {
   throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
 };
+
+/** 위험 명령: 2인 승인 명령과 멈추는 쪽 명령 3·11(control-tower §3·§4, ADR-0095·0322) */
+const riskyCommand = (type: CommandType): boolean => approvalModeOf(type) === 'TWO' || type === 'KILL_SWITCH' || type === 'AUTOMATION_STOP';
+const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '위험 명령은 다시 인증해야 합니다' });
+const reauthUnavailable = () => new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
 
 @Controller('v1/ops/commands')
 export class CommandsController {
@@ -25,13 +32,19 @@ export class CommandsController {
     private readonly decideCommand: DecideCommand,
     private readonly retryCommand: RetryCommand,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(COMMAND_REAUTH) private readonly reauth?: ApprovalReauthVerifier,
   ) {}
 
   @Post()
   @HttpCode(201)
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ body: CommandBody, responses: { 201: CommandView } })
-  async create(@ContractBody(CommandBody) body: z.output<typeof CommandBody>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandView>> {
+  async create(
+    @ContractBody(CommandBody) body: z.output<typeof CommandBody>,
+    @CurrentPrincipal() me: Principal,
+    @Req() request: FastifyRequest,
+  ): Promise<z.output<typeof CommandView>> {
+    await this.#requireReauth(body.type, me, request);
     const command = await this.createCommand.execute({
       type: body.type,
       reason: body.reason,
@@ -83,7 +96,13 @@ export class CommandsController {
   @HttpCode(200)
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ params: CommandIdParams, responses: { 200: CommandView } })
-  async approve(@ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandView>> {
+  async approve(
+    @ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>,
+    @CurrentPrincipal() me: Principal,
+    @Req() request: FastifyRequest,
+  ): Promise<z.output<typeof CommandView>> {
+    const current = await this.getCommand.execute(params.commandId);
+    await this.#requireReauth(current.type, me, request);
     return viewOf(
       await this.decideCommand.approve({
         commandId: params.commandId,
@@ -108,7 +127,13 @@ export class CommandsController {
   @HttpCode(200)
   @Roles(['operator', 'commander'])
   @ContractRouteSchema({ params: CommandIdParams, responses: { 200: CommandView } })
-  async retry(@ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CommandView>> {
+  async retry(
+    @ContractParams(CommandIdParams) params: z.output<typeof CommandIdParams>,
+    @CurrentPrincipal() me: Principal,
+    @Req() request: FastifyRequest,
+  ): Promise<z.output<typeof CommandView>> {
+    const current = await this.getCommand.execute(params.commandId);
+    await this.#requireReauth(current.type, me, request);
     return viewOf(
       await this.retryCommand.execute({
         commandId: params.commandId,
@@ -117,5 +142,23 @@ export class CommandsController {
       }),
       me,
     );
+  }
+
+  /** 위험 명령이면 X-Reauth-Token(act=OPS_COMMAND, 패스키, 그 세션)을 본다. 막히면 명령 행·감사 기록을 쓰지 않는다 */
+  async #requireReauth(type: CommandType, me: Principal, request: FastifyRequest): Promise<void> {
+    if (!riskyCommand(type)) return;
+    const token = request.headers['x-reauth-token'];
+    const value = typeof token === 'string' && token !== '' ? token : undefined;
+    // 토큰이 없는 것과 확인기가 없는 것은 다르다: 없는 토큰은 403, 확인기·jti 저장소 장애는 503(닫힌 쪽)
+    if (value === undefined) throw reauthRequired();
+    if (!this.reauth) throw reauthUnavailable();
+    try {
+      const v = await this.reauth.verify(value, { sessionId: me.sessionId, act: 'OPS_COMMAND' });
+      if (v.accountId !== me.accountId) throw reauthRequired();
+    } catch (e) {
+      if (e instanceof ProblemError) throw e;
+      if (e instanceof ReauthUnavailable) throw reauthUnavailable();
+      throw reauthRequired();
+    }
   }
 }

@@ -10,11 +10,12 @@ import { HandleCommandEvent } from './application/handle-command-event.js';
 import { ListCommands } from './application/list-commands.js';
 import { RetryCommand } from './application/retry-command.js';
 import type { CancelledEventGuard, CommandExecutor, CommandStore } from './domain/ports.js';
+import type { ApprovalReauthVerifier } from '../payouts/index.js';
 import { CommandsController } from './inbound/commands.controller.js';
 import { InternalCommandEventsController } from './inbound/internal-command-events.controller.js';
-import { COMMAND_EXECUTOR, COMMAND_STORE } from './tokens.js';
+import { COMMAND_EXECUTOR, COMMAND_REAUTH, COMMAND_STORE } from './tokens.js';
 
-export { COMMAND_STORE, COMMAND_EXECUTOR } from './tokens.js';
+export { COMMAND_STORE, COMMAND_EXECUTOR, COMMAND_REAUTH } from './tokens.js';
 
 @Module({})
 export class CommandsModule {
@@ -25,6 +26,8 @@ export class CommandsModule {
     onCommandEvent?: (h: HandleCommandEvent) => void,
     /** 회차 취소 확정 회차의 판매 재개 막기(BAT-420 GAT-110 H). 만들 때·실행 때 함께 본다 */
     guard?: CancelledEventGuard,
+    /** 위험 명령 재인증 확인기(act=OPS_COMMAND, BAT-045 BOT-140). 없으면 위험 명령이 503이다 */
+    reauth?: ApprovalReauthVerifier,
   ): DynamicModule {
     const execution = new ExecuteCommand(store, executor, checkpoints, guard);
     const wired = executor ? execution : undefined;
@@ -34,6 +37,7 @@ export class CommandsModule {
     const providers: Provider[] = [
       { provide: COMMAND_STORE, useValue: store },
       { provide: COMMAND_EXECUTOR, useValue: executor },
+      { provide: COMMAND_REAUTH, useValue: reauth },
       { provide: ExecuteCommand, useValue: execution },
       { provide: CreateCommand, useValue: createCommand },
       { provide: ListCommands, useFactory: () => new ListCommands(store) },

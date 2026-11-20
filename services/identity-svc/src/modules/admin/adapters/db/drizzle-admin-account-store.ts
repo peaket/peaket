@@ -734,6 +734,13 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
           const live = await tx.select({ id: adminSession.id }).from(adminSession).where(and(eq(adminSession.adminAccountId, id), isNull(adminSession.terminatedAt)));
           return this.#endIn(tx, live.map((x) => x.id), reason, now);
         },
+        endSession: async (id, sessionId, now) => {
+          const [s] = await tx.select({ id: adminSession.id, terminatedAt: adminSession.terminatedAt }).from(adminSession).where(and(eq(adminSession.id, sessionId), eq(adminSession.adminAccountId, id)));
+          if (!s) return 'NOT_FOUND';
+          if (s.terminatedAt !== null) return 'ALREADY';
+          await this.#endIn(tx, [s.id], 'ADMIN_FORCE', now);
+          return 'OK';
+        },
         addNotice: async (id, kind, now) => {
           await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: id, kind, createdAt: new Date(now) });
         },

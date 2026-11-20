@@ -11,6 +11,7 @@ import { PriorityModule, type PriorityModuleDeps } from './modules/priority/inde
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
 import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } from './modules/payouts/index.js';
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
+import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
 import {
   CsCaseEventCancellationCases,
   DrizzleEventCancellationStore,
@@ -49,6 +50,11 @@ interface CommonWiring {
   readonly payouts?: PayoutsModuleDeps;
   /** 계약 조건 변경 승인 업무(BAT-615). 없으면 메모리 저장·메모리 core 대역, 재인증은 닫힌 대역이다 */
   readonly approvals?: ApprovalsModuleDeps;
+  /** 관리 계정 REST·승인 업무(BAT-045 BOT-152, ADR-0322). identity는 필수이고, reauth가 없으면 쓰기가 503이다 */
+  readonly adminAccounts?: {
+    readonly identity: AdminIdentity;
+    readonly reauth?: AdminReauth;
+  };
   /**
    * 회차 취소 요청(BAT-425 GAT-130 잔여, BAT-420 GAT-110). refunds·reauth가 없으면 요청·확정이 503이다.
    * reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속)는 시작 조립(event-cancellation-wiring)이 고른다. 없으면 그 경로가 503이다.
@@ -116,7 +122,7 @@ export class AppModule {
         module: AppModule,
         imports: [
           databaseModule(o.database),
-          CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations)),
+          CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth),
           AuditModule.register(checkpoints, signer),
           LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
           CasesModule.register(csCases),
@@ -128,7 +134,9 @@ export class AppModule {
             storage: 'database',
             database: o.database,
             audit: chain,
+            reader: chain,
             ...(o.approvals ?? {}),
+            ...(o.adminAccounts ? { admin: o.adminAccounts } : {}),
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
           }),
           EventCancellationsModule.register(
@@ -155,7 +163,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [
-        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations)),
+        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth),
         AuditModule.register(checkpoints, signer),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
         CasesModule.register(csCases),
@@ -168,6 +176,8 @@ export class AppModule {
           audit: chain,
           deps: {
             ...(o.approvals ?? {}),
+            ...(o.adminAccounts ? { admin: o.adminAccounts } : {}),
+            reader: chain,
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
           },
         }),

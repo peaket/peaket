@@ -586,6 +586,20 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         }
         return ended.sort();
       },
+      endSession: async (id, sessionId, now) => {
+        const s = this.#sessions.find((x) => x.id === sessionId && x.accountId === id);
+        if (!s) return 'NOT_FOUND';
+        if (s.terminatedAt !== null) return 'ALREADY';
+        const before = { terminatedAt: s.terminatedAt, terminationReason: s.terminationReason };
+        Object.assign(s, { terminatedAt: now, terminationReason: 'ADMIN_FORCE' });
+        const ev = { accountId: id, sessionId: s.id, reason: 'ADMIN_FORCE' };
+        this.#terminated.push(ev);
+        undo.push(() => {
+          Object.assign(s, before);
+          this.#terminated.splice(this.#terminated.indexOf(ev), 1);
+        });
+        return 'OK';
+      },
       addNotice: async (id, kind, now) => {
         const n = { id: randomUUID(), accountId: id, kind, at: now, sentAt: null };
         this.#notices.push(n);

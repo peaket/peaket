@@ -80,6 +80,14 @@ export class MemoryAuditChain implements AuditChain {
   async entriesBetween(fromSeq: number, toSeq: number): Promise<readonly AuditEntry[]> {
     return this.entries.filter((e) => e.seq >= fromSeq && e.seq <= toSeq);
   }
+
+  /** 한 대상(record_id)의 기록을 최근 순으로. 권한 변경 내역(SCR-064 ⑥)이 쓴다 */
+  async entriesOfRecord(recordId: string, o: { cursor?: string; limit: number }): Promise<{ entries: AuditEntry[]; nextCursor: string | null }> {
+    const after = o.cursor ? Number(o.cursor) : Number.POSITIVE_INFINITY;
+    const rows = this.entries.filter((e) => e.recordId === recordId && e.seq < after).sort((a, b) => b.seq - a.seq);
+    const page = rows.slice(0, o.limit);
+    return { entries: page, nextCursor: rows.length > o.limit ? String(page[page.length - 1]!.seq) : null };
+  }
 }
 
 /**

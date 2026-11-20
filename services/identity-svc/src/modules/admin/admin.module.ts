@@ -11,6 +11,7 @@ import { CONSOLE_ORIGINS, type ConsoleOrigins, DispatchAdminNotices } from './ap
 import { ChangeAdminPassword } from './application/change-admin-password.js';
 import { EndAdminSession } from './application/end-admin-session.js';
 import { ManageAdminAccounts } from './application/manage-admin-accounts.js';
+import { TerminateAdminSessions } from './application/terminate-admin-sessions.js';
 import { ManagePasskeys } from './application/manage-passkeys.js';
 import { ReauthenticateAdmin } from './application/reauthenticate-admin.js';
 import { RefreshAdminSession } from './application/refresh-admin-session.js';
@@ -176,10 +177,11 @@ export class AdminModule {
         RefreshAdminSession,
         EndAdminSession,
         ManageAdminAccounts,
+        TerminateAdminSessions,
         ReauthenticateAdmin,
         ManagePasskeys,
       ],
-      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ManageAdminAccounts, ReauthenticateAdmin, ManagePasskeys, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE, ADMIN_PASSKEY_STORE],
+      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ManageAdminAccounts, TerminateAdminSessions, ReauthenticateAdmin, ManagePasskeys, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE, ADMIN_PASSKEY_STORE],
     };
   }
 }

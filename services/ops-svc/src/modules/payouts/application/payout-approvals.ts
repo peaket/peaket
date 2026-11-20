@@ -108,6 +108,14 @@ export class PayoutApprovals {
     return payoutApprovalView(r, actor);
   }
 
+  /** 통합 승인함(지급 + commander 역할 변경)이 종류를 가릴 때 쓴다. 볼 수 없는 승인은 null(없는 것과 같은 404) */
+  async findView(approvalId: string, actor: OpsActor): Promise<PayoutApprovalView | null> {
+    const r = await this.d.store.find(approvalId);
+    if (!r) return null;
+    if (r.requesterId !== actor.accountId && actor.role !== 'commander' && actor.role !== 'cs_lead') return null;
+    return payoutApprovalView(r, actor);
+  }
+
   async approve(approvalId: string, actor: OpsActor, reauthToken: string | undefined): Promise<PayoutApprovalView> {
     return guard(async () => {
       const r = await this.d.store.find(approvalId);

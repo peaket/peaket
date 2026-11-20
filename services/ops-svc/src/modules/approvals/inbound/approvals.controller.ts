@@ -1,5 +1,5 @@
-// 받는 층: 승인 업무 목록·상세·승인·반려·철회(openapi /v1/ops/approval-requests*, BAT-615 LCH-070).
-// 지급 묶음 승인과 계약 조건 변경 승인을 ApprovalRouter가 kind로 나눈다. 계약 승인은 요청자·commander만 보고, 승인은 commander만 한다.
+// 받는 층: 승인 업무 목록·상세·승인·반려·철회(openapi /v1/ops/approval-requests*, BAT-615 LCH-070, BAT-045 BOT-152).
+// 지급 묶음·계약 조건 변경·commander 역할 변경 승인을 ApprovalRouter가 kind로 나눈다. 계약 승인은 요청자·commander만 보고, 승인은 commander만 한다.
 import { Body, Controller, Get, Header, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, ProblemError, type Principal, Roles } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';

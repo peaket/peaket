@@ -27,8 +27,17 @@ export interface PayoutPaymentClient {
   listCircuits(): Promise<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }>;
 }
 
+/** 위험 작업의 재인증 작업 묶음(identity reauth 토큰의 act, authz-matrix §6, ADR-0206·0322) */
+export type ReauthAct = 'APPROVAL' | 'OPS_COMMAND' | 'PERMISSION_CHANGE';
 export interface ApprovalReauthVerifier {
-  verify(token: string | undefined, o: { sessionId: string; act: 'APPROVAL' }): Promise<{ accountId: string; factors: string[] }>;
+  verify(token: string | undefined, o: { sessionId: string; act: ReauthAct }): Promise<{ accountId: string; factors: string[] }>;
+}
+/** 재인증 확인기·jti 저장소에 닿지 못했다(받는 층은 503 reauth-unavailable, Retry-After 5초 [가정]) */
+export class ReauthUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('재인증 확인기나 jti 저장소에 닿지 못했다', { cause });
+    this.name = 'ReauthUnavailable';
+  }
 }
 
 export const PAYOUT_APPROVAL_STORE = Symbol.for('peaket.ops.payout-approval-store');

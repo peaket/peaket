@@ -8,6 +8,7 @@ import { AppModule } from './app.module.js';
 import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
+import { GrpcIdentityAdminAccounts } from './modules/admin-accounts/adapters/grpc-identity-admin-accounts.js';
 import { HttpCommandExecutor } from './adapters/http-command-executor.js';
 import { assertOpsPartnerRole } from './adapters/db/database-role.js';
 import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
@@ -38,6 +39,8 @@ if (partnerRoleChecked) await assertOpsPartnerRole(partnerDatabase);
 // 회차 취소 지표(확정 실패 뒤 되돌리기 저장 실패, 웨이브 끝 리뷰 K4). 서비스를 만든 뒤 레지스트리에 붙인다
 const eventCancellationSignals = new PromEventCancellationSignals();
 const adminAuthz = new GrpcAdminAuthz(identityUrl);
+// 관리 계정 REST(ADR-0322). identity AdminAccountService·AdminDesignationService·AdminSessionService 클라이언트
+const adminIdentity = new GrpcIdentityAdminAccounts(identityUrl);
 const purchaseUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
 const purchaseGrpcAddr = process.env.PEAKET_PURCHASE_GRPC_ADDR;
 const coreUrl = process.env.PEAKET_CORE_HTTP_URL;
@@ -138,6 +141,7 @@ const service = await createService({
     ...(scannerDevices ? { scannerDevices } : {}),
     ...(payouts ? { payouts } : {}),
     approvals,
+    adminAccounts: { identity: adminIdentity, ...(reauth ? { reauth } : {}) },
     eventCancellations,
     onCommandEvent: (h) => (commandEvents = h),
   }),
@@ -219,6 +223,7 @@ process.once('SIGTERM', () => {
         service.logger.error({ err }, '제어 gRPC 클라이언트 닫기 실패');
       }
       scannerDevices?.close();
+      adminIdentity.close();
       adminAuthz.close();
       await tenantRedis?.close();
       await reauthRedis?.close();

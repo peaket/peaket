@@ -31,6 +31,7 @@ export interface IdentityPackage {
   /** 관리 경로의 역할 판정(ADR-0172, BOT-123) */
   AdminAuthzService: grpc.ServiceClientConstructor;
   AdminAccountService: grpc.ServiceClientConstructor;
+  AdminSessionService: grpc.ServiceClientConstructor;
   AdminDesignationService: grpc.ServiceClientConstructor;
   /** 추가 검증 제출의 본인확인 재통과 확인(queue-svc만, bot-defense §5.2 3단계, BOT-090) */
   ReverificationCheckService: grpc.ServiceClientConstructor;

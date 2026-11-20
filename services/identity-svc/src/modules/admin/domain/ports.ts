@@ -396,7 +396,7 @@ export interface ManagedAccount {
 }
 /** 트랜잭션 안에서 읽은 계정(지정·패스키 수는 싣지 않는다: 지정은 designationsFor로 따로 읽는다, 재검토 2026-11-05) */
 export type LockedAccount = Omit<ManagedAccount, 'designations' | 'passkeyCount'>;
-export type AdminAccountRequestKind = 'INVITE' | 'CHANGE_ROLE' | 'REINVITE' | 'REMOVE' | 'DESIGNATE' | 'REVOKE_DESIGNATION';
+export type AdminAccountRequestKind = 'INVITE' | 'CHANGE_ROLE' | 'REINVITE' | 'REMOVE' | 'DESIGNATE' | 'REVOKE_DESIGNATION' | 'TERMINATE_SESSIONS';
 /** 관리 호출 한 번의 트랜잭션 안에서 쓰는 것 */
 export interface AdminManagementTx {
   findRequest(requestId: string): Promise<{ kind: AdminAccountRequestKind; accountId: string; result: string } | null>;
@@ -419,6 +419,8 @@ export interface AdminManagementTx {
   markRemoved(id: string, now: number): Promise<void>;
   /** 그 계정의 끝나지 않은 세션을 모두 끝내고 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다. 끝낸 세션 ID */
   endAllSessions(id: string, reason: 'ADMIN_FORCE' | 'DELETE' | 'ROLE_CHANGED', now: number): Promise<string[]>;
+  /** 그 계정의 세션 하나를 끝낸다. 세션이 없거나 그 계정의 것이 아니면 NOT_FOUND, 이미 끝났으면 ALREADY(멱등, BOT-152) */
+  endSession(id: string, sessionId: string, now: number): Promise<'OK' | 'ALREADY' | 'NOT_FOUND'>;
   addNotice(id: string, kind: 'INVITATION', now: number): Promise<void>;
   /** 그 계정의 살아 있는 지정과 since 뒤에 거둔 지정(대상 행을 잠근 뒤 부른다, BOT-151) */
   designationsFor(accountId: string, since: number): Promise<{ live: DesignationKind[]; revoked: { kind: DesignationKind; revokedAt: number }[] }>;

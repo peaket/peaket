@@ -6,7 +6,7 @@ import 'reflect-metadata';
 import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
-import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
+import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, adminSessionHandlers, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, TerminateAdminSessions, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   AddProvider,
@@ -297,6 +297,7 @@ const grpc = await startGrpcServer({
           { definition: identityPackage().AdminAuthzService.service, handlers: adminAuthzHandlers({ authz: service.app.get(GetAdminAuthz) }, (method, err) => service.logger.error({ err, method }, 'AdminAuthzService 처리 실패')) },
           // 관리 계정 관리와 지정(ops-svc만, BOT-150·151)
           { definition: identityPackage().AdminAccountService.service, handlers: adminAccountHandlers({ manage: service.app.get(ManageAdminAccounts) }, (method, err) => service.logger.error({ err, method }, 'AdminAccountService 처리 실패')) },
+          { definition: identityPackage().AdminSessionService.service, handlers: adminSessionHandlers({ terminate: service.app.get(TerminateAdminSessions) }, (method, err) => service.logger.error({ err, method }, 'AdminSessionService 처리 실패')) },
           // 살아 있는 지정 조회(ops-svc만, 조사 경로 요청마다, BOT-151)
           { definition: identityPackage().AdminDesignationService.service, handlers: adminDesignationHandlers({ manage: service.app.get(ManageAdminAccounts) }, (method, err) => service.logger.error({ err, method }, 'AdminDesignationService 처리 실패')) },
         ]

@@ -1,5 +1,5 @@
 // 지급 승인 업무 모듈 조립.
-import { type DynamicModule, Module, type Provider } from '@nestjs/common';
+import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import type { AuditChain } from '../audit/audit.js';
 import { PayoutApprovals } from './application/payout-approvals.js';
@@ -18,6 +18,7 @@ export interface PayoutsModuleDeps {
   readonly audit?: AuditChain;
 }
 
+@Global()
 @Module({})
 export class PayoutsModule {
   static register(

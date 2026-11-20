@@ -164,7 +164,7 @@ export const adminAccountRequest = pgTable(
     result: text('result').notNull(),
     createdAt: at('created_at').notNull(),
   },
-  (t) => [index('admin_account_request_created_idx').on(t.createdAt), check('admin_account_request_kind_check', sql`${t.kind} in ('INVITE', 'CHANGE_ROLE', 'REINVITE', 'REMOVE', 'DESIGNATE', 'REVOKE_DESIGNATION')`)],
+  (t) => [index('admin_account_request_created_idx').on(t.createdAt), check('admin_account_request_kind_check', sql`${t.kind} in ('INVITE', 'CHANGE_ROLE', 'REINVITE', 'REMOVE', 'DESIGNATE', 'REVOKE_DESIGNATION', 'TERMINATE_SESSIONS')`)],
 );
 
 /** 발급한 관리 리프레시 토큰 해시(docs/data.md admin_refresh_token_hash, BOT-130). 예전 토큰이 다시 오면 그 패밀리를 끝낸다. 절대 만료가 지나면 정비가 지운다 */
