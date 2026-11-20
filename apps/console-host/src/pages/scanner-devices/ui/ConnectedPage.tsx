@@ -40,6 +40,7 @@ export function ConnectedPage() {
   usePreviewHost({ scope: { stage: '현장' }, control: { kind: 'ok' } }, []);
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [promoters, setPromoters] = useState<readonly Promoter[]>([]);
+  const [partnerWarning, setPartnerWarning] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [partnerFilter, setPartnerFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | 'ALL'>('ALL');
@@ -78,6 +79,9 @@ export function ConnectedPage() {
       setSelectedId((prev) => prev ?? page.items[0]?.deviceId ?? null);
       if (partners) {
         setPromoters((partners.data.items ?? []).flatMap((p) => (p.promoterId ? [{ promoterId: p.promoterId, legalName: p.legalName ?? promoterLabel(p.promoterId) }] : [])));
+        setPartnerWarning(false);
+      } else {
+        setPartnerWarning(true);
       }
     } catch {
       setLoad({ kind: 'error', message: '기기 목록을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
@@ -223,6 +227,7 @@ export function ConnectedPage() {
                   </select>
                   <i className="ic ic-chevron-down ic-16" aria-hidden="true" />
                 </div>
+                {partnerWarning ? <span className="badge badge-warning" title="파트너사 목록을 불러오지 못해 기기 목록의 파트너 ID로 표시합니다">파트너 목록 없음</span> : null}
                 <label className="t-xs muted" htmlFor="f-st">상태</label>
                 <div className="input-group input-group-sm" style={{ width: 140, height: 32 }}>
                   <select id="f-st" value={statusFilter} onChange={(e) => setStatusFilter(e.currentTarget.value as DeviceStatus | 'ALL')}>

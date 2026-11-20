@@ -3,6 +3,7 @@
 // 목록의 파트너 줄과 '계약'·'결제사 등록' 탭은 그 상태로 옮긴다(보드가 그린 두 파트너·두 탭만 있다).
 // 역할(d5 §3.3): viewer는 메뉴에 없음, operator는 입력·변경 요청, commander는 입력·변경 승인(승인은 승인 업무에서), CS 두 역할은 읽기.
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
+import { useSearchParams } from 'react-router';
 import { useBoardPage } from '@/shared/lib/board';
 import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE, NoAccess, ReadOnlyScope, type Access } from '@/features/screen-access';
@@ -11,11 +12,18 @@ import { DEFAULT, STATES } from '../states';
 import { MainD, valsD } from './board-d';
 import { MainM, valsM } from './board-m';
 import { MainT, valsT } from './board-t';
+import { ConnectedPage } from './ConnectedPage';
 
 const TITLE = '파트너사·계약 관리';
 const ACCESS: Record<ConsoleRole, Access> = { viewer: 'none', operator: 'act', commander: 'act', cs_agent: 'read', cs_lead: 'read' };
 
+/** 실제 경로: ops-svc 파트너사·계약 API에 연결한 화면. 미리보기(?state=)는 디자인 보드를 그대로 쓴다 */
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const chosen = useChosenRole();
   const { state, layout, close, go } = useBoardPage(TITLE, STATES, DEFAULT);
   usePreviewHost(
