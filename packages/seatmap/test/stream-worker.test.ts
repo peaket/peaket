@@ -202,6 +202,23 @@ describe('FE-T11 좌석 스트림: 보이는 구역만 1초 뒤 구독', () => {
     expect(s.sections().at(-1)).toMatchObject({ visible: [], subscribed: [] });
   });
 
+  it('[FE-T11] 전체 보기는 5초마다 전체 스냅샷을 다시 받는다', async () => {
+    const s = setup();
+    await s.ready();
+    const fullCalls = () => s.fetch.mock.calls.filter(([u]) => !u.includes('section=') && !u.endsWith('.json')).length;
+    const baseline = fullCalls();
+    expect(baseline).toBeGreaterThanOrEqual(1);
+    await s.t.advance(5_000);
+    await s.t.flush();
+    expect(fullCalls()).toBe(baseline + 1);
+    await s.t.advance(5_000);
+    await s.t.flush();
+    expect(fullCalls()).toBe(baseline + 2);
+    await s.t.advance(5_000);
+    await s.t.flush();
+    expect(fullCalls()).toBe(baseline + 3);
+  });
+
   it('[FE-T11] 1초 넘게 안정된 뒤 한 번에 옮겨도 새 구역을 1초 뒤 구독한다', async () => {
     const s = setup();
     const socket = await s.ready();

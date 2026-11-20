@@ -67,9 +67,12 @@ async function scenario(page, request) {
   await send(page, { type: 'fit' });
   // 먼저 4,999ms 경계를 본다(구독 해제를 기다리며 시간을 먹지 않게 순서를 둔다)
   const elapsed = Date.now() - fitAt;
-  if (elapsed < SNAPSHOT_REFRESH_MS - 200) await page.waitForTimeout(SNAPSHOT_REFRESH_MS - 200 - elapsed);
+  if (elapsed < SNAPSHOT_REFRESH_MS - 1) await page.waitForTimeout(SNAPSHOT_REFRESH_MS - 1 - elapsed);
   const early = await log(request);
-  expect(early.snapshots.filter((s) => s.section === null && s.at >= fitAt), '4,999ms 안의 전체 스냅샷').toHaveLength(0);
+  expect(
+    early.snapshots.filter((s) => s.section === null && s.at >= fitAt && s.at < fitAt + SNAPSHOT_REFRESH_MS - 1),
+    '4,999ms 안의 전체 스냅샷',
+  ).toHaveLength(0);
   await expect.poll(async () => (await lastSections(page))?.subscribed ?? null, { message: '전체 보기 구독 해제', timeout: 10_000 }).toEqual([]);
   await expect.poll(async () => (await log(request)).stream.subscribed.at(-1) ?? null, { message: '서버가 본 구독 해제', timeout: 5_000 }).toEqual([]);
   await expect
