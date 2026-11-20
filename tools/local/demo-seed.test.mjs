@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stringify as stringifyYaml } from 'yaml';
-import { checkSeed, resolveSeedTimes, seatCountsOf } from './demo-seed.mjs';
+import { checkSeed, matchSeedEvents, resolveSeedTimes, seatCountsOf } from './demo-seed.mjs';
 import { DEMO_SEED_FILE, readSeed } from './demo-auth.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -195,6 +195,128 @@ test('RV-01 회차 오픈은 실행 시각 기준 상대 표기이고 지난 시
   const badResult = checkSeed(write('bad-time.yaml', garbage));
   assert.equal(badResult.ok, false, '읽지 못하는 시각 표기가 통과했다');
   assert.ok(badResult.problems.some((p) => p.includes('openAt')), `읽지 못하는 openAt 문제가 없다: ${badResult.problems.join('; ')}`);
+});
+
+test('RV-01 잔여 절대 시각: startAt·endAt·entryOpensAt도 상대 표기이고 순서·경계를 검사한다', () => {
+  const s = seed();
+  // 절대 날짜가 하나라도 남으면 시드가 늙는다(--check가 먼저 실패해야 한다)
+  const text = readFileSync(DEMO_SEED_FILE, 'utf8');
+  assert.ok(!/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text), '시드 파일에 절대 날짜가 남아 있다');
+  const relative = /^[+-](?:\d+d)?(?:\d+h)?(?:\d+m)?$/;
+  for (const e of s.events) {
+    for (const field of ['openAt', 'startAt', 'endAt', 'entryOpensAt']) {
+      assert.match(String(e[field]), relative, `회차 ${e.key}의 ${field}가 상대 표기가 아니다(${e[field]})`);
+    }
+  }
+
+  // 회차 길이(종료 − 시작)는 공연 길이 그대로다: 상대 표기로 바꿔도 값의 뜻이 남는다
+  const resolved = resolveSeedTimes(s);
+  const minutesOf = (key) => {
+    const e = resolved.events.find((x) => x.key === key);
+    return (Date.parse(e.endAt) - Date.parse(e.startAt)) / 60_000;
+  };
+  assert.equal(minutesOf('e1-1025'), 120, 'LUMEN 콘서트 회차 길이');
+  assert.equal(minutesOf('e2-01'), 180, '가을 야외 페스티벌 회차 길이');
+  assert.equal(minutesOf('e3-01'), 100, '소극장 뮤지컬 회차 길이');
+  assert.equal(minutesOf('e4-01'), 90, '팬미팅 회차 길이');
+
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-bat087-times-'));
+  const write = (name, value) => {
+    const file = join(dir, name);
+    writeFileSync(file, stringifyYaml(value));
+    return file;
+  };
+  let seq = 0;
+  const check = (mutate) => {
+    const copy = structuredClone(s);
+    mutate(copy.events);
+    seq += 1;
+    return checkSeed(write(`mutated-${seq}.yaml`, copy));
+  };
+
+  // 절대 시각이 남은 자리마다 실패한다(미래의 절대값도 통과하지 않는다)
+  for (const field of ['openAt', 'startAt', 'endAt', 'entryOpensAt']) {
+    const r = check((events) => {
+      events[0][field] = '2026-12-24T18:00:00+09:00';
+    });
+    assert.equal(r.ok, false, `절대 시각 ${field}가 통과했다`);
+    assert.ok(
+      r.problems.some((p) => p.includes(field) && p.includes('절대')),
+      `${field} 절대 시각 문제가 없다: ${r.problems.join('; ')}`,
+    );
+  }
+
+  // 과거 시각은 실패한다
+  const pastOpen = check((events) => {
+    events[0].openAt = '-1h';
+  });
+  assert.equal(pastOpen.ok, false, '지난 openAt(-1h)이 통과했다');
+  assert.ok(pastOpen.problems.some((p) => p.includes('openAt') && /지났|지난/.test(p)), `지난 시각 문제가 없다: ${pastOpen.problems.join('; ')}`);
+
+  // 순서 위반: 시작 ≥ 종료, 입장 시작 > 시작, 오픈 ≥ 판매 종료(시작 24시간 전)
+  const sameEnd = check((events) => {
+    events[0].endAt = events[0].startAt;
+  });
+  assert.equal(sameEnd.ok, false, 'startAt == endAt이 통과했다');
+  assert.ok(sameEnd.problems.some((p) => p.includes('endAt')), `startAt/endAt 순서 문제가 없다: ${sameEnd.problems.join('; ')}`);
+
+  const reversedEnd = check((events) => {
+    events[0].endAt = '+1d5h';
+  });
+  assert.equal(reversedEnd.ok, false, 'endAt < startAt이 통과했다');
+
+  const lateEntry = check((events) => {
+    events[0].entryOpensAt = '+1d7h';
+  });
+  assert.equal(lateEntry.ok, false, 'entryOpensAt > startAt이 통과했다');
+  assert.ok(lateEntry.problems.some((p) => p.includes('entryOpensAt')), `entryOpensAt 문제가 없다: ${lateEntry.problems.join('; ')}`);
+
+  const saleEndAtOpen = check((events) => {
+    events[0].openAt = '+6h'; // e1-1025의 시작(+1d6h) 24시간 전과 같은 시각
+  });
+  assert.equal(saleEndAtOpen.ok, false, 'openAt == 판매 종료가 통과했다');
+  assert.ok(saleEndAtOpen.problems.some((p) => p.includes('openAt') && p.includes('판매 종료')), `판매 종료 경계 문제가 없다: ${saleEndAtOpen.problems.join('; ')}`);
+
+  // 경계는 양 끝에서 갈린다: 입장 시작 == 시작은 되고, 오픈은 판매 종료 1분 전이면 된다
+  const entryAtStart = check((events) => {
+    events[0].entryOpensAt = events[0].startAt;
+  });
+  assert.equal(entryAtStart.ok, true, `entryOpensAt == startAt이 실패했다: ${entryAtStart.problems.join('; ')}`);
+
+  const openBeforeSaleEnd = check((events) => {
+    events[0].openAt = '+5h59m';
+  });
+  assert.equal(openBeforeSaleEnd.ok, true, `openAt이 판매 종료 1분 전인데 실패했다: ${openBeforeSaleEnd.problems.join('; ')}`);
+
+  // 경계: 오픈 뒤 30일이 지난 시계로도 시드는 그대로 유효하다(모든 시각이 상대라 늙지 않는다)
+  const first = new Date('2026-11-21T02:00:00+09:00');
+  const later = new Date(first.getTime() + 30 * 86_400_000);
+  const firstEvents = resolveSeedTimes(s, first).events;
+  const laterEvents = resolveSeedTimes(s, later).events;
+  firstEvents.forEach((e, i) => {
+    for (const field of ['openAt', 'startAt', 'endAt', 'entryOpensAt']) {
+      assert.equal(
+        Date.parse(laterEvents[i][field]) - Date.parse(e[field]),
+        30 * 86_400_000,
+        `${e.key}의 ${field}가 30일 뒤에 같은 상대값으로 펼쳐지지 않았다`,
+      );
+    }
+  });
+  const laterResult = checkSeed(DEMO_SEED_FILE, later);
+  assert.equal(laterResult.ok, true, `오픈 기준 30일 뒤 시드 검사가 실패했다: ${laterResult.problems.join('; ')}`);
+});
+
+test('RV-01 상대 시작 시각: 두 번째 적용은 시작 시각 차례로 기존 회차를 찾는다', () => {
+  const s = seed();
+  const e1 = (now) => resolveSeedTimes(s, now).events.filter((e) => e.productionKey === 'e1');
+  const first = e1(new Date('2026-11-21T02:00:00+09:00'));
+  const rows = first.map((e, i) => ({ id: `row-${i}`, epoch: Math.floor(Date.parse(e.startAt) / 1000) }));
+  // 5분 뒤 다시 펼치면 시작 시각 값이 달라진다(epoch로 찾으면 못 찾는다). 차례로 이으면 같은 행을 찾는다
+  const later = e1(new Date('2026-11-21T02:05:00+09:00'));
+  assert.notEqual(Date.parse(later[0].startAt), Date.parse(first[0].startAt), '상대 시작 시각이 두 적용에서 같다');
+  assert.deepEqual(matchSeedEvents(later, rows), [['e1-1025', 'row-0'], ['e1-1026', 'row-1']]);
+  // 개수가 모자라면 있는 것만 잇는다(부분 상태에서도 터지지 않는다)
+  assert.deepEqual(matchSeedEvents(later, rows.slice(0, 1)), [['e1-1025', 'row-0']]);
 });
 
 test('DS-05 모든 참조가 있고 비밀은 값이 아니라 환경 값 이름이다', () => {
