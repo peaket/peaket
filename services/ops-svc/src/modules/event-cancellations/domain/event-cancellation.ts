@@ -107,16 +107,30 @@ export interface PartnerEventCancellationStatusView {
   compensation?: { targetCount: number; totalAmount: number } | null;
 }
 
+/** openapi OpsActor: 판정자를 화면이 쓰는 모양(표시 이름은 계정 읽기가 없어 null, 화면은 '삭제된 계정'으로 그린다) */
+export interface EventCancellationActor {
+  adminAccountId: string;
+  displayName: string | null;
+  role: string;
+}
+
 export interface EventCancellationView {
   requestId: string;
   eventId: string;
+  /** 공연 제목(core 판매 설정 사본에서 읽는다). 읽지 못하면 없다 */
+  title?: string;
   kind: EventCancellationKind;
   status: EventCancellationStatus;
   reason: string;
+  /** 파트너가 적은 사유(commander가 직접 낸 요청이면 그 사유). openapi partnerReason */
+  partnerReason: string | null;
+  faultOpinion: EventCancellationFault | null;
+  evidenceRef: string | null;
+  newStartsAt: string | null;
   fault?: EventCancellationFault;
   fanNoticeReason?: string;
   requestedAt: string;
-  judgedBy?: string;
+  judgedBy?: EventCancellationActor;
   dryRun?: EventCancellationDryRun;
   progress?: EventCancellationProgress;
 }
@@ -127,18 +141,24 @@ export const eventCancellationView = (r: EventCancellationRecord): EventCancella
   kind: r.kind,
   status: r.status,
   reason: r.reason,
+  partnerReason: r.reason,
+  faultOpinion: r.faultOpinion ?? null,
+  evidenceRef: r.evidenceRef ?? null,
+  newStartsAt: r.newStartsAt ? r.newStartsAt.toISOString() : null,
   ...(r.fault !== null ? { fault: r.fault } : {}),
   ...(r.fanNoticeReason !== null ? { fanNoticeReason: r.fanNoticeReason } : {}),
   requestedAt: r.requestedAt.toISOString(),
-  ...(r.judgedBy !== null ? { judgedBy: r.judgedBy } : {}),
+  // 판정은 commander만 할 수 있다(judge의 @Roles). 표시 이름은 계정 읽기 계약이 없어 null이다
+  ...(r.judgedBy !== null ? { judgedBy: { adminAccountId: r.judgedBy, displayName: null, role: 'commander' } } : {}),
   ...(r.refundJobState !== null ? { progress: { state: r.refundJobState } } : {}),
 });
 
-/** 판정·확정·반려 응답과 관제 상세: 목록 항목에 미리보기(dryRun)를 더한다. progress를 주면 그 값으로 바꾼다 */
-export const eventCancellationDetailView = (r: EventCancellationRecord, progress?: EventCancellationProgress): EventCancellationView => {
+/** 판정·확정·반려 응답과 관제 상세: 목록 항목에 미리보기(dryRun)를 더한다. progress·title을 주면 그 값으로 바꾼다 */
+export const eventCancellationDetailView = (r: EventCancellationRecord, progress?: EventCancellationProgress, title?: string): EventCancellationView => {
   const base = eventCancellationView(r);
   return {
     ...base,
+    ...(title !== undefined ? { title } : {}),
     ...(r.dryRun ? { dryRun: r.dryRun } : {}),
     ...(progress !== undefined ? { progress } : {}),
   };

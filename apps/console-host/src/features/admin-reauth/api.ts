@@ -149,7 +149,7 @@ export function reauthErrorMessage(e: unknown): string {
   const status = typeof p.status === 'number' ? p.status : 0;
   const type = typeof p.type === 'string' ? (p.type.split('/').pop() ?? '') : '';
   if (status === 409 && type === 'passkey-not-registered') return '이 계정에는 등록한 패스키가 없습니다. 내 계정에서 패스키를 등록한 뒤 다시 시도해 주세요';
-  if (status === 503) return '지금은 다시 인증하지 못했습니다. 잠시 뒤 다시 시도해 주세요';
+  if (status === 503) return '지금은 다시 로그인한 확인을 하지 못했습니다. 잠시 뒤 다시 로그인해 주세요';
   if (status === 410) return '패스키 확인 시간이 지났습니다. 처음부터 다시 해 주세요';
   if (status === 403 && type === 'password-change-required') return '비밀번호를 바꾼 뒤 다시 시도해 주세요';
   if (status === 423) return '계정이 잠겨 있습니다. 운영자에게 잠금 해제를 요청해 주세요';

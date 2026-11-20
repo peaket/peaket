@@ -33,13 +33,19 @@ export const View = z
   .object({
     requestId: z.string(),
     eventId: z.string(),
+    title: z.string().optional(),
     kind: z.enum(KINDS),
     status: z.enum(STATUSES),
     reason: z.string(),
+    partnerReason: z.string().nullable(),
+    faultOpinion: z.enum(FAULTS).nullable(),
+    evidenceRef: z.string().nullable(),
+    newStartsAt: z.string().nullable(),
     fault: z.enum(FAULTS).optional(),
     fanNoticeReason: z.string().optional(),
     requestedAt: z.string(),
-    judgedBy: z.string().optional(),
+    // openapi OpsActor(판정자). 표시 이름은 계정 읽기 계약이 없어 null이다
+    judgedBy: z.object({ adminAccountId: z.string(), displayName: z.string().nullable(), role: z.string() }).optional(),
     dryRun: DryRun.optional(),
     progress: Progress.optional(),
   })
@@ -64,6 +70,8 @@ export const PartnerStatus = z.object({
   refundProgress: z.object({ total: z.number().int(), done: z.number().int(), failed: z.number().int() }).nullable(),
   pausedBy: z.enum(['AUTOMATIC', 'OPERATOR']).nullable(),
   postponement: z.object({ refundApplicationCount: z.number().int(), refundDeadlineAt: z.string() }).nullable(),
+  // 배상 대상 수·합계(확정 뒤 미리보기의 값, 개인 명단 없음, d5 §6.12 ④ '배상 대상 수·합계')
+  compensation: z.object({ targetCount: z.number().int(), totalAmount: z.number().int() }).nullable(),
 });
 
 /** 도메인 문제는 Problem으로(확장 칸 requestId 등을 싣는다), 그 밖은 그대로 던진다 */

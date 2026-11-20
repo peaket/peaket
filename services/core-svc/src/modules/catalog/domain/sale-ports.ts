@@ -58,6 +58,8 @@ export interface SaleState {
   production: {
     id: string;
     promoterId: string;
+    /** 공연 제목(production.title). 관제 회차 취소 상세가 회차 ID 대신 보인다(RV-01). 시험 대역은 비울 수 있다 */
+    title?: string;
     saleReview: SaleReview;
     saleApprovedAt: Date | null;
     /** production.sale_policy(승인 이력이 있으면 마지막 승인 내용) */

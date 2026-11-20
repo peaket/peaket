@@ -190,6 +190,8 @@ export type OpsErrorKind =
   | 'preview-required'
   | 'already-approved'
   | 'approver-ineligible'
+  | 'rejection-not-allowed'
+  | 'invalid-body'
   | 'sale-stop-unavailable'
   | 'event-refund-unavailable'
   | 'reauth'
@@ -220,10 +222,13 @@ export function errorOf(e: ProblemLike | null | undefined): OpsError {
   if (status === 409 && type === 'preview-required') return { kind: 'preview-required', text: '미리보기가 없습니다. 다시 판정해 미리보기를 만든 뒤 확정해 주세요' };
   if (status === 409 && type === 'already-approved') return { kind: 'already-approved', text: '이미 확정된 요청입니다' };
   if (status === 403 && type === 'approver-ineligible') return { kind: 'approver-ineligible', text: '판정한 분은 두 번째 승인을 할 수 없습니다' };
+  if (status === 403 && type === 'rejection-not-allowed') return { kind: 'rejection-not-allowed', text: '판정 전 반려는 commander만 할 수 있습니다' };
+  // 400 invalid-body는 팬 통지 사유(서버 필수)를 포함한 판정 본문 오류다. 화면은 빈 값을 먼저 막고, 남은 경우도 정본 문구로 알린다(RV-06)
+  if (status === 400 && type === 'invalid-body') return { kind: 'invalid-body', text: '판정 내용을 다시 확인해 주세요. 팬 통지 사유는 꼭 적어야 합니다' };
   if (status === 503 && type === 'sale-stop-unavailable') return { kind: 'sale-stop-unavailable', text: '판매를 멈추지 못해 확정하지 않았습니다. 잠시 뒤 다시 시도해 주세요' };
   if (status === 503 && type === 'event-refund-unavailable') return { kind: 'event-refund-unavailable', text: '일괄 환불을 시작하지 못했습니다. 잠시 뒤 다시 시도해 주세요' };
   if (status === 403 && type === 'reauth-required') return { kind: 'reauth', text: '다시 인증해야 합니다. 비밀번호·인증 앱 코드와 패스키로 확인해 주세요' };
-  if (status === 503 && type === 'reauth-unavailable') return { kind: 'reauth-unavailable', text: '지금은 다시 인증하지 못했습니다. 잠시 뒤 다시 시도해 주세요' };
+  if (status === 503 && type === 'reauth-unavailable') return { kind: 'reauth-unavailable', text: '지금은 다시 로그인한 확인을 하지 못했습니다. 잠시 뒤 다시 로그인해 주세요' };
   if (status === 404) return { kind: 'not-found', text: '찾을 수 없습니다' };
   if (status === 403) return { kind: 'forbidden', text: '이 작업을 할 권한이 없습니다' };
   if (status === 409) return { kind: 'conflict', text: '지금 상태에서는 할 수 없습니다. 새로 고친 뒤 다시 시도해 주세요' };

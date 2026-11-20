@@ -133,12 +133,18 @@ export function ConnectedPage() {
   const status = detail?.status ?? 'UNKNOWN';
   const canApprove = canWrite && status === 'PENDING_APPROVAL';
   const canJudgeNow = canJudge && (status === 'REQUESTED' || status === 'JUDGED' || status === 'PENDING_APPROVAL');
-  const canReject = canWrite && (status === 'REQUESTED' || status === 'JUDGED' || status === 'PENDING_APPROVAL');
+  // 판정 전(REQUESTED) 반려는 commander만이다(서버 403 rejection-not-allowed와 같은 가드, RV-07)
+  const canReject = (status === 'REQUESTED' ? canJudge : canWrite) && (status === 'REQUESTED' || status === 'JUDGED' || status === 'PENDING_APPROVAL');
 
   const saveJudgement = async () => {
     if (!detail) return;
     if (!reason.trim()) {
       setNotice({ tone: 'bad', text: '판정 사유를 적어 주세요' });
+      return;
+    }
+    // 팬 통지 사유는 서버 필수(z.string().min(1).max(200))다. 빈 값을 보내 400을 받지 않고 칸 오류로 막는다(RV-06)
+    if (!fanNotice.trim()) {
+      setNotice({ tone: 'bad', text: '팬 통지 사유를 적어 주세요' });
       return;
     }
     setBusy('judge');
@@ -352,7 +358,7 @@ export function ConnectedPage() {
                   <textarea className="input" rows={3} value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} disabled={!canJudgeNow || busy !== null} />
                 </label>
                 <label className="field">
-                  <span className="label">팬 통지 사유 (200자까지)</span>
+                  <span className="label">팬 통지 사유 (필수, 200자까지)</span>
                   <textarea className="input" rows={2} value={fanNotice} maxLength={200} onChange={(e) => setFanNotice(e.target.value)} disabled={!canJudgeNow || busy !== null} />
                   <span className="hint">확정되면 예매자 전원에게 환불 일정이 안내됩니다. 내부 판정 사유와 따로 씁니다.</span>
                 </label>

@@ -12,7 +12,7 @@ export class HttpCoreEventOwners implements EventOwnerLookup {
     private readonly internalToken?: string,
   ) {}
 
-  async find(eventId: string): Promise<{ promoterId: string; startsAtMs: number; endsAtMs?: number } | undefined> {
+  async find(eventId: string): Promise<{ promoterId: string; startsAtMs: number; endsAtMs?: number; title?: string } | undefined> {
     const res = await this.client.request({
       method: 'GET',
       path: '/internal/v1/events/{eventId}/sale-config',
@@ -22,12 +22,14 @@ export class HttpCoreEventOwners implements EventOwnerLookup {
     });
     if (res.status === 404) return undefined;
     if (!res.ok) throw new Error(`core-svc sale config ${res.status}`);
-    const body = (await res.json()) as { promoterId?: unknown; startsAtMs?: unknown; endsAtMs?: unknown };
+    const body = (await res.json()) as { promoterId?: unknown; startsAtMs?: unknown; endsAtMs?: unknown; title?: unknown };
     if (typeof body.promoterId !== 'string' || typeof body.startsAtMs !== 'number' || !Number.isFinite(body.startsAtMs)) throw new Error('core-svc sale config 모양이 다르다');
     return {
       promoterId: body.promoterId,
       startsAtMs: body.startsAtMs,
       ...(typeof body.endsAtMs === 'number' && Number.isFinite(body.endsAtMs) ? { endsAtMs: body.endsAtMs } : {}),
+      // 공연 제목은 관제 상세의 ①에만 쓴다(없으면 회차 ID로 떨어진다)
+      ...(typeof body.title === 'string' && body.title ? { title: body.title } : {}),
     };
   }
 }

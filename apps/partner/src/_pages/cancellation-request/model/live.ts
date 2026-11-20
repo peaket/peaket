@@ -187,7 +187,7 @@ export function errorOf(e: ProblemLike | null | undefined): RequestError {
   if (status === 409 && type === 'event-ended') return { kind: 'ended', text: '종료된 회차는 요청할 수 없습니다' };
   if (status === 404) return { kind: 'not-found', text: '찾을 수 없습니다' };
   if (status === 422 && type === 'postponement-date-invalid') return { kind: 'date-invalid', text: '바뀐 일시는 지금 공연 시작보다 늦어야 합니다' };
-  if (status === 403 && type === 'partner_member') return { kind: 'member', text: '회차 취소·연기 요청은 파트너 관리자만 할 수 있습니다' };
+  if (status === 403 && (type === 'partner-admin-required' || type === 'partner_member')) return { kind: 'member', text: '회차 취소·연기 요청은 파트너 관리자만 할 수 있습니다' };
   if (status === 403 && type === 'reauth-required') return { kind: 'reauth', text: '다시 인증해야 합니다. 파트너 관리자로 다시 로그인한 뒤 시도해 주세요' };
   if (status === 409) return { kind: 'conflict', text: '지금 상태에서는 요청할 수 없습니다. 새로 고친 뒤 다시 시도해 주세요' };
   return { kind: 'other', text: '요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요' };

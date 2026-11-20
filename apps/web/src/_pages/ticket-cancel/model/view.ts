@@ -1,5 +1,9 @@
 // SCR-038 예매 취소: 상태별로 보이는 구역(캔버스 보드 SCR-038-m renderVals를 그대로 옮겼다), 취소 수수료 기준표, 환급액 계산.
 import type { Scr038State } from '@/shared/config/screens.booking';
+// 결과 판정은 cancel-flow.ts 한 벌만 둔다(RV-09)
+import { resultViewOf, type CancelResultKind } from './cancel-flow.ts';
+
+export { resultViewOf };
 
 export type CancelSheet = 'reauth' | 'final' | 'expired' | 'postFinal';
 export type CancelResult = 'pending' | 'hold' | 'check' | 'void' | 'delay';
@@ -136,22 +140,13 @@ export function quoteView(v: unknown): QuoteView {
 }
 
 /** 202 응답의 결과 카드 종류(정본 d5 §5.20 ⑥) */
-export type ResultKind = 'refunded' | 'deferred' | 'pending-account' | 'pending';
+export type ResultKind = CancelResultKind;
 
 export interface ResultView {
   kind: ResultKind;
   cancellationId: string;
   refundAmount: number;
   refundAccountRequired: boolean;
-}
-
-/** 202 `status` 세 값과 `refundAccountRequired`로 결과 카드를 가른다. 모르는 상태는 `pending`이다 */
-export function resultViewOf(c: unknown): ResultKind {
-  const v = (typeof c === 'object' && c !== null ? c : {}) as Record<string, unknown>;
-  if (v.status === 'REFUNDED') return 'refunded';
-  if (v.status === 'REQUESTED') return 'deferred';
-  if (v.status === 'REFUND_PENDING') return v.refundAccountRequired === true ? 'pending-account' : 'pending';
-  return 'pending';
 }
 
 /** 취소(Cancellation)를 결과 카드 값으로 바꾼다. 모르는 칸은 버린다 */

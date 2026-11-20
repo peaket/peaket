@@ -1,6 +1,6 @@
 # ADR-0328: 예매 취소 POST의 구매 세션 서명을 재인증·Origin 검사로 바꾼다 (2026-11-20)
 
-- **상태**: 채택(2026-11-20, BAT-421 구현, 전체 감독 결정 1). 추천 적용이며, 취소 처리기 하나에서만 `@PurchaseSigned()`와 구매 서명 머리 요구를 뗀다. 나머지 다섯 구매 세션 서명 작업(홀드·홀드 해제·연장·주문·결제 시도·결제 접수)은 그대로 둔다.
+- **상태**: 채택(2026-11-20, BAT-421 구현, 전체 감독 결정 1). 추천 적용이며, 취소 처리기 하나에서만 `@PurchaseSigned()`와 구매 서명 머리 요구를 뗀다. 나머지 여섯 구매 세션 서명 작업(홀드·홀드 해제·연장·주문·결제 시도·결제 접수)과 구매 세션 종료(`DELETE /v1/events/{eventId}/purchase-session`)는 그대로 둔다.
 - **관련**: [docs/features/transfer-refund.md](../features/transfer-refund.md) §3.1, [docs/frontend.md](../frontend.md) §4.1·§4.2.4·§4.3, [docs/design/d5-screen-blueprint.md](../design/d5-screen-blueprint.md) §5.20, [docs/api/openapi.yaml](../api/openapi.yaml) `createTicketCancellation`, [docs/BUILD_ORDER.md](../BUILD_ORDER.md) BAT-421, [ADR-0050](0050-crypto-corrections-and-key-management.md) 결정 8, [ADR-0221](0221-booking-flow-split-and-purchase-signer-core.md) 결정 5, [ADR-0293](0293-fan-reauth-token-bound-to-receiving-operation.md)
 - **관련 ID**: transfer-refund:v5.0.0-3.5.3, R-T39, BAT-421, GAT-090
 
@@ -15,7 +15,7 @@
 
 1. **취소 처리기에서 구매 세션 서명 요구를 뗀다.** `ticket-cancellation.controller.ts`의 `@PurchaseSigned()`와 계약 머리 스키마의 `X-Purchase-Seq`·`X-Purchase-Mac`을 지운다. openapi와 생성물은 바꾸지 않는다(이미 서명을 선언하지 않았다).
 2. **취소는 재인증·Origin·팬 쿠키로 지킨다.** 차례는 인증 가드 → 멱등 키 → 본문 검사(계좌 모양) → `X-Reauth-Token` 확인(세션·계정·`act`·`op`·한 번 쓰기) → 취소 Saga다. 확인에 실패하면 403 `reauth-required`, 확인기를 못 쓰면 503 `reauth-unavailable`(Retry-After 5초 [가정])이고 Saga는 돌지 않는다(기존 그대로).
-3. **다른 다섯 서명 작업은 그대로 둔다.** 좌석 홀드·해제·연장, 주문 만들기, 결제 시도, 결제 접수는 구매 여정 안에서만 일어나므로 살아 있는 구매 세션 서명이 맞다. 이 결정은 `POST /v1/tickets/{ticketId}/cancellation` 하나에만 적용한다.
+3. **다른 여섯 서명 작업과 구매 세션 종료는 그대로 둔다.** 좌석 홀드·해제·연장, 주문 만들기, 결제 시도, 결제 접수는 구매 여정 안에서만 일어나므로 살아 있는 구매 세션 서명이 맞고, 구매 세션 종료도 그 세션을 끝내는 작업이라 서명이 맞다. 이 결정은 `POST /v1/tickets/{ticketId}/cancellation` 하나에만 적용한다.
 4. **화면은 견적의 `refundAccountRequired`로 재인증 `purpose`를 먼저 정한다.** 참이면 `ticket-cancel-refund-account`, 거짓이면 `ticket-cancel`이고 재인증은 한 번이다. 계좌는 재인증 왕복 뒤에 받아 요청 본문에만 싣고 저장하지 않는다(d5 §5.20 ⑤ 뒤 ⑦, docs/frontend.md §4.1).
 5. **계약 주석과 정본을 맞춘다.** transfer-refund §3.1 '차례'에서 '구매 요청 서명'을 빼고, 이 처리기가 팬 쿠키·gw-fan Origin 검사·재인증 토큰으로 지켜진다는 한 줄을 둔다. 취소 POST에 구매 서명 머리가 없어도 401이 나지 않는다는 사실은 회귀 시험이 지킨다.
 

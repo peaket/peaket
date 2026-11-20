@@ -15,6 +15,7 @@ const SaleConfigResponse = z
     eventId: z.string(),
     productionId: z.string(),
     promoterId: z.string(),
+    title: z.string().optional(),
     rev: z.number(),
     opensAtMs: z.number(),
     startsAtMs: z.number(),

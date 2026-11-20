@@ -2,6 +2,9 @@
 // 순수 함수만 둔다. API 실행부·브라우저 저장소는 부르는 쪽(TicketCancelLive)이 넘긴다.
 // 계좌는 어디에도 저장하지 않는다: 이 파일의 PendingCancel에도 계좌 칸이 없다(payment §6, POL-014).
 
+// 재인증 확인기 503 문구는 공용 파일 한 곳만 쓴다(RV-09, docs/frontend.md §4.3)
+import { REAUTH_UNAVAILABLE } from '../../../shared/lib/reauth-failure.ts';
+
 /** 재인증 웹 purpose. 앱 서버 REAUTH_PURPOSE_OPS의 두 값과 짝이다(authz-matrix §6, ADR-0293) */
 export type CancelPurpose = 'ticket-cancel' | 'ticket-cancel-refund-account';
 
@@ -55,7 +58,6 @@ export interface ProblemLike {
 }
 
 const REAUTH_REQUIRED_TEXT = '다시 로그인한 확인이 만료되었거나 이미 쓰였습니다. 다시 로그인해 주세요';
-const REAUTH_UNAVAILABLE_TEXT = '지금은 다시 로그인한 확인을 하지 못했습니다. 잠시 뒤 다시 로그인해 주세요';
 const ACCOUNT_REQUIRED_TEXT = '환불받을 계좌를 입력해 주세요. 계좌를 넣으면 다시 시도할 수 있습니다';
 const ACCOUNT_INVALID_TEXT = '은행과 계좌번호, 예금주를 다시 확인해 주세요';
 const DEPENDENCY_TEXT = '환급액을 계산하지 못했습니다. 잠시 뒤 다시 시도해 주세요';
@@ -81,7 +83,7 @@ export function errorOf(e: ProblemLike | null | undefined): CancelError {
   const type = typeOf(e?.type);
   if (status === 403 && type === 'reauth-required') return { kind: 'reauth', text: REAUTH_REQUIRED_TEXT };
   if (status === 403 && type === 'not-payer') return { kind: 'not-payer', text: NOT_PAYER_TEXT };
-  if (status === 503 && type === 'reauth-unavailable') return { kind: 'reauth-unavailable', text: REAUTH_UNAVAILABLE_TEXT };
+  if (status === 503 && type === 'reauth-unavailable') return { kind: 'reauth-unavailable', text: REAUTH_UNAVAILABLE };
   if (status === 503 && type === 'dependency-unavailable') return { kind: 'dependency', text: DEPENDENCY_TEXT };
   if (status === 422 && type === 'refund-account-required') return { kind: 'account-required', text: ACCOUNT_REQUIRED_TEXT };
   if (status === 400 && type === 'invalid-body') return { kind: 'account-invalid', text: ACCOUNT_INVALID_TEXT };

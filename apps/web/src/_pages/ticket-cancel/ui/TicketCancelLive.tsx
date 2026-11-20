@@ -1,8 +1,9 @@
 'use client';
 // SCR-038 예매 취소 실제 화면(d5 §5.20, docs/frontend.md §4.1·§4.2.4, ADR-0328).
 // 차례: 티켓·견적 읽기 → 견적의 refundAccountRequired로 재인증 purpose를 정하고 재인증(/reauth/{provider})으로 떠남 →
-// 돌아와 /reauth/token으로 토큰을 메모리에 받음 → (계좌가 필요하면) 계좌 입력 → POST /v1/tickets/{ticketId}/cancellation.
-// 계좌는 재인증 왕복 동안 저장하지 않고 요청 본문에만 싣는다. 카드 끝 4자리는 계약에 없어 '원결제 수단'으로만 쓴다.
+// 돌아와 /reauth/token으로 토큰을 메모리에 받음 → (계좌가 필요하면) 마지막 확인 안에서 계좌 입력 → POST /v1/tickets/{ticketId}/cancellation.
+// 계좌 칸은 재인증에서 돌아온 뒤에만 그린다(왕복은 전체 페이지 이동이라 미리 적은 값이 사라진다, RV-03). 계좌는 저장하지 않고 본문에만 싣는다.
+// 카드 끝 4자리는 계약에 없어 '원결제 수단'으로만 쓴다.
 // URL의 티켓 한 장만 취소한다(같은 주문의 여러 좌석은 지갑·주문 읽기 계약이 생기는 다음 묶음).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -196,10 +197,8 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
           setNeedAccount(true);
           setAccountError(null);
         }
-        if (mapped.kind === 'reauth' || mapped.kind === 'reauth-unavailable') {
-          attemptRef.current = null;
-          keyRef.current = null;
-        }
+        // 403 reauth-required·503 reauth-unavailable은 토큰만 버리고 새 재인증을 받는다.
+        // 처리기가 던지면 멱등 키 행이 되돌아가므로 같은 본문은 같은 키로 다시 보낸다(RV-04, platform/idempotency.ts).
       } finally {
         setBusy(false);
       }
@@ -330,40 +329,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
                   </section>
 
                   {needAccount ? (
-                    <section className="col gap-3.5" aria-labelledby="h-account">
-                      <div className="col gap-1">
-                        <h2 className="t-md fw-b lg:text-lg" id="h-account">
-                          환불받을 계좌
-                        </h2>
-                        <p className="t-sm muted">가상계좌로 결제한 예매라 환불받을 계좌가 필요합니다. 계좌는 저장하지 않고 환불 요청에만 씁니다.</p>
-                      </div>
-                      <Select
-                        id="tc-bank"
-                        label="은행"
-                        placeholder="은행을 고르세요"
-                        options={REFUND_BANKS.map((b) => ({ value: b.code, label: b.label }))}
-                        value={account.bankCode}
-                        onChange={(e) => setAccount((a) => ({ ...a, bankCode: e.target.value }))}
-                      />
-                      <TextField
-                        id="tc-account"
-                        label="계좌번호"
-                        inputMode="numeric"
-                        autoComplete="off"
-                        placeholder="숫자와 하이픈"
-                        value={account.accountNumber}
-                        onChange={(e) => setAccount((a) => ({ ...a, accountNumber: e.target.value }))}
-                        hint="계좌번호는 저장하지 않고 환불 요청에만 씁니다"
-                      />
-                      <TextField
-                        id="tc-holder"
-                        label="예금주"
-                        autoComplete="off"
-                        value={account.holderName}
-                        onChange={(e) => setAccount((a) => ({ ...a, holderName: e.target.value }))}
-                        error={accountError ?? undefined}
-                      />
-                    </section>
+                    <p className="t-sm muted">가상계좌로 결제한 예매라 다시 로그인한 뒤 환불받을 계좌를 받습니다. 계좌는 저장하지 않고 환불 요청에만 씁니다.</p>
                   ) : null}
 
                   <section className="card col gap-3 p-4 md:px-5 md:py-[18px]" aria-labelledby="h-action">
@@ -376,6 +342,39 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
                           {ticket.seatLabel || '이 티켓'}을 취소하고 {won(quote.refundAmount)}을 {needAccount ? '입력한 환불 계좌' : '원결제 수단'}으로
                           환급합니다. 취소하면 되돌릴 수 없습니다.
                         </p>
+                        {needAccount && token && awaitingConfirm ? (
+                          <section className="col gap-3.5" aria-labelledby="h-account">
+                            <h3 className="t-sm fw-b" id="h-account">
+                              환불받을 계좌
+                            </h3>
+                            <Select
+                              id="tc-bank"
+                              label="은행"
+                              placeholder="은행을 고르세요"
+                              options={REFUND_BANKS.map((b) => ({ value: b.code, label: b.label }))}
+                              value={account.bankCode}
+                              onChange={(e) => setAccount((a) => ({ ...a, bankCode: e.target.value }))}
+                            />
+                            <TextField
+                              id="tc-account"
+                              label="계좌번호"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              placeholder="숫자와 하이픈"
+                              value={account.accountNumber}
+                              onChange={(e) => setAccount((a) => ({ ...a, accountNumber: e.target.value }))}
+                              hint="계좌번호는 저장하지 않고 환불 요청에만 씁니다"
+                            />
+                            <TextField
+                              id="tc-holder"
+                              label="예금주"
+                              autoComplete="off"
+                              value={account.holderName}
+                              onChange={(e) => setAccount((a) => ({ ...a, holderName: e.target.value }))}
+                              error={accountError ?? undefined}
+                            />
+                          </section>
+                        ) : null}
                         <div className="col gap-2">
                           <Button variant="danger" size="lg" block loading={busy} onClick={() => void send(token)} disabled={canceled}>
                             예매를 취소하고 {won(quote.refundAmount)}을 환급받습니다

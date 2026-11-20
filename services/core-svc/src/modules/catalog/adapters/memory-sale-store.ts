@@ -247,7 +247,7 @@ export class MemorySaleStore implements SaleStore {
     const layout = this.repo.layouts.get(productionId);
     const doc = layout?.pending?.doc ?? layout?.rows?.doc;
     return {
-      production: { id: p.id, promoterId: p.promoterId, saleReview: p.saleReview, saleApprovedAt: p.saleApprovedAt, rules: policy?.rules ?? [], pendingRules: policy?.pending, salePolicyVersion: policy?.version ?? 1 },
+      production: { id: p.id, promoterId: p.promoterId, title: p.title, saleReview: p.saleReview, saleApprovedAt: p.saleApprovedAt, rules: policy?.rules ?? [], pendingRules: policy?.pending, salePolicyVersion: policy?.version ?? 1 },
       events: [...this.repo.events.values()]
         .filter((e) => e.productionId === productionId)
         .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.id < b.id ? -1 : 1))

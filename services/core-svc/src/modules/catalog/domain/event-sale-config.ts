@@ -18,6 +18,8 @@ export interface EventSaleConfig {
   eventId: string;
   productionId: string;
   promoterId: string;
+  /** 공연 제목(관제 회차 취소 상세가 회차 ID 대신 보인다, RV-01). 옛 사본에는 없다 */
+  title?: string;
   /** 판매 승인·설정 고치기의 판. queue-svc는 이 값이 지금보다 클 때만 바꾼다 */
   rev: number;
   opensAtMs: number;
@@ -87,10 +89,10 @@ export function buildEventSaleConfigs(st: SaleState, facts: ReadonlyMap<string, 
   const rules = st.production.rules;
   return st.events
     .filter((e) => e.status !== 'CANCELLED')
-    .map((e) => configOf(st.production.id, st.production.promoterId, e, rules, st.production.salePolicyVersion, facts.get(e.eventId) ?? {}));
+    .map((e) => configOf(st.production.id, st.production.promoterId, e, rules, st.production.salePolicyVersion, facts.get(e.eventId) ?? {}, st.production.title));
 }
 
-function configOf(productionId: string, promoterId: string, e: SaleEventRow, rules: SalePolicyRule[], policyVersion: number, facts: EventSaleConfigFacts): EventSaleConfig {
+function configOf(productionId: string, promoterId: string, e: SaleEventRow, rules: SalePolicyRule[], policyVersion: number, facts: EventSaleConfigFacts, title?: string): EventSaleConfig {
   const end = saleEndsAt(e);
   const phases = salePhases(rules, e.eventId, { openAt: e.openAt, saleEndsAt: end, perPersonLimit: e.perPersonLimit });
   const eligGates = phases
@@ -101,6 +103,7 @@ function configOf(productionId: string, promoterId: string, e: SaleEventRow, rul
     eventId: e.eventId,
     productionId,
     promoterId,
+    ...(title ? { title } : {}),
     rev,
     opensAtMs: e.openAt.getTime(),
     startsAtMs: e.startsAt.getTime(),

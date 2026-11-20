@@ -6,6 +6,8 @@
 // 연기 환급 모드는 d5 주소대로 ?mode=postponed로도 연다(상태를 고르지 않았을 때 '연기 환급').
 // 실제 경로: 티켓 ID가 UUID면 목업 대신 TicketCancelLive가 티켓·견적·재인증·취소를 부른다(BAT-421).
 // 목업 티켓(tkt-…)이나 ?state=가 있으면 지금 퍼블리싱 화면을 그대로 본다.
+// 주의: 이 미리보기 보드는 계좌 칸을 재인증(⑤) 앞에 그리는 옛 차례다. 실제 화면(TicketCancelLive)은 재인증에서 돌아온 뒤에만
+// 계좌 칸을 그린다(d5 §5.20 ⑤ → ⑦, BAT-421 리뷰 반영 RV-03·RV-10). 보드는 다음 퍼블리싱 정리에서 같은 차례로 옮긴다.
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';

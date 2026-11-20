@@ -102,7 +102,7 @@ export interface EventRefundReader {
 
 /** core-svc 내부 판매 설정(GET /internal/v1/events/{eventId}/sale-config). 없으면 undefined, 실패는 던진다 */
 export interface EventOwnerLookup {
-  find(eventId: string): Promise<{ promoterId: string; startsAtMs: number; endsAtMs?: number } | undefined>;
+  find(eventId: string): Promise<{ promoterId: string; startsAtMs: number; endsAtMs?: number; title?: string } | undefined>;
 }
 
 // ---- BAT-420-rest GAT-110: core 회차 상태 반영(transfer-refund §5 'core 회차 상태 반영', R-T41) ----

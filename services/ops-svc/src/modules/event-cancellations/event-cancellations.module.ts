@@ -18,7 +18,7 @@ import type {
   SaleSuspensionLookup,
 } from './domain/ports.js';
 import { EventCancellationsController } from './inbound/event-cancellations.controller.js';
-import { PartnerEventCancellationController } from './inbound/partner-event-cancellation.controller.js';
+import { PartnerAdminGuard, PartnerEventCancellationController } from './inbound/partner-event-cancellation.controller.js';
 
 export interface EventCancellationsModuleDeps {
   readonly store: EventCancellationStore;
@@ -60,6 +60,7 @@ export class EventCancellationsModule {
       module: EventCancellationsModule,
       controllers: [EventCancellationsController, PartnerEventCancellationController],
       providers: [
+        PartnerAdminGuard,
         {
           provide: EventCancellations,
           inject: [CLOCK, PLATFORM_LOGGER],

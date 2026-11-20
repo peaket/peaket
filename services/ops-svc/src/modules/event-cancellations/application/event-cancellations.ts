@@ -246,6 +246,8 @@ export class EventCancellations {
       refundProgress: wantsProgress && job ? { total: job.total, done: job.done, failed: job.failed } : null,
       pausedBy: r.status === 'PAUSED' && job ? pausedByOf(job) : null,
       postponement: wantsPostponement && job?.refundWindowClosesAt !== undefined ? { refundApplicationCount: job.appliedOrders ?? 0, refundDeadlineAt: job.refundWindowClosesAt } : null,
+      // 배상 대상 수·합계는 판정 미리보기의 값이고 확정 뒤에만 보인다(개인 명단은 싣지 않는다, d5 §6.12 ④)
+      compensation: approved && r.dryRun && r.dryRun.compensationTargets > 0 ? { targetCount: r.dryRun.compensationTargets, totalAmount: r.dryRun.compensationTotal } : null,
     };
   }
 
@@ -253,15 +255,26 @@ export class EventCancellations {
     return { items: (await this.store.list(filter)).map(eventCancellationView), nextCursor: null };
   }
 
-  /** 관제 상세: 미리보기와, 진행 중·끝난 요청이면 결제사별 진행률(읽기 실패면 상태만) */
+  /** 관제 상세: 공연 제목과 미리보기, 진행 중·끝난 요청이면 결제사별 진행률(읽기 실패면 상태만) */
   async get(requestId: string): Promise<EventCancellationView> {
     const r = await this.#find(requestId);
-    if (!PROGRESS_STATUSES.has(r.status) || !this.extra.reader) return eventCancellationDetailView(r);
+    const title = await this.#eventTitle(r.eventId);
+    if (!PROGRESS_STATUSES.has(r.status) || !this.extra.reader) return eventCancellationDetailView(r, undefined, title);
     const job = await this.#job(r.requestId);
     const progress: EventCancellationProgress = job
       ? { state: job.state, total: job.total, done: job.done, failed: job.failed, ...(job.accountPending !== undefined ? { accountPending: job.accountPending } : {}), perPg: job.perPg.map((p) => ({ pg: p.pg, state: p.state, ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}), done: p.done, failed: p.failed, unknown: p.unknown })) }
       : { state: r.refundJobState ?? r.status };
-    return eventCancellationDetailView(r, progress);
+    return eventCancellationDetailView(r, progress, title);
+  }
+
+  /** 관제 상세가 보일 공연 제목(core 판매 설정 사본). 소속 확인을 조립하지 않았거나 읽기 실패면 undefined(제목 칸만 빈다) */
+  async #eventTitle(eventId: string): Promise<string | undefined> {
+    if (!this.extra.owners) return undefined;
+    try {
+      return (await this.extra.owners.find(eventId))?.title;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

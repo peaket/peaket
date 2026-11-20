@@ -130,6 +130,7 @@ async function readState(tx: Tx, p: ProductionRow, tenantId: string): Promise<Sa
     production: {
       id: p.id,
       promoterId: p.promoterId,
+      title: p.title,
       saleReview: p.saleReview as SaleReview,
       saleApprovedAt: p.saleApprovedAt,
       rules: rulesOf(p.salePolicy),

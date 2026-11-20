@@ -2954,7 +2954,7 @@ lg 1280
 
 - 실제 경로(BAT-421): `getPartnerProduction`으로 공연·회차를 읽어 회차를 고르고, `POST /v1/partner/events/{eventId}/cancellation`(멱등키, 확인 대화상자 뒤)로 요청한다. 상태는 `GET` 같은 경로로 읽어 `REQUESTED` '판정 대기' → `JUDGED` '재판정 대기' → `PENDING_APPROVAL` '확정 대기(2인 승인)' → `APPROVED` '확정'·`RUNNING` '확정 · 환불 진행 중 {n}%' → `PAUSED` '일시정지(자동/운영자)' → `REFUND_WINDOW` '연기 확정 · 환급 신청 기간' → `COMPLETED` '완료' / `REJECTED` '반려'로 그린다. 반려 사유는 `rejectionReason`, 팬 통지 사유는 `judgementSummary`만 보인다. 진행률은 `refundProgress`의 `total`·`done`·`failed` 합계만이고 percent는 `done/total`(내림)이다.
 - 파트너 응답에 미리보기(`dryRun`)·결제사별 몫·판정자·내부 판정 사유가 없다. 화면도 그리지 않는다(transfer-refund §5 '요청 두 길').
-- 실무자 역할을 미리 아는 계약이 없어 첫 방문에는 요청 버튼이 활성이다. 403 `partner_member`를 받으면 그 방문 동안 버튼을 끄고 위 문구를 보인다(감독 결정 6).
+- 실무자 역할을 미리 아는 계약이 없어 첫 방문에는 요청 버튼이 활성이다. 403 `partner-admin-required`(실무자)를 받으면 그 방문 동안 버튼을 끄고 위 문구를 보인다(감독 결정 6, BAT-421 리뷰 반영 RV-02. Problem type은 케밥 표기이고 화면은 옛 별칭 `partner_member`도 함께 받는다).
 
 ## 7. 관제 콘솔 화면(`apps/console-host`)
 
