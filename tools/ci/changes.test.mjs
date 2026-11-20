@@ -55,7 +55,7 @@ test('계약 원본을 바꾸면 계약·문서와 화면·서비스 전부를, 
 });
 
 test('배포 상태·부하 시험·도구·워크플로 밖 .github은 각 범위로 간다', () => {
-  assert.deepEqual(scopes({ 'deploy/x.yaml': '\n', 'loadtest/k1.js': '\n', 'tools/ci/x.mjs': '\n', '.github/CODEOWNERS': '*\n' }), ['docs', 'deploy', 'loadtest', 'tools', 'ci']);
+  assert.deepEqual(scopes({ 'deploy/x.yaml': '\n', 'loadtest/k1.js': '\n', 'tools/ci/x.mjs': '\n', '.github/CODEOWNERS': '*\n' }), ['docs', 'deploy', 'gitops', 'loadtest', 'tools', 'ci']);
 });
 
 test('파일을 옮기면 옛 경로의 범위와, 링크가 깨질 수 있어 docs도 고른다', () => {
@@ -473,4 +473,26 @@ test('BAS170_비교기준을읽지못하면_web도고른다', () => {
 test('PRF215_코드리뷰_v1무대도구와_구매요청서명벡터를바꾸면_loadtest를고르고_이름만비슷한파일은_고르지않는다', () => {
   for (const f of ['tools/local/v1-stage.mjs', 'tools/local/v1-objects.mjs', 'docs/api/vectors/purchase-request-mac.v1.json']) assert.ok(scopes({ [f]: 'x\n' }).includes('loadtest'), f);
   for (const f of ['tools/local/v1-stage.test.mjs', 'docs/api/vectors/purchase-request-mac.v2.json', 'docs/api/vectors/other.v1.json']) assert.ok(!scopes({ [f]: 'x\n' }).includes('loadtest'), f);
+});
+
+// 배포 상태 정적 검사(BAS-150·BAT-085, ADR-0319): deploy/ 전체와 gitops 검사 도구가 바뀌면 gitops 범위를 고르고,
+// Kyverno 정책·설치 값(deploy/policies/)이 바뀌면 kind 입장 시험도 함께 고른다(정책을 실제 admission으로 본다)
+test('GV-07 BAT-085 deploy/와 gitops 검사 도구는 gitops를, Kyverno 정책·설치 값은 kind를 고른다', () => {
+  // 범위 차례는 changes.mjs의 SCOPES 순서다
+  assert.deepEqual(scopes({ 'deploy/policies/kyverno/policy-values.yaml': 'x\n' }), ['docs', 'deploy', 'gitops', 'tools', 'kind']);
+  assert.deepEqual(scopes({ 'deploy/policies/kyverno/envs/demo/policies.yaml': 'x\n' }), ['docs', 'deploy', 'gitops', 'tools', 'kind']);
+  assert.deepEqual(scopes({ 'deploy/policies/test/kyverno-policies.test.mjs': 'x\n' }), ['deploy', 'gitops', 'tools', 'kind']);
+  assert.deepEqual(scopes({ 'deploy/platform/kyverno/values.yaml': 'x\n' }), ['docs', 'deploy', 'gitops', 'tools', 'kind']);
+  assert.deepEqual(scopes({ 'deploy/platform/kyverno/application.yaml': 'x\n' }), ['docs', 'deploy', 'gitops', 'tools', 'kind']);
+  for (const f of ['tools/ci/gitops-check.mjs', 'tools/ci/supply-chain-verify.mjs', 'tools/ci/kyverno-policies.mjs']) {
+    assert.deepEqual(scopes({ [f]: 'x\n' }), ['gitops', 'tools'], f);
+  }
+  // 시험 파일은 도구 시험(tools)만 돌린다(배포 상태 검사를 다시 돌리지 않는다)
+  assert.deepEqual(scopes({ 'tools/ci/gitops-check.test.mjs': 'x\n' }), ['tools']);
+  assert.deepEqual(scopes({ 'tools/ci/supply-chain-verify.test.mjs': 'x\n' }), ['tools']);
+  assert.deepEqual(scopes({ 'tools/ci/kyverno-policies.test.mjs': 'x\n' }), ['tools']);
+  // 워크플로 자체는 ci·gitops(정책·도구가 함께 바뀌면 위 규칙이 kind를 더한다)
+  assert.deepEqual(scopes({ '.github/workflows/gitops-check.yml': 'x\n' }), ['gitops', 'ci']);
+  // 일반 deploy 변경은 gitops를 켠다(기존 deploy·tools도 그대로)
+  assert.deepEqual(scopes({ 'deploy/workloads/queue-svc/values.yaml': 'x\n' }), ['docs', 'deploy', 'gitops', 'tools']);
 });

@@ -1103,3 +1103,54 @@ test('M8 diagnose.e2e.mjs는 실패 때 dumpDiagnose를 부르고 stageDiag·실
   }
 });
 
+// --- D-T32 ②(GV-02, docs/devops.md §3.4 '출시 후보 빌드는 캐시를 쓰지 않는다', ADR-0130, BAT-085) ---
+// 빌드 잡의 여섯 캐시 꼴(actions/cache·cache-from·cache-to·--cache-from·--cache-to·--mount=type=cache·cache-mode)을 모두 막는다.
+// 주석은 보지 않고, 실제 build-image.yml의 빌드 잡이 통과하는 것은 위 DT32_실제build-image.yml 시험이 지킨다.
+
+test('GV-02 D-T32 ② 빌드 잡에 캐시 복원·저장 꼴(actions/cache·cache-from/to·--cache-from/to·--mount=type=cache·cache-mode)이 있으면 실패한다', () => {
+  const cases = [
+    ['actions/cache 단계', `      - uses: actions/cache@${SHA}\n        with:\n          path: node_modules\n          key: k`],
+    ['cache-from', '      - run: docker buildx build --cache-from type=gha .'],
+    ['cache-to', '      - run: docker buildx build --cache-to type=gha,mode=max .'],
+    ['cache-from 설정 줄', '        with:\n          cache-from: type=gha'],
+    ['cache-to 설정 줄', '        with:\n          cache-to: type=gha,mode=max'],
+    ['--cache-from', '      - run: docker buildx build --cache-from=type=local,src=/tmp/cache .'],
+    ['--cache-to', '      - run: docker buildx build --cache-to=type=local,dest=/tmp/cache .'],
+    ['--mount=type=cache', '      - run: docker buildx build --mount=type=cache,target=/root/.cache .'],
+    ['cache-mode', '        with:\n          cache-mode: max'],
+  ];
+  for (const [what, step] of cases) {
+    const r = run(withStep(step), 'build-image.yml');
+    assert.equal(r.code, 1, `${what}: ${r.out}`);
+    assert.match(r.out, /D-T32/, what);
+  }
+  // CRLF도 같다
+  const crlf = run(withStep('      - run: docker buildx build --cache-from type=gha .').replace(/\n/g, '\r\n'), 'build-image.yml');
+  assert.equal(crlf.code, 1, crlf.out);
+  assert.match(crlf.out, /D-T32/);
+});
+
+test('GV-02 D-T32 ② 주석 속 캐시 꼴과 게시 잡의 캐시는 빌드 잡 규칙을 건드리지 않는다(게시 잡은 저장소 코드를 돌리지 않는다)', () => {
+  for (const comment of [
+    '      # --mount=type=cache는 출시 후보 빌드에서 쓰지 않는다',
+    '      # cache-from: type=gha',
+    '      # actions/cache@v4도 쓰지 않는다',
+  ]) {
+    assert.equal(run(withStep(comment), 'build-image.yml').code, 0, comment);
+  }
+  // 게시 잡에 캐시 단계가 있어도 빌드 잡 검사는 통과한다(게시 잡은 서명 신원을 받는 별도 잡이다)
+  const withPublishCache = `${BUILD_GOOD}${PUBLISH_JOB.replace('    steps:\n', `    steps:\n      - uses: actions/cache@${SHA}\n        with:\n          path: x\n          key: y\n`)}`;
+  const r = run(withPublishCache, 'build-image.yml', { allowlist: PUBLISH_ALLOWLIST });
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /actions\/cache/);
+});
+
+// 시험 이의(2026-11-20, BAT-085): check-workflows는 `actions/cache@`만 보고 `actions/cache/restore@`·`actions/cache/save@`
+// 하위 경로는 아직 잡지 못한다. 여섯 꼴은 막지만 같은 액션의 하위 경로가 빠져 있다. 제품 코드는 시험 담당이 고치지 않는다.
+test('GV-02 D-T32 ② (남은 구멍) actions/cache/restore·save 하위 경로도 빌드 잡에서 막아야 한다', { skip: '규칙이 actions/cache@만 본다(계획 BAT-085 시험 이의, 제품 코드는 리뷰 반영 몫)' }, () => {
+  for (const action of ['restore', 'save']) {
+    const r = run(withStep(`      - uses: actions/cache/${action}@${SHA}`), 'build-image.yml');
+    assert.equal(r.code, 1, `actions/cache/${action}: ${r.out}`);
+  }
+});
+

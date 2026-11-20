@@ -7,7 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tempDir } from './git-fixture.mjs';
-import { BUILDER, BUILDKIT_IMAGE, PLATFORMS, loadBuildArgs, ociBuildArgs, ociManifestDigest, parseImageArgs, scmRunArgs, smokeRunArgs } from './image-build.mjs';
+import { BUILDER, BUILDKIT_IMAGE, PLATFORMS, isReleaseRef, loadBuildArgs, ociBuildArgs, ociManifestDigest, parseImageArgs, scmRunArgs, smokeRunArgs } from './image-build.mjs';
 
 const VALID = ['--dockerfile', 'services/v0-monolith/Dockerfile', '--image', 'v0-monolith', '--platform', 'linux/arm64', '--out', 'out/images'];
 const without = (flag) => {
@@ -185,4 +185,36 @@ test('DT32_이미있는빌더는_고정한BuildKit이미지일때만_다시쓴�
   assert.equal(builderUsesPinnedImage(pinned.replace(BUILDKIT_IMAGE, 'moby/buildkit:buildx-stable-1')), false);
   assert.equal(builderUsesPinnedImage(pinned.replace(/Driver Options:.*\n/, '')), false);
   assert.equal(builderUsesPinnedImage(pinned.replace('docker-container', 'docker')), false);
+});
+
+// --- D-T32 ②(GV-02, docs/devops.md §3.4 '출시 후보 빌드는 캐시를 쓰지 않는다', ADR-0130, BAT-085) ---
+// release/hotfix 가지의 출시 후보 빌드는 OCI 빌드와 스모크 다시 빌드 둘 다 --no-cache를 붙인다(M9).
+// develop·PR ref와 GITHUB_REF가 없는 로컬은 지금처럼 캐시를 쓴다(동작 변화 없음).
+
+test('GV-02 D-T32 ② isReleaseRef는 release·hotfix 가지만 참이고 develop·main·PR·빈 값은 거짓이다', () => {
+  for (const ref of ['refs/heads/release/1.5.0', 'refs/heads/release/2026-11', 'refs/heads/hotfix/1.5.1']) assert.equal(isReleaseRef(ref), true, ref);
+  for (const ref of [undefined, null, '', 'refs/heads/develop', 'refs/heads/main', 'refs/pull/1/merge', 'refs/tags/release/1.5.0', 'refs/heads/release', 'refs/heads/release-code/1.5.0', 'refs/heads/hotfix2/1.5.1', 'refs/heads/feature/release/1.5.0']) {
+    assert.equal(isReleaseRef(ref), false, String(ref));
+  }
+});
+
+test('GV-02 D-T32 ② 출시 후보 빌드는 OCI 빌드와 스모크 다시 빌드 둘 다 --no-cache를 붙이고, 그 밖에는 붙이지 않는다', () => {
+  const base = { dockerfile: 'services/v0-monolith/Dockerfile', image: 'v0-monolith', platform: 'linux/amd64', ociFile: 'out/a.oci.tar', metadataFile: 'out/a.json', tag: 'peaket-smoke/v0-monolith:amd64' };
+  for (const args of [ociBuildArgs({ ...base, noCache: true }), loadBuildArgs({ ...base, noCache: true })]) {
+    assert.equal(args.filter((a) => a === '--no-cache').length, 1, args.join(' '));
+  }
+  for (const args of [ociBuildArgs(base), loadBuildArgs(base), ociBuildArgs({ ...base, noCache: false }), loadBuildArgs({ ...base, noCache: false })]) {
+    assert.equal(args.includes('--no-cache'), false, args.join(' '));
+  }
+  // release/hotfix ref에서 프로그램이 고르는 값 그대로: 두 인자 목록 모두 --no-cache
+  for (const ref of ['refs/heads/release/1.5.0', 'refs/heads/hotfix/1.5.1']) {
+    const noCache = isReleaseRef(ref);
+    assert.equal(ociBuildArgs({ ...base, noCache }).includes('--no-cache'), true, ref);
+    assert.equal(loadBuildArgs({ ...base, noCache }).includes('--no-cache'), true, ref);
+  }
+  for (const ref of ['refs/heads/develop', 'refs/heads/main', 'refs/pull/1/merge', undefined]) {
+    const noCache = isReleaseRef(ref);
+    assert.equal(ociBuildArgs({ ...base, noCache }).includes('--no-cache'), false, String(ref));
+    assert.equal(loadBuildArgs({ ...base, noCache }).includes('--no-cache'), false, String(ref));
+  }
 });
