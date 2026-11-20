@@ -884,7 +884,7 @@ test('V-T43 ② R3 관제 SSE 두 규칙에도 게이트웨이 응답 고치기�
   const sub = nextSub();
   const wrongAud = token(c, 'admin', { sub, sid: `s-${sub}`, aud: 'partner', scope: c.probes['gw-ops'].scope ?? '' });
   for (const path of ['/v1/ops/live', `/v1/ops/events/e-${RUN}/live`]) {
-    const r = await send(c, 'ops-api', { path, headers: edge(c, '198.51.100.57', { authorization: `Bearer ${wrongAud}` }) });
+    const r = await send(c, 'ops-api', { path, headers: edge(c, '203.0.113.57', { authorization: `Bearer ${wrongAud}` }) });
     const at = `대상이 다른 토큰 GET ${path}`;
     assert.equal(r.status, 401, `${at}: ${r.status} ${r.text.slice(0, 200)}`);
     assert.match(String(r.headers['content-type'] ?? ''), /^application\/problem\+json\b/, `${at}: 형식`);
@@ -910,7 +910,7 @@ test('V-T43 ② R3 관제 SSE 두 규칙에도 게이트웨이 응답 고치기�
     rs = await Promise.all(
       [0, 1, 2].map(async (i) => {
         await sleep(i * 200);
-        return send(c, 'ops-api', { path: '/v1/ops/live', headers: edge(c, '198.51.100.58', { authorization: `Bearer ${tv}`, 'x-e2e-delay-ms': '4000' }), timeoutMs: 30_000 });
+        return send(c, 'ops-api', { path: '/v1/ops/live', headers: edge(c, '203.0.113.58', { authorization: `Bearer ${tv}`, 'x-e2e-delay-ms': '4000' }), timeoutMs: 30_000 });
       }),
     );
   } finally {

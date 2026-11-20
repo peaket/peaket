@@ -223,13 +223,21 @@ test('B-T18 ④ 원본 확인 머리 없이(또는 틀린 값으로) 보낸 위�
   for (const { gw, verify } of cases) {
     const sub = nextSub();
     const ja4 = JA4();
+    const ip = nextIp();
     const forged = { 'cloudfront-viewer-ja4-fingerprint': ja4, 'cloudfront-viewer-asn': '64496', 'x-amzn-waf-bot-labels': 'awswaf:managed:aws:bot-control:bot:verified', 'cloudfront-viewer-address': '192.0.2.9:443', 'x-amzn-waf-forged': '1', 'x-peaket-arrival': 'forged-arrival' };
-    const headers = { 'x-forwarded-for': nextIp(), ...forged, ...(verify === undefined ? {} : { 'x-peaket-origin-verify': verify }) };
-    const h = echoed(await probe(c, gw, { tokenValue: accessToken(c, gw, sub), event: EVENT, headers }));
+    const headers = { 'x-forwarded-for': ip, ...forged, ...(verify === undefined ? {} : { 'x-peaket-origin-verify': verify }) };
+    const r = await probe(c, gw, { tokenValue: accessToken(c, gw, sub), event: EVENT, headers });
     const m = `${gw} 원본 확인=${verify === undefined ? '없음' : verify === c.originVerify ? '맞음' : `'${verify}'`}`;
-    for (const k of Object.keys(forged)) assert.equal(h[k], undefined, `${m}: 백엔드에 ${k}`);
-    assert.equal(h['x-peaket-origin-verify'], undefined, `${m}: 원본 확인 머리가 넘었다`);
-    const [line] = await waitLogLine(c, gw, sub);
+    if (gw === 'gw-ops') {
+      // gw-ops는 원본 확인이 없거나 틀리면 403이고, Viewer 주소도 허용 목록 밖이라 대역에 닿지 않는다(ADR-0321)
+      assert.equal(r.status, 403, `${m}: ${r.status}`);
+      assert.throws(() => echoed(r), `${m}: 대역에 닿았다`);
+    } else {
+      const h = echoed(r);
+      for (const k of Object.keys(forged)) assert.equal(h[k], undefined, `${m}: 백엔드에 ${k}`);
+      assert.equal(h['x-peaket-origin-verify'], undefined, `${m}: 원본 확인 머리가 넘었다`);
+    }
+    const [line] = await waitLogLine(c, gw, ip);
     assert.ok(blank(line.ja4) && blank(line.asn) && blank(line.edgeBotLabels), `${m}: 로그 ${JSON.stringify(line)}`);
     assert.ok(!JSON.stringify(line).includes(ja4), `${m}: 로그에 위조 JA4`);
   }
@@ -257,7 +265,8 @@ test('[ASVS v5.0.0-15.3.4] 바깥에서 x-forwarded-for 여러 값을 보내도 
       ['10.0.0.1,198.51.100.2, 2001:db8::7', '2001:db8::7'],
       ['203.0.113.8', '203.0.113.8'],
     ]) {
-      const h = echoed(await probe(c, gw, { tokenValue: accessToken(c, gw, nextSub()), event: EVENT, headers: edge(c, sent) }));
+      // gw-ops는 허용 IP 목록을 보므로 CloudFront-Viewer-Address는 허용 대역으로 두고, 견주는 값은 x-forwarded-for로 보낸다
+      const h = echoed(await probe(c, gw, { tokenValue: accessToken(c, gw, nextSub()), event: EVENT, headers: edge(c, sent, {}, nextIp()) }));
       assert.equal(h['x-forwarded-for'], want, `${gw} ${sent}`);
       for (const k of ['forwarded', 'x-real-ip']) assert.equal(h[k], undefined, `${gw}: ${k}`);
     }
@@ -542,10 +551,12 @@ test('B-T18 ④ RV-01 원본 확인 없이 보낸 위조 끝단 머리는 거절
     if (gw === 'gw-queue') cases.push({ m: '허용 밖 Origin', host: 'queue', method: 'POST', path: `/v1/queues/${EVENT}/entries`, headers: { origin: 'https://evil.example', 'content-type': 'text/plain;charset=UTF-8', cookie: `__Secure-peaket_at=${accessToken(c, gw, nextSub())}` }, body: '{}', status: 403 });
     if (gw === 'gw-fan') cases.push({ m: '허용 밖 Origin', host: 'api', method: 'POST', path: '/v1/identity/access-tokens', headers: { origin: 'https://evil.example', cookie: '__Secure-peaket_rt=rt-e2e' }, status: 403 });
     for (const k of cases) {
-      const ip = uniqueIp();
+      // gw-ops는 허용 IP·원본 확인을 요구하므로 허용 대역 주소와 원본 확인 머리를 붙여 나머지 거절(401·404·405)을 본다
+      const ip = gw === 'gw-ops' ? nextIp() : uniqueIp();
+      const allowed = gw === 'gw-ops' ? { 'x-peaket-origin-verify': c.originVerify, 'cloudfront-viewer-address': `${ip}:443` } : {};
       const ja4 = JA4();
       const forged = { 'cloudfront-viewer-ja4-fingerprint': ja4, 'cloudfront-viewer-asn': '64496', 'x-amzn-waf-bot-labels': 'awswaf:managed:aws:bot-control:bot:verified' };
-      const r = await send(c, k.host, { method: k.method, path: k.path, body: k.body, headers: { 'x-forwarded-for': ip, ...forged, ...k.headers } });
+      const r = await send(c, k.host, { method: k.method, path: k.path, body: k.body, headers: { 'x-forwarded-for': ip, ...allowed, ...forged, ...k.headers } });
       const m = `${gw} ${k.m}(${r.status})`;
       if (k.status) assert.equal(r.status, k.status, m);
       else assert.ok(r.status < 500, m);
@@ -711,11 +722,19 @@ test('B-T18 ④ VF-13 원본 확인 없이 보낸 위조 끝단 머리는 CloudF
   for (const gw of BEHIND_CLOUDFRONT) {
     // ① 자기 Lua 정책이 있는 라우트(확인 경로)
     const own = await probe(c, gw, { tokenValue: accessToken(c, gw, nextSub()), event: EVENT, headers: { 'x-forwarded-for': nextIp(), ...forgedEdge() } });
-    assert.ok(own.status < 400, `${gw} 확인 경로: ${own.status}`);
-    assertNoEdge(echoed(own), `${gw} 확인 경로`);
     // ② 게이트웨이 정책에만 기대는 라우트
     const g = gatewayOnly[gw];
     const r = await send(c, g.host, { method: g.method, path: g.path, body: g.body, headers: { 'x-forwarded-for': nextIp(), ...forgedEdge(), ...(g.headers ?? {}) } });
+    if (gw === 'gw-ops') {
+      // gw-ops는 원본 확인이 없거나 Viewer 주소가 허용 목록 밖이면 403이라 대역에 닿지 않는다(ADR-0321)
+      assert.equal(own.status, 403, `${gw} 확인 경로: ${own.status}`);
+      assert.throws(() => echoed(own), `${gw} 확인 경로: 대역에 닿았다`);
+      assert.equal(r.status, 403, `${gw} ${g.method} ${g.path}: ${r.status}`);
+      assert.throws(() => echoed(r), `${gw} ${g.method} ${g.path}: 대역에 닿았다`);
+      continue;
+    }
+    assert.ok(own.status < 400, `${gw} 확인 경로: ${own.status}`);
+    assertNoEdge(echoed(own), `${gw} 확인 경로`);
     assert.ok(r.status < 400, `${gw} ${g.method} ${g.path}: ${r.status}`);
     assertNoEdge(echoed(r), `${gw} ${g.method} ${g.path}`);
   }

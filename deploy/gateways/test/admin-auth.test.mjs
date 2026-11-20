@@ -126,6 +126,49 @@ test('I-T46 ⑤ 공통 Lua는 refreshCookie를 갱신 경로의 POST 밖에서 C
   assert.notEqual(partnerCtx[0].requireOriginVerify, true, 'gw-partner에 원본 확인 필수를 켰다(직접 호출 규칙이 아직 없다)');
 });
 
+// BAT-045 리뷰 W-01: 라우트 수준 EnvoyExtensionPolicy가 게이트웨이 수준 정책을 통째로 덮는다(Envoy Gateway v1.10.0).
+// 그래서 라우트 정책도 게이트웨이 설정을 그대로 갖지 않으면 /v1/ops/commands·/v1/partner/events/... 에서 원본 확인·허용 IP·리프레시 쿠키 지우기가 사라진다.
+// kind에서 8개 중 6개가 이 때문에 실패했다(계획 '## 시험'). CSRF 출처는 앱 서버 라우트(Origin: null을 보낸다)에 닿지 않도록 공개·API 라우트 정책에만 둔다.
+test('BAT-045 W-01 라우트 수준 filterContext도 게이트웨이 수준 설정(원본 확인·허용 IP·리프레시 쿠키·CSRF 출처)을 그대로 갖는다', () => {
+  const inherited = ['originVerify', 'requireOriginVerify', 'opsAllowedIpsEnv', 'refreshCookie', 'refreshPath', 'tokenCookie', 'tokenScheme'];
+  for (const [gw, gatewayCtx, origin] of [
+    ['gw-ops', opsCtx[0], OPS_ORIGIN],
+    ['gw-partner', partnerCtx[0], PARTNER_ORIGIN],
+  ]) {
+    // 게이트웨이 정책에는 csrfOrigin이 없다(앱 서버 양식의 Origin: null을 막지 않게). CSRF는 라우트 정책이 싣는다.
+    assert.equal(gatewayCtx.csrfOrigin, undefined, `${gw}-edge.csrfOrigin`);
+    for (const [name, checkTyp] of [[`${gw}-public-edge`, false], [`${gw}-api-edge`, true]]) {
+      const ctxs = filterContextsOf(name);
+      assert.equal(ctxs.length, 1, `${name}의 filterContext가 하나가 아니다: ${JSON.stringify(ctxs)}`);
+      const c = ctxs[0];
+      for (const key of inherited) {
+        if (gatewayCtx[key] === undefined) continue;
+        assert.equal(c[key], gatewayCtx[key], `${name}.${key}가 게이트웨이 수준(${JSON.stringify(gatewayCtx[key])})과 다르다`);
+      }
+      assert.equal(c.csrfOrigin, origin, `${name}.csrfOrigin`);
+      // 유일하게 라우트가 바꾸는 값: API 라우트만 토큰 유형(typ)을 본다(공개 로그인 라우트는 낡은 쿠키가 있어도 받는다)
+      assert.equal(c.checkTyp, checkTyp, `${name}.checkTyp`);
+      const routeName = name.replace(/-edge$/, '');
+      const refs = (named('EnvoyExtensionPolicy', name)?.spec?.targetRefs ?? []).filter((t) => t.kind === 'HTTPRoute').map((t) => t.name);
+      assert.ok(refs.includes(routeName), `${name}이 ${routeName} 라우트를 고르지 않는다: ${refs.join(',')}`);
+    }
+  }
+});
+
+// BAT-045 리뷰 W-02: Envoy csrf 필터는 Origin의 끝 슬래시를 떼고 견주어 `https://console.peaket.example/`을 같은 출처로 본다(2026-11-20 kind).
+// 그래서 공통 Lua가 위험한 메서드(POST·PUT·PATCH·DELETE)에서 Origin을 글자 그대로 견주고, 끝 슬래시·여럿·빈 값은 403으로 거절한다.
+test('BAT-045 W-02 공통 Lua는 CSRF Origin을 글자 그대로 견주어 끝 슬래시를 받지 않는다', () => {
+  const fn = region(LUA, 'local function csrf_origin_denied', 'local function reject');
+  assert.match(fn, /setting\(ctx, "csrfOrigin"\)/, 'csrfOrigin 설정을 읽지 않는다');
+  assert.match(fn, /#origins == 0/, 'Origin이 없는 요청을 나누지 않는다(브라우저 밖 클라이언트는 통과)');
+  assert.match(fn, /#origins ~= 1 then return true end/, 'Origin이 여럿일 때 거절하지 않는다');
+  assert.match(fn, /return origins\[1\] ~= allowed/, 'Origin을 글자 그대로 견주지 않는다');
+  assert.doesNotMatch(fn, /sub\([^)]*1, *-2\)|gsub\([^)]*"\/"/, 'Origin의 끝 슬래시를 떼고 견준다');
+  const handler = LUA.slice(LUA.indexOf('function envoy_on_request'));
+  assert.match(handler, /csrf_origin_denied\(handle, headers, ctx\)/, '요청 처리에서 출처를 견주지 않는다');
+  assert.match(handler, /csrf_origin_denied\(handle, headers, ctx\) then\n\s+return handle:respond\(direct_headers\("403"\), FORBIDDEN\)/, 'CSRF 출처 거절이 403이 아니다');
+});
+
 test('B6 B7 gw-ops는 원본 확인이 틀리면 403이고, /internal 404가 그보다 먼저이며, 허용 IP는 원본 확인이 맞은 요청에서만 본다', () => {
   const handler = LUA.slice(LUA.indexOf('function envoy_on_request'));
   const internal = handler.indexOf('is_internal(headers:get(":path"))');

@@ -50,12 +50,18 @@ test('I-T46 ⑤ gw-ops 리프레시 쿠키는 갱신 경로 밖에서 빠지고 
   const h = echoed(outside);
   assert.ok(h.cookie.includes(`${OPS_AT}=`), '액세스 쿠키까지 지웠다');
   assert.ok(!h.cookie.includes(OPS_RT), `리프레시 쿠키가 갱신 경로 밖으로 나갔다: ${h.cookie}`);
-  assert.equal(h['cloudfront-viewer-address'], undefined, 'CloudFront-Viewer-Address가 안쪽으로 남았다');
+  assert.equal(h['cloudfront-viewer-address'], `${ip}:443`, '원본 확인이 맞으면 Viewer 주소는 안쪽으로 남는다(끝단 머리 지우기는 확인이 틀릴 때만)');
 
-  const inside = await send(c, 'ops-api', { method: 'POST', path: OPS_REFRESH, headers: edge(c, ip, { cookie }, ip), body: '' });
+  const inside = await send(c, 'ops-api', { method: 'POST', path: OPS_REFRESH, headers: edge(c, ip, { cookie, origin: c.origins.console }, ip), body: '' });
   const hi = echoed(inside);
   assert.ok(hi.cookie.includes(`${OPS_AT}=`), '갱신 경로에서 액세스 쿠키를 지웠다');
   assert.ok(hi.cookie.includes(`${OPS_RT}=`), '갱신 경로에서 리프레시 쿠키를 지웠다');
+
+  // 라우트 수준 filterContext(gw-ops-api-edge)가 게이트웨이 설정을 덮어도 지워지는지: 다른 API 경로에서도 같다
+  const me = await send(c, 'ops-api', { method: 'GET', path: '/v1/ops/auth/sessions/me', headers: edge(c, ip, { cookie }, ip) });
+  const hme = echoed(me);
+  assert.ok(!hme.cookie.includes(OPS_RT), `sessions/me에서 리프레시 쿠키가 남았다: ${hme.cookie}`);
+  assert.ok(hme.cookie.includes(`${OPS_AT}=`), 'sessions/me에서 액세스 쿠키를 지웠다');
 });
 
 test('I-T46 ⑤ Cookie 머리 둘·큰따옴표·앞뒤 빈칸이어도 리프레시 쿠키만 빠진다', async () => {
@@ -76,14 +82,14 @@ test('I-T46 ⑤ 파트너 리프레시 쿠키도 갱신 경로 밖에서 빠진�
   const h = echoed(outside);
   assert.ok(!h.cookie.includes(PARTNER_RT), `파트너 리프레시 쿠키가 갱신 경로 밖으로 나갔다: ${h.cookie}`);
   assert.ok(h.cookie.includes(`${PARTNER_AT}=`), '파트너 액세스 쿠키를 지웠다');
-  const inside = await send(c, 'partner-api', { method: 'POST', path: PARTNER_REFRESH, headers: partnerHeaders({ cookie }, ip), body: '' });
+  const inside = await send(c, 'partner-api', { method: 'POST', path: PARTNER_REFRESH, headers: partnerHeaders({ cookie, origin: c.origins.partner }, ip), body: '' });
   assert.ok(echoed(inside).cookie.includes(`${PARTNER_RT}=`), '갱신 경로에서 파트너 리프레시 쿠키를 지웠다');
 });
 
 test('I-T46 ④ [ASVS v5.0.0-3.5.1] 운영자 갱신을 다른/빈 Origin으로 보내면 403이고 콘솔 출처면 대역에 닿는다', async () => {
   const ip = nextIp();
   const cookie = `${OPS_RT}=refresh-${RUN}`;
-  for (const [label, origin] of [['다른 출처', 'https://evil.example'], ['없음', undefined], ['null', 'null'], ['다른 콘솔', 'https://partner.peaket.example'], ['끝 슬래시', `${c.origins.console}/`]]) {
+  for (const [label, origin] of [['다른 출처', 'https://evil.example'], ['없음', undefined], ['빈 값', ''], ['null', 'null'], ['다른 콘솔', 'https://partner.peaket.example'], ['끝 슬래시', `${c.origins.console}/`]]) {
     const r = await send(c, 'ops-api', { method: 'POST', path: OPS_REFRESH, headers: edge(c, ip, { cookie, ...(origin === undefined ? {} : { origin }) }, ip), body: '' });
     assertForbidden(r, `운영자 갱신 ${label}`);
   }
@@ -98,7 +104,7 @@ test('I-T52 ② 운영자·파트너 로그인을 다른/빈 Origin으로 보내
     ['partner-api', '/v1/partner/auth/sessions', c.origins.partner],
   ]) {
     const ip = nextIp();
-    for (const [label, origin] of [['다른 출처', 'https://evil.example'], ['없음', undefined], ['null', 'null']]) {
+    for (const [label, origin] of [['다른 출처', 'https://evil.example'], ['없음', undefined], ['빈 값', ''], ['null', 'null'], ['끝 슬래시', `${good}/`]]) {
       const r = await send(c, host, { method: 'POST', path, headers: edge(c, ip, { 'content-type': 'application/json', ...(origin === undefined ? {} : { origin }) }, ip), body: '{}' });
       assertForbidden(r, `${host} 로그인 ${label}`);
     }

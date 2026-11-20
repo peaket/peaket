@@ -252,9 +252,9 @@ test('ASVS 코드 영역: 구현 위치의 경로(앞 두 마디)·서비스·�
   assert.deepEqual(codeArea(w, [...dirs, 'services/core-svc']), ['services/core-svc']);
   const [e] = asvsItems('docs/security/asvs/analytics.md', `${ASVS_HEAD}| v5.0.0-1.2.1 | L1 | 가 | 적용 | 공통 | 미실행 | — |\n`);
   assert.deepEqual(codeArea(e, dirs), []);
-  // 아직 코드가 없는 기능은 구현 위치 칸이 다른 기능의 폴더를 가리켜도 영역이 비어 있다(남의 시험 태그로 부풀지 않게)
+  // 코드가 생긴 기능은 구현 위치 칸의 영역을 쓴다(2026-11-20 BAT-425가 transfer-refund 영역을 채웠다)
   const [f] = asvsItems('docs/security/asvs/transfer-refund.md', `${ASVS_HEAD}| v5.0.0-2.2.2 | L1 | 가 | 적용 | \`services/purchase-svc\` | 미실행 | — |\n`);
-  assert.deepEqual(codeArea(f, dirs), []);
+  assert.deepEqual(codeArea(f, dirs), ['services/purchase-svc']);
 });
 
 test('ASVS 상태: 그 행의 코드 영역 안 시험 파일의 태그만 자동 시험이고, 같은 ID의 태그가 영역 밖에만 있으면 ID만이다', () => {
