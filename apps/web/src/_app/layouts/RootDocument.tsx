@@ -3,10 +3,12 @@
 //   글자 그대로, pnpm --filter @peaket/web color-mode)를 같은 출처 파일로 <head>에서 먼저 실어 첫 그림 전에 html에
 //   data-seed-user-color-scheme을 단다. 키트 다크 변수와 맨 바깥 color-scheme이 그 값을 따른다(@peaket/ds kit-tokens.css·ds.css).
 //   캐시 화면(묶음 A)은 script-src 'self'로 실리고, 요청 화면(B·E·F)은 그 응답의 nonce를 붙인다(d2 §1, HOT-291).
+//   우리가 싣는 같은 출처 스크립트라 빌드 때 만든 SHA-256 integrity도 붙인다(BAT-172, ADR-0326, docs/frontend.md §5.14.2).
 //   다크 미리보기(?theme=dark)는 셸 루트(.pk.dark)가 맡는다.
 // - 글꼴: Pretendard 가변 글꼴 동적 서브셋(styles/globals.css, 화면에 쓰인 글자의 조각만 받는다, docs/frontend.md §5.8).
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { SEED_COLOR_MODE_SRI } from '../theme/seed-color-mode-sri';
 import '../styles/globals.css';
 
 export const rootMetadata: Metadata = {
@@ -30,7 +32,7 @@ export function RootDocument({ children, nonce }: { children: ReactNode; nonce?:
   return (
     <html lang="ko" data-seed-color-mode="system" suppressHydrationWarning>
       <head>
-        <script src="/seed-color-mode.js" nonce={nonce} />
+        <script src="/seed-color-mode.js" nonce={nonce} integrity={SEED_COLOR_MODE_SRI} />
       </head>
       <body className="pk">
         {/* 서비스 워커는 월렛 화면(WalletPwa)에서만 동적으로 등록한다. 루트 문서에 두면 모든 경로 첫 JS에 Serwist가 들어간다 */}
