@@ -1,4 +1,4 @@
-// Kyverno CEL 정책의 정적 시험(KV-01·KV-04~07, D-T11 ①·D-T18 ②·D-T28·D-T33, ADR-0318, BAT-085).
+// Kyverno CEL 정책의 정적 시험(KV-01·KV-04~07·V-01, D-T11 ①·D-T18 ②·D-T28·D-T33, ADR-0318, BAT-085).
 // 생성 파일(deploy/policies/kyverno/envs/<환경>/policies.yaml)과 설치 값(deploy/platform/kyverno/values.yaml)을 읽고,
 // 정본(docs/devops.md §4.2·§4.3, 계획 BAT-085 §6·§12)의 값과 견준다. 원천(policy-values.yaml)에서 기대값을 만들지 않는다.
 // 차트 렌더는 Helm을 쓴다(tools/local/tools.mjs가 고정 판을 받는다). 실행: node --test "deploy/policies/test/*.test.mjs"
@@ -41,7 +41,8 @@ const byName = (docs, name) => {
 };
 const expressions = (spec) => (spec.validations ?? []).map((v) => v.expression).join('\n');
 const namespaceList = (spec) => {
-  const e = spec.matchConstraints?.matchConditions?.[0]?.expression ?? '';
+  // Kyverno v1.20 CEL 정책은 matchConditions를 spec 바로 아래에 둔다(CRD 스키마, V-01)
+  const e = spec.matchConditions?.[0]?.expression ?? '';
   const m = /object\.metadata\.namespace in \[(.*)\]/.exec(e);
   assert.ok(m, `네임스페이스 고정 matchConditions가 없다: ${e}`);
   return m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, ''));
@@ -112,7 +113,8 @@ test('KV-01 D-T11 ① 이미지 정책: keyless 신원 둘(release·hotfix)·발
     ]);
     assert.equal(cosign.ctlog?.url, REKOR);
     assert.equal(p.spec.attestations?.[0]?.intoto?.type, PREDICATE);
-    assert.deepEqual(p.spec.attestations?.[0]?.attestors, [{ name: 'peaketCosign' }]);
+    // attestations[] 항목에는 서명자를 넣지 않는다(서명자는 spec.attestors에 있고, CRD 모양은 V-01)
+    assert.equal(p.spec.attestations?.[0]?.attestors, undefined);
     const e = expressions(p.spec);
     // 컨테이너·초기 컨테이너·임시 컨테이너 모두 서명을 본다(M13)
     for (const list of ['images.containers', 'images.initContainers', 'images.ephemeralContainers']) assert.match(e, new RegExp(`${list}\\.map\\(image, verifyImageSignatures`), `${env}: ${list}`);
@@ -120,6 +122,40 @@ test('KV-01 D-T11 ① 이미지 정책: keyless 신원 둘(release·hotfix)·발
     // 출처 증명의 정본 값(B3): 저장소·워크플로·release/hotfix·GitHub 호스트 러너·buildType
     for (const value of [BUILD_TYPE, REPOSITORY, WORKFLOW, 'refs/heads/release/', 'refs/heads/hotfix/', 'runner_environment', 'github-hosted']) assert.ok(e.includes(value), `${env}: ${value}`);
     assert.doesNotMatch(e, /refs\/heads\/develop|refs\/heads\/main/, env);
+  }
+});
+
+// ===================== V-01(검증): 생성 정책이 Kyverno v1.20 CRD 모양을 따른다 =====================
+
+test('V-01 생성 정책이 Kyverno v1.20 CRD 모양을 따른다: matchConditions는 spec 바로 아래, attestations[]에 attestors가 없다', () => {
+  for (const env of ENVS) {
+    const docs = load(env);
+    for (const d of docs) {
+      // 클러스터의 CRD가 선언한 칸만 보낸다. strict decoding은 모르는 칸이 하나라도 있으면 정책 전체를 거부한다
+      assert.ok(Array.isArray(d.spec.matchConditions), `${env}/${d.metadata.name}: spec.matchConditions가 배열이 아니다`);
+      assert.ok(d.spec.matchConditions.length > 0, `${env}/${d.metadata.name}: spec.matchConditions가 비었다`);
+      assert.equal(
+        d.spec.matchConstraints?.matchConditions,
+        undefined,
+        `${env}/${d.metadata.name}: matchConditions는 matchConstraints의 칸이 아니라 spec 바로 아래다(unknown field로 거부된다)`,
+      );
+      assert.equal(
+        Object.keys(d.spec.matchConstraints ?? {}).includes('matchConditions'),
+        false,
+        `${env}/${d.metadata.name}: matchConstraints에 matchConditions가 남았다`,
+      );
+    }
+    const p = byName(docs, POLICY_NAMES.image);
+    assert.equal(p.kind, 'ImageValidatingPolicy');
+    // 서명 검증자는 spec.attestors에 있고, 검증식이 attestors.<이름>·attestations.<이름>으로 부른다
+    assert.ok(Array.isArray(p.spec.attestors) && p.spec.attestors.length > 0, `${env}: spec.attestors가 비었거나 목록이 아니다`);
+    assert.ok(p.spec.attestors.some((a) => a.name === 'peaketCosign'), `${env}: peaketCosign attestor`);
+    // attestations[] 항목은 name·intoto·referrer만 받는다. attestors를 넣으면 unknown field다
+    assert.ok(Array.isArray(p.spec.attestations) && p.spec.attestations.length > 0, `${env}: spec.attestations가 비었거나 목록이 아니다`);
+    for (const a of p.spec.attestations) {
+      assert.ok(a.name, `${env}: attestations[].name이 없다`);
+      assert.equal(a.attestors, undefined, `${env}/${a.name}: attestations[]에 attestors를 넣으면 CRD가 모르는 칸이라 거부된다(서명자는 spec.attestors에 둔다)`);
+    }
   }
 });
 

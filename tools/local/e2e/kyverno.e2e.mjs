@@ -7,13 +7,13 @@
 // - D-T33 ①: 데모 정책(감사)이 허용 GHCR 이미지를 막지 않는다.
 // - D-T33 ②: 운영 레지스트리 정책(Deny) 사본이 GHCR·다른 계정 ECR을 거부하고 PEAKET ECR은 통과시킨다.
 // - 오프라인 PoC: Kyverno admission의 egress를 로컬 레지스트리·DNS만 남기고 막은 뒤 같은 다이제스트와 새 다이제스트를 다시 띄워
-//   결과를 docs/review/measurements/BAT-085-offline-verify.md에 적는다(시험이 아니라 측정이다. 통과/실패를 단언하지 않는다).
+//   결과를 .cache/peaket-tools/BAT-085-offline-verify.md에 적는다(시험이 아니라 측정이다. 통과/실패를 단언하지 않는다).
 // 테스트 서명 키는 임시 폴더에 만들고 지운다(저장소에 비밀 키를 두지 않는다). 정책 이름은 임시 사본에만 -e2e를 붙인다.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +38,8 @@ const POD_IMAGE = 'registry.k8s.io/pause:3.10';
 const DIGEST = `sha256:${'d'.repeat(64)}`;
 const ECR = '000000000000.dkr.ecr.ap-northeast-2.amazonaws.com/';
 const TIMEOUT = 120_000;
-const kc = (args, o = {}) => kubectl(args, { timeout: TIMEOUT, quiet: true, ...o });
+// kubectl 오류의 stderr를 파이프로 받는다. 상속(inherit)이면 execFileSync 오류에 .stderr가 없어 거부 문구를 단언하지 못한다(V-05)
+const kc = (args, o = {}) => kubectl(args, { timeout: TIMEOUT, quiet: true, stdio: ['pipe', 'pipe', 'pipe'], ...o });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const docker = (args, o = {}) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000, ...o });
 
@@ -103,6 +104,8 @@ async function denied(spec, pattern) {
   } catch (e) {
     const text = String(e.stderr ?? e.message);
     if (made) throw e;
+    // stderr를 읽어야 이 단언이 실제 입장 웹훅의 문구를 본다(V-05)
+    assert.match(text, /denied the request|is forbidden/, `${spec.metadata.name}: 입장 웹훅의 거부 문구가 아니다: ${text}`);
     assert.match(text, pattern, `${spec.metadata.name}: ${text}`);
   } finally {
     if (made) await deletePod(spec.metadata.name);
@@ -131,21 +134,23 @@ function copyPolicy(env, name, newName) {
   return doc;
 }
 async function waitPolicy(kind, name) {
-  // Kyverno CEL 정책은 status.conditions의 Ready로 준비를 알린다. 그 칸이 없으면 잠깐 뒤 진행한다(정책 적용 자체는 이미 끝났다)
+  // Kyverno CEL 정책은 status.conditionStatus.ready로 준비를 알린다(V-04). 예전 시험은 status.ready만 보아 매번 120초를 기다린 뒤 조용히 진행했다.
+  // 120초 안에 준비되지 않으면 시험을 실패시킨다(정책이 준비되지 않은 채 판정하면 빈 통과가 된다)
   const until = Date.now() + 120_000;
+  let last = '아직 읽지 못했다';
   for (;;) {
     try {
       const out = await kc(['get', kind, name, '-o', 'json'], { quiet: true });
       const status = JSON.parse(out).status ?? {};
-      const ready = status.ready === true || (status.conditions ?? []).some((c) => c.type === 'Ready' && c.status === 'True');
+      last = status;
+      const ready =
+        status.conditionStatus?.ready === true ||
+        (Array.isArray(status.conditions) && status.conditions.some((c) => c.type === 'Ready' && (c.status === 'True' || c.status === true)));
       if (ready) return;
-    } catch {
-      // 아직 없다
+    } catch (e) {
+      last = String(e.stderr ?? e.message);
     }
-    if (Date.now() > until) {
-      await sleep(5000);
-      return;
-    }
+    if (Date.now() > until) assert.fail(`${kind}/${name}: 120초 안에 준비(Ready)되지 않았다: ${JSON.stringify(last).slice(0, 600)}`);
     await sleep(1000);
   }
 }
@@ -186,6 +191,13 @@ async function startRegistry() {
   ];
   for (const o of objects) await applyDoc(o);
 }
+/** `docker push`가 찍은 다이제스트를 읽는다. `docker inspect .RepoDigests[0]`는 원본(여러 플랫폼 index) 다이제스트라 레지스트리에 없는 값을 가리킬 수 있다(V-02) */
+function pushDigest(ref) {
+  const out = docker(['push', ref]);
+  const m = /digest:\s*(sha256:[0-9a-f]{64})/.exec(out);
+  assert.ok(m, `${ref}: docker push 출력에서 digest: sha256:…을 읽지 못했다(엉뚱한 다이제스트로 서명하지 않는다)\n${out.trim().split(/\r?\n/).slice(-5).join('\n')}`);
+  return m[1];
+}
 /** 이미지 셋을 밀고 서명한다. 서명은 registry 저장소 경로(peaket-e2e/...)에 붙어 클러스터 참조와 같다 */
 function pushAndSign() {
   for (const image of [BUSYBOX_IMAGE, COSIGN_IMAGE]) {
@@ -202,11 +214,7 @@ function pushAndSign() {
   const digestOf = (name) => {
     const ref = `${HOST_REGISTRY}/peaket-e2e/${name}:v1`;
     docker(['tag', BUSYBOX_IMAGE, ref]);
-    docker(['push', ref]);
-    const repo = docker(['inspect', '-f', '{{index .RepoDigests 0}}', ref]).trim();
-    const m = /@(sha256:[0-9a-f]{64})$/.exec(repo);
-    assert.ok(m, `${name}: 푸시한 다이제스트를 읽지 못했다(${repo})`);
-    return m[1];
+    return pushDigest(ref);
   };
   const signedDigest = digestOf('signed');
   const unsignedDigest = digestOf('unsigned');
@@ -223,9 +231,10 @@ function pushAndSign() {
   wrongKeyImage = `${LOCAL_PREFIX}wrongkey@${wrongDigest}`;
 }
 
-/** 오프라인 측정 결과를 측정 파일에 덧붙인다(커밋하는 문서다. 실행할 때만 바뀐다) */
+/** 오프라인 측정 결과를 작업 폴더 캐시에 덧붙인다. 추적 중인 측정 문서(docs/review/measurements/)는 고치지 않는다(V-07, RV-10) */
+const MEASUREMENT_FILE = join(REPO, '.cache', 'peaket-tools', 'BAT-085-offline-verify.md');
 function recordMeasurement(results) {
-  const file = join(REPO, 'docs', 'review', 'measurements', 'BAT-085-offline-verify.md');
+  mkdirSync(dirname(MEASUREMENT_FILE), { recursive: true });
   const at = new Date().toISOString();
   const lines = [
     '',
@@ -236,7 +245,10 @@ function recordMeasurement(results) {
     '한계: 키 없는(keyless) 서명의 오프라인 번들은 첫 출시 이미지가 생긴 뒤 G-20에서 다시 잰다. 이 실행은 키 기반 시험 서명만 본다.',
     '',
   ];
-  writeFileSync(file, `${readFileSync(file, 'utf8').trimEnd()}\n${lines.join('\n')}`);
+  const head = existsSync(MEASUREMENT_FILE)
+    ? readFileSync(MEASUREMENT_FILE, 'utf8').trimEnd()
+    : '# BAT-085 오프라인 검증 시험 실행 기록(e2e가 .cache에 쓰는 파일이다. 커밋하지 않는다)';
+  writeFileSync(MEASUREMENT_FILE, `${head}\n${lines.join('\n')}`);
 }
 
 before(async () => {
@@ -276,12 +288,14 @@ test('D-T11 ② 서명한 이미지는 입장하고, 서명 없음·다른 키·
       webhookConfiguration: { timeoutSeconds: 15 },
       matchConstraints: {
         resourceRules: [{ apiGroups: [''], apiVersions: ['v1'], operations: ['CREATE', 'UPDATE'], resources: ['pods'] }],
-        matchConditions: [{ name: 'e2e-namespace', expression: `object.metadata.namespace == '${NS}'` }],
       },
+      // matchConditions는 spec 바로 아래다(matchConstraints의 칸이 아니다, V-01)
+      matchConditions: [{ name: 'e2e-namespace', expression: `object.metadata.namespace == '${NS}'` }],
       matchImageReferences: [{ glob: `${LOCAL_PREFIX}*` }],
       credentials: { allowInsecureRegistry: true },
       validationConfigurations: { required: true, verifyDigest: true },
-      attestors: [{ name: 'e2eKey', cosign: { key: { data: publicKey } } }],
+      // 키 서명은 투명성 로그·SCT 없이 검증한다(오프라인 egress 차단과 kind의 네트워크 없음, V-06)
+      attestors: [{ name: 'e2eKey', cosign: { key: { data: publicKey }, ctlog: { insecureIgnoreTlog: true, insecureIgnoreSCT: true } } }],
       validations: [
         { expression: 'images.containers.map(image, verifyImageSignatures(image, [attestors.e2eKey])).all(result, result > 0)', message: 'E2E 이미지 서명을 확인하지 못했다' },
         { expression: 'images.initContainers.map(image, verifyImageSignatures(image, [attestors.e2eKey])).all(result, result > 0)', message: 'E2E 초기 컨테이너 이미지 서명을 확인하지 못했다' },
@@ -364,12 +378,14 @@ test('BAT-085 오프라인 PoC: Kyverno egress를 로컬 레지스트리·DNS만
       webhookConfiguration: { timeoutSeconds: 15 },
       matchConstraints: {
         resourceRules: [{ apiGroups: [''], apiVersions: ['v1'], operations: ['CREATE', 'UPDATE'], resources: ['pods'] }],
-        matchConditions: [{ name: 'e2e-namespace', expression: `object.metadata.namespace == '${NS}'` }],
       },
+      // matchConditions는 spec 바로 아래다(matchConstraints의 칸이 아니다, V-01)
+      matchConditions: [{ name: 'e2e-namespace', expression: `object.metadata.namespace == '${NS}'` }],
       matchImageReferences: [{ glob: `${LOCAL_PREFIX}*` }],
       credentials: { allowInsecureRegistry: true },
       validationConfigurations: { required: true, verifyDigest: true },
-      attestors: [{ name: 'e2eKey', cosign: { key: { data: publicKey } } }],
+      // 키 서명은 투명성 로그·SCT 없이 검증한다(오프라인 egress 차단과 kind의 네트워크 없음, V-06)
+      attestors: [{ name: 'e2eKey', cosign: { key: { data: publicKey }, ctlog: { insecureIgnoreTlog: true, insecureIgnoreSCT: true } } }],
       validations: [{ expression: 'images.containers.map(image, verifyImageSignatures(image, [attestors.e2eKey])).all(result, result > 0)', message: 'E2E 이미지 서명을 확인하지 못했다' }],
     },
   };
@@ -381,9 +397,7 @@ test('BAT-085 오프라인 PoC: Kyverno egress를 로컬 레지스트리·DNS만
   // ② 새 다이제스트를 하나 더 밀고 서명한다(아직 Kyverno가 본 적 없는 이미지)
   const freshRef = `${HOST_REGISTRY}/peaket-e2e/fresh-${RUN}:v1`;
   docker(['tag', BUSYBOX_IMAGE, freshRef]);
-  docker(['push', freshRef]);
-  const freshDigest = /@(sha256:[0-9a-f]{64})$/.exec(docker(['inspect', '-f', '{{index .RepoDigests 0}}', freshRef]).trim())?.[1];
-  assert.ok(freshDigest, '새 다이제스트를 읽지 못했다');
+  const freshDigest = pushDigest(freshRef);
   cosign(['sign', '--yes', '--tlog-upload=false', '--allow-insecure-registry', '--key', '/keys/cosign.key', `${HOST_REGISTRY}/peaket-e2e/fresh-${RUN}@${freshDigest}`]);
   const freshImage = `${LOCAL_PREFIX}fresh-${RUN}@${freshDigest}`;
   const egress = {
@@ -416,7 +430,7 @@ test('BAT-085 오프라인 PoC: Kyverno egress를 로컬 레지스트리·DNS만
   recordMeasurement(result);
   await kc(['delete', 'networkpolicy', 'kyverno-egress-offline-e2e', '-n', 'kyverno', '--ignore-not-found']).catch(() => {});
   await deletePolicy('imagevalidatingpolicies', E2E_POLICY);
-  // 측정 파일에 결과 줄이 있어야 한다(통과/실패를 단언하지 않는다)
-  const text = readFileSync(join(REPO, 'docs', 'review', 'measurements', 'BAT-085-offline-verify.md'), 'utf8');
+  // 캐시에 쓴 결과 줄이 있어야 한다(통과/실패를 단언하지 않는다). 추적 문서는 그대로다
+  const text = readFileSync(MEASUREMENT_FILE, 'utf8');
   assert.match(text, /같은 다이제스트\(온라인 선통과\): /);
 });

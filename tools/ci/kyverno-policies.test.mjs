@@ -132,6 +132,21 @@ test('KV-04 같은 입력을 두 번 만들면 같은 바이트이고, 세 환�
   }
 });
 
+test('V-01 생성기는 matchConditions를 spec 바로 아래에 두고 attestations[]에 attestors를 넣지 않는다', () => {
+  const checked = checkValues(parse(SOURCE));
+  assert.deepEqual(checked.problems, []);
+  for (const env of ENVS) {
+    const docs = policiesFor(checked.values, env);
+    for (const d of docs) {
+      assert.ok(Array.isArray(d.spec.matchConditions) && d.spec.matchConditions.length > 0, `${env}/${d.metadata.name}: spec.matchConditions`);
+      assert.equal(d.spec.matchConstraints?.matchConditions, undefined, `${env}/${d.metadata.name}: matchConstraints.matchConditions`);
+    }
+    const image = docs.find((d) => d.kind === 'ImageValidatingPolicy');
+    assert.ok(image.spec.attestors.length > 0, `${env}: attestors`);
+    for (const a of image.spec.attestations) assert.equal(a.attestors, undefined, `${env}/${a.name}: attestations[].attestors`);
+  }
+});
+
 // ===================== KV-04: 생성기 CLI =====================
 
 test('KV-04 --write 뒤 --check는 0이고, 손 고침·원천 없음·인자 오류는 까닭과 함께 1·2다', () => {

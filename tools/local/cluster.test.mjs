@@ -17,8 +17,11 @@ import {
   V0_PG_URL,
   V0_REDIS_URL,
   metricsServerInstall,
+  nodeTagSource,
+  normalizedImageNames,
   selfSignedCertArgs,
   strimziInstall,
+  tagOf,
   upPlan,
   v0ForwardArgs,
   v0HelmArgs,
@@ -102,6 +105,47 @@ test('FND110_고정판_kind노드는_다이제스트이고_Kafka·PostgreSQL·AW
       assert.ok(V1_PRELOAD_IMAGES.includes(m[1]), `${f}: ${m[1]}가 V1_PRELOAD_IMAGES에 없다`);
     }
   }
+});
+
+test('BAT085 V-03 로컬 이미지 사전 적재는 태그를 잃는 kind load 대신 ctr로 넣고 태그를 확인한다', () => {
+  const source = readFileSync(join(REPO, 'tools', 'local', 'cluster.mjs'), 'utf8');
+  const start = source.indexOf('export function tagOf');
+  const end = source.indexOf('// --- 로컬 관측', start);
+  assert.ok(start > 0 && end > start, 'preloadLocalImages 주변을 찾지 못했다');
+  const body = source.slice(start, end);
+  // docker save --platform → docker cp → ctr images import --platform
+  assert.match(body, /'save', '--platform'/, 'docker save --platform');
+  assert.match(body, /'cp'/, 'docker cp');
+  assert.match(body, /'ctr', '-n', 'k8s\.io', 'images', 'import', '--platform'/, 'ctr images import --platform');
+  // 태그가 없으면 노드 안에서 붙이고, 끝내 없으면 시작을 멈춘다
+  assert.match(body, /'ctr', '-n', 'k8s\.io', 'images', 'tag'/, 'ctr images tag');
+  assert.match(body, /throw new Error/, '태그가 없으면 실패');
+  // 태그를 잃는 경로(kind load image-archive)로 돌아가지 않는다
+  assert.doesNotMatch(body, /image-archive/, 'kind load image-archive');
+
+  // 다이제스트로만 받은 이미지는 로컬 RepoTags가 비어 save가 태그를 잃는다: 실을 태그를 먼저 붙인다
+  assert.match(body, /'tag', ref, tag/, 'docker tag로 실을 태그를 먼저 붙인다');
+  // 이름:태그@sha256:…에서 노드에 붙일 태그만 고른다(kyvernoImages는 태그+다이제스트다)
+  const kyverno = `reg.kyverno.io/kyverno/kyverno:v1.20.0@sha256:${'a'.repeat(64)}`;
+  assert.equal(tagOf(kyverno), 'reg.kyverno.io/kyverno/kyverno:v1.20.0');
+  assert.equal(tagOf(`reg.kyverno.io/kyverno/kyverno@sha256:${'a'.repeat(64)}`), null, '태그 없는 다이제스트 참조는 노드에 태그로 실을 수 없다');
+
+  // 짧은 이름은 containerd에서 정규화된다(노드에는 docker.io/library/postgres:18-alpine으로 남는다)
+  assert.deepEqual(normalizedImageNames('postgres:18-alpine'), ['postgres:18-alpine', 'docker.io/library/postgres:18-alpine']);
+  assert.equal(
+    nodeTagSource(['docker.io/library/postgres:18-alpine'], [], 'postgres:18-alpine'),
+    null,
+    '정규화 이름이 있으면 태그가 있는 것이다(짧은 이름만 비교해 실패하지 않는다)',
+  );
+  // kind load가 태그를 잃은 모양: import-2026-11-20@sha256:… 하나만 새로 생겨도 그 이름에 태그를 붙인다
+  const lost = `docker.io/library/import-2026-11-20@sha256:${'b'.repeat(64)}`;
+  assert.equal(nodeTagSource([lost], [lost], 'busybox:1.36'), lost);
+  assert.equal(nodeTagSource(['busybox:1.36'], ['busybox:1.36'], 'busybox:1.36'), null, '이미 태그가 있으면 붙이지 않는다');
+  assert.equal(
+    nodeTagSource([], [`import-1@sha256:${'c'.repeat(64)}`, `import-2@sha256:${'d'.repeat(64)}`], 'busybox:1.36'),
+    null,
+    '어느 것인지 고를 수 없으면 태그를 지어내지 않고 실패한다',
+  );
 });
 
 // --- v0 배포(docs/infra.md §3 'v0 배포', wbs 1.1.4, BUILD_ORDER BSL-050) ---
