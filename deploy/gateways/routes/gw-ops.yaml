@@ -183,13 +183,31 @@ spec:
           name: identity-svc
           namespace: core
           port: 8080
-    - matches:
+    - name: ops-bot-review
+      matches:
         - path:
             type: PathPrefix
             value: /v1/ops/events/{eventId}/bot-review
         - path:
             type: PathPrefix
             value: /v1/ops/events/{eventId}/bot-review-samples
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
+    - matches:
         - path:
             type: PathPrefix
             value: /v1/ops/events/{eventId}/demand-forecast
