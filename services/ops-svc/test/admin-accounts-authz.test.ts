@@ -5,6 +5,7 @@
 // - identity가 DESIGNATION_CONFLICT(409)·DESIGNATION_TARGET_NOT_ELIGIBLE(422)을 주면 Problem으로 바꾸고 감사 FAILED 1, 성공 내역 0.
 // - 세션 강제 종료는 operator·commander만 204이고 viewer는 403이며 identity 호출이 0이다.
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
@@ -22,6 +23,7 @@ const audit = new MemoryAuditChain();
 let svc: Awaited<ReturnType<typeof createService>>;
 let seq = 0;
 const newId = () => `0194b045-0000-7000-8000-${String(900000 + ++seq).padStart(12, '0')}`;
+const SESSION = '0194b045-0000-7000-8000-000000009901';
 
 beforeAll(async () => {
   svc = await createService({
@@ -38,7 +40,12 @@ afterAll(async () => {
 });
 
 const send = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, headers: Record<string, string>, body?: unknown) =>
-  svc.http.inject({ method, url, headers: body === undefined ? headers : { ...headers, 'content-type': 'application/json' }, ...(body === undefined ? {} : { payload: JSON.stringify(body) }) });
+  svc.http.inject({
+    method,
+    url,
+    headers: { ...headers, ...(method === 'POST' ? { 'idempotency-key': randomUUID() } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+    ...(body === undefined ? {} : { payload: JSON.stringify(body) }),
+  });
 const json = (r: { payload: string }) => (r.payload === '' ? {} : (JSON.parse(r.payload) as Record<string, unknown>));
 const token = (who: Record<string, string>) => kit.token({ accountId: who['x-user-id']!, sessionId: who['x-session-id']!, act: 'PERMISSION_CHANGE' });
 const withToken = (who: Record<string, string>, extra: Record<string, string> = {}) => ({ ...who, 'x-reauth-token': token(who), ...extra });
@@ -65,7 +72,7 @@ describe('관리 계정 REST 권한(AZ-T14)', () => {
         ['지정', send('POST', `/v1/ops/admin-accounts/${target}/designations`, who, { kind: 'ACCESS_REVIEWER', basis: '지정서' })],
         ['지정 거두기', send('DELETE', `/v1/ops/admin-accounts/${target}/designations/ACCESS_REVIEWER`, who)],
         ['세션 전체 종료', send('DELETE', `/v1/ops/admin-accounts/${target}/sessions`, who)],
-        ['세션 하나 종료', send('DELETE', `/v1/ops/admin-accounts/${target}/sessions/sess-1`, who)],
+        ['세션 하나 종료', send('DELETE', `/v1/ops/admin-accounts/${target}/sessions/${SESSION}`, who)],
         ['권한 내역', send('GET', `/v1/ops/admin-accounts/${target}/permission-changes`, who)],
       ];
       for (const [label, p] of attempts) expect((await p).statusCode, `${role} ${label}`).toBe(403);
@@ -168,12 +175,12 @@ describe('관리 계정 REST 권한(AZ-T14)', () => {
     const viewer = identity.ops('viewer');
     const calls = admin.callsOf('terminateSessions');
     expect((await send('DELETE', `/v1/ops/admin-accounts/${target}/sessions`, viewer)).statusCode).toBe(403);
-    expect((await send('DELETE', `/v1/ops/admin-accounts/${target}/sessions/sess-1`, viewer)).statusCode).toBe(403);
+    expect((await send('DELETE', `/v1/ops/admin-accounts/${target}/sessions/${SESSION}`, viewer)).statusCode).toBe(403);
     expect(admin.callsOf('terminateSessions')).toBe(calls);
     const operator = identity.ops('operator');
     expect((await send('DELETE', `/v1/ops/admin-accounts/${target}/sessions`, operator)).statusCode).toBe(204);
     const commander = identity.ops('commander');
-    expect((await send('DELETE', `/v1/ops/admin-accounts/${target}/sessions/sess-1`, commander)).statusCode).toBe(204);
+    expect((await send('DELETE', `/v1/ops/admin-accounts/${target}/sessions/${SESSION}`, commander)).statusCode).toBe(204);
     expect(admin.callsOf('terminateSessions')).toBe(calls + 2);
   });
 

@@ -2,6 +2,7 @@
 // 제품 JwksApprovalVerifier를 ES256 시험 키·JWKS 대역·jti 저장소 대역에 물려, 토큰의 aud·act·sid·factors(passkey)·exp·jti를 본다.
 // 막히면 403 reauth-required이고 identity 쓰기 호출·감사 기록이 0이며, 확인기·jti 저장소 장애는 503 reauth-unavailable(Retry-After 5초)이다.
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
@@ -38,7 +39,7 @@ beforeEach(() => {
   kit.jti.failNext = false;
 });
 
-const post = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+const post = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'idempotency-key': randomUUID(), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const put = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'PUT', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 interface TokenOptions {

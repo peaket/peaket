@@ -2,6 +2,7 @@
 // 실제 ops DB에 감사 기록·승인 업무를 남기고, 역할 변경·세션 종료가 늦게 보이더라도 identity 판정(요청마다 다시 읽기)이
 // 같은 액세스 토큰의 다음 요청을 403으로 막는지 본다. 지연 반영은 시험 대역 identity의 답을 바꿔 흉내 낸다.
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { createDatabase, createService, fakeClock, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -44,7 +45,7 @@ afterAll(async () => {
   container?.stop();
 });
 
-const post = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+const post = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'idempotency-key': randomUUID(), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const withToken = (who: Record<string, string>, extra: Record<string, string> = {}) => ({
