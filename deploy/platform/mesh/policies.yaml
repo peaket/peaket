@@ -587,7 +587,6 @@ spec:
     - from:
         - source:
             principals:
-              - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-fan-2f99f311
               - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
               - cluster.local/ns/core/sa/ops-svc
               - cluster.local/ns/purchase/sa/purchase-svc

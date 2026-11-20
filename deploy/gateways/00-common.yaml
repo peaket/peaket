@@ -234,7 +234,8 @@ data:
     -- 설정(filterContext): originVerify(참이면 1의 견주기를 한다), requireOriginVerify(참이면 1의 견주기가 틀릴 때 403),
     -- checkTyp(참이면 2를 한다, 토큰을 요구하는 라우트), tokenCookie(액세스 쿠키 이름, 없으면 ""), tokenScheme(Authorization 앞말),
     -- opsAllowedIpsEnv(gw-ops 허용 IP 환경 값 이름, 없으면 검사하지 않는다), refreshCookie(지울 리프레시 쿠키 이름, 없으면 ""),
-    -- refreshPath(그 쿠키를 넘기는 유일한 갱신 경로), admission(참이면 4를 한다), admissionIssuer(입장 토큰 발급자 iss), corsOrigin(5의 화면 출처)
+    -- refreshPath(그 쿠키를 넘기는 유일한 갱신 경로), csrfOrigin(CSRF를 볼 화면 출처, 없으면 보지 않는다),
+    -- admission(참이면 4를 한다), admissionIssuer(입장 토큰 발급자 iss), corsOrigin(5의 화면 출처)
 
     local ORIGIN_VERIFY = "x-peaket-origin-verify"
     local EDGE_PREFIXES = { "cloudfront-viewer-", "x-amzn-waf-" }
@@ -567,6 +568,21 @@ data:
         ["access-control-allow-credentials"] = "true",
         ["access-control-expose-headers"] = "WWW-Authenticate",
       }
+    end
+
+    -- 1.5 CSRF Origin 글자 그대로 확인(docs/architecture.md §4, BAT-045 리뷰 W-02): Envoy csrf 필터는 Origin의 끝 슬래시를
+    --    떼고 견주어 `https://console.peaket.example/`을 같은 출처로 받는다(2026-11-20 kind 확인). 그래서 csrfOrigin을 받은
+    --    게이트웨이는 위험한 메서드(POST·PUT·PATCH·DELETE)에 Origin이 있으면 값이 정확히 하나이고 그 출처와 글자 그대로 같아야 한다.
+    --    Origin이 없으면 통과한다(브라우저 밖 클라이언트). 빈 값·여럿·끝 슬래시·다른 출처는 403이고 백엔드에 닿지 않는다.
+    local function csrf_origin_denied(handle, headers, ctx)
+      local allowed = setting(ctx, "csrfOrigin")
+      if type(allowed) ~= "string" or allowed == "" then return false end
+      local method = headers:get(":method")
+      if method ~= "POST" and method ~= "PUT" and method ~= "PATCH" and method ~= "DELETE" then return false end
+      local origins = values_of(headers, "origin")
+      if #origins == 0 then return false end
+      if #origins ~= 1 then return true end
+      return origins[1] ~= allowed
     end
 
     local function reject(handle, headers, ctx)
@@ -930,6 +946,10 @@ data:
           return handle:respond(direct_headers("403"), FORBIDDEN)
         end
         if denied ~= nil then return handle:respond(direct_headers("403"), FORBIDDEN) end
+      end
+      -- CSRF 출처는 글자 그대로 견준다(Envoy csrf 필터가 끝 슬래시를 떼는 것을 덮는다, BAT-045 리뷰 W-02)
+      if csrf_origin_denied(handle, headers, ctx) then
+        return handle:respond(direct_headers("403"), FORBIDDEN)
       end
       -- 리프레시 쿠키는 갱신 경로 밖으로 넘기지 않는다(깊은 방어, I-T46 ⑤)
       rewrite_cookies(headers, ctx)

@@ -509,6 +509,8 @@ spec:
       backendRefs:
         - group: ""
           kind: Service
-          name: payment-svc
+          # 배상·취소 계좌 입력은 purchase-svc 처리기가 받고 payment-svc RequestCompensationTransfer·CancelPayment를 부른다
+          # (openapi 설명, BAT-425·BAT-045 리뷰 W-03). 라우트 원천이 payment-svc를 가리키던 표류를 고쳤다.
+          name: purchase-svc
           namespace: purchase
           port: 8080

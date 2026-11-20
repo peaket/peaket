@@ -1471,6 +1471,6 @@ spec:
       backendRefs:
         - group: ""
           kind: Service
-          name: payment-svc
+          name: purchase-svc
           namespace: purchase
           port: 8080

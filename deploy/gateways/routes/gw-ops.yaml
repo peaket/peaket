@@ -124,9 +124,49 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/ops/auth/reauthentications
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: identity-svc
+          namespace: core
+          port: 8080
+    # 같은 경로의 GET(내 세션 정보)은 ops-svc, DELETE(로그아웃)는 identity-svc다(openapi 두 설명). 메서드로 나눈다(BAT-045 리뷰 W-03).
+    - matches:
         - path:
-            type: PathPrefix
+            type: Exact
             value: /v1/ops/auth/sessions/me
+          method: GET
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/ops/auth/sessions/me
+          method: DELETE
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:

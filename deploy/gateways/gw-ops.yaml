@@ -91,6 +91,10 @@ spec:
           value: Origin
 ---
 # gw-ops: 원본 확인·끝단 신호 머리 지우기와 토큰 유형(typ) 확인(공통 Lua, JWT 확인 뒤에 돈다)
+# 라우트 수준 정책(gw-ops-public-edge·gw-ops-api-edge)은 이 게이트웨이 정책을 통째로 덮는다(Envoy Gateway v1.10.0).
+# 그래서 라우트 정책도 아래 설정(requireOriginVerify·opsAllowedIpsEnv·refreshCookie/refreshPath·csrfOrigin)을 그대로 싣는다.
+# 한쪽만 고치면 /v1/ops/commands 같은 API 라우트에서 원본 확인·허용 IP·리프레시 쿠키 지우기가 사라진다(BAT-045 리뷰 W-01).
+# csrfOrigin은 여기 두지 않는다: CSRF는 SecurityPolicy가 걸린 공개·API 라우트에만 적용하고, 라우트 정책이 그 값을 싣는다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyExtensionPolicy
 metadata:
@@ -116,6 +120,35 @@ spec:
         tokenScheme: Bearer
         refreshCookie: __Host-peaket_ops_rt
         refreshPath: /v1/ops/auth/access-tokens
+---
+# gw-ops-public: 로그인·갱신 등 공개 라우트도 같은 게이트웨이 설정을 그대로 받고, CSRF Origin만 글자 그대로 견준다
+# (라우트 정책이 게이트웨이 정책을 덮으므로 전부 다시 싣는다, BAT-045 리뷰 W-01·W-02).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-ops-public-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-ops-public
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        requireOriginVerify: true
+        opsAllowedIpsEnv: PEAKET_OPS_ALLOWED_IPS
+        checkTyp: false
+        tokenCookie: __Host-peaket_ops_at
+        tokenScheme: Bearer
+        refreshCookie: __Host-peaket_ops_rt
+        refreshPath: /v1/ops/auth/access-tokens
+        csrfOrigin: https://console.peaket.example
 ---
 # gw-ops: 토큰 확인이 대상(aud)으로 거절한 응답(Envoy는 403과 WWW-Authenticate error="invalid_token")을 401로 바꾼다
 # (docs/features/identity.md §3 발급자와 검증 규칙, I-T36: 다른 대상의 토큰은 역할과 상관없이 401. 2026-11-16 kind 확인). 출처 확인·인가의 403은 그 머리가 없어 그대로다.
@@ -458,6 +491,7 @@ spec:
                   - ops
 ---
 # gw-ops-api: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+# 이 라우트 정책은 gw-ops-edge(게이트웨이)를 통째로 덮으므로(v1.10.0) 게이트웨이 설정을 모두 다시 싣는다. checkTyp만 다르다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyExtensionPolicy
 metadata:
@@ -482,9 +516,14 @@ spec:
         name: peaket-gateway-edge-lua
       filterContext:
         originVerify: true
+        requireOriginVerify: true
+        opsAllowedIpsEnv: PEAKET_OPS_ALLOWED_IPS
         checkTyp: true
         tokenCookie: __Host-peaket_ops_at
         tokenScheme: Bearer
+        refreshCookie: __Host-peaket_ops_rt
+        refreshPath: /v1/ops/auth/access-tokens
+        csrfOrigin: https://console.peaket.example
 ---
 # gw-ops ops-api: 다른 라우트에 맞지 않는 경로는 404(토큰 확인 없음). 생성 라우트가 정규식이라 가장 짧은 정규식 /.*로 둔다(Envoy Gateway는 정규식을 앞부분 매치보다 앞에 둔다, docs/infra.md §4.1 '호스트와 내부 경로'). 이 라우트에도 공통 Lua가 돌아 접근 로그에 위조 끝단 머리가 남지 않는다(리뷰 RV-01)
 apiVersion: gateway.networking.k8s.io/v1

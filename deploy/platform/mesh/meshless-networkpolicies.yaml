@@ -470,13 +470,6 @@ spec:
               kubernetes.io/metadata.name: envoy-gateway-system
           podSelector:
             matchLabels:
-              gateway.envoyproxy.io/owning-gateway-name: gw-fan
-              gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: envoy-gateway-system
-          podSelector:
-            matchLabels:
               gateway.envoyproxy.io/owning-gateway-name: gw-partner
               gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
         - namespaceSelector:

@@ -107,6 +107,9 @@ spec:
           value: Origin
 ---
 # gw-partner: 원본 확인·끝단 신호 머리 지우기와 토큰 유형(typ) 확인(공통 Lua, JWT 확인 뒤에 돈다)
+# 라우트 수준 정책(gw-partner-public-edge·gw-partner-api-edge)은 이 게이트웨이 정책을 통째로 덮는다(Envoy Gateway v1.10.0).
+# 그래서 라우트 정책도 refreshCookie/refreshPath·csrfOrigin을 그대로 싣는다(BAT-045 리뷰 W-01).
+# csrfOrigin은 여기 두지 않는다: 이 정책은 파트너 앱 서버 라우트에도 닿는데, 앱 서버 양식은 `Origin: null`을 보낸다(BAT-055 RV-02).
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyExtensionPolicy
 metadata:
@@ -130,6 +133,33 @@ spec:
         tokenScheme: Bearer
         refreshCookie: __Secure-peaket_partner_rt
         refreshPath: /v1/partner/auth/access-tokens
+---
+# gw-partner-public: 로그인·갱신 등 공개 라우트도 같은 게이트웨이 설정을 그대로 받고, CSRF Origin만 글자 그대로 견준다
+# (라우트 정책이 게이트웨이 정책을 덮으므로 전부 다시 싣는다, BAT-045 리뷰 W-01·W-02).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: gw-partner-public-edge
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: gw-partner-public
+  lua:
+    - type: ValueRef
+      valueRef:
+        group: ""
+        kind: ConfigMap
+        name: peaket-gateway-edge-lua
+      filterContext:
+        originVerify: true
+        checkTyp: false
+        tokenCookie: __Secure-peaket_partner_at
+        tokenScheme: Bearer
+        refreshCookie: __Secure-peaket_partner_rt
+        refreshPath: /v1/partner/auth/access-tokens
+        csrfOrigin: https://partner.peaket.example
 ---
 # gw-partner: 토큰 확인이 대상(aud)으로 거절한 응답(Envoy는 403과 WWW-Authenticate error="invalid_token")을 401로 바꾼다
 # (docs/features/identity.md §3 발급자와 검증 규칙, I-T36: 다른 대상의 토큰은 역할과 상관없이 401. 2026-11-16 kind 확인). 출처 확인·인가의 403은 그 머리가 없어 그대로다.
@@ -511,6 +541,7 @@ spec:
                   - partner
 ---
 # gw-partner-api: 공통 Lua + 토큰 유형(typ) 확인(JWT 확인보다 앞에서 실린 토큰의 머리를 직접 읽는다)
+# 이 라우트 정책은 gw-partner-edge(게이트웨이)를 통째로 덮으므로(v1.10.0) 게이트웨이 설정을 모두 다시 싣는다. checkTyp만 다르다.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyExtensionPolicy
 metadata:
@@ -535,6 +566,9 @@ spec:
         checkTyp: true
         tokenCookie: __Secure-peaket_partner_at
         tokenScheme: Bearer
+        refreshCookie: __Secure-peaket_partner_rt
+        refreshPath: /v1/partner/auth/access-tokens
+        csrfOrigin: https://partner.peaket.example
 ---
 # gw-partner-app: 파트너 콘솔 앱 서버(같은 출처 화면). x-peaket-browser-traceparent를 이 라우트에서만 넘긴다(docs/observability.md §6)
 apiVersion: gateway.networking.k8s.io/v1
