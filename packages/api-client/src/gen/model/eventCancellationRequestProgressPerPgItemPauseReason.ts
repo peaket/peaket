@@ -19,6 +19,7 @@ export type EventCancellationRequestProgressPerPgItemPauseReason = typeof EventC
 
 export const EventCancellationRequestProgressPerPgItemPauseReason = {
   AUTO_FAILURE_RATE: 'AUTO_FAILURE_RATE',
+  AUTO_FAILED_AMOUNT: 'AUTO_FAILED_AMOUNT',
   AUTO_CONSECUTIVE_FAILURES: 'AUTO_CONSECUTIVE_FAILURES',
   AUTO_CIRCUIT_OPEN: 'AUTO_CIRCUIT_OPEN',
   AUTO_REJECT_RATE: 'AUTO_REJECT_RATE',

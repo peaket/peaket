@@ -16,7 +16,7 @@ import { reauthFailureText } from '@/shared/lib/reauth-failure';
 import { pickupReauthToken, submitReauthForm } from '@/shared/lib/reauth-return';
 import { AppShell } from '@/widgets/app-shell';
 import { errorOf, keyForBody, reauthPurposeOf, takePending, writePending, type AttemptKey, type CancelError, type CancelPurpose, type StorageLike } from '../model/cancel-flow';
-import { quoteView, resultView, type QuoteView, type ResultView } from '../model/view';
+import { quoteView, resultView, refundMethodText, type QuoteView, type ResultView } from '../model/view';
 
 const won = (n: number) => `₩${new Intl.NumberFormat('ko-KR').format(n)}`;
 
@@ -236,6 +236,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
   );
 
   const purpose: CancelPurpose = needAccount ? 'ticket-cancel-refund-account' : reauthPurposeOf(quote);
+  const accountReady = account.bankCode !== '' && account.accountNumber !== '' && account.holderName !== '';
   const canceled = ticket?.status === 'REFUNDED' || ticket?.status === 'VOIDED' || ticket?.status === 'CANCEL_REQUESTED';
 
   return (
@@ -295,7 +296,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
           {load.kind === 'ready' && quote && ticket ? (
             <>
               {result ? (
-                <ResultCard result={result} accountUsed={needAccount && account.bankCode !== ''} />
+                <ResultCard result={result} accountUsed={needAccount && accountReady} />
               ) : (
                 <>
                   {canceled ? (
@@ -318,7 +319,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
                       <dt className="kv-total">환급 예상액</dt>
                       <dd className="kv-total num">{won(quote.refundAmount)}</dd>
                       <dt>환급 수단</dt>
-                      <dd>{needAccount ? '입력한 환불 계좌' : '원결제 수단'}</dd>
+                      <dd>{refundMethodText(needAccount, accountReady)}</dd>
                     </dl>
                     {quote.basis ? <p className="t-xs muted">{quote.basis}</p> : null}
                     {quote.refundAfterEntryClose ? (
@@ -339,7 +340,7 @@ export function TicketCancelLive({ ticketId }: { ticketId: string }) {
                     {token && awaitingConfirm ? (
                       <>
                         <p className="t-sm">
-                          {ticket.seatLabel || '이 티켓'}을 취소하고 {won(quote.refundAmount)}을 {needAccount ? '입력한 환불 계좌' : '원결제 수단'}으로
+                          {ticket.seatLabel || '이 티켓'}을 취소하고 {won(quote.refundAmount)}을 {refundMethodText(needAccount, accountReady)}으로
                           환급합니다. 취소하면 되돌릴 수 없습니다.
                         </p>
                         {needAccount && token && awaitingConfirm ? (

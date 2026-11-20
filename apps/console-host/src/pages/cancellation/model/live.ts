@@ -48,7 +48,7 @@ export interface DetailView {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const intAtLeast0 = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
-const textOf = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+const textOf = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
 
 function kindOf(v: unknown): DetailView['kind'] {
   return v === 'CANCEL' || v === 'POSTPONE' ? v : null;
@@ -113,11 +113,12 @@ export function percentOf(p: { done: number; total: number } | null | undefined)
   return Math.min(100, Math.max(0, Math.floor((p.done * 100) / p.total)));
 }
 
-/** 상세 응답을 화면 값으로. 모르는 칸은 버리고, 판정자 표시 이름이 없으면 '삭제된 계정'이다 */
+/** 상세 응답을 화면 값으로. 모르는 칸은 버리고, 판정자 표시 이름이 없으면 계정 ID를 보인다 */
 export function detailView(raw: unknown): DetailView {
   const v = isRecord(raw) ? raw : {};
   const actor = isRecord(v.judgedBy) ? v.judgedBy : null;
   const display = actor ? textOf(actor.displayName) : null;
+  const accountId = actor ? textOf(actor.adminAccountId) : null;
   return {
     requestId: textOf(v.requestId) ?? '',
     eventId: textOf(v.eventId) ?? '',
@@ -131,8 +132,8 @@ export function detailView(raw: unknown): DetailView {
     evidenceRef: textOf(v.evidenceRef),
     newStartsAt: textOf(v.newStartsAt),
     requestedAt: textOf(v.requestedAt),
-    judgedBy: actor ? (display ?? '삭제된 계정') : null,
-    judgedById: actor ? textOf(actor.adminAccountId) : null,
+    judgedBy: display ?? (accountId ? `계정 ID ${accountId}` : null),
+    judgedById: accountId,
     dryRun: previewOf(v.dryRun),
     progress: progressOf(v.progress),
   };

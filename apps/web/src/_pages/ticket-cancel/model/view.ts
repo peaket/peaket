@@ -160,3 +160,12 @@ export function resultView(c: unknown): ResultView {
     refundAccountRequired: v.refundAccountRequired === true,
   };
 }
+
+/**
+ * 견적·확인 문구의 환급 수단. 계좌가 필요해도 입력 전에는 '입력한 환불 계좌'로 쓰지 않는다.
+ * 계좌는 재인증에서 돌아온 뒤 ⑤→⑦ 차례에 받으므로, 견적 ③에서는 받을 자리만 알린다(d5 §5.20).
+ */
+export function refundMethodText(refundAccountRequired: boolean, accountReady: boolean): string {
+  if (!refundAccountRequired) return '원결제 수단';
+  return accountReady ? '입력한 환불 계좌' : '환불 계좌(다시 로그인한 뒤 입력)';
+}

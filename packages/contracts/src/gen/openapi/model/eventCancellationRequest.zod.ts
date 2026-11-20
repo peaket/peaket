@@ -34,7 +34,7 @@ export const EventCancellationRequest = zod.object({
   "perPg": zod.array(zod.object({
   "pg": zod.enum(['TOSS', 'PORTONE', 'SIMULATOR']).optional(),
   "state": zod.enum(['RUNNING', 'PAUSED', 'COMPLETED']).optional(),
-  "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
+  "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
