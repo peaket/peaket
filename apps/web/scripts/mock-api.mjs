@@ -12,6 +12,7 @@
 //   좌석맵 파일(ADR-0216·0223) GET /v1/events/{회차}/seatmap-layouts/{1|2|3}.json(1은 8석 자리 파일, 2·3은 실제 배치). 입장 확정·대기 상태 파일은 판 2를 준다
 //   홀드·구매 세션 나가기(ADR-0225): 서명을 실제로 확인한다. hold=normal|race|recent|limit|paused|ended|down|no-match|session-ended|signature-invalid|admission-invalid|seq-reused. 주문(ADR-0228): GET /v1/holds/{id}, POST /v1/orders, order=normal|no-id|restricted|hold-gone|other-tab|paused|sale-ended|consent-outdated|down. 접수(ADR-0229): POST /v1/orders/{id}/payment-acceptance, accept=normal|mismatch|already|attempt|expired|down. 결과(ADR-0230): GET /v1/orders/{id}/payment-status, GET /v1/tickets, pay=normal|checking|issuing|unknown|compensated|declined|taken|deposit|expired|gone|unauthorized
 //   좌석 스냅샷(ADR-0224) GET /v1/events/{회차}/seatmap-snapshot: 입장 토큰 필수, 첫 사용에 임시 공개키 필수. seatSnapshot=expired(이름 있는 401)|cookie(이름 없는 401)|down(503)|newer(판 3)
+//   좌석 스트림 대역(BAT-182, HOT-357, docs/frontend.md §4.4.1): WS /v1/events/{회차}/seats/stream. 상태 바꾸기 GET /__mock/seat-state?op=delta&section=0&seat=3&state=1 | op=close&code=4401 | op=interval&ms=1000 | op=reset, 기록 GET /__mock/seat-stream
 //   예매 제한(ADR-0213) restriction=none|active|overdue|fraud(GET /v1/booking-restrictions/me), 알림 신청 subscribe=normal|limit|busy|ended(422·429·410)
 //   판매 단계(ADR-0272 결정 3, HOT-346) detailSale=none|presale-before|presale-now: 공연 상세 salePhases가 없음 · 오픈부터 1시간 PRESALE 뒤 GENERAL ·
 //   지금이 든 PRESALE(정한 순간부터 1시간 뒤까지) 뒤 GENERAL. 팬별 판매 자격 GET /v1/events/{회차}/sale-eligibility eligibility=eligible|ineligible|down
@@ -34,6 +35,7 @@ import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
 import { createPartnerMock } from './mock-api/partner.mjs';
 import { createPurchaseMock } from './mock-api/purchase.mjs';
 import { SEATMAP_VERSIONS, seatmapLayoutV, seatSnapshot } from './mock-api/seatmap.mjs';
+import { createSeatStreamMock } from './mock-api/stream.mjs';
 import { GW_FAN_API_CORS, GW_PARTNER_API_ALLOW_HEADERS } from './gateway-cors.mjs';
 
 /** 사전 요청에서 허용하는 머리: gw-fan·gw-partner API 정책의 합(소비자 웹·대기실·파트너 콘솔 출처에 함께 답한다) */
@@ -658,6 +660,8 @@ export function startMockApi({
   const cancels = new Set();
   const wished = new Set(INITIAL_WISHES);
   const partner = createPartnerMock();
+  /** 좌석 델타 WebSocket 대역(BAT-182). 같은 바이트·하위 프로토콜·닫힘 코드를 지킨다 */
+  const seatStream = createSeatStreamMock({ now });
   /** 검사 기록(가장 최근 REQUEST_LOG_MAX건) */
   const requestLog = [];
   const server = createServer((req, res) => {
@@ -722,6 +726,9 @@ export function startMockApi({
       return;
     }
     if (p === '/__mock/partner-last' && req.method === 'GET') return send(200, partner.last());
+    // 좌석 스트림 대역의 상태 바꾸기·기록(BAT-182). 검사 경로라 요청 기록에는 남기지 않는다
+    if (p === '/__mock/seat-state' && req.method === 'GET') return send(200, seatStream.control(url.searchParams));
+    if (p === '/__mock/seat-stream' && req.method === 'GET') return send(200, seatStream.log());
     if (partner.handle({ p, req, url, state, send, unauthorized, readJson })) return;
     if (p === '/v1/home' && req.method === 'GET') return send(200, homeFeed(origin, state.home));
     if (p === '/v1/home/rankings.json' && req.method === 'GET') {
@@ -961,6 +968,15 @@ export function startMockApi({
     const img = /^\/img\/([a-z0-9-]{1,40})\/(\d{3,4})\.(avif|webp)$/.exec(p);
     if (img && req.method === 'GET') return send(200, Buffer.from(placeholderSvg(Math.min(Number(img[2]), 1280))), 'image/svg+xml', { 'cache-control': 'public, max-age=60' });
     send(404, { type: 'about:blank', title: 'Not Found', status: 404 }, 'application/problem+json');
+  });
+  // 좌석 스트림(WebSocket 업그레이드)은 요청 처리기가 아니라 여기서 받는다(BAT-182). 다른 경로의 업그레이드는 404로 거절한다
+  server.on('upgrade', (req, socket) => {
+    const host = (req.headers.host ?? '').split(':')[0];
+    if (host !== '127.0.0.1' && host !== 'localhost') {
+      socket.destroy();
+      return;
+    }
+    seatStream.handleUpgrade(req, socket);
   });
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
 }

@@ -2,7 +2,7 @@
 // SCR-010 좌석 선택의 실제 화면(d5 §5.10, docs/frontend.md §4.2.2·§5.2, BUILD_ORDER HOT-350 ①, ADR-0224).
 // 대기실이 탭 저장소에 둔 입장 저장값을 읽어 구매 세션 키를 열고(첫 스냅샷에 임시 공개키를 싣는다), 좌석맵 Worker에 좌석맵 파일·스냅샷을 맡긴다.
 // 좌석맵 패키지·서명기는 늦게 가져온다(첫 JS 예산, §5.8). 캔버스는 효과 안에서 만든다: OffscreenCanvas로 넘긴 캔버스는 다시 넘길 수 없어 다시 시도·Strict Mode마다 새로 만든다.
-// 고른 좌석의 홀드·요약은 HOT-353, 접근성 목록은 HOT-354, 실시간은 HOT-357에서 잇는다.
+// 고른 좌석의 홀드·요약은 HOT-353, 접근성 목록은 HOT-354, 실시간 좌석 델타·구독·연결 배너는 HOT-357(BAT-182)에서 이었다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { PriceTierLegend } from '@peaket/ds/PriceTierLegend';
@@ -10,13 +10,15 @@ import { SeatLegend, type SeatStatus } from '@peaket/ds/SeatStatusBadge';
 import type { FromWorker, SeatMapClient } from '@peaket/seatmap';
 import type { PurchaseSigner } from '@peaket/api-client/purchase';
 import Link from 'next/link';
+import { createActor } from 'xstate';
 import { ORIGINS } from '@/shared/config/origins';
 import { holdClock } from '@/shared/lib/hold-clock';
 import { useStickyInset } from '@/shared/lib/sticky-inset';
 import { AppShell } from '@/widgets/app-shell';
-import { canPick, clearAdmission, createGesture, createHoverTracker, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, tierNames, tierRank, wheelFactor, type GestureCommand, type SeatsPhase } from '../model/live';
+import { admissionExpiryMs, canPick, clearAdmission, connectionBanner, createGesture, createHoverTracker, errorPhase, readAdmission, seatmapLayoutUrl, snapshotUrl, streamUrl, tierNames, tierRank, wheelFactor, type GestureCommand, type SeatsPhase } from '../model/live';
 import type { Booking, HoldResult } from '../model/booking-runtime';
 import type { BookingNotice, SeatPick } from '../model/booking-machine';
+import { connectionEvent, connectionMachine } from '../model/connection-machine';
 import type { ListSection, OpenSection } from '../model/seat-list';
 import { GoneState } from './GoneState';
 import { LiveSummary } from './LiveSummary';
@@ -148,6 +150,10 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const [booking, setBooking] = useState<{ value: string; picks: SeatPick[]; notice: BookingNotice | null; limit: number; extended: boolean } | null>(null);
   const [auto, setAuto] = useState<'assigning' | 'done' | 'unavailable' | 'no-match' | 'wish-error' | null>(null);
   const [heldLeft, setHeldLeft] = useState<number | null>(null);
+  /** 좌석 연결 상태 기계의 지금 상태(배너) */
+  const [connection, setConnection] = useState<{ state: string; degraded: boolean }>({ state: 'connecting', degraded: false });
+  /** Worker가 알린 구독 목록(화면 낭독기용 요약) */
+  const [liveSections, setLiveSections] = useState<{ visible: number; subscribed: number } | null>(null);
   /** 이번 화면에서 401로 토큰을 갱신했는가(한 번만) */
   const refreshedRef = useRef(false);
   const autoRetriesRef = useRef(0);
@@ -162,6 +168,22 @@ export function SeatsLive({ eventId }: { eventId: string }) {
     let drawn = false;
     const abort = new AbortController();
     const cleanups: Array<() => void> = [];
+    // 연결 상태 기계(docs/frontend.md §3.5): Worker의 connection 알림을 넣고, ended면 까닭별 화면으로 간다
+    setConnection({ state: 'connecting', degraded: false });
+    setLiveSections(null);
+    const connActor = createActor(connectionMachine);
+    const connSub = connActor.subscribe((snap) => {
+      if (!live) return;
+      const state = String(snap.value);
+      setConnection({ state, degraded: snap.context.degraded });
+      // 4401 만료(token-expired)는 '예매 시간이 끝났습니다'(ended), 무효·권한 없음은 '세션 무효'(invalid)다(감독 결정 2026-11-20)
+      if (state === 'ended') setPhase(snap.context.endReason === 'token-expired' ? 'ended' : 'invalid');
+    });
+    connActor.start();
+    cleanups.push(() => {
+      connSub.unsubscribe();
+      connActor.stop();
+    });
 
     const start = async () => {
       const adm = readAdmission(eventId, sessionStorage);
@@ -283,6 +305,8 @@ export function SeatsLive({ eventId }: { eventId: string }) {
       host.appendChild(canvas);
       cleanups.push(() => canvas.remove());
 
+      // 스트림은 첫 그림(ready) 뒤 한 번만 연다(§5.2). Worker도 두 번째 stream을 무시한다
+      let streamSent = false;
       const map = createSeatMap({
         canvas,
         layoutUrl,
@@ -295,11 +319,25 @@ export function SeatsLive({ eventId }: { eventId: string }) {
           if (m.type === 'ready') {
             if (!drawn) void b.restore();
             drawn = true;
+            if (!streamSent) {
+              streamSent = true;
+              // 숨긴 탭에서 열었으면 5초 갱신부터 멈춘다(§5.2 숨긴 탭 규칙)
+              mapRef.current?.send({ type: 'visibility', visible: document.visibilityState !== 'hidden' });
+              mapRef.current?.send({ type: 'stream', url: streamUrl(ORIGINS.api!, eventId), expiresAtMs: admissionExpiryMs(adm.admissionToken) });
+            }
             if (!behaviorTracker) {
               behaviorTracker = createBehaviorTracker(() => performance.now());
               cleanups.push(listenBehavior(window, behaviorTracker));
             }
             setPhase('ready');
+          } else if (m.type === 'connection') {
+            const ev = connectionEvent(m.state, m);
+            if (ev) connActor.send(ev);
+          } else if (m.type === 'sections') {
+            setLiveSections({ visible: m.visible.length, subscribed: m.subscribed.length });
+          } else if (m.type === 'metrics') {
+            // 화면 확인·측정이 읽는 값(사용자에게 보이지 않는다, §5.2 `seat_delta_e2e_ms`)
+            if (m.deltaE2eMs !== undefined) hostRef.current?.setAttribute('data-delta-e2e-ms', String(Math.round(m.deltaE2eMs)));
           } else if (m.type === 'view') {
             viewRef.current = m;
             // 카메라만 바뀌면 화면을 다시 그리지 않는다(끌 때마다 전체가 다시 그려지지 않게)
@@ -409,6 +447,13 @@ export function SeatsLive({ eventId }: { eventId: string }) {
     };
   }, [eventId, attempt]);
 
+  // 숨긴 탭이면 5초 스냅샷 갱신을 멈추고, 다시 보이면 바로 한 번 받는다(§5.2 숨긴 탭 규칙)
+  useEffect(() => {
+    const onVisibility = () => mapRef.current?.send({ type: 'visibility', visible: document.visibilityState !== 'hidden' });
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
   // 예매 시간이 끝났으면 안내를 잠깐 보이고 대기실로 옮긴다(차례가 온 뒤 15분 안이면 같은 대기표로 다시 입장한다, §5.3)
   useEffect(() => {
     if (phase !== 'ended' && phase !== 'invalid') return;
@@ -470,6 +515,7 @@ export function SeatsLive({ eventId }: { eventId: string }) {
   const atMax = !view || view.zoom >= view.maxZoom;
   const seatLevel = view?.level === 'seats';
   const gone = phase === 'ended' || phase === 'invalid';
+  const liveBanner = connectionBanner(connection.state, connection.degraded);
   const heldNow = isHeld ? (bookingRef.current?.held() ?? null) : null;
   const holdTimer = heldLeft === null ? null : holdClock(heldLeft);
   const summaryPhase = booking?.value === 'holding' || booking?.value === 'held' || booking?.value === 'paused' || booking?.value === 'saleEnded' ? booking.value : 'selecting';
@@ -553,6 +599,16 @@ export function SeatsLive({ eventId }: { eventId: string }) {
         ) : (
           <div className="col gap-3 pt-3 pb-4 md:gap-3.5 md:px-6 md:pt-4 md:pb-6 lg:mx-auto lg:w-full lg:max-w-[1280px] lg:gap-4 lg:px-8 lg:pt-6 lg:pb-8">
             <h1 className="t-xl px-4 max-lg:sr-only md:px-0">좌석 선택</h1>
+            {liveBanner ? (
+              <NoticeBanner tone={liveBanner.tone} role="status" className="mx-4 md:mx-0">
+                {liveBanner.title}
+              </NoticeBanner>
+            ) : null}
+            {liveSections && liveSections.subscribed > 0 ? (
+              <p className="sr-only" role="status">
+                실시간으로 {liveSections.subscribed}개 구역의 좌석을 받고 있습니다
+              </p>
+            ) : null}
             {booking?.value === 'paused' ? (
               <NoticeBanner tone="danger" icon="pause" role="alert" title="판매가 잠시 멈췄습니다." className="mx-4 md:mx-0">
                 고른 좌석은 홀드 시간 동안 유지됩니다

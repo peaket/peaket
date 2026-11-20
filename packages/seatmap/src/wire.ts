@@ -149,6 +149,58 @@ export function encodeTimeSync(clientTimeMs: number): Uint8Array {
   return u8;
 }
 
+/** 서버 → 클라이언트 Heartbeat(18바이트). `TimeSync`를 받으면 그 clientTimeMs를 echo한다(§4.4.1) */
+export function encodeHeartbeat(serverTimeMs: number, echoClientTimeMs: number): Uint8Array {
+  const u8 = new Uint8Array(18);
+  const v = new DataView(u8.buffer);
+  v.setUint8(0, 1);
+  v.setUint8(1, 2);
+  v.setBigUint64(2, BigInt(Math.floor(serverTimeMs)), true);
+  v.setBigUint64(10, BigInt(Math.floor(echoClientTimeMs)), true);
+  return u8;
+}
+
+/** 서버 → 클라이언트 BatchInterval(4바이트). 평시 100, Degraded 1000 [가정] */
+export function encodeBatchInterval(intervalMs: number): Uint8Array {
+  const u8 = new Uint8Array(4);
+  const v = new DataView(u8.buffer);
+  v.setUint8(0, 1);
+  v.setUint8(1, 3);
+  v.setUint16(2, intervalMs, true);
+  return u8;
+}
+
+/** 서버 → 클라이언트 SeatDeltaBatch(§4.4.1). 개발 대역·시험 서버가 화면과 같은 바이트를 쓰게 한다 */
+export function encodeDeltaBatch(o: {
+  serverTimeMs: number;
+  maxWaitMs: number;
+  seatEpoch: number;
+  sections: ReadonlyArray<{ sectionIndex: number; sectionVersion: number; offsets: ArrayLike<number>; states: ArrayLike<number> }>;
+}): Uint8Array {
+  const size = 18 + o.sections.reduce((n, s) => n + 8 + 3 * s.offsets.length, 0);
+  const u8 = new Uint8Array(size);
+  const v = new DataView(u8.buffer);
+  v.setUint8(0, 1);
+  v.setUint8(1, 1);
+  v.setBigUint64(2, BigInt(Math.floor(o.serverTimeMs)), true);
+  v.setUint16(10, o.maxWaitMs, true);
+  v.setUint32(12, o.seatEpoch, true);
+  v.setUint16(16, o.sections.length, true);
+  let p = 18;
+  for (const s of o.sections) {
+    if (s.offsets.length !== s.states.length) throw new WireError('델타 좌석 수와 상태 수가 다르다');
+    v.setUint16(p, s.sectionIndex, true);
+    v.setUint32(p + 2, s.sectionVersion, true);
+    v.setUint16(p + 6, s.offsets.length, true);
+    p += 8;
+    for (let i = 0; i < s.offsets.length; i++, p += 3) {
+      v.setUint16(p, s.offsets[i]!, true);
+      v.setUint8(p + 2, s.states[i]!);
+    }
+  }
+  return u8;
+}
+
 /** 구역마다 마지막으로 반영한 판과 세대. 델타를 받을지 정한다(§4.4 '적용 순서') */
 export interface SectionVersions {
   seatEpoch: number;

@@ -158,6 +158,31 @@ export class SeatMapEngine {
     this.cache.invalidate(head.sectionIndex);
   }
 
+  /**
+   * 전체 스냅샷을 반영한다(전체 보기 5초 갱신, docs/frontend.md §5.2). 이미 아는 세대·구역 판보다 낡은 스냅샷이면 쓰지 않고 false를 돌려준다
+   * (델타가 먼저 온 경우 판을 되돌리면 다음 델타가 갭으로 보여 스냅샷을 또 부른다). 점유 표시는 구역 스냅샷과 같은 규칙으로 지킨다.
+   */
+  applyFullSnapshot(snap: Snapshot): boolean {
+    if (snap.layoutVersion !== this.L.layoutVersion) throw new Error(`스냅샷 layoutVersion ${snap.layoutVersion} ≠ 좌석맵 ${this.L.layoutVersion}`);
+    if ((snap.flags & 1) !== 0 || snap.sections.length !== this.L.S) throw new Error(`전체 스냅샷이 아니다(구역 ${snap.sections.length})`);
+    if (snap.seatEpoch < this.versions.seatEpoch) return false;
+    if (snap.seatEpoch === this.versions.seatEpoch) {
+      for (const s of snap.sections) if (s.sectionVersion < this.versions.version[s.sectionIndex]!) return false;
+    }
+    const before = this.state.slice();
+    applySnapshot(this.state, snap, (s) => (s < this.L.S ? [this.L.sectionStart[s]!, this.L.sectionEnd[s]!] : undefined));
+    for (let k = 0; k < this.L.N; k++) {
+      if (this.state[k] !== STATE.UNAVAILABLE) continue;
+      const was = before[k]!;
+      if (was === STATE.HELD || was === STATE.SOLD) this.state[k] = was;
+      else if (this.isMine(k)) this.state[k] = STATE.HELD;
+    }
+    this.versions.seatEpoch = snap.seatEpoch;
+    for (const s of snap.sections) this.versions.version[s.sectionIndex] = s.sectionVersion;
+    this.cache.clear();
+    return true;
+  }
+
   setTheme(theme: ColorMode): void {
     this.o.theme = theme;
     this.cache.clear();
@@ -259,6 +284,36 @@ export class SeatMapEngine {
       if (w >= this.o.width * SEATS_SECTION_RATIO) return 'seats';
     }
     return 'overview';
+  }
+
+  /**
+   * 지금 좌석으로 그리는 구역을 화면 가운데에 가까운 차례로. 화면과 겹치는 폭이 화면 폭의 1/3 [가정] 이상인 구역만 넣는다
+   * (가장자리에 걸친 구역은 보이는 부분으로 센다. 전체 보기에서는 빈 배열, docs/frontend.md §5.2 '구독은 좌석이 보이는 구역만').
+   * Worker는 앞에서부터 16개를 구독하고 나머지는 5초 스냅샷으로 갱신한다(§4.4.1).
+   */
+  visibleSections(): number[] {
+    if (!this.L) return [];
+    const midX = this.o.width / 2;
+    const midY = this.o.height / 2;
+    const b = this.L.bounds;
+    const v = this.viewRect();
+    const out: number[] = [];
+    for (let s = 0; s < this.L.S; s++) {
+      const left = Math.max(b[s * 4]!, v.x);
+      const right = Math.min(b[s * 4 + 2]!, v.x + v.w);
+      if (right <= left) continue;
+      const bottom = Math.max(b[s * 4 + 1]!, v.y);
+      const top = Math.min(b[s * 4 + 3]!, v.y + v.h);
+      if (top <= bottom) continue;
+      if ((right - left) * this.cam.scale < this.o.width * SEATS_SECTION_RATIO) continue;
+      out.push(s);
+    }
+    const dist = (s: number): number => {
+      const sx = this.cam.tx + ((b[s * 4]! + b[s * 4 + 2]!) / 2) * this.cam.scale;
+      const sy = this.cam.ty + ((b[s * 4 + 1]! + b[s * 4 + 3]!) / 2) * this.cam.scale;
+      return Math.hypot(sx - midX, sy - midY);
+    };
+    return out.sort((a, c) => dist(a) - dist(c) || a - c);
   }
 
   // ── 좌석 ────────────────────────────────────────────────

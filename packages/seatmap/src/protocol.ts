@@ -1,11 +1,14 @@
 // 메인 ↔ 좌석맵 Worker 메시지(docs/frontend.md §4.7 'Worker 메시지', BUILD_ORDER HOT-110). 받는 쪽이 Zod로 검사한다.
 // 메시지 종류는 type 칸이고, 누르기 종류는 pointer의 kind 칸이다(§4.7의 pointer{type}는 이 kind다).
-// 지금 있는 것(HOT-110·HOT-120): 첫 그림·카메라([+]·[−]·[전체 보기]·구역으로 확대)·누르기·고르기·테마, 단계 알림(view).
-// 구역 구독·연결 상태는 HOT-357에서 더한다. 목록 열기(HOT-354, ADR-0227)는 listSections·listSection → sectionList·sectionState·stateChanged다.
+// 지금 있는 것: 첫 그림·카메라([+]·[−]·[전체 보기]·구역으로 확대)·누르기·고르기·테마, 단계 알림(view, HOT-110·HOT-120),
+// 목록(listSections·listSection → sectionList·sectionState·stateChanged, HOT-354·ADR-0227), 실시간 구역 구독·연결(HOT-357·BAT-182).
+// 실시간은 첫 그림(ready) 뒤 stream{url, expiresAtMs}으로 열고, 탭이 보이는지는 visibility로 알린다. Worker는 connection·sections·metrics로 답한다.
 import { z } from 'zod';
 
 const int = z.number().int();
 const nonNeg = int.nonnegative();
+/** 만료 시각은 '없음'을 Infinity로 쓴다(Zod의 number는 Infinity를 거부한다) */
+const expiry = z.custom<number>((v) => typeof v === 'number' && !Number.isNaN(v) && v >= 0, { message: '만료 시각이 아니다' });
 
 /** 접근성 목록의 좌석 상태 코드(states 배열의 값 = 이 배열의 색인). 휠체어석은 상태가 아니라 좌석의 속성이다(seats.wheelchair) */
 export const LIST_STATES = ['available', 'held-by-others', 'mine', 'sold', 'unavailable'] as const;
@@ -57,6 +60,10 @@ export const ToWorker = z.discriminatedUnion('type', [
   z.object({ type: z.literal('listSections') }),
   /** 접근성 목록이 연 구역(닫으면 null). 그 구역의 상태 전체를 한 번 답하고, 그 뒤에는 바뀐 좌석만 보낸다 */
   z.object({ type: z.literal('listSection'), section: nonNeg.nullable() }),
+  /** 첫 그림(ready) 뒤 한 번: 좌석 델타 WebSocket을 연다(§4.4.1). 두 번 보내도 연결은 하나다. 입장 토큰은 init의 admission을 쓴다 */
+  z.object({ type: z.literal('stream'), url: z.string().min(1).max(2_048), expiresAtMs: expiry }),
+  /** 탭이 보이는가(§5.2 숨긴 탭 규칙). 숨긴 동안 5초 스냅샷 갱신을 멈추고 소켓은 그대로 둔다 */
+  z.object({ type: z.literal('visibility'), visible: z.boolean() }),
   z.object({ type: z.literal('dispose') }),
 ]);
 export type ToWorker = z.infer<typeof ToWorker>;
@@ -102,6 +109,12 @@ export const FromWorker = z.discriminatedUnion('type', [
   }),
   /** 목록이 연 구역에서 바뀐 좌석만. 두 배열은 복사하지 않고 넘긴다(§5.2) */
   z.object({ type: z.literal('stateChanged'), section: nonNeg, version: nonNeg, offsets: Offsets, states: Bytes }),
+  /** 실시간 연결 상태(§3.5·§4.4.1). connecting·live·reconnecting·ended이고, live에서 degraded, ended에서 reason이 붙는다 */
+  z.object({ type: z.literal('connection'), state: z.enum(['connecting', 'live', 'reconnecting', 'ended']), degraded: z.boolean().optional(), reason: z.enum(['token-invalid', 'token-expired', 'forbidden']).optional() }),
+  /** 구독 목록(§5.2): visible은 지금 좌석으로 보이는 구역(가운데 가까운 차례), subscribed는 실제로 보낸 16개 이하 */
+  z.object({ type: z.literal('sections'), visible: z.array(nonNeg).max(65_535), subscribed: z.array(nonNeg).max(16) }),
+  /** 델타 하나를 화면에 반영한 종단 지연(ms, §4.4.1 `seat_delta_e2e_ms`). 시계를 못 맞췄으면 생략한다 */
+  z.object({ type: z.literal('metrics'), deltaE2eMs: z.number().nonnegative().optional() }),
   /** source·status·problem·retryAfter: 파일·스냅샷 요청이 HTTP 오류로 끝났을 때(화면이 다음 동작을 고른다, HOT-350 ①, ADR-0224 결정 5) */
   z.object({ type: z.literal('error'), message: z.string(), source: z.enum(['layout', 'snapshot']).optional(), status: int.optional(), problem: z.string().optional(), retryAfter: z.number().nonnegative().optional() }),
 ]);

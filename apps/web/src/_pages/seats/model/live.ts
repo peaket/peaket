@@ -46,6 +46,50 @@ export function seatmapLayoutUrl(eventId: string, path: string | undefined): str
 /** 스냅샷 주소. 서버가 준 값이 아니라 설정한 API 출처로 만든다 */
 export const snapshotUrl = (apiOrigin: string, eventId: string): string => `${apiOrigin}/v1/events/${encodeURIComponent(eventId)}/seatmap-snapshot`;
 
+/**
+ * 좌석 델타 WebSocket 주소(docs/frontend.md §4.4.1). 같은 출처 규칙으로 http→ws, https→wss만 바꾼다.
+ * 경로는 `/v1/events/{id}/seats/stream`이고, 회차 ID는 주소 조각으로 부호화한다(주소에 쿼리·조각을 붙이지 않는다).
+ */
+export function streamUrl(apiOrigin: string, eventId: string): string {
+  const u = new URL(`/v1/events/${encodeURIComponent(eventId)}/seats/stream`, apiOrigin);
+  u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+  return u.toString();
+}
+
+/**
+ * 입장 토큰의 만료 시각(벽시계 ms). 토큰의 `exp`(초)를 읽어 1,000을 곱한다.
+ * 값이 없거나 모양이 틀리면 Infinity(만료 없음)다. 서명은 서버가 확인하므로 화면은 값만 본다.
+ */
+export function admissionExpiryMs(token: string): number {
+  const part = token.split('.')[1];
+  if (!part) return Number.POSITIVE_INFINITY;
+  try {
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const bytes = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+    const exp = (JSON.parse(new TextDecoder().decode(bytes)) as { exp?: unknown }).exp;
+    return typeof exp === 'number' && Number.isFinite(exp) && exp > 0 ? exp * 1_000 : Number.POSITIVE_INFINITY;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/** 위쪽 연결 배너(§5.10 'Degraded 문구'). reconnecting이면 복구 중, live에서 BatchInterval 1000이면 지연 표시다 */
+export interface ConnectionBanner {
+  tone: 'warning';
+  title: string;
+}
+
+/**
+ * 연결 상태 → 배너. 두 문구는 d5 §5.10·docs/frontend.md §5.10의 문구를 그대로 쓴다.
+ * connecting·ended에는 배너가 없다(로딩·구매 세션 끝 화면이 따로 있다).
+ */
+export function connectionBanner(state: string, degraded: boolean): ConnectionBanner | null {
+  if (state === 'reconnecting') return { tone: 'warning', title: '실시간 연결 복구 중' };
+  if (state === 'live' && degraded) return { tone: 'warning', title: '실시간 반영이 느려졌습니다' };
+  return null;
+}
+
 /** 좌석맵 메시지 검사 범위(@peaket/seatmap protocol). 넘겨서 지도를 잃지 않게 자른다 */
 const MAX_TIERS = 16;
 const MAX_TIER_NAME = 32;

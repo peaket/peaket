@@ -1,11 +1,16 @@
 // 좌석맵 Worker 진입점(docs/frontend.md §5.2·§4.7, BUILD_ORDER HOT-110). 받은 메시지를 Zod로 검사하고 엔진(engine.ts)에 넘긴다.
 // 메인 스레드 대체(client.ts)도 같은 처리기를 쓴다. 캔버스 화소 크기(화면 크기 × dpr)는 두 길 모두 이 처리기가 맞춘다.
+// 실시간(BAT-182, HOT-357): 첫 그림 뒤 stream을 받으면 좌석 델타 WebSocket(connection.ts)과 세대·갭 다시 맞추기(delta-sync.ts)를 연다.
+// 화면에 보이는 구역만 1초 머문 뒤 구독하고(16개 상한), 델타는 엔진에 반영하며, 전체 보기·16개 초과 구역은 5초 스냅샷으로 갱신한다.
+import { deltaE2eMs } from './clock';
+import { createSeatConnection, type SeatSocket, type StateDetail } from './connection';
+import { createDeltaSync } from './delta-sync';
 import { SeatMapEngine, type BitmapFactory } from './engine';
 import { FLAG, sectionOf, type SeatMapColumnsFile } from './layout';
 import { sectionStatus } from './overview';
 import { seatState, type Ctx2D } from './paint';
 import { FromWorker, LIST_STATES, ToWorker } from './protocol';
-import { decodeSnapshot } from './wire';
+import { decodeSnapshot, MAX_SUBSCRIBED_SECTIONS, type Snapshot } from './wire';
 
 export interface Host {
   post(m: FromWorker, transfer?: Transferable[]): void;
@@ -13,6 +18,14 @@ export interface Host {
   /** 다음 화면 갱신(그린 것이 화면에 나간 뒤). Worker 안 requestAnimationFrame이 없으면 setTimeout */
   nextFrame(): Promise<void>;
   now(): number;
+  /** 좌석 델타 WebSocket을 연다(Worker는 전역 WebSocket, 시험은 가짜 소켓을 넣는다) */
+  openSocket?(url: string, protocols: string[]): SeatSocket;
+  /** 타이머(가짜 시계로 도는 시험이 바꾼다) */
+  setTimer?(fn: () => void, ms: number): unknown;
+  clearTimer?(handle: unknown): void;
+  /** 서버 시계(보정 표본이 없을 때). 시험은 가짜 시각을 넣는다 */
+  serverNow?(): number;
+  random?(): number;
 }
 
 type Canvas = { width: number; height: number };
@@ -54,6 +67,13 @@ const AFTER_ZOOM_GUARD_MS = 300;
 const READ_TIMEOUT_MS = 10_000;
 const timeoutSignal = (): AbortSignal => AbortSignal.timeout(READ_TIMEOUT_MS);
 
+/** 구역이 화면에 이만큼 이어져 보이면 구독한다 [가정](docs/frontend.md §5.2, FE-T11) */
+const SUBSCRIBE_DWELL_MS = 1_000;
+/** 구독 집합을 바꾸는 최소 간격. 서버 상한(초당 2번)보다 보수적이다 [가정](§4.4.1) */
+const SUBSCRIBE_MIN_INTERVAL_MS = 1_000;
+/** 전체 보기·16개 초과 구역의 스냅샷 갱신 간격 [가정](§5.2) */
+const SNAPSHOT_REFRESH_MS = 5_000;
+
 /** 좌석맵 파일 주소의 판 번호만 바꾼 주소(…/{layoutVersion}.json). 그 꼴이 아니면 undefined */
 function layoutUrlAt(url: string, version: number): string | undefined {
   const m = /\/\d+\.json(?=$|[?#])/.exec(url);
@@ -85,6 +105,35 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
   let hoverPosted = false;
   /** 누름에 확대로 답한 시각 */
   let zoomedAt = Number.NEGATIVE_INFINITY;
+  /** 입장 토큰(init이 준 값). stream의 소켓 인증과 스냅샷 요청에 쓴다 */
+  let admission: { token: string; ephemeralKey?: string } | null = null;
+  /** 스냅샷 주소(init). 구역 스냅샷은 여기에 ?section=을 붙인다 */
+  let snapshotUrl: string | null = null;
+  /** 좌석 델타 연결과 세대·갭 다시 맞추기 */
+  let connection: ReturnType<typeof createSeatConnection> | null = null;
+  let sync: ReturnType<typeof createDeltaSync> | null = null;
+  /** 지금 좌석으로 보이는 구역(가운데 가까운 차례)과 실제로 보낸 구독 집합 */
+  let visible: number[] = [];
+  let subscribed: number[] = [];
+  /** 구역이 처음 보인 시각(1,000ms 머묾을 센다) */
+  const seenAt = new Map<number, number>();
+  let sentSectionsKey = '';
+  let lastSubscribeAt = Number.NEGATIVE_INFINITY;
+  let subscribeTimer: unknown;
+  /** 전체 보기 5초 스냅샷·16개 초과 구역 순환 스냅샷 */
+  let refreshTimer: unknown;
+  let refreshMode: 'overview' | 'seats' | null = null;
+  let roundRobin = 0;
+  /** 전체 스냅샷 요청이 진행 중인가(느린 응답이 겹치지 않게) */
+  let refreshing = false;
+  /** 탭이 숨겨졌는가(숨긴 동안 5초 갱신을 멈춘다) */
+  let hidden = false;
+  /** 마지막 닫힘 코드(4401을 '토큰 만료'로 가르는 데 쓴다) */
+  let closeCode: number | null = null;
+  /** 스트림 세대(dispose·init 뒤에 늦게 온 응답을 버린다) */
+  let streamGen = 0;
+  /** 접근성 목록이 연 구역의 델타(offset → state). 스냅샷 뒤 다시 얹은 것까지 모아 한 번에 보낸다 */
+  const listedChanges = new Map<number, number>();
   /** 마우스 올림 좌석을 맞춘다. 좌석이 바뀌었으면 true */
   const syncHover = (): boolean => {
     if (!engine) return false;
@@ -129,12 +178,195 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
   };
+
+  // ── 실시간(BAT-182, HOT-357): 스트림·구독·델타·5초 스냅샷 ──────────────
+  const setTimer = (fn: () => void, ms: number): unknown => (host.setTimer ? host.setTimer(fn, ms) : setTimeout(fn, ms));
+  const clearTimer = (handle: unknown): void => {
+    if (handle === undefined) return;
+    if (host.clearTimer) host.clearTimer(handle);
+    else clearTimeout(handle as ReturnType<typeof setTimeout>);
+  };
+  const random = (): number => (host.random ? host.random() : Math.random());
+  const admissionHeaders = (): Record<string, string> => {
+    if (!admission) return {};
+    return { 'X-Admission-Token': admission.token, ...(admission.ephemeralKey ? { 'X-Client-Ephemeral-Key': admission.ephemeralKey } : {}) };
+  };
+
+  /** 스냅샷 주소에 구역을 붙인다(openapi seatmap-snapshot `?section=`) */
+  const sectionUrl = (section: number): string => {
+    const base = snapshotUrl!;
+    return `${base}${base.includes('?') ? '&' : '?'}section=${section}`;
+  };
+
+  /** 구역 하나의 스냅샷(GET seatmap-snapshot?section=). HTTP 오류는 status·Retry-After를 실어 delta-sync가 재시도하게 한다 */
+  const fetchSectionSnapshot = async (section: number): Promise<ArrayBuffer> => {
+    const res = await host.fetch(sectionUrl(section), { credentials: 'include', headers: admissionHeaders(), cache: 'no-store', signal: timeoutSignal() });
+    if (!res.ok) {
+      const e = await failed('snapshot', res);
+      throw Object.assign(e, { retryAfterMs: (e.retryAfter ?? 0) * 1_000 });
+    }
+    return res.arrayBuffer();
+  };
+
+  /** 전체 스냅샷(전체 보기 5초 갱신). 낡은 판이면 엔진이 쓰지 않는다 */
+  const fetchFullSnapshot = async (): Promise<Snapshot> => {
+    const res = await host.fetch(snapshotUrl!, { credentials: 'include', headers: admissionHeaders(), cache: 'no-store', signal: timeoutSignal() });
+    if (!res.ok) throw await failed('snapshot', res);
+    return decodeSnapshot(await res.arrayBuffer());
+  };
+
+  const postSections = (): void => {
+    const key = `${visible.join(',')}|${subscribed.join(',')}`;
+    if (key === sentSectionsKey) return;
+    sentSectionsKey = key;
+    host.post({ type: 'sections', visible: [...visible], subscribed: [...subscribed] });
+  };
+
+  /** 구독 집합을 바꾼다: 전체 집합을 보내고, 새 구역은 스냅샷으로 맞춘 뒤 델타를 얹는다(§4.4.1) */
+  const commitSections = (want: number[], now: number): void => {
+    const added = want.filter((s) => !subscribed.includes(s));
+    subscribed = want.slice(0, MAX_SUBSCRIBED_SECTIONS);
+    lastSubscribeAt = now;
+    connection?.setSections(subscribed);
+    if (sync && added.length > 0) sync.resync(added);
+    postSections();
+    draw();
+  };
+
+  /** 5초 갱신을 멈춘다(숨긴 탭·연결 끝) */
+  const stopRefresh = (): void => {
+    if (refreshTimer !== undefined) clearTimer(refreshTimer);
+    refreshTimer = undefined;
+    refreshMode = null;
+  };
+
+  /** 전체 보기면 전체 스냅샷 한 번, 좌석 단계에서 16개를 넘으면 구역 하나를 돌아가며 받는다(§5.2) */
+  function refreshOnce(): void {
+    if (!engine || !connection || !snapshotUrl || hidden) return stopRefresh();
+    const e = engine;
+    const gen = streamGen;
+    const mode = e.level() === 'seats' ? 'seats' : 'overview';
+    refreshMode = mode;
+    if (mode === 'overview') {
+      if (!refreshing) {
+        refreshing = true;
+        void fetchFullSnapshot()
+          .then(
+            (snap) => {
+              if (gen === streamGen && !hidden && engine && engine.applyFullSnapshot(snap)) draw();
+            },
+            (err: unknown) => {
+              // 401·403은 화면이 대기실로 보내야 한다(다시 물어도 같다). 그 밖은 다음 5초에 다시 시도한다
+              if (err instanceof FetchFailed && (err.status === 401 || err.status === 403)) {
+                stopRefresh();
+                fail(err);
+              }
+            },
+          )
+          .finally(() => {
+            refreshing = false;
+          });
+      }
+    } else {
+      const extra = visible.filter((s) => !subscribed.includes(s));
+      if (extra.length > 0) {
+        const s = extra[roundRobin % extra.length]!;
+        roundRobin = (roundRobin + 1) % extra.length;
+        sync?.resync([s]);
+      }
+    }
+    // 요청이 끝나기를 기다리지 않고 다음 차례를 잡는다(요청은 delta-sync가 한 번에 하나로 줄 세운다)
+    if (!hidden && refreshTimer === undefined && connection) refreshTimer = setTimer(refreshOnce, SNAPSHOT_REFRESH_MS);
+  }
+
+  /** 갱신 주기를 지금 단계에 맞춘다(단계가 바뀔 때만 5초를 다시 센다) */
+  function scheduleRefresh(): void {
+    const mode = engine && engine.level() === 'seats' ? 'seats' : 'overview';
+    if (hidden || !connection || !engine) return stopRefresh();
+    if (refreshMode === mode && refreshTimer !== undefined) return;
+    if (refreshTimer !== undefined) clearTimer(refreshTimer);
+    refreshMode = mode;
+    refreshTimer = setTimer(refreshOnce, SNAPSHOT_REFRESH_MS);
+  }
+
+  /**
+   * 보이는 구역과 구독 집합을 다시 센다. 새로 보인 구역은 1,000ms 이어져야 넣고, 화면 밖으로 나간 구역은 바로 뺀다.
+   * 집합이 바뀌면 1,000ms에 한 번만 보내고, 아직 머묾이 차지 않은 구역이 있으면 그때를 예약한다.
+   */
+  function evaluate(): void {
+    const e = engine;
+    if (!e || !connection) return;
+    const now = host.now();
+    visible = e.visibleSections();
+    const seen = new Set(visible);
+    for (const s of [...seenAt.keys()]) if (!seen.has(s)) seenAt.delete(s);
+    for (const s of visible) if (!seenAt.has(s)) seenAt.set(s, now);
+    let want: number[] = [];
+    if (e.level() === 'seats') {
+      for (const s of visible) if (now - (seenAt.get(s) ?? now) >= SUBSCRIBE_DWELL_MS) want.push(s);
+      want = want.slice(0, MAX_SUBSCRIBED_SECTIONS);
+    }
+    const changed = want.join(',') !== subscribed.join(',');
+    if (subscribeTimer !== undefined) {
+      clearTimer(subscribeTimer);
+      subscribeTimer = undefined;
+    }
+    if (changed) {
+      const wait = lastSubscribeAt + SUBSCRIBE_MIN_INTERVAL_MS - now;
+      if (wait <= 0) commitSections(want, now);
+      else subscribeTimer = setTimer(evaluate, wait);
+    } else {
+      let earliest = Number.POSITIVE_INFINITY;
+      for (const s of visible) {
+        if (want.includes(s)) continue;
+        earliest = Math.min(earliest, (seenAt.get(s) ?? now) + SUBSCRIBE_DWELL_MS);
+      }
+      if (earliest > now && earliest !== Number.POSITIVE_INFINITY) subscribeTimer = setTimer(evaluate, Math.max(1, earliest - now));
+    }
+    postSections();
+    scheduleRefresh();
+  }
+
+  /** 델타를 반영한 뒤 목록이 연 구역이면 바뀐 좌석만 알린다(§4.4.1) */
+  const onApplied = (sections: readonly number[]): void => {
+    draw();
+    if (listed === null || !sections.includes(listed) || listedChanges.size === 0) return;
+    const offsets = Uint32Array.from(listedChanges.keys());
+    const states = Uint8Array.from(listedChanges.values());
+    listedChanges.clear();
+    host.post({ type: 'stateChanged', section: listed, version: engine?.versions.version[listed]!, offsets, states }, [offsets.buffer, states.buffer]);
+  };
+
+  /** 스트림 상태를 모두 정리한다(dispose·init 다시) */
+  const stopStream = (): void => {
+    streamGen++;
+    stopRefresh();
+    if (subscribeTimer !== undefined) clearTimer(subscribeTimer);
+    subscribeTimer = undefined;
+    sync?.dispose();
+    connection?.dispose();
+    sync = null;
+    connection = null;
+    visible = [];
+    subscribed = [];
+    seenAt.clear();
+    listedChanges.clear();
+    sentSectionsKey = '';
+    lastSubscribeAt = Number.NEGATIVE_INFINITY;
+    roundRobin = 0;
+    closeCode = null;
+  };
+
   return async function handle(raw: unknown): Promise<void> {
     const parsed = ToWorker.safeParse(raw);
     if (!parsed.success) return fail(`메시지가 틀렸다: ${parsed.error.issues[0]?.message}`);
     const m = parsed.data;
     try {
       if (m.type === 'init') {
+        stopStream();
+        admission = m.admission ?? null;
+        snapshotUrl = m.snapshotUrl ?? null;
+        hidden = false;
         canvas = m.canvas as unknown as Canvas;
         size(m.width, m.height, m.dpr);
         const ctx = getCtx(m.canvas);
@@ -187,12 +419,15 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
         return;
       }
       if (m.type === 'dispose') {
+        stopStream();
         engine?.cache.clear();
         engine = null;
         listed = null;
         canvas = null;
         hoverPoint = null;
         hoverPosted = false;
+        admission = null;
+        snapshotUrl = null;
         return;
       }
       if (m.type === 'viewport') {
@@ -202,21 +437,107 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
       if (m.type === 'tiers' && !engine) pendingTiers = { ...(m.tierRank ? { tierRank: m.tierRank } : {}), ...(m.tierNames ? { tierNames: m.tierNames } : {}) };
       if (!engine) return;
       switch (m.type) {
+        case 'stream': {
+          // 첫 그림 뒤 한 번만 연다(두 번 보내도 소켓은 하나, T1). 입장 토큰은 init의 admission을 쓴다
+          if (connection) break;
+          if (!admission || !snapshotUrl) {
+            fail('입장 토큰이나 스냅샷 주소가 없어 실시간 연결을 열 수 없다');
+            break;
+          }
+          const e = engine;
+          closeCode = null;
+          sync = createDeltaSync({
+            engine: e,
+            fetchSection: fetchSectionSnapshot,
+            subscribed: () => subscribed,
+            random,
+            now: () => host.now(),
+            setTimer,
+            clearTimer,
+            onApplied,
+            onError: (err) => fail(err),
+            onFatal: (kind, err) => fail(kind === 'unauthorized' ? err : new Error(`좌석 실시간 연결의 좌석맵 판이 다르다: ${String((err as Error)?.message ?? err)}`)),
+          });
+          const conn = createSeatConnection({
+            url: m.url,
+            getToken: () => ({ token: admission!.token, expiresAtMs: m.expiresAtMs }),
+            openSocket: (url, protocols) => (host.openSocket ? host.openSocket(url, protocols) : (new WebSocket(url, protocols) as unknown as SeatSocket)),
+            now: () => host.now(),
+            serverNow: () => (host.serverNow ? host.serverNow() : Date.now()),
+            setTimer,
+            clearTimer,
+            random,
+            auth: 'subprotocol',
+            // 한 번도 열리지 못한 닫힘이 이어지면 HTTP로 토큰을 확인한다(ADR-0240). 스냅샷 경로를 쓴다
+            probeAuth: async () => {
+              try {
+                const res = await host.fetch(snapshotUrl!, { credentials: 'include', headers: admissionHeaders(), cache: 'no-store', signal: timeoutSignal() });
+                return res.status === 401 || res.status === 403 ? 'rejected' : res.ok ? 'ok' : 'unknown';
+              } catch {
+                return 'unknown';
+              }
+            },
+            onState: (state, detail) => {
+              // 연결을 맺은 뒤의 4401은 서버가 본 토큰 만료다(§4.4.1). 화면은 '예매 시간이 끝났습니다'(ended)로 간다
+              let d: StateDetail = detail;
+              if (state === 'ended' && detail && 'reason' in detail && detail.reason === 'token-invalid' && closeCode === 4401) d = { reason: 'token-expired' };
+              host.post({ type: 'connection', state, ...(d ?? {}) });
+              if (state === 'live') scheduleRefresh();
+              else if (state === 'ended') stopRefresh();
+            },
+            onFrame: (frame) => {
+              if (frame.type !== 'delta') return;
+              // 목록이 연 구역의 바뀐 좌석을 모아 둔다(스냅샷 뒤 다시 얹은 것까지 onApplied에서 한 번에 보낸다)
+              if (listed !== null) {
+                for (const s of frame.sections) {
+                  if (s.sectionIndex !== listed) continue;
+                  s.offsets.forEach((offset, i) => listedChanges.set(offset, s.states[i]!));
+                }
+              }
+              sync?.onDelta(frame);
+              // 그린 시각(보정 시계) − (serverTimeMs − maxWaitMs). 시계 표본이 나빠 음수가 나올 수 있어 0 아래는 0으로 본다
+              const ms = deltaE2eMs(frame, host.now(), conn.clock);
+              if (ms !== undefined) host.post({ type: 'metrics', deltaE2eMs: Math.max(0, ms) });
+            },
+            onResubscribed: (sections) => sync?.resync(sections),
+            onClose: (code) => {
+              closeCode = code;
+            },
+            onError: (err) => fail(err),
+          });
+          connection = conn;
+          conn.start();
+          evaluate();
+          break;
+        }
+        case 'visibility':
+          hidden = !m.visible;
+          if (hidden) stopRefresh();
+          else if (connection) {
+            // 다시 보이면 바로 한 번 받고 5초 주기를 새로 센다(§5.2)
+            stopRefresh();
+            refreshOnce();
+          }
+          break;
         case 'viewport':
           engine.resize(m.w, m.h, m.dpr);
           draw();
+          evaluate();
           break;
         case 'camera':
           engine.setCamera(m.zoom, m.x, m.y);
           draw();
+          evaluate();
           break;
         case 'zoomBy':
           engine.zoomBy(m.factor, m.x, m.y);
           await drawSoon();
+          evaluate();
           break;
         case 'pan':
           engine.panBy(m.dx, m.dy);
           await drawSoon();
+          evaluate();
           break;
         case 'tiers':
           engine.setTiers(m.tierRank, m.tierNames);
@@ -225,11 +546,13 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
         case 'fit':
           engine.fitAll();
           draw();
+          evaluate();
           break;
         case 'focusSection':
           if (m.section < engine.L.S) {
             engine.focusSection(m.section);
             draw();
+            evaluate();
           }
           break;
         case 'pointer':
@@ -250,6 +573,7 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
               engine.focusSection(s);
               zoomedAt = host.now();
               draw();
+              evaluate();
             }
             host.post({ type: 'hit', seatIndex: -1, seatId: null, label: null, tier: null });
             break;
@@ -258,6 +582,7 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
           if (engine.zoomToSeat(m.x, m.y)) {
             zoomedAt = host.now();
             draw();
+            evaluate();
             host.post({ type: 'hit', seatIndex: -1, seatId: null, label: null, tier: null });
             break;
           }
@@ -313,6 +638,7 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
         }
         case 'listSection': {
           listed = m.section !== null && m.section < engine.L.S ? m.section : null;
+          listedChanges.clear();
           if (listed === null) break;
           const start = engine.L.sectionStart[listed]!;
           const sec = engine.L.file.sections[listed]!;
