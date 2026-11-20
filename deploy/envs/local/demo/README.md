@@ -21,6 +21,8 @@ bash D:/ticketpass-locks/lock.sh take docker lane4-BAT-087
 bash D:/ticketpass-locks/lock.sh drop docker lane4-BAT-087
 ```
 
+`demo`의 게이트웨이 단계는 자체 서명 인증서를 만들려고 `openssl`을 부른다. Windows PowerShell에서 Git for Windows를 쓰면 `C:\Program Files\Git\usr\bin`을 PATH에 앞에 둔다(없으면 `spawnSync openssl ENOENT`로 멈춘다).
+
 클러스터는 `lane4-demo`(kubeconfig `.cache/peaket-tools/kubeconfig-lane4-demo`)이고, 이 PC의 다른 `peaket`·`lane4-*` 클러스터는 건드리지 않는다. 처음 만들 때 게이트웨이 포트 18441~18445와 gRPC 19051·모의 기관 18920의 포트 매핑을 건다. 매핑 없이 만든 옛 클러스터면 `down` 뒤 `up`으로 다시 만든다.
 
 ## 운영과 무엇이 다른가
@@ -35,6 +37,17 @@ bash D:/ticketpass-locks/lock.sh drop docker lane4-BAT-087
 | 로그인 | OIDC | 데모 인증 도우미 | `tools/local/demo-auth.mjs`가 팬 gRPC·관리 공개 API로 쿠키를 만든다 |
 | 첫 관리자·promoter | 초대·승인 | 부트스트랩 예외 | 공개 API가 없다. **감사 기록이 남지 않는다(한계)** |
 | 시드 | 운영 데이터 | `deploy/envs/demo/seed/base.yaml` | 가상 이름·`example.test` 이메일만 쓴다 |
+
+### 데모 전용 예외(BAT-087 고침, 2026-11-20)
+
+정본 계획 B12는 '공연·좌석을 공개·관리 API로만'이지만, 아직 없는 파트너 API 다섯(`GET /v1/partner/productions`, `GET /v1/partner/productions/{id}`, `POST /v1/partner/events/{eventId}/staff-invitations`, `GET /v1/partner/events/{eventId}/staff`, `POST /v1/partner/productions/{id}/sale-review`) 가운데 넷은 뒤 묶음(HOT-260·R-548) 몫이다. 그래서 **로컬 데모 시드만** 다음을 예외로 한다. API를 새로 만들지 않는다.
+
+- **직접 SQL(넣기)**: 공연장(`place`) 행과 스태프 배정(`staff_assignment`) 행. 둘 다 공개 API가 없다. 스태프 배정은 '초대 수락이 끝난 `ASSIGNED`' 상태로 넣는다.
+- **직접 SQL(읽기)**: 기존 공연·회차·스태프를 찾는 조회. 두 번째 적용에서 중복을 만들지 않으려면 필요하다.
+- **판매 심사 제출**: BAT-616이 만든 `POST /v1/partner/productions/{productionId}/sale-review`를 쓴다. 고치기 전에는 이 경로가 없어 시드가 첫 공연에서 멈췄다.
+- 공연·회차·좌석맵·기기는 여전히 공개·관리 API로만 만든다(감사 기록·Outbox 유지).
+- 무대 쪽 예외: `bundle`은 `PEAKET_BUNDLE_MODE=split`(한 파드 안 gRPC 포트 충돌 회피), `ops-svc`·`realtime-gw`는 `nodeSelector: null`(차트 기본 노드 셀렉터를 지운다), web은 읽기 전용 루트 위에 `.next/static`·`serwist`·`cache`·`public`을 빈 볼륨으로 연다(시작할 때 복사하는 자리), partner는 데모 전용 `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`를 빌드·실행에 같은 값으로 쓴다.
+- 이 예외는 `docs/review/plans/BAT-087.md`의 '고침' 절과 `deploy/envs/demo/README.md`에도 적는다.
 
 ## 호스트와 포트
 

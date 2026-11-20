@@ -1,15 +1,19 @@
 // BAT-087 기본 합성 시드 적용기(docs/review/plans/BAT-087.md §5·§6 G5).
 // - `--check`: 시드 파일의 참조·비밀 없음·개수 계약을 본다(클러스터 없이, DS-05)
-// - `--apply`: ① 첫 관리자·패스키·promoter 부트스트랩 Job 둘 ② 공개·관리 API로 공연·회차·좌석맵·스태프·기기·판매 승인
-//   ③ 개수를 다시 읽어 `--json`으로 낸다. 공연·좌석을 DB에 직접 넣지 않는다(감사·Outbox가 없어지지 않게)
-// - 두 번 적용해도 계정·공연·회차·promoter·스태프·기기 수가 같다(키·제목·이메일·이름으로 찾아 없을 때만 만든다)
+// - `--apply`: ① 첫 관리자·패스키·promoter 부트스트랩 Job 둘 ② 공개·관리 API로 공연·회차·좌석맵·기기·판매 승인
+//   ③ 개수를 다시 읽어 `--json`으로 낸다(created·counts·total)
+// - 예외(로컬 데모 전용, 계획 '고침' 절·deploy/envs/demo/README.md): 공연장(place) 행과 스태프 배정(staff_assignment)은
+//   공개 API가 없어 직접 SQL로 넣고, 기존 공연·회차·스태프를 찾는 읽기도 직접 SQL로 한다. 공연·회차·좌석맵은
+//   공개 API로만 만들어 감사 기록·Outbox를 남긴다(계획 B12, M8).
+// - 두 번 적용해도 계정·공연·회차·promoter·스태프·기기 수가 같다(키·제목·시작 시각·이메일로 찾아 없을 때만 만든다).
+//   두 번째에는 좌석맵을 다시 PUT하지 않는다(같은 배치를 덮어쓰지 않는다)
 // - 비밀·개인정보는 출력하지 않는다. 실패하면 exit 1이고 어느 단계가 실패했는지만 낸다
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEMO_CLUSTER, DEMO_GATEWAY_PORTS, DEMO_HOSTS, demoOrigins } from './demo-objects.mjs';
-import { demoAuth, httpsJson, prepareDemoSecrets, readSeed, DEMO_CONTRACT_FILE, DEMO_SEED_FILE } from './demo-auth.mjs';
+import { demoUuid, demoAuth, httpsJson, prepareDemoSecrets, readSeed, DEMO_CONTRACT_FILE, DEMO_SEED_FILE } from './demo-auth.mjs';
 import { DEFAULT_ROOT, ensureTool } from './tools.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -113,7 +117,18 @@ export function expandSeatMap(seed, map) {
       seats,
     });
   }
-  return { canvas: base.canvas ?? { width: 1400, height: 1000 }, sections };
+  return { canvas: canvasOf(base), sections };
+}
+
+/** 구역 배치가 캔버스를 넘지 않게 필요한 크기로 늘린다(구역은 두 열로 놓는다) */
+function canvasOf(base) {
+  const sections = base.sections ?? [];
+  const columns = 2;
+  const levels = Math.max(1, Math.ceil(sections.length / columns));
+  const maxRows = Math.max(0, ...sections.map((s) => Number(s.rows ?? 0)));
+  const width = Math.max(Number(base.canvas?.width ?? 1400), 250 + (columns - 1) * 500 + 400 + 50);
+  const height = Math.max(Number(base.canvas?.height ?? 1000), 120 + (levels - 1) * 380 + maxRows * 26 + 20);
+  return { width, height };
 }
 
 const kubeconfig = () => process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, `kubeconfig-${process.env.PEAKET_DEMO_CLUSTER || DEMO_CLUSTER}`);
@@ -121,6 +136,17 @@ const kubeconfig = () => process.env.PEAKET_KUBECONFIG || join(DEFAULT_ROOT, `ku
 async function kubectl(args, o = {}) {
   const k = await ensureTool('kubectl');
   return execFileSync(k, ['--kubeconfig', kubeconfig(), ...args], { encoding: 'utf8', stdio: o.input !== undefined ? ['pipe', 'pipe', 'inherit'] : ['ignore', 'pipe', 'pipe'], ...o });
+}
+
+const sqlLiteral = (value) => `'${String(value).replaceAll("'", "''")}'`;
+
+/** 데모 PostgreSQL에 SQL 한 번(로컬 데모 전용 예외). 여러 행은 `|`로 잇고 한 줄에 하나씩 돌려준다 */
+async function psql(db, statement) {
+  const out = await kubectl(['-n', 'purchase', 'exec', 'deploy/demo-postgres', '--', 'psql', '-U', 'postgres', '-d', db, '-v', 'ON_ERROR_STOP=1', '-tA', '-c', statement], { quiet: true });
+  return String(out)
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /** 부트스트랩 Job 하나를 지우고 다시 만든 뒤 끝날 때까지 본다 */
@@ -189,6 +215,69 @@ async function api(o) {
   return res.json;
 }
 
+/** 데모 공연장(place) 행을 직접 SQL로 보장한다(공연장을 만드는 공개 API가 없다, 로컬 데모 전용 예외) */
+async function ensurePlaces(seed, promoterId) {
+  const byName = new Map();
+  const names = [...new Set(seed.productions.map((p) => p.placeName))];
+  for (const name of names) {
+    const prod = seed.productions.find((p) => p.placeName === name);
+    const id = demoUuid(`place:${name}`);
+    await psql(
+      'peaket_demo_core',
+      `insert into place (id, name, address, region, status, created_by) values (${sqlLiteral(id)}, ${sqlLiteral(name)}, ${sqlLiteral(prod.placeAddress)}, '서울', 'ACTIVE', ${sqlLiteral(promoterId)}) on conflict (id) do nothing`,
+    );
+    byName.set(name, id);
+  }
+  return byName;
+}
+
+/** 공연·회차를 SQL로 읽는다(파트너 목록·상세 API가 아직 없어 키를 찾는 읽기만 예외로 한다) */
+async function readProductions(promoterId) {
+  const rows = await psql('peaket_demo_core', `select id, title, sale_review from production where promoter_id = ${sqlLiteral(promoterId)}`);
+  return rows.map((line) => {
+    const [id, title, saleReview] = line.split('|');
+    return { id, title, saleReview };
+  });
+}
+
+/** 한 공연의 회차를 SQL로 읽는다(시작 시각 epoch 초로 시드와 잇는다) */
+async function readEvents(productionId) {
+  const rows = await psql('peaket_demo_core', `select id, extract(epoch from starts_at)::bigint from event where production_id = ${sqlLiteral(productionId)}`);
+  return rows.map((line) => {
+    const [id, epoch] = line.split('|');
+    return { id, epoch: Number(epoch) };
+  });
+}
+
+/** 공연에 배치본(좌석맵)이 이미 있는지(회차의 venue_id가 채워졌는지) */
+async function hasLayout(productionId) {
+  const rows = await psql('peaket_demo_core', `select 1 from event where production_id = ${sqlLiteral(productionId)} and venue_id is not null limit 1`);
+  return rows.length > 0;
+}
+
+/** 계정 ID를 이메일로 읽는다(identity DB, 읽기만) */
+async function readAccountIds(emails) {
+  if (emails.length === 0) return new Map();
+  const rows = await psql('peaket_demo_identity', `select id, email from account where email in (${emails.map(sqlLiteral).join(', ')})`);
+  return new Map(rows.map((line) => {
+    const [id, email] = line.split('|');
+    return [email, id];
+  }));
+}
+
+/** 스태프 배정을 직접 SQL로 넣는다(파트너 초대 API가 없다, 로컬 데모 전용 예외). 이미 있으면 0 */
+async function insertStaffAssignment(o) {
+  const exists = await psql('peaket_demo_identity', `select 1 from staff_assignment where event_id = ${sqlLiteral(o.eventId)} and account_id = ${sqlLiteral(o.accountId)} limit 1`);
+  if (exists.length) return 0;
+  await psql(
+    'peaket_demo_identity',
+    `insert into staff_assignment (id, account_id, event_id, promoter_id, role, invite_email, invite_token_hash, invite_expires_at, invited_by, valid_from, valid_until, status, accepted_at, consent_version)
+     values (${sqlLiteral(demoUuid(`staff:${o.eventId}:${o.accountId}`))}, ${sqlLiteral(o.accountId)}, ${sqlLiteral(o.eventId)}, ${sqlLiteral(o.promoterId)}, ${sqlLiteral(o.role)}, null, null, now() + interval '365 days', ${sqlLiteral(o.invitedBy)}, now(), now() + interval '365 days', 'ASSIGNED', now(), 'demo-v1')
+     on conflict (event_id, account_id) do nothing`,
+  );
+  return 1;
+}
+
 /**
  * 부트스트랩 → 기본 시드 적용. 실패는 단계 이름과 함께 던진다.
  * @param {{ seedFile?: string }} [o]
@@ -213,39 +302,39 @@ export async function applySeed(o = {}) {
       port: c.ports.api,
       method: 'POST',
       path: '/v1/identity/signup-completions',
-      headers: { cookie: cookieHeader(s.cookies), origin: demoOrigins()[ 'www' ] },
+      headers: { cookie: cookieHeader(s.cookies), origin: demoOrigins()['www'] },
       body: { ageOver14: true, consents: { terms: true, privacy: true, marketing: false, phone: false }, nickname: a.nickname ?? a.key },
     });
     if (![200, 201, 204, 409, 422].includes(done.status)) throw new Error(`팬 ${a.key} 가입 마무리 → ${done.status}`);
   }
 
-  // 파트너 관리자 로그인
+  // 파트너·관제 관리자 로그인
+  const promoterId = bootstrap.promoters[0]?.id ?? null;
   const partner = await demoAuth('admin', 'stella-admin');
   const partnerHeaders = { cookie: cookieHeader(partner.cookies), origin: demoOrigins().partner, 'sec-fetch-site': 'same-origin' };
   const ops = await demoAuth('admin', 'sujin');
   const opsHeaders = { cookie: cookieHeader(ops.cookies), origin: demoOrigins().console, 'sec-fetch-site': 'same-origin' };
 
   const counts = { productions: 0, events: 0, seatMaps: 0, staff: 0, devices: 0 };
-  const existing = await api({ host: c.hosts['partner-api'], port: c.ports['partner-api'], method: 'GET', path: '/v1/partner/productions?limit=100', headers: partnerHeaders });
-  const byTitle = new Map((existing.items ?? []).map((p) => [p.title, p.productionId]));
-  const promoterId = bootstrap.promoters[0]?.id ?? null;
+  const places = await ensurePlaces(seed, promoterId);
+  const known = new Map((await readProductions(promoterId)).map((p) => [p.title, p]));
   const eventIds = {};
   for (const prod of seed.productions) {
-    let productionId = byTitle.get(prod.title);
-    if (!productionId) {
-      const events = seed.events.filter((e) => e.productionKey === prod.key);
+    const events = seed.events.filter((e) => e.productionKey === prod.key);
+    let row = known.get(prod.title);
+    if (!row) {
       const created = await api({
         host: c.hosts['partner-api'],
         port: c.ports['partner-api'],
         method: 'POST',
         path: '/v1/partner/productions',
-        headers: partnerHeaders,
+        headers: { ...partnerHeaders, 'idempotency-key': demoUuid(`create-production:${prod.key}`) },
         body: {
           title: prod.title,
           genre: prod.genre,
           ageRating: prod.ageRating,
           runningMinutes: prod.runningMinutes,
-          newPlace: { name: prod.placeName, address: prod.placeAddress },
+          placeId: places.get(prod.placeName),
           artists: [],
           aliases: prod.aliases ?? [],
           events: events.map((e) => ({
@@ -260,61 +349,99 @@ export async function applySeed(o = {}) {
           })),
         },
       });
-      productionId = created.productionId;
-      events.forEach((e, i) => (eventIds[e.key] = created.eventIds[i]));
-      byTitle.set(prod.title, productionId);
       counts.productions += 1;
       counts.events += created.eventIds.length;
+      events.forEach((e, i) => (eventIds[e.key] = created.eventIds[i]));
+      known.set(prod.title, { id: created.productionId, title: prod.title, saleReview: 'DRAFT' });
     } else {
-      const detail = await api({ host: c.hosts['partner-api'], port: c.ports['partner-api'], method: 'GET', path: `/v1/partner/productions/${productionId}`, headers: partnerHeaders });
-      for (const e of detail.events ?? []) eventIds[e.eventId ?? e.id] = e.eventId ?? e.id;
-      // 상세의 회차는 시작 시각으로 시드와 잇는다
-      for (const e of seed.events.filter((x) => x.productionKey === prod.key)) {
-        const hit = (detail.events ?? []).find((x) => x.startsAt === e.startAt);
-        if (hit) eventIds[e.key] = hit.eventId ?? hit.id;
+      const rows = await readEvents(row.id);
+      for (const e of events) {
+        const hit = rows.find((x) => x.epoch === Math.floor(Date.parse(e.startAt) / 1000));
+        if (hit) eventIds[e.key] = hit.id;
       }
     }
-    // 좌석맵: 시드의 좌석맵을 API 모양으로 펼쳐 PUT(같은 내용을 다시 써도 같다)
-    const maps = seed.seatMaps.filter((m) => seed.events.find((e) => e.key === m.eventKey)?.productionKey === prod.key);
-    for (const map of maps) {
-      const layout = expandSeatMap(seed, map);
-      const detail = await api({ host: c.hosts['partner-api'], port: c.ports['partner-api'], method: 'GET', path: `/v1/partner/productions/${productionId}`, headers: partnerHeaders });
-      const prices = seed.events.find((e) => e.key === map.eventKey)?.prices ?? {};
-      await api({
-        host: c.hosts['partner-api'],
-        port: c.ports['partner-api'],
-        method: 'PUT',
-        path: `/v1/partner/productions/${productionId}/seatmap`,
-        headers: partnerHeaders,
-        body: {
-          layoutVersion: detail.version ?? 0,
-          canvas: layout.canvas,
-          priceTiers: Object.entries(prices).map(([tierId, price]) => ({ tierId, name: tierId, price })),
-          sections: layout.sections,
-        },
-      });
-      counts.seatMaps += 1;
-    }
   }
-  // 남은 좌석맵(복제)은 같은 공연 배치라 새로 쓰지 않는다. 회차별 다른 배치는 뒤 단계에서 나눈다
 
-  // 스태프 초대(이메일로 찾아 없을 때만) — 이벤트별
+  // 좌석맵: 아직 배치본이 없는 공연에만 한 번 PUT한다(같은 공연의 회차는 같은 배치본, ADR-0093).
+  // 두 번째 적용에서는 venue가 이미 있어 다시 쓰지 않는다. 중간에 실패해 다시 돌아도 빠진 공연만 채운다
+  for (const prod of seed.productions) {
+    const productionId = known.get(prod.title)?.id;
+    if (!productionId) continue;
+    if (await hasLayout(productionId)) continue;
+    const map = seed.seatMaps.find((m) => seed.events.find((e) => e.key === m.eventKey)?.productionKey === prod.key);
+    if (!map) continue;
+    const layout = expandSeatMap(seed, map);
+    const prices = seed.events.find((e) => e.key === map.eventKey)?.prices ?? {};
+    // 좌석 등급(구역 tierId)은 모두 가격 등급에 있어야 한다. 회차 가격에 없는 등급은 그 회차의 가장 싼 값으로 채운다
+    const cheapest = Math.min(...Object.values(prices).map(Number));
+    const gradePrices = [...new Set(layout.sections.map((s) => s.tierId).filter(Boolean))].map((tierId) => ({ tierId, name: tierId, price: Number(prices[tierId] ?? cheapest) }));
+    await api({
+      host: c.hosts['partner-api'],
+      port: c.ports['partner-api'],
+      method: 'PUT',
+      path: `/v1/partner/productions/${productionId}/seatmap`,
+      headers: { ...partnerHeaders, 'if-match': '"0"' },
+      body: {
+        layoutVersion: 0,
+        canvas: layout.canvas,
+        priceTiers: gradePrices,
+        sections: layout.sections,
+      },
+    });
+    counts.seatMaps += 1;
+  }
+
+  // 스태프 배정(파트너 초대 API가 없어 직접 SQL, 로컬 데모 전용 예외)
+  const staffEmails = [...new Set(seed.staff.map((s) => seed.accounts.find((a) => a.key === s.accountKey)?.email).filter(Boolean))];
+  const accountIds = await readAccountIds(staffEmails);
+  const invitedBy = demoUuid('admin:sujin');
   for (const s of seed.staff) {
     const eventId = eventIds[s.eventKey];
     if (!eventId) continue;
-    const account = seed.accounts.find((a) => a.key === s.accountKey);
-    const staff = await api({ host: c.hosts['partner-api'], port: c.ports['partner-api'], method: 'GET', path: `/v1/partner/events/${eventId}/staff`, headers: partnerHeaders });
-    const known = new Set((staff.items ?? staff.staff ?? []).map((x) => x.email));
-    if (!known.has(account.email)) {
+    const accountId = accountIds.get(seed.accounts.find((a) => a.key === s.accountKey)?.email);
+    if (!accountId) throw new Error(`스태프 ${s.key}의 계정을 identity DB에서 찾지 못했다`);
+    counts.staff += await insertStaffAssignment({ eventId, accountId, role: s.role, promoterId, invitedBy });
+  }
+
+  // 판매 승인: 공연마다 파트너 판매 심사 제출(BAT-616) → 관제 승인. 이미 승인된 공연은 건너뛴다.
+  // 기기 배치는 core의 회차 판매 설정(sale-config)을 읽으므로 승인 뒤에 한다
+  const promoter = seed.promoters[0];
+  const approvedRows = new Map((await readProductions(promoterId)).map((p) => [p.id, p.saleReview]));
+  for (const prod of seed.productions) {
+    const row = known.get(prod.title);
+    if (!row) continue;
+    const productionId = row.id;
+    if (approvedRows.get(productionId) === 'APPROVED') continue;
+    const submitted = await httpsJson({
+      host: c.hosts['partner-api'],
+      port: c.ports['partner-api'],
+      method: 'POST',
+      path: `/v1/partner/productions/${productionId}/sale-review`,
+      headers: partnerHeaders,
+      body: {
+        seller: { legalName: promoter.legalName, representative: '예시 대표', address: '서울특별시 예시구 예시로 1', phone: '02-0000-0000', email: 'stella@example.test', businessRegNo: '000-00-00000', mailOrderReportNo: '제0000-예시호' },
+        payoutAccount: { bankCode: '000', accountNumber: '000000000000', holderName: promoter.legalName },
+        accessibleSeating: { confirmed: true },
+      },
+    });
+    if (submitted.status === 404) {
+      // BAT-616(파트너 판매 심사 제출)이 아직 develop에 없을 때만 도는 로컬 데모 예외다.
+      // 공개 경로가 생기면 이 갈래는 쓰이지 않는다(계획 '고침' 절). 감사 기록·판매자 사본은 남지 않는다(한계)
+      console.error(`알림: ${productionId} 판매 심사 제출 경로가 없다(BAT-616 미병합). 로컬 데모 예외로 sale_review만 SUBMITTED로 바꾼다`);
+      await psql('peaket_demo_core', `update production set sale_review = 'SUBMITTED' where id = ${sqlLiteral(productionId)} and sale_review in ('DRAFT', 'REJECTED')`);
+    } else if (![200, 202, 409].includes(submitted.status)) {
+      throw new Error(`판매 심사 제출 ${productionId} → ${submitted.status}(BAT-616 파트너 판매 심사 경로가 필요하다)`);
+    }
+    const scale = seed.events.filter((e) => e.productionKey === prod.key).map((e) => ({ eventId: eventIds[e.key], scale: 'SMALL' })).filter((x) => x.eventId);
+    if (scale.length) {
       await api({
-        host: c.hosts['partner-api'],
-        port: c.ports['partner-api'],
+        host: c.hosts['ops-api'],
+        port: c.ports['ops-api'],
         method: 'POST',
-        path: `/v1/partner/events/${eventId}/staff-invitations`,
-        headers: partnerHeaders,
-        body: { invitations: [{ email: account.email, role: s.role }] },
+        path: `/v1/ops/sale-reviews/${productionId}/approvals`,
+        headers: opsHeaders,
+        body: { scales: scale, placeId: places.get(prod.placeName) },
       });
-      counts.staff += 1;
     }
   }
 
@@ -332,52 +459,30 @@ export async function applySeed(o = {}) {
         deviceByName.set(d.name, deviceId);
         counts.devices += 1;
       }
-      await api({
+      // If-Match는 새 배치에 "0"이다. 이미 배치된 기기면 412(판이 다름)를 받는데, 데모 시드는 배치를 바꾸지 않으므로 넘긴다
+      const placed = await httpsJson({
         host: c.hosts['partner-api'],
         port: c.ports['partner-api'],
         method: 'PUT',
         path: `/v1/partner/events/${eventId}/device-placements/${deviceId}`,
-        headers: partnerHeaders,
+        headers: { ...partnerHeaders, 'if-match': '"0"' },
         body: { gateZone: d.booth, mode: 'IN' },
       });
+      if (![200, 412].includes(placed.status)) throw new Error(`기기 배치 ${d.name} → ${placed.status}`);
     }
   }
 
-  // 판매 승인: 공연마다 판매 심사 제출 → 관제 승인(값은 시드의 가상 사업자 정보)
-  const promoter = seed.promoters[0];
-  for (const prod of seed.productions) {
-    const productionId = byTitle.get(prod.title);
-    if (!productionId) continue;
-    const detail = await api({ host: c.hosts['partner-api'], port: c.ports['partner-api'], method: 'GET', path: `/v1/partner/productions/${productionId}`, headers: partnerHeaders });
-    if (detail.saleReview?.status === 'APPROVED' || detail.saleApprovedAt) continue;
-    await httpsJson({
-      host: c.hosts['partner-api'],
-      port: c.ports['partner-api'],
-      method: 'POST',
-      path: `/v1/partner/productions/${productionId}/sale-review`,
-      headers: partnerHeaders,
-      body: {
-        seller: { legalName: promoter.legalName, representative: '예시 대표', address: '서울특별시 예시구 예시로 1', phone: '02-0000-0000', email: 'stella@example.test', businessRegNo: '000-00-00000', mailOrderReportNo: '제0000-예시호' },
-        payoutAccount: { bankCode: '000', accountNumber: '000000000000', holderName: promoter.legalName },
-        accessibleSeating: { confirmed: true },
-      },
-    });
-    const scale = (detail.events ?? []).map((e) => ({ eventId: e.eventId ?? e.id, scale: 'SMALL' }));
-    const placeId = detail.place?.placeId ?? detail.place?.id;
-    const artistIds = (detail.artists ?? []).map((a) => a.artistId ?? a.id).filter(Boolean);
-    if (placeId && scale.length) {
-      await httpsJson({
-        host: c.hosts['ops-api'],
-        port: c.ports['ops-api'],
-        method: 'POST',
-        path: `/v1/ops/sale-reviews/${productionId}/approvals`,
-        headers: opsHeaders,
-        body: { scales: scale, placeId, artistIds },
-      });
-    }
-  }
-
-  return { ok: true, counts, eventIds: Object.keys(eventIds).length, fanSessions: Object.keys(fanSessions).length, seed: seedFile.replaceAll('\\', '/') };
+  const total = {
+    accounts: seed.accounts.length,
+    passkeys: (seed.adminPasskeys ?? []).length,
+    promoters: (seed.promoters ?? []).length,
+    productions: seed.productions.length,
+    events: seed.events.length,
+    seatMaps: seed.seatMaps.length,
+    staff: seed.staff.length,
+    devices: seed.staff.reduce((n, s) => n + (s.devices ?? []).length, 0),
+  };
+  return { ok: true, counts, total, eventIds: Object.keys(eventIds).length, fanSessions: Object.keys(fanSessions).length, seed: seedFile.replaceAll('\\', '/') };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

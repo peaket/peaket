@@ -109,7 +109,7 @@ node --test "tools/local/*.test.mjs"
 | `demo-images.mjs` | BAT-087 데모 이미지 10개의 계획·정적 점검(`--check`)·빌드(`--build`). 기존 `bundle`·`ops-svc`·`pg-simulator`는 재사용합니다 |
 | `demo-objects.mjs` | 데모 무대의 순수 객체·값: 워크로드 표, 네임스페이스, PostgreSQL·Valkey·Kafka 토픽, Secret, 모의 기관, 실제 백엔드를 보는 게이트웨이 객체(출처 포트·bundle 네임스페이스) |
 | `demo-auth.mjs` | 데모 인증 도우미: 팬 gRPC `CreateSession`, 관리·파트너 공개 로그인(비밀번호+TOTP), 패스키 CDP 입력, 데모 비밀 생성(`prepare`) |
-| `demo-seed.mjs` | `deploy/envs/demo/seed/base.yaml` 검사(`--check`)·적용(`--apply`). 부트스트랩 Job 뒤 공개·관리 API로 시드하고 개수를 다시 읽습니다 |
+| `demo-seed.mjs` | `deploy/envs/demo/seed/base.yaml` 검사(`--check`)·적용(`--apply`). 부트스트랩 Job 뒤 공개·관리 API로 시드하고 개수를 다시 읽습니다. 로컬 데모 예외로 공연장·스태프 배정은 직접 SQL로 넣습니다(README '로컬 데모 전용 예외') |
 | `e2e/demo-stage.e2e.mjs` | `demo`→`demo-seed`→게이트웨이 응답→`demo-down` 연기 시험(시험 담당 몫, 계획 §6 DS-07~10) |
 
 ```bash
@@ -125,7 +125,8 @@ BAT-086 재현 스크립트가 도는 **로컬 데모 무대**를 올립니다(�
 - **환경**: `PEAKET_ENV=local`입니다(`demo`가 아닙니다: 합본은 `local`·`ci`에서만 시작하고 identity KMS·웹 모의 OIDC 제공자도 local 전제입니다).
 - **호스트·포트**: 정본 이름에 이 PC 포트를 붙입니다(`https://www.peaket.example:18441`~`https://scanner.peaket.example:18445`). identity gRPC는 `127.0.0.1:19051`, 모의 본인확인기관은 `127.0.0.1:18920`입니다. 브라우저는 Playwright `--host-resolver-rules=MAP *.peaket.example 127.0.0.1`·`ignoreHTTPSErrors: true`, 사람은 hosts 파일을 씁니다(아래 표).
 - **인증**: `node tools/local/demo-auth.mjs fan <accountKey>`·`admin <accountKey>`가 표준 출력 한 줄 JSON `{ accountKey, kind, cookies, passkey? }`를 냅니다. 팬은 identity gRPC `CreateSession`, 관리·파트너는 공개 로그인 API(비밀번호→TOTP)입니다. 모의 OIDC 제공자는 올리지 않습니다. 값은 `.cache/peaket-tools/demo-secrets/`(0600)에만 있습니다.
-- **시드**: `demo-seed --check`가 참조·비밀 없음·개수 계약을 보고, `--apply`가 부트스트랩 Job 둘 뒤 공개·관리 API로 공연·회차·좌석맵·스태프·기기·판매 승인을 넣습니다. 두 번 적용해도 개수가 같습니다. 첫 관리자·promoter만 부트스트랩 예외이고 **감사 기록이 남지 않습니다(한계)**.
+- **시드**: `demo-seed --check`가 참조·비밀 없음·개수 계약을 보고, `--apply`가 부트스트랩 Job 둘 뒤 공개·관리 API로 공연·회차·좌석맵·기기·판매 승인을 넣습니다. 두 번 적용해도 개수가 같고, 두 번째에는 좌석맵을 다시 PUT하지 않습니다. `--json`은 `created`(`counts`)·`total`·`eventIds`를 냅니다. 첫 관리자·promoter만 부트스트랩 예외이고 **감사 기록이 남지 않습니다(한계)**.
+- **로컬 데모 전용 예외(직접 SQL)**: 파트너 공연 목록·상세·스태프 초대 API가 아직 core-svc에 없어(HOT-260·R-548), 로컬 데모 시드만 공연장(`place`)과 스태프 배정(`staff_assignment`)을 직접 SQL로 넣고 기존 공연·회차·스태프를 찾는 읽기도 SQL로 합니다. 공연·회차·좌석맵·기기는 공개·관리 API로만 만듭니다. 판매 심사 제출은 BAT-616의 `POST /v1/partner/productions/{productionId}/sale-review`를 씁니다. 이 예외는 운영·클라우드에 쓰지 않습니다.
 - **정리**: `demo-down`은 데모 네임스페이스 여섯만 지우고 `lane4-demo` 클러스터는 남깁니다. 두 번 불러도 exit 0입니다.
 - **한계**: 합본 재사용(운영 모양과 다름), 로컬 전용 이미지(GHCR·서명 없음), 부트스트랩 감사 없음, OTel 수집기·`image-worker` 없음. 자세한 것은 `deploy/envs/local/demo/README.md`.
 
