@@ -243,6 +243,8 @@ export function createHandler(host: Host, getCtx: (canvas: OffscreenCanvas | HTM
   /** 전체 보기면 전체 스냅샷 한 번, 좌석 단계에서 16개를 넘으면 구역 하나를 돌아가며 받는다(§5.2) */
   function refreshOnce(): void {
     if (!engine || !connection || !snapshotUrl || hidden) return stopRefresh();
+    // 이 콜백을 부른 타이머는 끝났다. 핸들을 비워야 아래에서 다음 5초를 다시 잡는다
+    refreshTimer = undefined;
     const e = engine;
     const gen = streamGen;
     const mode = e.level() === 'seats' ? 'seats' : 'overview';
