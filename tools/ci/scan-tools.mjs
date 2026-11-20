@@ -51,7 +51,7 @@ export const PINS = Object.freeze({
   trivy: Object.freeze({ image: 'ghcr.io/aquasecurity/trivy', version: '0.76.1', digest: 'sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c' }),
   // ZAP 기준선 점검(공식 이미지, 다이제스트 고정, ADR-0323 결정 2). 2.17.0은 2026-11-03 게시(3일 뒤 조건을 지남).
   // 여러 플랫폼 지수 다이제스트다(Docker Hub zaproxy/zap-stable 2.17.0, 2026-11-20 조회).
-  zap: Object.freeze({ image: 'zaproxy/zap-stable', version: '2.17.0', digest: 'sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af' }),
+  zap: Object.freeze({ image: 'zaproxy/zap-stable', tag: '2.17.0', version: '2.17.0', digest: 'sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af' }),
 });
 
 /** gitleaks가 누출을 찾았을 때의 종료 코드. 오류(설정·git 실패)는 1로 끝나므로 누출과 겹치지 않는 값을 준다 */
@@ -888,9 +888,17 @@ const dockerAsync = (args, timeoutMs = 600_000) =>
     });
   });
 
-/** ZAP 기준선 인자. 결과는 <out>/<report>에 쓴다(/zap/wrk로 붙인다) */
+/** ZAP 기준선 인자. 결과는 <out>/<report>에 쓴다(/zap/wrk로 붙인다). host를 주면 그 이름으로 접속하고
+ * 컨테이너 /etc/hosts에 host→127.0.0.1을 넣어 Host/SNI와 인증서 이름을 맞춘다(gw-ops·gw-partner TLS). */
 export function dastArgs({ target, out, report = 'zap.json', pins = PINS, host }) {
-  return ['run', '--rm', '--network', 'host', '-v', `${resolve(out)}:/zap/wrk:rw`, zapImage(pins), 'zap-baseline.py', '-t', target, '-J', report, '-I', '-m', '1', ...(host ? ['-z', `-H Host:${host}`] : [])];
+  let effective = target;
+  const routing = [];
+  if (host) {
+    const u = new URL(target);
+    effective = `${u.protocol}//${host}${u.port ? `:${u.port}` : ''}${u.pathname}${u.search}`;
+    routing.push('--add-host', `${host}:127.0.0.1`);
+  }
+  return ['run', '--rm', '--network', 'host', ...routing, '-v', `${resolve(out)}:/zap/wrk:rw`, zapImage(pins), 'zap-baseline.py', '-t', effective, '-J', report, '-I', '-m', '1'];
 }
 
 function readZap(file) {

@@ -1,6 +1,6 @@
 // 관리 재인증 토큰 확인(identity GET /internal/jwks/admin.json, act APPROVAL, passkey 필수).
 import { createExternalHttpClient, ProblemError, type ReauthJtiStore, systemClock, TokenRejected, TokenVerifier, type Clock, type TokenVerifierOptions } from '@peaket/platform';
-import { type ApprovalReauthVerifier, ReauthUnavailable, type ReauthAct } from '../domain/ports.js';
+import { type ApprovalReauthVerifier, type ReauthAct } from '../domain/ports.js';
 
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
 
@@ -29,17 +29,17 @@ export class JwksApprovalVerifier implements ApprovalReauthVerifier {
         let claimed: boolean;
         try {
           claimed = await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now());
-        } catch (e) {
-          throw new ReauthUnavailable(e);
+        } catch {
+          throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
         }
         if (!claimed) throw reauthRequired();
       }
       return { accountId: v.accountId, factors };
     } catch (e) {
-      if (e instanceof ProblemError || e instanceof ReauthUnavailable) throw e;
+      if (e instanceof ProblemError) throw e;
       if (e instanceof TokenRejected) throw reauthRequired();
       // 키 묶음을 받지 못하는 등 확인기 장애는 통과가 아니라 503이다(닫힌 쪽)
-      throw new ReauthUnavailable(e);
+      throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
     }
   }
 }

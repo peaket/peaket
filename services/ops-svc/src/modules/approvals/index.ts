@@ -6,6 +6,7 @@ export { ApprovalRouter } from './application/approval-router.js';
 export { DrizzleContractApprovalStore } from './adapters/db/drizzle-store.js';
 export { MemoryContractApprovalStore } from './adapters/memory-store.js';
 export { MemoryCoreContract, UnavailableCoreContract } from '../../adapters/http-core-contract.js';
+export { RoleChangeApprovals, RoleChangeApprovals as Approvals, type RoleChangeApprovalsDeps } from '../../admin-accounts/index.js';
 export { APPROVAL_DUE_BUSINESS_DAYS, addBusinessDays, roleChangeApprovalView, type RoleChangeApprovalView } from './domain/approval.js';
 export type { ContractApprovalRecord } from './domain/approval.js';
 export type { ContractApprovalStore, CoreContractClient } from './domain/ports.js';

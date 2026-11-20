@@ -103,8 +103,8 @@ export function main(argv = process.argv.slice(2)) {
   writeFileSync(values.out, `${JSON.stringify(sarif, null, 2)}\n`);
   console.log(`ZAP 기준선: 결과 ${findings}건(High ${high}, Medium ${medium}) → ${values.out}`);
   // 이벤트 이름은 판정 도구가 받는 값과 같게 두되, 여기서는 막지 않는다(High는 scan-gate가 막는다)
-  // High가 있어도 여기서 끝내지 않는다: 막는 판정은 scan-gate --tool zap이 한다
-  return 0;
+  // High가 있어도 SARIF는 남긴다. 이 도구는 High가 있으면 1로 끝나고, scan-gate --tool zap도 같은 결과를 막는다
+  return high > 0 ? 1 : 0;
 }
 
 await runIfMain(import.meta.url, async () => {

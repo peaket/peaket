@@ -1,6 +1,6 @@
 # DAST(ZAP 기준선 점검) 야간·수동 실행(BUILD_ORDER BOT-161, docs/devops.md §3·§3.3, ADR-0323).
 # - develop 야간(03:00 KST [가정])과 수동 실행은 kind에 v0와 게이트웨이 다섯을 올린 뒤 공개 입구 www·api·partner를 점검한다.
-#   ops-api·scanner-api는 허용 IP·기기 인증 뒤라 점검 대상에서 뺀다.
+#   관제·스캐너 입구는 허용 IP·기기 인증 뒤라 점검 대상에서 뺀다.
 # - ZAP 공식 이미지를 판·다이제스트로 고정한다(tools/ci/scan-tools.mjs PINS.zap, 2026-11-03 게시 2.17.0).
 #   High(보안 등급 7.0 이상)는 tools/ci/scan-gate.mjs가 막고, 결과 파일이 없거나 비었거나 꼴이 아니면 dast-gate가 막는다.
 # - 결과는 산출물로 남기고, 예약 실행이 실패하면 SEV3 이슈를 연다(issues: write는 notify 잡만).
@@ -49,8 +49,12 @@ jobs:
             out="$RUNNER_TEMP/dast/$name"
             mkdir -p "$out"
             node tools/ci/scan-tools.mjs dast --target "https://127.0.0.1:$port" --host "$host" --out "$out"
+            set +e
             node tools/ci/dast-gate.mjs --report "$out/zap.json" --out "$out/zap.sarif" --event "$GITHUB_EVENT_NAME"
+            dast_code=$?
+            set -e
             node tools/ci/scan-gate.mjs --tool zap --sarif "$out/zap.sarif" --report "$out/gate.json" --event "$GITHUB_EVENT_NAME"
+            if [ "$dast_code" -ne 0 ]; then exit "$dast_code"; fi
           }
           run_one www "$port_fan" www.peaket.example
           run_one api "$port_fan" api.peaket.example
