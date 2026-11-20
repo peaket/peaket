@@ -2,8 +2,9 @@
 // POST …/approvals·rejections, 판매 승인 LCH-080, BAT-616, ADR-0327).
 // operator·commander만 승인·반려하고, viewer·CS를 포함한 다섯 역할이 목록·상세를 읽는다(authz-matrix §4.1). 응답은 no-store다.
 // 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(ADR-0093).
-import { Controller, Get, Header, HttpCode, Post, Query } from '@nestjs/common';
-import { ContractBody, ContractParams, ContractRouteSchema, Roles } from '@peaket/platform';
+import { Controller, Get, Header, HttpCode, Post } from '@nestjs/common';
+import { ListOpsSaleReviewsQueryParams } from '@peaket/contracts/openapi/ops';
+import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { ApproveSaleReview } from '../application/approve-sale-review.js';
 import { RejectSaleReview } from '../application/reject-sale-review.js';
@@ -11,6 +12,8 @@ import { OpsSaleReviews } from '../application/request-sale-review.js';
 import { ProductionParams } from './partner-production.controller.js';
 
 const Scale = z.enum(['LARGE', 'MEDIUM', 'SMALL']);
+/** 목록 쿼리는 계약 생성 스키마를 그대로 쓰고 닫는다. status·cursor·limit을 반복하면 파이프가 겹친 매개변수로 400을 낸다(ASVS 15.3.7) */
+const ListQuery = ListOpsSaleReviewsQueryParams.strict();
 export const SaleApprovalBody = z
   .object({
     scales: z.array(z.object({ eventId: z.uuid(), scale: Scale }).strict()).min(1),
@@ -66,11 +69,11 @@ export class OpsSaleReviewController {
   @Header('Cache-Control', 'no-store')
   @Roles(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead'])
   @ContractRouteSchema({ responses: { 200: SaleReviewPageView } })
-  async list(@Query() q: Record<string, string | undefined>) {
+  async list(@ContractQuery(ListQuery) q: z.output<typeof ListQuery>) {
     return this.reviews.list({
-      ...(q.status !== undefined ? { status: q.status } : {}),
+      ...(q.status !== undefined ? { statuses: q.status } : {}),
       ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
-      ...(q.limit !== undefined ? { limit: Number(q.limit) } : {}),
+      ...(q.limit !== undefined ? { limit: q.limit } : {}),
     });
   }
 

@@ -393,7 +393,7 @@ stateDiagram-v2
 
 **판매 승인(SCR-048, 2026-11-20 BAT-616, ADR-0327)**
 
-- 목록 `GET /v1/ops/sale-reviews`는 상태(기본 SUBMITTED)를 주지 않으면 승인 대기만, `status`에 쉼표로 여럿을 주면 그 상태들을 제출·승인·등록 시각 오래된 순으로 준다. 상세 `GET /v1/ops/sale-reviews/{productionId}`는 판매자 정보·회차(오픈·시작·규모)·판매 정책 읽기 전용·제출 시각·재승인 여부·반려 사유를 준다. viewer·operator·commander·`cs_agent`·`cs_lead`가 읽고(CS·viewer는 읽기만), 승인·반려는 operator·commander만 한다. 두 응답은 `no-store`이고 계좌번호 전체·연락처·사업자번호를 싣지 않는다.
+- 목록 `GET /v1/ops/sale-reviews`는 상태(기본 SUBMITTED)를 주지 않으면 승인 대기만, `status`에 쉼표로 여럿을 주면 그 상태들을 제출·승인·등록 시각 오래된 순으로 준다. 상세 `GET /v1/ops/sale-reviews/{productionId}`는 판매자 정보·회차(오픈·시작·규모)·판매 정책 읽기 전용·제출 시각·재승인 여부·반려 사유를 준다. viewer·operator·commander·`cs_agent`·`cs_lead`가 읽고(CS·viewer는 읽기만), 승인·반려는 operator·commander만 한다. 세 응답은 `no-store`다. 목록은 계좌번호 전체·연락처·사업자번호를 싣지 않고, 상세와 파트너 현황은 그 공연의 판매자 정보(상호·대표자·주소·연락처·사업자번호)를 권한 있는 역할에게만 싣는다.
 - 승인은 공연 단위다(ADR-0093). 승인 커밋 뒤 core-svc가 비취소 회차마다 purchase 내부 판매 열기를 부르고, 성공한 회차만 `q:cfg`·`q:epoch`를 쓴 뒤 `event:{id}`·`production:{id}` CDN 태그를 무효화한다. 열기·사본·무효화가 실패해도 승인은 200으로 남고 정비 일 `sale-config-publish`가 다시 시도한다.
 - 반려는 사유 1~1,000자를 `production.rejection_reason`에 남기고 파트너 화면·관제 상세가 읽는다.
 - 판매 중지·재개(2인 승인)와 SCR-048의 그 단추는 LCH-090 몫이다(ADR-0123). 이 묶음은 자리 안내만 둔다. 지급대행 등록은 LCH-110 전이라 "연동 전"으로 보인다. 화면 연결은 BAT-617이다.

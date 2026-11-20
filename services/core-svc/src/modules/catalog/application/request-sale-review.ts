@@ -4,7 +4,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger, ProblemError } from '@peaket/platform';
 import { OPS_SALE_STORE, SALE_STORE, type SaleStore } from '../domain/sale-ports.js';
-import { decodeSaleReviewCursor, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView, SALE_REVIEW_FILTER_STATUSES, SaleReviewProblem, validateSaleReviewRequest } from '../domain/sale-review.js';
+import { decodeSaleReviewCursor, isSaleReviewFilterStatus, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView, SaleReviewProblem, validateSaleReviewRequest } from '../domain/sale-review.js';
 import { notFound, productionSuspended } from './problems.js';
 
 export interface RequestSaleReviewInput {
@@ -72,15 +72,18 @@ export class RequestSaleReview {
 export class OpsSaleReviews {
   constructor(@Inject(OPS_SALE_STORE) private readonly store: SaleStore) {}
 
-  async list(q: { status?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<OpsSaleReviewPage> {
-    const statuses = q.status === undefined || q.status.trim() === '' ? ['SUBMITTED'] : q.status.split(',').map((s) => s.trim());
-    for (const s of statuses) {
-      if (!(SALE_REVIEW_FILTER_STATUSES as readonly string[]).includes(s)) throw new ProblemError({ type: 'invalid-body', status: 400, title: '모르는 판매 승인 상태입니다' });
+  /** statuses는 쿼리 스키마가 쉼표 목록을 나눠 넘긴다. 저장소에 닿기 전에 상태 이름과 커서 모양을 다시 본다(직접 부르는 길도 있다) */
+  async list(q: { statuses?: readonly string[] | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<OpsSaleReviewPage> {
+    const asked = q.statuses !== undefined && q.statuses.length > 0 ? q.statuses : ['SUBMITTED'];
+    const statuses: OpsSaleReviewQuery['statuses'] = [];
+    for (const s of asked) {
+      if (!isSaleReviewFilterStatus(s)) throw new ProblemError({ type: 'invalid-body', status: 400, title: '모르는 판매 승인 상태입니다' });
+      statuses.push(s);
     }
     const limit = q.limit ?? 20;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new ProblemError({ type: 'invalid-body', status: 400, title: 'limit은 1~100 사이 정수여야 합니다' });
     if (q.cursor !== undefined && decodeSaleReviewCursor(q.cursor) === undefined) throw new ProblemError({ type: 'invalid-body', status: 400, title: '커서가 올바르지 않습니다' });
-    const page = await this.store.opsReviews({ statuses: statuses as OpsSaleReviewQuery['statuses'], ...(q.cursor !== undefined ? { cursor: q.cursor } : {}), limit });
+    const page = await this.store.opsReviews({ statuses, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}), limit });
     return page;
   }
 

@@ -145,6 +145,9 @@ export interface PartnerSaleReviewView {
   seller: OpsSaleReviewDetail['seller'];
   events: PartnerSaleReviewEvent[];}
 
+/** 커서의 공연 ID는 저장소가 `::uuid`로 캐스트하므로 모양을 먼저 본다(모양이 틀리면 DB에 닿기 전 400) */
+const CURSOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const encodeCursor = (at: Date, productionId: string): string => Buffer.from(JSON.stringify([at.toISOString(), productionId])).toString('base64url');
 
 /** 목록 커서는 정렬 키(제출·승인·등록 시각)와 공연 ID다. 같은 시각이 겹쳐도 한 줄씩 넘어간다 */
@@ -155,7 +158,7 @@ export function encodeSaleReviewCursor(at: Date, productionId: string): string {
 export function decodeSaleReviewCursor(cursor: string): { at: Date; productionId: string } | undefined {
   try {
     const v = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
-    if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'string' || typeof v[1] !== 'string') return undefined;
+    if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'string' || typeof v[1] !== 'string' || !CURSOR_UUID.test(v[1])) return undefined;
     const at = new Date(v[0]);
     return Number.isNaN(at.getTime()) ? undefined : { at, productionId: v[1] };
   } catch {
