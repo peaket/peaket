@@ -1,0 +1,43 @@
+# BAT-086 임시 클라우드 데모 절차 값(docs/review/plans/BAT-086.md §1 G6, docs/devops.md §5.1·§11·§14).
+# 이 파일은 **절차**다. 실제 클라우드 자원을 만들지 않는다(execution: not-run). 값은 소유자 지출 상한
+# 5만 원 안에서 정한 [가정]이고, 시작 전에 `node tools/local/demo.mjs cloud-plan --check`로 산술을 본다.
+#
+# 두 데모 경로(ADR-0325):
+# - 로컬(기본, 0원): `node tools/local/demo.mjs all` — BAT-087의 로컬 이미지·로컬 오버레이
+# - 클라우드(선택): 이 파일의 구성으로 몇 시간만 켠다. 이미지는 GHCR에 서명해 게시한 다이제스트만 쓴다.
+version: 1
+name: 피켓 임시 클라우드 데모
+execution: not-run # 이 묶음은 실행하지 않는다. 실제 실행은 소유자 결정·비용 승인 뒤
+ttlHours: 6 # [가정] TTL. 넘긴 스택은 정리 작업이 지운다(docs/devops.md §11)
+currency: KRW
+budgetKrw: 50000 # 소유자 지출 상한(docs/devops.md §11). 이 안에서만 켠다
+fxKrwPerUsd: 1450 # [가정] 2026-11 환율. 시작 전 가격표·환율을 다시 읽는다
+image:
+  source: ghcr-signed # 첫 출시 뒤 승격한 GHCR 서명 다이제스트만(deploy/envs/demo/*.yaml)
+  pullSecrets: false # 공개 패키지라 kind·클라우드 모두 끌어오기 비밀이 없다(D-T33 ③)
+  tagPolicy: digest-only # 태그 금지(docs/devops.md §5.2 승격 값)
+components:
+  # 시간당 추정(달러, 서울 리전 정가 [가정]). 시간당 합계 × TTL × 환율이 예산 이하여야 한다
+  - { key: eks-control-plane, label: EKS 제어 평면, hourlyUsd: 0.1 }
+  - { key: nodes, label: 워커 노드 c7g.large 2대, hourlyUsd: 0.3264 }
+  - { key: nlb, label: NLB 1대, hourlyUsd: 0.0225 }
+  - { key: nat, label: NAT 게이트웨이 1대, hourlyUsd: 0.059 }
+  - { key: public-ipv4, label: 공인 IPv4 3개, hourlyUsd: 0.015 }
+  - { key: aurora, label: Aurora PostgreSQL 최소 1대, hourlyUsd: 0.29 }
+  - { key: storage, label: "볼륨·로그 저장 [가정]", hourlyUsd: 0.05 }
+cleanup:
+  # 정리 차례. 하나라도 빠지면 cloud-plan --check가 exit 1이다
+  - { key: cluster, label: EKS 클러스터(kubectl로 워크로드 먼저 지운다) }
+  - { key: load-balancer, label: NLB·대상 그룹 }
+  - { key: dns, label: Route 53 레코드 }
+  - { key: secrets, label: Secrets Manager 데모 네임스페이스 비밀 }
+  - { key: volumes, label: EBS·스냅숏·Aurora(삭제 보호 확인) }
+  - { key: logs, label: CloudWatch 로그 그룹 }
+steps:
+  # 절차(사람이 따라 한다). 실제 실행은 이 묶음 밖이다
+  - { id: precheck, label: 'cloud-plan --check와 가격표·환율 다시 읽기' }
+  - { id: estimate, label: '시간당 추정 × TTL이 남은 예산 이하인지 확인' }
+  - { id: up, label: 'terraform apply(ttl 태그 필수)' }
+  - { id: seed, label: 'tools/local/demo-seed.mjs --apply(공개·관리 API로만)' }
+  - { id: replay, label: 'tools/local/demo.mjs play(같은 S1~S9 재생)' }
+  - { id: teardown, label: 'cleanup 차례대로 지우고 잔여 자원 0 확인' }
