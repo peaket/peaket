@@ -226,6 +226,22 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 | settlement:v5.0.0-8.2.2 | 자동 시험 | B | core-svc 관제 경로 | 계약 승인 상세는 요청자·commander만, 파트너사 상세는 viewer 403·CS 읽기다. 시험 이름에 `[ASVS v5.0.0-8.2.2]`을 단다(J-T29 ⑦ ⑧). BAT-615 완료(2026-11-20, R-719). |
 | settlement:v5.0.0-8.2.3 | 자동 시험 | B | core-svc 관제 경로 | 응답에 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID가 없고 `payoutAccount`는 null이다. 시험 이름에 `[ASVS v5.0.0-8.2.3]`을 단다(J-T29 ⑧). BAT-615 완료(2026-11-20, R-719). |
 
+## BAT-086 V-T7(2026-11-21 구현)
+
+V-T7(빈 PC에서 데모 재현 스크립트 실행 — 한 명령으로 시연 흐름이 뜨고 걸린 시간이 기록된다)의 상태는 아직 `빈칸`이다. 구현 담당은 시험 파일을 쓰지 않았고 Docker·kind를 돌리지 않았다. 시험 담당이 아래 이름으로 시험을 쓰고, 시험·검증이 통과하면 `자동 시험`으로 바꾼다.
+
+| 항목 | 근거·자리 |
+| --- | --- |
+| V-T7 ①(시나리오 정의) | `tools/local/demo/scenarios.mjs`의 `validateScenarios`·`publicPlan`. 정본 `docs/design/d5-screen-blueprint.md` §10.6과 대조. `node tools/local/demo.mjs plan --check` |
+| V-T7 ②(선행 없으면 닫힌 실패) | `tools/local/demo.mjs`의 `doctorChecks`(가짜 뿌리·가짜 PATH). 클러스터 명령 0회 |
+| V-T7 ③(조용한 건너뛰기 없음) | `tools/local/demo/runner.mjs`의 `stageProblems`·`play`(가짜 kubectl이 `pods-not-ready`를 돌려줄 때 exit 1), 모르는 시나리오 exit 2 |
+| V-T7 ④(빈 PC 한 명령 재생) | kind e2e: `node tools/local/demo.mjs all`. Docker 잠금 필요. 측정 `docs/review/measurements/BAT-086-demo.md` |
+| V-T7 ⑤(두 번 돌리기·정리) | kind e2e: `up` 재사용·`seed` 두 번·`down` 두 번. `demo.mjs down`은 데모 네임스페이스와 kind 클러스터를 지운다 |
+| V-T7 ⑥(비밀·개인정보 없음) | `tools/local/demo/measure.mjs`의 `redact`·측정 계약, 시드 `demo-seed --check` |
+| V-T7 ⑦(측정 기록) | `tools/local/demo/measure.mjs`의 `measurementText`·`writeMeasurement`. 실패한 실행도 `결과: 실패`와 실패 단계를 남긴다 |
+| DM-08·DM-09(D-T48 시연) | `tools/local/demo/compat.mjs`. 같은 커밋 0, `v0.0.0` 태그와 견주면 응답 필드 삭제로 1. Docker 필요(없으면 exit 2). 결과 `docs/review/measurements/BAT-086-compat.md` |
+| CP-01(클라우드 값) | `tools/local/demo/cloud-plan.mjs`·`deploy/demo/cloud-plan.yaml`. TTL 6시간·예산 산술·정리 차례·서명 GHCR·실행 없음 |
+
 ## BAT-182 완료(2026-11-20, R-721)
 
 BAT-182(HOT-357)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바꾸지 않고 근거만 더한다(자동 시험 4·다른 단계 0, 등급 A 3·B 1 그대로). 네 항목 모두 시험 이름이 상태를 정하는 자동 시험이라 상태 칸은 두지 않는다.

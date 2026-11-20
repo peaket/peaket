@@ -400,6 +400,8 @@ allowBuilds: {}             # 설치 스크립트를 허용할 패키지. 빈 �
 
 - 환경의 정의와 크기는 infra §3이 정본이다. 늘 켜 두는 데모는 두지 않는다(질문 24 결론, ADR-0057). 운영·스테이징은 설계로만 둔다. 이 절의 승격 흐름은 로컬 kind의 환경 오버레이에서 그대로 보여 준다(docs/verification.md §5.1).
 - **로컬 데모 경로(추천 적용 2026-11-20, BAT-087)**: 로컬 kind 데모는 GHCR의 서명 다이제스트가 아니라 `peaket/<워크로드>:demo` 이미지와 `deploy/envs/local/demo/` 오버레이로 올린다(`node tools/local/cluster.mjs demo`). 그래서 첫 출시 전에도 재현 스크립트를 돌릴 수 있고, 임시 클라우드 데모(서명 다이제스트·TTL)는 첫 출시 뒤 승격 묶음이 처음 켠다. 이미지 열의 목록·빌드·정적 점검은 `tools/local/demo-images.mjs --check|--build`가 맡고, 기본 합성 시드는 `deploy/envs/demo/seed/base.yaml` 하나를 `tools/local/demo-seed.mjs`가 적용한다. 시드의 첫 관리자·promoter만 부트스트랩 예외이고(감사 기록 없음), 공연·회차·좌석·스태프·기기·판매 승인은 공개·관리 API로 넣는다. 로컬 데모의 `PEAKET_ENV`는 `local`이고, 데모 표시가 필요한 클라우드 판만 `demo`다.
+- **데모 재현과 임시 클라우드 절차(추천 적용 2026-11-20, BAT-086, ADR-0325)**: 두 경로는 같은 명령·같은 시나리오·같은 시드를 쓴다. 로컬(기본, 0원)은 `node tools/local/demo.mjs all`이 ① 선행 점검 ② `cluster.mjs demo` ③ `demo-seed --apply` ④ S1~S9 재생 ⑤ `docs/review/measurements/BAT-086-demo.md` ⑥ 정리(데모 네임스페이스 + kind 클러스터)까지 한다. `--keep`이면 무대를 남긴다. 클라우드(선택)는 이 묶음에서 실행하지 않는다: `deploy/demo/cloud-plan.yaml`에 TTL 6시간 [가정]·예산(소유자 상한 5만 원 안)·시간당 추정·정리 차례(클러스터·부하 분산기·DNS·비밀·볼륨·로그)를 적고, `node tools/local/demo.mjs cloud-plan --check`(또는 `node tools/ci/cloud-plan.mjs --check`)가 산술과 필수 항목을 본다. 시작 절차는 ① 값·가격표·환율 확인 ② `terraform apply`(`ttl` 태그 필수) ③ `demo-seed --apply` ④ `demo.mjs play` ⑤ `cleanup` 차례대로 지우고 잔여 자원 0 확인이다. 이미지는 `deploy/envs/demo/*.yaml`의 서명된 GHCR 다이제스트만 쓰고 끌어오기 비밀은 없다(D-T33 ③). 첫 출시 뒤 승격 묶음이 그 값 파일을 채운다.
+- **운영 판 호환 검사 시연(추천 적용 2026-11-20, BAT-086)**: `node tools/local/demo.mjs compat`는 임시 `git clone --shared`에서 ① 같은 커밋(출시 태그 없음)은 `contract-breaking`이 통과 ② `v0.0.0-demo` 태그를 기준 커밋에 붙이고 응답 스키마(`Problem`)의 필드 하나를 지운 커밋을 만들면 실패하며 지운 필드 이름을 출력하는지를 본다. 실제 저장소·원격·태그는 건드리지 않고, 도구가 0이 아닌 코드(도구 오류 포함)로 끝나면 통과로 세지 않는다. 장부 D-T48은 이미 자동 시험이라 이 묶음은 **시연**만 한다(범위는 V-T7).
 
 ### 5.2 배포 상태 구조(`deploy/`)
 
@@ -941,6 +943,8 @@ infra/
 | D-T47 | 바뀐 범위 고르기(추천 적용 2026-10-30, ADR-0165, §3.1): ① `docs/`만 바꾼 PR ② `packages/platform` 한 줄을 바꾼 PR ③ `infra/` 아래 Terraform 파일만 바꾼 PR ④ 범위 스크립트를 일부러 실패시킨 PR | ① 문서 검사만 돌고 `ci-summary`가 통과해 병합할 수 있다(필수 검사가 '대기'로 남지 않는다) ② 플랫폼에 기대는 서비스 전부의 검사가 돈다 ③ `iac-check`만 돈다 ④ 전체 검사가 돈다 |
 | D-T48 | 운영 판과의 계약 호환(추천 적용 2026-10-30, ADR-0165, §3.1): 마지막 출시 태그에 있는 응답 필드 하나를 지우고, 그 필드를 읽던 화면 코드와 제공자 코드를 같은 PR에서 함께 고친다. Avro 스키마의 필수 칸 하나를 기본값 없이 더한 PR도 따로 올린다 | 같은 커밋끼리의 검사는 통과해도, 마지막 출시 태그와 견주는 `oasdiff breaking`·Pact(운영 소비자)와 Avro 호환 검사가 두 PR을 모두 막는다 |
 | D-T49 | 작업 가지 수 경고와 `develop` 병합 방식 주간 점검(추천 적용 2026-11-04, FND-160, §2.2.1·§2.2.6): ① 같은 팀(`@peaket/queue`) 파일을 바꾸는 작업 가지 PR 넷이 열려 있다 ② 그중 하나가 포크 PR이다 ③ 한 PR이 두 팀의 파일을 바꾼다 ④ `develop`에 `feature/*`가 병합 커밋으로 들어왔다 ⑤ `release/*`·`hotfix/*`·`merge/*`의 병합 커밋 ⑥ GitHub API 읽기가 실패한다 | ①은 네 번째 PR의 `branch-policy`가 그 팀의 경고를 남기고 통과한다. ②의 포크 PR은 세지 않는다. ③은 두 팀에 하나씩 센다. ④는 주간 점검이 그 커밋을 경고하고 ⑤는 경고하지 않는다. ⑥은 읽지 못했다는 경고만 남기고 PR 검사도 주간 잡도 실패하지 않는다 |
+
+- **D-T48 시연(추천 적용 2026-11-20, BAT-086, ADR-0325)**: `node tools/local/demo.mjs compat`가 임시 `git clone --shared`에서 ① 같은 커밋(출시 태그 없음)은 `contract-breaking` 통과 ② 기준 커밋에 출시 태그 규칙에 맞는 `v0.0.0` 태그를 붙이고 응답 스키마(`Problem`)의 필드 하나를 지운 커밋을 만들면 실패하며 지운 필드 이름을 출력하는지를 한 번에 보인다(계획의 `v0.0.0-demo`는 `tools/ci/release-tags.mjs`의 vX.Y.Z 규칙 밖이라 데모 태그만 v0.0.0으로 쓴다). 실제 저장소·원격·태그는 바꾸지 않고, 도구가 0이 아닌 코드(도구 오류 포함)로 끝나면 통과로 세지 않는다. 장부 D-T48은 이미 자동 시험이므로 BAT-086의 범위는 V-T7이고 이 명령은 시연이다.
 
 ## 15. 알려진 한계
 
