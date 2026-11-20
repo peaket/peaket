@@ -264,9 +264,9 @@ export class DrizzleSearchIndex implements SearchIndex {
   async #documentsFor(tx: DbTransaction, t: GradedTargets): Promise<DocumentRow[]> {
     const branches: SQL[] = [];
     if (t.productions.length > 0) branches.push(sql`select unnest(${sql.param(t.productions)}::uuid[]) as id`);
-    if (t.places.length > 0) branches.push(sql`select p.production_id from search_document p where p.place_id = any(${sql.param(t.places)}::uuid[])`);
+    if (t.places.length > 0) branches.push(sql`select p.production_id as id from search_document p where p.place_id = any(${sql.param(t.places)}::uuid[])`);
     if (t.artists.length > 0)
-      branches.push(sql`select a.production_id from search_document a cross join lateral jsonb_array_elements_text(a.artist_ids) x(artist_id) where x.artist_id = any(${sql.param(t.artists)}::text[])`);
+      branches.push(sql`select a.production_id as id from search_document a cross join lateral jsonb_array_elements_text(a.artist_ids) x(artist_id) where x.artist_id = any(${sql.param(t.artists)}::text[])`);
     if (branches.length === 0) return [];
     return rowsOf<DocumentRow>(await tx.execute(sql`with ids as (${sql.join(branches, sql` union `)}) select ${DOCUMENT_COLUMNS} from search_document d join ids on d.production_id = ids.id`));
   }
