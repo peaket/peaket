@@ -102,11 +102,11 @@ async function seedCancellation(cancellationId = randomUUID()): Promise<string> 
   return cancellationId;
 }
 
-const service = (): RequestRefundAccount =>
+const service = (paymentPort: PaymentCancellations = payments): RequestRefundAccount =>
   new RequestRefundAccount({
     orders: new DrizzleCancellationOrders(db, seatMap),
     writes: new DrizzleCancellationWrites(db, new DrizzleOrderStore({ clock })),
-    payments,
+    payments: paymentPort,
     nowMs: () => NOW,
   });
 
@@ -164,5 +164,42 @@ describe('R-T42 ④·RV-24 계좌 다시 받기의 재시작 재생 [실제 Post
     });
     expect(paymentCalls).toHaveLength(1);
     expect(await rowOf(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempt: 1 });
+  });
+
+  // RV-30(낮음): 같은 키로 계좌를 실은 첫 요청이 시도를 올리고 payment를 부른 뒤 답(refund_account_answer)을 저장하기 전에
+  // 프로세스가 끊기면, 새 인스턴스의 같은 키는 첫 202(REFUND_PENDING)를 재생해야 한다. 그대로 payment의 V5로 가면
+  // 앞 시도가 CANCEL_PENDING/미반영일 때 REFUND_ACCOUNT_REQUIRED(422)를 받아 첫 답과 달라진다.
+  // 이 시험은 purchase 경계가 같은 키의 진행 중 시도를 payment에 다시 보내지 않고 202를 재생하는지 본다.
+  test('R-T42 ④_RV30_답_저장_전에_끊긴_같은_키의_새_인스턴스는_202_REFUND_PENDING을_재생하고_422가_아니다', async () => {
+    await seedOrder();
+    const cancellationId = randomUUID();
+    const key = randomUUID();
+    const requestHash = createHash('sha256').update('{"bankCode":"88","accountNumber":"110-987-654321","holderName":"김환불"}').digest();
+    // 첫 요청이 beginAttempt(시도 1·키 기록)·payment 호출까지 마치고 답 저장 전에 끊긴 모양이다
+    await db.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at, refund_account_required_at, refund_attempts, refund_attempt, refund_account_idem_key)
+       values ($1, $2, $3, 'USER', 7, false, 1000, 3333, $4, 'REFUND_PENDING', $5, $5, $5, 0, 1, $6)`,
+      [cancellationId, ORDER, TICKET, REFUND_AMOUNT, new Date(NOW), key],
+    );
+    await db.pool.query(
+      `insert into order_idempotency (account_ref, operation, idempotency_key, request_hash, result_ref, created_at)
+       values ($1, 'REFUND_ACCOUNT', $2, $3, $4, $5)`,
+      [ACCOUNT, key, Buffer.from(requestHash), cancellationId, new Date(NOW)],
+    );
+    const calls: unknown[] = [];
+    const refuses: PaymentCancellations = {
+      cancel: async (q) => {
+        calls.push(q);
+        // 지금 payment V5가 이 창에서 답하는 값(계좌를 실은 같은 시도의 조회가 '반영 아님')
+        return 'REFUND_ACCOUNT_REQUIRED';
+      },
+    };
+
+    await expect(
+      service(refuses).run({ accountId: ACCOUNT, cancellationId, account: REFUND_ACCOUNT, reauthToken: undefined, idempotencyKey: key, requestHash }),
+    ).resolves.toEqual({ cancellationId, status: 'REFUND_PENDING', refundAmount: REFUND_AMOUNT });
+    expect(calls, '같은 키의 답 재생은 payment를 다시 부르지 않는다').toEqual([]);
+    expect(await rowOf(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempt: 1, refund_account_idem_key: key, refund_account_answer: null });
+    expect(await idempotencyRows()).toHaveLength(1);
   });
 });

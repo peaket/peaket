@@ -428,6 +428,29 @@ describe('P-T73·P-T74 같은 취소 ID의 다시 부름과 계좌 [실제 Postg
     expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
   });
 
+  // RV-30(낮음): 같은 키로 계좌를 실은 두 요청이 겹치거나 답을 저장하기 전에 끊기면, 두 번째 부름도 계좌를 실은 채
+  // 같은 시도(a1)에 닿는다. 그 시도는 이미 계좌를 받았으므로 조회가 '반영 아님'이어도 계좌를 다시 요구하지 않고
+  // CANCEL_PENDING(202 대기)을 줘야 purchase가 같은 202를 재생한다(ADR-0316 결정 4, B9).
+  test('P-T76 ②_RV30_계좌를_실은_같은_시도의_재시도가_반영_아니면_계좌_요구가_아니라_대기다', async () => {
+    const p = await tossPaid({ virtual: true });
+    const cancellationId = randomUUID();
+    const idemKey = `cancel-${cancellationId}-a1`;
+    await admin.pool.query(
+      `insert into payment_cancel (id, payment_id, idempotency_key, attempt, amount, reason, full_cancel, expected_balance, status, created_at)
+       values ($1, $2, $3, 1, 25000, '관객 취소', false, 60000, 'CANCEL_PENDING', $4)`,
+      [randomUUID(), p.paymentId, idemKey, new Date(NOW)],
+    );
+    sent.length = 0;
+    const answer = await cancel(p.paymentId, cancellationId, { attempt: 1, account: REFUND_ACCOUNT });
+    expect(answer).toEqual({ result: 'CANCEL_RESULT_CANCEL_PENDING', cancelled_amount: { krw: 0 } });
+    // 새 전송 0, 조회 1이고 행·원장·잔액은 그대로다
+    expect(calls('POST ')).toEqual([]);
+    expect(calls(`GET /v1/payments/${p.paymentKey}`)).toHaveLength(1);
+    expect(await cancelRows(p.paymentId)).toEqual([{ idempotency_key: idemKey, amount: 25_000, expected_balance: 60_000, status: 'CANCEL_PENDING' }]);
+    expect(await ledger(p.paymentId)).toEqual({ status: 'APPROVED', cancelled_amount: 0 });
+    expect(await simBalance(p.paymentKey)).toBe(AMOUNT);
+  });
+
   test('P-T73 ② 결제사가 멱등키 재사용(IDEMPOTENCY_KEY_REUSED)으로 답하면 UNKNOWN이고 행은 진행 중(REQUESTED) 그대로다(FAILED 아님)', async () => {
     const p = await tossPaid({ virtual: true });
     const cancellationId = randomUUID();

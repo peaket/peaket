@@ -77,6 +77,12 @@ const state = {
   /** 표 ID → 입장 시작 시각 */
   entryOf: new Map<string, number>(),
   records: new Map<string, CancellationRecord>(),
+  /** RV-30: 같은 키의 시도 올리기는 실제 `order_idempotency`처럼 키 행을 되돌려 준다 */
+  idemAttempts: new Map<string, number>(),
+  /** RV-30: payment-svc 답을 호출 순서대로 바꿔 끼운다(두 번째가 V5의 422를 흉내 낸다) */
+  paymentScript: [] as PaymentCancelOutcome[],
+  /** RV-30: 겹친 두 요청의 차례를 만들려고 결제사 대역을 잠깐 늦춘다 */
+  paymentDelayMs: undefined as number | undefined,
   /** BAT-420-rest 리뷰 반영: 재인증 확인 횟수(P-T74 ①), 표마다 ticket-svc 답(다시 누름 ALREADY_CANCELLED, P-T73 ⑤)·판매 종료 시각(공연 시작 뒤) */
   verifies: 0,
   ticketAnswer: new Map<string, unknown>(),
@@ -114,9 +120,14 @@ const refundAccountWrites: RefundAccountWrites = {
   beginAttempt: async (q) => {
     const r = state.records.get(q.cancellationId);
     const old = r?.refundAttempt ?? 0;
+    // 실제 저장소의 같은 키 재생(플랫폼 IdempotencyStore): 시도를 올리지 않고 그 시도의 값을 돌려준다
+    const keyId = q.idempotency === undefined ? undefined : `${q.cancellationId}:${q.idempotency.key}`;
+    const replayed = keyId === undefined ? undefined : state.idemAttempts.get(keyId);
+    if (r && replayed !== undefined && r.state === 'REFUND_PENDING') return { attempt: replayed, orderId: r.orderId, ticketId: r.ticketId, refundAmount: r.refundAmount, reason: 'USER', retryAttempts: r.refundAttempts };
     if (!r || r.state !== 'REFUND_PENDING' || r.refundAccountRequired !== true || old !== q.oldAttempt || old >= 3) return undefined;
     const attempt = old + 1;
-    state.records.set(q.cancellationId, { ...r, refundAttempt: attempt });
+    state.records.set(q.cancellationId, { ...r, refundAttempt: attempt, ...(q.idempotency === undefined ? {} : { refundAccountIdemKey: q.idempotency.key }) });
+    if (keyId !== undefined) state.idemAttempts.set(keyId, attempt);
     state.accountStarts.push({ cancellationId: q.cancellationId, oldAttempt: old, attempt });
     return { attempt, orderId: r.orderId, ticketId: r.ticketId, refundAmount: r.refundAmount, reason: 'USER', retryAttempts: r.refundAttempts };
   },
@@ -160,7 +171,9 @@ beforeAll(async () => {
           amount: q.amount,
           reason: q.reason,
         });
-        return state.payment;
+        const answer = state.paymentScript.length > 0 ? state.paymentScript.shift()! : state.payment;
+        if (state.paymentDelayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, state.paymentDelayMs));
+        return answer;
       },
     },
     writes,
@@ -212,7 +225,9 @@ afterAll(async () => {
 beforeEach(() => {
   state.lookup = 'VIRTUAL';
   state.payment = 'CANCELLED';
-  for (const a of [state.lookups, state.ticketCalls, state.paymentCalls, state.created, state.accountMarks, state.retries, state.failures, state.accountStarts, state.accountClears, state.accountUpdates, state.accountFailures]) a.length = 0;
+  for (const a of [state.lookups, state.ticketCalls, state.paymentCalls, state.created, state.accountMarks, state.retries, state.failures, state.accountStarts, state.accountClears, state.accountUpdates, state.accountFailures, state.paymentScript]) a.length = 0;
+  state.paymentDelayMs = undefined;
+  state.idemAttempts.clear();
   state.verifies = 0;
   redis.commands.length = 0;
 });
@@ -542,6 +557,28 @@ describe('R-T42 ① 예매 취소의 지연 환급 계좌 다시 받기(202·404
     expect(JSON.parse(second.payload)).toEqual(JSON.parse(first.payload));
     expect(state.accountStarts).toHaveLength(1);
     expect(state.paymentCalls).toHaveLength(1);
+  });
+
+  // RV-30(낮음): 같은 키로 계좌를 실은 두 요청이 겹치면 둘째가 첫 답을 보기 전에 payment의 V5로 가
+  // REFUND_ACCOUNT_REQUIRED(422)를 받을 수 있다. 같은 키·같은 본문은 처리 중이어도 같은 202(REFUND_PENDING)여야 하고,
+  // payment를 다시 부르지 않아야 한다(플랫폼 멱등 규칙, ADR-0316 결정 4, B9).
+  test('R-T42 ④_RV30_같은_키로_계좌를_실은_두_요청이_겹쳐도_둘_다_같은_202이고_payment를_다시_부르지_않는다', async () => {
+    const id = accountPending();
+    const key = randomUUID();
+    state.paymentScript = ['PENDING', 'REFUND_ACCOUNT_REQUIRED'];
+    state.paymentDelayMs = 200;
+    const first = postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
+    // 첫 요청이 시도를 올리고 payment를 부른 뒤에 둘째가 들어온다(답은 아직 없다)
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const second = await postAccount(id, REFUND_ACCOUNT, { key, token: accountToken().t });
+    const firstAnswer = await first;
+    const expected = { cancellationId: id, status: 'REFUND_PENDING', refundAmount: 30_000 };
+    expect(firstAnswer.statusCode, firstAnswer.payload).toBe(202);
+    expect(second.statusCode, second.payload).toBe(202);
+    expect(JSON.parse(firstAnswer.payload)).toEqual(expected);
+    expect(JSON.parse(second.payload)).toEqual(expected);
+    expect(state.paymentCalls, '같은 키의 겹친 요청은 payment를 다시 부르지 않는다').toHaveLength(1);
+    expect(state.accountStarts, '시도는 한 번만 오른다').toHaveLength(1);
   });
 
   test('R-T42 ④_시도_3회를_넘으면(저장된_시도_3)_409이고_payment가_0이다', async () => {

@@ -1633,8 +1633,8 @@ describe('P-T76 ② 계좌 시도의 재시도 [실제 PostgreSQL·ticket-svc·p
   const REFUND_ACCOUNT = { bankCode: '88', accountNumber: '110-987-654321', holderName: '김환불' };
   const accountRow = async (cancellationId: string) =>
     (
-      await admin.pool.query<{ status: string; refund_attempt: number; next_refund_at: Date | null; refund_account_required_at: Date | null; refund_failed_at: Date | null }>(
-        'select status, refund_attempt, next_refund_at, refund_account_required_at, refund_failed_at from order_cancellation where id = $1',
+      await admin.pool.query<{ status: string; refund_attempt: number; refund_attempts: number; next_refund_at: Date | null; refund_account_required_at: Date | null; refund_failed_at: Date | null }>(
+        'select status, refund_attempt, refund_attempts, next_refund_at, refund_account_required_at, refund_failed_at from order_cancellation where id = $1',
         [cancellationId],
       )
     ).rows[0]!;
@@ -1748,5 +1748,77 @@ describe('P-T76 ② 계좌 시도의 재시도 [실제 PostgreSQL·ticket-svc·p
     const row = await accountRow(cancellationId);
     expect(row).toMatchObject({ status: 'REFUND_PENDING', refund_attempt: 1, refund_account_required_at: null, refund_failed_at: null });
     expect(row.next_refund_at).not.toBeNull();
+  }, 60_000);
+
+  // RV-28(높음): a0(첫 시도)가 CANCEL_PENDING인 채 1분 재시도 조회가 '반영 아님'이면 payment는 attempt 0에
+  // REFUND_ACCOUNT_REQUIRED(계좌 대기)를 준다. 팬이 새 계좌를 내면 purchase는 attempt를 1로 올리지만 payment는
+  // 앞 a0 CANCEL_PENDING 때문에 a1 행을 만들지 않고 UNKNOWN을 준다. 구매 쪽이 attempt를 0으로 되돌리지 않으면
+  // 재시도 루프가 없는 a1만 보내 INVALID_ARGUMENT(→UNKNOWN)를 5회 소진하고 CS '환급 실패'로 끝난다(ADR-0316 결정 4·B9).
+  // 새 계좌 요청 뒤 refund_attempt가 0으로 유지되고, 재시도가 a0를 계속 조회하며, a0가 늦게 CANCELLED되면
+  // REFUNDED로 끝나고 CS 실패 0·이중 환급 0인지 실제 PostgreSQL·payment gRPC로 본다.
+  test('P-T76 ③_RV28_a0가_CANCEL_PENDING일_때_새_계좌_시도는_시도를_올리지_않고_재시도가_a0를_조회해_REFUNDED로_끝난다', async () => {
+    const w = await world();
+    await paymentDb.pool.query(
+      `insert into payment_event (payment_id, seq, event_key, type, exported, occurred_at) values ($1, 1, $2, 'AWAITING_DEPOSIT', true, now()), ($1, 2, $3, 'APPROVED', true, now())`,
+      [w.paymentId, randomUUID(), randomUUID()],
+    );
+    const cancellationId = randomUUID();
+    gatewayCalls = [];
+    gatewayQueries = [];
+    gatewayQuery = { kind: 'UNKNOWN' };
+    gatewayOutcome = 'CANCEL_PENDING';
+    try {
+      await expect(
+        saga.execute({ accountId: w.accountId, ticketId: w.ticketId, cancellationId, reason: 'USER', nowMs: NOW, deadlineMs: 5_000, refundAccount: REFUND_ACCOUNT }),
+      ).resolves.toMatchObject({ status: 'REFUND_PENDING', payment: 'PENDING' });
+    } finally {
+      gatewayOutcome = 'CANCELLED';
+    }
+    // a0는 계좌를 실어 한 번 나갔고 결제사가 CANCEL_PENDING으로 받아들였다
+    expect(gatewayCalls).toHaveLength(1);
+    expect(await cancelRows(w.paymentId)).toEqual([{ idempotency_key: `cancel-${cancellationId}`, attempt: 0, status: 'CANCEL_PENDING' }]);
+    expect(await accountRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempt: 0, refund_attempts: 1, refund_failed_at: null });
+
+    // 1분 뒤 같은 시도(a0, 계좌 없음)의 조회가 아직 '반영 아님'이라 계좌 대기로 멈춘다
+    gatewayQuery = { kind: 'FOUND', paymentRef: `ref-${w.orderId}`, orderRef: w.orderId, status: 'APPROVED', amount: PRICE, balanceAmount: PRICE };
+    gatewayQueries = [];
+    const retry = new RefundAfterEntry({
+      writes,
+      payments: paymentCancels!,
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: writes,
+      nowMs: () => NOW + 60_000,
+    });
+    await expect(retry.run()).resolves.toEqual({ refunded: 0, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0, accountPending: 1 });
+    expect(gatewayCalls, '새 전송 0').toHaveLength(1);
+    expect(gatewayQueries, 'a0 조회 1').toHaveLength(1);
+    expect(await accountRow(cancellationId)).toMatchObject({ refund_attempt: 0, refund_account_required_at: new Date(NOW + 60_000), next_refund_at: null, refund_failed_at: null });
+
+    // 팬이 새 계좌를 낸다: payment는 앞 a0 CANCEL_PENDING 때문에 a1 행을 만들지 않고 UNKNOWN을 준다
+    gatewayQueries = [];
+    const request = new RequestRefundAccount({ orders: new DrizzleCancellationOrders(purchaseDb, seatMap), writes, payments: paymentCancels!, nowMs: () => NOW + 120_000 });
+    await expect(
+      request.run({ accountId: w.accountId, cancellationId, account: REFUND_ACCOUNT, reauthToken: undefined, idempotencyKey: randomUUID() }),
+    ).resolves.toEqual({ cancellationId, status: 'REFUND_PENDING', refundAmount: 90_000 });
+    expect(gatewayCalls, '새 전송 0(이중 환급 0)').toHaveLength(1);
+    expect(gatewayQueries, 'a0 CANCEL_PENDING이라 조회도 없다').toHaveLength(0);
+    expect(await accountRow(cancellationId)).toMatchObject({ status: 'REFUND_PENDING', refund_attempt: 0, refund_failed_at: null });
+
+    // a0가 늦게 반영됐다: 재시도가 a0를 조회해 REFUNDED로 끝난다
+    gatewayQuery = { kind: 'FOUND', paymentRef: `ref-${w.orderId}`, orderRef: w.orderId, status: 'APPROVED', amount: PRICE, balanceAmount: PRICE - 90_000 };
+    gatewayQueries = [];
+    const late = new RefundAfterEntry({
+      writes,
+      payments: paymentCancels!,
+      entries: { lookup: async (ids) => new Map(ids.map((id) => [id, { found: true, entered: false }])) },
+      claims: writes,
+      nowMs: () => NOW + 10 * 60_000,
+    });
+    await expect(late.run()).resolves.toEqual({ refunded: 1, pending: 0, failed: 0, entryRecorded: 0, unverified: 0, held: 0 });
+    expect(gatewayCalls, '새 전송 0(이중 환급 0)').toHaveLength(1);
+    expect(gatewayQueries, 'a0 조회 1').toHaveLength(1);
+    expect(await cancelRows(w.paymentId)).toEqual([{ idempotency_key: `cancel-${cancellationId}`, attempt: 0, status: 'CANCELED' }]);
+    expect(await paymentRow(w.paymentId)).toEqual({ status: 'PARTIAL_CANCELED', cancelled_amount: 90_000 });
+    expect(await accountRow(cancellationId)).toMatchObject({ status: 'REFUNDED', refund_attempt: 0, refund_attempts: 1, next_refund_at: null, refund_failed_at: null });
   }, 60_000);
 });

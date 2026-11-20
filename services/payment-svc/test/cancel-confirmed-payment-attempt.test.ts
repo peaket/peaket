@@ -258,6 +258,23 @@ describe('P-T76 ① 앞 진행 중 행이 반영됐으면 새 전송 0', () => {
     }
   });
 
+  // RV-30(낮음): 같은 키로 계좌를 실은 요청이 겹치거나 답을 저장하기 전에 끊기면, 같은 시도의 두 번째 부름도
+  // 계좌를 실은 채 payment에 닿는다. 그 시도는 이미 계좌를 받았으므로 V5 조회가 '반영 아님'이어도
+  // REFUND_ACCOUNT_REQUIRED(422)가 아니라 CANCEL_PENDING(202 대기)이어야 첫 답과 같다(ADR-0316 결정 4, B9).
+  test('P-T76 ②_RV30_계좌를_실은_같은_시도의_재시도가_반영_아니면_계좌_요구가_아니라_대기다', async () => {
+    const f = fixture({
+      ownStatus: 'CANCEL_PENDING',
+      begin: begun({ replay: true, record: { idemKey: `cancel-${CANCEL}-a1`, attempt: 1 } }),
+      query: found(60_000),
+      settleQuery: { status: 'RESEND' },
+    });
+    await expect(run(f, { attempt: 1, account: ACCOUNT })).resolves.toEqual({ result: 'CANCEL_PENDING', cancelledAmount: 0 });
+    expect(f.calls).toEqual(['find-own', 'begin', 'query', 'settle-own']);
+    expect(f.queries()).toBe(1);
+    expect(f.cancels).toHaveLength(0);
+    expect(f.marks).toEqual([]);
+  });
+
   test('P-T76 ②_RV21_계좌_시도의_재시도_조회가_반영이면_새_전송_0으로_끝난다', async () => {
     for (const ownStatus of ['REQUESTED', 'CANCEL_PENDING'] as const) {
       const f = fixture({
