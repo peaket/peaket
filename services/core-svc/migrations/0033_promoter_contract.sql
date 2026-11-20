@@ -4,6 +4,7 @@
 -- 3) 기존 promoter 행에는 1000bp·1000bp·DEPOSIT [가정]의 첫 계약을 채운다(계약 없는 회차를 만들지 않는다, A1-H10).
 -- 4) event.commission_rate_bp는 판매 승인 때 그 파트너의 지금 계약에서 복사한다.
 -- 5) 관제(core_ops)·파트너(core_partner) 역할 권한과 행 보안. core_app은 계약 표를 읽지 못한다(ADR-0320 결정 8).
+-- 6) 0033 이전에 판매 승인된 회차의 event.commission_rate_bp를 그 파트너의 지금 계약 수수료율로 한 번 채운다(RV-02).
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 --> statement-breakpoint
 ALTER TABLE "promoter" ADD COLUMN IF NOT EXISTS "commission_rate_bp" integer DEFAULT 1000;
@@ -54,10 +55,23 @@ SELECT gen_random_uuid(), p."id", 1000, 1000, 'DEPOSIT', tstzrange(now(), NULL, 
 FROM "promoter" p
 WHERE NOT EXISTS (SELECT 1 FROM "promoter_contract" c WHERE c."promoter_id" = p."id");
 --> statement-breakpoint
--- 파트너사 등록(POST /v1/ops/promoters)의 멱등 키 작업을 더한다
+-- 0033 이전에 이미 판매 승인된 회차를 그 파트너의 지금 계약 수수료율로 한 번 채운다(RV-02, settlement §4.1·A1-H10).
+-- 재승인은 기존 회차 값을 바꾸지 않으므로 여기서 채우지 않으면 옛 회차의 설정 사본이 계속 수수료율 없이 남아 payment-svc 정산이 503으로 닫힌다.
+-- 계약이 없으면 마이그레이션 기본값 1000bp를 쓴다(위 백필 뒤에는 모든 파트너에 계약이 있다).
+UPDATE "event" e
+SET "commission_rate_bp" = coalesce(c."commission_rate_bp", 1000)
+FROM "production" p
+LEFT JOIN "promoter_contract" c ON c."promoter_id" = p."promoter_id" AND upper_inf(c."valid_during")
+WHERE e."production_id" = p."id"
+  AND e."promoter_id" = p."promoter_id"
+  AND e."commission_rate_bp" IS NULL
+  AND p."sale_review" = 'APPROVED'
+  AND p."sale_approved_at" IS NOT NULL;
+--> statement-breakpoint
+-- 파트너사 등록(POST /v1/ops/promoters)·계약 변경 요청(POST /v1/ops/promoters/{promoterId}/contract-term-changes)의 멱등 키 작업을 더한다
 ALTER TABLE "idempotency_record" DROP CONSTRAINT IF EXISTS "idempotency_record_operation_check";
 --> statement-breakpoint
-ALTER TABLE "idempotency_record" ADD CONSTRAINT "idempotency_record_operation_check" CHECK ("operation" in ('CREATE_PRODUCTION', 'CREATE_PRODUCTION_EVENT', 'CREATE_MERCH_ORDER', 'START_MERCH_PAYMENT', 'ACCEPT_MERCH_PAYMENT', 'CREATE_TICKET_ADDON', 'CANCEL_MERCH_ORDER', 'RETURN_MERCH_ORDER', 'CREATE_OPS_PROMOTER'));
+ALTER TABLE "idempotency_record" ADD CONSTRAINT "idempotency_record_operation_check" CHECK ("operation" in ('CREATE_PRODUCTION', 'CREATE_PRODUCTION_EVENT', 'CREATE_MERCH_ORDER', 'START_MERCH_PAYMENT', 'ACCEPT_MERCH_PAYMENT', 'CREATE_TICKET_ADDON', 'CANCEL_MERCH_ORDER', 'RETURN_MERCH_ORDER', 'CREATE_OPS_PROMOTER', 'CREATE_OPS_PROMOTER_CONTRACT_CHANGE'));
 --> statement-breakpoint
 -- 관제 경로(core_ops): 파트너사·계약을 읽고 쓰며, 판매 승인 때 event 수수료율을 쓴다
 GRANT SELECT, INSERT ON "promoter" TO core_ops;
@@ -66,7 +80,7 @@ GRANT UPDATE ("commission_rate_bp", "pending_contract_approval_id") ON "promoter
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE ON "promoter_contract" TO core_ops;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE ON "idempotency_record" TO core_ops;
+GRANT SELECT, INSERT, UPDATE, DELETE ON "idempotency_record" TO core_ops;
 --> statement-breakpoint
 GRANT UPDATE ("commission_rate_bp") ON "event" TO core_ops;
 --> statement-breakpoint

@@ -153,9 +153,10 @@ export class MemorySaleStore implements SaleStore {
           });
         },
         currentCommissionRateBp: async (promoterId) => {
+          // 계약 기간이 없으면 undefined다. promoter.commission_rate_bp(0033의 기본 1000)로 물러나지 않는다(ADR-0320 결정 4, RV-01)
           const periods = [...(this.repo.promoterContracts.get(promoterId) ?? [])].filter((x) => x.validUntil === null);
           const current = periods[0] ?? [...(this.repo.promoterContracts.get(promoterId) ?? [])].at(-1);
-          return current?.commissionRateBp ?? this.repo.promoters.get(promoterId)?.commissionRateBp;
+          return current?.commissionRateBp;
         },
         largeOpenTimes: async (from, to, exclude) =>
           [...this.repo.events.values()]
