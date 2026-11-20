@@ -1,0 +1,23 @@
+# ticket-svc의 로컬 데모 값(BAT-087). PEAKET_ENV는 local이다(demo가 아니다: 합본·identity·웹의 local 전제).
+# 출처·호스트는 정본 이름에 이 PC 포트(18441~18445)를 붙인다. 비밀은 Secret으로만 받는다.
+name: ticket-svc
+
+image:
+  repository: peaket/ticket-svc
+  tag: demo
+  pullPolicy: Never
+
+secretEnvFrom: demo-ticket
+
+env:
+  PEAKET_ENV: local
+  PEAKET_GRPC_PORT: "50051"
+  PEAKET_IDENTITY_GRPC_URL: identity-svc.core.svc.cluster.local:50051
+  PEAKET_CORE_HTTP_URL: http://core-svc.core.svc.cluster.local:8080
+  PEAKET_OPS_HTTP_URL: http://ops-svc.core.svc.cluster.local:8080
+
+service:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

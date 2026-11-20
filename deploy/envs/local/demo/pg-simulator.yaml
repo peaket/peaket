@@ -1,0 +1,22 @@
+# pg-simulator의 로컬 데모 값(BAT-087). PEAKET_ENV는 local이다(demo가 아니다: 합본·identity·웹의 local 전제).
+# 출처·호스트는 정본 이름에 이 PC 포트(18441~18445)를 붙인다. 비밀은 Secret으로만 받는다.
+name: pg-simulator
+
+image:
+  repository: peaket/pg-simulator
+  tag: demo
+  pullPolicy: Never
+
+secretEnvFrom: demo-pg-simulator
+
+env:
+  PEAKET_ENV: local
+  PG_SIMULATOR_HOST: 0.0.0.0
+  PG_SIMULATOR_PORT: "8790"
+
+service:
+  replicas: 1
+  port: 8790
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 128Mi }

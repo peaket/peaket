@@ -1,0 +1,25 @@
+# trust-svc의 로컬 데모 값(BAT-087). PEAKET_ENV는 local이다(demo가 아니다: 합본·identity·웹의 local 전제).
+# 출처·호스트는 정본 이름에 이 PC 포트(18441~18445)를 붙인다. 비밀은 Secret으로만 받는다.
+name: trust-svc
+
+image:
+  repository: peaket/trust-svc
+  tag: demo
+  pullPolicy: Never
+
+secretEnvFrom: demo-trust
+
+env:
+  PEAKET_ENV: local
+  PEAKET_GRPC_PORT: "50051"
+  PEAKET_TRUST_RULES_FILE: /etc/peaket/trust/rules.json
+
+service:
+  replicas: 1
+  volumes:
+    - { name: trust-rules, configMap: { name: demo-trust-rules } }
+  volumeMounts:
+    - { name: trust-rules, mountPath: /etc/peaket/trust, readOnly: true }
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 384Mi }

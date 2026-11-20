@@ -1,0 +1,18 @@
+# console-host 배포 단위 기본 값(BAT-087 데모 무대, docs/devops.md §5.2). 환경 값은 deploy/envs/<환경>/console-host.yaml에 둔다.
+name: console-host
+
+managementPort: 19464
+
+# 정적·Next 앱은 관리 포트 /ready·/livez가 없다. 데모 값에서 프로브를 끈다(BAT-087)
+probes:
+  enabled: false
+
+service:
+  enabled: true
+  replicas: 1
+  port: 8080
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  env: {}
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

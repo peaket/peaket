@@ -1,0 +1,36 @@
+# bundle의 로컬 데모 값(BAT-087). PEAKET_ENV는 local이다(demo가 아니다: 합본·identity·웹의 local 전제).
+# 출처·호스트는 정본 이름에 이 PC 포트(18441~18445)를 붙인다. 비밀은 Secret으로만 받는다.
+name: bundle
+
+image:
+  repository: peaket/bundle
+  tag: demo
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+  PEAKET_BUNDLE_SERVICES: payment-svc,purchase-svc,admission-ctrl,queue-svc
+  PEAKET_BUNDLE_ENV_DIR: /etc/peaket/bundle
+  PEAKET_BUNDLE_MODE: single
+  NODE_OPTIONS: --max-semi-space-size=32
+
+service:
+  # queue·admission·purchase·payment를 한 파드로 덮는다(감독 결정 2). 운영 모양(서비스별 1복제)과 다르다
+  replicas: 1
+  port: 8080
+  extraPorts:
+    - { name: purchase, port: 8081 }
+    - { name: admission, port: 8082 }
+    - { name: payment, port: 8084 }
+  leaderLease: [admission-ctrl, payment-entry-pause]
+  volumes:
+    - { name: bundle-env, secret: { secretName: demo-bundle-env } }
+    - { name: seatmaps, emptyDir: {} }
+    - { name: batch-results, emptyDir: {} }
+  volumeMounts:
+    - { name: bundle-env, mountPath: /etc/peaket/bundle, readOnly: true }
+    - { name: seatmaps, mountPath: /etc/peaket/seatmaps, readOnly: true }
+    - { name: batch-results, mountPath: /var/peaket/batch-results }
+  resources:
+    requests: { cpu: 500m, memory: 768Mi }
+    limits: { memory: 1536Mi }

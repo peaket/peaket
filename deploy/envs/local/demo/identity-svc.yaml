@@ -1,0 +1,40 @@
+# identity-svc의 로컬 데모 값(BAT-087). PEAKET_ENV는 local이다(demo가 아니다: 합본·identity·웹의 local 전제).
+# 출처·호스트는 정본 이름에 이 PC 포트(18441~18445)를 붙인다. 비밀은 Secret으로만 받는다.
+name: identity-svc
+
+image:
+  repository: peaket/identity-svc
+  tag: demo
+  pullPolicy: Never
+
+secretEnvFrom: demo-identity
+
+env:
+  PEAKET_ENV: local
+  PEAKET_GRPC_PORT: "50051"
+  PEAKET_TOKEN_ISSUER: https://identity.peaket.example
+  PEAKET_COOKIE_DOMAIN: peaket.example
+  # 콘솔 출처는 포트를 포함한다(WebAuthn RP ID는 호스트, Origin은 포트까지)
+  PEAKET_PARTNER_CONSOLE_ORIGIN: https://partner.peaket.example:18443
+  PEAKET_OPS_CONSOLE_ORIGIN: https://console.peaket.example:18444
+  PEAKET_SCANNER_PWA_ORIGIN: https://scanner.peaket.example:18445
+  # 다른 서비스 gRPC(로컬 데모는 실제 백엔드)
+  PEAKET_TICKET_GRPC_URL: ticket-svc.ticket.svc.cluster.local:50051
+  PEAKET_TRUST_GRPC_URL: trust-svc.trust.svc.cluster.local:50051
+  PEAKET_PURCHASE_GRPC_URL: bundle.purchase.svc.cluster.local:50051
+  # 본인확인 시험 어댑터와 모의 기관(파드 18920)
+  PEAKET_VERIFICATION_PROVIDER: test
+  PEAKET_TEST_VERIFICATION_URL: http://mock-idv.core.svc.cluster.local:18920
+  PEAKET_ADMIN_MAIL_DIR: /tmp/admin-mail
+
+service:
+  replicas: 1
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 768Mi }
+
+# 로컬 데모는 External Secrets·Outbox 릴레이를 쓰지 않는다(서비스 파드 하나로 본다)
+externalSecret:
+  enabled: false
+outboxRelay:
+  enabled: false

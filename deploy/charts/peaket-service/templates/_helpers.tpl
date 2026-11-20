@@ -77,7 +77,9 @@ spec:
       envFrom:
         - secretRef: { name: {{ .Values.secretEnvFrom }} }
       {{- end }}
+      {{- if .Values.probes.enabled }}
       {{- include "peaket.probes" . | nindent 6 }}
+      {{- end }}
       lifecycle:
         preStop:
           sleep: { seconds: {{ .Values.service.preStopSleepSeconds }} }

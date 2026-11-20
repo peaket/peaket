@@ -1,0 +1,39 @@
+# core-svc의 로컬 데모 값(BAT-087). PEAKET_ENV는 local이다(demo가 아니다: 합본·identity·웹의 local 전제).
+# 출처·호스트는 정본 이름에 이 PC 포트(18441~18445)를 붙인다. 비밀은 Secret으로만 받는다.
+name: core-svc
+
+image:
+  repository: peaket/core-svc
+  tag: demo
+  pullPolicy: Never
+
+secretEnvFrom: demo-core
+
+env:
+  PEAKET_ENV: local
+  PEAKET_IDENTITY_GRPC_URL: identity-svc.core.svc.cluster.local:50051
+  # image-worker(HOT-200)는 아직 없다. 이미지 경로만 503이고 나머지 core 경로는 뜬다
+  PEAKET_IMAGE_GRPC_URL: 127.0.0.1:59999
+  PEAKET_SEATMAP_GRPC_URL: core-seatmap-worker.core.svc.cluster.local:50051
+  PEAKET_IMAGE_BASE_URL: https://www.peaket.example:18441
+  PEAKET_IMAGE_STORE_DIR: /var/peaket/images
+  PEAKET_PUBLIC_FILE_DIR: /var/peaket/public
+  PEAKET_SEATMAP_TEMPLATE_DIR: /app/seed/seatmap-templates
+  PEAKET_QUEUE_REDIS_URL: redis://demo-valkey.purchase.svc.cluster.local:6379
+  PEAKET_KAFKA_BROKERS: peaket-kafka-bootstrap.kafka.svc.cluster.local:9092
+  PEAKET_IDENTITY_JWKS_URL: http://identity-svc.core.svc.cluster.local:8080/internal/jwks/admin.json
+  PEAKET_IDENTITY_ISSUER: https://identity.peaket.example
+  PEAKET_PURCHASE_HTTP_URL: http://bundle.purchase.svc.cluster.local:8081
+  PEAKET_WEBHOOK_WORKER: "off"
+
+service:
+  replicas: 1
+  volumes:
+    - { name: images, emptyDir: {} }
+    - { name: public, emptyDir: {} }
+  volumeMounts:
+    - { name: images, mountPath: /var/peaket/images }
+    - { name: public, mountPath: /var/peaket/public }
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { memory: 1Gi }

@@ -16,6 +16,11 @@ env: {}
 # 두 Deployment가 함께 받는 Secret 이름(envFrom). 비우면 쓰지 않는다
 secretEnvFrom: ""
 
+# 준비·생존·시작 프로브(docs/architecture.md §5 '프로브 규칙'). 정적 앱(web·partner·console-host·scanner·queue-room)은
+# 관리 포트 /ready·/livez가 없어 로컬 데모 값에서 끈다(BAT-087). 끄면 파드는 컨테이너가 뜨는 대로 준비다
+probes:
+  enabled: true
+
 # 관리 포트(/metrics·/ready·/livez). 앱 트래픽과 다른 포트다(docs/architecture.md §5 '프로브 규칙')
 managementPort: 9464
 

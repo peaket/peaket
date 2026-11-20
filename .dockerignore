@@ -24,6 +24,19 @@ services
 !services/ops-svc
 # v0 모놀리스의 개발 의존성(작업 공간 연결에 package.json만 있으면 된다)
 !services/invariant-checker/package.json
+# BAT-087 데모 무대의 새 서비스 이미지 다섯
+!services/identity-svc
+!services/ticket-svc
+!services/trust-svc
+!services/core-svc
+!services/realtime-gw
+# BAT-087 데모 무대의 앱 이미지 다섯(widgets는 console-host에 묶인다)과 그 nginx 설정
+!apps/web
+!apps/partner
+!apps/console-host
+!apps/scanner
+!apps/widgets
+!deploy/local/demo/nginx
 **/.cache
 **/.claude
 **/.turbo

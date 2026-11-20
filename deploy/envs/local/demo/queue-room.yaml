@@ -1,0 +1,19 @@
+# queue-room의 로컬 데모 값(BAT-087). PEAKET_ENV는 local이다(demo가 아니다: 합본·identity·웹의 local 전제).
+# 출처·호스트는 정본 이름에 이 PC 포트(18441~18445)를 붙인다. 비밀은 Secret으로만 받는다.
+name: queue-room
+
+image:
+  repository: peaket/queue-room
+  tag: demo
+  pullPolicy: Never
+
+env:
+  PEAKET_ENV: local
+
+service:
+  replicas: 1
+  port: 8080
+  command: ["nginx", "-g", "daemon off;"]
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
