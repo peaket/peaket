@@ -195,6 +195,8 @@ async function api(o) {
  */
 export async function applySeed(o = {}) {
   const seedFile = o.seedFile ?? DEMO_SEED_FILE;
+  const checked = checkSeed(seedFile);
+  if (!checked.ok) throw new Error(`시드 검사에 실패했다: ${checked.problems.join('; ')}`);
   const { bootstrap } = prepareDemoSecrets({ seedFile });
   const seed = readSeed(seedFile);
   const c = contract();

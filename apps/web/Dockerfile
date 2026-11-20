@@ -30,7 +30,9 @@ ENV NEXT_PUBLIC_API_ORIGIN=https://api.peaket.example:18441 \
     NEXT_PUBLIC_SCANNER_ORIGIN=https://scanner.peaket.example:18445 \
     NEXT_PUBLIC_PEAKET_PG_SIMULATOR=1 \
     PEAKET_ENV=local
-RUN pnpm --filter @peaket/web build
+RUN pnpm --filter @peaket/web build \
+ && mkdir -p /out-next \
+ && for p in next redis @redis; do if [ -e "apps/web/node_modules/$p" ]; then cp -aL "apps/web/node_modules/$p" /out-next/; fi; done
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
 ENV NODE_ENV=production \
@@ -43,6 +45,7 @@ COPY --from=build --chown=node:node /repo/apps/web/server ./server
 COPY --from=build --chown=node:node /repo/apps/web/package.json ./package.json
 # start.mjs가 createRequire(appDir)로 next·redis를 찾는다. standalone이 추적한 node_modules를 앱 폴더에 둔다
 RUN mkdir -p node_modules && cp -a .next/standalone/node_modules/. node_modules/
+COPY --from=build --chown=node:node /out-next/. ./node_modules/
 USER node
 EXPOSE 3000
 CMD ["node", "server/start.mjs", "--port", "3000", "--host", "0.0.0.0"]

@@ -491,6 +491,8 @@ export function demoGatewayObjects(objects, origins = demoOrigins()) {
       { type: 'RegularExpression', value: '^/shop/[^/]+/queue$' },
     ]),
   );
+  // 추가 검증(/queue/{id}/verify)은 소비자 웹 화면이다. 대기실 정규식에 들지 않게 따로 웹 앱 서버로 보낸다
+  out.push(appRoute('demo-queue-verify', 'gw-queue', 'queue', DEMO_HOSTS.queue, 'web', 3000, [{ type: 'RegularExpression', value: '^/(?:en|ja|zh)/queue/[^/]+/verify/?$|^/queue/[^/]+/verify/?$' }]));
   return out;
 }
 

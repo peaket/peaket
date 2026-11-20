@@ -19,6 +19,7 @@ COPY apps/partner apps/partner
 ENV NEXT_PUBLIC_PARTNER_API_ORIGIN=https://partner-api.peaket.example:18443 \
     PEAKET_ENV=local
 RUN pnpm --filter @peaket/partner build \
+ && mkdir -p apps/partner/.next/standalone/apps/partner/.next \
  && cp -a apps/partner/.next/static apps/partner/.next/standalone/apps/partner/.next/static \
  && cp -a apps/partner/public apps/partner/.next/standalone/apps/partner/public
 

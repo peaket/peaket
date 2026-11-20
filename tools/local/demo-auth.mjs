@@ -319,7 +319,9 @@ async function createSession(account) {
   const client = new SessionService(`127.0.0.1:${c.grpcPort ?? 19051}`, grpc.credentials.createInsecure());
   try {
     const res = await new Promise((resolve, reject) => {
-      client.createSession(
+      const call = client.CreateSession ?? client.createSession;
+      call.call(
+        client,
         {
           idempotency_key: `demo-${account.key}-${randomBytes(8).toString('hex')}`,
           provider: PROVIDER[account.provider] ?? 1,
