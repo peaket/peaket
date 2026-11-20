@@ -808,6 +808,7 @@
 | R-712 | BAT-605 완료 표시·lane5 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane5.md, docs/review/plans/BAT-605.md | 단계 완료·진행 로그·검증 기록 | 완료 |
 | R-713 | BAT-178 완료 표시·lane2 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane2.md, docs/review/plans/BAT-178.md | 단계 완료·진행 로그·검증 기록 | 완료 |
 | R-714 | BAT-179 완료 표시·lane2 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane2.md, docs/review/plans/BAT-179.md | 단계 완료·진행 로그·검증 기록 | 완료 |
+| R-715 | BAT-167 완료 표시·lane2 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane2.md, docs/review/plans/BAT-167.md | 단계 완료·진행 로그·검증 기록 | 완료 |
 
 ## 4. 숫자 일치표
 
