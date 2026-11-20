@@ -1,0 +1,32 @@
+# 보안 검사 예약 실행 실패 알림(BUILD_ORDER BOT-161, docs/devops.md §4.4, ADR-0323).
+# security-scan.yml은 ci.yml이 workflow_call로도 부르므로 그 안에 issues: write를 두면 부르는 쪽의 권한 규칙(10)을 넘는다.
+# 그래서 security-scan 실행이 끝난 뒤 이 워크플로가 예약 실행(schedule)의 실패만 보고 SEV3 이슈를 연다.
+# PR·푸시·수동 실행 실패는 GitHub 기본 알림에 그대로 둔다.
+name: security-scan-notify
+
+on:
+  workflow_run:
+    workflows: [security-scan]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: SEV3 이슈 열기
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "[SEV3] 보안 검사 예약 실행 실패: $RUN_ID" \
+            --body "security-scan.yml 예약 실행이 실패했습니다. 실행: $RUN_URL — 실패한 잡의 산출물과 로그를 보고 원인을 고칩니다(SAST·의존성·이미지·비밀 게이트는 0.1.4 판정, docs/devops.md §4.4, ADR-0323)."

@@ -1,0 +1,83 @@
+# DAST(ZAP 기준선 점검) 야간·수동 실행(BUILD_ORDER BOT-161, docs/devops.md §3·§3.3, ADR-0323).
+# - develop 야간(03:00 KST [가정])과 수동 실행은 kind에 v0와 게이트웨이 다섯을 올린 뒤 공개 입구 www·api·partner를 점검한다.
+#   ops-api·scanner-api는 허용 IP·기기 인증 뒤라 점검 대상에서 뺀다.
+# - ZAP 공식 이미지를 판·다이제스트로 고정한다(tools/ci/scan-tools.mjs PINS.zap, 2026-11-03 게시 2.17.0).
+#   High(보안 등급 7.0 이상)는 tools/ci/scan-gate.mjs가 막고, 결과 파일이 없거나 비었거나 꼴이 아니면 dast-gate가 막는다.
+# - 결과는 산출물로 남기고, 예약 실행이 실패하면 SEV3 이슈를 연다(issues: write는 notify 잡만).
+# - 출시 후보 데모 점검은 workflow_call 자리만 둔다. 데모 환경이 생긴 뒤 release.yml/promote.yml이 부른다(이 묶음에서는 부르지 않는다).
+name: dast-nightly
+
+on:
+  schedule:
+    # 18:00 UTC = 03:00 KST(다음 날) [가정]
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  dast:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      # kind에 v0와 게이트웨이 다섯을 올린다(ci-kind.yml과 같은 스크립트). DAST는 게이트웨이의 공개 입구만 본다
+      - run: node tools/local/cluster.mjs up
+      - run: node tools/local/cluster.mjs image
+      - run: node tools/local/cluster.mjs v0
+      - run: node tools/local/cluster.mjs gateways
+      # 게이트웨이 접속 정보에서 포트를 읽어 www·api(gw-fan), partner(gw-partner)를 점검한다. Host 머리로 SNI/인증서 이름을 맞춘다
+      - name: ZAP 기준선 점검과 판정
+        run: |
+          set -euo pipefail
+          port_fan=$(node -e "const c=require('./.cache/peaket-tools/gateways-e2e.json'); process.stdout.write(String(c.ports['gw-fan']))")
+          port_partner=$(node -e "const c=require('./.cache/peaket-tools/gateways-e2e.json'); process.stdout.write(String(c.ports['gw-partner']))")
+          run_one() {
+            name=$1; port=$2; host=$3
+            out="$RUNNER_TEMP/dast/$name"
+            mkdir -p "$out"
+            node tools/ci/scan-tools.mjs dast --target "https://127.0.0.1:$port" --host "$host" --out "$out"
+            node tools/ci/dast-gate.mjs --report "$out/zap.json" --out "$out/zap.sarif" --event "$GITHUB_EVENT_NAME"
+            node tools/ci/scan-gate.mjs --tool zap --sarif "$out/zap.sarif" --report "$out/gate.json" --event "$GITHUB_EVENT_NAME"
+          }
+          run_one www "$port_fan" www.peaket.example
+          run_one api "$port_fan" api.peaket.example
+          run_one partner "$port_partner" partner.peaket.example
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dast-zap
+          path: ${{ runner.temp }}/dast/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # 예약 실행이 실패하면 아무도 모르는 구멍을 막는다(docs/devops.md §4.4, ADR-0323). ci.yml이 부른 실행(workflow_call)은 이슈를 열지 않는다
+  notify-scheduled-failure:
+    needs: [dast]
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: SEV3 이슈 열기
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "[SEV3] DAST 야간 점검 실패: $GITHUB_RUN_ID" \
+            --body "DAST(ZAP 기준선) 예약 실행이 실패했습니다. 실행: $RUN_URL — 산출물(dast-zap)의 zap.json·zap.sarif·gate.json을 보고 원인을 고칩니다. High(7.0 이상)가 있으면 배포를 막습니다(docs/devops.md §3·§4.4, ADR-0323)."

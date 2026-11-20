@@ -34,7 +34,7 @@ export const ADR_DIR = fileURLToPath(new URL('../../docs/adr/', import.meta.url)
 /** 등급과 상관없이 막는 CodeQL 프로토타입 오염 쿼리 셋(ASVS 15.3.6, ADR-0263 결정 4) */
 export const PROTOTYPE_QUERIES = Object.freeze(['js/prototype-polluting-assignment', 'js/prototype-pollution', 'js/prototype-pollution-utility']);
 /** 판정하는 도구와 SARIF의 도구 이름 */
-export const TOOLS = Object.freeze({ gitleaks: 'gitleaks', codeql: 'CodeQL', 'trivy-config': 'Trivy', 'trivy-secret': 'Trivy' });
+export const TOOLS = Object.freeze({ gitleaks: 'gitleaks', codeql: 'CodeQL', 'trivy-config': 'Trivy', 'trivy-secret': 'Trivy', zap: 'ZAP' });
 const SECRET_TOOLS = new Set(['gitleaks', 'trivy-secret']);
 const EXCEPTION_TOOLS = ['codeql', 'trivy-config'];
 const EXCEPTION_KEYS = ['tool', 'rule', 'path', 'reason', 'issue', 'adr', 'count', 'createdOn', 'expiresOn', 'reviewOn'];
@@ -147,8 +147,9 @@ export function readFindings(inputs, tool) {
       });
     });
   }
-  // IaC 설정 검사는 같은 차트를 두 값으로 그리므로(deploy·chart-ci) 같은 (규칙, 경로, 줄) 결과를 하나로 센다(다시 보기 7)
-  if (tool === 'trivy-config') {
+  // IaC 설정 검사는 같은 차트를 두 값으로 그리므로(deploy·chart-ci) 같은 (규칙, 경로, 줄) 결과를 하나로 센다(다시 보기 7).
+  // DAST는 같은 규칙·주소가 인스턴스마다 올 수 있어 하나로 센다(ADR-0323).
+  if (tool === 'trivy-config' || tool === 'zap') {
     const seen = new Set();
     return {
       findings: findings.filter((f) => {

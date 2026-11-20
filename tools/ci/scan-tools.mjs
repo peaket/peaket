@@ -18,15 +18,17 @@
 //        종료 코드: gitleaks의 이력 검사 종료 코드(0 누출 없음, GITLEAKS_LEAK_EXIT 누출 있음, 그 밖은 오류), 미끼·설정 실패는 DECOY_EXIT
 //   node tools/ci/scan-tools.mjs trivy-config --out <폴더> [--repo <저장소>]   → <폴더>/<대상 이름>.sarif
 //   node tools/ci/scan-tools.mjs trivy-image --input <OCI 묶음 tar> --sarif <결과 파일> [--work <미끼 폴더>]
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { runIfMain } from './entry.mjs';
+import { toSarif } from './dast-gate.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +49,9 @@ export const PINS = Object.freeze({
   }),
   // 여러 플랫폼 묶음 다이제스트(amd64·arm64 러너가 자기 것을 고른다). Docker Hub aquasec/trivy:0.76.1과 같은 값이고 GHCR에서 받는다(ADR-0263 결정 13 ④)
   trivy: Object.freeze({ image: 'ghcr.io/aquasecurity/trivy', version: '0.76.1', digest: 'sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c' }),
+  // ZAP 기준선 점검(공식 이미지, 다이제스트 고정, ADR-0323 결정 2). 2.17.0은 2026-11-03 게시(3일 뒤 조건을 지남).
+  // 여러 플랫폼 지수 다이제스트다(Docker Hub zaproxy/zap-stable 2.17.0, 2026-11-20 조회).
+  zap: Object.freeze({ image: 'zaproxy/zap-stable', version: '2.17.0', digest: 'sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af' }),
 });
 
 /** gitleaks가 누출을 찾았을 때의 종료 코드. 오류(설정·git 실패)는 1로 끝나므로 누출과 겹치지 않는 값을 준다 */
@@ -81,6 +86,7 @@ export const IAC_TARGETS = Object.freeze([
 
 export const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 export const trivyImage = (pins = PINS) => `${pins.trivy.image}@${pins.trivy.digest}`;
+export const zapImage = (pins = PINS) => `${pins.zap.image}@${pins.zap.digest}`;
 
 /** 이 기계 아키텍처의 gitleaks 묶음. 표에 없으면 던진다 */
 export function gitleaksAsset(arch = process.arch, pins = PINS) {
@@ -827,6 +833,106 @@ export function runTrivyImage({ input, sarif, work, docker = dockerStdout }) {
   }
 }
 
+// ---------- ZAP 기준선(DAST, ADR-0323) ----------
+
+/** 미끼 서버: ZAP 기준선의 수동 점검이 High를 내야 하는 경로 넷을 링크로 노출한다 */
+export const DAST_DECOY_PATHS = Object.freeze(['/.git/config', '/WEB-INF/web.xml', '/server-status', '/phpinfo.php']);
+
+function decoyServer() {
+  return createServer((req, res) => {
+    const url = req.url ?? '/';
+    if (url.startsWith('/.git/config')) {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n');
+      return;
+    }
+    if (url.startsWith('/WEB-INF/web.xml')) {
+      res.writeHead(200, { 'content-type': 'application/xml' });
+      res.end('<?xml version="1.0"?><web-app xmlns="http://java.sun.com/xml/ns/javaee"><servlet><servlet-name>decoy</servlet-name></servlet></web-app>');
+      return;
+    }
+    if (url.startsWith('/server-status')) {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><body><h1>Apache Server Status</h1><table><tr><td>Server Version: Apache/2.4.58</td></tr></table></body></html>');
+      return;
+    }
+    if (url.startsWith('/phpinfo.php')) {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><body><h1>PHP Version 8.3.0</h1><table><tr><td>System Linux decoy</td></tr></table></body></html>');
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<html><body><a href="/.git/config">a</a><a href="/WEB-INF/web.xml">b</a><a href="/server-status">c</a><a href="/phpinfo.php">d</a></body></html>`);
+  });
+}
+
+/** docker를 비동기로 돌린다(미끼 서버가 같은 프로세스에서 답해야 해 spawnSync를 쓰지 않는다) */
+const dockerAsync = (args, timeoutMs = 600_000) =>
+  new Promise((resolvePromise, reject) => {
+    const p = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      p.kill('SIGKILL');
+      reject(new Error(`docker가 ${timeoutMs}ms 안에 끝나지 않았다`));
+    }, timeoutMs);
+    p.stdout.on('data', (d) => (stdout += d.toString()));
+    p.stderr.on('data', (d) => (stderr += d.toString()));
+    p.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      resolvePromise({ code, stdout, stderr });
+    });
+  });
+
+/** ZAP 기준선 인자. 결과는 <out>/<report>에 쓴다(/zap/wrk로 붙인다) */
+export function dastArgs({ target, out, report = 'zap.json', pins = PINS, host }) {
+  return ['run', '--rm', '--network', 'host', '-v', `${resolve(out)}:/zap/wrk:rw`, zapImage(pins), 'zap-baseline.py', '-t', target, '-J', report, '-I', '-m', '1', ...(host ? ['-z', `-H Host:${host}`] : [])];
+}
+
+function readZap(file) {
+  if (!existsSync(file)) throw new Error(`ZAP 결과 파일이 없다: ${file}`);
+  const text = readFileSync(file, 'utf8');
+  if (text.trim() === '') throw new Error(`ZAP 결과 파일이 비었다: ${file}`);
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`ZAP 결과 파일이 JSON이 아니다: ${file}`);
+  }
+  const { high } = toSarif(parsed);
+  return { parsed, high };
+}
+
+/**
+ * ZAP 기준선 점검. 미끼(High가 나와야 하는 경로)를 먼저 돌려 도구가 실제로 보는지 확인하고,
+ * 못 찾으면 대상을 보지 않고 DecoyError로 끝낸다. 대상 결과는 <out>/zap.json이다.
+ * @param {{ target: string, out: string, docker?: typeof dockerAsync, pins?: typeof PINS, decoy?: boolean }} o
+ */
+export async function runDast({ target, out, docker = dockerAsync, pins = PINS, decoy = true, host }) {
+  mkdirSync(out, { recursive: true });
+  if (decoy) {
+    const server = decoyServer();
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    try {
+      const port = server.address().port;
+      const r = await docker(dastArgs({ target: `http://127.0.0.1:${port}/`, out, report: 'zap-decoy.json', pins }));
+      if (r.code !== 0 && r.code !== 1 && r.code !== 2) throw new DecoyError(`ZAP 미끼 점검이 ${r.code}로 끝났다`);
+      const found = readZap(join(out, 'zap-decoy.json'));
+      if (found.high === 0) throw new DecoyError('ZAP 미끼 점검에서 High를 찾지 못했다(도구가 보지 않는 것으로 보고 대상 점검을 하지 않는다)');
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  }
+  const r = await docker(dastArgs({ target, out, report: 'zap.json', pins, ...(host ? { host } : {}) }));
+  if (r.code !== 0 && r.code !== 1 && r.code !== 2) throw new Error(`ZAP 기준선 점검이 ${r.code}로 끝났다`);
+  readZap(join(out, 'zap.json'));
+  return join(out, 'zap.json');
+}
+
 // ---------- 명령줄 ----------
 
 async function main(argv) {
@@ -841,6 +947,8 @@ async function main(argv) {
       work: { type: 'string' },
       repo: { type: 'string', default: '.' },
       input: { type: 'string' },
+      target: { type: 'string' },
+      host: { type: 'string' },
       'all-refs': { type: 'boolean', default: false },
     },
   });
@@ -877,7 +985,18 @@ async function main(argv) {
       return DECOY_EXIT;
     }
   }
-  throw new Error(`모르는 하위 명령: ${cmd ?? '(없음)'} (fetch-gitleaks·gitleaks·trivy-config·trivy-image)`);
+  if (cmd === 'dast') {
+    try {
+      const report = await runDast({ target: need('target'), out: need('out'), ...(values.host ? { host: values.host } : {}) });
+      console.log(`ZAP 기준선 점검(미끼 확인 뒤): ${report}`);
+      return 0;
+    } catch (e) {
+      if (!(e instanceof DecoyError)) throw e;
+      console.log(process.env.GITHUB_ACTIONS === 'true' ? `::error::${e.message}` : `실패: ${e.message}`);
+      return DECOY_EXIT;
+    }
+  }
+  throw new Error(`모르는 하위 명령: ${cmd ?? '(없음)'} (fetch-gitleaks·gitleaks·trivy-config·trivy-image·dast)`);
 }
 
 // 직접 실행 판별이 틀리면 통과가 아니라 실패로 끝낸다(ADR-0263 결정 13 ⑦)

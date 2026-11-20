@@ -6,7 +6,7 @@
 #   OpenSSF Scorecard는 ci.yml이 부르지 않는 따로 된 scorecard.yml에 둔다(그 잡의 actions: read가 ci.yml 실행을 막지 않게, devops §4.4 '리뷰 뒤 더한 규칙' ①). 판·체크섬·다이제스트는 tools/ci/scan-tools.mjs의 고정 표, 액션은 아래 uses: 줄의 커밋이다.
 #   Semgrep은 쓰지 않는다(소유자 결정 OPEN[31], 2026-11-10). 그 몫은 ESLint 규칙(ci-node의 린트)과 CodeQL 프로토타입 오염 쿼리가 맡는다.
 # 권한: 맨 위는 contents: read이고 security-events: write는 codeql 잡만 받는다(ci.yml의 부르는 잡이 그만큼만 허락한다). 비밀 값을 쓰지 않는다.
-# 예약 실행은 ci.yml 밖이라 ci-summary가 보지 않는다. 실패는 GitHub 기본 알림에 기댄다(계획 BAT-202 8장 6).
+# 예약 실행은 ci.yml 밖이라 ci-summary가 보지 않는다. 예약 실행 실패는 security-scan-notify.yml이 SEV3 이슈로 연다(2026-11-20, BAT-045 BOT-161, ADR-0323).
 name: security-scan
 
 on:
