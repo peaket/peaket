@@ -13,6 +13,9 @@ secretEnvFrom: queue-svc-secrets
 managementPort: 9464
 
 service:
+  # 핫패스: 온디맨드 노드에 둔다(karpenter.sh/capacity-type: on-demand [가정, BAT-076 NodePool 라벨과 맞춘다], ADR-0102 결정 3)
+  nodeSelector:
+    karpenter.sh/capacity-type: on-demand
   replicas: 2
   port: 8080
   command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]

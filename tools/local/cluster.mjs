@@ -68,6 +68,18 @@ export const PINNED = {
   // (2026-11-16 받지 않고 조회, 감독 승인: 공식 레지스트리·다이제스트 고정·판 기록)
   envoyGatewayRatelimitImage: 'docker.io/envoyproxy/ratelimit:5ae0682e',
   envoyGatewayRatelimitDigest: 'sha256:b95206e32b1a5f824fb06062fbb85bbdfb7f5de54135e92afe8462f22c979681',
+  // Kyverno CEL 입장 정책(BUILD_ORDER BAS-150·BAT-085, ADR-0318). 차트 3.10.0(appVersion v1.20.0)과 이미지 다이제스트를 고정한다.
+  // 다이제스트는 2026-11-20 GHCR의 여러 플랫폼 목록(index) 다이제스트다. 차트 파일 자체는 helm repo가 판으로 받는다
+  kyvernoVersion: 'v1.20.0',
+  kyvernoChartVersion: '3.10.0',
+  kyvernoChartRepo: 'https://kyverno.github.io/kyverno/',
+  kyvernoImages: [
+    'reg.kyverno.io/kyverno/kyverno:v1.20.0@sha256:9de49c5416ea536f00a205527197ac048abdf32c5a75d633cd9afff8928f359d',
+    'reg.kyverno.io/kyverno/kyvernopre:v1.20.0@sha256:339067e083430e0c97007541bef9cfdbac89bee13f7228772c77ae8aead14b8b',
+    'reg.kyverno.io/kyverno/background-controller:v1.20.0@sha256:c72df38320a48fc9de10f9d23d087a117853bb08207b7f60f6d1e8457fb3ddb7',
+    'reg.kyverno.io/kyverno/cleanup-controller:v1.20.0@sha256:0f9ce0c203561c52499e871a987ff987371f57385fcafe7af1a01dfd6db1feee',
+    'reg.kyverno.io/kyverno/reports-controller:v1.20.0@sha256:f54e3cc106fadb1a615d0ec11c42f741f51d3580a5f70dfbe7bd7ec58864ef03',
+  ],
 };
 
 /**
@@ -972,6 +984,42 @@ async function meshNetpol() {
   console.log(`접속 정보: ${MESH_NETPOL_CONTRACT_FILE}`);
 }
 
+/**
+ * Kyverno CEL 정책을 kind에 설치하고 그 환경의 정책을 적용한다(BUILD_ORDER BAS-150·BAT-085, ADR-0318).
+ * 배포 값은 deploy/platform/kyverno/values.yaml(복제 3·PDB·관제 풀·이미지 다이제스트)이고, 정책은
+ * deploy/policies/kyverno/envs/<환경>/policies.yaml(생성 파일)이다. e2e 시험은 이 명령 뒤에 파드를 만들어 입장을 본다.
+ * `--env demo|staging|prod`(기본 demo). 데모는 감사 모드라 위반을 기록하고, 스테이징·운영은 거부한다.
+ * @param {string[]} argv
+ */
+export function kyvernoPlan(argv = []) {
+  let env = 'demo';
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== '--env') throw new Error(`kyverno의 모르는 인자: ${argv[i]}(쓰는 법: kyverno [--env demo|staging|prod])`);
+    const value = argv[++i];
+    if (!['demo', 'staging', 'prod'].includes(value)) throw new Error(`kyverno --env는 demo·staging·prod 가운데 하나다(${value})`);
+    env = value;
+  }
+  return { env };
+}
+
+async function kyverno(argv = []) {
+  const { env } = kyvernoPlan(argv);
+  step('Docker 엔진과 도구');
+  run('docker', ['info', '--format', '{{.ServerVersion}}'], { quiet: true });
+  for (const t of ['kind', 'kubectl', 'helm']) await ensureTool(t);
+  if (!existsSync(KUBECONFIG)) await kind(['export', 'kubeconfig', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
+  await preloadLocalImages(PINNED.kyvernoImages);
+  step(`Kyverno 차트 ${PINNED.kyvernoChartVersion}(appVersion ${PINNED.kyvernoVersion}) 설치: 복제 3·PDB minAvailable 2·관제 풀·이미지 다이제스트 고정`);
+  await helm(['repo', 'add', 'kyverno', PINNED.kyvernoChartRepo, '--force-update']);
+  await helm(['upgrade', '--install', 'kyverno', 'kyverno/kyverno', '--version', PINNED.kyvernoChartVersion, '-n', 'kyverno', '--create-namespace', '-f', join(REPO, 'deploy', 'platform', 'kyverno', 'values.yaml'), '--wait', '--timeout', '600s']);
+  await kubectl(['-n', 'kyverno', 'rollout', 'status', 'deploy/kyverno-admission-controller', '--timeout=300s']);
+  step(`정책 적용: deploy/policies/kyverno/envs/${env}/policies.yaml(${env === 'demo' ? 'Audit' : 'Deny'})`);
+  await kubectl(['apply', '-f', join(REPO, 'deploy', 'policies', 'kyverno', 'envs', env, 'policies.yaml')]);
+  const policies = await kubectl(['get', 'imagevalidatingpolicies,validatingpolicies', '-o', 'custom-columns=KIND:.kind,NAME:.metadata.name,MODE:.spec.validationActions[*]'], { quiet: true });
+  console.log(policies.trim());
+  step('준비됨');
+}
+
 async function down() {
   await kind(['delete', 'cluster', '--name', CLUSTER, '--kubeconfig', KUBECONFIG]);
 }
@@ -1019,13 +1067,13 @@ async function realtimeGw(argv = []) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2];
-  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, 'realtime-gw': realtimeGw, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
+  const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, kyverno, 'realtime-gw': realtimeGw, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|realtime-gw [--image <이름:태그>]|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|kyverno [--env demo|staging|prod]|realtime-gw [--image <이름:태그>]|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();
-  const withArgs = { up: upPlan, v1: v1Plan, 'gateways-admission': gatewaysAdmissionMode };
+  const withArgs = { up: upPlan, v1: v1Plan, 'gateways-admission': gatewaysAdmissionMode, kyverno: kyvernoPlan };
   if (withArgs[cmd]) {
     try {
       withArgs[cmd](process.argv.slice(3));

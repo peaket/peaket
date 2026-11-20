@@ -1,0 +1,110 @@
+# Kyverno 공식 Helm 차트 값(차트 3.10.0, appVersion v1.20.0, BUILD_ORDER BAS-150·BAT-085, ADR-0318).
+# 정본: docs/devops.md §4.3 '이미지 입장 정책'·'온세일 확장을 막지 않기', docs/infra-handover.md §3.1, ADR-0102 결정 3.
+# kind 시험은 이 파일을 `helm upgrade --install kyverno kyverno/kyverno -n kyverno -f <이 파일>`로 쓴다.
+# 운영 설치는 ArgoCD Application(deploy/platform/kyverno/application.yaml)이 맡는다. 정책은 deploy/policies/kyverno/envs/<환경>을 적용한다.
+# 이미지는 판(v1.20.0)과 다이제스트를 함께 고정한다. 차트가 `<repository>:<tag>`로 렌더하므로 tag 칸에 `v1.20.0@sha256:…`를 적는다.
+# 다이제스트는 2026-11-20 GHCR의 여러 플랫폼 목록(index) 다이제스트다.
+global:
+  image:
+    registry: reg.kyverno.io
+
+admissionController:
+  # 관제·시스템 풀에 복제 3(ADR-0102 결정 3). 확장·제어 길이 서비스보다 먼저 뜬다
+  replicas: 3
+  priorityClassName: peaket-control
+  nodeSelector:
+    peaket.io/pool: ops
+  tolerations:
+    - key: peaket.io/pool
+      operator: Equal
+      value: ops
+      effect: NoSchedule
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: admission-controller
+  podDisruptionBudget:
+    enabled: true
+    # 복제 3에서 하나는 비울 수 있다. minAvailable 3이면 아무것도 비우지 못한다(M15)
+    minAvailable: 2
+  container:
+    image:
+      registry: reg.kyverno.io
+      repository: kyverno/kyverno
+      tag: v1.20.0@sha256:9de49c5416ea536f00a205527197ac048abdf32c5a75d633cd9afff8928f359d
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { memory: 384Mi }
+  initContainer:
+    image:
+      registry: reg.kyverno.io
+      repository: kyverno/kyvernopre
+      tag: v1.20.0@sha256:339067e083430e0c97007541bef9cfdbac89bee13f7228772c77ae8aead14b8b
+
+backgroundController:
+  priorityClassName: peaket-control
+  nodeSelector:
+    peaket.io/pool: ops
+  tolerations:
+    - key: peaket.io/pool
+      operator: Equal
+      value: ops
+      effect: NoSchedule
+  container:
+    image:
+      registry: reg.kyverno.io
+      repository: kyverno/background-controller
+      tag: v1.20.0@sha256:c72df38320a48fc9de10f9d23d087a117853bb08207b7f60f6d1e8457fb3ddb7
+
+cleanupController:
+  priorityClassName: peaket-control
+  nodeSelector:
+    peaket.io/pool: ops
+  tolerations:
+    - key: peaket.io/pool
+      operator: Equal
+      value: ops
+      effect: NoSchedule
+  container:
+    image:
+      registry: reg.kyverno.io
+      repository: kyverno/cleanup-controller
+      tag: v1.20.0@sha256:0f9ce0c203561c52499e871a987ff987371f57385fcafe7af1a01dfd6db1feee
+
+reportsController:
+  priorityClassName: peaket-control
+  nodeSelector:
+    peaket.io/pool: ops
+  tolerations:
+    - key: peaket.io/pool
+      operator: Equal
+      value: ops
+      effect: NoSchedule
+  container:
+    image:
+      registry: reg.kyverno.io
+      repository: kyverno/reports-controller
+      tag: v1.20.0@sha256:f54e3cc106fadb1a615d0ec11c42f741f51d3580a5f70dfbe7bd7ec58864ef03
+
+# 웹훅이 보는 네임스페이스에서 시스템·정책 네임스페이스를 뺀다(이름 목록으로 고정).
+# 정책마다 matchConstraints.namespaceSelector가 서비스 네임스페이스만 고르므로 두 겹이다.
+config:
+  webhooks:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+            - kyverno
+            - kube-node-lease
+            - kube-public
+
+# 아래 둘은 차트가 읽지 않는 대조용 값이다. 정책 생성기 원천(deploy/policies/kyverno/policy-values.yaml)의
+# 웹훅 기본값과 같은지 시험(KV-07)이 견준다. 데모 정책은 failurePolicy Ignore를 쓴다.
+policyDefaults:
+  failurePolicy: Fail
+  timeoutSeconds: 15

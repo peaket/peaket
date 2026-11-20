@@ -41,6 +41,11 @@ service:
   # 비우면 Lease·권한을 만들지 않고 토큰을 붙이지 않는다
   # 서비스 파드의 우선순위 클래스(예: peaket-control). 비우면 칸을 넣지 않는다(docs/devops.md §5.2, ADR-0078 결정 8)
   priorityClassName: ""
+  # 서비스 파드의 노드 배치 값(쿠버네티스 nodeSelector·tolerations 그대로). 비우면 칸을 넣지 않아 지금 렌더와 같다.
+  # 핫패스는 온디맨드 노드(karpenter.sh/capacity-type: on-demand), ops-svc는 관제 풀(peaket.io/pool=ops:NoSchedule)에 둔다
+  # (ADR-0102 결정 3, docs/infra-handover.md §3.1, 추천 적용 2026-11-20, BUILD_ORDER BAT-085)
+  nodeSelector: {}
+  tolerations: []
   # Argo Rollouts 카나리(운영). 켜면 Deployment 대신 Rollout 하나를 내고, local·CI는 기본값(Deployment)을 쓴다
   # 단계의 pauseSeconds는 그 단계 뒤 분석·대기 시간(초)이다. 값은 [가정](docs/devops.md §6.2)
   rollout:

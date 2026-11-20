@@ -1,0 +1,190 @@
+# 생성 파일이다. 손으로 고치지 않는다(원천 deploy/policies/kyverno/policy-values.yaml에서 node tools/ci/kyverno-policies.mjs --write가 만든다, ADR-0318).
+# 환경: prod. 모드·허용 레지스트리·데모 이미지 목록은 원천이 정한다.
+# 정책 넷: peaket-image-admission(서명·출처·다이제스트), peaket-registry-allowlist(환경별 허용 레지스트리),
+#           peaket-pod-baseline(자원·PSS Restricted·latest·hostPath·데모 이미지·PEAKET_ENV·--disable-sigusr1),
+#           peaket-hotpath-placement(핫패스 온디맨드·ops-svc 관제 풀)
+---
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: peaket-image-admission
+  labels:
+    peaket.io/generated-by: kyverno-policies
+    peaket.io/environment: prod
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+    matchConditions:
+      - name: peaket-service-namespace
+        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  matchImageReferences:
+    - glob: "*"
+  validationConfigurations:
+    required: true
+    verifyDigest: true
+  attestors:
+    - name: peaketCosign
+      cosign:
+        keyless:
+          identities:
+            - subject: https://github.com/peaket/peaket/.github/workflows/build-image.yml@refs/heads/release/*
+              issuer: https://token.actions.githubusercontent.com
+            - subject: https://github.com/peaket/peaket/.github/workflows/build-image.yml@refs/heads/hotfix/*
+              issuer: https://token.actions.githubusercontent.com
+        ctlog:
+          url: https://rekor.sigstore.dev
+  attestations:
+    - name: peaketSlsa
+      intoto:
+        type: https://slsa.dev/provenance/v1
+      attestors:
+        - name: peaketCosign
+  validations:
+    - expression: images.containers.map(image, verifyImageSignatures(image, [attestors.peaketCosign])).all(result, result > 0)
+      message: PEAKET 이미지 서명을 확인하지 못했다(출시·핫픽스 빌드만 서명한다, docs/devops.md §4.2)
+    - expression: images.initContainers.map(image, verifyImageSignatures(image, [attestors.peaketCosign])).all(result, result > 0)
+      message: 초기 컨테이너 이미지의 PEAKET 서명을 확인하지 못했다
+    - expression: images.ephemeralContainers.map(image, verifyImageSignatures(image, [attestors.peaketCosign])).all(result, result > 0)
+      message: 임시 컨테이너 이미지의 PEAKET 서명을 확인하지 못했다
+    - expression: images.containers.map(image, verifyAttestationSignatures(image, attestations.peaketSlsa, [attestors.peaketCosign])).all(result, result > 0)
+      message: SLSA 출처 증명을 확인하지 못했다
+    - expression: images.containers.map(image, extractPayload(image, attestations.peaketSlsa).predicate.buildDefinition.buildType == 'https://actions.github.io/buildtypes/workflow/v1' && extractPayload(image, attestations.peaketSlsa).predicate.buildDefinition.externalParameters.workflow.repository == 'https://github.com/peaket/peaket' && extractPayload(image, attestations.peaketSlsa).predicate.buildDefinition.externalParameters.workflow.path == '.github/workflows/build-image.yml' && (extractPayload(image, attestations.peaketSlsa).predicate.buildDefinition.externalParameters.workflow.ref.startsWith('refs/heads/release/') || extractPayload(image, attestations.peaketSlsa).predicate.buildDefinition.externalParameters.workflow.ref.startsWith('refs/heads/hotfix/')) && extractPayload(image, attestations.peaketSlsa).predicate.buildDefinition.internalParameters.github.runner_environment == 'github-hosted').all(result, result)
+      message: 출처 증명이 release/hotfix ref와 GitHub 호스트 러너를 말하지 않는다(D-T32 ③)
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: peaket-registry-allowlist
+  labels:
+    peaket.io/generated-by: kyverno-policies
+    peaket.io/environment: prod
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+    matchConditions:
+      - name: peaket-service-namespace
+        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  variables:
+    - name: images
+      expression: "object.spec.containers.map(c, c.image) + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers.map(c, c.image) : [])"
+  validations:
+    - expression: variables.images.all(image, ['000000000000.dkr.ecr.ap-northeast-2.amazonaws.com/'].exists(prefix, image.startsWith(prefix)))
+      message: 허용 레지스트리 밖의 이미지다(000000000000.dkr.ecr.ap-northeast-2.amazonaws.com/, D-T33)
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: peaket-pod-baseline
+  labels:
+    peaket.io/generated-by: kyverno-policies
+    peaket.io/environment: prod
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+    matchConditions:
+      - name: peaket-service-namespace
+        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  variables:
+    - name: allContainers
+      expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])"
+    - name: nodeContainers
+      expression: "variables.allContainers.filter(c, ((has(c.command) ? c.command : []).size() > 0 && ((has(c.command) ? c.command : [])[0] == 'node' || (has(c.command) ? c.command : [])[0].endsWith('/node'))) || (has(c.args) ? c.args : []).exists(a, a == 'node' || a.endsWith('/node') || a.contains('node ')) || (has(c.command) ? c.command : []).exists(x, x.contains('node ')))"
+    - name: nodeContainersWithFlag
+      expression: "variables.nodeContainers.filter(c, ((has(c.command) ? c.command : []) + (has(c.args) ? c.args : [])).exists(x, x.contains('--disable-sigusr1')) || (has(c.env) && c.env.exists(e, e.name == 'NODE_OPTIONS' && has(e.value) && e.value.contains('--disable-sigusr1'))))"
+    - name: nodeContainersWithDebug
+      expression: "variables.nodeContainers.filter(c, ((has(c.command) ? c.command : []) + (has(c.args) ? c.args : [])).exists(x, x.contains('--inspect') || x.contains('--no-disable-sigusr1')) || (has(c.env) && c.env.exists(e, e.name == 'NODE_OPTIONS' && has(e.value) && (e.value.contains('--inspect') || e.value.contains('--no-disable-sigusr1')))))"
+  validations:
+    - expression: variables.allContainers.all(c, has(c.resources) && has(c.resources.requests) && c.resources.requests.size() > 0 && has(c.resources.limits) && c.resources.limits.size() > 0)
+      message: 모든 컨테이너(초기·임시 포함)에 자원 requests와 limits가 있어야 한다(docs/devops.md §4.3)
+    - expression: variables.allContainers.all(c, (has(c.securityContext) && has(c.securityContext.runAsNonRoot) && c.securityContext.runAsNonRoot == true ||  (has(object.spec.securityContext) && has(object.spec.securityContext.runAsNonRoot) && object.spec.securityContext.runAsNonRoot == true)) && has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && c.securityContext.allowPrivilegeEscalation == false && has(c.securityContext) && has(c.securityContext.readOnlyRootFilesystem) && c.securityContext.readOnlyRootFilesystem == true && has(c.securityContext) && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop.exists(d, d == "ALL") && ((has(c.securityContext) && has(c.securityContext.seccompProfile) && has(c.securityContext.seccompProfile.type) && c.securityContext.seccompProfile.type == "RuntimeDefault") ||  (has(object.spec.securityContext) && has(object.spec.securityContext.seccompProfile) && object.spec.securityContext.seccompProfile.type == "RuntimeDefault")))
+      message: Pod Security Standards Restricted(비루트·읽기 전용 루트·capability drop ALL·seccomp RuntimeDefault)를 지켜야 한다
+    - expression: variables.allContainers.all(c, c.image.contains('@sha256:') || (c.image.contains(':') && !c.image.endsWith(':latest')))
+      message: 이미지는 다이제스트나 latest가 아닌 태그로 고정한다
+    - expression: "!(has(object.spec.volumes) && object.spec.volumes.exists(v, has(v.hostPath)))"
+      message: hostPath 볼륨은 쓸 수 없다
+    - expression: variables.allContainers.all(c, ['pg-simulator', 'identity-simulator', 'demo-helper', 'bundle', 'example-svc'].all(name, !c.image.contains('/' + name + ':') && !c.image.contains('/' + name + '@') && !c.image.startsWith(name + ':') && !c.image.startsWith(name + '@')))
+      message: 스테이징·운영에는 데모 전용 이미지(pg-simulator·identity-simulator·demo-helper·bundle·example-svc)를 쓸 수 없다(ADR-0095)
+    - expression: object.spec.containers.all(c, has(c.env) && c.env.exists(e, e.name == 'PEAKET_ENV' && e.value == 'prod'))
+      message: PEAKET_ENV를 env에 직접 두고 prod로 맞춘다(envFrom Secret으로 넣으면 정책이 값을 보지 못한다)
+    - expression: variables.nodeContainers.size() == variables.nodeContainersWithFlag.size()
+      message: Node 컨테이너는 command/args 또는 NODE_OPTIONS에 --disable-sigusr1이 있어야 한다(D-T18 ②)
+    - expression: variables.nodeContainersWithDebug.size() == 0
+      message: Node 디버그 옵션(--inspect·--no-disable-sigusr1)은 쓸 수 없다(D-T18 ②, ASVS 13.4.2)
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: peaket-hotpath-placement
+  labels:
+    peaket.io/generated-by: kyverno-policies
+    peaket.io/environment: prod
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 15
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - pods
+    matchConditions:
+      - name: peaket-service-namespace
+        expression: object.metadata.namespace in ['queue', 'purchase', 'ticket', 'trust', 'core', 'web', 'platform', 'ops-breakglass']
+  variables:
+    - name: appName
+      expression: "has(object.metadata.labels) && 'app.kubernetes.io/name' in object.metadata.labels ? object.metadata.labels['app.kubernetes.io/name'] : ''"
+  validations:
+    - expression: "!(variables.appName in ['queue-svc', 'admission-ctrl', 'purchase-svc', 'realtime-gw', 'web']) || (has(object.spec.nodeSelector) && 'karpenter.sh/capacity-type' in object.spec.nodeSelector && object.spec.nodeSelector['karpenter.sh/capacity-type'] == 'on-demand')"
+      message: "핫패스 워크로드는 온디맨드 노드(nodeSelector karpenter.sh/capacity-type: on-demand)에 둔다(ADR-0102)"
+    - expression: variables.appName != 'ops-svc' || (has(object.spec.priorityClassName) && object.spec.priorityClassName == 'peaket-control' && has(object.spec.tolerations) && object.spec.tolerations.exists(t, t.key == 'peaket.io/pool' && t.value == 'ops' && t.effect == 'NoSchedule'))
+      message: ops-svc는 관제 풀(peaket.io/pool=ops:NoSchedule) toleration과 priorityClassName peaket-control을 받아야 한다(ADR-0102 결정 3)

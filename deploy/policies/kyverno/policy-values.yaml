@@ -1,0 +1,83 @@
+# Kyverno CEL 정책의 한 원천(docs/devops.md §4.3, ADR-0318, BUILD_ORDER BAS-150·BAT-085).
+# 환경별 정책 파일 deploy/policies/kyverno/envs/<환경>/policies.yaml은 이 파일에서 생성한다.
+# 손으로 고치지 않는다. 고칠 것은 이 파일을 고친 뒤 `node tools/ci/kyverno-policies.mjs --write`로 다시 만든다.
+# 생성기는 미해결 자리 표시(<ECR_ACCOUNT> 같은 꺾쇠)와 환경 누락·모르는 칸을 거부한다.
+version: 1
+
+# 정책을 거는 네임스페이스(이름 목록으로 고정한다. kube-* 같은 넓은 제외를 쓰지 않는다).
+# 시스템·애드온 네임스페이스(kube-system·kyverno·kube-node-lease·kube-public)는 여기에 넣지 않는다.
+namespaces:
+  - queue
+  - purchase
+  - ticket
+  - trust
+  - core
+  - web
+  - platform
+  - ops-breakglass
+
+# 데모 전용 이미지(저장소 이름 조각). 스테이징·운영 정책은 이 이미지를 거부한다(ADR-0095).
+# pg-simulator·identity-simulator는 시뮬레이터, demo-helper는 2인 승인 시연 도우미,
+# bundle은 측정 무대의 한 프로세스 합본, example-svc는 로컬 예제 서비스다.
+demoImages:
+  - pg-simulator
+  - identity-simulator
+  - demo-helper
+  - bundle
+  - example-svc
+
+# 핫패스 워크로드(온디맨드 노드에 둔다. karpenter.sh/capacity-type: on-demand [가정, BAT-076 NodePool 라벨과 맞춘다]).
+# payment-svc는 일반 풀이라 뺀다(docs/devops.md §5.2 네임스페이스 지도, ADR-0102 결정 3).
+hotPathWorkloads:
+  - queue-svc
+  - admission-ctrl
+  - purchase-svc
+  - realtime-gw
+  - web
+
+# 서명·출처 증명의 신원(docs/devops.md §4.2·§4.3, ADR-0169·ADR-0130). 값은 정본 자리에서 옮겨 적는다.
+image:
+  # Sigstore Fulcio 발급자
+  issuer: https://token.actions.githubusercontent.com
+  # Rekor 투명성 로그
+  rekor: https://rekor.sigstore.dev
+  # 출처 증명이 말하는 소스 저장소·빌드 워크플로
+  workflowRepository: https://github.com/peaket/peaket
+  workflowPath: .github/workflows/build-image.yml
+  # 출시·핫픽스 후보 빌드만 서명·게시한다. 두 ref만 받는다
+  workflowRefs:
+    - refs/heads/release/*
+    - refs/heads/hotfix/*
+  # SLSA v1 출처 증명 predicate와 GitHub buildType
+  provenanceType: https://slsa.dev/provenance/v1
+  buildType: https://actions.github.io/buildtypes/workflow/v1
+  # GitHub 호스트 러너만 받는다(자체 호스트 실행기 서명 거부, D-T32 ③)
+  runnerEnvironment: github-hosted
+
+ecr:
+  # [가정] AWS 계정이 생기면 12자리 계정 ID로 바꾼다. 생성기는 12자리 숫자만 받는다(4-4-4 표기 허용).
+  # ECR 허용 레지스트리는 이 계정 ID를 고정해 다른 계정의 *.dkr.ecr…을 받지 않는다(D-T33 ②).
+  account: "0000-0000-0000"
+  region: ap-northeast-2
+
+# 환경별 모드와 허용 레지스트리.
+#   demo    감사(Audit): 위반을 기록하고 파드를 띄운다. 웹훅 failurePolicy는 Ignore(데모 가용성) [가정]
+#   staging 거부(Deny):  기동을 거부한다. failurePolicy는 Fail
+#   prod    거부(Deny):  기동을 거부한다. failurePolicy는 Fail
+# 허용 접두사는 끝에 `/`를 둔다(ghcr.io/peaket-evil/을 받지 않게, D-T33 ②). 글롭(*)은 쓰지 않는다.
+environments:
+  demo:
+    mode: Audit
+    failurePolicy: Ignore
+    registries:
+      - ghcr.io/peaket/
+  staging:
+    mode: Deny
+    failurePolicy: Fail
+    registries:
+      - "{ecr}.dkr.ecr.ap-northeast-2.amazonaws.com/"
+  prod:
+    mode: Deny
+    failurePolicy: Fail
+    registries:
+      - "{ecr}.dkr.ecr.ap-northeast-2.amazonaws.com/"

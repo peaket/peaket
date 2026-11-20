@@ -1,0 +1,32 @@
+# Kyverno ArgoCD Application 자리(BUILD_ORDER BAS-150·BAT-085, ADR-0318, docs/devops.md §5.2).
+# 실제 클러스터 설치·동기화는 클러스터 애드온 단계가 한다. kind 시험은 이 파일을 쓰지 않고 Helm으로 직접 설치한다.
+# - 차트는 Kyverno 공식 차트 3.10.0(appVersion v1.20.0)이다. 판·이미지 다이제스트는 values.yaml에 고정한다.
+# - 두 번째 source는 이 저장소의 values.yaml을 `$values/...`로 읽기 위한 자리다(ArgoCD 다중 source).
+# - ApplicationSet이 아니라 Application 하나인 이유: 정책(deploy/policies/kyverno/envs/<환경>)은 환경 값이 생기는
+#   승격 단계에서 별도 Application으로 붙인다. 지금은 설치 값만 둔다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: peaket
+    peaket.io/environment: platform
+spec:
+  project: peaket-platform
+  sources:
+    - repoURL: https://kyverno.github.io/kyverno/
+      chart: kyverno
+      targetRevision: 3.10.0
+      helm:
+        valueFiles:
+          - $values/deploy/platform/kyverno/values.yaml
+    - repoURL: https://github.com/peaket/peaket
+      targetRevision: develop
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]

@@ -43,6 +43,12 @@ spec:
   {{- with .Values.service.priorityClassName }}
   priorityClassName: {{ . | quote }}
   {{- end }}
+  {{- with .Values.service.nodeSelector }}
+  nodeSelector: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.service.tolerations }}
+  tolerations: {{- toYaml . | nindent 4 }}
+  {{- end }}
   terminationGracePeriodSeconds: {{ .Values.service.terminationGracePeriodSeconds }}
   securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
   containers:

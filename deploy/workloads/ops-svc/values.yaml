@@ -6,6 +6,15 @@ name: ops-svc
 managementPort: 9464
 
 service:
+  # 관제·시스템 풀(ADR-0102 결정 3, docs/devops.md §5.2 네임스페이스 지도). 확장·제어 길이 서비스보다 먼저 뜬다
+  priorityClassName: peaket-control
+  nodeSelector:
+    peaket.io/pool: ops
+  tolerations:
+    - key: peaket.io/pool
+      operator: Equal
+      value: ops
+      effect: NoSchedule
   replicas: 2
   port: 8080
   command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
