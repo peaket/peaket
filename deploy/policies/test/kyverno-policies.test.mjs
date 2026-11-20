@@ -261,6 +261,62 @@ test('KV-07 ArgoCD Application은 공식 차트와 이 값 파일을 가리킨�
   assert.equal(app.spec.syncPolicy?.automated?.prune, true);
 });
 
+// ===================== KV-08 RV-01: kind에서 Kyverno가 실제로 뜨는가 =====================
+
+test('KV-08 RV-01 kind Kyverno는 peaket.io/pool=ops 라벨 없이 스케줄된다(운영 값은 관제 풀 그대로)', () => {
+  const values = parse(readFileSync(join(REPO, 'deploy', 'platform', 'kyverno', 'values.yaml'), 'utf8'));
+  const controllers = ['admissionController', 'backgroundController', 'cleanupController', 'reportsController'];
+  // 운영 값은 관제 풀을 요구한다(이 시험은 kind 쪽만 본다)
+  for (const part of controllers) assert.deepEqual(values[part].nodeSelector, { 'peaket.io/pool': 'ops' }, part);
+
+  const cluster = readFileSync(join(REPO, 'tools', 'local', 'cluster.mjs'), 'utf8');
+  // (가) kind 덧씌우기 값으로 네 컨트롤러의 nodeSelector·tolerations를 비우고 cluster.mjs가 그 파일을 함께 넘긴다
+  const kindValuesFile = join(REPO, 'deploy', 'platform', 'kyverno', 'kind-values.yaml');
+  let overlayClears = false;
+  if (existsSync(kindValuesFile)) {
+    const kindValues = parse(readFileSync(kindValuesFile, 'utf8')) ?? {};
+    overlayClears = controllers.every((part) => {
+      const selector = kindValues[part]?.nodeSelector;
+      const tolerations = kindValues[part]?.tolerations;
+      return (selector === undefined || Object.keys(selector).length === 0) && (tolerations === undefined || tolerations.length === 0);
+    });
+  }
+  const overlayUsed = cluster.includes('kind-values');
+  // (나) cluster.mjs가 kind 노드에 라벨을 단다(테인트는 없어 toleration은 무해하다)
+  const labelsNode = /['"]label['"][\s\S]{0,300}peaket\.io\/pool=ops/.test(cluster);
+  // (다) --set으로 컨트롤러의 nodeSelector를 비운다
+  const clearsBySet = /--set[^\n]*nodeSelector/.test(cluster);
+  assert.ok(
+    (overlayClears && overlayUsed) || labelsNode || clearsBySet,
+    'kind Kyverno 설치가 peaket.io/pool=ops 라벨을 요구해 네 컨트롤러가 Pending이 된다(RV-01). kind-values.yaml로 nodeSelector·tolerations를 비우고 cluster.mjs가 함께 넘기거나, cluster.mjs가 kind 노드에 라벨을 달거나, --set으로 비워야 한다',
+  );
+});
+
+// ===================== KV-09 RV-04: 레지스트리 정책 CEL =====================
+
+test('KV-09 D-T33 ①·② 레지스트리 CEL: 데모는 ghcr.io/peaket/와 imagePullSecrets 금지, 스테이징·운영은 ECR 계정 고정', () => {
+  for (const env of ENVS) {
+    const p = byName(load(env), POLICY_NAMES.registry);
+    const e = expressions(p.spec);
+    const images = p.spec.variables?.find((v) => v.name === 'images')?.expression ?? '';
+    // 레지스트리 CEL은 앱·초기·임시 컨테이너를 모두 본다
+    for (const list of ['object.spec.containers', 'object.spec.initContainers', 'object.spec.ephemeralContainers']) assert.ok(images.includes(list), `${env}: ${list}`);
+    // 글롭(*)이 아니라 접두사 `startsWith`이고, 접두사 뒤의 `/` 경계를 지킨다(peaket-evil을 받지 않는다)
+    assert.match(e, /image\.startsWith\(prefix\)/, env);
+    assert.equal(e.includes('*'), false, `${env}: 글롭을 쓰면 안 된다`);
+    if (env === 'demo') {
+      assert.ok(e.includes("['ghcr.io/peaket/']"), env);
+      assert.ok(p.spec.validations.some((v) => v.expression.includes('object.spec.imagePullSecrets') && v.expression.includes('size() > 0')), `${env}: imagePullSecrets 금지`);
+    } else {
+      assert.ok(e.includes(`['${ECR}']`), `${env}: ${ECR}`);
+      assert.equal(e.includes('ghcr.io/peaket/'), false, `${env}: 운영은 GHCR을 허용하지 않는다`);
+      assert.equal(e.includes('imagePullSecrets'), false, `${env}: 운영은 ECR 끌어오기 비밀을 쓸 수 있다`);
+    }
+    // `ghcr.io/peaket`(슬래시 없음) 같은 접두사가 남지 않는다
+    assert.doesNotMatch(e, /ghcr\.io\/peaket[^/']/, env);
+  }
+});
+
 // ===================== KV-04: 생성 파일이 원천과 같다 =====================
 
 test('KV-04 생성 파일 셋은 원천(policy-values.yaml)을 다시 만든 것과 바이트가 같다', async () => {

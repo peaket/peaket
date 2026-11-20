@@ -5,11 +5,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAllDocuments } from 'yaml';
 import { tempDir } from './git-fixture.mjs';
+import { POLICY_NAMES } from './kyverno-policies.mjs';
+import { applyPlan as applyPromotion, parseCandidates, promotionPlan } from './promote-plan.mjs';
 import {
   FORBIDDEN_GRPC_LB_PROFILE,
   MESH_NAMESPACES,
@@ -150,18 +152,35 @@ test('GV-01 D-T28 어떤 파드 env에도 PEAKET_GRPC_LB_PROFILE=headless-round-
 
 // ===================== GV-05·GV-06 D-T33: 환경별 허용 레지스트리 =====================
 
-test('GV-05 D-T33 ① 데모 허용 레지스트리는 ghcr.io/peaket/이고 그 접두사 안의 다이제스트 이미지는 통과한다', () => {
+test('GV-05 D-T33 ① 데모 허용 레지스트리는 ghcr.io/peaket/이고 그 접두사 안의 다이제스트 이미지는 통과한다 [ASVS v5.0.0-13.2.5]', () => {
   const allow = registryAllowlist(REPO, 'demo');
   assert.deepEqual(allow.problems, []);
   assert.deepEqual(allow.registries, ['ghcr.io/peaket/']);
   assert.deepEqual(checkRegistry([{ name: 'queue-svc', reference: `ghcr.io/peaket/queue-svc@${DIGEST}` }], allow.registries), []);
   // 로컬·CI도 데모의 허용 목록(GHCR)을 쓴다
   for (const env of ['local', 'ci']) assert.deepEqual(registryAllowlist(REPO, env).registries, ['ghcr.io/peaket/'], env);
-  // imagePullSecrets 없이 다이제스트로 참조한다(정적 단언은 정책 시험이 본다)
-  assert.equal(`ghcr.io/peaket/queue-svc@${DIGEST}`.includes('@sha256:'), true);
+  // 데모·로컬 매니페스트에는 imagePullSecrets를 두지 않고 다이제스트로 참조한다(D-T33 ①)
+  const dirs = ['deploy/envs/demo', 'deploy/envs/local'];
+  let checked = 0;
+  for (const dir of dirs) {
+    for (const name of readdirSync(join(REPO, dir)).filter((f) => /\.ya?ml$/.test(f))) {
+      const text = readFileSync(join(REPO, dir, name), 'utf8');
+      assert.doesNotMatch(text, /^\s*imagePullSecrets\s*:/m, `${dir}/${name}: imagePullSecrets를 둘 수 없다(D-T33 ①)`);
+      checked++;
+    }
+  }
+  assert.ok(checked > 0, '데모·로컬 값 파일을 하나도 읽지 못했다');
+  // 데모 레지스트리 정책의 CEL이 그 두 규칙(허용 접두사·imagePullSecrets 금지)을 실제로 건다
+  const demo = parseAllDocuments(readFileSync(join(REPO, 'deploy', 'policies', 'kyverno', 'envs', 'demo', 'policies.yaml'), 'utf8'))
+    .map((d) => d.toJS())
+    .find((o) => o.metadata?.name === POLICY_NAMES.registry);
+  assert.ok(demo, '데모 레지스트리 정책이 없다');
+  const expressions = demo.spec.validations.map((v) => v.expression);
+  assert.ok(expressions.some((e) => e.includes("['ghcr.io/peaket/']") && e.includes('image.startsWith(prefix)')), expressions.join('\n'));
+  assert.ok(expressions.some((e) => e.includes('object.spec.imagePullSecrets') && e.includes('size() > 0')), expressions.join('\n'));
 });
 
-test('GV-06 D-T33 ② 운영 허용 레지스트리는 PEAKET ECR 계정 하나이고 GHCR·다른 계정 ECR은 거부한다', () => {
+test('GV-06 D-T33 ② 운영 허용 레지스트리는 PEAKET ECR 계정 하나이고 GHCR·다른 계정 ECR은 거부한다 [ASVS v5.0.0-13.2.5]', () => {
   const allow = registryAllowlist(REPO, 'prod');
   assert.deepEqual(allow.problems, []);
   assert.deepEqual(allow.registries, [ECR_PREFIX]);
@@ -189,6 +208,38 @@ test('GV-06 D-T33 ② 운영 허용 레지스트리는 PEAKET ECR 계정 하나�
 test('GV-06 D-T33 ② 허용 레지스트리 목록이 비면 이미지가 없어도 실패로 본다(조용한 통과 금지)', () => {
   assert.deepEqual(checkRegistry([], ['ghcr.io/peaket/']), []);
   assert.equal(checkRegistry([], []).length, 1);
+});
+
+// ===================== RV-02: gitops-check와 ArgoCD가 같은 값 파일로 렌더한다 =====================
+
+test('RV-02 gitops-check는 ArgoCD와 같은 값 파일(환경 값 하나)로 렌더하고, 승격 값이 배치 값을 이어받는다', () => {
+  const dir = fixtureRoot({
+    workloads: { 'queue-svc': 'name: queue-svc\nservice:\n  nodeSelector:\n    karpenter.sh/capacity-type: on-demand\n  port: 8080\n' },
+  });
+  // promote-plan이 만드는 첫 승격 값(환경 값)을 그대로 쓴다
+  const plan = promotionPlan({
+    env: 'prod',
+    tag: 'v1.5.0',
+    candidates: parseCandidates(JSON.stringify([{ service: 'queue-svc', repository: `${ECR_PREFIX}queue-svc`, digest: DIGEST }])),
+    root: dir,
+  });
+  applyPromotion(plan, dir);
+
+  const calls = [];
+  const run = (_cmd, args) => {
+    calls.push(args);
+    return 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: queue-svc\nspec:\n  template:\n    spec:\n      containers: []\n';
+  };
+  const overlay = renderOverlay(dir, 'prod', { helm: 'helm', run });
+  assert.deepEqual(overlay.problems, []);
+  assert.equal(calls.length, 1);
+  const files = calls[0].flatMap((a, i) => (a === '-f' ? [calls[0][i + 1]] : []));
+  assert.deepEqual(files, [join(dir, 'deploy', 'envs', 'prod', 'queue-svc.yaml')], `Helm에 들어간 값 파일: ${files.join(', ')}`);
+  // ArgoCD ApplicationSet도 환경 값 하나만 valueFiles로 쓴다(고칠 때 어긋나지 않게 여기서 함께 본다)
+  const appset = parseAllDocuments(readFileSync(join(REPO, 'deploy', 'projects', 'applicationsets.yaml'), 'utf8'))
+    .map((d) => d.toJS())
+    .find((o) => o.metadata?.name === 'peaket-prod');
+  assert.deepEqual(appset.spec.template.spec.source.helm.valueFiles, ['{{ .path.path }}']);
 });
 
 // ===================== GV-04 D-T32 ③: 승격 값의 다이제스트·서명 =====================

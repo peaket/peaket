@@ -1145,9 +1145,11 @@ test('GV-02 D-T32 ② 주석 속 캐시 꼴과 게시 잡의 캐시는 빌드 �
   assert.doesNotMatch(r.out, /actions\/cache/);
 });
 
-// 시험 이의(2026-11-20, BAT-085): check-workflows는 `actions/cache@`만 보고 `actions/cache/restore@`·`actions/cache/save@`
-// 하위 경로는 아직 잡지 못한다. 여섯 꼴은 막지만 같은 액션의 하위 경로가 빠져 있다. 제품 코드는 시험 담당이 고치지 않는다.
-test('GV-02 D-T32 ② (남은 구멍) actions/cache/restore·save 하위 경로도 빌드 잡에서 막아야 한다', { skip: '규칙이 actions/cache@만 본다(계획 BAT-085 시험 이의, 제품 코드는 리뷰 반영 몫)' }, () => {
+// 리뷰 RV-05(2026-11-20, BAT-085): check-workflows.mjs의 빌드 잡 캐시 규칙(300행 `/\buses:\s*['"]?actions\/cache@/`)이
+// `actions/cache/restore@`·`actions/cache/save@` 하위 경로를 잡지 못한다. 고칠 대상은 그 규칙을
+// `/\buses:\s*['"]?actions\/cache(\/|@)/`로 넓히는 것이다. 시험 담당은 제품 코드를 고치지 않고 이 구멍을 skip 시험으로 고정한다.
+// 리뷰 반영 구현에서 규칙을 넓힌 뒤 이 skip을 풀어 restore·save 둘 다 1로 끝나는 것을 단언한다.
+test('RV-05 D-T32 ② actions/cache/restore·save 하위 경로도 빌드 잡에서 막아야 한다', { skip: 'check-workflows.mjs:300의 규칙이 actions/cache@만 본다(RV-05, 고칠 대상 /actions\\/cache(\\/|@)/)' }, () => {
   for (const action of ['restore', 'save']) {
     const r = run(withStep(`      - uses: actions/cache/${action}@${SHA}`), 'build-image.yml');
     assert.equal(r.code, 1, `actions/cache/${action}: ${r.out}`);

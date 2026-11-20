@@ -40,6 +40,12 @@ function valueFile(root, env, service, text) {
   writeFileSync(file, text);
   return file;
 }
+/** 배포 단위 기본 값(deploy/workloads/<서비스>/values.yaml) 하나를 만든다 */
+function workloadFile(root, service, text) {
+  const file = join(root, 'deploy', 'workloads', service, 'values.yaml');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text);
+}
 const OLD = 'image:\n  repository: ghcr.io/peaket/purchase-svc\n  digest: ' + sha('a') + '\n';
 const COMMENTED = '# 환경 값(docs/devops.md §5.3)\nname: purchase-svc\n\n' + OLD + '\nenv:\n  PEAKET_ENV: demo\n';
 
@@ -177,4 +183,33 @@ test('PR-04 promote.yml: 체크아웃자격증명을남기지않고_contents·pu
   // 승격 계획은 promote-plan.mjs가 만든다(워크플로가 값 파일을 손으로 고치지 않는다)
   assert.match(runs, /node tools\/ci\/promote-plan\.mjs --env "\$ENV_NAME" --tag "\$TAG"/);
   assert.equal(existsSync(join(REPO, 'tools', 'ci', 'promote-plan.mjs')), true);
+});
+
+test('RV-02 새 env 값 파일은 배포 단위 값의 service.nodeSelector·tolerations·priorityClassName을 이어받는다', () => {
+  const root = tempRoot();
+  workloadFile(root, 'queue-svc', 'name: queue-svc\nservice:\n  nodeSelector:\n    karpenter.sh/capacity-type: on-demand\n  port: 8080\n');
+  workloadFile(
+    root,
+    'ops-svc',
+    'name: ops-svc\nservice:\n  priorityClassName: peaket-control\n  nodeSelector:\n    peaket.io/pool: ops\n  tolerations:\n    - { key: peaket.io/pool, operator: Equal, value: ops, effect: NoSchedule }\n',
+  );
+  const candidates = parseCandidates(
+    JSON.stringify([
+      { service: 'queue-svc', repository: 'ghcr.io/peaket/queue-svc', digest: sha('d') },
+      { service: 'ops-svc', repository: 'ghcr.io/peaket/ops-svc', digest: sha('e') },
+    ]),
+  );
+  const plan = promotionPlan({ env: 'prod', tag: 'v1.5.0', candidates, root });
+  applyPlan(plan, root);
+
+  // ArgoCD는 환경 값 파일 하나만 Helm 값으로 쓴다. 승격 값이 배치 정책(peaket-hotpath-placement)의 요구를 담아야 한다
+  const queue = parseYaml(readFileSync(join(root, 'deploy', 'envs', 'prod', 'queue-svc.yaml'), 'utf8'));
+  assert.deepEqual(queue.service?.nodeSelector, { 'karpenter.sh/capacity-type': 'on-demand' });
+  assert.equal(queue.image?.digest, sha('d'));
+  assert.equal(queue.env?.PEAKET_ENV, 'prod');
+
+  const ops = parseYaml(readFileSync(join(root, 'deploy', 'envs', 'prod', 'ops-svc.yaml'), 'utf8'));
+  assert.deepEqual(ops.service?.nodeSelector, { 'peaket.io/pool': 'ops' });
+  assert.deepEqual(ops.service?.tolerations, [{ key: 'peaket.io/pool', operator: 'Equal', value: 'ops', effect: 'NoSchedule' }]);
+  assert.equal(ops.service?.priorityClassName, 'peaket-control');
 });
