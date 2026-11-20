@@ -469,7 +469,7 @@ erDiagram
         text pg_fallback "TOSS|PORTONE|NULL"
         text status "SCHEDULED|CANCELLED|POSTPONED. 기본은 SCHEDULED(이름은 추천 적용 2026-10-20, ADR-0073), 회차 취소 요청이 확정되면 CANCELLED, 연기가 확정되면 POSTPONED(바뀐 starts_at·ends_at을 따른다, docs/planning/03 §2.11). 판매 승인은 공연의 sale_review 칸이고(ADR-0093), 판매 상태(판매 전·판매 중·판매 종료)는 이 칸이 아니라 open_at·starts_at으로 계산한다(ADR-0064)"
         text scale "LARGE|MEDIUM|SMALL, 공연 규모(architecture §9.5). 공연의 판매 승인 때 회차마다 정하고 T-30분 점검 전까지 올리기만 한다. 승인 전 NULL(ADR-0062·0078·0093)"
-        int commission_rate_bp "판매 승인 때 promoter 값으로 고정한 중개수수료율(만분율, ADR-0060). 승인은 공연 단위라 그 공연의 회차에 같은 값을 쓴다(ADR-0093)"
+        int commission_rate_bp "판매 승인 때 promoter_contract의 지금 수수료율로 고정한 중개수수료율(만분율, ADR-0060·0320). 승인은 공연 단위라 그 공연의 회차에 같은 값을 쓴다(ADR-0093). 0033 이전에 승인된 회차는 마이그레이션이 그 파트너의 지금 계약(백필 1000bp)으로 한 번 채운다(RV-02)"
     }
     production {
         uuid id PK
@@ -2485,7 +2485,7 @@ erDiagram
 
 큰 원장 표의 보존 삭제(추천 적용 2026-10-28, ADR-0114. 2026-10-22 ADR-0083의 월 파티션을 다시 봤다): 주문(`purchase_order`)·결제(`payment`)·티켓(`ticket`)과 그 자식 표는 나누지 않는다. 5년 누적(주문 약 1,700만·티켓 약 3,500만)이 한 표로 감당할 크기이기 때문이다. 유일 규칙은 보통 UNIQUE로 건다(주문당 결제 1건은 `payment.order_id` UNIQUE). 주문 멱등키는 멱등 기록 표 `order_idempotency`가 맡는다(계정 × 작업 범위, 기술 검토 중간-046).
 
-**서비스마다 둔 멱등 기록 표(추천 적용 2026-10-29, ADR-0146 결정 1)**: openapi가 `Idempotency-Key`를 요구하는 쓰기는 50곳이다(2026-11-05 다시 셈. 공연 등록이 더해졌다, ADR-0198). 그 가운데 홀드(좌석 Redis `s:{event:E}:idem:*`, §3)와 주문 세 작업(`order_idempotency`) 밖의 작업은 요청을 받아 자기 DB의 상태를 바꾸는 서비스가 그 DB의 `idempotency_record`에 남긴다. 칸은 `account_ref`(부른 팬 계정이나 관리 계정), `operation`, `idempotency_key`, `request_hash`(메서드·실제 경로·본문 바이트의 SHA-256), `result_ref`(다시 돌려줄 응답의 대상), `created_at`이고, 기본 키는 앞의 셋이다. 칸의 형은 `account_ref text`, `operation text`, `idempotency_key uuid`(소문자로 맞춘 v4), `request_hash bytea`(32바이트), `result_ref text`(커밋할 때 채운다), `created_at timestamptz`(주입한 시계)이고, 서비스는 `packages/platform`의 `idempotencyRecordTable(작업 목록)`으로 같은 정의를 만든다(추천 적용 2026-11-01). `operation`은 그 서비스 작업 목록으로 `CHECK`한다. 키와 지문은 대상 행을 바꾸는 같은 트랜잭션에 적는다. 그래야 처음 커밋한 결과만 같은 상태 코드와 본문으로 돌려주고, 같은 키에 본문이 다르면 422로 가린다(docs/api/guidelines.md §4). 대상 표의 자연 유일 제약(예: 진행 중 취소 1건)만으로는 다른 본문을 가릴 수 없다. 24시간 [가정] 뒤 정비 시간에 지운다(`(created_at)` 인덱스, §5.1). Redis에만 두지 않는 것은 재시작·장애 조치 때 기록을 잃으면 같은 요청을 두 번 처리할 수 있기 때문이다. purchase의 `order_idempotency`는 같은 꼴이라 이름을 그대로 둔다. 다른 서비스로 넘기는 호출은 gRPC 멱등 키를 따로 싣는다(docs/api/proto/README.md).
+**서비스마다 둔 멱등 기록 표(추천 적용 2026-10-29, ADR-0146 결정 1)**: openapi가 `Idempotency-Key`를 요구하는 쓰기는 50곳이다(2026-11-05 다시 셈. 공연 등록이 더해졌다, ADR-0198). 그 가운데 홀드(좌석 Redis `s:{event:E}:idem:*`, §3)와 주문 세 작업(`order_idempotency`) 밖의 작업은 요청을 받아 자기 DB의 상태를 바꾸는 서비스가 그 DB의 `idempotency_record`에 남긴다. 칸은 `account_ref`(부른 팬 계정이나 관리 계정), `operation`, `idempotency_key`, `request_hash`(메서드·실제 경로·본문 바이트의 SHA-256), `result_ref`(다시 돌려줄 응답의 대상), `created_at`이고, 기본 키는 앞의 셋이다. 칸의 형은 `account_ref text`, `operation text`, `idempotency_key uuid`(소문자로 맞춘 v4), `request_hash bytea`(32바이트), `result_ref text`(커밋할 때 채운다), `created_at timestamptz`(주입한 시계)이고, 서비스는 `packages/platform`의 `idempotencyRecordTable(작업 목록)`으로 같은 정의를 만든다(추천 적용 2026-11-01). `operation`은 그 서비스 작업 목록으로 `CHECK`한다. 키와 지문은 대상 행을 바꾸는 같은 트랜잭션에 적는다. 그래야 처음 커밋한 결과만 같은 상태 코드와 본문으로 돌려주고, 같은 키에 본문이 다르면 422로 가린다(docs/api/guidelines.md §4). 대상 표의 자연 유일 제약(예: 진행 중 취소 1건)만으로는 다른 본문을 가릴 수 없다. 24시간 [가정] 뒤 정비 시간에 지운다(`(created_at)` 인덱스, §5.1). Redis에만 두지 않는 것은 재시작·장애 조치 때 기록을 잃으면 같은 요청을 두 번 처리할 수 있기 때문이다. purchase의 `order_idempotency`는 같은 꼴이라 이름을 그대로 둔다. 계약 조건 변경 요청(`POST /v1/ops/promoters/{promoterId}/contract-term-changes`)은 콘솔의 같은 키 재시도를 다른 운영자 계정도 그대로 받아야 하므로 `account_ref`에 계정 대신 작업 범위 `ops-contract-change`를 넣고, 같은 키·같은 본문이면 처음 202 응답(JSON)을 `result_ref`에서 재생한다(RV-03, ADR-0320). 다른 서비스로 넘기는 호출은 gRPC 멱등 키를 따로 싣는다(docs/api/proto/README.md).
 
 | 서비스 DB | 이 표에 남기는 작업 |
 | --- | --- |
@@ -2533,7 +2533,7 @@ erDiagram
 | `ticket.payer_account_id` | 주문의 계정 | 발권 | 바뀌지 않음 | 없음(그 시점 값) |
 | `ticket.event_id`·`seat_id` | 주문 항목 | 발권 | 바뀌지 않음 | 없음 |
 | `ticket.gate_zone` | 좌석 값이 있으면 `seat.gate_zone`, 없으면 `section.gate_zone` | 발권 | 오픈 뒤 바꿀 수 있음 | ticket-svc가 티켓 값을 고치고 `scanner_change`로 알린다 |
-| `event.commission_rate_bp` | `promoter.commission_rate_bp`(`promoter_contract`) | 판매 승인 | 바뀌지 않음 | 없음(ADR-0060) |
+| `event.commission_rate_bp` | `promoter_contract.commission_rate_bp`(지금 계약. 없으면 채우지 않는다) | 판매 승인(0033 이전 승인분은 마이그레이션 백필) | 바뀌지 않음 | 없음(ADR-0060·0320) |
 | `merch_order_item.unit_price`·`order_item.unit_price` | 상품·등급 가격 | 주문 | 바뀌지 않음 | 없음 |
 | `product.commission_rate_bp` | `promoter.commission_rate_bp`(`promoter_contract`) | 상품을 처음 게시할 때 | 바뀌지 않음 | 없음(ADR-0062) |
 | `merch_order_item.commission_rate_bp`·`option_snapshot` | `product.commission_rate_bp`, 고른 옵션과 `product.name`·`type`·`schema_version` | 주문 | 바뀌지 않음 | 없음. 상품 정산은 이 칸으로 계산한다(ADR-0101) |
