@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
-const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'loadtest', 'tools', 'ci', 'kind', 'image', 'specs', 'specs_full', 'web'];
+const SCOPES = ['docs', 'contracts', 'js', 'js_all', 'data', 'infra', 'deploy', 'gitops', 'loadtest', 'tools', 'ci', 'kind', 'image', 'specs', 'specs_full', 'web'];
 
 // 경로 앞머리 → 범위. 한 파일이 여러 범위에 들 수 있다
 const RULES = [
@@ -28,7 +28,12 @@ const RULES = [
   // 배포 상태 전체: 메시 정적 시험(deploy/platform/mesh/test, tools-check)이 deploy/ 아래 모든 YAML·템플릿을 훑어 다른 PeerAuthentication·
   // 인가 정책·웨이포인트 라벨·최소 TLS 판을 막으므로(D-T36, ADR-0285 결정 2·10), 운영 오버레이가 놓일 deploy/envs/와 차트·로컬 정의가 바뀌어도 tools를 고른다
   // (BAT-061 리뷰 RV-01). ci.yml은 tools 범위일 때 tools-check를 부른다
-  [/^deploy\//, ['deploy', 'tools']],
+  [/^deploy\//, ['deploy', 'tools', 'gitops']],
+  // 배포 상태 정적 검사(gitops-check.yml, BAS-150·BAT-085, ADR-0319)는 deploy/와 그 검사 도구가 바뀌면 돈다.
+  // Kyverno 정책·설치 값은 kind 입장 시험도 함께 고른다(정책을 실제 admission으로 본다)
+  [/^deploy\/policies\//, ['kind', 'tools', 'gitops']],
+  [/^tools\/ci\/(gitops-check|supply-chain-verify|kyverno-policies)\.mjs$/, ['gitops']],
+  [/^\.github\/workflows\/gitops-check\.yml$/, ['gitops']],
   // 로컬 kind 클러스터 시험(ci-kind.yml): 클러스터 정의·공용 차트·클러스터 도구, 서비스 이미지에 드는 것 전부(플랫폼 패키지와 서비스 뼈대,
   // 공용 설정 패키지, 작업 공간 파일)(openspec 변경 add-local-cluster-and-relay-deployment). 무거운 잡이라 화면·문서 변경에는 돌지 않고,
   // develop 푸시에서는 늘 돈다

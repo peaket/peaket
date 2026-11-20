@@ -1,0 +1,20 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [{ "name": "ghcr.io/peaket/queue-svc", "digest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222" } }],
+  "predicateType": "https://slsa.dev/provenance/v1",
+  "predicate": {
+    "buildDefinition": {
+      "buildType": "https://actions.github.io/buildtypes/workflow/v1",
+      "externalParameters": {
+        "workflow": {
+          "ref": "refs/heads/develop",
+          "repository": "https://github.com/peaket/peaket",
+          "path": ".github/workflows/build-image.yml"
+        }
+      },
+      "internalParameters": { "github": { "runner_environment": "github-hosted" } },
+      "resolvedDependencies": []
+    },
+    "runDetails": { "builder": { "id": "https://github.com/actions/runner" } }
+  }
+}

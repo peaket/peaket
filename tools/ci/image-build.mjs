@@ -19,6 +19,9 @@ export const BUILDER = 'peaket-oci';
 export const PLATFORMS = { 'linux/amd64': { arch: 'amd64', nodeArch: 'x64' }, 'linux/arm64': { arch: 'arm64', nodeArch: 'arm64' } };
 
 const IMAGE_NAME = /^[a-z0-9._-]{1,64}$/;
+/** 출시·핫픽스 가지의 출시 후보 빌드인가(docs/devops.md §3.4, D-T32 ②) */
+export const RELEASE_REF = /^refs\/heads\/(release|hotfix)\//;
+export const isReleaseRef = (ref) => typeof ref === 'string' && RELEASE_REF.test(ref);
 
 /**
  * 명령줄 인자. 빠졌거나 틀리면 던진다(이미지 이름은 소문자·숫자·.·_·- 1~64자, 플랫폼은 PLATFORMS 가운데 하나)
@@ -57,7 +60,8 @@ export function parseImageArgs(argv) {
 
 /**
  * OCI 묶음을 만드는 docker buildx build 인자(빌드 맥락은 저장소 뿌리 '.')
- * @param {{ dockerfile: string, image: string, platform: string, ociFile: string, metadataFile: string }} o
+ * noCache가 참이면 층 캐시를 쓰지 않는다(출시·핫픽스 후보 빌드, D-T32 ②)
+ * @param {{ dockerfile: string, image: string, platform: string, ociFile: string, metadataFile: string, noCache?: boolean }} o
  * @returns {string[]}
  */
 export function ociBuildArgs(o) {
@@ -68,6 +72,7 @@ export function ociBuildArgs(o) {
     BUILDER,
     '--platform',
     o.platform,
+    ...(o.noCache ? ['--no-cache'] : []),
     '-f',
     o.dockerfile,
     // 출처 증명·SBOM은 게시 잡이 붙인다(빌드 잡은 그 권한이 없다, docs/devops.md §4.2)
@@ -83,11 +88,12 @@ export function ociBuildArgs(o) {
 
 /**
  * 스모크용으로 같은 빌드를 이 기계의 Docker에 싣는 인자(캐시로 다시 만든다)
- * @param {{ dockerfile: string, platform: string, tag: string }} o
+ * noCache가 참이면 스모크 다시 빌드도 층 캐시를 쓰지 않는다(출시·핫픽스 후보 빌드, D-T32 ②)
+ * @param {{ dockerfile: string, platform: string, tag: string, noCache?: boolean }} o
  * @returns {string[]}
  */
 export function loadBuildArgs(o) {
-  return ['buildx', 'build', '--builder', BUILDER, '--platform', o.platform, '-f', o.dockerfile, '--provenance=false', '--sbom=false', '--load', '-t', o.tag, '.'];
+  return ['buildx', 'build', '--builder', BUILDER, '--platform', o.platform, ...(o.noCache ? ['--no-cache'] : []), '-f', o.dockerfile, '--provenance=false', '--sbom=false', '--load', '-t', o.tag, '.'];
 }
 
 /**
@@ -213,22 +219,24 @@ function ensureBuilder() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const o = parseImageArgs(process.argv.slice(2));
+  // 출시·핫픽스 후보 빌드는 캐시를 쓰지 않는다. OCI 빌드와 스모크 다시 빌드 둘 다다(D-T32 ②, docs/devops.md §3.4)
+  const noCache = isReleaseRef(process.env.GITHUB_REF);
   const { arch, nodeArch } = PLATFORMS[o.platform];
   mkdirSync(o.out, { recursive: true });
   const ociFile = join(o.out, `${o.image}-${arch}.oci.tar`);
   const metadataFile = join(o.out, `${o.image}-${arch}.metadata.json`);
   ensureBuilder();
-  docker(ociBuildArgs({ dockerfile: o.dockerfile, image: o.image, platform: o.platform, ociFile, metadataFile }));
+  docker(ociBuildArgs({ dockerfile: o.dockerfile, image: o.image, platform: o.platform, ociFile, metadataFile, noCache }));
   const digest = ociManifestDigest(readFileSync(ociFile));
   const meta = JSON.parse(readFileSync(metadataFile, 'utf8'));
   if (meta['containerimage.digest'] && meta['containerimage.digest'] !== digest) {
     throw new Error(`빌더가 알린 다이제스트(${meta['containerimage.digest']})와 OCI 묶음의 다이제스트(${digest})가 다르다`);
   }
   writeFileSync(join(o.out, `${o.image}-${arch}.digest`), `${digest}\n`);
-  console.log(`이미지 ${o.image} ${o.platform}: ${digest}`);
+  console.log(`이미지 ${o.image} ${o.platform}: ${digest}${noCache ? ' (캐시 없이)' : ''}`);
   if (o.smoke) {
     const tag = `peaket-smoke/${o.image}:${arch}`;
-    docker(loadBuildArgs({ dockerfile: o.dockerfile, platform: o.platform, tag }));
+    docker(loadBuildArgs({ dockerfile: o.dockerfile, platform: o.platform, tag, noCache }));
     const smokeScript = resolve(dirname(fileURLToPath(import.meta.url)), 'image-smoke.mjs');
     docker(smokeRunArgs({ tag, platform: o.platform, smokeScript, nodeArch }));
     docker(scmRunArgs({ tag, platform: o.platform, smokeScript }));

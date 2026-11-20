@@ -9,6 +9,7 @@
 //   6. 잡마다 timeout-minutes를 둔다(재사용 워크플로를 부르는 잡은 그 워크플로가 정한다)
 //   7. build-image.yml의 잡 build는 잡 권한이 contents: read 하나뿐이고 레지스트리 로그인·푸시·서명·출처 증명 단계가 없다(D-T32 ①)
 //      잡 publish가 있으면 저장소 코드를 체크아웃하지 않고(secrets 없음) 서명 신원·레지스트리 쓰기·출처 증명 권한과 cosign·attest 단계를 갖춘다(D-T32 ①, BAS-020)
+//      잡 build에는 캐시 복원·저장 곳(actions/cache·cache-from·cache-to·--cache-from·--cache-to·--mount=type=cache·cache-mode)도 없다(D-T32 ②).
 //   8. `branch-watch.mjs count`를 부르는 단계는 continue-on-error: true와 timeout-minutes를 둔다. 경고만 하는 점검이 필수 검사(branch-policy)를 막지 않게 한다(D-T49)
 //   9. GitHub 소유(소유자가 actions·github)가 아닌 액션·재사용 워크플로는 조직 허용 목록(infra/stacks/global/github/variables.tf의
 //      actions_patterns_allowed 기본값, 조직에 적용하는 것은 소유자)의 꼴(소유자/저장소@*, 소유자/*)에 맞아야 한다. 그 목록을 읽지 못하면 실패한다
@@ -294,6 +295,15 @@ const BUILD_JOB_FORBIDDEN = [
   [/\bcrane\s+(push|copy|cp|append|mutate)\b/, 'crane 푸시'],
   [/\bskopeo\s+copy\b/, 'skopeo copy'],
   [/\boras\s+push\b/, 'oras push'],
+  // 출시·핫픽스 후보 빌드는 캐시를 복원·저장하지 않는다(D-T32 ②, docs/devops.md §3.4 '출시 후보 빌드는 캐시를 쓰지 않는다').
+  // actions/cache·cache-from/cache-to·--cache-from/--cache-to·--mount=type=cache·cache-mode는 모두 캐시 복원이다
+  [/\buses:\s*['"]?actions\/cache@/, 'actions/cache 단계'],
+  [/\bcache-from\s*:/, 'cache-from 설정'],
+  [/\bcache-to\s*:/, 'cache-to 설정'],
+  [/--cache-from\b/, '--cache-from'],
+  [/--cache-to\b/, '--cache-to'],
+  [/--mount=type=cache\b/, '--mount=type=cache'],
+  [/\bcache-mode\s*:/, 'cache-mode'],
 ];
 
 function checkBuildJob(file, code, jobsStart) {
