@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stringify as stringifyYaml } from 'yaml';
-import { checkSeed, seatCountsOf } from './demo-seed.mjs';
+import { checkSeed, resolveSeedTimes, seatCountsOf } from './demo-seed.mjs';
 import { DEMO_SEED_FILE, readSeed } from './demo-auth.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -145,7 +145,7 @@ test('DS-05 시드 참조가 맞고 개수가 계획·d5 §10.3과 같다', () =
     seats: 2400,
     wheelchairSeats: 20,
     staff: 2,
-    devices: 3,
+    devices: 7,
   });
   const s = seed();
   assert.deepEqual(s.accounts.filter((a) => a.kind === 'fan').map((a) => a.key), FAN_KEYS, '팬 계정');
@@ -154,6 +154,47 @@ test('DS-05 시드 참조가 맞고 개수가 계획·d5 §10.3과 같다', () =
   assert.deepEqual(s.productions.map((p) => p.key), ['e1', 'e2', 'e3', 'e4'], '공연');
   assert.deepEqual(s.events.map((e) => e.key), ['e1-1025', 'e1-1026', 'e2-01', 'e3-01', 'e3-02', 'e3-03', 'e4-01'], '회차');
   assert.deepEqual(seatCountsOf(s), { seats: 2400, wheelchair: 20 }, '좌석 수');
+  // d5 §10.3의 기기 일곱(동문 4·서문 3). 시드 주석과 실제 값이 같아야 한다(RV-06)
+  assert.deepEqual(
+    s.staff.flatMap((st) => (st.devices ?? []).map((d) => d.name)),
+    ['동문-01', '동문-02', '동문-03', '동문-04', '서문-01', '서문-02', '서문-03'],
+    '기기 일곱 대',
+  );
+});
+
+test('RV-01 회차 오픈은 실행 시각 기준 상대 표기이고 지난 시각은 실패한다', () => {
+  const s = seed();
+  for (const e of s.events) assert.match(String(e.openAt), /^[+-]\d+[mhd]$/, `회차 ${e.key}의 openAt이 상대 표기가 아니다(${e.openAt})`);
+  // 상대 표기를 지금 기준으로 펼치면 모두 미래이고, 판매 종료(시작 24시간 전)보다 이르다
+  const resolved = resolveSeedTimes(s);
+  for (const e of resolved.events) {
+    assert.ok(Date.parse(e.openAt) > Date.now(), `${e.key}의 openAt이 지났다(${e.openAt})`);
+    assert.ok(Date.parse(e.openAt) < Date.parse(e.startAt) - 24 * 60 * 60_000, `${e.key}의 openAt이 판매 종료보다 늦다`);
+  }
+  assert.equal(checkSeed().ok, true, '지금 기준으로 시드 검사가 실패했다');
+
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-bat087-time-'));
+  const write = (name, value) => {
+    const file = join(dir, name);
+    writeFileSync(file, stringifyYaml(value));
+    return file;
+  };
+  const past = structuredClone(s);
+  past.events[0].openAt = '-1h';
+  const pastResult = checkSeed(write('past.yaml', past));
+  assert.equal(pastResult.ok, false, '지난 openAt(-1h)이 통과했다');
+  assert.ok(pastResult.problems.some((p) => p.includes('openAt') && /지났|지난/.test(p)), `지난 시각 문제가 없다: ${pastResult.problems.join('; ')}`);
+
+  const oldAbsolute = structuredClone(s);
+  oldAbsolute.events[0].openAt = '2020-01-01T00:00:00+09:00';
+  const oldResult = checkSeed(write('old-absolute.yaml', oldAbsolute));
+  assert.equal(oldResult.ok, false, '지난 절대 시각이 통과했다');
+
+  const garbage = structuredClone(s);
+  garbage.events[0].openAt = 'tomorrow';
+  const badResult = checkSeed(write('bad-time.yaml', garbage));
+  assert.equal(badResult.ok, false, '읽지 못하는 시각 표기가 통과했다');
+  assert.ok(badResult.problems.some((p) => p.includes('openAt')), `읽지 못하는 openAt 문제가 없다: ${badResult.problems.join('; ')}`);
 });
 
 test('DS-05 모든 참조가 있고 비밀은 값이 아니라 환경 값 이름이다', () => {

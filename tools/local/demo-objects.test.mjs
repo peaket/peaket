@@ -4,8 +4,10 @@
 // 실행(저장소 뿌리): node --test "tools/local/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { gatewayCertArgs, listenerCertificates, readGatewayObjects } from './gateway-objects.mjs';
 import {
   DEMO_CLUSTER,
@@ -55,6 +57,24 @@ const originStrings = (value) => {
 };
 const routesByName = (defs, name) => defs.find((o) => o.kind === 'HTTPRoute' && o.metadata?.name === name);
 const backendRefs = (defs) => defs.filter((o) => o.kind === 'HTTPRoute').flatMap((o) => (o.spec?.rules ?? []).flatMap((r) => r.backendRefs ?? []));
+
+/** demoSecrets가 요구하는 시험용 키(값은 가짜다) */
+function demoSecretKeys() {
+  return {
+    dbPassword: 'abcdefghijklmnop',
+    idvSecret: 'idv-secret',
+    pgSim: { secretKey: 'sim_sk_x', clientKey: 'sim_ck_x' },
+    tokenKeys: { fan: { privateJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y', d: 'd', kid: 'fan' } } },
+    pepperKey: 'pepper',
+    totpKey: 'totp',
+    internalToken: 'internal',
+    admission: { privateJwk: { kty: 'EC', d: 'd' }, jwks: { keys: [] } },
+    ecdh: { privateJwk: { kty: 'EC', d: 'd' }, publicJwk: { kty: 'EC', x: 'x', y: 'y' } },
+  };
+}
+
+const demoSecretsOf = () => demoSecrets({ keys: demoSecretKeys(), bootstrap: { version: 1, accounts: [], promoters: [] } });
+const secretNamed = (name) => demoSecretsOf().find((s) => s.metadata.name === name);
 
 test('DS-03 게이트웨이 객체는 실제 서비스 backendRef만 쓰고 gateway-echo·localGatewayObjects 흔적이 없다', () => {
   const defs = objects();
@@ -184,6 +204,34 @@ test('DS-04 게이트웨이 프록시는 로컬 kind 값(ClusterIP·100m·추적
     assert.equal(k?.envoyDeployment?.container?.resources?.requests?.cpu, '100m', `${p.metadata.name}의 CPU 요청`);
     assert.equal(p.spec?.telemetry?.tracing, undefined, `${p.metadata.name}에 추적이 남아 있다(로컬에 수집기가 없다)`);
   }
+});
+
+test('RV-02 합본 환경 파일이 결제 복귀·대기열 CORS에 실제 웹 출처를 쓴다', () => {
+  const env = secretNamed('demo-bundle-env')?.stringData ?? {};
+  const origin = demoOrigins().www;
+  assert.equal(origin, 'https://www.peaket.example:18441', '데모 웹 출처');
+  for (const svc of ['queue-svc', 'payment-svc']) {
+    const lines = String(env[`${svc}.env`] ?? '').split('\n');
+    assert.ok(env[`${svc}.env`], `${svc}.env가 없다`);
+    assert.ok(lines.includes(`PEAKET_WEB_ORIGIN=${origin}`), `${svc}.env에 PEAKET_WEB_ORIGIN=${origin}이 없다(결제 복귀·대기열 CORS가 다른 출처를 쓴다)`);
+  }
+});
+
+test('RV-03 core 실행 Secret은 슈퍼유저 DSN을 주지 않고 부트스트랩 Secret이 따로 있다', () => {
+  const core = secretNamed('demo-core');
+  assert.ok(core, 'demo-core Secret이 없다');
+  assert.equal(core.stringData.PEAKET_BOOTSTRAP_DATABASE_URL, undefined, 'demo-core가 슈퍼유저 DSN을 준다(core-svc 파드가 envFrom으로 받는다)');
+  assert.doesNotMatch(JSON.stringify(core.stringData), /postgres:\/\/postgres:/, 'demo-core에 슈퍼유저 DSN이 있다');
+  const boot = secretNamed('demo-bootstrap-core');
+  assert.ok(boot, 'demo-bootstrap-core Secret이 없다(부트스트랩 Job 전용)');
+  assert.match(String(boot.stringData.PEAKET_BOOTSTRAP_DATABASE_URL ?? ''), /^postgres:\/\/postgres:/, '부트스트랩 Secret에 슈퍼유저 DSN이 없다');
+  // core-svc 오버레이는 demo-core만 받는다(부트스트랩 Secret을 envFrom으로 받지 않는다)
+  const overlay = parseYaml(readFileSync(join(REPO, 'deploy/envs/local/demo/core-svc.yaml'), 'utf8'));
+  assert.equal(overlay.secretEnvFrom, 'demo-core', 'core-svc 오버레이의 Secret');
+  // 시드 적용기는 core 부트스트랩 Job에만 demo-bootstrap-core를 준다
+  const seedSource = readFileSync(join(REPO, 'tools', 'local', 'demo-seed.mjs'), 'utf8');
+  assert.match(seedSource, /name: 'demo-bootstrap-core'[^}]*secret: 'demo-bootstrap-core'/, 'core 부트스트랩 Job이 demo-bootstrap-core를 쓰지 않는다');
+  assert.doesNotMatch(seedSource, /name: 'demo-bootstrap-core'[^}]*secret: 'demo-core'/, 'core 부트스트랩 Job이 demo-core(역할 주소)를 쓴다');
 });
 
 test('DS-12 데모 객체·시드에 개인 키·Bearer 토큰·비밀 값이 없다', () => {

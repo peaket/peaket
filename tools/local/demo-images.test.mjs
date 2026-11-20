@@ -95,6 +95,14 @@ test('DS-01 로컬 오버레이 13개가 demo 태그·Never·PEAKET_ENV local이
   );
 });
 
+test('RV-09 정적 앱 셋(console-host·scanner·queue-room)의 워크로드 기본 명령은 nginx다', () => {
+  for (const name of ['console-host', 'scanner', 'queue-room']) {
+    const file = join(REPO, 'deploy', 'workloads', name, 'values.yaml');
+    const values = parseYaml(readFileSync(file, 'utf8'));
+    assert.deepEqual(values.service?.command, ['nginx', '-g', 'daemon off;'], `${name} 기본 명령이 nginx가 아니다(다음 환경이 시작하지 않는다)`);
+  }
+});
+
 test('DS-01 오버레이·게이트웨이·문서에 latest 태그나 IfNotPresent가 없다(demo는 Never)', () => {
   for (const w of DEMO_WORKLOADS) {
     const values = parseYaml(readFileSync(join(OVERLAY, `${w.name}.yaml`), 'utf8'));

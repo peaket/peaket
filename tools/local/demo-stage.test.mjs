@@ -70,10 +70,13 @@ export function demoExpectedWorkloads() {
   );
   writeFileSync(
     join(dir, 'run.mjs'),
-    `const cluster = await import(${JSON.stringify(new URL(`file:///${CLUSTER_MJS.replaceAll('\\', '/')}`).href)});
+    `// 실제 명령줄처럼 demo 계열 이름을 argv[2]에 둔다(cluster.mjs가 데모 클러스터 기본값을 잡는다)
 const cmd = process.argv[2];
+process.argv[2] = cmd === 'status' ? 'demo-status' : cmd === 'down' ? 'demo-down' : 'demo';
+const cluster = await import(${JSON.stringify(new URL(`file:///${CLUSTER_MJS.replaceAll('\\', '/')}`).href)});
 if (cmd === 'status') await cluster.demoStatus(process.argv.slice(3));
 else if (cmd === 'down') { await cluster.demoDown(); await cluster.demoDown(); }
+else if (cmd === 'ports') { try { cluster.demoHostPorts(); } catch (e) { console.error(e.message); process.exit(1); } }
 else { console.error('unknown'); process.exit(64); }
 `,
   );
@@ -191,6 +194,31 @@ test('DS-10 demo-down은 클러스터 이름·kubeconfig 기본값을 lane4-demo
   assert.match(source, /demo\(\?:-\|\$\)|demoCommand/, 'demo 명령 판별이 없다');
   const demoDown = source.slice(source.indexOf('export async function demoDown'));
   assert.doesNotMatch(demoDown.slice(0, demoDown.indexOf('\n}\n') + 1), /await down\(\)|kind\(\[/, 'demo-down이 클러스터 삭제(down)를 부른다');
+});
+
+test('RV-04 데모 포트가 없을 때 안내는 lane4-demo를 명시하고 기본 peaket을 지우지 않는다', () => {
+  const dir = fakeDir();
+  const r = runStage(dir, 'ports', { PEAKET_DEMO_CLUSTER: 'lane4-demo' });
+  assert.equal(r.status, 1, `포트가 없는데 exit ${r.status}다`);
+  assert.match(r.stderr, /PEAKET_CLUSTER=lane4-demo node tools\/local\/cluster\.mjs down/, `클러스터를 명시한 안내가 없다: ${r.stderr}`);
+  assert.match(r.stderr, /node tools\/local\/cluster\.mjs demo/, `demo로 다시 만들라는 안내가 없다: ${r.stderr}`);
+  // README의 복구 안내도 같은 명령을 쓴다(기본 peaket을 지우지 않는다)
+  const readme = readFileSync(join(REPO, 'deploy', 'envs', 'local', 'demo', 'README.md'), 'utf8');
+  assert.match(readme, /PEAKET_CLUSTER=lane4-demo node tools\/local\/cluster\.mjs down/, 'README 26행의 복구 안내');
+  assert.doesNotMatch(readme, /`node tools\/local\/cluster\.mjs down` 뒤 `up`/, 'README가 기본 peaket을 지우는 안내를 그대로 쓴다');
+});
+
+test('RV-05 demo 계열 명령은 PEAKET_DEMO_CLUSTER를 따르고 다른 명령과 클러스터를 가른다', () => {
+  const dir = fakeDir();
+  const env = { PEAKET_DEMO_CLUSTER: 'lane4-alt', PEAKET_CLUSTER: 'lane4-test' };
+  const r = runStage(dir, 'status', env);
+  assert.equal(r.status, 0, `demo-status 실패: ${r.stderr}`);
+  const args = r.calls[0]?.args ?? [];
+  const i = args.indexOf('--kubeconfig');
+  assert.ok(i >= 0, 'kubectl에 --kubeconfig가 없다');
+  assert.match(String(args[i + 1]).replaceAll('\\', '/'), /kubeconfig-lane4-alt$/, `kubeconfig가 PEAKET_DEMO_CLUSTER를 따르지 않는다: ${args[i + 1]}`);
+  const down = runStage(dir, 'down', env);
+  assert.match(down.stdout, /클러스터 lane4-alt는 그대로/, `demo-down이 PEAKET_DEMO_CLUSTER를 따르지 않는다: ${down.stdout}`);
 });
 
 test('DS-12 demo-status·demo-down 콘솔 출력에 비밀·개인정보가 없다', () => {

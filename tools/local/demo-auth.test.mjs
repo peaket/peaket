@@ -38,6 +38,9 @@ test('데모 인증 계약: 팬은 gRPC CreateSession, 관리·파트너는 공�
   assert.equal(out.passkey.name, seed.adminPasskeys.find((p) => p.accountKey === 'sujin')?.name);
   assert.equal(Object.hasOwn(out, 'password'), false, '패스키 결과에 비밀번호가 있다');
   assert.equal(Object.hasOwn(out, 'totpSeed'), false, '패스키 결과에 TOTP 시드가 있다');
+  // 파트너 관리자는 파트너 콘솔의 rpId를 낸다(콘솔 rpId를 내면 파트너 WebAuthn이 거부한다, RV-07)
+  const partner = await demoAuth('passkey', 'stella-admin');
+  assert.equal(partner.passkey.rpId, 'partner.peaket.example', '파트너 관리자 패스키의 rpId');
 });
 
 test('데모 인증 계약: 부트스트랩은 관리 계정 전부·promoter·패스키 공개 부분만 만든다', () => {

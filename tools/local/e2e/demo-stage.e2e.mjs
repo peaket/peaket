@@ -219,9 +219,11 @@ test('DS-02 이미지 열 개가 실제로 빌드되고 실행 이미지에 원�
       check('run', ['--rm', '--entrypoint', 'test', i.image, '-f', 'dist/main.js']);
       check('run', ['--rm', '--entrypoint', 'sh', i.image, '-c', 'test ! -d /app/src && test ! -d /app/test && test ! -d /app/.git']);
     } else if (i.workload === 'web' || i.workload === 'partner') {
-      // Next.js standalone(node) 이미지
+      // Next.js standalone(node) 이미지. 앱 이름으로 경로를 만든다(partner에 web 경로를 쓰지 않는다, RV-08)
+      const app = i.workload === 'web' ? 'apps/web' : 'apps/partner';
       check('run', ['--rm', '--entrypoint', 'node', i.image, '--version']);
-      check('run', ['--rm', '--entrypoint', 'sh', i.image, '-c', 'test ! -d /app/apps/web/src && test ! -d /app/.git && test ! -d /app/apps/web/.git']);
+      check('run', ['--rm', '--entrypoint', 'sh', i.image, '-c', `test ! -d /app/${app}/src && test ! -d /app/.git && test ! -d /app/${app}/.git`]);
+      if (i.workload === 'partner') check('run', ['--rm', '--entrypoint', 'sh', i.image, '-c', 'test -f /app/apps/partner/server.js']);
     } else {
       // nginx 정적 이미지에는 node가 없다(console-host·scanner·queue-room). 계획 §6/§9대로 nginx -t만 본다
       check('run', ['--rm', '--entrypoint', 'nginx', i.image, '-t']);
@@ -281,7 +283,7 @@ test('DS-09① 첫 시드가 공연·회차·좌석맵·스태프·기기를 만
   });
   assert.equal(devices.status, 200, `기기 목록 → ${devices.status}`);
   state.firstTotals.devices = (devices.json.items ?? devices.json.devices ?? []).length;
-  assert.equal(state.firstTotals.devices, 3, `시드 뒤 기기 수 ${state.firstTotals.devices}`);
+  assert.equal(state.firstTotals.devices, 7, `시드 뒤 기기 수 ${state.firstTotals.devices}`);
 
   // 시나리오 상태(주문·홀드)는 0이다
   const orders = Number(await psql('select count(*) from purchase_order'));
