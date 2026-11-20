@@ -1,6 +1,6 @@
 # BAT-085 GHCR 익명 끌어오기 측정 (측정 계획, 결과 없음)
 
-- **상태**: 아직 실행하지 않았다. 2026-11-20 구현 담당은 이 PC에서 Docker/kind를 돌리지 않았다(시험·검증 담당 몫, Docker 잠금 필요).
+- **상태**: 2026-11-20 검증 담당이 계획·감독 결정대로 미뤘다(D-T33 ③은 첫 출시 뒤). 2026-11-20 구현 담당은 이 PC에서 Docker/kind를 돌리지 않았다.
 - **정본**: [docs/devops.md](../../devops.md) §5.1·D-T33 ③, [ADR-0318](../../adr/0318-kyverno-image-admission-policies-and-offline-verification.md) 결정 6.
 
 ## 잴 것
@@ -17,3 +17,10 @@
 
 - 실행 시각, 이미지·다이제스트, 파드 이벤트, 걸린 시간을 이 파일에 적는다. 우리 패키지 몫은 '아직'으로 남긴다.
 - 데모 입장 정책의 `peaket-registry-allowlist`가 `imagePullSecrets`를 거부하는지도 같은 kind에서 함께 본다(D-T33 ①).
+
+## 실행 결과(2026-11-20, 검증 담당 ses_pending_verify_bat085)
+
+- **D-T33 ③은 미룬다**: 계획·감독 결정대로 우리 패키지의 익명 끌어오기는 첫 출시 후보 게시 뒤에 잰다.
+- **곁들여 본 것**: 호스트 Docker가 `ghcr.io/sigstore/cosign/cosign:v2.4.1`을 끌어오기 비밀 없이 받았다(kind e2e가 cosign을 쓸 때). 이것은 kind 파드의 익명 끌어오기가 아니므로 ③의 근거로 쓰지 않는다.
+- **우리 패키지**: 아직 게시된 이미지가 없다. 첫 푸시는 조직 패키지가 비공개가 기본이라 소유자가 공개 설정을 바꿔야 한다.
+- **정적 확인**: 데모 정책의 `imagePullSecrets` 금지와 GHCR 접두사는 단위 시험(GV-05·GV-06, KV-09)이 본다.
