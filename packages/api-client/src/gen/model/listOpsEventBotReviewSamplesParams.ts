@@ -12,8 +12,13 @@
 import type { CursorParameter } from './cursorParameter';
 import type { LimitParameter } from './limitParameter';
 import type { ListOpsEventBotReviewSamplesStatus } from './listOpsEventBotReviewSamplesStatus';
+import type { ReviewKindParameter } from './reviewKindParameter';
 
 export type ListOpsEventBotReviewSamplesParams = {
+/**
+ * 표본 종류. PASSED_SAMPLE은 통과 세션 표본(FR-049, 기본값), HUMAN_BASELINE은 출시 뒤 실제 사람 기준 표본(ADR-0174, 두 묶음 섞기). 한 회차에 두 종류가 있을 수 있어 두 GET이 이 값으로 고른다(BAT-197, 2026-11-21)
+ */
+reviewKind?: ReviewKindParameter;
 status?: ListOpsEventBotReviewSamplesStatus;
 /**
  * 불투명 커서(이전 응답의 nextCursor, guidelines §3)

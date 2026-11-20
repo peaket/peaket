@@ -3,7 +3,7 @@
 // 회차 취소 환불 gRPC(PEAKET_PURCHASE_GRPC_ADDR, BAT-425 GAT-130)와 판매 중지·재개 제어 gRPC(PEAKET_*_CONTROL_GRPC_ADDR, BAT-465 R-584)를 싣는다.
 // 명령 요청·결과 사건은 Kafka(ops.command-events)로도 받는다(HTTP /internal/v1/ops/command-events와 같은 처리기).
 import 'reflect-metadata';
-import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, loadLogPseudonymizer, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
@@ -20,6 +20,8 @@ import type { HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
+import { PromBotReviewSignals } from './modules/bot-review/index.js';
+import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
 
 const SERVICE = 'ops-svc';
@@ -129,6 +131,12 @@ const ticketGrpcUrl = process.env.PEAKET_TICKET_GRPC_URL;
 const scannerDevices = ticketGrpcUrl ? new GrpcTicketScannerDevices({ address: ticketGrpcUrl }) : undefined;
 // 감사 체크포인트 공개 앵커 서명 키(Ed25519, BAT-465 R-584). 운영은 비밀 관리에서 넣는다.
 const anchor = auditAnchorSignerFromEnv(process.env);
+// 봇 표본 검토(BAT-197 BOT-080): 후보 원장(ClickHouse, OPS-220 적재)과 trust-svc ApplyLabel을 조립한다.
+// 주소가 없으면 닫힌 대역으로 시작하고 그 경로만 503이다(진행은 배치가 없어 404).
+const botReviewSignals = new PromBotReviewSignals();
+const botReviewSource = botReviewSourceFromEnv(process.env);
+const botReviewLabels = botReviewLabelsFromEnv(process.env);
+const botReviewActorRef = loadLogPseudonymizer(process.env).pseudonymizer;
 const service = await createService({
   name: SERVICE,
   adminAuthz,
@@ -145,11 +153,20 @@ const service = await createService({
     approvals,
     adminAccounts: { identity: adminIdentity, ...(reauth ? { reauth } : {}) },
     eventCancellations,
+    botReview: {
+      source: botReviewSource.source,
+      ...(botReviewLabels ? { labels: botReviewLabels } : {}),
+      signals: botReviewSignals,
+      accountRef: (accountId: string) => botReviewActorRef.ref(accountId),
+    },
     onCommandEvent: (h) => (commandEvents = h),
   }),
 });
 eventCancellationSignals.register(service.metrics.registry);
+botReviewSignals.register(service.metrics.registry);
 if (anchor.warning) service.logger.warn({}, anchor.warning);
+if (botReviewSource.warning) service.logger.warn({}, botReviewSource.warning);
+if (!botReviewLabels) service.logger.warn({}, 'PEAKET_TRUST_GRPC_URL이 없어 표본 판정 HUMAN·BOT이 503 bot-review-label-unavailable이다(UNDECIDED는 기록된다)');
 if (!partnerRoleChecked) service.logger.warn({}, 'PEAKET_PARTNER_DATABASE_URL이 없어 파트너 회차 취소 경로가 관제 DB 풀을 함께 쓴다(local·ci만, 행 보안은 앱 대조만 남는다)');
 if (!purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 환불 gRPC를 쓰지 않는다(내부 HTTP 호환 경로)');
 if (!purchaseUrl && !purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_PURCHASE_GRPC_ADDR이 없어 EVENT_CANCEL 실행을 하지 않는다');
@@ -226,6 +243,7 @@ process.once('SIGTERM', () => {
         service.logger.error({ err }, '제어 gRPC 클라이언트 닫기 실패');
       }
       scannerDevices?.close();
+      botReviewLabels?.close();
       adminIdentity.close();
       adminAuthz.close();
       await tenantRedis?.close();

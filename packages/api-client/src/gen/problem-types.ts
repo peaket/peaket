@@ -4,6 +4,7 @@
 export type ProblemType =
   | 'admin-account-locked'
   | 'admin-account-state-conflict'
+  | 'admin-account-unavailable'
   | 'admin-email-in-use'
   | 'admin-login-busy'
   | 'admin-login-code-invalid'
@@ -33,6 +34,11 @@ export type ProblemType =
   | 'booking-restricted'
   | 'booth-mismatch'
   | 'booth-not-authorized'
+  | 'bot-review-already-recorded'
+  | 'bot-review-assign-conflict'
+  | 'bot-review-evidence-required'
+  | 'bot-review-label-unavailable'
+  | 'bot-review-source-unavailable'
   | 'cancel-deadline-passed'
   | 'cancellation-conflict'
   | 'cancellation-not-account-pending'
@@ -336,6 +342,7 @@ export const PROBLEM_TYPE_BASE = "https://peaket.example/problems/";
 export const PROBLEM_TYPES = {
   'admin-account-locked': { status: 423, title: "계정이 잠겼습니다" },
   'admin-account-state-conflict': { status: 409, title: "지금 계정 상태에서는 할 수 없습니다" },
+  'admin-account-unavailable': { status: 503, title: "관리 계정 서비스에 닿지 못했습니다" },
   'admin-email-in-use': { status: 409, title: "이미 쓰는 이메일입니다" },
   'admin-login-busy': { status: 429, title: "잠시 뒤 다시 시도해 주세요" },
   'admin-login-code-invalid': { status: 401, title: "인증 앱 코드가 맞지 않습니다" },
@@ -365,6 +372,11 @@ export const PROBLEM_TYPES = {
   'booking-restricted': { status: 403, title: "예매가 제한된 계정입니다" },
   'booth-mismatch': { status: 409, title: "티켓 보유자와 다른 분입니다" },
   'booth-not-authorized': { status: 403, title: "부스 재발급 허용이 없거나 10분이 지났습니다" },
+  'bot-review-already-recorded': { status: 409, title: "이미 판정을 기록한 표본입니다" },
+  'bot-review-assign-conflict': { status: 409, title: "표본 배치를 만드는 요청이 겹쳤습니다" },
+  'bot-review-evidence-required': { status: 422, title: "사람 기준 표본을 봇으로 판정하려면 행동 요약 밖의 근거가 필요합니다" },
+  'bot-review-label-unavailable': { status: 503, title: "봇 라벨을 반영하지 못했습니다" },
+  'bot-review-source-unavailable': { status: 503, title: "표본 후보 원장에 닿지 못했습니다" },
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'cancellation-not-account-pending': { status: 409, title: "환급 계좌를 기다리는 취소가 아닙니다" },

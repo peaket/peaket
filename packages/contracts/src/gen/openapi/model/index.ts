@@ -418,6 +418,7 @@ export * from './getEventSeatmapSnapshotParams.zod.js';
 export * from './getIdentityProviders200.zod.js';
 export * from './getIdentityScannerSessions200.zod.js';
 export * from './getIdentitySessions200.zod.js';
+export * from './getOpsEventBotReviewParams.zod.js';
 export * from './getOpsEventLiveParams.zod.js';
 export * from './getOpsFraudCaseReplayExportParams.zod.js';
 export * from './getOpsLiveHeaders.zod.js';

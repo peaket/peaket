@@ -11,10 +11,12 @@
  */
 import * as zod from 'zod';
 
+export const listOpsEventBotReviewSamplesParamsReviewKindDefault = `PASSED_SAMPLE`;
 export const listOpsEventBotReviewSamplesParamsLimitMax = 100;
 
 
 export const ListOpsEventBotReviewSamplesParams = zod.object({
+  "reviewKind": zod.enum(['PASSED_SAMPLE', 'HUMAN_BASELINE']).default(listOpsEventBotReviewSamplesParamsReviewKindDefault),
   "status": zod.enum(['PENDING', 'RECORDED']).optional(),
   "cursor": zod.string().optional(),
   "limit": zod.int().min(1).max(listOpsEventBotReviewSamplesParamsLimitMax).optional()

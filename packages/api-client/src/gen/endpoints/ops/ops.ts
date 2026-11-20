@@ -130,6 +130,7 @@ import type {
   EventCancellationRequestPage,
   EventReport,
   EventReportSummary,
+  GetOpsEventBotReviewParams,
   GetOpsEventLiveParams,
   GetOpsLiveParams,
   GetOpsWidget200,
@@ -16245,28 +16246,42 @@ export type getOpsEventBotReviewResponse404 = {
   status: 404
 }
 
+export type getOpsEventBotReviewResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type getOpsEventBotReviewResponseSuccess = (getOpsEventBotReviewResponse200) & {
   headers: Headers;
 };
-export type getOpsEventBotReviewResponseError = (getOpsEventBotReviewResponse401 | getOpsEventBotReviewResponse403 | getOpsEventBotReviewResponse404) & {
+export type getOpsEventBotReviewResponseError = (getOpsEventBotReviewResponse401 | getOpsEventBotReviewResponse403 | getOpsEventBotReviewResponse404 | getOpsEventBotReviewResponse503) & {
   headers: Headers;
 };
 
-export const getGetOpsEventBotReviewUrl = (eventId: string,) => {
+export const getGetOpsEventBotReviewUrl = (eventId: string,
+    params?: GetOpsEventBotReviewParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/v1/ops/events/${encodeURIComponent(String(eventId))}/bot-review`
+  return stringifiedParams.length > 0 ? `/v1/ops/events/${encodeURIComponent(String(eventId))}/bot-review?${stringifiedParams}` : `/v1/ops/events/${encodeURIComponent(String(eventId))}/bot-review`
 }
 
 /**
- * FR-049, POL-006, SCR-067, ADR-0174, docs/planning/03 §3 '봇 판정 표본 검토' 행, docs/features/bot-defense.md §13. reviewKind HUMAN_BASELINE(출시 뒤 실제 사람 기준 표본 검토, 두 묶음)이면 묶음별 진행 수와 결과 비율을 싣지 않고 interim은 null이다(그것으로 방금 본 세션의 묶음을 알 수 있어서, d5 §7.15). 표본이 아직 없으면 404다. 경로와 칸은 wbs 3.2.3이 정한다고 d5·bot-defense §20에 적혀 있어 이 초안이 먼저 정한다 [가정]. Cache-Control: no-store
+ * FR-049, POL-006, SCR-067, ADR-0174, docs/planning/03 §3 '봇 판정 표본 검토' 행, docs/features/bot-defense.md §13. reviewKind 질의로 표본 종류를 고른다(기본 PASSED_SAMPLE, BAT-197 2026-11-21). reviewKind HUMAN_BASELINE(출시 뒤 실제 사람 기준 표본 검토, 두 묶음)이면 묶음별 진행 수와 결과 비율을 싣지 않고 interim은 null이다(그것으로 방금 본 세션의 묶음을 알 수 있어서, d5 §7.15). 표본이 아직 없으면 404다. 경로와 칸은 wbs 3.2.3이 정한다고 d5·bot-defense §20에 적혀 있어 이 초안이 먼저 정한다 [가정]. Cache-Control: no-store
  * @summary 회차의 봇 표본 검토 진행(건수, 기한, 중간 결과)
  */
-export const getOpsEventBotReview = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsEventBotReviewResponseSuccess> => {
+export const getOpsEventBotReview = async (eventId: string,
+    params?: GetOpsEventBotReviewParams, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsEventBotReviewResponseSuccess> => {
 
-  return orvalFetch<getOpsEventBotReviewResponseSuccess>(getGetOpsEventBotReviewUrl(eventId),
+  return orvalFetch<getOpsEventBotReviewResponseSuccess>(getGetOpsEventBotReviewUrl(eventId,params),
   {
     ...options,
     method: 'GET'
@@ -16279,23 +16294,25 @@ export const getOpsEventBotReview = async (eventId: string, options?: Parameters
 
 
 
-export const getGetOpsEventBotReviewQueryKey = (eventId: string,) => {
+export const getGetOpsEventBotReviewQueryKey = (eventId: string,
+    params?: GetOpsEventBotReviewParams,) => {
     return [
-    `/v1/ops/events/${eventId}/bot-review`
+    `/v1/ops/events/${eventId}/bot-review`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetOpsEventBotReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+export const getGetOpsEventBotReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(eventId: string,
+    params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetOpsEventBotReviewQueryKey(eventId);
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsEventBotReviewQueryKey(eventId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsEventBotReview>>> = ({ signal }) => getOpsEventBotReview(eventId, { signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsEventBotReview>>> = ({ signal }) => getOpsEventBotReview(eventId,params, { signal, ...requestOptions });
 
 
 
@@ -16309,7 +16326,8 @@ export type GetOpsEventBotReviewQueryError = ErrorType<UnauthorizedResponse | Pr
 
 
 export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
- eventId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
+ eventId: string,
+    params: undefined |  GetOpsEventBotReviewParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getOpsEventBotReview>>,
           TError,
@@ -16319,7 +16337,8 @@ export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOps
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
- eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
+ eventId: string,
+    params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getOpsEventBotReview>>,
           TError,
@@ -16329,7 +16348,8 @@ export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOps
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
- eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ eventId: string,
+    params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -16337,11 +16357,12 @@ export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOps
  */
 
 export function useGetOpsEventBotReview<TData = Awaited<ReturnType<typeof getOpsEventBotReview>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
- eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ eventId: string,
+    params?: GetOpsEventBotReviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventBotReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getGetOpsEventBotReviewQueryOptions(eventId,options)
+  const queryOptions = getGetOpsEventBotReviewQueryOptions(eventId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -16402,7 +16423,7 @@ export const getListOpsEventBotReviewSamplesUrl = (eventId: string,
 }
 
 /**
- * FR-049, POL-006, SCR-067, ADR-0174, authz-matrix §4.1 봇 판정 범주 행. 개인 식별 정보(계정·이름·연락처·IP·기기 가명)와 판정 기준의 세부 가중치를 싣지 않는다. 서버가 정한 무작위 순서로 준다. HUMAN_BASELINE이면 riskBand·behaviorSummaryBand를 null로 두고 묶음과 판정을 싣지 않는다. status를 주지 않으면 아직 기록하지 않은 표본만 준다 [가정]. Cache-Control: no-store
+ * FR-049, POL-006, SCR-067, ADR-0174, authz-matrix §4.1 봇 판정 범주 행. reviewKind 질의로 표본 종류를 고른다(기본 PASSED_SAMPLE, BAT-197 2026-11-21). 개인 식별 정보(계정·이름·연락처·IP·기기 가명)와 판정 기준의 세부 가중치를 싣지 않는다. 서버가 정한 무작위 순서로 준다. HUMAN_BASELINE이면 riskBand·behaviorSummaryBand를 null로 두고 묶음과 판정을 싣지 않는다. status를 주지 않으면 아직 기록하지 않은 표본만 준다 [가정]. Cache-Control: no-store
  * @summary 검토할 세션 표본(개인 식별 정보·판정 가중치 없음)
  */
 export const listOpsEventBotReviewSamples = async (eventId: string,
@@ -16541,10 +16562,15 @@ export type createOpsBotReviewSampleJudgementResponse422 = {
   status: 422
 }
 
+export type createOpsBotReviewSampleJudgementResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsBotReviewSampleJudgementResponseSuccess = (createOpsBotReviewSampleJudgementResponse200) & {
   headers: Headers;
 };
-export type createOpsBotReviewSampleJudgementResponseError = (createOpsBotReviewSampleJudgementResponse400 | createOpsBotReviewSampleJudgementResponse401 | createOpsBotReviewSampleJudgementResponse403 | createOpsBotReviewSampleJudgementResponse404 | createOpsBotReviewSampleJudgementResponse409 | createOpsBotReviewSampleJudgementResponse410 | createOpsBotReviewSampleJudgementResponse422) & {
+export type createOpsBotReviewSampleJudgementResponseError = (createOpsBotReviewSampleJudgementResponse400 | createOpsBotReviewSampleJudgementResponse401 | createOpsBotReviewSampleJudgementResponse403 | createOpsBotReviewSampleJudgementResponse404 | createOpsBotReviewSampleJudgementResponse409 | createOpsBotReviewSampleJudgementResponse410 | createOpsBotReviewSampleJudgementResponse422 | createOpsBotReviewSampleJudgementResponse503) & {
   headers: Headers;
 };
 
@@ -16557,7 +16583,7 @@ export const getCreateOpsBotReviewSampleJudgementUrl = (sampleId: string,) => {
 }
 
 /**
- * FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174)
+ * FR-049, POL-006, SCR-067, ADR-0174. 표본마다 한 번이다. 기록은 세션 ID와 판정 결과·근거 종류만 남기고 메모 칸은 두지 않는다(POL-006, d5의 '그 밖(메모)'는 근거 종류 OTHER로 받는다 [가정]). ops-svc가 trust.proto TrustLabelService.ApplyLabel(출처 SAMPLE_REVIEW, 표본의 묶음 review_batch와 적용 판 판정 applied_verdict를 함께)로 반영한다(bot-defense §9·§12). reviewKind HUMAN_BASELINE에서 BOT이면 행동 요약 밖의 근거 evidenceKinds가 하나 이상 있어야 한다(없으면 422). UNDECIDED는 trust-svc로 보내지 않아 라벨과 차단 목록 변화가 없고, 표본 판정 기록에만 남아 fp_review.csv의 unsure로 센다(추천 적용 2026-11-10, bot-defense §9 '첫 구현', ADR-0174). ApplyLabel이 실패하면 판정 행을 쓰지 않고 503 bot-review-label-unavailable이다(같은 Idempotency-Key로 다시 보낸다, B15). Cache-Control: no-store
  * @summary 표본 판정 기록(세션 ID와 판정 결과·근거 종류만)
  */
 export const createOpsBotReviewSampleJudgement = async (sampleId: string,

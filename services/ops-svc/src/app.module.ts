@@ -11,6 +11,7 @@ import { PriorityModule, type PriorityModuleDeps } from './modules/priority/inde
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
 import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } from './modules/payouts/index.js';
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
+import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
 import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
 import {
   CsCaseEventCancellationCases,
@@ -54,6 +55,16 @@ interface CommonWiring {
   readonly adminAccounts?: {
     readonly identity: AdminIdentity;
     readonly reauth?: AdminReauth;
+  };
+  /**
+   * 봇 표본 검토(BAT-197 BOT-080, FR-049). source가 없으면 진행·배정이 503이고, labels가 없으면 HUMAN·BOT 판정이 503이다.
+   * signals는 main.ts가 서비스 레지스트리에 붙인다. accountRef는 처리자의 로그 가명이다.
+   */
+  readonly botReview?: {
+    readonly source?: BotReviewSource;
+    readonly labels?: TrustLabels;
+    readonly signals?: BotReviewSignals;
+    readonly accountRef?: (accountId: string) => string | undefined;
   };
   /**
    * 회차 취소 요청(BAT-425 GAT-130 잔여, BAT-420 GAT-110). refunds·reauth가 없으면 요청·확정이 503이다.
@@ -139,6 +150,7 @@ export class AppModule {
             ...(o.adminAccounts ? { admin: o.adminAccounts } : {}),
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
           }),
+          BotReviewModule.register({ database: o.database, ...(o.botReview ?? {}) }),
           EventCancellationsModule.register(
             eventCancellationDeps(
               o,
@@ -181,6 +193,7 @@ export class AppModule {
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
           },
         }),
+        BotReviewModule.register({ ...(o.botReview ?? {}) }),
         EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(csCases) }, chain)),
       ],
     };
