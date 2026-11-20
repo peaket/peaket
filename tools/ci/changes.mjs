@@ -72,6 +72,9 @@ const RULES = [
   // platform 전체는 넣지 않는다(서비스만 쓰는 모듈까지 화면 잡을 돌리지 않게, BAS-170)
   // 좌석맵 패키지는 세 엔진 검사(seatmap-pkg 잡, BUILD_ORDER HOT-120)가 본다. 구매 세션 서명기 원본과 서버와 같은 시험 벡터는
   // 서명기 세 엔진 검사(purchase 잡, HOT-360 ①, ADR-0221 결정 7)가 본다
+  // 좌석 실시간(BAT-182, HOT-357, FE-T11·S-T13·S-T21·S-T31 ⑥): 좌석 화면·좌석맵 패키지·가짜 스트림·5만 석 좌석 시나리오는 web 잡(seats 포함)이 본다.
+  // 아래 web 규칙이 이미 잡지만, 좌석 경로를 한 줄로 드러내 새 파일이 생겨도 빠뜨리지 않게 한다
+  [/^(apps\/web\/src\/_pages\/seats\/|apps\/web\/scripts\/mock-api(\/|\.mjs$)|packages\/seatmap\/|tools\/web-checks\/seats\/)/, ['web']],
   [
     /^(apps\/|packages\/(ds|config|seatmap)\/|packages\/platform\/(src\/(telemetry-app-server|telemetry-sdk|trace-boundary|client-family|pseudonym|config|deadline)\.ts|package\.json)$|packages\/api-client\/src\/purchase\/|services\/core-svc\/test-int\/fixtures\/seatmap-editor\/|docs\/api\/vectors\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|tools\/storybook\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
     ['web'],

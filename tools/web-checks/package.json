@@ -14,6 +14,7 @@
     "seatmap": "playwright test -c playwright.seatmap.config.mjs",
     "budgets": "playwright test -c playwright.budgets.config.mjs",
     "seatmap-pkg": "playwright test -c playwright.seatmap-pkg.config.mjs",
+    "seats": "playwright test -c playwright.seats.config.mjs",
     "ds": "playwright test -c playwright.ds.config.mjs",
     "csp": "playwright test -c playwright.csp.config.mjs",
     "reflow": "playwright test -c playwright.reflow.config.mjs",
