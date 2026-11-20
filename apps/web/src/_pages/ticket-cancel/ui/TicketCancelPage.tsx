@@ -4,6 +4,8 @@
 // 상태는 보드 SCR-038-m의 14가지(t·d 보드는 기본 모양만 있어 m의 상태를 같은 배치에 얹었다). 시트 상태는 열린 채로 그린다.
 // 보드 t는 가상계좌 결제 예매(환불받을 계좌 칸, 결제 수단 줄)다. 그 변형은 ?pay=vbank로 본다(퍼블리싱용 검색 값, 추천안).
 // 연기 환급 모드는 d5 주소대로 ?mode=postponed로도 연다(상태를 고르지 않았을 때 '연기 환급').
+// 실제 경로: 티켓 ID가 UUID면 목업 대신 TicketCancelLive가 티켓·견적·재인증·취소를 부른다(BAT-421).
+// 목업 티켓(tkt-…)이나 ?state=가 있으면 지금 퍼블리싱 화면을 그대로 본다.
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -12,6 +14,7 @@ import { NoticeBanner } from '@peaket/ds/NoticeBanner';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { Select } from '@peaket/ds/Select';
 import { TextField } from '@peaket/ds/TextField';
+import { REFUND_BANKS } from '@peaket/validation/refund-account';
 import { getPerformance } from '@/entities/performance';
 import { getProduction } from '@/entities/production';
 import { getTicket } from '@/entities/ticket';
@@ -33,21 +36,19 @@ import {
   type CancelResult,
 } from '../model/view';
 import { CancelBar, CancelProvider, CancelSheets, QuoteAside, QuoteInline, SeatChoices } from './CancelFlow';
+import { TicketCancelLive } from './TicketCancelLive';
 
 type Props = PageProps<{ ticketId: string }>;
+
+/** 실제 티켓 ID 꼴(UUID). 목업 티켓(tkt-…)과 가른다 */
+const TICKET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const won = (n: number) => `₩${new Intl.NumberFormat('ko-KR').format(n)}`;
 /** h2: 휴대폰·태블릿 t-md 굵게, 데스크톱 t-lg */
 const H2 = 't-md fw-b lg:text-lg';
 
-/** 환불 계좌 은행 목록(합성 예시) */
-const BANKS = [
-  { value: 'kb', label: '국민은행' },
-  { value: 'shinhan', label: '신한은행' },
-  { value: 'woori', label: '우리은행' },
-  { value: 'hana', label: '하나은행' },
-  { value: 'nh', label: '농협은행' },
-];
+/** 환불 계좌 은행 목록(서버 검사와 같은 공용 표, 토스 두 자리 코드) */
+const BANKS = REFUND_BANKS.map((b) => ({ value: b.code, label: b.label }));
 
 function load(ticketId: string) {
   const ticket = getTicket(ticketId);
@@ -61,10 +62,15 @@ function load(ticketId: string) {
 
 export async function TicketCancelPage({ params, searchParams }: Props) {
   const { ticketId } = await params;
+  const sp = await searchParams;
+  // 실제 경로는 서버 값으로 그린다(목업 자료를 쓰지 않는다). UUID가 아니고 목업도 없으면 404
+  if (!getTicket(ticketId)) {
+    if (!TICKET_ID.test(ticketId)) notFound();
+    return <TicketCancelLive ticketId={ticketId} />;
+  }
   const d = load(ticketId);
   if (!d) notFound();
   const { ticket, perf, production, venue } = d;
-  const sp = await searchParams;
   const fallback: Scr038State = firstParam(sp, 'mode') === 'postponed' ? '연기 환급' : '선택';
   const state = resolvePreviewState(sp, SCR038_STATES, fallback);
   const dark = resolvePreviewTheme(sp) === 'dark';

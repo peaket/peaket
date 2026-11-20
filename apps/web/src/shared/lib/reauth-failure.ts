@@ -19,6 +19,11 @@ const BY_TYPE: Readonly<Record<string, ReauthFailure>> = {
 export const REAUTH_EXPIRED = '다시 로그인한 확인이 만료되었거나 이미 쓰였습니다';
 /** 재인증으로 떠나기 전 토큰 갱신이 401이 아닌 이유(연결 끊김·5xx)로 실패했다(d5 §5.17, identity §8·§2.1) */
 export const REAUTH_START_UNAVAILABLE = '지금은 다시 로그인을 시작할 수 없습니다. 잠시 뒤 다시 시도해 주세요';
+/**
+ * 재인증 확인기(공개키·`jti` 저장소)를 쓰지 못해 서버가 503 `reauth-unavailable`로 답했을 때의 문구.
+ * 같은 토큰으로 다시 보내지 않고 새 재인증을 받는다(docs/frontend.md §4.3, transfer-refund §3.1 '답').
+ */
+export const REAUTH_UNAVAILABLE = '지금은 다시 로그인한 확인을 하지 못했습니다. 잠시 뒤 다시 로그인해 주세요';
 
 /** 문제 type의 끝 이름(예: reauth-stale) → 이유. 모르는 이름은 failed */
 export const reauthFailureOf = (type: string): ReauthFailure => BY_TYPE[type] ?? 'failed';

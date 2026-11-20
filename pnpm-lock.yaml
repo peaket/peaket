@@ -471,6 +471,9 @@ importers:
       '@peaket/telemetry':
         specifier: workspace:*
         version: link:../../packages/telemetry
+      '@peaket/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       '@portone/browser-sdk':
         specifier: 0.1.13
         version: 0.1.13

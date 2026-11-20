@@ -1,13 +1,14 @@
 // 받는 층: 예매 취소 견적·취소(openapi getTicketCancellationQuote·createTicketCancellation, GAT-070·GAT-080).
-// 팬 쿠키와 구매 요청 서명을 쓰고, 취소는 Idempotency-Key를 cancellationId로 쓴다.
-// 취소는 구매 요청 서명·본문 검사 뒤에 X-Reauth-Token을 ReauthGate로 본다(docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인').
+// 팬 쿠키·gw-fan의 Origin 검사·재인증 토큰을 쓰고, 취소는 Idempotency-Key를 cancellationId로 쓴다.
+// 취소는 본문 검사 뒤에 X-Reauth-Token을 ReauthGate로 본다(docs/features/transfer-refund.md §3.1 '팬 취소의 재인증 확인').
+// 구매 세션 서명은 이 처리기에서 쓰지 않는다: 취소 화면은 며칠 뒤 열려 살아 있는 구매 세션이 없고, 재인증 토큰이 세션·계정·act·op에 묶여 한 번만 쓰인다(ADR-0328).
 // 작업 묶음·받는 쪽 작업은 본문에 환급 계좌가 있으면 FAN_HIGH_RISK·TICKET_CANCEL_REFUND_ACCOUNT, 없으면 FAN_SENSITIVE·TICKET_CANCEL이다(ADR-0293). 거절은 403 reauth-required, 확인 못 함은 503 reauth-unavailable이다.
 // 확인기를 꽂지 않은 조립은 닫힌 대역(unavailableReauth, 늘 403)이다. 견적은 재인증이 필요 없어 연다.
 // 환불 계좌 규칙(BUILD_ORDER GAT-090, docs/features/payment.md §6): 견적은 refundAccountRequired를 싣고 결제 수단을 읽지 못하면 503 dependency-unavailable이다.
 // 취소는 재인증 뒤 Saga 앞에서 다시 읽어, 계좌가 필요한데 없으면 422 refund-account-required, 읽지 못하면 503 dependency-unavailable이다(둘 다 아무것도 쓰지 않는다).
 // 계좌 대기(202 REFUND_PENDING)는 refundAccountRequired 참을 싣는다.
 import { Controller, Get, HttpCode, Inject, Post, Req } from '@nestjs/common';
-import { Bulkhead, CLOCK, type Clock, ContractBody, dependencyUnavailable, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, type IdempotencyRequest as Idem, Idempotent, type Principal, ProblemError, PurchaseSigned, Roles } from '@peaket/platform';
+import { Bulkhead, CLOCK, type Clock, ContractBody, dependencyUnavailable, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, type IdempotencyRequest as Idem, Idempotent, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyRequest } from 'fastify';
 import { refundAccountShape } from '@peaket/validation/refund-account';
 import { z } from 'zod';
@@ -37,8 +38,6 @@ const RefundAccountBody = z.object({ bankCode: z.string().max(20), accountNumber
 const CancelBody = z.object({ refundAccount: RefundAccountBody.optional() }).strict();
 const CancelHeaders = z.object({
   'Idempotency-Key': z.uuid(),
-  'X-Purchase-Seq': z.int().min(1),
-  'X-Purchase-Mac': z.string(),
   'X-Reauth-Token': z.string().optional(),
 });
 const CancelResponse = z
@@ -91,7 +90,7 @@ export class TicketCancellationController {
   @Bulkhead(WRITE_BULKHEAD)
   @Roles(['fan'], { scopes: ['ticket:buy'] })
   @Idempotent({ operation: 'CANCEL_TICKET' })
-  @PurchaseSigned()
+  // 구매 세션 서명(@PurchaseSigned)을 달지 않는다: 취소 화면은 며칠 뒤 열려 살아 있는 구매 세션이 없다(ADR-0328).
   @ContractRouteSchema({ params: TicketParams, headers: CancelHeaders, body: CancelBody, responses: { 202: CancelResponse } })
   async cancelOf(
     @ContractParams(TicketParams) params: z.output<typeof TicketParams>,
