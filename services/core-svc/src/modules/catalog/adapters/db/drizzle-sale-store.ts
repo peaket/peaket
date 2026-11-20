@@ -369,7 +369,7 @@ export class DrizzleSaleStore implements SaleStore {
              pr.legal_name, pr.representative, pr.address, pr.phone, pr.email, pr.business_reg_no, pr.mail_order_report_no, pr.exemption_basis, pr.verified_at
         from production p
         join promoter pr on pr.id = p.promoter_id
-       where p.id = ${productionId}::uuid`);
+       where p.id = ${productionId}::uuid and p.sale_review <> 'DRAFT'`);
     const p = r.rows[0] as
       | {
           id: string;
