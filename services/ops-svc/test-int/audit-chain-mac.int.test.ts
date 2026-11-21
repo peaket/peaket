@@ -32,10 +32,12 @@ import {
   DrizzleAuditVerifyStore,
   KmsAuditMacKey,
   LocalAuditMacKey,
+  MemoryMacAnchorStore,
   auditHash,
   auditRecordFromJson,
   kmsAuditMacClient,
   type AuditMacKey,
+  type MacAnchorStore,
 } from '../src/modules/audit/index.js';
 import { CreateCommand, DrizzleCommandStore, type CommandExecutor } from '../src/modules/commands/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
@@ -130,7 +132,7 @@ const kmsKey = (seoulEndpoint: string, tokyoEndpoint: string, signals?: AuditSig
 const macStore = () => new DrizzleAuditMacStore(db);
 const alerts = () => new DrizzleOpsAlertStore(db);
 const chain = () => new DrizzleAuditChain(db);
-const verifier = (key: AuditMacKey, o: { checkpoints?: AuditCheckpointService } = {}) =>
+const verifier = (key: AuditMacKey, o: { checkpoints?: AuditCheckpointService; anchors?: MacAnchorStore } = {}) =>
   new AuditChainVerifier({ store: new DrizzleAuditVerifyStore(db), key, ledger: macStore(), anchors: new DirMacAnchorStore(anchorDir), sourceMatches: (e) => chain().sourceMatches(e), alerts: alerts(), audit: chain(), ...o });
 /** 바퀴를 끝까지 돌려 채운 행 수 */
 async function fillAll(key: AuditMacKey): Promise<number> {
@@ -273,6 +275,62 @@ describe('C-T27 감사 기록 변조 탐지', () => {
     const run = await verifier(key).verify({}, clock.now() + HOUR);
     expect(run).toMatchObject({ result: 'MISMATCH', firstBadSeq: 2, reason: 'mac' });
     expect(await count("select count(*) as n from ops_alert where kind = 'audit-chain-mismatch'")).toBe(1);
+  }, 60_000);
+
+  test('C-T27 ① RV-14 25시간보다 오래된 앵커가 있을 때 DB 앵커 행의 anchored_at을 앞당겨 최근 앵커를 후보로 만들어도, 버킷·폴더 객체의 시각으로 다시 확인해 믿지 않고 seq 1부터 봐서 창 안 변조를 MISMATCH로 잡는다', async () => {
+    const key = new LocalAuditMacKey(LOCAL, 'local-rv-14-at');
+    const anchor = () => new AuditMacAnchorer(macStore(), new DirMacAnchorStore(anchorDir), key.keyId).runOnce(clock.now());
+    await seedCommands(['오래된 앵커 1', '오래된 앵커 2']);
+    await fillAll(key);
+    expect(await anchor()).toEqual({ anchoredSeq: 2 });
+    clock.advance(26 * HOUR);
+    const ids = await seedCommands(['최근 3', '최근 4', '최근 5']);
+    expect(await fillAll(key)).toBe(3);
+    expect(await anchor()).toEqual({ anchoredSeq: 5 });
+    expect(await verifier(key).verify({}, clock.now())).toMatchObject({ result: 'VALID', toSeq: 5 });
+    clock.advance(HOUR);
+    expect(await tamperReason(ids[1]!, '창 안 변조')).toBe(4);
+    // DB 쓰기 권한만 있는 사람이 고칠 수 있는 칸: 기록의 만든 시각과 최근 앵커 행의 쓴 시각(25시간 창 밖으로)
+    await q("update audit_chain set created_at = created_at - interval '26 hours'");
+    await q("update audit_mac_anchor set anchored_at = anchored_at - interval '26 hours' where seq = 5");
+    const at = clock.now() + HOUR;
+    // 겹친 가드를 하나 뺀 경우(불변 객체 없이 DB 앵커 행만 믿음): 후보 seq 5 다음부터 봐서 변조를 놓친다
+    expect(await verifier(key, { anchors: new MemoryMacAnchorStore() }).verify({}, at)).toMatchObject({ result: 'VALID', fromSeq: 6 });
+    // 객체의 시각(at)은 고칠 수 없다: 후보를 확인하지 못해 seq 1부터 본다(control-tower §7 '확인하지 못하면 seq 1부터')
+    const run = await verifier(key).verify({}, at);
+    expect(run).toMatchObject({ result: 'MISMATCH', fromSeq: 1, firstBadSeq: 4, reason: 'mac' });
+    expect((await q<{ result: string; from_seq: string; first_bad_seq: string }>('select result, from_seq, first_bad_seq from audit_verification_run where run_id = $1', [run.runId])).rows).toEqual([
+      { result: 'MISMATCH', from_seq: '1', first_bad_seq: '4' },
+    ]);
+  }, 60_000);
+
+  test('C-T27 ① RV-14 오래된 앵커 후보의 DB 행 mac이 객체와 다르거나 객체가 없는 앵커 행이 후보면 그 후보를 믿지 않고 seq 1부터 봐서 첫 변조 seq(1)를 정확히 낸다', async () => {
+    const key = new LocalAuditMacKey(LOCAL, 'local-rv-14-mac');
+    const anchor = () => new AuditMacAnchorer(macStore(), new DirMacAnchorStore(anchorDir), key.keyId).runOnce(clock.now());
+    const ids = await seedCommands(['앵커 앞 1', '앵커 앞 2', '앵커 앞 3']);
+    await fillAll(key);
+    expect(await anchor()).toEqual({ anchoredSeq: 3 });
+    clock.advance(26 * HOUR);
+    await seedCommands(['앵커 뒤 4', '앵커 뒤 5']);
+    expect(await fillAll(key)).toBe(2);
+    expect(await anchor()).toEqual({ anchoredSeq: 5 });
+    expect(await verifier(key).verify({}, clock.now())).toMatchObject({ result: 'VALID', toSeq: 5 });
+    clock.advance(HOUR);
+    expect(await tamperReason(ids[0]!, '오래된 구간 변조')).toBe(1);
+    await q("update audit_chain set created_at = created_at - interval '26 hours'");
+    const at = clock.now() + HOUR;
+    const trusting = () => verifier(key, { anchors: new MemoryMacAnchorStore() }).verify({}, at);
+    // ① 후보(25시간 전보다 먼저 쓴 마지막 앵커 seq 3)의 DB 행 mac을 고친다: 객체의 mac과 다르다
+    await q("update audit_mac_anchor set mac = decode(repeat('ab', 32), 'hex') where seq = 3");
+    expect(await trusting()).toMatchObject({ result: 'MISMATCH', fromSeq: 4, firstBadSeq: 4 });
+    expect(await verifier(key).verify({}, at)).toMatchObject({ result: 'MISMATCH', fromSeq: 1, firstBadSeq: 1, reason: 'mac' });
+    // ② mac을 되돌리고, 객체가 없는 seq 4의 앵커 행을 오래된 시각으로 넣어 후보로 만든다
+    await q('update audit_mac_anchor set mac = (select mac from audit_chain where seq = 3) where seq = 3');
+    await q(
+      "insert into audit_mac_anchor (seq, mac, object_key, key_id, anchored_at) select 4, c.mac, 'audit-chain/anchors/v1/00000000000000000004.json', 'local-rv-14-mac', a.anchored_at from audit_chain c, audit_mac_anchor a where c.seq = 4 and a.seq = 3",
+    );
+    expect(await trusting()).toMatchObject({ result: 'MISMATCH', fromSeq: 5, firstBadSeq: 5 });
+    expect(await verifier(key).verify({}, at)).toMatchObject({ result: 'MISMATCH', fromSeq: 1, firstBadSeq: 1, reason: 'mac' });
   }, 60_000);
 
   test('C-T27 ① 25시간보다 오래된 기록의 변조는 마지막 검증 지점 뒤가 아니어도 체크포인트 재검증이 잡는다', async () => {
