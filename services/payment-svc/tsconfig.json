@@ -10,6 +10,7 @@
     "emitDecoratorMetadata": true,
     "paths": {
       "@peaket/platform": ["../../packages/platform/src/index.ts"],
+      "@peaket/platform/stream-worker": ["../../packages/platform/src/stream-worker.ts"],
       "@peaket/pg-simulator": ["../pg-simulator/src/index.ts"],
       "@peaket/search-normalize": ["../../packages/search-normalize/src/index.ts"]
     },

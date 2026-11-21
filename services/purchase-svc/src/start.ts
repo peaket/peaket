@@ -32,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
 import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, internalGrpcTokenFromEnv, kafkaTelemetrySend, type KafkaTelemetrySender, RedisReauthJtiStore, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
-import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
+import { createKafkaProducer, type KafkaProducer, startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import {
   DrizzleCancelledTickets,
@@ -912,6 +912,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     await telemetrySink?.close(TELEMETRY_CLOSE_MS);
     await telemetrySender?.disconnect(TELEMETRY_CLOSE_MS);
   };
+  // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다
+  const controlSync = startServiceControlSync(service, env);
   await service.listen();
   // 회차 취소 일괄 환불 gRPC(refund.proto, BAT-425 GAT-130). PEAKET_GRPC_PORT가 있을 때만 연다.
   // 없으면 ops-svc는 내부 HTTP 호환 경로를 쓴다(같은 쓰임새·같은 멱등 키).
@@ -1084,8 +1086,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
         } catch (err) {
           service.logger.error({ err: errorSummary(err) }, '취소 gRPC 클라이언트 닫기 실패');
         }
-        // 소비자 전용 풀(결제 결과 반영도 쓴다)은 소비자와 당기기를 멈춘 뒤라, 발권·당기기 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다
-        return Promise.all([redis.close(), database?.close(), consumerDatabase?.close(), paymentConsumerDatabase?.close(), paymentStatusWaitDatabase?.close(), sagaDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close(), saleStateDatabase?.close()]);
+        // 소비자 전용 풀(결제 결과 반영도 쓴다)은 소비자와 당기기를 멈춘 뒤라, 발권·당기기 실행기 전용 풀은 실행기를 멈춘 뒤라 쓰는 연결이 없다.
+        // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다(ADR-0333 결정 2)
+        return Promise.all([controlSync?.close(), redis.close(), database?.close(), consumerDatabase?.close(), paymentConsumerDatabase?.close(), paymentStatusWaitDatabase?.close(), sagaDatabase?.close(), ticketIssueDatabase?.close(), paymentPullDatabase?.close(), orderExpiryDatabase?.close(), saleStateDatabase?.close()]);
       })
       .then(() => undefined);
     return closing;

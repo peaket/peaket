@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') },
+      { find: /^@peaket\/platform\/stream-worker$/, replacement: src('../../packages/platform/src/stream-worker.ts') },
       { find: /^@peaket\/pg-simulator$/, replacement: src('../pg-simulator/src/index.ts') },
     ],
   },

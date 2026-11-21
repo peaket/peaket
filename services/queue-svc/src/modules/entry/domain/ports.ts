@@ -47,36 +47,6 @@ export interface WithdrawnKeys {
   expireBy(pid: string, eventIds: readonly string[], at: number): Promise<number>;
 }
 
-/** 처리를 마치지 못해 다시 나올 때마다 두 배로 느는 빌림의 상한 [가정] */
-export const DUE_LEASE_MAX_MS = 3_600_000;
-
-/** 처리할 때를 기다리는 탈퇴 사건(값에 pid가 있다, ADR-0214 결정 7) */
-export interface DueWithdrawal {
-  eventKey: string;
-  pids: string[];
-  purgeBy: number;
-  dueAt: number;
-}
-
-/**
- * 탈퇴 사건의 '처리할 때' 집합(docs/data.md §3 q:{wdr}, ADR-0214 결정 7). 때가 안 된 사건을 Kafka 처리 줄에 두지 않고 여기 넣는다.
- * 값(pid·purgeBy)은 purgeBy까지만 둔다. 꺼내기는 빌리기(그동안 다른 파드가 집지 않는다)라, 처리를 마치지 못하면 빌림이 끝난 뒤 다시 나온다.
- * 대기열 Redis가 잠시 안 되면 QueueStoreUnavailable
- */
-export interface WithdrawnDue {
-  /** 같은 eventKey는 한 번만 넣는다(다시 받은 사건) */
-  schedule(i: DueWithdrawal): Promise<void>;
-  /**
-   * 때가 됐고 빌린 사람이 없는 것을 limit개까지 빌려 꺼낸다. 빌린 항목은 훑는 범위에서 빠지고(뒤 항목이 굶지 않게), 빌림은 꺼낼 때마다 두 배로 는다(DUE_LEASE_MAX_MS까지).
-   * 값이 수명(purgeBy)으로 사라진 항목만 지우고 expired로 센다. 값이 있으면 purgeBy가 지났어도 꺼낸다(지금 처리한다)
-   */
-  claim(i: { leaseMs: number; limit: number }): Promise<{ items: DueWithdrawal[]; expired: number }>;
-  /** 처리를 마쳤다(항목과 값을 지운다) */
-  done(eventKey: string): Promise<void>;
-  /** 가장 이른 처리할 때(없으면 null). 때가 지난 지 오래된 항목은 경보다 */
-  oldestDue(): Promise<number | null>;
-}
-
 export const EVENT_SCHEDULES = Symbol('queue.EventSchedules');
 export interface EventSchedules {
   /** 사본이 없으면 null(그 회차의 대기열이 열리지 않음) */

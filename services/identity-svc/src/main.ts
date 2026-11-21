@@ -2,6 +2,7 @@
 // (OTel SDK가 node:http보다 먼저 서야 한다, docs/devops.md §4.4)
 // 앱 포트(REST: 팬 토큰 갱신 POST /v1/identity/access-tokens, 공개키 묶음 GET /internal/jwks/{set}.json)·관리 포트(/metrics, /ready)는
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
+// 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다. identity 자신의 경로는 DB로도 끝난 세션을 막는다(identity §8)
 import 'reflect-metadata';
 import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
@@ -257,6 +258,10 @@ for (const w of withdrawal.warnings) service.logger.warn(w);
 if (!loginRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 세션의 로그인 판정이 늘 UNKNOWN이다');
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 
+// 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다.
+// Kafka 클라이언트(네이티브 모듈)는 여기서 싣는다
+const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+const controlSync = startServiceControlSync(service, process.env);
 await service.listen();
 // 업무 gRPC 포트(PEAKET_GRPC_PORT, 기본 50051 [가정])와 부하 분산 프로필은 공용 설정이 읽는다(createService가 틀린 값이면 시작하지 않는다, BUILD_ORDER BAS-080)
 const grpc = await startGrpcServer({
@@ -343,6 +348,7 @@ process.once('SIGTERM', () => {
     .finally(() => {
       stopInvRefs();
       scannerDevices?.close();
-      return Promise.all([database.close(), cache?.close()]);
+      // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다
+      return Promise.all([controlSync?.close(), database.close(), cache?.close()]);
     });
 });

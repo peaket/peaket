@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') },
+      { find: /^@peaket\/platform\/stream-worker$/, replacement: src('../../packages/platform/src/stream-worker.ts') },
       // OTel SDK 시작(추적 시험, test/outbound-trace.test.ts)도 원본으로 잇는다
       { find: /^@peaket\/platform\/telemetry$/, replacement: src('../../packages/platform/src/telemetry.ts') },
     ],

@@ -2,8 +2,10 @@
 // 앱 포트(관제 HTTP /v1/ops/commands)와 관리 포트(/metrics, /ready)는 서비스 뼈대가 연다.
 // 회차 취소 환불 gRPC(PEAKET_PURCHASE_GRPC_ADDR, BAT-425 GAT-130)와 판매 중지·재개 제어 gRPC(PEAKET_*_CONTROL_GRPC_ADDR, BAT-465 R-584)를 싣는다.
 // 명령 요청·결과 사건은 Kafka(ops.command-events)로도 받는다(HTTP /internal/v1/ops/command-events와 같은 처리기).
+// 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다.
 import 'reflect-metadata';
 import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, loadLogPseudonymizer, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
+import { startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { GrpcControlSender } from './adapters/grpc-control-sender.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
@@ -180,6 +182,8 @@ if (!cancellationDeps.reader) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR
 if (!reauth) service.logger.warn({}, 'PEAKET_IDENTITY_JWKS_URL이 없어 회차 취소 요청·확정이 503 reauth-unavailable이다');
 for (const warning of reauthStartup.warnings) service.logger.warn({}, warning);
 if (coreEventStatusWarning) service.logger.warn({}, coreEventStatusWarning);
+// 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다
+const controlSync = startServiceControlSync(service, process.env);
 await service.listen();
 // core 회차 상태 반영 다시 하기(1분 [가정], BAT-420-rest GAT-110, R-T41 ③). 잡기 뒤 미루기(SKIP LOCKED)라 파드 여럿이 함께 돌려도 한 요청은 한쪽만 부른다
 const coreApplyTimer = cancellationDeps.core
@@ -246,6 +250,8 @@ process.once('SIGTERM', () => {
       botReviewLabels?.close();
       adminIdentity.close();
       adminAuthz.close();
+      // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다
+      await controlSync?.close();
       await tenantRedis?.close();
       await reauthRedis?.close();
       if (partnerDatabase !== database) await partnerDatabase.close();

@@ -1,5 +1,6 @@
 // ticket-svc 조립(BUILD_ORDER HOT-160). main.ts와 서비스 묶음(services/bundle)이 같은 함수를 부른다.
 // gRPC 포트는 서비스 안에서 따로 열고, health/management HTTP는 플랫폼 createService가 연다.
+// 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
 import { type AdminAuthzPort, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
@@ -57,6 +58,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
   let alert: ((message: string, fields: Record<string, unknown>) => void) | undefined;
   let freshnessTimer: ReturnType<typeof setInterval> | undefined;
+  let controlSync: { close(): Promise<void> } | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
     const shiftStore = new DrizzleScannerShiftStore(database);
@@ -164,6 +166,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
       service.logger.warn({}, 'PEAKET_OPS_HTTP_URL이 없어 스캐너 신선도 경보(O-T20)를 내지 않는다');
     }
     service.readiness.register('grpc');
+    // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다.
+    // Kafka 클라이언트(네이티브 모듈)는 이 시작 함수를 부를 때 싣는다
+    const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+    controlSync = startServiceControlSync(service, env);
     const httpPorts = await service.listen();
     grpc = await startGrpcServer({
       host: config.grpcHost,
@@ -203,6 +209,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
 
     const started = service;
     const startedGrpc = grpc;
+    const startedSync = controlSync;
     const ports = { appPort: httpPorts.port, managementPort: httpPorts.managementPort, grpcPort: grpc.port };
     let closing: Promise<void> | undefined;
     const close = (): Promise<void> => {
@@ -213,6 +220,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
           await startedGrpc.close();
           await started.close();
         } finally {
+          // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다
+          await startedSync?.close();
           adminAuthz?.close?.();
           scannerSessions?.close?.();
           await redis?.close().catch(() => {});
@@ -225,6 +234,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     if (freshnessTimer) clearInterval(freshnessTimer);
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});
+    await controlSync?.close();
     adminAuthz?.close?.();
     scannerSessions?.close?.();
     await redis?.close().catch(() => {});

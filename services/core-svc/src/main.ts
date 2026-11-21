@@ -234,6 +234,10 @@ const searchTimers = new SearchReadModelTimers({
   clock: systemClock,
   logger: service.logger,
 }).register(service.metrics.registry);
+// 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽(설정·종료 세션)을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고
+// 그 밖은 여기서 시작에 실패한다. 이 도우미가 Kafka 클라이언트(네이티브 모듈)를 싣는다. 서비스를 닫은 뒤 끈다
+const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+const controlSync = startServiceControlSync(service, process.env);
 await service.listen();
 // 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기 → 주기 일. 둘 다 준비 확인에 넣지 않는다: 그동안 /ready는 200이고 검색은 표에 있는 줄로, 자동완성은 빈 후보·no-store로 답한다(결정 14)
 await searchTimers.start();
@@ -250,7 +254,7 @@ let consumers: CoreConsumers | undefined;
 let closing: Promise<void> | undefined;
 if (!kafka.enabled) service.logger.warn({ dep: 'kafka' }, kafka.warning);
 else {
-  // 네이티브 Kafka 모듈은 켤 때만 싣는다(local·ci에서 브로커 없이 뜰 때는 싣지 않는다)
+  // 탈퇴 사건 소비자는 브로커 주소가 있을 때만 싣는다(local·ci에서 브로커 없이 뜰 때는 싣지 않는다)
   const { startCoreConsumers } = await import('./consumers/start.js');
   const pod = (process.env.PEAKET_POD ?? process.env.HOSTNAME ?? 'local').slice(0, 64);
   // 파기 UPDATE·다시 정리 예약도 소비자 풀로 쓴다(처리기와 반복이 같은 Reviews). 후기 유스케이스의 나머지 의존은 서비스 조립의 것을 그대로 쓴다
@@ -306,7 +310,8 @@ function shutdown(): Promise<void> {
         heldTickets?.close();
         void queueRedis?.close();
         void shopRedis?.close();
-        return Promise.all([database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close(), searchDatabase.close()]);
+        // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다(ADR-0333 결정 2)
+        return Promise.all([controlSync?.close(), database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close(), searchDatabase.close()]);
       });
   })();
   return closing;

@@ -5,6 +5,7 @@
 // paymentServiceHandlers를 PaymentService에 묶는다. 준비 상태는 gRPC 포트를 연 뒤에 켠다. 승인 실행기와 UNKNOWN 조회 실행기(승인 실행기의 풀과 채널별 호출 보호기를 함께 쓴다)는 그 뒤에 켠다(BUILD_ORDER PRF-181·PRF-182·PRF-183).
 // 앱 포트에는 결제사 웹훅 경로가 있다(웹훅 전용 풀 payment-svc-webhook, BUILD_ORDER HOT-150).
 // 종료(close, 시작 파일은 SIGTERM에 부른다): 준비 상태를 내리고(docs/devops.md §6.4) gRPC 포트를 닫으면서 두 실행기를 멈춘 뒤(돌던 호출과 그 뒤 쓰기를 기다린다) 서비스를 닫고 DB 풀 넷을 닫는다.
+// 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 연결과 함께 끈다.
 import 'reflect-metadata';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
@@ -296,6 +297,10 @@ let circuitsRef: PgCircuits | undefined;
     new DrizzleCompensationTransfers({ database: batchDatabase, clock: systemClock }),
     { recordCompensationAdvance: (i) => service.app.get(Settlements).recordCompensationAdvance(i) },
   );
+  // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다.
+  // Kafka 클라이언트(네이티브 모듈)는 이 시작 함수를 부를 때 싣는다(시작 파일을 읽기만 하는 곳은 싣지 않는다)
+  const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+  const controlSync = startServiceControlSync(service, env);
   const httpPorts = await service.listen();
   const grpc = await startGrpcServer({
     host: config.grpcHost,
@@ -391,7 +396,7 @@ let circuitsRef: PgCircuits | undefined;
       stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), (settlementDueWorker?.stop() ?? Promise.resolve()).then(() => settlementDueElector.stop())],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve()],
       closeService: () => service.close(),
-      closeConnections: () => [Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), tenantRedis?.close(), reauthRedis?.close()],
+      closeConnections: () => [controlSync?.close(), Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), tenantRedis?.close(), reauthRedis?.close()],
       onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),
     });
   };
