@@ -12,6 +12,11 @@
     - 다시 쌓은 트리에서 도는 통합 시험 전체(ADR-0283 결정 3)
     - CI를 기다리지 않는 푸시([ADR-0222](0222-push-develop-each-step-no-ci-wait.md))
     - 모델(모두 Opus 5.5, 2026-11-16 결정)
+  - 보탬(2026-11-21, 소유자 결정 "카드 거둬"): 결정 10(node 잡 통합 시험 범위 고르기)은 하지 않는다. CI node 잡의 통합 시험은 지금처럼 매번 전부 돈다. 아래 '확인'의 뒤 묶음도 C 묶음 역할 확인 하나만 남는다.
+    - 잰 값: node 잡 21.8분 가운데 통합 시험 12개가 약 13분이다.
+    - 최근 묶음 46개 가운데 26개(57%)는 `packages/contracts`·`platform`·`config`를 건드린다. 그래서 범위를 골라도 어차피 전부 돈다.
+    - 나머지 묶음에서 줄어드는 것은 CI 러너 시간 10~13분뿐이다. CI는 기다리지 않는다(ADR-0222).
+    - 반면 상대 경로 가져오기를 놓쳐 A 등급 시험이 빠질 위험이 크다.
 - **관련**: [docs/architecture.md](../architecture.md) §8.6, [docs/devops.md](../devops.md) §3.1·§3.3, `.github/workflows/ci.yml`·`ci-kind.yml`·`tools-check.yml`
 - **관련 ID**: 없음(작업 절차와 CI 배치만 바꾼다)
 
