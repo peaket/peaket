@@ -115,7 +115,24 @@
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+- 담당 `lane2-w12ciweb-review`(claude-opus-5-5). 짧은 대조 리뷰(ADR-0283 결정 2, ADR-0331)다. 범위는 `dd9f08485..9092f4d26`(계획 `d8f064e8f`, 구현 `bd6c92c4b`, 시험 `9092f4d26`)이다. 코드·시험은 고치지 않았다.
+- **막는 지적(높음·보안·통과 기준)은 없다.** 대조한 것:
+  1. **계획 항목**: 위 4 표의 두 파일만 바뀌었다. 구현은 2의 단계를 주석 두 줄까지 글자 그대로, 설치 단계와 `pnpm --filter @peaket/seatmap typecheck` 사이(`ci-web.yml` 446~448행)에 넣었다. 시험은 1의 두 꼴을 `deepEqual`로 넣었고, 시험 이름과 다른 단언(24·29·31·33·34행)은 그대로다. 바꾸지 않기로 한 `eslint.config.mjs`·`web-boundaries.mjs`·대기실 쪽 파일은 diff에 없다.
+  2. **정본**: 경로 파일 규칙(`web-boundaries.mjs` `routeReexportOnly`)은 가져오기, `export { … }`, `export … from`, `export *`, 이름 하나짜리 `export default`만 받는다. 새 표본 둘은 그 꼴이라 ADR-0329 결정 5와 맞는다. konva 금지(ADR-0264 결정 2, `eslint.config.mjs` 99~115행)는 지금도 `apps/partner/app/**`를 덮는다.
+  3. **시험이 약해졌나**: 저장소 파일은 그대로 두고, 뿌리 설정 배열을 메모리에서 바꿔 ESLint에 넘겨 봤다. 원래 설정에서 두 표본은 정확히 `['no-restricted-imports']` 하나만 내고, 알림 글도 konva 금지의 것이다. konva 설정에서 `app/**` 글롭을 빼면(검증 표본 M1) 둘 다 `[]`가 된다. konva 묶음만 빼도 둘 다 `[]`다. 그러니 고친 단언은 konva 금지를 잃으면 떨어진다. 다른 규칙 때문에 우연히 맞는 것이 아니다. 옛 표본(`export const k`)은 konva 금지를 잃어도 경로 파일 규칙 하나가 남는 자리였다. 새 표본은 다시 내보내기로 잇는 우회(`export { default } from 'konva'`)도 막는지 본다. 그래서 '경로 파일에서도 konva 금지'를 지키는 범위가 오히려 넓어졌다. 이 폴더에서 `security.test.mjs`를 다시 돌려 6개 모두 통과했다.
+  4. **seats 빌드 단계**: `@peaket/web`이 기대는 작업 공간 패키지 가운데 `build` 스크립트가 있는 것은 contracts·platform·search-normalize·validation 넷뿐이다(`packages/*/package.json`). 넷 다 설치 필터 `@peaket/web...` 안에 있다. pnpm은 여러 패키지 스크립트를 의존 차례대로 돌므로, platform·validation보다 contracts를 먼저 빌드한다. 좌석맵 쪽 의존(ds·config)에는 빌드할 것이 없다. 이 잡에는 캐시(`actions/cache`, turbo 원격 캐시)가 없어서 캐시가 낡을 걱정도 없다. 더한 시간은 계획 재현 기준 약 6초로, 잡 상한 35분에 견주면 작다(같은 빌드를 뒤에서 한 번 더 하는 것은 RV-04). 리뷰가 `node tools/ci/check-workflows.mjs`를 다시 돌려 워크플로 23개 모두 통과했다.
+  5. **역할 경계·꼬리말**: 구현 커밋 `bd6c92c4b`는 `ci-web.yml`과 이 파일만 바꿨다. 시험 커밋 `9092f4d26`은 시험 파일과 이 파일만 바꿨다. 세 커밋 모두 꼬리말 덩이(Role·Agent-Session·Agent-Model·Batch·Co-Authored-By, 계획은 `Batch-Order: impl-first`도)를 갖췄고, 세션 ID가 담당 표 행과 같다. `node tools/ci/roles-check.mjs --base dd9f08485`의 실패는 '코드(정방향) 묶음에 review·verify 커밋이 없다' 하나뿐이다(이 커밋과 검증이 채운다).
+- 지적은 모두 중간·낮음이다. 이 묶음에서 고치지 않고 정리 목록으로 넘긴다(ADR-0331 결정 5).
+
+| 번호 | 등급 | 자리 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간 | 이 계획 '감독에게' 2, 5 '초안 PR CI'의 seats 줄 | seats 잡은 BAT-182에서 생긴 뒤로 CI에서 타입 검사 다음 단계(단위 시험, `node seed-css/build.mjs web`, `pnpm run seats`)를 한 번도 돌지 못했고, 이 묶음 뒤에 처음 돈다. 그런데 '새 실패는 이 묶음에서 고치지 않고 새 일로'(ADR-0283 결정 6)라는 판정 기준은 node 잡에만 적혀 있다. 또 로컬 확인은 전체 설치에서 했지만, CI는 일부만 설치한다(작업 공간 34개 중 10개, 실행 44912722163 seats 로그 250행). 리뷰가 web 시험 파일 127개의 가져오기를 훑었다. 설치 범위 밖에서 가져오는 것은 `services/identity-svc/scripts/mock-idv.mjs`(Node 내장 모듈만 씀)와 뿌리 개발 의존 `yaml`(같은 로그 389~394행에서 설치됨)뿐이었다. 그래서 막힐 곳은 보이지 않는다 | 검증 담당이 '검증' 절에 seats 판정 기준을 적는다: 'web 타입 검사 통과까지가 이 묶음 몫이고, 그 뒤 단계의 새 실패는 감독에게 2처럼 새 일로 넘긴다'. 계획을 고치는 커밋은 필요 없다 |
+| RV-02 | 낮음 | `apps/partner/src/_pages/seatmap-editor/security.test.mjs:27~28` | 두 표본이 konva 금지 하나만 내는 것은, 경로 파일 규칙이 무엇을 다시 내보내는지(출처)를 보지 않아서다. `'konva'`에서 가져와도 받는다. 정본 `docs/frontend.md` §2.2 'Next.js 경로 폴더' 첫 문장은 'src/_pages·src/_app의 것을' 다시 내보낸다고 출처까지 말한다. 반면 ADR-0329 결정 5와 규칙은 문장 꼴만 본다. 뒤에 규칙이 출처까지 보게 바뀌면, 두 표본에 규칙이 다시 둘 걸려 이번과 같은 꼴로 깨진다 | 지금은 고치지 않는다. 경로 파일 규칙에 출처 검사를 더하는 묶음이 생기면, 그 묶음이 이 단언도 함께 고친다(경로 파일 표본은 konva 알림 글이 정확히 하나인지만 보고, 경로 파일 규칙은 `web-boundaries.test.mjs`가 맡는다). §2.2 문장과 규칙이 다른 점은 정리 목록에 한 줄로 적는다 |
+| RV-03 | 낮음 | `security.test.mjs:27~28` | 경로 파일 규칙이 받는 꼴 가운데 `export * from 'konva'`와 `import Konva from 'konva'; export default Konva;`는 표본에 없다. 리뷰가 돌려 보니 둘 다 지금 설정에서는 정확히 `['no-restricted-imports']`를 내고, M1에서는 `[]`가 된다. 지금도 막히지만, 시험이 지켜 주지는 않는다 | 다음에 이 파일을 고칠 때 같은 경로 파일 표본 둘을 더한다(정리 목록) |
+| RV-04 | 낮음 | `.github/workflows/ci-web.yml:448`·`:455`, 이 계획 7 첫 줄 | (가) 새 단계(448행)와 `seed-css/build.mjs` 26행의 첫 단계가 같은 의존 빌드를 두 번 한다. tsc 증분 빌드 설정이 없어서 두 번째도 약 6초가 든다. (나) 계획 7이 BAT-182 RV-04에서 옮겨 적은 '운영 빌드 단계를 빼면 잡이 10분 안팎 준다'는 CI에서 잰 값과 맞지 않는다. 같은 실행 44912722163에서 reflow 잡의 `node seed-css/build.mjs web partner console`(`PEAKET_BUILDS=prod`)은 39초, budgets 잡의 `node seed-css/build.mjs`는 34초였다 | (가)는 받아들인다. 다만 정리 때 BAT-182 RV-04대로 455행을 빼더라도 448행은 남겨야 한다(그때는 그것이 유일한 의존 빌드다). 그 정리 줄에 이 점을 적는다. (나)는 그 정리 줄에 잰 값(1분 안쪽)을 적어 우선순위를 낮춘다 |
+| RV-05 | 낮음 | 이 계획 '감독에게' 4, 7 끝 줄 | 이 계획을 커밋한 뒤(23:47) `develop`의 `c06b480cf`(2026-11-21 23:58)가 ADR-0329 상태를 '채택'으로 바꿨다. 그래서 '감독에게' 4는 이미 처리됐다. 출발점 뒤 `develop` 커밋들은 이 묶음 파일(`ci-web.yml`, 시험 파일, ESLint 설정 둘, `apps/web`, `packages/search-normalize`)을 건드리지 않아 겹치지 않는다 | 기록 때 감독이 '감독에게' 4를 처리됨(`c06b480cf`)으로 적고 넘긴다. 따로 고칠 커밋은 없다 |
+
+- **판정: 통과.** 막는 지적이 없으므로 검증으로 넘긴다. 남은 확인은 초안 PR CI 몫이다: node 잡의 남은 일 11개, seats 잡의 첫 끝까지 실행(RV-01), queue-room 다시 보기.
 
 ## 검증
 
@@ -128,6 +145,7 @@
 | plan | lane2-w12ciweb-plan | claude-opus-5-5 | 2026-11-21T23:10+09:00 | 2026-11-21T23:50+09:00 |
 | impl | lane2-w12ciweb-impl | claude-opus-5-5 | 2026-11-21T23:48+09:00 | 2026-11-22T00:02+09:00 |
 | test | lane2-w12ciweb-test | claude-opus-5-5 | 2026-11-22T00:04+09:00 | 2026-11-22T00:10+09:00 |
+| review | lane2-w12ciweb-review | claude-opus-5-5 | 2026-11-22T00:12+09:00 | 2026-11-22T00:32+09:00 |
 
 ## 기록
 
