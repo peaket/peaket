@@ -6,7 +6,7 @@
 
 ## 지금 상태
 
-- 기획(v1.0)과 설계를 마쳤습니다. **코드는 아직 없고**, 구현은 작업 목록(WBS: 할 일을 잘게 나눈 작업 목록)의 Phase 0부터 시작합니다([docs/wbs/wbs.md](docs/wbs/wbs.md)).
+- 기획(v1.0)과 설계를 마쳤고, 지금은 기능 묶음 단위로 구현하고 있습니다. 묶음 목록은 [docs/BUILD_ORDER.md](docs/BUILD_ORDER.md), 진행 상태는 [docs/PROGRESS.md](docs/PROGRESS.md)에 있습니다. 전체 작업 목록(WBS: 할 일을 잘게 나눈 작업 목록)은 [docs/wbs/wbs.md](docs/wbs/wbs.md)입니다.
 - 아래 목표 숫자는 모두 **재기 전의 가설**입니다. 잰 결과는 좋든 나쁘든 성능 장부([docs/perf-ledger.md](docs/perf-ledger.md))에 그대로 적습니다.
 - 운영 환경은 설계로만 두고, 측정은 PC에서 합니다. 100만 명 규모는 1천~10만 명을 잰 결과를 설계 식으로 늘려 추정합니다(ADR-0057, [docs/verification.md](docs/verification.md)).
 
@@ -72,7 +72,7 @@
 python tools/doc-check/check_all.py
 ```
 
-구현을 시작하면 이 저장소 하나를 받아 토큰 없이 설치하고 빌드합니다. 내부 패키지를 게시하지 않고 저장소 안에서 잇기 때문입니다([docs/devops.md](docs/devops.md) §2.1). Node 24(판은 `.nvmrc`)에서 `corepack pnpm install --frozen-lockfile`로 설치하고 `pnpm test`로 시험을 돌립니다. 코드는 정본을 명세로 읽고 시험을 먼저 써서 만듭니다([docs/architecture.md](docs/architecture.md) §8.6, ADR-0178). pnpm 판은 `package.json`에 고정되어 있습니다.
+이 저장소 하나를 받아 토큰 없이 설치하고 빌드합니다. 내부 패키지를 게시하지 않고 저장소 안에서 잇기 때문입니다([docs/devops.md](docs/devops.md) §2.1). Node 24(판은 `.nvmrc`)에서 `corepack pnpm install --frozen-lockfile`로 설치하고 `pnpm test`로 시험을 돌립니다. 코드는 정본을 명세로 읽고 기능 묶음 절차대로 만듭니다([docs/architecture.md](docs/architecture.md) §8.6, ADR-0178·0281). pnpm 판은 `package.json`에 고정되어 있습니다.
 
 ## 문서 규칙
 
