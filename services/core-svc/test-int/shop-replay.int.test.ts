@@ -504,6 +504,57 @@ describe('AZ-T17 ⑥ 굿즈 작업의 멱등 재생 대조', () => {
     }
   });
 
+  test('AZ-T17 ⑥ 리뷰 재현(RV2): 시작·접수·취소·계좌 다시 받기의 재생 참조가 다른 팬 주문 경로의 그 팬 자신의 것이면 404 not-found이고 결제사 호출과 쓰기가 없다 [ASVS v5.0.0-8.2.2]', async () => {
+    // 결정 6 표 '경로 주문의 계정이 세션 계정이다'만 남기는 경우: C 계정의 기록이 D 주문 경로의 지문을 갖고, 결과 참조는 그 경로 주문(D)의
+    // 시도·accepted·취소를 가리킨다. 시도의 주문·두 값 목록·취소 행의 주문 대조는 모두 지나므로 계정 대조만이 막는다.
+    // 재생 길이 맨 먼저 보므로 기록은 지문을 맞춰 소유자 연결로 넣는다(계좌 다시 받기 K7과 같은 꼴)
+    const C = randomUUID();
+    const D = randomUUID();
+    const product = await seedProduct({ fulfillments: ['PICKUP'] });
+    const slot = await seedSlot(product);
+    // D의 결제 전 주문과 그 결제 시도, D의 결제한 주문과 그 취소
+    const OD1 = orderIdOf(await post(D, '/v1/shop/orders', { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot }));
+    const startD = await post(D, `/v1/shop/orders/${OD1}/payments`, {});
+    expect(startD.statusCode, startD.payload).toBe(201);
+    const viewD = JSON.parse(startD.payload) as { attemptId: string };
+    const OD2 = (await seedPaidOrder(D, product, { status: 'READY' })).orderId;
+    const cancelD = await post(D, `/v1/shop/orders/${OD2}/cancellations`, {});
+    expect(cancelD.statusCode, cancelD.payload).toBe(202);
+    const XD = String((JSON.parse(cancelD.payload) as { cancellationId: string }).cancellationId);
+    const calls = () => ({ checkout: payments.calls.checkout.length, confirm: payments.calls.confirm.length, cancel: payments.calls.cancel.length });
+    expect(calls()).toEqual({ checkout: 1, confirm: 0, cancel: 1 });
+
+    const cases: { what: string; operation: string; url: string; body: unknown; ref: string; orderId: string; hidden: string[] }[] = [
+      { what: '결제 시도 시작', operation: 'START_MERCH_PAYMENT', url: `/v1/shop/orders/${OD1}/payments`, body: {}, ref: startD.payload, orderId: OD1, hidden: [viewD.attemptId, '"checkout"'] },
+      { what: '결제 접수', operation: 'ACCEPT_MERCH_PAYMENT', url: `/v1/shop/orders/${OD1}/payment-acceptance`, body: { pg: 'SIMULATOR', paymentKey: `sim-${OD1}`, amount: PRICE }, ref: 'accepted', orderId: OD1, hidden: [] },
+      { what: '취소', operation: 'CANCEL_MERCH_ORDER', url: `/v1/shop/orders/${OD2}/cancellations`, body: {}, ref: `cancel:${XD}`, orderId: OD2, hidden: [XD, '"cancellationId"'] },
+      { what: '계좌 다시 받기', operation: 'SHOP_CANCEL_REFUND_ACCOUNT', url: `/v1/shop/orders/${OD2}/cancellations/${XD}/account`, body: ACCOUNT_BODY, ref: `cancel:${XD}`, orderId: OD2, hidden: ['"cancellationId"', '"refundAmount"'] },
+    ];
+    for (const c of cases) {
+      const key = randomUUID();
+      const payload = JSON.stringify(c.body);
+      await admin.pool.query('insert into idempotency_record (account_ref, operation, idempotency_key, request_hash, result_ref, created_at) values ($1, $2, $3, $4, $5, $6)', [
+        C,
+        c.operation,
+        key,
+        Buffer.from(requestFingerprint('POST', c.url, Buffer.from(payload, 'utf8'))),
+        c.ref,
+        new Date(clock.now()),
+      ]);
+      const notFound = await foreign404(c.orderId);
+      const before = await writes();
+      const was = calls();
+      logs.length = 0;
+      const res = await svc.http.inject({ method: 'POST', url: c.url, headers: { ...headers(C, key), 'x-reauth-token': 'reauth-az-t17-rv2' }, payload });
+      expect(problem(res), c.what).toEqual(notFound);
+      // 404 본문의 instance는 요청 경로라 경로에 든 ID는 보지 않고, 처음 응답에만 있는 값·칸이 없는지 본다
+      for (const h of c.hidden) expect(res.payload.includes(h), `${c.what}: ${h}`).toBe(false);
+      expect(calls(), c.what).toEqual(was);
+      expect(await writes(), c.what).toEqual(before);
+      expectOneMismatch(`RV2 ${c.what}`, c.operation, c.orderId, c.operation === 'ACCEPT_MERCH_PAYMENT' ? [C, D] : [C, D, c.ref]);
+    }
+  });
+
   test('AZ-T17 ⑥ 반품 재생 참조가 같은 팬의 다른 주문이면 404 not-found이고 그 주문 상세가 응답에 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const C = randomUUID();
     const product = await seedProduct({ fulfillments: ['PICKUP'] });
