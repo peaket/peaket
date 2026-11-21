@@ -99,6 +99,11 @@ C 묶음이라 검증의 필수 검사는 아니다(ADR-0331 결정 4). 위 5의
 
 C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4). 고치기 전 상태의 재현은 계획 담당이 위 1 '재현'에 적었다(요약 명령 exit 2).
 
+## 구현
+
+- `.gitignore` 시험 보고서 묶음(`:1-3`) 아래 `:4`에 주석 한 줄, `:5`에 `search-golden-report.json` 한 줄을 더했다(위 3 그대로). 다른 파일은 손대지 않았다.
+- 확인(이 폴더): `git check-ignore -v services/core-svc/search-golden-report.json` → `.gitignore:5:search-golden-report.json`. `git ls-files`에 그 이름 없음. `python -I -X utf8 tools/doc-check/check_all.py` 오류 0.
+
 ## 시험 결과
 
 (구현·시험 담당이 채운다)
@@ -116,6 +121,7 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12golden-plan | claude-opus-5-5 | 2026-11-22T04:55+09:00 | 2026-11-22T05:07+09:00 |
+| impl | lane2-w12golden-impl | claude-opus-5-5 | 2026-11-22T05:06+09:00 | 2026-11-22T05:09+09:00 |
 
 ## 다음 단계
 
