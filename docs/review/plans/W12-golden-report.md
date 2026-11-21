@@ -134,7 +134,37 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 
 ## 검증
 
-(검증 담당이 채운다. 5의 명령 결과와 초안 PR CI 실행 번호)
+- 담당 `lane2-w12golden-verify`(claude-opus-5-5). 계획·시험·구현·리뷰에 관여하지 않았다. 범위는 `dcdd806ab..a48addf4d`(구현 `b0a6b091b`, 시험 `3d7f09246`)이다. 코드·시험은 커밋하지 않았고 Docker도 쓰지 않았다. 표본은 하나씩 넣고 보고서 파일을 `rm -f`로 지운 뒤 위 5의 1~3을 차례대로 돌렸다. 그 뒤 `git checkout -- <파일>`로 되돌렸고, 그때마다 `git status --short`가 비었음을 봤다. 끝에 만든 보고서(`test-report.json`·`search-golden-report.json`)를 지웠다.
+- 기준선(고친 그대로): 5의 1 시험 1개 통과(`SR-T12 골든 세트: 1위 100% · 3위 안 100% (100개)`). 5의 2 새 이름이 생기고 옛 이름은 없다. `git check-ignore -v` → `.gitignore:5:search-golden-report.json`, 추적 안 된 파일 없음. 5의 3 `find`는 `--report services/core-svc/test-report.json` 하나만 찾았고 `asvs-report.mjs`는 exit 0이다.
+
+### 틀린 구현 표본(위 6)
+
+| 번호 | 넣은 것 | 5의 1 | 5의 2 | 5의 3 | 판정 |
+| --- | --- | --- | --- | --- | --- |
+| M1 | 시험 `:81` 쓰는 경로만 옛 이름 `../test-report-search-golden.json`으로(주석 `:3`은 새 이름) | 통과 | 새 이름 없음(실패) | `find`가 골든 보고서도 찾음. `vitest JSON 보고서가 아니다(testResults 없음): services/core-svc/test-report-search-golden.json`, exit 2 | 잡힘 |
+| M2 | 시험의 새 이름을 `test-report.search-golden.json`으로(`:3`·`:81`) | 통과 | 새 이름 없음(실패) | 같은 문구(그 파일 이름)로 exit 2 | 잡힘 |
+| M3 | `.gitignore:5` 줄을 뺌 | 통과 | `git check-ignore` exit 1, `git status`에 `?? services/core-svc/search-golden-report.json` | exit 0 | 잡힘(5의 2) |
+| M3′ | `.gitignore:5`를 오타 `search-golden-reprot.json`으로 | 통과 | M3과 같음 | exit 0 | 잡힘(5의 2) |
+
+- **틀린 구현 3개 중 3개 잡힘**(M3은 줄 빠짐·오타 두 꼴 모두). 5의 1은 어느 표본에서도 통과한다. 단언이 정답률만 보므로 맞다. 이 묶음을 지키는 것은 5의 2·3이다(위 6의 '잡을 것' 그대로).
+
+### 초안 PR CI(PR #61, 실행 44945449240, 머리 `a48addf4d`)
+
+- core-svc 단위 시험이 캐시 없이 돌았다. `test/search-golden.test.ts` 1개 통과, 기록 줄 `SR-T12 골든 세트: 1위 100% · 3위 안 100% (100개)`.
+- **ASVS 태그 리포트 단계**: `node / node` 로그에 `asvs-report: … 보고서가 아니다` 줄이 없다(grep 0건). 작업 요약 'node / node summary'에 'ASVS 추적 시험 태그' 표가 나왔다(표 2027행 가운데 적용 1782행, '시험 보고서 15개를 읽었다', 문서별 18줄). 위 '감독에게' 1의 해 ①(요약이 통째로 빠짐)과 ②의 끝 코드 2는 사라졌다.
+- 그 단계의 끝 표시는 `exit code 1`이다. `asvs-report.mjs:185`는 요약을 다 쓴 뒤 태그 붙은 시험이 하나라도 실패했으면 1을 낸다(읽기 오류는 2). 요약의 '실패한 태그 시험'에 아래 purchase-svc 시험 하나가 적혔다. 그 시험이 통과하면 0이 된다. 이 묶음 몫이 아니다.
+- `node / node`와 그래서 `ci-summary`는 빨강이다. 원인은 purchase-svc 단위 `test/payment-deposit.test.ts` 'P-T36 ③_주문마다 그 주문의 답을 쓴다'(`expected 'TRANSIENT' to deeply equal { bank: '20', … }`) 하나다(147파일 4368개 중 1 실패). 이 묶음 diff(`.gitignore`·core-svc 시험 파일·이 계획)는 purchase-svc에 닿지 않는다. 단위 시험 단계가 실패해 그 뒤 lint·통합 시험 단계는 건너뛰었다. 나머지 잡은 통과 또는 건너뜀이다.
+
+### 게이트
+
+- `pnpm exec turbo run typecheck --filter=@peaket/core-svc --force` 9개 성공(캐시 0). `pnpm lint` 끝 코드 0. `python -I -X utf8 tools/doc-check/check_all.py` 오류 0. `node tools/ci/roles-check.mjs`는 이 커밋 전 'verify 커밋이 없다' 하나만 실패였고, 이 커밋이 그 자리를 채운다.
+
+### 남은 위험
+
+1. 이름이 다시 `test-report*` 꼴로 돌아가도 CI에서 드러나는 곳은 ASVS 단계(`continue-on-error`)의 exit 2뿐이라 잡이 빨개지지 않는다. 위 2의 (나)·(다)를 버리며 받아들인 위험이다.
+2. PR CI는 한 번 봤다. P-T36 ③ 실패는 이 묶음 밖이라 이름만 감독에게 넘긴다.
+
+- **판정: 합쳐도 됨.** 틀린 구현 3개 중 3개 잡힘. ASVS 요약 단계의 '보고서가 아니다' 오류가 사라졌고 작업 요약에 표가 나온다. 막는 지적 없음. node 잡 빨강은 purchase-svc P-T36 ③(이 묶음 밖)이다.
 
 ## 담당 표
 
@@ -144,6 +174,7 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 | impl | lane2-w12golden-impl | claude-opus-5-5 | 2026-11-22T05:06+09:00 | 2026-11-22T05:09+09:00 |
 | test | lane2-w12golden-test | claude-opus-5-5 | 2026-11-22T05:08+09:00 | 2026-11-22T05:12+09:00 |
 | review | lane2-w12golden-review | claude-opus-5-5 | 2026-11-22T05:12+09:00 | 2026-11-22T05:18+09:00 |
+| verify | lane2-w12golden-verify | claude-opus-5-5 | 2026-11-22T05:18+09:00 | 2026-11-22T05:34+09:00 |
 
 ## 다음 단계
 
@@ -152,4 +183,4 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 3. 리뷰·검증 담당(서로 다른 세션): 5의 4와 초안 PR CI 한 번, 각자 '리뷰'·'검증' 절을 채워 커밋.
 4. 감독: 초안 PR CI 확인 뒤 develop에 합친다.
 
-- **다음 단계: 리뷰·검증 → 기록 → 합치기.** 구현(`b0a6b091b`, `.gitignore` 한 줄)과 시험(이름 바꿈, 위 '시험 결과')이 끝났다.
+- **다음 단계: 기록 → 합치기.** 구현(`b0a6b091b`)·시험(`3d7f09246`)·리뷰(통과)·검증(합쳐도 됨, 위 '검증')이 끝났다.
