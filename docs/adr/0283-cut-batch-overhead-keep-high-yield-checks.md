@@ -1,6 +1,6 @@
 # ADR-0283: 묶음의 부대 비용을 줄이고 잘 잡히는 검사를 꼭 한다(2026-11-18)
 
-- **상태**: 채택(2026-11-18, 소유자 결정: "지금 이 개발을 최대한 빠르고 정확하게 하고 싶다"는 물음에 낸 추천 여섯 가지를 "추천대로 적용"으로 고름). [ADR-0190](0190-step-cost-waits-reviews-records.md)·[ADR-0256](0256-feature-batches-completion-ledger-risk-grades.md)·[ADR-0270](0270-independent-agents-per-role-test-first.md)·[ADR-0281](0281-implementation-first-independent-tests.md)·[ADR-0282](0282-separate-progress-records-from-plans.md)을 보완한다. 역할 다섯을 서로 다른 에이전트가 맡는 것(ADR-0270)과 A 등급의 실패 증명(ADR-0256 결정 10)은 바꾸지 않는다.
+- **상태**: 채택(2026-11-18, 소유자 결정: "지금 이 개발을 최대한 빠르고 정확하게 하고 싶다"는 물음에 낸 추천 여섯 가지를 "추천대로 적용"으로 고름). [ADR-0190](0190-step-cost-waits-reviews-records.md)·[ADR-0256](0256-feature-batches-completion-ledger-risk-grades.md)·[ADR-0270](0270-independent-agents-per-role-test-first.md)·[ADR-0281](0281-implementation-first-independent-tests.md)·[ADR-0282](0282-separate-progress-records-from-plans.md)을 보완한다. 역할 다섯을 서로 다른 에이전트가 맡는 것(ADR-0270)과 A 등급의 실패 증명(ADR-0256 결정 10)은 바꾸지 않는다. 보탬(2026-11-21): [ADR-0331](0331-trim-per-batch-checks-defer-kind.md) 결정 7이 결정 3의 닿는 CI 잡을 로컬과 초안 PR CI 가운데 하나만 보게 했고, 결정 9가 CI kind 잡을 배포 구간으로 미뤘다.
 - **관련**: [docs/architecture.md](../architecture.md) §8.6, [docs/PROGRESS.md](../PROGRESS.md) 턴 규칙, `docs/lanes/`, [docs/progress-archive.md](../progress-archive.md) §6
 - **관련 ID**: 없음(작업 절차만 바꾼다)
 

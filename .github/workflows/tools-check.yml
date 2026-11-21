@@ -11,7 +11,8 @@ permissions:
 jobs:
   tools:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # 로컬 클러스터 도구 시험 앞의 identity-svc 빌드를 더해 10분에서 늘렸다(ADR-0331 결정 9)
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,6 +28,11 @@ jobs:
           npm install --global "$pm"
       - run: pnpm install --frozen-lockfile
       - run: node --test "tools/ci/*.test.mjs"
+      # 로컬 클러스터 도구의 클러스터 없는 시험(도구 받기·Strimzi 설치 파일 고치기·공용 차트 렌더·데모 시드, docs/devops.md §3.1 tools-check 행).
+      # 배포 구간까지 ci-kind를 미루면서 ci-kind.yml에서 옮겼다(소유자 결정 2026-11-21, ADR-0331 결정 9). 데모 시드 시험(DS-05·06·12)이
+      # services/identity-svc/scripts/seed-demo.mjs를 띄우고 그 스크립트가 identity-svc dist를 읽으므로 의존 패키지와 함께 먼저 빌드한다
+      - run: pnpm exec turbo run build --filter=@peaket/identity-svc...
+      - run: node --test "tools/local/*.test.mjs"
       # 게이트웨이 다섯의 정의 정적 시험(docs/infra.md §4.1 'Envoy 게이트웨이의 첫 구현', BUILD_ORDER HOT-400)
       - run: node --test "deploy/gateways/test/*.test.mjs"
       # 게이트웨이 라우트 생성 대조(D-T42 ①②, docs/infra.md §4.1 '생성 대조', BUILD_ORDER HOT-410): openapi·라우트 원천으로 다시 만든 결과가 생성 파일과 다르면 실패.

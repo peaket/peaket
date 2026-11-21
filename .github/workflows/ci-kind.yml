@@ -2,10 +2,17 @@
 # add-local-cluster-and-relay-deployment). ci.yml이 바뀐 범위에 kind가 있거나 develop에 푸시했을 때 부른다.
 # 로컬과 같은 스크립트(tools/local)로 kind 클러스터(Strimzi Kafka 3.9.1, PostgreSQL 18, 계정 없는 AWS 흉내 서버)를 띄운다.
 # 도구와 이미지는 판·해시·다이제스트로 고정했다. 비밀이 필요 없어 포크 PR에서도 돈다(비밀이 필요한 단계는 tools/ci/fork-guard.mjs를 거친다).
+# 배포 구간 전까지는 ci.yml이 부르지 않고(저장소 변수 PEAKET_KIND_IN_CI가 'true'일 때만), 매주 토요일 03:00 KST [가정]와 수동 실행으로
+# 스스로 돈다(소유자 결정 2026-11-21, ADR-0331 결정 9). 참고용이라 아무것도 막지 않고 이슈도 열지 않는다.
+# 클러스터 없이 도는 tools/local/*.test.mjs는 tools-check.yml로 옮겼다
 name: ci-kind
 
 on:
   workflow_call:
+  schedule:
+    # 금요일 18:00 UTC = 토요일 03:00 KST [가정]
+    - cron: '0 18 * * 5'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,14 +34,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
-      # 차트 렌더 시험이 YAML 해석기(뿌리 개발 의존성 yaml)를 쓴다. 잠금 파일대로만 설치한다(§4.4)
+      # 클러스터 도구가 YAML 해석기(뿌리 개발 의존성 yaml)를 쓴다. 잠금 파일대로만 설치한다(§4.4)
       - run: |
           pm=$(node -p "require('./package.json').packageManager")
           case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
           npm install --global "$pm"
       - run: pnpm install --frozen-lockfile
-      # 도구 받기(판·해시)·Strimzi 설치 파일 고치기·공용 차트 렌더 시험
-      - run: node --test "tools/local/*.test.mjs"
+      # 도구 받기(판·해시)·Strimzi 설치 파일 고치기·공용 차트 렌더 시험(tools/local/*.test.mjs)은 클러스터가 필요 없어 tools-check.yml이 돈다(ADR-0331 결정 9)
       - run: node tools/local/cluster.mjs up
       - run: node tools/local/cluster.mjs image
       # 계정 없는 AWS 흉내 서버의 기능 확인과 V-T28 ①의 kind 부분(실제 Lease API로 리더 이어받기)

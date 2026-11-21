@@ -90,9 +90,11 @@ jobs:
       base: ${{ github.event.pull_request.base.sha || github.event.before }}
 
   # 로컬 kind 클러스터 시험(무겁다): 클러스터 정의·공용 차트·릴레이 코드가 바뀌었거나 develop 푸시(§3.3 E2E는 CI의 kind)
+  # 배포 구간 전까지는 미룬다(소유자 결정 2026-11-21, ADR-0331 결정 9): 저장소 변수 PEAKET_KIND_IN_CI가 'true'일 때만 위 조건으로 돈다.
+  # 변수가 없으면 건너뛰고(ci-summary는 건너뛴 잡을 통과로 센다), ci-kind.yml이 매주 토요일 예약·수동 실행으로 참고만 돈다
   kind:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.kind == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) }}
+    if: ${{ !cancelled() && vars.PEAKET_KIND_IN_CI == 'true' && (needs.changes.result != 'success' || needs.changes.outputs.kind == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/develop')) }}
     uses: ./.github/workflows/ci-kind.yml
 
   # 이미지 빌드 시험(푸시 없이, docs/devops.md §3.2): 이미지가 있는 배포 단위와 그 Dockerfile이 담는 것이 바뀌었을 때.

@@ -478,21 +478,33 @@ test('MG-10 V22 CI가 돌린다(ci.yml): changes 잡의 tools·kind 범위가 �
   const wf = parse(readFileSync(join(REPO, '.github/workflows/ci.yml'), 'utf8'));
   const jobUsing = (file) => Object.entries(wf.jobs ?? {}).find(([, j]) => j.uses === `./.github/workflows/${file}`);
   const ctx = (o = {}) => {
-    const c = { 'needs.changes.result': 'success', 'github.event_name': 'pull_request', 'github.ref': 'refs/heads/feature/x' };
+    // 저장소 변수가 없으면 GitHub는 빈 문자열로 계산한다
+    const c = { 'needs.changes.result': 'success', 'github.event_name': 'pull_request', 'github.ref': 'refs/heads/feature/x', 'vars.PEAKET_KIND_IN_CI': '' };
     for (const k of Object.keys(wf.jobs.changes?.outputs ?? {})) c[`needs.changes.outputs.${k}`] = 'false';
     return { ...c, ...o };
   };
-  for (const [file, scope] of [
-    ['tools-check.yml', 'tools'],
-    ['ci-kind.yml', 'kind'],
+  // kind 잡은 배포 구간 전까지 저장소 변수 PEAKET_KIND_IN_CI가 'true'일 때만 범위 조건으로 돈다(소유자 결정 2026-11-21, ADR-0331 결정 9)
+  for (const [file, scope, on] of [
+    ['tools-check.yml', 'tools', {}],
+    ['ci-kind.yml', 'kind', { 'vars.PEAKET_KIND_IN_CI': 'true' }],
   ]) {
     const found = jobUsing(file);
     assert.ok(found, `ci.yml에 ${file}을 부르는 잡이 없다`);
     const [name, job] = found;
     assert.match(String(wf.jobs.changes?.outputs?.[scope] ?? ''), new RegExp(`outputs\\.${scope}\\b`), `changes 잡이 ${scope} 범위를 내보내지 않는다`);
     assert.ok((Array.isArray(job.needs) ? job.needs : [job.needs]).includes('changes'), `${name}이 changes를 기다리지 않는다`);
-    assert.equal(job.if === undefined || evalExpr(job.if, ctx({ [`needs.changes.outputs.${scope}`]: 'true' })), true, `${name}: ${scope} 범위가 켜져도 돌지 않는다(if ${job.if})`);
+    assert.equal(job.if === undefined || evalExpr(job.if, ctx({ [`needs.changes.outputs.${scope}`]: 'true', ...on })), true, `${name}: ${scope} 범위가 켜져도 돌지 않는다(if ${job.if})`);
     assert.equal(job['continue-on-error'] ?? false, false, `${name}에 continue-on-error`);
+  }
+  // 변수가 없으면 kind 범위가 켜져도, develop 푸시여도 kind 잡은 돌지 않는다(ADR-0331 결정 9)
+  const [kindName, kindJob] = jobUsing('ci-kind.yml');
+  assert.ok(kindJob.if, `${kindName}에 조건(if)이 없다`);
+  for (const o of [
+    { 'needs.changes.outputs.kind': 'true' },
+    { 'github.event_name': 'push', 'github.ref': 'refs/heads/develop' },
+    { 'needs.changes.result': 'failure' },
+  ]) {
+    assert.equal(evalExpr(kindJob.if, ctx(o)), false,`${kindName}: PEAKET_KIND_IN_CI 없이 돈다(${JSON.stringify(o)}, if ${kindJob.if})`);
   }
 });
 
