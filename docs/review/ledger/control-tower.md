@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 8 | 111 | 0 | 0 | 1 | 3 | 0 | 24 | 149 | 296 |
-| 합계 | 8 | 111 | 0 | 0 | 1 | 3 | 0 | 24 | 149 | 296 |
+| B | 29 | 101 | 0 | 0 | 1 | 4 | 0 | 24 | 141 | 300 |
+| 합계 | 29 | 101 | 0 | 0 | 1 | 4 | 0 | 24 | 141 | 300 |
 
 ## docs/features/control-tower.md
 
@@ -13,10 +13,12 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | C-T1 | — | 제어 명령 접수 SLO 검증 | 운영자 10명이 동시에 접속한 부하(SLO 계측 표준 조건)에서 접수 p95 ≤ 500ms(NFR-008·§4, 2026-11-01 정합 점검)와 성공률… | 빈칸 | B | — |
 | C-T2 | — | 명령 전파 신뢰성 검증 | 최종 승인이 끝난 때부터 받는 쪽의 ack(집행하는 모든 곳이 판 N 이상을 적용, ADR-0103)가 끝날 때까지 종단 p99 ≤ 3초와 성공률 99.9%를… | 빈칸 | B | — |
-| C-T3 | — | 시스템 안전 한계 강제 통제 | 허용 기준값을 벗어난 동시 입장 목표 수치를 설정하려 하면 422 Unprocessable Entity로 바로 거절되고, 시스템 반영이 0건임을 입증한다. | 빈칸 | B | — |
-| C-T4 | — | 2인 상호 승인 무결성 | 명령 요청자와 승인자가 같은 계정이면 승인이 거부되고, 10분 대기 시간 초과 시 자동으로 만료된다. | 빈칸 | B | — |
-| C-T5 | — | 위험 명령 재인증 강제 | 킬스위치 같은 중대 명령을 낼 때 5분 이내의 유효한 재인증 토큰이 없으면 403 Forbidden으로 차단된다. | 빈칸 | B | — |
-| C-T6 | — | 명령 사전 실행 모의(dry-run) | 명령 집행 전, 센 값은 같은 시각의 원천(대기열 Redis·purchase DB·게이트웨이 집계)에서 직접 센 값과 같고, 예측 값은 식과 넣은 값·가정이… | 빈칸 | B | — |
+| C-T3 | — | 시스템 안전 한계 강제 통제 | 허용 기준값을 벗어난 동시 입장 목표 수치를 설정하려 하면 422 Unprocessable Entity로 바로 거절되고, 시스템 반영이 0건임을 입증한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
+| C-T4 | — | 2인 상호 승인 무결성 | 명령 요청자와 승인자가 같은 계정이면 승인이 거부되고, 10분 대기 시간 초과 시 자동으로 만료된다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
+| C-T5 | — | 위험 명령 재인증 강제 | 킬스위치 같은 중대 명령을 낼 때 5분 이내의 유효한 재인증 토큰이 없으면 403 Forbidden으로 차단된다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
+| C-T6 | ① | 명령 사전 실행 모의(dry-run) | ① 명령 집행 전, 센 값은 같은 시각의 원천(대기열 Redis·purchase DB·게이트웨이 집계)에서 직접 센 값과 같고 | 다른 단계 | B | BAT-365 · dry-run 센 값이 같은 시각의 원천(대기열 Redis·purchase DB·게이트웨이 집계)에서 직접 센 값과 같은지는 받는 쪽이 센 값을 주는 읽기 전용… |
+| C-T6 | ② | 명령 사전 실행 모의(dry-run) | ② 예측 값은 식과 넣은 값·가정이 함께 표시된다. | 자동 시험 | B | 시험: services/ops-svc/test/command-dry-run.test.ts |
+| C-T6 | ③ | 명령 사전 실행 모의(dry-run) | ③ 실행 5분 [가정] 뒤 예측과 실제 값이 명령 기록에 남는다(추천 적용 2026-10-28, 기술 검토 낮음-059, §4. 세부 번호는 추천 적용… | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-dry-run.test.ts |
 | C-T7 | — | 파드 ack 시간 초과 예외 처리 | 대상 파드의 수신 확인이 시간 초과되면 FAILED 상태로 바뀌고, 수동 재시도([ 다시 시도 ])와 채운 런북 CLI 명령 한 줄 안내가 바로 나온다. | 빈칸 | B | — |
 | C-T8 | — | 제어 명령 긴급 원복(Revert) | 직전 정상 설정값을 복원했다는 ack를 정상으로 받고, 1차 명령과 롤백 명령이 감사 로그에 총 2건으로 무결하게 남는다. | 빈칸 | B | — |
 | C-T9 | — | 자동 제어와 수동 제어의 경합 | 운영자가 수동 명령으로 개입한 직후 15분간 AIMD 자동 조정이 멈추고, 만료 후 확인을 거쳐 자동 조정으로 돌아옴을 입증한다. 자동 조절 멈춤 중 지정 뒤… | 빈칸 | B | — |
@@ -41,7 +43,9 @@
 | C-T24 | — | 접속기록 점검 | 파트너 계정이 같은 명단을 24시간에 3회 내려받으면 다음 날 점검 목록에 '반복 다운로드'로 올라오고, 사유 확인과 사후조치를 기록할 때까지 미조치로 남는다… | 빈칸 | B | — |
 | C-T25 | — | Go/No-Go 필수 항목 실패 | 노드 시계 오프셋을 30ms로 만든 상태로 T-30분 점검을 하면 No-Go가 된다. 오픈 시각에는 입장 일시정지와 대기실 공지가 걸린 채로 로비 셔플은… | 빈칸 | B | — |
 | C-T26 | — | 진행 중 배포가 남은 T-30분 점검 | 대형 회차 T-100분에 시작해 표본 부족으로 판정 불가에 멈춘 카나리(devops §6.2)를 두고, 그 카나리의 `freeze-guard` 자동… | 빈칸 | B | — |
-| C-T27 | — | 감사 기록 변조 탐지 | 앵커가 찍힌 감사 기록 한 줄의 사유를 DB에서 고친다. 다른 시험에서는 마지막 앵커 뒤의 맨 끝 기록을 지운다. 그 뒤 검증 잡을 돌리면, 고친 기록은 다음… | 빈칸 | B | — |
+| C-T27 | ① | 감사 기록 변조 탐지 | ① mac 불일치로 SEV2가 나오고 | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
+| C-T27 | ② | 감사 기록 변조 탐지 | ② 보안 사고 기록이 나온다. | ID만 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
+| C-T27 | ③ | 감사 기록 변조 탐지 | ③ 앵커 뒤 끝 기록의 삭제는 드러나지 않으므로 남는 한계(최대 5분)로 기록된다(세부 번호는 추천 적용 2026-11-21, BAT-355 계획) | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | C-T28 | — | 런북 서명과 연결 신원 | 서명이 하나뿐인 묶음(명령 3 정지 묶음 제외), 같은 운영자가 두 번 서명한 묶음, 5분 지난 묶음, 이미 쓴 commandId의 묶음, operator 한… | 빈칸 | B | — |
 | C-T29 | — | 홈 구성 저장 | operator가 판매 승인 전 공연을 배너에 넣고, 대체 텍스트 없이 저장하고, 두 운영자가 같은 판으로 거의 동시에 저장하고, viewer가 저장을… | 빈칸 | B | — |
 | C-T30 | — | 판단 위젯 요약과 원인 분석 링크 | 판매 진행 중 탭에서 Redis 메모리를 주의 기준 [가정] 위로 올리면 포화도 요약이 '주의'로 바뀐다. 시험 서비스가 새 종류의 오류를 내면 1분 [가정]… | 빈칸 | B | — |
@@ -69,7 +73,7 @@
 | C-T46 | — | 판매 일시정지 1인 실행과 2인 재개 | commander 1인이 재인증 뒤 명령 3을 내면 승인 대기 없이 전파되어 ack p99 3초 안에 ACKED가 되고, 사후 검토 보고서 할 일(작성… | 빈칸 | B | — |
 | C-T47 | — | 2인 승인 시연(데모) | 데모 환경에서 2인 명령을 요청한 뒤 데모 막대의 '요청자 본인으로 승인 시도'를 누르면 403이고, '데모 승인자로 승인'을 누르면 데모 도우미가 데모 승인자… | 빈칸 | B | — |
 | C-T48 | — | 받는 쪽 과부하 중 제어 명령 | purchase-svc에 이벤트 루프 지연 p99 200ms [가정]가 나는 부하를 건 채 명령 3을 내면, 제어 gRPC(데드라인 1초 [가정], 같은 명령… | 빈칸 | B | — |
-| C-T49 | — | KMS 정지 중 명령 커밋 | KMS 호출을 막은 채 명령 2를 내면 접수 p95 500ms 안에 커밋·전파된다. mac이 빈 감사 행이 1분 [가정]을 넘으면 SEV2가 뜨고, KMS를… | 빈칸 | B | — |
+| C-T49 | — | KMS 정지 중 명령 커밋 | KMS 호출을 막은 채 명령 2를 내면 접수 p95 500ms 안에 커밋·전파된다. mac이 빈 감사 행이 1분 [가정]을 넘으면 SEV2가 뜨고, KMS를… | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts, services/ops-svc/test/audit-mac.test.ts |
 | C-T50 | — | 킬스위치 중 확장·재시작 | 명령 3이 ACKED인 회차에서 purchase-svc를 둘에서 여섯으로 늘리고, 다른 시험에서는 파드 하나를 강제로 다시 시작한다. 새 파드의 홀드·결제… | 빈칸 | B | — |
 | C-T51 | — | 오래 끈 기능 플래그 | 관람 후기 기능 플래그를 명령 9로 끄고 시계를 8일 넘긴 뒤 core-svc를 다시 시작하면 새 파드에서도 꺼져 있다. 만료가 지난 로그 레벨 값은 새 파드가… | 빈칸 | B | — |
 | C-T52 | — | 에러 버짓 100% 소진과 Degraded 후보 추천(추천 적용… | 온세일 윈도우 안에서 결제 확정 여정의 에러 버짓을 100% 소진시키면, 시스템이 Degraded Mode 후보를 추천하고 긴급 알림을 보낸다. 운영자 한 명의… | 빈칸 | B | — |
@@ -181,12 +185,12 @@
 | v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test/sale-eligibility.http.test.ts 외 8곳 (영역:… |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 5곳… |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/search.http.test.ts, services/realtime-gw/test/hub.test.ts (영역: apps/console-host… |
-| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, loadtest/test/args090.test.mjs 외 87곳 (영역: services/ops-svc) |
+| v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/ops-svc/test/command-dry-run.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/save-answer.test.mjs… |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/catalog.int.test.ts 외 40곳 (영역:… |
-| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/shop-order.http.test.ts, services/identity-svc/test-int/withdrawal-participant.int.test… |
-| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/admission-ctrl/test/admission-leader.test.ts 외 46곳 (영역:… |
-| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외… |
+| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
+| v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
+| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/approval-request.int.test.ts, services/ops-svc/test-int/command-lifecycle.int.test.ts 외 1곳 |
 | v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 해당 없음 | B | 해당 없음(관제 업무에 한정 수량 자원이 없다. 같은 범위·종류의 명령이 겹치면 판 번호가 큰 쪽이 이기고, 승인 대기·전파 중 겹침은 콘솔이 표시한다, control-tower §4) |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | ID만 | B | 다른 곳 시험: packages/platform/test-int/tenant-rate-limit.int.test.ts, packages/platform/test/body-limit.test.ts 외 36곳 (영역:… |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts |
@@ -231,22 +235,22 @@
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역:… |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 1곳 |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 56곳 (영역:… |
-| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 15곳 (영역:… |
-| v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/bulkhead-auth.test.ts, services/core-svc/test/partner-bulkhead-auth.test.ts 외 3곳 (영역:… |
+| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts, services/ops-svc/test/approval-visibility.test.ts 외 1곳 |
+| v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 해당 없음 | B | 해당 없음(관제 콘솔은 플랫폼 운영자만 쓰고 파트너 테넌트가 들어오지 않는다. 파트너 실시간 판매 현황(§11)은 이 표 범위 밖이다) |
 | v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: apps/console-host, apps/widgets |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: apps/console-host, apps/widgets |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 1곳… |
-| v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts (영역: apps/console-host, apps/widgets) |
+| v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
 | v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/payment-svc/test/portone-gateway.test.ts (영역:… |
 | v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | ID만 | B | 다른 곳 시험: services/payment-svc/test/virtual-account-deposit.test.ts (영역: apps/console-host, apps/widgets) |
 | v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | ID만 | B | 다른 곳 시험: packages/shuffle/test/drand-seal.test.ts, services/admission-ctrl/test/kms-seed-opener.test.ts 외 3곳 (영역:… |
-| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int… |
-| v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, packages/shuffle/test/shuffle.test.ts (영역:… |
+| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
+| v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
 | v5.0.0-11.4.2 | — | L2 | 비밀번호는 현재 권고 파라미터를 적용한 승인된 비밀번호 해시 함수로 저장한다. | 해당 없음 | B | 해당 없음(이 기능에는 비밀번호가 없다. 관리 계정 비밀번호는 auth.md 11.4.2가 판정한다) |
 | v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, packages/shuffle/test/shuffle.test.ts (영역:… |
 | v5.0.0-11.4.4 | — | L2 | 비밀번호에서 비밀 키를 만들 때 키 스트레칭 파라미터가 있는 승인된 KDF를 쓰고, 그 파라미터는 무차별 대입으로 키가 뚫리지 않게 보안과 성능을 맞춰 정한다. | 해당 없음 | B | 해당 없음(비밀번호에서 키를 만들지 않는다) |
-| v5.0.0-11.5.1 | — | L2 | 추측되면 안 되는 모든 난수와 문자열은 CSPRNG로 만들고 128비트 이상의 엔트로피를 갖는다(UUID는 이 조건을 만족하지 않는다). | ID만 | B | 다른 곳 시험: services/payment-svc/test/pg-selection.test.ts, services/payment-svc/test/simulator-gateway.test.ts 외 5곳 (영역:… |
+| v5.0.0-11.5.1 | — | L2 | 추측되면 안 되는 모든 난수와 문자열은 CSPRNG로 만들고 128비트 이상의 엔트로피를 갖는다(UUID는 이 조건을 만족하지 않는다). | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | v5.0.0-11.6.1 | — | L2 | 키 생성·시드 생성과 디지털 서명 생성·검증에는 승인된 알고리즘과 운용 모드만 쓰고, 알려진 공격에 약한 키(페르마 인수분해에 약한 RSA 키 등)를 만들지… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test-int/kms-seed.int.test.ts 외 4곳… |
 | v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-server.test.ts (영역:… |
 | v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | B | 영역: apps/console-host, apps/widgets |
@@ -293,7 +297,7 @@
 | v5.0.0-15.3.6 | — | L2 | 프로토타입 오염을 막도록 JavaScript를 작성한다(객체 리터럴 대신 `Set`·`Map` 등). | ID만 | B | 다른 곳 시험: packages/api-client/test/policy.test.ts, packages/config/eslint/js-security.test.mjs 외 7곳 (영역: function… |
 | v5.0.0-15.3.7 | — | L2 | HTTP 파라미터 오염 공격을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-checks.test.ts, services/purchase-svc/test/read-seat-snapshot.test.ts 외 1곳 (영역:… |
 | v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/search-removal.test.ts 외 1곳 (영역:… |
-| v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 1곳 (영역:… |
+| v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/console-host, apps/widgets) |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/console-host, apps/widgets) |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/console-host, apps/widgets) |
@@ -303,12 +307,12 @@
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | ID만 | B | 다른 곳 시험: packages/platform/test/control-codec.test.ts, packages/platform/test/redis.test.ts 외 56곳 (영역:… |
 | v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 1곳 (영역:… |
-| v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 빈칸 | B | 영역: apps/console-host, apps/widgets |
+| v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: apps/console-host, apps/widgets |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/limits-errors.test.mjs, packages/platform/test/problem.test.ts 외 2곳 (영역:… |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/lobby.test.mjs, apps/web/src/_pages/event-detail/model/eligibility-store.test.mjs 외… |
 | v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 71곳… |
-| v5.0.0-2.3.5 | — | L3 | 고가치 업무 흐름에는 여러 사람의 승인을 요구한다. | 빈칸 | B | 영역: apps/console-host, apps/widgets |
+| v5.0.0-2.3.5 | — | L3 | 고가치 업무 흐름에는 여러 사람의 승인을 요구한다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-4.1.5 | — | L3 | 아주 민감하거나 여러 시스템을 거치는 요청·거래에는 전송 보호 위에 메시지마다 디지털 서명을 더한다. | 빈칸 | B | 영역: services/ops-svc |
 | v5.0.0-8.4.2 | — | L3 | 관리 화면 접근에는 지속적인 신원 확인, 기기 보안 상태 평가, 맥락 위험 분석 같은 여러 겹의 보안을 두고, 네트워크 위치나 신뢰 단말만으로 인가하지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/widgets |
 | v5.0.0-14.2.7 | — | L3 | 민감 정보에 보존 등급을 매기고, 쓸모없어진 데이터를 정한 일정이나 상황에 따라 자동으로 지운다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/payment-svc/test-int/payment-confirm-runner.i… |

@@ -279,3 +279,9 @@
 - BAT-059(R-741, R059-13): `trustedTerminatedAt`의 기준 Kafka 시각은 0 이하·수가 아님만 본다. 레코드 시각과 종료 시각이 같은 단위로 함께 틀리면 범위 안으로 보인다(packages/platform/src/control.ts).
 - BAT-059(R-741, R059-14): `time_replaced` 경고가 바꾼 레코드마다 한 줄이라, 릴레이가 오래 멈췄다 밀린 사건을 보내면 파드마다 줄이 많아진다. 처음 한 줄과 주기 요약으로 줄인다.
 - BAT-059(R-741, 검증): 기기 부하가 클 때 platform `control-sync-reread.test.ts`(I-T48 ③-3)·`service-control-sync*.test.ts`(②-4)가 기본 5초 시간 한도에 걸린 적이 있다(부하가 내려가면 통과). CI에서 흔들리면 시험 한도를 늘린다.
+- W12-vt40(R-745): `lane1-cleanup`의 V-T40 흔들림 줄(BAT-051·2026-11-18·2026-11-19 넘김)은 이 묶음에서 원인 둘(끊긴 판 섞임, 응답 ∥ 재시작 단언)을 고쳤다. BAT-051 한 번은 로그가 없어 어느 쪽인지 가리지 못했다.
+- W12-vt40(R-745, 계획): purchase `test-int/seat-model.int.test.ts:43`도 같은 `interruptAfterTimeLimit`(480초) 꼴이라 끊긴 판이 계속 돌 수 있다. 같은 도우미로 바꾼다.
+- W12-vt40(R-745, 계획): 고친 뒤에도 집중 경합이 한도에 끊기면 판 수가 줄어 갈래 단언이 거짓 실패를 낼 수 있다(거짓 통과는 아님).
+- W12-vt40(R-745, 리뷰 RVvt-3~5): 매달린 판(본문이 던지지 않고 멈춤)을 끝없이 기다림, 닫기 실패를 '끊긴 판'으로 잘못 부르고 뒤 시험이 모두 막힘, 끊긴 판 마지막 걸음의 위반을 버림(payment-model 하네스).
+- W12-vt40(R-745, 검증): R1·R2가 멈추는 때는 발권 행이 없어 `#isolate`의 발권 줄을 빼도 잡지 못한다(읽어서 앎). 시험 이의 8: 3초 한도 재현 명령은 `interrupted after 0 tests`로 실패한다(45초 설정에서는 문제 아님).
+- 흔들림 후보(갈래 4 PR #54, 2026-11-22 감독 넘김): platform `test-int/idempotency.int.test.ts` FND080(처리 중 첫 요청이 기다림 안에 커밋, lock_timeout 시간 민감)과 `test-int/control-sync.int.test.ts` I-T48 ③-2(Kafka 끊김 복구, BAT-059)가 한 번씩 흔들렸다(다시 돌리면 통과).
