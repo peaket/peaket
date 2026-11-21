@@ -22,7 +22,10 @@ const HOME = 'apps/partner/src/widgets/seatmap-canvas/sample.ts';
 test('konva는 CMP-051 폴더 밖에서 가져오지 않는다 [ASVS v5.0.0-15.1.4]', async () => {
   // 밖: 정적·동적 가져오기 모두 막는다
   assert.deepEqual(await rules("import Konva from 'konva/lib/Core';\nexport const k = Konva;\n", PAGE), ['no-restricted-imports']);
-  assert.deepEqual(await rules("import Konva from 'konva';\nexport const k = Konva;\n", 'apps/partner/app/(console)/events/[id]/seatmap/page.tsx'), ['no-restricted-imports']);
+  // Next.js 경로 파일은 다시 내보내기만 받으므로(docs/frontend.md §2.2, ADR-0329 결정 5) 표본도 그 꼴로 둔다: 가져온 뒤 내보내기, 다시 내보내기로 잇는 우회
+  const ROUTE = 'apps/partner/app/(console)/events/[id]/seatmap/page.tsx';
+  assert.deepEqual(await rules("import Konva from 'konva';\nexport { Konva as default };\n", ROUTE), ['no-restricted-imports']);
+  assert.deepEqual(await rules("export { default } from 'konva';\n", ROUTE), ['no-restricted-imports']);
   assert.deepEqual(await rules("export const load = () => import('konva/lib/shapes/Rect');\n", PAGE), ['no-restricted-syntax']);
   // 안: 받는다
   assert.deepEqual(await rules("import Konva from 'konva/lib/Core';\nimport { Rect } from 'konva/lib/shapes/Rect';\nexport const k = [Konva, Rect];\n", HOME), []);

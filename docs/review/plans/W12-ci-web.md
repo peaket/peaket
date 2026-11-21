@@ -98,7 +98,10 @@
 
 ## 실패 확인
 
-(시험 담당이 채운다. 실패 ①은 시험 표본만 바꾸고 제품 코드는 그대로라 고친 시험은 기준 트리에서도 통과한다. ADR-0331 결정 2대로 실패는 검증의 M1·M2로 보고, 여기에는 기준 트리의 고치기 전 결과(위 1 재현)와 고친 뒤 결과를 돌린 명령·시험 수·실패 수로 적는다.)
+실패 ①은 시험 표본만 바꾸고 제품 코드는 그대로라 고친 시험은 기준 트리에서도 통과한다. ADR-0331 결정 2대로 고친 단언이 틀린 규칙에서 실패하는지는 검증의 M1·M2가 본다. 여기에는 고치기 전·뒤 결과를 적는다.
+
+- **고치기 전(구현 커밋 `bd6c92c4b`, 시험 파일은 `dd9f08485`와 같음)**: `pnpm --filter @peaket/partner exec node --test src/_pages/seatmap-editor/security.test.mjs` → 6개 중 5 통과·1 실패. 실패는 22행 'konva는 CMP-051 폴더 밖에서 가져오지 않는다 [ASVS v5.0.0-15.1.4]'의 25행 단언이다. 실제 `['no-restricted-imports', 'peaket-web-boundaries/route-reexport-only']`, 기대 `['no-restricted-imports']`로 CI 로그와 같은 차이다.
+- **고친 뒤**: 같은 명령 6/6 통과, 실패 0.
 
 ## 구현
 
@@ -107,7 +110,8 @@
 
 ## 시험 결과
 
-(시험 담당이 채운다)
+- **바꾼 것**: `apps/partner/src/_pages/seatmap-editor/security.test.mjs` 25행 단언 하나를 위 1의 두 꼴로 바꿨다. 같은 경로 파일(`apps/partner/app/(console)/events/[id]/seatmap/page.tsx`)에서 `import Konva from 'konva';` 뒤 `export { Konva as default };`, 그리고 `export { default } from 'konva';`가 각각 정확히 `['no-restricted-imports']`인지 본다(`deepEqual`, 느슨한 `includes` 아님). 기대 규칙은 정본의 konva 금지(ADR-0264 결정 2)이고, 경로 파일 규칙(`docs/frontend.md` §2.2, ADR-0329 결정 5)은 걸리지 않아야 한다. 표본 위에 그 꼴을 고른 까닭을 한 줄 주석으로 달았다. 시험 이름과 다른 단언은 그대로이고 새 시험은 없다.
+- **결과(작업 폴더 뿌리)**: 위 한 파일 6/6. `pnpm --filter @peaket/partner test` 195/195(실패 0, 건너뜀 0). 이 폴더엔 `packages/*/dist`가 없어 처음엔 `instrumentation.test.mjs` 셋과 `sale-policy/model/form.test.mjs`가 dist 없음으로 실패했다. CI처럼 의존 패키지를 먼저 빌드(`pnpm --filter "@peaket/partner^..." run --if-present build`, contracts·validation·platform)한 뒤 다시 돌린 결과이고, 확인 뒤 만든 dist 셋은 지웠다. `pnpm lint` 끝 코드 0. `python -I -X utf8 tools/doc-check/check_all.py` 오류 0(경고 4는 구현 절과 같은 기존 경고).
 
 ## 리뷰
 
@@ -123,6 +127,7 @@
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12ciweb-plan | claude-opus-5-5 | 2026-11-21T23:10+09:00 | 2026-11-21T23:50+09:00 |
 | impl | lane2-w12ciweb-impl | claude-opus-5-5 | 2026-11-21T23:48+09:00 | 2026-11-22T00:02+09:00 |
+| test | lane2-w12ciweb-test | claude-opus-5-5 | 2026-11-22T00:04+09:00 | 2026-11-22T00:10+09:00 |
 
 ## 기록
 
