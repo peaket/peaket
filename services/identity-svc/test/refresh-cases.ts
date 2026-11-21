@@ -139,7 +139,7 @@ export function refreshCases(name: string, make: () => Promise<RefreshStoreUnder
       expect(await k.refresh.run({ refreshToken: s2.refreshToken })).toEqual({ result: 'INVALID' });
     });
 
-    test('I-T3_로그아웃과기기한도정리는_같은트랜잭션에세션종료사건을남긴다', async () => {
+    test('PRF-030_로그아웃과기기한도정리는_같은트랜잭션에세션종료사건을남긴다', async () => {
       const t = await make();
       const k = await kit(t.store);
       const sub = `u-${newKey().slice(0, 8)}`;

@@ -1,15 +1,13 @@
 // 탈퇴 계정의 사람 키 만료 당기기(docs/features/queue-admission.md §3 '탈퇴 계정의 사람 키', BUILD_ORDER BOT-037, I-T27).
 // identity의 탈퇴 사건(asyncapi identity.accounts-withdrawn `AccountWithdrawn`)을 읽는 처리기와 만료를 거는 일을 가짜 포트로 본다. 실제 Valkey는 test-int/withdrawn-keys.int.test.ts.
+// 탈퇴 전 토큰은 종료 세션 목록이 막으므로 처리기는 withdrawnAt과 상관없이 받자마자 만료를 당긴다(I-T3 ④, ADR-0333 결정 5, BUILD_ORDER HOT-401 묶음 BAT-059).
 import { randomUUID } from 'node:crypto';
 import { type ConsumedMessage, fakeClock, isTransientError } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { PURGE_EVENTS_PER_CALL, PurgeWithdrawnKeys } from '../src/modules/entry/application/purge-withdrawn-keys.js';
 import type { WithdrawnKeys } from '../src/modules/entry/domain/ports.js';
 import { QueueStoreUnavailable } from '../src/modules/entry/domain/queue.js';
-import { MemoryWithdrawnDue } from '../src/modules/entry/adapters/memory-withdrawn-due.js';
-import { WithdrawnDueWorker } from '../src/modules/entry/application/withdrawn-due-worker.js';
-import { AccountWithdrawnHandler, jsonAccountWithdrawnCodec, WITHDRAWN_DELAY_MS } from '../src/modules/entry/inbound/account-withdrawn.handler.js';
-import { withdrawnDueCases } from './withdrawn-due-cases.js';
+import { AccountWithdrawnHandler, jsonAccountWithdrawnCodec } from '../src/modules/entry/inbound/account-withdrawn.handler.js';
 
 const NOW = Date.parse('2026-11-04T03:00:00.000Z');
 const DAY = 86_400_000;
@@ -86,95 +84,65 @@ describe('탈퇴 사건 처리기(BOT-037)', () => {
     expect(t.calls).toEqual([]);
   });
 
-  test('I-T27_때가안된탈퇴사건은_처리할때집합에넣고바로돌려준다(파티션을막지않는다)_그뒤작업이때가되면처리한다(ADR-0214결정7)', async () => {
-    const k = fakeKeys(['ev-1']);
-    const clock = fakeClock({ now: NOW + 60_000 });
-    const due = new MemoryWithdrawnDue(clock);
-    const purge = new PurgeWithdrawnKeys(k.port, fakeClock({ now: NOW }));
-    const handler = new AccountWithdrawnHandler(purge, jsonAccountWithdrawnCodec, { clock, due });
-    const e = handler.decode(msg(withdrawn()));
-    await handler.handle(e);
-    expect(k.calls).toEqual([]);
-    expect(due.itemsForTest()).toEqual([{ eventKey: e.eventKey, pids: [PID], purgeBy: NOW + 5 * DAY, dueAt: NOW + WITHDRAWN_DELAY_MS }]);
-    const worker = new WithdrawnDueWorker(due, purge, clock);
-    await worker.tick();
-    expect(k.calls).toEqual([]);
-    clock.advance(NOW + WITHDRAWN_DELAY_MS - clock.now());
-    await worker.tick();
-    expect(k.calls).toEqual([{ pid: PID, events: ['ev-1'], at: NOW + 5 * DAY }]);
-    expect(due.itemsForTest()).toEqual([]);
-    expect(WITHDRAWN_DELAY_MS).toBe(15 * 60_000);
-  });
-
-  test('I-T27_때가지난사건과_purgeBy가때보다이른사건은_받자마자처리한다', async () => {
-    const k = fakeKeys(['ev-1']);
-    const due = new MemoryWithdrawnDue(fakeClock({ now: NOW }));
-    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(k.port, fakeClock({ now: NOW })), jsonAccountWithdrawnCodec, { clock: fakeClock({ now: NOW }), due });
-    await handler.handle(handler.decode(msg(withdrawn({ withdrawnAt: new Date(NOW - WITHDRAWN_DELAY_MS).toISOString(), purgeBy: new Date(NOW + 4 * DAY).toISOString() }))));
-    await handler.handle(handler.decode(msg(withdrawn({ purgeBy: new Date(NOW + 60_000).toISOString() }))));
-    expect(k.calls.map((c) => c.at)).toEqual([NOW + 4 * DAY, NOW + 60_000]);
-    expect(due.itemsForTest()).toEqual([]);
-  });
-
-  test('I-T27_withdrawnAt이미래면_파티션을막지않고처리할때를지금+15분으로당기며_경고를남긴다(값은싣지않는다)', async () => {
+  test('I-T3 ④-1 탈퇴 사건은 withdrawnAt이 지금·1분 전·2분 뒤 어느 것이든 미루지 않고 받자마자 두 키 만료를 purgeBy(지금 + 5일을 넘지 않게 자른 값)로 당긴다', async () => {
     const k = fakeKeys(['ev-1']);
     const clock = fakeClock({ now: NOW });
-    const due = new MemoryWithdrawnDue(clock);
-    const warned: object[] = [];
-    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(k.port, clock), jsonAccountWithdrawnCodec, { clock, due, logger: { warn: (o) => void warned.push(o) } });
-    const e = handler.decode(msg(withdrawn({ withdrawnAt: new Date(NOW + DAY).toISOString(), purgeBy: new Date(NOW + 2 * DAY).toISOString() })));
-    await handler.handle(e);
-    expect(due.itemsForTest()[0]!.dueAt).toBe(NOW + WITHDRAWN_DELAY_MS);
-    expect(warned).toEqual([{ eventKey: e.eventKey, aheadMs: DAY }]);
-    // 시계 허용 차이(1분 [가정]) 안이면 당기지 않는다
-    const e2 = handler.decode(msg(withdrawn({ withdrawnAt: new Date(NOW + 30_000).toISOString() })));
-    await handler.handle(e2);
-    expect(due.itemsForTest().find((x) => x.eventKey === e2.eventKey)!.dueAt).toBe(NOW + 30_000 + WITHDRAWN_DELAY_MS);
+    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(k.port, clock), jsonAccountWithdrawnCodec, { clock });
+    const MIN = 60_000;
+    // purgeBy는 탈퇴 ~ 탈퇴 + 5일 안이어야 받는다(보류 규칙). 2분 뒤 탈퇴의 탈퇴 + 5일은 지금 + 5일을 2분 넘으므로 지금 + 5일로 자른다
+    await handler.handle(handler.decode(msg(withdrawn({ withdrawnAt: new Date(NOW).toISOString(), purgeBy: new Date(NOW + 3 * DAY).toISOString() }))));
+    await handler.handle(handler.decode(msg(withdrawn({ withdrawnAt: new Date(NOW - MIN).toISOString(), purgeBy: new Date(NOW - MIN + 5 * DAY).toISOString() }))));
+    await handler.handle(handler.decode(msg(withdrawn({ withdrawnAt: new Date(NOW + 2 * MIN).toISOString(), purgeBy: new Date(NOW + 2 * MIN + 5 * DAY).toISOString() }))));
+    expect(k.calls).toEqual([
+      { pid: PID, events: ['ev-1'], at: NOW + 3 * DAY },
+      { pid: PID, events: ['ev-1'], at: NOW - MIN + 5 * DAY },
+      { pid: PID, events: ['ev-1'], at: NOW + 5 * DAY },
+    ]);
   });
 
-  test('I-T27_withdrawnAt이아주먼미래라purgeBy가그+5일이어도_기다리는값과만료당기기의기한은지금+5일을넘지않는다', async () => {
+  test('I-T3 ④-2 withdrawnAt이 아주 먼 미래라 purgeBy가 그 + 5일이어도 받자마자 걸고 기한은 지금 + 5일을 넘지 않는다', async () => {
     const k = fakeKeys(['ev-1']);
     const clock = fakeClock({ now: NOW });
-    const due = new MemoryWithdrawnDue(clock);
-    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(k.port, clock), jsonAccountWithdrawnCodec, { clock, due });
+    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(k.port, clock), jsonAccountWithdrawnCodec, { clock });
     await handler.handle(handler.decode(msg(withdrawn({ withdrawnAt: new Date(NOW + 400 * DAY).toISOString(), purgeBy: new Date(NOW + 405 * DAY).toISOString() }))));
-    expect(due.itemsForTest()[0]).toMatchObject({ dueAt: NOW + WITHDRAWN_DELAY_MS, purgeBy: NOW + 5 * DAY });
+    expect(k.calls).toEqual([{ pid: PID, events: ['ev-1'], at: NOW + 5 * DAY }]);
   });
 
-  test('I-T27_꺼낸값의purgeBy가이미지났어도_버리지않고만료를당긴다(키를바로지운다)', async () => {
-    const k = fakeKeys(['ev-1']);
+  test('I-T3 ④-3 같은 탈퇴 사건을 두 번 받아도 두 번 모두 같은 기한으로 건다(다시 해도 결과가 같다)', async () => {
+    const k = fakeKeys(['ev-1', 'ev-2']);
     const clock = fakeClock({ now: NOW });
-    const due = new MemoryWithdrawnDue(clock);
-    await due.schedule({ eventKey: randomUUID(), pids: [PID], purgeBy: NOW + 1_000, dueAt: NOW });
-    clock.advance(2_000);
-    await new WithdrawnDueWorker(due, new PurgeWithdrawnKeys(k.port, fakeClock({ now: NOW })), clock).tick();
-    expect(k.calls).toEqual([{ pid: PID, events: ['ev-1'], at: NOW + 1_000 }]);
-    expect(due.itemsForTest()).toEqual([]);
+    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(k.port, clock), jsonAccountWithdrawnCodec, { clock });
+    const raw = withdrawn({ purgeBy: new Date(NOW + 2 * DAY).toISOString() });
+    await handler.handle(handler.decode(msg(raw)));
+    await handler.handle(handler.decode(msg(raw)));
+    expect(k.calls).toEqual([
+      { pid: PID, events: ['ev-1', 'ev-2'], at: NOW + 2 * DAY },
+      { pid: PID, events: ['ev-1', 'ev-2'], at: NOW + 2 * DAY },
+    ]);
   });
 
-  test('I-T27_꺼내기가실패하면실패지표를올리고_값이사라져버린항목도지표로센다', async () => {
-    const k = fakeKeys(['ev-1']);
+  test('I-T3 ④-4 대기열 Redis 일시 장애로 TransientError가 난 뒤 다시 하면 두 번째에 만료가 걸린다', async () => {
+    let fail = true;
+    const calls: { pid: string; at: number }[] = [];
+    const port: WithdrawnKeys = {
+      activeEvents: async () => {
+        if (fail) throw new QueueStoreUnavailable(new Error('주입한 장애'));
+        return ['ev-1'];
+      },
+      expireBy: async (pid, eventIds, at) => {
+        calls.push({ pid, at });
+        return eventIds.length * 2;
+      },
+    };
     const clock = fakeClock({ now: NOW });
-    const due = new MemoryWithdrawnDue(clock);
-    const seen: string[] = [];
-    const signals = { lag: (s: number) => void seen.push(`lag:${s}`), failed: (stage: string) => void seen.push(`failed:${stage}`), expired: (n: number) => void seen.push(`expired:${n}`) };
-    const worker = new WithdrawnDueWorker(due, new PurgeWithdrawnKeys(k.port, fakeClock({ now: NOW })), clock, { signals });
-    due.failClaimNext = new QueueStoreUnavailable(new Error('잠시 안 됨'));
-    await worker.tick();
-    expect(seen).toEqual(['failed:claim']);
-    const e = randomUUID();
-    await due.schedule({ eventKey: e, pids: [PID], purgeBy: NOW + DAY, dueAt: NOW });
-    due.dropValueForTest(e);
-    seen.length = 0;
-    await worker.tick();
-    expect(seen).toEqual(['expired:1', 'lag:0']);
-  });
-
-  test('I-T27_미루기를0으로두면(종료세션목록이붙은뒤)_받자마자처리한다', async () => {
-    const k = fakeKeys(['ev-1']);
-    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(k.port, fakeClock({ now: NOW })), jsonAccountWithdrawnCodec, { clock: fakeClock({ now: NOW }), delayMs: 0 });
-    await handler.handle(handler.decode(msg(withdrawn())));
-    expect(k.calls).toHaveLength(1);
+    const handler = new AccountWithdrawnHandler(new PurgeWithdrawnKeys(port, clock), jsonAccountWithdrawnCodec, { clock });
+    const e = handler.decode(msg(withdrawn({ purgeBy: new Date(NOW + DAY).toISOString() })));
+    const err = await handler.handle(e).catch((x: unknown) => x);
+    expect(isTransientError(err)).toBe(true);
+    expect(calls).toEqual([]);
+    fail = false;
+    await handler.handle(e);
+    expect(calls).toEqual([{ pid: PID, at: NOW + DAY }]);
   });
 
   test('대기열Redis일시장애는_TransientError로바꿔다시하게한다', async () => {
@@ -213,8 +181,3 @@ describe('탈퇴 사건 처리기(BOT-037)', () => {
   });
 });
 
-withdrawnDueCases('메모리', async () => {
-  const clock = fakeClock({ now: NOW });
-  const due = new MemoryWithdrawnDue(clock);
-  return { due, clock, dropValue: async (k) => due.dropValueForTest(k) };
-});

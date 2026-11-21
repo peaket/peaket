@@ -1,6 +1,6 @@
 // queue-svc Kafka 구독을 실제 Kafka 3.9(KRaft)와 Valkey 8.1로 돈다(docs/features/queue-admission.md §4 '판매 상태와 Kafka 구독의 첫 구현', ADR-0214).
 // 토픽 셋을 그룹 하나로 읽어 판매 상태·구매 세션·탈퇴 사건이 각자 처리되고, 좌석 사건은 건너뛰며, 모양이 틀린 사건은 대기열 Redis에 보류되고,
-// 탈퇴 사건은 미루기가 지난 뒤에 처리되는지 본다. 값은 JSON 대역이다(Avro는 BAS-030).
+// 탈퇴 사건은 받자마자 처리되고 처리할 때 집합(q:{wdr}:…)을 쓰지 않는지 본다(I-T3 ④, ADR-0333 결정 5). 값은 JSON 대역이다(Avro는 BAS-030).
 import { randomUUID } from 'node:crypto';
 import { createHotRedis, type HotRedis, PlatformMetrics, systemClock } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer } from '@peaket/platform/stream-worker';
@@ -12,9 +12,7 @@ import { PurchaseSessionSlots } from '../src/modules/admission/application/purch
 import { PurchaseSessionHandler } from '../src/modules/admission/inbound/purchase-session.handler.js';
 import { keys } from '../src/modules/entry/adapters/redis-entry-store.js';
 import { EVENTS_KEY, RedisEventSchedules } from '../src/modules/entry/adapters/redis-event-schedules.js';
-import { RedisWithdrawnDue } from '../src/modules/entry/adapters/redis-withdrawn-due.js';
 import { RedisWithdrawnKeys } from '../src/modules/entry/adapters/redis-withdrawn-keys.js';
-import { WithdrawnDueWorker } from '../src/modules/entry/application/withdrawn-due-worker.js';
 import { PurgeWithdrawnKeys } from '../src/modules/entry/application/purge-withdrawn-keys.js';
 import { AccountWithdrawnHandler } from '../src/modules/entry/inbound/account-withdrawn.handler.js';
 import { ApplySaleChange, EventSaleChangedHandler, RedisSaleStates, SEATS_TOPIC } from '../src/modules/sale/index.js';
@@ -28,10 +26,7 @@ let valkey: ValkeyContainer;
 let redis: HotRedis;
 let producer: KafkaProducer;
 let consumers: QueueConsumers;
-let worker: WithdrawnDueWorker;
 const metrics = new PlatformMetrics('queue-svc');
-/** 탈퇴 사건 미루기를 시험에서 줄인다(운영 15분) */
-const DELAY_MS = 8_000;
 
 beforeAll(async () => {
   [kafka, valkey] = await Promise.all([startKafka(), startValkey()]);
@@ -40,9 +35,6 @@ beforeAll(async () => {
   producer = createKafkaProducer({ brokers: kafka.brokers, clientId: 'it-producer', kind: 'default' });
   await producer.connect();
   const purge = new PurgeWithdrawnKeys(new RedisWithdrawnKeys(redis), systemClock);
-  const due = new RedisWithdrawnDue(redis, systemClock);
-  worker = new WithdrawnDueWorker(due, purge, systemClock, { everyMs: 200 });
-  worker.start();
   consumers = startQueueConsumers({
     env: 'ci',
     brokers: kafka.brokers,
@@ -50,7 +42,7 @@ beforeAll(async () => {
     redis,
     handlers: {
       purchaseSessions: new PurchaseSessionHandler(new PurchaseSessionSlots(new RedisAdmissionStore(redis))),
-      accountsWithdrawn: new AccountWithdrawnHandler(purge, undefined, { delayMs: DELAY_MS, due }),
+      accountsWithdrawn: new AccountWithdrawnHandler(purge),
       saleChanged: new EventSaleChangedHandler(new ApplySaleChange(new RedisSaleStates(redis), new RedisEventSchedules(redis, systemClock), systemClock)),
     },
     registry: metrics.registry,
@@ -62,7 +54,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await consumers?.stop().catch(() => {});
-  await worker?.stop();
   await producer?.disconnect().catch(() => {});
   await redis?.close();
   kafka?.stop();
@@ -114,20 +105,43 @@ test('PRF-136_구매세션종료사건은_그입장자리를뺀다', async () =>
   await until(async () => (await cmd(slots, ['ZSCORE', slots, jti])) === null, '자리 빼기', 30_000);
 });
 
-test('I-T27_탈퇴사건은_처리할때집합에넣고바로커밋하며_withdrawnAt+미루기가지난뒤작업이q:dup만료를purgeBy로당긴다', async () => {
+/** 그 이름공간의 키를 SCAN으로 모두 센다(단일 노드 Valkey) */
+async function scanAll(pattern: string): Promise<string[]> {
+  const found: string[] = [];
+  let cursor = '0';
+  do {
+    const [next, batch] = (await cmd('q:{wdr}:due', ['SCAN', cursor, 'MATCH', pattern, 'COUNT', '1000'])) as [string, string[]];
+    found.push(...batch.map(String));
+    cursor = String(next);
+  } while (cursor !== '0');
+  return found;
+}
+
+test('I-T3 ④-5 탈퇴 사건은 withdrawnAt과 상관없이 받자마자 q:dup·q:adm 만료를 purgeBy로 당긴 뒤 오프셋을 커밋하고, 처리할 때 집합(q:{wdr}:…)에 아무것도 쓰지 않는다', async () => {
   const eventId = newEvent();
   const pid = Buffer.from(randomUUID()).toString('base64url').slice(0, 43);
+  const later = Buffer.from(randomUUID()).toString('base64url').slice(0, 43);
   const now = Date.now();
   await cmd(EVENTS_KEY, ['ZADD', EVENTS_KEY, String(now + 86_400_000), eventId]);
   const dup = keys.dup(pid, eventId);
+  const adm = keys.adm(pid, eventId);
+  const laterDup = keys.dup(later, eventId);
   await cmd(dup, ['SET', dup, '1:1:r:j:', 'PXAT', String(now + 86_400_000)]);
+  await cmd(adm, ['SET', adm, 'hash:mark', 'PXAT', String(now + 86_400_000)]);
+  await cmd(laterDup, ['SET', laterDup, '2:1:r:j:', 'PXAT', String(now + 86_400_000)]);
   const purgeBy = now + 3_600_000;
+  const laterPurgeBy = now + 2 * 3_600_000;
+  const before = (await kafka.groupOffsets(QUEUE_GROUP('ci'), ACCOUNTS_WITHDRAWN_TOPIC)).get(0) ?? 0;
+  // 지금 탈퇴한 사건과 2분 뒤 탈퇴로 적힌 사건(보내는 쪽 시계가 앞선 경우): 둘 다 미루지 않는다
   const accountId = randomUUID();
   await send(ACCOUNTS_WITHDRAWN_TOPIC, accountId, { eventKey: randomUUID(), accountId, pids: [pid], withdrawnAt: new Date(now).toISOString(), purgeBy: new Date(purgeBy).toISOString() });
-  // 처리할 때 집합에 넣고 바로 오프셋을 커밋한다(때가 안 된 사건이 파티션을 막지 않는다)
-  await until(async () => ((await kafka.groupOffsets(QUEUE_GROUP('ci'), ACCOUNTS_WITHDRAWN_TOPIC)).get(0) ?? 0) >= 1, '탈퇴 사건 오프셋 커밋', DELAY_MS - 1_000, 300);
-  expect(Date.now()).toBeLessThan(now + DELAY_MS);
-  expect(Number(await cmd(dup, ['PEXPIRETIME', dup]))).toBe(now + 86_400_000);
-  await until(async () => Number(await cmd(dup, ['PEXPIRETIME', dup])) === purgeBy, '탈퇴 키 만료 당기기', 30_000);
-  expect(Date.now()).toBeGreaterThanOrEqual(now + DELAY_MS);
+  const laterAccount = randomUUID();
+  await send(ACCOUNTS_WITHDRAWN_TOPIC, laterAccount, { eventKey: randomUUID(), accountId: laterAccount, pids: [later], withdrawnAt: new Date(now + 120_000).toISOString(), purgeBy: new Date(laterPurgeBy).toISOString() });
+  await until(async () => ((await kafka.groupOffsets(QUEUE_GROUP('ci'), ACCOUNTS_WITHDRAWN_TOPIC)).get(0) ?? 0) >= before + 2, '탈퇴 사건 오프셋 커밋', 30_000, 200);
+  // 커밋된 때는 이미 만료가 걸려 있다(처리한 뒤에 커밋한다). 미루던 판(15분)이라면 이 시점에 만료가 그대로다
+  expect(Number(await cmd(dup, ['PEXPIRETIME', dup]))).toBe(purgeBy);
+  expect(Number(await cmd(adm, ['PEXPIRETIME', adm]))).toBe(purgeBy);
+  expect(Number(await cmd(laterDup, ['PEXPIRETIME', laterDup]))).toBe(laterPurgeBy);
+  expect(Date.now()).toBeLessThan(now + 120_000);
+  expect(await scanAll('q:{wdr}:*')).toEqual([]);
 });
