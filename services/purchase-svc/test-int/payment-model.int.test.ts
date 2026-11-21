@@ -30,17 +30,17 @@ import { join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createDatabase, type Database, fakeClock } from '@peaket/platform';
-import fc from 'fast-check';
+import fc, { type Scheduler, type SchedulerAct, type SchedulerSequenceItem } from 'fast-check';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { migratePayment } from '../../payment-svc/scripts/migrate.mjs';
 import { DrizzleWebhookStore } from '../../payment-svc/src/modules/payment/adapters/db/drizzle-webhook-store.js';
 import { ReceivePaymentWebhook } from '../../payment-svc/src/modules/payment/application/receive-payment-webhook.js';
 import { migratePurchase } from '../scripts/migrate.mjs';
 import { SPEC_ACTIONS } from './payment-model/actions.js';
-import { commandArbs, PAIRS, pairArb, type World } from './payment-model/commands.js';
+import { Act, commandArbs, PAIRS, pairArb, type World } from './payment-model/commands.js';
 import { readTrace, replay, scopeOf } from './payment-model/itf.js';
 import type { Scope, SpecMove } from './payment-model/spec.js';
-import { PaymentSystem, seededRandom, type SystemOptions } from './payment-model/system.js';
+import { labelOf, PaymentSystem, seededRandom, type SystemOptions } from './payment-model/system.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -127,6 +127,82 @@ const run = async (s: PaymentSystem, moves: SpecMove[]) => {
     if (s.violations.length > 0) throw new Error(`불변식 위반:\n${s.violations.join('\n')}`);
   }
 };
+
+/** 속성 한 번 부르기의 판(속성 시험 한 번의 실행)들이 시스템을 만드는 곳 */
+interface PropertyRuns {
+  make(scope: Scope, o?: SystemOptions): Promise<PaymentSystem>;
+}
+/**
+ * 속성 실행 도우미: 무작위 명령 순서·경합·집중 경합(focusedPair) 속성과 재현 시험(R1·R2)이 함께 쓴다. 판의 본문은 runs.make로 시스템을 만든다.
+ * 시간 한도(interruptAfterTimeLimit)에 끊긴 판을 다루는 법은 docs/verification.md §2.4 둘째 줄이다
+ */
+async function checkProperty<Ts extends [unknown, ...unknown[]]>(arbs: { [K in keyof Ts]: fc.Arbitrary<Ts[K]> }, body: (runs: PropertyRuns, ...args: Ts) => Promise<void>, params: fc.Parameters<Ts>): Promise<void> {
+  const runs: PropertyRuns = { make };
+  await fc.assert(fc.asyncProperty<Ts>(...arbs, (...args: Ts) => body(runs, ...args)), params);
+}
+
+/** 재현 시험(R1·R2)이 판 하나를 지켜보는 칸: 본문이 시작했는지, 만든 시스템, 본문이 끝났는지와 끝남 약속 */
+class RunWatch {
+  started = false;
+  made: PaymentSystem | undefined;
+  ended = false;
+  #resolve: () => void = () => undefined;
+  readonly end = new Promise<void>((r) => {
+    this.#resolve = r;
+  });
+  finish(): void {
+    this.ended = true;
+    this.#resolve();
+  }
+}
+/** 그 판의 주문 행 수와, 그 가운데 아직 다른 판의 실행기 잡기 대상인 행 수(system.ts #isolate가 'infinity'로 미루거나 비우는 칸) */
+async function claimable(s: PaymentSystem): Promise<{ rows: number; live: { saga: number; ticket: number; query: number; confirm: number } }> {
+  const ids = [s.scope.orders.map((o) => s.orderIdOf(o))];
+  const p = (
+    await purchase.pool.query<{ rows: number; saga: number; ticket: number }>(
+      `select (select count(*)::int from order_saga_job where order_id = any($1::uuid[])) + (select count(*)::int from ticket_issue_job where order_id = any($1::uuid[])) as rows,
+              (select count(*)::int from order_saga_job where order_id = any($1::uuid[]) and pull_next_at is distinct from 'infinity') as saga,
+              (select count(*)::int from ticket_issue_job where order_id = any($1::uuid[]) and (issue_due_at <> 'infinity' or next_attempt_at is not null)) as ticket`,
+      ids,
+    )
+  ).rows[0]!;
+  const q = (
+    await payment.pool.query<{ rows: number; query: number; confirm: number }>(
+      `select (select count(*)::int from payment where order_id = any($1::uuid[])) + (select count(*)::int from payment_confirm_job j join payment x on x.id = j.payment_id where x.order_id = any($1::uuid[])) as rows,
+              (select count(*)::int from payment where order_id = any($1::uuid[]) and next_query_at is not null and next_query_at <> 'infinity') as query,
+              (select count(*)::int from payment_confirm_job j join payment x on x.id = j.payment_id where x.order_id = any($1::uuid[]) and j.next_attempt_at is distinct from 'infinity') as confirm`,
+      ids,
+    )
+  ).rows[0]!;
+  return { rows: p.rows + q.rows, live: { saga: p.saga, ticket: p.ticket, query: q.query, confirm: q.confirm } };
+}
+/**
+ * 재현 시험의 시간 한도: 시스템 준비와 앞 걸음 몇 개(잡기 대상 행이 생기는 접수까지)보다 길고, 판 하나보다 확실히 짧다.
+ * 로컬에서 잰 값(2026-11-22): R1은 행이 500~800ms 사이에 생기고 판이 약 3.2초, R2(스케줄러 길)는 500ms 안에 생기고 판이 약 1.6초다. 두 끝의 가운데쯤으로 둔다
+ */
+const R1_LIMIT_MS = 1_500;
+const R2_LIMIT_MS = 800;
+/**
+ * 재현 시험(R1·R2)의 공통 단언: 속성이 시간 한도에 끊겨 돌아온 그때(기다리지 않고 바로 찍는다) 그 판의 본문이 끝났고, 열린 PaymentSystem이 0이며,
+ * 그 판의 행이 다른 판의 잡기 대상에서 빠졌다. 끝나면 남은 본문을 끝까지 기다린다(고치기 전 하네스에서도 다음 시험을 오염시키지 않는다)
+ */
+async function expectStoppedAndClosed(property: Promise<unknown>, watch: RunWatch): Promise<void> {
+  try {
+    // 빈 시험 막기 ①: 판이 정말 끊겼다(판 하나짜리 속성이 한 번도 끝나지 못하면 fast-check가 이 문구로 실패를 낸다)
+    await expect(property).rejects.toThrow(/Property interrupted after 0 tests/);
+    const at = { ended: watch.ended, open: systems.length };
+    const made = watch.made;
+    // 빈 시험 막기 ②: 본문이 시스템을 만들었다
+    expect(made).toBeInstanceOf(PaymentSystem);
+    const steps = made!.steps;
+    const rows = await claimable(made!);
+    // 빈 시험 막기 ③: 그 판이 잡기 대상이 될 행(Saga·발권 작업, 결제 원장·승인 명령)을 만들었다
+    expect(rows.rows).toBeGreaterThan(0);
+    expect({ ...at, grew: made!.steps - steps, live: rows.live }).toEqual({ ended: true, open: 0, grew: 0, live: { saga: 0, ticket: 0, query: 0, confirm: 0 } });
+  } finally {
+    if (watch.started) await watch.end;
+  }
+}
 const PROPOSED = scopeOf(specText, 'payment_proposed');
 const ATTEMPTS = scopeOf(specText, 'payment_proposed_attempts');
 const ONE: Scope = { ...PROPOSED, orders: [1] };
@@ -224,10 +300,11 @@ const VARIANTS: Array<[string, Scope]> = [
   ['payment_proposed_full: 주문 2·시도 2', scopeOf(specText, 'payment_proposed_full')],
 ];
 test.each(VARIANTS)('V-T40 모델 기반 무작위 명령 순서(%s): 명세 불변식과 명세 다음 상태가 지켜진다', async (_name, scope) => {
-  await fc.assert(
-    fc.asyncProperty(fc.array(fc.oneof(...commandArbs(scope)), { minLength: 600, maxLength: 1000 }), fc.constantFrom<number | undefined>(undefined, 1, 2), fc.nat(), async (cmds, bulkhead, seed) => {
+  await checkProperty(
+    [fc.array(fc.oneof(...commandArbs(scope)), { minLength: 600, maxLength: 1000 }), fc.constantFrom<number | undefined>(undefined, 1, 2), fc.nat()],
+    async (runs, cmds, bulkhead, seed) => {
       const started = Date.now();
-      const w: World = { s: await make(scope, { random: seededRandom(seed), ...(bulkhead === undefined ? {} : { bulkhead }) }) };
+      const w: World = { s: await runs.make(scope, { random: seededRandom(seed), ...(bulkhead === undefined ? {} : { bulkhead }) }) };
       randomSystems.add(w.s);
       await using(w.s, async () => {
         try {
@@ -236,7 +313,7 @@ test.each(VARIANTS)('V-T40 모델 기반 무작위 명령 순서(%s): 명세 불
           tally(totals, w.s, started);
         }
       });
-    }),
+    },
     { numRuns: RUNS, ...replayParams },
   );
 }, PROPERTY_TIMEOUT_MS);
@@ -244,10 +321,11 @@ test.each(VARIANTS)('V-T40 모델 기반 무작위 명령 순서(%s): 명세 불
 // ---- 경합(fc.scheduler): 운영 코드의 DB 문 차례를 스케줄러가 섞고, 두 걸음을 함께 돌린 결과가 어느 한 차례와 같아야 한다 ----
 const contention = { runs: 0, steps: 0, ms: 0, counts: {} as Record<string, number>, blockedSends: 0, pairs: 0, lost: 0 };
 test.each(VARIANTS)('V-T40 경합(fc.scheduler, %s): 함께 돌린 두 걸음의 결과가 어느 한 차례의 명세 다음 상태와 같고 불변식이 지켜진다', async (_name, scope) => {
-  await fc.assert(
-    fc.asyncProperty(fc.scheduler(), fc.array(fc.oneof({ arbitrary: pairArb(), weight: 40 }, ...commandArbs(scope)), { minLength: 300, maxLength: 500 }), fc.constantFrom<number | undefined>(undefined, 1), fc.nat(), async (sch, cmds, bulkhead, seed) => {
+  await checkProperty(
+    [fc.scheduler(), fc.array(fc.oneof({ arbitrary: pairArb(), weight: 40 }, ...commandArbs(scope)), { minLength: 300, maxLength: 500 }), fc.constantFrom<number | undefined>(undefined, 1), fc.nat()],
+    async (runs, sch, cmds, bulkhead, seed) => {
       const started = Date.now();
-      const w: World = { s: await make(scope, { scheduler: sch, random: seededRandom(seed), ...(bulkhead === undefined ? {} : { bulkhead }) }) };
+      const w: World = { s: await runs.make(scope, { scheduler: sch, random: seededRandom(seed), ...(bulkhead === undefined ? {} : { bulkhead }) }) };
       randomSystems.add(w.s);
       await using(w.s, async () => {
         try {
@@ -258,33 +336,64 @@ test.each(VARIANTS)('V-T40 경합(fc.scheduler, %s): 함께 돌린 두 걸음의
           contention.lost += w.s.pairs.lost;
         }
       });
-    }),
+    },
     { numRuns: CONTENTION_RUNS, ...replayParams },
   );
 }, PROPERTY_TIMEOUT_MS);
 
+interface PairOptions {
+  /** a를 끝낸 뒤 b를 시작한다(PaymentSystem.pair) */
+  serial?: boolean;
+  /** 속성 매개변수 덮어쓰기(재현 시험 R2가 작은 시간 한도를 준다) */
+  params?: fc.Parameters<[Scheduler]>;
+  /** 스케줄러 감싸개(재현 시험 R3). 시스템은 감싼 스케줄러로 만든 뒤에 생기므로 늦게 받는다 */
+  wrap?: (sch: Scheduler, system: () => PaymentSystem) => Scheduler;
+  /** 재현 시험이 판을 지켜보는 칸 */
+  watch?: RunWatch;
+}
 /** 집중 경합 하나: setup으로 상태를 만든 뒤 쌍을 돌리고 결과 이름을 센다 */
-async function focusedPair(scope: Scope, setup: SpecMove[], a: SpecMove, b: SpecMove, outcome: (s: PaymentSystem) => string, runs: number, order: { serial?: boolean } = {}): Promise<Record<string, number>> {
+async function focusedPair(scope: Scope, setup: SpecMove[], a: SpecMove, b: SpecMove, outcome: (s: PaymentSystem) => string, runs: number, opts: PairOptions = {}): Promise<Record<string, number>> {
   const seen: Record<string, number> = {};
-  await fc.assert(
-    fc.asyncProperty(fc.scheduler(), async (sch) => {
-      const s = await make(scope, { scheduler: sch });
-      await using(s, async () => {
-        await run(s, setup);
-        await s.pair(a, b, order);
-        for (const [k, n] of Object.entries(s.pairKinds)) pairKinds[k] = (pairKinds[k] ?? 0) + n;
-        const o = outcome(s);
-        seen[o] = (seen[o] ?? 0) + 1;
-      });
-    }),
-    { numRuns: runs, ...replayParams },
+  await checkProperty(
+    [fc.scheduler()],
+    async (props, sch) => {
+      if (opts.watch) opts.watch.started = true;
+      try {
+        let made: PaymentSystem | undefined;
+        const system = () => {
+          if (!made) throw new Error('focusedPair: 감싸개가 시스템을 만들기 전에 시스템을 찾았다');
+          return made;
+        };
+        const s = await props.make(scope, { scheduler: opts.wrap ? opts.wrap(sch, system) : sch });
+        made = s;
+        if (opts.watch) opts.watch.made = s;
+        await using(s, async () => {
+          await run(s, setup);
+          await s.pair(a, b, opts.serial === undefined ? {} : { serial: opts.serial });
+          for (const [k, n] of Object.entries(s.pairKinds)) pairKinds[k] = (pairKinds[k] ?? 0) + n;
+          const o = outcome(s);
+          seen[o] = (seen[o] ?? 0) + 1;
+        });
+      } finally {
+        opts.watch?.finish();
+      }
+    },
+    { numRuns: runs, ...replayParams, ...opts.params },
   );
   return seen;
 }
 
+/** 늦게 온 발권 성공 답 ∥ 보상 시작의 준비(승인·결과 반영 뒤 발권 기한 넘김 → CS 확인 → 발권 호출에 ticket-svc가 답함) */
+const LATE_TICKET_SETUP: SpecMove[] = [...upToSent(1), { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }, { a: 'respond', o: 1, p: 1 }, { a: 'applyResult', o: 1, p: 1 }, { a: 'overdue', o: 1 }, { a: 'csConfirm', o: 1 }, { a: 'issue', o: 1 }, { a: 'ticketSvc', o: 1, c: 'OK' }];
+/** 승인 응답 ∥ 재시작의 준비(승인 호출을 보내고 결제사가 승인함, 답은 아직 실행기에 돌아가지 않음) */
+const RESPOND_RESTART_SETUP: SpecMove[] = [...upToSent(1), { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }];
+/** 승인 응답 ∥ 재시작의 결과(결제 원장 상태) 판정: 집중 경합의 스케줄러 차례와 재현 시험 R3가 같이 쓴다 */
+function judgeRespondRestart(seen: Record<string, number>): void {
+  expect(Object.keys(seen)).toEqual(['UNKNOWN']);
+}
+
 test('V-T40 집중 경합: 늦게 온 발권 성공 답과 보상 시작이 겹쳐도 결과는 어느 한 차례와 같고, 두 갈래(성공 반영이 먼저면 CONFIRMED, 보상이 먼저면 보상 중)가 모두 나온다(명세 ⑥)', async () => {
-  const setup: SpecMove[] = [...upToSent(1), { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }, { a: 'respond', o: 1, p: 1 }, { a: 'applyResult', o: 1, p: 1 }, { a: 'overdue', o: 1 }, { a: 'csConfirm', o: 1 }, { a: 'issue', o: 1 }, { a: 'ticketSvc', o: 1, c: 'OK' }];
-  const seen = await focusedPair(ONE, setup, { a: 'issueAck', o: 1 }, { a: 'compStart', o: 1 }, (s) => s.obs.ord[1]!.st, 16);
+  const seen = await focusedPair(ONE, LATE_TICKET_SETUP, { a: 'issueAck', o: 1 }, { a: 'compStart', o: 1 }, (s) => s.obs.ord[1]!.st, 16);
   console.info(`발권 답 ∥ 보상 시작: ${JSON.stringify(seen)}`);
   expect(Object.keys(seen).sort()).toEqual(['COMPENSATING', 'CONFIRMED']);
 }, PROPERTY_TIMEOUT_MS);
@@ -296,12 +405,11 @@ test('V-T40 집중 경합: 접수 ∥ 새 결제 시도가 겹쳐도 결과는 �
 }, PROPERTY_TIMEOUT_MS);
 
 test('V-T40 집중 경합: 승인 응답 ∥ payment-svc 재시작이 겹치면 재시작이 쓰기를 막아 결과 모름이 되고, 응답이 먼저 끝나면(차례를 정함) 승인이 남고 재시작은 잃을 호출이 없다(두 갈래, 코드 리뷰 H5)', async () => {
-  const setup: SpecMove[] = [...upToSent(1), { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }];
-  const raced = await focusedPair(ONE, setup, { a: 'respond', o: 1, p: 1 }, { a: 'restart' }, (s) => s.obs.pay['1,1']!, 8);
+  const raced = await focusedPair(ONE, RESPOND_RESTART_SETUP, { a: 'respond', o: 1, p: 1 }, { a: 'restart' }, (s) => s.obs.pay['1,1']!, 8);
   // 스케줄러 차례에서는 재시작의 DB 끊기가 응답의 쓰기보다 늘 먼저 와서(쓰기는 문을 여러 개 지난다) 응답이 이기는 갈래가 나오지 않는다. 그 갈래는 차례를 정해 바로 만든다
-  const serial = await focusedPair(ONE, setup, { a: 'respond', o: 1, p: 1 }, { a: 'restart' }, (s) => `${s.obs.pay['1,1']}/${s.obs.env.restarts}`, 2, { serial: true });
+  const serial = await focusedPair(ONE, RESPOND_RESTART_SETUP, { a: 'respond', o: 1, p: 1 }, { a: 'restart' }, (s) => `${s.obs.pay['1,1']}/${s.obs.env.restarts}`, 2, { serial: true });
   console.info(`응답 ∥ 재시작: ${JSON.stringify(raced)}, 응답 먼저(차례 정함): ${JSON.stringify(serial)}`);
-  expect(Object.keys(raced)).toEqual(['UNKNOWN']);
+  judgeRespondRestart(raced);
   expect(Object.keys(serial)).toEqual(['APPROVED/1']);
 }, PROPERTY_TIMEOUT_MS);
 
@@ -315,6 +423,92 @@ test('V-T40 집중 경합: 전환 ∥ 접수, 전환 ∥ 새 결제 시도, 주�
 test('V-T40 집중 경합: 결과 모름 조회 ∥ 다른 주문의 승인 응답, 결과 반영 ∥ 다른 주문의 만료가 겹쳐도 결과는 어느 한 차례와 같다(무작위가 드물게 닿는 쌍)', async () => {
   await focusedPair(PROPOSED, [...upToSent(1), { a: 'timeout', o: 1, p: 1 }, { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }, ...upToSent(2), { a: 'pgProcess', o: 2, p: 1, c: 'APPROVED' }], { a: 'query', o: 1, p: 1 }, { a: 'respond', o: 2, p: 1 }, (s) => `${s.obs.pay['1,1']}/${s.obs.pay['2,1']}`, 6);
   await focusedPair(PROPOSED, [...upToSent(1), { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }, { a: 'respond', o: 1, p: 1 }], { a: 'applyResult', o: 1, p: 1 }, { a: 'expireOrder', o: 2 }, (s) => `${s.obs.ord[1]!.st}/${s.obs.ord[2]!.st}`, 6);
+}, PROPERTY_TIMEOUT_MS);
+
+// ---- 하네스 재현 시험(W12-vt40): 시간 한도에 끊긴 판 멈추기, 승인 응답 ∥ 재시작의 응답 먼저 차례 ----
+test('V-T40 R1 하네스(시간 한도): 시간 한도에 끊긴 무작위 판은 속성이 돌아오기 전에 멈추고 닫혀, 열린 PaymentSystem이 0이고 그 판의 행이 다른 판의 잡기 대상에서 빠진다', async () => {
+  const watch = new RunWatch();
+  // 앞 걸음(두 주문의 승인 호출까지)을 정해 두어 끊길 때 잡기 대상이 될 행이 있게 하고, 그 뒤는 무작위 속성과 같은 명령 순서다
+  const prefix = [...upToSent(1), ...upToSent(2)].map((m) => new Act(m, () => true));
+  const property = checkProperty(
+    [fc.array(fc.oneof(...commandArbs(PROPOSED)), { minLength: 600, maxLength: 1000 })],
+    async (runs, cmds) => {
+      watch.started = true;
+      try {
+        const w: World = { s: await runs.make(PROPOSED) };
+        watch.made = w.s;
+        randomSystems.add(w.s);
+        await using(w.s, () => fc.asyncModelRun(() => ({ model: w, real: w }), [...prefix, ...cmds]));
+      } finally {
+        watch.finish();
+      }
+    },
+    { numRuns: 1, seed: 0x7640, interruptAfterTimeLimit: R1_LIMIT_MS, markInterruptAsFailure: false },
+  );
+  await expectStoppedAndClosed(property, watch);
+}, PROPERTY_TIMEOUT_MS);
+
+test('V-T40 R2 하네스(시간 한도): 시간 한도에 끊긴 집중 경합 판도 같은 방법으로 멈추고 닫힌다', async () => {
+  const watch = new RunWatch();
+  const property = focusedPair(ONE, LATE_TICKET_SETUP, { a: 'issueAck', o: 1 }, { a: 'compStart', o: 1 }, (s) => s.obs.ord[1]!.st, 1, { params: { interruptAfterTimeLimit: R2_LIMIT_MS, markInterruptAsFailure: false }, watch });
+  await expectStoppedAndClosed(property, watch);
+}, PROPERTY_TIMEOUT_MS);
+
+/**
+ * 재현 시험 R3의 스케줄러 감싸개: fc.scheduler의 스케줄러를 그대로 잇고, 재시작의 시작 문만 그 주문의 결제 원장이 ACCEPTED에서 벗어날 때까지
+ * (승인 응답의 쓰기가 커밋됨, 감싸지 않은 pool로 읽는다) 안쪽 스케줄러에 넘기지 않는다. 미뤄 둔 문은 안쪽 count()에 들지 않아 하네스(#drive)가 그동안 응답 쪽 문만 푼다
+ */
+class RestartAfterRespondWrite implements Scheduler {
+  readonly #restart = `시작 ${labelOf({ a: 'restart' })}`;
+  readonly #inner: Scheduler;
+  readonly #system: () => PaymentSystem;
+  readonly #order: number;
+  constructor(inner: Scheduler, system: () => PaymentSystem, order: number) {
+    this.#inner = inner;
+    this.#system = system;
+    this.#order = order;
+  }
+  readonly schedule = <T>(task: Promise<T>, label?: string, metadata?: unknown, customAct?: SchedulerAct): Promise<T> => {
+    if (label !== this.#restart) return this.#inner.schedule(task, label, metadata, customAct);
+    return this.#respondWritten().then(() => this.#inner.schedule(task, label, metadata, customAct));
+  };
+  readonly scheduleFunction: Scheduler['scheduleFunction'] = (f, customAct) => this.#inner.scheduleFunction(f, customAct);
+  scheduleSequence(items: SchedulerSequenceItem[], customAct?: SchedulerAct): ReturnType<Scheduler['scheduleSequence']> {
+    return this.#inner.scheduleSequence(items, customAct);
+  }
+  count(): number {
+    return this.#inner.count();
+  }
+  readonly waitOne = (customAct?: SchedulerAct) => this.#inner.waitOne(customAct);
+  readonly waitAll = (customAct?: SchedulerAct) => this.#inner.waitAll(customAct);
+  readonly waitNext = (count: number, customAct?: SchedulerAct) => this.#inner.waitNext(count, customAct);
+  readonly waitIdle = (customAct?: SchedulerAct) => this.#inner.waitIdle(customAct);
+  readonly waitFor = <T>(task: Promise<T>, customAct?: SchedulerAct) => this.#inner.waitFor(task, customAct);
+  readonly report = () => this.#inner.report();
+  toString(): string {
+    return String(this.#inner);
+  }
+  /** 승인 응답의 원장 쓰기가 커밋될 때까지(상한 10초) */
+  async #respondWritten(): Promise<void> {
+    const s = this.#system();
+    const end = Date.now() + 10_000;
+    for (;;) {
+      const status = (await s.paymentDb().pool.query<{ status: string }>('select status from payment where order_id = $1', [s.orderIdOf(this.#order)])).rows[0]?.status;
+      if (status !== undefined && status !== 'ACCEPTED') return;
+      if (Date.now() > end) throw new Error(`R3 감싸개: 주문 ${this.#order}의 승인 응답 쓰기가 10초 안에 커밋되지 않았다(원장 ${status})`);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+  }
+}
+
+test('V-T40 R3 집중 경합(차례 고정): 승인 응답의 쓰기가 끝난 뒤에 재시작의 시작 문을 푸는 스케줄러 차례도 직렬 결과(APPROVED, 재시작 1)이고 같은 허용 집합 판정을 통과한다', async () => {
+  const seen = await focusedPair(ONE, RESPOND_RESTART_SETUP, { a: 'respond', o: 1, p: 1 }, { a: 'restart' }, (s) => `${s.obs.pay['1,1']}/${s.obs.env.restarts}`, 4, {
+    wrap: (sch, system) => new RestartAfterRespondWrite(sch, system, 1),
+  });
+  console.info(`R3 응답 쓰기 뒤 재시작(차례 고정): ${JSON.stringify(seen)}`);
+  // 빈 시험 막기: 감싸개가 실제로 차례를 정했다(4판 모두 응답 먼저의 직렬 결과, docs/features/payment.md §2 '답 반영(한 트랜잭션)' 뒤 재시작 한 번)
+  expect(seen).toEqual({ 'APPROVED/1': 4 });
+  judgeRespondRestart(Object.fromEntries(Object.entries(seen).map(([k, n]) => [k.slice(0, k.indexOf('/')), n])));
 }, PROPERTY_TIMEOUT_MS);
 
 // ---- 집중 시험(무작위가 드물게 닿는 갈래를 바로 만든다) ----
