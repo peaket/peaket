@@ -198,3 +198,9 @@
 | impl | w12sec-impl-7a4f | claude-opus-5-5 | 2026-11-21T22:18+09:00 | 2026-11-21T22:41+09:00 |
 | review | w12sec-review-9d2b | claude-opus-5-5 | 2026-11-21T22:50+09:00 | 2026-11-21T22:58+09:00 |
 | verify | w12sec-verify-1e6c | claude-opus-5-5 | 2026-11-21T22:50+09:00 | 2026-11-21T23:07+09:00 |
+
+## 기록
+
+- R-733. develop 합치기 전 `origin/develop`(5f5eb248a) 위로 다시 쌓음(들어온 변경은 에이전트 훅뿐, 겹친 파일 없음). 다시 쌓은 트리에서 `node --test` scan-tools·scan-gate·demo-auth·demo-objects·demo-images 92/92, `roles-check` 통과(커밋 6).
+- W12S-01·08: 수동 전체 security-scan 실행 44910774428(가지 568e1cc58) codeql·secrets·dependencies·iac-config 모두 success, PR #45 security-scan 네 잡 pass. PR CI의 다른 빨강(contracts·tools DS-12/V-T7 ⑦·web/seats·node konva 흔들림)은 develop 44897193480과 같은 실패다.
+- 정리 목록: `docs/lanes/lane4-cleanup.md`(RV-01~04, X2, 대조 빈틈).
