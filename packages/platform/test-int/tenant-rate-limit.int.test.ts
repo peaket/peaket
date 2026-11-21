@@ -80,6 +80,16 @@ let valkey: ValkeyContainer;
 let inspector: HotRedis;
 let identity: FakeIdentity;
 
+/**
+ * 셈 시험의 판정 마감(W12-dt50 ①). 이 파일의 셈 시험은 INCR 원자성·600/601 경계·두 인스턴스 합계·키 수명·배선을 보고,
+ * 20ms 기본 마감의 열림은 단위 시험(test/tenant-rate-limit.test.ts)과 T8이 본다. 붐비는 러너에서 첫 판정이 20ms를 넘겨
+ * 세지 않고 통과하면(정본의 열림) 정확한 수 단언이 흔들리므로 넉넉히 준다. 열림이 또 나면 expectNoOpen이 원인 이름으로 실패한다.
+ */
+const COUNT_DEADLINE_MS = 5_000;
+/** 시험이 키를 읽고 바꾸는 검사용 연결의 명령 마감(W12-dt50 ⑤). 판정 대상이 아니라 시험 장치다 */
+const INSPECT_DEADLINE_MS = 5_000;
+const inspect = (args: string[]) => inspector.command(args, { deadlineMs: INSPECT_DEADLINE_MS });
+
 beforeAll(async () => {
   valkey = await startValkey();
   inspector = await createHotRedis({ url: valkey.url });
@@ -91,7 +101,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await inspector.command(['FLUSHDB']);
+  await inspect(['FLUSHDB']);
+  // 스크립트 캐시도 비워 모든 시험의 첫 판정이 NOSCRIPT → EVAL 길을 지나게 한다(W12-dt50 ④. 시험 차례·골라 돌리기와 상관없이 바탕이 같다)
+  await inspect(['SCRIPT', 'FLUSH']);
   identity = new FakeIdentity();
 });
 
@@ -110,7 +122,7 @@ async function boot(name: string, o: { limit?: number; timeoutMs?: number } = {}
     clock: fakeClock(),
     logDestination: sink,
     adminAuthz: identity,
-    tenantRateLimit: { redis, ...(o.limit === undefined ? {} : { limit: o.limit }), ...(o.timeoutMs === undefined ? {} : { timeoutMs: o.timeoutMs }) },
+    tenantRateLimit: { redis, ...(o.limit === undefined ? {} : { limit: o.limit }), timeoutMs: o.timeoutMs ?? COUNT_DEADLINE_MS },
   });
   services.push(svc);
   return svc;
@@ -137,8 +149,8 @@ async function expectAllowed(svc: PlatformService, headers: Record<string, strin
   for (let i = 1; i <= n; i++) expect((await get(svc, headers)).statusCode, `${i}번째`).toBe(200);
 }
 
-const keyOf = async (tenant: string) => (await inspector.command(['GET', tenantRateLimitKey(tenant)])) as string | null;
-const pttlOf = async (tenant: string) => Number(await inspector.command(['PTTL', tenantRateLimitKey(tenant)]));
+const keyOf = async (tenant: string) => (await inspect(['GET', tenantRateLimitKey(tenant)])) as string | null;
+const pttlOf = async (tenant: string) => Number(await inspect(['PTTL', tenantRateLimitKey(tenant)]));
 
 function sample(text: string, name: string, labels: Record<string, string> = {}): number | undefined {
   for (const line of text.split('\n')) {
@@ -152,6 +164,16 @@ function sample(text: string, name: string, labels: Record<string, string> = {})
 }
 
 const metricsOf = async (svc: PlatformService) => (await svc.management.inject({ method: 'GET', url: '/metrics' })).payload as unknown as string;
+const opensOf = async (svc: PlatformService) => sample(await metricsOf(svc), 'tenant_rate_limit_total', { service: svc.name, result: 'unavailable' });
+
+/**
+ * 그 인스턴스들에 판정 열림(마감·오류로 세지 않고 통과)이 한 건도 없었음을 본다(W12-dt50 ③).
+ * 셈 시험은 모든 요청이 Redis 판정에 닿는다는 전제로 정확한 수를 단언하므로, 키 값·429를 단언하기 앞에 이 전제를 먼저 본다.
+ * 열림이 나면 '599≠600' 대신 '열림 n건'으로 실패해 원인이 바로 보인다.
+ */
+async function expectNoOpen(...svcs: PlatformService[]): Promise<void> {
+  for (const svc of svcs) expect(await opensOf(svc), `${svc.name} 판정 열림(unavailable) 건수`).toBeUndefined();
+}
 
 describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 인스턴스)', () => {
   test('D-T50 ⑦ 같은 테넌트 계정 둘이 합쳐 601번째에 429이고 600번째까지는 통과한다', async () => {
@@ -159,9 +181,11 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
     // 계정 A1 300건은 인스턴스 1, 계정 A2 300건은 인스턴스 2로 보낸다(계정별이 아니라 테넌트 합계임을 본다)
     await expectAllowed(one, partner('acc-a1', 's-a1'), 300);
     await expectAllowed(two, partner('acc-a2', 's-a2'), 300);
+    await expectNoOpen(one, two);
     expect(await keyOf('tenant-a')).toBe('600');
 
     const limited = await get(one, partner('acc-a1', 's-a1'));
+    await expectNoOpen(one, two);
     expect(limited.statusCode).toBe(429);
     expect(limited.headers['retry-after']).toMatch(/^\d+$/);
     expect(Number(limited.headers['retry-after'])).toBeGreaterThanOrEqual(1);
@@ -181,11 +205,15 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
   test('D-T50 ⑦ 두 서비스 인스턴스가 같은 테넌트 카운터를 올린다', async () => {
     const [one, two] = await bootPair();
     await expectAllowed(one, partner('acc-a1', 's-a1'), 300);
+    await expectNoOpen(one);
     expect(await keyOf('tenant-a')).toBe('300');
     // 두 번째 인스턴스가 이어서 센다(같은 키). 601번째는 두 번째 인스턴스가 429로 끝낸다
     for (let i = 301; i <= 600; i++) expect((await get(two, partner('acc-a2', 's-a2'))).statusCode, `${i}번째`).toBe(200);
+    await expectNoOpen(one, two);
     expect(await keyOf('tenant-a')).toBe('600');
-    expect((await get(two, partner('acc-a2', 's-a2'))).statusCode).toBe(429);
+    const limited = await get(two, partner('acc-a2', 's-a2'));
+    await expectNoOpen(one, two);
+    expect(limited.statusCode).toBe(429);
     expect(await keyOf('tenant-a')).toBe('601');
     const pttl = await pttlOf('tenant-a');
     expect(pttl).toBeGreaterThan(0);
@@ -195,9 +223,14 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
   test('D-T50 ⑦ 600번째는 통과하고 601번째만 429다(599·600·601 경계)', async () => {
     const one = await boot('partner-int');
     await expectAllowed(one, partner('acc-a1', 's-a1'), 599);
-    expect((await get(one, partner('acc-a1', 's-a1'))).statusCode, '600번째').toBe(200);
-    expect((await get(one, partner('acc-a1', 's-a1'))).statusCode, '601번째').toBe(429);
-    expect((await get(one, partner('acc-a1', 's-a1'))).statusCode, '602번째').toBe(429);
+    await expectNoOpen(one);
+    const r600 = await get(one, partner('acc-a1', 's-a1'));
+    const r601 = await get(one, partner('acc-a1', 's-a1'));
+    const r602 = await get(one, partner('acc-a1', 's-a1'));
+    await expectNoOpen(one);
+    expect(r600.statusCode, '600번째').toBe(200);
+    expect(r601.statusCode, '601번째').toBe(429);
+    expect(r602.statusCode, '602번째').toBe(429);
     expect(await keyOf('tenant-a')).toBe('602');
   });
 
@@ -207,6 +240,7 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
     await expectAllowed(one, partner('acc-b1', 's-b1'), 100);
     // partner_member도 같은 테넌트 카운터를 올린다(M5)
     expect((await get(one, partner('acc-a2', 's-a2'))).statusCode).toBe(200);
+    await expectNoOpen(one);
     expect(await keyOf('tenant-a')).toBe('101');
     expect(await keyOf('tenant-b')).toBe('100');
 
@@ -215,14 +249,17 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
     // 관제 신원과 스캐너 신원은 파트너 경로에서 401이고 세지 않는다
     expect((await get(one, { 'x-user-id': 'acc-o1', 'x-session-id': 's-o1', 'x-user-aud': 'ops' })).statusCode).toBe(401);
     expect((await get(one, { 'x-user-id': 'acc-s1', 'x-session-id': 's-s1', 'x-user-aud': 'scanner' })).statusCode).toBe(401);
-    expect(await inspector.command(['KEYS', 'rl:tenant:*'])).toEqual(expect.arrayContaining(['rl:tenant:tenant-a', 'rl:tenant:tenant-b']));
-    expect((await inspector.command(['KEYS', 'rl:tenant:*'])) as string[]).toHaveLength(2);
+    expect(await inspect(['KEYS', 'rl:tenant:*'])).toEqual(expect.arrayContaining(['rl:tenant:tenant-a', 'rl:tenant:tenant-b']));
+    expect((await inspect(['KEYS', 'rl:tenant:*'])) as string[]).toHaveLength(2);
 
     // 테넌트 A가 막힌 뒤에도 B는 자기 키로 통과한다(M2)
-    await inspector.command(['SET', tenantRateLimitKey('tenant-a'), '600']);
-    await inspector.command(['PEXPIRE', tenantRateLimitKey('tenant-a'), '60000']);
-    expect((await get(one, partner('acc-a1', 's-a1'))).statusCode, 'A 막힘').toBe(429);
-    expect((await get(one, partner('acc-b1', 's-b1'))).statusCode, 'B 통과').toBe(200);
+    await inspect(['SET', tenantRateLimitKey('tenant-a'), '600']);
+    await inspect(['PEXPIRE', tenantRateLimitKey('tenant-a'), '60000']);
+    const a = await get(one, partner('acc-a1', 's-a1'));
+    const b = await get(one, partner('acc-b1', 's-b1'));
+    await expectNoOpen(one);
+    expect(a.statusCode, 'A 막힘').toBe(429);
+    expect(b.statusCode, 'B 통과').toBe(200);
   });
 
   test('D-T50 ⑦ 401·403 요청은 세지 않고 유효한 요청만 센다', async () => {
@@ -231,6 +268,7 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
     for (let i = 0; i < 601; i++) expect((await get(one, partner('acc-v1', 's-v1'))).statusCode, `역할 밖 ${i + 1}`).toBe(403);
     expect(await keyOf('tenant-a')).toBeNull();
     expect((await get(one, partner('acc-a1', 's-a1'))).statusCode).toBe(200);
+    await expectNoOpen(one);
     expect(await keyOf('tenant-a')).toBe('1');
   });
 
@@ -238,12 +276,15 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
     const one = await boot('partner-int');
     expect((await get(one, partner('acc-a1', 's-a1', { 'x-tenant-id': 'tenant-b' }))).statusCode).toBe(200);
     expect((await get(one, partner('acc-a2', 's-a2', { 'x-tenant-id': 'tenant-b' }))).statusCode).toBe(200);
+    await expectNoOpen(one);
     expect(await keyOf('tenant-a')).toBe('2');
     expect(await keyOf('tenant-b')).toBeNull();
   });
 
   test('D-T50 ⑦ Redis가 끊겨도 통과하고 돌아오면 다시 센다 [ASVS v5.0.0-16.5.2]', async () => {
-    const one = await boot('partner-int');
+    // 열림이 주제라 판정 마감을 짧게 따로 준다(W12-dt50 ②). 멈춘 Valkey는 답하지 않으므로 어떤 유한한 마감에서도 열림이 반드시 나고,
+    // 250ms [가정]는 복구 뒤 600건+429 단언이 판정 p99(이 PC 2ms 안팎)의 100배 넘는 여유를 갖게 하는 값이다
+    const one = await boot('partner-int', { timeoutMs: 250 });
     valkey.pause();
     try {
       const started = performance.now();
@@ -264,23 +305,28 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
         await new Promise((r) => setTimeout(r, 100));
       }
     }
-    await inspector.command(['DEL', tenantRateLimitKey('tenant-a')]);
+    await inspect(['DEL', tenantRateLimitKey('tenant-a')]);
     await expectAllowed(one, partner('acc-a1', 's-a1'), 600);
-    expect((await get(one, partner('acc-a1', 's-a1'))).statusCode).toBe(429);
+    const limited = await get(one, partner('acc-a1', 's-a1'));
+    // 복구 뒤에는 열림이 없어야 정확한 수를 단언할 수 있다. 멈춘 동안의 1건 그대로다(W12-dt50 ③)
+    expect(await opensOf(one), '복구 뒤 판정 열림(unavailable) 건수').toBe(1);
+    expect(limited.statusCode).toBe(429);
   }, 30_000);
 
   test('D-T50 ⑦ 카운터 키는 60초 수명을 갖고 창이 끝나면 다시 센다', async () => {
     const one = await boot('partner-int');
     await expectAllowed(one, partner('acc-a1', 's-a1'), 600);
+    await expectNoOpen(one);
     const pttl = await pttlOf('tenant-a');
     expect(pttl).toBeGreaterThan(0);
     expect(pttl).toBeLessThanOrEqual(60_000);
-    expect(Number(await inspector.command(['TTL', tenantRateLimitKey('tenant-a')]))).not.toBe(-1);
+    expect(Number(await inspect(['TTL', tenantRateLimitKey('tenant-a')]))).not.toBe(-1);
     // 창을 1초로 줄여 기다리면 키가 사라지고 다시 600회를 받는다(M12: 앱 시계가 아니라 Redis 수명이 창이다)
-    await inspector.command(['PEXPIRE', tenantRateLimitKey('tenant-a'), '1']);
+    await inspect(['PEXPIRE', tenantRateLimitKey('tenant-a'), '1']);
     await new Promise((r) => setTimeout(r, 1_200));
     expect(await keyOf('tenant-a')).toBeNull();
     expect((await get(one, partner('acc-a1', 's-a1'))).statusCode).toBe(200);
+    await expectNoOpen(one);
     expect(await keyOf('tenant-a')).toBe('1');
     expect(await pttlOf('tenant-a')).toBeGreaterThan(0);
   });
@@ -289,14 +335,12 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
     // 이 시험은 INCR 원자성(600 초과 통과 없음)을 본다. 판정 마감 20ms의 열림 동작은 T7·T8이 따로 본다:
     // 한 프로세스·한 연결에 601건을 한꺼번에 넣으면 클라이언트의 100ms 명령 마감을 넘겨 일부가 열림으로 통과한다(의도한 열림).
     // 그래서 여기서는 파드 여럿처럼 연결 여럿(8개)에 나눠 보내 모든 요청이 Redis 판정에 닿게 하고, 판정 마감도 늘린다.
-    const many = await Promise.all(Array.from({ length: 8 }, (_, i) => boot(`partner-int-${i + 1}`, { timeoutMs: 5_000 })));
+    const many = await Promise.all(Array.from({ length: 8 }, (_, i) => boot(`partner-int-${i + 1}`, { timeoutMs: COUNT_DEADLINE_MS })));
     // 첫 EVALSHA가 NOSCRIPT로 실패하지 않게 스크립트를 한 번 올린다(그 요청도 한도에 센다)
     expect((await get(many[0]!, partner('acc-a1', 's-a1'))).statusCode).toBe(200);
     const all = await Promise.all(Array.from({ length: 601 }, (_, i) => get(many[i % many.length]!, partner('acc-a1', 's-a1'))));
     const statuses = all.map((r) => r.statusCode);
-    for (const svc of many) {
-      expect(sample(await metricsOf(svc), 'tenant_rate_limit_total', { service: svc.name, result: 'unavailable' })).toBeUndefined();
-    }
+    await expectNoOpen(...many);
     expect(statuses.filter((s) => s === 200)).toHaveLength(599);
     expect(statuses.filter((s) => s === 429).length).toBeGreaterThanOrEqual(2);
     expect(statuses.filter((s) => s >= 500)).toHaveLength(0);
@@ -307,6 +351,7 @@ describe('D-T50 ⑦ 서비스 층 테넌트 한도(실제 Valkey, 서비스 두 
     const one = await boot('partner-int', { limit: 1 });
     expect((await get(one, partner('acc-a1', 's-a1'))).statusCode).toBe(200);
     const r = await get(one, partner('acc-a1', 's-a1'));
+    await expectNoOpen(one);
     expect(r.statusCode).toBe(429);
     const body = JSON.parse(r.payload) as Record<string, unknown>;
     expect(body).toMatchObject({ type: 'about:blank', title: 'Too Many Requests', status: 429 });
