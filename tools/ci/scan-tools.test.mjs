@@ -4,7 +4,7 @@
 // 시험 자료에 비밀 꼴 글자를 쓰지 않는다(이 저장소의 gitleaks가 시험 파일도 본다).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,7 @@ import {
   gitleaksIgnoreProblems,
   makeTar,
   missingIacTargets,
+  readGitleaksConfig,
   unpackOciLayout,
   runGitleaks,
   trivyConfigArgs,
@@ -276,6 +277,52 @@ test('[ASVS v5.0.0-13.3.1] gitleaks 허용 블록은 targetRules가 있고(경�
   }
   // 경로와 함께 AND로 좁힌 블록은 targetRules가 없어도 된다(값 꼴은 여전히 묶는다)
   assert.deepEqual(gitleaksConfigProblems(`${base}condition = 'AND'\npaths = ['''^packages/a/test/v\\.json$''']\nregexes = ['''^[0-9a-f]{64}$''']\n`), []);
+});
+
+// ---------- W12S-07 이력에 남은 데모 서버 액션 키의 오탐 허용 블록(docs/review/plans/W12-ci-sec.md §3) ----------
+// 정본: docs/devops.md §4.4 '시험·데모 값의 꼴과 도구 판' ①(이미 이력에 들어간 값은 오탐으로 보고 gitleaks.toml 허용 목록에
+// 까닭·그 값 그대로의 꼴·그 값이 있는 경로(AND)로 둔다)와 같은 절 표의 비밀 탐지 줄('까닭과 좁은 경로·꼴'), '리뷰 뒤 더한 규칙' ⑤.
+// 데모 키 값은 글자 그대로 두지 않고 문구 조각을 이어 그 자리에서 base64로 만든다(계획 §3 첫 줄).
+const DEMO_KEY = Buffer.from(`${['peaket', 'demo', 'server', 'actions', 'key'].join('-')}--`).toString('base64');
+/** 이력에서 그 값이 걸린 파일(계획 §1의 2: 실행 44900557822의 gitleaks 결과 여섯 건) */
+const DEMO_KEY_FILES = ['apps/web/Dockerfile', 'apps/partner/Dockerfile', 'deploy/envs/local/demo/web.yaml', 'tools/local/demo-objects.mjs'];
+/** 그 블록이 풀면 안 되는 경로(다른 앱 원본·다른 서비스 이미지·운영 값, 이웃 파일, 앞뒤에 글자가 붙은 경로) */
+const NOT_DEMO_KEY_FILES = ['apps/web/src/a.ts', 'services/x/Dockerfile', 'deploy/envs/prod/web.yaml', 'deploy/envs/local/demo/partner.yaml', 'apps/web/Dockerfile.bak', 'x/apps/web/Dockerfile', 'tools/local/demo-objects.test.mjs'];
+/** gitleaks 꼴을 JS 정규식으로(맨 앞 (?i)는 i 깃발로) */
+const goRegex = (p) => (String(p).startsWith('(?i)') ? new RegExp(String(p).slice(4), 'i') : new RegExp(String(p)));
+const demoKeyBlocks = () => {
+  const values = [DEMO_KEY, DEMO_KEY.replace(/=+$/, '')];
+  return readGitleaksConfig(readFileSync(join(HERE, 'gitleaks.toml'), 'utf8')).allowlists.filter((a) => (a.regexes ?? []).some((r) => values.some((v) => goRegex(r).test(v))));
+};
+
+test('W12S-07 ① 데모 서버 액션 키 값(끝 = 있든 없든)을 푸는 허용 블록이 있고 generic-api-key만·AND·그 값이 걸린 네 파일 경로로만 좁혔다', () => {
+  assert.deepEqual(gitleaksConfigProblems(readFileSync(join(HERE, 'gitleaks.toml'), 'utf8')), [], 'gitleaks 설정 전체의 규칙');
+  const blocks = demoKeyBlocks();
+  assert.ok(blocks.length >= 1, '데모 서버 액션 키 값을 푸는 허용 블록이 없다(경로만·지문으로 풀지 않고 값 꼴로 둔다)');
+  for (const a of blocks) {
+    const at = `허용 블록 '${String(a.description).slice(0, 40)}…'`;
+    for (const v of [DEMO_KEY, DEMO_KEY.replace(/=+$/, '')]) assert.ok(a.regexes.some((r) => goRegex(r).test(v)), `${at}이 끝 = ${v.endsWith('=') ? '있는' : '없는'} 값을 풀지 않는다`);
+    assert.deepEqual(a.targetRules, ['generic-api-key'], `${at}의 targetRules`);
+    assert.equal(a.condition, 'AND', `${at}의 condition(경로와 값이 함께 맞아야 푼다)`);
+    assert.ok(Array.isArray(a.paths) && a.paths.length > 0, `${at}에 경로가 없다(경로 없이 값만으로 풀면 다른 파일의 같은 값도 지나간다)`);
+    const hit = (f) => a.paths.some((p) => goRegex(p).test(f));
+    for (const f of DEMO_KEY_FILES) assert.equal(hit(f), true, `${at}의 경로가 ${f}에 맞지 않는다`);
+    for (const f of NOT_DEMO_KEY_FILES) assert.equal(hit(f), false, `${at}의 경로가 ${f}에도 맞는다(그 값이 걸린 네 파일만)`);
+  }
+});
+
+test('W12S-07 ② 그 블록의 값 꼴은 그 값 그대로다(실행 때 만든 다른 32바이트 base64 키·한 글자 바꾼 값은 풀지 않는다)', () => {
+  const blocks = demoKeyBlocks();
+  assert.ok(blocks.length >= 1, '데모 서버 액션 키 값을 푸는 허용 블록이 없다');
+  const at = 5;
+  const flipped = `${DEMO_KEY.slice(0, at)}${DEMO_KEY[at] === 'A' ? 'B' : 'A'}${DEMO_KEY.slice(at + 1)}`;
+  const others = [randomBytes(32).toString('base64'), randomBytes(32).toString('base64'), flipped];
+  for (const a of blocks) {
+    for (const v of others) {
+      const wide = a.regexes.filter((r) => goRegex(r).test(v) || goRegex(r).test(v.replace(/=+$/, '')));
+      assert.deepEqual(wide, [], `허용 블록의 값 꼴이 데모 값이 아닌 키도 푼다: ${JSON.stringify(wide)}`);
+    }
+  }
 });
 
 test('[ASVS v5.0.0-13.3.1] 지문 무시 목록의 줄마다 이슈 번호와 교체한 날을 단 주석이 앞에 있다', () => {

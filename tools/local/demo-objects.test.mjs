@@ -1,10 +1,11 @@
 // BAT-087 데모 오버레이가 실제 백엔드를 보는지(DS-03), 출처·호스트·포트·SAN(DS-04),
-// 생성 객체에 비밀·개인정보가 없는지(DS-12)를 순수 함수로 본다.
+// 생성 객체에 비밀·개인정보가 없는지(DS-12), 서버 액션 키가 Secret으로만 가는지(W12S-03, docs/review/plans/W12-ci-sec.md §3)를 순수 함수로 본다.
 // 정본: docs/review/plans/BAT-087.md §5 '이미지·워크로드'·'호스트·포트', §6 DS-03·04·12, §9 M2·M3·M4·M12.
 // 실행(저장소 뿌리): node --test "tools/local/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -15,6 +16,7 @@ import {
   DEMO_GATEWAY_PORTS,
   DEMO_HOSTS,
   DEMO_NAMESPACES,
+  DEMO_OVERLAY_DIR,
   DEMO_WORKLOADS,
   demoAppObjects,
   demoDatabaseUrls,
@@ -290,4 +292,65 @@ test('DS-12 demo-status가 견줄 기대 워크로드는 15개이고 차트 밖 
     assert.ok(w.name && w.namespace, '워크로드 이름·네임스페이스가 비었다');
     assert.ok(Number.isInteger(w.expected) && w.expected >= 1, `${w.name}의 기대 복제 수가 0이다`);
   }
+});
+
+// ---------- W12S-03 서버 액션 키는 무대마다 만든 값을 Secret으로만(docs/review/plans/W12-ci-sec.md §3) ----------
+// 정본: docs/infra.md '로컬 데모의 비밀'(서버 액션 키도 같은 비밀 파일에서 무작위 32바이트로 만들어 웹·파트너가 같은 값을 Secret으로만 받고,
+// 오버레이 값 파일에는 굽지 않는다), docs/devops.md §4.4 '시험·데모 값의 꼴과 도구 판' ②.
+const SERVER_ACTIONS_ENV = 'NEXT_SERVER_ACTIONS_ENCRYPTION_KEY';
+/** 예전 데모 상수(공개된 값). 글자 그대로 두지 않고 문구 조각을 이어 그 자리에서 base64로 만든다(계획 §3 첫 줄) */
+const OLD_DEMO_KEY = Buffer.from(`${['peaket', 'demo', 'server', 'actions', 'key'].join('-')}--`).toString('base64');
+
+test('W12S-03 ① demoSecrets의 demo-web·demo-partner(네임스페이스 web)가 입력 keys.serverActionsKey를 그대로 싣는다', () => {
+  // 시험 값은 실행 때 무작위로 만든다(예전 상수와도 다르다)
+  const serverActionsKey = randomBytes(32).toString('base64');
+  assert.notEqual(serverActionsKey, OLD_DEMO_KEY);
+  const secrets = demoSecrets({ keys: { ...demoSecretKeys(), serverActionsKey }, bootstrap: { version: 1, accounts: [], promoters: [] } });
+  const webNamespace = DEMO_WORKLOADS.find((w) => w.name === 'web')?.namespace;
+  const partnerNamespace = DEMO_WORKLOADS.find((w) => w.name === 'partner')?.namespace;
+  assert.equal(webNamespace, 'web', 'web 워크로드의 네임스페이스');
+  assert.equal(partnerNamespace, 'web', 'partner 워크로드의 네임스페이스');
+  for (const [name, namespace] of [['demo-web', webNamespace], ['demo-partner', partnerNamespace]]) {
+    const s = secrets.find((o) => o.metadata?.name === name);
+    assert.ok(s, `데모 Secret ${name}이 없다`);
+    assert.equal(s.kind, 'Secret', `${name}의 종류`);
+    assert.equal(s.metadata.namespace, namespace, `${name}의 네임스페이스(워크로드와 같아야 envFrom으로 읽는다)`);
+    assert.equal(s.stringData?.[SERVER_ACTIONS_ENV], serverActionsKey, `${name}의 ${SERVER_ACTIONS_ENV}가 입력 keys.serverActionsKey가 아니다`);
+  }
+});
+
+test('W12S-03 ② demo-objects 모듈이 예전 데모 상수 DEMO_SERVER_ACTIONS_KEY를 내놓지 않는다', async () => {
+  const mod = await import('./demo-objects.mjs');
+  assert.equal(Object.hasOwn(mod, 'DEMO_SERVER_ACTIONS_KEY'), false, 'DEMO_SERVER_ACTIONS_KEY가 아직 있다(무대마다 만든 값을 쓴다)');
+  // 이름만 바꿔 같은 값을 내놓아도 안 된다
+  const same = Object.entries(mod).filter(([, v]) => v === OLD_DEMO_KEY).map(([k]) => k);
+  assert.deepEqual(same, [], `예전 데모 상수 값을 내놓는 이름: ${same.join(', ')}`);
+});
+
+test('W12S-03 ③ 데모 오버레이 값 파일의 env에 서버 액션 키가 없고 web·partner는 secretEnvFrom으로 demo-web·demo-partner를 받는다', () => {
+  const files = readdirSync(join(REPO, DEMO_OVERLAY_DIR)).filter((f) => f.endsWith('.yaml'));
+  assert.equal(files.length, DEMO_WORKLOADS.length, `${DEMO_OVERLAY_DIR}의 값 파일 수`);
+  const withKey = [];
+  for (const f of files) {
+    const values = parseYaml(readFileSync(join(REPO, DEMO_OVERLAY_DIR, f), 'utf8'));
+    if (values?.env && Object.hasOwn(values.env, SERVER_ACTIONS_ENV)) withKey.push(f);
+  }
+  assert.deepEqual(withKey, [], `값 파일 env에 ${SERVER_ACTIONS_ENV}가 있다(Secret으로만 준다): ${withKey.join(', ')}`);
+  const web = parseYaml(readFileSync(join(REPO, DEMO_OVERLAY_DIR, 'web.yaml'), 'utf8'));
+  const partner = parseYaml(readFileSync(join(REPO, DEMO_OVERLAY_DIR, 'partner.yaml'), 'utf8'));
+  assert.equal(web.secretEnvFrom, 'demo-web', 'web 오버레이의 secretEnvFrom');
+  assert.equal(partner.secretEnvFrom, 'demo-partner', 'partner 오버레이의 secretEnvFrom');
+});
+
+test('W12S-03 ④ 예전 데모 상수 값이 오버레이 폴더·데모 이미지 Dockerfile·데모 도구 원본에 남지 않는다', () => {
+  const files = [
+    ...readdirSync(join(REPO, DEMO_OVERLAY_DIR)).map((f) => `${DEMO_OVERLAY_DIR}/${f}`),
+    'apps/web/Dockerfile',
+    'apps/partner/Dockerfile',
+    ...readdirSync(join(REPO, 'tools', 'local')).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs')).map((f) => `tools/local/${f}`),
+  ];
+  assert.ok(files.length > DEMO_WORKLOADS.length + 2, `볼 파일이 너무 적다: ${files.length}`);
+  const unpadded = OLD_DEMO_KEY.replace(/=+$/, '');
+  const hits = files.filter((f) => readFileSync(join(REPO, f), 'utf8').includes(unpadded));
+  assert.deepEqual(hits, [], `예전 데모 상수 값이 남은 파일: ${hits.join(', ')}`);
 });
