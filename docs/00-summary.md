@@ -781,6 +781,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-741: BAT-059 HOT-401 — 서비스 일곱(core·identity·ops·payment·purchase·queue·ticket)이 control.sessions-terminated를 방송형으로 읽어 끝난 세션의 토큰을 수 초 안에 거부하고, 범위 밖 종료 시각은 받은 때부터 막아 세며, queue-svc 탈퇴 15분 미루기를 뺀다(ADR-0333).
 - R-742: ops-svc 관제 명령이 전이 표·2인 승인·dry-run 비교를 거치고, 감사 체인은 KMS mac·5분 앵커·검증 잡으로 변조를 잡는다(BAT-355).
 - R-743: realtime-gw 곧 닫는 연결 상한 시험이 가짜 시계로 결정적이 되어 느린 CI에서 흔들리지 않는다(W12-rtgw).
+- R-744: core-svc 판매자 표에 행 단위 보안을 걸어 파트너가 자기 판매자 행만 읽고 고친다(W12-core-rls).
 
 ## 5. [충돌] 결정 결과
 
