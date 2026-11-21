@@ -97,7 +97,29 @@
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+- 본 것: `git diff origin/develop...HEAD`(b165f9276·201d8cd5e·29526b6d1·49eebb291·7bfb2cf6d), 정본은 ADR-0285 결정 4·5·8·9와 되돌릴 조건, ADR-0288 결정 8(이 묶음이 바꾸지 않음), ADR-0317 결정 1·7, `docs/api/proto/README.md` §2~§4, `docs/features/transfer-refund.md:131·:257`, `docs/features/payment.md:720-721`, `docs/api/guidelines.md:197`. 다시 돌림: `node tools/ci/mesh-policies.mjs --check` exit 0(부르는 쪽 없는 업무 gRPC `GetCompensationTransfer` 하나), `node --test deploy/platform/mesh/test/*.test.mjs` 시험 24·실패 0.
+- **결론: 막는 지적 0.** 생성물에서 늘어난 주체·포트·경로는 0이다. `policies.yaml` 차이는 머리 주석 한 줄과 웨이포인트 경로 `/…CompensationTransferService/*` → `/…/RequestCompensationTransfer` 한 줄(주체는 그대로 `cluster.local/ns/purchase/sa/purchase-svc` 하나, `:674-681`)이고, `meshless-networkpolicies.yaml`은 차이가 없다. 계획의 A1·A2는 origin/develop에 이미 있던 허용(BAT-425 84f30f86c)이라 아래 표는 "남은 허용이 정본과 1:1인가"로 본다.
+
+허용 1:1 대조(생성물 diff 전체와 계획 1의 A1·A2):
+
+| # | 받는 쪽·포트·경로 | 주체 | 이 묶음의 변화 | 정본 근거 | 코드 근거 | 판정 |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 | payment-svc 웨이포인트 `/peaket.payment.v1.CompensationTransferService/RequestCompensationTransfer` | purchase-svc | 좁힘(서비스 통째 → 메서드 하나) | ADR-0317 결정 1(`0317-…md:16` "ops-svc는 송금을 부르지 않는다"), transfer-refund.md:131 '배상 계좌 입력', 메서드 규칙 꼴은 ADR-0285 결정 8(`:33`) | `services/purchase-svc/src/modules/refund/adapters/grpc-compensation-transfer.ts:41`(`RequestCompensationTransfer`만 든 클라이언트) | 1:1 |
+| A1′ | payment-svc 웨이포인트 `/…/GetCompensationTransfer` | 없음 | 닫힘(purchase-svc 빠짐) | 정본·코드 어디에도 부르는 쪽 없음(받는 쪽 `compensation-transfer.grpc.ts:72`와 그 단위 시험뿐), ADR-0285 결정 4 '부르는 쪽 빠진 규칙은 만들지 않는다' | — | 맞음 |
+| A2 | payment-svc REST 8080(메시·메시 없는 둘 다) | purchase-svc | 없음(원천 주석 근거만 고침) | transfer-refund.md:257 '서킷 연결', payment.md:721, guidelines.md:197, ADR-0285 결정 9 표 `:48`·보충 `:54`(15쌍, 셌음) | `refund/adapters/http-pg-circuits.ts`(`GET /internal/v1/circuits`), 받는 쪽 `payment/inbound/internal-circuits.controller.ts:15-26` | 1:1(경로 단위는 아래 RV-01) |
+| — | payment-svc 업무 gRPC 포트(메시 없는 판) | 부르는 쪽 합 | 없음 | ADR-0285 결정 8 끝 문장(메시 없는 판은 합) | purchase-svc는 `PaymentService`로 이미 들어 있음 | 맞음 |
+
+- 원천: `port-allow.yaml:172-177`이 `methods: { GetCompensationTransfer: [], RequestCompensationTransfer: [purchase-svc] }`로 메서드 단위이고, 생성물은 `--check`가 원천·라우트·proto와 같다고 답한다(손 편집 없음).
+- 정본 보충: ADR-0285는 덧붙임뿐이다(표 한 행 `:48`, 보충 문단 `:54`, 되돌릴 조건 한 줄 `:85`, 지운 줄 0). proto README §2 '부르는 쪽 확인'은 줄 끝에 한 문장을 더했고 §3은 행 `:75`·기록 `:128`을 더했다. §4 `:138`만 원래 줄을 고쳐 썼는데, 옛 줄("송금 … 결제사 계약 뒤 더한다")은 R-592(2026-11-15, `payment.proto:484` 서비스 있음) 뒤로 낡은 줄이었고, 남은 사실(ADR-0046, 지급대행 계약 전)은 새 줄에 남겼으며 옮김을 `:128`에 적었다. 뜻을 거꾸로 바꾼 곳은 없다.
+- 남는 위험 판단(감독 3): 보안 높음으로 이 묶음에서 막을 것은 아니다. ① payment-svc `InternalSettlementController`(`internal-settlement.controller.ts:61-63`)는 공유 토큰 `InternalTokenGuard`(`packages/platform/src/auth.ts:115-121`, 토큰 값만 견줌)만 보고 부르는 쪽 신원을 보지 않으므로 purchase-svc가 토큰으로 `POST /internal/v1/settlements/*`에 닿는 것은 맞다. ② 그러나 이 허용은 origin/develop에 이미 있고 이 묶음은 넓히지 않았다(생성물 REST 차이 0). ③ 쓰려면 purchase-svc 장악이 먼저 필요하고, 같은 꼴의 core-svc 위험(BAT-420-rest RV-07)도 같은 되돌릴 조건 줄로 다뤘다. 다만 적힌 위험이 실제보다 가볍게 적혔다(RV-01).
+- 시험: 기대 표(`INTERNAL_HTTP` 16쌍, `GRPC` 배상 송금 메서드 표, 포트 상수, 릴레이 파드 라벨)는 시험이 스스로 들고 원천·생성기에서 가져오지 않는다. proto 메서드 목록만 정본 proto에서 읽는다(W12M-01 ①). 커밋 경계: 시험 커밋 29526b6d1은 시험 파일과 이 계획만, 구현 커밋 49eebb291은 원천·생성물·이 계획만 건드렸다(시험 파일 0). 계획 커밋 b165f9276의 ADR·README는 계획 몫으로 적힌 대로다.
+
+| 번호 | 등급 | 파일:줄 | 근거와 방향 |
+| --- | --- | --- | --- |
+| RV-01 | 중간(보안 성격, 기존 위험·이 묶음 밖) | `docs/adr/0285-mesh-port-allow-source-generated-policies.md:85`, `services/payment-svc/src/modules/settlement/application/settlements.ts:481-490·494-498`, `inbound/internal-settlement.controller.ts:137-158` | 보충 줄은 "닿는다"까지만 적었다. 실제로는 `approveBatch`가 `approvalId`를 ops-svc 승인 기록과 견주지 않고 아무 문자열이나 받아 `PENDING_APPROVAL`을 `APPROVED`로 바꾸고, `execution`이 그 상태만 보므로, 공유 토큰을 가진 부르는 쪽은 ops 승인 없이 지급 묶음을 승인·실행할 수 있다(지급처는 확정 정산서의 등록 판매자, 합계 대조 `:504-505`가 있어 돈이 엉뚱한 곳으로 가지는 않는다). 방향: 감독이 정리 목록에 올리고, 대안 2 새 ADR(경로 거르기)이나 앱 층 부르는 쪽 확인(부르는 쪽별 토큰, 또는 승인 ID를 ops-svc에 확인)을 그때 정한다. 보충 줄에 '승인 우회'를 한 구절 더하는 것도 그 묶음 몫 |
+| RV-02 | 중간(기존·이 묶음 밖) | `tools/local/e2e/mesh-netpol.e2e.mjs:72·117` | kind 시험 MK-01은 `gw-fan` → payment-svc REST를 '닿음'으로 기대하는데 메시 없는 생성물(`meshless-networkpolicies.yaml:473`)은 `gw-partner`뿐이다. 이 묶음이 바꾼 것이 아니지만 ci-kind가 돌면 빨갛게 될 수 있다(손으로 돌리지 않음). 방향: 라우트 원천을 정본으로 e2e 표를 고치는 작은 묶음 |
+| RV-03 | 낮음(이 묶음 밖) | `docs/api/guidelines.md:197` | 서킷 읽기 줄의 근거 ADR-0316(지연 환급 계좌)은 서킷을 다루지 않는다. 이 묶음의 ADR-0285 보충 `:54`가 이 줄을 근거로 가리키므로 표기를 transfer-refund §5 '서킷 연결'로 고치는 일을 정리 목록에 올린다 |
+| RV-04 | 낮음(이 묶음 밖) | `services/purchase-svc/src/relay-app.ts:221-231` | 릴레이도 운영에서 `PEAKET_PAYMENT_HTTP_URL`을 꼭 요구하는데 원천에 릴레이 신원이 없다. ADR-0285 결정 4대로 릴레이 배포를 켜는 단계에서 원천·결정 9 표에 함께 더해야 한다(계획 '감독에게 5' ①). 정리 목록에 올린다 |
 
 ## 검증
 
@@ -110,3 +132,4 @@
 | plan | w12mesh-plan-8d4c | claude-opus-5-5 | 2026-11-22T00:15+09:00 | 2026-11-22T00:29+09:00 |
 | test | w12mesh-test-2f9a | claude-opus-5-5 | 2026-11-22T00:31+09:00 | 2026-11-22T00:41+09:00 |
 | impl | w12mesh-impl-5e7b | claude-opus-5-5 | 2026-11-22T00:35+09:00 | 2026-11-22T00:39+09:00 |
+| review | w12mesh-review-3a6f | claude-opus-5-5 | 2026-11-22T00:43+09:00 | 2026-11-22T00:47+09:00 |
