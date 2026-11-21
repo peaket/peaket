@@ -207,15 +207,16 @@ function demoEnv(o) {
 }
 
 function measurementOf(report, o, cleanup, outcome) {
+  const found = doctorChecks(o.root).tools;
   return {
     commit: gitHead(),
     date: new Date().toISOString(),
     pc: `${process.platform} ${release()} · ${cpus()[0]?.model ?? 'CPU'} · Node ${process.version} · Playwright tools/web-checks 1.64.1`,
     tools: {
       node: process.version,
-      docker: toolVersion('docker', ['--version']),
-      kind: toolVersion('kind', ['version']),
-      kubectl: toolVersion('kubectl', ['version', '--client', '--output=json']),
+      docker: toolVersion(found.docker ?? 'docker', ['--version']),
+      kind: toolVersion(found.kind ?? 'kind', ['version']),
+      kubectl: toolVersion(found.kubectl ?? 'kubectl', ['version', '--client', '--output=json']),
       playwright: '1.64.1(tools/web-checks)',
     },
     coldStartSeconds: report?.coldStartSeconds,
@@ -225,7 +226,14 @@ function measurementOf(report, o, cleanup, outcome) {
     command: `node tools/local/demo.mjs ${o.cmd}${o.skipBuild ? ' --skip-build' : ''}${o.keep ? ' --keep' : ''}`,
     notes: [
       'S1·S3·S4·S6은 구매 세션 서명(ECDH+HKDF)으로 실제 API와 데모 PG 시뮬레이터를 끝까지 부른다.',
-      'S2·S5·S7·S8·S9는 화면을 열고, 아직 자동화하지 못한 판정을 실패로 남긴다(까닭은 표에 있다). 조용히 건너뛰지 않는다.',
+      'S2는 대기열 Redis notice를 데모 전용으로 매진으로 바꾸고(공개 API에 재고 0 쓰기가 없다) 매진 화면의 [취소표 알림 받기] 실패·[다시 시도] 문구를 재생한다. 취소표 알림 신청 API는 제품에 없다(404).',
+      'S3는 실패·결과 불명 주문을 남기므로 S9가 취소하는 E-1 대신 E-4(팬미팅)에서 돌린다. S9의 일괄 환불을 미완료 주문이 막지 않게 하기 위한 시나리오 분리다.',
+      'S5는 팬 재인증 토큰(identity gRPC IssueReauthToken, act FAN_SENSITIVE·op TICKET_CANCEL)을 발급해 취소 견적·취소 API를 끝까지 부른다. 양도 API는 제품에 없어 화면만 연다.',
+      'S6의 판매 심사 제출 API는 제품에 없다(BAT-616 미병합, 404). 데모 전용 SQL로 sale_review만 SUBMITTED로 두고 판매 승인은 실제 ops API로 부른다.',
+      'S7은 패스키 재인증(시드 개인키로 WebAuthn assertion) 뒤 요청자 자기 승인 403·두 번째 commander 승인·감사 기록을 본다. S9는 파트너 요청·commander 판정·두 번째 commander 확정·일괄 환불을 본다.',
+      'S8은 보존한 DPoP 기기 키로 기기 등록·승인 로그인·스캔 업로드를 하고, 판정 넷(통과·거부·확인 필요·이상 표시)을 티켓 원장에서 확인한다. 시드 티켓에 게이트 구역이 비어 있어 데모 전용 SQL로 기기 배치 구역을 티켓에 적는다.',
+      'S9의 회차 취소 환불 반복은 합본의 purchase-relay 자식이 돈다(운영은 별도 outbox-relay Deployment).',
+      'S1 홈(/v1/home)은 제품에 없어 500이고, 화면 증거로만 연다(판정 checks에는 넣지 않는다).',
       `데모 동의 문안 판은 ${DEMO_CONSENT_VERSION}이다(서버 값과 다르면 422 consent-version-outdated).`,
     ],
   };

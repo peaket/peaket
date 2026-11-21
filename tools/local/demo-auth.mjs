@@ -306,10 +306,12 @@ export function cookiesOf(setCookie, host) {
       const i = x.indexOf('=');
       return i < 0 ? [x.toLowerCase(), true] : [x.slice(0, i).toLowerCase(), x.slice(i + 1)];
     }));
+    // 서버가 Domain을 줬으면 하위 호스트까지 가도록 앞점을 붙인다(Playwright는 앞점 없는 값을 host-only로 넣는다)
+    const domain = a.domain ? (a.domain.startsWith('.') ? a.domain : `.${a.domain}`) : host;
     out.push({
       name,
       value,
-      domain: a.domain ?? host,
+      domain,
       path: a.path ?? '/',
       ...(a.expires ? { expires: Date.parse(a.expires) } : {}),
       secure: Boolean(a.secure),
@@ -391,17 +393,20 @@ export async function demoAuth(kind, accountKey) {
   if (kind === 'passkey') {
     const pk = secrets.passkeys[accountKey];
     if (!pk) throw new Error(`${accountKey}에 패스키 시드가 없다`);
-    return { accountKey, kind: 'passkey', passkey: { rpId: rpIdOf(account), credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64'), name: pk.name } };
+    return { accountKey, kind: 'passkey', passkey: { rpId: rpIdOf(account), credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64url'), name: pk.name } };
   }
   if (account.kind === 'fan') {
     if (kind !== 'fan') throw new Error(`${accountKey}는 팬 계정이다(demo-auth fan …)`);
     const session = await createSession(account);
     if (!session?.access_token) throw new Error('CreateSession 응답에 세션이 없다(연결 확인)');
-    const domain = 'peaket.example';
+    // 도메인 쿠키는 앞점이 있어야 브라우저가 하위 호스트(api·queue·www)로도 보낸다.
+    // 앞점이 없으면 Playwright가 host-only로 넣어 대기실 화면의 fetch가 401(Jwt is missing)이 된다
+    const domain = '.peaket.example';
     return {
       accountKey,
       kind: 'fan',
       accountId: session.account_id,
+      sessionId: session.session_id,
       cookies: [
         { name: '__Secure-peaket_at', value: session.access_token, domain, path: '/', secure: true, httpOnly: true, sameSite: 'Strict' },
         { name: '__Secure-peaket_rt', value: session.refresh_token, domain, path: '/v1/identity/access-tokens', secure: true, httpOnly: true, sameSite: 'Strict' },
@@ -419,8 +424,55 @@ export async function demoAuth(kind, accountKey) {
     kind: 'admin',
     aud,
     cookies: login.cookies,
-    ...(pk ? { passkey: { rpId: rpIdOf(account), credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64'), name: pk.name } } : {}),
+    ...(pk ? { passkey: { rpId: rpIdOf(account), credentialId: pk.credentialId, privateKey: pk.privateKeyPkcs8, userHandle: Buffer.from(demoUuid(`admin:${accountKey}`).replaceAll('-', ''), 'hex').toString('base64url'), name: pk.name } } : {}),
   };
+}
+
+/** 관리·파트너 계정의 데모 비밀(메모리에서만). 표준 출력·로그·측정에 싣지 않는다 */
+export function demoAccountSecrets(accountKey) {
+  const seed = readSeed();
+  const account = seed.accounts.find((a) => a.key === accountKey);
+  if (!account || account.kind !== 'admin') throw new Error(`관리 계정이 아니다: ${accountKey}`);
+  const { secrets } = prepareDemoSecrets();
+  const s = secrets.accounts[accountKey];
+  if (!s) throw new Error(`${accountKey}의 데모 비밀이 없다(demo-auth prepare)`);
+  return { password: s.password, totpSeed: s.totpSeed };
+}
+
+/**
+ * 팬 재인증 토큰 하나(identity gRPC IssueReauthToken). 앱 서버가 제공자 재인증을 마친 뒤 부르는 자리와 같은 RPC다.
+ * 데모에는 OIDC 제공자가 없으므로 그 앞 단계만 생략하고, 세션·제공자 연결·강도 판정·토큰 발급은 실제 경로를 쓴다.
+ * @param {{ sessionId: string, accountId: string, provider: string, providerUserId: string, operation: string }} i
+ */
+export async function issueFanReauthToken(i) {
+  const grpc = await import('@grpc/grpc-js');
+  const loader = await import('@grpc/proto-loader');
+  const def = loader.loadSync(join(REPO, 'docs', 'api', 'proto', 'peaket', 'identity', 'v1', 'identity.proto'), { keepCase: true, longs: String, enums: String, defaults: true, oneofs: true });
+  const pkg = grpc.loadPackageDefinition(def);
+  const SessionService = pkg.peaket.identity.v1.SessionService;
+  const c = readContract();
+  const client = new SessionService(`127.0.0.1:${c.grpcPort ?? 19051}`, grpc.credentials.createInsecure());
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const call = client.IssueReauthToken ?? client.issueReauthToken;
+      call.call(
+        client,
+        {
+          session_id: i.sessionId,
+          account_id: i.accountId,
+          provider: PROVIDER[i.provider] ?? 1,
+          provider_user_id: i.providerUserId,
+          strength: 'REAUTH_STRENGTH_VERIFIED',
+          operation: `REAUTH_OPERATION_${i.operation}`,
+        },
+        (err, value) => (err ? reject(err) : resolve(value)),
+      );
+    });
+    if (res?.result !== 'REAUTH_RESULT_ISSUED' || typeof res.reauth_token !== 'string') throw new Error(`IssueReauthToken 결과 ${res?.result ?? '없음'}`);
+    return res.reauth_token;
+  } finally {
+    client.close();
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

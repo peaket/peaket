@@ -45,12 +45,12 @@ export const SCENARIOS = [
     title: '매진과 취소표 알림(E-3)',
     screens: ['SCR-008', 'SCR-018', 'SCR-054'],
     accounts: ['jimin'],
-    needs: ['E-3', 'sold-out'],
-    checks: ['sold-out', 'cancel-alert-subscribed'],
+    needs: ['E-3', 'sold-out-fixture'],
+    // 취소표 알림 신청 API는 아직 없다(제품 빈칸). 매진 화면에서 누르면 실패 분기의 '다시 시도' 문구를 재생한다
+    checks: ['sold-out', 'retry-message'],
     steps: [
-      { id: 'queue', kind: 'screen', screen: 'SCR-008', path: '/queue/{eventId}', as: 'jimin' },
-      { id: 'soldout', kind: 'screen', screen: 'SCR-018', path: '/queue/{eventId}', as: 'jimin', note: '매진 상태' },
-      { id: 'alert', kind: 'api', note: '취소표 알림 신청' },
+      { id: 'soldout', kind: 'screen', screen: 'SCR-018', path: '/queue/{eventId}', as: 'jimin', note: '매진 상태(대기열 Redis notice를 데모 전용으로 매진으로 바꾼다)' },
+      { id: 'alert', kind: 'screen', note: '취소표 알림 받기를 눌러 실패 분기의 다시 시도 문구를 본다(신청 API 없음)' },
       { id: 'likes', kind: 'screen', screen: 'SCR-054', path: '/my/likes', as: 'jimin' },
     ],
   },
@@ -59,7 +59,8 @@ export const SCENARIOS = [
     title: '결제 실패와 결과 불명',
     screens: ['SCR-011', 'SCR-012', 'SCR-055', 'SCR-012', 'SCR-010'],
     accounts: ['jimin'],
-    needs: ['E-1', 'demo-clock', 'queue-entry', 'pg-simulator', 'simulator-faults'],
+    // S3는 실패·결과 불명 주문을 남기므로 S9가 취소하는 E-1 대신 E-4를 쓴다
+    needs: ['E-4', 'demo-clock', 'queue-entry', 'pg-simulator', 'simulator-faults'],
     checks: ['unknown-result', 'seat-released'],
     steps: [
       { id: 'checkout', kind: 'screen', screen: 'SCR-011', path: '/booking/{eventId}/checkout', as: 'jimin' },
@@ -93,14 +94,16 @@ export const SCENARIOS = [
     screens: ['SCR-013', 'SCR-014', 'SCR-041', 'SCR-013', 'SCR-038'],
     accounts: ['jimin', 'haneul'],
     needs: ['E-1', 'ticket', 'fan-reauth'],
-    checks: ['transfer-offer', 'cancel-with-fee'],
+    // 양도 API(POST /v1/tickets/{id}/transfers, /v1/transfers/*)는 아직 없다(제품 빈칸). 이 묶음은 팬 재인증 토큰과
+    // ticket-cancel 재인증 경로(견적 → 취소)를 실제 API로 끝낸다.
+    checks: ['fan-reauth', 'cancel-with-fee'],
     steps: [
       { id: 'tickets', kind: 'screen', screen: 'SCR-013', path: '/my/tickets', as: 'jimin' },
-      { id: 'transfer', kind: 'screen', screen: 'SCR-014', path: '/my/tickets/{ticketId}/transfer', as: 'jimin' },
-      { id: 'offer', kind: 'screen', screen: 'SCR-041', path: '/my/transfers/{offerId}', as: 'haneul' },
-      { id: 'accept', kind: 'api', note: '하늘 계정이 양도 수락' },
+      { id: 'transfer', kind: 'screen', screen: 'SCR-014', path: '/my/tickets/{ticketId}/transfer', as: 'jimin', note: '양도 화면(제품 API 없음, 증거로만 연다)' },
+      { id: 'offer', kind: 'screen', screen: 'SCR-041', path: '/my/transfers/{offerId}', as: 'haneul', note: '양도 제안 화면(제품 API 없음)' },
+      { id: 'reauth', kind: 'api', note: '팬 재인증 토큰(issueFanReauthToken, act FAN_SENSITIVE·op TICKET_CANCEL)' },
       { id: 'cancel', kind: 'screen', screen: 'SCR-038', path: '/my/tickets/{ticketId}/cancel', as: 'jimin' },
-      { id: 'fee', kind: 'api', note: '남은 티켓 취소(공제 확인)' },
+      { id: 'fee', kind: 'api', note: '취소 견적(공제율·환급액) → X-Reauth-Token으로 취소(202)' },
     ],
   },
   {

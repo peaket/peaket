@@ -68,7 +68,8 @@ export const DEMO_WORKLOADS = Object.freeze([
   { name: 'ops-svc', namespace: 'core', port: 8080, replicas: 1, reused: true },
   { name: 'ticket-svc', namespace: 'ticket', port: 8080, extraPorts: [{ name: 'grpc', port: 50051 }], replicas: 1 },
   { name: 'trust-svc', namespace: 'trust', port: 8080, extraPorts: [{ name: 'grpc', port: 50051 }], replicas: 1 },
-  { name: 'bundle', namespace: 'purchase', port: 8080, extraPorts: [{ name: 'purchase', port: 8081 }, { name: 'admission', port: 8082 }, { name: 'payment', port: 8084 }], replicas: 1, reused: true },
+  // purchase-grpc는 회차 취소 환불·판정 미리보기(ops-svc → purchase-svc gRPC)를 위한 포트다. payment·queue와 겹치지 않게 50053
+  { name: 'bundle', namespace: 'purchase', port: 8080, extraPorts: [{ name: 'purchase', port: 8081 }, { name: 'admission', port: 8082 }, { name: 'payment', port: 8084 }, { name: 'purchase-grpc', port: 50053 }], replicas: 1, reused: true },
   { name: 'pg-simulator', namespace: 'purchase', port: 8790, replicas: 1, reused: true },
   { name: 'realtime-gw', namespace: 'purchase', port: 8080, replicas: 1 },
   { name: 'web', namespace: 'web', port: 3000, replicas: 1 },
@@ -248,7 +249,7 @@ export function demoLayout() {
     coreHttp: demoServiceUrl('core-svc', 8080),
     ticketGrpc: 'ticket-svc.ticket.svc.cluster.local:50051',
     trustGrpc: 'trust-svc.trust.svc.cluster.local:50051',
-    purchaseGrpc: 'bundle.purchase.svc.cluster.local:50051',
+    purchaseGrpc: 'bundle.purchase.svc.cluster.local:50053',
     bundleServiceUrls: {
       'queue-svc': demoServiceUrl('bundle', V1_PORTS['queue-svc'].app),
       'purchase-svc': demoServiceUrl('bundle', V1_PORTS['purchase-svc'].app),
@@ -299,6 +300,29 @@ export function demoSecrets(o) {
   const webOrigin = demoOrigins().www;
   files['queue-svc'].PEAKET_WEB_ORIGIN = webOrigin;
   files['payment-svc'].PEAKET_WEB_ORIGIN = webOrigin;
+  // 팬 취소의 재인증 확인기(purchase-svc)가 identity 팬 공개키를 읽게 한다. 없으면 local·ci는 닫힌 대역(늘 403)이라
+  // BAT-086의 S5(팬 재인증 → 티켓 취소)가 끝나지 않는다. 발급자는 identity-svc의 PEAKET_TOKEN_ISSUER와 같다
+  files['purchase-svc'].PEAKET_IDENTITY_FAN_JWKS_URL = 'http://identity-svc.core.svc.cluster.local:8080/internal/jwks/fan.json';
+  files['purchase-svc'].PEAKET_IDENTITY_ISSUER = 'https://identity.peaket.example';
+  // 회차 취소 환불 gRPC(ops-svc가 부른다). payment-svc(50051)·queue-svc(50052)와 겹치지 않게 50053을 쓴다
+  files['purchase-svc'].PEAKET_GRPC_PORT = '50053';
+  // 발권·본인확인 재확인은 같은 무대의 ticket-svc·identity-svc gRPC를 쓴다. 없으면 purchase-svc가 '늘 발권' 대역을 써
+  // ticket 원장에 티켓이 생기지 않아 S5·S8·S9가 빈 껍데기가 된다
+  files['purchase-svc'].PEAKET_TICKET_GRPC_ADDR = 'ticket-svc.ticket.svc.cluster.local:50051';
+  files['purchase-svc'].PEAKET_IDENTITY_GRPC_ADDR = 'identity-svc.core.svc.cluster.local:50051';
+  // 합본의 purchase-relay 자식(회차 취소 환불 반복)이 쓰는 값. 릴레이는 아웃박스·정비 DB를 따로 받고,
+  // 결제 HTTP는 같은 파드의 payment-svc(8084)를 본다. 없으면 relay-app이 시작하지 않는다
+  files['purchase-svc'].PEAKET_OUTBOX_DATABASE_URL = urls.purchase;
+  files['purchase-svc'].PEAKET_MAINTENANCE_DATABASE_URL = urls.purchase;
+  files['purchase-svc'].PEAKET_PAYMENT_HTTP_URL = 'http://127.0.0.1:8084';
+  // 좌석맵 판 파일은 데모 재생기가 회차마다 /tmp/seatmaps/{eventId}.json으로 쓴다(읽기 전용 마운트를 피한다).
+  // 시드가 좌석맵을 만든 뒤 재생기가 파일을 쓰지 않으면 purchase-svc 홀드가 503 seat-store-unavailable이다
+  files['purchase-svc'].PEAKET_SEATMAP_DIR = '/tmp/seatmaps';
+  // gw-fan-buy의 Lua admissionIssuer는 데모에서 포트 붙은 queue 출처로 바뀐다(demo-objects의 출처 바꾸기).
+  // 발급자도 같은 값으로 맞춘다. v1 기본값(https://queue.v1.peaket.local)과 다르면 게이트웨이가 입장 토큰을 401로 막는다
+  const queueOrigin = demoOrigins().queue;
+  files['queue-svc'].PEAKET_ADMISSION_TOKEN_ISSUER = queueOrigin;
+  files['purchase-svc'].PEAKET_ADMISSION_ISSUER = queueOrigin;
   return [
     secret('demo-postgres', 'purchase', { POSTGRES_PASSWORD: k.dbPassword }),
     secret('demo-identity', 'core', {
@@ -533,7 +557,9 @@ export function demoGatewayObjects(objects, origins = demoOrigins()) {
   out.push(appRoute('demo-scanner', 'gw-scanner', 'scanner', DEMO_HOSTS.scanner, 'scanner', 8080, [{ type: 'PathPrefix', value: '/' }]));
   out.push(
     appRoute('demo-queue-room', 'gw-queue', 'queue', DEMO_HOSTS.queue, 'queue-room', 8080, [
-      { type: 'PathPrefix', value: '/_q/' },
+      // 정적 자산은 정규식으로 잡는다. PathPrefix /_q/는 같은 게이트웨이의 not-found 정규식(/.*)보다
+      // Envoy 라우트 차례에서 밀려 404가 났다(데모 확인). 더 구체적인 정규식은 그 앞에 놓인다
+      { type: 'RegularExpression', value: '^/_q/.*' },
       { type: 'RegularExpression', value: '^/queue/[^/]+/?$' },
       { type: 'RegularExpression', value: '^/(en|ja|zh)/queue/[^/]+/?$' },
       { type: 'RegularExpression', value: '^/shop/[^/]+/queue$' },

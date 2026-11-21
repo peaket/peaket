@@ -12,6 +12,10 @@
     "./stage": {
       "types": "./dist/stage.d.ts",
       "default": "./dist/stage.js"
+    },
+    "./relay": {
+      "types": "./dist/relay.d.ts",
+      "default": "./dist/relay.js"
     }
   },
   "scripts": {

@@ -9,6 +9,9 @@ image:
 
 env:
   PEAKET_ENV: local
+  # Next 서버 컴포넌트(홈·공연 상세)가 부르는 원본 API. 없으면 loadEvent가 'missing'이라 상세가 404다.
+  # 브라우저 쪽 호출은 빌드에 박은 NEXT_PUBLIC_API_ORIGIN(포트 붙은 gw-fan)을 그대로 쓴다
+  PEAKET_API_ORIGIN: http://core-svc.core.svc.cluster.local:8080
   # 빌드와 같은 값이어야 한다(apps/web/Dockerfile, tools/local/demo-objects.mjs의 DEMO_SERVER_ACTIONS_KEY)
   NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: cGVha2V0LWRlbW8tc2VydmVyLWFjdGlvbnMta2V5LS0=
 

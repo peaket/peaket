@@ -10,6 +10,8 @@ image:
 env:
   PEAKET_ENV: local
   PEAKET_BUNDLE_SERVICES: payment-svc,purchase-svc,admission-ctrl,queue-svc
+  # 회차 취소 환불 반복(relay.ts)을 합본의 자식 프로세스로 함께 띄운다. S9가 상태 COMPLETED를 보려면 이 반복이 돈다
+  PEAKET_BUNDLE_PURCHASE_RELAY: '1'
   PEAKET_BUNDLE_ENV_DIR: /etc/peaket/bundle
   # single 모드면 payment·purchase·queue의 기본 gRPC가 모두 50051이라 한 파드 안에서 포트가 겹친다.
   # v1 무대처럼 split으로 나눠 프로세스를 나눈다(파드는 여전히 하나다, 감독 결정 2)
@@ -26,7 +28,10 @@ service:
     - { name: purchase, port: 8081 }
     - { name: admission, port: 8082 }
     - { name: payment, port: 8084 }
-  leaderLease: [admission-ctrl, payment-entry-pause]
+    # 회차 취소 환불·판정 미리보기(ops-svc → purchase-svc gRPC). payment 50051·queue 50052와 겹치지 않게 50053
+    - { name: purchase-grpc, port: 50053 }
+  # purchase-svc-outbox-relay: 합본 안 purchase-relay가 회차 취소 환불 반복을 돌릴 때 잡는 Lease
+  leaderLease: [admission-ctrl, payment-entry-pause, purchase-svc-outbox-relay]
   volumes:
     - { name: bundle-env, secret: { secretName: demo-bundle-env } }
     - { name: seatmaps, emptyDir: {} }

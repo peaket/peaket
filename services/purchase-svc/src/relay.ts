@@ -82,6 +82,8 @@ const relay = await startPurchaseRelay({
   tradePublisher: new KafkaTradeEventPublisher(producer),
   leaseApi: inClusterLeaseApi(config.leaseName),
   holder: config.pod,
+  // 회차 취소 환불 반복이 읽는 환경 값(결제 HTTP·티켓 gRPC·정비 URL 등). 빠지면 relay-app이 시작하지 않는다
+  env: process.env,
 });
 
 // 종료: 반복을 멈추고 Lease를 놓은 뒤 연결을 닫는다(종료 대기 30초 안, docs/devops.md §6.4).

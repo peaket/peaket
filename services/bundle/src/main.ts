@@ -17,6 +17,8 @@ import { childStopWaitMs, stopChildProcess } from './stop-child.js';
 /** 홀드 전용 purchase-svc의 앱 포트(차트 Service가 연다)와 관리 포트(합본이 /ready·/metrics로 모은다) */
 const HOLD_PORT = 8083;
 const HOLD_MANAGEMENT_PORT = 9465;
+/** purchase-relay(회차 취소 환불 반복) 자식의 관리 포트. split 합본의 purchase-svc(9473)와 겹치지 않는다 */
+const RELAY_MANAGEMENT_PORT = 9475;
 
 const config = loadBundleConfig(process.env);
 const platform = loadPlatformConfig(process.env);
@@ -138,6 +140,10 @@ try {
     process.exit();
   }
   throw err;
+}
+// 데모·로컬 합본은 회차 취소 환불 반복을 같은 파드의 자식 프로세스로 함께 띄운다(운영은 별도 outbox-relay Deployment)
+if (process.env.PEAKET_BUNDLE_PURCHASE_RELAY === '1') {
+  spawnChild('purchase-relay', ['purchase-relay'], RELAY_MANAGEMENT_PORT, { PEAKET_RELAY_MANAGEMENT_PORT: String(RELAY_MANAGEMENT_PORT) });
 }
 if (stop.signal.aborted) void shutdown();
 else logger.info({ mode: split ? 'split' : 'single', services: running.services }, '합본의 서비스를 모두 켰다');

@@ -16,6 +16,9 @@ env:
   PEAKET_IDENTITY_JWKS_URL: http://identity-svc.core.svc.cluster.local:8080/internal/jwks/admin.json
   PEAKET_IDENTITY_ISSUER: https://identity.peaket.example
   PEAKET_KAFKA_BROKERS: peaket-kafka-bootstrap.kafka.svc.cluster.local:9092
+  # 회차 취소 판정 미리보기·확정 환불(ops-svc → purchase-svc gRPC). bundle의 purchase-svc gRPC 포트다.
+  # 없으면 판정·확정이 503 event-refund-unavailable이라 BAT-086의 S9가 끝나지 않는다
+  PEAKET_PURCHASE_GRPC_ADDR: bundle.purchase.svc.cluster.local:50053
 
 service:
   replicas: 1

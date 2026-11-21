@@ -1341,7 +1341,9 @@ async function demoGateways() {
   step('게이트웨이 다섯(실제 백엔드, deploy/gateways의 정의)');
   await preloadLocalImages([GATEWAY_CONTROLLER_IMAGE, GATEWAY_PROXY_IMAGE, PINNED.envoyGatewayRatelimitImage, RATELIMIT_REDIS_IMAGE]);
   // gw-ops 허용 IP(로컬 시험 값 127.0.0.0/8, ADR-0321 결정 3). 프록시가 뜨기 전에 두어야 환경 값으로 읽는다.
-  // 없으면 공통 Lua가 관제 요청을 모두 거절한다(닫힌 쪽): demo-seed의 관리자 로그인·승인이 403이 된다
+  // 없으면 공통 Lua가 관제 요청을 모두 거절한다(닫힌 쪽): demo-seed의 관리자 로그인·승인이 403이 된다.
+  // 빈 클러스터에서는 Envoy Gateway 설치 전이라 네임스페이스가 없다. 먼저 만들고 적용한다
+  await kubectl(['create', 'namespace', GATEWAY_NAMESPACE]).catch(() => undefined);
   await kubectl(['apply', '-f', join(REPO, 'deploy', 'envs', 'local', 'gateways', 'peaket-ops-allow.yaml')]);
   const controller = readFileSync(join(REPO, 'deploy', 'gateways', 'controller', 'envoy-gateway.yaml'), 'utf8');
   assertRatelimitBackend(controller);
@@ -1357,8 +1359,10 @@ async function demoGateways() {
   const defs = remoteDemoGatewayObjects();
   const certs = listenerCertificates(defs);
   const tls = gatewayTls([...new Set(certs.map((c) => c.host))]);
-  const keys = Object.fromEntries(['fan', 'admin', 'staff', 'admission'].map((k) => [k, generateV0TokenKey()]));
-  const admission = admissionKeySet({ current: keys.admission.privateJwk, next: generateV0TokenKey().privateJwk, previous: generateV0TokenKey().privateJwk, expired: generateV0TokenKey().privateJwk }, Math.floor(Date.now() / 1000));
+  // 지금 입장 토큰 키는 이 무대의 queue-svc·purchase-svc가 쓰는 키(demo Secrets)와 같아야 한다.
+  // 게이트웨이만 새 임의 키를 쓰면 gw-fan-buy Lua가 모든 입장 토큰을 401 admission-token-invalid로 막는다
+  const { secrets: demoSecretsForGateway } = prepareDemoSecrets();
+  const admission = admissionKeySet({ current: demoSecretsForGateway.admission.privateJwk, next: generateV0TokenKey().privateJwk, previous: generateV0TokenKey().privateJwk, expired: generateV0TokenKey().privateJwk }, Math.floor(Date.now() / 1000));
   const originVerify = randomBytes(32).toString('base64url');
   for (const o of gatewaySecrets(certs, tls, originVerify)) await createSecret(o);
   await kubectl(['apply', '-f', '-'], { input: JSON.stringify(admissionJwksConfigMap(admissionJwks(admission))) });

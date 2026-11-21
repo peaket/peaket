@@ -12,7 +12,7 @@ type StartFn = (o: { env: Record<string, string | undefined>; onFatal?: (err: un
 
 const name = process.argv[2];
 const hold = process.argv.includes('--hold');
-const SERVICES: readonly string[] = ['payment-svc', 'purchase-svc', 'admission-ctrl', 'queue-svc'];
+const SERVICES: readonly string[] = ['payment-svc', 'purchase-svc', 'admission-ctrl', 'queue-svc', 'purchase-relay'];
 if (!name || !SERVICES.includes(name)) throw new Error(`service-worker는 서비스 이름을 받아야 한다: ${SERVICES.join('·')}`);
 if (hold && name !== 'purchase-svc') throw new Error('--hold는 purchase-svc에만 쓴다');
 
@@ -20,7 +20,9 @@ const envDir = process.env.PEAKET_BUNDLE_ENV_DIR;
 if (!envDir) throw new Error('service-worker는 PEAKET_BUNDLE_ENV_DIR가 필요하다');
 
 const common: Record<string, string | undefined> = { ...process.env };
-const file = parseEnvFile(await readFile(join(envDir, `${name}.env`), 'utf8'), `${name}.env`);
+// purchase-relay는 purchase-svc와 같은 환경 파일을 쓴다(같은 DB·Redis·Kafka·gRPC 주소)
+const envName = name === 'purchase-relay' ? 'purchase-svc' : name;
+const file = parseEnvFile(await readFile(join(envDir, `${envName}.env`), 'utf8'), `${envName}.env`);
 
 if (hold) {
   // 홀드·세션 확인은 Redis와 좌석맵 판만 쓴다. DB·Kafka를 빼면 purchase-svc start()가
@@ -29,11 +31,15 @@ if (hold) {
   delete common.PEAKET_KAFKA_BROKERS;
   delete file.PEAKET_DATABASE_URL;
   delete file.PEAKET_KAFKA_BROKERS;
+  // 홀드 전용 프로세스는 회차 취소 환불 gRPC를 열지 않는다. 열면 본 purchase-svc와 같은 포트(PEAKET_GRPC_PORT)를
+  // 두 번 잡아 EADDRINUSE로 합본이 죽는다(데모 무대에서 PEAKET_GRPC_PORT를 켤 때 드러났다)
+  delete common.PEAKET_GRPC_PORT;
+  delete file.PEAKET_GRPC_PORT;
   file.PORT = process.env.PEAKET_HOLD_PORT ?? '8083';
   file.PEAKET_MANAGEMENT_PORT = process.env.PEAKET_HOLD_MANAGEMENT_PORT ?? '9465';
 }
 
-const env = serviceEnv(name as BundleService, common, file);
+const env = serviceEnv(envName as BundleService, common, file);
 const STARTERS: Record<string, () => Promise<StartFn>> = {
   'payment-svc': async () => (await import('@peaket/payment-svc/start')).start,
   'purchase-svc': async () => (await import('@peaket/purchase-svc/start')).start,
@@ -41,16 +47,25 @@ const STARTERS: Record<string, () => Promise<StartFn>> = {
   'queue-svc': async () => (await import('@peaket/queue-svc/start')).start,
 };
 
-const start = await STARTERS[name]!();
-let running: { close(): Promise<void> } | undefined;
-running = await start({
-  env,
-  onFatal: (err) => {
-    console.error(JSON.stringify({ level: 'error', service: hold ? 'hold-worker' : name, msg: '치명적 실패', err: err instanceof Error ? err.message : String(err) }));
-    process.exitCode = 1;
-    void running?.close();
-  },
-});
-process.once('SIGTERM', () => void running?.close());
-process.once('SIGINT', () => void running?.close());
-console.log(JSON.stringify({ level: 'info', service: hold ? 'hold-worker' : name, port: Number(env.PORT), managementPort: Number(env.PEAKET_MANAGEMENT_PORT), msg: '서비스 프로세스를 켰다' }));
+if (name === 'purchase-relay') {
+  // relay.ts는 import 시점에 시작한다(별도 start 함수가 없다). 환경 파일 값을 프로세스 환경에 합친 뒤 띄운다.
+  // 관리 포트는 purchase-svc 본체와 겹치지 않게 합본이 넘긴 값을 쓴다
+  Object.assign(process.env, env);
+  process.env.PEAKET_MANAGEMENT_PORT = process.env.PEAKET_RELAY_MANAGEMENT_PORT ?? process.env.PEAKET_MANAGEMENT_PORT;
+  await import('@peaket/purchase-svc/relay');
+  console.log(JSON.stringify({ level: 'info', service: 'purchase-relay', msg: '아웃박스·회차 취소 환불 릴레이를 켰다' }));
+} else {
+  const start = await STARTERS[name]!();
+  let running: { close(): Promise<void> } | undefined;
+  running = await start({
+    env,
+    onFatal: (err) => {
+      console.error(JSON.stringify({ level: 'error', service: hold ? 'hold-worker' : name, msg: '치명적 실패', err: err instanceof Error ? err.message : String(err) }));
+      process.exitCode = 1;
+      void running?.close();
+    },
+  });
+  process.once('SIGTERM', () => void running?.close());
+  process.once('SIGINT', () => void running?.close());
+  console.log(JSON.stringify({ level: 'info', service: hold ? 'hold-worker' : name, port: Number(env.PORT), managementPort: Number(env.PEAKET_MANAGEMENT_PORT), msg: '서비스 프로세스를 켰다' }));
+}

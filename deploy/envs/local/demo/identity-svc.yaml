@@ -21,7 +21,7 @@ env:
   # 다른 서비스 gRPC(로컬 데모는 실제 백엔드)
   PEAKET_TICKET_GRPC_URL: ticket-svc.ticket.svc.cluster.local:50051
   PEAKET_TRUST_GRPC_URL: trust-svc.trust.svc.cluster.local:50051
-  PEAKET_PURCHASE_GRPC_URL: bundle.purchase.svc.cluster.local:50051
+  PEAKET_PURCHASE_GRPC_URL: bundle.purchase.svc.cluster.local:50053
   # 본인확인 시험 어댑터와 모의 기관(파드 18920)
   PEAKET_VERIFICATION_PROVIDER: test
   PEAKET_TEST_VERIFICATION_URL: http://mock-idv.core.svc.cluster.local:18920
