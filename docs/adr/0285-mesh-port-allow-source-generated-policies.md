@@ -37,7 +37,7 @@
    | --- | --- | --- |
    | core-svc | identity-svc | 관리 공개키 묶음 `/internal/jwks/admin.json`(`PEAKET_IDENTITY_JWKS_URL`, 예매자 내보내기 재인증) |
    | core-svc | purchase-svc | 예매자 명단 `/internal/v1/events/{eventId}/attendees`(`PEAKET_PURCHASE_HTTP_URL`) |
-   | ops-svc | core-svc | 판매 설정 사본 `/internal/v1/events/{eventId}/sale-config`, 회차 규모 변경 `/v1/ops/events/{eventId}/scale-changes`, 회차 취소·연기의 core 회차 상태 반영 `/internal/v1/events/{eventId}/cancellation-status`(2026-11-19 더함, BUILD_ORDER GAT-110, docs/features/transfer-refund.md §5 'core 회차 상태 반영')(`PEAKET_CORE_HTTP_URL`) |
+   | ops-svc | core-svc | 판매 설정 사본 `/internal/v1/events/{eventId}/sale-config`, 회차 규모 변경 `/v1/ops/events/{eventId}/scale-changes`, 회차 취소·연기의 core 회차 상태 반영 `/internal/v1/events/{eventId}/cancellation-status`(2026-11-19 더함, BUILD_ORDER GAT-110, docs/features/transfer-refund.md §5 'core 회차 상태 반영'), 온세일 윈도우가 끝난 회차 목록 `/internal/v1/events/onsale-closed`(감사 회차 마감 체크포인트, 보충(2026-11-22, BAT-360): 같은 쌍이라 원천 규칙은 그대로이고 구현 커밋이 원천 주석에 경로를 더한다, ADR-0348 결정 9)(`PEAKET_CORE_HTTP_URL`) |
    | ops-svc | identity-svc | 관리 공개키 묶음(`PEAKET_IDENTITY_JWKS_URL`) |
    | ops-svc | payment-svc | 정산·지급 `/internal/v1/settlements/*`, 결제사 차단기 상태 `/internal/v1/circuits`(`PEAKET_PAYMENT_HTTP_URL`) |
    | ops-svc | purchase-svc | 일괄 환불 `/internal/v1/event-refunds`, 판매 중지 `/internal/v1/event-sales/*`, 우선 구매 `/internal/v1/priority-grants`(`PEAKET_PURCHASE_HTTP_URL`) |

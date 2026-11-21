@@ -148,7 +148,7 @@
 | BAT-360 | 4 | 3 | B | OPS-280·OPS-290 | 3.25 | C-T10 ②, C-T38, C-T39, C-T40, C-T41, C-T42, C-T45 ①, C-T46 ②, C-T47 ①, C-T61, control-tower:v5.0.0-1.1.1, control-tower:v5.0.0-1.3.3, control-tower:v5.0.0-2.1.2, control-tower:v5.0.0-2.2.3, control-tower:v5.0.0-8.2.2, control-tower:v5.0.0-11.2.1, control-tower:v5.0.0-11.2.3, control-tower:v5.0.0-11.4.3, control-tower:v5.0.0-11.6.1, control-tower:v5.0.0-16.2.4, control-tower:v5.0.0-16.2.5 | 2026-11-22 계획 때 장부 범위를 OPS-280·290 몫으로 좁혔다(갈래 4). 뺀 항목의 정할 곳 후보는 docs/review/plans/BAT-360.md |
 | BAT-365 | 4 | 3 | B | OPS-300·OPS-310 | 5 | docs/features/control-tower.md, C-T6 ①, C-T50, C-T51, C-T53, C-T54, Q-T12, Q-T30, docs/security/asvs/control-tower.md |  |
 | BAT-370 | 2 | 3 | B | OPS-340·OPS-380 | 5 | docs/features/control-tower.md, FE-T41, docs/security/asvs/frontend.md |  |
-| BAT-375 | 2 | 3 | B | OPS-390·OPS-400 | 4.5 | docs/features/control-tower.md, docs/security/asvs/control-tower.md, docs/security/asvs/auth.md |  |
+| BAT-375 | 2 | 3 | B | OPS-390·OPS-400 | 4.5 | docs/features/control-tower.md, docs/security/asvs/control-tower.md, docs/security/asvs/auth.md | 2026-11-22 감독 승인: C-T47 ②(데모 막대 두 버튼과 데모 도우미, 도우미의 데모 승인자 재인증은 소프트웨어 패스키)를 BAT-360에서 넘겨받는다(docs/review/plans/BAT-360.md '감독에게' 1, ADR-0349 결정 11) |
 | BAT-380 | 2 | 3 | B | OPS-410·OPS-420 | 4 | docs/features/control-tower.md, docs/security/asvs/catalog-review.md |  |
 | BAT-382 | 2 | 1 | B | HOT-305 | 1 | docs/security/asvs/catalog-review.md | 혼자: BAT-040에서 옮김(2026-11-16, BAT-040 웨이브 7 계획). 구간 1 단계지만 선행 OPS-410(홈 구성 표, BAT-380)이 구간 3이라 그 뒤에 둔다. 선행 HOT-270(검색 읽기 모델, BAT-165 웨이브 7). 장부 범위는 묶음을 시작할 때 계획이 좁힌다 |
 | BAT-385 | 2 | 3 | B | OPS-350·OPS-360 | 3.5 | FE-T25, FE-T26, docs/frontend.md, docs/security/asvs/frontend.md |  |
