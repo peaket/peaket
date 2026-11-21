@@ -16,13 +16,15 @@ let fx: Fixture;
 let platform: Platform;
 let s: Awaited<ReturnType<Fixture['start']>>;
 let base: string;
+/** 배포한 판(PEAKET_VERSION, 로그 줄의 version). 두 자리 판 번호가 든 값 */
+const DEPLOYED_VERSION = '2.10.3';
 
 // 준비는 서비스 전체(src/index.js)를 불러와 띄운다. CI의 node 잡은 모든 패키지를 한꺼번에 돌려, 붐빌 때 불러오기만으로
 // 기본 제한 10초를 넘었다(2026-11-03 원격 CI, 그 실행의 시간 69%가 불러오기). 준비 단계만 60초로 둔다
 beforeAll(async () => {
   fx = await import('./fixture.js');
   platform = await import('../src/index.js');
-  s = await fx.start({ PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '10', PORT: '0', PEAKET_MANAGEMENT_PORT: '0' });
+  s = await fx.start({ PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '10', PEAKET_VERSION: DEPLOYED_VERSION, PORT: '0', PEAKET_MANAGEMENT_PORT: '0' });
   const { port } = await s.svc.listen('127.0.0.1');
   base = `http://127.0.0.1:${port}`;
 }, 60_000);
@@ -78,6 +80,30 @@ describe('서버 span(SDK)', () => {
     expect(span.parentSpanContext?.spanId).toBe('b7ad6b7169203331');
     const [line] = requests();
     expect(line).toMatchObject({ traceId: id, spanId: span.spanContext().spanId });
+  });
+});
+
+describe('로그 연관(docs/security/asvs/delivery.md 16.2.4)', () => {
+  test('[ASVS v5.0.0-16.2.4] 정규 로그 줄과 요청 안의 서비스 로거 줄은 각각 JSON 한 줄이고 W3C traceId(32자리)·spanId(16자리, 서버 span)와 배포 판 version을 싣는다', async () => {
+    const id = traceWithR(TWO56 - 1n, 'a1b2c3d4e5f60718a9');
+    s.raw.length = 0;
+    await call('/v1/demo/log-inside', { traceparent: tp(id) });
+    const [span] = serverSpans();
+    const spanId = span!.spanContext().spanId;
+    expect(spanId).toMatch(/^[0-9a-f]{16}$/);
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+    const request = requests();
+    const inside = s.lines.filter((l) => l.msg === 'inside');
+    expect(request).toHaveLength(1);
+    expect(inside).toHaveLength(1);
+    for (const line of [request[0]!, inside[0]!]) expect(line).toMatchObject({ traceId: id, spanId, version: DEPLOYED_VERSION, service: 'demo-svc' });
+    // 쓴 글 조각마다 줄 하나: 끝의 줄바꿈 하나뿐이고 그 앞은 JSON으로 읽힌다
+    expect(s.raw.length).toBeGreaterThanOrEqual(2);
+    for (const chunk of s.raw) {
+      expect(chunk.endsWith('\n'), chunk).toBe(true);
+      expect(chunk.slice(0, -1), chunk).not.toContain('\n');
+      expect(() => JSON.parse(chunk), chunk).not.toThrow();
+    }
   });
 });
 

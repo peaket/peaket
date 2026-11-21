@@ -101,6 +101,37 @@ test('V-T31 ③ [ASVS v5.0.0-15.3.2] 외부 호출 예외는 적은 파일의 �
   assert.equal(await at('apps/web/src/x.ts'), 0);
 });
 
+// 바깥 호출 점검(BUILD_ORDER OPS-020, ADR-0334 결정 5 '전역 fetch의 값 쓰임(부르기·?? fetch 기본값·값으로 넘기기)', BAT-215).
+// 서비스 어댑터는 시험용으로 fetch를 주입받는다(fetch?: typeof fetch). 주입이 없을 때 전역 fetch로 떨어지면 추적 머리가 바깥 제공자에 실리고 리디렉트를 따른다
+test('V-T31 ③ [ASVS v5.0.0-15.3.2] [ASVS v5.0.0-14.2.3] 주입받은 fetch가 없을 때 전역 fetch로 떨어지는 꼴(??·||·삼항·??=·구조 분해와 매개변수 기본값)과 전역 fetch를 값으로 넘기는 꼴을 막고, 주입받은 fetch를 공용 외부 호출 클라이언트에 넘기는 꼴만 통과시킨다', () => {
+  const O = 'o: { fetch?: typeof fetch; fetchImpl?: typeof fetch }';
+  const CLIENT = "import { createExternalHttpClient } from '@peaket/platform';\n";
+  const OPTS = "provider: 'turnstile', baseUrl: 'https://x.test', timeoutCapMs: 500";
+  const blocked = [
+    `export const f = (${O}, u: string) => (o.fetch ?? fetch)(u);`,
+    `export function m(${O}) { const f = o.fetch ?? fetch; return f; }`,
+    `export function m(${O}) { const f = o.fetch || fetch; return f; }`,
+    `export function m(${O}) { return o.fetch ? o.fetch : fetch; }`,
+    `export function m(${O}) { let f = o.fetch; f ??= fetch; return f; }`,
+    `export function m(${O}) { const { fetch: f = fetch } = o; return f; }`,
+    'export function m(f: typeof fetch = fetch) { return f; }',
+    'export const m = (f: typeof fetch = fetch) => f;',
+    'export class A { constructor(private readonly f: typeof fetch = fetch) {} }',
+    'export const list = [fetch];',
+    'export const bag = { f: fetch };',
+    `${CLIENT}export const c = createExternalHttpClient({ ${OPTS}, fetch });`,
+    `${CLIENT}export const c = (${O}) => createExternalHttpClient({ ${OPTS}, fetch: o.fetch ?? fetch });`,
+    `${CLIENT}export const c = (${O}) => createExternalHttpClient({ ${OPTS}, ...(o.fetch ? { fetch: o.fetch } : { fetch }) });`,
+  ];
+  for (const code of blocked) assert.ok(ids(code).includes(OUTBOUND), `막아야 한다: ${code.split('\n').at(-1)}`);
+  const allowed = [
+    `${CLIENT}export const c = (${O}) => createExternalHttpClient({ ${OPTS}, fetch: o.fetch });`,
+    `${CLIENT}export const c = (${O}) => createExternalHttpClient({ ${OPTS}, ...(o.fetch ? { fetch: o.fetch } : {}) });`,
+    `${CLIENT}export const c = (${O}) => createExternalHttpClient({ ${OPTS}, ...(o.fetchImpl ? { fetch: o.fetchImpl } : {}) });`,
+  ];
+  for (const code of allowed) assert.deepEqual(ids(code), [], `막지 않아야 한다: ${code.split('\n').at(-1)}`);
+});
+
 const NEST = "import { Controller, Get, Post } from '@nestjs/common';\nimport { ContractRouteSchema } from '@peaket/platform';\nimport { z } from 'zod';\nconst Body = z.object({ a: z.string() });\n";
 const CONTROLLER = 'services/demo-svc/src/modules/note/inbound/note.controller.ts';
 const schemaErrors = (code, baseline = []) =>
