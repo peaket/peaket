@@ -1,6 +1,6 @@
 # ADR-0329: 화면 앱 구조를 공용 ESLint 규칙으로 막는다(층 방향·조각 공개 파일·이름·경로 파일) (2026-11-21)
 
-- **상태**: 제안(2026-11-21, 소유자 인터뷰로 정함). 규칙·기준선·시험은 작업 트리에 있고 아직 커밋하지 않았다.
+- **상태**: 채택(2026-11-21, 소유자 인터뷰로 정하고 같은 날 소유자가 "채택으로" 확인). 규칙·기준선·시험은 a79a82834로 커밋했다.
 - **관련**: [docs/frontend.md](../frontend.md) §2.2 '층 의존'·'조각 공개 파일'·'이름'·'Next.js 경로 폴더', [docs/architecture.md](../architecture.md) §6.5 '아키텍처 구조', [docs/quality/quality-requirements.md](../quality/quality-requirements.md) QR-MA-2, `packages/config/eslint/web-boundaries.mjs`·`web-boundaries-baseline.json`·`web-boundaries.test.mjs`
 - **관련 ID**: QR-MA-2, 기술 검토 낮음-098
 
