@@ -41,6 +41,8 @@ export interface MacAnchorStore {
   put(anchor: MacAnchor, nowMs: number): Promise<string>;
   /** seq가 from 이상 to 이하인 앵커(seq 차례). 읽지 못한 객체는 빼지 않고 던진다 */
   list(fromSeq: number, toSeq: number): Promise<readonly MacAnchor[]>;
+  /** 그 seq의 앵커 하나(없으면 undefined). 검증 창의 시작점을 불변 객체의 시각으로 확인한다 */
+  get(seq: number): Promise<MacAnchor | undefined>;
 }
 
 /** S3 Object Lock 앵커(운영). 흉내 서버 주소는 local·ci만(moto) */
@@ -77,6 +79,18 @@ export class S3MacAnchorStore implements MacAnchorStore {
     return key;
   }
 
+  async get(seq: number): Promise<MacAnchor | undefined> {
+    try {
+      const body = await this.#client.send(new GetObjectCommand({ Bucket: this.o.bucket, Key: macAnchorObjectKey(seq) }));
+      const anchor = parseAnchor((await body.Body?.transformToString('utf8')) ?? '');
+      return anchor && anchor.seq === seq ? anchor : undefined;
+    } catch (e) {
+      const name = (e as { name?: unknown } | null)?.name;
+      if (name === 'NoSuchKey' || name === 'NotFound') return undefined;
+      throw e;
+    }
+  }
+
   async list(fromSeq: number, toSeq: number): Promise<readonly MacAnchor[]> {
     const out: MacAnchor[] = [];
     let token: string | undefined;
@@ -111,6 +125,17 @@ export class DirMacAnchorStore implements MacAnchorStore {
     await mkdir(join(this.dir, MAC_ANCHOR_PREFIX), { recursive: true });
     await writeFile(path, JSON.stringify(anchor), 'utf8');
     return key;
+  }
+
+  async get(seq: number): Promise<MacAnchor | undefined> {
+    let text: string;
+    try {
+      text = await readFile(join(this.dir, macAnchorObjectKey(seq)), 'utf8');
+    } catch {
+      return undefined;
+    }
+    const anchor = parseAnchor(text);
+    return anchor && anchor.seq === seq ? anchor : undefined;
   }
 
   async list(fromSeq: number, toSeq: number): Promise<readonly MacAnchor[]> {
@@ -153,6 +178,10 @@ export class MemoryMacAnchorStore implements MacAnchorStore {
   async list(fromSeq: number, toSeq: number): Promise<readonly MacAnchor[]> {
     return [...this.objects.values()].filter((a) => a.seq >= fromSeq && a.seq <= toSeq).sort((a, b) => a.seq - b.seq);
   }
+
+  async get(seq: number): Promise<MacAnchor | undefined> {
+    return this.objects.get(macAnchorObjectKey(seq));
+  }
 }
 
 /** 앵커가 기대는 mac 머리와 앵커 행(audit_mac_anchor) */
@@ -165,6 +194,8 @@ export interface MacAnchorLedger {
   recordAnchor(a: { readonly seq: number; readonly mac: Buffer; readonly objectKey: string; readonly keyId: string; readonly nowMs: number }): Promise<void>;
   /** seq가 from 이상 to 이하인 앵커 행(seq 차례) */
   anchorsBetween(fromSeq: number, toSeq: number): Promise<readonly MacAnchor[]>;
+  /** 쓴 시각이 before보다 이른 앵커 행 가운데 seq가 가장 큰 것(없으면 undefined). DB 값이라 검증 잡은 불변 객체로 다시 확인한다 */
+  lastAnchorBefore(beforeMs: number): Promise<MacAnchor | undefined>;
 }
 
 /** 5분 앵커 한 바퀴. mac_seq가 늘었을 때만 객체 하나를 쓰고, 쓰기에 실패하면 행을 남기지 않는다(다음 바퀴에 다시) */

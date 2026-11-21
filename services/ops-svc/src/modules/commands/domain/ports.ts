@@ -83,10 +83,10 @@ export interface CommandWriter {
   /** 지금까지 쓴 것을 반영한 명령 */
   readonly current: Command;
   /**
-   * 대응 행을 넣고 새 가명 참조(UUIDv4)를 준다.
+   * 대응 행을 넣고 새 가명 참조(UUIDv4)를 준다. ref를 주면 그 값을 가명 참조로 쓴다(부르는 쪽이 미리 만든 참조, 실행 체크포인트와 같은 값).
    * @throws DuplicateCommandActor 같은 회차의 REQUESTER·APPROVER에 같은 관리 계정이 이미 있음
    */
-  actor(side: ActorSide, round: number, accountId: string, nowMs: number): Promise<string>;
+  actor(side: ActorSide, round: number, accountId: string, nowMs: number, ref?: string): Promise<string>;
   /** 그 회차의 요청자(가명 참조와, 대응이 남아 있으면 관리 계정 ID) */
   requesterOf(round: number): Promise<{ readonly ref: string; readonly accountId?: string } | undefined>;
   /** 그 회차에 이미 승인·거부가 있는가 */
@@ -126,7 +126,7 @@ export interface CommandStore {
   /** PENDING_APPROVAL·REVERT_PENDING을 거부한다 */
   reject(commandId: string, approverRef: string, approverRole: string, reason: string, nowMs: number): Promise<CommandDecision>;
   /** 실행을 시작한 명령을 DISPATCHED로 바꾸고 시도 횟수를 올리며 사건·감사를 남긴다. actor는 재시도한 사람(없으면 SYSTEM) */
-  markDispatched(commandId: string, nowMs: number, actor?: { readonly accountId: string; readonly role: string }): Promise<Command>;
+  markDispatched(commandId: string, nowMs: number, actor?: { readonly accountId: string; readonly role: string; readonly ref?: string }): Promise<Command>;
   /** 대상 실행이 성공한 명령을 유형의 성공 상태(ACKED·SUCCEEDED)로 바꾸고 결과·사건·감사를 남긴다 */
   markSucceeded(commandId: string, result: Record<string, unknown> | undefined, nowMs: number, ackedAtMs?: number): Promise<Command>;
   /** 대상 실행이 실패한 명령을 FAILED로 바꾸고 사유·사건·감사를 남긴다 */

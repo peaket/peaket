@@ -2083,6 +2083,7 @@ erDiagram
         bytea access_log_day_anchor "일 체크포인트에만"
         jsonb closed_events "회차 마감 체크포인트에만"
         bytea checkpoint_hash "RFC 8785 정규화 JSON의 SHA-256"
+        text actor_ref "구현 칸: 만든 쪽. 관리 계정 ID를 적지 않는다(실행 전후 체크포인트는 그 DISPATCHED 사건의 가명 참조, 처음 실행은 시스템 빈 UUID, 손으로 만든 것은 역할 이름, 추천 적용 2026-11-22, BAT-355 리뷰 RV-02)"
         bytea signature "체크포인트 서명 키(KMS ECDSA P-256)"
         text ots_state "PENDING|COMPLETE"
         bytea ots_proof

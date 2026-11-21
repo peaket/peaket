@@ -1182,15 +1182,14 @@ export const CreateOpsCommandReversionParams = zod.object({
 })
 
 export const CreateOpsCommandReversionHeader = zod.object({
-  "X-Reauth-Token": zod.string().optional().describe('명령 3·11의 되돌리기 요청일 때 필수(guidelines §7)')
+  "X-Reauth-Token": zod.string().optional().describe('명령 3·11의 되돌리기 요청과 명령 6(Degraded Mode) 해제일 때 필수(guidelines §7, control-tower §3 명령 6·ADR-0105, 추천 적용 2026-11-22, BAT-355 리뷰 RV-03)')
 })
 
-export const createOpsCommandReversionBodyReasonMax = 2000;
 
 
 
 export const CreateOpsCommandReversionBody = zod.object({
-  "reason": zod.string().min(1).max(createOpsCommandReversionBodyReasonMax).describe('되돌리는 사유(감사 로그)')
+  "reason": zod.string().min(1).describe('되돌리는 사유(감사 로그). 서버가 2,000자를 넘으면 400으로 거르고, 앞뒤 공백을 지우고 NFC로 정규화한 뒤 비었거나 제어 문자·양방향 제어 문자가 있으면 422다(ADR-0340 결정 10)')
 }).strict()
 
 export const CreateOpsCommandReversionResponse = zod.object({
@@ -1268,12 +1267,11 @@ export const CreateOpsCommandExtensionParams = zod.object({
   "commandId": zod.string()
 })
 
-export const createOpsCommandExtensionBodyReasonMax = 2000;
 
 
 
 export const CreateOpsCommandExtensionBody = zod.object({
-  "reason": zod.string().min(1).max(createOpsCommandExtensionBodyReasonMax)
+  "reason": zod.string().min(1).describe('연장 사유. 서버가 2,000자를 넘으면 400으로 거르고, 앞뒤 공백을 지우고 NFC로 정규화한 뒤 비었거나 제어 문자·양방향 제어 문자가 있으면 422다(ADR-0340 결정 10)')
 }).strict()
 
 export const CreateOpsCommandExtensionResponse = zod.object({

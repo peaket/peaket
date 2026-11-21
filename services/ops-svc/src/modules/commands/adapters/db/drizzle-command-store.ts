@@ -139,8 +139,8 @@ class DbCommandWriter implements CommandWriter {
     return this.#current;
   }
 
-  async actor(side: ActorSide, round: number, accountId: string, nowMs: number): Promise<string> {
-    const ref = randomUUID();
+  async actor(side: ActorSide, round: number, accountId: string, nowMs: number, given?: string): Promise<string> {
+    const ref = given ?? randomUUID();
     try {
       await this.tx.execute(sql`
         insert into command_actor (actor_ref, command_id, round, side, admin_account_id, recorded_at)

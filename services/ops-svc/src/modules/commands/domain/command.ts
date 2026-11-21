@@ -48,6 +48,11 @@ export const isCatalogCommand = (type: CommandType): boolean => CATALOG_COMMAND_
 export const successStateOf = (type: CommandType): 'ACKED' | 'SUCCEEDED' => (isCatalogCommand(type) ? 'ACKED' : 'SUCCEEDED');
 /** 되돌리기에 두 번째 승인이 드는 명령 3·11(T14·T15, ADR-0073) */
 export const REVERT_NEEDS_APPROVAL: readonly CommandType[] = ['KILL_SWITCH', 'AUTOMATION_STOP'];
+/**
+ * 되돌리기 요청에 재인증(X-Reauth-Token)이 드는 명령: 명령 3·11의 되돌리기 요청(T14)과 명령 6 Degraded Mode 모두 해제
+ * (commander 1인이 사유를 적고 재인증해 실행, control-tower §3 명령 6·ADR-0105, BAT-355 리뷰 RV-03)
+ */
+export const REVERT_NEEDS_REAUTH: readonly CommandType[] = ['KILL_SWITCH', 'DEGRADED_MODE', 'AUTOMATION_STOP'];
 
 export const COMMAND_STATES = [
   'DRAFTED',

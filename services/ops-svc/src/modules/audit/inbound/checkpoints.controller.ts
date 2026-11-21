@@ -77,7 +77,8 @@ export class AuditCheckpointsController {
   @Roles(['commander'])
   @ContractRouteSchema({ body: CreateBody, responses: { 201: CheckpointView } })
   async create(@ContractBody(CreateBody) body: z.output<typeof CreateBody>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof CheckpointView>> {
-    return checkpointViewOf(await this.checkpoints.create({ reason: body.reason, actorRef: me.accountId }));
+    // 체크포인트는 7년 보존이고 누구나(viewer도) 목록에서 본다: 관리 계정 ID 대신 그때의 역할 이름만 남긴다(ADR-0149 결정 4, BAT-355 리뷰 RV-02)
+    return checkpointViewOf(await this.checkpoints.create({ reason: body.reason, actorRef: me.role ?? 'commander' }));
   }
 
   @Get()

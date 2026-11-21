@@ -59,8 +59,8 @@ export interface AuditVerifyStore {
 export interface AuditChainVerifierDeps {
   readonly store: AuditVerifyStore;
   readonly key: AuditMacKey;
-  /** 앵커 행(audit_mac_anchor). 저장소가 durable이 아니면 이것을 앵커로 본다 */
-  readonly ledger: Pick<MacAnchorLedger, 'anchorsBetween'>;
+  /** 앵커 행(audit_mac_anchor). 저장소가 durable이 아니면 이것을 앵커로 본다. 검증 창 시작점의 후보도 여기서 찾는다 */
+  readonly ledger: Pick<MacAnchorLedger, 'anchorsBetween' | 'lastAnchorBefore'>;
   readonly anchors?: MacAnchorStore;
   /** 원본 행 대조(DrizzleAuditChain.sourceMatches). 없으면 해당 없음 */
   readonly sourceMatches?: (entry: AuditChainEntry) => Promise<boolean>;
@@ -139,6 +139,22 @@ export class AuditChainVerifier {
     return { lastSeq: expected - 1 };
   }
 
+  /**
+   * 25시간 창의 시작점(ADR-0341 결정 6 (가), BAT-355 리뷰 RV-01). 기록 해시에 들지 않는 DB 칸(audit_chain.created_at, audit_verification_run)은
+   * 고칠 수 있으므로 시작점을 정하지 못한다. 불변 저장소에 쓴 앵커 가운데 25시간 전보다 먼저 쓴 마지막 것의 다음 seq부터 본다.
+   * 후보는 DB 앵커 행에서 찾고 불변 객체(시각·mac)로 다시 확인한다. 확인하지 못하면(없음·시각이 창 안·mac 다름) 처음(seq 1)부터 본다.
+   * 저장소가 불변이 아니면(메모리, local·ci) DB 앵커 행을 그대로 쓴다
+   */
+  async #anchorWindowStart(sinceMs: number): Promise<number> {
+    const cand = await this.deps.ledger.lastAnchorBefore(sinceMs);
+    if (!cand) return 1;
+    if (this.deps.anchors?.durable) {
+      const obj = await this.deps.anchors.get(cand.seq);
+      if (!obj || !(Date.parse(obj.at) < sinceMs) || obj.mac !== cand.mac) return 1;
+    }
+    return cand.seq + 1;
+  }
+
   /** (다) 모든 체크포인트를 다시 검증한다. 어긋난 첫 체크포인트의 시작 seq */
   async #checkpoints(): Promise<Failure | undefined> {
     const cps = this.deps.checkpoints;
@@ -161,9 +177,12 @@ export class AuditChainVerifier {
     let failure: Failure | undefined;
     let errorReason: string | undefined;
     try {
+      // 시작점은 불변 앵커로 정하고, DB 값(마지막 검증 지점·지난 25시간에 쓴 행)은 범위를 넓히는 데만 쓴다(RV-01)
+      const sinceMs = nowMs - this.#windowMs;
+      const anchorStart = range.fromSeq === undefined ? await this.#anchorWindowStart(sinceMs) : 1;
       const lastVerified = await store.lastVerifiedSeq();
-      const since = await store.firstSeqSince(nowMs - this.#windowMs);
-      fromSeq = Math.max(1, range.fromSeq ?? Math.min(lastVerified + 1, since ?? lastVerified + 1));
+      const since = await store.firstSeqSince(sinceMs);
+      fromSeq = Math.max(1, range.fromSeq ?? Math.min(anchorStart, lastVerified + 1, since ?? lastVerified + 1));
       const r = await this.verifyRange(fromSeq, range.toSeq ?? Number.MAX_SAFE_INTEGER);
       toSeq = r.lastSeq;
       failure = r.failure;

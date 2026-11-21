@@ -12,9 +12,8 @@
 
 export type CreateOpsCommandReversionBody = {
   /**
-     * 되돌리는 사유(감사 로그)
+     * 되돌리는 사유(감사 로그). 서버가 2,000자를 넘으면 400으로 거르고, 앞뒤 공백을 지우고 NFC로 정규화한 뒤 비었거나 제어 문자·양방향 제어 문자가 있으면 422다(ADR-0340 결정 10)
      * @minLength 1
-     * @maxLength 2000
      */
   reason: string;
 };

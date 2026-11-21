@@ -245,9 +245,9 @@ export class MemoryCommandStore extends CommandStoreBase {
       get current() {
         return current();
       },
-      async actor(side, round, accountId, nowMs) {
+      async actor(side, round, accountId, nowMs, given) {
         if (isPersonSide(side) && allActors().some((a) => a.commandId === commandId && a.round === round && isPersonSide(a.side) && a.adminAccountId === accountId)) throw new DuplicateCommandActor();
-        const actorRef = randomUUID();
+        const actorRef = given ?? randomUUID();
         newActors.push({ actorRef, commandId, round, side, adminAccountId: accountId, recordedAtMs: nowMs });
         return actorRef;
       },

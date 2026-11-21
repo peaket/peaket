@@ -220,6 +220,14 @@ export class DrizzleAuditMacStore implements AuditMacStore, WorkerLease, MacAnch
       on conflict (seq) do nothing`);
   }
 
+  async lastAnchorBefore(beforeMs: number): Promise<MacAnchor | undefined> {
+    const [r] = (
+      await this.database.db.execute(sql`
+        select seq, encode(mac, 'hex') as mac, key_id, anchored_at from audit_mac_anchor where anchored_at < ${new Date(beforeMs)}::timestamptz order by seq desc limit 1`)
+    ).rows as { seq: number | string; mac: string; key_id: string; anchored_at: Date | string }[];
+    return r ? { v: 1, seq: Number(r.seq), mac: r.mac, keyId: r.key_id, at: new Date(r.anchored_at).toISOString() } : undefined;
+  }
+
   async anchorsBetween(fromSeq: number, toSeq: number): Promise<readonly MacAnchor[]> {
     const rows = (
       await this.database.db.execute(sql`
@@ -278,6 +286,11 @@ export class MemoryAuditMacStore implements AuditMacStore, WorkerLease, MacAncho
 
   async recordAnchor(a: { seq: number; mac: Buffer; objectKey: string; keyId: string; nowMs: number }): Promise<void> {
     if (!this.anchors.has(a.seq)) this.anchors.set(a.seq, { seq: a.seq, mac: a.mac, objectKey: a.objectKey, keyId: a.keyId, anchoredAtMs: a.nowMs });
+  }
+
+  async lastAnchorBefore(beforeMs: number): Promise<MacAnchor | undefined> {
+    const a = [...this.anchors.values()].filter((x) => x.anchoredAtMs < beforeMs).sort((x, y) => y.seq - x.seq)[0];
+    return a ? { v: 1, seq: a.seq, mac: a.mac.toString('hex'), keyId: a.keyId, at: new Date(a.anchoredAtMs).toISOString() } : undefined;
   }
 
   async anchorsBetween(fromSeq: number, toSeq: number): Promise<readonly MacAnchor[]> {

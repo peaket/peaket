@@ -49,7 +49,7 @@ export abstract class CommandStoreBase implements CommandStore {
     return this.#decide(commandId, approverRef, approverRole, 'REJECTED', reason, nowMs);
   }
 
-  async markDispatched(commandId: string, nowMs: number, actor?: { readonly accountId: string; readonly role: string }): Promise<Command> {
+  async markDispatched(commandId: string, nowMs: number, actor?: { readonly accountId: string; readonly role: string; readonly ref?: string }): Promise<Command> {
     return (await this.mutate(commandId, (w) => writeDispatched(w, { nowMs, ...(actor ? { actor } : {}) }))) ?? missing(commandId);
   }
 

@@ -1,7 +1,7 @@
 // 받는 층: 운영 명령 접수·목록·상세·2인 승인·거부·재시도·되돌리기·연장(openapi /v1/ops/commands, ADR-0340).
 // 접수는 Idempotency-Key가 필요하다. 차례는 멱등 다시 보내기 → 저장 전 검사(403·422) → 위험 명령 재인증 → 저장이라,
 // 막힌 요청은 명령 행·사건·감사·멱등 기록을 남기지 않고, 같은 키·같은 본문의 다시 보내기는 재인증 토큰을 다시 보지 않는다(결정 7).
-// 위험 명령(2인, 명령 3·11과 그 되돌리기 요청, 명령 4의 2인 조건)은 X-Reauth-Token(act=OPS_COMMAND, 패스키, 그 세션)을 본다(ADR-0322).
+// 위험 명령(2인, 명령 3·11과 그 되돌리기 요청, 명령 6 해제, 명령 4의 2인 조건)은 X-Reauth-Token(act=OPS_COMMAND, 패스키, 그 세션)을 본다(ADR-0322).
 // 403마다 보안 사건 로그 한 줄(ops_command_authz_denied, 명령 ID·역할·까닭, 계정 ID 없음)을 남긴다(ASVS 16.3.2).
 import { Controller, Get, Header, HttpCode, Inject, Optional, Post, Req, Res } from '@nestjs/common';
 import {
@@ -25,7 +25,7 @@ import { GetCommand } from '../application/get-command.js';
 import { ListCommands } from '../application/list-commands.js';
 import { RetryCommand } from '../application/retry-command.js';
 import { ExtendCommand, RevertCommand } from '../application/revert-command.js';
-import { COMMAND_STATES, COMMAND_TYPES, CREATE_OPS_COMMAND, REVERT_NEEDS_APPROVAL, reauthRequiredFor, type Command } from '../domain/command.js';
+import { COMMAND_STATES, COMMAND_TYPES, CREATE_OPS_COMMAND, REVERT_NEEDS_REAUTH, reauthRequiredFor, type Command } from '../domain/command.js';
 import { noCommandSecurityEvents, type CommandSecurityEvents } from '../domain/ports.js';
 import { COMMAND_REAUTH, COMMAND_SECURITY_EVENTS } from '../tokens.js';
 import { ReauthUnavailable, type ApprovalReauthVerifier } from '../../payouts/index.js';
@@ -197,7 +197,7 @@ export class CommandsController {
     });
   }
 
-  /** 되돌리기(ADR-0340 결정 5). 명령 3·11은 commander 요청·재인증 → 202 REVERT_PENDING, 그 밖은 200 REVERTED */
+  /** 되돌리기(ADR-0340 결정 5). 명령 3·11은 commander 요청·재인증 → 202 REVERT_PENDING, 명령 6은 commander 1인·재인증 → 200, 그 밖은 200 REVERTED */
   @Post(':commandId/reversions')
   @HttpCode(200)
   @Roles(['operator', 'commander'])
@@ -211,7 +211,8 @@ export class CommandsController {
   ): Promise<z.output<typeof CommandView>> {
     return this.#guarded('revert', me, params.commandId, async () => {
       const current = await this.getCommand.execute(params.commandId);
-      if (REVERT_NEEDS_APPROVAL.includes(current.type)) await this.#verifyReauth(me, request);
+      // 명령 3·11의 되돌리기 요청과 명령 6 해제는 재인증한다(그 밖의 1인 되돌리기는 재인증 없음)
+      if (REVERT_NEEDS_REAUTH.includes(current.type)) await this.#verifyReauth(me, request);
       const r = await this.revertCommand.execute({
         commandId: params.commandId,
         reason: body.reason,

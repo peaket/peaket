@@ -162,14 +162,14 @@ export async function writeDecision(w: CommandWriter, q: { accountId: string; ro
 }
 
 /** 실행 시작(T8·T11). 감사 기록을 DISPATCHED 사건보다 먼저 쓴다. 처음 DISPATCHED이고 예측이 있으면 비교 때를 적는다 */
-export async function writeDispatched(w: CommandWriter, q: { nowMs: number; actor?: { accountId: string; role: string } }): Promise<Command> {
+export async function writeDispatched(w: CommandWriter, q: { nowMs: number; actor?: { accountId: string; role: string; ref?: string } }): Promise<Command> {
   const c = w.current;
   const to = nextCommandState(c.state, 'DISPATCHED', c.type);
   const attempts = c.attempts + 1;
   let actorRef = SYSTEM_ACTOR_REF;
   let actorRole = SYSTEM_ROLE;
   if (q.actor) {
-    actorRef = await w.actor('ACTOR', c.round ?? 0, q.actor.accountId, q.nowMs);
+    actorRef = await w.actor('ACTOR', c.round ?? 0, q.actor.accountId, q.nowMs, q.actor.ref);
     actorRole = q.actor.role;
   }
   const firstCompare = attempts === 1 && c.compareDueAtMs === undefined && hasPrediction(c.dryRun);

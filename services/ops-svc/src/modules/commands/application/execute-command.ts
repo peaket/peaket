@@ -1,9 +1,10 @@
 // 승인된 운영 명령의 실제 실행(T8~T11, BAT-465 GAT-300). 실행 전후 감사 체크포인트를 만들고,
 // 대상 결과를 성공(카탈로그 명령 ACKED·1회 실행 명령 SUCCEEDED, ADR-0340 결정 1)·FAILED로 남긴다.
 // 대상이 없으면 target-not-wired로 실패해 재시도할 수 있게 한다. 감사 기록은 DISPATCHED 사건과 함께 보내기 전에 커밋된다.
+import { randomUUID } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 import type { AuditCheckpointService } from '../../audit/index.js';
-import type { Command, CommandExecutionActor } from '../domain/command.js';
+import { SYSTEM_ACTOR_REF, type Command, type CommandExecutionActor } from '../domain/command.js';
 import type { CancelledEventGuard, CommandExecutor, CommandStore } from '../domain/ports.js';
 
 export class ExecuteCommand {
@@ -28,8 +29,11 @@ export class ExecuteCommand {
     if (command.state !== 'APPROVED' && command.state !== 'FAILED') {
       throw new ProblemError({ type: 'command-not-executable', status: 409, title: '실행할 수 있는 명령이 아닙니다' });
     }
-    const retry = command.state === 'FAILED' ? { accountId: actor.accountId, role: actor.role } : undefined;
-    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_BEFORE:${command.commandId}`, actorRef: actor.accountId });
+    // 실행 체크포인트의 행위자는 그 DISPATCHED 사건의 가명 참조다(처음 실행은 SYSTEM, 다시 한 실행은 그 사람의 ACTOR 참조).
+    // 체크포인트는 7년 보존이라 관리 계정 ID를 남기지 않는다(대응 표만 3년 뒤 지운다, ADR-0149 결정 3, BAT-355 리뷰 RV-02)
+    const retry = command.state === 'FAILED' ? { accountId: actor.accountId, role: actor.role, ref: randomUUID() } : undefined;
+    const actorRef = retry?.ref ?? SYSTEM_ACTOR_REF;
+    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_BEFORE:${command.commandId}`, actorRef });
     const dispatched = await this.store.markDispatched(command.commandId, nowMs, retry);
     let finished: Command;
     const eventId = command.eventId ?? (typeof command.params.eventId === 'string' ? command.params.eventId : undefined);
@@ -49,7 +53,7 @@ export class ExecuteCommand {
         finished = await this.store.markDispatchFailed(command.commandId, err instanceof Error ? err.message : 'execution-failed', nowMs);
       }
     }
-    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_AFTER:${command.commandId}`, actorRef: actor.accountId });
+    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_AFTER:${command.commandId}`, actorRef });
     return finished;
   }
 }
