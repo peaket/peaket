@@ -17,7 +17,8 @@ import { SCENARIOS, SCENARIO_ORDER, REQUIRED_CHECKS, validateScenarios, publicPl
 import { checkCloudPlan, CLOUD_PLAN_FILE, MAX_TTL_HOURS, REQUIRED_CLEANUP } from './demo/cloud-plan.mjs';
 import { breakOpenApi, compatPlan, runCompat, DEMO_TAG } from './demo/compat.mjs';
 import { measurementText, redact, writeMeasurement } from './demo/measure.mjs';
-import { DEMO_WORKLOADS, demoExpectedWorkloads } from './demo-objects.mjs';
+import { DEMO_WORKLOADS, demoExpectedWorkloads, demoOrigins } from './demo-objects.mjs';
+import { DEMO_BUILD_ARGS, DEMO_IMAGES, dockerBuildArgs } from './demo-images.mjs';
 import { DEMO_SEED_FILE } from './demo-auth.mjs';
 import { checkSeed } from './demo-seed.mjs';
 
@@ -383,6 +384,24 @@ test('V-T7 ④ S9는 판정자 아닌 두 번째 commander가 확정한다', () 
   assert.match(body, /const approved = await api\(ctx, 'second-commander', \{/, 'S9가 두 번째 commander로 확정하지 않는다');
   assert.match(body, /againToken = await adminReauth\(ctx, 'second-commander', 'APPROVAL'\)/, 'S9의 다시 확정 확인도 두 번째 commander가 아니다');
   assert.match(body, /addCheck\('refunded'/, 'S9가 환불 결과를 확인하지 않는다');
+});
+
+test('V-T7 ④ 깨끗한 빌드(--skip-build 없이) 계획에 데모 출처 VITE build-arg가 있다', () => {
+  const source = readFileSync(DEMO_MJS, 'utf8');
+  // all·up은 --skip-build를 줬을 때만 건너뛴다(기본은 새로 빌드한다)
+  assert.match(source, /\['demo', \.\.\.\(o\.skipBuild \? \['--skip-build'\] : \[\]\)\]/, 'all·up의 무대 호출이 --skip-build를 조건 없이 붙인다');
+  const cluster = readFileSync(join(REPO, 'tools', 'local', 'cluster.mjs'), 'utf8');
+  // 새 이미지 열은 buildImage(데모 build-arg를 붙이는 함수)로 빌드한다(직접 docker build가 아니다)
+  assert.match(cluster, /for \(const i of DEMO_NEW_IMAGES\) buildDemoImage\(i\)/, 'cluster.mjs의 demo가 demo-images의 buildImage로 빌드하지 않는다');
+  const queueRoom = DEMO_IMAGES.find((i) => i.workload === 'queue-room');
+  const args = dockerBuildArgs(queueRoom);
+  assert.ok(args.includes(`VITE_PEAKET_QUEUE_FILES_ORIGIN=${demoOrigins()['queue-files']}`), `깨끗한 빌드에 queue-files 출처가 없다: ${args.join(' ')}`);
+  assert.match(demoOrigins()['queue-files'], /:18442$/, '데모 queue-files 출처에 포트가 없다');
+  // demo-images --check도 같은 build-arg를 보고한다(사람이 읽는 --json)
+  const cli = spawnSync(process.execPath, [join(REPO, 'tools', 'local', 'demo-images.mjs'), '--check', '--json'], { cwd: REPO, encoding: 'utf8', timeout: 60_000 });
+  assert.equal(cli.status, 0, `demo-images --check exit ${cli.status}: ${cli.stderr}`);
+  const json = JSON.parse(cli.stdout);
+  assert.deepEqual(json.images.find((i) => i.workload === 'queue-room').buildArgs, DEMO_BUILD_ARGS['queue-room'], '--check --json에 queue-room build-arg가 없다');
 });
 
 // ---------- V-T7 ⑤ 두 번 돌리기·정리 ----------

@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { DEMO_IMAGES, DEMO_NGINX_CONFS, DEMO_NGINX_IMAGE, DEMO_NODE_IMAGE, DEMO_DOCKERIGNORE_PATHS, checkImages, demoImagesPlan, dockerfileProblems, dockerignoreProblems } from './demo-images.mjs';
+import { DEMO_BUILD_ARGS, DEMO_IMAGES, DEMO_NGINX_CONFS, DEMO_NGINX_IMAGE, DEMO_NODE_IMAGE, DEMO_DOCKERIGNORE_PATHS, DEMO_REQUIRED_BUILD_ARGS, buildArgsProblems, checkImages, demoImagesPlan, dockerBuildArgs, dockerfileProblems, dockerignoreProblems } from './demo-images.mjs';
 import { DEMO_WORKLOADS, DEMO_IMAGES as DEMO_WORKLOAD_IMAGES, DEMO_OVERLAY_DIR, demoOrigins } from './demo-objects.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -156,6 +156,48 @@ test('DS-12 이미지 계획·Dockerfile에 비밀 값이나 개인 키가 없�
     const text = readFileSync(join(REPO, file), 'utf8');
     assert.doesNotMatch(text, /BEGIN (?:RSA |EC )?PRIVATE KEY|Bearer\s+/i, `${file}에 비밀 값이 있다`);
   }
+});
+
+test('V-T7 ④ 깨끗한 빌드는 포트 붙은 데모 출처를 VITE_* build-arg로 넘긴다(S2 매진 파일)', () => {
+  const expected = {
+    VITE_PEAKET_API_ORIGIN: demoOrigins().api,
+    VITE_PEAKET_QUEUE_ORIGIN: demoOrigins().queue,
+    VITE_PEAKET_QUEUE_FILES_ORIGIN: demoOrigins()['queue-files'],
+  };
+  assert.equal(expected.VITE_PEAKET_QUEUE_FILES_ORIGIN, 'https://queue-files.peaket.example:18442', '데모 queue-files 출처에 포트가 없다');
+  assert.deepEqual(DEMO_BUILD_ARGS['queue-room'], expected, 'queue-room의 데모 build-arg 계획');
+  assert.deepEqual(DEMO_REQUIRED_BUILD_ARGS['queue-room'], Object.keys(expected), 'queue-room의 필수 build-arg 목록');
+
+  // 새로 빌드할 때(--skip-build 없이) 실제 docker 명령에 --build-arg가 붙는다
+  const queueRoom = DEMO_IMAGES.find((i) => i.workload === 'queue-room');
+  const args = dockerBuildArgs(queueRoom);
+  for (const [name, value] of Object.entries(expected)) {
+    const at = args.indexOf('--build-arg');
+    assert.ok(at >= 0, `docker build 명령에 --build-arg가 없다: ${args.join(' ')}`);
+    assert.ok(args.includes(`${name}=${value}`), `docker build 명령에 ${name}=${value}가 없다: ${args.join(' ')}`);
+  }
+  // 빌드 인자가 필요 없는 이미지에는 붙이지 않는다(운영 기본값을 그대로 쓴다)
+  assert.equal(dockerBuildArgs(DEMO_IMAGES.find((i) => i.workload === 'identity-svc')).includes('--build-arg'), false, 'identity-svc에 --build-arg가 붙었다');
+  // 데이터가 갈라지지 않게 출처는 demoOrigins 하나만 쓴다
+  for (const value of Object.values(expected)) assert.ok(new Set(Object.values(demoOrigins())).has(value), `build-arg 출처 ${value}가 demoOrigins에 없다`);
+});
+
+test('V-T7 ④ demo-images --check가 기대 build-arg(ARG 선언·데모 포트)를 검사한다', () => {
+  const result = checkImages();
+  assert.equal(result.ok, true, `정적 점검이 실패했다: ${result.problems.join('; ')}`);
+  const queueRoom = DEMO_IMAGES.find((i) => i.workload === 'queue-room');
+  assert.deepEqual(buildArgsProblems(queueRoom), [], 'queue-room의 build-arg 정적 문제');
+  assert.deepEqual(result.images.find((i) => i.workload === 'queue-room').buildArgs, DEMO_BUILD_ARGS['queue-room'], '--check 결과에 build-arg가 없다');
+
+  // Dockerfile이 ARG를 받지 않으면 넘겨도 무시된다 → 실패
+  const undeclared = buildArgsProblems({ ...queueRoom, dockerfile: 'apps/partner/Dockerfile', buildArgs: { VITE_PEAKET_QUEUE_FILES_ORIGIN: demoOrigins()['queue-files'] } });
+  assert.match(undeclared.join('\n'), /VITE_PEAKET_QUEUE_FILES_ORIGIN.*ARG가 없다/, `ARG 없는 build-arg를 잡지 않는다: ${undeclared.join('; ')}`);
+  // 포트 없는 출처로 빌드하면 S2가 매진 파일을 읽지 못한다 → 실패
+  const noPort = buildArgsProblems({ ...queueRoom, buildArgs: { ...DEMO_BUILD_ARGS['queue-room'], VITE_PEAKET_QUEUE_FILES_ORIGIN: 'https://queue-files.peaket.example' } });
+  assert.match(noPort.join('\n'), /VITE_PEAKET_QUEUE_FILES_ORIGIN.*포트가 없다/, `포트 없는 출처를 잡지 않는다: ${noPort.join('; ')}`);
+  // 필수 build-arg를 빼면 실패
+  const missing = buildArgsProblems({ ...queueRoom, buildArgs: { VITE_PEAKET_API_ORIGIN: demoOrigins().api, VITE_PEAKET_QUEUE_ORIGIN: demoOrigins().queue } });
+  assert.match(missing.join('\n'), /VITE_PEAKET_QUEUE_FILES_ORIGIN.*빠졌다/, `빠진 필수 build-arg를 잡지 않는다: ${missing.join('; ')}`);
 });
 
 test('DS-01 demo-images 인자는 --check·--build·--json만 받고 모르는 인자는 던진다', () => {
