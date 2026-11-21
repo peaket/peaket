@@ -45,6 +45,7 @@ export type ProblemType =
   | 'cancellation-not-account-pending'
   | 'case-not-actioned'
   | 'checkpoint-empty'
+  | 'checkpoint-not-ready'
   | 'command-dispatch-failed'
   | 'command-not-executable'
   | 'command-not-failed'
@@ -312,6 +313,7 @@ export type ProblemType =
   | 'seatmap-replace-required'
   | 'seatmap-worker-unavailable'
   | 'self-target-forbidden'
+  | 'seq-not-in-checkpoint'
   | 'server-busy'
   | 'session-not-found'
   | 'settlement-commission-rate-invalid'
@@ -390,6 +392,7 @@ export const PROBLEM_TYPES = {
   'cancellation-not-account-pending': { status: 409, title: "환급 계좌를 기다리는 취소가 아닙니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
   'checkpoint-empty': { status: 409, title: "묶을 감사 기록이 없습니다" },
+  'checkpoint-not-ready': { status: 409, title: "아직 서명하지 않았거나 옛 체크포인트입니다" },
   'command-dispatch-failed': { status: 502, title: "명령을 대상에 보내지 못했습니다. 다시 시도해 주세요" },
   'command-not-executable': { status: 409, title: "실행할 수 있는 명령이 아닙니다" },
   'command-not-failed': { status: 409, title: "실패한 명령만 다시 시도할 수 있습니다" },
@@ -657,6 +660,7 @@ export const PROBLEM_TYPES = {
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
   'seatmap-worker-unavailable': { status: 503, title: "좌석맵 파일을 잠시 확인할 수 없습니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
+  'seq-not-in-checkpoint': { status: 422, title: "그 체크포인트가 덮지 않는 기록입니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
   'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },
   'settlement-commission-rate-invalid': { status: 422, title: "수수료율이 맞지 않습니다" },

@@ -11,6 +11,15 @@ export interface DueEventConfig {
   endsAt: Date;
 }
 
+/** 온세일 윈도우가 끝난 회차(감사 공개 체크포인트의 회차 마감, ADR-0348 결정 9). 회차 ID와 마감 시각(판매 시작 + 60분)만 담는다 */
+export interface OnsaleClosedEvent {
+  eventId: string;
+  closedAt: Date;
+}
+
+/** 온세일 윈도우 끝 = 판매 시작 + 60분(ADR-0075 결정 3, docs/features/queue-admission.md) */
+export const ONSALE_WINDOW_END_MS = 60 * 60_000;
+
 export interface SaleConfigStore {
   /** 회차 설정과 진행 중 회차 목록을 함께 쓴다. 같은 값을 다시 써도 결과가 같다 */
   put(configs: readonly EventSaleConfig[], admission: readonly { eventId: string; startsAtMs: number }[]): Promise<void>;
@@ -20,6 +29,8 @@ export interface SaleConfigStore {
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]>;
   /** 공연 설정·계약의 회차 수수료율(bp). 없으면 undefined(A1-H10). */
   commissionRateBp(eventId: string): Promise<number | undefined>;
+  /** 판매 시작 + 60분이 [from, to)에 든 회차(마감 시각·회차 ID 차례, limit개까지). 대기열 사본처럼 원천이 아니면 없다 */
+  listOnsaleClosed?(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]>;
 }
 
 export const SALE_CONFIG_STORE = Symbol('SALE_CONFIG_STORE');
@@ -31,6 +42,8 @@ export interface SaleConfigReader {
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]>;
   /** 공연 설정·계약의 회차 수수료율(bp). 없으면 undefined(A1-H10). */
   commissionRateBp(eventId: string): Promise<number | undefined>;
+  /** 판매 시작 + 60분이 [from, to)에 든 회차(ops-svc 게시 작업, ADR-0348 결정 9). 없으면 내부 경로가 503이다 */
+  listOnsaleClosed?(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]>;
 }
 
 export const SALE_CONFIG_READER = Symbol('SALE_CONFIG_READER');

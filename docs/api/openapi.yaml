@@ -84,6 +84,8 @@ x-peaket-problem-types:
     command-dispatch-failed: { status: 502, title: "명령을 대상에 보내지 못했습니다. 다시 시도해 주세요" }
     checkpoint-empty: { status: 409, title: "묶을 감사 기록이 없습니다" }
     audit-chain-broken: { status: 409, title: "감사 체인 구간이 비었습니다" }
+    checkpoint-not-ready: { status: 409, title: "아직 서명하지 않았거나 옛 체크포인트입니다" }
+    seq-not-in-checkpoint: { status: 422, title: "그 체크포인트가 덮지 않는 기록입니다" }
     consent-required: { status: 422, title: "동의가 필요합니다" }
     consent-version-outdated: { status: 422, title: "동의 문안이 바뀌었습니다. 다시 확인해 주세요" }
     contract-approval-conflict: { status: 409, title: "다른 사람이 먼저 처리했습니다" }
@@ -1760,20 +1762,29 @@ components:
         protectedRangesVersion: { type: string, description: "명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)" }
     AuditCheckpoint:
       type: object
-      description: "감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다."
+      description: "감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075, ADR-0348). 감사 체인의 fromSeq~toSeq 기록을 묶은 요약이다. 공개 사슬(kind DAILY·EVENT_CLOSE·MANUAL)은 번호 no가 1부터 빈틈 없이 붙고, 루트는 잎 솔트를 섞은 RFC 9162 머클 루트(잎 바이트는 ADR-0348 결정 2), 값은 RFC 8785 체크포인트 JSON이며 직전 공개 체크포인트의 checkpointHash와 잇는다. 서명(KMS ECDSA P-256)·공개 타임스탬프(OpenTimestamps)·게시(두 버킷의 transparency/v1/)는 게시 작업 audit-anchor만 하고, 손으로 만든 체크포인트는 다음 실행 전까지 서명 칸이 비어 있다. 명령 실행 앞뒤 체크포인트(kind EXECUTION)는 번호·JSON·서명·게시가 없는 내부용이다. 0023 이전 옛 행(legacy)은 공개 사슬 밖이고 루트는 (seq, hash) 줄의 SHA-256, 서명은 옛 Ed25519다(확인하지 않는다)."
       properties:
         checkpointId: { type: string, format: uuid }
-        fromSeq: { type: integer, format: int64 }
-        toSeq: { type: integer, format: int64 }
-        rootHash: { type: string, description: "구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진" }
-        prevCheckpointHash: { type: string, description: "직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자" }
+        fromSeq: { type: integer, format: int64, description: "체크포인트 JSON의 firstSeq" }
+        toSeq: { type: integer, format: int64, description: "체크포인트 JSON의 lastSeq" }
+        rootHash: { type: string, description: "새 행은 머클 루트(merkleRoot와 같다), 옛 행은 구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진" }
+        prevCheckpointHash: { type: string, description: "공개 행은 직전 공개 체크포인트의 checkpointHash, 내부·옛 행은 직전 내부 체크포인트의 rootHash. 첫 체크포인트는 빈 글자" }
         reason: { type: string }
         actorRef: { type: string }
         createdAt: { type: string, format: date-time }
-        signature: { type: [string, "null"], description: "체크포인트 값의 Ed25519 서명(base64). 서명기가 없는 시험 조립에서는 null" }
-        keyId: { type: [string, "null"], description: "서명 키 ID" }
-        anchorRef: { type: [string, "null"], description: "공개 앵커의 위치. 이번 몫은 local:<checkpointId>" }
+        signature: { type: [string, "null"], description: "공개 행은 체크포인트 JSON 바이트의 ECDSA P-256 / SHA-256 서명(DER의 base64, 게시 작업이 채운다. 서명 전이면 null). 옛 행은 옛 Ed25519 서명(base64)" }
+        keyId: { type: [string, "null"], description: "서명 키 ID(공개 행은 KMS 키 ID 또는 local 키 ID)" }
+        anchorRef: { type: [string, "null"], description: "공개 행은 게시한 체크포인트 파일 이름(transparency/v1/checkpoints/<번호 10자리>.json, 게시 전이면 null), 옛 행은 local:<checkpointId>" }
         anchoredAt: { type: [string, "null"], format: date-time }
+        no: { type: [integer, "null"], format: int64, description: "공개 체크포인트 번호(1부터 빈틈 없음). 내부·옛 행은 null(ADR-0348 결정 3)" }
+        kind: { type: [string, "null"], enum: [DAILY, EVENT_CLOSE, MANUAL, EXECUTION, null], description: "만든 때: 일(00:10 KST 뒤 첫 실행)·회차 마감·손으로·명령 실행 앞뒤(내부). 옛 행은 null" }
+        leafCount: { type: [integer, "null"], description: "잎(기록) 수. 옛 행은 null" }
+        merkleRoot: { type: [string, "null"], description: "RFC 9162 머클 루트 16진(옛 행은 null)" }
+        checkpointHash: { type: [string, "null"], description: "체크포인트 JSON(RFC 8785) 바이트의 SHA-256 16진. 공개 행만" }
+        signatureAlg: { type: [string, "null"], enum: [ECDSA_P256_SHA256, null], description: "공개 행의 서명 알고리즘. 내부·옛 행은 null" }
+        otsState: { type: [string, "null"], enum: [PENDING, COMPLETE, null], description: "공개 타임스탬프 상태. 캘린더가 모두 실패했거나 서명 전이면 null" }
+        publishedAt: { type: [string, "null"], format: date-time, description: "두 버킷에 모두 게시한 시각" }
+        legacy: { type: boolean, description: "0023 이전 옛 행(공개 사슬 밖)인가" }
     AuditCheckpointPage:
       type: object
       properties:
@@ -1784,16 +1795,23 @@ components:
       properties:
         checkpointId: { type: string, format: uuid }
         valid: { type: boolean, description: "루트·기록 재계산·연쇄·원본 대조·직전 사슬·서명·앵커가 모두 맞는가" }
-        rootValid: { type: boolean, description: "구간 기록을 다시 모은 루트가 저장값과 같고, record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조가 모두 맞는가(B3-H03)" }
-        prevValid: { type: boolean, description: "직전 체크포인트 루트와 이어지는가" }
-        signatureValid: { type: boolean, description: "Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)" }
-        anchorValid: { type: boolean, description: "공개 앵커 참조가 남았는가" }
+        rootValid: { type: boolean, description: "구간 기록을 다시 모은 루트가 저장값과 같고(새 행은 잎 솔트를 섞은 머클 루트, 옛 행은 줄 SHA-256), record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조, 공개 행의 저장 JSON과 칸·해시가 모두 맞는가(B3-H03, ADR-0348)" }
+        prevValid: { type: boolean, description: "공개 행은 직전 번호의 checkpointHash와 구간이 이어지는가, 내부·옛 행은 직전 내부 체크포인트 루트와 이어지는가" }
+        signatureValid: { type: boolean, description: "공개 행: 서명이 있으면 저장된 공개키로 체크포인트 JSON에 맞는가(서명 전이면 참이고 signed가 거짓). 내부·옛 행은 해당 없음(참)" }
+        anchorValid: { type: boolean, description: "공개 행: 게시했으면 증명 파일의 대상 해시가 checkpointHash와 같은가(게시 전이면 참). 옛 행: 앵커 참조가 남았는가. 내부 행은 해당 없음(참)" }
         fromSeq: { type: integer, format: int64 }
         toSeq: { type: integer, format: int64 }
         checkedAt: { type: string, format: date-time }
+        no: { type: [integer, "null"], format: int64 }
+        kind: { type: [string, "null"], enum: [DAILY, EVENT_CLOSE, MANUAL, EXECUTION, null] }
+        legacy: { type: boolean }
+        signed: { type: boolean, description: "공개 행에 게시 작업의 서명이 있는가" }
+        checkpointHash: { type: [string, "null"] }
+        otsState: { type: [string, "null"], enum: [PENDING, COMPLETE, null] }
+        publishedAt: { type: [string, "null"], format: date-time }
     AuditAnchor:
       type: object
-      description: "공개 앵커(BAT-465 R-584, ADR-0075). 세션 없이 읽어 Ed25519 공개키로 검증한다. 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트다."
+      description: "공개 앵커(BAT-465 R-584, ADR-0075, ADR-0348 결정 12). 세션 없이 읽는다. 공개 행은 checkpointJson 바이트에 대한 ECDSA P-256 / SHA-256 서명(signature, DER의 base64)을 publicKey(SPKI PEM)로 확인한다(algorithm ECDSA_P256_SHA256). 서명 전이면 signature·keyId가 null이고 publicKey는 빈 글이다. 옛 행(legacy)의 algorithm은 Ed25519이고 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트였다(그 공개키는 더 내주지 않아 publicKey가 빈 글)."
       properties:
         checkpointId: { type: string, format: uuid }
         fromSeq: { type: integer, format: int64 }
@@ -1805,8 +1823,61 @@ components:
         keyId: { type: [string, "null"] }
         anchorRef: { type: [string, "null"] }
         anchoredAt: { type: [string, "null"], format: date-time }
-        algorithm: { type: string, enum: [Ed25519] }
-        publicKey: { type: string, description: "SPKI PEM 공개키" }
+        algorithm: { type: string, enum: [Ed25519, ECDSA_P256_SHA256], description: "공개 행은 ECDSA_P256_SHA256, 옛 행은 Ed25519" }
+        publicKey: { type: string, description: "서명 키의 SPKI PEM 공개키. 서명 전·옛 행이면 빈 글" }
+        no: { type: [integer, "null"], format: int64 }
+        kind: { type: [string, "null"], enum: [DAILY, EVENT_CLOSE, MANUAL, EXECUTION, null] }
+        leafCount: { type: [integer, "null"] }
+        merkleRoot: { type: [string, "null"] }
+        checkpointHash: { type: [string, "null"] }
+        checkpointJson: { type: [string, "null"], description: "서명 대상인 RFC 8785 체크포인트 JSON 글(공개 행만, 게시 파일 <번호>.json과 같은 바이트)" }
+        signatureAlg: { type: [string, "null"], enum: [ECDSA_P256_SHA256, null] }
+        otsState: { type: [string, "null"], enum: [PENDING, COMPLETE, null] }
+        publishedAt: { type: [string, "null"], format: date-time }
+        legacy: { type: boolean }
+    AuditVerificationBundleRequest:
+      additionalProperties: false
+      type: object
+      required: [seq, reason]
+      description: "검증 묶음 요청(ADR-0348 결정 8). 그 체크포인트가 덮는 기록 하나의 seq와 내보내는 사유"
+      properties:
+        seq: { type: integer, format: int64, minimum: 1, description: "기록 번호. 체크포인트의 fromSeq~toSeq 밖이면 422 seq-not-in-checkpoint" }
+        reason: { type: string, minLength: 1, maxLength: 2000, description: "내보내는 사유. 앞뒤 공백을 지우고 NFC로 한 번 정규화한 뒤 1~2,000자, 제어 문자·양방향 제어 문자가 있으면 400. 감사 기록 AUDIT_BUNDLE_EXPORTED에 남는다" }
+    AuditVerificationBundle:
+      type: object
+      description: "검증 묶음 판 1(ADR-0348 결정 8). 받은 쪽이 tools/audit-verify로 recordSha256 = SHA-256(prevHash 16진 글 ‖ recordJson) → 잎 = SHA-256(0x00 ‖ 'PEAKET-audit-leaf-v1' ‖ seq u64 big-endian ‖ recordSha256 ‖ leafSalt) → 포함 증명(RFC 9162 §2.1.3.2) → 체크포인트 JSON의 merkleRoot → 서명 → 증명 파일의 대상 해시를 확인한다. 잎 솔트가 실리는 외부 제공 자료다"
+      required: [version, checkpoint, record, inclusionProof]
+      properties:
+        version: { type: integer, enum: [1] }
+        checkpoint:
+          type: object
+          required: [no, checkpointId, json, checkpointHash, signature, keyId, signatureAlg, publicKeyPem, otsProof]
+          properties:
+            no: { type: integer, format: int64 }
+            checkpointId: { type: string, format: uuid }
+            json: { type: string, description: "체크포인트 JSON 글(RFC 8785, 게시 파일과 같은 바이트)" }
+            checkpointHash: { type: string }
+            signature: { type: string, description: "DER의 base64" }
+            keyId: { type: string }
+            signatureAlg: { type: string, enum: [ECDSA_P256_SHA256] }
+            publicKeyPem: { type: string }
+            otsProof: { type: [string, "null"], description: "OpenTimestamps 증명 파일(.ots)의 base64. 아직 없으면 null" }
+        record:
+          type: object
+          required: [seq, recordJson, prevHash, recordSha256, leafSalt]
+          properties:
+            seq: { type: integer, format: int64 }
+            recordJson: { type: string, description: "정규화 기록 글(recordType·recordId·payload·at, 키 차례 정렬)" }
+            prevHash: { type: string, description: "직전 기록 해시 16진(첫 기록은 빈 글)" }
+            recordSha256: { type: string }
+            leafSalt: { type: string, description: "잎 솔트 16진 64자" }
+        inclusionProof:
+          type: object
+          required: [leafIndex, treeSize, path]
+          properties:
+            leafIndex: { type: integer, description: "seq − firstSeq(0부터)" }
+            treeSize: { type: integer, description: "= leafCount" }
+            path: { type: array, items: { type: string }, description: "형제 해시 16진(잎 쪽부터, RFC 9162 §2.1.3.1)" }
     QueueEntryRequest: { description: "대기열 진입 본문(POST /v1/queues/{eventId}/entries). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)", additionalProperties: false, type: object, required: [preverifyToken], properties: { preverifyToken: { type: string }, deviceId: { type: string }, entryRequestId: { type: string, format: uuid, description: "진입 시도 하나에 브라우저가 만든 UUID. 응답을 못 받아 다시 보낼 때 같은 값을 쓰면 이어서 처리하고, 이미 번호를 기록했으면 같은 번호의 대기표를 다시 준다. 1인 1순번 선점 값 PENDING:{요청 ID}에 쓴다(헤더가 아니라 본문이라 사전 요청이 없다, 추천 적용 2026-10-28, 기술 검토 중간-035)" } } }
     AdmissionRequest: { description: "입장 확정 본문(POST /v1/queues/{eventId}/admission). application/json과 text/plain(JSON 글자, T=0 사전 요청 없음) 두 표현이 같은 이 스키마를 쓴다(BAS-040)", additionalProperties: false, type: object, properties: { queueTicket: { type: string }, lobbyToken: { type: string }, priorityGrantId: { type: string, format: uuid, description: "우선 구매(이의가 인정된 부정 예매 표 취소의 되돌림, POL-046 ⑦)의 권리 ID(GET /v1/fraud-appeal-requests의 priorityPurchases). 대기표·참가 토큰 대신 보낸다. 그 계정의 OFFERED 권리이고 만료 전이면 대기 번호·15분 만료 없이 입장 토큰(클레임 prio)을 주고 입장 자리 수에 세지 않는다. 이때 queue-svc가 새 여정 ID(jny)를 만든다. 판매 종료 뒤에도 받는다(판매 종료 규칙의 예외, 추천 적용 2026-10-31, ADR-0171)" }, firstEtaSec: { type: number, description: "선택. 대기 화면이 이 대기에서 처음 보인 예상 대기(초, 1~86,400). firstEtaAtMs와 함께 오면 queue-svc가 그 대기표가 처음 자리를 잡을 때 (차례 시각 − firstEtaAtMs) ÷ firstEtaSec을 예상 대기 오차 지표(queue_eta_error_ratio)에 넣는다. 관측용이라 서버는 모양을 묻지 않고(입장을 400으로 막지 않는다) 숫자가 아니거나 범위 밖이면 버리며, 판정에 쓰지 않는다(추천 적용 2026-11-03, ADR-0183)" }, firstEtaAtMs: { type: number, description: "선택. firstEtaSec을 처음 보인 때의 보정된 서버 시각(유닉스 밀리초, ADR-0110). 미래이거나 이틀보다 앞이면 버린다" } } }
     QueueResultFile: { type: object, description: "셔플 결과 파일과 동시 도착 묶음 결과 파일의 본문: 토큰 해시 → 순번의 평평한 표다(docs/features/queue-admission.md §3 '결과 게시', ADR-0058, BUILD_ORDER BAS-042). 키는 SHA-256(UTF-8(토큰))의 소문자 16진 64자이고(셔플은 참가 토큰, 묶음은 사전 검증 토큰), 파일 이름의 hashPrefix는 그 앞 세 자리다(파일 4,096개 [가정]). 순번은 1부터다. 받는 시각의 분산은 응답의 spreadSec·shuffleSpreadSec 안에서 토큰 해시로 정한다", additionalProperties: { type: integer, minimum: 1 } }
@@ -5801,15 +5872,17 @@ paths:
     post: { operationId: createOpsScannerDeviceEnrollmentCode, tags: [ops], x-peaket-roles: [operator, commander], summary: "스캐너 기기 등록 코드 새로 만들기. 이전 코드는 무효", description: "FR-065, ADR-0051, 추천 적용 2026-10-14, ADR-0062. operator 이상. 코드는 RFC 8628 §6.1 문자 집합(BCDFGHJKLMNPQRSTVWXZ) 12자를 4자씩 하이픈으로 나눈 XXXX-XXXX-XXXX, 만든 뒤 10분 [가정] 한 번만 쓴다. 서버는 코드의 SHA-256만 Redis에 10분 TTL로 두고 등록되면 바로 지운다. 폐기·퇴역 기기는 409다. SCR-053은 코드와 QR(https://<스캐너 주소>/enroll#code=…, 코드는 URL 조각에만)을 보인다", security: [{ opsCookie: [] }], parameters: [{ name: deviceId, in: path, required: true, schema: { type: string } }], responses: { '201': { description: "새 코드. 이 응답에만 싣는다", content: { application/json: { schema: { type: object, properties: { enrollmentCode: { type: string, pattern: "^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$" }, enrollmentCodeExpiresAt: { type: string, format: date-time } } } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 기기(scanner-device-not-found)" }, '409': { $ref: '#/components/responses/Problem', description: "폐기·퇴역 기기(scanner-device-inactive)" } } }
   /v1/ops/audit-checkpoints:
     get: { operationId: listOpsAuditCheckpoints, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "감사 체크포인트 목록(최신순)", description: "BAT-465 GAT-310. viewer 이상. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/Limit' }], responses: { '200': { description: "체크포인트 한 페이지", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointPage' } } } }, '400': { $ref: '#/components/responses/Problem', description: "limit 밖" }, '403': { $ref: '#/components/responses/Problem', description: "권한 없음" } } }
-    post: { operationId: createOpsAuditCheckpoint, tags: [ops], x-peaket-roles: [commander], summary: "감사 체크포인트 생성(마지막 체크포인트 뒤~지금 머리)", description: "BAT-465 GAT-310. commander가 사유와 함께 만든다. 구간 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 만든 사실도 감사 체인에 남는다. 공개 앵커·서명·OpenTimestamps는 후속이다.", security: [{ opsCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 500 } } } } } }, responses: { '201': { description: "만든 체크포인트", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpoint' } } } }, '403': { $ref: '#/components/responses/Problem', description: "commander 아님" }, '409': { $ref: '#/components/responses/Problem', description: "묶을 기록이 없음(checkpoint-empty) 또는 체인 구간이 빔(audit-chain-broken)" } } }
+    post: { operationId: createOpsAuditCheckpoint, tags: [ops], x-peaket-roles: [commander], summary: "감사 체크포인트 생성(마지막 공개 체크포인트 뒤~지금 머리)", description: "BAT-465 GAT-310, ADR-0348 결정 1·3. commander가 사유와 함께 공개 사슬의 다음 번호(kind MANUAL)를 만든다. 구간 기록을 잎 솔트를 섞은 머클 루트로 묶고 직전 공개 체크포인트 해시와 잇는다. 만든 사실도 감사 체인에 남는다(AUDIT_CHECKPOINT_CREATED). 이 서버는 서명 키를 갖지 않아, 서명·공개 타임스탬프·게시는 다음 게시 작업(audit-anchor) 실행이 한다(그 전까지 signature는 null). 묶을 새 기록이 없으면 마지막 공개 체크포인트를 돌려준다.", security: [{ opsCookie: [] }], requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 500 } } } } } }, responses: { '201': { description: "만든 체크포인트", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpoint' } } } }, '403': { $ref: '#/components/responses/Problem', description: "commander 아님" }, '409': { $ref: '#/components/responses/Problem', description: "묶을 기록이 없음(checkpoint-empty) 또는 체인 구간이 빔(audit-chain-broken)" } } }
   /v1/ops/audit-checkpoints/{checkpointId}:
     get: { operationId: getOpsAuditCheckpoint, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "감사 체크포인트 상세", description: "BAT-465 GAT-310. viewer 이상. 없는 ID는 404. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "체크포인트", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpoint' } } } }, '403': { $ref: '#/components/responses/Problem', description: "권한 없음" }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
+  /v1/ops/audit-checkpoints/{checkpointId}/verification-bundles:
+    post: { operationId: createOpsAuditVerificationBundle, tags: [ops], x-peaket-roles: [commander], summary: "검증 묶음 내보내기(기록 하나, commander만)", description: "ADR-0348 결정 8, C-T39. 그 체크포인트가 덮는 기록 하나의 정규화 기록·잎 솔트·포함 증명과 체크포인트 JSON·서명·공개키·증명 파일을 준다. 잎 솔트가 실리는 외부 제공 자료라 commander만이다(viewer·operator는 403). 내보내기는 같은 요청에서 감사 기록 AUDIT_BUNDLE_EXPORTED(체크포인트·seq·사유·내보낸 관리 계정)로 남고, 기록을 남기지 못하면 묶음을 주지 않는다. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AuditVerificationBundleRequest' } } } }, responses: { '201': { description: "검증 묶음", content: { application/json: { schema: { $ref: '#/components/schemas/AuditVerificationBundle' } } } }, '400': { $ref: '#/components/responses/Problem', description: "본문 꼴이 틀림(사유 글 규칙 포함)" }, '403': { $ref: '#/components/responses/Problem', description: "commander 아님" }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" }, '409': { $ref: '#/components/responses/Problem', description: "checkpoint-not-ready: 아직 서명하지 않은 공개 행, 명령 실행 앞뒤(내부) 행, 옛 행. audit-chain-broken: 구간을 다시 모은 루트가 저장값과 다름" }, '422': { $ref: '#/components/responses/Problem', description: "seq-not-in-checkpoint: seq가 그 체크포인트의 fromSeq~toSeq 밖" } } }
   /v1/ops/audit-checkpoints/{checkpointId}/verification:
     get: { operationId: getOpsAuditCheckpointVerification, tags: [ops], x-peaket-roles: [viewer, operator, commander], summary: "감사 체크포인트 검증(루트·기록·연쇄·직전 사슬)", description: "BAT-465 GAT-310. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 ops_command·command_event 원본 행을 대조하고 직전 체크포인트 루트와 잇는지 본다(B3-H03, R-614). viewer 이상. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "검증 결과", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointVerification' } } } }, '403': { $ref: '#/components/responses/Problem', description: "권한 없음" }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
   /v1/ops/audit-anchors/{checkpointId}:
-    get: { operationId: getOpsAuditAnchor, tags: [ops], x-peaket-roles: [public], summary: "감사 체크포인트 공개 앵커(루트·Ed25519 서명·공개키)", description: "BAT-465 R-584, ADR-0075. 세션 없이 읽는다. 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트이고, publicKey(SPKI PEM)로 확인한다. 감사 체인 구간을 다시 모은 검증은 같은 경로의 /verification이 한다. 외부 불변 저장소 앵커(S3 Object Lock)·OpenTimestamps는 후속이다. Cache-Control: no-store", security: [], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "공개 앵커", content: { application/json: { schema: { $ref: '#/components/schemas/AuditAnchor' } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
+    get: { operationId: getOpsAuditAnchor, tags: [ops], x-peaket-roles: [public], summary: "감사 체크포인트 공개 앵커(체크포인트 JSON·서명·공개키)", description: "BAT-465 R-584, ADR-0075, ADR-0348 결정 12. 세션 없이 읽는다. 공개 행은 checkpointJson 바이트에 대한 ECDSA P-256 서명을 publicKey(SPKI PEM)로 확인한다. 옛 행(legacy)은 Ed25519였고 공개키를 더 내주지 않는다. 감사 체인 구간을 다시 모은 검증은 같은 경로의 /verification이 한다. 게시한 공개 파일(transparency/v1/checkpoints/…·public-keys.json·index.json)과 공개 검증 도구(tools/audit-verify)는 피켓 서버 없이 같은 것을 확인한다. Cache-Control: no-store", security: [], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "공개 앵커", content: { application/json: { schema: { $ref: '#/components/schemas/AuditAnchor' } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
   /v1/ops/audit-anchors/{checkpointId}/verification:
-    get: { operationId: getOpsAuditAnchorVerification, tags: [ops], x-peaket-roles: [public], summary: "공개 앵커 검증(루트·기록·연쇄·직전 사슬·서명·앵커)", description: "BAT-465 R-584·R-614. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 원본 행을 대조하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다(B3-H03). Cache-Control: no-store", security: [], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "검증 결과", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointVerification' } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
+    get: { operationId: getOpsAuditAnchorVerification, tags: [ops], x-peaket-roles: [public], summary: "공개 앵커 검증(루트·기록·연쇄·직전 사슬·서명·앵커)", description: "BAT-465 R-584·R-614, ADR-0348. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 원본 행을 대조하고, 직전 체크포인트와 잇는지, 공개 행의 ECDSA 서명이 저장된 공개키로 체크포인트 JSON에 맞는지, 게시한 증명 파일의 대상 해시가 체크포인트 해시와 같은지 본다(B3-H03). Cache-Control: no-store", security: [], parameters: [{ name: checkpointId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: "검증 결과", content: { application/json: { schema: { $ref: '#/components/schemas/AuditCheckpointVerification' } } } }, '404': { $ref: '#/components/responses/Problem', description: "없는 체크포인트" } } }
   /v1/ops/live:
     get: { operationId: getOpsLive, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "관제 늘 여는 SSE 흐름(명령 상태·ack, 내 승인 대기, 경보, 자동 제어 상태, 걸린 자동 조치, 접속자)", description: "FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다). text/event-stream. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래된 번호면 reset을 보낸다(화면은 REST로 다시 읽는다). 15초 [가정]마다 주석 줄. 액세스 토큰 만료·세션 종료 때 서버가 닫는다. gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live", security: [{ opsCookie: [] }], parameters: [{ name: eventId, in: query, required: false, description: 접속자를 보일 회차, schema: { type: string } }, { name: Last-Event-ID, in: header, required: false, schema: { type: string } }], responses: { '200': { description: SSE 스트림, content: { text/event-stream: {} } }, '401': { $ref: '#/components/responses/Problem', description: 세션 없음·만료 } } }
   /v1/ops/events/{eventId}/live:

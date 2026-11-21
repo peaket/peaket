@@ -1,6 +1,7 @@
 // 불변 감사 로그의 최소 해시 체인(GAT-110, docs/features/control-tower.md §7, docs/data.md audit_chain·audit_chain_head).
 // 각 기록의 record_sha256 = SHA-256(직전 해시 || 정규화한 기록 JSON)이고, audit_chain_head.last_hash가 마지막 해시다.
 // mac(HMAC)은 커밋 뒤 체인 작업자가 채운다(chain-worker.ts, ADR-0341). leaf_salt는 기록 파기 때 함께 파기할 32바이트 난수다.
+// 데모 환경(PEAKET_ENV=demo)의 기록 payload에는 demo: true를 붙인다(검사 분기가 아니라 표시, 다른 환경에는 칸이 없다, ADR-0349 결정 11).
 import { createHash, randomBytes } from 'node:crypto';
 import type { DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
@@ -21,6 +22,17 @@ export interface AuditEntry {
   readonly createdAtMs: number;
   /** 정규화 기록 원문. 검증이 해시를 다시 계산하고 원본 행과 대조하는 데 쓴다(B3-H03) */
   readonly record: AuditRecord;
+  /** 잎 솔트(16진 64자, 공개 체크포인트 잎, ADR-0348 결정 2) */
+  readonly leafSalt?: string;
+}
+
+/**
+ * 데모 표시를 붙인 기록(ADR-0349 결정 11). PEAKET_ENV가 demo일 때만 payload에 demo: true를 더하고, 그 밖의 환경은 그대로 둔다.
+ * 부를 때마다 환경 값을 읽는다(시험이 바꿔 볼 수 있다). 이미 demo 칸이 있으면 덮지 않는다
+ */
+export function demoMarked(record: AuditRecord, env: Record<string, string | undefined> = process.env): AuditRecord {
+  if (env.PEAKET_ENV?.trim() !== 'demo' || 'demo' in record.payload) return record;
+  return { ...record, payload: { ...record.payload, demo: true } };
 }
 
 /** 해시 체인에 한 기록을 더한다. 구현은 DB 트랜잭션 안(운영) 또는 메모리(시험)다 */
@@ -47,7 +59,8 @@ export function auditHash(prevHash: string, record: AuditRecord): string {
 /** 시험용 메모리 체인. append와 같은 규칙으로 해시를 이어 붙인다 */
 export class MemoryAuditChain implements AuditChain {
   readonly entries: AuditEntry[] = [];
-  async append(record: AuditRecord): Promise<void> {
+  async append(input: AuditRecord): Promise<void> {
+    const record = demoMarked(input);
     const prevHash = this.entries.at(-1)?.hash ?? '';
     this.entries.push({
       seq: this.entries.length + 1,
@@ -57,6 +70,7 @@ export class MemoryAuditChain implements AuditChain {
       prevHash,
       createdAtMs: record.nowMs,
       record,
+      leafSalt: randomBytes(32).toString('hex'),
     });
   }
 
@@ -95,7 +109,8 @@ export class MemoryAuditChain implements AuditChain {
  * mac은 비운 채 쓰고 KMS를 부르지 않는다(체인 작업자가 커밋 뒤 seq 차례로 채운다, ADR-0102·0341). mac_seq·last_mac은 읽지 않는다.
  * 호출자는 명령 쓰기와 같은 트랜잭션에 넣어야 한다. 덧붙인 seq를 돌려준다.
  */
-export async function appendAuditIn(tx: DbTransaction, record: AuditRecord): Promise<number> {
+export async function appendAuditIn(tx: DbTransaction, input: AuditRecord): Promise<number> {
+  const record = demoMarked(input);
   const head = await tx.execute(sql`select last_seq, encode(last_hash, 'hex') as last_hash from audit_chain_head where id = 1 for update`);
   const row = head.rows[0] as { last_seq: number | string; last_hash: string } | undefined;
   if (!row) throw new Error('audit_chain_head 행이 없다(마이그레이션 0000)');

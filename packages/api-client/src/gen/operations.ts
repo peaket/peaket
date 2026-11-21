@@ -35,6 +35,7 @@ export type OperationId =
   | 'createOpsApprovalRequestWithdrawal'
   | 'createOpsArtist'
   | 'createOpsAuditCheckpoint'
+  | 'createOpsAuditVerificationBundle'
   | 'createOpsAuthAccessToken'
   | 'createOpsAuthInvitationAcceptance'
   | 'createOpsAuthInvitationCompletion'
@@ -434,6 +435,7 @@ export const OPERATIONS = {
   createOpsApprovalRequestWithdrawal: {operationId: "createOpsApprovalRequestWithdrawal",method: "POST",path: "/v1/ops/approval-requests/{approvalId}/withdrawals",host: "ops-api",kind: "write",cookie: true},
   createOpsArtist: {operationId: "createOpsArtist",method: "POST",path: "/v1/ops/artists",host: "ops-api",kind: "write",cookie: true},
   createOpsAuditCheckpoint: {operationId: "createOpsAuditCheckpoint",method: "POST",path: "/v1/ops/audit-checkpoints",host: "ops-api",kind: "write",cookie: true},
+  createOpsAuditVerificationBundle: {operationId: "createOpsAuditVerificationBundle",method: "POST",path: "/v1/ops/audit-checkpoints/{checkpointId}/verification-bundles",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthAccessToken: {operationId: "createOpsAuthAccessToken",method: "POST",path: "/v1/ops/auth/access-tokens",host: "ops-api",kind: "write",cookie: true},
   createOpsAuthInvitationAcceptance: {operationId: "createOpsAuthInvitationAcceptance",method: "POST",path: "/v1/ops/auth/invitation-acceptances",host: "ops-api",kind: "write",cookie: false},
   createOpsAuthInvitationCompletion: {operationId: "createOpsAuthInvitationCompletion",method: "POST",path: "/v1/ops/auth/invitation-completions",host: "ops-api",kind: "write",cookie: false},

@@ -14,13 +14,20 @@ import * as zod from 'zod';
 export const AuditCheckpointVerification = zod.object({
   "checkpointId": zod.uuid().optional(),
   "valid": zod.boolean().optional().describe('루트·기록 재계산·연쇄·원본 대조·직전 사슬·서명·앵커가 모두 맞는가'),
-  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같고, record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조가 모두 맞는가(B3-H03)'),
-  "prevValid": zod.boolean().optional().describe('직전 체크포인트 루트와 이어지는가'),
-  "signatureValid": zod.boolean().optional().describe('Ed25519 서명이 체크포인트 값과 맞는가(서명기가 없으면 참)'),
-  "anchorValid": zod.boolean().optional().describe('공개 앵커 참조가 남았는가'),
+  "rootValid": zod.boolean().optional().describe('구간 기록을 다시 모은 루트가 저장값과 같고(새 행은 잎 솔트를 섞은 머클 루트, 옛 행은 줄 SHA-256), record_json으로 다시 계산한 기록 해시와 prev_hash 연쇄, 원본 행 대조, 공개 행의 저장 JSON과 칸·해시가 모두 맞는가(B3-H03, ADR-0348)'),
+  "prevValid": zod.boolean().optional().describe('공개 행은 직전 번호의 checkpointHash와 구간이 이어지는가, 내부·옛 행은 직전 내부 체크포인트 루트와 이어지는가'),
+  "signatureValid": zod.boolean().optional().describe('공개 행: 서명이 있으면 저장된 공개키로 체크포인트 JSON에 맞는가(서명 전이면 참이고 signed가 거짓). 내부·옛 행은 해당 없음(참)'),
+  "anchorValid": zod.boolean().optional().describe('공개 행: 게시했으면 증명 파일의 대상 해시가 checkpointHash와 같은가(게시 전이면 참). 옛 행: 앵커 참조가 남았는가. 내부 행은 해당 없음(참)'),
   "fromSeq": zod.int().optional(),
   "toSeq": zod.int().optional(),
-  "checkedAt": zod.iso.datetime({"offset":true}).optional()
+  "checkedAt": zod.iso.datetime({"offset":true}).optional(),
+  "no": zod.int().nullish(),
+  "kind": zod.union([zod.literal('DAILY'),zod.literal('EVENT_CLOSE'),zod.literal('MANUAL'),zod.literal('EXECUTION'),zod.literal(null)]).nullish(),
+  "legacy": zod.boolean().optional(),
+  "signed": zod.boolean().optional().describe('공개 행에 게시 작업의 서명이 있는가'),
+  "checkpointHash": zod.string().nullish(),
+  "otsState": zod.union([zod.literal('PENDING'),zod.literal('COMPLETE'),zod.literal(null)]).nullish(),
+  "publishedAt": zod.iso.datetime({"offset":true}).nullish()
 })
 
 export type AuditCheckpointVerification = zod.input<typeof AuditCheckpointVerification>;

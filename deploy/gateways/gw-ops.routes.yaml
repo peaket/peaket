@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-ops.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 804cf35a34a3678b5443d46f04eed43ad41db7822ebf4dfbf1534d750e9dfd39
+# openapi info.version 1.0.0-draft · 계약 sha256 aac075bf8bec78c0ed90c5e8e6f588d19393d016034e6f66034727a158a3c716
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -1034,6 +1034,14 @@ spec:
           method: OPTIONS
         - path:
             type: RegularExpression
+            value: /v1/ops/audit-checkpoints/[^/]+/verification-bundles
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/audit-checkpoints/[^/]+/verification-bundles
+          method: OPTIONS
+        - path:
+            type: RegularExpression
             value: /v1/ops/bot-review-samples/[^/]+/judgement
           method: POST
         - path:
@@ -1103,14 +1111,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/ops/commands/[^/]+/approvals
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/commands/[^/]+/extensions
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/commands/[^/]+/extensions
           method: OPTIONS
       filters:
         - type: RequestHeaderModifier
@@ -1152,6 +1152,14 @@ spec:
     - matches:
         - path:
             type: RegularExpression
+            value: /v1/ops/commands/[^/]+/extensions
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/commands/[^/]+/extensions
+          method: OPTIONS
+        - path:
+            type: RegularExpression
             value: /v1/ops/commands/[^/]+/post-review
           method: POST
         - path:
@@ -1398,14 +1406,6 @@ spec:
             type: Exact
             value: /v1/ops/event-cancellations
           method: POST
-        - path:
-            type: Exact
-            value: /v1/ops/event-cancellations
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/event-cancellations/[^/]+
-          method: GET
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -1429,6 +1429,14 @@ spec:
           port: 8080
     - matches:
         - path:
+            type: Exact
+            value: /v1/ops/event-cancellations
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/event-cancellations/[^/]+
+          method: GET
+        - path:
             type: RegularExpression
             value: /v1/ops/event-cancellations/[^/]+
           method: OPTIONS
@@ -1676,14 +1684,6 @@ spec:
             type: RegularExpression
             value: /v1/ops/fraud-clusters/[^/]+
           method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/home-layout
-          method: GET
-        - path:
-            type: Exact
-            value: /v1/ops/home-layout
-          method: PUT
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -1722,6 +1722,14 @@ spec:
     - ops-api.peaket.example
   rules:
     - matches:
+        - path:
+            type: Exact
+            value: /v1/ops/home-layout
+          method: GET
+        - path:
+            type: Exact
+            value: /v1/ops/home-layout
+          method: PUT
         - path:
             type: Exact
             value: /v1/ops/home-layout

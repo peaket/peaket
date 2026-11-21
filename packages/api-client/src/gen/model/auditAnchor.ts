@@ -10,9 +10,12 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { AuditAnchorAlgorithm } from './auditAnchorAlgorithm';
+import type { AuditAnchorKind } from './auditAnchorKind';
+import type { AuditAnchorOtsState } from './auditAnchorOtsState';
+import type { AuditAnchorSignatureAlg } from './auditAnchorSignatureAlg';
 
 /**
- * 공개 앵커(BAT-465 R-584, ADR-0075). 세션 없이 읽어 Ed25519 공개키로 검증한다. 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트다.
+ * 공개 앵커(BAT-465 R-584, ADR-0075, ADR-0348 결정 12). 세션 없이 읽는다. 공개 행은 checkpointJson 바이트에 대한 ECDSA P-256 / SHA-256 서명(signature, DER의 base64)을 publicKey(SPKI PEM)로 확인한다(algorithm ECDSA_P256_SHA256). 서명 전이면 signature·keyId가 null이고 publicKey는 빈 글이다. 옛 행(legacy)의 algorithm은 Ed25519이고 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트였다(그 공개키는 더 내주지 않아 publicKey가 빈 글).
  */
 export interface AuditAnchor {
   checkpointId?: string;
@@ -29,7 +32,30 @@ export interface AuditAnchor {
   anchorRef?: string | null;
   /** @nullable */
   anchoredAt?: string | null;
+  /** 공개 행은 ECDSA_P256_SHA256, 옛 행은 Ed25519 */
   algorithm?: AuditAnchorAlgorithm;
-  /** SPKI PEM 공개키 */
+  /** 서명 키의 SPKI PEM 공개키. 서명 전·옛 행이면 빈 글 */
   publicKey?: string;
+  /** @nullable */
+  no?: number | null;
+  /** @nullable */
+  kind?: AuditAnchorKind;
+  /** @nullable */
+  leafCount?: number | null;
+  /** @nullable */
+  merkleRoot?: string | null;
+  /** @nullable */
+  checkpointHash?: string | null;
+  /**
+     * 서명 대상인 RFC 8785 체크포인트 JSON 글(공개 행만, 게시 파일 <번호>.json과 같은 바이트)
+     * @nullable
+     */
+  checkpointJson?: string | null;
+  /** @nullable */
+  signatureAlg?: AuditAnchorSignatureAlg;
+  /** @nullable */
+  otsState?: AuditAnchorOtsState;
+  /** @nullable */
+  publishedAt?: string | null;
+  legacy?: boolean;
 }

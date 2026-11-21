@@ -10,9 +10,13 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * 공개 행은 ECDSA_P256_SHA256, 옛 행은 Ed25519
+ */
 export type AuditAnchorAlgorithm = typeof AuditAnchorAlgorithm[keyof typeof AuditAnchorAlgorithm];
 
 
 export const AuditAnchorAlgorithm = {
   Ed25519: 'Ed25519',
+  ECDSA_P256_SHA256: 'ECDSA_P256_SHA256',
 } as const;

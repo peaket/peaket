@@ -11,6 +11,7 @@ import type { OpsAlertStore } from '../alerts/index.js';
 import type { MemoryAuditChain } from './audit.js';
 import { auditMacInput, type AuditMacKey } from './mac.js';
 import type { MacAnchor, MacAnchorLedger } from './mac-anchor.js';
+import { CheckpointSignals } from './checkpoint-signals.js';
 
 export const AUDIT_CHAIN_LEASE = 'audit-chain-mac';
 /** ADR-0341 결정 3·4의 시간 값 [가정] */
@@ -54,6 +55,8 @@ export interface WorkerLease {
 export class AuditSignals {
   readonly macLagSeconds = new Gauge({ name: 'ops_audit_mac_lag_seconds', help: 'mac이 빈 가장 오래된 감사 체인 행의 나이(초, 없으면 0, ADR-0341 결정 4)', registers: [] });
   readonly kmsFailoverTotal = new Counter({ name: 'ops_audit_kms_failover_total', help: '감사 체인 키 호출을 복제 키 리전으로 넘긴 수(ADR-0341 결정 2)', labelNames: ['op'] as const, registers: [] });
+  /** 감사 공개 앵커 지표 셋(ADR-0348 결정 10) */
+  readonly checkpoints = new CheckpointSignals();
 
   failover(op: string): void {
     this.kmsFailoverTotal.inc({ op });
@@ -62,6 +65,7 @@ export class AuditSignals {
   register(registry: Registry): void {
     registry.registerMetric(this.macLagSeconds);
     registry.registerMetric(this.kmsFailoverTotal);
+    this.checkpoints.register(registry);
   }
 }
 

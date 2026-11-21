@@ -10,6 +10,7 @@
     "migrate": "node scripts/migrate.mjs",
     "assign-bot-review": "node dist/bot-review-assign.js",
     "audit:verify": "node --import @peaket/platform/telemetry/register dist/jobs/verify-audit-chain.js",
+    "audit:anchor": "node --import @peaket/platform/telemetry/register dist/jobs/audit-anchor.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mjs",
     "typecheck": "tsc --noEmit"
@@ -17,12 +18,14 @@
   "dependencies": {
     "@aws-sdk/client-kms": "3.1159.0",
     "@aws-sdk/client-s3": "3.1159.0",
+    "@aws-sdk/client-wafv2": "3.1159.0",
     "@grpc/grpc-js": "1.14.6",
     "@grpc/proto-loader": "0.8.1",
     "@nestjs/common": "^12.3.2",
     "@nestjs/core": "^12.3.2",
     "@peaket/contracts": "workspace:*",
     "@peaket/platform": "workspace:*",
+    "canonicalize": "5.1.0",
     "drizzle-orm": "0.45.4",
     "fastify": "^5.12.7",
     "pg": "^8.23.1",

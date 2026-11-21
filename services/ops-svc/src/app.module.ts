@@ -11,8 +11,7 @@ import {
   MemoryAuditChain,
   MemoryAuditCheckpointStore,
   MemoryAuditIntakeStore,
-  ephemeralAuditAnchorSigner,
-  type AuditAnchorSigner,
+  type AuditCheckpointStore,
   type AuditBackgroundOptions,
   type AuditChain,
   type AuditChainReader,
@@ -70,8 +69,8 @@ interface CommonWiring {
   readonly nowMs?: number;
   /** Kafka 소비자(ops.command-events)가 쓸 처리기(BAT-465 R-584). HTTP 수신기와 같은 객체다 */
   readonly onCommandEvent?: (h: HandleCommandEvent) => void;
-  /** 감사 체크포인트 공개 앵커 서명기(BAT-465 R-584). 없으면 임시 Ed25519 키를 쓴다(시험) */
-  readonly signer?: AuditAnchorSigner;
+  /** 메모리 조립의 감사 체크포인트 저장소(시험이 게시 작업과 같은 행을 나눠 본다, BAT-360). 없으면 새로 만든다. API 프로세스는 서명 키를 갖지 않는다(ADR-0348 결정 1) */
+  readonly auditCheckpoints?: AuditCheckpointStore;
   /** ticket-svc ScannerDeviceService gRPC 클라이언트(BAT-450). 없으면 관제 기기 경로를 열지 않는다 */
   readonly scannerDevices?: TicketScannerDevices;
   /** 시험에서 감사 체인을 넘겨 기록을 확인한다. 없으면 DB/메모리 체인을 만든다 */
@@ -151,10 +150,9 @@ export class AppModule {
    * partnerDatabase: 파트너 회차 취소 경로의 DB 풀(ops_partner 역할, PEAKET_PARTNER_DATABASE_URL, 웨이브 끝 리뷰 S2). 없으면 관제 풀을 함께 쓴다(local·ci·시험)
    */
   static register(o: ({ database: Database; partnerDatabase?: Database } & CommonWiring) | ({ memory: true } & CommonWiring)): DynamicModule {
-    const signer = o.signer ?? ephemeralAuditAnchorSigner();
     if ('database' in o) {
       const chain = o.auditChain ?? new DrizzleAuditChain(o.database);
-      const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(o.database), chain, () => o.nowMs ?? Date.now(), signer);
+      const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(o.database), chain, () => o.nowMs ?? Date.now());
       const store = new DrizzleCommandStore(o.database);
       const cancellations = new DrizzleEventCancellationStore(o.database);
       const csCases = new DrizzleCsCaseStore(o.database);
@@ -168,7 +166,7 @@ export class AppModule {
             ...(o.commandExtras ?? {}),
             maintenance: { enabled: background !== undefined, ...(background?.maintenanceMs !== undefined ? { intervalMs: background.maintenanceMs } : {}) },
           }),
-          AuditModule.register(checkpoints, signer, {
+          AuditModule.register(checkpoints, {
             intake: new DrizzleAuditIntakeStore(o.database),
             ...(o.auditSignals ? { signals: o.auditSignals } : {}),
             background: {
@@ -214,7 +212,7 @@ export class AppModule {
       };
     }
     const chain = o.auditChain ?? new MemoryAuditChain();
-    const checkpoints = new AuditCheckpointService(new MemoryAuditCheckpointStore(), chain, () => o.nowMs ?? Date.now(), signer);
+    const checkpoints = new AuditCheckpointService(o.auditCheckpoints ?? new MemoryAuditCheckpointStore(), chain, () => o.nowMs ?? Date.now());
     const store = new MemoryCommandStore(chain);
     const cancellations = new MemoryEventCancellationStore(chain);
     const csCases = new MemoryCsCaseStore();
@@ -222,7 +220,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth, { ...(o.commandExtras ?? {}) }),
-        AuditModule.register(checkpoints, signer, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
+        AuditModule.register(checkpoints, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
         CasesModule.register(csCases),
         AlertsModule.register(new MemoryOpsAlertStore()),

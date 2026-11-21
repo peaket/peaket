@@ -1,5 +1,6 @@
-// 감사 체크포인트의 외부 불변 저장소(S3 Object Lock)·OpenTimestamps 앵커 경계(BAT-465 잔여, ADR-0171).
-// 외부 버킷·AWS 자격 증명이 없는 환경에서는 로컬 앵커(local:<checkpointId>)를 유지하고, 이 어댑터들은 503/보류로 막는다.
+// 감사 체크포인트의 옛 외부 앵커 경계(BAT-465 잔여, ADR-0171). 늘 503/보류로 막는 껍데기라 부르는 쪽이 없다.
+// 공개 체크포인트의 실제 게시·공개 타임스탬프는 게시 작업 audit-anchor(publisher.ts)가 public-store.ts(두 버킷)·ots.ts(캘린더)로 한다(ADR-0348 결정 5·6).
+// 이 파일은 옛 계약(시험)을 위해 남기고, API 프로세스와 게시 작업은 이것을 쓰지 않는다.
 import { createHash } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 
