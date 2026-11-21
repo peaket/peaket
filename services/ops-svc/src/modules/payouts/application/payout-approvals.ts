@@ -166,7 +166,7 @@ export class PayoutApprovals {
       if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
       if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '요청자는 반려할 수 없습니다');
       if (actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 반려할 수 있습니다');
-      if (reason.trim() === '') throw new PayoutApprovalProblem('invalid-query', 422, '반려 사유가 필요합니다');
+      if (reason.trim() === '') throw new PayoutApprovalProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
       const nowMs = this.d.clock.now();
       const now = new Date(nowMs);
       // 반려하면 payment-svc의 배치·정산서 결속을 풀어 같은 지급일의 새 배치를 만들 수 있게 한다(CONS-V02).

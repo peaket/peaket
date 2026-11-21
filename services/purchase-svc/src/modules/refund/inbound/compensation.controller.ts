@@ -59,7 +59,7 @@ const reauthUnavailable = (cause: unknown) => new ProblemError({ type: 'reauth-u
 const cancellationNotPending = () => new ProblemError({ type: 'cancellation-not-account-pending', status: 409, title: '환급 계좌를 기다리는 취소가 아닙니다' });
 const compensationNotPending = () => new ProblemError({ type: 'compensation-not-account-pending', status: 409, title: '배상 계좌를 기다리는 건이 아닙니다' });
 const refundAccountRequired = () => new ProblemError({ type: 'refund-account-required', status: 422, title: '환불받을 계좌를 입력해 주세요' });
-const refundRejected = () => new ProblemError({ type: 'refund-rejected', status: 422, title: '환급이 거절되었습니다' });
+const refundRejected = () => new ProblemError({ type: 'refund-rejected', status: 422, title: '결제사가 환급을 거절했습니다. 고객센터가 이어 봅니다' });
 /** 지급대행·계정이 없어 지금은 보낼 수 없다. Retry-After 5초 [가정](openapi createCompensationAccount 503) */
 const compensationUnavailable = (cause: unknown) => new ProblemError({ type: 'compensation-transfer-unavailable', status: 503, title: '지금은 배상금을 보낼 수 없습니다', retryAfterSeconds: 5, cause });
 const compensationFailed = (cause: unknown) => new ProblemError({ type: 'compensation-transfer-failed', status: 422, title: '배상금 송금이 실패했습니다. 고객센터가 이어 봅니다', cause });

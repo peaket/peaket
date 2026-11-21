@@ -8386,10 +8386,17 @@ export const useCreateOpsApprovalRequestApproval = <TError = ErrorType<ProblemRe
   status: 200
 }
 
+export type createOpsApprovalRequestRejectionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createOpsApprovalRequestRejectionResponseSuccess = (createOpsApprovalRequestRejectionResponse200) & {
   headers: Headers;
 };
-;
+export type createOpsApprovalRequestRejectionResponseError = (createOpsApprovalRequestRejectionResponse400) & {
+  headers: Headers;
+};
 
 export const getCreateOpsApprovalRequestRejectionUrl = (approvalId: string,) => {
 
@@ -8435,7 +8442,7 @@ return orvalFetch<createOpsApprovalRequestRejectionResponseSuccess>(getCreateOps
 
 export const getCreateOpsApprovalRequestRejectionMutationKey = () => ['createOpsApprovalRequestRejection'] as const;
 
-export const getCreateOpsApprovalRequestRejectionMutationOptions = <TError = ErrorType<unknown>,
+export const getCreateOpsApprovalRequestRejectionMutationOptions = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsApprovalRequestRejection>>, TError,CreateOpsApprovalRequestRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createOpsApprovalRequestRejection>>, TError,CreateOpsApprovalRequestRejectionMutationVariables, TContext> => {
 
@@ -8464,13 +8471,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateOpsApprovalRequestRejectionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsApprovalRequestRejection>>>
     export type CreateOpsApprovalRequestRejectionMutationBody = BodyType<CreateOpsApprovalRequestRejectionBody> | undefined
-    export type CreateOpsApprovalRequestRejectionMutationError = ErrorType<unknown>
+    export type CreateOpsApprovalRequestRejectionMutationError = ErrorType<ProblemResponse>
     export type CreateOpsApprovalRequestRejectionMutationVariables = {approvalId: string;data?: BodyType<CreateOpsApprovalRequestRejectionBody>}
 
     /**
  * @summary 반려(사유 필수)
  */
-export const useCreateOpsApprovalRequestRejection = <TError = ErrorType<unknown>,
+export const useCreateOpsApprovalRequestRejection = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsApprovalRequestRejection>>, TError,CreateOpsApprovalRequestRejectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createOpsApprovalRequestRejection>>,

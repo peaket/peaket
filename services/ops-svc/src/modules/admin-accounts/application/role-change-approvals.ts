@@ -16,7 +16,7 @@ export interface RoleChangeApprovalsDeps {
   readonly clock: Clock;
 }
 
-const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '승인 업무를 찾을 수 없습니다' });
+const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다', detail: '승인 업무를 찾을 수 없습니다' });
 const conflict = (title: string) => new ProblemError({ type: 'admin-account-state-conflict', status: 409, title });
 
 export class RoleChangeApprovals {
@@ -133,10 +133,10 @@ export class RoleChangeApprovals {
     const r = await this.d.store.find(approvalId);
     if (!r) throw notFound();
     if (r.status !== 'PENDING_APPROVAL') throw conflict('지금 판정할 수 있는 승인 업무가 아닙니다');
-    if (r.requestedBy === actor.accountId) throw new ProblemError({ type: 'approval-self-not-allowed', status: 403, title: '요청자는 반려할 수 없습니다' });
-    if (actor.role !== 'commander') throw new ProblemError({ type: 'approval-role-required', status: 403, title: 'commander만 반려할 수 있습니다' });
+    if (r.requestedBy === actor.accountId) throw new ProblemError({ type: 'approval-self-not-allowed', status: 403, title: '요청자는 승인할 수 없습니다', detail: '요청자는 반려할 수 없습니다' });
+    if (actor.role !== 'commander') throw new ProblemError({ type: 'approval-role-required', status: 403, title: 'commander만 승인할 수 있습니다', detail: 'commander만 반려할 수 있습니다' });
     const text = reason.trim();
-    if (text === '') throw new ProblemError({ type: 'invalid-query', status: 422, title: '반려 사유가 필요합니다' });
+    if (text === '') throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다', detail: '반려 사유가 필요합니다' });
     const now = this.d.clock.now();
     const next: RoleChangeApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, closeReason: text, updatedAtMs: now };
     if (!(await this.d.store.save(next, r.updatedAtMs))) throw conflict('다른 사람이 먼저 처리했습니다');
@@ -144,7 +144,7 @@ export class RoleChangeApprovals {
   }
 
   async #verify(token: string | undefined, actor: { sessionId: string }): Promise<{ accountId: string }> {
-    if (!this.d.reauth) throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
+    if (!this.d.reauth) throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 검증기를 쓸 수 없습니다', retryAfterSeconds: 5 });
     return this.d.reauth.verify(token, { sessionId: actor.sessionId, act: 'APPROVAL' });
   }
 }

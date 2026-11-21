@@ -20,8 +20,8 @@ const badQuery = (): never => {
 
 /** 위험 명령: 2인 승인 명령과 멈추는 쪽 명령 3·11(control-tower §3·§4, ADR-0095·0322) */
 const riskyCommand = (type: CommandType): boolean => approvalModeOf(type) === 'TWO' || type === 'KILL_SWITCH' || type === 'AUTOMATION_STOP';
-const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '위험 명령은 다시 인증해야 합니다' });
-const reauthUnavailable = () => new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
+const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
+const reauthUnavailable = () => new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 검증기를 쓸 수 없습니다', retryAfterSeconds: 5 });
 
 @Controller('v1/ops/commands')
 export class CommandsController {
