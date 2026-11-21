@@ -820,6 +820,7 @@
 | R-724 | BAT-087 완료 표시·lane4 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane4.md, docs/review/plans/BAT-087.md | 단계 완료·진행 로그·검증 기록 | 완료 |
 | R-725 | BAT-197 완료 표시·lane3 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane3.md, docs/review/plans/BAT-197.md | 단계 완료·진행 로그·검증 기록 | 완료 |
 | R-726 | BAT-616 완료 표시·lane5 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane5.md, docs/review/plans/BAT-616.md | 단계 완료·진행 로그·검증 기록 | 완료 |
+| R-727 | 묶음마다 시험·리뷰·검증이 구현의 두 배 시간을 쓰고(역할 시간 55% 대 26%), B 묶음 커밋이 ADR-0283 목표의 두세 배였으며, CI kind 잡이 develop 푸시마다 30~53분 돌고 11-20부터 연달아 실패해 다음 묶음을 막았다 | docs/adr/0331, docs/architecture.md §8.6, docs/devops.md §3.1·§3.3, docs/PROGRESS.md, .github/workflows/ci.yml·ci-kind.yml·tools-check.yml | 구현 전 실패 확인 A만·B 틀린 구현 10개 이하·C 화면 비교만·리뷰 중간 이하 정리 목록·새 맥락 리뷰 SEG·브라우저 확인 웨이브 끝·kind 배포 구간까지 끔(ADR-0331) | 적용 |
 
 ## 4. 숫자 일치표
 
