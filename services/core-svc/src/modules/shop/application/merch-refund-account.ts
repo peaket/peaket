@@ -1,7 +1,7 @@
 // 굿즈 지연 환급 계좌 다시 받기(POST /v1/shop/orders/{orderId}/cancellations/{cancellationId}/account,
 // BAT-425, ADR-0316 결정 5, openapi createShopCancellationAccount, P-T63 ③·R-T43).
 // 결제사 계좌 거절로 끝난 merch_refund(REJECTED·fail_reason REFUND_ACCOUNT_REQUIRED·account_required_at 있음)에만 계좌를 받는다.
-// 차례: 멱등 다시 오기 → 계좌 모양(400) → 주문 소유·취소 행(없거나 남의 주문은 같은 404) → 자격·시도 상한(409) →
+// 차례: 멱등 다시 오기(새 행의 주문이 경로 주문이고 세션 계정의 것일 때만, 아니면 404, ADR-0337 결정 6) → 계좌 모양(400) → 주문 소유·취소 행(없거나 남의 주문은 같은 404) → 자격·시도 상한(409) →
 // 재인증(op SHOP_CANCEL_REFUND_ACCOUNT, act FAN_HIGH_RISK, 403·503) → 행 잠금 안에서 새 merch_refund 행(새 UUIDv7 취소 ID,
 // replaces_refund_id = 옛 행, 같은 kind·amount·사유)과 새 merch_refund_item 자리·멱등 기록 커밋 → 새 취소 ID로 CancelPayment → 답 반영.
 // 옛 행은 REJECTED 그대로 두고, 계좌는 이 호출 안에서만 쓰며 저장·로그·사건·Outbox·지표 어디에도 남기지 않는다(POL-014).
@@ -20,8 +20,8 @@ import {
   refundRetryNextDelayMs,
 } from '../domain/merch-order.js';
 import { type CancelOutcome, type MerchPayments, ReauthUnavailable, type ShopOrderStore, type ShopReauthGate } from '../domain/merch-ports.js';
-import { type CancellationView, RefundResultWriteFailed } from './merch-cancel.js';
-import { type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
+import { type CancellationView, RefundResultWriteFailed, verifiedCancelRow } from './merch-cancel.js';
+import { replayMismatch, type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
 
 export interface MerchRefundAccountInput {
   readonly accountId: string;
@@ -66,7 +66,7 @@ export class MerchRefundAccount {
   async run(i: MerchRefundAccountInput): Promise<CancellationView> {
     const once = i.once ?? syntheticOnce(i);
     const replay = await this.d.store.replayOf(once);
-    if (replay !== undefined) return this.#replay(replay);
+    if (replay !== undefined) return this.#replay(i, replay, once.operation);
     // 계좌 모양은 주문 조회·재인증·행 쓰기 앞에서 본다(400 invalid-body, P-T63 ③)
     const shape = refundAccountShape(i.account);
     if (!shape.ok) {
@@ -109,7 +109,7 @@ export class MerchRefundAccount {
       if (e instanceof MerchCancelNotAllowed) this.d.signals?.refundAccount('rejected');
       throw e;
     }
-    if (created.kind === 'replay') return this.#replay(created.resultRef);
+    if (created.kind === 'replay') return this.#replay(i, created.resultRef, once.operation);
     this.d.signals?.refundAccount('accepted');
     const newId = created.refund.refundId;
     const amount = created.refund.amount;
@@ -169,11 +169,14 @@ export class MerchRefundAccount {
     }
   }
 
-  /** 같은 키 다시 오기. 새 행의 지금 상태로 같은 답을 만든다(계좌 거절은 422, 업무 거절도 422) */
-  async #replay(ref: string): Promise<CancellationView> {
-    if (!ref.startsWith('cancel:')) throw badRequest('invalid-body');
-    const row = await this.d.store.cancelView(ref.slice('cancel:'.length));
-    if (row === undefined) throw dependencyUnavailable();
+  /**
+   * 같은 키 다시 오기. 새 행의 지금 상태로 같은 답을 만든다(계좌 거절은 422, 업무 거절도 422).
+   * 참조(`cancel:{새 행}`)의 주문이 경로 주문이 아니거나 그 주문이 세션 계정의 것이 아니면 남의 주문과 같은 404다(ADR-0337 결정 6).
+   * 새 행은 경로의 취소 ID와 다른 ID라 취소 ID끼리는 견주지 않는다. 계좌 값은 로그에 싣지 않는다
+   */
+  async #replay(i: MerchRefundAccountInput, ref: string, operation: string): Promise<CancellationView> {
+    const row = await verifiedCancelRow(this.d.store, i.accountId, i.orderId, ref);
+    if (row === undefined) throw replayMismatch(this.#log, operation, i.orderId.toLowerCase());
     if (row.state === 'REJECTED') {
       this.d.signals?.refundAccount('rejected');
       throw row.refundAccountRequired ? refundAccountRequired() : refundRejected();

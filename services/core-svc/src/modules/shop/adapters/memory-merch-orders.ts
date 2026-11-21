@@ -270,6 +270,11 @@ export class MemoryShopOrderStore implements ShopOrderStore {
     return o ? this.#detail(o) : undefined;
   }
 
+  async paymentAttempt(attemptId: string): Promise<MerchAttempt | undefined> {
+    const a = this.attempts.get(attemptId);
+    return a ? { ...a } : undefined;
+  }
+
   async listOrders(accountId: string, limit: number, cursor?: string): Promise<{ items: ShopOrderDetail[]; nextCursor: string | null }> {
     const after = cursor ? Buffer.from(cursor, 'base64url').toString('utf8').split(':') : undefined;
     const rows = [...this.orders.values()]
@@ -612,6 +617,7 @@ export class MemoryShopOrderStore implements ShopOrderStore {
     if (!r) return undefined;
     return {
       cancellationId: refundId,
+      orderId: r.orderId,
       status: 'REFUND_PENDING',
       refundAmount: r.amount,
       refundAccountRequired: r.accountRequiredAtMs !== null,

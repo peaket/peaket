@@ -516,6 +516,8 @@ export const wish = pgTable(
 
 /** 멱등 기록 표(ADR-0146 결정 1). 작업 이름은 openapi가 멱등 키를 요구하는 core-svc 쓰기다 */
 // 굿즈 주문의 네 작업(주문·결제 시도·결제 접수·부가 상품 주문)은 core_app이 쓴다(BAT-600, ADR-0300 결정 4·5, ADR-0301 결정 2)
+// 0041이 역할·작업마다 행 보안·칸 권한과 파트너 기록의 tenant_id 칸(기본값 app.tenant_id)을 건다. 플랫폼 문장이 SQL 글이라 칸은 이 객체에 두지 않는다(ADR-0337).
+// 작업을 더하면 CHECK와 함께 그 역할 정책의 작업 목록도 고친다(ADR-0337 결정 1)
 export const idempotencyRecord = idempotencyRecordTable([
   'CREATE_PRODUCTION',
   'CREATE_PRODUCTION_EVENT',

@@ -1,5 +1,5 @@
 // 굿즈·부가 상품 구매자 취소(POST /v1/shop/orders/{orderId}/cancellations, ADR-0315, POL-016 §1.4, P-T59 ④·P-T61·P-T63·P-T64·V-T35 ③).
-// 차례: 멱등 다시 오기 → 주문 소유(남의 주문·없는 주문 같은 404) → 항목·자격(READY, 부가 상품은 입장 시작 전, 에스크로는 전체만) →
+// 차례: 멱등 다시 오기(취소 행의 주문이 경로 주문이고 세션 계정의 것일 때만, 아니면 404, ADR-0337 결정 6) → 주문 소유(남의 주문·없는 주문 같은 404) → 항목·자격(READY, 부가 상품은 입장 시작 전, 에스크로는 전체만) →
 // 계좌 모양(400) → 결제 원장 읽기(가상계좌였는지, 실패 503) → 가상계좌인데 계좌 없음(422) → 재인증(계좌를 보낸 요청, 403·503) →
 // 환급 행·항목 자리·멱등 기록을 한 트랜잭션으로(항목 상태는 아직 바꾸지 않는다) → CancelPayment(같은 취소 ID) → 결과 반영.
 // 계좌는 이 요청 안에서만 쓰고 저장·로그하지 않는다. 카드 결제에 온 계좌는 결제사로 보내지 않는다.
@@ -19,8 +19,8 @@ import {
   type CancelStatus,
   type ShopOrderDetail,
 } from '../domain/merch-order.js';
-import { type CancelOutcome, type MerchPayments, ReauthUnavailable, type ShopOrderStore, type ShopReauthGate } from '../domain/merch-ports.js';
-import { type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
+import { type CancelOutcome, type CancelRowView, type MerchPayments, ReauthUnavailable, type ShopOrderStore, type ShopReauthGate } from '../domain/merch-ports.js';
+import { replayMismatch, type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
 
 export interface MerchCancelDeps {
   store: ShopOrderStore;
@@ -66,7 +66,7 @@ export class MerchCancel {
   /** @throws ShopProblem 400 invalid-body · 403 reauth-required · 404 not-found · 409 · 422 refund-account-required · 503 */
   async run(accountId: string, sessionId: string, orderId: string, body: CancellationBody, once: IdempotencyRequest, reauthToken?: string): Promise<CancellationView> {
     const replay = await this.d.store.replayOf(once);
-    if (replay !== undefined) return this.#replay(replay);
+    if (replay !== undefined) return this.#replay(accountId, orderId, replay, once.operation);
     const detail = await this.d.store.findOrder(orderId.toLowerCase());
     if (!detail || detail.order.accountId !== accountId) throw orderNotFound();
     const nowMs = this.d.clock.now();
@@ -127,7 +127,7 @@ export class MerchCancel {
       nowMs,
       ...(entryOpensAtMs === undefined ? {} : { entryOpensAtMs }),
     });
-    if (created.kind === 'replay') return this.#replay(created.resultRef);
+    if (created.kind === 'replay') return this.#replay(accountId, orderId, created.resultRef, once.operation);
     const amount = created.refund.amount;
     // 카드 결제에 온 계좌는 결제사로 보내지 않는다(P-T63 ④)
     const sendAccount = payment.virtualAccountPaid === true ? account : undefined;
@@ -188,11 +188,13 @@ export class MerchCancel {
     return at?.getTime();
   }
 
-  /** 같은 키 다시 오기. 환급 행의 지금 상태로 같은 답을 만든다(거절은 같은 4xx, 이미 환급이면 REFUNDED) */
-  async #replay(ref: string): Promise<CancellationView> {
-    if (!ref.startsWith('cancel:')) throw badRequest('invalid-body');
-    const row = await this.d.store.cancelView(ref.slice('cancel:'.length));
-    if (row === undefined) throw dependencyUnavailable();
+  /**
+   * 같은 키 다시 오기. 환급 행의 지금 상태로 같은 답을 만든다(거절은 같은 4xx, 이미 환급이면 REFUNDED).
+   * 참조가 경로 주문의 취소가 아니거나(모양이 틀림·행 없음·다른 주문) 그 주문이 세션 계정의 것이 아니면 남의 주문과 같은 404다(ADR-0337 결정 6)
+   */
+  async #replay(accountId: string, orderId: string, ref: string, operation: string): Promise<CancellationView> {
+    const row = await verifiedCancelRow(this.d.store, accountId, orderId, ref);
+    if (row === undefined) throw replayMismatch(this.#log, operation, orderId.toLowerCase());
     if (row.state === 'REJECTED') {
       this.d.signals?.cancellation('rejected');
       throw refundAccountRequired();
@@ -204,4 +206,17 @@ export class MerchCancel {
       ...(row.refundAccountRequired ? { refundAccountRequired: true } : {}),
     };
   }
+}
+
+/**
+ * 취소·환급 계좌 다시 받기 재생의 결과 참조 `cancel:{취소 ID}`를 대조한다(ADR-0337 결정 6). 그 환급 행의 주문이 경로 주문이고
+ * 그 주문의 계정이 세션 계정일 때만 행을 돌려준다. 아니면 undefined(받는 쪽이 같은 404로 답한다)
+ */
+export async function verifiedCancelRow(store: Pick<ShopOrderStore, 'cancelView' | 'findOrder'>, accountId: string, orderId: string, ref: string): Promise<CancelRowView | undefined> {
+  if (!ref.startsWith('cancel:')) return undefined;
+  const path = orderId.toLowerCase();
+  const row = await store.cancelView(ref.slice('cancel:'.length));
+  if (row === undefined || row.orderId !== path) return undefined;
+  const detail = await store.findOrder(path);
+  return detail && detail.order.accountId === accountId ? row : undefined;
 }

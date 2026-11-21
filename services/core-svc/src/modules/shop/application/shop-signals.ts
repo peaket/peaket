@@ -13,6 +13,7 @@
 // - shop_product_attributes_invalid: 마지막 속성 검증 잡이 찾은 틀린 상품 수(게이지, ADR-0300 결정 2)
 // 로그 면은 플랫폼 로거의 warn·error만 쓴다. 결제 참조·계좌·개인 값은 싣지 않는다.
 import { Counter, Gauge, type Registry } from '@peaket/platform';
+import { orderNotFound, type ShopProblem } from '../domain/merch-order.js';
 
 export interface ShopLogger {
   info(o: object, msg: string): void;
@@ -22,6 +23,16 @@ export interface ShopLogger {
 
 /** 로그를 남기지 않는 면(시험·조립 전) */
 export const silentShopLogger: ShopLogger = { info: () => {}, warn: () => {}, error: () => {} };
+
+/**
+ * 멱등 재생의 결과 참조가 지금 요청의 계정·경로 주문에 속하지 않는다(ADR-0337 결정 6). 보안 이벤트로 오류 로그 한 줄을 남기고(authz-matrix §2의 7)
+ * 남의 주문과 같은 404 not-found를 돌려준다(받는 쪽이 던진다). 로그에는 작업과 경로의 주문 ID만 싣고 계정 ID·결과 참조 원문은 싣지 않는다.
+ * 경로에 주문이 없는 작업(주문 만들기·부가 상품 주문)은 orderId를 비운다(참조한 주문 ID도 싣지 않는다)
+ */
+export function replayMismatch(log: ShopLogger, operation: string, orderId?: string): ShopProblem {
+  log.error({ kind: 'idempotency-replay-mismatch', severity: 'SEV2', operation, ...(orderId === undefined ? {} : { orderId }) }, '멱등 재생의 결과 참조가 이 요청의 계정·주문과 맞지 않아 처음 응답 대신 404로 답했다');
+  return orderNotFound();
+}
 
 export type MerchOrderOutcome = 'created' | 'sold_out' | 'in_progress' | 'paid' | 'failed' | 'expired';
 export type MerchRefundOutcome = 'cancelled' | 'pending' | 'rejected';
