@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { demoOrigins } from './demo-objects.mjs';
 
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -38,9 +39,32 @@ function entry(workload, kind, dockerfile, extra = {}) {
     dockerfile,
     base: kind === 'service' ? DEMO_NODE_IMAGE : workload === 'web' || workload === 'partner' ? DEMO_NODE_IMAGE : DEMO_NGINX_IMAGE,
     user: kind === 'service' || workload === 'web' || workload === 'partner' ? 'node' : '101',
+    buildArgs: DEMO_BUILD_ARGS[workload] ?? Object.freeze({}),
     ...extra,
   });
 }
+
+/**
+ * 빌드할 때 구워 넣는 데모 출처(브라우저 Origin은 포트를 포함한다).
+ * 운영 기본값(포트 없음)으로 빌드한 queue-room은 S2의 매진 상태 파일(`/_q/...`·queue-files:18442)을 읽지 못한다(BAT-086 V-T7).
+ * Dockerfile이 `ARG <이름>`을 선언해야 넘긴 값이 쓰인다(`--check`가 본다). 키는 {@link dockerBuildArgs}가 `--build-arg`로 붙인다.
+ */
+export function demoBuildArgs(origins = demoOrigins()) {
+  return Object.freeze({
+    'queue-room': Object.freeze({
+      VITE_PEAKET_API_ORIGIN: origins.api,
+      VITE_PEAKET_QUEUE_ORIGIN: origins.queue,
+      VITE_PEAKET_QUEUE_FILES_ORIGIN: origins['queue-files'],
+    }),
+  });
+}
+
+/** 워크로드별 데모 build-arg */
+export const DEMO_BUILD_ARGS = demoBuildArgs();
+/** 데모 빌드에 반드시 넘겨야 하는 build-arg(빠지면 S2 같은 시나리오가 조용히 깨진다) */
+export const DEMO_REQUIRED_BUILD_ARGS = Object.freeze({
+  'queue-room': Object.freeze(['VITE_PEAKET_API_ORIGIN', 'VITE_PEAKET_QUEUE_ORIGIN', 'VITE_PEAKET_QUEUE_FILES_ORIGIN']),
+});
 
 /**
  * 새 이미지 열(빌드 차례: 기반 패키지를 먼저 쓰는 서비스 → 앱).
@@ -117,6 +141,36 @@ export function dockerignoreProblems(text = readFileSync(join(REPO, '.dockerigno
 }
 
 /**
+ * 이미지 하나의 데모 build-arg가 Dockerfile의 `ARG` 선언과 맞는지 본다(V-T7 ④ `--check`).
+ * Dockerfile에 ARG가 없으면 `--build-arg`는 조용히 무시되고 운영 기본값(포트 없음)이 구워진다.
+ * @param {{ workload: string, dockerfile: string, buildArgs?: Record<string, string> }} i
+ * @param {Record<string, string[]>} required
+ */
+export function buildArgsProblems(i, required = DEMO_REQUIRED_BUILD_ARGS) {
+  const problems = [];
+  const args = i.buildArgs ?? {};
+  const declared = new Set([...readFileSync(join(REPO, i.dockerfile), 'utf8').matchAll(/^ARG\s+([A-Za-z0-9_]+)/gm)].map((m) => m[1]));
+  const origins = new Set(Object.values(demoOrigins()));
+  for (const name of required[i.workload] ?? []) {
+    if (!(name in args)) problems.push(`${i.dockerfile}: 필수 build-arg ${name}가 빠졌다`);
+  }
+  for (const [name, value] of Object.entries(args)) {
+    if (!declared.has(name)) problems.push(`${i.dockerfile}: build-arg ${name}를 받는 ARG가 없다(넘겨도 무시된다)`);
+    if (!/:18\d{3}(?:\/|$)/.test(value)) problems.push(`${i.dockerfile}: build-arg ${name}=${value}에 이 PC 포트가 없다`);
+    else if (!origins.has(value)) problems.push(`${i.dockerfile}: build-arg ${name}=${value}가 demoOrigins에 없다`);
+  }
+  return problems;
+}
+
+/** docker build 명령(저장소 뿌리 맥락). 데모 출처 build-arg를 함께 넘긴다 */
+export function dockerBuildArgs(i) {
+  const args = ['build', '-f', join(REPO, i.dockerfile), '-t', i.image];
+  for (const [name, value] of Object.entries(i.buildArgs ?? {})) args.push('--build-arg', `${name}=${value}`);
+  args.push(REPO);
+  return args;
+}
+
+/**
  * `--check`(기본)·`--build` 인자. --check는 정적 점검, --build는 10개를 차례로 빌드한다.
  * @param {string[]} argv
  */
@@ -139,18 +193,21 @@ export function checkImages() {
   const images = DEMO_IMAGES.map((i) => {
     const problems = [];
     if (!existsSync(join(REPO, i.dockerfile))) problems.push(`${i.dockerfile}이 없다`);
-    else problems.push(...dockerfileProblems(i.dockerfile, { user: i.user }));
+    else {
+      problems.push(...dockerfileProblems(i.dockerfile, { user: i.user }));
+      problems.push(...buildArgsProblems(i));
+    }
     if (DEMO_NGINX_CONFS[i.workload] && !existsSync(join(REPO, DEMO_NGINX_CONFS[i.workload]))) problems.push(`${DEMO_NGINX_CONFS[i.workload]}이 없다`);
-    return { workload: i.workload, image: i.image, dockerfile: i.dockerfile, problems };
+    return { workload: i.workload, image: i.image, dockerfile: i.dockerfile, buildArgs: i.buildArgs ?? {}, problems };
   });
   const shared = dockerignoreProblems();
   const problems = [...shared, ...images.flatMap((i) => i.problems)];
   return { ok: problems.length === 0, images, problems };
 }
 
-/** 이미지 하나를 저장소 뿌리 맥락에서 빌드한다 */
+/** 이미지 하나를 저장소 뿌리 맥락에서 빌드한다(데모 출처 build-arg 포함) */
 export function buildImage(i) {
-  execFileSync('docker', ['build', '-f', join(REPO, i.dockerfile), '-t', i.image, REPO], { stdio: 'inherit' });
+  execFileSync('docker', dockerBuildArgs(i), { stdio: 'inherit' });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
