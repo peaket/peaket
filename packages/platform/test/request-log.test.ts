@@ -371,6 +371,31 @@ describe('서비스 로거', () => {
   });
 });
 
+describe('로그 시각(docs/security/asvs/delivery.md 16.2.2)', () => {
+  /** ISO 8601, 밀리초, 시간대 오프셋 +09:00(KST). 'Z'(UTC)나 오프셋 없는 꼴은 아니다 */
+  const KST_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+09:00$/;
+
+  test('[ASVS v5.0.0-16.2.2] 정규 로그 줄·서비스 로거·NestJS 자체 기록의 ts는 주입한 시계 값을 시간대 오프셋(+09:00)을 단 ISO 8601로 적는다', async () => {
+    // UTC로는 12월 31일, KST로는 다음 해 1월 1일인 때(날짜·연도가 바뀌는 자리)
+    s = await start(BASE, { now: Date.parse('2026-12-31T15:30:00.250Z') });
+    await s.inject({ method: 'GET', url: '/v1/demo/log-inside' });
+    const request = only(s.requests());
+    const inside = s.lines.find((l) => l.msg === 'inside');
+    expect(request.ts).toBe('2027-01-01T00:30:00.250+09:00');
+    expect(inside?.ts).toBe('2027-01-01T00:30:00.250+09:00');
+    // 시계를 돌리면 그만큼 바뀐다(시스템 시계가 아니라 주입한 시계다)
+    s.clock.advance(61_001);
+    s.svc.logger.warn({ kind: 'clock-check' }, '시각 확인');
+    expect(s.lines.find((l) => l.kind === 'clock-check')?.ts).toBe('2027-01-01T00:31:01.251+09:00');
+    for (const l of s.lines) expect(String(l.ts), String(l.msg)).toMatch(KST_ISO);
+
+    const c = collector();
+    const at = Date.parse('2026-06-30T23:59:59.999Z');
+    new NestPinoLogger(createPlatformLogger({ service: 't', env: 'ci', version: 'v', clock: fakeClock({ now: at }), level: 'info', destination: c.stream })).log('부트스트랩', 'NestApplication');
+    expect(c.lines[0]?.ts).toBe('2026-07-01T08:59:59.999+09:00');
+  });
+});
+
 describe('시작 설정', () => {
   test('ADR0053_운영에서_가명키가없으면_서비스가시작하지않는다', async () => {
     await expect(createService({ name: 'demo-svc', module: DemoModule, env: { PEAKET_ENV: 'prod' } })).rejects.toThrow(PlatformConfigError);
