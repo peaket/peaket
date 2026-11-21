@@ -115,7 +115,7 @@
 | BAT-205 | 3 | 2 | B | BAS-020·BAS-030 | 4.25 | D-T32 ①, D-T39 ①~④, ST-T15, delivery:v5.0.0-15.1.2 | 2026-11-12 시작 때 장부 범위를 좁혔다(ADR-0267 웨이브): docs/devops.md·streaming.md·delivery.md 전체는 다른 단계 몫이 섞여 있어 이 묶음이 만드는 공급망 게시 잡·SBOM 찾기·Avro 검사·등록 Job만 남긴다. 나머지는 각 단계가 채운다 |
 | BAT-210 | 3 | 2 | B | BAS-070·BAS-110·BAS-230 | 4.5 | NFR-007 | 2026-11-12 시작 때 장부 범위를 NFR-007로 좁혔다(ADR-0267 웨이브): docs/architecture.md·verification.md 전체는 다른 단계 몫이 섞여 있다. 이 묶음은 남은 기능 설계서 4편의 운영 확인 표, NFR-007 셈 근거, RFC 3건 초안을 만든다. BAS-110의 포트원 웹훅 헤더는 이미 payment §5에 있고, 토스·포트원 한도는 계약 전 추정으로 둔다 |
 | BAT-215 | 1 | 3 | B | OPS-010·OPS-020·OPS-030 | 4.75 | AC-T7, docs/observability.md, docs/security/asvs/delivery.md | 선행 HOT-420(갈래 1, 끝남). 2.11.2의 나머지 HOT-430~450은 선행으로 두지 않는다(OPEN[53] (가), 2026-11-21) |
-| BAT-220 | 1 | 3 | B | OPS-150·OPS-160 | 4.75 | ST-T15, ST-T16, docs/streaming.md, docs/features/analytics.md, docs/features/control-tower.md |  |
+| BAT-220 | 1 | 3 | B | OPS-150·OPS-160 | 4.75 | ST-T15, ST-T16 ① | 2026-11-22 계획 때 장부 범위를 OPS-150(공용 소비 모듈)이 닫는 항목으로 좁혔다. OPS-160은 나누기 제안(감독 결정 대기), 빠진 항목의 갈 곳은 docs/review/plans/BAT-220.md §2·§12 |
 | BAT-225 | 1 | 3 | B | OPS-190·OPS-200 | 4.25 | docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md |  |
 | BAT-230 | 1 | 3 | B | OPS-205·OPS-220 | 4.5 | docs/features/analytics.md, A-T18, A-T22, ST-T22, docs/security/asvs/analytics.md |  |
 | BAT-235 | 1 | 3 | B | OPS-230 | 3 | docs/features/analytics.md, A-T25 | 혼자: 이웃과 합치면 5일을 넘음(OPS-220과 6일, OPS-240과 5.25일) |
