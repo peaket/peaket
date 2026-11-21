@@ -73,7 +73,11 @@ export interface DeviceKeyRegistrationInput {
 }
 
 export type DeviceKeyRegistrationResult =
-  | { readonly kind: 'REGISTERED'; readonly keyId: string; readonly revokedKeyId?: string }
+  /**
+   * unchanged: 같은 티켓의 지금 유효 키와 keyId가 같은 요청이라 아무것도 바꾸지 않았다(새 행·폐기·scanner_change·24시간 셈 없음,
+   * offline-gate §2 '같은 키 다시 등록', ADR-0336 결정 4). 응답은 처음 등록과 같은 201 `{keyId}`다
+   */
+  | { readonly kind: 'REGISTERED'; readonly keyId: string; readonly revokedKeyId?: string; readonly unchanged?: true }
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'NOT_HOLDER' }
   | { readonly kind: 'REAUTH_REQUIRED' }

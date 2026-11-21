@@ -18,6 +18,7 @@
 //   지금이 든 PRESALE(정한 순간부터 1시간 뒤까지) 뒤 GENERAL. 팬별 판매 자격 GET /v1/events/{회차}/sale-eligibility eligibility=eligible|ineligible|down
 //   (eligible은 PRESALE도 대상, ineligible은 PRESALE만 대상 아님, down은 503. 비로그인 fan=guest면 401). 명단 밖 403은 queueLobby·queueEntry=sale-eligibility
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
+//   입장용 휴대폰 등록(ADR-0336, BAT-350) POST /v1/tickets/{티켓}/device-keys: deviceKey=normal|mismatch|down|reauth|not-found|invalid, deviceKeyReset=1(scripts/mock-api/tickets.mjs)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
 //   detail=suspended면 모두 410 event-suspended(한 번 공개된 뒤 판매 중지, ADR-0200 결정 3)
@@ -34,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { createQueueMock, QUEUE_DEFAULTS } from './mock-api/queue.mjs';
 import { createPartnerMock } from './mock-api/partner.mjs';
 import { createPurchaseMock } from './mock-api/purchase.mjs';
+import { createTicketsMock } from './mock-api/tickets.mjs';
 import { SEATMAP_VERSIONS, seatmapLayoutV, seatSnapshot } from './mock-api/seatmap.mjs';
 import { createSeatStreamMock } from './mock-api/stream.mjs';
 import { GW_FAN_API_CORS, GW_PARTNER_API_ALLOW_HEADERS } from './gateway-cors.mjs';
@@ -599,7 +601,7 @@ export function startMockApi({
   now = Date.now,
 } = {}) {
   const origin = `http://127.0.0.1:${port}`;
-  const state = { pay: 'normal', ticketEvent: '', accept: 'normal', order: 'normal', hold: 'normal', holdAction: 'normal', payments: 'normal', seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', detailSale: 'none', eligibility: 'eligible', verify: 'popup', restriction: 'none', subscribe: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
+  const state = { pay: 'normal', ticketEvent: '', accept: 'normal', order: 'normal', hold: 'normal', holdAction: 'normal', payments: 'normal', seatSnapshot: 'normal', home: 'normal', ranking: 'normal', fan: 'member', detail: 'normal', detailSale: 'none', eligibility: 'eligible', verify: 'popup', restriction: 'none', subscribe: 'normal', deviceKey: 'normal', person: MEMBER_PERSON, ...QUEUE_DEFAULTS };
   /** detailSale=presale-now를 정한 순간 + 1시간(지금이 든 PRESALE 조각의 끝). 고정해 공연 상세와 판매 자격이 같은 조각을 준다 */
   let presaleNowEndsAt = 0;
   /** 공연 상세의 판매 단계(openapi SalePhase[]). 없음이면 undefined */
@@ -631,6 +633,7 @@ export function startMockApi({
   };
   const queue = createQueueMock({ now, state, schedule: scheduleOf });
   const purchase = createPurchaseMock({ now, state });
+  const tickets = createTicketsMock({ state });
   /** 본인확인 건(건 ID → 목적·돌아갈 주소·상태) */
   const attempts = new Map();
   /** 결과 확정(identity-svc confirm-verification.ts의 차례): 정리 중 → 기관 값 → 기록 없는 REVERIFY → 만 나이 → 다른 계정 → 같은 사람 */
@@ -707,7 +710,7 @@ export function startMockApi({
     const p = url.pathname;
     const unauthorized = () => send(401, { type: 'about:blank', title: 'Unauthorized', status: 401 }, 'application/problem+json');
     if (p === '/__mock/state' && req.method === 'GET') {
-      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'detailSale', 'eligibility', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'holdAction', 'payments', 'order', 'accept', 'pay', 'ticketEvent', 'partner', 'partnerImage', ...Object.keys(QUEUE_DEFAULTS)])) {
+      for (const k of /** @type {const} */ (['home', 'ranking', 'fan', 'fanEnded', 'detail', 'detailSale', 'eligibility', 'verify', 'restriction', 'subscribe', 'seatSnapshot', 'hold', 'holdAction', 'payments', 'order', 'accept', 'pay', 'ticketEvent', 'partner', 'partnerImage', 'deviceKey', ...Object.keys(QUEUE_DEFAULTS)])) {
         const v = url.searchParams.get(k);
         if (v !== null && (v !== '' || k === 'fanEnded' || k === 'queueBanner' || k === 'queueSeats' || k === 'queueOpenIn' || k === 'queueSoldOutTiers' || k === 'queueStateRetryAfter')) state[k] = v;
       }
@@ -718,6 +721,7 @@ export function startMockApi({
       if (url.searchParams.get('detailSale') === 'presale-now') presaleNowEndsAt = now() + HOUR_MS;
       if (url.searchParams.get('queueReset')) queue.reset();
       if (url.searchParams.get('logReset')) requestLog.length = 0;
+      if (url.searchParams.get('deviceKeyReset')) tickets.reset();
       if (url.searchParams.get('fan')) {
         state.nickname = undefined;
         state.person = state.fan === 'member' ? MEMBER_PERSON : undefined;
@@ -883,6 +887,7 @@ export function startMockApi({
     // 대기열(진입·묶음 결과·대기 상태 파일·입장 확정·대기 취소, scripts/mock-api/queue.mjs)
     if (queue.handle(req, p, { send, problem, readJson, badRequest })) return;
     if (purchase.handle(req, p, url, { send, problem })) return;
+    if (tickets.handle(req, p, { send, problem, readJson, badRequest, unauthorized })) return;
     if (p === '/v1/wishes' && req.method === 'GET') {
       if (state.fan === 'guest') return unauthorized();
       const raw = url.searchParams.get('productionIds');

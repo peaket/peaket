@@ -8,7 +8,10 @@ import Dexie, { type Table } from 'dexie';
 export const WALLET_DB_NAME = 'peaket-wallet';
 
 export type DeviceKeyReason = 'ISSUE' | 'REISSUE' | 'TRANSFER' | 'BOOTH';
-/** LOCAL: 이 기기에만 만든 키. REGISTERED: ticket-svc에 공개키를 등록한 키 */
+/**
+ * LOCAL: 서버가 등록을 확인하기 전의 키('확인 전'), 또는 팬 API 주소가 없는 빌드(로컬 화면 개발)에서 이 기기에만 둔 키.
+ * REGISTERED: ticket-svc가 같은 keyId로 등록을 확인한 키(201). QR은 이때만 보인다(주소 없는 빌드 제외, docs/frontend.md §4.2.4, ADR-0336)
+ */
 export type DeviceKeyRegistration = 'LOCAL' | 'REGISTERED';
 
 export interface StoredDeviceKey {

@@ -27,7 +27,15 @@ export {
   type QrV1Fields,
   type QrV1Payload,
 } from './qr-v1';
-export { deviceKeyRegistrationConfigured, registerDeviceKey, type DeviceKeyRegistrationResult, type RegisterDeviceKeyInput } from './register';
+export {
+  contractPublicKeyJwk,
+  deviceKeyRegistrationAvailable,
+  registerDeviceKey,
+  type DeviceKeyRegistrationResult,
+  type DeviceKeyRetryReason,
+  type RegisterDeviceKeyInput,
+} from './register';
+export { enrollDeviceKey, syncDeviceKeyRegistration, type SyncOptions, type WalletKeyStatus } from './enrollment';
 export {
   deleteDeviceKey,
   loadDeviceKey,
@@ -45,7 +53,18 @@ export {
   type StoredDeviceKey,
   type WalletTicketSnapshot,
 } from './store';
-export { isNetworkOnlyPath, isSkipWaitingMessage, isWalletDocumentPath, rejectNoStore } from './sw-rules';
+export {
+  isNetworkOnlyPath,
+  isSkipWaitingMessage,
+  isWalletCacheVersion,
+  isWalletDocumentPath,
+  LEGACY_WALLET_CACHES,
+  rejectNoStore,
+  rotateWalletCaches,
+  staleWalletCaches,
+  walletCacheName,
+  WALLET_CACHE_PREFIX,
+} from './sw-rules';
 export { applyWaitingUpdate, holdQrLock, isUpdateHoldScreen, qrLockHeld, QR_LOCK_NAME, shouldOfferUpdate, WALLET_SCOPE_URL } from './update-hold';
 export { DeviceQr, type DeviceQrProps, type DeviceQrSnapshot } from './ui/DeviceQr';
 export { OfflineBanner, type OfflineBannerProps } from './ui/OfflineBanner';

@@ -1,6 +1,9 @@
-// 시험·로컬용 기기 공개키 저장소. DrizzleDeviceKeyStore와 같은 규칙(티켓당 유효 키 하나, 24시간 REISSUE 한도)을 메모리에서 지킨다.
+// 시험·로컬용 기기 공개키 저장소. DrizzleDeviceKeyStore와 같은 규칙(티켓당 유효 키 하나, 24시간 REISSUE 한도,
+// 같은 키 다시 등록은 바꾸지 않고 받음)을 메모리에서 지킨다.
 import { keyIdTextOf, publicKeyTextOf } from '../domain/device-key.js';
 import type { DeviceKeyRegistrationInput, DeviceKeyRegistrationResult, DeviceKeyStore } from '../domain/ports.js';
+
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
 
 export interface MemoryDeviceKeyTicket {
   ticketId: string;
@@ -30,14 +33,17 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore {
     const ticket = this.tickets.get(i.ticketId);
     if (!ticket) return { kind: 'NOT_FOUND' };
     if (ticket.accountId !== i.accountId) return { kind: 'NOT_HOLDER' };
+    const list = this.keys.get(i.ticketId) ?? [];
+    const active = list.find((k) => k.revokedAtMs === undefined);
+    // 같은 키 다시 등록(offline-gate §2, ADR-0336 결정 4): 보유자 확인 바로 뒤, 입장 시작·TRANSFER·재인증 확인보다 앞에서 본다.
+    // 지금 유효 키와 keyId가 같으면 아무것도 바꾸지 않고 같은 keyId로 답한다(새 키·폐기·24시간 셈 없음). 입장 시작 뒤에도 같다
+    if (active && sameBytes(active.keyId, i.keyId)) return { kind: 'REGISTERED', keyId: keyIdTextOf(active.keyId), unchanged: true };
     const started = ticket.eventStartsAtMs !== undefined && i.nowMs >= ticket.eventStartsAtMs;
     // 입장 시작 뒤에는 소유권이 동결된다. 재인증이 있어도 REISSUE·TRANSFER는 안 되고 BOOTH만 된다.
     if (started && (i.reason === 'REISSUE' || i.reason === 'TRANSFER')) return { kind: 'ENTRY_STARTED' };
     if (started && i.reason === 'ISSUE' && !i.reauthVerified) return { kind: 'ENTRY_STARTED' };
     // TRANSFER는 양도로 보유자가 바뀐 뒤에만 쓴다. 결제자 그대로면 양도 수락 전이므로 거절한다.
     if (i.reason === 'TRANSFER' && ticket.accountId === (ticket.payerAccountId ?? ticket.accountId)) return { kind: 'TRANSFER_NOT_ALLOWED' };
-    const list = this.keys.get(i.ticketId) ?? [];
-    const active = list.find((k) => k.revokedAtMs === undefined);
     // 이미 키가 있으면 ISSUE도 첫 등록이 아니다. 재인증 없이는 바꾸지 못한다.
     if (i.reason === 'ISSUE' && active && !i.reauthVerified) return { kind: 'REAUTH_REQUIRED' };
     if (i.reason === 'REISSUE' || (i.reason === 'ISSUE' && active)) {

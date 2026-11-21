@@ -16,12 +16,23 @@ export const SW_FILES = ['sw.js'];
 
 const JS_LINK = /\n?\/\/# sourceMappingURL=[^\n]*\s*$/;
 
-/** 미리 저장에 더하는 문서 판: 배포 ID, 없으면 커밋, 둘 다 없으면 개발 값 */
+/** 판 꼴: 공유 캐시의 빌드 칸과 같다(docs/frontend.md §5.18 '공유 캐시 처리기 세부'). 워커 쪽 같은 꼴은 src/features/wallet-device-key/sw-rules.ts */
+const REVISION = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** 워커 묶음에 판을 넣는 이름(app/sw.ts의 `declare const __WALLET_CACHE_VERSION__`). 런타임 캐시 이름 `wallet-shell-{판}`에 쓴다 */
+export const WALLET_CACHE_VERSION_DEFINE = '__WALLET_CACHE_VERSION__';
+
+/**
+ * 미리 저장에 더하는 문서 판이자 런타임 캐시 판: 배포 ID, 없으면 커밋, 둘 다 없으면 개발 값(빈 값은 없는 것으로 본다).
+ * 꼴 밖이면 던져 워커 빌드를 멈춘다(docs/frontend.md §5.4 런타임 캐시 판, ADR-0336 결정 5)
+ */
 export function swRevision(env = process.env) {
-  return env.PEAKET_DEPLOYMENT_ID || env.GITHUB_SHA || 'wallet-dev';
+  const revision = env.PEAKET_DEPLOYMENT_ID || env.GITHUB_SHA || 'wallet-dev';
+  if (!REVISION.test(revision)) throw new Error(`월렛 워커 판이 꼴([A-Za-z0-9_-]{1,64}) 밖이다: ${JSON.stringify(revision)}`);
+  return revision;
 }
 
-/** @serwist/turbopack createSerwistRoute에 넘기는 값(빌드 때만 쓴다) */
+/** @serwist/turbopack createSerwistRoute에 넘기는 값(빌드 때만 쓴다). 미리 저장 판과 런타임 캐시 판은 같은 값 하나다 */
 export function serwistOptions(env = process.env) {
   const revision = swRevision(env);
   return {
@@ -31,6 +42,7 @@ export function serwistOptions(env = process.env) {
       { url: '/~offline', revision },
       { url: '/my/tickets', revision },
     ],
+    esbuildOptions: { define: { [WALLET_CACHE_VERSION_DEFINE]: JSON.stringify(revision) } },
   };
 }
 

@@ -1,5 +1,6 @@
 // 입장용 기기 공개키 저장소(Drizzle, FR-012, offline-gate §2·§3). 등록·폐기와 scanner_change 기록을 한 트랜잭션에 넣는다.
 // 티켓 행을 FOR UPDATE로 잠가 같은 티켓의 동시 등록이 유효 키 하나 규칙을 깨지 않게 한다.
+// 같은 키 다시 등록(지금 유효 키와 keyId가 같음)은 그 잠금 안에서 아무것도 바꾸지 않고 받는다(offline-gate §2, ADR-0336 결정 4).
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -30,6 +31,12 @@ export class DrizzleDeviceKeyStore implements DeviceKeyStore {
       const ticket = rows[0];
       if (!ticket) return { kind: 'NOT_FOUND' };
       if (ticket.account_id !== i.accountId) return { kind: 'NOT_HOLDER' };
+      const activeRows = (await tx.execute(sql`select key_id from device_key where ticket_id = ${i.ticketId} and revoked_at is null limit 1`)).rows as { key_id: Buffer }[];
+      const activeKeyId = activeRows[0] ? new Uint8Array(activeRows[0].key_id) : undefined;
+      // 같은 키 다시 등록(offline-gate §2, ADR-0336 결정 4): 티켓 행 잠금 안에서, 보유자 확인 바로 뒤·입장 시작·TRANSFER·재인증 확인보다 앞에서 본다.
+      // 지금 유효 키와 keyId가 같으면 새 행·폐기·scanner_change·24시간 셈 없이 같은 keyId로 답한다. 겹친 두 요청은 잠금으로 차례가 되어
+      // 먼저 온 쪽이 등록하고 뒤엣것은 여기서 바꾸지 않고 받는다
+      if (activeKeyId && Buffer.from(activeKeyId).equals(Buffer.from(i.keyId))) return { kind: 'REGISTERED', keyId: keyIdTextOf(activeKeyId), unchanged: true };
       const startsAt = atMs(ticket.event_starts_at);
       const started = startsAt !== undefined && i.nowMs >= startsAt;
       // 입장 시작 뒤에는 소유권이 동결된다. 재인증이 있어도 REISSUE·TRANSFER는 안 되고 BOOTH만 된다.
@@ -37,8 +44,7 @@ export class DrizzleDeviceKeyStore implements DeviceKeyStore {
       if (started && i.reason === 'ISSUE' && !i.reauthVerified) return { kind: 'ENTRY_STARTED' };
       // TRANSFER는 양도로 보유자가 바뀐 뒤에만 쓴다. 결제자 그대로면 양도 수락 전이므로 거절한다.
       if (i.reason === 'TRANSFER' && ticket.account_id === ticket.payer_account_id) return { kind: 'TRANSFER_NOT_ALLOWED' };
-      const activeRows = (await tx.execute(sql`select id from device_key where ticket_id = ${i.ticketId} and revoked_at is null limit 1`)).rows as { id: string }[];
-      const hasActive = activeRows.length > 0;
+      const hasActive = activeKeyId !== undefined;
       // 이미 키가 있으면 ISSUE도 첫 등록이 아니다. 재인증 없이는 바꾸지 못한다.
       if (i.reason === 'ISSUE' && hasActive && !i.reauthVerified) return { kind: 'REAUTH_REQUIRED' };
       if (i.reason === 'REISSUE' || (i.reason === 'ISSUE' && hasActive)) {

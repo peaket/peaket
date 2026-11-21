@@ -1,6 +1,9 @@
 // 입장용 기기 공개키 등록·폐기 유스케이스(FR-012, POL-018, ADR-0025·0050 결정 2·ADR-0051 결정 10·11).
 // 키는 월렛의 '이 휴대폰을 입장용으로 등록' 버튼으로만 만든다. 서버는 공개키만 받고 keyId를 계산해 등록한다.
 // 입장 시작 뒤 ISSUE·REISSUE는 재인증이 필요하고, BOOTH는 부스 허용이 있어야 한다(지금은 재인증·부스 허용 저장소가 없어 403).
+// 같은 키 다시 등록(지금 유효 키와 keyId가 같으면 바꾸지 않고 201, offline-gate §2, ADR-0336 결정 4)은 저장소가 티켓 행 잠금 안에서
+// 보유자 확인 바로 뒤에 지킨다(DrizzleDeviceKeyStore·MemoryDeviceKeyStore). 잠금 밖인 이 계층에서 보면 겹친 두 요청이 모두 '키 없음'을 본다.
+// REISSUE·BOOTH의 재인증·부스 허용 확인은 지금처럼 이 계층에서 저장소보다 먼저 한다.
 import type { Clock } from '@peaket/platform';
 import { assertReason, deviceKeyMaterialOf, type DeviceKeyReason, type PublicKeyJwk } from '../domain/device-key.js';
 import type { DeviceKeyRegistrationResult, DeviceKeyStore } from '../domain/ports.js';
