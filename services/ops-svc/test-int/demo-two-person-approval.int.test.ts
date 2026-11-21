@@ -98,7 +98,9 @@ beforeAll(async () => {
   svc = await createService({
     name: 'ops-svc',
     module: AppModule.register({ database: db, executor, background: false, nowMs: NOW, adminAccounts: { identity: new FakeAdminIdentity(), reauth: kit.verifier } }),
-    env: { PEAKET_ENV: 'demo' },
+    // 서비스 뼈대 설정은 ci로 띄운다: demo 뼈대는 운영처럼 로그 가명 키·내부 토큰·테넌트 한도 Redis가 있어야 시작하는데(플랫폼 몫, 이 시험 밖)
+    // 데모 표시는 감사 기록을 쓸 때 프로세스 환경 값 PEAKET_ENV를 읽으므로(ADR-0349 결정 11) 위의 stubEnv('demo')가 정한다
+    env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),
     adminAuthz: identity,
