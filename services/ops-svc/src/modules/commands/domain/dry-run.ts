@@ -1,8 +1,9 @@
 // 명령 사전 모의(dry-run)의 꼴·센 값 포트·예측 식·실행 뒤 비교(ADR-0340 결정 2·3, docs/features/control-tower.md §4 '센 값·예측 값·예측 오차 기록').
 // 센 값은 유형마다 포트 DryRunSource로 센다. 원천이 없거나 실패하면 unavailable에 적고 접수를 막지 않는다(권한·한계 검사는 따로 한다).
-// 예측 식은 명령 1만 낸다. 빈 결과를 '일치'로 적지 않는다: 세지 못한 값은 늘 unavailable에 남는다.
+// 예측 식은 명령 1과 명령 12·6 결제 갈래(동시 입장 목표 상한, ADR-0349 결정 4·6)가 낸다. 빈 결과를 '일치'로 적지 않는다: 세지 못한 값은 늘 unavailable에 남는다.
 import type { ProtectedRangeHit } from './block-ranges.js';
 import { SAFETY_LIMITS, type ApprovalMode, type CommandType } from './command.js';
+import { ONSALE_WINDOW_AFTER_MS, ONSALE_WINDOW_BEFORE_MS } from './onsale-window.js';
 
 /** dry-run 기록의 판 */
 export const DRY_RUN_VERSION = 1;
@@ -81,6 +82,8 @@ export function limitsOf(type: CommandType): Record<string, number> {
       return { blockMaxTtlMs: SAFETY_LIMITS.blockMaxTtlMs, blockMaxEntries: SAFETY_LIMITS.blockMaxEntries };
     case 'LOG_LEVEL':
       return { logLevelMs: SAFETY_LIMITS.logLevelMs };
+    case 'PG_ASSIGN':
+      return { onsaleWindowBeforeMs: ONSALE_WINDOW_BEFORE_MS, onsaleWindowAfterMs: ONSALE_WINDOW_AFTER_MS, admissionTargetMax: SAFETY_LIMITS.admissionTargetMax };
     default:
       return {};
   }
@@ -163,11 +166,78 @@ export function predictAdmissionTarget(params: Readonly<Record<string, unknown>>
   return { predicted, unavailable };
 }
 
-/** 예측 식이 있는 유형 */
-export const PREDICTING_TYPES: readonly CommandType[] = ['ADMISSION_TARGET'];
+/**
+ * 결제사별 동시 입장 목표 상한의 넣는 값(docs/features/queue-admission.md §5 '결제사별 상한' 정상 상태 갈래):
+ * 상한 = min(절대 상한, 결제사 승인 상한 × 평균 체류 ÷ 결제 비율 × 안전 계수). 평균 체류 180초(docs/architecture.md §9.1), 결제 비율 1.0 [가정], 안전 계수 0.5 [가정]
+ */
+export const PG_ADMISSION_CAP_INPUTS = Object.freeze({ avgDwellSeconds: 180, paymentRatio: 1.0, safetyFactor: 0.5 });
+const PG_CAP_FORMULA = 'min(admissionTargetMax, pgTps × avgDwellSeconds ÷ paymentRatio × safetyFactor)';
+const PG_CAP_ASSUMPTIONS = [
+  '평균 체류 180초(docs/architecture.md §9.1)',
+  '결제 비율 1.0 [가정], 안전 계수 0.5 [가정](docs/features/queue-admission.md §5 결제사별 상한)',
+  '결제사 승인 상한은 payment-svc가 답한 설정 값이다(CheckEventPgAssignment)',
+];
+/** 명령 12·6 dry-run의 센 값 이름: 지금 결제사·새 결제사의 승인 상한(초당). 명령 6 회차 범위는 ':<회차>'를 붙인다 */
+export const PG_TPS_KEYS = Object.freeze({ current: 'currentPgTps', next: 'newPgTps' });
+/** 명령 12·6 dry-run의 예측 이름: 동시 입장 목표 상한 지금·새 값 */
+export const PG_CAP_KEYS = Object.freeze({ current: 'admissionTargetCapNow', next: 'admissionTargetCapNew' });
+
+/** 결제사 승인 상한 하나로 동시 입장 목표 상한을 계산한다 */
+export function pgAdmissionCap(pgTps: number): number {
+  const { avgDwellSeconds, paymentRatio, safetyFactor } = PG_ADMISSION_CAP_INPUTS;
+  return Math.min(SAFETY_LIMITS.admissionTargetMax, (pgTps * avgDwellSeconds) / paymentRatio * safetyFactor);
+}
+
+/** 상한 하나의 예측. 넣을 값이 없거나 0 이하면 unavailable이다 */
+function capPrediction(key: string, tpsKey: string, counted: readonly DryRunCount[]): { predicted?: DryRunPrediction; unavailable?: DryRunUnavailable } {
+  const tps = valueOf(counted, tpsKey);
+  if (tps === undefined || !Number.isFinite(tps)) return { unavailable: { key, source: PREDICTION_SOURCE, reason: `input-unavailable:${tpsKey}` } };
+  if (tps <= 0) return { unavailable: { key, source: PREDICTION_SOURCE, reason: `input-zero:${tpsKey}` } };
+  return {
+    predicted: {
+      key,
+      value: pgAdmissionCap(tps),
+      formula: PG_CAP_FORMULA,
+      inputs: { pgTps: tps, ...PG_ADMISSION_CAP_INPUTS, admissionTargetMax: SAFETY_LIMITS.admissionTargetMax },
+      assumptions: PG_CAP_ASSUMPTIONS,
+    },
+  };
+}
+
+/**
+ * 명령 12·6 결제 갈래 예측(ADR-0349 결정 4·6): 동시 입장 목표 상한 지금 → 새 값. 센 값(currentPgTps·newPgTps, 명령 6 회차 범위는 ':<회차>' 붙음)이
+ * 없으면 그 예측은 unavailable이다(승인 상한을 받지 못함). 명령 6 PLATFORM 범위는 회차별 지금 지정을 읽지 않아 unavailable이다
+ */
+export function predictPgCaps(type: CommandType, params: Readonly<Record<string, unknown>>, counted: readonly DryRunCount[]): { predicted: DryRunPrediction[]; unavailable: DryRunUnavailable[] } {
+  const predicted: DryRunPrediction[] = [];
+  const unavailable: DryRunUnavailable[] = [];
+  const push = (r: { predicted?: DryRunPrediction; unavailable?: DryRunUnavailable }) => {
+    if (r.predicted) predicted.push(r.predicted);
+    if (r.unavailable) unavailable.push(r.unavailable);
+  };
+  if (type === 'PG_ASSIGN') {
+    push(capPrediction(PG_CAP_KEYS.current, PG_TPS_KEYS.current, counted));
+    push(capPrediction(PG_CAP_KEYS.next, PG_TPS_KEYS.next, counted));
+    return { predicted, unavailable };
+  }
+  const eventIds = Array.isArray(params.eventIds) ? (params.eventIds as unknown[]).filter((v): v is string => typeof v === 'string') : [];
+  if (params.scope !== 'EVENT' || eventIds.length === 0) {
+    unavailable.push({ key: PG_CAP_KEYS.next, source: PREDICTION_SOURCE, reason: 'platform-scope-not-read' });
+    return { predicted, unavailable };
+  }
+  for (const id of eventIds) {
+    push(capPrediction(`${PG_CAP_KEYS.current}:${id}`, `${PG_TPS_KEYS.current}:${id}`, counted));
+    push(capPrediction(`${PG_CAP_KEYS.next}:${id}`, `${PG_TPS_KEYS.next}:${id}`, counted));
+  }
+  return { predicted, unavailable };
+}
+
+/** 예측 식이 있는 유형(명령 6은 결제 갈래만) */
+export const PREDICTING_TYPES: readonly CommandType[] = ['ADMISSION_TARGET', 'PG_ASSIGN', 'DEGRADED_MODE'];
 
 export function predictionsOf(type: CommandType, params: Readonly<Record<string, unknown>>, counted: readonly DryRunCount[]): { predicted: DryRunPrediction[]; unavailable: DryRunUnavailable[] } {
   if (type === 'ADMISSION_TARGET') return predictAdmissionTarget(params, counted);
+  if (type === 'PG_ASSIGN' || (type === 'DEGRADED_MODE' && params.mode === 'PAYMENT_PG_FALLBACK')) return predictPgCaps(type, params, counted);
   return { predicted: [], unavailable: [] };
 }
 

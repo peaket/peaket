@@ -246,6 +246,7 @@ export type OperationId =
   | 'getOpsAuthPasskeys'
   | 'getOpsCase'
   | 'getOpsCommand'
+  | 'getOpsCommandPostReview'
   | 'getOpsComplianceDataRequest'
   | 'getOpsComplianceDocument'
   | 'getOpsComplianceIncident'
@@ -646,6 +647,7 @@ export const OPERATIONS = {
   getOpsAuthPasskeys: {operationId: "getOpsAuthPasskeys",method: "GET",path: "/v1/ops/auth/passkeys",host: "ops-api",kind: "read",cookie: true},
   getOpsCase: {operationId: "getOpsCase",method: "GET",path: "/v1/ops/cases/{caseId}",host: "ops-api",kind: "read",cookie: true},
   getOpsCommand: {operationId: "getOpsCommand",method: "GET",path: "/v1/ops/commands/{commandId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsCommandPostReview: {operationId: "getOpsCommandPostReview",method: "GET",path: "/v1/ops/commands/{commandId}/post-review",host: "ops-api",kind: "read",cookie: true},
   getOpsComplianceDataRequest: {operationId: "getOpsComplianceDataRequest",method: "GET",path: "/v1/ops/compliance/data-requests/{requestId}",host: "ops-api",kind: "read",cookie: true},
   getOpsComplianceDocument: {operationId: "getOpsComplianceDocument",method: "GET",path: "/v1/ops/compliance/documents/{documentId}",host: "ops-api",kind: "read",cookie: true},
   getOpsComplianceIncident: {operationId: "getOpsComplianceIncident",method: "GET",path: "/v1/ops/compliance/incidents/{incidentId}",host: "ops-api",kind: "read",cookie: true},

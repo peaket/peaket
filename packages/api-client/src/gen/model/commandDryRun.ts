@@ -27,7 +27,7 @@ export interface CommandDryRun {
   /** 접수·승인에 X-Reauth-Token이 필요한 위험 명령인가 */
   reauthRequired: boolean;
   counted: CommandDryRunCountedItem[];
-  /** 예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록) */
+  /** 예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 ':<회차 ID>', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록) */
   predicted: CommandDryRunPredictedItem[];
   /** 세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등) */
   unavailable: CommandDryRunUnavailableItem[];

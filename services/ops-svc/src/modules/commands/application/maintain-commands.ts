@@ -2,11 +2,16 @@
 // 승인 기한이 지난 PENDING_APPROVAL → REJECTED(SYSTEM, approval-expired), REVERT_PENDING → ACKED(REVERT_EXPIRED),
 // 만료가 지난 명령 2·8 → AUTO_EXPIRED(SYSTEM), 비교 때가 된 명령 → DRY_RUN_COMPARED(예측·실제, 세지 못하면 unavailable)를 남긴다.
 // 하루 한 번 3년 [가정] 지난 관리 계정 대응 행을 지운다(삭제 보류 행은 남긴다).
+// BAT-360(ADR-0349 결정 7·10): 만료가 지난 ACKED 명령 4는 WAF IP 집합 둘을 읽어 대역이 모두 빠졌거나 만료 전 다른 명령 4가 같은 대역을 막을 때만 AUTO_EXPIRED(SYSTEM)로 적고,
+//   IP 집합을 읽지 못하면 그대로 두고 다음 바퀴에 다시 본다(ASN 항목이 있는 명령은 이 확인 밖이다). 사후 검토는 놓친 할 일을 열고 기한 넘김 SEV3를 한 번 낸다.
+//   새 몫의 수(blocksExpired·postReviewsOpened·postReviewAlerts)는 0이 아닐 때만 결과에 싣는다.
 import { ACTOR_MAPPING_PURGE_INTERVAL_MS, ACTOR_MAPPING_RETENTION_MS, type Command } from '../domain/command.js';
+import { blockCommandOf, blockExpired, blockExpiryVerdict, ipSetKeys, type IpFamily } from '../domain/block-expiry.js';
 import { closeIfApprovalExpired, writeAutoExpired, writeComparison } from '../domain/command-writes.js';
 import { compareDryRun, type DryRunPrediction } from '../domain/dry-run.js';
-import type { CommandDueKind, CommandStore } from '../domain/ports.js';
+import type { BlockIpSetReader, CommandDueKind, CommandStore } from '../domain/ports.js';
 import type { ComputeDryRun } from './compute-dry-run.js';
+import type { PostReviews } from './post-review.js';
 
 export interface MaintainCommandsOptions {
   /** 한 바퀴에 종류마다 처리하는 명령 수(기본 50 [가정]) */
@@ -15,15 +20,31 @@ export interface MaintainCommandsOptions {
   readonly actorPurgeIntervalMs?: number;
 }
 
+/** 정비가 더 보는 몫(BAT-360). 주지 않으면 그 몫을 하지 않는다 */
+export interface MaintainCommandsExtras {
+  /** 명령 4 만료 확인이 읽는 WAF IP 집합 둘. 없으면(local·ci, 설정 없음) 명령 4는 ACKED 그대로다 */
+  readonly blockIpSets?: BlockIpSetReader;
+  /** 사후 검토 할 일 열기·기한 경보 */
+  readonly postReviews?: PostReviews;
+}
+
 export interface MaintenanceRound {
   readonly approvalsExpired: number;
   readonly revertsExpired: number;
   readonly autoExpired: number;
   readonly compared: number;
   readonly actorsPurged: number;
+  /** 명령 4 AUTO_EXPIRED(0이면 없다) */
+  readonly blocksExpired?: number;
+  /** 연 사후 검토 할 일(0이면 없다) */
+  readonly postReviewsOpened?: number;
+  /** 낸 사후 검토 기한 경보(0이면 없다) */
+  readonly postReviewAlerts?: number;
 }
 
 const predictedOf = (c: Command): DryRunPrediction[] => (Array.isArray(c.dryRun?.predicted) ? (c.dryRun.predicted as DryRunPrediction[]) : []);
+/** 명령 4 만료 확인이 한 바퀴에 읽는 ACKED 명령 4 쪽 수 상한(쪽마다 100) */
+const BLOCK_PAGES = 5;
 
 export class MaintainCommands {
   readonly #batch: number;
@@ -35,6 +56,7 @@ export class MaintainCommands {
     private readonly store: CommandStore,
     private readonly dryRun: ComputeDryRun,
     o: MaintainCommandsOptions = {},
+    private readonly extras: MaintainCommandsExtras = {},
   ) {
     this.#batch = o.batch ?? 50;
     this.#retentionMs = o.actorRetentionMs ?? ACTOR_MAPPING_RETENTION_MS;
@@ -69,7 +91,25 @@ export class MaintainCommands {
       actorsPurged = await safe(() => this.store.purgeActors(nowMs - this.#retentionMs));
       this.#lastPurgeMs = nowMs;
     }
-    return { approvalsExpired, revertsExpired, autoExpired, compared, actorsPurged };
+    const blocksExpired = await safe(() => this.expireBlocks(nowMs));
+    let review = { opened: 0, alerted: 0 };
+    if (this.extras.postReviews) {
+      try {
+        review = await this.extras.postReviews.maintain(nowMs, this.#batch);
+      } catch {
+        // 다음 바퀴에 다시
+      }
+    }
+    return {
+      approvalsExpired,
+      revertsExpired,
+      autoExpired,
+      compared,
+      actorsPurged,
+      ...(blocksExpired > 0 ? { blocksExpired } : {}),
+      ...(review.opened > 0 ? { postReviewsOpened: review.opened } : {}),
+      ...(review.alerted > 0 ? { postReviewAlerts: review.alerted } : {}),
+    };
   }
 
   /** 비교 때가 된 명령의 실제 값을 같은 원천으로 세어 남긴다. 원천을 세지 못하면 그 사실을 unavailable로 남긴다 */
@@ -81,6 +121,44 @@ export class MaintainCommands {
       const actual = await this.dryRun.count({ type: c.type, params: c.params, ...(c.eventId !== undefined ? { eventId: c.eventId } : {}) }, nowMs);
       const comparison = compareDryRun(predictedOf(c), c.params, actual, nowMs);
       if (await this.store.mutate(id, (w) => writeComparison(w, { comparison: comparison as unknown as Record<string, unknown>, nowMs }))) n += 1;
+    }
+    return n;
+  }
+
+  /**
+   * 만료가 지난 ACKED 명령 4의 AUTO_EXPIRED 확인(ADR-0349 결정 10, C-T61 ⑥). 만료 − 1ms에는 아니다.
+   * 만료 전 다른 ACKED 명령 4의 대역은 '덮음'으로 본다. 그 가족의 IP 집합을 읽지 못한 명령은 그대로 둔다. 적은 수
+   */
+  async expireBlocks(nowMs: number): Promise<number> {
+    const sets = this.extras.blockIpSets;
+    if (!sets) return 0;
+    const acked: Command[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < BLOCK_PAGES; page += 1) {
+      const p = await this.store.list({ type: 'BLOCK_ASN_IP', states: ['ACKED'], limit: 100, ...(cursor !== undefined ? { cursor } : {}) });
+      acked.push(...p.items);
+      if (!p.nextCursor) break;
+      cursor = p.nextCursor;
+    }
+    const expired = acked.filter((c) => c.expiresAtMs !== undefined && blockExpired(c.expiresAtMs, nowMs));
+    if (expired.length === 0) return 0;
+    const live = ipSetKeys(acked.filter((c) => c.expiresAtMs !== undefined && !blockExpired(c.expiresAtMs, nowMs)).flatMap((c) => blockCommandOf(c.commandId, c.params, c.expiresAtMs!).cidrs));
+    const read: Partial<Record<IpFamily, ReadonlySet<string>>> = {};
+    for (const family of [4, 6] as const) {
+      try {
+        read[family] = ipSetKeys(await sets.read(family));
+      } catch {
+        // 읽지 못한 가족의 명령은 다음 바퀴에 다시 본다
+      }
+    }
+    let n = 0;
+    for (const c of expired.slice(0, this.#batch)) {
+      const verdict = blockExpiryVerdict(blockCommandOf(c.commandId, c.params, c.expiresAtMs!), nowMs, read, live);
+      if (!verdict.expire) continue;
+      const done = await this.store.mutate(c.commandId, async (w) =>
+        w.current.state === 'ACKED' && w.current.expiresAtMs !== undefined && blockExpired(w.current.expiresAtMs, nowMs) ? writeAutoExpired(w, { reason: verdict.reason, nowMs }) : false,
+      );
+      if (done) n += 1;
     }
     return n;
   }

@@ -40,6 +40,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "GetNewPaymentPause": {
                       "requestType": "GetNewPaymentPauseRequest",
                       "responseType": "GetNewPaymentPauseResponse"
+                    },
+                    "CheckEventPgAssignment": {
+                      "requestType": "CheckEventPgAssignmentRequest",
+                      "responseType": "CheckEventPgAssignmentResponse"
                     }
                   }
                 },
@@ -794,6 +798,63 @@ export const paymentV1Payment: Record<string, unknown> = {
                     },
                     "paused_since": {
                       "type": "google.protobuf.Timestamp",
+                      "id": 2
+                    }
+                  }
+                },
+                "CheckEventPgAssignmentRequest": {
+                  "fields": {
+                    "event_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "primary_pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 2
+                    },
+                    "fallback_pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 3
+                    }
+                  }
+                },
+                "CheckEventPgAssignmentResponse": {
+                  "fields": {
+                    "allowed": {
+                      "type": "bool",
+                      "id": 1
+                    },
+                    "conflict_sub_provider": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "conflict_reason": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "current_primary_pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 4
+                    },
+                    "current_fallback_pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 5
+                    },
+                    "approval_limits": {
+                      "rule": "repeated",
+                      "type": "PgApprovalLimit",
+                      "id": 6
+                    }
+                  }
+                },
+                "PgApprovalLimit": {
+                  "fields": {
+                    "pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 1
+                    },
+                    "approvals_per_second": {
+                      "type": "double",
                       "id": 2
                     }
                   }

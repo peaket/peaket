@@ -10,6 +10,11 @@ import { planCreation } from '../../domain/command-writes.js';
 import { DuplicateCommandActor, type ActorSide, type CommandDueKind, type CommandListQuery, type CommandPage, type CommandPatch, type CommandWriter, type NewCommandApproval, type NewCommandEvent } from '../../domain/ports.js';
 import { appendAuditIn } from '../../../audit/audit.js';
 import { CommandStoreBase, decodeCursor, encodeCursor } from '../command-store-base.js';
+import { publishSetting } from '../settings-outbox.js';
+import type { SettingChange } from '../../domain/ports.js';
+import type { PostReviewAlertKind, PostReviewRow, PostReviewWriter } from '../../domain/post-review.js';
+import type { CommandTimelineEntry } from '../../domain/ports.js';
+import { DbPostReviewWriter, postReviewRowOf, postReviewsDueOf, postReviewsToOpenOf, timelineOfDb } from './drizzle-post-reviews.js';
 
 interface Row {
   id: string;
@@ -32,6 +37,8 @@ interface Row {
   result: Record<string, unknown> | string | null;
   /** 대응 표로 푼 요청자 관리 계정(없으면 null) */
   requester_account?: string | null;
+  /** 사후 검토 작성 기한(command_post_review.due_at, 없으면 null) */
+  post_review_due_at?: Date | string | null;
 }
 
 /** 같은 사람 두 번·요청자 본인 승인을 막는 부분 유일 색인(마이그레이션 0021) */
@@ -75,15 +82,17 @@ const toCommand = (r: Row, extra: { approvals?: readonly string[]; revertRequest
   ...(r.result !== null ? { result: json(r.result) } : {}),
   ...(extra.dryRun !== undefined ? { dryRun: extra.dryRun } : {}),
   ...(extra.ackedAtMs !== undefined ? { ackedAtMs: extra.ackedAtMs } : {}),
+  ...(r.post_review_due_at !== undefined && r.post_review_due_at !== null ? { postReviewDueAtMs: ms(r.post_review_due_at)! } : {}),
 });
 
 /** 글자 칸을 UUID로 읽는다(옛 행의 글자 값은 null이 되어 결합에서 빠진다). 대응 표 기본 키 색인을 쓰게 한다 */
 const asUuid = (col: SQL): SQL => sql`(case when ${col} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (${col})::uuid end)`;
 
-/** 요청자 관리 계정을 함께 읽는 명령 행 SELECT(대응 표 왼쪽 결합) */
+/** 요청자 관리 계정과 사후 검토 작성 기한을 함께 읽는 명령 행 SELECT(대응 표·사후 검토 표 왼쪽 결합) */
 const SELECT_ROW = sql`
-  select c.*, a.admin_account_id::text as requester_account
-  from ops_command c left join command_actor a on a.actor_ref = ${asUuid(sql`c.requested_by`)}`;
+  select c.*, a.admin_account_id::text as requester_account, pr.due_at as post_review_due_at
+  from ops_command c left join command_actor a on a.actor_ref = ${asUuid(sql`c.requested_by`)}
+  left join command_post_review pr on pr.command_id = c.id`;
 
 type Exec = Pick<DbTransaction, 'execute'>;
 
@@ -127,12 +136,15 @@ async function detailOf(q: Exec, row: Row): Promise<Command> {
 /** 잠근 명령 행 하나의 쓰기(같은 트랜잭션) */
 class DbCommandWriter implements CommandWriter {
   #current: Command;
+  /** 사후 검토 행(같은 트랜잭션, ADR-0349 결정 7) */
+  readonly postReviews: PostReviewWriter;
 
   constructor(
     private readonly tx: DbTransaction,
     current: Command,
   ) {
     this.#current = current;
+    this.postReviews = new DbPostReviewWriter(tx, current.commandId);
   }
 
   get current(): Command {
@@ -226,6 +238,11 @@ class DbCommandWriter implements CommandWriter {
   async audit(recordType: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
     await appendAuditIn(this.tx, { recordType, recordId: this.#current.commandId, payload, nowMs });
   }
+
+  /** 설정 사건을 같은 트랜잭션의 Outbox 행으로(ADR-0349 결정 5). 행 ID는 실제 시계의 UUIDv7이다(일 파티션은 릴레이가 실제 시계로 미리 만든다) */
+  async setting(s: SettingChange): Promise<void> {
+    await publishSetting(this.tx, s);
+  }
 }
 
 /** 정비 작업이 고르는 조건 */
@@ -262,11 +279,12 @@ export class DrizzleCommandStore extends CommandStoreBase {
         const plan = planCreation(input, requesterRef);
         const now = new Date(input.nowMs);
         await tx.execute(sql`
-          insert into ops_command (id, type, state, reason, params, requested_by, requested_role, event_id, approval_expires_at, compare_due_at, attempts, round, created_at, updated_at)
+          insert into ops_command (id, type, state, reason, params, requested_by, requested_role, event_id, approval_expires_at, compare_due_at, expires_at, attempts, round, created_at, updated_at)
           values (${input.commandId}::uuid, ${input.type}, ${plan.state}, ${input.reason}, ${JSON.stringify(input.params)}::jsonb, ${plan.requesterRef},
                   ${input.system ? 'system' : input.requestedRole}, ${input.eventId ?? null}::uuid,
                   ${plan.approvalExpiresAtMs !== undefined ? new Date(plan.approvalExpiresAtMs) : null}::timestamptz,
                   ${plan.compareDueAtMs !== undefined ? new Date(plan.compareDueAtMs) : null}::timestamptz,
+                  ${plan.expiresAtMs !== undefined ? new Date(plan.expiresAtMs) : null}::timestamptz,
                   ${plan.attempts}::int, 0, ${now}::timestamptz, ${now}::timestamptz)`);
         const [row] = (await tx.execute(sql`${SELECT_ROW} where c.id = ${input.commandId}::uuid`)).rows as unknown as Row[];
         const w = new DbCommandWriter(tx, toCommand(row!));
@@ -347,5 +365,23 @@ export class DrizzleCommandStore extends CommandStoreBase {
   async purgeActors(beforeMs: number): Promise<number> {
     const r = await this.database.db.execute(sql`delete from command_actor where recorded_at < ${new Date(beforeMs)}::timestamptz and delete_hold_ref is null`);
     return (r as { rowCount?: number | null }).rowCount ?? 0;
+  }
+
+  // ---- 사후 검토(ADR-0349 결정 7): 잠그지 않는 읽기. 쓰기는 mutate의 postReviews ----
+
+  postReviewOf(commandId: string): Promise<PostReviewRow | undefined> {
+    return postReviewRowOf(this.database.db, commandId);
+  }
+
+  postReviewsDue(nowMs: number, limit: number): Promise<readonly { commandId: string; kind: PostReviewAlertKind }[]> {
+    return postReviewsDueOf(this.database.db, nowMs, limit);
+  }
+
+  postReviewsToOpen(limit: number): Promise<readonly string[]> {
+    return postReviewsToOpenOf(this.database.db, limit);
+  }
+
+  timelineOf(commandId: string): Promise<readonly CommandTimelineEntry[]> {
+    return timelineOfDb(this.database.db, commandId);
   }
 }

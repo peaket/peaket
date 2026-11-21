@@ -1,5 +1,6 @@
 // 받는 층: gRPC PaymentService(docs/api/proto/peaket/payment/v1/payment.proto)를 유스케이스에 잇는다(BUILD_ORDER PRF-180).
-// ConfirmPayment·BatchGetPayments·GetPayment(BUILD_ORDER HOT-151)·CancelPayment(입금 전 취소, BUILD_ORDER HOT-152)·PrepareCheckout(BUILD_ORDER PRF-190)·GetNewPaymentPause(BUILD_ORDER PRF-201)만 처리기를 둔다. 나머지 RPC는 처리기를 넣지 않아 grpc-js가 UNIMPLEMENTED로 답한다(identity-svc의 부분 구현과 같다).
+// ConfirmPayment·BatchGetPayments·GetPayment(BUILD_ORDER HOT-151)·CancelPayment(입금 전 취소, BUILD_ORDER HOT-152)·PrepareCheckout(BUILD_ORDER PRF-190)·GetNewPaymentPause(BUILD_ORDER PRF-201)·
+// CheckEventPgAssignment(명령 12 사전 판정, BUILD_ORDER BAT-360 OPS-290)만 처리기를 둔다. 나머지 RPC는 처리기를 넣지 않아 grpc-js가 UNIMPLEMENTED로 답한다(identity-svc의 부분 구현과 같다).
 // 업무 오류는 상태 코드로(PaymentInputError → INVALID_ARGUMENT, PaymentCommandMismatchError → FAILED_PRECONDITION), 저장소 오류는 statusOfStoreError로 고른 코드와 고정 문구로
 // 돌려주고 이유는 서버 쪽 기록에만 남긴다(docs/api/proto/README.md §2 'gRPC 상태 코드').
 // 데드라인: 처음에 call.getDeadline()을 보고 남은 시간이 MIN_CALL_REMAINING_MS보다 모자라면 시작하지 않고 DEADLINE_EXCEEDED다(같은 표 '데드라인'). 넉넉하면 남은 시간을 쓰임새에 넘긴다.
@@ -18,6 +19,7 @@ import type { CheckoutValues, EscrowProduct, TossCheckoutValues } from '../domai
 import { PaymentPgUnavailableError, type PrepareCheckoutInput } from '../domain/pg-selection.js';
 import type { PrepareCheckout, PrepareCheckoutAnswer } from '../application/prepare-checkout.js';
 import type { EventPaymentPause, GetNewPaymentPause } from '../application/get-new-payment-pause.js';
+import type { CheckEventPgAssignment, CheckEventPgAssignmentAnswer, CheckEventPgAssignmentInput } from '../application/check-event-pg-assignment.js';
 import { PaymentNewPausedError } from '../domain/entry-pause.js';
 
 export interface PaymentPackage {
@@ -254,6 +256,28 @@ export function getNewPaymentPauseResponseOf(pauses: readonly EventPaymentPause[
   return { pauses: pauses.map((p) => ({ event_id: p.eventId, paused_since: timestampOf(p.pausedSinceMs) })) };
 }
 
+/** 요청(proto 칸 이름) → 검사 전 입력(명령 12 사전 판정, ADR-0349 결정 3). 앞머리 PG_PROVIDER_를 떼고, 대체가 UNSPECIFIED(칸 없음)면 뺀다 */
+export function checkEventPgAssignmentInputOf(request: Record<string, unknown>): CheckEventPgAssignmentInput {
+  const fallback = text(request.fallback_pg).replace(/^PG_PROVIDER_/, '');
+  return {
+    eventId: text(request.event_id),
+    primary: text(request.primary_pg).replace(/^PG_PROVIDER_/, '') || 'UNSPECIFIED',
+    ...(fallback === '' || fallback === 'UNSPECIFIED' ? {} : { fallback }),
+  };
+}
+
+/** 답 → CheckEventPgAssignmentResponse(proto 칸 이름). 걸리지 않았으면 걸린 하위 결제사·까닭은 빈 글, 지정이 없으면 결제사 칸을 뺀다(UNSPECIFIED) */
+export function checkEventPgAssignmentResponseOf(answer: CheckEventPgAssignmentAnswer): Record<string, unknown> {
+  return {
+    allowed: answer.allowed,
+    conflict_sub_provider: answer.conflict?.provider ?? '',
+    conflict_reason: answer.conflict?.reason ?? '',
+    ...(answer.current === undefined ? {} : { current_primary_pg: `PG_PROVIDER_${answer.current.primary}` }),
+    ...(answer.current?.fallback === undefined ? {} : { current_fallback_pg: `PG_PROVIDER_${answer.current.fallback}` }),
+    approval_limits: answer.approvalLimits.map((l) => ({ pg: `PG_PROVIDER_${l.pg}`, approvals_per_second: l.approvalsPerSecond })),
+  };
+}
+
 export interface PaymentGrpcUseCases {
   accept: Pick<AcceptPaymentCommand, 'execute'>;
   batchGet: Pick<BatchGetPaymentStates, 'execute'>;
@@ -265,6 +289,8 @@ export interface PaymentGrpcUseCases {
   prepareCheckout?: Pick<PrepareCheckout, 'execute'>;
   /** 없으면 GetNewPaymentPause는 UNIMPLEMENTED다 */
   getNewPaymentPause?: Pick<GetNewPaymentPause, 'execute'>;
+  /** 없으면 CheckEventPgAssignment는 UNIMPLEMENTED다(명령 12 사전 판정, 부르는 쪽 ops-svc, ADR-0349 결정 3) */
+  checkEventPgAssignment?: Pick<CheckEventPgAssignment, 'execute'>;
 }
 
 /** 문장 시간 초과(statement_timeout)의 SQLSTATE */
@@ -339,6 +365,9 @@ export function paymentServiceHandlers(useCases: PaymentGrpcUseCases, onError: (
     })),
     ...(useCases.prepareCheckout === undefined ? {} : { PrepareCheckout: unary('PrepareCheckout', async (r, budget) => prepareCheckoutResponseOf(await useCases.prepareCheckout!.execute(prepareCheckoutInputOf(r), budget))) }),
     ...(useCases.getNewPaymentPause === undefined ? {} : { GetNewPaymentPause: unary('GetNewPaymentPause', async (r, budget) => getNewPaymentPauseResponseOf(await useCases.getNewPaymentPause!.execute(Array.isArray(r.event_ids) ? r.event_ids.map(text) : [], budget))) }),
+    ...(useCases.checkEventPgAssignment === undefined
+      ? {}
+      : { CheckEventPgAssignment: unary('CheckEventPgAssignment', async (r, budget) => checkEventPgAssignmentResponseOf(await useCases.checkEventPgAssignment!.execute(checkEventPgAssignmentInputOf(r), budget))) }),
     ...(useCases.cancelPayment === undefined ? {} : { CancelPayment: unary('CancelPayment', async (r, budget) => cancelResponseOf(await useCases.cancelPayment!.execute(cancelInputOf(r), budget))) }),
     ...(useCases.getPayment === undefined
       ? {}

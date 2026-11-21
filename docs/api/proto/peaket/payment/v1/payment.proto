@@ -9,7 +9,7 @@ package peaket.payment.v1;
 import "google/protobuf/timestamp.proto";
 import "peaket/common/v1/common.proto";
 
-// 부르는 쪽: purchase-svc(booking 모듈), core-svc(shop 모듈과 판매 승인), ops-svc(지급 묶음 승인).
+// 부르는 쪽: purchase-svc(booking 모듈), core-svc(shop 모듈과 판매 승인), ops-svc(지급 묶음 승인, 명령 12 결제사 지정 사전 판정).
 service PaymentService {
   // 결제창 준비. 결제사를 고르고(결제사 전환 → 공연 지정 → 플랫폼 기본) 결제사 SDK에 넘길 값을 돌려준다.
   // 결제 시도(READY) 기록은 부르는 쪽이 자기 DB에 한다. 데드라인 300ms [가정]. 결제사를 부르지 않는다.
@@ -68,6 +68,13 @@ service PaymentService {
   // 전환 대상이 포트원인데 쓰는 포트원 채널 가운데 하나라도 하위 결제사 검사로 빠졌고 기준 결제사가 정지면 그 회차도 돌려준다(수단을 모르므로 좌석을 지키는 쪽,
   // 추천 적용 2026-11-10, BUILD_ORDER PRF-203, 코드 리뷰).
   rpc GetNewPaymentPause(GetNewPaymentPauseRequest) returns (GetNewPaymentPauseResponse);
+
+  // 명령 12(결제사 지정)의 사전 판정. 부르는 쪽은 ops-svc뿐이고 미리보기·접수·실행 직전에 묻는다(ADR-0349 결정 3, docs/features/control-tower.md §3).
+  // 회차 지정 쓰임새 AssignEventPg와 같은 하위 결제사 규칙 함수(subProviderConflict)와 같은 포트원 채널 표로 판정하고 아무것도 쓰지 않는다
+  // (docs/features/payment.md §2.2 '하위 결제사 검사의 첫 구현', BUILD_ORDER PRF-203). 회차는 소문자 UUID, 결제사는 TOSS·PORTONE이고 대체는 비울 수 있다.
+  // 틀린 입력, SIMULATOR·UNSPECIFIED 기본, 기본과 같은 대체는 INVALID_ARGUMENT다. 걸리면 allowed 거짓과 걸린 하위 결제사 이름·까닭만 싣는다(채널 키는 싣지 않는다).
+  // 지금 회차 지정(event_pg_config)과 결제사별 승인 상한(설정에 있는 결제사만)을 함께 준다. 부르는 쪽 데드라인 2초 [가정]. 읽기만 하므로 멱등 키가 없다.
+  rpc CheckEventPgAssignment(CheckEventPgAssignmentRequest) returns (CheckEventPgAssignmentResponse);
 }
 
 // 주문 종류.
@@ -476,6 +483,36 @@ message EventPaymentPause {
   string event_id = 1;
   // 이번 일시 정지가 시작된 시각. 채널이 없거나 비활성이라 멈춘 회차는 0이다(시작 시각이 정해지지 않았다, 추천 적용 2026-11-09, BUILD_ORDER PRF-201)
   google.protobuf.Timestamp paused_since = 2;
+}
+
+message CheckEventPgAssignmentRequest {
+  // 회차 ID(소문자 UUID)
+  string event_id = 1;
+  // 기본 결제사(TOSS·PORTONE)
+  peaket.common.v1.PgProvider primary_pg = 2;
+  // 대체 결제사(TOSS·PORTONE). UNSPECIFIED면 대체 없음
+  peaket.common.v1.PgProvider fallback_pg = 3;
+}
+
+message CheckEventPgAssignmentResponse {
+  // 하위 결제사 규칙에 걸리지 않으면 true
+  bool allowed = 1;
+  // 걸렸을 때만: 걸린 하위 결제사 이름(포트원 PgProvider 값). allowed면 빈 글
+  string conflict_sub_provider = 2;
+  // 걸렸을 때만: SAME_PROVIDER(같은 결제사) 또는 UNCONFIRMED(확인 전). allowed면 빈 글
+  string conflict_reason = 3;
+  // 지금 회차 지정(event_pg_config)의 기본 결제사. 지정이 없으면 UNSPECIFIED
+  peaket.common.v1.PgProvider current_primary_pg = 4;
+  // 지금 회차 지정의 대체 결제사. 없으면 UNSPECIFIED
+  peaket.common.v1.PgProvider current_fallback_pg = 5;
+  // 결제사별 승인 상한. payment-svc 설정에 값이 있는 결제사만 담고, 없으면 빈 목록이다(부르는 쪽 dry-run은 그 값을 '세지 못함'으로 둔다, ADR-0349 결정 4)
+  repeated PgApprovalLimit approval_limits = 6;
+}
+
+message PgApprovalLimit {
+  peaket.common.v1.PgProvider pg = 1;
+  // 그 결제사 채널의 초당 승인 호출 상한
+  double approvals_per_second = 2;
 }
 
 // 배상 송금(BAT-425 GAT-130 잔여, FR-056, POL-014·019, ADR-0046 결정 5).

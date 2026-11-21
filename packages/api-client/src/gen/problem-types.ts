@@ -170,6 +170,7 @@ export type ProblemType =
   | 'not-running'
   | 'not-verifying'
   | 'notify-sender-unavailable'
+  | 'onsale-window-unavailable'
   | 'open-interval-conflict'
   | 'open-maintenance-window'
   | 'open-passed'
@@ -201,10 +202,15 @@ export type ProblemType =
   | 'payout-gateway-unavailable'
   | 'payout-kyc-required'
   | 'payout-not-retryable'
+  | 'pg-check-unavailable'
   | 'pg-fallback-same-provider'
   | 'pg-unavailable'
   | 'pickup-slot-unavailable'
   | 'place-exists'
+  | 'post-review-conflict'
+  | 'post-review-invalid'
+  | 'post-review-not-executor'
+  | 'post-review-self-confirm'
   | 'poster-not-deletable'
   | 'postponement-date-invalid'
   | 'precondition-failed'
@@ -517,6 +523,7 @@ export const PROBLEM_TYPES = {
   'not-running': { status: 409, title: "진행 중인 요청이 아닙니다" },
   'not-verifying': { status: 409, title: "추가 검증 중인 대기표가 아닙니다" },
   'notify-sender-unavailable': { status: 503, title: "알림 발송기를 쓸 수 없습니다" },
+  'onsale-window-unavailable': { status: 503, title: "온세일 윈도우를 지금 확인할 수 없습니다" },
   'open-interval-conflict': { status: 409, title: "다른 대규모 공연과 오픈 시각이 겹칩니다" },
   'open-maintenance-window': { status: 409, title: "정비 시간에는 오픈할 수 없습니다" },
   'open-passed': { status: 410, title: "오픈 시각이 지났습니다" },
@@ -548,10 +555,15 @@ export const PROBLEM_TYPES = {
   'payout-gateway-unavailable': { status: 503, title: "지급대행을 아직 시작할 수 없습니다" },
   'payout-kyc-required': { status: 409, title: "KYC 확인이 끝나지 않아 지급할 수 없습니다" },
   'payout-not-retryable': { status: 409, title: "실패한 지급 건만 다시 보낼 수 있습니다" },
+  'pg-check-unavailable': { status: 503, title: "결제사 지정을 지금 확인할 수 없습니다" },
   'pg-fallback-same-provider': { status: 422, title: "대체 결제사가 기본 결제사와 같은 하위 결제사를 거칩니다" },
   'pg-unavailable': { status: 503, title: "결제를 잠시 시작할 수 없습니다" },
   'pickup-slot-unavailable': { status: 422, title: "고를 수 없는 수령 시간대입니다" },
   'place-exists': { status: 409, title: "같은 공연장이 있습니다" },
+  'post-review-conflict': { status: 409, title: "지금 사후 검토 상태에서는 할 수 없습니다" },
+  'post-review-invalid': { status: 422, title: "사후 검토 보고서 값이 올바르지 않습니다" },
+  'post-review-not-executor': { status: 403, title: "명령을 실행한 commander만 제출할 수 있습니다" },
+  'post-review-self-confirm': { status: 403, title: "실행한 분은 검토할 수 없습니다. 다른 commander가 검토합니다" },
   'poster-not-deletable': { status: 409, title: "포스터는 지우지 않고 바꿉니다" },
   'postponement-date-invalid': { status: 422, title: "바뀐 공연 시작 시각이 올바르지 않습니다" },
   'precondition-failed': { status: 412, title: "다른 사람이 먼저 고쳤습니다" },

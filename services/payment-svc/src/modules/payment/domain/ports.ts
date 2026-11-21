@@ -798,6 +798,19 @@ export interface EventPgAssignmentStore {
   assignEvent(w: EventPgAssignmentWrite): Promise<boolean>;
 }
 
+/**
+ * 설정 사건 PG_ASSIGNMENT(명령 12) 처리의 로그(ADR-0349 결정 5, BUILD_ORDER BAT-360). 회차·명령 ID·안전한 오류 코드·걸린 까닭만 싣는다.
+ * 값 원문·오류 글은 싣지 않는다(ASVS v5.0.0-16.2.5)
+ */
+export interface PgAssignmentSettingLog {
+  /** 썼거나(written) 표의 지정이 같거나 더 늦어 건너뛰었다 */
+  applied(e: { readonly eventId: string; readonly commandId: string; readonly written: boolean }): void;
+  /** 입력 오류(field) 또는 하위 결제사 규칙(provider·reason)에 걸려 쓰지 않았다. 다시 하지 않는다 */
+  rejected(e: { readonly eventId: string; readonly commandId: string; readonly field?: string; readonly provider?: string; readonly reason?: string }): void;
+  /** 저장소 오류. retryInMs 뒤 다시 한다(그사이 같은 회차의 새 사건이 오면 새 사건으로 넘어간다) */
+  storeFailed(e: { readonly eventId: string; readonly commandId: string; readonly attempt: number; readonly retryInMs: number; readonly err: unknown }): void;
+}
+
 /** 관측 하위 결제사 표(payment_pg_channel_observed) */
 export interface PgChannelObservationReader {
   /** 채널 키 → 관측 하위 결제사 */

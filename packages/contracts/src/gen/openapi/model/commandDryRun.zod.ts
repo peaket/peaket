@@ -27,7 +27,7 @@ export const CommandDryRun = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),

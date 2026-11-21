@@ -14,7 +14,7 @@ export { DecideCommand } from './application/decide-command.js';
 export { ExecuteCommand } from './application/execute-command.js';
 export { GetCommand } from './application/get-command.js';
 export { ListCommands } from './application/list-commands.js';
-export { MaintainCommands, type MaintainCommandsOptions, type MaintenanceRound } from './application/maintain-commands.js';
+export { MaintainCommands, type MaintainCommandsExtras, type MaintainCommandsOptions, type MaintenanceRound } from './application/maintain-commands.js';
 export { RetryCommand } from './application/retry-command.js';
 export { ExtendCommand, RevertCommand } from './application/revert-command.js';
 export {
@@ -109,7 +109,92 @@ export { MemoryCommandStore, type MemoryCommandActor, type MemoryCommandEvent } 
 export { DrizzleCommandStore } from './adapters/db/drizzle-command-store.js';
 export { UnavailableDryRunSource, DRY_RUN_SOURCE_NOT_WIRED } from './adapters/unavailable-dry-run-source.js';
 export { LogCommandSecurityEvents, PromCommandSignals } from './adapters/command-signals.js';
+// 명령 12·6 결제 갈래와 설정 사건 일반 내기(BAT-360 OPS-290, ADR-0349 결정 1~6, BAT-360 계획 8.3: BAT-365가 명령 5·7·8·9·온세일 LOG_SAMPLING에 쓴다)
+export { PG_ASSIGNMENT_SETTING, pgAssignmentSettingOf, type ExecuteCommandOptions } from './application/execute-command.js';
+export { PG_CHECK_TIMEOUT_MS, PgAssignmentGate, onsaleWindowUnavailable, pgCheckUnavailable, type PgAssignmentGateDeps } from './application/pg-assignment-gate.js';
+export {
+  ASSIGNABLE_PGS,
+  PAYMENT_PG_FALLBACK,
+  PG_FALLBACK_MAX_EVENTS,
+  PG_FALLBACK_SCOPES,
+  isPgFallbackParams,
+  pgAssignParamsOf,
+  pgFallbackParamsOf,
+  type AssignablePg,
+  type PgAssignParams,
+  type PgFallbackParams,
+} from './domain/command-params.js';
+export { ONSALE_WINDOW_AFTER_MS, ONSALE_WINDOW_BEFORE_MS, ONSALE_WINDOW_READ_TIMEOUT_MS, inOnsaleWindow } from './domain/onsale-window.js';
+export { PG_ADMISSION_CAP_INPUTS, PG_CAP_KEYS, PG_TPS_KEYS, pgAdmissionCap, predictPgCaps } from './domain/dry-run.js';
+export type { OnsaleStartSource, PgAssignmentCheck, PgAssignmentVerdict, PgName, SettingChange } from './domain/ports.js';
+export { SETTING_EVENT_KEY_DOMAIN, SETTING_KINDS, SettingChangeRejected, publishSetting, settingEventKey, settingMessageKey, settingOutboxMessage } from './adapters/settings-outbox.js';
+export { GrpcPgAssignmentCheck, PG_CHECK_GRPC_TIMEOUT_MS, pgAssignmentVerdictOf, type GrpcPgAssignmentCheckOptions } from './adapters/grpc-pg-assignment-check.js';
+export { HttpCoreSaleStart } from './adapters/http-core-sale-start.js';
+export type { MemoryOutboxSetting } from './adapters/memory-command-store.js';
 export { CommandsController } from './inbound/commands.controller.js';
 export { CommandDryRunsController } from './inbound/command-dry-runs.controller.js';
 export { CommandMaintenanceJob, type CommandMaintenanceOptions } from './inbound/command-maintenance.job.js';
 export { CommandBody, CommandDryRunView, CommandIdParams, CommandPageView, CommandView, ReasonBody, RejectBody, baseViewOf, canApproveOf, viewOf } from './inbound/command-view.js';
+// BAT-360 OPS-290(ADR-0349 결정 7~10): 사후 검토·운영 사건 줄·명령 4 만료 정리
+export { PostReviews, type PostReviewActor, type PostReviewView, type PostReviewsDeps } from './application/post-review.js';
+export { ExpireWafBlocks, type BlockExpiryView, type ExpirerLog, type WafExpiryFamilyResult, type WafExpiryRun } from './application/expire-waf-blocks.js';
+export { blockExpiresAtOf, openPostReviewIn } from './domain/command-writes.js';
+export {
+  AUTOMATION_STOP_TRIGGERS,
+  KILL_SWITCH_TRIGGERS,
+  POST_REVIEW_ASSESSMENTS,
+  POST_REVIEW_CONFIRM_DUE_MS,
+  POST_REVIEW_CONFIRM_OVERDUE_ALERT,
+  POST_REVIEW_DUE_MS,
+  POST_REVIEW_OVERDUE_ALERT,
+  POST_REVIEW_TEXT_MAX,
+  POST_REVIEW_TRIGGERS,
+  POST_REVIEW_TYPES,
+  PostReviewInvalid,
+  isOverdue,
+  isPostReviewType,
+  postReviewConfirmationOf,
+  postReviewReportOf,
+  postReviewText,
+  type PostReviewAlertKind,
+  type PostReviewAssessment,
+  type PostReviewFollowUp,
+  type PostReviewReport,
+  type PostReviewRow,
+  type PostReviewTrigger,
+  type PostReviewWriter,
+} from './domain/post-review.js';
+export {
+  WafLockConflict,
+  blockCommandOf,
+  blockExpired,
+  blockExpiryVerdict,
+  blockRemovalOf,
+  ipSetKeys,
+  liveBlockKeys,
+  type BlockExpiryRow,
+  type BlockExpiryVerdict,
+  type BlockRemoval,
+  type ExpiredBlockCommand,
+  type IpFamily,
+  type IpSetSnapshot,
+  type WafIpSets,
+} from './domain/block-expiry.js';
+export { ActiveCommandersUnavailable, type ActiveCommanders, type BlockIpSetReader, type CommandTimelineEntry } from './domain/ports.js';
+export { OPS_EVENT_STAGES, OpsEventLog, OpsEventStore, opsEventLineOf, opsEventNameOf, type OpsEventLine, type OpsEventSink, type OpsEventStage } from './adapters/ops-event-log.js';
+export { IdentityActiveCommanders } from './adapters/identity-active-commanders.js';
+export {
+  AwsWafIpSets,
+  MemoryWafIpSets,
+  WAF_ENDPOINT_ENV,
+  WAF_IPSET_V4_ENV,
+  WAF_IPSET_V6_ENV,
+  WAF_OPEN_ENVS,
+  WAF_SCOPE_ENV,
+  wafIpSetsConfigFromEnv,
+  type WafIpSetRef,
+  type WafIpSetsConfig,
+} from './adapters/waf-ip-sets.js';
+export { DrizzleWafBlockExpiryView } from './adapters/db/drizzle-waf-block-expiry.js';
+export { PostReviewBody, PostReviewConfirmationBody, PostReviewController, PostReviewView as PostReviewResponseView } from './inbound/post-review.controller.js';
+export { COMMAND_OPS_EVENTS } from './tokens.js';

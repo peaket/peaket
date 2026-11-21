@@ -17,6 +17,17 @@ import {
   type NewCommandEvent,
 } from '../domain/ports.js';
 import { CommandStoreBase, decodeCursor, encodeCursor } from './command-store-base.js';
+import { POST_REVIEW_TYPES, type PostReviewAlertKind, type PostReviewRow, type PostReviewWriter } from '../domain/post-review.js';
+import type { CommandTimelineEntry } from '../domain/ports.js';
+import type { OutboxMessage } from '@peaket/platform';
+import type { SettingChange } from '../domain/ports.js';
+import { settingOutboxMessage } from './settings-outbox.js';
+
+/** 메모리 Outbox 한 줄(설정 사건과 그 Kafka 메시지) */
+export interface MemoryOutboxSetting {
+  readonly setting: SettingChange;
+  readonly message: OutboxMessage;
+}
 
 interface MemRow {
   commandId: string;
@@ -77,9 +88,18 @@ export class MemoryCommandStore extends CommandStoreBase {
   readonly #approvals: MemApproval[] = [];
   readonly #idempotency = new Map<string, { hash: Buffer; commandId: string; createdAtMs: number }>();
   readonly #locks = new Map<string, Promise<void>>();
+  /** 사후 검토 행(command_post_review와 같은 칸, ADR-0349 결정 7) */
+  readonly #postReviews = new Map<string, PostReviewRow>();
+  /** 설정 사건 Outbox(ops DB outbox와 같은 메시지, ADR-0349 결정 5) */
+  readonly #outbox: MemoryOutboxSetting[] = [];
 
   constructor(private readonly audit: AuditChain) {
     super();
+  }
+
+  /** 시험용: 쓰기가 성공해 남은 설정 사건(차례대로) */
+  outboxSettings(): readonly MemoryOutboxSetting[] {
+    return [...this.#outbox];
   }
 
   /** 시험용: 명령의 사건(차례대로) */
@@ -120,6 +140,7 @@ export class MemoryCommandStore extends CommandStoreBase {
     const dryRun = events.find((e) => e.type === 'DRY_RUN')?.dryRun ?? events.find((e) => e.type === 'DISPATCHED' && e.dryRun !== undefined)?.dryRun;
     const ackedAtMs = events.find((e) => e.type === 'ACKED')?.ackedAtMs;
     const approvals = [...this.#approvals, ...(overlay?.approvals ?? [])].filter((a) => a.commandId === r.commandId && a.round === 0).map((a) => account(a.approverRef) ?? '');
+    const postReviewDueAtMs = this.#postReviews.get(r.commandId)?.dueAtMs;
     const revertRequester = r.round > 0 ? actors.find((a) => a.commandId === r.commandId && a.round === r.round && a.side === 'REQUESTER') : undefined;
     return {
       commandId: r.commandId,
@@ -145,6 +166,7 @@ export class MemoryCommandStore extends CommandStoreBase {
       ...(r.result !== undefined ? { result: r.result } : {}),
       ...(dryRun !== undefined ? { dryRun } : {}),
       ...(ackedAtMs !== undefined ? { ackedAtMs } : {}),
+      ...(postReviewDueAtMs !== undefined ? { postReviewDueAtMs } : {}),
     };
   }
 
@@ -184,6 +206,7 @@ export class MemoryCommandStore extends CommandStoreBase {
         ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
         ...(plan.approvalExpiresAtMs !== undefined ? { approvalExpiresAtMs: plan.approvalExpiresAtMs } : {}),
         ...(plan.compareDueAtMs !== undefined ? { compareDueAtMs: plan.compareDueAtMs } : {}),
+        ...(plan.expiresAtMs !== undefined ? { expiresAtMs: plan.expiresAtMs } : {}),
         round: 0,
         createdAtMs: input.nowMs,
         updatedAtMs: input.nowMs,
@@ -236,11 +259,13 @@ export class MemoryCommandStore extends CommandStoreBase {
     const newActors: MemoryCommandActor[] = [];
     const newApprovals: MemApproval[] = [];
     const audits: { recordType: string; payload: Record<string, unknown>; nowMs: number }[] = [];
+    const newSettings: MemoryOutboxSetting[] = [];
     const existingEvents = this.#events.get(commandId) ?? [];
     const allActors = () => [...this.#actors.values(), ...newActors];
     const store = this;
     // 그 쓰기 안에서 쓴 대응·승인·사건을 함께 본다
     const current = (): Command => store.#toCommand(draft, { actors: newActors, approvals: newApprovals, events: newEvents });
+    let review: PostReviewRow | undefined;
     const writer: CommandWriter = {
       get current() {
         return current();
@@ -296,13 +321,20 @@ export class MemoryCommandStore extends CommandStoreBase {
       async audit(recordType, payload, nowMs) {
         audits.push({ recordType, payload, nowMs });
       },
+      // 설정 사건(ADR-0349 결정 5): DB와 같은 꼴 검사(settingOutboxMessage)를 지난 메시지를 쓰기가 성공할 때만 남긴다
+      async setting(s: SettingChange) {
+        newSettings.push({ setting: s, message: settingOutboxMessage(s) });
+      },
+      postReviews: this.#postReviewWriter(commandId, () => [...existingEvents, ...newEvents], (r) => (review = r)),
     };
     const result = await fn(writer);
     // 모두 성공했을 때만 반영한다(한 트랜잭션처럼)
+    if (review) this.#postReviews.set(commandId, review);
     this.#rows.set(commandId, draft);
     for (const a of newActors) this.#actors.set(a.actorRef, a);
     this.#approvals.push(...newApprovals);
     this.#events.set(commandId, [...existingEvents, ...newEvents]);
+    this.#outbox.push(...newSettings);
     for (const a of audits) await this.audit.append({ recordType: a.recordType, recordId: commandId, payload: a.payload, nowMs: a.nowMs });
     return result;
   }
@@ -327,6 +359,78 @@ export class MemoryCommandStore extends CommandStoreBase {
       .sort((a, b) => a.compareDueAtMs! - b.compareDueAtMs!)
       .slice(0, limit)
       .map((r) => r.commandId);
+  }
+
+  /** 쓰기 하나의 사후 검토 쓰기. 바꾼 행은 put으로 넘기고, 쓰기가 성공하면 반영한다(조건은 command_post_review의 조건부 갱신과 같다) */
+  #postReviewWriter(commandId: string, events: () => readonly MemoryCommandEvent[], put: (r: PostReviewRow) => void): PostReviewWriter {
+    let row = this.#postReviews.get(commandId);
+    const set = (r: PostReviewRow): true => {
+      row = r;
+      put(r);
+      return true;
+    };
+    return {
+      async read() {
+        return row;
+      },
+      async firstDispatchedAtMs() {
+        return events().find((e) => e.type === 'DISPATCHED')?.createdAtMs;
+      },
+      async open(r) {
+        if (row) return false;
+        return set({ commandId, executorRef: r.executorRef, dueAtMs: r.dueAtMs, soloSelfReview: false, late: false });
+      },
+      async submit(r) {
+        if (!row || row.submittedAtMs !== undefined) return false;
+        return set({ ...row, submittedAtMs: r.submittedAtMs, report: r.report, confirmDueAtMs: r.confirmDueAtMs, late: row.late || r.late });
+      },
+      async confirm(r) {
+        if (!row || row.submittedAtMs === undefined || row.confirmedAtMs !== undefined) return false;
+        return set({ ...row, confirmedAtMs: r.confirmedAtMs, reviewerRef: r.reviewerRef, assessment: r.assessment, soloSelfReview: r.soloSelfReview, late: row.late || r.late });
+      },
+      async markAlerted(kind: PostReviewAlertKind, nowMs: number) {
+        if (!row) return false;
+        if (kind === 'DUE') {
+          if (row.submittedAtMs !== undefined || row.dueAlertedAtMs !== undefined || nowMs < row.dueAtMs) return false;
+          return set({ ...row, dueAlertedAtMs: nowMs });
+        }
+        if (row.submittedAtMs === undefined || row.confirmedAtMs !== undefined || row.confirmAlertedAtMs !== undefined || row.confirmDueAtMs === undefined || nowMs < row.confirmDueAtMs) return false;
+        return set({ ...row, confirmAlertedAtMs: nowMs });
+      },
+    };
+  }
+
+  async postReviewOf(commandId: string): Promise<PostReviewRow | undefined> {
+    return this.#postReviews.get(commandId);
+  }
+
+  async postReviewsDue(nowMs: number, limit: number): Promise<readonly { commandId: string; kind: PostReviewAlertKind }[]> {
+    const due: { commandId: string; kind: PostReviewAlertKind; t: number }[] = [];
+    for (const r of this.#postReviews.values()) {
+      if (r.submittedAtMs === undefined && r.dueAlertedAtMs === undefined && r.dueAtMs <= nowMs) due.push({ commandId: r.commandId, kind: 'DUE', t: r.dueAtMs });
+      else if (r.submittedAtMs !== undefined && r.confirmedAtMs === undefined && r.confirmAlertedAtMs === undefined && r.confirmDueAtMs !== undefined && r.confirmDueAtMs <= nowMs) {
+        due.push({ commandId: r.commandId, kind: 'CONFIRM', t: r.confirmDueAtMs });
+      }
+    }
+    return due
+      .sort((a, b) => a.t - b.t)
+      .slice(0, limit)
+      .map(({ commandId, kind }) => ({ commandId, kind }));
+  }
+
+  async postReviewsToOpen(limit: number): Promise<readonly string[]> {
+    return [...this.#rows.values()]
+      .filter((r) => POST_REVIEW_TYPES.includes(r.type) && r.attempts > 0 && !this.#postReviews.has(r.commandId) && (this.#events.get(r.commandId) ?? []).some((e) => e.type === 'DISPATCHED'))
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .slice(0, limit)
+      .map((r) => r.commandId);
+  }
+
+  async timelineOf(commandId: string): Promise<readonly CommandTimelineEntry[]> {
+    return (this.#events.get(commandId) ?? []).map((e) => {
+      const account = this.#actors.get(e.actorRef)?.adminAccountId;
+      return { seq: e.seq, type: e.type, actorRef: e.actorRef, actorRole: e.actorRole, ...(account !== undefined ? { actorAccountId: account } : {}), reason: e.reason, createdAtMs: e.createdAtMs };
+    });
   }
 
   async purgeActors(beforeMs: number): Promise<number> {

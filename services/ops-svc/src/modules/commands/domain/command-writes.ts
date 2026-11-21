@@ -21,6 +21,7 @@ import {
   type NewCommand,
 } from './command.js';
 import type { CommandDecision, CommandWriter, NewCommandEvent } from './ports.js';
+import { isPostReviewType, POST_REVIEW_DUE_MS } from './post-review.js';
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
@@ -49,6 +50,8 @@ export interface CreationPlan {
   readonly state: CommandState;
   readonly approvalExpiresAtMs?: number;
   readonly compareDueAtMs?: number;
+  /** 명령 4는 받을 때 params.expiresAt을 ops_command.expires_at에 적는다(ADR-0349 결정 10) */
+  readonly expiresAtMs?: number;
   readonly attempts: number;
   /** 요청자 가명 참조(시스템이면 빈 UUID) */
   readonly requesterRef: string;
@@ -56,6 +59,13 @@ export interface CreationPlan {
   readonly actor?: { readonly side: 'REQUESTER'; readonly round: 0; readonly accountId: string };
   readonly events: readonly Omit<NewCommandEvent, 'nowMs'>[];
   readonly audit: { readonly recordType: string; readonly payload: Record<string, unknown> };
+}
+
+/** 명령 4의 만료 시각(접수 검사를 지난 params.expiresAt). 다른 유형이나 읽지 못하면 undefined */
+export function blockExpiresAtOf(input: Pick<NewCommand, 'type' | 'params'>): number | undefined {
+  if (input.type !== 'BLOCK_ASN_IP' || typeof input.params.expiresAt !== 'string') return undefined;
+  const ms = Date.parse(input.params.expiresAt);
+  return Number.isFinite(ms) ? ms : undefined;
 }
 
 /**
@@ -81,10 +91,12 @@ export function planCreation(input: NewCommand, requesterRef: string): CreationP
   state = nextCommandState(state, 'DRY_RUN', input.type);
   state = nextCommandState(state, mode === 'TWO' ? 'PENDING_APPROVAL' : 'APPROVED', input.type);
   const by = { actorRef: requesterRef, actorRole: input.requestedRole, reason: input.reason };
+  const blockExpiresAtMs = blockExpiresAtOf(input);
   return {
     state,
     attempts: 0,
     ...(mode === 'TWO' ? { approvalExpiresAtMs: input.nowMs + APPROVAL_TTL_MS } : {}),
+    ...(blockExpiresAtMs !== undefined ? { expiresAtMs: blockExpiresAtMs } : {}),
     requesterRef,
     actor: { side: 'REQUESTER', round: 0, accountId: input.requestedBy },
     events: [
@@ -176,7 +188,27 @@ export async function writeDispatched(w: CommandWriter, q: { nowMs: number; acto
   await w.audit('COMMAND_EXECUTION_STARTED', { state: 'DISPATCHED', attempt: attempts, actorRef, actorRole }, q.nowMs);
   await w.event({ type: 'DISPATCHED', actorRef, actorRole, reason: c.reason, nowMs: q.nowMs });
   await w.patch({ state: to, attempts, lastError: null, executedAtMs: null, ...(firstCompare ? { compareDueAtMs: q.nowMs + DRY_RUN_COMPARE_DELAY_MS } : {}), nowMs: q.nowMs });
+  // 승인 없이 실행한 명령 3·11은 처음 DISPATCHED와 같은 트랜잭션에서 사후 검토 할 일을 연다(작성 기한 + 48시간, ADR-0349 결정 7)
+  if (attempts === 1 && isPostReviewType(c.type)) await openPostReviewIn(w, q.nowMs);
   return w.current;
+}
+
+/**
+ * 사후 검토 할 일 하나를 연다(명령 3·11, 처음 DISPATCHED 시각 + 48시간). 이미 있거나 아직 DISPATCHED가 없거나 저장소가 사후 검토를 모르면 하지 않는다.
+ * POST_REVIEW_OPENED 사건과 감사 기록을 같은 트랜잭션에 남긴다. 실행자는 그 명령을 요청한 commander다(명령 3·11은 요청자가 곧 실행한다). 열었으면 참
+ */
+export async function openPostReviewIn(w: CommandWriter, nowMs: number): Promise<boolean> {
+  const c = w.current;
+  const pr = w.postReviews;
+  if (!pr || !isPostReviewType(c.type) || (await pr.read()) !== undefined) return false;
+  const firstMs = await pr.firstDispatchedAtMs();
+  if (firstMs === undefined) return false;
+  const executorRef = (await w.requesterOf(0))?.ref ?? c.requesterRef ?? '';
+  const dueAtMs = firstMs + POST_REVIEW_DUE_MS;
+  if (!(await pr.open({ executorRef, dueAtMs }))) return false;
+  await w.audit('POST_REVIEW_OPENED', { dueAt: iso(dueAtMs), executorRef }, nowMs);
+  await w.event({ type: 'POST_REVIEW_OPENED', actorRef: SYSTEM_ACTOR_REF, actorRole: SYSTEM_ROLE, reason: 'post-review-opened', detail: { dueAt: iso(dueAtMs) }, nowMs });
+  return true;
 }
 
 /** 실행 성공(T9 ACKED·T9S SUCCEEDED). 명령 2·8은 첫 ack에 만료 시각을 적는다(T17 준비) */

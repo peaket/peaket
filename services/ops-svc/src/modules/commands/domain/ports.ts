@@ -1,6 +1,7 @@
 // 운영 명령 포트(저장소·실행·dry-run 원천·신호). 도메인은 DB·HTTP를 모른다.
 // 상태를 바꾸는 쓰기는 모두 CommandWriter(잠근 명령 행 하나의 트랜잭션) 위에서 command-writes.ts의 함수가 한다.
 import type { Command, CommandExecutionActor, CommandExecutionResult, CommandIdempotency, CommandState, CommandType, NewCommand } from './command.js';
+import type { PostReviewAlertKind, PostReviewRow, PostReviewWriter } from './post-review.js';
 
 export interface CommandListQuery {
   readonly eventId?: string;
@@ -96,6 +97,88 @@ export interface CommandWriter {
   approval(a: NewCommandApproval): Promise<void>;
   /** 감사 체인에 한 기록을 같은 트랜잭션으로 덧붙인다 */
   audit(recordType: string, payload: Record<string, unknown>, nowMs: number): Promise<void>;
+  /**
+   * 설정 사건 하나를 같은 트랜잭션의 Outbox 행으로 쓴다(ADR-0349 결정 5, adapters/settings-outbox.ts publishSetting). 트랜잭션의 마지막 쓰기로 부른다.
+   * 없는 저장소는 설정형 명령을 낼 수 없다(실행기가 FAILED로 남긴다)
+   * @throws SettingChangeRejected 계약 꼴이 아님(트랜잭션째 되돌아간다)
+   */
+  setting?(s: SettingChange): Promise<void>;
+  /** 명령 3·11의 사후 검토 행(command_post_review)을 같은 트랜잭션에서 고친다(ADR-0349 결정 7). 두 저장소가 채운다 */
+  readonly postReviews?: PostReviewWriter;
+}
+
+/** 명령 사건 한 줄과 그 행위자(대응이 남아 있으면 관리 계정 ID). 사후 검토 ★ 칸(실행 기록·재개 시각과 승인자)을 채운다 */
+export interface CommandTimelineEntry {
+  readonly seq: number;
+  readonly type: string;
+  readonly actorRef: string;
+  readonly actorRole: string;
+  readonly actorAccountId?: string;
+  readonly reason: string;
+  readonly createdAtMs: number;
+}
+
+/** 활성 commander 목록(identity ListAdminAccounts, 1인 기간 판정). 닿지 못하면 던진다(받는 층 503, 자기 검토를 받지 않는다) */
+export interface ActiveCommanders {
+  list(): Promise<readonly string[]>;
+}
+
+/** 활성 commander 목록을 읽지 못함 */
+export class ActiveCommandersUnavailable extends Error {
+  constructor(readonly why: string) {
+    super(`active-commanders-unavailable:${why}`);
+    this.name = 'ActiveCommandersUnavailable';
+  }
+}
+
+/** 명령 4 정비가 읽는 WAF IP 집합(가족별 대역 글자). 읽지 못하면 던진다(그 명령은 다음 바퀴로) */
+export interface BlockIpSetReader {
+  read(family: 4 | 6): Promise<readonly string[]>;
+}
+
+/**
+ * 설정 사건 일반(asyncapi control.settings SettingChanged, ADR-0349 결정 5). 메시지 키는 '<scope>:<kind>:<target>'이고,
+ * 값의 판은 occurredAtMs, eventKey는 (commandId, kind, scope)로 정한다. kind는 계약 key 열거 그대로다
+ */
+export interface SettingChange {
+  /** 계약 key 열거의 값(PG_ASSIGNMENT, LOG_LEVEL 등) */
+  readonly kind: string;
+  /** PLATFORM 또는 회차 ID */
+  readonly scope: string;
+  /** 대상(기능 플래그 이름, 로그 레벨을 바꿀 서비스 등). 없으면 비운다 */
+  readonly target?: string;
+  /** 종류마다 정한 값(asyncapi value 갈래) */
+  readonly value: Record<string, unknown>;
+  readonly expiresAtMs?: number;
+  readonly commandId: string;
+  /** 명령 기록의 가명 참조(관리 계정 ID를 싣지 않는다) */
+  readonly actorRef: string;
+  /** 판(사건 시각) */
+  readonly occurredAtMs: number;
+}
+
+/** 명령 12·6이 묻는 결제사 이름(ops 쪽 값, payment.proto PgProvider와 대응) */
+export type PgName = 'TOSS' | 'PORTONE' | 'SIMULATOR';
+
+/** 하위 결제사 판정 결과(payment-svc CheckEventPgAssignment, ADR-0349 결정 3). 값은 하위 결제사 이름과 까닭뿐이다 */
+export interface PgAssignmentVerdict {
+  readonly allowed: boolean;
+  /** 걸렸을 때만: 하위 결제사 이름(포트원 PgProvider 값)과 까닭 */
+  readonly conflict?: { readonly subProvider: string; readonly reason: string };
+  /** 지금 회차 지정(payment-svc event_pg_config). 없으면 undefined */
+  readonly current?: { readonly primaryPg: PgName; readonly fallbackPg?: PgName };
+  /** 결제사별 승인 상한(초당 승인 호출). 설정에 없는 결제사는 빠진다 */
+  readonly approvalLimits: Readonly<Partial<Record<PgName, number>>>;
+}
+
+/** 하위 결제사 판정 포트(ops-svc → payment-svc gRPC, 데드라인 2초 [가정]). 실패·시간 초과는 던진다(503 pg-check-unavailable) */
+export interface PgAssignmentCheck {
+  check(q: { readonly eventId: string; readonly primaryPg: PgName; readonly fallbackPg?: PgName }): Promise<PgAssignmentVerdict>;
+}
+
+/** 회차 판매 시작 읽기(core-svc 내부 판매 설정, ADR-0349 결정 2). 판매 승인 전(404)이면 undefined, 그 밖의 실패는 던진다 */
+export interface OnsaleStartSource {
+  saleStartMs(eventId: string): Promise<number | undefined>;
 }
 
 /** 정비 작업이 고르는 때가 된 명령 */
@@ -131,6 +214,14 @@ export interface CommandStore {
   markSucceeded(commandId: string, result: Record<string, unknown> | undefined, nowMs: number, ackedAtMs?: number): Promise<Command>;
   /** 대상 실행이 실패한 명령을 FAILED로 바꾸고 사유·사건·감사를 남긴다 */
   markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command>;
+  /** 사후 검토 행(잠그지 않는 읽기, 조회 경로). 행이 없으면 undefined */
+  postReviewOf?(commandId: string): Promise<PostReviewRow | undefined>;
+  /** 기한을 넘겼는데 경보를 내지 않은 사후 검토(DUE: 제출 전, CONFIRM: 제출 뒤 검토 전). 잠그지 않는다 */
+  postReviewsDue?(nowMs: number, limit: number): Promise<readonly { readonly commandId: string; readonly kind: PostReviewAlertKind }[]>;
+  /** 처음 DISPATCHED를 지난 명령 3·11 가운데 사후 검토 행이 없는 것(할 일 열기를 놓친 명령을 정비가 잇는다) */
+  postReviewsToOpen?(limit: number): Promise<readonly string[]>;
+  /** 명령의 사건 차례와 행위자(사후 검토 ★ 칸) */
+  timelineOf?(commandId: string): Promise<readonly CommandTimelineEntry[]>;
 }
 
 /** 판매 재개 막기(BAT-420 GAT-110, ADR-0280 결정 2): 그 회차에 CANCEL 요청이 APPROVED·RUNNING·PAUSED·COMPLETED인가 */
