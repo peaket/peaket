@@ -123,7 +123,20 @@
 
 ## 검증
 
-(검증 담당이 채운다)
+- 임시 사본(7bfb2cf6d, detached)에서 틀린 구현을 하나씩 넣고 `node --test deploy/platform/mesh/test/*.test.mjs`와 `node tools/ci/mesh-policies.mjs --check`를 돌린 뒤 되돌렸다. 원천 표본은 `--write`로 생성물을 다시 만들었고, 생성물 표본(M4)은 생성물에 직접 넣었다. 사본은 `yaml` 패키지가 없어 `corepack pnpm install --frozen-lockfile` 뒤 돌렸다. 넣기 전 기준: 시험 24·통과 24, `--check` exit 0.
+
+| # | 넣은 결함 | 실패한 시험 |
+| --- | --- | --- |
+| M1 | 원천 `CompensationTransferService: [purchase-svc]` 서비스 통째(`/*`) | MS-09, W12M-01 ①(`--check` exit 0) |
+| M2 | 원천 `GetCompensationTransfer: [purchase-svc]`(두 메서드 모두 엶) | MS-09, W12M-01 ①(`--check` exit 0) |
+| M3 | 원천 `RequestCompensationTransfer: [ops-svc, purchase-svc]` | MS-09, W12M-01 ①(`--check` exit 0) |
+| M4 | 생성물 `meshless-networkpolicies.yaml` payment-svc 8080의 purchase-svc 출처를 이름 라벨만으로(`component: service` 지움) | MS-10, MS-18, W12M-01 ②(`--check` exit 1, 줄 488) |
+| M5 | 원천 payment-svc `rest` 부르는 쪽에서 purchase-svc를 뺌 | MS-10, MS-19, W12M-01 ②(`--check` exit 0) |
+
+- 넣은 5·잡힌 5·놓친 0. M4는 '이름 라벨만' 갈래만 넣었다('제어·지표 포트에 더함' 갈래는 표본 5개 상한으로 따로 돌리지 않음).
+- 판정 기준 대조 ①: 시험 `GRPC`의 배상 송금 `{ RequestCompensationTransfer: ['purchase-svc'], GetCompensationTransfer: [] }`가 `docs/api/proto/README.md` §3 `:75`·`:39`, ADR-0317 결정 1(ops-svc는 송금을 부르지 않음)과 같다.
+- 판정 기준 대조 ②: 시험 `INTERNAL_HTTP` 16쌍 중 15쌍이 ADR-0285 결정 9 표(`purchase-svc → payment-svc` `:48`, 보충 `:54` 포함)와 1:1로 같고, 남은 한 쌍 `purchase-svc → queue-svc`는 ADR-0288 결정 8이다. 경로 `GET /internal/v1/circuits`는 `docs/features/transfer-refund.md` §5 '서킷 연결', `docs/api/guidelines.md:197`과 같다.
+- CI: PR #53 실행 44920667562(7bfb2cf6d)에서 `tools-check / tools` success. 같은 실행의 `node / node`·`ci-summary`는 failure이고 이 검증에서 까닭을 보지 않았다.
 
 ## 담당 표
 
@@ -133,3 +146,4 @@
 | test | w12mesh-test-2f9a | claude-opus-5-5 | 2026-11-22T00:31+09:00 | 2026-11-22T00:41+09:00 |
 | impl | w12mesh-impl-5e7b | claude-opus-5-5 | 2026-11-22T00:35+09:00 | 2026-11-22T00:39+09:00 |
 | review | w12mesh-review-3a6f | claude-opus-5-5 | 2026-11-22T00:43+09:00 | 2026-11-22T00:47+09:00 |
+| verify | w12mesh-verify-7c2d | claude-opus-5-5 | 2026-11-22T00:43+09:00 | 2026-11-22T00:50+09:00 |
