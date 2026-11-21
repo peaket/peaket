@@ -2077,7 +2077,7 @@ erDiagram
     }
     audit_checkpoint {
         uuid id PK "체크포인트 ID(API의 checkpointId). 2026-11-22 BAT-360 계획: 공개 번호 no는 따로 유일 칸으로 둔다(ADR-0348 결정 3)"
-        bigint no UK "공개 체크포인트 번호, 1부터 빈틈 없음. 0023 이전 옛 행은 null(공개 사슬 밖, legacy)"
+        bigint no UK "공개 체크포인트 번호, 1부터 빈틈 없음. 0023 이전 옛 행(legacy)과 명령 실행 전후 체크포인트(EXECUTION, 내부용)는 null(공개 사슬 밖, 추천 적용 2026-11-22, ADR-0348 결정 1·3)"
         bigint from_seq "체크포인트 JSON의 firstSeq"
         bigint to_seq "체크포인트 JSON의 lastSeq"
         int leaf_count
