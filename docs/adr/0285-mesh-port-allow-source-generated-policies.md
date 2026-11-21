@@ -45,10 +45,13 @@
    | payment-svc | core-svc | 정산 원천 `/internal/v1/events/settlement-due`·`/internal/v1/events/{eventId}/commission-rate`·`/internal/v1/shop/product-settlement-items`(`PEAKET_CORE_HTTP_URL`) |
    | payment-svc | identity-svc | 관리 공개키 묶음(`PEAKET_IDENTITY_JWKS_URL`) |
    | purchase-svc | core-svc | 판매 설정 사본(`PEAKET_CORE_HTTP_URL`) |
+   | purchase-svc | payment-svc | 결제사 서킷 상태 `GET /internal/v1/circuits`(`PEAKET_PAYMENT_HTTP_URL`, 회차 취소 일괄 환불의 자동 정지). 보충(2026-11-22, W12-mesh) |
    | purchase-svc | ops-svc | CS 처리함 `/internal/v1/cs-cases`, 운영 경보 `/internal/v1/ops-alerts`(`PEAKET_OPS_HTTP_URL`) |
    | ticket-svc | core-svc | 판매 설정 사본(`PEAKET_CORE_HTTP_URL`) |
    | ticket-svc | ops-svc | 운영 경보 `/internal/v1/ops-alerts`(`PEAKET_OPS_HTTP_URL`) |
    | 팬 웹 앱 서버(web) | identity-svc | 팬 공개키 묶음 `/internal/jwks/fan.json`(`PEAKET_FAN_TOKEN_JWKS_URL`) |
+
+   보충(2026-11-22, W12-mesh): purchase-svc → payment-svc 줄을 더해 표는 15쌍이다. 근거는 docs/features/transfer-refund.md §5 '서킷 연결'과 docs/api/guidelines.md §8.1의 'purchase-svc 내부 서킷 상태 읽기' 줄이고(BAT-425 R-716), 원천에는 그때 이미 들어가 있었다. 시험의 정본 표만 따라오지 못했다(계획 docs/review/plans/W12-mesh.md).
 
    trust-svc의 REST 포트는 gw-fan만 받는다(허니팟 기록 경로 하나, docs/architecture.md §5 '포트별 허용 표'). 이 경로의 라우트는 공개 경로를 설정으로 넣으므로 저장소의 라우트에 없다(docs/infra.md §4.1 '허니팟 경로의 첫 구현'). 그래서 원천에 예외 한 줄로 적는다.
 10. **메시 바탕 매니페스트(손으로 쓴다, `deploy/platform/mesh/`).**
@@ -79,6 +82,7 @@
 
 - Envoy Gateway가 프록시 서비스 계정 이름을 정하는 설정을 주면 그 이름으로 고정한다.
 - 내부 HTTP를 경로로 거를 필요가 커지면(내부 HTTP 부르는 쪽이 바깥 경로를 부른 사고나 검토 지적) 대안 2를 새 ADR로 다시 본다. 상태를 바꾸는 내부 HTTP가 늘면 그 경로를 여기 적는다. 2026-11-19: core-svc `POST /internal/v1/events/{eventId}/cancellation-status`(회차 취소·연기 반영). 부르는 쪽은 ops-svc뿐이지만 포트 단위라 core-svc REST 포트를 부르는 다른 서비스도 공유 토큰만 있으면 닿는다(BAT-420-rest 리뷰 RV-07).
+- 보충(2026-11-22, W12-mesh): payment-svc REST 포트의 부르는 쪽이 ops-svc 하나에서 ops-svc·purchase-svc 둘이 됐다. purchase-svc가 부르는 것은 읽기 `GET /internal/v1/circuits` 하나지만, 포트 단위라 공유 토큰만 있으면 ops-svc 몫의 상태를 바꾸는 `POST /internal/v1/settlements/*`(정산 계산·지급 묶음 승인·실행·미수금)에도 닿는다. 위 '대안 2를 새 ADR로 다시 볼' 때 함께 본다.
 
 ## 확인
 
