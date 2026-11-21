@@ -1163,9 +1163,14 @@ const wfFile = (n) => join(REPO, '.github', 'workflows', n);
 const wfText = (n) => readFileSync(wfFile(n), 'utf8');
 const wfDoc = (n) => YAML.parse(wfText(n));
 
-test('BOT-161 dast-nightly.yml은 예약(03:00 KST)·수동·workflow_call에만 돌고 PR마다 돌지 않는다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+test('BOT-161 dast-nightly.yml은 수동·workflow_call에만 돌고(구간 5 전까지 예약 멈춤) PR마다 돌지 않는다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const d = wfDoc('dast-nightly.yml');
-  assert.deepEqual(d.on.schedule, [{ cron: '0 18 * * *' }], '03:00 KST [가정] 예약이 아니다');
+  // kind를 쓰는 예약 실행 셋은 구간 5(인프라 구축)까지 멈추고 수동 실행만 둔다(소유자 결정 2026-11-21, ADR-0332 결정 1)
+  for (const name of ['dast-nightly.yml', 'ci-kind.yml', 'perf-nightly.yml']) {
+    const w = wfDoc(name);
+    assert.ok(!('schedule' in w.on), `${name}에 예약(schedule)이 있다(ADR-0332 결정 1)`);
+    assert.ok('workflow_dispatch' in w.on, `${name}에 수동 실행이 없다`);
+  }
   assert.ok('workflow_dispatch' in d.on);
   assert.ok('workflow_call' in d.on);
   assert.ok(!('pull_request' in d.on) && !('push' in d.on), 'PR·푸시마다 돈다');

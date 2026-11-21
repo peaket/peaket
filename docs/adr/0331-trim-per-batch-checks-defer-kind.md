@@ -17,6 +17,7 @@
     - 최근 묶음 46개 가운데 26개(57%)는 `packages/contracts`·`platform`·`config`를 건드린다. 그래서 범위를 골라도 어차피 전부 돈다.
     - 나머지 묶음에서 줄어드는 것은 CI 러너 시간 10~13분뿐이다. CI는 기다리지 않는다(ADR-0222).
     - 반면 상대 경로 가져오기를 놓쳐 A 등급 시험이 빠질 위험이 크다.
+  - 바꿈(2026-11-21, 소유자 결정 "추천대로 반영"): [ADR-0332](0332-infra-build-out-segment-five.md)가 결정 9의 주 1회 예약 실행을 뺐다(수동 실행만 남김). 배포 구간은 '구간 5: 인프라 구축'이다.
 - **관련**: [docs/architecture.md](../architecture.md) §8.6, [docs/devops.md](../devops.md) §3.1·§3.3, `.github/workflows/ci.yml`·`ci-kind.yml`·`tools-check.yml`
 - **관련 ID**: 없음(작업 절차와 CI 배치만 바꾼다)
 
