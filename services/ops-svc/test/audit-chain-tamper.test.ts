@@ -8,7 +8,6 @@ import {
   MemoryAuditChain,
   MemoryAuditCheckpointStore,
   auditHash,
-  ephemeralAuditAnchorSigner,
   type AuditCheckpointStore,
   type AuditRecord,
 } from '../src/modules/audit/index.js';
@@ -24,7 +23,7 @@ const RECORD2: AuditRecord = { recordType: 'B', recordId: ID2, payload: { n: 2 }
 const fixture = () => {
   const chain = new MemoryAuditChain();
   const store = new MemoryAuditCheckpointStore();
-  const service = new AuditCheckpointService(store, chain, () => NOW, ephemeralAuditAnchorSigner('test-key'));
+  const service = new AuditCheckpointService(store, chain, () => NOW);
   return { chain, store, service };
 };
 
@@ -90,6 +89,10 @@ describe('OPS-04 체크포인트 원자성 포트', () => {
       find: (checkpointId) => base.find(checkpointId),
       head: () => base.head(),
       findPrevious: (fromSeq) => base.findPrevious(fromSeq),
+      lastPublic: () => base.lastPublic(),
+      lastInternal: () => base.lastInternal(),
+      findByNo: (no) => base.findByNo(no),
+      signingKey: (keyId) => base.signingKey(keyId),
       ...(over.createWithAudit ? { createWithAudit: over.createWithAudit } : {}),
     };
     return { base, store };
@@ -112,20 +115,19 @@ describe('OPS-04 체크포인트 원자성 포트', () => {
         return cp;
       },
     });
-    const service = new AuditCheckpointService(store, chain, () => NOW, ephemeralAuditAnchorSigner('k'));
+    const service = new AuditCheckpointService(store, chain, () => NOW);
     const cp = await service.create({ reason: '원자 시험', actorRef: 'ops-1' });
 
     expect(atomicCalls).toBe(1);
     expect(seen.map((r) => r.recordType)).toEqual(['AUDIT_CHECKPOINT_CREATED']);
-    expect(seen[0]!.payload).toMatchObject({
-      fromSeq: 1,
-      toSeq: 1,
-      rootHash: cp.rootHash,
-      prevCheckpointHash: '',
-      anchorRef: `local:${cp.checkpointId}`,
-      signature: cp.signature,
-      keyId: 'k',
-    });
+    // 수동 체크포인트는 공개 사슬 1번이고, API 프로세스에는 서명 키가 없어 서명·앵커 칸이 비어 있다(ADR-0348 결정 1·3·11)
+    expect(seen[0]!.payload).toMatchObject({ kind: 'MANUAL', no: 1, fromSeq: 1, toSeq: 1, rootHash: cp.rootHash, prevCheckpointHash: '', checkpointHash: cp.checkpointHash });
+    expect(seen[0]!.payload).not.toHaveProperty('signature');
+    expect(seen[0]!.payload).not.toHaveProperty('keyId');
+    expect(seen[0]!.payload).not.toHaveProperty('anchorRef');
+    expect(cp).toMatchObject({ kind: 'MANUAL', no: 1 });
+    expect(cp.signature).toBeUndefined();
+    expect(cp.keyId).toBeUndefined();
     expect(base.entries).toHaveLength(1);
     expect(chain.entries.filter((e) => e.recordType === 'AUDIT_CHECKPOINT_CREATED')).toHaveLength(1);
   });
@@ -138,7 +140,7 @@ describe('OPS-04 체크포인트 원자성 포트', () => {
         throw new Error('injected audit failure');
       },
     });
-    const service = new AuditCheckpointService(store, chain, () => NOW, ephemeralAuditAnchorSigner('k'));
+    const service = new AuditCheckpointService(store, chain, () => NOW);
     await expect(service.create({ reason: '롤백 시험', actorRef: 'ops-1' })).rejects.toThrow('injected audit failure');
     expect(base.entries).toHaveLength(0);
     expect(chain.entries.filter((e) => e.recordType === 'AUDIT_CHECKPOINT_CREATED')).toHaveLength(0);
