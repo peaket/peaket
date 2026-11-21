@@ -211,4 +211,10 @@
 
 ## 기록
 
-(감독이 채운다)
+- **R-737.** 갈래 2 지휘 세션(`lane2-w12-conductor`)이 기록했다. 감독 결정(2026-11-22)으로 ADR-0169(빌드 절차를 바꾸는 PR에 다른 경로를 섞지 않는다)대로 둘로 나눠 합쳤다: (a) 워크플로 몫만 `41049c462`(가지 `feature/lane2-W12-ci-web-wf`, 초안 PR #52, 내용은 구현 커밋 `bd6c92c4b`·`9d2ace536`의 `ci-web.yml` 변경 그대로)을 먼저 develop에 합쳤고, (b) 이 가지(파트너 시험 표본·계획·리뷰·검증·기록, 초안 PR #51)를 그 위로 다시 쌓아 합친다. 다시 쌓을 때 구현 커밋 둘의 `ci-web.yml` 몫은 develop 쪽을 받아 비었고 계획 파일 몫만 남았다.
+- **고친 것**: ① `apps/partner/src/_pages/seatmap-editor/security.test.mjs` 경로 파일 표본을 `route-reexport-only`가 받는 꼴 둘로(정본 `docs/frontend.md` §2.2·ADR-0329 결정 5). ② `web / seats` 잡이 web 의존 패키지(dist로만 내보내는 `@peaket/search-normalize/refine` 등)를 먼저 빌드하고, web 시험이 함께 도는 queue-room 시험의 의존(vite)도 설치한다. ③ `web / queue-room`은 흔들림으로 판정하고 정리 목록에 적었다.
+- **CI**: PR #51(실행 44919441525)·#52(44919503553)에서 `web / seats`가 BAT-182 뒤 처음 끝까지 초록(seatmap 128·web 1,031·`pnpm run seats` 3/3), `@peaket/partner#test` 195/195, queue-room 36/36, security-scan 넷 초록. 이 묶음 탓이 아닌 남은 빨강: tools-check mesh MS-09·10·19(develop에도 있음), core-svc 통합 AZ-T5·R165-1(BAT-616 뒤 처음 돎) — 둘 다 감독에게 넘겼다. PR #51의 branch-policy는 나눠 합치므로 풀린다.
+- **틀린 구현**: 4개 넣어 4개 잡힘(M1~M4), 놓침 0.
+- **역할**: 계획 → 구현 → 시험 → 리뷰 → 구현(queue-room 필터) → 검증, 역할마다 다른 담당(담당 표). 리뷰 뒤 구현 커밋은 검증 앞이다. 시험 담당은 실패 ①의 표본 고침을 맡았고, 실패 ②는 seats 잡 자체가 재현이라 새 시험이 없다.
+- **정리 목록**: 리뷰 RV-01~04, queue-room 흔들림, 검증의 tsbuildinfo 함정을 `docs/lanes/lane2-cleanup.md`에 적었다. RV-05(ADR-0329 상태)는 develop `c06b480cf`로 이미 처리됐다.
+- **다음 단계**: BAT-350 합치기(이 묶음 위로 rebase) → W12-dt50 → BAT-177.
