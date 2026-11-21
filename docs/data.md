@@ -1990,6 +1990,8 @@ erDiagram
     evidence_bundle ||--o{ evidence_custody_log : "관리 연속성"
     admin_account ||--o{ fraud_case : "담당 조사관"
     command_event ||--o{ command_approval : "명령 승인(ADR-0086)"
+    ops_command ||--o| command_post_review : "명령 3·11 사후 검토(ADR-0349)"
+    audit_signing_key ||--o{ audit_checkpoint : "서명 키(ADR-0348)"
     takedown_action {
         uuid id PK
         uuid notice_id "takedown_notice(NOTICE·SAME_CONTENT일 때). ops 논리 DB라 외래키 없음(추천 적용 2026-10-23)"
@@ -2074,21 +2076,48 @@ erDiagram
         timestamptz created_at
     }
     audit_checkpoint {
-        bigint no PK "체크포인트 번호"
-        bigint first_seq
-        bigint last_seq
+        uuid id PK "체크포인트 ID(API의 checkpointId). 2026-11-22 BAT-360 계획: 공개 번호 no는 따로 유일 칸으로 둔다(ADR-0348 결정 3)"
+        bigint no UK "공개 체크포인트 번호, 1부터 빈틈 없음. 0023 이전 옛 행은 null(공개 사슬 밖, legacy)"
+        bigint from_seq "체크포인트 JSON의 firstSeq"
+        bigint to_seq "체크포인트 JSON의 lastSeq"
         int leaf_count
-        bytea merkle_root "RFC 9162 머클 트리 해시(잎은 PEAKET-audit-leaf-v1, seq, 기록 해시, 잎 솔트)"
-        bytea prev_checkpoint_hash
-        bytea access_log_day_anchor "일 체크포인트에만"
+        bytea root_hash "새 행은 RFC 9162 머클 트리 해시(잎은 PEAKET-audit-leaf-v1, seq, 기록 해시, 잎 솔트, 바이트 꼴은 ADR-0348 결정 2). 옛 행은 seq:해시 줄의 SHA-256"
+        bytea prev_hash "직전 체크포인트 해시(첫 체크포인트는 빈 bytea)"
+        text kind "DAILY|EVENT_CLOSE|MANUAL|EXECUTION(명령 실행 전후, 지금 꼴)"
+        bytea access_log_day_anchor "일 체크포인트에만. 접속기록 저장소(OPS-330) 전에는 null"
         jsonb closed_events "회차 마감 체크포인트에만"
-        bytea checkpoint_hash "RFC 8785 정규화 JSON의 SHA-256"
+        text checkpoint_json "RFC 8785 정규화 JSON 바이트 그대로(게시하는 값, ADR-0348 결정 3)"
+        bytea checkpoint_hash "RFC 8785 정규화 JSON(checkpoint_json)의 SHA-256"
         text actor_ref "구현 칸: 만든 쪽. 관리 계정 ID를 적지 않는다(실행 전후 체크포인트는 그 DISPATCHED 사건의 가명 참조, 처음 실행은 시스템 빈 UUID, 손으로 만든 것은 역할 이름, 추천 적용 2026-11-22, BAT-355 리뷰 RV-02)"
-        bytea signature "체크포인트 서명 키(KMS ECDSA P-256)"
-        text ots_state "PENDING|COMPLETE"
-        bytea ots_proof
+        text signature "체크포인트 서명 키(KMS ECDSA P-256). 새 행은 DER의 base64이고 게시 작업만 채운다(ADR-0348 결정 4)"
+        text key_id "audit_signing_key.key_id"
+        text ots_state "PENDING|COMPLETE. 캘린더가 모두 실패하면 null"
+        bytea ots_proof "OpenTimestamps 증명 파일(완료 증명으로 바뀌면 새 값)"
+        timestamptz ots_upgraded_at
+        text reason "만든 까닭(손으로 만든 것은 사유, 실행 전후 체크포인트는 COMMAND_EXECUTION_BEFORE·AFTER와 명령 ID). 공개 JSON에는 싣지 않는다"
         timestamptz created_at
-        timestamptz published_at
+        timestamptz published_at "두 버킷에 모두 쓴 시각"
+    }
+    audit_signing_key {
+        text key_id PK "KMS 키 ID 또는 local 키 ID(ADR-0348 결정 4)"
+        bytea public_key_spki "GetPublicKey로 받은 공개키"
+        text alg "ECDSA_P256_SHA256"
+        timestamptz first_used_at
+    }
+    command_post_review {
+        uuid command_id PK "명령 3·11(승인 없이 실행), ADR-0349 결정 7"
+        text executor_ref "실행한 commander의 가명 참조(command_actor로 푼다)"
+        timestamptz due_at "처음 DISPATCHED + 48시간. 정각이면 넘김"
+        timestamptz submitted_at
+        jsonb report "계기·설명·2인 승인을 기다리지 않은 이유·후속 조치(openapi post-review 본문). 사람 이름 없음"
+        timestamptz confirm_due_at "제출 + 7일"
+        timestamptz confirmed_at
+        text reviewer_ref "검토한 commander의 가명 참조"
+        text assessment "APPROPRIATE|INAPPROPRIATE|INCONCLUSIVE"
+        bool solo_self_review "1인 기간 자기 검토"
+        bool late "기한 뒤 제출·검토"
+        timestamptz due_alerted_at "작성 기한 넘김 SEV3를 낸 시각(한 번)"
+        timestamptz confirm_alerted_at "검토 기한 넘김 SEV3를 낸 시각(한 번)"
     }
     data_request {
         uuid id PK
@@ -2836,7 +2865,7 @@ erDiagram
 3. **결제 승인 처리 (payment)**: `payment` 레코드 상태 전이, `payment_event` 기록, Outbox 적재를 트랜잭션 하나로 처리한다. 주문당 결제 1건은 `payment.order_id`의 유일 제약이 지킨다(결제 표를 나누지 않아 직접 걸 수 있다. 2026-10-22~10-28에는 파티션 때문에 따로 둔 `payment_per_order` 표가 맡았다, ADR-0114). 외부 PG사 웹훅을 받을 때는 `webhook_receipt` 테이블에 PG사별 고유 식별자(PEAKET이 연동하는 결제사인 토스는 `transmission_id`, 포트원은 Standard Webhooks 규격의 사건 키 `webhook-id`, 기술 검토 낮음-070)로 유니크 제약을 걸어, 같은 식별자로 다시 온 웹훅은 한 번만 처리한다. 토스 문서는 재전송 때 전송 ID가 같은지 밝히지 않는다. 그래서 식별자가 다른 중복이 와도, 결제 상태는 단건 조회 API 결과로만 바꾼다는 규칙 때문에 결과가 바뀌지 않는다(docs/features/payment.md §5). 웹훅이 들어온 경로의 결제사와 결제 기록의 결제사가 다르면 반영하지 않는다(ADR-0044). 결과 당기기(`BatchGetPayments`)는 쓰기 인스턴스에서 `payment.order_id` 유일 인덱스로 읽는다. 읽기 복제본은 복제가 늦으면 방금 승인한 건을 놓치므로 쓰지 않는다(추천 적용 2026-10-29, ADR-0140). 대체 결제사 전환(명령 6)은 제어 gRPC로 받아 `pg_switch`에 판 번호가 지금보다 클 때만 쓰는 조건부 UPDATE 하나다. 모든 파드가 2초 [가정]마다 다시 읽어 맞추고, 새 파드는 이 표를 읽어야 준비 상태가 된다(추천 적용 2026-10-29, ADR-0143 결정 1).
 4. **티켓 발권 및 키 바인딩 (ticket)**: `ticket` 엔티티는 발권 때 만들고, 첫 `device_key`는 팬이 '입장용 휴대폰 등록'을 누를 때 등록한다(ADR-0051). 키를 등록하거나 폐기할 때는 같은 트랜잭션에서 `scanner_change`에 변경을 적는다. 티켓 양도 트랜잭션은 `SELECT … FOR UPDATE`로 행을 잠근다. `version` 칸 비교는 사람이 화면에서 읽고 나중에 저장하는 CS·관리 흐름에만 쓴다(2026-11-01 정합 점검, 기술 검토 낮음-071). 보유자 변경과 기존 기기 키의 `revoked_at` 설정은 트랜잭션 하나로 끝낸다. 새 보유자의 공개키는 그 뒤 '입장용으로 등록'(reason `TRANSFER`)으로 따로 등록한다(ADR-0051 결정 10).
 5. **굿즈 주문 및 재고 확정 (core shop)**: Redis에서 남은 재고를 원자적으로 차감한 뒤, 결제 승인 직전에 PostgreSQL `product_stock` 테이블을 조건부로 갱신(`stock >= quantity`)하고 `merch_order` 레코드를 만든다. 주문을 만들 때(CREATED) 같은 Lua가 재고 예약(§3 `shop:{product:P}:resv`, 유효 시간 15분 [가정])을 함께 넣고, `merch_order.stock_reserved_until`에 같은 시각을 적는다. 예약이 지나도록 결제가 끝나지 않으면 만료 작업이 주문을 조건부로 EXPIRED로 바꾼 뒤 Redis 재고만 돌린다(PostgreSQL 재고는 승인 직전에만 깎으므로 돌릴 것이 없다). 같은 계정은 같은 상품에 결제하지 않은 주문을 하나만 [가정] 둔다(추천 적용 2026-10-28, ADR-0107).
-6. **운영 제어 명령 (ops)**: `command_event` 테이블에 명령 이벤트를 덧붙이기만 하는 append-only 방식으로 기록한다. 명령의 상태는 그 명령의 사건으로 정한다(이벤트 소싱). 콘솔 목록·검색에 쓰는 지금 상태는 같은 트랜잭션에서 고치는 명령 상태 표에 두고, 이 표는 사건에서 다시 만들 수 있는 사본이다(지금까지 '주기적 상태 스냅샷'이라 적은 것, 추천 적용 2026-10-28, ADR-0113). 이 기록은 불변 감사 로그와 같은 저장소에 영구 보존된다. 같은 트랜잭션에서 `audit_chain`에 체인 행(빈틈 없는 번호, 기록 종류·ID, 기록 해시)을 더하고, 키 건 해시인 mac은 비운 채 커밋한다. 빈틈 없는 번호는 같은 트랜잭션에서 머리 행 `audit_chain_head`를 `UPDATE … RETURNING`으로 올려 얻는다(DB 시퀀스는 빈틈이 생기고 커밋 순서와 어긋날 수 있다, 추천 적용 2026-10-22, ADR-0086). 기록 트랜잭션은 KMS를 부르지 않아, KMS가 늦거나 멈춰도 명령이 커밋된다. 체인 작업자 하나(ops-svc 안에서 Lease로 고른 하나)가 커밋 뒤 `seq` 순서로 mac을 채운다. 가장 오래된 빈 행이 1분 [가정]을 넘으면 SEV2이고, 서울 KMS가 응답하지 않으면 도쿄의 다중 리전 복제 키로 계산한다(같은 키 재료라 mac이 같다, 추천 적용 2026-10-28, ADR-0102). 명령의 2인 승인은 자식 표 `command_approval`에 둔다. 그리고 5분마다 mac을 채운 마지막 값을 S3(AWS의 파일 저장소) Object Lock에 앵커로 남겨, 명령 기록을 고치거나 지우면 검증에서 드러나게 한다(ADR-0053). 행마다 비공개 잎 솔트를 함께 쓴다. 매일과 회차 마감 때 감사 체크포인트(`audit_checkpoint`)를 만들어 서명하고, 공개 타임스탬프에 고정해 게시한다(ADR-0075). 입장 일시정지 연장(`EXTENDED`)과 명령 11 사후 검토(`POST_REVIEW_SUBMITTED`·`POST_REVIEW_CONFIRMED`)는 같은 command_id의 이벤트로 더한다(추천 적용 2026-10-14, ADR-0062). 만료 차단 정리 작업 `waf-block-expirer`는 명령 상태 표를 직접 읽지 않고 읽기 전용 보기 `waf_block_expiry_v` 하나만 읽는다. 이 보기는 명령 4 행의 명령 ID·대역·만료 시각·상태만 보이고, 그 작업의 DB 사용자 `waf_block_expirer`는 이 보기의 SELECT 권한만 가진다(명령 상태 표·`command_event`·감사 체인의 읽기·쓰기 권한 없음). 보기와 사용자 이름은 추천 적용 2026-10-30이다(소유자 결정 2026-10-30, open-items 70번 ①, docs/features/control-tower.md §5, docs/infra.md §1 ②).
+6. **운영 제어 명령 (ops)**: `command_event` 테이블에 명령 이벤트를 덧붙이기만 하는 append-only 방식으로 기록한다. 명령의 상태는 그 명령의 사건으로 정한다(이벤트 소싱). 콘솔 목록·검색에 쓰는 지금 상태는 같은 트랜잭션에서 고치는 명령 상태 표에 두고, 이 표는 사건에서 다시 만들 수 있는 사본이다(지금까지 '주기적 상태 스냅샷'이라 적은 것, 추천 적용 2026-10-28, ADR-0113). 이 기록은 불변 감사 로그와 같은 저장소에 영구 보존된다. 같은 트랜잭션에서 `audit_chain`에 체인 행(빈틈 없는 번호, 기록 종류·ID, 기록 해시)을 더하고, 키 건 해시인 mac은 비운 채 커밋한다. 빈틈 없는 번호는 같은 트랜잭션에서 머리 행 `audit_chain_head`를 `UPDATE … RETURNING`으로 올려 얻는다(DB 시퀀스는 빈틈이 생기고 커밋 순서와 어긋날 수 있다, 추천 적용 2026-10-22, ADR-0086). 기록 트랜잭션은 KMS를 부르지 않아, KMS가 늦거나 멈춰도 명령이 커밋된다. 체인 작업자 하나(ops-svc 안에서 Lease로 고른 하나)가 커밋 뒤 `seq` 순서로 mac을 채운다. 가장 오래된 빈 행이 1분 [가정]을 넘으면 SEV2이고, 서울 KMS가 응답하지 않으면 도쿄의 다중 리전 복제 키로 계산한다(같은 키 재료라 mac이 같다, 추천 적용 2026-10-28, ADR-0102). 명령의 2인 승인은 자식 표 `command_approval`에 둔다. 그리고 5분마다 mac을 채운 마지막 값을 S3(AWS의 파일 저장소) Object Lock에 앵커로 남겨, 명령 기록을 고치거나 지우면 검증에서 드러나게 한다(ADR-0053). 행마다 비공개 잎 솔트를 함께 쓴다. 매일과 회차 마감 때 감사 체크포인트(`audit_checkpoint`)를 만들어 서명하고, 공개 타임스탬프에 고정해 게시한다(ADR-0075). 입장 일시정지 연장(`EXTENDED`)과 명령 11 사후 검토(`POST_REVIEW_SUBMITTED`·`POST_REVIEW_CONFIRMED`)는 같은 command_id의 이벤트로 더한다(추천 적용 2026-10-14, ADR-0062). 명령 3·11 사후 검토는 할 일을 여는 `POST_REVIEW_OPENED`도 더하고, 지금 상태(기한·제출·검토)는 같은 트랜잭션에서 고치는 `command_post_review`에 둔다(추천 적용 2026-11-22, BAT-360 계획, ADR-0349 결정 7). 만료 차단 정리 작업 `waf-block-expirer`는 명령 상태 표를 직접 읽지 않고 읽기 전용 보기 `waf_block_expiry_v` 하나만 읽는다. 이 보기는 명령 4 행의 명령 ID·대역·만료 시각·상태만 보이고, 그 작업의 DB 사용자 `waf_block_expirer`는 이 보기의 SELECT 권한만 가진다(명령 상태 표·`command_event`·감사 체인의 읽기·쓰기 권한 없음). 보기와 사용자 이름은 추천 적용 2026-10-30이다(소유자 결정 2026-10-30, open-items 70번 ①, docs/features/control-tower.md §5, docs/infra.md §1 ②).
 7. **트랜잭셔널 아웃박스 릴레이**: 모든 환경(로컬·v0·운영)의 Outbox 릴레이는 서비스마다 둔 폴링 릴레이 하나다(Outbox 표를 짧은 주기로 읽어 Kafka로 보내는 작은 작업자). Debezium(DB 변경 기록을 읽어 Kafka로 보내는 도구)을 쓰던 운영의 CDC(DB의 변경 기록을 읽어 다른 시스템으로 흘려보내는 방식) 릴레이는 2026-10-28에 뺐다. 측정한 길과 운영 길을 같게 하고 복제 슬롯과 자바 실행 기반을 없애려는 것이다(추천 적용 2026-10-28, ADR-0116). Redis 메모리에서 생긴 원본 이벤트(좌석 홀드, 구매 세션 시작과 종료)는 Redis Stream 전용 릴레이 워커가 Kafka 토픽으로 넘긴다. 보내는 규칙과 정리 규칙(정리는 추천 적용 2026-10-20, ADR-0070. 2026-10-28 ADR-0116으로 고쳤다):
    - **배치**: Outbox를 쓰는 서비스(purchase·payment·ticket·identity·core·ops)마다 Deployment `<서비스>-outbox-relay`(서비스와 같은 이미지, 복제 2)를 두고, 쿠버네티스 Lease로 하나만 보낸다. 그 서비스가 Outbox로 내는 토픽의 MSK 쓰기 권한은 릴레이 역할에 주고 요청 처리 파드의 역할에는 주지 않는다(같은 토픽에 Redis Stream 릴레이도 쓰는 `trade.seats`는 그 릴레이 역할에도 준다). DB에는 PgBouncer를 거쳐 역할 `<서비스>_outbox_relay`(Outbox 읽기와 `sent_at` 고치기만)로 붙는다.
    - **제어 사건도 Outbox로(추천 적용 2026-10-29, ADR-0143 결정 3)**: 설정형 명령의 `control.settings`는 ops-svc Outbox(ops DB)로, 세션 종료의 `control.sessions-terminated`는 identity-svc Outbox(identity DB)로 보낸다. 릴레이가 100ms [가정]마다 읽으므로 평소 지연은 거의 그대로다. Kafka가 멈춘 동안 낸 명령과 종료 세션은 표에 남았다가 돌아오면 이어 나간다. 받는 쪽은 `expiresAt`이 지난 설정을 무시한다(지금 규칙). 잃지 않게 될 뿐, Kafka가 멈춘 동안 늦어지는 것은 그대로다.
@@ -3022,6 +3051,9 @@ erDiagram
 | 판매 정책 규칙·판매 자격 명단·회차 고치기(추천 적용 2026-11-10, BUILD_ORDER HOT-250, ADR-0261 결정 2·4·6·7): 같은 명단을 두 요청이 함께 올림, 잠금 시각에 겹친 올리기(판정 뒤 잠금 시각이 지남), 규칙 저장과 명단 올리기가 겹쳐 잠금 시각이 어긋남, 같은 규칙·회차를 두 사람이 고침, 파기 정비와 올리기가 겹침 | 파일 읽기와 회원 코드 변환은 잠금 밖에서 먼저 한다. 규칙 저장·명단 올리기·지우기·회차 고치기는 공연 행을 `SELECT … FOR NO KEY UPDATE`로 잡은 트랜잭션(등록·이미지·좌석맵과 같은 잠금)에서 판(`If-Match`, 명단은 판 +1)을 보고, 잠금 시각을 그 안에서 다시 계산하고 다시 본다(지금 ≥ `locked_at`이면 409, 경계 포함). 두 올리기는 이 잠금으로 줄을 서서 나중에 커밋한 쪽이 이긴다(사본 판 `copy_seq`가 오르므로 사본도 나중 판만 남는다). 파기 정비는 명단 행을 `FOR UPDATE`로 잡고(올리기·회차 더하기·고치기는 그 행을 고친다) `destroy_due_at` ≤ 지금을 다시 보고 지우며 지운 기록을 같은 트랜잭션에 남긴다. 사본에 닿는 일은 새 사본 판을 매겨 정비 일이 넘기는 지금의 규칙·회차로 다시 넘긴다(추천 적용, 2026-11-10, 리뷰, ADR-0261 결정 13 ⑶·⑷·⑻) | Q-T36 ⑤, S-T39 ⑥, core-svc 통합 시험(실제 PostgreSQL, 두 요청 사이에 잠금 시각을 끼워 넣기) |
 | 판매 자격 대조(queue-svc, 추천 적용 2026-11-10, BUILD_ORDER HOT-253, ADR-0265): 로비·진입의 대조와 core-svc의 사본 갈아끼우기·지우기가 겹침, 대조와 번호 내기 사이에 사본이 바뀜, 창 경계에서 고른 창과 Lua가 도는 때가 어긋남, 로비 참가 뒤 오픈 전에 창·사본이 바뀜, 같은 사람의 진입 두 요청 가운데 하나만 창 안(경계를 걸침) | 대조는 번호를 내는(로비는 참가자를 넣기 전 창을 보는) 회차 슬롯 Lua 안에서 해 대조와 번호 사이에 틈이 없다. 사본은 Set과 표지 `eligv`를 한 Lua로 바꾸므로(쓰는 쪽 HOT-251) 대조 Lua는 바꾸기 전이나 뒤의 한 판만 본다. 파드별 묶음은 고른 명단 키가 같은 요청끼리만 모은다. 창은 파드 시계로 골라 경계에서 시계 차이(수 ms)만큼 어긋날 수 있고(남는 한계), 낸 참가 토큰·대기표는 다시 거르지 않으며 정확한 강제는 홀드 평가다. 자격이 없는 요청은 회차 슬롯에 아무것도 쓰지 않고 사람 키 선점만 풀어, 같은 사람의 다른 요청은 지금의 1인 1순번 규칙대로 하나만 번호를 받는다 | Q-T36 ①②⑨(실제 Valkey 통합 시험: 대조 Lua와 사본 갈아끼우기를 번갈아 부르기, 자격이 섞인 묶음의 번호 카운터·참가자 목록 정확한 값) |
 | 한 realtime-gw 파드 안에서 여러 연결이 같은 구역 채널을 거의 같은 때 구독·해제해, 앞의 `SSUBSCRIBE`가 끝나기 전에 마지막 연결이 빠지거나(구독이 남음) 해제가 끝나기 전에 새 연결이 들어옴(구독이 빠짐)(추천 적용 2026-11-18, BAT-052 계획, ADR-0296) | 허브는 채널마다 구독한 연결 수를 세어 0↔1이 바뀔 때 구독기에 알리기만 하고, 원하는 상태는 구독기 하나가 든다. 구독기는 같은 채널의 명령을 한 번에 하나씩 보내고, 실패 뒤의 실제 상태를 '모름'으로 두어 원하는 상태와 같아질 때까지 물러서며 다시 보낸다(ADR-0297 결정 1, docs/features/seat-hold.md §7 'realtime-gw의 첫 구현') | S-T42 ⑧ ⑰ |
+| 감사 공개 체크포인트(추천 적용 2026-11-22, BAT-360 계획, ADR-0348): 게시 작업 두 번이 겹쳐 같은 번호를 두 번 만들거나, 수동 생성과 일 체크포인트가 같은 구간을 덮음 | CronJob은 겹쳐 돌지 않고(`concurrencyPolicy: Forbid`), 만들기는 한 트랜잭션에서 `pg_advisory_xact_lock`(체크포인트 잠금 하나)을 잡은 뒤 마지막 행을 읽어 `no + 1`·`to_seq + 1`부터 쓴다. `no` 유일 제약이 남은 경합을 막는다. 서명·게시 칸은 `signature IS NULL`·`published_at IS NULL` 조건부 갱신이라 두 번 써도 한 번만 바뀐다 | C-T40 |
+| 사후 검토 보고서 제출·검토가 겹침(추천 적용 2026-11-22, BAT-360 계획, ADR-0349): 같은 명령에 제출 두 번, 제출 전 검토, 검토 두 번, 기한 경보와 제출이 같은 때 | `command_post_review` 조건부 갱신(`submitted_at IS NULL`·`confirmed_at IS NULL AND submitted_at IS NOT NULL`)이 하나만 통과시키고 나머지는 409다. 경보는 `due_alerted_at IS NULL` 조건부 갱신으로 한 번만 낸다 | C-T10 ② |
+| 만료 차단 정리 작업과 다른 쪽이 같은 WAF IP 집합을 바꿈(추천 적용 2026-11-22, BAT-360 계획, ADR-0349): 작업이 읽은 뒤 쓰기 전에 명령 4의 새 차단이 더해짐 | `GetIPSet`의 잠금 토큰으로 `UpdateIPSet`을 하고, `WAFOptimisticLockException`이면 다시 읽어 한 번 더 한다(그사이 더한 대역을 지우지 않는다). 작업은 겹쳐 돌지 않는다 | C-T61 ⑤ |
 | 같은 굿즈 한정 재고에 여러 계정이 동시에 주문하고, 결제 접수 때 PostgreSQL 재고를 깎음(추천 적용 2026-11-18, BAT-600 계획, ADR-0300 결정 3~5) | 판매 가능 수는 상품 슬롯의 예약 Lua 하나가 검사·차감·예약을 함께 한다(슬롯 안에서 차례로 돈다). 여러 상품 주문은 상품 ID 차례로 하나씩 잡고 실패하면 앞서 잡은 것을 푼다. 결제 접수는 주문 행 잠금 아래 상품 ID 차례로 `product_stock`을 `stock >= quantity` 조건부로 깎고, 0행이면 주문을 실패로 끝낸다 | P-T57 ③④(동시 주문 10건에 성공 3건, PostgreSQL 재고 0일 때 결제 명령 0건) |
 | 같은 계정이 같은 상품에 두 주문을 겹쳐 만듦(결제 전 주문 하나, 추천 적용 2026-11-18, BAT-600 계획, ADR-0300 결정 4) | 예약 Lua가 같은 슬롯의 `unpaid` 해시로 그 계정의 다른 결제 전 주문을 보고 거절한다. 앞 주문이 DB에 있으면 조건부로 만료하고 풀고 다시 잡는다. 아직 DB에 없으면(만드는 중) 409 `merch-order-in-progress`다 | P-T42 ④ |
 | 굿즈 재고 예약 만료와 결제 접수·결과 반영이 같은 주문에 겹침(추천 적용 2026-11-18, BAT-600 계획, ADR-0300 결정 5~7) | 셋 다 주문 행을 `FOR UPDATE`로 잠그고 출발 상태(`CREATED`, 만료는 접수 전이고 기한이 지났을 때만)일 때만 바꾸는 조건부 UPDATE다. Redis 예약은 커밋 뒤 풀고, 원소가 있을 때만 재고를 돌려 두 번 돌리지 않는다. 반영 도중 죽어 남은 원소는 만료 작업이 주문 상태를 보고 돌린다 | P-T42 ③⑤ |
