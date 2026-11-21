@@ -9,7 +9,7 @@ import 'reflect-metadata';
 import { Controller, Get, Module, type Type } from '@nestjs/common';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { generateAuthTokenFromRole } from 'aws-msk-iam-sasl-signer-js';
-import { Roles, createService, fakeClock, type PlatformService } from '../src/index.js';
+import { PlatformConfigError, Roles, createService, fakeClock, type PlatformService } from '../src/index.js';
 import { kafkaAdminConfig, kafkaConsumerConfig } from '../src/kafka-config.js';
 import { startServiceControlSync, type ServiceControlSync } from '../src/stream-worker.js';
 import { collector, sample } from './fixture.js';
@@ -99,6 +99,33 @@ describe('I-T3 ② 도우미가 만드는 읽기 연결의 운영 인증(ADR-033
     // 실린 인증이 실제로 쓰인다: 클라이언트가 토큰을 그 역할·세션 이름으로 만든다
     await until(() => vi.mocked(generateAuthTokenFromRole).mock.calls.length > 0, 'MSK 토큰 만들기');
     expect(vi.mocked(generateAuthTokenFromRole).mock.calls[0]![0]).toMatchObject({ region: 'ap-northeast-2', awsRoleArn: ROLE_ARN, awsRoleSessionName: 'sync-svc-staging' });
+  }, 30_000);
+});
+
+describe('I-T3 ② 설정만 읽기(sessions: false)와 빠뜨림 막기(ADR-0333 결정 3, ADR-0334 결정 2, BAT-215 리뷰 RV215-2)', () => {
+  test('I-T3 ②-14 신원 역할 처리기가 있는 서비스가 local·ci 밖(staging)에서 도우미를 설정만 읽기(sessions: false)로만 부르면 소비 표시가 서지 않아 listen이 PlatformConfigError로 두 포트를 열지 않고, 같은 꼴의 서비스를 기본(종료 세션도 읽음)으로 부르면 표시가 서고 듣는다', async () => {
+    const env = { PEAKET_ENV: 'staging', PEAKET_KAFKA_BROKERS: UNREACHABLE, PEAKET_KAFKA_AUTH: 'msk-iam', PEAKET_KAFKA_MSK_ROLE_ARN: ROLE_ARN, AWS_REGION: 'ap-northeast-2', PEAKET_POD: 'pod-x14' };
+    const svc = await boot(env);
+    // real-time: 도우미는 실제 Kafka 클라이언트를 만들어 닿지 않는 주소로 붙고, listen이 빠뜨림 막기를 지나 실제로 듣는지는 포트를 열어야 보인다(빈 포트 0, 127.0.0.1) BAT-215
+    const settingsOnly = startServiceControlSync(svc, env, { sessions: false });
+    expect(settingsOnly).toBeDefined();
+    syncs.push(settingsOnly!);
+    expect(svc.controlSync.started).toBe(false);
+    const listening = svc.listen('127.0.0.1');
+    await expect(listening).rejects.toThrow(PlatformConfigError);
+    // 막은 까닭에 그 신원 처리기 이름이 실린다
+    await expect(listening).rejects.toThrow(/FanController\.me/);
+    expect(svc.http.server.listening).toBe(false);
+    expect(svc.management.server.listening).toBe(false);
+
+    const envB = { ...env, PEAKET_POD: 'pod-x14b' };
+    const other = await boot(envB);
+    const full = startServiceControlSync(other, envB);
+    expect(full).toBeDefined();
+    syncs.push(full!);
+    expect(other.controlSync.started).toBe(true);
+    await other.listen('127.0.0.1');
+    expect(other.http.server.listening).toBe(true);
   }, 30_000);
 });
 
