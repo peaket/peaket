@@ -434,6 +434,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 - **ADR-0338**: 상태 줄에 '셋째로 결정 4의 트리거 조건에서 슈퍼유저를 뺐다', 결정 4 셋째 항목을 '파트너 역할에게만 돈다. 슈퍼유저는 앱 경로가 아니라 뺀다'와 그 까닭(PostgreSQL 18 `is_member_of_role`가 슈퍼유저에게 참, `assertDatabaseRole`이 앱 연결의 슈퍼유저를 막음)으로 고쳤다. 결과에 '시험 준비: 시드 사용자는 슈퍼유저라 트리거를 건너뛴다' 한 줄을 더했다. authz-matrix AZ-T18 글은 바꾸지 않았다.
 - **게이트(로컬)**: `turbo run build --filter=@peaket/core-svc^...`, core-svc `typecheck` 통과. core-svc 단위 105파일 773개 중 771개 통과, 2개(`fill-search-guard.test.ts` W7L2-S8·S12, 한 번은 `internal-sale-config-token-boot.test.ts` SEC-06R ①도)가 전체 실행에서만 5초 시간 초과였다(자식 프로세스를 띄우는 시험, 따로 돌리면 `migrations-journal`·`shop-notify.migration`·`webhook-dispatcher`와 함께 5파일 21개 통과, 바꾼 파일과 관계없음). `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(모두 기존 openapi·mermaid 경고).
 - **감독에게(고치지 않음)**: PostgreSQL 16부터 슈퍼유저가 아닌 `CREATEROLE` 사용자가 역할을 만들면 그 사용자에게 새 역할의 ADMIN 구성원 자격이 저절로 붙고(INHERIT·SET 없이), `pg_has_role(…, 'MEMBER')`은 그 자격도 센다. 운영 DB는 Aurora라 관리 계정이 슈퍼유저가 아니다. 운영 마이그레이션을 그 계정으로 돌리고 그 계정이 0004에서 `core_partner`를 만들었다면, 그 계정(표 소유자)의 상품 넣기·고치기에도 트리거가 돈다. 지금 상품 행을 쓰는 마이그레이션은 없어 당장 영향은 없지만, 뒤에 상품 수수료율을 고치는 데이터 마이그레이션은 트리거가 덮는다. 조건을 `'USAGE'`로 바꾸거나 표 소유자 제외(`assertDatabaseRole`의 소유자 검사와 같은 꼴)를 더할지는 감독이 정할 일이다(`rls.int`의 `core_migrator` 시험은 역할을 슈퍼유저가 먼저 만든 뒤라 이 경우를 보지 않는다).
+- **트리거 판정 `USAGE`(감독 결정 2026-11-22, 둘째 구현 세션 `lane2-w12corerls2-impl2`)**: 0042 `product_commission_from_contract` 첫 줄의 `pg_has_role(current_user, 'core_partner', 'MEMBER')`을 `'USAGE'`로 바꿨다(슈퍼유저 제외는 그대로). 0042 주석과 ADR-0338 상태 줄·결정 4에 까닭(PostgreSQL 16부터 `CREATEROLE` 비슈퍼유저가 받는 저절로 붙는 관리 자격을 `MEMBER`가 셈, `SET ROLE core_partner`도 참, `has_privs_of_role`도 슈퍼유저에게 참)을 더했다. 결과 절의 시험 준비 문장은 그대로다. 시험 파일은 건드리지 않았다. 게이트(로컬): core-svc `typecheck` 통과, 단위 105파일 773개 통과, `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(모두 기존 openapi·mermaid 경고). CI 결과는 감독 보고로 넘긴다.
 
 ## 리뷰
 
@@ -450,6 +451,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 | plan | lane2-w12corerls2-plan | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T03:14+09:00 |
 | test | lane2-w12corerls2-test | claude-opus-5-5 | 2026-11-22T04:31+09:00 | 2026-11-22T06:37+09:00 |
 | impl | lane2-w12corerls2-impl | claude-opus-5-5 | 2026-11-22T05:14+09:00 | 2026-11-22T05:48+09:00 |
+| impl | lane2-w12corerls2-impl2 | claude-opus-5-5 | 2026-11-22T06:37+09:00 | 2026-11-22T06:41+09:00 |
 
 ## 기록
 

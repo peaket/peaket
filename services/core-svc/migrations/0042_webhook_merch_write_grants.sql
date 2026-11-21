@@ -49,15 +49,17 @@ REVOKE UPDATE ON "product" FROM core_partner;
 GRANT UPDATE ("type", "schema_version", "name", "status", "price", "shipping_fee", "return_shipping_fee", "return_address", "limited_qty", "transferable", "ticket_linked", "linked_event_id", "fulfillments", "sale_starts_at", "sale_ends_at", "commission_rate_bp", "attributes", "version", "published_at", "updated_at") ON "product" TO core_partner;
 --> statement-breakpoint
 -- 호출자 권한 함수라 파트너 트랜잭션에서는 자기 테넌트 계약만 읽는다(0033 promoter_contract_partner_read). search_path를 고정하고 표 이름에 스키마를 붙인다(ADR-0241 결정 5).
--- 파트너 역할에게만 돈다. 슈퍼유저는 빼고 그대로 둔다: pg_has_role(…, 'MEMBER')는 슈퍼유저를 모든 역할의 구성원으로 보고(PostgreSQL 18 is_member_of_role),
--- 슈퍼유저는 앱 경로가 아니며 원래 행 보안·권한을 넘는다(앱 연결은 assertDatabaseRole이 슈퍼유저를 막는다). 조건 꼴은 0008 partner_approved_sale_guard와 같다
+-- 파트너 역할의 권한을 물려받는 호출자에게만 돈다(USAGE). MEMBER는 PostgreSQL 16부터 CREATEROLE 비슈퍼유저가 역할을 만들 때 저절로 받는
+-- ADMIN 자격(INHERIT·SET 없음)도 세어 그런 관리 계정의 상품 쓰기에도 돌기 때문이다. SET ROLE core_partner는 current_user가 core_partner라 USAGE 참이다.
+-- 슈퍼유저는 빼고 그대로 둔다: pg_has_role(…, 'USAGE')도 슈퍼유저를 모든 역할의 권한을 가진 것으로 보고(PostgreSQL 18 has_privs_of_role),
+-- 슈퍼유저는 앱 경로가 아니며 원래 행 보안·권한을 넘는다(앱 연결은 assertDatabaseRole이 슈퍼유저를 막는다). 조건 꼴은 0008 partner_approved_sale_guard와 같고 판정만 USAGE다
 CREATE OR REPLACE FUNCTION product_commission_from_contract() RETURNS trigger
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
-  IF (SELECT r.rolsuper FROM pg_catalog.pg_roles r WHERE r.rolname = current_user) OR NOT pg_catalog.pg_has_role(current_user, 'core_partner', 'MEMBER') THEN
+  IF (SELECT r.rolsuper FROM pg_catalog.pg_roles r WHERE r.rolname = current_user) OR NOT pg_catalog.pg_has_role(current_user, 'core_partner', 'USAGE') THEN
     RETURN NEW;
   END IF;
   IF TG_OP = 'UPDATE' AND OLD.commission_rate_bp IS NOT NULL THEN
