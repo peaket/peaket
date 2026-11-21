@@ -1,6 +1,6 @@
 # 작업 계획: W12-rtgw(S-T42 ⑯ 닫히는 중 연결 시험이 서버의 실제 100ms 유예와 경주)
 
-- **진행**: 계획·시험·리뷰 끝(2026-11-22, 막는 지적 0) → 다음은 검증 담당.
+- **진행**: 검증 끝 → 다음은 기록·합치기(BAT-355 뒤).
 - **무엇**: `develop` `456df0929` CI(실행 44924759035, `node / node` 잡) `@peaket/realtime-gw#test`에서 `services/realtime-gw/test/gateway.test.ts:205`의 'S-T42 ⑯ 같은 jti로 회차가 다른 연결을 답하지 않는 채 넷 만들면 … 다섯째 핸드셰이크는 … 503 …'(SEC-R02, BAT-052 RF-T15)이 `ev-2 경로: expected [ 101, '', 'websocket' ] to deeply equal [ 503, '', undefined ]`로 실패했다. 다섯째 셋 가운데 앞의 둘(회차 다름·회차 맞음)은 503이었고 셋째(ev-2 경로)만 101이다. 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
 - **바탕**: 작업 폴더 `D:/ticketpass-lane4-rtgw`(가지 `feature/lane4-W12-rtgw`, 출발점 `origin/develop` `456df0929`). 단위 시험은 `pnpm --filter @peaket/realtime-gw test`(vitest).
 - **등급·차례**: C, 시험만 묶음(`Batch-Kind: test-only`): 계획 → 시험(실패 확인을 같은 커밋에) → 리뷰 → 검증 → 기록. 제품 코드(`services/realtime-gw/src/`)는 고치지 않는다.
@@ -102,7 +102,21 @@
 
 ## 검증
 
-(검증 담당이 채운다)
+- 바탕: 시험 커밋 `5d3a991e4`의 임시 사본(`git worktree add --detach`, `corepack pnpm install --frozen-lockfile`, `pnpm exec turbo run build --filter=@peaket/realtime-gw^...`). Docker는 쓰지 않았다. 결함 없는 사본의 `pnpm --filter @peaket/realtime-gw test test/gateway.test.ts`는 6/6 통과다.
+- 틀린 구현 표본: `src/modules/stream/inbound/handshake.ts`에 하나씩 넣고 같은 명령을 돌린 뒤 `git checkout --`로 되돌렸다.
+
+| # | 넣은 결함 | 실패한 시험 |
+| --- | --- | --- |
+| M1 | `CLOSING_GRACE_MS = 50` | 곧 닫는 연결 시험(99ms에 `expected [ true, true ] to deeply equal [ false, false ]`), SEC-R02 고침·W12R-01 ①(`회차 다름: expected [ 101, '', 'websocket' ] to deeply equal [ 503, '', undefined ]`). 3 실패 |
+| M2 | `conn.close`에서 `this.#open.delete(ws)`를 뺌('close' 때만 뺌) | SEC-R01 두 시험(회차 다름 셋 뒤 다른 토큰 `expected 503 to be 101`, 같은 jti 넷 `[ 101, 101, 101, 503 ]`). 2 실패 |
+| M3 | 닫히는 중 셈을 4429(`tooMany`)일 때만 올림(4403은 세지 않음, 파드 셈에서는 그대로 뺌) | SEC-R02 고침·W12R-01 ①(`회차 다름: expected [ 101, … ]`). 2 실패 |
+| M4 | `CLOSING_GRACE_MS = 1_000` | 곧 닫는 연결 시험·SEC-R02 고침(300ms 뒤 끊김을 보는 `until`이 `expected false to be true`). 2 실패 |
+
+- 넣은 것 4·잡힌 것 4·놓친 것 0. 표본마다 실패한 시험이 계획 4 '잡을 시험' 칸과 같다.
+- RV-01: M1에서 곧 닫는 연결 시험의 99ms '아직 열림' 단언(`test/gateway.test.ts:202`)이 잡혔다(위 표 M1 줄).
+- 결정성: 결함 없는 사본에서 `-t "S-T42 ⑯"` 10번 → 10번 모두 5 passed | 1 skipped (6)(W12R-01 ①이 함께 걸리고 S-T42 ②는 건너뜀), 실패 0, 한 번 3.2~5.7초.
+- 판정 기준 대조: ① 닫기 인사 유예는 정본 `docs/features/seat-hold.md` §7 '핸드셰이크'와 ADR-0297 결정 3이 100ms [가정]이고, 시험은 `SPEC.closingGraceMs: 100`(`:17`)과 `closingGraceMs − 1` = 99ms에서 아직 열림·503을 본다(`:200-202`, `:239-241`). 구현 상수를 가져오지 않는다. 일치. ② 같은 jti의 닫히는 중 연결(회차가 다른 것 포함) 4개면 업그레이드 없이 503인 것은 정본이 같은 두 곳이다. 시험은 `SPEC.closingPerToken: 4`(`:19`)이고, ev-2 토큰 넷(4403) 뒤 다섯째 셋을 `[ 503, '', undefined ]`로, 503 셈 3으로 본다(`:240-243`). 일치.
+- 정리: 임시 사본은 worktree 등록이 풀렸지만 `Filename too long`으로 폴더 `D:/ticketpass-lane4-rtgw-verify`가 디스크에 남았다(손으로 지운다).
 
 ## 담당 표
 
@@ -111,5 +125,6 @@
 | plan | w12rtgw-plan-4b8e | claude-opus-5-5 | 2026-11-22T01:57+09:00 | 2026-11-22T02:25+09:00 |
 | test | w12rtgw-test-6d1c | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T02:45+09:00 |
 | review | w12rtgw-review-8e3d | claude-opus-5-5 | 2026-11-22T02:46+09:00 | 2026-11-22T02:51+09:00 |
+| verify | w12rtgw-verify-2a7f | claude-opus-5-5 | 2026-11-22T02:46+09:00 | 2026-11-22T02:54+09:00 |
 
 ## 기록
