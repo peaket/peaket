@@ -17,7 +17,7 @@ export const OpsCommandRequested = zod.object({
   "params": zod.looseObject({
 
 }).optional().describe('명령 유형별 값'),
-  "requestedBy": zod.string().describe('요청한 관리 계정 ID'),
+  "requestedBy": zod.uuid().describe('요청한 관리 계정 ID. ops-svc는 명령 기록에 가명 참조를 적고 이 값은 대응 표(command_actor)에만 둔다(ADR-0340 결정 8)'),
   "requestedRole": zod.string().describe('요청 당시 역할'),
   "occurredAt": zod.iso.datetime({"offset":true}).optional()
 })

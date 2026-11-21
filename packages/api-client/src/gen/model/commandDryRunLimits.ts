@@ -10,4 +10,7 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 
-export type CommandStateDryRun = { [key: string]: unknown };
+/**
+ * 그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)
+ */
+export type CommandDryRunLimits = {[key: string]: number};

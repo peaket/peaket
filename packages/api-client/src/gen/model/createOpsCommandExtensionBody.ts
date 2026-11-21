@@ -11,6 +11,9 @@
  */
 
 export type CreateOpsCommandExtensionBody = {
-  /** @minLength 1 */
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
   reason: string;
 };

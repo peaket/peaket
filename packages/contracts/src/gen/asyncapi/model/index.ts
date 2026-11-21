@@ -18,6 +18,7 @@ export * from './loginMethodChanged.zod.js';
 export * from './opsAlert.zod.js';
 export * from './opsApproval.zod.js';
 export * from './opsAutoAction.zod.js';
+export * from './opsCommandAutoAction.zod.js';
 export * from './opsCommandRequested.zod.js';
 export * from './opsCommandResult.zod.js';
 export * from './opsControl.zod.js';

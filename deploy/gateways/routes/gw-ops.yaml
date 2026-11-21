@@ -333,6 +333,9 @@ spec:
             value: /v1/ops/cases
         - path:
             type: PathPrefix
+            value: /v1/ops/command-dry-runs
+        - path:
+            type: PathPrefix
             value: /v1/ops/commands
         - path:
             type: PathPrefix

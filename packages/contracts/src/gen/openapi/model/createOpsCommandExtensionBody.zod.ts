@@ -11,10 +11,11 @@
  */
 import * as zod from 'zod';
 
+export const createOpsCommandExtensionBodyReasonMax = 2000;
 
 
 export const CreateOpsCommandExtensionBody = zod.object({
-  "reason": zod.string().min(1)
+  "reason": zod.string().min(1).max(createOpsCommandExtensionBodyReasonMax)
 }).strict()
 
 export type CreateOpsCommandExtensionBody = zod.input<typeof CreateOpsCommandExtensionBody>;

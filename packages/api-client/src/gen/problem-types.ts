@@ -45,9 +45,12 @@ export type ProblemType =
   | 'cancellation-not-account-pending'
   | 'case-not-actioned'
   | 'checkpoint-empty'
+  | 'command-dispatch-failed'
   | 'command-not-executable'
   | 'command-not-failed'
   | 'command-not-pending'
+  | 'command-not-revertible'
+  | 'command-out-of-range'
   | 'command-requester-cannot-approve'
   | 'command-role-forbidden'
   | 'commander-removal-needs-role-change'
@@ -387,9 +390,12 @@ export const PROBLEM_TYPES = {
   'cancellation-not-account-pending': { status: 409, title: "환급 계좌를 기다리는 취소가 아닙니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
   'checkpoint-empty': { status: 409, title: "묶을 감사 기록이 없습니다" },
+  'command-dispatch-failed': { status: 502, title: "명령을 대상에 보내지 못했습니다. 다시 시도해 주세요" },
   'command-not-executable': { status: 409, title: "실행할 수 있는 명령이 아닙니다" },
   'command-not-failed': { status: 409, title: "실패한 명령만 다시 시도할 수 있습니다" },
   'command-not-pending': { status: 409, title: "승인 대기 중인 명령이 아닙니다" },
+  'command-not-revertible': { status: 409, title: "되돌릴 수 있는 명령이 아닙니다" },
+  'command-out-of-range': { status: 422, title: "안전 허용 범위 밖의 명령입니다" },
   'command-requester-cannot-approve': { status: 403, title: "요청한 분은 승인할 수 없습니다" },
   'command-role-forbidden': { status: 403, title: "이 명령을 할 수 있는 역할이 아닙니다" },
   'commander-removal-needs-role-change': { status: 409, title: "commander 역할을 먼저 바꿔 주세요" },

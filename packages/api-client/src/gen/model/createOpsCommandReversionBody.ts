@@ -14,6 +14,7 @@ export type CreateOpsCommandReversionBody = {
   /**
      * 되돌리는 사유(감사 로그)
      * @minLength 1
+     * @maxLength 2000
      */
   reason: string;
 };

@@ -13,11 +13,12 @@ export const OpsCommandResult = zod.object({
   "eventKey": zod.string().describe('중복 제거 키. 같은 사건을 다시 보내면 같은 값'),
   "kind": zod.enum(['COMMAND_RESULT']),
   "commandId": zod.uuid(),
-  "status": zod.enum(['SUCCEEDED', 'FAILED']),
+  "status": zod.enum(['SUCCEEDED', 'ACKED', 'FAILED']).describe('ACKED는 받는 쪽이 판 N 이상을 적용했다는 답(ADR-0103). 성공 상태는 명령 유형이 정한다(ADR-0340 결정 1)'),
   "detail": zod.looseObject({
 
 }).optional().describe('대상이 돌려준 결과(성공했을 때)'),
   "error": zod.string().max(opsCommandResultErrorMax).optional().describe('실패 사유'),
+  "ackedAt": zod.iso.datetime({"offset":true}).optional().describe('받는 쪽이 적용한 시각(ACKED일 때). 없으면 받은 시각'),
   "occurredAt": zod.iso.datetime({"offset":true}).optional()
 })
 

@@ -54,6 +54,7 @@ export type OperationId =
   | 'createOpsCaseReply'
   | 'createOpsCommand'
   | 'createOpsCommandApproval'
+  | 'createOpsCommandDryRun'
   | 'createOpsCommandExtension'
   | 'createOpsCommandPostReview'
   | 'createOpsCommandPostReviewConfirmation'
@@ -452,6 +453,7 @@ export const OPERATIONS = {
   createOpsCaseReply: {operationId: "createOpsCaseReply",method: "POST",path: "/v1/ops/cases/{caseId}/replies",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsCommand: {operationId: "createOpsCommand",method: "POST",path: "/v1/ops/commands",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsCommandApproval: {operationId: "createOpsCommandApproval",method: "POST",path: "/v1/ops/commands/{commandId}/approvals",host: "ops-api",kind: "write",cookie: true},
+  createOpsCommandDryRun: {operationId: "createOpsCommandDryRun",method: "POST",path: "/v1/ops/command-dry-runs",host: "ops-api",kind: "write",cookie: true},
   createOpsCommandExtension: {operationId: "createOpsCommandExtension",method: "POST",path: "/v1/ops/commands/{commandId}/extensions",host: "ops-api",kind: "write",cookie: true},
   createOpsCommandPostReview: {operationId: "createOpsCommandPostReview",method: "POST",path: "/v1/ops/commands/{commandId}/post-review",host: "ops-api",kind: "write",cookie: true},
   createOpsCommandPostReviewConfirmation: {operationId: "createOpsCommandPostReviewConfirmation",method: "POST",path: "/v1/ops/commands/{commandId}/post-review-confirmation",host: "ops-api",kind: "write",cookie: true},

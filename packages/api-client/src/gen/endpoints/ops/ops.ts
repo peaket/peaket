@@ -74,6 +74,7 @@ import type {
   AuditCheckpointVerification,
   CaseReply,
   Command,
+  CommandDryRun,
   CommandState,
   CommandStatePage,
   ComplianceDocument,
@@ -2991,6 +2992,11 @@ export type createOpsCommandResponse201 = {
   status: 201
 }
 
+export type createOpsCommandResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createOpsCommandResponse403 = {
   data: ProblemResponse
   status: 403
@@ -3006,10 +3012,15 @@ export type createOpsCommandResponse422 = {
   status: 422
 }
 
+export type createOpsCommandResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsCommandResponseSuccess = (createOpsCommandResponse201) & {
   headers: Headers;
 };
-export type createOpsCommandResponseError = (createOpsCommandResponse403 | createOpsCommandResponse409 | createOpsCommandResponse422) & {
+export type createOpsCommandResponseError = (createOpsCommandResponse400 | createOpsCommandResponse403 | createOpsCommandResponse409 | createOpsCommandResponse422 | createOpsCommandResponse503) & {
   headers: Headers;
 };
 
@@ -3022,7 +3033,7 @@ export const getCreateOpsCommandUrl = () => {
 }
 
 /**
- * FR-030, POL-021. 허용 범위 밖 422. 2인 명령은 PENDING_APPROVAL. 위험 명령(2인 승인 명령, 명령 4의 2인 조건, 멈추는 쪽인 명령 3·11)은 X-Reauth-Token 필요. 명령 3·11은 1인 실행이라 승인 대기 없이 전달한다(ADR-0095). 전달 경로는 features/control-tower.md
+ * FR-030, POL-021. 허용 범위 밖 422. 2인 명령은 PENDING_APPROVAL. 위험 명령(2인 승인 명령, 명령 4의 2인 조건, 멈추는 쪽인 명령 3·11)은 X-Reauth-Token 필요. 명령 3·11은 1인 실행이라 승인 대기 없이 전달한다(ADR-0095). 전달 경로는 features/control-tower.md. 사건 차례는 CREATED → DRY_RUN(dry-run 기록) → PENDING_APPROVAL 또는 APPROVED이고, 검사(403·422)는 저장 전이라 막힌 요청은 명령·사건·감사·멱등 기록이 남지 않는다. Idempotency-Key는 필수이고 범위는 부른 계정 × CREATE_OPS_COMMAND다. 같은 키·같은 본문은 처음 명령을 돌려주고 재인증 토큰을 다시 보지 않는다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 2·7·9)
  * @summary 운영 명령 생성(사유 필수) → dry-run → 승인 → 전달 → ack
  */
 export const createOpsCommand = async (command: Command, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsCommandResponseSuccess> => {
@@ -3236,7 +3247,127 @@ export function useListOpsCommands<TData = Awaited<ReturnType<typeof listOpsComm
 
 
 
-export type createOpsCommandApprovalResponse200 = {
+export type createOpsCommandDryRunResponse200 = {
+  data: CommandDryRun
+  status: 200
+}
+
+export type createOpsCommandDryRunResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsCommandDryRunResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsCommandDryRunResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsCommandDryRunResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsCommandDryRunResponseSuccess = (createOpsCommandDryRunResponse200) & {
+  headers: Headers;
+};
+export type createOpsCommandDryRunResponseError = (createOpsCommandDryRunResponse400 | createOpsCommandDryRunResponse403 | createOpsCommandDryRunResponse409 | createOpsCommandDryRunResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsCommandDryRunUrl = () => {
+
+
+
+
+  return `/v1/ops/command-dry-runs`
+}
+
+/**
+ * FR-030, POL-021, SCR-030. 1인 명령도 실행 전에 영향 범위를 보게 한다. 본문은 명령 접수(POST /v1/ops/commands)와 같고, 접수와 같은 검사(유형별 역할 403, 꼴 422, 안전 한계 422)를 한 뒤 dry-run을 준다. 재인증·Idempotency-Key가 없고 명령·사건·감사 기록을 남기지 않는다. 접수는 같은 계산을 다시 해 DRY_RUN 사건에 남긴다(그 기록이 승인자가 보는 값이다, 추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 2)
+ * @summary 명령 dry-run 미리보기(저장하지 않음)
+ */
+export const createOpsCommandDryRun = async (command: Command, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsCommandDryRunResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsCommandDryRunResponseSuccess>(getCreateOpsCommandDryRunUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(command)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsCommandDryRunMutationKey = () => ['createOpsCommandDryRun'] as const;
+
+export const getCreateOpsCommandDryRunMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCommandDryRun>>, TError,CreateOpsCommandDryRunMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsCommandDryRun>>, TError,CreateOpsCommandDryRunMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsCommandDryRunMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsCommandDryRun>>, CreateOpsCommandDryRunMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsCommandDryRun(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsCommandDryRunMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsCommandDryRun>>>
+    export type CreateOpsCommandDryRunMutationBody = BodyType<Command>
+    export type CreateOpsCommandDryRunMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsCommandDryRunMutationVariables = {data: BodyType<Command>}
+
+    /**
+ * @summary 명령 dry-run 미리보기(저장하지 않음)
+ */
+export const useCreateOpsCommandDryRun = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCommandDryRun>>, TError,CreateOpsCommandDryRunMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsCommandDryRun>>,
+        TError,
+        CreateOpsCommandDryRunMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsCommandDryRunMutationOptions(options), queryClient);
+    }
+    export type createOpsCommandApprovalResponse200 = {
   data: CommandState
   status: 200
 }
@@ -3251,10 +3382,15 @@ export type createOpsCommandApprovalResponse409 = {
   status: 409
 }
 
+export type createOpsCommandApprovalResponse502 = {
+  data: ProblemResponse
+  status: 502
+}
+
 export type createOpsCommandApprovalResponseSuccess = (createOpsCommandApprovalResponse200) & {
   headers: Headers;
 };
-export type createOpsCommandApprovalResponseError = (createOpsCommandApprovalResponse403 | createOpsCommandApprovalResponse409) & {
+export type createOpsCommandApprovalResponseError = (createOpsCommandApprovalResponse403 | createOpsCommandApprovalResponse409 | createOpsCommandApprovalResponse502) & {
   headers: Headers;
 };
 
@@ -3333,8 +3469,13 @@ export const useCreateOpsCommandApproval = <TError = ErrorType<ProblemResponse>,
       return useMutation(getCreateOpsCommandApprovalMutationOptions(options), queryClient);
     }
     export type createOpsCommandRejectionResponse200 = {
-  data: void
+  data: CommandState
   status: 200
+}
+
+export type createOpsCommandRejectionResponse403 = {
+  data: ProblemResponse
+  status: 403
 }
 
 export type createOpsCommandRejectionResponse409 = {
@@ -3342,10 +3483,15 @@ export type createOpsCommandRejectionResponse409 = {
   status: 409
 }
 
+export type createOpsCommandRejectionResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
 export type createOpsCommandRejectionResponseSuccess = (createOpsCommandRejectionResponse200) & {
   headers: Headers;
 };
-export type createOpsCommandRejectionResponseError = (createOpsCommandRejectionResponse409) & {
+export type createOpsCommandRejectionResponseError = (createOpsCommandRejectionResponse403 | createOpsCommandRejectionResponse409 | createOpsCommandRejectionResponse422) & {
   headers: Headers;
 };
 
@@ -3559,10 +3705,15 @@ export type createOpsCommandReversionResponse409 = {
   status: 409
 }
 
+export type createOpsCommandReversionResponse502 = {
+  data: ProblemResponse
+  status: 502
+}
+
 export type createOpsCommandReversionResponseSuccess = (createOpsCommandReversionResponse200 | createOpsCommandReversionResponse202) & {
   headers: Headers;
 };
-export type createOpsCommandReversionResponseError = (createOpsCommandReversionResponse403 | createOpsCommandReversionResponse409) & {
+export type createOpsCommandReversionResponseError = (createOpsCommandReversionResponse403 | createOpsCommandReversionResponse409 | createOpsCommandReversionResponse502) & {
   headers: Headers;
 };
 
@@ -3660,15 +3811,25 @@ export const useCreateOpsCommandReversion = <TError = ErrorType<ProblemResponse>
   status: 200
 }
 
+export type createOpsCommandExtensionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type createOpsCommandExtensionResponse409 = {
   data: ProblemResponse
   status: 409
 }
 
+export type createOpsCommandExtensionResponse502 = {
+  data: ProblemResponse
+  status: 502
+}
+
 export type createOpsCommandExtensionResponseSuccess = (createOpsCommandExtensionResponse200) & {
   headers: Headers;
 };
-export type createOpsCommandExtensionResponseError = (createOpsCommandExtensionResponse409) & {
+export type createOpsCommandExtensionResponseError = (createOpsCommandExtensionResponse403 | createOpsCommandExtensionResponse409 | createOpsCommandExtensionResponse502) & {
   headers: Headers;
 };
 

@@ -718,7 +718,7 @@ export const ListOpsAdminAccountPermissionChangesResponse = zod.object({
 })
 
 /**
- * FR-030, POL-021. 허용 범위 밖 422. 2인 명령은 PENDING_APPROVAL. 위험 명령(2인 승인 명령, 명령 4의 2인 조건, 멈추는 쪽인 명령 3·11)은 X-Reauth-Token 필요. 명령 3·11은 1인 실행이라 승인 대기 없이 전달한다(ADR-0095). 전달 경로는 features/control-tower.md
+ * FR-030, POL-021. 허용 범위 밖 422. 2인 명령은 PENDING_APPROVAL. 위험 명령(2인 승인 명령, 명령 4의 2인 조건, 멈추는 쪽인 명령 3·11)은 X-Reauth-Token 필요. 명령 3·11은 1인 실행이라 승인 대기 없이 전달한다(ADR-0095). 전달 경로는 features/control-tower.md. 사건 차례는 CREATED → DRY_RUN(dry-run 기록) → PENDING_APPROVAL 또는 APPROVED이고, 검사(403·422)는 저장 전이라 막힌 요청은 명령·사건·감사·멱등 기록이 남지 않는다. Idempotency-Key는 필수이고 범위는 부른 계정 × CREATE_OPS_COMMAND다. 같은 키·같은 본문은 처음 명령을 돌려주고 재인증 토큰을 다시 보지 않는다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 2·7·9)
  * @summary 운영 명령 생성(사유 필수) → dry-run → 승인 → 전달 → ack
  */
 export const CreateOpsCommandHeader = zod.object({
@@ -732,19 +732,47 @@ export const createOpsCommandBodyReasonMax = 2000;
 
 export const CreateOpsCommandBody = zod.object({
   "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'EVENT_REFUND_PAUSE', 'EVENT_REFUND_RESUME', 'SCALE_CHANGE', 'SALE_STOP', 'SALE_RESUME']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드. SCALE_CHANGE는 판매 승인 뒤 회차 규모 올리기(BAT-465, core-svc POST /v1/ops/events/{eventId}/scale-changes). EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME은 회차 취소 일괄 환불 작업을 멈추고 다시 시작한다(2026-11-15 R-583, params.requestId·params.pg). SALE_STOP·SALE_RESUME은 판매 승인 업무의 판매 중지·재개를 회차에 집행한다(요청자가 아닌 두 번째 사람이 승인, ADR-0123, BAT-465 R-584). params는 {eventId, reasonCode(SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER), suspensionRef}이다'),
-  "reason": zod.string().min(1).max(createOpsCommandBodyReasonMax).describe('실행 사유. 제어 문자와 양방향 제어 문자는 지운다(ADR-0159 결정 11, docs/security/asvs/control-tower.md 1.3.3)'),
+  "reason": zod.string().min(1).max(createOpsCommandBodyReasonMax).describe('실행 사유. 앞뒤 공백을 지우고 NFC로 한 번 정규화한 뒤 1~2,000자를 본다. 제어 문자·양방향 제어 문자(U+202A~U+202E, U+2066~U+2069)가 있으면 422 invalid-command다(ADR-0340 결정 10, docs/security/asvs/control-tower.md 1.3.3)'),
   "params": zod.looseObject({
 
-}).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073)')
+}).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073). 명령 1·2·3·4·5는 ops-svc가 아래 칸만 받고 모르는 칸은 422 invalid-command로 거른다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 9): ADMISSION_TARGET {eventId, target(정수, 1,000 이상 8,000 이하. 밖이면 422 command-out-of-range), fromTarget(선택, 자동 조치가 본 지금 목표)}, ADMISSION_PAUSE {eventId}(만료는 첫 ack + 10분이라 받지 않는다), KILL_SWITCH {scope, eventIds}(EVENT면 회차 1개 이상·겹침 없음, PLATFORM이면 회차 없음), BLOCK_ASN_IP {cidrs: [CIDR 글자], asns: [1~4294967295], expiresAt(필수, 지금보다 늦고 지금 + 24시간 이하)}(호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 invalid-command, 항목 합계 100개 [가정] 초과·만료 없음·범위 밖은 command-out-of-range, ADR-0339 결정 2), BOT_LEVEL {level, reassessMode(선택)}')
 }).strict()
 
 export const CreateOpsCommandResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
-  "dryRun": zod.looseObject({
-
-}).optional(),
-  "approvals": zod.array(zod.string()).optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
   "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
@@ -757,7 +785,7 @@ export const CreateOpsCommandResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "displayName": zod.string().nullish(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
-}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
   "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
@@ -797,11 +825,39 @@ export const ListOpsCommandsQueryParams = zod.object({
 export const ListOpsCommandsResponse = zod.object({
   "items": zod.array(zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
-  "dryRun": zod.looseObject({
-
-}).optional(),
-  "approvals": zod.array(zod.string()).optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
   "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
@@ -814,7 +870,7 @@ export const ListOpsCommandsResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "displayName": zod.string().nullish(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
-}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
   "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
@@ -837,6 +893,54 @@ export const ListOpsCommandsResponse = zod.object({
 })
 
 /**
+ * FR-030, POL-021, SCR-030. 1인 명령도 실행 전에 영향 범위를 보게 한다. 본문은 명령 접수(POST /v1/ops/commands)와 같고, 접수와 같은 검사(유형별 역할 403, 꼴 422, 안전 한계 422)를 한 뒤 dry-run을 준다. 재인증·Idempotency-Key가 없고 명령·사건·감사 기록을 남기지 않는다. 접수는 같은 계산을 다시 해 DRY_RUN 사건에 남긴다(그 기록이 승인자가 보는 값이다, 추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 2)
+ * @summary 명령 dry-run 미리보기(저장하지 않음)
+ */
+export const createOpsCommandDryRunBodyReasonMax = 2000;
+
+
+
+export const CreateOpsCommandDryRunBody = zod.object({
+  "type": zod.enum(['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'BLOCK_ASN_IP', 'BOT_LEVEL', 'DEGRADED_MODE', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN', 'EVENT_CANCEL', 'EVENT_REFUND_PAUSE', 'EVENT_REFUND_RESUME', 'SCALE_CHANGE', 'SALE_STOP', 'SALE_RESUME']).describe('PG_ASSIGN은 명령 12 결제사 지정(온세일 윈도우 밖, ADR-0044). 결제사 전환은 DEGRADED_MODE의 결제 모드. SCALE_CHANGE는 판매 승인 뒤 회차 규모 올리기(BAT-465, core-svc POST /v1/ops/events/{eventId}/scale-changes). EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME은 회차 취소 일괄 환불 작업을 멈추고 다시 시작한다(2026-11-15 R-583, params.requestId·params.pg). SALE_STOP·SALE_RESUME은 판매 승인 업무의 판매 중지·재개를 회차에 집행한다(요청자가 아닌 두 번째 사람이 승인, ADR-0123, BAT-465 R-584). params는 {eventId, reasonCode(SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER), suspensionRef}이다'),
+  "reason": zod.string().min(1).max(createOpsCommandDryRunBodyReasonMax).describe('실행 사유. 앞뒤 공백을 지우고 NFC로 한 번 정규화한 뒤 1~2,000자를 본다. 제어 문자·양방향 제어 문자(U+202A~U+202E, U+2066~U+2069)가 있으면 422 invalid-command다(ADR-0340 결정 10, docs/security/asvs/control-tower.md 1.3.3)'),
+  "params": zod.looseObject({
+
+}).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073). 명령 1·2·3·4·5는 ops-svc가 아래 칸만 받고 모르는 칸은 422 invalid-command로 거른다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 9): ADMISSION_TARGET {eventId, target(정수, 1,000 이상 8,000 이하. 밖이면 422 command-out-of-range), fromTarget(선택, 자동 조치가 본 지금 목표)}, ADMISSION_PAUSE {eventId}(만료는 첫 ack + 10분이라 받지 않는다), KILL_SWITCH {scope, eventIds}(EVENT면 회차 1개 이상·겹침 없음, PLATFORM이면 회차 없음), BLOCK_ASN_IP {cidrs: [CIDR 글자], asns: [1~4294967295], expiresAt(필수, 지금보다 늦고 지금 + 24시간 이하)}(호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 invalid-command, 항목 합계 100개 [가정] 초과·만료 없음·범위 밖은 command-out-of-range, ADR-0339 결정 2), BOT_LEVEL {level, reassessMode(선택)}')
+}).strict()
+
+export const CreateOpsCommandDryRunResponse = zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).describe('명령 사전 모의(dry-run) 판 1(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 2). 센 값·예측 값·세지 못한 값·건 안전 한계를 나눠 보인다(control-tower §4). 원천을 세지 못한 값은 unavailable에만 있고 0으로 적지 않는다')
+
+/**
  * FR-030, POL-021. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, POL-020, 기술 검토 중간-051). PENDING_APPROVAL이면 승인해 전달한다. REVERT_PENDING(명령 3·11의 되돌리기 요청)이면 요청자 아닌 operator 이상 1인이 재인증 뒤 승인해 되돌리고 REVERTED가 된다(POL-021 B, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)
  * @summary 두 번째 승인(요청자와 달라야 함, 실행 직전 재인증). 명령 3·11 되돌리기 요청의 승인도 받는다
  */
@@ -850,11 +954,39 @@ export const CreateOpsCommandApprovalHeader = zod.object({
 
 export const CreateOpsCommandApprovalResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
-  "dryRun": zod.looseObject({
-
-}).optional(),
-  "approvals": zod.array(zod.string()).optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
   "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
@@ -867,7 +999,7 @@ export const CreateOpsCommandApprovalResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "displayName": zod.string().nullish(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
-}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
   "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
@@ -899,23 +1031,41 @@ export const CreateOpsCommandRejectionBody = zod.object({
   "reason": zod.string()
 }).strict()
 
-export const CreateOpsCommandRejectionResponse = zod.unknown()
-
-/**
- * BAT-465 GAT-300. FAILED인 명령만 다시 실행한다. 실행 전후 감사 체크포인트를 만들고 SUCCEEDED/FAILED로 끝낸다. 409 command-not-failed.
- * @summary 실패한 운영 명령 재시도(같은 명령 ID, 시도 횟수 증가)
- */
-export const CreateOpsCommandRetryParams = zod.object({
-  "commandId": zod.string()
-})
-
-export const CreateOpsCommandRetryResponse = zod.object({
+export const CreateOpsCommandRejectionResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
-  "dryRun": zod.looseObject({
-
-}).optional(),
-  "approvals": zod.array(zod.string()).optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
   "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
@@ -928,7 +1078,82 @@ export const CreateOpsCommandRetryResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "displayName": zod.string().nullish(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
-}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
+  "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
+  "lastError": zod.string().nullish().describe('마지막 실행 실패 사유. 성공하면 null'),
+  "executedAt": zod.iso.datetime({"offset":true}).nullish().describe('마지막 실행이 끝난 시각'),
+  "result": zod.looseObject({
+
+}).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
+  "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
+  "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
+  "delivery": zod.object({
+  "kind": zod.enum(['ACK', 'APPLY_CHECK']).optional(),
+  "ackedCount": zod.int().optional(),
+  "targetCount": zod.int().optional(),
+  "unackedTargets": zod.array(zod.string()).optional(),
+  "applyStatus": zod.union([zod.literal('OUTBOX_WAITING'),zod.literal('CHECKING'),zod.literal('CONFIRMED'),zod.literal('UNCONFIRMED'),zod.literal('UNKNOWN'),zod.literal(null)]).nullish().describe('APPLY_CHECK일 때만')
+}).nullish().describe('전파 상태. 제어 gRPC 명령은 ack 수, 설정형 명령은 적용 확인(ADR-0143). 상세에만 싣는다')
+})
+
+/**
+ * BAT-465 GAT-300. FAILED인 명령만 다시 실행한다. 실행 전후 감사 체크포인트를 만들고 SUCCEEDED/FAILED로 끝낸다. 409 command-not-failed.
+ * @summary 실패한 운영 명령 재시도(같은 명령 ID, 시도 횟수 증가)
+ */
+export const CreateOpsCommandRetryParams = zod.object({
+  "commandId": zod.string()
+})
+
+export const CreateOpsCommandRetryResponse = zod.object({
+  "commandId": zod.string().optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
+  "ackedAt": zod.iso.datetime({"offset":true}).optional(),
+  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
+  "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
+  "eventId": zod.string().nullish().describe('회차 하나에 건 명령이면 그 회차. 범위가 여럿이거나 전체면 null이고 params로 본다'),
+  "reason": zod.string().optional().describe('실행 사유. 승인자에게 그대로 보인다'),
+  "params": zod.looseObject({
+
+}).optional().describe('유형별 값. 상세에만 싣는다'),
+  "requestedBy": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
   "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
@@ -960,20 +1185,49 @@ export const CreateOpsCommandReversionHeader = zod.object({
   "X-Reauth-Token": zod.string().optional().describe('명령 3·11의 되돌리기 요청일 때 필수(guidelines §7)')
 })
 
+export const createOpsCommandReversionBodyReasonMax = 2000;
 
 
 
 export const CreateOpsCommandReversionBody = zod.object({
-  "reason": zod.string().min(1).describe('되돌리는 사유(감사 로그)')
+  "reason": zod.string().min(1).max(createOpsCommandReversionBodyReasonMax).describe('되돌리는 사유(감사 로그)')
 }).strict()
 
 export const CreateOpsCommandReversionResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
-  "dryRun": zod.looseObject({
-
-}).optional(),
-  "approvals": zod.array(zod.string()).optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
   "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
@@ -986,7 +1240,7 @@ export const CreateOpsCommandReversionResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "displayName": zod.string().nullish(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
-}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
   "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
@@ -1014,20 +1268,49 @@ export const CreateOpsCommandExtensionParams = zod.object({
   "commandId": zod.string()
 })
 
+export const createOpsCommandExtensionBodyReasonMax = 2000;
 
 
 
 export const CreateOpsCommandExtensionBody = zod.object({
-  "reason": zod.string().min(1)
+  "reason": zod.string().min(1).max(createOpsCommandExtensionBodyReasonMax)
 }).strict()
 
 export const CreateOpsCommandExtensionResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
-  "dryRun": zod.looseObject({
-
-}).optional(),
-  "approvals": zod.array(zod.string()).optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
   "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
@@ -1040,7 +1323,7 @@ export const CreateOpsCommandExtensionResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "displayName": zod.string().nullish(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
-}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
   "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),
@@ -4437,11 +4720,39 @@ export const GetOpsCommandParams = zod.object({
 
 export const GetOpsCommandResponse = zod.object({
   "commandId": zod.string().optional(),
-  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
-  "dryRun": zod.looseObject({
-
-}).optional(),
-  "approvals": zod.array(zod.string()).optional(),
+  "state": zod.enum(['DRAFTED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'DISPATCHED', 'ACKED', 'SUCCEEDED', 'FAILED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED']).optional().describe('DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073)'),
+  "dryRun": zod.object({
+  "version": zod.literal(1),
+  "approvalMode": zod.enum(['NONE', 'ONE', 'TWO']).describe('NONE은 commander 1인 즉시 실행(명령 3·11), ONE은 1인, TWO는 요청자 아닌 두 번째 승인. 명령 4는 대역·ASN으로 정한다(ADR-0339 결정 1)'),
+  "reauthRequired": zod.boolean().describe('접수·승인에 X-Reauth-Token이 필요한 위험 명령인가'),
+  "counted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "source": zod.string().describe('원천'),
+  "measuredAt": zod.iso.datetime({"offset":true}).describe('센 시각')
+})),
+  "predicted": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.number(),
+  "formula": zod.string().describe('식'),
+  "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
+  "assumptions": zod.array(zod.string())
+})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('세지 못한 값과 까닭(원천 없음 source-not-wired, 원천 오류, 넣을 값 없음 등)'),
+  "limits": zod.record(zod.string(), zod.number()).describe('그 명령에 건 안전 한계 값(ops-svc 도메인 상수, ADR-0340 결정 9)'),
+  "protectedRangeHits": zod.array(zod.object({
+  "kind": zod.enum(['ASN', 'CIDR']),
+  "value": zod.string(),
+  "category": zod.enum(['KR_CARRIER', 'CLOUD']),
+  "label": zod.string()
+})).optional().describe('명령 4만: 걸린 보호 대역 항목'),
+  "protectedRangesVersion": zod.string().optional().describe('명령 4만: 보호 대역 목록 판(ADR-0339 결정 3)')
+}).optional().describe('접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2)'),
+  "approvals": zod.array(zod.string()).optional().describe('명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149)'),
   "ackedAt": zod.iso.datetime({"offset":true}).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062)'),
   "type": zod.string().optional().describe('명령 유형(Command.type과 같은 값)'),
@@ -4454,7 +4765,7 @@ export const GetOpsCommandResponse = zod.object({
   "adminAccountId": zod.string().optional(),
   "displayName": zod.string().nullish(),
   "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
-}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+}).optional().describe('요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4)'),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "approvalExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('두 번째 승인 기한(10분, PENDING_APPROVAL·REVERT_PENDING일 때만)'),
   "attempts": zod.int().optional().describe('실행 시도 횟수(재시도 포함). 첫 실행 전에는 0'),

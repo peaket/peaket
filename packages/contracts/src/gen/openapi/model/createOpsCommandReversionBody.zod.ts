@@ -11,10 +11,11 @@
  */
 import * as zod from 'zod';
 
+export const createOpsCommandReversionBodyReasonMax = 2000;
 
 
 export const CreateOpsCommandReversionBody = zod.object({
-  "reason": zod.string().min(1).describe('되돌리는 사유(감사 로그)')
+  "reason": zod.string().min(1).max(createOpsCommandReversionBodyReasonMax).describe('되돌리는 사유(감사 로그)')
 }).strict()
 
 export type CreateOpsCommandReversionBody = zod.input<typeof CreateOpsCommandReversionBody>;

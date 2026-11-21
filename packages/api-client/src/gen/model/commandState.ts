@@ -9,8 +9,8 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { CommandDryRun } from './commandDryRun';
 import type { CommandStateDelivery } from './commandStateDelivery';
-import type { CommandStateDryRun } from './commandStateDryRun';
 import type { CommandStateParams } from './commandStateParams';
 import type { CommandStateResult } from './commandStateResult';
 import type { CommandStateState } from './commandStateState';
@@ -18,9 +18,11 @@ import type { OpsActor } from './opsActor';
 
 export interface CommandState {
   commandId?: string;
-  /** DISPATCHED는 대상 실행 중, SUCCEEDED는 대상이 성공한 끝 상태, FAILED는 실행 실패(재시도 가능)다. REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073) */
+  /** DISPATCHED는 대상 실행 중, FAILED는 실행 실패(재시도 가능)다. 성공한 끝 상태는 카탈로그 명령 1~12가 ACKED(받는 쪽 ack, 되돌릴 수 있음), 1회 실행 명령(EVENT_CANCEL·EVENT_REFUND_PAUSE·EVENT_REFUND_RESUME·SCALE_CHANGE·SALE_STOP·SALE_RESUME)이 SUCCEEDED(되돌리지 않음)다(추천 적용 2026-11-21, ADR-0340 결정 1). REVERT_PENDING은 명령 3·11의 되돌리기 요청이 두 번째 승인을 기다리는 상태(10분, docs/planning/03 §2.6, 추천 적용 2026-10-20, ADR-0073) */
   state?: CommandStateState;
-  dryRun?: CommandStateDryRun;
+  /** 접수 때 DRY_RUN 사건에 남긴 dry-run 기록(승인자가 보는 값). 상세에만 싣는다(ADR-0340 결정 2) */
+  dryRun?: CommandDryRun;
+  /** 명령을 승인·거부한 관리 계정 ID(대응 표로 푼 값, 결정 차례). 3년 뒤 대응을 지우면 빈 글자다(ADR-0149) */
   approvals?: string[];
   ackedAt?: string;
   /** 만료 있는 명령(2·4·8)의 만료 시각. 명령 2는 연장하면 바뀐다(ADR-0062) */
@@ -36,6 +38,7 @@ export interface CommandState {
   reason?: string;
   /** 유형별 값. 상세에만 싣는다 */
   params?: CommandStateParams;
+  /** 요청자. 명령 기록에는 가명 참조만 있고 관리 계정 ID는 대응 표(command_actor)로 푼다. 대응을 지웠으면 adminAccountId가 없고 역할만 보인다(ADR-0340 결정 8, ADR-0149 결정 4) */
   requestedBy?: OpsActor;
   createdAt?: string;
   /**
