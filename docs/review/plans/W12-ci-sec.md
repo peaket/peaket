@@ -121,7 +121,13 @@
 
 ## 시험 결과
 
-(구현 뒤 시험 담당이 채운다)
+구현 트리 `9e8b66aa`에서 돌렸다(먼저 `pnpm exec turbo run build --filter=@peaket/identity-svc...`).
+
+- 재현 시험: `node --test --test-name-pattern=W12S tools/ci/scan-tools.test.mjs tools/local/demo-auth.test.mjs tools/local/demo-objects.test.mjs tools/local/demo-images.test.mjs tools/local/demo.test.mjs` → 시험 17, 실패 0
+- `node --test tools/ci/scan-tools.test.mjs tools/ci/scan-gate.test.mjs tools/ci/security-scan-workflow.test.mjs` → 시험 57, 실패 0
+- `node --test tools/local/demo-auth.test.mjs tools/local/demo-objects.test.mjs tools/local/demo-images.test.mjs tools/local/demo.test.mjs tools/local/demo-seed.test.mjs` → 시험 84, 실패 0
+- `pnpm --filter @peaket/purchase-svc test test/seat-layout.test.ts` → 시험 103, 실패 0
+- W12S-01·08은 CI 몫이다(PR `security-scan / secrets`, 전체 분석).
 
 ## 리뷰
 
@@ -136,5 +142,5 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12sec-plan-3b7d | claude-opus-5-5 | 2026-11-21T21:31+09:00 | 2026-11-21T21:58+09:00 |
-| test | w12sec-test-5c1e | claude-opus-5-5 | 2026-11-21T22:00+09:00 | 2026-11-21T22:17+09:00 |
+| test | w12sec-test-5c1e | claude-opus-5-5 | 2026-11-21T22:00+09:00 | 2026-11-21T22:45+09:00 |
 | impl | w12sec-impl-7a4f | claude-opus-5-5 | 2026-11-21T22:18+09:00 | 2026-11-21T22:41+09:00 |
