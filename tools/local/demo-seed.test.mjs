@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stringify as stringifyYaml } from 'yaml';
-import { checkSeed, matchSeedEvents, resolveSeedTimes, seatCountsOf } from './demo-seed.mjs';
-import { DEMO_SEED_FILE, readSeed } from './demo-auth.mjs';
+import { checkSeed, matchSeedEvents, purchaseSeatMapFile, resolveSeedTimes, seatCountsOf, syncPurchaseSeatMaps } from './demo-seed.mjs';
+import { DEMO_SEED_FILE, demoUuid, readSeed } from './demo-auth.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const IDENTITY_SEED = join(REPO, 'services', 'identity-svc', 'scripts', 'seed-demo.mjs');
@@ -160,6 +160,61 @@ test('DS-05 시드 참조가 맞고 개수가 계획·d5 §10.3과 같다', () =
     ['동문-01', '동문-02', '동문-03', '동문-04', '서문-01', '서문-02', '서문-03'],
     '기기 일곱 대',
   );
+});
+
+test('V-T7 시드는 purchase 좌석맵 판 파일을 시드 값으로 만든다(Finding: V-T7-seed-seatmap)', () => {
+  const s = resolveSeedTimes(seed(), new Date());
+  const event = s.events.find((e) => e.key === 'e1-1025');
+  const map = s.seatMaps.find((m) => m.eventKey === 'e1-1025');
+  const eventId = '11111111-1111-4111-8111-111111111111';
+  const file = purchaseSeatMapFile(s, event, map, eventId);
+  assert.equal(file.perAccountLimit, 4, '회차 1인 한도가 시드와 다르다');
+  assert.equal(file.saleEndsAt, new Date(Date.parse(event.startAt) - 24 * 60 * 60_000).toISOString(), '판매 끝이 회차 시작 24시간 전이 아니다');
+  assert.deepEqual(file.tierPrices, { R: 154000, S: 132000, A: 110000 }, '등급 가격이 시드와 다르다');
+  assert.equal(file.layout.layoutVersion, 1, '판 번호가 core 첫 발행(1)과 다르다');
+  const seats = file.layout.sections.flatMap((x) => x.seats);
+  assert.equal(seats.length, 2400, '좌석 수가 시드와 다르다');
+  const first = seats[0];
+  assert.equal(first.label, 'R1-1-1', '시드의 읽기 쉬운 좌석 ID를 label로 남기지 않았다');
+  assert.match(first.seatId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, '좌석 ID가 purchase 판 파일의 UUID가 아니다');
+  assert.equal(first.seatId, demoUuid(`seat:${eventId}:R1-1-1`), '같은 회차·좌석 ID가 재생기(writeSeatMap) 규칙과 다르다');
+  assert.equal(first.tierId, 'R', '좌석 등급이 시드와 다르다');
+  assert.deepEqual(file.layout.sections[0].seatIndexRange, { from: 0, to: 299 }, '구역 좌석 범위가 purchase 해석 규칙과 다르다');
+  // 복제(copyOf) 회차도 원본 배치를 그 회차의 좌석 ID로 편다
+  const copy = s.events.find((e) => e.key === 'e2-01');
+  const copyId = '22222222-2222-4222-8222-222222222222';
+  const copyFile = purchaseSeatMapFile(s, copy, s.seatMaps.find((m) => m.eventKey === 'e2-01'), copyId);
+  assert.equal(copyFile.layout.sections.flatMap((x) => x.seats).length, 2400, '복제 회차의 좌석 수가 원본과 다르다');
+  assert.notEqual(copyFile.layout.sections[0].seats[0].seatId, first.seatId, '회차가 달라도 좌석 ID가 같다');
+});
+
+test('V-T7 시드는 좌석맵 판 파일을 bundle의 /tmp/seatmaps/<회차>.json에 쓴다(Finding: V-T7-seed-seatmap)', () => {
+  const s = resolveSeedTimes(seed(), new Date());
+  const targets = [
+    { eventKey: 'e1-1025', eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+    { eventKey: 'e3-01', eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+  ];
+  const writes = [];
+  const written = syncPurchaseSeatMaps(s, targets, (path, text) => writes.push({ path, text }));
+  assert.equal(written, 2, '쓴 파일 수가 회차 수와 다르다');
+  assert.deepEqual(
+    writes.map((w) => w.path),
+    [
+      '/tmp/seatmaps/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json',
+      '/tmp/seatmaps/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.json',
+    ],
+    'purchase-svc의 PEAKET_SEATMAP_DIR(/tmp/seatmaps) 경로 규칙과 다르다',
+  );
+  for (const w of writes) {
+    const file = JSON.parse(w.text);
+    assert.ok(file.perAccountLimit >= 1 && file.perAccountLimit <= 4, `1인 한도 ${file.perAccountLimit}`);
+    assert.ok(Number.isFinite(Date.parse(file.saleEndsAt)), '판매 끝 시각이 없다');
+    assert.ok(file.layout.sections.length > 0, '구역이 없다');
+  }
+  // 시드의 좌석맵 일곱이 모두 eventIds와 이어지면 일곱 파일을 쓴다
+  const all = seed().seatMaps.map((m) => ({ eventKey: m.eventKey, eventId: demoUuid(`event:${m.eventKey}`) }));
+  assert.equal(syncPurchaseSeatMaps(s, all, () => {}), 7, '시드 좌석맵 일곱을 쓰지 않는다');
+  assert.equal(syncPurchaseSeatMaps(s, [], () => {}), 0, '빈 목록인데 파일을 쓴다');
 });
 
 test('RV-01 회차 오픈은 실행 시각 기준 상대 표기이고 지난 시각은 실패한다', () => {

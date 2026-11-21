@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { parseArgs, doctorChecks, DEMO_CLUSTER, allResult, measurementHistoryPath, playMeasurementPath, findChromium } from './demo.mjs';
+import { parseArgs, doctorChecks, DEMO_CLUSTER, allResult, measurementHistoryPath, playMeasurementPath, findChromium, lastOutputLine } from './demo.mjs';
 import { SCENARIOS, SCENARIO_ORDER, REQUIRED_CHECKS, validateScenarios, publicPlan, readD5Scenarios } from './demo/scenarios.mjs';
 import { runScenarios } from './demo/runner.mjs';
 import { checkCloudPlan, CLOUD_PLAN_FILE, MAX_TTL_HOURS, REQUIRED_CLEANUP } from './demo/cloud-plan.mjs';
@@ -554,6 +554,36 @@ test('V-T7 ⑦ 측정 기록은 성공·실패를 그대로 남긴다', () => {
   });
   assert.equal(written.file, file);
   assert.match(readFileSync(file, 'utf8'), /- \*\*결과\*\*: 통과/);
+});
+
+test('V-T7 ⑦ 시드 실패는 자식 명령과 마지막 출력 줄을 측정에 남긴다(Finding: V-T7-seed-seatmap)', () => {
+  // runNodeJson은 stdout과 stderr를 이어 붙인다. 마지막 비어 있지 않은 줄이 실패 까닭이다
+  assert.equal(lastOutputLine('준비\n시드 적용 실패: 기기 배치 동문-01 → 503\n\n'), '시드 적용 실패: 기기 배치 동문-01 → 503');
+  assert.equal(lastOutputLine(''), '');
+  assert.equal(lastOutputLine(undefined), '');
+
+  const fail = measurementText({
+    commit: 'e'.repeat(40),
+    date: '2026-11-21T00:00:00.000Z',
+    pc: 'test',
+    tools: { node: process.version },
+    scenarios: SCENARIO_ORDER.map((id) => ({ id, title: id, result: '미실행', reason: '시드 실패' })),
+    cleanup: '지움',
+    outcome: '실패(시드 exit 1)',
+    failure: '명령 `node tools/local/cluster.mjs demo-seed --apply --json` · 마지막 출력: 시드 적용 실패: 기기 배치 동문-01 → 503',
+  });
+  assert.match(fail, /- \*\*결과\*\*: 실패\(시드 exit 1\)/);
+  assert.match(fail, /- \*\*실패 내용\*\*: 명령 `node tools\/local\/cluster\.mjs demo-seed --apply --json`/);
+  assert.match(fail, /마지막 출력: 시드 적용 실패: 기기 배치 동문-01 → 503/);
+
+  // all의 시드 실패 갈래가 자식 출력의 마지막 줄을 실제로 쓰는지(문구만 있는 시험이 아니다)
+  const source = readFileSync(DEMO_MJS, 'utf8');
+  const start = source.indexOf('if (seed.status !== 0) {');
+  assert.ok(start > 0, 'runAll의 시드 실패 갈래를 찾지 못했다');
+  const branch = source.slice(start, source.indexOf('if (o.seedOnly)', start));
+  assert.match(branch, /lastOutputLine\(seed\.text\)/, '시드 실패 갈래가 자식 출력을 버린다');
+  assert.match(branch, /cluster\.mjs demo-seed --apply --json/, '시드 실패 갈래가 자식 명령을 남기지 않는다');
+  assert.match(branch, /failure(?:\s*:\s*failure)?\s*,/, '시드 실패 갈래가 측정에 실패 내용을 넘기지 않는다');
 });
 
 test('V-T7 ⑦ all은 선행이 없으면 실패 측정을 남기고 시나리오를 통과로 세지 않는다', () => {
