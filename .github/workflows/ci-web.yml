@@ -442,7 +442,10 @@ jobs:
           pm=$(node -p "require('./package.json').packageManager")
           case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
           npm install --global "$pm"
-      - run: pnpm install --frozen-lockfile --filter "@peaket/seatmap..." --filter "@peaket/web..."
+      - run: pnpm install --frozen-lockfile --filter "@peaket/seatmap..." --filter "@peaket/web..." --filter "@peaket/queue-room..."
+      # 소비자 웹이 가져오는 작업 공간 패키지 가운데 빌드 산출(dist)로만 내보내는 것(@peaket/search-normalize/refine 등)을 먼저 만든다.
+      # 타입 검사와 단위 시험(autocomplete.test.mjs가 dist를 읽는다)이 그것을 본다. seed-css/build.mjs 첫 단계와 같은 명령이다
+      - run: pnpm --filter "@peaket/web^..." run --if-present build
       # 단위(연결·갭·구독·배너)·typecheck. 시험 이름 앞부분에 ID(FE-T11·S-T13·S-T21·S-T31 ⑥)가 붙는다
       - run: pnpm --filter @peaket/seatmap typecheck
       - run: pnpm --filter @peaket/web typecheck
