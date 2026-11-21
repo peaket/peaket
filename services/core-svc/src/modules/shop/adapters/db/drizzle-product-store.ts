@@ -124,6 +124,8 @@ export class DrizzleProductStore implements ProductStore {
   async save(promoterId: string, record: ProductRecord, expectedVersion: number, change: StockChange = { kind: 'set', stock: record.stock ?? record.limitedQty ?? 0 }): Promise<ProductRecord | 'conflict' | 'stock-negative'> {
     return this.db.transaction(
       async (tx) => {
+        // 수수료율은 SET하지 않는다. DB 트리거 product_commission_from_contract가 게시 때의 계약 값으로 정하고 그 뒤 바꾸지 않으므로,
+        // 돌려주는 기록의 수수료율은 DB가 정한 값이다(ADR-0338 결정 4). 그 칸 고치기 권한은 이 코드가 배포된 뒤 거둔다
         const updated = await tx
           .update(product)
           .set({
@@ -142,14 +144,13 @@ export class DrizzleProductStore implements ProductStore {
             fulfillments: record.fulfillments,
             saleStartsAt: record.saleStartsAt,
             saleEndsAt: record.saleEndsAt,
-            commissionRateBp: record.commissionRateBp,
             attributes: record.attributes,
             publishedAt: record.publishedAt,
             updatedAt: record.updatedAt,
             version: sql`${product.version} + 1`,
           })
           .where(and(eq(product.id, record.productId), eq(product.promoterId, promoterId), eq(product.version, expectedVersion)))
-          .returning({ version: product.version });
+          .returning({ version: product.version, commissionRateBp: product.commissionRateBp });
         if (updated.length === 0) return 'conflict';
         let stock: number | null = record.stock;
         if (record.limitedQty === null || change.kind === 'remove') {
@@ -171,7 +172,7 @@ export class DrizzleProductStore implements ProductStore {
             .onConflictDoUpdate({ target: productStock.productId, set: { stock: change.stock, updatedAt: record.updatedAt } });
           stock = change.stock;
         }
-        return { ...record, stock, version: updated[0]!.version };
+        return { ...record, stock, version: updated[0]!.version, commissionRateBp: updated[0]!.commissionRateBp };
       },
       { tenantId: promoterId },
     ).catch((e: unknown) => {

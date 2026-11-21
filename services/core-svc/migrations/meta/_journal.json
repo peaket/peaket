@@ -239,6 +239,13 @@
       "when": 1795281728010,
       "tag": "0040_promoter_row_security",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795292357949,
+      "tag": "0042_webhook_merch_write_grants",
+      "breakpoints": true
     }
   ]
 }
