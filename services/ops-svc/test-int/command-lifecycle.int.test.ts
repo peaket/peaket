@@ -193,26 +193,69 @@ describe('AZ-T10 실제 DB의 2인 분리', () => {
 });
 
 describe('한 트랜잭션과 가명 참조(ASVS 2.3.3·16.2.1)', () => {
-  test('[ASVS v5.0.0-2.3.3] command_actor 쓰기가 실패하면 명령 행·사건·감사 행·멱등 기록이 모두 없고 감사 체인 머리도 그대로다(실제 DB)', async () => {
-    const before = await tables();
-    const head = (await q<{ last_seq: string }>('select last_seq from audit_chain_head where id = 1')).rows[0]!.last_seq;
-    const commandId = randomUUID();
-    await expect(
+  test('[ASVS v5.0.0-2.3.3] 감사 행·체인 머리·사건을 쓴 뒤 커밋 직전에 실패해도(그리고 대응 행 쓰기에서 실패해도) 명령 행·사건·command_actor·감사 행·체인 머리·멱등 기록이 모두 되돌아간다(실제 DB)', async () => {
+    const headOf = async () => (await q<{ last_seq: string; last_hash: string }>("select last_seq, encode(last_hash, 'hex') as last_hash from audit_chain_head where id = 1")).rows[0]!;
+    const errorText = (e: unknown): string => {
+      const parts: string[] = [];
+      for (let x: unknown = e; x instanceof Error; x = (x as { cause?: unknown }).cause) parts.push(x.message);
+      return parts.join(' | ');
+    };
+    const insert = (reason: string, requestedBy: string) =>
       store.insert({
-        commandId,
+        commandId: randomUUID(),
         type: 'LOG_LEVEL',
-        reason: '대응 행 실패',
+        reason,
         params: { level: 'DEBUG' },
-        // command_actor.admin_account_id는 uuid라 이 값의 대응 행 쓰기가 실패한다
-        requestedBy: 'not-a-uuid',
+        requestedBy,
         requestedRole: 'operator',
         nowMs: clock.now(),
-        idempotency: { accountRef: 'not-a-uuid', operation: 'CREATE_OPS_COMMAND', key: randomUUID(), requestHash: new Uint8Array(32) },
-      }),
-    ).rejects.toThrow();
+        idempotency: { accountRef: requestedBy, operation: 'CREATE_OPS_COMMAND', key: randomUUID(), requestHash: new Uint8Array(32) },
+      });
+    // ① 늦은 실패: 그 트랜잭션의 마지막 쓰기(감사 행·체인 머리) 뒤, 커밋할 때 터지는 지연 제약 트리거(시험만 걸고 끝나면 지운다).
+    //    트리거는 터지는 그때 같은 트랜잭션에 이미 쓰인 사건·대응 행·멱등 기록·머리를 세어 오류 글에 싣는다(실패가 정말 감사 행 뒤였음을 본다)
+    await admin.query(`
+      create or replace function test_fail_at_commit() returns trigger language plpgsql as $f$
+      begin
+        if new.record_json->'payload'->>'reason' = '커밋 직전 실패' then
+          raise exception 'test-fail-at-commit events=% actors=% idem=% head=% seq=%',
+            (select count(*) from command_event where command_id = new.record_id),
+            (select count(*) from command_actor where command_id = new.record_id),
+            (select count(*) from idempotency_record where operation = 'CREATE_OPS_COMMAND'),
+            (select last_seq from audit_chain_head where id = 1),
+            new.seq;
+        end if;
+        return null;
+      end
+      $f$`);
+    await admin.query('create constraint trigger test_fail_at_commit after insert on audit_chain deferrable initially deferred for each row execute function test_fail_at_commit()');
+    try {
+      const before = await tables();
+      const head = await headOf();
+      const late = await insert('커밋 직전 실패', randomUUID()).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(late).toBeInstanceOf(Error);
+      const seq = Number(head.last_seq) + 1;
+      expect(errorText(late)).toContain(`test-fail-at-commit events=3 actors=1 idem=${before.idempotency_record + 1} head=${seq} seq=${seq}`);
+      expect(await tables()).toEqual(before);
+      expect(await headOf()).toEqual(head);
+      expect(await count("select count(*) as n from ops_command where reason = '커밋 직전 실패'")).toBe(0);
+    } finally {
+      await admin.query('drop trigger if exists test_fail_at_commit on audit_chain');
+      await admin.query('drop function if exists test_fail_at_commit()');
+    }
+    // ② 이른 실패: command_actor.admin_account_id는 uuid라 이 값의 대응 행 쓰기가 실패한다
+    const before = await tables();
+    const head = await headOf();
+    await expect(insert('대응 행 실패', 'not-a-uuid')).rejects.toThrow();
     expect(await tables()).toEqual(before);
-    expect(await count('select count(*) as n from ops_command where id = $1', [commandId])).toBe(0);
-    expect((await q<{ last_seq: string }>('select last_seq from audit_chain_head where id = 1')).rows[0]!.last_seq).toBe(head);
+    expect(await headOf()).toEqual(head);
+    // 트리거를 지운 뒤에는 같은 접수가 그대로 커밋된다(시험 장치가 남지 않았다)
+    const ok = await insert('트리거 뒤 정상 접수', randomUUID());
+    expect(ok.replayed).toBe(false);
+    expect(await count('select count(*) as n from ops_command where id = $1', [ok.command.commandId])).toBe(1);
+    expect(Number((await headOf()).last_seq)).toBe(Number(head.last_seq) + 1);
   });
 
   test('[ASVS v5.0.0-16.2.1] 실제 DB의 명령 기록(requested_by·actor_ref·approver_ref·감사 record_json)에는 관리 계정 ID가 없고 대응 표로만 풀리며, 3년 [가정]이 지난 대응 행만 지우고 보류 행은 남긴다', async () => {
