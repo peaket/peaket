@@ -137,7 +137,67 @@
 
 ## 검증
 
-(검증 담당이 채운다)
+- 담당 `lane2-w12ciweb-verify`(claude-opus-5-5). 계획·시험·구현·리뷰에 관여하지 않았다. 코드·시험은 고치지 않았다.
+- **바탕**: 이 묶음 작업 폴더(머리 `9d2ace536`)에서 계획 6의 틀린 구현을 하나씩 파일에 넣고 돌린 뒤, 넣기 전 사본으로 되돌렸다. 되돌릴 때마다 `git status --short`가 비었다. 고치지 않은 상태의 기준선은 `security.test.mjs` 6/6과 아래 seats 차례 통과다.
+- **M1·M2 돌린 법**: 계획 6 표대로 뿌리 `eslint.config.mjs`를 실제로 고치고 `pnpm --filter @peaket/partner exec node --test src/_pages/seatmap-editor/security.test.mjs`를 돌렸다. 시험 하나는 첫 실패 단언에서 멈춘다. 그래서 뒤 단언까지 보려고, 같은 설정 파일을 읽는 ESLint 호출로 22행 시험의 표본 일곱 개를 따로 린트해 결과를 견줬다.
+- **M3·M4 돌린 법**: 일회용 스크립트가 워크플로 파일에서 seats 잡의 `run:` 줄을 읽어, 적힌 차례대로 web 타입 검사까지 돌렸다. 설치 두 단계(pnpm 깔기, 필터 설치)는 건너뛰었다. 로컬은 전체 설치라 흉내 내지 못한다(구현 절과 같다). 돌리기 전마다 `packages/*/dist`(빌드 산출)와 `apps/web/tsconfig.tsbuildinfo`를 지웠다. 뒤 파일은 증분 빌드 캐시다. 타입 검사기가 앞 실행 결과를 기억해 두는 파일로, `packages/config/tsconfig/nextjs.json`의 `incremental: true` 때문에 생긴다. 이 캐시 이야기는 아래 '남은 위험' 1에 있다.
+
+| 번호 | 넣은 틀린 구현 | 결과 |
+| --- | --- | --- |
+| M1 | `PARTNER_KONVA_OUTSIDE.files`에서 `'apps/partner/app/**/*.{…}'` 글롭을 뺌 | **잡힘.** 22행 시험이 27행 단언에서 실패했다(실제 `[]`, 기대 `['no-restricted-imports']`). 따로 린트해 보니 28행 표본도 `[]`다. 56행 시험을 비롯한 나머지 다섯은 통과했다(계획 기대와 같음) |
+| M2 | 기본 내보내기 배열에서 `PARTNER_KONVA_OUTSIDE`를 `NO_MOCKS_IN_APPS` 앞으로 옮김 | **잡힘.** 22행 시험이 24행 단언에서 실패했다. 따로 린트해 보니 24·27·28·29행 표본이 모두 `[]`였고, 목업 표본(33·34행)은 그대로 `['no-restricted-imports']`였다. 계획 기대에 더해 56행 시험('require()·템플릿 글자 …')도 66행에서 실패했다(막혀야 할 표본이 통과) |
+| M3 | 의존 빌드 단계를 `pnpm --filter @peaket/web typecheck` 뒤로 옮김 | **잡힘.** seatmap 타입 검사는 끝 코드 0이었다. web 타입 검사는 끝 코드 1이었다. 오류는 TS2307 셋(`SearchResults.tsx:15`, `autocomplete.ts:8`·`:11`)과 TS7006 하나(`suggestion-source.ts:75`)로, PR #45 CI 로그와 같은 넷이다 |
+| M4 | 빌드 필터를 `"@peaket/seatmap^..."`로 바꿈 | **잡힘.** 빌드는 아무것도 만들지 않고 끝 코드 0으로 끝났다. 이어 web 타입 검사가 M3과 같은 넷으로 끝 코드 1이었다 |
+
+- **결과: 넣은 4, 잡힌 4, 놓친 0.** 놓친 것이 없어 시험 담당에게 넘길 일은 없다.
+- 고치지 않은 상태에서 같은 스크립트를 돌렸다(dist·캐시를 지운 뒤). 의존 빌드(search-normalize·contracts·validation·platform)가 끝 코드 0, seatmap 타입 검사가 0, web 타입 검사가 0이었다. 만든 dist 넷과 캐시는 지웠다.
+
+### CI 판정
+
+- **판정 기준(리뷰 RV-01)**: seats 잡에서 이 묶음 몫은 web 타입 검사 통과까지다. 그 뒤 단계(단위 시험, 운영 빌드, `pnpm run seats`)에서 새 실패가 나오면 '감독에게' 2처럼 새 일로 넘긴다(ADR-0283 결정 6). 이번에는 뒤 단계도 모두 초록이라 넘길 것이 없다.
+- **실행**: PR #51은 44919441525(머지 시험 커밋 `416c475` = `9d2ace536` + `develop` `5cf51bc3d`)와 branch-policy 44919441442다. PR #52는 44919503553(`878f812` = `3813fcc4f` + `5cf51bc3d`)와 branch-policy 44919503361이다. 실패 로그는 잡 로그 API(`gh api repos/peaket/peaket/actions/jobs/<잡>/logs`)로 받아 grep으로 좁혔다.
+
+| 잡 | PR #51(나머지, b) | PR #52(워크플로만, a) | 판정 |
+| --- | --- | --- | --- |
+| `web / seats` | 통과(2분 38초) | 통과(2분 39초) | **처음으로 끝까지 초록.** 두 PR 모두 단계가 다 성공했다. 차례는 의존 빌드(작업 공간 34개 중 9개 범위) → seatmap 타입 검사 → web 타입 검사 → seatmap 시험 128/128 → web 시험 1,031/1,031 → 운영 빌드(정적 화면 60개) → `pnpm run seats` 3/3이다. 화면 시나리오 셋은 S-T21 둘과 S-T31 ⑥이고, 그리기 p99는 7.9~9.9ms다. 설치 단계의 `ERR_SWC_NATIVE_CACHE`는 그대로다(끝 코드 0, 갈래 4 몫, '감독에게' 1) |
+| `node / node` | 실패(8분 22초) | 건너뜀(워크플로 한 파일만 바뀜) | **`@peaket/partner#test` 통과 195/195**(실패 ① 고침 확인). turbo `--affected` 일 12개가 모두 성공했다. 이어 `pnpm lint`, platform 통합 시험(미리 정한 D-T50 ⑦은 이번엔 10/10 통과), identity-svc 통합 시험도 통과했다. 그다음 core-svc 통합 시험에서 **새 실패 3**이 나왔다(아래 '새 실패' 1). 이 묶음 탓이 아니다 |
+| `web / queue-room` | 통과 36/36(8분 20초) | 통과 36/36(8분 33초) | **흔들림 판정을 그대로 둔다.** WebKit의 `tabs.spec.mjs:178` FE-T6 '차례가 오면 입장 확정은 보이는 리더만 …'은 #51에서 5.9초에 통과했고 #52에서도 통과했다. 같은 화면 코드가 `develop` 44912722163까지 세 번 이어 통과했다. 원인 후보 (가)·(나)는 가르지 못했다. 정리 목록 줄은 계획 3의 문안대로 기록 때 더한다 |
+| 다른 `web / *` 아홉(budgets·ds·purchase·reflow·rich-text·seatmap-pkg·seed-css·tokens·visual) | 모두 통과 | 모두 통과 | 이 묶음과 상관없이 초록 |
+| `tools-check / tools` | 실패 | 실패 | **미리 정한 D-T42가 아니다.** D-T42 ①②③은 이번에 통과했다(W12-tools가 `develop`에 들어감). 실패한 곳은 그 뒤 단계 `node --test "deploy/platform/mesh/test/*.test.mjs"`의 MS-09·MS-10·MS-19다(아래 '새 실패' 2). `develop` `5cf51bc3d` 푸시 실행 44918058373에도 같은 셋이 있어 이 묶음 탓이 아니다 |
+| `branch-policy` | 실패 | 통과 | #51은 예상대로 ADR-0169에 걸렸다. 로그는 "빌드 절차를 바꾸는 PR에 다른 경로가 섞였다: `security.test.mjs`, `W12-ci-web.md`"다. #52는 워크플로 한 파일뿐이라 통과했다. (a)·(b)로 나눠 합치면 풀린다 |
+| `security-scan` 넷(codeql·secrets·dependencies·iac-config) | 통과 | 통과 | 감독·갈래 4 몫이지만 이번엔 초록 |
+| `contract-check` | 건너뜀 | 건너뜀 | 바뀐 범위 밖 |
+| `docs-check`·`lint-guard` | 통과 | 건너뜀 | — |
+| `ci-summary` | 실패(tools-check·node) | 실패(tools-check) | 위 실패를 모은 것일 뿐이다 |
+
+- **새 실패(이 묶음 탓 아님, 새 일로 넘김)**:
+  1. **`node / node`의 `pnpm --filter @peaket/core-svc test:integration`, 3개 실패**(파일 48개 중 2개, 시험 477개 중 3개).
+     - `test-int/rls.int.test.ts` AZ-T5 '[ASVS v5.0.0-8.4.1] 리뷰 재현: 코드가 쓰지 않는 표는 읽지 못한다(판매자 연락처, …)'(101행)와 '… 다른 공연을 지우거나 판매자 표를 고칠 권한이 없다'(120행)가 실패했다. 파트너 전용 DB 사용자 `core_partner`가 `promoter`를 읽고 고칠 수 있었다. 원인 후보는 BAT-616 `3cd4945fe`(2026-11-20)다. 그 커밋의 `services/core-svc/migrations/0034_sale_review_request.sql`이 `GRANT SELECT ON "promoter" TO core_partner`와 판매자 칸 `GRANT UPDATE`를 더했는데, 이것이 AZ-T5 단언과 어긋난다. 권한과 시험 가운데 어느 쪽이 정본에 맞는지 가려야 한다(마이그레이션이 근거로 든 것은 ADR-0327이다).
+     - `test-int/search-read-model.int.test.ts` R165-1 'HOT-270 표 마이그레이션 전부터 승인돼 있던 공연은 …'(559행)이 `column "sale_submitted_at" of relation "production" does not exist`로 실패했다. 원인 후보도 같은 BAT-616이다. 그 커밋이 Drizzle 스키마에 `sale_submitted_at`을 더했다. 이 시험은 마이그레이션 일부만 올린 DB에 지금 스키마로 줄을 넣으므로, 그 사이에 깨진다.
+     - **왜 지금 보였나**: core-svc 통합 시험은 BAT-616 뒤 `develop`에서 한 번도 돌지 않았다. node 잡이 앞 단계(turbo 단계의 partner 시험 등)에서 멈춰 이 단계를 건너뛰었기 때문이다(실행 44712957328·44820466982). 지금도 core-svc 뒤 통합 시험 아홉 단계(payment-svc부터 web까지)는 돌지 않았다. 고치면 또 새 실패가 나올 수 있다.
+  2. **`tools-check / tools`의 mesh 정책 시험 MS-09·MS-10·MS-19**(`deploy/platform/mesh/test/mesh-policies.test.mjs` 746·775·1108행). 서비스 사이 통신 허용 규칙(mesh 정책)인 `deploy/platform/mesh/policies.yaml`에서 payment-svc 8080과 `CompensationTransferService/RequestCompensationTransfer`가 purchase-svc 신원을 받는다. 그런데 시험의 정본 표(ADR-0285 결정 9 등)에는 그 호출자가 없다. 원인 후보는 BAT-425 `84f30f86c`(배상 송금)와 BAT-045 `3e14ffd95`다. 뒤 커밋은 배상 라우트를 purchase-svc로 옮기면서 mesh 정책을 다시 만들었다. 그 뒤 정책과 정본 표가 어긋난 것으로 보인다. `develop` 44912722163에서는 앞 단계 `tools/local`(DS-12·V-T7 ⑦)이 실패해 이 단계까지 오지 못했다. 지금도 그 뒤 단계 열셋(`mesh-policies.mjs --check`, `check-workflows.mjs` 등)은 건너뛰었다.
+- node 잡의 남은 일('감독에게' 2): PR #51은 `--affected`로 일 12개만 돌았다. 그래서 `develop` 44912722163에서 멈췄던 남은 11개가 이번에 돌았는지는 판정하지 못했다. 그 가운데 `@peaket/web` 단위 시험 1,031개는 seats 잡에서 통과했다.
+
+### 로컬 게이트
+
+- `pnpm --filter @peaket/partner test`: 195/195(실패 0, 건너뜀 0). 이 폴더엔 dist가 없어 계획 '시험 결과'대로 `pnpm --filter "@peaket/partner^..." run --if-present build`(contracts·validation·platform)를 먼저 했다. 끝난 뒤 만든 dist 셋은 지웠다.
+- `node tools/ci/check-workflows.mjs`: 통과(워크플로 23개).
+- `pnpm lint`: 끝 코드 0.
+- `python -I -X utf8 tools/doc-check/check_all.py`: 오류 0(이 절을 쓴 뒤).
+- `node tools/ci/roles-check.mjs --base dd9f08485`: 커밋 전에는 '코드(정방향) 묶음에 verify 커밋이 없다' 하나만 실패였다. 검증 커밋 뒤 결과는 감독에게 보고한다.
+
+### 남은 위험
+
+1. **로컬 재현 함정**: `apps/web/tsconfig.tsbuildinfo`(증분 빌드 캐시)가 남아 있으면, dist를 지워도 web 타입 검사가 TS2307 셋만 내고 TS7006은 숨는다. `suggestion-source.ts`의 앞 결과를 캐시에서 다시 쓰기 때문이다. 검증 처음에 M3을 돌렸을 때 그랬다. 끝 코드는 그래도 1이라 이번 판정에는 영향이 없다. CI에는 그 파일이 없다. 로컬에서 seats 차례를 흉내 낼 때는 그 파일도 지운다.
+2. **`develop` node 잡은 합친 뒤에도 빨갛다**: 위 '새 실패' 1이 고쳐질 때까지 그렇다. 그 뒤 통합 시험 아홉 단계가 숨긴 실패가 더 있을 수 있다.
+3. **queue-room WebKit 흔들림**: 이번 두 번의 통과는 흔들림 판정을 받칠 뿐이고 원인을 가르지 못했다. 같은 시험이 다시 흔들리면 계획 3 '처리'대로 시험 묶음을 연다.
+4. **리뷰가 넘긴 낮음 셋(RV-02·03·04)**은 정리 목록 몫으로 그대로 남는다.
+
+### (a)·(b) 합치기 판정
+
+- **(a) PR #52(`3813fcc4f`, 워크플로만): 합쳐도 됨.** branch-policy가 통과했고, seats·queue-room을 포함한 web 잡 열하나가 모두 초록이다. 실패는 tools-check 하나다. `develop` 자체(44918058373)에도 있는 mesh MS-09·10·19라 이 묶음 탓이 아니다. 다만 미리 정한 목록의 'tools-check D-T42'와 시험 이름이 다르므로 감독이 이 바뀜을 확인한다.
+- **(b) PR #51(나머지): (a)를 합친 뒤 rebase하면 합쳐도 됨.** `@peaket/partner#test` 195/195로 실패 ①이 고쳐졌다. branch-policy 실패는 (a)가 들어간 뒤 바뀐 경로가 시험 파일과 계획 파일만 남으면 풀린다. node 잡 실패는 core-svc 통합 시험의 새 실패(BAT-616 쪽)라 이 묶음 탓이 아니다. 새 일로 넘긴다.
+- **다음 단계**: (a) PR #52 CI 초록 확인 → develop 합치기 → (b) rebase·기록 → 합치기
 
 ## 담당 표
 
@@ -147,6 +207,7 @@
 | impl | lane2-w12ciweb-impl | claude-opus-5-5 | 2026-11-21T23:48+09:00 | 2026-11-22T00:28+09:00 |
 | test | lane2-w12ciweb-test | claude-opus-5-5 | 2026-11-22T00:04+09:00 | 2026-11-22T00:10+09:00 |
 | review | lane2-w12ciweb-review | claude-opus-5-5 | 2026-11-22T00:12+09:00 | 2026-11-22T00:32+09:00 |
+| verify | lane2-w12ciweb-verify | claude-opus-5-5 | 2026-11-22T00:30+09:00 | 2026-11-22T00:47+09:00 |
 
 ## 기록
 
