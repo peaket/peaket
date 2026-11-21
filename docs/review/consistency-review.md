@@ -830,6 +830,7 @@
 | R-734 | 서비스 코드의 이름 붙은 오류가 정본 목록과 상태·제목이 달라 PRF192가 잠복 실패했다(반려 사유 없음에 invalid-query 422) | services/ops-svc admin-accounts·approvals·payouts·commands, services/purchase-svc internal-sale-open·compensation, services/core-svc request-sale-review, docs/api/openapi.yaml, packages/api-client gen | 목록의 type·status·title을 그대로 쓰고 반려 공백 사유는 400 invalid-body(W12-prf192) | 적용 |
 | R-735 | v0.2.0 대비 의도한 계약 깨짐 8건(BAT-425·BAT-421·BAT-616)이 깨짐 예외에 없어 contract-check가 develop과 모든 초안 PR을 막았다 | docs/api/breaking/openapi-ignore.txt | 소유자 승인으로 oasdiff 문장 8줄과 까닭을 더하고 초안 PR에 breaking-approved 라벨 | 완료 |
 | R-736 | tools-check가 저장소 파일 0600 요구·선행 없는 all의 kubectl 호출·옛 라우트 생성물로 늘 빨갰다 | tools/local/demo-auth.mjs, tools/local/demo.mjs, tools/local/demo-seed.test.mjs, tools/local/demo.test.mjs, tools/local/demo-auth.test.mjs, deploy/gateways/*.routes.yaml, docs/infra.md, docs/verification.md | 0600은 .cache 비밀 파일에서, 선행 없으면 도구 실행 0, 라우트는 생성기로(W12-tools) | 적용 |
+| R-737 | develop 화면 CI 숨은 실패 셋(partner 린트 시험 표본·seats 잡 빌드 차례·queue-room 흔들림) | apps/partner security.test.mjs, .github/workflows/ci-web.yml(41049c462), 계획 W12-ci-web | 표본을 정본 꼴로, seats 잡 의존 빌드·queue-room 설치 | 고침, 흔들림·리뷰 넷은 정리 목록 |
 
 ## 4. 숫자 일치표
 
