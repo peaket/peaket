@@ -24,11 +24,11 @@ node --test tools/ci/claude-hooks.test.mjs
 
 ## 무인 모드(자리를 비울 때)
 
-소유자가 자는 동안처럼 권한 물음에 답할 사람이 없을 때 켭니다. 켜 두면 훅의 '묻기'를 묻지 않고 허용하고, 허용한 명령을 기록합니다. '막기'(강제 푸시·`reset --hard` 등)와 `main` 푸시는 그대로 막습니다. 정해 둔 시간이 지나면 저절로 꺼집니다.
+소유자가 자는 동안처럼 권한 물음에 답할 사람이 없을 때 켭니다. 켜 두면 훅의 '묻기'를 묻지 않고 허용하고, 허용한 명령을 기록합니다. '막기'(강제 푸시·`reset --hard` 등)와 `main` 푸시는 그대로 막습니다. 시간을 주지 않으면 `off`로 끌 때까지 켜져 있고(소유자 결정 2026-11-22), 시간을 주면 그만큼 뒤 저절로 꺼집니다.
 
 ```bash
-node tools/claude-hooks/unattended.mjs on        # 켜기(12시간 뒤 저절로 꺼짐)
-node tools/claude-hooks/unattended.mjs on 9      # 9시간만(많아야 24)
+node tools/claude-hooks/unattended.mjs on        # 켜기(off로 끌 때까지 시간 제한 없음)
+node tools/claude-hooks/unattended.mjs on 9      # 9시간만 켜기(많아야 24, 지나면 저절로 꺼짐)
 node tools/claude-hooks/unattended.mjs status    # 상태와 최근 허용 기록
 node tools/claude-hooks/unattended.mjs off       # 끄기. 켜 둔 동안 허용한 명령 수를 보여 줌
 ```

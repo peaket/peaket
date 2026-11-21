@@ -50,10 +50,11 @@ export function stateDir() {
   return process.env.PEAKET_HOOKS_STATE_DIR || path.join(HOOKS_DIR, '..', '..', '.claude', 'unattended');
 }
 
-// 켜져 있으면 { since, until }(밀리초), 꺼져 있거나 끝 시각이 지났으면 null
+// 켜져 있으면 { since, until }(밀리초, until이 null이면 끌 때까지 시간 제한 없음), 꺼져 있거나 끝 시각이 지났으면 null
 export function unattended(now = Date.now()) {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(stateDir(), 'on.json'), 'utf8'));
+    if (s?.until === null && typeof s?.since === 'number') return s;
     if (typeof s?.until !== 'number' || now >= s.until) return null;
     return s;
   } catch {

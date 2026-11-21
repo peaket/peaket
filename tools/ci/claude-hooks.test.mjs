@@ -301,6 +301,18 @@ test('CH-13 ① 무인 모드: 묻기는 허용으로 바꾸고 기록하며, �
     assert.match(unattendedMain(['off']).text, /이미 꺼져/);
   }));
 
+test('CH-13 ③ 시간을 주지 않고 켜면 끌 때까지 시간 제한 없이 켜져 있다', () =>
+  withState(() => {
+    const t0 = Date.UTC(2026, 10, 22, 0, 0, 0);
+    assert.equal(unattendedMain(['on'], t0).code, 0);
+    for (const later of [t0 + 13 * 3_600_000, t0 + 30 * 24 * 3_600_000]) assert.ok(unattended(later), String(later));
+    assert.match(unattendedMain(['status'], t0 + 13 * 3_600_000).text, /시간 제한 없음/);
+    assert.equal(shell('git stash'), 'allow');
+    assert.match(unattendedMain(['off']).text, /끔/);
+    assert.equal(unattended(t0 + 13 * 3_600_000), null);
+    assert.equal(shell('git stash'), 'ask');
+  }));
+
 test('CH-13 ② 무인 모드는 끝 시각이 지나면 꺼지고, 잘못된 시간은 받지 않는다', () =>
   withState((state) => {
     const t0 = Date.UTC(2026, 10, 21, 15, 0, 0);
