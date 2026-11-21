@@ -186,21 +186,78 @@ async function checkProperty<Ts extends [unknown, ...unknown[]]>(arbs: { [K in k
   if (failure) throw failure.error;
 }
 
-/** 재현 시험(R1·R2)이 판 하나를 지켜보는 칸: 본문이 시작했는지, 만든 시스템, 본문이 끝났는지와 끝남 약속 */
+/** 재현 시험(R1·R2)이 판 하나를 지켜보는 칸: 본문이 시작했는지, 만든 시스템, 본문이 끝났는지와 끝난 까닭, 끝남 약속 */
 class RunWatch {
   started = false;
   made: PaymentSystem | undefined;
   ended = false;
+  /** 본문이 끝난 까닭: 정상 끝이면 '정상 끝', 던졌으면 그 오류 문구 */
+  outcome: string | undefined;
   #resolve: () => void = () => undefined;
   readonly end = new Promise<void>((r) => {
     this.#resolve = r;
   });
-  finish(): void {
+  /** 판의 본문을 돌리며 지켜본다(던진 오류는 그대로 다시 던진다) */
+  async track(body: () => Promise<void>): Promise<void> {
+    this.started = true;
+    try {
+      await body();
+      this.#finish('정상 끝');
+    } catch (e) {
+      this.#finish(e instanceof Error ? e.message : String(e));
+      throw e;
+    }
+  }
+  #finish(outcome: string): void {
+    this.outcome = outcome;
     this.ended = true;
     this.#resolve();
   }
 }
-/** 그 판의 주문 행 수와, 그 가운데 아직 다른 판의 실행기 잡기 대상인 행 수(system.ts #isolate가 'infinity'로 미루거나 비우는 칸) */
+/**
+ * 재현 시험(R1·R2)의 문: 판의 본문을 붙들고, fast-check가 그 판을 끝낸 뒤에야 푼다(afterEach 플러그인). 본문이 문에서 기다리는 동안 판은 시간 한도로만
+ * 끝날 수 있으므로 끊김이 늘 판 도중(문)에서 일어난다. 시간 한도 값은 문까지 가는 앞 걸음보다 길기만 하면 되고 기계 속도와 상관없다(리뷰 RVvt-1).
+ * 문은 다음 매크로 작업(setImmediate)에서 연다: 그 사이 fast-check가 돌아오는 차례(마이크로 작업)가 끝나, 고친 하네스라면 도우미가 중단 표시를 한 뒤다
+ */
+class InterruptGate {
+  /** 본문이 문에 닿았다 */
+  reached = false;
+  /** fast-check가 판을 끝낸 그때 본문이 문에서 기다리고 있었는가 */
+  heldAtEnd: boolean | undefined;
+  #open: () => void = () => undefined;
+  readonly #opened = new Promise<void>((r) => {
+    this.#open = r;
+  });
+  /** 속성 매개변수 plugins에 넣는다(fast-check afterEach 플러그인과 같은 자리: 판 하나의 실행이 fast-check 쪽에서 끝난 뒤) */
+  plugin<Ts>(): fc.Plugin<Ts> {
+    const ended = () => {
+      this.heldAtEnd = this.reached;
+      setImmediate(this.#open);
+    };
+    return () => ({
+      decorateRun: (nestedRun) => (value) => {
+        const out = nestedRun(value);
+        if (!(out instanceof Promise)) {
+          ended();
+          return out;
+        }
+        return out.finally(ended);
+      },
+    });
+  }
+  /** 본문이 문에서 기다린다 */
+  async wait(): Promise<void> {
+    this.reached = true;
+    await this.#opened;
+  }
+  /** 명령 순서에 끼우는 문(명세 걸음이 아니다) */
+  readonly command: fc.AsyncCommand<World, World> = {
+    check: () => true,
+    run: () => this.wait(),
+    toString: () => '문(속성이 판을 끊은 뒤 풀림)',
+  };
+}
+/** 그 판의 주문 행 가운데 system.ts #isolate가 잡기 밖으로 미루는 행의 수(값과 상관없이)와, 그 가운데 아직 다른 판의 실행기 잡기 대상인 행 수('infinity'로 미루거나 비우는 칸) */
 async function claimable(s: PaymentSystem): Promise<{ rows: number; live: { saga: number; ticket: number; query: number; confirm: number } }> {
   const ids = [s.scope.orders.map((o) => s.orderIdOf(o))];
   const p = (
@@ -213,7 +270,7 @@ async function claimable(s: PaymentSystem): Promise<{ rows: number; live: { saga
   ).rows[0]!;
   const q = (
     await payment.pool.query<{ rows: number; query: number; confirm: number }>(
-      `select (select count(*)::int from payment where order_id = any($1::uuid[])) + (select count(*)::int from payment_confirm_job j join payment x on x.id = j.payment_id where x.order_id = any($1::uuid[])) as rows,
+      `select (select count(*)::int from payment where order_id = any($1::uuid[]) and next_query_at is not null) + (select count(*)::int from payment_confirm_job j join payment x on x.id = j.payment_id where x.order_id = any($1::uuid[])) as rows,
               (select count(*)::int from payment where order_id = any($1::uuid[]) and next_query_at is not null and next_query_at <> 'infinity') as query,
               (select count(*)::int from payment_confirm_job j join payment x on x.id = j.payment_id where x.order_id = any($1::uuid[]) and j.next_attempt_at is distinct from 'infinity') as confirm`,
       ids,
@@ -222,28 +279,31 @@ async function claimable(s: PaymentSystem): Promise<{ rows: number; live: { saga
   return { rows: p.rows + q.rows, live: { saga: p.saga, ticket: p.ticket, query: q.query, confirm: q.confirm } };
 }
 /**
- * 재현 시험의 시간 한도: 시스템 준비와 앞 걸음 몇 개(잡기 대상 행이 생기는 접수까지)보다 길고, 판 하나보다 확실히 짧다.
- * 로컬에서 잰 값(2026-11-22): R1은 행이 500~800ms 사이에 생기고 판이 약 3.2초, R2(스케줄러 길)는 500ms 안에 생기고 판이 약 1.6초다. 두 끝의 가운데쯤으로 둔다
+ * 재현 시험의 시간 한도: 문(InterruptGate)이 판을 붙들므로 판 길이와 견줄 필요가 없고, 시스템 준비와 문까지의 앞 걸음보다 길기만 하면 된다.
+ * 로컬(2026-11-22)에서 문까지의 준비와 앞 걸음은 R1·R2 모두 1초 안에 끝난다. 느린 기계에도 여유를 둔다(리뷰 RVvt-1)
  */
-const R1_LIMIT_MS = 1_500;
-const R2_LIMIT_MS = 800;
+const R_LIMIT_MS = 5_000;
+/** 하네스 PaymentSystem이 중단 표시를 보고 걸음 첫 줄에서 던지는 오류 문구(payment-model/system.ts) */
+const HALTED = '중단: 시간 한도에 끊긴 판';
 /**
  * 재현 시험(R1·R2)의 공통 단언: 속성이 시간 한도에 끊겨 돌아온 그때(기다리지 않고 바로 찍는다) 그 판의 본문이 끝났고, 열린 PaymentSystem이 0이며,
  * 그 판의 행이 다른 판의 잡기 대상에서 빠졌다. 끝나면 남은 본문을 끝까지 기다린다(고치기 전 하네스에서도 다음 시험을 오염시키지 않는다)
  */
-async function expectStoppedAndClosed(property: Promise<unknown>, watch: RunWatch): Promise<void> {
+async function expectStoppedAndClosed(property: Promise<unknown>, watch: RunWatch, gate: InterruptGate): Promise<void> {
   try {
     // 빈 시험 막기 ①: 판이 정말 끊겼다(판 하나짜리 속성이 한 번도 끝나지 못하면 fast-check가 이 문구로 실패를 낸다)
     await expect(property).rejects.toThrow(/Property interrupted after 0 tests/);
-    const at = { ended: watch.ended, open: systems.length };
+    const at = { ended: watch.ended, open: systems.length, outcome: watch.outcome };
     const made = watch.made;
-    // 빈 시험 막기 ②: 본문이 시스템을 만들었다
+    // 빈 시험 막기 ②: 끊김이 판 도중(본문이 문에서 기다리는 동안)에 일어났고, 본문이 시스템을 만들었다
+    expect(gate.heldAtEnd).toBe(true);
     expect(made).toBeInstanceOf(PaymentSystem);
     const steps = made!.steps;
     const rows = await claimable(made!);
     // 빈 시험 막기 ③: 그 판이 잡기 대상이 될 행(Saga·발권 작업, 결제 원장·승인 명령)을 만들었다
     expect(rows.rows).toBeGreaterThan(0);
-    expect({ ...at, grew: made!.steps - steps, live: rows.live }).toEqual({ ended: true, open: 0, grew: 0, live: { saga: 0, ticket: 0, query: 0, confirm: 0 } });
+    // 본문은 중단 표시로 멈췄다(제 끝까지 돌고 닫힌 것이 아니다, 리뷰 RVvt-2)
+    expect({ ...at, grew: made!.steps - steps, live: rows.live }).toEqual({ ended: true, open: 0, outcome: HALTED, grew: 0, live: { saga: 0, ticket: 0, query: 0, confirm: 0 } });
   } finally {
     if (watch.started) await watch.end;
   }
@@ -395,6 +455,8 @@ interface PairOptions {
   wrap?: (sch: Scheduler, system: () => PaymentSystem) => Scheduler;
   /** 재현 시험이 판을 지켜보는 칸 */
   watch?: RunWatch;
+  /** 준비 걸음 after개 뒤에서 기다릴 것(재현 시험 R2의 문). 나머지 준비 걸음과 쌍은 그 뒤에 돈다 */
+  hold?: { after: number; wait: () => Promise<void> };
 }
 /** 집중 경합 하나: setup으로 상태를 만든 뒤 쌍을 돌리고 결과 이름을 센다 */
 async function focusedPair(scope: Scope, setup: SpecMove[], a: SpecMove, b: SpecMove, outcome: (s: PaymentSystem) => string, runs: number, opts: PairOptions = {}): Promise<Record<string, number>> {
@@ -402,8 +464,7 @@ async function focusedPair(scope: Scope, setup: SpecMove[], a: SpecMove, b: Spec
   await checkProperty(
     [fc.scheduler()],
     async (props, sch) => {
-      if (opts.watch) opts.watch.started = true;
-      try {
+      const body = async () => {
         let made: PaymentSystem | undefined;
         const system = () => {
           if (!made) throw new Error('focusedPair: 감싸개가 시스템을 만들기 전에 시스템을 찾았다');
@@ -413,15 +474,17 @@ async function focusedPair(scope: Scope, setup: SpecMove[], a: SpecMove, b: Spec
         made = s;
         if (opts.watch) opts.watch.made = s;
         await using(s, async () => {
-          await run(s, setup);
+          const at = opts.hold?.after ?? setup.length;
+          await run(s, setup.slice(0, at));
+          if (opts.hold) await opts.hold.wait();
+          await run(s, setup.slice(at));
           await s.pair(a, b, opts.serial === undefined ? {} : { serial: opts.serial });
           for (const [k, n] of Object.entries(s.pairKinds)) pairKinds[k] = (pairKinds[k] ?? 0) + n;
           const o = outcome(s);
           seen[o] = (seen[o] ?? 0) + 1;
         });
-      } finally {
-        opts.watch?.finish();
-      }
+      };
+      await (opts.watch ? opts.watch.track(body) : body());
     },
     { numRuns: runs, ...replayParams, ...opts.params },
   );
@@ -485,30 +548,36 @@ test('V-T40 집중 경합: 결과 모름 조회 ∥ 다른 주문의 승인 응�
 // ---- 하네스 재현 시험(W12-vt40): 시간 한도에 끊긴 판 멈추기, 승인 응답 ∥ 재시작의 응답 먼저 차례 ----
 test('V-T40 R1 하네스(시간 한도): 시간 한도에 끊긴 무작위 판은 속성이 돌아오기 전에 멈추고 닫혀, 열린 PaymentSystem이 0이고 그 판의 행이 다른 판의 잡기 대상에서 빠진다', async () => {
   const watch = new RunWatch();
-  // 앞 걸음(두 주문의 승인 호출까지)을 정해 두어 끊길 때 잡기 대상이 될 행이 있게 하고, 그 뒤는 무작위 속성과 같은 명령 순서다
+  const gate = new InterruptGate();
+  // 앞 걸음(두 주문의 승인 호출까지)을 정해 두어 끊길 때 잡기 대상이 될 행이 있게 하고, 문 뒤에 늘 할 수 있는 걸음(pgProcess) 하나를 두며,
+  // 그 뒤는 무작위 속성과 같은 명령 순서다
   const prefix = [...upToSent(1), ...upToSent(2)].map((m) => new Act(m, () => true));
+  const afterGate = new Act({ a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }, () => true);
   const property = checkProperty(
     [fc.array(fc.oneof(...commandArbs(PROPOSED)), { minLength: 600, maxLength: 1000 })],
-    async (runs, cmds) => {
-      watch.started = true;
-      try {
+    (runs, cmds) =>
+      watch.track(async () => {
         const w: World = { s: await runs.make(PROPOSED) };
         watch.made = w.s;
         randomSystems.add(w.s);
-        await using(w.s, () => fc.asyncModelRun(() => ({ model: w, real: w }), [...prefix, ...cmds]));
-      } finally {
-        watch.finish();
-      }
-    },
-    { numRuns: 1, seed: 0x7640, interruptAfterTimeLimit: R1_LIMIT_MS, markInterruptAsFailure: false },
+        const all: Array<fc.AsyncCommand<World, World>> = [...prefix, gate.command, afterGate, ...cmds];
+        await using(w.s, () => fc.asyncModelRun(() => ({ model: w, real: w }), all));
+      }),
+    { numRuns: 1, seed: 0x7640, interruptAfterTimeLimit: R_LIMIT_MS, markInterruptAsFailure: false, plugins: [gate.plugin()] },
   );
-  await expectStoppedAndClosed(property, watch);
+  await expectStoppedAndClosed(property, watch, gate);
 }, PROPERTY_TIMEOUT_MS);
 
 test('V-T40 R2 하네스(시간 한도): 시간 한도에 끊긴 집중 경합 판도 같은 방법으로 멈추고 닫힌다', async () => {
   const watch = new RunWatch();
-  const property = focusedPair(ONE, LATE_TICKET_SETUP, { a: 'issueAck', o: 1 }, { a: 'compStart', o: 1 }, (s) => s.obs.ord[1]!.st, 1, { params: { interruptAfterTimeLimit: R2_LIMIT_MS, markInterruptAsFailure: false }, watch });
-  await expectStoppedAndClosed(property, watch);
+  const gate = new InterruptGate();
+  const property = focusedPair(ONE, LATE_TICKET_SETUP, { a: 'issueAck', o: 1 }, { a: 'compStart', o: 1 }, (s) => s.obs.ord[1]!.st, 1, {
+    params: { interruptAfterTimeLimit: R_LIMIT_MS, markInterruptAsFailure: false, plugins: [gate.plugin()] },
+    watch,
+    // 승인 호출까지(Saga·승인 명령 행이 잡기 대상인 때) 문에서 끊고, 그 뒤 준비 걸음 일곱과 쌍이 남는다
+    hold: { after: upToSent(1).length, wait: () => gate.wait() },
+  });
+  await expectStoppedAndClosed(property, watch, gate);
 }, PROPERTY_TIMEOUT_MS);
 
 /**
