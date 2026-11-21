@@ -179,8 +179,10 @@ test('DS-04 대기실 정규식은 세 개이고 /queue/{id}/verify를 잡지 �
   const route = routesByName(defs, 'demo-queue-room');
   assert.ok(route, '대기실 HTTPRoute가 없다');
   const matches = route.spec.rules[0].matches.map((m) => m.path);
-  assert.deepEqual(matches.map((p) => p.value), ['/_q/', ...QUEUE_ROOM_PATHS], '대기실 경로 목록');
-  for (const p of matches) assert.equal(p.type, p.value === '/_q/' ? 'PathPrefix' : 'RegularExpression', `대기실 경로 ${p.value}의 종류`);
+  // /_q/ PathPrefix는 자산 경로에서 게이트웨이 not-found 정규식에 먼저 잡혀 404가 났다.
+  // 정규식 ^/_q/.*로 자산·셸을 함께 잡는다(배포 확인 2026-11-21)
+  assert.deepEqual(matches.map((p) => p.value), ['^/_q/.*', ...QUEUE_ROOM_PATHS], '대기실 경로 목록');
+  for (const p of matches) assert.equal(p.type, 'RegularExpression', `대기실 경로 ${p.value}의 종류`);
   const regexes = QUEUE_ROOM_PATHS.map((p) => new RegExp(p));
   for (const ok of ['/queue/abc', '/queue/abc/', '/en/queue/abc', '/ja/queue/abc/', '/zh/queue/abc', '/shop/event-1/queue']) {
     assert.ok(regexes.some((r) => r.test(ok)), `대기실 경로 ${ok}를 잡지 않는다`);
