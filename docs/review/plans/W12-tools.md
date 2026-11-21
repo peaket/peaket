@@ -91,7 +91,18 @@
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+- 범위: `git diff origin/develop...HEAD`(계획 8a2559ade, 시험 36fea8aec·fb509ac89, 구현 3983d07cb·f1858a8c2)와 정본 두 줄(`docs/infra.md` '로컬 데모의 비밀', `docs/verification.md` 재현 스크립트), `tools/ci/gateway-routes.mjs` 머리 주석·해시 계산.
+- 대조 결과: 계획 §2의 두 파일과 §3의 시험 여덟이 모두 있다. 비밀 쓰기 세 자리(빠진 키 채우기·새 파일·`sessions.json`)가 `writeSecretJson`(0600으로 쓰기 → `chmodSync` 0600) 하나로 모였고, 저장소 파일 권한 단언은 지워져 git 권한 그대로다. 선행이 없으면 `runAll`이 `issues.ok`(거짓)를 넘겨 도구 넷을 판 확인까지 실행하지 않고, 도구 판 칸은 찾은 도구 '판 확인 안 함'·못 찾은 도구 '없음'이다(helm 칸 더함). 선행이 모두 있으면 지금처럼 판을 잰다. 정본과 어긋남 없음.
+- 시험 장치: `childProcessRecorder`는 `node:child_process`를 통째로 바꿔 실제 실행을 막고, 훅이 실렸는지(`loaded() === 1`)를 매번 단언해 빈 기록이 통과로 새지 않는다. W12T-02 ③이 같은 장치로 kubectl 판 확인 기록을 잡아 기록 장치의 양성 대조를 겸한다. 이 PC(win32)에서 세 시험 파일 시험 60·통과 57·실패 0·건너뜀 3(W12T-01 ②③④ POSIX).
+- 라우트 생성물: 다섯 파일의 줄 2(계약 sha256)만 바뀌었고, 브랜치 위 `docs/api/openapi.yaml`은 그대로다. `node tools/ci/gateway-routes.mjs --check` exit 0(생성기는 openapi의 정규화 JSON으로 해시를 잰다)이라 생성기 결과다.
+- 커밋 나눔: 시험 커밋은 시험 파일 셋과 계획만, 구현 커밋은 `demo-auth.mjs`·`demo.mjs`와 계획('구현 메모')만, 라우트 커밋은 생성물 다섯만 건드렸다. 구현 커밋이 시험 파일을 바꾸지 않았다. 라우트 다시 만들기는 계획 §2 표 밖이지만 '구현 메모'에 까닭(W12-prf192가 `--write`를 빠뜨림, D-T42 ①② 실패)을 적었다.
+
+| # | 등급 | 자리 | 근거 · 방향 |
+| --- | --- | --- | --- |
+| RV-01 | 중간 | `tools/local/demo-auth.mjs:110-111` | 있던 넓은(0644) 파일은 `writeFileSync`가 같은 inode(파일 본체)를 잘라 새 비밀을 다 쓴 뒤에야 `chmodSync`로 좁힌다. 그 틈에 열린 읽기와, 넓을 때 이미 열어 둔 읽기 핸들은 새 내용(채운 `serverActionsKey`·새 세션 쿠키)을 읽는다(권한은 열 때만 본다). 두 호출 모두 기호 연결(symlink)도 따라간다. 다만 이 틈은 파일이 이미 넓은 채 다른 비밀을 담고 있던 때만 생겨 더해지는 노출이 작고, 정본의 끝 상태(0600)는 맞아 막지 않는다. 방향: 같은 폴더의 임시 파일을 `{ flag: 'wx', mode: 0o600 }`으로 쓰고 `renameSync`로 바꿔 끼운다(새 inode라 옛 핸들이 새 비밀을 못 읽고, 기호 연결은 따라가지 않고 바꾸며, 쓰다 멈춰도 반쪽 파일이 남지 않는다). W12T-01 ④의 `writeFileSync(` 한 곳 단언과도 맞는다. |
+| RV-02 | 낮음 | `tools/local/demo.test.mjs:135`·`:147`·`:173` | 가짜 `execSync`·`exec`는 셸 명령 글 전체를 `exe`로 적어(`kubectl version --client`), `toolCalls()`가 도구 넷으로 세지 않는다. 지금 코드는 `spawnSync`만 써 거짓 통과는 없지만, 판 확인을 `execSync('kubectl version …')`으로 바꾼 틀린 구현은 W12T-02 ①을 지난다. 방향: 두 가짜에서 명령 글의 첫 낱말을 `short`로 떼어 `exe`로 적는다. |
+
+- 막는 지적(높음·보안·통과 기준): 0. RV-01·02는 이 묶음에서 고치지 않고 다음 tools 묶음 후보로 남긴다.
 
 ## 검증
 
@@ -104,3 +115,4 @@
 | plan | w12tools-plan-7f3b | claude-opus-5-5 | 2026-11-21T23:23+09:00 | 2026-11-21T23:34+09:00 |
 | test | w12tools-test-1a8c | claude-opus-5-5 | 2026-11-21T23:34+09:00 | 2026-11-21T23:59+09:00 |
 | impl | w12tools-impl-9c2e | claude-opus-5-5 | 2026-11-21T23:49+09:00 | 2026-11-21T23:56+09:00 |
+| review | w12tools-review-4e1a | claude-opus-5-5 | 2026-11-22T00:00+09:00 | 2026-11-22T00:06+09:00 |
