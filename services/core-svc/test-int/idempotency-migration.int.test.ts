@@ -45,12 +45,14 @@ const OLD = {
   ops: { account: randomUUID(), operation: 'CREATE_OPS_PROMOTER', key: randomUUID(), ref: A, tenant: null },
 } as const;
 
-/** 리뷰 RV5: 변경분 회차에 eventId가 빈(null) 원소를 가진 판매자 X의 공연. 정상 코드는 만들지 않지만 백필은 이런 행에도 엉뚱한 테넌트를 붙이지 않아야 한다 */
+/** 리뷰 RV5: 변경분 회차에 eventId가 빈(null)·빈 글('') 원소를 가진 판매자 X의 공연. 정상 코드는 만들지 않지만 백필은 이런 행에도 엉뚱한 테넌트를 붙이지 않아야 한다 */
 const X = randomUUID();
 const PX = randomUUID();
 /** 리뷰 RV5: eventId를 읽지 못하는 옛 회차 더하기 기록(어느 판매자도 정할 수 없어 비어 있어야 한다) */
 const NO_EVENT = {
   nullEventId: { account: randomUUID(), operation: 'CREATE_PRODUCTION_EVENT', key: randomUUID(), ref: JSON.stringify({ eventId: null, pending: true, warnings: [] }) },
+  /** 검증 V5: eventId가 빈 글이다(0041의 '빈 글이 아닐 때만' 조건이 막는다) */
+  emptyEventId: { account: randomUUID(), operation: 'CREATE_PRODUCTION_EVENT', key: randomUUID(), ref: JSON.stringify({ eventId: '', pending: true, warnings: [] }) },
   missingEventId: { account: randomUUID(), operation: 'CREATE_PRODUCTION_EVENT', key: randomUUID(), ref: JSON.stringify({ pending: true, warnings: [] }) },
   notJson: { account: randomUUID(), operation: 'CREATE_PRODUCTION_EVENT', key: randomUUID(), ref: 'y' },
 } as const;
@@ -109,7 +111,7 @@ beforeAll(async () => {
     X,
     PLACE,
     new Date('2026-11-01T00:00:00Z'),
-    JSON.stringify({ addedEvents: [{ ...added, eventId: null }, { ...added, eventId: randomUUID() }] }),
+    JSON.stringify({ addedEvents: [{ ...added, eventId: null }, { ...added, eventId: '' }, { ...added, eventId: randomUUID() }] }),
   ]);
   for (const r of [...Object.values(OLD), ...Object.values(NO_EVENT)]) {
     await q('insert into idempotency_record (account_ref, operation, idempotency_key, request_hash, result_ref, created_at) values ($1, $2, $3, $4, $5, $6)', [
@@ -150,7 +152,7 @@ describe('AZ-T17 멱등 기록 표 0041 옮김', () => {
     for (const t of [A, B, randomUUID()]) expect((await keysIn(t)).filter((k) => nobody.includes(k)), t).toEqual([]);
   });
 
-  test('AZ-T17 ⑦ 리뷰 재현(RV5): eventId가 null이거나 없거나 JSON이 아닌 옛 회차 더하기 기록은 eventId가 빈 변경분 회차를 가진 다른 판매자의 공연에 붙지 않고 비어 있다 [ASVS v5.0.0-8.4.1]', async () => {
+  test('AZ-T17 ⑦ 리뷰 재현(RV5): eventId가 null·빈 글이거나 없거나 JSON이 아닌 옛 회차 더하기 기록은 eventId가 null·빈 글인 변경분 회차를 가진 다른 판매자의 공연에 붙지 않고 비어 있다 [ASVS v5.0.0-8.4.1]', async () => {
     const keys = Object.values(NO_EVENT).map((r) => r.key);
     const rows = (await admin.pool.query('select idempotency_key, tenant_id, result_ref from idempotency_record where idempotency_key = any($1::uuid[])', [keys])).rows as { idempotency_key: string; tenant_id: string | null; result_ref: string }[];
     const byKey = new Map(rows.map((r) => [r.idempotency_key, r]));
