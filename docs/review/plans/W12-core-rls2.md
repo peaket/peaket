@@ -370,7 +370,44 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 
 ## 실패 확인
 
-(시험 담당이 위 7대로 쓴다.)
+시험 담당(세션 `lane2-w12corerls2-test`)이 2026-11-22에 위 7의 **길 (나) 초안 PR CI**로 돌렸다(감독 지시로 로컬 Docker는 쓰지 않음, 잠금·컨테이너 건드리지 않음). 트리는 develop `d0a72e8a2` 위로 다시 쌓은 이 가지의 계획 커밋 둘 위에 시험 커밋 `15962e965`만 얹은 것(구현 전, 0042 없음)이다. W12-core-idem은 아직 develop에 없어 그 새 시험 파일 셋은 이 트리에 없다.
+
+- **정적 검사**: core-svc `tsc --noEmit`(`tsconfig.json`이 `test-int`를 포함) 통과, `pnpm lint` 통과(`test-int`는 뿌리 린트 범위 밖).
+- **명령**: 가지 `feature/lane2-W12-core-rls2`를 올리고 초안 PR #59(`--base develop`)를 열었다. `ci` 실행의 `node / node` 잡 첫 시도는 core-svc 앞 단계 `pnpm --filter @peaket/platform test:integration`에서 이 묶음과 관계없는 두 시험(I-T48 ③ Kafka `Message timed out`, D-T50 ⑦ 테넌트 한도 키 `599`≠`600`)이 흔들려 core-svc 통합 시험까지 가지 못했다. `gh run rerun --failed`로 다시 돌린 둘째 시도에서 platform 18/18·identity-svc 32/32 파일이 통과했고 `pnpm --filter @peaket/core-svc test:integration`이 돌았다(20:03~20:06 UTC). purchase-svc 통합 단계는 core-svc 실패로 돌지 않았다(GAT080_0014·GAT-110 P3·V-T40 기존 실패는 이번에 보지 않음). 잡 끝의 `asvs-report` 단계 끝 코드 2(`test-report-search-golden.json`이 vitest JSON이 아님)는 실패 뒤 정리 단계이고 이 묶음 파일과 관계없다.
+- **결과**: core-svc 파일 49개 중 2개 실패·46개 통과·1개 건너뜀(`local-partner-stack.int`, 원래 건너뜀). 시험 500개 중 **17개 실패·482개 통과·1개 건너뜀**. 실패 17개는 모두 아래 표의 단언 실패이고(실행조차 안 되는 실패 없음), 그 밖의 파일은 모두 통과했다(`shop-order.int` 23/23, `rls.int` 24/24, `promoter-contract.int` 14/14, `shop-cancel`·`shop-return`·`shop-expiry` 포함).
+
+| 시험 | 결과 | 실제 값(구현 전 트리) |
+| --- | --- | --- |
+| AZ-T18 ① | **실패(단언)** | 여덟 칸 고치기가 모두 `1`행(기대 `42501`), A1이 `DISABLED`·`FAILING`·주소 `https://attacker.example/hook`·판매자 B로 바뀜 |
+| AZ-T18 ② | **실패(단언)** | 가~라가 모두 `1`행(기대 0·`42501`·`42501`·`42501`), A2가 `ACTIVE`·사유 없음으로 다시 켜지고 A1이 `DISABLED`·`PARTNER`·판 2 |
+| AZ-T18 ③ | **실패(단언)** | 발송·서명 일곱 번·DEAD·E의 `FAILING` 끄기·알림 훅 1번은 통과, F가 `PARTNER`·판 1이 아니라 `FAILING`·판 2(`findEndpointById(F)`도 같음) |
+| AZ-T18 ④ | **실패(단언)** | 판매자·끝점 ID 칸 고치기가 `1`행(기대 `42501`). 자기 테넌트 읽기 `[A1, A2]`·조건 없는 고치기 2행·테넌트 없이 0건·B 판매자 넣기 `42501`·아홉 칸 고치기 `[{ id: A1 }]`는 기대대로 |
+| AZ-T18 ⑤ | **실패(단언)** | 항목 여덟 칸·주문 다섯 칸 고치기가 모두 `2`행, PAID 주문·항목 넣기 `1`행(지우기 둘은 이미 `42501`). 정산 원천 응답이 A 항목 수수료 0·꾸민 주문 50,000원 항목으로 바뀜. 시작 응답(A 33,000원·1000bp, B 20,000원)은 기대대로 |
+| AZ-T18 ⑥ | 통과 | 있던 동작. 실패는 검증의 M14~M16으로 본다 |
+| AZ-T18 ⑦ | **실패(단언)** | 정책이 옛 `merch_order_partner_tenant`·`merch_order_item_partner_tenant`(ALL)·`webhook_endpoint_app_write`(UPDATE `true`)이고, `core_app`·`core_partner`의 끝점 고치기가 표 단위 `true`(칸 열하나 모두), 파트너의 두 주문 표 넣기·고치기가 표 단위 `true`(칸 전부) |
+| AZ-T18 ⑧가 | **실패(단언)** | 게시 상품 수수료율 `0`(기대 1,234) |
+| AZ-T18 ⑧나 | **실패(단언)** | 초안 수수료율 `5`(기대 비움) |
+| AZ-T18 ⑧다 | **실패(단언)** | 게시로 고친 초안 `7`(기대 1,234) |
+| AZ-T18 ⑧라 | **실패(단언)** | 조건 없는 고치기 2행 뒤 P1 `0`·P2 `0`(기대 1,234·비움) |
+| AZ-T18 ⑧마 | **실패(단언)** | 계약 변경 뒤 P1 1,234는 기대대로, P2 `1`·P3 `9`(기대 2,000·2,000) |
+| AZ-T18 ⑧바 | **실패(단언)** | 계약 없는 판매자의 게시 넣기가 `1`행(기대 `23514`), 저장 행 둘 |
+| AZ-T18 ⑧사 | **실패(단언)** | 판매자·상품 ID 칸 고치기가 `1`행(기대 `42501`) |
+| AZ-T18 ⑧아 | **실패(단언)** | 팬 경로 주문 저장소가 읽은 P4 `0`·P5 `9`(기대 1,234·2,000) |
+| AZ-T18 ⑧자 | **실패(단언)** | 상품 표 트리거 `[]`, 파트너 상품 고치기 표 단위 `true`(칸 22개, 상품 ID·판매자 포함) |
+| shop-notify '0014·0015가 …' | **실패(단언)** | `core_partner`의 `product`·`webhook_endpoint` 표 단위 권한이 `INSERT,SELECT,UPDATE`(기대 `INSERT,SELECT`) |
+| shop-notify '0016이 …' | **실패(단언)** | `core_partner`의 두 주문 표가 `INSERT,SELECT,UPDATE`(기대 `SELECT`). `core_app` 끝점 단언은 앞 단언에서 멈춰 보지 못함 |
+
+- **처음부터 통과한 시험과 실패를 볼 표본**: ⑥ → M14·M15·M16. ③의 발송·끄기 몫 → M6·M7·M8(③에서 실패한 것은 F 몫뿐). ④의 아홉 칸 → M10. `shop-notify`·`shop-order`의 계약 시드는 구현 전 트리에서도 통과한다(기대대로).
+- **시험 쓰기에서 계획과 다르게 한 것**(단언을 약하게 한 것은 없다):
+  - ⑧은 시험 하나가 아니라 가~자 아홉 개로 나눴다(이름 `AZ-T18 ⑧가` 꼴, 장부는 ⑧로 센다). 시험마다 시드를 새로 넣어 앞 단계 실패가 뒤 단계를 가리지 않는다. P1(게시 1,234)·P2(초안)는 `admin`으로 넣는다. 그래서 라는 P1 1,234·P2 비움(초안 분기)을 보고, 마는 계약 변경 뒤 P2를 처음 게시해 2,000이 되는 것도 본다. 아는 `DrizzleShopOrderStore.products`(팬 주문 만들기가 수수료율을 복사해 오는 읽기)로 읽는다.
+  - 되돌리기는 `afterEach`가 아니라 `beforeEach`의 시드 다시 넣기(네 표 지우고 넣기)다. 실패한 시험의 변경도 다음 시험 전에 지워진다.
+  - ③의 서명 기대값은 받은 본문 글로 따로 만든 HMAC이다. 발송 본문이 jsonb를 거쳐 키 차례가 바뀌므로 본문 글을 시험에서 다시 만들지 않고, 본문 내용은 따로 깊이 같음으로 본다.
+  - ⑤는 꾸민 PAID 주문과 그 주문의 배송 완료 항목을 넣는다. 시작 응답은 B 항목까지 정확한 값으로 본다.
+  - ⑦은 계획 목록에 더해 `core_app`의 두 주문 표 읽기·넣기·고치기가 그대로인지와 `core_partner`의 끝점 읽기·넣기를 본다. 시드 A2의 판은 3이다(판 그대로를 1이 우연히 남는 것과 가르려고).
+- **구현 담당에게(시험이 찾은 것)**:
+  - **3.2의 '시험 `admin`은 파트너 역할 구성원이 아니어서 트리거가 아무것도 하지 않는다'는 틀리다.** PostgreSQL의 `pg_has_role(…, 'MEMBER')`은 `is_member_of_role`을 쓰고, 그 함수는 슈퍼유저를 모든 역할의 구성원으로 본다(PostgreSQL 18 `src/backend/utils/adt/acl.c`, 2026-11-22 확인). 시험 `admin`(`postgres`)은 슈퍼유저라, ADR-0338 결정 4의 식 그대로면 `admin`의 상품 넣기·고치기에도 트리거가 돈다. 그러면 계약 없이 게시 상품을 `admin`으로 넣는 `shop-cancel`·`shop-return`·`shop-expiry`·`shop-unclaimed`·`shop-refund-account`·`shop-attributes-check`·`shop-migration` 통합 시험(그리고 W12-core-idem의 `shop-replay`)이 23514로 멈추고, 계약이 있는 판매자면 시드한 수수료율이 계약 값으로 덮인다. 결정 4 '소유자가 돌리는 … 시험 준비는 그대로다'와 어긋나므로 식을 고칠지(예: 슈퍼유저를 빼는 조건) 계획·감독이 정할 일이다. 이 묶음의 새 시험 파일은 `admin` 시드를 계약 값과 같게 넣어 어느 쪽이든 그대로 돈다.
+  - ⑦의 `webhook_endpoint_app_disable` 식은 PostgreSQL이 다시 쓴 글로 본다(`(status = 'ACTIVE'::text)`, `((status = 'DISABLED'::text) AND (disabled_reason = 'FAILING'::text))`). ADR-0338 결정 1의 식을 그 꼴 그대로 쓴다(`IN` 목록 등 다른 꼴은 다른 글이 된다).
+  - 13.2의 축소 마이그레이션이 수수료율 칸 고치기를 거두면 ⑧다·라·마(수수료율을 SET한다)의 결과가 `42501`로 바뀐다. 그때 ⑧자 칸 목록과 함께 그 셋의 기대값도 고친다.
 
 ## 시험 결과
 
@@ -393,9 +430,10 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12corerls2-plan | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T03:14+09:00 |
+| test | lane2-w12corerls2-test | claude-opus-5-5 | 2026-11-22T04:31+09:00 | 2026-11-22T05:15+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: W12-core-rls·W12-core-idem이 develop에 합쳐진 뒤 이 가지를 rebase해 `feature/lane2-W12-core-rls2-r2`로 올리고, 시험 담당(`lane2-w12corerls2-test`)이 위 6의 시험을 쓰고 위 7대로 구현 전 트리에서 실패를 본다.
+- **다음 단계**: 감독이 '실패 확인'의 트리거 슈퍼유저 문제(식을 고칠지)를 정한 뒤, 구현 담당이 위 5대로 0042·상품 저장소·주석을 쓰고 초안 PR #59 CI에서 `webhook-merch-grants.int`·`shop-notify.int`와 위 6의 회귀가 통과하는지 본다.
