@@ -411,11 +411,26 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 
 ## 시험 결과
 
-(시험 담당이 구현 뒤 트리의 결과를 쓴다.)
+구현 담당이 구현 커밋 `ccf429505`(develop `d0a72e8a2` 위 계획 둘·시험 둘·구현 하나)을 올려 초안 PR #59의 `ci` 실행 44946383634를 봤다(로컬 Docker는 쓰지 않음).
+
+- **통과**: `changes`·`lint-guard`·`contract-check`·`tools-check`·`security-scan` 넷·`docs-check`. `node / node`의 typecheck·단위·build(바뀐 작업 공간 전부)·`pnpm lint`·platform 통합 18/18파일·identity-svc 32/32파일.
+- **core-svc 통합**: 49파일 중 48 통과·1 건너뜀(`local-partner-stack.int`, 원래 건너뜀), 시험 500개 중 **499 통과·1 건너뜀·실패 0**. `webhook-merch-grants.int` **16/16**(AZ-T18 ①~⑦, ⑧가~자), `shop-notify.int` 14/14, `shop-order.int` 23/23, 회귀 `shop-cancel` 22·`shop-return` 9·`shop-expiry` 12·`shop-unclaimed` 10·`shop-refund-account` 10·`shop-attributes-check` 4·`shop-migration` 8·`promoter-contract` 14·`rls` 24·`webhook-lease` 1·`webhook-lease-concurrent` 3 모두 통과. 슈퍼유저 시드가 트리거를 건너뛰어 계약 없는 게시 상품 시드가 그대로 들어갔다.
+- **payment-svc 통합: 실패(이 묶음 때문, 시험 이의)**: 27파일 중 1 실패, 593개 중 4 실패. `test-int/merch-path-e2e.int.test.ts`의 P-T57 ①·P-T57 ②·V-T35 ①·P-T58 ①④⑤가 모두 그 파일의 `createProduct`(파트너 HTTP `POST /v1/partner/products`, 게시)에서 `expected 500 to be 201`이다. 이 시험은 core-svc 마이그레이션·`AppModule`을 원본 경로로 가져와(의존 선언 밖, `FixedCommissionRate(1000)` 기본 조립) 판매자 `PROMOTER`의 계약 행 없이 파트너 역할로 게시 상품을 만든다. 0042 트리거가 계약 없는 게시를 23514로 멈추는 것(ADR-0338 결정 4)이 그대로 500이 된 것이고, 계획 6의 '기존 시험 고침'이 `shop-notify`·`shop-order`만 적어 빠졌다. 고칠 곳은 시험 파일이라 구현 담당은 건드리지 않았다: 그 파일 `beforeAll`(판매자 시드 195행 뒤)에 `coreAdmin`으로 `PROMOTER`의 계약 행(수수료율 1000, 기간 끝이 열림)을 넣으면 된다(`shop-order.int` 124행 꼴).
+- **돌지 않음**: payment-svc 실패로 그 뒤 queue-svc·trust-svc·admission-ctrl·purchase-svc·realtime-gw·bundle·invariant-checker·web 통합 단계가 건너뛰어졌다. purchase-svc 기존 실패(GAT080_0014·GAT-110 P3·V-T40)는 이번에 보지 않았다. 다른 서비스 시험에서 core-svc 파트너 상품 경로를 부르는 것은 이 파일 하나다(`grep -rln "v1/partner/products" services/*/test-int`, 웹 검사의 `tools/web-checks/partner-api/server.mjs`는 DB 없는 가짜 서버).
+- **슈퍼유저 아님 단언(감독 덤 조사)**: 시작 확인 `assertDatabaseRole`(`services/core-svc/src/modules/catalog/adapters/db/database-role.ts` 23·27행, `main.ts` 178~182행·`relay.ts` 51·73행)이 슈퍼유저·BYPASSRLS·소유자 연결을 막는다. 시험은 `test-int/rls.int.test.ts` 460~469행(파트너·팬 통과, 슈퍼유저 `admin`을 `core_partner`로 확인하면 `/행 보안/`으로 거절, 두 역할 겸임 거절), 435~440행(그룹 역할 둘과 시험 로그인 둘의 `rolsuper`·`rolbypassrls` 거짓), `test-int/search-read-model.int.test.ts` 1522·1523행(`core_search`), `test/core-consumers.test.ts` 222~224·270행(소비자 풀의 `assertDatabaseRole(…, 'core_app')` 부름만)이다. 그룹 역할은 마이그레이션 0004 11~14행(0008·0012·0023도 같은 꼴)이 슈퍼유저·BYPASSRLS면 멈춘다. **없는 것(시험 담당이 더할 후보)**: `main.ts`가 팬·파트너·관제·검색 연결마다 `assertDatabaseRole`을 부르는지 보는 시험(지금은 소비자 풀 하나만), `relay.ts`의 두 부름, 로컬·CI 시연 로그인을 `NOSUPERUSER`로 만드는지(`tools/local/demo-objects.mjs` 676행, `demo-objects.test.mjs`에 단언 없음). 운영 로그인 사용자는 저장소 밖(비밀 관리)에서 만들어 시작 확인만이 지킨다.
 
 ## 구현
 
-(구현 담당이 쓴다.)
+구현 담당(세션 `lane2-w12corerls2-impl`)이 2026-11-22에 위 5대로 썼다. 커밋 `ccf429505`(구현·ADR-0338 고침), 시험 파일은 건드리지 않았다.
+
+- **`services/core-svc/migrations/0042_webhook_merch_write_grants.sql`(새)**: 3.1의 1~4 그대로. 표 단위 REVOKE 뒤 칸 GRANT, 정책은 `DROP POLICY IF EXISTS` 뒤 `CREATE POLICY`, 함수는 `CREATE OR REPLACE FUNCTION`(`SECURITY INVOKER`, `SET search_path = pg_catalog, pg_temp`), 트리거는 `DROP TRIGGER IF EXISTS` 뒤 `CREATE TRIGGER`(BEFORE INSERT OR UPDATE, 행마다, 칸 목록·WHEN 없음). 정책 식은 ⑦이 보는 글 꼴(`"status" = 'ACTIVE'`, `"status" = 'DISABLED' AND "disabled_reason" = 'FAILING'`, 0004와 같은 테넌트 식) 그대로 썼다.
+- **트리거 조건(감독 결정 2026-11-22)**: 3.1 꼴의 첫 줄에 슈퍼유저 제외를 더했다. 글은 `IF (SELECT r.rolsuper FROM pg_catalog.pg_roles r WHERE r.rolname = current_user) OR NOT pg_catalog.pg_has_role(current_user, 'core_partner', 'MEMBER') THEN RETURN NEW; END IF;`이고, 0008 `partner_approved_sale_guard`와 같은 꼴이다. 역할 행을 못 찾으면(NULL) 덮어쓰기를 하는 쪽으로 닫힌다. 3.2의 '시험 `admin`은 파트너 역할 구성원이 아니어서 트리거가 아무것도 하지 않는다'는 '시험 `admin`은 슈퍼유저라 트리거 첫 줄에서 빠진다'로 읽는다(시험 준비 전용 사실, AZ-T18 정본 글은 그대로).
+- **journal**: idx 42 한 줄만 더했다(W12-core-idem의 0041 줄은 가져오지 않음). `when`은 0040과 W12-core-idem 0041의 값보다 크다(2026-11-21T20:19:17.949Z UTC의 밀리초). `test/migrations-journal.test.ts`는 통과한다(빈 번호 0035~0039·0041이 있어도 idx 차례만 본다).
+- **`drizzle-product-store.ts` `save`**: SET에서 `commissionRateBp`를 빼고 `returning`에 `commissionRateBp`를 더해, 돌려주는 기록의 수수료율을 DB(트리거)가 정한 값으로 둔다. `insert`·메모리 저장소·포트는 그대로다.
+- **주석**: `drizzle-webhook-store.ts` 머리(파트너 아홉 칸, 발송기 `core_app` 세 칸·켜진 끝점 끄기만)와 `disableEndpoint`(꺼진 끝점은 0행), `drizzle-merch-store.ts` 머리(파트너는 읽기만, ADR-0338 결정 3·5).
+- **ADR-0338**: 상태 줄에 '셋째로 결정 4의 트리거 조건에서 슈퍼유저를 뺐다', 결정 4 셋째 항목을 '파트너 역할에게만 돈다. 슈퍼유저는 앱 경로가 아니라 뺀다'와 그 까닭(PostgreSQL 18 `is_member_of_role`가 슈퍼유저에게 참, `assertDatabaseRole`이 앱 연결의 슈퍼유저를 막음)으로 고쳤다. 결과에 '시험 준비: 시드 사용자는 슈퍼유저라 트리거를 건너뛴다' 한 줄을 더했다. authz-matrix AZ-T18 글은 바꾸지 않았다.
+- **게이트(로컬)**: `turbo run build --filter=@peaket/core-svc^...`, core-svc `typecheck` 통과. core-svc 단위 105파일 773개 중 771개 통과, 2개(`fill-search-guard.test.ts` W7L2-S8·S12, 한 번은 `internal-sale-config-token-boot.test.ts` SEC-06R ①도)가 전체 실행에서만 5초 시간 초과였다(자식 프로세스를 띄우는 시험, 따로 돌리면 `migrations-journal`·`shop-notify.migration`·`webhook-dispatcher`와 함께 5파일 21개 통과, 바꾼 파일과 관계없음). `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(모두 기존 openapi·mermaid 경고).
+- **감독에게(고치지 않음)**: PostgreSQL 16부터 슈퍼유저가 아닌 `CREATEROLE` 사용자가 역할을 만들면 그 사용자에게 새 역할의 ADMIN 구성원 자격이 저절로 붙고(INHERIT·SET 없이), `pg_has_role(…, 'MEMBER')`은 그 자격도 센다. 운영 DB는 Aurora라 관리 계정이 슈퍼유저가 아니다. 운영 마이그레이션을 그 계정으로 돌리고 그 계정이 0004에서 `core_partner`를 만들었다면, 그 계정(표 소유자)의 상품 넣기·고치기에도 트리거가 돈다. 지금 상품 행을 쓰는 마이그레이션은 없어 당장 영향은 없지만, 뒤에 상품 수수료율을 고치는 데이터 마이그레이션은 트리거가 덮는다. 조건을 `'USAGE'`로 바꾸거나 표 소유자 제외(`assertDatabaseRole`의 소유자 검사와 같은 꼴)를 더할지는 감독이 정할 일이다(`rls.int`의 `core_migrator` 시험은 역할을 슈퍼유저가 먼저 만든 뒤라 이 경우를 보지 않는다).
 
 ## 리뷰
 
@@ -431,9 +446,10 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12corerls2-plan | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T03:14+09:00 |
 | test | lane2-w12corerls2-test | claude-opus-5-5 | 2026-11-22T04:31+09:00 | 2026-11-22T05:15+09:00 |
+| impl | lane2-w12corerls2-impl | claude-opus-5-5 | 2026-11-22T05:14+09:00 | 2026-11-22T05:48+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: 감독이 '실패 확인'의 트리거 슈퍼유저 문제(식을 고칠지)를 정한 뒤, 구현 담당이 위 5대로 0042·상품 저장소·주석을 쓰고 초안 PR #59 CI에서 `webhook-merch-grants.int`·`shop-notify.int`와 위 6의 회귀가 통과하는지 본다.
+- **다음 단계**: 시험 담당이 '시험 결과'의 시험 이의(payment-svc `merch-path-e2e.int` 판매자 계약 행 시드)를 고치고 슈퍼유저 아님 단언 시험을 확인(시험 담당) → PR #59 CI에서 payment-svc 뒤 통합 단계(purchase-svc 등)까지 확인 → 리뷰(보안)·검증 → (W12-core-idem 합친 뒤) rebase·기록 → 합치기. 감독은 '구현'의 비슈퍼유저 소유자 메모(트리거 조건 `MEMBER`)를 정한다.
