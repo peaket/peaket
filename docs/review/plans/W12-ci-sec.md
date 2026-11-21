@@ -154,7 +154,40 @@
 
 ## 검증
 
-(검증 담당이 채운다)
+- 바탕: 임시 사본(`568e1cc58`을 떼어 낸 작업 트리, 이 묶음 작업 폴더와 따로)에 틀린 구현을 하나씩 넣었다. 계획이 가리킨 시험을 돌린 뒤 고친 파일만 되돌렸다. Docker는 쓰지 않았다.
+- 고치지 않은 사본에서는 일곱 파일이 모두 통과했다: scan-tools 25, scan-gate 25, security-scan-workflow 7, demo-auth 12, demo-objects 16, demo-images 14, demo 29.
+- 결과: 넣은 10, 잡힌 9, 놓친 1.
+
+| # | 넣은 틀린 구현 | 실패한 시험 |
+| --- | --- | --- |
+| M1 | 데모 키 블록에서 `condition`·`paths`를 지워 규칙과 값 꼴만 남김 | W12S-07 ① |
+| M2 | 값 꼴을 32바이트 base64면 무엇이든 받게 넓힘(`^[A-Za-z0-9+/]{43}\=?$`) | W12S-07 ②. 기존 설정 검사(`gitleaksConfigProblems`)는 이 꼴을 못 잡는다. 계획 4의 '기존 scan-tools 시험'은 `.*` 같은 꼴에만 맞다 |
+| M3 | 허용 블록을 지우고 `gitleaks-ignore`에 c0609b91·13fef82a 지문 6줄을 가짜 이슈 번호 주석과 함께 넣음 | W12S-07 ①② |
+| M4 | web Dockerfile에 `ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`, `DEMO_BUILD_ARGS.web`에 그 키 | W12S-02 ①②, 기존 DS-01·V-T7 ④(demo-images), V-T7 ④(demo) |
+| M5 | `web.yaml` env에 키를 다른 값으로 남김(`secretEnvFrom`은 그대로) | W12S-03 ③ |
+| M6 | 상수를 `demo-auth.mjs`의 다른 이름으로 옮김(문구를 그 자리에서 base64로 만듦). 새 파일과 채워 넣기 모두 그 값을 씀 | W12S-04 ①②. 글자 그대로가 아니라서 W12S-03 ④는 지나갔다(예상대로) |
+| M7 | `ca`와 함께 `rejectUnauthorized: false`를 남김 | W12S-06 ②④ |
+| M8 | 믿을 인증서가 없거나 빈 글이면 확인을 끄고 진행 | W12S-06 ③ |
+| X1(더함) | 이름 확인을 끔(`checkServerIdentity: () => undefined`) | W12S-06 ④ |
+| X2(더함) | `ca`를 주지 않아도 계약의 `caPem`으로 물러서지 않음(`const ca = o.ca`) | **놓침**(일곱 파일 모두 통과) |
+
+- M9·M10은 CI 몫이다.
+  - 근거: 수동 전체 security-scan 실행 44910774428에서 codeql·secrets·dependencies·iac-config가 모두 success였다. PR #45의 security-scan 네 잡도 pass였다.
+  - 결과: 이 둘로 W12S-01(비밀 탐지 막음 0)과 W12S-08(CodeQL 전체 분석 막음 0)이 판정됐다.
+- 판정 기준 대조(계획 1):
+  1. 1의 2 허용 블록: W12S-07 ①②가 문장의 조건을 모두 단언한다(generic-api-key만, AND, 네 파일 `^…$`, 그 값 그대로, 끝 `=` 있음·없음). 안 맞아야 할 경로 7개와, 무작위로 만든 값·한 글자 바꾼 값까지 본다. 맞다.
+  2. 1의 2 앞으로: Dockerfile 키 지움, 무작위 32바이트, 예전 파일에 채워 넣기, `demo-web`·`demo-partner`, `secretEnvFrom`, 상수 없앰을 본다. W12S-02 ①②③, W12S-03 ①~④, W12S-04 ①~③의 단언이 문장과 맞다.
+  3. 1의 3 #36: 인증서 확인(W12S-06 ②), 이름 확인(④), 빈 글이면 연결 0번에 `caPem` 오류(③), 바른 요청(①)은 맞다. 'undefined면 계약의 `caPem`'을 보는 시험은 없다(X2). 실제로 부르는 곳(`demoAuth`·`demo-seed`·데모 재생기·e2e)은 모두 `ca` 없이 부르는 길을 쓴다.
+  4. 1의 1 시험 JWT: 기존 시험 블록에 값 꼴을 더했는지는 로컬 시험이 없고 W12S-01이 본다. W12S-05 ①은 가림 결과를 머리와 서명 칸 둘 다로 본다.
+  - 이름만 달고 실제로 보지 않는 W12S 시험은 없었다. 시험마다 제 읽는 법부터 확인한다: 표본 검사(W12S-02 ①②③), 수 하한(W12S-02 ②), 연결 수 세기(W12S-06 ③).
+- 어느 표본에도 실패하지 않은 것:
+  - 파일: `tools/ci/scan-gate.test.mjs`, `tools/ci/security-scan-workflow.test.mjs`. 표본이 그 영역을 건드리지 않았다.
+  - W12S 세부: 02 ③, 03 ①②④, 04 ③, 05 ①, 06 ①. 03 ①②는 `demoSecrets`가 상수를 쓰는 표본을 넣지 않아 이번 표본으로는 확인하지 못했다.
+  - 돌리지 않은 것: `demo-seed.test.mjs`, purchase-svc `seat-layout.test.ts`. #32~#35는 동작이 같아 W12S-08로 본다.
+- 구간 끝 정리 목록으로 보냄. 감독 결정: X2는 막히는 쪽으로 깨지므로 보안 영향이 없다. 시험에는 계약 파일 자리 인자가 필요해 이 묶음 밖이다.
+  - X2: `ca`가 없을 때 계약의 `caPem`을 쓰는지, 계약에도 없으면 거절하는지 보는 시험.
+  - 가벼운 빈틈 ①: 허용 블록과 `gitleaks-ignore` 지문을 함께 두면 잡지 않는다. 지금 시험은 블록이 없을 때만 간접으로 잡는다.
+  - 가벼운 빈틈 ②: W12S-04 ③은 채워 넣은 값이 무작위인지 보지 않는다(M6에서 ③은 통과했다).
 
 ## 담당 표
 
@@ -164,3 +197,4 @@
 | test | w12sec-test-5c1e | claude-opus-5-5 | 2026-11-21T22:00+09:00 | 2026-11-21T22:45+09:00 |
 | impl | w12sec-impl-7a4f | claude-opus-5-5 | 2026-11-21T22:18+09:00 | 2026-11-21T22:41+09:00 |
 | review | w12sec-review-9d2b | claude-opus-5-5 | 2026-11-21T22:50+09:00 | 2026-11-21T22:58+09:00 |
+| verify | w12sec-verify-1e6c | claude-opus-5-5 | 2026-11-21T22:50+09:00 | 2026-11-21T23:07+09:00 |
