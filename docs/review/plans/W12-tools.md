@@ -106,7 +106,21 @@
 
 ## 검증
 
-(검증 담당이 채운다)
+- 방법: 구현 뒤 트리 `fb509ac89`를 분리 작업 폴더(`git worktree add --detach`)에 꺼내 `corepack pnpm install --frozen-lockfile`·`pnpm exec turbo run build --filter=@peaket/identity-svc...` 뒤, §4의 틀린 구현을 하나씩 넣고 계획이 가리킨 시험 파일만 `node --test`로 돌려 실패를 본 다음 그 파일만 `git checkout --`로 되돌렸다(win32, Docker 없음). 넣기 전 기준은 세 시험 파일 시험 60·통과 57·실패 0·건너뜀 3(W12T-01 ②③④ POSIX)으로 '시험 결과'와 같다.
+
+| # | 넣은 결함 | 실패한 시험 |
+| --- | --- | --- |
+| M1 | `runAll`의 `write`가 `measurementOf`에 `issues.ok`를 넘기지 않는다(선행이 없어도 판을 잰다) | V-T7 ⑦·W12T-02 ①(판 확인 넷 `docker --version`·`kind version`·`kubectl version --client --output=json`·`helm version --short` 기록), W12T-02 ②(도구 판 칸이 모두 '있음') |
+| M2 | 선행이 없을 때 kubectl·helm만 건너뛰고 docker·kind 판은 실행한다 | V-T7 ⑦·W12T-02 ①(`docker --version`·`kind version` 기록), W12T-02 ②(docker·kind '있음') |
+| M3 | 도구 판을 늘 '판 확인 안 함'·'없음'으로 적는다(선행이 모두 있어도 안 잰다) | W12T-02 ③("선행이 모두 있는데 kubectl 판을 재지 않았다") |
+| M4 | 선행이 없으면 측정 파일을 쓰지 않는다(`write(report)` 지움) | V-T7 ⑦·W12T-02 ①, W12T-02 ②(측정 파일 없음 ENOENT) |
+| M5 | `writeSecretJson`이 `chmodSync`를 하지 않고, `sessions.json`은 도우미 밖 `writeFileSync`로 쓴다 | W12T-01 ④ 모든 OS("writeFileSync( 호출이 2곳이다")로 `sessions.json` 쪽이 잡힘. `chmodSync` 쪽은 아래 CI 줄 |
+
+- 넣은 5·잡힌 5·놓친 0.
+- M5의 `chmodSync` 쪽(POSIX 세부라 이 PC는 W12T-01 ②③④를 건너뜀): PR #50 CI 실행 44916859307 우분투 `tools-check / tools`에서 `tools/local` 시험 265·통과 265·건너뜀 0으로 W12T-01 ②③④가 실제로 돌았고 실패 목록에 없다. ③은 있던 0644 파일을 다시 쓴 뒤 0600을 보므로, `mode`가 새 파일에만 듣는 `chmodSync` 없는 구현은 거기서 실패한다. 그 잡의 실패는 이 묶음 밖 메시 정책 MS-09·10·19뿐이다(감독이 W12-mesh로 맡김).
+- 판정 기준 대조(둘, 모두 정본과 맞음):
+  1. `docs/verification.md` 재현 스크립트(선행이 없으면 exit 1, 확인 못 한 시나리오는 통과로 세지 않음, kubectl·docker·kind·helm은 판 확인까지 하나도 실행하지 않음, 찾은 도구 '판 확인 안 함'·못 찾은 도구 '없음') ↔ V-T7 ⑦·W12T-02 ①(exit 1·'실패(선행 없음)'·시나리오 모두 '미실행'·도구 기록 0)과 W12T-02 ②(docker·kind·kubectl '판 확인 안 함', helm '없음'). 문구와 판정이 같다.
+  2. `docs/infra.md` '로컬 데모의 비밀'(0600은 새로 만들 때와 있던 파일을 다시 쓸 때 모두, 저장소 시드·도구 파일은 git 권한 그대로, 권한 검사는 `.cache`의 비밀 파일만) ↔ DS-12·W12T-01 ①(저장소 파일 권한을 보지 않고 시드 폴더 비밀 파일 없음·출력 비밀 없음만 본다)과 W12T-01 ③(있던 0644 비밀 파일을 다시 쓴 뒤 0600).
 
 ## 담당 표
 
@@ -116,3 +130,4 @@
 | test | w12tools-test-1a8c | claude-opus-5-5 | 2026-11-21T23:34+09:00 | 2026-11-21T23:59+09:00 |
 | impl | w12tools-impl-9c2e | claude-opus-5-5 | 2026-11-21T23:49+09:00 | 2026-11-21T23:56+09:00 |
 | review | w12tools-review-4e1a | claude-opus-5-5 | 2026-11-22T00:00+09:00 | 2026-11-22T00:06+09:00 |
+| verify | w12tools-verify-6b5d | claude-opus-5-5 | 2026-11-22T00:00+09:00 | 2026-11-22T00:08+09:00 |
