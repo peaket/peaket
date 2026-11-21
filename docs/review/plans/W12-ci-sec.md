@@ -131,7 +131,26 @@
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+- 본 범위: 출발점 `de4d6a67`부터 `568e1cc58`까지 네 커밋. `origin/develop..HEAD`(두 점)로 보면 가지를 딴 뒤 `develop`에 들어온 커밋(`ec2201730`·`5f5eb248a`, 에이전트 훅)이 거꾸로 섞여 보여서, 갈라진 점 기준(`origin/develop...HEAD`, 세 점)으로 보았다.
+- **막는 지적(높음·보안·통과 기준)은 없다.** 대조한 것:
+  1. 계획 항목: 1의 1~6은 모두 코드에 들어갔다. 1의 7은 계획의 설명이고, 1의 8은 계획 커밋이 정본 두 문장으로 넣었다. '손댈 파일' 표의 파일은 모두 고쳤고, 표 밖 파일(`scan-exceptions.json`·`gitleaks-ignore`·`codeql-config.yml`·`scan-gate.mjs` 포함)은 고치지 않았다.
+  2. gitleaks 허용 블록: 새 블록은 `targetRules = ['generic-api-key']`, `condition = 'AND'`이고, 경로는 그 네 파일만 `^…$`로 묶었으며, 값 꼴은 그 값 그대로(`^…\=?$`)다. 경로만으로 푸는 블록, 통째 허용, 넓은 꼴, `gitleaks-ignore` 지문은 없다. 시험 JWT는 기존 '시험 코드의 가짜 값' 블록(시험 경로와 `AND`)에 그 값 그대로의 꼴 하나만 더했다. 두 꼴 모두 `\.`·`\=`로 이스케이프해서 설정 파일 자체가 다시 걸리지 않는다. 진짜 비밀이 이 블록을 지나려면 그 공개 값과 글자까지 같아야 하므로 지나갈 길이 없다.
+  3. 데모 키는 Secret으로만 들어간다: 두 Dockerfile의 빌드·실행 단계에서 키 `ENV` 넷을 지웠고, `ARG`·빌드 인자로 옮기지 않았다. 키는 `demoSecrets`가 비밀 파일 값으로 만든 `demo-web`·`demo-partner` Secret으로만 들어간다. 부르는 쪽은 비밀 객체를 통째로 넘기고(`cluster.mjs` 1441줄), Secret은 `kubectl create -f -`의 표준 입력으로 넣으며, Helm 설치(1479줄)보다 먼저 만든다. `demo-auth prepare`의 출력에는 개수만 나온다. 그래서 키가 로그나 이미지 기록에 남는 길은 보이지 않는다.
+  4. HTTPS 확인: `rejectUnauthorized: false`를 지우고 `ca`와 `servername`을 준다. 그래서 Node 기본값대로 인증서 확인과 이름 확인이 모두 켜진다. 믿을 인증서가 빈 글이면 연결하기 전에 거절한다. `httpsJson`을 부르는 곳은 모두 무대 계약의 `hosts`를 쓰고, 이 목록은 `caPem`을 만들 때 쓴 인증서 이름 목록과 같다(`cluster.mjs` `listenerCertificates`).
+  5. CodeQL 고침: 억제 주석은 없다. `#fileOf`는 KEY_PART 검사를 통과한 값으로만 경로를 만들어서, 받아 주는 값이 예전과 같다. `int()`가 받는 범위도 그대로이고, `seed-demo.mjs`는 변수 이름만 바꿨다. #35의 경보 문구가 "Password from an access to passwords"(GitHub 경보 API, 2026-11-21 확인)라서, 바꾼 변수 이름이 실제 출발점이 맞다.
+  6. 커밋 경계: 구현 커밋 `9e8b66aae`는 시험 파일을 건드리지 않았다. 시험 커밋 `879b8d21d`·`568e1cc58`은 시험 파일 다섯과 이 계획 파일만 바꿨다.
+  7. 새 비밀: 이 가지가 더한 줄에서 긴 base64·JWT·PEM 모양을 찾으면, 나오는 것은 `gitleaks.toml`에 이스케이프해 넣은 꼴 둘뿐이다. 시험에 쓰는 키·토큰·인증서는 모두 실행할 때 만든다.
+  8. 재현 시험을 이 트리에서 다시 돌렸다: `node --test --test-name-pattern=W12S tools/ci/scan-tools.test.mjs tools/local/demo-auth.test.mjs tools/local/demo-objects.test.mjs tools/local/demo-images.test.mjs tools/local/demo.test.mjs`를 돌려 17개 모두 통과했다.
+- 지적: 모두 중간·낮음이다. 이 묶음에서는 고치지 않고 구간 끝 정리 목록으로 넘긴다(ADR-0331 결정 5).
+
+| 번호 | 등급 | 자리 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `docs/infra.md` 577줄('로컬 데모의 비밀' 끝 문장), `tools/local/demo/runner.mjs:202` | 새 정본 문장은 '데모 도구의 HTTPS 요청'이 모두 `caPem`으로 인증서를 확인한다고 쓴다. 그런데 데모 재생기의 브라우저 창은 `ignoreHTTPSErrors: true`로 확인을 끈다(계획 §5가 범위 밖으로 뺀 곳). 정본 문장이 실제 코드보다 넓다 | 문장을 'Node 요청 도우미(`httpsJson`)의 HTTPS 요청'으로 좁히고 브라우저 창 예외를 적는다. 아니면 정리 때 브라우저 창도 그 인증서를 믿게 고친다 |
+| RV-02 | 낮음 | `tools/local/demo-auth.mjs:262` | `httpsJson`이 요청할 때마다 계약 파일을 동기로 다시 읽는다. 부르는 쪽은 이미 `ctx.contract`·`state.contract`를 들고 있어서, 실행 중에 계약 파일이 다시 쓰이면 주소·포트와 믿을 인증서가 서로 다른 계약에서 온다 | 부르는 쪽이 `ca: contract.caPem`을 넘기거나, 한 번 읽은 값을 쓴다 |
+| RV-03 | 낮음 | `tools/local/demo-objects.mjs:268·363·364` | `serverActionsKey`가 선택 값(`?`)이고 검사가 없다. 값이 빠지면 키 없는 Secret이 만들어지고, web·partner 파드가 뜰 때에야(`assertServerActionsKey`) 멈춘다. 이때도 서버가 뜨지 않는 쪽으로 막히므로 보안 문제는 아니다 | 타입을 필수로 바꾸고, `demoSecrets`가 빈 값을 받으면 그 자리에서 던진다 |
+| RV-04 | 낮음 | `tools/local/demo-objects.test.mjs:350`(W12S-03 ④) | 예전 상수가 남았는지 `tools/local` 바로 아래의 `.mjs`만 보고, 하위 폴더 `tools/local/demo/`·`tools/local/e2e/`는 보지 않는다(지금 트리에는 남은 곳이 없다는 것을 grep으로 확인했다) | 하위 폴더까지 찾아 들어가며 본다 |
+
+- 남은 확인(지적 아님): W12S-01(PR의 `security-scan / secrets`)과 W12S-08(CodeQL 전체 분석)은 CI 몫이다. #32·#33·#34 고침이 먹히는지는 CodeQL이 새 검사 꼴을 알아보는지에 달려 있어서, 이 PC에서는 확인할 수 없다. 고친 뒤에도 남으면 '감독에게' 6의 OPEN 문안대로 간다.
 
 ## 검증
 
@@ -144,3 +163,4 @@
 | plan | w12sec-plan-3b7d | claude-opus-5-5 | 2026-11-21T21:31+09:00 | 2026-11-21T21:58+09:00 |
 | test | w12sec-test-5c1e | claude-opus-5-5 | 2026-11-21T22:00+09:00 | 2026-11-21T22:45+09:00 |
 | impl | w12sec-impl-7a4f | claude-opus-5-5 | 2026-11-21T22:18+09:00 | 2026-11-21T22:41+09:00 |
+| review | w12sec-review-9d2b | claude-opus-5-5 | 2026-11-21T22:50+09:00 | 2026-11-21T22:58+09:00 |
