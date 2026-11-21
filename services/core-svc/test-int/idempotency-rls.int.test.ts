@@ -395,5 +395,17 @@ describe('AZ-T17 멱등 기록 표의 역할 나누기(행 보안)', () => {
       ).rows as { cols: boolean; del: boolean }[];
       expect(t, role).toEqual([{ cols: false, del: false }]);
     }
+    // 행 보안을 거치지 않는 비우기(TRUNCATE)와 이 표에 쓰지 않는 참조·트리거 권한은 다섯 역할 모두 없다
+    // (결정 4: 표 단위로 남는 것은 읽기와 core_ops 지우기뿐, 결정 3 끝: 정비·검색 역할은 권한이 없다. 검증 V8·리뷰 RV6)
+    for (const role of ['core_partner', 'core_app', 'core_ops', 'core_maintenance', 'core_search'] as const) {
+      const t = (
+        await admin.pool.query(
+          `select has_table_privilege($1, 'idempotency_record', 'TRUNCATE') as truncate, has_table_privilege($1, 'idempotency_record', 'REFERENCES') as refs,
+                  has_any_column_privilege($1, 'idempotency_record', 'REFERENCES') as col_refs, has_table_privilege($1, 'idempotency_record', 'TRIGGER') as trig`,
+          [role],
+        )
+      ).rows as { truncate: boolean; refs: boolean; col_refs: boolean; trig: boolean }[];
+      expect(t, role).toEqual([{ truncate: false, refs: false, col_refs: false, trig: false }]);
+    }
   });
 });

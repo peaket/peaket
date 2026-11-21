@@ -302,6 +302,7 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 - **시험 이의(시험 담당에게)**: `shop-replay.int.test.ts` 437행 `expect(mismatchLines()).toEqual([])`가 바로 앞 취소 반복(409~419행)이 남긴 `CANCEL_MERCH_ORDER` 로그 한 줄을 본다(`logs.length = 0`이 반복 안에만 있고 계좌 다시 받기 앞에는 없다). 받은 값은 `kind` `idempotency-replay-mismatch`·`operation` `CANCEL_MERCH_ORDER`·`orderId` = o5 한 줄이다. 맞는 참조(`cancel:{X5}`)의 계좌 다시 받기는 로그를 남기지 않았는데도 실패한다. 435행 `retry()` 앞에 `logs.length = 0`을 두면 풀린다. 그래서 계좌 다시 받기의 맞지 않는 두 줄(438~448행, M19)은 CI에서 아직 돌지 않았다. 구현 담당은 커밋하지 않은 임시 단위 확인(메모리 저장소)으로 그 길(다른 팬 주문·같은 팬 다른 주문의 취소, 꼴이 틀린 참조, 남의 경로 주문 → 404·로그 한 줄·계좌 값 없음·결제사 취소 0)을 봤다.
 - **시험 이의 반영(시험 담당, 2026-11-22)**: 시험 결함이 맞아 `5438106a3`가 맞는 참조 요청 앞에서 로그를 비운다(단언은 그대로). PR #57 CI(`ci` 실행 44937447572, `node / node`)의 core-svc 통합은 `Test Files 2 failed | 48 passed | 1 skipped (51)`, `Tests 3 failed | 487 passed | 1 skipped (491)`이고, AZ-T17 14개 모두 통과했다(`shop-replay` 5개, 계좌 다시 받기의 맞지 않는 두 줄 포함). 실패 셋은 위 '원래 실패라 뺀 것'과 같다.
 - **리뷰 반영 시험(시험 담당, 2026-11-22, RV1·RV2·RV5)**: develop 위로 다시 쌓은 가지에 `d956e7a43`(RV1 포트원 `totalAmount` 대조)·`eec585326`(RV2 경로 주문 계정 대조, 시작·접수·취소·계좌 다시 받기)·`7dbb37765`(RV5 `eventId`를 읽지 못하는 옛 회차 더하기 기록 백필 재현)를 더했다. PR #57 CI(`ci` 실행 44941146374, `node / node`)의 core-svc 통합은 `Test Files 1 failed | 49 passed | 1 skipped (51)`, `Tests 1 failed | 499 passed | 1 skipped (501)`이다. RV1·RV2 새 시험 둘은 지금 구현에서 통과했다(대조가 이미 있다, `shop-replay` 7개 통과). RV5 새 시험은 기대대로 실패했다: `{"eventId":null}` 기록의 테넌트 칸이 비지 않고 `eventId`가 빈 변경분 원소를 가진 판매자 X의 ID로 채워졌다(첫 단언에서 멈춤, 없음·JSON 아님 두 기록은 구현 뒤 확인). 기존 AZ-T17 14개와 W12-core-rls가 들어온 `rls.int`(24)·`search-read-model.int`(34)는 모두 통과했다. 같은 잡의 ASVS 요약 단계가 `test-report-search-golden.json`이 vitest JSON 보고서가 아니라며 끝 코드 2로 끝났는데, 이 묶음이 바꾼 파일이 아니다.
+- **검증이 놓친 셋의 시험(시험 담당 `lane2-w12coreidem-test2`, 2026-11-22, V6·V8·V5)**: 새 단위 시험 `test/shop-replay-in-tx.test.ts`(AZ-T17 ⑥ 여섯)는 메모리 저장소가 처음 보기 직후 같은 키 기록을 커밋하는 차례를 만들어 일곱 작업의 트랜잭션 안 재생 길을 탄다. 지금 구현에서 6/6 통과, 그 길의 대조를 뺀 틀린 구현 여섯(V6 결제 시작·접수·주문·취소·계좌 다시 받기·반품, 로컬에서 하나씩 넣고 되돌림)에서 해당 시험이 각각 '거절을 기대했는데 값이 왔다'로 실패했다. 결제 시작의 이 길은 결제창 준비가 저장 함수보다 먼저 돌아(RV3 정리 목록) 그 호출 수는 단언하지 않고 시도·쓰기 0을 본다. 통합 시험은 `idempotency-rls` ⑧에 다섯 역할의 TRUNCATE·REFERENCES(표·칸)·TRIGGER 없음(V8), `idempotency-migration` RV5에 빈 글 `eventId` 기록과 변경분 원소(V5)를 더했고 PR #57 CI로 본다. 게이트(로컬): core-svc typecheck, 단위 106파일·779개, `pnpm lint`, 문서 점검 통과.
 
 ## 구현
 
@@ -478,9 +479,10 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 | review | lane2-w12coreidem-review | claude-opus-5-5 | 2026-11-22T04:06+09:00 | 2026-11-22T04:22+09:00 |
 | impl | lane2-w12coreidem-impl2 | claude-opus-5-5 | 2026-11-22T04:46+09:00 | 2026-11-22T04:54+09:00 |
 | verify | lane2-w12coreidem-verify | claude-opus-5-5 | 2026-11-22T05:31+09:00 | 2026-11-22T06:17+09:00 |
+| test | lane2-w12coreidem-test2 | claude-opus-5-5 | 2026-11-22T06:19+09:00 | 2026-11-22T06:40+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: 기록 → 합치기.
+- **다음 단계**: 재검증(V5·V6·V8을 새 시험이 잡는지) → 기록 → 합치기.
