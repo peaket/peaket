@@ -73,11 +73,11 @@ afterEach(async () => {
   }
 });
 
-async function pod(name: string, o: ServiceControlSyncOptions = {}): Promise<Pod> {
+async function pod(name: string, o: ServiceControlSyncOptions = {}, env: Record<string, string> = {}): Promise<Pod> {
   const svc = await createService({
     name: SERVICE,
     module: It3Module,
-    env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'fatal' },
+    env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'fatal', ...env },
     logDestination: new Writable({ write: (_c, _e, cb) => cb() }),
   });
   const sync = startServiceControlSync(svc, { PEAKET_ENV: 'ci', PEAKET_KAFKA_BROKERS: kafka.brokers.join(','), PEAKET_POD: name }, o);
@@ -224,4 +224,62 @@ describe('I-T48 새 파드의 종료 세션(ADR-0103 결정 2)', () => {
       if (!resumed) await kafka.resume();
     }
   }, 240_000);
+});
+
+describe('C-T75 실제 Kafka의 온세일 로그 표본(ADR-0334 결정 1·2, BUILD_ORDER BAT-215)', () => {
+  /** 시작 설정 값(PEAKET_LOG_SAMPLE_ONE_IN). 기본 10·온세일 100과 다르게 고른다 */
+  const START_ONE_IN = 7;
+  /** 다시 맞춤 주기 기본값(CONTROL_SYNC_DEFAULTS.reconcileMs, 정본 '2초 [가정]' ADR-0103)의 여유를 둔 시험 한도 */
+  const SWEEP_SLACK_MS = 2_000 + 3_000;
+
+  test('C-T75 ② C-T75 ⑤ ops-svc 꼴(JSON, ISO 시각) LOG_SAMPLING을 실제 Kafka에 넣으면 이미 뜬 파드 둘(하나는 설정 토픽만 읽는 sessions: false)이 정상 줄 비율 100을 적용하고, 구간 안에 새로 뜬 파드도 100이며, 끝이 지나면 셋 모두 시작 설정 값으로 돌아가고 그 뒤에 뜬 파드는 만료된 값을 무시한다', async () => {
+    const env = { PEAKET_LOG_SAMPLE_ONE_IN: String(START_ONE_IN) };
+    const a = await pod('pod-ls-a', {}, env);
+    const b = await pod('pod-ls-b', { sessions: false }, env);
+    await readyAll([a, b]);
+    for (const p of [a, b]) expect(p.svc.logs.sampleOneIn, p.pod).toBe(START_ONE_IN);
+    // 설정 토픽만 읽는 파드는 종료 세션 목록 소비를 켰다고 표시하지 않는다
+    expect(a.svc.controlSync.started).toBe(true);
+    expect(b.svc.controlSync.started).toBe(false);
+
+    const occurredAt = Date.now();
+    const expiresAt = occurredAt + 15_000;
+    const key = 'PLATFORM:LOG_SAMPLING:*';
+    const value = {
+      commandId: 'cmd-it-log-sampling',
+      key: 'LOG_SAMPLING',
+      scope: 'PLATFORM',
+      value: { oneIn: 100 },
+      expiresAt: new Date(expiresAt).toISOString(),
+      actor: '6f1d2c3b-4a59-4e8d-9c7b-0a1b2c3d4e5f',
+      occurredAt: new Date(occurredAt).toISOString(),
+      eventKey: '7a1c0f3e-2b4d-4c5e-9f60-718293a4b5c6',
+    };
+    await producer.send({ topic: CONTROL_TOPICS.settings, messages: [{ key, value: Buffer.from(JSON.stringify(value)) }] });
+    await until(() => a.svc.logs.sampleOneIn === 100 && b.svc.logs.sampleOneIn === 100, '두 파드 100 적용', PROPAGATION_MS);
+
+    // 구간 안에 새로 뜬 파드는 압축 토픽에 남은 마지막 값을 시작 작업에서 적용한다
+    const c = await pod('pod-ls-c', { sessions: false }, env);
+    await readyAll([c]);
+    expect(c.svc.logs.sampleOneIn).toBe(100);
+
+    await until(() => [a, b, c].every((p) => p.svc.logs.sampleOneIn === START_ONE_IN), '끝이 지난 뒤 시작 설정 값', Math.max(0, expiresAt - Date.now()) + SWEEP_SLACK_MS, 200);
+    expect(Date.now()).toBeGreaterThanOrEqual(expiresAt);
+
+    // 끝이 지난 뒤 뜬 파드는 만료된 값을 무시한다
+    const d = await pod('pod-ls-d', { sessions: false }, env);
+    await readyAll([d]);
+    expect(d.svc.logs.sampleOneIn).toBe(START_ONE_IN);
+
+    // 설정 토픽만 읽는 파드는 종료 세션 토픽의 소비자 그룹을 만들지 않는다
+    const admin = createKafkaAdmin({ brokers: kafka.brokers, clientId: 'it-log-sampling-groups' });
+    await admin.connect();
+    try {
+      const groups = (await admin.listGroups()).groups.map((g) => g.groupId);
+      expect(groups).toEqual(expect.arrayContaining([`${SERVICE}-pod-ls-a.${CONTROL_TOPICS.sessionsTerminated}`, `${SERVICE}-pod-ls-b.${CONTROL_TOPICS.settings}`]));
+      for (const name of ['pod-ls-b', 'pod-ls-c', 'pod-ls-d']) expect(groups, name).not.toContain(`${SERVICE}-${name}.${CONTROL_TOPICS.sessionsTerminated}`);
+    } finally {
+      await admin.disconnect();
+    }
+  }, 180_000);
 });
