@@ -827,6 +827,7 @@
 | R-731 | wbs.csv에서 관측 4.1.1·알림 5.6.1·5.6.3이 2.11.2 전체를 선행으로 둬, 구간 5로 미룬 HOT-430~450 때문에 BAT-215~240·250~265·455가 기능 구현 중에 열리지 않았다(ADR-0332 결정 3과 어긋남) | docs/wbs/wbs.csv·wbs.md(4.1.1·5.6.1·5.6.3·§5), docs/adr/0332 결정 7, docs/adr/0331 '확인', docs/BUILD_ORDER.md, docs/PROGRESS.md | 소유자 결정 OPEN[53] (가)대로 선행을 2.11.2 ①(HOT-420)로 좁힘 | 완료 |
 | R-732 | 갈래 작업 폴더의 가지 만들기와 소유자가 허락한 feature/* 푸시까지 훅이 물어 갈래 세션이 멈췄고, 소유자가 자리를 비우면 답할 사람이 없었다 | tools/claude-hooks/lib.mjs·shell-rules.mjs·unattended.mjs·README.md, tools/ci/claude-hooks.test.mjs, docs/adr/0330 결정 3·6·9, .gitignore | 링크된 worktree·feature/* 통과, 무인 모드(묻기 → 허용 + 기록, main 푸시는 막기, 시간 지나면 꺼짐) | 완료 |
 | R-733 | develop CI security-scan이 gitleaks 오탐 7·CodeQL 높음 5로 막혀 모든 갈래 PR CI까지 빨갰다 | tools/ci/gitleaks.toml, apps/web/Dockerfile, apps/partner/Dockerfile, deploy/envs/local/demo, tools/local/demo-auth.mjs, tools/local/demo-objects.mjs, services/purchase-svc layout-seat-map.ts, services/identity-svc scripts/seed-demo.mjs, tools/web-checks/seats/server.mjs, docs/devops.md, docs/infra.md | 오탐은 좁은 허용 블록, 데모 키는 실행 때 만든 Secret, 데모 HTTPS 확인 켬, CodeQL 오탐은 검사를 도구가 알아보게(W12-ci-sec) | 적용 |
+| R-734 | 서비스 코드의 이름 붙은 오류가 정본 목록과 상태·제목이 달라 PRF192가 잠복 실패했다(반려 사유 없음에 invalid-query 422) | services/ops-svc admin-accounts·approvals·payouts·commands, services/purchase-svc internal-sale-open·compensation, services/core-svc request-sale-review, docs/api/openapi.yaml, packages/api-client gen | 목록의 type·status·title을 그대로 쓰고 반려 공백 사유는 400 invalid-body(W12-prf192) | 적용 |
 
 ## 4. 숫자 일치표
 
