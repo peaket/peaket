@@ -107,6 +107,7 @@
 
 - **바꾼 것**: `.github/workflows/ci-web.yml` seats 잡의 설치 단계 바로 뒤, `pnpm --filter @peaket/seatmap typecheck` 앞에 위 2의 단계(주석 두 줄과 `- run: pnpm --filter "@peaket/web^..." run --if-present build`)를 계획 글 그대로 넣었다. 다른 단계·잡은 그대로다. 같은 워크플로에는 이 꼴의 단계가 없었고(`ci-node.yml`의 `turbo run build --filter=…^...`는 turbo를 쓰는 잡이다), 명령은 `tools/web-checks/seed-css/build.mjs` 26행과 같은 꼴이다.
 - **확인(작업 폴더 뿌리, 시작 때 `packages/*/dist` 없음)**: 고친 잡의 차례대로 의존 빌드(끝 코드 0, search-normalize·contracts·validation·platform의 dist 넷이 생김) → `pnpm --filter @peaket/seatmap typecheck` 0 → `pnpm --filter @peaket/web typecheck` 0 → `pnpm --filter @peaket/seatmap test` 128/128 → `pnpm --filter @peaket/web test` 1,031/1,031. 워크플로 검사 `node tools/ci/check-workflows.mjs`(워크플로 23개 통과)·`check-docker-timeouts.mjs`·`check-lint-disables.mjs`·`check-workspace-protocol.mjs` 모두 0, 워크플로를 읽는 시험 `node --test`(check-workflows·changes·ci-summary·check-docker-timeouts·web-test-split·security-scan-workflow) 130개 중 129 통과·실패 0(1개는 CI 밖에서 건너뛰는 시험). `python -I -X utf8 tools/doc-check/check_all.py` 오류 0(경고 4는 이 묶음과 상관없는 기존 경고). 확인 뒤 만든 dist 넷은 지웠다.
+- **더함(초안 PR #51 CI 실행 44917763456)**: seats 잡이 타입 검사를 지나 `pnpm --filter @peaket/web test`까지 갔으나, web의 test 스크립트가 함께 도는 `queue-room/test/edge.test.mjs`·`vite-config.test.mjs`가 `ERR_MODULE_NOT_FOUND: Cannot find package 'vite'`로 실패했다. 설치 단계 필터가 `@peaket/seatmap...`·`@peaket/web...`뿐이라 `@peaket/queue-room`의 의존(vite)이 깔리지 않았다. 설치 단계에 `--filter "@peaket/queue-room..."`를 더했다(같은 워크플로의 다른 잡이 queue-room을 까는 꼴과 같다). 시험 파일과 web test 스크립트는 그대로다. 확인: 필터 이름이 `apps/web/queue-room/package.json`의 이름과 같고 `pnpm ls -r --depth -1`에 세 필터로 `@peaket/queue-room`이 잡힌다(vite는 그 devDependencies에 있다). 워크플로 검사 넷 0, `node --test tools/ci/check-workflows.test.mjs` 63개 중 62 통과·실패 0(1개 건너뜀). 필터 설치는 로컬에서 흉내 내지 못해 초안 PR CI로 본다.
 
 ## 시험 결과
 
@@ -143,7 +144,7 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12ciweb-plan | claude-opus-5-5 | 2026-11-21T23:10+09:00 | 2026-11-21T23:50+09:00 |
-| impl | lane2-w12ciweb-impl | claude-opus-5-5 | 2026-11-21T23:48+09:00 | 2026-11-22T00:02+09:00 |
+| impl | lane2-w12ciweb-impl | claude-opus-5-5 | 2026-11-21T23:48+09:00 | 2026-11-22T00:28+09:00 |
 | test | lane2-w12ciweb-test | claude-opus-5-5 | 2026-11-22T00:04+09:00 | 2026-11-22T00:10+09:00 |
 | review | lane2-w12ciweb-review | claude-opus-5-5 | 2026-11-22T00:12+09:00 | 2026-11-22T00:32+09:00 |
 
