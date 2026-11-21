@@ -1,6 +1,8 @@
 // 감사 공개 앵커의 실제 PostgreSQL 18·AWS 흉내 서버(moto 5.2.5) 통합 시험(BAT-360 OPS-280, ADR-0348, ADR-0075, control-tower §14 C-T38·C-T41·C-T42).
 // - C-T38 ①: 감사 기록 100건을 쓴 뒤 일 체크포인트 실행 한 번이 감사 앵커 버킷과 공개 게시 버킷(moto S3)에 같은 JSON·서명·대기 증명을 남긴다.
-//   서명은 moto KMS의 ECC_NIST_P256 키(Sign MessageType DIGEST·ECDSA_SHA_256)이고, 시험은 KMS GetPublicKey로 받은 공개키로 JSON 바이트를 따로 확인한다([ASVS v5.0.0-11.6.1]).
+//   서명은 같은 알고리즘(ECDSA P-256)의 local 서명기다: moto 5.2.5는 KMS Sign의 MessageType DIGEST를 RAW처럼 다시 해시해 서명하므로(2026-11-22 시험 담당이 확인,
+//   DIGEST 서명은 SHA-256(다이제스트) 위 서명이 된다) 실제 KMS의 DIGEST 서명 바이트는 흉내 서버로 볼 수 없다(계획 14절 3 '안 되면 미검증(클라우드)').
+//   KMS 요청 꼴(MessageType DIGEST·ECDSA_SHA_256, 다이제스트 32바이트)은 단위 시험 audit-checkpoint-bytes가, moto KMS 키 꼴 받기는 아래 [ASVS v5.0.0-11.6.1] 시험이 본다.
 //   작업은 DB 역할 ops_audit_anchor로 붙고 감사 체인에 기록을 더하지 않는다(결정 11).
 // - C-T38 ③: 두 버킷에서 받은 폴더를 공개 검증 도구(tools/audit-verify, 파이썬·openssl)가 통과시킨다(--skip-bitcoin, 비트코인 단계는 공식 클라이언트 몫).
 // - C-T41: 캘린더를 모두 막아도(닿지 않는 주소 + 실패하는 가짜) 체크포인트·서명은 DB에 남고 게시하지 않으며, 다음 실행에서 다시 찍는다.
@@ -26,6 +28,8 @@ import {
   DrizzleAuditPublishStore,
   HttpOpenTimestampsCalendar,
   KmsCheckpointSigner,
+  ephemeralCheckpointSigner,
+  type CheckpointSigner,
   MemoryOpenTimestampsCalendar,
   S3AuditPublicStore,
   kmsCheckpointSignerClient,
@@ -137,8 +141,11 @@ async function buckets(): Promise<{ pub: string; anc: string }> {
   return { pub, anc };
 }
 
-function publisher(o: { pub: string; anc: string; calendars?: readonly OpenTimestampsCalendar[]; signerEndpoint?: string }) {
-  const signer = new KmsCheckpointSigner(kmsCheckpointSignerClient({ region: REGION, endpoint: o.signerEndpoint ?? endpoint }), keyId);
+/** 시험 파일 하나의 서명 키(ECDSA P-256, KMS와 같은 알고리즘) */
+const SIGNER = ephemeralCheckpointSigner('audit-anchor-it-key');
+
+function publisher(o: { pub: string; anc: string; calendars?: readonly OpenTimestampsCalendar[]; signer?: CheckpointSigner }) {
+  const signer = o.signer ?? SIGNER;
   const logs: Record<string, unknown>[] = [];
   const p = new AuditCheckpointPublisher({
     store: new DrizzleAuditPublishStore(jobDb),
@@ -203,7 +210,7 @@ const file = (no: number, ext: string) => `transparency/v1/checkpoints/${String(
 const chainCount = async () => Number((await admin.query<{ n: string }>('select count(*)::text as n from audit_chain')).rows[0]!.n);
 
 describe('C-T38 감사 체크포인트와 공개 타임스탬프(PostgreSQL·moto)', () => {
-  test('C-T38 ① 감사 기록 100건 뒤 일 체크포인트가 두 버킷에 같은 JSON·서명·대기 증명을 남기고, KMS 공개키로 JSON 바이트가 확인되며 작업 역할은 체인에 기록을 더하지 않는다 [ASVS v5.0.0-11.6.1]', async () => {
+  test('C-T38 ① 감사 기록 100건 뒤 일 체크포인트가 두 버킷(moto S3)에 같은 JSON·서명·대기 증명을 남기고, 게시한 공개키로 JSON 바이트가 확인되며 작업 역할은 체인에 기록을 더하지 않는다', async () => {
     const { pub, anc } = await buckets();
     await seed(100, DAY1 - 2 * HOUR);
     expect(await chainCount()).toBe(100);
@@ -214,7 +221,7 @@ describe('C-T38 감사 체크포인트와 공개 타임스탬프(PostgreSQL·mot
     const [row] = (await admin.query<{ checkpoint_json: string; hash: string; root: string; ots_state: string; published_at: Date | null; key_id: string; signature: string; from_seq: string; to_seq: string }>(
       "select checkpoint_json, encode(checkpoint_hash,'hex') as hash, encode(root_hash,'hex') as root, ots_state, published_at, key_id, signature, from_seq, to_seq from audit_checkpoint where no = 1",
     )).rows;
-    expect(row).toMatchObject({ ots_state: 'PENDING', key_id: keyId, from_seq: '1', to_seq: '100' });
+    expect(row).toMatchObject({ ots_state: 'PENDING', key_id: 'audit-anchor-it-key', from_seq: '1', to_seq: '100' });
     expect(row!.published_at).toBeInstanceOf(Date);
     const root = await expectedRoot(1, 100);
     expect(row!.root).toBe(root);
@@ -228,12 +235,12 @@ describe('C-T38 감사 체크포인트와 공개 타임스탬프(PostgreSQL·mot
     const json = (await getObject(pub, file(1, 'json')))!;
     expect(json.toString('utf8')).toBe(row!.checkpoint_json);
     expect(sha(json).toString('hex')).toBe(row!.hash);
-    // KMS가 내준 공개키로만 확인한다(시험은 피켓 서명 코드를 거치지 않는다)
-    const spki = Buffer.from((await kms.send(new GetPublicKeyCommand({ KeyId: keyId }))).PublicKey!);
+    // 서명 키의 공개키로만 확인한다(확인은 node:crypto, 피켓 확인 코드를 거치지 않는다)
+    const spki = await SIGNER.publicKeySpki();
     const sig = Buffer.from((await getObject(anc, file(1, 'sig')))!.toString('utf8'), 'base64');
     expect(verify('sha256', json, { key: createPublicKey({ key: spki, format: 'der', type: 'spki' }), dsaEncoding: 'der' }, sig)).toBe(true);
     const keys = JSON.parse((await getObject(pub, 'transparency/v1/public-keys.json'))!.toString('utf8')) as { keys: { keyId: string; alg: string; publicKeyPem: string }[] };
-    expect(keys.keys).toEqual([expect.objectContaining({ keyId, alg: 'ECDSA_P256_SHA256' })]);
+    expect(keys.keys).toEqual([expect.objectContaining({ keyId: 'audit-anchor-it-key', alg: 'ECDSA_P256_SHA256' })]);
     expect(createPublicKey(keys.keys[0]!.publicKeyPem).export({ type: 'spki', format: 'der' }).equals(spki)).toBe(true);
     const ots = (await getObject(pub, file(1, 'ots')))!;
     expect(ots.subarray(33, 65).toString('hex')).toBe(row!.hash);
@@ -312,6 +319,16 @@ describe('C-T42 기록 파기 뒤 공개 루트(PostgreSQL·moto)', () => {
   });
 });
 
+describe('[ASVS v5.0.0-11.6.1] KMS 서명 키 꼴(moto KMS)', () => {
+  test('[ASVS v5.0.0-11.6.1] KMS 서명기는 moto KMS의 ECC_NIST_P256·SIGN_VERIFY 키 공개키(SPKI, P-256)를 KMS가 준 그대로 받는다', async () => {
+    const good = new KmsCheckpointSigner(kmsCheckpointSignerClient({ region: REGION, endpoint }), keyId);
+    const spki = await good.publicKeySpki();
+    expect(spki.equals(Buffer.from((await kms.send(new GetPublicKeyCommand({ KeyId: keyId }))).PublicKey!))).toBe(true);
+    expect(createPublicKey({ key: spki, format: 'der', type: 'spki' }).asymmetricKeyDetails?.namedCurve).toBe('prime256v1');
+    // 다른 키 꼴(ECC_SECG_P256K1 등)의 거절은 GetPublicKey의 KeySpec으로 판정한다: 흉내 서버가 그 칸을 주지 않아 단위 시험(audit-checkpoint-bytes)이 본다
+  });
+});
+
 describe('B12·B7 작업 DB 역할과 루트 어긋남(PostgreSQL)', () => {
   test('B12 게시 작업 역할 ops_audit_anchor는 audit_chain·audit_chain_head를 쓰지 못하고(42501) 체크포인트 표만 고친다', async () => {
     await seed(2, DAY1 - HOUR);
@@ -331,8 +348,9 @@ describe('B12·B7 작업 DB 역할과 루트 어긋남(PostgreSQL)', () => {
   test('B7 서명 전에 기록 해시가 바뀌면 작업은 서명·게시하지 않고 끝 코드 1의 SEV2 조건을 낸다', async () => {
     const { pub, anc } = await buckets();
     await seed(3, DAY1 - HOUR);
-    // KMS에 닿지 않는 첫 실행: 체크포인트만 만들고 서명하지 않는다
-    const r1 = await publisher({ pub, anc, signerEndpoint: 'http://127.0.0.1:9' }).p.run(DAY1);
+    // KMS에 닿지 않는 첫 실행(공개키를 받지 못함): 체크포인트만 만들고 서명하지 않는다
+    const down: CheckpointSigner = { keyId: SIGNER.keyId, alg: SIGNER.alg, publicKeySpki: async () => Promise.reject(new Error('KMS 503')), sign: (m) => SIGNER.sign(m) };
+    const r1 = await publisher({ pub, anc, signer: down }).p.run(DAY1);
     expect(r1).toMatchObject({ created: [{ no: 1, kind: 'DAILY' }], signed: 0 });
     await admin.query("update audit_chain set record_sha256 = decode(repeat('ef', 32), 'hex') where seq = 2");
     const { p, logs } = publisher({ pub, anc });
