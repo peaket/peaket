@@ -4,12 +4,13 @@
 import { randomUUID } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 import { blockApprovalOfParams, COMMAND_TYPES, requesterRolesOf, type ApprovalMode, type Command, type CommandExecutionActor, type CommandIdempotency, type CommandType } from '../domain/command.js';
-import { checkCommandParams, CommandInputRejected, normalizeReason } from '../domain/command-params.js';
-import type { CommandDryRun } from '../domain/dry-run.js';
+import { checkCommandParams, CommandInputRejected, isPgFallbackParams, normalizeReason, pgAssignParamsOf } from '../domain/command-params.js';
+import type { CommandDryRun, DryRunCountResult } from '../domain/dry-run.js';
 import { noCommandSecurityEvents, type CancelledEventGuard, type CommandSecurityEvents, type CommandStore } from '../domain/ports.js';
 import type { ProtectedRangeHit } from '../domain/block-ranges.js';
 import { ComputeDryRun } from './compute-dry-run.js';
 import type { ExecuteCommand } from './execute-command.js';
+import { PgAssignmentGate } from './pg-assignment-gate.js';
 
 export interface CreateCommandInput {
   readonly type: CommandType;
@@ -61,11 +62,14 @@ export function problemOfRejection(e: CommandInputRejected): ProblemError {
 export interface CreateCommandDeps {
   readonly dryRun?: ComputeDryRun;
   readonly security?: CommandSecurityEvents;
+  /** 명령 12 온세일 윈도우·하위 결제사 판정과 명령 12·6 결제 갈래 dry-run 넣는 값(ADR-0349). 없으면 원천 없는 문(명령 12는 503)이다 */
+  readonly pgGate?: PgAssignmentGate;
 }
 
 export class CreateCommand {
   readonly dryRun: ComputeDryRun;
   readonly #security: CommandSecurityEvents;
+  readonly #pgGate: PgAssignmentGate;
 
   constructor(
     private readonly store: CommandStore,
@@ -76,11 +80,13 @@ export class CreateCommand {
   ) {
     this.dryRun = deps.dryRun ?? new ComputeDryRun();
     this.#security = deps.security ?? noCommandSecurityEvents;
+    this.#pgGate = deps.pgGate ?? new PgAssignmentGate();
   }
 
   /**
    * 저장 전 검사와 dry-run. 내부 사건 수신·직접 호출도 같은 규칙을 지난다(B3-H01).
-   * @throws ProblemError 403 command-role-forbidden, 422 invalid-command·command-out-of-range, 409 event-cancelled
+   * @throws ProblemError 403 command-role-forbidden, 422 invalid-command·command-out-of-range, 409 event-cancelled,
+   *   명령 12는 503 onsale-window-unavailable·pg-check-unavailable과 422 pg-fallback-same-provider(ADR-0349 결정 2·3)
    */
   async prepare(input: Pick<CreateCommandInput, 'type' | 'reason' | 'params' | 'requestedRole' | 'nowMs'>): Promise<PreparedCommand> {
     if (!COMMAND_TYPES.includes(input.type)) throw invalidCommand();
@@ -101,7 +107,16 @@ export class CreateCommand {
       // 제목은 openapi x-peaket-problem-types 목록 그대로(같은 이름은 어느 서비스나 같은 제목, PRF192), 이 경우의 설명은 detail에 싣는다
       throw new ProblemError({ type: 'event-cancelled', status: 409, title: '취소가 확정된 회차입니다', detail: '회차 취소가 확정된 회차는 판매를 재개할 수 없습니다' });
     }
-    const dryRun = await this.dryRun.compute({ type: input.type, params, ...(eventId !== undefined ? { eventId } : {}) }, input.nowMs);
+    // 명령 12: 온세일 윈도우 → 하위 결제사 판정(503·422면 저장하지 않는다). 판정이 준 승인 상한을 dry-run 넣는 값으로 쓴다(ADR-0349 결정 2·3·4).
+    // 명령 6 결제 갈래: 회차마다 지금 지정·승인 상한을 읽어 dry-run에 넣는다(막지 않는다, 결정 6)
+    let extra: DryRunCountResult | undefined;
+    if (input.type === 'PG_ASSIGN') {
+      const pg = pgAssignParamsOf(params);
+      extra = this.#pgGate.pgAssignInputs(pg, await this.#pgGate.checkPgAssign(pg, input.nowMs), input.nowMs);
+    } else if (isPgFallbackParams(input.type, params)) {
+      extra = await this.#pgGate.pgFallbackInputs(params, input.nowMs);
+    }
+    const dryRun = await this.dryRun.compute({ type: input.type, params, ...(eventId !== undefined ? { eventId } : {}) }, input.nowMs, extra);
     const hits = input.type === 'BLOCK_ASN_IP' ? blockApprovalOfParams(params, this.dryRun.protectedRanges).hits : [];
     return { type: input.type, reason, params, ...(eventId !== undefined ? { eventId } : {}), approvalMode: dryRun.approvalMode, reauthRequired: dryRun.reauthRequired, dryRun, protectedRangeHits: hits };
   }

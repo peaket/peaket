@@ -707,6 +707,14 @@ spec:
     - from:
         - source:
             principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/CheckEventPgAssignment
+    - from:
+        - source:
+            principals:
               - cluster.local/ns/core/sa/core-svc
               - cluster.local/ns/purchase/sa/purchase-svc
       to:

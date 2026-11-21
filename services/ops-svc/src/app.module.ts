@@ -20,9 +20,9 @@ import {
   type MacAnchorStore,
 } from './modules/audit/index.js';
 import { CommandsModule, type CommandExecutor, type CommandsModuleExtras, type HandleCommandEvent } from './modules/commands/index.js';
-import { DrizzleCommandStore, MemoryCommandStore } from './modules/commands/index.js';
+import { DrizzleCommandStore, IdentityActiveCommanders, MemoryCommandStore } from './modules/commands/index.js';
 import { CasesModule, DrizzleCsCaseStore, MemoryCsCaseStore } from './modules/cases/index.js';
-import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore } from './modules/alerts/index.js';
+import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore, type OpsAlertStore } from './modules/alerts/index.js';
 import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
@@ -61,8 +61,8 @@ interface CommonWiring {
   readonly auditMac?: { readonly key?: AuditMacKey; readonly anchors?: MacAnchorStore; readonly env?: Record<string, string | undefined> };
   /** 감사 체인 지표 묶음(시작 조립이 서비스 레지스트리에 붙인다). 없으면 모듈이 만든다 */
   readonly auditSignals?: AuditSignals;
-  /** dry-run 센 값 원천·명령 4 보호 대역 목록(시험·BAT-365) */
-  readonly commandExtras?: Pick<CommandsModuleExtras, 'dryRunSources' | 'protectedRanges' | 'signals'>;
+  /** dry-run 센 값 원천·명령 4 보호 대역 목록(시험·BAT-365), 명령 12 온세일 윈도우·하위 결제사 판정 원천(BAT-360, 시작 조립이 core HTTP·payment gRPC로 채운다) */
+  readonly commandExtras?: Pick<CommandsModuleExtras, 'dryRunSources' | 'protectedRanges' | 'signals' | 'pgAssignment' | 'postReviews' | 'blockIpSets' | 'opsEvents'>;
   /** 우선 구매 권리 발급·회수(GAT-135). 없으면 그 경로를 열지 않는다 */
   readonly priority?: PriorityModuleDeps;
   /** 시험에서 체크포인트 시각을 고정한다. 없으면 Date.now */
@@ -118,6 +118,12 @@ interface CommonWiring {
   };
 }
 
+/** 명령 3·11 사후 검토의 의존(ADR-0349 결정 7): 1인 기간 판정은 관리 계정 identity(넘긴 것이 먼저), 기한 넘김 SEV3는 같은 ops 경보 저장소 */
+function postReviewWiring(o: CommonWiring, alerts: OpsAlertStore): NonNullable<CommandsModuleExtras['postReviews']> {
+  const commanders = o.commandExtras?.postReviews?.commanders ?? (o.adminAccounts ? new IdentityActiveCommanders(o.adminAccounts.identity) : undefined);
+  return { ...(commanders ? { commanders } : {}), alerts: o.commandExtras?.postReviews?.alerts ?? alerts };
+}
+
 /** 회차 취소 모듈의 의존(넘긴 것만 싣고, 판매 중지 확인·판정 대기 건은 기본을 채운다). 파트너 저장소는 DB 조립에서만 넣는다 */
 function eventCancellationDeps(
   o: CommonWiring,
@@ -164,6 +170,7 @@ export class AppModule {
           databaseModule(o.database),
           CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth, {
             ...(o.commandExtras ?? {}),
+            postReviews: postReviewWiring(o, alerts),
             maintenance: { enabled: background !== undefined, ...(background?.maintenanceMs !== undefined ? { intervalMs: background.maintenanceMs } : {}) },
           }),
           AuditModule.register(checkpoints, {
@@ -216,14 +223,18 @@ export class AppModule {
     const store = new MemoryCommandStore(chain);
     const cancellations = new MemoryEventCancellationStore(chain);
     const csCases = new MemoryCsCaseStore();
+    const memoryAlerts = new MemoryOpsAlertStore();
     return {
       module: AppModule,
       imports: [
-        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth, { ...(o.commandExtras ?? {}) }),
+        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth, {
+          ...(o.commandExtras ?? {}),
+          postReviews: postReviewWiring(o, memoryAlerts),
+        }),
         AuditModule.register(checkpoints, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
         CasesModule.register(csCases),
-        AlertsModule.register(new MemoryOpsAlertStore()),
+        AlertsModule.register(memoryAlerts),
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
         PayoutsModule.register({ storage: 'memory', deps: { ...(o.payouts ?? {}), audit: chain } }),

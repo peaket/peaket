@@ -180,6 +180,34 @@ export function loadPortoneChannelMap(env: Record<string, string | undefined>, p
   return portoneChannelMapOf(portone, providers);
 }
 
+/** 명령 12 사전 판정이 싣는 결제사 이름(ADR-0349 결정 1) */
+const APPROVAL_TPS_PGS: readonly PgName[] = ['TOSS', 'PORTONE'];
+
+/**
+ * 결제사별 승인 상한(PEAKET_PG_APPROVAL_TPS: 결제사 → 초당 승인 호출 상한 JSON, 예 {"TOSS":…,"PORTONE":…}, 선택)을 읽는다.
+ * 명령 12 사전 판정(CheckEventPgAssignment)이 그대로 싣고, ops-svc dry-run이 동시 입장 목표 상한을 계산한다(ADR-0349 결정 4, docs/features/queue-admission.md '결제사별 상한').
+ * 값은 이 저장소에 적지 않고 배포 설정이 넣는다. 없으면 빈 표이고 부르는 쪽 dry-run은 그 값을 '세지 못함'으로 둔다.
+ * @throws Error JSON 객체가 아님, TOSS·PORTONE 밖의 키, 양의 유한수가 아닌 값(시작 실패). 글에 값을 싣지 않는다
+ */
+export function loadPgApprovalTps(env: Record<string, string | undefined>): ReadonlyMap<PgName, number> {
+  const raw = env.PEAKET_PG_APPROVAL_TPS?.trim();
+  const out = new Map<PgName, number>();
+  if (!raw) return out;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('PEAKET_PG_APPROVAL_TPS가 JSON이 아니다');
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('PEAKET_PG_APPROVAL_TPS는 결제사 → 초당 승인 상한 객체여야 한다');
+  for (const [pg, tps] of Object.entries(parsed)) {
+    if (!APPROVAL_TPS_PGS.includes(pg as PgName)) throw new Error('PEAKET_PG_APPROVAL_TPS의 키는 TOSS·PORTONE이어야 한다');
+    if (typeof tps !== 'number' || !Number.isFinite(tps) || tps <= 0) throw new Error('PEAKET_PG_APPROVAL_TPS의 값은 양의 수여야 한다');
+    out.set(pg as PgName, tps);
+  }
+  return out;
+}
+
 /**
  * 결제사 어댑터 시작 조건을 본다(BUILD_ORDER PRF-181이 넘긴 것, PRF-184). local·ci는 어댑터 없이도 켠다. 그 밖의 환경은 토스 어댑터가 있어야 한다.
  * 시뮬레이터 어댑터는 운영에서 켜지 못하고, demo·staging에서는 부하 시험·전환 훈련용으로 함께 켤 수 있지만 '어댑터 하나 이상'에는 세지 않는다.

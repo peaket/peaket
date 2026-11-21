@@ -70,7 +70,7 @@ export { portoneVirtualAccountOf, tossVirtualAccountOf } from './adapters/pg/vir
 export { BATCH_GET_STATEMENT_TIMEOUT_MS, DrizzlePaymentStore, type DrizzlePaymentStoreOptions } from './adapters/db/drizzle-payment-store.js';
 export { paymentCommandLog } from './adapters/payment-command-log.js';
 export { PromPaymentCommandSignals } from './adapters/prom-payment-command-signals.js';
-export { cancelInputOf, cancelResponseOf, confirmInputOf, confirmResponseOf, getNewPaymentPauseResponseOf, getPaymentResponseOf, orderPaymentStateOf, paymentPackage, paymentServiceHandlers, prepareCheckoutInputOf, prepareCheckoutResponseOf, type PaymentGrpcUseCases, type PaymentPackage } from './inbound/payment.grpc.js';
+export { cancelInputOf, cancelResponseOf, checkEventPgAssignmentInputOf, checkEventPgAssignmentResponseOf, confirmInputOf, confirmResponseOf, getNewPaymentPauseResponseOf, getPaymentResponseOf, orderPaymentStateOf, paymentPackage, paymentServiceHandlers, prepareCheckoutInputOf, prepareCheckoutResponseOf, type PaymentGrpcUseCases, type PaymentPackage } from './inbound/payment.grpc.js';
 export { PaymentModule, type PaymentModuleDeps } from './payment.module.js';
 // 낮춘 채널 상한의 유지·전파·회복과 포트원 채널의 하위 결제사 검사(BUILD_ORDER PRF-203)
 export * from './domain/pg-channel-limit.js';
@@ -80,5 +80,9 @@ export { DrizzlePgChannelLimit, DrizzlePgChannelObserved, PG_CHANNEL_LIMIT_READ_
 export { PromPgChannelSignals } from './adapters/prom-pg-channel-signals.js';
 export { pgChannelLog } from './adapters/pg-channel-log.js';
 export { AssignEventPg, type AssignEventPgDeps, type AssignEventPgInput, EVENT_PG_ASSIGN_MAX_SKEW_MS } from './application/assign-event-pg.js';
+// 명령 12 사전 판정과 설정 사건 PG_ASSIGNMENT 받는 쪽(BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 3·5)
+export { CheckEventPgAssignment, type CheckEventPgAssignmentAnswer, type CheckEventPgAssignmentDeps, type CheckEventPgAssignmentInput, type PgApprovalLimit } from './application/check-event-pg-assignment.js';
+export { PG_ASSIGNMENT_RETRY_MAX_MS, PG_ASSIGNMENT_RETRY_MS, PG_ASSIGNMENT_SETTING_KIND, PgAssignmentSettingHandler, type PgAssignmentSettingDeps, pgAssignmentInputOf, type SettingChangeSource } from './application/pg-assignment-setting.js';
+export { pgAssignmentSettingLog } from './adapters/pg-assignment-setting-log.js';
 export { CachedPgChannelObservations, type CachedPgChannelObservationsOptions, PG_CHANNEL_OBSERVED_MAX_STALE_MS, PG_CHANNEL_OBSERVED_READ_BUDGET_MS, PG_CHANNEL_OBSERVED_TTL_MS, PortoneFallbackExclusions } from './application/pg-channel-observations.js';
 export { PgChannelObserver, type PgChannelObserverDeps, type PortoneObservedChannel } from './application/pg-channel-observer.js';

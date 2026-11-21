@@ -77,6 +77,7 @@ import type {
   CaseReply,
   Command,
   CommandDryRun,
+  CommandPostReview,
   CommandState,
   CommandStatePage,
   ComplianceDocument,
@@ -3274,10 +3275,15 @@ export type createOpsCommandDryRunResponse422 = {
   status: 422
 }
 
+export type createOpsCommandDryRunResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsCommandDryRunResponseSuccess = (createOpsCommandDryRunResponse200) & {
   headers: Headers;
 };
-export type createOpsCommandDryRunResponseError = (createOpsCommandDryRunResponse400 | createOpsCommandDryRunResponse403 | createOpsCommandDryRunResponse409 | createOpsCommandDryRunResponse422) & {
+export type createOpsCommandDryRunResponseError = (createOpsCommandDryRunResponse400 | createOpsCommandDryRunResponse403 | createOpsCommandDryRunResponse409 | createOpsCommandDryRunResponse422 | createOpsCommandDryRunResponse503) & {
   headers: Headers;
 };
 
@@ -3925,13 +3931,23 @@ export const useCreateOpsCommandExtension = <TError = ErrorType<ProblemResponse>
       return useMutation(getCreateOpsCommandExtensionMutationOptions(options), queryClient);
     }
     export type createOpsCommandPostReviewResponse201 = {
-  data: void
+  data: CommandPostReview
   status: 201
+}
+
+export type createOpsCommandPostReviewResponse400 = {
+  data: ProblemResponse
+  status: 400
 }
 
 export type createOpsCommandPostReviewResponse403 = {
   data: ProblemResponse
   status: 403
+}
+
+export type createOpsCommandPostReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type createOpsCommandPostReviewResponse409 = {
@@ -3947,7 +3963,7 @@ export type createOpsCommandPostReviewResponse422 = {
 export type createOpsCommandPostReviewResponseSuccess = (createOpsCommandPostReviewResponse201) & {
   headers: Headers;
 };
-export type createOpsCommandPostReviewResponseError = (createOpsCommandPostReviewResponse403 | createOpsCommandPostReviewResponse409 | createOpsCommandPostReviewResponse422) & {
+export type createOpsCommandPostReviewResponseError = (createOpsCommandPostReviewResponse400 | createOpsCommandPostReviewResponse403 | createOpsCommandPostReviewResponse404 | createOpsCommandPostReviewResponse409 | createOpsCommandPostReviewResponse422) & {
   headers: Headers;
 };
 
@@ -3960,7 +3976,7 @@ export const getCreateOpsCommandPostReviewUrl = (commandId: string,) => {
 }
 
 /**
- * FR-030, POL-021 A·C(4), 추천 적용 2026-10-14, ADR-0062. 명령 3·11만(명령 3은 추천 적용 2026-10-27, ADR-0095. 명령 3은 인시던트 포스트모템의 한 절로도 쓴다). 실행 기록·정지 동안의 조치·영향·재개는 시스템이 감사 로그와 지표에서 채운다(docs/features/control-tower.md §6). 제출하면 다른 commander에게 검토를 요청한다. 기한을 넘기면 SEV3
+ * FR-030, POL-021 A·C(4), 추천 적용 2026-10-14, ADR-0062. 명령 3·11만(명령 3은 추천 적용 2026-10-27, ADR-0095. 명령 3은 인시던트 포스트모템의 한 절로도 쓴다). 실행 기록·정지 동안의 조치·영향·재개는 시스템이 감사 로그와 지표에서 채운다(docs/features/control-tower.md §6). 제출하면 다른 commander에게 검토를 요청한다. 기한을 넘기면 SEV3. 첫 구현(추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7): 할 일은 처음 DISPATCHED와 같은 트랜잭션에 열리고 작성 기한은 그 시각 + 48시간(정각이면 넘김)이다. 늦은 제출도 받고 late로 적는다. 글은 앞뒤 공백을 지우고 NFC로 한 번 정규화한 뒤 2,000자를 보며, 제어 문자(줄바꿈·탭 제외)와 양방향 제어 문자(U+202A~U+202E, U+2066~U+2069)는 422다(docs/security/asvs/control-tower.md 1.1.1·1.3.3). followUps.issueUrl은 https만 받는다. 제출은 명령 행 잠금과 command_post_review 조건부 갱신(submitted_at IS NULL)으로 한 번만 통과한다
  * @summary 명령 3·11 사후 검토 보고서 제출(실행한 commander, 실행 뒤 48시간 안)
  */
 export const createOpsCommandPostReview = async (commandId: string,
@@ -4040,9 +4056,137 @@ export const useCreateOpsCommandPostReview = <TError = ErrorType<ProblemResponse
       > => {
       return useMutation(getCreateOpsCommandPostReviewMutationOptions(options), queryClient);
     }
-    export type createOpsCommandPostReviewConfirmationResponse200 = {
-  data: void
+    export type getOpsCommandPostReviewResponse200 = {
+  data: CommandPostReview
   status: 200
+}
+
+export type getOpsCommandPostReviewResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsCommandPostReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsCommandPostReviewResponseSuccess = (getOpsCommandPostReviewResponse200) & {
+  headers: Headers;
+};
+export type getOpsCommandPostReviewResponseError = (getOpsCommandPostReviewResponse403 | getOpsCommandPostReviewResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsCommandPostReviewUrl = (commandId: string,) => {
+
+
+
+
+  return `/v1/ops/commands/${encodeURIComponent(String(commandId))}/post-review`
+}
+
+/**
+ * 추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7. 보고서(제출 전이면 비어 있음)·기한·검토와 ★ 칸을 준다. ★ 칸은 ops DB로 채운다: 실행 기록(처음 전달·ack 시각, 시도 수, 실행 사유), 정지부터 재개까지 같은 범위(전체 정지면 모든 명령, 회차 정지면 회차가 겹치는 명령)에서 만든 명령, 재개 시각과 되돌리기를 요청·승인한 사람. 지표 칸(영향)은 원천이 생길 때까지 unavailable에 칸 이름과 까닭으로만 싣는다(0으로 적지 않는다). 할 일이 없는 명령(명령 3·11 밖, 처음 전달 전)은 404다. Cache-Control: no-store
+ * @summary 명령 3·11 사후 검토 보고서 조회(viewer 이상)
+ */
+export const getOpsCommandPostReview = async (commandId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsCommandPostReviewResponseSuccess> => {
+
+  return orvalFetch<getOpsCommandPostReviewResponseSuccess>(getGetOpsCommandPostReviewUrl(commandId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsCommandPostReviewQueryKey = (commandId: string,) => {
+    return [
+    `/v1/ops/commands/${commandId}/post-review`
+    ] as const;
+    }
+
+
+export const getGetOpsCommandPostReviewQueryOptions = <TData = Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError = ErrorType<ProblemResponse>>(commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsCommandPostReviewQueryKey(commandId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsCommandPostReview>>> = ({ signal }) => getOpsCommandPostReview(commandId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: commandId !== null && commandId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsCommandPostReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsCommandPostReview>>>
+export type GetOpsCommandPostReviewQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsCommandPostReview<TData = Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError = ErrorType<ProblemResponse>>(
+ commandId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsCommandPostReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsCommandPostReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsCommandPostReview<TData = Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError = ErrorType<ProblemResponse>>(
+ commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsCommandPostReview>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsCommandPostReview>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsCommandPostReview<TData = Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError = ErrorType<ProblemResponse>>(
+ commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 명령 3·11 사후 검토 보고서 조회(viewer 이상)
+ */
+
+export function useGetOpsCommandPostReview<TData = Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError = ErrorType<ProblemResponse>>(
+ commandId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsCommandPostReview>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsCommandPostReviewQueryOptions(commandId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsCommandPostReviewConfirmationResponse200 = {
+  data: CommandPostReview
+  status: 200
+}
+
+export type createOpsCommandPostReviewConfirmationResponse400 = {
+  data: ProblemResponse
+  status: 400
 }
 
 export type createOpsCommandPostReviewConfirmationResponse403 = {
@@ -4050,15 +4194,30 @@ export type createOpsCommandPostReviewConfirmationResponse403 = {
   status: 403
 }
 
+export type createOpsCommandPostReviewConfirmationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createOpsCommandPostReviewConfirmationResponse409 = {
   data: ProblemResponse
   status: 409
 }
 
+export type createOpsCommandPostReviewConfirmationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsCommandPostReviewConfirmationResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type createOpsCommandPostReviewConfirmationResponseSuccess = (createOpsCommandPostReviewConfirmationResponse200) & {
   headers: Headers;
 };
-export type createOpsCommandPostReviewConfirmationResponseError = (createOpsCommandPostReviewConfirmationResponse403 | createOpsCommandPostReviewConfirmationResponse409) & {
+export type createOpsCommandPostReviewConfirmationResponseError = (createOpsCommandPostReviewConfirmationResponse400 | createOpsCommandPostReviewConfirmationResponse403 | createOpsCommandPostReviewConfirmationResponse404 | createOpsCommandPostReviewConfirmationResponse409 | createOpsCommandPostReviewConfirmationResponse422 | createOpsCommandPostReviewConfirmationResponse503) & {
   headers: Headers;
 };
 
@@ -4071,7 +4230,7 @@ export const getCreateOpsCommandPostReviewConfirmationUrl = (commandId: string,)
 }
 
 /**
- * FR-030, POL-021 C(4), 추천 적용 2026-10-14, ADR-0062. 실행한 commander가 부르면 403('실행한 분은 검토할 수 없습니다. 다른 commander가 검토합니다', 1인 기간 예외는 403 설명). 기한을 넘기면 SEV3
+ * FR-030, POL-021 C(4), 추천 적용 2026-10-14, ADR-0062. 실행한 commander가 부르면 403('실행한 분은 검토할 수 없습니다. 다른 commander가 검토합니다', 1인 기간 예외는 403 설명). 기한을 넘기면 SEV3. 첫 구현(추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7): 검토 기한은 제출 + 7일(정각이면 넘김)이고 늦은 검토도 받아 late로 적는다. 1인 기간은 identity ListAdminAccounts의 활성 commander가 실행자 한 명뿐인 때이고, 확인하지 못하면 503이며 자기 검토를 받지 않는다. comment는 제출 글과 같은 규칙(NFC 한 번, 2,000자, 제어 문자)이다
  * @summary 명령 3·11 사후 검토 보고서 검토(실행자가 아닌 commander, 제출 뒤 7일 안)
  */
 export const createOpsCommandPostReviewConfirmation = async (commandId: string,

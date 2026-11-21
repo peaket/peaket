@@ -71,6 +71,7 @@ export * from './cancellationQuote.zod.js';
 export * from './caseReply.zod.js';
 export * from './command.zod.js';
 export * from './commandDryRun.zod.js';
+export * from './commandPostReview.zod.js';
 export * from './commandState.zod.js';
 export * from './commandStatePage.zod.js';
 export * from './compensation.zod.js';

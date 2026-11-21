@@ -735,7 +735,7 @@ export const CreateOpsCommandBody = zod.object({
   "reason": zod.string().min(1).max(createOpsCommandBodyReasonMax).describe('실행 사유. 앞뒤 공백을 지우고 NFC로 한 번 정규화한 뒤 1~2,000자를 본다. 제어 문자·양방향 제어 문자(U+202A~U+202E, U+2066~U+2069)가 있으면 422 invalid-command다(ADR-0340 결정 10, docs/security/asvs/control-tower.md 1.3.3)'),
   "params": zod.looseObject({
 
-}).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073). 명령 1·2·3·4·5는 ops-svc가 아래 칸만 받고 모르는 칸은 422 invalid-command로 거른다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 9): ADMISSION_TARGET {eventId, target(정수, 1,000 이상 8,000 이하. 밖이면 422 command-out-of-range), fromTarget(선택, 자동 조치가 본 지금 목표)}, ADMISSION_PAUSE {eventId}(만료는 첫 ack + 10분이라 받지 않는다), KILL_SWITCH {scope, eventIds}(EVENT면 회차 1개 이상·겹침 없음, PLATFORM이면 회차 없음), BLOCK_ASN_IP {cidrs: [CIDR 글자], asns: [1~4294967295], expiresAt(필수, 지금보다 늦고 지금 + 24시간 이하)}(호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 invalid-command, 항목 합계 100개 [가정] 초과·만료 없음·범위 밖은 command-out-of-range, ADR-0339 결정 2), BOT_LEVEL {level, reassessMode(선택)}')
+}).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073). 명령 1·2·3·4·5는 ops-svc가 아래 칸만 받고 모르는 칸은 422 invalid-command로 거른다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 9): ADMISSION_TARGET {eventId, target(정수, 1,000 이상 8,000 이하. 밖이면 422 command-out-of-range), fromTarget(선택, 자동 조치가 본 지금 목표)}, ADMISSION_PAUSE {eventId}(만료는 첫 ack + 10분이라 받지 않는다), KILL_SWITCH {scope, eventIds}(EVENT면 회차 1개 이상·겹침 없음, PLATFORM이면 회차 없음), BLOCK_ASN_IP {cidrs: [CIDR 글자], asns: [1~4294967295], expiresAt(필수, 지금보다 늦고 지금 + 24시간 이하)}(호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 invalid-command, 항목 합계 100개 [가정] 초과·만료 없음·범위 밖은 command-out-of-range, ADR-0339 결정 2), BOT_LEVEL {level, reassessMode(선택)}. 명령 12와 명령 6의 결제 갈래도 칸을 닫는다(추천 적용 2026-11-22, BUILD_ORDER BAT-360, ADR-0349 결정 1·6): PG_ASSIGN {eventId(소문자 UUID), primaryPg(TOSS|PORTONE), fallbackPg(선택, TOSS|PORTONE, 기본과 같으면 invalid-command)}(온세일 윈도우 안이면 command-out-of-range, 하위 결제사 규칙에 걸리면 pg-fallback-same-provider, 확인하지 못하면 503. 실행하면 control.settings 사건 PG_ASSIGNMENT 하나를 내고 ACKED다), DEGRADED_MODE의 결제 갈래 {mode: PAYMENT_PG_FALLBACK, scope: EVENT|PLATFORM, eventIds(EVENT면 소문자 UUID 1~100개 [가정]·겹침 없음, 101개 이상은 command-out-of-range, PLATFORM이면 없음), toPg(선택, TOSS|PORTONE)}(승인은 요청자 아닌 operator 이상, 둘 다 재인증. 전송은 OPS-310). 명령 6의 다른 모드는 아직 객체만 본다')
 }).strict()
 
 export const CreateOpsCommandResponse = zod.object({
@@ -757,7 +757,7 @@ export const CreateOpsCommandResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -842,7 +842,7 @@ export const ListOpsCommandsResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -905,7 +905,7 @@ export const CreateOpsCommandDryRunBody = zod.object({
   "reason": zod.string().min(1).max(createOpsCommandDryRunBodyReasonMax).describe('실행 사유. 앞뒤 공백을 지우고 NFC로 한 번 정규화한 뒤 1~2,000자를 본다. 제어 문자·양방향 제어 문자(U+202A~U+202E, U+2066~U+2069)가 있으면 422 invalid-command다(ADR-0340 결정 10, docs/security/asvs/control-tower.md 1.3.3)'),
   "params": zod.looseObject({
 
-}).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073). 명령 1·2·3·4·5는 ops-svc가 아래 칸만 받고 모르는 칸은 422 invalid-command로 거른다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 9): ADMISSION_TARGET {eventId, target(정수, 1,000 이상 8,000 이하. 밖이면 422 command-out-of-range), fromTarget(선택, 자동 조치가 본 지금 목표)}, ADMISSION_PAUSE {eventId}(만료는 첫 ack + 10분이라 받지 않는다), KILL_SWITCH {scope, eventIds}(EVENT면 회차 1개 이상·겹침 없음, PLATFORM이면 회차 없음), BLOCK_ASN_IP {cidrs: [CIDR 글자], asns: [1~4294967295], expiresAt(필수, 지금보다 늦고 지금 + 24시간 이하)}(호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 invalid-command, 항목 합계 100개 [가정] 초과·만료 없음·범위 밖은 command-out-of-range, ADR-0339 결정 2), BOT_LEVEL {level, reassessMode(선택)}')
+}).optional().describe('명령 유형별 값. 유형마다 oneOf 스키마로 칸과 범위를 정한다(구현 전에 더한다, 추천 적용 2026-10-30): 설정 사건으로 퍼지는 명령(5·8·9·12, 6의 설정 갈래, 7의 purchase-svc 쪽)은 SettingChanged.avsc의 value 갈래와 같은 칸, 제어 gRPC 명령(1·2·3·6 진입·6 대체 결제사 전환·7·11)은 control.proto desired_state_json과 같은 칸, 명령 4는 대역·ASN 목록과 만료 시각(24시간 이하), 명령 10은 통보 ID다(control-tower §3 안전 허용 범위). KILL_SWITCH는 {scope: EVENT|PLATFORM, eventIds: [...]}이고 EVENT면 회차 1개 이상(추천 적용 2026-10-14, ADR-0062). BOT_LEVEL은 {level: RELAXED|STANDARD|AGGRESSIVE, reassessMode: OFF|SHADOW|ENFORCE}이고 강도와 대기 중 재평가 모드를 따로 고른다(asyncapi SettingChanged, 추천 적용 2026-10-20, ADR-0073). 명령 1·2·3·4·5는 ops-svc가 아래 칸만 받고 모르는 칸은 422 invalid-command로 거른다(추천 적용 2026-11-21, BUILD_ORDER BAT-355, ADR-0340 결정 9): ADMISSION_TARGET {eventId, target(정수, 1,000 이상 8,000 이하. 밖이면 422 command-out-of-range), fromTarget(선택, 자동 조치가 본 지금 목표)}, ADMISSION_PAUSE {eventId}(만료는 첫 ack + 10분이라 받지 않는다), KILL_SWITCH {scope, eventIds}(EVENT면 회차 1개 이상·겹침 없음, PLATFORM이면 회차 없음), BLOCK_ASN_IP {cidrs: [CIDR 글자], asns: [1~4294967295], expiresAt(필수, 지금보다 늦고 지금 + 24시간 이하)}(호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 invalid-command, 항목 합계 100개 [가정] 초과·만료 없음·범위 밖은 command-out-of-range, ADR-0339 결정 2), BOT_LEVEL {level, reassessMode(선택)}. 명령 12와 명령 6의 결제 갈래도 칸을 닫는다(추천 적용 2026-11-22, BUILD_ORDER BAT-360, ADR-0349 결정 1·6): PG_ASSIGN {eventId(소문자 UUID), primaryPg(TOSS|PORTONE), fallbackPg(선택, TOSS|PORTONE, 기본과 같으면 invalid-command)}(온세일 윈도우 안이면 command-out-of-range, 하위 결제사 규칙에 걸리면 pg-fallback-same-provider, 확인하지 못하면 503. 실행하면 control.settings 사건 PG_ASSIGNMENT 하나를 내고 ACKED다), DEGRADED_MODE의 결제 갈래 {mode: PAYMENT_PG_FALLBACK, scope: EVENT|PLATFORM, eventIds(EVENT면 소문자 UUID 1~100개 [가정]·겹침 없음, 101개 이상은 command-out-of-range, PLATFORM이면 없음), toPg(선택, TOSS|PORTONE)}(승인은 요청자 아닌 operator 이상, 둘 다 재인증. 전송은 OPS-310). 명령 6의 다른 모드는 아직 객체만 본다')
 }).strict()
 
 export const CreateOpsCommandDryRunResponse = zod.object({
@@ -924,7 +924,7 @@ export const CreateOpsCommandDryRunResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -971,7 +971,7 @@ export const CreateOpsCommandApprovalResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -1050,7 +1050,7 @@ export const CreateOpsCommandRejectionResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -1125,7 +1125,7 @@ export const CreateOpsCommandRetryResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -1211,7 +1211,7 @@ export const CreateOpsCommandReversionResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -1293,7 +1293,7 @@ export const CreateOpsCommandExtensionResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),
@@ -1342,7 +1342,7 @@ export const CreateOpsCommandExtensionResponse = zod.object({
 })
 
 /**
- * FR-030, POL-021 A·C(4), 추천 적용 2026-10-14, ADR-0062. 명령 3·11만(명령 3은 추천 적용 2026-10-27, ADR-0095. 명령 3은 인시던트 포스트모템의 한 절로도 쓴다). 실행 기록·정지 동안의 조치·영향·재개는 시스템이 감사 로그와 지표에서 채운다(docs/features/control-tower.md §6). 제출하면 다른 commander에게 검토를 요청한다. 기한을 넘기면 SEV3
+ * FR-030, POL-021 A·C(4), 추천 적용 2026-10-14, ADR-0062. 명령 3·11만(명령 3은 추천 적용 2026-10-27, ADR-0095. 명령 3은 인시던트 포스트모템의 한 절로도 쓴다). 실행 기록·정지 동안의 조치·영향·재개는 시스템이 감사 로그와 지표에서 채운다(docs/features/control-tower.md §6). 제출하면 다른 commander에게 검토를 요청한다. 기한을 넘기면 SEV3. 첫 구현(추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7): 할 일은 처음 DISPATCHED와 같은 트랜잭션에 열리고 작성 기한은 그 시각 + 48시간(정각이면 넘김)이다. 늦은 제출도 받고 late로 적는다. 글은 앞뒤 공백을 지우고 NFC로 한 번 정규화한 뒤 2,000자를 보며, 제어 문자(줄바꿈·탭 제외)와 양방향 제어 문자(U+202A~U+202E, U+2066~U+2069)는 422다(docs/security/asvs/control-tower.md 1.1.1·1.3.3). followUps.issueUrl은 https만 받는다. 제출은 명령 행 잠금과 command_post_review 조건부 갱신(submitted_at IS NULL)으로 한 번만 통과한다
  * @summary 명령 3·11 사후 검토 보고서 제출(실행한 commander, 실행 뒤 48시간 안)
  */
 export const CreateOpsCommandPostReviewParams = zod.object({
@@ -1373,10 +1373,160 @@ export const CreateOpsCommandPostReviewBody = zod.object({
 }).strict()).optional().describe('후속 조치(0개 이상). 자동 제어 규칙이나 임계값을 바꿔야 하면 결정 기록이나 ADR로 잇는다')
 }).strict()
 
-export const CreateOpsCommandPostReviewResponse = zod.void()
+export const CreateOpsCommandPostReviewResponse = zod.object({
+  "commandId": zod.uuid(),
+  "type": zod.enum(['KILL_SWITCH', 'AUTOMATION_STOP']),
+  "state": zod.string().describe('명령의 지금 상태(CommandState.state)'),
+  "reason": zod.string().describe('★ 실행 사유 원문'),
+  "executor": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('★ 실행자(명령 3·11은 요청한 commander가 실행한다)'),
+  "dueAt": zod.iso.datetime({"offset":true}).describe('작성 기한(처음 DISPATCHED + 48시간, 정각이면 넘김)'),
+  "late": zod.boolean().describe('기한 뒤 제출 또는 검토'),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullable(),
+  "report": zod.object({
+  "trigger": zod.string().optional(),
+  "triggerDetail": zod.string().optional(),
+  "whyNoSecondApproval": zod.string().optional(),
+  "actionsNote": zod.string().optional(),
+  "impactNote": zod.string().optional(),
+  "followUps": zod.array(zod.object({
+  "task": zod.string().optional(),
+  "owner": zod.string().optional(),
+  "dueDate": zod.iso.date().optional(),
+  "issueUrl": zod.url().optional()
+})).optional()
+}).nullable().describe('제출한 보고서(post-review 본문을 정규화한 값)'),
+  "confirmDueAt": zod.iso.datetime({"offset":true}).nullable().describe('검토 기한(제출 + 7일)'),
+  "confirmedAt": zod.iso.datetime({"offset":true}).nullable(),
+  "reviewer": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).describe('검토한 commander'),
+  "assessment": zod.union([zod.literal('APPROPRIATE'),zod.literal('INAPPROPRIATE'),zod.literal('INCONCLUSIVE'),zod.literal(null)]).nullable(),
+  "comment": zod.string().nullable().describe('검토 의견'),
+  "soloSelfReview": zod.boolean().describe('1인 기간 자기 검토(활성 commander가 실행자 한 명뿐일 때)'),
+  "execution": zod.object({
+  "dispatchedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "ackedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "attempts": zod.int().optional()
+}).describe('★ 실행 기록'),
+  "actionsDuringStop": zod.array(zod.object({
+  "commandId": zod.uuid().optional(),
+  "type": zod.string().optional(),
+  "state": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+})).describe('★ 정지부터 재개(아직이면 지금)까지 같은 범위에서 만든 명령'),
+  "impact": zod.object({
+  "stopped": zod.boolean().optional().describe('아직 정지 중(재개 전)'),
+  "stopDurationSec": zod.int().nullish().describe('정지부터 재개까지(재개 전이면 null)')
+}).describe('★ 영향 가운데 ops DB로 셀 수 있는 것(정지 시간). 나머지 지표는 unavailable'),
+  "resumption": zod.object({
+  "revertRequestedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "revertedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "requestedBy": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).optional(),
+  "approvedBy": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).optional()
+}).describe('★ 재개: 되돌리기 요청·완료 시각과 요청자·승인자(아직이면 null)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('원천이 없어 채우지 못한 ★ 칸과 까닭(0으로 적지 않는다)')
+}).describe('명령 3·11 사후 검토 보고서(추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7, docs/features/control-tower.md §6 \'사후 검토 보고서의 항목\'). 사람 칸은 대응 표(command_actor)로 푼 관리 계정이고 대응을 지웠으면 adminAccountId가 없다. ★ 지표 칸은 unavailable에만 있다')
 
 /**
- * FR-030, POL-021 C(4), 추천 적용 2026-10-14, ADR-0062. 실행한 commander가 부르면 403('실행한 분은 검토할 수 없습니다. 다른 commander가 검토합니다', 1인 기간 예외는 403 설명). 기한을 넘기면 SEV3
+ * 추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7. 보고서(제출 전이면 비어 있음)·기한·검토와 ★ 칸을 준다. ★ 칸은 ops DB로 채운다: 실행 기록(처음 전달·ack 시각, 시도 수, 실행 사유), 정지부터 재개까지 같은 범위(전체 정지면 모든 명령, 회차 정지면 회차가 겹치는 명령)에서 만든 명령, 재개 시각과 되돌리기를 요청·승인한 사람. 지표 칸(영향)은 원천이 생길 때까지 unavailable에 칸 이름과 까닭으로만 싣는다(0으로 적지 않는다). 할 일이 없는 명령(명령 3·11 밖, 처음 전달 전)은 404다. Cache-Control: no-store
+ * @summary 명령 3·11 사후 검토 보고서 조회(viewer 이상)
+ */
+export const GetOpsCommandPostReviewParams = zod.object({
+  "commandId": zod.string()
+})
+
+export const GetOpsCommandPostReviewResponse = zod.object({
+  "commandId": zod.uuid(),
+  "type": zod.enum(['KILL_SWITCH', 'AUTOMATION_STOP']),
+  "state": zod.string().describe('명령의 지금 상태(CommandState.state)'),
+  "reason": zod.string().describe('★ 실행 사유 원문'),
+  "executor": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('★ 실행자(명령 3·11은 요청한 commander가 실행한다)'),
+  "dueAt": zod.iso.datetime({"offset":true}).describe('작성 기한(처음 DISPATCHED + 48시간, 정각이면 넘김)'),
+  "late": zod.boolean().describe('기한 뒤 제출 또는 검토'),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullable(),
+  "report": zod.object({
+  "trigger": zod.string().optional(),
+  "triggerDetail": zod.string().optional(),
+  "whyNoSecondApproval": zod.string().optional(),
+  "actionsNote": zod.string().optional(),
+  "impactNote": zod.string().optional(),
+  "followUps": zod.array(zod.object({
+  "task": zod.string().optional(),
+  "owner": zod.string().optional(),
+  "dueDate": zod.iso.date().optional(),
+  "issueUrl": zod.url().optional()
+})).optional()
+}).nullable().describe('제출한 보고서(post-review 본문을 정규화한 값)'),
+  "confirmDueAt": zod.iso.datetime({"offset":true}).nullable().describe('검토 기한(제출 + 7일)'),
+  "confirmedAt": zod.iso.datetime({"offset":true}).nullable(),
+  "reviewer": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).describe('검토한 commander'),
+  "assessment": zod.union([zod.literal('APPROPRIATE'),zod.literal('INAPPROPRIATE'),zod.literal('INCONCLUSIVE'),zod.literal(null)]).nullable(),
+  "comment": zod.string().nullable().describe('검토 의견'),
+  "soloSelfReview": zod.boolean().describe('1인 기간 자기 검토(활성 commander가 실행자 한 명뿐일 때)'),
+  "execution": zod.object({
+  "dispatchedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "ackedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "attempts": zod.int().optional()
+}).describe('★ 실행 기록'),
+  "actionsDuringStop": zod.array(zod.object({
+  "commandId": zod.uuid().optional(),
+  "type": zod.string().optional(),
+  "state": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+})).describe('★ 정지부터 재개(아직이면 지금)까지 같은 범위에서 만든 명령'),
+  "impact": zod.object({
+  "stopped": zod.boolean().optional().describe('아직 정지 중(재개 전)'),
+  "stopDurationSec": zod.int().nullish().describe('정지부터 재개까지(재개 전이면 null)')
+}).describe('★ 영향 가운데 ops DB로 셀 수 있는 것(정지 시간). 나머지 지표는 unavailable'),
+  "resumption": zod.object({
+  "revertRequestedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "revertedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "requestedBy": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).optional(),
+  "approvedBy": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).optional()
+}).describe('★ 재개: 되돌리기 요청·완료 시각과 요청자·승인자(아직이면 null)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('원천이 없어 채우지 못한 ★ 칸과 까닭(0으로 적지 않는다)')
+}).describe('명령 3·11 사후 검토 보고서(추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7, docs/features/control-tower.md §6 \'사후 검토 보고서의 항목\'). 사람 칸은 대응 표(command_actor)로 푼 관리 계정이고 대응을 지웠으면 adminAccountId가 없다. ★ 지표 칸은 unavailable에만 있다')
+
+/**
+ * FR-030, POL-021 C(4), 추천 적용 2026-10-14, ADR-0062. 실행한 commander가 부르면 403('실행한 분은 검토할 수 없습니다. 다른 commander가 검토합니다', 1인 기간 예외는 403 설명). 기한을 넘기면 SEV3. 첫 구현(추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7): 검토 기한은 제출 + 7일(정각이면 넘김)이고 늦은 검토도 받아 late로 적는다. 1인 기간은 identity ListAdminAccounts의 활성 commander가 실행자 한 명뿐인 때이고, 확인하지 못하면 503이며 자기 검토를 받지 않는다. comment는 제출 글과 같은 규칙(NFC 한 번, 2,000자, 제어 문자)이다
  * @summary 명령 3·11 사후 검토 보고서 검토(실행자가 아닌 commander, 제출 뒤 7일 안)
  */
 export const CreateOpsCommandPostReviewConfirmationParams = zod.object({
@@ -1392,7 +1542,77 @@ export const CreateOpsCommandPostReviewConfirmationBody = zod.object({
   "comment": zod.string().min(1).max(createOpsCommandPostReviewConfirmationBodyCommentMax)
 }).strict()
 
-export const CreateOpsCommandPostReviewConfirmationResponse = zod.unknown()
+export const CreateOpsCommandPostReviewConfirmationResponse = zod.object({
+  "commandId": zod.uuid(),
+  "type": zod.enum(['KILL_SWITCH', 'AUTOMATION_STOP']),
+  "state": zod.string().describe('명령의 지금 상태(CommandState.state)'),
+  "reason": zod.string().describe('★ 실행 사유 원문'),
+  "executor": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('★ 실행자(명령 3·11은 요청한 commander가 실행한다)'),
+  "dueAt": zod.iso.datetime({"offset":true}).describe('작성 기한(처음 DISPATCHED + 48시간, 정각이면 넘김)'),
+  "late": zod.boolean().describe('기한 뒤 제출 또는 검토'),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullable(),
+  "report": zod.object({
+  "trigger": zod.string().optional(),
+  "triggerDetail": zod.string().optional(),
+  "whyNoSecondApproval": zod.string().optional(),
+  "actionsNote": zod.string().optional(),
+  "impactNote": zod.string().optional(),
+  "followUps": zod.array(zod.object({
+  "task": zod.string().optional(),
+  "owner": zod.string().optional(),
+  "dueDate": zod.iso.date().optional(),
+  "issueUrl": zod.url().optional()
+})).optional()
+}).nullable().describe('제출한 보고서(post-review 본문을 정규화한 값)'),
+  "confirmDueAt": zod.iso.datetime({"offset":true}).nullable().describe('검토 기한(제출 + 7일)'),
+  "confirmedAt": zod.iso.datetime({"offset":true}).nullable(),
+  "reviewer": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).describe('검토한 commander'),
+  "assessment": zod.union([zod.literal('APPROPRIATE'),zod.literal('INAPPROPRIATE'),zod.literal('INCONCLUSIVE'),zod.literal(null)]).nullable(),
+  "comment": zod.string().nullable().describe('검토 의견'),
+  "soloSelfReview": zod.boolean().describe('1인 기간 자기 검토(활성 commander가 실행자 한 명뿐일 때)'),
+  "execution": zod.object({
+  "dispatchedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "ackedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "attempts": zod.int().optional()
+}).describe('★ 실행 기록'),
+  "actionsDuringStop": zod.array(zod.object({
+  "commandId": zod.uuid().optional(),
+  "type": zod.string().optional(),
+  "state": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+})).describe('★ 정지부터 재개(아직이면 지금)까지 같은 범위에서 만든 명령'),
+  "impact": zod.object({
+  "stopped": zod.boolean().optional().describe('아직 정지 중(재개 전)'),
+  "stopDurationSec": zod.int().nullish().describe('정지부터 재개까지(재개 전이면 null)')
+}).describe('★ 영향 가운데 ops DB로 셀 수 있는 것(정지 시간). 나머지 지표는 unavailable'),
+  "resumption": zod.object({
+  "revertRequestedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "revertedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "requestedBy": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).optional(),
+  "approvedBy": zod.union([zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),zod.null()]).optional()
+}).describe('★ 재개: 되돌리기 요청·완료 시각과 요청자·승인자(아직이면 null)'),
+  "unavailable": zod.array(zod.object({
+  "key": zod.string(),
+  "source": zod.string(),
+  "reason": zod.string()
+})).describe('원천이 없어 채우지 못한 ★ 칸과 까닭(0으로 적지 않는다)')
+}).describe('명령 3·11 사후 검토 보고서(추천 적용 2026-11-22, BUILD_ORDER BAT-360 OPS-290, ADR-0349 결정 7, docs/features/control-tower.md §6 \'사후 검토 보고서의 항목\'). 사람 칸은 대응 표(command_actor)로 푼 관리 계정이고 대응을 지웠으면 adminAccountId가 없다. ★ 지표 칸은 unavailable에만 있다')
 
 /**
  * SCR-068 [홈 구성] 탭(추천 적용 2026-10-14, ADR-0063). viewer 이상
@@ -4831,7 +5051,7 @@ export const GetOpsCommandResponse = zod.object({
   "formula": zod.string().describe('식'),
   "inputs": zod.record(zod.string(), zod.number()).describe('넣은 값'),
   "assumptions": zod.array(zod.string())
-})).describe('예측 값. 명령 1만 식을 낸다(그 밖은 빈 목록)'),
+})).describe('예측 값. 명령 1과 명령 12·명령 6 결제 갈래(동시 입장 목표 상한 지금 admissionTargetCapNow → 새 값 admissionTargetCapNew, 명령 6 회차 범위는 키 끝에 \':<회차 ID>\', 결제사 승인 상한을 받지 못하면 unavailable, ADR-0349 결정 4·6)가 식을 낸다(그 밖은 빈 목록)'),
   "unavailable": zod.array(zod.object({
   "key": zod.string(),
   "source": zod.string(),

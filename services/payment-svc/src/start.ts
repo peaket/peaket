@@ -6,17 +6,19 @@
 // 앱 포트에는 결제사 웹훅 경로가 있다(웹훅 전용 풀 payment-svc-webhook, BUILD_ORDER HOT-150).
 // 종료(close, 시작 파일은 SIGTERM에 부른다): 준비 상태를 내리고(docs/devops.md §6.4) gRPC 포트를 닫으면서 두 실행기를 멈춘 뒤(돌던 호출과 그 뒤 쓰기를 기다린다) 서비스를 닫고 DB 풀 넷을 닫는다.
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 연결과 함께 끈다.
+// 같은 설정 저장소의 PG_ASSIGNMENT(명령 12) 변경은 회차 지정 쓰임새로 쓰고, 명령 12 사전 판정 CheckEventPgAssignment를 업무 gRPC에 묶는다(BUILD_ORDER BAT-360, ADR-0349 결정 3·5).
 import 'reflect-metadata';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
 import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, reauthJtiStoreFromEnv, systemClock, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
+import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgApprovalTps, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
 import { CompensationTransfers, DrizzleCompensationTransfers, FakeCompensationTransfer, compensationTransferHandlers, compensationTransferPackage } from './modules/compensation/index.js';
 import {
   AcceptPaymentCommand,
+  AssignEventPg,
   assertPlatformSubProviders,
   BatchGetPaymentStates,
   BreakerPgCircuits,
@@ -27,6 +29,7 @@ import {
   CancelDepositPayment,
   CancelPayment,
   channelTableOf,
+  CheckEventPgAssignment,
   confirmRunnerDatabaseOptions,
   createPgHttp,
   DrizzleConfirmJobs,
@@ -59,6 +62,8 @@ import {
   PayRefKeyRing,
   perPodBulkhead,
   PG_CHANNEL_BULKHEAD,
+  PgAssignmentSettingHandler,
+  pgAssignmentSettingLog,
   PgCallGuards,
   pgCallGuardLog,
   pgChannelLog,
@@ -143,6 +148,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 포트원 채널의 하위 결제사 표. local·ci 밖에서 값이 빠졌거나, 플랫폼 기본값이 하위 결제사 규칙에 걸리면 듣기 전에 시작 실패다(배포 검사, P-T46 ③, BUILD_ORDER PRF-203)
   const portoneChannels = loadPortoneChannelMap(env, portone);
   assertPlatformSubProviders(checkoutConfig.defaults, portoneChannels);
+  // 결제사별 승인 상한(선택, 명령 12 사전 판정이 싣는다). 틀린 값은 듣기 전에 시작 실패다(ADR-0349 결정 4, BUILD_ORDER BAT-360)
+  const approvalTps = loadPgApprovalTps(env);
   // 정지 판정자의 입력을 읽을 클러스터 Prometheus 주소. local·ci 밖에서 없으면 듣기 전에 시작 실패다(BUILD_ORDER PRF-202 코드 리뷰)
   const promUrl = loadEntryPausePrometheusUrl(env);
   // 결제 수단 연결값의 라벨 키 pay. 없으면 경고만 하고 칸을 비운다(결제는 막지 않는다, BUILD_ORDER HOT-145). 잘못된 설정은 듣기 전에 시작 실패다
@@ -301,6 +308,13 @@ let circuitsRef: PgCircuits | undefined;
   // Kafka 클라이언트(네이티브 모듈)는 이 시작 함수를 부를 때 싣는다(시작 파일을 읽기만 하는 곳은 싣지 않는다)
   const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
   const controlSync = startServiceControlSync(service, env);
+  // 설정 사건 PG_ASSIGNMENT(명령 12): 설정 저장소의 변경마다 회차 지정을 쓴다. 지정 시각은 사건의 occurredAt이다(일반 풀, ADR-0349 결정 5, BUILD_ORDER BAT-360).
+  // 읽기는 listen 전에 시작한 소비가 비동기로 하므로, 여기서 바로 붙이면 첫 레코드부터 듣는다. 제어 토픽 소비가 꺼진 local·ci는 받는 쪽도 없다
+  const pgAssignmentSettings = new PgAssignmentSettingHandler({
+    assign: new AssignEventPg({ store: new DrizzlePgSelection({ database: batchDatabase }), ...(portoneChannels ? { portone: portoneChannels } : {}), clock: systemClock }),
+    log: pgAssignmentSettingLog(service.logger),
+  });
+  if (controlSync) pgAssignmentSettings.subscribe(controlSync.sync.settings);
   const httpPorts = await service.listen();
   const grpc = await startGrpcServer({
     host: config.grpcHost,
@@ -311,7 +325,7 @@ let circuitsRef: PgCircuits | undefined;
     services: [
       {
         definition: paymentPackage().PaymentService.service,
-        handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment, prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults, ...(fallbackExclusions ? { fallbackExclusions } : {}) }) }, (method, err, orderId) =>
+        handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment, prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), checkEventPgAssignment: new CheckEventPgAssignment({ selection: new DrizzlePgSelection({ database: batchDatabase }), ...(portoneChannels ? { portone: portoneChannels } : {}), approvalTps }) }, (method, err, orderId) =>
           // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
           service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
         ),
@@ -394,7 +408,7 @@ let circuitsRef: PgCircuits | undefined;
     // 모두 끝나면 서비스와 DB 풀을 닫는다. 앞 단계가 실패해도 뒤 단계를 한다
     return shutdownInOrder({
       stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), (settlementDueWorker?.stop() ?? Promise.resolve()).then(() => settlementDueElector.stop())],
-      drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve()],
+      drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve(), pgAssignmentSettings.stop()],
       closeService: () => service.close(),
       closeConnections: () => [controlSync?.close(), Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), tenantRedis?.close(), reauthRedis?.close()],
       onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),

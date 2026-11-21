@@ -127,8 +127,9 @@ const COMMANDER_ONLY = ['commander'] as const;
 
 /**
  * 명령 유형별 역할(B3-H01, docs/features/control-tower.md §3·§4, POL-021·POL-038).
- * 멈춤·재개·킬스위치·자동화 정지는 commander만 요청·승인·재시도한다. 봇 강도·Degraded Mode도 commander가 요청하고
- * 다른 commander가 승인한다. 회차 취소(EVENT_CANCEL)는 2인 승인을 유지하되 문서처럼 operator 이상이 승인한다.
+ * 멈춤·재개·킬스위치·자동화 정지는 commander만 요청·승인·재시도한다. 봇 강도도 commander가 요청하고 다른 commander가 승인한다.
+ * Degraded Mode(명령 6)는 commander가 요청하고 요청자 아닌 operator 이상이 승인한다(control-tower §3 6행, ADR-0349 결정 6.
+ * 명령 5의 같은 어긋남은 BAT-365). 회차 취소(EVENT_CANCEL)는 2인 승인을 유지하되 문서처럼 operator 이상이 승인한다.
  */
 const COMMAND_ROLE_POLICY: Readonly<Record<CommandType, CommandRolePolicy>> = {
   ADMISSION_TARGET: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
@@ -136,7 +137,7 @@ const COMMAND_ROLE_POLICY: Readonly<Record<CommandType, CommandRolePolicy>> = {
   KILL_SWITCH: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
   BLOCK_ASN_IP: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
   BOT_LEVEL: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
-  DEGRADED_MODE: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+  DEGRADED_MODE: { requesterRoles: COMMANDER_ONLY, approverRoles: ALL_ROLES },
   LOBBY_BANNER: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
   LOG_LEVEL: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
   FEATURE_OFF: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
@@ -295,6 +296,8 @@ export interface Command {
   readonly dryRun?: Record<string, unknown>;
   /** 첫 ack 시각(상세에서만 읽는다) */
   readonly ackedAtMs?: number;
+  /** 명령 3·11 사후 검토 보고서 작성 기한(command_post_review.due_at, 처음 DISPATCHED + 48시간, ADR-0349 결정 7). 할 일이 없으면 없다 */
+  readonly postReviewDueAtMs?: number;
 }
 
 /** 실행을 요청한 관리 계정. 대상 서비스에 넘길 신원 머리를 만드는 데 쓴다 */

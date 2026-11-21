@@ -95,6 +95,7 @@ workloads:
     podLabels: { app.kubernetes.io/name: core-svc, app.kubernetes.io/component: service }
     ports:
       # ops-svc는 판매 설정 사본·회차 규모 변경과 회차 취소·연기의 core 회차 상태 반영(/internal/v1/events/{eventId}/cancellation-status, 2026-11-19 GAT-110)을 부른다(ADR-0285 결정 9 표)
+      # 감사 체크포인트 게시 작업(ops-svc 이미지)은 끝난 회차 목록 GET /internal/v1/events/onsale-closed를 읽는다(BAT-360, 감독 결정 2026-11-22, ADR-0348 결정 9. 같은 쌍이라 규칙은 그대로)
       rest: { port: 8080, callers: [ops-svc, payment-svc, purchase-svc, ticket-svc] }
       grpc:
         port: 50051
@@ -180,6 +181,8 @@ workloads:
               ApprovePayoutBatch: [ops-svc]
               BatchGetPayments: [purchase-svc]
               CancelPayment: [core-svc, purchase-svc]
+              # 명령 12(결제사 지정)의 하위 결제사 사전 판정(ADR-0349 결정 3, docs/api/proto/README.md §3, BAT-360)
+              CheckEventPgAssignment: [ops-svc]
               ConfirmPayment: [core-svc, purchase-svc]
               GetNewPaymentPause: [purchase-svc]
               GetPayment: [purchase-svc]

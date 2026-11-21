@@ -7,26 +7,32 @@ import { ComputeDryRun } from './application/compute-dry-run.js';
 import { CreateCommand, PreviewCommand } from './application/create-command.js';
 import { DecideCommand } from './application/decide-command.js';
 import { ExecuteCommand } from './application/execute-command.js';
+import { PgAssignmentGate } from './application/pg-assignment-gate.js';
 import { GetCommand } from './application/get-command.js';
 import { HandleCommandEvent } from './application/handle-command-event.js';
 import { ListCommands } from './application/list-commands.js';
 import { MaintainCommands, type MaintainCommandsOptions } from './application/maintain-commands.js';
+import { PostReviews } from './application/post-review.js';
 import { RetryCommand } from './application/retry-command.js';
 import { ExtendCommand, RevertCommand } from './application/revert-command.js';
 import { COMMAND_MAINTENANCE_INTERVAL_MS, type CommandType } from './domain/command.js';
 import type { DryRunSource } from './domain/dry-run.js';
-import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore } from './domain/ports.js';
+import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, OnsaleStartSource, PgAssignmentCheck } from './domain/ports.js';
 import type { ProtectedRangeList } from './domain/protected-ranges.js';
 import { LogCommandSecurityEvents, PromCommandSignals } from './adapters/command-signals.js';
 import { UnavailableDryRunSource } from './adapters/unavailable-dry-run-source.js';
+import { OpsEventLog, OpsEventStore } from './adapters/ops-event-log.js';
+import type { ActiveCommanders, BlockIpSetReader } from './domain/ports.js';
+import type { OpsAlertStore } from '../alerts/index.js';
 import type { ApprovalReauthVerifier } from '../payouts/index.js';
 import { CommandDryRunsController } from './inbound/command-dry-runs.controller.js';
 import { CommandMaintenanceJob, type CommandMaintenanceOptions } from './inbound/command-maintenance.job.js';
 import { CommandsController } from './inbound/commands.controller.js';
 import { InternalCommandEventsController } from './inbound/internal-command-events.controller.js';
-import { COMMAND_EXECUTOR, COMMAND_MAINTENANCE_OPTIONS, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_STORE } from './tokens.js';
+import { PostReviewController } from './inbound/post-review.controller.js';
+import { COMMAND_EXECUTOR, COMMAND_MAINTENANCE_OPTIONS, COMMAND_OPS_EVENTS, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_STORE } from './tokens.js';
 
-export { COMMAND_STORE, COMMAND_EXECUTOR, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_MAINTENANCE_OPTIONS } from './tokens.js';
+export { COMMAND_STORE, COMMAND_EXECUTOR, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_MAINTENANCE_OPTIONS, COMMAND_OPS_EVENTS } from './tokens.js';
 
 /** 운영 명령 모듈의 덧붙임(BAT-355). 주지 않으면 원천 unavailable·기본 보호 목록·정비 꺼짐이다 */
 export interface CommandsModuleExtras {
@@ -38,12 +44,24 @@ export interface CommandsModuleExtras {
   readonly maintenance?: { readonly enabled: boolean; readonly intervalMs?: number } & MaintainCommandsOptions;
   /** 지표(없으면 Prometheus 묶음을 만들어 COMMAND_SIGNALS로 내놓는다) */
   readonly signals?: CommandSignals;
+  /**
+   * 명령 12 온세일 윈도우(core-svc 판매 설정)·하위 결제사 판정(payment-svc gRPC)의 원천(ADR-0349 결정 2·3, BAT-360). 없으면 명령 12가 503이다.
+   * 주면 실행기 없이도 명령 12를 접수 뒤 바로 실행한다(설정 사건은 저장소 Outbox로 낸다)
+   */
+  readonly pgAssignment?: { readonly onsale?: OnsaleStartSource; readonly pgCheck?: PgAssignmentCheck; readonly onsaleTimeoutMs?: number; readonly pgCheckTimeoutMs?: number };
+  /** 명령 3·11 사후 검토(ADR-0349 결정 7): 1인 기간 판정(identity 활성 commander)과 기한 넘김 SEV3 경보 저장소. commanders가 없으면 실행자의 검토는 503이다 */
+  readonly postReviews?: { readonly commanders?: ActiveCommanders; readonly alerts?: OpsAlertStore };
+  /** 명령 4 만료 확인이 읽는 WAF IP 집합 둘(ADR-0349 결정 10). 없으면 명령 4는 정비가 AUTO_EXPIRED로 적지 않는다 */
+  readonly blockIpSets?: BlockIpSetReader;
+  /** 운영 사건 줄 ops_event(ADR-0349 결정 8). 없으면 서비스 로거로 낸다(시험이 받는 쪽을 넣는다) */
+  readonly opsEvents?: OpsEventLog;
 }
 
 @Module({})
 export class CommandsModule {
   static register(
-    store: CommandStore,
+    /** 명령 저장소. 모듈 안 쓰임새는 운영 사건 줄을 내는 감싼 저장소를 쓰고, COMMAND_STORE는 이 원래 저장소다 */
+    rawStore: CommandStore,
     executor?: CommandExecutor,
     checkpoints?: AuditCheckpointService,
     onCommandEvent?: (h: HandleCommandEvent) => void,
@@ -54,6 +72,9 @@ export class CommandsModule {
     extras: CommandsModuleExtras = {},
   ): DynamicModule {
     const signals = extras.signals ?? new PromCommandSignals();
+    // 운영 사건 줄은 감싼 저장소가 쓰기 트랜잭션이 끝난 뒤에만 낸다(ADR-0349 결정 8)
+    const opsEvents = extras.opsEvents ?? new OpsEventLog();
+    const store: CommandStore = new OpsEventStore(rawStore, opsEvents);
     const security = new LogCommandSecurityEvents();
     const dryRun = new ComputeDryRun({
       ...(extras.dryRunSources ? { sources: extras.dryRunSources } : {}),
@@ -61,15 +82,20 @@ export class CommandsModule {
       ...(extras.protectedRanges ? { protectedRanges: extras.protectedRanges } : {}),
       signals,
     });
-    const execution = new ExecuteCommand(store, executor, checkpoints, guard);
-    const wired = executor ? execution : undefined;
-    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security });
-    const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {});
+    // 명령 12 판정은 미리보기·접수·실행 직전이 같은 객체를 쓴다(ADR-0349 결정 2·3)
+    const pgGate = new PgAssignmentGate(extras.pgAssignment ?? {});
+    const execution = new ExecuteCommand(store, executor, checkpoints, guard, { pgGate });
+    const wired = executor || extras.pgAssignment ? execution : undefined;
+    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate });
+    const postReviews = new PostReviews({ store, ...(extras.postReviews?.commanders ? { commanders: extras.postReviews.commanders } : {}), ...(extras.postReviews?.alerts ? { alerts: extras.postReviews.alerts } : {}) });
+    const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}) });
     const maintenance: CommandMaintenanceOptions = { enabled: extras.maintenance?.enabled ?? false, intervalMs: extras.maintenance?.intervalMs ?? COMMAND_MAINTENANCE_INTERVAL_MS };
     // HTTP 수신기와 Kafka 소비자가 같은 처리기를 쓴다(두 길로 같은 사건이 와도 한 번만 만든다).
     onCommandEvent?.(new HandleCommandEvent({ createCommand, store }));
     const providers: Provider[] = [
-      { provide: COMMAND_STORE, useValue: store },
+      { provide: COMMAND_STORE, useValue: rawStore },
+      { provide: COMMAND_OPS_EVENTS, useFactory: (logger?: PlatformLogger) => opsEvents.attach(logger), inject: [{ token: PLATFORM_LOGGER, optional: true }] },
+      { provide: PostReviews, useValue: postReviews },
       { provide: COMMAND_EXECUTOR, useValue: executor },
       { provide: COMMAND_REAUTH, useValue: reauth },
       { provide: COMMAND_SIGNALS, useValue: signals },
@@ -92,9 +118,9 @@ export class CommandsModule {
     ];
     return {
       module: CommandsModule,
-      controllers: [CommandsController, CommandDryRunsController, InternalCommandEventsController],
+      controllers: [CommandsController, CommandDryRunsController, InternalCommandEventsController, PostReviewController],
       providers,
-      exports: [MaintainCommands, COMMAND_SIGNALS],
+      exports: [MaintainCommands, COMMAND_SIGNALS, PostReviews],
     };
   }
 }

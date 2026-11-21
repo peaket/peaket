@@ -53,6 +53,8 @@ export const CommandView = z.object({
   result: z.record(z.string(), z.unknown()).nullable().optional(),
   dryRun: CommandDryRunView.optional(),
   canApprove: z.boolean(),
+  /** 명령 3·11 사후 검토 보고서 작성 기한(ADR-0349 결정 7, openapi CommandState.postReviewDueAt) */
+  postReviewDueAt: z.string().nullable().optional(),
 });
 export const CommandBaseView = CommandView.omit({ params: true, dryRun: true });
 export const CommandPageView = z.object({ items: z.array(CommandBaseView), nextCursor: z.string().nullable() });
@@ -84,6 +86,7 @@ export const baseViewOf = (c: Command, me?: Principal): z.output<typeof CommandB
   ...(c.executedAtMs !== undefined ? { executedAt: new Date(c.executedAtMs).toISOString() } : {}),
   ...(c.result !== undefined ? { result: c.result } : {}),
   canApprove: canApproveOf(c, me),
+  ...(c.postReviewDueAtMs !== undefined ? { postReviewDueAt: new Date(c.postReviewDueAtMs).toISOString() } : {}),
 });
 export const viewOf = (c: Command, me?: Principal): z.output<typeof CommandView> => ({
   ...baseViewOf(c, me),

@@ -9,3 +9,5 @@ export const COMMAND_SECURITY_EVENTS = Symbol('ops.COMMAND_SECURITY_EVENTS');
 export const COMMAND_MAINTENANCE_OPTIONS = Symbol('ops.COMMAND_MAINTENANCE_OPTIONS');
 /** 운영 명령 지표(ops_command_dry_run_unavailable_total). 시작 조립이 서비스 레지스트리에 붙인다 */
 export const COMMAND_SIGNALS = Symbol('ops.COMMAND_SIGNALS');
+/** 운영 사건 줄 ops_event(ADR-0349 결정 8). 모듈 조립이 서비스 로거를 붙인다 */
+export const COMMAND_OPS_EVENTS = Symbol('ops.COMMAND_OPS_EVENTS');

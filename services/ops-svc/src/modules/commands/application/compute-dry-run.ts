@@ -52,9 +52,17 @@ export class ComputeDryRun {
     return { counted: r.counted.filter((c) => keys.includes(c.key) && Number.isFinite(c.value)), unavailable };
   }
 
-  /** 그 명령의 CommandDryRun(판 1). params는 접수 검사를 지난 값이어야 한다 */
-  async compute(target: DryRunTarget, nowMs: number): Promise<CommandDryRun> {
-    const counted = await this.count(target, nowMs);
+  /**
+   * 그 명령의 CommandDryRun(판 1). params는 접수 검사를 지난 값이어야 한다.
+   * extra는 접수 검사가 이미 읽은 넣는 값(명령 12·6 결제 갈래의 결제사 승인 상한, ADR-0349 결정 4·6)이고 센 값·세지 못한 값에 그대로 더한다
+   */
+  async compute(target: DryRunTarget, nowMs: number, extra?: DryRunCountResult): Promise<CommandDryRun> {
+    const own = await this.count(target, nowMs);
+    const counted: DryRunCountResult = extra
+      ? { counted: [...own.counted, ...extra.counted.filter((c) => Number.isFinite(c.value))], unavailable: [...own.unavailable, ...extra.unavailable] }
+      : own;
+    // 지표 이름표에는 회차 ID(':<회차>')를 싣지 않는다(이름표 수를 묶는다)
+    if (extra) for (const u of extra.unavailable) (this.deps.signals ?? noCommandSignals).dryRunUnavailable(target.type, u.key.split(':')[0]!);
     const prediction = predictionsOf(target.type, target.params, counted.counted);
     const approvalMode = approvalModeOf(target.type, target.params as Record<string, unknown>, this.protectedRanges);
     const block = target.type === 'BLOCK_ASN_IP' ? blockApprovalOfParams(target.params as Record<string, unknown>, this.protectedRanges) : undefined;

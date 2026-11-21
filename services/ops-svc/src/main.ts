@@ -16,9 +16,9 @@ import { assertOpsPartnerRole } from './adapters/db/database-role.js';
 import { reauthWiring } from './reauth-wiring.js';
 import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
-import { AuditSignals } from './modules/audit/index.js';
+import { AuditSignals, auditEnvName } from './modules/audit/index.js';
 import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
-import { PromCommandSignals, type HandleCommandEvent } from './modules/commands/index.js';
+import { AwsWafIpSets, GrpcPgAssignmentCheck, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
@@ -75,6 +75,17 @@ const executor = new HttpCommandExecutor({
   ...(control ? { control } : {}),
   internalToken,
 });
+// 명령 12 온세일 윈도우(core-svc 판매 설정)·하위 결제사 판정(payment-svc gRPC CheckEventPgAssignment), BAT-360 ADR-0349 결정 2·3.
+// 주소가 없으면 그 원천이 없는 닫힌 쪽이라 명령 12 미리보기·접수·실행이 503이다. 설정 사건은 같은 트랜잭션의 ops Outbox로 내고 릴레이(dist/relay.js)가 보낸다
+const paymentGrpcAddr = process.env.PEAKET_PAYMENT_GRPC_ADDR;
+const pgAssignmentCheck = paymentGrpcAddr ? new GrpcPgAssignmentCheck({ address: paymentGrpcAddr }) : undefined;
+const pgAssignment = {
+  ...(coreUrl ? { onsale: new HttpCoreSaleStart(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 5_000 }), internalToken) } : {}),
+  ...(pgAssignmentCheck ? { pgCheck: pgAssignmentCheck } : {}),
+};
+// 명령 4 만료 확인(ADR-0349 결정 10): 정비 바퀴가 관제용 WAF IP 집합 둘(PEAKET_WAF_IPSET_V4·V6·SCOPE)을 읽기만 한다. 없으면 명령 4를 AUTO_EXPIRED로 적지 않는다
+const wafConfig = wafIpSetsConfigFromEnv(process.env, { envName: auditEnvName(process.env) });
+const wafIpSets = wafConfig ? new AwsWafIpSets(wafConfig) : undefined;
 const purchasePriority = purchaseGrpcAddr ? new GrpcPurchasePriorityGrants(purchaseGrpcAddr) : undefined;
 const priority =
   (purchasePriority || purchaseUrl) && queueClient
@@ -163,7 +174,7 @@ const service = await createService({
       accountRef: (accountId: string) => botReviewActorRef.ref(accountId),
     },
     onCommandEvent: (h) => (commandEvents = h),
-    commandExtras: { signals: commandSignals },
+    commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}) },
     auditSignals,
   }),
 });
@@ -177,6 +188,8 @@ if (!partnerRoleChecked) service.logger.warn({}, 'PEAKET_PARTNER_DATABASE_URL이
 if (!purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR이 없어 회차 취소 환불 gRPC를 쓰지 않는다(내부 HTTP 호환 경로)');
 if (!purchaseUrl && !purchaseGrpcAddr) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_PURCHASE_GRPC_ADDR이 없어 EVENT_CANCEL 실행을 하지 않는다');
 if (!coreUrl) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 SCALE_CHANGE 실행을 하지 않는다');
+if (!wafIpSets) service.logger.warn({}, 'PEAKET_WAF_IPSET_V4·PEAKET_WAF_IPSET_V6이 없어 만료가 지난 명령 4를 AUTO_EXPIRED로 적지 않는다(ACKED 그대로)');
+if (!coreUrl || !pgAssignmentCheck) service.logger.warn({}, 'PEAKET_CORE_HTTP_URL·PEAKET_PAYMENT_GRPC_ADDR이 없어 명령 12(PG_ASSIGN) 미리보기·접수·실행이 503이다');
 if (!purchaseUrl || !queueUrl) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_QUEUE_HTTP_URL이 없어 SALE_STOP·SALE_RESUME 실행을 하지 않는다');
 if (!priority) service.logger.warn({}, 'PEAKET_PURCHASE_HTTP_URL·PEAKET_QUEUE_HTTP_URL이 없어 우선 구매 권리 발급·회수를 열지 않는다');
 if (!scannerDevices) service.logger.warn({}, 'PEAKET_TICKET_GRPC_URL이 없어 관제 스캐너 기기 경로(/v1/ops/scanner-devices)를 열지 않는다');
@@ -251,6 +264,7 @@ process.once('SIGTERM', () => {
         service.logger.error({ err }, '제어 gRPC 클라이언트 닫기 실패');
       }
       scannerDevices?.close();
+      pgAssignmentCheck?.close();
       botReviewLabels?.close();
       adminIdentity.close();
       adminAuthz.close();
