@@ -102,7 +102,8 @@
 
 ## 구현
 
-(구현 담당이 채운다)
+- **바꾼 것**: `.github/workflows/ci-web.yml` seats 잡의 설치 단계 바로 뒤, `pnpm --filter @peaket/seatmap typecheck` 앞에 위 2의 단계(주석 두 줄과 `- run: pnpm --filter "@peaket/web^..." run --if-present build`)를 계획 글 그대로 넣었다. 다른 단계·잡은 그대로다. 같은 워크플로에는 이 꼴의 단계가 없었고(`ci-node.yml`의 `turbo run build --filter=…^...`는 turbo를 쓰는 잡이다), 명령은 `tools/web-checks/seed-css/build.mjs` 26행과 같은 꼴이다.
+- **확인(작업 폴더 뿌리, 시작 때 `packages/*/dist` 없음)**: 고친 잡의 차례대로 의존 빌드(끝 코드 0, search-normalize·contracts·validation·platform의 dist 넷이 생김) → `pnpm --filter @peaket/seatmap typecheck` 0 → `pnpm --filter @peaket/web typecheck` 0 → `pnpm --filter @peaket/seatmap test` 128/128 → `pnpm --filter @peaket/web test` 1,031/1,031. 워크플로 검사 `node tools/ci/check-workflows.mjs`(워크플로 23개 통과)·`check-docker-timeouts.mjs`·`check-lint-disables.mjs`·`check-workspace-protocol.mjs` 모두 0, 워크플로를 읽는 시험 `node --test`(check-workflows·changes·ci-summary·check-docker-timeouts·web-test-split·security-scan-workflow) 130개 중 129 통과·실패 0(1개는 CI 밖에서 건너뛰는 시험). `python -I -X utf8 tools/doc-check/check_all.py` 오류 0(경고 4는 이 묶음과 상관없는 기존 경고). 확인 뒤 만든 dist 넷은 지웠다.
 
 ## 시험 결과
 
@@ -121,6 +122,7 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12ciweb-plan | claude-opus-5-5 | 2026-11-21T23:10+09:00 | 2026-11-21T23:50+09:00 |
+| impl | lane2-w12ciweb-impl | claude-opus-5-5 | 2026-11-21T23:48+09:00 | 2026-11-22T00:02+09:00 |
 
 ## 기록
 
