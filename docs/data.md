@@ -1741,8 +1741,8 @@ erDiagram
         uuid order_id FK
         uuid product_id FK "product.id(같은 core 논리 DB, ADR-0101)"
         int quantity
-        int unit_price "주문 시점 가격 스냅샷"
-        int commission_rate_bp "주문 때 상품의 고정 수수료율(만분율)을 복사. 상품 정산의 계산 값(ADR-0101)"
+        int unit_price "주문 시점 가격 스냅샷(0016·코드의 칸 이름은 unit_amount). 파트너 DB 역할은 이 표에 넣지도 고치지도 못한다(상품 정산이 읽는 값, ADR-0338 결정 3)"
+        int commission_rate_bp "주문 때 상품의 고정 수수료율(만분율)을 복사. 상품 정산의 계산 값(ADR-0101). 파트너 배송·반품 처리 경로가 생겨도 파트너에게 고치기를 주지 않는다(ADR-0338 결정 4)"
         jsonb option_snapshot "주문 때 고른 옵션과 상품 이름·유형·스키마 판(ADR-0013 결정 3)"
         text status "READY|SHIPPED|DELIVERED|PICKED_UP|LOCKED|RETURN_REQUESTED|RETURN_RECEIVED|DISPUTED|CANCELLED|REFUNDED(docs/planning/03 §2.13)"
         text tracking_no "송장(택배사·번호, 판매자 등록)"
@@ -1807,7 +1807,7 @@ erDiagram
         text previous_secret "비밀을 바꾼 뒤 24시간 함께 서명하는 옛 비밀(ADR-0053)"
         text_array event_types "구독한 이벤트 type(ADR-0062)"
         text status "ACTIVE|DISABLED"
-        text disabled_reason "PARTNER|FAILING. FAILING은 5일 [가정] 동안 성공 없이 DEAD 50건 [가정] 넘음(추천 적용 2026-10-30, docs/features/notify.md §9). 자동 전환은 발송기와 함께 후속"
+        text disabled_reason "PARTNER|FAILING. FAILING은 5일 [가정] 동안 성공 없이 DEAD 50건 [가정] 넘음(추천 적용 2026-10-30, docs/features/notify.md §9). 자동 전환은 발송기가 한다. 발송기가 붙는 팬 경로 DB 역할은 이 표에서 켜진 끝점을 FAILING으로 끄는 것(status·disabled_reason·version 세 칸)만 고친다(ADR-0338 결정 1)"
         timestamptz secret_issued_at "현재 비밀을 발급한 시각. 1분 안 재발급은 409"
         timestamptz previous_secret_valid_until "옛 비밀 서명을 그만 붙이는 시각"
         int version "PATCH의 If-Match 판(guidelines §12)"
