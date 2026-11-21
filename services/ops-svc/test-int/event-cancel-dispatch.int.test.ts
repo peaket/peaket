@@ -97,7 +97,7 @@ describe('EVENT_CANCEL 실제 DB·내부 HTTP', () => {
     const row = await admin.query("select state from ops_command where id = $1::uuid", [created.commandId]);
     expect(row.rows[0]).toEqual({ state: 'SUCCEEDED' });
     const events = await admin.query('select type from command_event where command_id = $1::uuid order by seq', [created.commandId]);
-    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'SUCCEEDED']);
+    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'SUCCEEDED']);
     const audit = await admin.query('select record_type from audit_chain where record_id = $1::uuid order by seq', [created.commandId]);
     expect(audit.rows.map((r: { record_type: string }) => r.record_type)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_EXECUTION_STARTED', 'COMMAND_SUCCEEDED']);
   });
@@ -113,7 +113,7 @@ describe('EVENT_CANCEL 실제 DB·내부 HTTP', () => {
     const row = await admin.query("select state from ops_command where id = $1::uuid", [created.commandId]);
     expect(row.rows[0]).toEqual({ state: 'FAILED' });
     const events = await admin.query('select type from command_event where command_id = $1::uuid order by seq', [created.commandId]);
-    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'FAILED']);
+    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'FAILED']);
     const audit = await admin.query('select record_type from audit_chain where record_id = $1::uuid order by seq', [created.commandId]);
     expect(audit.rows.map((r: { record_type: string }) => r.record_type)).toEqual(['COMMAND_CREATED', 'COMMAND_APPROVED', 'COMMAND_EXECUTION_STARTED', 'COMMAND_EXECUTION_FAILED']);
     failDispatch = false;

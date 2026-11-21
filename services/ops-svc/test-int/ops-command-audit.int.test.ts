@@ -1,14 +1,14 @@
 // ops-svc 실제 PostgreSQL 18 통합 시험(GAT-110 첫 몫, R-552).
 // 0000 마이그레이션 적용·재적용, ops_command·command_event·command_approval·audit_chain 저장소,
 // 2인 승인·요청자≠승인자, 감사 해시 체인, CS REFUND_FAILED 열린 건 멱등을 실제 DB에서 본다.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createDatabase, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
-import { AuditCheckpointService, DrizzleAuditChain, DrizzleAuditCheckpointStore, auditHash } from '../src/modules/audit/index.js';
+import { AuditCheckpointService, DrizzleAuditChain, DrizzleAuditCheckpointStore, auditHash, auditRecordFromJson } from '../src/modules/audit/index.js';
 import { DrizzleCsCaseStore, ReceiveCaseRequested } from '../src/modules/cases/index.js';
 import {
   APPROVAL_TTL_MS,
@@ -63,10 +63,17 @@ afterAll(async () => {
 const q = <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params?: unknown[]) => admin.query<R>(text, params);
 const count = async (text: string, params: unknown[] = []): Promise<number> => Number((await q<{ n: string }>(text, params)).rows[0]!.n);
 const COMMANDER_TYPES = ['BOT_LEVEL', 'DEGRADED_MODE', 'KILL_SWITCH', 'SALE_STOP', 'SALE_RESUME', 'AUTOMATION_STOP'];
+/** 명령 3·5는 openapi Command.params의 칸만 받는다(ADR-0340 결정 9). 그 밖의 유형은 열린 객체다 */
+const PARAMS: Record<string, Record<string, unknown>> = { BOT_LEVEL: { level: 'STANDARD' }, KILL_SWITCH: { scope: 'PLATFORM' } };
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+/** 키 차례에 흔들리지 않는 JSON의 SHA-256(감사 기록에 실린 dry-run 지문과 견준다) */
+const sorted = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(sorted) : v !== null && typeof v === 'object' ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])])) : v;
+const digest = (v: unknown): string => createHash('sha256').update(JSON.stringify(sorted(v))).digest('hex');
 const commandInput = (type: 'LOG_LEVEL' | 'BOT_LEVEL' | 'DEGRADED_MODE' | 'KILL_SWITCH', over: Record<string, unknown> = {}) => ({
   type,
   reason: '장애 대응',
-  params: {},
+  params: PARAMS[type] ?? {},
   requestedBy: REQUESTER,
   requestedRole: COMMANDER_TYPES.includes(type) ? 'commander' : 'operator',
   nowMs: NOW,
@@ -131,35 +138,50 @@ describe('0000 마이그레이션과 표 모양', () => {
 });
 
 describe('운영 명령 저장소와 감사 해시 체인', () => {
-  test('GAT110_2인_명령은_PENDING_APPROVAL·10분_기한·사건_2개·감사_1개를_남긴다', async () => {
+  test('GAT110_2인_명령은_PENDING_APPROVAL·10분_기한·사건_3개·감사_1개를_남기고_사람_칸은_가명_참조다', async () => {
     const command = await create.execute(commandInput('BOT_LEVEL', { reason: '봇 급증', params: { level: 'AGGRESSIVE' } }));
     expect(command.state).toBe('PENDING_APPROVAL');
     expect(command.approvalExpiresAtMs).toBe(NOW + APPROVAL_TTL_MS);
 
-    const row = await q<{ state: string; approval_expires_at: Date }>('select state, approval_expires_at from ops_command where id = $1', [command.commandId]);
+    const row = await q<{ state: string; approval_expires_at: Date; requested_by: string; requested_role: string }>(
+      'select state, approval_expires_at, requested_by, requested_role from ops_command where id = $1',
+      [command.commandId],
+    );
     expect(row.rows[0]!.state).toBe('PENDING_APPROVAL');
     expect(row.rows[0]!.approval_expires_at.getTime()).toBe(NOW + APPROVAL_TTL_MS);
+    // 사람 칸은 기록마다 새 가명 참조(UUIDv4)이고 관리 계정 ID는 대응 표에만 있다(ADR-0340 결정 8, docs/data.md command_event.actor_ref)
+    const ref = row.rows[0]!.requested_by;
+    expect(ref).toMatch(UUID_V4);
+    expect(ref).not.toBe(REQUESTER);
+    expect(row.rows[0]!.requested_role).toBe('commander');
 
-    const events = await q<{ seq: number; type: string; actor_ref: string }>('select seq, type, actor_ref from command_event where command_id = $1 order by seq', [command.commandId]);
+    // 요청 한 행위의 CREATED·DRY_RUN·첫 상태 사건이 같은 참조다(control-tower §4 T1·T2·T4)
+    const events = await q<{ seq: number; type: string; actor_ref: string; actor_role: string; has_dry_run: boolean }>(
+      'select seq, type, actor_ref, actor_role, dry_run is not null as has_dry_run from command_event where command_id = $1 order by seq',
+      [command.commandId],
+    );
     expect(events.rows).toEqual([
-      { seq: 1, type: 'CREATED', actor_ref: REQUESTER },
-      { seq: 2, type: 'PENDING_APPROVAL', actor_ref: REQUESTER },
+      { seq: 1, type: 'CREATED', actor_ref: ref, actor_role: 'commander', has_dry_run: false },
+      { seq: 2, type: 'DRY_RUN', actor_ref: ref, actor_role: 'commander', has_dry_run: true },
+      { seq: 3, type: 'PENDING_APPROVAL', actor_ref: ref, actor_role: 'commander', has_dry_run: false },
     ]);
+    const actors = await q<{ actor_ref: string; round: number; side: string; admin_account_id: string }>(
+      'select actor_ref::text as actor_ref, round, side, admin_account_id::text as admin_account_id from command_actor where command_id = $1',
+      [command.commandId],
+    );
+    expect(actors.rows).toEqual([{ actor_ref: ref, round: 0, side: 'REQUESTER', admin_account_id: REQUESTER }]);
 
-    const audit = await q<{ seq: string; record_type: string; record_id: string; hash: string; mac: Buffer | null; salt_len: number }>(
-      "select seq, record_type, record_id, encode(record_sha256, 'hex') as hash, mac, octet_length(leaf_salt) as salt_len from audit_chain where record_id = $1 order by seq",
+    const audit = await q<{ seq: string; record_type: string; record_id: string; hash: string; mac: Buffer | null; salt_len: number; record_json: unknown }>(
+      "select seq, record_type, record_id, encode(record_sha256, 'hex') as hash, mac, octet_length(leaf_salt) as salt_len, record_json from audit_chain where record_id = $1 order by seq",
       [command.commandId],
     );
     expect(audit.rows).toHaveLength(1);
     expect(audit.rows[0]).toMatchObject({ record_type: 'COMMAND_CREATED', record_id: command.commandId, mac: null, salt_len: 32 });
-    expect(audit.rows[0]!.hash).toBe(
-      auditHash('', {
-        recordType: 'COMMAND_CREATED',
-        recordId: command.commandId,
-        payload: { type: 'BOT_LEVEL', state: 'PENDING_APPROVAL', requestedBy: REQUESTER, reason: '봇 급증' },
-        nowMs: NOW,
-      }),
-    );
+    const record = auditRecordFromJson(audit.rows[0]!.record_json)!;
+    const [dry] = (await q<{ dry_run: unknown }>("select dry_run from command_event where command_id = $1 and type = 'DRY_RUN'", [command.commandId])).rows;
+    expect(record.payload).toEqual({ type: 'BOT_LEVEL', state: 'PENDING_APPROVAL', requestedBy: ref, requestedRole: 'commander', reason: '봇 급증', dryRunSha256: digest(dry!.dry_run) });
+    expect(JSON.stringify(audit.rows[0]!.record_json)).not.toContain(REQUESTER);
+    expect(audit.rows[0]!.hash).toBe(auditHash('', { ...record, nowMs: NOW }));
 
     const head = await q<{ last_seq: string; hash: string }>("select last_seq, encode(last_hash, 'hex') as hash from audit_chain_head where id = 1");
     expect(head.rows[0]).toEqual({ last_seq: audit.rows[0]!.seq, hash: audit.rows[0]!.hash });
@@ -169,23 +191,33 @@ describe('운영 명령 저장소와 감사 해시 체인', () => {
     const command = await create.execute(commandInput('BOT_LEVEL'));
     await expect(decide.approve({ commandId: command.commandId, approverRef: REQUESTER, approverRole: 'commander', nowMs: NOW + 1 })).rejects.toMatchObject({ status: 403 });
     expect(await count('select count(*) as n from command_approval where command_id = $1', [command.commandId])).toBe(0);
+    expect(await count("select count(*) as n from command_actor where command_id = $1 and side = 'APPROVER'", [command.commandId])).toBe(0);
 
     const approved = await decide.approve({ commandId: command.commandId, approverRef: APPROVER, approverRole: 'commander', nowMs: NOW + 1 });
     expect(approved.state).toBe('APPROVED');
     expect(approved.approvalExpiresAtMs).toBeUndefined();
+    // 응답의 approvals는 대응 표로 푼 관리 계정이다(ADR-0340 결정 8)
     expect((await get.execute(command.commandId)).approvals).toEqual([APPROVER]);
 
-    const approval = await q<{ approver_ref: string; approver_role: string; decision: string; reason: string | null }>(
-      'select approver_ref, approver_role, decision, reason from command_approval where command_id = $1',
+    const approval = await q<{ approver_ref: string; approver_role: string; decision: string; reason: string | null; round: number }>(
+      'select approver_ref, approver_role, decision, reason, round from command_approval where command_id = $1',
       [command.commandId],
     );
-    expect(approval.rows).toEqual([{ approver_ref: APPROVER, approver_role: 'commander', decision: 'APPROVED', reason: null }]);
+    expect(approval.rows).toHaveLength(1);
+    const approverRef = approval.rows[0]!.approver_ref;
+    expect(approverRef).toMatch(UUID_V4);
+    expect(approverRef).not.toBe(APPROVER);
+    expect(approval.rows[0]).toEqual({ approver_ref: approverRef, approver_role: 'commander', decision: 'APPROVED', reason: null, round: 0 });
+    const mapped = await q<{ side: string; admin_account_id: string }>('select side, admin_account_id::text as admin_account_id from command_actor where actor_ref = $1::uuid', [approverRef]);
+    expect(mapped.rows).toEqual([{ side: 'APPROVER', admin_account_id: APPROVER }]);
 
+    const requesterRef = (await q<{ requested_by: string }>('select requested_by from ops_command where id = $1', [command.commandId])).rows[0]!.requested_by;
     const events = await q<{ seq: number; type: string; actor_ref: string }>('select seq, type, actor_ref from command_event where command_id = $1 order by seq', [command.commandId]);
     expect(events.rows).toEqual([
-      { seq: 1, type: 'CREATED', actor_ref: REQUESTER },
-      { seq: 2, type: 'PENDING_APPROVAL', actor_ref: REQUESTER },
-      { seq: 3, type: 'APPROVED', actor_ref: APPROVER },
+      { seq: 1, type: 'CREATED', actor_ref: requesterRef },
+      { seq: 2, type: 'DRY_RUN', actor_ref: requesterRef },
+      { seq: 3, type: 'PENDING_APPROVAL', actor_ref: requesterRef },
+      { seq: 4, type: 'APPROVED', actor_ref: approverRef },
     ]);
 
     const audit = await q<{ seq: string; hash: string }>("select seq, encode(record_sha256, 'hex') as hash from audit_chain where record_id = $1 order by seq", [command.commandId]);
@@ -194,7 +226,7 @@ describe('운영 명령 저장소와 감사 해시 체인', () => {
       auditHash(audit.rows[0]!.hash, {
         recordType: 'COMMAND_APPROVED',
         recordId: command.commandId,
-        payload: { decision: 'APPROVED', approverRef: APPROVER, approverRole: 'commander' },
+        payload: { decision: 'APPROVED', approverRef, approverRole: 'commander' },
         nowMs: NOW + 1,
       }),
     );
@@ -230,7 +262,8 @@ describe('운영 명령 저장소와 감사 해시 체인', () => {
   test('GAT110_목록은_유형·상태·회차로_거르고_커서로_나누며_상세는_params를_싣는다', async () => {
     const eventId = randomUUID();
     const a = await create.execute(commandInput('LOG_LEVEL', { params: { eventId }, nowMs: NOW + 10 }));
-    const b = await create.execute(commandInput('BOT_LEVEL', { params: { eventId }, nowMs: NOW + 11 }));
+    // 명령 5(BOT_LEVEL)는 eventId 칸이 없다(ADR-0340 결정 9). 열린 객체인 DEGRADED_MODE로 회차를 건다
+    const b = await create.execute(commandInput('DEGRADED_MODE', { params: { eventId }, nowMs: NOW + 11 }));
 
     const page1 = await list.execute({ eventId, limit: 1 });
     expect(page1.items).toHaveLength(1);
@@ -240,7 +273,7 @@ describe('운영 명령 저장소와 감사 해시 체인', () => {
     expect(page2.items[0]!.commandId).not.toBe(page1.items[0]!.commandId);
     expect([page1.items[0]!.commandId, page2.items[0]!.commandId]).toEqual([b.commandId, a.commandId]);
 
-    expect((await list.execute({ eventId, type: 'BOT_LEVEL', limit: 10 })).items.map((c) => c.commandId)).toEqual([b.commandId]);
+    expect((await list.execute({ eventId, type: 'DEGRADED_MODE', limit: 10 })).items.map((c) => c.commandId)).toEqual([b.commandId]);
     expect((await list.execute({ eventId, states: ['APPROVED'], limit: 10 })).items.map((c) => c.commandId)).toEqual([a.commandId]);
 
     expect((await get.execute(a.commandId)).params).toEqual({ eventId });

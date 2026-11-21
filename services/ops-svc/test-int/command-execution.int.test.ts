@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
 import { HttpCommandExecutor } from '../src/adapters/http-command-executor.js';
 import { AppModule } from '../src/app.module.js';
-import { DrizzleCommandStore } from '../src/modules/commands/index.js';
+import { DrizzleCommandStore, IllegalCommandTransition } from '../src/modules/commands/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { adminAccountsForCommands, reauthFor } from './reauth.js';
@@ -155,8 +155,15 @@ describe('BAT-465 실제 PostgreSQL·대상 HTTP', () => {
     await store.markDispatched(commandId, NOW + 1);
     await store.markDispatchFailed(commandId, 'boom', NOW + 2);
     expect((await store.find(commandId))?.lastError).toBe('boom');
-    await store.markSucceeded(commandId, undefined, NOW + 3);
-    expect((await store.find(commandId))?.lastError).toBeUndefined();
+    // 전이 표에 FAILED → SUCCEEDED는 없다(control-tower §4): 트랜잭션째 되돌아가고 행은 FAILED 그대로다
+    await expect(store.markSucceeded(commandId, undefined, NOW + 3)).rejects.toBeInstanceOf(IllegalCommandTransition);
+    expect(await store.find(commandId)).toMatchObject({ state: 'FAILED', lastError: 'boom', attempts: 1 });
+    // 같은 명령 ID로 다시 보낸 뒤(T11) 성공한다
+    await store.markDispatched(commandId, NOW + 4);
+    await store.markSucceeded(commandId, undefined, NOW + 5);
+    const done = await store.find(commandId);
+    expect(done).toMatchObject({ state: 'SUCCEEDED', attempts: 2 });
+    expect(done?.lastError).toBeUndefined();
   });
 
   test('BAT465_SCALE_CHANGE는_core-svc를_불러_SUCCEEDED로_끝나고_체크포인트_두_개를_남긴다', async () => {
@@ -173,7 +180,8 @@ describe('BAT-465 실제 PostgreSQL·대상 HTTP', () => {
     expect(row.rows[0]).toMatchObject({ state: 'SUCCEEDED', attempts: 1, result: { target: 'core-svc' } });
     expect(await count("select count(*) as n from audit_checkpoint where reason like $1", [`COMMAND_EXECUTION%:${c.commandId}`])).toBe(2);
     const events = await q<{ type: string }>('select type from command_event where command_id = $1::uuid order by seq', [c.commandId]);
-    expect(events.rows.map((r) => r.type)).toEqual(['CREATED', 'APPROVED', 'DISPATCHED', 'SUCCEEDED']);
+    // 접수는 CREATED → DRY_RUN → 첫 상태 사건을 쓴다(control-tower §4 T1·T2·T5, ADR-0340 결정 2)
+    expect(events.rows.map((r) => r.type)).toEqual(['CREATED', 'DRY_RUN', 'APPROVED', 'DISPATCHED', 'SUCCEEDED']);
   });
 
   test('BAT465_EVENT_CANCEL은_요청자_본인이_승인할_수_없고_commander_승인_뒤_purchase로_간다', async () => {

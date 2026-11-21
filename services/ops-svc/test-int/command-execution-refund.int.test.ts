@@ -80,7 +80,7 @@ describe('BAT-425 회차 취소 환불 명령', () => {
     expect(JSON.parse(approved.payload)).toMatchObject({ state: 'SUCCEEDED' });
     expect(calls[0]).toMatchObject({ method: 'start', q: { requestId: c.commandId, eventId, fault: 'ORGANIZER', kind: 'CANCEL' } });
     const events = await admin.query('select type from command_event where command_id = $1::uuid order by seq', [c.commandId]);
-    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'SUCCEEDED']);
+    expect(events.rows.map((r: { type: string }) => r.type)).toEqual(['CREATED', 'DRY_RUN', 'PENDING_APPROVAL', 'APPROVED', 'DISPATCHED', 'SUCCEEDED']);
   });
 
   test('GAT130_EVENT_REFUND_PAUSE와_RESUME은_같은_작업_ID로_바로_실행된다', async () => {

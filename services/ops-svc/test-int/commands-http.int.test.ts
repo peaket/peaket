@@ -45,7 +45,8 @@ describe('/v1/ops/commands 실제 DB HTTP', () => {
     const viewer = identity.ops('viewer');
     expect((await get('/v1/ops/commands', viewer)).statusCode).toBe(200);
     expect((await post('/v1/ops/commands', viewer, { type: 'LOG_LEVEL', reason: 'x' })).statusCode).toBe(403);
-    const created = await post('/v1/ops/commands', identity.ops('commander'), { type: 'BOT_LEVEL', reason: '권한 확인' });
+    const created = await post('/v1/ops/commands', identity.ops('commander'), { type: 'BOT_LEVEL', reason: '권한 확인', params: { level: 'STANDARD' } });
+    expect(created.statusCode).toBe(201);
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     expect((await get(`/v1/ops/commands/${commandId}`, viewer)).statusCode).toBe(403);
     expect((await post(`/v1/ops/commands/${commandId}/approvals`, viewer, {})).statusCode).toBe(403);
@@ -79,15 +80,21 @@ describe('/v1/ops/commands 실제 DB HTTP', () => {
 
   test('GAT110_거부와_모르는_명령_유형·빈_사유는_계약대로_응답한다', async () => {
     const operator = identity.ops('operator');
-    const created = await post('/v1/ops/commands', operator, { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: { asn: 1234 } });
+    // 명령 4는 ASN이 있으면 2인이다(ADR-0339 결정 1). 만료 시각은 필수(24시간 이하)
+    const created = await post('/v1/ops/commands', operator, { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: { asns: [1234], expiresAt: new Date(NOW + 60 * 60_000).toISOString() } });
+    expect(JSON.parse(created.payload)).toMatchObject({ state: 'PENDING_APPROVAL' });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     const commander = identity.ops('commander');
     const rejected = await post(`/v1/ops/commands/${commandId}/rejections`, commander, { reason: '근거 부족' });
     expect(rejected.statusCode).toBe(200);
     expect(JSON.parse(rejected.payload)).toMatchObject({ commandId, state: 'REJECTED' });
 
-    expect((await post('/v1/ops/commands', operator, { type: 'NOPE', reason: 'x' })).statusCode).toBe(400);
-    expect((await post('/v1/ops/commands', operator, { type: 'LOG_LEVEL', reason: '' })).statusCode).toBe(400);
+    // reauthFor가 Idempotency-Key를 붙이므로 400은 본문 검사의 400이다
+    for (const bad of [{ type: 'NOPE', reason: 'x' }, { type: 'LOG_LEVEL', reason: '' }]) {
+      const r = await post('/v1/ops/commands', operator, bad);
+      expect(r.statusCode).toBe(400);
+      expect(String((JSON.parse(r.payload) as { type: string }).type)).not.toMatch(/idempotency-key-invalid$/);
+    }
     expect((await get(`/v1/ops/commands/${randomUUID()}`, operator)).statusCode).toBe(404);
   });
 });
