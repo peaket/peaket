@@ -77,6 +77,13 @@
 - 명령: `node --test tools/local/demo-seed.test.mjs tools/local/demo.test.mjs tools/local/demo-auth.test.mjs` → 시험 60, 실패 3, 건너뜀 3(W12T-01 ②③④ POSIX 세부. Windows라 건너뛰고 우분투 CI `tools-check / tools`가 본다). `node --test "tools/local/*.test.mjs"` → 시험 265, 실패 3(같은 셋), 건너뜀 4(위 셋 + BSL050 0600). demo-seed DS-05·06은 identity-svc `dist`가 없으면 모듈 없음으로 실행조차 안 돼 `pnpm exec turbo run build --filter=@peaket/identity-svc` 뒤에 쟀다.
 - 실패 까닭: W12T-01 ④(모든 OS) `demo-auth.mjs`가 `writeSecretJson`을 내보내지 않음 / W12T-02 ① 시드가 빠진 `all`에서 판 확인 셋(`docker --version`·`kind version`·`kubectl version --client --output=json`)이 기록됨(Windows에서도) / W12T-02 ② 도구 판 칸이 docker·kind·kubectl '있음'이고 helm 칸이 없음. 통과(★ 아님): W12T-02 ③(판을 잼, 기록 장치 자기 확인)·④(doctor 기록 0). W12T-01 ③④ POSIX 세부(있던 파일에 `mode`가 듣지 않아 644가 남음, 도우미 없음)는 CI에서 실패해야 하고, ②는 지금도 맞다.
 
+## 구현 메모
+
+- `tools/local/demo-auth.mjs`: `writeSecretJson(file, value)`를 내보낸다(폴더 만들기 → `writeFileSync(mode 0o600)` → `chmodSync(0o600)`, 있던 넓은 파일도 좁힌다). 빠진 키 채우기·새 비밀 파일·`sessions.json` 세 자리를 이리로 모아, 주석 밖 `writeFileSync(`는 이 함수 안 한 곳뿐이다.
+- `tools/local/demo.mjs`: `measurementOf`가 `probeTools`를 받고 `runAll`은 `issues.ok`를 넘긴다. 선행이 없으면 docker·kind·kubectl·helm을 판 확인까지 실행하지 않고, 찾은 도구는 '판 확인 안 함', 못 찾은 도구는 '없음'이다. 도구 판 칸에 helm(`version --short`)을 더했다.
+- 게이트웨이 라우트 생성물: W12-prf192가 `docs/api/openapi.yaml`을 고친 뒤 `--write`를 빠뜨려 `deploy/gateways/*.routes.yaml` 다섯의 계약 sha256 줄이 옛 값이었다(재현 시험 `tools/ci/gateway-routes.test.mjs` D-T42 ①② 실패). `node tools/ci/gateway-routes.mjs --write`로 다시 만들었고 `git diff`는 다섯 파일의 sha256 줄(줄 2)뿐이다. 따로 커밋한다.
+- 게이트(win32, Docker 없음): 세 시험 파일 시험 60·통과 57·실패 0·건너뜀 3(W12T-01 ②③④ POSIX). `node --test "tools/local/*.test.mjs"` 265·통과 261·실패 0·건너뜀 4(위 셋 + BSL050 0600). `gateway-routes.mjs --check` exit 0(고치기 전 5건 다름). `gateway-routes.test.mjs` 41·실패 0(고치기 전 D-T42 ①② 실패 1). 바꾼 두 파일 `pnpm exec eslint` 0. `check_all.py` 오류 0·경고 4(이 묶음 밖).
+
 ## 시험 결과
 
 (구현 뒤 시험 담당이 채운다)
@@ -95,3 +102,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w12tools-plan-7f3b | claude-opus-5-5 | 2026-11-21T23:23+09:00 | 2026-11-21T23:34+09:00 |
 | test | w12tools-test-1a8c | claude-opus-5-5 | 2026-11-21T23:34+09:00 | 2026-11-21T23:47+09:00 |
+| impl | w12tools-impl-9c2e | claude-opus-5-5 | 2026-11-21T23:49+09:00 | 2026-11-21T23:56+09:00 |

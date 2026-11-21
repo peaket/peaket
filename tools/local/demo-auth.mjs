@@ -10,7 +10,7 @@
 //   node tools/local/demo-auth.mjs passkey <accountKey>
 // 계약: 표준 출력 한 줄 JSON { accountKey, kind, cookies: [{ name, value, domain, path, secure, httpOnly, sameSite }], passkey? }
 import { createHash, createHmac, generateKeyPairSync, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +99,19 @@ export function readSeed(file = DEMO_SEED_FILE) {
 }
 
 /**
+ * 비밀 JSON 파일을 쓴다(폴더 만들기 → 0600으로 쓰기 → 권한 맞추기). 비밀 파일 쓰기는 모두 이리로 모은다.
+ * mode는 새 파일에만 들어서, 있던 파일(넓은 권한일 수 있다)은 chmod로 0600까지 좁힌다(docs/infra.md '로컬 데모의 비밀').
+ * Windows에는 POSIX 권한이 없어 chmod가 읽기 전용 여부만 바꾼다
+ * @param {string} file
+ * @param {unknown} value
+ */
+export function writeSecretJson(file, value) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(file, 0o600);
+}
+
+/**
  * 데모 비밀을 읽거나 새로 만든다(0600). 같은 파일을 두 번 쓰지 않는다(멱등).
  * secretsFile은 비밀 파일 자리(기본 DEMO_SECRETS_FILE. 시험이 임시 폴더를 준다)
  * @param {{ seedFile?: string, secretsFile?: string }} [o]
@@ -119,7 +132,7 @@ export function prepareDemoSecrets(o = {}) {
         changed = true;
       }
     }
-    if (changed) writeFileSync(secretsFile, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+    if (changed) writeSecretJson(secretsFile, secrets);
     return { secrets, bootstrap: bootstrapOf(seed, secrets, seedFile) };
   }
   const fan = randomJwk();
@@ -158,8 +171,7 @@ export function prepareDemoSecrets(o = {}) {
     if (a.kind === 'admin') secrets.accounts[a.key] = { password: randomBytes(18).toString('base64url'), totpSeed: base32(randomBytes(20)) };
   }
   for (const p of seed.adminPasskeys ?? []) secrets.passkeys[p.accountKey] = passkeyMaterial(p.name);
-  mkdirSync(dirname(secretsFile), { recursive: true });
-  writeFileSync(secretsFile, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+  writeSecretJson(secretsFile, secrets);
   return { secrets, bootstrap: bootstrapOf(seed, secrets, seedFile) };
 }
 
@@ -496,9 +508,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(2);
   }
   const result = await demoAuth(cmd, arg);
-  mkdirSync(dirname(DEMO_SESSIONS_FILE), { recursive: true });
   const sessions = existsSync(DEMO_SESSIONS_FILE) ? JSON.parse(readFileSync(DEMO_SESSIONS_FILE, 'utf8')) : {};
   sessions[`${cmd}:${arg}`] = result;
-  writeFileSync(DEMO_SESSIONS_FILE, `${JSON.stringify(sessions, null, 2)}\n`, { mode: 0o600 });
+  writeSecretJson(DEMO_SESSIONS_FILE, sessions);
   console.log(JSON.stringify(result));
 }
