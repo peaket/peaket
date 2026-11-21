@@ -11,6 +11,8 @@ import { repo, commit, git, tempDir } from './git-fixture.mjs';
 import { parseCommand } from '../claude-hooks/shell.mjs';
 import { pre, post } from '../claude-hooks/shell-rules.mjs';
 import { preEdit, postEdit } from '../claude-hooks/edit-rules.mjs';
+import { unattended } from '../claude-hooks/lib.mjs';
+import { main as unattendedMain } from '../claude-hooks/unattended.mjs';
 
 const HOOKS = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'claude-hooks');
 const ROOT = resolve(HOOKS, '..', '..');
@@ -218,6 +220,101 @@ test('CH-11 ① 공유 설정이 훅 넷을 잇고, 가리키는 파일이 있�
   // 강제 푸시 금지(permissions.deny)는 PowerShell 도구에도 건다
   assert.ok(settings.permissions.deny.some((r) => r.startsWith('PowerShell(git push --force')));
 });
+
+// 명령줄에 넣는 경로는 / 로 쓴다(\ 는 셸 낱말 가르기에서 이스케이프로 읽힌다)
+const slash = (p) => p.split('\\').join('/');
+
+test('CH-12 ① 갈래 작업 폴더(링크된 worktree)에서 가지 만들기·바꾸기는 묻지 않는다', () => {
+  const main = devRepo();
+  const wt = slash(join(tempDir('claude-hooks-wt-'), 'lane9'));
+  git(main, 'worktree', 'add', '-q', '-b', 'feature/lane9-x', wt);
+  for (const c of ['git switch -c feature/lane9-y origin/develop', 'git checkout -b feature/lane9-z', 'git switch develop']) {
+    assert.equal(shell(c, wt), 'pass', c);
+  }
+  assert.equal(shell(`git -C ${wt} switch -c feature/lane9-w origin/develop`, main), 'pass');
+  assert.equal(shell(`cd ${wt} && git switch -c feature/lane9-v`, main), 'pass');
+  assert.equal(shell(`Set-Location ${wt}; git switch -c feature/lane9-t`, main, 'PowerShell'), 'pass');
+  // 메인 작업 트리(여러 세션이 함께 씀)는 그대로 묻는다. 작업 폴더라도 stash·되돌리기는 묻는다
+  assert.equal(shell('git switch -c feature/lane9-u', main), 'ask');
+  assert.equal(shell(`cd ${wt} && git -C ${slash(main)} switch lane9`, main), 'ask');
+  assert.equal(shell(`cd ${wt} && git stash`, main), 'ask');
+  assert.equal(shell('git restore docs/a.md', wt), 'ask');
+});
+
+test('CH-12 ② feature/* 가지 올리기·lease·지우기는 묻지 않고, main·다른 가지는 묻는다', () => {
+  for (const c of [
+    'git push -u origin feature/lane1-BAT-059',
+    'git push origin HEAD:refs/heads/feature/lane1-BAT-059',
+    'git push --force-with-lease origin feature/lane1-BAT-059',
+    'git push origin --delete feature/lane1-BAT-059',
+    'git push origin :feature/lane1-BAT-059',
+    'git push origin HEAD:develop feature/lane1-BAT-059',
+  ]) {
+    assert.equal(shell(c), 'pass', c);
+  }
+  const lane = devRepo();
+  git(lane, 'checkout', '-q', '-b', 'feature/lane2-BAT-350');
+  assert.equal(shell('git push', lane), 'pass');
+  assert.equal(shell('git push origin HEAD', lane), 'pass');
+  for (const c of ['git push origin main', 'git push origin lane1', 'git push --force-with-lease origin lane4-r2', 'git push origin --delete lane1', 'git push origin feature/x main']) {
+    assert.equal(shell(c), 'ask', c);
+  }
+  assert.equal(shell('git push --force-with-lease origin feature/x develop'), 'deny');
+  assert.equal(shell('git push --force origin feature/lane1-x'), 'deny');
+});
+
+function withState(fn) {
+  const state = tempDir('claude-hooks-state-');
+  const old = process.env.PEAKET_HOOKS_STATE_DIR;
+  process.env.PEAKET_HOOKS_STATE_DIR = state;
+  try {
+    return fn(state);
+  } finally {
+    if (old == null) delete process.env.PEAKET_HOOKS_STATE_DIR;
+    else process.env.PEAKET_HOOKS_STATE_DIR = old;
+  }
+}
+
+test('CH-13 ① 무인 모드: 묻기는 허용으로 바꾸고 기록하며, 막기와 main 푸시는 막는다', () =>
+  withState((state) => {
+    assert.equal(shell('git stash'), 'ask');
+    assert.equal(unattendedMain(['on', '1']).code, 0);
+    const out = pre({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git stash' }, cwd: DEV, session_id: 's-1' });
+    assert.equal(decision(out), 'allow');
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /무인 모드[\s\S]*git stash/);
+    for (const c of ['git push --tags', 'git update-ref refs/heads/x abc', 'git add docs', 'git push origin lane1']) {
+      assert.equal(shell(c), 'allow', c);
+    }
+    for (const c of ['git reset --hard', 'git push --force', 'git add -A', 'npm install x', 'git push origin lane1 && git reset --hard']) {
+      assert.equal(shell(c), 'deny', c);
+    }
+    assert.equal(shell('git push origin main'), 'deny');
+    assert.equal(shell('git push -u origin feature/lane1-x'), 'pass');
+    const log = readFileSync(join(state, 'allowed.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(log.length, 5);
+    assert.equal(log[0].command, 'git stash');
+    assert.equal(log[0].session, 's-1');
+    assert.ok(log.every((e) => e.reason && e.at));
+    assert.match(unattendedMain(['status']).text, /켜짐[\s\S]*git stash/);
+    assert.match(unattendedMain(['off']).text, /5개/);
+    assert.equal(shell('git stash'), 'ask');
+    assert.match(unattendedMain(['off']).text, /이미 꺼져/);
+  }));
+
+test('CH-13 ② 무인 모드는 끝 시각이 지나면 꺼지고, 잘못된 시간은 받지 않는다', () =>
+  withState((state) => {
+    const t0 = Date.UTC(2026, 10, 21, 15, 0, 0);
+    assert.equal(unattendedMain(['on', '2'], t0).code, 0);
+    assert.ok(unattended(t0 + 3_600_000));
+    assert.equal(unattended(t0 + 2 * 3_600_000), null);
+    for (const bad of ['0', '-1', '25', 'abc']) assert.equal(unattendedMain(['on', bad]).code, 2, bad);
+    assert.equal(unattendedMain(['bogus']).code, 2);
+    writeFileSync(join(state, 'on.json'), '{깨진');
+    assert.equal(unattended(), null);
+    const r = spawnSync(process.execPath, [join(HOOKS, 'unattended.mjs'), 'status'], { encoding: 'utf8', env: { ...process.env, PEAKET_HOOKS_STATE_DIR: state }, timeout: 20000 });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /꺼짐/);
+  }));
 
 test('CH-11 ② 이 저장소의 실제 생성 파일이 막힌다', () => {
   const out = execFileSync(process.execPath, [join(HOOKS, 'guard-edit.mjs')], {

@@ -1,8 +1,9 @@
 # ADR-0330: 에이전트 훅으로 저장소 절대 규칙을 막는다(셸 명령·생성 파일·원천 고친 뒤 할 일) (2026-11-21)
 
 - **상태**: 채택(2026-11-21, 소유자 결정 '1단계 만들기'). 턴 끝 점검(결정 7)은 2단계로 미룬다.
+  - 보충(2026-11-21, 소유자 결정: 자는 동안 세션이 권한 물음에 멈추지 않게 '무인 모드'를 켜고 끄기, 그때 남은 묻기는 '자동 허용'): 결정 9를 더하고 결정 3의 두 줄과 결정 6의 마지막 문장을 바꿨다.
 - **관련**: [CLAUDE.md](../../CLAUDE.md) '절대 규칙', [docs/architecture.md](../architecture.md) §8.6 '맡기기', [docs/devops.md](../devops.md) §2.2.5·§2.2.6 '강제 장치'·§4.4, ADR-0286(합치기 줄), `.claude/settings.json`, `tools/claude-hooks/`, `tools/ci/claude-hooks.test.mjs`
-- **관련 ID**: 시험 CH-01~CH-11
+- **관련 ID**: 시험 CH-01~CH-13
 
 ## 맥락
 
@@ -24,10 +25,12 @@
    | `git add -A`·`--all`·`-u`·`.`·`:/`(경로 없이), `git commit -a` | 막기 | CLAUDE.md '내가 고친 파일만 스테이징' |
    | 폴더나 글롭을 통째로 `git add` | 묻기 | 같은 규칙. 폴더 안에 다른 세션의 파일이 섞일 수 있다 |
    | `git reset --hard`, `git clean -f`, 작업 트리 전체 `git checkout`·`git restore` | 막기 | 다른 세션의 미완 변경을 버린다 |
-   | 경로를 준 `git checkout -- <경로>`·`git restore <경로>`, `git switch`·`checkout -b`, `git stash`(목록·보기 밖) | 묻기 | 내 파일이면 쓸 수 있다. 공유 작업 트리에서 가지를 바꾸면 다른 세션 파일이 섞인다(docs/devops.md §2.2.5) |
+   | 경로를 준 `git checkout -- <경로>`·`git restore <경로>`, 메인 작업 트리의 `git switch`·`checkout -b`, `git stash`(목록·보기 밖) | 묻기 | 내 파일이면 쓸 수 있다. 공유 작업 트리에서 가지를 바꾸면 다른 세션 파일이 섞인다(docs/devops.md §2.2.5) |
+   | 링크된 worktree(갈래 작업 폴더) 안의 `git switch`·`checkout -b`. 같은 명령줄의 `cd`·`Set-Location`과 `git -C`를 따라 가린다 | 통과 | 작업 폴더는 한 세션만 쓴다(결정 9) |
    | 강제 푸시(`--force`·`-f`·`+refspec`), develop·main으로 `--force-with-lease` | 막기 | §8.6 '맡기기', ADR-0286 |
-   | develop 밖 원격 가지·태그 푸시, `--tags`·`--all`, 원격 지우기, `git update-ref` | 묻기 | §8.6 '맡기기'(소유자에게 묻는 일), ADR-0286 |
+   | develop·`feature/*` 밖 원격 가지·태그 푸시, `--tags`·`--all`, `feature/*` 밖 원격 지우기, `git update-ref` | 묻기 | §8.6 '맡기기'(소유자에게 묻는 일), ADR-0286 |
    | `git push origin develop`·`HEAD:develop`, 로컬 `git push . …` | 통과 | 합치기 줄(ADR-0286) |
+   | `feature/*` 가지 올리기, 그 가지만의 `--force-with-lease`, 그 가지 지우기 | 통과 | 소유자 허락 2026-11-16(docs/PROGRESS.md 턴 규칙 '원격 올리기': 초안 PR CI용으로 올리고, 자기 가지는 lease로 다시 올리고, 합친 뒤 지운다) |
    | `npm`·`yarn` 설치 명령 | 막기 | docs/devops.md §4.4(pnpm 작업 공간 전용) |
    | 커밋 제목이 Conventional Commits 꼴이 아니거나 허용 종류 밖, 본문 `BREAKING CHANGE`인데 제목에 `!` 없음 | 막기 | docs/devops.md §2.2.5·§2.2.6 |
    | 커밋 뒤 제목 끝에 ID 괄호(예 `(LCH-080)`)가 없음 | 알리기(실행 뒤) | CLAUDE.md. ID가 딸리지 않는 정리 커밋도 있어 막지 않는다 |
@@ -35,9 +38,15 @@
    한 명령에 막기와 묻기가 섞이면 막기가 이긴다.
 4. **편집 전에 생성 파일과 다른 잠금 파일을 막는다.** 대상은 `packages/{contracts,api-client,ds}/src/gen/`, `deploy/local/dashboards/*.json`, 첫 줄(`#!` 줄 다음)이 주석 `생성 파일이다`로 시작하는 파일(게이트웨이 라우트·메시 정책·Kyverno 정책), `package-lock.json`·`npm-shrinkwrap.json`·`yarn.lock`, 손으로 고친 `pnpm-lock.yaml`이다. 막는 까닭에 원천과 돌릴 생성기를 적는다. 생성기는 Node로 파일을 쓰므로 막히지 않는다.
 5. **편집 뒤에 원천을 고쳤으면 할 일을 세션마다 한 번 알린다.** `docs/api/openapi.yaml`이면 contracts·api-client 생성과 게이트웨이 라우트 생성, `asyncapi.yaml`·`proto/`이면 contracts 생성(proto는 메시 정책도), 라우트·메시·Kyverno 원천과 디자인 토큰이면 그 생성기, `packages/platform/src`이면 platform 빌드(지표 목록이면 대시보드도), `packages/seatmap/src`·`services/{payment-svc,pg-simulator}/src`이면 상대 경로로 가져다 쓰는 core-svc·purchase-svc 타입 검사다. 알림은 막지 않는다.
-6. **훅이 스스로 고장 나면 막지 않고 통과시킨다.** 입력이 깨지거나 규칙이 예외를 던지면 출력 없이 끝 코드 0이다. 훅은 실수를 막는 난간이지 보안 경계가 아니다. 셸 글을 대충 읽으므로 마음먹고 돌아가는 길(변수에 담은 명령, `bash -c` 속 글 등)은 막지 못한다. 권한을 대신 허락하는(`allow`) 판정은 쓰지 않는다.
+6. **훅이 스스로 고장 나면 막지 않고 통과시킨다.** 입력이 깨지거나 규칙이 예외를 던지면 출력 없이 끝 코드 0이다. 훅은 실수를 막는 난간이지 보안 경계가 아니다. 셸 글을 대충 읽으므로 마음먹고 돌아가는 길(변수에 담은 명령, `bash -c` 속 글 등)은 막지 못한다. 권한을 대신 허락하는(`allow`) 판정은 결정 9의 무인 모드에서 '묻기'를 바꿀 때만 쓴다.
 7. **턴 끝 점검(Stop 훅)은 2단계로 미룬다.** 원천은 바뀌었는데 생성물이 그대로인 채 턴을 끝내는 일을 막으려면, 작업 트리 전체가 아니라 이 세션이 고친 파일만 봐야 한다(다른 세션의 미완 변경에 걸리지 않게). 그 기록 방식을 정한 뒤 더한다.
 8. **강제 푸시 권한 거절 목록에 `PowerShell(...)` 꼴을 더한다.** 훅과 권한 거절이 같은 일을 두 겹으로 막는다. 권한 거절은 훅이 고장 나도 남는다.
+9. **갈래 작업 폴더와 무인 모드(보충 2026-11-21).** 웨이브 12에서 갈래 세션이 묶음마다 새 가지를 만들고(`git switch -c`) 초안 PR용으로 `feature/*`를 올릴 때마다 물음에 걸려 멈췄다. 소유자가 자는 동안에는 답할 사람이 없다.
+   - 링크된 worktree(뿌리의 `.git`이 파일) 안의 가지 만들기·바꾸기와 `feature/*` 푸시·lease·지우기는 묻지 않는다(결정 3 표). 메인 작업 트리는 그대로 묻는다.
+   - 무인 모드: `node tools/claude-hooks/unattended.mjs on [시간]`으로 켜고 `off`로 끈다. 기본 12시간, 많아야 24시간 뒤 저절로 꺼진다. 상태는 저장소 뿌리의 `.claude/unattended/`(기록하지 않음)에 있다.
+   - 켜져 있으면 남은 '묻기'(폴더 통째 스테이징, 경로 되돌리기, 메인 작업 트리의 가지 바꾸기, `stash`, develop·`feature/*` 밖 푸시, 태그 푸시, 원격 지우기, `update-ref`)를 허용(`allow`)으로 바꾸고, 명령·세션·까닭을 `.claude/unattended/allowed.jsonl`에 한 줄씩 남긴다. 소유자가 `off`나 `status`로 아침에 본다.
+   - `main` 푸시(출시)만은 무인 모드에서 허용하지 않고 막는다. 소유자가 정할 일이라 아침에 다시 한다. '막기'(결정 3)는 무인 모드에서도 그대로다.
+   - 세션 권한 모드는 바꾸지 않는다(모두 auto). 모드가 다르면 세션 사이 메시지가 사용자 승인 대기로 묶여 밤새 조율이 멈추기 때문이다.
 
 ## 결과
 
@@ -48,6 +57,7 @@
   - 오탐으로 묻기·막기가 잦으면(한 주에 정상 작업이 세 번 넘게 막히면 [가정]) 그 규칙을 묻기나 알리기로 낮추고 이 ADR에 적는다.
   - 작업 가지·PR로 바꾸면(사람이 늘어 1인 기간이 끝나면, §8.5) 'develop 밖 푸시 묻기'는 가지 규칙에 맞춰 다시 정한다.
   - Claude Code가 같은 일을 하는 기본 기능(예: 생성 파일 표시를 읽는 편집 보호)을 내면 그 기능으로 옮긴다.
+  - 무인 모드(결정 9)에서 허용한 명령이 다른 세션의 변경을 날리거나 섞은 일이 한 번이라도 생기면, 그 종류는 무인 모드에서 막기로 바꾼다.
 
 ## 다른 선택지
 

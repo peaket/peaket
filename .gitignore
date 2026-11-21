@@ -18,6 +18,8 @@ crash.log
 
 # Claude Code의 개인 설정(공유 설정인 .claude/launch.json 등은 기록한다)
 .claude/settings.local.json
+# 에이전트 훅 무인 모드 상태·허용 기록(ADR-0330 결정 9)
+.claude/unattended/
 
 # 화면 앱 빌드 산출물(Next.js·Vite·webpack·Turborepo, docs/frontend.md §2.2)
 .next/

@@ -1,15 +1,18 @@
 // 셸 명령 검사 규칙(ADR-0330 결정 2·3). 실행 파일은 guard-shell.mjs이고 Bash와 PowerShell 도구 둘 다 건다(.claude/settings.json).
 // 실행 전(PreToolUse): CLAUDE.md 절대 규칙 가운데 명령으로 드러나는 것을 막거나 묻는다.
-//   - 남의 미완 변경 섞기·날리기: git add -A·.·-u, 폴더 통째 스테이징(묻기), commit -a, reset --hard, clean -f, checkout/restore 전체(막기)와 경로(묻기), stash·switch(묻기)
-//   - 소유자에게 묻는 일(docs/architecture.md §8.6 '맡기기'): 강제 푸시(막기), develop 밖 원격 가지·태그 푸시(묻기), update-ref(묻기)
+//   - 남의 미완 변경 섞기·날리기: git add -A·.·-u, 폴더 통째 스테이징(묻기), commit -a, reset --hard, clean -f, checkout/restore 전체(막기)와 경로(묻기), stash(묻기),
+//     메인 작업 트리의 switch·checkout -b(묻기. 갈래 작업 폴더인 링크된 worktree 안에서는 묻지 않는다)
+//   - 소유자에게 묻는 일(docs/architecture.md §8.6 '맡기기'): 강제 푸시(막기), develop·feature/* 밖 원격 가지·태그 푸시(묻기), update-ref(묻기).
+//     feature/* 가지 올리기·자기 가지 --force-with-lease·합친 뒤 지우기는 소유자가 허락했다(2026-11-16, docs/PROGRESS.md 턴 규칙 '원격 올리기')
 //   - pnpm 전용(docs/devops.md §4.4): npm·yarn 설치 명령(막기)
 //   - 커밋 제목은 Conventional Commits 1.0.0(tools/ci/conventional.mjs, docs/devops.md §2.2.5)
+// 무인 모드(lib.mjs unattended, 소유자 결정 2026-11-21)가 켜져 있으면 '묻기'를 허용으로 바꾸고 기록한다. main 푸시만은 그때 막는다
 // 실행 뒤(PostToolUse): 커밋 제목 끝에 요구사항·시험 ID 괄호가 없으면 알린다(막지 않는다)
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseTitle, TYPES } from '../ci/conventional.mjs';
-import { deny, ask, note } from './lib.mjs';
+import { deny, ask, allow, note, repoRootOf, unattended, logAllowed } from './lib.mjs';
 import { parseCommand, program, gitCall } from './shell.mjs';
 
 const STAGE_OTHERS =
@@ -43,6 +46,28 @@ function isDir(dir, p) {
     return false;
   }
 }
+
+// 링크된 worktree(뿌리의 .git이 파일)인지. 갈래 작업 폴더는 모두 git worktree add로 만든 이것이고 한 세션만 쓴다.
+// 메인 작업 트리(.git이 폴더)는 여러 세션이 함께 쓰므로 가지를 바꾸면 남의 미완 변경이 섞인다
+function isLinkedWorktree(dir) {
+  try {
+    const root = repoRootOf(dir);
+    return root != null && fs.statSync(path.join(root, '.git')).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// Git Bash의 /d/foo 꼴 경로를 D:/foo로 바꾼다(Windows에서 path.resolve가 잘못 읽지 않게)
+const nativePath = (p) => (process.platform === 'win32' ? p.replace(/^\/([A-Za-z])(?=\/|$)/, '$1:') : p);
+
+// 소유자가 자리를 비웠을 때도 묻지 않고 막을 '묻기'(main 푸시). 무인 모드에서 허용으로 바꾸지 않는다
+const OWNER_ONLY = new WeakSet();
+const askOwnerOnly = (reason) => {
+  const out = ask(reason);
+  OWNER_ONLY.add(out);
+  return out;
+};
 
 function checkAdd(args, dir) {
   if (hasFlag(args, '--dry-run', 'n')) return null;
@@ -117,11 +142,15 @@ function checkPush(args, dir) {
     return d.replace(/^refs\/heads\//, '');
   };
   const targets = refspecs.map(dst).map((d) => (d === 'HEAD' ? currentBranch(dir) : d));
+  // 갈래 작업 가지(feature/<갈래>-<묶음>): 초안 PR CI용으로 올리고, 자기 가지는 lease로 다시 올리고, 합친 뒤 지운다(소유자 허락 2026-11-16)
+  const feature = (t) => typeof t === 'string' && t.startsWith('feature/');
+  const pushed = refspecs.length ? targets : [currentBranch(dir)];
   if (force) return deny(`강제 푸시다. ${OWNER_ASK}. .claude/settings.json도 막는다`);
   if (lease) {
     if (!targets.length || targets.some((t) => t === 'develop' || t === 'main' || t == null)) {
       return deny(`develop·main(또는 가지를 알 수 없는) 강제 푸시다. ${OWNER_ASK}`);
     }
+    if (targets.every(feature)) return null;
     return ask(`강제 푸시(--force-with-lease)다. ${OWNER_ASK}`);
   }
   if (remote === '.') return null; // 로컬 가지 옮기기(합치기 줄)
@@ -129,10 +158,12 @@ function checkPush(args, dir) {
     return ask(`가지 여럿이나 태그를 원격에 올린다. ${OWNER_ASK}`);
   }
   if (hasFlag(args, '--delete', 'd') || refspecs.some((r) => r.startsWith(':'))) {
+    if (targets.length && targets.every(feature)) return null;
     return ask(`원격 가지·태그를 지운다. ${OWNER_ASK}`);
   }
-  const off = refspecs.length ? targets.filter((t) => t !== 'develop') : [currentBranch(dir)].filter((t) => t !== 'develop');
-  if (off.length) return ask(`develop 밖(${off.map((t) => t ?? '알 수 없음').join(', ')})으로 푸시한다. ${OWNER_ASK}`);
+  const off = pushed.filter((t) => t !== 'develop' && !feature(t));
+  if (off.includes('main')) return askOwnerOnly(`main으로 푸시한다(출시). ${OWNER_ASK}`);
+  if (off.length) return ask(`develop·feature/* 밖(${off.map((t) => t ?? '알 수 없음').join(', ')})으로 푸시한다. ${OWNER_ASK}`);
   return null;
 }
 
@@ -150,6 +181,7 @@ function checkGit(sub, args, dir, parsed) {
       return hasFlag(args, '--dry-run', 'n') || !hasFlag(args, '--force', 'f') ? null : deny(`git clean -f는 추적하지 않는 파일(다른 세션이 새로 만든 파일)을 지운다. ${DISCARD_OTHERS}`);
     case 'checkout': {
       if (hasFlag(args, '-b') || args.includes('-B') || hasFlag(args, '--orphan')) {
+        if (isLinkedWorktree(dir)) return null;
         return ask('공유 작업 트리에서 가지를 바꾼다. 다른 세션이 고치던 파일이 섞인다(docs/devops.md §2.2.5 문서 행). 갈래 작업이면 worktree를 쓴다');
       }
       const { before, after } = positional(args);
@@ -167,6 +199,7 @@ function checkGit(sub, args, dir, parsed) {
       return ask(`git restore로 파일을 되돌린다(${paths.join(', ')}). ${DISCARD_OTHERS}`);
     }
     case 'switch':
+      if (isLinkedWorktree(dir)) return null;
       return ask('공유 작업 트리에서 가지를 바꾼다. 다른 세션이 고치던 파일이 섞인다(docs/devops.md §2.2.5 문서 행). 갈래 작업이면 worktree를 쓴다');
     case 'stash': {
       const op = args[0];
@@ -188,23 +221,43 @@ export function pre(input) {
   const cwd = input?.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const parsed = parseCommand(command);
   const asks = [];
+  // 같은 명령줄 안의 cd(cd X && git …)를 따라간다. 갈래 작업 폴더인지 가리는 데 쓴다
+  let here = cwd;
   for (const words of parsed.segments) {
     const p = program(words);
     if (!p) continue;
     let out = null;
     const sub = p.args.find((a) => !a.startsWith('-')) ?? (p.name === 'yarn' ? 'install' : '');
+    if (CD.has(p.name)) {
+      const to = p.args.find((a) => !a.startsWith('-') && a.toLowerCase() !== '/d');
+      if (to) here = path.resolve(here, nativePath(to));
+      continue;
+    }
     if ((p.name === 'npm' || p.name === 'yarn') && NPM_INSTALL.has(sub)) {
       out = deny(
         `${p.name} 설치 명령이다. 이 저장소는 pnpm 작업 공간 전용이고 잠금 파일은 pnpm-lock.yaml 하나다(docs/devops.md §4.4). 대신: corepack pnpm install --frozen-lockfile, pnpm --filter <패키지> add <의존성>`,
       );
     } else if (p.name === 'git') {
       const g = gitCall(p.args);
-      if (g) out = checkGit(g.sub, g.args, g.dir ? path.resolve(cwd, g.dir) : cwd, parsed);
+      if (g) out = checkGit(g.sub, g.args, g.dir ? path.resolve(here, nativePath(g.dir)) : here, parsed);
     }
     if (out?.hookSpecificOutput?.permissionDecision === 'deny') return out;
     if (out) asks.push(out);
   }
-  return asks[0] ?? null;
+  return settle(asks[0] ?? null, input, command, cwd);
+}
+
+const CD = new Set(['cd', 'pushd', 'chdir', 'set-location', 'sl']);
+
+// 무인 모드면 '묻기'를 허용으로 바꾸고 기록한다(소유자 결정 2026-11-21). main 푸시는 그때 막는다
+function settle(out, input, command, cwd) {
+  if (out?.hookSpecificOutput?.permissionDecision !== 'ask') return out;
+  const on = unattended();
+  if (!on) return out;
+  const reason = out.hookSpecificOutput.permissionDecisionReason;
+  if (OWNER_ONLY.has(out)) return deny(`무인 모드라 소유자에게 물을 수 없어 막는다. 아침에 소유자가 정한다. ${reason}`);
+  logAllowed({ at: new Date().toISOString(), session: input?.session_id ?? null, cwd, command: command.slice(0, 2000), reason });
+  return allow(`무인 모드(소유자 결정 2026-11-21)라 묻지 않고 허용한다. 원래 물을 까닭: ${reason}`);
 }
 
 // 제목 끝 괄호에 ID(대문자-숫자 꼴, 예 LCH-080·R-726·QR-MA-2·ADR-0330)가 있는지

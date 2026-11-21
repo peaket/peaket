@@ -3,6 +3,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HOOKS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export async function readInput() {
   const chunks = [];
@@ -35,6 +38,38 @@ export const deny = (reason) => ({
 export const ask = (reason) => ({
   hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: reason },
 });
+
+// 도구 실행 전: 묻지 않고 허용한다(무인 모드에서 '묻기'를 바꿀 때만 쓴다)
+export const allow = (reason) => ({
+  hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: reason },
+});
+
+// 무인 모드(소유자 결정 2026-11-21, ADR-0330 보충). 소유자가 자리를 비운 동안 '묻기'를 허용으로 바꾸고 그 명령을 기록한다.
+// 상태는 저장소 뿌리의 .claude/unattended/(기록하지 않음)에 둔다. 켜고 끄기는 unattended.mjs가 한다
+export function stateDir() {
+  return process.env.PEAKET_HOOKS_STATE_DIR || path.join(HOOKS_DIR, '..', '..', '.claude', 'unattended');
+}
+
+// 켜져 있으면 { since, until }(밀리초), 꺼져 있거나 끝 시각이 지났으면 null
+export function unattended(now = Date.now()) {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(stateDir(), 'on.json'), 'utf8'));
+    if (typeof s?.until !== 'number' || now >= s.until) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+// 무인 모드에서 허용한 명령을 한 줄씩 남긴다(아침에 소유자가 본다). 쓰지 못해도 막지 않는다
+export function logAllowed(entry) {
+  try {
+    fs.mkdirSync(stateDir(), { recursive: true });
+    fs.appendFileSync(path.join(stateDir(), 'allowed.jsonl'), `${JSON.stringify(entry)}\n`);
+  } catch {
+    // 기록 실패는 무시한다
+  }
+}
 
 // 도구 실행 뒤(PostToolUse): 모델에게 할 일을 알린다(막지 않는다)
 export const note = (context) => ({
