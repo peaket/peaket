@@ -226,21 +226,21 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 | settlement:v5.0.0-8.2.2 | 자동 시험 | B | core-svc 관제 경로 | 계약 승인 상세는 요청자·commander만, 파트너사 상세는 viewer 403·CS 읽기다. 시험 이름에 `[ASVS v5.0.0-8.2.2]`을 단다(J-T29 ⑦ ⑧). BAT-615 완료(2026-11-20, R-719). |
 | settlement:v5.0.0-8.2.3 | 자동 시험 | B | core-svc 관제 경로 | 응답에 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID가 없고 `payoutAccount`는 null이다. 시험 이름에 `[ASVS v5.0.0-8.2.3]`을 단다(J-T29 ⑧). BAT-615 완료(2026-11-20, R-719). |
 
-## BAT-086 V-T7(2026-11-21 구현)
+## BAT-086 V-T7(2026-11-21 구현·시험)
 
-V-T7(빈 PC에서 데모 재현 스크립트 실행 — 한 명령으로 시연 흐름이 뜨고 걸린 시간이 기록된다)의 상태는 아직 `빈칸`이다. 구현 담당은 시험 파일을 쓰지 않았고 Docker·kind를 돌리지 않았다. 시험 담당이 아래 이름으로 시험을 쓰고, 시험·검증이 통과하면 `자동 시험`으로 바꾼다.
+V-T7(빈 PC에서 데모 재현 스크립트 실행 — 한 명령으로 시연 흐름이 뜨고 걸린 시간이 기록된다)의 상태는 `자동 시험`이다. 시험 담당(`ses_pending_test_bat086`)이 `tools/local/demo.test.mjs`에 `V-T7 ①`~`V-T7 ⑦`·`DM-08`·`DM-09`·`CP-01` 이름으로 20개 시험을 두었고, `node tools/ci/ledger.mjs --batch BAT-086 --require`가 통과한다. 실제 kind 재생은 `node tools/local/demo.mjs all --skip-build`로 S1~S9 9/9(콜드 스타트 7초, 2026-11-21T04:21:59Z)이고 측정은 `docs/review/measurements/BAT-086-demo.md`에 있다. D-T48은 시연만 하고 장부 범위에 넣지 않았다(`docs/review/ledger/devops.md:125`).
 
-| 항목 | 근거·자리 |
+| 항목 | 시험 이름·근거 |
 | --- | --- |
-| V-T7 ①(시나리오 정의) | `tools/local/demo/scenarios.mjs`의 `validateScenarios`·`publicPlan`. 정본 `docs/design/d5-screen-blueprint.md` §10.6과 대조. `node tools/local/demo.mjs plan --check` |
-| V-T7 ②(선행 없으면 닫힌 실패) | `tools/local/demo.mjs`의 `doctorChecks`(가짜 뿌리·가짜 PATH). 클러스터 명령 0회 |
-| V-T7 ③(조용한 건너뛰기 없음) | `tools/local/demo/runner.mjs`의 `stageProblems`·`play`(가짜 kubectl이 `pods-not-ready`를 돌려줄 때 exit 1), 모르는 시나리오 exit 2 |
-| V-T7 ④(빈 PC 한 명령 재생) | kind e2e: `node tools/local/demo.mjs all`. Docker 잠금 필요. 측정 `docs/review/measurements/BAT-086-demo.md` |
-| V-T7 ⑤(두 번 돌리기·정리) | kind e2e: `up` 재사용·`seed` 두 번·`down` 두 번. `demo.mjs down`은 데모 네임스페이스와 kind 클러스터를 지운다 |
-| V-T7 ⑥(비밀·개인정보 없음) | `tools/local/demo/measure.mjs`의 `redact`·측정 계약, 시드 `demo-seed --check` |
-| V-T7 ⑦(측정 기록) | `tools/local/demo/measure.mjs`의 `measurementText`·`writeMeasurement`. 실패한 실행도 `결과: 실패`와 실패 단계를 남긴다 |
-| DM-08·DM-09(D-T48 시연) | `tools/local/demo/compat.mjs`. 같은 커밋 0, `v0.0.0` 태그와 견주면 응답 필드 삭제로 1. Docker 필요(없으면 exit 2). 결과 `docs/review/measurements/BAT-086-compat.md` |
-| CP-01(클라우드 값) | `tools/local/demo/cloud-plan.mjs`·`deploy/demo/cloud-plan.yaml`. TTL 6시간·예산 산술·정리 차례·서명 GHCR·실행 없음 |
+| V-T7 ①(시나리오 정의) | `tools/local/demo.test.mjs`의 `V-T7 ① ...` 세 시험. `validateScenarios`·`publicPlan`이 정본 d5 §10.6과 화면 순서·필수 checks(S1·S3·S7·S8·S9)를 대조하고, 시나리오를 빼거나 화면 순서를 바꾸면 실패한다. `node tools/local/demo.mjs plan --check` |
+| V-T7 ②(선행 없으면 닫힌 실패) | `V-T7 ② ...` 두 시험. 가짜 뿌리에서 시드·이미지 목록·오버레이·Playwright·도구가 하나씩 빠질 때 exit 1, 빠진 경로·이름을 모두 나열하고 클러스터 명령 0회 |
+| V-T7 ③(조용한 건너뛰기 없음) | `V-T7 ③ ...` 두 시험. 가짜 `node:child_process`가 파드 미준비를 돌려주면 `play` exit 1·`pods-not-ready`·시나리오 결과 없음, 모르는 시나리오·인자 exit 2 |
+| V-T7 ④(빈 PC 한 명령 재생) | `V-T7 ④ ...` 다섯 시험. 측정 파일 9/9·콜드 스타트·정리, 재생기의 S2 매진 픽스처·S7 맥락 둘·S8 기기 키 보존·S9 2인 승인. 실제 실행은 `docs/review/measurements/BAT-086-demo.md` |
+| V-T7 ⑤(두 번 돌리기·정리) | `V-T7 ⑤ ...` 시험. `up`의 무대 재사용, `down`의 데모 네임스페이스+kind 클러스터 삭제·`--keep-cluster`, 다른 클러스터 보존. 시드 멱등은 `demo-seed.test.mjs` DS-06 |
+| V-T7 ⑥(비밀·개인정보 없음) | `V-T7 ⑥ ...` 시험. 시드 `checkSeed`(비밀 값 칸·실제 이메일·전화번호 0), `redact`가 Bearer·password·TOTP·JWT·세션 쿠키를 가림, `plan`·`doctor` 출력에 비밀 값 0 |
+| V-T7 ⑦(측정 기록) | `V-T7 ⑦ ...` 두 시험. 성공·실패 측정의 커밋·콜드 스타트·시나리오별 결과·실패 단계·정리, 선행 없음 `all`이 `결과: 실패(선행 없음)`와 미실행을 남김 |
+| DM-08·DM-09(D-T48 시연) | `DM-08 ...`·`DM-09 ...` 시험과 실제 `node tools/local/demo.mjs compat`. 같은 커밋 0, `v0.0.0` 태그와 견주면 응답 필드(`type`) 삭제로 1, 도구 오류(exit 2)는 통과 아님, 복제본 밖 태그 그대로. 결과 `docs/review/measurements/BAT-086-compat.md` |
+| CP-01(클라우드 값) | `CP-01 ...` 시험과 `node tools/local/demo.mjs cloud-plan --check`. TTL 6시간·예산 딱 경계 통과·1원 초과 실패·정리 여섯 항목 누락 실패·서명 GHCR·실행 없음 |
 
 ## BAT-182 완료(2026-11-20, R-721)
 
