@@ -243,6 +243,12 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 
 (시험 담당이 구현 뒤 트리의 결과를 쓴다.)
 
+- **초안 PR CI(구현 담당이 적음)**: PR #56(초안, 머리 `4c22d930c`), GitHub Actions 실행 **44930078460**의 `node / node` 잡(136924669608). PR 실행이라 develop과 합친 트리다.
+  - core-svc 통합 시험: 파일 48개 중 47개 통과·1개 건너뜀, 시험 484개 중 **483개 통과·1개 건너뜀·실패 0**. 건너뛴 것은 `local-partner-stack.int.test.ts`(`PEAKET_LOCAL_STACK=1`일 때만 돈다, 늘 건너뜀).
+  - `rls.int.test.ts` 24개 전부 통과(AZ-T5 판매자 표 ①~⑦ 포함), `search-read-model.int.test.ts` 34개 전부 통과(R165-1 포함). 회귀로 본 `sale-review-db`(4)·`promoter-contract`(14)·`production-image`(32)·`sale-policy`(8)도 통과.
+  - core-svc 단위 104파일·771개, typecheck, lint, platform·identity·payment·queue·trust·admission-ctrl 통합은 통과.
+  - 잡이 실패한 까닭은 이 묶음과 무관한 purchase-svc 통합 2개다: `purchase-migration.int.test.ts` 'GAT080_0014(예매 취소): order_cancellation은 …CHECK를 만든다'(CHECK 목록 8개, 기대 6개), `event-refund.int.test.ts` 'GAT-110 P3 실제 DB에서 그 밖 실패의 끝내기를 실패시키면 …'(outbox 넣기 쿼리 실패). 이 묶음은 purchase-svc를 바꾸지 않는다. `ci-summary`는 그 때문에 실패다. ASVS 태그 리포트 단계(`continue-on-error`)의 `test-report-search-golden.json` 형식 경고도 이 묶음과 무관하다.
+
 ## 구현
 
 구현 담당(세션 `lane2-w12corerls-impl`)이 2026-11-22에 위 2·4대로 했다. 시험 파일은 건드리지 않았다.
@@ -252,7 +258,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
   - `services/core-svc/migrations/meta/_journal.json`: `{"idx":40,"version":"7","when":1795281728010,"tag":"0040_promoter_row_security","breakpoints":true}`. `git fetch origin` 뒤 `origin/develop`(`456df0929`)의 마지막은 그대로 `0034_sale_review_request`(1795118255889)이고 0035~0039는 develop에 없다. 스냅숏은 만들지 않았다(0033·0034와 같다).
   - `services/core-svc/src/modules/catalog/adapters/db/drizzle-commission-rate.ts` 3~4행 주석만: '자기 행의 판매자 정보 칸만 연다(0040, ADR-0327 결정 13). 수수료율 칸은 열지 않는다'.
   - 바꾸지 않은 것: 쿼리, `schema.ts`, `database-role.ts`(`assertDatabaseRole`), 0034, 계약·생성물. R165-1 때문에 고친 것은 없다(위 1.3).
-- **게이트(로컬, Docker 없이)**: `pnpm exec turbo run build --filter=@peaket/core-svc^...` 4/4 캐시, `pnpm --filter @peaket/core-svc typecheck` 통과, `pnpm --filter @peaket/core-svc test` 104파일·771개 통과(`migrations-journal` 포함), `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(모두 이 묶음과 무관한 openapi·mermaid 경고) → 통과. 마이그레이션 전용 검사 도구는 `tools/ci`에 없다. 통합 시험은 로컬 Docker를 쓰지 않고(감독 차례) 초안 PR CI로 본다(아래 '시험 결과').
+- **게이트(로컬, Docker 없이)**: `pnpm exec turbo run build --filter=@peaket/core-svc^...` 4/4 캐시, `pnpm --filter @peaket/core-svc typecheck` 통과, `pnpm --filter @peaket/core-svc test` 104파일·771개 통과(`migrations-journal` 포함), `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(모두 이 묶음과 무관한 openapi·mermaid 경고) → 통과. 마이그레이션 전용 검사 도구는 `tools/ci`에 없다. 통합 시험은 로컬 Docker를 쓰지 않고(감독 차례) 초안 PR CI로 본다(위 '시험 결과').
 
 ## 리뷰
 
@@ -268,10 +274,10 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12corerls-plan | claude-opus-5-5 | 2026-11-22T01:05+09:00 | 2026-11-22T01:40+09:00 |
 | test | lane2-w12corerls-test | claude-opus-5-5 | 2026-11-22T01:38+09:00 | 2026-11-22T02:12+09:00 |
-| impl | lane2-w12corerls-impl | claude-opus-5-5 | 2026-11-22T02:11+09:00 | (CI 결과를 적을 때 채운다) |
+| impl | lane2-w12corerls-impl | claude-opus-5-5 | 2026-11-22T02:11+09:00 | 2026-11-22T02:48+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: 감독이 '감독에게' 2(idempotency_record)를 정한 뒤, 시험 담당(`lane2-w12corerls-test`)이 위 5의 시험을 쓰고 위 6대로 구현 전 트리에서 실패를 본다.
+- **다음 단계**: 리뷰(보안)·검증 → 기록 → 합치기. 구현(`4c22d930c`)과 초안 PR #56 CI(실행 44930078460, core-svc 통합 483개 통과·실패 0)가 끝났다. 리뷰 담당이 위 8 끝의 보안 관점으로 보고, 검증 담당이 위 7의 틀린 구현 16개를 돈다.
