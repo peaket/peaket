@@ -182,3 +182,8 @@
 - BAT-350 R-740 V350-2 낮음: 계획과 `services/ticket-svc/test/device-keys-http.test.ts` 주석이 다시 쌓기 전 해시 `a0a652796`을 가리킨다. 정본 좁힘 커밋은 develop의 RV350-1 커밋이다
 - BAT-350 R-740 V350-3 낮음: 월렛 `/my/tickets` 첫 JS 161.3kB로 한도 161.6kB(기준선 160.6 + 1)까지 여유 0.3kB다. 다음 월렛 묶음은 첫 JS부터 잰다
 - BAT-350 R-740 BAT-350 계획 12: ticket-svc 통합 시험이 `ci-node.yml` 통합 시험 목록에 없어 CI가 돌리지 않는다(갈래 4에 알릴 것). 등록 경로가 취소된 티켓의 ISSUE도 받는다(스캐너가 티켓 상태를 먼저 본다). 폐기된 keyId를 같은 티켓에 다시 등록하면 `keys`와 `revokedKeyIds` 둘 다에 실린다. 스캐너가 33바이트 압축 공개키를 WebCrypto `importKey('raw')`로 세 엔진에서 받는지는 GAT-140 판정 10단계 때 본다. 로컬·CI 빌드는 판이 `wallet-dev` 하나라 캐시 이름이 바뀌지 않는다
+- W12-core-rls R-744 RV-01 중간: core_app이 0004의 표 단위 읽기와 `promoter_app_read`(참)로 `promoter`의 모든 칸·모든 행을 읽는다. 수수료율 사본(`commission_rate_bp`)·계약 변경 대기 ID·판매 승인 전 판매자의 연락처·사업자번호까지 팬 경로에서 읽혀 ADR-0320 결정 8의 '팬 경로에서 계약 값 회수'와 뜻이 어긋난다(같은 값이 `event.commission_rate_bp`에도 있다). core_app 읽기를 회차 요약이 쓰는 칸으로 좁힌다(계획 '감독에게' 3 (가)와 같은 줄)
+- W12-core-rls R-744 RV-02 낮음: 시험 AZ-T5 판매자 표 ⑦의 소유자 검사가 이름 여섯만 견준다. 검증에서 소유자를 `core_search`로 바꾸는 변형을 넣어 보니 ⑦은 통과했다(다른 시험 하나는 마이그레이션 사용자가 SET ROLE을 못 해 우연히 깨짐). 시작 검사 `assertDatabaseRole`도 `promoter` 소유자를 보지 않는다(계획 '감독에게' 3 (다)와 같은 줄)
+- W12-core-rls R-744 RV-03 낮음: FORCE가 없어 소유자 권한으로 도는 보기·정의자 함수는 행 단위 보안을 건너뛴다. 지금 `promoter`를 읽는 것은 없지만 그렇게 남게 지키는 정본 문장·시험이 없다
+- W12-core-rls R-744 검증: 판정 기준 ⑥은 일괄 작업 사용자(`core_maintenance`·`core_search`)에게 권한이 없음을 시험하지 않는다(부분). core-svc 통합 전체를 이 PC에서 한 번에 돌리면 시간 초과·연결 끊김·429로 흔들린다(실패 파일만 다시 돌려 311/311 — lane1-cleanup PRF-168, 이 파일 BAT-174 R-699와 같은 흔들림)
+- W12-core-rls R-744 기존 실패(이 묶음 탓 아님, 갈래 3 몫으로 감독이 맡김): purchase-svc `purchase-migration.int.test.ts` GAT080_0014 CHECK 8≠6, `event-refund.int.test.ts` GAT-110 P3 outbox 넣기
