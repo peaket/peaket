@@ -45,6 +45,16 @@ const OLD = {
   ops: { account: randomUUID(), operation: 'CREATE_OPS_PROMOTER', key: randomUUID(), ref: A, tenant: null },
 } as const;
 
+/** 리뷰 RV5: 변경분 회차에 eventId가 빈(null) 원소를 가진 판매자 X의 공연. 정상 코드는 만들지 않지만 백필은 이런 행에도 엉뚱한 테넌트를 붙이지 않아야 한다 */
+const X = randomUUID();
+const PX = randomUUID();
+/** 리뷰 RV5: eventId를 읽지 못하는 옛 회차 더하기 기록(어느 판매자도 정할 수 없어 비어 있어야 한다) */
+const NO_EVENT = {
+  nullEventId: { account: randomUUID(), operation: 'CREATE_PRODUCTION_EVENT', key: randomUUID(), ref: JSON.stringify({ eventId: null, pending: true, warnings: [] }) },
+  missingEventId: { account: randomUUID(), operation: 'CREATE_PRODUCTION_EVENT', key: randomUUID(), ref: JSON.stringify({ pending: true, warnings: [] }) },
+  notJson: { account: randomUUID(), operation: 'CREATE_PRODUCTION_EVENT', key: randomUUID(), ref: 'y' },
+} as const;
+
 /** 마이그레이션 폴더를 사본으로 옮기고 일지를 lastIdx까지로 자른다 */
 function migrationsUpTo(lastIdx: number): string {
   const src = fileURLToPath(new URL('../migrations', import.meta.url));
@@ -93,7 +103,15 @@ beforeAll(async () => {
     new Date('2026-11-01T00:00:00Z'),
     JSON.stringify({ addedEvents: [added] }),
   ]);
-  for (const r of Object.values(OLD)) {
+  await q('insert into promoter (id, legal_name) values ($1, $2)', [X, '(주)엑스']);
+  await q("insert into production (id, promoter_id, place_id, title, genre, sale_review, sale_approved_at, pending_revision) values ($1, $2, $3, 'X 공연', '콘서트', 'SUBMITTED', $4, $5::jsonb)", [
+    PX,
+    X,
+    PLACE,
+    new Date('2026-11-01T00:00:00Z'),
+    JSON.stringify({ addedEvents: [{ ...added, eventId: null }, { ...added, eventId: randomUUID() }] }),
+  ]);
+  for (const r of [...Object.values(OLD), ...Object.values(NO_EVENT)]) {
     await q('insert into idempotency_record (account_ref, operation, idempotency_key, request_hash, result_ref, created_at) values ($1, $2, $3, $4, $5, $6)', [
       r.account,
       r.operation,
@@ -124,11 +142,22 @@ describe('AZ-T17 멱등 기록 표 0041 옮김', () => {
       // 결과 참조는 그대로 두고 테넌트 칸만 채운다
       expect({ name, tenant: byKey.get(r.key)?.tenant_id, ref: byKey.get(r.key)?.result_ref }).toEqual({ name, tenant: r.tenant, ref: r.ref });
     }
-    expect(rows).toHaveLength(Object.keys(OLD).length);
+    expect(rows).toHaveLength(Object.keys(OLD).length + Object.keys(NO_EVENT).length);
     expect(await keysIn(A)).toEqual([OLD.production.key, OLD.event.key].sort());
     expect(await keysIn(B)).toEqual([OLD.pendingEvent.key]);
     // 못 채운 행은 어느 테넌트에도 보이지 않는다
     const nobody: string[] = [OLD.notJson.key, OLD.badId.key, OLD.fan.key, OLD.ops.key];
     for (const t of [A, B, randomUUID()]) expect((await keysIn(t)).filter((k) => nobody.includes(k)), t).toEqual([]);
+  });
+
+  test('AZ-T17 ⑦ 리뷰 재현(RV5): eventId가 null이거나 없거나 JSON이 아닌 옛 회차 더하기 기록은 eventId가 빈 변경분 회차를 가진 다른 판매자의 공연에 붙지 않고 비어 있다 [ASVS v5.0.0-8.4.1]', async () => {
+    const keys = Object.values(NO_EVENT).map((r) => r.key);
+    const rows = (await admin.pool.query('select idempotency_key, tenant_id, result_ref from idempotency_record where idempotency_key = any($1::uuid[])', [keys])).rows as { idempotency_key: string; tenant_id: string | null; result_ref: string }[];
+    const byKey = new Map(rows.map((r) => [r.idempotency_key, r]));
+    for (const [name, r] of Object.entries(NO_EVENT)) {
+      expect({ name, tenant: byKey.get(r.key)?.tenant_id, ref: byKey.get(r.key)?.result_ref }).toEqual({ name, tenant: null, ref: r.ref });
+    }
+    // 판매자 X의 파트너 트랜잭션에도, 다른 테넌트에도 보이지 않는다
+    for (const t of [X, A, B]) expect((await keysIn(t)).filter((k) => (keys as string[]).includes(k)), t).toEqual([]);
   });
 });
