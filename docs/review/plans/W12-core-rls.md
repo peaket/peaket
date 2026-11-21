@@ -243,7 +243,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 
 (시험 담당이 구현 뒤 트리의 결과를 쓴다.)
 
-- **초안 PR CI(구현 담당이 적음)**: PR #56(초안, 머리 `4c22d930c`), GitHub Actions 실행 **44930078460**의 `node / node` 잡(136924669608). PR 실행이라 develop과 합친 트리다.
+- **초안 PR CI(구현 담당이 적음)**: PR #56(초안, 머리 `4c22d930c`), GitHub Actions 실행 **44930078460**의 `node / node` 잡. PR 실행이라 develop과 합친 트리다.
   - core-svc 통합 시험: 파일 48개 중 47개 통과·1개 건너뜀, 시험 484개 중 **483개 통과·1개 건너뜀·실패 0**. 건너뛴 것은 `local-partner-stack.int.test.ts`(`PEAKET_LOCAL_STACK=1`일 때만 돈다, 늘 건너뜀).
   - `rls.int.test.ts` 24개 전부 통과(AZ-T5 판매자 표 ①~⑦ 포함), `search-read-model.int.test.ts` 34개 전부 통과(R165-1 포함). 회귀로 본 `sale-review-db`(4)·`promoter-contract`(14)·`production-image`(32)·`sale-policy`(8)도 통과.
   - core-svc 단위 104파일·771개, typecheck, lint, platform·identity·payment·queue·trust·admission-ctrl 통합은 통과.
