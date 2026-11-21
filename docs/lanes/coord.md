@@ -67,7 +67,8 @@
   - 도는 중: 갈래 1 BAT-215(합치기 전, 계약 깨짐 소유자 결정 대기 — LOG_SAMPLING 값 유니온) → BAT-216·BAT-220(OPS-150만, avsc 승인, OPS-160은 새 묶음). 갈래 2 W12-core-idem → W12-golden-report → W12-sr13 → W12-core-rls2(트리거 슈퍼유저 제외 승인) → BAT-177(11-30 마감). 갈래 4 BAT-360(시험 중, Docker 차례 다음).
   - 소유자에게 물은 것: (1) LOG_SAMPLING 계약 깨짐 (가) 예외 승인 (나) 기존 꼴에 싣기 (다) BAT-365로 미루기. (2) 갈래 3·5를 초기화(11-23 00:00) 전에 열지.
   - 갈래 3을 열면 앞 차례: purchase-svc 기존 실패 둘(event-refund GAT-110 P3 outbox 23514, purchase-migration GAT080_0014 제약 8≠6) → W12-core-notify(발송기 전용 DB 역할 core_notify, webhook_delivery) → BAT-450 → BAT-455 → BAT-410·430(GAT-010 풀림). 알릴 것: W12-prf192가 BAT-045 오류 유형 29곳을 고침, O-T23의 정할 곳 GAT-180, BAT-360이 core-svc 끝난 회차 내부 경로를 더함.
-  - 갈래 5를 열면 앞 차례: BAT-617 → W12-merch-replay(굿즈 결제창 값 재생 때 다시 만들기, A) → BAT-620 → BAT-625(approveBatch 승인 ID 대조, 보안 높음) → BAT-630. 알릴 것: BAT-360이 payment-svc 세 곳을 고침, promoter RLS(0040)·수수료율 트리거(0042).
+  - 갈래 5를 열면 맨 앞(기한 2026-11-29): BAT-616이 남긴 날짜 고정 시험 — `services/purchase-svc/test-int/sale-open.int.test.ts:136`이 2026-11-29를, core-svc 같은 이름 시험이 2026-12-02·03을 고정해 그날이 지나면 실패할 수 있다(갈래 1 W12-pt36 조사, 목록은 가지 feature/lane1-W12-pt36에 있는 W12-pt36 계획 파일). 상대 시각·주입 시계로 바꾼다. 짧은 마감으로 진짜 서버를 부르는 `identity-grpc.int.test.ts`는 갈래 3 정리 목록 후보.
+  - 갈래 5를 열면 그다음 차례: BAT-617 → W12-merch-replay(굿즈 결제창 값 재생 때 다시 만들기, A) → BAT-620 → BAT-625(approveBatch 승인 ID 대조, 보안 높음) → BAT-630. 알릴 것: BAT-360이 payment-svc 세 곳을 고침, promoter RLS(0040)·수수료율 트리거(0042).
   - Docker 차례 규칙: 보안 높음·여러 갈래가 기다리는 묶음 먼저, 잠금이 비면 다음 갈래가 잡고, 컨테이너를 안 쓰는 동안은 놓는다.
   - 번호: ADR 0348·0349 갈래 4(BAT-360), 0350 소유자 사이 세션의 'B·C 묶음 가볍게' 초안(제안, 미커밋), 감독 다음 몫 0351부터. core-svc 마이그레이션 0040~0042 갈래 2.
   - 소유자 손 정리 대기: 빈 폴더 `D:/ticketpass-r740`, 갈래 4 검증 임시 폴더 다섯(`D:/ticketpass-lane4-{sec,prf,tools,mesh,rtgw}-verify`), 다른 프로젝트의 멈춘 컨테이너 35개, 메인 폴더에 스테이징된 docs/walkthrough 75개쯤.
