@@ -211,7 +211,33 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 
 ## 실패 확인
 
-(시험 담당이 위 6대로 쓴다.)
+시험 담당(세션 `lane2-w12corerls-test`)이 2026-11-22에 위 6대로 돌렸다. 길은 **(가) 로컬 Docker**다. 트리는 계획 커밋 `db33521bc` 위에 시험 파일 둘만 고친 작업 트리(구현 전, 0040 없음)다.
+
+- **Docker 잠금**: 01:46에 `lane2-W12-dt50`이 쥐고 있었다(01:42:21부터). 15초 간격으로 `take`를 다시 해 **02:03:21에 잡았고 02:05:09에 놓았다**(`lock.sh drop docker lane2-W12-core-rls`). 컨테이너 이름 앞머리를 `PEAKET_TEST_CONTAINER_PREFIX=w12corerls-`로 붙였고, 끝난 뒤 `docker ps -a --filter name=w12corerls-`가 0개였다(시험이 스스로 `rm -f -v`). 다른 갈래 컨테이너·kind는 건드리지 않았다. 감독 차례(갈래 1 BAT-059 → 갈래 4 BAT-355 → 갈래 2)에 따라 이 뒤로는 잠금을 다시 잡지 않는다.
+- **정적 검사**(잠금 전): `pnpm --filter @peaket/core-svc typecheck` 통과(`tsconfig.json`이 `test-int`를 포함하는지 일부러 틀린 파일로 확인하고 지웠다), `pnpm lint` 통과.
+- **명령**: `pnpm exec turbo run build --filter=@peaket/core-svc^...`(4/4 캐시) → `pnpm --filter @peaket/core-svc test:integration test-int/rls.int.test.ts test-int/search-read-model.int.test.ts`(02:03:51 시작, 60.7초, 끝 코드 1).
+- **결과**: 파일 2개 중 1개 실패. 시험 58개 중 **5개 실패·53개 통과·건너뜀 0**. `rls.int.test.ts` 24개 중 5개 실패, `search-read-model.int.test.ts` 34개 전부 통과.
+
+| 시험 | 결과 | 실제 값(구현 전 트리) | 까닭 |
+| --- | --- | --- | --- |
+| AZ-T5 판매자 표 ① | **실패(단언)** | 테넌트 A의 조건 없는 조회가 `[A, B]`, 테넌트 B도 `[A, B]` | 행 보안이 없어 표 단위 읽기(0034)가 모든 행을 준다 |
+| AZ-T5 판매자 표 ② | **실패(단언)** | 그 연결의 `app.tenant_id`가 `''`(연결 재사용 확인됨)인데 테넌트 없는 읽기가 `[A, B]`, 트랜잭션 밖 읽기도 `[A, B]`, 조건 없는 고치기가 A·B 상호를 모두 `(주)테넌트없이고침`으로 바꿈 | 같음. 고치기는 오류 없이 2행을 바꿨다 |
+| AZ-T5 판매자 표 ③ | **실패(단언)** | WHERE·RETURNING 없는 테넌트 A의 고치기 뒤 B의 상호가 `(주)비`가 아니라 `(주)에이 조건없이고침`. 지우기·넣기는 이미 `42501`(그 두 줄은 단언 전에 돌아 통과) | 행 보안이 없어 칸 고치기 권한(0034)이 모든 행에 걸린다 |
+| AZ-T5 판매자 표 ④ | 통과 | — | 이미 있는 동작(자기 행 8칸 고치기·읽기). 실패는 검증의 M7·M8·M9로 본다 |
+| AZ-T5 판매자 표 ⑤ | **실패(단언)** | 읽기 셋(`verified_at`·`commission_rate_bp`·`pending_contract_approval_id`)이 `됨`. 고치기 넷(`verified_at`·`commission_rate_bp`·`pending_contract_approval_id`·`id`)은 이미 `42501` | 표 단위 SELECT(0034)가 남아 있다. 칸마다 결과를 한 객체로 모아 단언해 일곱 칸이 다 보인다 |
+| AZ-T5 판매자 표 ⑥ | 통과 | — | 행 보안이 없어 팬·관제 사용자가 다 본다. 실패는 M12·M13으로 본다 |
+| AZ-T5 판매자 표 ⑦ | **실패(단언)** | `promoter`의 `relrowsecurity = false`, `relforcerowsecurity = false`, `pg_policies` 0개. 기대한 파트너 식은 `(id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)`(0004 `production_partner_tenant`의 글에서 바꾼 것, 그 앞 가드 `promoter_id = ` 포함은 통과) | 0040이 없다 |
+| 리뷰 재현: 코드가 쓰지 않는 표는 읽지 못한다(승인 전 공연 별칭·출연진) | 통과 | — | 판매자 줄을 지웠고 별칭·출연진은 그대로 `42501` |
+| 다른 공연을 지울 권한이 없다 | 통과 | — | 판매자 고치기 줄을 지웠다(③으로 옮김) |
+| R165-1 | 통과 | — | 0023 앞 표 준비를 그때 있던 칸만 적은 SQL(`d.pool.query`)로 바꿔 42703이 사라졌다. 단언이 무는지는 M16으로 본다 |
+
+- **시험 쓰기에서 계획과 다르게 한 것**(단언을 약하게 한 것은 없다):
+  - ③의 넣기는 B의 `id`가 아니라 새 `id`로 했다. 같은 테넌트(A)로 남의 판매자 행을 새로 넣는 경우이고, B의 `id`면 권한이 잘못 열렸을 때 `23505`(키 중복)로 갈려 원인이 흐려진다.
+  - ④는 `admin`으로 A의 `verified_at`을 먼저 값(`2026-10-01T03:00:00Z`)으로 채운 뒤 그대로인지 본다(NULL이 우연히 NULL로 남는 것보다 강하다). 읽기는 `WHERE id = A`로 한다(조건 없는 읽기는 ①이 본다).
+  - ⑤는 계획의 다섯에 `pending_contract_approval_id` 고치기와 `id` 고치기를 더해 일곱이다(목록 밖 값마다).
+  - ⑥의 팬 경로 읽기는 id만이 아니라 두 행의 모든 칸 값을 단언한다.
+  - ⑦은 `promoter_ops`·`promoter_app_read`의 `qual`을 '있음'이 아니라 정확히 `true`로 본다(결정 13 '조건 없는 정책', '읽기만 전체').
+  - 상태를 바꾸는 시험의 되돌리기는 시험 끝 줄이 아니라 판매자 표 묶음의 `afterEach`가 한다(시험이 실패해도 되돌린다. 구현 전 트리에서 ②가 두 행을 바꿨다).
 
 ## 시험 결과
 
@@ -234,6 +260,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12corerls-plan | claude-opus-5-5 | 2026-11-22T01:05+09:00 | 2026-11-22T01:40+09:00 |
+| test | lane2-w12corerls-test | claude-opus-5-5 | 2026-11-22T01:38+09:00 | 2026-11-22T02:12+09:00 |
 
 ## 기록
 

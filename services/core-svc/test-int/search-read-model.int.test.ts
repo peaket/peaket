@@ -546,8 +546,9 @@ describe('R165-1 서버가 뜰 때 따라잡기', () => {
       const at = Date.parse('2026-11-16T00:00:00.000Z');
       const promoterId = randomUUID();
       const placeId = randomUUID();
-      await d.db.insert(promoter).values({ id: promoterId, legalName: '(주)옛공연' });
-      await d.db.insert(place).values({ id: placeId, name: '옛날홀', address: '서울', region: '서울', createdBy: ACTOR });
+      // 0022 모양의 DB라 지금 Drizzle 표 객체(정의된 칸을 모두 적는다)를 쓰지 않고 그때 있던 칸만 적은 SQL로 넣는다(W12-core-rls, promoter-contract.int.test.ts와 같은 꼴)
+      await d.pool.query('insert into promoter (id, legal_name) values ($1, $2)', [promoterId, '(주)옛공연']);
+      await d.pool.query('insert into place (id, name, address, region, created_by) values ($1, $2, $3, $4, $5)', [placeId, '옛날홀', '서울', '서울', ACTOR]);
       const made: string[] = [];
       for (const [title, review, artistName, alias] of [
         ['옛승인 첫공연', 'APPROVED', '옛승인 배우', 'OLD FIRST'],
@@ -556,14 +557,14 @@ describe('R165-1 서버가 뜰 때 따라잡기', () => {
       ] as const) {
         const id = randomUUID();
         made.push(id);
-        await d.db.insert(production).values({ id, promoterId, placeId, title, genre: '콘서트', saleReview: review, saleApprovedAt: review === 'APPROVED' ? new Date(at - 10 * D) : null });
-        await d.db.insert(event).values({ id: randomUUID(), productionId: id, promoterId, venueId: null, openAt: new Date(at - D), startsAt: new Date(at + 20 * D), endsAt: new Date(at + 20 * D + 2 * H) });
+        await d.pool.query('insert into production (id, promoter_id, place_id, title, genre, sale_review, sale_approved_at) values ($1, $2, $3, $4, $5, $6, $7)', [id, promoterId, placeId, title, '콘서트', review, review === 'APPROVED' ? new Date(at - 10 * D) : null]);
+        await d.pool.query('insert into event (id, production_id, promoter_id, venue_id, open_at, starts_at, ends_at) values ($1, $2, $3, $4, $5, $6, $7)', [randomUUID(), id, promoterId, null, new Date(at - D), new Date(at + 20 * D), new Date(at + 20 * D + 2 * H)]);
         if (artistName) {
           const artistId = randomUUID();
-          await d.db.insert(artist).values({ id: artistId, name: artistName, createdBy: ACTOR });
-          await d.db.insert(productionArtist).values({ productionId: id, artistId, sortOrder: 0 });
+          await d.pool.query('insert into artist (id, name, created_by) values ($1, $2, $3)', [artistId, artistName, ACTOR]);
+          await d.pool.query('insert into production_artist (production_id, artist_id, sort_order) values ($1, $2, $3)', [id, artistId, 0]);
         }
-        if (alias) await d.db.insert(searchAlias).values({ id: randomUUID(), targetKind: 'PRODUCTION', targetId: id, alias, source: 'PARTNER', createdBy: ACTOR });
+        if (alias) await d.pool.query('insert into search_alias (id, target_kind, target_id, alias, source, created_by) values ($1, $2, $3, $4, $5, $6)', [randomUUID(), 'PRODUCTION', id, alias, 'PARTNER', ACTOR]);
       }
       // 이제 검색 표 마이그레이션을 올린다(빈 표만 만든다)
       await migrateCore(c.url);

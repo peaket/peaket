@@ -1,13 +1,14 @@
 // 테넌트 표의 행 보안(2차 방어) 통합 시험(실제 PostgreSQL 18 컨테이너, AZ-T5, FR-021, docs/security/authz-matrix.md §5.3, ADR-0198 결정 8, ADR-0241, BUILD_ORDER HOT-172).
 // 배치본·구역·좌석·가격 등급 표(0007)는 HOT-240이 더했다(ADR-0260 결정 2). 판매 자격 명단·구성원 표와 규칙·회차 고치기 칸 권한(0008)은 HOT-250이 더했다(ADR-0261 결정 8)
+// 판매자 표 promoter의 행 보안·칸 단위 읽기(0040)는 W12-core-rls가 더했다(ADR-0327 결정 13, authz-matrix §3.3·§5.3). 0034가 판매자 표를 파트너에게 행 보안 없이 열었다
 import 'reflect-metadata';
 import { createDatabase, type Database, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { assertDatabaseRole } from '../src/modules/catalog/adapters/db/database-role.js';
-import { event, place, priceTier, production, productionArtist, promoter, saleEligibilityList, saleEligibilityMember, searchAlias, seat, section, venue } from '../src/modules/catalog/adapters/db/schema.js';
+import { event, place, priceTier, production, productionArtist, promoter, promoterContractState, saleEligibilityList, saleEligibilityMember, searchAlias, seat, section, venue } from '../src/modules/catalog/adapters/db/schema.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { loginFor } from './roles.js';
 
@@ -15,8 +16,11 @@ let pg: PostgresContainer;
 let admin: Database;
 let partner: Database;
 let app: Database;
+let ops: Database;
 const A = randomUUID();
 const B = randomUUID();
+const NAME_A = '(주)에이';
+const NAME_B = '(주)비';
 const PLACE = randomUUID();
 const PROD_A = randomUUID();
 const PROD_B = randomUUID();
@@ -34,9 +38,10 @@ beforeAll(async () => {
   // 연결 하나짜리 풀: 앞 트랜잭션의 SET LOCAL이 끝난 연결을 다시 쓰는 경우를 만든다
   partner = await loginFor(admin, pg, 'core_partner_login', 'core_partner', 1);
   app = await loginFor(admin, pg, 'core_app_login', 'core_app', 2);
+  ops = await loginFor(admin, pg, 'core_ops_login', 'core_ops', 1);
   await admin.db.insert(promoter).values([
-    { id: A, legalName: '(주)에이' },
-    { id: B, legalName: '(주)비' },
+    { id: A, legalName: NAME_A },
+    { id: B, legalName: NAME_B },
   ]);
   await admin.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: randomUUID() });
   await admin.db.insert(production).values([
@@ -52,6 +57,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await partner?.close();
   await app?.close();
+  await ops?.close();
   await admin?.close();
   pg?.stop();
 });
@@ -96,9 +102,9 @@ describe('AZ-T5 파트너 전용 DB 사용자', () => {
     await denied(async (tx) => tx.update(event).set({ status: 'CANCELLED' }));
   });
 
-  test('[ASVS v5.0.0-8.4.1] 리뷰 재현: 코드가 쓰지 않는 표는 읽지 못한다(판매자 연락처, 승인 전 공연 별칭)', async () => {
+  // 판매자 표는 0034부터 파트너가 자기 행을 읽는다(ADR-0327 결정 1·11·13). 그 범위는 아래 'AZ-T5 판매자 표 ①~⑦'이 본다
+  test('[ASVS v5.0.0-8.4.1] 리뷰 재현: 코드가 쓰지 않는 표는 읽지 못한다(승인 전 공연 별칭·출연진)', async () => {
     const denied = async (fn: Parameters<Database['transaction']>[0]) => expect(partner.transaction(fn, { tenantId: A })).rejects.toMatchObject({ cause: { code: '42501' } });
-    await denied(async (tx) => tx.select({ id: promoter.id }).from(promoter));
     await denied(async (tx) => tx.select({ id: searchAlias.id }).from(searchAlias));
     await denied(async (tx) => tx.select({ id: productionArtist.artistId }).from(productionArtist));
   });
@@ -115,9 +121,9 @@ describe('AZ-T5 파트너 전용 DB 사용자', () => {
     expect(rows<Record<string, unknown>>(out)).toHaveLength(1);
   });
 
-  test('[ASVS v5.0.0-8.4.1] 다른 공연을 지우거나 판매자 표를 고칠 권한이 없다', async () => {
+  // 판매자 표 고치기는 0034부터 자기 행의 판매자 정보 칸에 열렸다. 다른 파트너 행을 못 고치는 것은 'AZ-T5 판매자 표 ③'이 본다
+  test('[ASVS v5.0.0-8.4.1] 다른 공연을 지울 권한이 없다', async () => {
     await expect(partner.transaction(async (tx) => tx.delete(production), { tenantId: A })).rejects.toMatchObject({ cause: { code: '42501' } });
-    await expect(partner.transaction(async (tx) => tx.update(promoter).set({ legalName: 'x' }), { tenantId: A })).rejects.toMatchObject({ cause: { code: '42501' } });
   });
 
   test('S-T38 ⑦ 배치본·구역·좌석·가격 등급 행은 자기 테넌트로만 넣고 고치며 공개된 틀만 읽는다 [ASVS v5.0.0-8.4.1]', async () => {
@@ -264,6 +270,159 @@ describe('AZ-T5 파트너 전용 DB 사용자', () => {
     expect(r).toHaveLength(1);
     expect(Object.keys(r[0]!)).toEqual(['open_at']);
     expect(new Date(r[0]!.open_at as string).getTime()).toBe(OPEN_B.getTime());
+  });
+});
+
+/** 거부된 쿼리의 SQLSTATE. Drizzle은 pg 오류를 cause로 감싼다. DB 오류가 아니면 그 글을 돌려 단언 차이에 드러낸다 */
+const sqlState = (e: unknown): string => {
+  const cause = e instanceof Error ? e.cause : undefined;
+  return typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string' ? cause.code : `DB 오류 아님: ${String(e)}`;
+};
+
+describe('AZ-T5 판매자 표(promoter, ADR-0327 결정 13)', () => {
+  // 판매자 정보 여덟 칸(ADR-0327 결정 1·11, 0034가 파트너에게 고치기를 준 칸). 시드·코드 상수와 겹치지 않는 값을 고른다
+  const SELLER = {
+    legalName: '(주)에이 새상호',
+    representative: '가나다',
+    address: '부산 해운대구 시험로 7',
+    phone: '051-000-0707',
+    email: 'seller-a@peaket.test',
+    businessRegNo: '707-07-07070',
+    mailOrderReportNo: '2026-부산해운대-0707',
+    exemptionBasis: '시험용 면제 근거',
+  };
+  const CLEARED = { representative: null, address: null, phone: null, email: null, businessRegNo: null, mailOrderReportNo: null, exemptionBasis: null, verifiedAt: null };
+  const sellerColumns = {
+    id: promoter.id,
+    legalName: promoter.legalName,
+    representative: promoter.representative,
+    address: promoter.address,
+    phone: promoter.phone,
+    email: promoter.email,
+    businessRegNo: promoter.businessRegNo,
+    mailOrderReportNo: promoter.mailOrderReportNo,
+    exemptionBasis: promoter.exemptionBasis,
+  };
+  const bothSellers = sql`${promoter.id} in (${A}, ${B})`;
+  /** admin(슈퍼유저라 행 보안을 지난다)으로 본 두 판매자의 상호 */
+  const legalNames = async () => Object.fromEntries((await admin.db.select({ id: promoter.id, n: promoter.legalName }).from(promoter).where(bothSellers)).map((r) => [r.id, r.n]));
+
+  // 시험마다 시드로 되돌린다(③④가 바꾸고, 구현 전 트리에서는 ②도 두 행을 바꾼다)
+  afterEach(async () => {
+    await admin.db.update(promoter).set({ legalName: NAME_A, ...CLEARED }).where(sql`${promoter.id} = ${A}`);
+    await admin.db.update(promoter).set({ legalName: NAME_B, ...CLEARED }).where(sql`${promoter.id} = ${B}`);
+  });
+
+  test('AZ-T5 판매자 표 ① 테넌트 조건을 뺀 조회도 자기 판매자 행만 준다 [ASVS v5.0.0-8.4.1]', async () => {
+    const seen = {
+      a: await partner.transaction(async (tx) => tx.select({ id: promoter.id }).from(promoter), { tenantId: A }),
+      b: await partner.transaction(async (tx) => tx.select({ id: promoter.id }).from(promoter), { tenantId: B }),
+    };
+    expect(seen).toEqual({ a: [{ id: A }], b: [{ id: B }] });
+  });
+
+  test('AZ-T5 판매자 표 ② 테넌트 없이는 읽기·고치기 모두 0건이다(앞 트랜잭션이 쓴 연결을 다시 써도 오류 없이) [ASVS v5.0.0-8.4.1]', async () => {
+    // 연결 하나짜리 풀이라 다음 트랜잭션이 같은 연결을 받는다. 그 연결의 app.tenant_id는 NULL이 아니라 빈 문자열이다(authz-matrix §5.3)
+    await partner.transaction(async (tx) => tx.select({ id: promoter.id }).from(promoter), { tenantId: A });
+    const inTx = await partner.transaction(async (tx) => {
+      const tenant = rows<{ v: string | null }>(await tx.execute(sql`select current_setting('app.tenant_id', true) as v`));
+      const seen = await tx.select({ id: promoter.id }).from(promoter);
+      await tx.update(promoter).set({ legalName: '(주)테넌트없이고침' });
+      return { tenant, seen };
+    });
+    const outside = await partner.db.select({ id: promoter.id }).from(promoter);
+    expect({ inTx, outside, names: await legalNames() }).toEqual({ inTx: { tenant: [{ v: '' }], seen: [] }, outside: [], names: { [A]: NAME_A, [B]: NAME_B } });
+  });
+
+  test('AZ-T5 판매자 표 ③ 조건 없는 고치기로도 다른 파트너의 판매자 행을 바꾸지 못하고 넣기·지우기 권한이 없다 [ASVS v5.0.0-8.4.1]', async () => {
+    const denied = async (fn: Parameters<Database['transaction']>[0]) => expect(partner.transaction(fn, { tenantId: A })).rejects.toMatchObject({ cause: { code: '42501' } });
+    // WHERE도 RETURNING도 없이 고친다. 칸을 읽지 않아야 읽기 정책이 끼지 않고 고치기 정책만 행을 거른다(PostgreSQL 18 CREATE POLICY '명령별 적용 정책')
+    await partner.transaction(async (tx) => tx.update(promoter).set({ legalName: '(주)에이 조건없이고침' }), { tenantId: A });
+    const names = await legalNames();
+    await denied(async (tx) => tx.delete(promoter));
+    await denied(async (tx) => tx.insert(promoter).values({ id: randomUUID(), legalName: '(주)끼어들기' }));
+    expect(names).toEqual({ [A]: '(주)에이 조건없이고침', [B]: NAME_B });
+  });
+
+  test('AZ-T5 판매자 표 ④ 자기 판매자 행의 판매자 정보 여덟 칸은 고치고 읽는다(운영자 확인 시각은 그대로) [ASVS v5.0.0-8.4.1]', async () => {
+    const VERIFIED = new Date('2026-10-01T03:00:00.000Z');
+    await admin.db.update(promoter).set({ verifiedAt: VERIFIED }).where(sql`${promoter.id} = ${A}`);
+    const own = sql`${promoter.id} = ${A}`;
+    const out = await partner.transaction(
+      async (tx) => ({
+        changed: await tx.update(promoter).set(SELLER).where(own).returning({ id: promoter.id }),
+        read: await tx.select(sellerColumns).from(promoter).where(own),
+      }),
+      { tenantId: A },
+    );
+    expect(out).toEqual({ changed: [{ id: A }], read: [{ id: A, ...SELLER }] });
+    const stored = Object.fromEntries((await admin.db.select().from(promoter).where(bothSellers)).map((r) => [r.id, r]));
+    expect(stored).toEqual({
+      [A]: { id: A, ...SELLER, verifiedAt: VERIFIED },
+      [B]: { id: B, legalName: NAME_B, ...CLEARED },
+    });
+  });
+
+  test('AZ-T5 판매자 표 ⑤ 자기 행이라도 판매자 정보 밖의 칸은 읽지도 고치지도 못한다(운영자 확인 시각·수수료율·계약 변경 대기) [ASVS v5.0.0-8.2.3]', async () => {
+    const tried = (fn: Parameters<Database['transaction']>[0]) => partner.transaction(fn, { tenantId: A }).then(() => '됨', sqlState);
+    const own = sql`${promoter.id} = ${A}`;
+    // 칸마다 따로 한 트랜잭션씩 본다(목록 밖 값마다 거부). 계약 칸은 그림자 객체 promoterContractState로만 닿는다(schema.ts)
+    const outcome = {
+      readVerifiedAt: await tried(async (tx) => tx.select({ v: promoter.verifiedAt }).from(promoter).where(own)),
+      readCommissionRateBp: await tried(async (tx) => tx.select({ v: promoterContractState.commissionRateBp }).from(promoterContractState).where(own)),
+      readPendingContractApprovalId: await tried(async (tx) => tx.select({ v: promoterContractState.pendingContractApprovalId }).from(promoterContractState).where(own)),
+      updateVerifiedAt: await tried(async (tx) => tx.update(promoter).set({ verifiedAt: new Date('2026-10-02T00:00:00.000Z') })),
+      updateCommissionRateBp: await tried(async (tx) => tx.update(promoterContractState).set({ commissionRateBp: 1 })),
+      updatePendingContractApprovalId: await tried(async (tx) => tx.update(promoterContractState).set({ pendingContractApprovalId: randomUUID() })),
+      updateId: await tried(async (tx) => tx.update(promoter).set({ id: randomUUID() })),
+    };
+    expect(outcome).toEqual({
+      readVerifiedAt: '42501',
+      readCommissionRateBp: '42501',
+      readPendingContractApprovalId: '42501',
+      updateVerifiedAt: '42501',
+      updateCommissionRateBp: '42501',
+      updatePendingContractApprovalId: '42501',
+      updateId: '42501',
+    });
+  });
+
+  test('AZ-T5 판매자 표 ⑥ 팬 경로 사용자는 모든 판매자 행을 읽기만 하고 관제 사용자는 모든 판매자 행을 본다 [ASVS v5.0.0-8.4.1]', async () => {
+    // 회차 상세가 읽는 모양(기본 객체의 모든 칸, ADR-0200)
+    const fan = Object.fromEntries((await app.db.select().from(promoter)).map((r) => [r.id, r]));
+    expect(fan).toEqual({
+      [A]: { id: A, legalName: NAME_A, ...CLEARED },
+      [B]: { id: B, legalName: NAME_B, ...CLEARED },
+    });
+    await expect(app.db.update(promoter).set({ legalName: '(주)팬경로고침' })).rejects.toMatchObject({ cause: { code: '42501' } });
+    const seenByOps = await ops.db.select({ id: promoter.id }).from(promoter);
+    expect(seenByOps.map((r) => r.id).sort()).toEqual([A, B].sort());
+  });
+
+  test('AZ-T5 판매자 표 ⑦ 행 보안이 켜져 있고 FORCE가 없으며 소유자가 앱 역할이 아니고 정책 넷이 정한 모양이다 [ASVS v5.0.0-8.4.1]', async () => {
+    const table = rows<{ rls: boolean; forced: boolean; owner: string }>(
+      await admin.db.execute(
+        sql`select c.relrowsecurity as rls, c.relforcerowsecurity as forced, pg_get_userbyid(c.relowner) as owner from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'promoter' and c.relkind = 'r'`,
+      ),
+    );
+    const policies = rows<{ policyname: string; cmd: string; roles: string[]; qual: string | null; with_check: string | null }>(
+      await admin.db.execute(sql`select policyname, cmd, roles::text[] as roles, qual, with_check from pg_policies where schemaname = 'public' and tablename = 'promoter' order by policyname`),
+    );
+    // 파트너 식은 production_partner_tenant(0004, ADR-0241 결정 3)의 식에서 promoter_id 자리에 id가 온 것이다(ADR-0327 결정 13)
+    const base = rows<{ qual: string }>(await admin.db.execute(sql`select qual from pg_policies where schemaname = 'public' and tablename = 'production' and policyname = 'production_partner_tenant'`));
+    expect(base).toHaveLength(1);
+    expect(base[0]!.qual).toMatch(/\bpromoter_id = /);
+    const self = base[0]!.qual.replace('promoter_id', 'id');
+    expect({ table: table.map((t) => ({ rls: t.rls, forced: t.forced })), policies }).toEqual({
+      table: [{ rls: true, forced: false }],
+      policies: [
+        { policyname: 'promoter_app_read', cmd: 'SELECT', roles: ['core_app'], qual: 'true', with_check: null },
+        { policyname: 'promoter_ops', cmd: 'ALL', roles: ['core_ops'], qual: 'true', with_check: 'true' },
+        { policyname: 'promoter_partner_self_read', cmd: 'SELECT', roles: ['core_partner'], qual: self, with_check: null },
+        { policyname: 'promoter_partner_self_update', cmd: 'UPDATE', roles: ['core_partner'], qual: self, with_check: self },
+      ],
+    });
+    expect(['core_partner', 'core_app', 'core_ops', 'core_partner_login', 'core_app_login', 'core_ops_login']).not.toContain(table[0]!.owner);
   });
 });
 
