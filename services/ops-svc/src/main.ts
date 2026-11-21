@@ -16,7 +16,7 @@ import { assertOpsPartnerRole } from './adapters/db/database-role.js';
 import { reauthWiring } from './reauth-wiring.js';
 import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
-import { AuditSignals, auditAnchorSignerFromEnv } from './modules/audit/index.js';
+import { AuditSignals } from './modules/audit/index.js';
 import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
 import { PromCommandSignals, type HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
@@ -131,8 +131,7 @@ let commandEvents: HandleCommandEvent | undefined;
 // 관제 스캐너 기기 경계(BAT-450): ops-svc가 권한·감사를 맡고 ticket-svc ScannerDeviceService gRPC가 원장을 쓴다.
 const ticketGrpcUrl = process.env.PEAKET_TICKET_GRPC_URL;
 const scannerDevices = ticketGrpcUrl ? new GrpcTicketScannerDevices({ address: ticketGrpcUrl }) : undefined;
-// 감사 체크포인트 공개 앵커 서명 키(Ed25519, BAT-465 R-584). 운영은 비밀 관리에서 넣는다.
-const anchor = auditAnchorSignerFromEnv(process.env);
+// 감사 체크포인트 서명 키는 이 프로세스에 없다: 서명·게시는 게시 작업(dist/jobs/audit-anchor.js)만 한다(BAT-360, ADR-0348 결정 1·4).
 // 봇 표본 검토(BAT-197 BOT-080): 후보 원장(ClickHouse, OPS-220 적재)과 trust-svc ApplyLabel을 조립한다.
 // 주소가 없으면 닫힌 대역으로 시작하고 그 경로만 503이다(진행은 배치가 없어 404).
 const botReviewSignals = new PromBotReviewSignals();
@@ -151,7 +150,6 @@ const service = await createService({
     database,
     partnerDatabase,
     executor,
-    signer: anchor.signer,
     ...(priority ? { priority } : {}),
     ...(scannerDevices ? { scannerDevices } : {}),
     ...(payouts ? { payouts } : {}),
@@ -173,7 +171,6 @@ eventCancellationSignals.register(service.metrics.registry);
 botReviewSignals.register(service.metrics.registry);
 commandSignals.register(service.metrics.registry);
 auditSignals.register(service.metrics.registry);
-if (anchor.warning) service.logger.warn({}, anchor.warning);
 if (botReviewSource.warning) service.logger.warn({}, botReviewSource.warning);
 if (!botReviewLabels) service.logger.warn({}, 'PEAKET_TRUST_GRPC_URL이 없어 표본 판정 HUMAN·BOT이 503 bot-review-label-unavailable이다(UNDECIDED는 기록된다)');
 if (!partnerRoleChecked) service.logger.warn({}, 'PEAKET_PARTNER_DATABASE_URL이 없어 파트너 회차 취소 경로가 관제 DB 풀을 함께 쓴다(local·ci만, 행 보안은 앱 대조만 남는다)');

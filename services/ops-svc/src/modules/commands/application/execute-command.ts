@@ -33,7 +33,7 @@ export class ExecuteCommand {
     // 체크포인트는 7년 보존이라 관리 계정 ID를 남기지 않는다(대응 표만 3년 뒤 지운다, ADR-0149 결정 3, BAT-355 리뷰 RV-02)
     const retry = command.state === 'FAILED' ? { accountId: actor.accountId, role: actor.role, ref: randomUUID() } : undefined;
     const actorRef = retry?.ref ?? SYSTEM_ACTOR_REF;
-    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_BEFORE:${command.commandId}`, actorRef });
+    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_BEFORE:${command.commandId}`, actorRef, kind: 'EXECUTION' });
     const dispatched = await this.store.markDispatched(command.commandId, nowMs, retry);
     let finished: Command;
     const eventId = command.eventId ?? (typeof command.params.eventId === 'string' ? command.params.eventId : undefined);
@@ -53,7 +53,7 @@ export class ExecuteCommand {
         finished = await this.store.markDispatchFailed(command.commandId, err instanceof Error ? err.message : 'execution-failed', nowMs);
       }
     }
-    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_AFTER:${command.commandId}`, actorRef });
+    await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_AFTER:${command.commandId}`, actorRef, kind: 'EXECUTION' });
     return finished;
   }
 }

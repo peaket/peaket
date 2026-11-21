@@ -1235,6 +1235,9 @@ importers:
       '@aws-sdk/client-s3':
         specifier: 3.1159.0
         version: 3.1159.0
+      '@aws-sdk/client-wafv2':
+        specifier: 3.1159.0
+        version: 3.1159.0
       '@grpc/grpc-js':
         specifier: 1.14.6
         version: 1.14.6
@@ -1253,6 +1256,9 @@ importers:
       '@peaket/platform':
         specifier: workspace:*
         version: link:../../packages/platform
+      canonicalize:
+        specifier: 5.1.0
+        version: 5.1.0
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1)
@@ -1712,6 +1718,10 @@ packages:
 
   '@aws-sdk/client-sts@3.1159.0':
     resolution: {integrity: sha512-mKdDVs2lsx13Zx/rmysS4jY9uXViQ62tKe3aYE4U3oZFDF1Fnxt9MWVw7HFyE2BzPdZvTbHrlrGremiffxqpnQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-wafv2@3.1159.0':
+    resolution: {integrity: sha512-uZ3a+UYRYUs5ekyqbkyI9KgezsiWzRPw19gJ4RSrAR9h9HpL2jfcp+bILSi6zFaAmK0L6sCbBIBC7l6P1rbSzQ==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.978.7':
@@ -4797,6 +4807,11 @@ packages:
   caniuse-lite@1.0.30001819:
     resolution: {integrity: sha512-LFUqIIAwpzsIuevnKnsR9qnStBcgzPShTX61lBwN9uFkkf8o8zLiebEjbW8AYtZiF+1YKDWfdt/pWDtMuG8Xwg==}
 
+  canonicalize@5.1.0:
+    resolution: {integrity: sha512-bab9+WefZljqQ8jT0qRwVmTyzAUU63K97QIQD3agynIBrb6sa5M2eAy8Hv8K3p4V9+ONVYZKtGYl4Dg+/5Gumw==}
+    engines: {node: '>=22'}
+    hasBin: true
+
   chai@6.3.0:
     resolution: {integrity: sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg==}
     engines: {node: '>=18'}
@@ -7553,6 +7568,17 @@ snapshots:
       '@smithy/fetch-http-handler': 5.8.0
       '@smithy/node-http-handler': 4.13.0
       '@smithy/types': 4.19.0
+      tslib: 2.8.1
+
+  '@aws-sdk/client-wafv2@3.1159.0':
+    dependencies:
+      '@aws-sdk/core': 3.981.0
+      '@aws-sdk/credential-provider-node': 3.972.90
+      '@aws-sdk/types': 3.975.1
+      '@smithy/core': 3.40.0
+      '@smithy/fetch-http-handler': 5.8.0
+      '@smithy/node-http-handler': 4.13.0
+      '@smithy/types': 4.20.0
       tslib: 2.8.1
 
   '@aws-sdk/core@3.978.7':
@@ -10539,6 +10565,8 @@ snapshots:
   camelcase@5.3.1: {}
 
   caniuse-lite@1.0.30001819: {}
+
+  canonicalize@5.1.0: {}
 
   chai@6.3.0: {}
 

@@ -1,5 +1,5 @@
 // 감사 모듈의 공개 면.
-export { appendAuditIn, auditHash, MemoryAuditChain, type AuditChain, type AuditEntry, type AuditRecord } from './audit.js';
+export { appendAuditIn, auditHash, canonicalAuditRecord, demoMarked, MemoryAuditChain, type AuditChain, type AuditEntry, type AuditRecord } from './audit.js';
 export {
   AUDIT_BACKGROUND,
   AUDIT_CHECKPOINTS,
@@ -60,10 +60,18 @@ export {
   AUDIT_ANCHOR_S3_ENDPOINT_ENV,
   AUDIT_CHAIN_KMS_KEY_ID_ENV,
   AUDIT_CHAIN_LOCAL_KEY_ENV,
+  AUDIT_ANCHOR_JOB_OPEN_ENVS,
   AUDIT_OPEN_ENVS,
+  AUDIT_PUBLIC_BUCKET_ENV,
+  AUDIT_PUBLIC_DIR_ENV,
+  OTS_CALENDAR_URLS_ENV,
   auditEnvName,
   auditMacKeyFromEnv,
+  auditPublicTargetsFromEnv,
   macAnchorStoreFromEnv,
+  otsCalendarsFromEnv,
+  type AuditPublicTargetsFromEnv,
+  type OtsCalendarsFromEnv,
 } from './config.js';
 export {
   AUDIT_INTAKE_PAYLOADS,
@@ -76,32 +84,107 @@ export {
   type AuditIntakeRecordType,
   type AuditIntakeStore,
 } from './audit-intake.js';
+export { AUDIT_ANCHOR_MESSAGE_VERSION, auditAnchorMessage, type AuditAnchorTarget } from './anchor.js';
 export {
-  AUDIT_ANCHOR_MESSAGE_VERSION,
-  Ed25519AuditAnchorSigner,
-  Ed25519AuditAnchorVerifier,
-  auditAnchorMessage,
-  auditAnchorSignerFromEnv,
-  ephemeralAuditAnchorSigner,
-  type AuditAnchorSignature,
-  type AuditAnchorSigner,
-  type AuditAnchorSignerFromEnv,
-  type AuditAnchorTarget,
-} from './anchor.js';
-export {
+  AUDIT_BUNDLE_EXPORTED,
+  AUDIT_CHECKPOINT_KINDS,
+  PUBLIC_CHECKPOINT_KINDS,
+  PUBLIC_CHECKPOINT_LOCK,
   auditRecordFromJson,
   AuditCheckpointService,
+  CheckpointRaceLost,
   DrizzleAuditChain,
   DrizzleAuditCheckpointStore,
   MemoryAuditCheckpointStore,
   auditCheckpointRoot,
+  buildPublicCheckpoint,
+  checkpointLeafHashes,
+  checkpointMerkleRoot,
+  isLegacyCheckpoint,
+  isPublicCheckpoint,
+  publicCheckpointFits,
   type AuditChainEntry,
   type AuditChainReader,
   type AuditCheckpoint,
+  type AuditCheckpointKind,
   type AuditCheckpointStore,
   type AuditCheckpointVerification,
+  type AuditSigningKey,
+  type BuiltPublicCheckpoint,
+  type ClosedEvent,
   type NewAuditCheckpoint,
+  type OtsState,
 } from './checkpoint.js';
+export { AUDIT_LEAF_DOMAIN, inclusionProof, inclusionProofOfLeafHashes, leafHash, leafInput, merkleRootOfLeafHashes, merkleTreeHash, nodeHash, verifyInclusion } from './merkle.js';
+export { CHECKPOINT_JSON_VERSION, canonicalCheckpointJson, checkpointHashOf, parseCheckpointJson, type CheckpointJsonBody, type CheckpointJsonInput } from './checkpoint-json.js';
+export {
+  AUDIT_CHECKPOINT_KMS_KEY_ID_ENV,
+  AUDIT_CHECKPOINT_LOCAL_KEY_ENV,
+  CHECKPOINT_SIGNATURE_ALG,
+  CHECKPOINT_SIGNER_OPEN_ENVS,
+  LocalCheckpointSigner,
+  checkpointSignerFromEnv,
+  ephemeralCheckpointSigner,
+  spkiPem,
+  verifyCheckpointSignature,
+  type CheckpointSigner,
+  type CheckpointSignerFromEnv,
+} from './checkpoint-signer.js';
+export { CheckpointSignUnavailable, KmsCheckpointSigner, kmsCheckpointSignerClient, type CheckpointSignClient } from './adapters/kms-checkpoint-signer.js';
+export {
+  HttpOpenTimestampsCalendar,
+  MemoryOpenTimestampsCalendar,
+  OTS_BITCOIN_TAG,
+  OTS_CALENDAR_TIMEOUT_MS,
+  OTS_HEADER_MAGIC,
+  OTS_PENDING_TAG,
+  OTS_RESPONSE_MAX_BYTES,
+  OTS_UPGRADE_INTERVAL_MS,
+  OtsFormatError,
+  hasBitcoinAttestation,
+  parseOtsFile,
+  parseOtsHeader,
+  stampDigest,
+  upgradeProof,
+  type OpenTimestampsCalendar,
+  type OtsFile,
+  type StampResult,
+  type UpgradeResult,
+} from './ots.js';
+export { AUDIT_PUBLIC_RETENTION_MS, DirAuditPublicStore, MemoryAuditPublicStore, S3AuditPublicStore, type AuditPublicStore, type PutOnceResult } from './public-store.js';
+export {
+  AUDIT_ANCHOR_ACTOR,
+  AUDIT_ANCHOR_SCHEDULE,
+  AuditCheckpointPublisher,
+  DrizzleAuditPublishStore,
+  INDEX_FILE,
+  MemoryAuditPublishStore,
+  PUBLIC_KEYS_FILE,
+  TRANSPARENCY_PREFIX,
+  checkpointFileBase,
+  kstDate,
+  kstDayStartMs,
+  type AccessLogDayAnchorSource,
+  type AuditAnchorLog,
+  type AuditAnchorRunResult,
+  type AuditCheckpointPublisherDeps,
+  type AuditPublishStore,
+  type ClosedOnsaleSource,
+} from './publisher.js';
+export {
+  AUDIT_CHECKPOINT_ALERT_EVENT_KEY,
+  AUDIT_CHECKPOINT_MISMATCH_ALERT,
+  AUDIT_CHECKPOINT_PUBLISH_LAG_ALERT,
+  AUDIT_OTS_INCOMPLETE_ALERT,
+  CHECKPOINT_SIGNAL_DEFAULTS,
+  CheckpointSignalMonitor,
+  CheckpointSignals,
+  checkpointSignalSnapshotOf,
+  type CheckpointSignalMonitorDeps,
+  type CheckpointSignalSnapshot,
+  type CheckpointSignalSource,
+} from './checkpoint-signals.js';
+export { AUDIT_BUNDLE_VERSION, verificationBundleOf, type AuditVerificationBundle } from './bundle.js';
 export { checkpointViewOf } from './inbound/checkpoints.controller.js';
 export {
   MemoryImmutableAnchorStore,

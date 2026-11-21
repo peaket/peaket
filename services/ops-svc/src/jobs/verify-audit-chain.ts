@@ -10,7 +10,6 @@ import {
   DrizzleAuditCheckpointStore,
   DrizzleAuditMacStore,
   DrizzleAuditVerifyStore,
-  Ed25519AuditAnchorSigner,
   auditEnvName,
   auditMacKeyFromEnv,
   macAnchorStoreFromEnv,
@@ -37,10 +36,8 @@ async function main(): Promise<number> {
   const database = createDatabase({ url, applicationName: 'ops-svc-verify-audit-chain', max: 2 });
   try {
     const chain = new DrizzleAuditChain(database);
-    const pem = env.PEAKET_AUDIT_ANCHOR_PRIVATE_KEY?.replace(/\n/g, '\n').trim();
-    // 체크포인트 서명은 키가 있을 때만 본다(임시 키로 만든 서명은 다른 프로세스에서 확인할 수 없다)
-    const signer = pem ? new Ed25519AuditAnchorSigner(pem, env.PEAKET_AUDIT_ANCHOR_KEY_ID?.trim() || 'audit-anchor-v1') : undefined;
-    const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(database), chain, () => Date.now(), signer);
+    // 공개 체크포인트 서명은 audit_signing_key의 공개키로 확인한다(서명 키는 게시 작업만 쓴다, ADR-0348 결정 4)
+    const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(database), chain, () => Date.now());
     const verifier = new AuditChainVerifier({
       store: new DrizzleAuditVerifyStore(database),
       key: keyR.key,

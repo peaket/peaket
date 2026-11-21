@@ -72,6 +72,8 @@ import type {
   AuditCheckpoint,
   AuditCheckpointPage,
   AuditCheckpointVerification,
+  AuditVerificationBundle,
+  AuditVerificationBundleRequest,
   CaseReply,
   Command,
   CommandDryRun,
@@ -13263,8 +13265,8 @@ export const getCreateOpsAuditCheckpointUrl = () => {
 }
 
 /**
- * BAT-465 GAT-310. commander가 사유와 함께 만든다. 구간 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 만든 사실도 감사 체인에 남는다. 공개 앵커·서명·OpenTimestamps는 후속이다.
- * @summary 감사 체크포인트 생성(마지막 체크포인트 뒤~지금 머리)
+ * BAT-465 GAT-310, ADR-0348 결정 1·3. commander가 사유와 함께 공개 사슬의 다음 번호(kind MANUAL)를 만든다. 구간 기록을 잎 솔트를 섞은 머클 루트로 묶고 직전 공개 체크포인트 해시와 잇는다. 만든 사실도 감사 체인에 남는다(AUDIT_CHECKPOINT_CREATED). 이 서버는 서명 키를 갖지 않아, 서명·공개 타임스탬프·게시는 다음 게시 작업(audit-anchor) 실행이 한다(그 전까지 signature는 null). 묶을 새 기록이 없으면 마지막 공개 체크포인트를 돌려준다.
+ * @summary 감사 체크포인트 생성(마지막 공개 체크포인트 뒤~지금 머리)
  */
 export const createOpsAuditCheckpoint = async (createOpsAuditCheckpointBody: CreateOpsAuditCheckpointBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuditCheckpointResponseSuccess> => {
 
@@ -13330,7 +13332,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateOpsAuditCheckpointMutationVariables = {data: BodyType<CreateOpsAuditCheckpointBody>}
 
     /**
- * @summary 감사 체크포인트 생성(마지막 체크포인트 뒤~지금 머리)
+ * @summary 감사 체크포인트 생성(마지막 공개 체크포인트 뒤~지금 머리)
  */
 export const useCreateOpsAuditCheckpoint = <TError = ErrorType<ProblemResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuditCheckpoint>>, TError,CreateOpsAuditCheckpointMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
@@ -13465,7 +13467,133 @@ export function useGetOpsAuditCheckpoint<TData = Awaited<ReturnType<typeof getOp
 
 
 
-export type getOpsAuditCheckpointVerificationResponse200 = {
+export type createOpsAuditVerificationBundleResponse201 = {
+  data: AuditVerificationBundle
+  status: 201
+}
+
+export type createOpsAuditVerificationBundleResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsAuditVerificationBundleResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsAuditVerificationBundleResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsAuditVerificationBundleResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsAuditVerificationBundleResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsAuditVerificationBundleResponseSuccess = (createOpsAuditVerificationBundleResponse201) & {
+  headers: Headers;
+};
+export type createOpsAuditVerificationBundleResponseError = (createOpsAuditVerificationBundleResponse400 | createOpsAuditVerificationBundleResponse403 | createOpsAuditVerificationBundleResponse404 | createOpsAuditVerificationBundleResponse409 | createOpsAuditVerificationBundleResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsAuditVerificationBundleUrl = (checkpointId: string,) => {
+
+
+
+
+  return `/v1/ops/audit-checkpoints/${encodeURIComponent(String(checkpointId))}/verification-bundles`
+}
+
+/**
+ * ADR-0348 결정 8, C-T39. 그 체크포인트가 덮는 기록 하나의 정규화 기록·잎 솔트·포함 증명과 체크포인트 JSON·서명·공개키·증명 파일을 준다. 잎 솔트가 실리는 외부 제공 자료라 commander만이다(viewer·operator는 403). 내보내기는 같은 요청에서 감사 기록 AUDIT_BUNDLE_EXPORTED(체크포인트·seq·사유·내보낸 관리 계정)로 남고, 기록을 남기지 못하면 묶음을 주지 않는다. Cache-Control: no-store
+ * @summary 검증 묶음 내보내기(기록 하나, commander만)
+ */
+export const createOpsAuditVerificationBundle = async (checkpointId: string,
+    auditVerificationBundleRequest: AuditVerificationBundleRequest, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsAuditVerificationBundleResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsAuditVerificationBundleResponseSuccess>(getCreateOpsAuditVerificationBundleUrl(checkpointId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(auditVerificationBundleRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsAuditVerificationBundleMutationKey = () => ['createOpsAuditVerificationBundle'] as const;
+
+export const getCreateOpsAuditVerificationBundleMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuditVerificationBundle>>, TError,CreateOpsAuditVerificationBundleMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsAuditVerificationBundle>>, TError,CreateOpsAuditVerificationBundleMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsAuditVerificationBundleMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsAuditVerificationBundle>>, CreateOpsAuditVerificationBundleMutationVariables> = (props) => {
+          const {checkpointId,data} = props ?? {};
+
+          return  createOpsAuditVerificationBundle(checkpointId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsAuditVerificationBundleMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsAuditVerificationBundle>>>
+    export type CreateOpsAuditVerificationBundleMutationBody = BodyType<AuditVerificationBundleRequest>
+    export type CreateOpsAuditVerificationBundleMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsAuditVerificationBundleMutationVariables = {checkpointId: string;data: BodyType<AuditVerificationBundleRequest>}
+
+    /**
+ * @summary 검증 묶음 내보내기(기록 하나, commander만)
+ */
+export const useCreateOpsAuditVerificationBundle = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsAuditVerificationBundle>>, TError,CreateOpsAuditVerificationBundleMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsAuditVerificationBundle>>,
+        TError,
+        CreateOpsAuditVerificationBundleMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsAuditVerificationBundleMutationOptions(options), queryClient);
+    }
+    export type getOpsAuditCheckpointVerificationResponse200 = {
   data: AuditCheckpointVerification
   status: 200
 }
@@ -13614,8 +13742,8 @@ export const getGetOpsAuditAnchorUrl = (checkpointId: string,) => {
 }
 
 /**
- * BAT-465 R-584, ADR-0075. 세션 없이 읽는다. 서명 대상은 'audit-checkpoint-v1' 판과 체크포인트 ID·구간·루트·직전 루트·만든 시각을 줄바꿈으로 이은 UTF-8 바이트이고, publicKey(SPKI PEM)로 확인한다. 감사 체인 구간을 다시 모은 검증은 같은 경로의 /verification이 한다. 외부 불변 저장소 앵커(S3 Object Lock)·OpenTimestamps는 후속이다. Cache-Control: no-store
- * @summary 감사 체크포인트 공개 앵커(루트·Ed25519 서명·공개키)
+ * BAT-465 R-584, ADR-0075, ADR-0348 결정 12. 세션 없이 읽는다. 공개 행은 checkpointJson 바이트에 대한 ECDSA P-256 서명을 publicKey(SPKI PEM)로 확인한다. 옛 행(legacy)은 Ed25519였고 공개키를 더 내주지 않는다. 감사 체인 구간을 다시 모은 검증은 같은 경로의 /verification이 한다. 게시한 공개 파일(transparency/v1/checkpoints/…·public-keys.json·index.json)과 공개 검증 도구(tools/audit-verify)는 피켓 서버 없이 같은 것을 확인한다. Cache-Control: no-store
+ * @summary 감사 체크포인트 공개 앵커(체크포인트 JSON·서명·공개키)
  */
 export const getOpsAuditAnchor = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditAnchorResponseSuccess> => {
 
@@ -13686,7 +13814,7 @@ export function useGetOpsAuditAnchor<TData = Awaited<ReturnType<typeof getOpsAud
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary 감사 체크포인트 공개 앵커(루트·Ed25519 서명·공개키)
+ * @summary 감사 체크포인트 공개 앵커(체크포인트 JSON·서명·공개키)
  */
 
 export function useGetOpsAuditAnchor<TData = Awaited<ReturnType<typeof getOpsAuditAnchor>>, TError = ErrorType<ProblemResponse>>(
@@ -13732,7 +13860,7 @@ export const getGetOpsAuditAnchorVerificationUrl = (checkpointId: string,) => {
 }
 
 /**
- * BAT-465 R-584·R-614. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 원본 행을 대조하고, 직전 체크포인트 루트와 잇는지, Ed25519 서명이 체크포인트 값과 맞는지, 공개 앵커 참조가 남았는지 본다(B3-H03). Cache-Control: no-store
+ * BAT-465 R-584·R-614, ADR-0348. 세션 없이 읽는다. 구간 기록을 다시 모아 루트를 비교하고, record_json으로 기록 해시를 다시 계산하며 prev_hash 연쇄와 원본 행을 대조하고, 직전 체크포인트와 잇는지, 공개 행의 ECDSA 서명이 저장된 공개키로 체크포인트 JSON에 맞는지, 게시한 증명 파일의 대상 해시가 체크포인트 해시와 같은지 본다(B3-H03). Cache-Control: no-store
  * @summary 공개 앵커 검증(루트·기록·연쇄·직전 사슬·서명·앵커)
  */
 export const getOpsAuditAnchorVerification = async (checkpointId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsAuditAnchorVerificationResponseSuccess> => {

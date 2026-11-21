@@ -1,10 +1,12 @@
 // 감사 체인 작업자·빈 행 경보·5분 앵커의 타이머(ADR-0341 결정 3·4·5). 모듈 수명주기로 켜고 끈다(main.ts를 고치지 않는다).
 // 임대(ops_worker_lease, audit-chain-mac)를 쥔 파드만 mac을 채우고 앵커를 쓴다. 빈 행 경보는 파드마다 돈다(경보는 (사건 키, 종류) 하나로 모인다).
 // 한 바퀴가 실패해도 다음 바퀴에 다시 한다(경고 로그에는 오류 이름만).
+// 감사 공개 앵커 신호(ADR-0348 결정 10)도 1분 [가정]마다 돈다: 지표·밀림 경보는 파드마다, 서명 전 체크포인트 어긋남 검증은 임대를 쥔 파드만.
 import type { OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import type { PlatformLogger } from '@peaket/platform';
 import { AUDIT_CHAIN_LEASE, AUDIT_WORKER_DEFAULTS, type AuditChainWorker, type AuditMacLagMonitor, type WorkerLease } from './chain-worker.js';
 import { MAC_ANCHOR_INTERVAL_MS, type AuditMacAnchorer } from './mac-anchor.js';
+import { CHECKPOINT_SIGNAL_DEFAULTS, type CheckpointSignalMonitor } from './checkpoint-signals.js';
 
 export interface AuditBackgroundOptions {
   readonly enabled: boolean;
@@ -15,6 +17,8 @@ export interface AuditBackgroundOptions {
   readonly leaseMs?: number;
   readonly lagCheckMs?: number;
   readonly anchorMs?: number;
+  /** 감사 공개 앵커 신호 간격(기본 1분) */
+  readonly checkpointSignalMs?: number;
 }
 
 export interface AuditBackgroundDeps {
@@ -22,6 +26,8 @@ export interface AuditBackgroundDeps {
   readonly lease: WorkerLease;
   readonly monitor: AuditMacLagMonitor;
   readonly anchorer: AuditMacAnchorer;
+  /** 감사 공개 앵커 신호(없으면 돌지 않는다) */
+  readonly checkpointSignals?: CheckpointSignalMonitor;
   readonly now: () => number;
   readonly logger?: PlatformLogger;
   readonly options: AuditBackgroundOptions;
@@ -55,6 +61,7 @@ export class AuditBackground implements OnApplicationBootstrap, OnModuleDestroy 
     every('worker', o.tickMs ?? AUDIT_WORKER_DEFAULTS.tickMs, () => this.tickWorker());
     every('lag', o.lagCheckMs ?? AUDIT_WORKER_DEFAULTS.lagCheckMs, () => this.deps.monitor.runOnce(this.deps.now()));
     every('anchor', o.anchorMs ?? MAC_ANCHOR_INTERVAL_MS, () => this.tickAnchor());
+    if (this.deps.checkpointSignals) every('checkpoint-signals', o.checkpointSignalMs ?? CHECKPOINT_SIGNAL_DEFAULTS.intervalMs, () => this.tickCheckpointSignals());
   }
 
   onModuleDestroy(): void {
@@ -90,5 +97,10 @@ export class AuditBackground implements OnApplicationBootstrap, OnModuleDestroy 
   async tickAnchor(): Promise<void> {
     if (!this.leader) return;
     await this.deps.anchorer.runOnce(this.deps.now());
+  }
+
+  /** 공개 앵커 신호 한 바퀴. 어긋남 검증은 임대를 쥔 파드만 한다 */
+  async tickCheckpointSignals(): Promise<void> {
+    await this.deps.checkpointSignals?.runOnce(this.deps.now(), { leader: this.leader });
   }
 }

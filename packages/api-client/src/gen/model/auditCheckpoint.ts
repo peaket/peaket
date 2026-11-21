@@ -9,36 +9,83 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { AuditCheckpointKind } from './auditCheckpointKind';
+import type { AuditCheckpointOtsState } from './auditCheckpointOtsState';
+import type { AuditCheckpointSignatureAlg } from './auditCheckpointSignatureAlg';
 
 /**
- * 감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다.
+ * 감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075, ADR-0348). 감사 체인의 fromSeq~toSeq 기록을 묶은 요약이다. 공개 사슬(kind DAILY·EVENT_CLOSE·MANUAL)은 번호 no가 1부터 빈틈 없이 붙고, 루트는 잎 솔트를 섞은 RFC 9162 머클 루트(잎 바이트는 ADR-0348 결정 2), 값은 RFC 8785 체크포인트 JSON이며 직전 공개 체크포인트의 checkpointHash와 잇는다. 서명(KMS ECDSA P-256)·공개 타임스탬프(OpenTimestamps)·게시(두 버킷의 transparency/v1/)는 게시 작업 audit-anchor만 하고, 손으로 만든 체크포인트는 다음 실행 전까지 서명 칸이 비어 있다. 명령 실행 앞뒤 체크포인트(kind EXECUTION)는 번호·JSON·서명·게시가 없는 내부용이다. 0023 이전 옛 행(legacy)은 공개 사슬 밖이고 루트는 (seq, hash) 줄의 SHA-256, 서명은 옛 Ed25519다(확인하지 않는다).
  */
 export interface AuditCheckpoint {
   checkpointId?: string;
+  /** 체크포인트 JSON의 firstSeq */
   fromSeq?: number;
+  /** 체크포인트 JSON의 lastSeq */
   toSeq?: number;
-  /** 구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진 */
+  /** 새 행은 머클 루트(merkleRoot와 같다), 옛 행은 구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진 */
   rootHash?: string;
-  /** 직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자 */
+  /** 공개 행은 직전 공개 체크포인트의 checkpointHash, 내부·옛 행은 직전 내부 체크포인트의 rootHash. 첫 체크포인트는 빈 글자 */
   prevCheckpointHash?: string;
   reason?: string;
   actorRef?: string;
   createdAt?: string;
   /**
-     * 체크포인트 값의 Ed25519 서명(base64). 서명기가 없는 시험 조립에서는 null
+     * 공개 행은 체크포인트 JSON 바이트의 ECDSA P-256 / SHA-256 서명(DER의 base64, 게시 작업이 채운다. 서명 전이면 null). 옛 행은 옛 Ed25519 서명(base64)
      * @nullable
      */
   signature?: string | null;
   /**
-     * 서명 키 ID
+     * 서명 키 ID(공개 행은 KMS 키 ID 또는 local 키 ID)
      * @nullable
      */
   keyId?: string | null;
   /**
-     * 공개 앵커의 위치. 이번 몫은 local:<checkpointId>
+     * 공개 행은 게시한 체크포인트 파일 이름(transparency/v1/checkpoints/<번호 10자리>.json, 게시 전이면 null), 옛 행은 local:<checkpointId>
      * @nullable
      */
   anchorRef?: string | null;
   /** @nullable */
   anchoredAt?: string | null;
+  /**
+     * 공개 체크포인트 번호(1부터 빈틈 없음). 내부·옛 행은 null(ADR-0348 결정 3)
+     * @nullable
+     */
+  no?: number | null;
+  /**
+     * 만든 때: 일(00:10 KST 뒤 첫 실행)·회차 마감·손으로·명령 실행 앞뒤(내부). 옛 행은 null
+     * @nullable
+     */
+  kind?: AuditCheckpointKind;
+  /**
+     * 잎(기록) 수. 옛 행은 null
+     * @nullable
+     */
+  leafCount?: number | null;
+  /**
+     * RFC 9162 머클 루트 16진(옛 행은 null)
+     * @nullable
+     */
+  merkleRoot?: string | null;
+  /**
+     * 체크포인트 JSON(RFC 8785) 바이트의 SHA-256 16진. 공개 행만
+     * @nullable
+     */
+  checkpointHash?: string | null;
+  /**
+     * 공개 행의 서명 알고리즘. 내부·옛 행은 null
+     * @nullable
+     */
+  signatureAlg?: AuditCheckpointSignatureAlg;
+  /**
+     * 공개 타임스탬프 상태. 캘린더가 모두 실패했거나 서명 전이면 null
+     * @nullable
+     */
+  otsState?: AuditCheckpointOtsState;
+  /**
+     * 두 버킷에 모두 게시한 시각
+     * @nullable
+     */
+  publishedAt?: string | null;
+  /** 0023 이전 옛 행(공개 사슬 밖)인가 */
+  legacy?: boolean;
 }

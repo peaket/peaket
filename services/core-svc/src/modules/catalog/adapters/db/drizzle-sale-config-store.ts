@@ -3,7 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
 import { eq, sql } from 'drizzle-orm';
 import type { EventSaleConfig } from '../../domain/event-sale-config.js';
-import { OPS_DATABASE, type DueEventConfig, type SaleConfigReader, type SaleConfigStore } from '../../domain/sale-config-ports.js';
+import { ONSALE_WINDOW_END_MS, OPS_DATABASE, type DueEventConfig, type OnsaleClosedEvent, type SaleConfigReader, type SaleConfigStore } from '../../domain/sale-config-ports.js';
 import { eventSaleConfig } from './schema.js';
 
 const dueEvents = async (database: Database, through: Date, limit: number): Promise<DueEventConfig[]> => {
@@ -19,6 +19,18 @@ const dueEvents = async (database: Database, through: Date, limit: number): Prom
     .map((p) => ({ eventId: p.eventId, promoterId: p.promoterId, endsAt: new Date(p.endsAtMs) }));
 };
 
+/** 판매 시작 + 60분이 [from, to)에 든 회차(ID·마감 시각만, ADR-0348 결정 9) */
+const onsaleClosed = async (database: Database, from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]> => {
+  const closedAt = sql`((${eventSaleConfig.payload}->>'opensAtMs')::bigint + ${ONSALE_WINDOW_END_MS})`;
+  const rows = await database.db
+    .select({ eventId: eventSaleConfig.eventId, closedAtMs: sql<string>`${closedAt}` })
+    .from(eventSaleConfig)
+    .where(sql`${closedAt} >= ${from.getTime()} and ${closedAt} < ${to.getTime()}`)
+    .orderBy(sql`${closedAt}`, eventSaleConfig.eventId)
+    .limit(limit);
+  return rows.map((r) => ({ eventId: r.eventId, closedAt: new Date(Number(r.closedAtMs)) }));
+};
+
 /** 내부 HTTP 읽기 전용 사본 읽기(core_app). 쓰기 역할(core_ops)을 읽기에 쓰지 않는다 */
 @Injectable()
 export class DrizzleSaleConfigReader implements SaleConfigReader {
@@ -31,6 +43,10 @@ export class DrizzleSaleConfigReader implements SaleConfigReader {
 
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]> {
     return dueEvents(this.database, through, limit);
+  }
+
+  listOnsaleClosed(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]> {
+    return onsaleClosed(this.database, from, to, limit);
   }
 
   async commissionRateBp(eventId: string): Promise<number | undefined> {
@@ -64,6 +80,10 @@ export class DrizzleSaleConfigStore implements SaleConfigStore {
 
   listEndedBefore(through: Date, limit: number): Promise<DueEventConfig[]> {
     return dueEvents(this.database, through, limit);
+  }
+
+  listOnsaleClosed(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]> {
+    return onsaleClosed(this.database, from, to, limit);
   }
 
   async commissionRateBp(eventId: string): Promise<number | undefined> {

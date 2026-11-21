@@ -14,18 +14,27 @@ import * as zod from 'zod';
 export const AuditCheckpointPage = zod.object({
   "items": zod.array(zod.object({
   "checkpointId": zod.uuid().optional(),
-  "fromSeq": zod.int().optional(),
-  "toSeq": zod.int().optional(),
-  "rootHash": zod.string().optional().describe('구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진'),
-  "prevCheckpointHash": zod.string().optional().describe('직전 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
+  "fromSeq": zod.int().optional().describe('체크포인트 JSON의 firstSeq'),
+  "toSeq": zod.int().optional().describe('체크포인트 JSON의 lastSeq'),
+  "rootHash": zod.string().optional().describe('새 행은 머클 루트(merkleRoot와 같다), 옛 행은 구간 기록의 (seq, hash)를 이어 붙인 SHA-256 16진'),
+  "prevCheckpointHash": zod.string().optional().describe('공개 행은 직전 공개 체크포인트의 checkpointHash, 내부·옛 행은 직전 내부 체크포인트의 rootHash. 첫 체크포인트는 빈 글자'),
   "reason": zod.string().optional(),
   "actorRef": zod.string().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
-  "signature": zod.string().nullish().describe('체크포인트 값의 Ed25519 서명(base64). 서명기가 없는 시험 조립에서는 null'),
-  "keyId": zod.string().nullish().describe('서명 키 ID'),
-  "anchorRef": zod.string().nullish().describe('공개 앵커의 위치. 이번 몫은 local:<checkpointId>'),
-  "anchoredAt": zod.iso.datetime({"offset":true}).nullish()
-}).describe('감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075). 감사 체인의 fromSeq~toSeq 기록을 SHA-256 루트로 묶고 직전 체크포인트 루트와 잇는다. 루트는 Ed25519로 서명해 공개 앵커(anchorRef)로 남긴다. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 후속이다.')).optional(),
+  "signature": zod.string().nullish().describe('공개 행은 체크포인트 JSON 바이트의 ECDSA P-256 / SHA-256 서명(DER의 base64, 게시 작업이 채운다. 서명 전이면 null). 옛 행은 옛 Ed25519 서명(base64)'),
+  "keyId": zod.string().nullish().describe('서명 키 ID(공개 행은 KMS 키 ID 또는 local 키 ID)'),
+  "anchorRef": zod.string().nullish().describe('공개 행은 게시한 체크포인트 파일 이름(transparency/v1/checkpoints/<번호 10자리>.json, 게시 전이면 null), 옛 행은 local:<checkpointId>'),
+  "anchoredAt": zod.iso.datetime({"offset":true}).nullish(),
+  "no": zod.int().nullish().describe('공개 체크포인트 번호(1부터 빈틈 없음). 내부·옛 행은 null(ADR-0348 결정 3)'),
+  "kind": zod.union([zod.literal('DAILY'),zod.literal('EVENT_CLOSE'),zod.literal('MANUAL'),zod.literal('EXECUTION'),zod.literal(null)]).nullish().describe('만든 때: 일(00:10 KST 뒤 첫 실행)·회차 마감·손으로·명령 실행 앞뒤(내부). 옛 행은 null'),
+  "leafCount": zod.int().nullish().describe('잎(기록) 수. 옛 행은 null'),
+  "merkleRoot": zod.string().nullish().describe('RFC 9162 머클 루트 16진(옛 행은 null)'),
+  "checkpointHash": zod.string().nullish().describe('체크포인트 JSON(RFC 8785) 바이트의 SHA-256 16진. 공개 행만'),
+  "signatureAlg": zod.union([zod.literal('ECDSA_P256_SHA256'),zod.literal(null)]).nullish().describe('공개 행의 서명 알고리즘. 내부·옛 행은 null'),
+  "otsState": zod.union([zod.literal('PENDING'),zod.literal('COMPLETE'),zod.literal(null)]).nullish().describe('공개 타임스탬프 상태. 캘린더가 모두 실패했거나 서명 전이면 null'),
+  "publishedAt": zod.iso.datetime({"offset":true}).nullish().describe('두 버킷에 모두 게시한 시각'),
+  "legacy": zod.boolean().optional().describe('0023 이전 옛 행(공개 사슬 밖)인가')
+}).describe('감사 체크포인트(BAT-465 GAT-310·R-584, ADR-0075, ADR-0348). 감사 체인의 fromSeq~toSeq 기록을 묶은 요약이다. 공개 사슬(kind DAILY·EVENT_CLOSE·MANUAL)은 번호 no가 1부터 빈틈 없이 붙고, 루트는 잎 솔트를 섞은 RFC 9162 머클 루트(잎 바이트는 ADR-0348 결정 2), 값은 RFC 8785 체크포인트 JSON이며 직전 공개 체크포인트의 checkpointHash와 잇는다. 서명(KMS ECDSA P-256)·공개 타임스탬프(OpenTimestamps)·게시(두 버킷의 transparency/v1/)는 게시 작업 audit-anchor만 하고, 손으로 만든 체크포인트는 다음 실행 전까지 서명 칸이 비어 있다. 명령 실행 앞뒤 체크포인트(kind EXECUTION)는 번호·JSON·서명·게시가 없는 내부용이다. 0023 이전 옛 행(legacy)은 공개 사슬 밖이고 루트는 (seq, hash) 줄의 SHA-256, 서명은 옛 Ed25519다(확인하지 않는다).')).optional(),
   "nextCursor": zod.string().nullish()
 })
 
