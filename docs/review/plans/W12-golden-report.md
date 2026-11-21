@@ -106,7 +106,13 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 
 ## 시험 결과
 
-(구현·시험 담당이 채운다)
+- **바꾼 것**: `services/core-svc/test/search-golden.test.ts` `:81` 쓰는 경로를 `../search-golden-report.json`으로, `:3` 주석의 파일 이름도 같은 이름으로(위 3 그대로). 단언·계산·시험 이름은 그대로다. 이 폴더에 남아 있던 `services/core-svc/test-report-search-golden.json`은 `rm -f`로 지웠다(git이 무시하는 파일이라 커밋 변화 없음).
+- **증명(위 5 차례대로, 이 폴더, 2026-11-22)**:
+  - 5의 1: `PEAKET_TEST_REPORT=test-report.json pnpm --filter @peaket/core-svc test test/search-golden.test.ts` → 1개 통과, 기록 줄 `SR-T12 골든 세트: 1위 100% · 3위 안 100% (100개)`.
+  - 5의 2: `services/core-svc/search-golden-report.json`이 생겼고(`cases` 100, `target` 0.9·0.98, `misses` 빈 목록) 옛 이름은 없다. `git check-ignore -v` → `.gitignore:5:search-golden-report.json`. `git status --porcelain -- services/core-svc`에 추적 안 된 파일 없음.
+  - 5의 3: `ci-node.yml:158`과 같은 `find`가 찾은 것은 `--report services/core-svc/test-report.json` 하나다(골든 보고서 없음). `node tools/ci/asvs-report.mjs … --summary <임시>` → `exit=0`, 요약 '시험 보고서 1개를 읽었다'. 그 뒤 `test-report.json`은 지웠다.
+  - 5의 4 일부: `pnpm exec turbo run typecheck --filter=@peaket/core-svc` 9개 성공, `pnpm lint` 끝 코드 0, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0.
+- **초안 PR**: 이 커밋을 올린 뒤 연다. CI 결과는 검증 담당이 '검증' 절에 적는다.
 
 ## 리뷰
 
@@ -122,6 +128,7 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12golden-plan | claude-opus-5-5 | 2026-11-22T04:55+09:00 | 2026-11-22T05:07+09:00 |
 | impl | lane2-w12golden-impl | claude-opus-5-5 | 2026-11-22T05:06+09:00 | 2026-11-22T05:09+09:00 |
+| test | lane2-w12golden-test | claude-opus-5-5 | 2026-11-22T05:08+09:00 | 2026-11-22T05:12+09:00 |
 
 ## 다음 단계
 
@@ -129,3 +136,5 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 2. 시험 담당: 시험 파일 두 줄(위 3)과 묵은 로컬 파일 지우기, 5의 1~3을 돌려 '시험 결과'에 적고 커밋, `Role: test`. 담당 표에 test 줄.
 3. 리뷰·검증 담당(서로 다른 세션): 5의 4와 초안 PR CI 한 번, 각자 '리뷰'·'검증' 절을 채워 커밋.
 4. 감독: 초안 PR CI 확인 뒤 develop에 합친다.
+
+- **다음 단계: 리뷰·검증 → 기록 → 합치기.** 구현(`b0a6b091b`, `.gitignore` 한 줄)과 시험(이름 바꿈, 위 '시험 결과')이 끝났다.

@@ -1,6 +1,6 @@
 // 골든 세트 시험(BAT-165 웨이브 7 T-10, SR-T12). 고정 카탈로그를 메모리 저장소에 채우고 HTTP(GET /v1/search·/v1/search/suggestions)로 묻는다.
 // 정본: docs/features/search.md:303 SR-T12(검색어 100개 [가정], §3·§5의 모든 경우, 순서 경우는 §4.5 브라우저 거르기 함수를 거친다),
-// NFR-028(docs/planning/02-requirements.md:189: 1위 정답률 90% [가정]·3위 안 정답률 98% [가정]). 정답률은 test-report-search-golden.json으로도 낸다.
+// NFR-028(docs/planning/02-requirements.md:189: 1위 정답률 90% [가정]·3위 안 정답률 98% [가정]). 정답률은 search-golden-report.json으로도 낸다.
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { writeFileSync } from 'node:fs';
@@ -78,7 +78,7 @@ describe('골든 세트', () => {
     const top1 = rows.filter((r) => r.top1).length / rows.length;
     const top3 = rows.filter((r) => r.top3).length / rows.length;
     const report = { cases: rows.length, top1, top3, target: { top1: TOP1, top3: TOP3 }, misses: rows.filter((r) => !r.top3 || !r.top1) };
-    writeFileSync(fileURLToPath(new URL('../test-report-search-golden.json', import.meta.url)), `${JSON.stringify(report, null, 1)}\n`);
+    writeFileSync(fileURLToPath(new URL('../search-golden-report.json', import.meta.url)), `${JSON.stringify(report, null, 1)}\n`);
     console.info(`SR-T12 골든 세트: 1위 ${(top1 * 100).toFixed(0)}% · 3위 안 ${(top3 * 100).toFixed(0)}% (${rows.length}개)`);
     expect(rows).toHaveLength(CASES);
     expect({ top1: top1 >= TOP1, top3: top3 >= TOP3, misses: report.misses }).toEqual({ top1: true, top3: true, misses: report.misses });
