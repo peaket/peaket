@@ -142,4 +142,27 @@ describe('기기 키 HTTP 벡터 [O-T45]', () => {
     expect(problemName(otherKey.payload)).toBe('reauth-required');
     expect((await deviceKeysStore.activeKeysByEvent(EVENT)).get(ticketId)!.map((k) => k.keyId)).toEqual([vector.keyIdB64u]);
   });
+
+  // RV350-1(정본 a0a652796): REISSUE·BOOTH는 재인증·부스 허용 확인(403)을 먼저 지나야 같은 키를 본다. 이 서비스 조립에는 재인증 확인이 없다
+  test('O-T45 ③ HTTP: 같은 키 REISSUE·BOOTH는 재인증·부스 허용 확인을 못 지나면 403이고 보유자가 아니어도 404보다 403이다', async () => {
+    const ticketId = '0190f3a1-7c2e-7a00-8b2a-6c1d5e70f203';
+    deviceKeysStore.seedTicket({ ticketId, eventId: EVENT, accountId: ACCOUNT });
+    expect((await post(ticketId, { publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'ISSUE' })).statusCode).toBe(201);
+    const reissue = { publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'REISSUE' };
+    const booth = { publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'BOOTH', boothRequestId: '0190f3a1-7c2e-7a00-8000-0000000000b1' };
+    for (const [label, target, account] of [
+      ['보유자', ticketId, ACCOUNT],
+      ['다른 계정', ticketId, OTHER],
+      ['없는 티켓', '0190f3a1-7c2e-7a00-8b2a-6c1d5e70f299', ACCOUNT],
+    ] as const) {
+      for (const body of [reissue, booth]) {
+        const r = await post(target, body, account);
+        expect(r.statusCode, `${label} ${body.reason}`).toBe(403);
+        expect(problemName(r.payload), `${label} ${body.reason}`).toBe('reauth-required');
+      }
+    }
+    expect(deviceKeysStore.keys.get(ticketId)).toHaveLength(1);
+    expect(deviceKeysStore.keys.get(ticketId)![0]!.revokedAtMs).toBeUndefined();
+    expect(deviceKeysStore.keys.get(ticketId)![0]!.reason).toBe('ISSUE');
+  });
 });

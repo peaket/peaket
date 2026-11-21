@@ -198,6 +198,53 @@ describe('같은 키 다시 등록 [O-T45]', () => {
     expect(store.keys.get(transferred)![0]!.revokedAtMs).toBeUndefined();
   });
 
+  // RV350-1(정본 a0a652796): 판정 차례는 이유마다 다르다. ISSUE·TRANSFER는 보유자 확인(404) 바로 뒤에 같은 키를 보고,
+  // REISSUE·BOOTH는 재인증·부스 허용 확인(403)을 먼저 지난 뒤 보유자 확인 다음에 본다. 그 확인을 못 지나면 같은 키여도 403이다
+  test('O-T45 ③ REISSUE·BOOTH는 재인증·부스 허용 확인(403)이 먼저다: 같은 키여도 못 지나면 403이고 보유자가 아니어도 404보다 403이다', async () => {
+    await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }));
+    const before = store.keys.get(TICKET)!.map((k) => ({ ...k }));
+    const withReauth = new DeviceKeys({ store, clock, reauth });
+    const same = { publicKeyJwk: vector.publicKeyJwkAsExported };
+    const booth = { ...same, reason: 'BOOTH' as const, boothRequestId: '0190f3a1-7c2e-7a00-8000-0000000000b1' };
+
+    // 보유자 본인, 같은 키: 재인증 없는 REISSUE·BOOTH는 403(재인증 필요), 재인증이 있어도 부스 허용이 없는 BOOTH는 403(부스 허용 없음)
+    await expect(keys.register(register({ ...same, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+    await expect(keys.register(register(booth))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+    await expect(withReauth.register(register(booth))).rejects.toMatchObject({ code: 'BOOTH_NOT_ALLOWED' });
+
+    // 보유자가 아니거나(다른 계정) 없는 티켓이어도 그 확인을 못 지나면 404보다 403이 먼저다
+    for (const who of [{ accountId: OTHER }, { ticketId: '0190f3a1-7c2e-7a00-8000-000000000099' }]) {
+      await expect(keys.register(register({ ...same, ...who, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+      await expect(keys.register(register({ ...booth, ...who }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+      await expect(withReauth.register(register({ ...booth, ...who }))).rejects.toMatchObject({ code: 'BOOTH_NOT_ALLOWED' });
+      // 재인증을 지난 REISSUE는 그다음 보유자 확인에서 404다
+      await expect(withReauth.register(register({ ...same, ...who, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+
+    // 어느 요청도 바꾼 것이 없다
+    expect(store.keys.get(TICKET)).toEqual(before);
+    expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([]);
+  });
+
+  test('O-T45 ③ 재인증을 지난 REISSUE의 같은 키는 바꾸지 않고 201이고 24시간 한도에 세지 않는다', async () => {
+    await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }));
+    const withReauth = new DeviceKeys({ store, clock, reauth });
+    clock.advance(1_000);
+    expect(await withReauth.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'REISSUE' }))).toEqual({ keyId: vector.keyIdB64u });
+    const rows = store.keys.get(TICKET)!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.revokedAtMs).toBeUndefined();
+    expect(rows[0]!.registeredAtMs).toBe(NOW);
+    expect(rows[0]!.reason).toBe('ISSUE');
+    expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([]);
+    // 한도에 세지 않았으므로 새 키 REISSUE(첫 교체)는 되고, 그다음 교체는 24시간 한도로 막힌다
+    clock.advance(1_000);
+    const rotated = await withReauth.register(register({ publicKeyJwk: await publicJwk(), reason: 'REISSUE' }));
+    expect(rotated.keyId).not.toBe(vector.keyIdB64u);
+    expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([vector.keyIdB64u]);
+    await expect(withReauth.register(register({ publicKeyJwk: await publicJwk(), reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REISSUE_LIMIT' });
+  });
+
   test('O-T45 ③ 같은 키 요청 둘이 겹쳐도 둘 다 201이고 유효 키는 하나다', async () => {
     const both = await Promise.all([
       keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported })),
