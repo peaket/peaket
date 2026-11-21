@@ -109,6 +109,14 @@ service:
       # 예: [{ namespaces: [data], podLabels: { app: pgbouncer }, ports: [6432] }, { cidrs: [10.20.0.0/16], ports: [5432] }, { allowLinkLocalCidrs: [169.254.170.23/32], ports: [80] }]
       internal: []
 
+# 스트림 작업자 모드(docs/streaming.md §2.2·§2.3, ASVS v5.0.0-13.4.5, BUILD_ORDER OPS-150). 작업자에는 관리 API가 없고 들어오는 연결은 지표 수집·상태 확인뿐이다.
+# 켜면 서비스 Deployment가 앱 포트·Service를 만들지 않고(컨테이너 포트는 관리 포트 하나, PORT 환경 값 없음), NetworkPolicy를 service.networkPolicy.enabled와
+# 상관없이 늘 낸다. 들어옴은 service.networkPolicy.managementFromNamespaces(관측 네임스페이스)에서 관리 포트로만, 나감은 service.networkPolicy.egress 그대로다.
+# 앱 포트에 기대는 값(service.extraPorts·service.networkPolicy.appFromPodLabels), 쿠버네티스 API 권한(service.leaderLease),
+# 자동 확장·카나리(service.autoscaling·service.keda·service.rollout, §2.2 '복제 수 고정·롤링')는 받지 않는다(렌더를 멈춘다)
+worker:
+  enabled: false
+
 # 서비스별 Outbox 릴레이(ADR-0116 결정 1·2). 서비스와 같은 이미지를 다른 시작 명령으로 띄운다. Lease 리더만 보내고 정비를 돈다
 outboxRelay:
   enabled: false

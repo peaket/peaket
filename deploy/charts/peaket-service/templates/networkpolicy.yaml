@@ -1,8 +1,12 @@
 {{- $np := .Values.service.networkPolicy }}
 {{- $egress := $np.egress | default dict }}
 {{- $hasEgress := or $egress.publicHttps $egress.internal }}
-{{- if and .Values.service.enabled $np.enabled }}
+{{- $worker := .Values.worker.enabled }}
+{{- /* 스트림 작업자 모드는 정책을 늘 낸다(작업자마다 네트워크 정책, docs/streaming.md §2.3) */}}
+{{- if and .Values.service.enabled (or $np.enabled $worker) }}
 {{- $name := include "peaket.name" . }}
+{{- /* 작업자에는 앱 포트가 없어 앱 포트 규칙을 만들지 않는다(appFromPodLabels는 peaket.workerChecks가 막는다). 들어옴은 관측 네임스페이스 → 관리 포트뿐 */}}
+{{- $appFrom := ternary (dict) $np.appFromPodLabels $worker }}
 # 서비스 파드에 닿을 수 있는 곳(docs/infra.md §3 'v0 배포' '앱 포트 막기'). 앱 포트는 정한 라벨의 파드만, 관리 포트는 정한 네임스페이스만.
 # 정하지 않은 들어오는 연결은 모두 막는다. 운영 정책은 wbs 0.4.4에서 정한다
 # 나가는 쪽은 service.networkPolicy.egress에 값이 있을 때만 막는다(docs/infra.md §9, BUILD_ORDER PRF-192)
@@ -19,14 +23,14 @@ spec:
       app.kubernetes.io/name: {{ $name }}
       app.kubernetes.io/component: service
   policyTypes: [Ingress{{ if $hasEgress }}, Egress{{ end }}]
-  {{- if not (or $np.appFromPodLabels $np.managementFromNamespaces) }}
+  {{- if not (or $appFrom $np.managementFromNamespaces) }}
   ingress: []
   {{- else }}
   ingress:
-    {{- if $np.appFromPodLabels }}
+    {{- if $appFrom }}
     - from:
         - podSelector:
-            matchLabels: {{- toYaml $np.appFromPodLabels | nindent 14 }}
+            matchLabels: {{- toYaml $appFrom | nindent 14 }}
       ports:
         - { protocol: TCP, port: {{ int .Values.service.port }} }
     {{- end }}

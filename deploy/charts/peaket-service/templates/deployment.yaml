@@ -1,5 +1,6 @@
 {{- if .Values.service.enabled }}
 {{- $name := include "peaket.name" . }}
+{{- include "peaket.workerChecks" . }}
 {{- include "peaket.extraPorts" . }}
 # 서비스 파드. 쿠버네티스 API를 부르지 않으므로 서비스 계정 토큰을 붙이지 않는다(ASVS v5.0.0-13.2.2)
 apiVersion: v1
@@ -31,6 +32,8 @@ spec:
     {{- include "peaket.servicePodTemplate" . | nindent 4 }}
 ---
 {{- end }}
+{{- /* 스트림 작업자는 앱 포트가 없어 Service를 만들지 않는다(docs/streaming.md §2.3, worker.enabled). 지표는 PodMonitor·주석으로 파드에서 긁는다 */}}
+{{- if not .Values.worker.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -46,4 +49,5 @@ spec:
     {{- range .Values.service.extraPorts }}
     - { name: {{ .name }}, port: {{ int .port }}, targetPort: {{ .name }} }
     {{- end }}
+{{- end }}
 {{- end }}

@@ -57,15 +57,20 @@ spec:
       imagePullPolicy: {{ .Values.image.pullPolicy }}
       command: {{- toYaml .Values.service.command | nindent 8 }}
       ports:
+        {{- /* 스트림 작업자는 앱 포트가 없다: 관리 포트(지표·상태) 하나뿐이다(docs/streaming.md §2.3, worker.enabled) */}}
+        {{- if not .Values.worker.enabled }}
         - { name: http, containerPort: {{ .Values.service.port }} }
+        {{- end }}
         - { name: management, containerPort: {{ .Values.managementPort }} }
         {{- range .Values.service.extraPorts }}
         - { name: {{ .name }}, containerPort: {{ int .port }} }
         {{- end }}
       env:
         {{- include "peaket.commonEnv" . | nindent 8 }}
+        {{- if not .Values.worker.enabled }}
         - name: PORT
           value: {{ .Values.service.port | quote }}
+        {{- end }}
         {{- range $k, $v := .Values.service.env }}
         {{- if ne $k "NODE_OPTIONS" }}
         - name: {{ $k }}
@@ -367,6 +372,17 @@ startupProbe:
 {{- end -}}
 {{- end -}}
 {{- toYaml .volumes -}}
+{{- end -}}
+
+{{/* 스트림 작업자 모드(worker.enabled)가 받지 않는 값이면 렌더를 멈춘다(docs/streaming.md §2.2·§2.3, ASVS v5.0.0-13.4.5).
+    앱 포트에 기대는 값(extraPorts·appFromPodLabels), 쿠버네티스 API 권한(leaderLease, 서비스 계정 토큰을 붙이게 된다), 자동 확장·카나리(복제 수 고정·롤링) */}}
+{{- define "peaket.workerChecks" -}}
+{{- if .Values.worker.enabled -}}
+{{- if .Values.service.extraPorts -}}{{- fail "worker.enabled이면 service.extraPorts를 받지 않는다(작업자 컨테이너 포트는 관리 포트 하나다, docs/streaming.md §2.3)" -}}{{- end -}}
+{{- if .Values.service.networkPolicy.appFromPodLabels -}}{{- fail "worker.enabled이면 service.networkPolicy.appFromPodLabels를 받지 않는다(앱 포트가 없고 들어오는 연결은 관측 네임스페이스 → 관리 포트뿐이다, docs/streaming.md §2.3)" -}}{{- end -}}
+{{- if include "peaket.leaderLeases" . | fromJsonArray -}}{{- fail "worker.enabled이면 service.leaderLease를 받지 않는다(작업자에는 쿠버네티스 API 권한을 주지 않는다, docs/streaming.md §2.3)" -}}{{- end -}}
+{{- if or .Values.service.autoscaling.enabled .Values.service.keda.enabled .Values.service.rollout.enabled -}}{{- fail "worker.enabled이면 service.autoscaling·keda·rollout을 켜지 않는다(복제 수를 고정하고 롤링으로 올린다, docs/streaming.md §2.2)" -}}{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/* 서비스 파드의 앱 포트 밖 포트(service.extraPorts, BUILD_ORDER PRF-215: 합본은 서비스마다 앱 포트가 다르다). 칸마다 name(소문자·숫자·-, 15자 안)·port(1~65535)이고
