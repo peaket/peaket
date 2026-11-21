@@ -300,6 +300,7 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 - **회귀**: `registration.int`(11)·`shop-order.int`(23)·`shop-cancel.int`(22)·`shop-refund-account.int`(10)·`shop-return.int`(9)·`promoter-contract.int`(14)·`shop-notify.int`·`shop-migration.int`·`shop-expiry.int`·`shop-unclaimed.int` 모두 통과. 단위 `test/migrations-journal.test.ts`·`test/promoter-contract.migration.test.ts` 통과.
 - core-svc 단계가 실패해 같은 잡의 뒤 단계(payment-svc·purchase-svc 등 통합)는 돌지 않았다. purchase-svc 두 실패(GAT080_0014·GAT-110 P3)는 갈래 3 몫의 기존 실패다. 같은 실행의 다른 잡(lint-guard·docs-check·contract-check·tools-check·security-scan)은 통과했다.
 - **시험 이의(시험 담당에게)**: `shop-replay.int.test.ts` 437행 `expect(mismatchLines()).toEqual([])`가 바로 앞 취소 반복(409~419행)이 남긴 `CANCEL_MERCH_ORDER` 로그 한 줄을 본다(`logs.length = 0`이 반복 안에만 있고 계좌 다시 받기 앞에는 없다). 받은 값은 `kind` `idempotency-replay-mismatch`·`operation` `CANCEL_MERCH_ORDER`·`orderId` = o5 한 줄이다. 맞는 참조(`cancel:{X5}`)의 계좌 다시 받기는 로그를 남기지 않았는데도 실패한다. 435행 `retry()` 앞에 `logs.length = 0`을 두면 풀린다. 그래서 계좌 다시 받기의 맞지 않는 두 줄(438~448행, M19)은 CI에서 아직 돌지 않았다. 구현 담당은 커밋하지 않은 임시 단위 확인(메모리 저장소)으로 그 길(다른 팬 주문·같은 팬 다른 주문의 취소, 꼴이 틀린 참조, 남의 경로 주문 → 404·로그 한 줄·계좌 값 없음·결제사 취소 0)을 봤다.
+- **시험 이의 반영(시험 담당, 2026-11-22)**: 시험 결함이 맞아 `5438106a3`가 맞는 참조 요청 앞에서 로그를 비운다(단언은 그대로). PR #57 CI(`ci` 실행 44937447572, `node / node`)의 core-svc 통합은 `Test Files 2 failed | 48 passed | 1 skipped (51)`, `Tests 3 failed | 487 passed | 1 skipped (491)`이고, AZ-T17 14개 모두 통과했다(`shop-replay` 5개, 계좌 다시 받기의 맞지 않는 두 줄 포함). 실패 셋은 위 '원래 실패라 뺀 것'과 같다.
 
 ## 구현
 
