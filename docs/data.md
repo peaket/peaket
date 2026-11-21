@@ -2021,6 +2021,8 @@ erDiagram
         text requested_role "operator|commander"
         uuid event_id "회차 하나에 건 명령이면 그 회차"
         timestamptz approval_expires_at "2인 승인 기한(10분 [가정])"
+        timestamptz expires_at "만료 있는 명령 2·8의 만료 시각(첫 ack 뒤 10분·30분, 명령 2는 연장하면 바뀜). 지나면 AUTO_EXPIRED(추천 적용 2026-11-21, ADR-0340 결정 5)"
+        timestamptz compare_due_at "예측이 있는 명령의 실행 뒤 비교를 할 때(처음 DISPATCHED + 5분 [가정]). 비교를 남기면 비운다(추천 적용 2026-11-21, ADR-0340 결정 3)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -2062,7 +2064,7 @@ erDiagram
         bigint seq PK "빈틈 없는 번호"
         text record_type
         uuid record_id
-        bytea record_sha256 "기록 정규화 값의 SHA-256"
+        bytea record_sha256 "SHA-256(직전 기록 해시의 16진 글자 ‖ 정규화 기록 JSON 글자). R-614부터 이 뜻이다(추천 적용 2026-11-21, ADR-0341 결정 1)"
         jsonb record_json "정규화 기록(recordType·recordId·payload·at). 검증이 해시를 다시 계산하고 원본 행과 대조한다(R-614 B3-H03). 0012 이전 행은 null"
         bytea prev_hash "직전 기록 해시(첫 행은 빈 bytea). 저장된 해시 연쇄를 검증한다(R-614 B3-H03)"
         bytea mac "HMAC(감사 체인 키, PEAKET-audit-v1, seq, 직전 mac, 기록 해시). 커밋 때는 비우고 체인 작업자가 seq 순서로 채운다. 빈 행은 부분 인덱스 WHERE mac IS NULL(ADR-0102)"
@@ -2285,6 +2287,33 @@ erDiagram
         bigint mac_seq "mac을 채운 마지막 seq. 체인 작업자만 올린다(ADR-0102)"
         bytea last_mac "mac_seq 행의 mac. 기록 트랜잭션은 읽지 않는다(ADR-0102)"
     }
+    ops_worker_lease {
+        text name PK "작업 이름. 감사 체인 작업자는 audit-chain-mac(추천 적용 2026-11-21, ADR-0341 결정 3)"
+        text holder "임대를 쥔 파드"
+        timestamptz lease_until "임대 끝. 15초 [가정], 5초 [가정]마다 늘린다"
+    }
+    audit_mac_anchor {
+        bigint seq PK "5분 앵커에 쓴 mac_seq(추천 적용 2026-11-21, ADR-0341 결정 5)"
+        bytea mac "그 seq 행의 mac"
+        text object_key "감사 앵커 버킷의 객체 이름(S3 Object Lock 컴플라이언스, 7년)"
+        text key_id "감사 체인 키 ID"
+        timestamptz anchored_at
+    }
+    audit_verification_run {
+        uuid run_id PK "검증 잡 한 번(추천 적용 2026-11-21, ADR-0341 결정 6)"
+        bigint from_seq
+        bigint to_seq
+        text result "VALID|MISMATCH|ERROR. 검증하지 못했으면 ERROR이고 통과로 적지 않는다"
+        bigint first_bad_seq "optional, 처음 어긋난 seq"
+        text reason "optional, 어긋난 까닭(빈틈·기록 해시·직전 mac·mac·앵커·체크포인트)"
+        timestamptz started_at
+        timestamptz finished_at
+    }
+    audit_record_intake {
+        text event_key PK "다른 서비스가 보낸 감사 사건의 멱등 키(추천 적용 2026-11-21, ADR-0341 결정 7)"
+        bigint seq "덧붙인 audit_chain 번호"
+        timestamptz received_at
+    }
     ops_push_event {
         bigint seq PK "늘어나기만 하는 순번. SSE 이벤트 id이고 다시 붙기(Last-Event-ID)의 기준(ADR-0100)"
         text kind "command|approval|alert|autoAction(명령 상태, 승인 대기, 경보 수신, 자동 조치의 시작·끝)"
@@ -2475,8 +2504,9 @@ erDiagram
     }
     command_actor {
         uuid actor_ref PK
-        uuid command_id "UNIQUE (command_id, admin_account_id): 같은 사람 두 번·요청자 본인 승인 금지(ADR-0086의 검사를 옮김)"
-        text side "REQUESTER|APPROVER"
+        uuid command_id "UNIQUE (command_id, round, admin_account_id) WHERE side가 REQUESTER·APPROVER: 같은 사람 두 번·요청자 본인 승인 금지(ADR-0086의 검사를 옮김. 회차는 추천 적용 2026-11-21, ADR-0340 결정 8)"
+        smallint round "0은 명령, 되돌리기 요청마다 1씩 오른다(추천 적용 2026-11-21, ADR-0340 결정 8)"
+        text side "REQUESTER|APPROVER|ACTOR. ACTOR는 연장·재시도·되돌림 실행처럼 유일 제약이 없는 행위(ADR-0340 결정 8)"
         uuid admin_account_id
         timestamptz recorded_at "3년 [가정] 뒤 행을 지운다. 기록·체인은 고치지 않는다(ADR-0149)"
         uuid delete_hold_ref "optional, 삭제 보류 근거 건 ID(수사 요청·진행 중 분쟁)"
@@ -2997,6 +3027,8 @@ erDiagram
 | 반품 요청과 판매자 도착 확인(I11)·환급(I12)이 같은 항목에 겹침(추천 적용 2026-11-19, BAT-605, ADR-0315) | 반품은 항목이 `SHIPPED`·`DELIVERED`·`PICKED_UP`(부가 상품은 `READY`·`LOCKED`)일 때만 `RETURN_REQUESTED`로 바꾸는 조건부 UPDATE다. 판매자 전이는 `RETURN_REQUESTED → RETURN_RECEIVED → REFUNDED`(또는 `DISPUTED`) 차례만 받는 순수 함수로 두고 HTTP는 BAT-610 잔여가 연다. 반품 요청은 결제사를 부르지 않아 돈이 움직이지 않는다 | P-T62 ①~④ |
 | 구매자 취소 환급 다시 부르기와 첫 요청의 결과 반영이 겹침(추천 적용 2026-11-19, BAT-605, ADR-0315) | 환급 행을 잠그고 이미 끝난(`CANCELLED`·`REJECTED`) 행은 다시 쓰지 않는다. 첫 요청과 재시도가 같은 취소 ID(결제사 멱등키 `cancel-{취소 ID}`)를 쓰므로 결제사에서도 한 번이다. `CANCEL_PENDING`·`UNKNOWN`은 항목을 `CANCELLED`로 두고 1→5→15→60→360분 [가정] 5회 [가정] 뒤 멈춘다 | P-T64 ①②④ |
 | 굿즈 지연 환급 계좌 다시 받기가 같은 취소에 두 번 오거나 재시도와 겹침(추천 적용 2026-11-20, BAT-425, ADR-0316 결정 5) | 주문 행을 `FOR UPDATE`로 잠그고 `merch_refund`의 `replaces_refund_id` 사슬 끝 행을 다시 읽는다. 같은 `Idempotency-Key`는 멱등 기록이 첫 쓰기라 `cancel:{새 환급 ID}`를 다시 받고, 다른 키로 이어서 오면 사슬 끝 행이 `REQUESTED`·`CANCEL_PENDING`·`CANCELLED`라 409 `merch-cancel-not-allowed`다. 옛 행 하나는 새 행 하나로만 대신하는 부분 유일 인덱스가 마지막 안전망이고, 새 행은 같은 항목 자리(`merch_refund_item`)를 다시 잡는다. 결제사 취소는 커밋 뒤 새 취소 ID·시도 번호(`cancel-{ID}-a{n}`)로 한 번 부른다 | R-T43 ①③ |
+| 같은 운영 명령에 두 번째 승인·거부·승인 기한 정비·되돌리기 승인이 겹치고, 같은 사람이 두 갈래로 승인함(추천 적용 2026-11-21, BAT-355, ADR-0340) | `ops_command` 행을 `FOR UPDATE`로 잠근 뒤 상태와 `approval_expires_at`을 다시 본다(기한과 같거나 늦으면 승인 대신 `REJECTED`). 정비 작업은 `FOR UPDATE SKIP LOCKED`로 고른다. 같은 사람은 `command_actor`의 `UNIQUE (command_id, round, admin_account_id)`(REQUESTER·APPROVER만)가 마지막 안전망이고, 응용 층이 먼저 요청자 본인 403을 낸다. 같은 `Idempotency-Key`의 접수는 `idempotency_record` 기본 키가 한 번만 받는다 | C-T4, AZ-T10 |
+| 감사 체인 작업자가 mac을 채우는 동안 명령 트랜잭션이 새 체인 행을 덧붙이고, 임대가 끝나는 순간 두 파드가 함께 채움(추천 적용 2026-11-21, BAT-355, ADR-0341 결정 3) | 덧붙이기는 `audit_chain_head`를 잠가 `last_seq`만 올리고 `mac_seq`·`last_mac`을 읽지 않는다. 작업자는 KMS를 트랜잭션 밖에서 부르고, 짧은 트랜잭션에서 빈 `mac`만 채우며 `mac_seq = 읽은 값` 조건으로 머리를 옮긴다(맞지 않으면 그 바퀴를 버린다). 작업자 하나는 `ops_worker_lease` 임대 행으로 고른다. 두 파드가 함께 채워도 mac 값이 같다 | C-T49 |
 
 데이터베이스 인덱스는 다음을 표준으로 만든다. 활성 판매의 유일 부분 인덱스 `seat_sale (event_id, seat_id) WHERE status IN ('PENDING','SOLD')`(§2), 홀드 원장의 활성 홀드 유일 부분 인덱스 `seat_hold (event_id, seat_id) WHERE status = 'HELD'`, 회차·좌석별 등급 정본 `event_seat_price (event_id, seat_id)` 기본 키(지금은 표를 만들지 않고 배치본 좌석의 `tier_id`를 쓴다, ADR-0260 결정 2. 2026-10-28 좌석 Redis 장애 때의 비상 홀드 경로를 없애 잠금 대상이 아니다, ADR-0121), 검색 읽기 모델 `search_term`의 띄어쓰기 없앤 값·낱자·초성에 둔 앞부분 일치용 B-tree 인덱스(`text_pattern_ops`)다(ADR-0094). 트랜잭션 격리 수준 실험(READ COMMITTED, REPEATABLE READ, SERIALIZABLE 환경에서 쓰기 스큐 재현)으로, 애플리케이션 계층의 비즈니스 로직에만 기대지 않고 데이터베이스의 물리 유니크 제약을 마지막 안전 방어선으로 둔 설계가 타당함을 보인다.
 
