@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 244 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 393 |
-| 합계 | 254 | 51 | 0 | 0 | 0 | 6 | 0 | 7 | 85 | 403 |
+| B | 261 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 74 | 395 |
+| 합계 | 271 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 74 | 405 |
 
 ## docs/features/identity.md
 
@@ -35,11 +35,11 @@
 | I-T12 | — | 관리 계정 1시간 유휴 만료 | 61분간 활동이 없는 관리자 세션은 바로 무효가 되고, 비밀번호와 TOTP 입력을 모두 다시 요구한다. | 빈칸 | B | — |
 | I-T13 | — | 관제망 허용 IP 대역 격리 | 허용 IP(사내망·VPN 출구) 밖에서 관제 콘솔·`ops-api`에 접근하면 관제 배포의 웹 ACL에서 403으로 막힌다. 원본 확인 머리가 없거나… | 빈칸 | B | — |
 | I-T14 | — | 관리자 비밀번호 복잡도 검증 | 15자 미만, 서비스·회사·계정 이름에 숫자나 기호만 붙인 비밀번호(금칙어 대조 방식은 docs/security/auth-controls.md §4.3, 예는… | 자동 시험 | B | 시험: services/identity-svc/test/admin-password.test.ts |
-| I-T15 | ① | 내부 세션 생성 엔드포인트 격리(두 범위, 추천 적용… | ① 운영 설계(메시 있음): 외부 인터넷, 허가되지 않은 서비스, API 게이트웨이 밖에서 identity 내부 세션 생성… | 빈칸 | B | — |
-| I-T15 | ② | 내부 세션 생성 엔드포인트 격리(두 범위, 추천 적용… | ② 포트폴리오 실행(메시 없음): docs/architecture.md §3.2에서 identity-svc를 부르지 않는 파드에서 identity-svc… | 빈칸 | B | — |
+| I-T15 | ① | 내부 세션 생성 엔드포인트 격리(두 범위, 추천 적용… | ① 운영 설계(메시 있음): 외부 인터넷, 허가되지 않은 서비스, API 게이트웨이 밖에서 identity 내부 세션 생성… | ID만 | B | 시험: deploy/workloads/test/workloads.test.mjs |
+| I-T15 | ② | 내부 세션 생성 엔드포인트 격리(두 범위, 추천 적용… | ② 포트폴리오 실행(메시 없음): docs/architecture.md §3.2에서 identity-svc를 부르지 않는 파드에서 identity-svc… | 자동 시험 | B | 시험: deploy/workloads/test/workloads.test.mjs |
 | I-T50 | ① | 세션 생성 계약의 멱등과 허용 목록(추천 적용 2026-10-28… | ① 같은 멱등 키로 `CreateSession`을 데드라인 직후 다시 보낸다 … 은 세션·기기 바인딩이 하나뿐이고 앞서 발급한 리프레시 토큰은 쓸 수 없다. | 자동 시험 | B | 시험: services/identity-svc/test-int/session-store.int.test.ts, services/identity-svc/test/session-cases.ts 외 1곳 |
 | I-T50 | ② | 세션 생성 계약의 멱등과 허용 목록(추천 적용 2026-10-28… | ② 같은 키에 다른 `provider_user_id`를 보낸다 … 는 `ALREADY_EXISTS`, | 자동 시험 | B | 시험: services/identity-svc/test-int/session-store.int.test.ts, services/identity-svc/test/session-cases.ts 외 1곳 |
-| I-T50 | ③ | 세션 생성 계약의 멱등과 허용 목록(추천 적용 2026-10-28… | ③ purchase-svc 신원으로 `SessionService`를, 웹 앱 서버 신원으로 `IdentityService`를 부른다 … 은… | ID만 | B | 시험: packages/contracts/test/proto-descriptors.test.ts, services/identity-svc/test-int/session-store.int.test.ts 외 2곳 |
+| I-T50 | ③ | 세션 생성 계약의 멱등과 허용 목록(추천 적용 2026-10-28… | ③ purchase-svc 신원으로 `SessionService`를, 웹 앱 서버 신원으로 `IdentityService`를 부른다 … 은… | 자동 시험 | B | 시험: deploy/workloads/test/workloads.test.mjs |
 | I-T50 | ④ | 세션 생성 계약의 멱등과 허용 목록(추천 적용 2026-10-28… | ④ 끝난 세션에 `EndSession`을 다시 보낸다. … 는 성공(`ended=false`)이다 | 자동 시험 | B | 시험: services/identity-svc/test/session-cases.ts, services/identity-svc/test/session.grpc.test.ts |
 | I-T16 | — | 회원 탈퇴 및 개인정보 파기 | 탈퇴하면 바로 모든 세션이 만료되고, 프로필 정보와 CI 해시가 영구 파기된다. 법정 거래 기록만 물리적으로 분리해 보관된다. | 자동 시험 | B | 시험: apps/web/src/features/account-withdraw/flow.test.mjs, services/identity-svc/test-int/withdrawal.int.test.ts 외 2곳 |
 | I-T17 | — | 법정 접속기록 보존 검증 | 로그인, 대기열 진입, 주문, 결제 요청의 감사 로그가 접속기록 저장소에 3개월간 온전히 보존되고 정상적으로 조회된다. '온전히'는 셋으로 확인한다(추천 적용… | 빈칸 | B | — |
@@ -81,8 +81,8 @@
 | I-T46 | ① | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ①은 204와 새 액세스·리프레시 쿠키(본문에 토큰 0건), | 자동 시험 | B | 시험: services/identity-svc/test/admin-token-refresh-http.test.ts |
 | I-T46 | ② | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ② (30초 유예가 지난 뒤)는 401과 패밀리 전체 폐기·세션 종료 이벤트, | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts |
 | I-T46 | ③ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ③은 401이고 비밀번호와 TOTP를 다시 요구, | 자동 시험 | B | 시험: services/identity-svc/test/admin-token-refresh-http.test.ts |
-| I-T46 | ④ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ④는 거절이다. | ID만 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-http… |
-| I-T46 | ⑤ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ⑤는 백엔드에 리프레시 쿠키가 전달되지 않는다 | ID만 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-http… |
+| I-T46 | ④ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ④는 거절이다. | 자동 시험 | B | 시험: deploy/gateways/test/admin-auth.test.mjs, tools/local/e2e/gateway-admin-auth.e2e.mjs |
+| I-T46 | ⑤ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ⑤는 백엔드에 리프레시 쿠키가 전달되지 않는다 | 자동 시험 | B | 시험: deploy/gateways/test/admin-auth.test.mjs, tools/local/e2e/gateway-admin-auth.e2e.mjs |
 | I-T46 | ⑥ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ⑥은 204와 새 쿠키이고 세션이 이어진다(§3 '응답을 잃은 뒤의 재시도'), | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-http… |
 | I-T47 | — | 초대·승인 링크의 URL 조각: 로그인하지 않은 휴대폰으로 초대… | 화면이 열리자마자 주소창에서 조각이 사라진다. 로그인 뒤 돌아온 주소·`next`·서버 접근 로그·`Referer`에 토큰과 확인 코드가 0건이고, 같은 탭에서… | 빈칸 | B | — |
 | I-T48 | ① | 새 파드의 종료 세션(추천 적용 2026-10-28… | ①은 새 파드가 준비 상태가 된 뒤 그 세션 요청을 401로 거부한다 | 빈칸 | B | — |
@@ -97,15 +97,15 @@
 | I-T51 | ③ | 로그인 구현 비교 PoC(추천 적용 2026-10-28… | ③는 두 안 모두 거절한다. | 자동 시험 | B | 시험: tools/poc/login-compare/login-compare.test.mjs |
 | I-T51 | ④ | 로그인 구현 비교 PoC(추천 적용 2026-10-28… | ④는 두 안 모두 거절한다. | 자동 시험 | B | 시험: tools/poc/login-compare/login-compare.test.mjs |
 | I-T51 | ⑤ | 로그인 구현 비교 PoC(추천 적용 2026-10-28… | ⑤ 뒤 identity 세션 밖에 남는 세션 쿠키·저장소 수를 센다(C는 0). ADR-0119 결정 3의 기준 다섯(세션 층 수, 판 유지 상태, 코드 양… | 자동 시험 | B | 시험: tools/poc/login-compare/login-compare.test.mjs |
-| I-T52 | ① | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ①은 gw-partner 응답이 `__Secure-peaket_partner_at`·`__Secure-peaket_partner_rt`를 주고 본문에 토큰이… | 빈칸 | B | — |
-| I-T52 | ② | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ②는 거절된다. | 빈칸 | B | — |
-| I-T52 | ③ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ③에 Auth.js 쿠키(`authjs.*`)가 없다. | 빈칸 | B | — |
-| I-T52 | ④ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ④는 앱 서버가 받은 액세스 토큰으로 gw-partner를 불러 그린다 | 빈칸 | B | — |
+| I-T52 | ① | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ①은 gw-partner 응답이 `__Secure-peaket_partner_at`·`__Secure-peaket_partner_rt`를 주고 본문에 토큰이… | 자동 시험 | B | 시험: tools/local/e2e/gateway-admin-auth.e2e.mjs |
+| I-T52 | ② | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ②는 거절된다. | 자동 시험 | B | 시험: deploy/gateways/test/admin-auth.test.mjs, tools/local/e2e/gateway-admin-auth.e2e.mjs |
+| I-T52 | ③ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ③에 Auth.js 쿠키(`authjs.*`)가 없다. | 자동 시험 | B | 시험: apps/partner/src/_pages/partner-auth/no-authjs-cookies.test.mjs |
+| I-T52 | ④ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ④는 앱 서버가 받은 액세스 토큰으로 gw-partner를 불러 그린다 | ID만 | B | 시험: apps/partner/src/_pages/partner-auth/no-authjs-cookies.test.mjs, deploy/gateways/test/admin-auth.test.mjs 외 1곳 |
 | I-T53 | ① | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ①은 활성화되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs |
-| I-T53 | ② | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ②는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/export.test.ts, services/identity-svc/test/passkey-cases.ts |
-| I-T53 | ③ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ③은 통과하고 재인증 기록에 `factors` 셋이 남는다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
+| I-T53 | ② | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ②는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/export.test.ts, services/identity-svc/test/passkey-cases.ts 외 1곳 |
+| I-T53 | ③ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ③은 통과하고 재인증 기록에 `factors` 셋이 남는다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts 외 1곳 |
 | I-T53 | ④ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ④는 RP ID가 맞지 않아 거부된다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
-| I-T53 | ⑤ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ⑤는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs |
+| I-T53 | ⑤ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ⑤는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs, services/ops-svc/test/admin-command-reauth.test.ts |
 | I-T54 | ① | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ①은 '확인됨' 재인증 토큰이다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, apps/web/src/features/social-login/server/reauth-st… |
 | I-T54 | ② | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ②는 거부되고 '제공자 계정에서 로그아웃한 뒤 다시 시도'를 안내한다. | 자동 시험 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | I-T54 | ③ | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ③은 '요청만 함'이다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, apps/web/src/features/social-login/server/reauth-st… |
@@ -145,10 +145,10 @@
 | I-T60 | ⑧ | 관리 계정 역할 변경·삭제(추천 적용 2026-10-30… | ⑧은 422 role-group-mismatch, | 자동 시험 | B | 시험: services/identity-svc/test/admin-account-management.test.ts |
 | I-T60 | ⑨ | 관리 계정 역할 변경·삭제(추천 적용 2026-10-30… | ⑨는 409 commander-removal-needs-role-change다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-account-management.test.ts |
 | I-T60 | ⑩ | 관리 계정 역할 변경·삭제(추천 적용 2026-10-30… | ⑩은 200이고 업무 이메일과 인증 수단이 DB에 0건이며, 행에는 ID·역할·삭제 시각만 남고 그 계정의 로그인은 거부된다. … 의 내역이… | 자동 시험 | B | 시험: services/identity-svc/test/admin-account-management.test.ts |
-| I-T61 | ① | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ①은 재인증 없이 204이고 그 계정의 세션이 모든 파드에서 수 초 안에 401이다(ADMIN_FORCE). 계정 상태는 그대로라 비밀번호와 TOTP로 다시… | 빈칸 | B | — |
-| I-T61 | ② | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ②는 그 세션만 끝난다. | 빈칸 | B | — |
-| I-T61 | ③ | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ③은 404, | 빈칸 | B | — |
-| I-T61 | ④ | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ④는 403이다 | 빈칸 | B | — |
+| I-T61 | ① | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ①은 재인증 없이 204이고 그 계정의 세션이 모든 파드에서 수 초 안에 401이다(ADMIN_FORCE). 계정 상태는 그대로라 비밀번호와 TOTP로 다시… | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
+| I-T61 | ② | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ②는 그 세션만 끝난다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
+| I-T61 | ③ | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ③은 404, | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
+| I-T61 | ④ | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ④는 403이다 | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts |
 | I-T62 | ① | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ①은 조회 응답에 파트너 이름이 없고, 화면이 `GET /v1/events/{eventId}`의 sellerName을 배정 파트너로 보인다(공연 상세의 판매자… | 빈칸 | B | — |
 | I-T62 | ② | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ②는 조회가 403 `other-partner-device`이고 화면은 이유만 보이며 파트너 이름이 없다. 그 코드로 승인을 보내도 403이다. | 빈칸 | B | — |
 | I-T62 | ③ | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ③은 회차 공개 요약이 404라 이름과 공연명 없이 기기 이름·확인 코드·유효 시간을 보이고, 승인은 된다. | 빈칸 | B | — |
@@ -287,8 +287,9 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/purchase-svc/test/snapshot-http.test.ts 외 3곳 (영역:… |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs, apps/web/src/_pages/queue-verify/model/verify-fl… |
+| v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: packages/platform/test-int/tenant-rate-limit.int.test.ts, packages/platform/test/body-limit.test.ts 외 1곳 |
+| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/ops-svc/test/bot-review-http.test.ts 외 4곳 (영역:… |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: apps/console-host, apps/partner, apps/web… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
@@ -301,7 +302,7 @@
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/core-svc/test/seatmap-templates.http.test.ts, services/queue-svc/test/leave-http.test.ts 외 4곳 (영역:… |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: apps/console-host/src/pages/cancellation/ui/wiring.test.mjs, apps/partner/src/_pages/cancellation-request/ui/wiring… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 해당 없음 | B | 해당 없음: 로그인은 창을 열지 않고 리디렉션(브라우저를 다른 주소로 보내는 응답)으로 이동하므로 받는 창 메시지가 없다(docs/features/identity.md §2). 로그인에 팝업 창을 쓰게 되면 다시… |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
@@ -357,7 +358,7 @@
 | v5.0.0-7.4.2 | — | L1 | 계정이 정지·삭제되면 그 계정의 모든 활성 세션을 끝낸다. | 자동 시험 | B | 시험: services/identity-svc/test-int/main-withdrawal.int.test.ts, services/identity-svc/test-int/withdrawal-participant.in… |
 | v5.0.0-7.4.3 | — | L2 | 인증 요소를 바꾸거나 지운 뒤 다른 세션을 모두 끝낼 수 있게 한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/device-sessions.int.test.ts, services/identity-svc/test-int/link-proposal.int.test.ts… |
 | v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web |
-| v5.0.0-7.4.5 | — | L2 | 관리자가 사용자별·전체 활성 세션을 끝낼 수 있다. | 빈칸 | B | 영역: services/identity-svc, services/ops-svc |
+| v5.0.0-7.4.5 | — | L2 | 관리자가 사용자별·전체 활성 세션을 끝낼 수 있다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
 | v5.0.0-7.5.1 | — | L2 | 인증에 영향을 주는 민감 계정 정보를 바꾸기 전에 전체 재인증을 요구한다. | 자동 시험 | B | 시험: services/identity-svc/test/passkey-cases.ts |
 | v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 3곳 |
 | v5.0.0-7.6.1 | — | L2 | 신뢰 당사자와 IdP 사이의 세션 수명·종료가 문서대로 동작하고, IdP 인증 간격이 최대 시간에 이를 때처럼 필요하면 재인증을 요구한다. | 빈칸 | B | 영역: apps/web |
@@ -366,14 +367,14 @@
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역:… |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-password-change.int.test.ts, services/identity-svc/test/admin-password-change.t… |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/queue-svc/test/leave-cases.ts |
-| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | ID만 | B | 다른 곳 시험: packages/contracts/test/close-additional-properties.test.ts, packages/contracts/test/types.test.ts 외 6곳 (영역:… |
+| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts, services/ops-svc/test/approval-visibility.test.ts |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | ID만 | B | 다른 곳 시험: packages/platform/test/bulkhead-auth.test.ts, services/core-svc/test/partner-bulkhead-auth.test.ts 외 3곳 (영역:… |
-| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외… |
+| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 자동 시험 | B | 시험: packages/platform/test-int/tenant-rate-limit.int.test.ts |
 | v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: packages/platform/test/purchase-auth.test.ts, packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | 자동 시험 | B | 시험: services/queue-svc/test-int/main-jwks.int.test.ts, services/queue-svc/test/admission-jwks.test.ts 외 1곳 |
 | v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
-| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts, services/purchase-svc/test/admission-token.test.ts |
+| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts, services/ops-svc/test/admin-command-reauth.test.ts 외 2곳 |
 | v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-10.1.1 | — | L2 | 토큰은 꼭 필요한 구성요소에만 보낸다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
@@ -393,7 +394,7 @@
 | v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/payment-svc/test/portone-gateway.test.ts (영역:… |
 | v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | ID만 | B | 다른 곳 시험: services/payment-svc/test/virtual-account-deposit.test.ts (영역: services/identity-svc) |
 | v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | ID만 | B | 다른 곳 시험: packages/shuffle/test/drand-seal.test.ts, services/admission-ctrl/test/kms-seed-opener.test.ts 외 3곳 (영역:… |
-| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.te… |
+| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int… |
 | v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, packages/shuffle/test/shuffle.test.ts (영역:… |
 | v5.0.0-11.4.2 | — | L2 | 비밀번호는 현재 권고 파라미터를 적용한 승인된 비밀번호 해시 함수로 저장한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-totp.int.test.ts, services/identity-svc/test/admin-totp.test.ts |
 | v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, packages/shuffle/test/shuffle.test.ts (영역:… |
@@ -420,3 +421,4 @@
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
+| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: packages/platform/test-int/kafka.int.test.ts, packages/platform/test-int/outbox.int.test.ts 외 8곳 |

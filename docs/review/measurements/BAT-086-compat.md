@@ -1,6 +1,7 @@
 # BAT-086 운영 판 호환 검사 시연(D-T48)
 
 - **커밋(작성 시점)**: `aaf87493`(계획) + 이 묶음 구현 변경
+- **커밋(리뷰 반영 실행, 2026-11-21T07:50Z)**: `8984a716`(`--work .cache/peaket-tools/demo-compat-fix`, 같은 결과: same-commit 0·release-tag-diff 1)
 - **날짜**: 2026-11-21
 - **명령**: `node tools/local/demo.mjs compat --work .cache/peaket-tools/demo-compat`
 - **도구**: `tools/ci/contract-breaking.mjs`(oasdiff 1.34.1·AsyncAPI CLI 6.2.2 고정 이미지), Docker 엔진

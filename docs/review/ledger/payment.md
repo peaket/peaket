@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 126 | 24 | 6 | 0 | 2 | 11 | 0 | 0 | 0 | 169 |
+| A | 159 | 24 | 6 | 0 | 2 | 11 | 0 | 0 | 0 | 202 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 184 | 24 | 6 | 0 | 2 | 42 | 0 | 0 | 0 | 258 |
+| 합계 | 217 | 24 | 6 | 0 | 2 | 42 | 0 | 0 | 0 | 291 |
 
 ## docs/features/payment.md
 
@@ -154,9 +154,14 @@
 | P-T73 | ③ | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ③ 계좌 거절로 끝난 행을 같은 취소 ID로 맞는 계좌와 함께 다시 부르면 결제사 호출 0이고 `REFUND_ACCOUNT_REQUIRED`다. 다른 업무… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts |
 | P-T73 | ④ | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ④ 팬이 계좌 거절 뒤 새 멱등 키로 같은 표를 다시 누르면 202 `REFUND_PENDING`·`refundAccountRequired` 참이고… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts |
 | P-T73 | ⑤ | 같은 취소 ID의 다시 부름과 가상계좌 계좌(추천 적용… | ⑤ 다시 누름(공연 시작 뒤 포함)에 실은 계좌를 payment 대역이 받지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/cancel-refund-account-http.test.ts |
-| P-T74 | ① | 환불 계좌 모양(추천 적용, 2026-11-19… | ①은행 코드 세 자리(`088`)·한 자리·글자, 계좌번호의 글자·하이픈 뺀 숫자 21자·31자 글, 예금주 빈 값·61자 각각은 400… | 자동 시험 | A | 시험: packages/validation/test/refund-account.test.ts, services/purchase-svc/test/cancel-refund-account-http.test.ts |
+| P-T74 | ① | 환불 계좌 모양(추천 적용, 2026-11-19… | ①은행 코드 세 자리(`088`)·한 자리·글자·목록 밖 두 자리(`99`·`04`), 계좌번호의 글자·하이픈 뺀 숫자 21자·31자 글, 예금주 빈 값·61자… | 자동 시험 | A | 시험: packages/validation/test/refund-account.test.ts, services/purchase-svc/test/cancel-refund-account-http.test.ts |
 | P-T74 | ② | 환불 계좌 모양(추천 적용, 2026-11-19… | ② 같은 경우마다 payment-svc의 판정이 purchase와 같다(같은 표로 두 서비스를 돈다) | 자동 시험 | A | 시험: services/payment-svc/test/refund-account-shape.test.ts |
-| P-T74 | ③ | 환불 계좌 모양(추천 적용, 2026-11-19… | ③ 포트원 대응표에 없는 은행 코드는 `payment_cancel` 0행·결제사 0이고 `REFUND_ACCOUNT_REQUIRED`이며, 같은 취소 ID를… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T74 | ③ | 환불 계좌 모양(추천 적용, 2026-11-19… | ③ 목록 밖 은행 코드(예 `99`)는 `payment_cancel` 0행·결제사 0이고 `REFUND_ACCOUNT_REQUIRED`이며, 같은 취소 ID를… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T76 | ① | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ①가상계좌 결제에 계좌를 실은 `REQUESTED` 행을 11분 전에 만들고 새 취소 ID에 다른 계좌를 실어 부른다. 결제사 취소 호출은 새 건 0·조회… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T76 | ② | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ② 같은 취소 ID에 `refund_attempt=1`·계좌를 실어 부르면 새 멱등키 `cancel-{id}-a1`·payment_cancel.attempt=1… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T76 | ③ | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ③ 앞 행이 `CANCEL_PENDING`이면 새 전송 0·답 `PENDING`/`UNKNOWN`이고 행은 그대로다. 앞 `REQUESTED` 둘이면 새 전송… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T76 | ④ | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ④ 조회가 '반영'인데 다른 취소가 원장에 반영돼 잔액을 가를 수 없으면 새 전송 0·원장 그대로·답 `UNKNOWN`. 조회가 '반영 아님'인데 옛 행을 닫지… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| P-T76 | ⑤ | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ⑤ 시도 번호 파싱(0·1·3 통과, 4 거절), 키 계산, `SUPERSEDED` 조건부 닫기, `BUSY`와 새 시도의 차례(새 시도는 10분 창을 기다리지… | 자동 시험 | A | 시험: services/payment-svc/test/cancel-confirmed-payment-attempt.test.ts |
 | P-T75 | ① | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ① 종류 다섯(이상 표시·환급 실패·일괄 환불 실패·공제 차액·환불 대기)마다 ops-svc가 `accepted: true`로 답하고 CS 처리함에 건이 한 번… | 자동 시험 | A | 시험: services/ops-svc/test/cases-contract.test.ts, services/ops-svc/test/cases.test.ts 외 1곳 |
 | P-T75 | ② | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ② ops-svc가 2xx `accepted: false`로 답하면 purchase-svc는 연 시각을 쓰지 않고 실패 지표를 올리며 다음 틱에 다시 연다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
 | P-T75 | ③ | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ③ 그 판정은 CS 건 어댑터 모두 같다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
@@ -164,7 +169,7 @@
 | P-T56 | ② | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ② 다시 부르면 같은 답이고 행이 그대로다. `TICKET`으로 부르면 `FAILED_PRECONDITION`과 SEV2 로그 한 줄이고 행이 바뀌지 않는다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int.test.ts 외 1곳 |
 | P-T56 | ③ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ③ `INVALID_ARGUMENT`이고 쓴 행이 없다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts, services/payment-svc/test/merch-confirm-command.test.t… |
 | P-T56 | ④ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ④ `INVALID_ARGUMENT`다(티켓 규칙 그대로). | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts, services/payment-svc/test/merch-confirm-command.test.t… |
-| P-T56 | ⑤ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ⑤ 복귀 주소가 `/shop/checkout/return?order=…&pg=…`이고, 회차가 없으면 플랫폼 기본 결제사이며, 허용 수단에 가상계좌가 없고… | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts, services/payment-svc/test-int/merch-path-e2e.int.test.ts 외 2곳 |
+| P-T56 | ⑤ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ⑤ 복귀 주소가 `/shop/checkout/return?order=…&pg=…`이고, 회차가 없으면 플랫폼 기본 결제사이며, 허용 수단에 가상계좌가 있고(추천… | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts, services/payment-svc/test-int/merch-path-e2e.int.test.ts 외 2곳 |
 | P-T56 | ⑥ | 굿즈 결제의 결제창 준비와 승인 명령(추천 적용 2026-11-18… | ⑥ 승인 사건의 `orderKind`가 `MERCH`, `eventId`가 null, Kafka 키가 주문 ID다. purchase-svc 소비자는 반영하지… | 자동 시험 | A | 시험: packages/contracts/test/payment-event-order-kind.test.ts, services/invariant-checker/test-int/invariants.int.test.ts… |
 | P-T57 | ① | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ① 주문 `PAID`, `product_stock` 2, 카운터 2, 그 주문의 예약 원소 0이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-order.int.test.ts 외 2곳 |
 | P-T57 | ② | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ② 주문 `FAILED`, `product_stock`과 카운터가 3으로 돌아오고 과금이 0건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts 외 1곳 |
@@ -175,12 +180,40 @@
 | P-T57 | ⑦ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑦ 차례로 422 `merch-quantity-limit-exceeded`(두 줄 합 3도 같다. 두 줄 합 2는… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-order.int.test.ts 외 2곳 |
 | P-T57 | ⑧ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑧ 앞은 남은 수 1, 뒤는 422 `product-limited-qty-invalid`이고 남은 수가 그대로다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts 외 1곳 |
 | P-T57 | ⑨ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑨ 기한이 지나도 주문은 `FAILED`가 되지 않고 승인이 오면 `PAID`이며 재고가 돌아오지 않는다. 명령이 적히지 않았으면 기한에 `FAILED`와 두… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts |
-| P-T57 | ⑩ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑩ 본문 검사(400·422)는 그대로이고, 통과하면 503 `pg-unavailable`이며 재고 예약·주문 행이 0이다 | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts |
+| P-T57 | ⑩ | 굿즈 주문과 한정 재고의 결제 흐름(core-svc shop… | ⑩ (BAT-605가 뒤집음) 택배 주문은 201로 만들어지고 `paymentStore`가 `ESCROW`이며 결제 시도가 열린다(503… | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts |
 | P-T58 | ① | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ① 토요일에는 바뀐 행이 없다. 월요일에 항목이 `CANCELLED`를 거쳐 `REFUNDED`가 되고(`cancel_reason` `UNCLAIMED`) 결제… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-unclaimed.int.test.ts 외 2곳 |
 | P-T58 | ② | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ② 바뀐 행이 없고 결제 취소가 0건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-unclaimed.int.test.ts, services/core-svc/test/merch-unclaimed.test.ts |
 | P-T58 | ③ | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ③ 10분 뒤 같은 취소 ID로 다시 불러 `REFUNDED`가 되고, 결제사 취소는 1건이다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-migration.int.test.ts, services/core-svc/test-int/shop-unclaimed.int.test.ts 외 1곳 |
 | P-T58 | ④ | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ④ 받지 않은 항목 금액만 취소한다. | 자동 시험 | A | 시험: services/core-svc/test-int/shop-unclaimed.int.test.ts, services/core-svc/test/merch-unclaimed.test.ts 외 1곳 |
 | P-T58 | ⑤ | 현장 수령 미수령 자동 취소(추천 적용 2026-11-18… | ⑤ 결제 취소가 1건이다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-unclaimed.int.test.ts, services/core-svc/test/merch-unclaimed.test.ts 외 1곳 |
+| P-T59 | ① | 택배 결제대금예치 결제(추천 적용 2026-11-19, BAT-605… | ① `paymentStore=ESCROW`, 201이다 | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts |
+| P-T59 | ② | 택배 결제대금예치 결제(추천 적용 2026-11-19, BAT-605… | ② 결제창 상품이 같고 원장 상점이 `ESCROW`이며 재호출은 같은 답·상점 변경은 거절된다 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts, services/payment-svc/test/merch-pg-selection.test.ts |
+| P-T59 | ③ | 택배 결제대금예치 결제(추천 적용 2026-11-19, BAT-605… | ③ 400에는 시도·결제창 준비가 0이고 VA는 201이다 | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts, services/payment-svc/test-int/payment-merch-grpc.int.test.ts 외 1곳 |
+| P-T59 | ④ | 택배 결제대금예치 결제(추천 적용 2026-11-19, BAT-605… | ④ 전체 취소 금액은 상품 합 + 배송비이고 부분 취소는 409다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts |
+| P-T59 | ⑤ | 택배 결제대금예치 결제(추천 적용 2026-11-19, BAT-605… | ⑤ 수령 방식으로만 가른다 | 자동 시험 | A | 시험: services/core-svc/test/merch-order.test.ts |
+| P-T60 | ① | 굿즈 가상계좌 입금 대기(O2~O4, 추천 적용 2026-11-19… | ① 201·`depositDueAt` 정확한 값 | 자동 시험 | A | 시험: services/core-svc/test/shop-order.http.test.ts |
+| P-T60 | ② | 굿즈 가상계좌 입금 대기(O2~O4, 추천 적용 2026-11-19… | ② 원장 칸과 답이 같고 허용하지 않으면 입금 대기를 받지 않는다 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts |
+| P-T60 | ③ | 굿즈 가상계좌 입금 대기(O2~O4, 추천 적용 2026-11-19… | ③ EXTEND 1회·RELEASE(restore=0)·예약 원소 0 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts |
+| P-T60 | ④ | 굿즈 가상계좌 입금 대기(O2~O4, 추천 적용 2026-11-19… | ④ 경계 양쪽과 한 번만 반영 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-expiry.int.test.ts |
+| P-T60 | ⑤ | 굿즈 가상계좌 입금 대기(O2~O4, 추천 적용 2026-11-19… | ⑤ 실패 시 상태와 계좌 칸, 로그 0건 | 자동 시험 | A | 시험: services/core-svc/test/merch-orders-read.test.ts |
+| P-T60 | ⑥ | 굿즈 가상계좌 입금 대기(O2~O4, 추천 적용 2026-11-19… | ⑥ 원문 0건 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-merch-grpc.int.test.ts |
+| P-T61 | ① | 구매자 취소(I2·I16, 추천 적용 2026-11-19… | ① 각 금액·상태·결제사 요청 수를 정확한 값으로 본다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
+| P-T61 | ② | 구매자 취소(I2·I16, 추천 적용 2026-11-19… | ② 각 금액·상태·결제사 요청 수를 정확한 값으로 본다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
+| P-T61 | ③ | 구매자 취소(I2·I16, 추천 적용 2026-11-19… | ③ 각 금액·상태·결제사 요청 수를 정확한 값으로 본다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
+| P-T61 | ④ | 구매자 취소(I2·I16, 추천 적용 2026-11-19… | ④ 각 금액·상태·결제사 요청 수를 정확한 값으로 본다 | 자동 시험 | A | 시험: services/core-svc/test/shop-cancel.http.test.ts |
+| P-T61 | ⑤ | 구매자 취소(I2·I16, 추천 적용 2026-11-19… | ⑤ 각 금액·상태·결제사 요청 수를 정확한 값으로 본다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
+| P-T62 | ① | 구매자 반품 요청(I7~I10, 추천 적용 2026-11-19… | ① 경계·상태·행 수와 함수 경계. 판매자 HTTP는 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-return.int.test.ts, services/core-svc/test/shop-return.http.test.ts |
+| P-T62 | ② | 구매자 반품 요청(I7~I10, 추천 적용 2026-11-19… | ② 경계·상태·행 수와 함수 경계. 판매자 HTTP는 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-return.int.test.ts |
+| P-T62 | ③ | 구매자 반품 요청(I7~I10, 추천 적용 2026-11-19… | ③ 경계·상태·행 수와 함수 경계. 판매자 HTTP는 없다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-return.int.test.ts, services/core-svc/test/shop-return.http.test.ts |
+| P-T62 | ④ | 구매자 반품 요청(I7~I10, 추천 적용 2026-11-19… | ④ 경계·상태·행 수와 함수 경계. 판매자 HTTP는 없다 | 자동 시험 | A | 시험: services/core-svc/test/merch-return.test.ts |
+| P-T63 | ① | 굿즈 취소의 환불 계좌와 재인증(추천 적용 2026-11-19… | ① 정확한 상태·호출 수·저장 0건 | 자동 시험 | A | 시험: services/core-svc/test/shop-cancel.http.test.ts |
+| P-T63 | ② | 굿즈 취소의 환불 계좌와 재인증(추천 적용 2026-11-19… | ② 정확한 상태·호출 수·저장 0건 | 자동 시험 | A | 시험: services/core-svc/test/jwks-fan-reauth.test.ts, services/core-svc/test/shop-cancel.http.test.ts 외 1곳 |
+| P-T63 | ③ | 굿즈 취소의 환불 계좌와 재인증(추천 적용 2026-11-19… | ③ 정확한 상태·호출 수·저장 0건 | 자동 시험 | A | 시험: services/core-svc/test/shop-cancel.http.test.ts |
+| P-T63 | ④ | 굿즈 취소의 환불 계좌와 재인증(추천 적용 2026-11-19… | ④ 정확한 상태·호출 수·저장 0건 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
+| P-T64 | ① | 굿즈 환급의 멱등·재시도·계좌 거절(추천 적용 2026-11-19… | ① 경계·호출 수·행 상태·이중 환급 0 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
+| P-T64 | ② | 굿즈 환급의 멱등·재시도·계좌 거절(추천 적용 2026-11-19… | ② 경계·호출 수·행 상태·이중 환급 0 | 자동 시험 | A | 시험: services/core-svc/test/merch-refund-retry.test.ts |
+| P-T64 | ③ | 굿즈 환급의 멱등·재시도·계좌 거절(추천 적용 2026-11-19… | ③ 경계·호출 수·행 상태·이중 환급 0 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
+| P-T64 | ④ | 굿즈 환급의 멱등·재시도·계좌 거절(추천 적용 2026-11-19… | ④ 경계·호출 수·행 상태·이중 환급 0 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-cancel.int.test.ts |
 
 ## docs/security/asvs/payment.md
 
@@ -194,8 +227,8 @@
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-confirm-runner.int… |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 26곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/admission-ctrl/test/admission-leader.test.ts, services/admission-ctrl/test/aimd.test.ts 외 14곳 |
-| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-confirm-runner.int.test.ts, services/payment-svc/test-int/payment-deposit.int… |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: packages/platform/test-int/idempotency.int.test.ts, packages/platform/test-int/template.int.test.ts |
+| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: packages/platform/test-int/idempotency.int.test.ts, packages/platform/test-int/template.int.test.ts 외 6곳 |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-reconciliation.i… |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
@@ -211,20 +244,20 @@
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. (이름을 단 시험도 있다) |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int.tes… |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-password-change.int.test.ts, services/identity-svc/test/admin-password-change.t… |
-| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 33곳 |
-| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 2곳 |
+| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 38곳 |
+| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/compensation-transfer.int.test.ts, services/payment-svc/test-int/payment-checkout.int… |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test/payment-method-ref.test.ts |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 다른 단계 | B | 결제 공통 후속 · payment-svc·플랫폼의 TLS·KMS 경로가 맡는다. BAT-050 범위 밖이다. |
 | v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | 자동 시험 | B | 시험: services/payment-svc/test/portone-gateway.test.ts |
 | v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | 자동 시험 | B | 시험: services/payment-svc/test/virtual-account-deposit.test.ts |
 | v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.test.ts |
-| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.test.ts |
+| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int.test… |
 | v5.0.0-11.5.1 | — | L2 | 추측되면 안 되는 모든 난수와 문자열은 CSPRNG로 만들고 128비트 이상의 엔트로피를 갖는다(UUID는 이 조건을 만족하지 않는다). | 자동 시험 | B | 시험: services/payment-svc/test/pg-selection.test.ts, services/payment-svc/test/simulator-gateway.test.ts 외 2곳 |
 | v5.0.0-12.2.1 | — | L1 | 클라이언트와 외부에 노출된 HTTP 서비스 사이의 모든 연결에 TLS를 쓰고, 안전하지 않거나 암호화되지 않은 통신으로 돌아가지 않는다. | 다른 단계 | B | 결제 공통 후속 · payment-svc·플랫폼의 TLS·KMS 경로가 맡는다. BAT-050 범위 밖이다. |
 | v5.0.0-12.2.2 | — | L1 | 외부에 노출된 서비스는 공인 TLS 인증서를 쓴다. | 다른 단계 | B | 결제 공통 후속 · payment-svc·플랫폼의 TLS·KMS 경로가 맡는다. BAT-050 범위 밖이다. |
@@ -263,7 +296,7 @@
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | 다른 단계 | B | 결제 공통 후속 · 배포·로깅·공급망 공통 통제가 맡는다. BAT-050 범위 밖이다. |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | 다른 단계 | B | 결제 공통 후속 · 배포·로깅·공급망 공통 통제가 맡는다. BAT-050 범위 밖이다. |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | 다른 단계 | B | 결제 공통 후속 · 배포·로깅·공급망 공통 통제가 맡는다. BAT-050 범위 밖이다. |
-| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-confirm-runner.i… |
+| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test-int/shop-refund-account.int.test.ts… |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | 다른 단계 | B | 결제 공통 후속 · 배포·로깅·공급망 공통 통제가 맡는다. BAT-050 범위 밖이다. |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | 자동 시험 | B | 시험: services/purchase-svc/test/accept-http.test.ts, services/purchase-svc/test/accept-payment.test.ts 외 1곳 |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test-int/payment-reconciliation.int… |

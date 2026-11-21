@@ -228,17 +228,17 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 
 ## BAT-086 V-T7(2026-11-21 구현·시험)
 
-V-T7(빈 PC에서 데모 재현 스크립트 실행 — 한 명령으로 시연 흐름이 뜨고 걸린 시간이 기록된다)의 상태는 `자동 시험`이다. 시험 담당(`ses_pending_test_bat086`)이 `tools/local/demo.test.mjs`에 `V-T7 ①`~`V-T7 ⑦`·`DM-08`·`DM-09`·`CP-01` 이름으로 20개 시험을 두었고, `node tools/ci/ledger.mjs --batch BAT-086 --require`가 통과한다. 실제 kind 재생은 `node tools/local/demo.mjs all --skip-build`로 S1~S9 9/9(콜드 스타트 7초, 2026-11-21T04:21:59Z)이고 측정은 `docs/review/measurements/BAT-086-demo.md`에 있다. D-T48은 시연만 하고 장부 범위에 넣지 않았다(`docs/review/ledger/devops.md:125`).
+V-T7(빈 PC에서 데모 재현 스크립트 실행 — 한 명령으로 시연 흐름이 뜨고 걸린 시간이 기록된다)의 상태는 `자동 시험`이다. `tools/local/demo.test.mjs`에 `V-T7 ①`~`V-T7 ⑦`·`DM-08`·`DM-09`·`CP-01` 이름으로 28개 시험(리뷰 반영 RV-01·02·03·05·09·10·11 시험 포함)을 두었고, `node tools/ci/ledger.mjs --batch BAT-086 --require`가 통과한다. 실제 kind 재생은 `node tools/local/demo.mjs all --skip-build`로 S1~S9 9/9이고 측정은 `docs/review/measurements/BAT-086-demo.md`(실행별 `BAT-086-demo-<runId>.md`도 함께)에 있다. D-T48은 시연만 하고 장부 범위에 넣지 않았다(`docs/review/ledger/devops.md:125`).
 
 | 항목 | 시험 이름·근거 |
 | --- | --- |
-| V-T7 ①(시나리오 정의) | `tools/local/demo.test.mjs`의 `V-T7 ① ...` 세 시험. `validateScenarios`·`publicPlan`이 정본 d5 §10.6과 화면 순서·필수 checks(S1·S3·S7·S8·S9)를 대조하고, 시나리오를 빼거나 화면 순서를 바꾸면 실패한다. `node tools/local/demo.mjs plan --check` |
-| V-T7 ②(선행 없으면 닫힌 실패) | `V-T7 ② ...` 두 시험. 가짜 뿌리에서 시드·이미지 목록·오버레이·Playwright·도구가 하나씩 빠질 때 exit 1, 빠진 경로·이름을 모두 나열하고 클러스터 명령 0회 |
+| V-T7 ①(시나리오 정의) | `tools/local/demo.test.mjs`의 `V-T7 ① ...` 네 시험. `validateScenarios`·`publicPlan`이 정본 d5 §10.6과 화면 순서·필수 checks(S1·S3·S7·S8·S9)·`evidenceOnlyScreens`를 대조하고, 시나리오를 빼거나 화면 순서·증거 화면 이름을 바꾸면 실패한다. `node tools/local/demo.mjs plan --check`. 공용 게이트웨이 출처가 화면 하나인지, 데모 패치만 gw-fan에 대기실·스캐너 출처를 더하는지도 본다(RV-01) |
+| V-T7 ②(선행 없으면 닫힌 실패) | `V-T7 ② ...` 세 시험. 가짜 뿌리에서 시드·이미지 목록·오버레이·Playwright 패키지·chromium 실행 파일·도구가 하나씩 빠질 때 exit 1, 빠진 경로·이름을 모두 나열하고 클러스터 명령 0회(RV-09) |
 | V-T7 ③(조용한 건너뛰기 없음) | `V-T7 ③ ...` 두 시험. 가짜 `node:child_process`가 파드 미준비를 돌려주면 `play` exit 1·`pods-not-ready`·시나리오 결과 없음, 모르는 시나리오·인자 exit 2 |
-| V-T7 ④(빈 PC 한 명령 재생) | `V-T7 ④ ...` 다섯 시험. 측정 파일 9/9·콜드 스타트·정리, 재생기의 S2 매진 픽스처·S7 맥락 둘·S8 기기 키 보존·S9 2인 승인. 실제 실행은 `docs/review/measurements/BAT-086-demo.md` |
-| V-T7 ⑤(두 번 돌리기·정리) | `V-T7 ⑤ ...` 시험. `up`의 무대 재사용, `down`의 데모 네임스페이스+kind 클러스터 삭제·`--keep-cluster`, 다른 클러스터 보존. 시드 멱등은 `demo-seed.test.mjs` DS-06 |
+| V-T7 ④(빈 PC 한 명령 재생) | `V-T7 ④ ...` 여덟 시험. 측정 파일 9/9·콜드 스타트·정리, 재생기의 S2 매진 픽스처·S7 맥락 둘·S8 기기 키 보존·S9 2인 승인·깨끗한 빌드 build-arg, all 시작~첫 화면 콜드 스타트 값(RV-02), 필수 화면 방문 실패=시나리오 실패·`ticket-qr` 화면 QR 요소(RV-05). 실제 실행은 `docs/review/measurements/BAT-086-demo.md`, 실제 all e2e는 검증 담당이 실행한다 |
+| V-T7 ⑤(두 번 돌리기·정리) | `V-T7 ⑤ ...` 두 시험. `up`의 무대 재사용, `down`의 데모 네임스페이스+kind 클러스터 삭제·`--keep-cluster`, 다른 클러스터 보존, `all --keep` exit 0·정리 실패는 `통과(정리 실패)`(RV-03). 시드 멱등은 `demo-seed.test.mjs` DS-06 |
 | V-T7 ⑥(비밀·개인정보 없음) | `V-T7 ⑥ ...` 시험. 시드 `checkSeed`(비밀 값 칸·실제 이메일·전화번호 0), `redact`가 Bearer·password·TOTP·JWT·세션 쿠키를 가림, `plan`·`doctor` 출력에 비밀 값 0 |
-| V-T7 ⑦(측정 기록) | `V-T7 ⑦ ...` 두 시험. 성공·실패 측정의 커밋·콜드 스타트·시나리오별 결과·실패 단계·정리, 선행 없음 `all`이 `결과: 실패(선행 없음)`와 미실행을 남김 |
+| V-T7 ⑦(측정 기록) | `V-T7 ⑦ ...` 네 시험. 성공·실패 측정의 커밋·콜드 스타트·전체 시간·시나리오별 결과·실패 단계·정리, 선행 없음 `all`이 `결과: 실패(선행 없음)`와 미실행을 남김, 0건 실행은 `건너뜀`(RV-10), 실행별 측정 파일 분리(RV-11) |
 | DM-08·DM-09(D-T48 시연) | `DM-08 ...`·`DM-09 ...` 시험과 실제 `node tools/local/demo.mjs compat`. 같은 커밋 0, `v0.0.0` 태그와 견주면 응답 필드(`type`) 삭제로 1, 도구 오류(exit 2)는 통과 아님, 복제본 밖 태그 그대로. 결과 `docs/review/measurements/BAT-086-compat.md` |
 | CP-01(클라우드 값) | `CP-01 ...` 시험과 `node tools/local/demo.mjs cloud-plan --check`. TTL 6시간·예산 딱 경계 통과·1원 초과 실패·정리 여섯 항목 누락 실패·서명 GHCR·실행 없음 |
 

@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 117 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 8 | 152 |
-| 합계 | 117 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 8 | 152 |
+| B | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 3 | 152 |
+| 합계 | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 3 | 152 |
 
 ## docs/features/bot-defense.md
 
@@ -28,11 +28,11 @@
 | B-T7 | ① | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ① 새 판을 S3에 두면 1시간 안에 두 서비스가 읽는다 | ID만 | B | 시험: packages/platform/test/asn-table.test.ts, services/queue-svc/test/degraded-limits.test.ts 외 1곳 |
 | B-T7 | ② | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ② S3를 막으면 마지막 판으로 판정하고 7일 [가정] 넘게 새 판이 없으면 SEV3 | 자동 시험 | B | 시험: packages/platform/test/asn-table.test.ts |
 | B-T7 | ③ | ASN 분류표: ① 새 판을 S3에 두면 1시간 안에 두 서비스가… | ③ `CloudFront-Viewer-ASN`이 없는 요청은 그 밖으로 보고 IP 한도를 걸지 않는다 | 자동 시험 | B | 시험: packages/platform/test/asn-table.test.ts, services/queue-svc/test/degraded-limits.test.ts 외 1곳 |
-| B-T8 | ① | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ①로그인한 같은 출처 클릭은 `tr:hp:{pid}`가 생기고 다음 사전 검증이 `CHALLENGE`(사유 범주 `INTERACTION`)다 | 빈칸 | B | — |
-| B-T8 | ② | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ②로그인하지 않은 클릭은 지표만 오른다 | 빈칸 | B | — |
-| B-T8 | ③ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ③이미 판정을 통과해 기다리는 사람의 적중은 격리를 만들지 않는다 | 빈칸 | B | — |
-| B-T8 | ④ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ④ 24시간 [가정] 뒤 표시가 사라진다 | 빈칸 | B | — |
-| B-T8 | ⑤ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ⑤ 모든 경우 응답은 204·빈 본문이다(FR-049, NFR-020) | 빈칸 | B | — |
+| B-T8 | ① | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ①로그인한 같은 출처 클릭은 `tr:hp:{pid}`가 생기고 다음 사전 검증이 `CHALLENGE`(사유 범주 `INTERACTION`)다 | 자동 시험 | B | 시험: services/trust-svc/test/honeypot.test.ts |
+| B-T8 | ② | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ②로그인하지 않은 클릭은 지표만 오른다 | 자동 시험 | B | 시험: services/trust-svc/test/honeypot.test.ts |
+| B-T8 | ③ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ③이미 판정을 통과해 기다리는 사람의 적중은 격리를 만들지 않는다 | 자동 시험 | B | 시험: services/trust-svc/test/honeypot.test.ts |
+| B-T8 | ④ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ④ 24시간 [가정] 뒤 표시가 사라진다 | 자동 시험 | B | 시험: services/trust-svc/test-int/score-risk.int.test.ts, services/trust-svc/test/honeypot.test.ts |
+| B-T8 | ⑤ | 허니팟 경로: ① 로그인한 같은 출처 클릭은 `tr:hp:{pid}`가… | ⑤ 모든 경우 응답은 204·빈 본문이다(FR-049, NFR-020) | 자동 시험 | B | 시험: services/trust-svc/test/honeypot.test.ts |
 | B-T9 | ① | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ① 추가 검증 실패, 허니팟 적중, 재평가 후보만으로는 키가 생기지 않는다 | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test/block-list-source.test.ts |
 | B-T9 | ② | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ② 표본 검토 '봇' 판정과 부정구매 확인 라벨 반영으로만 키가 생기고 값에 확정 출처가 있다 | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | B-T9 | ③ | 차단 기기 목록 등재 조건: ① 추가 검증 실패, 허니팟 적중, 재평가… | ③ 표본 검토 '사람' 재판정과 이의 인정은 키를 지운다 | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
@@ -144,8 +144,8 @@
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts, services/identity-svc/test/trust-login-risk.test.ts 외 7곳 |
 | v5.0.0-2.4.2 | — | L3 | 비즈니스 업무 로직 흐름이 물리적 인간의 현실적인 동작 타이밍을 요구하도록 설계하여 비정상적으로 빠른 기계적 제출을 방어한다. | 빈칸 | B | 영역: services/trust-svc |
 | v5.0.0-6.1.1 | — | L1 | 레이트 리밋·자동화 방지·적응형 대응 같은 통제가 크리덴셜 스터핑과 비밀번호 무차별 대입을 어떻게 막는지 문서에 정한다. 통제를 어떻게 설정하는지와 악의적 계정… | ID만 | B | 다른 곳 시험: services/identity-svc/test/admin-login.test.ts (영역: services/trust-svc) |
-| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/queue-svc/test/sale-state.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 1곳 |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
+| v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts, services/queue-svc/test/sale-state.test.ts 외 2곳 |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-entry-function.test.ts, services/queue-svc/test/edge-first-visit-function.test.ts |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: services/trust-svc) |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |

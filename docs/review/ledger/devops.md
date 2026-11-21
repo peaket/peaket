@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 65 | 2 | 1 | 0 | 1 | 2 | 0 | 0 | 47 | 118 |
-| 합계 | 65 | 2 | 1 | 0 | 1 | 2 | 0 | 0 | 47 | 118 |
+| B | 72 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 118 |
+| 합계 | 72 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 118 |
 
 ## docs/devops.md
 
@@ -21,7 +21,7 @@
 | D-T8 | — | 확장 마이그레이션을 적용한 DB에서 N-1 앱 시험 묶음을 실행한다 | 통과한다. 옛 열을 지우는 축소 마이그레이션을 같은 배포에 넣으면 N-1 시험이 실패해 PR이 막힌다 | 빈칸 | B | — |
 | D-T9 | — | `-- peaket:no-transaction` 표시가 있는 파일의… | 트랜잭션 밖에서 성공하고 기록 표에 남는다. 표시가 없는 파일에 같은 문장이 있으면 Squawk가 막는다 | 빈칸 | B | — |
 | D-T10 | — | 핫 테이블에 긴 트랜잭션이 열린 상태에서 그 표를 바꾸는 마이그레이션 | 3초 뒤 물러나 5회 다시 시도한 뒤 잡이 실패한다. 롤아웃은 시작되지 않는다. 그동안 핫패스 p99는 변하지 않는다 | 빈칸 | B | — |
-| D-T11 | — | 서명이나 출처 증명이 없는 이미지 배포 | 스테이징·운영에서는 기동이 거부되고, 데모에서는 위반이 기록된다 | 빈칸 | B | — |
+| D-T11 | — | 서명이나 출처 증명이 없는 이미지 배포 | 스테이징·운영에서는 기동이 거부되고, 데모에서는 위반이 기록된다. 구현(추천 적용 2026-11-20, BAT-085, ADR-0318):… | 자동 시험 | B | 시험: deploy/policies/test/kyverno-policies.test.mjs, tools/local/e2e/kyverno.e2e.mjs |
 | D-T12 | ① | 워크플로가 서드파티 액션을 태그로 참조하거나, 조직 허용 목록에 없는… | ① 저장소의 워크플로 검사(`tools/ci/check-workflows.mjs`)가 PR에서 막는다: 태그·가지·짧은 SHA 참조와, GitHub 소유가… | 자동 시험 | B | 시험: tools/ci/check-workflows.test.mjs |
 | D-T12 | ② | 워크플로가 서드파티 액션을 태그로 참조하거나, 조직 허용 목록에 없는… | ② 조직 정책 때문에 워크플로가 실패한다(소유자가 조직 설정을 적용한 뒤 한 번 확인한다). 연결: ADR-0263 결정 10(추천 적용 2026-11-10… | 미검증 | B | BAT-202 · 조직 Actions 정책은 GitHub 조직 설정이라 저장소 시험으로 보지 못한다. 2026-11-10 조직 API에서 `sha_pinning_required: true`·허용 목록을 읽었지만… |
 | D-T13 | — | 수정본이 공개된 지 31일째인 높음 등급 취약점이 있는 이미지를… | 승격 PR이 막힌다. 30일 뒤 만료되는 예외 기록이 있으면 통과하고, 예외가 만료되면 다시 막힌다 | 빈칸 | B | — |
@@ -43,18 +43,18 @@
 | D-T25 | — | `release/1.6.0`이 열려 있는 동안… | `main`에 `v1.5.1` 태그가 붙는다. 역병합 PR의 대상은 `develop`이 아니라 `release/1.6.0`이다 | 자동 시험 | B | 시험: tools/ci/release-plan.test.mjs |
 | D-T26 | — | 대형 회차 동결 창 안에서 `hotfix/1.5.2`를 마무리한다 | `main` 병합과 태그는 된다. 운영 승격 PR은 동결 게이트에 막혔다가 창이 끝난 뒤 진행된다 | 빈칸 | B | — |
 | D-T27 | — | 서비스 템플릿에서 우아한 종료를 뺀 판(공용 gRPC 서버가 마감 없이… | 앞의 판은 진행 중이던 호출이 끊겨 템플릿 시험이 실패하고 PR이 막힌다. 정상 판은 그 호출을 성공으로 끝내고 새 호출은 받지 않는다 | 자동 시험 | B | 시험: packages/platform/test-int/shutdown.int.test.ts, packages/platform/test/grpc-server.test.ts |
-| D-T28 | — | 운영 오버레이에서 서비스 네임스페이스의 앰비언트 등록 라벨을 지우거나… | gitops-check의 정책 시험이 실패해 PR이 막힌다. 로컬·데모 오버레이의 같은 설정은 통과한다 | 빈칸 | B | — |
+| D-T28 | — | 운영 오버레이에서 서비스 네임스페이스의 앰비언트 등록 라벨을 지우거나… | gitops-check의 정책 시험이 실패해 PR이 막힌다. 로컬·데모 오버레이의 같은 설정은 통과한다. 구현(추천 적용 2026-11-20, BAT-085… | 자동 시험 | B | 시험: tools/ci/gitops-check.test.mjs |
 | D-T29 | ① | 서비스 템플릿의 시작 작업(추천 적용 2026-10-28… | ① 동안은 준비 상태가 아니다. … 은 계속 준비 상태가 아니고, | 자동 시험 | B | 시험: packages/platform/test/control.test.ts |
 | D-T29 | ② | 서비스 템플릿의 시작 작업(추천 적용 2026-10-28… | ② 동안은 준비 상태가 아니다. | 자동 시험 | B | 시험: packages/platform/test/control.test.ts |
 | D-T29 | ③ | 서비스 템플릿의 시작 작업(추천 적용 2026-10-28… | ③ 동안은 준비 상태가 아니다. | 자동 시험 | B | 시험: packages/platform/test/control.test.ts |
 | D-T29 | ④ | 서비스 템플릿의 시작 작업(추천 적용 2026-10-28… | ④는 30초 [가정] 뒤 준비 상태가 되며 SEV2 `control_sync_lagging{kind}`가 뜬다. 준비 프로브는 시작 작업이 켠 표시만 본다… | 자동 시험 | B | 시험: packages/platform/test/control.test.ts |
 | D-T30 | — | IAM 코드에서 워크로드의 Pod Identity 역할에… | 셋 모두 정적 검사가 PR을 막는다. 워크로드마다 MSK 전용 역할 하나와, 그 역할만 맡을 수 있는 Pod Identity 역할의 짝이면 통과한다 | 빈칸 | B | — |
 | D-T32 | ① | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ①은 워크플로 검사(`tools/ci/check-workflows.mjs`)가 PR을 막는다. 빌드 잡의 권한 규칙(그 잡의 `permissions`가… | 자동 시험 | B | 시험: tools/ci/check-workflows.test.mjs |
-| D-T32 | ② | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ② `cache-mode` 규칙은 출시 가지 후보 빌드가 생기는 단계에서 더한다. 빌드 잡에는 `id-token` 권한이 없어 토큰 요청도 실패한다. | ID만 | B | 시험: tools/ci/check-workflows.test.mjs, tools/ci/image-build.test.mjs 외 1곳 |
-| D-T32 | ③ | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ③은 `gitops-check`가 인증서의 소스 ref·실행기 종류로 거부하고, 스테이징·운영 입장 정책도 기동을 거부한다. 출시·핫픽스 가지를 GitHub… | ID만 | B | 시험: tools/ci/check-workflows.test.mjs, tools/ci/image-build.test.mjs 외 1곳 |
-| D-T33 | ① | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ①은 통과한다. | 빈칸 | B | — |
-| D-T33 | ② | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ②는 `gitops-check`가 허용 레지스트리 밖이라 PR을 막는다. | 빈칸 | B | — |
-| D-T33 | ③ | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ③은 인증 없이 받는다. 데모 입장 정책(감사 모드)은 GHCR 이미지의 서명·출처도 §4.2와 같은 신원으로 확인해 위반을 0건으로 기록한다 | 빈칸 | B | — |
+| D-T32 | ② | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ② 캐시 금지 규칙은 이 묶음에서 더했다. 빌드 잡에는 `id-token` 권한이 없어 토큰 요청도 실패한다. | 자동 시험 | B | 시험: tools/ci/check-workflows.test.mjs, tools/ci/image-build.test.mjs |
+| D-T32 | ③ | 공급망 잡 분리(추천 적용 2026-10-28, 기술 검토… | ③은 `gitops-check`가 인증서의 소스 ref·실행기 종류로 거부하고, 스테이징·운영 입장 정책도 기동을 거부한다. 출시·핫픽스 가지를 GitHub… | 자동 시험 | B | 시험: tools/ci/gitops-check.test.mjs, tools/ci/supply-chain-verify.test.mjs |
+| D-T33 | ① | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ①은 통과한다. … 를 보고, `gitops-check`가 같은 값으로 PR을 막는다. | 자동 시험 | B | 시험: deploy/policies/test/kyverno-policies.test.mjs, tools/ci/gitops-check.test.mjs 외 1곳 |
+| D-T33 | ② | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ②는 `gitops-check`가 허용 레지스트리 밖이라 PR을 막는다. … 를 보고, `gitops-check`가 같은 값으로 PR을 막는다. | 자동 시험 | B | 시험: deploy/policies/test/kyverno-policies.test.mjs, tools/ci/gitops-check.test.mjs 외 1곳 |
+| D-T33 | ③ | 오버레이별 허용 레지스트리(추천 적용 2026-10-28, 기술 검토… | ③은 인증 없이 받는다. 데모 입장 정책(감사 모드)은 GHCR 이미지의 서명·출처도 §4.2와 같은 신원으로 확인해 위반을 0건으로 기록한다. 구현(추천 적용… | 측정 | B | BAT-085 · 로컬 kind가 끌어오기 비밀 없이 공개 GHCR 이미지의 다이제스트를 받는지 잰다(예: Kyverno 이미지). 우리 패키지의 실제 익명 끌어오기는 첫 출시 후보 게시와 패키지 공개 설정(소유자… |
 | D-T34 | ① | 저장소 비밀의 교대 사용자 교체(추천 적용 2026-10-28, 기술… | ①은 둘 다 성공한다. | 빈칸 | B | — |
 | D-T34 | ② | 저장소 비밀의 교대 사용자 교체(추천 적용 2026-10-28, 기술… | ②는 연결 재시도 안에서 성공하고 실패 수만 남는다. | 빈칸 | B | — |
 | D-T34 | ③ | 저장소 비밀의 교대 사용자 교체(추천 적용 2026-10-28, 기술… | ③은 인증이 실패하고 `datastore_auth_failures_total`의 SEV2 경보가 뜬다. 재시작 잡이 교체 사이에 그 파드를 다시 띄운 판에서는… | 빈칸 | B | — |
@@ -97,7 +97,7 @@
 | D-T50 | ④ | 전역 레이트 리밋과 웹훅 출발지 한도(추천 적용 2026-11-16… | ④ 정적 시험이 평문 설정을 막고, kind의 레이트 리밋 서비스는 TLS로 붙어 판정한다 | 자동 시험 | B | 시험: deploy/gateways/test/limits-errors.test.mjs, tools/local/e2e/gateway-limits.e2e.mjs |
 | D-T50 | ⑤ | 전역 레이트 리밋과 웹훅 출발지 한도(추천 적용 2026-11-16… | ⑤ 전역 한도 정책이 붙지 않는다(정적 시험) | 자동 시험 | B | 시험: deploy/gateways/test/limits-errors.test.mjs |
 | D-T50 | ⑥ | 전역 레이트 리밋과 웹훅 출발지 한도(추천 적용 2026-11-16… | ⑥ 한도를 넘은 요청은 429이고 payment-svc에 닿지 않으며, 다른 IP의 요청은 통과한다 | 자동 시험 | B | 시험: deploy/gateways/test/limits-errors.test.mjs, tools/local/e2e/gateway-limits.e2e.mjs |
-| D-T50 | ⑦ | 전역 레이트 리밋과 웹훅 출발지 한도(추천 적용 2026-11-16… | ⑦ 601번째는 429다(테넌트당 한도. 게이트웨이가 아니라 서비스 층의 테넌트별 공용 카운터가 판정한다, 소유자 결정 2026-11-16 OPEN[41]… | 다른 단계 | B | HOT-173 · 파트너 API의 테넌트당 600회/분(docs/api/guidelines.md §6). 게이트웨이(BAT-060)는 계정당 한도만 첫 겹으로 건다. 테넌트당 한도는 서비스 층의 테넌트별 공용… |
+| D-T50 | ⑦ | 전역 레이트 리밋과 웹훅 출발지 한도(추천 적용 2026-11-16… | ⑦ 601번째는 429다(테넌트당 한도. 게이트웨이가 아니라 서비스 층의 테넌트별 공용 카운터가 판정한다, 소유자 결정 2026-11-16 OPEN[41]… | 자동 시험 | B | 시험: packages/platform/test-int/tenant-rate-limit.int.test.ts, packages/platform/test/tenant-rate-limit.test.ts 외 5곳 |
 | D-T38 | — | 서비스를 바꾼 PR에서 계약에 없는 응답 필드를 가진 컨트롤러와… | 두 PR 모두 `contract-check`의 OpenAPI 차이 검사가 실패해 병합되지 않는다. 계약과 같은 판은 통과한다. 운영 이미지에는 문서 경로가 없어… | 자동 시험 | B | 시험: packages/platform/test/contract-sweep.test.ts, packages/platform/test/metrics.test.ts 외 4곳 |
 | D-T39 | ① | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ① : PreSync Job이 실패해 동기화가 멈추고 생산자는 배포되지 않는다. | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
 | D-T39 | ② | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ② : 주제별 ID가 ConfigMap에 쓰이고, 생산자는 실행 중 레지스트리 호출 0건으로 Outbox 바이트를 만든다. | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |

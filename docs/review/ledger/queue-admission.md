@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 110 | 51 | 2 | 0 | 0 | 2 | 0 | 0 | 31 | 196 |
+| A | 115 | 46 | 3 | 0 | 0 | 2 | 0 | 0 | 30 | 196 |
 | B | 36 | 13 | 0 | 0 | 0 | 3 | 0 | 2 | 5 | 59 |
-| 합계 | 146 | 64 | 2 | 0 | 0 | 5 | 0 | 2 | 36 | 255 |
+| 합계 | 151 | 59 | 3 | 0 | 0 | 5 | 0 | 2 | 35 | 255 |
 
 ## docs/features/queue-admission.md
 
@@ -34,7 +34,7 @@
 | Q-T20 | ① | 봇 등급별 혼동 행렬 측정 | ① '공개 자료 기준': 이용 조건을 확인한 공개 실제 사람 기록에서 결과를 보기 전에 사전 등록한 n명(1인 1기록, 조정용과 사람 단위로 나눔, 원천… | 빈칸 | A | — |
 | Q-T20 | ② | 봇 등급별 혼동 행렬 측정 | ② '모의 사람(리허설)': 모의 사람 생성기의 세션(원천 `mock`)을 같은 경로로 넣어 측정 절차가 끝까지 도는지 본다. 추가 검증 큐로 간 봇 세션은 그… | 빈칸 | A | — |
 | Q-T21 | — | 적응형 공격 대응 검증 | 등급별로 라운드 1과 비교한 마지막 라운드의 하락 폭(%p)과 규칙 변경 내역을 기록한다. 2단계가 95% 아래로 떨어지면 ADR-0039 되돌릴 조건을 따른다 | 빈칸 | A | — |
-| Q-T22 | — | 실서비스 하한 지표 추정 | 자동화 봇만 허니팟에 걸리고 화면 낭독기 사용자는 잘못 걸리는 일이 없음을 확인한다. 링크를 미리 여는 확장 프로그램을 켠 브라우저의 적중 수를 따로 세고… | 빈칸 | A | — |
+| Q-T22 | — | 실서비스 하한 지표 추정 | 자동화 봇만 허니팟에 걸리고 화면 낭독기 사용자는 잘못 걸리는 일이 없음을 확인한다. 링크를 미리 여는 확장 프로그램을 켠 브라우저의 적중 수를 따로 세고… | 측정 | A | OPS-220 · 허니팟 정밀도 표본 검토(100건 [가정])의 정밀도 추정은 BAT-197에서 뺐다(새 `reviewKind`·원천·집계와 화면 상태가 필요해 따로 묶는다, 감독 결정 2026-11-21)… |
 | Q-T23 | — | 동시 도착 구간 묶음 검증(오픈 직후 묶음 켬·끔 비교… | 묶음 안 순번과 실제 도착 시각 사이의 스피어만 상관계수 절댓값이 ≤ 0.05 [가정]로 수렴한다. 사람 모의 도착의 p90이 N 안에 들고, 묶음에 든 사람… | 자동 시험 | A | 시험: services/admission-ctrl/test/publish.test.ts |
 | Q-T24 | — | 토큰 발급 시각 정책 검증 | 미리 발급한 토큰만 무작위 묶음 셔플에 들어가고, 오픈 후 발급한 토큰은 묶음 다음의 도착 순서로 배정된다. 무중단 갱신을 해도 최초 발급 시각이 바뀌지 않는다. | 자동 시험 | A | 시험: services/queue-svc/test/batch-cases.ts, services/queue-svc/test/entry-cases.ts |
 | Q-T25 | — | 차례 직전 직접 확인 규칙 | 이른 시도는 `NOT_YET`과 남은 예상 시간을 받고, 다음 시도는 그 시각에 맞춰진다. 레이트 리밋 위반 요청은 차단되고, 직접 확인으로 늘어난 origin… | 자동 시험 | A | 시험: apps/web/queue-room/test/autoassign.test.mjs |
@@ -79,11 +79,11 @@
 | Q-T39 | ③ | 최초 방문 쿠키와 행동 신호 요약 | ③ 쿠키가 없는 것으로 처리되고 다른 진입은 그대로다 | 자동 시험 | A | 시험: services/queue-svc/test/first-visit-cookie.test.ts |
 | Q-T39 | ④ | 최초 방문 쿠키와 행동 신호 요약 | ④ CDN 캐시 응답에 `Set-Cookie`가 없다 | 자동 시험 | A | 시험: services/queue-svc/test/edge-first-visit-function.test.ts |
 | Q-T39 | ⑤ | 최초 방문 쿠키와 행동 신호 요약 | ⑤ 400. 요청·로그에 원시 좌표·키 값이 0건이다 | ID만 | A | 시험: apps/web/src/_pages/event-detail/ui/no-set-cookie.test.mjs, apps/web/src/features/behavior-summary/tracker.test.mjs… |
-| Q-T40 | ① | 허니팟 기록 조건 | ①만 허니팟 적중으로 기록되고, | ID만 | A | 시험: apps/web/queue-room/test/hidden-link.test.mjs, apps/web/src/shared/config/hidden-link.test.mjs 외 4곳 |
-| Q-T40 | ② | 허니팟 기록 조건 | ②는 기록되지 않는다( | ID만 | A | 시험: apps/web/queue-room/test/hidden-link.test.mjs, apps/web/src/shared/config/hidden-link.test.mjs 외 4곳 |
-| Q-T40 | ③ | 허니팟 기록 조건 | ③는 기록되지 않는다( | ID만 | A | 시험: apps/web/queue-room/test/hidden-link.test.mjs, apps/web/src/shared/config/hidden-link.test.mjs 외 4곳 |
-| Q-T40 | ④ | 허니팟 기록 조건 | ④는 기록되지 않는다( | ID만 | A | 시험: apps/web/queue-room/test/hidden-link.test.mjs, apps/web/src/shared/config/hidden-link.test.mjs 외 4곳 |
-| Q-T40 | ⑤ | 허니팟 기록 조건 | ⑤는 기록되지 않는다( … 는 남는 한계로, 다른 신호가 맡는다) | ID만 | A | 시험: apps/web/queue-room/test/hidden-link.test.mjs, apps/web/src/shared/config/hidden-link.test.mjs 외 4곳 |
+| Q-T40 | ① | 허니팟 기록 조건 | ①만 허니팟 적중으로 기록되고, | 자동 시험 | A | 시험: apps/web/queue-room/test/hidden-link.test.mjs, services/trust-svc/test-int/score-risk.int.test.ts 외 1곳 |
+| Q-T40 | ② | 허니팟 기록 조건 | ②는 기록되지 않는다( | 자동 시험 | A | 시험: services/trust-svc/test/honeypot.test.ts |
+| Q-T40 | ③ | 허니팟 기록 조건 | ③는 기록되지 않는다( | 자동 시험 | A | 시험: services/trust-svc/test/honeypot.test.ts |
+| Q-T40 | ④ | 허니팟 기록 조건 | ④는 기록되지 않는다( | 자동 시험 | A | 시험: services/trust-svc/test/honeypot.test.ts |
+| Q-T40 | ⑤ | 허니팟 기록 조건 | ⑤는 기록되지 않는다( … 는 남는 한계로, 다른 신호가 맡는다) | 자동 시험 | A | 시험: services/trust-svc/test/honeypot.test.ts |
 | Q-T41 | ① | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ① 네트워크 기록에 OPTIONS가 없고 응답을 스크립트가 읽는다 … 의 브라우저 시험이 증명하고, … 에서 OPTIONS가 보이면 ADR-0065 되돌릴… | 자동 시험 | A | 시험: services/queue-svc/test/admission.test.ts, tools/local/e2e/queue-cors.e2e.mjs |
 | Q-T41 | ② | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ② OPTIONS가 먼저 나가고 응답에 `Access-Control-Max-Age: 7200`이 있다 | 자동 시험 | A | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs 외 1곳 |
 | Q-T41 | ③ | 진입·입장 확정의 사전 요청 없는 형식과 교차 출처 응답 | ③ 415 | 자동 시험 | A | 시험: services/queue-svc/test/http.test.ts |
@@ -227,7 +227,7 @@
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/queue-svc/test/admission.test.ts, services/queue-svc/test/http.test.ts 외 2곳 |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: services/queue-svc/test/leave-http.test.ts, services/queue-svc/test/shuffle-proof.test.ts 외 1곳 |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: apps/web/src/_pages/ticket-cancel/ui/live-wiring.test.mjs, services/queue-svc/test/leave-http.test.ts 외 2곳 |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs (영역: apps/web, packages/shuffle, services/admission-ctrl… |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
@@ -246,7 +246,7 @@
 | v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/payment-svc/test/portone-gateway.test.ts (영역:… |
 | v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | ID만 | B | 다른 곳 시험: services/payment-svc/test/virtual-account-deposit.test.ts (영역: apps/web, packages/shuffle… |
 | v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | 자동 시험 | B | 시험: packages/shuffle/test/drand-seal.test.ts, services/admission-ctrl/test/kms-seed-opener.test.ts 외 1곳 |
-| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.te… |
+| v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int… |
 | v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | 자동 시험 | B | 시험: packages/shuffle/test/shuffle.test.ts |
 | v5.0.0-11.4.2 | — | L2 | 비밀번호는 현재 권고 파라미터를 적용한 승인된 비밀번호 해시 함수로 저장한다. | 해당 없음 | B | 해당 없음: 이 기능에는 비밀번호가 없다 |
 | v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | 자동 시험 | B | 시험: packages/shuffle/test/shuffle.test.ts |

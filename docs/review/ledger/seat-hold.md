@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 116 | 13 | 15 | 2 | 0 | 9 | 1 | 0 | 0 | 156 |
-| B | 109 | 19 | 0 | 0 | 0 | 3 | 0 | 15 | 10 | 156 |
-| 합계 | 225 | 32 | 15 | 2 | 0 | 12 | 1 | 15 | 10 | 312 |
+| A | 130 | 13 | 15 | 2 | 0 | 6 | 1 | 0 | 0 | 167 |
+| B | 110 | 18 | 0 | 0 | 0 | 3 | 0 | 15 | 10 | 156 |
+| 합계 | 240 | 31 | 15 | 2 | 0 | 9 | 1 | 15 | 10 | 323 |
 
 ## docs/features/seat-hold.md
 
@@ -25,7 +25,7 @@
 | S-T11 | — | 트랜잭션 격리 수준 비교 실험 | 부분 유니크 인덱스가 격리 수준과 무관하게 최종 오버셀을 막는 마지막 방어선임을 입증한다. | 측정 | A | PRF-140 · 트랜잭션 격리 수준 비교. 판정이 부하 수치다 (이름을 단 시험도 있다) |
 | S-T12 | ① | 실시간 전파 대역폭 및 지연시간 | ① 합격은 절대값으로만 판정한다. 상태가 바뀐 뒤(홀드 Lua의 변경 시각, 묶음 대기 포함) 화면에 그려지기까지의 종단 p99 지연시간 300ms… | 측정 | A | BAT-095 · 실시간 전파 대역폭과 지연의 판정 측정(연결 5,000개, `tc netem`). 2026-11-18 HOT-090(BAT-052)에서 옮김(전체 감독 결정). ②(지표)는 BAT-052 시험 |
 | S-T12 | ② | 실시간 전파 대역폭 및 지연시간 | ② realtime-gw가 그 측정이 읽는 값을 지표로 낸다: 보낸 묶음마다 `realtime_gw_batches_total`이 1… | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
-| S-T13 | — | 전파 버전 갭 자가 치유 검증 | 30초 이내에 그 섹션 스냅샷을 다시 받아, 99.9% 확률로 완전히 회복됨을 입증한다. 버전 건너뜀을 3,000번 이상 만들고, 30초 안에 회복하지 못한… | 다른 단계 | A | BAT-182 · 전파 버전 갭 자가 치유. 회복은 화면의 delta-sync라 화면을 realtime-gw에 이은 뒤 잰다(2026-11-18 전체 감독 결정). 서버 몫은 S-T42 ⑤⑥⑩ |
+| S-T13 | — | 전파 버전 갭 자가 치유 검증 | 30초 이내에 그 섹션 스냅샷을 다시 받아, 99.9% 확률로 완전히 회복됨을 입증한다. 버전 건너뜀을 3,000번 이상 만들고, 30초 안에 회복하지 못한… | 자동 시험 | A | 시험: packages/seatmap/test/s-t13-gap.test.ts |
 | S-T14 | ① | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ① 박자에 보내기 버퍼가 256KiB 이상인 연결만 그 박자에 `BatchInterval` 1000을 받고 그 뒤 묶음이 1초 차례마다 오며(256KiB −… | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/degraded.test.ts 외 1곳 |
 | S-T14 | ② | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ② 박자 늦음 p99가 50ms를 넘는 10초 창이 18개 이어지면 파드의 모든 연결이 `BatchInterval` 1000을 받고… | 자동 시험 | A | 시험: services/realtime-gw/test/degraded.test.ts |
 | S-T14 | ③ | 실시간 전파 Degraded Mode 검증(①~③ 추천 적용… | ③ 파드가 Degraded인 동안 새로 붙은 연결의 첫 프레임은 `BatchInterval` 1000이고, 간격이 그대로면 `BatchInterval`을 다시… | 자동 시험 | A | 시험: services/realtime-gw/test/degraded.test.ts |
@@ -37,7 +37,7 @@
 | S-T18 | — | 화면 낭독기 웹 접근성 검증 | 모든 회차가 완주해 예매 완주율 100%를 달성하고(개발자 수동 시험으로 표시), axe Core 자동 검사 위반 건수 0건을 충족한다… | 사람 확인 | A | BAT-175 · 화면 낭독기로 사람이 예매를 완주한다(axe 자동 검사는 CI). 확인 목록은 docs/review/manual-a11y/S-T18.md다. VoiceOver(iOS Safari)는 기기를 구할… |
 | S-T19 | — | 자동 좌석 배정 모드 검증 | 배정 좌석이 희망 조건 규칙(1순위 연석, 분리 허용 시 1순위 분리, 2순위 순)대로 정확히 할당되고, 중복 홀드는 0건이다. 모든 후보가 실패하면 아무… | 측정 | A | BAT-090 heavy gate · 자동 배정 1,000건 동시·1순위 매진·분리 조합. 단위 시험은 후보·분리·수동 전환을 본다. 2026-11-13 측정: 100 동시×10묶음 1,000/1,000·중복… |
 | S-T20 | — | 자동 배정 순서 공정성 | 순번과 배정 순서의 스피어만 상관계수 0.99 이상, 봇의 평균 순위 이득(순번 순위 − 배정 순위)이 입장 제어 루프 1주기분(약 6명) 이하 [가정… | 측정 | A | BAT-090 heavy gate · 자동 배정 순서 공정성. 2026-11-13 측정: 같은 조건 순차 10건×2회 R0001~R0020 동일·굶주림 0(보고서 §6) (이름을 단 시험도 있다) |
-| S-T21 | — | 확대 표시와 구역 구독 | 좌석이 보이는 구역만 구독되고(전체 보기에서 0개) 축소하면 해제된다. 보이는 좌석의 다른 분 선택은 p99 300ms 안에 바뀌고, 전체 보기의 구역 상태는… | 다른 단계 | A | BAT-182 · 확대 표시와 구역 구독(2026-11-18 전체 감독 결정) |
+| S-T21 | — | 확대 표시와 구역 구독 | 좌석이 보이는 구역만 구독되고(전체 보기에서 0개) 축소하면 해제된다. 보이는 좌석의 다른 분 선택은 p99 300ms 안에 바뀌고, 전체 보기의 구역 상태는… | 자동 시험 | A | 시험: tools/web-checks/seats/s-t21.spec.mjs |
 | S-T22 | ① | 판매 종료 뒤 홀드 | ① 앞은 201, 뒤는 410 `sale-ended`이고 좌석을 잡지 않는다 | 다른 단계 | A | 미정 · 판매 종료 뒤 홀드 |
 | S-T22 | ② | 판매 종료 뒤 홀드 | ② 홀드 TTL·연장·결제창 유지 규칙 안에서 성공한다 | 다른 단계 | A | 미정 · 판매 종료 뒤 홀드 |
 | S-T22 | ③ | 판매 종료 뒤 홀드 | ③ 비트맵은 풀리지만 새 홀드는 410이라 다시 팔리지 않는다 | 다른 단계 | A | 미정 · 판매 종료 뒤 홀드 |
@@ -88,7 +88,7 @@
 | S-T31 | ③ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ③는 4403이다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | S-T31 | ④ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ④는 4403이다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | S-T31 | ⑤ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ⑤는 두 번째 `TimeSync`에 답이 없다 | 자동 시험 | A | 시험: services/realtime-gw/test/hub.test.ts |
-| S-T31 | ⑥ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ⑥은 상한에 닿지 않아 닫힘이 0번이다. 4429로 닫힌 화면은 10초 넘게 지난 뒤 다시 붙는다(docs/frontend.md §4.4.1) | 다른 단계 | A | BAT-182 · 좌석 구독 상한과 프레임 검사의 ⑥ 정상 화면 시나리오(S-T21과 같이 화면을 realtime-gw에 이은 뒤 본다). ①~⑤는 realtime-gw 시험이 BAT-052에서 맡는다(추천 적용… |
+| S-T31 | ⑥ | 좌석 구독 상한과 프레임 검사(추천 적용 2026-10-30, §7… | ⑥은 상한에 닿지 않아 닫힘이 0번이다. 4429로 닫힌 화면은 10초 넘게 지난 뒤 다시 붙는다(docs/frontend.md §4.4.1) | 자동 시험 | A | 시험: tools/web-checks/seats/s-t21.spec.mjs |
 | S-T32 | ① | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ①는 422이고 바깥 연결이 0번이다(시험 서버 접속 기록) | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
 | S-T32 | ② | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ②는 422이고 바깥 연결이 0번이다(시험 서버 접속 기록) | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
 | S-T32 | ③ | 좌석맵 가져오기 공격 파일(추천 적용 2026-10-30, §10… | ③은 정한 도형만 읽고 나머지는 검증 결과의 경고로 나온다 | 자동 시험 | A | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts |
@@ -155,7 +155,18 @@
 | S-T40 | ⑥ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑥ 24cm 짝과 이웃 구역 짝은 두 좌석이 모두 `SEAT_OVERLAP`에 들고 25cm 짝은 들지 않는다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
 | S-T40 | ⑦ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑦ 밖 좌석만 `SEAT_OUTSIDE_SHAPE`이고 변 위·안 좌석은 아니다 | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
 | S-T40 | ⑧ | 좌석맵 템플릿과 휠체어석·겹침·도형 밖 경고(추천 적용… | ⑧가져오기 결과와 저장 응답의 `warnings`가 같은 코드·좌석이고 저장은 200으로 판이 오른다. 좌석 ID는 경고마다 100개까지이고… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-templates.int.test.ts, services/core-svc/test/seatmap-warnings.http.test.ts |
-| S-T41 | — | 판매 설정 사본과 승인 실행(판매 승인 LCH-080, §4 '판매… | 승인된 공연의 회차마다 `salePolicy`·`eligGates`(PRESALE 창)·`eligLists`가 실리고, 취소 회차는 빠지며, 승인 전 공연은… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-approval.int.test.ts, services/core-svc/test/event-sale-config.test.ts 외 1곳 |
+| S-T41 | ① | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ① 파트너 요청: `partner_admin`이 판매자 정보·계좌 모양·휠체어석 확인을 넣으면 202… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-review-db.int.test.ts, services/core-svc/test/sale-review-request.http.test.ts |
+| S-T41 | ② | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ② 본문: 필수 칸 누락·신고번호와 면제 근거 둘 다 없음·계좌 모양 틀림·`confirmed:false`·회차 0개·공연장 없음은 400/422이고 상태·행 0 | 자동 시험 | A | 시험: services/core-svc/test/sale-review-request.http.test.ts |
+| S-T41 | ③ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ③ 변경 취소: 승인 이력이 있는 SUBMITTED에서 DELETE 204·APPROVED·pending 비움, 이력 없음·APPROVED·SUSPENDED는… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-review-db.int.test.ts, services/core-svc/test/sale-review-request.http.test.ts |
+| S-T41 | ④ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ④ 반려 사유: 1~1,000자로 반려하면 REJECTED·`rejectionReason`이 목록·상세·파트너 현황에 같게 보이고, 사유 없음·1,001자… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-review-db.int.test.ts, services/core-svc/test/ops-sale-review.http.test.ts |
+| S-T41 | ⑤ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑤ 목록·상세: 기본 SUBMITTED만, 상태 필터·커서·limit, 오래된 순, viewer·CS 200, 목록에 계좌·연락처·사업자번호 0건, 없는 공연… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-review-db.int.test.ts, services/core-svc/test/ops-sale-review.http.test.ts |
+| S-T41 | ⑥ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑥ 승인 뒤 판매 열기: 회차마다 시작 시각 오름차순 `sale-open` 1번, 성공한 뒤에만 `q:cfg`·`q:epoch`가 서고 실패하면 사본이 없다… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-open.int.test.ts, services/core-svc/test/sale-approval.test.ts |
+| S-T41 | ⑦ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑦ 오픈 경계·UPCOMING: `openAt−1ms`에 UPCOMING(`open_at`·판 1·`EventSaleChanged`)·`seat_rebuild`… | 자동 시험 | A | 시험: services/purchase-svc/test-int/sale-open.int.test.ts |
+| S-T41 | ⑧ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑧ `q:cfg`·`q:epoch`: 같은 rev·낮은 rev는 덮지 않고(9→10 경계), `node`가 `standalone` 또는 {CLUSTER… | 자동 시험 | A | 시험: services/core-svc/test-int/queue-sale-config.int.test.ts |
+| S-T41 | ⑨ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑨ 열기 실패 때 닫힘: 503/409이면 승인은 200·`q:cfg` 없음(대기열 404), 정비 일을 다시 돌리면 열고 사본을 쓴다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-open.int.test.ts, services/core-svc/test/sale-approval.test.ts 외 1곳 |
+| S-T41 | ⑩ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑩ CDN: 승인하면 회차마다 `event:{id}`·`production:{id}`를 무효화하고, 반려는 0건, 무효화 실패를 주입해도 승인 200 | 자동 시험 | A | 시험: services/core-svc/test/ops-sale-review.http.test.ts |
+| S-T41 | ⑪ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑪ BAT-051 회귀: 승인 공연의 `sale-config`를 읽어 홀드 규칙·1인 한도·판매 종료를 덮고, 사본 없으면 파일 설정·사본 오류면 503 | 자동 시험 | A | 시험: services/purchase-svc/test-int/seat-store.int.test.ts |
+| S-T41 | ⑫ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑫ 화면은 BAT-617. 승인된 공연의 회차마다 `salePolicy`·`eligGates`(PRESALE 창)·`eligLists`가 실리고 취소 회차는… | 자동 시험 | A | 시험: services/core-svc/test/event-sale-config.test.ts |
 | S-T42 | ① | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ①은 101이고 고른 하위 프로토콜이 `peaket.seats.v1`뿐이며 첫 프레임이 `BatchInterval` 100이다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | S-T42 | ② | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ②는 차례대로 404·403·403·400·400·400·400·400·400·400·401·401·401·401·401·401·401·503이고 업그레이드가… | 자동 시험 | A | 시험: packages/platform/test/admission-token.test.ts, services/realtime-gw/test-int/stream.int.test.ts 외 1곳 |
 | S-T42 | ③ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ③은 4403이다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
@@ -216,11 +227,11 @@
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-store.int.test.ts, services/purchase-svc/test-int/seat-store.int.test.ts 외 8곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 26곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/internal-sale-config.int.test.ts 외 6곳 |
-| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외… |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외… |
+| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/compensation-records.int.test… |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/compensation-records.int.test… |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/config.test.ts 외 3곳 |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/purchase-svc/test/snapshot-http.test.ts |
-| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs, apps/web/src/_pages/queue-verify/model/verify-fl… |
+| v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/partner/src/_pages/cancellation-request/model/live.test.mjs, apps/partner/src/_pages/seatmap-editor/model/impor… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: apps/partner, apps/web, packages/seatmap… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
@@ -233,7 +244,7 @@
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
-| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: services/core-svc/test/seatmap-templates.http.test.ts, services/queue-svc/test/leave-http.test.ts 외 4곳 (영역:… |
+| v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: apps/partner/src/_pages/cancellation-request/ui/wiring.test.mjs, apps/web/src/_pages/ticket-cancel/ui/live-wiring.te… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs (영역: apps/partner) |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
@@ -244,7 +255,7 @@
 | v5.0.0-4.2.1 | — | L2 | 로드밸런서·방화벽 등 모든 구성요소가 HTTP 버전에 맞게 메시지 경계를 정해 요청 밀반입을 막는다(HTTP/1.x는 `Transfer-Encoding`이… | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-4.3.1 | — | L2 | 허용 쿼리 목록, 깊이·개수 제한, 쿼리 비용 분석 가운데 하나 이상으로 비싼 중첩 쿼리에 의한 GraphQL·데이터 계층 표현식 서비스 거부를 막는다. | 해당 없음 | B | 해당 없음(좌석 API는 REST와 WebSocket이고 GraphQL을 쓰지 않는다) |
 | v5.0.0-4.3.2 | — | L2 | GraphQL을 외부에 공개하는 경우가 아니면 운영 환경에서 인트로스펙션을 끈다. | 해당 없음 | B | 해당 없음(위와 같다) |
-| v5.0.0-4.4.1 | — | L1 | 모든 WebSocket 연결에 WSS를 쓴다. | ID만 | B | 다른 곳 시험: packages/seatmap/test/connection.test.ts, services/v0-monolith/test/gateway-http-rules.test.ts 외 1곳 (영역:… |
+| v5.0.0-4.4.1 | — | L1 | 모든 WebSocket 연결에 WSS를 쓴다. | ID만 | B | 다른 곳 시험: packages/seatmap/test/connection.test.ts, packages/seatmap/test/s-t13-gap.test.ts 외 2곳 (영역:… |
 | v5.0.0-4.4.2 | — | L2 | WebSocket 첫 HTTP 핸드셰이크에서 `Origin`을 허용 출처 목록과 대조한다. | 자동 시험 | B | 시험: services/realtime-gw/test-int/stream.int.test.ts |
 | v5.0.0-4.4.3 | — | L2 | 표준 세션 관리를 쓸 수 없으면 세션 관리 요구사항을 따르는 전용 토큰을 쓴다. | 자동 시험 | B | 시험: services/realtime-gw/test-int/stream.int.test.ts |
 | v5.0.0-4.4.4 | — | L2 | 전용 WebSocket 세션 토큰은 인증된 HTTPS 세션으로 처음 받거나 검증한다. | 자동 시험 | B | 시험: services/realtime-gw/test-int/stream.int.test.ts |
@@ -260,10 +271,10 @@
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | 자동 시험 | B | 시험: services/purchase-svc/test/purchase-session-leave-http.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | 자동 시험 | B | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test-int/sale-policy.int.test.ts 외 23곳 |
-| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 22곳 |
-| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/start-payment-http.test.ts, services/purchase-svc/test/start-payment.test.ts |
+| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 23곳 |
+| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/cancel-refund-account-http.test.ts, services/purchase-svc/test/compensations-http.test.ts… |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/partner-bulkhead-auth.test.ts, services/purchase-svc/test/hold-seats.test.ts 외 1곳 |
-| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외… |
+| v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: packages/platform/test-int/tenant-rate-limit.int.test.ts, services/core-svc/test-int/export-audit.int.test.ts… |
 | v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-server.test.ts (영역: apps/partner… |
 | v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | B | 영역: apps/partner, apps/web, packages/seatmap, services/purchase-svc |
 | v5.0.0-12.1.3 | — | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |

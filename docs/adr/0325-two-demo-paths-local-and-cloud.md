@@ -40,7 +40,7 @@
 - 빈 PC에서 `node tools/local/demo.mjs all` 한 번으로 무대·시드·S1~S9 재생·측정·정리가 이어진다. 걸린 시간은 `docs/review/measurements/BAT-086-demo.md`에 남는다.
 - 클라우드 데모는 `deploy/demo/cloud-plan.yaml`의 값 검사와 `docs/devops.md` §5.1 절차로만 존재한다. 첫 출시 뒤 승격 묶음이 `deploy/envs/demo`의 서명 다이제스트를 채우면 같은 `play`로 돈다.
 - 대가: `tools/local/demo.mjs`와 `tools/local/demo/`(시나리오·재생기·측정·호환·클라우드 검사)가 는다. 정본 문서 넷(infra·devops·verification·d5)과 BUILD_ORDER·lane4가 이 경로를 가리킨다.
-- 남는 한계: 이 묶음의 재생은 S1·S3·S4·S6을 실제 API로 끝까지 부르고, S2·S5·S7·S8·S9는 화면 증거와 실패 사유까지만 남긴다(사람 확인·재인증·스캐너 기기 등록·매진 픽스처가 다음 몫). 클라우드 실행, ArgoCD·카나리·동결 창, 데모 도우미(OPS-290), 성능 수치는 이 결정의 범위가 아니다.
+- 남는 한계: 이 재생은 S1~S9를 실제 API·화면으로 끝까지 부르지만, 화면이 없어 증거로만 여는 화면(S1 SCR-001, S5 SCR-014·SCR-041, S9 SCR-044·SCR-043)은 판정에서 뺀다. S7의 2인 승인은 API 세션 둘(브라우저 맥락 하나)이고, S8은 실제 카메라·기기가 아니라 보존한 DPoP 키와 시뮬레이터를 쓴다. 클라우드 실행, ArgoCD·카나리·동결 창, 데모 도우미(OPS-290), 성능 수치는 이 결정의 범위가 아니다.
 
 ## 되돌릴 조건
 

@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 17 | 6 | 0 | 0 | 0 | 0 | 0 | 0 | 34 | 57 |
-| 합계 | 17 | 6 | 0 | 0 | 0 | 0 | 0 | 0 | 34 | 57 |
+| B | 23 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 27 | 57 |
+| 합계 | 23 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 27 | 57 |
 
 ## docs/security/auth-controls.md
 
@@ -51,13 +51,13 @@
 | AZ-T11 | — | 재인증 토큰 묶음: 정산 계좌 변경용으로 받은 재인증 토큰을 명단… | 모두 403 `reauth-required`다 | 빈칸 | B | — |
 | AZ-T12 | — | 지정: 지정 없는 commander가 분석 실버와 포렌식 2단계… | 모두 403이다. 지정을 거둔 뒤에는 캐시 시간(5초 [가정]) 안에 막힌다 | 빈칸 | B | — |
 | AZ-T13 | — | 현장 스태프: A 회차 토큰으로 B 회차 목록을, 다른 파트너 기기로… | 403이고 판정이 기록되지 않는다(I-T22·I-T23·I-T25와 같은 결과) | 빈칸 | B | — |
-| AZ-T14 | ① | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ①는 모두 403이고 대상 계정과 권한 내역에 변화가 0건이다. | 빈칸 | B | — |
-| AZ-T14 | ② | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ②는 모두 403이고 대상 계정과 권한 내역에 변화가 0건이다. | 빈칸 | B | — |
-| AZ-T14 | ③ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ③은 403 self-target-forbidden과 422 designation-target-not-commander다. | 빈칸 | B | — |
-| AZ-T14 | ④ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ④는 캐시 시간(5초 [가정]) 안에 403이다(AZ-T12와 같다). | 빈칸 | B | — |
-| AZ-T14 | ⑤ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ⑤는 세션이 이미 끝나 401이거나, 세션 종료 이벤트가 늦어도 identity-svc가 DB 역할로 다시 봐 거절한다. | 빈칸 | B | — |
-| AZ-T14 | ⑥ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ⑥은 A의 계정만 나오고 B의 계정이 0건이며 이메일은 가린 값이다. partner_member는 403이다. | 빈칸 | B | — |
-| AZ-T14 | ⑦ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ⑦은 doc-check `roles` 오류다(§5.5) | 빈칸 | B | — |
+| AZ-T14 | ① | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ①는 모두 403이고 대상 계정과 권한 내역에 변화가 0건이다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts |
+| AZ-T14 | ② | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ②는 모두 403이고 대상 계정과 권한 내역에 변화가 0건이다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts |
+| AZ-T14 | ③ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ③은 403 self-target-forbidden과 422 designation-target-not-commander다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts |
+| AZ-T14 | ④ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ④는 캐시 시간(5초 [가정]) 안에 403이다(AZ-T12와 같다). | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-account-management.int.test.ts |
+| AZ-T14 | ⑤ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ⑤는 세션이 이미 끝나 401이거나, 세션 종료 이벤트가 늦어도 identity-svc가 DB 역할로 다시 봐 거절한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts |
+| AZ-T14 | ⑥ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ⑥은 A의 계정만 나오고 B의 계정이 0건이며 이메일은 가린 값이다. partner_member는 403이다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-account-http.test.ts |
+| AZ-T14 | ⑦ | 관리 계정 관리(§6.1, 추천 적용 2026-10-30… | ⑦은 doc-check `roles` 오류다(§5.5) | ID만 | B | 시험: services/identity-svc/test-int/admin-account-management.int.test.ts, services/identity-svc/test/admin-account-http.t… |
 | AZ-T15 | ② | 부정 거래 조사(§3.2·§3.5·§3.7·§4.1, 추천 적용… | ② B·C는 상세가 404이고, 승인은 B 403·C 403 `fraud-approver-ineligible`이다. D는 요약이 든 상세를 읽고 재인증 뒤… | 빈칸 | B | — |
 | AZ-T15 | ③ | 부정 거래 조사(§3.2·§3.5·§3.7·§4.1, 추천 적용… | ③ 403 | 빈칸 | B | — |
 | AZ-T15 | ④ | 부정 거래 조사(§3.2·§3.5·§3.7·§4.1, 추천 적용… | ④ 둘 가운데 하나만 생기고 다른 하나는 409 `designation-conflict`다. 냉각 기간 안의 지정도 409다 | 빈칸 | B | — |
