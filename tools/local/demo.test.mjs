@@ -12,12 +12,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { parseArgs, doctorChecks, DEMO_CLUSTER } from './demo.mjs';
+import { parseArgs, doctorChecks, DEMO_CLUSTER, allResult, measurementHistoryPath, playMeasurementPath, findChromium } from './demo.mjs';
 import { SCENARIOS, SCENARIO_ORDER, REQUIRED_CHECKS, validateScenarios, publicPlan, readD5Scenarios } from './demo/scenarios.mjs';
+import { runScenarios } from './demo/runner.mjs';
 import { checkCloudPlan, CLOUD_PLAN_FILE, MAX_TTL_HOURS, REQUIRED_CLEANUP } from './demo/cloud-plan.mjs';
 import { breakOpenApi, compatPlan, runCompat, DEMO_TAG } from './demo/compat.mjs';
 import { measurementText, redact, writeMeasurement } from './demo/measure.mjs';
-import { DEMO_WORKLOADS, demoExpectedWorkloads, demoOrigins } from './demo-objects.mjs';
+import { DEMO_WORKLOADS, demoExpectedWorkloads, demoGatewayObjects, demoOrigins } from './demo-objects.mjs';
+import { demoOriginSecurityPatch, readGatewayObjects } from './gateway-objects.mjs';
 import { DEMO_BUILD_ARGS, DEMO_IMAGES, dockerBuildArgs } from './demo-images.mjs';
 import { DEMO_SEED_FILE } from './demo-auth.mjs';
 import { checkSeed } from './demo-seed.mjs';
@@ -26,6 +28,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO_MJS = join(REPO, 'tools', 'local', 'demo.mjs');
 const RUNNER_MJS = join(REPO, 'tools', 'local', 'demo', 'runner.mjs');
 const MEASUREMENT = join(REPO, 'docs', 'review', 'measurements', 'BAT-086-demo.md');
+const GATEWAY_DIR = join(REPO, 'deploy', 'gateways');
 
 const tempDir = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 const runDemo = (args, env = {}) =>
@@ -74,6 +77,9 @@ function fakeRoot(without = new Set()) {
   if (!without.has('stage')) put('tools/local/cluster.mjs', '');
   if (!without.has('seed-script')) put('tools/local/demo-seed.mjs', '');
   if (!without.has('playwright')) put('tools/web-checks/node_modules/@playwright/test/package.json', '{}\n');
+  // Playwright 브라우저 캐시(계획 리뷰 RV-09). 패키지만 있고 chromium이 없는 경우를 따로 만들 수 있게 한다
+  const browsers = join(root, 'ms-playwright');
+  if (!without.has('chromium')) put(`ms-playwright/chromium-1234/${process.platform === 'win32' ? 'chrome-win64/chrome.exe' : 'chrome-linux/chrome'}`);
   const bin = join(root, 'bin');
   mkdirSync(bin, { recursive: true });
   for (const t of ['docker', 'kind', 'helm']) {
@@ -89,8 +95,8 @@ function fakeRoot(without = new Set()) {
       writeFileSync(join(bin, 'kubectl'), '#!/bin/sh\necho "$@" >> "$PEAKET_FAKE_CALLS"\n', { mode: 0o755 });
     }
   }
-  const env = { ...process.env, PATH: bin, PEAKET_TOOLS_DIR: join(root, '.cache', 'peaket-tools'), PEAKET_FAKE_CALLS: calls };
-  return { root, bin, env, calls, text: () => readFileSync(calls, 'utf8') };
+  const env = { ...process.env, PATH: bin, PEAKET_TOOLS_DIR: join(root, '.cache', 'peaket-tools'), PEAKET_FAKE_CALLS: calls, PLAYWRIGHT_BROWSERS_PATH: browsers };
+  return { root, bin, browsers, env, calls, text: () => readFileSync(calls, 'utf8') };
 }
 
 /**
@@ -203,6 +209,9 @@ test('V-T7 ① 시나리오 정의가 정본 d5 §10.6과 같고 필수 checks�
     assert.ok(s.checks.length >= 1, `${s.id}에 checks가 없다`);
     assert.ok(s.accounts.length >= 1, `${s.id}에 계정이 없다`);
     assert.ok(s.needs.length >= 1, `${s.id}에 needs가 없다`);
+    // 증거로만 여는 화면은 시나리오 정의에 따로 적는다(리뷰 RV-05). screens 밖의 이름은 잡는다
+    assert.ok(Array.isArray(s.evidenceOnlyScreens), `${s.id}에 evidenceOnlyScreens가 없다`);
+    for (const screen of s.evidenceOnlyScreens) assert.ok(s.screens.includes(screen), `${s.id}의 evidenceOnlyScreens ${screen}이 screens에 없다`);
     for (const c of REQUIRED_CHECKS[s.id] ?? []) assert.ok(s.checks.includes(c), `${s.id}에 ${c}가 없다`);
   }
   // S8 판정 넷은 이름이 모두 다르다
@@ -227,6 +236,12 @@ test('V-T7 ① 시나리오 하나가 빠지거나 화면 순서가 다르면 pl
   const duplicated = SCENARIOS.map((s) => (s.id === 'S9' ? { ...s, checks: [...s.checks, 'refunded'] } : s));
   const dup = validateScenarios(duplicated);
   assert.equal(dup.ok, false, '같은 check 이름을 두 번 넣어도 통과했다');
+
+  // 증거 전용 화면이 시나리오 화면 목록 밖이면 잡는다
+  const badEvidence = SCENARIOS.map((s) => (s.id === 'S1' ? { ...s, evidenceOnlyScreens: ['SCR-999'] } : s));
+  const badEvidenceResult = validateScenarios(badEvidence);
+  assert.equal(badEvidenceResult.ok, false, 'screens 밖의 evidenceOnlyScreens를 통과시켰다');
+  assert.ok(badEvidenceResult.problems.some((p) => p.includes('evidenceOnlyScreens') && p.includes('SCR-999')), badEvidenceResult.problems.join('\n'));
 });
 
 test('V-T7 ① plan --check·plan --json이 S1~S9와 화면·계정·needs·checks를 낸다', () => {
@@ -292,6 +307,23 @@ test('V-T7 ② 가짜 뿌리의 doctor는 클러스터 명령을 부르지 않�
   assert.equal(okOut.ok, true);
   assert.deepEqual(okOut.problems, []);
   assert.equal(good.text(), '', `doctor가 클러스터 명령을 불렀다: ${good.text()}`);
+});
+
+test('V-T7 ② doctor가 Playwright chromium 실행 파일을 본다(RV-09)', () => {
+  // 패키지는 있는데 브라우저 캐시가 없는 빈 PC: play에서야 브라우저 실행이 실패하면 닫힌 실패가 아니다
+  const missing = fakeRoot(new Set(['chromium']));
+  const r = doctorChecks(missing.root, missing.env);
+  assert.equal(r.ok, false, 'chromium이 없는데 doctor가 통과했다');
+  const problem = r.problems.find((p) => p.what === 'Playwright chromium');
+  assert.ok(problem, `chromium 문제가 목록에 없다: ${JSON.stringify(r.problems)}`);
+  assert.ok(String(problem.path).includes('ms-playwright'), `브라우저 캐시 경로가 없다: ${problem.path}`);
+  const cli = runDemo(['doctor', '--root', missing.root, '--json'], missing.env);
+  assert.equal(cli.status, 1, `chromium이 없는데 doctor exit ${cli.status}`);
+
+  // 캐시에 chromium 실행 파일이 있으면 통과하고, 찾은 경로를 돌려준다
+  const good = fakeRoot();
+  assert.ok(findChromium(good.browsers), `${good.browsers}에서 chromium 실행 파일을 찾지 못했다`);
+  assert.equal(doctorChecks(good.root, good.env).ok, true, JSON.stringify(doctorChecks(good.root, good.env).problems));
 });
 
 // ---------- V-T7 ③ 조용한 건너뛰기 없음 ----------
@@ -641,6 +673,152 @@ test('CP-01 cloud-plan --check가 TTL·예산 경계·정리 누락을 잡는다
   assert.equal(out.ok, true);
   assert.equal(out.ttlHours, MAX_TTL_HOURS);
   assert.ok(out.estimatedKrw <= out.budgetKrw);
+});
+
+// ---------- 리뷰 반영 RV-01~RV-05·RV-09~RV-11 ----------
+
+test('V-T7 ① 공용 게이트웨이 출처는 화면 하나이고 데모 패치만 queue·scanner 출처를 더한다(RV-01)', () => {
+  const shared = readGatewayObjects(GATEWAY_DIR);
+  const routeGateway = new Map();
+  for (const o of shared) if (o.kind === 'HTTPRoute') for (const p of o.spec?.parentRefs ?? []) if (p.name) routeGateway.set(o.metadata.name, p.name);
+  const isFanPolicy = (o) => o.kind === 'SecurityPolicy' && (o.spec?.targetRefs ?? []).some((t) => routeGateway.get(t.name) === 'gw-fan');
+  const listsOf = (o) => [o.spec?.cors?.allowOrigins, o.spec?.csrf?.additionalOrigins].filter(Array.isArray);
+
+  // 공용 deploy/gateways: 화면 출처 하나(ASVS 3.4.2·3.5.1). 데모 포트 출처가 새면 여기서 잡는다
+  for (const o of shared.filter((x) => x.kind === 'SecurityPolicy')) {
+    for (const list of listsOf(o)) {
+      assert.equal(list.length, 1, `${o.metadata.name}의 출처가 ${list.length}개다(공용 정의는 하나): ${list.join(', ')}`);
+      assert.doesNotMatch(String(list[0]), /:1844[1-5]$/, `${o.metadata.name}에 데모 포트 출처가 있다: ${list[0]}`);
+    }
+  }
+
+  // 데모 객체: gw-fan 정책에만 대기실(queue)·스캐너(scanner) 앱 출처가 더해진다
+  const origins = demoOrigins();
+  const demo = demoGatewayObjects(shared, origins);
+  const fan = demo.filter(isFanPolicy);
+  assert.ok(fan.length > 0, 'gw-fan 정책을 찾지 못했다');
+  for (const o of fan) {
+    for (const list of listsOf(o)) {
+      assert.ok(list.includes(origins.www), `${o.metadata.name}에 www 데모 출처가 없다: ${list.join(', ')}`);
+      assert.ok(list.includes(origins.queue), `${o.metadata.name}에 대기실 데모 출처가 없다: ${list.join(', ')}`);
+      assert.ok(list.includes(origins.scanner), `${o.metadata.name}에 스캐너 데모 출처가 없다: ${list.join(', ')}`);
+    }
+  }
+  for (const o of demo.filter((x) => x.kind === 'SecurityPolicy' && !isFanPolicy(x))) {
+    const all = listsOf(o).flat();
+    const gateways = (o.spec?.targetRefs ?? []).map((t) => routeGateway.get(t.name));
+    if (!gateways.includes('gw-scanner')) assert.ok(!all.includes(origins.scanner), `${o.metadata.name}에 데모 스캐너 출처가 샜다: ${origins.scanner}`);
+    assert.ok(!all.includes(origins.queue), `${o.metadata.name}에 데모 대기실 출처가 샜다: ${origins.queue}`);
+  }
+
+  // 패치는 입력을 바꾸지 않고, 두 번 적용해도 같은 값이 겹치지 않는다
+  const before = JSON.stringify(shared);
+  const patched = demoOriginSecurityPatch(shared, origins);
+  assert.equal(JSON.stringify(shared), before, 'demoOriginSecurityPatch가 입력 객체를 바꿨다');
+  const twice = demoOriginSecurityPatch(patched, origins);
+  for (const o of twice.filter(isFanPolicy)) for (const list of listsOf(o)) assert.equal(list.length, new Set(list).size, `${o.metadata.name}의 출처가 겹친다: ${list.join(', ')}`);
+});
+
+test('V-T7 ④ 콜드 스타트는 명령 시작~첫 화면이다(RV-02)', async () => {
+  const dir = tempDir('peaket-bat086-run-');
+  const report = await runScenarios({
+    repo: REPO,
+    scenarios: [{ id: 'S1', title: '주입', checks: [] }],
+    contract: {},
+    artifactsDir: join(dir, 'artifacts'),
+    pw: { chromium: { launch: async () => ({ close: async () => undefined }) } },
+    flows: { S1: async (ctx) => { ctx.firstScreenAt = ctx.now(); } },
+    now: () => 5_000,
+    startedAt: 2_000,
+    log: () => undefined,
+  });
+  assert.equal(report.startedAt, new Date(2_000).toISOString(), '보고서 시작이 all 시작이 아니다(브라우저 시작~첫 화면만 쟀다)');
+  assert.equal(report.coldStartSeconds, 3, `콜드 스타트 ${report.coldStartSeconds}초(기대 3초: 2,000ms → 5,000ms)`);
+  assert.equal(report.totalSeconds, 3, `전체 ${report.totalSeconds}초(기대 3초)`);
+
+  // 측정 파일은 콜드 스타트와 전체 시간을 따로 적는다
+  const text = measurementText({
+    commit: 'e'.repeat(40),
+    date: '2026-11-21T00:00:00.000Z',
+    pc: 'test',
+    tools: { node: process.version },
+    coldStartSeconds: 3,
+    totalSeconds: 1_380,
+    scenarios: [{ id: 'S1', title: '지민', result: '통과', seconds: 9 }],
+    cleanup: '지움',
+    outcome: '통과',
+  });
+  assert.match(text, /- \*\*콜드 스타트\*\*: 3초 \(명령 시작 ~ 첫 화면\)/);
+  assert.match(text, /- \*\*전체 시간\*\*: 1380초 \(명령 시작 ~ 재생 끝\)/);
+});
+
+test('V-T7 ⑤ all --keep은 exit 0이고 정리 실패는 실패로 남는다(RV-03)', () => {
+  assert.deepEqual(allResult({ keep: true, report: { ok: true }, cleanup: '남김(--keep)' }), { outcome: '통과', exit: 0 }, '--keep 성공이 exit 1이면 안 된다');
+  assert.deepEqual(allResult({ report: { ok: true }, cleanup: '지움(데모 네임스페이스+kind 클러스터)' }), { outcome: '통과', exit: 0 });
+  assert.deepEqual(allResult({ report: { ok: true }, cleanup: '실패(demo-down 1, kind down 1)' }), { outcome: '통과(정리 실패)', exit: 1 }, '정리 실패를 성공으로 덮었다');
+  assert.deepEqual(allResult({ report: { ok: false }, cleanup: '지움(데모 네임스페이스+kind 클러스터)' }), { outcome: '실패', exit: 1 });
+
+  // 무대 준비 단계가 실패한 뒤의 정리도 demo-down·down의 끝 코드를 확인해 적는다
+  const source = readFileSync(DEMO_MJS, 'utf8');
+  const start = source.indexOf('const stage = stageProblems');
+  const block = source.slice(start, source.indexOf('report = o.skipPlay', start));
+  assert.match(block, /cleanupStage\(o\.cluster\)/, 'stageProblems 실패 정리가 두 명령의 결과를 확인하지 않는다');
+});
+
+test('V-T7 ④ 필수 화면 방문 실패는 시나리오 실패이고 ticket-qr은 화면 QR을 본다(RV-05)', () => {
+  const source = readFileSync(RUNNER_MJS, 'utf8');
+  for (const s of SCENARIOS) {
+    const body = runnerBlock(source, s.id);
+    const evidence = new Set(s.evidenceOnlyScreens ?? []);
+    for (const screen of new Set(s.screens)) {
+      const lines = body.split(/\r?\n/).filter((l) => l.includes(`screen: '${screen}'`));
+      assert.ok(lines.length > 0, `${s.id}가 ${screen}을 방문하지 않는다`);
+      const required = lines.some((l) => !/\.catch\(/.test(l));
+      assert.equal(required, !evidence.has(screen), `${s.id} ${screen}: ${evidence.has(screen) ? 'evidenceOnlyScreens인데 실패를 삼키지 않는다' : '필수 화면인데 실패를 .catch로 삼킨다'}`);
+    }
+  }
+  // 티켓 QR은 원장 UUID만 보지 않고 화면의 QR 요소·값(aria-label)을 본다
+  const s1 = runnerBlock(source, 'S1');
+  const qr = functionBlock(source, 'async function ticketQrOf(page) {');
+  assert.match(qr, /role="img"|aria-label/, 'ticketQrOf가 화면의 QR 요소를 보지 않는다');
+  assert.match(s1, /ticketQrOf\(ticketPage\)/, 'S1이 티켓 화면의 QR을 확인하지 않는다');
+  assert.match(s1, /addCheck\('ticket-qr',\s*[a-zA-Z]/, 'ticket-qr이 상수 true다');
+});
+
+test('V-T7 ⑦ 0건 실행은 통과가 아니라 건너뜀이다(RV-10)', () => {
+  assert.deepEqual(allResult({ seedOnly: true, cleanup: '남김(--seed-only)' }), { outcome: '건너뜀(시드만)', exit: 0 });
+  assert.deepEqual(
+    allResult({ skipPlay: true, report: { ok: false, scenarios: [] }, cleanup: '지움(데모 네임스페이스+kind 클러스터)' }),
+    { outcome: '건너뜀(--skip-play: 재생 안 함)', exit: 0 },
+    '--skip-play 0건을 통과로 적었다',
+  );
+  const source = readFileSync(DEMO_MJS, 'utf8');
+  assert.doesNotMatch(source, /통과\(시드만\)/, "0건 실행을 '통과(시드만)'로 적는다");
+  // 측정 파일도 결과 칸에 건너뜀을 그대로 쓴다
+  const text = measurementText({
+    commit: 'f'.repeat(40),
+    date: '2026-11-21T00:00:00.000Z',
+    pc: 'test',
+    tools: { node: process.version },
+    coldStartSeconds: undefined,
+    scenarios: [{ id: 'S1', title: '지민', result: '미실행' }],
+    cleanup: '남김(--seed-only)',
+    outcome: '건너뜀(시드만)',
+  });
+  assert.match(text, /- \*\*결과\*\*: 건너뜀\(시드만\)/);
+  assert.doesNotMatch(text, /- \*\*결과\*\*: 통과/);
+});
+
+test('V-T7 ⑦ 측정은 실행별 파일을 따로 쓴다(RV-11)', () => {
+  const canonical = join(REPO, 'docs', 'review', 'measurements', 'BAT-086-demo.md');
+  assert.equal(measurementHistoryPath(canonical, 'run-1'), join(REPO, 'docs', 'review', 'measurements', 'BAT-086-demo-run-1.md'));
+  assert.equal(playMeasurementPath(canonical, 'run-1'), join(REPO, 'docs', 'review', 'measurements', 'play', 'BAT-086-demo-run-1.md'));
+
+  const source = readFileSync(DEMO_MJS, 'utf8');
+  const all = source.slice(source.indexOf('async function runAll'), source.indexOf('/** 재생 한 번'));
+  assert.match(all, /writeMeasurement\(measurementHistoryPath\(/, 'all이 실행별 측정 파일을 쓰지 않는다(정본을 덮개로 쓴다)');
+  const play = source.slice(source.indexOf('async function play'), source.indexOf('async function main'));
+  assert.match(play, /playMeasurementPath\(/, 'play의 기본 측정이 정본 파일을 덮는다');
 });
 
 // ---------- 명령줄 옵션 ----------
