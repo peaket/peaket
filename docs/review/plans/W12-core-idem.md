@@ -324,6 +324,7 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 - **게이트(로컬, Docker 없이)**: `pnpm --filter @peaket/core-svc typecheck` 통과, `pnpm --filter @peaket/core-svc test` 104파일 771개 통과, `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0. 커밋하지 않은 임시 단위 확인(메모리 저장소로 유스케이스를 바로 부름)으로 ⑥ 일곱 자리의 맞음·맞지 않음과 로그 칸을 따로 봤다(아래 '시험 이의' 때문에 CI가 계좌 다시 받기 줄을 못 보므로). 그 파일은 지웠다.
 - `node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-core-idem`: 지금은 review·verify 커밋이 없어 실패(묶음 차례상 맞다). 담당 표 impl 줄은 이 커밋에 더했다.
 - **리뷰 반영(RV5, 세션 `lane2-w12coreidem-impl2`, 2026-11-22)**: 0041 셋째 백필(변경분 회차)에 결과 참조의 `eventId`가 JSON 글(`jsonb_typeof = 'string'`)이고 빈 글이 아닐 때만 담기 비교하는 조건 둘을 더했다(JSON 변환은 그대로 `CASE` 안, 일지는 그대로). 앞 두 백필은 `=` 비교라 `eventId`·`productionId`가 NULL이면 거짓이어서 같은 빈틈이 없어 두었다. 로컬 게이트(Docker 없이): core-svc typecheck 통과, 단위 105파일 773개 통과(`migrations-journal` 3개 포함), `pnpm lint` 통과, 문서 점검 오류 0. 통합 시험(RV5 재현 포함)은 올린 뒤 PR #57 CI로 본다.
+- **RV5 고침 뒤 CI(검증 담당이 확인해 적음)**: PR #57 `ci` 실행 44943279963 2차(`3d0c86ef4`. develop 위로 다시 쌓기 전의 같은 고침이고, 다시 쌓은 것이 `eba5240c7`)의 `node / node` 잡 core-svc 통합이 `Tests 500 passed | 1 skipped (501)`이다(RV5 재현을 포함한 AZ-T17 17개 통과). 같은 잡의 실패는 이 묶음이 바꾸지 않은 purchase-svc 통합(파일 3개)과 ASVS 요약 단계(`test-report-search-golden.json`이 vitest JSON 보고서가 아니라며 끝 코드 2, 앞 '시험 결과'의 리뷰 반영 줄과 같은 까닭)다.
 
 ## 리뷰
 
@@ -358,7 +359,114 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 
 ## 검증
 
-(검증 담당이 위 8의 표본 결과를 쓴다.)
+- 담당 `lane2-w12coreidem-verify`(claude-opus-5-5). 계획·시험·구현·리뷰에 관여하지 않았다. 트리는 develop 위로 다시 쌓은 `eba5240c7`(RV5 고침 뒤)다. 제품·시험 코드는 커밋하지 않았다. 표본은 하나씩 넣고 해당 파일만 돌린 뒤 `git checkout -- <파일>`로 되돌렸고, 매번 `git status --short`가 비어 있는 것을 봤다(아래 '환경 우회'의 `postgres.ts` 한 줄만 표본 동안 남겼다가 끝에 되돌렸다). 표본을 넣는 도구는 바꿀 글이 정한 횟수만큼 정확히 나오지 않으면 멈추게 했다(작업 폴더 밖 임시 스크립트, 커밋하지 않음).
+- **Docker 잠금**: `lock.sh who docker`가 '비어 있음'이어서 **05:31:27에 잡았고**(owner.txt 둘째 줄 `예상 끝 2026-11-22 06:31:27 (갈래 2 W12-core-idem 검증, 다음 갈래 4 BAT-360)`) **06:09:32에 놓았다**. 컨테이너 이름 앞머리는 `PEAKET_TEST_CONTAINER_PREFIX=w12coreidem-`다. 다른 갈래의 컨테이너는 건드리지 않았다.
+- **기준선**: `pnpm exec turbo run build --filter=@peaket/core-svc^...`(4/4 캐시) 뒤 `idempotency-rls`·`idempotency-migration`·`shop-replay` 세 파일이 17/17 통과(05:32, 22초).
+- **환경 우회(표본 실행 동안만)**: 05:34부터 다른 세션의 CPU 부하 스크립트(스레드 48개, 40분)가 돌아 PostgreSQL 컨테이너 초기화의 '디스크 동기화'가 60~100초 걸렸고, 시험 도우미(`startPostgres`)의 60초 기다림을 넘겨 시험이 단언 전에 `Connection terminated unexpectedly`로 멈췄다(표본 M2·M3 첫 실행, 세지 않음). 남의 프로세스는 건드리지 않았다. 대신 표본 실행 동안 `test-int/postgres.ts`의 `docker run`에 `-e POSTGRES_INITDB_ARGS=--no-sync` 하나만 더했다(초기화 때 동기화만 건너뜀. 서버 설정·마이그레이션·단언은 그대로). 그 상태에서 세 파일 기준선이 다시 17/17 통과(05:51, 54초)한 것을 보고 표본을 돌렸다. 표본이 끝난 06:04에 되돌렸고(`git status --short` 빈 줄) 부하도 끝나 있었다. 아래 전체 회귀는 되돌린 도우미로 돌렸다.
+
+### 틀린 구현 검사(계획 표본 27개 중 27개 잡힘, 놓침 0. 검증 담당이 더한 9개 중 6개 잡힘, 놓침 3)
+
+표본마다 계획 8의 '잡아야 할 시험'이 든 파일만 돌렸다(0041 정책·권한 표본은 `idempotency-rls`, M1은 거기에 `idempotency-migration`, M11·M12는 `registration`, M13은 `idempotency-migration`·`registration`까지, 백필 표본은 `idempotency-migration`, 재생 대조 표본은 `shop-replay`). '실패한 시험'의 행 번호는 첫 실패 단언이다.
+
+| # | 틀린 구현 | 계획이 기대한 시험 | 실제로 실패한 시험 | 판정 |
+| --- | --- | --- | --- | --- |
+| M1 | 파트너 읽기 정책의 테넌트 식 뺌 | ①⑦⑧ | ①②⑧, ⑦ 둘(10개 중 5개) | 잡힘 |
+| M2 | 파트너 고치기 USING을 작업 목록만 | ①⑧ | ①②⑧. 남의 행이 바뀐 것이 아니라 B 행이 WITH CHECK에 걸려 조건 없는 고치기 전체가 42501이었다(두 번째 가드가 막음) | 잡힘 |
+| M3 | 파트너 정책 셋에서 `nullif` 뺌(네 곳) | ②(22P02) | ②(연결 재사용 읽기 `22P02`), ⑧ | 잡힘 |
+| M4 | 파트너 읽기를 `coalesce(…, tenant_id)` | ②⑧ | ②⑧ | 잡힘 |
+| M5 | 팬 읽기 USING `true` | ③⑧ | ③ 팬(12개가 보임), ⑧ | 잡힘 |
+| M6 | 팬 넣기 WITH CHECK `true` | ③⑧ | **⑧만**. ③ 넣기는 통과했다: 플랫폼 문장의 `RETURNING`이 새 행에 팬 읽기 정책도 걸어 다른 역할 작업 이름의 넣기가 여전히 42501이다 | 잡힘(⑧) |
+| M7 | 관제 지우기 USING `true` | ③⑧ | ③ 관제(지운 행 12, 기대 2), ⑧ | 잡힘 |
+| M8 | `START_MERCH_PAYMENT`를 관제 정책 넷의 목록에 | ③⑧ | ③ 관제(3개 보임)·③ 넣기(관제의 `START_MERCH_PAYMENT`가 됨), ⑧ | 잡힘 |
+| M9 | `REVOKE`에서 `UPDATE` 뺌 | ④⑧ | ④(파트너 `account_ref` 고치기가 됨), ⑧ 칸 권한 | 잡힘 |
+| M10 | 넣기 칸 권한에 `tenant_id` | ④⑧ | ④(`tenant_id`를 적은 넣기가 됨), ⑧ | 잡힘 |
+| M11 | 파트너 정책 설정 이름 `app.tenant`(네 곳) | ①②⑤, `registration` | `idempotency-rls` 8개 모두(준비의 파트너 첫 요청 42501), `registration` 11개 중 6개 | 잡힘 |
+| M12 | 고치기 칸 권한에서 `created_at` 뺌 | ⑤, 회귀 전부 | `idempotency-rls` 8개 모두(세 역할 첫 요청 42501), `registration` 6개 | 잡힘 |
+| M13 | `tenant_id`를 기본값 없이 | ⑤⑦, `registration` | `idempotency-rls` 8개 모두, `registration` 6개. ⑦ 둘은 통과했다(백필은 기본값과 무관) | 잡힘 |
+| M14 | `#replayView` 계정 대조 뺌 | ⑥ 주문·부가 상품 | ⑥ 주문·부가 상품(264행, 201) | 잡힘 |
+| M15 | 시작 재생의 '시도가 경로 주문의 것' 뺌 | ⑥ 결제 시도 (가) | ⑥ 결제 시도 (가)(334행) | 잡힘 |
+| M16 | 시작 재생의 금액 대조 뺌 | ⑥ 결제 시도 (다) | ⑥ 결제 시도 (다), RV1(포트원 + 1,000원 줄) | 잡힘 |
+| M17 | 접수 재생이 목록 밖 값을 `accepted`로 | ⑥ 결제 접수 | ⑥ 결제 접수(`ACCEPTED`가 202, 421행) | 잡힘 |
+| M18 | 취소 재생(`merch-cancel.ts`만)에서 취소 행의 주문 대조 뺌 | ⑥ 취소 | ⑥ 취소·계좌(469행 취소 '다른 팬 주문의 취소'가 202) | 잡힘 |
+| M19 | 계좌 다시 받기 재생(`merch-refund-account.ts`만)에서 같은 대조 뺌 | ⑥ 계좌 다시 받기 | ⑥ 취소·계좌(499행 계좌 다시 받기가 202. 취소 줄은 통과) | 잡힘 |
+| M20 | 반품 재생의 경로 주문 대조 뺌(참조한 주문을 읽는 구현 전 꼴) | ⑥ 반품 | ⑥ 반품(579행, 200) | 잡힘 |
+| M21 | 회차 더하기 백필 뺌 | ⑦ | ⑦(`event` 기록 테넌트 NULL) | 잡힘 |
+| M22 | 변경분 회차 백필 뺌 | ⑦ | ⑦(`pendingEvent` 기록) | 잡힘 |
+| M23 | `FORCE ROW LEVEL SECURITY` 더함 | ⑧만 | ⑧만(`force: true`) | 잡힘 |
+| M24 | 포트원도 `amount`를 봄 | RV1 | RV1(`totalAmount` = 주문 금액인 맞는 줄이 404, 380행) | 잡힘 |
+| M25 | 시작 재생의 계정 비교 뺌 | RV2 | RV2 '결제 시도 시작'(201) | 잡힘 |
+| M26 | 접수 재생의 계정 비교 뺌 | RV2 | RV2 '결제 접수'(202) | 잡힘 |
+| M27 | `verifiedCancelRow`(취소·계좌 다시 받기 공용)의 계정 비교 뺌 | RV2 | RV2 '취소'(202) | 잡힘 |
+| V1 | 관제 **넣기** 정책 하나에만 `START_MERCH_PAYMENT` | — | ⑧만(③ 넣기는 M6과 같은 까닭으로 통과) | 잡힘(⑧) |
+| V2 | 파트너 넣기 WITH CHECK의 테넌트 식 뺌 | — | ⑧만 | 잡힘(⑧) |
+| V3 | 공연 등록 백필 뺌(계획 표에 없던 첫째 백필) | — | ⑦(`production` 기록) | 잡힘 |
+| V4 | RV5 고침 되돌림(조건 둘 뺌) | — | ⑦ RV5 재현(`nullEventId`) | 잡힘 |
+| V5 | RV5 조건 가운데 `->> 'eventId' <> ''`만 뺌 | — | 없음 | **놓침** |
+| V6 | 결제 시작 트랜잭션 안 재생 길(`merch-payment.ts` 104행)이 대조 없이 결과 참조를 그대로 돌려줌 | — | 없음 | **놓침** |
+| V7 | 주문 만들기 대조 로그에 참조한 주문 ID를 실음 | — | ⑥ 주문(267행, 로그에 참조 주문 ID) | 잡힘 |
+| V8 | 0041에 `GRANT TRUNCATE … TO core_app` 더함 | — | 없음 | **놓침** |
+| V9 | 시작 재생의 결제사 대조 뺌 | — | ⑥ 결제 시도 (나)(201) | 잡힘 |
+
+- **계획 표본 27개는 모두 잡혔다.** 그래서 계획 표본에서 시험 담당에게 넘길 시험은 없다.
+- **검증 담당이 더한 표본에서 놓친 셋(시험 담당에게 넘길 시험)**: 모두 구현은 맞고(지금 코드에 그 대조·권한 결함이 없다) 시험이 묶지 않는 자리다. 셋 다 리뷰의 낮음 지적과 같은 자리라 §8.6 5대로 구간 끝 정리 목록으로 보낸다(기록 담당이 그 줄에 이 실행 결과를 근거로 붙인다).
+  1. V6(돈, RV3): ADR-0337 결정 6 '같은 키 동시 요청이 트랜잭션 안에서 받는 재생도 같다'를 묶는 시험이 없다. HTTP 시험은 처음 길(`replayOf`)만 탄다. 넘길 시험: RV3 방향 그대로 메모리 저장소 단위 시험에서 `replayOf`는 `undefined`, 저장 함수가 `replay`를 돌려주게 해 일곱 자리마다 바꾼 참조 → 404 `not-found`·로그 한 줄.
+  2. V8(권한, RV6): 표 단위 TRUNCATE는 행 보안을 거치지 않는데 ⑧이 SELECT·INSERT·UPDATE·DELETE만 본다. 넘길 시험: ⑧에 세 역할의 `TRUNCATE`·`REFERENCES`·`TRIGGER`가 거짓.
+  3. V5(권한, RV5 뒤): RV5 재현 시험이 `eventId` 빈 글(`""`)을 갖지 않아 둘째 조건이 묶이지 않는다. 지금 코드는 빈 글 `eventId`를 만들지 않아 해는 없다. 넘길 시험: RV5 시험의 판매자 X 변경분에 `eventId: ""` 원소, 옛 기록에 `{"eventId":""}` 하나를 더해 비어 있음을 본다.
+- **덧붙여 본 것**: M6·V1·V2는 ⑧의 정책 식 단언만 잡았다. 행동 시험의 넣기가 플랫폼 문장(`INSERT … ON CONFLICT … RETURNING`)이라 넣기 WITH CHECK와 읽기 USING이 겹쳐 막기 때문이다(계획 3.2 '겹친 가드'). 지금은 ⑧이 받치므로 넘기지 않지만, 넣기 정책만 따로 보려면 `RETURNING` 없는 여섯 칸 넣기를 역할마다 더하면 된다(낮음). M2도 두 가드(USING·WITH CHECK)가 서로를 받친다는 계획 3.2와 맞다.
+
+### 판정 기준 대조
+
+정본은 [authz-matrix](../../security/authz-matrix.md) §7 AZ-T17 판정 기준 ①~⑧, ADR-0337 결정 1~6이다.
+
+| 항목 | 정본 기준 | 시험 단언 | 대조 |
+| --- | --- | --- | --- |
+| ① | A의 파트너 작업 기록만 보이고 바뀐다. B·팬·관제는 그대로 | A 트랜잭션 조건 없는 읽기 = A 시드 둘, B = B 하나, WHERE·RETURNING 없는 고치기 2행, 소유자 연결로 A 둘만 바뀜 | 충족 |
+| ② | 0건이고 오류가 없다(연결 재사용 포함, 트랜잭션 밖 포함) | 설정 값 `''` 확인 뒤 읽기 `[]`·고치기 0, 트랜잭션 밖 읽기 `[]`·고치기 0, 전부 그대로 | 충족. 한 번도 값을 걸지 않은 연결(NULL)은 직접 만들지 않고 ⑧이 식 글(`nullif`)을 묶는다(W12-core-rls와 같다) |
+| ③ | 팬은 일곱, 관제는 둘의 기록에만 닿고, 지우기는 관제 작업만, 다른 역할 작업 이름의 넣기는 세 역할 모두 42501 | 팬 읽기 = 팬 시드 일곱(작업 일곱 모두), 고치기 7행·그것만, 지우기 42501. 관제 읽기·고치기·지우기 2행·그것만. 역할마다 다른 역할 작업 둘의 넣기 42501·`execute` 0 | 충족. 넣기 거절은 읽기 정책과 겹친 결과라 넣기 정책 식은 ⑧이 묶는다(M6·V1). 파트너 지우기는 ⑧의 표 단위 `del: false` |
+| ④ | 범위 칸·테넌트 칸 고치기, 테넌트 칸 넣기 모두 42501 | 역할마다 `account_ref`·`operation`(목록 안)·`idempotency_key`·`tenant_id`(WITH CHECK가 지나는 값) 고치기와 `tenant_id` 넣기가 칸마다 42501, 전부 그대로 | 충족 |
+| ⑤ | 처음·같은 결과·422가 지금과 같고, 파트너 기록의 테넌트 칸 = 요청 테넌트, 팬·관제는 비어 있음 | 역할마다 작업 하나로 `execute` 횟수·재생 참조·422 `idempotency-key-reused`·24시간 ± 1ms, 소유자 연결로 `tenant_id` A·NULL·NULL | 충족. 나머지 작업의 처음 요청은 매 시험 준비가 각 역할 연결로 낸다 |
+| ⑥ | 모두 404 `not-found`, 바꾼 값이 응답에 없음, 결제사 호출·DB 쓰기 0, 로그 1줄, 바꾸지 않은 재요청은 처음과 같다 | 다른 팬의 주문(주문·부가 상품), 다른 주문의 시도·다른 결제사·금액(토스 꼴·포트원 `totalAmount`)·JSON 아님, 목록 밖 값 둘, 다른 주문의 취소(다른 팬·같은 팬, 취소·계좌 다시 받기), 같은 팬의 다른 주문(반품), 다른 팬 경로(RV2 넷)마다 남의 주문 404와 같은 본문·값 없음·결제사 호출 수 그대로·표 여덟 행 수 그대로·로그 한 줄(계정 ID·참조 원문 없음). 바꾸지 않은 재요청은 처음 응답과 바이트까지 같다 | 부분. (가) 트랜잭션 안 재생 길은 시험이 없다(V6, RV3). (나) 'DB 쓰기 0'은 행 수로만 보아 고치기(UPDATE)는 반품의 다른 주문 항목 상태 말고는 못 본다. (다) 계좌 다시 받기는 처음 요청 대신 맞는 참조 기록의 202 `REFUNDED`로 '바꾸지 않은 재요청'을 본다 |
+| ⑦ | 파트너 기록의 테넌트 칸이 그 판매자로 채워져 그 테넌트에서만 보이고, 팬·관제는 비어 있음 | 0040까지 올린 DB의 기록 일곱(공연·회차·변경분 회차·JSON 아님·UUID 꼴 아님·팬·관제)의 테넌트 칸·결과 참조 그대로, A는 둘·B는 하나, 못 채운 넷은 어느 테넌트에도 없음, RV5 셋 비어 있음 | 충족(빈 글 `eventId`는 위 V5) |
+| ⑧ | 행 보안 켬, FORCE 없음, 소유자가 앱 역할이 아님, 정책 열 개, 작업 목록 합 = CHECK, 겹치지 않음 | `relrowsecurity` 참·`relforcerowsecurity` 거짓, 소유자가 세 역할·로그인 사용자 셋이 아님, 정책 열 개의 이름·명령·역할·식 유무, 식마다 작업 목록 = 결정 1·파트너 식에 0004 테넌트 식·팬·관제 식에 `app.tenant_id` 없음, 합 = CHECK·겹침 없음, 칸 권한 넣기 여섯·고치기 셋, 표 단위 읽기만·지우기는 관제만, `core_maintenance`·`core_search` 권한 없음 | 부분. 소유자는 이름 여섯만 보아 `core_maintenance`·`core_search`·구성원 역할이 소유자인 경우를 놓친다(W12-core-rls RV-02와 같은 자리). TRUNCATE 등은 위 V8 |
+
+- 요약: 충족 6(①②③④⑤⑦), 부분 2(⑥ 트랜잭션 안 재생 길·행 고치기, ⑧ 소유자 범위·TRUNCATE), 미시험 0. 부분 둘은 지금 새는 길이 아니고(구현에 대조가 있고 그런 권한·소유자가 없다) 리뷰 RV3·RV6과 W12-core-rls RV-02 정리 줄과 같은 자리다.
+
+### 전체 회귀
+
+`PEAKET_TEST_REPORT=<작업 폴더 밖 파일> pnpm --filter @peaket/core-svc test:integration`(파일 51개, 시험 501개)을 잠금 안에서, 되돌린 시험 도우미로 돌렸다(부하 스크립트는 이미 끝나 있었다).
+
+| 실행 | 시각 | 결과 | 실패한 곳 |
+| --- | --- | --- | --- |
+| 1 전체 | 06:04:51~06:07:46, 172초 | 파일 3개 실패, 시험 489 통과·11 실패·1 건너뜀 | `shop-expiry` 9개(`RedisDeadlineError` Redis 호출 마감 100ms 넘김), `search-read-model` 1개(155행 SR-T7, 30초 시간 초과), `search-bat166` 1개(SR-T13 ① 시간 비교 98.7ms, 기준 75ms 미만) |
+| 2 실행 1에서 실패한 세 파일만 | 06:08:17~06:09:12, 54초 | **56/56 통과** | — |
+
+- **합친 결과**: 실행 1에서 모두 통과한 48개 파일과 실행 2의 세 파일을 시험 보고서 JSON 둘(작업 폴더 밖)로 합치면 **파일 51개, 500개 통과·1개 건너뜀(`local-partner-stack`, 늘 건너뜀)·실패 0**이다. **PR #57 CI(실행 44943279963 2차, 500 통과·1 건너뜀)와 같다.**
+- AZ-T17 17개(`idempotency-rls` 8·`idempotency-migration` 2·`shop-replay` 7)와 계획 6 끝의 회귀(`registration` 11·`shop-order` 23·`shop-cancel` 22·`shop-refund-account` 10·`shop-return` 9·`promoter-contract` 14·`rls` 24)는 실행 1에서 모두 통과했다.
+- 흔들린 셋은 W12-core-rls 검증의 전체 회귀와 같은 자리다. Redis 마감 초과는 `docs/lanes/lane1-cleanup.md` PRF-168('전체 실행에서 매번 다른 시험 2~5개, 따로 돌리면 통과'), `search-bat166`·`search-read-model`의 시간 흔들림은 `docs/lanes/lane2-cleanup.md` BAT-174 R-699 줄이다. `shop-expiry`는 따로 돌리면 12/12였고 CI에서도 통과했다. 그래서 새로 넘기지 않는다.
+- **Docker 잠금**: 05:31:27에 잡고 **06:09:32에 놓았다**(`lock.sh drop docker lane2-W12-core-idem`, 뒤의 `who`는 '비어 있음'). 놓기 전 `docker ps -a --filter name=w12coreidem-`가 0개였다(시험이 스스로 `rm -f -v`, 표본 전 확인용으로 띄운 `w12coreidem-probe` 셋도 지웠다).
+
+### 게이트
+
+| 명령 | 결과 |
+| --- | --- |
+| `pnpm exec turbo run build --filter=@peaket/core-svc^...` | 4/4 캐시 |
+| `pnpm --filter @peaket/core-svc typecheck` | 통과 |
+| `pnpm --filter @peaket/core-svc test` | 105파일·773개 통과(`migrations-journal`의 0041 `when` 차례 포함) |
+| `pnpm lint` | 통과 |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0·경고 4 → 통과(경고는 모두 이 묶음 밖: openapi 응답 설명 셋, mermaid 문법 검사 건너뜀) |
+| `node tools/ci/trace-check.mjs --ids "AZ-T17" --report <실행 1 보고서> --report <실행 2 보고서>`(보고서는 작업 폴더 밖) | `AZ-T17 통과 17`. 계획 9의 `--ids "AZ-T17, v5.0.0-8.2.2, v5.0.0-8.4.1"`도 통과(8.2.2 20·8.4.1 48) |
+| `node tools/ci/roles-check.mjs --base origin/develop --head HEAD` | 이 커밋 뒤 통과(`묶음 W12-core-idem: 코드 커밋 14개(plan 1·test 4·impl 2·review 1·review-fix 5·verify 1·record 0·doc 0)`, `통과: 묶음 1개, 커밋 14개`) |
+
+### 남은 위험
+
+- ADR-0337 '남는 한계' 둘(같은 역할 안의 계정 묶기 OPEN-A, 결제창 값을 저장하는 재생 OPEN-B)은 이 묶음 범위 밖이고 감독 결정을 기다린다.
+- 위 놓친 셋(V6·V8·V5)과 판정 '부분' 둘: 구현 결함이 아니라 시험 빈자리다. 정리 목록 RV3·RV6·RV5 줄로 간다.
+- 정비 연결 역할('감독에게' 3)은 BAS-060에서 본다. 리뷰 RV4(openapi 404 설명)·RV7(결제 식별 칸 대조)은 정리 목록 그대로다.
+- 이 PC의 Docker는 다른 세션이 CPU를 다 쓰면 PostgreSQL 초기화가 시험 도우미의 60초 기다림을 넘긴다(위 '환경 우회'). 시험 도우미 쪽은 고치지 않았다.
+
+### 판정
+
+**합쳐도 됨.** 계획 표본 27개가 모두 잡혔고, 판정 기준 ①~⑧에 미시험이 없으며, core-svc 통합 전체가 두 실행을 합쳐 500개 통과·1개 건너뜀·실패 0(PR #57 CI와 같음)이고 게이트가 모두 통과했다. 놓친 셋은 구현이 아니라 시험 빈자리라 정리 목록으로 보낸다(시험 담당에게 넘길 시험 위 1~3).
 
 ## 담당 표
 
@@ -369,9 +477,10 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 | impl | lane2-w12coreidem-impl | claude-opus-5-5 | 2026-11-22T03:09+09:00 | 2026-11-22T03:46+09:00 |
 | review | lane2-w12coreidem-review | claude-opus-5-5 | 2026-11-22T04:06+09:00 | 2026-11-22T04:22+09:00 |
 | impl | lane2-w12coreidem-impl2 | claude-opus-5-5 | 2026-11-22T04:46+09:00 | 2026-11-22T04:54+09:00 |
+| verify | lane2-w12coreidem-verify | claude-opus-5-5 | 2026-11-22T05:31+09:00 | 2026-11-22T06:17+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: 시험 담당이 '시험 결과'의 시험 이의(437행)를 고친다 → 리뷰(보안)·검증 → (W12-core-rls 합친 뒤) rebase·기록 → 합치기.
+- **다음 단계**: 기록 → 합치기.
