@@ -33,12 +33,17 @@ WHERE r."operation" = 'CREATE_PRODUCTION_EVENT'
   AND r."tenant_id" IS NULL
   AND e."id"::text = (CASE WHEN pg_input_is_valid(r."result_ref", 'jsonb') THEN r."result_ref"::jsonb END) ->> 'eventId';
 --> statement-breakpoint
--- 변경분 회차: 담기 비교(@>)는 addedEvents가 배열이 아니거나 비어 있어도 오류 없이 거짓이다
+-- 변경분 회차: 담기 비교(@>)는 addedEvents가 배열이 아니거나 비어 있어도 오류 없이 거짓이다.
+-- eventId가 비지 않은 글일 때만 견준다. null·없음·JSON 아님이면 ->>가 NULL이라 jsonb_build_object가 {"eventId":null}을 만들고,
+-- 그러면 eventId가 빈(null) 변경분 원소를 가진 공연의 판매자가 붙는다(리뷰 RV5). 앞 두 백필은 = 비교라 NULL이면 거짓이어서 이 빈틈이 없다.
+-- 세 조건은 어느 차례로 계산돼도 결과가 같고 JSON 변환은 모두 CASE 안이다.
 UPDATE "idempotency_record" r
 SET "tenant_id" = p."promoter_id"
 FROM "production" p
 WHERE r."operation" = 'CREATE_PRODUCTION_EVENT'
   AND r."tenant_id" IS NULL
+  AND jsonb_typeof((CASE WHEN pg_input_is_valid(r."result_ref", 'jsonb') THEN r."result_ref"::jsonb END) -> 'eventId') = 'string'
+  AND (CASE WHEN pg_input_is_valid(r."result_ref", 'jsonb') THEN r."result_ref"::jsonb END) ->> 'eventId' <> ''
   AND p."pending_revision" -> 'addedEvents' @> jsonb_build_array(jsonb_build_object('eventId', (CASE WHEN pg_input_is_valid(r."result_ref", 'jsonb') THEN r."result_ref"::jsonb END) ->> 'eventId'));
 --> statement-breakpoint
 REVOKE INSERT, UPDATE ON "idempotency_record" FROM core_partner, core_app, core_ops;

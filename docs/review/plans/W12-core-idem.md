@@ -323,6 +323,7 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 - **schema.ts** 517~520행 주석: 0041의 행 보안·칸 권한·`tenant_id`와 작업을 더할 때 정책 목록도 고친다는 것.
 - **게이트(로컬, Docker 없이)**: `pnpm --filter @peaket/core-svc typecheck` 통과, `pnpm --filter @peaket/core-svc test` 104파일 771개 통과, `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0. 커밋하지 않은 임시 단위 확인(메모리 저장소로 유스케이스를 바로 부름)으로 ⑥ 일곱 자리의 맞음·맞지 않음과 로그 칸을 따로 봤다(아래 '시험 이의' 때문에 CI가 계좌 다시 받기 줄을 못 보므로). 그 파일은 지웠다.
 - `node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-core-idem`: 지금은 review·verify 커밋이 없어 실패(묶음 차례상 맞다). 담당 표 impl 줄은 이 커밋에 더했다.
+- **리뷰 반영(RV5, 세션 `lane2-w12coreidem-impl2`, 2026-11-22)**: 0041 셋째 백필(변경분 회차)에 결과 참조의 `eventId`가 JSON 글(`jsonb_typeof = 'string'`)이고 빈 글이 아닐 때만 담기 비교하는 조건 둘을 더했다(JSON 변환은 그대로 `CASE` 안, 일지는 그대로). 앞 두 백필은 `=` 비교라 `eventId`·`productionId`가 NULL이면 거짓이어서 같은 빈틈이 없어 두었다. 로컬 게이트(Docker 없이): core-svc typecheck 통과, 단위 105파일 773개 통과(`migrations-journal` 3개 포함), `pnpm lint` 통과, 문서 점검 오류 0. 통합 시험(RV5 재현 포함)은 올린 뒤 PR #57 CI로 본다.
 
 ## 리뷰
 
@@ -367,6 +368,7 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 | test | lane2-w12coreidem-test | claude-opus-5-5 | 2026-11-22T02:25+09:00 | 2026-11-22T03:12+09:00 |
 | impl | lane2-w12coreidem-impl | claude-opus-5-5 | 2026-11-22T03:09+09:00 | 2026-11-22T03:46+09:00 |
 | review | lane2-w12coreidem-review | claude-opus-5-5 | 2026-11-22T04:06+09:00 | 2026-11-22T04:22+09:00 |
+| impl | lane2-w12coreidem-impl2 | claude-opus-5-5 | 2026-11-22T04:46+09:00 | 2026-11-22T04:54+09:00 |
 
 ## 기록
 
