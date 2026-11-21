@@ -339,6 +339,61 @@ describe('AZ-T17 ⑥ 굿즈 작업의 멱등 재생 대조', () => {
     }
   });
 
+  test('AZ-T17 ⑥ 리뷰 재현(RV1): 포트원 결제 시도 재생은 결제창 totalAmount를 주문 금액과 견주어 같으면 처음 응답 그대로이고 다르면 404 not-found이다 [ASVS v5.0.0-8.2.2]', async () => {
+    // 결정 6 표: 결제창 금액은 토스 amount, 포트원 totalAmount다. 모의 결제사 대역은 토스 꼴만 내므로 시도의 결제사를 소유자 연결로 PORTONE으로 바꾸고
+    // 결과 참조를 포트원 꼴 결제창 값(openapi PaymentAttempt.checkout PortoneCheckout)으로 둔다
+    const C = randomUUID();
+    const product = await seedProduct({ fulfillments: ['PICKUP'] });
+    const slot = await seedSlot(product);
+    const O1 = orderIdOf(await post(C, '/v1/shop/orders', { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot }));
+    const url = `/v1/shop/orders/${O1}/payments`;
+    const K = randomUUID();
+    const first = await post(C, url, {}, K);
+    expect(first.statusCode, first.payload).toBe(201);
+    const view = JSON.parse(first.payload) as { attemptId: string } & Record<string, unknown>;
+    const moved = await admin.pool.query(`update merch_payment_attempt set pg = 'PORTONE' where id = $1 and order_id = $2`, [view.attemptId, O1]);
+    expect(moved.rowCount).toBe(1);
+    const portone = (totalAmount: number, extra: Record<string, unknown> = {}) => ({
+      ...view,
+      pg: 'PORTONE',
+      checkout: {
+        storeId: 'store-az-t17-rv1',
+        channelKey: 'channel-key-az-t17-rv1',
+        paymentId: `pay-${O1}`,
+        orderName: '재생 시험 굿즈',
+        totalAmount,
+        currency: 'KRW',
+        redirectUrl: `https://peaket.test/shop/checkout/return?order=${O1}`,
+        customData: { orderId: O1 },
+        ...extra,
+      },
+    });
+    const notFound = await foreign404(O1);
+    const checkouts = payments.calls.checkout.length;
+    expect(checkouts).toBe(1);
+
+    // totalAmount가 주문 금액이면 저장한 포트원 결제창 값 그대로 201
+    const same = portone(PRICE);
+    await setRef(C, 'START_MERCH_PAYMENT', K, JSON.stringify(same));
+    logs.length = 0;
+    const ok = await post(C, url, {}, K);
+    expect({ status: ok.statusCode, body: JSON.parse(ok.payload) as unknown }).toEqual({ status: 201, body: same });
+    expect(mismatchLines()).toEqual([]);
+
+    // totalAmount만 주문 금액 + 1,000원이고 amount 칸에 주문 금액을 끼워도 404(포트원은 amount를 보지 않는다)
+    const bumped = PRICE + 1000;
+    const ref = JSON.stringify(portone(bumped, { amount: PRICE }));
+    await setRef(C, 'START_MERCH_PAYMENT', K, ref);
+    const before = await writes();
+    logs.length = 0;
+    const res = await post(C, url, {}, K);
+    expect(problem(res)).toEqual(notFound);
+    expect(res.payload.includes(String(bumped))).toBe(false);
+    expect(payments.calls.checkout.length).toBe(checkouts);
+    expect(await writes()).toEqual(before);
+    expectOneMismatch('포트원 totalAmount + 1,000원', 'START_MERCH_PAYMENT', O1, [C, ref]);
+  });
+
   test('AZ-T17 ⑥ 결제 접수 재생 참조가 목록 밖 값이면 404 not-found이고 승인 명령이 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const C = randomUUID();
     const product = await seedProduct({ fulfillments: ['PICKUP'] });
