@@ -19,6 +19,7 @@ import { type EvidenceStore, s3EvidenceStore } from './evidence-store.js';
 import type { HotPathMetrics } from './hot-path.js';
 import { installHttpHooks, markServerSpan, requestSideFields } from './http-hooks.js';
 import { NestPinoLogger, PLATFORM_LOGGER, type PlatformLogger, createPlatformLogger } from './log.js';
+import { describeMetricViolations, validateMetricRegistry } from './metric-rules.js';
 import { PlatformMetrics, statusClass } from './metrics.js';
 import { PROBLEM_CONTENT_TYPE } from './problem.js';
 import { ProblemFilter, frameworkErrorProblem } from './problem-filter.js';
@@ -140,7 +141,7 @@ export interface PlatformService {
    * (예: trust-svc 보안 로그 줄의 처리자 accountRef, docs/observability.md §7 '선택적 비즈니스 필드')
    */
   pseudonymizer: LogPseudonymizer;
-  /** 정규 로그 줄 표본 비율 바꾸기(온세일 구간 등, FND-090의 제어 상태 소비가 부른다) */
+  /** 정규 로그 줄 표본 비율 바꾸기(온세일 구간의 control.settings LOG_SAMPLING을 제어 토픽 소비가 적용한다, ADR-0334 결정 2) */
   logs: { setSampleOneIn(oneIn: number): void; readonly sampleOneIn: number };
   app: NestFastifyApplication;
   /** 앱 포트의 Fastify(시험에서는 inject로 부른다) */
@@ -159,6 +160,10 @@ export interface PlatformService {
    * local·ci 밖에서 신원 역할(public 말고) 처리기가 있는데 켜지 않았으면 listen이 PlatformConfigError로 던지고 듣지 않는다(ADR-0333 결정 3)
    */
   controlSync: { started: boolean };
+  /**
+   * 앱 포트와 관리 포트를 연다. 듣기 전에 지표 규칙(docs/observability.md §8, ADR-0334 결정 6)을 보고, 등록된 지표가 금지 라벨을 달았거나
+   * 이름 규칙을 어겼거나 Counter 이름이 _total로 끝나지 않으면(등록 지표가 하나도 없어도) PlatformConfigError로 던지고 듣지 않는다(환경과 관계없이 같다)
+   */
   listen(host?: string): Promise<{ port: number; managementPort: number }>;
   close(): Promise<void>;
 }
@@ -320,6 +325,12 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
         throw new PlatformConfigError(
           `${o.name}: 신원 역할 처리기(${shown}${more})가 있는데 종료 세션 목록 소비(@peaket/platform/stream-worker의 startServiceControlSync)를 켜지 않고 듣기 시작하려 했다(PEAKET_ENV=${config.env}, ADR-0333 결정 3)`,
         );
+      }
+      // 지표 라벨 규칙(C-T76): 계정·세션·순번·좌석·IP·User-Agent·주문 번호 꼴의 라벨은 시계열을 폭발시키고 개인 식별값을 지표에 남긴다
+      if (metrics.registry.getMetricsAsArray().length === 0) throw new PlatformConfigError(`${o.name}: 지표 레지스트리가 비어 지표 규칙을 볼 수 없다(ADR-0334 결정 6)`);
+      const violations = validateMetricRegistry(metrics.registry);
+      if (violations.length > 0) {
+        throw new PlatformConfigError(`${o.name}: 지표 규칙(docs/observability.md §8, ADR-0334 결정 6)을 어긴 지표가 있어 듣기 시작하지 않는다: ${describeMetricViolations(violations)}`);
       }
       await app.listen({ port: config.port, host });
       await management.listen({ port: config.managementPort, host });

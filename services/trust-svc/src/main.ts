@@ -151,6 +151,12 @@ const verdictEvidence = new GetVerdictEvidence({ store: features, clock: systemC
 const rulesLoop = startRuleRefresh({ rules, readiness: service.readiness, task: RULES_READY_TASK });
 await rulesLoop.first;
 
+// 제어 설정 토픽(로그 레벨·온세일 로그 표본, ADR-0334 결정 2): 듣기 전에 control.settings를 읽기 시작한다(다 읽어야 /ready 200).
+// 신원 처리기가 없어(공개 미끼 경로만) 종료 세션 토픽은 읽지 않는다(ADR-0333 결정 1, docs/features/identity.md §3 '서비스에 잇기').
+// 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다. 이 도우미가 Kafka 클라이언트(네이티브 모듈)를 싣는다. 서비스를 닫은 뒤 끈다
+const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+const controlSync = startServiceControlSync(service, env, { sessions: false });
+
 await service.listen();
 // 업무 gRPC 포트(PEAKET_GRPC_PORT, 기본 50051 [가정])와 부하 분산 프로필은 공용 설정이 읽는다(BUILD_ORDER BAS-080)
 const grpc = await startGrpcServer({
@@ -176,6 +182,7 @@ process.once('SIGTERM', () => {
     .close()
     .then(() => Promise.all(pending))
     .then(() => service.close())
+    .then(() => controlSync?.close())
     .catch((err: unknown) => service.logger.error({ err }, 'trust-svc 종료 실패'))
     .finally(async () => {
       breaker.shutdown();

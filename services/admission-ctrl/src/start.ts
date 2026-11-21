@@ -68,6 +68,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
   });
   metrics.register(service.metrics.registry);
   if (!controlInputs) service.logger.warn({}, '자동 제어 입력이 없어(PEAKET_PROMETHEUS_URL) AIMD를 끈 채 돈다(로컬·CI)');
+  // 제어 설정 토픽(로그 레벨·온세일 로그 표본, ADR-0334 결정 2): 듣기 전에 control.settings를 읽기 시작한다(다 읽어야 /ready 200).
+  // 신원 처리기가 없어 종료 세션 토픽은 읽지 않는다(ADR-0333 결정 1, docs/features/identity.md §3 '서비스에 잇기'). 브로커가 없으면 local·ci만 경고로 끄고
+  // 그 밖은 여기서 시작에 실패한다(합본은 브로커 주소를 지운다). 이 도우미가 Kafka 클라이언트(네이티브 모듈)를 싣는다. 서비스를 닫은 뒤 끈다
+  const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+  const controlSync = startServiceControlSync(service, env, { sessions: false });
   await service.listen();
   const leader = service.app.get(AdmissionLeader);
   elector.start();
@@ -101,6 +106,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         .stop()
         .then(() => elector.stop())
         .then(() => service.close())
+        .then(() => controlSync?.close())
         .catch((err: unknown) => service.logger.error({ err }, 'admission-ctrl 종료 실패'))
         .finally(() => Promise.all([redis.close(), waitRedis?.close()]))
         .then(() => undefined);

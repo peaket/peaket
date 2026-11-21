@@ -34,6 +34,7 @@ export { AcceptMultipart, AcceptTextPlain, BodyLimit, Bulkhead, DEFAULT_BODY_LIM
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline, ROUTE_DEADLINE_KEY, RouteDeadline } from './deadline.js';
 export { HOT_PATH_METRICS, HotPathMetrics, timeHotPath, timeHotPathSync, type HotPathOutcome, type HotPathStage } from './hot-path.js';
 export { LATENCY_BUCKETS_SECONDS, PlatformMetrics, TIMEOUT_METRICS } from './metrics.js';
+export { describeMetricViolations, isForbiddenMetricLabel, validateMetricRegistry, type MetricRuleViolation } from './metric-rules.js';
 export { MTLS_CONFIRMATION_CLAIM, MTLS_POC_BLOCKERS, mtlsConfirmationOf, mtlsPocBlockers, verifyMtlsConfirmation, type MtlsConfirmationDecision, type MtlsPocBlocker } from './mtls.js';
 export { SCANNER_MTLS_AUTH_HEADER, SCANNER_MTLS_CERT_HEADER, SCANNER_MTLS_CNF_HEADER, type ScannerMtlsOptions } from './scanner-auth.js';
 // 서비스가 자기 지표를 만들 때 쓰는 클래스(서비스마다 지표 라이브러리를 따로 들이지 않게 플랫폼이 다시 내보낸다, ADR-0182)
@@ -174,7 +175,7 @@ export {
   type SettingChanged,
   type SettingEntry,
 } from './control.js';
-export { controlEventCodec } from './control-codec.js';
+export { controlEventCodec, logSamplingValue } from './control-codec.js';
 export {
   MONTHLY_PARTITION_DEFAULTS,
   addKstMonths,

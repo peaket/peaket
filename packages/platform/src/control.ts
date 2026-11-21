@@ -5,9 +5,14 @@
 // - 제어 상태는 2초 [가정]마다 다시 읽어 판 번호가 큰 쪽을 남긴다. 설정은 키마다 큰 판(occurredAt)만, 지우는 표시는 지움, 만료는 무시
 // - 읽지 못한 레코드는 건너뛰고 control_sync_skipped_total{service,topic,reason="unreadable"}로 센다. 종료 사건의 종료 시각을 읽지 못하거나
 //   믿을 범위(그 레코드의 Kafka 시각 k에 대해 k − 15분 < 종료 시각 ≤ k + 1분) 밖이면 받은 때부터 막고 reason="time_replaced"로 센다(ADR-0333 결정 4)
+// - 정상 로그 줄 표본(LOG_SAMPLING, ADR-0334 결정 2, C-T75): 이 서비스 대상(`PLATFORM:LOG_SAMPLING:*`·`PLATFORM:LOG_SAMPLING:<서비스 이름>`)의 사건은
+//   저장 전에 거른다. 본 eventKey는 다시 적용하지 않고, 범위·갈래·만료 시각이 틀리면 버리고 경고 줄 하나를 남긴다. 살아 있는 값(서비스 이름 쪽이 먼저)을
+//   바로 setSampleOneIn으로 적용하고, 둘 다 없거나 만료되면 시작 설정 값(PEAKET_LOG_SAMPLE_ONE_IN)으로 돌린다
+// - 신원 처리기가 없는 서비스(trust-svc·realtime-gw·admission-ctrl)는 sessions: false로 설정 토픽만 읽는다(docs/features/identity.md §3 '서비스에 잇기')
 import { Counter, Gauge, type Registry } from '@prometheus-io/client';
 import { TERMINATED_SESSION_TTL_MS } from './auth.js';
 import type { Clock } from './clock.js';
+import { logSamplingValue } from './control-codec.js';
 import { CONTROL_TOPICS } from './outbox.js';
 import { realSleep } from './outbox-relay.js';
 import type { Readiness } from './readiness.js';
@@ -27,6 +32,15 @@ export const CONTROL_SYNC_DEFAULTS = {
 
 /** 종료 시각을 그대로 쓰는 미래 쪽 끝: 그 레코드의 Kafka 시각 + 1분 [가정](노드 시계 차이에 둔 여유, ADR-0333 결정 4) */
 const TERMINATED_AT_FUTURE_SKEW_MS = 60_000;
+
+/** 정상 로그 줄 표본 설정의 종류와 모든 서비스 대상 메시지 키(ADR-0334 결정 1) */
+const LOG_SAMPLING = 'LOG_SAMPLING';
+const LOG_SAMPLING_ALL = `PLATFORM:${LOG_SAMPLING}:*`;
+/** 한 번 적용한 LOG_SAMPLING eventKey를 기억하는 수 [가정](하루 몇 건이라 넉넉하다. 넘으면 오래된 것부터 잊고, 그 뒤 같은 사건은 판 번호 비교가 막는다) */
+const LOG_SAMPLING_SEEN_MAX = 256;
+
+/** LOG_SAMPLING을 버린 까닭(경고 줄의 reason) */
+type LogSamplingRejectReason = 'scope' | 'branch' | 'range' | 'expires_at';
 
 /** control_sync_skipped_total의 까닭(ADR-0333 결정 4) */
 type ControlSyncSkipReason = 'unreadable' | 'time_replaced';
@@ -232,8 +246,11 @@ export interface ControlSyncHost {
   clock: Clock;
   readiness: Readiness;
   metrics: { registry: Registry };
-  logger: { level: string; warn(o: object, msg?: string): void };
-  config: { logLevel: string };
+  logger: { level: string; warn(o: object, msg?: string): void; info(o: object, msg?: string): void };
+  /** logLevel·sampleOneIn: 만료된 설정을 되돌릴 시작 설정 값(PEAKET_LOG_LEVEL·PEAKET_LOG_SAMPLE_ONE_IN) */
+  config: { logLevel: string; sampleOneIn: number };
+  /** 정상 로그 줄 표본 비율(LOG_SAMPLING이 바꾼다, ADR-0334 결정 2) */
+  logs: { setSampleOneIn(oneIn: number): void; readonly sampleOneIn: number };
   auth: { terminateSession(e: { sessionId: string; terminatedAt?: string }): void };
 }
 
@@ -246,6 +263,11 @@ export interface ControlSyncOptions {
   retryMs?: number;
   reconcileMs?: number;
   measureMs?: number;
+  /**
+   * 종료 세션 토픽(control.sessions-terminated)도 읽는다. 기본 true. false면 설정 토픽(control.settings)만 읽는다:
+   * 게이트웨이 신원 머리를 받는 처리기가 없는 서비스(ADR-0333 결정 1, 추천 적용 2026-11-22 BAT-215 구현, ADR-0334 결정 2)
+   */
+  sessions?: boolean;
 }
 
 export interface ControlSync {
@@ -257,8 +279,9 @@ export interface ControlSync {
 const LOG_LEVELS: Record<string, string> = { INFO: 'info', DEBUG: 'debug', TRACE: 'trace' };
 
 /**
- * 시작 작업을 준비 표시에 걸고(listen 전에 부른다) 백그라운드로 돈다. 세 작업이 끝나면 /ready가 200이 된다.
- * 서비스 로그 수준 설정(`<범위>:LOG_LEVEL:<서비스 이름>`)은 바로 적용하고 만료되면 설정의 기본으로 돌린다
+ * 시작 작업을 준비 표시에 걸고(listen 전에 부른다) 백그라운드로 돈다. 세 작업(sessions: false면 종료 세션을 뺀 것)이 끝나면 /ready가 200이 된다.
+ * 서비스 로그 수준 설정(`<범위>:LOG_LEVEL:<서비스 이름>`)과 정상 로그 줄 표본 설정(`PLATFORM:LOG_SAMPLING:*`·`PLATFORM:LOG_SAMPLING:<서비스 이름>`)은
+ * 바로 적용하고 만료되면 시작 설정 값으로 돌린다
  */
 export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): ControlSync {
   const t = { ...CONTROL_SYNC_DEFAULTS, ...pick(o) };
@@ -275,6 +298,48 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
     const level = e ? LOG_LEVELS[String((e.value as { level?: unknown } | null)?.level)] : undefined;
     host.logger.level = level ?? host.config.logLevel;
   });
+
+  // 정상 로그 줄 표본(ADR-0334 결정 2). 저장소에는 아래 acceptSetting을 지난 값만 든다
+  const samplingKeys = [`PLATFORM:${LOG_SAMPLING}:${host.name}`, LOG_SAMPLING_ALL];
+  settings.onChange((key) => {
+    if (!samplingKeys.includes(key)) return;
+    const live = samplingKeys.map((k) => settings.get(k)).find((x) => x !== undefined);
+    const read = live ? logSamplingValue(live.value) : undefined;
+    const oneIn = read && 'oneIn' in read ? read.oneIn : host.config.sampleOneIn;
+    const changed = oneIn !== host.logs.sampleOneIn;
+    host.logs.setSampleOneIn(oneIn);
+    if (!changed) return;
+    if (live) host.logger.info({ kind: 'control-sync', key: live.key, oneIn, expiresAt: live.expiresAt === null ? null : new Date(live.expiresAt).toISOString() }, 'LOG_SAMPLING 적용');
+    else host.logger.info({ kind: 'control-sync', oneIn }, 'LOG_SAMPLING 만료, 시작 설정 값으로 돌림');
+  });
+  const seenSampling = new Set<string>();
+  /**
+   * 저장 전에 거른다(ADR-0334 결정 2). 이 서비스 대상 LOG_SAMPLING만 보고 나머지는 그대로 둔다. 거르면 false.
+   * 본 eventKey(ops-svc 복제 여럿·재시작이 같은 사건을 다시 낸 것)는 조용히 버리고, 틀린 값은 경고 줄 하나와 함께 버린다(지금 적용한 값은 그대로)
+   */
+  const acceptSetting = (key: string, s: SettingChanged): boolean => {
+    const parts = key.split(':');
+    if (parts[1] !== LOG_SAMPLING && s.key !== LOG_SAMPLING) return true;
+    const target = parts[parts.length - 1];
+    if (target !== '*' && target !== host.name) return true;
+    if (seenSampling.has(s.eventKey)) return false;
+    seenSampling.add(s.eventKey);
+    if (seenSampling.size > LOG_SAMPLING_SEEN_MAX) seenSampling.delete(seenSampling.values().next().value as string);
+    const read = logSamplingValue(s.value);
+    const reason: LogSamplingRejectReason | undefined =
+      parts.length !== 3 || parts[0] !== 'PLATFORM' || s.scope !== 'PLATFORM'
+        ? 'scope'
+        : parts[1] !== LOG_SAMPLING || s.key !== LOG_SAMPLING || ('invalid' in read && read.invalid === 'branch')
+          ? 'branch'
+          : 'invalid' in read
+            ? 'range'
+            : s.expiresAt === null
+              ? 'expires_at'
+              : undefined;
+    if (reason === undefined) return true;
+    host.logger.warn({ kind: 'control-sync', key, reason, eventKey: s.eventKey }, 'LOG_SAMPLING 값 무시');
+    return false;
+  };
 
   const tasks: Promise<void>[] = [];
   if (control && o.controlState) {
@@ -390,40 +455,48 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
       CONTROL_TOPICS.settings,
       async () => new Map(),
       (r) => {
-        settings.apply(r.key ?? '', r.value === null ? null : o.codec.setting(r.value));
+        const key = r.key ?? '';
+        if (r.value === null) {
+          settings.apply(key, null);
+          return;
+        }
+        const s = o.codec.setting(r.value);
+        if (acceptSetting(key, s)) settings.apply(key, s);
       },
     ),
   );
   const sessionsTopic = CONTROL_TOPICS.sessionsTerminated;
   const replacedLabels = { service: host.name, topic: sessionsTopic, reason: 'time_replaced' satisfies ControlSyncSkipReason };
-  // 세 줄(두 토픽의 unreadable, 종료 사건 토픽의 time_replaced)을 0으로 미리 낸다. unreadable은 topicTask가 낸다
-  metrics.skipped.inc(replacedLabels, 0);
-  tasks.push(
-    topicTask(
-      'sessions',
-      sessionsTopic,
-      // Kafka가 돌아올 때마다 '지금 − 15분'을 다시 잰다
-      () => o.source.offsetsAt(sessionsTopic, host.clock.now() - t.sessionsRewindMs),
-      (r) => {
-        if (r.value === null) return;
-        const e = o.codec.sessionTerminated(r.value);
-        const at = trustedTerminatedAt(e.terminatedAt, r.timestamp, host.clock.now());
-        if (at) {
-          // 범위 안의 옛 사건(받은 때 이미 15분이 지난 것)은 TerminatedSessions가 넣지 않는다(그 세션의 토큰은 이미 수명이 끝났다)
-          host.auth.terminateSession({ sessionId: e.sessionId, terminatedAt: at.toISOString() });
-          return;
-        }
-        // 읽지 못하거나 범위 밖이면 시각 없이 넘겨 받은 때부터 15분 막는다(그대로 받거나 건너뛰면 그 세션이 열린 쪽으로 실패한다, ADR-0333 결정 4).
-        // 로그에는 sid·값을 싣지 않는다
-        host.auth.terminateSession({ sessionId: e.sessionId });
-        metrics.skipped.inc(replacedLabels);
-        host.logger.warn(
-          { kind: 'control-sync', topic: sessionsTopic, partition: r.partition, offset: String(r.offset), reason: 'time_replaced' },
-          `${sessionsTopic} 종료 시각을 읽지 못하거나 믿을 범위 밖이라 받은 때부터 막는다(파티션 ${r.partition}, 오프셋 ${r.offset})`,
-        );
-      },
-    ),
-  );
+  // 세 줄(두 토픽의 unreadable, 종료 사건 토픽의 time_replaced)을 0으로 미리 낸다. unreadable은 topicTask가 낸다. 설정만 읽으면 한 줄이다
+  if (o.sessions !== false) {
+    metrics.skipped.inc(replacedLabels, 0);
+    tasks.push(
+      topicTask(
+        'sessions',
+        sessionsTopic,
+        // Kafka가 돌아올 때마다 '지금 − 15분'을 다시 잰다
+        () => o.source.offsetsAt(sessionsTopic, host.clock.now() - t.sessionsRewindMs),
+        (r) => {
+          if (r.value === null) return;
+          const e = o.codec.sessionTerminated(r.value);
+          const at = trustedTerminatedAt(e.terminatedAt, r.timestamp, host.clock.now());
+          if (at) {
+            // 범위 안의 옛 사건(받은 때 이미 15분이 지난 것)은 TerminatedSessions가 넣지 않는다(그 세션의 토큰은 이미 수명이 끝났다)
+            host.auth.terminateSession({ sessionId: e.sessionId, terminatedAt: at.toISOString() });
+            return;
+          }
+          // 읽지 못하거나 범위 밖이면 시각 없이 넘겨 받은 때부터 15분 막는다(그대로 받거나 건너뛰면 그 세션이 열린 쪽으로 실패한다, ADR-0333 결정 4).
+          // 로그에는 sid·값을 싣지 않는다
+          host.auth.terminateSession({ sessionId: e.sessionId });
+          metrics.skipped.inc(replacedLabels);
+          host.logger.warn(
+            { kind: 'control-sync', topic: sessionsTopic, partition: r.partition, offset: String(r.offset), reason: 'time_replaced' },
+            `${sessionsTopic} 종료 시각을 읽지 못하거나 믿을 범위 밖이라 받은 때부터 막는다(파티션 ${r.partition}, 오프셋 ${r.offset})`,
+          );
+        },
+      ),
+    );
+  }
   timers.push(setInterval(() => settings.sweep(), t.reconcileMs));
 
   return {
