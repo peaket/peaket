@@ -176,6 +176,13 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 | review | lane2-w12golden-review | claude-opus-5-5 | 2026-11-22T05:12+09:00 | 2026-11-22T05:18+09:00 |
 | verify | lane2-w12golden-verify | claude-opus-5-5 | 2026-11-22T05:18+09:00 | 2026-11-22T05:34+09:00 |
 
+## 기록
+
+- **R-747.** 갈래 2 지휘 세션(`lane2-w12-conductor`)이 기록했다. 감독이 맡긴 작은 C 묶음(2026-11-22)이다. 검색 정답률 시험(`services/core-svc/test/search-golden.test.ts`, NFR-028)이 정답률 보고서를 `test-report-search-golden.json`으로 써서 `ci-node.yml` ASVS 요약 단계의 `find -name 'test-report*.json'`에 잡혀 vitest 보고서로 잘못 읽혔다(그 단계는 `continue-on-error`라 잡은 빨개지지 않았지만 ASVS 표가 작업 요약에서 빠졌다). 이름을 `search-golden-report.json`으로 바꾸고 `.gitignore`에 그 한 줄을 더했다.
+- **차례**: 계획 → 구현(.gitignore) → 시험(이름 바꿈) → 리뷰(통과, 낮음 2) → 검증(틀린 구현 3/3, PR #61 CI에서 ASVS 단계 '보고서가 아니다' 줄 사라지고 작업 요약에 ASVS 표가 나옴) → 기록.
+- **정리 목록**: 리뷰 RG-01·RG-02, 검증 남은 위험(이름이 다시 `test-report*`로 돌아가도 그 단계가 `continue-on-error`라 잡이 빨개지지 않음)을 `docs/lanes/lane2-cleanup.md`에 적었다.
+- **이 묶음 탓이 아닌 것**: 같은 PR CI의 `node / node` 빨강은 purchase-svc 단위 `test/payment-deposit.test.ts` 'P-T36 ③'(4,368개 중 1) — 감독에게 넘겼다.
+
 ## 다음 단계
 
 1. 구현 담당: `.gitignore` 한 줄(위 3) 커밋, 꼬리말 `Role: impl`·`Batch: W12-golden-report`. 담당 표에 impl 줄.

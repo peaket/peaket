@@ -190,3 +190,6 @@
 - W12-dt50 R-746 RV-01 중간: 서비스로 조립했을 때 기본 판정 마감 20ms가 가드에 닿는지 결정적으로 보는 시험이 없다. 검증에서 조립이 `timeoutMs ?? 2_000`을 넣는 변형(M7)은 통합·단위 모두 놓쳤고, `timeoutMs`를 떨어뜨리는 변형(M8)은 열림이 날 때만 잡혀 결정적이지 않았다. 단위 조립 시험에 `redis.calls[0]?.deadlineMs`가 20인지 보는 단언을 더한다(`packages/platform/src/service.ts`는 갈래 1 BAT-059 영역 — 감독이 갈래 1에 알림)
 - W12-dt50 R-746 RV-02 낮음: `packages/platform/test-int/tenant-rate-limit.int.test.ts` 85·335행 주석이 아직 '20ms 열림은 T8이 본다'고 적는다(지금 T8은 250ms). 주석을 고친다
 - W12-dt50 R-746 정본 문구 낮음: `docs/api/guidelines.md` §6·`docs/architecture.md` §4의 '세지 않고 통과'는 실제 동작으로는 '판정에 쓰지 않고 통과'가 정확하다(마감 뒤에 도착한 증가는 서버에 남는다). 위험은 없다
+- W12-golden-report R-747 RG-01 낮음: `docs/review/measurements/W7-lane2-review-correctness.md:22`(W7L2-C8) '고칠 방향' 칸에 옛 이름 `test-report-search-golden.json`이 남았다. W7L2-C8을 맡는 묶음이 새 이름 `search-golden-report.json`을 쓴다
+- W12-golden-report R-747 RG-02 낮음: 계획 5의 4 `pnpm exec eslint services/core-svc/test/search-golden.test.ts`는 그 파일을 다루는 뿌리 ESLint 설정이 없어 '무시함' 경고만 내고 아무것도 검사하지 않는다
+- W12-golden-report R-747 검증 남은 위험 낮음: 보고서 이름이 다시 `test-report*` 꼴로 돌아가도 ASVS 요약 단계가 `continue-on-error`라 잡이 빨개지지 않고 그 단계 끝 코드 2로만 드러난다(계획 2의 (나)·(다)를 버리며 받아들임)
