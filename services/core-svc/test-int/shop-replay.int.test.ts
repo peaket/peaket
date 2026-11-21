@@ -431,7 +431,8 @@ describe('AZ-T17 ⑥ 굿즈 작업의 멱등 재생 대조', () => {
       new Date(clock.now()),
     ]);
     const retry = () => svc.http.inject({ method: 'POST', url: accountUrl, headers: { ...headers(C, K7), 'x-reauth-token': 'reauth-az-t17' }, payload });
-    // 맞는 참조(경로 주문의 취소)는 그 취소의 상태로 답한다(지문이 맞는지도 이것으로 본다)
+    // 맞는 참조(경로 주문의 취소)는 그 취소의 상태로 답한다(지문이 맞는지도 이것으로 본다). 앞 취소 반복의 로그는 비우고 이 요청의 로그만 본다
+    logs.length = 0;
     const own = await retry();
     expect({ status: own.statusCode, body: JSON.parse(own.payload) as unknown }).toEqual({ status: 202, body: { cancellationId: X5, status: 'REFUNDED', refundAmount: PRICE } });
     expect(mismatchLines()).toEqual([]);
