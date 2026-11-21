@@ -1,6 +1,7 @@
 // 입장용 기기 공개키 등록·폐기 단위 시험(BUILD_ORDER GAT-140, FR-012, POL-018, ADR-0025·0050·0051, offline-gate §2·§3).
 // JWK에서 keyId(SPKI SHA-256 앞 8바이트)·압축 공개키를 만들고, 티켓당 유효 키 하나·소유자·입장 시작·재발급 한도를 본다.
 import { createHash, createPublicKey } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { fakeClock } from '@peaket/platform';
 import { exportJWK, generateKeyPair } from 'jose';
 import { beforeEach, describe, expect, test } from 'vitest';
@@ -123,5 +124,87 @@ describe('기기 키 등록·폐기 [GAT-140]', () => {
 
     store.seedTicket({ ticketId: TICKET, eventId: EVENT, accountId: ACCOUNT, payerAccountId: ACCOUNT });
     await expect(keys.register(register({ publicKeyJwk: await publicJwk(), reason: 'TRANSFER' }))).rejects.toMatchObject({ code: 'TRANSFER_NOT_ALLOWED' });
+  });
+});
+
+// 같은 키 다시 등록(BAT-350, O-T45 ③, offline-gate §2 '같은 키 다시 등록', ADR-0336 결정 4).
+// 공개키·keyId는 구현과 따로 계산해 둔 시험 벡터(docs/api/vectors/qr-v1-device-key.v1.json)에서 읽는다. 월렛이 내보낸 JWK 모양(ext·key_ops)이다.
+// 같은 규칙을 Drizzle 저장소가 겹쳐 지키므로 실제 DB 쪽은 test-int/device-key.int.test.ts의 O-T45 ③이 본다.
+interface QrVector {
+  publicKeyJwkAsExported: PublicKeyJwk;
+  keyIdB64u: string;
+  compressedPublicKeyB64u: string;
+}
+const vector = JSON.parse(readFileSync(new URL('../../../docs/api/vectors/qr-v1-device-key.v1.json', import.meta.url), 'utf8')) as QrVector;
+
+describe('같은 키 다시 등록 [O-T45]', () => {
+  const reauth: ReauthGate = { verify: async () => true };
+
+  test('O-T45 ③ 같은 키 다시 등록은 바꾸지 않고 201, 다른 계정은 404', async () => {
+    const first = await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }));
+    expect(first).toEqual({ keyId: vector.keyIdB64u });
+    // 응답을 잃은 월렛이 같은 공개키로 다시 보낸다: 재인증(403)에 막히지 않고 같은 keyId
+    clock.advance(1_000);
+    const again = await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }));
+    expect(again).toEqual({ keyId: vector.keyIdB64u });
+    // 바뀐 것이 없다: 유효 키 하나, 행 하나(처음 등록 시각 그대로), 폐기 0
+    const rows = store.keys.get(TICKET)!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.revokedAtMs).toBeUndefined();
+    expect(rows[0]!.registeredAtMs).toBe(NOW);
+    expect((await store.activeKeysByEvent(EVENT)).get(TICKET)).toEqual([{ keyId: vector.keyIdB64u, publicKey: vector.compressedPublicKeyB64u }]);
+    expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([]);
+    expect(await store.keyState(TICKET, Buffer.from(vector.keyIdB64u, 'base64url'))).toBe('ACTIVE');
+
+    // 보유자 확인이 먼저다: 다른 계정·없는 티켓은 같은 공개키라도 not-found(404)
+    await expect(keys.register(register({ accountId: OTHER, publicKeyJwk: vector.publicKeyJwkAsExported }))).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(keys.register(register({ ticketId: '0190f3a1-7c2e-7a00-8000-000000000099', publicKeyJwk: vector.publicKeyJwkAsExported }))).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    expect(store.keys.get(TICKET)).toHaveLength(1);
+
+    // 24시간 재발급 한도에도 세지 않는다: 재인증 뒤 첫 키 교체는 된다(다시 보낸 것이 교체로 세졌다면 REISSUE_LIMIT)
+    clock.advance(60_000);
+    const rotated = await new DeviceKeys({ store, clock, reauth }).register(register({ publicKeyJwk: await publicJwk() }));
+    expect(rotated.keyId).not.toBe(vector.keyIdB64u);
+    expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([vector.keyIdB64u]);
+  });
+
+  test('O-T45 ③ 입장 시작 뒤에도 같은 키는 201이고, 다른 키는 지금 규칙대로 거절한다', async () => {
+    await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }));
+    store.seedTicket({ ticketId: TICKET, eventId: EVENT, accountId: ACCOUNT, eventStartsAtMs: NOW - 1 });
+    expect(await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }))).toEqual({ keyId: vector.keyIdB64u });
+    expect(store.keys.get(TICKET)).toHaveLength(1);
+    expect(store.keys.get(TICKET)![0]!.revokedAtMs).toBeUndefined();
+    // 다른 키: 입장 시작 뒤 ISSUE는 재인증 없이 거절(HTTP 403 reauth-required)
+    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    expect((await store.activeKeysByEvent(EVENT)).get(TICKET)).toEqual([{ keyId: vector.keyIdB64u, publicKey: vector.compressedPublicKeyB64u }]);
+  });
+
+  test('O-T45 ③ 유효 키와 다른 키는 재인증 없이 거절하고, TRANSFER도 같은 키는 바꾸지 않고 받는다', async () => {
+    await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }));
+    // 다른 키 ISSUE: 지금 규칙(재인증 필요) 그대로
+    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+    expect((await store.activeKeysByEvent(EVENT)).get(TICKET)!.map((k) => k.keyId)).toEqual([vector.keyIdB64u]);
+    expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([]);
+
+    // 양도로 보유자가 바뀐 티켓의 새 보유자 TRANSFER 등록을 다시 보내도 바꾸지 않는다
+    const transferred = '0190f3a1-7c2e-7a00-8000-000000000097';
+    store.seedTicket({ ticketId: transferred, eventId: EVENT, accountId: OTHER, payerAccountId: ACCOUNT });
+    const transfer = register({ ticketId: transferred, accountId: OTHER, publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'TRANSFER' });
+    expect(await keys.register(transfer)).toEqual({ keyId: vector.keyIdB64u });
+    expect(await keys.register(transfer)).toEqual({ keyId: vector.keyIdB64u });
+    expect(store.keys.get(transferred)).toHaveLength(1);
+    expect(store.keys.get(transferred)![0]!.revokedAtMs).toBeUndefined();
+  });
+
+  test('O-T45 ③ 같은 키 요청 둘이 겹쳐도 둘 다 201이고 유효 키는 하나다', async () => {
+    const both = await Promise.all([
+      keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported })),
+      keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported })),
+    ]);
+    expect(both).toEqual([{ keyId: vector.keyIdB64u }, { keyId: vector.keyIdB64u }]);
+    expect(store.keys.get(TICKET)).toHaveLength(1);
+    expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([]);
   });
 });

@@ -5,6 +5,7 @@ import 'reflect-metadata';
 import { createDatabase, fakeClock, type Database } from '@peaket/platform';
 import { exportJWK, generateKeyPair } from 'jose';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateTicket } from '../scripts/migrate.mjs';
 import { DrizzleScannerGateStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-gate-store.js';
@@ -43,6 +44,24 @@ const SEAT_H = '0190f3a1-7c2e-7a00-8000-000000000128';
 const SEAT_I = '0190f3a1-7c2e-7a00-8000-000000000129';
 const SEAT_J = '0190f3a1-7c2e-7a00-8000-00000000012a';
 const CANCEL = '0190f3a1-7c2e-7a00-8000-000000000131';
+// BAT-350 O-T45(같은 키 다시 등록·keyId 맞물림)
+const ORDER_K = '0190f3a1-7c2e-7a00-8000-00000000011b';
+const ORDER_L = '0190f3a1-7c2e-7a00-8000-00000000011c';
+const ORDER_M = '0190f3a1-7c2e-7a00-8000-00000000011d';
+const ORDER_N = '0190f3a1-7c2e-7a00-8000-00000000011e';
+const SEAT_K = '0190f3a1-7c2e-7a00-8000-00000000012b';
+const SEAT_L = '0190f3a1-7c2e-7a00-8000-00000000012c';
+const SEAT_M = '0190f3a1-7c2e-7a00-8000-00000000012d';
+const SEAT_N = '0190f3a1-7c2e-7a00-8000-00000000012e';
+
+/** 구현과 따로 계산해 둔 시험 벡터(docs/api/vectors/qr-v1-device-key.v1.json, ADR-0336 결정 6) */
+interface QrVector {
+  publicKeyJwkAsExported: PublicKeyJwk;
+  keyIdB64u: string;
+  compressedPublicKeyB64u: string;
+  negative: { otherKeyIdB64u: string };
+}
+const vector = JSON.parse(readFileSync(new URL('../../../docs/api/vectors/qr-v1-device-key.v1.json', import.meta.url), 'utf8')) as QrVector;
 
 let pg: PostgresContainer;
 let database: Database;
@@ -235,5 +254,87 @@ describe('기기 키 PostgreSQL [GAT-140]', () => {
     expect(byId.get(scans[3]!.id)).toMatchObject({ result: 'REJECT', reason: 'INVALID_QR' });
     expect(await deviceKeyStore.keyState(rotated.ticketId, Buffer.from(newKey.keyId, 'base64url'))).toBe('ACTIVE');
     expect(await deviceKeyStore.keyState(unknown.ticketId, Buffer.from('AAAAAAAAAAA', 'base64url'))).toBe('UNKNOWN');
+  });
+
+  // ---------- BAT-350 같은 키 다시 등록(O-T45 ③, offline-gate §2, ADR-0336 결정 4)·keyId 맞물림(O-T45 ④⑤) ----------
+  // 행 수와 scanner_change 줄 수는 DB에서 직접 센다(저장소 함수의 돌려준 값만 보지 않는다)
+
+  /** 그 티켓의 device_key 행·폐기 행, scanner_change의 KEY_REGISTERED·KEY_REVOKED 줄, 회차 전체 변경분 줄 */
+  async function keyCounts(ticketId: string) {
+    const k = (await database.pool.query('select count(*)::int as n, count(*) filter (where revoked_at is not null)::int as revoked from device_key where ticket_id = $1', [ticketId]))
+      .rows[0] as { n: number; revoked: number };
+    const c = (
+      await database.pool.query(
+        "select count(*) filter (where kind = 'KEY_REGISTERED')::int as registered, count(*) filter (where kind = 'KEY_REVOKED')::int as revoked from scanner_change where event_id = $1 and payload->>'ticketId' = $2",
+        [EVENT, ticketId],
+      )
+    ).rows[0] as { registered: number; revoked: number };
+    const all = (await database.pool.query('select count(*)::int as n from scanner_change where event_id = $1', [EVENT])).rows[0] as { n: number };
+    return { keyRows: k.n, revokedRows: k.revoked, keyRegistered: c.registered, keyRevoked: c.revoked, eventChanges: all.n };
+  }
+
+  test('O-T45 ③ Drizzle: 다시 등록은 새 행·scanner_change 0이고 겹친 두 요청도 행 하나', async () => {
+    const same = (ticketId: string) => ({ ticketId, accountId: ACCOUNT, sessionId: SESSION, publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'ISSUE' as const });
+
+    // 처음 등록 뒤 같은 키를 다시 보낸다(응답을 잃은 월렛)
+    const t = await issueTicket(ORDER_K, SEAT_K);
+    const registeredAt = clock.now();
+    expect(await keys.register(same(t.ticketId))).toEqual({ keyId: vector.keyIdB64u });
+    const before = await keyCounts(t.ticketId);
+    expect(before).toMatchObject({ keyRows: 1, revokedRows: 0, keyRegistered: 1, keyRevoked: 0 });
+    clock.advance(1000);
+    expect(await keys.register(same(t.ticketId))).toEqual({ keyId: vector.keyIdB64u });
+    expect(await keyCounts(t.ticketId)).toEqual(before);
+    const row = (await database.pool.query('select registered_at, revoked_at from device_key where ticket_id = $1', [t.ticketId])).rows[0] as { registered_at: Date; revoked_at: Date | null };
+    expect(row.registered_at.getTime()).toBe(registeredAt);
+    expect(row.revoked_at).toBeNull();
+
+    // 다른 계정은 같은 공개키라도 404(NOT_FOUND)이고 아무것도 바꾸지 않는다
+    await expect(keys.register({ ...same(t.ticketId), accountId: OTHER })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(await keyCounts(t.ticketId)).toEqual(before);
+
+    // 입장 시작 뒤에도 같은 키는 201이고 바꾸지 않는다. 다른 키는 지금 규칙대로 거절한다
+    await database.pool.query('update ticket set event_starts_at = $1 where id = $2', [new Date(NOW - 1), t.ticketId]);
+    expect(await keys.register(same(t.ticketId))).toEqual({ keyId: vector.keyIdB64u });
+    await expect(keys.register({ ...same(t.ticketId), publicKeyJwk: await publicJwk() })).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    expect(await keyCounts(t.ticketId)).toEqual(before);
+
+    // 24시간 한도에 세지 않는다: 다시 보낸 뒤에도 재인증 뒤 첫 교체는 된다(셌다면 REISSUE_LIMIT)
+    const u = await issueTicket(ORDER_L, SEAT_L);
+    expect(await keys.register(same(u.ticketId))).toEqual({ keyId: vector.keyIdB64u });
+    expect(await keys.register(same(u.ticketId))).toEqual({ keyId: vector.keyIdB64u });
+    const rotated = await reauthKeys.register({ ...same(u.ticketId), publicKeyJwk: await publicJwk() });
+    expect(rotated.keyId).not.toBe(vector.keyIdB64u);
+    expect(await keyCounts(u.ticketId)).toMatchObject({ keyRows: 2, revokedRows: 1, keyRegistered: 2, keyRevoked: 1 });
+
+    // 겹친 두 요청(티켓 행 잠금으로 차례가 된다): 둘 다 201·같은 keyId, 행 하나, KEY_REGISTERED 한 줄
+    const v = await issueTicket(ORDER_M, SEAT_M);
+    const beforeBoth = await keyCounts(v.ticketId);
+    const both = await Promise.all([keys.register(same(v.ticketId)), keys.register(same(v.ticketId))]);
+    expect(both).toEqual([{ keyId: vector.keyIdB64u }, { keyId: vector.keyIdB64u }]);
+    const afterBoth = await keyCounts(v.ticketId);
+    expect(afterBoth).toMatchObject({ keyRows: 1, revokedRows: 0, keyRegistered: 1, keyRevoked: 0 });
+    expect(afterBoth.eventChanges - beforeBoth.eventChanges).toBe(1);
+  });
+
+  test('O-T45 ④⑤ Drizzle: 목록 keys에 벡터 keyId·압축 공개키가 하나이고 등록한 keyId는 PASS, 다른 keyId는 KEY_UNKNOWN이다', async () => {
+    const t = await issueTicket(ORDER_N, SEAT_N);
+    expect(await keys.register({ ticketId: t.ticketId, accountId: ACCOUNT, sessionId: SESSION, publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'ISSUE' })).toEqual({
+      keyId: vector.keyIdB64u,
+    });
+    const pkg = await gate.package({ eventId: EVENT, nowMs: NOW });
+    expect(pkg.tickets.find((x) => x.ticketId === t.ticketId)!.keys).toEqual([{ keyId: vector.keyIdB64u, publicKey: vector.compressedPublicKeyB64u }]);
+    const scans = [scan(t.ticketId, vector.negative.otherKeyIdB64u, 11), scan(t.ticketId, vector.keyIdB64u, 12)];
+    const unknown = await gate.acceptScans({ eventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, scans: [scans[0]!], nowMs: NOW });
+    const ok = await gate.acceptScans({ eventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, scans: [scans[1]!], nowMs: NOW });
+    expect([...unknown.acceptedIds, ...ok.acceptedIds]).toHaveLength(2);
+    const rows = (await database.pool.query('select id, result, reason from scan_event where event_id = $1 and id = any($2::uuid[])', [EVENT, scans.map((s) => s.id)])).rows as {
+      id: string;
+      result: string;
+      reason: string | null;
+    }[];
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(scans[0]!.id)).toMatchObject({ result: 'REJECT', reason: 'KEY_UNKNOWN' });
+    expect(byId.get(scans[1]!.id)).toMatchObject({ result: 'PASS', reason: null });
   });
 });

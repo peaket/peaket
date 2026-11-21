@@ -1,4 +1,6 @@
 // 스캐너 목록의 유효 키·폐기 keyId와 스캔 시 keyId 대조 시험(BUILD_ORDER GAT-140, offline-gate §3·§6.4·§7.1).
+import { createHash, createPublicKey, ECDH, verify } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { fakeClock } from '@peaket/platform';
 import { exportJWK, generateKeyPair } from 'jose';
 import { beforeEach, describe, expect, test } from 'vitest';
@@ -87,5 +89,64 @@ describe('스캐너 기기 키 [GAT-140]', () => {
     expect(gateStore.scans.get(r.acceptedIds[0]!)).toMatchObject({ result: 'REJECT', reason: 'KEY_REVOKED' });
     const ok = await scans([scan({ keyId: second.keyId })]);
     expect(gateStore.scans.get(ok.acceptedIds[0]!)).toMatchObject({ result: 'PASS' });
+  });
+});
+
+// 월렛 → 서버 → 스캐너 목록 → 스캔 대조의 keyId 맞물림(BAT-350, O-T45 ④⑤, offline-gate §2·§3, ADR-0336 결정 6).
+// 기대 값은 구현과 따로 계산해 둔 시험 벡터(docs/api/vectors/qr-v1-device-key.v1.json)에서 읽고, 압축 공개키 풀기·서명 확인은 node:crypto로 따로 한다.
+interface QrVector {
+  publicKeyJwkAsExported: PublicKeyJwk;
+  spkiDerB64u: string;
+  keyIdB64u: string;
+  compressedPublicKeyB64u: string;
+  qr: { ticketId: string; messageHex: string; signatureB64u: string };
+  negative: { tamperedSignatureB64u: string; otherKeyIdB64u: string };
+}
+const vector = JSON.parse(readFileSync(new URL('../../../docs/api/vectors/qr-v1-device-key.v1.json', import.meta.url), 'utf8')) as QrVector;
+/** P-256 SPKI DER 머리(비압축 점 65바이트 앞, RFC 5480 id-ecPublicKey + prime256v1) */
+const P256_SPKI_PREFIX = Buffer.from('3059301306072a8648ce3d020106082a8648ce3d030107034200', 'hex');
+
+describe('스캐너 keyId 맞물림 [O-T45]', () => {
+  const VT = vector.qr.ticketId;
+
+  beforeEach(async () => {
+    deviceKeys.seedTicket({ ticketId: VT, eventId: EVENT, accountId: ACCOUNT });
+    gateStore.seedTicket({ ticketId: VT, eventId: EVENT, seatId: 'A-2', gateZone: '동문', status: 'ACTIVE' });
+    expect(await keys.register({ ticketId: VT, accountId: ACCOUNT, sessionId: SESSION, publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'ISSUE' })).toEqual({
+      keyId: vector.keyIdB64u,
+    });
+  });
+
+  test('O-T45 ④ 스캐너 목록 keys에 벡터 keyId·압축 공개키가 하나 있고 그 키로 벡터 서명이 확인된다', async () => {
+    const p = await gate.package(EVENT, EVENT);
+    const ticket = p.tickets.find((t) => t.ticketId === VT)!;
+    expect(ticket.keys).toEqual([{ keyId: vector.keyIdB64u, publicKey: vector.compressedPublicKeyB64u }]);
+    expect(p.revokedKeyIds).toEqual([]);
+
+    // 목록의 압축 공개키(33바이트)를 풀어 SPKI를 만들면 벡터 SPKI와 같고, keyId(SPKI SHA-256 앞 8바이트)도 같다
+    const compressed = Buffer.from(ticket.keys[0]!.publicKey, 'base64url');
+    expect(compressed).toHaveLength(33);
+    const point = Buffer.from(String(ECDH.convertKey(compressed, 'prime256v1', undefined, 'hex', 'uncompressed')), 'hex');
+    expect(point).toHaveLength(65);
+    const spki = Buffer.concat([P256_SPKI_PREFIX, point]);
+    expect(spki.toString('base64url')).toBe(vector.spkiDerB64u);
+    expect(createHash('sha256').update(spki).digest().subarray(0, 8).toString('base64url')).toBe(ticket.keys[0]!.keyId);
+
+    // 그 키로 벡터 QR v1 서명이 확인되고, 한 바이트 바꾼 서명은 틀린다
+    const key = createPublicKey({ key: spki, format: 'der', type: 'spki' });
+    const message = Buffer.from(vector.qr.messageHex, 'hex');
+    expect(verify('sha256', message, { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(vector.qr.signatureB64u, 'base64url'))).toBe(true);
+    expect(verify('sha256', message, { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(vector.negative.tamperedSignatureB64u, 'base64url'))).toBe(false);
+  });
+
+  test('O-T45 ⑤ 등록한 keyId 스캔은 PASS, 다른 keyId는 KEY_UNKNOWN이다', async () => {
+    // 다른 keyId를 먼저 올린다(거절은 입장 상태를 바꾸지 않아, 뒤의 PASS가 '이미 입장'에 섞이지 않는다)
+    const unknown = await scans([scan({ ticketId: VT, keyId: vector.negative.otherKeyIdB64u })]);
+    expect(unknown.acceptedIds).toHaveLength(1);
+    expect(gateStore.scans.get(unknown.acceptedIds[0]!)).toMatchObject({ result: 'REJECT', reason: 'KEY_UNKNOWN' });
+    const ok = await scans([scan({ ticketId: VT, keyId: vector.keyIdB64u })]);
+    expect(ok.acceptedIds).toHaveLength(1);
+    expect(gateStore.scans.get(ok.acceptedIds[0]!)).toMatchObject({ result: 'PASS' });
+    expect(gateStore.scans.get(ok.acceptedIds[0]!)!.reason ?? null).toBeNull();
   });
 });

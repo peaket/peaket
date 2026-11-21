@@ -27,6 +27,7 @@ import { GetMyBookingRestrictionResponse } from '@peaket/contracts/openapi/suppo
 import { CreateEventHoldResponse, GetEventSeatmapLayoutResponse } from '@peaket/contracts/openapi/seats';
 import { GetFanSaleEligibilityResponse, GetSearchSuggestionsResponse, ListSearchResultsResponse } from '@peaket/contracts/openapi/catalog';
 import { CreatePartnerProductionImageResponse, UpdatePartnerProductionImageResponse } from '@peaket/contracts/openapi/partner';
+import { CreateTicketDeviceKeyBody, CreateTicketDeviceKeyResponse } from '@peaket/contracts/openapi/tickets';
 import { productionImage } from './mock-api/partner.mjs';
 import { ARTISTS, INITIAL_WISHES, searchResults, suggestions, suggestQueryOk, eventDetail, homeFeed, placeholderSvg, rankingFile, reviewSummary, startMockApi, subscriptionPage, wishPage } from './mock-api.mjs';
 import { decodeFrame, encodeSubscribe, encodeTimeSync } from '../../../packages/seatmap/src/wire.ts';
@@ -1046,6 +1047,76 @@ test('FE-T11 개발용 스트림 대역이 하위 프로토콜·TimeSync·구독
     assert.equal(final.intervals[0], 100);
     assert.ok(final.intervals.includes(1_000));
     assert.ok(final.timeSyncs.some((t) => t.clientTimeMs === 123_456));
+  } finally {
+    server.close();
+  }
+});
+
+// 입장용 휴대폰 등록 가짜 API(BAT-350, GAT-010, offline-gate §2 '서버 등록 잇기'·'같은 키 다시 등록', ADR-0336).
+// 가짜를 진짜(ticket-svc)와 같은 시험 벡터로 짝짓는다: 같은 공개키에 ticket-svc 시험(O-T45 ②)과 같은 keyId를 돌려줘야 한다.
+// 이 파일의 다른 가짜 API 시험처럼 HTTP 서버를 띄워 경로·상태 바꾸기의 배선까지 바깥에서 본다.
+test('GAT-010 가짜 API 기기 키 등록은 계약 모양이고 벡터 keyId를 돌려준다', async () => {
+  const vector = JSON.parse(readFileSync(new URL('../../../docs/api/vectors/qr-v1-device-key.v1.json', import.meta.url), 'utf8'));
+  // real-time: 가짜 API는 HTTP 서버라 경로 처리기와 /__mock/state 배선을 바깥 경계에서 본다(이 파일의 기존 시험과 같은 방식) BAT-350
+  const server = await startMockApi({ port: 0 });
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+  const ticketId = '0190f3a1-7c2e-7a00-8b2a-6c1d5e70f102';
+  const register = async (body, t = ticketId) => {
+    const r = await fetch(`${base}/v1/tickets/${t}/device-keys`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const text = await r.text();
+    return { status: r.status, body: text ? JSON.parse(text) : undefined };
+  };
+  const problemName = (b) => String(b?.type ?? '').split('/').pop();
+  const issue = { publicKeyJwk: vector.publicKeyJwkAsExported, reason: 'ISSUE' };
+  // 다른 공개키(P-256)
+  const other = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ format: 'jwk' });
+  const otherIssue = { publicKeyJwk: { kty: other.kty, crv: other.crv, x: other.x, y: other.y }, reason: 'ISSUE' };
+  assert.deepEqual(CreateTicketDeviceKeyBody.parse(issue), issue);
+  assert.deepEqual(CreateTicketDeviceKeyBody.parse(otherIssue), otherIssue);
+  try {
+    // 처음 등록: 201, 계약 모양(모르는 칸 없음), keyId = 벡터 값
+    const first = await register(issue);
+    assert.equal(first.status, 201);
+    assert.deepEqual(CreateTicketDeviceKeyResponse.parse(first.body), first.body);
+    assert.deepEqual(first.body, { keyId: vector.keyIdB64u });
+    // 같은 키 다시 등록은 바꾸지 않고 201 같은 keyId, 다른 키는 재인증 필요(403 reauth-required)
+    assert.deepEqual(await register(issue), { status: 201, body: { keyId: vector.keyIdB64u } });
+    const otherKey = await register(otherIssue);
+    assert.equal(otherKey.status, 403);
+    assert.equal(problemName(otherKey.body), 'reauth-required');
+    // 다른 티켓은 따로 센다
+    assert.equal((await register(otherIssue, '0190f3a1-7c2e-7a00-8b2a-6c1d5e70f103')).status, 201);
+    // 계약 밖 칸(개인키 d)은 400
+    assert.equal((await register({ ...issue, publicKeyJwk: { ...issue.publicKeyJwk, d: 'x'.repeat(43) } })).status, 400);
+    // 등록한 키를 잊으면 다른 키도 처음 등록이 된다
+    await fetch(`${base}/__mock/state?deviceKeyReset=1`);
+    assert.equal((await register(otherIssue)).status, 201);
+    await fetch(`${base}/__mock/state?deviceKeyReset=1`);
+
+    // 상태 바꾸기: mismatch는 다른 keyId 201, down 503, reauth 403, not-found 404, invalid 422(문제 이름은 ticket-svc와 같다)
+    await fetch(`${base}/__mock/state?deviceKey=mismatch`);
+    const mismatch = await register(issue);
+    assert.equal(mismatch.status, 201);
+    assert.deepEqual(CreateTicketDeviceKeyResponse.parse(mismatch.body), mismatch.body);
+    assert.notEqual(mismatch.body.keyId, vector.keyIdB64u);
+    assert.equal(Buffer.from(mismatch.body.keyId, 'base64url').length, 8);
+    for (const [mode, status, name] of [
+      ['down', 503, 'dependency-unavailable'],
+      ['reauth', 403, 'reauth-required'],
+      ['not-found', 404, 'not-found'],
+      ['invalid', 422, 'invalid-device-key'],
+    ]) {
+      await fetch(`${base}/__mock/state?deviceKey=${mode}`);
+      const r = await register(issue);
+      assert.equal(r.status, status, mode);
+      assert.equal(problemName(r.body), name, mode);
+    }
+    await fetch(`${base}/__mock/state?deviceKey=normal&deviceKeyReset=1`);
+    assert.deepEqual(await register(issue), { status: 201, body: { keyId: vector.keyIdB64u } });
+    // 비로그인은 401
+    await fetch(`${base}/__mock/state?fan=guest`);
+    assert.equal((await register(issue)).status, 401);
   } finally {
     server.close();
   }

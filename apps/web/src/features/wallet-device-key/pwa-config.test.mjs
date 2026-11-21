@@ -9,6 +9,8 @@ import { test } from 'node:test';
 
 const appRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const read = (path) => readFileSync(join(appRoot, path), 'utf8');
+/** 주석을 뺀 소스(설명 글의 이름에 속지 않게) */
+const swCode = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/.*$/gm, '');
 
 // BAT-170 웨이브 7(T7·T8, docs/frontend.md §5.4 '갱신' ①⑤): 경로·no-store·메시지 규칙은 sw-rules.ts에 두고 sw.ts가 그것을 쓴다.
 // 규칙 자체는 sw-rules.test.mjs가, 실제 브라우저 동작은 tools/web-checks/reflow/wallet-sw.spec.mjs가 본다.
@@ -19,7 +21,10 @@ test('서비스 워커는 API·자기 자신을 캐시하지 않고 /my/tickets 
   assert.match(sw, /new NetworkOnly\(\)/);
   assert.match(sw, /isWalletDocumentPath\(url\.pathname\)/);
   assert.doesNotMatch(sw, /url\.pathname\.startsWith\('\/my\/tickets'\)/);
-  assert.match(sw, /new StaleWhileRevalidate\(\{ cacheName: 'wallet-pages', plugins: \[[^\]]*\brejectNoStore\b/);
+  // 런타임 캐시 이름은 판을 붙인 `wallet-shell-{판}`(docs/frontend.md §5.4 런타임 캐시 판·§3.12, ADR-0336 결정 5). 판 없는 옛 이름 글자는 쓰지 않는다(BAT-350 고침)
+  assert.match(sw, /new StaleWhileRevalidate\(\{ cacheName: WALLET_CACHE, plugins: \[[^\]]*\brejectNoStore\b/);
+  assert.match(sw, /const WALLET_CACHE = walletCacheName\(/);
+  assert.doesNotMatch(swCode(sw), /'wallet-pages'|'wallet-assets'/);
   assert.match(sw, /precacheEntries: self\.__SW_MANIFEST/);
   assert.match(sw, /url: '\/~offline'/);
   assert.doesNotMatch(sw, /NetworkFirst/);
@@ -89,4 +94,84 @@ test('오프라인 대체 화면이 있고 서비스 워커 범위는 /my/ticket
   assert.match(pwa, /options=\{\{ scope: '\/my\/tickets' \}\}/);
   assert.match(pwa, /process\.env\.NODE_ENV === 'development'/);
   assert.match(read('src/widgets/ticket-wallet/ui/Wallet.tsx'), /<OfflineBannerLazy /);
+});
+
+// ---------- 런타임 캐시 판(BAT-350, O-T46, docs/frontend.md §5.4 '갱신'의 런타임 캐시 판, ADR-0336 결정 5) ----------
+// 빌드 설정(scripts/service-worker.mjs)이 내놓는 값을 바깥 경계로 보고, 워커 소스가 그 값을 실제로 쓰는지(부르는 쪽)는 소스로 본다.
+// 판 이름 `__WALLET_CACHE_VERSION__`은 BAT-350 계획 §6(구현 담당이 정한 것)의 이름이다. 실제 워커 묶음의 동작은 web/reflow(월렛 워커 세 엔진)가 본다.
+
+test('O-T46 ① 런타임 캐시는 판을 붙인 이름 하나이고 미리 저장 판과 같다', async () => {
+  const { serwistOptions } = await import('../../../scripts/service-worker.mjs');
+  const { walletCacheName } = await import('./sw-rules.ts');
+  // 판 9와 10으로 빌드한 두 워커: 런타임 캐시 판 = 같은 빌드의 미리 저장 판
+  for (const v of ['9', '10']) {
+    const o = serwistOptions({ PEAKET_DEPLOYMENT_ID: v, GITHUB_SHA: 'sha-other' });
+    assert.deepEqual([...new Set(o.additionalPrecacheEntries.map((e) => e.revision))], [v], `판 ${v}: 미리 저장 판`);
+    assert.deepEqual(Object.keys(o.esbuildOptions.define), ['__WALLET_CACHE_VERSION__'], `판 ${v}: 워커에 넣는 값은 판 하나`);
+    const built = JSON.parse(o.esbuildOptions.define.__WALLET_CACHE_VERSION__);
+    assert.equal(built, v);
+    assert.equal(walletCacheName(built), `wallet-shell-${v}`);
+  }
+  // 배포 식별자가 없으면 커밋, 그것도 없으면 개발 값(wallet-dev). 어느 때든 두 판은 같은 값이다
+  for (const [env, v] of [
+    [{ GITHUB_SHA: '0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c' }, '0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c'],
+    [{}, 'wallet-dev'],
+  ]) {
+    const o = serwistOptions(env);
+    assert.deepEqual([...new Set(o.additionalPrecacheEntries.map((e) => e.revision))], [v]);
+    assert.equal(JSON.parse(o.esbuildOptions.define.__WALLET_CACHE_VERSION__), v);
+  }
+
+  // 워커 소스: 문서 규칙과 자산 규칙이 같은 이름 하나를 쓰고, 그 이름은 빌드 때 넣은 판으로 만든다
+  const code = swCode(read('app/sw.ts'));
+  const names = [...code.matchAll(/cacheName:\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
+  assert.deepEqual(names, ['WALLET_CACHE', 'WALLET_CACHE'], '런타임 규칙 둘이 이름 하나를 함께 쓴다');
+  const versionVar = /const WALLET_CACHE = walletCacheName\(([A-Za-z_$][\w$]*)\)/.exec(code)?.[1];
+  assert.ok(versionVar, '런타임 캐시 이름을 walletCacheName(판)으로 만든다');
+  assert.match(code, new RegExp(`const ${versionVar} = __WALLET_CACHE_VERSION__;`));
+  assert.match(code, /declare const __WALLET_CACHE_VERSION__: string;/);
+  // 활성화 때 옛 판 캐시를 정리한 뒤(같은 판으로) clients.claim()을 부른다
+  const activate = code.slice(code.indexOf("addEventListener('activate'"));
+  assert.ok(activate.length > 0 && code.includes("addEventListener('activate'"), 'activate 처리기가 있다');
+  const rotateAt = activate.indexOf('rotateWalletCaches(');
+  const claimAt = activate.indexOf('self.clients.claim()');
+  assert.ok(rotateAt > 0, 'activate에서 rotateWalletCaches를 부른다');
+  assert.ok(claimAt > rotateAt, 'clients.claim()은 정리 뒤다');
+  assert.match(activate.slice(rotateAt, claimAt), new RegExp(`version: ${versionVar}\\b`));
+});
+
+test('O-T46 ④ 판 값이 꼴을 벗어나면 워커 빌드 설정이 던진다', async () => {
+  const { serwistOptions, swRevision, writeServiceWorker } = await import('../../../scripts/service-worker.mjs');
+  // §5.18 빌드 칸 꼴 [A-Za-z0-9_-]{1,64}
+  assert.equal(swRevision({ PEAKET_DEPLOYMENT_ID: 'a'.repeat(64) }), 'a'.repeat(64));
+  assert.equal(swRevision({ PEAKET_DEPLOYMENT_ID: 'Deploy_10-x' }), 'Deploy_10-x');
+  for (const bad of ['a'.repeat(65), 'a/b', ' ', 'v1.2', 'é', 'deploy 10']) {
+    assert.throws(() => swRevision({ PEAKET_DEPLOYMENT_ID: bad }), Error, `배포 식별자 ${JSON.stringify(bad)}`);
+    assert.throws(() => serwistOptions({ PEAKET_DEPLOYMENT_ID: bad }), Error, `배포 식별자 ${JSON.stringify(bad)}`);
+    assert.throws(() => swRevision({ GITHUB_SHA: bad }), Error, `커밋 ${JSON.stringify(bad)}`);
+  }
+  // 빌드 단계(next.config.ts의 runAfterProductionCompile → writeServiceWorker)가 실제로 멈추고 워커 파일을 쓰지 않는다
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const distDir = mkdtempSync(join(tmpdir(), 'bat350-sw-'));
+  // 다른 까닭(모듈 불러오기 실패 등)으로 던진 것을 통과로 세지 않게, 판 확인이 던지는 바로 그 오류인지 본다
+  const expected = (() => {
+    try {
+      serwistOptions({ PEAKET_DEPLOYMENT_ID: 'a/b' });
+    } catch (e) {
+      return e.message;
+    }
+    return undefined;
+  })();
+  assert.equal(typeof expected, 'string');
+  const saved = process.env.PEAKET_DEPLOYMENT_ID;
+  process.env.PEAKET_DEPLOYMENT_ID = 'a/b';
+  try {
+    await assert.rejects(writeServiceWorker({ distDir }), (e) => e instanceof Error && e.message === expected);
+    assert.equal(existsSync(join(distDir, 'serwist', 'sw.js')), false);
+  } finally {
+    if (saved === undefined) delete process.env.PEAKET_DEPLOYMENT_ID;
+    else process.env.PEAKET_DEPLOYMENT_ID = saved;
+    rmSync(distDir, { recursive: true, force: true });
+  }
 });
