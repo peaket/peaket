@@ -1,4 +1,5 @@
 // 가상계좌 입금 대기의 주문 쪽 규칙(docs/features/payment.md §6 '주문 쪽'·'결제 상태 응답', BUILD_ORDER HOT-151, P-T36).
+import * as net from 'node:net';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { paymentV1Payment } from '@peaket/contracts/proto';
@@ -236,22 +237,119 @@ describe('GetPayment 답 읽기', () => {
     expect(() => new GrpcPaymentDepositReader({ address: 'no-port' })).toThrow();
   });
 
-  /** 같은 프로세스의 가짜 payment-svc(PaymentService.GetPayment만). 물은 주문의 계좌를 답한다 */
-  async function fakePaymentServer(accounts: Record<string, string>) {
+  /**
+   * 같은 프로세스의 가짜 payment-svc(PaymentService.GetPayment만). 물은 주문의 계좌를 답한다.
+   * firstAnswerDelayMs를 주면 첫 GetPayment의 답만 그만큼 늦게 보낸다(요청은 받은 즉시 requests에 남긴다, W12-pt36 R1)
+   */
+  async function fakePaymentServer(accounts: Record<string, string>, o: { firstAnswerDelayMs?: number } = {}) {
     const def = protoLoader.fromJSON(paymentV1Payment as Parameters<typeof protoLoader.fromJSON>[0], { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true });
     const pkg = (grpc.loadPackageDefinition(def) as unknown as { peaket: { payment: { v1: { PaymentService: grpc.ServiceClientConstructor } } } }).peaket.payment.v1;
     const server = new grpc.Server();
     const requests: Record<string, unknown>[] = [];
+    const timers = new Set<NodeJS.Timeout>();
     server.addService(pkg.PaymentService.service, {
       GetPayment: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
         requests.push(call.request);
         const orderId = call.request.order_id as string;
-        cb(null, { order_id: orderId, virtual_account: { bank: '20', account_number: accounts[orderId], due_at: { seconds: Math.floor(DUE_MS / 1000), nanos: 0 } } });
+        const answer = () => cb(null, { order_id: orderId, virtual_account: { bank: '20', account_number: accounts[orderId], due_at: { seconds: Math.floor(DUE_MS / 1000), nanos: 0 } } });
+        if (requests.length === 1 && o.firstAnswerDelayMs !== undefined) {
+          // real-time: 재현할 결함이 grpc-js의 벽시계 마감을 넘기는 늦은 답이다(가짜 시계로는 grpc-js 마감이 움직이지 않는다) W12-pt36
+          const t = setTimeout(() => {
+            timers.delete(t);
+            answer();
+          }, o.firstAnswerDelayMs);
+          timers.add(t);
+        } else answer();
       },
     });
     const port = await new Promise<number>((resolve, reject) => server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? reject(e) : resolve(p))));
-    return { address: `127.0.0.1:${port}`, requests, close: () => server.forceShutdown() };
+    return {
+      address: `127.0.0.1:${port}`,
+      requests,
+      close: () => {
+        for (const t of timers) clearTimeout(t);
+        server.forceShutdown();
+      },
+    };
   }
+
+  /**
+   * 시험 서버 앞의 TCP 중계. 첫 연결만 받은 뒤 delayMs 동안 양쪽 바이트를 붙잡았다가 잇는다(부하에서 첫 연결 맺기가 늦은 꼴, W12-pt36 R2).
+   * 둘째 연결부터는 바로 잇는다
+   */
+  async function slowFirstConnection(target: string, delayMs: number) {
+    const at = target.lastIndexOf(':');
+    const host = target.slice(0, at);
+    const port = Number(target.slice(at + 1));
+    const sockets = new Set<net.Socket>();
+    const timers = new Set<NodeJS.Timeout>();
+    let first = true;
+    const relay = net.createServer((inbound) => {
+      const outbound = net.connect(port, host);
+      for (const [a, b] of [
+        [inbound, outbound],
+        [outbound, inbound],
+      ] as const) {
+        sockets.add(a);
+        a.on('error', () => b.destroy());
+        a.on('close', () => b.destroy());
+      }
+      const join = () => {
+        inbound.pipe(outbound);
+        outbound.pipe(inbound);
+      };
+      if (!first) return join();
+      first = false;
+      inbound.pause();
+      outbound.pause();
+      // real-time: 재현할 결함이 grpc-js의 벽시계 마감 안에 연결이 서지 않는 것이다(가짜 시계로는 소켓이 움직이지 않는다) W12-pt36
+      const t = setTimeout(() => {
+        timers.delete(t);
+        join();
+      }, delayMs);
+      timers.add(t);
+    });
+    // real-time: grpc-js 리더가 진짜 TCP로 잇는 곳이라 실제 포트가 있어야 한다(같은 파일의 가짜 서버와 같다) W12-pt36
+    await new Promise<void>((resolve, reject) => relay.once('error', reject).listen(0, '127.0.0.1', () => resolve()));
+    const { port: relayPort } = relay.address() as net.AddressInfo;
+    return {
+      address: `127.0.0.1:${relayPort}`,
+      close: () => {
+        for (const t of timers) clearTimeout(t);
+        for (const s of sockets) s.destroy();
+        relay.close();
+      },
+    };
+  }
+
+  /** 늦춤 값 400ms [가정]. 리더 마감 상한 300ms(docs/features/payment.md §6 GetPayment 데드라인)보다 길다(W12-pt36) */
+  const SLOW_MS = 400;
+
+  test('P-T36 ③ R1_첫 답이 늦으면 미리 묻기 없는 지금 꼴의 첫 호출은 TRANSIENT다(서버는 요청을 받았다)', async () => {
+    const srv = await fakePaymentServer({ [ORDER]: '1111111111' }, { firstAnswerDelayMs: SLOW_MS });
+    const c = new GrpcPaymentDepositReader({ address: srv.address });
+    try {
+      await expect(c.read(ORDER)).resolves.toBe(PAYMENT_DEPOSIT_READ_TRANSIENT);
+      await vi.waitFor(() => expect(srv.requests.map((r) => r.order_id)).toEqual([ORDER]));
+    } finally {
+      srv.close();
+      c.close();
+    }
+  });
+
+  test('P-T36 ③ R2_첫 연결이 늦으면 미리 묻기 없는 지금 꼴의 첫 호출은 TRANSIENT다(서버는 요청을 못 받았다)', async () => {
+    const srv = await fakePaymentServer({ [ORDER]: '1111111111' });
+    const relay = await slowFirstConnection(srv.address, SLOW_MS);
+    const c = new GrpcPaymentDepositReader({ address: relay.address });
+    try {
+      await expect(c.read(ORDER)).resolves.toBe(PAYMENT_DEPOSIT_READ_TRANSIENT);
+      expect(srv.requests).toEqual([]);
+    } finally {
+      c.close();
+      relay.close();
+      srv.close();
+    }
+  });
 
   test('P-T36 ③_주문마다 그 주문의 답을 쓴다(앞 주문의 GetPayment 답을 다시 쓰지 않는다) [ASVS v5.0.0-8.2.2]', async () => {
     const OTHER = '0195f3a0-0000-7000-8000-000000000025';
