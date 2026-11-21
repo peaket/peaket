@@ -86,7 +86,8 @@
 
 ## 시험 결과
 
-(구현 뒤 시험 담당이 채운다)
+- 구현 트리(`f1858a8c2`, win32, Docker 없음): `node --test "tools/local/*.test.mjs"` → 시험 265, 실패 0, 건너뜀 4(W12T-01 ②③④ POSIX 세부 + BSL050 0600). `node --test tools/ci/gateway-routes.test.mjs` → 시험 41, 실패 0, 건너뜀 0.
+- POSIX 세부 W12T-01 ②③④는 초안 PR CI `tools-check / tools`(우분투)로 본다.
 
 ## 리뷰
 
@@ -101,5 +102,5 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12tools-plan-7f3b | claude-opus-5-5 | 2026-11-21T23:23+09:00 | 2026-11-21T23:34+09:00 |
-| test | w12tools-test-1a8c | claude-opus-5-5 | 2026-11-21T23:34+09:00 | 2026-11-21T23:47+09:00 |
+| test | w12tools-test-1a8c | claude-opus-5-5 | 2026-11-21T23:34+09:00 | 2026-11-21T23:59+09:00 |
 | impl | w12tools-impl-9c2e | claude-opus-5-5 | 2026-11-21T23:49+09:00 | 2026-11-21T23:56+09:00 |
