@@ -49,14 +49,19 @@ const input = (type: CommandType, over: Record<string, unknown> = {}) => ({
 });
 
 describe('B3-H01 명령 유형별 역할', () => {
-  test('정책 표가 모든 명령 유형을 덮고 commander 전용 유형은 요청·승인 모두 commander다', () => {
+  test('정책 표가 모든 명령 유형을 덮고 commander 전용 유형은 요청이 commander이며, 승인은 명령 6만 요청자 아닌 operator 이상이다', () => {
     for (const type of COMMAND_TYPES) {
       const policy = commandModule.rolePolicyOf(type);
       expect(policy.requesterRoles.length).toBeGreaterThan(0);
       expect(policy.approverRoles.length).toBeGreaterThan(0);
-      // 승인자는 요청 가능 역할의 부분집합이어야 한다(승인만 열린 역할이 생기면 2인 분리가 깨진다).
+      // 명령 6(Degraded Mode·결제 감내 모드)은 정본이 'commander 요청 + 요청자 아닌 operator 이상 1인 승인'이다
+      // (control-tower §3 6행, payment §2.2, ADR-0349 결정 6). 나머지는 승인자가 요청 가능 역할의 부분집합이다
+      // (승인만 열린 역할이 생기면 2인 분리가 깨진다). 명령 5의 같은 정본 어긋남은 BAT-365가 고친다(감독 결정 2026-11-22).
+      if (type === 'DEGRADED_MODE') continue;
       expect(policy.approverRoles.every((role) => policy.requesterRoles.includes(role))).toBe(true);
     }
+    expect(requesterRolesOf('DEGRADED_MODE')).toEqual(['commander']);
+    expect([...approverRolesOf('DEGRADED_MODE')].sort()).toEqual(['commander', 'operator']);
     const commanderOnly = COMMAND_TYPES.filter((type) => requesterRolesOf(type).join(',') === 'commander');
     expect([...commanderOnly].sort()).toEqual([...COMMANDER_ONLY].sort());
     // 회차 취소는 문서대로 operator 이상이 승인한다(과잉 축소 방지).

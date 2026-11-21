@@ -140,6 +140,8 @@ const GRPC = {
       GetNewPaymentPause: ['purchase-svc'],
       RegisterPayoutSeller: ['core-svc'],
       ApprovePayoutBatch: ['ops-svc'],
+      // 명령 12 하위 결제사 사전 판정: ops-svc만 부른다(docs/api/proto/README.md §3 'ops-svc → payment-svc CheckEventPgAssignment', ADR-0349 결정 3)
+      CheckEventPgAssignment: ['ops-svc'],
     },
   },
   'purchase-svc': {
@@ -764,6 +766,8 @@ test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 �
   assert.deepEqual(pay('ApprovePayoutBatch'), [principalOf('ops-svc')]);
   assert.deepEqual(pay('RegisterPayoutSeller'), [principalOf('core-svc')]);
   assert.ok(!pay('ConfirmPayment').includes(principalOf('ops-svc')), 'ConfirmPayment에 ops-svc가 있다');
+  // 명령 12 판정(BAT-360, ADR-0349 결정 3): ops-svc 하나만 받고 결제를 만드는 쪽(purchase-svc·core-svc)은 받지 않는다
+  assert.deepEqual(pay('CheckEventPgAssignment'), [principalOf('ops-svc')]);
   // 탈퇴 참여자(BAT-010, ADR-0284 결정 1): identity-svc는 받고, 그 밖(web·purchase-svc 자신·ops-svc·게이트웨이)은 받지 않는다
   const wd = waypointAllowed(mesh, 'purchase-svc', '/peaket.purchase.v1.WithdrawalParticipantService/ProcessAccountWithdrawal');
   assert.ok(wd.has(principalOf('identity-svc')), 'ProcessAccountWithdrawal에 identity-svc가 없다');
