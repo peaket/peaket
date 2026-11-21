@@ -7,7 +7,7 @@
 // - 비밀 값은 여기서 만들지 않는다. cluster.mjs가 이 PC에서 만들어 Secret으로만 넣고 `.cache/peaket-tools/demo-secrets/`에 둔다
 import { V1_PORTS, v1EnvFiles } from './v1-stage.mjs';
 import { V1_KAFKA_TOPICS, V1_POSTGRES_TAG, V1_VALKEY_TAG } from './v1-objects.mjs';
-import { GATEWAY_PROXY_IMAGE, LOCAL_PROXY_CPU_REQUEST } from './gateway-objects.mjs';
+import { demoOriginSecurityPatch, GATEWAY_PROXY_IMAGE, LOCAL_PROXY_CPU_REQUEST } from './gateway-objects.mjs';
 
 export const DEMO_ENV = 'local';
 export const DEMO_CLUSTER = 'lane4-demo';
@@ -554,6 +554,9 @@ export function demoGatewayObjects(objects, origins = demoOrigins()) {
   const hasGrant = out.some((o) => o.kind === 'ReferenceGrant' && o.metadata?.namespace === 'trust');
   if (!hasGrant) out.push(referenceGrant('trust'));
   out.push(appRoute('demo-console', 'gw-ops', 'console', DEMO_HOSTS.console, 'console-host', 8080, [{ type: 'PathPrefix', value: '/' }]));
+  // 정적 콘솔 문서는 브라우저가 원본 확인 머리를 보낼 수 없다. gw-ops 게이트웨이의 requireOriginVerify·허용 IP를
+  // 이 라우트에서만 끈다(라우트 정책이 게이트웨이 정책을 덮는다). 운영·클라우드에는 없다
+  out.push(demoConsoleEdge());
   out.push(appRoute('demo-scanner', 'gw-scanner', 'scanner', DEMO_HOSTS.scanner, 'scanner', 8080, [{ type: 'PathPrefix', value: '/' }]));
   out.push(
     appRoute('demo-queue-room', 'gw-queue', 'queue', DEMO_HOSTS.queue, 'queue-room', 8080, [
@@ -567,7 +570,8 @@ export function demoGatewayObjects(objects, origins = demoOrigins()) {
   );
   // 추가 검증(/queue/{id}/verify)은 소비자 웹 화면이다. 대기실 정규식에 들지 않게 따로 웹 앱 서버로 보낸다
   out.push(appRoute('demo-queue-verify', 'gw-queue', 'queue', DEMO_HOSTS.queue, 'web', 3000, [{ type: 'RegularExpression', value: '^/(?:en|ja|zh)/queue/[^/]+/verify/?$|^/queue/[^/]+/verify/?$' }]));
-  return out;
+  // 데모에서만 필요한 출처는 공용 deploy/gateways에 두지 않고 여기서 더한다(리뷰 RV-01). gw-fan 정책만 넓힌다
+  return demoOriginSecurityPatch(out, origins);
 }
 
 /** 게이트웨이 다섯이 가리킬 수 있게 trust 네임스페이스 Service를 허락한다 */
@@ -587,9 +591,31 @@ function referenceGrant(namespace) {
   };
 }
 
-/** 앱 호스트 하나의 HTTPRoute(web 네임스페이스의 앱 Service로) */
-function appRoute(name, gateway, section, hostname, service, port, matches) {
+/**
+ * 로컬 데모 콘솔 문서 라우트의 원본 확인·허용 IP 예외. gw-ops 게이트웨이 정책은 `requireOriginVerify: true`라
+ * 브라우저가 콘솔 문서를 열 때 403이 난다(2026-11-21 리뷰 반영에서 확인). 화면은 정적 콘솔 호스트라 예외로 두고,
+ * API 라우트(gw-ops-api·gw-ops-public)의 정책은 그대로 둔다. 운영·클라우드에는 이 객체가 없다.
+ */
+function demoConsoleEdge() {
   return {
+    apiVersion: 'gateway.envoyproxy.io/v1alpha1',
+    kind: 'EnvoyExtensionPolicy',
+    metadata: { name: 'demo-console-edge', namespace: 'envoy-gateway-system', labels: { 'app.kubernetes.io/part-of': 'peaket-demo' } },
+    spec: {
+      targetRefs: [{ group: 'gateway.networking.k8s.io', kind: 'HTTPRoute', name: 'demo-console' }],
+      lua: [
+        {
+          type: 'ValueRef',
+          valueRef: { group: '', kind: 'ConfigMap', name: 'peaket-gateway-edge-lua' },
+          filterContext: { originVerify: true, requireOriginVerify: false, checkTyp: false, tokenCookie: '__Host-peaket_ops_at', tokenScheme: 'Bearer' },
+        },
+      ],
+    },
+  };
+}
+
+/** 앱 호스트 하나의 HTTPRoute(web 네임스페이스의 앱 Service로) */
+function appRoute(name, gateway, section, hostname, service, port, matches) {  return {
     apiVersion: 'gateway.networking.k8s.io/v1',
     kind: 'HTTPRoute',
     metadata: { name, namespace: 'envoy-gateway-system', labels: { 'app.kubernetes.io/part-of': 'peaket-demo' } },

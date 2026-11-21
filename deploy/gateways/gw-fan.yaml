@@ -352,8 +352,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -424,8 +422,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -454,8 +450,6 @@ spec:
   csrf:
     additionalOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
 ---
 # gw-fan-search: 교차 출처·출처 확인(토큰 확인 없음, 공개 경로)
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -471,8 +465,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -501,8 +493,6 @@ spec:
   csrf:
     additionalOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
 ---
 # gw-fan-search: 클라이언트 IP(게이트웨이가 정한 값)마다 초당 50건(docs/features/search.md §8 '무작위 입력' 줄의 '첫 값', SR-T13 ②).
 # - 로컬 한도(프록시 파드마다 센다)라 실제 상한은 파드 수 × 이 값이다. 이 판은 모아 두기(버킷 크기)를 초당 건수와 같게 만든다(따로 적는 칸이 없다).
@@ -550,8 +540,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -580,8 +568,6 @@ spec:
   csrf:
     additionalOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
   jwt:
     providers:
       - name: fan-fan
@@ -666,8 +652,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -696,8 +680,6 @@ spec:
   csrf:
     additionalOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
   jwt:
     providers:
       - name: fan-fan
@@ -787,8 +769,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -817,8 +797,6 @@ spec:
   csrf:
     additionalOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
   jwt:
     providers:
       - name: fan-fan
@@ -964,8 +942,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -1040,8 +1016,6 @@ spec:
   cors:
     allowOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
     allowMethods:
       - GET
       - POST
@@ -1070,8 +1044,6 @@ spec:
   csrf:
     additionalOrigins:
       - https://www.peaket.example
-      - https://queue.peaket.example:18442
-      - https://scanner.peaket.example:18445
   jwt:
     optional: true
     providers:

@@ -22,7 +22,7 @@ export function seconds(v) {
  * 측정 결과 한 건의 Markdown. 계약: 커밋·날짜·PC/OS·도구 판·콜드 스타트·시나리오별 결과·정리 결과.
  * @param {{
  *   commit: string, date: string, pc: string, tools: Record<string, string>,
- *   coldStartSeconds?: number, scenarios: Array<{ id: string, title: string, startedAt?: string, endedAt?: string, seconds?: number, result: '통과'|'실패'|'미실행', failedStep?: string, reason?: string }>,
+ *   coldStartSeconds?: number, totalSeconds?: number, scenarios: Array<{ id: string, title: string, startedAt?: string, endedAt?: string, seconds?: number, result: '통과'|'실패'|'미실행', failedStep?: string, reason?: string }>,
  *   cleanup?: string, command?: string, notes?: string[], outcome?: string,
  * }} r
  */
@@ -35,6 +35,7 @@ export function measurementText(r) {
   lines.push(`- **도구 판**: ${Object.entries(r.tools).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
   lines.push(`- **명령**: \`${r.command ?? 'node tools/local/demo.mjs all'}\``);
   lines.push(`- **콜드 스타트**: ${seconds(r.coldStartSeconds)} (명령 시작 ~ 첫 화면)`);
+  lines.push(`- **전체 시간**: ${seconds(r.totalSeconds)} (명령 시작 ~ 재생 끝)`);
   lines.push(`- **정리**: ${r.cleanup ?? '—'}`);
   lines.push(`- **결과**: ${r.outcome ?? (r.scenarios.every((s) => s.result === '통과') ? '통과' : '실패')}`);
   lines.push('', '## 시나리오별', '', '| # | 시나리오 | 시작 | 끝 | 걸린 시간 | 결과 | 실패 단계·까닭 |', '| --- | --- | --- | --- | --- | --- | --- |');

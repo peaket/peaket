@@ -287,8 +287,43 @@ export function localGatewayObjects(objects) {
   return out;
 }
 
-/** 리스너마다의 인증서 Secret 이름과 호스트(Gateway의 certificateRefs에서) */
-export function listenerCertificates(objects) {
+/**
+ * 데모 전용 교차 출처 덧붙이기(계획 리뷰 반영 RV-01). 공용 deploy/gateways 정의는 게이트웨이마다 화면 출처 하나만
+ * 허용한다(ASVS 3.4.2·3.5.1). 로컬 데모는 대기실(queue)·스캐너(scanner) 앱을 같은 API 호스트(gw-fan) 뒤 다른
+ * 포트로 두므로, 그 두 화면 출처가 gw-fan 정책에만 더 있어야 한다. 다른 게이트웨이의 출처는 넓히지 않는다.
+ * 입력 객체는 바꾸지 않고, 이미 있는 출처는 다시 넣지 않는다(두 번 적용해도 안전).
+ * @param {Array<Record<string, any>>} objects deploy/gateways 객체 @param {Record<string, string>} origins demoOrigins()
+ */
+export function demoOriginSecurityPatch(objects, origins) {
+  if (!origins || typeof origins !== 'object') throw new Error('데모 출처 목록이 필요하다(demoOrigins())');
+  const extra = [origins.queue, origins.scanner].filter((v) => typeof v === 'string' && v !== '');
+  if (extra.length !== 2) throw new Error('데모 출처에 대기실(queue)·스캐너(scanner)가 모두 있어야 한다');
+  // SecurityPolicy의 targetRef는 HTTPRoute 이름이다. 그 라우트의 parentRef로 게이트웨이를 찾는다
+  const gatewayOfRoute = new Map();
+  for (const o of objects) {
+    if (o.kind !== 'HTTPRoute') continue;
+    const name = o.metadata?.name;
+    const gateway = (o.spec?.parentRefs ?? []).map((p) => p?.name).find(Boolean);
+    if (name && gateway) gatewayOfRoute.set(name, gateway);
+  }
+  const out = JSON.parse(JSON.stringify(objects));
+  for (const o of out) {
+    if (o.kind !== 'SecurityPolicy') continue;
+    const gateways = (o.spec?.targetRefs ?? []).map((t) => gatewayOfRoute.get(t?.name)).filter(Boolean);
+    if (!gateways.includes('gw-fan')) continue;
+    const add = (list) => {
+      if (!Array.isArray(list)) return list;
+      const values = list.map((v) => (typeof v === 'string' ? v : v?.value)).filter(Boolean);
+      for (const origin of extra) if (!values.includes(origin)) list.push(origin);
+      return list;
+    };
+    if (o.spec?.cors) o.spec.cors.allowOrigins = add(o.spec.cors.allowOrigins);
+    if (o.spec?.csrf) o.spec.csrf.additionalOrigins = add(o.spec.csrf.additionalOrigins);
+  }
+  return out;
+}
+
+/** 리스너마다의 인증서 Secret 이름과 호스트(Gateway의 certificateRefs에서) */export function listenerCertificates(objects) {
   const out = [];
   for (const g of objects.filter((o) => o.kind === 'Gateway')) {
     for (const l of g.spec?.listeners ?? []) for (const ref of l.tls?.certificateRefs ?? []) out.push({ gateway: g.metadata.name, listener: l.name, host: l.hostname, secret: ref.name });

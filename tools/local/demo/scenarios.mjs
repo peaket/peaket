@@ -25,6 +25,7 @@ export const SCENARIOS = [
     screens: ['SCR-001', 'SCR-002', 'SCR-007', 'SCR-008', 'SCR-010', 'SCR-011', 'SCR-012', 'SCR-013'],
     accounts: ['jimin'],
     needs: ['E-1', 'demo-clock', 'queue-entry', 'pg-simulator'],
+    evidenceOnlyScreens: ['SCR-001'],
     checks: ['seat-hold-2', 'payment-approved', 'ticket-qr'],
     steps: [
       { id: 'home', kind: 'screen', screen: 'SCR-001', path: '/', as: 'jimin' },
@@ -46,6 +47,7 @@ export const SCENARIOS = [
     screens: ['SCR-008', 'SCR-018', 'SCR-054'],
     accounts: ['jimin'],
     needs: ['E-3', 'sold-out-fixture'],
+    evidenceOnlyScreens: [],
     // 취소표 알림 신청 API는 아직 없다(제품 빈칸). 매진 화면에서 누르면 실패 분기의 '다시 시도' 문구를 재생한다
     checks: ['sold-out', 'retry-message'],
     steps: [
@@ -61,6 +63,7 @@ export const SCENARIOS = [
     accounts: ['jimin'],
     // S3는 실패·결과 불명 주문을 남기므로 S9가 취소하는 E-1 대신 E-4를 쓴다
     needs: ['E-4', 'demo-clock', 'queue-entry', 'pg-simulator', 'simulator-faults'],
+    evidenceOnlyScreens: [],
     checks: ['unknown-result', 'seat-released'],
     steps: [
       { id: 'checkout', kind: 'screen', screen: 'SCR-011', path: '/booking/{eventId}/checkout', as: 'jimin' },
@@ -77,6 +80,7 @@ export const SCENARIOS = [
     screens: ['SCR-002', 'SCR-008', 'SCR-010', 'SCR-011'],
     accounts: ['jimin'],
     needs: ['E-2', 'demo-clock', 'queue-entry', 'pg-simulator'],
+    evidenceOnlyScreens: [],
     checks: ['auto-assign', 'payment-approved'],
     steps: [
       { id: 'event', kind: 'screen', screen: 'SCR-002', path: '/events/{eventId}', as: 'jimin' },
@@ -94,6 +98,7 @@ export const SCENARIOS = [
     screens: ['SCR-013', 'SCR-014', 'SCR-041', 'SCR-013', 'SCR-038'],
     accounts: ['jimin', 'haneul'],
     needs: ['E-1', 'ticket', 'fan-reauth'],
+    evidenceOnlyScreens: ['SCR-014', 'SCR-041'],
     // 양도 API(POST /v1/tickets/{id}/transfers, /v1/transfers/*)는 아직 없다(제품 빈칸). 이 묶음은 팬 재인증 토큰과
     // ticket-cancel 재인증 경로(견적 → 취소)를 실제 API로 끝낸다.
     checks: ['fan-reauth', 'cancel-with-fee'],
@@ -112,6 +117,7 @@ export const SCENARIOS = [
     screens: ['SCR-020', 'SCR-062', 'SCR-021', 'SCR-048', 'SCR-062', 'SCR-026'],
     accounts: ['stella-admin', 'minho'],
     needs: ['partner-api', 'ops-api', 'seatmap'],
+    evidenceOnlyScreens: [],
     checks: ['production-created', 'sale-approved', 'status-visible'],
     steps: [
       { id: 'partner', kind: 'screen', screen: 'SCR-020', path: '/login', as: 'stella-admin' },
@@ -132,6 +138,7 @@ export const SCENARIOS = [
     screens: ['SCR-029', 'SCR-030', 'SCR-031'],
     accounts: ['minho', 'sujin', 'second-commander'],
     needs: ['E-1', 'console', 'passkey', 'two-person-approval'],
+    evidenceOnlyScreens: [],
     checks: ['self-approval-403', 'second-approval-ok', 'audit-entry'],
     steps: [
       { id: 'dashboard', kind: 'screen', screen: 'SCR-029', path: '/dashboard?event={eventId}', as: 'sujin' },
@@ -149,6 +156,7 @@ export const SCENARIOS = [
     screens: ['SCR-050', 'SCR-053', 'SCR-037', 'SCR-036', 'SCR-051', 'SCR-033', 'SCR-034', 'SCR-052'],
     accounts: ['haneul', 'doyun'],
     needs: ['E-1', 'staff', 'scanner-device', 'synthetic-ticket'],
+    evidenceOnlyScreens: [],
     checks: ['verdict-pass', 'verdict-reject', 'verdict-needs-check', 'verdict-anomaly'],
     steps: [
       { id: 'assignment', kind: 'screen', screen: 'SCR-037', path: '/staff', as: 'haneul' },
@@ -165,6 +173,7 @@ export const SCENARIOS = [
     screens: ['SCR-044', 'SCR-045', 'SCR-047', 'SCR-013', 'SCR-043'],
     accounts: ['jimin', 'sujin', 'second-commander'],
     needs: ['E-1', 'ticket', 'event-cancellation', 'two-person-approval'],
+    evidenceOnlyScreens: ['SCR-044', 'SCR-043'],
     checks: ['refunded'],
     steps: [
       { id: 'cancellation', kind: 'screen', screen: 'SCR-044', path: '/events/{productionId}/cancellation', as: 'stella-admin' },
@@ -256,6 +265,9 @@ export function validateScenarios(list = SCENARIOS, o = {}) {
     if (!Array.isArray(s.accounts) || s.accounts.length === 0) problems.push(`${id}에 계정이 없다`);
     if (!Array.isArray(s.needs) || s.needs.length === 0) problems.push(`${id}에 필요한 선행(needs)이 없다`);
     if (!Array.isArray(s.checks) || s.checks.length === 0) problems.push(`${id}에 결과 확인(checks)이 없다`);
+    // 증거로만 여는 화면(리뷰 RV-05): 화면 목록 안의 이름이어야 하고, 필수 화면 판정에서 뺀다
+    if (!Array.isArray(s.evidenceOnlyScreens)) problems.push(`${id}에 evidenceOnlyScreens(배열)가 없다`);
+    else for (const screen of s.evidenceOnlyScreens) if (!(s.screens ?? []).includes(screen)) problems.push(`${id}의 evidenceOnlyScreens ${screen}이 화면 목록에 없다`);
     for (const c of REQUIRED_CHECKS[id] ?? []) if (!(s.checks ?? []).includes(c)) problems.push(`${id}에 결과 확인 '${c}'가 없다`);
     if (new Set(s.checks ?? []).size !== (s.checks ?? []).length) problems.push(`${id}의 checks에 같은 이름이 두 번 있다`);
     if (new Set(s.screens ?? []).size === 0 && (s.screens ?? []).length > 0) problems.push(`${id}의 screens가 비었다`);
@@ -263,7 +275,7 @@ export function validateScenarios(list = SCENARIOS, o = {}) {
   return {
     ok: problems.length === 0,
     problems,
-    scenarios: list.map((s) => ({ id: s.id, title: s.title, screens: [...s.screens], accounts: [...s.accounts], needs: [...s.needs], checks: [...s.checks] })),
+    scenarios: list.map((s) => ({ id: s.id, title: s.title, screens: [...s.screens], accounts: [...s.accounts], needs: [...s.needs], checks: [...s.checks], evidenceOnlyScreens: [...(s.evidenceOnlyScreens ?? [])] })),
   };
 }
 

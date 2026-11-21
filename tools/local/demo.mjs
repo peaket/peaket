@@ -40,7 +40,7 @@ const USAGE = `쓰는 법: node tools/local/demo.mjs <명령> [옵션]
 /** 인자를 명령별로 읽는다. 모르는 인자는 던진다(호출한 쪽이 exit 2로 바꾼다) */
 export function parseArgs(argv) {
   const cmd = argv[0];
-  const o = { cmd, root: REPO, scenarios: ['all'], json: false, check: false, headed: false, video: false, keep: false, skipBuild: false, seedOnly: false, skipPlay: false, reset: false, keepCluster: false, cluster: process.env.PEAKET_DEMO_CLUSTER || DEMO_CLUSTER, work: undefined, measure: join(REPO, 'docs', 'review', 'measurements', 'BAT-086-demo.md') };
+  const o = { cmd, root: REPO, scenarios: ['all'], json: false, check: false, headed: false, video: false, keep: false, skipBuild: false, seedOnly: false, skipPlay: false, reset: false, keepCluster: false, cluster: process.env.PEAKET_DEMO_CLUSTER || DEMO_CLUSTER, work: undefined, measureSet: false, measure: join(REPO, 'docs', 'review', 'measurements', 'BAT-086-demo.md') };
   const take = (i) => {
     const v = argv[i + 1];
     if (!v) throw new Error(`${argv[i]}에는 값이 필요하다`);
@@ -70,8 +70,10 @@ export function parseArgs(argv) {
       }
     } else if (a === '--cluster') o.cluster = take(i++);
     else if (a === '--work') o.work = resolve(take(i++));
-    else if (a === '--measure') o.measure = resolve(take(i++));
-    else if (a === '--help' || a === '-h') o.help = true;
+    else if (a === '--measure') {
+      o.measure = resolve(take(i++));
+      o.measureSet = true;
+    } else if (a === '--help' || a === '-h') o.help = true;
     else throw new Error(`모르는 인자: ${a}`);
   }
   const known = ['doctor', 'plan', 'up', 'seed', 'play', 'status', 'compat', 'cloud-plan', 'down', 'all', 'help'];
@@ -120,6 +122,7 @@ export function findCachedTool(root, name, env = process.env) {
 /**
  * 선행 점검. 파일·도구를 모두 보고, 빠진 것을 전부 모아 돌려준다(계획 B4).
  * 클러스터 명령은 부르지 않는다(V-T7 ②: 가짜 kubectl 기록 0).
+ * Playwright 패키지와 chromium 실행 파일을 따로 본다: 패키지만 있고 브라우저가 없는 빈 PC는 play에서야 실패한다(리뷰 RV-09).
  * @param {string} root 저장소 뿌리(가짜 뿌리 시험용)
  */
 export function doctorChecks(root = REPO, env = process.env) {
@@ -136,6 +139,8 @@ export function doctorChecks(root = REPO, env = process.env) {
   file('데모 무대 스크립트', join(root, 'tools', 'local', 'cluster.mjs'));
   file('기본 시드 적용기', join(root, 'tools', 'local', 'demo-seed.mjs'));
   file('Playwright', join(root, 'tools', 'web-checks', 'node_modules', '@playwright', 'test', 'package.json'));
+  const browsers = playwrightBrowsersDir(env);
+  if (!findChromium(browsers)) problems.push({ what: 'Playwright chromium', path: browsers });
   for (const t of ['docker', 'kind', 'kubectl', 'helm']) {
     const p = findOnPath(t, env) ?? findCachedTool(root, t, env);
     tools[t] = p ?? null;
@@ -144,11 +149,68 @@ export function doctorChecks(root = REPO, env = process.env) {
   return { ok: problems.length === 0, problems, tools, root };
 }
 
+/** Playwright 브라우저 캐시(기본 설치 경로). PLAYWRIGHT_BROWSERS_PATH가 있으면 그것을 쓴다 */
+export function playwrightBrowsersDir(env = process.env) {
+  if (env.PLAYWRIGHT_BROWSERS_PATH) return resolve(env.PLAYWRIGHT_BROWSERS_PATH);
+  if (process.platform === 'win32') return join(env.LOCALAPPDATA || join(env.USERPROFILE || '', 'AppData', 'Local'), 'ms-playwright');
+  return join(env.HOME || '', '.cache', 'ms-playwright');
+}
+
+/**
+ * 브라우저 캐시에서 chromium 실행 파일 하나를 찾는다(없으면 undefined). 명령을 실행하지 않는다.
+ * Playwright 판마다 하위 폴더 이름이 달라(chrome-win64·chrome-linux·chrome-headless-shell) 두 단계까지 본다.
+ */
+export function findChromium(dir) {
+  const shapes = [
+    ['chrome-win64', 'chrome.exe'],
+    ['chrome-win', 'chrome.exe'],
+    ['chrome-linux', 'chrome'],
+    ['chrome-linux64', 'chrome'],
+    ['chrome-mac', 'Chromium.app'],
+  ];
+  let entries = [];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || !/^chromium(?:-headless_shell)?-\d+$/.test(e.name)) continue;
+    for (const parts of shapes) {
+      const p = join(dir, e.name, ...parts);
+      try {
+        if (statSync(p).isFile() || statSync(p).isDirectory()) return p;
+      } catch {}
+    }
+    let subs = [];
+    try {
+      subs = readdirSync(join(dir, e.name), { withFileTypes: true });
+    } catch {}
+    for (const sub of subs) {
+      if (!sub.isDirectory()) continue;
+      for (const name of ['chrome.exe', 'chrome', 'headless_shell']) {
+        const p = join(dir, e.name, sub.name, name);
+        try {
+          if (statSync(p).isFile()) return p;
+        } catch {}
+      }
+    }
+  }
+  return undefined;
+}
+
 function toolVersion(name, args = ['--version']) {
   try {
     const r = spawnSync(name, args, { encoding: 'utf8', timeout: 20_000 });
     if (r.status !== 0) return '없음';
-    return String(r.stdout ?? r.stderr ?? '').trim().split('\n')[0].slice(0, 120) || '있음';
+    const text = String(r.stdout ?? r.stderr ?? '').trim();
+    // kubectl version --client --output=json은 여러 줄 JSON이라 첫 줄이 '{'다. 판만 꺼낸다(리뷰 RV-14)
+    try {
+      const j = JSON.parse(text);
+      const v = j?.clientVersion?.gitVersion ?? j?.clientVersion?.version;
+      if (v) return String(v);
+    } catch {}
+    return text.split('\n')[0].slice(0, 120) || '있음';
   } catch {
     return '없음';
   }
@@ -206,6 +268,40 @@ function demoEnv(o) {
   return { ...process.env, PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster };
 }
 
+/**
+ * `all`의 결과 문장과 끝 코드(리뷰 RV-03·RV-10). 0건 실행은 '통과'가 아니라 '건너뜀'이고,
+ * `--keep`은 정리 실패가 아니며, 정리 실패는 성공으로 덮지 않는다.
+ * @param {{ keep?: boolean, seedOnly?: boolean, skipPlay?: boolean, report?: { ok?: boolean }, cleanup?: string }} r
+ * @returns {{ outcome: string, exit: number }}
+ */
+export function allResult({ keep = false, seedOnly = false, skipPlay = false, report, cleanup = '' } = {}) {
+  const cleaned = String(cleanup).startsWith('지움');
+  if (seedOnly) return { outcome: '건너뜀(시드만)', exit: 0 };
+  if (skipPlay) {
+    const cleanupFailed = !keep && !cleaned;
+    return { outcome: cleanupFailed ? '건너뜀(--skip-play: 재생 안 함)(정리 실패)' : '건너뜀(--skip-play: 재생 안 함)', exit: cleanupFailed ? 1 : 0 };
+  }
+  const ok = Boolean(report?.ok);
+  const cleanupFailed = !keep && !cleaned;
+  if (ok && !cleanupFailed) return { outcome: '통과', exit: 0 };
+  if (ok) return { outcome: '통과(정리 실패)', exit: 1 };
+  return { outcome: '실패', exit: 1 };
+}
+
+/** 실행별 측정 파일: 정본 옆에 runId를 붙인다(정본을 덮지 않는다, 리뷰 RV-11) */
+export function measurementHistoryPath(file, runId) {
+  const id = String(runId ?? '').replace(/[^A-Za-z0-9._-]+/g, '-');
+  if (!id) throw new Error('측정 실행 ID가 필요하다');
+  const p = resolve(file);
+  const name = p.split(/[\\/]/).pop().replace(/\.md$/i, '');
+  return join(dirname(p), `${name}-${id}.md`);
+}
+
+/** play만 실행한 측정: 정본과 섞지 않고 <정본 폴더>/play/<이름>-<runId>.md에 쓴다(리뷰 RV-11) */
+export function playMeasurementPath(file, runId) {
+  return join(dirname(resolve(file)), 'play', measurementHistoryPath(file, runId).split(/[\\/]/).pop());
+}
+
 function measurementOf(report, o, cleanup, outcome) {
   const found = doctorChecks(o.root).tools;
   return {
@@ -220,6 +316,7 @@ function measurementOf(report, o, cleanup, outcome) {
       playwright: '1.64.1(tools/web-checks)',
     },
     coldStartSeconds: report?.coldStartSeconds,
+    totalSeconds: report?.totalSeconds,
     scenarios: (report?.scenarios ?? []).map((s) => ({ ...s })),
     cleanup,
     outcome,
@@ -229,11 +326,13 @@ function measurementOf(report, o, cleanup, outcome) {
       'S2는 대기열 Redis notice를 데모 전용으로 매진으로 바꾸고(공개 API에 재고 0 쓰기가 없다) 매진 화면의 [취소표 알림 받기] 실패·[다시 시도] 문구를 재생한다. 취소표 알림 신청 API는 제품에 없다(404).',
       'S3는 실패·결과 불명 주문을 남기므로 S9가 취소하는 E-1 대신 E-4(팬미팅)에서 돌린다. S9의 일괄 환불을 미완료 주문이 막지 않게 하기 위한 시나리오 분리다.',
       'S5는 팬 재인증 토큰(identity gRPC IssueReauthToken, act FAN_SENSITIVE·op TICKET_CANCEL)을 발급해 취소 견적·취소 API를 끝까지 부른다. 양도 API는 제품에 없어 화면만 연다.',
-      'S6의 판매 심사 제출 API는 제품에 없다(BAT-616 미병합, 404). 데모 전용 SQL로 sale_review만 SUBMITTED로 두고 판매 승인은 실제 ops API로 부른다.',
+      'S6의 판매 심사 제출 API는 BAT-616으로 들어왔다(develop 병합). 이미지가 병합 전 빌드면 404라 데모 전용 SQL로 sale_review만 SUBMITTED로 두는 분기를 탄다.',
       'S7은 패스키 재인증(시드 개인키로 WebAuthn assertion) 뒤 요청자 자기 승인 403·두 번째 commander 승인·감사 기록을 본다. S9는 파트너 요청·commander 판정·두 번째 commander 확정·일괄 환불을 본다.',
       'S8은 보존한 DPoP 기기 키로 기기 등록·승인 로그인·스캔 업로드를 하고, 판정 넷(통과·거부·확인 필요·이상 표시)을 티켓 원장에서 확인한다. 시드 티켓에 게이트 구역이 비어 있어 데모 전용 SQL로 기기 배치 구역을 티켓에 적는다.',
       'S9의 회차 취소 환불 반복은 합본의 purchase-relay 자식이 돈다(운영은 별도 outbox-relay Deployment).',
       'S1 홈(/v1/home)은 제품에 없어 500이고, 화면 증거로만 연다(판정 checks에는 넣지 않는다).',
+      'S1 SCR-013은 제품 앱이 목업 티켓만 그린다(티켓 조회 API 없음). 화면은 목업 티켓 id로 열어 QR 요소를 확인하고, ticket-qr은 실제 원장 ticketId와 화면 QR을 함께 본다.',
+      '증거로만 여는 화면(evidenceOnlyScreens): S1 SCR-001, S5 SCR-014·SCR-041, S9 SCR-044·SCR-043. 나머지 화면 방문 실패는 시나리오 실패다.',
       `데모 동의 문안 판은 ${DEMO_CONSENT_VERSION}이다(서버 값과 다르면 422 consent-version-outdated).`,
     ],
   };
@@ -251,73 +350,78 @@ function cleanupStage(cluster) {
 /** all: 무대 → 시드 → 재생 → 측정 → 정리 */
 async function runAll(o, log) {
   const startedAt = Date.now();
+  const runId = new Date(startedAt).toISOString().replace(/[:.]/g, '-');
   const issues = doctorChecks(o.root);
   let report;
   let cleanup = o.keep ? '남김(--keep)' : '아직';
   let outcome;
+  /** 정본 측정과 실행별 측정을 함께 쓴다(실패·부분 실행이 정본을 덮어도 지난 기록은 남는다, 리뷰 RV-11) */
+  const write = (r) => {
+    const measured = measurementOf(r, o, cleanup, outcome);
+    measured.coldStartSeconds = r?.coldStartSeconds;
+    measured.totalSeconds = r?.totalSeconds;
+    writeMeasurement(o.measure, measured);
+    writeMeasurement(measurementHistoryPath(o.measure, r?.runId ?? runId), measured);
+    return measured;
+  };
   if (!issues.ok) {
     log('선행이 모자란다. 고치기 전에는 무대를 올리지 않는다(닫힌 실패):');
     for (const p of issues.problems) log(`  - ${p.what}: ${p.path}`);
     outcome = '실패(선행 없음)';
-    report = { coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '선행 없음' })) };
-    writeMeasurement(o.measure, measurementOf(report, o, cleanup, outcome));
+    report = { runId, coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '선행 없음' })) };
+    write(report);
     return 1;
   }
   log('① 데모 무대');
   const upStatus = runNode('cluster.mjs', ['demo', ...(o.skipBuild ? ['--skip-build'] : [])], { PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster });
   if (upStatus !== 0) {
     outcome = `실패(무대 exit ${upStatus})`;
-    report = { coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: `무대 exit ${upStatus}` })) };
+    report = { runId, coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: `무대 exit ${upStatus}` })) };
     cleanup = o.keep ? '남김(--keep)' : cleanupStage(o.cluster);
-    writeMeasurement(o.measure, measurementOf(report, o, cleanup, outcome));
+    write(report);
     return 1;
   }
   log('② 기본 합성 시드');
   const seed = runNodeJson('cluster.mjs', ['demo-seed', '--apply', '--json'], { PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster });
   if (seed.status !== 0) {
     outcome = `실패(시드 exit ${seed.status})`;
-    report = { coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '시드 실패' })) };
+    report = { runId, coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '시드 실패' })) };
     cleanup = o.keep ? '남김(--keep)' : cleanupStage(o.cluster);
-    writeMeasurement(o.measure, measurementOf(report, o, cleanup, outcome));
+    write(report);
     return 1;
   }
   if (o.seedOnly) {
-    outcome = '통과(시드만)';
-    writeMeasurement(o.measure, measurementOf({ scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '--seed-only' })) }, o, o.keep ? '남김(--keep)' : '남김(--seed-only)', outcome));
-    return 0;
+    cleanup = o.keep ? '남김(--keep)' : '남김(--seed-only)';
+    outcome = allResult({ seedOnly: true }).outcome;
+    report = { runId, coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '--seed-only' })) };
+    write(report);
+    return allResult({ seedOnly: true }).exit;
   }
   log('③ S1~S9 재생');
   const stage = stageProblems({ env: demoEnv(o) });
   if (!stage.ok) {
     outcome = `실패(${stage.reason})`;
-    report = { coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: stage.reason })) };
-    cleanup = o.keep ? '남김(--keep)' : '아직';
-    if (!o.keep) {
-      runNode('cluster.mjs', ['demo-down'], { PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster });
-      runNode('cluster.mjs', ['down'], { PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster });
-      cleanup = '지움(네임스페이스+클러스터)';
-    }
-    writeMeasurement(o.measure, measurementOf(report, o, cleanup, outcome));
+    report = { runId, coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: stage.reason })) };
+    cleanup = o.keep ? '남김(--keep)' : cleanupStage(o.cluster);
+    write(report);
     return 1;
   }
   report = o.skipPlay
-    ? { coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '--skip-play' })), ok: true }
-    : await play(o, log, true);
-  outcome = report.ok ? '통과' : '실패';
+    ? { runId, coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '--skip-play' })), ok: false }
+    : await play(o, log, true, startedAt);
   if (!o.keep) {
     log('④ 정리');
     cleanup = cleanupStage(o.cluster);
-    if (!cleanup.startsWith('지움')) outcome = `${outcome}(정리 실패)`;
   } else cleanup = '남김(--keep)';
-  const measured = measurementOf(report, o, cleanup, outcome);
-  measured.coldStartSeconds = report.coldStartSeconds;
-  writeMeasurement(o.measure, measured);
+  const result = allResult({ keep: o.keep, skipPlay: o.skipPlay, report, cleanup });
+  outcome = result.outcome;
+  write(report);
   log(`⑤ 측정: ${o.measure}`);
-  return report.ok && cleanup.startsWith('지움') ? 0 : 1;
+  return result.exit;
 }
 
-/** 재생 한 번(공개 함수: play 명령과 all이 함께 쓴다) */
-async function play(o, log, fromAll = false) {
+/** 재생 한 번(공개 함수: play 명령과 all이 함께 쓴다). startedAt은 all이 명령을 시작한 시각이다(콜드 스타트, 리뷰 RV-02) */
+async function play(o, log, fromAll = false, startedAt) {
   const ids = o.scenarios.includes('all') ? SCENARIO_ORDER : o.scenarios;
   const chosen = SCENARIOS.filter((s) => ids.includes(s.id));
   const contractFile = process.env.PEAKET_DEMO_CONTRACT || join(DEFAULT_ROOT, 'demo-contract.json');
@@ -334,12 +438,16 @@ async function play(o, log, fromAll = false) {
     headed: o.headed,
     video: o.video,
     log,
+    startedAt,
   });
   const failed = report.scenarios.filter((s) => s.result !== '통과');
   log(`재생 결과: ${report.scenarios.length - failed.length}/${report.scenarios.length} 통과${failed.length ? `, 실패 ${failed.map((s) => s.id).join('·')}` : ''}`);
-  if (!fromAll && o.measure) {
+  if (!fromAll) {
     const outcome = report.ok ? '통과' : '실패';
-    writeMeasurement(o.measure, measurementOf(report, o, '—(play만 실행)', outcome));
+    // play만 돌린 측정은 정본을 덮지 않는다(리뷰 RV-11)
+    const file = o.measureSet ? o.measure : playMeasurementPath(o.measure, report.runId);
+    writeMeasurement(file, measurementOf(report, o, '—(play만 실행)', outcome));
+    log(`측정: ${file}`);
   }
   return report;
 }
@@ -464,7 +572,7 @@ async function main() {
         if (!o.json) console.error(`${stage.reason}: ${stage.problems.join('; ')}`);
         return 1;
       }
-      const report = await play(o, log, false);
+      const report = await play(o, log, false, Date.now());
       jsonOut(o, report);
       return report.ok ? 0 : 1;
     }

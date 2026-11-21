@@ -271,6 +271,19 @@ async function failArtifact(ctx, step, page, e) {
   } catch {}
 }
 
+/**
+ * 티켓 화면의 QR 요소를 확인한다(리뷰 RV-05). 화면은 role="img"와 aria-label('입장 QR, 티켓 …')로 QR을 그리고,
+ * 실제 무늬는 .qr 안의 검은 칸(i.on)이다. 화면은 목업 티켓만 그리므로 값은 원장 ticketId와 따로 적는다
+ * (측정 파일 '남긴 것'의 데모 예외).
+ */
+async function ticketQrOf(page) {
+  const qr = page.locator('[role="img"][aria-label^="입장 QR"]').first();
+  await qr.waitFor({ state: 'visible', timeout: ACTION_TIMEOUT_MS });
+  const label = (await qr.getAttribute('aria-label')) ?? '';
+  const cells = await qr.locator('.qr i.on').count();
+  return { ok: /입장 QR/.test(label) && cells > 0, label, cells };
+}
+
 /** 제품 API 한 번. 쿠키는 데모 세션에서만 읽고 로그에 싣지 않는다 */
 async function api(ctx, account, o) {
   const s = await session(ctx, account);
@@ -708,6 +721,30 @@ async function queuePreverify(ctx, account, eventId) {
   return pre.json.preverifyToken;
 }
 
+/**
+ * 대기실 화면은 사전 검증 토큰이 브라우저 저장소에 없으면 공연 상세로 돌아가고, T=0 화면이 404로 끝난다.
+ * 같은 API로 토큰을 받아 페이지에 넣는다(대기열 진입·판정은 실제 화면·API가 한다).
+ */
+async function primeQueueBrowser(ctx, account, eventId) {
+  ensureQueueSchedule(ctx, eventId);
+  const token = await queuePreverify(ctx, account, eventId);
+  const page = await pageFor(ctx, account);
+  await page.addInitScript(
+    ({ qkey, token, deviceId, at }) => {
+      localStorage.setItem('peaket.device', deviceId);
+      localStorage.setItem(qkey, JSON.stringify({ preverifyToken: token, preverifyIssuedAt: at, savedAt: at }));
+    },
+    { qkey: `peaket.queue.${eventId}`, token, deviceId: DEMO_DEVICE_ID, at: ctx.now() },
+  );
+  return page;
+}
+
+/** 대기실 화면을 떠나 하트비트가 입장 표시를 다시 만들지 않게 한다(데모 전용) */
+async function stopQueueBrowser(ctx, account) {
+  const page = ctx.pages.get(account);
+  if (page) await page.goto('about:blank').catch(() => undefined);
+}
+
 /** 대기열 진입 → 입장 확정(구매 세션 재료). 조건을 기다리며 다시 묻는다 */
 async function admit(ctx, account, eventId) {
   const origin = originOf(ctx.contract, 'queue');
@@ -884,13 +921,19 @@ const FLOWS = {
     await resetQueueAdmission(ctx, eventId);
     writeSeatMap(ctx, eventId, 'e1-1025');
     await ensureFanVerified(ctx, 'jimin');
-    // 홈 피드(/v1/home)는 아직 제품에 없다. 화면 증거로만 열고 실패는 로그에 남긴다(판정은 S1 checks)
+    // 홈 피드(/v1/home)는 아직 제품에 없다. 증거로만 열고 실패는 로그에 남긴다(판정은 S1 checks)
     await visit(ctx, { screen: 'SCR-001', path: '/', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-001: ${e.message}`));
     await visit(ctx, { screen: 'SCR-002', path: '/events/{eventId}', account: 'jimin', expect: ['예매|LUMEN'] });
     const { openAt } = await shiftClock(ctx, eventId);
     ctx.vars.openAt = openAt;
-    await visit(ctx, { screen: 'SCR-007', path: '/queue/{eventId}', account: 'jimin', origin: 'queue', expect: ['로비|대기|순번|오픈'] }).catch((e) => ctx.log(`  화면 SCR-007: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-007', path: '/queue/{eventId}', account: 'jimin', origin: 'queue', expect: ['로비|대기|순번|오픈'] });
     await waitOpen(ctx, eventId, openAt);
+    // T=0 대기열 화면(정본 d5 §10.6). 사전 검증 토큰을 넣고 한 번 열어 화면 전이를 남긴다
+    await primeQueueBrowser(ctx, 'jimin', eventId);
+    await visit(ctx, { screen: 'SCR-008', path: '/queue/{eventId}', account: 'jimin', origin: 'queue' });
+    // 화면을 떠난 뒤 입장 표시를 지운다. 화면이 살아 있으면 하트비트가 다시 만들어 admit이 409다
+    await stopQueueBrowser(ctx, 'jimin');
+    await resetQueueAdmission(ctx, eventId);
     const admission = await admit(ctx, 'jimin', eventId);
     const signer = await purchaseSigner(admission);
     const hold = heldOf(await holdSeats(ctx, 'jimin', eventId, signer, { seatIds: [demoSeatId(eventId, 'R1-1-5'), demoSeatId(eventId, 'R1-1-6')] }), 'S1');
@@ -922,11 +965,14 @@ const FLOWS = {
       { timeoutMs: 60_000, intervalMs: 1_000 },
     );
     ctx.vars.ticketId = ticketId;
-    ctx.addCheck('ticket-qr', true, `ticketId ${ticketId}`);
-    await visit(ctx, { screen: 'SCR-010', path: '/booking/{eventId}/seats', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-010: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-011', path: '/booking/{eventId}/checkout', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-011: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-012', path: '/booking/{eventId}/result', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-012: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-013', path: '/my/tickets/{ticketId}', account: 'jimin', expect: ['티켓|QR|입장'] }).catch((e) => ctx.log(`  화면 SCR-013: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-010', path: '/booking/{eventId}/seats', account: 'jimin' });
+    await visit(ctx, { screen: 'SCR-011', path: '/booking/{eventId}/checkout', account: 'jimin' });
+    await visit(ctx, { screen: 'SCR-012', path: '/booking/{eventId}/result', account: 'jimin' });
+    // SCR-013은 제품 앱이 목업 티켓만 그린다(티켓 조회 API 없음). 화면은 QR이 있는 상태로 열어 요소·값을 확인하고,
+    // 판정의 ticketId는 실제 원장 값이다(측정 파일 '남긴 것'의 데모 예외)
+    const ticketPage = await visit(ctx, { screen: 'SCR-013', path: '/my/tickets/tkt-lumen-r1-0312?state=QR%2015%EC%B4%88%20%EC%A7%80%EB%82%A8', account: 'jimin', expect: ['티켓'] });
+    const qr = await ticketQrOf(ticketPage);
+    ctx.addCheck('ticket-qr', qr.ok, `원장 ticketId ${ticketId} · 화면 QR ${qr.cells}칸 · ${qr.label.slice(0, 60)}`);
     return ctx.checks;
   },
 
@@ -956,15 +1002,9 @@ const FLOWS = {
 
     // 대기실 화면은 공연 상세가 발급한 사전 검증 토큰으로 진입한다. 직접 URL로 열면 토큰이 없어 공연 상세로 돌아가므로,
     // 같은 API로 토큰을 받아 브라우저 저장소에 넣고 연다(대기열 진입·판정은 실제 화면·API가 한다)
-    const preverifyToken = await queuePreverify(ctx, 'jimin', eventId);
-    const page = await pageFor(ctx, 'jimin');
-    await page.addInitScript(
-      ({ qkey, token, deviceId, at }) => {
-        localStorage.setItem('peaket.device', deviceId);
-        localStorage.setItem(qkey, JSON.stringify({ preverifyToken: token, preverifyIssuedAt: at, savedAt: at }));
-      },
-      { qkey: `peaket.queue.${eventId}`, token: preverifyToken, deviceId: DEMO_DEVICE_ID, at: ctx.now() },
-    );
+    const page = await primeQueueBrowser(ctx, 'jimin', eventId);
+    // 대기열 T=0 화면(SCR-008). 같은 주소에서 매진 상태로 바뀌기 전 화면을 한 번 남긴다
+    await visit(ctx, { screen: 'SCR-008', path: '/queue/{eventId}', account: 'jimin', origin: 'queue' });
     await visit(ctx, { screen: 'SCR-018', path: '/queue/{eventId}', account: 'jimin', origin: 'queue' });
     // 매진 화면은 대기실이 진입·상태 파일을 받은 다음에야 그려진다. 화면 하나에 최대 2분을 준다
     const alert = page.getByRole('button', { name: /취소표 알림 받기/ }).first();
@@ -973,7 +1013,7 @@ const FLOWS = {
     // 취소표 알림 신청 API(/v1/events/{id}/subscriptions)는 아직 제품에 없다. 화면의 실패 분기와 [다시 시도] 문구를 재생한다
     await page.getByText(/다시 시도해 주세요/).first().waitFor({ state: 'visible', timeout: ACTION_TIMEOUT_MS });
     ctx.addCheck('retry-message', true, '취소표 알림 신청 실패 → [다시 시도] 문구 확인(신청 API는 제품 빈칸)');
-    await visit(ctx, { screen: 'SCR-054', path: '/my/likes', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-054: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-054', path: '/my/likes', account: 'jimin' });
     return ctx.checks;
   },
 
@@ -984,7 +1024,7 @@ const FLOWS = {
     ctx.vars.eventId = eventId;
     writeSeatMap(ctx, eventId, 'e4-01');
     await ensureFanVerified(ctx, 'jimin');
-    await visit(ctx, { screen: 'SCR-011', path: '/booking/{eventId}/checkout', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-011: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-011', path: '/booking/{eventId}/checkout', account: 'jimin' });
     const { openAt } = await shiftClock(ctx, eventId);
     await waitOpen(ctx, eventId, openAt);
     // 같은 회차를 S1이 먼저 썼다. 계정별 입장 표시를 지워 다시 줄을 설 수 있게 한다(데모 전용)
@@ -1030,10 +1070,10 @@ const FLOWS = {
     });
     ctx.addCheck('unknown-result', unknown === 'UNKNOWN', `결제 상태 ${unknown}`);
     simulatorClearFaults(ctx);
-    await visit(ctx, { screen: 'SCR-012', path: '/booking/{eventId}/result', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-012: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-055', path: '/my/orders', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-055: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-012', path: '/booking/{eventId}/result', account: 'jimin' });
+    await visit(ctx, { screen: 'SCR-055', path: '/my/orders', account: 'jimin' });
     ctx.vars.eventId = eventId;
-    await visit(ctx, { screen: 'SCR-010', path: '/booking/{eventId}/seats', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-010: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-010', path: '/booking/{eventId}/seats', account: 'jimin' });
     return ctx.checks;
   },
 
@@ -1045,7 +1085,9 @@ const FLOWS = {
     await visit(ctx, { screen: 'SCR-002', path: '/events/{eventId}', account: 'jimin', expect: ['예매|페스티벌'] });
     const { openAt } = await shiftClock(ctx, eventId);
     await waitOpen(ctx, eventId, openAt);
-    await visit(ctx, { screen: 'SCR-008', path: '/queue/{eventId}', account: 'jimin', origin: 'queue' }).catch((e) => ctx.log(`  화면 SCR-008: ${e.message}`));
+    await primeQueueBrowser(ctx, 'jimin', eventId);
+    await visit(ctx, { screen: 'SCR-008', path: '/queue/{eventId}', account: 'jimin', origin: 'queue' });
+    await stopQueueBrowser(ctx, 'jimin');
     await resetQueueAdmission(ctx, eventId);
     const admission = await admit(ctx, 'jimin', eventId);
     const signer = await purchaseSigner(admission);
@@ -1062,8 +1104,8 @@ const FLOWS = {
     if (accepted.status !== 202) throw new Error(`S4 결제 접수 → ${accepted.status}`);
     const paid = await waitPayment(ctx, 'jimin', order.json.orderId, ['CONFIRMED', 'APPROVED']);
     ctx.addCheck('payment-approved', paid === 'CONFIRMED' || paid === 'APPROVED', `결제 상태 ${paid}`);
-    await visit(ctx, { screen: 'SCR-010', path: '/booking/{eventId}/seats', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-010: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-011', path: '/booking/{eventId}/checkout', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-011: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-010', path: '/booking/{eventId}/seats', account: 'jimin' });
+    await visit(ctx, { screen: 'SCR-011', path: '/booking/{eventId}/checkout', account: 'jimin' });
     return ctx.checks;
   },
 
@@ -1075,7 +1117,7 @@ const FLOWS = {
     const ticketId = sqlRead(ctx, 'peaket_demo_ticket', `select id from ticket where event_id = '${eventId}' and account_id = '${me.accountId}' and status = 'ISSUED' order by created_at, id limit 1`);
     if (!/^[0-9a-f-]{36}$/.test(ticketId)) throw new Error(`S5에 쓸 지민의 티켓이 없다(S1이 먼저 돈다): ${JSON.stringify(ticketId)}`);
     ctx.vars.ticketId = ticketId;
-    await visit(ctx, { screen: 'SCR-013', path: '/my/tickets', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-013: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-013', path: '/my/tickets', account: 'jimin' });
     // 양도 화면은 증거로만 연다. POST /v1/tickets/{id}/transfers·/v1/transfers/*는 아직 제품에 없다(이 묶음은 화면·API를 만들지 않는다)
     await visit(ctx, { screen: 'SCR-014', path: '/my/tickets/{ticketId}/transfer', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-014: ${e.message}`));
     ctx.vars.offerId = randomUUID();
@@ -1088,7 +1130,7 @@ const FLOWS = {
     const quote = await api(ctx, 'jimin', { method: 'GET', host: 'api', path: `/v1/tickets/${ticketId}/cancellation-quote` });
     if (quote.status !== 200) throw new Error(`취소 견적 → ${quote.status} ${tail(quote.text, 600)}`);
     const q = quote.json ?? {};
-    await visit(ctx, { screen: 'SCR-038', path: '/my/tickets/{ticketId}/cancel', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-038: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-038', path: '/my/tickets/{ticketId}/cancel', account: 'jimin' });
     const cancelled = await api(ctx, 'jimin', {
       method: 'POST',
       host: 'api',
@@ -1103,8 +1145,8 @@ const FLOWS = {
   },
 
   async S6(ctx) {
-    await visit(ctx, { screen: 'SCR-020', path: '/login', account: 'stella-admin' }).catch((e) => ctx.log(`  화면 SCR-020: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-062', path: '/events', account: 'stella-admin', origin: 'partner', expect: ['공연'] }).catch((e) => ctx.log(`  화면 SCR-062: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-020', path: '/login', account: 'stella-admin' });
+    await visit(ctx, { screen: 'SCR-062', path: '/events', account: 'stella-admin', origin: 'partner', expect: ['공연'] });
     // 공연장은 시드가 만든 행을 읽는다(파트너 목록·상세 API 없음, BAT-087 로컬 예외와 같은 읽기)
     const placeId = sqlRead(ctx, 'peaket_demo_core', `select id from place where name = '피켓 아레나' limit 1`);
     if (!/^[0-9a-f-]{36}$/.test(placeId)) throw new Error(`시드 공연장(피켓 아레나)을 찾지 못했다: ${JSON.stringify(placeId)}`);
@@ -1132,7 +1174,7 @@ const FLOWS = {
     }
     ctx.vars.productionId = productionId;
     ctx.addCheck('production-created', true, `productionId ${productionId}`);
-    await visit(ctx, { screen: 'SCR-021', path: '/events/new', account: 'stella-admin', origin: 'partner', expect: ['공연|등록'] }).catch((e) => ctx.log(`  화면 SCR-021: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-021', path: '/events/new', account: 'stella-admin', origin: 'partner', expect: ['공연|등록'] });
     // 좌석맵 한 번(없을 때만). 작은 배치 하나면 충분하다
     const layout = sqlRead(ctx, 'peaket_demo_core', `select count(*) from event where production_id = '${productionId}' and venue_id is not null`);
     if (Number(layout) === 0) {
@@ -1186,7 +1228,7 @@ const FLOWS = {
       throw new Error(`판매 심사 제출 → ${submitted.status} ${tail(submitted.text, 600)}`);
     }
     const scale = JSON.parse(sqlRead(ctx, 'peaket_demo_core', `select coalesce(json_agg(json_build_object('eventId', id, 'scale', 'SMALL')), '[]'::json) from event where production_id = '${productionId}'`));
-    await visit(ctx, { screen: 'SCR-048', path: `/sale-reviews/${productionId}`, account: 'minho', origin: 'console', expect: ['판매|승인'] }).catch((e) => ctx.log(`  화면 SCR-048: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-048', path: `/sale-reviews/${productionId}`, account: 'minho', origin: 'console', expect: ['판매|승인'] });
     const approved = await api(ctx, 'minho', { method: 'POST', host: 'ops-api', path: `/v1/ops/sale-reviews/${productionId}/approvals`, body: { scales: scale, placeId } });
     if (![200, 202, 409].includes(approved.status)) throw new Error(`판매 승인 → ${approved.status} ${tail(approved.text, 600)}`);
     ctx.addCheck('sale-approved', true, `승인 응답 ${approved.status}`);
@@ -1194,17 +1236,17 @@ const FLOWS = {
     ctx.vars.eventId = eventId;
     const pub = await api(ctx, 'jimin', { method: 'GET', host: 'api', path: `/v1/events/${eventId}` });
     ctx.addCheck('status-visible', pub.status === 200 && Array.isArray(pub.json?.salePhases) && pub.json.salePhases.length > 0, `공개 조회 ${pub.status} · 판매 구간 ${pub.json?.salePhases?.length ?? 0}`);
-    await visit(ctx, { screen: 'SCR-062', path: '/events', account: 'stella-admin', origin: 'partner' }).catch((e) => ctx.log(`  화면 SCR-062: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-026', path: '/events/{eventId}', account: 'jimin', expect: ['BAT-086|예매'] }).catch((e) => ctx.log(`  화면 SCR-026: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-062', path: '/events', account: 'stella-admin', origin: 'partner' });
+    await visit(ctx, { screen: 'SCR-026', path: '/events/{eventId}', account: 'jimin', expect: ['BAT-086|예매'] });
     return ctx.checks;
   },
 
   async S7(ctx) {
     const eventId = demoEventId(ctx, 'LUMEN 콘서트 2026 서울');
     ctx.vars.eventId = eventId;
-    await visit(ctx, { screen: 'SCR-029', path: `/dashboard?event=${eventId}`, account: 'sujin', origin: 'console', expect: ['관제|대시보드'] }).catch((e) => ctx.log(`  화면 SCR-029: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-030', path: '/commands', account: 'sujin', origin: 'console', expect: ['명령'] }).catch((e) => ctx.log(`  화면 SCR-030: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-031', path: '/audit', account: 'sujin', origin: 'console', expect: ['감사'] }).catch((e) => ctx.log(`  화면 SCR-031: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-029', path: `/dashboard?event=${eventId}`, account: 'sujin', origin: 'console', expect: ['관제|대시보드'] });
+    await visit(ctx, { screen: 'SCR-030', path: '/commands', account: 'sujin', origin: 'console', expect: ['명령'] });
+    await visit(ctx, { screen: 'SCR-031', path: '/audit', account: 'sujin', origin: 'console', expect: ['감사'] });
 
     // 요청자(수진)가 2인 승인 명령을 만들고, 같은 사람이 승인하면 403, 두 번째 commander가 승인하면 200이다.
     // 재인증 토큰은 패스키까지 마친 것만 통과하고(jti 1회용), 같은 TOTP 칸은 한 번만 받으므로 adminReauth가 칸을 맞춰 기다린다.
@@ -1259,15 +1301,18 @@ const FLOWS = {
     const approvedRow = audit.find((r) => r.type === 'COMMAND_APPROVED');
     const auditOk = createdRow?.requestedBy === demoUuid('admin:sujin') && approvedRow?.approverRef === second && createdRow.requestedBy !== approvedRow.approverRef;
     ctx.addCheck('audit-entry', auditOk, `감사 ${audit.map((r) => r.type).join('·') || '없음'} · 요청자 ${createdRow?.requestedBy ?? '없음'} · 승인자 ${approvedRow?.approverRef ?? '없음'}`);
-    await visit(ctx, { screen: 'SCR-031', path: '/audit', account: 'sujin', origin: 'console' }).catch((e) => ctx.log(`  화면 SCR-031(재방문): ${e.message}`));
+    await visit(ctx, { screen: 'SCR-031', path: '/audit', account: 'sujin', origin: 'console' });
     return ctx.checks;
   },
 
   async S8(ctx) {
     const eventId = demoEventId(ctx, 'LUMEN 콘서트 2026 서울');
     ctx.vars.eventId = eventId;
-    await visit(ctx, { screen: 'SCR-037', path: '/staff', account: 'haneul', expect: ['배정|현장|스태프'] }).catch((e) => ctx.log(`  화면 SCR-037: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-036', path: '/', account: 'haneul', origin: 'scanner', expect: ['스캔|스캐너|기기'] }).catch((e) => ctx.log(`  화면 SCR-036: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-050', path: '/staff/invitations', account: 'haneul' });
+    await visit(ctx, { screen: 'SCR-053', path: '/scanner-devices', account: 'sujin', origin: 'console' });
+    await visit(ctx, { screen: 'SCR-037', path: '/staff', account: 'haneul', expect: ['배정|현장|스태프'] });
+    await visit(ctx, { screen: 'SCR-036', path: '/', account: 'haneul', origin: 'scanner', expect: ['스캔|스캐너|기기'] });
+    await visit(ctx, { screen: 'SCR-051', path: '/staff/approve', account: 'haneul', expect: ['승인|기기'] });
 
     // 입장 창을 지금 앞으로 당긴다(시드는 입장 시작이 공연 30시간 전이라 아직 열리지 않았다). 데모 시계와 같은 상대 값이다
     const info = await api(ctx, 'jimin', { method: 'GET', host: 'api', path: `/v1/events/${eventId}` });
@@ -1375,8 +1420,9 @@ const FLOWS = {
     ctx.addCheck('verdict-reject', reject, '같은 티켓 두 번째 IN이 ALREADY_IN으로 내려갔다');
     ctx.addCheck('verdict-needs-check', check, 'VERIFY 스캔이 CHECK(확인 필요)로 남았다');
     ctx.addCheck('verdict-anomaly', anomaly, `이상 표시 ${flags.map((f) => f.kind).join('·') || flagItems.map((f) => f.kind).join('·') || '없음'}`);
-    await visit(ctx, { screen: 'SCR-033', path: '/', account: 'haneul', origin: 'scanner' }).catch((e) => ctx.log(`  화면 SCR-033: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-034', path: '/', account: 'haneul', origin: 'scanner' }).catch((e) => ctx.log(`  화면 SCR-034: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-033', path: '/setup', account: 'haneul', origin: 'scanner' });
+    await visit(ctx, { screen: 'SCR-034', path: '/scan', account: 'haneul', origin: 'scanner' });
+    await visit(ctx, { screen: 'SCR-052', path: '/manage', account: 'haneul', origin: 'scanner' });
     return ctx.checks;
   },
 
@@ -1385,8 +1431,9 @@ const FLOWS = {
     const productionId = sqlRead(ctx, 'peaket_demo_core', `select id from production where title = 'LUMEN 콘서트 2026 서울' limit 1`);
     ctx.vars.eventId = eventId;
     ctx.vars.productionId = productionId;
-    await visit(ctx, { screen: 'SCR-044', path: `/events/${productionId}/cancellation`, account: 'stella-admin', origin: 'partner', expect: ['취소'] }).catch((e) => ctx.log(`  화면 SCR-044: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-045', path: '/cs/inbox', account: 'sujin', origin: 'console', expect: ['CS|문의'] }).catch((e) => ctx.log(`  화면 SCR-045: ${e.message}`));
+    // SCR-044는 파트너 공연 상세 API가 없어 '불러오는 중'에서 멈춘다(제품 빈칸). 화면 증거로만 연다
+    await visit(ctx, { screen: 'SCR-044', path: `/events/${productionId}/cancellation`, account: 'stella-admin', origin: 'partner' }).catch((e) => ctx.log(`  화면 SCR-044: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-045', path: '/cs/inbox', account: 'sujin', origin: 'console', expect: ['CS|문의'] });
 
     // ① 파트너 관리자 요청 → ② commander 판정(미리보기) → ③ 판정자 아닌 commander가 재인증 뒤 확정(2인)
     const requested = await api(ctx, 'stella-admin', {
@@ -1459,8 +1506,8 @@ const FLOWS = {
     });
     ctx.addCheck('refunded', refundsDone && ticketsRefunded && again.status === 409, `상태 ${final.status} · 환불 ${progress.done}/${progress.total}(실패 ${progress.failed}) · 티켓 ${ticketStates.join(',') || '없음'} · 다시 확정 ${again.status}`);
 
-    await visit(ctx, { screen: 'SCR-047', path: `/cancellations/${requestId}`, account: 'sujin', origin: 'console', expect: ['취소|환불'] }).catch((e) => ctx.log(`  화면 SCR-047: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-013', path: '/my/tickets', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-013: ${e.message}`));
+    await visit(ctx, { screen: 'SCR-047', path: `/cancellations/${requestId}`, account: 'sujin', origin: 'console', expect: ['취소|환불'] });
+    await visit(ctx, { screen: 'SCR-013', path: '/my/tickets', account: 'jimin' });
     ctx.vars.compensationId = randomUUID();
     await visit(ctx, { screen: 'SCR-043', path: '/my/compensations/{compensationId}', account: 'jimin' }).catch((e) => ctx.log(`  화면 SCR-043: ${e.message}`));
     return ctx.checks;
@@ -1469,9 +1516,10 @@ const FLOWS = {
 
 /**
  * 시나리오 목록을 재생한다. 시험 담당이 가짜 의존성을 넣을 수 있게 deps를 받는다.
+ * startedAt은 `all`이 명령을 시작한 시각이다(콜드 스타트 = 명령 시작 ~ 첫 화면, 리뷰 RV-02).
  * @param {{ repo: string, scenarios: import('./scenarios.mjs').SCENARIOS, contract: any, artifactsDir: string,
- *   headed?: boolean, video?: boolean, pw?: any, auth?: Function, log?: Function, now?: Function,
- *   browserLauncher?: Function }} o
+ *   headed?: boolean, video?: boolean, pw?: any, auth?: Function, log?: Function, now?: Function, startedAt?: number,
+ *   flows?: Record<string, Function>, browserLauncher?: Function }} o
  */
 export async function runScenarios(o) {
   const runId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
@@ -1486,7 +1534,8 @@ export async function runScenarios(o) {
     headless: !o.headed,
     args: ['--host-resolver-rules=MAP *.peaket.example 127.0.0.1'],
   });
-  const startedAt = o.now?.() ?? Date.now();
+  const startedAt = Number.isFinite(o.startedAt) ? o.startedAt : (o.now?.() ?? Date.now());
+  const flows = o.flows ?? FLOWS;
   const results = [];
   // API 세션과 TOTP 칸은 한 실행 안에서 이어 쓴다(브라우저 맥락은 시나리오마다 새로 연다, 계획 §11 '화면 사이 상태 새기')
   const sessionCache = new Map();
@@ -1498,8 +1547,8 @@ export async function runScenarios(o) {
       const ctx = newCtx({ ...o, runId, artifactsDir, pw, browser, log, sessionCache, totpSteps });
       let failure;
       try {
-        if (!FLOWS[s.id]) throw new Error(`시나리오 ${s.id}의 재생 흐름이 없다`);
-        await FLOWS[s.id](ctx);
+        if (!flows[s.id]) throw new Error(`시나리오 ${s.id}의 재생 흐름이 없다`);
+        await flows[s.id](ctx);
       } catch (e) {
         failure = e instanceof Error ? e.message : String(e);
       } finally {
@@ -1532,10 +1581,12 @@ export async function runScenarios(o) {
     await browser.close().catch(() => undefined);
   }
   const firstScreenAt = results.map((r) => r.firstScreenAt).filter(Boolean).sort((a, b) => a - b)[0];
+  const endedAt = o.now?.() ?? Date.now();
   const report = {
     runId,
     startedAt: new Date(startedAt).toISOString(),
-    endedAt: new Date(o.now?.() ?? Date.now()).toISOString(),
+    endedAt: new Date(endedAt).toISOString(),
+    totalSeconds: Math.round((endedAt - startedAt) / 1000),
     coldStartSeconds: firstScreenAt === undefined ? undefined : Math.round((firstScreenAt - startedAt) / 1000),
     scenarios: results,
     artifactsDir,
