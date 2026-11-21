@@ -105,11 +105,14 @@
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+- 까닭: 버그 고침이라 고치기 전 트리(`4ece10e7` 위에 시험만 더함)에서 ★ 시험이 실패하는지 본다(§8.6의 5, ADR-0281). 계획 표 밖 세부 W12S-02 ②③·W12S-03 ④·W12S-06 ④는 같은 정본 문장(빌드 인자·RUN 안 값, 상수 값이 남지 않음, 이름 확인)에서 더했다.
+- W12S-01·08: 실행 44900557822에서 막음 7·5.
+- 명령: `node --test tools/ci/scan-tools.test.mjs tools/local/demo-auth.test.mjs tools/local/demo-objects.test.mjs tools/local/demo-images.test.mjs tools/local/demo.test.mjs` → 시험 96, 실패 14(모두 W12S ★ 세부), 기존 시험은 모두 통과.
+- 실패 까닭: W12S-02 ①③ web·partner Dockerfile의 키 `ENV` 넷 / W12S-03 ① `demo-web` Secret 없음, ② `DEMO_SERVER_ACTIONS_KEY`를 내놓음, ③ `web.yaml` env에 키, ④ 상수 값이 네 파일에 남음 / W12S-04 ①~③ `secretsFile`을 받지 않아 임시 파일을 만들지 않음 / W12S-06 ②③④ 확인을 꺼 다른 인증서·빈 `ca`·다른 이름도 받아들임 / W12S-07 ①② 데모 키 값을 푸는 허용 블록 없음. 통과(★ 아님): W12S-02 ②(지금도 맞음, 표본으로 잡는 것은 봄)·W12S-05 ①(시험 고침)·W12S-06 ①(바른 요청).
 
 ## 시험 결과
 
-(시험 담당이 채운다)
+(구현 뒤 시험 담당이 채운다)
 
 ## 리뷰
 
@@ -124,3 +127,4 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12sec-plan-3b7d | claude-opus-5-5 | 2026-11-21T21:31+09:00 | 2026-11-21T21:58+09:00 |
+| test | w12sec-test-5c1e | claude-opus-5-5 | 2026-11-21T22:00+09:00 | 2026-11-21T22:17+09:00 |

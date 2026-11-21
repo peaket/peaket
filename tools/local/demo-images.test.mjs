@@ -3,6 +3,7 @@
 // - 새 이미지 열: peaket/<워크로드>:demo, base는 @sha256 다이제스트 고정, latest 없음, 실행 단계 비루트(node·101)
 // - .dockerignore가 앱·서비스·nginx 경로를 다시 연다
 // - 로컬 오버레이 13개는 image.tag demo·pullPolicy Never·PEAKET_ENV local이고, 포트 붙은 출처를 쓴다
+// - W12S-02: 이미지(ENV·ARG·빌드 인자)에 키·비밀 이름을 굽지 않는다(docs/review/plans/W12-ci-sec.md §3)
 // 실행(저장소 뿌리): node --test "tools/local/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -198,6 +199,110 @@ test('V-T7 ④ demo-images --check가 기대 build-arg(ARG 선언·데모 포트
   // 필수 build-arg를 빼면 실패
   const missing = buildArgsProblems({ ...queueRoom, buildArgs: { VITE_PEAKET_API_ORIGIN: demoOrigins().api, VITE_PEAKET_QUEUE_ORIGIN: demoOrigins().queue } });
   assert.match(missing.join('\n'), /VITE_PEAKET_QUEUE_FILES_ORIGIN.*빠졌다/, `빠진 필수 build-arg를 잡지 않는다: ${missing.join('; ')}`);
+});
+
+// ---------- W12S-02 이미지에 키·비밀 이름을 굽지 않는다(docs/review/plans/W12-ci-sec.md §3) ----------
+// 정본: docs/devops.md §4.4 '시험·데모 값의 꼴과 도구 판' ②(이미지의 ENV·ARG·빌드 인자에 키·비밀 값을 굽지 않는다),
+// docs/infra.md '로컬 데모의 비밀'(서버 액션 키는 Secret으로만, 빌드는 키 없이 한다).
+
+/** 키·비밀로 읽히는 이름의 끝(계획 §3 W12S-02) */
+const SECRET_NAME = /(?:_KEY|_SECRET|_TOKEN|PASSWORD)$/i;
+
+/**
+ * Dockerfile의 ENV·ARG가 정하는 이름들. 줄 끝 `\`로 이은 줄을 한 명령으로 읽고, 이은 줄 사이의 주석 줄은 Docker처럼 뺀다.
+ * `ENV 이름=값 …`·`ARG 이름[=기본값] …`과 옛 꼴 `ENV 이름 값`을 받는다.
+ * @returns {{ kind: 'ENV' | 'ARG', name: string }[]}
+ */
+function envArgNames(text) {
+  const commands = [];
+  let cur = null;
+  for (const line of String(text).split(/\r?\n/)) {
+    if (/^\s*#/.test(line)) continue;
+    const continued = /\\\s*$/.test(line);
+    const body = continued ? line.replace(/\\\s*$/, ' ') : line;
+    cur = cur === null ? body : `${cur} ${body}`;
+    if (!continued) {
+      commands.push(cur);
+      cur = null;
+    }
+  }
+  if (cur !== null) commands.push(cur);
+  const out = [];
+  for (const c of commands) {
+    const m = /^\s*(ENV|ARG)\s+(.*)$/i.exec(c);
+    if (!m) continue;
+    const kind = /** @type {'ENV' | 'ARG'} */ (m[1].toUpperCase());
+    const tokens = m[2].match(/(?:[^\s"']+|"(?:[^"\\]|\\.)*"|'[^']*')+/g) ?? [];
+    if (kind === 'ENV' && tokens.length > 0 && !tokens[0].includes('=')) {
+      out.push({ kind, name: tokens[0] });
+      continue;
+    }
+    for (const t of tokens) out.push({ kind, name: t.split('=')[0] });
+  }
+  return out;
+}
+
+test('W12S-02 ① 데모 이미지 열 개의 Dockerfile ENV·ARG 이름에 키·비밀 이름(_KEY·_SECRET·_TOKEN·PASSWORD)이 없다(줄 이음 포함)', () => {
+  // 읽는 법부터 본다: 이은 줄 안의 이름·주석 줄·옛 꼴 ENV·ARG 여럿을 모두 이름으로 낸다(읽지 못해 조용히 통과하지 않게)
+  const sample = ['FROM x AS b', 'ENV A_ORIGIN=1 \\', '    # 이은 줄 사이 주석', '    B_TOKEN=2', 'ARG C_SECRET D_MODE=x', 'ENV E_KEY 3'].join('\n');
+  assert.deepEqual(envArgNames(sample).map((n) => `${n.kind} ${n.name}`), ['ENV A_ORIGIN', 'ENV B_TOKEN', 'ARG C_SECRET', 'ARG D_MODE', 'ENV E_KEY']);
+  assert.deepEqual(envArgNames(sample).filter((n) => SECRET_NAME.test(n.name)).map((n) => n.name), ['B_TOKEN', 'C_SECRET', 'E_KEY'], '표본의 비밀 이름 셋을 잡지 못했다');
+
+  const found = [];
+  for (const i of DEMO_IMAGES) {
+    const names = envArgNames(readFileSync(join(REPO, i.dockerfile), 'utf8'));
+    assert.ok(names.length >= 1, `${i.dockerfile}에서 ENV·ARG를 하나도 읽지 못했다(읽는 법이 틀렸다)`);
+    for (const n of names) if (SECRET_NAME.test(n.name)) found.push(`${i.dockerfile} ${n.kind} ${n.name}`);
+  }
+  // 이은 줄을 실제로 읽었는지: web의 ENV 덩이 가운데 줄과 queue-room의 ARG를 읽는다
+  const web = envArgNames(readFileSync(join(REPO, 'apps/web/Dockerfile'), 'utf8')).map((n) => n.name);
+  assert.ok(web.includes('NEXT_PUBLIC_SCANNER_ORIGIN') && web.includes('PEAKET_ENV'), `apps/web/Dockerfile의 이은 ENV 줄을 읽지 못했다: ${web.join(', ')}`);
+  const queueRoom = envArgNames(readFileSync(join(REPO, 'apps/web/queue-room/Dockerfile'), 'utf8'));
+  assert.ok(queueRoom.some((n) => n.kind === 'ARG' && n.name === 'VITE_PEAKET_API_ORIGIN'), 'queue-room의 ARG를 읽지 못했다');
+  assert.deepEqual(found, [], `이미지에 키·비밀 이름이 구워져 있다(실행 때 Secret으로 준다): ${found.join('; ')}`);
+});
+
+/** 이미지들의 docker build 명령에서 --build-arg 이름을 모두 읽는다 */
+function buildArgNames(images) {
+  const out = [];
+  for (const i of images) {
+    const argv = dockerBuildArgs(i);
+    argv.forEach((a, at) => {
+      if (a === '--build-arg') out.push({ workload: i.workload, name: String(argv[at + 1] ?? '').split('=')[0] });
+    });
+  }
+  return out;
+}
+
+test('W12S-02 ② 데모 빌드 인자(DEMO_BUILD_ARGS·docker build --build-arg)에 키·비밀 이름이 없다', () => {
+  // 읽는 법부터 본다: 비밀 이름의 빌드 인자를 붙인 이미지 표본은 잡는다
+  const queueRoom = DEMO_IMAGES.find((i) => i.workload === 'queue-room');
+  const probe = buildArgNames([{ ...queueRoom, buildArgs: { ...queueRoom.buildArgs, PROBE_TOKEN: 'x' } }]).filter((n) => SECRET_NAME.test(n.name));
+  assert.deepEqual(probe.map((n) => n.name), ['PROBE_TOKEN'], '표본의 비밀 이름 빌드 인자를 잡지 못했다');
+
+  const found = [];
+  for (const [workload, args] of Object.entries(DEMO_BUILD_ARGS)) for (const name of Object.keys(args)) if (SECRET_NAME.test(name)) found.push(`DEMO_BUILD_ARGS.${workload}.${name}`);
+  const passed = buildArgNames(DEMO_IMAGES);
+  // queue-room의 출처 셋은 빌드 인자로 넘긴다(넘기는 길을 실제로 읽었는지)
+  assert.ok(passed.length >= 3, `docker build 명령에서 --build-arg를 ${passed.length}개만 읽었다`);
+  for (const n of passed) if (SECRET_NAME.test(n.name)) found.push(`${n.workload} --build-arg ${n.name}`);
+  assert.deepEqual(found, [], `키·비밀을 빌드 인자로 넘긴다(이미지 기록에 남는다): ${found.join('; ')}`);
+});
+
+test('W12S-02 ③ 데모 Dockerfile의 명령(주석 뺌) 어디에도 키·비밀 이름에 값을 주는 꼴(이름=)이 없다(RUN 안의 환경 값 포함)', () => {
+  const assignments = (text) =>
+    [
+      ...String(text)
+        .split(/\r?\n/)
+        .filter((l) => !/^\s*#/.test(l))
+        .join('\n')
+        .matchAll(/\b[A-Za-z0-9_]*(?:_KEY|_SECRET|_TOKEN|PASSWORD)=/gi),
+    ].map((m) => m[0]);
+  // 읽는 법부터 본다: RUN 안의 환경 값은 잡고 주석 줄은 보지 않는다
+  assert.deepEqual(assignments('# A_KEY=x\nRUN B_SECRET=y pnpm build'), ['B_SECRET='], '표본의 RUN 안 비밀 이름 값을 잡지 못했다');
+  const found = [];
+  for (const i of DEMO_IMAGES) for (const a of assignments(readFileSync(join(REPO, i.dockerfile), 'utf8'))) found.push(`${i.dockerfile}: ${a}`);
+  assert.deepEqual(found, [], `Dockerfile이 키·비밀 이름에 값을 준다: ${found.join('; ')}`);
 });
 
 test('DS-01 demo-images 인자는 --check·--build·--json만 받고 모르는 인자는 던진다', () => {

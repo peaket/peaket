@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -462,17 +463,23 @@ test('V-T7 ⑤ up 재사용·down 두 번·다른 클러스터 보존을 지킨�
 
 // ---------- V-T7 ⑥ 비밀·개인정보 없음 ----------
 
-test('V-T7 ⑥ 시드·측정·출력에 비밀·개인정보가 없다', () => {
+test('V-T7 ⑥ 시드·측정·출력에 비밀·개인정보가 없다(W12S-05 ① JWT 모양 입력은 실행 때 만든다)', () => {
   const seed = checkSeed(DEMO_SEED_FILE);
   assert.deepEqual(seed.problems, [], seed.problems.join('\n'));
   assert.equal(seed.ok, true);
 
   const secret = 'Authorization: Bearer abc.def.ghi password: hunter2 totp=123456 __Secure-peaket_at=session-value';
-  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U';
+  // W12S-05 ①: JWT 모양 값은 글자 그대로 두지 않는다(docs/devops.md §4.4 '시험·데모 값의 꼴과 도구 판' ①).
+  // 머리·본문 JSON을 그 자리에서 base64url로 바꾸고 서명 칸은 무작위 바이트로 채운다(어느 키로 만든 토큰도 아니다)
+  const jwtHead = Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url');
+  const jwtBody = Buffer.from(JSON.stringify({ sub: '1234567890' })).toString('base64url');
+  const jwtSig = randomBytes(32).toString('base64url');
+  const jwt = [jwtHead, jwtBody, jwtSig].join('.');
   const red = redact(`${secret} ${jwt}`);
   assert.doesNotMatch(red, /hunter2|123456|session-value/, `가리지 않은 비밀 값이 있다: ${red}`);
   assert.doesNotMatch(red, /abc\.def\.ghi/, `Bearer 값을 가리지 않았다: ${red}`);
-  assert.doesNotMatch(red, /eyJhbGciOiJIUzI1NiJ9/, `JWT를 가리지 않았다: ${red}`);
+  assert.equal(red.includes(jwtHead), false, `JWT를 가리지 않았다: ${red}`);
+  assert.equal(red.includes(jwtSig), false, `JWT 서명 칸을 가리지 않았다: ${red}`);
   assert.match(red, /Bearer <가림>/);
   assert.match(red, /password.*<가림>/);
   assert.match(red, /<JWT 가림>/);
