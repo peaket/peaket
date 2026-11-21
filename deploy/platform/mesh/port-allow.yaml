@@ -163,13 +163,18 @@ workloads:
     namespace: purchase
     podLabels: { app.kubernetes.io/name: payment-svc, app.kubernetes.io/component: service }
     ports:
-      # purchase-svc는 회차 취소 자동 정지의 결제사 서킷 상태를 GET /internal/v1/circuits로 읽는다(BAT-425 GAT-120, ADR-0316)
+      # purchase-svc는 회차 취소 일괄 환불 자동 정지의 결제사 서킷 상태를 GET /internal/v1/circuits로 읽는다
+      # (docs/features/transfer-refund.md §5 '서킷 연결', ADR-0285 결정 9 표 보충 2026-11-22 W12-mesh)
       rest: { port: 8080, callers: [ops-svc, purchase-svc] }
       grpc:
         port: 50051
         services:
-          # 배상 송금은 purchase-svc가 compensation_id 멱등으로 부른다(BAT-425 GAT-130, ADR-0317)
-          peaket.payment.v1.CompensationTransferService: [purchase-svc]
+          # 배상 송금 요청은 purchase-svc만 compensation_id 멱등으로 부른다(ADR-0317 결정 1, docs/api/proto/README.md §3).
+          # 송금 조회는 부르는 쪽이 없다(W12-mesh)
+          peaket.payment.v1.CompensationTransferService:
+            methods:
+              GetCompensationTransfer: []
+              RequestCompensationTransfer: [purchase-svc]
           peaket.payment.v1.PaymentService:
             methods:
               ApprovePayoutBatch: [ops-svc]
