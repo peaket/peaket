@@ -58,6 +58,8 @@ jobs:
       # 성능 장부 도구: 명령줄 시험(점검 판정·지연 대조·증거 수준·야간 비교 D-T40)과 자체 시험(docs/perf-ledger.md)
       - run: node --test "tools/perf-ledger/*.test.mjs"
       - run: python3 -I -X utf8 tools/perf-ledger/collect.py --selftest
+      # 감사 공개 검증 도구 시험(ADR-0348 결정 7, BUILD_ORDER BAT-360 OPS-280): 시험이 python3(3.11 이상)·시스템 openssl로 도구를 띄운다(ubuntu-24.04에 둘 다 있다)
+      - run: node --test "tools/audit-verify/*.test.mjs"
       - run: node tools/ci/check-workflows.mjs
       - run: node tools/ci/check-codeowners.mjs
       - run: node tools/ci/check-workspace-protocol.mjs

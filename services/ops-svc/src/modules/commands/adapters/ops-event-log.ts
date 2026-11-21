@@ -4,7 +4,7 @@
 // 내는 자리는 한 곳이다: 명령 저장소를 감싼 OpsEventStore가 쓰기(insert·mutate·mutateDue)의 트랜잭션이 끝난(커밋된) 뒤에만 낸다.
 // 던져서 되돌아간 쓰기는 줄을 남기지 않는다. 단계는 REQUESTED(사람 접수)·AUTO_ACTION_STARTED(시스템 자동 조치)와 아래 사건 이름이다.
 import type { PlatformLogger } from '@peaket/platform';
-import { CATALOG_COMMAND_TYPES, SYSTEM_ROLE, type Command, type CommandIdempotency, type CommandType, type NewCommand } from '../domain/command.js';
+import { CATALOG_COMMAND_TYPES, SYSTEM_ROLE, approvalModeOf, type Command, type CommandIdempotency, type CommandType, type NewCommand } from '../domain/command.js';
 import type { CommandDueKind, CommandListQuery, CommandPage, CommandStore, CommandTimelineEntry, CommandWriter } from '../domain/ports.js';
 import type { PostReviewAlertKind, PostReviewRow } from '../domain/post-review.js';
 import { CommandStoreBase } from './command-store-base.js';
@@ -79,6 +79,8 @@ export class OpsEventStore extends CommandStoreBase {
     const out = await this.inner.insert(input);
     if (!out.replayed) {
       this.log.emit(opsEventLineOf(out.command, input.system ? 'AUTO_ACTION_STARTED' : 'REQUESTED', input.system ? SYSTEM_ROLE : input.requestedRole));
+      // 두 번째 승인이 없는 사람 접수(1인·즉시 실행)는 만들 때 요청자의 APPROVED 사건을 같은 트랜잭션에 쓴다(planCreation과 같은 판정). 그 사건의 줄도 낸다(B23)
+      if (!input.system && (input.approvalMode ?? approvalModeOf(input.type, input.params)) !== 'TWO') this.log.emit(opsEventLineOf(out.command, 'APPROVED', input.requestedRole));
       // 시스템 자동 조치는 만들 때 DISPATCHED라 그 뒤 사건은 mutate가 낸다
     }
     return out;

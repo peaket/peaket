@@ -19,7 +19,7 @@ const bytes32 = (v: Uint8Array | string, what: string): Buffer => {
 };
 
 /**
- * 잎 입력 바이트(84바이트).
+ * 잎 입력 바이트(92바이트 = 도메인 글 20 + seq 8 + 기록 해시 32 + 잎 솔트 32).
  * @param recordSha256 기록 해시(32바이트 또는 16진 소문자 64자)
  * @param leafSalt 잎 솔트(32바이트 또는 16진 소문자 64자)
  */
