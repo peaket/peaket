@@ -708,4 +708,74 @@ describe('웹훅 끝점·굿즈 주문·상품 수수료율의 앱 역할 쓰기
       table: { update: false, insert: true, select: true },
     });
   });
+
+  // 트리거가 도는 '파트너 역할'은 그 역할의 권한을 그대로 쓰는 사용자다(감독 결정 2026-11-22: pg_has_role 판정 USAGE).
+  // 상속으로 쓰는 앱 로그인은 ⑧가~아가 본다(core_partner_login은 GRANT 기본값 INHERIT·SET 참). 여기서는 관리 자격만 가진 사용자와 SET ROLE을 본다
+  test('AZ-T18 ⑧차 역할을 만들 수 있는 비슈퍼유저 관리자(파트너 역할의 관리 자격만, 상속·SET 없음)가 상품을 넣거나 고치면 트리거가 돌지 않아 적은 값 그대로다 [ASVS v5.0.0-8.2.3] [ASVS v5.0.0-8.4.1]', async () => {
+    // PostgreSQL 16부터 CREATEROLE 비슈퍼유저가 역할을 만들면 그 역할의 ADMIN 자격만 저절로 받는다(createrole_self_grant 기본값 '': INHERIT·SET 거짓).
+    // 운영 마이그레이션 계정이 0004에서 core_partner를 만든 경우와 같은 꼴을, 이미 있는 core_partner에는 같은 선택지의 GRANT로 만든다
+    const MGR = 'core_mgr_login';
+    await admin.pool.query(`CREATE ROLE ${MGR} LOGIN PASSWORD 'peaket-test' NOSUPERUSER NOBYPASSRLS CREATEROLE`);
+    const mgr = createDatabase({ url: pg.urlFor(MGR, 'peaket-test'), applicationName: 'core-svc-mgr', max: 1 });
+    try {
+      await mgr.pool.query('CREATE ROLE az_t18_probe NOLOGIN');
+      await admin.pool.query(`GRANT core_partner TO ${MGR} WITH ADMIN OPTION, INHERIT FALSE, SET FALSE`);
+      // 시험 준비: 관리자가 상품 표를 읽고 쓰게 한다(운영 마이그레이션 계정은 표 소유자라 행 보안을 지난다. 여기서는 그 몫을 정책 하나로 준다)
+      await admin.pool.query(`GRANT SELECT, INSERT, UPDATE ON product TO ${MGR}`);
+      await admin.pool.query(`CREATE POLICY az_t18_mgr_all ON product FOR ALL TO ${MGR} USING (true) WITH CHECK (true)`);
+      const memberships = (
+        await admin.pool.query<{ role: string; admin_option: boolean; inherit_option: boolean; set_option: boolean }>(
+          `select r.rolname as role, m.admin_option, m.inherit_option, m.set_option from pg_auth_members m join pg_roles r on r.oid = m.roleid join pg_roles u on u.oid = m.member where u.rolname = $1 order by r.rolname collate "C"`,
+          [MGR],
+        )
+      ).rows;
+      const judged = (await admin.pool.query<{ member: boolean; usage: boolean }>(`select pg_has_role($1::name, 'core_partner', 'MEMBER') as member, pg_has_role($1::name, 'core_partner', 'USAGE') as usage`, [MGR])).rows[0];
+      const published = randomUUID();
+      const draft = randomUUID();
+      const noContract = randomUUID();
+      const outcome = {
+        publishedA: await run(mgr.db.insert(product).values(productValues(published, A, 'PUBLISHED', 0))),
+        draftA: await run(mgr.db.insert(product).values(productValues(draft, A, 'DRAFT', 5))),
+        publishedNoContract: await run(mgr.db.insert(product).values(productValues(noContract, C, 'PUBLISHED', 3))),
+        updateP1: await run(mgr.db.update(product).set({ commissionRateBp: 0 }).where(eq(product.id, P1))),
+      };
+      expect({ memberships, judged, outcome, rates: await storedRates([published, draft, noContract, P1]) }).toEqual({
+        // 저절로 받은 자격과 시험이 만든 자격이 같은 꼴이다
+        memberships: [
+          { role: 'az_t18_probe', admin_option: true, inherit_option: false, set_option: false },
+          { role: 'core_partner', admin_option: true, inherit_option: false, set_option: false },
+        ],
+        judged: { member: true, usage: false },
+        outcome: { publishedA: 1, draftA: 1, publishedNoContract: 1, updateP1: 1 },
+        rates: { [published]: 0, [draft]: 5, [noContract]: 3, [P1]: 0 },
+      });
+    } finally {
+      await mgr.close();
+      await admin.pool.query('DROP POLICY IF EXISTS az_t18_mgr_all ON product');
+      await admin.pool.query(`REVOKE ALL ON product FROM ${MGR}`);
+      await admin.pool.query('DROP ROLE IF EXISTS az_t18_probe');
+      await admin.pool.query(`DROP ROLE IF EXISTS ${MGR}`);
+    }
+  });
+
+  test('AZ-T18 ⑧카 파트너 로그인이 SET ROLE로 파트너 역할 자체가 되어도(current_user = core_partner) 수수료율은 계약 값이고 계약 없는 게시는 23514다 [ASVS v5.0.0-8.2.3] [ASVS v5.0.0-8.4.1]', async () => {
+    const id = randomUUID();
+    const asRole = <T>(tenantId: string, fn: (tx: DbTransaction) => Promise<T>) =>
+      partner.transaction(async (tx) => {
+        await tx.execute(sql`set local role core_partner`);
+        const who = (await tx.execute(sql`select current_user as u`)).rows as { u: string }[];
+        return { who: who[0]?.u, result: await fn(tx) };
+      }, { tenantId });
+    const outcome = {
+      publishedA: await asRole(A, async (tx) => (await tx.insert(product).values(productValues(id, A, 'PUBLISHED', 0))).rowCount),
+      publishedNoContract: await asRole(C, async (tx) => tx.insert(product).values(productValues(randomUUID(), C, 'PUBLISHED', 3))).then(
+        (r) => r.result.rowCount,
+        sqlState,
+      ),
+    };
+    expect({ outcome, rates: await storedRates([id]) }).toEqual({
+      outcome: { publishedA: { who: 'core_partner', result: 1 }, publishedNoContract: '23514' },
+      rates: { [id]: RATE_A },
+    });
+  });
 });
