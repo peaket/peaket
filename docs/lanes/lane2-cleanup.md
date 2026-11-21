@@ -173,3 +173,12 @@
 - W12-ci-web R-737 리뷰 RV-04 낮음: seats 잡의 새 의존 빌드 단계(`ci-web.yml` 448행 근처)와 `seed-css/build.mjs` 첫 단계가 같은 빌드를 두 번 한다(각 약 6초). 하나로 줄인다. W12-ci-web 계획 7의 '운영 빌드 단계를 빼면 10분 안팎 준다'는 CI 실측(reflow 39초·budgets 34초)과 맞지 않는다
 - W12-ci-web R-737 `web / queue-room` 흔들림: 2026-11-16~21 끝난 58회 가운데 실패 2회, 둘 다 WebKit 여러 탭 시험(`tabs.spec.mjs`, FE-T6 178행 `page.waitForURL` 30초 초과). PR #51·#52에서는 36/36 통과. 원인 후보 (가) 첫 탭을 연 뒤 1.5초 고정 대기 동안 리더가 첫 탭이 아니게 됨 (나) WebKit 여러 탭 멈춤. 실행 44910775075 산출물 `queue-room-checks`의 `error-context.md`로 가른다
 - W12-ci-web R-737 검증 남은 위험: 로컬에서 `apps/web/tsconfig.tsbuildinfo`(타입 검사 증분 캐시)가 남아 있으면 의존 dist를 지워도 TS7006이 숨고 오류가 셋만 나온다(끝 코드는 1). 재현할 때 그 파일도 지운다
+- BAT-350 R-740 RV350-2 중간: 월렛 등록이 429를 '다시 보내기'로 다룬다. 이 경로 계약의 429는 24시간 한도(`Retry-After: 86400`)라 지금은 닿지 않지만 GAT-020에서 재인증 재발급이 붙으면 닿는다. 그때 정본(docs/features/offline-gate.md §2·ADR-0336)에서 429를 나눈다
+- BAT-350 R-740 RV350-3 중간: 서비스 워커 활성화 때 옛 판 문서를 다시 받는 동안(최대 10초 [가정]) 탐색이 기다린다. 공연장의 약한 연결에서 월렛 진입이 늦어질 수 있는데 정본 '남는 한계'(docs/frontend.md §5.4)에 이 지연이 없다. 적거나 기다림을 줄인다
+- BAT-350 R-740 RV350-5 낮음: `DeviceQr`의 '이 기기에 키 다시 만들기'가 이미 서버에 등록됐을 수 있는 LOCAL 키도 지워, 새 키를 보내면 '다시 확인 필요'(403)에 갇힌다
+- BAT-350 R-740 RV350-6 낮음: 두 탭이 함께 등록 버튼을 누르면 키가 겹쳐 RV350-5와 같은 식으로 갇힐 수 있다(탭 사이 잠금 없음)
+- BAT-350 R-740 RV350-7 낮음: `swRevision`과 `deploymentIdOf`가 같은 배포 식별자를 따로 읽는다(빈칸 자르기가 다름). 하나로 모은다
+- BAT-350 R-740 RV350-8·V350-1 낮음: 묶인 `sw.js`·실제 브라우저의 캐시 이름 `wallet-shell-{판}`을 단언하는 시험이 없다. 검증 표본 어느 것에도 실패하지 않은 시험 다섯(`pwa-config`·`vector`·`mock-api`·`scanner-device-keys`·통합 `O-T45 ④⑤ Drizzle`)을 겨누는 표본을 더한다
+- BAT-350 R-740 V350-2 낮음: 계획과 `services/ticket-svc/test/device-keys-http.test.ts` 주석이 다시 쌓기 전 해시 `a0a652796`을 가리킨다. 정본 좁힘 커밋은 develop의 RV350-1 커밋이다
+- BAT-350 R-740 V350-3 낮음: 월렛 `/my/tickets` 첫 JS 161.3kB로 한도 161.6kB(기준선 160.6 + 1)까지 여유 0.3kB다. 다음 월렛 묶음은 첫 JS부터 잰다
+- BAT-350 R-740 BAT-350 계획 12: ticket-svc 통합 시험이 `ci-node.yml` 통합 시험 목록에 없어 CI가 돌리지 않는다(갈래 4에 알릴 것). 등록 경로가 취소된 티켓의 ISSUE도 받는다(스캐너가 티켓 상태를 먼저 본다). 폐기된 keyId를 같은 티켓에 다시 등록하면 `keys`와 `revokedKeyIds` 둘 다에 실린다. 스캐너가 33바이트 압축 공개키를 WebCrypto `importKey('raw')`로 세 엔진에서 받는지는 GAT-140 판정 10단계 때 본다. 로컬·CI 빌드는 판이 `wallet-dev` 하나라 캐시 이름이 바뀌지 않는다
