@@ -188,7 +188,7 @@ export class ContractApprovals {
       if (!r) throw notFound();
       assertCanDecide(r, actor, 'reject');
     const text = reason.trim();
-    if (text.length < 1 || text.length > 2_000) throw invalid('반려 사유는 1~2,000자여야 합니다');
+    if (text.length < 1 || text.length > 2_000) throw new ContractApprovalProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
     // 지금 계약을 바꾸지 않는다. core의 승인 대기 표시를 먼저 풀고(멱등) ops 상태를 쓴다
     await this.d.core.cancel({ promoterId: r.promoterId, approvalId: r.approvalId, reason: text });
     const nowMs = this.d.clock.now();

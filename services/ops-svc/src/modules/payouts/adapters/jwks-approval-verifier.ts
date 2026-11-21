@@ -30,7 +30,7 @@ export class JwksApprovalVerifier implements ApprovalReauthVerifier {
         try {
           claimed = await this.#jti.claim(v.jti, v.expiresAt, this.#clock.now());
         } catch {
-          throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
+          throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 검증기를 쓸 수 없습니다', retryAfterSeconds: 5 });
         }
         if (!claimed) throw reauthRequired();
       }
@@ -39,7 +39,7 @@ export class JwksApprovalVerifier implements ApprovalReauthVerifier {
       if (e instanceof ProblemError) throw e;
       if (e instanceof TokenRejected) throw reauthRequired();
       // 키 묶음을 받지 못하는 등 확인기 장애는 통과가 아니라 503이다(닫힌 쪽)
-      throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
+      throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 검증기를 쓸 수 없습니다', retryAfterSeconds: 5 });
     }
   }
 }

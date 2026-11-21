@@ -77,12 +77,12 @@ export class OpsSaleReviews {
     const asked = q.statuses !== undefined && q.statuses.length > 0 ? q.statuses : ['SUBMITTED'];
     const statuses: OpsSaleReviewQuery['statuses'] = [];
     for (const s of asked) {
-      if (!isSaleReviewFilterStatus(s)) throw new ProblemError({ type: 'invalid-body', status: 400, title: '모르는 판매 승인 상태입니다' });
+      if (!isSaleReviewFilterStatus(s)) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다', detail: '모르는 판매 승인 상태입니다' });
       statuses.push(s);
     }
     const limit = q.limit ?? 20;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new ProblemError({ type: 'invalid-body', status: 400, title: 'limit은 1~100 사이 정수여야 합니다' });
-    if (q.cursor !== undefined && decodeSaleReviewCursor(q.cursor) === undefined) throw new ProblemError({ type: 'invalid-body', status: 400, title: '커서가 올바르지 않습니다' });
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다', detail: 'limit은 1~100 사이 정수여야 합니다' });
+    if (q.cursor !== undefined && decodeSaleReviewCursor(q.cursor) === undefined) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다', detail: '커서가 올바르지 않습니다' });
     const page = await this.store.opsReviews({ statuses, ...(q.cursor !== undefined ? { cursor: q.cursor } : {}), limit });
     return page;
   }

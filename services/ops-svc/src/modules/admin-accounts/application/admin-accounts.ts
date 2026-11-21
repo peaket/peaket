@@ -25,9 +25,9 @@ export interface AdminAccountsDeps {
   readonly clock: Clock;
 }
 
-const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '관리 계정을 찾을 수 없습니다' });
+const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다', detail: '관리 계정을 찾을 수 없습니다' });
 const reauthRequired = () => new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
-const reauthUnavailable = () => new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 확인기를 쓸 수 없습니다', retryAfterSeconds: 5 });
+const reauthUnavailable = () => new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 검증기를 쓸 수 없습니다', retryAfterSeconds: 5 });
 
 /** 멱등 키에서 정해진 request_id(UUID 꼴)를 만든다. 같은 키·작업·대상·본문이면 같은 값이라 identity 멱등 기록이 두 번째를 알아본다 */
 export function requestIdOf(operation: string, accountRef: string, idempotencyKey: string, bodyHash: string): string {
@@ -39,7 +39,7 @@ const IDEMPOTENCY_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 
 /** Idempotency-Key는 필수 UUID v4다(guidelines §4). 없거나 틀리면 400이고 쓰지 않는다 */
 export function idempotencyKeyOf(raw: string | undefined): string {
-  if (!raw || !IDEMPOTENCY_KEY.test(raw)) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: 'Idempotency-Key는 UUID v4여야 합니다' });
+  if (!raw || !IDEMPOTENCY_KEY.test(raw)) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: '멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다', detail: 'Idempotency-Key는 UUID v4여야 합니다' });
   return raw.toLowerCase();
 }
 
@@ -60,7 +60,7 @@ export function bodyHashOf(body: unknown): string {
 
 const reasonOf = (raw: string): string => {
   const s = raw.normalize('NFC').replace(/[\u0000-\u001f\u007f-\u009f]/gu, '').trim();
-  if (s.length < 1 || [...s].length > 500) throw new ProblemError({ type: 'invalid-query', status: 400, title: '사유는 1~500자입니다' });
+  if (s.length < 1 || [...s].length > 500) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다', detail: '사유는 1~500자입니다' });
   return s;
 };
 
@@ -89,7 +89,7 @@ export class AdminAccounts {
   async invite(actor: OpsActor, body: { email: string; displayName: string; role: AdminRole; promoterId?: string }, reauthToken: string | undefined, idempotencyKey: string | undefined): Promise<AdminAccountView> {
     // operator는 파트너 계정만 초대한다(authz-matrix §6.1, RV-07). identity를 부르기 전에 거른다
     if (actor.role !== 'commander' && !isPartnerRole(body.role)) {
-      throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '그 역할의 계정을 다룰 수 없습니다' });
+      throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '이 역할로는 초대할 수 없습니다', detail: '그 역할의 계정을 다룰 수 없습니다' });
     }
     const key = idempotencyKeyOf(idempotencyKey);
     const bodyHash = bodyHashOf({ email: body.email, displayName: body.displayName, role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}) });
@@ -116,13 +116,13 @@ export class AdminAccounts {
 
   async changeRole(actor: OpsActor, accountId: string, body: { role: AdminRole; reason: string }, ifMatch: string | undefined, reauthToken: string | undefined, idempotencyKey: string | undefined): Promise<{ kind: 'changed'; account: AdminAccountView } | { kind: 'approval'; approval: RoleChangeApprovalView }> {
     const target = await this.get(accountId);
-    if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 역할은 바꿀 수 없습니다' });
+    if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정에는 할 수 없습니다', detail: '자기 역할은 바꿀 수 없습니다' });
     if (isPartnerRole(target.role) !== isPartnerRole(body.role)) throw new ProblemError({ type: 'role-group-mismatch', status: 422, title: '파트너 역할과 관제 역할 사이는 바꿀 수 없습니다' });
-    if (actor.role !== 'commander' && (!isPartnerRole(target.role) || !isPartnerRole(body.role))) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '그 역할의 계정을 다룰 수 없습니다' });
+    if (actor.role !== 'commander' && (!isPartnerRole(target.role) || !isPartnerRole(body.role))) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '이 역할로는 초대할 수 없습니다', detail: '그 역할의 계정을 다룰 수 없습니다' });
     const version = parseIfMatch(ifMatch);
-    if (version === null) throw new ProblemError({ type: 'precondition-required', status: 428, title: 'If-Match 판이 필요합니다' });
-    if (version !== target.version) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 바꿨습니다' });
-    if (target.status === 'REMOVED') throw new ProblemError({ type: 'admin-account-state-conflict', status: 409, title: '삭제한 계정입니다' });
+    if (version === null) throw new ProblemError({ type: 'precondition-required', status: 428, title: '고칠 판(If-Match)을 보내 주세요' });
+    if (version !== target.version) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
+    if (target.status === 'REMOVED') throw new ProblemError({ type: 'admin-account-state-conflict', status: 409, title: '지금 계정 상태에서는 할 수 없습니다', detail: '삭제한 계정입니다' });
     const reason = reasonOf(body.reason);
     await this.#reauth(reauthToken, actor);
     const key = idempotencyKey === undefined ? undefined : idempotencyKeyOf(idempotencyKey);
@@ -152,8 +152,8 @@ export class AdminAccounts {
 
   async reinvite(actor: OpsActor, accountId: string, body: { reasonCode: 'RESEND' | 'PROTECT_LOCK' | 'CREDENTIAL_LOST'; reason: string }, reauthToken: string | undefined, idempotencyKey: string | undefined): Promise<AdminAccountView> {
     const target = await this.get(accountId);
-    if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정은 재초대할 수 없습니다' });
-    if (actor.role !== 'commander' && !isPartnerRole(target.role)) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '그 역할의 계정을 다룰 수 없습니다' });
+    if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정에는 할 수 없습니다', detail: '자기 계정은 재초대할 수 없습니다' });
+    if (actor.role !== 'commander' && !isPartnerRole(target.role)) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '이 역할로는 초대할 수 없습니다', detail: '그 역할의 계정을 다룰 수 없습니다' });
     const reason = reasonOf(body.reason);
     const key = idempotencyKeyOf(idempotencyKey);
     const bodyHash = bodyHashOf({ reasonCode: body.reasonCode, reason });
@@ -174,11 +174,11 @@ export class AdminAccounts {
 
   async remove(actor: OpsActor, accountId: string, body: { reason: string }, reauthToken: string | undefined): Promise<AdminAccountView | null> {
     const target = await this.get(accountId);
-    if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정은 지울 수 없습니다' });
+    if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정에는 할 수 없습니다', detail: '자기 계정은 지울 수 없습니다' });
     // 이미 지운 계정은 같은 200 계정 뷰다(openapi POST .../removal, RV-05). 삭제된 commander도 이 갈래가 먼저다
     if (target.status === 'REMOVED') return target;
-    if (target.role === 'commander') throw new ProblemError({ type: 'commander-removal-needs-role-change', status: 409, title: 'commander 계정은 먼저 역할을 내려야 합니다' });
-    if (actor.role !== 'commander' && !isPartnerRole(target.role)) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '그 역할의 계정을 지울 수 없습니다' });
+    if (target.role === 'commander') throw new ProblemError({ type: 'commander-removal-needs-role-change', status: 409, title: 'commander 역할을 먼저 바꿔 주세요', detail: 'commander 계정은 먼저 역할을 내려야 합니다' });
+    if (actor.role !== 'commander' && !isPartnerRole(target.role)) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '이 역할로는 초대할 수 없습니다', detail: '그 역할의 계정을 지울 수 없습니다' });
     const reason = reasonOf(body.reason);
     await this.#reauth(reauthToken, actor);
     const requestId = uuidv7(this.d.clock);
@@ -195,7 +195,7 @@ export class AdminAccounts {
   }
 
   async designate(actor: OpsActor, accountId: string, body: { kind: DesignationKind; basis: string }, reauthToken: string | undefined, idempotencyKey: string | undefined) {
-    if (accountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기에게 지정할 수 없습니다' });
+    if (accountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정에는 할 수 없습니다', detail: '자기에게 지정할 수 없습니다' });
     const key = idempotencyKeyOf(idempotencyKey);
     const bodyHash = bodyHashOf({ kind: body.kind, basis: body.basis });
     await this.#reauth(reauthToken, actor);
@@ -293,7 +293,7 @@ export class AdminAccounts {
     for (const e of page.entries) {
       const p = e.record.payload as Record<string, unknown>;
       if (p.operation !== operation || p.idempotencyKey !== idempotencyKey || p.status !== 'SUCCEEDED') continue;
-      if (p.bodyHash !== bodyHash) throw new ProblemError({ type: 'idempotency-key-reused', status: 422, title: '같은 Idempotency-Key로 다른 본문을 보냈습니다' });
+      if (p.bodyHash !== bodyHash) throw new ProblemError({ type: 'idempotency-key-reused', status: 422, title: '같은 멱등 키를 다른 요청에 썼습니다', detail: '같은 Idempotency-Key로 다른 본문을 보냈습니다' });
       return p;
     }
     return null;

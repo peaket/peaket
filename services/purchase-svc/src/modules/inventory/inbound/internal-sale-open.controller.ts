@@ -21,9 +21,9 @@ export class InternalSaleOpenController {
   @ContractRouteSchema({ params: SaleOpenParams, body: SaleOpenBody, responses: { 200: SaleOpenView } })
   async open(@Param() params: unknown, @Body() body: unknown): Promise<z.output<typeof SaleOpenView>> {
     const p = SaleOpenParams.safeParse(params);
-    if (!p.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '회차 ID가 올바르지 않습니다' });
+    if (!p.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다', detail: '회차 ID가 올바르지 않습니다' });
     const b = SaleOpenBody.safeParse(body);
-    if (!b.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '판매 열기 본문이 올바르지 않습니다' });
+    if (!b.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다', detail: '판매 열기 본문이 올바르지 않습니다' });
     try {
       return await this.openSale.run({ eventId: p.data.eventId.toLowerCase(), openAtMs: b.data.openAtMs, startsAtMs: b.data.startsAtMs });
     } catch (err) {
