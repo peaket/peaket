@@ -420,6 +420,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 - **슈퍼유저 아님 단언(감독 덤 조사)**: 시작 확인 `assertDatabaseRole`(`services/core-svc/src/modules/catalog/adapters/db/database-role.ts` 23·27행, `main.ts` 178~182행·`relay.ts` 51·73행)이 슈퍼유저·BYPASSRLS·소유자 연결을 막는다. 시험은 `test-int/rls.int.test.ts` 460~469행(파트너·팬 통과, 슈퍼유저 `admin`을 `core_partner`로 확인하면 `/행 보안/`으로 거절, 두 역할 겸임 거절), 435~440행(그룹 역할 둘과 시험 로그인 둘의 `rolsuper`·`rolbypassrls` 거짓), `test-int/search-read-model.int.test.ts` 1522·1523행(`core_search`), `test/core-consumers.test.ts` 222~224·270행(소비자 풀의 `assertDatabaseRole(…, 'core_app')` 부름만)이다. 그룹 역할은 마이그레이션 0004 11~14행(0008·0012·0023도 같은 꼴)이 슈퍼유저·BYPASSRLS면 멈춘다. **없는 것(시험 담당이 더할 후보)**: `main.ts`가 팬·파트너·관제·검색 연결마다 `assertDatabaseRole`을 부르는지 보는 시험(지금은 소비자 풀 하나만), `relay.ts`의 두 부름, 로컬·CI 시연 로그인을 `NOSUPERUSER`로 만드는지(`tools/local/demo-objects.mjs` 676행, `demo-objects.test.mjs`에 단언 없음). 운영 로그인 사용자는 저장소 밖(비밀 관리)에서 만들어 시작 확인만이 지킨다.
 - **시험 담당 고침 뒤(커밋 `f6fafb52e`, 같은 PR CI)**: `merch-path-e2e.int` `beforeAll`에 `PROMOTER` 계약 행(1000bp, 기간 끝 열림)을 더했고(단언 그대로), 새 `test-int/startup-db-role.int.test.ts`(AZ-T5, ADR-0241 결정 7)가 빌드한 `dist/main.js`를 팬·파트너·관제·검색 주소 하나씩 슈퍼유저로 바꿔 띄워 넷 모두 그 역할 이름을 단 시작 확인 오류·끝 코드 1로 뜨지 않음을 본다. 결과: core-svc 통합 50파일(1 건너뜀) 501개 중 **500 통과·실패 0**(`startup-db-role` 1/1), payment-svc 27/27파일 591 통과·2 건너뜀(`merch-path-e2e` 4/4), queue-svc 21·trust-svc 14·admission-ctrl 5파일 모두 통과, purchase-svc는 기존 실패 둘(GAT080_0014, GAT-110 P3)만이라 그 뒤 realtime-gw·bundle·invariant-checker·web 단계는 건너뛰어졌다. 새 시작 확인 시험은 지금 코드에서 처음부터 통과하므로, 실패는 검증 담당이 `main.ts`의 `assertDatabaseRole` 줄 하나를 빼는 표본으로 본다. `relay.ts` 51·73행은 시작 확인보다 앞에서 Kafka 생산자 연결을 기다려 Kafka 없이 같은 꼴로 띄울 수 없어 더하지 않았다(정리 목록 후보). 시연 로그인(`tools/local/demo-objects`)은 갈래 4 영역이라 건드리지 않았다.
 - **트리거 판정 시험(감독 결정 2026-11-22, `MEMBER` → `USAGE` 전, 시험 담당)**: `webhook-merch-grants.int`에 ⑧차(CREATEROLE 비슈퍼유저 관리자가 파트너 역할의 관리 자격만, 상속·SET 없이 가진 꼴 — PostgreSQL 16부터 역할을 만든 사용자가 저절로 받는 꼴과 같음을 `pg_auth_members`로 대조 — 이 상품을 넣고 고치면 적은 값 그대로, 계약 없는 게시도 23514가 아님)와 ⑧카(파트너 로그인이 `SET ROLE core_partner`로 역할 자체가 되어도 계약 값, 계약 없는 게시 23514)를 더했다. 앱 로그인의 상속(GRANT 기본값) 꼴은 ⑧가~아가 이미 본다. 실패 확인은 다음 줄에 적는다.
+- **트리거 판정 시험의 실패 확인(커밋 `796f3057a`, 같은 PR CI, 구현은 아직 `MEMBER`)**: core-svc 통합 50파일(1 건너뜀) 503개 중 **501 통과·1 실패**. 실패는 **⑧차 하나(단언 실패)**다. 관리 자격의 꼴(저절로 받은 `az_t18_probe`와 시험이 만든 `core_partner` 모두 ADMIN 참·INHERIT 거짓·SET 거짓)과 판정 사실(`MEMBER` 참·`USAGE` 거짓)은 기대대로였다. 실제 값: 게시 넣기 둘(A·계약 없는 C)이 `42501`(트리거가 돌아 관리자 권한으로 계약 표를 읽다 거절됨), 초안에 적은 5가 비움, P1에 적은 0이 1,234로 덮였다. ⑧카는 통과(`current_user` = `core_partner`, 계약 값 1,234, 계약 없는 게시 23514). 판정을 `USAGE`로 바꾸면 ⑧차가 통과해야 한다.
 
 ## 구현
 
@@ -447,11 +448,11 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12corerls2-plan | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T03:14+09:00 |
-| test | lane2-w12corerls2-test | claude-opus-5-5 | 2026-11-22T04:31+09:00 | 2026-11-22T05:15+09:00 |
+| test | lane2-w12corerls2-test | claude-opus-5-5 | 2026-11-22T04:31+09:00 | 2026-11-22T06:37+09:00 |
 | impl | lane2-w12corerls2-impl | claude-opus-5-5 | 2026-11-22T05:14+09:00 | 2026-11-22T05:48+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: 시험 담당이 '시험 결과'의 시험 이의(payment-svc `merch-path-e2e.int` 판매자 계약 행 시드)를 고치고 슈퍼유저 아님 단언 시험을 확인(시험 담당) → PR #59 CI에서 payment-svc 뒤 통합 단계(purchase-svc 등)까지 확인 → 리뷰(보안)·검증 → (W12-core-idem 합친 뒤) rebase·기록 → 합치기. 감독은 '구현'의 비슈퍼유저 소유자 메모(트리거 조건 `MEMBER`)를 정한다.
+- **다음 단계**: 구현 담당이 트리거 판정을 `USAGE`로 바꿔(슈퍼유저 제외는 그대로) PR #59 CI에서 AZ-T18 ⑧차가 통과하고 나머지 core-svc 통합이 그대로인지 본다 → 리뷰(보안).
