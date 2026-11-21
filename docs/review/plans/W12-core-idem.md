@@ -289,11 +289,38 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 
 ## 시험 결과
 
-(시험 담당이 구현 뒤 트리의 결과를 쓴다.)
+구현 담당이 구현 커밋 `774148113` 뒤 초안 PR #57 CI(`ci` 실행의 `node / node` 잡, `pnpm --filter @peaket/core-svc test:integration` 단계)로 봤다. 로컬 Docker는 쓰지 않았다.
+
+- **core-svc 통합**: `Test Files 3 failed | 47 passed | 1 skipped (51)`, `Tests 4 failed | 486 passed | 1 skipped (491)`.
+- **AZ-T17 14개**: 13개 통과, 1개 실패(시험 결함, 아래 '시험 이의').
+  - `idempotency-rls.int.test.ts` 8개 모두 통과(① ② ③ 셋 ④ ⑤ ⑧).
+  - `idempotency-migration.int.test.ts` 1개 통과(⑦).
+  - `shop-replay.int.test.ts` 5개 가운데 넷 통과(주문·부가 상품, 결제 시도 가~라, 결제 접수 `ACCEPTED`·`x`·`accepted`, 반품). '취소·환급 계좌 다시 받기'는 취소 두 줄(다른 팬 주문의 취소·같은 팬 다른 주문의 취소: 404·결제사 취소 0·쓰기 0·로그 한 줄)과 계좌 다시 받기의 맞는 참조(202 `REFUNDED`, 지문이 맞음)까지 통과한 뒤 437행에서 실패했다.
+- **원래 실패라 뺀 것(셋)**: `rls.int.test.ts` AZ-T5 '코드가 쓰지 않는 표는 읽지 못한다'·'다른 공연을 지우거나 판매자 표를 고칠 권한이 없다', `search-read-model.int.test.ts` R165-1. W12-core-rls가 develop에 없어서다(구현 전과 같은 셋).
+- **회귀**: `registration.int`(11)·`shop-order.int`(23)·`shop-cancel.int`(22)·`shop-refund-account.int`(10)·`shop-return.int`(9)·`promoter-contract.int`(14)·`shop-notify.int`·`shop-migration.int`·`shop-expiry.int`·`shop-unclaimed.int` 모두 통과. 단위 `test/migrations-journal.test.ts`·`test/promoter-contract.migration.test.ts` 통과.
+- core-svc 단계가 실패해 같은 잡의 뒤 단계(payment-svc·purchase-svc 등 통합)는 돌지 않았다. purchase-svc 두 실패(GAT080_0014·GAT-110 P3)는 갈래 3 몫의 기존 실패다. 같은 실행의 다른 잡(lint-guard·docs-check·contract-check·tools-check·security-scan)은 통과했다.
+- **시험 이의(시험 담당에게)**: `shop-replay.int.test.ts` 437행 `expect(mismatchLines()).toEqual([])`가 바로 앞 취소 반복(409~419행)이 남긴 `CANCEL_MERCH_ORDER` 로그 한 줄을 본다(`logs.length = 0`이 반복 안에만 있고 계좌 다시 받기 앞에는 없다). 받은 값은 `kind` `idempotency-replay-mismatch`·`operation` `CANCEL_MERCH_ORDER`·`orderId` = o5 한 줄이다. 맞는 참조(`cancel:{X5}`)의 계좌 다시 받기는 로그를 남기지 않았는데도 실패한다. 435행 `retry()` 앞에 `logs.length = 0`을 두면 풀린다. 그래서 계좌 다시 받기의 맞지 않는 두 줄(438~448행, M19)은 CI에서 아직 돌지 않았다. 구현 담당은 커밋하지 않은 임시 단위 확인(메모리 저장소)으로 그 길(다른 팬 주문·같은 팬 다른 주문의 취소, 꼴이 틀린 참조, 남의 경로 주문 → 404·로그 한 줄·계좌 값 없음·결제사 취소 0)을 봤다.
 
 ## 구현
 
-(구현 담당이 쓴다.)
+구현 담당(세션 `lane2-w12coreidem-impl`)이 2026-11-22에 썼다. 구현 커밋 `774148113`(시험 커밋 `f0fdae575` 위). 시험 파일은 건드리지 않았다.
+
+- **바탕**: 계획 7과 같은 까닭(W12-core-rls가 develop에 없음)으로 rebase하지 않고 시험 커밋 위에 쌓았다. 로컬 Docker는 쓰지 않았다(감독 차례). 통합 시험은 초안 PR #57 CI로 봤다.
+- **0041** `services/core-svc/migrations/0041_idempotency_record_role_security.sql`(계획 3.1 차례 그대로)
+  - `tenant_id uuid` 칸, 기본값 `nullif(current_setting('app.tenant_id', true), '')::uuid`(`ADD COLUMN IF NOT EXISTS`).
+  - 백필 셋(공연 등록 → `production`, 회차 더하기 → `event`, 남은 회차 더하기 → `pending_revision -> 'addedEvents'`). JSON 변환은 `CASE WHEN pg_input_is_valid(result_ref, 'jsonb') THEN result_ref::jsonb END` 안에서만 하고, ID는 `id::text`와 글로 견준다. 변경분 회차는 담기 비교(`@>`)라 `addedEvents`가 배열이 아니어도 오류 없이 거짓이다. 작업 이름으로 거르므로 팬·관제 기록에는 닿지 않는다.
+  - `REVOKE INSERT, UPDATE` 뒤 `GRANT INSERT`(여섯 칸)·`GRANT UPDATE`(세 칸)를 세 역할에. 읽기·`core_ops` 지우기는 그대로.
+  - `ENABLE ROW LEVEL SECURITY`(FORCE 없음), 정책 열 개(`DROP POLICY IF EXISTS` 뒤 `CREATE POLICY`). 작업 목록은 결정 1 그대로 `"operation" IN (…)`, 파트너 셋은 그 뒤에 `AND "tenant_id" = nullif(current_setting('app.tenant_id', true), '')::uuid`(0004 `production_partner_tenant`와 같은 꼴).
+- **일지** `migrations/meta/_journal.json`: `{"idx":41,"when":1795284988205,"tag":"0041_idempotency_record_role_security"}`. W12-core-rls 0040의 `when`(1795281728010)보다 크다. idx는 41이다(0035~0040이 빈자리). `test/migrations-journal.test.ts`는 idx 빈자리를 막지 않는다(파일 번호 = idx, when 늘 커짐, 파일·일지 짝만 본다. 0024·0025 빈자리가 이미 있다). rebase 때 일지는 0040·0041 두 줄을 다 남긴다.
+- **재생 대조(결정 6)**: 맞지 않으면 `replayMismatch`(`application/shop-signals.ts`)가 `error({ kind: 'idempotency-replay-mismatch', severity: 'SEV2', operation, orderId? })` 한 줄을 남기고 `orderNotFound()`(남의 주문 404와 같은 `ShopProblem`)를 돌려준다. 계정 ID·결과 참조 원문은 싣지 않는다. `operation`은 그 요청의 멱등 작업 이름이다. 처음 길(`replayOf`)과 트랜잭션 안 재생 길 둘 다 같은 대조를 탄다. 처음 길은 쓰기·결제사 호출 전에 끝난다.
+  - `create-merch-order.ts` `#replayView`: 참조 주문이 없거나 계정이 세션 계정이 아니면 404(`orderId` 없음, 참조한 주문 ID도 싣지 않음). 트랜잭션 안 재생은 예약을 푼 뒤 `try` 밖에서 대조한다(예약 두 번 풀기 없음).
+  - `merch-payment.ts` 시작 `#startReplay`: JSON을 읽고(`attemptId`·`pg` 글, `checkout` 객체), 경로 주문이 세션 계정의 것이고, `paymentAttempt(attemptId)`의 주문이 경로 주문이며 결제사가 같고, 결제창 금액(포트원 `totalAmount`, 그 밖 `amount`)이 주문 금액일 때만 처음 응답 그대로. 접수 `#acceptReplay`: 참조가 `accepted`·`sold-out`이고 경로 주문이 세션 계정의 것일 때만(`sold-out`은 409).
+  - `merch-cancel.ts` `verifiedCancelRow`(계좌 다시 받기도 씀): `cancel:` 꼴이고, 그 환급 행의 주문이 경로 주문이며, 그 주문이 세션 계정의 것일 때만 행을 준다. 전에는 꼴이 틀리면 400·행이 없으면 503이었는데 이제 같은 404다(정상 흐름에서는 생기지 않는 값이다). 계좌 다시 받기의 참조는 새 행 ID라 경로 취소 ID와는 견주지 않는다.
+  - `merch-return.ts`: 참조가 `return:{경로 주문}`일 때만 세션 계정으로 그 주문을 읽는다.
+- **저장소 읽기**: `ShopOrderStore.paymentAttempt(attemptId)`(대체·만료 포함, DB는 UUID 꼴만), `CancelRowView.orderId`. DB·메모리 저장소 둘 다.
+- **schema.ts** 517~520행 주석: 0041의 행 보안·칸 권한·`tenant_id`와 작업을 더할 때 정책 목록도 고친다는 것.
+- **게이트(로컬, Docker 없이)**: `pnpm --filter @peaket/core-svc typecheck` 통과, `pnpm --filter @peaket/core-svc test` 104파일 771개 통과, `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0. 커밋하지 않은 임시 단위 확인(메모리 저장소로 유스케이스를 바로 부름)으로 ⑥ 일곱 자리의 맞음·맞지 않음과 로그 칸을 따로 봤다(아래 '시험 이의' 때문에 CI가 계좌 다시 받기 줄을 못 보므로). 그 파일은 지웠다.
+- `node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-core-idem`: 지금은 review·verify 커밋이 없어 실패(묶음 차례상 맞다). 담당 표 impl 줄은 이 커밋에 더했다.
 
 ## 리뷰
 
@@ -309,9 +336,10 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12coreidem-plan | claude-opus-5-5 | 2026-11-22T01:45+09:00 | 2026-11-22T02:24+09:00 |
 | test | lane2-w12coreidem-test | claude-opus-5-5 | 2026-11-22T02:25+09:00 | 2026-11-22T03:12+09:00 |
+| impl | lane2-w12coreidem-impl | claude-opus-5-5 | 2026-11-22T03:09+09:00 | 2026-11-22T03:46+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: W12-core-rls가 develop에 합쳐진 뒤 이 가지를 rebase하고, 구현 담당이 위 3·5대로 0041과 shop 재생 대조를 넣어 새 시험 파일 셋(AZ-T17 ①~⑧ 14개)과 위 6의 회귀를 통과시킨다.
+- **다음 단계**: 시험 담당이 '시험 결과'의 시험 이의(437행)를 고친다 → 리뷰(보안)·검증 → (W12-core-rls 합친 뒤) rebase·기록 → 합치기.
