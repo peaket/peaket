@@ -8,7 +8,7 @@ import { nameKeys } from '@peaket/search-normalize';
 import { describe, expect, test } from 'vitest';
 import type { Database } from '@peaket/platform';
 import { DrizzleSearchIndex, SuggestionDictionary, type DictionarySnapshot, type SearchDictionarySource, type SearchDocument, type SearchTermRow } from '../src/modules/catalog/index.js';
-import { firstSorted, searchDocuments, type SearchQuery } from '../src/modules/catalog/domain/search.js';
+import { firstSorted, searchDocuments, type NameKeysLookup, type SearchQuery } from '../src/modules/catalog/domain/search.js';
 import type { DocumentRow } from '../src/modules/catalog/adapters/db/search-rows.js';
 
 const PAGE = 20;
@@ -19,6 +19,23 @@ const pid = (n: number) => `p-${String(n).padStart(5, '0')}`;
 const q = (s: string, o: Partial<SearchQuery> = {}): SearchQuery => ({ q: s, includePast: true, noConvert: false, page: 1, now: new Date(T0), ...o });
 const doc = (n: number, o: Partial<SearchDocument> = {}): SearchDocument => ({ productionId: pid(n), eventId: `${pid(n)}-e`, title: TITLE, aliases: [], genre: '콘서트', artists: [], saleStatus: 'ON_SALE', popularity: 0, ...o });
 const ids = (out: { items: { productionId: string }[] }) => out.items.map((x) => x.productionId);
+/**
+ * 이름마다 비교 값을 한 번만 만드는 keysOf(부를 때마다 새 기억 칸). 운영 조립이 사전의 keysOf를 넘기는 자리(catalog.module.ts의 SEARCH_INDEX)와 같고,
+ * nameKeys는 이름 글의 순수 함수라 답이 같다(domain/search.ts indexDocuments 주석). 넘기지 않으면 후보 줄마다 nameKeys를 새로 만들어 붐비는 CI에서 시간 한도를 넘긴다(W12-sr13).
+ * seen: 부를 때마다 그 이름을 알린다(끼어듦을 보는 시험용)
+ */
+const keysOfOnce = (seen?: (name: string) => void): NameKeysLookup => {
+  const memo = new Map<string, ReturnType<typeof nameKeys>>();
+  return (name) => {
+    seen?.(name);
+    let k = memo.get(name);
+    if (k === undefined) {
+      k = nameKeys(name);
+      memo.set(name, k);
+    }
+    return k;
+  };
+};
 /** 정해진 섞기(넣는 차례가 답에 영향을 주지 않는지 본다) */
 const shuffle = <T>(xs: T[]): T[] => {
   const out = [...xs];
@@ -149,7 +166,7 @@ describe('SR-T13 ① 큰 후보를 끊어 처리해도 답은 그대로이고 �
       [n - 1, 6],
     ]);
     const rows = Array.from({ length: n }, (_, i) => row(i, marked.get(i) ?? 0));
-    const index = new DrizzleSearchIndex(fakeDb(rows), 'https://img.test');
+    const index = new DrizzleSearchIndex(fakeDb(rows), 'https://img.test', { keysOf: keysOfOnce() });
     const out = await index.search(q('같은 이름'));
     const top = [...new Set([1_999, 2_000, 4_000, n - 1].filter((i) => i < n))].sort((a, b) => (marked.get(b) ?? 0) - (marked.get(a) ?? 0)).map(pid);
     const rest = Array.from({ length: n }, (_, i) => i).filter((i) => !marked.has(i)).map(pid);
@@ -157,7 +174,7 @@ describe('SR-T13 ① 큰 후보를 끊어 처리해도 답은 그대로이고 �
     expect(ids(out)).toEqual(want);
     expect([out.total, out.totalCapped]).toEqual([Math.min(n, CAP), n > CAP]);
     // 마지막 쪽(50쪽)도 같은 차례의 981~1,000번째다
-    const last = await new DrizzleSearchIndex(fakeDb(rows), 'https://img.test').search(q('같은 이름', { page: CAP / PAGE }));
+    const last = await new DrizzleSearchIndex(fakeDb(rows), 'https://img.test', { keysOf: keysOfOnce() }).search(q('같은 이름', { page: CAP / PAGE }));
     expect(ids(last)).toEqual([...top, ...rest].slice(CAP - PAGE, CAP));
   });
 
@@ -174,15 +191,16 @@ describe('SR-T13 ① 큰 후보를 끊어 처리해도 답은 그대로이고 �
     let looked = 0;
     let atSuggest = -1;
     let suggested: number | undefined;
-    // 검색이 첫 덩이의 이름 비교 값을 만드는 동안 자동완성 요청이 '들어온다'(다음 차례의 콜백으로 줄을 선다)
-    const keysOf = () => {
+    // 검색이 첫 덩이의 이름 비교 값을 찾는 동안 자동완성 요청이 '들어온다'(다음 차례의 콜백으로 줄을 선다)
+    const once = keysOfOnce();
+    const keysOf: NameKeysLookup = (name) => {
       looked += 1;
       if (looked === 1)
         setImmediate(() => {
           atSuggest = looked;
           suggested = dict.suggest('루멘').items.length;
         });
-      return undefined;
+      return once(name);
     };
     const out = await new DrizzleSearchIndex(fakeDb(rows), 'https://img.test', { keysOf }).search(q('같은 이름'));
     expect(out.total).toBe(CAP);
@@ -232,19 +250,28 @@ describe('SR-T13 ① 끊어 처리하는 사이 함께 온 검색(검증 P12)', 
     ]);
     const qa = q('같은 이름', { page: 2 });
     const qb = q('다른 제목', { sort: 'POPULAR' });
-    const solo = new DrizzleSearchIndex(db, 'https://img.test');
+    const solo = new DrizzleSearchIndex(db, 'https://img.test', { keysOf: keysOfOnce() });
     const wantA = await solo.search(qa);
     const wantB = await solo.search(qb);
     // 혼자 보낸 답이 맞는 후보에서 나왔다(빈 결과로 통과하지 않게)
     expect([wantA.items.length, wantA.total, wantA.items.every((x) => x.productionId.startsWith('a-'))]).toEqual([PAGE, CAP, true]);
     expect([wantB.items.length, wantB.total, wantB.items.every((x) => x.productionId.startsWith('b-'))]).toEqual([PAGE, CAP, true]);
-    // 같은 어댑터(같은 인스턴스)에 함께 보낸다. 끼어드는 차례를 바꿔 두 번
-    const shared = new DrizzleSearchIndex(db, 'https://img.test');
+    // 같은 어댑터(같은 인스턴스)에 함께 보낸다. 끼어드는 차례를 바꿔 두 번.
+    // turns: 비교 값을 찾은 이름이 바로 앞과 다를 때만 더한다. 길이 3 이상이면 앞 검색이 다른 검색에 끊겼다가 다시 이어졌다(A·B·A)
+    const turns: string[] = [];
+    const shared = new DrizzleSearchIndex(db, 'https://img.test', {
+      keysOf: keysOfOnce((name) => {
+        if (turns.at(-1) !== name) turns.push(name);
+      }),
+    });
     const [gotA, gotB] = await Promise.all([shared.search(qa), shared.search(qb)]);
+    expect(turns.length, `함께 보낸 두 검색이 끊어 처리하는 사이 서로 끼어들지 않았다(이름 바뀜 ${turns.join('·')})`).toBeGreaterThanOrEqual(3);
     expect(ids(gotA)).toEqual(ids(wantA));
     expect(ids(gotB)).toEqual(ids(wantB));
     expect([gotA.total, gotB.total]).toEqual([wantA.total, wantB.total]);
+    turns.length = 0;
     const [gotB2, gotA2] = await Promise.all([shared.search(qb), shared.search(qa)]);
+    expect(turns.length, `차례를 바꿔 함께 보낸 두 검색이 끊어 처리하는 사이 서로 끼어들지 않았다(이름 바뀜 ${turns.join('·')})`).toBeGreaterThanOrEqual(3);
     expect(ids(gotA2)).toEqual(ids(wantA));
     expect(ids(gotB2)).toEqual(ids(wantB));
   });
