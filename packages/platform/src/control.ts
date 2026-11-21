@@ -3,8 +3,10 @@
 // - 시작 작업 셋(제어 상태, control.settings 끝까지, control.sessions-terminated 지금 − 15분부터)이 끝나야 준비 상태
 // - Kafka에 닿지 못하면 30초 [가정] 뒤 그 작업을 끝난 것으로 치고 control_sync_lagging{kind}=1(따라잡으면 0)
 // - 제어 상태는 2초 [가정]마다 다시 읽어 판 번호가 큰 쪽을 남긴다. 설정은 키마다 큰 판(occurredAt)만, 지우는 표시는 지움, 만료는 무시
-// - 읽지 못한 레코드는 건너뛰고 control_sync_skipped_total{service,topic}으로 센다. 종료 시각을 읽지 못한 종료 사건은 받은 때를 종료 시각으로 쓴다(ADR-0333 결정 4)
+// - 읽지 못한 레코드는 건너뛰고 control_sync_skipped_total{service,topic,reason="unreadable"}로 센다. 종료 사건의 종료 시각을 읽지 못하거나
+//   믿을 범위(그 레코드의 Kafka 시각 k에 대해 k − 15분 < 종료 시각 ≤ k + 1분) 밖이면 받은 때부터 막고 reason="time_replaced"로 센다(ADR-0333 결정 4)
 import { Counter, Gauge, type Registry } from '@prometheus-io/client';
+import { TERMINATED_SESSION_TTL_MS } from './auth.js';
 import type { Clock } from './clock.js';
 import { CONTROL_TOPICS } from './outbox.js';
 import { realSleep } from './outbox-relay.js';
@@ -22,6 +24,24 @@ export const CONTROL_SYNC_DEFAULTS = {
   /** 종료 세션 되감기(종료 세션 목록을 두는 시간, ADR-0011 결정 2) */
   sessionsRewindMs: 15 * 60_000,
 } as const;
+
+/** 종료 시각을 그대로 쓰는 미래 쪽 끝: 그 레코드의 Kafka 시각 + 1분 [가정](노드 시계 차이에 둔 여유, ADR-0333 결정 4) */
+const TERMINATED_AT_FUTURE_SKEW_MS = 60_000;
+
+/** control_sync_skipped_total의 까닭(ADR-0333 결정 4) */
+type ControlSyncSkipReason = 'unreadable' | 'time_replaced';
+
+/**
+ * 종료 사건의 종료 시각을 그대로 믿어도 되는가(ADR-0333 결정 4). 기준 k는 레코드의 Kafka 시각이고, 0 이하이거나 유한하지 않으면 받은 때다.
+ * k − 15분 < 종료 시각 ≤ k + 1분이고 Date로 나타낼 수 있어야 한다. 밖이면 받은 때부터 막는다(닫힌 쪽 실패)
+ */
+function trustedTerminatedAt(terminatedAt: number, recordTimestamp: number, receivedAt: number): Date | undefined {
+  if (!Number.isFinite(terminatedAt)) return undefined;
+  const k = Number.isFinite(recordTimestamp) && recordTimestamp > 0 ? recordTimestamp : receivedAt;
+  if (terminatedAt <= k - TERMINATED_SESSION_TTL_MS || terminatedAt > k + TERMINATED_AT_FUTURE_SKEW_MS) return undefined;
+  const at = new Date(terminatedAt);
+  return Number.isFinite(at.getTime()) ? at : undefined;
+}
 
 export interface BroadcastRecord {
   topic: string;
@@ -78,8 +98,8 @@ export class ControlSyncMetrics {
   readonly lagging: Gauge<'service' | 'kind'>;
   readonly consumerLag: Gauge<'service' | 'topic'>;
   readonly appliedVersion: Gauge<'service' | 'key'>;
-  /** 읽지 못해 건너뛴 레코드(1건 이상이면 SEV3, ADR-0333 결정 4) */
-  readonly skipped: Counter<'service' | 'topic'>;
+  /** 읽지 못해 건너뛴 레코드(unreadable)와 종료 시각을 받은 때로 바꾼 종료 사건(time_replaced). 1건 이상이면 SEV3(ADR-0333 결정 4) */
+  readonly skipped: Counter<'service' | 'topic' | 'reason'>;
   constructor(
     registry: Registry,
     readonly service: string,
@@ -88,7 +108,7 @@ export class ControlSyncMetrics {
     this.lagging = new Gauge({ name: 'control_sync_lagging', help: 'Kafka에 닿지 못한 채 준비 상태로 간 시작 작업(따라잡으면 0, ADR-0103 결정 2)', labelNames: ['service', 'kind'], registers });
     this.consumerLag = new Gauge({ name: 'control_consumer_lag_seconds', help: '방송형 토픽에서 처리한 마지막 메시지의 나이(끝을 따라잡으면 0)', labelNames: ['service', 'topic'], registers });
     this.appliedVersion = new Gauge({ name: 'control_settings_applied_version', help: '적용한 설정의 판 번호(occurredAt 밀리초, ADR-0143 결정 2)', labelNames: ['service', 'key'], registers });
-    this.skipped = new Counter({ name: 'control_sync_skipped_total', help: '방송형 제어 토픽에서 값을 읽지 못해 건너뛴 레코드(보안 통제가 레코드 하나만큼 빠졌다, ADR-0333 결정 4)', labelNames: ['service', 'topic'], registers });
+    this.skipped = new Counter({ name: 'control_sync_skipped_total', help: '방송형 제어 토픽의 레코드. reason=unreadable은 값을 읽지 못해 건너뛴 것(보안 통제가 레코드 하나만큼 빠졌다), reason=time_replaced는 종료 사건의 종료 시각을 읽지 못하거나 믿을 범위 밖이라 받은 때로 바꾼 것(ADR-0333 결정 4)', labelNames: ['service', 'topic', 'reason'], registers });
   }
 }
 
@@ -287,7 +307,7 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
     const lagLabels = { service: host.name, topic };
     metrics.lagging.set(labels, 0);
     metrics.consumerLag.set(lagLabels, 0);
-    metrics.skipped.inc(lagLabels, 0);
+    metrics.skipped.inc({ ...lagLabels, reason: 'unreadable' satisfies ControlSyncSkipReason }, 0);
     let caughtUp = false;
     let degraded = false;
     timers.push(
@@ -346,7 +366,7 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
               try {
                 onRecord(r);
               } catch (err) {
-                metrics.skipped.inc(lagLabels);
+                metrics.skipped.inc({ ...lagLabels, reason: 'unreadable' satisfies ControlSyncSkipReason });
                 warn(`${topic} 사건을 읽지 못해 건너뛴다(파티션 ${r.partition}, 오프셋 ${r.offset})`, err);
               }
               if (check()) reached();
@@ -374,18 +394,33 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
       },
     ),
   );
+  const sessionsTopic = CONTROL_TOPICS.sessionsTerminated;
+  const replacedLabels = { service: host.name, topic: sessionsTopic, reason: 'time_replaced' satisfies ControlSyncSkipReason };
+  // 세 줄(두 토픽의 unreadable, 종료 사건 토픽의 time_replaced)을 0으로 미리 낸다. unreadable은 topicTask가 낸다
+  metrics.skipped.inc(replacedLabels, 0);
   tasks.push(
     topicTask(
       'sessions',
-      CONTROL_TOPICS.sessionsTerminated,
+      sessionsTopic,
       // Kafka가 돌아올 때마다 '지금 − 15분'을 다시 잰다
-      () => o.source.offsetsAt(CONTROL_TOPICS.sessionsTerminated, host.clock.now() - t.sessionsRewindMs),
+      () => o.source.offsetsAt(sessionsTopic, host.clock.now() - t.sessionsRewindMs),
       (r) => {
         if (r.value === null) return;
         const e = o.codec.sessionTerminated(r.value);
-        // 종료 시각을 읽지 못하면(NaN·Date 범위 밖) 시각 없이 넘겨 받은 때부터 15분 막는다(건너뛰면 그 세션이 열린 쪽으로 실패한다, ADR-0333 결정 4)
-        const at = new Date(e.terminatedAt);
-        host.auth.terminateSession(Number.isFinite(at.getTime()) ? { sessionId: e.sessionId, terminatedAt: at.toISOString() } : { sessionId: e.sessionId });
+        const at = trustedTerminatedAt(e.terminatedAt, r.timestamp, host.clock.now());
+        if (at) {
+          // 범위 안의 옛 사건(받은 때 이미 15분이 지난 것)은 TerminatedSessions가 넣지 않는다(그 세션의 토큰은 이미 수명이 끝났다)
+          host.auth.terminateSession({ sessionId: e.sessionId, terminatedAt: at.toISOString() });
+          return;
+        }
+        // 읽지 못하거나 범위 밖이면 시각 없이 넘겨 받은 때부터 15분 막는다(그대로 받거나 건너뛰면 그 세션이 열린 쪽으로 실패한다, ADR-0333 결정 4).
+        // 로그에는 sid·값을 싣지 않는다
+        host.auth.terminateSession({ sessionId: e.sessionId });
+        metrics.skipped.inc(replacedLabels);
+        host.logger.warn(
+          { kind: 'control-sync', topic: sessionsTopic, partition: r.partition, offset: String(r.offset), reason: 'time_replaced' },
+          `${sessionsTopic} 종료 시각을 읽지 못하거나 믿을 범위 밖이라 받은 때부터 막는다(파티션 ${r.partition}, 오프셋 ${r.offset})`,
+        );
       },
     ),
   );
