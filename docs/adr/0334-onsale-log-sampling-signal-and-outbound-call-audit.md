@@ -9,7 +9,7 @@
 - 정규 로그 줄의 정상 표본 비율은 실행 중에 `service.logs.setSampleOneIn`으로 바꿀 수 있지만, 서비스가 온세일 구간을 알 신호가 없었다(docs/observability.md §7 '표본').
 - 소유자는 OPEN[09]에서 ops-svc가 대형·중형 온세일 윈도우(T-10분~T+60분, POL-028) 시작에 `LOG_SAMPLING`(값 `oneIn`, `expiresAt`은 윈도우 끝)을 내고 플랫폼이 로그 레벨 설정처럼 적용하는 안을 골랐다. 계약(Avro 열거 기호와 값 레코드)과 일정의 출처, 겹친 윈도우, 중복은 정하지 않았다.
 - ops-svc에는 회차 오픈 시각·규모를 읽는 곳이 없다. 규모(`LARGE`·`MEDIUM`·`SMALL`)와 오픈 시각은 core-svc 회차에 있다.
-- 바깥 제공자 호출의 추적 머리 누출은 identity-svc 두 곳을 고쳤고(BOT-110), 나머지 서비스는 사람이 하나씩 봤을 뿐 막는 검사가 없다(BUILD_ORDER OPS-020 줄).
+- 바깥 제공자 호출의 추적 머리 누출은 identity-svc 두 곳을 고쳤다(BOT-110). OPS-020 줄은 다른 서비스의 바깥 호출도 전역 `fetch`를 바로 부르지 않는지 보라고 한다. 그 검사는 이미 공용 린트 규칙 `peaket-service/no-direct-outbound-http`(BAS-010 ①, V-T31 ③)가 서비스 코드 전부에 걸고 있다(2026-11-22 바로잡음. 처음 판은 '막는 검사가 없다'로 잘못 적었다).
 - 지표 라벨 금지 목록(docs/observability.md §8)도 막는 검사가 없다.
 
 ## 결정
@@ -18,7 +18,7 @@
 2. **소비(공용 서버 패키지)**: `startControlSync`의 설정 처리에 `LOG_SAMPLING`을 더해 받자마자 `setSampleOneIn(oneIn)`을 부른다. `expiresAt`이 지나면 시작 설정 값(`PEAKET_LOG_SAMPLE_ONE_IN`, 기본 10)으로 돌린다. 만료가 지난 값은 새 파드가 무시한다(로그 레벨과 같다, C-T51). 값이 틀리면(범위 밖, 갈래 불일치) 적용하지 않고 경고 줄 하나를 남긴다.
 3. **생산(ops-svc)**: 1분 [가정]마다 core-svc에서 앞으로 2시간 [가정] 안의 대형·중형 회차 오픈 시각을 읽는다(내부 호출, 규모 없는 회차는 소형으로 본다). 윈도우는 [오픈 − 10분, 오픈 + 60분)이고, 지금 걸친 윈도우들의 끝 가운데 가장 늦은 것을 `expiresAt`으로 낸다. 끝이 바뀔 때(새 윈도우가 겹쳐 늘 때)만 다시 낸다. 행위자는 자동 조치(SYSTEM, docs/observability.md §7 `ops_event`)이고, `commandId`·`eventKey`는 `expiresAt`에서 정해진 값으로 만들어 복제 여럿·재시작이 같은 사건을 내도 소비자가 한 번만 적용한다(ADR-0052). Outbox로 낸다. core-svc를 읽지 못하면 내지 않고(이미 낸 값은 `expiresAt`까지 유지) 실패 지표를 올린다.
 4. **표본 문턱은 그대로**: 비율만 바뀌고 문턱식·전수 규칙(4xx·5xx, SLO 초과, `keep()`, 진입 경로)은 docs/observability.md §7대로다.
-5. **바깥 호출 점검**: `services/*/src`와 화면 앱 서버 코드가 바깥 제공자(docs/observability.md §6 '신뢰 경계의 추적 문맥' 나가는 쪽 목록)를 부를 때는 `createExternalHttpClient`만 쓴다. 전역 `fetch`·`globalThis.fetch`를 직접 부르는 곳은 공용 린트 규칙이 막고, 허용 목록(파일과 까닭: 같은 파드 안 관리 포트, 메시 안 내부 호출을 그 클라이언트에 주입하는 곳)만 둔다. 서비스 쪽 규칙은 이미 있는 `peaket-service/no-direct-outbound-http`(BUILD_ORDER BAS-010 ①, ADR-0259, `packages/config/eslint/service-security.mjs`)가 그것이다: `services/*/src`와 서비스 뼈대에 걸려 전역 `fetch`의 모든 값 쓰임(부르기·`?? fetch` 기본값·넘기기)과 전역 객체의 `fetch`를 막고, 허용 목록은 같은 파일의 `OUTBOUND_HTTP_EXCEPTIONS`(파일·푸는 쓰임·까닭)다. 같은 일을 하는 규칙을 하나 더 두지 않는다. 화면 앱 서버 코드는 자동 계측(http·undici)을 싣지 않아 전역 `fetch`가 추적 머리를 싣지 않으므로(packages/platform `telemetry-app-server.ts`) 규칙 대신 사람이 본다(추천 적용, 2026-11-22, BAT-215 구현).
+5. **바깥 호출 점검은 이미 있는 규칙으로 한다**(바로잡음 2026-11-22, BAT-215 구현 판단을 감독이 받음): `services/*/src`가 바깥 제공자(docs/observability.md §6 '신뢰 경계의 추적 문맥' 나가는 쪽 목록)를 부를 때는 `createExternalHttpClient`만 쓴다. 이를 막는 규칙은 이미 있는 `peaket-service/no-direct-outbound-http`(BUILD_ORDER BAS-010 ①, [ADR-0259](0259-verification-submit-appeal-first-implementation.md), `packages/config/eslint/service-security.mjs`, 시험 V-T31 ③)다. 서비스 코드와 서비스 뼈대에 걸려 전역 `fetch`의 값 쓰임(부르기·`?? fetch` 기본값·값으로 넘기기)과 전역 객체의 `fetch`, `node:http(s)`·`node:http2`·undici를 막고, 허용 목록은 같은 파일의 `OUTBOUND_HTTP_EXCEPTIONS`(파일·푸는 쓰임·까닭)다. 같은 일을 하는 규칙을 하나 더 두지 않는다. 둘이면 하나를 빼는 결함이 다른 하나에 가려지기 때문이다. 2026-11-22에 걸리는 곳은 0이다. 화면 앱 서버 코드는 자동 계측(http·undici)을 싣지 않아 전역 `fetch`가 추적 머리를 싣지 않으므로(packages/platform `telemetry-app-server.ts`) 규칙 대신 사람이 본다(추천 적용, 2026-11-22, BAT-215 구현).
 6. **지표 라벨 검사**: 공용 서버 패키지가 서비스 시작(`listen`) 때 레지스트리에 등록된 지표 전부를 훑어, 어기면 어긴 지표 이름과 라벨을 모두 들어 시작을 실패시킨다(C-T76). 환경과 관계없이 같다.
    - 라벨 이름은 소문자로 바꾸고 `_`·`-`를 뺀 뒤 금지 이름과 견준다. 금지 이름은 docs/observability.md §8 '사용 금지 라벨'을 이름으로 옮긴 `accountid`·`userid`·`pid`·`sid`·`sessionid`·`ci`·`token`·`queueseq`·`seq`·`seatid`·`ip`·`clientip`·`useragent`·`ua`·`orderid`다. `token`·`ip`로 끝나는 이름도 금지다.
    - 이름은 Prometheus 이름 규칙(`[a-zA-Z_:][a-zA-Z0-9_:]*`)을 따르고 Counter는 `_total`로 끝난다. 이미 있는 지표가 어기면 이름을 바꾸지 않고 구현 담당이 계획 파일에 적고 멈춘다(경보·대시보드가 그 이름을 읽는다).
@@ -29,6 +29,7 @@
 - 서비스가 저마다 회차 일정을 읽어 비율을 정한다: 파드마다 core-svc를 부르고 판단이 갈린다. 소유자 결정과도 다르다.
 - 운영자가 명령으로 바꾼다: 사람이 잊으면 피크에 로그가 열 배로 쌓인다.
 - 린트 대신 사람 점검: BOT-110 뒤에도 같은 꼴이 남을 수 있다.
+- 바깥 호출 규칙을 하나 더 만든다(처음 계획의 `no-raw-fetch`): 이미 있는 규칙과 같은 일을 해, 하나를 빼는 결함이 다른 하나에 가려진다. 고르지 않았다.
 
 ## 결과
 
