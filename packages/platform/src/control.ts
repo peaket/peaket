@@ -3,7 +3,8 @@
 // - 시작 작업 셋(제어 상태, control.settings 끝까지, control.sessions-terminated 지금 − 15분부터)이 끝나야 준비 상태
 // - Kafka에 닿지 못하면 30초 [가정] 뒤 그 작업을 끝난 것으로 치고 control_sync_lagging{kind}=1(따라잡으면 0)
 // - 제어 상태는 2초 [가정]마다 다시 읽어 판 번호가 큰 쪽을 남긴다. 설정은 키마다 큰 판(occurredAt)만, 지우는 표시는 지움, 만료는 무시
-import { Gauge, type Registry } from '@prometheus-io/client';
+// - 읽지 못한 레코드는 건너뛰고 control_sync_skipped_total{service,topic}으로 센다. 종료 시각을 읽지 못한 종료 사건은 받은 때를 종료 시각으로 쓴다(ADR-0333 결정 4)
+import { Counter, Gauge, type Registry } from '@prometheus-io/client';
 import type { Clock } from './clock.js';
 import { CONTROL_TOPICS } from './outbox.js';
 import { realSleep } from './outbox-relay.js';
@@ -63,10 +64,11 @@ export interface SessionTerminated {
   accountId: string;
   sessionId: string;
   reason: string;
+  /** 종료 시각(밀리초). 읽지 못했으면 NaN이고, startControlSync가 받은 때를 쓴다 */
   terminatedAt: number;
 }
 
-/** 제어 사건 값 해석 포트. Avro(Confluent 형식)는 BAS-030이 만든다 */
+/** 제어 사건 값 해석 포트. 던지면 그 레코드를 건너뛰고 센다. 운영 JSON 해독기는 controlEventCodec, Avro(Confluent 형식)는 BAS-030이 만든다 */
 export interface ControlCodec {
   setting(value: Buffer): SettingChanged;
   sessionTerminated(value: Buffer): SessionTerminated;
@@ -76,6 +78,8 @@ export class ControlSyncMetrics {
   readonly lagging: Gauge<'service' | 'kind'>;
   readonly consumerLag: Gauge<'service' | 'topic'>;
   readonly appliedVersion: Gauge<'service' | 'key'>;
+  /** 읽지 못해 건너뛴 레코드(1건 이상이면 SEV3, ADR-0333 결정 4) */
+  readonly skipped: Counter<'service' | 'topic'>;
   constructor(
     registry: Registry,
     readonly service: string,
@@ -84,6 +88,7 @@ export class ControlSyncMetrics {
     this.lagging = new Gauge({ name: 'control_sync_lagging', help: 'Kafka에 닿지 못한 채 준비 상태로 간 시작 작업(따라잡으면 0, ADR-0103 결정 2)', labelNames: ['service', 'kind'], registers });
     this.consumerLag = new Gauge({ name: 'control_consumer_lag_seconds', help: '방송형 토픽에서 처리한 마지막 메시지의 나이(끝을 따라잡으면 0)', labelNames: ['service', 'topic'], registers });
     this.appliedVersion = new Gauge({ name: 'control_settings_applied_version', help: '적용한 설정의 판 번호(occurredAt 밀리초, ADR-0143 결정 2)', labelNames: ['service', 'key'], registers });
+    this.skipped = new Counter({ name: 'control_sync_skipped_total', help: '방송형 제어 토픽에서 값을 읽지 못해 건너뛴 레코드(보안 통제가 레코드 하나만큼 빠졌다, ADR-0333 결정 4)', labelNames: ['service', 'topic'], registers });
   }
 }
 
@@ -282,6 +287,7 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
     const lagLabels = { service: host.name, topic };
     metrics.lagging.set(labels, 0);
     metrics.consumerLag.set(lagLabels, 0);
+    metrics.skipped.inc(lagLabels, 0);
     let caughtUp = false;
     let degraded = false;
     timers.push(
@@ -340,7 +346,8 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
               try {
                 onRecord(r);
               } catch (err) {
-                warn(`${topic} 사건을 읽지 못해 건너뛴다(오프셋 ${r.offset})`, err);
+                metrics.skipped.inc(lagLabels);
+                warn(`${topic} 사건을 읽지 못해 건너뛴다(파티션 ${r.partition}, 오프셋 ${r.offset})`, err);
               }
               if (check()) reached();
               else metrics.consumerLag.set(lagLabels, Math.max(0, host.clock.now() - r.timestamp) / 1000);
@@ -376,7 +383,9 @@ export function startControlSync(host: ControlSyncHost, o: ControlSyncOptions): 
       (r) => {
         if (r.value === null) return;
         const e = o.codec.sessionTerminated(r.value);
-        host.auth.terminateSession({ sessionId: e.sessionId, terminatedAt: new Date(e.terminatedAt).toISOString() });
+        // 종료 시각을 읽지 못하면(NaN·Date 범위 밖) 시각 없이 넘겨 받은 때부터 15분 막는다(건너뛰면 그 세션이 열린 쪽으로 실패한다, ADR-0333 결정 4)
+        const at = new Date(e.terminatedAt);
+        host.auth.terminateSession(Number.isFinite(at.getTime()) ? { sessionId: e.sessionId, terminatedAt: at.toISOString() } : { sessionId: e.sessionId });
       },
     ),
   );

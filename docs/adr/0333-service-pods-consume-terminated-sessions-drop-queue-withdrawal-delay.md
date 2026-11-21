@@ -20,7 +20,7 @@
 4. **값 해독(BAS-030의 Avro 전까지 JSON)**: 운영 해독기를 플랫폼에 둔다.
    - 종료 사건은 `sessionId`(비지 않은 글)만 꼭 요구한다. `reason`·`accountId`는 보지 않는다. 이유 값이 새로 더해져도 거절이 빠지지 않게 하려는 것이다(계약 검사로 모르는 이유를 버리면 열린 쪽으로 실패한다).
    - `terminatedAt`은 ISO 시각 글(asyncapi)과 밀리초 수(Avro `timestamp-millis`)를 받는다. 읽지 못하면 받은 때를 종료 시각으로 둔다(닫힌 쪽 실패). 목록에 두는 시간은 지금 규칙(종료 시각 + 15분, 되감아 읽은 옛 사건은 남은 시간만)이다.
-   - 설정 사건(`control.settings`)은 계약(asyncapi `SettingChanged`)대로 읽고 시각 칸을 밀리초로 바꾼다.
+   - 설정 사건(`control.settings`)은 계약(asyncapi `SettingChanged`)대로 읽고 시각 칸을 밀리초로 바꾼다. 플랫폼은 계약 생성물(`@peaket/contracts`)을 실행 때 싣지 않으므로(개발 의존성이고, 플랫폼만 담는 이미지가 계약을 빌드하지 않는다) 계약의 칸 이름과 모양(글, ISO 시각이나 밀리초 수)만 보고 키·값 갈래의 목록은 보지 않는다. 모양이 틀리거나 시각을 읽지 못하면 아래 건너뛰기로 간다(추천 적용, 2026-11-21, BAT-059 구현).
    - 읽지 못한 레코드는 지금처럼 건너뛰되 `control_sync_skipped_total{service,topic}`으로 센다. 1건 이상이면 SEV3(`kind` control)다. 보안 통제가 레코드 하나만큼 빠졌다는 뜻이다(ASVS v5.0.0-16.3.4).
 5. **대기열 탈퇴 15분 미루기를 뺀다**: `AccountWithdrawnHandler`는 사건을 받자마자 진행 중인 회차의 두 키(`q:dup`·`q:adm`) 만료를 당긴다. 처리할 때 집합 `q:{wdr}:…`, `WithdrawnDueWorker`, 미루기·시계 허용 차이 상수, 지표 셋(`queue_withdrawn_due_lag_seconds`·`queue_withdrawn_due_failures_total`·`queue_withdrawn_due_expired_total`)과 그 경보를 없앤다. 지우는 기한을 지금 + 5일로 자르는 일과 `purgeBy`가 탈퇴 ~ 탈퇴 + 5일 밖이면 보류하는 일은 그대로다. 대기열 Redis 장애 전환으로 만료 당기기 쓰기를 잃으면 RB-05 뒤 이 토픽의 그룹 위치를 장애 전환 시각 − 20분 [가정]으로 되돌려 다시 읽는 길(ADR-0214 결정 7)은 그대로 쓴다(다시 해도 결과가 같다).
 6. **이전 판이 남긴 처리할 때 집합**: 아직 운영 쪽 배포가 없어(구간 5, ADR-0332) 남은 항목을 옮기는 코드를 두지 않는다. 남은 키의 값(pid)은 수명(`purgeBy`)에 사라진다. 배포된 환경에서 같은 판 바꾸기를 하게 되면, 배포 시각 − 20분 [가정]으로 위 5의 그룹 위치 되돌리기를 한 번 한다.

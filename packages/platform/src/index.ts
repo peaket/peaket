@@ -174,6 +174,7 @@ export {
   type SettingChanged,
   type SettingEntry,
 } from './control.js';
+export { controlEventCodec } from './control-codec.js';
 export {
   MONTHLY_PARTITION_DEFAULTS,
   addKstMonths,

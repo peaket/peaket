@@ -276,6 +276,11 @@ export function authzUnavailable(cause?: unknown): ProblemError {
 /** 서비스 하나의 인증 상태(종료 세션 목록, 역할 캐시, identity 포트) */
 export class AuthState {
   readonly terminated: TerminatedSessions;
+  /**
+   * 신원 역할(public 말고)을 허용한 처리기(`컨트롤러.메서드`). 시작 때 RolesCheck가 채운다.
+   * 하나라도 있으면 local·ci 밖에서 종료 세션 목록 소비 없이 듣지 않는다(PlatformService.listen, ADR-0333 결정 3)
+   */
+  readonly identityHandlers: string[] = [];
   readonly #cache: AdminAuthzCache;
 
   constructor(
@@ -656,6 +661,7 @@ export class RolesCheck implements OnApplicationBootstrap {
 
   onApplicationBootstrap(): void {
     const problems: string[] = [];
+    const identityHandlers: string[] = [];
     for (const wrapper of this.discovery.getControllers()) {
       const metatype = wrapper.metatype as Type<unknown> | undefined;
       if (!metatype?.prototype) continue;
@@ -670,6 +676,8 @@ export class RolesCheck implements OnApplicationBootstrap {
           continue;
         }
         const scannerAuth = (Reflect.getMetadata(SCANNER_AUTH_METADATA, fn) as ScannerAuthOptions | undefined) ?? (Reflect.getMetadata(SCANNER_AUTH_METADATA, metatype) as ScannerAuthOptions | undefined);
+        // 게이트웨이 신원 머리(X-Session-Id)를 받는 처리기: 종료 세션 목록이 막아야 한다(ADR-0333 결정 1·3)
+        if (policy.roles.some((r) => r !== 'public')) identityHandlers.push(where);
         for (const r of policy.roles) {
           if (!(ROLE_VALUES as readonly string[]).includes(r)) problems.push(`${where}: 표에 없는 역할 값 ${r}`);
           else if (AUDIENCE_OF[r as Exclude<RoleValue, 'public'>] === 'scanner' && !this.state.scanner) {
@@ -710,5 +718,6 @@ export class RolesCheck implements OnApplicationBootstrap {
       }
     }
     if (problems.length) throw new Error(`허용 역할 확인 실패(AZ-T1):\n- ${problems.join('\n- ')}`);
+    this.state.identityHandlers.splice(0, this.state.identityHandlers.length, ...identityHandlers);
   }
 }

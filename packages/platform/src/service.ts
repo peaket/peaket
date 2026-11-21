@@ -12,7 +12,7 @@ import { AUTH_STATE, AuthGuard, AuthState, INTERNAL_TOKEN_REQUIRED, RolesCheck, 
 import { ScannerAuthState, type ScannerAuthWiring } from './scanner-auth.js';
 import { type PurchaseSessionPort, purchaseRejections } from './purchase-auth.js';
 import { CLOCK, type Clock, systemClock } from './clock.js';
-import { type PlatformConfig, loadPlatformConfig } from './config.js';
+import { type PlatformConfig, PlatformConfigError, loadPlatformConfig } from './config.js';
 import { activeTrace } from './context.js';
 import { diagnoseConfigFromEnv, startDiagnose, type StartDiagnoseOptions } from './diagnose.js';
 import { type EvidenceStore, s3EvidenceStore } from './evidence-store.js';
@@ -154,6 +154,11 @@ export interface PlatformService {
   readiness: Readiness;
   /** 인증 상태. 세션 종료 사건(control.sessions-terminated)의 소비(FND-090)가 terminateSession을 부른다 */
   auth: { terminateSession(e: { sessionId: string; terminatedAt?: string }): void; isTerminated(sessionId: string): boolean };
+  /**
+   * 종료 세션 목록 소비를 켰다는 표시. `@peaket/platform/stream-worker`의 startServiceControlSync가 켠다.
+   * local·ci 밖에서 신원 역할(public 말고) 처리기가 있는데 켜지 않았으면 listen이 PlatformConfigError로 던지고 듣지 않는다(ADR-0333 결정 3)
+   */
+  controlSync: { started: boolean };
   listen(host?: string): Promise<{ port: number; managementPort: number }>;
   close(): Promise<void>;
 }
@@ -271,6 +276,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   });
   await management.ready();
 
+  const controlSync = { started: false };
   const releaseSigterm = o.sigtermReadiness === false ? undefined : dropReadinessOnSigterm(readiness);
   const diagnosing = diagnose
     ? startDiagnose({
@@ -305,7 +311,16 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
       terminateSession: (e) => auth.terminateSession(e),
       isTerminated: (sessionId) => auth.terminated.has(sessionId),
     },
+    controlSync,
     async listen(host = '0.0.0.0') {
+      // 빠뜨림 막기(ADR-0333 결정 3): 새 서비스가 소비를 잊고 배포되면 끝난 세션의 토큰이 조용히 통한다. local·ci(시험·합본)는 보지 않는다
+      if (internalTokenRequired && auth.identityHandlers.length > 0 && !controlSync.started) {
+        const shown = auth.identityHandlers.slice(0, 3).join(', ');
+        const more = auth.identityHandlers.length > 3 ? ` 외 ${auth.identityHandlers.length - 3}개` : '';
+        throw new PlatformConfigError(
+          `${o.name}: 신원 역할 처리기(${shown}${more})가 있는데 종료 세션 목록 소비(@peaket/platform/stream-worker의 startServiceControlSync)를 켜지 않고 듣기 시작하려 했다(PEAKET_ENV=${config.env}, ADR-0333 결정 3)`,
+        );
+      }
       await app.listen({ port: config.port, host });
       await management.listen({ port: config.managementPort, host });
       return { port: portOf(http), managementPort: portOf(management) };
