@@ -1,6 +1,7 @@
 # ADR-0241: core-svc의 파트너 경로를 전용 DB 사용자와 행 보안으로 막는다
 
 - **상태**: 채택(2026-11-09, 추천 적용. authz-matrix §5.3의 행 보안은 추천 적용 2026-10-30이다). BUILD_ORDER HOT-172.
+  - 보충(2026-11-22, 감독 결정 W12-core-rls): 결정 4의 '판매자 연락처를 읽지 못한다'를 [ADR-0327](0327-sale-review-request-and-sale-open.md) 결정 13이 '다른 파트너의 판매자 행을 읽지 못한다'로 좁혔다. 자기 판매자 행의 판매자 정보 칸은 판매 승인 요청·현황이 읽고 쓰고, 판매자 표 `promoter`에도 결정 3과 같은 식의 행 보안이 걸린다.
 - **관련**: [docs/security/authz-matrix.md](../security/authz-matrix.md) §3.3·§5.3, ADR-0083, ADR-0198 결정 2·8
 - **관련 ID**: AZ-T5, FR-021, ASVS v5.0.0-8.4.1
 

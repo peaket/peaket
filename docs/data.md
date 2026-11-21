@@ -647,7 +647,7 @@ erDiagram
         int sort_order
     }
     promoter {
-        uuid id PK
+        uuid id PK "테넌트 값 자체(행 보안: 파트너 DB 역할은 이 값이 요청 테넌트인 자기 행만 읽고 판매자 정보 칸만 고친다, ADR-0327 결정 13)"
         text legal_name "상호(판매자 신원정보, POL-037)"
         text representative "대표자"
         text address
