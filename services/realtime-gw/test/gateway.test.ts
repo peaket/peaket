@@ -3,11 +3,12 @@
 // 파드 연결 셈에서 빠지고 닫기 인사를 100ms [가정]만 기다린 뒤 끊는다. 회차가 다른 연결도 그 jti의 닫히는 중 연결로 세고, 4개 [가정]이면 그 jti의 새 핸드셰이크는
 // ⑤ 뒤 업그레이드 없이 503), ADR-0297 결정 3 '곧 닫는 연결'·결정 7, §12 S-T42 ②⑯, §13. 보안 다시 보기 SEC-R01·R02·R03.
 // '닫기 인사에 답하지 않는' 클라이언트는 101 뒤 소켓을 열어 둔 채 아무것도 쓰지 않는 맨 TCP다. 단언 값은 정본에서 적고 구현 상수를 가져오지 않는다.
+// S-T42 ⑯은 서버의 닫기 인사 유예 타이머(setTimeout)를 가짜 시계로 잡는다. 진짜 100ms와 경주하면 느린 러너에서 유예가 먼저 끝나 흔들렸다(W12-rtgw).
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { createServer, request, type Server } from 'node:http';
 import type { Socket } from 'node:net';
 import { parseAdmissionJwks, systemClock } from '@peaket/platform';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createStreamHub, StreamGateway } from '../src/modules/stream/index.js';
 import { FakeSubscriber } from './hub-fixtures.js';
 
@@ -119,7 +120,9 @@ function shake(port: number, path: string, o: { protocols?: string; method?: str
 }
 
 const PATH = '/v1/events/ev-1/seats/stream';
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** 가짜 시계를 켜기 전에 잡아 둔 진짜 setTimeout. 시험 쪽 폴링은 서버의 가짜 유예 타이머에 묶이지 않는다(W12-rtgw) */
+const realSetTimeout = globalThis.setTimeout;
+const sleep = (ms: number): Promise<void> => new Promise((r) => realSetTimeout(r, ms));
 const until = async (ok: () => boolean, ms: number): Promise<boolean> => {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -129,7 +132,18 @@ const until = async (ok: () => boolean, ms: number): Promise<boolean> => {
   return ok();
 };
 
+/** 서버의 닫기 인사 유예 타이머만 가짜로 한다. ws 받는 쪽의 setImmediate·nextTick과 토큰 iat·확인의 Date는 진짜로 둔다(W12-rtgw 계획 2) */
+const fakeGraceTimers = (): void => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+};
+
+/** 서버와 한 번 주고받는다(없는 경로 404). 그 앞에 서버가 끊은 소켓의 'close'가 클라이언트에 닿게 하는, 시간 대신의 기다림이다 */
+const roundTrip = async (port: number): Promise<void> => {
+  expect((await shake(port, '/v1/nope')).status).toBe(404);
+};
+
 afterEach(async () => {
+  vi.useRealTimers();
   for (const s of sockets.splice(0)) s.destroy();
   await Promise.race([gateway?.shutdown(), sleep(3_000)]);
   await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
@@ -138,6 +152,8 @@ afterEach(async () => {
 });
 
 describe('S-T42 ⑯ 곧 닫는 연결은 파드 상한을 차지하지 않는다(SEC-R01, ADR-0297 결정 3)', () => {
+  beforeEach(fakeGraceTimers);
+
   test('S-T42 ⑯ 파드 상한 3에서 회차가 다른 토큰(ev-2)으로 ev-1에 셋 붙어 닫기 인사에 답하지 않아도(4403 bad event) 곧바로 다른 토큰의 핸드셰이크는 101이다 [ASVS v5.0.0-2.4.1]', async () => {
     const port = await startGateway(3);
     const evil = token({ eventId: 'ev-2' });
@@ -178,18 +194,25 @@ describe('S-T42 ⑯ 곧 닫는 연결은 파드 상한을 차지하지 않는다
     const open2 = await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${same}` });
     const tooMany = await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${same}` });
     expect([bad.status, open1.status, open2.status, tooMany.status]).toEqual([101, 101, 101, 101]);
-    await sleep(SPEC.waitAfterGraceMs);
-    expect([bad.kept!.closed, tooMany.kept!.closed]).toEqual([true, true]);
-    expect([open1.kept!.closed, open2.kept!.closed]).toEqual([false, false]);
+    // 닫힘 프레임을 받았으면 서버가 유예 타이머를 건 뒤다
+    expect(await until(() => bad.kept!.closeCode() === 4403 && tooMany.kept!.closeCode() === 4429, 1_000)).toBe(true);
+    // 유예 끝 1ms 전: 아직 끊지 않는다(닫기 인사를 기다리는 중)
+    await vi.advanceTimersByTimeAsync(SPEC.closingGraceMs - 1);
+    await roundTrip(port);
+    expect([bad.kept!.closed, tooMany.kept!.closed]).toEqual([false, false]);
+    // 시험이 보는 300ms까지 시계를 돌리면 둘은 끊기고, 열린 둘은 닫힘 프레임 없이 그대로다
+    await vi.advanceTimersByTimeAsync(SPEC.waitAfterGraceMs - (SPEC.closingGraceMs - 1));
+    expect(await until(() => bad.kept!.closed && tooMany.kept!.closed, 1_000)).toBe(true);
+    expect([open1.kept!.closed, open2.kept!.closed, open1.kept!.closeCode(), open2.kept!.closeCode()]).toEqual([false, false, undefined, undefined]);
     expect(SPEC.closingGraceMs).toBeLessThan(SPEC.waitAfterGraceMs);
   });
 });
 
 describe('S-T42 ⑯ 같은 토큰의 닫히는 중 연결 상한(SEC-R02, ADR-0297 결정 3)', () => {
-  test('S-T42 ⑯ 같은 jti로 회차가 다른 연결을 답하지 않는 채 넷 만들면(101 뒤 4403 bad event) 다섯째 핸드셰이크는 회차가 맞든 다르든 업그레이드 없이 503·빈 본문이고, 그 연결들이 끊긴 뒤(300ms) 맞는 회차는 101이다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.5.1]', async () => {
-    const port = await startGateway(100);
-    const wrong = token({ jti: 'jti-r02', eventId: 'ev-2' });
-    const right = token({ jti: 'jti-r02', eventId: 'ev-1' });
+  beforeEach(fakeGraceTimers);
+
+  /** 같은 jti로 회차가 다른(ev-2 토큰) 연결을 답하지 않는 채 넷 만들고, 넷 모두 4403 닫힘 프레임을 받을 때까지 기다린다 */
+  const fourClosing = async (port: number, wrong: string): Promise<Kept[]> => {
     const kept: Kept[] = [];
     for (let i = 0; i < SPEC.closingPerToken; i++) {
       const r = await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${wrong}` });
@@ -197,20 +220,47 @@ describe('S-T42 ⑯ 같은 토큰의 닫히는 중 연결 상한(SEC-R02, ADR-02
       kept.push(r.kept!);
     }
     expect(await until(() => kept.every((k) => k.closeCode() === 4403), 1_000)).toBe(true);
-    // 바로 다섯째: 회차가 다른 것도 맞는 것도(ev-2 경로로 맞는 회차 포함) 503
-    const fifthWrong = await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${wrong}` });
-    const fifthRight = await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${right}` });
-    const fifthOtherPath = await shake(port, '/v1/events/ev-2/seats/stream', { protocols: `${SEATS}, ${AUTH}${wrong}` });
-    for (const [name, r] of [['회차 다름', fifthWrong], ['회차 맞음', fifthRight], ['ev-2 경로', fifthOtherPath]] as const) {
+    return kept;
+  };
+
+  /** 다섯째 셋: 회차 다름·회차 맞음·ev-2 경로(회차 다른 토큰이 그 회차 주소로) */
+  const fifthThree = async (port: number, wrong: string, right: string): Promise<Array<readonly [string, Shake]>> => [
+    ['회차 다름', await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${wrong}` })],
+    ['회차 맞음', await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${right}` })],
+    ['ev-2 경로', await shake(port, '/v1/events/ev-2/seats/stream', { protocols: `${SEATS}, ${AUTH}${wrong}` })],
+  ];
+
+  test('S-T42 ⑯ 같은 jti로 회차가 다른 연결을 답하지 않는 채 넷 만들면(101 뒤 4403 bad event) 다섯째 핸드셰이크는 회차가 맞든 다르든 업그레이드 없이 503·빈 본문이고, 그 연결들이 끊긴 뒤(300ms) 맞는 회차는 101이다 [ASVS v5.0.0-2.4.1] [ASVS v5.0.0-16.5.1]', async () => {
+    const port = await startGateway(100);
+    const wrong = token({ jti: 'jti-r02', eventId: 'ev-2' });
+    const right = token({ jti: 'jti-r02', eventId: 'ev-1' });
+    const kept = await fourClosing(port, wrong);
+    // 유예 끝 1ms 전의 다섯째: 회차가 다른 것도 맞는 것도(ev-2 경로로 맞는 회차 포함) 503(유예가 짧으면 여기서 끊겨 셈이 준다)
+    await vi.advanceTimersByTimeAsync(SPEC.closingGraceMs - 1);
+    for (const [name, r] of await fifthThree(port, wrong, right)) {
       expect([r.status, r.body, r.upgrade], name).toEqual([503, '', undefined]);
     }
     expect(rejects.filter((s) => s === 503)).toHaveLength(3);
     // 다른 토큰은 막히지 않는다
     expect((await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${token()}` })).status).toBe(101);
-    await sleep(SPEC.waitAfterGraceMs);
-    expect(kept.every((k) => k.closed)).toBe(true);
+    // 시험이 보는 300ms까지 시계를 돌리면 유예가 끝나 넷이 끊긴다
+    await vi.advanceTimersByTimeAsync(SPEC.waitAfterGraceMs - (SPEC.closingGraceMs - 1));
+    expect(await until(() => kept.every((k) => k.closed), 1_000)).toBe(true);
     const later = await shake(port, PATH, { protocols: `${SEATS}, ${AUTH}${right}` });
     expect(later.status).toBe(101);
+  });
+
+  test('W12R-01 ① 같은 jti로 회차가 다른 넷을 만든 뒤 가짜 시계 99ms에서 진짜 시간이 유예보다 길게(150ms) 흘러도(느린 러너) 다섯째 셋(회차 다름·맞음·ev-2 경로)은 모두 업그레이드 없이 503·빈 본문이다 [ASVS v5.0.0-2.4.1]', async () => {
+    const port = await startGateway(100);
+    const wrong = token({ jti: 'jti-w12r', eventId: 'ev-2' });
+    const right = token({ jti: 'jti-w12r', eventId: 'ev-1' });
+    await fourClosing(port, wrong);
+    await vi.advanceTimersByTimeAsync(SPEC.closingGraceMs - 1);
+    // fixed-wait: 느린 CI 러너를 흉내 내려고 진짜 시간을 유예보다 길게 흘린다. 유예가 진짜 시계에 묶여 있으면 여기서 넷이 끊겨 다섯째가 101이 된다 W12R-01
+    await sleep(SPEC.closingGraceMs + 50);
+    for (const [name, r] of await fifthThree(port, wrong, right)) {
+      expect([r.status, r.body, r.upgrade], name).toEqual([503, '', undefined]);
+    }
   });
 });
 

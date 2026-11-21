@@ -1,6 +1,6 @@
 # 작업 계획: W12-rtgw(S-T42 ⑯ 닫히는 중 연결 시험이 서버의 실제 100ms 유예와 경주)
 
-- **진행**: 계획 끝(2026-11-22) → 다음은 시험 담당.
+- **진행**: 계획·시험 끝(2026-11-22) → 다음은 리뷰 담당.
 - **무엇**: `develop` `456df0929` CI(실행 44924759035, `node / node` 잡) `@peaket/realtime-gw#test`에서 `services/realtime-gw/test/gateway.test.ts:205`의 'S-T42 ⑯ 같은 jti로 회차가 다른 연결을 답하지 않는 채 넷 만들면 … 다섯째 핸드셰이크는 … 503 …'(SEC-R02, BAT-052 RF-T15)이 `ev-2 경로: expected [ 101, '', 'websocket' ] to deeply equal [ 503, '', undefined ]`로 실패했다. 다섯째 셋 가운데 앞의 둘(회차 다름·회차 맞음)은 503이었고 셋째(ev-2 경로)만 101이다. 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
 - **바탕**: 작업 폴더 `D:/ticketpass-lane4-rtgw`(가지 `feature/lane4-W12-rtgw`, 출발점 `origin/develop` `456df0929`). 단위 시험은 `pnpm --filter @peaket/realtime-gw test`(vitest).
 - **등급·차례**: C, 시험만 묶음(`Batch-Kind: test-only`): 계획 → 시험(실패 확인을 같은 커밋에) → 리뷰 → 검증 → 기록. 제품 코드(`services/realtime-gw/src/`)는 고치지 않는다.
@@ -73,11 +73,19 @@
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+- 까닭: 버그(흔들림) 재현이라 고치기 전 방식에서 실패를 본다. 이 PC(32스레드), 임시 사본은 `test/` 아래 따로 두고 돌린 뒤 지웠다(`git status`에 `gateway.test.ts`만 남음).
+- ① 고치기 전(`456df0929` 시험 파일 사본, ev-2 경로 핸드셰이크 앞에 진짜 `sleep(120)`): `pnpm test test/w12r-repro.test.ts -t "SEC-R02"` 5번 → 5번 모두 1 failed | 4 skipped (5), `AssertionError: ev-2 경로: expected [ 101, '', 'websocket' ] to deeply equal [ 503, '', undefined ]`(CI와 같은 글).
+- ② 고친 파일 사본에서 SEC-R02 describe의 `beforeEach(fakeGraceTimers)`를 빼고 W12R-01 ①의 시계 돌리기를 건너뜀(진짜 타이머): `pnpm test test/w12r-neg.test.ts -t "W12R-01"` 5번 → 5번 모두 1 failed | 5 skipped (6), `AssertionError: 회차 다름: expected [ 101, '', 'websocket' ] to deeply equal [ 503, '', undefined ]`(150ms 안에 넷이 끊겨 다섯째가 101).
 
 ## 시험 결과
 
-(시험 담당이 채운다)
+- 바꾼 것(`test/gateway.test.ts`만): ⑯ 두 describe의 `beforeEach`에서 `vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })`, `afterEach` 첫 줄 `vi.useRealTimers()`, 시험 쪽 `sleep`은 파일 머리에서 잡은 진짜 `setTimeout`, 고정 `sleep(300)` 둘은 가짜 시계 99ms·300ms 돌리기와 `until`(닫힘을 1,000ms까지 폴링)로. 곧 닫는 연결 시험은 99ms에 서버와 한 번 주고받은 뒤(404) 아직 열림을 본다. 새 `W12R-01 ①`(진짜 150ms를 흘리는 줄에 `fixed-wait` 표기). `SPEC` 값·기존 시험 이름·단언 값·`src/`는 그대로.
+- `pnpm --filter @peaket/realtime-gw test test/gateway.test.ts` 5번: 6/6 ×5, 실패 0. ev-2 경로 앞에 진짜 120ms를 넣은 고친 사본 5번: 6/6 ×5, 실패 0.
+- `-t "S-T42 ⑯"` 20번: 5 passed | 1 skipped ×20(W12R-01 ①이 SEC-R02 describe 안이라 함께 걸림), 실패 0. `-t "W12R-01"` 20번: 1 passed | 5 skipped ×20, 실패 0.
+- 바쁜 고리 64개(`node -e "for(;;){}"`, 스레드의 2배) 아래 `test/gateway.test.ts` 5번: 6/6 ×5(파일당 51~67초), 실패 0. 끝나고 바쁜 고리 0개 확인.
+- `pnpm --filter @peaket/realtime-gw test`(꾸러미 전체): 7 파일·87 시험 통과, 실패 0.
+- `pnpm exec turbo run typecheck --filter=@peaket/realtime-gw`: 7 successful. `pnpm exec eslint services/realtime-gw/test/gateway.test.ts`: 오류 0(시험 파일은 뿌리 설정의 `**/*.test.*` 무시라 '무시' 경고 1).
+- `python tools/doc-check/check_all.py`: 오류 0, 경고 4(이 묶음과 무관한 api 3·mermaid 건너뜀 1). `node tools/ci/roles-check.mjs`: 시험 커밋 전 '시험만 묶음에 test·review·verify 커밋이 없다' 1건(차례상 아직 없음, 검증 뒤 다시 본다).
 
 ## 리뷰
 
@@ -92,5 +100,6 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12rtgw-plan-4b8e | claude-opus-5-5 | 2026-11-22T01:57+09:00 | 2026-11-22T02:25+09:00 |
+| test | w12rtgw-test-6d1c | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T02:45+09:00 |
 
 ## 기록
