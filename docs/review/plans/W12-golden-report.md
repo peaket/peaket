@@ -116,7 +116,21 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+- 담당 `lane2-w12golden-review`(claude-opus-5-5). 범위는 `dcdd806ab..3d7f09246`(구현 `b0a6b091b`, 시험 `3d7f09246`)이다. 코드·시험은 고치지 않았고 Docker도 쓰지 않았다.
+- **막는 지적(높음·통과 기준)은 없다.** 대조한 것:
+  1. **요약 단계와 겹침**: `ci-node.yml:158`의 `find -name`은 파일 이름이 `test-report`로 시작하는 것만 고른다. `search-golden-report.json`은 그 꼴이 아니다. 이 폴더에서 위 5의 1~3을 다시 돌렸다. 시험 1개 통과, 새 이름이 생기고 옛 이름은 없다. `find`는 `--report services/core-svc/test-report.json` 하나만 찾았고 `asvs-report.mjs`는 exit 0이다. 위 6의 M1~M3은 이 명령들이 잡는다.
+  2. **`.gitignore` 새 줄**: 빗금이 없어 어느 폴더에서든 그 이름을 가린다(`git check-ignore -v`로 `apps/web/`·`docs/`·`services/core-svc/test/` 아래 같은 이름도 `.gitignore:5`에 걸리는 것을 봤다). 바로 위 `test-report*` 두 줄과 같은 꼴이다. git이 추적하는 같은 이름 파일은 없고, 무시된 같은 이름 파일은 시험이 만든 `services/core-svc/` 것뿐이다. 이름이 좁아 다른 파일을 숨길 걱정은 작다.
+  3. **그 이름을 읽는 다른 곳**: `git grep`으로 찾은 새 이름은 `.gitignore:5`, 시험 `:3`·`:81`, 이 계획뿐이다. 워크플로·`tools/ci`·`turbo.json`(test `outputs`는 `test-report.json`·`.xml`만)에는 없다. 옛 이름은 기록에만 남는다(RG-01).
+  4. **단언**: 시험 커밋은 `:3` 주석과 `:81` 쓰는 경로만 바꿨다. 문턱(`TOP1`·`TOP3`), 정답률 계산, `toHaveLength(CASES)`, 판정 `toEqual`, 시험 이름은 그대로다. 그래서 NFR-028 판정은 약해지지 않았다.
+  5. **역할 경계·꼬리말**: 구현 `b0a6b091b`은 `.gitignore`와 이 파일만, 시험 `3d7f09246`은 시험 파일과 이 파일만 바꿨다. 세 커밋 모두 꼬리말 덩이를 갖췄고 세션 ID가 담당 표와 같다. 계획 커밋에 `Batch-Order: impl-first`가 있다. `node tools/ci/roles-check.mjs`의 실패는 'review·verify 커밋이 없다' 하나뿐이다(이 커밋과 검증이 채운다).
+- 지적은 낮음 2이다. 이 묶음에서 고치지 않고 정리 목록으로 넘긴다(ADR-0283 결정 6, ADR-0331 결정 5).
+
+| 번호 | 등급 | 자리 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RG-01 | 낮음 | `docs/review/measurements/W7-lane2-review-correctness.md:22`(W7L2-C8) | 위 3은 시험 파일 밖에서 옛 이름이 나오는 곳을 `W12-core-rls.md:250` 한 줄로 셌다. 그런데 W7L2-C8의 '고칠 방향' 칸도 `test-report-search-golden.json`의 `misses`를 나눠 세라고 적는다. 읽는 코드가 아니라 CI에는 해가 없지만, 그 지적을 이어받는 사람은 없는 파일을 찾게 된다 | 기록은 고치지 않는다. W7L2-C8을 맡는 묶음 계획에 새 이름 `search-golden-report.json`을 적는다 |
+| RG-02 | 낮음 | 위 5의 4 첫 줄 `pnpm exec eslint services/core-svc/test/search-golden.test.ts` | 이 파일은 뿌리 ESLint 설정이 다루지 않아 '맞는 설정이 없어 무시함' 경고 하나만 내고 끝 코드 0이다(이 폴더에서 돌림). 그 줄은 아무것도 검사하지 않는데 점검 명령처럼 읽힌다 | 다음 계획부터 서비스 시험 파일의 점검은 typecheck 줄로 적고 이 eslint 줄은 뺀다 |
+
+- **판정: 통과.** 막는 지적이 없으므로 검증으로 넘긴다. 초안 PR CI의 ASVS 단계(`exit code 2`가 없고 작업 요약에 표가 나오는지)는 검증 몫이다.
 
 ## 검증
 
@@ -129,6 +143,7 @@ C 묶음이라 구현 전 실패 확인을 하지 않는다(ADR-0331 결정 2·4
 | plan | lane2-w12golden-plan | claude-opus-5-5 | 2026-11-22T04:55+09:00 | 2026-11-22T05:07+09:00 |
 | impl | lane2-w12golden-impl | claude-opus-5-5 | 2026-11-22T05:06+09:00 | 2026-11-22T05:09+09:00 |
 | test | lane2-w12golden-test | claude-opus-5-5 | 2026-11-22T05:08+09:00 | 2026-11-22T05:12+09:00 |
+| review | lane2-w12golden-review | claude-opus-5-5 | 2026-11-22T05:12+09:00 | 2026-11-22T05:18+09:00 |
 
 ## 다음 단계
 
