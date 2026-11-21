@@ -745,3 +745,68 @@ describe('사람 칸의 가명 참조와 대응 행 지우기(ASVS 16.2.1, ADR-0
     expect(json(await h.get(`/v1/ops/commands/${later}`, approver))).toMatchObject({ requestedBy: { adminAccountId: accounts[0], role: 'commander' } });
   });
 });
+
+describe('리뷰 반영 재현(BAT-355 리뷰 RV-02·RV-03)', () => {
+  test('OPS-260 RV-02 [ASVS v5.0.0-16.2.1] 실행 전후 감사 체크포인트의 actorRef는 관리 계정 ID가 아니라 그 실행(DISPATCHED 사건)의 가명 참조다(처음 실행은 SYSTEM 빈 UUID, 다시 한 실행은 그 사람의 ACTOR 참조, B18·ADR-0149 결정 3·ADR-0340 결정 8)', async () => {
+    let failFirst = true;
+    const h = await harness({
+      result: (c) => {
+        if (c.type === 'LOBBY_BANNER' && failFirst) {
+          failFirst = false;
+          return { status: 'FAILED', error: 'queue-svc 503' };
+        }
+        return { status: 'ACKED', ackedAtMs: NOW };
+      },
+    });
+    const viewer = h.identity.ops('viewer');
+    const checkpoints = async () => (json(await h.get('/v1/ops/audit-checkpoints?limit=100', viewer)).items as Array<{ actorRef: string; reason: string }>) ?? [];
+    // 처음 실행: 요청한 operator가 아니라 SYSTEM이 보낸다(DISPATCHED 사건의 행위자)
+    const operator = h.identity.ops('operator');
+    const once = idOf(await h.post('/v1/ops/commands', operator, { type: 'LOG_LEVEL', reason: '로그', params: { level: 'DEBUG' } }));
+    expect(h.store.eventsOf(once).find((e) => e.type === 'DISPATCHED')?.actorRef).toBe(SYSTEM_REF);
+    const first = await checkpoints();
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.map((c) => c.actorRef)).toEqual(first.map(() => SYSTEM_REF));
+    // 실패 뒤 다른 operator가 다시 보낸다: 체크포인트의 행위자는 그 사람의 가명 참조(대응 표 ACTOR)다
+    const retrier = h.identity.ops('operator');
+    const failed = idOf(await h.post('/v1/ops/commands', operator, { type: 'LOBBY_BANNER', reason: '공지', params: { templateId: 'notice-rv02' } }));
+    expect((await h.store.find(failed))?.state).toBe('FAILED');
+    const retried = await h.post(`/v1/ops/commands/${failed}/retries`, retrier, {});
+    expect([retried.statusCode, json(retried).state]).toEqual([200, 'ACKED']);
+    const actorRefs = h.store.actors().filter((a) => a.commandId === failed && a.side === 'ACTOR').map((a) => a.actorRef);
+    expect(actorRefs).toHaveLength(1);
+    const all = await checkpoints();
+    for (const c of all) {
+      expect([operator['x-user-id'], retrier['x-user-id']], c.reason).not.toContain(c.actorRef);
+      expect([SYSTEM_REF, ...actorRefs], c.reason).toContain(c.actorRef);
+    }
+    const text = JSON.stringify(all);
+    expect(text).not.toContain(operator['x-user-id']!);
+    expect(text).not.toContain(retrier['x-user-id']!);
+  });
+
+  test('OPS-260 RV-03 명령 6(Degraded Mode) 해제(되돌리기)는 commander 1인이 재인증해야 하고, 토큰 없이·패스키 없이 보내면 403 reauth-required이며 되돌리기 사건·감사·실행이 0건이다(control-tower §3 명령 6, ADR-0105)', async () => {
+    const h = await harness();
+    const requester = h.identity.ops('commander');
+    const id = idOf(await h.post('/v1/ops/commands', h.withToken(requester), { type: 'DEGRADED_MODE', reason: '결제사 장애', params: { mode: 'PAYMENT' } }));
+    const approver = h.identity.ops('commander');
+    expect(json(await h.post(`/v1/ops/commands/${id}/approvals`, h.withToken(approver), {})).state).toBe('ACKED');
+    const events = h.store.eventsOf(id).length;
+    const audits = h.audit.entries.filter((e) => e.recordId === id).length;
+    for (const [label, headers] of [
+      ['토큰 없음', approver],
+      ['패스키 없음', h.withToken(approver, { factors: ['password', 'totp'] })],
+    ] as const) {
+      const r = await h.post(`/v1/ops/commands/${id}/reversions`, headers, { reason: 'Degraded Mode 모두 해제' });
+      expect([r.statusCode, slug(r)], label).toEqual([403, expect.stringMatching(/reauth-required$/)]);
+    }
+    expect((await h.store.find(id))?.state).toBe('ACKED');
+    expect(h.store.eventsOf(id)).toHaveLength(events);
+    expect(h.audit.entries.filter((e) => e.recordId === id)).toHaveLength(audits);
+    expect(h.calls.revert).toEqual([]);
+    // 재인증한 commander 1인이면 해제를 보낸다(2인 승인 없음)
+    const ok = await h.post(`/v1/ops/commands/${id}/reversions`, h.withToken(approver), { reason: 'Degraded Mode 모두 해제' });
+    expect([ok.statusCode, json(ok).state]).toEqual([200, 'REVERTED']);
+    expect(h.calls.revert).toEqual([id]);
+  });
+});

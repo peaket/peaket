@@ -260,6 +260,21 @@ describe('C-T27 감사 기록 변조 탐지', () => {
     expect(mismatch!.record_json.payload).toMatchObject({ runId: run.runId, firstBadSeq: 2, reason: 'mac' });
   }, 60_000);
 
+  test('C-T27 ① RV-01 키 없이 기록을 고친 뒤 audit_chain.created_at을 26시간 앞으로 옮겨도(기록 해시에 들지 않는 칸) 다음 검증은 앵커가 찍힌 구간을 보고 MISMATCH(첫 seq 2)다', async () => {
+    const ids = await seedCommands(['검증 창 1', '검증 창 2', '검증 창 3', '검증 창 4']);
+    const key = new LocalAuditMacKey(LOCAL, 'local-rv-01');
+    expect(await fillAll(key)).toBe(4);
+    expect(await new AuditMacAnchorer(macStore(), new DirMacAnchorStore(anchorDir), key.keyId).runOnce(clock.now())).toEqual({ anchoredSeq: 4 });
+    expect(await verifier(key).verify({}, clock.now())).toMatchObject({ result: 'VALID', fromSeq: 1, toSeq: 4 });
+    clock.advance(HOUR);
+    expect(await tamperReason(ids[1]!, '검증 창 밖으로 옮긴 변조')).toBe(2);
+    // DB 쓰기 권한만 있는 사람이 만든 시각 칸도 옮긴다(25시간 창 밖으로)
+    await q("update audit_chain set created_at = created_at - interval '26 hours'");
+    const run = await verifier(key).verify({}, clock.now() + HOUR);
+    expect(run).toMatchObject({ result: 'MISMATCH', firstBadSeq: 2, reason: 'mac' });
+    expect(await count("select count(*) as n from ops_alert where kind = 'audit-chain-mismatch'")).toBe(1);
+  }, 60_000);
+
   test('C-T27 ① 25시간보다 오래된 기록의 변조는 마지막 검증 지점 뒤가 아니어도 체크포인트 재검증이 잡는다', async () => {
     const ids = await seedCommands(['오래된 1', '오래된 2', '오래된 3']);
     const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(db), chain(), () => clock.now());
