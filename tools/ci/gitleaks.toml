@@ -26,7 +26,7 @@ regexes = [
 ]
 
 [[allowlists]]
-description = '''시험 코드의 가짜 값: 멱등 키·사건 키 UUID, 결제 시뮬레이터 시험 키, 취소·환불 멱등 키 고정 값, 결제 취소 시험이 사례 번호와 낱말 하나로 붙인 멱등 키(웨이브 8 BAT-415), 부하 시험이 가림·거절을 보려고 넣는 가짜 토큰·키. 시험 폴더와 시험 파일에서만 받는다'''
+description = '''시험 코드의 가짜 값: 멱등 키·사건 키 UUID, 결제 시뮬레이터 시험 키, 취소·환불 멱등 키 고정 값, 결제 취소 시험이 사례 번호와 낱말 하나로 붙인 멱등 키(웨이브 8 BAT-415), 부하 시험이 가림·거절을 보려고 넣는 가짜 토큰·키, 데모 재현 시험이 가림 함수에 넣던 JWT 모양 입력(BAT-086 V-T7 ⑥, 어느 키로도 서명하지 않았고 지금은 실행 때 만든다, W12-ci-sec). 시험 폴더와 시험 파일에서만 받는다'''
 condition = 'AND'
 targetRules = ['generic-api-key', 'jwt', 'stripe-access-token']
 paths = ['''(?:^|/)(?:test|test-int)/[^/].*|\.test\.(?:ts|mjs)$''']
@@ -40,6 +40,7 @@ regexes = [
   '''^sk_live_REALSECRET\d{10}$''',
   '''^eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJ4In0\.sig\-_A1$''',
   '''^eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJTRUNSRVRQQVlMT0FEIn0\.SIGsecretSIG$''',
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U$''',
   '''^lt\-mwah7w0a30bd$''',
 ]
 
@@ -70,3 +71,10 @@ condition = 'AND'
 targetRules = ['generic-api-key']
 paths = ['''^loadtest/test/v1\.test\.mjs$''']
 regexes = ['''^[0-9a-f]{64}$''']
+
+[[allowlists]]
+description = '''로컬 kind 데모 이미지·오버레이가 Next 서버 액션 암호화 키로 쓰던 데모 상수(영어 문구를 base64로 쓴 32바이트, 공개된 값이라 데모 밖에서 쓰지 않는다). 어느 무대의 비밀도 아니고 이력의 네 파일에만 남았다. 지금은 무대마다 데모 비밀 파일에서 무작위로 만들어 Secret으로만 준다(docs/infra.md 로컬 데모의 비밀, W12-ci-sec)'''
+condition = 'AND'
+targetRules = ['generic-api-key']
+paths = ['''^(?:apps/(?:web|partner)/Dockerfile|deploy/envs/local/demo/web\.yaml|tools/local/demo\-objects\.mjs)$''']
+regexes = ['''^cGVha2V0LWRlbW8tc2VydmVyLWFjdGlvbnMta2V5LS0\=?$''']

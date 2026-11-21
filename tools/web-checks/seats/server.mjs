@@ -53,7 +53,7 @@ const send = (res, status, type, body) => {
   res.end(body);
 };
 const json = (res, status, body) => send(res, status, 'application/json; charset=utf-8', JSON.stringify(body));
-const int = (v, min, max) => (Number.isInteger(Number(v)) && Number(v) >= min && Number(v) <= max ? Number(v) : null);
+const int = (v, min, max) => { const n = Number(v); return Number.isInteger(n) && n >= min && n <= max ? n : null; };
 
 /** /__seats/delta: 구독한 연결에 델타를 count번 every ms 간격으로 보낸다(화면 p99용) */
 function startDeltas(params) {

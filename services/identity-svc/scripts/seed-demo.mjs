@@ -51,7 +51,7 @@ if (pepperKey.length !== 32 || totpKey.length !== 32) {
   process.exit(2);
 }
 const pepper = new LocalPepper(new Map([[1, pepperKey]]), 1);
-const passwords = new Pbkdf2AdminPasswords(pepper, { iterations: ADMIN_PBKDF2_MIN_ITERATIONS });
+const hasher = new Pbkdf2AdminPasswords(pepper, { iterations: ADMIN_PBKDF2_MIN_ITERATIONS });
 const totpCipher = new LocalTotpSeedCipher(totpKey);
 
 const client = new pg.Client({ connectionString: url, application_name: 'identity-svc-demo-bootstrap' });
@@ -62,7 +62,7 @@ try {
   for (const a of bootstrap.accounts) {
     const exists = await client.query('select id from admin_account where id = $1 or (email = $2 and status <> $3) limit 1', [a.id, a.email, 'REMOVED']);
     if (exists.rowCount) continue;
-    const phc = await passwords.hash(a.id, a.password);
+    const phc = await hasher.hash(a.id, a.password);
     const seed = base32Decode(a.totpSeed);
     const enc = await totpCipher.encrypt(a.id, seed);
     await client.query(

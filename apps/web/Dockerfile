@@ -29,8 +29,7 @@ ENV NEXT_PUBLIC_API_ORIGIN=https://api.peaket.example:18441 \
     NEXT_PUBLIC_CONSOLE_ORIGIN=https://console.peaket.example:18444 \
     NEXT_PUBLIC_SCANNER_ORIGIN=https://scanner.peaket.example:18445 \
     NEXT_PUBLIC_PEAKET_PG_SIMULATOR=1 \
-    PEAKET_ENV=local \
-    NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=cGVha2V0LWRlbW8tc2VydmVyLWFjdGlvbnMta2V5LS0=
+    PEAKET_ENV=local
 # 점 세 개(`...`)는 작업 공간 의존 패키지(@peaket/search-normalize 등)까지 먼저 빌드한다.
 # 점이 없으면 Next의 모듈 해석이 `@peaket/search-normalize/refine`을 찾지 못해 빌드가 실패한다
 RUN pnpm --filter @peaket/web... build \
@@ -38,11 +37,11 @@ RUN pnpm --filter @peaket/web... build \
  && for p in next redis @redis; do if [ -e "apps/web/node_modules/$p" ]; then cp -aL "apps/web/node_modules/$p" /out-next/; fi; done
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
-# 데모 전용 상수. 빌드와 같은 값이어야 한다(tools/local/demo-objects.mjs의 DEMO_SERVER_ACTIONS_KEY)
+# 서버 액션 암호화 키는 이미지에 굽지 않는다. 실행 때 Secret demo-web으로 받는다(docs/infra.md '로컬 데모의 비밀').
+# 빌드는 키 없이 하고, 실행 때 받은 키가 빌드가 만든 키를 이긴다
 ENV NODE_ENV=production \
     PEAKET_ENV=local \
-    PEAKET_NEXT_DIST=.next \
-    NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=cGVha2V0LWRlbW8tc2VydmVyLWFjdGlvbnMta2V5LS0=
+    PEAKET_NEXT_DIST=.next
 WORKDIR /app/apps/web
 COPY --from=build --chown=node:node /repo/apps/web/.next ./.next
 COPY --from=build --chown=node:node /repo/apps/web/public ./public

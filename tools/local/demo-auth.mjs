@@ -100,25 +100,26 @@ export function readSeed(file = DEMO_SEED_FILE) {
 
 /**
  * 데모 비밀을 읽거나 새로 만든다(0600). 같은 파일을 두 번 쓰지 않는다(멱등).
- * @param {{ seedFile?: string }} [o]
+ * secretsFile은 비밀 파일 자리(기본 DEMO_SECRETS_FILE. 시험이 임시 폴더를 준다)
+ * @param {{ seedFile?: string, secretsFile?: string }} [o]
  * @returns {{ secrets: any, bootstrap: any }}
  */
 export function prepareDemoSecrets(o = {}) {
   const seedFile = o.seedFile ?? DEMO_SEED_FILE;
+  const secretsFile = o.secretsFile ?? DEMO_SECRETS_FILE;
   const seed = readSeed(seedFile);
-  if (existsSync(DEMO_SECRETS_FILE)) {
-    const secrets = JSON.parse(readFileSync(DEMO_SECRETS_FILE, 'utf8'));
-    // 예전 파일(이 묶음 전)에는 identity의 연계정보·pid 키가 없다. 새로 만들지 않고 채워 넣는다(멱등)
+  if (existsSync(secretsFile)) {
+    const secrets = JSON.parse(readFileSync(secretsFile, 'utf8'));
+    // 예전 파일(그 값을 더하기 전)에는 identity의 연계정보·pid 키, Next 서버 액션 암호화 키(W12-ci-sec)가 없다.
+    // 새로 만들지 않고 없는 값만 채워 넣는다(멱등)
     let changed = false;
-    if (!secrets.pidHmacKey) {
-      secrets.pidHmacKey = randomBytes(32).toString('base64');
-      changed = true;
+    for (const name of ['pidHmacKey', 'ciHmacKey', 'serverActionsKey']) {
+      if (!secrets[name]) {
+        secrets[name] = randomBytes(32).toString('base64');
+        changed = true;
+      }
     }
-    if (!secrets.ciHmacKey) {
-      secrets.ciHmacKey = randomBytes(32).toString('base64');
-      changed = true;
-    }
-    if (changed) writeFileSync(DEMO_SECRETS_FILE, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+    if (changed) writeFileSync(secretsFile, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
     return { secrets, bootstrap: bootstrapOf(seed, secrets, seedFile) };
   }
   const fan = randomJwk();
@@ -143,6 +144,8 @@ export function prepareDemoSecrets(o = {}) {
     // identity의 연계정보(CI)·pid HMAC 키(local·ci·demo 전용, 운영은 KMS). 둘은 달라야 한다
     pidHmacKey: randomBytes(32).toString('base64'),
     ciHmacKey: randomBytes(32).toString('base64'),
+    // Next 서버 액션 암호화 키(표준 base64 32바이트, web·partner가 Secret으로 같은 값을 받는다. docs/infra.md '로컬 데모의 비밀')
+    serverActionsKey: randomBytes(32).toString('base64'),
     internalToken: randomBytes(32).toString('base64url'),
     queueTokenKey: `demoq${randomBytes(8).toString('hex')}:${randomBytes(32).toString('base64')}`,
     admission: { privateJwk: admission.privateJwk, jwks: publicJwksOf(admission.privateJwk) },
@@ -155,8 +158,8 @@ export function prepareDemoSecrets(o = {}) {
     if (a.kind === 'admin') secrets.accounts[a.key] = { password: randomBytes(18).toString('base64url'), totpSeed: base32(randomBytes(20)) };
   }
   for (const p of seed.adminPasskeys ?? []) secrets.passkeys[p.accountKey] = passkeyMaterial(p.name);
-  mkdirSync(dirname(DEMO_SECRETS_FILE), { recursive: true });
-  writeFileSync(DEMO_SECRETS_FILE, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+  mkdirSync(dirname(secretsFile), { recursive: true });
+  writeFileSync(secretsFile, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
   return { secrets, bootstrap: bootstrapOf(seed, secrets, seedFile) };
 }
 
@@ -250,10 +253,16 @@ function demoEdgeHeaders(host) {
 }
 
 /**
- * HTTPS 요청(자체 서명 인증서, Host로 정본 이름을 보낸다). 303·302를 따라가지 않는다(로그인 응답의 Set-Cookie만 본다).
- * @param {{ host: string, port: number, method: string, path: string, body?: unknown, headers?: Record<string,string> }} o
+ * HTTPS 요청(Host로 정본 이름을 보낸다). 303·302를 따라가지 않는다(로그인 응답의 Set-Cookie만 본다).
+ * 무대의 자체 서명 인증서(o.ca, 없으면 무대 계약 파일의 caPem)를 믿을 기준으로 삼아 인증서와 이름(o.host)을 확인한다.
+ * 믿을 인증서가 없으면(빈 글 포함) 연결하지 않고 거절한다. 확인을 끄는 쪽으로 물러서지 않는다(docs/infra.md '로컬 데모의 비밀')
+ * @param {{ host: string, port: number, method: string, path: string, body?: unknown, headers?: Record<string,string>, ca?: string }} o
  */
 export function httpsJson(o) {
+  const ca = o.ca === undefined ? readContract().caPem : o.ca;
+  if (typeof ca !== 'string' || ca.trim() === '') {
+    return Promise.reject(new Error(`믿을 게이트웨이 인증서(caPem)가 없어 ${o.host}에 요청하지 않는다. 무대 계약 파일(${DEMO_CONTRACT_FILE.replaceAll('\\', '/')})의 caPem은 node tools/local/cluster.mjs demo가 쓴다`));
+  }
   return new Promise((resolve, reject) => {
     const payload = o.body === undefined ? undefined : Buffer.from(JSON.stringify(o.body));
     const req = httpsRequest(
@@ -263,7 +272,7 @@ export function httpsJson(o) {
         method: o.method,
         path: o.path,
         servername: o.host,
-        rejectUnauthorized: false,
+        ca,
         headers: {
           host: `${o.host}:${o.port}`,
           accept: 'application/json',
