@@ -838,6 +838,7 @@
 | R-742 | ops-svc 명령 수명주기·2인 승인·dry-run과 감사 체인 mac·앵커·검증 잡이 정본과 달리 비어 있거나 상태를 직접 썼다 | services/ops-svc/src/modules/commands, services/ops-svc/src/modules/audit, services/ops-svc/src/jobs, services/ops-svc/migrations/0021·0022, services/queue-svc/src/modules/entry/adapters, docs/api/openapi.yaml, docs/api/asyncapi.yaml, ADR-0339·0340·0341, docs/features/control-tower.md, docs/data.md | 전이 표·2인 승인·dry-run 기록과 비교·명령 4 조건·가명 참조, mac·작업자·앵커·검증 잡(BAT-355) | 적용 |
 | R-743 | realtime-gw 곧 닫는 연결 상한 시험이 실제 100ms 유예 타이머와 경주해 느린 CI에서 흔들렸다 | services/realtime-gw/test/gateway.test.ts | 서버 유예 타이머만 가짜 시계로, 판정 시점은 99ms·300ms(W12-rtgw) | 적용 |
 | R-744 | core-svc 판매자 표에 행 단위 보안이 없어 파트너가 남의 판매자 정보를 읽고 고쳤다 | services/core-svc/migrations/0040_promoter_row_security.sql·journal, rls.int·search-read-model.int 시험, ADR-0327 결정 13 | 칸 단위 읽기·RLS 정책 넷 | 고침, 리뷰 중간 1·낮음 2는 정리 목록 |
+| R-746 | 테넌트 한도 통합 시험이 스크립트 캐시가 빈 첫 호출의 판정 마감 초과로 흔들렸다 | packages/platform/test-int/tenant-rate-limit.int.test.ts, 계획 W12-dt50 | 셈 시험 마감 5,000ms·열림 0 단언·SCRIPT FLUSH | 고침, 리뷰 중간 1·낮음 1·정본 문구는 정리 목록 |
 
 ## 4. 숫자 일치표
 
