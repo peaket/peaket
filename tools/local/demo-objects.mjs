@@ -92,9 +92,6 @@ export const DEMO_DB_USERS = Object.freeze({
   core: ['core_app_login', 'core_partner_login', 'core_ops_login', 'core_search_login'],
 });
 
-/** Next 서버 액션 암호화 키(데모 전용 상수). apps/partner/Dockerfile의 ENV와 같아야 한다 */
-export const DEMO_SERVER_ACTIONS_KEY = 'cGVha2V0LWRlbW8tc2VydmVyLWFjdGlvbnMta2V5LS0=';
-
 /** 데모 네임스페이스 객체 */
 export function demoNamespaces() {
   return DEMO_NAMESPACES.map((name) => ({ apiVersion: 'v1', kind: 'Namespace', metadata: { name, labels: { 'app.kubernetes.io/part-of': 'peaket-demo' } } }));
@@ -267,7 +264,8 @@ export function demoLayout() {
  * - demo-pg-simulator·demo-idv: 결제 시뮬레이터·모의 기관 시험 키
  * - demo-bootstrap: 첫 관리자·패스키·promoter 부트스트랩 값(감사 기록 없음, 로컬 데모 전용)
  * - demo-bootstrap-core: 첫 promoter 부트스트랩 Job 전용 슈퍼유저 DSN(실행 파드는 받지 않는다)
- * @param {{ keys: { dbPassword: string, idvSecret: string, pgSim: { secretKey: string, clientKey: string }, tokenKeys: Record<string, { privateJwk: unknown }>, pepperKey: string, totpKey: string, internalToken: string, queueTokenKey?: string, admission?: any, ecdh?: any, batchRandomness?: string }, bootstrap: unknown }} o
+ * - demo-web·demo-partner: Next 서버 액션 암호화 키(keys.serverActionsKey, 두 앱이 같은 값)
+ * @param {{ keys: { dbPassword: string, idvSecret: string, pgSim: { secretKey: string, clientKey: string }, tokenKeys: Record<string, { privateJwk: unknown }>, pepperKey: string, totpKey: string, internalToken: string, serverActionsKey?: string, queueTokenKey?: string, admission?: any, ecdh?: any, batchRandomness?: string }, bootstrap: unknown }} o
  */
 export function demoSecrets(o) {
   const k = o.keys;
@@ -360,10 +358,10 @@ export function demoSecrets(o) {
       PEAKET_INTERNAL_TOKEN: k.internalToken,
       PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken,
     }),
-    secret('demo-partner', 'web', {
-      // Next 서버 액션 암호화 키. 빌드와 실행이 같은 값이어야 해서 Dockerfile의 ENV와 같은 데모 전용 상수를 쓴다(비밀이 아니다)
-      NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: DEMO_SERVER_ACTIONS_KEY,
-    }),
+    // Next 서버 액션 암호화 키. 무대마다 데모 비밀 파일에서 만든 값을 web·partner가 같은 값으로 Secret으로만 받는다
+    // (이미지·오버레이 값 파일에는 굽지 않는다. 실행 때 받은 키가 빌드가 만든 키를 이긴다, docs/infra.md '로컬 데모의 비밀')
+    secret('demo-web', 'web', { NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: k.serverActionsKey }),
+    secret('demo-partner', 'web', { NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: k.serverActionsKey }),
     secret('demo-ticket', 'ticket', { PEAKET_DATABASE_URL: urls.ticket, PEAKET_TICKET_REDIS_URL: L.redisUrl, PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken, PEAKET_INTERNAL_TOKEN: k.internalToken }),
     secret('demo-trust', 'trust', { PEAKET_TRUST_REDIS_URL: L.redisUrl, PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken }),
     secret('demo-bundle-env', 'purchase', Object.fromEntries(Object.entries(files).map(([svc, values]) => [`${svc}.env`, `${Object.entries({ ...values, PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken }).sort(([a], [b]) => a.localeCompare(b)).map(([n, v]) => `${n}=${v}`).join('\n')}\n`]))),

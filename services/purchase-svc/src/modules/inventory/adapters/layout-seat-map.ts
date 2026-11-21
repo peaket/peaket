@@ -1,6 +1,6 @@
 // 운영 좌석맵 판(BUILD_ORDER PRF-137, docs/features/seat-hold.md §2 '운영 좌석맵 판'): 회차별 판 파일을 읽어 메모리에 두는 SeatMap·SeatMapIndex·SeatMapSections.
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Clock } from '@peaket/platform';
 import { KEY_PART, type SeatRef } from '../domain/hold.js';
 import { type AutoCandidateList, type AutoCondition, autoCandidatesOf, autoFingerprint } from '../domain/auto.js';
@@ -26,11 +26,25 @@ const isFileMissing = (err: unknown): boolean => (err as { code?: unknown } | nu
 export class FileSeatMapSource implements SeatMapSource {
   constructor(private readonly dir: string) {}
 
-  async load(eventId: string): Promise<unknown | undefined> {
+  /**
+   * 회차 판 파일의 경로. eventId가 KEY_PART 모양이고, 만든 경로가 폴더 바로 안(폴더 밖·절대 경로·하위 폴더가 아님)일 때만 낸다.
+   * 아니면 undefined(파일에 닿지 않는다). KEY_PART가 이미 막는 값을 경로로 한 번 더 확인한다(CodeQL js/path-injection이 검사를 알아보게)
+   */
+  #fileOf(eventId: string): string | undefined {
     if (!KEY_PART.test(eventId)) return undefined;
+    const root = resolve(this.dir);
+    const file = resolve(root, `${eventId}.json`);
+    const rel = relative(root, file);
+    if (rel.startsWith('..') || isAbsolute(rel) || dirname(rel) !== '.') return undefined;
+    return file;
+  }
+
+  async load(eventId: string): Promise<unknown | undefined> {
+    const file = this.#fileOf(eventId);
+    if (file === undefined) return undefined;
     let text: string;
     try {
-      text = await readFile(join(this.dir, `${eventId}.json`), 'utf8');
+      text = await readFile(file, 'utf8');
     } catch (err) {
       if (isFileMissing(err)) return undefined;
       throw err;
@@ -39,9 +53,10 @@ export class FileSeatMapSource implements SeatMapSource {
   }
 
   async stamp(eventId: string): Promise<string | undefined> {
-    if (!KEY_PART.test(eventId)) return undefined;
+    const file = this.#fileOf(eventId);
+    if (file === undefined) return undefined;
     try {
-      const s = await stat(join(this.dir, `${eventId}.json`));
+      const s = await stat(file);
       return `${s.mtimeMs}:${s.size}`;
     } catch (err) {
       if (isFileMissing(err)) return undefined;

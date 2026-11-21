@@ -47,7 +47,7 @@ bash D:/ticketpass-locks/lock.sh drop docker lane4-BAT-087
 - **판매 심사 제출**: BAT-616이 만든 `POST /v1/partner/productions/{productionId}/sale-review`를 쓴다. 고치기 전에는 이 경로가 없어 시드가 첫 공연에서 멈췄다.
 - **좌석맵 판 파일 복사(2026-11-21, BAT-086 고침)**: 공연·회차·좌석맵은 공개·관리 API로만 만들지만, purchase-svc는 자기 파드의 `PEAKET_SEATMAP_DIR`(`/tmp/seatmaps`)에서 회차 판 파일 `{eventId}.json`을 읽는다. core-svc는 자기 파드의 `/var/peaket/public`에만 쓰므로, 시드가 승인 전에 `kubectl exec -i deploy/bundle`로 같은 바이트(시드가 PUT한 배치 + 회차 1인 한도·판매 끝·등급 가격·회차별 좌석 UUID)를 채운다. 이 파일이 없으면 승인 뒤 core의 `sale-open`이 `409 sale-not-publishable(sale_open_no_layout)`로 닫혀 기기 배치가 503이 된다. **로컬 데모 전용 예외**이며 운영·클라우드 데모에는 쓰지 않는다(운영은 회차 설정을 core에서 받는 LCH-080 길이 판 파일 자리를 정한다).
 - 공연·회차·좌석맵·기기는 여전히 공개·관리 API로만 만든다(감사 기록·Outbox 유지).
-- 무대 쪽 예외: `bundle`은 `PEAKET_BUNDLE_MODE=split`(한 파드 안 gRPC 포트 충돌 회피), `ops-svc`·`realtime-gw`는 `nodeSelector: null`(차트 기본 노드 셀렉터를 지운다), web은 읽기 전용 루트 위에 `.next/static`·`serwist`·`cache`·`public`을 빈 볼륨으로 연다(시작할 때 복사하는 자리), partner는 데모 전용 `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`를 빌드·실행에 같은 값으로 쓴다.
+- 무대 쪽 예외: `bundle`은 `PEAKET_BUNDLE_MODE=split`(한 파드 안 gRPC 포트 충돌 회피), `ops-svc`·`realtime-gw`는 `nodeSelector: null`(차트 기본 노드 셀렉터를 지운다), web은 읽기 전용 루트 위에 `.next/static`·`serwist`·`cache`·`public`을 빈 볼륨으로 연다(시작할 때 복사하는 자리). web·partner의 Next 서버 액션 암호화 키(`NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`)는 이미지·값 파일에 굽지 않고 Secret `demo-web`·`demo-partner`로만 받는다(아래 '비밀', 2026-11-21 W12-ci-sec).
 - 이 예외는 `docs/review/plans/BAT-087.md`의 '고침' 절과 `deploy/envs/demo/README.md`에도 적는다.
 
 ## 호스트와 포트
@@ -75,6 +75,8 @@ bash D:/ticketpass-locks/lock.sh drop docker lane4-BAT-087
 
 - `.cache/peaket-tools/demo-secrets/secrets.json`(0600)과 `sessions.json`(0600)에만 쓴다.
 - 저장소·로그·측정 파일·화면에 싣지 않는다. `demo-auth prepare`가 없으면 새로 만든다.
+- Next 서버 액션 암호화 키(`serverActionsKey`, 무작위 32바이트)도 이 파일에서 만들고, 그 값이 없는 예전 파일에는 채워 넣는다. web·partner가 같은 값을 Secret으로 받는다. 예전에 이미지·값 파일에 넣었던 데모 상수는 공개된 값이라 쓰지 않는다.
+- 데모 도구의 HTTPS 요청은 무대 접속 정보(`.cache/peaket-tools/demo-contract.json`)의 자체 서명 인증서(`caPem`)로 인증서와 이름을 확인한다. 그 값이 없으면 확인을 끄지 않고 요청 전에 멈춘다(`node tools/local/cluster.mjs demo`로 다시 만든다).
 - 패스키 개인키는 Playwright CDP `WebAuthn.addCredential`로만 쓰고, 데모가 끝나면 `.cache` 폴더째 지운다.
 
 ## 한계(측정·기록에도 적는다)

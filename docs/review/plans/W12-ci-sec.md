@@ -110,6 +110,15 @@
 - 명령: `node --test tools/ci/scan-tools.test.mjs tools/local/demo-auth.test.mjs tools/local/demo-objects.test.mjs tools/local/demo-images.test.mjs tools/local/demo.test.mjs` → 시험 96, 실패 14(모두 W12S ★ 세부), 기존 시험은 모두 통과.
 - 실패 까닭: W12S-02 ①③ web·partner Dockerfile의 키 `ENV` 넷 / W12S-03 ① `demo-web` Secret 없음, ② `DEMO_SERVER_ACTIONS_KEY`를 내놓음, ③ `web.yaml` env에 키, ④ 상수 값이 네 파일에 남음 / W12S-04 ①~③ `secretsFile`을 받지 않아 임시 파일을 만들지 않음 / W12S-06 ②③④ 확인을 꺼 다른 인증서·빈 `ca`·다른 이름도 받아들임 / W12S-07 ①② 데모 키 값을 푸는 허용 블록 없음. 통과(★ 아님): W12S-02 ②(지금도 맞음, 표본으로 잡는 것은 봄)·W12S-05 ①(시험 고침)·W12S-06 ①(바른 요청).
 
+## 구현 메모
+
+- gitleaks jwt(1의 1): `tools/ci/gitleaks.toml` '시험 코드의 가짜 값' 블록에 그 JWT 그대로의 꼴(`.` 이스케이프) 하나와 까닭 한 구절을 더했다.
+- gitleaks generic-api-key(1의 2): 같은 파일에 새 블록(`generic-api-key`만·`AND`·이력의 네 파일 경로·그 값 그대로 `\=?`). 두 Dockerfile의 키 `ENV` 넷을 지우고 주석을 고쳤다. `demo-auth.mjs` `prepareDemoSecrets`가 `secretsFile`을 받고 `serverActionsKey`(무작위 32바이트)를 만들거나 예전 파일에 채운다. `demo-objects.mjs`는 상수를 지우고 `demo-web`·`demo-partner`가 `k.serverActionsKey`를 싣는다. `web.yaml`은 키 줄을 지우고 `secretEnvFrom: demo-web`, 오버레이 README를 고쳤다.
+- #36: `httpsJson`이 `o.ca`(없으면 계약 `caPem`)를 `ca`로 주고 `servername`으로 이름을 확인한다. 빈 값이면 연결 전에 `caPem`을 말하는 오류로 거절한다. `rejectUnauthorized: false`는 없앴다.
+- #35: `seed-demo.mjs`의 `passwords`를 `hasher`로(두 줄). #33·#34: `FileSeatMapSource`의 경로를 `#fileOf`(KEY_PART → `resolve` → `relative`가 `..`로 시작·절대·하위 폴더면 `undefined`)에서만 만든다. #32: `int()`가 `n = Number(v)` 하나를 검사하고 돌려준다.
+- 게이트(이 PC, Docker 없음): `node --test tools/ci/scan-tools.test.mjs tools/ci/scan-gate.test.mjs tools/ci/security-scan-workflow.test.mjs` 57/57. `node --test tools/local/demo-auth.test.mjs tools/local/demo-objects.test.mjs tools/local/demo-images.test.mjs tools/local/demo.test.mjs tools/local/demo-seed.test.mjs` 84/84(demo-seed의 DS-05/06은 identity-svc `dist`가 있어야 해서 turbo build를 먼저 돌렸다). `pnpm --filter @peaket/purchase-svc test test/seat-layout.test.ts` 103/103. turbo typecheck purchase-svc·identity-svc 통과. 바꾼 `.mjs`·`.ts` 다섯 ESLint 0. `tools/web-checks`는 설치가 없어 `node --check seats/server.mjs`만 통과. `python tools/doc-check/check_all.py` 오류 0.
+- 남은 확인: W12S-01(PR `security-scan / secrets`)과 W12S-08(전체 분석, 감독에게 4)은 CI 몫이다.
+
 ## 시험 결과
 
 (구현 뒤 시험 담당이 채운다)
@@ -128,3 +137,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w12sec-plan-3b7d | claude-opus-5-5 | 2026-11-21T21:31+09:00 | 2026-11-21T21:58+09:00 |
 | test | w12sec-test-5c1e | claude-opus-5-5 | 2026-11-21T22:00+09:00 | 2026-11-21T22:17+09:00 |
+| impl | w12sec-impl-7a4f | claude-opus-5-5 | 2026-11-21T22:18+09:00 | 2026-11-21T22:41+09:00 |
