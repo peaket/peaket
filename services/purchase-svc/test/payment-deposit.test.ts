@@ -239,9 +239,10 @@ describe('GetPayment 답 읽기', () => {
 
   /**
    * 같은 프로세스의 가짜 payment-svc(PaymentService.GetPayment만). 물은 주문의 계좌를 답한다.
-   * firstAnswerDelayMs를 주면 첫 GetPayment의 답만 그만큼 늦게 보낸다(요청은 받은 즉시 requests에 남긴다, W12-pt36 R1)
+   * firstAnswerDelayMs를 주면 첫 GetPayment의 답만, answerDelayFor를 주면 그 주문의 답만 그만큼 늦게 보낸다
+   * (요청은 받은 즉시 requests에 남긴다. 첫 답 늦춤은 W12-pt36 R3, 주문 늦춤은 R1)
    */
-  async function fakePaymentServer(accounts: Record<string, string>, o: { firstAnswerDelayMs?: number } = {}) {
+  async function fakePaymentServer(accounts: Record<string, string>, o: { firstAnswerDelayMs?: number; answerDelayFor?: { orderId: string; ms: number } } = {}) {
     const def = protoLoader.fromJSON(paymentV1Payment as Parameters<typeof protoLoader.fromJSON>[0], { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true });
     const pkg = (grpc.loadPackageDefinition(def) as unknown as { peaket: { payment: { v1: { PaymentService: grpc.ServiceClientConstructor } } } }).peaket.payment.v1;
     const server = new grpc.Server();
@@ -252,12 +253,13 @@ describe('GetPayment 답 읽기', () => {
         requests.push(call.request);
         const orderId = call.request.order_id as string;
         const answer = () => cb(null, { order_id: orderId, virtual_account: { bank: '20', account_number: accounts[orderId], due_at: { seconds: Math.floor(DUE_MS / 1000), nanos: 0 } } });
-        if (requests.length === 1 && o.firstAnswerDelayMs !== undefined) {
+        const delayMs = requests.length === 1 && o.firstAnswerDelayMs !== undefined ? o.firstAnswerDelayMs : o.answerDelayFor?.orderId === orderId ? o.answerDelayFor.ms : undefined;
+        if (delayMs !== undefined) {
           // real-time: 재현할 결함이 grpc-js의 벽시계 마감을 넘기는 늦은 답이다(가짜 시계로는 grpc-js 마감이 움직이지 않는다) W12-pt36
           const t = setTimeout(() => {
             timers.delete(t);
             answer();
-          }, o.firstAnswerDelayMs);
+          }, delayMs);
           timers.add(t);
         } else answer();
       },
@@ -348,12 +350,14 @@ describe('GetPayment 답 읽기', () => {
     throw new Error(`연결을 맺지 못함: 미리 묻기 ${WARM_TRIES}번 동안 서버가 요청을 받지 못했다`);
   }
 
-  test('P-T36 ③ R1_첫 답이 늦으면 미리 묻기 없는 지금 꼴의 첫 호출은 TRANSIENT다(서버는 요청을 받았다)', async () => {
-    const srv = await fakePaymentServer({ [ORDER]: '1111111111' }, { firstAnswerDelayMs: SLOW_MS });
+  test('P-T36 ③ R1_주문의 답이 마감보다 늦으면 연결이 서 있어도 그 호출은 TRANSIENT다(서버는 그 요청을 받았다)', async () => {
+    const srv = await fakePaymentServer({ [WARM]: '0000000000', [ORDER]: '1111111111' }, { answerDelayFor: { orderId: ORDER, ms: SLOW_MS } });
     const c = new GrpcPaymentDepositReader({ address: srv.address });
     try {
+      // 연결을 먼저 세운다(리뷰 RVpt-1): '서버가 받음' 줄이 첫 연결 맺기 시간(마감 300ms)에 기대지 않게 한다
+      const from = await warmUp(c, srv.requests);
       await expect(c.read(ORDER)).resolves.toBe(PAYMENT_DEPOSIT_READ_TRANSIENT);
-      await vi.waitFor(() => expect(srv.requests.map((r) => r.order_id)).toEqual([ORDER]));
+      await vi.waitFor(() => expect(srv.requests.slice(from).map((r) => r.order_id)).toEqual([ORDER]));
     } finally {
       srv.close();
       c.close();
@@ -412,7 +416,7 @@ describe('GetPayment 답 읽기', () => {
     const c = new GrpcPaymentDepositReader({ address: '127.0.0.1:1', onFailure });
     try {
       await expect(warmUp(c, [])).rejects.toThrow('연결을 맺지 못함');
-      expect(onFailure).toHaveBeenCalledTimes(10);
+      expect(onFailure).toHaveBeenCalledTimes(WARM_TRIES);
     } finally {
       c.close();
     }
