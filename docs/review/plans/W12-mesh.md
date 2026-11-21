@@ -92,7 +92,8 @@
 
 ## 시험 결과
 
-(구현 뒤 시험 담당이 채운다)
+- `node --test deploy/platform/mesh/test/*.test.mjs`(49eebb291): 시험 24·실패 0.
+- `node --test tools/ci/mesh-policies.test.mjs`(49eebb291): 시험 14·실패 0.
 
 ## 리뷰
 
@@ -107,5 +108,5 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12mesh-plan-8d4c | claude-opus-5-5 | 2026-11-22T00:15+09:00 | 2026-11-22T00:29+09:00 |
-| test | w12mesh-test-2f9a | claude-opus-5-5 | 2026-11-22T00:31+09:00 | 2026-11-22T00:33+09:00 |
+| test | w12mesh-test-2f9a | claude-opus-5-5 | 2026-11-22T00:31+09:00 | 2026-11-22T00:41+09:00 |
 | impl | w12mesh-impl-5e7b | claude-opus-5-5 | 2026-11-22T00:35+09:00 | 2026-11-22T00:39+09:00 |
