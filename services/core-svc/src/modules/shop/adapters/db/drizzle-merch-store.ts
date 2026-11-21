@@ -1,4 +1,6 @@
 // shop 주문·정산 원천 Drizzle 저장소. 내부 정산 원천은 core_app으로 읽는다.
+// 파트너 DB 역할(core_partner)은 굿즈 주문·주문 항목을 자기 테넌트 것만 읽기만 하고 넣기·고치기가 없다. 정산이 읽는 단가·수량·수수료율·상태를
+// 파트너 경로가 바꾸지 못하게 한다. 파트너 배송·반품 처리 경로를 만들 때 줄 칸과 주지 않을 칸은 ADR-0338 결정 3·5를 따른다.
 import { eq } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { MerchOrderStore } from '../../domain/merch-ports.js';

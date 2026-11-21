@@ -1,5 +1,7 @@
 // notify Drizzle 저장소(docs/data.md webhook_endpoint·webhook_delivery). 파트너 경로는 core_partner 역할(RLS)로 읽고 쓴다.
 // RLS는 트랜잭션의 app.tenant_id로 거르므로 모든 질의를 테넌트 트랜잭션 안에서 한다(ADR-0241, authz-matrix §5.3).
+// 파트너 역할은 끝점의 아홉 칸만 고친다(끝점 ID·판매자 칸은 못 고친다). 발송기 연결은 core_app이고, 이 표에서는 모든 끝점을 읽되
+// 켜진 끝점을 FAILING으로 끄는 세 칸(status·disabled_reason·version)만 고친다(ADR-0338 결정 1·2). 칸을 더 SET하거나 꺼진 끝점을 고치면 DB가 거절한다.
 import { and, desc, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { WebhookStore } from '../../domain/ports.js';
@@ -249,6 +251,8 @@ export class DrizzleWebhookStore implements WebhookStore {
   }
 
   async disableEndpoint(endpointId: string, _now: Date) {
+    // core_app은 이 세 칸만, 켜진 끝점만 고친다(정책 webhook_endpoint_app_disable, ADR-0338 결정 1).
+    // 이미 꺼진 끝점(파트너가 끈 것)에는 0행이라 사유 PARTNER와 판이 그대로 남는다. 다른 칸을 더하면 DB가 거절한다(42501)
     await this.db.transaction(async (tx) => {
       await tx
         .update(webhookEndpoint)

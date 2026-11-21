@@ -246,6 +246,13 @@
       "when": 1795284988205,
       "tag": "0041_idempotency_record_role_security",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795292357949,
+      "tag": "0042_webhook_merch_write_grants",
+      "breakpoints": true
     }
   ]
 }
