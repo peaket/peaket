@@ -228,7 +228,7 @@ payment 잔여(R-574)로 payment-svc settlement 모듈과 `settlement_statement`
 
 ## BAT-086 V-T7(2026-11-21 구현·시험)
 
-V-T7(빈 PC에서 데모 재현 스크립트 실행 — 한 명령으로 시연 흐름이 뜨고 걸린 시간이 기록된다)의 상태는 `자동 시험`이다. `tools/local/demo.test.mjs`에 `V-T7 ①`~`V-T7 ⑦`·`DM-08`·`DM-09`·`CP-01` 이름으로 29개 시험(리뷰 반영 RV-01·02·03·05·09·10·11 시험과 `Finding: V-T7-seed-seatmap` 시험 포함)을 두었고, `tools/local/demo-seed.test.mjs`에 좌석맵 판 파일 모양·경로를 보는 시험 2개를 더했다. `node tools/ci/ledger.mjs --batch BAT-086 --require`가 통과한다. 실제 kind 재생은 `node tools/local/demo.mjs all --skip-build`로 S1~S9 9/9이고(좌석맵 고침 뒤 2026-11-21, purchase `event_sale` 7행·`/tmp/seatmaps` 파일 7개) 측정은 `docs/review/measurements/BAT-086-demo.md`(실행별 `BAT-086-demo-<runId>.md`도 함께)에 있다. D-T48은 시연만 하고 장부 범위에 넣지 않았다(`docs/review/ledger/devops.md:125`).
+V-T7(빈 PC에서 데모 재현 스크립트 실행 — 한 명령으로 시연 흐름이 뜨고 걸린 시간이 기록된다)의 상태는 `자동 시험`이다. `tools/local/demo.test.mjs`에 `V-T7 ①`~`V-T7 ⑦`·`DM-08`·`DM-09`·`CP-01` 이름으로 29개 시험(리뷰 반영 RV-01·02·03·05·09·10·11 시험과 `Finding: V-T7-seed-seatmap` 시험 포함)을 두었고, `tools/local/demo-seed.test.mjs`에 좌석맵 판 파일 모양·경로를 보는 시험 2개를 더했다. `node tools/ci/ledger.mjs --batch BAT-086 --require`가 통과한다. 실제 kind 재생은 `node tools/local/demo.mjs all --skip-build`로 S1~S9 9/9이고(좌석맵 고침 뒤 2026-11-21, purchase `event_sale` 7행·`/tmp/seatmaps` 파일 7개) 측정은 `docs/review/measurements/BAT-086-demo.md`(실행별 `BAT-086-demo-<runId>.md`도 함께)에 있다. D-T48은 시연만 하고 장부 범위에 넣지 않았다(`docs/review/ledger/devops.md:125`). BAT-086 완료(2026-11-21, R-727).
 
 | 항목 | 시험 이름·근거 |
 | --- | --- |
