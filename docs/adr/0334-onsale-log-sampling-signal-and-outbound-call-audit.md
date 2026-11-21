@@ -1,6 +1,6 @@
 # ADR-0334: 온세일 구간의 정상 로그 줄 표본은 ops-svc가 `LOG_SAMPLING` 설정으로 내고, 바깥 호출과 지표 라벨은 정적 검사로 지킨다(2026-11-22)
 
-- **상태**: 채택(추천 적용, 2026-11-22, BUILD_ORDER BAT-215 계획 `bat215-plan-eec48d28`). 방향(신호 출처는 ops-svc의 `control.settings` `LOG_SAMPLING`)은 소유자 결정 OPEN[09](2026-11-02, docs/progress-archive.md:45)이고, 이 ADR은 OPS-010·OPS-020을 구현하기 전에 그 세부를 정한다(docs/architecture.md §8.6 4의 2).
+- **상태**: 채택(추천 적용, 2026-11-22, BUILD_ORDER BAT-215 계획 `bat215-plan-eec48d28`). 방향(신호 출처는 ops-svc의 `control.settings` `LOG_SAMPLING`)은 소유자 결정 OPEN[09](2026-11-02, docs/progress-archive.md:45)이고, 이 ADR은 OPS-010·OPS-020을 구현하기 전에 그 세부를 정한다(docs/architecture.md §8.6 4의 2). 구현 시점(감독 결정, 2026-11-22): 결정 1·2·4~6은 BAT-215가 만든다. 결정 3(생산)은 미룬다: ops-svc의 `control.settings` Outbox 표·릴레이는 갈래 4 BAT-360이 만들고, 온세일 구간의 `LOG_SAMPLING` 내기는 BAT-365(OPS-300)가 한다. 그때까지 서비스는 시작 설정 값의 비율로 남는다.
 - **관련**: [ADR-0069](0069-ops-control-principles-audit-self-safety-alert-hygiene-wide-events.md)(정규 로그 줄·`sampleRate`), [ADR-0103](0103-control-as-state-startup-sync-broadcast-topics-compacted-settings.md)(제어 상태 시작 작업·방송형 읽기), [ADR-0125](0125-entry-path-head-sampling-collector-sizing-shared-sample-threshold.md)(표본 문턱), [ADR-0053](0053-crypto-hardening-pseudonyms-webhooks-stores-runbook-audit.md)(나가는 호출엔 경로 틀만), [ADR-0077](0077-observability-book-review-buckets-storage-retention.md)(라벨 규칙), [ADR-0331](0331-trim-per-batch-checks-defer-kind.md) 결정 9, [ADR-0332](0332-infra-build-out-segment-five.md) 결정 7
 - **관련 ID**: C-T75, C-T76, AC-T7, OPS-010, OPS-020, POL-028, ASVS v5.0.0-15.3.2·14.2.3·16.2.2·16.2.4
 
