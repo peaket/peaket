@@ -1,9 +1,10 @@
 // 모듈 조립 파일: 진입 포트에 어댑터를 묶는다.
 import { type DynamicModule, Module } from '@nestjs/common';
-import { CLOCK, type Clock, HOT_PATH_METRICS, type HotPathMetrics, type HotRedis } from '@peaket/platform';
+import { CLOCK, type Clock, type ExternalHttpClient, HOT_PATH_METRICS, type HotPathMetrics, type HotRedis, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { MemoryEntryStore, MemoryEventSchedules, MemoryShuffleCommits } from './adapters/memory-entry-store.js';
 import { QUEUE_REDIS, QUEUE_WAIT_REDIS, RedisEntryStore, RedisShuffleCommits } from './adapters/redis-entry-store.js';
 import { RedisEventSchedules } from './adapters/redis-event-schedules.js';
+import { OpsAuditShuffleDisclosures } from './adapters/ops-audit-disclosures.js';
 import { MemoryWithdrawnKeys } from './adapters/memory-withdrawn-keys.js';
 import { RedisWithdrawnKeys } from './adapters/redis-withdrawn-keys.js';
 import { PurgeWithdrawnKeys } from './application/purge-withdrawn-keys.js';
@@ -12,7 +13,7 @@ import { IssuePreverification } from './application/issue-preverification.js';
 import { JoinLobby } from './application/join-lobby.js';
 import { LeaveQueue } from './application/leave-queue.js';
 import { ShuffleCommits } from './application/shuffle-commits.js';
-import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LEAVE_SIGNALS, type LeaveSignals, DEGRADED_LIMITS, type DegradedLimits, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, WITHDRAWN_KEYS } from './domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LEAVE_SIGNALS, type LeaveSignals, DEGRADED_LIMITS, type DegradedLimits, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, SHUFFLE_DISCLOSURES, WITHDRAWN_KEYS } from './domain/ports.js';
 import { EligibilityLog } from './application/eligibility-log.js';
 import { QueueController } from './inbound/queue.controller.js';
 
@@ -36,6 +37,8 @@ export type EntryModuleOptions = ({ storage: 'redis'; redis: HotRedis; waitRedis
   eligibilitySignals?: EligibilitySignals;
   /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
   hotPath?: HotPathMetrics;
+  /** 셔플 커밋 공시를 ops 감사 체인에 보낼 ops-svc 내부 HTTP(BAT-355, ADR-0341 결정 7). 없으면 지금의 정규 로그 줄만 남긴다 */
+  opsAudit?: { ops: Pick<ExternalHttpClient, 'request'>; internalToken?: string };
 };
 
 @Module({})
@@ -84,6 +87,15 @@ export class EntryModule {
         ...(o.arrivalSignals ? [{ provide: ARRIVAL_SIGNALS, useValue: o.arrivalSignals }] : []),
         ...(o.firstVisit ? [{ provide: FIRST_VISIT_COOKIES, useValue: o.firstVisit }] : []),
         ...(o.firstVisitSignals ? [{ provide: FIRST_VISIT_SIGNALS, useValue: o.firstVisitSignals }] : []),
+        ...(o.opsAudit
+          ? [
+              {
+                provide: SHUFFLE_DISCLOSURES,
+                useFactory: (logger?: PlatformLogger) => new OpsAuditShuffleDisclosures({ ...o.opsAudit!, ...(logger ? { logger } : {}) }),
+                inject: [{ token: PLATFORM_LOGGER, optional: true }],
+              },
+            ]
+          : []),
       ],
       exports: [PurgeWithdrawnKeys, ShuffleCommits],
     };
