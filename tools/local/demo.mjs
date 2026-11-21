@@ -311,17 +311,34 @@ export function playMeasurementPath(file, runId) {
   return join(dirname(resolve(file)), 'play', measurementHistoryPath(file, runId).split(/[\\/]/).pop());
 }
 
-function measurementOf(report, o, cleanup, outcome) {
+/** 도구 판 확인 인자(선행이 모두 있을 때만 실행한다) */
+const TOOL_VERSION_ARGS = {
+  docker: ['--version'],
+  kind: ['version'],
+  kubectl: ['version', '--client', '--output=json'],
+  helm: ['version', '--short'],
+};
+
+/**
+ * 측정 기록. probeTools가 false면(선행 없음) 도구를 판 확인까지 하나도 실행하지 않고,
+ * 찾은 도구는 '판 확인 안 함', 못 찾은 도구는 '없음'으로 적는다(docs/verification.md '재현 스크립트')
+ */
+function measurementOf(report, o, cleanup, outcome, probeTools = true) {
   const found = doctorChecks(o.root).tools;
+  const version = (name) => {
+    if (!probeTools) return found[name] ? '판 확인 안 함' : '없음';
+    return toolVersion(found[name] ?? name, TOOL_VERSION_ARGS[name]);
+  };
   return {
     commit: gitHead(),
     date: new Date().toISOString(),
     pc: `${process.platform} ${release()} · ${cpus()[0]?.model ?? 'CPU'} · Node ${process.version} · Playwright tools/web-checks 1.64.1`,
     tools: {
       node: process.version,
-      docker: toolVersion(found.docker ?? 'docker', ['--version']),
-      kind: toolVersion(found.kind ?? 'kind', ['version']),
-      kubectl: toolVersion(found.kubectl ?? 'kubectl', ['version', '--client', '--output=json']),
+      docker: version('docker'),
+      kind: version('kind'),
+      kubectl: version('kubectl'),
+      helm: version('helm'),
       playwright: '1.64.1(tools/web-checks)',
     },
     coldStartSeconds: report?.coldStartSeconds,
@@ -365,9 +382,12 @@ async function runAll(o, log) {
   let report;
   let cleanup = o.keep ? '남김(--keep)' : '아직';
   let outcome;
-  /** 정본 측정과 실행별 측정을 함께 쓴다(실패·부분 실행이 정본을 덮어도 지난 기록은 남는다, 리뷰 RV-11) */
+  /**
+   * 정본 측정과 실행별 측정을 함께 쓴다(실패·부분 실행이 정본을 덮어도 지난 기록은 남는다, 리뷰 RV-11).
+   * 선행이 없으면 도구 판 확인도 하지 않는다(W12-tools)
+   */
   const write = (r) => {
-    const measured = measurementOf(r, o, cleanup, outcome);
+    const measured = measurementOf(r, o, cleanup, outcome, issues.ok);
     measured.coldStartSeconds = r?.coldStartSeconds;
     measured.totalSeconds = r?.totalSeconds;
     writeMeasurement(o.measure, measured);
