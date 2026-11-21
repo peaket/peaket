@@ -833,6 +833,7 @@
 | R-737 | develop 화면 CI 숨은 실패 셋(partner 린트 시험 표본·seats 잡 빌드 차례·queue-room 흔들림) | apps/partner security.test.mjs, .github/workflows/ci-web.yml(41049c462), 계획 W12-ci-web | 표본을 정본 꼴로, seats 잡 의존 빌드·queue-room 설치 | 고침, 흔들림·리뷰 넷은 정리 목록 |
 | R-738 | 메시 정책 시험의 정본 표가 배상 송금(purchase-svc)·서킷 읽기 REST 쌍을 따라오지 못해 tools-check가 빨갰다 | docs/api/proto/README.md, docs/adr/0285-mesh-port-allow-source-generated-policies.md, deploy/platform/mesh/port-allow.yaml, deploy/platform/mesh/policies.yaml, deploy/platform/mesh/test/mesh-policies.test.mjs | 정본 표 보충, 배상 송금은 메서드 단위 허용(W12-mesh) | 적용 |
 | R-739 | 무인 모드가 기본 12시간·최대 24시간 뒤 꺼져, 소유자가 직접 잠그기 전까지 켜 두고 싶은 경우를 담지 못했다 | tools/claude-hooks/lib.mjs·unattended.mjs·README.md, tools/ci/claude-hooks.test.mjs, docs/adr/0330 결정 9 | 시간 없이 켜면 off까지 켜 둠(until null), 시간을 주면 그대로 | 완료 |
+| R-740 | GAT-010 남은 몫(서버 키 등록 잇기·keyId 맞물림·런타임 캐시 판)이 없었다 | apps/web wallet-device-key·sw, services/ticket-svc 기기 키 저장소, docs/api/openapi.yaml, ADR-0336, offline-gate §2·§11 | 스위치 없앰·같은 키 무변경 201·wallet-shell-{판} | 고침, 리뷰·검증 낮음·중간 9은 정리 목록 |
 
 ## 4. 숫자 일치표
 
