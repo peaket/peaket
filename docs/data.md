@@ -2004,11 +2004,12 @@ erDiagram
     command_event {
         uuid command_id PK
         int seq PK
-        text type
-        uuid actor_ref "기록마다 새 무작위 참조. 관리 계정 ID는 command_actor에만(추천 적용 2026-10-29, ADR-0149)"
+        text type "CREATED·DRY_RUN·PENDING_APPROVAL·APPROVED·REJECTED·DISPATCHED·ACKED·SUCCEEDED·FAILED·REVERT_REQUESTED·REVERT_APPROVED·REVERT_REJECTED·REVERT_EXPIRED·REVERT_STARTED·REVERTED·REVERT_FAILED·EXTENDED·EXTEND_ACKED·EXTEND_FAILED·AUTO_EXPIRED·DRY_RUN_COMPARED(추천 적용 2026-11-21, BAT-355, ADR-0340)"
+        uuid actor_ref "기록마다 새 무작위 참조. 관리 계정 ID는 command_actor에만(추천 적용 2026-10-29, ADR-0149). '기록'은 한 사람의 한 행위다: 요청(명령 행·CREATED·DRY_RUN·첫 상태 사건·감사 기록이 같은 참조), 승인·거부, 재시도·연장·되돌림마다 새 참조(추천 적용 2026-11-21, BAT-355). 시스템은 모든 자리가 0인 빈 UUID"
         text actor_role "viewer|operator|commander|system(그때의 역할)"
         text reason
-        jsonb dry_run
+        jsonb dry_run "DRY_RUN 사건(시스템 자동 조치는 DISPATCHED 사건)의 dry-run 기록(openapi CommandDryRun)"
+        jsonb detail "사건마다 다른 값: EXTENDED·EXTEND_ACKED의 새 만료, DRY_RUN_COMPARED의 예측·실제·센 시각·차이(추천 적용 2026-11-21, BAT-355, 마이그레이션 ops 0021)"
         timestamptz acked_at
     }
     ops_command {
@@ -2023,6 +2024,7 @@ erDiagram
         timestamptz approval_expires_at "2인 승인 기한(10분 [가정])"
         timestamptz expires_at "만료 있는 명령 2·8의 만료 시각(첫 ack 뒤 10분·30분, 명령 2는 연장하면 바뀜). 지나면 AUTO_EXPIRED(추천 적용 2026-11-21, ADR-0340 결정 5)"
         timestamptz compare_due_at "예측이 있는 명령의 실행 뒤 비교를 할 때(처음 DISPATCHED + 5분 [가정]). 비교를 남기면 비운다(추천 적용 2026-11-21, ADR-0340 결정 3)"
+        smallint round "지금 회차(0은 명령, 명령 3·11의 되돌리기 요청마다 1씩 오름. command_actor.round와 같다, 추천 적용 2026-11-21, BAT-355)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -2358,6 +2360,7 @@ erDiagram
         uuid approver_ref PK "가명 참조(ADR-0149)"
         text approver_role
         uuid requester_ref "가명 참조"
+        smallint round "0은 명령의 승인·거부, 1 이상은 그 회차 되돌리기 요청의 승인·거부(추천 적용 2026-11-21, BAT-355, 마이그레이션 ops 0021)"
         timestamptz approved_at
     }
     fraud_snapshot {

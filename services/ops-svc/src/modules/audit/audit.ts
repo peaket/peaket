@@ -1,6 +1,6 @@
 // 불변 감사 로그의 최소 해시 체인(GAT-110, docs/features/control-tower.md §7, docs/data.md audit_chain·audit_chain_head).
 // 각 기록의 record_sha256 = SHA-256(직전 해시 || 정규화한 기록 JSON)이고, audit_chain_head.last_hash가 마지막 해시다.
-// mac(HMAC)은 체인 작업자가 채우는 자리로 비워 둔다. leaf_salt는 기록 파기 때 함께 파기할 32바이트 난수다.
+// mac(HMAC)은 커밋 뒤 체인 작업자가 채운다(chain-worker.ts, ADR-0341). leaf_salt는 기록 파기 때 함께 파기할 32바이트 난수다.
 import { createHash, randomBytes } from 'node:crypto';
 import type { DbTransaction } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
@@ -91,10 +91,11 @@ export class MemoryAuditChain implements AuditChain {
 }
 
 /**
- * DB 트랜잭션 안에서 체인에 한 기록을 더한다. audit_chain_head 행을 잠가 seq를 올리고, 직전 해시를 읽어 해시를 잇는다.
- * 호출자는 명령 쓰기와 같은 트랜잭션에 넣어야 한다.
+ * DB 트랜잭션 안에서 체인에 한 기록을 더한다(감사 기록의 단일 입구). audit_chain_head 행을 잠가 seq를 올리고, 직전 해시를 읽어 해시를 잇는다.
+ * mac은 비운 채 쓰고 KMS를 부르지 않는다(체인 작업자가 커밋 뒤 seq 차례로 채운다, ADR-0102·0341). mac_seq·last_mac은 읽지 않는다.
+ * 호출자는 명령 쓰기와 같은 트랜잭션에 넣어야 한다. 덧붙인 seq를 돌려준다.
  */
-export async function appendAuditIn(tx: DbTransaction, record: AuditRecord): Promise<void> {
+export async function appendAuditIn(tx: DbTransaction, record: AuditRecord): Promise<number> {
   const head = await tx.execute(sql`select last_seq, encode(last_hash, 'hex') as last_hash from audit_chain_head where id = 1 for update`);
   const row = head.rows[0] as { last_seq: number | string; last_hash: string } | undefined;
   if (!row) throw new Error('audit_chain_head 행이 없다(마이그레이션 0000)');
@@ -106,4 +107,5 @@ export async function appendAuditIn(tx: DbTransaction, record: AuditRecord): Pro
     values (${seq}::bigint, ${record.recordType}, ${record.recordId}::uuid, decode(${hash}, 'hex'), decode(${prevHash}, 'hex'),
             ${canonicalAuditRecord(record)}::jsonb, ${randomBytes(32)}, ${new Date(record.nowMs)}::timestamptz)`);
   await tx.execute(sql`update audit_chain_head set last_seq = ${seq}::bigint, last_hash = decode(${hash}, 'hex') where id = 1`);
+  return seq;
 }

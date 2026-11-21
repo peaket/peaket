@@ -1,8 +1,25 @@
 // 뿌리 모듈: 운영 명령·CS 처리함의 저장소를 DB/메모리로 골라 싣는다.
+// DB 조립은 감사 체인 작업자·5분 앵커와 명령 정비 작업을 모듈 수명주기로 켠다(BAT-355). 지표 묶음은 COMMAND_SIGNALS·AUDIT_SIGNALS로 내놓는다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import { type Database, databaseModule } from '@peaket/platform';
-import { AuditCheckpointService, AuditModule, DrizzleAuditChain, DrizzleAuditCheckpointStore, MemoryAuditChain, MemoryAuditCheckpointStore, ephemeralAuditAnchorSigner, type AuditAnchorSigner, type AuditChain, type AuditChainReader } from './modules/audit/index.js';
-import { CommandsModule, type CommandExecutor, type HandleCommandEvent } from './modules/commands/index.js';
+import {
+  AuditCheckpointService,
+  AuditModule,
+  DrizzleAuditChain,
+  DrizzleAuditCheckpointStore,
+  DrizzleAuditIntakeStore,
+  MemoryAuditChain,
+  MemoryAuditCheckpointStore,
+  MemoryAuditIntakeStore,
+  ephemeralAuditAnchorSigner,
+  type AuditAnchorSigner,
+  type AuditBackgroundOptions,
+  type AuditChain,
+  type AuditChainReader,
+  type AuditMacKey,
+  type MacAnchorStore,
+} from './modules/audit/index.js';
+import { CommandsModule, type CommandExecutor, type CommandsModuleExtras, type HandleCommandEvent } from './modules/commands/index.js';
 import { DrizzleCommandStore, MemoryCommandStore } from './modules/commands/index.js';
 import { CasesModule, DrizzleCsCaseStore, MemoryCsCaseStore } from './modules/cases/index.js';
 import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore } from './modules/alerts/index.js';
@@ -35,6 +52,15 @@ import {
 
 interface CommonWiring {
   readonly executor?: CommandExecutor;
+  /**
+   * 감사 체인 작업자·빈 행 경보·5분 앵커와 명령 정비 작업의 타이머(BAT-355, ADR-0340·0341). DB 조립은 기본으로 켠다.
+   * false면 타이머를 켜지 않는다(감사 체인 키·앵커 설정 검사는 한다). 시험은 간격을 바꿔 넣을 수 있다
+   */
+  readonly background?: false | { readonly audit?: Partial<Omit<AuditBackgroundOptions, 'enabled'>>; readonly maintenanceMs?: number };
+  /** 감사 체인 키·앵커 저장소·환경 값을 넘긴다(시험). 없으면 process.env로 고른다(local·ci·demo 밖에서 키 ID·넘길 리전·버킷이 없으면 시작하지 않는다) */
+  readonly auditMac?: { readonly key?: AuditMacKey; readonly anchors?: MacAnchorStore; readonly env?: Record<string, string | undefined> };
+  /** dry-run 센 값 원천·명령 4 보호 대역 목록(시험·BAT-365) */
+  readonly commandExtras?: Pick<CommandsModuleExtras, 'dryRunSources' | 'protectedRanges' | 'signals'>;
   /** 우선 구매 권리 발급·회수(GAT-135). 없으면 그 경로를 열지 않는다 */
   readonly priority?: PriorityModuleDeps;
   /** 시험에서 체크포인트 시각을 고정한다. 없으면 Date.now */
@@ -129,15 +155,31 @@ export class AppModule {
       const store = new DrizzleCommandStore(o.database);
       const cancellations = new DrizzleEventCancellationStore(o.database);
       const csCases = new DrizzleCsCaseStore(o.database);
+      const alerts = new DrizzleOpsAlertStore(o.database);
+      const background = o.background === false ? undefined : (o.background ?? {});
       return {
         module: AppModule,
         imports: [
           databaseModule(o.database),
-          CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth),
-          AuditModule.register(checkpoints, signer),
+          CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth, {
+            ...(o.commandExtras ?? {}),
+            maintenance: { enabled: background !== undefined, ...(background?.maintenanceMs !== undefined ? { intervalMs: background.maintenanceMs } : {}) },
+          }),
+          AuditModule.register(checkpoints, signer, {
+            intake: new DrizzleAuditIntakeStore(o.database),
+            background: {
+              database: o.database,
+              alerts,
+              ...(o.auditMac?.key ? { key: o.auditMac.key } : {}),
+              ...(o.auditMac?.anchors ? { anchors: o.auditMac.anchors } : {}),
+              ...(o.auditMac?.env ? { env: o.auditMac.env } : {}),
+              enabled: background !== undefined,
+              ...(background?.audit ? { options: background.audit } : {}),
+            },
+          }),
           LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
           CasesModule.register(csCases),
-          AlertsModule.register(new DrizzleOpsAlertStore(o.database)),
+          AlertsModule.register(alerts),
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
           PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts, audit: chain } : { storage: 'memory', deps: { audit: chain } }),
@@ -175,8 +217,8 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [
-        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth),
-        AuditModule.register(checkpoints, signer),
+        CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth, { ...(o.commandExtras ?? {}) }),
+        AuditModule.register(checkpoints, signer, { intake: new MemoryAuditIntakeStore(chain) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
         CasesModule.register(csCases),
         AlertsModule.register(new MemoryOpsAlertStore()),

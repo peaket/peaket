@@ -1,10 +1,15 @@
-// 운영 명령 저장소의 PostgreSQL 구현. 명령 쓰기와 감사 체인 기록을 한 트랜잭션에 넣는다.
+// 운영 명령 저장소의 PostgreSQL 구현. 명령 행·사건·대응 행(command_actor)·감사 체인 기록·멱등 기록을 한 트랜잭션에 넣는다(ASVS 2.3.3).
+// 상태 쓰기 규칙은 도메인 command-writes.ts에 있고, 여기서는 명령 행을 FOR UPDATE로 잠근 쓰기(DbCommandWriter)를 준다.
+// 사람 칸(requested_by·actor_ref·approver_ref·감사 기록)은 기록마다 새 가명 참조이고 관리 계정 ID는 command_actor에만 있다(ADR-0340 결정 8).
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
-import { sql } from 'drizzle-orm';
-import { APPROVAL_TTL_MS, approvalModeOf, approverRolesOf, requesterRolesOf, stateAfterCreate, type Command, type CommandState, type CommandType, type NewCommand } from '../../domain/command.js';
-import type { CommandDecision, CommandListQuery, CommandPage, CommandStore } from '../../domain/ports.js';
+import { DATABASE, IDEMPOTENCY_RECORD_TABLE, IDEMPOTENCY_RETENTION_MS, IdempotencyStore, idempotencyKeyReused, type Database, type DbTransaction } from '@peaket/platform';
+import { sql, type SQL } from 'drizzle-orm';
+import { AUTO_EXPIRE_TYPES, type Command, type CommandIdempotency, type CommandState, type CommandType, type NewCommand } from '../../domain/command.js';
+import { planCreation } from '../../domain/command-writes.js';
+import { DuplicateCommandActor, type ActorSide, type CommandDueKind, type CommandListQuery, type CommandPage, type CommandPatch, type CommandWriter, type NewCommandApproval, type NewCommandEvent } from '../../domain/ports.js';
 import { appendAuditIn } from '../../../audit/audit.js';
+import { CommandStoreBase, decodeCursor, encodeCursor } from '../command-store-base.js';
 
 interface Row {
   id: string;
@@ -16,198 +21,331 @@ interface Row {
   requested_role: string;
   event_id: string | null;
   approval_expires_at: Date | string | null;
+  expires_at: Date | string | null;
+  compare_due_at: Date | string | null;
+  round: number | string | null;
   created_at: Date | string;
   updated_at: Date | string;
   attempts: number | string | null;
   last_error: string | null;
   executed_at: Date | string | null;
   result: Record<string, unknown> | string | null;
+  /** 대응 표로 푼 요청자 관리 계정(없으면 null) */
+  requester_account?: string | null;
 }
 
-const toCommand = (r: Row, approvals: readonly string[] = []): Command => ({
+/** 같은 사람 두 번·요청자 본인 승인을 막는 부분 유일 색인(마이그레이션 0021) */
+const ACTOR_PERSON_KEY = 'command_actor_person_key';
+
+const ms = (v: Date | string | null): number | undefined => (v === null ? undefined : new Date(v).getTime());
+const json = <T>(v: T | string): T => (typeof v === 'string' ? (JSON.parse(v) as T) : v);
+const pgCode = (e: unknown): string | undefined => {
+  const any = e as { code?: unknown; cause?: { code?: unknown } } | undefined;
+  const c = any?.code ?? any?.cause?.code;
+  return typeof c === 'string' ? c : undefined;
+};
+const constraintOf = (e: unknown): string | undefined => {
+  const any = e as { constraint?: unknown; cause?: { constraint?: unknown } } | undefined;
+  const c = any?.constraint ?? any?.cause?.constraint;
+  return typeof c === 'string' ? c : undefined;
+};
+
+/** 행을 명령으로. 승인·dry-run·ack 시각 같은 딸린 값은 따로 붙인다 */
+const toCommand = (r: Row, extra: { approvals?: readonly string[]; revertRequestedBy?: string; dryRun?: Record<string, unknown>; ackedAtMs?: number } = {}): Command => ({
   commandId: r.id,
   type: r.type as CommandType,
   state: r.state as CommandState,
   reason: r.reason,
-  params: typeof r.params === 'string' ? (JSON.parse(r.params) as Record<string, unknown>) : r.params,
-  requestedBy: r.requested_by,
+  params: json(r.params),
+  requestedBy: r.requester_account ?? '',
+  requesterRef: r.requested_by,
   requestedRole: r.requested_role,
   ...(r.event_id !== null ? { eventId: r.event_id } : {}),
-  ...(r.approval_expires_at !== null ? { approvalExpiresAtMs: new Date(r.approval_expires_at).getTime() } : {}),
-  createdAtMs: new Date(r.created_at).getTime(),
-  updatedAtMs: new Date(r.updated_at).getTime(),
-  approvals,
+  ...(r.approval_expires_at !== null ? { approvalExpiresAtMs: ms(r.approval_expires_at)! } : {}),
+  ...(r.expires_at !== null ? { expiresAtMs: ms(r.expires_at)! } : {}),
+  ...(r.compare_due_at !== null ? { compareDueAtMs: ms(r.compare_due_at)! } : {}),
+  round: Number(r.round ?? 0),
+  ...(extra.revertRequestedBy !== undefined ? { revertRequestedBy: extra.revertRequestedBy } : {}),
+  createdAtMs: ms(r.created_at)!,
+  updatedAtMs: ms(r.updated_at)!,
+  approvals: extra.approvals ?? [],
   attempts: Number(r.attempts ?? 0),
   ...(r.last_error !== null ? { lastError: r.last_error } : {}),
-  ...(r.executed_at !== null ? { executedAtMs: new Date(r.executed_at).getTime() } : {}),
-  ...(r.result !== null ? { result: typeof r.result === 'string' ? (JSON.parse(r.result) as Record<string, unknown>) : r.result } : {}),
+  ...(r.executed_at !== null ? { executedAtMs: ms(r.executed_at)! } : {}),
+  ...(r.result !== null ? { result: json(r.result) } : {}),
+  ...(extra.dryRun !== undefined ? { dryRun: extra.dryRun } : {}),
+  ...(extra.ackedAtMs !== undefined ? { ackedAtMs: extra.ackedAtMs } : {}),
 });
 
-const encodeCursor = (c: Command): string => Buffer.from(JSON.stringify([c.createdAtMs, c.commandId]), 'utf8').toString('base64url');
-const decodeCursor = (raw: string): { createdAtMs: number; commandId: string } | undefined => {
-  try {
-    const v: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    if (!Array.isArray(v) || typeof v[0] !== 'number' || typeof v[1] !== 'string') return undefined;
-    return { createdAtMs: v[0], commandId: v[1] };
-  } catch {
-    return undefined;
+/** 글자 칸을 UUID로 읽는다(옛 행의 글자 값은 null이 되어 결합에서 빠진다). 대응 표 기본 키 색인을 쓰게 한다 */
+const asUuid = (col: SQL): SQL => sql`(case when ${col} ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then (${col})::uuid end)`;
+
+/** 요청자 관리 계정을 함께 읽는 명령 행 SELECT(대응 표 왼쪽 결합) */
+const SELECT_ROW = sql`
+  select c.*, a.admin_account_id::text as requester_account
+  from ops_command c left join command_actor a on a.actor_ref = ${asUuid(sql`c.requested_by`)}`;
+
+type Exec = Pick<DbTransaction, 'execute'>;
+
+async function approvalsOf(q: Exec, ids: readonly string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (ids.length === 0) return out;
+  const rows = (
+    await q.execute(sql`
+      select p.command_id::text as command_id, a.admin_account_id::text as account
+      from command_approval p left join command_actor a on a.actor_ref = ${asUuid(sql`p.approver_ref`)}
+      where p.command_id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}) and p.round = 0
+      order by p.decided_at`)
+  ).rows as { command_id: string; account: string | null }[];
+  for (const r of rows) out.set(r.command_id, [...(out.get(r.command_id) ?? []), r.account ?? '']);
+  return out;
+}
+
+/** 상세에 붙는 값: 승인(회차 0), 지금 회차의 되돌리기 요청자, 접수 때의 dry-run, 첫 ack 시각 */
+async function detailOf(q: Exec, row: Row): Promise<Command> {
+  const id = row.id;
+  const approvals = (await approvalsOf(q, [id])).get(id) ?? [];
+  const round = Number(row.round ?? 0);
+  let revertRequestedBy: string | undefined;
+  if (round > 0) {
+    const [r] = (await q.execute(sql`select admin_account_id::text as account from command_actor where command_id = ${id}::uuid and round = ${round} and side = 'REQUESTER' limit 1`)).rows as { account: string }[];
+    revertRequestedBy = r?.account;
   }
+  const [d] = (
+    await q.execute(sql`
+      select dry_run from command_event where command_id = ${id}::uuid and dry_run is not null and type in ('DRY_RUN', 'DISPATCHED') order by seq limit 1`)
+  ).rows as { dry_run: Record<string, unknown> | string }[];
+  const [a] = (await q.execute(sql`select acked_at from command_event where command_id = ${id}::uuid and type = 'ACKED' and acked_at is not null order by seq limit 1`)).rows as { acked_at: Date | string }[];
+  return toCommand(row, {
+    approvals,
+    ...(revertRequestedBy !== undefined ? { revertRequestedBy } : {}),
+    ...(d ? { dryRun: json(d.dry_run) } : {}),
+    ...(a ? { ackedAtMs: ms(a.acked_at)! } : {}),
+  });
+}
+
+/** 잠근 명령 행 하나의 쓰기(같은 트랜잭션) */
+class DbCommandWriter implements CommandWriter {
+  #current: Command;
+
+  constructor(
+    private readonly tx: DbTransaction,
+    current: Command,
+  ) {
+    this.#current = current;
+  }
+
+  get current(): Command {
+    return this.#current;
+  }
+
+  async actor(side: ActorSide, round: number, accountId: string, nowMs: number): Promise<string> {
+    const ref = randomUUID();
+    try {
+      await this.tx.execute(sql`
+        insert into command_actor (actor_ref, command_id, round, side, admin_account_id, recorded_at)
+        values (${ref}::uuid, ${this.#current.commandId}::uuid, ${round}::smallint, ${side}, ${accountId}::uuid, ${new Date(nowMs)}::timestamptz)`);
+    } catch (e) {
+      if (pgCode(e) === '23505' && constraintOf(e) === ACTOR_PERSON_KEY) throw new DuplicateCommandActor();
+      throw e;
+    }
+    return ref;
+  }
+
+  async requesterOf(round: number): Promise<{ ref: string; accountId?: string } | undefined> {
+    const [r] = (
+      await this.tx.execute(sql`
+        select actor_ref::text as ref, admin_account_id::text as account from command_actor
+        where command_id = ${this.#current.commandId}::uuid and round = ${round} and side = 'REQUESTER' limit 1`)
+    ).rows as { ref: string; account: string }[];
+    if (r) return { ref: r.ref, accountId: r.account };
+    // 옛 행(0021 이전)은 대응이 명령마다 있지 않을 수 있다: 가명 참조로 찾는다
+    if (round !== 0) return undefined;
+    const ref = this.#current.requesterRef ?? '';
+    const [legacy] = (await this.tx.execute(sql`select admin_account_id::text as account from command_actor where actor_ref = ${asUuid(sql`${ref}::text`)}`)).rows as { account: string }[];
+    return { ref, ...(legacy ? { accountId: legacy.account } : {}) };
+  }
+
+  async decidedIn(round: number): Promise<boolean> {
+    return (await this.tx.execute(sql`select 1 from command_approval where command_id = ${this.#current.commandId}::uuid and round = ${round} limit 1`)).rows.length > 0;
+  }
+
+  async event(e: NewCommandEvent): Promise<void> {
+    const id = this.#current.commandId;
+    const [seq] = (await this.tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${id}::uuid`)).rows as { seq: number | string }[];
+    await this.tx.execute(sql`
+      insert into command_event (command_id, seq, type, actor_ref, actor_role, reason, dry_run, detail, acked_at, created_at)
+      values (${id}::uuid, ${Number(seq!.seq)}::int, ${e.type}, ${e.actorRef}, ${e.actorRole}, ${e.reason},
+              ${e.dryRun !== undefined ? JSON.stringify(e.dryRun) : null}::jsonb, ${e.detail !== undefined ? JSON.stringify(e.detail) : null}::jsonb,
+              ${e.ackedAtMs !== undefined ? new Date(e.ackedAtMs) : null}::timestamptz, ${new Date(e.nowMs)}::timestamptz)`);
+    if (e.ackedAtMs !== undefined && this.#current.ackedAtMs === undefined && e.type === 'ACKED') this.#current = { ...this.#current, ackedAtMs: e.ackedAtMs };
+  }
+
+  async patch(p: CommandPatch): Promise<void> {
+    const sets: SQL[] = [sql`updated_at = ${new Date(p.nowMs)}::timestamptz`];
+    const at = (v: number | null) => (v === null ? null : new Date(v));
+    if (p.state !== undefined) sets.push(sql`state = ${p.state}`);
+    if (p.approvalExpiresAtMs !== undefined) sets.push(sql`approval_expires_at = ${at(p.approvalExpiresAtMs)}::timestamptz`);
+    if (p.expiresAtMs !== undefined) sets.push(sql`expires_at = ${at(p.expiresAtMs)}::timestamptz`);
+    if (p.compareDueAtMs !== undefined) sets.push(sql`compare_due_at = ${at(p.compareDueAtMs)}::timestamptz`);
+    if (p.executedAtMs !== undefined) sets.push(sql`executed_at = ${at(p.executedAtMs)}::timestamptz`);
+    if (p.attempts !== undefined) sets.push(sql`attempts = ${p.attempts}::int`);
+    if (p.lastError !== undefined) sets.push(sql`last_error = ${p.lastError}`);
+    if (p.result !== undefined) sets.push(sql`result = ${p.result === null ? null : JSON.stringify(p.result)}::jsonb`);
+    if (p.round !== undefined) sets.push(sql`round = ${p.round}::smallint`);
+    await this.tx.execute(sql`update ops_command set ${sql.join(sets, sql`, `)} where id = ${this.#current.commandId}::uuid`);
+    const c = { ...this.#current } as Record<string, unknown>;
+    const opt = (k: string, v: unknown) => {
+      if (v === undefined) return;
+      if (v === null) delete c[k];
+      else c[k] = v;
+    };
+    if (p.state !== undefined) c.state = p.state;
+    opt('approvalExpiresAtMs', p.approvalExpiresAtMs);
+    opt('expiresAtMs', p.expiresAtMs);
+    opt('compareDueAtMs', p.compareDueAtMs);
+    opt('executedAtMs', p.executedAtMs);
+    opt('lastError', p.lastError);
+    opt('result', p.result);
+    if (p.attempts !== undefined) c.attempts = p.attempts;
+    if (p.round !== undefined) c.round = p.round;
+    c.updatedAtMs = p.nowMs;
+    this.#current = c as unknown as Command;
+  }
+
+  async approval(a: NewCommandApproval): Promise<void> {
+    await this.tx.execute(sql`
+      insert into command_approval (command_id, approver_ref, approver_role, requester_ref, decision, reason, round, decided_at)
+      values (${this.#current.commandId}::uuid, ${a.approverRef}, ${a.approverRole}, ${a.requesterRef}, ${a.decision}, ${a.reason ?? null}, ${a.round}::smallint, ${new Date(a.nowMs)}::timestamptz)`);
+    if (a.round === 0) {
+      const [r] = (await this.tx.execute(sql`select admin_account_id::text as account from command_actor where actor_ref = ${a.approverRef}::uuid`)).rows as { account: string }[];
+      this.#current = { ...this.#current, approvals: [...this.#current.approvals, r?.account ?? ''] };
+    }
+  }
+
+  async audit(recordType: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
+    await appendAuditIn(this.tx, { recordType, recordId: this.#current.commandId, payload, nowMs });
+  }
+}
+
+/** 정비 작업이 고르는 조건 */
+const DUE: Record<CommandDueKind, (nowMs: number) => SQL> = {
+  APPROVAL_EXPIRED: (now) => sql`c.state = 'PENDING_APPROVAL' and c.approval_expires_at <= ${new Date(now)}::timestamptz`,
+  REVERT_EXPIRED: (now) => sql`c.state = 'REVERT_PENDING' and c.approval_expires_at <= ${new Date(now)}::timestamptz`,
+  AUTO_EXPIRE: (now) => sql`c.state = 'ACKED' and c.type in (${sql.join(AUTO_EXPIRE_TYPES.map((t) => sql`${t}`), sql`, `)}) and c.expires_at <= ${new Date(now)}::timestamptz`,
 };
 
 @Injectable()
-export class DrizzleCommandStore implements CommandStore {
-  constructor(@Inject(DATABASE) private readonly database: Database) {}
+export class DrizzleCommandStore extends CommandStoreBase {
+  constructor(@Inject(DATABASE) private readonly database: Database) {
+    super();
+  }
 
-  async create(input: NewCommand): Promise<Command> {
-    const mode = approvalModeOf(input.type);
-    const state = stateAfterCreate(mode);
+  async replayOf(idem: CommandIdempotency, nowMs: number): Promise<string | undefined> {
+    const since = new Date(nowMs - IDEMPOTENCY_RETENTION_MS);
+    const [row] = (
+      await this.database.db.execute(sql`
+        select request_hash, result_ref from ${sql.identifier(IDEMPOTENCY_RECORD_TABLE)}
+         where account_ref = ${idem.accountRef} and operation = ${idem.operation} and idempotency_key = ${idem.key}::uuid and created_at > ${since}`)
+    ).rows as { request_hash: Buffer; result_ref: string | null }[];
+    if (!row || row.result_ref === null) return undefined;
+    const stored = Buffer.from(row.request_hash);
+    const hash = Buffer.from(idem.requestHash);
+    if (stored.length !== hash.length || !timingSafeEqual(stored, hash)) throw idempotencyKeyReused();
+    return row.result_ref;
+  }
+
+  async insert(input: NewCommand): Promise<{ command: Command; replayed: boolean }> {
     return this.database.transaction(async (tx) => {
-      await tx.execute(sql`
-        insert into ops_command (id, type, state, reason, params, requested_by, requested_role, event_id, approval_expires_at, created_at, updated_at)
-        values (${input.commandId}::uuid, ${input.type}, ${state}, ${input.reason}, ${JSON.stringify(input.params)}::jsonb, ${input.requestedBy}, ${input.requestedRole},
-                ${input.eventId ?? null}::uuid, ${mode === 'TWO' ? new Date(input.nowMs + APPROVAL_TTL_MS) : null}::timestamptz,
-                ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz)`);
-      await this.#event(tx, input.commandId, 1, 'CREATED', input.requestedBy, input.requestedRole, input.reason, input.nowMs);
-      if (state !== 'DRAFTED') await this.#event(tx, input.commandId, 2, state, input.requestedBy, input.requestedRole, input.reason, input.nowMs);
-      await appendAuditIn(tx, {
-        recordType: 'COMMAND_CREATED',
-        recordId: input.commandId,
-        payload: { type: input.type, state, requestedBy: input.requestedBy, reason: input.reason },
-        nowMs: input.nowMs,
+      const insert = async (): Promise<Command> => {
+        const requesterRef = randomUUID();
+        const plan = planCreation(input, requesterRef);
+        const now = new Date(input.nowMs);
+        await tx.execute(sql`
+          insert into ops_command (id, type, state, reason, params, requested_by, requested_role, event_id, approval_expires_at, compare_due_at, attempts, round, created_at, updated_at)
+          values (${input.commandId}::uuid, ${input.type}, ${plan.state}, ${input.reason}, ${JSON.stringify(input.params)}::jsonb, ${plan.requesterRef},
+                  ${input.system ? 'system' : input.requestedRole}, ${input.eventId ?? null}::uuid,
+                  ${plan.approvalExpiresAtMs !== undefined ? new Date(plan.approvalExpiresAtMs) : null}::timestamptz,
+                  ${plan.compareDueAtMs !== undefined ? new Date(plan.compareDueAtMs) : null}::timestamptz,
+                  ${plan.attempts}::int, 0, ${now}::timestamptz, ${now}::timestamptz)`);
+        const [row] = (await tx.execute(sql`${SELECT_ROW} where c.id = ${input.commandId}::uuid`)).rows as unknown as Row[];
+        const w = new DbCommandWriter(tx, toCommand(row!));
+        if (plan.actor) {
+          await tx.execute(sql`
+            insert into command_actor (actor_ref, command_id, round, side, admin_account_id, recorded_at)
+            values (${plan.requesterRef}::uuid, ${input.commandId}::uuid, 0, 'REQUESTER', ${plan.actor.accountId}::uuid, ${now}::timestamptz)`);
+        }
+        for (const e of plan.events) await w.event({ ...e, nowMs: input.nowMs });
+        await w.audit(plan.audit.recordType, plan.audit.payload, input.nowMs);
+        const [fresh] = (await tx.execute(sql`${SELECT_ROW} where c.id = ${input.commandId}::uuid`)).rows as unknown as Row[];
+        return detailOf(tx, fresh!);
+      };
+      if (!input.idempotency) return { command: await insert(), replayed: false };
+      // 멱등 기록은 같은 트랜잭션의 첫 쓰기다. 같은 키·같은 지문이면 처음 명령을 돌려주고 새 일을 하지 않는다(ADR-0340 결정 7)
+      return new IdempotencyStore({ clock: { now: () => input.nowMs, monotonicMs: () => performance.now() } }).run<{ command: Command; replayed: boolean }>(tx, input.idempotency, {
+        execute: async () => {
+          const command = await insert();
+          return { resultRef: command.commandId, value: { command, replayed: false } };
+        },
+        replay: async (ref) => {
+          const [row] = (await tx.execute(sql`${SELECT_ROW} where c.id = ${ref}::uuid`)).rows as unknown as Row[];
+          if (!row) throw new Error(`멱등 기록이 가리키는 명령이 없다: ${ref}`);
+          return { command: await detailOf(tx, row), replayed: true };
+        },
       });
-      const result = await tx.execute(sql`select * from ops_command where id = ${input.commandId}::uuid`);
-      return toCommand(result.rows[0] as unknown as Row);
     });
   }
 
   async find(commandId: string): Promise<Command | undefined> {
-    const [row] = (await this.database.db.execute(sql`select * from ops_command where id = ${commandId}::uuid`)).rows as unknown as Row[];
-    if (!row) return undefined;
-    const approvals = await this.#approvals(commandId);
-    return toCommand(row, approvals);
+    const [row] = (await this.database.db.execute(sql`${SELECT_ROW} where c.id = ${commandId}::uuid`)).rows as unknown as Row[];
+    return row ? detailOf(this.database.db, row) : undefined;
   }
 
   async list(query: CommandListQuery): Promise<CommandPage> {
     let where = sql`true`;
-    if (query.eventId !== undefined) where = sql`${where} and event_id = ${query.eventId}::uuid`;
-    if (query.type !== undefined) where = sql`${where} and type = ${query.type}`;
-    if (query.states !== undefined && query.states.length > 0) where = sql`${where} and state in (${sql.join(query.states.map((s: string) => sql`${s}`), sql`, `)})`;
-    if (query.updatedAfterMs !== undefined) where = sql`${where} and updated_at > ${new Date(query.updatedAfterMs)}::timestamptz`;
+    if (query.eventId !== undefined) where = sql`${where} and c.event_id = ${query.eventId}::uuid`;
+    if (query.type !== undefined) where = sql`${where} and c.type = ${query.type}`;
+    if (query.states !== undefined && query.states.length > 0) where = sql`${where} and c.state in (${sql.join(query.states.map((s: string) => sql`${s}`), sql`, `)})`;
+    if (query.updatedAfterMs !== undefined) where = sql`${where} and c.updated_at > ${new Date(query.updatedAfterMs)}::timestamptz`;
     const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
     if (cursor) {
       const at = new Date(cursor.createdAtMs);
-      where = sql`${where} and (created_at < ${at}::timestamptz or (created_at = ${at}::timestamptz and id < ${cursor.commandId}::uuid))`;
+      where = sql`${where} and (c.created_at < ${at}::timestamptz or (c.created_at = ${at}::timestamptz and c.id < ${cursor.commandId}::uuid))`;
     }
-    const rows = (await this.database.db.execute(sql`select * from ops_command where ${where} order by created_at desc, id desc limit ${query.limit + 1}`)).rows as unknown as Row[];
-    const page = rows.slice(0, query.limit).map((r) => toCommand(r));
-    const approvals = await this.#approvalsMany(page.map((c) => c.commandId));
-    const items = page.map((c) => ({ ...c, approvals: approvals.get(c.commandId) ?? [] }));
+    const rows = (await this.database.db.execute(sql`${SELECT_ROW} where ${where} order by c.created_at desc, c.id desc limit ${query.limit + 1}`)).rows as unknown as Row[];
+    const page = rows.slice(0, query.limit);
+    const approvals = await approvalsOf(this.database.db, page.map((r) => r.id));
+    const items = page.map((r) => toCommand(r, { approvals: approvals.get(r.id) ?? [] }));
     const last = items.at(-1);
     return { items, ...(rows.length > query.limit && last ? { nextCursor: encodeCursor(last) } : {}) };
   }
 
-  async approve(commandId: string, approverRef: string, approverRole: string, nowMs: number): Promise<CommandDecision> {
-    return this.#decide(commandId, approverRef, approverRole, 'APPROVED', undefined, nowMs);
-  }
-
-  async reject(commandId: string, approverRef: string, approverRole: string, reason: string, nowMs: number): Promise<CommandDecision> {
-    return this.#decide(commandId, approverRef, approverRole, 'REJECTED', reason, nowMs);
-  }
-
-  async markDispatched(commandId: string, nowMs: number): Promise<Command> {
+  async mutate<T>(commandId: string, fn: (w: CommandWriter) => Promise<T>): Promise<T | undefined> {
     return this.database.transaction(async (tx) => {
-      const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
-      if (!row) throw new Error(`명령이 없다: ${commandId}`);
-      const attempts = Number(row.attempts ?? 0) + 1;
-      await tx.execute(sql`update ops_command set state = 'DISPATCHED', attempts = ${attempts}, last_error = null, executed_at = null, updated_at = ${new Date(nowMs)}::timestamptz where id = ${commandId}::uuid`);
-      const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
-      await this.#event(tx, commandId, Number(seq!.seq), 'DISPATCHED', 'system', 'system', row.reason, nowMs);
-      await appendAuditIn(tx, { recordType: 'COMMAND_EXECUTION_STARTED', recordId: commandId, payload: { state: 'DISPATCHED', attempt: attempts }, nowMs });
-      const approvals = await this.#approvalsIn(tx, commandId);
-      return toCommand({ ...row, state: 'DISPATCHED', attempts, last_error: null, executed_at: null, updated_at: new Date(nowMs) }, approvals);
+      const [locked] = (await tx.execute(sql`select id from ops_command where id = ${commandId}::uuid for update`)).rows as { id: string }[];
+      if (!locked) return undefined;
+      const [row] = (await tx.execute(sql`${SELECT_ROW} where c.id = ${commandId}::uuid`)).rows as unknown as Row[];
+      return fn(new DbCommandWriter(tx, await detailOf(tx, row!)));
     });
   }
 
-  async markSucceeded(commandId: string, result: Record<string, unknown> | undefined, nowMs: number): Promise<Command> {
+  async mutateDue(kind: CommandDueKind, nowMs: number, fn: (w: CommandWriter) => Promise<void>): Promise<boolean> {
     return this.database.transaction(async (tx) => {
-      const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
-      if (!row) throw new Error(`명령이 없다: ${commandId}`);
-      await tx.execute(sql`
-        update ops_command set state = 'SUCCEEDED', last_error = null, executed_at = ${new Date(nowMs)}::timestamptz,
-          result = ${result !== undefined ? JSON.stringify(result) : null}::jsonb, updated_at = ${new Date(nowMs)}::timestamptz
-        where id = ${commandId}::uuid`);
-      const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
-      await this.#event(tx, commandId, Number(seq!.seq), 'SUCCEEDED', 'system', 'system', row.reason, nowMs);
-      await appendAuditIn(tx, { recordType: 'COMMAND_SUCCEEDED', recordId: commandId, payload: { state: 'SUCCEEDED', ...(result !== undefined ? { result } : {}) }, nowMs });
-      const approvals = await this.#approvalsIn(tx, commandId);
-      return toCommand({ ...row, state: 'SUCCEEDED', last_error: null, executed_at: new Date(nowMs), result: result ?? null, updated_at: new Date(nowMs) }, approvals);
+      const [picked] = (await tx.execute(sql`select c.id from ops_command c where ${DUE[kind](nowMs)} order by c.updated_at limit 1 for update skip locked`)).rows as { id: string }[];
+      if (!picked) return false;
+      const [row] = (await tx.execute(sql`${SELECT_ROW} where c.id = ${picked.id}::uuid`)).rows as unknown as Row[];
+      await fn(new DbCommandWriter(tx, await detailOf(tx, row!)));
+      return true;
     });
   }
 
-  async markDispatchFailed(commandId: string, reason: string, nowMs: number): Promise<Command> {
-    return this.database.transaction(async (tx) => {
-      const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
-      if (!row) throw new Error(`명령이 없다: ${commandId}`);
-      await tx.execute(sql`
-        update ops_command set state = 'FAILED', last_error = ${reason}, executed_at = ${new Date(nowMs)}::timestamptz, updated_at = ${new Date(nowMs)}::timestamptz
-        where id = ${commandId}::uuid`);
-      const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
-      await this.#event(tx, commandId, Number(seq!.seq), 'FAILED', 'system', 'system', reason, nowMs);
-      await appendAuditIn(tx, { recordType: 'COMMAND_EXECUTION_FAILED', recordId: commandId, payload: { state: 'FAILED', reason }, nowMs });
-      const approvals = await this.#approvalsIn(tx, commandId);
-      return toCommand({ ...row, state: 'FAILED', last_error: reason, executed_at: new Date(nowMs), updated_at: new Date(nowMs) }, approvals);
-    });
+  async dueForCompare(nowMs: number, limit: number): Promise<readonly string[]> {
+    const rows = (await this.database.db.execute(sql`select id::text as id from ops_command where compare_due_at <= ${new Date(nowMs)}::timestamptz order by compare_due_at limit ${limit}`)).rows as { id: string }[];
+    return rows.map((r) => r.id);
   }
 
-  async #decide(commandId: string, approverRef: string, approverRole: string, decision: 'APPROVED' | 'REJECTED', reason: string | undefined, nowMs: number): Promise<CommandDecision> {
-    return this.database.transaction(async (tx) => {
-      const [row] = (await tx.execute(sql`select * from ops_command where id = ${commandId}::uuid for update`)).rows as unknown as Row[];
-      if (!row) return { status: 'NOT_FOUND' } as const;
-      if (row.state !== 'PENDING_APPROVAL') return { status: 'NOT_PENDING' } as const;
-      // 기존 행이 commander 전용 유형을 operator가 요청한 경우도 승인 단계에서 닫는다(B3-H01).
-      const type = row.type as CommandType;
-      if (!requesterRolesOf(type).includes(row.requested_role) || !approverRolesOf(type).includes(approverRole)) {
-        return { status: 'ROLE_FORBIDDEN' } as const;
-      }
-      if (row.requested_by === approverRef) return { status: 'SAME_ACTOR' } as const;
-      await tx.execute(sql`
-        insert into command_approval (command_id, approver_ref, approver_role, decision, reason, decided_at)
-        values (${commandId}::uuid, ${approverRef}, ${approverRole}, ${decision}, ${reason ?? null}, ${new Date(nowMs)}::timestamptz)`);
-      await tx.execute(sql`update ops_command set state = ${decision}, updated_at = ${new Date(nowMs)}::timestamptz, approval_expires_at = null where id = ${commandId}::uuid`);
-      const [seq] = (await tx.execute(sql`select coalesce(max(seq), 0) + 1 as seq from command_event where command_id = ${commandId}::uuid`)).rows as { seq: number | string }[];
-      await this.#event(tx, commandId, Number(seq!.seq), decision, approverRef, approverRole, reason ?? row.reason, nowMs);
-      await appendAuditIn(tx, {
-        recordType: decision === 'APPROVED' ? 'COMMAND_APPROVED' : 'COMMAND_REJECTED',
-        recordId: commandId,
-        payload: { decision, approverRef, approverRole, ...(reason !== undefined ? { reason } : {}) },
-        nowMs,
-      });
-      const approvals = await this.#approvalsIn(tx, commandId);
-      return { status: 'APPLIED', command: toCommand({ ...row, state: decision, updated_at: new Date(nowMs), approval_expires_at: null }, approvals) } as const;
-    });
-  }
-
-  async #event(tx: DbTransaction, commandId: string, seq: number, type: string, actorRef: string, actorRole: string, reason: string, nowMs: number): Promise<void> {
-    await tx.execute(sql`
-      insert into command_event (command_id, seq, type, actor_ref, actor_role, reason, created_at)
-      values (${commandId}::uuid, ${seq}::int, ${type}, ${actorRef}, ${actorRole}, ${reason}, ${new Date(nowMs)}::timestamptz)`);
-  }
-
-  async #approvals(commandId: string): Promise<string[]> {
-    const rows = (await this.database.db.execute(sql`select approver_ref from command_approval where command_id = ${commandId}::uuid order by decided_at`)).rows as { approver_ref: string }[];
-    return rows.map((r) => r.approver_ref);
-  }
-
-  async #approvalsMany(ids: readonly string[]): Promise<Map<string, string[]>> {
-    const out = new Map<string, string[]>();
-    if (ids.length === 0) return out;
-    const rows = (await this.database.db.execute(sql`select command_id, approver_ref from command_approval where command_id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}) order by decided_at`)).rows as { command_id: string; approver_ref: string }[];
-    for (const r of rows) out.set(r.command_id, [...(out.get(r.command_id) ?? []), r.approver_ref]);
-    return out;
-  }
-
-  async #approvalsIn(tx: DbTransaction, commandId: string): Promise<string[]> {
-    const rows = (await tx.execute(sql`select approver_ref from command_approval where command_id = ${commandId}::uuid order by decided_at`)).rows as { approver_ref: string }[];
-    return rows.map((r) => r.approver_ref);
+  async purgeActors(beforeMs: number): Promise<number> {
+    const r = await this.database.db.execute(sql`delete from command_actor where recorded_at < ${new Date(beforeMs)}::timestamptz and delete_hold_ref is null`);
+    return (r as { rowCount?: number | null }).rowCount ?? 0;
   }
 }

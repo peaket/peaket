@@ -9,11 +9,14 @@
     "start": "node --import @peaket/platform/telemetry/register dist/main.js",
     "migrate": "node scripts/migrate.mjs",
     "assign-bot-review": "node dist/bot-review-assign.js",
+    "audit:verify": "node --import @peaket/platform/telemetry/register dist/jobs/verify-audit-chain.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1159.0",
+    "@aws-sdk/client-s3": "3.1159.0",
     "@grpc/grpc-js": "1.14.6",
     "@grpc/proto-loader": "0.8.1",
     "@nestjs/common": "^12.3.2",

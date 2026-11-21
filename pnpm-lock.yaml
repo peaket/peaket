@@ -1229,6 +1229,12 @@ importers:
 
   services/ops-svc:
     dependencies:
+      '@aws-sdk/client-kms':
+        specifier: 3.1159.0
+        version: 3.1159.0
+      '@aws-sdk/client-s3':
+        specifier: 3.1159.0
+        version: 3.1159.0
       '@grpc/grpc-js':
         specifier: 1.14.6
         version: 1.14.6

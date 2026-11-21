@@ -1,5 +1,6 @@
-// 승인된 운영 명령의 실제 실행(BAT-465 GAT-300). 실행 전후 감사 체크포인트를 만들고,
-// 대상 결과를 SUCCEEDED/FAILED로 남긴다. 대상이 없으면 target-not-wired로 실패해 재시도할 수 있게 한다.
+// 승인된 운영 명령의 실제 실행(T8~T11, BAT-465 GAT-300). 실행 전후 감사 체크포인트를 만들고,
+// 대상 결과를 성공(카탈로그 명령 ACKED·1회 실행 명령 SUCCEEDED, ADR-0340 결정 1)·FAILED로 남긴다.
+// 대상이 없으면 target-not-wired로 실패해 재시도할 수 있게 한다. 감사 기록은 DISPATCHED 사건과 함께 보내기 전에 커밋된다.
 import { ProblemError } from '@peaket/platform';
 import type { AuditCheckpointService } from '../../audit/index.js';
 import type { Command, CommandExecutionActor } from '../domain/command.js';
@@ -14,27 +15,36 @@ export class ExecuteCommand {
     readonly guard?: CancelledEventGuard,
   ) {}
 
+  /** 실행기(되돌림·연장을 보내는 쪽도 같다). 없으면 보내지 못한 것으로 본다 */
+  get target(): CommandExecutor | undefined {
+    return this.executor;
+  }
+
+  /**
+   * APPROVED(T8)·FAILED(T11)인 명령을 보낸다. FAILED에서 다시 하면 그 사람이 행위자(ACTOR 대응)다.
+   * @throws ProblemError 409 command-not-executable
+   */
   async run(command: Command, actor: CommandExecutionActor, nowMs: number): Promise<Command> {
-    if (command.state !== 'APPROVED' && command.state !== 'FAILED' && command.state !== 'DISPATCHED') {
+    if (command.state !== 'APPROVED' && command.state !== 'FAILED') {
       throw new ProblemError({ type: 'command-not-executable', status: 409, title: '실행할 수 있는 명령이 아닙니다' });
     }
-    if (command.type === 'SALE_RESUME' && this.guard) {
-      const eventId = command.eventId ?? (typeof command.params.eventId === 'string' ? command.params.eventId : undefined);
-      // 실행기를 부르지 않고 FAILED로 남긴다(다시 시도해도 같은 확인을 지난다)
-      if (eventId !== undefined && (await this.guard.isCancelled(eventId))) return this.store.markDispatchFailed(command.commandId, 'event-cancelled', nowMs);
-    }
+    const retry = command.state === 'FAILED' ? { accountId: actor.accountId, role: actor.role } : undefined;
     await this.checkpoints?.create({ reason: `COMMAND_EXECUTION_BEFORE:${command.commandId}`, actorRef: actor.accountId });
-    const dispatched = await this.store.markDispatched(command.commandId, nowMs);
+    const dispatched = await this.store.markDispatched(command.commandId, nowMs, retry);
     let finished: Command;
-    if (!this.executor) {
+    const eventId = command.eventId ?? (typeof command.params.eventId === 'string' ? command.params.eventId : undefined);
+    if (command.type === 'SALE_RESUME' && this.guard && eventId !== undefined && (await this.guard.isCancelled(eventId))) {
+      // 실행기를 부르지 않고 FAILED로 남긴다(다시 시도해도 같은 확인을 지난다)
+      finished = await this.store.markDispatchFailed(command.commandId, 'event-cancelled', nowMs);
+    } else if (!this.executor) {
       finished = await this.store.markDispatchFailed(command.commandId, 'target-not-wired', nowMs);
     } else {
       try {
         const result = await this.executor.execute(dispatched, actor);
         finished =
-          result.status === 'SUCCEEDED'
-            ? await this.store.markSucceeded(command.commandId, result.detail, nowMs)
-            : await this.store.markDispatchFailed(command.commandId, result.error, nowMs);
+          result.status === 'FAILED'
+            ? await this.store.markDispatchFailed(command.commandId, result.error, nowMs)
+            : await this.store.markSucceeded(command.commandId, result.detail, nowMs, result.status === 'ACKED' ? result.ackedAtMs : undefined);
       } catch (err) {
         finished = await this.store.markDispatchFailed(command.commandId, err instanceof Error ? err.message : 'execution-failed', nowMs);
       }

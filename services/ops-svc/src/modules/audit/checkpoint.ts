@@ -32,6 +32,20 @@ export interface AuditChainReader {
 
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+/** 시스템 행위자의 가명 참조(운영 명령 모듈의 SYSTEM_ACTOR_REF와 같은 값, ADR-0340 결정 8) */
+const SYSTEM_REF = '00000000-0000-0000-0000-000000000000';
+
+const sortJson = (v: unknown): unknown => {
+  if (Array.isArray(v)) return v.map(sortJson);
+  if (v !== null && typeof v === 'object') return Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, sortJson((v as Record<string, unknown>)[k])]));
+  return v;
+};
+/** 키 차례에 흔들리지 않는 JSON의 SHA-256(16진). 운영 명령 모듈 recordDigest와 같은 규칙이다(dry-run 기록 지문 대조) */
+const digestOf = (raw: unknown): string => {
+  const v = typeof raw === 'string' ? (JSON.parse(raw) as unknown) : raw;
+  return createHash('sha256').update(JSON.stringify(sortJson(v ?? null))).digest('hex');
+};
+
 /** record_json(정규화 기록)을 해시 재계산용 AuditRecord로 되돌린다. 모양이 깨졌으면 undefined */
 export function auditRecordFromJson(raw: unknown): AuditRecord | undefined {
   let value: unknown = raw;
@@ -374,18 +388,27 @@ export class DrizzleAuditChain implements AuditChain, AuditChainReader {
           requested_role: string;
         }[];
         if (!row || row.type !== p.type || row.reason !== p.reason || row.requested_by !== p.requestedBy) return false;
-        return (
-          (await exists(sql`
-            select 1 from command_event where command_id = ${id}::uuid and seq = 1 and type = 'CREATED'
-              and actor_ref = ${row.requested_by} and actor_role = ${row.requested_role} and reason = ${row.reason}`)) &&
-          (await exists(sql`
-            select 1 from command_event where command_id = ${id}::uuid and seq = 2 and type = ${String(p.state)}
-              and actor_ref = ${row.requested_by} and actor_role = ${row.requested_role} and reason = ${row.reason}`))
-        );
+        const by = sql`actor_ref = ${row.requested_by} and actor_role = ${row.requested_role} and reason = ${row.reason}`;
+        if (!(await exists(sql`select 1 from command_event where command_id = ${id}::uuid and seq = 1 and type = 'CREATED' and ${by}`))) return false;
+        // 0021 이전 기록은 dry-run 사건 없이 두 번째 사건이 첫 상태다
+        if (p.dryRunSha256 === undefined) return exists(sql`select 1 from command_event where command_id = ${id}::uuid and seq = 2 and type = ${String(p.state)} and ${by}`);
+        const [dry] = (await this.database.db.execute(sql`select dry_run from command_event where command_id = ${id}::uuid and seq = 2 and type = 'DRY_RUN' and ${by}`)).rows as { dry_run: unknown }[];
+        if (!dry || digestOf(dry.dry_run) !== p.dryRunSha256) return false;
+        return exists(sql`select 1 from command_event where command_id = ${id}::uuid and seq = 3 and type = ${String(p.state)} and ${by}`);
+      }
+      case 'COMMAND_AUTO_ACTION': {
+        const [row] = (await this.database.db.execute(sql`select type, reason, requested_by from ops_command where id = ${id}::uuid`)).rows as { type: string; reason: string; requested_by: string }[];
+        if (!row || row.type !== p.type || row.reason !== p.reason || row.requested_by !== SYSTEM_REF || p.requestedBy !== SYSTEM_REF) return false;
+        const [ev] = (await this.database.db.execute(sql`select dry_run from command_event where command_id = ${id}::uuid and seq = 1 and type = 'DISPATCHED' and actor_ref = ${SYSTEM_REF}`)).rows as { dry_run: unknown }[];
+        return ev !== undefined && digestOf(ev.dry_run) === p.dryRunSha256;
       }
       case 'COMMAND_APPROVED':
       case 'COMMAND_REJECTED': {
         const decision = record.recordType === 'COMMAND_APPROVED' ? 'APPROVED' : 'REJECTED';
+        // 승인 기한이 지나 시스템이 닫은 거부는 승인 행 없이 사건만 있다(ADR-0340 결정 4)
+        if (p.approverRef === SYSTEM_REF) {
+          return decision === 'REJECTED' && exists(sql`select 1 from command_event where command_id = ${id}::uuid and type = 'REJECTED' and actor_ref = ${SYSTEM_REF} and reason = 'approval-expired'`);
+        }
         const [row] = (await this.database.db.execute(sql`
           select decision, approver_role, reason from command_approval where command_id = ${id}::uuid and approver_ref = ${String(p.approverRef)}`)).rows as {
           decision: string;
@@ -401,15 +424,18 @@ export class DrizzleAuditChain implements AuditChain, AuditChainReader {
       case 'COMMAND_EXECUTION_STARTED': {
         const [row] = (await this.database.db.execute(sql`select attempts from ops_command where id = ${id}::uuid`)).rows as { attempts: number | string }[];
         if (!row || Number(row.attempts) < Number(p.attempt)) return false;
-        return exists(sql`
-          select 1 from command_event where command_id = ${id}::uuid and type = 'DISPATCHED' and actor_ref = 'system' and actor_role = 'system'`);
+        // 행위자는 시스템(처음 실행) 또는 다시 한 사람의 가명 참조다. 0021 이전 기록은 'system'
+        const actor = typeof p.actorRef === 'string' ? p.actorRef : 'system';
+        return exists(sql`select 1 from command_event where command_id = ${id}::uuid and type = 'DISPATCHED' and actor_ref = ${actor}`);
       }
       case 'COMMAND_EXECUTION_FAILED':
         return exists(sql`
-          select 1 from command_event where command_id = ${id}::uuid and type = 'FAILED' and actor_ref = 'system' and reason = ${String(p.reason)}`);
+          select 1 from command_event where command_id = ${id}::uuid and type = 'FAILED' and actor_ref in ('system', ${SYSTEM_REF}) and reason = ${String(p.reason)}`);
       case 'COMMAND_SUCCEEDED':
         return exists(sql`
-          select 1 from command_event where command_id = ${id}::uuid and type = 'SUCCEEDED' and actor_ref = 'system' and actor_role = 'system'`);
+          select 1 from command_event where command_id = ${id}::uuid and type = 'SUCCEEDED' and actor_ref in ('system', ${SYSTEM_REF}) and actor_role = 'system'`);
+      case 'COMMAND_ACKED':
+        return exists(sql`select 1 from command_event where command_id = ${id}::uuid and type = 'ACKED' and actor_ref = ${SYSTEM_REF}`);
       case 'EVENT_CANCELLATION_REQUESTED':
       case 'EVENT_CANCELLATION_JUDGED':
       case 'EVENT_CANCELLATION_APPROVED':

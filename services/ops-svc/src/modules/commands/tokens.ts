@@ -3,3 +3,9 @@ export const COMMAND_STORE = Symbol('ops.COMMAND_STORE');
 export const COMMAND_EXECUTOR = Symbol('ops.COMMAND_EXECUTOR');
 /** 위험 명령 재인증 확인기(act=OPS_COMMAND, ADR-0322). 없으면 위험 명령은 503이다 */
 export const COMMAND_REAUTH = Symbol('ops.COMMAND_REAUTH');
+/** 보안 사건 로그(ops_block_protected_range·ops_command_authz_denied) */
+export const COMMAND_SECURITY_EVENTS = Symbol('ops.COMMAND_SECURITY_EVENTS');
+/** 정비 작업 타이머 설정 */
+export const COMMAND_MAINTENANCE_OPTIONS = Symbol('ops.COMMAND_MAINTENANCE_OPTIONS');
+/** 운영 명령 지표(ops_command_dry_run_unavailable_total). 시작 조립이 서비스 레지스트리에 붙인다 */
+export const COMMAND_SIGNALS = Symbol('ops.COMMAND_SIGNALS');
