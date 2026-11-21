@@ -17,6 +17,7 @@ import {
   type AuditChain,
   type AuditChainReader,
   type AuditMacKey,
+  type AuditSignals,
   type MacAnchorStore,
 } from './modules/audit/index.js';
 import { CommandsModule, type CommandExecutor, type CommandsModuleExtras, type HandleCommandEvent } from './modules/commands/index.js';
@@ -59,6 +60,8 @@ interface CommonWiring {
   readonly background?: false | { readonly audit?: Partial<Omit<AuditBackgroundOptions, 'enabled'>>; readonly maintenanceMs?: number };
   /** 감사 체인 키·앵커 저장소·환경 값을 넘긴다(시험). 없으면 process.env로 고른다(local·ci·demo 밖에서 키 ID·넘길 리전·버킷이 없으면 시작하지 않는다) */
   readonly auditMac?: { readonly key?: AuditMacKey; readonly anchors?: MacAnchorStore; readonly env?: Record<string, string | undefined> };
+  /** 감사 체인 지표 묶음(시작 조립이 서비스 레지스트리에 붙인다). 없으면 모듈이 만든다 */
+  readonly auditSignals?: AuditSignals;
   /** dry-run 센 값 원천·명령 4 보호 대역 목록(시험·BAT-365) */
   readonly commandExtras?: Pick<CommandsModuleExtras, 'dryRunSources' | 'protectedRanges' | 'signals'>;
   /** 우선 구매 권리 발급·회수(GAT-135). 없으면 그 경로를 열지 않는다 */
@@ -167,6 +170,7 @@ export class AppModule {
           }),
           AuditModule.register(checkpoints, signer, {
             intake: new DrizzleAuditIntakeStore(o.database),
+            ...(o.auditSignals ? { signals: o.auditSignals } : {}),
             background: {
               database: o.database,
               alerts,
@@ -218,7 +222,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         CommandsModule.register(store, o.executor, checkpoints, o.onCommandEvent, new StoreCancelledEventGuard(cancellations), o.adminAccounts?.reauth ?? o.approvals?.reauth ?? o.payouts?.reauth, { ...(o.commandExtras ?? {}) }),
-        AuditModule.register(checkpoints, signer, { intake: new MemoryAuditIntakeStore(chain) }),
+        AuditModule.register(checkpoints, signer, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
         CasesModule.register(csCases),
         AlertsModule.register(new MemoryOpsAlertStore()),

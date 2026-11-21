@@ -5,7 +5,7 @@
 // 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고(ADR-0333 결정 2), 듣기 시작한 뒤 Kafka 소비자(구매 세션·탈퇴·회차 판매 상태, ADR-0214)를 켠다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, Counter, createHotRedis, createService, errorSummary, Gauge, HotPathMetrics, loadPlatformConfig, ReloadingAsnTable, systemClock } from '@peaket/platform';
+import { CircuitBreaker, Counter, createExternalHttpClient, createHotRedis, createService, errorSummary, Gauge, HotPathMetrics, loadPlatformConfig, ReloadingAsnTable, systemClock } from '@peaket/platform';
 import { startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
@@ -116,6 +116,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const eligibilitySignals = new PromEligibilitySignals();
   // 핫패스 구간 진단(BAT-027): 레지스트리는 createService 뒤에 생기므로 지표 객체만 먼저 만들고, 듣기 전에 붙인다
   const hotPath = new HotPathMetrics(SERVICE);
+  // 셔플 커밋 공시를 ops 감사 체인의 SYSTEM 기록으로 보낸다(BAT-355, ADR-0341 결정 7, queue-admission §2 '공시 감사 기록'). 한 번 2초 [가정].
+  // 주소가 없으면 지금처럼 정규 로그 줄만 남긴다(공시는 막지 않는다)
+  const opsHttpUrl = env.PEAKET_OPS_HTTP_URL;
+  const opsAudit = opsHttpUrl
+    ? { ops: createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsHttpUrl, timeoutCapMs: 2_000 }), ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}) }
+    : undefined;
   const service = await createService({
     name: SERVICE,
     env,
@@ -140,6 +146,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       firstVisitSignals,
       // trust-svc 클라이언트 하나가 진입 판정과 추가 검증(VERIFICATION)을 함께 맡는다(같은 차단기: 서킷이 열리면 제출도 503, B-T6 ④)
       verification: { ...(reverification ? { reverification } : {}), ...(trustRisk ? { risk: trustRisk } : {}), ...(cases ? { cases } : {}), signals: verificationSignals },
+      ...(opsAudit ? { opsAudit } : {}),
     }),
   });
   arrivalSignals.register(service.metrics.registry);
@@ -155,6 +162,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   kafkaCases?.warm();
   if (!trustRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 위험 판정이 늘 축소 운영이다(local·ci·demo)');
   if (!asnFile) service.logger.warn({ dep: 'asn-table' }, 'PEAKET_ASN_TABLE_FILE이 없어 축소 운영의 IP 한도를 걸지 않는다');
+  if (!opsAudit) service.logger.warn({ dep: 'ops-svc' }, 'PEAKET_OPS_HTTP_URL이 없어 셔플 커밋 공시를 ops 감사 체인에 보내지 않고 정규 로그 줄만 남긴다');
   asnLog.warn = (reason) => service.logger.warn({ dep: 'asn-table', reason }, 'ASN 분류표를 읽지 못해 마지막 판을 쓴다');
   // 경고 함수를 단 뒤에 읽기 시작한다(첫 읽기 실패 경고를 잃지 않게). 파드가 요청을 받기 전이라 그 사이 축소 운영은 IP 한도 없이 간다
   asnTable.start();

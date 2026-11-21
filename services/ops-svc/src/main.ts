@@ -16,9 +16,9 @@ import { assertOpsPartnerRole } from './adapters/db/database-role.js';
 import { reauthWiring } from './reauth-wiring.js';
 import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
-import { auditAnchorSignerFromEnv } from './modules/audit/index.js';
+import { AuditSignals, auditAnchorSignerFromEnv } from './modules/audit/index.js';
 import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
-import type { HandleCommandEvent } from './modules/commands/index.js';
+import { PromCommandSignals, type HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
@@ -139,6 +139,9 @@ const botReviewSignals = new PromBotReviewSignals();
 const botReviewSource = botReviewSourceFromEnv(process.env);
 const botReviewLabels = botReviewLabelsFromEnv(process.env);
 const botReviewActorRef = loadLogPseudonymizer(process.env).pseudonymizer;
+// 명령·감사 체인 지표(BAT-355): ops_command_dry_run_unavailable_total, ops_audit_mac_lag_seconds, ops_audit_kms_failover_total. 서비스를 만든 뒤 레지스트리에 붙인다
+const commandSignals = new PromCommandSignals();
+const auditSignals = new AuditSignals();
 const service = await createService({
   name: SERVICE,
   adminAuthz,
@@ -162,10 +165,14 @@ const service = await createService({
       accountRef: (accountId: string) => botReviewActorRef.ref(accountId),
     },
     onCommandEvent: (h) => (commandEvents = h),
+    commandExtras: { signals: commandSignals },
+    auditSignals,
   }),
 });
 eventCancellationSignals.register(service.metrics.registry);
 botReviewSignals.register(service.metrics.registry);
+commandSignals.register(service.metrics.registry);
+auditSignals.register(service.metrics.registry);
 if (anchor.warning) service.logger.warn({}, anchor.warning);
 if (botReviewSource.warning) service.logger.warn({}, botReviewSource.warning);
 if (!botReviewLabels) service.logger.warn({}, 'PEAKET_TRUST_GRPC_URL이 없어 표본 판정 HUMAN·BOT이 503 bot-review-label-unavailable이다(UNDECIDED는 기록된다)');
