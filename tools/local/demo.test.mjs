@@ -3,6 +3,8 @@
 // - 실제 kind 클러스터·Docker는 부르지 않는다. V-T7 ④의 실제 실행은 `node tools/local/demo.mjs all`이 맡고,
 //   이 파일은 그 실행이 남긴 측정 파일과 재생기 구조를 본다. kind e2e는 CI에 넣지 않는다(계획 §10).
 // - 닫힌 실패(선행 없음·파드 미준비·모르는 시나리오)는 가짜 뿌리·가짜 kubectl로 본다. 클러스터 명령 기록 0을 함께 확인한다.
+// - 명령 기록은 `node:child_process` 가로채기(childProcessRecorder)로 본다. PATH의 가짜 kubectl 스크립트 기록은 Windows에서
+//   Node가 .cmd를 셸 없이 실행하지 않아(EINVAL) 비어 거짓 통과했다(W12T-02, docs/review/plans/W12-tools.md §1의 2).
 // 실행(저장소 뿌리): node --test "tools/local/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -60,7 +62,8 @@ function functionBlock(source, signature) {
 
 /**
  * doctor가 보는 가짜 뿌리. `without`에 넣은 선행만 뺀다.
- * kubectl은 기록만 하는 가짜다(doctor가 부르면 기록이 남는다). 다른 도구는 빈 파일이면 충분하다.
+ * 도구 넷(docker·kind·kubectl·helm)은 doctor가 찾는 데만 쓰는 빈 파일이다. 무엇을 실행했는지는 이 파일이 아니라
+ * childProcessRecorder(`node:child_process` 가로채기)로 본다(W12T-02: Windows의 kubectl.cmd 기록은 실행되지 않아 비었다).
  */
 function fakeRoot(without = new Set()) {
   const root = tempDir('peaket-bat086-doctor-');
@@ -83,21 +86,111 @@ function fakeRoot(without = new Set()) {
   if (!without.has('chromium')) put(`ms-playwright/chromium-1234/${process.platform === 'win32' ? 'chrome-win64/chrome.exe' : 'chrome-linux/chrome'}`);
   const bin = join(root, 'bin');
   mkdirSync(bin, { recursive: true });
-  for (const t of ['docker', 'kind', 'helm']) {
+  for (const t of CLUSTER_TOOLS) {
     if (!without.has(`tool:${t}`)) writeFileSync(join(bin, t), '');
   }
-  const calls = join(root, 'calls.txt');
+  const env = { ...process.env, PATH: bin, PEAKET_TOOLS_DIR: join(root, '.cache', 'peaket-tools'), PLAYWRIGHT_BROWSERS_PATH: browsers };
+  return { root, bin, browsers, env };
+}
+
+/** 정본(docs/verification.md 재현 스크립트)이 선행이 없으면 판 확인까지 실행하지 않는다고 적은 도구 넷 */
+const CLUSTER_TOOLS = ['docker', 'kind', 'kubectl', 'helm'];
+
+/**
+ * `node:child_process`를 통째로 가로채 모든 호출(spawnSync·execFileSync·execSync·spawn·execFile·exec)을 기록하는 --import 훅.
+ * PATH의 가짜 실행 파일과 달리 OS와 상관없이 기록이 남는다. 실제 프로세스는 하나도 띄우지 않는다.
+ * - exits: [정규식 원문, 끝 코드] 목록. 명령 줄(실행 파일·경로 인자는 이름만, 확장자 .exe·.cmd·.bat은 뗌)에 처음 맞는 끝 코드를 돌려준다
+ * - stdout: [정규식 원문, 표준 출력] 목록. 맞는 것이 없으면 빈 글이다
+ * - 훅이 실리면 `loaded` 줄을 하나 남긴다(가로채기가 빠져 기록이 비는 거짓 통과를 막는다)
+ * @param {{ exits?: Array<[string, number]>, stdout?: Array<[string, string]> }} [o]
+ */
+function childProcessRecorder({ exits = [], stdout = [] } = {}) {
+  const dir = tempDir('peaket-w12t-cp-');
+  const calls = join(dir, 'calls.jsonl');
   writeFileSync(calls, '');
-  if (process.platform === 'win32') {
-    // bare `kubectl`를 두지 않는다. findOnPath가 .CMD를 찾고, 실행되면 이 파일에 한 줄이 남는다
-    if (!without.has('tool:kubectl')) writeFileSync(join(bin, 'kubectl.cmd'), '@echo off\r\necho %*>>"%PEAKET_FAKE_CALLS%"\r\n');
-  } else {
-    if (!without.has('tool:kubectl')) {
-      writeFileSync(join(bin, 'kubectl'), '#!/bin/sh\necho "$@" >> "$PEAKET_FAKE_CALLS"\n', { mode: 0o755 });
-    }
-  }
-  const env = { ...process.env, PATH: bin, PEAKET_TOOLS_DIR: join(root, '.cache', 'peaket-tools'), PEAKET_FAKE_CALLS: calls, PLAYWRIGHT_BROWSERS_PATH: browsers };
-  return { root, bin, browsers, env, calls, text: () => readFileSync(calls, 'utf8') };
+  writeFileSync(
+    join(dir, 'fake-child-process.mjs'),
+    String.raw`import { appendFileSync } from 'node:fs';
+const exits = JSON.parse(process.env.PEAKET_W12T_CP_EXITS || '[]').map(([re, code]) => [new RegExp(re), code]);
+const outs = JSON.parse(process.env.PEAKET_W12T_CP_STDOUT || '[]').map(([re, text]) => [new RegExp(re), text]);
+const short = (v) => String(v).split(/[\\/]/).pop().replace(/\.(?:exe|cmd|bat)$/i, '');
+const record = (fn, exe, args) => {
+  const list = (Array.isArray(args) ? args : []).map(String);
+  const line = [short(exe), ...list.map((a) => (/[\\/]/.test(a) ? short(a) : a))].join(' ');
+  appendFileSync(process.env.PEAKET_W12T_CP_CALLS, JSON.stringify({ fn, exe: short(exe), args: list, line }) + '\n');
+  return line;
+};
+const pick = (rules, line, none) => (rules.find(([re]) => re.test(line)) ?? [null, none])[1];
+appendFileSync(process.env.PEAKET_W12T_CP_CALLS, JSON.stringify({ fn: 'loaded' }) + '\n');
+export function spawnSync(exe, args = []) {
+  const line = record('spawnSync', exe, args);
+  return { pid: 0, status: pick(exits, line, 0), signal: null, stdout: pick(outs, line, ''), stderr: '', output: [] };
+}
+export function execFileSync(exe, args = []) {
+  const line = record('execFileSync', exe, args);
+  const status = pick(exits, line, 0);
+  if (status !== 0) throw Object.assign(new Error('가짜 execFileSync exit ' + status), { status });
+  return pick(outs, line, '');
+}
+export function execSync(command) {
+  record('execSync', command, []);
+  return '';
+}
+export function spawn(exe, args = []) {
+  record('spawn', exe, args);
+  throw new Error('이 시험은 spawn을 쓰지 않는다');
+}
+export function execFile(exe, args = []) {
+  record('execFile', exe, args);
+  throw new Error('이 시험은 execFile을 쓰지 않는다');
+}
+export function exec(command) {
+  record('exec', command, []);
+  throw new Error('이 시험은 exec를 쓰지 않는다');
+}
+`,
+  );
+  writeFileSync(
+    join(dir, 'hook.mjs'),
+    `import { registerHooks } from 'node:module';
+const fake = ${JSON.stringify(pathToFileURL(join(dir, 'fake-child-process.mjs')).href)};
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === 'node:child_process' || specifier === 'child_process') return { url: fake, shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+});
+`,
+  );
+  const env = { PEAKET_W12T_CP_CALLS: calls, PEAKET_W12T_CP_EXITS: JSON.stringify(exits), PEAKET_W12T_CP_STDOUT: JSON.stringify(stdout) };
+  const all = () => readFileSync(calls, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l));
+  return {
+    /** 훅이 실린 횟수(자식 node 하나당 1) */
+    loaded: () => all().filter((c) => c.fn === 'loaded').length,
+    /** 기록된 호출(훅 실림 줄은 뺀다) */
+    calls: () => all().filter((c) => c.fn !== 'loaded'),
+    /** 기록 가운데 도구 넷(docker·kind·kubectl·helm)을 부른 것 */
+    toolCalls: () => all().filter((c) => CLUSTER_TOOLS.includes(c.exe)),
+    run: (args, baseEnv = process.env) =>
+      spawnSync(process.execPath, ['--import', pathToFileURL(join(dir, 'hook.mjs')).href, DEMO_MJS, ...args], {
+        cwd: REPO,
+        encoding: 'utf8',
+        timeout: 180_000,
+        env: { ...baseEnv, ...env },
+      }),
+  };
+}
+
+/** 측정 파일의 '도구 판' 줄을 { 도구: 값 }으로 읽는다(`node v24 · docker 판 확인 안 함 · …`) */
+function measuredTools(text) {
+  const line = text.split(/\r?\n/).find((l) => l.startsWith('- **도구 판**: '));
+  assert.ok(line, `측정 파일에 도구 판 줄이 없다:\n${text}`);
+  return Object.fromEntries(
+    line
+      .slice('- **도구 판**: '.length)
+      .split(' · ')
+      .map((e) => [e.slice(0, e.indexOf(' ')), e.slice(e.indexOf(' ') + 1)]),
+  );
 }
 
 /**
@@ -292,22 +385,26 @@ test('V-T7 ② 선행이 하나라도 없으면 doctor가 exit 1이고 빠진 �
   assert.ok(r.tools.docker && r.tools.kind && r.tools.kubectl && r.tools.helm, `있는 도구를 읽지 못했다: ${JSON.stringify(r.tools)}`);
 });
 
-test('V-T7 ② 가짜 뿌리의 doctor는 클러스터 명령을 부르지 않고, 모두 있으면 exit 0이다', () => {
+test('V-T7 ② 가짜 뿌리의 doctor는 클러스터 명령을 부르지 않고, 모두 있으면 exit 0이다(W12T-02 ④ child_process 가로채기 기록 0)', () => {
   const bad = fakeRoot(new Set(['seed']));
-  const fail = runDemo(['doctor', '--root', bad.root, '--json'], bad.env);
-  assert.equal(fail.status, 1, `선행이 없는데 doctor exit ${fail.status}`);
+  const badRec = childProcessRecorder();
+  const fail = badRec.run(['doctor', '--root', bad.root, '--json'], bad.env);
+  assert.equal(fail.status, 1, `선행이 없는데 doctor exit ${fail.status}\n${fail.stderr}`);
   const out = JSON.parse(fail.stdout);
   assert.equal(out.ok, false);
   assert.ok(out.problems.some((p) => p.what === '데모 시드'), JSON.stringify(out.problems));
-  assert.equal(bad.text(), '', `선행이 없는데 클러스터 명령을 불렀다: ${bad.text()}`);
+  assert.equal(badRec.loaded(), 1, '가로채기 훅이 doctor 프로세스에 실리지 않았다(기록이 비어도 믿을 수 없다)');
+  assert.deepEqual(badRec.calls(), [], `선행이 없는데 doctor가 명령을 불렀다: ${JSON.stringify(badRec.calls())}`);
 
   const good = fakeRoot();
-  const ok = runDemo(['doctor', '--root', good.root, '--json'], good.env);
+  const goodRec = childProcessRecorder();
+  const ok = goodRec.run(['doctor', '--root', good.root, '--json'], good.env);
   assert.equal(ok.status, 0, `모두 있는데 doctor exit ${ok.status}\n${ok.stderr}`);
   const okOut = JSON.parse(ok.stdout);
   assert.equal(okOut.ok, true);
   assert.deepEqual(okOut.problems, []);
-  assert.equal(good.text(), '', `doctor가 클러스터 명령을 불렀다: ${good.text()}`);
+  assert.equal(goodRec.loaded(), 1, '가로채기 훅이 doctor 프로세스에 실리지 않았다(기록이 비어도 믿을 수 없다)');
+  assert.deepEqual(goodRec.calls(), [], `doctor가 명령을 불렀다: ${JSON.stringify(goodRec.calls())}`);
 });
 
 test('V-T7 ② doctor가 Playwright chromium 실행 파일을 본다(RV-09)', () => {
@@ -593,19 +690,60 @@ test('V-T7 ⑦ 시드 실패는 자식 명령과 마지막 출력 줄을 측정�
   assert.match(branch, /failure(?:\s*:\s*failure)?\s*,/, '시드 실패 갈래가 측정에 실패 내용을 넘기지 않는다');
 });
 
-test('V-T7 ⑦ all은 선행이 없으면 실패 측정을 남기고 시나리오를 통과로 세지 않는다', () => {
-  const f = fakeRoot(new Set(['seed']));
+/**
+ * 선행 일부를 뺀 가짜 뿌리에서 `all`을 가로채기 아래 돌린다(실제 무대·도구는 하나도 띄우지 않는다).
+ * @param {Set<string>} without fakeRoot에서 뺄 선행
+ * @param {{ exits?: Array<[string, number]>, stdout?: Array<[string, string]> }} [fake] 가로채기가 돌려줄 끝 코드·출력
+ */
+function allIntercepted(without, fake = {}) {
+  const f = fakeRoot(without);
+  const rec = childProcessRecorder(fake);
   const file = join(tempDir('peaket-bat086-all-'), 'BAT-086-demo.md');
-  const r = runDemo(['all', '--root', f.root, '--measure', file], f.env);
-  assert.equal(r.status, 1, `선행이 없는데 all exit ${r.status}\n${r.stderr}`);
-  const text = readFileSync(file, 'utf8');
-  assert.match(text, /- \*\*결과\*\*: 실패\(선행 없음\)/);
-  const rows = text.split(/\r?\n/).filter((l) => /^\| S[1-9] \|/.test(l));
-  assert.equal(rows.length, SCENARIO_ORDER.length);
-  for (const row of rows) {
-    assert.match(row, /\| 미실행 \|/, `선행이 없는데 통과로 셌다: ${row}`);
+  const r = rec.run(['all', '--root', f.root, '--measure', file], f.env);
+  assert.equal(rec.loaded(), 1, `가로채기 훅이 all 프로세스에 실리지 않았다(기록이 비어도 믿을 수 없다)\n${r.stderr}`);
+  return { r, rec, text: readFileSync(file, 'utf8') };
+}
+
+test('V-T7 ⑦ all은 선행이 없으면 실패 측정을 남기고 시나리오를 통과로 세지 않는다(W12T-02 ① 가로채기 기록에 kubectl·docker·kind·helm 0)', () => {
+  // 파일 선행(시드)이 빠진 PC와 도구(helm)가 빠진 PC. 둘 다 나머지 도구 셋은 PATH에 있다
+  for (const missing of ['seed', 'tool:helm']) {
+    const { r, rec, text } = allIntercepted(new Set([missing]));
+    assert.equal(r.status, 1, `${missing}가 없는데 all exit ${r.status}\n${r.stderr}`);
+    assert.match(text, /- \*\*결과\*\*: 실패\(선행 없음\)/, `${missing}: 결과 칸`);
+    const rows = text.split(/\r?\n/).filter((l) => /^\| S[1-9] \|/.test(l));
+    assert.equal(rows.length, SCENARIO_ORDER.length, `${missing}: 시나리오 줄 수`);
+    for (const row of rows) {
+      assert.match(row, /\| 미실행 \|/, `${missing}: 선행이 없는데 통과로 셌다: ${row}`);
+    }
+    assert.deepEqual(rec.toolCalls(), [], `${missing}가 없는데 도구를 실행했다(판 확인 포함): ${JSON.stringify(rec.toolCalls().map((c) => c.line))}`);
   }
-  assert.equal(f.text(), '', `선행이 없는데 클러스터 명령을 불렀다: ${f.text()}`);
+});
+
+test('W12T-02 ② 선행이 없는 all의 측정 도구 판 칸: 찾은 도구는 판 확인 안 함, 못 찾은 도구(helm)는 없음', () => {
+  const { r, text } = allIntercepted(new Set(['tool:helm']));
+  assert.equal(r.status, 1, `helm이 없는데 all exit ${r.status}\n${r.stderr}`);
+  const tools = measuredTools(text);
+  assert.deepEqual(
+    Object.fromEntries(CLUSTER_TOOLS.map((t) => [t, tools[t]])),
+    { docker: '판 확인 안 함', kind: '판 확인 안 함', kubectl: '판 확인 안 함', helm: '없음' },
+    `측정의 도구 판 줄: ${JSON.stringify(tools)}`,
+  );
+});
+
+test('W12T-02 ③ 선행이 모두 있으면 무대가 실패해도 도구 판을 잰다(kubectl version --client --output=json 기록, 기록 장치 자기 확인)', () => {
+  const { r, rec, text } = allIntercepted(new Set(), {
+    exits: [['^node cluster\\.mjs demo(?: |$)', 1]],
+    stdout: [['^kubectl version --client --output=json$', '{"clientVersion":{"gitVersion":"v1.31.0-w12t"}}']],
+  });
+  assert.equal(r.status, 1, `무대가 exit 1인데 all exit ${r.status}\n${r.stderr}`);
+  assert.match(text, /- \*\*결과\*\*: 실패\(무대 exit 1\)/, '결과 칸이 무대 실패가 아니다');
+  const lines = rec.calls().map((c) => c.line);
+  assert.ok(lines.some((l) => /^node cluster\.mjs demo(?: |$)/.test(l)), `무대(cluster.mjs demo)를 부르지 않았다: ${JSON.stringify(lines)}`);
+  assert.ok(
+    rec.toolCalls().some((c) => c.exe === 'kubectl' && c.args.join(' ') === 'version --client --output=json'),
+    `선행이 모두 있는데 kubectl 판을 재지 않았다: ${JSON.stringify(lines)}`,
+  );
+  assert.equal(measuredTools(text).kubectl, 'v1.31.0-w12t', '측정의 kubectl 판 칸이 판 확인 결과가 아니다');
 });
 
 // ---------- DM-08·DM-09 운영 판 호환 검사 시연(D-T48) ----------

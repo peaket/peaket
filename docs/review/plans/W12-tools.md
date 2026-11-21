@@ -72,11 +72,14 @@
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+- 까닭: 버그 고침이라 고치기 전 트리(계획 `843b50dfb` 위에 시험만 더함)에서 ★ 시험이 실패하는지 본다(§8.6의 5, ADR-0281).
+- W12T-01 ①: 실행 44910775075 `tools-check / tools`에서 `…/deploy/envs/demo/seed/base.yaml의 권한이 너무 넓다(644)`. 이 PC(win32)는 옛 단언을 건너뛰어 통과했다. 새 시험은 저장소 파일 권한 루프를 지웠다.
+- 명령: `node --test tools/local/demo-seed.test.mjs tools/local/demo.test.mjs tools/local/demo-auth.test.mjs` → 시험 60, 실패 3, 건너뜀 3(W12T-01 ②③④ POSIX 세부. Windows라 건너뛰고 우분투 CI `tools-check / tools`가 본다). `node --test "tools/local/*.test.mjs"` → 시험 265, 실패 3(같은 셋), 건너뜀 4(위 셋 + BSL050 0600). demo-seed DS-05·06은 identity-svc `dist`가 없으면 모듈 없음으로 실행조차 안 돼 `pnpm exec turbo run build --filter=@peaket/identity-svc` 뒤에 쟀다.
+- 실패 까닭: W12T-01 ④(모든 OS) `demo-auth.mjs`가 `writeSecretJson`을 내보내지 않음 / W12T-02 ① 시드가 빠진 `all`에서 판 확인 셋(`docker --version`·`kind version`·`kubectl version --client --output=json`)이 기록됨(Windows에서도) / W12T-02 ② 도구 판 칸이 docker·kind·kubectl '있음'이고 helm 칸이 없음. 통과(★ 아님): W12T-02 ③(판을 잼, 기록 장치 자기 확인)·④(doctor 기록 0). W12T-01 ③④ POSIX 세부(있던 파일에 `mode`가 듣지 않아 644가 남음, 도우미 없음)는 CI에서 실패해야 하고, ②는 지금도 맞다.
 
 ## 시험 결과
 
-(시험·구현 담당이 채운다)
+(구현 뒤 시험 담당이 채운다)
 
 ## 리뷰
 
@@ -91,3 +94,4 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12tools-plan-7f3b | claude-opus-5-5 | 2026-11-21T23:23+09:00 | 2026-11-21T23:34+09:00 |
+| test | w12tools-test-1a8c | claude-opus-5-5 | 2026-11-21T23:34+09:00 | 2026-11-21T23:47+09:00 |

@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -523,24 +523,13 @@ test('DS-12 시드 파일에 개인 키·Bearer 토큰·실제 개인정보가 �
   for (const p of s.promoters ?? []) if (p.phone) assert.match(p.phone, /^0\d-\d{4}-\d{4}$/, `promoter ${p.key}의 전화번호가 자리표시자 모양이 아니다`);
 });
 
-test('DS-12 demo-seed --check 출력·감사 표기에 비밀이 없다', () => {
+// 정본(docs/infra.md '로컬 데모의 비밀', W12-tools): 저장소에 든 시드·도구 파일에는 비밀이 없어 git이 담는 권한(644·755) 그대로 두고,
+// 권한 검사는 .cache의 비밀 파일만 본다(0600 단언은 demo-auth.test.mjs W12T-01 ②~④). 여기서는 저장소 파일 권한을 보지 않는다.
+test('DS-12 demo-seed --check 출력·감사 표기에 비밀이 없다(W12T-01 ① 저장소 파일 권한은 보지 않는다)', () => {
   const r = run(join(REPO, 'tools', 'local', 'demo-seed.mjs'), ['--check', '--json']);
   assert.equal(r.status, 0, `demo-seed --check 실패: ${r.stderr}`);
   assert.doesNotMatch(r.stdout + r.stderr, /password|totp|Bearer|PRIVATE KEY/i, '--check 출력에 비밀 낱말·값이 있다');
   assert.match(r.stdout, /"seats": 2400/, '--check 출력에 좌석 수가 없다');
-  // 저장소의 새 시드·객체·도구 파일에 비밀 파일을 만들지 않는다
-  const newFiles = [
-    DEMO_SEED_FILE,
-    join(REPO, 'tools/local/demo-auth.mjs'),
-    join(REPO, 'tools/local/demo-seed.mjs'),
-    join(REPO, 'tools/local/demo-objects.mjs'),
-    join(REPO, 'services/identity-svc/scripts/seed-demo.mjs'),
-    join(REPO, 'services/core-svc/scripts/seed-demo.mjs'),
-  ];
-  for (const file of newFiles) {
-    const mode = statSync(file).mode & 0o777;
-    if (process.platform !== 'win32') assert.equal(mode & 0o077, 0, `${file}의 권한이 너무 넓다(${mode.toString(8)})`);
-  }
   // 저장소에 새 비밀 파일(.pem·.key)이 없다
   const secrets = readdirSync(join(REPO, 'deploy', 'envs', 'demo', 'seed')).filter((f) => /\.(?:pem|key|p12|pfx)$/i.test(f));
   assert.deepEqual(secrets, [], `시드 폴더에 비밀 파일이 있다: ${secrets.join(', ')}`);
