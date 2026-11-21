@@ -322,8 +322,31 @@ describe('GetPayment 답 읽기', () => {
     };
   }
 
-  /** 늦춤 값 400ms [가정]. 리더 마감 상한 300ms(docs/features/payment.md §6 GetPayment 데드라인)보다 길다(W12-pt36) */
-  const SLOW_MS = 400;
+  /**
+   * 늦춤 값 1000ms [가정](W12-pt36). 리더 마감 상한 300ms(docs/features/payment.md §6 GetPayment 데드라인)의 두 배보다 길다.
+   * 400ms면 미리 묻기를 한 번만 하는 도우미에서도 다음 호출의 마감(300→600ms) 안에 연결이 서서 R3이 그 결함을 놓친다
+   */
+  const SLOW_MS = 1_000;
+  /** 다른 주문(:256·R3) */
+  const OTHER = '0195f3a0-0000-7000-8000-000000000025';
+  /** 연결 미리 맺기에만 쓰는 주문 ID. 가짜 서버 계좌 표에 넣는다(W12-pt36) */
+  const WARM = '0195f3a0-0000-7000-8000-000000000026';
+  /** 미리 묻기 횟수 한도 10 [가정](W12-pt36) */
+  const WARM_TRIES = 10;
+
+  /**
+   * 연결 미리 맺기(W12-pt36): 단언할 호출 전에 같은 리더로 WARM을 서버가 그 요청을 받을 때까지 묻는다.
+   * 연결이라는 전제를 세우는 일이라 미리 묻기의 답은 단언하지 않는다. 리더마다 연결 묶음이 따로라 다른 클라이언트로는 맺을 수 없다.
+   * 돌려주는 값은 미리 묻기가 끝난 때의 요청 수다(그 뒤 몫만 대조한다).
+   * @throws Error 한도 안에 서버가 요청을 받지 못함(연결을 맺지 못함)
+   */
+  async function warmUp(c: GrpcPaymentDepositReader, requests: readonly Record<string, unknown>[]): Promise<number> {
+    for (let i = 0; i < WARM_TRIES; i++) {
+      await c.read(WARM);
+      if (requests.some((r) => r.order_id === WARM)) return requests.length;
+    }
+    throw new Error(`연결을 맺지 못함: 미리 묻기 ${WARM_TRIES}번 동안 서버가 요청을 받지 못했다`);
+  }
 
   test('P-T36 ③ R1_첫 답이 늦으면 미리 묻기 없는 지금 꼴의 첫 호출은 TRANSIENT다(서버는 요청을 받았다)', async () => {
     const srv = await fakePaymentServer({ [ORDER]: '1111111111' }, { firstAnswerDelayMs: SLOW_MS });
@@ -352,15 +375,45 @@ describe('GetPayment 답 읽기', () => {
   });
 
   test('P-T36 ③_주문마다 그 주문의 답을 쓴다(앞 주문의 GetPayment 답을 다시 쓰지 않는다) [ASVS v5.0.0-8.2.2]', async () => {
-    const OTHER = '0195f3a0-0000-7000-8000-000000000025';
-    const srv = await fakePaymentServer({ [ORDER]: '1111111111', [OTHER]: '2222222222' });
+    const srv = await fakePaymentServer({ [WARM]: '0000000000', [ORDER]: '1111111111', [OTHER]: '2222222222' });
     const c = new GrpcPaymentDepositReader({ address: srv.address });
     try {
+      const from = await warmUp(c, srv.requests);
       await expect(c.read(ORDER)).resolves.toEqual({ bank: '20', accountNumber: '1111111111', dueAt: DUE });
       await expect(c.read(OTHER)).resolves.toEqual({ bank: '20', accountNumber: '2222222222', dueAt: DUE });
-      expect(srv.requests.map((r) => r.order_id)).toEqual([ORDER, OTHER]);
+      expect(srv.requests.slice(from).map((r) => r.order_id)).toEqual([ORDER, OTHER]);
     } finally {
       srv.close();
+      c.close();
+    }
+  });
+
+  test.each([
+    ['R1 첫 답 늦춤', 'answer'],
+    ['R2 첫 연결 늦춤', 'connection'],
+  ] as const)('P-T36 ③ R3_%s 아래에서도 연결을 미리 맺으면 주문마다 그 주문의 답을 쓴다 [ASVS v5.0.0-8.2.2]', async (_n, slow) => {
+    const srv = await fakePaymentServer({ [WARM]: '0000000000', [ORDER]: '1111111111', [OTHER]: '2222222222' }, slow === 'answer' ? { firstAnswerDelayMs: SLOW_MS } : {});
+    const relay = slow === 'connection' ? await slowFirstConnection(srv.address, SLOW_MS) : undefined;
+    const c = new GrpcPaymentDepositReader({ address: relay?.address ?? srv.address });
+    try {
+      const from = await warmUp(c, srv.requests);
+      await expect(c.read(ORDER)).resolves.toEqual({ bank: '20', accountNumber: '1111111111', dueAt: DUE });
+      await expect(c.read(OTHER)).resolves.toEqual({ bank: '20', accountNumber: '2222222222', dueAt: DUE });
+      expect(srv.requests.slice(from).map((r) => r.order_id)).toEqual([ORDER, OTHER]);
+    } finally {
+      c.close();
+      relay?.close();
+      srv.close();
+    }
+  });
+
+  test('P-T36 ③ R4_연결 미리 맺기 도우미는 서버가 요청을 받지 못하면 한도 10번 뒤 던진다(조용히 통과하지 않는다)', async () => {
+    const onFailure = vi.fn<(code: string) => void>();
+    const c = new GrpcPaymentDepositReader({ address: '127.0.0.1:1', onFailure });
+    try {
+      await expect(warmUp(c, [])).rejects.toThrow('연결을 맺지 못함');
+      expect(onFailure).toHaveBeenCalledTimes(10);
+    } finally {
       c.close();
     }
   });
