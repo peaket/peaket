@@ -2,11 +2,12 @@
 // 정본: docs/review/plans/BAT-087.md §5 '인증 도우미 계약', §6 DS-12, 감독 결정 5·7.
 // 실제 gRPC·게이트웨이 로그인은 kind e2e(DS-08·09)가 본다. 여기서는 값의 모양·TOTP·쿠키·부트스트랩 행만 본다.
 // W12S-04(서버 액션 키를 비밀 파일에서 만들기)·W12S-06(데모 HTTPS 요청의 인증서 확인)은 docs/review/plans/W12-ci-sec.md §3.
+// W12T-01 ②~④(비밀 파일은 새로 만들 때와 다시 쓸 때 모두 0600)는 docs/review/plans/W12-tools.md §3.
 // 실행(저장소 뿌리): node --test "tools/local/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -187,6 +188,89 @@ test('W12S-04 ③ serverActionsKey가 없는 예전 파일에는 그 값만 채�
     assert.equal(readFileSync(f, 'utf8'), afterFill, '다시 부르면 비밀 파일이 바뀐다(멱등이 아니다)');
     assert.equal(third.secrets.serverActionsKey, filled.serverActionsKey, '다시 부르면 serverActionsKey가 바뀐다');
   });
+});
+
+// ---------- W12T-01 데모 비밀 파일 권한(docs/review/plans/W12-tools.md §3) ----------
+// 정본: docs/infra.md '로컬 데모의 비밀'(0600(주인만 읽고 쓰는 파일 권한)은 비밀 파일을 새로 만들 때와 있던 파일을 다시 쓸 때 모두 맞춘다.
+// 권한 검사는 .cache의 비밀 파일만 본다). writeFileSync의 mode는 새 파일에만 듣는다: 있던 파일을 다시 쓰는 자리를 따로 본다.
+// 비밀 JSON 쓰기 도우미는 demo-auth.mjs가 내보내는 writeSecretJson(file, value)다(계획 §2: 폴더 만들기 → 0600으로 쓰기 → 권한 맞추기).
+const POSIX_ONLY = process.platform === 'win32' && 'Windows에는 POSIX 파일 권한이 없다(우분투 CI tools-check / tools가 본다)';
+const modeOf = (file) => (statSync(file).mode & 0o777).toString(8);
+/** 도우미를 그 자리에서 가져온다(도우미가 없는 트리에서도 이 파일의 다른 시험은 돈다) */
+async function secretWriter() {
+  const mod = await import('./demo-auth.mjs');
+  assert.equal(typeof mod.writeSecretJson, 'function', 'demo-auth.mjs가 비밀 JSON 쓰기 도우미 writeSecretJson을 내보내지 않는다');
+  return mod.writeSecretJson;
+}
+
+// skip-until: 2027-05-21 Windows에는 POSIX 파일 권한이 없다(우분투 CI tools-check가 본다) W12-tools
+test('W12T-01 ② 임시 secretsFile에 새로 만든 데모 비밀 파일은 0600이다(POSIX)', { skip: POSIX_ONLY }, async () => {
+  await withTempSecrets(({ file }) => {
+    const f = file('new');
+    prepareDemoSecrets({ secretsFile: f });
+    assert.equal(modeOf(f), '600', `새로 만든 비밀 파일의 권한이 ${modeOf(f)}다`);
+  });
+});
+
+// skip-until: 2027-05-21 Windows에는 POSIX 파일 권한이 없다(우분투 CI tools-check가 본다) W12-tools
+test('W12T-01 ③ 키 하나(serverActionsKey)가 빠진 0644 비밀 파일을 채워 다시 쓰면 0600으로 좁혀진다(POSIX)', { skip: POSIX_ONLY }, async () => {
+  await withTempSecrets(({ file }) => {
+    const f = file('wide');
+    prepareDemoSecrets({ secretsFile: f });
+    const old = JSON.parse(readFileSync(f, 'utf8'));
+    delete old.serverActionsKey;
+    writeFileSync(f, `${JSON.stringify(old, null, 2)}\n`);
+    chmodSync(f, 0o644);
+    assert.equal(modeOf(f), '644', '시험 준비: 넓은 권한(644) 파일을 만들지 못했다');
+
+    const out = prepareDemoSecrets({ secretsFile: f });
+    const filled = JSON.parse(readFileSync(f, 'utf8'));
+    assert.equal(typeof filled.serverActionsKey, 'string', '빠진 serverActionsKey를 채워 다시 쓰지 않았다(이 시험의 전제)');
+    assert.equal(out.secrets.serverActionsKey, filled.serverActionsKey, '돌려준 비밀과 파일의 serverActionsKey가 다르다');
+    assert.equal(modeOf(f), '600', `있던 비밀 파일을 다시 쓴 뒤 권한이 ${modeOf(f)}다(0600으로 맞추지 않았다)`);
+  });
+});
+
+// skip-until: 2027-05-21 Windows에는 POSIX 파일 권한이 없다(우분투 CI tools-check가 본다) W12-tools
+test('W12T-01 ④ 비밀 JSON 쓰기 도우미는 있던 0644 파일에 써도 0600으로 맞춘다(POSIX)', { skip: POSIX_ONLY }, async () => {
+  const writeSecretJson = await secretWriter();
+  const dir = mkdtempSync(join(tmpdir(), 'w12t-secret-json-'));
+  try {
+    const f = join(dir, 'sessions.json');
+    writeFileSync(f, '{"before":true}\n');
+    chmodSync(f, 0o644);
+    assert.equal(modeOf(f), '644', '시험 준비: 넓은 권한(644) 파일을 만들지 못했다');
+    const value = { version: 1, jimin: { cookie: 'w12t-fake-cookie' } };
+    writeSecretJson(f, value);
+    assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), value, '도우미가 준 값을 그대로 쓰지 않았다');
+    assert.equal(modeOf(f), '600', `도우미로 다시 쓴 뒤 권한이 ${modeOf(f)}다`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W12T-01 ④ demo-auth.mjs의 비밀 파일 쓰기(writeFileSync)는 도우미 안 한 곳뿐이고, 도우미는 없는 폴더를 만들어 쓴다(모든 OS)', async () => {
+  const writeSecretJson = await secretWriter();
+  const dir = mkdtempSync(join(tmpdir(), 'w12t-secret-json-'));
+  try {
+    const f = join(dir, 'demo-secrets', 'nested', 'secrets.json');
+    const value = { version: 1, dbPassword: 'w12t-fake-password' };
+    writeSecretJson(f, value);
+    assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), value, '도우미가 없는 폴더를 만들어 쓰지 않았다');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // 있던 파일을 다시 쓰는 자리(빠진 키 채우기·sessions.json)가 도우미를 비켜 가면 권한이 넓은 채 남는다. 주석 줄은 세지 않는다
+  const code = readFileSync(join(REPO, 'tools', 'local', 'demo-auth.mjs'), 'utf8')
+    .split(/\r?\n/)
+    .map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l))
+    .join('\n');
+  const at = [...code.matchAll(/writeFileSync\(/g)].map((m) => m.index);
+  assert.equal(at.length, 1, `demo-auth.mjs의 writeFileSync( 호출이 ${at.length}곳이다(도우미 안 한 곳이어야 한다)`);
+  const start = code.indexOf('export function writeSecretJson(');
+  assert.ok(start >= 0, 'demo-auth.mjs에 export function writeSecretJson( 정의가 없다');
+  const end = code.indexOf('\n}\n', start);
+  assert.ok(start < at[0] && at[0] < end, 'demo-auth.mjs의 writeFileSync( 한 곳이 writeSecretJson 안에 있지 않다');
 });
 
 // ---------- W12S-06 데모 HTTPS 요청은 무대 인증서로 확인한다(docs/review/plans/W12-ci-sec.md §3) ----------
