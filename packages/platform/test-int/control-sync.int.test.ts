@@ -132,6 +132,26 @@ describe('I-T3 ① 방송형 소비(ADR-0103 결정 3)', () => {
   }, 120_000);
 });
 
+describe('I-T3 ③ 실제 Kafka 레코드 시각(ADR-0333 결정 4, BAT-059 리뷰 반영 R059-1)', () => {
+  test('I-T3 ③-10 실제 Kafka 레코드 시각으로 견주어 identity 꼴 정상 사건(지금 ISO 종료 시각)은 시각을 바꾸지 않는다', async () => {
+    const p = await pod('pod-t3-10');
+    await readyAll([p]);
+    const accountId = `acc-it3-${(seq += 1)}`;
+    const sent = Date.now();
+    // Outbox 릴레이처럼 레코드 시각을 주지 않는다(Kafka 클라이언트가 보낸 때를 적는다). 종료 시각은 보내기 직전의 지금(ISO 글)이다
+    await producer.send({
+      topic: CONTROL_TOPICS.sessionsTerminated,
+      messages: [{ key: accountId, value: Buffer.from(JSON.stringify({ accountId, sessionId: 's-it3-10', reason: 'LOGOUT', terminatedAt: new Date(sent).toISOString() })) }],
+    });
+    await until(async () => (await p.status('s-it3-10')) === 401, 's-it3-10 401', PROPAGATION_MS);
+    expect(await p.status('s-it3-live')).toBe(200);
+    // 읽기 포트가 낸 레코드 시각이 밀리초라 범위 안이다(초 단위로 내면 미래 쪽 밖이 되어 time_replaced가 오른다)
+    const m = await p.metrics();
+    expect(sample(m, 'control_sync_skipped_total', { service: SERVICE, topic: CONTROL_TOPICS.sessionsTerminated, reason: 'time_replaced' })).toBe(0);
+    expect(sample(m, 'control_sync_skipped_total', { service: SERVICE, topic: CONTROL_TOPICS.sessionsTerminated, reason: 'unreadable' })).toBe(0);
+  }, 120_000);
+});
+
 describe('I-T48 새 파드의 종료 세션(ADR-0103 결정 2)', () => {
   test('I-T48 ① 로그아웃 직후(1초 안) 새로 띄운 인스턴스는 15분 창을 다 읽기 전에는 준비가 아니고(503, 남은 작업 sessions·settings), 준비가 된 직후 첫 요청부터 그 sid를 401로 막는다', async () => {
     await terminate('s-it48-1');
