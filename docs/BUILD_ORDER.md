@@ -141,7 +141,7 @@
 | BAT-335 | 5 | 3 | B | GAT-350 | 1.25 | O-T40, O-T41, docs/features/offline-gate.md | 혼자: 측정 창 3. 선행 GAT-230(갈래 2) |
 | BAT-340 | 5 | 3 | C | GAT-370 | 1 | - | 혼자: 측정 창 3 |
 | BAT-345 | 감독 | 3 | C | SEG-030 | 0.5 | - | 혼자: 구간 마무리 |
-| BAT-350 | 2 | 3 | B | GAT-010 | 2.5 | docs/features/offline-gate.md, docs/security/asvs/offline-gate.md | 혼자: 짝이 맞지 않음(이웃 OPS-260과 묶으면 OPS-310이 혼자 남는다). 선행 HOT-160(갈래 1). 서버 키 등록 경로는 BAT-430(GAT-140, R-561). 일부 구현(R-554·R-562·R-563). 남은 것은 단계 줄. 보고서 docs/review/measurements/BAT-350-wave.md. |
+| BAT-350 | 2 | 3 | B | GAT-010 | 2.5 | O-T13, O-T44, O-T45, O-T46 | 혼자: 짝이 맞지 않음(이웃 OPS-260과 묶으면 OPS-310이 혼자 남는다). 선행 HOT-160(갈래 1). 서버 키 등록 경로는 BAT-430(GAT-140, R-561). 일부 구현(R-554·R-562·R-563). 남은 것은 단계 줄. 보고서 docs/review/measurements/BAT-350-wave.md. 2026-11-21 계획(docs/review/plans/BAT-350.md §3)에서 장부 범위를 offline-gate 문서 전체·ASVS 표(232항목, 다른 묶음 BAT-395·400·405·430 등과 겹침)에서 이 단계가 정하는 넷으로 좁혔다(§8.6 3 '범위를 좁혀 뺀다'). |
 | BAT-355 | 4 | 3 | B | OPS-260·OPS-270 | 4.25 | docs/features/control-tower.md, I-T53, docs/security/authz-matrix.md, docs/security/asvs/control-tower.md |  |
 | BAT-360 | 4 | 3 | B | OPS-280·OPS-290 | 3.25 | docs/features/control-tower.md, C-T47, docs/security/asvs/control-tower.md |  |
 | BAT-365 | 4 | 3 | B | OPS-300·OPS-310 | 5 | docs/features/control-tower.md, C-T50, C-T51, C-T53, C-T54, Q-T12, Q-T30, docs/security/asvs/control-tower.md |  |

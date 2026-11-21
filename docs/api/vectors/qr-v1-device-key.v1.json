@@ -1,0 +1,39 @@
+{
+  "description": "QR v1·입장용 기기 키 시험 벡터 v1(docs/features/offline-gate.md §2·§3·O-T45, ADR-0336 결정 6). 시험용 키이고 개인키는 싣지 않는다. 만든 법: 구현과 따로 Node.js 내장 crypto(KeyObject, prime256v1)로 키쌍을 만들고 ECDSA-SHA256 IEEE P1363으로 서명했으며, keyId는 공개키 SPKI DER의 SHA-256 앞 8바이트, 압축 공개키는 0x02/0x03(y 홀짝) ‖ x, base45는 RFC 9285 절차를 따로 적어 계산했다(BAT-350 계획 담당, 2026-11-21). 월렛 시험과 ticket-svc 시험이 같은 파일을 읽는다",
+  "curve": "P-256",
+  "publicKeyJwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "vR_kwCTX5DoVDyuFEmUc35dKs86osl2cbHK9blfYo5s",
+    "y": "32Yr6HPRxqUY0o8pct1HuRPYzT2B52CWAQKvrguTrB0"
+  },
+  "publicKeyJwkAsExported": {
+    "crv": "P-256",
+    "ext": true,
+    "key_ops": [
+      "verify"
+    ],
+    "kty": "EC",
+    "x": "vR_kwCTX5DoVDyuFEmUc35dKs86osl2cbHK9blfYo5s",
+    "y": "32Yr6HPRxqUY0o8pct1HuRPYzT2B52CWAQKvrguTrB0"
+  },
+  "spkiDerB64u": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEvR_kwCTX5DoVDyuFEmUc35dKs86osl2cbHK9blfYo5vfZivoc9HGpRjSjyly3Ue5E9jNPYHnYJYBAq-uC5OsHQ",
+  "keyIdHex": "95d37b132aa4998b",
+  "keyIdB64u": "ldN7EyqkmYs",
+  "compressedPublicKeyB64u": "A70f5MAk1-Q6FQ8rhRJlHN-XSrPOqLJdnGxyvW5X2KOb",
+  "qr": {
+    "version": 1,
+    "header": "PEAKET-QR-v1",
+    "ticketId": "0190f3a1-7c2e-7a00-8b2a-6c1d5e70f102",
+    "timeSeconds": 1795651215,
+    "messageHex": "5045414b45542d51522d76310190f3a17c2e7a008b2a6c1d5e70f10295d37b132aa4998b6b07768f",
+    "signatureB64u": "K6vd67bcTFilJFpk9dFO8M5zEVoTNQyp1xgF52fA5J-8Vh_wWQoECEGCaaYRnfYF3qL5X1oxOTDK4egf9N9BHw",
+    "payloadHex": "010190f3a17c2e7a008b2a6c1d5e70f10295d37b132aa4998b6b07768f2babddebb6dc4c58a5245a64f5d14ef0ce73115a13350ca9d71805e767c0e49fbc561ff0590a0408418269a6119df605dea2f95f5a313930cae1e81ff4df411f",
+    "base45": "W50REIUIKI*5430FG53W3NCEVE04XQ1J2H K6SHK.0L4IWWL.ZTB%RD9B Q4FYCWKQ-JUROEJHBZV69LLT13JBTFHOW8K.*AEHU:B1/11+LGX:KS/JHX06RKK2C1A6P767PSZ143ASV0"
+  },
+  "negative": {
+    "tamperedSignatureB64u": "K6vd67bcTFilJFtk9dFO8M5zEVoTNQyp1xgF52fA5J-8Vh_wWQoECEGCaaYRnfYF3qL5X1oxOTDK4egf9N9BHw",
+    "tamperedMessageHex": "5045414b45542d51522d76310190f3a17c2e7a008b2a6c1d5e70f10295d37b132aa4998b6b07768e",
+    "otherKeyIdB64u": "atN7EyqkmYs"
+  }
+}
