@@ -74,7 +74,7 @@ const METRICS_PORT = 9464;
 const CONTROL_CALLERS = ['ops-svc', 'ops-breakglass'];
 /** 관리 경로를 처리하는 여덟 서비스(docs/architecture.md:290, D-T36 ⑦) */
 const ADMIN_EIGHT = ['core-svc', 'identity-svc', 'ticket-svc', 'payment-svc', 'purchase-svc', 'queue-svc', 'trust-svc', 'ops-svc'];
-/** ADR-0285 결정 9: REST 포트의 내부 HTTP 부르는 쪽 14쌍과 ADR-0288 결정 8의 purchase-svc → queue-svc(입장 토큰 공개키 묶음, BAT-057) 한 쌍 [부르는 쪽, 받는 쪽] */
+/** ADR-0285 결정 9: REST 포트의 내부 HTTP 부르는 쪽 15쌍(2026-11-22 보충 포함)과 ADR-0288 결정 8의 purchase-svc → queue-svc(입장 토큰 공개키 묶음, BAT-057) 한 쌍 [부르는 쪽, 받는 쪽] */
 const INTERNAL_HTTP = [
   ['core-svc', 'identity-svc'],
   ['core-svc', 'purchase-svc'],
@@ -87,6 +87,8 @@ const INTERNAL_HTTP = [
   ['payment-svc', 'identity-svc'],
   ['purchase-svc', 'core-svc'],
   ['purchase-svc', 'ops-svc'],
+  // ADR-0285 결정 9 보충(2026-11-22, W12-mesh): purchase-svc가 payment-svc 결제사 서킷 상태 GET /internal/v1/circuits를 읽는다(docs/features/transfer-refund.md §5 '서킷 연결', docs/api/guidelines.md §8.1)
+  ['purchase-svc', 'payment-svc'],
   // ADR-0288 결정 8: purchase-svc가 queue-svc 앱 포트의 GET /internal/jwks/admission.json을 5분마다 읽는다(docs/features/seat-hold.md §2 '입장 토큰 공개키 묶음 주기 읽기')
   ['purchase-svc', 'queue-svc'],
   ['ticket-svc', 'core-svc'],
@@ -96,7 +98,8 @@ const INTERNAL_HTTP = [
 /**
  * 업무 gRPC 부르는 쪽(받는 워크로드 → proto 서비스 → 부르는 쪽, 메서드마다 다르면 { 메서드: 부르는 쪽 }).
  * docs/api/proto/README.md:39 '부르는 쪽 확인', §3 '호출 목록'(:65-122) 첫 칸, docs/architecture.md:743·:290, docs/features/payment.md:720.
- * 배상 송금(CompensationTransferService)은 README §3 아래 '아직 계약하지 않은 통신'이라 부르는 쪽이 없다(아무도 부르지 못함).
+ * 배상 송금(CompensationTransferService)은 메서드 단위다: RequestCompensationTransfer는 purchase-svc만 부르고 GetCompensationTransfer는 부르는 쪽이 없다
+ * (ADR-0317 결정 1, docs/api/proto/README.md §3 '호출 목록' purchase-svc → payment-svc 행 :75, docs/features/transfer-refund.md §5 '배상 계좌 입력').
  */
 const GRPC = {
   'core-svc': {
@@ -127,7 +130,7 @@ const GRPC = {
   },
   'image-worker': { 'peaket.image.v1.ImageService': ['core-svc'] },
   'payment-svc': {
-    'peaket.payment.v1.CompensationTransferService': [],
+    'peaket.payment.v1.CompensationTransferService': { RequestCompensationTransfer: ['purchase-svc'], GetCompensationTransfer: [] },
     'peaket.payment.v1.PaymentService': {
       PrepareCheckout: ['purchase-svc', 'core-svc'],
       ConfirmPayment: ['purchase-svc', 'core-svc'],
@@ -743,7 +746,7 @@ test('MS-08 proto 대조: ControlReceiver를 뺀 proto 서비스는 모두 정�
   for (const w of WORKLOADS) for (const m of control.methods) assert.equal(waypointAllowed(mesh, w, `/${CONTROL_SERVICE}/${m}`).size, 0, `${w} 웨이포인트에 ${CONTROL_SERVICE}/${m} 경로`);
 });
 
-test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 받는 주체가 정본 표(서비스·메서드 → 부르는 쪽)와 같다(TicketService/ListTickets는 web, IssueTickets에 web 없음, VoidTickets는 purchase-svc, 배상 송금은 아무도 없음)', () => {
+test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 받는 주체가 정본 표(서비스·메서드 → 부르는 쪽)와 같다(TicketService/ListTickets는 web, IssueTickets에 web 없음, VoidTickets는 purchase-svc, 배상 송금은 RequestCompensationTransfer만 purchase-svc이고 GetCompensationTransfer는 아무도 없음)', () => {
   const mesh = meshObjects();
   const table = methodTable();
   assert.ok(table.size > 80, `정본 표가 너무 작다(${table.size})`);
@@ -765,9 +768,10 @@ test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 �
   const wd = waypointAllowed(mesh, 'purchase-svc', '/peaket.purchase.v1.WithdrawalParticipantService/ProcessAccountWithdrawal');
   assert.ok(wd.has(principalOf('identity-svc')), 'ProcessAccountWithdrawal에 identity-svc가 없다');
   for (const n of ['web', 'purchase-svc', 'ops-svc', 'core-svc', ...GATEWAYS]) assert.ok(!wd.has(principalOf(n)) && !wd.has(ALL), `ProcessAccountWithdrawal에 ${n}`);
-  // 부르는 쪽 0개(경계): 배상 송금 메서드는 아무도 부르지 못한다
-  for (const m of protos().get('peaket.payment.v1.CompensationTransferService').methods)
-    assert.equal(waypointAllowed(mesh, 'payment-svc', `/peaket.payment.v1.CompensationTransferService/${m}`).size, 0, `CompensationTransferService/${m}에 규칙이 있다`);
+  // 배상 송금(ADR-0317 결정 1): 송금 요청은 purchase-svc 하나, 부르는 쪽 0개(경계)인 송금 조회는 아무도 부르지 못한다
+  const comp = (m) => sorted(waypointAllowed(mesh, 'payment-svc', `/peaket.payment.v1.CompensationTransferService/${m}`));
+  assert.deepEqual(comp('RequestCompensationTransfer'), [principalOf('purchase-svc')]);
+  assert.deepEqual(comp('GetCompensationTransfer'), [], 'CompensationTransferService/GetCompensationTransfer에 규칙이 있다');
 });
 
 // ===================== MS-10 기본 거부 =====================
@@ -1105,10 +1109,10 @@ test('MS-18 메시 없는 출처 칸의 꼴: 다른 네임스페이스의 부르
   assert.ok(peers > 50, `출처 칸이 너무 적다(${peers})`);
 });
 
-test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 14쌍과 ADR-0288 결정 8의 한 쌍(15쌍)마다 받는 쪽 REST 규칙에 부르는 쪽이 있고, 표에 없는 서비스 신원은 REST 규칙에 없다(게이트웨이 빼고)', () => {
+test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 15쌍(2026-11-22 보충 포함)과 ADR-0288 결정 8의 한 쌍(16쌍)마다 받는 쪽 REST 규칙에 부르는 쪽이 있고, 표에 없는 서비스 신원은 REST 규칙에 없다(게이트웨이 빼고)', () => {
   const mesh = meshObjects();
   const meshless = meshlessObjects();
-  assert.equal(INTERNAL_HTTP.length, 15);
+  assert.equal(INTERNAL_HTTP.length, 16);
   for (const [from, to] of INTERNAL_HTTP) {
     assert.ok(allowedOn(meshNodeAllow(mesh, to), REST_PORT(to)).has(principalOf(from)), `policies.yaml ${to} REST에 ${from}가 없다`);
     assert.equal(meshlessAllows(meshless, to, REST_PORT(to), IDENTITY[from]), true, `meshless ${to} REST에 ${from}가 닿지 못한다`);
@@ -1134,4 +1138,40 @@ test('PRF-050 PRF-137 ADR-0288 결정 8 생성 정책이 purchase-svc의 queue-s
     assert.ok(!allowedOn(allow, port).has(principalOf('purchase-svc')), `policies.yaml queue-svc ${port}에 purchase-svc가 닿는다`);
     assert.equal(meshlessAllows(meshless, 'queue-svc', port, IDENTITY['purchase-svc']), false, `meshless queue-svc ${port}에 purchase-svc가 닿는다`);
   }
+});
+
+// ===================== W12M-01 배상 송금 메서드 단위·purchase-svc → payment-svc REST(계획 docs/review/plans/W12-mesh.md §3) =====================
+
+const COMP_SVC = 'peaket.payment.v1.CompensationTransferService';
+
+test('W12M-01 ① 배상 송금은 메서드 단위다: payment-svc 웨이포인트의 RequestCompensationTransfer는 purchase-svc 주체 하나뿐(ops-svc·core-svc·web·게이트웨이 다섯 없음), GetCompensationTransfer는 받는 주체 0이고, 어느 규칙에도 서비스 통째 경로가 없다(ADR-0317 결정 1, docs/api/proto/README.md §3)', () => {
+  const mesh = meshObjects();
+  // 정본 proto의 메서드 둘(새 메서드가 생기면 정본에서 부르는 쪽을 찾아 이 시험을 고친다)
+  assert.deepEqual(sorted(protos().get(COMP_SVC)?.methods ?? []), ['GetCompensationTransfer', 'RequestCompensationTransfer'], `${COMP_SVC}의 proto 메서드`);
+  const req = waypointAllowed(mesh, 'payment-svc', `/${COMP_SVC}/RequestCompensationTransfer`);
+  assert.deepEqual(sorted(req), [principalOf('purchase-svc')], 'RequestCompensationTransfer의 주체');
+  for (const n of ['ops-svc', 'core-svc', 'web', 'payment-svc', 'identity-svc', ...GATEWAYS]) assert.ok(!req.has(principalOf(n)) && !req.has(ALL), `RequestCompensationTransfer에 ${n}`);
+  assert.deepEqual(sorted(waypointAllowed(mesh, 'payment-svc', `/${COMP_SVC}/GetCompensationTransfer`)), [], 'GetCompensationTransfer를 받는 주체가 있다(부르는 쪽 없음)');
+  const wide = [];
+  for (const p of mesh.filter((o) => o.kind === 'AuthorizationPolicy'))
+    for (const r of p.spec?.rules ?? []) for (const t of r.to ?? []) for (const pat of t.operation?.paths ?? []) if (pat === `/${COMP_SVC}/*`) wide.push(p.metadata?.name);
+  assert.deepEqual(wide, [], `/${COMP_SVC}/* 경로 규칙이 있는 정책(서비스 통째로 열면 GetCompensationTransfer까지 열린다)`);
+});
+
+test('W12M-01 ② purchase-svc → payment-svc REST: purchase-svc는 payment-svc REST 8080에 메시·메시 없는 둘 다 닿고 제어 50061·지표 9464에는 둘 다 닿지 않으며, purchase-svc 릴레이 파드·이름 라벨만 단 파드는 메시 없는 판에서 payment-svc REST에 닿지 않는다(ADR-0285 결정 9 보충, docs/features/transfer-refund.md §5 \'서킷 연결\')', () => {
+  const mesh = meshObjects();
+  const meshless = meshlessObjects();
+  const allow = meshNodeAllow(mesh, 'payment-svc');
+  const rest = REST_PORT('payment-svc');
+  assert.equal(rest, 8080);
+  assert.ok(allowedOn(allow, rest).has(principalOf('purchase-svc')), 'policies.yaml payment-svc REST에 purchase-svc가 없다');
+  assert.equal(meshlessAllows(meshless, 'payment-svc', rest, IDENTITY['purchase-svc']), true, 'meshless payment-svc REST에 purchase-svc가 닿지 못한다');
+  for (const port of [CONTROL_PORT, METRICS_PORT]) {
+    assert.ok(!allowedOn(allow, port).has(principalOf('purchase-svc')), `policies.yaml payment-svc ${port}에 purchase-svc가 닿는다`);
+    assert.equal(meshlessAllows(meshless, 'payment-svc', port, IDENTITY['purchase-svc']), false, `meshless payment-svc ${port}에 purchase-svc가 닿는다`);
+  }
+  const relay = { namespace: 'purchase', podLabels: { 'app.kubernetes.io/name': 'purchase-svc', 'app.kubernetes.io/component': 'outbox-relay' } };
+  const nameOnly = { namespace: 'purchase', podLabels: { 'app.kubernetes.io/name': 'purchase-svc' } };
+  assert.equal(meshlessAllows(meshless, 'payment-svc', rest, relay), false, 'meshless payment-svc REST에 purchase-svc 릴레이 파드가 닿는다');
+  assert.equal(meshlessAllows(meshless, 'payment-svc', rest, nameOnly), false, 'meshless payment-svc REST에 이름 라벨만 단 purchase-svc 파드가 닿는다');
 });

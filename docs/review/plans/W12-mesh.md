@@ -77,7 +77,11 @@
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+- 까닭: 원천이 `CompensationTransferService`를 통째(`/*`)로 purchase-svc에 열어, 부르는 쪽이 없는 `GetCompensationTransfer`까지 purchase-svc를 받는다.
+- `node --test deploy/platform/mesh/test/*.test.mjs`(시험만 고친 트리, 201d8cd5e 위): 시험 24·통과 22·실패 2.
+  - MS-09: `payment-svc /peaket.payment.v1.CompensationTransferService/GetCompensationTransfer`가 `[purchase-svc]`를 받는다(기대 `[]`).
+  - W12M-01 ①: `GetCompensationTransfer를 받는 주체가 있다(부르는 쪽 없음)`, 같은 `[purchase-svc]`.
+  - MS-10·MS-19·W12M-01 ②는 통과(정본 표를 고쳐 원천과 맞음).
 
 ## 구현 메모
 
@@ -85,7 +89,7 @@
 
 ## 시험 결과
 
-(시험 담당이 채운다)
+(구현 뒤 시험 담당이 채운다)
 
 ## 리뷰
 
@@ -100,3 +104,4 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12mesh-plan-8d4c | claude-opus-5-5 | 2026-11-22T00:15+09:00 | 2026-11-22T00:29+09:00 |
+| test | w12mesh-test-2f9a | claude-opus-5-5 | 2026-11-22T00:31+09:00 | 2026-11-22T00:33+09:00 |
