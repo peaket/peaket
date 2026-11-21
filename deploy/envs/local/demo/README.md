@@ -45,6 +45,7 @@ bash D:/ticketpass-locks/lock.sh drop docker lane4-BAT-087
 - **직접 SQL(넣기)**: 공연장(`place`) 행과 스태프 배정(`staff_assignment`) 행. 둘 다 공개 API가 없다. 스태프 배정은 '초대 수락이 끝난 `ASSIGNED`' 상태로 넣는다.
 - **직접 SQL(읽기)**: 기존 공연·회차·스태프를 찾는 조회. 두 번째 적용에서 중복을 만들지 않으려면 필요하다.
 - **판매 심사 제출**: BAT-616이 만든 `POST /v1/partner/productions/{productionId}/sale-review`를 쓴다. 고치기 전에는 이 경로가 없어 시드가 첫 공연에서 멈췄다.
+- **좌석맵 판 파일 복사(2026-11-21, BAT-086 고침)**: 공연·회차·좌석맵은 공개·관리 API로만 만들지만, purchase-svc는 자기 파드의 `PEAKET_SEATMAP_DIR`(`/tmp/seatmaps`)에서 회차 판 파일 `{eventId}.json`을 읽는다. core-svc는 자기 파드의 `/var/peaket/public`에만 쓰므로, 시드가 승인 전에 `kubectl exec -i deploy/bundle`로 같은 바이트(시드가 PUT한 배치 + 회차 1인 한도·판매 끝·등급 가격·회차별 좌석 UUID)를 채운다. 이 파일이 없으면 승인 뒤 core의 `sale-open`이 `409 sale-not-publishable(sale_open_no_layout)`로 닫혀 기기 배치가 503이 된다. **로컬 데모 전용 예외**이며 운영·클라우드 데모에는 쓰지 않는다(운영은 회차 설정을 core에서 받는 LCH-080 길이 판 파일 자리를 정한다).
 - 공연·회차·좌석맵·기기는 여전히 공개·관리 API로만 만든다(감사 기록·Outbox 유지).
 - 무대 쪽 예외: `bundle`은 `PEAKET_BUNDLE_MODE=split`(한 파드 안 gRPC 포트 충돌 회피), `ops-svc`·`realtime-gw`는 `nodeSelector: null`(차트 기본 노드 셀렉터를 지운다), web은 읽기 전용 루트 위에 `.next/static`·`serwist`·`cache`·`public`을 빈 볼륨으로 연다(시작할 때 복사하는 자리), partner는 데모 전용 `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`를 빌드·실행에 같은 값으로 쓴다.
 - 이 예외는 `docs/review/plans/BAT-087.md`의 '고침' 절과 `deploy/envs/demo/README.md`에도 적는다.

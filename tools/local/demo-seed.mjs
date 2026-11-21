@@ -203,6 +203,56 @@ export function expandSeatMap(seed, map) {
   return { canvas: canvasOf(base), sections };
 }
 
+/**
+ * 시드 회차 하나의 purchase-svc 좌석맵 판 파일 내용(JSON). purchase-svc는 `PEAKET_SEATMAP_DIR`의
+ * `{eventId}.json`을 읽고 `perAccountLimit`·`saleEndsAt`·선택 `tierPrices`·`layout`을 요구한다
+ * (services/purchase-svc/src/modules/inventory/domain/seat-layout.ts `parseEventSeatMapFile`).
+ * 데모 재생기의 writeSeatMap과 같은 규칙을 쓴다: 같은 회차·좌석은 같은 UUID이고, 시드의 읽기 쉬운 ID는 label에 남긴다.
+ * @param {any} seed 펼친 시각의 시드(resolveSeedTimes)
+ * @param {any} event 시드 회차
+ * @param {any} map 시드 좌석맵
+ * @param {string} eventId core가 만든 회차 ID
+ */
+export function purchaseSeatMapFile(seed, event, map, eventId) {
+  const expanded = expandSeatMap(seed, map);
+  for (const sec of expanded.sections) {
+    for (const seat of sec.seats) {
+      seat.label = seat.seatId;
+      seat.seatId = demoUuid(`seat:${eventId}:${seat.seatId}`);
+    }
+  }
+  const startsAtMs = Date.parse(event.startAt);
+  if (!Number.isFinite(startsAtMs)) throw new Error(`회차 ${event.key}의 시작 시각을 읽지 못했다: ${event.startAt}`);
+  return {
+    perAccountLimit: Number(event.perPersonLimit ?? 4),
+    // 회차 판매는 시작 24시간 전에 끝난다(core saleEndsAt과 같은 값). 화면·구매 세션 서명의 판매 구간과 맞춘다
+    saleEndsAt: new Date(startsAtMs - SALE_END_BEFORE_START_MS).toISOString(),
+    tierPrices: Object.fromEntries(Object.entries(event.prices ?? {}).map(([tierId, price]) => [tierId, Number(price)])),
+    // core가 첫 발행 때 쓰는 판 번호는 1이다(재생기의 writeSeatMap과 같다)
+    layout: { layoutVersion: 1, sections: expanded.sections },
+  };
+}
+
+/**
+ * 시드 회차들의 purchase-svc 좌석맵 판 파일을 `write(path, text)`로 쓴다.
+ * 시드는 core의 공개 파일(`/var/peaket/public`)만 만들 수 있어 purchase 파드의 자리를 따로 채운다(로컬 데모 전용).
+ * @param {any} seed 펼친 시각의 시드
+ * @param {Array<{ eventKey: string, eventId: string }>} targets 회차 ID가 있는 시드 회차
+ * @param {(path: string, text: string) => void} write 파일 쓰기
+ * @returns {number} 쓴 파일 수
+ */
+export function syncPurchaseSeatMaps(seed, targets, write) {
+  let written = 0;
+  for (const t of targets) {
+    const event = seed.events.find((e) => e.key === t.eventKey);
+    const map = seed.seatMaps.find((m) => m.eventKey === t.eventKey);
+    if (!event || !map) throw new Error(`시드에 회차 ${t.eventKey}의 좌석맵이 없다`);
+    write(`/tmp/seatmaps/${t.eventId}.json`, JSON.stringify(purchaseSeatMapFile(seed, event, map, t.eventId)));
+    written += 1;
+  }
+  return written;
+}
+
 /** 구역 배치가 캔버스를 넘지 않게 필요한 크기로 늘린다(구역은 두 열로 놓는다) */
 function canvasOf(base) {
   const sections = base.sections ?? [];
@@ -230,6 +280,14 @@ async function psql(db, statement) {
     .split(/\r?\n/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/**
+ * bundle 파드의 한 경로에 파일 하나를 쓴다(로컬 데모 전용 예외). 표준 입력으로 넘긴다.
+ * purchase-svc의 `PEAKET_SEATMAP_DIR=/tmp/seatmaps`는 core의 `/var/peaket/public`과 다른 파드·자리다.
+ */
+function writePurchaseSeatMap(path, text) {
+  kubectl(['-n', 'purchase', 'exec', '-i', 'deploy/bundle', '--', 'sh', '-c', `mkdir -p '${dirname(path)}' && cat > '${path}'`], { input: text, quiet: true });
 }
 
 /** 부트스트랩 Job 하나를 지우고 다시 만든 뒤 끝날 때까지 본다 */
@@ -414,7 +472,7 @@ export async function applySeed(o = {}) {
   const ops = await demoAuth('admin', 'sujin');
   const opsHeaders = { cookie: cookieHeader(ops.cookies), origin: demoOrigins().console, 'sec-fetch-site': 'same-origin' };
 
-  const counts = { productions: 0, events: 0, seatMaps: 0, staff: 0, devices: 0 };
+  const counts = { productions: 0, events: 0, seatMaps: 0, purchaseSeatMaps: 0, staff: 0, devices: 0 };
   const places = await ensurePlaces(seed, promoterId);
   const known = new Map((await readProductions(promoterId)).map((p) => [p.title, p]));
   const eventIds = {};
@@ -486,6 +544,13 @@ export async function applySeed(o = {}) {
     });
     counts.seatMaps += 1;
   }
+
+  // purchase-svc는 자기 파드의 PEAKET_SEATMAP_DIR(/tmp/seatmaps)에서 회차 판 파일({eventId}.json)을 읽는다.
+  // core의 /var/peaket/public과 다른 자리라 시드가 채우지 않으면 승인 뒤 core의 sale-open이
+  // 409 sale-not-publishable(sale_open_no_layout)로 닫혀 기기 배치·회차 판매 설정이 503/404로 멈춘다.
+  // 로컬 데모 전용 예외다(운영은 회차 설정을 core에서 받는 LCH-080 길이 판 파일을 정한다)
+  const seatMapTargets = seed.seatMaps.map((m) => ({ eventKey: m.eventKey, eventId: eventIds[m.eventKey] })).filter((t) => t.eventId);
+  counts.purchaseSeatMaps = syncPurchaseSeatMaps(seed, seatMapTargets, writePurchaseSeatMap);
 
   // 스태프 배정(파트너 초대 API가 없어 직접 SQL, 로컬 데모 전용 예외)
   const staffEmails = [...new Set(seed.staff.map((s) => seed.accounts.find((a) => a.key === s.accountKey)?.email).filter(Boolean))];

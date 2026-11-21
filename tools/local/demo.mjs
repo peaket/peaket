@@ -263,6 +263,15 @@ function runNodeJson(script, args, extraEnv = {}) {
   return { status: r.status ?? 1, json, text };
 }
 
+/** 자식 프로세스 출력의 마지막 비어 있지 않은 줄. 실패 측정에 까닭을 남길 때 쓴다(비밀은 측정 쪽 redact가 가린다) */
+export function lastOutputLine(text) {
+  const lines = String(text ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.at(-1) ?? '';
+}
+
 /** 데모 클러스터 이름을 자식 프로세스와 같은 환경 값으로 맞춘다 */
 function demoEnv(o) {
   return { ...process.env, PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster };
@@ -320,6 +329,7 @@ function measurementOf(report, o, cleanup, outcome) {
     scenarios: (report?.scenarios ?? []).map((s) => ({ ...s })),
     cleanup,
     outcome,
+    ...(report?.failure ? { failure: report.failure } : {}),
     command: `node tools/local/demo.mjs ${o.cmd}${o.skipBuild ? ' --skip-build' : ''}${o.keep ? ' --keep' : ''}`,
     notes: [
       'S1·S3·S4·S6은 구매 세션 서명(ECDH+HKDF)으로 실제 API와 데모 PG 시뮬레이터를 끝까지 부른다.',
@@ -385,7 +395,12 @@ async function runAll(o, log) {
   const seed = runNodeJson('cluster.mjs', ['demo-seed', '--apply', '--json'], { PEAKET_CLUSTER: o.cluster, PEAKET_DEMO_CLUSTER: o.cluster });
   if (seed.status !== 0) {
     outcome = `실패(시드 exit ${seed.status})`;
-    report = { runId, coldStartSeconds: undefined, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '시드 실패' })) };
+    // 자식의 표준 출력·오류를 버리면 '실패(시드 exit 1)'만 남는다. 어느 명령이 무엇을 뱉었는지 측정에 남긴다
+    const seedCommand = 'node tools/local/cluster.mjs demo-seed --apply --json';
+    const seedLast = lastOutputLine(seed.text);
+    const failure = seedLast ? `명령 \`${seedCommand}\` · 마지막 출력: ${seedLast}` : `명령 \`${seedCommand}\` · 출력 없음`;
+    log(`  시드 실패: ${seedLast || '출력 없음'}`);
+    report = { runId, coldStartSeconds: undefined, failure, scenarios: SCENARIOS.map((s) => ({ id: s.id, title: s.title, result: '미실행', reason: '시드 실패' })) };
     cleanup = o.keep ? '남김(--keep)' : cleanupStage(o.cluster);
     write(report);
     return 1;

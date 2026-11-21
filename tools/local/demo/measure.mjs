@@ -23,7 +23,7 @@ export function seconds(v) {
  * @param {{
  *   commit: string, date: string, pc: string, tools: Record<string, string>,
  *   coldStartSeconds?: number, totalSeconds?: number, scenarios: Array<{ id: string, title: string, startedAt?: string, endedAt?: string, seconds?: number, result: '통과'|'실패'|'미실행', failedStep?: string, reason?: string }>,
- *   cleanup?: string, command?: string, notes?: string[], outcome?: string,
+ *   cleanup?: string, command?: string, notes?: string[], outcome?: string, failure?: string,
  * }} r
  */
 export function measurementText(r) {
@@ -38,6 +38,8 @@ export function measurementText(r) {
   lines.push(`- **전체 시간**: ${seconds(r.totalSeconds)} (명령 시작 ~ 재생 끝)`);
   lines.push(`- **정리**: ${r.cleanup ?? '—'}`);
   lines.push(`- **결과**: ${r.outcome ?? (r.scenarios.every((s) => s.result === '통과') ? '통과' : '실패')}`);
+  // 실패한 자식 명령과 마지막 출력 줄. '실패(시드 exit 1)'만 남기면 까닭을 잃는다(계획 '좌석맵 연결 고침')
+  if (r.failure) lines.push(`- **실패 내용**: ${r.failure}`);
   lines.push('', '## 시나리오별', '', '| # | 시나리오 | 시작 | 끝 | 걸린 시간 | 결과 | 실패 단계·까닭 |', '| --- | --- | --- | --- | --- | --- | --- |');
   for (const s of r.scenarios) {
     const why = s.result === '통과' ? '' : [s.failedStep ? `단계 ${s.failedStep}` : '', s.reason ?? ''].filter(Boolean).join(' · ');
