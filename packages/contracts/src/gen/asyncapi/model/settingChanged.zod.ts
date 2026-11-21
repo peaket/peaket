@@ -6,9 +6,12 @@
  */
 import * as zod from 'zod';
 
+export const settingChangedValueEightOneInMax = 10000;
+
+
 export const SettingChanged = zod.object({
   "commandId": zod.string(),
-  "key": zod.enum(['BOT_LEVEL', 'LOG_LEVEL', 'FEATURE_FLAG', 'DEGRADED_MODE', 'LOBBY_BANNER', 'PG_ASSIGNMENT', 'AUTOMATION_STOP']).describe('FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 쓰지 않는다(명령 11은 제어 gRPC로만 admission-ctrl에 보내고 이 토픽으로는 보내지 않는다, docs/features/control-tower.md §3·§5, ADR-0103 결정 1, 2026-10-29 바로잡음. 지난 판과 맞추려고 기호만 남긴다). PG_ASSIGNMENT는 회차 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044)'),
+  "key": zod.enum(['BOT_LEVEL', 'LOG_LEVEL', 'FEATURE_FLAG', 'DEGRADED_MODE', 'LOBBY_BANNER', 'PG_ASSIGNMENT', 'AUTOMATION_STOP', 'LOG_SAMPLING']).describe('FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 쓰지 않는다(명령 11은 제어 gRPC로만 admission-ctrl에 보내고 이 토픽으로는 보내지 않는다, docs/features/control-tower.md §3·§5, ADR-0103 결정 1, 2026-10-29 바로잡음. 지난 판과 맞추려고 기호만 남긴다). PG_ASSIGNMENT는 회차 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044). LOG_SAMPLING은 온세일 구간의 정상 로그 줄 표본 비율이다(운영 명령이 아니라 ops-svc의 자동 조치, 범위 PLATFORM, 추천 적용 2026-11-22, ADR-0334 결정 1)'),
   "scope": zod.string().describe('PLATFORM 또는 회차 ID. 결제사 지정·전환은 회차 단위(결제사 지정은 회차 칸, ADR-0093 결정 2)'),
   "value": zod.union([zod.object({
   "level": zod.enum(['RELAXED', 'STANDARD', 'AGGRESSIVE']),
@@ -26,8 +29,10 @@ export const SettingChanged = zod.object({
   "fallbackPg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish()
 }).describe('PG_ASSIGNMENT(명령 12). 회차의 기본 결제사와 대체 결제사'),zod.object({
   "stopped": zod.boolean()
-}).describe('AUTOMATION_STOP(명령 11)')]).describe('키마다 정한 값의 레코드(Avro 유니온, 추천 적용 2026-10-28, 기술 검토 낮음-026. 문자열 JSON이던 것을 바꿔 호환 검사가 값 모양 변화를 잡게 했다). 어느 갈래인지는 key가 정한다. 대상(기능 플래그 이름, 로그 레벨을 바꿀 서비스, Degraded 모드 이름)은 메시지 키에 있다. 재평가 모드는 강도와 따로 고르는 명령 5의 별도 매개변수이고, ENFORCE로 바꾸는 것은 commander만 한다(추천 적용 2026-10-20, ADR-0073)'),
-  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('로그 레벨 30분 자동 복귀 등'),
+}).describe('AUTOMATION_STOP(명령 11)'),zod.object({
+  "oneIn": zod.int().min(1).max(settingChangedValueEightOneInMax)
+}).describe('LOG_SAMPLING(ops-svc 자동 조치, 명령 번호 없음). 정상 2xx 로그 줄을 oneIn건에 1건 남긴다(4xx·5xx 등 전수 규칙은 그대로, docs/observability.md §7). expiresAt(온세일 윈도우 끝)이 지나면 시작 설정 값(PEAKET_LOG_SAMPLE_ONE_IN)으로 돌아간다(추천 적용 2026-11-22, ADR-0334 결정 1·2)')]).describe('키마다 정한 값의 레코드(Avro 유니온, 추천 적용 2026-10-28, 기술 검토 낮음-026. 문자열 JSON이던 것을 바꿔 호환 검사가 값 모양 변화를 잡게 했다). 어느 갈래인지는 key가 정한다. 대상(기능 플래그 이름, 로그 레벨을 바꿀 서비스, Degraded 모드 이름, 로그 표본을 바꿀 서비스)은 메시지 키에 있다. 로그 표본의 메시지 키는 `PLATFORM:LOG_SAMPLING:*`(모든 서비스)이고 마지막 마디가 서비스 이름이면 그 서비스만이다(ADR-0334 결정 1). 재평가 모드는 강도와 따로 고르는 명령 5의 별도 매개변수이고, ENFORCE로 바꾸는 것은 commander만 한다(추천 적용 2026-10-20, ADR-0073)'),
+  "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('로그 레벨 30분 자동 복귀, 로그 표본의 온세일 윈도우 끝(ADR-0334) 등'),
   "actor": zod.uuid().describe('명령 기록의 가명 참조 actor_ref(UUIDv4, ADR-0149). 관리 계정 ID를 싣지 않는다. 압축 토픽이라 키마다 마지막 사건이 오래 남는다(ADR-0150)'),
   "occurredAt": zod.iso.datetime({"offset":true}),
   "eventKey": zod.uuid().describe('중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값')

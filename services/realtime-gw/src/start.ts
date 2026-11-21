@@ -45,6 +45,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let warn: (obj: object, msg: string) => void = () => {};
   let service: Awaited<ReturnType<typeof createService>> | undefined;
   let subscriber: RedisChannelSubscriber | undefined;
+  let controlSync: { close(): Promise<void> } | undefined;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
   try {
@@ -150,6 +151,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
       if (result === 'ok' || result === 'bad' || result === 'unrouted') messages.inc({ result }, v);
     });
 
+    // 제어 설정 토픽(로그 레벨·온세일 로그 표본, ADR-0334 결정 2): 듣기 전에 control.settings를 읽기 시작한다(다 읽어야 /ready 200).
+    // 입장 토큰만 받고 sid가 없어 종료 세션 토픽은 읽지 않는다(ADR-0333 결정 1, docs/features/identity.md §3 '서비스에 잇기'). 브로커가 없으면 local·ci만
+    // 경고로 끄고 그 밖은 여기서 시작에 실패한다. 이 도우미가 Kafka 클라이언트(네이티브 모듈)를 싣는다. 서비스를 닫은 뒤 끈다
+    const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+    controlSync = startServiceControlSync(started, env, { sessions: false });
+    const startedControlSync = controlSync;
     const listened = await started.listen();
     tickTimer = setInterval(() => hub.tick(), BATCH_INTERVAL_MS);
     refreshTimer = setInterval(() => void layout.refresh(), LAYOUT_REFRESH_MS);
@@ -168,6 +175,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         await started.close();
       } finally {
         if (tickTimer) clearInterval(tickTimer);
+        await startedControlSync?.close();
         await startedSubscriber.close();
       }
     };
@@ -191,6 +199,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     if (tickTimer) clearInterval(tickTimer);
     if (refreshTimer) clearInterval(refreshTimer);
     await service?.close().catch(() => {});
+    await controlSync?.close().catch(() => {});
     await subscriber?.close().catch(() => {});
     throw err;
   }

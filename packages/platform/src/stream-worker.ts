@@ -4,7 +4,8 @@
 // - Outbox 보내기 어댑터: 받은 순서대로, 키·값·머리 그대로. 생산 span은 사건마다 쓴 요청의 추적에 링크한다(observability §2)
 // - 키 단위 소비자 실행기: KeyedPartition에 넘기고 1초 [가정]마다·재조정·종료 때 '앞 사건이 모두 끝난 위치'를 커밋한다. 처리는 소비 span 안
 // - 방송형 읽기: 파드마다 그룹, 커밋 없음, 준 위치부터(ADR-0103 결정 3)
-// - 서비스의 제어 토픽 소비 도우미 startServiceControlSync: 설정·종료 세션 두 토픽을 방송형으로 읽어 종료 세션 목록을 채운다(ADR-0333 결정 2)
+// - 서비스의 제어 토픽 소비 도우미 startServiceControlSync: 설정·종료 세션 두 토픽을 방송형으로 읽어 종료 세션 목록을 채운다(ADR-0333 결정 2).
+//   신원 처리기가 없는 서비스는 sessions: false로 설정 토픽만 읽는다(ADR-0334 결정 2)
 import { createRequire } from 'node:module';
 import { hostname } from 'node:os';
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, propagation, trace, type Link } from '@opentelemetry/api';
@@ -532,18 +533,26 @@ export type ControlSyncConfig = { enabled: false; warning: string } | { enabled:
  * 제어 토픽 소비 설정을 환경 값에서 읽는다(서비스 소비자 설정 kafkaConsumersFromEnv와 같은 규칙).
  * PEAKET_KAFKA_BROKERS가 없거나 빈칸뿐이면 local·ci만 꺼진 설정이고 그 밖의 환경(값 없음 포함)은 던진다(시작 실패).
  * 있으면 쉼표로 나눈 '호스트:포트'여야 하고, 틀린 조각은 값 대신 몇 번째인지만 알린다(주소에 사용자 이름 등이 섞여 들 수 있다).
- * 파드 이름은 PEAKET_POD → HOSTNAME → 호스트 이름이고 64자까지 쓴다
+ * 파드 이름은 PEAKET_POD → HOSTNAME → 호스트 이름이고 64자까지 쓴다. sessions: false(설정 토픽만 읽는 서비스)는 알림 글만 다르다
  * @throws PlatformConfigError 위의 시작 실패, PEAKET_ENV 없음. kafkaAuthFromEnv의 오류(운영 쪽 환경에 PEAKET_KAFKA_AUTH 없음 등)
  */
-export function controlSyncConfigFromEnv(service: string, env: Record<string, string | undefined>): ControlSyncConfig {
+export function controlSyncConfigFromEnv(service: string, env: Record<string, string | undefined>, o: { sessions?: boolean } = {}): ControlSyncConfig {
   const raw = env.PEAKET_KAFKA_BROKERS?.trim();
   const peaketEnv = env.PEAKET_ENV;
+  const settingsOnly = o.sessions === false;
   if (!raw) {
     if (peaketEnv !== undefined && CONTROL_SYNC_OPTIONAL_ENVS.includes(peaketEnv)) {
-      return { enabled: false, warning: `PEAKET_KAFKA_BROKERS가 없어 제어 토픽(설정·종료 세션) 소비를 켜지 않았다: 끝난 세션의 토큰을 이 서비스가 막지 않는다(PEAKET_ENV=${peaketEnv}에서만 허락한다)` };
+      const warning = settingsOnly
+        ? `PEAKET_KAFKA_BROKERS가 없어 제어 설정 토픽 소비를 켜지 않았다: 로그 레벨·로그 표본 설정을 이 서비스가 받지 않는다(PEAKET_ENV=${peaketEnv}에서만 허락한다)`
+        : `PEAKET_KAFKA_BROKERS가 없어 제어 토픽(설정·종료 세션) 소비를 켜지 않았다: 끝난 세션의 토큰을 이 서비스가 막지 않는다(PEAKET_ENV=${peaketEnv}에서만 허락한다)`;
+      return { enabled: false, warning };
     }
-    // 조용히 소비 없이 뜨지 않는다: 끝난 세션의 액세스 토큰이 수명(15분)까지 통한다
-    throw new PlatformConfigError(`PEAKET_KAFKA_BROKERS가 없다(PEAKET_ENV=${peaketEnv || '(없음)'}에서는 종료 세션 목록을 채울 제어 토픽 소비가 있어야 한다. local·ci만 없이 뜬다)`);
+    // 조용히 소비 없이 뜨지 않는다: 끝난 세션의 액세스 토큰이 수명(15분)까지 통한다(설정만 읽는 서비스는 온세일 로그 표본·로그 레벨 설정을 놓친다)
+    throw new PlatformConfigError(
+      settingsOnly
+        ? `PEAKET_KAFKA_BROKERS가 없다(PEAKET_ENV=${peaketEnv || '(없음)'}에서는 제어 설정 토픽 소비가 있어야 한다. local·ci만 없이 뜬다)`
+        : `PEAKET_KAFKA_BROKERS가 없다(PEAKET_ENV=${peaketEnv || '(없음)'}에서는 종료 세션 목록을 채울 제어 토픽 소비가 있어야 한다. local·ci만 없이 뜬다)`,
+    );
   }
   const pieces = raw.split(',').map((s) => s.trim());
   const brokers = pieces.filter(Boolean);
@@ -562,17 +571,23 @@ export interface ServiceControlSync {
   close(): Promise<void>;
 }
 
-/** 시험이 시간을 줄일 때만 쓴다(서비스 시작 파일은 넘기지 않는다) */
-export type ServiceControlSyncOptions = Pick<ControlSyncOptions, 'degradeAfterMs' | 'retryMs' | 'measureMs' | 'reconcileMs'>;
+/**
+ * 시간 값(degradeAfterMs 등)은 시험이 시간을 줄일 때만 쓴다(서비스 시작 파일은 넘기지 않는다).
+ * sessions: false는 게이트웨이 신원 머리를 받는 처리기가 없는 서비스(trust-svc·realtime-gw·admission-ctrl)의 시작 파일이 넘긴다(ADR-0334 결정 2)
+ */
+export type ServiceControlSyncOptions = Pick<ControlSyncOptions, 'degradeAfterMs' | 'retryMs' | 'measureMs' | 'reconcileMs' | 'sessions'>;
 
 /**
- * 신원을 받는 서비스의 시작 파일이 createService 뒤, listen 전에 부른다(ADR-0333 결정 2). control.settings와
+ * 서비스의 시작 파일이 createService 뒤, listen 전에 부른다(ADR-0333 결정 2). control.settings와
  * control.sessions-terminated를 파드마다 방송형으로 읽어(kafkaBroadcastSource) 종료 세션을 service.auth에 넣고, 두 토픽을 다 읽어야
- * /ready가 200이다(startControlSync). 꺼진 설정(local·ci, 브로커 없음)이면 경고 한 줄을 남기고 undefined를 돌려준다
+ * /ready가 200이다(startControlSync). 꺼진 설정(local·ci, 브로커 없음)이면 경고 한 줄을 남기고 undefined를 돌려준다.
+ * sessions: false면 control.settings만 읽고(로그 레벨·로그 표본), 종료 세션 소비를 켰다는 표시(service.controlSync.started)는 세우지 않는다
+ * (신원 처리기를 더하면 listen의 빠뜨림 막기가 그대로 걸린다, ADR-0333 결정 3·ADR-0334 결정 2)
  * @throws PlatformConfigError controlSyncConfigFromEnv의 시작 실패
  */
 export function startServiceControlSync(service: PlatformService, env: Record<string, string | undefined>, o: ServiceControlSyncOptions = {}): ServiceControlSync | undefined {
-  const cfg = controlSyncConfigFromEnv(service.name, env);
+  const sessions = o.sessions !== false;
+  const cfg = controlSyncConfigFromEnv(service.name, env, { sessions });
   if (!cfg.enabled) {
     service.logger.warn({ dep: 'kafka', kind: 'control-sync' }, cfg.warning);
     return undefined;
@@ -580,8 +595,8 @@ export function startServiceControlSync(service: PlatformService, env: Record<st
   const source = kafkaBroadcastSource({ brokers: cfg.brokers, service: service.name, pod: cfg.pod, env: cfg.env, ...(cfg.auth ? { auth: cfg.auth } : {}) });
   const timing: ServiceControlSyncOptions = {};
   for (const k of ['degradeAfterMs', 'retryMs', 'measureMs', 'reconcileMs'] as const) if (o[k] !== undefined) timing[k] = o[k];
-  const sync = startControlSync(service, { source, codec: controlEventCodec, ...timing });
-  service.controlSync.started = true;
+  const sync = startControlSync(service, { source, codec: controlEventCodec, ...timing, sessions });
+  if (sessions) service.controlSync.started = true;
   let closing: Promise<void> | undefined;
   return {
     sync,
