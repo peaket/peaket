@@ -40,6 +40,12 @@ beforeAll(async () => {
   await admin.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: A });
   await admin.db.insert(production).values({ id: PROD_A, promoterId: A, placeId: PLACE, title: 'LUMEN 콘서트', genre: '콘서트', saleReview: 'DRAFT' });
   await admin.db.insert(event).values({ id: EVENT_A, productionId: PROD_A, promoterId: A, venueId: null, openAt: new Date('2027-01-01T00:00:00Z'), startsAt: new Date('2027-02-01T10:00:00Z'), endsAt: new Date('2027-02-01T12:00:00Z') });
+  // 파트너 HTTP로 게시하는 판매자마다 지금 계약(기간 끝이 열림). 0042 트리거가 게시 상품 수수료율을 계약에서 정한다(ADR-0338 결정 4). 조립의 FixedCommissionRate(1000)와 같은 값
+  await admin.pool.query(
+    `insert into promoter_contract (id, promoter_id, commission_rate_bp, guarantee_rate_bp, guarantee_kind, valid_during)
+     values ($1, $2, 1000, 1000, 'DEPOSIT', tstzrange('2026-01-01T00:00:00Z', NULL, '[)')), ($3, $4, 1000, 1000, 'DEPOSIT', tstzrange('2026-01-01T00:00:00Z', NULL, '[)'))`,
+    [randomUUID(), A, randomUUID(), B],
+  );
   process.env.PEAKET_INTERNAL_TOKEN = 'int-test-token';
   svc = await createService({
     name: 'core-svc',
@@ -102,14 +108,15 @@ describe('shop·notify PostgreSQL [BAT-610 R-567]', () => {
       { tablename: 'webhook_delivery', rowsecurity: true },
       { tablename: 'webhook_endpoint', rowsecurity: true },
     ]);
+    // 표 단위 권한만 본다(0042가 상품·웹훅 끝점의 고치기를 칸 단위로 좁혔다). 칸 권한은 AZ-T18 ⑦·⑧자
     const grants = await admin.pool.query(
       "select table_name, string_agg(privilege_type, ',' order by privilege_type) as privileges from information_schema.role_table_grants where grantee = 'core_partner' and table_name in ('product','product_stock','webhook_endpoint','webhook_delivery') group by table_name order by table_name",
     );
     expect(grants.rows).toEqual([
-      { table_name: 'product', privileges: 'INSERT,SELECT,UPDATE' },
+      { table_name: 'product', privileges: 'INSERT,SELECT' },
       { table_name: 'product_stock', privileges: 'DELETE,INSERT,SELECT,UPDATE' },
       { table_name: 'webhook_delivery', privileges: 'INSERT,SELECT,UPDATE' },
-      { table_name: 'webhook_endpoint', privileges: 'INSERT,SELECT,UPDATE' },
+      { table_name: 'webhook_endpoint', privileges: 'INSERT,SELECT' },
     ]);
     await expect(migrateCore(pg.url)).resolves.toBeUndefined();
   });
@@ -266,17 +273,18 @@ describe('shop·notify PostgreSQL [BAT-610 R-567]', () => {
     const grants = await admin.pool.query(
       "select table_name, string_agg(privilege_type, ',' order by privilege_type) as privileges from information_schema.role_table_grants where grantee = 'core_partner' and table_name in ('merch_order','merch_order_item','attendee_export') group by table_name order by table_name",
     );
+    // 표 단위 권한만 본다(0042가 파트너의 굿즈 주문 넣기·고치기를 거두고 팬 경로의 웹훅 끝점 고치기를 칸 단위로 좁혔다). 칸 권한은 AZ-T18 ⑦
     expect(grants.rows).toEqual([
       { table_name: 'attendee_export', privileges: 'INSERT,SELECT,UPDATE' },
-      { table_name: 'merch_order', privileges: 'INSERT,SELECT,UPDATE' },
-      { table_name: 'merch_order_item', privileges: 'INSERT,SELECT,UPDATE' },
+      { table_name: 'merch_order', privileges: 'SELECT' },
+      { table_name: 'merch_order_item', privileges: 'SELECT' },
     ]);
     const appGrants = await admin.pool.query(
       "select table_name, string_agg(privilege_type, ',' order by privilege_type) as privileges from information_schema.role_table_grants where grantee = 'core_app' and table_name in ('webhook_delivery','webhook_endpoint') group by table_name order by table_name",
     );
     expect(appGrants.rows).toEqual([
       { table_name: 'webhook_delivery', privileges: 'INSERT,SELECT,UPDATE' },
-      { table_name: 'webhook_endpoint', privileges: 'SELECT,UPDATE' },
+      { table_name: 'webhook_endpoint', privileges: 'SELECT' },
     ]);
     const payload = await admin.pool.query("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'webhook_delivery' and column_name = 'payload'");
     expect(payload.rows).toHaveLength(1);

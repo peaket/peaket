@@ -119,6 +119,11 @@ beforeAll(async () => {
   appDb = await loginFor(admin, pg, 'core_app_login', 'core_app', 12);
   partnerDb = await loginFor(admin, pg, 'core_partner_login', 'core_partner', 4);
   await admin.db.insert(promoter).values({ id: SELLER, legalName: '(주)루멘굿즈' });
+  // 파트너 HTTP로 게시하는 판매자의 지금 계약(기간 끝이 열림). 0042 트리거가 게시 상품 수수료율을 계약에서 정한다(ADR-0338 결정 4). 조립의 FixedCommissionRate(1000)와 같은 값
+  await admin.pool.query(
+    `insert into promoter_contract (id, promoter_id, commission_rate_bp, guarantee_rate_bp, guarantee_kind, valid_during) values ($1, $2, 1000, 1000, 'DEPOSIT', tstzrange('2026-01-01T00:00:00Z', NULL, '[)'))`,
+    [randomUUID(), SELLER],
+  );
   valkey = await startValkey();
   redis = await createHotRedis({ url: valkey.url });
   stock = new RedisMerchStock(redis);
