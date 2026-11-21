@@ -10,6 +10,7 @@ import { serviceLayerConfigs } from './packages/config/eslint/service-layers.mjs
 import { serviceSecurityConfigs, serviceSecurityPlugin } from './packages/config/eslint/service-security.mjs';
 import { webCompatConfigs, tsParser } from './packages/config/eslint/web-compat.mjs';
 import { webSecurityConfigs, webSecurityPlugin } from './packages/config/eslint/web-security.mjs';
+import { webBoundaryConfigs } from './packages/config/eslint/web-boundaries.mjs';
 
 /** 화면 코드(앱과 화면용 패키지의 소스). 브라우저 지원 린트를 건다(docs/frontend.md §1.5, BAS-210) */
 export const WEB_FILES = [
@@ -122,6 +123,8 @@ export default [
   ...webCompatConfigs(WEB_FILES),
   // 창 메시지 수신기 금지(처음의 NO_WINDOW_MESSAGE)는 화면 보안 규칙으로 옮겼고, 범위를 앱 코드에서 화면 코드 전체로 넓혔다
   ...webSecurityConfigs(WEB_FILES),
+  // 화면 앱 구조: FSD 층 방향·조각 공개 파일·파일 이름·받는 값 타입 이름·Next.js 경로 파일(ADR-0329). 들이기 전 위반은 기준선 파일에 둔다
+  ...webBoundaryConfigs(),
   NO_MOCKS_IN_APPS,
   API_CLIENT_HOME,
   ...PROTOTYPE_EVERYWHERE,

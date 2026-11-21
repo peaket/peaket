@@ -1,0 +1,320 @@
+{
+  "$comment": "화면 앱 구조 린트(web-boundaries.mjs, ADR-0329)를 들이기 전부터 있던 위반. 줄이기만 한다: 줄을 더하면 web-boundaries.test.mjs가 막고, 고친 줄이 남아 있어도 막는다. 예외를 새로 둘 일은 까닭과 함께 ADR로 정한다",
+  "entries": [
+    {
+      "rule": "layer-direction",
+      "key": "apps/partner/src/_pages/product-builder/ui/live/ShippingLive.tsx#../../../settlement/model/roster-live",
+      "reason": "상품 만들기 배송 단계가 같은 층의 정산 화면 조각 명단 자료를 함께 쓴다. 명단 자료를 아래 층으로 내리면 이 줄을 지운다"
+    },
+    {
+      "rule": "layer-direction",
+      "key": "apps/partner/src/widgets/seatmap-canvas/canvas.ts#@/_pages/seatmap-editor/model/types",
+      "reason": "좌석 캔버스(widgets)가 위 층인 좌석맵 편집 화면(_pages)의 타입을 가져온다. 타입을 entities로 내리면 이 줄을 지운다"
+    },
+    {
+      "rule": "layer-direction",
+      "key": "apps/web/src/_pages/checkout-return/ui/CheckoutReturnLive.tsx#../../checkout/model/payment-attempt",
+      "reason": "결제 복귀 화면이 결제 화면 조각의 결제 시도 자료를 함께 쓴다. 결제 시도 자료를 entities로 내리면 이 줄을 지운다"
+    },
+    {
+      "rule": "layer-direction",
+      "key": "apps/web/src/features/preverify/model.ts#../behavior-summary/tracker.ts",
+      "reason": "사전 확인(preverify)이 같은 층의 행동 요약(behavior-summary) 추적기를 직접 쓴다. 추적기를 아래 층(entities·shared)으로 내리면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_app/routing/route-normalize.ts#../../entities/performance/model.ts",
+      "reason": "proxy.ts(서버의 요청 가로채기)와 함께 쓰는 정규 주소 표라 화면 부품까지 싣는 공개 파일 대신 자료 파일만 가져온다. 자료만 내는 공개 파일(server/ 등)을 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_app/routing/route-normalize.ts#../../entities/policy-doc/model.ts",
+      "reason": "proxy.ts(서버의 요청 가로채기)와 함께 쓰는 정규 주소 표라 화면 부품까지 싣는 공개 파일 대신 자료 파일만 가져온다. 자료만 내는 공개 파일(server/ 등)을 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_app/routing/route-normalize.ts#../../entities/product/model.ts",
+      "reason": "proxy.ts(서버의 요청 가로채기)와 함께 쓰는 정규 주소 표라 화면 부품까지 싣는 공개 파일 대신 자료 파일만 가져온다. 자료만 내는 공개 파일(server/ 등)을 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_app/routing/route-normalize.ts#../../entities/ticket/model.ts",
+      "reason": "proxy.ts(서버의 요청 가로채기)와 함께 쓰는 정규 주소 표라 화면 부품까지 싣는 공개 파일 대신 자료 파일만 가져온다. 자료만 내는 공개 파일(server/ 등)을 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_app/routing/route-normalize.ts#../../widgets/ticket-wallet/model/wallet.ts",
+      "reason": "proxy.ts(서버의 요청 가로채기)와 함께 쓰는 정규 주소 표라 화면 부품까지 싣는 공개 파일 대신 자료 파일만 가져온다. 자료만 내는 공개 파일(server/ 등)을 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_pages/event-detail/ui/Booking.tsx#@/entities/me/restriction",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_pages/event-detail/ui/VerifyReturnResume.tsx#@/features/identity-verify/keys",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_pages/login/model/state.ts#../../../entities/provider/model.ts",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_pages/search/ui/SearchResults.tsx#@/widgets/app-shell/model/search-quality-client",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_pages/settings/model/devices.ts#../../../features/account-withdraw/flow.ts",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_pages/settings/model/devices.ts#../../../features/device-sessions/flow.ts",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/_pages/verify-return/ui/VerifyReturnLive.tsx#@/features/identity-verify/flow",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/features/login-methods/flow.ts#../../entities/provider/model.ts",
+      "reason": "규칙을 들이기 전부터 공개 파일을 거치지 않고 가져왔다. 가져오는 것을 그 조각 공개 파일에 더하고 경로를 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "no-slice-internals",
+      "key": "apps/web/src/widgets/app-shell/AppShell.tsx#@/features/wallet-device-key/ui/WalletUpdateLoader",
+      "reason": "wallet-device-key 공개 파일(index.ts)이 기기 키·QR 함수만 내고 화면 부품은 내지 않는다. 화면 부품을 내는 공개 파일을 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/console-host/src/pages/dashboard/ui/WidgetSlot.tsx#WidgetSlot",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(SlotProps)으로 지었다. WidgetSlotProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/partner/src/features/rich-text/LexicalEditor.tsx#LexicalEditor",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(DescriptionEditorProps)으로 지었다. LexicalEditorProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/booking-result/ui/BookingResultPage.tsx#BookingResultPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. BookingResultPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/booking-result/ui/BookingResultPreview.tsx#BookingResultPreview",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. BookingResultPreviewProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/checkout-return/ui/CheckoutReturnPage.tsx#CheckoutReturnPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. CheckoutReturnPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/checkout-return/ui/CheckoutReturnPreview.tsx#CheckoutReturnPreview",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. CheckoutReturnPreviewProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/checkout/ui/CheckoutForm.tsx#CheckoutForm",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(FormProps)으로 지었다. CheckoutFormProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/checkout/ui/CheckoutPage.tsx#CheckoutPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. CheckoutPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/checkout/ui/CheckoutPreview.tsx#CheckoutPreview",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. CheckoutPreviewProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/event-detail/ui/DetailModals.tsx#DetailModalsProvider",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(DetailModalsProps)으로 지었다. DetailModalsProviderProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/event-detail/ui/VerifyButtonLazy.tsx#VerifyButtonLazy",
+      "reason": "늦게 싣는 감싸개가 감싼 부품의 받는 값 타입(VerifyIdentityButtonProps)을 그대로 쓴다. 감싸개 이름으로 타입을 따로 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/inquiry-detail/ui/InquiryDetailPage.tsx#InquiryDetailPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. InquiryDetailPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/login-link/ui/LiveLinkPrompt.tsx#LiveLinkPrompt",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(LiveLinkProps)으로 지었다. LiveLinkPromptProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/policy/ui/PolicyPage.tsx#PolicyPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. PolicyPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/queue-verify/ui/QueueVerifyPage.tsx#QueueVerifyPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. QueueVerifyPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/queue-verify/ui/QueueVerifyPreview.tsx#QueueVerifyPreview",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. QueueVerifyPreviewProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/search/ui/Filters.tsx#FilterChips",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(FiltersProps)으로 지었다. FilterChipsProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/seats/ui/LiveSummary.tsx#LiveSummary",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(SummaryProps)으로 지었다. LiveSummaryProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/seats/ui/SeatsPage.tsx#SeatsPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. SeatsPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/seats/ui/SeatsPreview.tsx#SeatsPreview",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. SeatsPreviewProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/seats/ui/Summary.tsx#SummaryBar",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. SummaryBarProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/seats/ui/Summary.tsx#SummaryCard",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. SummaryCardProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/seats/ui/Summary.tsx#SummarySheet",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. SummarySheetProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/shop-product/ui/ShopProductPage.tsx#ShopProductPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. ShopProductPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/shuffle-proof/ui/ShuffleProofBody.tsx#ShuffleProofBody",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(ProofBodyProps)으로 지었다. ShuffleProofBodyProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/shuffle-proof/ui/ShuffleProofPage.tsx#ShuffleProofPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. ShuffleProofPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/ticket-addons/ui/TicketAddonsPage.tsx#TicketAddonsPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. TicketAddonsPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/ticket-cancel/ui/TicketCancelPage.tsx#TicketCancelPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. TicketCancelPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/ticket-transfer/ui/TicketTransferPage.tsx#TicketTransferPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. TicketTransferPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/_pages/transfer-offer/ui/TransferOfferPage.tsx#TransferOfferPage",
+      "reason": "규칙을 들이기 전에 파일 안에서만 쓰는 이름(Props)으로 지었다. TransferOfferPageProps로 바꾸면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/widgets/reviews/ui/ReviewModalsFromUrl.tsx#Inner",
+      "reason": "같은 파일의 바깥 부품 타입(ReviewModalsFromUrlProps)을 안쪽 부품이 그대로 쓴다. 안쪽 부품 이름을 바꾸거나 타입을 나누면 이 줄을 지운다"
+    },
+    {
+      "rule": "props-type-naming",
+      "key": "apps/web/src/widgets/ticket-wallet/ui/WalletClient.tsx#OfflineBannerLazy",
+      "reason": "늦게 싣는 감싸개가 감싼 부품의 받는 값 타입(OfflineBannerProps)을 그대로 쓴다. 감싸개 이름으로 타입을 따로 두면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(cached)/[locale]/events/[id]/page.tsx",
+      "reason": "로케일 확인·정적 경로 목록 같은 경로 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_pages 조각으로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(cached)/~offline/page.tsx",
+      "reason": "로케일 확인·정적 경로 목록 같은 경로 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_pages 조각으로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/[locale]/login/page.tsx",
+      "reason": "로케일 확인·정적 경로 목록 같은 경로 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_pages 조각으로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/demo/pg-simulator/authenticate/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/link/[provider]/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/login/[provider]/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/login/callback/[provider]/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/logout/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/reauth/[provider]/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/reauth/token/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/v1/identity/link-proposals/[proposalId]/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/(request)/v1/identity/link-proposals/[proposalId]/separate-account/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    },
+    {
+      "rule": "route-reexport-only",
+      "key": "apps/web/app/serwist/[path]/route.ts",
+      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
+    }
+  ]
+}

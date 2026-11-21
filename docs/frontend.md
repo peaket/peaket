@@ -241,13 +241,15 @@ peaket/
     ds/                  디자인 토큰 빌드(Style Dictionary 5) + 컴포넌트(@seed-design/react 3)
     console-contract/    관제 원격 위젯 계약(§4.5)
     seatmap/             좌석맵 열 배열·격자 색인·그리기 Worker(web·forensics, ADR-0080 결정 5)
-    config/              ESLint·TypeScript·Steiger·size-limit 설정
+    config/              ESLint(화면 앱 구조 규칙 포함, ADR-0329)·TypeScript·size-limit 설정
 ```
 
 | 규칙 | 내용 |
 | --- | --- |
-| 층 의존 | FSD 층은 위에서 아래로만 가져온다(`_app` → `_pages` → `widgets` → `features` → `entities` → `shared`). 이 규칙은 FSD 구조 검사 도구 Steiger의 `fsd/forbidden-imports`(위 층 가져오기와 같은 층 조각끼리 가져오기를 막는 규칙) 하나로 막는다. ESLint 가져오기 제한은 앱·패키지 사이 경계(아래 '앱 사이'·'대기실 경량 페이지'·'원격 위젯' 행)만 맡는다. 같은 규칙을 두 도구로 막지 않는다(architecture §6.5, 추천 적용 2026-10-28, 기술 검토 낮음-098) |
-| Next.js 경로 폴더 | 소비자 웹과 파트너 콘솔은 Next.js `app/`을 앱 뿌리에 두고, 그 안의 `page.tsx`·`layout.tsx`·경로 처리기는 `src/_pages`·`src/_app`의 것을 다시 내보내기만 한다. FSD 층 `app`·`pages`는 `src/_app`·`src/_pages`로 이름을 바꾼다. FSD 공식 Next.js 안내가 이름이 겹치지 않게 이렇게 하라고 하고, 그래야 Steiger가 pages 층을 따로 본다(추천 적용 2026-10-28, 기술 검토 낮음-098) |
+| 층 의존 | FSD 층은 위에서 아래로만 가져온다(`_app` → `_pages` → `widgets` → `features` → `entities` → `shared`). 같은 층의 다른 조각끼리도 가져오지 않는다. 이 규칙은 공용 ESLint 규칙 `peaket-web-boundaries/layer-direction`(`packages/config/eslint/web-boundaries.mjs`) 하나로 막는다. 처음에는 FSD 구조 검사 도구 Steiger의 `fsd/forbidden-imports`에 맡겼지만 저장소에 Steiger를 들이지 않아 아무것도 막지 않았으므로 ESLint로 옮겼다(ADR-0329 결정 1). 같은 규칙을 두 도구로 막지 않는다(architecture §6.5, 추천 적용 2026-10-28, 기술 검토 낮음-098) |
+| 조각 공개 파일 | 아래 층의 조각은 그 조각의 공개 파일로만 가져온다. 공개 파일은 `index.ts(x)`, 브라우저에서만 도는 `browser.ts`, 서버에서만 도는 `server/` 아래 파일이다. 공개 파일이 없는 조각은 폴더 전체가 공개다. 타입만 가져오기와 첫 화면에서 떼어 늦게 싣는 `import()`는 안쪽 파일을 가리켜도 된다. 시험·이야기 파일과 관제 콘솔 미리보기(`apps/console-host/src/app/preview`)는 보지 않는다. ESLint `peaket-web-boundaries/no-slice-internals`가 막는다(ADR-0329 결정 2) |
+| 이름 | `.ts`·`.mjs` 파일과 폴더는 소문자-하이픈(kebab-case), `.tsx`는 부품 하나면 단어 첫 글자 대문자(PascalCase), 부품 묶음이면 소문자-하이픈으로 짓는다. 파일 이름은 첫 점 앞만 본다. `index`, `_app`·`_pages`, Next.js `[id]`·`(묶음)`·`@슬롯`, `__tests__`는 건너뛴다. 화면 부품 `Foo`가 받는 값에 이름 붙인 타입을 쓰면 `FooProps`로 짓는다. 그 자리에 바로 적는 객체 타입과 여러 부품이 함께 쓰는 공용 이름(`PageProps`·`RouteProps`·`StepProps`)은 받는다. ESLint `file-naming`·`props-type-naming`이 막는다(ADR-0329 결정 3·4) |
+| Next.js 경로 폴더 | 소비자 웹과 파트너 콘솔은 Next.js `app/`을 앱 뿌리에 두고, 그 안의 `page.tsx`·`layout.tsx`·경로 처리기는 `src/_pages`·`src/_app`의 것을 다시 내보내기만 한다. FSD 층 `app`·`pages`는 `src/_app`·`src/_pages`로 이름을 바꾼다. FSD 공식 Next.js 안내가 이름이 겹치지 않게 이렇게 하라고 한다(추천 적용 2026-10-28, 기술 검토 낮음-098). 경로 파일에는 다시 내보내기와 파일에 직접 적어야 하는 경로 설정(`dynamic`·`revalidate`·`instant` 등 글자 값)만 두며, ESLint `peaket-web-boundaries/route-reexport-only`가 막는다(ADR-0329 결정 5) |
 | 앱 사이 | 앱은 다른 앱을 가져오지 않는다. 함께 쓰는 것은 `packages/`로 올린다 |
 | 대기실 경량 페이지 | `queue-room/`은 `packages/api-client`의 대기열 부분, `packages/telemetry`의 lite 판, `packages/ds`의 토큰 부분집합 CSS만 가져온다. React(화면 라이브러리)·Next.js를 가져오면 린트가 막는다 |
 | 소비자 웹 경로 묶음 | `app/(cached)/`에는 CDN이 캐시하는 화면(헤더 묶음 A)만, `app/(request)/`에는 요청마다 nonce로 그리는 화면(B·E·F)만 둔다. 두 묶음은 루트 레이아웃(모든 화면을 감싸는 맨 바깥 레이아웃)을 따로 갖는다. `(request)`의 루트 레이아웃은 요청의 nonce를 읽어 정적 셸 없이 그린다(§2.5). 어느 묶음에 둘지는 §2.5 표의 헤더 묶음 열을 따르고, 맞지 않으면 린트가 막는다(추천 적용 2026-10-28, 기술 검토 중간-094) |
