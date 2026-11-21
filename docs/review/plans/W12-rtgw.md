@@ -128,3 +128,8 @@
 | verify | w12rtgw-verify-2a7f | claude-opus-5-5 | 2026-11-22T02:46+09:00 | 2026-11-22T02:54+09:00 |
 
 ## 기록
+
+## 기록
+
+- R-743. 합치기 전 `origin/develop`(1b66a034a, BAT-355 포함) 위로 다시 쌓음. 다시 쌓은 트리에서 `test/gateway.test.ts` 6/6, `roles-check` 통과(시험만 묶음, 커밋 4). 제품 코드 바뀜 없음.
+- 감독 결정: 통합 `test-int/stream.int.test.ts:575-627`(RF-T14·RF-T15)의 같은 경주는 지금 묶음으로 열지 않고 정리 목록 후보(CI에서 실제로 막으면 작은 묶음).
