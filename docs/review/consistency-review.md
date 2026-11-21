@@ -824,6 +824,7 @@
 | R-728 | ADR-0331이 남긴 주 1회 kind 예약과 매일 도는 DAST·야간 성능 예약이 막지도 고치지도 않으면서 kind 클러스터를 띄워 실패를 쌓았고, 쌓인 배포 쪽 실패와 배포 쪽 묶음을 고칠 자리가 계획에 없었다 | docs/adr/0332, docs/BUILD_ORDER.md Phase 7·SEG-040, docs/architecture.md §8.6, docs/devops.md §3.1·§3.3, docs/PROGRESS.md, .github/workflows/ci-kind.yml·dast-nightly.yml·perf-nightly.yml·ci.yml | kind를 쓰는 예약 실행 셋을 멈추고 수동 실행만, 마지막 초록 fe21934d 기록, 기능 구현 뒤 구간 5 인프라 구축(INF-010~040·SEG-050)에서 한꺼번에 고침(ADR-0332) | 적용 |
 | R-729 | BAT-086 완료 표시·lane4 로그·계획 기록을 맞춘다 | docs/BUILD_ORDER.md, docs/lanes/lane4.md, docs/review/plans/BAT-086.md | 단계 완료·진행 로그·검증 기록 | 완료 |
 | R-730 | 3898f3c9f가 BUILD_ORDER를 옛 판으로 덮어 BAT-057·BAT-075 기록(BAT-059·076 줄, HOT-401 줄, HOT-400·BAS-080 체크, BAS-150·BAT-095로 넘긴 것)이 사라졌고, 끝난 묶음이 미완처럼 보여 ADR-0331 결정 9 후보에 들어갔으며, 구간 5로 미룬 HOT-430~450이 관측·알림 단계의 선행이었다 | docs/BUILD_ORDER.md, docs/PROGRESS.md(OPEN[53]·다음 할 일·진행 로그), docs/progress-archive.md §6.8, docs/adr/0331 '확인' | 9ae95c5b2 판의 줄을 그대로 되살림, 넘긴 것 다시 넣기, 조건이 찬 GAT-090·110 체크, 소유자에게 물을 것을 OPEN[53]로 | 완료(OPEN[53]은 소유자 결정 대기) |
+| R-731 | wbs.csv에서 관측 4.1.1·알림 5.6.1·5.6.3이 2.11.2 전체를 선행으로 둬, 구간 5로 미룬 HOT-430~450 때문에 BAT-215~240·250~265·455가 기능 구현 중에 열리지 않았다(ADR-0332 결정 3과 어긋남) | docs/wbs/wbs.csv·wbs.md(4.1.1·5.6.1·5.6.3·§5), docs/adr/0332 결정 7, docs/adr/0331 '확인', docs/BUILD_ORDER.md, docs/PROGRESS.md | 소유자 결정 OPEN[53] (가)대로 선행을 2.11.2 ①(HOT-420)로 좁힘 | 완료 |
 
 ## 4. 숫자 일치표
 
