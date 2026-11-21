@@ -28,7 +28,11 @@ afterAll(async () => {
 
 /** 위험 명령(2인 승인·멈추는 쪽 3·11)은 X-Reauth-Token(act=OPS_COMMAND)을 함께 보낸다(BAT-045 BOT-140) */
 const withReauth = (h: Record<string, string>) => ({ ...h, 'x-reauth-token': tokenFor(h['x-user-id']!, { act: 'OPS_COMMAND' }) });
-const post = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+/** 접수(POST /v1/ops/commands)는 Idempotency-Key가 필요하다(ADR-0340 결정 7). 그 밖의 POST에는 붙이지 않는다 */
+const post = (url: string, headers: Record<string, string>, body: unknown) =>
+  svc.http.inject({ method: 'POST', url, headers: { ...headers, ...(url === '/v1/ops/commands' ? { 'idempotency-key': randomUUID() } : {}), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+/** 명령 4 만료(지금 + 1시간, 24시간 이하) */
+const BLOCK_EXPIRES = new Date(NOW + 60 * 60_000).toISOString();
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 
 describe('/v1/ops/commands', () => {
@@ -49,7 +53,7 @@ describe('/v1/ops/commands', () => {
     const operator = identity.ops('operator');
     const commander = identity.ops('commander');
     expect((await post('/v1/ops/commands', withReauth(operator), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } })).statusCode).toBe(403);
-    expect((await post('/v1/ops/commands', withReauth(operator), { type: 'KILL_SWITCH', reason: '긴급 정지', params: {} })).statusCode).toBe(403);
+    expect((await post('/v1/ops/commands', withReauth(operator), { type: 'KILL_SWITCH', reason: '긴급 정지', params: { scope: 'PLATFORM' } })).statusCode).toBe(403);
     const created = await post('/v1/ops/commands', withReauth(commander), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
     expect(created.statusCode).toBe(201);
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
@@ -84,9 +88,11 @@ describe('/v1/ops/commands', () => {
     expect((await get('/v1/ops/commands', viewer)).statusCode).toBe(200);
     expect((await get('/v1/ops/commands?limit=101', viewer)).statusCode).toBe(400);
     expect((await post('/v1/ops/commands', viewer, { type: 'LOG_LEVEL', reason: 'x' })).statusCode).toBe(403);
-    const created = await post('/v1/ops/commands', withReauth(identity.ops('commander')), { type: 'BOT_LEVEL', reason: '권한 확인' });
+    const created = await post('/v1/ops/commands', withReauth(identity.ops('commander')), { type: 'BOT_LEVEL', reason: '권한 확인', params: { level: 'STANDARD' } });
+    expect(created.statusCode).toBe(201);
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     expect((await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(viewer), {})).statusCode).toBe(403);
+    expect(JSON.parse((await get(`/v1/ops/commands/${commandId}`, identity.ops('operator'))).payload)).toMatchObject({ state: 'PENDING_APPROVAL', approvals: [] });
   });
 
   test('GAT110_다른_commander가_승인하면_APPROVED이고_요청자는_승인할_수_없다', async () => {
@@ -103,7 +109,9 @@ describe('/v1/ops/commands', () => {
 
   test('GAT110_거부는_사유를_남기고_REJECTED다', async () => {
     const requester = identity.ops('operator');
-    const created = await post('/v1/ops/commands', withReauth(requester), { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: { asn: 1234 } });
+    const created = await post('/v1/ops/commands', withReauth(requester), { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: { asns: [1234], expiresAt: BLOCK_EXPIRES } });
+    expect(created.statusCode).toBe(201);
+    expect(JSON.parse(created.payload)).toMatchObject({ state: 'PENDING_APPROVAL' });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     const approver = identity.ops('operator');
     const rejected = await post(`/v1/ops/commands/${commandId}/rejections`, approver, { reason: '근거 부족' });
@@ -114,7 +122,11 @@ describe('/v1/ops/commands', () => {
 
   test('GAT110_모르는_유형과_빈_사유는_400이다', async () => {
     const op = identity.ops('operator');
-    expect((await post('/v1/ops/commands', op, { type: 'NOPE', reason: 'x' })).statusCode).toBe(400);
-    expect((await post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '' })).statusCode).toBe(400);
+    // Idempotency-Key를 붙여 보내므로 400은 본문 검사의 400이다(키가 없는 400과 섞이지 않게 type까지 본다)
+    for (const body of [{ type: 'NOPE', reason: 'x' }, { type: 'LOG_LEVEL', reason: '' }]) {
+      const r = await post('/v1/ops/commands', op, body);
+      expect(r.statusCode).toBe(400);
+      expect(String((JSON.parse(r.payload) as { type: string }).type)).not.toMatch(/idempotency-key-invalid$/);
+    }
   });
 });

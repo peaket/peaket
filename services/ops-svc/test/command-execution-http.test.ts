@@ -39,8 +39,9 @@ afterAll(async () => {
   await svc?.close();
 });
 
+/** 접수(POST /v1/ops/commands)는 Idempotency-Key가 필요하다(ADR-0340 결정 7) */
 const post = (url: string, headers: Record<string, string>, body: unknown) =>
-  svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  svc.http.inject({ method: 'POST', url, headers: { ...headers, ...(url === '/v1/ops/commands' ? { 'idempotency-key': randomUUID() } : {}), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 /** 위험 명령(EVENT_CANCEL은 2인 승인)은 X-Reauth-Token(act=OPS_COMMAND)을 함께 보낸다(BAT-045 BOT-140) */
 const withReauth = (h: Record<string, string>) => ({ ...h, 'x-reauth-token': tokenFor(h['x-user-id']!, { act: 'OPS_COMMAND' }) });

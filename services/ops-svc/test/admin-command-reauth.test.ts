@@ -44,7 +44,12 @@ afterAll(async () => {
   await svc?.close();
 });
 
-const post = (url: string, headers: Record<string, string>, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+/** 접수(POST /v1/ops/commands)는 Idempotency-Key가 필요하다(ADR-0340 결정 7). 키는 요청마다 새로 만든다 */
+const post = (url: string, headers: Record<string, string>, body: unknown) =>
+  svc.http.inject({ method: 'POST', url, headers: { ...headers, ...(url === '/v1/ops/commands' ? { 'idempotency-key': randomUUID() } : {}), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+/** 명령 3·4의 params(openapi Command.params). 명령 4는 ASN이 있어 2인·위험 명령이다(ADR-0339 결정 1) */
+const KILL = { scope: 'PLATFORM' };
+const BLOCK_ASN = { asns: [64500], expiresAt: new Date(NOW + 60 * 60_000).toISOString() };
 const get = (url: string, headers: Record<string, string>) => svc.http.inject({ method: 'GET', url, headers });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const token = (who: Record<string, string>, o: { act?: 'OPS_COMMAND'; factors?: readonly string[]; jti?: string; sessionOverride?: string } = {}) =>
@@ -57,8 +62,8 @@ describe('위험 명령 재인증(I-T53 ⑤)', () => {
     const commander = identity.ops('commander');
     const before = await commandCount(commander);
     for (const body of [
-      { type: 'KILL_SWITCH', reason: '긴급 정지', params: {} },
-      { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: { asn: 64500 } },
+      { type: 'KILL_SWITCH', reason: '긴급 정지', params: KILL },
+      { type: 'BLOCK_ASN_IP', reason: '대역 차단', params: BLOCK_ASN },
       { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } },
     ]) {
       const r = await post('/v1/ops/commands', commander, body);
@@ -77,12 +82,12 @@ describe('위험 명령 재인증(I-T53 ⑤)', () => {
       ['act APPROVAL', kit.token({ accountId: commander['x-user-id']!, sessionId: commander['x-session-id']!, act: 'APPROVAL' })],
       ['다른 세션', token(commander, { sessionOverride: '0194b045-0000-7000-8000-0000000000ff' })],
     ] as const) {
-      const r = await post('/v1/ops/commands', withToken(commander, t), { type: 'KILL_SWITCH', reason: `차단 ${label}`, params: {} });
+      const r = await post('/v1/ops/commands', withToken(commander, t), { type: 'KILL_SWITCH', reason: `차단 ${label}`, params: KILL });
       expect(r.statusCode, label).toBe(403);
       expect(String(json(r).type), label).toMatch(/reauth-required$/);
     }
     expect(await commandCount(commander)).toBe(before);
-    const ok = await post('/v1/ops/commands', withToken(commander, token(commander)), { type: 'KILL_SWITCH', reason: '긴급 정지', params: {} });
+    const ok = await post('/v1/ops/commands', withToken(commander, token(commander)), { type: 'KILL_SWITCH', reason: '긴급 정지', params: KILL });
     expect(ok.statusCode, ok.payload).toBe(201);
     expect(await commandCount(commander)).toBe(before + 1);
   });
@@ -91,9 +96,9 @@ describe('위험 명령 재인증(I-T53 ⑤)', () => {
     const commander = identity.ops('commander');
     const jti = 'jti-command-single-use';
     const t = token(commander, { jti });
-    expect((await post('/v1/ops/commands', withToken(commander, t), { type: 'KILL_SWITCH', reason: '첫 번째', params: {} })).statusCode).toBe(201);
+    expect((await post('/v1/ops/commands', withToken(commander, t), { type: 'KILL_SWITCH', reason: '첫 번째', params: KILL })).statusCode).toBe(201);
     const before = await commandCount(commander);
-    const replay = await post('/v1/ops/commands', withToken(commander, t), { type: 'KILL_SWITCH', reason: '두 번째', params: {} });
+    const replay = await post('/v1/ops/commands', withToken(commander, t), { type: 'KILL_SWITCH', reason: '두 번째', params: KILL });
     expect(replay.statusCode).toBe(403);
     expect(String(json(replay).type)).toMatch(/reauth-required$/);
     expect(await commandCount(commander)).toBe(before);

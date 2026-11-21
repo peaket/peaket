@@ -9,6 +9,7 @@ import {
   ExecuteCommand,
   ListCommands,
   MemoryCommandStore,
+  IllegalCommandTransition,
   RetryCommand,
   approvalModeOf,
   type CommandExecutionActor,
@@ -121,11 +122,12 @@ describe('운영 명령 실행·재시도', () => {
 
   test('B3H01_operator는_실패한_KILL_SWITCH를_재시도할_수_없고_commander는_할_수_있다', async () => {
     const f = fixture(executorOf([{ status: 'FAILED', error: 'admission down' }, { status: 'SUCCEEDED' }]));
-    const c = await f.create.execute(input('KILL_SWITCH', { requestedRole: 'commander', params: {}, actor: actor(REQUESTER, 'commander') }));
+    const c = await f.create.execute(input('KILL_SWITCH', { requestedRole: 'commander', params: { scope: 'PLATFORM' }, actor: actor(REQUESTER, 'commander') }));
     expect(c.state).toBe('FAILED');
     await expect(f.retry.execute({ commandId: c.commandId, actor: actor(APPROVER, 'operator'), nowMs: NOW + 1 })).rejects.toMatchObject({ status: 403 });
     const retried = await f.retry.execute({ commandId: c.commandId, actor: actor(APPROVER, 'commander'), nowMs: NOW + 2 });
-    expect(retried.state).toBe('SUCCEEDED');
+    // 카탈로그 명령(명령 3)의 성공 끝 상태는 ACKED다(ADR-0340 결정 1)
+    expect(retried.state).toBe('ACKED');
     expect(retried.attempts).toBe(2);
   });
 
@@ -177,8 +179,14 @@ describe('운영 명령 실행·재시도', () => {
     await store.markDispatched(command.commandId, NOW + 1);
     await store.markDispatchFailed(command.commandId, 'boom', NOW + 2);
     expect((await store.find(command.commandId))?.lastError).toBe('boom');
-    await store.markSucceeded(command.commandId, undefined, NOW + 3);
-    expect((await store.find(command.commandId))?.lastError).toBeUndefined();
+    // 전이 표에 FAILED → SUCCEEDED는 없다: 같은 명령 ID로 다시 보낸 뒤(T11) 성공한다(control-tower §4)
+    await expect(store.markSucceeded(command.commandId, undefined, NOW + 3)).rejects.toBeInstanceOf(IllegalCommandTransition);
+    expect(await store.find(command.commandId)).toMatchObject({ state: 'FAILED', lastError: 'boom', attempts: 1 });
+    await store.markDispatched(command.commandId, NOW + 4);
+    await store.markSucceeded(command.commandId, undefined, NOW + 5);
+    const done = await store.find(command.commandId);
+    expect(done).toMatchObject({ state: 'SUCCEEDED', attempts: 2 });
+    expect(done?.lastError).toBeUndefined();
   });
 
   test('GAT310_체크포인트_루트는_seq와_해시에_따라_달라진다', () => {

@@ -5,7 +5,7 @@ import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryAuditChain } from '../src/modules/audit/index.js';
-import { CreateCommand, MemoryCommandStore } from '../src/modules/commands/index.js';
+import { CreateCommand, DecideCommand, MemoryCommandStore } from '../src/modules/commands/index.js';
 import { InternalCommandEventsController, commandIdOfEventKey } from '../src/modules/commands/inbound/internal-command-events.controller.js';
 import { FakeIdentity, quiet } from './support.js';
 
@@ -74,6 +74,10 @@ describe('/internal/v1/ops/command-events', () => {
     });
     expect((await controller.handle({ eventKey: 'before', kind: 'COMMAND_RESULT', commandId: command.commandId, status: 'SUCCEEDED' })).accepted).toBe(false);
     expect((await store.find(command.commandId))?.state).toBe('PENDING_APPROVAL');
+    // 승인만 된(APPROVED) 명령도 결과 사건으로 끝나지 않는다. 실행을 시작해야(T8) 끝낸다
+    await new DecideCommand(store).approve({ commandId: command.commandId, approverRef: randomUUID(), approverRole: 'operator', nowMs: NOW + 1 });
+    expect((await controller.handle({ eventKey: 'approved', kind: 'COMMAND_RESULT', commandId: command.commandId, status: 'SUCCEEDED' })).accepted).toBe(false);
+    expect((await store.find(command.commandId))?.state).toBe('APPROVED');
     await store.markDispatched(command.commandId, NOW + 1);
     expect(await controller.handle({ eventKey: 'after', kind: 'COMMAND_RESULT', commandId: command.commandId, status: 'SUCCEEDED', detail: { applied: true } })).toEqual({ accepted: true, commandId: command.commandId });
     expect((await store.find(command.commandId))?.state).toBe('SUCCEEDED');

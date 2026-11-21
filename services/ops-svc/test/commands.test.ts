@@ -30,10 +30,16 @@ const fixture = (executor?: CommandExecutor) => {
 };
 
 const COMMANDER_TYPES = ['BOT_LEVEL', 'KILL_SWITCH', 'AUTOMATION_STOP', 'SALE_STOP', 'SALE_RESUME', 'DEGRADED_MODE'];
+/** 명령 1·2·3·4·5는 openapi Command.params의 칸만 받는다(ADR-0340 결정 9). 그 밖의 유형은 OPS-300 전까지 열린 객체다 */
+const PARAMS: Partial<Record<CommandType, Record<string, unknown>>> = {
+  BOT_LEVEL: { level: 'AGGRESSIVE' },
+  KILL_SWITCH: { scope: 'PLATFORM' },
+  AUTOMATION_STOP: {},
+};
 const input = (type: CommandType, over: Record<string, unknown> = {}) => ({
   type,
   reason: '장애 대응',
-  params: { level: 'DEBUG' },
+  params: PARAMS[type] ?? { level: 'DEBUG' },
   requestedBy: REQUESTER,
   requestedRole: COMMANDER_TYPES.includes(type) ? 'commander' : 'operator',
   nowMs: NOW,

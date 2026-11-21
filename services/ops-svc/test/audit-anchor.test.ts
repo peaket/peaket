@@ -124,7 +124,8 @@ describe('BAT-465 공개 앵커 HTTP', () => {
     const seeded = await svc.http.inject({
       method: 'POST',
       url: '/v1/ops/commands',
-      headers: { ...operator, 'content-type': 'application/json' },
+      // 접수는 Idempotency-Key가 필요하다(ADR-0340 결정 7)
+      headers: { ...operator, 'idempotency-key': crypto.randomUUID(), 'content-type': 'application/json' },
       payload: JSON.stringify({ type: 'SCALE_CHANGE', reason: '공개 앵커 씨앗', params: { eventId: crypto.randomUUID(), scale: 'LARGE' } }),
     });
     expect(seeded.statusCode).toBe(201);

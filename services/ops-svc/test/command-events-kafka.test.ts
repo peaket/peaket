@@ -4,7 +4,7 @@ import { fakeClock, type ConsumedMessage } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { OpsCommandEventsHandler } from '../src/consumers/index.js';
 import { MemoryAuditChain } from '../src/modules/audit/index.js';
-import { CreateCommand, HandleCommandEvent, MemoryCommandStore, commandIdOfEventKey } from '../src/modules/commands/index.js';
+import { CreateCommand, DecideCommand, HandleCommandEvent, MemoryCommandStore, commandIdOfEventKey } from '../src/modules/commands/index.js';
 
 const NOW = Date.parse('2026-11-14T09:00:00.000Z');
 const clock = fakeClock({ now: NOW });
@@ -64,6 +64,8 @@ describe('BAT-465 ops.command-events 소비자', () => {
     expect(f.handler.keyOf(record)).toBe(commandId);
     await expect(f.handler.handle(record)).rejects.toThrow('command-event-not-applicable');
     expect((await f.store.find(commandId))?.state).toBe('PENDING_APPROVAL');
+    // 전이 표대로 승인(T6, 요청자 아닌 commander) 뒤 실행을 시작해야(T8) 결과 사건이 끝낸다
+    await new DecideCommand(f.store).approve({ commandId, approverRef: randomUUID(), approverRole: 'commander', nowMs: NOW + 1 });
     await f.store.markDispatched(commandId, NOW + 1);
     await f.handler.handle(record);
     expect((await f.store.find(commandId))?.state).toBe('SUCCEEDED');

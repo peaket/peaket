@@ -54,7 +54,14 @@ afterAll(async () => {
 });
 
 type Headers = Record<string, string>;
-const post = (url: string, headers: Headers, body: unknown) => svc.http.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+/** 운영 명령 접수(POST /v1/ops/commands)는 Idempotency-Key가 필요하다(ADR-0340 결정 7). 시험이 키를 주지 않았으면 새로 붙인다 */
+const post = (url: string, headers: Headers, body: unknown) =>
+  svc.http.inject({
+    method: 'POST',
+    url,
+    headers: { ...(url === '/v1/ops/commands' && headers['idempotency-key'] === undefined ? { 'idempotency-key': randomUUID() } : {}), ...headers, 'content-type': 'application/json' },
+    payload: JSON.stringify(body),
+  });
 const get = (url: string, headers: Headers) => svc.http.inject({ method: 'GET', url, headers });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const withReauth = (who: Headers, key: string = randomUUID()): Headers => ({ ...who, 'idempotency-key': key, 'x-reauth-token': tokenFor(who['x-user-id']!) });

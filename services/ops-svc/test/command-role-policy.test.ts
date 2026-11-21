@@ -122,7 +122,7 @@ describe('B3-H01 명령 유형별 역할', () => {
   test('operator는 실패한 commander 전용 명령을 재시도할 수 없고 레거시 요청 역할도 함께 본다', async () => {
     const f = fixture();
     // commander가 요청해 실패한 KILL_SWITCH: operator 재시도는 403, commander만 시도할 수 있다.
-    const failed = await f.create.execute(input('KILL_SWITCH'));
+    const failed = await f.create.execute(input('KILL_SWITCH', { params: { scope: 'EVENT', eventIds: [randomUUID()] } }));
     expect(failed.state).toBe('FAILED');
     await expect(f.retry.execute({ commandId: failed.commandId, actor: actor(OTHER, 'operator'), nowMs: NOW + 1 })).rejects.toMatchObject({
       status: 403,
