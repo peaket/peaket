@@ -1,6 +1,8 @@
 # 시험 보고서(CI가 PEAKET_TEST_REPORT·NODE_OPTIONS로 남긴다, ASVS 태그 리포트 BOT-162)
 test-report*.json
 test-report*.xml
+# 검색 골든 세트 정답률 보고서(SR-T12). ASVS 태그 리포트가 모으는 test-report* 꼴과 겹치지 않게 따로 둔다
+search-golden-report.json
 
 # 파이썬 실행 부산물
 __pycache__/
