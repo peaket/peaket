@@ -283,7 +283,96 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 
 ## 검증
 
-(검증 담당이 위 7의 표본 결과를 쓴다.)
+- 담당 `lane2-w12corerls-verify`(claude-opus-5-5). 계획·시험·구현·리뷰에 관여하지 않았다. 트리는 리뷰 커밋 `6c92deaaf`(구현 뒤)다. 제품·시험 코드는 커밋하지 않았다. 표본은 하나씩 넣고 돌린 뒤 `git checkout -- <파일>`로 되돌렸고, 매번 `git status --short`가 비어 있는 것을 봤다.
+- **Docker 잠금**: 갈래 4가 놓았다는 감독 알림 뒤 `lock.sh who docker`가 '비어 있음'이었고 **03:11:46에 잡았고**(owner.txt 둘째 줄에 예상 끝 04:01:46) **03:43:32에 놓았다**(자세한 것은 아래 '전체 회귀' 끝). 컨테이너 이름 앞머리는 `PEAKET_TEST_CONTAINER_PREFIX=w12corerls-`다. 다른 갈래의 컨테이너·kind는 건드리지 않았다.
+- **기준선**: `pnpm exec turbo run build --filter=@peaket/core-svc^...`(4/4 캐시) 뒤 계획 7의 기준선 파일 여섯(`rls`·`search-read-model`·`sale-review-db`·`promoter-contract`·`production-image`·`sale-policy`)이 시험 116개 모두 통과(62초).
+
+### 틀린 구현 검사(16개 중 16개 잡힘, 놓침 0)
+
+표본마다 계획 7의 '잡아야 할 시험'이 든 파일만 돌렸다(M1~M6·M10·M11·M14·M15는 `rls.int.test.ts`, M7~M9는 거기에 `sale-review-db`, M12는 `production-image`·`sale-policy`, M13은 `promoter-contract`·`sale-review-db`, M16은 `search-read-model`). 표본을 넣는 도구는 바꿀 글이 정한 횟수만큼 정확히 나오지 않으면 멈추게 했다(작업 폴더 밖 임시 스크립트, 커밋하지 않음).
+
+| # | 틀린 구현 | 계획이 기대한 시험 | 실제로 실패한 시험 | 판정 |
+| --- | --- | --- | --- | --- |
+| M1 | `ENABLE ROW LEVEL SECURITY` 뺌 | ①②③⑦ | ①②③⑦ (24개 중 4개) | 잡힘 |
+| M2 | 파트너 읽기 USING을 '테넌트가 걸렸는지만' | ①⑦ | ①⑦ | 잡힘 |
+| M3 | 끝에 `OWNER TO core_partner` | ①②③⑦ | ①②③⑤⑦, '리뷰 재현: 슈퍼유저가 아닌 소유자로도 마이그레이션되고…'(6개). ⑦은 소유자 목록 단언에서 실패했다 | 잡힘 |
+| M4 | 파트너 두 정책에서 `nullif` 뺌(세 곳) | ②(22P02) | ②(연결 재사용에서 `22P02 invalid input syntax for type uuid: ""`), ⑦ | 잡힘 |
+| M5 | 읽기 USING을 `id = coalesce(…, id)` | ②⑦ | ②⑦ | 잡힘 |
+| M6 | 고치기 USING을 `true`(WITH CHECK는 테넌트 식) | ③⑦ | ②③⑦. B 행이 바뀌어서가 아니라, 고친 B 행이 WITH CHECK에 걸려 고치기 전체가 `42501 new row violates row-level security policy`로 실패했다(두 번째 가드가 막음, B 상호는 그대로) | 잡힘 |
+| M7 | 파트너 고치기 정책 뺌 | ④⑦, `sale-review-db` S-T41 ①⑤ | ③④⑦, S-T41 ①⑤(고치기가 0행이라 A도 안 바뀜) | 잡힘 |
+| M8 | 파트너 읽기 정책 뺌 | ①④⑦, `sale-review-db` | ①④⑦, S-T41 ①⑤·④ | 잡힘 |
+| M9 | 파트너 두 정책의 설정 이름을 `app.tenant`로(세 곳) | ①④⑦, `sale-review-db` | ①③④⑦, S-T41 ①⑤·④ | 잡힘 |
+| M10 | `REVOKE SELECT … FROM core_partner` 뺌 | ⑤ | ⑤(읽기 셋 `verified_at`·`commission_rate_bp`·`pending_contract_approval_id`가 '됨') | 잡힘 |
+| M11 | `GRANT UPDATE ("verified_at") … TO core_partner` 더함 | ⑤ | ⑤(`updateVerifiedAt`이 '됨') | 잡힘 |
+| M12 | `promoter_app_read` 뺌 | ⑥⑦, 회차 상세 둘 | ⑥⑦, `production-image` 'GET /v1/events/{eventId}의 posterUrl·posterAlt·detailImages…', `sale-policy` '공개 요약 salePhases·refundFees·PRESALE 배지는…'(64개 중 4개) | 잡힘 |
+| M13 | `promoter_ops` 뺌 | ⑥⑦, `promoter-contract`, `sale-review-db` | ⑥⑦, `promoter-contract` J-T29 ②·⑨ 둘·J-T30 ⑤(넷), `sale-review-db` S-T41 ①⑤·④·⑤(셋)(42개 중 9개) | 잡힘 |
+| M14 | 파트너 고치기 정책의 WITH CHECK 뺌 | ⑦만 | ⑦만 | 잡힘 |
+| M15 | `FORCE ROW LEVEL SECURITY` 더함 | ⑦만 | ⑦만 | 잡힘 |
+| M16 | `start()`의 `await this.#reconcile(at);` 뺌 | R165-1 | R165-1 '표 마이그레이션 전부터 승인돼 있던 공연은…', 그 밖에 R165-1 '모든 파드가 내려가 있던 동안…'·R165-14·R165-23(34개 중 4개) | 잡힘 |
+
+- **놓친 것: 없다.** 그래서 이 표본에서 시험 담당에게 넘길 시험은 없다.
+- **알고 넘긴 것(RV-02, 표본 밖)**: 리뷰가 짚은 '소유자를 `core_search`·`core_maintenance`로 바꾸는' 변형을 한 번 넣어 봤다(X1: 0040 끝에 `OWNER TO core_search`). **⑦은 통과했다(놓침).** 실패한 것은 '리뷰 재현: 슈퍼유저가 아닌 소유자로도 마이그레이션되고…' 하나뿐인데, 까닭이 소유자 규칙이 아니라 슈퍼유저가 아닌 마이그레이션 사용자가 `core_search`로 바꿀 권한이 없다는 것이었다(`42501 must be able to SET ROLE "core_search"`). 운영처럼 그 권한이 있는 사용자가 마이그레이션하면 판매자 표 시험 모두를 지난다. 표 소유자는 행 보안을 건너뛰므로 검색 연결이 모든 판매자의 연락처를 읽게 되는 권한 결함이다. 다만 고칠 방향(⑦을 다섯 역할의 `pg_has_role(…, 'member')`로 바꾸고 시작 검사를 넓힘)은 리뷰 RV-02와 계획 '감독에게' 3 (다)에 이미 있다. 그래서 새로 넘기지 않고 그 정리 줄에 이 실행 결과를 근거로 붙이기를 권한다(기록 담당).
+- 덧붙여 본 것: M6에서 보듯 고치기 정책의 USING이 틀려도 WITH CHECK가 남의 행 바꾸기를 오류로 막는다. M14(WITH CHECK 뺌)는 행동이 같아 ⑦의 구조 단언만 잡는다. 두 가드가 서로를 받친다는 계획 2의 설명과 맞다.
+
+### 판정 기준 대조
+
+정본은 AZ-T5 판정 기준([authz-matrix](../../security/authz-matrix.md) §7: '첫째는 A의 행만, 둘째는 0건이다. 팬·관제 사용자와 일괄 작업 사용자는 정책대로 본다. 앱 사용자가 표 소유자가 아니고 `BYPASSRLS`가 없다'), ADR-0327 결정 13, ADR-0271 결정 12(R165-1)다.
+
+| 시험 | 정본 기준 | 시험 단언 | 대조 |
+| --- | --- | --- | --- |
+| 판매자 표 ① | AZ-T5 '첫째는 A의 행만', authz-matrix §3.3(`id = 요청 테넌트`) | 테넌트 조건 없는 조회가 A는 정확히 `[{id: A}]`, B는 `[{id: B}]` | 충족 |
+| 판매자 표 ② | AZ-T5 '둘째는 0건', §5.3(`nullif`로 빈 문자열도 NULL) | 같은 연결의 값이 `''`인 것까지 보고, 읽기 `[]`·트랜잭션 밖 읽기 `[]`·조건 없는 고치기가 오류 없이 A·B 상호 그대로 | 충족. 한 번도 값을 걸지 않은 연결(NULL) 경우는 직접 만들지 않고 ⑦이 식 글(`true` 인자·`nullif`)을 묶는다 |
+| 판매자 표 ③ | 결정 13 '넣기·지우기 정책은 두지 않는다(권한도 없다)', AZ-T3 | WHERE·RETURNING 없는 고치기 뒤 B 상호 `(주)비` 그대로·A만 바뀜, 지우기·넣기 `42501` | 충족 |
+| 판매자 표 ④ | 결정 1·11(판매자 정보 8칸, `verified_at`은 쓰지 않음)·13 | 8칸 새 값 고치기 `[{id: A}]`, 9칸 읽기 그 값, 저장값 8칸 새 값·미리 채운 `verified_at` 그대로·B 행 그대로 | 충족 |
+| 판매자 표 ⑤ | 결정 13 '칸 단위로 좁힌다', ADR-0320 결정 8 | 판매자 정보 밖 세 칸 읽기와 그 셋+`id` 고치기, 일곱이 칸마다 `42501` | 충족(표의 열두 칸 가운데 나머지 아홉은 ④가 본다) |
+| 판매자 표 ⑥ | AZ-T5 '팬·관제 사용자는 정책대로', 결정 13(`core_ops` 조건 없음, `core_app` 읽기만 전체), ADR-0200 | 팬 경로가 두 행의 모든 칸 값, 팬 경로 고치기 `42501`, 관제가 `[A, B]` | 팬·관제는 충족. **일괄 작업 사용자(`core_maintenance`·`core_search`, 결정 13 '권한이 없어 정책을 두지 않는다')는 미시험**이다. ⑦의 '정책은 정확히 넷'이 그 역할의 정책이 없음은 묶지만, 그 역할에 권한이 없다는 것은 보지 않는다. 권한만 생기면 0건이라 지금 새는 길은 없다 |
+| 판매자 표 ⑦ | AZ-T5 '앱 사용자가 표 소유자가 아니고', 결정 13(행 보안 켬·FORCE 없음·정책 넷의 이름·명령·역할·식) | `relrowsecurity` 참·`relforcerowsecurity` 거짓, 정책 넷을 정확히, 파트너 식은 0004 정책 글에서 만든 것과 같음, 소유자가 앱 역할 여섯 이름이 아님 | 부분. 정책·FORCE는 충족. 소유자는 이름 여섯만 보아 `core_search`·`core_maintenance`·구성원 역할이 소유자인 경우를 놓친다(위 X1, RV-02). `BYPASSRLS`는 기존 '앱 사용자는 표 소유자가 아니고 BYPASSRLS가 없으며…' 시험이 `core_partner`·`core_app`과 그 로그인 사용자만 본다 |
+| R165-1 '표 마이그레이션 전부터 승인돼 있던 공연은…' | ADR-0271 결정 12('서버가 뜰 때 주기 일을 걸기 전에 `reconcileAll`을 한 번', '이미 있는 DB의 첫 채우기') | 0022까지 올린 DB에 그때 칸만 적은 SQL로 승인 둘·초안 하나를 넣고, 띄우기 전 검색 `[]`(대조군), `start()` 뒤 검색·자동완성이 승인 둘, 초안 줄 0, 이름 줄 키가 `nameKeys`와 같음, 어긋난 줄 0 | 충족(M16이 잡음). 이 묶음은 표 준비만 바꿨고 값·단언은 그대로다 |
+
+- 요약: 충족 6(①②③④⑤ 판매자 표, R165-1), 부분 2(⑥의 일괄 작업 사용자 미시험, ⑦의 소유자 범위). 부분 둘은 지금 새는 길이 아니고(권한이 없거나 소유자가 바뀌지 않았다) 리뷰 RV-02·'감독에게' 3 (다)의 정리 줄과 같은 자리다.
+
+### 전체 회귀
+
+`pnpm --filter @peaket/core-svc test:integration`(파일 48개, 시험 484개)을 잠금 안에서 돌렸다. 한 번에 깨끗하게 끝나지 않았다. 실패는 모두 시간 초과·연결 끊김·429(서버 바쁨)였다. 제 시험이 멈춘 동안에도 PC의 CPU 사용률이 22~100%로 오르내렸다(다른 프로그램). Docker 엔진에는 다른 컨테이너가 없었다.
+
+| 실행 | 시각 | 결과 | 실패한 곳 |
+| --- | --- | --- | --- |
+| 1 기본 작업자 수 | 03:21~03:25, 217초 | 파일 2개 실패, 시험 475 통과·8 실패·1 건너뜀 | `shop-expiry` 6개(`RedisDeadlineError` Redis 호출 마감 100ms 넘김), `search-read-model` 2개(R165-2·SR-T7, 30초 시간 초과) |
+| 1의 두 파일만 다시 | 03:25~03:26 | 46/46 통과 | — |
+| 2 작업자 6 | 03:26~03:33, 382초 | 시험 474 통과·7 실패·3 건너뜀 | `shop-expiry` 5개(같은 마감 초과), `search-read-model` 1개 실패·2개 건너뜀(연결 시간 초과·429), `search-bat166` SR-T13 ① 시간 비교(81.5ms, 기준 75ms 미만) |
+| 3 기본 작업자 수 | 03:34~03:39, 314초 | 파일 18개 실패, 시험 261 통과·29 실패·194 건너뜀 | 모두 시간 초과(시험 30초·준비 120초·seatmap-worker 시작 기다림)·연결 끊김·429 |
+| 4 실행 3에서 실패한 18개 파일만 | 03:41~03:43, 116초 | **18개 파일 311/311 통과** | — |
+
+- **합친 결과**: 실행 3에서 모두 통과한 29개 파일과 실행 4의 18개 파일을 시험 보고서 JSON(작업 폴더 밖)으로 합치면 **파일 48개, 483개 통과·1개 건너뜀(`local-partner-stack`, 늘 건너뜀)·실패 0**이다. **PR #56 CI(483개 통과·1개 건너뜀·실패 0)와 같다.**
+- 판매자 표와 닿는 파일(`rls` 24·`sale-review-db` 4·`promoter-contract` 14·`sale-policy` 8)은 실행 1~3 모두 통과했다. `production-image` 32는 실행 1·2에서 통과했고, 실행 3에서는 준비 단계 시간 초과로 통째로 건너뛰었다가 실행 4에서 통과했다. `search-read-model`이 실패한 자리(155·269·416·632·1353행)는 이 묶음이 표 준비를 바꾼 R165-1(526행)이 아니고, R165-1은 매번 통과했다.
+- 이 흔들림은 이미 정리 목록에 있다. Redis 마감 100ms 초과는 `docs/lanes/lane1-cleanup.md` PRF-168('전체 실행에서 매번 다른 시험 2~5개, 따로 돌리면 통과')이고, `search-bat166`의 시간 비교는 `docs/lanes/lane2-cleanup.md` BAT-174 R-699 줄이다. 이 묶음의 변경(0040·주석 한 줄·시험 두 파일)은 굿즈·검색 시간 경로에 닿지 않는다. 그래서 새로 넘기지 않는다.
+- **Docker 잠금**: 03:11:46에 잡고 **03:43:32에 놓았다**(`lock.sh drop docker lane2-W12-core-rls`, 뒤의 `who`는 '비어 있음'). 놓기 전 `docker ps -a --filter name=w12corerls-`가 0개였다(시험이 스스로 `rm -f -v`).
+
+### 게이트
+
+| 명령 | 결과 |
+| --- | --- |
+| `pnpm exec turbo run build --filter=@peaket/core-svc^...` | 4/4 캐시 |
+| `pnpm --filter @peaket/core-svc typecheck` | 통과 |
+| `pnpm --filter @peaket/core-svc test` | 104파일·771개 통과(`migrations-journal`의 0040 `when` 차례 포함) |
+| `pnpm lint` | 통과 |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 아래 '판정'의 첫 줄 |
+| `node tools/ci/trace-check.mjs --ids "AZ-T5" --report <실행 3 보고서> --report <실행 4 보고서>` | `AZ-T5 통과 24`. 계획 8의 `--ids "AZ-T5, v5.0.0-8.4.1, v5.0.0-8.2.3"`도 통과(8.4.1 38·8.2.3 5) |
+| `node tools/ci/roles-check.mjs --base 650ef80e0 --head HEAD` | 아래 '판정'의 첫 줄 |
+
+### 남은 위험
+
+- RV-02(위 X1): 소유자 검사가 이름 여섯만 본다. 소유자가 바뀌는 마이그레이션은 이 시험만으로는 막지 못한다.
+- RV-01: `core_app`이 판매자 표 열두 칸을 모두 읽는다(0004부터). 이 묶음은 행 범위만 정했다.
+- RV-03: FORCE가 없어 소유자 권한 보기·정의자 함수가 행 보안을 건너뛴다. 지금 그런 보기·함수는 없다.
+- `idempotency_record` 행 보안 없음('감독에게' 2, OPEN 문안 후보 11).
+- 위 넷은 모두 리뷰·계획이 정리 목록·OPEN 후보로 넘긴 것이고, 이 묶음을 막지 않는다.
+
+### 판정
+
+- 문서 점검과 역할 확인: `check_all.py`는 이 절을 쓴 뒤 오류 0이다(경고는 이 묶음과 무관한 openapi·mermaid 경고뿐). `roles-check`는 이 커밋 전에 실패가 '코드 묶음에 verify 커밋이 없다' 하나뿐이었다(plan 1·test 1·impl 3·review 1). 이 커밋이 그것을 채운다.
+- **판정: 합쳐도 됨.** 틀린 구현 16개를 모두 잡았고, 놓친 표본이 없어 시험 담당에게 넘길 시험이 없다. 판정 기준은 충족 6·부분 2이고, 부분 둘(일괄 작업 사용자의 권한 없음, 소유자 검사 범위)은 지금 새는 길이 아니며 리뷰 RV-02·계획 '감독에게' 3 (다)와 같은 정리 줄이다. core-svc 통합 전체는 다시 돌린 파일까지 합쳐 483/483(건너뜀 1)으로 PR #56 CI와 같다.
+- 기록 담당에게: RV-02 정리 줄에 위 X1 실행 결과(⑦ 통과, 소유자를 `core_search`로 바꿔도 판매자 표 시험이 모두 지남)를 근거로 붙인다. 로컬 전체 실행의 흔들림은 PRF-168·BAT-174 R-699 줄의 새 사례로 한 줄 덧붙일지 본다.
 
 ## 담당 표
 
@@ -293,9 +382,10 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 | test | lane2-w12corerls-test | claude-opus-5-5 | 2026-11-22T01:38+09:00 | 2026-11-22T02:12+09:00 |
 | impl | lane2-w12corerls-impl | claude-opus-5-5 | 2026-11-22T02:11+09:00 | 2026-11-22T02:48+09:00 |
 | review | lane2-w12corerls-review | claude-opus-5-5 | 2026-11-22T02:50+09:00 | 2026-11-22T03:08+09:00 |
+| verify | lane2-w12corerls-verify | claude-opus-5-5 | 2026-11-22T03:09+09:00 | 2026-11-22T03:50+09:00 |
 
 ## 기록
 
 (기록 담당이 쓴다.)
 
-- **다음 단계**: 리뷰(보안)·검증 → 기록 → 합치기. 구현(`4c22d930c`)과 초안 PR #56 CI(실행 44930078460, core-svc 통합 483개 통과·실패 0)가 끝났다. 리뷰 담당이 위 8 끝의 보안 관점으로 보고, 검증 담당이 위 7의 틀린 구현 16개를 돈다.
+- **다음 단계: 기록 → 합치기.** 구현(`4c22d930c`), 초안 PR #56 CI(실행 44930078460, core-svc 통합 483개 통과·실패 0), 리뷰(보안, 막는 지적 없음), 검증(틀린 구현 16개 중 16개 잡힘, 판정 '합쳐도 됨')이 끝났다.
