@@ -114,15 +114,15 @@
 | BAT-203 | 3 | 2 | A | HOT-253 | 0.75 | Q-T36 ①②, queue-admission:v5.0.0-2.3.2 | 혼자: 갈래 2 HOT-250(BAT-157)에서 나눈 갈래 3 몫(2026-11-10). 선행 BAT-157은 develop에 있다. 명단 사본을 쓰는 core-svc 어댑터는 HOT-251(갈래 2, OPEN[33] 결정 (가))이라, 그 전이면 사본을 시험이 넣는다 |
 | BAT-205 | 3 | 2 | B | BAS-020·BAS-030 | 4.25 | D-T32 ①, D-T39 ①~④, ST-T15, delivery:v5.0.0-15.1.2 | 2026-11-12 시작 때 장부 범위를 좁혔다(ADR-0267 웨이브): docs/devops.md·streaming.md·delivery.md 전체는 다른 단계 몫이 섞여 있어 이 묶음이 만드는 공급망 게시 잡·SBOM 찾기·Avro 검사·등록 Job만 남긴다. 나머지는 각 단계가 채운다 |
 | BAT-210 | 3 | 2 | B | BAS-070·BAS-110·BAS-230 | 4.5 | NFR-007 | 2026-11-12 시작 때 장부 범위를 NFR-007로 좁혔다(ADR-0267 웨이브): docs/architecture.md·verification.md 전체는 다른 단계 몫이 섞여 있다. 이 묶음은 남은 기능 설계서 4편의 운영 확인 표, NFR-007 셈 근거, RFC 3건 초안을 만든다. BAS-110의 포트원 웹훅 헤더는 이미 payment §5에 있고, 토스·포트원 한도는 계약 전 추정으로 둔다 |
-| BAT-215 | 1 | 3 | B | OPS-010·OPS-020·OPS-030 | 4.75 | AC-T7, docs/observability.md, docs/security/asvs/delivery.md | 대기: OPEN[53](wbs 4.1.1의 선행 2.11.2에 구간 5 후보 HOT-430·440·450이 있다) |
+| BAT-215 | 1 | 3 | B | OPS-010·OPS-020·OPS-030 | 4.75 | AC-T7, docs/observability.md, docs/security/asvs/delivery.md | 선행 HOT-420(갈래 1, 끝남). 2.11.2의 나머지 HOT-430~450은 선행으로 두지 않는다(OPEN[53] (가), 2026-11-21) |
 | BAT-220 | 1 | 3 | B | OPS-150·OPS-160 | 4.75 | ST-T15, ST-T16, docs/streaming.md, docs/features/analytics.md, docs/features/control-tower.md |  |
 | BAT-225 | 1 | 3 | B | OPS-190·OPS-200 | 4.25 | docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md |  |
 | BAT-230 | 1 | 3 | B | OPS-205·OPS-220 | 4.5 | docs/features/analytics.md, A-T18, A-T22, ST-T22, docs/security/asvs/analytics.md |  |
 | BAT-235 | 1 | 3 | B | OPS-230 | 3 | docs/features/analytics.md, A-T25 | 혼자: 이웃과 합치면 5일을 넘음(OPS-220과 6일, OPS-240과 5.25일) |
 | BAT-240 | 1 | 3 | B | OPS-240·OPS-040 | 4.25 | docs/features/analytics.md, docs/features/settlement.md, docs/observability.md, docs/security/asvs/analytics.md |  |
 | BAT-245 | 4 | 3 | B | OPS-050·OPS-060 | 3.5 | docs/observability.md, docs/security/data-classification.md |  |
-| BAT-250 | 4 | 3 | B | OPS-070·OPS-080 | 5 | V-T21, V-T22, V-T23, V-T30, Q-T61, docs/observability.md, docs/security/asvs/delivery.md | 선행 OPS-010~030(갈래 1, wbs 4.1.1). 대기: OPEN[53] |
-| BAT-255 | 4 | 3 | B | OPS-090·OPS-100 | 4.5 | docs/observability.md, Q-T42, Q-T49 | 선행 OPS-010~030(갈래 1, wbs 4.1.1). 대기: OPEN[53] |
+| BAT-250 | 4 | 3 | B | OPS-070·OPS-080 | 5 | V-T21, V-T22, V-T23, V-T30, Q-T61, docs/observability.md, docs/security/asvs/delivery.md | 선행 OPS-010~030(갈래 1, wbs 4.1.1) |
+| BAT-255 | 4 | 3 | B | OPS-090·OPS-100 | 4.5 | docs/observability.md, Q-T42, Q-T49 | 선행 OPS-010~030(갈래 1, wbs 4.1.1) |
 | BAT-260 | 4 | 3 | B | OPS-110·OPS-120·OPS-130 | 4.75 | V-T20, docs/observability.md, docs/devops.md |  |
 | BAT-265 | 4 | 3 | B | OPS-140·OPS-250 | 4.5 | V-T16, docs/observability.md, docs/features/analytics.md, docs/features/bot-defense.md |  |
 | BAT-270 | 4 | 3 | B | OPS-430 | 2.5 | docs/infra.md, docs/devops.md | 혼자: 이웃과 합치면 5일을 넘음(OPS-250과 5.5일, OPS-440과 5.5일) |
@@ -166,7 +166,7 @@
 | BAT-440 | 3 | 3 | B | GAT-180·GAT-190 | 4.25 | O-T38 | 일부 구현(R-544, 뒤에 R-561·R-582·R-609·R-610이 이 묶음 몫을 더함). 남은 것은 단계 줄. 부스 재발급은 identity 본인확인 대조와 ticket 부스 허용이 선행. 기록 docs/review/measurements/BAT-440-wave.md. |
 | BAT-445 | 3 | 3 | B | GAT-200·GAT-150 | 2.75 | O-T27, O-T31 | 2026-11-13 완료(heavy gate 통과, 합치기 대기): GAT-200 확인 목록·휴대폰 배치 시험, GAT-150 스캔 큐(별도 DB·strict)·BarcodeDetector 경계. scanner 11·console-host 39, 변이 15/15, 4관점 리뷰 높음 1·중간 4 고침. 실기 점검은 소유자 몫. 보고서 docs/review/measurements/BAT-445-wave.md |
 | BAT-450 | 3 | 3 | B | GAT-210·GAT-220 | 4 | I-T21 | 일부 구현(R-548·R-566·R-586, 감사 수정 R-600·R-601·R-619). 남은 것은 단계 줄. 파트너 초대 만들기는 core-svc 회차 판매자 대조와 메일 발송이 선행. 스태프 수락은 본인확인기관 계약 전이라 운영에서 막힘(R-601). 기록 docs/review/measurements/BAT-450-wave.md·BAT-450-gat220.md·BAT-450-gat220-remainder.md. |
-| BAT-455 | 3 | 3 | B | GAT-250·GAT-270 | 4.75 | docs/features/notify.md, I-T34, POL-034, docs/security/asvs/notify.md | 선행 HOT-420·HOT-430·HOT-440·HOT-450(갈래 1). 대기: OPEN[53] |
+| BAT-455 | 3 | 3 | B | GAT-250·GAT-270 | 4.75 | docs/features/notify.md, I-T34, POL-034, docs/security/asvs/notify.md | 선행 HOT-420(갈래 1, 끝남). HOT-430~450은 선행으로 두지 않는다(OPEN[53] (가), 2026-11-21) |
 | BAT-460 | 3 | 3 | B | GAT-280·GAT-290 | 4 | docs/features/transfer-refund.md, R-T29, docs/security/asvs/transfer-refund.md | 선행 OPS-260·OPS-270·OPS-280·OPS-290(갈래 2) |
 | BAT-465 | 3 | 3 | A | GAT-300·GAT-310 | 3.25 | docs/features/transfer-refund.md, R-T32, R-T34, Q-T59, docs/security/asvs/transfer-refund.md | 선행 ops-svc 골격(R-552). 일부 구현(R-568·R-584·R-593, 대부분 관제 명령 몫으로 GAT-300은 아직 시작 전). 남은 것은 단계 줄. 외부 불변 저장소(S3 Object Lock)·OpenTimestamps는 외부 계정이 없어 막힘. 기록 docs/review/measurements/R-568-wave.md·BAT-465-R584-wave.md·BAT-465-remainder-2.md, 브라우저 docs/review/browser-check/GAT-310.md. |
 | BAT-470 | 3 | 3 | B | GAT-320·GAT-330 | 3.75 | docs/features/transfer-refund.md, docs/security/data-classification.md, docs/security/asvs/support.md | 2026-11-14 R-552 ops-svc 골격이 CS 처리함 계약(REFUND_FAILED)·감사 선행 일부를 열었다. 문의·소명·법정 자료 요청 화면과 소비자 조립은 아직이다 |

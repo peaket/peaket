@@ -183,7 +183,7 @@
   - `node --test "tools/ci/*.test.mjs"`
   - `node tools/ci/check-workflows.mjs`
   - `python -I -X utf8 tools/doc-check/check_all.py`
-- **후보 목록 바로잡기(2026-11-21, R-730)**: 결정 9의 후보 가운데 BAT-055·057·075는 이미 끝난 묶음이었다(R-703·R-704). 3898f3c9f가 BUILD_ORDER를 옛 판으로 덮어 미완처럼 보였다. BAT-080·085도 끝났고 남은 몫은 BAT-076·081에 있다. 남은 후보는 BUILD_ORDER INF-020 줄에 있다. 미룬 HOT-430~450이 관측·알림 단계의 선행인 문제는 `docs/PROGRESS.md` OPEN[53]이다.
+- **후보 목록 바로잡기(2026-11-21, R-730)**: 결정 9의 후보 가운데 BAT-055·057·075는 이미 끝난 묶음이었다(R-703·R-704). 3898f3c9f가 BUILD_ORDER를 옛 판으로 덮어 미완처럼 보였다. BAT-080·085도 끝났고 남은 몫은 BAT-076·081에 있다. 남은 후보는 BUILD_ORDER INF-020 줄에 있다. 미룬 HOT-430~450이 관측·알림 단계의 선행이던 문제는 OPEN[53] (가)로 풀었다([ADR-0332](0332-infra-build-out-segment-five.md) 결정 7).
 - **뒤 묶음 둘**:
   - 통합 시험 범위 고르기(결정 10)
   - C 묶음 리뷰·검증을 한 담당이 맡는 것을 역할 확인이 받아들이게 하기(결정 4)
