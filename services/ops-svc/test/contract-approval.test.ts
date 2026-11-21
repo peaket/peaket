@@ -239,6 +239,15 @@ describe('J-T29 ③ 반려와 철회', () => {
     expect(again.approvalId).not.toBe(approvalId);
   });
 
+  test('W12P-01 ④ 계약 조건 변경 승인을 공백뿐인 사유로 반려하면 400 invalid-body이고 core 예약을 풀지 않는다', async () => {
+    const { approvalId } = await createApproval();
+    const r = await reject(approvalId, headers('commander'), { reason: '   ' });
+    expect(r.statusCode, r.payload).toBe(400);
+    expect(json(r)).toMatchObject({ type: 'https://peaket.example/problems/invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+    expect(core.cancelled).toEqual([]);
+    expect(store.rows.get(approvalId)).toMatchObject({ status: 'PENDING_APPROVAL' });
+  });
+
   test('J-T29 ③_요청자_철회는_WITHDRAWN이고_다른_사람은_철회할_수_없다', async () => {
     const { approvalId, requester } = await createApproval();
     const other = await withdraw(approvalId, headers('operator'), { reason: '남의 요청' });

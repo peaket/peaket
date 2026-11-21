@@ -37,7 +37,8 @@ class LoseDoneOnceStore implements RoleChangeApprovalStore {
   }
 }
 
-const run = async (o: { fail?: AdminAccountProblem | undefined; loseDone?: boolean }) => {
+/** commander 역할 변경을 요청해 승인 업무(PENDING_APPROVAL)를 만든다. 승인·반려는 부르는 쪽이 한다 */
+const requested = async () => {
   const { FakeAdminIdentity, reauthKit } = await import('./admin-support.js');
   const { FakeIdentity, quiet } = await import('./support.js');
   const identity = new FakeIdentity();
@@ -65,6 +66,11 @@ const run = async (o: { fail?: AdminAccountProblem | undefined; loseDone?: boole
   const created = await send('PUT', `/v1/ops/admin-accounts/${TARGET}/role`, { ...requester, 'x-reauth-token': permToken(requester), 'if-match': '"1"' }, { role: 'commander', reason: 'RV-03 시험' });
   expect(created.statusCode, created.payload).toBe(202);
   const approvalId = json(created).approvalId as string;
+  return { svc, admin, audit, store, kit, send, approver, approvalId };
+};
+
+const run = async (o: { fail?: AdminAccountProblem | undefined; loseDone?: boolean }) => {
+  const { svc, admin, audit, store, kit, send, approver, approvalId } = await requested();
   if (o.fail) admin.fail = { method: 'changeRole', problem: o.fail };
   store.loseNextDone = o.loseDone === true;
   const approveToken = kit.token({ accountId: approver['x-user-id']!, sessionId: approver['x-session-id']!, act: 'APPROVAL' });
@@ -94,6 +100,29 @@ describe('RV-03 승인 identity 오류·저장 패배', () => {
     expect(succeeded[0]!.record.payload).toMatchObject({ action: 'ROLE_CHANGED', approvalId: a.approvalId, toRole: 'commander' });
     const failed = a.audit.entries.filter((e) => e.recordId === a.target && e.record.payload.status === 'FAILED');
     expect(failed).toHaveLength(0);
+    await a.svc.close();
+  });
+});
+
+// W12-prf192: 반려 사유가 앞뒤 공백을 빼면 빈 글자이면 본문 오류다(guidelines §2, openapi x-peaket-problem-types invalid-body 400).
+// 목록 조건 오류(invalid-query)나 FRAUD_ACTION 승인 사유(approval-reason-required 422)가 아니다.
+const P = 'https://peaket.example/problems/';
+
+describe('W12P-01 역할 변경 승인 반려 사유 없음', () => {
+  test('W12P-01 ① commander가 공백뿐인 사유로 반려하면 400 invalid-body이고 업무는 PENDING_APPROVAL 그대로다', async () => {
+    const a = await requested();
+    const r = await a.send('POST', `/v1/ops/approval-requests/${a.approvalId}/rejections`, a.approver, { reason: '   ' });
+    expect(r.statusCode, r.payload).toBe(400);
+    expect(JSON.parse(r.payload)).toMatchObject({ type: `${P}invalid-body`, status: 400, title: '요청 본문이 올바르지 않습니다' });
+    expect(await a.store.find(a.approvalId)).toMatchObject({ status: 'PENDING_APPROVAL', approverId: null });
+    await a.svc.close();
+  });
+
+  test('W12P-01 ② 같은 업무에 빈 글자 사유도 ①과 같은 400이고 업무는 PENDING_APPROVAL 그대로다', async () => {
+    const a = await requested();
+    const r = await a.send('POST', `/v1/ops/approval-requests/${a.approvalId}/rejections`, a.approver, { reason: '' });
+    expect(r.statusCode, r.payload).toBe(400);
+    expect(await a.store.find(a.approvalId)).toMatchObject({ status: 'PENDING_APPROVAL', approverId: null });
     await a.svc.close();
   });
 });

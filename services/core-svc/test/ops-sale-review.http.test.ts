@@ -5,7 +5,7 @@ import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { MemoryCdnInvalidation, MemoryCatalogRepository, MemorySaleConfigStore } from '../src/modules/catalog/index.js';
+import { MemoryCdnInvalidation, MemoryCatalogRepository, MemorySaleConfigStore, OpsSaleReviews } from '../src/modules/catalog/index.js';
 import type { CdnInvalidation } from '../src/modules/catalog/domain/media-ports.js';
 import { FakeIdentity, NOW_MS, quiet } from './support.js';
 
@@ -180,6 +180,19 @@ describe('관제 판매 승인 목록·상세·반려·CDN(S-T41 ④⑤⑩)', ()
     expect((await list(ops(), '?cursor=not-a-cursor')).statusCode).toBe(400);
     expect((await list(ops(), '?limit=0')).statusCode).toBe(400);
     expect((await list(ops(), '?limit=101')).statusCode).toBe(400);
+  });
+
+  // W12-prf192: 목록 조건 오류는 invalid-query 400 '목록 조건이 올바르지 않습니다'다(openapi x-peaket-problem-types, guidelines §2).
+  // 계약 쿼리 스키마를 지나는 커서는 HTTP로, 스키마가 먼저 막는 상태·limit은 저장소 앞에서 다시 보는 모듈 공개 함수로 본다.
+  test('W12P-03 ① 판매 승인 목록의 잘못된 커서·limit 0·상태 DRAFT는 400 invalid-query다', async () => {
+    const want = { type: `${P}invalid-query`, status: 400, title: '목록 조건이 올바르지 않습니다' };
+    const r = await list(ops('viewer'), '?cursor=not-a-cursor');
+    expect(r.statusCode, r.payload).toBe(400);
+    expect(problem(r)).toMatchObject(want);
+    const reviews = svc.app.get(OpsSaleReviews);
+    await expect(reviews.list({ limit: 0 })).rejects.toMatchObject(want);
+    await expect(reviews.list({ statuses: ['DRAFT'] })).rejects.toMatchObject(want);
+    await expect(reviews.list({ cursor: 'not-a-cursor' })).rejects.toMatchObject(want);
   });
 
   test('S-T41 ⑤_ 잘못된 커서 UUID·반복 쿼리·limit 범위 밖은 400이고 500이 아니다', async () => {

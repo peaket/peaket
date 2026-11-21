@@ -118,3 +118,16 @@ describe('RV-05·06·07 관리 계정 REST 고침', () => {
     expect(admin.callsOf('invite')).toBe(before.invite + 1);
   });
 });
+
+describe('W12P-02 관리 계정 역할 변경 사유', () => {
+  test('W12P-02 ① 역할 변경 본문 사유가 공백뿐이면 400 invalid-body이고 identity를 부르지 않으며 역할도 그대로다', async () => {
+    const target = '0194b045-0000-7000-8000-000000004031';
+    admin.seed({ adminAccountId: target, role: 'operator', status: 'ACTIVE' });
+    const before = admin.callsOf('changeRole');
+    const r = await svc.http.inject({ method: 'PUT', url: `/v1/ops/admin-accounts/${target}/role`, headers: { ...who(COMMANDER), 'idempotency-key': randomUUID(), 'x-reauth-token': token(COMMANDER), 'if-match': '"1"', 'content-type': 'application/json' }, payload: JSON.stringify({ role: 'cs_agent', reason: '   ' }) });
+    expect(r.statusCode, r.payload).toBe(400);
+    expect(json(r)).toMatchObject({ type: 'https://peaket.example/problems/invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+    expect(admin.callsOf('changeRole')).toBe(before);
+    expect(admin.accounts.get(target)!.role).toBe('operator');
+  });
+});

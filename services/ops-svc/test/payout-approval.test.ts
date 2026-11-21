@@ -186,6 +186,15 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     expect(payments.calls).toEqual(['create', 'release']);
   });
 
+  test('W12P-01 ③ 지급 묶음 승인을 공백뿐인 사유로 반려하면 400 invalid-body이고 묶음을 풀지 않는다', async () => {
+    const created = JSON.parse((await create()).payload);
+    const r = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/rejections`, headers: headers('commander'), payload: JSON.stringify({ reason: '   ' }) });
+    expect(r.statusCode, r.payload).toBe(400);
+    expect(JSON.parse(r.payload)).toMatchObject({ type: 'https://peaket.example/problems/invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+    expect(store.rows.get(created.approvalId)).toMatchObject({ status: 'PENDING_APPROVAL' });
+    expect(payments.calls).toEqual(['create']);
+  });
+
   test('CONS-V02 반려하면 배치를 풀어 같은 지급일로 새 배치를 만들 수 있다', async () => {
     const created = JSON.parse((await create()).payload);
     const rejected = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/rejections`, headers: headers('commander'), payload: JSON.stringify({ reason: '금액 확인 필요' }) });
@@ -198,7 +207,7 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     const created = JSON.parse((await create()).payload);
     const app = new PayoutApprovals({ store, payments, reauth: new TestReauth(), clock: fakeClock({ now: NOW }) });
     await expect(app.approve(created.approvalId, { accountId: randomUUID(), sessionId: 's1', role: 'operator' }, 'approval-token')).rejects.toMatchObject({ status: 403, type: expect.stringContaining('approval-role-required') });
-    await expect(app.reject(created.approvalId, { accountId: randomUUID(), sessionId: 's2', role: 'commander' }, '   ')).rejects.toMatchObject({ status: 422 });
+    await expect(app.reject(created.approvalId, { accountId: randomUUID(), sessionId: 's2', role: 'commander' }, '   ')).rejects.toMatchObject({ status: 400, type: expect.stringContaining('invalid-body') });
   });
 
   test('J-T3 실행이 503이면 FAILED로 남고 다시 승인할 수 있다', async () => {
