@@ -245,7 +245,14 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 
 ## 구현
 
-(구현 담당이 쓴다.)
+구현 담당(세션 `lane2-w12corerls-impl`)이 2026-11-22에 위 2·4대로 했다. 시험 파일은 건드리지 않았다.
+
+- **바꾼 것**:
+  - `services/core-svc/migrations/0040_promoter_row_security.sql`(새 파일): 차례대로 `REVOKE SELECT ON "promoter" FROM core_partner` → `GRANT SELECT ("id"와 판매자 정보 8칸) ON "promoter" TO core_partner` → `ENABLE ROW LEVEL SECURITY`(FORCE 없음) → 정책 넷(`promoter_partner_self_read` FOR SELECT, `promoter_partner_self_update` FOR UPDATE USING·WITH CHECK, `promoter_ops` FOR ALL `USING (true) WITH CHECK (true)`, `promoter_app_read` FOR SELECT `USING (true)`). 파트너 두 식은 `"id" = nullif(current_setting('app.tenant_id', true), '')::uuid`다. 정책마다 `DROP POLICY IF EXISTS` 뒤 `CREATE POLICY`(0033 꼴), 문장마다 `--> statement-breakpoint`. 0034의 칸 고치기 8칸은 넓히지 않았다. 머리 주석에 까닭과 정본(ADR-0327 결정 13, ADR-0241 결정 1·3, authz-matrix §3.3·§5.3)을 적었다.
+  - `services/core-svc/migrations/meta/_journal.json`: `{"idx":40,"version":"7","when":1795281728010,"tag":"0040_promoter_row_security","breakpoints":true}`. `git fetch origin` 뒤 `origin/develop`(`456df0929`)의 마지막은 그대로 `0034_sale_review_request`(1795118255889)이고 0035~0039는 develop에 없다. 스냅숏은 만들지 않았다(0033·0034와 같다).
+  - `services/core-svc/src/modules/catalog/adapters/db/drizzle-commission-rate.ts` 3~4행 주석만: '자기 행의 판매자 정보 칸만 연다(0040, ADR-0327 결정 13). 수수료율 칸은 열지 않는다'.
+  - 바꾸지 않은 것: 쿼리, `schema.ts`, `database-role.ts`(`assertDatabaseRole`), 0034, 계약·생성물. R165-1 때문에 고친 것은 없다(위 1.3).
+- **게이트(로컬, Docker 없이)**: `pnpm exec turbo run build --filter=@peaket/core-svc^...` 4/4 캐시, `pnpm --filter @peaket/core-svc typecheck` 통과, `pnpm --filter @peaket/core-svc test` 104파일·771개 통과(`migrations-journal` 포함), `pnpm lint` 통과, `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(모두 이 묶음과 무관한 openapi·mermaid 경고) → 통과. 마이그레이션 전용 검사 도구는 `tools/ci`에 없다. 통합 시험은 로컬 Docker를 쓰지 않고(감독 차례) 초안 PR CI로 본다(아래 '시험 결과').
 
 ## 리뷰
 
@@ -261,6 +268,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head feature/lane2-W12-cor
 | --- | --- | --- | --- | --- |
 | plan | lane2-w12corerls-plan | claude-opus-5-5 | 2026-11-22T01:05+09:00 | 2026-11-22T01:40+09:00 |
 | test | lane2-w12corerls-test | claude-opus-5-5 | 2026-11-22T01:38+09:00 | 2026-11-22T02:12+09:00 |
+| impl | lane2-w12corerls-impl | claude-opus-5-5 | 2026-11-22T02:11+09:00 | (CI 결과를 적을 때 채운다) |
 
 ## 기록
 
