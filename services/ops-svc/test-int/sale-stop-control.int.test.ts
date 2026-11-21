@@ -11,7 +11,6 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
 import { HttpCommandExecutor } from '../src/adapters/http-command-executor.js';
 import { AppModule } from '../src/app.module.js';
-import { ephemeralAuditAnchorSigner } from '../src/modules/audit/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { adminAccountsForCommands, reauthFor } from './reauth.js';
@@ -73,7 +72,7 @@ beforeAll(async () => {
   });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db, executor, nowMs: NOW, signer: ephemeralAuditAnchorSigner('it'), adminAccounts: adminAccountsForCommands }),
+    module: AppModule.register({ database: db, executor, nowMs: NOW, adminAccounts: adminAccountsForCommands }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
@@ -151,21 +150,28 @@ describe('BAT-465 판매 중지·재개 집행 실제 DB', () => {
     expect(JSON.parse(retried.payload)).toMatchObject({ state: 'SUCCEEDED', attempts: 2 });
   });
 
-  test('R584_실행_전후_감사_체크포인트와_공개_앵커가_남는다', async () => {
+  test('R584_실행_전후_감사_체크포인트와_공개_앵커가_남는다(ADR-0348: 실행 체크포인트는 내부, 수동은 공개 사슬·서명 전)', async () => {
     const commander = identity.ops('commander');
     const created = await post('/v1/ops/audit-checkpoints', commander, { reason: '판매 중지 집행 뒤' });
     expect(created.statusCode).toBe(201);
-    const cp = JSON.parse(created.payload) as { checkpointId: string; signature: string | null; keyId: string | null; anchorRef: string | null };
-    expect(cp.signature).toBeTruthy();
-    expect(cp.keyId).toBe('it');
-    expect(cp.anchorRef).toBe(`local:${cp.checkpointId}`);
+    const cp = JSON.parse(created.payload) as { checkpointId: string; kind: string; no: number; signature?: string | null; keyId?: string | null; checkpointHash: string; signatureAlg: string; legacy: boolean };
+    // API 프로세스는 서명 키가 없다: 수동 체크포인트는 다음 게시 작업 실행 전까지 서명 칸이 비어 있다(ADR-0348 결정 1)
+    // 명령 실행 앞뒤 체크포인트(EXECUTION)는 번호가 없어 공개 사슬 첫 번호는 이 수동 체크포인트다(결정 3)
+    expect(cp).toMatchObject({ kind: 'MANUAL', no: 1, signatureAlg: 'ECDSA_P256_SHA256', legacy: false });
+    expect(cp.signature ?? null).toBeNull();
+    expect(cp.keyId ?? null).toBeNull();
     const anchor = await get(`/v1/ops/audit-anchors/${cp.checkpointId}`, {});
     expect(anchor.statusCode).toBe(200);
-    expect(JSON.parse(anchor.payload)).toMatchObject({ algorithm: 'Ed25519', signature: cp.signature });
+    expect(JSON.parse(anchor.payload)).toMatchObject({ algorithm: 'ECDSA_P256_SHA256', signature: null, keyId: null, publicKey: '', checkpointHash: cp.checkpointHash });
     const verification = await get(`/v1/ops/audit-anchors/${cp.checkpointId}/verification`, {});
-    expect(JSON.parse(verification.payload)).toMatchObject({ valid: true, signatureValid: true, anchorValid: true });
+    expect(JSON.parse(verification.payload)).toMatchObject({ valid: true, rootValid: true, prevValid: true, signed: false, no: 1, kind: 'MANUAL' });
 
-    const { rows } = await admin.query<{ n: string }>('select count(*)::text as n from audit_checkpoint');
-    expect(Number(rows[0]!.n)).toBeGreaterThanOrEqual(2);
+    const { rows } = await admin.query<{ kind: string; n: string; numbered: string }>(
+      'select kind, count(*)::text as n, count(no)::text as numbered from audit_checkpoint group by kind order by kind',
+    );
+    const byKind = Object.fromEntries(rows.map((r) => [r.kind, { n: Number(r.n), numbered: Number(r.numbered) }]));
+    expect(byKind.EXECUTION!.n).toBeGreaterThanOrEqual(2);
+    expect(byKind.EXECUTION!.numbered).toBe(0);
+    expect(byKind.MANUAL).toEqual({ n: 1, numbered: 1 });
   });
 });
