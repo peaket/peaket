@@ -1,10 +1,10 @@
-# 작업 계획: W12-core-rls2(웹훅 끝점·굿즈 주문의 앱 역할 쓰기 권한 좁히기)
+# 작업 계획: W12-core-rls2(웹훅 끝점·굿즈 주문·상품 수수료율의 앱 역할 쓰기 권한 좁히기)
 
-- **무엇**: core-svc 두 군데의 DB 쓰기 권한이 너무 넓다. (1) 웹훅 끝점 표 `webhook_endpoint`(파트너가 사건을 받을 주소와 서명 비밀을 적은 표)는 행 보안(RLS: 표의 행마다 누가 보고 고칠 수 있는지 DB가 거르는 규칙)이 있지만, 0016이 팬 경로 역할 `core_app`에 표 단위 고치기와 조건 없는 정책을 줬다. 팬 경로 쿼리 하나로 모든 파트너의 웹훅 주소·비밀을 바꿀 수 있다. (2) 굿즈 주문 표 `merch_order`·`merch_order_item`은 0016이 파트너 역할 `core_partner`에 표 단위 넣기·고치기를 줬다. 자기 테넌트(파트너사 하나의 데이터 범위) 주문의 단가·수수료율·상태를 고치거나 결제 안 된 주문을 넣을 수 있고, 상품 정산 원천이 그 값을 그대로 읽는다(돈). 감독 결정(2026-11-22, W12-core-idem 계획의 '다른 표 목록'에서 나온 높음 둘): 등급 A처럼 한다(시험 먼저, 틀린 구현은 판정 항목마다, 리뷰는 보안 관점). 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
+- **무엇**: core-svc 세 군데의 DB 쓰기 권한이 너무 넓다. (1) 웹훅 끝점 표 `webhook_endpoint`(파트너가 사건을 받을 주소와 서명 비밀을 적은 표)는 행 보안(RLS: 표의 행마다 누가 보고 고칠 수 있는지 DB가 거르는 규칙)이 있지만, 0016이 팬 경로 역할 `core_app`에 표 단위 고치기와 조건 없는 정책을 줬다. 팬 경로 쿼리 하나로 모든 파트너의 웹훅 주소·비밀을 바꿀 수 있다. (2) 굿즈 주문 표 `merch_order`·`merch_order_item`은 0016이 파트너 역할 `core_partner`에 표 단위 넣기·고치기를 줬다. 자기 테넌트(파트너사 하나의 데이터 범위) 주문의 단가·수수료율·상태를 고치거나 결제 안 된 주문을 넣을 수 있고, 상품 정산 원천이 그 값을 그대로 읽는다(돈). (3) 상품 표 `product`는 0014가 파트너 역할에 표 단위 고치기를 줘, 주문 항목이 복사하는 상품 수수료율을 파트너 경로 쿼리 하나로 아무 값으로 바꿀 수 있다(돈). 감독 결정(2026-11-22, W12-core-idem 계획의 '다른 표 목록'에서 나온 높음 둘. 같은 날 둘째 결정으로 (3)을 더하고 발송 원장·발송기 전용 역할은 W12-core-notify로 뗌): 등급 A처럼 한다(시험 먼저, 틀린 구현은 판정 항목마다, 리뷰는 보안 관점). 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
 - **바탕**: 작업 폴더 `D:/ticketpass-lane2-b176`, 가지 `feature/lane2-W12-core-rls2`, 출발점 `origin/develop` `e43bc2633`(계획을 쓰는 동안 `456df0929`에서 앞으로 감았다. core-svc 마이그레이션 마지막은 그대로 `0034_sale_review_request`, journal `when` 1795118255889). 2026-11-22 계획 담당(세션 `lane2-w12corerls2-plan`)이 썼고 제품·시험 코드는 쓰지 않았다. 마이그레이션 **0042**·ADR **0338**은 감독이 나눈 번호다.
 - **앞 묶음**: W12-core-rls(가지 `origin/feature/lane2-W12-core-rls`, 0040 `promoter` 행 보안, ADR-0327에 그 가지가 더하는 결정 13)와 W12-core-idem(가지 `origin/feature/lane2-W12-core-idem`, 0041 `idempotency_record`, 그 가지에만 있는 새 ADR 0337번). 두 계획과 0040은 `git show`로 읽었다. 이 묶음은 둘이 develop에 합쳐진 뒤 rebase해 시험·구현한다. 정책 꼴(명령마다 나눈 정책, `app.tenant_id`와 `nullif`, 칸 단위 GRANT, `DROP POLICY IF EXISTS` 뒤 `CREATE POLICY`, FORCE 없음)은 두 묶음과 같다.
-- **차례**: 시험 먼저. 계획 → 시험(구현 전 트리에서 실패 확인) → 구현 → 리뷰(보안) → 리뷰 반영 → 검증(틀린 구현 18개) → 기록. 계획 커밋에 `Batch-Order`를 달지 않는다(docs/architecture.md §8.6 '차례').
-- **정본**: [ADR-0338](../../adr/0338-core-webhook-endpoint-merch-order-write-grants.md)(새로 씀), [ADR-0241](../../adr/0241-core-svc-partner-row-security.md) 결정 1·3·4·6·7, [authz-matrix](../../security/authz-matrix.md) §3.3·§5.3(새 줄)·§7 **AZ-T18**(새 시험 ID), [data.md](../../data.md) `webhook_endpoint.disabled_reason`·`merch_order_item.unit_price`·`commission_rate_bp`, [asvs/notify](../../security/asvs/notify.md) 8.4.1, [asvs/settlement](../../security/asvs/settlement.md) 8.2.3, [notify.md](../../features/notify.md) §9·§13, [settlement.md](../../features/settlement.md) §4.5, ADR-0300 결정 9.
+- **차례**: 시험 먼저. 계획 → 시험(구현 전 트리에서 실패 확인) → 구현 → 리뷰(보안) → 리뷰 반영 → 검증(틀린 구현 24개) → 기록. 계획 커밋에 `Batch-Order`를 달지 않는다(docs/architecture.md §8.6 '차례').
+- **정본**: [ADR-0338](../../adr/0338-core-webhook-endpoint-merch-order-write-grants.md)(새로 씀), [ADR-0241](../../adr/0241-core-svc-partner-row-security.md) 결정 1·3·4·5·6·7, [ADR-0320](../../adr/0320-promoter-contract-terms-approval-and-freeze.md) 결정 6, [devops.md](../../devops.md) §7.1, [authz-matrix](../../security/authz-matrix.md) §3.3·§5.3(새 줄)·§7 **AZ-T18**(새 시험 ID), [data.md](../../data.md) `webhook_endpoint.disabled_reason`·`product.commission_rate_bp`·`merch_order_item.unit_price`·`commission_rate_bp`, [asvs/notify](../../security/asvs/notify.md) 8.4.1, [asvs/settlement](../../security/asvs/settlement.md) 8.2.3, [notify.md](../../features/notify.md) §9·§13, [settlement.md](../../features/settlement.md) §4.5, ADR-0300 결정 9.
 
 ## 감독에게
 
@@ -15,14 +15,15 @@
    - `docs/security/authz-matrix.md` §7: W12-core-idem의 AZ-T17 줄과 이쪽 AZ-T18 줄이 develop의 AZ-T16 줄 바로 뒤 같은 자리에 들어가 rebase 때 충돌이 난다. 두 줄을 다 남기고 AZ-T17 → AZ-T18 차례로 둔다. §5.3은 W12-core-rls가 'core-svc 구현' 줄을, W12-core-idem이 'ops-svc 구현' 줄 뒤에 새 줄을 더하고, 이쪽은 '비용과 확인' 줄 뒤에 더해 붙지 않는다.
    - `docs/data.md`(앞 묶음은 `promoter.id`·멱등 기록 표 문단, 이쪽은 1744·1745·1810행), `docs/security/asvs/settlement.md`(W12-core-rls는 8.4.1, 이쪽은 8.2.3): 붙지 않은 줄이라 충돌이 없을 것이다. ADR-0241은 이쪽이 고치지 않는다.
    - 자기 작업 가지의 강제 푸시(`--force-with-lease`)가 세션 권한 판정에 막히므로(docs/lanes/lane5-cleanup.md 21행) rebase한 가지는 `feature/lane2-W12-core-rls2-r2`로 새로 올리고, 초안 PR도 그 가지로 다시 연다.
-3. **판단 둘(방향 안, 확인 바람)**:
-   - 파트너의 굿즈 주문 '필요한 칸'은 **0개**다. 파트너 코드가 두 표를 쓰는 곳이 없다(배송·반품 처리 서버가 아직 없다, 1.4). 그래서 칸 고치기를 하나도 남기지 않고, 계약의 전이가 쓸 칸과 끝까지 주지 않을 칸의 선을 ADR-0338 결정 4에 적었다.
+3. **판단 셋(방향 안, 확인 바람)**:
+   - 파트너의 굿즈 주문 '필요한 칸'은 **0개**다. 파트너 코드가 두 표를 쓰는 곳이 없다(배송·반품 처리 서버가 아직 없다, 1.4). 그래서 칸 고치기를 하나도 남기지 않고, 계약의 전이가 쓸 칸과 끝까지 주지 않을 칸의 선을 ADR-0338 결정 5에 적었다.
    - 지시는 '표 단위 UPDATE를 거둔다'였지만 같은 GRANT 줄(0016 71행)의 **INSERT도 거둔다**. 결제 끝남(`PAID`) 주문을 넣으면 정산에 그대로 오르므로 고치기와 같은 돈 위험이다(2의 R6).
-4. **새 ADR-0338**(결정 1~7): 발송기 몫(읽기 그대로, 고치기는 켜진 끝점을 `FAILING`으로 끄는 세 칸만), 파트너 웹훅 칸 아홉, 파트너 굿즈 주문 읽기만, 파트너 쓰기 경로를 만들 때의 선, FORCE 없음, 이전 판 호환, 0042. 0338 말고 번호는 쓰지 않았다.
-5. **새 시험 ID AZ-T18**(authz-matrix §7, ①~⑦). 계획 커밋 직전 develop과 원격 가지 전부에 AZ-T18이 없음을 봤다(AZ-T17은 W12-core-idem 몫). `node tools/ci/ledger.mjs --scope AZ-T18`은 항목 7·빈칸 7·등급 B다.
-6. **OPEN 문안 후보 하나**(13): 발송기 전용 DB 역할. 팬 경로 역할이 웹훅 비밀을 읽고 발송 원장에 꾸민 행을 넣을 수 있는 남는 위험을 함께 닫는다.
-7. **새로 찾은 표**(14, 고치지 않음): 높음 후보 둘 — `webhook_delivery`(팬 경로 역할의 조건 없는 쓰기 → 파트너 비밀로 서명된 꾸민 사건), `product.commission_rate_bp`(파트너 역할의 표 단위 고치기 → 이후 주문 항목의 수수료율). 둘째는 이 묶음이 지키는 주문 항목 수수료율의 한 단계 앞이라 ADR-0338 '남는 한계'에도 적었다.
-8. **WBS 일 [가정] 1.3일**(12).
+   - **상품 수수료율은 칸 권한이 아니라 트리거가 지킨다.** 파트너 코드가 상품을 넣고 고칠 때 수수료율 칸을 함께 적고(계약에서 읽은 값), 넣기는 Drizzle이 모든 칸을 적어 칸 단위로 좁힐 수 없다. 그래서 0042의 트리거 `product_commission_from_contract`가 파트너 역할이 넣거나 고친 행의 수수료율을 '게시 때 계약 값, 그 뒤 그대로'로 덮어쓴다(ADR-0338 결정 4). 고치기 칸은 상품 ID·판매자를 뺀 스물을 주는데, **수수료율 칸 권한은 이번에는 남긴다**. 이전 판 코드가 그 칸을 SET해서 같이 거두면 배포 창 동안 파트너 상품 고치기가 모두 거절되기 때문이다(devops.md §7.1 '스키마 변경과 그 변경에 기대는 코드 변경은 같은 배포에 넣지 않는다'). 이 묶음 코드는 SET에서 그 칸을 빼고, 그 코드가 배포된 뒤 첫 core-svc 마이그레이션이 그 칸 권한을 거둔다(아래 13.2). 그동안에도 쓰이는 값은 트리거가 정한다. 칸 권한까지 이번에 거두려면 devops.md §7.1의 예외 결정이 필요하다.
+4. **새 ADR-0338**(결정 1~8): 발송기 몫(읽기 그대로, 고치기는 켜진 끝점을 `FAILING`으로 끄는 세 칸만, 이미 꺼진 끝점에는 0행이 되는 행동 바뀜), 파트너 웹훅 칸 아홉, 파트너 굿즈 주문 읽기만, 상품 수수료율(트리거·칸 스물·두 번에 나눔), 파트너 쓰기 경로를 만들 때의 선, FORCE 없음, 이전 판 호환, 0042. 0338 말고 번호는 쓰지 않았다.
+5. **새 시험 ID AZ-T18**(authz-matrix §7, ①~⑧. ⑧이 상품 수수료율). 첫 계획 커밋 직전 develop과 원격 가지 전부에 AZ-T18이 없음을 봤다(AZ-T17은 W12-core-idem 몫). `node tools/ci/ledger.mjs --scope AZ-T18`은 항목 8·빈칸 8·등급 B다.
+6. **넘기는 것**(13): 발송 원장 `webhook_delivery`와 발송기 전용 DB 역할 `core_notify`는 새 묶음 **W12-core-notify**(갈래 3)로 뗀다(조사 내용을 13.1에 남김, 묶음 줄은 기록 커밋에서 감독이 더함). 상품 수수료율 칸 권한 축소는 13.2다.
+7. **정리 목록 후보 여섯**(14, 중간·낮음, 고치지 않음). '파트너 굿즈 주문 계약 경로에 서버 처리기 없음'은 갈래 5 몫이다.
+8. **WBS 일 [가정] 1.8일**(12).
 
 ## 계획
 
@@ -71,12 +72,12 @@
 
 #### 1.3 발송기가 붙는 역할
 
-`main.ts` 165·178·249행: 발송기는 `PEAKET_DATABASE_URL`(`core_app`, 팬 경로와 같은 로그인)로 붙는다. 내부 입구도 `NOTIFY_APP_STORE`(`DATABASE`)다. DB가 발송기와 팬 경로를 가를 수 없으므로, 이 묶음은 '그 역할이 이 표에서 할 수 있는 일'을 발송기가 하는 일로 좁힌다. 발송기 전용 역할은 OPEN 문안(13)이다.
+`main.ts` 165·178·249행: 발송기는 `PEAKET_DATABASE_URL`(`core_app`, 팬 경로와 같은 로그인)로 붙는다. 내부 입구도 `NOTIFY_APP_STORE`(`DATABASE`)다. DB가 발송기와 팬 경로를 가를 수 없으므로, 이 묶음은 '그 역할이 이 표에서 할 수 있는 일'을 발송기가 하는 일로 좁힌다. 발송기 전용 역할은 새 묶음 W12-core-notify로 뗐다(13.1).
 
 #### 1.4 파트너가 실제로 고쳐야 하는 칸
 
 - 지금 코드: **없다**(1.2).
-- 계약(openapi 6315~6560행)의 파트너 쓰기: 송장 등록(`READY → SHIPPED`, 송장), 송장 CSV 묶음, 반품 도착 확인(`RETURN_REQUESTED → RETURN_RECEIVED`), 반품 거절(→ `DISPUTED`, 사유), 현장 수령(`READY → PICKED_UP`). 서버가 생기면 쓸 칸 후보는 `status`·`tracking_no`·`shipped_at`·`picked_up_at`·`return_received_at`·`reject_reason`·`return_resolved_at`이고 모두 주문 항목 표다. 주문 표는 쓰지 않는다. 그래서 ADR-0338 결정 4가 그 묶음이 넘지 않을 선을 정한다.
+- 계약(openapi 6315~6560행)의 파트너 쓰기: 송장 등록(`READY → SHIPPED`, 송장), 송장 CSV 묶음, 반품 도착 확인(`RETURN_REQUESTED → RETURN_RECEIVED`), 반품 거절(→ `DISPUTED`, 사유), 현장 수령(`READY → PICKED_UP`). 서버가 생기면 쓸 칸 후보는 `status`·`tracking_no`·`shipped_at`·`picked_up_at`·`return_received_at`·`reject_reason`·`return_resolved_at`이고 모두 주문 항목 표다. 주문 표는 쓰지 않는다. 그래서 ADR-0338 결정 5가 그 묶음이 넘지 않을 선을 정한다.
 
 #### 1.5 정산이 읽는 칸(`shop/domain/merch.ts` 117~172행)
 
@@ -87,7 +88,19 @@
 | 기준일 | `pg_store`, `purchase_confirmed_at`(결제대금예치) | `event_ends_at`, `fulfillment`, `picked_up_at`, `delivered_at`, `shipped_at` |
 | 귀속 | `id`, `promoter_id`, `event_id` | `id`, `order_id`, `promoter_id`, `event_id`, `product_id`, `product_name` |
 
-- data.md는 단가 칸을 `unit_price`라 적지만 0016과 코드는 `unit_amount`다(14 목록, 이번에 그 줄에 적어 둠).
+- data.md는 단가 칸을 `unit_price`라 적지만 0016과 코드는 `unit_amount`다(14 정리 후보, 이번에 그 줄에 적어 둠).
+
+#### 1.6 상품 `product`의 수수료율(감독 결정 둘째로 더함)
+
+- 권한·정책: `core_partner` `SELECT, INSERT, UPDATE` 표 단위(0014 46행), `product_partner_tenant` FOR ALL 테넌트 식(0014 54행). `core_app`은 읽기(기본 권한)와 `product_app_read`(0014 62행). 다른 역할은 없다.
+- 상품 표 칸은 22개다(`shop/adapters/db/schema.ts` 8~34행).
+- 파트너 코드(`shop/adapters/db/drizzle-product-store.ts`, `core_partner` 테넌트 트랜잭션):
+  - `insert`(88행): 22칸 전부를 적는다(수수료율은 앱이 정한 값).
+  - `save`(124행): `UPDATE … SET` 스무 칸(`type`·`schema_version`·`name`·`status`·`price`·`shipping_fee`·`return_shipping_fee`·`return_address`·`limited_qty`·`transferable`·`ticket_linked`·`linked_event_id`·`fulfillments`·`sale_starts_at`·`sale_ends_at`·`commission_rate_bp`·`attributes`·`published_at`·`updated_at`·`version`) `WHERE id·promoter_id·version RETURNING version`. `id`·`promoter_id`는 SET하지 않는다.
+- 수수료율을 정하는 곳(`shop/application/products.ts`): 게시로 만들 때(113행)와 처음 게시로 고칠 때(155행)만 `CommissionRateSource.rateBp`를 부른다. 운영 조립은 `DrizzleCommissionRate`(`main.ts` 204행, `promoter_contract`의 기간 끝이 열린 행, 없으면 예외)이고, DB 조립의 기본값은 `FixedCommissionRate(1000)`이다(`shop.module.ts` 108행. `shop-notify.int`·`shop-order.int`가 이 기본값으로 파트너 HTTP 게시를 한다).
+- 읽는 곳: 팬 경로 주문 만들기가 `core_app`으로 상품을 읽고 항목에 `p.commissionRateBp ?? 0`을 복사한다(`create-merch-order.ts` 212행).
+- 수수료율을 바꾸는 정당한 길: 계약 변경(2인 승인, ADR-0320)은 `promoter_contract`와 판매자·회차 칸만 바꾸고, 이미 게시된 상품 값은 바꾸지 않는다(ADR-0320 결정 6).
+- 시험 준비: `shop-cancel`·`shop-return`·`shop-expiry`·`shop-unclaimed`·`shop-refund-account`·`shop-attributes-check`·`shop-migration` 통합 시험은 소유자(`admin`)로 게시 상품을 계약 없이 넣는다(수수료율 1000 또는 비움). 트리거를 파트너 역할에만 거는 까닭이다(3.2).
 
 ### 2. 위험 재현(마이그레이션과 코드로 세움, 실행은 7)
 
@@ -101,8 +114,11 @@
 | R6 | 파트너 A: `insert into merch_order (… status 'PAID', pg 'TOSS' …)`와 항목 넣기 | 결제가 없는 주문이 정산 항목이 된다 | 42501(⑤) |
 | R7 | 파트너 A: `update merch_order_item set status = 'DELIVERED', delivered_at = now() - interval '30 days' where status = 'RETURN_REQUESTED'` | 반품 요청 항목이 정산에 들어가고 환급도 따로 나가 두 번 돈이 나간다 | 42501(⑤) |
 | R8 | 파트너 A: `update merch_order set shipping_fee = 0`·`set status = 'PAID', pg = 'TOSS' where status = 'CREATED'` | 배송비·결제 여부가 바뀐 채 정산된다 | 42501(⑤) |
+| R9 | 파트너 A: `update product set commission_rate_bp = 0`(조건 빠짐, 테넌트 A) | A의 모든 상품 수수료율이 0이 되고, 그 뒤 주문 항목이 0을 복사해 상품 정산서에 수수료 없이 오른다 | 트리거가 고치기 전 값으로 되돌려 그대로(⑧) |
+| R10 | 파트너 A: `insert into product (… status 'PUBLISHED', commission_rate_bp 0 …)` | 수수료 없는 게시 상품이 생긴다 | 트리거가 계약 값으로 정한다(⑧) |
+| R11 | 파트너 A: `update product set promoter_id = '<A>'`·`set id = …` | 지금은 판매자 칸이 WITH CHECK로만 막힌다(같은 테넌트 값이면 된다) | 42501(⑧) |
 
-- 다른 파트너 행은 지금도 테넌트 정책이 막는다(R5~R8은 자기 테넌트 안의 돈 값이다). 팬 경로(R1~R4)는 테넌트를 넘는다.
+- 다른 파트너 행은 지금도 테넌트 정책이 막는다(R5~R10은 자기 테넌트 안의 돈 값이다). 팬 경로(R1~R4)는 테넌트를 넘는다.
 
 ### 3. 설계(정본: ADR-0338)
 
@@ -121,9 +137,36 @@
    - `REVOKE INSERT, UPDATE ON "merch_order", "merch_order_item" FROM core_partner`(칸 권한을 다시 주지 않는다)
    - `DROP POLICY IF EXISTS "merch_order_partner_tenant"`·`"merch_order_item_partner_tenant"` → `CREATE POLICY "merch_order_partner_read" ON "merch_order" FOR SELECT TO core_partner USING (테넌트 식)`, `"merch_order_item_partner_read"`도 같은 꼴
    - `core_app` 권한과 `*_app_all`은 그대로.
-4. FORCE·소유자는 바꾸지 않는다(결정 5).
+4. 상품, 파트너 역할(결정 4)
+   - `REVOKE UPDATE ON "product" FROM core_partner` → `GRANT UPDATE (1.6의 스무 칸) ON "product" TO core_partner`(수수료율 칸은 이번에만 남김, 결정 4 '두 번에 나눔'). 넣기·읽기와 `product_partner_tenant`는 그대로.
+   - 함수와 트리거(꼴. 식은 ADR-0338 결정 4):
 
-- 쿼리·`schema.ts`·저장소는 바꾸지 않는다. 구현이 고치는 코드 파일은 주석 둘뿐이다(5).
+     ```sql
+     CREATE OR REPLACE FUNCTION product_commission_from_contract() RETURNS trigger
+     LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, pg_temp AS $$
+     BEGIN
+       IF NOT pg_has_role(current_user, 'core_partner', 'MEMBER') THEN RETURN NEW; END IF;
+       IF TG_OP = 'UPDATE' AND OLD.commission_rate_bp IS NOT NULL THEN
+         NEW.commission_rate_bp := OLD.commission_rate_bp;
+       ELSIF NEW.status = 'PUBLISHED' THEN
+         NEW.commission_rate_bp := (SELECT c.commission_rate_bp FROM public.promoter_contract c
+                                    WHERE c.promoter_id = NEW.promoter_id AND upper_inf(c.valid_during));
+         IF NEW.commission_rate_bp IS NULL THEN
+           RAISE EXCEPTION '계약 조건이 없어 상품 수수료율을 정할 수 없다' USING ERRCODE = '23514';
+         END IF;
+       ELSE
+         NEW.commission_rate_bp := NULL;
+       END IF;
+       RETURN NEW;
+     END $$;
+     DROP TRIGGER IF EXISTS product_commission_from_contract ON public.product;
+     CREATE TRIGGER product_commission_from_contract BEFORE INSERT OR UPDATE ON public.product
+       FOR EACH ROW EXECUTE FUNCTION product_commission_from_contract();
+     ```
+
+5. FORCE·소유자는 바꾸지 않는다(결정 6).
+
+- 쿼리·`schema.ts`는 바꾸지 않는다. 코드는 주석 둘과 상품 저장소의 고치기 한 곳만 바꾼다(5).
 
 #### 3.2 PostgreSQL 동작에서 시험·검증이 알아야 할 것(PostgreSQL 18 CREATE POLICY 문서 '명령별 적용 정책' 표, 2026-11-22 확인)
 
@@ -134,10 +177,13 @@
 - 파트너 판매자 칸 고치기는 칸 권한과 테넌트 WITH CHECK가 겹친다. ④는 값을 자기 테넌트로 골라 WITH CHECK가 지나게 해 칸 권한만 본다.
 - 소유자·슈퍼유저는 정책을 건너뛴다. 시험 `admin`은 슈퍼유저라 시드·되돌리기를 그대로 한다. FORCE를 더해도 `admin`은 건너뛰어 ⑦만 잡는다(M18).
 - 외래 키 검사는 행 보안을 건너뛴다. `id = id`처럼 값이 같은 고치기는 외래 키(`webhook_delivery.endpoint_id`)를 어기지 않는다.
+- 상품 트리거: 칸 권한은 문장의 SET 칸으로 문장을 돌리기 전에 보고, BEFORE 트리거는 그 뒤 새 행의 어느 칸이든 바꿀 수 있다(권한과 상관없다). 행 보안 WITH CHECK는 트리거가 바꾼 새 행에 걸린다. 그래서 ⑧은 '수수료율을 적은 문장이 거절되는가'가 아니라 '저장된 값이 무엇인가'를 본다.
+- 트리거 함수는 호출자 권한이라 파트너 트랜잭션에서는 `promoter_contract_partner_read`(0033)로 자기 테넌트 계약만 읽는다. 시험 `admin`은 파트너 역할 구성원이 아니어서 트리거가 아무것도 하지 않는다. 그래서 ⑧의 준비·되돌리기를 `admin`으로 해도 값이 덮이지 않고, 계약 없는 게시 상품 시드도 그대로 들어간다.
+- 계약 변경은 `admin`으로 지금 기간을 닫고(`upper` 채움) 새 기간을 넣는다(`promoter-contract.int.test.ts` 157~160행 꼴, `WITHOUT OVERLAPS` 유일 제약을 지킨다).
 
 #### 3.3 이전 판 코드(N-1)와 함께 돌기
 
-코드를 바꾸지 않는다. 배포 창 동안 이전 판의 발송기 끄기 문장은 새 세 칸·새 정책 안이고, 파트너 웹훅 고치기의 SET 칸은 아홉 칸 안이다. 파트너 굿즈 주문 쓰기 코드는 이전 판에도 없다.
+배포 창 동안 이전 판의 발송기 끄기 문장은 새 세 칸·새 정책 안이고, 파트너 웹훅 고치기의 SET 칸은 아홉 칸 안이다. 파트너 굿즈 주문 쓰기 코드는 이전 판에도 없다. 이전 판 상품 고치기는 수수료율을 포함한 스무 칸 안이고(그래서 그 칸 권한을 이번에 거두지 않는다), 적은 수수료율은 트리거가 덮는다. 이 묶음의 상품 저장소 코드는 수수료율을 SET하지 않으므로 축소 뒤에도 돈다.
 
 ### 4. 다른 역할 영향(0042 뒤)
 
@@ -147,6 +193,8 @@
 | `core_app` 팬 굿즈·정산 원천 | 그대로(`*_app_all`, 권한 그대로) |
 | `core_partner` 웹훅 | 등록·목록·고치기·재발급·발송 이력·다시 보내기 그대로(SET이 아홉 칸 안). 끝점 ID·판매자 칸만 고치지 못한다 |
 | `core_partner` 굿즈 주문 | 자기 테넌트 읽기 그대로. 쓰기 코드가 없어 영향 없음 |
+| `core_partner` 상품 | 목록·상세·만들기·고치기·재고 그대로. 수수료율은 앱이 계약에서 읽은 값과 같은 값을 트리거가 정한다. 계약이 없는데 게시하면 앱이 먼저 실패한다(운영 조립). `FixedCommissionRate`로 조립한 시험은 계약 행이 없어 트리거가 23514로 멈추므로, 파트너 HTTP로 게시하는 `shop-notify.int`·`shop-order.int`는 판매자마다 계약 행(수수료율 1000)을 시드에 더한다(6) |
+| `core_app` 주문 만들기 | 상품 수수료율을 읽어 복사하는 것 그대로. 읽는 값이 계약 값이다 |
 | `core_ops`·`core_maintenance`·`core_search`, 정의자 권한 함수 | 세 표의 권한·함수 참조가 없어 영향 없음 |
 | 소유자·시드(`scripts/seed-demo.mjs`)·시험 `admin` | FORCE가 없어 그대로 |
 | 다른 서비스 | payment-svc는 상품 정산 원천을 내부 HTTP로 읽는다(`core_app` 길). 영향 없음 |
@@ -160,21 +208,23 @@
 | 구현 | `services/core-svc/migrations/0042_webhook_merch_write_grants.sql`(새) | 3.1 |
 | 구현 | `services/core-svc/migrations/meta/_journal.json` | `{"idx":42,"version":"7","when":<0040·0041·develop 마지막보다 큼>,"tag":"0042_webhook_merch_write_grants","breakpoints":true}`. 스냅숏 없음(0033·0034·0040과 같다) |
 | 구현 | `src/modules/notify/adapters/db/drizzle-webhook-store.ts` 1~2행·251행 주석 | 발송기 연결은 `core_app`이고 이 표에서 켜진 끝점을 `FAILING`으로 끄는 세 칸만 고친다(ADR-0338 결정 1). 칸을 더 SET하거나 꺼진 끝점을 고치면 DB가 거절한다(주석만) |
-| 구현 | `src/modules/shop/adapters/db/drizzle-merch-store.ts` 1행 주석 | 파트너 DB 역할은 두 표를 읽기만 한다(ADR-0338 결정 3·4)(주석만) |
-| 시험 | `services/core-svc/test-int/webhook-merch-grants.int.test.ts`(새) | AZ-T18 ①~⑦ |
-| 시험 | `services/core-svc/test-int/shop-notify.int.test.ts` 95~116행·257~284행 | 권한 기대값을 0042 뒤 모양으로(아래 6 끝) |
-| 계획(이 커밋) | ADR-0338(새), authz-matrix §5.3·§7, data.md 세 줄, asvs/notify 8.4.1, asvs/settlement 8.2.3 | 정본 빈칸 먼저 |
+| 구현 | `src/modules/shop/adapters/db/drizzle-merch-store.ts` 1행 주석 | 파트너 DB 역할은 두 표를 읽기만 한다(ADR-0338 결정 3·5)(주석만) |
+| 구현 | `src/modules/shop/adapters/db/drizzle-product-store.ts` `save`(124~150행) | SET에서 `commissionRateBp`를 빼고 `returning`에 `commissionRateBp`를 더해 돌려주는 기록의 수수료율을 DB 값으로 둔다(ADR-0338 결정 4). `insert`는 그대로(트리거가 덮는다). 메모리 저장소·포트는 그대로 |
+| 시험 | `services/core-svc/test-int/webhook-merch-grants.int.test.ts`(새) | AZ-T18 ①~⑧ |
+| 시험 | `services/core-svc/test-int/shop-notify.int.test.ts` 95~116행·257~284행, `beforeAll` | 권한 기대값을 0042 뒤 모양으로, 판매자 A·B 계약 행 시드(아래 6 끝) |
+| 시험 | `services/core-svc/test-int/shop-order.int.test.ts` `beforeAll` | 파트너 HTTP로 게시하는 판매자의 계약 행 시드(수수료율 1000, 단언은 그대로) |
+| 계획(두 커밋) | ADR-0338(새), authz-matrix §5.3·§7, data.md 네 줄, asvs/notify 8.4.1, asvs/settlement 8.2.3 | 정본 빈칸 먼저 |
 
 - 구현 커밋은 시험 파일을, 시험 커밋은 시험 파일·이 계획 밖을 건드리지 않는다(§8.6 '바꾸는 파일').
-- 바꾸지 않는 것: 적용된 마이그레이션(0004·0014~0016), 쿼리·`schema.ts`·`packages/platform`, `rls.int.test.ts`·`roles.ts`, 계약·생성물·화면, ADR-0241, `webhook_delivery`·`product`(14).
+- 바꾸지 않는 것: 적용된 마이그레이션(0004·0014~0016·0033), `schema.ts`·`packages/platform`, `products.ts`(계약 읽기·실패는 그대로), `rls.int.test.ts`·`roles.ts`, 계약·생성물·화면, ADR-0241, `webhook_delivery`(13.1).
 
 ### 6. 시험 목록(시험 담당. 단언 값은 정본에서)
 
-- **준비는 0042에 기대지 않는다**: 시드는 `admin`(슈퍼유저)으로 넣는다. 판매자 A·B, 공연장·공연·회차(A), 끝점 A1(A, 켜짐, 발송 행 없음)·A2(A, 꺼짐 `PARTNER`)·B1(B, 켜짐, 구독 `payout.completed`만이라 ③의 사건을 받지 않음), 발송기용 끝점 E(B, 켜짐, 구독 `order.confirmed`, 옛 비밀과 미래 기한)·F(B, 꺼짐 `PARTNER`), 굿즈 주문 OA1(A, `PAID`·`TOSS`·`STANDARD`·배송비 3,000)과 항목(배송 완료, 단가 15,000 × 2, 수수료 1,000bp, 기준일이 시험 기간 안), OA2(A, `CREATED`)와 항목, OB(B, `PAID`)와 항목.
+- **준비는 0042에 기대지 않는다**: 시드는 `admin`(슈퍼유저)으로 넣는다. 판매자 A·B, 공연장·공연·회차(A), 끝점 A1(A, 켜짐, 발송 행 없음)·A2(A, 꺼짐 `PARTNER`)·B1(B, 켜짐, 구독 `payout.completed`만이라 ③의 사건을 받지 않음), 발송기용 끝점 E(B, 켜짐, 구독 `order.confirmed`, 옛 비밀과 미래 기한)·F(B, 꺼짐 `PARTNER`), 굿즈 주문 OA1(A, `PAID`·`TOSS`·`STANDARD`·배송비 3,000)과 항목(배송 완료, 단가 15,000 × 2, 수수료 1,000bp, 기준일이 시험 기간 안), OA2(A, `CREATED`)와 항목, OB(B, `PAID`)와 항목. ⑧용: 판매자 A의 계약(`promoter_contract`, 수수료율 1,234bp, 기간 끝이 열림), 계약이 없는 판매자 C.
 - 연결: `loginFor`(`test-int/roles.ts`)로 `core_app` 사용자(연결 2)와 `core_partner` 사용자(**연결 하나짜리 풀**: 앞 트랜잭션이 쓴 연결을 다시 쓰는 경우가 저절로 생긴다, rls.int.test.ts 34행 꼴). ⑤의 정산 원천은 `shop-notify.int.test.ts`처럼 `AppModule.register({ database: appDb, partnerDatabase: <다른 파트너 풀>, media: testMedia() })`와 `PEAKET_INTERNAL_TOKEN`으로 띄운 서비스의 `GET /internal/v1/shop/product-settlement-items`를 부른다.
 - 42501은 `rejects.toMatchObject({ cause: { code: '42501' } })`. 바꾼 상태는 `afterEach`에서 `admin`으로 되돌린다(구현 전 트리에서 고치기가 되므로 시험이 실패해도 되돌린다, W12-core-rls 시험 담당 꼴). 번호는 `AZ-T18 ①`처럼 ID 바로 뒤에.
 - ③의 서명 기대값은 `node:crypto`의 HMAC으로 시험 안에서 따로 만든다(`domain/webhook.ts`의 `webhookSignature`로 만들지 않는다. `test/webhook-dispatcher.test.ts` 39행 시험 꼴). 시계는 가짜 시계, 수신기는 응답 차례를 정한 가짜(그 파일의 `Receiver` 꼴). 이 파일의 다른 발송 행은 DEAD·SUCCEEDED이거나 다음 시도 시각이 미래여서 ③ 말고는 집히지 않게 둔다.
-- 시험이 기대는 공개 모양: 정책 이름(ADR-0338 결정 1·3), 칸 권한(결정 1·2·3), 일지 idx 42.
+- 시험이 기대는 공개 모양: 정책 이름(ADR-0338 결정 1·3), 트리거·함수 이름(결정 4), 칸 권한(결정 1~4), 계약 없는 게시 오류 23514, 일지 idx 42.
 
 | 시험 이름 | 단언(정확한 값) | 구현 전 트리 |
 | --- | --- | --- |
@@ -185,19 +235,20 @@
 | `AZ-T18 ⑤ 파트너 트랜잭션은 자기 테넌트의 굿즈 주문·주문 항목을 넣거나 칸마다 고치거나 지우지 못하고 상품 정산 원천 응답이 그대로다 [ASVS v5.0.0-8.2.3] [ASVS v5.0.0-8.4.1]` | 먼저 정산 원천 응답을 받아 둔다(OA1 항목: 총액 33,000·수수료 1,000bp). 테넌트 A로 WHERE·RETURNING 없는 고치기를 칸마다 따로: 항목 `unit_amount`(15,001)·`quantity`(3)·`commission_rate_bp`(0)·`refunded_amount`·`status`(`CANCELLED`)·`shipped_at`·`delivered_at`·`tracking_no`, 주문 `status`(`PAID`)·`shipping_fee`(0)·`pg`·`purchase_confirmed_at`·`amount`. 모두 42501(0행이 아니라 오류). `PAID` 주문·그 항목 넣기 각각 42501, 두 표 지우기 각각 42501. 끝에 정산 원천 응답이 처음과 깊이 같고, `admin`으로 두 표의 모든 행이 시드 값 그대로 | 실패(고치기·넣기가 되고 응답이 바뀜) |
 | `AZ-T18 ⑥ 파트너 트랜잭션의 굿즈 주문·주문 항목 읽기는 자기 테넌트 행뿐이고 테넌트 없이는 0건이다(앞 트랜잭션이 쓴 연결을 다시 써도 오류 없이) [ASVS v5.0.0-8.4.1]` | 테넌트 A의 조건 없는 읽기 ID가 두 표 모두 정확히 A의 행(OA1·OA2와 그 항목), B는 OB와 그 항목. A 트랜잭션 뒤 테넌트 없는 트랜잭션 `[]`(22P02 없이), 트랜잭션 밖 `[]` | 통과(있던 동작) → M14~M16 |
 | `AZ-T18 ⑦ 세 표의 행 보안이 켜져 있고 FORCE가 없으며 소유자가 앱 역할이 아니고 정책과 칸 권한이 정한 모양이다 [ASVS v5.0.0-8.4.1]` | `pg_class` 세 표 `relrowsecurity` 참·`relforcerowsecurity` 거짓, 소유자가 세 앱 역할·로그인 사용자 아님. `pg_policies`(`roles::text[]`)를 표·이름 차례로 정확히: `webhook_endpoint` = `webhook_endpoint_app_disable`(UPDATE, `{core_app}`, `qual`·`with_check`가 결정 1의 식), `webhook_endpoint_app_read`(SELECT, `{core_app}`, `true`, 없음), `webhook_endpoint_partner_tenant`(ALL, `{core_partner}`, 0015의 테넌트 식 그대로); `merch_order` = `merch_order_app_all`(ALL, `{core_app}`, `true`, `true`), `merch_order_partner_read`(SELECT, `{core_partner}`, `qual`이 `production_partner_tenant`의 `qual` 글과 같음, 없음); `merch_order_item`도 같은 꼴. `has_table_privilege`·`has_column_privilege`로 `core_app`의 끝점 UPDATE는 표 단위 거짓·칸은 셋만 참, `core_partner`의 끝점 UPDATE는 표 단위 거짓·칸은 아홉만 참, `core_partner`의 두 주문 표 INSERT·UPDATE는 표 단위·모든 칸 거짓이고 SELECT는 참 | 실패(옛 정책·표 단위 권한) |
+| `AZ-T18 ⑧ 파트너 트랜잭션이 상품 수수료율을 적어 넣거나 고쳐도 게시 때의 계약 값으로 정해지고 그 뒤 바뀌지 않으며 상품 ID·판매자 칸은 고치지 못한다 [ASVS v5.0.0-8.2.3] [ASVS v5.0.0-8.4.1]` | 테넌트 A로 가: 수수료율 0을 적은 게시 상품 P1 넣기 → `admin`으로 1,234. 나: 수수료율 5를 적은 초안 P2 넣기 → 비어 있음. 다: `set status = 'PUBLISHED', commission_rate_bp = 7 where id = P2` → 1,234. 라: WHERE·RETURNING 없는 `set commission_rate_bp = 0` → P1·P2 1,234 그대로. 마: `admin`으로 A의 계약을 2,000bp 새 기간으로 바꾼 뒤 `set name = '…' where id = P1` → P1은 1,234, 새 게시 상품 P3 넣기 → 2,000. 바: 테넌트 C로 게시 상품 넣기 23514, 초안 넣기는 되고 비어 있음. 사: P1에 `set promoter_id = A`·`set id = id` 각각 42501. 아: `app`으로 P1·P3 수수료율이 1,234·2,000. 자: `pg_trigger`에 `product_commission_from_contract`(BEFORE, INSERT·UPDATE, 행마다, 켜짐), 그 함수 `prosecdef` 거짓·`proconfig`에 `search_path=pg_catalog, pg_temp`. `has_table_privilege(core_partner, product, UPDATE)` 거짓, 칸은 1.6의 스무 칸만 참(상품 ID·판매자 거짓), INSERT는 표 단위 참 | 실패(가·다·라·마·사·자에서 적은 값이 남고 표 단위 권한) |
 
-- **기존 시험 고침(같은 시험 커밋)**: `shop-notify.int.test.ts` 95행 시험의 `core_partner` 기대값 `webhook_endpoint`를 `INSERT,SELECT`로, 257행 시험의 `merch_order`·`merch_order_item`을 `SELECT`로, `core_app` `webhook_endpoint`를 `SELECT`로 바꾸고 '표 단위 권한만 본다. 칸 권한은 AZ-T18 ⑦'이라는 주석 한 줄. 시험 이름·다른 단언은 그대로. 구현 전 트리에서는 이 두 시험도 실패한다.
-- 회귀(게이트에서 돈다): `shop-notify.int`(파트너 웹훅 HTTP 등록·고치기·재발급·이력·다시 보내기, 내부 입구, 정산 원천), `webhook-lease.int`·`webhook-lease-concurrent.int`, `shop-order.int`·`shop-cancel.int`·`shop-return.int`·`shop-expiry.int`·`shop-unclaimed.int`·`shop-refund-account.int`(팬 경로 쓰기), `shop-migration.int`, `rls.int`(W12-core-rls), W12-core-idem 새 파일 셋, `test/webhook-dispatcher.test.ts`, `test/migrations-journal.test.ts`, `test/shop-notify.migration.test.ts`.
+- **기존 시험 고침(같은 시험 커밋)**: `shop-notify.int.test.ts` 95행 시험의 `core_partner` 기대값 `product`·`webhook_endpoint`를 `INSERT,SELECT`로, 257행 시험의 `merch_order`·`merch_order_item`을 `SELECT`로, `core_app` `webhook_endpoint`를 `SELECT`로 바꾸고 '표 단위 권한만 본다. 칸 권한은 AZ-T18 ⑦'이라는 주석 한 줄. 시험 이름·다른 단언은 그대로. 구현 전 트리에서는 이 두 시험도 실패한다. 또 `shop-notify.int`·`shop-order.int`의 `beforeAll`에 파트너 HTTP로 게시하는 판매자마다 계약 행(수수료율 1000, 기간 끝이 열림)을 `admin`으로 넣는다. 지금 조립의 `FixedCommissionRate(1000)`와 같은 값이라 다른 단언은 그대로이고, 구현 전 트리에서도 통과한다.
+- 회귀(게이트에서 돈다): `shop-notify.int`(파트너 웹훅 HTTP 등록·고치기·재발급·이력·다시 보내기, 내부 입구, 정산 원천), `webhook-lease.int`·`webhook-lease-concurrent.int`, `shop-order.int`·`shop-cancel.int`·`shop-return.int`·`shop-expiry.int`·`shop-unclaimed.int`·`shop-refund-account.int`(팬 경로 쓰기), `shop-migration.int`, `shop-attributes-check.int`(소유자 시드가 트리거를 건너뛰는지), `promoter-contract.int`(계약 변경·상품 게시 수수료율 원천), `rls.int`(W12-core-rls), W12-core-idem 새 파일 셋, `test/webhook-dispatcher.test.ts`, `test/migrations-journal.test.ts`, `test/shop-notify.migration.test.ts`.
 
 ### 7. 실패 확인(시험 담당)
 
 - **어디서**: 두 앞 묶음이 develop에 든 뒤 rebase하고, 시험 커밋을 이 계획 커밋 위에 쌓은 트리(0042 없음).
-- **길 (가) 로컬 Docker**(감독이 갈래 2 차례를 줄 때만): `docker info` → `bash D:/ticketpass-locks/lock.sh take docker lane2-W12-core-rls2`(남이 쥐었으면 `who`를 적고 기다리지 말고 길 (나)) → `pnpm exec turbo run build --filter=@peaket/core-svc^...` → `pnpm --filter @peaket/core-svc test:integration test-int/webhook-merch-grants.int.test.ts test-int/shop-notify.int.test.ts` → 자기 컨테이너만 `docker rm -f -v` → `lock.sh drop docker lane2-W12-core-rls2`.
+- **길 (가) 로컬 Docker**(감독이 갈래 2 차례를 줄 때만): `docker info` → `bash D:/ticketpass-locks/lock.sh take docker lane2-W12-core-rls2`(남이 쥐었으면 `who`를 적고 기다리지 말고 길 (나)) → `pnpm exec turbo run build --filter=@peaket/core-svc^...` → `pnpm --filter @peaket/core-svc test:integration test-int/webhook-merch-grants.int.test.ts test-int/shop-notify.int.test.ts test-int/shop-order.int.test.ts` → 자기 컨테이너만 `docker rm -f -v` → `lock.sh drop docker lane2-W12-core-rls2`.
 - **길 (나) 초안 PR CI**(기본): 시험 커밋을 올리고(rebase 뒤라 `feature/lane2-W12-core-rls2-r2`) `gh pr create --draft --base develop --head <가지>`로 초안 PR을 연다. `ci.yml` → `ci-node.yml`의 `node` 잡이 core-svc 통합 시험 전부를 돈다(92행). `gh run view <실행 ID> --log-failed`로 그 잡의 실패 시험과 실제 값을 읽는다. 다른 통합 시험이 실패하면 이 묶음과 관계없는 것인지 적는다.
-- **기대**: ①②③④⑤⑦과 고친 `shop-notify` 두 시험이 **단언 실패**(실행조차 안 되는 실패가 아니다). ⑥은 통과(있던 동작)이고 M14~M16으로, ③의 발송 몫과 ④의 아홉 칸은 M6~M8·M10으로 본다(§8.6 7 '구현 전 트리에서 실패를 볼 수 없는 시험').
+- **기대**: ①②③④⑤⑦⑧과 고친 `shop-notify` 두 시험이 **단언 실패**(실행조차 안 되는 실패가 아니다). ⑥은 통과(있던 동작)이고 M14~M16으로, ③의 발송 몫과 ④의 아홉 칸은 M6~M8·M10으로 본다(§8.6 7 '구현 전 트리에서 실패를 볼 수 없는 시험').
 - **적을 것**: 길, 명령(또는 실행 ID), 파일마다 통과·실패 수, 실패마다 실제 값 한 줄, 처음부터 통과한 시험과 그 실패를 볼 표본 번호, 잠금 시각(길 가).
 
-### 8. 틀린 구현 표본(검증 담당, 18개, 항목마다 1개 이상)
+### 8. 틀린 구현 표본(검증 담당, 24개, 항목마다 1개 이상)
 
 기준선은 구현 뒤 트리에서 새 파일과 `shop-notify.int` 통과. 표본마다 하나만 넣고 돌린 뒤 `git checkout -- <파일>`. 0042를 바꾸는 표본은 통합 시험이 파일마다 새 컨테이너에 마이그레이션을 다시 올리므로 그대로 걸린다. 무거우면 표본을 몇 개씩 묶은 초안 PR CI로 돌려도 된다(표본마다 실행 하나).
 
@@ -221,9 +272,15 @@
 | M16 | ⑥ | 0042 | `merch_order_partner_read`를 `promoter_id = coalesce(nullif(…)::uuid, promoter_id)`로 | ⑥(테넌트 없이 모두), ⑦ |
 | M17 | ⑦ | 0042 | `merch_order`의 `REVOKE`에서 `INSERT`를 뺀다(넣기 정책이 없어 행동은 같다) | ⑦만 |
 | M18 | ⑦ | 0042 | `ALTER TABLE "webhook_endpoint" FORCE ROW LEVEL SECURITY`를 더한다 | ⑦만(`admin`은 슈퍼유저라 FORCE도 건너뜀) |
+| M19 | ⑧ | 0042 | 트리거를 만들지 않는다(함수와 칸 권한만) | ⑧가·다·라·자 |
+| M20 | ⑧ | 0042 | 고치기 분기에서 고치기 전 값을 지키지 않는다(게시면 늘 지금 계약 값) | ⑧마(P1이 2,000이 됨) |
+| M21 | ⑧ | 0042 | 계약이 없을 때 멈추지 않고 비워 둔다 | ⑧바(게시 상품이 수수료율 없이 들어감) |
+| M22 | ⑧ | 0042 | 트리거를 `BEFORE UPDATE`만 건다 | ⑧가(넣기에 적은 0이 남음)·자 |
+| M23 | ⑧ | 0042 | `core_partner`의 상품 `REVOKE UPDATE`를 빼고 칸 권한을 주지 않는다(표 단위 그대로) | ⑧사·자 |
+| M24 | ⑧ | 0042 | 함수를 `SECURITY DEFINER`로 만든다 | ⑧자만(행동은 같다. 정의자 권한은 행 보안을 건너뛰어 다른 테넌트 계약을 읽을 수 있다) |
 
-- 항목마다 수: ① 2, ② 3, ③ 3, ④ 2, ⑤ 3, ⑥ 3, ⑦ 2. 정책 식 칸 이름을 틀리면 0042가 42703으로 멈춰 모든 통합 시험이 멈추므로 세지 않는다. 장애 주입은 해당 없음(복구 경로가 없는 권한 변경).
-- '검증' 절에 적을 것: 표본마다 실패한 시험, 놓친 표본과 시험 담당에게 넘긴 것, AZ-T18 ①~⑦ 판정 기준과 단언의 대조 전수.
+- 항목마다 수: ① 2, ② 3, ③ 3, ④ 2, ⑤ 3, ⑥ 3, ⑦ 2, ⑧ 6. 정책 식 칸 이름을 틀리면 0042가 42703으로 멈춰 모든 통합 시험이 멈추므로 세지 않는다. 장애 주입은 해당 없음(복구 경로가 없는 권한 변경).
+- '검증' 절에 적을 것: 표본마다 실패한 시험, 놓친 표본과 시험 담당에게 넘긴 것, AZ-T18 ①~⑧ 판정 기준과 단언의 대조 전수.
 
 ### 9. 게이트 명령과 닿는 CI 잡
 
@@ -244,47 +301,72 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 | --- | --- |
 | `ci.yml` → `ci-node.yml` / node | core-svc typecheck·단위·통합 시험 |
 | `docs-check` | ADR-0338·authz-matrix·data.md·ASVS 두 표·이 계획 |
-| `lint-guard` | 주석만 바꾸지만 core-svc 파일이 닿는다 |
+| `lint-guard` | core-svc 상품 저장소(어댑터 층)와 주석 |
 
 - spec-check: `specs/specs.json`이 바꾸는 문서를 가리키지 않아 해당 없음.
-- 장부: BUILD_ORDER 묶음이 아니라 `ledger.mjs --batch`는 쓰지 않는다. 지금 `node tools/ci/ledger.mjs --scope AZ-T18`은 항목 7·빈칸 7·등급 B다. 감독 결정으로 A로 증명한다. 기록 담당이 `node tools/ci/ledger.mjs`로 다시 쓰고 AZ-T18 ①~⑦이 '자동 시험'인지 본다.
+- 장부: BUILD_ORDER 묶음이 아니라 `ledger.mjs --batch`는 쓰지 않는다. 지금 `node tools/ci/ledger.mjs --scope AZ-T18`은 항목 8·빈칸 8·등급 B다. 감독 결정으로 A로 증명한다. 기록 담당이 `node tools/ci/ledger.mjs`로 다시 쓰고 AZ-T18 ①~⑧이 '자동 시험'인지 본다.
 - `pnpm`이 막히면 `npx tsc -p services/core-svc/tsconfig.json --noEmit`, `npx vitest run --config vitest.integration.config.mjs <파일>`(core-svc 폴더).
-- 리뷰(보안): 정책 식과 칸 목록(1.2 표·ADR-0338), REVOKE·GRANT 차례, 다른 역할 경로(4 표), 발송기 몫이 끄기 하나로 좁혀졌는지와 읽기 몫을 좁히지 않았는지(3.2), FORCE·소유자, N-1(3.3), 시험이 쿼리 조건 없이 DB 가드만 보고 겹친 가드를 하나씩 보는지.
+- 리뷰(보안): 정책 식과 칸 목록(1.2 표·ADR-0338), REVOKE·GRANT 차례, 다른 역할 경로(4 표), 발송기 몫이 끄기 하나로 좁혀졌는지와 읽기 몫을 좁히지 않았는지(3.2), 상품 트리거의 역할 조건·호출자 권한·`search_path`·계약 없는 게시, 수수료율 칸 권한을 남긴 까닭(두 번에 나눔), FORCE·소유자, N-1(3.3), 시험이 쿼리 조건 없이 DB 가드만 보고 겹친 가드를 하나씩 보는지.
 
 ### 10. 자주 놓친 결함 가운데 해당하는 것
 
 - 정확한 값까지: ①④⑥ 보이는·바뀐 행 목록 전체, ③ 보낸 요청 수·주소·서명 값·끈 끝점의 사유와 판, ⑤ 정산 원천 응답 전체와 모든 행 값.
-- 경계·세 상태: 테넌트 있음(④⑥)·없음·빈 문자열(연결 재사용, ④⑥). 실패 기준 49건 + 1(③, 값은 notify.md §9 [가정]).
+- 경계·세 상태: 테넌트 있음(④⑥)·없음·빈 문자열(연결 재사용, ④⑥). 실패 기준 49건 + 1(③, 값은 notify.md §9 [가정]). 수수료율 처음 정하기·이미 정함·초안(⑧), 계약 있음·바뀜·없음(⑧).
 - 겹친 가드 하나씩: 칸 권한과 정책(①은 허용 끄기와 함께, ②는 허용 칸만, 3.2), 판매자 칸 권한과 WITH CHECK(④는 자기 테넌트 값), 넣기 권한과 넣기 정책 없음(M17은 ⑦).
 - 목록 밖 값마다: ① 칸마다, ② 상태·사유·판 경우마다, ⑤ 정산 칸마다.
-- 부르는 쪽이 결과를 쓰는지: ③은 실제 발송기를 `core_app`으로 돌려 수신기가 받은 요청을 보고, ⑤는 정산 원천 HTTP 응답을 견준다. 시험 값은 상수와 다르게(단가 15,001, 수량 3).
+- 부르는 쪽이 결과를 쓰는지: ③은 실제 발송기를 `core_app`으로 돌려 수신기가 받은 요청을 보고, ⑤는 정산 원천 HTTP 응답을 견준다. ⑧은 팬 경로 사용자가 읽는 상품 수수료율(주문이 복사하는 값)을 본다. 시험 값은 상수와 다르게(단가 15,001, 수량 3, 계약 1,234bp·2,000bp는 기본값 1000과 다르게).
 
 ### 11. 범위 밖
 
-발송기 전용 DB 역할(13 OPEN), `webhook_delivery`·`product`와 아래 14의 표, 파트너 배송·반품 처리 서버(ADR-0338 결정 4의 선만 정함), 파트너의 주문 읽기 칸 좁히기, `disableEndpoint`가 0행일 때의 보고, 계약·화면.
+발송 원장·발송기 전용 DB 역할(13.1, W12-core-notify), 상품 수수료율 칸 권한 축소(13.2), 상품의 다른 칸(가격 등 파트너가 정하는 값), 아래 14의 정리 후보, 파트너 배송·반품 처리 서버(ADR-0338 결정 4의 선만 정함), 파트너의 주문 읽기 칸 좁히기, `disableEndpoint`가 0행일 때의 보고, 계약·화면.
 
 ### 12. WBS 일 [가정]
 
-1.3일 = 계획 0.2 + 시험 0.4(새 통합 파일 하나, HTTP 조립 하나, 기존 단언 둘) + 구현 0.15(마이그레이션·주석) + 리뷰 0.15 + 검증 0.3(표본 18개) + 기록 0.1. 감독이 coord.md에 적는다.
+1.8일 = 계획 0.25(감독 결정 둘째 반영 포함) + 시험 0.55(새 통합 파일 하나와 ⑧, HTTP 조립 하나, 기존 단언 둘, 계약 시드 둘) + 구현 0.3(마이그레이션·트리거·상품 저장소 고치기·주석) + 리뷰 0.2 + 검증 0.4(표본 24개) + 기록 0.1. 감독이 coord.md에 적는다.
 
-### 13. OPEN 문안 후보(감독 결정 대기)
+### 13. 넘기는 것
 
-> **OPEN[다음 번호]** core-svc 웹훅 발송기 전용 DB 역할(W12-core-rls2가 남김, ADR-0338 '결과'의 남는 한계). 발송기가 팬 경로 역할 `core_app`으로 붙어, 그 역할은 0042 뒤에도 모든 파트너 웹훅 비밀을 읽고 켜진 끝점을 `FAILING`으로 끌 수 있다. 발송 원장 `webhook_delivery`는 `core_app`에 조건 없는 `FOR ALL` 정책(0016)이라, 팬 경로 쿼리 하나로 아무 끝점에 꾸민 본문의 발송 행을 넣으면 발송기가 그 파트너 비밀로 서명해 보낸다(가짜 주문 확정·지급 완료). notify.md §13은 '발송 워커의 서비스 계정만 비밀을 읽는다'고 적는다.
-> (가) 추천: 그룹 역할 `core_notify`와 연결 `PEAKET_NOTIFY_DATABASE_URL`을 새로 두고 발송기·내부 입구만 그 연결로 붙인다. `webhook_endpoint` 읽기·끄기 몫과 `webhook_delivery` 쓰기를 그 역할로 옮기고 `core_app`의 두 표 권한·정책을 거둔다. 시작 확인(ADR-0241 결정 7)에 더하고 로컬·CI·배포 값에 주소를 더한다. 배포 창 동안 이전 판이 `core_app`으로 쓰므로 두 번에 나눠 낸다(먼저 새 역할 권한과 연결, 다음 배포에서 `core_app` 권한 거두기). 새 묶음(A, 보안 높음).
-> (나) 그대로 두고 남는 위험으로 적는다(주소·비밀 바꾸기는 0042가 막는다).
+#### 13.1 W12-core-notify(갈래 3, 감독 결정 2026-11-22): 발송 원장과 발송기 전용 DB 역할
 
-### 14. 새로 찾은 표 목록(고치지 않음, ADR-0283 결정 6)
+- **위험**: 발송기가 팬 경로 역할 `core_app`으로 붙는다(1.3). 그래서 팬 경로 쿼리 하나로
+  - 발송 원장 `webhook_delivery`에 아무 끝점·아무 본문의 행을 넣으면 발송기가 그 파트너 비밀로 서명해 보낸다(가짜 주문 확정·지급 완료). **높음**.
+  - 원장 행의 상태를 고쳐 진짜 사건을 DEAD로 만들거나, 끝난 행을 PENDING으로 되돌려 다시 보낸다.
+  - 모든 끝점의 비밀을 읽는다(notify.md §13 '발송 워커의 서비스 계정만 비밀을 읽는다'와 다르다). 켜진 끝점을 `FAILING`으로 끈다(0042 뒤에 남는 가용성 위험).
+- **지금 권한**(`core_app`): `webhook_endpoint` 읽기(0004 25행 기본 권한)·`webhook_endpoint_app_read`(0015 50행), 0042 뒤 고치기 세 칸·`webhook_endpoint_app_disable`. `webhook_delivery` 읽기(기본 권한)·`INSERT, UPDATE`(0016 77행)·`webhook_delivery_app_read`(0015 52행)·`webhook_delivery_app_all` FOR ALL `true`(0016 105행).
+- **발송기가 실제로 쓰는 것**(`notify/adapters/db/drizzle-webhook-store.ts`, `dispatcher.ts`. `main.ts` 249행의 주기 작업과 내부 입구 `POST /internal/v1/notify/webhook-events`가 `NOTIFY_APP_STORE`로 같은 저장소를 쓴다):
+
+| 메서드(행) | 표 | 명령 | 읽는 칸(WHERE·RETURNING 포함) | 쓰는 칸 |
+| --- | --- | --- | --- | --- |
+| `listActiveEndpoints`(156) | `webhook_endpoint` | SELECT | 11칸 전부(조건 `promoter_id`·`status`) | — |
+| `findEndpointById`(163) | `webhook_endpoint` | SELECT | 11칸 전부(조건 `id`) | — |
+| `disableEndpoint`(251) | `webhook_endpoint` | UPDATE | `id`·`version` | `status`·`disabled_reason`·`version` |
+| `insertDeliveries`(170) | `webhook_delivery` | INSERT | — | 표 객체의 모든 칸(Drizzle이 `lease_until`도 기본값으로 적는다) |
+| `listDueDeliveries`(192) | `webhook_delivery` | SELECT … FOR UPDATE SKIP LOCKED → UPDATE … RETURNING | `id`·`status`·`next_attempt_at`·`lease_until`, 돌려받기는 모든 칸 | `lease_until` |
+| `saveDelivery`(220) | `webhook_delivery` | UPDATE | `id`·`status` | `status`·`attempt_count`·`last_http_status`·`last_error`·`next_attempt_at`·`finished_at`·`lease_until` |
+| `countDeadSince`(230) | `webhook_delivery` | SELECT count | `endpoint_id`·`status`·`finished_at`·`created_at` | — |
+| `lastSuccessAt`(240) | `webhook_delivery` | SELECT max | `endpoint_id`·`status`·`finished_at` | — |
+
+- 팬 경로의 다른 코드는 두 표를 읽지도 쓰지도 않는다(`grep -rn "webhookDelivery\|webhook_delivery\|webhookEndpoint" services/core-svc/src`가 notify 모듈만 준다). 파트너 경로(`core_partner`)는 끝점 관리와 다시 보내기(`redeliver` 134행, 원장 상태 되돌리기)를 그대로 쓴다.
+- **`core_app`에서 거둘 것**(새 역할로 옮긴 뒤): 두 표의 읽기(기본 권한으로 받은 것), `webhook_endpoint` 고치기 세 칸, `webhook_delivery` 넣기·고치기, 정책 넷(`webhook_endpoint_app_read`·`webhook_endpoint_app_disable`·`webhook_delivery_app_read`·`webhook_delivery_app_all`).
+- **새로 둘 것(후보)**: 그룹 역할 `core_notify`(로그인 불가, `NOBYPASSRLS`)와 위 표의 명령·칸만큼의 권한·정책, 연결 `PEAKET_NOTIFY_DATABASE_URL`과 풀, 시작 확인(`assertDatabaseRole`, ADR-0241 결정 7), `NotifyModule`의 `NOTIFY_APP_STORE` 주입, 시험 `test-int/roles.ts`의 역할 목록, 로컬·CI·배포 값의 주소, authz-matrix §5.3·notify.md §13 문장.
+- **배포 나누기**: 이전 판은 `core_app`으로 두 표를 쓰므로, 새 역할·권한·연결과 코드를 먼저 내고 `core_app` 권한을 다음 배포에서 거두는 두 번 나눔이 devops.md §7.1에 맞아 보인다. 정하는 것은 갈래 3 계획이다.
+- 묶음 줄(BUILD_ORDER '기능 묶음' 표)은 이 묶음 기록 커밋에서 감독이 더한다.
+
+#### 13.2 상품 수수료율 칸 권한 축소(ADR-0338 결정 4 '두 번에 나눔')
+
+- 이 묶음의 코드(상품 저장소가 수수료율을 SET하지 않음)가 배포된 뒤 첫 core-svc 마이그레이션이 `REVOKE UPDATE ("commission_rate_bp") ON "product" FROM core_partner` 한 줄을 낸다. 그때 AZ-T18 ⑧ 자의 칸 목록 단언에서 수수료율을 뺀다.
+- 그동안에도 트리거가 쓰이는 값을 정하므로 돈 위험은 0042로 닫힌다. 이 줄을 정리 목록에 적는 것은 기록 담당이다.
+
+### 14. 정리 목록 후보(중간·낮음, 고치지 않음, ADR-0283 결정 6)
 
 | 표·칸 | 누가 무엇을 | 위험 한 줄 |
 | --- | --- | --- |
-| `webhook_delivery` | `core_app` `INSERT, UPDATE`(0016 77행)·`webhook_delivery_app_all` FOR ALL `true`(0016 105행) | 팬 경로 쿼리 하나로 아무 끝점에 꾸민 본문을 넣으면 발송기가 파트너 비밀로 서명해 보낸다. 상태를 고쳐 진짜 사건을 DEAD로 만들거나 끝난 행을 다시 보낼 수도 있다. **높음 후보**(13 OPEN이 함께 닫는다) |
-| `product.commission_rate_bp` | `core_partner` `SELECT, INSERT, UPDATE` 표 단위(0014 46행). 코드가 계약 값을 넣지만(`products.ts` 113·155행) DB는 아무 값이나 받는다 | 파트너 경로 쿼리 하나로 자기 상품 수수료율을 0으로 바꾸면 그 뒤 주문 항목이 그 값을 복사해 정산된다(이 묶음이 지키는 값의 한 단계 앞). **높음 후보(돈)**. 방향 후보: 파트너의 상품 고치기를 칸 단위로 좁히고 수수료율은 게시 때 정의자 권한 함수나 트리거가 계약 표에서 채운다 |
 | `merch_order` 개인정보 칸 | `core_partner` 표 단위 읽기(0016 71행, 0042 뒤에도) | 자기 테넌트 주문의 받는 분 이름·연락처·주소·구매 계정·결제 ID 원문을 DB에서 읽는다. 계약은 가린 값과 접속기록이 남는 보기만 준다. 중간 |
 | `attendee_export` | `core_partner` `SELECT, INSERT, UPDATE` 표 단위(0016 73행), 코드는 넣기만(`drizzle-export-store.ts` 31행) | 파트너 경로 쿼리 하나로 자기 테넌트 내려받기 이력의 건수·결과를 고친다(접속기록 무결성). 낮음~중간 |
 | `core_app` 기본 읽기 권한 | 0004 25행 `ALTER DEFAULT PRIVILEGES … GRANT SELECT ON TABLES TO core_app` | 뒤에 만드는 모든 표를 팬 경로 역할이 읽는다(웹훅 비밀이 그렇게 열렸다). 새 표마다 거둘 것을 잊기 쉽다. 낮음~중간(구조) |
 | data.md `merch_order_item` | 문서가 `unit_price`라 적고 칸 일부(`promoter_id`·`event_id`·`product_name`·`fulfillment`·`ticket_linked`·`shipped_at`·`refunded_amount`·`event_ends_at` 등)가 빠져 있다 | 정본과 0016·코드가 어긋난다. 이번에는 `unit_price` 줄에 실제 이름만 적었다. 낮음(문서) |
-| 파트너 굿즈 주문 계약 경로 | `gw-partner` 라우트가 `/v1/partner/merch-order-items` 등을 core-svc로 보내지만 서버 처리기가 없다 | 화면이 실제 서버에서 404를 받는다. 서버를 만들 때 ADR-0338 결정 4를 따른다. 낮음(기능 빈칸) |
-| `dispatcher.ts` 118행 | 끄기가 0행이어도 `disabled`에 넣고 알림 훅을 부른다 | 0042 뒤 경쟁 상황에서 꺼지지 않은 끝점을 껐다고 보고할 수 있다(지금 알림 훅은 비어 있다). 낮음 |
+| 파트너 굿즈 주문 계약 경로 | `gw-partner` 라우트가 `/v1/partner/merch-order-items` 등을 core-svc로 보내지만 서버 처리기가 없다 | 화면이 실제 서버에서 404를 받는다. 서버를 만들 때 ADR-0338 결정 5를 따른다. 낮음(기능 빈칸). 갈래 5 |
+| `dispatcher.ts` 118행 | 끄기가 0행이어도 `disabled`에 넣고 알림 훅을 부른다 | 0042 뒤 경쟁 상황에서 꺼지지 않은 끝점을 껐다고 보고할 수 있다(지금 알림 훅은 비어 있다, ADR-0338 결정 1 '행동 바뀜'). 낮음 |
 
 ## 실패 확인
 
@@ -310,7 +392,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | lane2-w12corerls2-plan | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T02:58+09:00 |
+| plan | lane2-w12corerls2-plan | claude-opus-5-5 | 2026-11-22T02:26+09:00 | 2026-11-22T03:14+09:00 |
 
 ## 기록
 

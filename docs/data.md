@@ -1742,7 +1742,7 @@ erDiagram
         uuid product_id FK "product.id(같은 core 논리 DB, ADR-0101)"
         int quantity
         int unit_price "주문 시점 가격 스냅샷(0016·코드의 칸 이름은 unit_amount). 파트너 DB 역할은 이 표에 넣지도 고치지도 못한다(상품 정산이 읽는 값, ADR-0338 결정 3)"
-        int commission_rate_bp "주문 때 상품의 고정 수수료율(만분율)을 복사. 상품 정산의 계산 값(ADR-0101). 파트너 배송·반품 처리 경로가 생겨도 파트너에게 고치기를 주지 않는다(ADR-0338 결정 4)"
+        int commission_rate_bp "주문 때 상품의 고정 수수료율(만분율)을 복사. 상품 정산의 계산 값(ADR-0101). 파트너 배송·반품 처리 경로가 생겨도 파트너에게 고치기를 주지 않는다(ADR-0338 결정 5)"
         jsonb option_snapshot "주문 때 고른 옵션과 상품 이름·유형·스키마 판(ADR-0013 결정 3)"
         text status "READY|SHIPPED|DELIVERED|PICKED_UP|LOCKED|RETURN_REQUESTED|RETURN_RECEIVED|DISPUTED|CANCELLED|REFUNDED(docs/planning/03 §2.13)"
         text tracking_no "송장(택배사·번호, 판매자 등록)"
@@ -1775,7 +1775,7 @@ erDiagram
         text_array fulfillments "DELIVERY|PICKUP|WALLET, 하나 이상"
         timestamptz sale_starts_at
         timestamptz sale_ends_at
-        int commission_rate_bp "처음 게시할 때 그 파트너의 계약 수수료율로 고정(ADR-0062). 계약 표가 없어 지금은 기본 1000bp"
+        int commission_rate_bp "처음 게시할 때 그 판매자의 지금 계약 수수료율로 고정(ADR-0062, ADR-0320 결정 6). 파트너 DB 역할이 넣거나 고치면 트리거 product_commission_from_contract가 이 값을 정한다. 파트너가 적은 값은 쓰이지 않고 게시 뒤 바뀌지 않는다(ADR-0338 결정 4)"
         jsonb attributes "유형마다 다른 속성(옵션 규격·혜택 목록 등). Zod로 검사, GIN jsonb_path_ops"
         int version "낙관적 잠금"
         timestamptz published_at "처음 게시한 시각"
