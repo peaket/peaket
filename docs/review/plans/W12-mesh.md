@@ -147,3 +147,9 @@
 | impl | w12mesh-impl-5e7b | claude-opus-5-5 | 2026-11-22T00:35+09:00 | 2026-11-22T00:39+09:00 |
 | review | w12mesh-review-3a6f | claude-opus-5-5 | 2026-11-22T00:43+09:00 | 2026-11-22T00:47+09:00 |
 | verify | w12mesh-verify-7c2d | claude-opus-5-5 | 2026-11-22T00:43+09:00 | 2026-11-22T00:50+09:00 |
+
+## 기록
+
+- R-738. 합치기 전 `origin/develop`(650ef80e0) 위로 다시 쌓음. 다시 쌓은 트리에서 `node --test deploy/platform/mesh/test/*.test.mjs tools/ci/mesh-policies.test.mjs` 38/38, `mesh-policies --check` 통과, `roles-check` 통과(커밋 7).
+- PR #53 CI 44920667562: tools-check success(develop에서 처음 끝까지 초록), node는 갈래 2에 맡긴 `@peaket/partner#test` 기준선 실패.
+- 정리 목록: `docs/lanes/lane4-cleanup.md`(RV-01 정산 승인 대조 — 감독에게 따로, RV-02~04).
