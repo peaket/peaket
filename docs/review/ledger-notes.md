@@ -109,6 +109,7 @@ BAT-085(BAS-150)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바
 | frontend:v5.0.0-3.5.4 | 다른 단계 |  | GAT-040 | 화면 호스트 넷(`www`·`partner`·`console`·`scanner`)은 이미 나뉘어 있다(ADR-0065 결정 1). 남은 몫은 같은 `www`에 둔 월렛 서비스 워커 범위다: 정본은 `/my/tickets/sw.js`·범위 `/my/tickets/`(docs/frontend.md §5.4)인데 BAT-350(R-554)은 `/serwist/sw.js`·`Service-Worker-Allowed: /my/tickets`(끝 `/` 없음)로 냈다. 범위·위치 PoC는 GAT-040(wbs 5.1.4) 몫이고, 관제 원격 위젯 출처는 OPS-350이다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 | frontend:v5.0.0-3.4.4 | 다른 단계 |  | HOT-450 | 화면 앱은 `nosniff`를 보내지 않고 배포 응답 헤더 정책이 붙인다(docs/devops.md §6.6 '응답 보안 헤더 정책', `packages/config/headers/security-headers.mjs` 주석, 행의 '공통: delivery.md 판정'). 서비스 워커 스크립트(지금 `/serwist/sw.js`, 앱 서버 경로)와 `remoteEntry.js`(관제 정적 배포)도 같은 정책을 받는지는 CloudFront 캐시 동작별 응답 헤더 정책 몫이라 HOT-450 줄에 넘겼다. 게이트웨이 응답은 kind e2e(`tools/local/e2e/v0-deploy.e2e.mjs` BSL050)가 본다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 | D-T18 ② | 다른 단계 |  | BAS-150 | `--disable-sigusr1`이 없는 Node 파드를 거부하는 Kyverno 정책은 Kyverno CEL 정책 단계(BUILD_ORDER BAS-150, 묶음 BAT-085)가 만든다. ①(주석으로 진단 수집)은 BAT-075 시험이다(2026-11-19 계획). BAT-085의 시험 담당이 D-T18 ②를 이름에 단 시험을 더하는 커밋에서 이 줄을 지운다 |
+| C-T6 ① | 다른 단계 |  | BAT-365 | dry-run 센 값이 같은 시각의 원천(대기열 Redis·purchase DB·게이트웨이 집계)에서 직접 센 값과 같은지는 받는 쪽이 센 값을 주는 읽기 전용 `ControlReceiver.PreviewControl`이 생겨야 본다. 그 RPC(proto)와 받는 쪽은 OPS-300(묶음 BAT-365)이 만든다(감독 결정 2026-11-21, ADR-0340 결정 11). BAT-355는 `DryRunSource` 포트·기록·예측·비교와 `unavailable` 어댑터까지이고 ②③을 시험한다. BAT-365의 시험 담당이 C-T6 ①을 이름에 단 시험을 더하는 커밋에서 이 줄을 지운다 |
 
 ## 사람 확인
 
