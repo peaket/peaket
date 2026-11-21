@@ -85,7 +85,10 @@
 
 ## 구현 메모
 
-(구현 담당이 채운다)
+- 바꾼 파일: `deploy/platform/mesh/port-allow.yaml` 하나(원천). payment-svc `CompensationTransferService`를 서비스 통째 `[purchase-svc]`에서 `methods`로 나눠 `RequestCompensationTransfer: [purchase-svc]`, `GetCompensationTransfer: []`로 했다(근거 주석 ADR-0317 결정 1·README §3). REST 줄 주석의 근거를 ADR-0316에서 transfer-refund §5 '서킷 연결'·ADR-0285 결정 9 표 보충으로 고쳤다(감독에게 2).
+- 생성물은 `node tools/ci/mesh-policies.mjs --write`로만 다시 만들었다. `policies.yaml` 차이 두 줄뿐: 머리 주석 `:4`의 '부르는 쪽이 없는 업무 gRPC'가 `없음` → `peaket.payment.v1.CompensationTransferService/GetCompensationTransfer`, 웨이포인트 경로 `/…CompensationTransferService/*` → `/…/RequestCompensationTransfer`(같은 주체 purchase-svc). `meshless-networkpolicies.yaml`은 차이 없음. 그 밖에 늘거나 준 주체·포트·경로 없음(계획 2의 기대 차이와 같다, A2는 원천에 이미 있어 생성물 차이 없음).
+- 게이트: `node --test deploy/platform/mesh/test/*.test.mjs` 시험 24·통과 24·실패 0(MS-09·W12M-01 ① 통과), `node tools/ci/mesh-policies.mjs --check` exit 0(부르는 쪽 없는 업무 gRPC는 `GetCompensationTransfer` 하나), `node --test tools/ci/mesh-policies.test.mjs` 시험 14·통과 14·실패 0, `python tools/doc-check/check_all.py` 오류 0·경고 4(기존 openapi 3·mermaid 건너뜀 1, 이 묶음과 무관).
+- 시험 이의 없음. 시험 파일은 고치지 않았다.
 
 ## 시험 결과
 
@@ -105,3 +108,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w12mesh-plan-8d4c | claude-opus-5-5 | 2026-11-22T00:15+09:00 | 2026-11-22T00:29+09:00 |
 | test | w12mesh-test-2f9a | claude-opus-5-5 | 2026-11-22T00:31+09:00 | 2026-11-22T00:33+09:00 |
+| impl | w12mesh-impl-5e7b | claude-opus-5-5 | 2026-11-22T00:35+09:00 | 2026-11-22T00:39+09:00 |
