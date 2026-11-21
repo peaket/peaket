@@ -131,3 +131,10 @@
 | impl | w12tools-impl-9c2e | claude-opus-5-5 | 2026-11-21T23:49+09:00 | 2026-11-21T23:56+09:00 |
 | review | w12tools-review-4e1a | claude-opus-5-5 | 2026-11-22T00:00+09:00 | 2026-11-22T00:06+09:00 |
 | verify | w12tools-verify-6b5d | claude-opus-5-5 | 2026-11-22T00:00+09:00 | 2026-11-22T00:08+09:00 |
+
+## 기록
+
+- R-736. 합치기 전 `origin/develop`(c06b480cf) 위로 다시 쌓음. 다시 쌓은 트리에서 `node --test "tools/local/*.test.mjs" tools/ci/gateway-routes.test.mjs` 306개 중 통과 302·실패 0·건너뜀 4(Windows POSIX 세부), `gateway-routes --check` 통과, `roles-check` 통과(커밋 7).
+- PR #50 CI 44916859307: 우분투 tools-check에서 `tools/local` 265/265(건너뜀 0, W12T-01 ②③④ 실제 실행)·D-T42 통과. 그 잡의 실패는 이 묶음 밖 메시 정책 MS-09·10·19뿐(develop에서는 D-T42에서 멈춰 가려져 있었다) → 감독 결정으로 W12-mesh.
+- SWC 판정: 노이즈(계획 3절).
+- 정리 목록: `docs/lanes/lane4-cleanup.md`(RV-01·02, `--continue`·HOME 후보).
