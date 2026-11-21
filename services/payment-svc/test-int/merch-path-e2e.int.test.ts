@@ -193,6 +193,11 @@ beforeAll(async () => {
 
   // core-svc: 실제 HTTP·Drizzle·재고 Lua·gRPC 클라이언트
   await coreAdmin.db.insert(promoter).values({ id: PROMOTER, legalName: '(주)굿즈시험' });
+  // 파트너 HTTP로 게시하는 판매자의 지금 계약(기간 끝이 열림). core-svc 0042 트리거가 게시 상품 수수료율을 계약에서 정한다(ADR-0338 결정 4). 조립의 FixedCommissionRate(1000)와 같은 값
+  await coreAdmin.pool.query(
+    `insert into promoter_contract (id, promoter_id, commission_rate_bp, guarantee_rate_bp, guarantee_kind, valid_during) values ($1, $2, 1000, 1000, 'DEPOSIT', tstzrange('2026-01-01T00:00:00Z', NULL, '[)'))`,
+    [randomUUID(), PROMOTER],
+  );
   const PLACE = randomUUID();
   const PROD = randomUUID();
   await coreAdmin.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: PROMOTER });
