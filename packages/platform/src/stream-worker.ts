@@ -5,6 +5,7 @@
 // - 키 단위 소비자 실행기: KeyedPartition에 넘기고 1초 [가정]마다·재조정·종료 때 '앞 사건이 모두 끝난 위치'를 커밋한다. 처리는 소비 span 안
 // - 방송형 읽기: 파드마다 그룹, 커밋 없음, 준 위치부터(ADR-0103 결정 3)
 // - 서비스의 제어 토픽 소비 도우미 startServiceControlSync: 설정·종료 세션 두 토픽을 방송형으로 읽어 종료 세션 목록을 채운다(ADR-0333 결정 2)
+// - 스트림 작업자 묶음 실행기 runBatchWorker와 Avro 읽기(avro-reader·schema-registry-source, ADR-0335): 쓰기 뒤 커밋·파티션별 묶음·다시 시도(OPS-150)
 import { createRequire } from 'node:module';
 import { hostname } from 'node:os';
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, propagation, trace, type Link } from '@opentelemetry/api';
@@ -16,7 +17,21 @@ import { controlEventCodec } from './control-codec.js';
 import { kafkaAdminConfig, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaProducerKind } from './kafka-config.js';
 import { kafkaAuthFromEnv, type KafkaAuth } from './msk-iam.js';
 import type { PlatformService } from './service.js';
-import { KEYED_CONSUMER_DEFAULTS, KeyedConsumerMetrics, KeyedPartition, PauseGate, errorSummary, type ConsumedMessage, type HeldEventStore, type KeyedHandler } from './keyed-consumer.js';
+import { KEYED_CONSUMER_DEFAULTS, KeyedConsumerMetrics, KeyedPartition, PauseGate, errorSummary, isTransientError, type ConsumedMessage, type HeldEventStore, type KeyedHandler } from './keyed-consumer.js';
+import { BATCH_WORKER_DEFAULTS, BatchPartition, BatchWorkerMetrics, retryDelayMs, type BatchRecord, type BatchSink, type ClosedBatch, type RejectedPosition } from './batch-consumer.js';
+import type { DecodeOutcome } from './avro-reader.js';
+
+export {
+  SchemaUnavailableError,
+  UnknownSchemaError,
+  UNRECOGNIZED_SYMBOL,
+  createAvroReader,
+  type AvroReader,
+  type AvroReaderOptions,
+  type DecodeOutcome,
+  type SchemaSource,
+} from './avro-reader.js';
+export { SCHEMA_REGISTRY_DEFAULTS, schemaRegistrySource, type SchemaRegistrySourceOptions } from './schema-registry-source.js';
 
 /** 받기 처리기 안에서 보류 키 읽기를 기다리는 한도 [가정](max.poll.interval 300초보다 훨씬 짧게) */
 const INIT_TIMEOUT_MS = 5_000;
@@ -403,6 +418,425 @@ export function runKeyedConsumer<T>(o: KeyedConsumerRunOptions<T>): KeyedConsume
       );
       await commitAll();
       for (const k of [...slots.keys()]) dropSlot(k);
+      await consumer.disconnect();
+    },
+  };
+}
+
+// ---- 스트림 작업자 묶음 실행기(docs/streaming.md §2.4·§2.6·§2.7, OPS-150) ----
+
+export interface BatchWorkerOptions<T> extends Omit<KafkaClientBase, 'clientId'> {
+  /** client.id = `${worker}-${env}-${pod}`(docs/streaming.md §2.6) */
+  worker: string;
+  env: string;
+  pod: string;
+  groupId: string;
+  topics: string[];
+  /** 보통 (m) => reader.decode(m.topic, m.value ?? new Uint8Array()). TransientError(SchemaUnavailableError)를 던지면 그 파티션을 멈추고 다시 시도한다 */
+  decode: (m: ConsumedMessage) => Promise<DecodeOutcome>;
+  sink: BatchSink<T>;
+  maxRecords: number;
+  maxWaitMs: number;
+  /** 작업자 전체 동시 묶음(기본 BATCH_WORKER_DEFAULTS.maxInFlight) */
+  maxInFlight?: number;
+  /** 재조정·종료 때 처리 중 묶음을 기다리는 한도(기본 BATCH_WORKER_DEFAULTS.drainTimeoutMs, 시험이 줄인다) */
+  drainTimeoutMs?: number;
+  registry?: Registry;
+  logger?: { warn(o: object, msg?: string): void };
+  startAt?: 'earliest' | 'latest';
+}
+
+export interface BatchWorkerRun {
+  /** 연결되고 구독했다 */
+  started: Promise<void>;
+  /** 가져오기를 멈추고 처리 중 묶음을 한도 안에서 마쳐 커밋한 뒤 나간다. 열린(닫히지 않은) 묶음은 버린다(커밋하지 않아 다시 받는다) */
+  stop(): Promise<void>;
+}
+
+/** 위치 로그에 남길 값(원문·값 없음) */
+const positionLog = (worker: string, r: RejectedPosition) => ({ kind: 'stream-rejected', worker, topic: r.topic, partition: r.partition, offset: r.offset, kafkaTs: r.kafkaTs, schemaId: r.schemaId, reason: r.reason });
+
+/**
+ * 스트림 작업자의 소비 실행기. 파티션마다 BatchPartition으로 묶음을 닫고, 파티션마다 쓰기 하나·작업자 전체 maxInFlight까지 싱크에 쓴다.
+ * 쓰기가 성공해야 그 파티션을 '끝 오프셋 + 1'로 커밋한다(자동 커밋은 필수 설정으로 꺼져 있다). 쓰기가 실패하면 같은 묶음을 0.2초부터
+ * 두 배씩 30초까지 늘려 쉬며 다시 보내고, 그동안 그 파티션 가져오기를 멈춘다. 처음 보는 스키마 ID를 레지스트리에 닿지 못해 읽지 못하면
+ * (TransientError) 그 레코드를 받지 않고 그 파티션을 멈춘 뒤 같은 지연 규칙으로 그 레코드부터 다시 받는다
+ */
+export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
+  const metrics = o.registry ? BatchWorkerMetrics.for(o.registry, o.worker) : undefined;
+  const maxInFlight = o.maxInFlight ?? BATCH_WORKER_DEFAULTS.maxInFlight;
+  const drainTimeoutMs = o.drainTimeoutMs ?? BATCH_WORKER_DEFAULTS.drainTimeoutMs;
+  if (!Number.isInteger(maxInFlight) || maxInFlight < 1) throw new RangeError(`maxInFlight는 1 이상의 정수여야 한다: ${maxInFlight}`);
+  const clientId = `${o.worker}-${o.env}-${o.pod}`;
+
+  interface Slot {
+    topic: string;
+    partition: number;
+    batch: BatchPartition<T>;
+    gate: PauseGate;
+    /** 닫힌 묶음. 맨 앞이 쓰는 중이거나 다음에 쓸 것 */
+    queue: ClosedBatch<T>[];
+    writing: boolean;
+    ready: boolean;
+    /** 넘기며 버렸다: 다시 보내지 않고 커밋하지 않는다 */
+    dropped: boolean;
+    abort: AbortController;
+    /** 받기로 한 가장 큰 오프셋(다시 배달된 레코드 거르기) */
+    maxReceived: bigint | undefined;
+    /** 다시 열 때 맞출 위치 */
+    nextOffset: bigint | undefined;
+    timer?: NodeJS.Timeout;
+    decodeTimer?: NodeJS.Timeout;
+    decodeRetries: number;
+    decodeBlocked: boolean;
+    writeRetrying: boolean;
+    pausedCounted: boolean;
+    toCommit: string | undefined;
+    committed: string | undefined;
+    idle: (() => void)[];
+  }
+  const slots = new Map<string, Slot>();
+  const ready: Slot[] = [];
+  let inflight = 0;
+  let globalHeld = false;
+  const id = (topic: string, partition: number) => `${topic}\u0000${partition}`;
+  const stopping = new AbortController();
+  let consumer: KafkaConsumer;
+
+  const guard = (what: string, fn: () => void) => {
+    if (stopping.signal.aborted) return;
+    try {
+      fn();
+    } catch (err) {
+      o.logger?.warn({ kind: 'stream-worker', worker: o.worker, err: err instanceof Error ? err.message : String(err) }, `가져오기 ${what} 실패`);
+    }
+  };
+  const updatePaused = (slot: Slot) => {
+    const paused = !slot.dropped && (slot.decodeBlocked || slot.writeRetrying);
+    if (paused === slot.pausedCounted) return;
+    slot.pausedCounted = paused;
+    if (paused) metrics?.pausedPartitions.inc({ worker: o.worker });
+    else metrics?.pausedPartitions.dec({ worker: o.worker });
+  };
+  const holdGlobal = () => {
+    if (globalHeld) return;
+    globalHeld = true;
+    for (const s of slots.values()) s.gate.hold('global');
+  };
+  const releaseGlobal = () => {
+    if (!globalHeld) return;
+    globalHeld = false;
+    for (const s of slots.values()) s.gate.release('global');
+  };
+
+  const slotOf = (topic: string, partition: number): Slot => {
+    const k = id(topic, partition);
+    let slot = slots.get(k);
+    if (slot) return slot;
+    const gate: PauseGate = new PauseGate({
+      pause: () => guard('pause', () => consumer.pause([{ topic, partitions: [partition] }])),
+      resume: (next) =>
+        guard('resume', () => {
+          consumer.resume([{ topic, partitions: [partition] }]);
+          if (next !== undefined) consumer.seek({ topic, partition, offset: next.toString() });
+        }),
+      next: () => s.nextOffset,
+    });
+    const s: Slot = {
+      topic,
+      partition,
+      batch: new BatchPartition<T>({ topic, partition, maxRecords: o.maxRecords, maxWaitMs: o.maxWaitMs }),
+      gate,
+      queue: [],
+      writing: false,
+      ready: false,
+      dropped: false,
+      abort: new AbortController(),
+      maxReceived: undefined,
+      nextOffset: undefined,
+      decodeRetries: 0,
+      decodeBlocked: false,
+      writeRetrying: false,
+      pausedCounted: false,
+      toCommit: undefined,
+      committed: undefined,
+      idle: [],
+    };
+    slots.set(k, s);
+    if (globalHeld) gate.hold('global');
+    return s;
+  };
+
+  const commitSlot = async (slot: Slot) => {
+    const at = slot.toCommit;
+    if (at === undefined || at === slot.committed) return;
+    try {
+      await consumer.commitOffsets([{ topic: slot.topic, partition: slot.partition, offset: at }]);
+      slot.committed = at;
+    } catch (err) {
+      o.logger?.warn({ kind: 'stream-worker', worker: o.worker, topic: slot.topic, partition: slot.partition, err: errorSummary(err) }, '커밋 실패(다음 커밋·넘기기·종료 때 다시)');
+    }
+  };
+
+  const sleepUnlessDropped = (slot: Slot, ms: number) =>
+    new Promise<void>((resolve) => {
+      if (slot.abort.signal.aborted) return resolve();
+      const t = setTimeout(resolve, ms);
+      slot.abort.signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(t);
+          resolve();
+        },
+        { once: true },
+      );
+    });
+
+  const writeOne = async (slot: Slot, b: ClosedBatch<T>) => {
+    for (let attempt = 0; ; attempt += 1) {
+      if (slot.dropped) return;
+      const end = metrics?.insertSeconds.startTimer({ worker: o.worker, table: o.sink.table });
+      try {
+        await o.sink.write(b);
+        end?.();
+        break;
+      } catch (err) {
+        end?.();
+        if (slot.dropped) return;
+        metrics?.insertRetries.inc({ worker: o.worker });
+        o.logger?.warn(
+          { kind: 'stream-insert', worker: o.worker, topic: b.topic, partition: b.partition, firstOffset: b.firstOffset, lastOffset: b.lastOffset, attempt, err: errorSummary(err) },
+          '묶음 쓰기 실패(같은 묶음을 다시 보낸다)',
+        );
+        if (!slot.writeRetrying) {
+          slot.writeRetrying = true;
+          updatePaused(slot);
+          slot.gate.hold('retry');
+        }
+        await sleepUnlessDropped(slot, retryDelayMs(attempt));
+      }
+    }
+    if (slot.writeRetrying) {
+      slot.writeRetrying = false;
+      updatePaused(slot);
+      slot.gate.release('retry');
+    }
+    // 쓰기 뒤 넘기기 한도를 넘겨 버린 파티션은 커밋하지 않는다(새 주인이 다시 받는다)
+    if (slot.dropped) return;
+    for (const r of b.rejected) {
+      metrics?.rejected.inc({ worker: o.worker, topic: r.topic, reason: r.reason });
+      o.logger?.warn(positionLog(o.worker, r), '읽지 못한 레코드(위치만 남긴다)');
+    }
+    slot.toCommit = BatchPartition.commitOffset(b);
+    await commitSlot(slot);
+  };
+
+  const pump = () => {
+    while (inflight < maxInFlight && ready.length > 0) {
+      const slot = ready.shift()!;
+      slot.ready = false;
+      if (slot.dropped || slot.writing || slot.queue.length === 0) continue;
+      slot.writing = true;
+      inflight += 1;
+      const b = slot.queue[0]!;
+      void writeOne(slot, b)
+        .catch((err) => o.logger?.warn({ kind: 'stream-worker', worker: o.worker, err: errorSummary(err) }, '예상하지 못한 쓰기 오류'))
+        .finally(() => {
+          slot.writing = false;
+          inflight -= 1;
+          if (slot.queue[0] === b) slot.queue.shift();
+          if (slot.queue.length < 2) slot.gate.release('queued');
+          if (slot.queue.length > 0 && !slot.dropped && !slot.ready) {
+            slot.ready = true;
+            ready.push(slot);
+          }
+          if (slot.queue.length === 0 || slot.dropped) for (const w of slot.idle.splice(0)) w();
+          if (inflight < maxInFlight) releaseGlobal();
+          pump();
+        });
+    }
+    if (inflight >= maxInFlight) holdGlobal();
+  };
+
+  const enqueue = (slot: Slot, b: ClosedBatch<T>) => {
+    if (slot.timer) clearTimeout(slot.timer);
+    slot.timer = undefined;
+    slot.queue.push(b);
+    // 쓰는 중인 묶음 뒤에 또 닫힌 묶음이 기다리면 그 파티션 가져오기를 멈춘다(파티션마다 쓰기 하나, 메모리가 끝없이 늘지 않게)
+    if (slot.queue.length >= 2) slot.gate.hold('queued');
+    if (!slot.writing && !slot.ready) {
+      slot.ready = true;
+      ready.push(slot);
+    }
+    pump();
+  };
+
+  const armTimer = (slot: Slot) => {
+    if (slot.timer) return;
+    const ms = slot.batch.msUntilDue();
+    if (ms === undefined) return;
+    slot.timer = setTimeout(() => {
+      slot.timer = undefined;
+      if (slot.dropped) return;
+      const b = slot.batch.poll();
+      if (b) enqueue(slot, b);
+      else armTimer(slot);
+    }, ms);
+    slot.timer.unref();
+  };
+
+  const blockDecode = (slot: Slot, offset: bigint) => {
+    slot.nextOffset = offset;
+    if (slot.decodeBlocked) return;
+    slot.decodeBlocked = true;
+    updatePaused(slot);
+    slot.gate.hold('decode');
+    const ms = retryDelayMs(slot.decodeRetries);
+    slot.decodeRetries += 1;
+    slot.decodeTimer = setTimeout(() => {
+      slot.decodeTimer = undefined;
+      slot.decodeBlocked = false;
+      updatePaused(slot);
+      slot.gate.release('decode');
+    }, ms);
+    slot.decodeTimer.unref();
+  };
+
+  /** 쓰는 중·기다리는 닫힌 묶음이 끝날 때까지(한도 안에서) 기다린다. 끝나면 true */
+  const drainSlot = async (slot: Slot): Promise<boolean> => {
+    const idle = () => !slot.writing && slot.queue.length === 0;
+    if (idle()) return true;
+    let t: NodeJS.Timeout | undefined;
+    const done = await Promise.race([
+      new Promise<boolean>((resolve) => {
+        const check = () => (idle() ? resolve(true) : slot.idle.push(check));
+        slot.idle.push(check);
+      }),
+      new Promise<boolean>((resolve) => {
+        t = setTimeout(() => resolve(false), drainTimeoutMs);
+        t.unref();
+      }),
+    ]);
+    clearTimeout(t);
+    return done;
+  };
+
+  /** 파티션을 내놓는다: 열린 묶음은 버리고, 닫힌 묶음은 한도 안에서 마쳐 커밋한다. 한도를 넘기면 마치지 못한 묶음은 커밋하지 않는다 */
+  const release = async (slot: Slot, commit: boolean) => {
+    slot.gate.close();
+    if (slot.timer) clearTimeout(slot.timer);
+    if (slot.decodeTimer) clearTimeout(slot.decodeTimer);
+    slot.batch.discard();
+    const drained = await drainSlot(slot);
+    if (!drained) o.logger?.warn({ kind: 'stream-worker', worker: o.worker, topic: slot.topic, partition: slot.partition }, '처리 중 묶음 기다림이 한도를 넘어 그 묶음을 커밋하지 않고 넘긴다');
+    slot.dropped = true;
+    slot.abort.abort();
+    updatePaused(slot);
+    slot.queue.length = 0;
+    if (commit) await commitSlot(slot);
+    slots.delete(id(slot.topic, slot.partition));
+  };
+
+  consumer = createKafkaConsumer({
+    brokers: o.brokers,
+    clientId,
+    groupId: o.groupId,
+    auth: o.auth,
+    extra: {
+      ...o.extra,
+      'auto.offset.reset': o.startAt ?? 'earliest',
+      rebalance_cb: async (err: { code: number }, assignment: { topic: string; partition: number }[], fns: { assignmentLost(): boolean }) => {
+        if (err.code === ASSIGN) {
+          // 앱이 건 멈춤은 파티션을 내놓아도 남는다. 받을 때마다 푼다(runKeyedConsumer와 같은 까닭)
+          guard('resume', () => consumer.resume(assignment.map((tp) => ({ topic: tp.topic, partitions: [tp.partition] }))));
+          return;
+        }
+        if (err.code !== REVOKE) return;
+        const lost = fns.assignmentLost();
+        await Promise.all(
+          assignment.map(async (tp) => {
+            const slot = slots.get(id(tp.topic, tp.partition));
+            if (slot) await release(slot, !lost);
+          }),
+        );
+      },
+    },
+  });
+
+  const started = (async () => {
+    await consumer.connect();
+    await consumer.subscribe({ topics: o.topics });
+    await consumer.run({
+      // 받은 레코드만 직접 표시한다. 표시하지 않은 나머지는 클라이언트가 그 위치로 되돌린다(받지 않은 레코드를 건너뛰지 않게)
+      eachBatchAutoResolve: false,
+      eachBatch: async ({ batch, resolveOffset, isStale }) => {
+        const { topic, partition } = batch;
+        const slot = slotOf(topic, partition);
+        for (const message of batch.messages) {
+          if (isStale() || slot.dropped || stopping.signal.aborted) return;
+          const offset = BigInt(message.offset);
+          if (slot.maxReceived !== undefined && offset <= slot.maxReceived) {
+            resolveOffset(message.offset);
+            continue;
+          }
+          // 레지스트리를 기다리며 멈춘 동안 온 것은 받지 않는다(다시 열 때 막힌 레코드부터 다시 온다)
+          if (slot.decodeBlocked) return;
+          const m: ConsumedMessage = {
+            topic,
+            partition,
+            offset,
+            key: message.key ? message.key.toString('utf8') : null,
+            value: message.value,
+            headers: headersOf(message.headers as Record<string, unknown> | undefined),
+            timestamp: Number(message.timestamp),
+          };
+          let out: DecodeOutcome;
+          try {
+            out = await o.decode(m);
+          } catch (err) {
+            if (isTransientError(err)) {
+              o.logger?.warn({ kind: 'stream-worker', worker: o.worker, topic, partition, offset: message.offset, err: errorSummary(err) }, '스키마를 읽지 못해 그 파티션을 멈추고 다시 받는다');
+              blockDecode(slot, offset);
+              return;
+            }
+            // 일시 실패가 아닌 읽기 예외는 그 레코드 탓으로 본다(위치만 남긴다)
+            out = { kind: 'rejected', schemaId: null, reason: 'DESERIALIZE' };
+          }
+          slot.decodeRetries = 0;
+          const kafkaTs = message.timestamp || '0';
+          let item: BatchRecord<T> | RejectedPosition;
+          if (out.kind === 'record') {
+            item = { topic, partition, offset: message.offset, timestamp: kafkaTs, value: out.value as T };
+            for (const u of out.unrecognized) metrics?.unrecognizedSymbols.inc({ worker: o.worker, topic, record: out.recordName, field: u.field });
+          } else {
+            item = { topic, partition, offset: message.offset, kafkaTs, schemaId: out.schemaId, reason: out.reason };
+          }
+          slot.maxReceived = offset;
+          slot.nextOffset = offset + 1n;
+          resolveOffset(message.offset);
+          const closed = slot.batch.push(item);
+          if (closed) enqueue(slot, closed);
+          else armTimer(slot);
+        }
+        // 소비 밀림 = 높은 물표 − 다음에 읽을 오프셋(받은 묶음마다 고친다)
+        const high = /^\d+$/.test(batch.highWatermark) ? BigInt(batch.highWatermark) : undefined;
+        if (metrics && high !== undefined && slot.nextOffset !== undefined) {
+          const lag = high - slot.nextOffset;
+          metrics.consumerLag.set({ worker: o.worker, topic, partition: String(partition) }, Number(lag > 0n ? lag : 0n));
+        }
+      },
+    });
+  })();
+
+  return {
+    started,
+    async stop() {
+      if (stopping.signal.aborted) return;
+      await started.catch(() => {});
+      const assigned = consumer.assignment();
+      if (assigned.length > 0) consumer.pause(assigned.map((tp) => ({ topic: tp.topic, partitions: [tp.partition] })));
+      stopping.abort();
+      await Promise.all([...slots.values()].map((s) => release(s, true)));
       await consumer.disconnect();
     },
   };

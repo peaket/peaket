@@ -133,6 +133,19 @@ export {
   type KeyedHandler,
   type KeyedPartitionOptions,
 } from './keyed-consumer.js';
+export {
+  BATCH_WORKER_DEFAULTS,
+  BatchPartition,
+  BatchWorkerMetrics,
+  dedupToken,
+  retryDelayMs,
+  type BatchPartitionOptions,
+  type BatchRecord,
+  type BatchSink,
+  type ClosedBatch,
+  type RejectReason,
+  type RejectedPosition,
+} from './batch-consumer.js';
 export { HELD_EVENT_KEEP_DAYS, HELD_EVENT_TABLE, deleteReprocessedHeldEvents, drizzleHeldEventStore, heldEventCounts, heldEventTable, reprocessHeldEvents, type ReprocessResult } from './held-events.js';
 export { READINESS, READINESS_DIAGNOSING, READINESS_SHUTTING_DOWN, Readiness } from './readiness.js';
 export { GRPC_SERVER_DEFAULTS, RPC_UNKNOWN_METHOD, startGrpcServer, type GrpcServiceBinding, type StartedGrpcServer, type StartGrpcServerOptions } from './grpc-server.js';
