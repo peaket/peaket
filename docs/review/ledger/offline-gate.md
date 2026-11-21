@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 27 | 113 | 0 | 0 | 0 | 3 | 0 | 19 | 70 | 232 |
-| 합계 | 27 | 113 | 0 | 0 | 0 | 3 | 0 | 19 | 70 | 232 |
+| B | 43 | 113 | 0 | 0 | 0 | 3 | 0 | 19 | 70 | 248 |
+| 합계 | 43 | 113 | 0 | 0 | 0 | 3 | 0 | 19 | 70 | 248 |
 
 ## docs/features/offline-gate.md
 
@@ -33,7 +33,7 @@
 | O-T20 | — | 스캐너 동기화 신선도 경보 | 입장 시간대에 스캐너 한 대의 네트워크를 3분 끊으면, 2분이 지난 뒤 관제에 SEV2와 현장 책임자 알림이 나온다. 그 스캐너는 오프라인 판정을 계속한다… | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-freshness.test.ts |
 | O-T21 | — | 해제 15분 뒤 토큰 재사용 | 파트너가 스태프를 해제하고 6초 [가정] 뒤와 16분 뒤에 그 토큰과 그 기기 키의 DPoP 증명으로 요청한다. 근무 준비·목록·변경분과 책임자 기능(기기… | 빈칸 | B | — |
 | O-T22 | — | 입장 중 소유권 동결 | 입장 시작 뒤 돌려주기·양도 수락·양도 회수 요청은 409 `ENTRY_STARTED`로 거부되고, 키가 바뀌지 않는다. | 빈칸 | B | — |
-| O-T23 | — | 입장 상태 공유 | 같은 구역의 온라인 스캐너 A가 통과시킨 티켓을 2분 [가정] 뒤 스캐너 B로 찍으면 '이미 입장한 티켓'으로 거부된다. | 다른 단계 | B | BAT-350 · v0 모놀리스의 입장 시험(services/v0-monolith/test-int/gate.int.test.ts)만 있다. 목표 구조의 오프라인 게이트는 그 묶음(GAT-010)에서 다시… |
+| O-T23 | — | 입장 상태 공유 | 같은 구역의 온라인 스캐너 A가 통과시킨 티켓을 2분 [가정] 뒤 스캐너 B로 찍으면 '이미 입장한 티켓'으로 거부된다. | 다른 단계 | B | GAT-180 · v0 모놀리스의 입장 시험(services/v0-monolith/test-int/gate.int.test.ts)만 있다. 목표 구조에서 온라인 스캐너 A 통과 뒤 B의 '이미 입장'은 입장 상태… |
 | O-T24 | — | 다른 기기의 퇴장·재입장 | 재입장을 허용하는 회차에서 기기 X(퇴장 모드)로 OUT한 뒤 기기 Y(입장 모드)로 IN하면 정상이고, 이상 표시가 없다. | 빈칸 | B | — |
 | O-T25 | — | 키 미반영 | 변경분을 받지 못한 오프라인 스캐너는 입장 시작 뒤 처음 등록한 키의 QR을 '키 미반영'으로 거부하고 부스·책임자를 안내한다. | 빈칸 | B | — |
 | O-T26 | — | 해제·만료 뒤 남은 기록 | 업로드를 기다리는 기록 12건이 남은 채 해제되거나 역할 유효 끝이 지나도, 기기가 연결되면 12건이 모두 올라간다. 해제·만료 뒤 시각의 기록은 '세션 밖… | 빈칸 | B | — |
@@ -42,7 +42,7 @@
 | O-T29 | — | 입장 기록 마감 | 모든 기기가 큐를 비웠으면 역할 유효 끝에 마감된다. 한 대가 보고하지 않으면 24시간 [가정] 뒤에 마감되고, CS 처리함에 '미보고 스캐너'가 생긴다. 마감… | 빈칸 | B | — |
 | O-T30 | — | 변경분 일련번호 | 같은 회차에 동시에 들어온 두 변경 트랜잭션도 `scanner_seq` 카운터 행에서 차례로 번호를 받아 번호 순서와 커밋 순서가 같고, 스캐너가 둘 다… | 빈칸 | B | — |
 | O-T31 | — | 기기 배치 권한 | 일반 스태프가 배치를 바꾸면 403이다. 재입장을 허용하지 않는 회차에 퇴장 모드로 배치하면 422다. | 자동 시험 | B | 시험: apps/console-host/test/scanner-devices-phone.test.ts |
-| O-T32 | — | 입장용 휴대폰 등록 | 데스크톱으로 보이는 브라우저에서 월렛을 열면 키를 만들지 않고 휴대폰 등록을 안내한다. 휴대폰에서 등록하면 QR이 나온다. | 다른 단계 | B | GAT-140 · BAT-350이 클라이언트 키 생성·보관·QR 표시(등록 버튼, LOCAL 키)를 넣었다. 서버 공개키 등록·폐기·스캐너 keyId 대조는 ticket-svc POST… |
+| O-T32 | — | 입장용 휴대폰 등록 | 데스크톱으로 보이는 브라우저에서 월렛을 열면 키를 만들지 않고 휴대폰 등록을 안내한다. 휴대폰에서 등록하면 QR이 나온다. | 다른 단계 | B | GAT-020 · 데스크톱이면 키를 만들지 않고 휴대폰 등록을 안내하는 화면은 GAT-020 줄에 합친 GAT-030 '입장용 휴대폰 등록' 몫이다(2026-11-21 감독: 입장용 휴대폰 등록 안내는… |
 | O-T33 | — | QR v1 형식 | 지원하지 않는 형식 버전은 '유효하지 않은 QR', 폐기된 keyId는 '옛 QR', 서명이 맞지 않으면 '위조 의심'으로 사유가 나뉜다. | 다른 단계 | B | GAT-180·GAT-190 · BAT-350은 클라이언트 QR v1 형식·base45·서명·15초 재서명을 단위 시험했다(`qr-v1.test.mjs`). 스캐너가 '유효하지 않은 QR/옛 QR/위조 의심'… |
 | O-T34 | — | 예외 통과 | 책임자 세션만 예외 통과를 할 수 있다. 사유·메모·책임자 계정이 기록되고, CS 처리함의 사후 검토에 오른다. 대리 승인 세션에는 버튼이 없고, API로… | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-gate-http.test.ts |
 | O-T35 | ① | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ①는 403이다. 확인 코드가 만들어지지 않고 기록도 저장되지 않는다. | 빈칸 | B | — |
@@ -68,6 +68,22 @@
 | O-T42 | ③ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ③ 등록 201과 SEV3 경보 하나, 등록 경로는 닫히지 않는다 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
 | O-T42 | ④ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ④ 410 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
 | O-T43 | — | 잠금 걸린 티켓의 정상 입장(추천 적용 2026-10-31… | 세 티켓 모두 통과하고, 판정 사유와 지연이 잠금 없는 티켓과 같다. 회차 목록·변경분·스캐너 저장소에 잠금 칸·사건 ID가 0건이다. 입장 시작 뒤… | 빈칸 | B | — |
+| O-T44 | ① | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ① 키가 '등록됨'(`REGISTERED`)으로 저장되고 QR이 나온다. 보낸 본문의 `reason`은 `ISSUE`이고, 공개키 JWK에는 계약(openapi… | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
+| O-T44 | ② | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ② '등록됨'으로 바꾸지 않고 QR을 보이지 않는다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
+| O-T44 | ③ | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ③ 키는 이 기기에 '확인 전'(`LOCAL`)으로 남고 QR을 보이지 않는다(docs/design/d5 §5.13 '등록 확인 전') | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
+| O-T44 | ④ | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ④ 새 키를 만들지 않고 처음과 같은 공개키로 다시 보내며, 끝나면 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
+| O-T44 | ⑤ | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ⑤ 키는 남고 QR을 보이지 않는다. 403이면 '다시 확인 필요'를, 401이면 로그인 화면을 보인다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
+| O-T44 | ⑥ | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ⑥이 기기의 키를 지우고 등록 전 상태로 돌아간다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
+| O-T44 | ⑦ | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ⑦ 서버를 부르지 않고 이 기기에만 둔 키로 QR이 나온다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
+| O-T45 | ① | 같은 키 다시 등록과 스캐너 keyId 맞물림(추천 적용… | ① keyId·93바이트·base45 140자가 벡터 값과 같고 서명이 맞는다. 서명이나 시각을 한 바이트 바꾸면 틀린다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/vector.test.mjs |
+| O-T45 | ② | 같은 키 다시 등록과 스캐너 keyId 맞물림(추천 적용… | ② 201이고 응답 keyId가 벡터 값과 같다 | 자동 시험 | B | 시험: services/ticket-svc/test/device-keys-http.test.ts |
+| O-T45 | ③ | 같은 키 다시 등록과 스캐너 keyId 맞물림(추천 적용… | ③ 다시 보낸 요청은 201·같은 keyId이고, 유효 키는 하나, 폐기는 0, 스캐너 변경분 새 기록은 0이다. 다른 계정은 404다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/device-key.int.test.ts, services/ticket-svc/test/device-keys-http.test.ts 외 1곳 |
+| O-T45 | ④ | 같은 키 다시 등록과 스캐너 keyId 맞물림(추천 적용… | ④ 그 티켓의 `keys`에 벡터의 keyId·압축 공개키가 하나 있고 `revokedKeyIds`에는 없다. 그 압축 공개키로 벡터 서명이 확인된다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/device-key.int.test.ts, services/ticket-svc/test/scanner-device-keys.test.ts |
+| O-T45 | ⑤ | 같은 키 다시 등록과 스캐너 keyId 맞물림(추천 적용… | ⑤ 등록한 keyId는 통과(`PASS`)이고, 다른 keyId는 `KEY_UNKNOWN`이다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/device-key.int.test.ts, services/ticket-svc/test/scanner-device-keys.test.ts |
+| O-T46 | ① | 월렛 런타임 캐시 판(추천 적용 2026-11-21… | ① 두 워커의 런타임 캐시는 각자의 판을 붙인 이름 하나(docs/frontend.md §3.12 저장 표)이고, 그 판은 같은 빌드의 미리 저장 판과 같다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.test.m… |
+| O-T46 | ② | 월렛 런타임 캐시 판(추천 적용 2026-11-21… | ② 활성화가 끝나면 지금 판이 아닌 월렛 런타임 캐시와 옛 이름 둘은 없고, 미리 저장 캐시와 이름이 다른 캐시는 남는다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs |
+| O-T46 | ③ | 월렛 런타임 캐시 판(추천 적용 2026-11-21… | ③ 옛 판 캐시에 있던 월렛 문서 주소는 새 판 캐시에 네트워크로 다시 받아 들어 있고, 다시 받지 못한 주소는 없다. 옛 판의 응답을 옮겨 담지 않는다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs |
+| O-T46 | ④ | 월렛 런타임 캐시 판(추천 적용 2026-11-21… | ④ 판 값이 정한 꼴을 벗어나면 워커 빌드가 멈춘다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.test.m… |
 
 ## docs/security/asvs/offline-gate.md
 
@@ -210,7 +226,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/platform/test/telemetry.test.ts 외 4곳… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 19곳 (영역: apps/scanner) |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 18곳 (영역: apps/scanner) |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs (영역: apps/scanner) |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs (영역:… |
@@ -236,7 +252,7 @@
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외… |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
-| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | ID만 | B | 다른 곳 시험: packages/platform/test/redis.test.ts, packages/platform/test/request-log.test.ts 외 55곳 (영역: apps/scanner) |
+| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | ID만 | B | 다른 곳 시험: packages/platform/test/control-codec.test.ts, packages/platform/test/redis.test.ts 외 56곳 (영역: apps/scanner) |
 | v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: apps/scanner |

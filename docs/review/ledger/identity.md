@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 261 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 74 | 395 |
-| 합계 | 271 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 74 | 405 |
+| B | 267 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 71 | 398 |
+| 합계 | 277 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 71 | 408 |
 
 ## docs/features/identity.md
 
@@ -14,7 +14,10 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | I-T1 | — | 동일 이메일 타 제공자 로그인 | 자동 병합이 일어나지 않음을 입증한다. 검증 이메일이 같은 활성 계정이 정확히 1개면 계정을 만들기 전에 연결 제안(SCR-039)이 나오고, '새 계정… | 빈칸 | B | — |
 | I-T2 | — | 소셜 제공자 토큰 유출 방어 | identity-svc 데이터베이스, 캐시 저장소, 애플리케이션 로그에 제공자 액세스 토큰이 0건임을 검증한다. | 빈칸 | B | — |
-| I-T3 | — | 원격 세션 즉시 만료 전파 | 어떤 세션을 로그아웃하면 수 초 이내에 모든 마이크로서비스의 모든 파드가 그 `sid`의 요청을 바로 거절함을 확인한다(파드마다 따로 읽는 방송형 소비… | 자동 시험 | B | 시험: services/identity-svc/test/refresh-cases.ts |
+| I-T3 | ① | 원격 세션 즉시 만료 전파 | ① 한 서비스의 인스턴스 둘(파드 이름이 다르다)이 실제 Kafka `control.sessions-terminated`의 같은 사건을 모두 받아, 사건을… | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts |
+| I-T3 | ② | 원격 세션 즉시 만료 전파 | ② 신원을 받는 업무 서비스 일곱(core-svc·identity-svc·ops-svc·payment-svc·purchase-svc·queue-svc·ticket… | 자동 시험 | B | 시험: packages/platform/test/service-control-sync-kafka.test.ts, packages/platform/test/service-control-sync.test.ts 외 9곳 |
+| I-T3 | ③ | 원격 세션 즉시 만료 전파 | ③ identity가 로그아웃에서 실제로 남긴 사건 값(종료 시각은 ISO 시각)을 읽어 그 종료 시각 + 15분 직전까지 거절하고 15분이 되면 통과시킨다… | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test/control-codec.test.ts 외 1곳 |
+| I-T3 | ④ | 원격 세션 즉시 만료 전파 | ④ 탈퇴로 끝난 세션(이유 `DELETE`)의 토큰으로 온 queue-svc 진입·입장 확정은 401이고, 탈퇴 사건은 `withdrawnAt`과 상관없이… | 자동 시험 | B | 시험: services/queue-svc/test-int/consumers.int.test.ts, services/queue-svc/test-int/start-control-sync.int.test.ts 외 1곳 |
 | I-T4 | ① | 리프레시 토큰 재사용 탐지: ① 폐기된 리프레시 토큰을 30초… | ①는 그 패밀리의 모든 세션이 바로 강제 종료되고 보안 경보가 발행된다. … 과 같이 처리된다(추천 적용 2026-10-28, 기술 검토 중간-053) | 자동 시험 | B | 시험: services/identity-svc/test/refresh-cases.ts |
 | I-T4 | ② | 리프레시 토큰 재사용 탐지: ① 폐기된 리프레시 토큰을 30초… | ②는 새 쿠키를 받고 세션이 이어지며 `identity_refresh_retry_reuse_total`이 1 오른다. | 자동 시험 | B | 시험: services/identity-svc/test/refresh-cases.ts |
 | I-T4 | ③ | 리프레시 토큰 재사용 탐지: ① 폐기된 리프레시 토큰을 30초… | ③은 폐기된 토큰이라 | 자동 시험 | B | 시험: services/identity-svc/test/refresh-cases.ts |
@@ -54,7 +57,7 @@
 | I-T26 | ① | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ① 환불 예상액·양도 가능 여부 안내: 탈퇴 요청이 409 `withdrawal-confirmation-required`와 `unusedTickets`(티켓… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal-http.test.t… |
 | I-T26 | ② | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ② 최종 확인 뒤 차례: `confirmCancelUnusedTickets: true`로 다시 보내면 표마다 사유… | 자동 시험 | A | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/account-withdraw/flow.test.mjs 외 5곳 |
 | I-T26 | ③ | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ③ 환급 실패·미룸 유지: 결제사 `CANCEL_PENDING`·`UNKNOWN`·`REJECTED`이거나 입장 기록 마감 뒤 환급이면 202이고 계정은… | 자동 시험 | A | 시험: services/identity-svc/test/withdrawal-retry.test.ts, services/purchase-svc/test-int/withdrawal-participant.int.test… |
-| I-T27 | — | 탈퇴 후 재가입 및 온세일 방어 | 탈퇴 때 CI 해시가 파기됐는지 확인한다. 바로 재가입하고 본인확인을 하는 것은 정상적으로 되지만, 탈퇴 뒤 5일 안에는 진행 중인 같은 공연에서 중복 순번이… | 자동 시험 | B | 시험: services/identity-svc/test-int/withdrawal.int.test.ts, services/identity-svc/test/withdrawal.test.ts 외 4곳 |
+| I-T27 | — | 탈퇴 후 재가입 및 온세일 방어 | 탈퇴 때 CI 해시가 파기됐는지 확인한다. 바로 재가입하고 본인확인을 하는 것은 정상적으로 되지만, 탈퇴 뒤 5일 안에는 진행 중인 같은 공연에서 중복 순번이… | 자동 시험 | B | 시험: services/identity-svc/test-int/withdrawal.int.test.ts, services/identity-svc/test/withdrawal.test.ts 외 2곳 |
 | I-T28 | — | PBKDF2 비밀번호 해시 규격 검증 | DB에 저장된 해시 문자열에 `pbkdf2-sha256` 식별자, 600,000회 이상의 반복 파라미터, 페퍼 키 버전이 들어 있는지 검증한다. 다른 관리 계정… | 빈칸 | B | — |
 | I-T29 | — | 계정 연결 제안 발동 조건 | 검증된 이메일이 일치하는 활성 계정이 정확히 1개일 때만 연결 제안(`CreateSession`의 `link_proposal_id`, 웹은 SCR-039로… | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, services/identity-svc/test-int/link-proposal.int.te… |
 | I-T30 | — | 소유권 증명으로 연결 완결 | 연결 제안 뒤 기존 제공자 로그인에 성공하면 연결이 맺어진다. 3회 일치하지 않거나 10분이 지나면 제안이 안전하게 만료된다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, services/identity-svc/test-int/link-proposal.int.te… |
@@ -85,9 +88,9 @@
 | I-T46 | ⑤ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ⑤는 백엔드에 리프레시 쿠키가 전달되지 않는다 | 자동 시험 | B | 시험: deploy/gateways/test/admin-auth.test.mjs, tools/local/e2e/gateway-admin-auth.e2e.mjs |
 | I-T46 | ⑥ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ⑥은 204와 새 쿠키이고 세션이 이어진다(§3 '응답을 잃은 뒤의 재시도'), | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-http… |
 | I-T47 | — | 초대·승인 링크의 URL 조각: 로그인하지 않은 휴대폰으로 초대… | 화면이 열리자마자 주소창에서 조각이 사라진다. 로그인 뒤 돌아온 주소·`next`·서버 접근 로그·`Referer`에 토큰과 확인 코드가 0건이고, 같은 탭에서… | 빈칸 | B | — |
-| I-T48 | ① | 새 파드의 종료 세션(추천 적용 2026-10-28… | ①은 새 파드가 준비 상태가 된 뒤 그 세션 요청을 401로 거부한다 | 빈칸 | B | — |
-| I-T48 | ② | 새 파드의 종료 세션(추천 적용 2026-10-28… | ②는 세 파드 모두 거부한다(이벤트가 파드 하나에만 가지 않는다) | 빈칸 | B | — |
-| I-T48 | ③ | 새 파드의 종료 세션(추천 적용 2026-10-28… | ③은 30초 뒤 준비 상태가 되고 SEV2 `control_sync_lagging{kind="sessions"}`가 뜨며, Kafka가 돌아오면 15분 창을… | 빈칸 | B | — |
+| I-T48 | ① | 새 파드의 종료 세션(추천 적용 2026-10-28… | ①은 새 파드가 준비 상태가 된 뒤 그 세션 요청을 401로 거부한다 | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts |
+| I-T48 | ② | 새 파드의 종료 세션(추천 적용 2026-10-28… | ②는 세 파드 모두 거부한다(이벤트가 파드 하나에만 가지 않는다) | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts |
+| I-T48 | ③ | 새 파드의 종료 세션(추천 적용 2026-10-28… | ③은 30초 뒤 준비 상태가 되고 SEV2 `control_sync_lagging{kind="sessions"}`가 뜨며, Kafka가 돌아오면 15분 창을… | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test/control-sync-reread.test.ts 외 1곳 |
 | I-T49 | ① | pid 키 전환(추천 적용 2026-10-28, 기술 검토… | ①은 identity-svc가 돌려준 옛 pid와 같아 통과한다. | 자동 시험 | B | 시험: services/identity-svc/test/identity.grpc.test.ts, services/identity-svc/test/pid-rotation.test.ts |
 | I-T49 | ② | pid 키 전환(추천 적용 2026-10-28, 기술 검토… | ②는 `pid`(새 값)와 `pid_prev`(옛 값)를 함께 싣는다. | 자동 시험 | B | 시험: services/identity-svc/test/pid-rotation.test.ts |
 | I-T49 | ③ | pid 키 전환(추천 적용 2026-10-28, 기술 검토… | ③는 pid가 바뀌지 않는다. | 자동 시험 | B | 시험: services/identity-svc/test/pid-rotation.test.ts |
@@ -354,7 +357,7 @@
 | v5.0.0-7.2.4 | — | L1 | 인증·재인증 때 새 세션 토큰을 만들고 이전 토큰을 끝낸다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-http… |
 | v5.0.0-7.3.1 | — | L2 | 위험 분석과 문서화한 보안 결정에 따라 유휴 만료를 두어 재인증을 요구한다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-token-refresh-http.test.ts |
 | v5.0.0-7.3.2 | — | L2 | 위험 분석과 문서화한 보안 결정에 따라 절대 만료를 두어 재인증을 요구한다. | 빈칸 | B | 영역: services/identity-svc |
-| v5.0.0-7.4.1 | — | L1 | 로그아웃·만료로 세션이 끝나면 그 세션을 더 쓰지 못하게 하고, 참조 토큰·상태 저장 세션은 백엔드에서 무효화하며 자체 완결형 토큰은 종료 목록 등으로 거부한다. | 자동 시험 | B | 시험: packages/platform/test/auth-guard.test.ts, services/identity-svc/test-int/device-sessions.int.test.ts 외 7곳 |
+| v5.0.0-7.4.1 | — | L1 | 로그아웃·만료로 세션이 끝나면 그 세션을 더 쓰지 못하게 하고, 참조 토큰·상태 저장 세션은 백엔드에서 무효화하며 자체 완결형 토큰은 종료 목록 등으로 거부한다. | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test/auth-guard.test.ts 외 10곳 |
 | v5.0.0-7.4.2 | — | L1 | 계정이 정지·삭제되면 그 계정의 모든 활성 세션을 끝낸다. | 자동 시험 | B | 시험: services/identity-svc/test-int/main-withdrawal.int.test.ts, services/identity-svc/test-int/withdrawal-participant.in… |
 | v5.0.0-7.4.3 | — | L2 | 인증 요소를 바꾸거나 지운 뒤 다른 세션을 모두 끝낼 수 있게 한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/device-sessions.int.test.ts, services/identity-svc/test-int/link-proposal.int.test.ts… |
 | v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web |
@@ -417,8 +420,8 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.test.m… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/platform/test/telemetry.test.ts 외 4곳… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 19곳 (영역:… |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 18곳 (영역:… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
-| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: packages/platform/test-int/kafka.int.test.ts, packages/platform/test-int/outbox.int.test.ts 외 8곳 |
+| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test-int/kafka.int.test.ts 외 9곳 |

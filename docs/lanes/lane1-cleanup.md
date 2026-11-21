@@ -268,3 +268,14 @@
 - BAT-013(R-705, RV-10): ③-1 `I-T26③_결제사답CANCEL_PENDING·UNKNOWN·REJECTED...`가 한 값만 돌고 `REFUNDED`/`VOIDED` 제외를 실제 행으로 보지 않으며, HTTP→identity→purchase 전체 사슬 시험이 없다. 세 답과 실제 행을 만들거나 시험 이름을 실제 범위로 줄이고, 전체 사슬 시험의 필요성과 자리를 검증 담당이 정한다.
 - BAT-013(R-705, RV-11): `EVENT_CANCELLED` skip은 `ACCOUNT_WITHDRAWAL`에서 도달하지 않는다(`CancelTicket`은 `USER`+회차 취소 확정 때만). 도달하지 않는 case/주석을 지우거나 미래 결과로 표시하고 정본 skip 목록과 맞춘다.
 - BAT-013(R-705, RV-12): 게이트 결과(`gen:check`·`trace-check`·`lint`·`doc-check`)를 계획/커밋 본문에 다 적지 않았다. 다음 기록부터 게이트 결과를 계획 '시험 결과'에 함께 적는다.
+- BAT-059(R-741, R059-2): identity·core·payment·ticket가 브로커 없는 local·ci에서도 `@peaket/platform/stream-worker`를 실어 Kafka 네이티브 모듈이 열려야 시작한다(docs/streaming.md:29와 어긋남, 각 서비스 main.ts·start.ts). 꺼진 설정이면 도우미를 싣지 않게 한다.
+- BAT-059(R-741, R059-3): ADR-0333 결정 1의 '합본은 브로커 주소를 지운다'가 코드와 다르다(`--hold`만 지움, services/bundle/src/service-worker.ts). v1·데모 무대 토픽 목록(tools/local/v1-objects.mjs:24)에 제어 토픽 둘이 없어 30초 뒤 준비·`control_sync_lagging`=1·관리 연결 1초마다 다시 맺기가 남는다.
+- BAT-059(R-741, R059-4): 배포 뒤처리(제어 토픽 둘 만들기, identity 앱·payment·ticket 파드의 `PEAKET_KAFKA_BROKERS`, MSK 권한·파드별 그룹 이름)가 어느 단계 줄의 '넘긴 것'에도 없다. 놓치면 첫 배포에서 일곱 서비스가 시작하지 않는다(ADR-0333 '결과', 계획 §13-1). 구간 5 배포 단계 줄에 붙인다(감독에게 알림).
+- BAT-059(R-741, R059-6): 방송형 읽기 포트의 메모리 대역이 셋이다(control-codec·control·identity terminated-session-consume 시험). 실제 `kafkaBroadcastSource`와 같은 사례를 돌리는 계약 시험이 없다.
+- BAT-059(R-741, R059-7): 브로커 주소 규칙이 서비스 소비자 설정 넷에 이어 platform stream-worker.ts:523·538에 다섯 번째로 복사됐다. 플랫폼 규칙 하나를 함께 쓴다.
+- BAT-059(R-741, R059-9): 종료 사건 `sessionId` 길이에 상한이 없다(가드는 1,024자 넘는 머리를 읽지 않음, control-codec.ts:41). 넘는 값은 건너뛰고 센다.
+- BAT-059(R-741, R059-10): BUILD_ORDER OPS-450 줄의 되찾기 절차가 없앤 처리할 때 집합(`q:{wdr}:…`)을 가리킨다. '만료 당기기 쓰기를 잃었을 때'로 고친다(ADR-0333 결정 5).
+- BAT-059(R-741, R059-11): I-T3 ② 실제 시작 시험은 queue·purchase만 있다. payment·ticket(시작에 DB)·identity·core·ops(main.ts)는 소스 경계 시험뿐이다. 통합 시험 DB로 띄워 `/ready`의 `sessions`를 본다.
+- BAT-059(R-741, R059-13): `trustedTerminatedAt`의 기준 Kafka 시각은 0 이하·수가 아님만 본다. 레코드 시각과 종료 시각이 같은 단위로 함께 틀리면 범위 안으로 보인다(packages/platform/src/control.ts).
+- BAT-059(R-741, R059-14): `time_replaced` 경고가 바꾼 레코드마다 한 줄이라, 릴레이가 오래 멈췄다 밀린 사건을 보내면 파드마다 줄이 많아진다. 처음 한 줄과 주기 요약으로 줄인다.
+- BAT-059(R-741, 검증): 기기 부하가 클 때 platform `control-sync-reread.test.ts`(I-T48 ③-3)·`service-control-sync*.test.ts`(②-4)가 기본 5초 시간 한도에 걸린 적이 있다(부하가 내려가면 통과). CI에서 흔들리면 시험 한도를 늘린다.
