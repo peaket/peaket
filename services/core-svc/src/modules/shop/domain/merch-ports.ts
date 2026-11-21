@@ -7,6 +7,7 @@ import type {
   EscrowLine,
   IdempotencyRef as IdempotencyRequest,
   LimitedLine,
+  MerchAttempt,
   OrderableProduct,
   OrderState,
   PaymentRef,
@@ -332,6 +333,8 @@ export interface RefundRow {
 /** 구매자 취소 한 건의 응답 값(openapi Cancellation) */
 export interface CancelRowView {
   cancellationId: string;
+  /** 그 환급 행의 주문. 멱등 재생이 경로 주문과 견준다(ADR-0337 결정 6) */
+  orderId: string;
   status: CancelStatus;
   refundAmount: number;
   refundAccountRequired: boolean;
@@ -411,6 +414,8 @@ export interface ShopOrderStore {
   /** 예약 기한이 지난 결제 전 CREATED 주문 ID(limit개까지, 기한 차례) */
   dueUnpaidOrders(nowMs: number, limit: number): Promise<string[]>;
   findOrder(orderId: string): Promise<ShopOrderDetail | undefined>;
+  /** 결제 시도 하나(대체·만료 포함). 없거나 UUID 꼴이 아니면 undefined. 결제 시도 재생이 시도의 주문·결제사를 견준다(ADR-0337 결정 6) */
+  paymentAttempt(attemptId: string): Promise<MerchAttempt | undefined>;
   /** 최근 순(EXPIRED·FAILED 뺌) */
   listOrders(accountId: string, limit: number, cursor?: string): Promise<{ items: ShopOrderDetail[]; nextCursor: string | null }>;
   /**

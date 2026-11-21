@@ -239,6 +239,13 @@
       "when": 1795281728010,
       "tag": "0040_promoter_row_security",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795284988205,
+      "tag": "0041_idempotency_record_role_security",
+      "breakpoints": true
     }
   ]
 }

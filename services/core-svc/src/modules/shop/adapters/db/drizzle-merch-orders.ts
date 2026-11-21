@@ -413,6 +413,12 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
     return (await this.#details([o[0]]))[0];
   }
 
+  async paymentAttempt(attemptId: string): Promise<MerchAttempt | undefined> {
+    if (!UUID.test(attemptId)) return undefined;
+    const r = rowsOf(await this.db.db.execute(sql`select * from merch_payment_attempt where id = ${attemptId}`))[0];
+    return r ? attemptOf(r) : undefined;
+  }
+
   async #details(orders: Row[]): Promise<ShopOrderDetail[]> {
     if (orders.length === 0) return [];
     const ids = orders.map((o) => String(o.id));
@@ -846,6 +852,7 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
     if (!r) return undefined;
     return {
       cancellationId: refundId,
+      orderId: String(r.order_id),
       status: 'REFUND_PENDING',
       refundAmount: n(r.amount),
       refundAccountRequired: r.account_required_at !== null && r.account_required_at !== undefined,

@@ -1,5 +1,5 @@
 // 굿즈 주문 만들기(POST /v1/shop/orders)와 티켓 연동 부가 상품 주문(POST /v1/tickets/{ticketId}/addons)(BUILD_ORDER LCH-010·LCH-020, ADR-0300 결정 4, ADR-0301 결정 2·4).
-// 차례: 같은 멱등 키의 커밋한 결과가 있으면 그대로 → 상품 검사(⑥ 판매 중·수령 방식·티켓 연동, ① 한 판매자·한 수령 방식, ⑤ 옵션)
+// 차례: 같은 멱등 키의 커밋한 결과가 있으면 그 주문이 세션 계정의 것일 때만 그대로(아니면 404, ADR-0337 결정 6) → 상품 검사(⑥ 판매 중·수령 방식·티켓 연동, ① 한 판매자·한 수령 방식, ⑤ 옵션)
 // → 수령 방식 규칙(택배 동의·문안 판, 현장 수령 시간대, 부가 상품은 지금 보유자 확인) → 계정당 한도(④) → 금액 계산
 // → 한정 상품마다 상품 ID 오름차순으로 RESERVE(PREV·NO_COUNTER를 한 번씩 풀고 다시) → 주문·항목을 한 트랜잭션으로(멱등 기록 포함).
 // 예약 뒤에 실패하면 잡은 예약을 RELEASE(restore=1)로 푼다. 풀지 못하고 죽으면 만료 작업이 'DB에 없는 주문'으로 돌린다(ADR-0300 결정 7).
@@ -29,7 +29,7 @@ import {
 } from '../domain/merch-order.js';
 import { type HeldTicketsPort, HeldTicketsUnavailable, type MerchStock, type ReserveResult, type ShopOrderStore, StockUnavailable } from '../domain/merch-ports.js';
 import type { Fulfillment } from '../domain/product.js';
-import { type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
+import { replayMismatch, type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
 
 export interface MerchOrderDeps {
   store: ShopOrderStore;
@@ -73,7 +73,7 @@ export class CreateMerchOrder {
   /** 굿즈 주문(택배·현장 수령) */
   async shop(accountId: string, input: CreateShopOrderInput, once: IdempotencyRequest): Promise<CreatedOrderView> {
     const replay = await this.d.store.replayOf(once);
-    if (replay !== undefined) return this.#replayView(replay);
+    if (replay !== undefined) return this.#replayView(accountId, replay, once.operation);
     const nowMs = this.d.clock.now();
     const lines = input.items.map((i) => ({ productId: i.productId.toLowerCase(), quantity: i.quantity, options: i.options }));
     const products = await this.#products(lines);
@@ -107,7 +107,7 @@ export class CreateMerchOrder {
   /** 티켓 연동 부가 상품 주문(수령 방식 WALLET, ADR-0301 결정 2) */
   async addon(accountId: string, ticketId: string, input: { productId: string; quantity: number; options?: Record<string, string> | undefined }, once: IdempotencyRequest): Promise<CreatedOrderView> {
     const replay = await this.d.store.replayOf(once);
-    if (replay !== undefined) return this.#replayView(replay);
+    if (replay !== undefined) return this.#replayView(accountId, replay, once.operation);
     const nowMs = this.d.clock.now();
     const lines = [{ productId: input.productId.toLowerCase(), quantity: input.quantity, options: input.options }];
     const products = await this.#products(lines);
@@ -232,6 +232,7 @@ export class CreateMerchOrder {
     // 한정 상품은 상품 ID 오름차순으로 하나씩 예약한다(같은 상품이 두 줄이면 합친다)
     const limited = new Map([...quantitiesByProduct(c.lines)].filter(([productId]) => c.products.get(productId)!.limitedQty !== null));
     const held: Held[] = [];
+    let replayRef: string | undefined;
     try {
       for (const productId of [...limited.keys()].sort()) {
         const p = c.products.get(productId)!;
@@ -241,7 +242,7 @@ export class CreateMerchOrder {
       const saved = await this.d.store.insertOrder(c.once, { order, items });
       if (saved.kind === 'replay') {
         await this.#undo(held, orderId, c.accountId);
-        return this.#replayView(saved.resultRef);
+        replayRef = saved.resultRef;
       }
     } catch (e) {
       await this.#undo(held, orderId, c.accountId);
@@ -253,6 +254,8 @@ export class CreateMerchOrder {
       if (e instanceof ShopProblem && e.type === 'merch-order-in-progress') this.d.signals?.order('in_progress');
       throw e;
     }
+    // 그사이 같은 키가 커밋됐다(예약은 위에서 풀었다). 대조는 처음 길과 같다
+    if (replayRef !== undefined) return this.#replayView(c.accountId, replayRef, c.once.operation);
     this.d.signals?.order('created');
     return { orderId, fulfillment: c.fulfillment, paymentStore: pgStore, ...(limited.size > 0 ? { stockReservedUntil: reservedUntil.toISOString() } : {}) };
   }
@@ -313,9 +316,13 @@ export class CreateMerchOrder {
     }
   }
 
-  async #replayView(orderId: string): Promise<CreatedOrderView> {
+  /**
+   * 같은 키 다시 오기(ADR-0337 결정 6). 결과 참조의 주문이 세션 계정의 것일 때만 처음 응답 모양으로 돌려준다.
+   * 없거나 남의 주문이면 남의 주문과 같은 404이고 보안 이벤트 로그 한 줄이다(참조한 주문 ID는 응답·로그에 싣지 않는다)
+   */
+  async #replayView(accountId: string, orderId: string, operation: string): Promise<CreatedOrderView> {
     const d = await this.d.store.findOrder(orderId);
-    if (!d) throw orderNotFound();
+    if (!d || d.order.accountId !== accountId) throw replayMismatch(this.#log, operation);
     const limited = d.items.some((i) => i.limited);
     return { orderId, fulfillment: d.order.fulfillment, paymentStore: d.order.pgStore, ...(limited ? { stockReservedUntil: d.order.stockReservedUntil.toISOString() } : {}) };
   }

@@ -3,6 +3,9 @@
 //   PrepareCheckout(ORDER_KIND_MERCH)을 부른 뒤 주문 행을 잠그고 다시 보고 시도를 넣는다(이전 READY는 SUPERSEDED). 예약 시각을 늘리지 않는다.
 // - 접수: 한 트랜잭션(주문 잠금·조건부 재고 차감·시도 ACCEPTED·예약 연장·승인 명령 작업)을 커밋한 뒤 EXTEND와 ConfirmPayment(200ms)를 부르고 202.
 //   ConfirmPayment가 받아지지 않으면 작업이 다시 보낸다(merch-payment-results.ts). 만료면 409 order-expired이고 결제사를 부르지 않는다.
+// - 같은 키 다시 오기(ADR-0337 결정 6): 저장한 결과가 경로 주문·세션 계정의 것인지 본 뒤에만 돌려준다. 시작은 시도 ID가 경로 주문의 시도이고
+//   결제사가 그 시도의 결제사이며 결제창 금액이 주문 금액일 때, 접수는 참조가 accepted·sold-out이고 경로 주문이 세션 계정의 것일 때다.
+//   맞지 않으면 쓰기·결제사 호출 없이 남의 주문과 같은 404이고 보안 이벤트 로그 한 줄이다.
 import { uuidv7, type Clock, type IdempotencyRequest } from '@peaket/platform';
 import {
   type AcceptBody,
@@ -22,7 +25,7 @@ import {
   ShopProblem,
 } from '../domain/merch-order.js';
 import { CheckoutFailed, type CheckoutValues, type MerchPayments, type MerchStock, type ShopOrderStore } from '../domain/merch-ports.js';
-import { type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
+import { replayMismatch, type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
 
 export interface MerchPaymentDeps {
   store: ShopOrderStore;
@@ -53,7 +56,7 @@ export class MerchPayment {
 
   async start(accountId: string, orderId: string, body: { payMethod?: string | undefined }, once: IdempotencyRequest): Promise<PaymentAttemptView> {
     const replay = await this.d.store.replayOf(once);
-    if (replay !== undefined) return JSON.parse(replay) as PaymentAttemptView;
+    if (replay !== undefined) return this.#startReplay(accountId, orderId, replay, once.operation);
     const detail = await this.d.store.findOrder(orderId.toLowerCase());
     if (!detail || detail.order.accountId !== accountId) throw orderNotFound();
     const nowMs = this.d.clock.now();
@@ -98,17 +101,32 @@ export class MerchPayment {
     };
     this.d.signals?.escrowPayment(detail.order.pgStore === 'ESCROW' ? 'prepared' : 'standard');
     const saved = await this.d.store.saveAttempt(once, { orderId: detail.order.orderId, accountId, attemptId, pg: answer.pg, payMethod: body.payMethod ?? null, nowMs: this.d.clock.now(), responseJson: JSON.stringify(view) });
-    return saved.kind === 'replay' ? (JSON.parse(saved.resultRef) as PaymentAttemptView) : view;
+    return saved.kind === 'replay' ? this.#startReplay(accountId, orderId, saved.resultRef, once.operation) : view;
+  }
+
+  /**
+   * 시작의 같은 키 다시 오기. 대조는 처음 응답 뒤에도 바뀌지 않는 사실만 본다(소유 계정, 시도가 속한 주문, 시도의 결제사, 주문 금액).
+   * 그래서 그 뒤 시도가 대체·만료되었어도 처음 응답을 그대로 돌려준다(guidelines §4 '돌려주는 응답')
+   */
+  async #startReplay(accountId: string, orderId: string, ref: string, operation: string): Promise<PaymentAttemptView> {
+    const path = orderId.toLowerCase();
+    const view = attemptViewOf(ref);
+    if (view !== undefined) {
+      const detail = await this.d.store.findOrder(path);
+      const attempt = detail && detail.order.accountId === accountId ? await this.d.store.paymentAttempt(view.attemptId) : undefined;
+      if (detail && attempt && attempt.orderId === detail.order.orderId && attempt.pg === view.pg && checkoutAmountOf(view) === detail.order.amount) return view;
+    }
+    throw replayMismatch(this.#log, operation, path);
   }
 
   async accept(accountId: string, orderId: string, body: AcceptBody, once: IdempotencyRequest): Promise<void> {
     const replay = await this.d.store.replayOf(once);
-    if (replay !== undefined) return this.#replay(replay);
+    if (replay !== undefined) return this.#acceptReplay(accountId, orderId, replay, once.operation);
     const ref = paymentRefOf(body);
     if (!ref) throw badRequest('payment_ref_invalid');
     const nowMs = this.d.clock.now();
     const out = await this.d.store.acceptPayment(once, { orderId: orderId.toLowerCase(), accountId, nowMs, body, ref });
-    if (out.kind === 'replay') return this.#replay(out.resultRef);
+    if (out.kind === 'replay') return this.#acceptReplay(accountId, orderId, out.resultRef, once.operation);
     if (out.kind === 'sold-out') {
       // 주문 FAILED는 커밋했다. Redis 예약을 풀어 카운터를 돌린다(실패하면 만료 작업이 FAILED 주문의 원소로 돌린다)
       for (const l of out.limited) {
@@ -135,7 +153,37 @@ export class MerchPayment {
     else await this.d.store.rescheduleJob(out.job.orderId, now + confirmRetryDelayMs(1), { tries: 1 });
   }
 
-  #replay(ref: string): void {
-    if (ref === 'sold-out') throw merchSoldOut();
+  /** 접수의 같은 키 다시 오기. 참조는 두 값(accepted·sold-out)뿐이고 경로 주문이 세션 계정의 것이어야 한다. sold-out만 409다 */
+  async #acceptReplay(accountId: string, orderId: string, ref: string, operation: string): Promise<void> {
+    const path = orderId.toLowerCase();
+    if (ref === 'accepted' || ref === 'sold-out') {
+      const detail = await this.d.store.findOrder(path);
+      if (detail && detail.order.accountId === accountId) {
+        if (ref === 'sold-out') throw merchSoldOut();
+        return;
+      }
+    }
+    throw replayMismatch(this.#log, operation, path);
   }
+}
+
+/** 저장한 결제 시도 응답(JSON)을 읽는다. 읽지 못하거나 대조할 칸이 없으면 undefined */
+function attemptViewOf(ref: string): PaymentAttemptView | undefined {
+  let v: unknown;
+  try {
+    v = JSON.parse(ref);
+  } catch {
+    return undefined;
+  }
+  if (typeof v !== 'object' || v === null) return undefined;
+  const o = v as Record<string, unknown>;
+  if (typeof o.attemptId !== 'string' || typeof o.pg !== 'string' || typeof o.checkout !== 'object' || o.checkout === null) return undefined;
+  return v as PaymentAttemptView;
+}
+
+/** 결제창 금액: 포트원은 totalAmount, 토스·시뮬레이터는 amount(openapi PaymentAttempt.checkout). 숫자가 아니면 undefined */
+function checkoutAmountOf(v: PaymentAttemptView): number | undefined {
+  const c = v.checkout as Record<string, unknown>;
+  const amount = v.pg === 'PORTONE' ? c.totalAmount : c.amount;
+  return typeof amount === 'number' ? amount : undefined;
 }
