@@ -32,6 +32,16 @@ class FanController {
   }
 }
 
+/** 공개와 신원 역할을 함께 허용한 처리기: 신원 머리(X-Session-Id)를 받으면 종료 세션 목록이 막아야 한다(ADR-0333 결정 1·3) */
+@Controller('v1/mixed')
+class MixedController {
+  @Get('feed')
+  @Roles(['public', 'fan'])
+  feed() {
+    return { ok: true };
+  }
+}
+
 @Controller('v1/ops')
 class OpsController {
   @Get('board')
@@ -144,6 +154,18 @@ describe('I-T3 ② 도우미와 빠뜨림 막기(ADR-0333 결정 2·3)', () => {
         expect(svc.http.server.listening, `${env}/${c.name}`).toBe(false);
         expect(svc.management.server.listening, `${env}/${c.name}`).toBe(false);
       }
+    }
+  });
+
+  test("I-T3 ②-12 공개와 신원 역할을 함께 허용한 처리기(@Roles(['public', 'fan']))만 있어도 신원 처리기로 보아, local·ci 밖에서 소비 없이 듣기 시작하면 PlatformConfigError로 듣지 않는다", async () => {
+    for (const env of ON_ENVS) {
+      const { svc } = await boot({ PEAKET_ENV: env }, MixedController);
+      const listening = svc.listen('127.0.0.1');
+      await expect(listening, env).rejects.toThrow(PlatformConfigError);
+      // 막은 까닭에 그 처리기 이름이 실린다(신원 처리기로 셌다는 뜻)
+      await expect(listening, env).rejects.toThrow(/MixedController\.feed/);
+      expect(svc.http.server.listening, env).toBe(false);
+      expect(svc.management.server.listening, env).toBe(false);
     }
   });
 
