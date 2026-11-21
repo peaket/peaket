@@ -835,6 +835,7 @@
 | R-739 | 무인 모드가 기본 12시간·최대 24시간 뒤 꺼져, 소유자가 직접 잠그기 전까지 켜 두고 싶은 경우를 담지 못했다 | tools/claude-hooks/lib.mjs·unattended.mjs·README.md, tools/ci/claude-hooks.test.mjs, docs/adr/0330 결정 9 | 시간 없이 켜면 off까지 켜 둠(until null), 시간을 주면 그대로 | 완료 |
 | R-740 | GAT-010 남은 몫(서버 키 등록 잇기·keyId 맞물림·런타임 캐시 판)이 없었다 | apps/web wallet-device-key·sw, services/ticket-svc 기기 키 저장소, docs/api/openapi.yaml, ADR-0336, offline-gate §2·§11 | 스위치 없앰·같은 키 무변경 201·wallet-shell-{판} | 고침, 리뷰·검증 낮음·중간 9은 정리 목록 |
 | R-741 | 끝난 세션의 액세스 토큰을 서비스가 수명까지 받았다(`startControlSync`를 부르는 곳 없음, FR-017 '몇 초 이내에 거부' 미충족)와 queue 탈퇴 15분 미루기가 남아 있었다(ADR-0214 결정 7) | packages/platform(control.ts·control-codec.ts·stream-worker.ts 도우미·auth.ts 빠뜨림 막기·template), services 일곱의 시작 파일, queue-svc entry(미루기 파일 셋 삭제·받자마자 처리), docs/adr/0333, identity.md §8·§12, queue-admission.md, data.md, observability.md, verification.md | 계획 → 구현 → 시험(구현 전 트리 41 중 40 실패) → 리뷰 → 리뷰 반영(R059-1) → 검증 40/40 | 해결 |
+| R-742 | ops-svc 명령 수명주기·2인 승인·dry-run과 감사 체인 mac·앵커·검증 잡이 정본과 달리 비어 있거나 상태를 직접 썼다 | services/ops-svc/src/modules/commands, services/ops-svc/src/modules/audit, services/ops-svc/src/jobs, services/ops-svc/migrations/0021·0022, services/queue-svc/src/modules/entry/adapters, docs/api/openapi.yaml, docs/api/asyncapi.yaml, ADR-0339·0340·0341, docs/features/control-tower.md, docs/data.md | 전이 표·2인 승인·dry-run 기록과 비교·명령 4 조건·가명 참조, mac·작업자·앵커·검증 잡(BAT-355) | 적용 |
 
 ## 4. 숫자 일치표
 
