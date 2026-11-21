@@ -359,6 +359,8 @@ export class PaymentSystem {
   /** 경합 쌍 종류(commands.ts PAIRS)마다 돈 수(코드 리뷰 H5) */
   readonly pairKinds: Record<string, number> = {};
   #podN = 0;
+  /** 중단 표시: 시간 한도에 끊긴 판(docs/verification.md §2.4 둘째 줄). 켜지면 다음 걸음의 첫 줄에서 던진다 */
+  #halted = false;
 
   constructor(
     private readonly purchase: Database,
@@ -460,6 +462,18 @@ export class PaymentSystem {
       await this.#isolate();
     }
     debug(`${this.eventId} 닫음`);
+  }
+
+  /**
+   * 중단 표시를 한다(시간 한도에 끊긴 판: fast-check는 그 판의 결과만 버리고 실행을 멈추지 않는다, docs/verification.md §2.4).
+   * 걸음 도중(DB 트랜잭션·스케줄러 문)에는 끊지 않는다(닫기가 몰아야 할 문이 남는다): 지금 걸음은 끝까지 가고 다음 걸음(move·pair·blockedSend)의 첫 줄에서 던진다.
+   * 던지면 명령 실행이 끝나고 시험의 using이 닫기(close → #isolate)를 한다
+   */
+  halt(): void {
+    this.#halted = true;
+  }
+  #stepBoundary(): void {
+    if (this.#halted) throw new Error('중단: 시간 한도에 끊긴 판');
   }
 
   /** 두 DB를 다음 실행이 이어 쓴다: 이 실행의 행을 실행기들의 잡기 대상에서 뺀다(닫기가 도중에 실패해도 한다) */
@@ -657,6 +671,7 @@ export class PaymentSystem {
    * check가 거짓이면(무작위 실행의 경합 걸음 등) 다음 상태 대조는 하지 않는다
    */
   async move(m: SpecMove, check = true): Promise<void> {
+    this.#stepBoundary();
     const label = labelOf(m);
     this.log.push(label);
     this.steps += 1;
@@ -684,6 +699,7 @@ export class PaymentSystem {
    * 진 걸음의 운영 코드는 거절로 끝나므로 그 걸음 하네스의 '뜻밖의 결과' 오류는 세기만 하고 넘긴다(둘 다 오류면 하네스 오류로 던진다)
    */
   async pair(a: SpecMove, b: SpecMove, o: { serial?: boolean } = {}): Promise<void> {
+    this.#stepBoundary();
     const sch = this.o.scheduler;
     if (!sch) throw new Error('pair: 경합 걸음은 scheduler가 있어야 한다');
     const label = `경합(${labelOf(a)} ∥ ${labelOf(b)})`;
@@ -1119,6 +1135,7 @@ export class PaymentSystem {
    * 작업 행이 남는지(재시도 큐) 본다(코드 리뷰 H3)
    */
   async blockedSend(o: number, p: number): Promise<void> {
+    this.#stepBoundary();
     const ids = this.#ids.get(o)!;
     this.log.push(`상한 찬 send(${o}, ${p})`);
     this.blockedSends += 1;

@@ -15,7 +15,8 @@
 //    임대 소유자 조건(옛 파드의 늦은 쓰기), 결제사 쪽 전액 취소, 전환 뒤 고정, 보상, 웹훅(지표로 처리 길을 가린다), 같은 주문의 승인 명령 다시 보내기.
 // ④ 동작 기록 재생(V-T40 ③): tools/spec-check traces가 낸 명세 기록 19개를 같은 이름의 동작으로 운영 코드에 다시 돌려, 걸음마다 관측이 기록의 다음 상태와 같다.
 //    모든 걸음을 재생해야 하고(알려진 차이가 없다), 어긋나면 처음 어긋난 걸음 번호를 남긴다.
-// 횟수와 시간(CI 기본, 코드 리뷰 M12): MBT_RUNS(기본 16, 범위마다. 경합은 그 반), MBT_TIME_LIMIT_MS(기본 45초, 속성 하나의 시간 한도. 넘으면 그때까지 돈 것으로 끝낸다).
+// 횟수와 시간(CI 기본, 코드 리뷰 M12): MBT_RUNS(기본 16, 범위마다. 경합은 그 반), MBT_TIME_LIMIT_MS(기본 45초, 속성 하나의 시간 한도. 넘으면 그때까지 돈 것으로 끝낸다.
+//    끊긴 판은 다음 걸음에서 멈추고 닫힌 뒤 다음 판·시험으로 간다: checkProperty, docs/verification.md §2.4 둘째 줄, W12-vt40).
 //    로컬에서 이 기본 값으로 파일 하나가 약 4분이다(2026-11-10). 실패를 다시 돌리려면 MBT_SEED·MBT_PATH. 걸음 기록: MBT_DEBUG=<파일>. 처음 실패에서 멈추기: MBT_NO_SHRINK=1.
 // 운영 코드 변이 확인(2026-11-10, 하나씩 넣고 되돌림, MBT_NO_SHRINK=1, CI 기본 값. 결과는 docs/verification.md V-T40 행에도 적는다):
 // - M1 결제사 고정 깸(승인 실행기·결과 모름 조회가 결제 원장의 결제사 대신 지금 전환 상태로 결제사를 고름, 운영 코드): 집중(전환 뒤 고정)과 무작위 셋이 잡음(명세 ②).
@@ -98,10 +99,22 @@ afterAll(async () => {
   server?.stop();
 });
 
-const make = async (scope: Scope, o: SystemOptions = {}) => {
+/**
+ * 시스템 하나를 만든다. 열린 다른 PaymentSystem이 있으면 하네스 오류다(시험·판은 하나씩 열고 닫는다. 앞 판이 닫히지 않아 행이 섞이는 것이
+ * '결제사 1 대역이 …' 같은 결제 위반으로 위장되지 않고 이름으로 드러난다). made는 준비(init) 전에 부른다(속성 도우미가 끊긴 판에 중단 표시를 잇는다)
+ */
+const make = async (scope: Scope, o: SystemOptions = {}, made?: (s: PaymentSystem) => void) => {
+  if (systems.length > 0) throw new Error(`하네스: 열린 PaymentSystem이 ${systems.length}개 남았는데 새로 만든다(앞 판·시험이 닫히지 않았다)`);
   const s = new PaymentSystem(purchase, payment, fakeClock({ now: Date.now() }), scope, o);
   systems.push(s);
-  await s.init();
+  made?.(s);
+  try {
+    await s.init();
+  } catch (e) {
+    await s.close().catch(() => undefined);
+    systems.splice(systems.indexOf(s), 1);
+    throw e;
+  }
   return s;
 };
 /** 시스템 하나로 body를 돌리고 늘 닫는다(실패한 시험도 행을 남기지 않는다, 코드 리뷰 M10). body가 끝났으면 불변식 위반을 실패로 낸다 */
@@ -128,17 +141,49 @@ const run = async (s: PaymentSystem, moves: SpecMove[]) => {
   }
 };
 
-/** 속성 한 번 부르기의 판(속성 시험 한 번의 실행)들이 시스템을 만드는 곳 */
-interface PropertyRuns {
-  make(scope: Scope, o?: SystemOptions): Promise<PaymentSystem>;
+/** 속성 한 번 부르기의 판(속성 시험 한 번의 실행)들이 시스템을 만드는 곳. 부르기마다 하나다(중단 신호를 모듈 전역 하나로 두지 않는다) */
+class PropertyRuns {
+  #stopped = false;
+  readonly #made = new Set<PaymentSystem>();
+  /** 판이 시스템을 만든다. 속성이 이미 돌아왔으면(끊긴 판) 만들지 않고 던진다 */
+  readonly make = async (scope: Scope, o: SystemOptions = {}): Promise<PaymentSystem> => {
+    if (this.#stopped) throw new Error('중단: 시간 한도에 끊긴 판(속성이 이미 돌아왔다)');
+    return make(scope, o, (s) => this.#made.add(s));
+  };
+  /** 속성이 돌아왔다(통과·실패·끊김 모두): 새 시스템을 막고, 아직 열린 시스템에 중단 표시를 한다(다음 걸음에서 멈춘다) */
+  stop(): void {
+    this.#stopped = true;
+    for (const s of this.#made) if (systems.includes(s)) s.halt();
+  }
 }
 /**
  * 속성 실행 도우미: 무작위 명령 순서·경합·집중 경합(focusedPair) 속성과 재현 시험(R1·R2)이 함께 쓴다. 판의 본문은 runs.make로 시스템을 만든다.
- * 시간 한도(interruptAfterTimeLimit)에 끊긴 판을 다루는 법은 docs/verification.md §2.4 둘째 줄이다
+ * fast-check의 시간 한도(interruptAfterTimeLimit)는 끊긴 판의 결과만 버리고 그 본문을 멈추지 않는다. 그래서 속성이 돌아오면 끊긴 판에 중단 표시를 하고,
+ * 본문이 모두 끝나(닫기가 그 판의 행을 다른 판의 잡기 대상에서 뺌) 열린 PaymentSystem이 0이 된 뒤에 돌아온다(docs/verification.md §2.4 둘째 줄)
  */
 async function checkProperty<Ts extends [unknown, ...unknown[]]>(arbs: { [K in keyof Ts]: fc.Arbitrary<Ts[K]> }, body: (runs: PropertyRuns, ...args: Ts) => Promise<void>, params: fc.Parameters<Ts>): Promise<void> {
-  const runs: PropertyRuns = { make };
-  await fc.assert(fc.asyncProperty<Ts>(...arbs, (...args: Ts) => body(runs, ...args)), params);
+  const runs = new PropertyRuns();
+  /** 진행 중인 판의 본문 */
+  const bodies = new Set<Promise<void>>();
+  const predicate = (...args: Ts): Promise<void> => {
+    const p = body(runs, ...args);
+    bodies.add(p);
+    p.then(
+      () => bodies.delete(p),
+      () => bodies.delete(p),
+    );
+    return p;
+  };
+  let failure: { error: unknown } | undefined;
+  try {
+    await fc.assert(fc.asyncProperty<Ts>(...arbs, predicate), params);
+  } catch (error) {
+    failure = { error };
+  }
+  runs.stop();
+  await Promise.allSettled([...bodies]);
+  if (systems.length > 0) throw new Error(`하네스: 끊긴 판이 닫히지 않았다(열린 PaymentSystem ${systems.length}개)`, failure && { cause: failure.error });
+  if (failure) throw failure.error;
 }
 
 /** 재현 시험(R1·R2)이 판 하나를 지켜보는 칸: 본문이 시작했는지, 만든 시스템, 본문이 끝났는지와 끝남 약속 */
@@ -387,9 +432,18 @@ async function focusedPair(scope: Scope, setup: SpecMove[], a: SpecMove, b: Spec
 const LATE_TICKET_SETUP: SpecMove[] = [...upToSent(1), { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }, { a: 'respond', o: 1, p: 1 }, { a: 'applyResult', o: 1, p: 1 }, { a: 'overdue', o: 1 }, { a: 'csConfirm', o: 1 }, { a: 'issue', o: 1 }, { a: 'ticketSvc', o: 1, c: 'OK' }];
 /** 승인 응답 ∥ 재시작의 준비(승인 호출을 보내고 결제사가 승인함, 답은 아직 실행기에 돌아가지 않음) */
 const RESPOND_RESTART_SETUP: SpecMove[] = [...upToSent(1), { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' }];
-/** 승인 응답 ∥ 재시작의 결과(결제 원장 상태) 판정: 집중 경합의 스케줄러 차례와 재현 시험 R3가 같이 쓴다 */
+/**
+ * 승인 응답 ∥ payment-svc 재시작의 허용 결과(결제 원장 상태): 두 차례 가운데 하나다(docs/verification.md §2.4 '무작위로 드문 경합', V-T40 행 '어느 한 차례의
+ * 명세 다음 상태'). 값은 docs/features/payment.md §2 '승인 실행기의 첫 구현'이 정한다.
+ * - 응답 먼저: '답 반영(한 트랜잭션)'이 ACCEPTED에서 승인으로 쓰고 명령 행을 지운다 → APPROVED. 뒤의 재시작은 잃을 호출이 없다.
+ * - 재시작 먼저: 옛 실행기의 쓰기는 막히고 다시 뜬 실행기가 '임대 잔해(restart)'로 결제사를 다시 부르지 않고 UNKNOWN으로 쓴다 → UNKNOWN.
+ * 어느 차례와도 맞지 않는 결과(직렬 가능이 아님)는 판마다 PaymentSystem.pair가 위반으로 잡고 using이 실패로 낸다
+ */
+const RESPOND_RESTART_ALLOWED: readonly string[] = ['UNKNOWN', 'APPROVED'];
+/** 승인 응답 ∥ 재시작의 결과(결제 원장 상태) 판정: 결과가 있고 모두 허용 집합 안이다. 집중 경합의 스케줄러 차례와 재현 시험 R3가 같이 쓴다 */
 function judgeRespondRestart(seen: Record<string, number>): void {
-  expect(Object.keys(seen)).toEqual(['UNKNOWN']);
+  expect(Object.keys(seen).length).toBeGreaterThan(0);
+  expect(Object.keys(seen).filter((k) => !RESPOND_RESTART_ALLOWED.includes(k))).toEqual([]);
 }
 
 test('V-T40 집중 경합: 늦게 온 발권 성공 답과 보상 시작이 겹쳐도 결과는 어느 한 차례와 같고, 두 갈래(성공 반영이 먼저면 CONFIRMED, 보상이 먼저면 보상 중)가 모두 나온다(명세 ⑥)', async () => {
@@ -404,12 +458,15 @@ test('V-T40 집중 경합: 접수 ∥ 새 결제 시도가 겹쳐도 결과는 �
   expect(Object.keys(seen).sort()).toEqual(['ACCEPTED/ACCEPTED', 'CREATED/SUPERSEDED']);
 }, PROPERTY_TIMEOUT_MS);
 
-test('V-T40 집중 경합: 승인 응답 ∥ payment-svc 재시작이 겹치면 재시작이 쓰기를 막아 결과 모름이 되고, 응답이 먼저 끝나면(차례를 정함) 승인이 남고 재시작은 잃을 호출이 없다(두 갈래, 코드 리뷰 H5)', async () => {
+test('V-T40 집중 경합: 승인 응답 ∥ payment-svc 재시작의 결과는 두 차례 가운데 하나이고(재시작 먼저면 쓰기가 막혀 결과 모름, 응답 먼저면 승인이 남고 재시작은 잃을 호출이 없다), 스케줄러 차례에서 결과 모름 갈래가 나온다(두 갈래, 코드 리뷰 H5)', async () => {
   const raced = await focusedPair(ONE, RESPOND_RESTART_SETUP, { a: 'respond', o: 1, p: 1 }, { a: 'restart' }, (s) => s.obs.pay['1,1']!, 8);
-  // 스케줄러 차례에서는 재시작의 DB 끊기가 응답의 쓰기보다 늘 먼저 와서(쓰기는 문을 여러 개 지난다) 응답이 이기는 갈래가 나오지 않는다. 그 갈래는 차례를 정해 바로 만든다
+  // 스케줄러 차례에서는 대개 재시작의 DB 끊기가 응답의 쓰기보다 먼저 온다(쓰기는 문을 여러 개 지난다). 차례는 실제 시간에 따라 달라(머리 주석) 응답 먼저(APPROVED)도 나온다.
+  // 응답 먼저 갈래는 차례를 정해 바로 만든다
   const serial = await focusedPair(ONE, RESPOND_RESTART_SETUP, { a: 'respond', o: 1, p: 1 }, { a: 'restart' }, (s) => `${s.obs.pay['1,1']}/${s.obs.env.restarts}`, 2, { serial: true });
-  console.info(`응답 ∥ 재시작: ${JSON.stringify(raced)}, 응답 먼저(차례 정함): ${JSON.stringify(serial)}`);
+  console.info(`응답 ∥ 재시작(스케줄러 차례): ${JSON.stringify(raced)}, 응답 먼저(차례 정함): ${JSON.stringify(serial)}`);
   judgeRespondRestart(raced);
+  // 이 시험의 목적: 겹치면 재시작이 쓰기를 막아 결과 모름이 되는 갈래가 스케줄러 차례에서 나온다
+  expect(Object.keys(raced)).toContain('UNKNOWN');
   expect(Object.keys(serial)).toEqual(['APPROVED/1']);
 }, PROPERTY_TIMEOUT_MS);
 
