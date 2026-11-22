@@ -1,6 +1,7 @@
 // 내 스캐너 세션 조회·끝내기의 통합 시험(실제 PostgreSQL 18, docs/features/identity.md §6.1 '휴대폰 화면 실제 연결' ④⑤, §12 I-T89 ①~⑥,
 // ADR-0362 결정 6, BUILD_ORDER F-05-7 시험 담당). 마이그레이션 0038(scanner_session.device_name)과 목록·끝내기의 실제 SQL,
 // 같은 트랜잭션의 reauth_token_use·terminated_at·Outbox(control.sessions-terminated, 사유 LOGOUT)를 본다. 메모리 쪽은 test/scanner-sessions-self.test.ts.
+import { randomUUID } from 'node:crypto';
 import { createDatabase, type Database, ensureOutboxPartitions, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateIdentity } from '../scripts/migrate.mjs';
@@ -54,9 +55,10 @@ async function setup() {
     const deviceId = uuid(0xd1000 + n);
     const now = clock.now();
     await database.pool.query(
-      `insert into staff_assignment (id, account_id, event_id, role, invited_by, valid_from, valid_until, status, promoter_id)
-       values ($1, $2, $3, $4, $5, $6, $7, 'ASSIGNED', $8)`,
-      [assignmentId, s.accountId, eventId, o.role ?? 'gate_lead', uuid(0xa1000 + n), new Date(now - HOUR), new Date(now + 6 * HOUR), uuid(0xb1000 + n)],
+      // 수락한 배정: invite_expires_at은 NOT NULL이라 초대 때의 만료(수락 전 시각)를 남기고, 이메일·토큰 해시는 수락 때 지운 꼴(0031, docs/data.md staff_assignment)
+      `insert into staff_assignment (id, account_id, event_id, role, invite_expires_at, invited_by, valid_from, valid_until, status, promoter_id, accepted_at, consent_version)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'ASSIGNED', $9, $10, 'staff-2026-11-23')`,
+      [assignmentId, s.accountId, eventId, o.role ?? 'gate_lead', new Date(now + HOUR), uuid(0xa1000 + n), new Date(now - HOUR), new Date(now + 6 * HOUR), uuid(0xb1000 + n), new Date(now - HOUR)],
     );
     await staff.createScannerSession({
       scannerSessionId,
@@ -177,7 +179,8 @@ describe('I-T89 PostgreSQL', () => {
     const seeded = await t.seed(s, { deviceName: '동문-41', expiresInMs: 500 * DAY });
     // Outbox 행 ID의 시계만 파티션이 없는 먼 날로 둔 저장소
     const far = new DrizzleStaffAssignmentStore(database, fakeClock({ now: clock.now() + 400 * DAY }));
-    const jti = newKey();
+    // reauth_token_use.jti는 uuid다(서명기가 넣는 jti와 같은 꼴)
+    const jti = randomUUID();
     await expect(far.endOwnScannerSession({ accountId: s.accountId, scannerSessionId: seeded.scannerSessionId, nowMs: clock.now(), reauth: { jti, expiresAtMs: clock.now() + 300_000 } })).rejects.toThrow();
     expect(await terminatedAt(seeded.scannerSessionId)).toBeNull();
     expect(await q('select 1 from reauth_token_use where jti = $1', [jti])).toHaveLength(0);

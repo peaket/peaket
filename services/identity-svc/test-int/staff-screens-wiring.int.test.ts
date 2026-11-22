@@ -144,6 +144,22 @@ beforeAll(async () => {
     env: { PEAKET_ENV: 'ci' },
     fallbackUrl: `http://127.0.0.1:${mockPort}`,
   });
+  // 예열: 막 뜬 main.ts의 DB 풀은 첫 연결이 풀 대기 한도(1초)를 넘으면 429 server-busy로 답한다(docs/architecture.md §5, 시험 PC의 Docker 첫 연결).
+  // 본 대본 전에 DB를 읽는 경로가 200을 줄 때까지(조건으로) 기다린다. 대본의 단언은 다시 시도하지 않는다
+  const warm = await new CreateSession(new DrizzleSessionStore(database, systemClock), signer, testDeviceRefs(), recordingSignals(), noClaims, systemClock).run({
+    idempotencyKey: newKey(),
+    provider: 'kakao',
+    providerUserId: `warm-${newKey().slice(0, 8)}`,
+    email: null,
+    deviceId: 'dev-warm',
+  });
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const r = await fetch(`${gw.url}/v1/identity/scanner-sessions`, { headers: { cookie: `__Secure-peaket_at=${warm.accessToken}` } });
+    await r.text();
+    if (r.status === 200) break;
+    if (r.status !== 429 || Date.now() > deadline) throw new Error(`예열이 끝나지 않았다: ${r.status}`);
+  }
 }, 180_000);
 
 afterAll(async () => {
@@ -209,9 +225,10 @@ test('I-T91 ⑥ I-T92 ④ I-T93 ④ I-T90 ⑤ 화면 흐름 모듈로 실제 ide
   await invite(A1, E1, T1);
   await invite(A2, E2, T2);
   await database.pool.query(
-    `insert into staff_assignment (id, account_id, event_id, role, invited_by, valid_from, valid_until, status, promoter_id, accepted_at, consent_version)
-     values ($1, $2, $3, 'gate_staff', $4, $5, $6, 'ASSIGNED', $7, now(), 'staff-2026-11-23')`,
-    [A3, me.accountId, E3, randomUUID(), new Date(now - HOUR), new Date(now + 6 * HOUR), PROMOTER],
+    // 수락한 배정: invite_expires_at은 NOT NULL이라 초대 때의 만료를 남긴다(0031, docs/data.md staff_assignment)
+    `insert into staff_assignment (id, account_id, event_id, role, invite_expires_at, invited_by, valid_from, valid_until, status, promoter_id, accepted_at, consent_version)
+     values ($1, $2, $3, 'gate_staff', $4, $5, $6, $7, 'ASSIGNED', $8, $9, 'staff-2026-11-23')`,
+    [A3, me.accountId, E3, new Date(now + HOUR), randomUUID(), new Date(now - HOUR), new Date(now + 6 * HOUR), PROMOTER, new Date(now - HOUR)],
   );
   const staffDb = new DrizzleStaffAssignmentStore(database, systemClock);
 
@@ -288,13 +305,12 @@ test('I-T91 ⑥ I-T92 ④ I-T93 ④ I-T90 ⑤ 화면 흐름 모듈로 실제 ide
   // 다시 보내면 이미 끝난 세션(404 session-not-found)
   const reauth2 = (await signer.reauth({ accountId: me.accountId, sessionId: me.sessionId, provider: 'google', strength: 'verified', operation: 'SCANNER_SESSION_END' }, Date.now())).token;
   expect(await devices.endScanner(scannerSessionId, reauth2)).toEqual({ kind: 'gone' });
-}, 120_000);
-
-test('identity-svc 시작 파일이 스캐너 세션 두 경로와 지표를 조립한다(identity_scanner_session_ended_total{cause="self"})', async () => {
-  // 위 시험이 끝낸 한 건이 시작 파일의 /metrics에 보인다(시험 조립이 아니라 main.ts의 조립)
+  // 시작 파일(main.ts)의 조립이 지표를 단다: 이 시험의 끝내기 한 건(404는 세지 않는다)이 /metrics에 보인다. 다른 시험의 차례에 기대지 않게 여기서 본다
   const metrics = await (await fetch(`http://127.0.0.1:${mgmtPort}/metrics`)).text();
   expect(metrics).toMatch(/identity_scanner_session_ended_total\{[^}]*cause="self"[^}]*\} 1\b/);
-  // 신원 없는 두 경로는 401(경로가 없으면 404다)
+}, 120_000);
+
+test('identity-svc 시작 파일이 스캐너 세션 두 경로를 조립한다: 신원 없는 두 경로는 401이다(경로가 없으면 404)', async () => {
   expect((await fetch(`${gw.url}/v1/identity/scanner-sessions`)).status).toBe(401);
   expect((await fetch(`${gw.url}/v1/identity/scanner-sessions/${randomUUID()}`, { method: 'DELETE', headers: { origin: WEB } })).status).toBe(401);
 });
