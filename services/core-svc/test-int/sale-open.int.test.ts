@@ -33,6 +33,10 @@ const TENANT = randomUUID();
 const PLACE = randomUUID();
 const general = { version: 1, name: '일반', rounds: 'ALL' as const, rule: { then: { limitPerPerson: 4 } } };
 const KEEP_AFTER_SALE_END_MS = 24 * 60 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+// 사본 키의 만료(PEXPIREAT)는 실제 시계로 잡힌다. 고정 날짜를 쓰면 그날이 지나 키가 사라지므로 시작 시각을 실행 시각에서 잡는다
+const BASE_MS = Date.now() + 7 * DAY_MS;
+const startsAtMs = (days: number): number => BASE_MS + days * DAY_MS;
 
 class StubSaleOpen implements SaleOpen {
   readonly calls: SaleOpenInput[] = [];
@@ -98,14 +102,14 @@ const approval = (id: string, scales: { eventId: string; scale: string }[]) =>
     payload: JSON.stringify({ scales, placeId: PLACE }),
   });
 
-/** 판매 승인 대기 공연 하나. startsAt을 따로 주어 시작 시각 차례를 시험이 정한다(오픈은 시작 3일 전) */
-async function makeSubmitted(startsAt: string[]): Promise<{ productionId: string; eventIds: string[] }> {
+/** 판매 승인 대기 공연 하나. startsAtMs를 따로 주어 시작 시각 차례를 시험이 정한다(오픈은 시작 3일 전) */
+async function makeSubmitted(startsAt: number[]): Promise<{ productionId: string; eventIds: string[] }> {
   const productionId = randomUUID();
   await admin.db.insert(production).values({ id: productionId, promoterId: TENANT, placeId: PLACE, title: `겨울 콘서트-${productionId.slice(0, 8)}`, genre: '콘서트', saleReview: 'SUBMITTED', salePolicy: [general], salePolicyVersion: 1 });
   const eventIds: string[] = [];
-  for (const startsAtIso of startsAt) {
+  for (const startsAtMsI of startsAt) {
     const eventId = randomUUID();
-    const startsAtDate = new Date(startsAtIso);
+    const startsAtDate = new Date(startsAtMsI);
     await admin.db.insert(event).values({
       id: eventId,
       productionId,
@@ -137,7 +141,7 @@ const configRow = async (eventId: string) => (await admin.db.select().from(event
 
 describe('승인 뒤 판매 열기·대기열 사본(실제 PostgreSQL·Valkey)', () => {
   test('S-T41 ⑥_ 승인은 비취소 회차를 시작 시각 오름차순으로 한 번씩 sale-open하고, opened·exists만 q:cfg·q:epoch를 쓴다(Approval 재호출은 부수 효과 0)', async () => {
-    const m = await makeSubmitted(['2026-12-03T10:00:00.000Z', '2026-12-02T10:00:00.000Z']);
+    const m = await makeSubmitted([startsAtMs(1), startsAtMs(0)]);
     await redis.command(['DEL', `q:{event:${m.eventIds[0]}}:cfg`, `q:{event:${m.eventIds[1]}}:cfg`, `q:{event:${m.eventIds[0]}}:epoch`, `q:{event:${m.eventIds[1]}}:epoch`], { key: `q:{event:${m.eventIds[0]}}:cfg` });
     saleOpen.calls.length = 0;
     // 두 번째 회차는 이미 열린 것으로 답해 exists도 사본을 쓰는지 본다
@@ -190,7 +194,7 @@ describe('승인 뒤 판매 열기·대기열 사본(실제 PostgreSQL·Valkey)'
   });
 
   test('S-T41 ⑥_ 취소 회차는 sale-open을 부르지 않고 UPCOMING·사본에도 넣지 않는다(B11)', async () => {
-    const m = await makeSubmitted(['2026-12-11T10:00:00.000Z', '2026-12-12T10:00:00.000Z']);
+    const m = await makeSubmitted([startsAtMs(8), startsAtMs(9)]);
     await admin.pool.query(`update event set status = 'CANCELLED' where id = $1`, [m.eventIds[1]]);
     saleOpen.calls.length = 0;
     saleOpen.handler = async () => 'opened';
@@ -203,8 +207,8 @@ describe('승인 뒤 판매 열기·대기열 사본(실제 PostgreSQL·Valkey)'
   });
 
   test('S-T41 ⑨_ 열기가 실패(예외·no-layout)하면 승인은 200이고 q:cfg가 없으며, 정비 일이 다시 돌면 열고 사본을 쓴다', async () => {
-    const failed = await makeSubmitted(['2026-12-04T10:00:00.000Z', '2026-12-05T10:00:00.000Z']);
-    const noLayout = await makeSubmitted(['2026-12-06T10:00:00.000Z']);
+    const failed = await makeSubmitted([startsAtMs(2), startsAtMs(3)]);
+    const noLayout = await makeSubmitted([startsAtMs(4)]);
     for (const m of [failed, noLayout]) {
       for (const id of m.eventIds) await redis.command(['DEL', `q:{event:${id}}:cfg`, `q:{event:${id}}:epoch`], { key: `q:{event:${id}}:cfg` });
     }
@@ -240,9 +244,9 @@ describe('승인 뒤 판매 열기·대기열 사본(실제 PostgreSQL·Valkey)'
     }
     // 실패했던 회차의 판매 종료가 지나지 않았으므로 TTL은 시작 24시간 전 + 1일이다
     const cfg = await cfgOf(failed.eventIds[0]!);
-    expect(Number(cfg.startsAtMs)).toBe(Date.parse('2026-12-04T10:00:00.000Z'));
-    expect(Number(cfg.config ? JSON.parse(cfg.config).saleEndsAtMs : 0)).toBe(Date.parse('2026-12-03T10:00:00.000Z'));
+    expect(Number(cfg.startsAtMs)).toBe(startsAtMs(2));
+    expect(Number(cfg.config ? JSON.parse(cfg.config).saleEndsAtMs : 0)).toBe(startsAtMs(2) - DAY_MS);
     const ttl = Number(await redis.command(['PEXPIRETIME', `q:{event:${failed.eventIds[0]}}:cfg`], { key: `q:{event:${failed.eventIds[0]}}:cfg` }));
-    expect(Math.abs(ttl - (Date.parse('2026-12-03T10:00:00.000Z') + KEEP_AFTER_SALE_END_MS))).toBeLessThan(5_000);
+    expect(Math.abs(ttl - (startsAtMs(2) - DAY_MS + KEEP_AFTER_SALE_END_MS))).toBeLessThan(5_000);
   });
 });

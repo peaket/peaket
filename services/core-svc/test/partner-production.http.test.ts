@@ -15,6 +15,19 @@ const TENANT = randomUUID();
 const OTHER = randomUUID();
 const PLACE = randomUUID();
 const ARTIST = randomUUID();
+const DAY = 86_400_000;
+/** 실행 시각 기준 상대 시각(UTC 11:00). 고정 날짜를 쓰면 그날이 지나 '지금 < 오픈 < 판매 종료' 전제가 깨진다 */
+const openAtIn = (days: number): string => {
+  const d = new Date(Date.now() + days * DAY);
+  d.setUTCHours(11, 0, 0, 0);
+  return d.toISOString();
+};
+/** 시작 시각(UTC 10:00). 판매 종료(시작 24시간 전)가 오픈 뒤가 되도록 오픈보다 넉넉히 뒤로 잡는다 */
+const startsAtIn = (days: number): string => {
+  const d = new Date(Date.now() + days * DAY);
+  d.setUTCHours(10, 0, 0, 0);
+  return d.toISOString();
+};
 
 beforeAll(async () => {
   repo.sellerNames.set(TENANT, '(주)피켓공연');
@@ -163,8 +176,9 @@ describe('공연 등록', () => {
 
 describe('회차 더하기', () => {
   /** 그 테넌트의 공연을 만들고 ID를 돌려준다. approvedAt을 주면 판매 승인된 것으로 바꾼다 */
-  async function production(tenant: string, openAt: string, approvedAt?: Date, saleReview: 'APPROVED' | 'SUSPENDED' | 'REJECTED' = 'APPROVED'): Promise<{ id: string; eventId: string }> {
-    const r = await create(identity.partner(tenant), productionBody(PLACE, { events: [eventBody({ openAt })] }));
+  async function production(tenant: string, openAt: string, approvedAt?: Date, saleReview: 'APPROVED' | 'SUSPENDED' | 'REJECTED' = 'APPROVED', startsAt?: string): Promise<{ id: string; eventId: string }> {
+    const event = startsAt ? eventBody({ openAt, startsAt, endsAt: new Date(Date.parse(startsAt) + 2 * 3_600_000).toISOString() }) : eventBody({ openAt });
+    const r = await create(identity.partner(tenant), productionBody(PLACE, { events: [event] }));
     const out = JSON.parse(r.payload);
     if (approvedAt) repo.productions.set(out.productionId, { ...repo.productions.get(out.productionId)!, saleReview, saleApprovedAt: approvedAt });
     return { id: out.productionId, eventId: out.eventIds[0] };
@@ -199,8 +213,10 @@ describe('회차 더하기', () => {
   });
 
   test('[ASVS v5.0.0-8.1.1] 승인뒤더한회차는_변경분에만두고재승인대기가되며_그회차는공개요약에없다', async () => {
-    const p = await production(TENANT, '2026-12-02T11:00:00Z', new Date('2026-11-04T00:00:00Z'));
-    const r = await add(identity.partner(TENANT, 'partner_admin'), p.id, eventBody({ openAt: '2026-12-02T11:00:00Z', startsAt: '2026-12-27T10:00:00Z', endsAt: '2026-12-27T12:00:00Z' }));
+    const openAt = openAtIn(10);
+    const startsAt = startsAtIn(35);
+    const p = await production(TENANT, openAt, new Date('2026-11-04T00:00:00Z'), 'APPROVED', startsAt);
+    const r = await add(identity.partner(TENANT, 'partner_admin'), p.id, eventBody({ openAt, startsAt, endsAt: new Date(Date.parse(startsAt) + 2 * 3_600_000).toISOString() }));
     expect(r.statusCode).toBe(201);
     const out = JSON.parse(r.payload);
     expect(out.pending).toBe(true);
@@ -213,8 +229,10 @@ describe('회차 더하기', () => {
   });
 
   test('반려된재승인중에더해도_상태는반려그대로다(다시요청은따로)', async () => {
-    const p = await production(TENANT, '2026-12-03T11:00:00Z', new Date('2026-11-04T00:00:00Z'), 'REJECTED');
-    const r = await add(identity.partner(TENANT, 'partner_admin'), p.id, eventBody({ openAt: '2026-12-03T11:00:00Z', startsAt: '2026-12-28T10:00:00Z', endsAt: '2026-12-28T12:00:00Z' }));
+    const openAt = openAtIn(11);
+    const startsAt = startsAtIn(36);
+    const p = await production(TENANT, openAt, new Date('2026-11-04T00:00:00Z'), 'REJECTED', startsAt);
+    const r = await add(identity.partner(TENANT, 'partner_admin'), p.id, eventBody({ openAt, startsAt, endsAt: new Date(Date.parse(startsAt) + 2 * 3_600_000).toISOString() }));
     expect(r.statusCode).toBe(201);
     expect(repo.productions.get(p.id)?.saleReview).toBe('REJECTED');
   });

@@ -29,6 +29,8 @@ import { startValkey, type ValkeyContainer } from './valkey.js';
 const SEAT_COUNT = 137;
 const DAY = 86_400_000;
 const TOPIC = 'trade.seats';
+// 판매 열기·판정 시계는 실행 시각에서 잡는다. 고정 날짜를 쓰면 그날이 지나 '판매 종료(시작 24시간 전)' 검사에 걸린다
+const BASE = Date.now() + 7 * DAY;
 
 let pg: PostgresContainer;
 let valkey: ValkeyContainer;
@@ -133,8 +135,8 @@ const saleMsgs = async (eventId: string) =>
 
 describe('purchase 판매 열기(실제 PostgreSQL·Valkey, S-T41 ⑦⑨)', () => {
   test('S-T41 ⑦_ openAt−1ms에 UPCOMING(open_at·판 1·EventSaleChanged)·seat_rebuild 판 1·비트맵·s:ctl:events·세대 키가 서고, 판정은 오픈 전에 ON_SALE을 내지 않는다', async () => {
-    const openAt = Date.parse('2026-11-29T11:00:00.000Z');
-    const w = world({ openAt, startsAt: Date.parse('2026-12-02T10:30:00.000Z') });
+    const openAt = BASE;
+    const w = world({ openAt, startsAt: openAt + 3 * DAY });
     const r = await w.open.run({ eventId: w.eventId, openAtMs: w.openAt, startsAtMs: w.startsAt });
     expect(r).toEqual({ opened: true, upcomingCreated: true, seatEpoch: expect.any(Number) });
     expect(r.seatEpoch).toBeGreaterThan(0);
@@ -181,14 +183,15 @@ describe('purchase 판매 열기(실제 PostgreSQL·Valkey, S-T41 ⑦⑨)', () =
   });
 
   test('S-T41 ⑦_ openAt+1ms도 다음 틱이 ON_SALE로 바꾸고, 판매 종료 지난 회차·좌석맵이 없는 회차는 409이고 행을 만들지 않는다', async () => {
-    const openAt = Date.parse('2026-12-03T11:00:00.000Z');
-    const late = world({ openAt, startsAt: Date.parse('2026-12-06T10:30:00.000Z') });
+    const openAt = BASE + DAY;
+    const late = world({ openAt, startsAt: openAt + 3 * DAY });
     await late.open.run({ eventId: late.eventId, openAtMs: late.openAt, startsAtMs: late.startsAt });
     late.clock.advance(2); // openAt + 1ms에 다음 틱이 돈다
     expect(await tickOf(late)).toMatchObject({ outcome: 'CHANGED', status: 'ON_SALE' });
 
     // 판매 종료(시작 24시간 전)가 지난 회차
-    const ended = world({ openAt: Date.parse('2026-11-01T11:00:00.000Z'), startsAt: Date.parse('2026-11-02T10:30:00.000Z'), saleEndsAtMs: Date.parse('2026-11-01T10:30:00.000Z') });
+    const endedOpenAt = BASE + 2 * DAY;
+    const ended = world({ openAt: endedOpenAt, startsAt: endedOpenAt + DAY, saleEndsAtMs: endedOpenAt - 30 * 60_000 });
     const endedErr = await ended.open.run({ eventId: ended.eventId, openAtMs: ended.openAt, startsAtMs: ended.startsAt }).catch((e: unknown) => e);
     expect(endedErr).toBeInstanceOf(OpenSaleError);
     expect((endedErr as OpenSaleError).code).toBe(SALE_NOT_PUBLISHABLE);
@@ -196,7 +199,8 @@ describe('purchase 판매 열기(실제 PostgreSQL·Valkey, S-T41 ⑦⑨)', () =
     expect(await q(`select count(*)::int as n from seat_rebuild where event_id = $1`, [ended.eventId])).toEqual([{ n: 0 }]);
 
     // 좌석맵 판이 없는 회차
-    const noLayout = world({ openAt: Date.parse('2026-12-05T11:00:00.000Z'), startsAt: Date.parse('2026-12-08T10:30:00.000Z'), noLayout: true });
+    const noLayoutOpenAt = BASE + 3 * DAY;
+    const noLayout = world({ openAt: noLayoutOpenAt, startsAt: noLayoutOpenAt + 3 * DAY, noLayout: true });
     const noLayoutErr = await noLayout.open.run({ eventId: noLayout.eventId, openAtMs: noLayout.openAt, startsAtMs: noLayout.startsAt }).catch((e: unknown) => e);
     expect(noLayoutErr).toBeInstanceOf(OpenSaleError);
     expect((noLayoutErr as OpenSaleError).code).toBe(SALE_NOT_PUBLISHABLE);
@@ -205,8 +209,8 @@ describe('purchase 판매 열기(실제 PostgreSQL·Valkey, S-T41 ⑦⑨)', () =
   });
 
   test('S-T41 ⑨_ 좌석 Redis 장애는 503 seat-store-unavailable이고 UPCOMING·seat_rebuild는 남으며, 회복한 뒤 다시 부르면 이어서 연다', async () => {
-    const openAt = Date.parse('2026-12-07T11:00:00.000Z');
-    const startsAt = Date.parse('2026-12-10T10:30:00.000Z');
+    const openAt = BASE + 4 * DAY;
+    const startsAt = openAt + 3 * DAY;
     const w = world({
       openAt,
       startsAt,
