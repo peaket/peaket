@@ -20,7 +20,9 @@ import {
   type BaseTransportOptions,
 } from '@sentry/core';
 import { ServerRuntimeClient, nodeStackLineParser } from '@sentry/core/server';
+import { DrizzleQueryError } from 'drizzle-orm';
 import { redactDeep } from './log.js';
+import { queryErrorInfo } from './request-log.js';
 import { withoutTracePropagation } from './trace-boundary.js';
 
 /** 받는 곳 주소 환경 변수. 조직이 없는 동안은 모든 환경에서 비어 있다(ADR-0139 결정 3) */
@@ -97,6 +99,19 @@ export function lockEvent(event: ErrorEvent): ErrorEvent {
   const sdk = (masked.sdk ?? {}) as Record<string, unknown>;
   masked.sdk = { ...sdk, settings: { infer_ip: 'never' } };
   return masked as unknown as ErrorEvent;
+}
+
+/**
+ * 보낼 오류. 쿼리 오류는 메시지에 매개변수 값이 들어 있어(Drizzle 'params: …') 로그와 같이 값을 뺀 사본으로 바꾼다(request-log의 queryErrorInfo).
+ * 원인 사슬(cause)과 Error의 덧붙인 칸은 이 SDK가 싣지 않는다(연결 오류·추가 자료 통합을 켜지 않는다)
+ */
+export function reportableError(error: unknown): unknown {
+  if (!(error instanceof DrizzleQueryError)) return error;
+  const info = queryErrorInfo(error);
+  const copy = new Error(info.message);
+  copy.name = info.type;
+  copy.stack = info.stack ?? `${info.type}: ${info.message}`;
+  return copy;
 }
 
 /** node:http(s)로 보낸다. 추적 문맥을 싣지 않고 span을 만들지 않는다. 시한을 넘기거나 실패하면 버린다 */
@@ -221,7 +236,8 @@ export function startErrorReporting(env: Record<string, string | undefined>, o: 
   const send = (error: unknown, scope: Scope, mechanism: string): void => {
     if (!open) return;
     try {
-      client.captureException(error, { originalException: error, mechanism: { type: mechanism, handled: false } }, scope);
+      const reportable = reportableError(error);
+      client.captureException(reportable, { originalException: reportable, mechanism: { type: mechanism, handled: false } }, scope);
     } catch {
       // 수집 실패로 요청 처리가 바뀌지 않게 삼킨다
     }
