@@ -49,6 +49,7 @@ export const PartnerSaleReviewBody = z
 const RequestAccepted = z.object({ status: z.literal('SUBMITTED') }).strict();
 const PartnerStatusView = z
   .object({
+    title: z.string(),
     saleReview: z.string(),
     rejectionReason: z.string().nullable(),
     hasApprovalHistory: z.boolean(),

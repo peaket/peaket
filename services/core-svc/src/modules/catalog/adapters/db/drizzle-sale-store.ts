@@ -257,13 +257,14 @@ export class DrizzleSaleStore implements SaleStore {
     return this.db.transaction(
       async (tx) => {
         const r = await tx.execute(sql`
-          select p.sale_review, p.sale_approved_at, p.sale_submitted_at, p.rejection_reason,
+          select p.title, p.sale_review, p.sale_approved_at, p.sale_submitted_at, p.rejection_reason,
                  pr.legal_name, pr.representative, pr.address, pr.phone, pr.email, pr.business_reg_no, pr.mail_order_report_no, pr.exemption_basis
             from production p
             join promoter pr on pr.id = p.promoter_id
            where p.id = ${productionId}::uuid and p.promoter_id = ${tenantId}::uuid`);
         const p = r.rows[0] as
           | {
+              title: string;
               sale_review: SaleReview;
               sale_approved_at: Date | string | null;
               sale_submitted_at: Date | string | null;
@@ -295,6 +296,7 @@ export class DrizzleSaleStore implements SaleStore {
           exemptionBasis: p.exemption_basis,
         });
         return {
+          title: p.title,
           saleReview: p.sale_review,
           rejectionReason: p.rejection_reason,
           hasApprovalHistory: p.sale_approved_at !== null,
@@ -365,10 +367,11 @@ export class DrizzleSaleStore implements SaleStore {
     if (!UUID.test(productionId)) return undefined;
     const r = await this.db.db.execute(sql`
       select p.id, p.title, p.promoter_id, pr.legal_name as promoter_name, p.sale_review, p.sale_approved_at, p.sale_submitted_at, p.rejection_reason,
-             p.sale_policy, p.pending_revision,
+             p.sale_policy, p.pending_revision, p.place_id, p.requested_place, p.accessible_seating_check, pl.name as place_name,
              pr.legal_name, pr.representative, pr.address, pr.phone, pr.email, pr.business_reg_no, pr.mail_order_report_no, pr.exemption_basis, pr.verified_at
         from production p
         join promoter pr on pr.id = p.promoter_id
+        left join place pl on pl.id = p.place_id
        where p.id = ${productionId}::uuid and p.sale_review <> 'DRAFT'`);
     const p = r.rows[0] as
       | {
@@ -382,6 +385,10 @@ export class DrizzleSaleStore implements SaleStore {
           rejection_reason: string | null;
           sale_policy: unknown;
           pending_revision: unknown;
+          place_id: string | null;
+          requested_place: { name?: string } | null;
+          accessible_seating_check: boolean | null;
+          place_name: string | null;
           legal_name: string;
           representative: string | null;
           address: string | null;
@@ -421,6 +428,10 @@ export class DrizzleSaleStore implements SaleStore {
       }),
       verifiedAt: p.verified_at === null ? null : new Date(p.verified_at),
       salePolicy: Array.isArray(pending.salePolicy) ? pending.salePolicy : rulesOf(p.sale_policy),
+      placeId: p.place_id,
+      placeName: p.place_name ?? (typeof p.requested_place?.name === 'string' ? p.requested_place.name : null),
+      requestedPlace: p.place_id === null && p.requested_place !== null,
+      accessibleSeatingCheck: p.accessible_seating_check,
       events: (ev.rows as { id: string; open_at: Date | string; starts_at: Date | string; status: EventStatus; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]).map((e) => ({
         eventId: e.id,
         openAt: new Date(e.open_at),

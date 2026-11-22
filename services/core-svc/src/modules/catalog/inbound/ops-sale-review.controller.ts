@@ -17,7 +17,7 @@ const ListQuery = ListOpsSaleReviewsQueryParams.strict();
 export const SaleApprovalBody = z
   .object({
     scales: z.array(z.object({ eventId: z.uuid(), scale: Scale }).strict()).min(1),
-    placeId: z.uuid(),
+    placeId: z.uuid().optional(),
     accessibleSeatingCheck: z.boolean().optional(),
   })
   .strict();
@@ -53,6 +53,10 @@ const SaleReviewDetailView = z
     verifiedAt: z.unknown().nullable(),
     salePolicy: z.array(z.record(z.string(), z.unknown())),
     events: z.array(z.record(z.string(), z.unknown())),
+    placeId: z.string().nullable(),
+    placeName: z.string().nullable(),
+    requestedPlace: z.boolean(),
+    accessibleSeatingCheck: z.boolean().nullable(),
     suspensionApprovalPending: z.boolean(),
   })
   .passthrough();

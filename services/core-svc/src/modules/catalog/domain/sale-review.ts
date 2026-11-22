@@ -125,6 +125,12 @@ export interface OpsSaleReviewDetail {
   /** 확인 패널의 판매 정책(재승인 대기 변경분이 있으면 그 규칙). 읽기 전용이다 */
   salePolicy: SalePolicyRule[];
   events: OpsSaleReviewEvent[];
+  /** 등록된 공연장. 새 공연장 요청이면 placeId는 null이고 placeName은 요청한 이름이다(BAT-617) */
+  placeId: string | null;
+  placeName: string | null;
+  requestedPlace: boolean;
+  /** 파트너가 휠체어석 확인을 했는지(BAT-617). 아직 요청 전이면 null */
+  accessibleSeatingCheck: boolean | null;
   suspensionApprovalPending: boolean;
 }
 
@@ -138,12 +144,15 @@ export interface PartnerSaleReviewEvent {
 
 /** 파트너가 읽는 판매 승인 현황(얇은 읽기 경로) */
 export interface PartnerSaleReviewView {
+  /** 공연명(SCR-021 5단계 머리, BAT-617) */
+  title: string;
   saleReview: SaleReview;
   rejectionReason: string | null;
   hasApprovalHistory: boolean;
   submittedAt: Date | null;
   seller: OpsSaleReviewDetail['seller'];
-  events: PartnerSaleReviewEvent[];}
+  events: PartnerSaleReviewEvent[];
+}
 
 /** 커서의 공연 ID는 저장소가 `::uuid`로 캐스트하므로 모양을 먼저 본다(모양이 틀리면 DB에 닿기 전 400) */
 const CURSOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

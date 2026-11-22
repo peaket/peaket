@@ -3,7 +3,7 @@
 import type { EventEditable, ListWrite, SaleEventRow, SaleOwnerView, SaleState, SaleStore, SaleTx } from '../domain/sale-ports.js';
 import { applyApproval, type SaleApprovalInput } from '../domain/sale-approval.js';
 import { sellerInfoOf } from '../domain/promoter-contract.js';
-import { decodeSaleReviewCursor, encodeSaleReviewCursor, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView } from '../domain/sale-review.js';
+import { decodeSaleReviewCursor, encodeSaleReviewCursor, saleReviewSortKey, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView } from '../domain/sale-review.js';
 import type { MemoryCatalogRepository } from './memory-catalog-repository.js';
 
 export class MemorySaleStore implements SaleStore {
@@ -169,7 +169,7 @@ export class MemorySaleStore implements SaleStore {
             });
             this.repo.sellerNames.set(tenantId, body.seller.legalName);
             const p = this.repo.productions.get(productionId)!;
-            this.repo.productions.set(productionId, { ...p, saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null });
+            this.repo.productions.set(productionId, { ...p, saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null, accessibleSeatingCheck: true });
           });
         },
         cancelReview: async () => {
@@ -249,6 +249,7 @@ export class MemorySaleStore implements SaleStore {
     if (!p || p.promoterId !== tenantId) return undefined;
     const seller = this.#seller(tenantId);
     return {
+      title: p.title,
       saleReview: p.saleReview,
       rejectionReason: p.rejectionReason ?? null,
       hasApprovalHistory: p.saleApprovedAt !== null,
@@ -270,7 +271,7 @@ export class MemorySaleStore implements SaleStore {
       .filter((p) => p.saleReview !== 'DRAFT' && statuses.has(p.saleReview))
       .map((p) => {
         const events = this.#events(p.id);
-        const at = p.saleSubmittedAt ?? p.saleApprovedAt ?? new Date(0);
+        const at = saleReviewSortKey({ saleSubmittedAt: p.saleSubmittedAt ?? null, saleApprovedAt: p.saleApprovedAt, saleCreatedAt: p.createdAt ?? new Date(0) });
         return { p, at, events };
       })
       .filter((r) => !cursor || r.at.getTime() > cursor.at.getTime() || (r.at.getTime() === cursor.at.getTime() && r.p.id > cursor.productionId))
@@ -296,7 +297,8 @@ export class MemorySaleStore implements SaleStore {
     const p = this.repo.productions.get(productionId);
     if (!p || p.saleReview === 'DRAFT') return undefined;
     const policy = this.repo.salePolicies.get(productionId);
-    const events = this.#events(productionId);
+    const events = this.#events(productionId, true);
+    const requestedName = typeof (p.requestedPlace as { name?: unknown } | null | undefined)?.name === 'string' ? (p.requestedPlace as { name: string }).name : null;
     return {
       productionId: p.id,
       title: p.title,
@@ -309,6 +311,10 @@ export class MemorySaleStore implements SaleStore {
       seller: this.#seller(p.promoterId),
       verifiedAt: this.repo.promoters.get(p.promoterId)?.verifiedAt ?? null,
       salePolicy: policy?.pending ?? policy?.rules ?? [],
+      placeId: p.placeId,
+      placeName: p.placeId !== null ? (this.repo.placeNames.find((x) => x.id === p.placeId)?.name ?? null) : requestedName,
+      requestedPlace: p.placeId === null && p.requestedPlace != null,
+      accessibleSeatingCheck: p.accessibleSeatingCheck ?? null,
       events: events.map((e) => ({
         eventId: e.id,
         openAt: e.openAt,
@@ -330,10 +336,10 @@ export class MemorySaleStore implements SaleStore {
     return sellerInfoOf(p);
   }
 
-  /** 취소되지 않은 회차를 시작 시각 차례로(목록·상세·파트너 현황이 같은 차례를 쓴다) */
-  #events(productionId: string): { id: string; openAt: Date; startsAt: Date; status: 'SCHEDULED' | 'CANCELLED' | 'POSTPONED' }[] {
+  /** 회차를 시작 시각 차례로. 목록·파트너 현황은 취소 회차를 빼고, 관제 상세는 포함한다(계약 OpsSaleReviewEvent.status, RV-06) */
+  #events(productionId: string, includeCancelled = false): { id: string; openAt: Date; startsAt: Date; status: 'SCHEDULED' | 'CANCELLED' | 'POSTPONED' }[] {
     return [...this.repo.events.values()]
-      .filter((e) => e.productionId === productionId && e.status !== 'CANCELLED')
+      .filter((e) => e.productionId === productionId && (includeCancelled || e.status !== 'CANCELLED'))
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.id < b.id ? -1 : 1));
   }
 

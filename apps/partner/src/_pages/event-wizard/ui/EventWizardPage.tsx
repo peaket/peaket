@@ -2,7 +2,7 @@
 // 휴대폰: 판매 승인 상태와 단계별 입력 내용을 읽기만 한다(입력·임시저장·승인 요청은 안내 카드) / 태블릿: 1열, 지금 단계 이름만 / lg: 12열 / xl: 보드 -xl의 세 칸.
 // 새 공연은 '공연 관리 › 새 공연 등록' 머리, 기존 공연은 공연 문맥 머리(등록 정보 탭). 하단 막대는 화면 아래에 붙는다.
 import { previewHref } from '@peaket/ds/Preview';
-import { PRIMARY_PRODUCTION_ID, requireProduction } from '@/entities/production';
+import { getProduction, PRIMARY_PRODUCTION_ID, requireProduction } from '@/entities/production';
 import { routes } from '@/shared/config/routes';
 import {
   EDIT_WIZARD_STATES,
@@ -17,6 +17,7 @@ import { EventContextHeader } from '@/widgets/event-context';
 import { edit } from '../model/fixtures';
 import { resolveView, STEP_STATE, type WizardMode, type WizardStep } from '../model/view';
 import { EditRounds } from './EditRounds';
+import { LiveSaleReview } from './LiveSaleReview';
 import { LiveWizard } from './live/LiveWizard';
 import { MobileSummary } from './MobileSummary';
 import { CopyLinkBanner } from './parts/CopyLinkBanner';
@@ -44,6 +45,10 @@ const FALLBACK: Record<WizardMode, WizardState> = {
 };
 
 export function EventWizardPage({ eventId, mode, path, searchParams }: EventWizardPageProps) {
+  // 실제 공연(UUID)의 5단계는 서버 값으로 그린다. 목업 공연이면 지금 퍼블리싱 화면을 그대로 본다(BAT-617)
+  if (mode === 'sale-review' && eventId && !getProduction(eventId)) {
+    return <LiveSaleReview productionId={eventId} />;
+  }
   // 새 공연은 ?state=가 없으면 실제 위저드다(ADR-0245 결정 7). 상태를 고르면 지금까지의 퍼블리싱 화면을 그린다
   if (mode === 'new' && readParam(searchParams, 'state') === undefined) {
     return (

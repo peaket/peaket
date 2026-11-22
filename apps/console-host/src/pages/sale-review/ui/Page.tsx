@@ -4,6 +4,7 @@
 // 위 상태 바: 단계 T=0 · 자동 제어 일시정지 13:12 · 20:04:12. 목록 탭(승인 대기·승인됨·판매 중지)은 그 탭의 대표 상태로 옮긴다.
 // 역할(d5 §3.3): viewer·CS 두 역할은 읽기, operator는 승인·반려와 판매 중지·재개 요청, commander는 그 승인까지.
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
+import { useSearchParams } from 'react-router';
 import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE, ReadOnlyScope, type Access } from '@/features/screen-access';
@@ -13,6 +14,7 @@ import { MainD, OverlaysD, valsD } from './board-d';
 import { MainM, valsM } from './board-m';
 import { MainT, OverlaysT, valsT } from './board-t';
 import { EmptyQueue } from './EmptyQueue';
+import { ConnectedPage } from './ConnectedPage';
 
 const TITLE = '판매 승인';
 const ACCESS: Record<ConsoleRole, Access> = { viewer: 'read', operator: 'act', commander: 'act', cs_agent: 'read', cs_lead: 'read' };
@@ -30,6 +32,11 @@ const GAPS: BoardGaps<State> = {
 };
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const chosen = useChosenRole();
   const { state, boardStates, layout, close, go } = useBoardPage(TITLE, STATES, DEFAULT, GAPS);
   const vd = valsD(state);

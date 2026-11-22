@@ -175,7 +175,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
       insertProduction: async (p) => {
         if (!this.sellerNames.has(p.promoterId)) throw new Error(`판매자 행이 없다(외래키): ${p.promoterId}`);
         writes.push(() => {
-          this.productions.set(p.id, { id: p.id, promoterId: p.promoterId, placeId: p.placeId ?? null, title: p.title, genre: p.genre, saleReview: 'DRAFT', saleApprovedAt: null });
+          this.productions.set(p.id, { id: p.id, promoterId: p.promoterId, placeId: p.placeId ?? null, title: p.title, genre: p.genre, saleReview: 'DRAFT', saleApprovedAt: null, createdAt: new Date() });
           this.registrations.set(p.id, p);
           for (const e of p.events) this.#putEvent(p.id, null, e);
         });
