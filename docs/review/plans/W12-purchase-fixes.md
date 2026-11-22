@@ -66,7 +66,13 @@
 
 ## 리뷰
 
-리뷰 예정: (1) 0030·0031 CHECK 이름이 BAT-425 마이그레이션과 맞는지, (2) P3의 시계 주입이 제품 기본 시계(`systemClock`)를 바꾸지 않는지, (3) CHECK 목록 통째 비교를 유지했는지, (4) `identity-grpc.int` 흔들림을 이 묶음에서 고치지 않고 정리 목록 후보로 남겼는지. 리뷰 커밋에서 결과를 적는다.
+2026-11-22, `lane3-w12purchase-review`(시험 담당과 다른 세션). **막는 지적 없음.**
+
+- **0030·0031 CHECK 이름 근거**: `services/purchase-svc/migrations/0030_compensation_and_refund_attempt.sql:31`의 `order_cancellation_refund_attempt_check`, `0031_refund_account_idempotency.sql:4`의 `order_cancellation_refund_account_answer_check`와 시험 기대 이름이 같다. BAT-425(지연 환급 계좌 다시 받기)가 더한 제약이고, GAT080_0014가 보는 0014 계약 자체는 바뀌지 않았다.
+- **P3 시계 주입이 제품 기본 시계를 바꾸지 않는가**: 제품 기본은 그대로 `systemClock`이다(`drizzle-event-refund-store.ts:100`, `drizzle-event-refund-claims.ts:24`). 시험이 생성자에 명시 시계를 넘길 뿐이라 제품 동작 변화가 없다. `git diff e7f15543d..HEAD -- services/purchase-svc/src services/purchase-svc/migrations`가 비어 있음을 확인했다.
+- **CHECK 목록 통째 비교 유지**: `purchase-migration.int.test.ts:107`이 여전히 `toEqual`로 8개 이름을 전부 견준다. 새 CHECK가 몰래 생기면 계속 잡는다.
+- **identity-grpc 흔들림은 후속**: 이 묶음에서 고치지 않고 `docs/lanes/lane3-cleanup.md`의 기존 줄에 원인 후보(실제 루프백 gRPC + 재확인 150ms·연락처 50ms 벽시계 마감)만 덧붙였다. 채널 데우기·데드라인 설정화는 후속 정리 목록 몫으로 남긴다.
+- **시험만 묶음 조건**: test 커밋이 시험 파일 둘만 바꿨고, 제품·마이그레이션·계약 변경이 없다. 되돌릴 지적 없음.
 
 ## 검증
 
