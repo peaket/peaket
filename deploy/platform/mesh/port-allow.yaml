@@ -11,7 +11,7 @@
 #   rest.gatewaysWithoutRoute는 라우트가 저장소에 없는 게이트웨이 경로의 예외다(trust-svc 허니팟 경로, ADR-0285 결정 9 끝).
 #   grpc.services는 proto 서비스 전체 이름마다 부르는 쪽이다. 한 서비스 안에서 메서드마다 부르는 쪽이 다르면 methods로 메서드마다 적는다
 #   (docs/api/proto/README.md §3 '호출 목록'). 빈 목록은 아무도 부르지 못한다(규칙을 만들지 않는다).
-# - 포트 번호는 ADR-0285 결정 6이다: REST 8080(화면 앱 서버는 라우트의 포트), 지표 9464, 업무 gRPC 50051(ticket-svc 50052), 제어 50061 [가정, OPS-310에서 확정].
+# - 포트 번호는 ADR-0285 결정 6이다: REST 8080(화면 앱 서버는 라우트의 포트), 지표 9464, 업무 gRPC 50051(ticket-svc 50052), 제어 50061(ADR-0366 결정 1).
 # - 새 proto 서비스·메서드를 더하면 --check가 막는다. 받는 워크로드의 grpc.services에 부르는 쪽과 함께 한 줄을 더한다.
 version: 1
 
@@ -190,6 +190,8 @@ workloads:
               GetPayment: [purchase-svc]
               PrepareCheckout: [core-svc, purchase-svc]
               RegisterPayoutSeller: [core-svc]
+              # 명령 6 대체 결제사 전환을 보내기 직전에 회차마다 갈 결제사·승인 상한을 묻는다(읽기 전용, ADR-0366 결정 5)
+              ResolvePgSwitch: [ops-svc]
       control: { port: 50061, callers: [ops-svc, ops-breakglass] }
       metrics: { port: 9464, callers: [prometheus] }
 

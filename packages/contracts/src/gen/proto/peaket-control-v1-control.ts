@@ -25,7 +25,8 @@ export const controlV1Control: Record<string, unknown> = {
                     "CONTROL_KIND_LOBBY_BANNER": 5,
                     "CONTROL_KIND_AUTOMATION_STOP": 6,
                     "CONTROL_KIND_SALE_SUSPENSION": 7,
-                    "CONTROL_KIND_PG_SWITCH": 8
+                    "CONTROL_KIND_PG_SWITCH": 8,
+                    "CONTROL_KIND_ENTRY_PAUSE_RELEASE": 9
                   }
                 },
                 "ApplyControlRequest": {

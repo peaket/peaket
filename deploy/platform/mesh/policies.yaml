@@ -756,6 +756,14 @@ spec:
         - operation:
             paths:
               - /peaket.payment.v1.PaymentService/RegisterPayoutSeller
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/core/sa/ops-svc
+      to:
+        - operation:
+            paths:
+              - /peaket.payment.v1.PaymentService/ResolvePgSwitch
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy

@@ -9,7 +9,7 @@ package peaket.payment.v1;
 import "google/protobuf/timestamp.proto";
 import "peaket/common/v1/common.proto";
 
-// 부르는 쪽: purchase-svc(booking 모듈), core-svc(shop 모듈과 판매 승인), ops-svc(지급 묶음 승인, 명령 12 결제사 지정 사전 판정).
+// 부르는 쪽: purchase-svc(booking 모듈), core-svc(shop 모듈과 판매 승인), ops-svc(지급 묶음 승인, 명령 12 결제사 지정 사전 판정, 명령 6 대체 결제사 전환의 갈 곳 묻기).
 service PaymentService {
   // 결제창 준비. 결제사를 고르고(결제사 전환 → 공연 지정 → 플랫폼 기본) 결제사 SDK에 넘길 값을 돌려준다.
   // 결제 시도(READY) 기록은 부르는 쪽이 자기 DB에 한다. 데드라인 300ms [가정]. 결제사를 부르지 않는다.
@@ -75,6 +75,13 @@ service PaymentService {
   // 틀린 입력, SIMULATOR·UNSPECIFIED 기본, 기본과 같은 대체는 INVALID_ARGUMENT다. 걸리면 allowed 거짓과 걸린 하위 결제사 이름·까닭만 싣는다(채널 키는 싣지 않는다).
   // 지금 회차 지정(event_pg_config)과 결제사별 승인 상한(설정에 있는 결제사만)을 함께 준다. 부르는 쪽 데드라인 2초 [가정]. 읽기만 하므로 멱등 키가 없다.
   rpc CheckEventPgAssignment(CheckEventPgAssignmentRequest) returns (CheckEventPgAssignmentResponse);
+
+  // 명령 6 대체 결제사 전환(DEGRADED_MODE PAYMENT_PG_FALLBACK)을 보내기 직전에 ops-svc가 묻는다(ADR-0366 결정 5). 부르는 쪽은 ops-svc뿐이고 데드라인 2초 [가정]이다.
+  // 회차마다 '전환이 켜졌을 때 그 회차의 새 결제 시도가 갈 결제사'를 결제사 선택(PrepareCheckout)과 같은 규칙으로 정한다: to_pg가 있으면 그 결제사,
+  // 없으면 회차 지정(event_pg_config)의 대체, 지정이 없으면 플랫폼 대체(PEAKET_PG_FALLBACK)이고, 대체가 없으면 기준 결제사다.
+  // approvals_per_second는 그 결제사의 승인 상한(payment-svc 설정)이고 설정에 없으면 0이다. approval_limits는 설정에 있는 결제사의 상한 목록이다.
+  // 회차 0~100개(소문자 UUID, 겹침 없음), to_pg는 UNSPECIFIED·TOSS·PORTONE이고 틀리면 INVALID_ARGUMENT다. 읽기만 하므로 멱등 키가 없다.
+  rpc ResolvePgSwitch(ResolvePgSwitchRequest) returns (ResolvePgSwitchResponse);
 }
 
 // 주문 종류.
@@ -513,6 +520,28 @@ message PgApprovalLimit {
   peaket.common.v1.PgProvider pg = 1;
   // 그 결제사 채널의 초당 승인 호출 상한
   double approvals_per_second = 2;
+}
+
+message ResolvePgSwitchRequest {
+  // 전환할 회차 ID(소문자 UUID, 0~100개). 비우면 approval_limits만 돌려준다(전체 범위 전환)
+  repeated string event_ids = 1;
+  // 옮겨 갈 결제사(TOSS·PORTONE). UNSPECIFIED면 미리 지정한 대체 결제사다
+  peaket.common.v1.PgProvider to_pg = 2;
+}
+
+message ResolvePgSwitchResponse {
+  // 요청한 회차마다 한 줄(요청 차례)
+  repeated PgSwitchRoute routes = 1;
+  // 설정에 있는 결제사의 승인 상한(CheckEventPgAssignmentResponse와 같은 값)
+  repeated PgApprovalLimit approval_limits = 2;
+}
+
+message PgSwitchRoute {
+  string event_id = 1;
+  // 전환이 켜졌을 때 그 회차의 새 결제 시도가 갈 결제사
+  peaket.common.v1.PgProvider pg = 2;
+  // 그 결제사의 초당 승인 상한. 설정에 없으면 0
+  double approvals_per_second = 3;
 }
 
 // 배상 송금(BAT-425 GAT-130 잔여, FR-056, POL-014·019, ADR-0046 결정 5).

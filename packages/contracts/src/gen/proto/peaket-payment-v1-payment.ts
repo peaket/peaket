@@ -44,6 +44,10 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "CheckEventPgAssignment": {
                       "requestType": "CheckEventPgAssignmentRequest",
                       "responseType": "CheckEventPgAssignmentResponse"
+                    },
+                    "ResolvePgSwitch": {
+                      "requestType": "ResolvePgSwitchRequest",
+                      "responseType": "ResolvePgSwitchResponse"
                     }
                   }
                 },
@@ -856,6 +860,49 @@ export const paymentV1Payment: Record<string, unknown> = {
                     "approvals_per_second": {
                       "type": "double",
                       "id": 2
+                    }
+                  }
+                },
+                "ResolvePgSwitchRequest": {
+                  "fields": {
+                    "event_ids": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 1
+                    },
+                    "to_pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 2
+                    }
+                  }
+                },
+                "ResolvePgSwitchResponse": {
+                  "fields": {
+                    "routes": {
+                      "rule": "repeated",
+                      "type": "PgSwitchRoute",
+                      "id": 1
+                    },
+                    "approval_limits": {
+                      "rule": "repeated",
+                      "type": "PgApprovalLimit",
+                      "id": 2
+                    }
+                  }
+                },
+                "PgSwitchRoute": {
+                  "fields": {
+                    "event_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "pg": {
+                      "type": "peaket.common.v1.PgProvider",
+                      "id": 2
+                    },
+                    "approvals_per_second": {
+                      "type": "double",
+                      "id": 3
                     }
                   }
                 },
