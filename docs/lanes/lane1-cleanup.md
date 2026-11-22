@@ -285,3 +285,5 @@
 - W12-vt40(R-745, 리뷰 RVvt-3~5): 매달린 판(본문이 던지지 않고 멈춤)을 끝없이 기다림, 닫기 실패를 '끊긴 판'으로 잘못 부르고 뒤 시험이 모두 막힘, 끊긴 판 마지막 걸음의 위반을 버림(payment-model 하네스).
 - W12-vt40(R-745, 검증): R1·R2가 멈추는 때는 발권 행이 없어 `#isolate`의 발권 줄을 빼도 잡지 못한다(읽어서 앎). 시험 이의 8: 3초 한도 재현 명령은 `interrupted after 0 tests`로 실패한다(45초 설정에서는 문제 아님).
 - 흔들림 후보(갈래 4 PR #54, 2026-11-22 감독 넘김): platform `test-int/idempotency.int.test.ts` FND080(처리 중 첫 요청이 기다림 안에 커밋, lock_timeout 시간 민감)과 `test-int/control-sync.int.test.ts` I-T48 ③-2(Kafka 끊김 복구, BAT-059)가 한 번씩 흔들렸다(다시 돌리면 통과).
+- W12-pt36(R-754, 리뷰 RVpt-3): `test/payment-deposit.test.ts:256`과 R3은 미리 묻기 뒤 ORDER·OTHER도 300ms 마감이다. 이벤트 고리가 300ms 넘게 멈추는 극심한 부하에서는 여전히 `TRANSIENT`로 실패할 수 있다. 제품 마감이 정본 값(`docs/features/payment.md:743`)이라 시험으로 줄일 수 없는 남은 위험이다. CI에서 다시 보이면 이 목록에서 다룬다.
+- W12-pt36(R-754, 계획 6절 1~9): 짧은 기본·명시 마감으로 찬 연결의 첫 호출을 부르는 시험이 아홉 행 더 있다(payment-deposit `:294`·`:316`·`:331`, payment-pull-adapters `:299`, grpc-new-payment-pause `:86`, identity-grpc.int `:107`·`:115`, orders-e2e.int `:205-206`, start-payment.int `:126`, purchase-path-e2e.int `:254`). 같은 `warmUp` 꼴을 공용 시험 도우미로 빼서 쓴다(계획 6절 10~12 고정 날짜·실제 시계는 coord에 있음).
