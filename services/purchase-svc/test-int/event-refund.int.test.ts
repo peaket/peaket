@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createDatabase, createExternalHttpClient, ensureOutboxPartitions, fakeClock, type Database } from '@peaket/platform';
+import { createDatabase, createExternalHttpClient, ensureOutboxPartitions, fakeClock, systemClock, type Clock, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
@@ -884,9 +884,9 @@ describe('W9-fix1 잡기 늘리기·멈춤 합치기·그 밖 실패 알림 [Pos
         [requestId],
       )
     ).rows.map((r) => ({ ticketId: r.ticket_id, status: r.status, token: r.claim_token, until: r.claimed_until === null ? null : r.claimed_until.getTime() }));
-  /** 이 요청만 보는 저장소(파일이 DB를 나눠 쓰므로 runDue가 다른 시험의 요청을 집지 않게) */
-  const scopedStore = (requestId: string) => {
-    const st = new DrizzleEventRefundStore(db);
+  /** 이 요청만 보는 저장소(파일이 DB를 나눠 쓰므로 runDue가 다른 시험의 요청을 집지 않게). 시계를 주면 Outbox ID 날과 파티션 날을 맞춘다 */
+  const scopedStore = (requestId: string, clock: Clock = systemClock) => {
+    const st = new DrizzleEventRefundStore(db, clock);
     st.activeRequests = async () => {
       const r = await st.find(requestId);
       return r && ['RUNNING', 'PAUSED', 'REFUND_WINDOW'].includes(r.status) ? [r] : [];
@@ -1026,9 +1026,12 @@ describe('W9-fix1 잡기 늘리기·멈춤 합치기·그 밖 실패 알림 [Pos
     const s = await seedTickets(eventId, 1, 'TOSS');
     const ticketId = s.ticketIds[0]!;
     let now = C;
+    // 저장소도 서비스와 같은 가짜 시계를 쓴다. 실제 오늘 날짜로 Outbox ID를 만들면 이 파일이 만든 파티션(2026-11-14~)에 없어 no partition of relation "outbox"로 실패한다
+    const clock: Clock = { now: () => now, monotonicMs: () => now - C };
+    await ensureOutboxPartitions(db, clock);
     const svc = (firstBatch?: number) =>
       new EventRefundService({
-        store: scopedStore(requestId),
+        store: scopedStore(requestId, clock),
         targets: {
           list: async (id) =>
             id === eventId
@@ -1038,7 +1041,7 @@ describe('W9-fix1 잡기 늘리기·멈춤 합치기·그 밖 실패 알림 [Pos
         // 업무 거절 목록 밖의 실패 답(시도 상한 전)
         canceller: { cancel: async () => ({ status: 'FAILED', error: 'NOT_FOUND' }) },
         fanNotifier: new OutboxEventRefundFanNotifier(),
-        claims: new DrizzleEventRefundClaims(db),
+        claims: new DrizzleEventRefundClaims(db, clock),
         csOutbox: { pendingItemFailures: async () => [], markItemFailureOpened: async () => undefined, pendingGaps: async () => [], markGapOpened: async () => undefined },
         ...(firstBatch !== undefined ? { firstBatch } : {}),
         nowMs: () => now,
