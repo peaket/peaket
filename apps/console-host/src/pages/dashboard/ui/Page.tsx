@@ -1,7 +1,7 @@
 // SCR-029 중앙 관제 대시보드(/dashboard?event=&tab=, d5 §7.2). 보드 SCR-029-d(데스크톱 xl 4열)·lg(1280~1439 3열)·t(태블릿 2열)·m(휴대폰 접힌 목록)을 배치마다 옮겼다.
 // 데스크톱의 T=0·판매 중 탭 위젯 일부는 원격 위젯 패키지(@peaket/widget-queue·purchase)로 그리고, 경보 패널은 ds AlertPanel이다.
 // 위 상태 바(단계·자동 제어·자동 조치·SEV·시계·역할)는 보드의 머리 분기대로 상태마다 호스트 값을 덮어쓴다.
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useLocation, useSearchParams } from 'react-router';
 import { previewHref } from '@peaket/ds/Preview';
 import { OPERATORS } from '@/entities/operator';
@@ -10,6 +10,8 @@ import { useIsXl } from '@/shared/lib/layout';
 import { usePreviewKeep } from '@/shared/lib/preview';
 import { useHost, usePreviewHost, type HostPatch } from '@/features/preview-host';
 import { useMainStyle } from '@/shared/model/shell';
+import { opsApiAvailable } from '@/shared/api';
+import { setLiveEvent } from '@/shared/api/live';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { DEFAULT, STATES, TAB_STATE, type State } from '../states';
 import { MainD, OverlaysD, valsD } from './board-d';
@@ -26,6 +28,8 @@ const EXTRA_BASE: Partial<Record<State, State>> = {
 };
 
 type Flags = ReturnType<typeof valsD>;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 보드 머리(BarD)의 분기를 호스트 덮어쓰기로 옮긴다 */
 function shellPatch(f: Flags): HostPatch {
@@ -96,13 +100,22 @@ export function Page() {
   usePreviewHost(shellPatch(flagsD), [state]);
   useMainStyle(layout === 'phone' ? undefined : { gap: 12 }, `dashboard-${layout}`);
 
+  // 실제 값 화면: ?state= 미리보기가 아니고 관제 API 주소가 있으면 위젯 둘을 원격으로 싣고 고른 회차(?event=)를 흐름 둘에 알린다(ADR-0360)
+  const live = !(__PREVIEW__ && params.get('state')) && opsApiAvailable();
+  const eventParam = params.get('event');
+  const liveEvent = eventParam && UUID.test(eventParam) ? eventParam.toLowerCase() : null;
+  useEffect(() => {
+    if (live) setLiveEvent(liveEvent, 'dashboard');
+  }, [live, liveEvent]);
+
   const ctx: DashCtx = useMemo(
     () => ({
       tabHref: (t: TabKey) => previewHref(pathname, TAB_STATE[t], { ...(JSON.parse(keepKey) as Record<string, string | undefined>), tab: t }),
       slot: state === '위젯 로딩' ? 'loading' : state === '위젯 오류' ? 'error' : state === '원격 위젯 적재 실패' ? 'remote-fail' : 'normal',
       recentReleased,
+      live,
     }),
-    [pathname, keepKey, state, recentReleased],
+    [pathname, keepKey, state, recentReleased, live],
   );
 
   // ?role=viewer로 볼 때도 판정·명령·결정 기록 버튼을 숨긴다(보드 notViewer 분기)

@@ -78,3 +78,13 @@
 4. 소비자 웹은 빌드할 때 `NEXT_PUBLIC_API_ORIGIN=http://localhost:18930`을 준다. 쿠키가 `localhost` 이름에 붙으므로 `127.0.0.1`이 아니라 `localhost`로 적는다. 이 값이 없으면 개발 서버의 본인확인 버튼은 퍼블리싱용 시험 창을 연다.
 
 로그인한 뒤 공연 상세(`/events/evt-lumen-1025`)에서 [휴대폰 본인확인]을 누르면 모의 기관 창이 열린다. 이름표가 같으면 같은 사람이라, 다른 계정에서 같은 이름표로 하면 '다른 계정의 본인'이 나온다.
+
+## 관제 콘솔을 실제 ops-svc에 붙여 띄우기(OPS-340, ADR-0360)
+
+관제 콘솔은 Module Federation 호스트와 원격 둘(대기열 `widgets/queue`, 구매 `widgets/purchase`)이다. `pnpm --filter @peaket/console-host build`가 `dist/`(호스트)와 `dist/remotes/<이름>/`(원격)를 함께 만든다. `PEAKET_CONSOLE_BUILD=single`이면 원격 없이 한 앱(기준선, FE-T29)으로 빌드한다. 대시보드(`/dashboard?event=<회차 UUID>`)의 '입장 비율·빈자리'·'결제사'와 명령 화면(`/commands`)은 `?state=`가 없으면 실제 값 화면이다.
+
+1. ops-svc를 띄운다(PostgreSQL·identity-svc 필요, `services/ops-svc/src/main.ts`). 위젯 값을 보려면 `PEAKET_PROMETHEUS_URL`(클러스터 안 Prometheus 주소)을 준다. 없으면 두 위젯은 '받지 못함'이다.
+2. 콘솔을 같은 출처로 붙인다(local·ci 전용 넘김, `apps/console-host/scripts/ops-proxy.mjs`). 바깥 요청의 신원 머리는 지우고, `PEAKET_OPS_DEV_IDENTITY=<관리 계정 UUID>:<세션 UUID>`를 주면 그 신원 머리를 싣는다(gw-ops의 JWT → 머리 바꾸기 대역, ops-svc가 identity에 역할을 묻는다).
+   - 개발 서버: `PEAKET_ENV=local PEAKET_OPS_API_ORIGIN=http://localhost:3002 PEAKET_OPS_PROXY_TARGET=http://127.0.0.1:<ops-svc PORT> PEAKET_OPS_DEV_IDENTITY=… pnpm --filter @peaket/console-host dev`(헤더는 묶음 C·Trusted Types 보고 모드)
+   - 미리보기 서버(운영 빌드, 묶음 C 막는 모드): `PEAKET_OPS_API_ORIGIN=http://localhost:4173 pnpm --filter @peaket/console-host build` 뒤 같은 환경값으로 `pnpm --filter @peaket/console-host preview`(http://localhost:4173)
+3. 흐름은 탭마다 늘 여는 흐름(`/v1/ops/live`) 하나와 위젯 흐름(`/v1/ops/events/{eventId}/live`) 하나다. 개발 도구 네트워크 탭에서 두 요청이 열려 있고 콘솔에 CSP·Trusted Types 보고가 없는지 본다.

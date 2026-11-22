@@ -1,5 +1,5 @@
 // @peaket/widget-purchase: 관제 원격 위젯(구매 팀 주인, docs/frontend.md §4.5).
-// 지금은 호스트가 workspace:로 이어 한 앱으로 빌드한다(ADR-0100 결정 6). Module Federation 원격 적재는 관제 단계에서 붙인다.
+// 퍼블리싱 화면(?state=)은 이 묶음을 workspace:로 그린다. 실제 값의 원격 노출은 ./remote(Module Federation ./widgets, ADR-0360)이다.
 export { type WidgetBaseProps } from './common';
 export { SeatHoldWidget, type SeatHoldWidgetProps, type SeatHoldData } from './SeatHoldWidget';
 export { PaymentBudgetWidget, type PaymentBudgetWidgetProps, type PaymentBudgetData, type JourneyBudget } from './PaymentBudgetWidget';

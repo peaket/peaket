@@ -3,14 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "관제 원격 위젯(대기열 팀 주인, docs/frontend.md §4.5). 지금은 호스트가 workspace:로 이어 한 앱으로 빌드한다",
+  "description": "관제 원격 위젯(대기열 팀 주인, docs/frontend.md §4.5). 호스트가 Module Federation 원격(/remotes/queue/remoteEntry.js, 노출 ./widgets)으로 싣고, 한 앱 기준선 빌드는 workspace:로 묶는다(ADR-0100 결정 6, ADR-0360)",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./remote": "./src/remote.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@peaket/console-contract": "workspace:*",
     "@peaket/ds": "workspace:*"
   },
   "peerDependencies": {

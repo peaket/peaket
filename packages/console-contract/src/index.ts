@@ -20,13 +20,39 @@ export interface DetailLink {
   label: MessageKey;
 }
 
-/** 원격이 읽을 수 있는 호스트 상태(§3.10). session·commands는 넘기지 않는다. 자세한 칸은 관제 콘솔 단계(OPS-340)에서 정한다 */
+/** 경보 한 건(asyncapi OpsAlert의 화면 몫, frontend §3.10 alerts) */
+export interface HostAlert {
+  alertId: string;
+  status: 'firing' | 'resolved';
+  severity: 'SEV1' | 'SEV2' | 'SEV3';
+  title: string;
+  kind: string;
+  startsAt: string;
+  endsAt?: string;
+  eventId?: string;
+}
+
+/** 접속 중 운영자 한 명(asyncapi OpsPresence operators의 항목) */
+export interface HostOperator {
+  accountRef: string;
+  role: string;
+  screen: string;
+}
+
+/**
+ * 원격이 읽을 수 있는 호스트 상태(§3.10, OPS-340에서 칸을 정함, ADR-0360). session·commands는 넘기지 않는다.
+ * control·autoActions는 원천 기능(F-02-1 자동 제어, F-03-4 자동 조치)이 늘 여는 흐름의 control·autoAction 사건으로 채운다. 그 전에는 비어 있다
+ */
 export interface HostState {
-  scope: { eventId: string | null };
-  control: Record<string, unknown>;
-  autoActions: readonly unknown[];
-  alerts: readonly unknown[];
-  presence: readonly unknown[];
+  scope: { eventId: string | null; stage?: string; tab?: string; timeRange?: { from: string; to: string } };
+  /** 자동 제어 다섯 값(정상·일시정지·자동 증액 멈춤·입력 없음·긴급 정지)과 우선순위. 모르면 kind 'unknown' */
+  control: { kind: 'ok' | 'paused' | 'raise-stopped' | 'no-input' | 'emergency-stop' | 'unknown'; updatedAt?: string };
+  /** 걸린 자동 조치(이름·대상·상태·시작 시각). 본문 모양은 원천 기능이 정한다 */
+  autoActions: readonly { name: string; target?: string; state: string; startedAt?: string }[];
+  /** 걸린 경보와 풀린 지 60분 [가정] 안의 경보(500건 [가정]까지) */
+  alerts: readonly HostAlert[];
+  /** 고른 회차의 접속 운영자 */
+  presence: readonly HostOperator[];
 }
 export type HostView = Readonly<Pick<HostState, 'scope' | 'control' | 'autoActions' | 'alerts' | 'presence'>>;
 

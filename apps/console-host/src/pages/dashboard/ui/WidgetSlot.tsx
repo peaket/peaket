@@ -15,7 +15,7 @@ interface SlotProps {
   children: ReactNode;
 }
 
-function FailCard({ title, style, remote }: { title: string; style?: CSSProperties; remote?: boolean }) {
+export function FailCard({ title, style, remote }: { title: string; style?: CSSProperties; remote?: boolean }) {
   return (
     <section className="widget is-error" role="region" aria-label={title} style={style}>
       <div className="widget-head wrap">
@@ -49,7 +49,7 @@ function FailCard({ title, style, remote }: { title: string; style?: CSSProperti
   );
 }
 
-function Skeleton({ title, style }: { title: string; style?: CSSProperties }) {
+export function Skeleton({ title, style }: { title: string; style?: CSSProperties }) {
   return (
     <section className="widget" role="region" aria-label={title} aria-busy="true" style={style}>
       <div className="widget-head">
