@@ -62,7 +62,7 @@
 | v5.0.0-15.3.2 | — | L2 | 백엔드가 외부 URL을 부를 때 의도하지 않은 리디렉션을 따라가지 않는다. | 자동 시험 | B | 시험: packages/config/eslint/service-security.test.mjs, packages/platform/test/telemetry.test.ts |
 | v5.0.0-15.3.3 | — | L2 | 컨트롤러·액션마다 허용 필드를 제한해 대량 할당 공격을 막는다. | 자동 시험 | B | 시험: packages/platform/test/request-checks.test.ts |
 | v5.0.0-15.3.4 | — | L2 | 모든 프록시·미들웨어가 사용자의 원래 IP를 최종 사용자가 조작할 수 없는 신뢰 필드로 넘기고, 애플리케이션·웹 서버는 그 값을 로그와 레이트 리밋 같은 보안… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
-| v5.0.0-15.3.5 | — | L2 | 변수 타입을 확인하고 엄격한 동등·비교 연산을 써서 타입 혼동을 막는다. | ID만 | B | 다른 곳 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts (영역: deploy, infra… |
+| v5.0.0-15.3.5 | — | L2 | 변수 타입을 확인하고 엄격한 동등·비교 연산을 써서 타입 혼동을 막는다. | ID만 | B | 다른 곳 시험: services/admission-ctrl/test-int/f021-leader-control.int.test.ts… |
 | v5.0.0-15.3.6 | — | L2 | 프로토타입 오염을 막도록 JavaScript를 작성한다(객체 리터럴 대신 `Set`·`Map` 등). | 자동 시험 | B | 시험: packages/config/eslint/js-security.test.mjs, packages/validation/test/validation.test.ts 외 1곳 |
 | v5.0.0-15.3.7 | — | L2 | HTTP 파라미터 오염 공격을 막는다. | 자동 시험 | B | 시험: packages/platform/test/request-checks.test.ts |
 | v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | 다른 단계 | B | INF-020 · 로그 목록은 docs/observability.md §9 보존 표와 docs/devops.md §10.4에 있다. 그 목록과 실제로 띄운 수집기 내보내기·Loki·Tempo 보존 설정이 맞는지는… |

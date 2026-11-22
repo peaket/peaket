@@ -42,7 +42,7 @@
 | Q-T27 | — | 비콘 지연 대기와 비상 처리 | 30초 지연에서는 그 라운드를 받은 뒤 셔플하고, 결과가 공개 재계산과 일치한다. 90초 지연에서는 60초에 셔플이 멈추고 SEV1 경보가 난다. 비상 처리는… | 자동 시험 | A | 시험: apps/web/scripts/mock-api/queue.test.mjs, apps/web/src/_pages/shuffle-proof/model/proof-view.test.mjs 외 16곳 |
 | Q-T28 | — | 대기 순서 공정성 지표 | 차례 전 입장이 0건이고, 위조 요청은 거부되며, `queue_admit_before_turn_total`이 늘지 않는다. 지표를 일부러 1 올리면… | 자동 시험 | A | 시험: services/queue-svc/test/admission-cases.ts |
 | Q-T29 | — | 도착 시각 쿠키 위조·재사용 | 네 경우 모두 쿠키가 무시되고 일반 진입 순서로 처리되며, 정상 쿠키는 도착 시각 순서대로 순번을 받는다 | 자동 시험 | A | 시험: services/queue-svc/test/arrival-cookie.test.ts, services/queue-svc/test/arrival-slot-cases.ts 외 2곳 |
-| Q-T30 | — | 옛 리더 펜싱과 리더 상태 이어받기 | 옛 리더의 쓰기는 모두 `FENCED`로 거절되고 그 파드는 대기 파드로 돌아간다. serving과 묶음 카운터의 중복 전진이 0건이고, 입장 일시정지와 수동… | 자동 시험 | A | 시험: services/admission-ctrl/test-int/leader-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts |
+| Q-T30 | — | 옛 리더 펜싱과 리더 상태 이어받기 | 옛 리더의 쓰기는 모두 `FENCED`로 거절되고 그 파드는 대기 파드로 돌아간다. serving과 묶음 카운터의 중복 전진이 0건이고, 입장 일시정지와 수동… | 자동 시험 | A | 시험: services/admission-ctrl/test-int/f021-leader-control.int.test.ts, services/admission-ctrl/test-int/leader-store.int… |
 | Q-T31 | — | 장애 전환으로 생긴 대기표 두 장 | 먼저 입장 확정한 대기표만 입장하고, 다른 대기표는 409 `DUPLICATE_ADMISSION`을 받으며 그 번호가 빠진 번호로 기록된다. 같은 대기표로 다시… | 자동 시험 | A | 시험: services/queue-svc/test/admission-cases.ts |
 | Q-T32 | — | 셔플 결과 분산 조회 | 게시 전 조회가 0건이고, 조회가 분산 창 8초에 고르게 퍼진다(1초 단위 최대가 평균의 1.3배 [가정] 이하). 게시가 늦으면 404 재시도 간격이… | 자동 시험 | A | 시험: services/queue-svc/test/shuffle-proof.test.ts |
 | Q-T33 | — | 첫 전진 시각 | 분산 창이 지나기 전에는 serving이 각 구간의 첫 번호를 넘지 않고, 지난 뒤 정상 전진한다. 게시를 공개 예정 시각보다 5초 늦춘 실행에서는 게시 뒤… | 자동 시험 | A | 시험: services/admission-ctrl/test-int/leader-store.int.test.ts, services/admission-ctrl/test/admission-leader.test.ts |
