@@ -301,7 +301,8 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
     const r = await started();
     await approvals.decide({ userCode: r.userCode, accountId: ACCOUNT, sessionId: FAN_SESSION, decision: 'APPROVE', assignmentId: ASSIGN });
     const token = await poll.run({ deviceCode: r.deviceCode, jkt: JKT });
-    expect(token.access_token).toBe(`staff-${NOW + 24 * HOUR}`);
+    const session = (await database.pool.query('select expires_at from scanner_session where staff_account_id = $1 and terminated_at is null', [ACCOUNT])).rows[0] as { expires_at: Date };
+    expect(token.access_token).toBe(`staff-${session.expires_at.getTime()}`);
     expect(await auths.get(hashDeviceCode(r.deviceCode))).toBeNull();
     expect(await auths.findByUserCode(r.userCode)).toBeNull();
     await expect(poll.run({ deviceCode: r.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'expired_token' });
@@ -346,7 +347,7 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
       const pending = approvals.decide({ userCode: r.userCode, accountId: OTHER, sessionId: FAN_SESSION2, decision: 'APPROVE', assignmentId: OTHER_ASSIGN });
       await untilSessionInsertWait();
       await blocker.query('commit');
-      await expect(pending).rejects.toMatchObject({ name: 'ScannerSessionConflict' });
+      await expect(pending).rejects.toMatchObject({ code: 'APPROVAL_CONFLICT' });
     } finally {
       blocker.release();
     }

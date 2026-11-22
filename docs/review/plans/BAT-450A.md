@@ -150,7 +150,7 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 | `C2-06 ①` | 실패: `save`가 `undefined`를 돌려주고 색인이 덮어써짐 |
 | `C2-07 ①` | 실패: 첫 발급 뒤에도 `id:devauth`·`id:devcode`가 남음 |
 | `C2-07 ②` | 실패: 동시 폴링 둘 다 토큰을 받음 |
-| `I-T38 ④` | 실패: `DrizzleQueryError`의 `cause.code=23505`(`scanner_session_device_active_key`)가 그대로 올라옴. 500이 될 경로를 재현했고 `ScannerSessionConflict`가 아니다 |
+| `I-T38 ④` | 실패: `DrizzleQueryError`의 `cause.code=23505`(`scanner_session_device_active_key`)가 그대로 올라옴. 500이 될 경로를 재현했고 시험이 기대하는 `APPROVAL_CONFLICT`가 아니다 |
 | `I-T23`·`I-T24`·`I-T37`·`I-T38 ①~③` | 통과: 기존 동작에 ID를 붙였거나 기존 동작을 그대로 본다 |
 
 ### 판정
@@ -158,6 +158,7 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 - 새 동작(C2-06·C2-07·C2-09·같은 기기 동시 승인)은 구현 전 트리에서 **값 단언으로 실패**했다(가져오기·문법 오류 아님).
 - ID만 더한 시험은 구현 전에도 통과한다. 그 시험이 판정 기준을 실제로 잡는지는 `## 검증`의 틀린 구현 표본으로 본다.
 - I-T24의 파트너 콘솔 해제 경로는 BAT-450B 몫이라 이 시험은 "배정이 REVOKED가 된 뒤"부터 본다.
+- 구현 뒤 시험 두 곳의 기대값을 바로잡았다(역할 test 두 번째 커밋): `C2-07 ①`은 `clock.advance` 때문에 토큰 만료가 `NOW + 24시간`이 아니라 세션 행의 `expires_at`이고, `I-T38 ④`는 어댑터의 `ScannerSessionConflict`가 유스케이스에서 `APPROVAL_CONFLICT`로 사상된 값을 본다. 두 시험 모두 구현 전 트리에서 값 단언으로 실패하는 성질은 그대로다.
 
 ## 리뷰
 
