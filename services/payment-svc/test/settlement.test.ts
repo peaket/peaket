@@ -46,7 +46,9 @@ const fact = (o: Partial<PaymentFact> = {}): PaymentFact => ({ paymentId: random
 const kyc = (promoterId: string, status: 'PENDING' | 'VERIFIED' | 'REJECTED') => ({ promoterId, status, businessVerified: status === 'VERIFIED', representativeVerified: status === 'VERIFIED', verifiedAt: status === 'VERIFIED' ? NOW : null, source: 'MANUAL', updatedAt: NOW });
 
 describe('정산 금액 계산', () => {
-  test('J-T18 판매 대금·환급·수수료·부가세·지급액을 식대로 계산한다', () => {
+  // F-07-5 시험 담당(2026-11-23): 이 계산 시험은 J-T1(settlement §13)의 금액이라 J-T18에서 J-T1로 이름을 바로잡는다.
+  // 정본 §4.2·§4.4(ADR-0368 결정 1)가 '계산은 CALCULATED, 같은 트랜잭션의 통지가 NOTIFIED·이의 기한'으로 바뀌어 계산 함수 결과는 CALCULATED·기한 없음이다.
+  test('J-T1 판매 대금·환급·수수료·부가세·지급액을 식대로 계산하고 원본 목록 합이 판매 대금·환급과 같다', () => {
     const { record, sources } = calculateEventStatement({
       promoterId: A,
       eventId: EVENT,
@@ -59,9 +61,11 @@ describe('정산 금액 계산', () => {
       now: NOW,
       statementId: randomUUID(),
     });
-    expect(record).toMatchObject({ grossAmount: 30_000_000, refundAmount: 2_000_000, commissionAmount: 2_800_000, commissionVat: 280_000, payoutAmount: 24_920_000, status: 'NOTIFIED', payoutDate: '2026-11-20' });
-    expect(record.disputeDueAt?.toISOString()).toBe('2026-11-17T00:00:00.000Z');
+    expect(record).toMatchObject({ grossAmount: 30_000_000, refundAmount: 2_000_000, commissionAmount: 2_800_000, commissionVat: 280_000, payoutAmount: 24_920_000, status: 'CALCULATED', holdReason: null, payoutDate: '2026-11-20' });
+    expect(record.disputeDueAt).toBeNull();
     expect(sources).toHaveLength(2);
+    expect(sources.filter((x) => x.kind === 'GROSS').reduce((n, x) => n + x.amount, 0)).toBe(30_000_000);
+    expect(sources.filter((x) => x.kind === 'REFUND').reduce((n, x) => n + x.amount, 0)).toBe(2_000_000);
   });
 
   test('A1-H3 CANCELED 전액 취소는 매출 0·환급 원금 전액·지급 0이다', () => {
@@ -77,10 +81,13 @@ describe('정산 금액 계산', () => {
       now: NOW,
       statementId: randomUUID(),
     });
-    expect(record).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'CARRIED_OVER' });
+    // 정본 §4.2·03 §2.12 T6(ADR-0368 결정 10): 0 이하의 CARRIED_OVER는 계산 때가 아니라 확정 때 한다
+    expect(record).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'CALCULATED' });
   });
 
-  test('J-T18 지급액이 0이면 CARRIED_OVER이고, KYC 전이면 HELD/KYC다', () => {
+  // F-07-5 시험 담당(2026-11-23): 정본 §4.2 '계산 때는 KYC·계좌로 보류하지 않고 지급액이 0 이하여도 통지한다'(ADR-0368 결정 1)로 바뀌어
+  // 옛 기대(계산 때 CARRIED_OVER·HELD/KYC)를 CALCULATED·보류 없음으로 고친다. 보류는 묶음 때(J-T35 ⑨), CARRIED_OVER는 확정 때(J-T35 ⑤)가 본다.
+  test('J-T35 ① 계산 때는 지급액 0도 KYC 전·KYC 일부 확인도 CALCULATED이고 보류 사유가 없다', () => {
     const zero = calculateEventStatement({
       promoterId: A,
       eventId: EVENT,
@@ -93,7 +100,7 @@ describe('정산 금액 계산', () => {
       now: NOW,
       statementId: randomUUID(),
     }).record;
-    expect(zero).toMatchObject({ payoutAmount: 0, status: 'CARRIED_OVER' });
+    expect(zero).toMatchObject({ payoutAmount: 0, status: 'CALCULATED', holdReason: null });
 
     const held = calculateEventStatement({
       promoterId: A,
@@ -107,7 +114,7 @@ describe('정산 금액 계산', () => {
       now: NOW,
       statementId: randomUUID(),
     }).record;
-    expect(held).toMatchObject({ status: 'HELD', holdReason: 'KYC' });
+    expect(held).toMatchObject({ status: 'CALCULATED', holdReason: null });
 
     const partialKyc = calculateEventStatement({
       promoterId: A,
@@ -121,7 +128,7 @@ describe('정산 금액 계산', () => {
       now: NOW,
       statementId: randomUUID(),
     }).record;
-    expect(partialKyc).toMatchObject({ status: 'HELD', holdReason: 'KYC' });
+    expect(partialKyc).toMatchObject({ status: 'CALCULATED', holdReason: null });
   });
 });
 
@@ -349,9 +356,12 @@ describe('정산 HTTP·유스케이스', () => {
     expect(await store.listPayoutBatches({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: s.payoutDate!, limit: 10 })).toHaveLength(1);
   });
 
-  test('A2-05 HELD·DISPUTED는 다시 CONFIRMED가 되고 PAID·SCHEDULED는 건드리지 않는다', async () => {
+  // F-07-5 시험 담당(2026-11-23): 정본 §4.2(ADR-0368 결정 1·6)로 KYC 전 정산서는 계산 때 HELD가 아니고(묶음 때 HELD),
+  // DISPUTED는 재확정이 아니라 기각·이의 인정 조정으로만 푼다. 그래서 HELD는 시험 자료로 두고, DISPUTED 재확정은 409로 남는지만 본다.
+  test('A2-05 HELD는 사유가 풀리면 다시 CONFIRMED가 되고 DISPUTED·PAID·SCHEDULED는 재확정으로 바꾸지 않는다', async () => {
     const held = await settlements.calculateEvent({ promoterId: B, eventId: HOLD_EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
-    expect(held.status).toBe('HELD');
+    expect(held.status).toBe('NOTIFIED');
+    await store.saveStatement({ ...(await store.findStatementById(held.statementId))!, status: 'HELD', holdReason: 'KYC' });
     await expect(settlements.reconfirmStatement(held.statementId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-kyc-required') });
     await settlements.recordKyc(B, 'VERIFIED');
     expect((await settlements.reconfirmStatement(held.statementId)).status).toBe('CONFIRMED');
@@ -360,7 +370,7 @@ describe('정산 HTTP·유스케이스', () => {
     await store.saveStatement({ ...(await store.findStatementById(disputed.statementId))!, status: 'DISPUTED' });
     const viaHttp = await svc.http.inject({ method: 'POST', url: `/internal/v1/settlements/statements/${disputed.statementId}/reconfirm` });
     expect(viaHttp.statusCode).toBe(409);
-    expect(JSON.parse(viaHttp.payload)).toMatchObject({ type: expect.stringContaining('settlement-dispute-open') });
+    expect((await store.findStatementById(disputed.statementId))?.status).toBe('DISPUTED');
 
     await store.saveStatement({ ...(await store.findStatementById(disputed.statementId))!, status: 'SCHEDULED' });
     await expect(settlements.reconfirmStatement(disputed.statementId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('settlement-not-reconfirmable') });
@@ -504,11 +514,11 @@ describe('상품 정산·미수금 상계', () => {
     const [one, two] = await Promise.all([svc.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' }), svc.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' })]);
     expect(one.created + two.created).toBe(1);
     expect(store.statements.size).toBe(1);
-    // KYC가 없으면 HELD
+    // KYC가 없어도 계산 때는 보류하지 않고 통지한다(정본 §4.2, ADR-0368 결정 1. F-07-5에서 옛 HELD 기대를 고침)
     store.kycs.delete(A);
     products.rows = [productItem({ itemId: randomUUID(), promoterId: B })];
     const held = await svc.calculateProduct({ periodStart: '2026-11-09', periodEnd: '2026-11-15' });
-    expect(held.items[0]).toMatchObject({ status: 'HELD', holdReason: 'KYC' });
+    expect(held.items[0]).toMatchObject({ status: 'NOTIFIED', holdReason: null });
   });
 
   test('M1-F2 배상금 미리 지급 미수금은 다른 결제사 정산서에서도 상계된다', async () => {

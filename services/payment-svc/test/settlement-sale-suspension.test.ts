@@ -103,7 +103,9 @@ describe('R-T23 ② 판매 중지된 회차의 정산 지급 보류', () => {
     expect(await store.listStatementsByBatch(batch.batchId)).toMatchObject([{ statementId: open.statementId }]);
   });
 
-  test('R-T23 ② 모두 판매 중지면 409 payout-sale-suspended이고 묶음·정산서를 바꾸지 않는다', async () => {
+  // F-07-5 시험 담당(lane5-f075-test, 2026-11-23): 정본 settlement §6 '판매 중지 보류의 첫 구현'이 "모두 중지면 … 그 정산서들을 HELD·SALE_SUSPENDED로 저장한 뒤 409"로 바뀌었다
+  // (BAT-625 RV-04, ADR-0368 결정 11, J-T35 ⑨). 옛 기대(CONFIRMED 그대로)를 정본에 맞춰 HELD로 고친다. 묶음은 여전히 만들지 않는다.
+  test('R-T23 ② J-T35 ⑨ 모두 판매 중지면 409 payout-sale-suspended이고 묶음은 만들지 않으며 정산서는 HELD·SALE_SUSPENDED로 저장한다', async () => {
     const suspended = await confirmed(SUSPENDED_EVENT);
     suspensions.suspended.add(SUSPENDED_EVENT);
     await expect(settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: suspended.payoutDate!, actor: randomUUID() })).rejects.toMatchObject({
@@ -111,7 +113,31 @@ describe('R-T23 ② 판매 중지된 회차의 정산 지급 보류', () => {
       type: expect.stringContaining('payout-sale-suspended'),
     });
     expect(store.batches.size).toBe(0);
-    expect(await store.findStatementById(suspended.statementId)).toMatchObject({ status: 'CONFIRMED', payoutBatchId: null });
+    expect(await store.findStatementById(suspended.statementId)).toMatchObject({ status: 'HELD', holdReason: 'SALE_SUSPENDED', payoutBatchId: null });
+    expect(store.statementAudits.filter((a) => a.statementId === suspended.statementId).at(-1)).toMatchObject({ fromStatus: 'CONFIRMED', toStatus: 'HELD' });
+  });
+
+  test('J-T35 ⑨ KYC·계좌 변경·계좌 불일치로 확정 정산서가 모두 빠진 묶음 요청은 409이고 정산서는 HELD·그 사유로 저장된다', async () => {
+    const cases = [
+      { reason: 'KYC' as const, type: 'payout-kyc-required', prepare: async (p: string) => settlements.recordKyc(p, 'PENDING') },
+      { reason: 'ACCOUNT_CHANGE' as const, type: 'payout-account-change-hold', prepare: async (p: string) => store.savePayoutAccount({ promoterId: p, bankCode: '004', accountLast4: '1234', version: 1, changedAt: NOW, holdUntil: new Date(NOW.getTime() + 1), holderVerified: true }) },
+      { reason: 'ACCOUNT_MISMATCH' as const, type: 'payout-account-mismatch', prepare: async (p: string) => store.savePayoutAccount({ promoterId: p, bankCode: '004', accountLast4: '1234', version: 1, changedAt: NOW, holdUntil: new Date(NOW.getTime() - 1), holderVerified: false }) },
+    ];
+    for (const c of cases) {
+      store.statements.clear();
+      store.batches.clear();
+      store.accounts.clear();
+      const promoterId = randomUUID();
+      const eventId = randomUUID();
+      await settlements.recordKyc(promoterId, 'VERIFIED');
+      payments.set(eventId, 'TOSS', [fact(3_000_000)], 'STANDARD');
+      const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+      await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
+      await c.prepare(promoterId);
+      await expect(settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining(c.type) });
+      expect(store.batches.size).toBe(0);
+      expect({ reason: c.reason, stored: await store.findStatementById(s.statementId) }).toMatchObject({ reason: c.reason, stored: { status: 'HELD', holdReason: c.reason, payoutBatchId: null } });
+    }
   });
 
   test('R-T23 ② core가 5xx·시간 초과면 503이고 묶음·정산서를 바꾸지 않는다', async () => {

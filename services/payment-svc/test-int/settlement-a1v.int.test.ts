@@ -1,7 +1,7 @@
 // A1V·CONS-V 정산 회귀 시험(실제 PostgreSQL 18). 단위 시험이 보지 못하는 Drizzle 저장소 의미를 고정한다.
 // 대상: A1V-01(한 배치 미수금 이중 상계), A1V-12(settlement_statement_audit), CONS-V01(insertStatement 0행).
 import 'reflect-metadata';
-import { createDatabase, fakeClock, type Database } from '@peaket/platform';
+import { createDatabase, ensureOutboxPartitions, fakeClock, systemClock, type Database } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePayment } from '../scripts/migrate.mjs';
@@ -47,6 +47,8 @@ beforeAll(async () => {
   await migratePayment(pgc.url);
   await migratePayment(pgc.url);
   db = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'payment-settlement-a1v' });
+  // F-07-5(ADR-0368 결정 2·3): 정산서 전이가 같은 트랜잭션에 trade.settlements Outbox를 쓴다. 운영 migrate 스크립트처럼 파티션을 만든다
+  await ensureOutboxPartitions(db, systemClock);
   store = new DrizzleSettlementStore(db);
   settlements = new Settlements({
     store,
@@ -100,7 +102,9 @@ describe('A1V-12 PostgreSQL 정산서 상태 전이 감사', () => {
     const disputedId = await statementRow({ promoterId, eventId: randomUUID(), payoutDate: '2026-11-20', payoutAmount: 89_000, status: 'DISPUTED' });
     const disputeId = randomUUID();
     await db.pool.query("insert into statement_dispute (id, statement_id, reason_code, detail, submitted_by, submitted_at) values ($1, $2, 'COMMISSION', '', $3, $4)", [disputeId, disputedId, randomUUID(), NOW]);
-    await settlements.resolveDispute(disputedId, disputeId, 'DISMISSED', 'ops-a1v');
+    // F-07-5(정본 §4.2, ADR-0368 결정 6): 이의는 기각 경로로만 푼다(사유·처리자 필수)
+    const csLead = randomUUID();
+    await settlements.dismissDispute(disputedId, { reason: '수수료율은 계약과 같다', actorId: csLead });
 
     const autoId = await statementRow({
       promoterId,
@@ -116,7 +120,7 @@ describe('A1V-12 PostgreSQL 정산서 상태 전이 감사', () => {
     expect(audits.rows).toEqual(
       expect.arrayContaining([
         { statement_id: heldId, from_status: 'HELD', to_status: 'CONFIRMED', reason: 'kyc-cleared', actor: 'ops-a1v' },
-        { statement_id: disputedId, from_status: 'DISPUTED', to_status: 'NOTIFIED', reason: 'dispute-dismissed', actor: 'ops-a1v' },
+        { statement_id: disputedId, from_status: 'DISPUTED', to_status: 'NOTIFIED', reason: 'dispute-dismissed', actor: csLead },
         { statement_id: autoId, from_status: 'NOTIFIED', to_status: 'CONFIRMED', reason: 'dispute-window-ended', actor: 'system' },
       ]),
     );

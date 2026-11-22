@@ -21,6 +21,7 @@ import {
   type HoldReason,
   type KycRecord,
   type PaymentFact,
+  type SettlementDueLog,
   type SettlementDueTimer,
   type StatementStatus,
 } from '../src/modules/settlement/index.js';
@@ -209,7 +210,8 @@ describe('A1V-02 회차 종료 다음 영업일 계산과 종료일 +5영업일 
     });
     // 2026-11-08(일) + 월·화·수·목·금 = 2026-11-13(금). 공휴일 달력은 아직 쓰지 않는다(settlement §5.1 한계).
     expect(record.payoutDate).toBe('2026-11-13');
-    expect(record.disputeDueAt?.toISOString()).toBe('2026-11-17T00:00:00.000Z');
+    // F-07-5(정본 §4.2, ADR-0368 결정 1): 이의 기한은 계산 함수가 아니라 같은 트랜잭션의 통지가 KST 공휴일 달력으로 정한다(J-T35 ⑦)
+    expect(record.disputeDueAt).toBeNull();
   });
 });
 
@@ -243,7 +245,9 @@ describe('A1V-03 이의 결과 없는 재확정과 새 이의 기간', () => {
     await svc?.close();
   });
 
-  test('DISPUTED는 이의 결과가 없으면 409 settlement-dispute-open이고, 결과 입력 뒤 NOTIFIED·1영업일 이의 기간이다', async () => {
+  // F-07-5 시험 담당(2026-11-23): 정본 §4.2(ADR-0368 결정 6)가 옛 이의 결과 경로(…/disputes/{disputeId}/resolution)를 없애고
+  // 기각 경로(dispute-dismissal, 사유·처리자 필수)로 바꿨다. 재확정이 이의를 풀지 않는 것(409)과 기각 뒤 NOTIFIED·1영업일은 그대로 본다.
+  test('DISPUTED는 재확정이 409이고 옛 결과 경로는 404이며, 기각 뒤 NOTIFIED·1영업일 이의 기간이다', async () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     store.kycs.set(promoterId, kyc(promoterId));
@@ -255,18 +259,27 @@ describe('A1V-03 이의 결과 없는 재확정과 새 이의 기간', () => {
 
     const blocked = await svc.http.inject({ method: 'POST', url: `/internal/v1/settlements/statements/${calculated.statementId}/reconfirm` });
     expect(blocked.statusCode).toBe(409);
-    expect(JSON.parse(blocked.payload)).toMatchObject({ type: expect.stringContaining('settlement-dispute-open') });
     expect((await store.findStatementById(calculated.statementId))?.status).toBe('DISPUTED');
 
-    const resolved = await svc.http.inject({
+    const legacy = await svc.http.inject({
       method: 'POST',
       url: `/internal/v1/settlements/statements/${calculated.statementId}/disputes/${dispute.disputeId}/resolution`,
       headers: { 'content-type': 'application/json' },
       payload: JSON.stringify({ result: 'DISMISSED', actor: 'ops-a1v' }),
     });
+    expect(legacy.statusCode).toBe(404);
+
+    const actorId = randomUUID();
+    const resolved = await svc.http.inject({
+      method: 'POST',
+      url: `/internal/v1/settlements/statements/${calculated.statementId}/dispute-dismissal`,
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ reason: '원장과 같다', actorId }),
+    });
     expect(resolved.statusCode).toBe(200);
+    // 2026-11-14(토) 09:00 KST + 1영업일 = 2026-11-16(월) 09:00 KST
     expect(JSON.parse(resolved.payload)).toMatchObject({ status: 'NOTIFIED', disputeDueAt: '2026-11-16T00:00:00.000Z' });
-    expect((await store.listDisputes(calculated.statementId))[0]).toMatchObject({ result: 'DISMISSED', resolvedAt: NOW });
+    expect((await store.listDisputes(calculated.statementId))[0]).toMatchObject({ result: 'DISMISSED', resolvedAt: NOW, resolvedBy: actorId, resolutionNote: '원장과 같다' });
   });
 });
 
@@ -295,6 +308,9 @@ describe('A1V-04 HELD 사유별 증빙', () => {
 });
 
 describe('A1V-10 회차 정산 스케줄러', () => {
+  // F-07-5 시험 담당(lane5-f075-test, 2026-11-23): 정본 §4.2·ADR-0368 결정 12로 정산 일꾼은 30분 [가정]마다 자동 확정·CS 건 다시 보내기·오래된 조정 닫기를 하고
+  // 회차 계산만 평일 06시(KST)에 한다. 옛 대역(필요한 메서드 둘만 가진 타입 탈출 객체)은 새 일을 부르지 못해 깨졌으므로,
+  // 진짜 Settlements(메모리 저장소)에 계산·확정 두 메서드만 감시를 단다. 확정은 06시와 무관하게 tick마다 도는 것이 새 정본이다.
   class ManualTimer implements SettlementDueTimer {
     #fn: (() => void) | undefined;
     setInterval(fn: () => void): unknown {
@@ -319,17 +335,17 @@ describe('A1V-10 회차 정산 스케줄러', () => {
     }
     throw new Error('기다린 조건이 참이 되지 않았다');
   };
+  const spied = () => {
+    const settlements = settlementsFor(new MemorySettlementStore());
+    const calculate = vi.spyOn(settlements, 'calculateDueEvents').mockResolvedValue({ calculated: 0, items: [] });
+    const confirm = vi.spyOn(settlements, 'confirmDueStatements').mockResolvedValue({ confirmed: 0, items: [] });
+    return { settlements, calculate, confirm };
+  };
 
   test('start()는 스스로 tick하지 않고 리더 전환 콜백의 tick(true)가 첫 tick을 맡는다', async () => {
     const timer = new ManualTimer();
-    const calculate = vi.fn(async () => ({ calculated: 0, items: [] }));
-    const confirm = vi.fn(async () => ({ confirmed: 0, items: [] }));
-    const worker = new SettlementDueWorker({
-      settlements: { calculateDueEvents: calculate, confirmDueStatements: confirm } as unknown as Settlements,
-      leader: { isLeader: () => true },
-      clock: fakeClock({ now: NOW.getTime() }),
-      timer,
-    });
+    const { settlements, calculate, confirm } = spied();
+    const worker = new SettlementDueWorker({ settlements, leader: { isLeader: () => true }, clock: fakeClock({ now: NOW.getTime() }), timer });
 
     worker.start();
     await flush();
@@ -342,18 +358,12 @@ describe('A1V-10 회차 정산 스케줄러', () => {
   });
 
   test('calculateDueEvents가 실패해도 confirmDueStatements는 돈다', async () => {
-    const calculate = vi.fn(async () => {
-      throw new Error('core-svc 503');
-    });
-    const confirm = vi.fn(async () => ({ confirmed: 1, items: [] }));
-    const failed = vi.fn();
-    const ticked = vi.fn();
-    const worker = new SettlementDueWorker({
-      settlements: { calculateDueEvents: calculate, confirmDueStatements: confirm } as unknown as Settlements,
-      leader: { isLeader: () => true },
-      clock: fakeClock({ now: NOW.getTime() }),
-      log: { failed, ticked },
-    });
+    const { settlements, calculate, confirm } = spied();
+    calculate.mockRejectedValue(new Error('core-svc 503'));
+    confirm.mockResolvedValue({ confirmed: 1, items: [] });
+    const failed = vi.fn<NonNullable<SettlementDueLog['failed']>>();
+    const ticked = vi.fn<NonNullable<SettlementDueLog['ticked']>>();
+    const worker = new SettlementDueWorker({ settlements, leader: { isLeader: () => true }, clock: fakeClock({ now: NOW.getTime() }), log: { failed, ticked } });
 
     await worker.tick();
 
@@ -363,19 +373,12 @@ describe('A1V-10 회차 정산 스케줄러', () => {
   });
 
   test('정기 실행은 KST 평일 06:00에만 하고, force tick과 실패는 그날 정기 실행을 소비하지 않는다', async () => {
-    // ① force tick은 즉시 돌지만 같은 날 정기 06:00 tick을 소비하지 않고, 주말 06:00에는 돌지 않는다.
+    // ① force tick은 즉시 돌지만 같은 날 정기 06:00 tick을 소비하지 않고, 주말 06:00에는 회차 계산을 하지 않는다(자동 확정은 tick마다).
     const timer = new ManualTimer();
     const clock = fakeClock({ now: Date.parse('2026-11-15T20:30:00.000Z') }); // 2026-11-16(월) 05:30 KST
-    const calculate = vi.fn(async () => ({ calculated: 0, items: [] }));
-    const confirm = vi.fn(async () => ({ confirmed: 0, items: [] }));
-    const ticked = vi.fn();
-    const worker = new SettlementDueWorker({
-      settlements: { calculateDueEvents: calculate, confirmDueStatements: confirm } as unknown as Settlements,
-      leader: { isLeader: () => true },
-      clock,
-      timer,
-      log: { ticked },
-    });
+    const { settlements, calculate, confirm } = spied();
+    const ticked = vi.fn<NonNullable<SettlementDueLog['ticked']>>();
+    const worker = new SettlementDueWorker({ settlements, leader: { isLeader: () => true }, clock, timer, log: { ticked } });
 
     worker.start();
     await worker.tick(true);
@@ -389,65 +392,59 @@ describe('A1V-10 회차 정산 스케줄러', () => {
     expect(confirm).toHaveBeenCalledTimes(2);
 
     timer.fire();
-    await flush();
+    await until(() => ticked.mock.calls.length === 3);
     expect(calculate).toHaveBeenCalledTimes(2);
+    expect(confirm).toHaveBeenCalledTimes(3);
 
     clock.advance(5 * 24 * 60 * 60 * 1_000); // 토요일 06:00 KST
     timer.fire();
-    await flush();
+    await until(() => ticked.mock.calls.length === 4);
     expect(calculate).toHaveBeenCalledTimes(2);
+    expect(confirm).toHaveBeenCalledTimes(4);
 
     clock.advance(2 * 24 * 60 * 60 * 1_000); // 다음 월요일 06:00 KST
     timer.fire();
-    await until(() => ticked.mock.calls.length === 3);
+    await until(() => ticked.mock.calls.length === 5);
+    expect(calculate).toHaveBeenCalledTimes(3);
     expect(calculate).toHaveBeenLastCalledWith('2026-11-22', 100);
     await worker.stop();
 
-    // ② 두 작업 중 하나가 실패한 정기 tick은 그날 실행을 소비하지 않아 06:30에 다시 돈다.
+    // ② 두 작업 중 하나가 실패한 정기 tick은 그날 회차 계산을 소비하지 않아 06:30에 다시 돈다.
     for (const failing of ['calculate', 'confirm'] as const) {
       const retryTimer = new ManualTimer();
       const retryClock = fakeClock({ now: Date.parse('2026-11-15T21:00:00.000Z') }); // 2026-11-16(월) 06:00 KST
-      const retryCalculate =
-        failing === 'calculate'
-          ? vi.fn().mockRejectedValueOnce(new Error('core-svc 503')).mockResolvedValue({ calculated: 0, items: [] })
-          : vi.fn(async () => ({ calculated: 0, items: [] }));
-      const retryConfirm =
-        failing === 'confirm'
-          ? vi.fn().mockRejectedValueOnce(new Error('db down')).mockResolvedValue({ confirmed: 0, items: [] })
-          : vi.fn(async () => ({ confirmed: 0, items: [] }));
-      const retryTicked = vi.fn();
-      const retryWorker = new SettlementDueWorker({
-        settlements: { calculateDueEvents: retryCalculate, confirmDueStatements: retryConfirm } as unknown as Settlements,
-        leader: { isLeader: () => true },
-        clock: retryClock,
-        timer: retryTimer,
-        log: { ticked: retryTicked },
-      });
+      const retry = spied();
+      if (failing === 'calculate') retry.calculate.mockRejectedValueOnce(new Error('core-svc 503'));
+      else retry.confirm.mockRejectedValueOnce(new Error('db down'));
+      const retryTicked = vi.fn<NonNullable<SettlementDueLog['ticked']>>();
+      const retryWorker = new SettlementDueWorker({ settlements: retry.settlements, leader: { isLeader: () => true }, clock: retryClock, timer: retryTimer, log: { ticked: retryTicked } });
 
       retryWorker.start();
       retryTimer.fire();
       await until(() => retryTicked.mock.calls.length === 1);
-      expect(retryCalculate).toHaveBeenCalledTimes(1);
-      expect(retryConfirm).toHaveBeenCalledTimes(1);
+      expect(retry.calculate).toHaveBeenCalledTimes(1);
+      expect(retry.confirm).toHaveBeenCalledTimes(1);
 
       retryClock.advance(30 * 60 * 1_000); // 같은 날 06:30 KST
       retryTimer.fire();
       await until(() => retryTicked.mock.calls.length === 2);
-      expect(retryCalculate).toHaveBeenCalledTimes(2);
-      expect(retryConfirm).toHaveBeenCalledTimes(2);
+      expect(retry.calculate).toHaveBeenCalledTimes(failing === 'calculate' ? 2 : 1);
+      expect(retry.confirm).toHaveBeenCalledTimes(2);
 
-      retryClock.advance(30 * 60 * 1_000); // 07:00 KST부터는 그날 정기 실행이 끝났다
+      retryClock.advance(30 * 60 * 1_000); // 07:00 KST부터는 그날 정기 회차 계산이 끝났다(자동 확정은 30분마다 계속)
       retryTimer.fire();
-      await flush();
-      expect(retryCalculate).toHaveBeenCalledTimes(2);
-      expect(retryConfirm).toHaveBeenCalledTimes(2);
+      await until(() => retryTicked.mock.calls.length === 3);
+      expect(retry.calculate).toHaveBeenCalledTimes(failing === 'calculate' ? 2 : 1);
+      expect(retry.confirm).toHaveBeenCalledTimes(3);
       await retryWorker.stop();
     }
   });
 });
 
 describe('A1V-12 정산서 상태 전이 감사', () => {
-  test('재확정·이의 해소·자동 확정은 이전/이후 상태·사유·행위자를 남긴다', async () => {
+  // F-07-5 시험 담당(2026-11-23): 이의는 기각(dismissDispute)이나 이의 인정 조정으로만 푼다(정본 §4.2, ADR-0368 결정 6).
+  // 옛 resolveDispute(…, 'ADJUSTED')는 조정 없이 ADJUSTED를 적는 길이라 정본에서 없앴으므로 기각으로 바꾼다.
+  test('재확정·이의 기각·자동 확정은 이전/이후 상태·사유·행위자를 남긴다', async () => {
     const store = new MemorySettlementStore();
     const settlements = settlementsFor(store);
     const promoterId = randomUUID();
@@ -456,18 +453,18 @@ describe('A1V-12 정산서 상태 전이 감사', () => {
     const held = await insertEventStatement(store, { promoterId, status: 'HELD', holdReason: 'KYC' });
     await settlements.reconfirmStatement(held.record.statementId, { actor: 'ops-a1v', reason: 'kyc-cleared' });
 
-    const disputed = await insertEventStatement(store, { promoterId });
+    const disputed = await insertEventStatement(store, { promoterId, status: 'NOTIFIED', disputeDueAt: new Date(NOW.getTime() + 60_000) });
     await settlements.dispute(promoterId, randomUUID(), disputed.record.statementId, { reasonCode: 'COMMISSION' });
-    const dispute = (await store.listDisputes(disputed.record.statementId))[0]!;
-    await settlements.resolveDispute(disputed.record.statementId, dispute.disputeId, 'ADJUSTED', 'ops-a1v');
+    const csLead = randomUUID();
+    await settlements.dismissDispute(disputed.record.statementId, { reason: '수수료율은 계약과 같다', actorId: csLead });
 
-    const auto = await insertEventStatement(store, { promoterId, disputeDueAt: new Date(NOW.getTime() - 1) });
+    const auto = await insertEventStatement(store, { promoterId, status: 'NOTIFIED', disputeDueAt: new Date(NOW.getTime() - 1) });
     expect((await settlements.confirmDueStatements()).confirmed).toBe(1);
 
     expect(store.statementAudits).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ statementId: held.record.statementId, fromStatus: 'HELD', toStatus: 'CONFIRMED', reason: 'kyc-cleared', actor: 'ops-a1v' }),
-        expect.objectContaining({ statementId: disputed.record.statementId, fromStatus: 'DISPUTED', toStatus: 'NOTIFIED', reason: 'dispute-adjusted', actor: 'ops-a1v' }),
+        expect.objectContaining({ statementId: disputed.record.statementId, fromStatus: 'DISPUTED', toStatus: 'NOTIFIED', reason: expect.stringMatching(/\S/), actor: csLead }),
         expect.objectContaining({ statementId: auto.record.statementId, fromStatus: 'NOTIFIED', toStatus: 'CONFIRMED', reason: 'dispute-window-ended', actor: 'system' }),
       ]),
     );

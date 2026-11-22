@@ -62,10 +62,12 @@ describe('CS 처리함 건 접수', () => {
   });
 
   // BAT-420-rest 리뷰 반영 RV-01(시험 담당 l3-b420-test, 2026-11-19): 정본(transfer-refund §3.1 ⑥ '실패 기록', P-T75)이 환불 대기(REFUND_ACCOUNT_PENDING)를 받는 종류에 더해 셋에서 넷으로 바꿨다(정본 변경 반영)
-  test('GAT-090 A4 받는 종류 넷(REFUND_FAILED·FLAGGED·JUDGEMENT_PENDING·REFUND_ACCOUNT_PENDING) 밖은 종류마다 건을 만들지 않는다', async () => {
-    const accepted = new Set(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING']);
+  // F-07-5 시험 담당(lane5-f075-test, 2026-11-23): 정본 settlement §4.2 '이의 받기'(ADR-0368 결정 5)가 payment-svc의 정산 이의 건(STATEMENT_DISPUTE)을
+  // 내부 HTTP로 받게 해 받는 종류가 넷에서 다섯이 됐다(정본 변경 반영). 그 밖 종류는 여전히 건을 만들지 않는다.
+  test('GAT-090 A4 J-T35 ③ 받는 종류 다섯(REFUND_FAILED·FLAGGED·JUDGEMENT_PENDING·REFUND_ACCOUNT_PENDING·STATEMENT_DISPUTE) 밖은 종류마다 건을 만들지 않는다', async () => {
+    const accepted = new Set(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING', 'STATEMENT_DISPUTE']);
     const others = CS_CASE_KINDS.filter((k) => !accepted.has(k));
-    expect(others.length).toBe(CS_CASE_KINDS.length - 4);
+    expect(others.length).toBe(CS_CASE_KINDS.length - 5);
     expect(others).toContain('DISPUTE');
     for (const kind of others) {
       const store = new MemoryCsCaseStore();

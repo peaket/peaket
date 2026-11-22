@@ -1,7 +1,7 @@
 // 정산·지급·KYC 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-610 잔여, R-574·R-588).
 // 0015·0016 적용·재적용, 실제 payment 원장 계산, 정산서·이의·KYC·지급 묶음·재시도·정산 계좌·상품 정산·미수금 상계를 본다.
 import 'reflect-metadata';
-import { createDatabase, fakeClock, type Database } from '@peaket/platform';
+import { createDatabase, ensureOutboxPartitions, fakeClock, systemClock, type Database } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migratePayment } from '../scripts/migrate.mjs';
@@ -89,6 +89,8 @@ beforeAll(async () => {
   await migratePayment(pgc.url);
   await migratePayment(pgc.url);
   db = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'payment-settlement-it' });
+  // F-07-5(ADR-0368 결정 1·2): 계산·전이가 같은 트랜잭션에 trade.settlements Outbox를 쓴다. 운영 migrate 스크립트처럼 파티션을 만든다
+  await ensureOutboxPartitions(db, systemClock);
   clock = fakeClock({ now: NOW.getTime() });
   store = new DrizzleSettlementStore(db);
   settlements = new Settlements({
@@ -154,11 +156,13 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     await expect(settlements.dispute(A, ACCOUNT, other.statementId, { reasonCode: 'GROSS_AMOUNT' })).rejects.toMatchObject({ status: 409 });
   });
 
-  test('KYC 전에는 HELD/KYC이고 지급 묶음은 409 payout-kyc-required다', async () => {
+  // F-07-5 시험 담당(2026-11-23): 정본 §4.2(ADR-0368 결정 1·11)로 계산 때는 KYC로 보류하지 않고 통지하며, 지급 묶음 때 HELD/KYC로 저장한 뒤 409다(J-T35 ⑨)
+  test('KYC 전에도 계산 때는 NOTIFIED이고, 지급 묶음은 409 payout-kyc-required이며 정산서를 HELD/KYC로 저장한다', async () => {
     const s = await settlements.calculateEvent({ promoterId: B, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
-    expect(s).toMatchObject({ status: 'HELD', holdReason: 'KYC' });
+    expect(s).toMatchObject({ status: 'NOTIFIED', holdReason: null });
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
     await expect(settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: ACCOUNT })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-kyc-required') });
+    expect(await store.findStatementById(s.statementId)).toMatchObject({ status: 'HELD', holdReason: 'KYC', payoutBatchId: null });
   });
 
   test('지급 묶음 승인→수기 포트원 제출, 실패 건은 새 refPayoutId로 재시도한다', async () => {
@@ -351,7 +355,8 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     await settlements.recordKyc(promoterId, 'VERIFIED');
     await paymentRow({ id: randomUUID(), amount: 10_000, cancelled: 0, status: 'CANCELED', eventId });
     const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
-    expect(s).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'CARRIED_OVER' });
+    // F-07-5(정본 §4.2·03 §2.12 T6, ADR-0368 결정 1·10): 0원도 계산 때는 통지하고 CARRIED_OVER는 확정 때 한다
+    expect(s).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'NOTIFIED' });
   });
 
   test('A1-H8 대사가 끝나지 않은 결제는 정산서에서 빠지고 이유가 excludedPayments에 남는다', async () => {

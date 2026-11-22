@@ -162,7 +162,9 @@ test('PRF215_마이그레이션잡은_합본이미지로_패키지실제경로�
 });
 
 test('PRF215_Kafka토픽은_무대가쓰는것만_없을때만만든다', () => {
-  assert.deepEqual([...V1_KAFKA_TOPICS].sort(), ['identity.accounts-withdrawn', 'telemetry.behavior', 'trade.orders', 'trade.payments', 'trade.purchase-sessions', 'trade.seats']);
+  // F-07-5(정본 settlement §4.2, ADR-0368 결정 1·3): payment-svc Outbox가 trade.settlements에 정산서 사건을 쓰므로 무대 토픽에 더한다
+  assert.deepEqual([...V1_KAFKA_TOPICS].sort(), ['identity.accounts-withdrawn', 'telemetry.behavior', 'trade.orders', 'trade.payments', 'trade.purchase-sessions', 'trade.seats', 'trade.settlements']);
+  assert.ok(kafkaTopicArgs('trade.settlements').includes('trade.settlements'));
   const a = kafkaTopicArgs('trade.payments');
   assert.ok(a.includes('--if-not-exists'));
   // 도구 JVM 힙을 작게 준다(브로커 컨테이너 메모리 한도를 함께 쓴다)
