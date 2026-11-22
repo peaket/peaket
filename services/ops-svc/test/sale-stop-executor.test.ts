@@ -95,7 +95,9 @@ describe('BAT-465 판매 중지·재개 집행', () => {
     const ok = await executor.execute(c, actor);
     expect(ok).toMatchObject({ status: 'SUCCEEDED', detail: { target: 'control-grpc', suspended: true } });
     expect(sent.map((x) => x.target)).toEqual(['purchase-svc', 'queue-svc']);
-    expect(sent[0]!.req).toMatchObject({ commandId: c.commandId, scope: c.params.eventId, kind: 'CONTROL_KIND_SALE_SUSPENSION', version: c.updatedAtMs, desiredStateJson: '{"suspended":true}' });
+    // F-02-1(ADR-0365 결정 1): 판매 중지·재개의 판은 명령 기록의 바뀐 시각(updatedAtMs)이 아니라 ops 원장이 매긴다. 원장 규칙은 f021-control-dispatch.test.ts(F021-VER)가 카탈로그 명령으로 본다
+    expect(sent[0]!.req).toMatchObject({ commandId: c.commandId, scope: c.params.eventId, kind: 'CONTROL_KIND_SALE_SUSPENSION', desiredStateJson: '{"suspended":true}' });
+    expect(Number.isSafeInteger(sent[0]!.req.version) && Number(sent[0]!.req.version) > 0).toBe(true);
 
     const stale = new HttpCommandExecutor({ control: { purchase: sender('purchase-svc', 1), queue: sender('queue-svc') } });
     expect(await stale.execute(command('SALE_STOP'), actor)).toMatchObject({ status: 'FAILED', error: 'ack-pending:purchase-svc:1' });
