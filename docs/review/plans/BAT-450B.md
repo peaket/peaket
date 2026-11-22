@@ -146,7 +146,23 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+시험 담당 `lane3-bat450b-test`(deepseek-v4.1-flash), 2026-11-22 13:10~13:15 KST. 기준 트리 `3129756b4`(계획 커밋)에서 구현 없이 시험만 더해 돌렸다. Docker는 쓰지 않았다.
+
+### 단위·HTTP(구현 전)
+
+| 파일 | 결과 | 실패한 시험(까닭) |
+| --- | --- | --- |
+| `services/identity-svc/test/partner-staff-invitations.test.ts` | **12개 중 12 실패** | 라우트가 없어 만들기·명단·해제·재발송이 404/400이다. I-T21 ①~⑪·I-T86 ③이 `201/200/204/503`을 기대하는 자리에서 404·400이 왔다. `I-T21 ⑤`는 404 본문 비교를 `instance`(요청 주소)까지 견주어 실패했고, 타입·상태·제목만 견주도록 시험을 고쳤다(구현 전 트리에서 여전히 404 자체가 없어 실패) |
+| `services/identity-svc/test/http-core-event-owners.test.ts` | **0개(파일 실패)** | `Cannot find module '../src/modules/session/adapters/http-core-event-owners.js'`. 새 어댑터 파일이 없다 |
+| `services/identity-svc/test/staff-invite-mailer.test.ts` | **0개(파일 실패)** | `Cannot find module '../src/modules/session/adapters/file-staff-invite-mailer.js'`. 새 파일 대역이 없다 |
+| `services/core-svc/test/internal-sale-config-identity-caller.test.ts` | **2개 통과** | 기존 sale-config 경로에 identity가 읽는 칸(`promoterId`·`startsAtMs`·`endsAtMs`·`entryOpensAtMs`)이 이미 있다. 계약 회귀 시험이라 구현 전에도 통과한다(뒤 틀린 구현 표본으로 판정 능력을 본다) |
+| `tools/ci/bat450b-contract.test.mjs` | **4개 중 4 실패** | openapi에 `staff-invitation-duplicate`·`staff-invitation-already-accepted`·네 작업의 404/409/422/503 응답과 `minItems: 1`이 없다. gw-partner 원천·생성 라우트가 아직 core-svc를 가리킨다. core-svc REST `callers`에 identity-svc가 없다 |
+
+### 판정
+
+- 새 동작(초대 만들기·명단·해제·재발송·core 대조·메일)은 구현 전 트리에서 **경로 없음(404/400)**과 **모듈 없음(import)**으로 실패했다. 값 단언으로 실패한 것은 HTTP 시험 12개이고, 어댑터·메일 대역은 파일이 없어 수집 단계에서 실패했다.
+- core 계약 시험은 기존 동작이라 통과한다. 이 시험이 identity가 읽는 칸을 실제로 잡는지는 `## 검증`의 틀린 구현 표본으로 본다.
+- Docker 통합 시험(중복 인덱스·실제 PostgreSQL)은 이번 실패 확인에서 돌리지 않았다. 구현 뒤 잠금을 잡고 `test-int/staff-invitations.int.test.ts`를 돌린다.
 
 ## 리뷰
 
@@ -160,4 +176,5 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | lane3-bat450b-plan | deepseek-v4.1-flash | 2026-11-22T13:05:00+09:00 | 2026-11-22T13:45:00+09:00 |
+| plan | lane3-bat450b-plan | deepseek-v4.1-flash | 2026-11-22T13:05:00+09:00 | 2026-11-22T13:08:00+09:00 |
+| test | lane3-bat450b-test | deepseek-v4.1-flash | 2026-11-22T13:10:00+09:00 | 2026-11-22T13:16:00+09:00 |
