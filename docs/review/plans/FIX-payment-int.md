@@ -105,6 +105,30 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 검증
 
+검증 담당(lane5-fixint-verify)이 리뷰 커밋 `1705c15e6` 트리에서 돌렸다. 계획·시험·리뷰에 관여하지 않았고 코드·시험은 고치지 않았다(틀린 구현은 넣었다가 손으로 되돌렸고, 끝에 `git diff`·`git status`가 비었다). Docker 잠금은 다른 갈래(lane4-F-02-1)가 04:27부터 쥐고 있어 기다렸다가 05:02~05:07에 쥐고 놓았다. 그때 `bench-*` 컨테이너는 없었다.
+
+| 명령 | 결과 | 비고 |
+| --- | --- | --- |
+| `pnpm exec turbo run build --filter=@peaket/payment-svc^... --filter=@peaket/search-normalize --filter=@peaket/pg-simulator` | 4작업 성공 | 시험 담당 1회째의 `merch-path-e2e` 실패 까닭(`search-normalize` `dist` 없음)을 미리 없앴다 |
+| `pnpm --filter @peaket/payment-svc test:integration`(05:03, 한 번) | **27파일 전부 통과, 594 통과·2 건너뜀(596), 실패 0**, 77초 | 시간 한도 실패(`DEADLINE_EXCEEDED`·Redis 100ms) 없음. 다시 돌린 파일도 없다 |
+| `pnpm exec turbo run typecheck --filter=@peaket/payment-svc` | 7작업 성공 | 오류 0 |
+| `pnpm lint` | 끝 코드 0 | 오류 0 |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0, 경고 4 → 통과 | 경고는 `openapi.yaml` 응답 설명 셋과 mermaid 건너뜀으로 이 묶음 밖이다 |
+| `node tools/ci/roles-check.mjs`(base `origin/develop`, 검증 커밋 전) | 끝 코드 1 | 묶음을 '시험만 커밋 3개(plan 1·test 1·review 1)'로 셌다. 실패 넷: ① `10933df92`(test)·② `1705c15e6`(review)에 `Batch-Kind`가 있는데 이 꼬리말은 plan 커밋에만 단다, ③ verify 커밋 없음, ④ '검증' 절 빔. ③④는 이 커밋이 채운다. ①②는 이미 쌓인 커밋의 꼬리말이라 기록 담당·감독이 다룬다. 이 검증 커밋에는 같은 실패를 더하지 않게 `Batch-Kind`를 달지 않았다 |
+
+틀린 구현 표본: **넣은 수 5, 잡은 수 5.**
+
+| # | 넣은 틀린 것 | 돌린 시험 | 결과 |
+| --- | --- | --- | --- |
+| S1 | `RESET_SQL`에서 `guarantee_collection`을 뺐다 | `compensation-transfer.int.test.ts` | **잡음** — 8시험 모두 실패, `cannot truncate a table referenced in a foreign key constraint` |
+| S2a | PRF180 기대 목록에서 `settlement_webhook_receipt`를 뺐다(28개) | `payment-grpc.int.test.ts` | **잡음** — PRF180 표 목록 시험 1개 실패, 94 통과 |
+| S2b | PRF180 기대 목록에 정본에 없는 `zz_not_in_spec`을 더했다(30개) | `payment-grpc.int.test.ts` | **잡음** — 같은 시험 1개 실패 |
+| S2c | 마이그레이션 0026 17줄의 표 이름을 `settlement_webhook_receipts`로 바꿨다(계획 표본 그대로) | `payment-grpc.int.test.ts` | **잡음** — 같은 시험 1개 실패, 차이에 `+ "settlement_webhook_receipts"` |
+| S3 | J-T28 ② 고리 안의 `await database.pool.query(RESET_SQL)`를 지웠다 | `compensation-transfer.int.test.ts` | **잡음** — J-T28 ② 1개 실패(`FAILED: expected [ … ] to have a length of 1 but got 2`, 둘째 상태), 7 통과 |
+
+- 표본마다 고친 줄만 손으로 되돌렸고 되돌린 뒤 `git diff --stat`이 비었다. 시험 컨테이너는 실행마다 스스로 지워져 `docker ps -a`에 새로 남은 것이 없다.
+- 판정: 계획 '통과 기준'의 통합 27파일 실패 0·typecheck·lint 0·doc-check 오류 0을 채운다. roles-check는 위 ①② 꼬리말 문제가 남아 있어 기록 전에 정리해야 한다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -112,3 +136,4 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | plan | lane5-fixint-plan | claude-opus-5-5 | 2026-11-23T03:28:00+09:00 | 2026-11-23T03:42:00+09:00 |
 | test | lane5-fixint-test | claude-opus-5-5 | 2026-11-23T03:37:00+09:00 | 2026-11-23T04:30:00+09:00 |
 | review | lane5-fixint-review | claude-opus-5-5 | 2026-11-23T04:30:00+09:00 | 2026-11-23T04:40:00+09:00 |
+| verify | lane5-fixint-verify | claude-opus-5-5 | 2026-11-23T04:35:00+09:00 | 2026-11-23T05:10:00+09:00 |
