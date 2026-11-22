@@ -214,3 +214,52 @@ test('FE-T47 ⑤ 탈퇴 204·계정 흡수는 대화상자 없이 ①과 같이 
     assert.match(src, /logoutCleanup\(\{ wallet: false, server: false/, f);
   }
 });
+
+// F-05-1 검증이 넘긴 것(정본 FE-T47 ⑤, ADR-0363 결정 8, docs/frontend.md §5.14.4 '탈퇴 완료와 계정 흡수'): 탈퇴·흡수 정리도 웹 푸시 해제 DELETE를
+// 먼저 시도하고, 세션이 끝나 401이거나 503이어도 정리를 마친다. 두 자리가 부르는 그대로(browser.ts logoutCleanup + web-push browserWebPush().unbind)
+// 브라우저 경계(탭 저장소·serviceWorker·fetch)만 바꿔 끼워 부른다
+test('FE-T47 ⑤ 탈퇴·흡수 정리는 웹 푸시 해제 DELETE를 먼저 시도하고 그것이 401·503이어도 정리를 마치며 서버 로그아웃은 보내지 않는다', async () => {
+  const { logoutCleanup } = await import('./browser.ts');
+  const { browserWebPush } = await import('../web-push/browser.ts');
+  const { ORIGINS } = await import('../../shared/config/origins.ts');
+  const { createHash } = await import('node:crypto');
+  const API = 'https://api.f051-ended.test';
+  const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/f051-ended';
+  const realFetch = globalThis.fetch;
+  const realApi = ORIGINS.api;
+  try {
+    for (const status of [401, 503]) {
+      const log = [];
+      const local = storage([...LOGOUT_LOCAL, ...KEEP_LOCAL]);
+      const session = storage([...LOGOUT_SESSION, ...KEEP_SESSION]);
+      globalThis.window = { localStorage: local, sessionStorage: session };
+      const reg = { scope: `${ORIGIN}/push/`, unregister: async () => (log.push('unregister:/push/'), true), pushManager: { getSubscription: async () => ({ endpoint: ENDPOINT }) } };
+      Object.defineProperty(globalThis.navigator, 'serviceWorker', { configurable: true, value: { getRegistration: async (s) => (s === '/push/' ? reg : undefined), getRegistrations: async () => [reg] } });
+      ORIGINS.api = API;
+      globalThis.fetch = async (url, init = {}) => {
+        log.push(`${init.method} ${String(url).replace(API, '')}`);
+        return new Response(JSON.stringify({ type: 'about:blank', status }), { status, headers: { 'content-type': 'application/problem+json' } });
+      };
+      // 두 자리(SettingsFlows endedSessionCleanup·LiveLoginMethods 흡수)와 같은 호출
+      const r = await logoutCleanup({ wallet: false, server: false, pushUnbind: () => browserWebPush().unbind() });
+      const key = createHash('sha256').update(ENDPOINT).digest('base64url');
+      assert.equal(log[0], `DELETE /v1/push-subscriptions/${key}`, `${status}: DELETE를 먼저 시도하지 않았다`);
+      assert.equal(log.includes('POST /logout'), false, `${status}: 서버 로그아웃을 보냈다`);
+      assert.deepEqual(r, { push: 'done', server: 'skipped' }, String(status));
+      assert.deepEqual([...local.m.keys()].sort(), [...KEEP_LOCAL].sort(), `${status}: 정리를 마치지 않았다`);
+      assert.deepEqual([...session.m.keys()].sort(), [...KEEP_SESSION].sort(), `${status}: 정리를 마치지 않았다`);
+      assert.equal(log.includes('unregister:/push/'), false, `${status}: 웹 푸시 워커 등록을 풀었다`);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    ORIGINS.api = realApi;
+    delete globalThis.window;
+    delete globalThis.navigator.serviceWorker;
+  }
+  // 두 자리가 정말 그 해제를 넘긴다(넘기지 않으면 위 DELETE가 나가지 않는다)
+  const { readFileSync } = await import('node:fs');
+  for (const f of ['../../_pages/settings/ui/SettingsFlows.tsx', '../../_pages/settings-providers/ui/LiveLoginMethods.tsx']) {
+    const src = readFileSync(new URL(f, import.meta.url), 'utf8');
+    assert.match(src, /logoutCleanup\(\{ wallet: false, server: false, pushUnbind: \(\) => p\.browserWebPush\(\)\.unbind\(\) \}\)/, f);
+  }
+});

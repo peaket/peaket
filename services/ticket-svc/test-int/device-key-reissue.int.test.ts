@@ -218,6 +218,43 @@ describe('O-T47 Drizzle 403 가르기 [GAT-020]', () => {
 });
 
 describe('O-T48 보내기 반복 임대·다시 보내기·정리(Drizzle) [GAT-020]', () => {
+  // F-05-1 검증 V-05가 넘긴 것: 두 잡기를 Promise.all로만 보내면 SKIP LOCKED가 없어도(뒤엣것이 기다렸다 다시 보고 뺀다) 통과한다.
+  // 다른 파드가 행 하나를 쥔(트랜잭션을 열어 둔) 동안 잡기가 기다리지 않고 나머지 행을 바로 돌려주는지 본다(docs/data.md device_key_notice, ADR-0363 결정 4)
+  test('O-T48 다른 파드가 행 하나를 쥔 동안 잡기는 기다리지 않고 그 행을 건너뛰어 나머지 행을 바로 돌려준다(SKIP LOCKED)', async () => {
+    await database.pool.query('update device_key_notice set sent_at = $1 where sent_at is null', [new Date(clock.now())]);
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const t = await ticket();
+      await reg(t, await deviceJwk(), 'ISSUE');
+      await reg(t, await deviceJwk(), 'REISSUE', 'ok');
+      ids.push((await noticesOf(t))[0]!.id);
+    }
+    const [held, ...rest] = ids;
+    const holder = await database.pool.connect();
+    try {
+      await holder.query('begin');
+      await holder.query('select id from device_key_notice where id = $1 for update', [held]);
+      const now = clock.now() + 10_000;
+      // real-time: 잠금을 기다리는지 가르려면 실제 시간 상한이 필요하다(통합 시험, 3초면 SKIP LOCKED의 즉시 반환과 충분히 갈린다) F-05-1 V-05
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const waited = new Promise<'waited'>((resolve) => {
+        timer = setTimeout(() => resolve('waited'), 3_000);
+      });
+      const got = await Promise.race([store.claimDue(now, 1000, 60_000), waited]);
+      clearTimeout(timer);
+      expect(got, '잡기가 쥔 행의 잠금을 기다렸다(SKIP LOCKED 없음)').not.toBe('waited');
+      const claimed = (got as readonly { id: string }[]).map((n) => n.id);
+      expect(claimed).not.toContain(held);
+      expect(claimed.filter((id) => rest.includes(id)).sort()).toEqual([...rest].sort());
+    } finally {
+      await holder.query('rollback').catch(() => {});
+      holder.release();
+    }
+    // 쥔 쪽이 놓으면(그 파드가 보내지 못하고 끝남) 쥐었던 행도 잡을 수 있다
+    expect((await store.claimDue(clock.now() + 10_000, 1000, 60_000)).map((n) => n.id)).toContain(held);
+    for (const id of ids) await store.markSent(id, clock.now());
+  });
+
   test('O-T48 두 파드가 겹쳐 잡아도(FOR UPDATE SKIP LOCKED) 같은 행을 둘이 잡지 않고, 임대가 끝나면 다시 잡으며 보낸 횟수가 는다', async () => {
     const mine: string[] = [];
     for (let i = 0; i < 6; i += 1) {

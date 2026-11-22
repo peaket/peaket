@@ -24,7 +24,8 @@ const ENROLL_GUIDE = readFileSync(new URL('./ui/EnrollGuide.tsx', import.meta.ur
 /** 주석을 뺀 소스 */
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-test('O-T50 ① iOS Safari 탭은 키를 만들지 않고 등록 요청이 0건이다(먼저 홈 화면 안내를 보인다)', () => {
+// 요청 수·키 수는 운영 빌드에서 실제로 눌러 센다(tools/web-checks/reflow/wallet-enroll.spec.mjs O-T50 ①, F-05-1 검증이 넘긴 것). 여기서는 판별과 화면의 차례만 본다
+test('O-T50 ① iOS Safari 탭이면 안내 판별이 키 만들기보다 먼저다(홈 화면 안내를 보인다)', () => {
   assert.equal(enrollPlatformOf({ userAgent: UA.iphoneSafari, displayStandalone: false }), 'ios-tab');
   assert.equal(needsEnrollGuide('ios-tab'), true);
   // 화면: '등록'을 누르면 안내가 필요한 기기에서는 안내를 세우고 키 만들기(enroll)를 부르지 않은 채 끝난다
