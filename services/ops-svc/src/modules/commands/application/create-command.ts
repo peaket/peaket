@@ -5,8 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 import { blockApprovalOfParams, COMMAND_TYPES, requesterRolesOf, type ApprovalMode, type Command, type CommandExecutionActor, type CommandIdempotency, type CommandType } from '../domain/command.js';
 import { checkCommandParams, CommandInputRejected, isPgFallbackParams, normalizeReason, pgAssignParamsOf } from '../domain/command-params.js';
+import { LOBBY_BANNER_TEMPLATE_ID } from '../domain/control-kinds.js';
 import type { CommandDryRun, DryRunCountResult } from '../domain/dry-run.js';
-import { noCommandSecurityEvents, type CancelledEventGuard, type CommandSecurityEvents, type CommandStore } from '../domain/ports.js';
+import { noApprovedLobbyBannerTemplates, noCommandSecurityEvents, type CancelledEventGuard, type CommandSecurityEvents, type CommandStore, type LobbyBannerTemplates } from '../domain/ports.js';
 import type { ProtectedRangeHit } from '../domain/block-ranges.js';
 import { ComputeDryRun } from './compute-dry-run.js';
 import type { ExecuteCommand } from './execute-command.js';
@@ -64,12 +65,18 @@ export interface CreateCommandDeps {
   readonly security?: CommandSecurityEvents;
   /** 명령 12 온세일 윈도우·하위 결제사 판정과 명령 12·6 결제 갈래 dry-run 넣는 값(ADR-0349). 없으면 원천 없는 문(명령 12는 503)이다 */
   readonly pgGate?: PgAssignmentGate;
+  /** 명령 7의 승인 템플릿 찾기(RV-01). 없으면 늘 '없음'(noApprovedLobbyBannerTemplates)이라 명령 7은 422다 */
+  readonly bannerTemplates?: LobbyBannerTemplates;
 }
+
+/** 명령 7 템플릿이 승인되지 않았거나 꼴이 틀림(422 invalid-command, detail templateId, RV-01) */
+const templateRejected = (): ProblemError => new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다', detail: 'templateId' });
 
 export class CreateCommand {
   readonly dryRun: ComputeDryRun;
   readonly #security: CommandSecurityEvents;
   readonly #pgGate: PgAssignmentGate;
+  readonly #bannerTemplates: LobbyBannerTemplates;
 
   constructor(
     private readonly store: CommandStore,
@@ -81,6 +88,7 @@ export class CreateCommand {
     this.dryRun = deps.dryRun ?? new ComputeDryRun();
     this.#security = deps.security ?? noCommandSecurityEvents;
     this.#pgGate = deps.pgGate ?? new PgAssignmentGate();
+    this.#bannerTemplates = deps.bannerTemplates ?? noApprovedLobbyBannerTemplates;
   }
 
   /**
@@ -102,6 +110,11 @@ export class CreateCommand {
     }
     const eventId = eventIdOf(params);
     if (eventId !== undefined && !UUID.test(eventId)) throw invalidCommand();
+    // 명령 7은 승인된 템플릿만 받는다(ADR-0365 결정 2 바꿈, RV-01). 저장하기 전에 본다(미리보기도 같다)
+    if (input.type === 'LOBBY_BANNER') {
+      const templateId = params.templateId;
+      if (typeof templateId !== 'string' || !LOBBY_BANNER_TEMPLATE_ID.test(templateId) || !(await this.#bannerTemplates.approved(templateId))) throw templateRejected();
+    }
     // 회차 취소가 확정된 회차는 판매를 다시 열지 않는다(환급 중·끝난 회차를 다시 팔지 않게, ADR-0280 결정 2). 실행 때도 다시 본다
     if (input.type === 'SALE_RESUME' && eventId !== undefined && this.guard && (await this.guard.isCancelled(eventId))) {
       // 제목은 openapi x-peaket-problem-types 목록 그대로(같은 이름은 어느 서비스나 같은 제목, PRF192), 이 경우의 설명은 detail에 싣는다

@@ -138,6 +138,16 @@ export interface ControlDeliveries {
   summary(commandId: string, version: number): Promise<CommandDeliveryView | undefined>;
 }
 
+/**
+ * 명령 7의 승인된 문구 템플릿 찾기(F-02-1 리뷰 반영 RV-01, ADR-0365 결정 2 바꿈). 승인 템플릿 저장소와 banner에 싣는 글은 F-03-5(OPS-410)가 정한다.
+ * 그때까지 기본 구현은 늘 '없음'이라 명령 7은 만들어지지 않는다(422 invalid-command, detail templateId)
+ */
+export interface LobbyBannerTemplates {
+  /** 그 템플릿이 승인돼 지금 쓸 수 있는가. 읽지 못하면 던진다 */
+  approved(templateId: string): Promise<boolean>;
+}
+export const noApprovedLobbyBannerTemplates: LobbyBannerTemplates = { approved: async () => false };
+
 /** 받는 쪽 서비스마다 부를 주소(ADR-0365 결정 3). 운영은 헤드리스 DNS를 부를 때마다 다시 풀고, local·ci는 주소 목록이다. 실패하면 던진다 */
 export interface ControlTargets {
   resolve(service: string): Promise<readonly string[]>;
@@ -151,10 +161,16 @@ export interface ControlTransport {
 /** 받는 쪽 넷에 같은 판을 퍼뜨리고 ack를 기다리는 길(application ControlDispatcher가 구현, 실행기가 판매 중지·재개에 쓴다) */
 export interface ControlDeliverer {
   /**
-   * 모든 받는 쪽이 판 이상을 답할 때까지 1초 [가정]마다 같은 판으로 다시 보낸다. startedAtMs + 10초에 못 미치면 실패다(ADR-0365 결정 4).
-   * 던지지 않는다
+   * 모든 받는 쪽이 판 이상을 답할 때까지 1초 [가정]마다 같은 판으로 다시 보낸다. 시한은 min(startedAtMs + 10초, untilMs)이고 그때 못 미치면 실패다
+   * (ADR-0365 결정 4. untilMs는 응답 안에서 기다리는 부르는 쪽이 요청의 남은 시간으로 준다, ASVS 15.1.3). 던지지 않는다
    */
-  deliver(q: { readonly commandId: string; readonly version: number; readonly deliveries: readonly import('./control-kinds.js').ControlDelivery[]; readonly startedAtMs: number }): Promise<ControlDeliverResult>;
+  deliver(q: {
+    readonly commandId: string;
+    readonly version: number;
+    readonly deliveries: readonly import('./control-kinds.js').ControlDelivery[];
+    readonly startedAtMs: number;
+    readonly untilMs?: number;
+  }): Promise<ControlDeliverResult>;
 }
 export type ControlDeliverResult = { readonly ok: true; readonly ackedAtMs: number; readonly acked: number } | { readonly ok: false; readonly error: string };
 

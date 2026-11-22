@@ -131,6 +131,16 @@ export interface LeaderStore {
    * 없는 저장소(시험 대역)는 제어를 받지 않는다
    */
   applyControl?(w: LeaderControlStoreWrite): Promise<LeaderControlResult>;
+  /**
+   * 회차와 무관한 리더 세대 키(q:{admission}:leader)의 세대 확인(RV-02, ADR-0365 결정 5): 내 세대가 낮으면 FENCED, 높으면 내 세대로 올린다(수명 없음).
+   * 새 리더가 서면 루프가 한 번 부른다
+   */
+  bumpPlatform?(gen: number): Promise<'OK' | 'FENCED'>;
+  /**
+   * 그 세대 키와 견주기만 한다(올리지 않는다, RV-02). 회차 범위 제어 쓰기가 쓰기 전에 부른다: 새 리더가 키를 올렸으면 아직 아무도 올리지 않은
+   * 회차 키(오픈 전)에도 옛 세대는 쓰지 못한다. 전체 범위 쓰기는 제어 쓰기 Lua가 같은 키로 펜싱한다
+   */
+  checkPlatform?(gen: number): Promise<'OK' | 'FENCED'>;
   /** 명세 acquire의 BUMP */
   bump(eventId: string, gen: number, keepUntilMs: number): Promise<'OK' | 'FENCED'>;
   /** 명세 plan·applyWrite의 ADVANCE(정리·빈자리·전진·기록을 Lua 하나로) */

@@ -56,7 +56,7 @@ export const isDispatchedControl = (type: CommandType): boolean => DISPATCHED_CO
 
 const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** 명령 7 문구 템플릿 ID(openapi NoticeTemplateCreate.templateId와 같은 꼴) */
-const TEMPLATE_ID = /^[a-z][a-z0-9-]{2,39}$/;
+export const LOBBY_BANNER_TEMPLATE_ID = /^[a-z][a-z0-9-]{2,39}$/;
 const invalid = (why: string): never => {
   throw new CommandInputRejected('INVALID', why);
 };
@@ -100,7 +100,7 @@ export interface ControlDeliveryTimes {
  * - 1: admission-ctrl 리더. APPLY {"target", "untilMs": 보낸 시각 + 15분}, REVERT {"target": null, "resumeAtMs": 보낸 시각}
  * - 2: admission-ctrl 리더. APPLY {"paused": true, "expiresAtMs": 보낸 시각 + 10분}, EXTEND {"paused": true, "expiresAtMs": 새 만료}, REVERT·EXPIRE {"paused": false, "expiresAtMs": null}
  * - 3: purchase-svc·admission-ctrl·queue-svc 범위마다 {"paused": 참거짓}
- * - 7: queue-svc {"banner": 템플릿 ID 또는 null}(배너 글 풀기는 화면 몫, 정한 세부)
+ * - 7: 승인 템플릿 글을 싣는 길은 F-03-5(OPS-410)가 정한다. 그때까지 적용은 거절하고(템플릿 ID를 banner 글로 싣지 않는다, RV-01), 되돌림만 {"banner": null}이다
  * - 11: admission-ctrl 리더 PLATFORM {"stopped": 참거짓}
  * @throws CommandInputRejected 명령 값이 꼴에 맞지 않음(배경 작업이 FAILED invalid-command로 남긴다)
  */
@@ -128,9 +128,8 @@ export function controlDeliveriesOf(c: Pick<Command, 'type' | 'params'>, phase: 
     }
     case 'LOBBY_BANNER': {
       if (undo) return [{ service: 'queue-svc', scope: scopes[0]!, kind, desiredStateJson: json({ banner: null }) }];
-      const templateId = c.params.templateId;
-      if (typeof templateId !== 'string' || !TEMPLATE_ID.test(templateId)) return invalid('templateId');
-      return [{ service: 'queue-svc', scope: scopes[0]!, kind, desiredStateJson: json({ banner: templateId }) }];
+      // 승인 템플릿의 글을 싣는 꼴은 아직 없다(ADR-0365 결정 2 바꿈, F-03-5). 템플릿 ID를 공지 글로 보내지 않는다
+      return invalid('templateId');
     }
     case 'AUTOMATION_STOP':
       return [{ service: 'admission-ctrl', scope: CONTROL_SCOPE_PLATFORM, kind, desiredStateJson: json({ stopped: !undo }) }];
