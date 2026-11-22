@@ -2,6 +2,7 @@
 // 0031 staff_assignment 표에서 초대 조회·수락·거절 상태 전이, 이메일·동의·중복·만료, 내 배정 목록·커서를 본다.
 import { createDatabase, fakeClock, type Database } from '@peaket/platform';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateIdentity } from '../scripts/migrate.mjs';
 import { DrizzleStaffAssignmentStore } from '../src/modules/session/adapters/db/drizzle-staff-assignment-store.js';
@@ -31,6 +32,10 @@ const A8 = '0190f3a1-7c2e-7a00-8000-000000000018';
 const A9 = '0190f3a1-7c2e-7a00-8000-000000000019';
 const A10 = '0190f3a1-7c2e-7a00-8000-00000000001a';
 const A11 = '0190f3a1-7c2e-7a00-8000-00000000001d';
+const A12 = '0190f3a1-7c2e-7a00-8000-00000000001e';
+const A13 = '0190f3a1-7c2e-7a00-8000-00000000001f';
+const A14 = '0190f3a1-7c2e-7a00-8000-00000000002a';
+const EVENT_DUP = '0190f3a1-7c2e-7a00-8000-00000000000a';
 const SS = '0190f3a1-7c2e-7a00-8000-00000000001b';
 const DEVICE = '0190f3a1-7c2e-7a00-8000-00000000001c';
 const TOKEN = 'db-invite-token-1';
@@ -226,5 +231,22 @@ describe('파트너 초대 만들기·명단·해제·재발송 PostgreSQL [BAT-
     await database.pool.query("update staff_assignment set status = 'ASSIGNED', account_id = $2 where id = $1", [A9, ACCOUNT]);
     await expect(store.reissueInvitation({ assignmentId: A9, tokenHash: hash('db-fresh-2'), expiresAtMs: NOW + 3 * HOUR })).resolves.toEqual({ result: 'ALREADY_ACCEPTED' });
     await expect(store.reissueInvitation({ assignmentId: '0190f3a1-7c2e-7a00-8000-0000000000ff', tokenHash: hash('x'), expiresAtMs: NOW })).resolves.toEqual({ result: 'NOT_FOUND' });
+  });
+
+  test('I-T21 ② 0036은 옛 중복 INVITED를 만료가 늦은 하나만 남기고 EXPIRED로 정리한 뒤 인덱스를 만든다(RV-01)', async () => {
+    await database.pool.query('drop index if exists staff_assignment_event_invite_email_key');
+    await seedInvitation({ id: A12, token: 'db-dup-old', eventId: EVENT_DUP, role: 'gate_staff', status: 'INVITED', email: 'dup@example.com', expiresAt: new Date(NOW + HOUR) });
+    await seedInvitation({ id: A13, token: 'db-dup-new', eventId: EVENT_DUP, role: 'gate_lead', status: 'INVITED', email: 'DUP@example.com', expiresAt: new Date(NOW + 2 * HOUR) });
+    const sql = readFileSync(new URL('../migrations/0036_staff_invitation_email_unique.sql', import.meta.url), 'utf8');
+    await database.pool.query(sql);
+    const rows = (await database.pool.query('select id, status, invite_email, invite_token_hash from staff_assignment where event_id = $1 order by id', [EVENT_DUP])).rows;
+    expect(rows).toEqual([
+      { id: A12, status: 'EXPIRED', invite_email: null, invite_token_hash: null },
+      { id: A13, status: 'INVITED', invite_email: 'DUP@example.com', invite_token_hash: Buffer.from(hash('db-dup-new'), 'hex') },
+    ]);
+    const idx = await database.pool.query("select indexname from pg_indexes where schemaname = 'public' and tablename = 'staff_assignment' and indexname = 'staff_assignment_event_invite_email_key'");
+    expect(idx.rows).toEqual([{ indexname: 'staff_assignment_event_invite_email_key' }]);
+    // 인덱스가 다시 서면 같은 이메일의 INVITED를 또 넣을 수 없다
+    await expect(seedInvitation({ id: A14, token: 'db-dup-again', eventId: EVENT_DUP, role: 'gate_staff', status: 'INVITED', email: 'dup@example.com' })).rejects.toMatchObject({ code: '23505', constraint: 'staff_assignment_event_invite_email_key' });
   });
 });
