@@ -45,7 +45,8 @@ export function createPreviewServer(o = {}) {
     }
     const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
     let file = path.resolve(dist, rel);
-    if (!file.startsWith(path.resolve(dist))) {
+    const inside = path.relative(path.resolve(dist), file);
+    if (inside.startsWith('..') || path.isAbsolute(inside)) {
       res.writeHead(400);
       res.end();
       return;

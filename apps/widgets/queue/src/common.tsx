@@ -12,6 +12,8 @@ export interface WidgetBaseProps {
   detailHref: string;
   /** 격자 자리(예: { gridColumn: 'span 2' }) */
   style?: CSSProperties;
+  /** 참이면 원천이 아직 붙지 않은 자리다. 실제 값 화면이 고정 자료를 그릴 때 '원천 연결 전' 배지와 data-source="pending"을 단다(docs/frontend.md §5.7) */
+  pending?: boolean;
 }
 
 export function Freshness({ value }: { value?: WidgetBaseProps['freshness'] }) {
@@ -62,12 +64,19 @@ export interface WidgetFrameProps {
   children: ReactNode;
 }
 
+/** 원천 연결 전 배지(고정 자료를 진짜 값으로 읽지 않게) */
+function PendingBadge() {
+  return <span className="badge badge-outline">원천 연결 전</span>;
+}
+
 export function WidgetFrame({ id, title, base, badges, actions, wrapHead, bodyStyle, foldMeta, children }: WidgetFrameProps) {
+  const source = base.pending ? 'pending' : undefined;
   if (base.collapsed) {
     return (
-      <details className="widget" style={{ alignSelf: 'start', ...base.style }}>
+      <details className="widget" data-source={source} style={{ alignSelf: 'start', ...base.style }}>
         <summary className="widget-head">
           <span>{title}</span>
+          {base.pending ? <PendingBadge /> : null}
           <span className="fold-meta">
             {foldMeta}
             <i className="ic ic-chevron-down fold-ic" aria-hidden="true" />
@@ -77,11 +86,12 @@ export function WidgetFrame({ id, title, base, badges, actions, wrapHead, bodySt
     );
   }
   return (
-    <section className="widget" role="region" aria-labelledby={id} style={base.style}>
+    <section className="widget" role="region" aria-labelledby={id} data-source={source} style={base.style}>
       <div className={wrapHead ? 'widget-head wrap' : 'widget-head'}>
         <h2 className="t-sm fw-b" id={id}>
           {title}
         </h2>
+        {base.pending ? <PendingBadge /> : null}
         <Freshness value={base.freshness} />
         {badges}
         <div className="actions" style={actions ? { gap: 12 } : undefined}>
