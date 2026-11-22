@@ -46,43 +46,29 @@
 
 PEAKET은 **"지연된 요청을 쥐고 있지 않고 가장 바깥에서 즉시 털어내며, 재시도는 단 한 층에서 통제한다"**는 2단계 장애 격리 방어선을 구축했다.
 
-```mermaid
-flowchart TD
-    subgraph Layer1["1단계: 입구 게이트웨이 무상태 L7 차단 (Envoy Gateway)"]
-        INGRESS["클라이언트 요청 유입"]
-        LIMIT_CHECK{"동시 요청 수 / 대기 큐 상한 초과?"}
-        FAST_FAIL["즉시 실패 반환!\nHTTP 503 Service Unavailable\nRetry-After: 3 (초)"]
-        OUTLIER["이상 파드 자동 퇴출\n(5xx 연속 5회 발생 파드 30초 격리, 최대 10%)"]
-    end
-
-    subgraph Layer2["2단계: 서비스 내부 프로세스 레벨 차단 (Opossum & Bulkhead)"]
-        SVC_CALL["서비스 간 gRPC / DB / 외부 PG 호출"]
-        BULKHEAD{"의존성별 격벽 연결 풀 가득 참?"}
-        REJECT_BUSY["429 server-busy 반환\n(타 의존성 스레드 풀 완벽 보존)"]
-        CIRCUIT{"Opossum 서킷 브레이커 Open?"}
-        FALLBACK["503 dependency-unavailable 반환\n+ 도메인별 기능 축소(Degraded) 대체 응답"]
-    end
-
-    subgraph MeshControl["서비스 메시 단일 재시도 계층 (Istio Ambient)"]
-        MESH_RETRY["네트워크 연결 실패 시에만 1회 재시도\n(connect-failure, refused-stream)\n- 앱에 도달하지 않은 요청만 한정\n- 재시도 예산 10% 엄격 제한"]
-    end
-
-    subgraph Downstream["다운스트림 인프라 (DB, Redis, 외부 PG사)"]
-        TARGET["PostgreSQL / Redis / TossPayments"]
-    end
-
-    INGRESS --> LIMIT_CHECK
-    LIMIT_CHECK -->|"상한 초과"| FAST_FAIL
-    LIMIT_CHECK -->|"정상 범위"| SVC_CALL
-    SVC_CALL --> OUTLIER
-
-    SVC_CALL --> BULKHEAD
-    BULKHEAD -->|"풀 고갈"| REJECT_BUSY
-    BULKHEAD -->|"통과"| CIRCUIT
-    CIRCUIT -->|"Open 상태"| FALLBACK
-    CIRCUIT -->|"Closed 상태"| MESH_RETRY
-    MESH_RETRY --> TARGET
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [1단계: 입구 게이트웨이 무상태 L7 차단 (Envoy Gateway)]                │
+│ • 서지 큐 및 동시 요청 수 상한 초과 시 HTTP 503 즉각 실패 (Fast-Fail) │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (정상 범위 요청만 진입)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [2단계: 서비스 내부 서킷 브레이커 & 벌크헤드 (Opossum)]                │
+│ • PG사/외부 연동 50% 실패 시 서킷 즉각 오픈 ──▶ 멱등 재시도 큐 대기    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (정상 트랜잭션만 도달)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [3단계: 스토리지 불변식 보호]                                          │
+│ • DB 부분 유니크 인덱스 및 Redis noeviction으로 시스템 붕괴 원천 차단 │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 격벽 계층 | 실패 감지 기준 | 장애 전파 차단 메커니즘 |
+| :--- | :--- | :--- |
+| **1단계 입구** | 큐 깊이 및 타임아웃 | 백엔드 다운스트림으로의 연쇄 트래픽 폭주 즉각 컷오프 |
+| **2단계 서비스**| Opossum 서킷 브레이커 | 외부 결제사 장애 시 스레드 풀 고갈을 방지하고 벌크헤드 격리 |
 
 ### 핵심 매커니즘 4가지
 

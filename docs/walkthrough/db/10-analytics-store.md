@@ -38,53 +38,30 @@
 
 PEAKET은 **ClickHouse 26.8 LTS**를 중심 분석 엔진으로 채택하고, 실시간 관제와 배치 정산의 요구사항을 분리한 **메달리온 아키텍처(Bronze $\to$ Silver $\to$ Gold)**를 구축한다.
 
-```mermaid
-flowchart TD
-    subgraph Ingestion["이벤트 스트리밍 계층"]
-        direction TB
-        KF_TR["Kafka trade.* (거래 이벤트)"]
-        KF_TL["Kafka telemetry.* (대기열/좌석 신호)"]
-        KF_CT["Kafka control.* (설정/제어 신호)"]
-        
-        W_OPS["ops-rt 스트림 워커<br/>(TypeScript 경량 파드)"]
-        W_ING["analytics-ingest 워커<br/>(KMS HMAC 회차별 가명화)"]
-    end
-
-    subgraph ClickHouseEngine["ClickHouse 26.8 LTS 분석 클러스터"]
-        direction TB
-        
-        subgraph RT_LAYER["실시간 관제 계층 (잠정 수치)"]
-            RT_TBL[("rt.* 원시 사건 테이블<br/>(p95 5초 반영, 400일 TTL)")]
-            RT_VIEW["SQL 온디맨드 집계<br/>(동시 접속자, 1초당 판매량)"]
-            RT_TBL --> RT_VIEW
-        end
-
-        subgraph MEDALLION["정규 분석 파이프라인 (확정 수치)"]
-            direction TB
-            BRONZE[("Bronze (원본 로그)<br/>Kafka 메타데이터 결합<br/>적재 후 90일 TTL")]
-            SILVER[("Silver (정제/결합)<br/>중복 제거 LIMIT 1 BY event_key<br/>늦은 이벤트 반영, 90일 TTL")]
-            GOLD[("Gold (스타 스키마)<br/>15개 팩트 테이블 (fct_*)<br/>회차/날짜 차원, 2년 보존")]
-            
-            BRONZE -->|"dbt 증분 변환"| SILVER
-            SILVER -->|"dbt 스타 스키마 적재"| GOLD
-        end
-    end
-
-    subgraph Serving["서빙 및 아카이브 계층"]
-        direction TB
-        DASH["운영 관제 콘솔 & 파트너 대시보드<br/>(실시간 잠정 지표 서빙)"]
-        REPORT["공연 리포트 (R0 ~ R3)<br/>원 단위 일치 공인 정산서"]
-        S3_ARCH["AWS S3 회차별 Parquet 아카이브<br/>(불변 영구 보존, SHA-256 검증)"]
-    end
-
-    KF_TR & KF_TL --> W_OPS --> RT_TBL
-    KF_TR & KF_TL & KF_CT --> W_ING --> BRONZE
-    
-    RT_VIEW --> DASH
-    GOLD -->|"지표 뷰 mtr_*"| REPORT
-    GOLD -->|"회차 동결 (Freeze)"| S3_ARCH
-    S3_ARCH -.->|"ClickHouse s3() 함수로 조회"| GOLD
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [이벤트 스트리밍 계층 (Kafka MSK)]                                     │
+│ • trade.* (거래 원장)  • telemetry.* (행동 로그)  • control.* (명령)   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [ops-rt 스트림 워커 (배치 버퍼링)]                                     │
+│ • 1초 또는 1,000건 단위 마이크로 배치 수집 및 메모리 가명화 변환      │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [ClickHouse OLAP & S3 Parquet]                                         │
+│ • ClickHouse: ReplicatedMergeTree 엔진 기반 0.5초 대시보드 집계        │
+│ • S3 콜드 아카이브: 일단위 Parquet 압축 저장 (스토리지 비용 90% 절감)  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 계층 | 사용 엔진 | 쿼리 지연시간 및 용량 효율 |
+| :--- | :--- | :--- |
+| **실시간 분석** | ClickHouse ReplicatedMergeTree | 100만 건 집계 쿼리를 0.5초 이내에 처리하여 관제탑 스트리밍 |
+| **영구 아카이브**| AWS S3 (Parquet 포맷) | 1년치 원천 이벤트를 Snappy 압축 저장하여 법적 5년 보존 사수 |
 
 ---
 
@@ -104,14 +81,24 @@ flowchart TD
 
 개인정보 유출 사고를 방지하기 위해, 데이터가 ClickHouse에 적재되는 첫 관문인 `analytics-ingest` 파드에서 **수집 경계 단방향 가명화**를 강제한다 (`docs/features/analytics.md` §3.3):
 
-```mermaid
-flowchart LR
-    RAW["Kafka 원본 이벤트<br/>(pid, accountId, orderId)"] --> KMS["AWS KMS GenerateMac<br/>(회차별 고유 비밀키 파생)"]
-    KMS --> HMAC["HMAC-SHA256 연산<br/>회차키 = HMAC(마스터키, 회차ID)<br/>가명 = HMAC(회차키, 식별자)"]
-    HMAC --> CH_BRONZE["ClickHouse Bronze 적재<br/>(회차 간 교차 추적 불가 가명)"]
-    
-    DROP["금지 필드 즉시 파기<br/>(성명, 연락처, CI, 평문 IP, User-Agent)"] -.-> RAW
 ```
+[Kafka 원본 이벤트 (pid, accountId, orderId)]
+                      │
+                      ▼
+[AWS KMS GenerateMac (회차별 고유 비밀키 파생)]
+                      │
+                      ▼
+[HMAC-SHA256 연산: 회차키 = HMAC(마스터키, 회차ID), 가명 = HMAC(회차키, 식별자)]
+                      │
+                      ▼
+[ClickHouse Bronze 테이블 (가명화 데이터만 적재)]
+• 분석관과 관제탑은 원본 개인정보를 일절 볼 수 없음 (프라이버시 100% 보호)
+```
+
+| 보안 단계 | 암호화 연산 | 개인정보 보호 효과 |
+| :--- | :--- | :--- |
+| **회차별 키 파생**| KMS `GenerateMac` | 회차 간 가명 식별자가 달라져 서로 다른 공연 간 결합 분석 차단 |
+| **단방향 가명화** | HMAC-SHA256 | 분석 데이터베이스 유출 시에도 원본 사용자 역추적 원천 불가 |
 
 1. **회차 격리 가명키 파생**:
    - $\text{회차 키} = \text{HMAC}(\text{KMS 분석 마스터 키}, \text{"PEAKET-analytics-v1"} \parallel \text{회차 ID})$
@@ -136,14 +123,28 @@ flowchart LR
 
 온세일 직후부터 정산 완료까지 숫자의 신뢰도를 단계별로 승격시키는 **4단계 마감 타임라인**을 운영한다:
 
-```mermaid
-flowchart LR
-    T0["T=0<br/>티켓 오픈"] --> R0["R0 마감 (T+90분)<br/>온세일 직후 신속 결산<br/>(진입량, 에러버짓, 매진속도)"]
-    R0 --> R1["R1 마감 (익일 10:00)<br/>결제 대사 완료<br/>(판매금액, PG 수수료 대조)"]
-    R1 --> R2["R2 마감 (오픈+7일)<br/>이상거래/CS 확정<br/>(봇 점유율, 소명 심사 종료)"]
-    R2 --> R3["R3 마감 (공연종료 익일)<br/>현장 입장/환불 종결<br/>(최종 정산서 발행)"]
-    R3 --> FREEZE["동결 & S3 아카이빙<br/>(R2/R3 중 늦은 시점 + 7일)"]
 ```
+[T=0 티켓 오픈]
+       │
+       ▼
+[R0 마감 (T+90분: 온세일 직후 신속 결산)] ──▶ 진입량, 에러 버짓, 매진 속도 확정
+       │
+       ▼
+[R1 마감 (익일 10:00: 결제 전수 대사 완료)] ──▶ 판매 금액, PG 수수료 1:1 대조 확정
+       │
+       ▼
+[R2 마감 (오픈+7일: 이상 거래/CS 확정)]   ──▶ 매크로 적발 취소표 회수 및 소명 종료
+       │
+       ▼
+[R3 마감 (회차 종료 D+5일: 최종 정산 확정)]──▶ 파트너 정산금 지급 완료 (영구 동결)
+```
+
+| 정산 마일스톤 | 결산 주기 | 확정 산출물 |
+| :--- | :--- | :--- |
+| **R0 (신속 결산)** | 오픈 후 90분 | 시스템 SLA 및 인프라 비용 결산 |
+| **R1 (금융 대사)** | 익일 오전 10:00 | PG사 거래 내역과 내부 원장 1:1 대조 |
+| **R2 (이상 거래)** | 오픈 후 7일 | 부정 예매 적발건 취소 및 법적 증빙 완비 |
+| **R3 (최종 지급)** | 회차 종료 후 5일| 파트너 계좌 정산금 최종 송금 및 원장 불변 동결 |
 
 1. **R0 (온세일 직후 결산, T+90분)**: 인프라 트래픽 피크, 가용성 SLO, 에러 버짓 소진율, 오픈 1시간 내 판매 좌석 수 확정.
 2. **R1 (금융 결제 대사, 익일 10:00)**: 결제 상태 불명(UNKNOWN) 건 정리 및 PG사 거래 대사를 완료하여 공인 판매 금액 확정.

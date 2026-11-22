@@ -43,30 +43,24 @@
 
 PEAKET은 **"수평 샤딩과 파티셔닝의 환상을 걷어내고, 단일 Aurora PostgreSQL의 강력한 ACID 제약조건과 셀(Cell) 아키텍처로 확장한다"**는 설계를 채택했다.
 
-```mermaid
-flowchart TD
-    subgraph AppTier["애플리케이션 계층 (purchase-svc / payment-svc)"]
-        BIZ_LOGIC["티켓팅 확정 비즈니스 로직\n- 좌석 상태 Hard Sale 확정\n- 주문서 생성 & 결제 정보 기록\n- 1인 1매 구매 한도 차감"]
-    end
-
-    subgraph ConnectionPool["커넥션 풀링 계층"]
-        PGBOUNCER["PgBouncer 트랜잭션 풀링\n(파드 수백 개 증설 시 커넥션 고갈 원천 방어)"]
-    end
-
-    subgraph AuroraPostgres["Aurora PostgreSQL (단일 Writer + 다중 AZ 동기식 Reader)"]
-        WRITER["Aurora Primary Writer (r6g.4xlarge)\n- 단일 마스터 ACID 트랜잭션\n- 부분 유니크 인덱스 (WHERE status != 'CANCELLED')\n- statement_timeout / idle_in_transaction_session_timeout"]
-        REPLICA["Aurora Read Replica (Multi-AZ)\n- 읽기 트래픽 분산 & Failover 대기 (RPO=0, RTO < 5분)"]
-    end
-
-    subgraph NightlyMaintenance["야간 데이터 정비 배치 (04:00~06:00)"]
-        CLEANER["데이터 보존기한 정비 워커\n- 1만 건 단위 청크(Chunk) DELETE\n- 인덱스 비대화 방지 및 WAL 스파이크 억제"]
-    end
-
-    BIZ_LOGIC --> PGBOUNCER
-    PGBOUNCER --> WRITER
-    WRITER -.->|"스토리지 레벨 복제 (10ms 이내)"| REPLICA
-    CLEANER -->|"정비 시간대 인덱스 청소"| WRITER
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [애플리케이션 계층 (purchase-svc / payment-svc)]                       │
+│ • 티켓팅 확정 트랜잭션 (Hard Sale, 멱등키, 1인 구매 한도)              │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (PgBouncer 풀러 경유)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [PostgreSQL 단일 Writer 인스턴스 (Aurora db.r7g.xlarge)]               │
+│ • 샤딩(Sharding) 배제: 5년 누적 3,500만 행이 단일 B-Tree(18GB)에 상주  │
+│ • 복잡한 2PC 분산 트랜잭션 없이 단일 로컬 ACID 트랜잭션으로 완결      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 데이터베이스 구조 | 샤딩 적용 시 문제점 | 단일 인스턴스 사수 이점 |
+| :--- | :--- | :--- |
+| **트랜잭션 일관성** | 파티션 간 2단계 커밋(2PC) 지연시간 급증 | 단일 로컬 ACID 커밋으로 p99 10ms 이내 처리 |
+| **인덱스 제약** | 분산 환경에서 글로벌 유니크 인덱스 불가 | `seat_sale` 부분 유니크 인덱스로 오버셀 0건 수학적 강제 |
 
 ### 핵심 매커니즘 4가지
 

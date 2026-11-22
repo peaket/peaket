@@ -54,9 +54,9 @@ PEAKET은 도메인 책임에 따라 4개 독립 서비스 DB로 분할하되, �
 
 ---
 
-### 3.2 핵심 도메인 완결 Mermaid ERD
+### 3.2 핵심 도메인 완결 ERD
 
-다음은 서비스 경계를 넘나드는 핵심 도메인 간의 전체 엔티티 관계 다이어그램(ERD)이다. 물리 외래키가 존재하는 관계와 논리적 ID로만 참조하는 분산 관계를 명확히 구분한다.
+다음은 서비스 경계를 넘나드는 핵심 도메인 간의 전체 엔티티 관계 다이어그램(ERD)이다. 관계선의 `||--o{`는 1:N, `||--o|`는 1:0..1을 뜻한다. 물리 외래키 관계는 관계선 라벨의 `(FK)`, 서비스 경계를 넘는 논리 ID 참조는 `(논리 ID)`로 구분한다.
 
 ```mermaid
 erDiagram
@@ -202,6 +202,17 @@ erDiagram
     }
 ```
 
+| 테이블 | 주요 역할 | 무결성 제약조건 |
+| :--- | :--- | :--- |
+| **production / event** | 공연 정보 및 회차 일정 마스터 | 회차별 독립적인 티켓 오픈 및 예매 상태 관리 |
+| **venue / section / seat**| 공연장 공간 좌표 및 등급 배치 | 불변(Immutable) 마스터 데이터로 온세일 중 변경 불가 |
+| **purchase_order** | 예매 주문 헤더 | 주문 상태(APPROVED, CANCELLED) 및 총 결제 금액 |
+| **order_item / order_event** | 주문 좌석 항목과 상태 전이 감사 이력 | `order_item` 복합 PK `(order_id, line_no)`, `order_event` 복합 PK `(order_id, seq)` |
+| **purchase_quota** | 1인당 예매 한도 원장 | `(account_id, event_id)` 복합 PK, 조건부 UPDATE로 한도 초과 차단 |
+| **seat_sale** | 좌석별 최종 판매 상태 원장 | `(event_id, seat_id)` 부분 유니크 인덱스로 오버셀 차단 |
+| **payment_attempt / payment** | 결제 시도 이력과 최종 결제 원장 | `payment_attempt` 활성 1건 부분 유니크, `payment.order_id` UNIQUE |
+| **ticket** | 발권 원장 및 소유권 | `payer_account_id`(결제자)와 `account_id`(보유자) 분리 |
+
 ---
 
 ### 3.3 테이블별 핵심 컬럼, 키 및 비즈니스 불변식
@@ -266,25 +277,28 @@ erDiagram
 
 ### 4.1 좌석 배치(Core)와 회차 판매(Purchase)의 물리적 분리
 
-```mermaid
-flowchart TD
-    subgraph CoreDomain["core-svc: 좌석 배치 (공간 정보 - 불변 마스터)"]
-        direction TB
-        Venue["venue (공연장 배치본)"]
-        Section["section (VIP, R 구역 다각형)"]
-        Seat["seat (행, 번호, X/Y 좌표)"]
-        Venue --> Section --> Seat
-    end
-
-    subgraph PurchaseDomain["purchase-svc: 회차별 판매 (상태 정보 - 고빈도 가변)"]
-        direction TB
-        EventSale["event_sale (회차 판매 상태)"]
-        SeatSale["seat_sale (PENDING / SOLD / RETURNED)"]
-        SeatHold["Redis 비트맵 & seat_hold (실시간 선점)"]
-    end
-
-    Seat -.->|"좌석 메타데이터 참조 (ID)"| SeatSale
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [core-svc: 좌석 배치 (공간 정보 - 불변 마스터)]                        │
+│ • venue (공연장 배치본) ──▶ section (구역 다각형) ──▶ seat (물리 좌석)  │
+│ • 오픈 전 1회 생성 후 티켓팅 중 쓰기 0건 (불변 마스터 캐싱)            │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [purchase-svc: 동적 좌석 판매 원장 (초고동시성 트랜잭션)]              │
+│ • seat_sale: 물리 좌석 행을 사전에 만들지 않고 판매 시점에만 INSERT     │
+│ • 5만 석 공연에서 단 1건도 안 팔렸을 때: seat_sale 행 수 = 0행          │
+│ • 5만 석 전석 매진 시: seat_sale 행 수 = 정확히 50,000행               │
+│ • 빈 좌석을 DB 행으로 보관하지 않아 락 경합 면적 100% 제거            │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 설계 방식 | 기존 전통적 방식 | PEAKET 채택 방식 (Zero-Row Baseline) |
+| :--- | :--- | :--- |
+| **테이블 크기** | 5만 석 사전 INSERT (5만 행 락) | 미판매 시 0행, 판매 성공 시에만 INSERT |
+| **락 경합 해소**| `SELECT ... FOR UPDATE` 행 락 경합 | 유니크 인덱스 충돌 검사로 락 대기 시간 0ms 달성 |
+| **데이터 무결성**| 복잡한 상태 업데이트 전이 | 단일 `seat_sale` 유니크 인덱스가 오버셀 수학적 사수 |
 
 - **공유성 (1:N 매핑)**: 대형 콘서트는 동일한 좌석 배치(`venue_id`)를 바탕으로 금/토/일 3~5회차를 진행한다. 만약 좌석 배치에 판매 상태를 두면 회차마다 5만 개의 좌석 행을 중복 복사해야 하며, 공연장 시설 보수나 좌표 수정 시 모든 회차의 좌석 데이터를 일일이 갱신해야 한다.
 - **부하 격리**: 좌석 좌표(`x, y`)와 구역 도형은 CDN과 브라우저에 수 시간 동안 캐싱되는 정적 데이터다. 반면 좌석 판매 상태(`PENDING`, `SOLD`)는 초당 수천 번 변경되는 극단적인 쓰기 핫스팟이다. 두 도메인을 물리적으로 분리함으로써 카탈로그 조회 트래픽과 예매 트래픽의 DB 경합을 완전히 차단했다.
@@ -311,16 +325,32 @@ flowchart TD
 
 주문 테이블은 완전한 이벤트 소싱(Event Sourcing)을 채택하지 않고, **현재 상태(`purchase_order`)와 덧붙이기 이력(`order_event`)의 하이브리드 모델**을 채택했다 (ADR-0113):
 
-```mermaid
-flowchart LR
-    subgraph SingleTx["단일 ACID 트랜잭션 (주문 전이 함수)"]
-        direction TB
-        T1["1. purchase_order 상태 UPDATE<br/>(status='APPROVED', event_seq=event_seq+1)"]
-        T2["2. order_event 이력 INSERT<br/>(seq=새 event_seq, cause='T8_PAYMENT_SUCCESS')"]
-        T3["3. outbox 테이블 이벤트 INSERT<br/>(OrderApproved 이벤트)"]
-        T1 --> T2 --> T3
-    end
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [단일 ACID 트랜잭션 (주문 전이 함수)]                                  │
+│                                                                        │
+│   1. purchase_order 상태 UPDATE (status='APPROVED', seq = seq + 1)     │
+│                               │                                        │
+│   2. order_event 이력 INSERT  (seq=새 event_seq, cause='T8_PAY_OK')    │
+│                               │                                        │
+│   3. purchase_quota 잔여 차감 (current_count = current_count + 매수)   │
+│                               │                                        │
+│   4. seat_sale 상태 전이      (status='SOLD', version = version + 1)   │
+│                               │                                        │
+│   5. purchase_outbox 이벤트   (topic='trade.purchase-orders')          │
+│                                                                        │
+└───────────────────────────────┬────────────────────────────────────────┘
+                                │ (단 하나의 COMMIT 문으로 원자적 기록)
+                                ▼
+                 [성공 시 5개 테이블 일괄 반영 / 실패 시 100% 롤백]
+```
+
+| 단계 | 대상 테이블 | 상태 변경 및 불변식 |
+| :--- | :--- | :--- |
+| **1~2** | `purchase_order` & `order_event` | 주문 상태 확정 및 단조 증가 시퀀스 기반 변경 이력 영구 보존 |
+| **3** | `purchase_quota` | 1인 4매 한도 초과 여부 원자적 검증 및 차감 |
+| **4** | `seat_sale` | PENDING $\rightarrow$ SOLD 최종 전이 (낙관적 락 버전 대조) |
+| **5** | `purchase_outbox` | 트랜잭션 커밋과 동시에 Kafka 발행용 이벤트 원자적 적재 |
 
 - **조회 성능의 극대화**: 주문 상세 화면이나 예매 내역 조회 시 수십 개의 이벤트를 리플레이(Replay)할 필요 없이 `purchase_order`의 단일 행만 읽으면 된다 (O(1) 인덱스 스캔).
 - **완벽한 감사 추적성**: 주문 상태가 변경될 때마다 동일한 트랜잭션 내에서 `order_event`에 빈틈없는 연속 순번(`seq`)으로 이력을 덧붙인다. 매일 새벽 배치 잡이 `purchase_order.event_seq`와 `order_event`의 마지막 `seq`를 대조하여 불일치 발견 시 경보(SEV3)를 발송한다.

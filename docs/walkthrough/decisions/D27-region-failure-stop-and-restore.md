@@ -50,37 +50,25 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```mermaid
-flowchart TD
-    subgraph DisasterTrigger ["1. 재해 감지 & 안전 정지 (서울 리전 정전)"]
-        AWSFailure["AWS ap-northeast-2 (Seoul) Down"]
-        Upptime["외부 모니터링 (GitHub/Cloudflare Upptime)"]
-        PublicNotice["정적 상태 안내 페이지 공지<br/>'안전한 데이터 보존을 위해 판매가 일시 중단되었습니다'"]
-        AWSFailure --> Upptime --> PublicNotice
-    end
-
-    subgraph OfflineGate ["2. 현장 게이트: 독립 오프라인 입장 (Zero Dependency)"]
-        Scanner["안드로이드 전용 스캐너 기기"]
-        LocalDB["SQLite 로컬 캐시 (티켓 공개키 목록)"]
-        QR["관람객 단말 오프라인 Base45 동적 QR"]
-        QR -->|150ms 검표| Scanner
-        Scanner --> LocalDB
-        Scanner -.->|스캔 완료 이력 로컬 SQLite에 누적 적재| Scanner
-    end
-
-    subgraph ColdRestore ["3. 도쿄 리전(ap-northeast-1) 통제된 콜드 복원"]
-        TokyoS3["도쿄 S3 스냅샷 버킷 (매일 1회 복제)"]
-        Terraform["Terraform IaC (도쿄 인프라 신규 프로비저닝)"]
-        PGReconcile["외부 PG사 거래 내역 단건 대사 배치"]
-        NewCluster["도쿄 신규 프로덕션 EKS + Aurora + Redis"]
-        
-        Terraform --> NewCluster
-        TokyoS3 -->|DB 일일 스냅샷 복원| NewCluster
-        PGReconcile -->|미반영 결제 건 100% 복구| NewCluster
-    end
-
-    PublicNotice -.->|24시간 이내 복구 완료 후| NewCluster
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [재해 감지 & 안전 정지 (서울 리전 정전 / 지진 / 화재 발생)]            │
+│ • 외부 독립 모니터링(Upptime) 감지 즉시 안전 정지 모드 진입            │
+│ • 위험한 멀티 리전 액티브 자동 페일오버(Split-Brain) 절대 금지         │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [도쿄 리전 비동기 스냅샷 백업 & 외부 결제사 대사]                      │
+│ • 도쿄 리전 S3/RDS 스냅샷 복구 + PG사 원시 거래 대사로 원장 일치      │
+│ • 현장 입장은 오프라인 PWA 스캐너로 무중단 진행                        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 재해 대응 전략 | 채택 정책 | 방어하는 참사 |
+| :--- | :--- | :--- |
+| **자동 전환 금지** | 서울 리전 즉각 판매 동결 | 분산 네트워크 순단 시 양쪽 리전에서 좌석이 동시 판매되는 오버셀 원천 차단 |
+| **오프라인 검표** | PWA 단말 로컬 단독 판정 | 서울 클라우드 전면 두절 시에도 현장 관객 입장 지연 0건 사수 |
 
 ### 핵심 매커니즘 4가지
 

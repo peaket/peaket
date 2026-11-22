@@ -41,34 +41,22 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```mermaid
-flowchart TD
-    subgraph StateMatrix ["1. 상태 성격별 단 1개 표준 도구 매트릭스"]
-        direction LR
-        S1["서버 비동기 데이터 ➔ TanStack Query"]
-        S2["폼 입력 & 유효성 ➔ React Hook Form + Zod"]
-        S3["복잡한 화면 흐름 제어 ➔ XState State Machine"]
-        S4["오프라인 로컬 저장소 ➔ Dexie.js (IndexedDB)"]
-        S5["전역 UI 상호작용 ➔ Zustand (단일 통일)"]
-    end
-
-    subgraph ZustandArch ["2. 4개 프론트엔드 앱의 단일 Zustand 아키텍처"]
-        direction TB
-        AppWeb["소비자 웹 (apps/web)<br/>- 찜 목록, UI 모달 상태"]
-        AppScanner["게이트 스캐너 (apps/scanner)<br/>- 검표 게이트 설정, 기기 상태"]
-        AppPartner["파트너 콘솔 (apps/partner)<br/>- 좌석맵 에디터 정규화 문서 상태"]
-        AppOps["관제 콘솔 (apps/ops)<br/>- 250ms 실시간 버퍼, 위젯 레이아웃"]
-    end
-
-    subgraph Integration ["3. 특수 워크로드와의 무결성 결합"]
-        Canvas2D["2D Canvas 에디터 엔진<br/>- React 트리 밖에서 useSeatStore.getState() 직접 구독<br/>- 변경된 좌석 인덱스만 캔버스 재드로잉 (INP < 200ms)"]
-        OpsWidgets["관제 원격 위젯 격리<br/>- 호스트 상태를 '읽기 전용'으로 제공 (host.getState())<br/>- 위젯 오류가 코어 관제 세션을 오염시키지 않음"]
-    end
-
-    S5 --> ZustandArch
-    AppPartner --> Canvas2D
-    AppOps --> OpsWidgets
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [상태 성격별 단 1개 표준 도구 매트릭스]                                │
+│                                                                        │
+│   • 서버 비동기 데이터 ──────▶ TanStack Query (캐싱, 지터 폴링, 무효화)│
+│   • 전역 UI / 로컬 상태 ─────▶ Zustand (가벼운 전역 상태)              │
+│   • 복합 업무 상태 머신 ─────▶ XState v5 (결제/양도 유한 상태 전이)   │
+│   • 폼 입력 및 스키마 검증 ──▶ React Hook Form + Zod                  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 상태 도메인 | 전담 도구 | 파편화 방지 효과 |
+| :--- | :--- | :--- |
+| **서버 캐시** | TanStack Query v5 | 중복 네트워크 요청 제거 및 적응형 폴링 자동 동기화 |
+| **상태 머신** | XState v5 | 결제창 체류 및 양도 프로세스의 잘못된 상태 전이 100% 차단 |
+| **폼 검증** | RHF + Zod | 런타임 타입 검증으로 게이트웨이 유입 전 잘못된 입력 차단 |
 
 ### 핵심 매커니즘 4가지
 

@@ -20,41 +20,36 @@
 
 ### 결제 생애주기 종합 상태 전이도
 
-```mermaid
-stateDiagram-v2
-    [*] --> ORDER_CREATED: "T1 주문 생성 (서버 금액 계산)"
-    ORDER_CREATED --> ORDER_CREATED: "T2 새 결제 시도 (PG 재선택)"
-    ORDER_CREATED --> AUTHENTICATED: "T3 결제창 인증 완료 (PG SDK 복귀)"
-    ORDER_CREATED --> EXPIRED: "T5 접수 없이 만료 (무과금 종결)"
-    AUTHENTICATED --> EXPIRED: "T6 접수 없이 만료 (무과금 종결)"
-    AUTHENTICATED --> ACCEPTED: "T4 결제 접수 202 (Saga 개시)"
-    
-    ACCEPTED --> RESERVED: "T7 Hard Sale PENDING 예약 성공"
-    ACCEPTED --> FAILED: "T8 좌석 경합 패배 (과금 0원 종결)"
-    
-    RESERVED --> APPROVED: "T9 PG 승인 성공 (Pivot Step 통과)"
-    RESERVED --> AWAITING_DEPOSIT: "T10 가상계좌 발급 (입금 대기)"
-    RESERVED --> FAILED: "T11 승인 거절 / 10분 기한 초과 (과금 0원)"
-    RESERVED --> UNKNOWN: "T12 승인 응답 유실 / 60초 타임아웃"
-    
-    UNKNOWN --> APPROVED: "T13 단건 조회로 승인 확인 (Forward Recovery)"
-    UNKNOWN --> AWAITING_DEPOSIT: "T14 단건 조회로 가상계좌 확인"
-    UNKNOWN --> FAILED: "T15 단건 조회로 미승인 확인 (좌석 해제)"
-    
-    AWAITING_DEPOSIT --> APPROVED: "T16 입금 확인 (웹훅 + 단건 조회)"
-    AWAITING_DEPOSIT --> FAILED: "T17 입금 기한 경과 (PENDING 삭제)"
-    
-    APPROVED --> CONFIRMED: "T18 발권 완료 (ticket-svc ISSUED)"
-    APPROVED --> APPROVED: "T19 발권 장애 재시도 (발권 큐 1~60s)"
-    APPROVED --> COMPENSATED: "T20 업무상 발권 불가 (회차 취소 / CS 확인 환불)"
-    
-    CONFIRMED --> AWAITING_DEPOSIT: "T21 가상계좌 입금 되돌림 (티켓 무효화)"
-    CONFIRMED --> PARTIALLY_REFUNDED: "T22 일부 티켓 예매 취소"
-    PARTIALLY_REFUNDED --> REFUNDED: "T23 잔여 티켓 추가 취소"
-    CONFIRMED --> REFUNDED: "T24 전액 취소 / 공연 취소 환급"
-    PARTIALLY_REFUNDED --> PARTIALLY_REFUNDED: "T25 예외 환불 추가 환급"
-    REFUNDED --> REFUNDED: "T26 예외 환불 추가 환급"
 ```
+┌──────────────┐     T1 주문 생성     ┌──────────────┐
+│  [*] 시작    │────────────────────▶│ ORDER_CREATED│
+└──────────────┘                      └──────┬───────┘
+                                             │
+                                             │ T3 결제창 인증 완료
+                                             ▼
+┌──────────────┐     T4 접수 완료     ┌──────────────┐
+│   EXPIRED    │◀──(T5,T6 무과금)─────│AUTHENTICATED │
+│  무과금 종결 │                      └──────┬───────┘
+└──────────────┘                             │
+                                             │ T7 Hard Sale PENDING 통과
+                                             ▼
+┌──────────────┐     T10 취소/실패    ┌──────────────┐
+│FAILED/CANCEL │◀─────────────────────│  PG_PENDING  │
+│  무과금 종결 │                      └──────┬───────┘
+└──────────────┘                             │
+                                             │ T9 PG 승인 완료 (Pivot Point)
+                                             ▼
+                                      ┌──────────────┐
+                                      │     PAID     │──▶ [*] 티켓 발권 전진
+                                      └──────────────┘
+```
+
+| 주문 상태 | 전이 조건 | 결제 및 원장 보장 |
+| :--- | :--- | :--- |
+| **ORDER_CREATED**| 서버 사이드 결제 금액 계산 | 클라이언트 금액 위조 차단, 10분 결제 타임아웃 타이머 가동 |
+| **AUTHENTICATED**| 결제창 인증 완료 (paymentKey) | PG사 인증 성공, 아직 금융 출금 전 단계 |
+| **PG_PENDING** | DB `seat_sale` PENDING 잠금 | 물리적 유니크 인덱스 확보, 실패 시 승인 미호출 (무과금) |
+| **PAID** | PG사 카드 승인 성공 | Pivot Point 달성, 이후 장애 발생 시 전진 복구 강제 |
 
 ### 결제 도메인 핵심 3대 서브시스템
 
@@ -206,6 +201,12 @@ sequenceDiagram
     end
 ```
 
+| 단계 | 격리 메커니즘 | 에러 발생 시 처리 |
+| :--- | :--- | :--- |
+| **PENDING 확보** | PostgreSQL 유니크 인덱스 | 23505 에러 시 승인 중단 및 409 반환 (출금 0건) |
+| **PG 승인 호출** | `confirm-{orderId}` 멱등키 | 타임아웃 시 단건 조회 API로 결제사 상태 확정 |
+| **전진 복구** | Transactional Outbox + 재시도 큐 | 결제 승인 후 티켓 발권 서버 다운 시에도 백그라운드 발권 완료 |
+
 ---
 
 ### 모듈 2: 멱등성 보장과 이중 결제 0건 방어 (Idempotency & Zero Double-Charge Guarantee)
@@ -263,20 +264,36 @@ NFR-006의 결제 확정 SLA는 p99 3초(PG 2초 + 내부 1초)다. 하지만 �
 
 #### 3. 네트워크 단절 및 타임아웃 시 전진 복구 (Forward Recovery)
 
-```mermaid
-flowchart TD
-    START["승인 API 호출 (confirm-{orderId})"] --> CALL{"PG 승인 응답\n(최대 60초 대기)"}
-    
-    CALL -- "200 OK 승인" --> APPROVED["APPROVED 확정\n(사후 발권 진행)"]
-    CALL -- "명시적 거절\n(한도초과/잔액부족)" --> FAILED["FAILED 종결\n(PENDING 삭제, 과금 0원)"]
-    CALL -- "네트워크 단절 / 60초 타임아웃 / 5xx" --> UNKNOWN["UNKNOWN 상태 전이\n(결코 즉시 취소하지 않음)"]
-    
-    UNKNOWN --> RETRY_QUERY["PG사 단건 결제 조회 API 호출\n(GET /v1/payments/{paymentKey})"]
-    
-    RETRY_QUERY -- "조회 결과: 승인 완료" --> APPROVED
-    RETRY_QUERY -- "조회 결과: 미승인 / 세션 만료" --> FAILED
-    RETRY_QUERY -- "조회 API 동반 장애 (일시적)" --> HOLD_UNKNOWN["UNKNOWN 유지 및 1초 간격 재조회\n(1시간 미해소 시 CS 처리함 이관)"]
 ```
+[승인 API 호출 (confirm-{orderId})]
+              │
+              ▼
+    [PG 승인 응답 수신 (최대 60초 대기)]
+              │
+    ┌─────────┼─────────────────────────┐
+    │ (200 OK)│ (명시적 거절: 한도초과) │ (타임아웃 / 단절 / 5xx)
+    ▼         ▼                         ▼
+┌─────────┐ ┌─────────┐         ┌───────────────────────────────┐
+│APPROVED │ │ FAILED  │         │ UNKNOWN 상태 (패킷 유실 의심) │
+│사후 발권│ │무과금종결│         └──────────────┬────────────────┘
+└─────────┘ └─────────┘                        │
+                                               ▼
+                                [PG사 단건 조회 API 즉시 호출]
+                                               │
+                                 ┌─────────────┴─────────────┐
+                                 │ 조회 성공: 결제 완료      │ 조회 성공: 미승인
+                                 ▼                           ▼
+                           ┌─────────┐                 ┌─────────┐
+                           │APPROVED │                 │ FAILED  │
+                           │사후 발권│                 │무과금종결│
+                           └─────────┘                 └─────────┘
+```
+
+| 응답 상태 | 원인 및 시스템 판정 | 금융 거래 보장 |
+| :--- | :--- | :--- |
+| **200 OK** | 카드사 승인 완료 | 즉시 APPROVED 확정 및 티켓 발권 파이프라인 기동 |
+| **거절 응답** | 한도 초과, 잔액 부족 등 | 즉시 FAILED 종결, 좌석 PENDING 행 즉시 삭제 (과금 0원) |
+| **UNKNOWN** | 네트워크 타임아웃 | 승인/취소 예단 금지, 단건 조회 API로 결제사 원장 대조 후 동기화 |
 
 - **섣부른 취소 금지 원칙**: 타임아웃 발생 시 상태를 `UNKNOWN`으로 두고 결제사 단건 조회 API를 통해 실제 승인 여부를 확인할 때까지 좌석 PENDING을 안전하게 유지한다.
 
@@ -331,26 +348,30 @@ Kafka(MSK)의 월 SLA는 99.9%이지만 PEAKET 결제 완료율 목표는 99.95%
 - `purchase-svc`의 `PaymentResultPuller`가 1초 주기로 `order_saga_job`을 스캔하여 `payment-svc`에 직접 gRPC `BatchGetPayments`(1회 최대 100건, 데드라인 500ms)를 호출하여 상태를 당겨온다(Pull).
 - 밀기(Push)와 당기기(Pull)는 동일한 `ApplyPaymentResult` 함수를 공유하며, `payment_event_seq` 순번 조건을 통해 먼저 도착한 쪽이 반영되고 늦게 온 쪽은 0행 업데이트로 안전하게 무시된다(P-T15, P-T47).
 
-```mermaid
-flowchart LR
-    subgraph PaymentSvc["payment-svc (승인 완료)"]
-        PAY_DB[("payment DB\nAPPROVED 커밋")] --> OUTBOX["Transactional Outbox"]
-        OUTBOX --> RELAY["Outbox 릴레이"]
-    end
-
-    subgraph DualPath["결제 결과 전달 이중화 경로"]
-        RELAY -->|"주 경로: 밀기 (Push)\nKafka trade.payments"| KAFKA["Kafka MSK"]
-        PAY_DB -.->|"보조 경로: 당기기 (Pull)\n5초 지연 시 BatchGetPayments"| GRPC["gRPC BatchGetPayments"]
-    end
-
-    subgraph PurchaseSvc["purchase-svc (주문 확정)"]
-        KAFKA --> CONSUMER["키 단위 동시 소비자\n(주문 ID별 32개 동시 처리)"]
-        GRPC --> PULLER["PaymentResultPuller\n(1초 주기 지연 스캔)"]
-        CONSUMER --> APPLY["ApplyPaymentResult\nWHERE seq < incomingSeq"]
-        PULLER --> APPLY
-        APPLY --> COMMIT["seat_sale SOLD\nticket_issue_job 등록\n주문 APPROVED 확정"]
-    end
 ```
+┌─────────────────────────────────┐
+│ [payment-svc (승인 완료)]       │
+│ • payment DB에 APPROVED 커밋    │
+│ • Transactional Outbox 테이블   │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Outbox 릴레이 (100ms 폴링 워커)]                                      │
+└───────┬────────────────────────────────┬───────────────────────────────┘
+        │ (주 경로: Kafka 푸시 스트림)   │ (보조 경로: gRPC 배치 풀링)
+        ▼                                ▼
+┌────────────────────────────────┐  ┌───────────────────────────────────┐
+│ Kafka trade.payments (acks=all)│  │ purchase-svc (동기 대조 gRPC)     │
+│ • ticket-svc 발권 컨슈머       │  │ • 롱 폴링 응답 즉시 반환          │
+│ • ClickHouse 실시간 매출 BI    │  │ • Kafka 순단 시에도 3초 내 확정  │
+└────────────────────────────────┘  └───────────────────────────────────┘
+```
+
+| 전달 경로 | 메커니즘 | 고가용성 보장 |
+| :--- | :--- | :--- |
+| **주 경로 (Kafka)** | Outbox 릴레이 $\rightarrow$ Kafka (acks=all) | 이벤트 기반 비동기 발권 및 분석 데이터 실시간 적재 |
+| **보조 경로 (gRPC)**| purchase-svc $\rightarrow$ payment-svc 단건 조회 | Kafka 클러스터 전면 장애 시에도 결제 확정 SLA 3초 사수 |
 
 #### 6. 결제-발권 불변식 검사기 (Invariant Checker)
 불변식 검사기가 1분 주기로 백그라운드 실행되어 다음 규칙을 상시 검증한다:

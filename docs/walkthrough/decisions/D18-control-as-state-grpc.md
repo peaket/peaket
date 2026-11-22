@@ -42,43 +42,25 @@
 
 PEAKET은 **"운영 제어는 휘발성 메시지가 아니라 받는 쪽 저장소의 버전 상태(Control-as-State)이며, 전송은 데이터 플레인을 우회하는 제어 전용 gRPC로 수행한다"**는 설계를 적용했다.
 
-```mermaid
-flowchart TD
-    subgraph ControlPlane["관제탑 평면 (물리적 완전 격리)"]
-        COMMANDER["관제탑 운영자 (SCR-014)"]
-        GW_OPS["gw-ops 전용 게이트웨이\n(관제 전용 NLB 격리, ADR-0144)"]
-        OPS_SVC["ops-svc 관제 오케스트레이터\n- 관제 전용 EKS 노드 풀\n- ops 전용 Aurora PostgreSQL"]
-    end
-
-    subgraph DirectChannel["제어 전용 gRPC 직접 채널 (Waypoint 우회)"]
-        GRPC_CALL["ApplyControl 단항 gRPC 호출\n(데드라인 1초, 멱등성 보장)\n- target_scope, command_type, version_epoch"]
-    end
-
-    subgraph TargetService["대상 서비스 (purchase-svc)"]
-        CTRL_PORT["제어 전용 gRPC 포트 (포트 50052)"]
-        DB_STATE[("purchase PostgreSQL\nsale_control 테이블 (원본)")]
-        REDIS_STATE[("좌석 Redis Cluster\ns:{event}:ctl (사본)")]
-        LUA_SCRIPT["좌석 선점 Lua 스크립트\n(s:{event}:ctl 확인 후 423 Locked 원자적 반환)"]
-    end
-
-    subgraph PodLifecycle["파드 수명주기 및 상태 수렴 루프"]
-        STARTUP["신규 파드 기동 (Startup Probe)"]
-        READ_STATE["로컬 저장소 제어 상태 필수 로드\n(실패 시 Ready 되지 않음)"]
-        LOOP["2초 주기 백그라운드 상태 수렴 루프\n(Local Memory <-> Redis 동기화)"]
-    end
-
-    COMMANDER --> GW_OPS
-    GW_OPS --> OPS_SVC
-    OPS_SVC --> GRPC_CALL
-    GRPC_CALL --> CTRL_PORT
-    CTRL_PORT --> DB_STATE
-    CTRL_PORT --> REDIS_STATE
-    LUA_SCRIPT <--> REDIS_STATE
-
-    STARTUP --> READ_STATE
-    READ_STATE <--> REDIS_STATE
-    READ_STATE --> LOOP
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [관제탑 평면 (물리적 완전 격리)]                                       │
+│ • Commander 운영 콘솔 ──▶ gw-ops 전용 게이트웨이 (NLB 사내망 격리)     │
+│ • ops-svc: 12대 명령 제어 평면 (단독 정지 / 2인 승인 재개)             │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (제어 전용 direct gRPC 채널)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [타겟 서비스 파드군 (queue-svc, purchase-svc 등)]                      │
+│ • 일반 트래픽용 Kafka나 공용 게이트웨이를 거치지 않고 직접 수신        │
+│ • 전파 지연시간 < 1초 이내에 10대 마이크로서비스 전역 즉각 반영        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 제어 경로 | 통신 프로토콜 | 신뢰성 및 지연 보장 |
+| :--- | :--- | :--- |
+| **비상 제어 채널** | Direct gRPC (`ApplyControl`) | Kafka 랙이나 일반 게이트웨이 지연과 무관하게 1초 내 직달 |
+| **망 분리** | gw-ops 사내망 IP 화이트리스트 | 외부 인터넷에서의 비상 제어 API 접근 원천 차단 |
 
 ### 핵심 매커니즘 4가지
 

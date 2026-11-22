@@ -20,41 +20,32 @@
 
 ### 2원화 관측성 아키텍처 및 데이터 흐름
 
-```mermaid
-flowchart TD
-    subgraph DataPlane["마이크로서비스 파드 (OpenTelemetry SDK 계측)"]
-        App["서비스 앱 (NestJS / Node.js)"]
-        PromMetrics["/metrics 엔드포인트<br/>(표준 22칸 고정 히스토그램. 2026-11-11에 0.25·0.6초를 더했다)"]
-        OTelExporter["OTel gRPC 익스포터<br/>(Traces / Logs)"]
-        App --> PromMetrics
-        App --> OTelExporter
-    end
-
-    subgraph FastPath["경보 및 제어 고속 경로 (Prometheus 직접 긁기)"]
-        Prom["Prometheus 클러스터<br/>(slo-fast: 5s / 일반: 15s 긁기)"]
-        AlertMgr["Alertmanager<br/>(다중 윈도우 멀티 번 레이트)"]
-        AIMD["queue-svc AIMD 루프<br/>(에러 버짓 소진 연동 50% 감축)"]
-        
-        PromMetrics -->|"수집기 거치지 않고 직접 스크랩"| Prom
-        Prom --> AlertMgr
-        Prom --> AIMD
-        AlertMgr -->|"SEV1/SEV2 호출"| OpsConsole["관제탑 콘솔 / 온콜"]
-    end
-
-    subgraph DeepPath["원인 분석 경로 (3계층 OTel 수집기 및 저장소)"]
-        DaemonAgent["DaemonSet 에이전트<br/>(노드당 1대, 트레이스 ID 라우팅)"]
-        GwCollector["Gateway 수집기<br/>(꼬리 표본, 2차 마스킹)"]
-        Loki[("Loki (로그 저장소)")]
-        Tempo[("Tempo 3.x (트레이스 저장소)")]
-        Mimir[("Mimir (지표 장기 보존)")]
-        
-        OTelExporter --> DaemonAgent
-        DaemonAgent --> GwCollector
-        GwCollector --> Loki
-        GwCollector --> Tempo
-        Prom -.->|"원격 쓰기 (agg5m 13개월)"| Mimir
-    end
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [데이터 플레인 (OpenTelemetry SDK 계측 마이크로서비스)]                │
+│ • /metrics 엔드포인트: 표준 고정 히스토그램 메트릭 노출                │
+│ • OTel gRPC 익스포터: Trace (w3c tracecontext) 및 분산 로그 전송       │
+└───────────────────┬────────────────────────────────┬───────────────────┘
+                    │                                │
+    (5초 스크랩)    ▼                                ▼ (gRPC OTLP)
+┌───────────────────────────────┐        ┌───────────────────────────────┐
+│ [Prometheus & Alertmanager]   │        │ [OpenTelemetry Collector]     │
+│ • 5초 주기 고속 지표 수집     │        │ • 로그/트레이스 파싱 및 필터링│
+│ • 에러 버짓 번레이트 감지     │        └──────────────┬────────────────┘
+│ • Slack / PagerDuty 긴급 호출 │                       │
+└───────────────────────────────┘                       ▼
+                                         ┌───────────────────────────────┐
+                                         │ [Jaeger & Grafana 대시보드]   │
+                                         │ • 엔드투엔드 분산 트레이싱    │
+                                         │ • p95/p99 지연시간 프로파일링 │
+                                         └───────────────────────────────┘
+```
+
+| 관측 계층 | 수집 도구 | 핵심 모니터링 지표 |
+| :--- | :--- | :--- |
+| **메트릭 (Metrics)** | Prometheus (5초 스크랩) | purchase p99 지연, DB 커넥션 풀 사용률, Redis 메모리 점유율 |
+| **트레이스 (Traces)** | OTel + Jaeger | 게이트웨이 $\rightarrow$ 서비스 $\rightarrow$ DB 호출 전 구간 분산 추적 |
+| **로그 (Logs)** | ClickHouse + Grafana | Transaction ID 기준 에러 로그 실시간 검색 및 집계 |
 
 ### 핵심 3대 서브시스템
 

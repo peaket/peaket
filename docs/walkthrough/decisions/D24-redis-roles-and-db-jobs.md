@@ -91,6 +91,11 @@ sequenceDiagram
     end
 ```
 
+| 큐 아키텍처 | 채택 기술 | 운영상 이점 |
+| :--- | :--- | :--- |
+| **비동기 잡 큐** | PostgreSQL Transactional Outbox | 별도 Redis 큐 관리 부담을 없애고 도메인 쓰기와 100% 원자적 커밋 |
+| **워커 풀 동시성**| `FOR UPDATE SKIP LOCKED` | 워커 간 락 경합 없이 여러 워커가 병렬로 안전하게 메시지 발행 |
+
 ### 핵심 매커니즘 4가지
 
 #### 1) 원본 보장 DB 작업 원장 & Outbox 릴레이

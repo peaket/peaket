@@ -72,6 +72,14 @@
   - Docker 차례 규칙: 보안 높음·여러 갈래가 기다리는 묶음 먼저, 잠금이 비면 다음 갈래가 잡고, 컨테이너를 안 쓰는 동안은 놓는다.
   - 번호: ADR 0348·0349 갈래 4(BAT-360), 0350 소유자 사이 세션의 'B·C 묶음 가볍게' 초안(제안, 미커밋), 감독 다음 몫 0351부터. core-svc 마이그레이션 0040~0042 갈래 2.
   - 소유자 손 정리 대기: 빈 폴더 `D:/ticketpass-r740`, 갈래 4 검증 임시 폴더 다섯(`D:/ticketpass-lane4-{sec,prf,tools,mesh,rtgw}-verify`), 다른 프로젝트의 멈춘 컨테이너 35개, 메인 폴더에 스테이징된 docs/walkthrough 75개쯤.
+- 2026-11-22 10시 OpenCode 감독 이어 받기 메모(웨이브 12 나머지):
+  - 합친 것: W12-sr13(R-750)·BAT-360(R-751)·W12-core-idem(R-752)·W12-core-rls2(R-753)·W12-pt36(R-754)·W12-purchase-fixes(R-755)·W12-datefix(R-756). develop `97b47ca81`.
+  - purchase 기존 실패 둘은 제품 결함이 아니라 시험 결함이었다(0030·0031 CHECK 이름, GAT-110 P3의 주입 시계와 Outbox 파티션 날). V-T40은 R-745로 이미 해결.
+  - 도는 것: 갈래 3 **W12-core-notify**(발송기 전용 DB 역할 `core_notify`·발송 원장 `webhook_delivery`, AZ-T19, core 0043, R-757) → 갈래 5 **BAT-617**(LCH-080 잔여 화면 SCR-021 5단계·SCR-048, RV-05 `artistIds`·`aliases`·RV-06 먼저, R-758).
+  - 소유자 결정 대기: 갈래 1 **BAT-215**의 `LOG_SAMPLING` 계약 깨짐 — (가) 예외 승인 (나) 기존 꼴에 싣기 (다) BAT-365로 미루기. 정할 때까지 갈래 1은 멈춤.
+  - 번호: ADR 0351부터, core-svc 마이그레이션 0043, 시험 ID AZ-T19, 기록 R-757·R-758.
+  - 이 PC의 기본 `bash`는 WSL이라 `D:/ticketpass-locks/lock.sh`를 못 찾는다. 잠금은 `C:\Program Files\Git\bin\bash.exe`로 실행한다(다른 갈래도 같다).
+  - 장부 생성물 `docs/review/ledger/*.md`가 합치기로 낡았다(줄 번호 밀림). 이번 묶음들을 합친 뒤 `node tools/ci/ledger.mjs`로 한 번에 재생성해 `docs(ledger)`로 커밋한다.
 
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).

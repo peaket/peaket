@@ -52,37 +52,33 @@ $$L = \lambda \cdot W$$
 
 PEAKET은 **"도착 지연을 고려한 유출입 피드백 루프(200ms)"**와 **"AIMD 기반 다운스트림 동적 조절"**을 결합하여 완벽한 백엔드 보호막을 구현했다.
 
-```mermaid
-flowchart TD
-    subgraph AdmissionController["admission-ctrl 단일 리더 (200ms 주기 루프)"]
-        LEADER["K8s Lease 리더 루프\n(세대 번호: leaseTransitions + 1)"]
-        METRICS["다운스트림 텔레메트리 모니터링\n(좌석/결제 p99 지연, 5xx 에러율)"]
-        AIMD["AIMD 정원 조절기\n- 정상: 30초마다 +2% (+100명)\n- 이상: 즉시 50% 감축 (2,500명)"]
-        CALC["전진 번호 계산 엔진\nfree = target - occupied - soon - inFlight\nadvance = free / arrival_rate"]
-    end
-
-    subgraph RedisQueue["Redis 대기열 클러스터"]
-        OCCUPIED[("q:{event}:admitted (Sorted Set)\n[현재 체류자 5,000명, Score=만료시각]")]
-        SOON_Q[("q:{event}:soon (Sorted Set)\n[정원 초과 대기자: 번호순 정렬]")]
-        LEADER_KEY[("q:{event}:leader\n[리더 세대 펜싱 키]")]
-        SERVING[("q:{event}:serving\n[현재 입장 허용 번호]")]
-    end
-
-    subgraph Ingress["queue-svc 입장 확정 게이트웨이"]
-        GATEWAY["첫 예매 API 수신 (POST /api/admit)\n- 대기표 HMAC 검증\n- 내 번호 <= serving 확인\n- pid 1인1입장 중복 검사\n- 체류 Sorted Set 등록"]
-    end
-
-    METRICS --> AIMD
-    AIMD -->|"현재 목표치 target"| CALC
-    LEADER --> CALC
-    CALC -->|"리더 세대 원자 검증 Lua"| LEADER_KEY
-    LEADER_KEY -->|"FENCED 아니면 serving 전진"| SERVING
-    OCCUPIED -.->|"체류자 수 조회"| CALC
-    SOON_Q -.->|"대기자 수 조회"| CALC
-
-    GATEWAY <--> OCCUPIED
-    GATEWAY <--> SERVING
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [admission-ctrl 단일 리더 (200ms 주기 제어 루프)]                      │
+│ • K8s Lease 기반 리더 선출 (단조 증가 에포크 펜싱 토큰 보장)           │
+│ • 다운스트림 텔레메트리 모니터링 (좌석/결제 p99 지연시간, 5xx 오류율)  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [AIMD 혼잡 제어기 (Additive Increase / Multiplicative Decrease)]      │
+│ • 정상 구간: 목표 유입량을 매 200ms마다 +2% 점진 증액                  │
+│ • 이상 감지 (p99 > 150ms 또는 오류율 1% 초과): 유입량 50% 즉각 삭감    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Redis 원자적 순번 전진 (advance_serving.lua)]                         │
+│ • delta = (현재 목표 인원 - 활성 세션 - InFlight)                      │
+│ • servingSeq를 원자적으로 전진시켜 초당 ~28명 승급 통제                │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 제어 파라미터 | 동작 규칙 | 다운스트림 보호 효과 |
+| :--- | :--- | :--- |
+| **AIMD 알고리즘** | 정상 시 +2%, 이상 시 -50% | TCP 혼잡 제어 원리로 백엔드 과부하 시 200ms 만에 트래픽 컷오프 |
+| **에포크 펜싱** | 단조 증가 lease 번호 대조 | 스플릿 브레인 상황에서 옛 리더의 servingSeq 조작 100% 차단 |
+| **초당 28 TPS** | Little's Law 기준 통제 | 좌석 화면 5,000명 유지, 결제 DB 쓰기를 28 TPS로 안전하게 수렴 |
 
 ### 핵심 매커니즘 4가지
 
@@ -102,38 +98,31 @@ flowchart TD
 #### 2) 사용자 생애주기와 상태 전이 흐름도
 사용자는 대기열 진입부터 좌석 예매창 확정까지 다음의 엄격한 상태 머신을 거친다:
 
-```mermaid
-stateDiagram-v2
-    [*] --> WAITING: 로비 셔플 또는 INCR 순번 발급
-    
-    state WAITING {
-        [*] --> CDN_POLLING: 1,000명 세그먼트 JSON 확인
-        CDN_POLLING --> CDN_POLLING: 내 번호 > serving (거리 적응형 폴링)
-    }
-
-    WAITING --> IN_FLIGHT: 내 번호 <= serving 호출 감지!
-    
-    state IN_FLIGHT {
-        [*] --> ADMIT_REQUEST: 첫 예매 요청 (POST /api/admit)
-    }
-
-    IN_FLIGHT --> ADMITTED: 정원 여유 있음 (occupied < target)
-    IN_FLIGHT --> SOON_QUEUE: 순간 정원 초과 (occupied >= target)
-
-    state SOON_QUEUE {
-        [*] --> FIFO_WAIT: q:{event}:soon 에서 번호순 대기
-        FIFO_WAIT --> ADMITTED: 빈자리 발생 시 최우선 순위 승격
-    }
-
-    state ADMITTED {
-        [*] --> SEAT_SELECT: 구매 세션 발급 (15분 TTL)
-        SEAT_SELECT --> COMPLETED: 좌석 홀드 및 결제 성공
-        SEAT_SELECT --> EXPIRED: 15분 시간 초과 (자리 반납)
-    }
-
-    COMPLETED --> [*]
-    EXPIRED --> [*]
 ```
+┌──────────────┐     순번 >= serving     ┌──────────────┐
+│   WAITING    │────────────────────────▶│   ADMITTED   │ (좌석 선택 진입)
+│ (대기실 체류)│                         │(5분 서명토큰)│
+└──────────────┘                         └──────┬───────┘
+       │                                        │
+       │ (정원 5,000명 포화 시)                 │ (좌석 Soft Hold 선점 성공)
+       ▼                                        ▼
+┌──────────────┐                         ┌──────────────┐
+│     SOON     │                         │   ORDERING   │ (주문서 작성)
+│ (승급 임박)  │                         └──────┬───────┘
+└──────────────┘                                │
+                                                │ (결제 승인 완료)
+                                                ▼
+                                         ┌──────────────┐
+                                         │    ORDERED   │ (발권 완료 종결)
+                                         └──────────────┘
+```
+
+| 상태 | 전이 트리거 | 상태 보장 및 타임아웃 |
+| :--- | :--- | :--- |
+| **WAITING** | T=0 셔플 완료 | CDN 세그먼트 폴링으로 내 번호와 serving 순번 대조 |
+| **ADMITTED** | `mySeq <= serving` | Ed25519 전자서명 입장 토큰 발급 (5분 미진입 시 만료) |
+| **SOON** | 화면 체류 5,000명 초과 | 퇴장자 발생 시 최우선 순위로 즉각 입장 승급 |
+| **ORDERING** | 좌석 1단계 선점 완료 | 7분 TTL 내 주문서 작성 및 결제 진행 |
 
 - **`SOON` 큐 번호 순 공정성 (POL-008)**: 순간적으로 정원이 차서 `SOON`을 받은 대기자는 번호 순 정렬 큐(`q:{event:E}:soon`)에 들어가며, 빈자리가 생기면 도착 순이 아닌 **대기 번호가 낮은 순서대로 최우선 입장**한다. 재시도 타이밍에 따른 순서 역전이 발생하지 않는다.
 

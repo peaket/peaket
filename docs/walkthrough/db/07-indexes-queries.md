@@ -64,27 +64,29 @@ ON seat_sale (event_id, seat_id)
 WHERE status IN ('PENDING', 'SOLD');
 ```
 
-```mermaid
-flowchart TD
-    subgraph TableHeap["seat_sale 테이블 힙 (물리 디스크)"]
-        direction TB
-        R1["Row 1: event_1, seat_42, status='RETURNED' (취소됨)"]
-        R2["Row 2: event_1, seat_42, status='PENDING' (새 구매자 선점)"]
-        R3["Row 3: event_1, seat_99, status='SOLD' (판매 완료)"]
-        R4["Row 4: event_1, seat_99, status='PENDING' (동시 시도자)"]
-    end
-
-    subgraph PartialIndex["idx_seat_sale_active_unique 인덱스 B-Tree"]
-        direction TB
-        I1["(event_1, seat_42) ──> Row 2 가리킴 (Row 1은 인덱스에 없음!)"]
-        I2["(event_1, seat_99) ──> Row 3 가리킴"]
-    end
-
-    TableHeap -.->|"WHERE status IN ('PENDING', 'SOLD') 조건 필터"| PartialIndex
-    R4 -.->|"동일 키 삽입 시도"| Conflict{"B-Tree 충돌 발생!"}
-    I2 --> Conflict
-    Conflict -->|"즉각 거절"| Reject["PostgreSQL: Unique Violation (23505)<br/>오버셀 원천 차단!"]
 ```
+┌─────────────────────────────────┐
+│ [seat_sale 테이블 힙 (물리 디스크)│
+│ • Row 1: event_1, seat_42, status='RETURNED' (취소표)                │
+│ • Row 2: event_1, seat_42, status='PENDING' (새 구매자 홀드 선점)    │
+│ • Row 3: event_1, seat_43, status='SOLD' (판매 확정)                 │
+└────────────────┬────────────────┘
+                 │ (인덱싱 조건 분기)
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [부분 유니크 인덱스 (idx_seat_sale_active)]                            │
+│ • CREATE UNIQUE INDEX ... WHERE status IN ('PENDING', 'SOLD')          │
+│ • 인덱스 엔트리:                                                       │
+│   - (event_1, seat_42) ──▶ Row 2 가리킴                                │
+│   - (event_1, seat_43) ──▶ Row 3 가리킴                                │
+│ • Row 1(RETURNED)은 인덱스에 포함되지 않아 취소표 재판매 즉각 허용      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 인덱스 구분 | 색인 대상 및 조건 | 성능 및 공간 최적화 효과 |
+| :--- | :--- | :--- |
+| **부분 유니크 인덱스** | `WHERE status IN ('PENDING', 'SOLD')` | 취소/환불 이력을 테이블에 보존하면서도 유니크 충돌 없이 오버셀 차단 |
+| **인덱스 크기 절감** | 전체 행 대신 활성 5만 행만 색인 | B-Tree 인덱스 크기를 80% 이상 절감하여 버퍼 풀 캐시 히트율 99%+ 사수 |
 
 - **취소 이력 보존**: 좌석이 취소(`RETURNED`)되면 부분 인덱스의 `WHERE` 조건을 만족하지 않으므로 **인덱스 엔트리에서 자동으로 즉시 제거**된다.
 - **물리적 오버셀 차단**: 새 구매자가 해당 좌석을 다시 선점할 때 `INSERT INTO seat_sale ... VALUES ('PENDING')`를 수행하면, 부분 인덱스에 `(event_1, seat_42)` 엔트리가 새로 등록된다. 만약 두 트랜잭션이 동시에 선점하려 하면 인덱스 레벨에서 즉시 `duplicate key value violates unique constraint` 에러를 뿜으며 1건만 통과시킨다.
@@ -130,20 +132,29 @@ PostgreSQL은 동일한 Prepared Statement를 5회 이상 실행하면 파라미
 
 PEAKET은 쿼리 성능 저하를 배포 전에 차단하기 위해 **이원화된 쿼리 플랜 회귀 검증 파이프라인**을 운영한다.
 
-```mermaid
-flowchart LR
-    DEV["개발자 PR 제출<br/>(SQL 쿼리 변경)"] --> CI["1. CI 가벼운 검증<br/>(GitHub Actions)"]
-    CI -->|"enable_seqscan=off 강제<br/>기대 인덱스 적중 여부 검사"| PASS{"통과 여부"}
-    
-    PASS -->|"실패"| REJECT["PR 머지 차단<br/>(인덱스 누락 리포트)"]
-    PASS -->|"성공"| NIGHT["2. 야간 5년치 벤치마크<br/>(전용 측정 장비)"]
-    
-    NIGHT -->|"합성 데이터 1.2억 행<br/>EXPLAIN (ANALYZE, BUFFERS)"| METRIC["버퍼 읽기량 & 실행 시간 측정"]
-    METRIC --> LEDGER[("docs/perf-ledger.md<br/>성능 장부 자동 기록")]
-    
-    PROD["3. 프로덕션 실시간 관제<br/>(auto_explain & pg_stat_statements)"] --> ALERT{"p99 500ms 초과 시"}
-    ALERT --> DIAG["진단 스냅샷 캡처 및 경보"]
 ```
+[개발자 PR 제출 (SQL 쿼리 변경)]
+              │
+              ▼
+[1. CI 가벼운 정적 검증 (GitHub Actions)]
+• enable_seqscan=off 강제 주입 후 EXPLAIN 실행
+• 기대 인덱스 적중 여부 검사
+              │
+      ┌───────┴───────┐
+      │ (인덱스 누락) │ (인덱스 적중)
+      ▼               ▼
+[PR 머지 즉각 차단]   [2. 사전 환경 가상 데이터 검증 (1,700만 행 DB)]
+                      • 5년치 볼륨 적재 사전 환경에서 실제 실행 계획 측정
+                      • p99 <= 10ms 초과 시 슬로우 쿼리 경보
+                              │
+                              ▼
+                      [안전한 무중단 마이그레이션 승인]
+```
+
+| 검증 단계 | 검증 환경 및 강제 플래그 | 차단하는 장애 |
+| :--- | :--- | :--- |
+| **1단계 CI 정적 검증** | `SET enable_seqscan = OFF` | 인덱스를 타지 않는 Full Table Scan 쿼리의 프로덕션 유입 원천 차단 |
+| **2단계 볼륨 검증** | 1,700만 행 모의 DB 스트레스 | 데이터 누적 시 B-Tree 깊이 증가로 인한 지연 스파이크 사전 방지 |
 
 1. **CI 단계 (가벼운 판)**:
    - 개발자가 쿼리를 수정하면 CI에서 1/100 축소 데이터베이스를 대상으로 실행한다. `enable_seqscan = off`를 설정하여 쿼리가 설계된 인덱스를 정상적으로 타는지(Index Scan 여부) 구문 수준에서 자동 단언(Assert)한다.

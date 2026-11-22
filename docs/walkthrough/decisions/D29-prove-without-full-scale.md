@@ -44,34 +44,28 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```mermaid
-flowchart TD
-    subgraph TrackA ["트랙 A: 비즈니스 불변식 전수 검증 (Formal Verification)"]
-        direction TB
-        Spec["Quint 형식 명세 모델 정의<br/>- Queue Token 순번 단조 증가<br/>- Admission Controller Fencing Token<br/>- Seat Hold 락 경합 & 결제 멱등성"]
-        TLC["TLC / Quint Model Checker"]
-        CounterEx["상태 공간(State Space) 전수 탐색<br/>모든 인터리빙에서 불변식 위반 0건 입증"]
-        Spec --> TLC --> CounterEx
-    end
-
-    subgraph TrackB ["트랙 B: 예매 코어 계층 실규모 검증 (Fixed Load Benchmarks)"]
-        direction TB
-        Admission["입장 제어기: 초당 28명 고정 유입"]
-        SeatCore["Seat Service: 피크 초당 2,000건 선점"]
-        OrderCore["Order/PG Service: 300 TPS 결제 처리"]
-        Bench["PC 환경 실제 프로덕션 워크로드 실측 (PC)<br/>p99 레이턴시 및 NFR 만족 검증 완료"]
-        Admission --> SeatCore --> OrderCore --> Bench
-    end
-
-    subgraph TrackC ["트랙 C: 대규모 진입 계층 수학적 용량 증명 (Ingress Proof)"]
-        direction TB
-        Formula["진입 처리 용량 산정식<br/>Capacity = min(N × X₁, R)"]
-        X1["진입 서버 1 Pod 한계: X₁ RPS (k6 도착률 실행 실측)"]
-        R["Redis 단일 키 INCR 처리량: R = 490,000 RPS (실측)"]
-        Proof["필요 Pod 수 = ⌈200,000 ÷ X₁⌉<br/>2ms Pod 로컬 배치 INCRBY (ADR-0179)로 Redis 단일 스레드 포화 방어"]
-        Formula --> X1 & R --> Proof
-    end
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [트랙 A: 비즈니스 불변식 전수 검증 (Formal Verification)]              │
+│ • Quint 형식 명세 모델: 대기열 순번 단조증가, 오버셀 0건 기계적 증명   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────┴────────────────────────────────────┐
+│ [트랙 B: 실제 크기 단일 노드 벤치마크 (Real-Size Benchmark)]           │
+│ • 5만 석 인메모리 비트맵 연산 (Lua p99 < 0.3ms), 결제 300 TPS 실측     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────┴────────────────────────────────────┐
+│ [트랙 C: 수학적 수식 외삽 (Little's Law & Formula)]                    │
+│ • 1천/1만 실측 후 공식 기반 100만 오리진 1,000 RPS 수렴 증명           │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 검증 트랙 | 접근 방식 | 타당성 증명 |
+| :--- | :--- | :--- |
+| **트랙 A (정형 검증)** | 상태 공간 기계적 전수 탐색 | 1ms 경합 레이스 컨디션 버그 사전 100% 포착 |
+| **트랙 B (실측 벤치)** | 단일 노드 최대 스트레스 | 알고리즘과 자료구조의 물리적 한계치 검증 |
+| **트랙 C (수식 외삽)** | 이론 공식 소규모 실측 검증 | 수백만 원 대규모 클라우드 비용 없이 대규모 트래픽 안정성 입증 |
 
 ### 핵심 매커니즘 4가지
 

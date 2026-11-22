@@ -20,35 +20,31 @@ PEAKET의 분산 마이크로서비스 아키텍처는 통신 계층의 특성�
 
 ### 3대 인터페이스 계약 및 거버넌스 아키텍처
 
-```mermaid
-flowchart TD
-    subgraph ClientGateway["1. 외부 REST 계층 (Client $\leftrightarrow$ Gateway)"]
-        WEB_APP["소비자 웹 / 콘솔 / 스캐너"]
-        GW_REST["API 게이트웨이 클러스터<br/>(gw-fan, gw-queue, gw-partner, gw-ops)"]
-        OAS_SPEC["docs/api/openapi.yaml<br/>(244 경로 / 271 작업, RFC 9457)"]
-        ZOD_GEN["orval 자동 생성 파이프라인<br/>(TypeScript DTO, React Query 훅, Zod 스키마)"]
-    end
-
-    subgraph InternalSync["2. 내부 동기 RPC 계층 (Service $\leftrightarrow$ Service)"]
-        PROTO_SPEC["docs/api/proto/peaket/*/v1/*.proto<br/>(12 파일 / 42 서비스 / 82 RPC)"]
-        GRPC_CONN["gRPC 채널 (HTTP/2 고성능 바이너리)<br/>(Deadline 전파, 멱등키 메타데이터)"]
-        SVC_A["queue-svc / purchase-svc / ticket-svc"]
-    end
-
-    subgraph AsyncBus["3. 비동기 이벤트 계층 (Event-Driven Backbone)"]
-        AVRO_SPEC["docs/api/avro/peaket/*/*.avsc<br/>(19종 Avro 레코드, 129개 필수 필드)"]
-        REGISTRY["Confluent Schema Registry<br/>(BACKWARD_TRANSITIVE 호환성 강제)"]
-        KAFKA_BUS["Kafka 이벤트 브로커<br/>(Transactional Outbox 패턴)"]
-    end
-
-    WEB_APP <-->|"REST/JSON (RFC 9457 Problem)"| GW_REST
-    OAS_SPEC -->|"CI 계약 검증 (oasdiff)"| GW_REST
-    OAS_SPEC -->|"코드 생성"| ZOD_GEN --> WEB_APP
-    GW_REST <-->|"Protobuf gRPC"| SVC_A
-    PROTO_SPEC -->|"CI 호환성 검증 (buf breaking)"| GRPC_CONN --> SVC_A
-    SVC_A -->|"Avro 직렬화 발행"| KAFKA_BUS
-    AVRO_SPEC -->|"스키마 등록 사전 검증"| REGISTRY <--> KAFKA_BUS
 ```
+┌─────────────────────────────────┐
+│ [1. 외부 REST / WebSocket 계층] │
+│ • 소비자 웹 / 콘솔 / 스캐너     │
+└────────────────┬────────────────┘
+                 │ (OpenAPI 3.1 & JSON Schema 스키마 엄격 검증)
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [5대 Envoy 게이트웨이 계층]                                            │
+│ • gw-queue, gw-fan, gw-partner, gw-ops, gw-scanner                     │
+└───────┬────────────────────────────────┬───────────────────────────────┘
+        │ (gRPC Protobuf 내부 고속 통신) │ (Avro 메시지 스트림)
+        ▼                                ▼
+┌────────────────────────────────┐  ┌───────────────────────────────────┐
+│ [2. 마이크로서비스 RPC 계층]   │  │ [3. 비동기 이벤트 계층]          │
+│ • Istio Ambient Mesh mTLS      │  │ • Kafka MSK (trade.*, telemetry.*)│
+│ • 서비스 간 고속 gRPC 통신     │  │ • Confluent Schema Registry 검증  │
+└────────────────────────────────┘  └───────────────────────────────────┘
+```
+
+| 인터페이스 계층 | 프로토콜 및 스키마 규격 | 엔지니어링 특성 및 검증 정책 |
+| :--- | :--- | :--- |
+| **외부 진입** | REST (OpenAPI 3.1) / WebSocket | Fastify JSON 스키마 사전 컴파일로 잘못된 패킷 게이트웨이 즉각 차단 |
+| **내부 통신** | gRPC (Protocol Buffers v3) | mTLS 암호화, 타입 안전성 보장, 내부 네트워크 RTT 5ms 이하 |
+| **이벤트 스트림**| Kafka (Apache Avro) | Confluent Schema Registry 하위 호환성(BACKWARD) 강제 |
 
 ---
 
@@ -132,24 +128,22 @@ API 설계 가이드라인([docs/api/guidelines.md](../../api/guidelines.md)), p
 
 Kafka 이벤트 버스는 19종의 Avro 스키마로 관리되며, Schema Registry의 `BACKWARD_TRANSITIVE` 모드를 적용한다:
 
-```mermaid
-flowchart LR
-    subgraph RegistryPolicy["Confluent Schema Registry 호환성 검증"]
-        NEW_SCHEMA["새 스키마 v(N+1) 등록 시도"]
-        CHECK{"BACKWARD_TRANSITIVE 검증<br/>(v1 ~ vN 모든 과거 데이터 역직렬화 가능한가?)"}
-        PASS_REG["등록 성공 (Schema ID 발급)"]
-        FAIL_REG["등록 거부 (CI 파이프라인 실패)"]
-    end
-
-    subgraph ProducerConsumer["생산자/소비자 배포 거버넌스"]
-        CONSUMER_FIRST["1. 소비자(Consumer) 서비스 선배포<br/>(새 스키마 필드 처리 가능하도록 준비)"]
-        PRODUCER_NEXT["2. 생산자(Producer) 서비스 후배포<br/>(새 이벤트 발행 개시)"]
-    end
-
-    NEW_SCHEMA --> CHECK
-    CHECK -->|"통과"| PASS_REG --> CONSUMER_FIRST --> PRODUCER_NEXT
-    CHECK -->|"실패"| FAIL_REG
 ```
+[새 스키마 v(N+1) 등록 시도] ──▶ [Confluent Schema Registry]
+                                        │
+                                        │ (BACKWARD 호환성 검증)
+                        ┌───────────────┴───────────────┐
+                        │ 통과                          │ 실패 (Breaking Change)
+                        ▼                               ▼
+               [스키마 등록 승인]               [배포 차단 (CI/CD 에러)]
+               (새 이벤트 발행 가능)            (기존 컨슈머 다운 원천 방지)
+```
+
+| 검증 단계 | 호환성 규칙 | 방어 효과 |
+| :--- | :--- | :--- |
+| **BACKWARD 호환성** | 새 스키마로 작성된 필드를 구버전 컨슈머가 읽을 수 있어야 함 | 컨슈머를 먼저 배포하지 않아도 프로듀서 무중단 배포 가능 |
+| **필드 삭제 금지** | 기존 필수(Required) 필드의 일방적 제거 차단 | 다운스트림 분석/정산 파이프라인의 역직렬화 패닉 방지 |
+| **기본값 필수** | 새 필드 추가 시 반드시 `default` 값 명시 의무화 | 구버전 데이터 재생(Replay) 시 스키마 불일치 에러 방지 |
 
 - **상시 존재 필드 필수 강제 (ADR-0150)**: Avro 스키마에 필드를 추가할 때 기본값(`default: null`)이 있으면 하위 호환성이 보장되지만, **한 번 등록된 null 허용 필드를 나중에 필수로 조이는 것은 Breaking Change**가 되어 불가능하다. 따라서 PEAKET은 최초 설계 시 191개 필드 중 상시 존재하는 129개 필드를 엄격히 필수로 확정하고, 조건부 필드에만 `["null", 타입]`과 `x-present-when` 명세를 부여했다.
 

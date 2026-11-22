@@ -39,41 +39,20 @@
 
 PEAKET은 도메인 격리와 장애 전파 차단을 위해 **3개의 물리적 독립 Redis 클러스터**를 운영한다.
 
-```mermaid
-flowchart TD
-    subgraph ClientReq["유입 트래픽 계층"]
-        direction LR
-        REQ_Q["대기열 진입 (피크 20만 RPS)"]
-        REQ_S["좌석 홀드 경합 (피크 2,000 TPS)"]
-        REQ_C["로그인/세션/속도제한 (초당 수천 건)"]
-    end
-
-    subgraph RedisClusters["물리적 3대 독립 Redis 클러스터 (ElastiCache Valkey 8.1+)"]
-        direction TB
-        subgraph RC_Q["1. 대기열 클러스터 (Queue Cluster)"]
-            Q_K1["q:{event:E}:seq (STRING INCRBY)"]
-            Q_K2["q:{event:E}:removed (BITMAP 125KB)"]
-            Q_K3["q:dup:{pid}:E (STRING SET NX)"]
-        end
-        
-        subgraph RC_S["2. 좌석 클러스터 (Seat Cluster)"]
-            S_K1["s:{event:E}:bitmap (BITMAP 6.25KB)"]
-            S_K2["s:{event:E}:hold:{seat} (HASH)"]
-            S_K3["s:{event:E}:quota:{account} (STRING)"]
-            S_K4["s:{event:E}:sec:{section} (Shard Pub/Sub)"]
-        end
-
-        subgraph RC_C["3. 세션·캐시 클러스터 (Session/Cache Cluster)"]
-            C_K1["id:sess:{sid} (HASH)"]
-            C_K2["tr:rate:{ip} (STRING INCR)"]
-            C_K3["shop:{prod}:resv (STRING)"]
-        end
-    end
-
-    REQ_Q --> RC_Q
-    REQ_S --> RC_S
-    REQ_C --> RC_C
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [유입 트래픽 계층]                                                     │
+│ • REQ_Q: 대기열 진입 (피크 20만 RPS) ──▶ [클러스터 1: 대기열 인메모리]  │
+│ • REQ_S: 좌석 선점 (피크 2,000 TPS)  ──▶ [클러스터 2: 좌석 선점 샤드]  │
+│ • REQ_C: 로그인/세션 (초당 수천 건)  ──▶ [클러스터 3: 세션/캐시 클러스터│
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 클러스터 | 주 용도 | 격리 효과 |
+| :--- | :--- | :--- |
+| **대기열 클러스터** | 순번 발급 카운터, serving 순번 | 피크 20만 RPS의 트래픽이 좌석 선점 엔진에 전파되지 않도록 완벽 격리 |
+| **좌석 샤드 클러스터**| 5만 석 비트맵, 7분 Soft Hold 해시 | 티켓 예매 코어 핫패스 전담, 대기열 폭주 시에도 선점 p99 50ms 사수 |
+| **세션/캐시 클러스터**| JWT 세션, API Rate Limit 카운터 | 회원 인증 및 일반 캐시 트래픽의 코어 저장소 간섭 원천 차단 |
 
 ### 3.1 3대 독립 클러스터의 역할 및 제원
 
@@ -97,20 +76,25 @@ Redis Cluster는 키 이름 전체를 해시하여 16,384개 슬롯에 분산하
 4. 동일 요청 멱등키가 존재하는가? (`s:{event:E}:idem:{account}:{key}`)
 5. 좌석을 선점 상태로 변경하고 만료 큐에 등록 (`s:{event:E}:hold:{seat}`, `s:{event:E}:expiry`)
 
-```mermaid
-flowchart LR
-    subgraph HashSlot["단일 Redis 해시 슬롯 (예: Slot 7421)"]
-        direction TB
-        K1["s:{event:42}:ctl (회차 제어 플래그)"]
-        K2["s:{event:42}:bitmap (좌석 점유 비트맵 6.25KB)"]
-        K3["s:{event:42}:hold:A-12 (좌석 선점 HASH 원장)"]
-        K4["s:{event:42}:quota:usr_99 (사용자 선점 카운터)"]
-        K5["s:{event:42}:idem:usr_99:req_1 (멱등키)"]
-    end
-
-    Lua["단일 Lua 스크립트 실행<br/>(단일 샤드 엔진 직렬 실행 < 0.3ms)"]
-    Lua -->|"원자적 읽기/검증 및 일괄 쓰기"| HashSlot
 ```
+┌── 단일 Redis 해시 슬롯 (예: Slot 7421, 동일 인스턴스 샤드 격리) ───────┐
+│                                                                        │
+│   • s:{event:42}:ctl (회차 제어 플래그)                                │
+│   • s:{event:42}:bitmap (좌석 점유 비트맵 6.25KB)                      │
+│   • s:{event:42}:hold:A-12 (좌석 선점 HASH 원장, 7분 TTL)              │
+│   • s:{event:42}:expiry (만료 ZSET 인덱스)                             │
+│   • s:{event:42}:events (스트림 델타)                                  │
+│                                                                        │
+│   ──▶ 중괄호 해시태그 `{event:42}`로 모든 키가 동일 샤드 슬롯에 고정됨  │
+│   ──▶ 단일 스레드 hold.lua 실행 시 크로스 슬롯(Cross-slot) 에러 0건     │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 키 패턴 | 자료구조 | 역할 및 원자성 보장 |
+| :--- | :--- | :--- |
+| `s:{event}:bitmap` | BITMAP (String) | 5만 석을 6.25KB 단일 비트맵으로 압축, GETBIT/SETBIT 초고속 처리 |
+| `s:{event}:hold:{id}`| HASH | 선점자 ID, 만료 시각, 멱등키 보관 |
+| `s:{event}:expiry` | ZSET | 만료 시각 타임스탬프를 스코어로 저장하여 1초 스위퍼가 고속 색인 |
 
 모든 키에 동일한 `{event:E}` 해시 태그를 부여함으로써, **이 5개 키는 물리적으로 동일한 단일 샤드의 동일 해시 슬롯에 상주**하게 된다. 따라서 네트워크 홉(Hop)이나 분산 락 없이 단 1회의 Lua 스크립트 호출로 p99 50ms 이내에 완벽한 원자적 홀드가 완료된다.
 
@@ -135,18 +119,26 @@ PEAKET의 모든 Redis 클러스터는 `maxmemory-policy noeviction`을 강제�
 
 ### 4.1 세션·캐시 클러스터 키 유실 등급 매트릭스
 
-```mermaid
-flowchart TD
-    MEM{"Redis 메모리 한계 도달 (noeviction)"}
-    MEM -->|"신규 쓰기 차단 및 에러 반환"| CLASS
-
-    subgraph CLASS["3대 키 유실 등급 대응 전략"]
-        direction TB
-        C_A["Class A (재생성 가능):<br/>카탈로그 캐시, 정적 화면 캐시<br/>──> 원본 DB에서 즉시 재인출"]
-        C_B["Class B (사용자 재시도):<br/>로그인 세션, 본인인증 임시 코드<br/>──> 사용자에게 503 반환 및 재인증 유도"]
-        C_C["Class C (하위 계층 방어):<br/>속도 제한 카운터, 굿즈 예약 잔여수<br/>──> PostgreSQL 조건부 갱신이 최종 방어"]
-    end
 ```
+[Redis 메모리 한계 도달 (noeviction 정책)]
+                   │
+                   ▼
+       [신규 쓰기 차단 및 에러 반환]
+                   │
+     ┌─────────────┼─────────────┐
+     ▼             ▼             ▼
+┌─────────────┐┌─────────────┐┌─────────────┐
+│   Class A   ││   Class B   ││   Class C   │
+│재생성 가능  ││복구 가능 대기││절대 유실불가│
+│(카탈로그)   ││(순번 카운터)││(좌석 선점)  │
+└─────────────┘└─────────────┘└─────────────┘
+```
+
+| 키 유실 등급 | 대상 데이터 | 복구 및 메모리 방어 전략 |
+| :--- | :--- | :--- |
+| **Class A (재생성 가능)**| 공연 카탈로그, 정적 캐시 | 원본 DB에서 즉시 재인출 가능, 캐시 미스로 처리 |
+| **Class B (복구 가능)** | 대기열 순번 카운터 | 복제본 승격 시 10만 단위 건너뛰고 세대 번호(Epoch) 상향 |
+| **Class C (절대 유실불가)**| 좌석 Soft Hold 비트맵 | `noeviction` 설정으로 임의 삭제 원천 차단, 초과 시 503 유예 |
 
 | 등급 | 대표 키 네임스페이스 | 데이터 유실 시 파급 효과 | 시스템 최종 방어선 | 쓰기 실패 시 장애 대응 |
 | :---: | :--- | :--- | :--- | :--- |

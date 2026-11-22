@@ -20,39 +20,35 @@
 
 ### Kafka 토폴로지 및 스트리밍 아키텍처
 
-```mermaid
-flowchart TD
-    subgraph Producers["이벤트 생산 계층 (Transactional Outbox)"]
-        OrderOutbox["purchase-svc Outbox 릴레이<br/>(단일 리더 Lease 12s, 100ms 폴링)"]
-        SeatStream["seat-svc Redis Stream 릴레이<br/>(좌석 홀드/만료 이벤트)"]
-        Pulse["rt-pulse 심장박동기<br/>(1초 주기 PipelinePulse 발행)"]
-    end
-
-    subgraph KafkaClusters["3대 Kafka 물리 클러스터 (MSK 복제 3벌)"]
-        TradeCluster["kafka-trade (거래/제어 클러스터)<br/>• trade.orders • trade.payments<br/>• trade.tickets • control.settings<br/>(키: 회차 ID / 파티션 12개)"]
-        TelemCluster["kafka-telemetry (텔레메트리 클러스터)<br/>• telemetry.clicks • telemetry.queue<br/>(키: 세션/기기 / 5,600 msg/s)"]
-        ObsCluster["kafka-observability (관측 전용)<br/>• Tempo 3.x 스팬 큐"]
-    end
-
-    OrderOutbox -->|"acks=all, 멱등생산"| TradeCluster
-    SeatStream --> TradeCluster
-    Pulse --> TelemCluster
-
-    subgraph Consumers["4대 TypeScript 스트림 워커 및 서비스 소비자"]
-        SvcConsumer["서비스 소비자 (purchase/ticket)<br/>파티션 내 주문 ID 32개 동시 처리<br/>실패 시 held_event 테이블 격리"]
-        OpsRt["ops-rt 워커<br/>(ClickHouse rt 원시 테이블 적재)"]
-        AnalyticsIngest["analytics-ingest 워커<br/>(HMAC 가명화 후 Bronze 적재)"]
-        TrustReassess["trust-reassess 워커<br/>(Redis 기반 봇 대기 재평가)"]
-        InvIngest["inv-ingest 워커<br/>(실명 사후 포렌식 DB 적재)"]
-    end
-
-    TradeCluster --> SvcConsumer
-    TradeCluster --> OpsRt
-    TradeCluster --> AnalyticsIngest
-    TradeCluster --> InvIngest
-    TelemCluster --> OpsRt
-    TelemCluster --> TrustReassess
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [이벤트 생산 계층 (Transactional Outbox)]                              │
+│ • purchase-svc Outbox 릴레이: 단일 리더 Lease 12s, 100ms 폴링          │
+│ • seat-svc Redis Stream 릴레이: 좌석 홀드 및 7분 만료 회수 델타        │
+│ • rt-pulse 심장박동기: 1초 주기 PipelinePulse 발행                     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Kafka MSK 클러스터 (토픽 3대 분류)]                                   │
+│ • trade.* (acks=all): 주문, 결제, 발권 금융 트랜잭션 (유실 0건)        │
+│ • telemetry.* (acks=1): 대기열 순번 조회, 클라이언트 행동 로그         │
+│ • control.* (acks=all): 긴급 제어, 2인 승인 명령 전파                  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [이벤트 소비 계층 (Idempotent Consumers)]                              │
+│ • ticket-svc: 발권 멱등 처리       • ops-rt: 실시간 ClickHouse 파이프라인│
+│ • audit-svc: Merkle 감사 해시 적재 • fraud-svc: 이상 거래 탐지         │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 토픽 분류 | 신뢰성 수준 (acks) | 소비 패턴 및 멱등성 보장 |
+| :--- | :--- | :--- |
+| **trade.*** | `acks=all`, min.insync=2 | DB `consumed_events` 테이블에 이벤트 ID 기록하여 중복 처리 방지 |
+| **telemetry.*** | `acks=1` (처리량 우선) | 초당 수만 건 로그 처리, 일부 유실 허용 비즈니스 텔레메트리 |
+| **control.*** | `acks=all`, 순서 엄격 보장| 긴급 정지/재개 명령을 컨슈머 그룹 전 파드에 1초 내 브로드캐스트 |
 
 ### 핵심 3대 서브시스템
 
@@ -154,29 +150,26 @@ PEAKET은 용도와 가용성 요건에 따라 AWS MSK 클러스터를 물리적
 #### 2. 파티션 내 키 단위 동시 처리 (Concurrent Key Processing)
 `@peaket/stream-worker` 공용 모듈은 단일 파티션 내부에서 **업무 키(주문 ID / 좌석 ID) 기반 병렬 처리 파이프라인**을 구현했다:
 
-```mermaid
-flowchart TD
-    Part["단일 파티션 레코드 스트림<br/>(회차 Event ID 기준 인입)"] --> Dispatcher["파티션 디스패처"]
-    
-    subgraph Workers["최대 32개 워커 스레드 풀 (주문 ID 해시 모듈로 32)"]
-        W1["Worker 1 (주문 ID #101)"]
-        W2["Worker 2 (주문 ID #102)"]
-        W3["Worker 3 (주문 ID #103)"]
-        W32["Worker 32 (주문 ID #132)"]
-    end
-    
-    Dispatcher -->|"Hash(orderId) % 32 == 0"| W1
-    Dispatcher -->|"Hash(orderId) % 32 == 1"| W2
-    Dispatcher -->|"Hash(orderId) % 32 == 2"| W3
-    Dispatcher -->|"Hash(orderId) % 32 == 31"| W32
-    
-    W1 --> CommitTracker["순차 오프셋 커밋 트래커"]
-    W2 --> CommitTracker
-    W3 --> CommitTracker
-    W32 --> CommitTracker
-    
-    CommitTracker -->|"빈틈없는 최소 오프셋까지 커밋"| KafkaBroker["Kafka 오프셋 커밋"]
 ```
+[단일 파티션 레코드 스트림 (Event ID 기준 인입)]
+                      │
+                      ▼
+             [파티션 디스패처]
+                      │
+     ┌────────────────┼────────────────┬────────────────┐
+     │ 주문 ID #101   │ 주문 ID #102   │ 주문 ID #103   │ 주문 ID #132
+     ▼                ▼                ▼                ▼
+┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐
+│  Worker 1    ││  Worker 2    ││  Worker 3    ││  Worker 32   │
+│ (스레드 풀 1)││ (스레드 풀 2)││ (스레드 풀 3)││(스레드 풀 32)│
+└──────────────┘└──────────────┘└──────────────┘└──────────────┘
+```
+
+| 디스패처 구조 | 샤딩 메커니즘 | 처리량 및 정합성 보장 |
+| :--- | :--- | :--- |
+| **주문 ID 해시 모듈로**| `hash(orderId) % 32` | 동일 주문에 대한 이벤트는 항상 동일 워커가 순차 처리 (인터리빙 방지) |
+| **병렬 워커 스레드 풀**| 최대 32개 워커 병렬 실행 | 단일 파티션 병목을 해소하여 처리량을 단일 스레드 대비 20배 이상 향상 |
+| **커밋 오프셋 관리** | 워커별 완료 상태 추적 | 처리 완료된 최소 연속 오프셋만 안전하게 Kafka에 커밋 (At-Least-Once) |
 
 - **동일 주문 순서 보장**: 동일한 주문 ID를 가진 이벤트는 언제나 동일한 워커 스레드로 배정되므로 주문 수명주기 순서가 100% 보장된다.
 - **서로 다른 주문 병렬 처리**: 서로 다른 주문 32개가 동시 병렬 처리되므로 처리량이 초당 수천~수만 건으로 32배 선형 확장된다.

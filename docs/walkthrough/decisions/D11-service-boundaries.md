@@ -49,47 +49,27 @@
 
 PEAKET은 **"조직 구조(콘웨이 법칙)가 아닌 시스템의 물리적 부하, 가용성 SLA, 실행 방식, 보안 경계를 유일한 분리 기준으로 삼는다"**는 원칙으로 10개 핵심 서비스를 정립했다.
 
-```mermaid
-flowchart TD
-    subgraph Gateways["5대 전용 씬 게이트웨이 (D-13)"]
-        GW_WEB["gw-web (팬 웹/앱)"]
-        GW_PARTNER["gw-partner (기획사)"]
-        GW_OPS["gw-ops (운영 관제)"]
-        GW_GATE["gw-gate (현장 검표)"]
-        GW_RT["realtime-gw (좌석 WebSocket)"]
-    end
-
-    subgraph Tier1["핫패스 티어 (초고부하 & 고빈도 스케일링)"]
-        SVC_QUEUE["1. queue-svc\n- 대기 번호 발급 (20만 RPS)\n- CDN 세그먼트 생성"]
-        SVC_ADMIT["2. admission-ctrl\n- 200ms 입장 제어 루프\n- 단일 리더 펜싱"]
-        SVC_PURCHASE["3. purchase-svc\n- 좌석 점유 (Soft Hold)\n- 주문서 생성 (Booking)"]
-        SVC_PAYMENT["4. payment-svc\n- 이중 PG 승인 (300 TPS)\n- 전진 복구 큐"]
-    end
-
-    subgraph Tier2["보안 및 제어 티어 (최고 가용성 & 장애 격리)"]
-        SVC_IDENTITY["5. identity-svc\n- 토큰 발급 & 실시간 권한 조회\n- OIDC 클라이언트"]
-        SVC_OPS["6. ops-svc\n- 관제 제어 gRPC 평면\n- 킬스위치 & 2인 승인 원장"]
-        SVC_TRUST["7. trust-svc\n- 6대 다층 봇 점수기\n- 비동기 CHALLENGE 격리"]
-        SVC_GATE["8. gate-svc\n- 오프라인 회전 QR 검증\n- P2P 변경분 동기화"]
-    end
-
-    subgraph Tier3["비즈니스 지원 및 분석 티어 (배치 & 비동기)"]
-        SVC_CORE["9. core-svc (모듈러 모놀리스)\n- 공연 카탈로그, 굿즈샵\n- 알림/웹훅 발송, CS/리뷰"]
-        SVC_ANALYTICS["10. analytics-worker\n- TypeScript 스트림 워커\n- ClickHouse 적재 & 집계"]
-    end
-
-    GW_WEB --> SVC_QUEUE & SVC_PURCHASE & SVC_IDENTITY
-    GW_RT <--> SVC_PURCHASE
-    GW_OPS --> SVC_OPS
-    GW_PARTNER --> SVC_CORE & SVC_PURCHASE
-    GW_GATE --> SVC_GATE
-
-    SVC_QUEUE <--> SVC_ADMIT
-    SVC_ADMIT --> SVC_PURCHASE
-    SVC_PURCHASE --> SVC_PAYMENT
-    SVC_QUEUE -.-> SVC_TRUST
-    SVC_PAYMENT -.-> SVC_ANALYTICS
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [5대 전용 씬 게이트웨이 (D-13)]                                        │
+│ • gw-web (팬 웹/앱)  • gw-partner (기획사)  • gw-ops (관제)             │
+│ • gw-gate (현장 검표) • gw-webhook (외부 결제사 웹훅)                   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+    ┌───────────────────────────────┼───────────────────────────────┐
+    │                               │                               │
+    ▼                               ▼                               ▼
+┌────────────────────────┐  ┌────────────────────────┐  ┌────────────────────────┐
+│ [주문/예매 도메인]     │  │ [공연/메타 도메인]     │  │ [결제/정산 도메인]     │
+│ • queue-svc, seat-svc  │  │ • core-svc, partner-svc│  │ • payment-svc          │
+│ • purchase-svc         │  │ • search-svc           │  │ • settlement-svc       │
+└────────────────────────┘  └────────────────────────┘  └────────────────────────┘
+```
+
+| 게이트웨이 | 라우팅 대상 도메인 | 트래픽 격리 효과 |
+| :--- | :--- | :--- |
+| **gw-web / gw-gate** | 예매 코어 및 현장 검표 | 티켓 오픈 트래픽 폭주가 타 업무 시스템에 영향을 주지 않도록 물리적 격리 |
+| **gw-ops / gw-partner**| 관제 콘솔 및 기획사 관리 | 사내망 IP 화이트리스트 및 mTLS 인증으로 보안 방벽 확립 |
 
 ### 핵심 매커니즘 4가지
 
