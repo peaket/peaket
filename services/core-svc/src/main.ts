@@ -45,7 +45,7 @@ import {
   UnavailableReviewEligibility,
   UnavailableFanProfile,
 } from './modules/review/index.js';
-import { DrizzleWebhookStore, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
+import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
 
 const SERVICE = 'core-svc';
@@ -257,6 +257,10 @@ const webhookWorker =
     : new WebhookWorker(new WebhookDispatcher({ store: new DrizzleWebhookStore(notifyDatabase), transport: new HttpsWebhookTransport(), clock: systemClock }), systemClock);
 webhookWorker?.start();
 
+// BAT-455 팬 알림 발송기(GAT-250). PEAKET_NOTIFY_WORKER=off면 켜지 않는다. 원장 저장소는 core_notify 연결이다
+const fanNotifyWorker = process.env.PEAKET_NOTIFY_WORKER === 'off' ? undefined : service.app.get(FanNotificationWorker);
+fanNotifyWorker?.start();
+
 // 탈퇴 사건 소비자(그룹 peaket.core-svc.<환경>)와 다시 정리 반복. DB는 소비자 전용 core_app 풀이다(후기 파기·다시 정리 예약과 보류 표 held_event, 리뷰 K2)
 let consumers: CoreConsumers | undefined;
 let closing: Promise<void> | undefined;
@@ -301,6 +305,7 @@ process.once('SIGTERM', () => {
 function shutdown(): Promise<void> {
   closing ??= (async () => {
     webhookWorker?.stop();
+    fanNotifyWorker?.stop();
     searchTimers.stop();
     // Kafka 소비자를 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋). 실패해도 나머지는 그대로 끝낸다
     await consumers?.stop().catch((err: unknown) => service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'));

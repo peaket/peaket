@@ -9,7 +9,7 @@ import { accountWithdrawnMessage } from './account-withdrawn-message.js';
 import { loginMethodChangedMessage } from './login-method-message.js';
 import { accountMergedMessage } from './account-merged-message.js';
 
-type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; closureNextCheckAt?: number; deletedAt?: number; nickname?: string | null; nicknameKey?: string | null; ageVerified?: boolean; memberCode?: string | null; phone?: string | null };
+type StoredAccount = AccountRow & { email: string | null; emailVerified: boolean; mergedInto?: string; createdAt: number; closureReason?: string; closureStartedAt?: number; closureNextCheckAt?: number; deletedAt?: number; nickname?: string | null; nicknameKey?: string | null; ageVerified?: boolean; memberCode?: string | null; phone?: string | null; verified?: boolean; locale?: string };
 
 type StoredSession = NewSession & { loginVerdictReason: string | null; loginVerdictAt: number; terminatedAt: number | null; terminatedReason: string | null; prevRefreshHash: Uint8Array | null; rotatedAt: number | null; refreshUsed: boolean; lastActiveAt: number };
 
@@ -107,6 +107,26 @@ export class MemorySessionStore implements SessionStore {
     const next = this.#queue.then(run, run);
     this.#queue = next.catch(() => {});
     return next;
+  }
+
+  /** 시험용: 휴대폰 본인확인을 마친 계정으로 표시한다(RecipientQueryService의 verified) */
+  markVerified(accountId: string): void {
+    const a = this.#state.accounts.get(accountId);
+    if (a) this.#state.accounts.set(accountId, { ...a, verified: true });
+  }
+
+  async recipientsOf(accountIds: readonly string[], includeEmail: boolean): Promise<import('../domain/ports.js').RecipientRow[]> {
+    return accountIds.map((accountId) => {
+      const a = this.#state.accounts.get(accountId);
+      if (!a) return { accountId, status: 'NOT_FOUND', verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}) };
+      return {
+        accountId,
+        status: a.status,
+        verified: a.verified === true,
+        locale: a.locale ?? 'ko',
+        ...(includeEmail ? { email: a.status === 'MERGED' || a.status === 'DELETED' ? null : a.email } : {}),
+      };
+    });
   }
 
   /** 시험이 저장된 세션을 들여다본다 */

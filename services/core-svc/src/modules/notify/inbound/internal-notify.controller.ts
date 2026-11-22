@@ -16,7 +16,7 @@ const NotifyBody = z
     refundAmount: z.number().int().nonnegative().optional(),
   })
   .strict();
-const View = z.object({ deliveryId: z.string(), type: z.enum(['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']), orderId: z.string(), status: z.enum(['SENT', 'UNAVAILABLE']), message: z.string() });
+const View = z.object({ deliveryId: z.string(), type: z.enum(['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']), orderId: z.string(), status: z.enum(['SENT', 'PENDING', 'FAILED', 'UNAVAILABLE']), message: z.string() });
 
 @Controller('internal/v1/notify/trade-events')
 @UseGuards(InternalTokenGuard)

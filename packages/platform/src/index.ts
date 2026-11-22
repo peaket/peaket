@@ -31,7 +31,7 @@ export {
   type ScannerStaffRole,
   type VerifiedDpopProof,
 } from './scanner-auth.js';
-export { AcceptMultipart, AcceptTextPlain, BodyLimit, Bulkhead, DEFAULT_BODY_LIMIT_BYTES, type RouteBulkhead, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type AcceptMultipartOptions, type ContractRouteSchemaInput } from './request-checks.js';
+export { AcceptFormUrlEncoded, AcceptMultipart, AcceptTextPlain, BodyLimit, Bulkhead, DEFAULT_BODY_LIMIT_BYTES, type RouteBulkhead, ContractBody, ContractHeaders, ContractParams, ContractQuery, ContractRouteSchema, RequestValidationError, contractRouteSchema, type AcceptMultipartOptions, type ContractRouteSchemaInput } from './request-checks.js';
 export { DEADLINE_HEADER, DEFAULT_MAX_DEADLINE_MS, Deadline, ROUTE_DEADLINE_KEY, RouteDeadline } from './deadline.js';
 export { HOT_PATH_METRICS, HotPathMetrics, timeHotPath, timeHotPathSync, type HotPathOutcome, type HotPathStage } from './hot-path.js';
 export { LATENCY_BUCKETS_SECONDS, PlatformMetrics, TIMEOUT_METRICS } from './metrics.js';

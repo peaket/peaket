@@ -6,7 +6,7 @@ import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from 'driz
 import { accountWithdrawnMessage } from '../account-withdrawn-message.js';
 import { loginMethodChangedMessage } from '../login-method-message.js';
 import { accountMergedMessage } from '../account-merged-message.js';
-import type { AccountStatus, ContactKind, CreateKeyRecord, InvestigationRefsRow, RefreshRow, SessionRow, SessionStore, SessionTx, SignupRecord, SignupState } from '../../domain/ports.js';
+import type { AccountStatus, ContactKind, CreateKeyRecord, InvestigationRefsRow, RecipientRow, RefreshRow, SessionRow, SessionStore, SessionTx, SignupRecord, SignupState } from '../../domain/ports.js';
 import { CREATE_KEY_TTL_MS, type LiveSession, type LoginVerdict, type Provider, type TerminationReason } from '../../domain/session.js';
 import { account, accountContactRef, accountHold, accountMerge, accountProvider, consent, device, reauthTokenUse, refreshTokenHash, session, sessionCreateKey } from './schema.js';
 
@@ -195,6 +195,33 @@ export class DrizzleSessionStore implements SessionStore {
     // 옛 판으로 남은 기기 행: 이음 기간에 다시 로그인하지 않은 기기(나중에 로그인하면 새 기기 알림이 한 번 간다)
     const removed = await loop(async () => (await db.execute(sql`delete from device where id in (select id from device where left(device_ref, ${prevPrefix.length}) = ${prevPrefix} limit ${chunk}) returning id`)).rows.length);
     return { cleared, removed };
+  }
+
+  async recipientsOf(accountIds: readonly string[], includeEmail: boolean): Promise<RecipientRow[]> {
+    if (accountIds.length === 0) return [];
+    const ids = [...new Set(accountIds)];
+    const rows = await this.database.db
+      .select({
+        id: account.id,
+        status: account.status,
+        email: account.email,
+        locale: account.locale,
+        verified: sql<boolean>`exists (select 1 from identity_verification v where v.account_id = ${account.id})`,
+      })
+      .from(account)
+      .where(inArray(account.id, ids));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return accountIds.map((accountId) => {
+      const r = byId.get(accountId);
+      if (!r) return { accountId, status: 'NOT_FOUND' as const, verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}) };
+      return {
+        accountId,
+        status: r.status as RecipientRow['status'],
+        verified: r.verified === true,
+        locale: r.locale || 'ko',
+        ...(includeEmail ? { email: r.status === 'MERGED' || r.status === 'DELETED' ? null : r.email } : {}),
+      };
+    });
   }
 
   async accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]> {

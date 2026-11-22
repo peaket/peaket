@@ -18,6 +18,15 @@ export interface AccountRow {
   status: AccountStatus;
 }
 
+/** 알림 받는 사람 묶음 조회(BatchGetRecipients, identity.proto, notify §2.1 E6) */
+export interface RecipientRow {
+  accountId: string;
+  status: AccountStatus | 'NOT_FOUND';
+  verified: boolean;
+  locale: string;
+  email?: string | null;
+}
+
 export interface SessionRow {
   id: string;
   accountId: string;
@@ -240,6 +249,8 @@ export interface SessionStore {
    * identityConflicts는 since 뒤의 같은 본인확인 시도 기록(본인확인 컨텍스트의 표를 읽는다. 표를 보지 못하는 저장소는 빈 목록)
    */
   investigationRefsOf(accountIds: readonly string[], since: number): Promise<InvestigationRefsRow[]>;
+  /** 받는 사람 묶음(최대 500, 요청 순서). 이메일은 includeEmail일 때만 채운다(identity.proto RecipientQueryService, notify §2.1 E6) */
+  recipientsOf(accountIds: readonly string[], includeEmail: boolean): Promise<RecipientRow[]>;
   /** 이메일은 있는데 EMAIL 연락처 가명 행이 없는 ACTIVE 계정을 ID 순으로 after 뒤부터 최대 limit개(정비 contact-ref-backfill) */
   accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]>;
   /** 새 판(writePrefix, 예 'k2.')이 아닌 EMAIL 행을 가진 ACTIVE 계정과 그 이메일·지금 값을 ID 순으로 after 뒤부터 최대 limit개(정비 contact-ref-rotate, BOT-046) */

@@ -37,6 +37,8 @@ export interface IdentityPackage {
   ReverificationCheckService: grpc.ServiceClientConstructor;
   /** 스캐너 경로 가드의 세션 확인(ticket-svc만, offline-gate §6.1, GAT-170) */
   ScannerSessionCheckService: grpc.ServiceClientConstructor;
+  /** 알림 받는 사람 묶음(core-svc 팬 알림 발송 워커만, notify §2.1 E6, BAT-455 N-T24) */
+  RecipientQueryService: grpc.ServiceClientConstructor;
 }
 
 let pkg: IdentityPackage | undefined;

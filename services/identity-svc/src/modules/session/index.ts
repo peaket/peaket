@@ -91,3 +91,5 @@ export { ComputeContactRef } from './application/compute-contact-ref.js';
 export { GetInvestigationRefs } from './application/get-investigation-refs.js';
 export { contactRefHandlers, investigationRefHandlers } from './inbound/session.grpc.js';
 export { PromSessionSignals } from './adapters/prom-session-signals.js';
+export { GetRecipients } from './application/get-recipients.js';
+export { recipientQueryHandlers } from './inbound/recipient-query.grpc.js';

@@ -28,11 +28,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   }
   await migrateCore(url);
   // 마이그레이션 직후 Outbox 일 파티션을 만든다(첫 쓰기가 파티션 없이 실패하지 않게). 운영 실행기의 같은 일은 BUILD_ORDER BAS-060이다
-  const { createDatabase, ensureOutboxPartitions, systemClock } = await import('@peaket/platform');
+  const { createDatabase, ensureMonthlyPartitions, ensureOutboxPartitions, systemClock } = await import('@peaket/platform');
   const database = createDatabase({ url, applicationName: 'core-svc-migrate', max: 1 });
   try {
     const { created } = await ensureOutboxPartitions(database, systemClock);
     console.log(`Outbox 파티션 ${created.length}개를 만들었다`);
+    // BAT-455: 첫 알림 발송 기록이 파티션 없이 실패하지 않게 월 파티션을 만든다
+    const notify = await ensureMonthlyPartitions(database, systemClock, { table: 'notification_delivery', key: 'timestamptz' });
+    console.log(`알림 발송 기록 파티션 ${notify.created.length}개를 만들었다`);
   } finally {
     await database.close();
   }

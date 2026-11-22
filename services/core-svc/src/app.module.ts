@@ -26,7 +26,7 @@ export class AppModule {
           review?: Omit<DatabaseReviewWiring, 'database'>;
           /** 굿즈 주문의 재고 Redis·payment-svc·ticket-svc. 빠진 것은 '늘 실패' 어댑터(그 경로만 503)다 */
           shop?: Partial<Omit<DatabaseShopWiring, 'database' | 'partnerDatabase'>>;
-          notify?: { notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> };
+          notify?: { notificationTransport?: NotificationTransport; env?: Record<string, string | undefined>; fanNotify?: import('./modules/notify/notify.module.js').FanNotifyWiring };
           exportJwks?: { url: string; issuer: string };
           identityGrpc?: string;
           /** purchase-svc 예매자 명단 내부 HTTP(A2-03). 없으면 굿즈 주문 대역을 쓴다 */
@@ -49,7 +49,7 @@ export class AppModule {
           saleConfigs?: SaleConfigStore;
           review?: MemoryReviewWiring;
           shop?: MemoryShopWiring;
-          notify?: { store?: WebhookStore; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> };
+          notify?: { store?: WebhookStore; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined>; fanNotify?: import('./modules/notify/notify.module.js').FanNotifyWiring };
           export?: MemoryExportWiring;
           /** 시험이 넘기는 ops 승인 대역. 없으면 메모리 대역(기록만) */
           opsApprovals?: OpsApprovalClient;
@@ -74,7 +74,7 @@ export class AppModule {
             payments: o.shop?.payments ?? unavailableMerchPayments,
             held: o.shop?.held ?? unavailableHeldTickets,
           }),
-          NotifyModule.register({ storage: 'database', notifyDatabase: o.notifyDatabase, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
+          NotifyModule.register({ storage: 'database', database: o.database, notifyDatabase: o.notifyDatabase, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}), ...(o.notify?.fanNotify ? { fanNotify: o.notify.fanNotify } : {}) }),
           ExportModule.register({
             storage: 'database',
             database: o.database,
@@ -92,7 +92,7 @@ export class AppModule {
         CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}), ...(o.media ? { media: o.media } : {}), ...(o.saleConfigs ? { saleConfigs: o.saleConfigs } : {}), ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}), ...(o.saleOpen ? { saleOpen: o.saleOpen } : {}), ...(o.saleConfigMetrics ? { saleConfigMetrics: o.saleConfigMetrics } : {}) }),
         ReviewModule.register({ storage: 'memory', wiring: { ...(o.catalog ? { catalogRepository: o.catalog } : {}), ...(o.review ?? {}) } }),
         ShopModule.register({ storage: 'memory', ...(o.shop ? { wiring: o.shop } : {}) }),
-        NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
+        NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}), ...(o.notify?.fanNotify ? { fanNotify: o.notify.fanNotify } : {}), ...(o.catalog ? { catalog: o.catalog } : {}) }),
         ExportModule.register({ storage: 'memory', ...(o.export ? { wiring: o.export } : {}) }),
       ],
     };

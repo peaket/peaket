@@ -23,6 +23,7 @@ import { WITHDRAWAL_PARTICIPANTS, WITHDRAWAL_SIGNALS, type WithdrawalParticipant
 import { LOGIN_RISK, type LoginRisk, ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, INV_REFS, type InvRefs, LINK_PROPOSALS, type LinkProposals, MERGE_CHECKERS, MERGE_PROPOSALS, type MergeChecker, type MergeProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
 import { AccountController, ProvidersController } from './inbound/account.controller.js';
 import { ListProviders } from './application/list-providers.js';
+import { GetRecipients } from './application/get-recipients.js';
 import { AddProvider } from './application/add-provider.js';
 import { UnlinkProvider } from './application/unlink-provider.js';
 import { ConfirmMerge } from './application/confirm-merge.js';
@@ -178,6 +179,7 @@ export class SessionModule {
         EndSession,
         IssueReauthToken,
         GetVerificationStatus,
+        GetRecipients,
         RefreshSession,
         WithdrawAccount,
         RetryPendingWithdrawals,
@@ -211,7 +213,7 @@ export class SessionModule {
         { provide: PUBLIC_KEYS, useValue: o.keys },
         { provide: COOKIE_DOMAIN, useValue: o.cookieDomain },
       ],
-      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, RefreshSession, WithdrawAccount, RetryPendingWithdrawals, FinishWithdrawals, CheckScannerSession, TerminateScannerSessions, ACCOUNT_CLOSURE],
+      exports: [CreateSession, GetLinkProposal, SeparateAccount, AddProvider, UnlinkProvider, SetAccountHold, ComputeContactRef, GetInvestigationRefs, BackfillContactRefs, EndSession, IssueReauthToken, GetVerificationStatus, GetRecipients, RefreshSession, WithdrawAccount, RetryPendingWithdrawals, FinishWithdrawals, CheckScannerSession, TerminateScannerSessions, ACCOUNT_CLOSURE],
     };
   }
 }

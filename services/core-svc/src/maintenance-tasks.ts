@@ -2,7 +2,7 @@
 // 판매 자격 명단 파기(sale-eligibility-purge)와 사본 다시 넘기기(sale-eligibility-copy)다. 정비 역할 연결(PEAKET_MAINTENANCE_DATABASE_URL, 모든 테넌트)을 쓴다.
 // 그 로그인 사용자는 core_maintenance 역할(마이그레이션 0008)에 들어 있어야 한다(리뷰 S7).
 // 사본을 쓰는 쪽은 소유자 결정 대기라 사본 어댑터는 늘 실패하는 어댑터다(지표 sale_eligibility_copy_unwired_total, 일은 실패로 끝나 정비 실패 지표에도 남는다).
-import { type Clock, type Database, type MaintenanceTask, createPlatformLogger, loadPlatformConfig } from '@peaket/platform';
+import { type Clock, type Database, type MaintenanceTask, createPlatformLogger, ensureMonthlyPartitions, loadPlatformConfig } from '@peaket/platform';
 import {
   DrizzleSaleConfigMaintenanceStore,
   DrizzleSaleConfigStore,
@@ -26,7 +26,7 @@ import { DrizzleShopOrderStore, type MerchPayments, MerchUnclaimed, MERCH_UNCLAI
  * shop 정비 일은 상품 속성 검증(product-attributes-check, 정비 시간 안 04:40 KST [가정], ADR-0300 결정 2)과 미수령 자동 취소(merch-unclaimed-cancel, 매일 10:00 KST [가정] 뒤 영업일,
  * ADR-0301 결정 5)다. 둘은 서비스 역할 연결(core_app, PEAKET_DATABASE_URL)이 있을 때만 돈다(BAT-600)
  */
-export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish', 'review-temp-block-expire', 'review-purge-legacy', PRODUCT_ATTRIBUTES_TASK, MERCH_UNCLAIMED_TASK] as const;
+export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish', 'review-temp-block-expire', 'review-purge-legacy', PRODUCT_ATTRIBUTES_TASK, MERCH_UNCLAIMED_TASK, 'notification-delivery-partitions'] as const;
 
 export function coreMaintenanceTasks(
   database: Database,
@@ -46,6 +46,9 @@ export function coreMaintenanceTasks(
     tasks.push(...saleConfigMaintenanceTasks(new DrizzleSaleConfigMaintenanceStore(o.opsDatabase), publish, logger));
   }
   tasks.push(...reviewMaintenanceTasks(new DrizzleReviewStore(database), clock));
+  // BAT-455: notification_delivery 월 파티션(90일 보존, docs/data.md §2 '파티션 표 규칙'). 날짜를 박은 첫 파티션을 두지 않는다
+  const deliverySpec = { table: 'notification_delivery', key: 'timestamptz' } as const;
+  tasks.push({ name: 'notification-delivery-partitions', when: 'daily', run: async () => void (await ensureMonthlyPartitions(database, clock, deliverySpec)) });
   if (o.shop) {
     const store = new DrizzleShopOrderStore(o.shop.database, clock);
     const attributes = new ProductAttributesCheck({ store, clock, signals: o.shop.signals, logger });

@@ -51,11 +51,11 @@ flowchart LR
 | 번호 | 무엇이 오가나 | 규칙 |
 | --- | --- | --- |
 | E1 | 신청·끄기, 찜·해제, 웹 푸시 구독 등록·해제 | 팬 쿠키 인증, 쓰기는 `Origin` 확인(docs/api/guidelines.md §9). §3 |
-| E2 | `trade.seats`의 판매 상태 바뀜(매진 풀림), `trade.orders`(예매 확정·취소), `trade.tickets`(양도 요청·수락·거절·철회·만료·돌려주기·회수, 추천 적용 2026-10-30), `trade.settlements`, `identity.accounts-merged`, `identity.login-methods-changed`(로그인 수단 연결·해제 안내, I-T34, 2026-11-04 BOT-041이 identity 쪽을 냈다) | Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)의 소비자(메시지를 읽는 쪽)가 받아 같은 트랜잭션으로 원장에 적은 뒤 읽은 위치를 커밋한다(ADR-0026의 멱등 소비자, ADR-0109) |
+| E2 | `trade.seats`의 판매 상태 바뀜(매진 풀림), `trade.orders`(예매 확정·취소), `trade.tickets`(양도 요청·수락·거절·철회·만료·돌려주기·회수, 추천 적용 2026-10-30), `trade.settlements`, `identity.accounts-merged`, `identity.login-methods-changed`(로그인 수단 연결·해제 안내, I-T34, 2026-11-04 BOT-041이 identity 쪽을 냈다) | Kafka(이벤트를 순서대로 쌓아 두고 여러 곳에 나눠 주는 메시지 시스템)의 소비자(메시지를 읽는 쪽)가 받아 같은 트랜잭션으로 원장에 적은 뒤 읽은 위치를 커밋한다(ADR-0026의 멱등 소비자, ADR-0109). BAT-455는 identity 두 사건을 내부 입구 `POST /internal/v1/notify/identity-events`로 받는 길까지 만들었고, Kafka 소비자 배선은 후속이다(§4.6) |
 | E3 | 오픈 시각(`open_at`)·로비 개방 리드·판매 승인 상태·회차 취소·연기 | 같은 core 논리 DB라 Kafka를 거치지 않는다. 바뀌는 트랜잭션 안에서 대량 발송 계획을 고친다(§5.6) |
 | E4 | 낱건 작업 행(`notification_job`·`webhook_delivery`)과 대량 발송 조각 행(`notification_broadcast_chunk`) | §4 |
 | E5 | 팬 알림 워커가 보낼 때가 된 행을 짧은 트랜잭션에서 `FOR UPDATE SKIP LOCKED`로 골라 임대(lease: 워커가 일을 맡았다고 표에 적어 두는 짧은 시간)를 건다 | ADR-0109 결정 2. 잠금을 쥔 채 바깥 호출을 하지 않는다 |
-| E6 | 받는 사람의 이메일, 언어, 본인확인 여부, 계정 상태 | identity-svc 읽기 전용 복제본에서 500명씩 묶어 묻는다. 계약은 identity.proto 초안 `RecipientQueryService.BatchGetRecipients`이고, 언어는 계정 칸 `account.locale` [가정]이다(docs/architecture.md §3.2, 2026-10-30) |
+| E6 | 받는 사람의 이메일, 언어, 본인확인 여부, 계정 상태 | identity-svc 읽기 전용 복제본에서 500명씩 묶어 묻는다. 계약은 identity.proto 초안 `RecipientQueryService.BatchGetRecipients`이고, 언어는 계정 칸 `account.locale` [가정]이다(docs/architecture.md §3.2, 2026-10-30). BAT-455가 identity-svc에 이 서비스를 구현했고 core-svc 워커가 500ms 데드라인으로 부른다(§4.6) |
 | E7 | RFC 8291로 암호화한 본문과 VAPID 서명 머리 | §4.4 |
 | E8 | 이메일 | 대행사는 아직 정하지 않았다(docs/review/open-items.md 57번, §4.4) |
 | E9 | 웹훅 워커가 같은 방식으로 `webhook_delivery` 행을 가져간다 | ADR-0109 결정 2 |
@@ -250,6 +250,15 @@ stateDiagram-v2
 - **판과 다시 보내기**: 잠금 상태가 바뀌거나(최대 기한·입장 시작에 ticket-svc가 스스로 풀 때 포함) 받은 사람의 표 결과가 정해지면 ops-svc가 그 (계정, 사건)의 사본을 더 큰 판으로 다시 보낸다. 최대 기한에는 ops-svc 스케줄러가 그 시각에 보낸다. 판 비교와 중복 키 규칙은 위와 같아, 같은 판을 다시 보내도 알림이 두 번 가지 않는다.
 - 받은 사람이 표를 결제자에게 돌려주면 ops-svc는 그 사람 사본의 `held_ticket_ids`에서 그 표를 빼 다시 보낸다. 이것은 결과가 아니라 알림을 보내지 않는다.
 
+### 4.6 구현 상태(2026-11-22, BAT-455 GAT-250)
+
+- **표**: 마이그레이션 0046가 `notification_subscription`·`push_subscription`·`notification_dedup`·`notification_job`·`notification_delivery`를 만든다. `notification_delivery`는 `sent_at` 월 파티션이고 첫 파티션은 정비 일 `notification-delivery-partitions`가 만든다. 팬 경로 `core_app`은 다섯 표를 쓰고, 발송기 `core_notify`는 신청의 `night_push`·`sent_count`·`status`·`end_reason`·`updated_at`, 구독 읽기·만료 삭제, 중복 키·작업 넣기와 결과 칸, 기록 넣기만 한다(ADR-0351과 같은 '코드가 쓰는 만큼만').
+- **API**: `POST`·`DELETE /v1/events/{eventId}/subscriptions`(OPEN·CANCELLATION, 200/201/410/422), `GET /v1/subscriptions`(회차 50개·커서), `POST`·`DELETE /v1/push-subscriptions`(허용 호스트·공인 IP·키 검사·계정당 10개·SHA-256 해시), `POST /v1/subscription-opt-outs/{optOutToken}`(RFC 8058 한 번 누름). 구현은 `services/core-svc/src/modules/notify/application/fan-notify.ts`와 `inbound/fan-notify.controller.ts`다.
+- **워커**: `FanNotificationWorker`가 `notification_job`을 임대 2분으로 집어 이메일·웹 푸시로 보낸다. 이메일은 `MailTransport` 포트(운영 대행 어댑터 자리)와 local·ci 파일 대역(`PEAKET_NOTIFY_MAIL_DIR`)이고, 웹 푸시는 RFC 8291 `aes128gcm` 암호화·RFC 8292 VAPID ES256 JWT를 만들고 local·ci 파일 대역(`PEAKET_NOTIFY_PUSH_DIR`) 또는 HTTPS로 보낸다. 404·410·403 구독은 지우고, 429·5xx는 남은 TTL 안에서 1분·5분·30분·2시간·6시간·12시간 [가정]으로 다시 보낸다. 결과를 모르는 신청 알림·광고는 다시 보내지 않고 돈·보안·법정 통지만 같은 키로 한 번 더 본다.
+- **받는 사람**: identity-svc `RecipientQueryService.BatchGetRecipients`를 구현했다(계정 500개, `includeEmail`, MERGED·DELETED·없는 계정 한 줄). core-svc 워커는 `RecipientDirectory` 포트로 부른다.
+- **I-T34·POL-034**: 내부 입구 `POST /internal/v1/notify/identity-events`가 `LOGIN_METHOD_CHANGED`를 받아 이메일·웹 푸시 작업을 한 번 적고, `ACCOUNT_MERGED`를 받아 흡수 계정의 신청·구독을 대표 계정으로 옮긴다(겹치면 하나, 보낸 횟수는 큰 쪽). 대표 계정에 완료 통지를 적는다. 흡수 계정 이메일 통지는 사건에 주소가 없어 남은 한계다(§16).
+- **남은 것**: 운영 메일 대행 계약과 `PEAKET_VAPID_PRIVATE_KEY`·`PEAKET_VAPID_PUBLIC_KEY`(OPEN[10]), 문자·알림톡 대행, 대량 발송 조각 원장(§4.2), Kafka 소비자 배선(지금은 내부 입구), POL-034 흡수 계정 이메일.
+
 ## 5. 대기실 오픈 안내 대량 발송(추천 적용 2026-10-30)
 
 ### 5.1 무엇이 문제인가
@@ -411,6 +420,7 @@ T는 오픈 시각(`open_at`), L은 로비 개방 리드(기본 10분, 회차 �
 | 다시 보내기 | `POST /v1/partner/webhook-deliveries/{deliveryId}/redeliveries` | 파트너 관리자. DEAD·SUCCEEDED 행을 PENDING으로 되돌려 같은 `webhook-id`로 다시 보낸다. 엔드포인트마다 분당 10건 [가정] |
 
 - 다른 파트너의 엔드포인트·발송 행은 404다(있는지 알리지 않는다). 엔지니어의 다시 보내기는 RB-11이다.
+- **GAT-270 재확인(2026-11-22, BAT-455)**: 이벤트 8종 구독 거르기(`WEBHOOK_EVENT_TYPES`·`listActiveEndpoints`), Standard Webhooks 서명·옛 비밀 24시간 겹침, 1분·5분·30분·2시간·6시간·12시간 재시도·DEAD·FAILING 비활성화, DNS 재검사·리디렉션 거부를 기존 시험(`notify-webhook.http.test.ts`, `webhook-dispatcher.test.ts`)으로 다시 확인했다. 남은 것은 Secrets Manager/KMS 비밀 저장, 파트너 콘솔 알림함·이메일, 분당 다시 보내기 상한, Kafka Outbox 소비자, 발송 파드의 나가는 443 제한(V-T34)이다. 이 묶음은 코드·시험 수용 기준을 닫고 위 운영 몫을 '운영 전'으로 둔다.
 - **구현 상태(2026-11-15, R-588)**: core-svc notify 모듈이 위 관리 API 가운데 등록·조회·고치기·비밀 재발급·발송 이력·다시 보내기를 구현했다. `webhook_endpoint`·`webhook_delivery` 표(0015), 테넌트 RLS, If-Match·권한·주소 검사·1분 재발급 제한·DEAD/SUCCEEDED만 다시 보내기를 단위·HTTP 시험으로 본다. **발송기**: `webhook_delivery`의 thin 본문(`payload`)을 읽어 Standard Webhooks 서명(현재·옛 비밀 공백 연결)으로 보내고, 2xx만 성공, 3xx·시간 초과는 실패로 본다. 재시도는 1분·5분·30분·2시간·6시간·12시간 [가정]이고 다 실패하면 DEAD다. 5일 [가정] 동안 성공 없이 DEAD 50건 [가정]이면 DISABLED(FAILING)로 바꾼다. 연결마다 DNS를 다시 해석해 공인 IP만 연결하고 리디렉션을 따르지 않는다. 시험은 가짜 수신기로 서명·재시도·DLQ·비활성화를 본다. **남은 것**: Secrets Manager/KMS 비밀 저장, 파트너 콘솔 알림함·이메일, 분당 다시 보내기 상한, Kafka `outbox` 소비자(지금은 `POST /internal/v1/notify/webhook-events` 내부 입구), 발송 파드의 나가는 443 제한(V-T34).
 
 ## 10. 실패와 재시도
@@ -497,6 +507,14 @@ docs/verification.md의 V-T36(알림 규칙)을 여기 N-T1~N-T5로 옮겼다. �
 | N-T14 | 알림 문구 변수: 이메일·전화번호가 든 값과 허용 목록 밖 키로 작업을 만든다. 시험 데이터로 발송한 뒤 작업·기록·조각 표를 훑는다 | 작업이 만들어지지 않고 오류로 센다. 표 어디에도 받는 주소·전화번호·본문이 없다. 연결: FR-040 | 단위 시험, DB 검사 |
 | N-T15 | 파트너 웹훅 관리: 실무자가 재발급·다시 보내기를 부른다, 다른 파트너의 발송 행을 다시 보낸다, 판이 다른 `If-Match`로 고친다, DEAD 행을 다시 보낸다, 5일 동안 실패만 하는 엔드포인트 | 실무자는 403, 남의 행은 404, 판 불일치는 412다. 다시 보낸 것은 같은 `webhook-id`이고 새 `webhook-timestamp`다. 계속 실패한 엔드포인트는 DISABLED가 되고 파트너에게 알림이 간다. 연결: FR-025 | API 시험(시계 고정) |
 | N-T16 | 부정 예매 알림(추천 적용 2026-10-31, ADR-0171·0173): 결제자 계정 하나에 소명을 요청한다. 그 계정이 결제한 표 하나는 받은 사람이 가졌다. 그 뒤 ① 같은 판의 `SetFraudAppealView`를 두 번 보낸다 ② 받은 사람의 표를 조사관이 표 목록에서 빼고 나머지 표를 취소한다(조치 실행 끝, 받은 사람의 표가 남음) ③ 다른 사건의 다른 결제자 계정은 조치 요청 없이 잠금 최대 기한이 지난다(입장 시작 전) ④ 또 다른 사건에서 입장 시작으로 잠금이 풀린다 ⑤ 또 다른 사건에서 잠긴 표가 모두 취소된다 | 결제자는 `FRAUD_APPEAL_REQUESTED`(잠금 최대 기한과 잠금 범위 문구 있음)를, 받은 사람은 `FRAUD_HOLDER_NOTICE`(사유 범주 없음, 잠금 줄 없음)를 한 통씩 받는다. ①은 알림이 늘지 않는다 ②는 결제자에게 `FRAUD_ACTION_NOTICE`('3영업일 안에 원래 결제 수단으로 전액 환급합니다')와, 잠긴 표 가운데 받은 사람의 표가 남아 `FRAUD_TRANSFER_LOCK_RELEASED` 한 통이 간다. 받은 사람에게는 `FRAUD_HOLDER_RESULT`(취소 대상에서 빠짐)가 가고 풀림 알림은 가지 않는다 ③은 그 결제자에게 `FRAUD_TRANSFER_LOCK_RELEASED`가 한 통 간다 ④·⑤는 풀림 알림이 가지 않고 `notified_lock_active`만 거짓이 된다. 어느 경우든 풀린 뒤에도 사본의 `locked_ticket_ids`는 그대로다. 모든 작업의 `vars`가 허용 목록 안이고, 받은 사람의 작업에 사유 범주·결제자 정보가 없다. 연결: FR-073 | 통합 시험(시계 고정) |
+| N-T17 | 신청 설정(BAT-455): 오픈·취소표 신청을 켜고 nightPush를 고치며 `GET /v1/subscriptions`가 회차별 상태를 준다. 오픈이 지난 OPEN·판매가 끝난 CANCELLATION, 없는 회차, 끝난 취소표 신청의 재개, 200건 상한, 커서 목록을 함께 본다 | 새 신청 201, 있으면 200·nightPush만 바뀐다. 410 `open-passed`·`sale-ended`, 404, 재개 200(ACTIVE·sentCount 0), 201번째 422 `subscription-limit`, 목록은 최근 순·`nextCursor`다. 연결: FR-004, FR-018 | API 시험(`services/core-svc/test/fan-notify-http.test.ts`) |
+| N-T18 | 웹 푸시 구독(BAT-455): 같은 주소를 두 계정이 등록·다시 묶기·해제하고, `http`·8443·허용 목록 밖·사설 IP로 풀리는 이름·틀린 키·11번째 구독·남의 키 해제를 넣는다 | 같은 주소는 지금 계정에 다시 묶이고 200, 새 구독 201, 해제는 이 계정 행만 204다. 잘못된 주소·키는 422 `push-service-not-allowed`·`push-key-invalid`이고 행이 없다. 11번째는 가장 오래된 구독을 지운다. `subscriptionKey`는 43자다. 연결: FR-004 | API 시험 |
+| N-T19 | 낱건 원장·워커(BAT-455): 같은 사건을 두 번 넣고, 5xx·400·결과 모름을 섞으며, 쓸모 기한을 넘긴다. 두 워커가 같은 행을 동시에 집는다 | 중복 사건은 한 번만 적고 한 번만 보낸다. 5xx는 1분·5분… 간격으로 다시 보내고 성공하면 기록 한 줄, 400은 DEAD, 기한 지남은 EXPIRED다. 결과 모름은 신청 알림을 다시 보내지 않고 돈·보안 통지만 한 번 더 간다. 한 행은 한 워커만 임대한다. 연결: FR-040 | 단위·HTTP·통합 시험(`notify-worker.test.ts`, `fan-notify.int.test.ts`) |
+| N-T20 | 한 번 누름 수신 거부(BAT-455): 토큰이 가리키는 신청 하나를 지우고 다시·위조·맞지 않는 HMAC·GET을 넣는다. 신청 알림 이메일의 `List-Unsubscribe` 머리를 본다 | 첫 요청에 그 신청만 지워지고, 다시·위조·틀린 HMAC은 같은 200이며 아무것도 바뀌지 않는다. GET은 404다. 이메일에 `List-Unsubscribe`·`List-Unsubscribe-Post`가 있고 토큰 원문은 기록에 남지 않는다. 연결: FR-040 | API·단위 시험 |
+| N-T21 | 웹 푸시 암호화·밤 규칙(BAT-455): RFC 8291 본문을 구독 개인키로 풀고, VAPID JWT의 `aud`·`exp`·`sub`를 확인한다. 404·410·403 응답과 21:00~08:00 KST nightPush를 넣는다 | 평문이 그대로 나오고, JWT는 ES256·12시간이다. 404·410·403 구독은 지워진다. 밤에는 nightPush를 켠 신청자에게만 웹 푸시를 보내고 이메일은 보낸다. 연결: FR-004, FR-040 | 단위 시험(`push-crypto.test.ts`, `notify-worker.test.ts`) |
+| N-T22 | 실패가 예매를 되돌리지 않음(BAT-455): 메일이 400으로 끝나 DEAD가 되어도 주문 상태·판을 건드리지 않고, 원장 저장 실패는 다음 바퀴에 다시 집는다 | DEAD는 알림 기록에만 남고 주문·예매 값은 그대로다. 저장 실패는 던지고 임대가 끝난 뒤 다시 보낸다. 연결: FR-040, ADR-0180 | 단위 시험 |
+| N-T23 | 로그인 수단 변경·계정 병합(BAT-455, I-T34·POL-034): 같은 연결 사건을 두 번 넣고, 흡수 계정의 신청·구독을 대표 계정으로 옮긴다 | 한 번만 적고 이메일·웹 푸시로 한 번 보낸다. 병합은 신청·구독을 옮기고 겹치면 하나만 남기며(보낸 횟수는 큰 쪽), 대표 계정에 완료 통지를 적는다. 연결: POL-034 | HTTP·단위 시험(`notify-identity-events.test.ts`) |
+| N-T24 | 받는 사람 묶음(BAT-455): identity `BatchGetRecipients`에 활성·병합·없는 계정과 이메일 포함·미포함을 넣는다 | 요청 순서대로 상태·본인확인·언어를 주고, 이메일은 `includeEmail`일 때만 준다. 병합·탈퇴 계정 이메일은 비고, 501명은 INVALID_ARGUMENT다. 연결: FR-040 | 단위·통합 시험(`recipients.test.ts`, `recipients.int.test.ts`) |
 
 ## 15. 검토한 다른 안
 
@@ -522,7 +540,9 @@ docs/verification.md의 V-T36(알림 규칙)을 여기 N-T1~N-T5로 옮겼다. �
 - 취소표 알림은 좌석 몇 개에 많은 사람이 받는다. 받은 사람은 대기열 맨 뒤에 선다.
 - 푸시 서비스와 메일 서비스의 실제 한도는 문서에 없거나(Apple·Mozilla·Microsoft의 전체 한도) 우리 방식에 걸리는지 모른다(FCM). 처음 크게 보낼 때 429가 많으면 ③이 창보다 늦어질 수 있다.
 - 첫 대형 공연 전에 메일 발송량을 늘려 두지 않으면 메일 서비스가 늦추거나 스팸으로 분류할 수 있다.
-- 이메일 대행사·알림톡·문자 대행사가 정해지지 않아 결과 조회·반송 처리·한도는 조건으로만 적었다.
+- 이메일 대행사·알림톡·문자 대행사가 정해지지 않아 결과 조회·반송 처리·한도는 조건으로만 적었다. BAT-455는 포트와 local·ci 파일 대역까지 했고, 운영 대행 어댑터·계정·VAPID 운영 키는 밖에서 막힌다.
+- POL-034의 '두 계정 이메일 완료 통지' 가운데 흡수 계정 이메일은 병합 확정 트랜잭션이 주소를 지우고 `identity.accounts-merged`에도 주소가 없어 아직 보내지 못한다. BAT-455는 대표 계정 이메일과 흡수 계정의 남은 웹 푸시 구독으로 통지한다. 주소를 Kafka에 싣지 않는 계약(짧게 보관하는 암호화 사본 또는 identity 내부 통지 입구)을 정한 뒤 후속으로 채운다.
+- 신청 알림의 대량 발송 조각 원장(§4.2)과 Kafka 소비자 배선은 이 묶음 밖이다. 지금은 내부 입구 `POST /internal/v1/notify/identity-events`와 `POST /internal/v1/notify/trade-events`가 사건을 넣는다.
 - 수치(창, 비율, 조각 크기, 체크포인트, 한도, 경보 기준)는 재지 않은 가정이다.
 
 **다른 문서·통합 담당이 고칠 것**(이 문서가 고치지 않은 파일. 처음 적은 목록이며, 대부분 2026-10-30 2차 반영 등으로 이미 고쳐졌다. 끝난 것은 이 목록 끝 줄에 적었다)

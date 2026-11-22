@@ -243,6 +243,18 @@ export function AcceptTextPlain(): MethodDecorator {
   };
 }
 
+export const FORM_URLENCODED_KEY = 'peaketFormUrlEncoded';
+
+/** 본문을 application/x-www-form-urlencoded로도 받는 경로에 단다(한 번 누름 수신 거부, RFC 8058). Fastify 경로 설정에 들어간다 */
+export function AcceptFormUrlEncoded(): MethodDecorator {
+  return (_target, _key, descriptor) => {
+    const fn = descriptor.value as object;
+    const prev = (Reflect.getMetadata(FASTIFY_ROUTE_CONFIG_METADATA, fn) as Record<string, unknown> | undefined) ?? {};
+    Reflect.defineMetadata(FASTIFY_ROUTE_CONFIG_METADATA, { ...prev, [FORM_URLENCODED_KEY]: true }, fn);
+    return descriptor;
+  };
+}
+
 export const MULTIPART_KEY = 'peaketMultipart';
 
 export interface AcceptMultipartOptions {
@@ -494,6 +506,19 @@ export function installRequestChecks(http: FastifyInstance, auth: AuthState): vo
     }
     keepRawBody(request, body as Buffer);
     json(request, (body as Buffer).toString('utf8'), done);
+  });
+  // 한 번 누름 수신 거부(RFC 8058)는 form 본문 한 줄을 보낸다(docs/features/notify.md §7.4).
+  // @AcceptFormUrlEncoded()를 단 경로만 받는다(그 밖은 415). 값은 문자열만이고 같은 이름이 여럿이면 마지막이 남는다
+  http.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'buffer' }, (request, body, done) => {
+    const config = request.routeOptions?.config as unknown as Record<string, unknown> | undefined;
+    if (config?.[FORM_URLENCODED_KEY] !== true) {
+      done(unsupportedMediaType(), undefined);
+      return;
+    }
+    keepRawBody(request, body as Buffer);
+    const out: Record<string, string> = {};
+    for (const [k, v] of new URLSearchParams((body as Buffer).toString('utf8'))) out[k] = v;
+    done(null, out);
   });
   // multipart는 @AcceptMultipart()를 단 경로만 받는다(그 밖은 415). 해석기가 스트림을 받아 상한을 스스로 센다(Fastify bodyLimit 밖)
   http.addContentTypeParser('multipart/form-data', (request, payload, done) => collectMultipart(request, payload as unknown as NodeJS.ReadableStream & { resume(): void }, done));

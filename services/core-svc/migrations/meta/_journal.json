@@ -274,6 +274,13 @@
       "when": 1795312000000,
       "tag": "0045_sale_review_suspension",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795315600000,
+      "tag": "0046_fan_notify",
+      "breakpoints": true
     }
   ]
 }

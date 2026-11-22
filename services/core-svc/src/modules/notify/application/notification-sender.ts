@@ -2,7 +2,9 @@
 // purchase-svc trade.orders Outbox의 회차 취소·연기·환급·환급 실패 사건을 받아 결제자·보유자 문안으로 보낸다.
 // 외부 푸시·이메일 대행 계정이 없어 실제 전송은 가짜 전송기(FakeNotificationTransport)로만 하고,
 // PEAKET_NOTIFY_SENDER_MODE=fake가 아니면 UNAVAILABLE(503)이다. 발송 원장·Kafka 소비자는 마이그레이션 허용 밖이라 후속이다.
-import { isProductionLikeEnv } from '@peaket/platform';
+import { isProductionLikeEnv, type Clock } from '@peaket/platform';
+import type { NotificationIntake } from './notification-intake.js';
+import type { FanNotificationWorker } from './fan-notification-worker.js';
 
 export type FanNoticeType = 'EVENT_CANCELLATION_CONFIRMED' | 'EVENT_POSTPONED' | 'REFUNDED' | 'REFUND_FAILED';
 
@@ -20,7 +22,7 @@ export interface FanNoticeDelivery {
   readonly deliveryId: string;
   readonly type: FanNoticeType;
   readonly orderId: string;
-  readonly status: 'SENT' | 'UNAVAILABLE';
+  readonly status: 'SENT' | 'PENDING' | 'FAILED' | 'UNAVAILABLE';
   readonly message: string;
 }
 
@@ -68,6 +70,8 @@ export class NotificationSender {
     private readonly transport: NotificationTransport,
     env: Record<string, string | undefined> = process.env,
     private readonly now: () => number = Date.now,
+    /** BAT-455: 있으면 가짜 전송기 대신 낱건 원장에 적고(같은 트랜잭션 중복 키) 바로 한 바퀴 보낸다. 운영 대행이 없는 fake 모드 시험용 */
+    private readonly ledger?: { intake: NotificationIntake; worker: FanNotificationWorker; clock: Clock },
   ) {
     assertNotifyFakeAllowed(env);
     this.#enabled = env.PEAKET_NOTIFY_SENDER_MODE?.trim() === 'fake';
@@ -85,10 +89,18 @@ export class NotificationSender {
       this.#sent.set(deliveryId, unavailable);
       return unavailable;
     }
+    if (this.ledger) {
+      await this.ledger.intake.tradeEvent({ ...input, ...(input.occurredAtMs !== undefined ? { occurredAtMs: input.occurredAtMs } : {}) });
+      await this.ledger.worker.processDue(new Date(this.ledger.clock.now()));
+      const d = await this.ledger.worker.deliveryOf(`${input.type}:${input.orderId}:${input.accountId}:EMAIL`);
+      const status: FanNoticeDelivery['status'] = d?.status === 'SENT' ? 'SENT' : d ? 'FAILED' : 'PENDING';
+      const out: FanNoticeDelivery = { deliveryId, type: input.type, orderId: input.orderId, status, message: message.title };
+      this.#sent.set(deliveryId, out);
+      return out;
+    }
     await this.transport.send({ deliveryId, accountId: input.accountId, ...message });
     const sent: FanNoticeDelivery = { deliveryId, type: input.type, orderId: input.orderId, status: 'SENT', message: message.title };
     this.#sent.set(deliveryId, sent);
-    // 첫 몫은 메모리 기록이라 무한히 자라지 않게 오래된 것부터 버린다(운영 발송 원장은 후속).
     while (this.#sent.size > 10_000) {
       const oldest = this.#sent.keys().next().value;
       if (oldest === undefined) break;

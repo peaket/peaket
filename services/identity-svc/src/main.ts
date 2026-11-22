@@ -20,8 +20,10 @@ import {
   contactRefHandlers,
   GetInvestigationRefs,
   GetVerificationStatus,
+  GetRecipients,
   investigationRefHandlers,
   scannerSessionCheckHandlers,
+  recipientQueryHandlers,
   InvRefKeyRing,
   phoneContactRefs,
   deviceRefsOf,
@@ -338,6 +340,11 @@ const grpc = await startGrpcServer({
         { check: service.app.get(CheckScannerSession), terminate: service.app.get(TerminateScannerSessions) },
         (method, err) => service.logger.error({ err, method }, 'ScannerSessionCheckService 처리 실패'),
       ),
+    },
+    // 알림 받는 사람 묶음(core-svc 팬 알림 발송 워커만, notify §2.1 E6, BAT-455 N-T24)
+    {
+      definition: identityPackage().RecipientQueryService.service,
+      handlers: recipientQueryHandlers({ recipients: service.app.get(GetRecipients) }, (method, err) => service.logger.error({ err, method }, 'RecipientQueryService 처리 실패')),
     },
   ],
   internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.identity.v1.AdminAuthzService'] },

@@ -1,6 +1,6 @@
 // notify Drizzle 스키마(docs/data.md webhook_endpoint·webhook_delivery, BUILD_ORDER BAT-610 서버 잔여).
 import { sql } from 'drizzle-orm';
-import { check, index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -51,5 +51,103 @@ export const webhookDelivery = pgTable(
     unique('webhook_delivery_endpoint_event_uq').on(t.endpointId, t.webhookId),
     index('webhook_delivery_endpoint_created_idx').on(t.endpointId, t.createdAt),
     index('webhook_delivery_due_idx').on(t.nextAttemptAt).where(sql`${t.status} in ('PENDING', 'RETRYING')`),
+  ],
+);
+
+// BAT-455 GAT-250 팬 알림 표(0045, docs/data.md §2 ⑥, notify §2.2).
+export const notificationSubscription = pgTable(
+  'notification_subscription',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    kind: text('kind').notNull(),
+    nightPush: boolean('night_push').notNull().default(false),
+    sentCount: integer('sent_count').notNull().default(0),
+    status: text('status').notNull().default('ACTIVE'),
+    endReason: text('end_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => [
+    check('notification_subscription_kind_check', sql`${t.kind} in ('OPEN', 'CANCELLATION')`),
+    check('notification_subscription_status_check', sql`${t.status} in ('ACTIVE', 'ENDED')`),
+    check('notification_subscription_end_reason_check', sql`${t.endReason} is null or ${t.endReason} in ('SENT_MAX', 'BOOKED', 'SALE_ENDED')`),
+    check('notification_subscription_sent_count_check', sql`${t.sentCount} >= 0`),
+    unique('notification_subscription_account_event_kind_uq').on(t.accountId, t.eventId, t.kind),
+    index('notification_subscription_event_kind_id_idx').on(t.eventId, t.kind, t.id),
+    index('notification_subscription_account_created_idx').on(t.accountId, t.createdAt),
+  ],
+);
+
+export const pushSubscription = pgTable(
+  'push_subscription',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    endpoint: text('endpoint').notNull(),
+    endpointHash: text('endpoint_hash').notNull(),
+    service: text('service').notNull(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }),
+    boundAt: timestamp('bound_at', { withTimezone: true, mode: 'date' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => [
+    check('push_subscription_service_check', sql`${t.service} in ('FCM', 'MOZILLA', 'APPLE', 'WNS')`),
+    unique('push_subscription_endpoint_uq').on(t.endpoint),
+    unique('push_subscription_endpoint_hash_uq').on(t.endpointHash),
+    index('push_subscription_account_bound_idx').on(t.accountId, t.boundAt),
+  ],
+);
+
+export const notificationDedup = pgTable('notification_dedup', {
+  dedupKey: text('dedup_key').primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+});
+
+export const notificationJob = pgTable(
+  'notification_job',
+  {
+    dedupKey: text('dedup_key')
+      .primaryKey()
+      .references(() => notificationDedup.dedupKey, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    targetId: text('target_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    channel: text('channel').notNull(),
+    vars: jsonb('vars').$type<Record<string, string | number | boolean | null>>().notNull().default({}),
+    status: text('status').notNull().default('PENDING'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true, mode: 'date' }).notNull(),
+    leaseUntil: timestamp('lease_until', { withTimezone: true, mode: 'date' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => [
+    check('notification_job_status_check', sql`${t.status} in ('PENDING', 'RETRYING', 'DEAD')`),
+    check('notification_job_channel_check', sql`${t.channel} in ('EMAIL', 'WEB_PUSH', 'ALIMTALK', 'SMS')`),
+    check('notification_job_attempts_check', sql`${t.attempts} >= 0`),
+    index('notification_job_due_idx').on(t.nextAttemptAt).where(sql`${t.status} in ('PENDING', 'RETRYING')`),
+  ],
+);
+
+export const notificationDelivery = pgTable(
+  'notification_delivery',
+  {
+    dedupKey: text('dedup_key').notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true, mode: 'date' }).notNull(),
+    kind: text('kind').notNull(),
+    targetId: text('target_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    channel: text('channel').notNull(),
+    status: text('status').notNull(),
+    providerMessageId: text('provider_message_id'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.dedupKey, t.sentAt] }),
+    check('notification_delivery_status_check', sql`${t.status} in ('PENDING', 'SENT', 'FAILED', 'DEAD', 'EXPIRED')`),
   ],
 );
