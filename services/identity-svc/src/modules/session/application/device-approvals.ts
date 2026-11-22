@@ -4,7 +4,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { normalizeUserCode, type ApprovedScannerSession } from '../domain/device-approval.js';
 import { DEVICE_APPROVAL_LIMITS, DEVICE_AUTHORIZATIONS, type DeviceApprovalLimits, type DeviceAuthorizationStore } from '../domain/ports.js';
-import { STAFF_ASSIGNMENT_STORE, StaffAccountInactive, type StaffAssignmentRecord, type StaffAssignmentStore, type StaffRole } from '../domain/staff.js';
+import { STAFF_ASSIGNMENT_STORE, ScannerSessionConflict, StaffAccountInactive, type StaffAssignmentRecord, type StaffAssignmentStore, type StaffRole } from '../domain/staff.js';
 import { defaultScannerSessionId, NEW_SCANNER_SESSION_ID, type NewScannerSessionId } from './start-device-authorization.js';
 
 export class DeviceApprovalError extends Error {
@@ -19,7 +19,8 @@ export class DeviceApprovalError extends Error {
       | 'ASSIGNMENT_NOT_ALLOWED'
       | 'PROXY_NOT_ALLOWED'
       | 'RATE_LIMITED'
-      | 'ALREADY_HANDLED',
+      | 'ALREADY_HANDLED'
+      | 'APPROVAL_CONFLICT',
     readonly retryAfterMs?: number,
   ) {
     super(`기기 승인 오류: ${code}`);
@@ -157,6 +158,7 @@ export class DeviceApprovals {
       });
     } catch (e) {
       if (e instanceof StaffAccountInactive) throw new DeviceApprovalError('ACCOUNT_INACTIVE');
+      if (e instanceof ScannerSessionConflict) throw new DeviceApprovalError('APPROVAL_CONFLICT');
       throw e;
     }
     const ok = await this.store.approve({ deviceCodeHash: auth.deviceCodeHash, approved, nowMs: now });

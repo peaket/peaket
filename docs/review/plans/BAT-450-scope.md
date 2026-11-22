@@ -32,8 +32,8 @@
 
 없는 문서·파일:
 
-- **`docs/security/asvs/identity.md`는 없다.** GAT-210·GAT-220의 ASVS 행은 `docs/security/asvs/offline-gate.md`에 있고, 로그인 공통 행은 `docs/security/asvs/auth.md`가 `offline-gate.md`를 가리킨다. 조사 지시의 파일 경로는 잘못이다.
-- **`docs/review/plans/BAT-450.md`는 없다.** BAT-450 계획 파일은 아직 없다. 이 파일은 계획이 아니라 조사 초안이다.
+- **ASVS `identity` 문서는 없다.** GAT-210·GAT-220의 ASVS 행은 `docs/security/asvs/offline-gate.md`에 있고, 로그인 공통 행은 `docs/security/asvs/auth.md`가 `offline-gate.md`를 가리킨다. 조사 지시의 파일 경로는 잘못이다.
+- **BAT-450 계획 파일은 없다.** BAT-450 계획 파일은 아직 없다. 이 파일은 계획이 아니라 조사 초안이다.
 
 ## 2. GAT-210 수용 기준: 충족/미충족
 
@@ -173,7 +173,7 @@ $ node tools/ci/ledger.mjs --scope "I-T21,I-T22,I-T23,I-T24,I-T25,I-T37,I-T38,I-
 | `docs/lanes/lane3.md` | 진행 로그 | 끝낸 묶음 한 줄 |
 | `docs/PROGRESS.md` | 해당 절 | 필요하면 한 줄. 40KB를 넘으면 `progress-archive.md`로 이동 |
 | `docs/review/ledger/*` | identity·offline-gate | `ledger.mjs`로 재생성(손으로 고치지 않는다) |
-| `docs/review/plans/BAT-450.md` | 새 파일 | 역할별 커밋·실패 확인·리뷰·검증·담당 표를 갖춘 묶음 계획(이 조사 파일과 별개) |
+| `BAT-450.md`(새 파일) | 새 파일 | 역할별 커밋·실패 확인·리뷰·검증·담당 표를 갖춘 묶음 계획(이 조사 파일과 별개) |
 
 ## 5. 남은 구현 묶음 제안
 
@@ -278,4 +278,4 @@ Docker test-int는 이번 조사에서 새로 돌리지 않았다. R-548·R-566�
 - 외부 본인확인기관·이메일 대행사가 없어 운영 경로는 확인할 수 없다. 개발·시험 경로만 확인했다.
 - ASVS 표의 `테스트 결과`는 CI 리포트가 없어 `미실행`으로 보인다. 실제 시험 태그와 리포트를 붙인 뒤 다시 봐야 한다.
 - 같은 기기 동시 승인 500은 코드 대조로 판단했다. 실제 PostgreSQL 2세션 재현은 BAT-450A에서 해야 한다.
-- `docs/security/asvs/identity.md`가 없어, 지시된 경로 대신 `offline-gate.md`를 읽었다.
+- ASVS `identity` 문서가 없어, 지시된 경로 대신 `offline-gate.md`를 읽었다.

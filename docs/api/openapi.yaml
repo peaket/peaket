@@ -104,6 +104,7 @@ x-peaket-problem-types:
     designation-exists: { status: 409, title: "이미 같은 지정이 있습니다" }
     designation-target-not-commander: { status: 422, title: "commander 계정에만 줄 수 있는 지정입니다" }
     designation-target-not-eligible: { status: 422, title: "이 계정에는 줄 수 없는 지정입니다" }
+    device-approval-conflict: { status: 409, title: "다른 승인이 먼저 처리되었습니다. 새 승인을 시작해 주세요" }
     device-revoked: { status: 403, title: "폐기된 스캐너 기기입니다" }
     device-unregistered: { status: 403, title: "등록되지 않은 스캐너 기기입니다" }
     enrollment-code-expired: { status: 410, title: "등록 코드가 만료되었거나 이미 사용되었습니다" }
@@ -373,6 +374,7 @@ x-peaket-problem-types:
     trigger-deferred: { status: 409, title: "판정 보류 중인 지표입니다" }
     under-14: { status: 403, title: "만 14세 미만은 피켓을 이용할 수 없습니다" }
     unknown-promoter: { status: 422, title: "등록되지 않은 파트너사입니다" }
+    user-code-unavailable: { status: 409, title: "확인 코드를 새로 받아 주세요" }
     unlock-code-invalid: { status: 422, title: "코드가 맞지 않습니다" }
     unlock-link-invalid: { status: 410, title: "이 링크는 더 쓸 수 없습니다" }
     unlock-link-resend-limit: { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" }

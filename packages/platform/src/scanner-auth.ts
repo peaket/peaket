@@ -86,6 +86,8 @@ export interface ScannerAuthWiring {
   replay: DpopReplayStore;
   /** 없으면 mTLS 머리를 믿지 않는다(기본 기기 키+DPoP만) */
   mtls?: ScannerMtlsOptions;
+  /** 게이트웨이 공개 출처(PEAKET_PUBLIC_ORIGIN). 있으면 DPoP htu를 이 값으로 만들고 forwarded 머리를 보지 않는다(C2-09) */
+  publicOrigin?: string;
 }
 
 /** 이번 배치는 스태프 토큰이 붙은 스캐너 경로만 다룬다(기기 등록·업로드의 기기 인증만 경로는 ticket-svc 단계) */

@@ -18,6 +18,8 @@ env:
   PEAKET_PARTNER_CONSOLE_ORIGIN: https://partner.peaket.example:18443
   PEAKET_OPS_CONSOLE_ORIGIN: https://console.peaket.example:18444
   PEAKET_SCANNER_PWA_ORIGIN: https://scanner.peaket.example:18445
+  # DPoP htu를 만들 게이트웨이 공개 출처(C2-09). forwarded 머리를 보지 않는다
+  PEAKET_PUBLIC_ORIGIN: https://scanner-api.peaket.example:18445
   # 다른 서비스 gRPC(로컬 데모는 실제 백엔드)
   PEAKET_TICKET_GRPC_URL: ticket-svc.ticket.svc.cluster.local:50051
   PEAKET_TRUST_GRPC_URL: trust-svc.trust.svc.cluster.local:50051

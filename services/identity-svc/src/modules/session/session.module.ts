@@ -50,7 +50,8 @@ import { StaffInvitations } from './application/staff-invitations.js';
 import { StaffInvitationController } from './inbound/staff-invitation.controller.js';
 import { DrizzleStaffAssignmentStore } from './adapters/db/drizzle-staff-assignment-store.js';
 import { MemoryStaffAssignmentStore } from './adapters/memory-staff-assignment-store.js';
-import { StartDeviceAuthorization, NEW_SCANNER_SESSION_ID, defaultScannerSessionId } from './application/start-device-authorization.js';
+import { StartDeviceAuthorization, NEW_SCANNER_SESSION_ID, NEW_USER_CODE, defaultScannerSessionId } from './application/start-device-authorization.js';
+import { newUserCode } from './domain/device-approval.js';
 import { DeviceApprovals } from './application/device-approvals.js';
 import { PollScannerToken } from './application/poll-scanner-token.js';
 import { ScannerAuthorizationController } from './inbound/scanner-authorization.controller.js';
@@ -93,6 +94,8 @@ export interface SessionModuleOptions {
   scannerDpopReplay?: DpopReplayStore;
   /** 시험에서 스캐너 세션 ID를 고정한다 */
   newScannerSessionId?: () => string;
+  /** 시험에서 사용자 확인 코드를 고정한다 */
+  newUserCode?: () => string;
   /** 탈퇴 참여자(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현'). 없으면 참여자 없이 바로 끝낸다(시험) */
   withdrawalParticipants?: WithdrawalParticipant[];
   /** 탈퇴 미룸 지표. 없으면 내지 않는다(시험) */
@@ -126,6 +129,7 @@ export class SessionModule {
         DeviceApprovals,
         PollScannerToken,
         { provide: NEW_SCANNER_SESSION_ID, useValue: o.newScannerSessionId ?? defaultScannerSessionId },
+        { provide: NEW_USER_CODE, useValue: o.newUserCode ?? newUserCode },
         o.deviceAuthorizations ? { provide: DEVICE_AUTHORIZATIONS, useValue: o.deviceAuthorizations } : { provide: DEVICE_AUTHORIZATIONS, useFactory: (clock: Clock) => new MemoryDeviceAuthorizations(() => clock.now()), inject: [CLOCK] },
         o.deviceApprovalLimits ? { provide: DEVICE_APPROVAL_LIMITS, useValue: o.deviceApprovalLimits } : { provide: DEVICE_APPROVAL_LIMITS, useValue: new MemoryDeviceApprovalLimits() },
         {

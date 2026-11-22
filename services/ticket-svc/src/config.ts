@@ -1,4 +1,6 @@
 // ticket-svc 설정(BUILD_ORDER HOT-160). 값은 환경에서만 받는다.
+import { publicOriginFromEnv } from '@peaket/platform';
+
 export const DEFAULT_TICKET_GRPC_PORT = 50052;
 export const TICKET_DB_POOL_MAX = 16;
 
@@ -20,6 +22,8 @@ export interface TicketServiceConfig {
   readonly internalToken?: string;
   /** mTLS 선택지 PoC: 게이트웨이만 아는 머리 비밀 값. 없으면 mTLS 머리를 믿지 않는다 */
   readonly scannerMtlsSecret?: string;
+  /** 게이트웨이 공개 출처(PEAKET_PUBLIC_ORIGIN). 있으면 DPoP htu를 이 값으로 만든다(C2-09) */
+  readonly publicOrigin?: string;
 }
 
 export function loadTicketServiceConfig(env: Record<string, string | undefined>): TicketServiceConfig {
@@ -28,6 +32,7 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
   const test = isTestEnv(env);
   const identityGrpcUrl = env.PEAKET_IDENTITY_GRPC_URL;
   const redisUrl = env.PEAKET_TICKET_REDIS_URL;
+  const publicOrigin = publicOriginFromEnv(env);
   // staging·prod에서 메모리 저장소로 떨어지면 파드마다 등록 코드·jti가 갈라져 재사용이 열린다. 시작을 막는다
   if (!test && !identityGrpcUrl) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(스캐너 세션·관제 역할 판정에 필요하다)');
   if (!test && !redisUrl) throw new Error('PEAKET_TICKET_REDIS_URL이 없다(등록 코드·DPoP jti를 공유해야 한다)');
@@ -42,6 +47,7 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
     ...(env.PEAKET_OPS_HTTP_URL ? { opsHttpUrl: env.PEAKET_OPS_HTTP_URL } : {}),
     ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}),
     ...(env.PEAKET_SCANNER_MTLS_SECRET ? { scannerMtlsSecret: env.PEAKET_SCANNER_MTLS_SECRET } : {}),
+    ...(publicOrigin ? { publicOrigin } : {}),
   };
 }
 

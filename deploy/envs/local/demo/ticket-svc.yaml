@@ -15,6 +15,8 @@ env:
   PEAKET_IDENTITY_GRPC_URL: identity-svc.core.svc.cluster.local:50051
   PEAKET_CORE_HTTP_URL: http://core-svc.core.svc.cluster.local:8080
   PEAKET_OPS_HTTP_URL: http://ops-svc.core.svc.cluster.local:8080
+  # DPoP htu를 만들 게이트웨이 공개 출처(C2-09). forwarded 머리를 보지 않는다
+  PEAKET_PUBLIC_ORIGIN: https://scanner-api.peaket.example:18445
 
 service:
   replicas: 1

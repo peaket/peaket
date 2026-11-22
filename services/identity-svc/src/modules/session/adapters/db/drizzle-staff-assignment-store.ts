@@ -4,6 +4,7 @@ import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import {
   type AcceptInvitationResult,
+  ScannerSessionConflict,
   type ScannerSessionRecord,
   StaffAccountInactive,
   type StaffAssignmentRecord,
@@ -194,41 +195,47 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     approvedAtMs: number;
     expiresAtMs: number;
   }): Promise<void> {
-    await this.database.transaction(async (tx) => {
-      // 계정 행을 잠가 같은 계정의 동시 승인을 한 번에 하나만 처리한다(부분 유일 인덱스의 백스톱, C2-05).
-      // 탈퇴·병합 트랜잭션이 먼저 계정을 바꿨다면 여기서 기다렸다가 ACTIVE가 아닌 것을 보고 세션을 만들지 않는다(C2V-06).
-      const [acc] = await tx.select({ id: account.id, status: account.status }).from(account).where(eq(account.id, i.accountId)).limit(1).for('update');
-      if (!acc) throw new StaffAccountInactive();
-      if (acc.status !== 'ACTIVE') throw new StaffAccountInactive();
-      const [assignment] = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.id, i.assignmentId)).limit(1).for('update');
-      if (!assignment) throw new Error('배정을 찾을 수 없다');
-      const mine = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.accountId, i.accountId));
-      const assignmentIds = mine.map((r) => r.id);
-      await tx
-        .update(scannerSession)
-        .set({ terminatedAt: new Date(i.approvedAtMs) })
-        .where(
-          and(
-            isNull(scannerSession.terminatedAt),
-            or(
-              eq(scannerSession.scannerDeviceId, i.deviceId),
-              eq(scannerSession.staffAccountId, i.accountId),
-              assignmentIds.length > 0 ? inArray(scannerSession.staffAssignmentId, assignmentIds) : undefined,
+    try {
+      await this.database.transaction(async (tx) => {
+        // 계정 행을 잠가 같은 계정의 동시 승인을 한 번에 하나만 처리한다(부분 유일 인덱스의 백스톱, C2-05).
+        // 탈퇴·병합 트랜잭션이 먼저 계정을 바꿨다면 여기서 기다렸다가 ACTIVE가 아닌 것을 보고 세션을 만들지 않는다(C2V-06).
+        const [acc] = await tx.select({ id: account.id, status: account.status }).from(account).where(eq(account.id, i.accountId)).limit(1).for('update');
+        if (!acc) throw new StaffAccountInactive();
+        if (acc.status !== 'ACTIVE') throw new StaffAccountInactive();
+        const [assignment] = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.id, i.assignmentId)).limit(1).for('update');
+        if (!assignment) throw new Error('배정을 찾을 수 없다');
+        const mine = await tx.select({ id: staffAssignment.id }).from(staffAssignment).where(eq(staffAssignment.accountId, i.accountId));
+        const assignmentIds = mine.map((r) => r.id);
+        await tx
+          .update(scannerSession)
+          .set({ terminatedAt: new Date(i.approvedAtMs) })
+          .where(
+            and(
+              isNull(scannerSession.terminatedAt),
+              or(
+                eq(scannerSession.scannerDeviceId, i.deviceId),
+                eq(scannerSession.staffAccountId, i.accountId),
+                assignmentIds.length > 0 ? inArray(scannerSession.staffAssignmentId, assignmentIds) : undefined,
+              ),
             ),
-          ),
-        );
-      await tx.insert(scannerSession).values({
-        id: i.scannerSessionId,
-        staffAssignmentId: i.assignmentId,
-        staffAccountId: i.accountId,
-        scannerDeviceId: i.deviceId,
-        approvedBySession: i.approvedBySession,
-        role: i.role,
-        proxy: i.proxy,
-        approvedAt: new Date(i.approvedAtMs),
-        expiresAt: new Date(i.expiresAtMs),
+          );
+        await tx.insert(scannerSession).values({
+          id: i.scannerSessionId,
+          staffAssignmentId: i.assignmentId,
+          staffAccountId: i.accountId,
+          scannerDeviceId: i.deviceId,
+          approvedBySession: i.approvedBySession,
+          role: i.role,
+          proxy: i.proxy,
+          approvedAt: new Date(i.approvedAtMs),
+          expiresAt: new Date(i.expiresAtMs),
+        });
       });
-    });
+    } catch (e) {
+      // scanner_session_device_active_key·scanner_session_account_active_key 위반은 동시 승인 경합이다(C2-05).
+      if ((e as { cause?: { code?: string } }).cause?.code === '23505') throw new ScannerSessionConflict();
+      throw e;
+    }
   }
 
   async touchScannerSession(scannerSessionId: string, atMs: number): Promise<void> {

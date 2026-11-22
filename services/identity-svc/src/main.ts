@@ -4,7 +4,7 @@
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다. identity 자신의 경로는 DB로도 끝난 세션을 막는다(identity §8)
 import 'reflect-metadata';
-import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, publicOriginFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
 import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, adminSessionHandlers, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, TerminateAdminSessions, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
@@ -138,6 +138,8 @@ const database = createDatabase({ url, applicationName: SERVICE });
 const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
 // 없거나 비면 운영으로 본다(위 RP 검사·플랫폼 설정과 같다). 로컬에서 Redis 없이 띄우려면 PEAKET_ENV=local을 준다
 const env = process.env.PEAKET_ENV || 'prod';
+// C2-09: 잘못된 게이트웨이 공개 출처(경로·질의·조각)는 첫 요청이 아니라 시작 때 닫는다
+publicOriginFromEnv(process.env);
 const internalGrpcToken = internalGrpcTokenFromEnv(process.env);
 if (!cacheUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_IDENTITY_REDIS_URL이 없다(세션·캐시 Redis, 비밀 관리에서 넣는다)');
 const cache = cacheUrl ? await createHotRedis({ url: cacheUrl }) : undefined;

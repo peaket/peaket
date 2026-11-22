@@ -19,6 +19,7 @@ function reject(e: unknown): never {
     if (e.code === 'PROXY_NOT_ALLOWED') throw new ProblemError({ type: 'proxy-approval-forbidden', status: 403, title: '대리 승인은 현장 책임자만 할 수 있습니다' });
     if (e.code === 'RATE_LIMITED') throw new ProblemError({ type: 'scanner-login-rate-limited', status: 429, title: '승인 요청이 너무 잦습니다', retryAfterSeconds: Math.max(1, Math.ceil((e.retryAfterMs ?? 0) / 1000)) });
     if (e.code === 'ALREADY_HANDLED') throw new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
+    if (e.code === 'APPROVAL_CONFLICT') throw new ProblemError({ type: 'device-approval-conflict', status: 409, title: '다른 승인이 먼저 처리되었습니다. 새 승인을 시작해 주세요' });
   }
   throw e;
 }

@@ -26,6 +26,7 @@ import type { Clock } from './clock.js';
 import { requestContext } from './context.js';
 import type { HotPathMetrics } from './hot-path.js';
 import { ProblemError } from './problem.js';
+import { requestUrlOf } from './request-url.js';
 import { constantTimeEqual } from './secret-compare.js';
 import { IDEMPOTENT_METADATA, type IdempotentOptions, prepareIdempotency } from './idempotency.js';
 import { PURCHASE_REJECTION_PROBLEMS, PURCHASE_SIGNED_METADATA, type PurchaseRejection, type PurchaseSessionPort, verifyPurchaseRequest } from './purchase-auth.js';
@@ -499,15 +500,6 @@ const scannerUnauthorized = (reply: FastifyReply, error: 'invalid_token' | 'inva
   return new UnauthorizedException();
 };
 
-/** DPoP 증명의 htu와 견줄 절대 주소. 게이트웨이가 넘긴 출처 머리를 먼저 쓴다(offline-gate §6.1) */
-function requestUrlOf(request: FastifyRequest): string {
-  const proto = singleHeader(request.headers['x-forwarded-proto']) ?? request.protocol;
-  const host = singleHeader(request.headers['x-forwarded-host']) ?? singleHeader(request.headers.host);
-  if (!host) throw new Error('요청 Host가 없다(DPoP htu를 만들 수 없다)');
-  const path = request.url.split(/[?#]/)[0];
-  return `${proto}://${host}${path}`;
-}
-
 /**
  * 스캐너 경로의 기기 증명·세션 판정(GAT-170, offline-gate §6.1). AuthGuard가 스태프 토큰의 신원을 판정한 뒤에 돈다.
  * - `@ScannerAuth()`가 없는 처리기는 그대로 통과한다.
@@ -586,7 +578,7 @@ export class ScannerGuard implements CanActivate {
         verified = await verifyDpopProof({
           proof,
           method: request.method,
-          url: requestUrlOf(request),
+          url: requestUrlOf(request, scanner.wiring.publicOrigin),
           ...(deviceOnly
             ? { requireAth: false }
             : { accessToken: token!, expectedAth: forwardedAth ?? computedAth!, expectedJkt: expectedJkt! }),

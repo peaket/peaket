@@ -8,9 +8,12 @@ export class MemoryDeviceAuthorizations implements DeviceAuthorizationStore {
 
   constructor(private readonly now: () => number = Date.now) {}
 
-  async save(r: DeviceAuthorizationRecord): Promise<void> {
+  async save(r: DeviceAuthorizationRecord): Promise<boolean> {
+    const taken = this.byUserCode.get(r.userCode);
+    if (taken !== undefined && taken !== r.deviceCodeHash) return false;
     this.byHash.set(r.deviceCodeHash, structuredClone(r));
     this.byUserCode.set(r.userCode, r.deviceCodeHash);
+    return true;
   }
 
   async findByUserCode(userCode: string): Promise<DeviceAuthorizationRecord | null> {
@@ -45,12 +48,23 @@ export class MemoryDeviceAuthorizations implements DeviceAuthorizationStore {
 
   async notePoll(deviceCodeHash: string, nowMs: number): Promise<DeviceAuthorizationPoll> {
     const r = this.byHash.get(deviceCodeHash);
-    if (!r || r.expiresAtMs <= nowMs) return { result: 'EXPIRED' };
+    if (!r || r.expiresAtMs <= nowMs) {
+      if (r) {
+        this.byHash.delete(deviceCodeHash);
+        this.byUserCode.delete(r.userCode);
+      }
+      return { result: 'EXPIRED' };
+    }
     if (r.lastPolledAtMs !== undefined && nowMs - r.lastPolledAtMs < r.intervalSec * 1000) {
       return { result: 'SLOW_DOWN', retryAfterMs: r.intervalSec * 1000 - (nowMs - r.lastPolledAtMs) };
     }
+    if (r.status === 'APPROVED' && r.approved) {
+      // 첫 발급 뒤에는 같은 기기 코드로 다시 토큰을 받을 수 없다(ASVS 6.5.1, C2-07).
+      this.byHash.delete(deviceCodeHash);
+      this.byUserCode.delete(r.userCode);
+      return { result: 'APPROVED', approved: structuredClone(r.approved) };
+    }
     this.byHash.set(deviceCodeHash, { ...r, lastPolledAtMs: nowMs });
-    if (r.status === 'APPROVED' && r.approved) return { result: 'APPROVED', approved: structuredClone(r.approved) };
     if (r.status === 'DENIED') return { result: 'DENIED' };
     return { result: 'PENDING' };
   }

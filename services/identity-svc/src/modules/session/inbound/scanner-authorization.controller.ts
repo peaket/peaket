@@ -67,6 +67,7 @@ export class ScannerAuthorizationController {
     } catch (e) {
       if (e instanceof DeviceAuthorizationError) {
         if (e.code === 'RATE_LIMITED') throw new ProblemError({ type: 'scanner-login-rate-limited', status: 429, title: '승인 요청이 너무 잦습니다' });
+        if (e.code === 'USER_CODE_UNAVAILABLE') throw new ProblemError({ type: 'user-code-unavailable', status: 409, title: '확인 코드를 새로 받아 주세요' });
         if (e.code === 'DEVICE_REVOKED') throw new ProblemError({ type: 'device-revoked', status: 403, title: '폐기된 스캐너 기기입니다' });
         if (e.code === 'REGISTRY_UNAVAILABLE') throw new ProblemError({ type: 'scanner-auth-unavailable', status: 503, title: '스캐너 기기·세션을 확인하지 못했습니다', retryAfterSeconds: 1 });
         throw new ProblemError({ type: 'device-unregistered', status: 403, title: '등록되지 않은 스캐너 기기입니다' });

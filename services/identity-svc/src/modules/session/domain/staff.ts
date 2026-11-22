@@ -50,6 +50,14 @@ export class StaffAccountInactive extends Error {
   }
 }
 
+/** 같은 기기·계정에 다른 승인이 먼저 세션을 만들었다(동시 승인 경합). 500 대신 409로 닫는다 */
+export class ScannerSessionConflict extends Error {
+  constructor() {
+    super('다른 승인이 먼저 처리되었다');
+    this.name = 'ScannerSessionConflict';
+  }
+}
+
 /** staff_assignment 한 행(초대·배정). 초대 이메일과 토큰 해시는 수락·거절 때 지운다. */
 export interface StaffAssignmentRecord {
   assignmentId: string;

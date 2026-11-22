@@ -503,7 +503,8 @@ export class ScannerRegistryUnavailable extends Error {
 export const DEVICE_AUTHORIZATIONS = Symbol('identity.DeviceAuthorizations');
 /** 기기 승인 요청 저장소(세션·캐시 Redis id:devauth, 5분). 모든 메서드: @throws DeviceAuthorizationUnavailable */
 export interface DeviceAuthorizationStore {
-  save(r: import('./device-approval.js').DeviceAuthorizationRecord): Promise<void>;
+  /** 저장했으면 true, 사용자 확인 코드 색인이 이미 잡혀 있으면 false(호출자가 새 코드로 다시 시도한다) */
+  save(r: import('./device-approval.js').DeviceAuthorizationRecord): Promise<boolean>;
   /** 사용자 확인 코드로 찾는다. 없거나 만료면 null */
   findByUserCode(userCode: string): Promise<import('./device-approval.js').DeviceAuthorizationRecord | null>;
   /** 기기 코드 SHA-256(hex)으로 찾는다. 없거나 만료면 null */
@@ -512,7 +513,7 @@ export interface DeviceAuthorizationStore {
   approve(i: { deviceCodeHash: string; approved: import('./device-approval.js').ApprovedScannerSession; nowMs: number }): Promise<boolean>;
   /** PENDING일 때만 거부로 바꾼다. 이미 끝났으면 false */
   deny(deviceCodeHash: string, nowMs: number): Promise<boolean>;
-  /** 폴링 간격을 본다. 너무 잦으면 SLOW_DOWN과 남은 시간을 준다 */
+  /** 폴링 간격을 본다. 너무 잦으면 SLOW_DOWN, 처음 승인을 돌려줄 때 레코드와 색인을 지운다(1회용) */
   notePoll(deviceCodeHash: string, nowMs: number): Promise<import('./device-approval.js').DeviceAuthorizationPoll>;
 }
 /** 기기 승인 저장소에 닿지 못했다 */

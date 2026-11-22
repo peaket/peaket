@@ -75,6 +75,7 @@ export type ProblemType =
   | 'designation-exists'
   | 'designation-target-not-commander'
   | 'designation-target-not-eligible'
+  | 'device-approval-conflict'
   | 'device-revoked'
   | 'device-unregistered'
   | 'duplicate-account'
@@ -342,6 +343,7 @@ export type ProblemType =
   | 'unlock-code-invalid'
   | 'unlock-link-invalid'
   | 'unlock-link-resend-limit'
+  | 'user-code-unavailable'
   | 'verification-not-found'
   | 'verification-submit-limited'
   | 'version-conflict'
@@ -428,6 +430,7 @@ export const PROBLEM_TYPES = {
   'designation-exists': { status: 409, title: "이미 같은 지정이 있습니다" },
   'designation-target-not-commander': { status: 422, title: "commander 계정에만 줄 수 있는 지정입니다" },
   'designation-target-not-eligible': { status: 422, title: "이 계정에는 줄 수 없는 지정입니다" },
+  'device-approval-conflict': { status: 409, title: "다른 승인이 먼저 처리되었습니다. 새 승인을 시작해 주세요" },
   'device-revoked': { status: 403, title: "폐기된 스캐너 기기입니다" },
   'device-unregistered': { status: 403, title: "등록되지 않은 스캐너 기기입니다" },
   'duplicate-account': { status: 409, title: "이미 다른 계정에서 본인확인한 분입니다. 그 계정으로 로그인해 주세요" },
@@ -695,6 +698,7 @@ export const PROBLEM_TYPES = {
   'unlock-code-invalid': { status: 422, title: "코드가 맞지 않습니다" },
   'unlock-link-invalid': { status: 410, title: "이 링크는 더 쓸 수 없습니다" },
   'unlock-link-resend-limit': { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" },
+  'user-code-unavailable': { status: 409, title: "확인 코드를 새로 받아 주세요" },
   'verification-not-found': { status: 404, title: "본인확인 건을 찾을 수 없습니다" },
   'verification-submit-limited': { status: 429, title: "확인을 너무 많이 시도했습니다. 잠시 뒤 다시 시도해 주세요" },
   'version-conflict': { status: 409, title: "다른 요청이 먼저 처리되었습니다" },

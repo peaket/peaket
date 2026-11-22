@@ -9,10 +9,10 @@ export const deviceAuthorizationKey = (hash: string) => `id:devauth:${hash}`;
 export const deviceUserCodeKey = (userCode: string) => `id:devcode:${userCode}`;
 
 const SAVE = redisScript(`
+if not redis.call('SET', KEYS[2], ARGV[2], 'PXAT', ARGV[1], 'NX') then return 0 end
 redis.call('DEL', KEYS[1])
 redis.call('HSET', KEYS[1], unpack(ARGV, 3))
 redis.call('PEXPIREAT', KEYS[1], ARGV[1])
-redis.call('SET', KEYS[2], ARGV[2], 'PXAT', ARGV[1])
 return 1
 `);
 
@@ -34,10 +34,20 @@ return 1
 
 const POLL = redisScript(`
 if redis.call('EXISTS', KEYS[1]) == 0 then return {'EXPIRED'} end
+local code = redis.call('HGET', KEYS[1], 'userCode')
 local exp = tonumber(redis.call('HGET', KEYS[1], 'expiresAtMs'))
-if exp <= tonumber(ARGV[1]) then redis.call('DEL', KEYS[1]) return {'EXPIRED'} end
+if exp <= tonumber(ARGV[1]) then
+  redis.call('DEL', KEYS[1])
+  if code then redis.call('DEL', ARGV[2] .. code) end
+  return {'EXPIRED'}
+end
 local status = redis.call('HGET', KEYS[1], 'status')
-if status == 'APPROVED' then return {'APPROVED', redis.call('HGET', KEYS[1], 'approved')} end
+if status == 'APPROVED' then
+  local approved = redis.call('HGET', KEYS[1], 'approved')
+  redis.call('DEL', KEYS[1])
+  if code then redis.call('DEL', ARGV[2] .. code) end
+  return {'APPROVED', approved}
+end
 if status == 'DENIED' then return {'DENIED'} end
 local last = tonumber(redis.call('HGET', KEYS[1], 'lastPolledAtMs') or '0')
 local interval = tonumber(redis.call('HGET', KEYS[1], 'intervalSec') or '5') * 1000
@@ -106,7 +116,7 @@ export class RedisDeviceAuthorizations implements DeviceAuthorizationStore {
     private readonly now: () => number,
   ) {}
 
-  async save(r: DeviceAuthorizationRecord): Promise<void> {
+  async save(r: DeviceAuthorizationRecord): Promise<boolean> {
     const key = deviceAuthorizationKey(r.deviceCodeHash);
     const fields = [
       ['userCode', r.userCode],
@@ -121,7 +131,7 @@ export class RedisDeviceAuthorizations implements DeviceAuthorizationStore {
       ...(r.lastPolledAtMs !== undefined ? [['lastPolledAtMs', String(r.lastPolledAtMs)]] : []),
       ...(r.approved !== undefined ? [['approved', JSON.stringify(r.approved)]] : []),
     ].flat();
-    await guard(this.redis.evalScript(SAVE, [key, deviceUserCodeKey(r.userCode)], [String(r.expiresAtMs), r.deviceCodeHash, ...fields]));
+    return Number(await guard(this.redis.evalScript(SAVE, [key, deviceUserCodeKey(r.userCode)], [String(r.expiresAtMs), r.deviceCodeHash, ...fields]))) === 1;
   }
 
   async findByUserCode(userCode: string): Promise<DeviceAuthorizationRecord | null> {
@@ -147,7 +157,7 @@ export class RedisDeviceAuthorizations implements DeviceAuthorizationStore {
 
   async notePoll(deviceCodeHash: string, nowMs: number): Promise<DeviceAuthorizationPoll> {
     const key = deviceAuthorizationKey(deviceCodeHash);
-    const raw = await guard(this.redis.evalScript(POLL, [key], [String(nowMs)]));
+    const raw = await guard(this.redis.evalScript(POLL, [key], [String(nowMs), deviceUserCodeKey('')]));
     const parts = Array.isArray(raw) ? raw.map(str) : [];
     const result = parts[0];
     if (result === 'APPROVED' && parts[1]) return { result: 'APPROVED', approved: JSON.parse(parts[1]) as ApprovedScannerSession };

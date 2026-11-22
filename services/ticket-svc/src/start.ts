@@ -124,6 +124,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         sessions: scannerSessions,
         replay,
         ...(config.scannerMtlsSecret ? { mtls: { secret: config.scannerMtlsSecret } } : {}),
+        ...(config.publicOrigin ? { publicOrigin: config.publicOrigin } : {}),
       },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     });
