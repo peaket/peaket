@@ -15,7 +15,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { createHotRedis, type HotRedis, PROBLEM_TYPE_BASE, purchaseMac, purchaseMacInput, purchaseRequestKey } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { migratePurchase } from '../scripts/migrate.mjs';
+import { ensurePurchaseOutboxPartitions, ensureSeatHoldPartitions, migratePurchase } from '../scripts/migrate.mjs';
 import { RedisSeatStore } from '../src/modules/inventory/index.js';
 import { start, type StartedService } from '../src/start.js';
 import { claimsOf, newKey, signAdmission } from '../test/admission-fixtures.js';
@@ -50,11 +50,21 @@ let seatDir: string;
 const pods: Pod[] = [];
 
 /** 이 파일이 쓰는 회차(좌석맵 판·판매 열기를 미리 한다) */
-const E = { paused: randomUUID(), other: randomUUID(), susp: randomUUID(), idle: randomUUID(), idleCtrl: randomUUID() };
+const E = { paused: randomUUID(), other: randomUUID(), susp: randomUUID(), idle: randomUUID(), idleCtrl: randomUUID(), pay: randomUUID() };
+
+/** 좌석 ID(주문 품목의 좌석 ID는 소문자 UUID다). 시험은 A01~A04 이름으로 부른다 */
+const SEAT: Readonly<Record<string, string>> = {
+  A01: '0193a000-0000-7000-8000-00000000a001',
+  A02: '0193a000-0000-7000-8000-00000000a002',
+  A03: '0193a000-0000-7000-8000-00000000a003',
+  A04: '0193a000-0000-7000-8000-00000000a004',
+};
 
 const layoutFile = () => ({
   perAccountLimit: 4,
   saleEndsAt: new Date(Date.now() + DAY).toISOString(),
+  // 주문 생성(RV-03)이 등급 가격을 읽는다(판 파일의 선택 칸, PRF-161)
+  tierPrices: { R: 110_000 },
   layout: {
     layoutVersion: 1,
     canvas: { width: 1000, height: 800 },
@@ -65,7 +75,7 @@ const layoutFile = () => ({
         shape: { type: 'polygon', points: [] },
         tierId: 'R',
         seatIndexRange: { from: 0, to: 3 },
-        seats: ['A01', 'A02', 'A03', 'A04'].map((seatId, index) => ({ seatId, row: 'A', number: index + 1, x: 10 * (index + 1), y: 20, index })),
+        seats: ['A01', 'A02', 'A03', 'A04'].map((name, index) => ({ seatId: SEAT[name]!, row: 'A', number: index + 1, x: 10 * (index + 1), y: 20, index })),
       },
     ],
   },
@@ -109,6 +119,9 @@ async function startPod(name: string, databaseUrl: string): Promise<Pod> {
 beforeAll(async () => {
   [pgc, valkey] = await Promise.all([startPostgres(), startValkey()]);
   await migratePurchase(pgc.url);
+  // 주문 생성(RV-03)이 쓰는 Outbox·홀드 원장의 달마다 칸(운영은 migrate 스크립트가 만든다)
+  await ensurePurchaseOutboxPartitions(pgc.url);
+  await ensureSeatHoldPartitions(pgc.url);
   admin = new pg.Client({ connectionString: pgc.url });
   await admin.connect();
   // C-T50 ③용 두 번째 DB: 마이그레이션은 같고 sale_control만 읽지 못하게 이름을 바꿔 둔다(시험 안에서 되돌린다)
@@ -187,7 +200,7 @@ async function firstHold(pod: Pod, eventId: string, seatId: string): Promise<{ s
   const client = clientKeyOf();
   const mac = Buffer.from(purchaseRequestKey(diffieHellman({ privateKey: client.privateKey, publicKey: ecdh.pub }), jti));
   const url = `/v1/events/${eventId}/holds`;
-  const body = JSON.stringify({ seatIds: [seatId], clientEphemeralPublicKey: client.text });
+  const body = JSON.stringify({ seatIds: [SEAT[seatId] ?? seatId], clientEphemeralPublicKey: client.text });
   const r = await fetch(`${pod.app}${url}`, {
     method: 'POST',
     body,
@@ -207,6 +220,20 @@ async function firstHold(pod: Pod, eventId: string, seatId: string): Promise<{ s
   return { status: r.status, ...(json.type !== undefined ? { type: json.type } : {}), jti };
 }
 
+/**
+ * 첫 홀드의 판정(201·423)을 본다. 503 seat-store-unavailable(Retry-After 2)은 계약이 정한 '좌석 Redis를 잠시 쓸 수 없다'는 일시 답이라
+ * 클라이언트처럼 다시 부른다(이 PC에서 파드 넷이 2초마다 사본을 다시 쓰는 동안 Redis 마감 100ms를 넘긴 경우가 있었다, 시험 결과 절). 다른 답은 바로 돌려준다
+ */
+async function settledHold(pod: Pod, eventId: string, seatId: string): Promise<{ status: number; type?: string; jti: string }> {
+  let r = await firstHold(pod, eventId, seatId);
+  const until = Date.now() + 6_000;
+  while (r.status === 503 && r.type === `${PROBLEM_TYPE_BASE}seat-store-unavailable` && Date.now() < until) {
+    await sleep(2_000); // fixed-wait: 503의 Retry-After 2초를 따른다(계약의 다시 부를 때) F-02-1
+    r = await firstHold(pod, eventId, seatId);
+  }
+  return r;
+}
+
 describe('C-T50 킬스위치 중 확장·재시작 (purchase-svc 시작 파일)', () => {
   test('C-T50 ① 명령 3이 ACKED인 회차에서 늘린 파드의 홀드는 423 sale-paused이고 다른 회차는 판다. 원본·사본에 판·명령 칸이 서고 두 파드 모두 그 판 이상을 ack한다', async () => {
     const cmd = randomUUID();
@@ -223,9 +250,9 @@ describe('C-T50 킬스위치 중 확장·재시작 (purchase-svc 시작 파일)'
     // 파드를 늘린다(셋째). 새 파드는 sale_control을 읽어야 준비가 된다
     const fresh = await startPod('purchase-f021-c', pgc.url);
     await expect.poll(() => ready(fresh), { timeout: 15_000, interval: 200 }).toBe(200);
-    const paused = await firstHold(fresh, E.paused, 'A01');
+    const paused = await settledHold(fresh, E.paused, 'A01');
     expect({ status: paused.status, type: paused.type }).toEqual({ status: 423, type: `${PROBLEM_TYPE_BASE}sale-paused` });
-    const other = await firstHold(fresh, E.other, 'A01');
+    const other = await settledHold(fresh, E.other, 'A01');
     expect(other.status, '다른 회차는 그대로 판다').toBe(201);
     // 새 파드도 같은 판을 다시 받으면 아무것도 바꾸지 않고 그 판을 답한다(멱등)
     expect((await fresh.control.apply(pauseReq(E.paused, version, true, cmd))).appliedVersion).toBe(version);
@@ -234,8 +261,8 @@ describe('C-T50 킬스위치 중 확장·재시작 (purchase-svc 시작 파일)'
   test('C-T50 ② 사본 s:{event:E}:ctl을 지우면 2초 [가정] + 다시 맞춤 한 번 안에 원본대로 다시 써진다', async () => {
     const before = await hash(ctl(E.paused));
     expect(before.paused, '① 시험의 정지가 걸려 있어야 한다').toBe('1');
-    await del(ctl(E.paused));
-    expect(await exists(ctl(E.paused))).toBe(0);
+    // DEL의 답(지운 키 수 1)이 '있던 사본을 지웠다'의 증거다. 그 뒤 '없음'을 따로 읽으면 2초 다시 맞춤과 경주한다(다시 맞춤이 먼저 되살릴 수 있다)
+    expect(Number(await del(ctl(E.paused)))).toBe(1);
     await expect.poll(() => hash(ctl(E.paused)), { timeout: 4_500, interval: 100 }).toMatchObject({ paused: '1', pausedRev: before.pausedRev, pausedCmd: before.pausedCmd });
   });
 
@@ -264,6 +291,81 @@ describe('C-T50 킬스위치 중 확장·재시작 (purchase-svc 시작 파일)'
       await brokenAdmin.end().catch(() => undefined);
     }
   }, 60_000);
+});
+
+// RV-03(리뷰 반영 재현, F-02-1 계획 15절): C-T50의 '새 파드의 결제 시도·결제 접수는 모두 423'과 '파드 하나를 강제로 다시 시작'.
+// 좌석 Redis 사본이 '정지 아님'(장애 전환 뒤 낡은 사본처럼, 판 칸이 커서 다시 맞춤도 덮지 않음)이어도 파드 메모리의 정지(ADR-0365 결정 7)로 423이어야 한다.
+// 결제 시도 시작(POST /v1/orders/{orderId}/payments)·결제 접수(POST /v1/orders/{orderId}/payment-acceptance)를 실제 HTTP로 부른다.
+describe('RV-03 C-T50 결제 시도·결제 접수의 정지 확인 (늘린 파드·다시 시작한 파드)', () => {
+  /** 구매 세션 하나(첫 홀드로 연다)와 그 세션의 서명한 요청 */
+  async function buyer(pod: Pod, eventId: string, seatId: string) {
+    const n = ++accountSeq;
+    const account = `0190f3a1-7c2e-7a00-8000-${String(n).padStart(12, '0')}`;
+    const login = `it-f021-login-${n}`;
+    const pid = `pid-${randomUUID()}`;
+    const jti = randomUUID();
+    const token = signAdmission(ADMISSION, claimsOf({ nowMs: Date.now(), jti, accountId: account, loginSessionId: login, eventId }));
+    const client = clientKeyOf();
+    const mac = Buffer.from(purchaseRequestKey(diffieHellman({ privateKey: client.privateKey, publicKey: ecdh.pub }), jti));
+    let seq = 0;
+    const signed = (at: Pod, url: string, body: unknown) => {
+      const payload = JSON.stringify(body);
+      const k = ++seq;
+      return fetch(`${at.app}${url}`, {
+        method: 'POST',
+        body: payload,
+        headers: {
+          'x-user-id': account,
+          'x-session-id': login,
+          'x-user-aud': 'fan',
+          'x-user-scope': 'ticket:buy',
+          'x-user-pid': pid,
+          'content-type': 'application/json',
+          'idempotency-key': randomUUID(),
+          'x-admission-token': token,
+          'x-purchase-seq': String(k),
+          'x-purchase-mac': purchaseMac(mac, purchaseMacInput('POST', url, k, Buffer.from(payload, 'utf8'))),
+        },
+      });
+    };
+    const h = await signed(pod, `/v1/events/${eventId}/holds`, { seatIds: [SEAT[seatId] ?? seatId], clientEphemeralPublicKey: client.text });
+    const hb = (await h.json()) as { holdId?: string };
+    expect(h.status, JSON.stringify(hb)).toBe(201);
+    const o = await signed(pod, '/v1/orders', { holdId: String(hb.holdId), buyer: { name: '김피켓', phone: '010-1234-5678' }, consents: { provisionToSeller: true, salesTerms: true, consentVersion: 'f021-v1' } });
+    const ob = (await o.json()) as { orderId?: string; amount?: number };
+    expect(o.status, JSON.stringify(ob)).toBe(201);
+    return { signed, orderId: String(ob.orderId), amount: Number(ob.amount) };
+  }
+  const problemOf = async (r: Response) => ({ status: r.status, type: ((await r.json().catch(() => ({}))) as { type?: string }).type });
+  const paused = { status: 423, type: `${PROBLEM_TYPE_BASE}sale-paused` };
+
+  test('RV-03 ① 명령 3이 ACKED인 회차에서 늘린 파드와 강제로 다시 시작한 파드의 결제 시도·결제 접수는 사본이 정지가 아니어도 423 sale-paused다', async () => {
+    const owner = pods[0]!;
+    const b = await buyer(owner, E.pay, 'A01');
+    await admin.query("insert into payment_attempt (id, order_id, pg, pg_order_ref, status, created_at) values ($1, $2::uuid, 'TOSS', $3::text, 'READY', now())", [randomUUID(), b.orderId, b.orderId]);
+    const cmd = randomUUID();
+    const acks = await toAll(pauseReq(E.pay, Date.now(), true, cmd));
+    expect(acks.length).toBeGreaterThanOrEqual(2);
+    // 사본을 '정지 아님'으로 낡게 둔다(판 칸이 커 다시 맞춤이 덮지 않는다). 홀드 Lua는 이 사본을 보지만 결제 쪽은 파드 메모리를 본다
+    await redis.command(['HSET', ctl(E.pay), 'paused', '0', 'pausedRev', '9007199254740991'], { key: ctl(E.pay) });
+    const toss = () => ({ pg: 'TOSS', paymentKey: `tgen_${randomUUID().replaceAll('-', '').slice(0, 24)}`, amount: b.amount });
+
+    // 늘린 파드
+    const added = await startPod('purchase-f021-d', pgc.url);
+    await expect.poll(() => ready(added), { timeout: 15_000, interval: 200 }).toBe(200);
+    expect(await problemOf(await b.signed(added, `/v1/orders/${b.orderId}/payments`, {})), '늘린 파드의 결제 시도').toEqual(paused);
+    expect(await problemOf(await b.signed(added, `/v1/orders/${b.orderId}/payment-acceptance`, toss())), '늘린 파드의 결제 접수').toEqual(paused);
+
+    // 강제로 다시 시작: 같은 이름의 파드를 닫고 새로 띄운다
+    pods.splice(pods.indexOf(owner), 1);
+    owner.control.close();
+    await owner.svc.close();
+    const restarted = await startPod('purchase-f021-a', pgc.url);
+    await expect.poll(() => ready(restarted), { timeout: 15_000, interval: 200 }).toBe(200);
+    expect(await problemOf(await b.signed(restarted, `/v1/orders/${b.orderId}/payments`, {})), '다시 시작한 파드의 결제 시도').toEqual(paused);
+    expect(await problemOf(await b.signed(restarted, `/v1/orders/${b.orderId}/payment-acceptance`, toss())), '다시 시작한 파드의 결제 접수').toEqual(paused);
+    expect(await rowOf(E.pay)).toMatchObject({ paused: true, paused_command_id: cmd });
+  }, 90_000);
 });
 
 // F021-IDLE은 전체 범위 정지·풀기(F021-SUSP ②)보다 먼저 돈다: 풀린 시각 + 5분 안의 세션은 유휴 시한이 늘어나(결정 8) 대조 회차가 끝나지 않는다
@@ -354,12 +456,12 @@ describe('F021-SUSP 판매 중지와 판매 일시정지의 판 칸 (B13·M10)',
     for (const e of [E.other, E.paused]) expect(await hash(ctl(e)), e).toMatchObject({ allPaused: '1', allRev: String(version), allCmd: cmd });
     await del(ctl(E.other));
     await expect.poll(() => hash(ctl(E.other)), { timeout: 4_500, interval: 100 }).toMatchObject({ allPaused: '1', allRev: String(version) });
-    const held = await firstHold(pods[0]!, E.other, 'A02');
+    const held = await settledHold(pods[0]!, E.other, 'A02');
     expect({ status: held.status, type: held.type }).toEqual({ status: 423, type: `${PROBLEM_TYPE_BASE}sale-paused` });
     const lift = Date.now() + 1;
     await toAll(pauseReq('PLATFORM', lift, false));
     expect(await hash(ctl(E.other))).toMatchObject({ allPaused: '0', allRev: String(lift) });
-    expect((await firstHold(pods[0]!, E.other, 'A03')).status, '전체 정지를 풀면 다시 판다').toBe(201);
+    expect((await settledHold(pods[0]!, E.other, 'A03')).status, '전체 정지를 풀면 다시 판다').toBe(201);
   });
 });
 
