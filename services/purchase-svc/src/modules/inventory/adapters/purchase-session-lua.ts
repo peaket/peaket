@@ -136,10 +136,12 @@ return redis.call('HSETNX', KEYS[1], 'bs', '1')
 // END_SESSION_LUA — KEYS: 1 세션 상태 s:session:{jti}. ARGV 없음.
 //   event·jny 칸이 모두 있으면 DEL 하고 {'ENDED', 회차 ID, 여정 ID}. 키가 없거나 칸이 모자란 찌꺼기 해시면(있으면 지우고) {'GONE'}. 재사용 차단 표지는 건드리지 않는다.
 //
-// SWEEP_SESSION_LUA — KEYS: 1 세션 상태. ARGV: 1 유휴 ms(SESSION_IDLE_MS).
+// SWEEP_SESSION_LUA — KEYS: 1 세션 상태. ARGV: 1 유휴 ms(SESSION_IDLE_MS), 2 '1'이면 판매 일시정지 중(유휴로 끝내지 않는다), 3 유휴 시한 바닥 ms(''이면 없음, ADR-0365 결정 8).
 //   HMGET event jny max idle pay. event 칸이 없으면 {'GONE'}(키는 건드리지 않는다. 찌꺼기는 키 수명이 지운다). max·idle이 양의 10진 정수(16자리 이하)가 아니거나 jny 칸이 없으면 pay와 관계없이 오류 PEAKET_CORRUPT_KEY {키}(아무것도 쓰지 않는다).
 //   지금 ≥ max → DEL, {'ENDED', 'MAX_STAY', 회차, 여정, 지금}. pay == '1' → {'LIVE', min(max, 지금 + ARGV 1)}(Paying이어도 유휴 시한 길이마다 다시 본다: 결제 실패로 Active에 돌아오면 그 뒤 유휴 정리가 최대 체류까지 밀리지 않게). 지금 ≥ idle → DEL, {'ENDED', 'IDLE', 회차, 여정, 지금}.
 //   아니면 {'LIVE', min(max, idle)}. LIVE는 아무것도 바꾸지 않는다.
+//   판매 일시정지 유휴 시계: max 확인 뒤, ARGV 3이 있고 idle < ARGV 3이면 HSET idle ARGV 3(정지 동안 쓴 시간을 돌려준다). ARGV 2가 '1'이면 pay 확인 다음에
+//   {'LIVE', min(max, 지금 + ARGV 1)}(정지 동안은 유휴를 세지 않고 다음 볼 시각만 미룬다).
 //
 // PAY_SESSION_LUA — KEYS: 1 세션 상태. ARGV: 1 '1'(Paying) 또는 '0'(Active), 2 유휴 ms.
 //   세션이 없으면 0(아무것도 만들지 않는다). '1'이면 HSET pay '1', '0'이면 HDEL pay와 HSET idle 지금 + ARGV 2. 돌려주는 값 1.
@@ -197,7 +199,12 @@ if now >= max then
   redis.call('DEL', KEYS[1])
   return out
 end
-if h[5] == '1' then return {'LIVE', int(math.min(max, now + tonumber(ARGV[1])))} end
+local floor = num(ARGV[3])
+if floor and idle < floor then
+  idle = floor
+  redis.call('HSET', KEYS[1], 'idle', int(floor))
+end
+if h[5] == '1' or ARGV[2] == '1' then return {'LIVE', int(math.min(max, now + tonumber(ARGV[1])))} end
 if now >= idle then
   local out = {'ENDED', 'IDLE', h[1], h[2], int(now), h[6] or ''}
   ${HELD_FIELDS}

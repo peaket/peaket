@@ -45,7 +45,7 @@ import {
   WithdrawPriorityGrant,
   type PriorityModuleDeps,
 } from './modules/priority/index.js';
-import { DrizzleSaleControlStore, RedisSaleControlCopies, SetSaleSuspension, type SaleControlModuleDeps } from './modules/sale-control/index.js';
+import { DrizzleSaleControlStore, RedisSaleControlCopies, SaleControlMemory, SaleControlReconciler, SetSalePause, SetSaleSuspension, type SaleControlModuleDeps } from './modules/sale-control/index.js';
 import { startControlServer } from './control/control-server.js';
 import {
   AccountWithdrawalTickets,
@@ -183,6 +183,7 @@ import {
   LoggerTicketVoidLog,
   PromTicketVoidSignals,
   unavailableIdentityRecheck,
+  type SeatSlotReads,
 } from './modules/booking/index.js';
 import {
   CoreSaleConfigs,
@@ -536,7 +537,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
 
   // 판매 중지·재개 사본(BAT-465 R-584, ADR-0123). 원본은 purchase DB sale_control, 사본은 좌석 Redis s:{event:E}:ctl이다.
   // purchase DB가 없으면 내부 HTTP 경로를 열지 않는다(홀드 Lua가 읽을 사본도 쓸 곳이 없다).
-  const saleControl: SaleControlModuleDeps | undefined = database ? { store: new DrizzleSaleControlStore(database), copies: new RedisSaleControlCopies(redis) } : undefined;
+  // 명령 3(판매 일시정지)도 같은 원본·사본이고 판 칸은 따로다(F-02-1 OPS-300, ADR-0365 결정 6). 파드 메모리(saleMemory)는 받는 쪽 쓰기와 2초 다시 맞춤이 채우고,
+  // 결제 시도·결제 접수의 정지 확인(booking slots 앞)과 구매 세션 정리의 유휴 시계가 읽는다(결정 7·8)
+  const saleMemory = database ? new SaleControlMemory() : undefined;
+  const saleControl: SaleControlModuleDeps | undefined =
+    database && saleMemory ? { store: new DrizzleSaleControlStore(database), copies: new RedisSaleControlCopies(redis), memory: saleMemory } : undefined;
   // 제어 gRPC 받는 쪽(peaket.control.v1.ControlReceiver, ADR-0102·0103). 주소가 있을 때만 제어 전용 포트를 연다.
   const controlPort = Number(env.PEAKET_PURCHASE_CONTROL_GRPC_PORT ?? '');
   const controlServer =
@@ -545,7 +550,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
           host: env.PEAKET_CONTROL_GRPC_HOST ?? '0.0.0.0',
           port: controlPort,
           deps: {
-            setSuspension: new SetSaleSuspension(saleControl.store, saleControl.copies),
+            setSuspension: new SetSaleSuspension(saleControl.store, saleControl.copies, saleControl.memory),
+            setPause: new SetSalePause(saleControl.store, saleControl.copies, saleControl.memory),
             podName: podId,
             nowMs: () => systemClock.now(),
           },
@@ -602,7 +608,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
         },
         writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
         accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
-        slots: new InventorySeatSlots(new RedisSeatSlots(redis)),
+        // 파드 메모리가 정지(명령 3 회차·전체, 판매 중지)라 하면 좌석 Redis를 부르지 않고 PAUSED(423 sale-paused)다(ADR-0365 결정 7)
+        slots: pauseAwareSlots(new InventorySeatSlots(new RedisSeatSlots(redis)), saleMemory),
         holds: orderHolds,
         holdMarks: manageHolds,
         saleConfigs: new SeatMapSaleConfigs(seatMap),
@@ -665,6 +672,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         issuer: admissionIssuer,
         onSessionEnded,
         manageHolds,
+        ...(saleMemory ? { salePauses: saleMemory } : {}),
       },
     }),
     purchaseSessions: sessions,
@@ -965,6 +973,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
   };
   // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다
   const controlSync = startServiceControlSync(service, env);
+  // purchase-svc 제어 상태 시작 작업(ADR-0365 결정 7, C-T50): sale_control을 읽어야 /ready가 200이고, 그 뒤 2초 [가정]마다 메모리와 좌석 Redis 사본을 원본대로 맞춘다
+  const saleReconciler = saleControl && saleMemory ? new SaleControlReconciler({ store: saleControl.store, memory: saleMemory, ...(saleControl.copies ? { copies: saleControl.copies } : {}), logger: service.logger }) : undefined;
+  saleReconciler?.start(service.readiness);
   await service.listen();
   // 회차 취소 일괄 환불 gRPC(refund.proto, BAT-425 GAT-130). PEAKET_GRPC_PORT가 있을 때만 연다.
   // 없으면 ops-svc는 내부 HTTP 호환 경로를 쓴다(같은 쓰임새·같은 멱등 키).
@@ -1090,7 +1101,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       // 제어 gRPC 서버는 새 제어를 받지 않고 돌던 호출을 기다린다(ADR-0102의 우아한 종료)
       (controlServer?.close() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, '제어 gRPC 서버 닫기 실패')),
     ])
-      .then(() => Promise.all([admissionLoader?.stop(), sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), compensationRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
+      .then(() => Promise.all([admissionLoader?.stop(), saleReconciler?.stop(), sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), compensationRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
       .then(() => service.close())
       .finally(closeTelemetry)
       .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
@@ -1153,4 +1164,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
     return closing;
   }
   return { close: shutdown };
+}
+
+/** 회차 슬롯 읽기 앞에 파드 메모리의 정지 확인을 둔다(결제 시도·결제 접수, ADR-0365 결정 7). 메모리가 없으면 그대로다 */
+function pauseAwareSlots(inner: SeatSlotReads, memory: { stopped(eventId: string): boolean } | undefined): SeatSlotReads {
+  if (!memory) return inner;
+  return { read: (eventId, o) => (memory.stopped(eventId) ? Promise.resolve({ status: 'PAUSED' as const }) : inner.read(eventId, o)) };
 }

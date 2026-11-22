@@ -26,6 +26,20 @@ export interface SeatCallOptions {
   deadlineMs?: number;
 }
 
+/** 정리 점검의 유휴 시계 선택값(ADR-0365 결정 8). 둘 다 없으면 평소 규칙이다 */
+export interface SweepIdleOptions {
+  /** 그 회차가 판매 일시정지(명령 3, 회차·전체)인 동안: 유휴로 끝내지 않는다 */
+  readonly idlePaused?: boolean;
+  /** 정지가 풀린 시각 + 유휴 5분: 유휴 시한이 이보다 이르면 이 값으로 다시 쓴다 */
+  readonly idleFloorMs?: number;
+}
+
+/** 구매 세션 정리가 읽는 판매 일시정지 유휴 시계(sale-control 모듈의 파드 메모리가 채운다, ADR-0365 결정 8) */
+export interface SaleIdleClock {
+  /** 정지 중이면 paused 참, 아니면 마지막으로 풀린 시각(있으면) */
+  idleRule(eventId: string): { readonly paused: true } | { readonly paused: false; readonly releasedAtMs?: number };
+}
+
 export const SEAT_STORE = Symbol('purchase.SeatStore');
 /**
  * 좌석 저장소(회차 슬롯 {event:E}의 좌석 Redis 키, docs/data.md §3). 운영은 홀드 Lua 하나(adapters/hold-lua.ts의 계약),
@@ -679,9 +693,11 @@ export interface PurchaseSessionStore {
    * 지금 ≥ 유휴 시한이면 지우고 IDLE로 ENDED, 아니면 LIVE(다음 점검 = min(최대 체류, 유휴 시한)). LIVE는 아무것도 바꾸지 않는다.
    * @throws RangeError jti가 키 조각 모양이 아님
    * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+   * 판매 일시정지 유휴 시계(ADR-0365 결정 8, 상태 기계 T11): o.idlePaused이면 최대 체류만 보고 유휴로 끝내지 않는다(LIVE, 다음 점검 = min(최대 체류, 지금 + 유휴 5분)).
+   * o.idleFloorMs가 있고 유휴 시한이 그보다 이르면 먼저 유휴 시한을 그 값으로 다시 쓴다(정지가 풀린 뒤 돌려주는 시간).
    * @throws Error 세션 상태의 max·idle 칸이 망가짐(PEAKET_CORRUPT_KEY)
    */
-  sweep(jti: string, o?: SeatCallOptions): Promise<SweepSessionResult>;
+  sweep(jti: string, o?: SeatCallOptions & SweepIdleOptions): Promise<SweepSessionResult>;
 
   /**
    * Paying 표시를 쓴다(한 원자 연산, T5·T8): paying true면 `pay` 칸을 '1'로 쓰고, false면 칸을 지우고 유휴 시한을 지금 + 5분으로 다시 쓴다.
