@@ -2,7 +2,7 @@
 // 가입을 마친 ACTIVE 계정만 답한다(정지·병합·탈퇴 계정의 코드는 빈 값이거나 답하지 않는다).
 import type { Database } from '@peaket/platform';
 import { and, eq, inArray } from 'drizzle-orm';
-import type { MemberCodeResolver } from '../domain/member-code.js';
+import type { MemberCodeResolver } from '../../domain/member-code.js';
 import { account } from './schema.js';
 
 export class DrizzleMemberCodeResolver implements MemberCodeResolver {
