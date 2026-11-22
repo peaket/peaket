@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 24 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 57 |
-| 합계 | 24 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 57 |
+| B | 32 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 65 |
+| 합계 | 32 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 65 |
 
 ## docs/security/auth-controls.md
 
@@ -73,3 +73,11 @@
 | AZ-T16 | ③ | 역할은 요청마다 판정(소유자 결정 2026-10-31… | ③ 판정에 쓰이지 않는다 | 빈칸 | B | — |
 | AZ-T16 | ④ | 역할은 요청마다 판정(소유자 결정 2026-10-31… | ④ 503 `authz-unavailable`이고 통과시키지 않는다 | 빈칸 | B | — |
 | AZ-T16 | ⑤ | 역할은 요청마다 판정(소유자 결정 2026-10-31… | ⑤ 403이다 | 빈칸 | B | — |
+| AZ-T17 | ① | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ① A의 파트너 작업 기록만 보이고 바뀐다. B·팬·관제 기록은 그대로다 | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts |
+| AZ-T17 | ② | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ② 0건이고 오류가 없다 | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts |
+| AZ-T17 | ③ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ③ 팬 경로 사용자는 팬 작업 일곱의 기록에만, 관제 경로 사용자는 관제 작업 둘의 기록에만 닿고, 지우기는 관제 경로 사용자의 관제 작업 기록만 된다. 다른… | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts |
+| AZ-T17 | ④ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ④ 모두 거절(42501)이다 | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts |
+| AZ-T17 | ⑤ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ⑤ 처음 결과, 같은 결과, 422 `idempotency-key-reused`가 지금과 같고, 파트너 기록의 테넌트 칸이 요청 테넌트이며 팬·관제 기록은 비어… | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts |
+| AZ-T17 | ⑥ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ⑥ 모두 404 `not-found`이고 바꾼 값이 응답에 없으며, 결제사 호출과 DB 쓰기가 0건이고 오류 로그… | 자동 시험 | B | 시험: services/core-svc/test-int/shop-replay.int.test.ts, services/core-svc/test/shop-replay-in-tx.test.ts |
+| AZ-T17 | ⑦ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ⑦ 파트너 기록의 테넌트 칸이 그 공연·회차의 판매자로 채워져 그 테넌트의 파트너 트랜잭션에서만 보이고, 팬·관제 기록의 테넌트 칸은 비어 있다 | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-migration.int.test.ts |
+| AZ-T17 | ⑧ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ⑧ 행 보안이 켜져 있고 FORCE가 없으며, 소유자가 앱 역할이 아니고, 정책은 ADR-0337 결정 3의 열 개이며, 세 역할의 작업 목록을 합치면 작업… | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts |

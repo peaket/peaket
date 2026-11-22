@@ -491,10 +491,14 @@ core-svc 0000~0034의 GRANT·행 보안을 표마다 대조했다('여러 역할
 | impl | lane2-w12coreidem-impl2 | claude-opus-5-5 | 2026-11-22T04:46+09:00 | 2026-11-22T04:54+09:00 |
 | verify | lane2-w12coreidem-verify | claude-opus-5-5 | 2026-11-22T05:31+09:00 | 2026-11-22T06:17+09:00 |
 | test | lane2-w12coreidem-test2 | claude-opus-5-5 | 2026-11-22T06:19+09:00 | 2026-11-22T06:40+09:00 |
-| verify | lane2-w12coreidem-verify2 | deepseek-v4.1-flash | 2026-11-22T09:10+09:00 | 2026-11-22T09:50+09:00 |
+| verify | lane2-w12coreidem-verify2 | deepseek-v4.1-flash | 2026-11-22T09:10+09:00 | 2026-11-22T09:46+09:00 |
 
 ## 기록
 
-(기록 담당이 쓴다.)
+기록 담당(`lane2-w12coreidem-record`, deepseek-v4.1-flash)이 2026-11-22에 썼다. 구현 커밋은 `774148113`·`eba5240c7`(RV5), 시험 커밋은 `7b098a661`·`5438106a3`·`6c3593f84`·`b32da2801`(검증이 놓친 셋), 검증은 `223168d75`와 `2e5c202ea`(검증 2)다.
 
-- **다음 단계**: 재검증(V5·V6·V8을 새 시험이 잡는지) → 기록 → 합치기.
+- **막은 것**: `idempotency_record`가 세 DB 역할(`core_partner`·`core_app`·`core_ops`)에 표 단위로 열려 있어, 한 경로의 조건 빠진 쿼리로 다른 역할 작업의 멱등 기록(팬 결제창 값·다른 파트너 등록 결과·관제 계약 변경 응답)을 읽고 바꾸고 지울 수 있었다. 0041이 `tenant_id` 칸(기본값 `app.tenant_id`)과 백필 셋을 더하고, 표 단위 넣기·고치기를 칸 단위(넣기 여섯·고치기 셋)로 거두며, 행 보안을 켜고(FORCE 없음) 역할·작업·명령마다 정책 열 개를 건다. 굿즈 작업 일곱의 재생은 결과 참조가 지금 요청의 계정·경로 주문(시도·취소)의 것일 때만 처음 응답을 돌려주고, 아니면 남의 주문과 같은 404 `not-found`이며 쓰기·결제사 호출이 앞에서 끝난다(로그 `idempotency-replay-mismatch`·`SEV2` 한 줄, 계정 ID·참조 원문 없음).
+- **정본**: ADR-0337(새), ADR-0241 결정 1·3·4·6·7, ADR-0146 결정 1, guidelines §4 '예외 셋째', authz-matrix §2·§5.3·§7 AZ-T17, data.md, asvs/payment 8.2.2, asvs/catalog-review 8.4.1.
+- **검증**: 검증 1이 계획 표본 27개를 모두 잡았고(놓침 0), core-svc 통합 두 실행을 합쳐 500/500(1 건너뜀). 검증 2가 검증 1의 놓친 셋을 메운 시험에서 새 단위 6/6·대상 통합 17/17을 봤고 V6 표본 6/6을 잡았다(V8·V5 표본은 Docker 차례가 없어 남김). 게이트: typecheck·lint·doc-check(오류 0)·단위 779/779·trace-check AZ-T17 17·ledger AZ-T17 8/8 자동 시험·roles-check.
+- **남은 위험**: OPEN-A(같은 역할 안 계정 묶기)·OPEN-B(결제창 값을 저장하는 재생), 정비 연결 역할(BAS-060), RV4(openapi 404 설명)·RV7(결제 식별 칸·통화), ⑧ 소유자 이름 여섯 한계. 모두 정리 목록 `docs/lanes/lane2-cleanup.md` R-752 줄이다.
+- **다음 단계**: 감독이 합치기. W12-core-idem 뒤 차례는 W12-golden-report다.
