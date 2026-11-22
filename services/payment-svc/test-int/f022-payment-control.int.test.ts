@@ -6,7 +6,7 @@
 // 정지 since > 판이면 열지 않음, 정지 캐시를 바로 비움, 파드마다 받은 가장 큰 판, 같거나 작은 판은 쓰기 없이 그 값), ADR-0365 결정 1(판 1~2^53−1), 계획 6절 B5~B8·B14·B15, 9절, 13절.
 // 시뮬레이터는 플랫폼 기본(SIMULATOR)이고, 대체 TOSS 어댑터도 시뮬레이터 주소·시뮬레이터 키로 띄운다(결제창 값만 만들고 부르지 않는다).
 // 결제사 승인 상한은 PEAKET_PG_APPROVAL_TPS {"TOSS": 37.9, "PORTONE": 12.5}(코드 기본값과 다른 시험 값).
-// [가정] 제어 포트 환경 값 PEAKET_PAYMENT_CONTROL_GRPC_PORT(계획 3.1)와 듣는 주소 PEAKET_CONTROL_GRPC_HOST(F-02-1 받는 쪽과 같다). 해제의 바라는 상태는 정본대로 {"pg"}만 싣는다.
+// [가정] 제어 포트 환경 값 PEAKET_PAYMENT_CONTROL_GRPC_PORT(계획 3.1)와 듣는 주소 PEAKET_CONTROL_GRPC_HOST(F-02-1 받는 쪽과 같다). 해제의 바라는 상태는 정본(ADR-0366 결정 8) {"pg", "actor"}다.
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { Writable } from 'node:stream';
@@ -125,6 +125,9 @@ beforeEach(async () => {
 
 const KIND = 'CONTROL_KIND_PG_SWITCH';
 const RELEASE = 'CONTROL_KIND_ENTRY_PAUSE_RELEASE';
+/** 해제를 낸 commander의 관리 계정 ID(ADR-0366 결정 8 {"pg", "actor"}, actor 1~128자) */
+const ACTOR = '0193a000-0000-7000-8000-00000000c0de';
+const rel = (pgName: string, actor: string = ACTOR) => JSON.stringify({ pg: pgName, actor });
 const sw = (switched: boolean, toPg: 'TOSS' | 'PORTONE' | null) => JSON.stringify({ switched, toPg });
 const req = (o: Partial<ApplyRequest> & Pick<ApplyRequest, 'scope' | 'desiredStateJson'>): ApplyRequest => ({ commandId: newId(), version: 1_000, kind: KIND, ...o });
 interface SwitchRow {
@@ -276,7 +279,7 @@ describe('F022-READY 새 파드의 준비 조건 (B8, ADR-0366 결정 3)', () =>
 });
 
 describe('F022-REL payment-svc 해제 받기 (B14·B15, ADR-0366 결정 9)', () => {
-  test('F022-REL ⑦ 정지 since = 판 − 1ms와 판 정각은 열고(actor는 SYSTEM이 아님), 판 + 1ms(명령 뒤 새로 걸린 정지)는 열지 않고 그 판을 답한다', async () => {
+  test('F022-REL ⑦ 정지 since = 판 − 1ms와 판 정각은 열고(actor는 받은 요청자 계정 ID), 판 + 1ms(명령 뒤 새로 걸린 정지)는 열지 않고 그 판을 답한다', async () => {
     // 경우마다 더 큰 판을 같은 파드에 보낸다(파드 메모리의 '받은 가장 큰 판'이 since 조건을 가리지 않게)
     const base = 1_763_870_400_000;
     const cases: [string, number, number, string][] = [
@@ -288,24 +291,24 @@ describe('F022-REL payment-svc 해제 받기 (B14·B15, ADR-0366 결정 9)', () 
     for (const [label, v, since] of cases) {
       await admin.pool.query('truncate payment_entry_pause');
       await putPause('TOSS', since, 3);
-      const ack = await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: '{"pg":"TOSS"}' }));
+      const ack = await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: rel('TOSS') }));
       const row = await pauseOf('TOSS');
-      got.push({ label, applied: ack.appliedVersion - v, stage: row?.stage, actorIsSystem: row?.actor === 'SYSTEM', reopened: row?.reopened_at !== null });
+      got.push({ label, applied: ack.appliedVersion - v, stage: row?.stage, actor: row?.actor, reopened: row?.reopened_at !== null });
     }
     expect(got).toEqual([
-      { label: '판 − 1ms', applied: 0, stage: 'OPEN', actorIsSystem: false, reopened: true },
-      { label: '판 정각', applied: 0, stage: 'OPEN', actorIsSystem: false, reopened: true },
-      { label: '판 + 1ms', applied: 0, stage: 'PROBING', actorIsSystem: true, reopened: false },
+      { label: '판 − 1ms', applied: 0, stage: 'OPEN', actor: ACTOR, reopened: true },
+      { label: '판 정각', applied: 0, stage: 'OPEN', actor: ACTOR, reopened: true },
+      { label: '판 + 1ms', applied: 0, stage: 'PROBING', actor: 'SYSTEM', reopened: false },
     ]);
   });
 
   test('F022-REL ⑧ 같은 판을 다시 받으면 쓰지 않고, 파드를 다시 띄운 뒤 같은 판을 받아도 그 뒤 새로 걸린 정지를 열지 않는다', async () => {
     const v = 1_763_870_500_000;
     await putPause('PORTONE', v - 60_000, 5);
-    expect((await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: '{"pg":"PORTONE"}' }))).appliedVersion).toBe(v);
+    expect((await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: rel('PORTONE') }))).appliedVersion).toBe(v);
     const opened = await pauseOf('PORTONE');
     expect(opened?.stage).toBe('OPEN');
-    expect((await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: '{"pg":"PORTONE"}' }))).appliedVersion).toBe(v);
+    expect((await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: rel('PORTONE') }))).appliedVersion).toBe(v);
     expect(await pauseOf('PORTONE')).toEqual(opened);
     // 명령 뒤에 자동 정지가 새로 걸린다(since > 판)
     await admin.pool.query(`update payment_entry_pause set stage = 'PROBING', actor = 'SYSTEM', since = $1, version = version + 1 where pg = 'PORTONE'`, [new Date(v + 5_000)]);
@@ -314,7 +317,7 @@ describe('F022-REL payment-svc 해제 받기 (B14·B15, ADR-0366 결정 9)', () 
     await stopPod(podA);
     podA = await startPod('payment-f022-a');
     await until(() => ready(podA), (s) => s === 200, '다시 띄운 파드 준비', { timeoutMs: 30_000 });
-    expect((await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: '{"pg":"PORTONE"}' }))).appliedVersion).toBe(v);
+    expect((await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: rel('PORTONE') }))).appliedVersion).toBe(v);
     expect(await pauseOf('PORTONE')).toEqual(repaused);
   }, 90_000);
 
@@ -326,7 +329,7 @@ describe('F022-REL payment-svc 해제 받기 (B14·B15, ADR-0366 결정 9)', () 
     // 이 파드가 정지를 읽어 캐시에 둘 때까지(조건 대기)
     await expect.poll(async () => (await failure(prepare(podB, e))).details, { timeout: 10_000, interval: 100 }).toBe('new-payment-paused');
     const cached = Date.now();
-    await podB.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: '{"pg":"TOSS"}' }));
+    await podB.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: rel('TOSS') }));
     const r = await prepare(podB, e);
     expect(Date.now() - cached, '캐시 수명 안에서 본 값이어야 비우기를 본 것이다').toBeLessThan(CACHE_MS);
     expect(r).toMatchObject({ pg: 'PG_PROVIDER_TOSS' });
@@ -334,9 +337,13 @@ describe('F022-REL payment-svc 해제 받기 (B14·B15, ADR-0366 결정 9)', () 
   });
 
   test.each([
-    ['모르는 칸', '{"pg":"TOSS","reason":"x"}'],
-    ['pg 없음', '{}'],
-    ['허용 밖 결제사', '{"pg":"NAVERPAY"}'],
+    ['모르는 칸', JSON.stringify({ pg: 'TOSS', actor: ACTOR, reason: 'x' })],
+    ['pg 없음', JSON.stringify({ actor: ACTOR })],
+    ['허용 밖 결제사', rel('NAVERPAY')],
+    ['actor 없음', '{"pg":"TOSS"}'],
+    ['빈 actor', rel('TOSS', '')],
+    ['129자 actor', rel('TOSS', 'a'.repeat(129))],
+    ['actor가 수', '{"pg":"TOSS","actor":7}'],
   ])('F022-REL ⑩ 해제의 %s는 INVALID_ARGUMENT이고 정지 행이 그대로다', async (_name, json) => {
     await putPause('TOSS', Date.now() - 30_000, 4);
     const before = await pauseOf('TOSS');
@@ -344,9 +351,17 @@ describe('F022-REL payment-svc 해제 받기 (B14·B15, ADR-0366 결정 9)', () 
     expect(await pauseOf('TOSS')).toEqual(before);
   });
 
+  test('F022-REL ⑫ actor 128자(상한 경계)는 받고 그 값으로 연다', async () => {
+    await putPause('TOSS', Date.now() - 30_000, 4);
+    const actor = 'b'.repeat(128);
+    const v = Date.now();
+    expect((await podA.control.apply(req({ kind: RELEASE, scope: 'PLATFORM', version: v, desiredStateJson: rel('TOSS', actor) }))).appliedVersion).toBe(v);
+    expect(await pauseOf('TOSS')).toMatchObject({ stage: 'OPEN', actor });
+  });
+
   test('F022-REL ⑪ 해제는 전체 범위만 받는다(회차 범위는 INVALID_ARGUMENT)', async () => {
     await putPause('TOSS', Date.now() - 30_000, 4);
-    await expect(podA.control.apply(req({ kind: RELEASE, scope: newId(), version: Date.now(), desiredStateJson: '{"pg":"TOSS"}' }))).rejects.toMatchObject({ code: status.INVALID_ARGUMENT });
+    await expect(podA.control.apply(req({ kind: RELEASE, scope: newId(), version: Date.now(), desiredStateJson: rel('TOSS') }))).rejects.toMatchObject({ code: status.INVALID_ARGUMENT });
     expect((await pauseOf('TOSS'))?.stage).toBe('PROBING');
   });
 });

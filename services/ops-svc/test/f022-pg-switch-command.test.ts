@@ -3,8 +3,8 @@
 // 결정 2(payment 바라는 상태 {"switched", "toPg": TOSS|PORTONE|null}), 결정 4·5(admission 바라는 상태 {"switched", "pgKey", "pgTps"}: 회차는 pgKey = 갈 결제사,
 // pgTps = 내림(승인 상한), 1 미만이면 1. 전체 범위는 toPg가 있으면 그 결제사, 없으면 PG_FALLBACK과 TOSS·PORTONE 상한의 최솟값. 처음 DISPATCHED 전에
 // ResolvePgSwitch를 묻고 실패하면 명령을 보내지 않고 503 pg-check-unavailable), 결정 6(ACKED와 같은 쓰기의 DEGRADED_MODE 설정 사건 하나, occurredAt = 판),
-// 결정 7(되돌리기는 commander·재인증, 새 판의 끄기 뒤 TOSS·PORTONE 해제, 모두 ack해야 REVERTED), 결정 8(해제 명령: {mode, pg}, commander 1인·승인 대기 없음·재인증,
-// CONTROL_KIND_ENTRY_PAUSE_RELEASE 범위 PLATFORM {"pg"}를 payment-svc 모든 파드에, 되돌리기 409 command-not-revertible, SIMULATOR는 local·ci만),
+// 결정 7(되돌리기는 commander·재인증, 새 판의 끄기 뒤 TOSS·PORTONE 해제, 모두 ack해야 REVERTED, 아니면 502 command-dispatch-failed·ACKED 그대로·REVERT_FAILED), 결정 8(해제 명령: {mode, pg}, commander 1인·승인 대기 없음·재인증,
+// CONTROL_KIND_ENTRY_PAUSE_RELEASE 범위 PLATFORM {"pg", "actor": 요청자 관리 계정 ID}를 payment-svc 모든 파드에, 되돌리기 409 command-not-revertible, SIMULATOR는 local·ci만),
 // ADR-0365 결정 4(1초 다시 보내기·처음 보낸 때부터 10초면 FAILED ack-timeout:<서비스>), 계획 6절 B1~B4·B11~B13, 9절, 13절.
 // 짝: 받는 쪽은 ControlTransport 포트 대역(GrpcControlTransport와 같은 꼴), 대상 찾기는 ControlTargets 대역, 회차 결제사·상한 묻기는 PgSwitchResolver 포트 대역
 // (진짜 gRPC 어댑터는 test-int/f022-pg-switch-e2e.int.test.ts가 실제 payment-svc에 돌린다), 재인증은 제품 JwksApprovalVerifier + 시험 키(admin-support.ts).
@@ -300,7 +300,8 @@ describe('F022-REV 결제 갈래 되돌리기 (B12, ADR-0366 결정 7)', () => {
     const applyVersion = sentFor(h, id)[0]!.req.version;
     const mark = h.sent.length;
     h.clock.advance(1_000);
-    const r = await h.post(`/v1/ops/commands/${id}/reversions`, h.withToken(h.identity.ops('commander')), { reason: '결제사 회복' });
+    const reverter = h.identity.ops('commander');
+    const r = await h.post(`/v1/ops/commands/${id}/reversions`, h.withToken(reverter), { reason: '결제사 회복' });
     expect(r.statusCode, r.payload).toBe(200);
     await settle(h, id, commander, 'REVERTED');
     const after = distinct(h.sent.slice(mark));
@@ -324,34 +325,40 @@ describe('F022-REV 결제 갈래 되돌리기 (B12, ADR-0366 결정 7)', () => {
     const firstOff = h.sent.findIndex((s, i) => i >= mark && s.req.kind === 'CONTROL_KIND_PG_SWITCH');
     expect(firstOff).toBeGreaterThanOrEqual(mark);
     expect(firstOff).toBeLessThan(firstRelease);
-    // 바라는 상태 꼴은 정본(ADR-0366 결정 8 {"pg"})대로 본다
-    expect(releases.map((s) => [s.service, s.address, s.req.scope, s.req.desiredStateJson]).sort()).toEqual(
+    // 바라는 상태는 ADR-0366 결정 8 {"pg", "actor"}: actor는 되돌린 사람의 관리 계정 ID다(가명 참조가 아니다)
+    expect(releases.map((s) => [s.address, desired(s)]).sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y)))).toEqual(
       [
-        ['payment-svc', PAYMENT_PODS[0], 'PLATFORM', '{"pg":"PORTONE"}'],
-        ['payment-svc', PAYMENT_PODS[0], 'PLATFORM', '{"pg":"TOSS"}'],
-        ['payment-svc', PAYMENT_PODS[1], 'PLATFORM', '{"pg":"PORTONE"}'],
-        ['payment-svc', PAYMENT_PODS[1], 'PLATFORM', '{"pg":"TOSS"}'],
-      ].sort(),
+        [PAYMENT_PODS[0], { pg: 'PORTONE', actor: reverter['x-user-id'] }],
+        [PAYMENT_PODS[0], { pg: 'TOSS', actor: reverter['x-user-id'] }],
+        [PAYMENT_PODS[1], { pg: 'PORTONE', actor: reverter['x-user-id'] }],
+        [PAYMENT_PODS[1], { pg: 'TOSS', actor: reverter['x-user-id'] }],
+      ].sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))),
     );
   });
 
-  test('F022-REV ③ 해제 하나가 ack되지 않으면 10초까지 같은 판으로 다시 보낸 뒤 FAILED(ack-timeout:payment-svc)이고 REVERTED가 아니다', async () => {
+  test('F022-REV ③ 해제 하나가 10초 안에 ack되지 않으면 502 command-dispatch-failed이고 명령은 ACKED 그대로·REVERT_FAILED 사건이며, 다시 하면 REVERTED다', async () => {
     const h = await harness();
     const { id, commander } = await acked(h, randomUUID());
-    h.answer.set(PAYMENT_PODS[1], (req) => (req.kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE' ? req.version - 1 : req.version));
+    let down = true;
+    h.answer.set(PAYMENT_PODS[1], (req) => (down && req.kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE' ? req.version - 1 : req.version));
     const r = await h.post(`/v1/ops/commands/${id}/reversions`, h.withToken(h.identity.ops('commander')), { reason: '결제사 회복' });
-    // 응답 코드는 정본에 없다(F-02-1 되돌리기 규칙의 502도 받는다). 판정은 끝 상태다
-    expect([200, 502, 503]).toContain(r.statusCode);
-    // 계획 14절 5: ADR-0365 결정 4대로 10초까지 같은 판으로 다시 보낸 뒤 FAILED(ack-timeout:payment-svc)다
-    await settle(h, id, commander, 'FAILED');
-    expect(json(await h.get(`/v1/ops/commands/${id}`, commander)).lastError).toBe('ack-timeout:payment-svc');
+    expect(r.statusCode, r.payload).toBe(502);
+    expect(slug(r)).toBe('command-dispatch-failed');
+    expect(await stateOf(h, id, commander)).toBe('ACKED');
+    expect(h.store.eventsOf(id).map((e) => e.type)).toContain('REVERT_FAILED');
     const resent = h.sent.filter((s) => s.address === PAYMENT_PODS[1] && s.req.kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE');
-    expect(resent.length).toBeGreaterThanOrEqual(2);
+    expect(resent.length, '10초 안에 1초마다 다시 보낸다').toBeGreaterThanOrEqual(2);
+    expect(Math.max(...resent.map((s) => s.at)) - Math.min(...resent.map((s) => s.at))).toBeLessThanOrEqual(ACK_TIMEOUT_MS);
+    // 다시 해도 된다(ADR-0340 결정 5): 받는 쪽이 돌아오면 REVERTED
+    down = false;
+    const again = await h.post(`/v1/ops/commands/${id}/reversions`, h.withToken(h.identity.ops('commander')), { reason: '다시 되돌림' });
+    expect(again.statusCode, again.payload).toBe(200);
+    await settle(h, id, commander, 'REVERTED');
   });
 });
 
 describe('F022-REL 해제만 하는 명령 6 (B13, ADR-0366 결정 8)', () => {
-  test('F022-REL ① commander가 재인증해 {mode: PAYMENT_ENTRY_RELEASE, pg: TOSS}를 내면 승인 대기 없이 payment 두 파드에만 ENTRY_PAUSE_RELEASE {"pg":"TOSS"}(범위 PLATFORM)를 보내 ACKED다', async () => {
+  test('F022-REL ① commander가 재인증해 {mode: PAYMENT_ENTRY_RELEASE, pg: TOSS}를 내면 승인 대기 없이 payment 두 파드에만 ENTRY_PAUSE_RELEASE {"pg":"TOSS","actor":요청자}(범위 PLATFORM)를 보내 ACKED다', async () => {
     const h = await harness();
     const commander = h.identity.ops('commander');
     const r = await h.post('/v1/ops/commands', h.withToken(commander), release({ pg: 'TOSS' }));
@@ -360,10 +367,11 @@ describe('F022-REL 해제만 하는 명령 6 (B13, ADR-0366 결정 8)', () => {
     expect(json(r).state).not.toBe('PENDING_APPROVAL');
     await settle(h, id, commander, 'ACKED');
     const out = distinct(sentFor(h, id));
-    expect(out.map((s) => [s.service, s.address, s.req.kind, s.req.scope, s.req.desiredStateJson]).sort()).toEqual(
+    // 바라는 상태는 ADR-0366 결정 8 {"pg", "actor"}: actor는 요청자 관리 계정 ID
+    expect(out.map((s) => [s.service, s.address, s.req.kind, s.req.scope, desired(s)]).sort()).toEqual(
       [
-        ['payment-svc', PAYMENT_PODS[0], 'CONTROL_KIND_ENTRY_PAUSE_RELEASE', 'PLATFORM', '{"pg":"TOSS"}'],
-        ['payment-svc', PAYMENT_PODS[1], 'CONTROL_KIND_ENTRY_PAUSE_RELEASE', 'PLATFORM', '{"pg":"TOSS"}'],
+        ['payment-svc', PAYMENT_PODS[0], 'CONTROL_KIND_ENTRY_PAUSE_RELEASE', 'PLATFORM', { pg: 'TOSS', actor: commander['x-user-id'] }],
+        ['payment-svc', PAYMENT_PODS[1], 'CONTROL_KIND_ENTRY_PAUSE_RELEASE', 'PLATFORM', { pg: 'TOSS', actor: commander['x-user-id'] }],
       ].sort(),
     );
     expect(h.resolver.calls, '해제는 회차 결제사를 묻지 않는다').toEqual([]);
