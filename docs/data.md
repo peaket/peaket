@@ -1260,7 +1260,8 @@ erDiagram
         bigint commission_amount "중개수수료"
         bigint commission_vat
         bigint offset_amount "미수금 상계(그 판의 receivable_movement OFFSET 합과 같다)"
-        bigint payout_amount
+        bigint adjustment_amount "적용한 수기 조정 합(그 판의 statement_adjustment APPLIED 금액 합과 같다, 0 기본, payment 0027, ADR-0368)"
+        bigint payout_amount "판매 대금 − 환급 − 중개수수료 − 부가세 − 상계 + 조정 합. 0 아래면 확정 때 CARRIED_OVER와 NEGATIVE_STATEMENT 미수금"
         int revision "판본. 회차 취소·연기 환급이나 승인된 수기 판단으로 다시 계산하면 1 올린 새 판을 만든다(기술 검토 중간-043)"
         uuid supersedes_id "이 판이 대신한 옛 판"
         jsonb excluded_payments "대사 불일치로 이번 계산에서 뺀 결제 ID 목록"
@@ -1293,8 +1294,11 @@ erDiagram
         text detail "2,000자"
         uuid submitted_by
         timestamptz submitted_at
-        text result "ADJUSTED|DISMISSED"
+        text result "ADJUSTED|DISMISSED(ADJUSTED는 이 이의에 붙은 조정을 적용할 때만)"
         timestamptz resolved_at
+        uuid resolved_by "기각한 cs_lead, 조정을 승인한 commander(payment 0027)"
+        text resolution_note "기각 사유 2,000자(payment 0027)"
+        timestamptz case_requested_at "CS 처리함 정산 이의 건을 연 시각. 비면 정산 일꾼이 다시 보낸다(payment 0027, ADR-0368)"
     }
     statement_adjustment {
         uuid id PK
@@ -1304,6 +1308,9 @@ erDiagram
         uuid dispute_id "이의 인정이면"
         bigint amount "+ 지급 늘림 / − 줄임"
         text evidence_note "2,000자"
+        text status "PENDING|APPLIED|VOID. 한 정산서에 PENDING은 하나(부분 유일, payment 0027, ADR-0368)"
+        uuid requested_by "요청한 cs_lead"
+        timestamptz requested_at
         timestamptz applied_at
     }
     payout_batch {

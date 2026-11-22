@@ -832,6 +832,7 @@ stateDiagram-v2
     Disputed --> Calculated: T15 다시 계산
     Confirmed --> Calculated: T16 다시 계산
     Held --> Calculated: T17 다시 계산
+    Confirmed --> Notified: T18 이의 없는 수기 조정 뒤 재알림
     Paid --> [*]
     CarriedOver --> [*]
 ```
@@ -841,11 +842,11 @@ stateDiagram-v2
 | 번호 | 출발 | 도착 | 전이와 조건 |
 | --- | --- | --- | --- |
 | T1 | (시작) | Calculated | 회차 정산서는 회차 종료 다음 영업일, 상품 정산서는 매주 첫 영업일(대사 완료 원장) |
-| T2 | Calculated | Notified | 파트너 알림(이의 기간 2영업일) |
+| T2 | Calculated | Notified | 파트너 알림(이의 기간 2영업일). T1과 한 트랜잭션이고, 계산 때는 KYC·계좌로 보류하지 않는다(보류는 T7, 추천 적용 2026-11-23, ADR-0368) |
 | T3 | Notified | Disputed | 파트너 이의 |
-| T4 | Disputed | Notified | 수기 조정 승인 또는 기각 뒤 다시 알림 |
+| T4 | Disputed | Notified | 수기 조정 승인 뒤 적용 또는 기각 뒤 다시 알림(이의 기간 1영업일) |
 | T5 | Notified | Confirmed | 이의 기간 끝 |
-| T6 | Confirmed | CarriedOver | 지급액 0 이하(미수금으로) |
+| T6 | Confirmed | CarriedOver | 지급액 0 이하(미수금으로). 확정(T5·T8)하는 트랜잭션에서 지급액이 0 이하면 바로 이어서 한다(추천 적용 2026-11-23, ADR-0368) |
 | T7 | Confirmed | Held | KYC 필요, 계좌 변경 뒤 3영업일, 잔액 부족, 포트원 계좌 불일치(ADR-0108), 판매 중지(ADR-0123) |
 | T8 | Held | Confirmed | 보류 사유 해소 |
 | T9 | Confirmed | Scheduled | 지급 묶음 2인 승인 뒤 결제사 요청 |
@@ -857,9 +858,11 @@ stateDiagram-v2
 | T15 | Disputed | Calculated | 같은 사유로 다시 계산(이의는 새 판에 다시 낸다) |
 | T16 | Confirmed | Calculated | 같은 사유로 다시 계산 |
 | T17 | Held | Calculated | 같은 사유로 다시 계산 |
+| T18 | Confirmed | Notified | 이의 없는 수기 조정(승인 업무)을 적용한 뒤 바뀐 금액을 다시 알림(이의 기간 1영업일, 추천 적용 2026-11-23, ADR-0368) |
 
 - 다시 계산하면 판본을 1 올린 새 판이 Calculated로 시작하고, 옛 판은 금액을 고치지 않은 채 Superseded로 끝난다. 그래서 위 '→ Calculated'는 옛 판이 Superseded가 되고 새 판이 생긴다는 뜻이다. 지급 건이 진행 중이거나 끝난 정산서는 다시 계산하지 않고, 그 뒤의 환불은 미수금으로 잡는다(docs/features/settlement.md §4.1·§4.4·§12, 추천 적용 2026-10-28, 기술 검토 중간-043).
 - 대사가 끝나지 않은 결제는 그 결제만 빼고 계산하고, 풀리면 지급 전이면 조정 행, 지급 뒤면 다음 정산서의 조정이나 미수금으로 넣는다.
+- 모든 전이는 출발 상태가 표와 같을 때만 저장하고(조건부 갱신), 상태·감사·`trade.settlements` 사건을 한 트랜잭션에 쓴다. 겹친 두 전이(예: 이의와 자동 확정)는 먼저 쓴 쪽만 남는다(docs/features/settlement.md §4.2, 추천 적용 2026-11-23, ADR-0368).
 
 ### 2.13 굿즈·부가 상품 주문(MerchOrder, MerchOrderItem) [보완]
 
