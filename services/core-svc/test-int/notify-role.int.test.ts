@@ -4,13 +4,17 @@
 // 발송기 메서드(notify/adapters/db/drizzle-webhook-store.ts), 서명 규격(docs/features/notify.md §9).
 // core_app이 이 묶음 뒤에도 두 표를 쓸 수 있는 것은 알려진 위험(두 번 나눔, ADR-0350 결정 5)이라 시험하지 않는다.
 import 'reflect-metadata';
-import { createDatabase, type Database, type Clock } from '@peaket/platform';
+import { createDatabase, createService, type Database, type Clock } from '@peaket/platform';
 import { eq, sql } from 'drizzle-orm';
 import { createHmac, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { AppModule } from '../src/app.module.js';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { webhookDelivery, webhookEndpoint } from '../src/modules/notify/adapters/db/schema.js';
 import { DrizzleWebhookStore, WebhookDispatcher, type WebhookTransport } from '../src/modules/notify/index.js';
+import { NOTIFY_APP_STORE } from '../src/modules/notify/notify.module.js';
+import type { WebhookStore } from '../src/modules/notify/domain/ports.js';
+import { FakeIdentity, quiet, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { loginFor } from './roles.js';
 
@@ -188,25 +192,52 @@ describe('웹훅 발송기 전용 DB 역할 core_notify(ADR-0350)', () => {
 
   test('AZ-T19 ③ core_notify는 webhook_endpoint의 비밀·주소·구독·판매자·끝점 ID를 고치지 못하고 켜진 끝점을 FAILING으로 끄는 세 칸만 고친다 [ASVS v5.0.0-8.4.1] [ASVS v5.0.0-8.2.3]', async () => {
     const onA1 = eq(webhookEndpoint.id, A1);
+    /** 칸 권한만 본다: 허용된 끄기(status·disabled_reason)를 함께 SET해 정책을 통과시키고, 고치기가 되면 트랜잭션을 되돌린다(칸 권한이 없으면 42501) */
+    const attempt = async (values: Partial<typeof webhookEndpoint.$inferInsert>): Promise<string> => {
+      try {
+        await notify.db.transaction(async (tx) => {
+          await tx.update(webhookEndpoint).set({ ...values, status: 'DISABLED', disabledReason: 'FAILING' }).where(onA1);
+          tx.rollback();
+        });
+        return 'COMMITTED';
+      } catch (e) {
+        return sqlState(e);
+      }
+    };
+    /** 끝점 ID는 Drizzle에서 SQL 식만 받으므로 따로 둔다 */
+    const attemptId = async (): Promise<string> => {
+      try {
+        await notify.db.transaction(async (tx) => {
+          await tx.update(webhookEndpoint).set({ id: sql`${webhookEndpoint.id}`, status: 'DISABLED', disabledReason: 'FAILING' }).where(onA1);
+          tx.rollback();
+        });
+        return 'COMMITTED';
+      } catch (e) {
+        return sqlState(e);
+      }
+    };
     const denied = {
-      secret: await run(notify.db.update(webhookEndpoint).set({ secret: 'whsec_attacker' }).where(onA1)),
-      url: await run(notify.db.update(webhookEndpoint).set({ url: 'https://attacker.example/hook' }).where(onA1)),
-      previousSecret: await run(notify.db.update(webhookEndpoint).set({ previousSecret: 'whsec_attacker_old' }).where(onA1)),
-      previousSecretValidUntil: await run(notify.db.update(webhookEndpoint).set({ previousSecretValidUntil: new Date('2027-06-01T00:00:00.000Z') }).where(onA1)),
-      eventTypes: await run(notify.db.update(webhookEndpoint).set({ eventTypes: ['payout.completed'] }).where(onA1)),
-      secretIssuedAt: await run(notify.db.update(webhookEndpoint).set({ secretIssuedAt: new Date('2026-11-19T00:00:00.000Z') }).where(onA1)),
-      promoterId: await run(notify.db.update(webhookEndpoint).set({ promoterId: B }).where(onA1)),
-      id: await run(notify.db.update(webhookEndpoint).set({ id: sql`${webhookEndpoint.id}` }).where(onA1)),
+      secret: await attempt({ secret: 'whsec_attacker' }),
+      url: await attempt({ url: 'https://attacker.example/hook' }),
+      previousSecret: await attempt({ previousSecret: 'whsec_attacker_old' }),
+      previousSecretValidUntil: await attempt({ previousSecretValidUntil: new Date('2027-06-01T00:00:00.000Z') }),
+      eventTypes: await attempt({ eventTypes: ['payout.completed'] }),
+      secretIssuedAt: await attempt({ secretIssuedAt: new Date('2026-11-19T00:00:00.000Z') }),
+      promoterId: await attempt({ promoterId: B }),
+      id: await attemptId(),
     };
     const allowed = await run(notify.db.update(webhookEndpoint).set({ status: 'DISABLED', disabledReason: 'FAILING', version: sql`${webhookEndpoint.version} + 1` }).where(onA1));
     const reEnable = await run(notify.db.update(webhookEndpoint).set({ status: 'ACTIVE', disabledReason: null }).where(eq(webhookEndpoint.id, A2)));
     const wrongReason = await run(notify.db.update(webhookEndpoint).set({ disabledReason: 'PARTNER' }).where(onA1));
+    // 켜진 B1을 사유 PARTNER로 끄는 것은 USING은 지나지만 WITH CHECK(사유 FAILING)에 걸려 42501이다
+    const partnerOff = await run(notify.db.update(webhookEndpoint).set({ status: 'DISABLED', disabledReason: 'PARTNER' }).where(eq(webhookEndpoint.id, B1)));
 
-    expect({ denied, allowed, reEnable, wrongReason, endpoints: await endpointsNow() }).toEqual({
+    expect({ denied, allowed, reEnable, wrongReason, partnerOff, endpoints: await endpointsNow() }).toEqual({
       denied: { secret: '42501', url: '42501', previousSecret: '42501', previousSecretValidUntil: '42501', eventTypes: '42501', secretIssuedAt: '42501', promoterId: '42501', id: '42501' },
       allowed: 1,
       reEnable: 0,
       wrongReason: 0,
+      partnerOff: '42501',
       endpoints: { ...SEED_ENDPOINTS, [A1]: { ...SEED_ENDPOINTS[A1]!, status: 'DISABLED', disabledReason: 'FAILING', version: 2 } },
     });
   });
@@ -378,5 +409,24 @@ describe('웹훅 발송기 전용 DB 역할 core_notify(ADR-0350)', () => {
       ],
       saved: { status: 'SUCCEEDED', attemptCount: 1, lastHttpStatus: 200, finishedAt: new Date(NOW) },
     });
+  });
+
+  test('AZ-T19 ⑧ 내부 입구의 NOTIFY_APP_STORE도 notifyDatabase 저장소를 쓴다(팬 경로 풀로 되돌아가지 않는다) [ASVS v5.0.0-8.4.1]', async () => {
+    // 닿지 않는 notifyDatabase를 주고, 팬 경로 database(admin)로 몰래 되돌아가면 이 읽기가 성공해 버린다
+    const broken = createDatabase({ url: 'postgres://127.0.0.1:1/peaket', applicationName: 'notify-wiring-broken', max: 1, connectionTimeoutMillis: 200 });
+    const svc = await createService({
+      name: 'core-svc',
+      module: AppModule.register({ database: admin, notifyDatabase: broken, partnerDatabase: admin, media: testMedia() }),
+      env: { PEAKET_ENV: 'ci' },
+      logDestination: quiet(),
+      adminAuthz: new FakeIdentity(),
+    });
+    try {
+      const store = svc.app.get<WebhookStore>(NOTIFY_APP_STORE);
+      await expect(store.listActiveEndpoints(B)).rejects.toThrow();
+    } finally {
+      await svc.close();
+      await broken.close();
+    }
   });
 });

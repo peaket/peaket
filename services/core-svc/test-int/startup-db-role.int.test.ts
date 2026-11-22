@@ -120,7 +120,9 @@ describe('운영 시작 파일의 DB 연결 시작 확인(ADR-0241 결정 7)', (
         PEAKET_PUBLIC_FILE_DIR: join(dir, 'public-files'),
       };
       // (가) 변수 없음, (나) 팬 경로 로그인, (다) 슈퍼유저. 셋 다 시작 확인에서 멈춰야 한다
-      const missing = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: '' });
+      const withoutNotify = { ...ok };
+      delete withoutNotify.PEAKET_NOTIFY_DATABASE_URL;
+      const missing = await bootUntilExit(withoutNotify);
       const wrongRole = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: pg.urlFor('core_app_login', 'peaket-test') });
       const superuser = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: pg.url });
       // (라) 발송기 로그인이 같은 이름의 표를 소유하면(행 보안을 건너뛴다) 시작 확인이 멈춰야 한다(RV-01).
