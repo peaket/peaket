@@ -80,7 +80,7 @@ async function receiver(o?: Parameters<App['startFakeReceiver']>[0]) {
 }
 
 /** 로그인한 팬의 요청: 이메일·전화번호 본문, 쿼리 문자열, 쿠키, 머리, 클라이언트 IP(직접·전달)를 싣는다 */
-function fanRequest(r: Running, method: string, path: string, payload?: string) {
+function fanRequest(r: Running, method: string, path: string, payload?: string, extraHeaders: Record<string, string> = {}) {
   return r.svc.http.inject({
     method,
     url: `${path}?q=${SECRETS.query}`,
@@ -90,6 +90,7 @@ function fanRequest(r: Running, method: string, path: string, payload?: string) 
       cookie: `sid=${SECRETS.cookie}; theme=dark`,
       'x-fan-note': SECRETS.header,
       'x-forwarded-for': SECRETS.forwardedIp,
+      ...extraHeaders,
     },
     payload: payload ?? JSON.stringify({ email: SECRETS.email, phone: SECRETS.phone, note: SECRETS.note }),
   });
@@ -182,6 +183,42 @@ describe('V-T39 ① 서버 오류 수집 잠금', () => {
     await recv.waitFor(1);
     await on.svc.errorReporting.flush(5_000);
     expect(recv.envelopes).toHaveLength(1);
+    expect(recv.rejected).toEqual([]);
+    expect(recv.events().map((e) => (e.tags as Record<string, unknown>).traceId)).toEqual([traceIdOf(crash)]);
+  });
+
+  test('V-T39 ① [ASVS v5.0.0-14.2.3] local·ci 밖에서는 http:// DSN이면 끄고 경고 한 줄을 남기며, https://면 켠다(RV012-1)', async () => {
+    // 정본 docs/api/guidelines.md §8 바깥 호출 표의 오류 수집 행은 HTTPS다. 평문 받는 곳은 로컬 가짜 수신기(local·ci)에만 허락한다
+    const recv = await receiver();
+    const httpsDsn = recv.dsn.replace(/^http:/, 'https:');
+    const INTERNAL = 'internal-token-for-error-reporting-test';
+    const deployed = (env: string) => ({ ...BASE, PEAKET_ENV: env, PEAKET_INTERNAL_TOKEN: INTERNAL, PEAKET_LOG_PSEUDONYM_KEY: Buffer.alloc(32, 3).toString('base64') });
+    for (const env of ['prod', 'staging', 'demo']) {
+      const off = await start({ ...deployed(env), PEAKET_SENTRY_DSN: recv.dsn });
+      expect(off.svc.errorReporting.enabled, env).toBe(false);
+      // 시작 로그는 오류 수집 줄 하나이고 경고(꼴 틀림)다. DSN(공개 키)은 남기지 않는다
+      const lines = off.lines.filter((l) => l.kind === 'error-reporting');
+      expect(lines, env).toHaveLength(1);
+      expect(lines[0], env).toMatchObject({ level: 'warn', enabled: false, reason: 'invalid-dsn' });
+      expect(off.raw.join(''), env).not.toContain(recv.key);
+      expect((await fanRequest(off, 'POST', '/v1/err/crash', undefined, { 'x-peaket-internal-token': INTERNAL })).statusCode, env).toBe(500);
+      await off.svc.errorReporting.flush(1_000);
+      await close(off);
+      // https:// DSN이면 같은 환경에서 켠다
+      const on = await start({ ...deployed(env), PEAKET_SENTRY_DSN: httpsDsn });
+      expect(on.svc.errorReporting.enabled, env).toBe(true);
+      expect(on.lines.filter((l) => l.kind === 'error-reporting'), env).toMatchObject([{ level: 'info', enabled: true }]);
+      await close(on);
+    }
+    // local·ci에서는 http:// 가짜 수신기도 받는다. 그 사건이 온 뒤 세면 운영 환경 서비스의 사건은 0건이다
+    const local = await start({ ...BASE, PEAKET_ENV: 'local', PEAKET_SENTRY_DSN: recv.dsn });
+    expect(local.svc.errorReporting.enabled).toBe(true);
+    await close(local);
+    const ci = await start({ ...BASE, PEAKET_SENTRY_DSN: recv.dsn });
+    expect(ci.svc.errorReporting.enabled).toBe(true);
+    const crash = await fanRequest(ci, 'POST', '/v1/err/crash');
+    await recv.waitFor(1);
+    await ci.svc.errorReporting.flush(5_000);
     expect(recv.rejected).toEqual([]);
     expect(recv.events().map((e) => (e.tags as Record<string, unknown>).traceId)).toEqual([traceIdOf(crash)]);
   });

@@ -496,3 +496,25 @@ test('GV-07 BAT-085 deploy/와 gitops 검사 도구는 gitops를, Kyverno 정책
   // 일반 deploy 변경은 gitops를 켠다(기존 deploy·tools도 그대로)
   assert.deepEqual(scopes({ 'deploy/workloads/queue-svc/values.yaml': 'x\n' }), ['docs', 'deploy', 'gitops', 'tools']);
 });
+
+// tools-check를 부르는 범위: ci.yml의 tools-check 잡 if 줄에서 읽는다(워크플로를 바꾸면 시험이 따라간다)
+function toolsCheckScopes() {
+  const wf = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+  const job = /^ {2}tools-check:\r?\n(?: {4}.*\r?\n)*/m.exec(wf)?.[0] ?? '';
+  const cond = /^ {4}if: (.*)$/m.exec(job)?.[1] ?? '';
+  return [...cond.matchAll(/needs\.changes\.outputs\.([a-z_]+) == 'true'/g)].map((m) => m[1]);
+}
+
+test('V-T47 ① 대시보드 생성기의 원천(§3.1 서비스 맵·CODEOWNERS·가상 팀·관측·최소 판 정본·잠금 파일)만 바꿔도 tools-check가 돈다(RV012-2)', () => {
+  const triggers = toolsCheckScopes();
+  assert.deepEqual([...triggers].sort(), ['ci', 'infra', 'js', 'tools']);
+  // 대시보드 대조(dashboards.mjs --check)는 docs/architecture.md §3.1 표를 읽는다: 그 파일 하나만 바꾼 변경에서도 tools 범위를 고른다
+  const arch = scopes({ 'docs/architecture.md': '### 3.1 서비스 맵\n\n| 서비스명 | 책임 |\n| --- | --- |\n| notify-svc | 알림 |\n' });
+  assert.ok(arch.includes('docs'), arch.join(','));
+  assert.ok(arch.includes('tools'), `docs/architecture.md만 바꾸면 tools 범위가 있어야 한다: ${arch.join(',')}`);
+  // 다른 원천은 이미 tools-check를 부르는 범위 하나 이상에 든다
+  for (const file of ['.github/CODEOWNERS', 'infra/stacks/global/github/teams.json', 'docs/observability.md', 'docs/devops.md', 'pnpm-lock.yaml']) {
+    const got = scopes({ [file]: '바꿈\n' });
+    assert.ok(got.some((s) => triggers.includes(s)), `${file}: ${got.join(',')}`);
+  }
+});
