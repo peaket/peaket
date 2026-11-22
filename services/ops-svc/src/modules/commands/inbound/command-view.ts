@@ -55,8 +55,13 @@ export const CommandView = z.object({
   canApprove: z.boolean(),
   /** 명령 3·11 사후 검토 보고서 작성 기한(ADR-0349 결정 7, openapi CommandState.postReviewDueAt) */
   postReviewDueAt: z.string().nullable().optional(),
+  /** 전파 상태(openapi CommandState.delivery, 상세에만, F-02-1 ADR-0365 결정 4) */
+  delivery: z
+    .object({ kind: z.enum(['ACK', 'APPLY_CHECK']), ackedCount: z.number(), targetCount: z.number(), unackedTargets: z.array(z.string()), applyStatus: z.string().nullable().optional() })
+    .nullable()
+    .optional(),
 });
-export const CommandBaseView = CommandView.omit({ params: true, dryRun: true });
+export const CommandBaseView = CommandView.omit({ params: true, dryRun: true, delivery: true });
 export const CommandPageView = z.object({ items: z.array(CommandBaseView), nextCursor: z.string().nullable() });
 
 /** 부른 계정이 지금 승인·거부할 수 있는가(요청자·이미 결정한 사람 제외, 서버 판정) */
@@ -92,4 +97,5 @@ export const viewOf = (c: Command, me?: Principal): z.output<typeof CommandView>
   ...baseViewOf(c, me),
   params: c.params,
   ...(c.dryRun !== undefined ? { dryRun: c.dryRun as z.output<typeof CommandDryRunView> } : {}),
+  ...(c.delivery !== undefined ? { delivery: { kind: c.delivery.kind, ackedCount: c.delivery.ackedCount, targetCount: c.delivery.targetCount, unackedTargets: [...c.delivery.unackedTargets] } } : {}),
 });

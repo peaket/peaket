@@ -198,3 +198,24 @@ export {
 export { DrizzleWafBlockExpiryView } from './adapters/db/drizzle-waf-block-expiry.js';
 export { PostReviewBody, PostReviewConfirmationBody, PostReviewController, PostReviewView as PostReviewResponseView } from './inbound/post-review.controller.js';
 export { COMMAND_OPS_EVENTS } from './tokens.js';
+// 제어 gRPC 판 원장·퍼뜨리기·ack(F-02-1 OPS-300, ADR-0365 결정 1~4. F-02-2가 명령 6·런북 길에 쓴다)
+export { CONTROL_ACK_TIMEOUT_MS, CONTROL_RETRY_MS, ControlAwareExecutor, ControlDispatcher, ControlFanout, type ControlDispatcherDeps, type ControlFanoutDeps, type ControlLog } from './application/dispatch-control.js';
+export {
+  ADMISSION_TARGET_HOLD_MS,
+  CONTROL_SCOPE_PLATFORM,
+  CONTROL_SERVICES,
+  DISPATCHED_CONTROL_TYPES,
+  controlDeliveriesOf,
+  controlKindOf,
+  controlScopesOf,
+  isDispatchedControl,
+  type ControlDelivery,
+  type ControlDeliveryTimes,
+  type ControlKindName,
+  type ControlPhase,
+  type ControlService,
+} from './domain/control-kinds.js';
+export type { CommandDeliveryView } from './domain/command.js';
+export type { ControlDeliverer, ControlDeliverResult, ControlDeliveries, ControlDeliveryRow, ControlTargets, ControlTransport } from './domain/ports.js';
+export { MemoryControlDeliveries, deliveryViewOf, type DeliveryViewRow } from './adapters/memory-control-deliveries.js';
+export { DrizzleControlDeliveries } from './adapters/db/drizzle-control-deliveries.js';

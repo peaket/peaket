@@ -20,6 +20,7 @@ import {
   type CommandState,
   type NewCommand,
 } from './command.js';
+import { controlKindOf, controlScopesOf } from './control-kinds.js';
 import type { CommandDecision, CommandWriter, NewCommandEvent } from './ports.js';
 import { isPostReviewType, POST_REVIEW_DUE_MS } from './post-review.js';
 
@@ -173,9 +174,28 @@ export async function writeDecision(w: CommandWriter, q: { accountId: string; ro
   return { status: 'APPLIED', command: w.current, revert: { actorRef: ref, actorRole: q.role } };
 }
 
-/** 실행 시작(T8·T11). 감사 기록을 DISPATCHED 사건보다 먼저 쓴다. 처음 DISPATCHED이고 예측이 있으면 비교 때를 적는다 */
+/**
+ * 제어 gRPC 명령의 판(ADR-0365 결정 1·4): 처음 DISPATCHED면 원장이 새 판을 매기고, 다시 하기(FAILED → DISPATCHED)는 같은 판이다.
+ * 보내기 시작한 시각(ack 시한의 기준)은 DISPATCHED마다 지금이다. 원장이 없는 저장소·범위를 읽지 못한 명령은 판을 적지 않는다(보내는 쪽이 FAILED로 남긴다)
+ */
+async function controlPatchOf(w: CommandWriter, c: Command, nowMs: number): Promise<{ controlVersion?: number; controlSentAtMs?: number }> {
+  const kind = controlKindOf(c.type);
+  if (!kind || !w.assignControlVersion) return {};
+  if (c.controlVersion !== undefined) return { controlSentAtMs: nowMs };
+  let scopes: string[];
+  try {
+    scopes = controlScopesOf(c);
+  } catch {
+    return {};
+  }
+  if (scopes.length === 0) return {};
+  return { controlVersion: await w.assignControlVersion({ scopes, kind, nowMs }), controlSentAtMs: nowMs };
+}
+
+/** 실행 시작(T8·T11). 감사 기록을 DISPATCHED 사건보다 먼저 쓴다. 처음 DISPATCHED이고 예측이 있으면 비교 때를 적는다. 제어 명령은 판을 매긴다 */
 export async function writeDispatched(w: CommandWriter, q: { nowMs: number; actor?: { accountId: string; role: string; ref?: string } }): Promise<Command> {
   const c = w.current;
+  const control = await controlPatchOf(w, c, q.nowMs);
   const to = nextCommandState(c.state, 'DISPATCHED', c.type);
   const attempts = c.attempts + 1;
   let actorRef = SYSTEM_ACTOR_REF;
@@ -187,7 +207,7 @@ export async function writeDispatched(w: CommandWriter, q: { nowMs: number; acto
   const firstCompare = attempts === 1 && c.compareDueAtMs === undefined && hasPrediction(c.dryRun);
   await w.audit('COMMAND_EXECUTION_STARTED', { state: 'DISPATCHED', attempt: attempts, actorRef, actorRole }, q.nowMs);
   await w.event({ type: 'DISPATCHED', actorRef, actorRole, reason: c.reason, nowMs: q.nowMs });
-  await w.patch({ state: to, attempts, lastError: null, executedAtMs: null, ...(firstCompare ? { compareDueAtMs: q.nowMs + DRY_RUN_COMPARE_DELAY_MS } : {}), nowMs: q.nowMs });
+  await w.patch({ state: to, attempts, lastError: null, executedAtMs: null, ...(firstCompare ? { compareDueAtMs: q.nowMs + DRY_RUN_COMPARE_DELAY_MS } : {}), ...control, nowMs: q.nowMs });
   // 승인 없이 실행한 명령 3·11은 처음 DISPATCHED와 같은 트랜잭션에서 사후 검토 할 일을 연다(작성 기한 + 48시간, ADR-0349 결정 7)
   if (attempts === 1 && isPostReviewType(c.type)) await openPostReviewIn(w, q.nowMs);
   return w.current;

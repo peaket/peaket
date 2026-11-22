@@ -3,13 +3,16 @@
 // 대상이 없으면 target-not-wired로 실패해 재시도할 수 있게 한다. 감사 기록은 DISPATCHED 사건과 함께 보내기 전에 커밋된다.
 // 명령 12(PG_ASSIGN)는 실행기를 부르지 않는다: 실행 직전에 온세일 윈도우·하위 결제사 판정을 다시 보고(걸리면 FAILED, 사유는 그 Problem 이름),
 // 통과하면 ACKED 상태 쓰기와 같은 트랜잭션에 control.settings 사건(키 '<회차>:PG_ASSIGNMENT:', 값 PgAssignmentValue) 하나를 Outbox로 쓴다(ADR-0349 결정 5).
-// 설정형 명령의 적용 확인 표시는 OPS-300이다.
+// 설정형 명령의 적용 확인 표시는 OPS-300(F-02-5)이다.
+// 제어 gRPC 카탈로그 명령 1·2·3·7·11(F-02-1, ADR-0365 결정 4)은 DISPATCHED(판 번호를 같은 트랜잭션에 매김)를 커밋한 뒤 배경 작업(ControlDispatcher)에 넘기고
+// DISPATCHED로 돌아온다. 끝 상태(ACKED·FAILED)는 배경 작업이 쓴다. 배경 작업이 없으면 전처럼 실행기를 부른다.
 import { randomUUID } from 'node:crypto';
 import { ProblemError } from '@peaket/platform';
 import type { AuditCheckpointService } from '../../audit/index.js';
 import { SYSTEM_ACTOR_REF, type Command, type CommandExecutionActor } from '../domain/command.js';
 import { CommandInputRejected, pgAssignParamsOf, type PgAssignParams } from '../domain/command-params.js';
 import { writeSucceeded } from '../domain/command-writes.js';
+import { controlScopesOf, isDispatchedControl } from '../domain/control-kinds.js';
 import type { CancelledEventGuard, CommandExecutor, CommandStore, SettingChange } from '../domain/ports.js';
 import { PgAssignmentGate } from './pg-assignment-gate.js';
 
@@ -17,6 +20,8 @@ import { PgAssignmentGate } from './pg-assignment-gate.js';
 export interface ExecuteCommandOptions {
   /** 명령 12 온세일 윈도우·하위 결제사 판정(CreateCommand와 같은 객체) */
   readonly pgGate?: PgAssignmentGate;
+  /** 제어 gRPC 명령의 배경 보내기(F-02-1, ADR-0365 결정 4). 없으면 실행기가 보낸다 */
+  readonly control?: { dispatch(command: Command): void };
 }
 
 /** 명령 12의 설정 사건 종류(asyncapi SettingChanged.key) */
@@ -35,8 +40,17 @@ export function pgAssignmentSettingOf(command: Command, params: PgAssignParams, 
   };
 }
 
+const scopesReadable = (c: Command): boolean => {
+  try {
+    return controlScopesOf(c).length > 0;
+  } catch {
+    return false;
+  }
+};
+
 export class ExecuteCommand {
   readonly #pgGate: PgAssignmentGate;
+  readonly #control: { dispatch(command: Command): void } | undefined;
 
   constructor(
     private readonly store: CommandStore,
@@ -47,6 +61,7 @@ export class ExecuteCommand {
     options: ExecuteCommandOptions = {},
   ) {
     this.#pgGate = options.pgGate ?? new PgAssignmentGate();
+    this.#control = options.control;
   }
 
   /**
@@ -102,6 +117,14 @@ export class ExecuteCommand {
     if (command.type === 'SALE_RESUME' && this.guard && eventId !== undefined && (await this.guard.isCancelled(eventId))) {
       // 실행기를 부르지 않고 FAILED로 남긴다(다시 시도해도 같은 확인을 지난다)
       finished = await this.store.markDispatchFailed(command.commandId, 'event-cancelled', nowMs);
+    } else if (this.#control && isDispatchedControl(command.type)) {
+      // 판이 매겨졌으면 배경 작업이 보낸다(응답은 DISPATCHED). 범위를 읽지 못했거나 원장이 없는 저장소면 보내지 못한 것이다
+      if (dispatched.controlVersion !== undefined) {
+        this.#control.dispatch(dispatched);
+        finished = dispatched;
+      } else {
+        finished = await this.store.markDispatchFailed(command.commandId, scopesReadable(dispatched) ? 'control-ledger-not-wired' : 'invalid-command', nowMs);
+      }
     } else if (command.type === 'PG_ASSIGN') {
       try {
         finished = await this.#pgAssign(dispatched, nowMs);
