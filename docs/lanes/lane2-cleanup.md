@@ -200,3 +200,10 @@
 - W12-core-idem R-752 RV6 해결: `idempotency-rls` ⑧이 다섯 역할(`core_partner`·`core_app`·`core_ops`·`core_maintenance`·`core_search`)의 TRUNCATE·REFERENCES(표·칸)·TRIGGER 없음을 본다(검증 V8)
 - W12-core-idem R-752 RV5 시험 해결: `idempotency-migration` RV5가 빈 글 `eventId` 기록과 변경분 원소를 더해 0041의 '빈 글이 아닐 때만' 조건을 묶는다(검증 V5)
 - W12-core-idem R-752 남은 것: RV4 openapi 주문 만들기·부가 상품 404 설명(정본 고침+`gen`), RV7 결제창 결제 식별 칸·통화 대조(또는 '남는 한계'에 적기), OPEN-A 같은 역할 안 계정 묶기, OPEN-B 결제창 값을 저장하지 않는 재생, 정비 연결 역할(BAS-060), ⑧ 소유자를 이름 여섯만 보는 한계(W12-core-rls RV-02와 같은 자리). 이 PC에서 core-svc 단위 전체를 돌리면 CPU 부하 때 5초 시한 초과가 둘(`internal-notify`·`tenant-rate-limit-wiring`) 나고 따로 돌리면 4/4 통과한다(통합의 PRF-168 흔들림과 같은 쪽, 검증 2의 셋째 실행은 779/779 통과). V8·V5 표본 재검사는 Docker 잠금이 갈래 4에 잡혀 검증 2에서 못 했다
+- BAT-177-r2 R-775 RV-03 낮음: `limits.test.mjs` T6 ③·T9 ③이 spec 원문 글 대조라 깨지기 쉽다. 판정 고리를 순수 함수로 빼 시험하는 쪽으로 바꾼다
+- BAT-177-r2 R-775 RV-04 낮음: `report.mjs` `lighthouseTable`이 값이 수가 아니면(NaN) '한도 안'으로 적는다
+- BAT-177-r2 R-775 RV-05 낮음: ADR-0359의 [가정] 크기를 잰 값 49,720B로, '(gzip)'을 gzip·deflate로 고친다
+- BAT-177-r2 R-775 RV-06 낮음: 구현 I2 커밋 eb0dd4ab6이 기록 몫인 이 파일의 BAT-176 일곱 줄을 '닫음'으로 고쳤다(내용은 맞아 그대로 둔다, 다음부터 기록 커밋에서)
+- BAT-177-r2 R-775 RV-07 낮음: CDN 캐시 열쇠에 `Accept-Encoding`(압축 방식)을 넣는 일을 배포 단계(HOT-450·CDN 설정)에 넘긴다
+- BAT-177-r2 R-775 RV-08 낮음(전부터): 자산 확장자로 끝나는 없는 주소는 CSP 없는 HTML 404다
+- BAT-177-r2 R-775 검증 남은 것: T8은 chromium만 로컬로 돌렸고(webkit·firefox는 CI), Next.js 쪽 회귀(`compress: false`)는 주입하지 않았다. 내장 브라우저에서 월렛 서비스 워커 등록을 보지 못했다
