@@ -102,6 +102,94 @@ describe('BAT-465 판매 중지·재개 집행', () => {
   });
 });
 
+// BAT-620 LCH-090: 판매 중지·재개가 core-svc 공연 판매 승인 상태(검색·홈)까지 잇는지 본다.
+// 정본: docs/features/transfer-refund.md §2.1, ADR-0123 결정 3(중지는 판매를 먼저 막고 공개를 내리며, 재개는 공개를 먼저 올리고 판매를 연다).
+describe('BAT-620 판매 중지·재개 core 연결', () => {
+  interface Sent {
+    provider: string;
+    method: string;
+    path: string;
+    params?: ExternalRequest['params'];
+    body: Record<string, unknown>;
+  }
+  type CoreCore = { scopeEventIds?: string[]; resumeEventIds?: string[]; scopeStatus?: number; resultStatus?: number };
+
+  const harness = (o: CoreCore = {}) => {
+    const order: string[] = [];
+    const sent: Sent[] = [];
+    const core = {
+      request: async (r: ExternalRequest) => {
+        const raw = typeof r.body === 'string' ? r.body : '{}';
+        sent.push({ provider: 'core-svc', method: r.method ?? 'GET', path: r.path, ...(r.params !== undefined ? { params: r.params } : {}), body: JSON.parse(raw) as Record<string, unknown> });
+        const scope = r.path.endsWith('/sale-review-scope');
+        order.push(scope ? 'core-scope' : 'core-result');
+        const status = (scope ? o.scopeStatus : o.resultStatus) ?? 200;
+        const body = scope
+          ? { productionId: 'prod-620', saleReview: 'APPROVED', eventIds: o.scopeEventIds ?? [] }
+          : { status: 'APPLIED', productionId: 'prod-620', eventIds: o.scopeEventIds ?? [], resumeEventIds: o.resumeEventIds ?? [] };
+        return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      },
+    };
+    const target = (provider: string) => ({
+      request: async (r: ExternalRequest) => {
+        const eventId = String(r.params?.eventId ?? '');
+        sent.push({ provider, method: r.method ?? 'POST', path: r.path, ...(r.params !== undefined ? { params: r.params } : {}), body: JSON.parse(typeof r.body === 'string' ? r.body : '{}') as Record<string, unknown> });
+        order.push(`${provider}:${eventId}`);
+        return new Response(JSON.stringify({ eventId, suspended: true, revision: 1 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    return { order, sent, core, purchase: target('purchase-svc'), queue: target('queue-svc') };
+  };
+
+  test('R-T23 ④ 중지는 회차 목록을 먼저 받아 모든 회차의 판매를 막은 뒤 core 공연 상태를 내린다', async () => {
+    const h = harness({ scopeEventIds: ['e-1', 'e-2'] });
+    const executor = new HttpCommandExecutor({ core: h.core, purchase: h.purchase, queue: h.queue, internalToken: 'it-token' });
+    const c = command('SALE_STOP', { eventId: 'e-1' });
+    const result = await executor.execute(c, actor);
+    expect(result).toMatchObject({ status: 'SUCCEEDED', detail: { target: 'purchase-svc+queue-svc+core-svc', eventIds: ['e-1', 'e-2'], suspended: true } });
+    expect(h.order).toEqual(['core-scope', 'purchase-svc:e-1', 'queue-svc:e-1', 'purchase-svc:e-2', 'queue-svc:e-2', 'core-result']);
+    expect(h.sent[0]).toMatchObject({ provider: 'core-svc', method: 'GET', path: '/internal/v1/events/{eventId}/sale-review-scope', params: { eventId: 'e-1' } });
+    expect(h.sent.at(-1)).toMatchObject({
+      provider: 'core-svc',
+      method: 'POST',
+      path: '/internal/v1/events/{eventId}/sale-review-result',
+      body: { kind: 'SUSPENDED', approvalId: c.commandId, reasonCode: 'SELLER_IDENTITY', reason: '판매자 신원 확인' },
+    });
+    expect(h.sent.filter((s) => s.provider === 'core-svc')[0]!.body).toEqual({});
+  });
+
+  test('R-T23 ④ 재개는 core를 먼저 올리고, core가 준 다시 열 회차만 대기열→판매 차례로 연다', async () => {
+    const h = harness({ resumeEventIds: ['e-open', 'e-future'] });
+    const executor = new HttpCommandExecutor({ core: h.core, purchase: h.purchase, queue: h.queue });
+    const result = await executor.execute(command('SALE_RESUME', { eventId: 'e-past', suspensionRef: 'AP-RESUME-4' }), actor);
+    expect(result).toMatchObject({ status: 'SUCCEEDED', detail: { target: 'purchase-svc+queue-svc+core-svc', eventIds: ['e-open', 'e-future'] } });
+    // 오픈 시각이 지난 e-past는 core가 다시 열 목록에 넣지 않았으므로 부르지 않는다
+    expect(h.order).toEqual(['core-result', 'queue-svc:e-open', 'purchase-svc:e-open', 'queue-svc:e-future', 'purchase-svc:e-future']);
+    expect(h.sent[0]).toMatchObject({ body: { kind: 'RESUMED', approvalId: 'AP-RESUME-4' } });
+  });
+
+  test('core가 실패하면 명령은 FAILED이고 뒤 대상을 부르지 않는다', async () => {
+    const scopeFails = harness({ scopeStatus: 503 });
+    const a = new HttpCommandExecutor({ core: scopeFails.core, purchase: scopeFails.purchase, queue: scopeFails.queue });
+    expect(await a.execute(command('SALE_STOP'), actor)).toEqual({ status: 'FAILED', error: 'core-svc sale review scope 503' });
+    expect(scopeFails.order).toEqual(['core-scope']);
+
+    const resultFails = harness({ scopeEventIds: ['e-1'], resultStatus: 409 });
+    const b = new HttpCommandExecutor({ core: resultFails.core, purchase: resultFails.purchase, queue: resultFails.queue });
+    const failed = await b.execute(command('SALE_STOP', { eventId: 'e-1' }), actor);
+    expect(failed).toEqual({ status: 'FAILED', error: 'core-svc sale review 409' });
+    // 이미 막은 회차는 그대로 두고(재시도가 멱등으로 다시 부른다) 뒤 회차는 부르지 않는다
+    expect(resultFails.order).toEqual(['core-scope', 'purchase-svc:e-1', 'queue-svc:e-1', 'core-result']);
+  });
+
+  test('core가 없으면 지금처럼 purchase·queue만 부른다(회차 취소 확정의 판매 멈춤 어댑터)', async () => {
+    const calls: Call[] = [];
+    const executor = new HttpCommandExecutor({ purchase: client('purchase-svc', calls), queue: client('queue-svc', calls) });
+    expect((await executor.execute(command('SALE_STOP'), actor)).status).toBe('SUCCEEDED');
+    expect(calls.map((x) => x.provider)).toEqual(['purchase-svc', 'queue-svc']);
+  });
+});
+
 // BAT-420 GAT-110 H(ADR-0280 결정 1): 회차 취소 확정 때 판매 멈춤 어댑터. 시험 담당이 구현 전에 썼다.
 describe('회차 취소 확정 때 판매 멈춤 [BAT-420]', () => {
   interface Sent {

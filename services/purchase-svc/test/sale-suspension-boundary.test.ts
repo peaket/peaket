@@ -42,15 +42,18 @@ describe('SALE_STOP·SALE_RESUME 경계', () => {
     expect(await suspend(f, { commandId: LATE })).toMatchObject({ suspended: true, revision: 3, changed: true });
   });
 
-  test('재개는 판매 일시정지(paused)를 건드리지 않는다', async () => {
+  test('R-T23 ③ 판매 재개는 판매 일시정지(paused)를 건드리지 않고, 명령 3 재개(paused=false)도 판매 중지(suspended)를 풀지 않는다', async () => {
     const f = fixture();
     // 명령 3(판매 일시정지)이 이미 paused를 세운 행
     f.store.rows.set(EVENT, { eventId: EVENT, paused: true, suspended: false, revision: 5, updatedAtMs: NOW });
     expect(await suspend(f, { version: 6 })).toMatchObject({ suspended: true, revision: 6, changed: true });
     expect(f.store.rows.get(EVENT)).toMatchObject({ paused: true, suspended: true });
+    // 명령 3 재개는 paused만 내린다: 판매 중지는 남는다
+    f.store.rows.set(EVENT, { ...f.store.rows.get(EVENT)!, paused: false });
+    expect(f.store.rows.get(EVENT)).toMatchObject({ paused: false, suspended: true });
     expect(await resume(f, { version: 7 })).toMatchObject({ suspended: false, revision: 7, changed: true });
-    // 재개로 paused가 풀리면 판매 일시정지가 풀린다(다른 칸이어야 한다)
-    expect(f.store.rows.get(EVENT)).toMatchObject({ paused: true, suspended: false });
+    // 판매 재개도 다른 칸(paused)을 건드리지 않는다
+    expect(f.store.rows.get(EVENT)).toMatchObject({ paused: false, suspended: false });
     expect(await f.service.state(EVENT)).toEqual({ eventId: EVENT, suspended: false, revision: 7 });
   });
 

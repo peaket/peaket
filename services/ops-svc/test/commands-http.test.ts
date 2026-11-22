@@ -95,6 +95,24 @@ describe('/v1/ops/commands', () => {
     expect(JSON.parse((await get(`/v1/ops/commands/${commandId}`, identity.ops('operator'))).payload)).toMatchObject({ state: 'PENDING_APPROVAL', approvals: [] });
   });
 
+  test('R-T23 ① operator가 판매 중지를 요청하거나 자기 승인하면 403이고, commander 요청만 2인 대기로 간다', async () => {
+    const operator = identity.ops('operator');
+    const body = { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId: randomUUID(), reasonCode: 'SELLER_IDENTITY' } };
+    expect((await post('/v1/ops/commands', withReauth(operator), body)).statusCode).toBe(403);
+
+    const requester = identity.ops('commander');
+    const created = await post('/v1/ops/commands', withReauth(requester), body);
+    expect(created.statusCode).toBe(201);
+    const { commandId } = JSON.parse(created.payload) as { commandId: string };
+    expect(JSON.parse(created.payload)).toMatchObject({ state: 'PENDING_APPROVAL' });
+    // 요청자 본인과 operator는 승인할 수 없다(요청자 ≠ 승인자, commander만)
+    expect((await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(requester), {})).statusCode).toBe(403);
+    expect((await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(operator), {})).statusCode).toBe(403);
+    expect(JSON.parse((await get(`/v1/ops/commands/${commandId}`, requester)).payload)).toMatchObject({ state: 'PENDING_APPROVAL', approvals: [] });
+    const approver = identity.ops('commander');
+    expect((await post(`/v1/ops/commands/${commandId}/approvals`, withReauth(approver), {})).statusCode).toBe(200);
+  });
+
   test('GAT110_다른_commander가_승인하면_APPROVED이고_요청자는_승인할_수_없다', async () => {
     const requester = identity.ops('commander');
     const created = await post('/v1/ops/commands', withReauth(requester), { type: 'DEGRADED_MODE', reason: '결제사 장애', params: { mode: 'PAYMENT' } });
