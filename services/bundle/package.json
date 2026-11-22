@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@peaket/admission-ctrl": "workspace:*",
+    "@peaket/contracts": "workspace:*",
     "@peaket/payment-svc": "workspace:*",
     "@peaket/platform": "workspace:*",
     "@peaket/purchase-svc": "workspace:*",

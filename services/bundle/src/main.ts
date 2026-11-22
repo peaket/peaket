@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createPlatformLogger, errorSummary, loadPlatformConfig, systemClock } from '@peaket/platform';
-import { type BundleConfig, type BundleService, loadBundleConfig, parseEnvFile, type RunningBundle, startBundle } from './bundle.js';
+import { type BundleConfig, type BundleService, loadBundleConfig, parseEnvFile, type RunningBundle, SCHEMA_IDS_FILE_ENV, startBundle, withLocalSchemaIds } from './bundle.js';
 import { startManagement } from './management.js';
 import { childStopWaitMs, stopChildProcess } from './stop-child.js';
 
@@ -21,6 +21,8 @@ const HOLD_MANAGEMENT_PORT = 9465;
 const RELAY_MANAGEMENT_PORT = 9475;
 
 const config = loadBundleConfig(process.env);
+// 생산자 스키마 ID 고정 파일(레지스트리가 없다, ADR-0357 결정 4): 자식 프로세스도 같은 파일을 받게 프로세스 환경 값에 둔다
+process.env[SCHEMA_IDS_FILE_ENV] = withLocalSchemaIds(process.env)[SCHEMA_IDS_FILE_ENV];
 const platform = loadPlatformConfig(process.env);
 const split = process.env.PEAKET_BUNDLE_MODE === 'split';
 const logger = createPlatformLogger({ service: 'bundle', env: platform.env, version: platform.version, az: process.env.PEAKET_AZ, pod: process.env.PEAKET_POD, clock: systemClock, level: platform.logLevel });

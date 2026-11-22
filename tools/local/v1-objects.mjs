@@ -1,6 +1,8 @@
 // v1 측정 무대의 kind 객체(node tools/local/cluster.mjs v1, docs/verification.md §3.8 '합본의 v1 무대', BUILD_ORDER PRF-215): 주소, Valkey(TLS 켬·끔), 전용 PostgreSQL,
 // Secret, 무대 공개 값 ConfigMap, DB 마이그레이션 잡, Kafka 토픽, 대기 상태 파일 앞 nginx 캐시, 결제 시뮬레이터, 고정 이미지 싣기 점검, helm 인자.
 // 클러스터를 부르지 않는 순수 함수다(시험: v1-stage.test.mjs).
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { envFileText, V1_CONSENT_VERSION, V1_HOLD_PORT, V1_NAMESPACE, V1_PATHS, V1_PORTS, V1_SERVICES, v1EnvFiles } from './v1-stage.mjs';
 
 export const V1_IMAGES = Object.freeze({ bundle: 'peaket/bundle:local', simulator: 'peaket/pg-simulator:local' });
@@ -296,6 +298,20 @@ export function v1PublicConfigMap(o) {
       pgMaxConnections: String(V1_PG_MAX_CONNECTIONS),
     },
   };
+}
+
+/** 로컬 고정 스키마 ID 파일(생성물, ADR-0357 결정 4): 계약의 주제를 이름 차례로 1부터 번호 매긴 값. @peaket/contracts/avro의 localSchemaIds와 같다 */
+export const LOCAL_SCHEMA_IDS_FILE = fileURLToPath(new URL('../../packages/contracts/src/gen/avro/local-schema-ids.json', import.meta.url));
+
+/**
+ * 생산자 스키마 ID ConfigMap schema-ids(키 schema-ids.json). 로컬 클러스터에는 레지스트리가 없어 등록 Job 대신 이 도구가 고정 번호로 만든다(ADR-0357 결정 4).
+ * 차트의 schemaIds.enabled가 붙인다(v1-purchase-relay)
+ * @param {string} [text] 고정 번호 JSON(기본 LOCAL_SCHEMA_IDS_FILE)
+ */
+export function v1SchemaIdsConfigMap(text = readFileSync(LOCAL_SCHEMA_IDS_FILE, 'utf8')) {
+  const ids = JSON.parse(text);
+  if (typeof ids !== 'object' || ids === null || Array.isArray(ids) || Object.values(ids).some((v) => !Number.isInteger(v) || v < 1)) throw new RangeError('고정 스키마 ID는 주제 → 1 이상 정수 객체다');
+  return { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'schema-ids', namespace: V1_NAMESPACE, labels: { 'app.kubernetes.io/part-of': 'peaket' } }, data: { 'schema-ids.json': JSON.stringify(ids) } };
 }
 
 /**

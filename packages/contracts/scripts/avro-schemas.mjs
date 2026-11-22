@@ -40,10 +40,42 @@ export function avroSchemaFiles(dir = AVRO) {
   });
 }
 
-/** out 폴더에 스키마 모듈과 모음 파일(index.ts)을 쓴다 */
-export function writeAvroModules(out, dir = AVRO) {
+/**
+ * asyncapi 채널(토픽)마다 Avro 스키마가 있는 메시지의 주제 이름(<토픽>-<레코드 전체 이름>, docs/api/avro/README.md §3·§4)을 이름 차례로 돌려준다.
+ * 메시지 이름과 같은 이름의 .avsc 레코드가 있으면 Avro 메시지다(JSON 메시지 RumSample·InvestigationRequest 등과 WebSocket·SSE 채널은 .avsc가 없어 빠진다)
+ * @param {{ channels?: Record<string, { address?: string, messages?: Record<string, unknown> }> }} asyncapi 읽은 asyncapi 문서
+ * @param {{ fullName: string, schema: { name: string } }[]} files avroSchemaFiles의 결과
+ */
+export function avroSubjectsOf(asyncapi, files) {
+  const bySimpleName = new Map(files.map((f) => [f.schema.name.split('.').pop(), f.fullName]));
+  const out = new Set();
+  for (const ch of Object.values(asyncapi.channels ?? {})) {
+    if (typeof ch?.address !== 'string' || ch.address.startsWith('/')) continue;
+    for (const name of Object.keys(ch.messages ?? {})) {
+      const full = bySimpleName.get(name);
+      if (full) out.add(`${ch.address}-${full}`);
+    }
+  }
+  return [...out].sort();
+}
+
+/** 로컬 클러스터·합본의 고정 스키마 ID: 주제를 이름 차례로 1부터 번호 매긴다(ADR-0357 결정 4. 로컬에서만 뜻이 있다) */
+export function localSchemaIdsOf(subjects) {
+  return Object.fromEntries([...subjects].sort().map((s, i) => [s, i + 1]));
+}
+
+/**
+ * out 폴더에 스키마 모듈과 모음 파일(index.ts), 로컬 고정 번호 파일(local-schema-ids.json)을 쓴다
+ * @param {object} asyncapi 읽은 asyncapi 문서(주제 목록을 만든다)
+ */
+export function writeAvroModules(out, asyncapi, dir = AVRO) {
   mkdirSync(out, { recursive: true });
   const all = avroSchemaFiles(dir);
+  const subjects = avroSubjectsOf(asyncapi, all);
+  const localIds = localSchemaIdsOf(subjects);
+  // 로컬 도구(tools/local)가 TS를 거치지 않고 읽는 같은 값
+  writeFileSync(join(out, 'local-schema-ids.json'), `${JSON.stringify(localIds, null, 2)}
+`);
   const fileOf = (rel) => rel.replace(/\.avsc$/, '').split('/').join('-');
   for (const d of all) {
     writeFileSync(
@@ -67,6 +99,12 @@ export function writeAvroModules(out, dir = AVRO) {
       'export const avroSchemas: Readonly<Record<string, AvroSchema>> = Object.freeze({',
       ...entries,
       '});',
+      '',
+      '/** asyncapi 채널마다 Avro로 내는 주제 이름(<토픽>-<레코드 전체 이름>), 이름 차례 */',
+      `export const avroSubjects: readonly string[] = Object.freeze(${JSON.stringify(subjects, null, 2)});`,
+      '',
+      '/** 로컬 클러스터·합본(레지스트리가 없다)의 고정 스키마 ID: avroSubjects를 이름 차례로 1부터(ADR-0357 결정 4). local-schema-ids.json과 같은 값 */',
+      `export const localSchemaIds: Readonly<Record<string, number>> = Object.freeze(${JSON.stringify(localIds, null, 2)});`,
       '',
       '/** 레지스트리 주제 이름(TopicRecordNameStrategy, docs/api/avro/README.md §3): <토픽>-<네임스페이스.레코드> */',
       'export function avroSubject(topic: string, fullName: string): string {',

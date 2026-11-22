@@ -14,6 +14,10 @@ env:
 service:
   enabled: false
 
+# 생산자 스키마 ID 고정 파일(ConfigMap schema-ids, tools/local/cluster.mjs v1이 계약의 고정 번호로 만든다, ADR-0357 결정 4)
+schemaIds:
+  enabled: true
+
 outboxRelay:
   enabled: true
   replicas: 2

@@ -45,7 +45,7 @@ import { applySeed, checkSeed } from './demo-seed.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey } from './v0-token.mjs';
 import { jsonFilesUnder } from './dashboards.mjs';
 import { applyGrafanaAccess, loadGrafanaAccess, reloadGrafanaProvisioning } from './grafana-access.mjs';
-import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
+import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1SchemaIdsConfigMap, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -927,6 +927,8 @@ export async function v1(argv = []) {
   }
   // 실행 도구가 읽는 공개 값(개인 성분 없음). 실행 도구는 환경 파일 Secret을 읽지 않는다
   await kubectl(['apply', '-f', '-'], { input: JSON.stringify(v1PublicConfigMap({ keys, redisTls: plan.redisTls, replicas, nginx })) });
+  // 생산자 스키마 ID 고정 파일(레지스트리가 없다, ADR-0357 결정 4). purchase-svc 릴레이 파드가 붙인다(v1-purchase-relay schemaIds.enabled)
+  await kubectl(['apply', '-f', '-'], { input: JSON.stringify(v1SchemaIdsConfigMap()) });
   step(`전용 PostgreSQL과 DB ${V1_DATABASES.purchase}·${V1_DATABASES.payment}(새로 만든다)`);
   await kubectl(['apply', '-f', '-'], { input: JSON.stringify({ apiVersion: 'v1', kind: 'List', items: v1PostgresObjects() }) });
   // 임시 저장소라 다시 띄우면 새 비밀번호로 처음부터 만든다

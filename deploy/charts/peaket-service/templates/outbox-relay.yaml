@@ -115,12 +115,14 @@ spec:
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
             {{- include "peaket.diagnoseMounts" . | nindent 12 }}
+            {{- include "peaket.schemaIdsMount" . | nindent 12 }}
             {{- with .Values.outboxRelay.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
         - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
         {{- include "peaket.diagnoseVolumes" (dict "resources" .Values.outboxRelay.resources "where" "outboxRelay") | nindent 8 }}
+        {{- include "peaket.schemaIdsVolume" . | nindent 8 }}
         {{- with .Values.outboxRelay.volumes }}
         {{- include "peaket.volumes" (dict "volumes" . "env" $.Values.env.PEAKET_ENV "where" "outboxRelay.volumes") | nindent 8 }}
         {{- end }}

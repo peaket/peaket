@@ -93,12 +93,14 @@ spec:
       volumeMounts:
         - { name: tmp, mountPath: /tmp }
         {{- include "peaket.diagnoseMounts" . | nindent 8 }}
+        {{- include "peaket.schemaIdsMount" . | nindent 8 }}
         {{- with .Values.service.volumeMounts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
   volumes:
     - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
     {{- include "peaket.diagnoseVolumes" (dict "resources" .Values.service.resources "where" "service") | nindent 4 }}
+    {{- include "peaket.schemaIdsVolume" . | nindent 4 }}
     {{- with .Values.service.volumes }}
     {{- include "peaket.volumes" (dict "volumes" . "env" $.Values.env.PEAKET_ENV "where" "service.volumes") | nindent 4 }}
     {{- end }}
@@ -114,6 +116,10 @@ spec:
   value: {{ include "peaket.name" . | quote }}
 - name: PEAKET_MANAGEMENT_PORT
   value: {{ .Values.managementPort | quote }}
+{{- if .Values.schemaIds.enabled }}
+- name: PEAKET_SCHEMA_IDS_FILE
+  value: "/etc/peaket/schema-ids/schema-ids.json"
+{{- end }}
 {{- range $k, $v := .Values.env }}
 {{- if ne $k "NODE_OPTIONS" }}
 - name: {{ $k }}
@@ -399,4 +405,19 @@ startupProbe:
 {{- $_ := set $used (toString $port) (toString .name) -}}
 {{- $_ := set $names (toString .name) true -}}
 {{- end -}}
+{{- end -}}
+
+{{/* 생산자 스키마 ID 설정(ADR-0357 결정 4): schemaIds.enabled면 등록 Job이 쓴 ConfigMap schema-ids(키 schema-ids.json)를 /etc/peaket/schema-ids/에 읽기 전용으로 붙인다.
+    환경 값 PEAKET_SCHEMA_IDS_FILE은 peaket.commonEnv가 준다. 앱·Outbox 릴레이 컨테이너가 함께 쓴다 */}}
+{{- define "peaket.schemaIdsMount" -}}
+{{- if .Values.schemaIds.enabled }}
+- { name: schema-ids, mountPath: /etc/peaket/schema-ids, readOnly: true }
+{{- end }}
+{{- end -}}
+
+{{- define "peaket.schemaIdsVolume" -}}
+{{- if .Values.schemaIds.enabled }}
+- name: schema-ids
+  configMap: { name: {{ required "schemaIds.configMapName이 필요하다" .Values.schemaIds.configMapName }}, items: [{ key: schema-ids.json, path: schema-ids.json }] }
+{{- end }}
 {{- end -}}

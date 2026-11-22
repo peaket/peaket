@@ -1,13 +1,17 @@
 // 한 프로세스 합본(docs/verification.md §3.8 (가), BUILD_ORDER PRF-215, ADR-0262 결정 4). 같은 v1 코드의 서비스를 Node 프로세스 하나에 띄운다.
 // - 켤 서비스는 PEAKET_BUNDLE_SERVICES(쉼표)로 고른다. 서비스 분리 비교의 갈래 스위치(wbs 2.12.5, BUILD_ORDER HOT-500)가 같은 값을 그대로 쓴다.
+// - 생산자 스키마 ID 설정(PEAKET_SCHEMA_IDS_FILE)이 공통 값에 없으면 계약의 고정 번호 파일을 임시 폴더에 쓰고 모든 서비스에 넘긴다(레지스트리가 없다, ADR-0357 결정 4).
 // - 서비스마다 환경 파일 PEAKET_BUNDLE_ENV_DIR/<서비스>.env를 읽어 프로세스 공통 값 위에 얹고, 그 서비스의 start({ env })에만 넘긴다(다른 서비스의 값은 섞이지 않는다).
 //   process.env에는 공통 값(PEAKET_ENV·파드 이름·쿠버네티스·OTel·Node 설정)만 둔다. 파일이 PEAKET_ENV를 적거나 포트가 겹치면 시작하지 않는다.
 // - 시험 도구다: PEAKET_ENV가 local·ci가 아니면 시작하지 않는다(운영에 배포하지 않는다, docs/verification.md §3.8).
 // - 켜는 차례는 결제 → 구매 → 입장 제어 → 대기열이고(부르는 쪽보다 불리는 쪽이 먼저 선다), 닫는 차례는 그 반대다(입구부터 닫는다).
 //   서비스 하나가 시작에 실패하면 이미 켠 서비스를 반대 차례로 닫고 그 오류를 다시 던진다.
 // - 서비스 사이 호출은 v1과 같은 gRPC로 둔다(같은 프로세스 안 함수 호출로 바꾸지 않는다, docs/verification.md §3.8 '같게 두는 것').
+import { writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { localSchemaIds } from '@peaket/contracts/avro';
 import type { Writable } from 'node:stream';
 
 /** 합본에 넣을 수 있는 서비스(ADR-0262 결정 4). 배열 차례가 켜는 차례다 */
@@ -93,6 +97,20 @@ export function parseEnvFile(text: string, file = '환경 파일'): Record<strin
   return out;
 }
 
+/** 생산자 스키마 ID 설정 파일을 가리키는 환경 값(ADR-0357 결정 4) */
+export const SCHEMA_IDS_FILE_ENV = 'PEAKET_SCHEMA_IDS_FILE';
+
+/**
+ * 합본에는 레지스트리가 없다(ADR-0357 결정 4): 공통 값에 PEAKET_SCHEMA_IDS_FILE이 없으면 계약의 고정 번호(@peaket/contracts/avro localSchemaIds,
+ * 주제를 이름 차례로 1부터)를 임시 폴더의 파일로 쓰고 그 경로를 더한 공통 값을 돌려준다. 이미 있으면 그대로 돌려준다(파일을 쓰지 않는다)
+ */
+export function withLocalSchemaIds(common: Record<string, string | undefined>, dir = tmpdir()): Record<string, string | undefined> {
+  if (common[SCHEMA_IDS_FILE_ENV]) return common;
+  const file = join(dir, `peaket-bundle-schema-ids-${process.pid}.json`);
+  writeFileSync(file, JSON.stringify(localSchemaIds), { mode: 0o644 });
+  return { ...common, [SCHEMA_IDS_FILE_ENV]: file };
+}
+
 /**
  * 한 서비스에 넘길 환경 값: 프로세스 공통 값 위에 그 서비스 파일의 값을 얹는다. 파일이 정하지 못하는 이름(PEAKET_ENV 등)이 있거나
  * PORT·PEAKET_MANAGEMENT_PORT가 빠졌으면 Error다
@@ -170,7 +188,7 @@ export interface RunningBundle {
 
 /** 서비스 환경 파일을 모두 먼저 읽고 검사한 뒤(포트 겹침 포함) 켠다 */
 export async function startBundle(o: StartBundleOptions): Promise<RunningBundle> {
-  const common = o.common ?? process.env;
+  const common = withLocalSchemaIds(o.common ?? process.env);
   const read = o.readEnvFile ?? ((p: string) => readFile(p, 'utf8'));
   const plans: { service: BundleService; env: Record<string, string | undefined> }[] = [];
   for (const service of o.config.services) {

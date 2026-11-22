@@ -72,7 +72,7 @@ export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI,
     // 내부 gRPC 계약의 JSON 설명자(추천 적용 2026-11-03, BUILD_ORDER PRF-020)
     writeProtoModules(join(out, 'proto'), proto);
     // Avro 계약 판 스키마(서비스의 공용 Avro 인코더와 스트림 작업자가 읽는다, ADR-0357 결정 2)
-    writeAvroModules(join(out, 'avro'), avro);
+    writeAvroModules(join(out, 'avro'), parse(readFileSync(asyncapi, 'utf8')), avro);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
