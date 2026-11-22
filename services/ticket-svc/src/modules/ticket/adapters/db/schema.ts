@@ -22,7 +22,7 @@ export const ticketIssue = pgTable(
 );
 
 /**
- * 주문 단위 발권 막기(BAT-011, HOT-161·PRF-173, 0010, docs/data.md ticket_issue_guard).
+ * 주문 단위 발권 막기(BAT-011, HOT-161·PRF-173, 0011, docs/data.md ticket_issue_guard).
  * IssueTickets와 BlockTicketIssuance가 이 행을 먼저 잠가 같은 주문의 발권과 막기를 한 차례로 가른다.
  * blocked_at이 비어 있으면 아직 막지 않은 잠금 자리이고(발권이 먼저 만든다), 값이 있으면 막힌 주문이다
  */
