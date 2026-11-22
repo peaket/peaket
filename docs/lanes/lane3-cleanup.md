@@ -67,7 +67,7 @@
 - W9-fix1(R-676) 리뷰 R4 낮음(문서): openapi `/v1/ops/event-cancellations/{requestId}/pauses`·`/resumptions` 응답에 끝난 작업의 409가 없다(전부터 409를 돌려줌). 409 `CONFLICT` 한 줄을 더한다(docs/api/openapi.yaml)
 - W9-fix1(R-676) 리뷰 R5 낮음: `services/purchase-svc/src/modules/refund/index.ts:160` 주석이 아직 '빈 뼈대'다. 다음 손질 때 지운다
 - W9-fix1(R-676) 계획 범위 밖: 결제사 몫 하나가 자동 정지하면 요청 전체가 PAUSED가 되어(`statusAfterRun`, 시험 `event-refund-gat130` R-T9) 다른 결제사 몫도 멈춘다. 정본 transfer-refund §5 '다른 결제사 몫은 계속한다'·data `event_cancellation_request.status`와 어긋난다(멈추는 쪽이라 돈은 안전, 상태 규칙을 바꾸면 시험·ops 화면이 함께 바뀜)
-- W9-fix1(R-676) 검증 때 본 것: 통합 전체를 한 번에 돌리면 `identity-grpc.int`의 previousPid 단언이 가끔 실패한다(그 파일만 돌리면 46개 모두 통과, 몰릴 때 흔들리는 시험)
+- W9-fix1(R-676) 검증 때 본 것: 통합 전체를 한 번에 돌리면 `identity-grpc.int`의 previousPid 단언이 가끔 실패한다(그 파일만 돌리면 46개 모두 통과, 몰릴 때 흔들리는 시험). 2026-11-22 W12-purchase-fixes 확인: 실제 루프백 `@grpc/grpc-js` 서버를 부르고 재확인 150ms·연락처 50ms 벽시계 마감이라 채널 콜드 스타트가 원인 후보다(계획 §4).
 - W9-fix3(R-675) 리뷰 N3 낮음: pg-simulator의 `authorization` 비교가 옛 꼴(길이 먼저 비교)이다. local·CI용이라 운영 위험은 없다. 원하면 `constantTimeEqual`로(services/pg-simulator/src/server.ts:59)
 - BAT-415-reauth(R-688) 리뷰 RV-03 낮음: 팬 공개키 묶음 주소(`PEAKET_IDENTITY_FAN_JWKS_URL`)의 쿼리를 버리고, 주소가 틀렸을 때 오류 글에 설정 이름이 없다(services/purchase-svc/src/modules/refund/adapters/jwks-fan-reauth-gate.ts)
 - BAT-415-reauth(R-688) 리뷰 RV-04 낮음: 공개키 묶음 읽기(상한 1,000ms)가 주문 쓰기 칸막이 안에서 돈다. 시작할 때 미리 읽기와 오래된 캐시로 답하기를 검토한다

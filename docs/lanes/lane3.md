@@ -6,6 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
+- **2026-11-22 W12-purchase-fixes(조사·시험 고침)**: purchase 기존 실패 둘은 제품 결함이 아니라 시험 결함이었다 — `purchase-migration.int`의 CHECK 목록에 0030·0031 제약을 더하고, `event-refund.int` GAT-110 P3는 주입 시계로 Outbox 파티션 날을 맞췄다(88/88·37/37). V-T40은 R-745로 이미 해결(51/51·28/28). `identity-grpc.int`는 실제 루프백 gRPC 서버를 부르며 150/50ms 벽시계 마감이 흔들림 후보. 계획 `docs/review/plans/W12-purchase-fixes.md`. develop에 합치지 않았다.
 - **2026-11-21 BAT-197 끝(R-725)**: 다음 차례는 BAT-410(GAT-050·GAT-055·GAT-060) → W8-audit2b(명단 접속기록, 계획 `docs/review/plans/W8-audit2b.md`, core 번호는 감독 확인). 작업 폴더 `D:/ticketpass-lane3`.
 - **2026-11-21 BAT-045 끝(R-722)**: 다음 차례는 BAT-185(HOT-012, AWS 계정 뒤) → BAT-190(BAS-250, OPEN[23] (다) 결정 뒤) → BAT-197(BOT-080) → BAT-410(GAT-050·GAT-055·GAT-060) → W8-audit2b(명단 접속기록, 계획 `docs/review/plans/W8-audit2b.md`, core 번호는 감독 확인). 작업 폴더 `D:/ticketpass-lane3`.
 - **2026-11-20 BAT-425 끝(R-716)**: 다음 차례는 BAT-045(계정·봇 방어 남은 몫) → BAT-185(HOT-012, AWS 계정 뒤) → BAT-190(BAS-250, OPEN[23] (다) 결정 뒤) → BAT-197(BOT-080) → BAT-410(GAT-050·GAT-055·GAT-060) → W8-audit2b(명단 접속기록, 계획 `docs/review/plans/W8-audit2b.md`, core 번호는 감독 확인). 작업 폴더 `D:/ticketpass-lane3`.
