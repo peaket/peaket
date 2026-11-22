@@ -1,0 +1,176 @@
+# 작업 계획: FIX-invariant-m3 — 미수금 이동 표 이름을 정본대로 바꾸고 M3가 실제 DB에서 돌게 한다
+
+- **무엇**: 불변식 검사기(시험이 끝난 뒤 DB를 대조해 돈·좌석 규칙 위반을 세는 도구)의 M3 '미수금 남은 금액 = 금액 − 이동 기록 합 ≥ 0'이 실제 payment DB에서 한 번도 돌지 않았다. 검사기는 정본 이름 `receivable_movement` 표를 찾는데, payment-svc 마이그레이션(DB 구조를 차례로 바꾸는 SQL 파일) 0016이 그 표를 `receivable_move`로 만들어 '원본에 표 없음'으로 건너뛰기(SKIPPED) 때문이다. 이 묶음은 ① payment 표 이름을 정본대로 바꾸는 마이그레이션 0028을 확장·축소 규칙의 첫 걸음으로 내고 ② 건너뛴 불변식이 조용히 묻히지 않게 검사기 출력에 드러내며 ③ M3가 마이그레이션을 모두 적용한 실제 payment DB에서 도는지를 시험으로 묶는다.
+- **바탕**: 작업 폴더 `D:/ticketpass-lane5-FIX-invariant-m3`, 가지 `feature/lane5-FIX-invariant-m3`, 출발점 `origin/develop` `f8fd325ff`. 감독 요청과 `docs/lanes/lane5-cleanup.md` 22줄(FIX-payment-int 리뷰 RV-02), 23줄의 이름 차이 부분. 마이그레이션 번호 0028은 갈래 5 몫이다(`docs/lanes/coord.md`, `39785d9ec`).
+- **정본**: 표 이름 `docs/data.md` §2 ERD `receivable_movement`(1119·1120·1262·1371·1375줄)와 `docs/features/settlement.md` §7 '미수금 이동 기록'·저장소 표, 표 이름 바꾸기 단계 `docs/data.md` §4 '미수금 이동 기록 표 이름 맞추기'(이 커밋에서 씀), 데이터 변경 규칙 `docs/devops.md` §7.1~7.3, 검사기 `docs/verification.md` §2.5(건너뜀 드러내기는 이 커밋에서 씀)·§3.10 'v1 합본 측정 규칙', 묶음 절차 `docs/architecture.md` §8.6. 이 문서는 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
+- **등급·차례**: A(돈 불변식·결제 DB 마이그레이션). 코드 묶음, 정방향(`Batch-Order: impl-first`, `docs/architecture.md` §8.6 4): 계획 → 구현 → 시험 → 리뷰 → 검증 → 기록.
+- **선행 조건**: 갈래 5의 F-07-5가 payment 0027을 `develop`에 먼저 합친다(감독 전제). 구현 담당은 시작할 때 `origin/develop`에 `0027_*.sql`이 있는지 보고, 있으면 그 위로 다시 쌓은 뒤 0028을 만든다. 없으면 감독에게 알리고 기다린다. Drizzle 마이그레이터는 적용 기록의 마지막 `when`(만든 시각)보다 늦은 것만 돌리고 snapshot은 `prevId`로 사슬을 이루므로, 0027보다 먼저 만든 0028을 뒤에 옮기면 기록 시각과 사슬을 다시 만들어야 한다.
+
+## 원인
+
+| # | 무엇이 어긋났나 | 자리 | 근거 |
+| --- | --- | --- | --- |
+| ⑴ | 마이그레이션이 정본 ERD와 다른 표 이름을 썼다 | `services/payment-svc/migrations/0016_receivables.sql` 17줄 `CREATE TABLE "receivable_move"`, 0026 22~31줄이 같은 이름에 `id`·`kind`·인덱스·CHECK를 더함, `src/modules/settlement/adapters/db/schema.ts` 273~293줄 | ERD `receivable_movement`(`docs/data.md` 1375줄), settlement.md §7 '미수금 이동 기록'·결과 표 503줄 |
+| ⑵ | 검사기는 정본 이름을 쓰므로 실제 DB에서 M3를 건너뛴다 | `services/invariant-checker/src/tables.ts` 35줄, `src/invariants.ts` 45줄(M3 `requires`), `src/run.ts` 109줄(`원본에 표 없음`) | `docs/verification.md` §2.5 '결과 파일': 표가 없으면 SKIPPED |
+| ⑶ | 검사기 통합 시험은 손으로 만든 정본 이름 표를 써서 차이를 못 봤다 | `services/invariant-checker/test-int/postgres.ts` 80줄 | — |
+| ⑷ | 건너뛴 불변식은 종료 코드에도 요약에도 안 드러난다. 측정 실행 도구 중 기대 목록을 대조하는 것은 v1 경로뿐이다 | `src/report.ts` `exitCode`(FAIL만 1), `src/cli.ts` 38줄(줄마다 결과만), `loadtest/runner/v1.mjs` 9줄 | `docs/architecture.md` §8.6 '자주 놓친 결함': 측정 도구는 SKIPPED가 '통과'로 새지 않는지 단언한다 |
+| ⑸ | v1 기대 SKIPPED 목록이 낡았다. v1 무대의 결제 DB는 payment-svc 마이그레이션을 모두 적용하므로(`tools/local/v1-objects.mjs` 347~373줄 → `services/payment-svc/scripts/migrate.mjs`) 0015·0016 뒤로 M1·M2·M4·M5는 표가 있어 세어진다. 이 묶음 뒤에는 M3도 세어진다 | `loadtest/runner/v1.mjs` 9줄 `['M1','M2','M3','M4','M5','P5','S3']` | 정본을 이 커밋에서 'S3·P5'로 고침(`docs/verification.md` §3.10) |
+
+- **정본이 이긴다**: 표 이름은 코드를 고친다. 정본은 이름 쪽은 바꾸지 않았다. 정본 안에서 실제 이름을 적은 저장소 표 한 곳(`docs/features/settlement.md` 저장소 표의 `receivable_move.id`·`kind`)만 정본 이름으로 맞추고 0028을 가리켰다.
+
+## 판단 1: 확장·축소
+
+- 규칙(`docs/devops.md` §7.1): 모든 스키마 변경은 실행 중인 판(N-1)과 새 판(N)에 함께 맞아야 하고(원칙 2), 맞지 않는 변경은 확장 → 이전 → 축소로 배포 2회 이상에 나누며, 스키마 변경과 그것에 기대는 코드 변경은 같은 배포에 넣지 않는다(원칙 3). 표 이름 바꾸기는 N-1이 옛 이름으로 쓰므로 맞지 않는 변경이다. 한 번에 바꾸면 규칙을 어긴다.
+- 방법: **표 이름을 바꾸고 옛 이름에 자동 갱신 뷰를 둔다.** PostgreSQL은 표 하나를 그대로 보이는 단순 뷰의 넣기·고치기·지우기를 밑 표로 넘기고, 넣지 않은 칸에는 밑 표의 기본값을 쓴다(뷰 칸에 기본값을 따로 걸지 않았을 때). 그래서 데이터가 한 표에 있어 옮길 행(이전 단계의 백필)이 없고, 두 이름이 같은 행을 본다. 열 이름 바꾸기 예시(§7.1 표)의 '두 열에 쓴다'가 여기서는 '두 이름이 한 표'다.
+- 세 출시로 나눈다(정본 `docs/data.md` §4 '미수금 이동 기록 표 이름 맞추기', 이 커밋에서 씀):
+
+| 단계 | 스키마 | 앱 | 이 묶음 |
+| --- | --- | --- | --- |
+| ① 확장 | 0028: 표·기본 키·CHECK 둘·외래 키 둘·인덱스의 이름만 바꾸고(메타데이터만, 다시 쓰기·다시 검증 없음) 옛 이름 뷰 `receivable_move`(`security_invoker = true`)를 만든다 | N: 옛 이름(뷰)으로 그대로 읽고 쓴다 | **여기** |
+| ② 이전 | 없음 | N+1: 새 이름으로 읽고 쓴다. 되돌리면 N은 뷰로 돈다 | 넘김(①이 든 출시 태그 뒤) |
+| ③ 축소 | `DROP VIEW receivable_move` | N+2 | 넘김(② 출시 7일 뒤 [가정]) |
+
+- 검사기는 운영에 배포하지 않는 시험 도구라 ① 직후부터 `receivable_movement`(표)를 읽어 M3를 센다. M3를 살리는 데 ②·③은 필요 없다.
+- 운영 전이라 줄이고 싶다면(한 출시에 ①②를 함께) 정본 규칙의 예외라 ADR이 필요하다. 이 계획은 줄이지 않는다.
+- 뷰의 권한: payment 마이그레이션에는 GRANT가 없다(역할·권한은 마이그레이션 실행기 BAS-060 몫). 이름을 바꿔도 표의 권한은 남는다. 뷰는 `security_invoker = true`로 부르는 역할의 표 권한으로 따지게 해, 뷰를 만든 DDL 역할의 권한으로 표에 닿는 길을 만들지 않는다. 뷰 자체의 권한은 BAS-060이 표와 같은 기본 권한으로 준다(로컬·CI는 관리 역할이라 해당 없음).
+
+## 판단 2: 건너뜀(SKIPPED)은 설계인가
+
+- **설계다.** 근거: `docs/verification.md` §2.5 '결과 파일'이 '원본 DB나 표, 시험 기록이 없으면 SKIPPED'와 'FAIL이면 종료 코드 1'을 정하고, §3.10이 v1 무대의 기대 SKIPPED 목록과 '다르면 실행 도구가 실패하고 그 실행을 무효로 남긴다'를 정한다. 무대마다 없는 원본이 정말 있다(v0에는 정산 표가 없고, v1 합본에는 티켓 원본이 없다). 그래서 SKIPPED를 실패로 바꾸지 않고 종료 코드도 그대로 둔다(바꾸면 v0·v1 실행 도구가 '검사기 실패'로 끝난다, `loadtest/run.mjs` 645·1738줄).
+- **정본 빈칸**: 검사기 자체가 SKIPPED를 어떻게 드러내는지는 비어 있었다. 이 커밋에서 §2.5 '건너뜀(SKIPPED)을 드러내기'로 썼다: ① 결과별 개수와 SKIPPED 불변식·까닭의 요약 한 줄(표준 출력) ② 까닭을 셋(시험 기록 없음·원본 없음·원본에 표 없음)으로 나누고, 붙은 원본에 표가 없는 것만 표준 오류에 경고 한 줄 ③ 무대마다 기대 목록 대조는 실행 도구 몫(§3.10). 또 검사기 표 목록을 실제 마이그레이션 DB로도 시험한다는 문장을 더했다.
+- **낡은 정본 고침**: §3.10 v1 기대 목록을 'S3·P5'로 고쳤다(원인 ⑸). 구현은 `V1_EXPECTED_SKIPPED`를 같이 고친다.
+- **ADR**: 필요 없다. 새 기술이나 방향을 고르지 않았고, 정본 규칙(§7.1 확장·축소, §2.5·§3.10 SKIPPED)을 지키는 방법과 빈칸을 '추천 적용'으로 채웠다.
+
+## 고칠 곳(구현 담당)
+
+| # | 파일 | 바꿀 것 |
+| --- | --- | --- |
+| I1 | `services/payment-svc/migrations/0028_receivable_movement_rename.sql`(새), `meta/0028_snapshot.json`(새), `meta/_journal.json` | 아래 'SQL 0028'의 문장만 둔다. snapshot·journal은 drizzle-kit이 만든 것을 쓴다(I2 뒤 `pnpm --filter @peaket/payment-svc db:generate --name receivable_movement_rename`, 이름 바꾸기 물음에 `receivable_move`에서 바꿈을 고른다. 묻는 화면을 못 쓰면 0027 snapshot을 복사해 새 `id`·`prevId`(0027 `id`)·표·제약·인덱스·외래 키 이름만 바꿔 손으로 만든다). 생성된 SQL은 제약을 지우고 다시 걸며(외래 키 다시 검증, 무거운 잠금)·인덱스를 다시 만들므로 이름만 바꾸는 문장으로 갈아 끼운다(§7.2·§7.3). 끝에 `db:generate`를 다시 돌려 '바뀐 것 없음'이어야 한다 |
+| I2 | `services/payment-svc/src/modules/settlement/adapters/db/schema.ts` 273~293줄 | `receivableMovement = pgTable('receivable_movement', …)`, 인덱스 `receivable_movement_receivable_idx`, CHECK `receivable_movement_amount_check`·`receivable_movement_kind_check`. 칸·외래 키 대상은 그대로. 옛 `receivableMove` 내보내기는 없앤다 |
+| I3 | `services/payment-svc/src/modules/settlement/adapters/db/receivable-move-compat.ts`(새), `drizzle-settlement-store.ts` 6·355·864·875·880·925줄 | 단계 ①의 앱은 옛 이름을 쓴다(판단 1). 새 파일에 옛 이름 `pgTable('receivable_move', …)`(칸은 I2와 같고 제약·인덱스는 두지 않음)을 `receivableMoveCompat`로 두고 저장소는 이것을 쓴다. 파일은 drizzle 설정의 표 정의 글로브(`./src/modules/*/adapters/db/schema.ts`) 밖이라 생성기가 표로 보지 않는다. 머리 주석에 '단계 ② 묶음이 지운다(docs/data.md §4 미수금 이동 기록 표 이름 맞추기)'를 적는다 |
+| I4 | `services/invariant-checker/src/report.ts`, `src/run.ts` 97~111줄 | `InvariantResult`에 `skip?: { kind: 'records' \| 'source' \| 'table'; names: string[] }`를 더하고 run.ts의 세 SKIPPED 자리에서 채운다(`reason` 글은 그대로). report.ts에 순수 함수 `summaryLine(results)`·`skipWarnings(results)`를 더한다(아래 '공개 인터페이스'). CSV·ndjson 형식과 `exitCode`는 그대로 |
+| I5 | `services/invariant-checker/src/cli.ts`, `src/cli-main.ts`(새) | `main()`의 몸을 `runCli(argv, env, io)`로 옮겨 내보내고(시험이 바깥 경계로 부르게), cli.ts는 그것을 불러 `process.exit`만 한다. 줄마다 결과 뒤에 요약 한 줄을 표준 출력에, `skipWarnings`를 표준 오류에 낸다. 끝 코드 0·1·2 뜻은 그대로 |
+| I6 | `loadtest/runner/v1.mjs` 6~9줄 | `V1_EXPECTED_SKIPPED = ['P5', 'S3']`, 주석을 정본 §3.10 새 문장에 맞춘다 |
+
+- 그 밖에 이 묶음이 고치지 않는다: `tables.ts`·`invariants.ts`·`sql/`(이미 정본 이름), 계약, purchase-svc·bundle 원본(둘 다 payment-svc 원본과 `migratePayment`를 가져다 쓰므로 타입 검사·통합 시험으로 확인만 한다).
+- 구현 담당이 돌려 보면 깨질 기존 시험(시험 담당이 고친다): payment `test/payment-schema.test.ts` 715·716줄 파일 목록과 `when` 차례(0027·0028), `test-int/payment-grpc.int.test.ts` 173줄 PRF180 표 목록(`receivable_move` → `receivable_movement`), `test-int/compensation-transfer.int.test.ts` 32줄 `RESET_SQL`(뷰는 `truncate`할 수 없다), `test-int/settlement.int.test.ts` 193~196줄(`information_schema.tables`에 뷰도 나온다), `loadtest/test/v1.test.mjs` 359~364줄, `loadtest/e2e/v1-rehearsal.e2e.mjs` 132줄(kind 무대라 CI 밖).
+
+### SQL 0028
+
+```sql
+-- 미수금 이동 기록 표 이름을 정본(docs/data.md ERD receivable_movement)에 맞춘다(FIX-invariant-m3).
+-- 확장 단계(docs/devops.md §7.1, docs/data.md §4 '미수금 이동 기록 표 이름 맞추기'): 이름만 바꾸고 옛 이름은 자동 갱신 뷰로 남긴다.
+ALTER TABLE "receivable_move" RENAME TO "receivable_movement";--> statement-breakpoint
+ALTER INDEX "receivable_move_pkey" RENAME TO "receivable_movement_pkey";--> statement-breakpoint
+ALTER INDEX "receivable_move_receivable_idx" RENAME TO "receivable_movement_receivable_idx";--> statement-breakpoint
+ALTER TABLE "receivable_movement" RENAME CONSTRAINT "receivable_move_amount_check" TO "receivable_movement_amount_check";--> statement-breakpoint
+ALTER TABLE "receivable_movement" RENAME CONSTRAINT "receivable_move_kind_check" TO "receivable_movement_kind_check";--> statement-breakpoint
+ALTER TABLE "receivable_movement" RENAME CONSTRAINT "receivable_move_receivable_id_partner_receivable_id_fk" TO "receivable_movement_receivable_id_partner_receivable_id_fk";--> statement-breakpoint
+ALTER TABLE "receivable_movement" RENAME CONSTRAINT "receivable_move_statement_id_settlement_statement_id_fk" TO "receivable_movement_statement_id_settlement_statement_id_fk";--> statement-breakpoint
+CREATE VIEW "receivable_move" WITH (security_invoker = true) AS SELECT "id", "receivable_id", "statement_id", "amount", "kind", "moved_at" FROM "receivable_movement";
+```
+
+- 기본 키 이름 `receivable_move_pkey`는 0026의 `ADD COLUMN "id" uuid PRIMARY KEY`가 PostgreSQL 기본 규칙으로 지은 것이다. 구현 담당은 0026까지 적용한 DB의 `pg_constraint`로 실제 이름을 한 번 확인한다. 새 외래 키 이름(58·59자)은 이름 상한 63바이트 안이다.
+
+## 공개 인터페이스
+
+- **payment DB**: 표 `receivable_movement`(칸 그대로), 제약·인덱스 `receivable_movement_pkey`·`_amount_check`·`_kind_check`·`_receivable_id_partner_receivable_id_fk`·`_statement_id_settlement_statement_id_fk`·`_receivable_idx`. 뷰 `receivable_move`(같은 칸 여섯, 단계 ③에서 지움).
+- **payment-svc 코드**: `schema.ts`의 `receivableMovement`(옛 `receivableMove` 없앰), `receivable-move-compat.ts`의 `receivableMoveCompat`(단계 ②에서 지움).
+- **검사기**:
+  - `InvariantResult.skip?: { kind: 'records' | 'source' | 'table'; names: string[] }`. `records`는 `names` 빈 배열, `source`는 없는 원본 이름, `table`은 없는 표 이름.
+  - `summaryLine(results): string` 예 `요약: PASS 9 · FAIL 0 · SKIPPED 8 — M1(원본에 표 없음: settlement_statement), P5(원본 없음: ticket), …`. SKIPPED가 없으면 `— SKIPPED 없음`. 차례는 `INVARIANTS` 차례.
+  - `skipWarnings(results): string[]`: `skip.kind === 'table'`인 결과마다 `경고: M3 원본(payment)에 붙었는데 표가 없다: receivable_movement — 기능이 아직 없거나 표 이름이 docs/data.md와 다르다` 꼴의 한 줄. 다른 까닭은 넣지 않는다.
+  - `runCli(argv, env, io: { stdout(s: string): void; stderr(s: string): void }): Promise<number>`(`src/cli-main.ts`). 표준 출력: 지금의 불변식별 줄 + 요약 한 줄. 표준 오류: 경고 줄. 끝 코드: FAIL이 있으면 1, 아니면 0(SKIPPED만 있어도 0), 인자·연결·기록 오류 2.
+- **loadtest**: `V1_EXPECTED_SKIPPED`가 `['P5', 'S3']`.
+
+## 시험 목록(시험 담당)
+
+이름에 ID를 단다. 검사기 쪽은 감독이 준 커밋 ID(J-T25, M3)를 따라 `J-T25 M3 ①…`로 쓴다(J-T25의 세부 ①~③은 지급대행 잔액 대사라, ID 바로 뒤에 번호를 붙이지 않아 그 세부를 채운 것으로 세지 않게 한다). payment 쪽은 표 모양 시험의 ID `PRF180`을 쓴다. 기존 시험의 이름은 바꾸지 않는다.
+
+| ID | 자리 | 무엇을 보나 |
+| --- | --- | --- |
+| J-T25 M3 ① | `services/invariant-checker/test-int/payment-migrated.int.test.ts`(새). `test-int/postgres.ts`의 `DATABASES`에 빈 DB `payment_migrated`를 더하고 `migratePayment`(`../../payment-svc/scripts/migrate.mjs`, bundle·purchase-svc 시험과 같은 가져오기)로 마이그레이션 전부를 적용한다 | payment 원본으로 이 DB를 주면 `tables.ts`의 payment 표 아홉이 모두 실리고(칸이 없으면 읽기가 오류로 끝난다), payment 표만 쓰는 불변식(P1·M1~M5)은 SKIPPED가 아니며, 어떤 결과에도 `skip.kind === 'table'`이 없다 |
+| J-T25 M3 ② | 같은 파일 | 같은 DB에 정본 칸·외래 키를 지켜 정산서 둘, 미수금 하나(100만 원), `receivable_movement`에 상계 30만·보증 충당 20만(`GUARANTEE`)·상계 50만·되돌림 50만(`REVERSAL`)을 넣고 `remaining`을 50만 원으로 두면 M3는 PASS 0건이다. `remaining`을 0으로 바꾸면 FAIL 1건이고 위반 행이 `amount=1000000 remaining=0 moved=500000`이다. 넣기는 새 이름 표로 한다 |
+| J-T25 M3 ③ | `test-int/invariants.int.test.ts`(기존 파일에 새 시험) | 붙은 원본에 표가 없으면(`bare` DB) 그 불변식의 `skip`이 `{ kind: 'table', names: […] }`이고 `skipWarnings`에 든다. 원본을 주지 않은 것(`skip.kind === 'source'`)과 기록이 없는 것(`records`)은 `skipWarnings`에 없다 |
+| J-T25 M3 ④ | `test/report.test.ts` | `summaryLine`이 PASS·FAIL·SKIPPED 개수와 SKIPPED ID·까닭을 `INVARIANTS` 차례로 적고, SKIPPED가 없으면 `SKIPPED 없음`이다. `skipWarnings`는 `table`만 줄로 낸다 |
+| J-T25 M3 ⑤ | `test-int/payment-migrated.int.test.ts` | `runCli`를 실제 DB 주소(환경 값)로 부르면 ① payment만 준 실행은 표준 출력 끝 줄이 요약이고 끝 코드 0(SKIPPED만 있음)이며 표준 오류가 비었다 ② payment 원본으로 `bare`를 주면 표준 오류에 M1~M5 경고가 나고 끝 코드는 0이다 ③ ②의 미수금을 틀리게 둔 실행은 끝 코드 1이다. `invariants.csv`가 세 경우 모두 써진다 |
+| PRF180 M3 ⑥ | `services/payment-svc/test/settlement-migration.test.ts`(기존 파일에 새 시험) | 0028 SQL에 위 'SQL 0028'의 이름 바꾸기 일곱 문장과 `CREATE VIEW "receivable_move" WITH (security_invoker = true)`가 있고, `DROP`·`ADD CONSTRAINT`·`CREATE INDEX`·`CREATE TABLE`이 없다. journal의 `idx` 28이 이 파일이고, 0028 snapshot에 `public.receivable_movement`(제약·인덱스·외래 키 이름이 모두 `receivable_movement_` 머리)가 있고 `public.receivable_move`가 없으며 `prevId`가 0027 snapshot의 `id`다 |
+| PRF180 M3 ⑦ | `services/payment-svc/test-int/settlement.int.test.ts`(새 시험) | 마이그레이션 뒤 `pg_constraint`·`pg_indexes`에서 `receivable_movement`의 제약 다섯·인덱스 둘 이름이 새 머리이고 `receivable_move_`로 시작하는 이름이 어디에도 없으며, `pg_class`에서 `receivable_move`는 뷰(`relkind = 'v'`)이고 `reloptions`에 `security_invoker=true`가 있다 |
+| PRF180 M3 ⑧ | 같은 파일 | N-1 앱처럼 옛 이름 뷰에 `id`·`kind` 없이 넣으면 새 UUID와 `OFFSET`으로 `receivable_movement`에 들어가고 옛 이름으로도 읽힌다. 뷰로 금액 0을 넣으면 `receivable_movement_amount_check`, 없는 미수금을 넣으면 `receivable_movement_receivable_id_partner_receivable_id_fk` 위반으로 막힌다 |
+| (기존, 이름 그대로) | `payment-schema.test.ts` 715·716줄·`when` 차례, `payment-grpc.int.test.ts` 173줄(PRF180), `compensation-transfer.int.test.ts` 32줄, `settlement.int.test.ts` 193~196줄(표는 `BASE TABLE`, 옛 이름은 `VIEW`로 기대), `loadtest/test/v1.test.mjs` 359~370줄(기대 목록 `['P5','S3']`, M3가 SKIPPED면 '더 M3'), `v1-rehearsal.e2e.mjs` 132줄 | 고친 기대값만 따라잡는다. 다른 단언은 약하게 하지 않는다 |
+
+- 단계 ①의 앱이 옛 이름(뷰)으로 돌므로, payment-svc 통합 시험 전부(settlement·compensation-transfer·settlement-a1v 등)가 그대로 'N-1 앱의 통합 시험 묶음을 새 스키마에서 실행'(`docs/devops.md` §7.3 적용 시험 ③)이 된다. 새 시험을 따로 두지 않는다. 시험의 날 SQL(`select … from receivable_move`)도 그대로 둔다(단계 ②가 새 이름으로 바꾼다).
+- 시험은 `docs/architecture.md` §8.6 '자주 놓친 결함'과 `peaket-test-antipatterns` 지침을 따른다. 특히 ①은 손으로 만든 표가 아니라 마이그레이션을 적용한 DB여야 하고, ⑤는 판정 함수가 아니라 명령 경계(`runCli`)를 본다.
+
+## 실패 확인
+
+시험 담당이 채운다. 정방향 묶음이라 구현 뒤에 쓰므로, 새 시험이 잡는 것은 아래 '틀린 구현 표본'과 이 계획 커밋 트리의 실제 동작(0026까지 적용한 payment DB에서 M3가 `원본에 표 없음: receivable_movement`로 SKIPPED)으로 보인다.
+
+## 확인 명령
+
+Docker가 필요하다. 잠금을 잡고 돌린 뒤 놓는다(잠금이 비어 있지 않으면 기다린다. 갈래 안에서 한 담당만 잡는다).
+
+```bash
+bash D:/ticketpass-locks/lock.sh take docker lane5-FIX-invariant-m3
+pnpm exec turbo run build --filter=@peaket/payment-svc^... --filter=@peaket/invariant-checker^... --filter=@peaket/search-normalize --filter=@peaket/pg-simulator
+pnpm --filter @peaket/payment-svc db:generate                 # 바뀐 것 없음(snapshot = schema.ts)
+pnpm --filter @peaket/payment-svc test
+pnpm --filter @peaket/invariant-checker test
+pnpm --filter @peaket/payment-svc test:integration             # 전부(뷰로 도는 N-1 호환 포함)
+pnpm --filter @peaket/invariant-checker test:integration
+pnpm exec turbo run build --filter=@peaket/bundle...
+pnpm --filter @peaket/bundle test:integration                   # 합본 시작 파일이 0028을 적용한 DB에서 뜬다
+bash D:/ticketpass-locks/lock.sh drop docker lane5-FIX-invariant-m3
+node --test loadtest/test/v1.test.mjs
+pnpm exec turbo run typecheck --filter=@peaket/payment-svc --filter=@peaket/invariant-checker --filter=@peaket/purchase-svc --filter=@peaket/bundle
+pnpm lint
+python -I -X utf8 tools/doc-check/check_all.py
+node tools/ci/roles-check.mjs --base origin/develop --head HEAD
+```
+
+- 통과 기준: 위 시험 전부 실패 0, `db:generate` 바뀐 것 없음, typecheck·lint 0, doc-check 오류 0, roles-check가 이 묶음을 '코드(정방향)'로 센다. purchase-svc는 payment-svc 원본을 가져다 쓰므로(CLAUDE.md) 타입 검사를 함께 돌린다.
+
+## 틀린 구현 표본(검증 담당용)
+
+| # | 넣을 틀린 것 | 잡을 검사 |
+| --- | --- | --- |
+| S1 | 0028에서 `CREATE VIEW`를 뺀다(한 번에 이름만 바꿈) | PRF180 M3 ⑥·⑦·⑧과 payment-svc 통합 시험 전부(저장소가 옛 이름을 쓴다) |
+| S2 | 0028을 drizzle-kit이 만든 그대로 둔다(제약 지우고 다시 걸기·인덱스 다시 만들기) | PRF180 M3 ⑥ |
+| S3 | 표 이름만 바꾸고 제약·인덱스 이름은 `receivable_move_…`로 둔다 | PRF180 M3 ⑦(⑥도) |
+| S4 | 0028이 다른 이름(`receivable_movements`)으로 바꾼다, 또는 `tables.ts`를 `receivable_move`로 되돌린다 | J-T25 M3 ①(M3 SKIPPED·`table` 까닭)과 PRF180 표 목록 |
+| S5 | 뷰를 `security_invoker` 없이 만든다 | PRF180 M3 ⑥·⑦ |
+| S6 | `skipWarnings`가 `source`·`records` 까닭도 경고로 낸다, 또는 `summaryLine`이 SKIPPED 목록을 빠뜨린다 | J-T25 M3 ③·④ |
+| S7 | `runCli`가 SKIPPED가 있으면 끝 코드 1을 낸다, 또는 경고를 표준 출력에 섞는다 | J-T25 M3 ⑤ |
+| S8 | M3 SQL에서 `REVERSAL`을 더하기로 바꾼다 | J-T25 M3 ②(실제 스키마의 되돌림 행으로) |
+| S9 | `V1_EXPECTED_SKIPPED`에 M3를 남긴다 | `loadtest/test/v1.test.mjs` PRF215 코드리뷰 H2 |
+
+- 저장소가 단계 ①에서 새 이름 표를 바로 쓰는 것(원칙 3 위반)은 시험으로 잡히지 않는다(동작은 같다). 리뷰가 I3을 본다.
+
+## 넘기는 것
+
+- **단계 ② 묶음(가칭 FIX-invariant-m3-2)**: 0028이 든 출시 태그 뒤. 저장소를 `receivableMovement`로 바꾸고 `receivable-move-compat.ts`를 지우며 시험의 날 SQL을 새 이름으로 바꾼다. 마이그레이션 없음.
+- **단계 ③ 묶음(가칭 FIX-invariant-m3-3)**: ② 출시 7일 뒤 [가정]. `DROP VIEW "receivable_move"` 마이그레이션(그때의 다음 번호).
+- **칸 차이**: ERD `receivable_movement`는 `created_at`·`reverses_id`(되돌린 기록)·`statement_id` 널 허용(보증·회수는 정산서 없음)인데 0016·0026은 `moved_at`·`reverses_id` 없음·`statement_id NOT NULL`이다. M3는 이 칸들을 읽지 않아 이 묶음 밖이다. 되돌림(`REVERSAL`)을 처음 쓰는 단계 전에 맞춰야 한다(정본과 코드 어느 쪽을 고칠지 포함). `docs/lanes/lane5-cleanup.md`에 줄을 더한다(기록 담당).
+- **ERD 누락**: `lane5-cleanup.md` 23줄의 표 셋·`seller_kyc` 칸 누락은 그대로 남는다(이 묶음은 이름 차이만 닫는다).
+- **다른 원본의 같은 시험**: purchase·ticket 원본 표(S1~S4·P3~P5)도 손으로 만든 표로만 시험한다. 서비스 마이그레이션을 적용한 DB로 J-T25 M3 ①과 같은 시험을 두는 일은 따로 한다.
+- **v0 실행 도구**: v0 경로(`loadtest/run.mjs` `runInvariants`)는 기대 SKIPPED 목록을 대조하지 않는다. 경고 줄은 이 묶음 뒤 콘솔에 보이지만 실행을 무효로 하지는 않는다.
+- **CLAUDE.md의 상대 경로 가져오기 목록**: invariant-checker 통합 시험이 `services/payment-svc/scripts/migrate.mjs`를 읽게 된다(bundle·purchase-svc도 이미 읽지만 목록에 없다). 목록을 고칠지는 소유자 몫이다.
+- **v1 리허설**: 기대 목록을 고쳤지만 kind 무대 리허설(`loadtest/e2e/v1-rehearsal.e2e.mjs`)은 이 묶음에서 돌리지 않는다. 다음 v1 측정 때 확인한다.
+
+## 시험 결과
+
+(시험 담당)
+
+## 리뷰
+
+(리뷰 담당)
+
+## 검증
+
+(검증 담당)
+
+## 담당 표
+
+| 역할 | 세션 ID | 모델 | 시작 | 끝 |
+| --- | --- | --- | --- | --- |
+| plan | lane5-fixm3-plan | claude-opus-5-5 | 2026-11-23T06:40:00+09:00 | 2026-11-23T07:20:00+09:00 |
