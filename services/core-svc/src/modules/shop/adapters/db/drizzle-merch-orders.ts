@@ -467,7 +467,8 @@ export class DrizzleShopOrderStore implements ShopOrderStore {
         await tx.execute(sql`
           insert into merch_payment_attempt (id, order_id, attempt_no, pg, pay_method, status, created_at)
           values (${a.attemptId}, ${a.orderId}, ${detail.attemptCount + 1}, ${a.pg}, ${a.payMethod}, 'READY', ${new Date(a.nowMs)})`);
-        return { resultRef: a.responseJson, value: undefined };
+        // 결과 참조는 시도 ID 하나다. 결제창 값은 저장하지 않고 재생 때 PrepareCheckout으로 다시 만든다(ADR-0352)
+        return { resultRef: a.attemptId, value: undefined };
       }),
     );
     return 'replay' in r ? { kind: 'replay', resultRef: r.replay } : { kind: 'saved' };

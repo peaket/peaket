@@ -3,9 +3,9 @@
 //   PrepareCheckout(ORDER_KIND_MERCH)을 부른 뒤 주문 행을 잠그고 다시 보고 시도를 넣는다(이전 READY는 SUPERSEDED). 예약 시각을 늘리지 않는다.
 // - 접수: 한 트랜잭션(주문 잠금·조건부 재고 차감·시도 ACCEPTED·예약 연장·승인 명령 작업)을 커밋한 뒤 EXTEND와 ConfirmPayment(200ms)를 부르고 202.
 //   ConfirmPayment가 받아지지 않으면 작업이 다시 보낸다(merch-payment-results.ts). 만료면 409 order-expired이고 결제사를 부르지 않는다.
-// - 같은 키 다시 오기(ADR-0337 결정 6): 저장한 결과가 경로 주문·세션 계정의 것인지 본 뒤에만 돌려준다. 시작은 시도 ID가 경로 주문의 시도이고
-//   결제사가 그 시도의 결제사이며 결제창 금액이 주문 금액일 때, 접수는 참조가 accepted·sold-out이고 경로 주문이 세션 계정의 것일 때다.
-//   맞지 않으면 쓰기·결제사 호출 없이 남의 주문과 같은 404이고 보안 이벤트 로그 한 줄이다.
+// - 같은 키 다시 오기(ADR-0337 결정 6, ADR-0352): 저장한 결과가 경로 주문·세션 계정의 것인지 본 뒤에만 돌려준다. 시작의 결과 참조는 시도 ID 하나이고,
+//   재생은 PrepareCheckout을 같은 시도 ID·고정 결제사로 다시 불러 지금 설정의 결제창 값을 만든다. 재생이 만든 결제사·금액·주문이 어긋나면 503이다.
+//   접수는 참조가 accepted·sold-out이고 경로 주문이 세션 계정의 것일 때다. 맞지 않으면 쓰기·결제사 호출 없이 남의 주문과 같은 404이고 보안 이벤트 로그 한 줄이다.
 import { uuidv7, type Clock, type IdempotencyRequest } from '@peaket/platform';
 import {
   type AcceptBody,
@@ -16,6 +16,7 @@ import {
   dependencyUnavailable,
   escrowLinesOf,
   merchSoldOut,
+  type MerchAttempt,
   orderNotFound,
   payMethodBlockedByStore,
   payMethodsForStore,
@@ -23,8 +24,9 @@ import {
   pgUnavailable,
   PULL_PENDING_MS,
   ShopProblem,
+  type ShopOrderDetail,
 } from '../domain/merch-order.js';
-import { CheckoutFailed, type CheckoutValues, type MerchPayments, type MerchStock, type ShopOrderStore } from '../domain/merch-ports.js';
+import { type CheckoutAnswer, CheckoutFailed, type CheckoutValues, type MerchPayments, type MerchStock, type ShopOrderStore } from '../domain/merch-ports.js';
 import { replayMismatch, type ShopLogger, type ShopSignals, silentShopLogger } from './shop-signals.js';
 
 export interface MerchPaymentDeps {
@@ -89,8 +91,17 @@ export class MerchPayment {
       this.#log.error({ kind: 'merch-checkout-failed', severity: 'SEV2', orderId: detail.order.orderId }, '굿즈 결제창 준비가 설정 오류로 끝났다');
       throw dependencyUnavailable();
     }
+    const view = this.#viewOf(detail, attemptId, answer);
+    this.d.signals?.escrowPayment(detail.order.pgStore === 'ESCROW' ? 'prepared' : 'standard');
+    // 결과 참조는 저장소가 시도 ID로 쓴다. 결제창 값은 DB에 두지 않는다(ADR-0352)
+    const saved = await this.d.store.saveAttempt(once, { orderId: detail.order.orderId, accountId, attemptId, pg: answer.pg, payMethod: body.payMethod ?? null, nowMs: this.d.clock.now() });
+    return saved.kind === 'replay' ? this.#startReplay(accountId, orderId, saved.resultRef, once.operation) : view;
+  }
+
+  /** 새 시도·재생의 201 재료. 재생은 지금 주문의 재고 예약 만료와 지금 설정의 결제창 값을 싣는다 */
+  #viewOf(detail: ShopOrderDetail, attemptId: string, answer: CheckoutAnswer): PaymentAttemptView {
     const allowed = new Set(payMethodsForStore(detail.order.pgStore));
-    const view: PaymentAttemptView = {
+    return {
       attemptId,
       pg: answer.pg,
       switched: answer.switched,
@@ -99,24 +110,77 @@ export class MerchPayment {
       checkout: answer.checkout,
       ...(answer.depositDueAtMs === undefined ? {} : { depositDueAt: new Date(answer.depositDueAtMs).toISOString() }),
     };
-    this.d.signals?.escrowPayment(detail.order.pgStore === 'ESCROW' ? 'prepared' : 'standard');
-    const saved = await this.d.store.saveAttempt(once, { orderId: detail.order.orderId, accountId, attemptId, pg: answer.pg, payMethod: body.payMethod ?? null, nowMs: this.d.clock.now(), responseJson: JSON.stringify(view) });
-    return saved.kind === 'replay' ? this.#startReplay(accountId, orderId, saved.resultRef, once.operation) : view;
   }
 
   /**
-   * 시작의 같은 키 다시 오기. 대조는 처음 응답 뒤에도 바뀌지 않는 사실만 본다(소유 계정, 시도가 속한 주문, 시도의 결제사, 주문 금액).
-   * 그래서 그 뒤 시도가 대체·만료되었어도 처음 응답을 그대로 돌려준다(guidelines §4 '돌려주는 응답')
+   * 시작의 같은 키 다시 오기(ADR-0352). 결과 참조에서 시도 ID만 읽고(옛 JSON 참조는 그 안의 ID만), 경로 주문·세션 계정의 시도인지 본 뒤
+   * PrepareCheckout을 같은 시도 ID·고정 결제사로 다시 불러 결제창 값을 지금 설정으로 만든다. 대조는 처음 응답 뒤에도 바뀌지 않는 사실만 본다.
+   * 맞지 않으면 쓰기·PrepareCheckout 없이 남의 주문과 같은 404이고 보안 이벤트 로그 한 줄이다.
    */
   async #startReplay(accountId: string, orderId: string, ref: string, operation: string): Promise<PaymentAttemptView> {
     const path = orderId.toLowerCase();
-    const view = attemptViewOf(ref);
-    if (view !== undefined) {
+    const attemptId = attemptIdOf(ref);
+    if (attemptId !== undefined) {
       const detail = await this.d.store.findOrder(path);
-      const attempt = detail && detail.order.accountId === accountId ? await this.d.store.paymentAttempt(view.attemptId) : undefined;
-      if (detail && attempt && attempt.orderId === detail.order.orderId && attempt.pg === view.pg && checkoutAmountOf(view) === detail.order.amount) return view;
+      if (detail && detail.order.accountId === accountId) {
+        const attempt = await this.d.store.paymentAttempt(attemptId);
+        if (attempt && attempt.orderId === detail.order.orderId) {
+          const answer = await this.#prepareReplay(detail, attempt);
+          this.#checkReplay(detail, attempt, answer);
+          return this.#viewOf(detail, attempt.attemptId, answer);
+        }
+      }
     }
     throw replayMismatch(this.#log, operation, path);
+  }
+
+  /**
+   * 재생의 결제창 준비. 처음 201을 준 요청이라 준비 실패는 400이 아니라 5xx이고, 같은 키로 다시 보낼 수 있다(ADR-0352 결정 5).
+   * 다른 결제사·다른 상점으로 넘어가지 않는다(pinnedPg).
+   */
+  async #prepareReplay(detail: ShopOrderDetail, attempt: MerchAttempt): Promise<CheckoutAnswer> {
+    const names = detail.items.map((i) => i.productName);
+    const orderName = names.length > 1 ? `${names[0]} 외 ${names.length - 1}건` : (names[0] ?? '굿즈 주문');
+    try {
+      return await this.d.payments.prepareCheckout({
+        orderId: detail.order.orderId,
+        attemptId: attempt.attemptId,
+        eventId: detail.order.eventId,
+        amount: detail.order.amount,
+        orderName,
+        payMethod: attempt.payMethod ?? undefined,
+        pgStore: detail.order.pgStore,
+        ...(detail.order.pgStore === 'ESCROW' ? { escrowProducts: escrowLinesOf(detail.items) } : {}),
+        virtualAccountAllowed: true,
+        pinnedPg: attempt.pg,
+      });
+    } catch (e) {
+      if (!(e instanceof CheckoutFailed)) throw e;
+      switch (e.reason) {
+        case 'unavailable':
+        case 'invalid':
+          throw pgUnavailable();
+        case 'paused':
+          throw new ShopProblem('new-payment-paused', 503, '새 결제를 잠시 멈췄습니다', 5);
+        default:
+          throw dependencyUnavailable();
+      }
+    }
+  }
+
+  /** 재생이 만든 결제사·금액·주문 ID가 시도·주문과 어긋나면 결제창 값을 돌려주지 않는다(다른 상점·다른 금액 차단, ADR-0352 결정 4) */
+  #checkReplay(detail: ShopOrderDetail, attempt: MerchAttempt, answer: CheckoutAnswer): void {
+    const field =
+      answer.pg !== attempt.pg
+        ? 'pg'
+        : checkoutAmountOf(answer.checkout, answer.pg) !== detail.order.amount
+          ? 'amount'
+          : checkoutOrderIdOf(answer.checkout, answer.pg) !== detail.order.orderId
+            ? 'orderId'
+            : undefined;
+    if (field === undefined) return;
+    this.#log.error({ kind: 'merch-checkout-replay-mismatch', severity: 'SEV2', orderId: detail.order.orderId, field }, '결제창 재생 값이 시도·주문과 어긋난다');
+    throw dependencyUnavailable();
   }
 
   async accept(accountId: string, orderId: string, body: AcceptBody, once: IdempotencyRequest): Promise<void> {
@@ -167,8 +231,14 @@ export class MerchPayment {
   }
 }
 
-/** 저장한 결제 시도 응답(JSON)을 읽는다. 읽지 못하거나 대조할 칸이 없으면 undefined */
-function attemptViewOf(ref: string): PaymentAttemptView | undefined {
+const ATTEMPT_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * 결과 참조에서 시도 ID를 읽는다. 새 참조는 UUID 하나이고, 옛 참조(배포 전)는 처음 응답 JSON이다.
+ * 옛 JSON에서는 `attemptId` 하나만 쓰고 결제창 값·결제사·금액은 버린다(ADR-0352 결정 6).
+ */
+function attemptIdOf(ref: string): string | undefined {
+  if (ATTEMPT_REF.test(ref)) return ref;
   let v: unknown;
   try {
     v = JSON.parse(ref);
@@ -176,14 +246,27 @@ function attemptViewOf(ref: string): PaymentAttemptView | undefined {
     return undefined;
   }
   if (typeof v !== 'object' || v === null) return undefined;
-  const o = v as Record<string, unknown>;
-  if (typeof o.attemptId !== 'string' || typeof o.pg !== 'string' || typeof o.checkout !== 'object' || o.checkout === null) return undefined;
-  return v as PaymentAttemptView;
+  const id = (v as { attemptId?: unknown }).attemptId;
+  return typeof id === 'string' && ATTEMPT_REF.test(id) ? id : undefined;
 }
 
 /** 결제창 금액: 포트원은 totalAmount, 토스·시뮬레이터는 amount(openapi PaymentAttempt.checkout). 숫자가 아니면 undefined */
-function checkoutAmountOf(v: PaymentAttemptView): number | undefined {
-  const c = v.checkout as Record<string, unknown>;
-  const amount = v.pg === 'PORTONE' ? c.totalAmount : c.amount;
+function checkoutAmountOf(c: CheckoutValues, pg: MerchAttempt['pg']): number | undefined {
+  const amount = pg === 'PORTONE' ? (c as { totalAmount?: unknown }).totalAmount : (c as { amount?: unknown }).amount;
   return typeof amount === 'number' ? amount : undefined;
 }
+
+/** 결제창의 주문 ID: 토스는 orderId, 포트원은 paymentId의 `pay-{orderId}`와 customData.orderId다. 다르면 undefined(어긋남) */
+function checkoutOrderIdOf(c: CheckoutValues, pg: MerchAttempt['pg']): string | undefined {
+  if (pg !== 'PORTONE') {
+    const id = (c as { orderId?: unknown }).orderId;
+    return typeof id === 'string' ? id : undefined;
+  }
+  const paymentId = (c as { paymentId?: unknown }).paymentId;
+  const custom = (c as { customData?: { orderId?: unknown } }).customData?.orderId;
+  const fromPayment = typeof paymentId === 'string' && paymentId.startsWith('pay-') ? paymentId.slice(4) : undefined;
+  const fromCustom = typeof custom === 'string' ? custom : undefined;
+  if (fromCustom !== undefined && fromPayment !== undefined && fromCustom !== fromPayment) return undefined;
+  return fromCustom ?? fromPayment;
+}
+

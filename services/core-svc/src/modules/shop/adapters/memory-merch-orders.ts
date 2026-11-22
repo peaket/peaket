@@ -300,7 +300,8 @@ export class MemoryShopOrderStore implements ShopOrderStore {
     if (blocked) throw blocked;
     for (const x of this.#attemptsOf(a.orderId)) if (x.status === 'READY') x.status = 'SUPERSEDED';
     this.attempts.set(a.attemptId, { attemptId: a.attemptId, orderId: a.orderId, attemptNo: detail.attemptCount + 1, pg: a.pg, payMethod: a.payMethod, status: 'READY', createdAt: new Date(a.nowMs), acceptedAt: null });
-    this.#remember(once, a.responseJson);
+    // 결과 참조는 시도 ID 하나다(결제창 값은 저장하지 않는다, ADR-0352)
+    this.#remember(once, a.attemptId);
     this.writes++;
     return { kind: 'saved' };
   }

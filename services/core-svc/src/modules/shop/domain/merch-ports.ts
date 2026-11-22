@@ -110,6 +110,8 @@ export interface CheckoutQuery {
   escrowProducts?: EscrowLine[] | undefined;
   /** 이 결제에서 가상계좌를 내도 되는가(굿즈는 늘 참, ADR-0314) */
   virtualAccountAllowed: boolean;
+  /** 멱등 재생에서 그 시도의 결제사로 고정한다(ADR-0352). 값이 있으면 전환·지정을 보지 않고 이 결제사로 값을 만든다 */
+  pinnedPg?: ShopPg | undefined;
 }
 
 /** 결제창 값(openapi PaymentAttempt.checkout 모양) */
@@ -261,6 +263,7 @@ export interface NewShopOrder {
   items: ShopOrderItem[];
 }
 
+/** 새 결제 시도. 저장소는 `attemptId`를 멱등 기록의 결과 참조로 쓴다(결제창 값은 저장하지 않는다, ADR-0352) */
 export interface NewAttempt {
   orderId: string;
   accountId: string;
@@ -268,8 +271,6 @@ export interface NewAttempt {
   pg: ShopPg;
   payMethod: string | null;
   nowMs: number;
-  /** 다시 돌려줄 응답 본문(JSON). 멱등 기록의 결과 참조로 둔다 */
-  responseJson: string;
 }
 
 /** 승인 명령 작업(merch_confirm_job) */

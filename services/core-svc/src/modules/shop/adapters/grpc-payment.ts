@@ -116,6 +116,8 @@ export class GrpcMerchPayments implements MerchPayments {
           virtual_account_allowed: q.virtualAccountAllowed,
           payment_store: q.pgStore === 'ESCROW' ? 'PAYMENT_STORE_ESCROW' : 'PAYMENT_STORE_STANDARD',
           ...(q.escrowProducts === undefined ? {} : { escrow_products: q.escrowProducts.map((p) => ({ id: p.id, name: p.name, code: p.code, unit_price: p.unitPrice, quantity: p.quantity })) }),
+          // 재생은 그 시도의 결제사로 고정한다(ADR-0352). 값이 있으면 payment-svc가 전환·지정을 보지 않는다
+          ...(q.pinnedPg === undefined ? {} : { pinned_pg: PG_PROVIDER[q.pinnedPg] }),
         },
         DEADLINE.checkout,
       );
