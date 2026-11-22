@@ -397,8 +397,16 @@ test('I-T32_흡수안내는방금흡수확정을받은탭에만보인다_표시�
   assert.equal(takeMergedAway(st, 5), false);
   assert.equal(st.m.has(MERGED_AWAY_KEY), false);
   assert.ok(MERGED_AWAY_TTL_MS <= 60_000);
-  // 떠나기 직전에 표시를 남기고, 흡수 안내 주소는 그 표시를 보는 부품으로 그린다(서버가 주소만 믿고 안내를 그리지 않는다)
-  assert.match(LIVE, /if \(st\.mergedAway\) markMergedAway\(tabStore, Date\.now\(\)\);\s*\n\s*window\.location\.assign\(st\.go\);/);
+  // 떠나기 직전에 표시를 남기고, 흡수 안내 주소는 그 표시를 보는 부품으로 그린다(서버가 주소만 믿고 안내를 그리지 않는다).
+  // 흡수면 로그아웃 정리(2·4번, 월렛 키 남김·서버 로그아웃 없음)를 마친 뒤에 흡수 표시를 남기고 떠난다(docs/frontend.md §5.14.4, ADR-0363 결정 8, F-05-1 시험 이의)
+  const merged = LIVE.slice(LIVE.indexOf('if (st.mergedAway)'));
+  const cleanupAt = merged.indexOf('logoutCleanup({ wallet: false, server: false');
+  const markAt = merged.indexOf('markMergedAway(tabStore, Date.now())');
+  const leaveAt = merged.indexOf('window.location.assign(go)');
+  assert.ok(cleanupAt > 0, '흡수 자리가 정리 루틴을 월렛 키 남김·서버 로그아웃 없이 부르지 않는다');
+  assert.ok(markAt > cleanupAt, '흡수 표시가 정리 뒤가 아니다');
+  assert.ok(leaveAt > markAt, '떠나기가 흡수 표시 뒤가 아니다');
+  assert.match(merged.slice(cleanupAt, markAt), /\.then\(/, '정리를 마치기를 기다리지 않는다');
   assert.match(PAGE, /endedMerged \? <MergedAwayNotice \/>/);
   assert.doesNotMatch(PAGE, /<Absorbed live=\{endedMerged\}/);
   const notice = readFileSync(new URL('../../_pages/settings-providers/ui/MergedAwayNotice.tsx', import.meta.url), 'utf8');

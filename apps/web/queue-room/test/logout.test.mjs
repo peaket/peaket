@@ -71,3 +71,52 @@ test('SCR-008 서버 로그아웃: 같은 출처 POST를 redirect manual로 보�
   assert.equal(await serverLogout(f({ type: 'basic', status: 403, ok: false }), '/logout'), 'failed');
   assert.equal(await serverLogout(f(new TypeError('끊김')), '/logout'), 'failed');
 });
+
+// F-05-1(ADR-0363 결정 8, docs/frontend.md §5.14.4): 대기실 루틴과 소비자 웹 루틴은 같은 목록을 쓴다. 같은 저장물을 채운 두 탭에서 두 루틴을 돌려
+// 남은 값이 같은지, 새로 더한 peaket.wallet.reauth·peaket.staff.fragment를 지우는지, 월렛 워커 범위 /my/tickets(끝 / 없음, ADR-0363 결정 5)를 푸는지 본다.
+test('FE-T47 대기실과 소비자 웹 정리 루틴은 같은 값을 지우고 남기며 월렛 범위 /my/tickets를 풀고 /push/는 남긴다 [ASVS v5.0.0-14.3.1]', async () => {
+  const { runLogoutCleanup } = await import('../../src/features/session-cleanup/routine.ts');
+  const LOCAL = ['peaket.queue.e1', 'peaket.clock', 'peaket.autoassign.e1', 'peaket.wishQueue', 'peaket.device', 'peaket.recentSearches'];
+  const SESSION = ['peaket.admission.e1', 'peaket.withdraw.reauth', 'peaket.providers.pending', 'peaket.devices.reauth', 'peaket.wallet.reauth', 'peaket.verify.return', 'peaket.staff.fragment', 'peaket.hold.e1', 'peaket.checkout.h1', 'peaket.providers.merged'];
+  const one = () => {
+    const local = memory();
+    const session = memory();
+    for (const k of LOCAL) local.setItem(k, 'v');
+    for (const k of SESSION) session.setItem(k, 'v');
+    const log = [];
+    return {
+      local,
+      session,
+      log,
+      d: {
+        local,
+        session,
+        idb: { deleteDatabase: (n) => log.push(`idb:${n}`) },
+        caches: { keys: async () => ['wallet-shell-10', 'other-cache'], delete: async (n) => (log.push(`cache:${n}`), true) },
+        serviceWorker: {
+          getRegistrations: async () => [
+            { scope: 'https://www.peaket.example/my/tickets', unregister: async () => (log.push('unregister:/my/tickets'), true) },
+            { scope: 'https://www.peaket.example/push/', unregister: async () => (log.push('unregister:/push/'), true) },
+          ],
+        },
+        broadcast: (name, msg) => log.push(`broadcast:${name}:${msg}`),
+        pushUnbind: async () => {
+          log.push('push:DELETE');
+        },
+      },
+    };
+  };
+  const room = one();
+  const web = one();
+  await clearForLogout(room.d, { wallet: true });
+  await runLogoutCleanup(web.d, { wallet: true, server: false });
+  assert.deepEqual(room.local.keys().sort(), ['peaket.device', 'peaket.recentSearches']);
+  assert.deepEqual(room.session.keys(), ['peaket.providers.merged']);
+  assert.deepEqual([room.local.keys().sort(), room.session.keys().sort()], [web.local.keys().sort(), web.session.keys().sort()]);
+  assert.deepEqual([...room.log].sort(), [...web.log].sort());
+  assert.equal(room.log[0], 'push:DELETE', '대기실도 웹 푸시 해제를 맨 앞에 한다');
+  assert.ok(room.log.includes('unregister:/my/tickets'));
+  assert.equal(room.log.includes('unregister:/push/'), false);
+  assert.deepEqual(room.log.filter((l) => l.startsWith('idb:')).sort(), ['idb:peaket-purchase', 'idb:peaket-push', 'idb:peaket-wallet']);
+  assert.deepEqual(room.log.filter((l) => l.startsWith('cache:')), ['cache:wallet-shell-10']);
+});

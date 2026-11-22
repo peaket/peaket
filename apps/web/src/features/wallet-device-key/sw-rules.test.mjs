@@ -1,6 +1,7 @@
 // 월렛 서비스 워커 규칙 시험(BAT-170 웨이브 7 T7, docs/frontend.md §5.4 '서비스 워커'·'갱신' ①⑤, docs/security/asvs/frontend.md 14.3.2).
 // 시험 담당(l2w7-BAT170-test)이 구현 전에 썼다(ADR-0270 결정 3). 단언 값은 정본의 글을 옮겨 적었고 코드 상수를 가져오지 않는다.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { isNetworkOnlyPath, isSkipWaitingMessage, isWalletCacheVersion, isWalletDocumentPath, rejectNoStore, rotateWalletCaches, staleWalletCaches, walletCacheName } from './sw-rules.ts';
 
@@ -49,9 +50,10 @@ test('HOT-390 SKIP_WAITING 메시지만 활성화를 부른다', () => {
   }
 });
 
-test('HOT-390 API(/v1/)와 워커 자신(/serwist/)은 네트워크로만 받는다', () => {
-  for (const p of ['/v1/', '/v1/tickets/me', '/serwist/sw.js', '/serwist/']) assert.equal(isNetworkOnlyPath(p), true, p);
-  for (const p of ['/v10/tickets', '/v1', '/serwistx/sw.js', '/my/tickets', '/', '/_next/static/chunks/a.js']) assert.equal(isNetworkOnlyPath(p), false, p);
+// ADR-0363 결정 5(F-05-1 시험 이의): 워커 자신은 /my/tickets/sw.js, 웹 푸시 워커는 /push/ 아래다(docs/frontend.md §5.4 범위 세부)
+test('HOT-390 FE-T14 API(/v1/)·월렛 워커 자신(/my/tickets/sw.js)·웹 푸시 워커(/push/)는 네트워크로만 받는다', () => {
+  for (const p of ['/v1/', '/v1/tickets/me', '/my/tickets/sw.js', '/push/sw.js', '/push/']) assert.equal(isNetworkOnlyPath(p), true, p);
+  for (const p of ['/v10/tickets', '/v1', '/serwistx/sw.js', '/my/tickets', '/my/tickets/tkt-1', '/', '/_next/static/chunks/a.js']) assert.equal(isNetworkOnlyPath(p), false, p);
 });
 
 // ---------- 런타임 캐시 판(BAT-350, O-T46, docs/frontend.md §5.4 '갱신'의 런타임 캐시 판, §3.12 저장 표, ADR-0336 결정 5) ----------
@@ -241,4 +243,98 @@ test('O-T46 ④ 판 값이 꼴을 벗어나면 런타임 캐시 이름을 만들
     assert.equal(isWalletCacheVersion(v), false, JSON.stringify(v));
     assert.throws(() => walletCacheName(v), Error, JSON.stringify(v));
   }
+});
+
+// ---------- 월렛 워커 위치·범위·킬 스위치(F-05-1, FE-T14, ADR-0363 결정 5·6, docs/frontend.md §5.4 범위 세부·킬 스위치, ASVS 3.5.4) ----------
+// 단언 값(주소·범위·지우는 캐시 이름)은 정본 글에서 적는다. 실제 브라우저의 범위 밖 가로채기 0은 tools/web-checks/reflow/wallet-sw.spec.mjs가 본다.
+
+test('FE-T14 월렛 워커는 /my/tickets/sw.js에서 범위 /my/tickets(끝 / 없음)로, 웹 푸시 워커는 /push/sw.js·범위 /push/로 등록한다 [ASVS v5.0.0-3.5.4]', async () => {
+  const m = await import('./sw-rules.ts');
+  assert.equal(m.WALLET_SW_URL, '/my/tickets/sw.js');
+  assert.equal(m.WALLET_SW_SCOPE, '/my/tickets');
+  assert.equal(m.PUSH_SW_URL, '/push/sw.js');
+  assert.equal(m.PUSH_SW_SCOPE, '/push/');
+});
+
+test('FE-T14 범위 /my/tickets가 맡게 되는 /my/tickets 뒤 / 아닌 경로는 새는 경로로 가른다 [ASVS v5.0.0-3.5.4]', async () => {
+  const { walletScopeLeaks } = await import('./sw-rules.ts');
+  for (const p of ['/my/ticketsX', '/my/tickets-old', '/my/tickets.json', '/my/tickets_1']) assert.equal(walletScopeLeaks(p), true, p);
+  for (const p of ['/my/tickets', '/my/tickets/', '/my/tickets/tkt-1', '/my/tickets/sw.js', '/my', '/my/settings', '/queue/evt-1', '/']) assert.equal(walletScopeLeaks(p), false, p);
+});
+
+test('FE-T14 앱의 경로 목록에 범위 /my/tickets가 원하지 않게 맡는 경로(/my/tickets 뒤 / 아닌 글자)가 없다 [ASVS v5.0.0-3.5.4]', async () => {
+  const { readdirSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { walletScopeLeaks } = await import('./sw-rules.ts');
+  const app = fileURLToPath(new URL('../../../app/', import.meta.url));
+  /** app/ 아래 경로 조각(라우트 그룹 (x)는 주소에 없고, [x]는 그 자리의 아무 값). 페이지·처리기 파일이 있는 폴더만 주소다 */
+  const routes = [];
+  const walk = (dir, segs) => {
+    const names = readdirSync(dir);
+    if (names.some((n) => /^(page|route)\.(tsx?|jsx?|mjs)$/.test(n))) routes.push(`/${segs.join('/')}`);
+    for (const n of names) {
+      const full = join(dir, n);
+      if (!statSync(full).isDirectory() || n.startsWith('_') || n.startsWith('@')) continue;
+      walk(full, /^\(.*\)$/.test(n) ? segs : [...segs, n]);
+    }
+  };
+  walk(app, []);
+  // 빈 결과가 통과로 새지 않게: 월렛 목록·워커 주소가 목록에 있어야 한다
+  assert.ok(routes.includes('/my/tickets'), `경로 목록에 /my/tickets가 없다: ${routes.length}개`);
+  assert.ok(routes.includes('/my/tickets/sw.js'), '경로 목록에 /my/tickets/sw.js가 없다');
+  assert.deepEqual(routes.filter((r) => walletScopeLeaks(r) || walletScopeLeaks(r.replace(/\[[^\]]+\]/g, 'x'))), []);
+  // 로케일 접두(/en)도 같은 규칙(범위는 /my/tickets 하나라 /en/my/tickets…는 범위 밖)
+  assert.deepEqual(routes.filter((r) => /^\/(\[[^\]]+\]|en)\/my\/tickets[^/]/.test(r)), []);
+});
+
+test('FE-T14 킬 스위치 모드(실행 값 PEAKET_WALLET_SW_MODE=kill)면 같은 주소가 킬 스위치 워커 파일을 낸다', async () => {
+  const { walletWorkerFile, SW_KILL_FILE } = await import('../../../scripts/service-worker.mjs');
+  const normal = walletWorkerFile({});
+  assert.notEqual(normal, SW_KILL_FILE);
+  for (const v of ['kill', 'KILL', ' kill ']) assert.equal(walletWorkerFile({ PEAKET_WALLET_SW_MODE: v }), SW_KILL_FILE, v);
+  for (const v of ['', 'normal', 'killed', 'off']) assert.equal(walletWorkerFile({ PEAKET_WALLET_SW_MODE: v }), normal, v);
+  // 처리기는 요청 때 실행 환경을 읽는다(빌드 값으로 켜고 끄지 않는다, docs/frontend.md §5.18)
+  const route = readFileSync(new URL('../../_app/workers/wallet-worker-route.ts', import.meta.url), 'utf8');
+  assert.match(route, /walletWorkerFile\(process\.env\)/);
+  assert.match(route, /await connection\(\)/);
+});
+
+test('FE-T14 킬 스위치는 wallet-shell-·옛 월렛·미리 저장 캐시를 지우고 자기 등록을 풀고 열린 월렛 창을 새로 읽힌다(그 밖의 캐시는 남긴다)', async () => {
+  const { runWalletKillSwitch } = await import('./sw-rules.ts');
+  const names = ['wallet-shell-9', 'wallet-shell-10', 'wallet-pages', 'wallet-assets', `serwist-precache-v2-${ORIGIN}/`, 'other-app-cache', 'workbox-x'];
+  const deleted = [];
+  const caches = {
+    keys: async () => [...names],
+    delete: async (n) => {
+      deleted.push(n);
+      return true;
+    },
+  };
+  let unregistered = 0;
+  const navigated = [];
+  const windows = [
+    { url: `${ORIGIN}/my/tickets`, navigate: async (u) => navigated.push(u) },
+    { url: `${ORIGIN}/my/tickets/tkt-1`, navigate: async (u) => navigated.push(u) },
+  ];
+  const r = await runWalletKillSwitch({
+    caches,
+    registration: { unregister: async () => (unregistered++, true) },
+    clients: { matchAll: async () => windows },
+  });
+  assert.deepEqual(deleted.sort(), ['serwist-precache-v2-https://www.peaket.example/', 'wallet-assets', 'wallet-pages', 'wallet-shell-10', 'wallet-shell-9'].sort());
+  assert.deepEqual(r.deleted.sort(), deleted.sort());
+  assert.equal(unregistered, 1);
+  assert.equal(r.unregistered, true);
+  assert.deepEqual(navigated, [`${ORIGIN}/my/tickets`, `${ORIGIN}/my/tickets/tkt-1`]);
+  assert.equal(r.reloaded, 2);
+});
+
+test('FE-T14 킬 스위치 워커는 IndexedDB(peaket-wallet)와 웹 푸시 워커(/push/)를 건드리지 않고 fetch 처리기가 없다', () => {
+  const kill = readFileSync(new URL('../../../app/sw-kill.ts', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  assert.doesNotMatch(kill, /indexedDB|deleteDatabase|peaket-wallet/);
+  assert.doesNotMatch(kill, /\/push\//);
+  assert.doesNotMatch(kill, /addEventListener\('fetch'/);
+  assert.match(kill, /skipWaiting\(\)/);
+  assert.match(kill, /runWalletKillSwitch\(/);
 });

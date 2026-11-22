@@ -136,10 +136,10 @@ describe('기기 키 HTTP 벡터 [O-T45]', () => {
     const other = await post(ticketId, body, OTHER);
     expect(other.statusCode).toBe(404);
     expect(problemName(other.payload)).toBe('not-found');
-    // 다른 키는 지금 규칙대로 재인증 필요(403 reauth-required)
+    // 다른 키(입장 시작 전)는 재인증 뒤 다시 받기(403 reissue-required, ADR-0363 결정 2)
     const otherKey = await post(ticketId, { publicKeyJwk: await jwk(), reason: 'ISSUE' });
     expect(otherKey.statusCode).toBe(403);
-    expect(problemName(otherKey.payload)).toBe('reauth-required');
+    expect(problemName(otherKey.payload)).toBe('reissue-required');
     expect((await deviceKeysStore.activeKeysByEvent(EVENT)).get(ticketId)!.map((k) => k.keyId)).toEqual([vector.keyIdB64u]);
   });
 
@@ -155,10 +155,14 @@ describe('기기 키 HTTP 벡터 [O-T45]', () => {
       ['다른 계정', ticketId, OTHER],
       ['없는 티켓', '0190f3a1-7c2e-7a00-8b2a-6c1d5e70f299', ACCOUNT],
     ] as const) {
-      for (const body of [reissue, booth]) {
+      // 재인증 없는 REISSUE는 reissue-required, 재인증 없는 BOOTH는 reauth-required(ADR-0363 결정 2, openapi createTicketDeviceKey 403 설명)
+      for (const [body, name] of [
+        [reissue, 'reissue-required'],
+        [booth, 'reauth-required'],
+      ] as const) {
         const r = await post(target, body, account);
         expect(r.statusCode, `${label} ${body.reason}`).toBe(403);
-        expect(problemName(r.payload), `${label} ${body.reason}`).toBe('reauth-required');
+        expect(problemName(r.payload), `${label} ${body.reason}`).toBe(name);
       }
     }
     expect(deviceKeysStore.keys.get(ticketId)).toHaveLength(1);

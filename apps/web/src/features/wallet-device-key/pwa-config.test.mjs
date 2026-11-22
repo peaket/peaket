@@ -72,8 +72,11 @@ test('HOT-390 묶은 워커 글 끝의 소스 맵 링크 줄을 지운다(숨김
   assert.equal(stripSourceMapLink('// sourceMappingURL 설명\nself.a=1;'), '// sourceMappingURL 설명\nself.a=1;\n');
 });
 
-test('HOT-390 Serwist 경로는 빌드 때 묶은 파일만 읽고 요청 때 다시 묶지 않으며 Service-Worker-Allowed를 준다', () => {
-  const route = read('app/serwist/[path]/route.ts');
+// ADR-0363 결정 5·6(F-05-1 시험 이의): 워커 주소는 /my/tickets/sw.js이고 처리기는 src/_app/workers/wallet-worker-route.ts다. 옛 경로 /serwist/*는 없앴다
+test('HOT-390 FE-T14 월렛 워커 경로 /my/tickets/sw.js는 빌드 때 묶은 파일만 읽고 요청 때 다시 묶지 않으며 Service-Worker-Allowed: /my/tickets·no-cache를 준다 [ASVS v5.0.0-3.5.4]', () => {
+  assert.equal(existsSync(join(appRoot, 'app/serwist')), false, '옛 워커 경로 /serwist/*가 남았다');
+  assert.match(read('app/my/tickets/sw.js/route.ts'), /export \{ GET \} from '@\/_app\/workers\/wallet-worker-route'/);
+  const route = read('src/_app/workers/wallet-worker-route.ts');
   // 요청 때 app/sw.ts를 다시 묶는 길이 없다(standalone 폴더에는 원본이 없다, BAT-171 시험 이의 6)
   const code = route.replace(/^\s*\/\/.*$/gm, '');
   assert.doesNotMatch(code, /@serwist\/turbopack|createSerwistRoute|esbuild/, '경로 처리기가 요청 때 워커를 묶는다');
@@ -81,6 +84,7 @@ test('HOT-390 Serwist 경로는 빌드 때 묶은 파일만 읽고 요청 때 �
   assert.match(route, /\bSW_DIR\b/);
   assert.match(route, /'use cache'/);
   assert.match(route, /Service-Worker-Allowed': '\/my\/tickets'/);
+  assert.match(route, /'Cache-Control': 'no-cache'/);
 });
 
 test('오프라인 대체 화면이 있고 서비스 워커 범위는 /my/tickets이며 루트 문서에는 없다', () => {
@@ -90,8 +94,9 @@ test('오프라인 대체 화면이 있고 서비스 워커 범위는 /my/ticket
   assert.doesNotMatch(root, /SerwistProvider|swUrl=/);
   const pwa = read('src/features/wallet-device-key/ui/OfflineBanner.tsx');
   assert.match(pwa, /import\('@serwist\/turbopack\/react'\)/);
-  assert.match(pwa, /swUrl="\/serwist\/sw\.js"/);
-  assert.match(pwa, /options=\{\{ scope: '\/my\/tickets' \}\}/);
+  // 등록 주소·범위는 sw-rules의 값(ADR-0363 결정 5). 값 자체는 sw-rules.test.mjs가 정본 글과 견준다
+  assert.match(pwa, /swUrl=\{WALLET_SW_URL\}/);
+  assert.match(pwa, /options=\{\{ scope: WALLET_SW_SCOPE \}\}/);
   assert.match(pwa, /process\.env\.NODE_ENV === 'development'/);
   assert.match(read('src/widgets/ticket-wallet/ui/Wallet.tsx'), /<OfflineBannerLazy /);
 });

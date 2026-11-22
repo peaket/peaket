@@ -207,12 +207,13 @@ describe('기기 키 PostgreSQL [GAT-140]', () => {
     expect(await deviceKeyStore.keyState(t.ticketId, Buffer.from(key.keyId, 'base64url'))).toBe('REVOKED');
   });
 
-  test('입장 시작 뒤 REISSUE는 재인증이 있어도 거절하고, TRANSFER는 보유자가 결제자와 다를 때만 된다', async () => {
+  // ADR-0363 결정 2(F-05-1 시험 이의): 입장 시작 뒤 다른 키가 유효하면 재인증이 있어도 부스로(REISSUE_AT_BOOTH, HTTP 403 reissue-at-booth)
+  test('입장 시작 뒤 다른 키가 유효한 티켓의 REISSUE는 재인증이 있어도 REISSUE_AT_BOOTH이고, TRANSFER는 보유자가 결제자와 다를 때만 된다', async () => {
     const t = await issueTicket(ORDER_G, SEAT_G);
     await keys.register({ ticketId: t.ticketId, accountId: ACCOUNT, sessionId: SESSION, publicKeyJwk: await publicJwk(), reason: 'ISSUE' });
     await database.pool.query('update ticket set event_starts_at = $1 where id = $2', [new Date(NOW - 1), t.ticketId]);
     await expect(reauthKeys.register({ ticketId: t.ticketId, accountId: ACCOUNT, sessionId: SESSION, publicKeyJwk: await publicJwk(), reason: 'REISSUE' })).rejects.toMatchObject({
-      code: 'ENTRY_STARTED',
+      code: 'REISSUE_AT_BOOTH',
     });
 
     const payerTicket = await issueTicket(ORDER_H, SEAT_H);
@@ -293,10 +294,10 @@ describe('기기 키 PostgreSQL [GAT-140]', () => {
     await expect(keys.register({ ...same(t.ticketId), accountId: OTHER })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(await keyCounts(t.ticketId)).toEqual(before);
 
-    // 입장 시작 뒤에도 같은 키는 201이고 바꾸지 않는다. 다른 키는 지금 규칙대로 거절한다
+    // 입장 시작 뒤에도 같은 키는 201이고 바꾸지 않는다. 다른 키는 부스로 보낸다(REISSUE_AT_BOOTH, ADR-0363 결정 2, F-05-1 시험 이의)
     await database.pool.query('update ticket set event_starts_at = $1 where id = $2', [new Date(NOW - 1), t.ticketId]);
     expect(await keys.register(same(t.ticketId))).toEqual({ keyId: vector.keyIdB64u });
-    await expect(keys.register({ ...same(t.ticketId), publicKeyJwk: await publicJwk() })).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    await expect(keys.register({ ...same(t.ticketId), publicKeyJwk: await publicJwk() })).rejects.toMatchObject({ code: 'REISSUE_AT_BOOTH' });
     expect(await keyCounts(t.ticketId)).toEqual(before);
 
     // 24시간 한도에 세지 않는다: 다시 보낸 뒤에도 재인증 뒤 첫 교체는 된다(셌다면 REISSUE_LIMIT)

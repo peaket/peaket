@@ -65,7 +65,8 @@ describe('기기 키 등록·폐기 [GAT-140]', () => {
     const jwk1 = await publicJwk();
     const first = await keys.register(register({ publicKeyJwk: jwk1 }));
     expect(first.keyId).toMatch(/^[A-Za-z0-9_-]{11}$/);
-    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+    // 입장 시작 전, 다른 키가 유효한데 재인증 없음: reissue-required(ADR-0363 결정 2)
+    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'REISSUE_REQUIRED' });
 
     const reauth: ReauthGate = { verify: async () => true };
     const withReauth = new DeviceKeys({ store, clock, reauth });
@@ -92,7 +93,8 @@ describe('기기 키 등록·폐기 [GAT-140]', () => {
   test('REISSUE는 재인증이 필요하고 24시간에 한 번만 되며, BOOTH는 부스 허용이 없어 거절한다', async () => {
     const jwk = await publicJwk();
     await keys.register(register({ publicKeyJwk: jwk }));
-    await expect(keys.register(register({ publicKeyJwk: jwk, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+    // 입장 시작 전 재인증 없는 REISSUE: reissue-required(ADR-0363 결정 2, openapi createTicketDeviceKey 403 설명)
+    await expect(keys.register(register({ publicKeyJwk: jwk, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REISSUE_REQUIRED' });
     const reauth: ReauthGate = { verify: async () => true };
     const withReauth = new DeviceKeys({ store, clock, reauth });
     await expect(withReauth.register(register({ publicKeyJwk: jwk, reason: 'BOOTH' }))).rejects.toMatchObject({ code: 'BOOTH_NOT_ALLOWED' });
@@ -102,12 +104,12 @@ describe('기기 키 등록·폐기 [GAT-140]', () => {
     await expect(withReauth.register(register({ publicKeyJwk: await publicJwk(), reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REISSUE_LIMIT' });
   });
 
-  test('입장 시작 뒤 REISSUE는 재인증이 있어도 ENTRY_STARTED다', async () => {
+  test('입장 시작 뒤 다른 키가 유효한 티켓의 REISSUE는 재인증이 있어도 REISSUE_AT_BOOTH다(ADR-0363 결정 2)', async () => {
     const reauth: ReauthGate = { verify: async () => true };
     const withReauth = new DeviceKeys({ store, clock, reauth });
     await keys.register(register({ publicKeyJwk: await publicJwk() }));
     store.seedTicket({ ticketId: TICKET, eventId: EVENT, accountId: ACCOUNT, payerAccountId: ACCOUNT, eventStartsAtMs: NOW - 1 });
-    await expect(withReauth.register(register({ publicKeyJwk: await publicJwk(), reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    await expect(withReauth.register(register({ publicKeyJwk: await publicJwk(), reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REISSUE_AT_BOOTH' });
   });
 
   test('TRANSFER는 보유자가 결제자와 다를 때만 허용한다', async () => {
@@ -176,15 +178,15 @@ describe('같은 키 다시 등록 [O-T45]', () => {
     expect(await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }))).toEqual({ keyId: vector.keyIdB64u });
     expect(store.keys.get(TICKET)).toHaveLength(1);
     expect(store.keys.get(TICKET)![0]!.revokedAtMs).toBeUndefined();
-    // 다른 키: 입장 시작 뒤 ISSUE는 재인증 없이 거절(HTTP 403 reauth-required)
-    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    // 다른 키: 입장 시작 뒤 다른 키가 유효하면 부스로(HTTP 403 reissue-at-booth, ADR-0363 결정 2)
+    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'REISSUE_AT_BOOTH' });
     expect((await store.activeKeysByEvent(EVENT)).get(TICKET)).toEqual([{ keyId: vector.keyIdB64u, publicKey: vector.compressedPublicKeyB64u }]);
   });
 
   test('O-T45 ③ 유효 키와 다른 키는 재인증 없이 거절하고, TRANSFER도 같은 키는 바꾸지 않고 받는다', async () => {
     await keys.register(register({ publicKeyJwk: vector.publicKeyJwkAsExported }));
-    // 다른 키 ISSUE: 지금 규칙(재인증 필요) 그대로
-    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+    // 다른 키 ISSUE(입장 시작 전): 재인증 뒤 다시 받기(HTTP 403 reissue-required, ADR-0363 결정 2)
+    await expect(keys.register(register({ publicKeyJwk: await publicJwk() }))).rejects.toMatchObject({ code: 'REISSUE_REQUIRED' });
     expect((await store.activeKeysByEvent(EVENT)).get(TICKET)!.map((k) => k.keyId)).toEqual([vector.keyIdB64u]);
     expect(await store.revokedKeyIdsByEvent(EVENT)).toEqual([]);
 
@@ -207,14 +209,14 @@ describe('같은 키 다시 등록 [O-T45]', () => {
     const same = { publicKeyJwk: vector.publicKeyJwkAsExported };
     const booth = { ...same, reason: 'BOOTH' as const, boothRequestId: '0190f3a1-7c2e-7a00-8000-0000000000b1' };
 
-    // 보유자 본인, 같은 키: 재인증 없는 REISSUE·BOOTH는 403(재인증 필요), 재인증이 있어도 부스 허용이 없는 BOOTH는 403(부스 허용 없음)
-    await expect(keys.register(register({ ...same, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+    // 보유자 본인, 같은 키: 재인증 없는 REISSUE는 403 reissue-required, BOOTH는 403 reauth-required(ADR-0363 결정 2), 재인증이 있어도 부스 허용이 없는 BOOTH는 403(부스 허용 없음)
+    await expect(keys.register(register({ ...same, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REISSUE_REQUIRED' });
     await expect(keys.register(register(booth))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
     await expect(withReauth.register(register(booth))).rejects.toMatchObject({ code: 'BOOTH_NOT_ALLOWED' });
 
     // 보유자가 아니거나(다른 계정) 없는 티켓이어도 그 확인을 못 지나면 404보다 403이 먼저다
     for (const who of [{ accountId: OTHER }, { ticketId: '0190f3a1-7c2e-7a00-8000-000000000099' }]) {
-      await expect(keys.register(register({ ...same, ...who, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
+      await expect(keys.register(register({ ...same, ...who, reason: 'REISSUE' }))).rejects.toMatchObject({ code: 'REISSUE_REQUIRED' });
       await expect(keys.register(register({ ...booth, ...who }))).rejects.toMatchObject({ code: 'REAUTH_REQUIRED' });
       await expect(withReauth.register(register({ ...booth, ...who }))).rejects.toMatchObject({ code: 'BOOTH_NOT_ALLOWED' });
       // 재인증을 지난 REISSUE는 그다음 보유자 확인에서 404다

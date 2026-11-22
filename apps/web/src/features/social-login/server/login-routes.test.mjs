@@ -269,6 +269,23 @@ test('I-T71_⑧ identity가 답하지 않으면 로그아웃은 쿠키를 지우
   assert.deepEqual(failures().map((l) => [l.event, l.reason]), [['logout.failed', 'identity']]);
 });
 
+// F-05-1(ADR-0363 결정 8, docs/frontend.md §5.14.4 5번): 소비자 웹 앱 서버의 로그아웃 응답은 Clear-Site-Data "cache" 하나다.
+// "cookies"(등록 도메인 전체 쿠키)·"storage"(월렛 입장 키)는 넣지 않는다. identity가 실패한 503에도 같다
+test('FE-T47 ① 로그아웃 응답의 Clear-Site-Data는 "cache" 하나이고 identity가 실패한 503에도 같다 [ASVS v5.0.0-14.3.1]', async () => {
+  for (const endFails of [false, true]) {
+    const b = new Browser();
+    await login(b);
+    identity.mode.endFails = endFails;
+    const res = await app.dispatch(new Request(`${web.url}/logout`, { method: 'POST', headers: { origin: web.url, cookie: b.cookieHeader(web.url) } }));
+    assert.equal(res.status, endFails ? 503 : 303, String(endFails));
+    assert.equal(res.headers.get('clear-site-data'), '"cache"', String(endFails));
+    assert.doesNotMatch(res.headers.get('clear-site-data') ?? '', /cookies|storage|\*/);
+    // 쿠키는 Set-Cookie 만료로만 지운다(같은 응답)
+    assert.ok(res.headers.getSetCookie().length > 0, String(endFails));
+  }
+  identity.mode.endFails = false;
+});
+
 test('I-T71_⑨ 다른 출처의 로그아웃은 거절되고 세션이 그대로다', async () => {
   const b = new Browser();
   await login(b);

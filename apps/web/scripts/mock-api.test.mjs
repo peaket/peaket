@@ -1080,11 +1080,11 @@ test('GAT-010 가짜 API 기기 키 등록은 계약 모양이고 벡터 keyId�
     assert.equal(first.status, 201);
     assert.deepEqual(CreateTicketDeviceKeyResponse.parse(first.body), first.body);
     assert.deepEqual(first.body, { keyId: vector.keyIdB64u });
-    // 같은 키 다시 등록은 바꾸지 않고 201 같은 keyId, 다른 키는 재인증 필요(403 reauth-required)
+    // 같은 키 다시 등록은 바꾸지 않고 201 같은 keyId, 다른 키는 입장 시작 전 재발급(403 reissue-required, ticket-svc와 같은 이름, ADR-0363 결정 2)
     assert.deepEqual(await register(issue), { status: 201, body: { keyId: vector.keyIdB64u } });
     const otherKey = await register(otherIssue);
     assert.equal(otherKey.status, 403);
-    assert.equal(problemName(otherKey.body), 'reauth-required');
+    assert.equal(problemName(otherKey.body), 'reissue-required');
     // 다른 티켓은 따로 센다
     assert.equal((await register(otherIssue, '0190f3a1-7c2e-7a00-8b2a-6c1d5e70f103')).status, 201);
     // 계약 밖 칸(개인키 d)은 400
@@ -1104,6 +1104,9 @@ test('GAT-010 가짜 API 기기 키 등록은 계약 모양이고 벡터 keyId�
     for (const [mode, status, name] of [
       ['down', 503, 'dependency-unavailable'],
       ['reauth', 403, 'reauth-required'],
+      // 403 세 이름(ADR-0363 결정 2): 월렛이 '저장소 유실, 입장 시작 전'·'저장소 유실, 입장 시작 뒤'를 가르는 상태
+      ['reissue', 403, 'reissue-required'],
+      ['booth', 403, 'reissue-at-booth'],
       ['not-found', 404, 'not-found'],
       ['invalid', 422, 'invalid-device-key'],
     ]) {
