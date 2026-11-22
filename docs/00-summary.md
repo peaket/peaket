@@ -803,6 +803,7 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-765: identity-svc 파트너 초대의 오류 유형을 정본 목록에 맞춰 PRF192를 다시 통과시켰다(W12-identity-problems).
 - BAT-625는 payment-svc 지급 묶음 승인이 ops-svc 승인 기록을 대조하게 하고, 같은 승인 재사용·감사·판매 중지 회차의 SALE_SUSPENDED 보류를 닫았다.
 - R-766 BAT-625는 payment-svc 지급 묶음 승인이 ops-svc 승인 기록을 대조하게 하고, 같은 승인 재사용·감사·판매 중지 회차의 SALE_SUSPENDED 보류를 닫았다.
+- R-767: W12-problem-types-2가 sale-suspension-conflict를 오류 목록·생성물에 맞추고 게이트웨이 라우트 다섯을 다시 만들어 CI를 통과시켰다.
 
 ## 5. [충돌] 결정 결과
 
