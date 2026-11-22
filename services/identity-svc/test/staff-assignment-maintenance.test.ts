@@ -102,7 +102,7 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
     await expect(store.reissueInvitation({ assignmentId: id, tokenHash: hash('new-token'), expiresAtMs: clock.now() + DAY })).resolves.toEqual({ result: 'ALREADY_ACCEPTED' });
   });
 
-  test('I-T87 ② 역할 유효 끝이 지난 ASSIGNED는 ENDED로 끝내고 이메일·토큰을 파기한다(정각은 그대로·멱등)', async () => {
+  test('I-T87 ② 역할 유효 끝이 지난 ASSIGNED는 ENDED로 끝내고 이메일·토큰을 파기한다(정각은 그대로·멱등) [ASVS v5.0.0-14.2.4]', async () => {
     seed('a-edge', { status: 'ASSIGNED', accountId: EDGE, validUntilMs: NOW, inviteEmail: undefined, inviteTokenHash: undefined });
     seed('a-past', { status: 'ASSIGNED', accountId: ACCOUNT, validUntilMs: NOW - 1, inviteEmail: 'p@example.com', inviteTokenHash: hash('tok-past') });
     seed('a-future', { status: 'ASSIGNED', accountId: OTHER, eventId: EVENT_2, validUntilMs: NOW + HOUR, inviteEmail: undefined, inviteTokenHash: undefined });
@@ -118,7 +118,7 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 0 });
   });
 
-  test('I-T87 ③ hasAssigned는 지금 창 안의 ASSIGNED만 센다(미래·지난·취소 false, 시작·끝 정각 true) [ASVS v5.0.0-6.5.1]', async () => {
+  test('I-T87 ③ hasAssigned는 지금 창 안의 ASSIGNED만 센다(미래·지난·취소 false, 시작·끝 정각 true)', async () => {
     seed('current', { status: 'ASSIGNED', accountId: ACCOUNT, validFromMs: NOW - 1, validUntilMs: NOW + 1 });
     seed('future', { status: 'ASSIGNED', accountId: OTHER, eventId: EVENT_2, validFromMs: NOW + 1, validUntilMs: NOW + HOUR });
     seed('past', { status: 'ASSIGNED', accountId: OTHER, eventId: EVENT_3, validFromMs: NOW - 2 * HOUR, validUntilMs: NOW - 1 });
@@ -134,7 +134,7 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
     await expect(store.hasAssigned(EDGE, NOW)).resolves.toBe(true);
   });
 
-  test('I-T87 ④ listSelf·명단은 정비 전에도 지난 ASSIGNED를 ENDED로 보이고, 역할 유효 끝이 지난 초대는 410이다', async () => {
+  test('I-T87 ④ listSelf·명단은 정비 전에도 지난 ASSIGNED를 ENDED로 보이고, 역할 유효 끝이 지난 초대는 410이다 [ASVS v5.0.0-6.5.5]', async () => {
     seed('a-past', { status: 'ASSIGNED', accountId: ACCOUNT, validUntilMs: NOW - 1, inviteEmail: undefined, inviteTokenHash: undefined });
     const self = await invitations.listSelf({ accountId: ACCOUNT, limit: 10 });
     expect(self.items).toHaveLength(1);
@@ -152,7 +152,7 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
     expect(store.assignments.get('i-window-over')).toMatchObject({ status: 'INVITED', accountId: null });
   });
 
-  test('I-T88 ① promoter_id가 없는 옛 INVITED·ASSIGNED를 정본화해 끝내고 promoter가 있는 행은 그대로 둔다', async () => {
+  test('I-T88 ① promoter_id가 없는 옛 INVITED·ASSIGNED를 정본화해 끝내고 promoter가 있는 행은 그대로 둔다 [ASVS v5.0.0-8.2.2]', async () => {
     seed('legacy-invite', { promoterId: undefined, inviteEmail: 'legacy@example.com', inviteTokenHash: hash('tok-legacy') });
     seed('legacy-assigned', { status: 'ASSIGNED', accountId: ACCOUNT, eventId: EVENT_2, promoterId: undefined, inviteEmail: 'legacy2@example.com', inviteTokenHash: hash('tok-legacy2') });
     seed('legacy-revoked', { status: 'REVOKED', promoterId: undefined });
