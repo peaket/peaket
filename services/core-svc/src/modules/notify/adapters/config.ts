@@ -1,6 +1,6 @@
 // BAT-455 알림 발송의 환경 값: 수신 거부 토큰 키·VAPID 키·공개 출처.
 // 운영은 Secrets Manager가 환경으로 넣는다(docs/security/secrets-and-keys.md '수신 거부 토큰 키').
-import { createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto';
+import { createECDH, createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 import type { VapidConfig } from '../domain/fan-notify-ports.js';
 
 export const OPTOUT_KEY_ENV = 'PEAKET_NOTIFY_OPTOUT_KEY';
@@ -33,20 +33,32 @@ export function topicKeyFromEnv(env: Record<string, string | undefined>, fallbac
   return raw;
 }
 
-/** VAPID 개인키(JWK JSON 또는 PEM)와 공개키(base64url 비압축 점). local·ci는 없으면 그 자리에서 만든 시험 키를 쓴다 */
+/**
+ * local·ci 고정 VAPID 시험 키(ADR-0363 결정 7). 화면의 공개 빌드 값 NEXT_PUBLIC_PEAKET_VAPID_PUBLIC_KEY와 같아야 구독이 이 서버의 키로 묶인다.
+ * 개인키는 고정 글의 SHA-256에서 만든다(운영 키가 아니다. 운영은 Secrets Manager의 PEAKET_VAPID_PRIVATE_KEY·PUBLIC_KEY). 공개키 값은 apps/README.md에 적었다
+ */
+const LOCAL_VAPID_SEED = 'peaket-local-ci-vapid-test-key-v1';
+
+export function localVapidKey(subject = 'mailto:notify@peaket.example'): VapidConfig {
+  const d = createHash('sha256').update(LOCAL_VAPID_SEED, 'utf8').digest();
+  const ecdh = createECDH('prime256v1');
+  ecdh.setPrivateKey(d);
+  const point = ecdh.getPublicKey();
+  const jwk = { kty: 'EC', crv: 'P-256', d: d.toString('base64url'), x: point.subarray(1, 33).toString('base64url'), y: point.subarray(33, 65).toString('base64url') };
+  return {
+    privateKey: createPrivateKey({ key: jwk, format: 'jwk' }).export({ format: 'pem', type: 'pkcs8' }).toString(),
+    publicKey: point.toString('base64url'),
+    subject,
+  };
+}
+
+/** VAPID 개인키(JWK JSON 또는 PEM)와 공개키(base64url 비압축 점). local·ci는 없으면 고정 시험 키(localVapidKey)를 쓴다 */
 export function vapidFromEnv(env: Record<string, string | undefined>): VapidConfig | undefined {
   const priv = env[VAPID_PRIVATE_ENV]?.trim();
   const pub = env[VAPID_PUBLIC_ENV]?.trim();
   if (!priv || !pub) {
     if (!isLocal(env)) return undefined;
-    const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
-    const jwk = publicKey.export({ format: 'jwk' });
-    if (typeof jwk.x !== 'string' || typeof jwk.y !== 'string') throw new Error('VAPID 시험 키를 만들지 못했습니다');
-    return {
-      privateKey: privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
-      publicKey: Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]).toString('base64url'),
-      subject: env[VAPID_SUBJECT_ENV]?.trim() || 'mailto:notify@peaket.example',
-    };
+    return localVapidKey(env[VAPID_SUBJECT_ENV]?.trim() || 'mailto:notify@peaket.example');
   }
   // 시작할 때 키가 맞는지 본다(개인키에서 공개키를 꺼내 견준다)
   const key = priv.startsWith('{') ? createPrivateKey({ key: JSON.parse(priv) as { kty: string; crv: string; x: string; y: string; d: string }, format: 'jwk' }) : createPrivateKey(priv);

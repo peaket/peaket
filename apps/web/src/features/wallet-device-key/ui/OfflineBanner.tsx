@@ -3,6 +3,7 @@
 // 미리보기 상태(?state=오프라인)는 forceOffline으로 같은 배너를 그린다. 서비스 워커가 셸을 열어도 이 배너가 먼저 보인다.
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { loadLastSyncedAt } from '../store';
+import { WALLET_SW_SCOPE, WALLET_SW_URL } from '../sw-rules';
 
 interface SerwistProviderProps {
   swUrl: string;
@@ -33,7 +34,8 @@ function WalletPwa() {
   // 화면이 받은 스크립트를 다시 보내는 CACHE_URLS는 매 방문 100여 개를 다시 받아
   // LCP 이미지와 네트워크를 다퉈 두 번째 방문부터 LCP를 8초대로 밀어 올렸다.
   if (!Provider) return null;
-  return <Provider swUrl="/serwist/sw.js" cacheOnNavigation={false} options={{ scope: '/my/tickets' }} />;
+  // 주소·범위는 docs/frontend.md §5.4 범위 세부(ADR-0363 결정 5): `/my/tickets/sw.js`, 범위 끝 `/` 없는 `/my/tickets`
+  return <Provider swUrl={WALLET_SW_URL} cacheOnNavigation={false} options={{ scope: WALLET_SW_SCOPE }} />;
 }
 
 let kst: Intl.DateTimeFormat | undefined;

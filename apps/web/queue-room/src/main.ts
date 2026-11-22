@@ -99,6 +99,18 @@ function storage(name: 'localStorage' | 'sessionStorage'): Storage | null {
   }
 }
 
+/** 웹 푸시 해제(§5.14.4 2번 맨 앞): 이 브라우저의 /push/ 구독이 있으면 DELETE /v1/push-subscriptions/{SHA-256 base64url}. 실패해도 이어 간다 */
+async function pushUnbind(): Promise<void> {
+  const reg = await navigator.serviceWorker?.getRegistration('/push/');
+  const sub = await reg?.pushManager?.getSubscription();
+  if (!sub) return;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sub.endpoint)));
+  let bin = '';
+  for (const b of digest) bin += String.fromCharCode(b);
+  const key = btoa(bin).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  await fetch(`${ORIGINS.api}/v1/push-subscriptions/${encodeURIComponent(key)}`, { method: 'DELETE', credentials: 'include', cache: 'no-store', redirect: 'error' });
+}
+
 const logoutDeps = (broadcast: boolean) => ({
   local: storage('localStorage'),
   session: storage('sessionStorage'),
@@ -115,7 +127,7 @@ const logoutDeps = (broadcast: boolean) => ({
 
 /** 로그아웃(§5.14.4 2~4번 뒤 같은 출처 POST /logout, ADR-0208 결정 7). 성공하면 홈으로. 부르기 전에 상태 기계를 멈춘다 */
 async function logout(wallet: boolean): Promise<'ok' | 'failed'> {
-  await clearForLogout(logoutDeps(true), { wallet });
+  await clearForLogout({ ...logoutDeps(true), pushUnbind }, { wallet });
   const r = await serverLogout((u, i) => fetch(u, i), links.logout());
   if (r === 'ok') location.assign(links.home());
   return r;

@@ -70,7 +70,18 @@ export function LiveLoginMethods({ loginMethod, mergeProposal }: { loginMethod?:
     if (st.go) {
       // 세션이 끝났으므로 새 문서로 연다(남은 화면 상태를 들고 가지 않게, 탈퇴 완료와 같다).
       // 흡수 안내는 이 탭에만 보이게 떠나기 직전에 표시를 남긴다(주소만으로는 안내를 그리지 않는다, BOT-043이 넘긴 것)
-      if (st.mergedAway) markMergedAway(tabStore, Date.now());
+      if (st.mergedAway) {
+        // 지금 계정이 흡수됐다: 대화상자 없이 로그아웃 정리 2·4번을 마친 뒤 흡수 표시를 남기고 떠난다(§5.14.4, ADR-0363 결정 8)
+        const go = st.go;
+        void Promise.all([import('@/features/session-cleanup'), import('@/features/web-push')])
+          .then(([c, p]) => c.logoutCleanup({ wallet: false, server: false, pushUnbind: () => p.browserWebPush().unbind() }))
+          .catch(() => undefined)
+          .then(() => {
+            markMergedAway(tabStore, Date.now());
+            window.location.assign(go);
+          });
+        return true;
+      }
       window.location.assign(st.go);
       return true;
     }

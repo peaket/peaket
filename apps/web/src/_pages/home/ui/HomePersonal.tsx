@@ -127,6 +127,11 @@ function useOffline(): boolean {
 
 const OFFLINE_ID = 'home-offline';
 
+/** CMP-068 [알림 켜기]의 웹 푸시(ADR-0363 결정 7). 모듈은 시트가 열릴 때 미리 받고 누를 때 쓴다(첫 JS에 넣지 않는다) */
+const webPushModule = () => import('@/features/web-push');
+const prepareWebPush = () => void webPushModule().catch(() => undefined);
+const enableWebPush = () => webPushModule().then((m) => m.browserWebPush().enable());
+
 /**
  * 오픈 알림 토글의 문맥과 오프라인 띠: 비로그인이면 누를 때 로그인으로, 오프라인이면 띠를 띄우고 토글을 비활성으로 둔다
  * (d5 §5.1 '오프라인'. 셸 전체의 오프라인 띠는 셸 단계가 정하고, 그 전까지 홈은 본문 위에 띄운다)
@@ -135,7 +140,7 @@ export function HomeOpenAlertProvider({ children }: { children: ReactNode }) {
   const { status } = usePersonal();
   const offline = useOffline();
   return (
-    <OpenAlertProvider guest={status === 'guest'} loginHref="/login?next=%2F" {...(offline ? { offlineReasonId: OFFLINE_ID } : {})}>
+    <OpenAlertProvider guest={status === 'guest'} loginHref="/login?next=%2F" enablePush={enableWebPush} preparePush={prepareWebPush} {...(offline ? { offlineReasonId: OFFLINE_ID } : {})}>
       {offline ? (
         <p id={OFFLINE_ID} role="status" className="row t-sm mx-auto w-full max-w-[1280px] px-4 py-2 md:px-6 lg:px-8" style={{ gap: 6, background: 'var(--surface-muted)' }}>
           <i className="ic ic-wifi-off ic-16" aria-hidden="true" />

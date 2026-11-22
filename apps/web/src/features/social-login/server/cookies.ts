@@ -1,5 +1,6 @@
 // 소비자 웹 앱 서버가 주고 지우는 쿠키(docs/features/identity.md §3 '쿠키 이름과 속성', asvs/auth.md 3.3.1·3.3.3·3.3.4).
-// 모두 Secure·HttpOnly이고 이름에 접두사를 붙인다. 지울 때는 같은 이름·Domain·Path에 Max-Age=0을 단다(Clear-Site-Data는 쓰지 않는다).
+// 모두 Secure·HttpOnly이고 이름에 접두사를 붙인다. 지울 때는 같은 이름·Domain·Path에 Max-Age=0을 단다(쿠키를 Clear-Site-Data "cookies"로 지우지 않는다.
+// 로그아웃 응답은 "cache" 하나만 더한다, handlers.ts logout, docs/frontend.md §5.14.4 5번, ADR-0363 결정 8).
 
 export const ACCESS_COOKIE = '__Secure-peaket_at';
 export const REFRESH_COOKIE = '__Secure-peaket_rt';

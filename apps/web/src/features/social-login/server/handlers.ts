@@ -103,6 +103,8 @@ function respond(status: number, body: string | null, cookies: string[] = [], he
   return new Response(body, { status, headers: h });
 }
 const redirect = (to: string, cookies: string[] = []) => respond(303, null, cookies, { location: to });
+/** 로그아웃 응답의 Clear-Site-Data(§5.14.4 5번): "cache" 하나 */
+const LOGOUT_CLEAR_SITE_DATA: Record<string, string> = { 'clear-site-data': '"cache"' };
 
 /** 공급자 동시 상한을 넘었을 때(429 server-busy). 로그인을 처음부터 다시 하게 한다 */
 const BUSY_TEXT = '요청이 많아 잠시 처리하지 못했습니다. 잠시 뒤 처음부터 다시 로그인해 주세요';
@@ -440,7 +442,11 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     }
   }
 
-  /** POST /logout: identity 세션을 끝내고 이 앱이 준 쿠키를 지운다. identity가 실패해도 쿠키는 지우고 503으로 알린다 */
+  /**
+   * POST /logout: identity 세션을 끝내고 이 앱이 준 쿠키를 지운다. identity가 실패해도 쿠키는 지우고 503으로 알린다.
+   * 응답에는 `Clear-Site-Data: "cache"` 하나를 더한다(같은 출처 HTTP 캐시만. `"cookies"`는 등록 도메인 전체 쿠키를, `"storage"`는 월렛 입장 키를
+   * 지우므로 넣지 않는다, docs/frontend.md §5.14.4 5번, ADR-0363 결정 8). 화면 출처의 저장물은 화면의 정리 루틴이 먼저 지운다
+   */
   async function logout(req: Request): Promise<Response> {
     if (!sameOrigin(req)) return forbidden();
     const cookies = [...clearSessionCookies(config.cookieDomain)];
@@ -455,10 +461,10 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
         await identity.endSession(fan);
       } catch (e) {
         log('logout.failed', { reason: 'identity', code: codeOf(e) });
-        return respond(503, '로그아웃을 마치지 못했습니다. 다시 시도해 주세요', cookies);
+        return respond(503, '로그아웃을 마치지 못했습니다. 다시 시도해 주세요', cookies, LOGOUT_CLEAR_SITE_DATA);
       }
     }
-    return redirect('/', cookies);
+    return respond(303, null, cookies, { location: '/', ...LOGOUT_CLEAR_SITE_DATA });
   }
 
   /** POST /reauth/token: 화면 스크립트가 재인증 결과를 한 번 받는다(identity §7.1 ⑤, I-T72) */

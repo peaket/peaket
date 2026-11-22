@@ -18,7 +18,7 @@
 //   지금이 든 PRESALE(정한 순간부터 1시간 뒤까지) 뒤 GENERAL. 팬별 판매 자격 GET /v1/events/{회차}/sale-eligibility eligibility=eligible|ineligible|down
 //   (eligible은 PRESALE도 대상, ineligible은 PRESALE만 대상 아님, down은 503. 비로그인 fan=guest면 401). 명단 밖 403은 queueLobby·queueEntry=sale-eligibility
 //   fan: member 본인확인 완료 · unverified 본인확인 전 · pending 가입 완료 화면(SCR-005) 전 · closing 만 14세 미만 결과로 정리 중 · guest 비로그인(팬 경로 401). 팬 계정 요약 GET /v1/identity/me(ADR-0202)
-//   입장용 휴대폰 등록(ADR-0336, BAT-350) POST /v1/tickets/{티켓}/device-keys: deviceKey=normal|mismatch|down|reauth|not-found|invalid, deviceKeyReset=1(scripts/mock-api/tickets.mjs)
+//   입장용 휴대폰 등록(ADR-0336, BAT-350, ADR-0363) POST /v1/tickets/{티켓}/device-keys: deviceKey=normal|mismatch|down|reauth|reissue|booth|not-found|invalid, deviceKeyReset=1(scripts/mock-api/tickets.mjs)
 // - 파생본 이미지 주소(/img/{이름}/{폭}.{avif|webp})에는 자리 그림(SVG)을 낸다
 // - 공연 상세(GET /v1/events/{eventId}, ADR-0200)는 고정 자료 카드의 모든 회차를 답하고 그 밖은 404다.
 //   detail=suspended면 모두 410 event-suspended(한 번 공개된 뒤 판매 중지, ADR-0200 결정 3)

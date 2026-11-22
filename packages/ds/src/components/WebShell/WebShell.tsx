@@ -176,8 +176,11 @@ export interface WebShellProps {
    * 보이는 높이 320px 이하에서 흐름에 들어간 띠가 바닥글 뒤에 오지 않게 한다(docs/frontend.md §5.11, d5 §5.2, BAT-171 R171-3)
    */
   bottomBar?: ReactNode;
-  /** 로그아웃 확인을 눌렀을 때 */
-  onLogout?: (opts: { clearEntryKeys: boolean }) => void;
+  /**
+   * 로그아웃 확인을 눌렀을 때. Promise를 돌려주면 끝날 때까지 대화상자를 열어 두고, `{ error }`로 끝나면 대화상자 안에 다시 시도를 안내한다
+   * (서버 로그아웃 503·연결 실패, ADR-0363 결정 8). 그 밖으로 끝나면 닫는다
+   */
+  onLogout?: (opts: { clearEntryKeys: boolean }) => void | Promise<{ error?: string } | void>;
   /** 메뉴 항목·검색 후보로 이동할 때(앱 라우터의 push). 없으면 브라우저 이동 */
   onNavigate?: (href: string) => void;
   renderLink?: RenderLink;
@@ -218,6 +221,8 @@ export function WebShell({
   const hrefs: WebShellHrefs = { ...WEB_SHELL_DEFAULT_HREFS, ...hrefsProp, locales: { ...WEB_SHELL_DEFAULT_HREFS.locales, ...hrefsProp?.locales } };
   const [menuOpen, setMenuOpen] = useState(defaultOpen === "menu");
   const [logoutOpen, setLogoutOpen] = useState(defaultOpen === "logout");
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   // 휴대폰·태블릿 검색 모드 머리. 아이콘으로 열었으면 입력에 초점, [취소]로 닫으면 아이콘으로 초점을 돌려준다
   const [barOpen, setBarOpen] = useState(Boolean(search?.barOpen));
   const [barFocus, setBarFocus] = useState(false);
@@ -477,10 +482,28 @@ export function WebShell({
 
       <LogoutDialog
         open={logoutOpen}
-        onClose={() => setLogoutOpen(false)}
-        onConfirm={(opts) => {
+        busy={logoutBusy}
+        error={logoutError}
+        onClose={() => {
+          if (logoutBusy) return;
           setLogoutOpen(false);
-          onLogout?.(opts);
+          setLogoutError(null);
+        }}
+        onConfirm={(opts) => {
+          const r = onLogout?.(opts);
+          if (!r || typeof (r as Promise<unknown>).then !== "function") {
+            setLogoutOpen(false);
+            return;
+          }
+          setLogoutBusy(true);
+          setLogoutError(null);
+          void (r as Promise<{ error?: string } | void>)
+            .then((out) => {
+              if (out && out.error) setLogoutError(out.error);
+              else setLogoutOpen(false);
+            })
+            .catch(() => setLogoutError("로그아웃하지 못했습니다. 다시 시도해 주세요"))
+            .finally(() => setLogoutBusy(false));
         }}
       />
     </div>

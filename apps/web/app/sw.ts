@@ -4,7 +4,8 @@
 //   양도·취소·부가 상품 화면과 `no-store` 응답은 Cache Storage에 넣지 않는다(§5.4 '갱신' ⑤, ASVS 14.3.2, HOT-390).
 //   티켓·키 데이터는 Dexie(`peaket-wallet`)가 맡는다.
 // - API(`/v1/*`)는 개인 값이므로 절대 캐시하지 않는다(NetworkOnly). 오프라인 입장 판정은 기기 키 서명과 IndexedDB만 쓴다.
-// - 캐시 못 한 문서는 `/~offline`으로 대체한다. 서비스 워커 자신(`/serwist/*`)도 캐시하지 않는다.
+// - 캐시 못 한 문서는 `/~offline`으로 대체한다. 서비스 워커 자신(`/my/tickets/sw.js`)과 웹 푸시 워커(`/push/`)는 늘 네트워크로 받는다(NetworkOnly).
+// - 주소·범위(ADR-0363 결정 5): `/my/tickets/sw.js`에서 범위 `/my/tickets`(끝 `/` 없음)로 등록한다. 킬 스위치는 같은 주소의 app/sw-kill.ts다(결정 6).
 // - 갱신 보류(§5.4 '갱신' ①, HOT-390): 새 판은 waiting에 머문다. 창이 `{ type: 'SKIP_WAITING' }`을 보냈을 때만(QR 잠금이 빈 것을
 //   창이 확인한 뒤, features/wallet-device-key/update-hold.ts) skipWaiting()을 부르고, 활성화한 뒤에 clients.claim()을 한다.
 // - 런타임 캐시 판(§5.4 '갱신'의 런타임 캐시 판, ADR-0336 결정 5): 두 런타임 규칙은 판을 붙인 캐시 하나(`wallet-shell-{판}`)를 함께 쓴다.

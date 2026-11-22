@@ -1,7 +1,19 @@
 // BAT-455 GAT-250 원장 입구: 무역 사건·로그인 수단 변경(I-T34)·계정 병합(POL-034)·직접 낱건.
 // 사건을 받은 트랜잭션에서 중복 키를 먼저 넣고, 들어갔을 때만 작업을 적는다(ADR-0109).
 import type { Clock } from '@peaket/platform';
-import { assertVars, FAN_NOTICE_KINDS, FanNotifyProblem, isSubscriptionNotice, newId, type FanNoticeKind, type NotificationChannel, type Vars } from '../domain/fan-notify.js';
+import {
+  assertVars,
+  FAN_NOTICE_KINDS,
+  FanNotifyProblem,
+  isSubscriptionNotice,
+  newId,
+  TICKET_KEY_NOTICE_KINDS,
+  ticketKeyNoticeDedupKey,
+  type FanNoticeKind,
+  type NotificationChannel,
+  type TicketKeyNoticeKind,
+  type Vars,
+} from '../domain/fan-notify.js';
 import type { FanNotifyStore } from '../domain/fan-notify-ports.js';
 import type { NotificationJob } from '../domain/fan-notify-records.js';
 
@@ -39,6 +51,15 @@ export interface AccountMergedInput {
   primaryAccountId: string;
   mergedAccountId: string;
   occurredAtMs?: number;
+}
+
+/** ticket-svc device_key_notice 보내기 반복이 보내는 입장 키 알림 사건(docs/features/notify.md §4.7, ADR-0363 결정 4) */
+export interface TicketKeyNoticeEvent {
+  noticeId: string;
+  type: TicketKeyNoticeKind;
+  accountId: string;
+  ticketId: string;
+  registeredAtMs: number;
 }
 
 export interface NoticeInput {
@@ -90,6 +111,33 @@ export class NotificationIntake {
     const out = { created: 0, duplicate: 0, subscriptionsMoved: sub.moved + sub.deduped, pushMoved: push.moved + push.deduped };
     for (const channel of ['EMAIL', 'WEB_PUSH'] as const) {
       const r = await this.enqueue({ kind: 'ACCOUNT_MERGED', targetId: i.eventKey, accountId: i.primaryAccountId, channel, vars: {}, dedupKey: `ACCOUNT_MERGED:${i.eventKey}:${i.primaryAccountId}:${channel}` });
+      out[r] += 1;
+    }
+    return out;
+  }
+
+  /**
+   * 입장 키 알림(notify §4.7): 이메일 하나와 그 계정의 살아 있는 웹 푸시 구독마다 하나. 중복 키에 noticeId가 들어가 같은 사건이 다시 와도 작업은 하나다.
+   * 변수는 type·registeredAt·ticketId 셋이고 공개키·keyId·이메일 주소는 싣지 않는다. 밤에도 보낸다(거래·안전 알림, §7.2)
+   */
+  async ticketKeyNotice(e: TicketKeyNoticeEvent): Promise<{ created: number; duplicate: number }> {
+    if (!isUuid(e.noticeId) || !isUuid(e.accountId) || !isUuid(e.ticketId)) throw new FanNotifyProblem('INVALID', 'ID 모양이 올바르지 않습니다');
+    if (!TICKET_KEY_NOTICE_KINDS.includes(e.type)) throw new FanNotifyProblem('INVALID', '알 수 없는 입장 키 알림 종류입니다');
+    if (!Number.isSafeInteger(e.registeredAtMs) || e.registeredAtMs < 0) throw new FanNotifyProblem('INVALID', '등록 시각이 올바르지 않습니다');
+    const vars = assertVars(e.type, { type: e.type, registeredAt: new Date(e.registeredAtMs).toISOString(), ticketId: e.ticketId });
+    const out = { created: 0, duplicate: 0 };
+    const key = { type: e.type, ticketId: e.ticketId, noticeId: e.noticeId, accountId: e.accountId };
+    const email = await this.enqueue({ kind: e.type, targetId: e.ticketId, accountId: e.accountId, channel: 'EMAIL', vars, dedupKey: ticketKeyNoticeDedupKey({ ...key, channel: 'EMAIL' }) });
+    out[email] += 1;
+    for (const sub of await this.d.store.listPushSubscriptions(e.accountId)) {
+      const r = await this.enqueue({
+        kind: e.type,
+        targetId: e.ticketId,
+        accountId: e.accountId,
+        channel: 'WEB_PUSH',
+        vars,
+        dedupKey: ticketKeyNoticeDedupKey({ ...key, channel: 'WEB_PUSH', subscriptionKey: sub.endpointHash }),
+      });
       out[r] += 1;
     }
     return out;

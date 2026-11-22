@@ -40,6 +40,13 @@ import { PROVIDER_INFO, type LiveWithdrawQuote, type WithdrawQuote } from '../mo
 import { resumeDeviceLogout, returnOnMount, scannerSectionView, type ScannerSectionView } from '../model/devices';
 import type { SettingsOverlay } from '../model/state';
 
+/** 탈퇴 완료 뒤 로그아웃 정리(§5.14.4 2·4번, 월렛 키는 남김·서버 로그아웃 없음, ADR-0363 결정 8). 늦게 싣는다 */
+function endedSessionCleanup(): Promise<unknown> {
+  return Promise.all([import('@/features/session-cleanup'), import('@/features/web-push')])
+    .then(([c, p]) => c.logoutCleanup({ wallet: false, server: false, pushUnbind: () => p.browserWebPush().unbind() }))
+    .catch(() => undefined);
+}
+
 type Overlay = Exclude<SettingsOverlay, { kind: 'logout' }>;
 /** 재인증 창의 목적. 원격 로그아웃의 scope는 그 기기(device)·이 기기의 다른 로그인(others, 지금 이 기기 줄) */
 type ReauthPurpose = { kind: 'device'; session: DeviceSession; scope: LogoutScope } | { kind: 'withdraw' };
@@ -362,6 +369,8 @@ export function SettingsFlows({
       // 요청이 도는 동안 창을 닫았으면 완료만 반영하고 나머지는 버린다(닫은 창을 다시 열지 않는다)
       const step = afterWithdraw(r, { closed: opened !== closedRef.current });
       if (step === 'done' || step === 'deferred') {
+        // 서버가 세션을 끝냈으므로 대화상자 없이 로그아웃 정리 2·4번을 한다(월렛 키는 남긴다, 서버 로그아웃은 보내지 않는다, ADR-0363 결정 8)
+        void endedSessionCleanup();
         setToken(null);
         setOverlay(null);
         setLiveDone(step);

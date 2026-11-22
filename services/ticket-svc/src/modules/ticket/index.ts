@@ -2,7 +2,19 @@
 export * from './domain/ticket.js';
 export * from './domain/ports.js';
 export { TicketService, type TicketServiceDeps } from './application/ticket-service.js';
-export { DeviceKeyError, DeviceKeys, type DeviceKeysDeps, type ReauthGate } from './application/device-keys.js';
+export { DEVICE_KEY_REAUTH_ACT, DEVICE_KEY_REAUTH_OP, DeviceKeyError, DeviceKeys, type DeviceKeyRegistrationOutcome, type DeviceKeysDeps, type ReauthGate } from './application/device-keys.js';
+export {
+  DEVICE_KEY_NOTICE_EVERY_MS,
+  DEVICE_KEY_NOTICE_LEASE_MS,
+  DEVICE_KEY_NOTICE_RETENTION_MS,
+  DEVICE_KEY_NOTICE_RETRY_MS,
+  DeviceKeyNoticeSender,
+  deviceKeyNoticeEventOf,
+  deviceKeyNoticeRetryDelayMs,
+  type DeviceKeyNoticeRunResult,
+  type DeviceKeyNoticeSenderDeps,
+} from './application/device-key-notices.js';
+export { DEVICE_KEY_NOTICE_PATH, HttpDeviceKeyNoticeSink } from './adapters/http-key-notice-sink.js';
 export { deviceKeyMaterialOf, keyIdBytesOf, keyIdTextOf, type DeviceKeyReason, type PublicKeyJwk } from './domain/device-key.js';
 export { MemoryTicketStore } from './adapters/memory-ticket-store.js';
 export { MemoryTransferStore } from './adapters/memory-transfer-store.js';

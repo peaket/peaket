@@ -79,8 +79,23 @@ export interface DeviceKeyRegistrationInput {
   readonly publicKey: Uint8Array;
   readonly reason: DeviceKeyReason;
   readonly nowMs: number;
-  /** 재인증을 확인했는가. 입장 시작 뒤 ISSUE와 반복 ISSUE의 허용 근거다 */
+  /** 재인증을 확인했는가. 입장 시작 뒤 첫 ISSUE, 다른 키가 유효한 ISSUE, REISSUE의 허용 근거다 */
   readonly reauthVerified: boolean;
+  /** 입장 키 알림 행 ID(성공한 교체·입장 시작 뒤 첫 등록이면 이 ID로 device_key_notice 한 행, ADR-0363 결정 4). 없으면 저장소가 만든다 */
+  readonly noticeId?: string;
+}
+
+/** 입장 키 알림 종류(docs/features/notify.md §4.7) */
+export type DeviceKeyNoticeType = 'DEVICE_KEY_REISSUED' | 'DEVICE_KEY_LATE_ISSUE';
+
+/**
+ * 성공한 등록이 알림 행을 남기는가(ADR-0363 결정 4, docs/data.md device_key_notice). 두 저장소가 같은 규칙을 쓴다.
+ * REISSUE와 키가 있던 티켓의 ISSUE(교체)는 DEVICE_KEY_REISSUED, 입장 시작 뒤 첫 ISSUE(유효 키 없음)는 DEVICE_KEY_LATE_ISSUE, 그 밖(첫 등록·TRANSFER)은 없음
+ */
+export function deviceKeyNoticeTypeOf(i: { reason: DeviceKeyReason; hadActive: boolean; started: boolean }): DeviceKeyNoticeType | undefined {
+  if (i.reason === 'REISSUE' || (i.reason === 'ISSUE' && i.hadActive)) return 'DEVICE_KEY_REISSUED';
+  if (i.reason === 'ISSUE' && i.started) return 'DEVICE_KEY_LATE_ISSUE';
+  return undefined;
 }
 
 export type DeviceKeyRegistrationResult =
@@ -88,14 +103,64 @@ export type DeviceKeyRegistrationResult =
    * unchanged: 같은 티켓의 지금 유효 키와 keyId가 같은 요청이라 아무것도 바꾸지 않았다(새 행·폐기·scanner_change·24시간 셈 없음,
    * offline-gate §2 '같은 키 다시 등록', ADR-0336 결정 4). 응답은 처음 등록과 같은 201 `{keyId}`다
    */
-  | { readonly kind: 'REGISTERED'; readonly keyId: string; readonly revokedKeyId?: string; readonly unchanged?: true }
+  | { readonly kind: 'REGISTERED'; readonly keyId: string; readonly revokedKeyId?: string; readonly unchanged?: true; readonly noticeId?: string }
   | { readonly kind: 'NOT_FOUND' }
   | { readonly kind: 'NOT_HOLDER' }
+  /** 재인증 필요(403 reauth-required). 지금 두 저장소는 쓰지 않는다(아래 ENTRY_STARTED가 같은 이름으로 나간다) */
   | { readonly kind: 'REAUTH_REQUIRED' }
+  /** 입장 시작 뒤 첫 등록(유효 키 없음)인데 재인증이 없거나 틀림, 입장 시작 뒤 유효 키 없는 REISSUE·TRANSFER(403 reauth-required, ADR-0363 결정 2) */
   | { readonly kind: 'ENTRY_STARTED' }
+  /** 입장 시작 전, 다른 키가 유효하거나 REISSUE인데 재인증이 없거나 틀림(403 reissue-required). 보유자가 아니어도 재인증 없는 REISSUE는 이것이다(404보다 403) */
+  | { readonly kind: 'REISSUE_REQUIRED' }
+  /** 입장 시작 뒤 다른 키가 유효함(재인증과 상관없이, ISSUE·REISSUE, 403 reissue-at-booth). 키는 바뀌지 않는다 */
+  | { readonly kind: 'REISSUE_AT_BOOTH' }
   | { readonly kind: 'REISSUE_LIMIT' }
   /** 보유자가 결제자 그대로인데 TRANSFER를 부른 경우(양도 수락 전) */
   | { readonly kind: 'TRANSFER_NOT_ALLOWED' };
+
+/** 보내기 반복이 집은 알림 행(연락처·키 값 없음) */
+export interface DeviceKeyNotice {
+  readonly id: string;
+  readonly type: DeviceKeyNoticeType;
+  readonly accountId: string;
+  readonly ticketId: string;
+  readonly registeredAtMs: number;
+  readonly attempts: number;
+}
+
+/** 입장 키 알림 보낼 표(device_key_notice, ADR-0363 결정 4). 행은 등록 트랜잭션이 적고 보내기 반복이 이 포트로 읽는다 */
+export interface DeviceKeyNoticeStore {
+  /**
+   * 보낼 때가 된 보내지 않은 행을 최대 limit개 잡는다(FOR UPDATE SKIP LOCKED로 고르고 next_attempt_at을 leaseMs 뒤로 밀어 다른 파드가 겹쳐 집지 않게 한다).
+   * 잡은 행의 attempts는 이번 보내기를 더한 값이다
+   */
+  claimDue(nowMs: number, limit: number, leaseMs: number): Promise<readonly DeviceKeyNotice[]>;
+  /** core-svc가 2xx·422로 답했다 */
+  markSent(id: string, nowMs: number): Promise<void>;
+  /** 다음 보낼 때를 정한다(1분·5분·30분 [가정]) */
+  reschedule(id: string, nextAttemptAtMs: number): Promise<void>;
+  /** 보내지 않은 행 수와 가장 오래된 행의 created_at(지표 ticket_device_key_notice_backlog·oldest_seconds) */
+  backlog(): Promise<{ readonly count: number; readonly oldestCreatedAtMs?: number }>;
+  /** 보낸 지 olderThanMs 지난 행을 지운다(7일 [가정], docs/data.md) */
+  purgeSent(beforeMs: number): Promise<number>;
+}
+
+/** core-svc 알림 내부 입구 본문(docs/features/notify.md §4.7). 정의 밖 칸은 core가 422로 거절한다 */
+export interface DeviceKeyNoticeEvent {
+  readonly noticeId: string;
+  readonly type: DeviceKeyNoticeType;
+  readonly accountId: string;
+  readonly ticketId: string;
+  readonly registeredAtMs: number;
+}
+
+/** 보내기 결과: sent(2xx·422) · retry(그 밖) */
+export type DeviceKeyNoticeSendResult = { readonly kind: 'sent'; readonly status: number } | { readonly kind: 'retry'; readonly reason: string };
+
+/** core-svc 알림 내부 입구로 보내는 포트(어댑터 HttpDeviceKeyNoticeSink) */
+export interface DeviceKeyNoticeSink {
+  send(e: DeviceKeyNoticeEvent): Promise<DeviceKeyNoticeSendResult>;
+}
 
 export interface DeviceKeyStore {
   register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult>;

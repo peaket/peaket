@@ -12,6 +12,11 @@ import { alertFailureText, OpenAlertProvider } from '@/features/open-alert';
 import { isRefreshUnavailableError, isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
+
+/** CMP-068 [알림 켜기]의 웹 푸시(ADR-0363 결정 7). 모듈은 시트가 열릴 때 미리 받고 누를 때 쓴다(첫 JS에 넣지 않는다) */
+const webPushModule = () => import('@/features/web-push');
+const prepareWebPush = () => void webPushModule().catch(() => undefined);
+const enableWebPush = () => webPushModule().then((m) => m.browserWebPush().enable());
 import { subscriptionFlags } from '../model/subscriptions';
 
 type Status = 'loading' | 'guest' | 'ready';
@@ -146,7 +151,7 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
 
   return (
     <PersonalContext.Provider value={{ status, alertKnown, alertOn, setAlert, cancelOn, setCancel, wishKnown, wished, setWish }}>
-      <OpenAlertProvider guest={status === 'guest'} loginHref={loginHref}>
+      <OpenAlertProvider guest={status === 'guest'} loginHref={loginHref} enablePush={enableWebPush} preparePush={prepareWebPush}>
         {children}
       </OpenAlertProvider>
     </PersonalContext.Provider>

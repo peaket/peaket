@@ -42,6 +42,8 @@
 | `NEXT_PUBLIC_PARTNER_API_ORIGIN` | 파트너 콘솔이 공연 등록·공연장과 아티스트 찾기를 부르는 파트너 API 주소(개발 서버에서 없으면 비워 둔다, 가짜 API 주소를 넣으면 위저드를 끝까지 볼 수 있다, ADR-0245) |
 | `NEXT_PUBLIC_QUEUE_ORIGIN`·`NEXT_PUBLIC_QUEUE_FILES_ORIGIN` | 브라우저 api-client가 함께 담는 대기열 API·파일 출처(개발 서버에서 없으면 비워 둔다) |
 | `PEAKET_CSP_ORIGINS` | CSP 자리 출처 바꾸기(JSON). 이미지 파생본 출처는 `img`(운영 기본 `https://img.peaket.example` [가정]) |
+| `NEXT_PUBLIC_PEAKET_VAPID_PUBLIC_KEY` | 웹 푸시 구독에 쓰는 VAPID 공개키(base64url 비압축 P-256 점, 공개 빌드 값, ADR-0363 결정 7). core-svc의 `PEAKET_VAPID_PUBLIC_KEY`와 같은 값이다. local·ci는 core-svc 고정 시험 키 `BPRK55IiAXYr6CC6I2ZUWyTZHxynq9qTIcpa74BEWw1K3HrMx_LNzk5VudZTbzxH3KArrpOSG5RZ6nhphlvXgpI`(core-svc `notify/adapters/config.ts` `localVapidKey`)를 넣는다. 없거나 틀린 꼴이면 웹 푸시를 켜지 않고 "이메일로 알려 드립니다"를 보인다 |
+| `PEAKET_WALLET_SW_MODE` | 웹 앱 서버 실행 값(빌드 값이 아니다). `kill`이면 `/my/tickets/sw.js`가 빌드 때 함께 묶은 월렛 킬 스위치 워커를 낸다(RB-23, ADR-0363 결정 6). 없으면 보통 워커 |
 
 ## 소셜 로그인을 로컬에서 돌려 보기(BUILD_ORDER PRF-020)
 
@@ -72,7 +74,7 @@
 
 1. 모의 기관: `PEAKET_ENV=local PEAKET_TEST_VERIFICATION_RETURN_URL=<웹 출처>/verify/return node services/identity-svc/scripts/mock-idv.mjs 18920`. 비밀은 identity-svc와 같은 `PEAKET_TEST_VERIFICATION_SECRET`(base64)이고, 없으면 둘 다 개발용 값을 쓴다. demo(로컬 kind 데모 오버레이)도 같은 모의 기관을 `PEAKET_ENV=demo`로 띄운다. demo는 비밀이 없으면 둘 다 시작하지 않는다(2026-11-05, BOT-010이 넘긴 것).
 2. identity-svc에 더하는 값: `PEAKET_VERIFICATION_PROVIDER=test`, `PEAKET_TEST_VERIFICATION_URL=http://127.0.0.1:18920/verify`, `PEAKET_CI_HMAC_KEY`(판 1, 판이 여럿이면 `PEAKET_CI_HMAC_KEYS`에 JSON `{"판": base64}`)·`PEAKET_PID_HMAC_KEY`(base64 32바이트. KMS로 하려면 `PEAKET_CI_HMAC_KMS_KEYS`·`PEAKET_PID_HMAC_KMS_KEY`와 moto 주소 `PEAKET_KMS_ENDPOINT`), 페이지 이동 방식 기관을 흉내 내려면 `PEAKET_TEST_VERIFICATION_MODE=REDIRECT`.
-3. 게이트웨이 대역(로컬에는 gw-fan이 없다): `PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=<웹 출처> PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=<발급자> node apps/web/scripts/local-fan-gateway.mjs 18930`.
+3. 게이트웨이 대역(로컬에는 gw-fan이 없다): `PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=<웹 출처> PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=<발급자> node apps/web/scripts/local-fan-gateway.mjs 18930`. 월렛 등록(`POST /v1/tickets/{ticketId}/device-keys`)을 ticket-svc로, 웹 푸시 구독(`/v1/push-subscriptions`)을 core-svc로 넘기려면 `PEAKET_TICKET_HTTP=http://127.0.0.1:<ticket-svc 앱 포트>`·`PEAKET_CORE_HTTP=http://127.0.0.1:<core-svc 앱 포트>`를 더한다(ADR-0363).
 4. 소비자 웹은 빌드할 때 `NEXT_PUBLIC_API_ORIGIN=http://localhost:18930`을 준다. 쿠키가 `localhost` 이름에 붙으므로 `127.0.0.1`이 아니라 `localhost`로 적는다. 이 값이 없으면 개발 서버의 본인확인 버튼은 퍼블리싱용 시험 창을 연다.
 
 로그인한 뒤 공연 상세(`/events/evt-lumen-1025`)에서 [휴대폰 본인확인]을 누르면 모의 기관 창이 열린다. 이름표가 같으면 같은 사람이라, 다른 계정에서 같은 이름표로 하면 '다른 계정의 본인'이 나온다.

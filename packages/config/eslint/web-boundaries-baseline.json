@@ -310,11 +310,6 @@
       "rule": "route-reexport-only",
       "key": "apps/web/app/(request)/v1/identity/link-proposals/[proposalId]/separate-account/route.ts",
       "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
-    },
-    {
-      "rule": "route-reexport-only",
-      "key": "apps/web/app/serwist/[path]/route.ts",
-      "reason": "요청 처리 코드를 경로 파일에 직접 두었다(규칙을 들이기 전). src/_app이나 그 조각의 server/로 옮기고 다시 내보내면 이 줄을 지운다"
     }
   ]
 }

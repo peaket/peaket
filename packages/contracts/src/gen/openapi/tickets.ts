@@ -70,7 +70,7 @@ export const CreateTicketDeviceKeyParams = zod.object({
 })
 
 export const CreateTicketDeviceKeyHeader = zod.object({
-  "X-Reauth-Token": zod.string().optional().describe('REISSUE와 입장 시작 뒤 ISSUE일 때 필수(guidelines §7)')
+  "X-Reauth-Token": zod.string().optional().describe('REISSUE, 다른 키가 유효한 티켓의 ISSUE, 입장 시작 뒤 첫 ISSUE일 때 필수(guidelines §7). 받는 쪽 작업 DEVICE_KEY_ISSUE·작업 묶음 FAN_SENSITIVE의 팬 재인증 토큰(ADR-0363 결정 1)')
 })
 
 export const createTicketDeviceKeyBodyPublicKeyJwkXRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');

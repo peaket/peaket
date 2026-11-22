@@ -1,9 +1,11 @@
 // 가짜 API의 입장용 휴대폰 등록(POST /v1/tickets/{ticketId}/device-keys, offline-gate §2 '서버 등록 잇기'·'같은 키 다시 등록', ADR-0336).
 // 월렛이 서버 등록을 늘 부르게 되어(BAT-350), 가짜 API를 쓰는 개발 서버·브라우저 확인에서 등록이 404(거절 → 키 지움)로 끝나지 않게 둔다.
 // - 받은 P-256 공개키 JWK에서 keyId(SPKI SHA-256 앞 8바이트, base64url)를 node:crypto로 계산해 201 `{keyId}`로 답한다(ticket-svc와 같은 식).
-// - 같은 티켓의 지금 키와 keyId가 같으면 바꾸지 않고 201, 다른 키면 403 reauth-required(재인증 확인은 GAT-020 몫, ticket-svc와 같은 규칙).
-// - 상태 바꾸기 deviceKey=normal|mismatch|down|reauth|not-found|invalid(mismatch는 다른 keyId로 201, down은 503, reauth는 403 reauth-required,
-//   not-found는 404, invalid는 422 invalid-device-key). deviceKeyReset=1은 등록한 키를 모두 잊는다. 비로그인(fan=guest)은 401
+// - 같은 티켓의 지금 키와 keyId가 같으면 바꾸지 않고 201, 다른 키면 403 reissue-required(입장 시작 전 재발급, ticket-svc와 같은 이름, ADR-0363 결정 2).
+//   X-Reauth-Token을 실은 REISSUE·ISSUE는 재인증을 지난 것으로 보고 받는다(가짜 API는 토큰을 확인하지 않는다). 그 뒤 24시간 안의 두 번째 교체는 429.
+// - 상태 바꾸기 deviceKey=normal|mismatch|down|reauth|reissue|booth|not-found|invalid(mismatch는 다른 keyId로 201, down은 503, reauth는 403 reauth-required,
+//   reissue는 403 reissue-required, booth는 403 reissue-at-booth, not-found는 404, invalid는 422 invalid-device-key). deviceKeyReset=1은 등록한 키를 모두 잊는다.
+//   비로그인(fan=guest)은 401
 import { createHash, createPublicKey } from 'node:crypto';
 
 /** 계약이 받는 칸(openapi createTicketDeviceKey). 그 밖의 칸(개인키 d 포함)이 있으면 400 */
@@ -48,9 +50,12 @@ function otherKeyId(keyId) {
 export function createTicketsMock({ state }) {
   /** 티켓 ID → 지금 유효 keyId */
   const active = new Map();
+  /** 티켓 ID → 재인증 뒤 교체한 횟수(24시간 한도 흉내, 가짜 API는 시각을 보지 않는다) */
+  const rotated = new Map();
   return {
     reset() {
       active.clear();
+      rotated.clear();
     },
     /**
      * 처리했으면 true
@@ -68,13 +73,20 @@ export function createTicketsMock({ state }) {
         const mode = state.deviceKey ?? 'normal';
         if (mode === 'down') return io.problem(503, 'dependency-unavailable', '잠시 후 다시 시도해 주세요', { 'retry-after': '1' });
         if (mode === 'reauth') return io.problem(403, 'reauth-required', '다시 인증해 주세요');
+        if (mode === 'reissue') return io.problem(403, 'reissue-required', '이 티켓은 다른 기기에 입장 키가 있습니다. 다시 로그인한 뒤 이 휴대폰으로 받을 수 있습니다');
+        if (mode === 'booth') return io.problem(403, 'reissue-at-booth', '입장이 시작되어 현장 부스에서만 다시 받을 수 있습니다');
         if (mode === 'not-found') return io.problem(404, 'not-found', '찾을 수 없습니다');
         const keyId = deviceKeyIdOf(b.publicKeyJwk);
         if (mode === 'invalid' || !keyId) return io.problem(422, 'invalid-device-key', '기기 공개키가 P-256 곡선 위의 점이 아닙니다');
         if (b.reason === 'BOOTH') return io.problem(403, 'booth-not-authorized', '부스 재발급 허용이 없거나 10분이 지났습니다');
         const current = active.get(ticketId);
-        // 같은 키 다시 등록은 바꾸지 않고 201, 다른 키는 재인증이 필요하다(재인증 확인이 없어 늘 403)
-        if (current !== undefined && current !== keyId) return io.problem(403, 'reauth-required', '다시 인증해 주세요');
+        const reauthed = typeof req.headers['x-reauth-token'] === 'string' && req.headers['x-reauth-token'] !== '';
+        // 같은 키 다시 등록은 바꾸지 않고 201, 다른 키는 재인증 뒤 다시 받는다(403 reissue-required, 토큰을 실으면 교체)
+        if (current !== undefined && current !== keyId) {
+          if (!reauthed) return io.problem(403, 'reissue-required', '이 티켓은 다른 기기에 입장 키가 있습니다. 다시 로그인한 뒤 이 휴대폰으로 받을 수 있습니다');
+          if ((rotated.get(ticketId) ?? 0) >= 1) return io.problem(429, 'too-many-requests', '24시간 안에 이미 다시 받았습니다', { 'retry-after': '86400' });
+          rotated.set(ticketId, (rotated.get(ticketId) ?? 0) + 1);
+        }
         active.set(ticketId, keyId);
         return io.send(201, { keyId: mode === 'mismatch' ? otherKeyId(keyId) : keyId });
       });

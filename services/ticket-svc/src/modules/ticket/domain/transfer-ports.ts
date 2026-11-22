@@ -1,8 +1,9 @@
-// 양도 저장소·재인증·회원 코드 찾기 포트(BUILD_ORDER GAT-050·GAT-055). 어댑터는 application이 아니라 이 파일을 본다(architecture §3.1).
+// 양도 저장소·재인증·회원 코드 찾기 포트(BUILD_ORDER GAT-050·GAT-055). 재인증 확인 포트는 기기 키 등록도 쓴다(GAT-020, ADR-0363 결정 1). 어댑터는 application이 아니라 이 파일을 본다(architecture §3.1).
 import type { CreateOfferRejection, ReturnRejection, TransferOfferRecord, TransferTicketSnapshot } from './transfer.js';
 
 export type TransferAct = 'FAN_HIGH_RISK' | 'FAN_SENSITIVE';
-export type TransferOp = 'TRANSFER_REQUEST' | 'TICKET_RETURN';
+/** 받는 쪽 작업(authz-matrix §6). DEVICE_KEY_ISSUE는 기기 키 등록(재발급·입장 시작 뒤 첫 등록, ADR-0363 결정 1)이 쓴다 */
+export type TransferOp = 'TRANSFER_REQUEST' | 'TICKET_RETURN' | 'DEVICE_KEY_ISSUE';
 
 /** 재인증 토큰 확인 포트(어댑터 JwksFanReauthGate). false면 403, 던지면 503(ReauthUnavailable) */
 export interface TransferReauthGate {

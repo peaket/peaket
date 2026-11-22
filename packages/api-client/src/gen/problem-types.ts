@@ -278,6 +278,8 @@ export type ProblemType =
   | 'refresh-token-invalid'
   | 'refund-account-required'
   | 'refund-rejected'
+  | 'reissue-at-booth'
+  | 'reissue-required'
   | 'rejection-not-allowed'
   | 'reoffer-not-allowed'
   | 'report-limited'
@@ -662,6 +664,8 @@ export const PROBLEM_TYPES = {
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },
   'refund-rejected': { status: 422, title: "결제사가 환급을 거절했습니다. 고객센터가 이어 봅니다" },
+  'reissue-at-booth': { status: 403, title: "입장이 시작되어 현장 부스에서만 다시 받을 수 있습니다" },
+  'reissue-required': { status: 403, title: "이 티켓은 다른 기기에 입장 키가 있습니다. 다시 로그인한 뒤 이 휴대폰으로 받을 수 있습니다" },
   'rejection-not-allowed': { status: 403, title: "판정 전 반려는 commander만 할 수 있습니다" },
   'reoffer-not-allowed': { status: 409, title: "받은 티켓은 다시 양도할 수 없습니다. 결제자에게 돌려주세요" },
   'report-limited': { status: 429, title: "오늘은 더 신고할 수 없습니다" },

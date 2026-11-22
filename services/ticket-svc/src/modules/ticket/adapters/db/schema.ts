@@ -139,6 +139,38 @@ export const deviceKey = pgTable(
   ],
 );
 
+/**
+ * 입장 키 알림 보낼 표(docs/data.md device_key_notice, ADR-0363 결정 4, 마이그레이션 0012). 성공한 교체·입장 시작 뒤 첫 등록이
+ * 등록과 같은 트랜잭션에 한 행을 적고, 보내기 반복이 core-svc 알림 내부 입구로 보낸다. 연락처·키 값은 두지 않는다
+ */
+export const deviceKeyNotice = pgTable(
+  'device_key_notice',
+  {
+    /** core-svc 알림 중복 키에 들어간다 */
+    id: uuid('id').primaryKey(),
+    /** 새로 등록한 키 */
+    deviceKeyId: uuid('device_key_id')
+      .notNull()
+      .references(() => deviceKey.id),
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => ticket.id),
+    /** 알림 받을 계정(그때의 보유자) */
+    accountId: uuid('account_id').notNull(),
+    type: text('type').notNull(),
+    createdAt: at('created_at').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: at('next_attempt_at').notNull(),
+    sentAt: at('sent_at'),
+  },
+  (t) => [
+    uniqueIndex('device_key_notice_device_key_uq').on(t.deviceKeyId),
+    index('device_key_notice_due_idx').on(t.nextAttemptAt).where(sql`${t.sentAt} IS NULL`),
+    check('device_key_notice_type_check', sql`${t.type} IN ('DEVICE_KEY_REISSUED', 'DEVICE_KEY_LATE_ISSUE')`),
+    check('device_key_notice_attempts_check', sql`${t.attempts} >= 0`),
+  ],
+);
+
 /** 취소표. (cancellation_id, ticket_id)로 멱등하다. */
 export const ticketCancellation = pgTable(
   'ticket_cancellation',

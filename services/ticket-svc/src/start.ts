@@ -3,7 +3,7 @@
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { type AdminAuthzPort, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, reauthJtiStoreFromEnv, type ScannerSessionCheck, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, type Clock, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, reauthJtiStoreFromEnv, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
@@ -14,7 +14,10 @@ import { DrizzleTransferStore } from './modules/ticket/adapters/db/drizzle-trans
 import { GrpcMemberCodeDirectory } from './modules/ticket/adapters/identity-member-codes.js';
 import { JwksFanReauthGate } from './modules/ticket/adapters/jwks-fan-reauth-gate.js';
 import { Transfers, type TransferReauthGate } from './modules/ticket/application/transfers.js';
-import { DeviceKeys } from './modules/ticket/application/device-keys.js';
+import { DeviceKeys, type DeviceKeysDeps } from './modules/ticket/application/device-keys.js';
+import { DEVICE_KEY_NOTICE_EVERY_MS, DeviceKeyNoticeSender } from './modules/ticket/application/device-key-notices.js';
+import { HttpDeviceKeyNoticeSink } from './modules/ticket/adapters/http-key-notice-sink.js';
+import type { DeviceKeyNoticeStore, DeviceKeyStore } from './modules/ticket/domain/ports.js';
 import { TicketService } from './modules/ticket/application/ticket-service.js';
 import { ticketPackage, ticketServiceHandlers, transferLockHandlers } from './modules/ticket/inbound/ticket.grpc.js';
 import { scannerDeviceHandlers } from './modules/scanner/inbound/scanner-device.grpc.js';
@@ -38,6 +41,48 @@ import {
 } from './modules/scanner/index.js';
 
 const SERVICE = 'ticket-svc';
+
+/** core-svc 알림 내부 입구 한 번의 시간 상한 2초 [가정](docs/review/plans/F-05-1.md §4, ADR-0363 결정 4) */
+export const DEVICE_KEY_NOTICE_TIMEOUT_MS = 2_000;
+
+export interface DeviceKeyAssemblyOptions {
+  /** 기기 키 저장소이자 알림 보낼 표(DrizzleDeviceKeyStore, 시험은 MemoryDeviceKeyStore) */
+  readonly store: DeviceKeyStore & DeviceKeyNoticeStore;
+  /** 팬 재인증 확인기. 양도·돌려주기와 같은 인스턴스를 넘긴다(ADR-0363 결정 1) */
+  readonly reauth: NonNullable<DeviceKeysDeps['reauth']>;
+  readonly clock: Clock;
+  /** core-svc 내부 HTTP 주소(PEAKET_CORE_HTTP_URL). 없으면 보내기 반복을 만들지 않는다(행만 쌓인다) */
+  readonly coreHttpUrl?: string;
+  /** x-peaket-internal-token(PEAKET_INTERNAL_TOKEN) */
+  readonly internalToken?: string;
+  /** 시험이 core 내부 입구 대역에 닿게 바꾸는 fetch */
+  readonly fetch?: typeof fetch;
+  readonly observe?: DeviceKeysDeps['observe'];
+  readonly observeNotice?: (result: 'sent' | 'retry') => void;
+}
+
+/**
+ * 기기 키 등록 유스케이스와 입장 키 알림 보내기를 조립한다(ADR-0363 결정 1·4). start()와 연결 시험이 같은 함수를 부른다.
+ * 재인증 확인기를 꽂지 않으면 재발급·입장 시작 뒤 첫 등록이 늘 403이므로(맥락 1) reauth는 필수다
+ */
+export function assembleDeviceKeys(o: DeviceKeyAssemblyOptions): { deviceKeys: DeviceKeys; notices?: DeviceKeyNoticeSender } {
+  const deviceKeys = new DeviceKeys({ store: o.store, clock: o.clock, reauth: o.reauth, ...(o.observe ? { observe: o.observe } : {}) });
+  if (!o.coreHttpUrl) return { deviceKeys };
+  const client = createExternalHttpClient({
+    provider: 'core-svc',
+    baseUrl: o.coreHttpUrl,
+    timeoutCapMs: DEVICE_KEY_NOTICE_TIMEOUT_MS,
+    clock: o.clock,
+    ...(o.fetch ? { fetch: o.fetch } : {}),
+  });
+  const notices = new DeviceKeyNoticeSender({
+    store: o.store,
+    sink: new HttpDeviceKeyNoticeSink(client, o.internalToken),
+    clock: o.clock,
+    ...(o.observeNotice ? { observe: o.observeNotice } : {}),
+  });
+  return { deviceKeys, notices };
+}
 
 export interface StartOptions {
   env: Record<string, string | undefined>;
@@ -63,6 +108,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let alert: ((message: string, fields: Record<string, unknown>) => void) | undefined;
   let freshnessTimer: ReturnType<typeof setInterval> | undefined;
   let expireTimer: ReturnType<typeof setInterval> | undefined;
+  let noticeTimer: ReturnType<typeof setInterval> | undefined;
   let controlSync: { close(): Promise<void> } | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
@@ -70,7 +116,6 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore });
     const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore });
     const ticket = new TicketService({ store, clock: systemClock });
-    const deviceKeys = new DeviceKeys({ store: deviceKeyStore, clock: systemClock });
     const scannerStore = new DrizzleScannerDeviceStore(database);
     const scannerCommands = new DrizzleScannerDeviceCommandStore(database);
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
@@ -81,6 +126,19 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const reauth: TransferReauthGate = config.identityFanJwksUrl
       ? new JwksFanReauthGate({ jwksUrl: config.identityFanJwksUrl, issuer: config.identityIssuer ?? 'https://identity.peaket.example', jti, clock: systemClock })
       : { verify: async () => false };
+    // 기기 키 등록(GAT-020, ADR-0363 결정 1·4): 양도와 같은 재인증 확인기를 꽂고, 알림 보내기 반복을 core-svc 내부 입구에 잇는다.
+    // 지표는 서비스를 만든 뒤 잇는다(registrationMetric·noticeMetric)
+    let registrationMetric: DeviceKeysDeps['observe'];
+    let noticeMetric: ((result: 'sent' | 'retry') => void) | undefined;
+    const { deviceKeys, notices } = assembleDeviceKeys({
+      store: deviceKeyStore,
+      reauth,
+      clock: systemClock,
+      ...(config.coreHttpUrl ? { coreHttpUrl: config.coreHttpUrl } : {}),
+      ...(config.internalToken ? { internalToken: config.internalToken } : {}),
+      observe: (r) => registrationMetric?.(r),
+      observeNotice: (r) => noticeMetric?.(r),
+    });
     const memberCodes = config.identityGrpcUrl ? new GrpcMemberCodeDirectory(config.identityGrpcUrl, lbProfile) : undefined;
     const transfers = new Transfers({
       store: transferStore,
@@ -167,6 +225,50 @@ export async function start(o: StartOptions): Promise<StartedService> {
     expireTimer = setInterval(expire, 60_000);
     expireTimer.unref?.();
     expire();
+    // 기기 키 등록 지표·로그 줄(docs/features/offline-gate.md §10.1). 계정·keyId는 싣지 않는다
+    const registrations = new Counter({
+      name: 'ticket_device_key_registrations_total',
+      help: '입장용 기기 키 등록 수(reason, result, offline-gate §10.1)',
+      labelNames: ['service', 'reason', 'result'],
+      registers: [service.metrics.registry],
+    });
+    registrationMetric = ({ reason, result }) => {
+      registrations.inc({ service: SERVICE, reason, result });
+      if (result !== 'registered' && result !== 'unchanged') service!.logger.info({ kind: 'device-key.rejected', reason, result }, 'device-key.rejected');
+    };
+    // 입장 키 알림 보내기 반복(ADR-0363 결정 4). core-svc 주소가 없으면 돌지 않고 행만 쌓인다
+    const noticeSent = new Counter({
+      name: 'ticket_device_key_notice_sent_total',
+      help: '입장 키 알림 보내기 결과 수(result=sent·retry, offline-gate §10.1)',
+      labelNames: ['service', 'result'],
+      registers: [service.metrics.registry],
+    });
+    noticeMetric = (result) => noticeSent.inc({ service: SERVICE, result });
+    const noticeBacklog = new Gauge({ name: 'ticket_device_key_notice_backlog', help: '보내지 않은 입장 키 알림 행 수(offline-gate §10.1)', labelNames: ['service'], registers: [service.metrics.registry] });
+    const noticeOldest = new Gauge({
+      name: 'ticket_device_key_notice_oldest_seconds',
+      help: '가장 오래된 보내지 않은 입장 키 알림 행의 나이(초, offline-gate §10.1)',
+      labelNames: ['service'],
+      registers: [service.metrics.registry],
+    });
+    if (notices) {
+      const sendNotices = (): void => {
+        void notices
+          .runOnce()
+          .then(() => notices.backlog())
+          .then((b) => {
+            noticeBacklog.set({ service: SERVICE }, b.count);
+            noticeOldest.set({ service: SERVICE }, b.oldestSeconds);
+          })
+          .catch((err: unknown) => service!.logger.warn({ err: err instanceof Error ? err.message : String(err) }, '입장 키 알림 보내기가 실패했다(다음 틱에 다시 한다)'));
+      };
+      noticeTimer = setInterval(sendNotices, DEVICE_KEY_NOTICE_EVERY_MS);
+      noticeTimer.unref?.();
+      sendNotices();
+      if (!config.internalToken) service.logger.warn({}, 'PEAKET_INTERNAL_TOKEN이 없어 입장 키 알림이 core-svc에서 401로 거절될 수 있다');
+    } else {
+      service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 입장 키 알림을 보내지 않는다(device_key_notice 행만 쌓인다)');
+    }
     // O-T20: 입장 시간대에 2분 넘게 변경분을 받지 못한 스캐너를 ops-svc SEV2 경보로 넘긴다(기존 ops_alert 경로).
     if (config.opsHttpUrl) {
       const freshnessAlerts = new Counter({
@@ -262,6 +364,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       started.readiness.register('shutting-down');
       if (freshnessTimer) clearInterval(freshnessTimer);
       if (expireTimer) clearInterval(expireTimer);
+      if (noticeTimer) clearInterval(noticeTimer);
       return (closing ??= (async () => {
         try {
           await startedGrpc.close();
@@ -281,6 +384,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   } catch (err) {
     if (freshnessTimer) clearInterval(freshnessTimer);
     if (expireTimer) clearInterval(expireTimer);
+    if (noticeTimer) clearInterval(noticeTimer);
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});
     await controlSync?.close();

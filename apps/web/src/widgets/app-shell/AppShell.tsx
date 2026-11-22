@@ -3,10 +3,13 @@
 // 장르 목록, 자동완성 출처·최근 검색어(search-source, HOT-313), 토스트를 넣는다. 서버 페이지는 직렬화되는 값(문자열·불리언·객체·ReactNode)만 넘긴다.
 // 로그인 상태(ADR-0202 결정 2, HOT-321): guest·user를 넘기지 않으면 화면 스크립트가 팬 계정 요약(GET /v1/identity/me)을 받아 고른다.
 // 받기 전에는 머리의 계정 자리가 빈자리다. guest(로그인 화면처럼 늘 로그인 전 모양)와 user(아직 데이터에 잇지 않은 화면의 목업)는 그대로 따른다.
-// 로그아웃은 확인 뒤 같은 출처 폼 POST /logout이다(앱 서버가 Origin을 보고 쿠키를 지운 뒤 홈으로, identity §2, ADR-0202 결정 6).
+// 로그아웃(ADR-0363 결정 8, docs/frontend.md §5.14.4): 대화상자의 [로그아웃]이 정리 루틴(features/session-cleanup)을 부른다.
+// 웹 푸시 해제 DELETE를 먼저 → 저장물 지우기 → ('이 기기의 입장 키도 지우기'를 골랐으면) 월렛 → 다른 탭에 logout → 같은 출처 fetch POST /logout.
+// 이동이나 2xx면 홈으로, 503·연결 실패면 대화상자 안에 다시 시도를 안내한다. 다른 탭의 logout을 받으면 저장물을 지우고 로그인 화면으로 간다.
+// 로그인한 셸이 그려지면 웹 푸시 구독을 지금 계정에 다시 묶는다(권한을 묻지 않는다, §4.2.4). 둘 다 늦게 싣는다(첫 JS에 넣지 않는다).
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, type ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import {
   WebShell,
   WebShellOfflineBanner,
@@ -22,6 +25,9 @@ import { WalletUpdateLoader } from '@/features/wallet-device-key/ui/WalletUpdate
 import { GENRES, searchHref } from '@/shared/config/genres';
 import { ToastProvider } from '@/shared/ui/toast';
 import { useRecentSearches, useSuggestionSource } from './search-source';
+
+/** 이 문서에서 웹 푸시 다시 묶기를 이미 했는가 */
+let rebound = false;
 
 const SHELL_GENRES = [
   ...GENRES.map((g) => ({ label: g.label, href: searchHref.genre(g.key), icon: g.icon })),
@@ -92,13 +98,48 @@ export function AppShell({
     : user
       ? { name: user.name, avatarText: user.avatarText, verified: user.verified, hasStaffAssignment: user.hasStaffAssignment }
       : (live ?? null);
-  const logout = useCallback(() => {
-    const f = document.createElement('form');
-    f.method = 'post';
-    f.action = '/logout';
-    document.body.appendChild(f);
-    f.submit();
+  const logout = useCallback(async ({ clearEntryKeys }: { clearEntryKeys: boolean }): Promise<{ error?: string } | void> => {
+    try {
+      const [{ logoutCleanup }, { browserWebPush }] = await Promise.all([import('@/features/session-cleanup'), import('@/features/web-push')]);
+      const r = await logoutCleanup({ wallet: clearEntryKeys, server: true, pushUnbind: () => browserWebPush().unbind() });
+      if (r.server === 'ok') {
+        window.location.assign('/');
+        return;
+      }
+    } catch {
+      // 모듈을 받지 못했거나(연결 끊김) 정리 중 뜻밖 오류: 아래 다시 시도 안내
+    }
+    return { error: '로그아웃하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요' };
   }, []);
+  // 다른 탭의 로그아웃(§5.14.4 4번): 이 탭의 저장물을 지우고 로그인 화면으로
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void import('@/features/session-cleanup')
+      .then((m) => {
+        if (!cancelled) stop = m.listenSessionLogout(() => window.location.assign('/login'));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+  // 로그인한 셸: 웹 푸시 구독을 지금 계정에 다시 묶는다(§4.2.4 '웹 푸시 다시 묶기'). 문서마다 한 번
+  const signedIn = Boolean(live);
+  useEffect(() => {
+    if (!signedIn || rebound) return;
+    rebound = true;
+    void import('@/features/web-push')
+      .then((m) => m.browserWebPush().rebind())
+      .then((r) => {
+        // 실패하면 다음 화면 열림에 한 번 더 한다
+        if (r.kind === 'failed') rebound = false;
+      })
+      .catch(() => {
+        rebound = false;
+      });
+  }, [signedIn]);
   return (
     <ToastProvider>
       <WebShell

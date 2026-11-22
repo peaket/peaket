@@ -12,9 +12,24 @@ export function isWalletDocumentPath(pathname: string): boolean {
   return WALLET_DOCUMENT.test(pathname);
 }
 
-/** 캐시하지 않고 네트워크로만 받는 주소인지: API(`/v1/`)와 워커 자신(`/serwist/`) */
+/** 월렛 워커 스크립트 주소와 등록 범위(docs/frontend.md §5.4 범위 세부, ADR-0363 결정 5). 범위는 끝 `/` 없는 `/my/tickets`다 */
+export const WALLET_SW_URL = '/my/tickets/sw.js';
+export const WALLET_SW_SCOPE = '/my/tickets';
+/** 웹 푸시 워커 스크립트 주소와 범위(§5.4 '웹 푸시를 받는 서비스 워커는 따로 둔다') */
+export const PUSH_SW_URL = '/push/sw.js';
+export const PUSH_SW_SCOPE = '/push/';
+
+/**
+ * 범위 `/my/tickets`가 원하지 않게 맡는 경로인지: `/my/tickets` 뒤에 `/`가 아닌 글자가 오는 주소(예 `/my/ticketsX`).
+ * 범위는 주소 앞부분 글자 비교라 그런 경로를 만들면 월렛 워커가 가로챈다. 그런 경로는 만들지 않는다(ADR-0363 결정 5, 경로 목록 시험이 막는다)
+ */
+export function walletScopeLeaks(pathname: string): boolean {
+  return pathname.startsWith(WALLET_SW_SCOPE) && pathname.length > WALLET_SW_SCOPE.length && pathname[WALLET_SW_SCOPE.length] !== '/';
+}
+
+/** 캐시하지 않고 네트워크로만 받는 주소인지: API(`/v1/`)와 워커 자신(`/my/tickets/sw.js`), 웹 푸시 워커(`/push/`) */
 export function isNetworkOnlyPath(pathname: string): boolean {
-  return pathname.startsWith('/v1/') || pathname.startsWith('/serwist/');
+  return pathname.startsWith('/v1/') || pathname === WALLET_SW_URL || pathname.startsWith(PUSH_SW_SCOPE);
 }
 
 /** `Cache-Control` 지시어 가운데 `no-store`가 있는지(대소문자·쉼표 사이 빈칸 무시) */
@@ -134,4 +149,57 @@ export async function rotateWalletCaches(o: RotateWalletCachesOptions): Promise<
     }
   }
   return { warmed, deleted };
+}
+
+/** 킬 스위치 워커가 지우는 캐시인지: 월렛 런타임 캐시(`wallet-shell-`)·판 없던 옛 이름 둘·Serwist 미리 저장·런타임 캐시(`serwist-`) */
+export function isWalletOwnedCache(name: string): boolean {
+  const legacy: readonly string[] = LEGACY_WALLET_CACHES;
+  return name.startsWith(WALLET_CACHE_PREFIX) || legacy.includes(name) || name.startsWith('serwist-');
+}
+
+export interface WalletKillSwitchOptions {
+  caches: CacheStorage;
+  /** 자기 등록(self.registration) */
+  registration: Pick<ServiceWorkerRegistration, 'unregister'>;
+  /** 열린 월렛 창을 새로 읽힌다(self.clients) */
+  clients: Pick<Clients, 'matchAll'>;
+}
+
+/**
+ * 킬 스위치(RB-23, docs/frontend.md §5.4 '킬 스위치', ADR-0363 결정 6): 월렛 런타임·미리 저장 캐시를 지우고 자기 등록을 풀고 열린 창을 새로 읽힌다.
+ * IndexedDB `peaket-wallet`(입장 키)과 웹 푸시 워커(`/push/`)는 건드리지 않는다. 돌려주는 값은 지운 캐시 이름과 새로 읽힌 창 수다
+ */
+export async function runWalletKillSwitch(o: WalletKillSwitchOptions): Promise<{ deleted: string[]; unregistered: boolean; reloaded: number }> {
+  const deleted: string[] = [];
+  for (const name of await o.caches.keys()) {
+    if (!isWalletOwnedCache(name)) continue;
+    try {
+      if (await o.caches.delete(name)) deleted.push(name);
+    } catch {
+      // 지우지 못한 캐시는 남는다(다음 방문 때 같은 워커가 다시 지운다)
+    }
+  }
+  let unregistered = false;
+  try {
+    unregistered = await o.registration.unregister();
+  } catch {
+    unregistered = false;
+  }
+  let reloaded = 0;
+  try {
+    const windows = await o.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of windows) {
+      const client = w as WindowClient;
+      if (typeof client.navigate !== 'function') continue;
+      try {
+        await client.navigate(client.url);
+        reloaded += 1;
+      } catch {
+        // 새로 읽히지 못한 창은 다음 이동 때 워커 없이 열린다
+      }
+    }
+  } catch {
+    // 창 목록을 받지 못해도 등록은 이미 풀렸다
+  }
+  return { deleted, unregistered, reloaded };
 }

@@ -24,6 +24,11 @@ export interface StoredDeviceKey {
   createdAt: number;
   reason: DeviceKeyReason;
   registration: DeviceKeyRegistration;
+  /**
+   * 서버가 재인증을 요구해 멈춘 키(ADR-0363 결정 2·3): REISSUE면 403 `reissue-required`('저장소 유실, 입장 시작 전'),
+   * ISSUE면 403 `reauth-required`('다시 확인 필요'). 화면을 다시 열어도 재인증 없이 다시 보내지 않는다(O-T49 ⑦). 재인증 뒤 보내면 지운다
+   */
+  reauthNeeded?: 'REISSUE' | 'ISSUE';
 }
 
 export interface WalletTicketSnapshot {
@@ -41,6 +46,8 @@ interface WalletMeta {
   lastSyncedAt: number;
   /** 오프라인 스냅샷 버전 벡터(GAT-160). 서버 스캐너 목록의 벡터와 같은 모양이다 */
   versionVector?: WalletVersionVector;
+  /** 마지막 `navigator.storage.persist()` 결과(docs/frontend.md §5.4, ADR-0363 결정 10). 등록할 때와 월렛을 열 때마다 다시 적는다 */
+  persistGranted?: boolean;
 }
 
 export interface WalletVersionVector {
@@ -100,7 +107,16 @@ export async function loadTicketSnapshot(ticketId: string): Promise<WalletTicket
 }
 
 export async function saveLastSyncedAt(at = Date.now()): Promise<void> {
-  await walletDatabase()?.meta.put({ id: 'wallet', lastSyncedAt: at });
+  const db = walletDatabase();
+  if (!db) return;
+  // 다른 칸(버전 벡터·persistGranted)은 남긴다
+  const meta = await db.meta.get('wallet');
+  await db.meta.put({ ...(meta ?? {}), id: 'wallet', lastSyncedAt: at });
+}
+
+/** 마지막 persist() 결과(meta.persistGranted). 적은 적이 없으면 undefined */
+export async function loadPersistGranted(): Promise<boolean | undefined> {
+  return (await walletDatabase()?.meta.get('wallet'))?.persistGranted;
 }
 
 export async function loadLastSyncedAt(): Promise<number | undefined> {
@@ -124,14 +140,27 @@ export function isWalletSnapshotStale(vector: Pick<WalletVersionVector, 'issuedA
   return nowMs - Date.parse(vector.issuedAt) > vector.maxOfflineMs;
 }
 
-/** iOS 7일 삭제·저장 공간 정리에 대비해 영구 저장소를 요청한다(offline-gate §4). 결과를 돌려준다 */
+/**
+ * iOS 7일 삭제·저장 공간 정리에 대비해 영구 저장소를 요청한다(offline-gate §4). 등록할 때와 월렛을 열 때마다 부른다(ADR-0363 결정 10).
+ * 결과를 `meta.persistGranted`에 적고 돌려준다
+ */
 export async function requestPersistentStorage(): Promise<boolean> {
+  let granted = false;
   try {
-    if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false;
-    return await navigator.storage.persist();
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) granted = await navigator.storage.persist();
   } catch {
-    return false;
+    granted = false;
   }
+  try {
+    const db = walletDatabase();
+    if (db) {
+      const meta = await db.meta.get('wallet');
+      await db.meta.put({ ...(meta ?? { lastSyncedAt: 0 }), id: 'wallet', persistGranted: granted });
+    }
+  } catch {
+    // 적지 못해도 결과는 돌려준다
+  }
+  return granted;
 }
 
 export async function storagePersisted(): Promise<boolean> {

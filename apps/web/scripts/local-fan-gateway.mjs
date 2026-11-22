@@ -11,6 +11,8 @@
 //   devIdentity를 주면 쿠키가 없는 요청에 그 신원 머리를 싣는다(local·ci 전용, identity-svc 없이 구매 경로를 볼 때)
 // - queueUrl을 주면 대기열 API 출처의 /v1/queues/ 경로(진입·입장 확정·추가 검증 등, 로컬에서는 앱 포트가 내는 대기 상태 파일도)를 같은 신원 머리·
 //   같은 출처·Origin 규칙으로 queue-svc로 넘긴다(ADR-0259 결정 8). 화면은 대기열 출처 NEXT_PUBLIC_QUEUE_ORIGIN(대기실은 VITE_PEAKET_QUEUE_ORIGIN)에 이 대역 주소를 넣는다
+// - ticketUrl을 주면 입장용 휴대폰 등록 POST /v1/tickets/{ticketId}/device-keys를 ticket-svc로, coreUrl을 주면 웹 푸시 구독 /v1/push-subscriptions·
+//   /v1/push-subscriptions/{subscriptionKey}를 core-svc로 넘긴다(ADR-0363, F-05-1 연결 시험). gw-fan 라우트보다 넓히지 않는다(local-fan-gateway-parity.test.mjs)
 // 실행: PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=http://localhost:3000 \
 //       PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=… node scripts/local-fan-gateway.mjs [포트]
 //       (대기열까지: PEAKET_QUEUE_HTTP=http://127.0.0.1:<queue-svc 앱 포트>)
@@ -30,6 +32,10 @@ const STAFF_ROUTE = /^\/v1\/(?:staff-invitation-lookups|staff-invitation-accepta
 const QUEUE_ROUTE = /^\/v1\/queues\/[^/]+\//;
 const PURCHASE_ROUTE = /^\/v1\/(holds(\/|$)|orders(\/|$)|events\/[^/]+\/(holds|purchase-session|seatmap-snapshot)(\/|$))/;
 const LOCAL_ADMISSION = '/v1/local-dev/admission';
+/** 입장용 휴대폰 등록(ticket-svc, gw-fan /v1/tickets/{ticketId}/device-keys) */
+const TICKET_DEVICE_KEY_ROUTE = /^\/v1\/tickets\/[^/]+\/device-keys$/;
+/** 웹 푸시 구독 등록·해제(core-svc, gw-fan /v1/push-subscriptions) */
+const PUSH_SUBSCRIPTION_ROUTE = /^\/v1\/push-subscriptions(\/[^/]+)?$/;
 /** 로컬 스택은 좌석맵 파일도 그 판의 좌석 ID로 낸다 */
 const LOCAL_LAYOUT = /^\/v1\/events\/[^/]+\/seatmap-layouts\//;
 /** 신원 머리: 바깥 요청에서 늘 지운다(앞단이 밑줄을 붙임표로 바꿀 수 있어 밑줄 이름도) */
@@ -107,7 +113,7 @@ function forward(upstream, path, method, headers, body) {
 
 /**
  * 게이트웨이 대역을 띄운다
- * @param {{ port?: number, identityUrl: string, webOrigin: string, jwks?: import('jose').JSONWebKeySet, jwksUrl?: string, issuer: string, env?: Record<string, string | undefined>, purchaseUrl?: string, queueUrl?: string, fallbackUrl?: string, localAdmissionUrl?: string, devIdentity?: Record<string, string> }} o
+ * @param {{ port?: number, identityUrl: string, webOrigin: string, jwks?: import('jose').JSONWebKeySet, jwksUrl?: string, issuer: string, env?: Record<string, string | undefined>, purchaseUrl?: string, queueUrl?: string, ticketUrl?: string, coreUrl?: string, fallbackUrl?: string, localAdmissionUrl?: string, devIdentity?: Record<string, string> }} o
  * @returns {Promise<{ url: string, close: () => Promise<void> }>}
  */
 export async function startLocalFanGateway(o) {
@@ -126,9 +132,13 @@ export async function startLocalFanGateway(o) {
           ? new URL(o.purchaseUrl)
           : o.queueUrl && QUEUE_ROUTE.test(pathname)
             ? new URL(o.queueUrl)
-            : o.fallbackUrl
-              ? new URL(o.fallbackUrl)
-              : undefined;
+            : o.ticketUrl && TICKET_DEVICE_KEY_ROUTE.test(pathname)
+              ? new URL(o.ticketUrl)
+              : o.coreUrl && PUSH_SUBSCRIPTION_ROUTE.test(pathname)
+                ? new URL(o.coreUrl)
+                : o.fallbackUrl
+                  ? new URL(o.fallbackUrl)
+                  : undefined;
   const keys = o.jwks ? createLocalJWKSet(o.jwks) : createRemoteJWKSet(new URL(/** @type {string} */ (o.jwksUrl)), { cacheMaxAge: 5 * 60_000, cooldownDuration: 30_000 });
 
   /** @param {string | undefined} token */
@@ -260,6 +270,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     env: process.env,
     ...(process.env.PEAKET_PURCHASE_HTTP ? { purchaseUrl: process.env.PEAKET_PURCHASE_HTTP } : {}),
     ...(process.env.PEAKET_QUEUE_HTTP ? { queueUrl: process.env.PEAKET_QUEUE_HTTP } : {}),
+    ...(process.env.PEAKET_TICKET_HTTP ? { ticketUrl: process.env.PEAKET_TICKET_HTTP } : {}),
+    ...(process.env.PEAKET_CORE_HTTP ? { coreUrl: process.env.PEAKET_CORE_HTTP } : {}),
     ...(process.env.PEAKET_MOCK_HTTP ? { fallbackUrl: process.env.PEAKET_MOCK_HTTP } : {}),
     ...(process.env.PEAKET_LOCAL_ADMISSION_HTTP ? { localAdmissionUrl: process.env.PEAKET_LOCAL_ADMISSION_HTTP } : {}),
     ...(process.env.PEAKET_LOCAL_DEV_IDENTITY ? { devIdentity: JSON.parse(process.env.PEAKET_LOCAL_DEV_IDENTITY) } : {}),

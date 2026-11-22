@@ -78,7 +78,17 @@ export function PermissionSettingsButton() {
   const toast = useToast();
   return (
     <>
-      <button className="btn btn-text" type="button" aria-haspopup="dialog" style={{ alignSelf: 'flex-start' }} onClick={() => setOpen(true)}>
+      <button
+        className="btn btn-text"
+        type="button"
+        aria-haspopup="dialog"
+        style={{ alignSelf: 'flex-start' }}
+        onClick={() => {
+          setOpen(true);
+          // 웹 푸시 모듈을 미리 받아 [알림 켜기]를 누른 동작 안에서 권한을 묻는다(notify §3.5)
+          void import('@/features/web-push').catch(() => undefined);
+        }}
+      >
         알림 권한 설정
         <i className="ic ic-chevron-right" aria-hidden="true" />
       </button>
@@ -94,7 +104,11 @@ export function PermissionSettingsButton() {
         }
         onAllow={() => {
           setOpen(false);
-          toast('이 기기로 알림을 받습니다', 'ic-bell-fill');
+          // 권한을 묻고 전용 워커(/push/sw.js)로 구독해 등록한다(ADR-0363 결정 7). 켤 수 없으면 이메일로 받는다고 알린다
+          void import('@/features/web-push')
+            .then((m) => m.browserWebPush().enable())
+            .then((r) => (r.kind === 'subscribed' ? toast('이 기기로 알림을 받습니다', 'ic-bell-fill') : toast('이메일로 알려 드립니다', 'ic-mail')))
+            .catch(() => toast('이메일로 알려 드립니다', 'ic-mail'));
         }}
         onFallback={() => {
           setOpen(false);

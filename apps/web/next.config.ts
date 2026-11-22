@@ -74,7 +74,7 @@ const config: NextConfig = {
       hideSourceMaps({ distDir });
       // 좌석 화면 자산 목록(대기실이 차례 전에 받는다, ADR-0216 결정 3). PoC 빌드에도 같은 경로가 있어 함께 만든다
       writeSeatPreload({ distDir });
-      // 월렛 서비스 워커를 빌드 때 묶어 <distDir>/serwist/sw.js로 둔다. 숨김 소스 맵 뒤라 미리 저장 판이 배포 파일과 맞고,
+      // 월렛·킬 스위치·웹 푸시 서비스 워커를 빌드 때 묶어 <distDir>/serwist/ 아래에 둔다. 숨김 소스 맵 뒤라 미리 저장 판이 배포 파일과 맞고,
       // 경로 처리기는 요청 때 다시 묶지 않는다(BAT-171 시험 이의 6)
       await writeServiceWorker({ distDir });
     },
@@ -102,6 +102,7 @@ const config: NextConfig = {
   },
 };
 
-// 월렛 서비스 워커(offline-gate §2·§4, BAT-350). 빌드 때 scripts/service-worker.mjs가 묶고 app/serwist/[path]/route.ts가 그 파일을 낸다.
+// 월렛 서비스 워커(offline-gate §2·§4, BAT-350, ADR-0363 결정 5·6·7). 빌드 때 scripts/service-worker.mjs가 묶고 app/my/tickets/sw.js/route.ts(월렛·킬 스위치)와
+// app/push/sw.js/route.ts(웹 푸시)가 그 파일을 낸다.
 // withSerwist는 esbuild를 서버 외부 패키지로 둔다(빌드 때 묶기에 쓴다).
 export default withSerwist(config);

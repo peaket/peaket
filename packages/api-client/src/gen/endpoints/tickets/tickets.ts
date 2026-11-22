@@ -224,10 +224,15 @@ export type createTicketDeviceKeyResponse429 = {
   status: 429
 }
 
+export type createTicketDeviceKeyResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createTicketDeviceKeyResponseSuccess = (createTicketDeviceKeyResponse201) & {
   headers: Headers;
 };
-export type createTicketDeviceKeyResponseError = (createTicketDeviceKeyResponse403 | createTicketDeviceKeyResponse404 | createTicketDeviceKeyResponse422 | createTicketDeviceKeyResponse429) & {
+export type createTicketDeviceKeyResponseError = (createTicketDeviceKeyResponse403 | createTicketDeviceKeyResponse404 | createTicketDeviceKeyResponse422 | createTicketDeviceKeyResponse429 | createTicketDeviceKeyResponse503) & {
   headers: Headers;
 };
 
@@ -275,7 +280,7 @@ return orvalFetch<createTicketDeviceKeyResponseSuccess>(getCreateTicketDeviceKey
 
 export const getCreateTicketDeviceKeyMutationKey = () => ['createTicketDeviceKey'] as const;
 
-export const getCreateTicketDeviceKeyMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
+export const getCreateTicketDeviceKeyMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketDeviceKey>>, TError,CreateTicketDeviceKeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createTicketDeviceKey>>, TError,CreateTicketDeviceKeyMutationVariables, TContext> => {
 
@@ -304,13 +309,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateTicketDeviceKeyMutationResult = NonNullable<Awaited<ReturnType<typeof createTicketDeviceKey>>>
     export type CreateTicketDeviceKeyMutationBody = BodyType<CreateTicketDeviceKeyBody> | undefined
-    export type CreateTicketDeviceKeyMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse>
+    export type CreateTicketDeviceKeyMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type CreateTicketDeviceKeyMutationVariables = {ticketId: string;data?: BodyType<CreateTicketDeviceKeyBody>}
 
     /**
  * @summary 기기 공개키 등록(입장용 휴대폰 등록·재발급·부스). 이전 키 폐기
  */
-export const useCreateTicketDeviceKey = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
+export const useCreateTicketDeviceKey = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTicketDeviceKey>>, TError,CreateTicketDeviceKeyMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createTicketDeviceKey>>,

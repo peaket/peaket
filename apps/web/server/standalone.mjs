@@ -38,7 +38,7 @@ export function prepareStandalone(appDir, dist) {
     mkdirSync(dirname(staticDest), { recursive: true });
     cpSync(staticSrc, staticDest, { recursive: true });
   }
-  // 월렛 서비스 워커 경로(app/serwist/[path]/route.ts)는 이 파일만 읽는다. 요청 때 다시 묶지 않는다(BAT-171 시험 이의 6)
+  // 서비스 워커 경로(app/my/tickets/sw.js/route.ts·app/push/sw.js/route.ts)는 이 폴더의 파일만 읽는다. 요청 때 다시 묶지 않는다(BAT-171 시험 이의 6)
   const swSrc = join(appDir, dist, SW_DIR);
   if (existsSync(swSrc)) cpSync(swSrc, join(app, dist, SW_DIR), { recursive: true });
   const publicSrc = join(appDir, 'public');

@@ -1,6 +1,7 @@
 'use client';
 // 로그아웃 확인(d5 §3.1, ADR-0079 결정 17, 보드 SCR-017 '로그아웃 확인'). 휴대폰은 아래 시트, 태블릿·데스크톱은 대화상자다.
 // 세 셸 변형이 같은 대화상자를 쓴다(ASVS 7.4.4). 무엇을 지우는지는 docs/frontend.md §3.12 표가 정한다(데이터 연결 단계).
+// 서버 로그아웃이 503·연결 실패면 부르는 쪽이 error를 넘겨 대화상자 안에 다시 시도를 안내한다(ADR-0363 결정 8, §5.14.4). busy인 동안 버튼을 막는다.
 import { useId, useState } from "react";
 import { WebShellModal, webModalButtonClass } from "./WebShellModal";
 
@@ -8,9 +9,13 @@ export interface LogoutDialogProps {
   open: boolean;
   onClose: () => void;
   onConfirm: (opts: { clearEntryKeys: boolean }) => void;
+  /** 서버 로그아웃 실패 글(있으면 role="alert"로 보이고 확인 버튼이 '다시 시도'가 된다) */
+  error?: string | null;
+  /** 로그아웃을 보내는 중 */
+  busy?: boolean;
 }
 
-export function LogoutDialog({ open, onClose, onConfirm }: LogoutDialogProps) {
+export function LogoutDialog({ open, onClose, onConfirm, error = null, busy = false }: LogoutDialogProps) {
   const id = useId();
   const [clearKeys, setClearKeys] = useState(false);
   return (
@@ -22,8 +27,13 @@ export function LogoutDialog({ open, onClose, onConfirm }: LogoutDialogProps) {
       maxWidth={480}
       actions={
         <>
-          <button className={webModalButtonClass("primary")} type="button" onClick={() => onConfirm({ clearEntryKeys: clearKeys })}>
-            로그아웃
+          <button
+            className={webModalButtonClass("primary")}
+            type="button"
+            aria-disabled={busy ? true : undefined}
+            onClick={() => (busy ? undefined : onConfirm({ clearEntryKeys: clearKeys }))}
+          >
+            {busy ? "로그아웃 중…" : error ? "다시 시도" : "로그아웃"}
           </button>
           <button className={webModalButtonClass("ghost")} type="button" onClick={onClose}>
             취소
@@ -31,6 +41,11 @@ export function LogoutDialog({ open, onClose, onConfirm }: LogoutDialogProps) {
         </>
       }
     >
+      {error ? (
+        <p className="t-sm fw-b" role="alert">
+          {error}
+        </p>
+      ) : null}
       <p className="t-sm" id={`${id}-d`}>
         이 기기에 저장된 대기·예매 진행 정보를 지웁니다. 입장 키는 남겨 두어 공연장에서 인터넷 없이 QR을 열 수 있습니다.
       </p>

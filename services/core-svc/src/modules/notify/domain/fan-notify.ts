@@ -18,6 +18,8 @@ export type FanNoticeKind =
   | 'LOGIN_METHOD_LINKED'
   | 'LOGIN_METHOD_UNLINKED'
   | 'ACCOUNT_MERGED'
+  | 'DEVICE_KEY_REISSUED'
+  | 'DEVICE_KEY_LATE_ISSUE'
   | 'OPEN_LOBBY'
   | 'OPEN_VERIFY'
   | 'CANCELLATION_ALERT'
@@ -31,7 +33,7 @@ export const NOTIFY_MAX_ATTEMPTS = 6;
 const RETRY_DELAYS_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 43_200_000] as const;
 export const notificationRetryDelayMs = (attempt: number): number => RETRY_DELAYS_MS[Math.max(0, Math.min(RETRY_DELAYS_MS.length - 1, attempt - 1))]!;
 /** 결과를 모르는 실패를 한 번 더 보내도 되는 돈·보안·법정 통지(notify §10, d5 §9.1.1) */
-const DUBIOUS_RETRY_KINDS: ReadonlySet<FanNoticeKind> = new Set(['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']);
+const DUBIOUS_RETRY_KINDS: ReadonlySet<FanNoticeKind> = new Set(['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED', 'DEVICE_KEY_REISSUED', 'DEVICE_KEY_LATE_ISSUE']);
 export const needsDubiousRetry = (kind: FanNoticeKind): boolean => DUBIOUS_RETRY_KINDS.has(kind);
 /** 신청 알림(신청 하나에 묶인 알림) */
 const SUBSCRIPTION_KINDS: ReadonlySet<FanNoticeKind> = new Set(['OPEN_LOBBY', 'OPEN_VERIFY', 'CANCELLATION_ALERT']);
@@ -47,11 +49,37 @@ export const FAN_NOTICE_KINDS: readonly FanNoticeKind[] = [
   'LOGIN_METHOD_LINKED',
   'LOGIN_METHOD_UNLINKED',
   'ACCOUNT_MERGED',
+  'DEVICE_KEY_REISSUED',
+  'DEVICE_KEY_LATE_ISSUE',
   'OPEN_LOBBY',
   'OPEN_VERIFY',
   'CANCELLATION_ALERT',
   'AD',
 ];
+
+/** 입장 키 알림 종류(docs/features/notify.md §4.7, ADR-0363 결정 4) */
+export type TicketKeyNoticeKind = Extract<FanNoticeKind, 'DEVICE_KEY_REISSUED' | 'DEVICE_KEY_LATE_ISSUE'>;
+export const TICKET_KEY_NOTICE_KINDS: readonly TicketKeyNoticeKind[] = ['DEVICE_KEY_REISSUED', 'DEVICE_KEY_LATE_ISSUE'];
+
+/**
+ * 입장 키 알림의 중복 키 `{type}:{ticketId}:{noticeId}:{accountId}:{채널}`(notify §4.3·§4.7). 웹 푸시는 그 계정의 구독마다 작업 하나라
+ * 채널 칸 뒤에 구독 키(구독 주소 SHA-256 base64url)를 붙인다. 워커는 그 구독에만 보낸다(webPushTargetOf)
+ */
+export function ticketKeyNoticeDedupKey(o: { type: TicketKeyNoticeKind; ticketId: string; noticeId: string; accountId: string; channel: 'EMAIL' | 'WEB_PUSH'; subscriptionKey?: string }): string {
+  const base = `${o.type}:${o.ticketId}:${o.noticeId}:${o.accountId}:${o.channel}`;
+  return o.channel === 'WEB_PUSH' && o.subscriptionKey ? `${base}:${o.subscriptionKey}` : base;
+}
+
+const SUBSCRIPTION_KEY = /^[A-Za-z0-9_-]{43}$/;
+
+/** 구독 하나에 묶인 웹 푸시 작업이면 그 구독 키. 계정 단위 작업(로그인 수단·병합 등)이면 undefined(그 계정의 모든 구독에 보낸다) */
+export function webPushTargetOf(kind: string, dedupKey: string): string | undefined {
+  if (!(TICKET_KEY_NOTICE_KINDS as readonly string[]).includes(kind)) return undefined;
+  const parts = dedupKey.split(':');
+  if (parts.length !== 6 || parts[4] !== 'WEB_PUSH') return undefined;
+  const key = parts[5]!;
+  return SUBSCRIPTION_KEY.test(key) ? key : undefined;
+}
 
 /** 문안 변수 허용 목록(notify §12). 주소·전화번호·이름은 종류를 가리지 않고 받지 않는다 */
 const VARS_ALLOWED: Record<FanNoticeKind, readonly string[]> = {
@@ -62,6 +90,8 @@ const VARS_ALLOWED: Record<FanNoticeKind, readonly string[]> = {
   LOGIN_METHOD_LINKED: ['provider'],
   LOGIN_METHOD_UNLINKED: ['provider'],
   ACCOUNT_MERGED: [],
+  DEVICE_KEY_REISSUED: ['type', 'registeredAt', 'ticketId'],
+  DEVICE_KEY_LATE_ISSUE: ['type', 'registeredAt', 'ticketId'],
   OPEN_LOBBY: ['title', 'body', 'url'],
   OPEN_VERIFY: ['title', 'body', 'url'],
   CANCELLATION_ALERT: ['title', 'body', 'url', 'eventTitle', 'startsAt'],
@@ -69,6 +99,7 @@ const VARS_ALLOWED: Record<FanNoticeKind, readonly string[]> = {
 };
 const EMAIL_LIKE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 const PHONE_LIKE = /(?:\+?82[-\s]?)?0?1[016789][-\s]?\d{3,4}[-\s]?\d{4}/;
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FORBIDDEN_KEYS = new Set(['email', 'phone', 'name', 'address', 'accountNumber', 'pid', 'ticketNumber', 'seatNumber']);
 export const VARS_MAX_BYTES = 1024;
 
@@ -105,7 +136,9 @@ export function assertVars(kind: FanNoticeKind, vars: Vars | undefined): Vars {
     }
     if (typeof value === 'boolean') continue;
     if (typeof value !== 'string') throw bad('알림 문구 변수는 문자열·숫자·불리언이어야 합니다');
-    if (EMAIL_LIKE.test(value) || PHONE_LIKE.test(value)) throw bad('알림 문구 변수에 이메일·전화번호 꼴 값이 있습니다');
+    // 티켓 ID(UUID)는 숫자 자리가 우연히 전화번호 꼴과 겹칠 수 있어 UUID 꼴이면 그 검사를 건너뛴다(입장 키 알림의 ticketId, notify §4.7)
+    const uuidLike = k === 'ticketId' && UUID_TEXT.test(value);
+    if (!uuidLike && (EMAIL_LIKE.test(value) || PHONE_LIKE.test(value))) throw bad('알림 문구 변수에 이메일·전화번호 꼴 값이 있습니다');
     if (/[\u0000-\u001f\u007f]/.test(value)) throw bad('알림 문구 변수에 제어 문자가 있습니다');
   }
   if (Buffer.byteLength(JSON.stringify(v), 'utf8') > VARS_MAX_BYTES) throw bad('알림 문구 변수가 1KB를 넘습니다');
@@ -143,6 +176,18 @@ export function messageOf(kind: FanNoticeKind, vars: Vars): NoticeMessage {
     }
     case 'ACCOUNT_MERGED':
       return { title: '계정을 합쳤습니다', body: 'PEAKET 계정 두 개를 하나로 합쳤습니다. 예매·알림 설정은 대표 계정에서 확인해 주세요.', url: '/my' };
+    case 'DEVICE_KEY_REISSUED':
+    case 'DEVICE_KEY_LATE_ISSUE': {
+      // 문안은 notify §4.7. 링크는 허용한 앞부분 `/my/`의 티켓 펼침(§3.5)
+      const at = kstMinuteText(text('registeredAt'));
+      const ticketId = text('ticketId');
+      const url = ticketId && UUID_TEXT.test(ticketId) ? `/my/tickets/${ticketId}` : '/my/tickets';
+      const body =
+        kind === 'DEVICE_KEY_REISSUED'
+          ? `티켓 한 장의 입장 키를 ${at}에 새 휴대폰으로 옮겼습니다. 이전 휴대폰의 QR은 더 쓸 수 없습니다. 직접 하신 일이 아니면 고객센터로 알려 주세요`
+          : `입장이 시작된 뒤 티켓 한 장을 ${at}에 이 계정의 휴대폰에 등록했습니다. 직접 하신 일이 아니면 고객센터로 알려 주세요`;
+      return { title: '티켓 입장 키를 새 휴대폰에 등록했습니다', body, url };
+    }
     case 'OPEN_LOBBY':
       return { title: text('title') ?? '대기실이 열렸습니다', body: text('body') ?? '공연 상세에서 대기실에 들어가세요.', ...(safeUrl(text('url')) ? { url: safeUrl(text('url')) } : {}) };
     case 'OPEN_VERIFY':
@@ -152,6 +197,15 @@ export function messageOf(kind: FanNoticeKind, vars: Vars): NoticeMessage {
     case 'AD':
       return { title: text('title') ?? '피켓 소식', body: text('body') ?? '', ...(safeUrl(text('url')) ? { url: safeUrl(text('url')) } : {}) };
   }
+}
+
+/** 등록 시각(ISO 8601)을 KST 'YYYY-MM-DD HH:mm'으로. 읽지 못하면 '방금' */
+function kstMinuteText(iso: string | undefined): string {
+  const ms = iso ? Date.parse(iso) : Number.NaN;
+  if (!Number.isFinite(ms)) return '방금';
+  const d = new Date(ms + 9 * 60 * 60 * 1000);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${two(d.getUTCMonth() + 1)}-${two(d.getUTCDate())} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}(KST)`;
 }
 
 /** 21:00:00 이상 08:00:00 미만 KST. 한국은 서머타임이 없어 UTC+9로 계산한다 */

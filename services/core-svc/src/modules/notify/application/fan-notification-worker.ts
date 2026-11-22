@@ -7,6 +7,7 @@ import {
   isSubscriptionNotice,
   messageOf,
   needsDubiousRetry,
+  webPushTargetOf,
   NOTIFY_LEASE_MS,
   NOTIFY_MAX_ATTEMPTS,
   notificationRetryDelayMs,
@@ -165,7 +166,10 @@ export class FanNotificationWorker {
       await this.#terminate(job, now, 'FAILED', null, out, 'failed');
       return;
     }
-    const subs = await this.d.store.listPushSubscriptions(job.accountId);
+    // 입장 키 알림은 구독마다 작업 하나다(notify §4.7). 그 작업은 자기 구독에만 보낸다. 나머지 종류는 그 계정의 모든 구독에 보낸다
+    const target = webPushTargetOf(job.kind, job.dedupKey);
+    const all = await this.d.store.listPushSubscriptions(job.accountId);
+    const subs = target ? all.filter((s) => s.endpointHash === target) : all;
     if (subs.length === 0) {
       // 그 계정에 웹 푸시 구독이 없으면 보낼 곳이 없다(이메일 몫은 따로 간다). 실패로 세지 않는다
       await this.d.store.deleteJob(job.dedupKey);
