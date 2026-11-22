@@ -197,7 +197,60 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 
 ## 검증
 
-(검증 담당이 채운다)
+검증 담당 `lane3-bat450b-verify`(deepseek-v4.1-flash), 2026-11-22 13:40~13:50 KST. 구현·시험·리뷰에 관여하지 않았다. 기준 커밋은 `6f88893de`(리뷰 반영·V-01 고침 뒤)이고, 틀린 구현은 이 작업 폴더에서 하나씩 넣고 관련 시험만 돌린 뒤 `git checkout -- <파일>`로 되돌렸다(제품 파일 차이 없음). Docker 잠금 `lane3-BAT-450B`는 13:35에 잡고 13:37에 놓았으며, 끝나고 `docker ps`에 peaket 컨테이너가 없음을 확인했다.
+
+### 게이트(기준 커밋)
+
+| 검사 | 결과 |
+| --- | --- |
+| identity-svc 단위 | 59파일 **708 통과** |
+| identity 새 시험 | 3파일 **20 통과**(초대 HTTP 12·어댑터 5·메일 3) |
+| core-svc 계약 시험 | **2 통과** |
+| api-client 단위 | 9파일 **116 통과** |
+| identity test-int(실제 PostgreSQL) | **10 통과**(`test-int/staff-invitations.int.test.ts`: 0036 중복 정리·인덱스, createInvitations·findInvitedEmails, listByEvent, revokeAssignment, reissueInvitation) |
+| typecheck | identity·core 통과 |
+| lint | 루트 `pnpm lint` 통과 |
+| doc-check | 오류 0, 경고 4(기존 3 + mermaid 검사 건너뜀) |
+| contracts `gen:check` | 생성물이 계약과 같다 |
+| gateway-routes `--check` | 생성 파일 5개가 openapi·원천과 같다 |
+| mesh-policies `--check` | 생성 파일 2개가 원천·라우트·proto와 같다 |
+| deploy workloads | **18 통과**(ID-01~06 포함) |
+| `node tools/ci/bat450b-contract.test.mjs` | **4 통과** |
+| `ledger --batch BAT-450B --require` | 범위 14항목, 자동 시험 14, 빈칸·ID만·미검증·다른 단계 0 → 통과 |
+| `ledger --scope I-T21,I-T86` | 자동 시험 14, 빈칸 0 |
+| `trace-check --ids I-T21,I-T86` | identity 3파일·core 1파일 보고서에서 I-T21 14·I-T86 8 통과, 대조 통과 |
+
+### Docker·시험 조립에서 드러난 것
+
+- 첫 통합 실행은 **3 실패/7 통과**였다. ⑴ `revokeAssignment`의 `control.sessions-terminated`가 Outbox 파티션을 필요로 하는데 시험이 `ensureOutboxPartitions`를 부르지 않았다(시험 조립), ⑵ 재발송 시험이 createInvitations 시험의 A9와 같은 회차·이메일로 겹쳤다(시험 조립), ⑶ `findInvitedEmails`가 입력 이메일을 소문자로 내리지 않아 `A@EXAMPLE.COM`을 찾지 못했다(제품 결함 V-01, 메모리 저장소와 갈라짐).
+- 시험 조립 둘은 `4178c3292`(test), 제품 결함은 `6f88893de`(fix+impl)에서 고쳤고, 다시 돌려 **10/10**을 봤다. V-01은 이 묶음 시험이 실제로 저장소 규칙을 잡는지 보여 주는 표본이기도 하다.
+
+### 틀린 구현 표본
+
+각 판정 항목에 하나씩 넣었다. 12개 가운데 **11개 잡힘, 1개 살아남음**.
+
+| 번호 | 넣은 틀린 구현 | 잡은 시험 |
+| --- | --- | --- |
+| M1 | `#ownerOf`가 `owner.promoterId !== tenantId`를 보지 않는다 | I-T21 ⑤ (1 실패) |
+| M2 | core 404를 503 `DEPENDENCY_UNAVAILABLE`로 사상한다 | I-T21 ⑤·I-T86 ③ (2 실패) |
+| M3 | 초대 토큰을 `randomBytes(16)`로 만든다 | I-T21 ③·④ (2 실패) |
+| M4 | 초대 수명을 25시간으로 늘린다 | I-T21 ③·⑥·⑨·⑩ (5 실패) |
+| M5 | 링크를 `?token=`로 만든다(조각 아님) | I-T21 ④·⑥ 등 (5 실패) |
+| M6 | 해제가 초대 이메일·토큰을 지우지 않는다 | I-T21 ⑧ (1 실패) |
+| M7 | 해제가 스캐너 세션을 끝내지 않는다 | I-T21 ⑧ (1 실패) |
+| M8 | 재발송이 토큰 해시를 바꾸지 않는다 | I-T21 ⑨·⑩ (2 실패) |
+| M9 | 명단 뷰에 `inviteEmail`·`accountId`를 더한다 | **살아남음**. HTTP 응답의 계약 스키마(Zod)가 모르는 칸을 지워 API 경계에서는 새지 않는다. 저장소 뷰 타입의 누출은 시험이 직접 보지 못한다(낮은 시험 빈틈) |
+| M10 | 요청 안 같은 이메일 검사를 뺀다 | I-T21 ② (1 실패) |
+| M11 | 파일 메일 대역을 운영에서도 연다 | 메일 시험 (1 실패) |
+| M12 | core 401·5xx를 없음(undefined)으로 삼킨다 | I-T86 ② (1 실패) |
+
+- M9는 API 경계에서 안전하지만, `StaffAssignmentPartnerView`를 만드는 저장소 코드가 이메일·계정 ID를 실수로 넣으면 조용히 지워져 시험이 못 본다. 후속으로 HTTP 응답 본문을 문자열로 검사하는 시험(이미 있다)에 저장소 뷰 직접 단언을 더하거나, 저장소가 만드는 뷰 타입에서 금지 칸을 타입으로 막는 방법이 있다.
+
+### 계약 결정·남은 위험
+
+- **ADR-0353 채택**: identity-svc가 core-svc `GET /internal/v1/events/{eventId}/sale-config`를 읽는다. 404는 404, 401·5xx·시간 초과·모양 틀림은 503이며 행을 만들지 않는다. core gRPC를 새로 두지 않았다.
+- **남은 위험**: RV-02(운영 identity Secret에 `PEAKET_INTERNAL_TOKEN`을 더하는 배포 작업), RV-03(200명 순차 메일), RV-04·RV-09(메일 먼저 보내고 DB 쓰기 → 경합 시 죽은 링크), RV-05(토큰 해시 유일 인덱스 없음), RV-07(계정·회차별 초대 한도 없음), RV-08(명단 건수 없음), RV-09(불변 감사 없음, BAT-450D), M9(저장소 뷰 누출 시험 빈틈).
+- **GAT-210 단계 줄은 체크하지 않는다.** 만료 정비(`INVITED`→`EXPIRED`·이메일 파기)·`hasStaffAssignment` 시간 필터·`promoter_id` 백필·ASVS 재판정은 BAT-450C, 불변 감사는 BAT-450D, 화면은 GAT-360·GAT-230·240이다.
 
 ## 담당 표
 
@@ -209,3 +262,4 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 | review | lane3-bat450b-review | deepseek-v4.1-flash | 2026-11-22T13:33:00+09:00 | 2026-11-22T13:40:00+09:00 |
 | test | lane3-bat450b-rv01-test | deepseek-v4.1-flash | 2026-11-22T13:41:00+09:00 | 2026-11-22T13:44:00+09:00 |
 | impl | lane3-bat450b-rv01-impl | deepseek-v4.1-flash | 2026-11-22T13:45:00+09:00 | 2026-11-22T13:48:00+09:00 |
+| verify | lane3-bat450b-verify | deepseek-v4.1-flash | 2026-11-22T13:40:00+09:00 | 2026-11-22T13:50:00+09:00 |
