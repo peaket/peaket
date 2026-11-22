@@ -677,7 +677,7 @@ describe('되돌리기·연장·자동 만료(OPS-260, ADR-0340 결정 5)', () =
   test('OPS-260 1인 카탈로그 명령의 되돌리기는 200 REVERTED이고, 보내지 못하면 ACKED 그대로·REVERT_FAILED·502 command-dispatch-failed다', async () => {
     const h = await harness();
     const op = h.identity.ops('operator');
-    const id = idOf(await h.post('/v1/ops/commands', op, { type: 'LOBBY_BANNER', reason: '공지', params: { templateId: 'maintenance' } }));
+    const id = idOf(await h.post('/v1/ops/commands', op, { type: 'FEATURE_OFF', reason: '후기 기능 끄기', params: { flag: 'reviews' } }));
     h.sendResult = { status: 'FAILED', error: 'queue-svc 503' };
     const failed = await h.post(`/v1/ops/commands/${id}/reversions`, op, { reason: '공지 내리기' });
     expect([failed.statusCode, slug(failed)]).toEqual([502, expect.stringMatching(/command-dispatch-failed$/)]);
@@ -760,10 +760,11 @@ describe('사람 칸의 가명 참조와 대응 행 지우기(ASVS 16.2.1, ADR-0
     // 3년 [가정](ADR-0149 결정 3). 보류가 걸린 승인자 행은 남긴다. 시험의 정비 간격은 기본(하루)과 다르게 1ms로 둔다
     const held = h.store.actors().find((a) => a.side === 'APPROVER' && a.commandId === id)!;
     held.deleteHoldRef = randomUUID();
-    // 정비 한 바퀴가 다른 일(승인 기한·자동 만료)을 하지 않도록 만료 없는 1인 명령(명령 7)을 더한다
-    const sameDay = idOf(await h.post('/v1/ops/commands', requester, { type: 'LOBBY_BANNER', reason: '같은 날 명령', params: { templateId: 'notice-1' } }));
+    // 정비 한 바퀴가 다른 일(승인 기한·자동 만료)을 하지 않도록 만료 없는 1인 명령(명령 9)을 더한다.
+    // 명령 7은 승인 템플릿 저장소 전에는 만들기가 422라(ADR-0365 결정 2 바꿈, F-02-1 RV-01) 같은 성질(1인 승인·한 번에 되돌림·만료 없음)의 명령 9로 바꿨다
+    const sameDay = idOf(await h.post('/v1/ops/commands', requester, { type: 'FEATURE_OFF', reason: '같은 날 명령', params: { flag: 'reviews' } }));
     h.clock.advance(24 * HOUR);
-    const later = idOf(await h.post('/v1/ops/commands', requester, { type: 'LOBBY_BANNER', reason: '하루 뒤 명령', params: { templateId: 'notice-2' } }));
+    const later = idOf(await h.post('/v1/ops/commands', requester, { type: 'FEATURE_OFF', reason: '하루 뒤 명령', params: { flag: 'reviews' } }));
     const threeYears = 3 * 365 * 24 * HOUR;
     const purge = new MaintainCommands(h.store, new ComputeDryRun(), { actorPurgeIntervalMs: 1 });
     const auditBefore = h.audit.entries.length;
@@ -789,7 +790,7 @@ describe('리뷰 반영 재현(BAT-355 리뷰 RV-02·RV-03)', () => {
     let failFirst = true;
     const h = await harness({
       result: (c) => {
-        if (c.type === 'LOBBY_BANNER' && failFirst) {
+        if (c.type === 'FEATURE_OFF' && failFirst) {
           failFirst = false;
           return { status: 'FAILED', error: 'queue-svc 503' };
         }
@@ -807,7 +808,7 @@ describe('리뷰 반영 재현(BAT-355 리뷰 RV-02·RV-03)', () => {
     expect(first.map((c) => c.actorRef)).toEqual(first.map(() => SYSTEM_REF));
     // 실패 뒤 다른 operator가 다시 보낸다: 체크포인트의 행위자는 그 사람의 가명 참조(대응 표 ACTOR)다
     const retrier = h.identity.ops('operator');
-    const failed = idOf(await h.post('/v1/ops/commands', operator, { type: 'LOBBY_BANNER', reason: '공지', params: { templateId: 'notice-rv02' } }));
+    const failed = idOf(await h.post('/v1/ops/commands', operator, { type: 'FEATURE_OFF', reason: '후기 기능 끄기', params: { flag: 'reviews' } }));
     expect((await h.store.find(failed))?.state).toBe('FAILED');
     const retried = await h.post(`/v1/ops/commands/${failed}/retries`, retrier, {});
     expect([retried.statusCode, json(retried).state]).toEqual([200, 'ACKED']);
