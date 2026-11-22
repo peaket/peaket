@@ -1,8 +1,8 @@
-// 웹훅 발송기 전용 DB 역할 core_notify 통합 시험(AZ-T19, W12-core-notify, ADR-0350, docs/security/authz-matrix.md §5.3·§7).
+// 웹훅 발송기 전용 DB 역할 core_notify 통합 시험(AZ-T19, W12-core-notify, ADR-0351, docs/security/authz-matrix.md §5.3·§7).
 // 실제 PostgreSQL 18 컨테이너에 0043까지 올린 뒤, 운영과 같은 그룹 역할(core_notify)의 로그인 사용자로 발송기 저장소·발송기를 돌린다.
-// 시드는 admin(슈퍼유저)으로 넣어 행 보안·칸 권한을 지난다. 단언 값은 정본에서: 권한·정책·칸 목록(ADR-0350 결정 3),
+// 시드는 admin(슈퍼유저)으로 넣어 행 보안·칸 권한을 지난다. 단언 값은 정본에서: 권한·정책·칸 목록(ADR-0351 결정 3),
 // 발송기 메서드(notify/adapters/db/drizzle-webhook-store.ts), 서명 규격(docs/features/notify.md §9).
-// core_app이 이 묶음 뒤에도 두 표를 쓸 수 있는 것은 알려진 위험(두 번 나눔, ADR-0350 결정 5)이라 시험하지 않는다.
+// core_app이 이 묶음 뒤에도 두 표를 쓸 수 있는 것은 알려진 위험(두 번 나눔, ADR-0351 결정 5)이라 시험하지 않는다.
 import 'reflect-metadata';
 import { createDatabase, createService, type Database, type Clock } from '@peaket/platform';
 import { eq, sql } from 'drizzle-orm';
@@ -121,7 +121,7 @@ afterAll(async () => {
   pg?.stop();
 });
 
-describe('웹훅 발송기 전용 DB 역할 core_notify(ADR-0350)', () => {
+describe('웹훅 발송기 전용 DB 역할 core_notify(ADR-0351)', () => {
   test('AZ-T19 ① 발송기 역할 core_notify는 끝점 읽기·끄기와 발송 원장 넣기·집기·저장·세기·마지막 성공을 할 수 있다 [ASVS v5.0.0-8.4.1]', async () => {
     const store = new DrizzleWebhookStore(notify);
     const active = await store.listActiveEndpoints(B);
@@ -275,7 +275,7 @@ describe('웹훅 발송기 전용 DB 역할 core_notify(ADR-0350)', () => {
     expect(outcome).toEqual({ insertEndpoint: '42501', deleteEndpoint: '42501', deleteDelivery: '42501', truncateDelivery: '42501' });
   });
 
-  test('AZ-T19 ⑦ core_notify 역할·정책·칸 권한이 ADR-0350 결정 1·3과 같고 표 소유자가 아니며 FORCE가 없다 [ASVS v5.0.0-8.4.1]', async () => {
+  test('AZ-T19 ⑦ core_notify 역할·정책·칸 권한이 ADR-0351 결정 1·3과 같고 표 소유자가 아니며 FORCE가 없다 [ASVS v5.0.0-8.4.1]', async () => {
     const rows = async <T extends Record<string, unknown>>(text: string, params: unknown[] = []) => (await admin.pool.query<T>(text, params)).rows;
     const TABLES = ['webhook_delivery', 'webhook_endpoint'];
     const role = (await rows<{ rolcanlogin: boolean; rolsuper: boolean; rolbypassrls: boolean }>('select rolcanlogin, rolsuper, rolbypassrls from pg_roles where rolname = $1', ['core_notify']))[0];
