@@ -12,7 +12,7 @@ import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { event, place, production, promoter } from '../src/modules/catalog/adapters/db/schema.js';
 import { DrizzleSearchReadModel, MemoryCdnInvalidation } from '../src/modules/catalog/index.js';
-import { FakeIdentity, IMAGE_ORIGIN_TEST, quiet, testMedia } from '../test/support.js';
+import { FakeIdentity, quiet, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { loginFor } from './roles.js';
 
@@ -45,7 +45,7 @@ beforeAll(async () => {
   await admin.db.insert(promoter).values({ id: TENANT, legalName: '(주)피켓공연' });
   await admin.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: randomUUID() });
   process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
-  sync = new DrizzleSearchReadModel(appDb, IMAGE_ORIGIN_TEST);
+  sync = new DrizzleSearchReadModel(admin);
   svc = await createService({
     name: 'core-svc-sale-suspension',
     module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ cdn }) }),
@@ -179,7 +179,7 @@ describe('LCH-090 판매 중지·재개 core 트랜잭션 [PostgreSQL·실제 HT
     expect(detail.statusCode).toBe(410);
     expect(JSON.parse(detail.payload)).toMatchObject({ type: 'https://peaket.example/problems/event-suspended' });
     const search = await svc.http.inject({ method: 'GET', url: '/v1/search?q=판매중지검색' });
-    expect(JSON.parse(search.payload)).toMatchObject({ productions: [] });
+    expect(JSON.parse(search.payload)).toMatchObject({ items: [] });
   });
 
   test('같은 승인 업무로 다시 내리면 200 UNCHANGED이고 검색 판·무효화가 늘지 않는다', async () => {
@@ -212,8 +212,8 @@ describe('LCH-090 판매 중지·재개 core 트랜잭션 [PostgreSQL·실제 HT
     });
     expect(await docIds()).toContain(p.productionId);
     expect((await svc.http.inject({ method: 'GET', url: `/v1/events/${p.openEventId}` })).statusCode).toBe(200);
-    // 오픈 시각이 지난 회차는 공개 요약도 열리지 않는다
-    expect((await svc.http.inject({ method: 'GET', url: `/v1/events/${p.futureEventId}` })).statusCode).toBe(404);
+    // core 공개 요약은 공연 단위라 오픈 시각이 지난 회차도 200이다. 판매가 열리지 않는 것은 ops가 그 회차에 RESUME을 보내지 않는 것으로 지킨다(executor 시험).
+    expect((await svc.http.inject({ method: 'GET', url: `/v1/events/${p.futureEventId}` })).statusCode).toBe(200);
     // 검색은 다시 들어오고, 경로 무효화도 한 번 더 부른다(캐시에 남은 '없음'을 지운다)
     expect(cdn.pathCalls.at(-1)).toEqual(['/v1/search*']);
     now = NOW;
@@ -241,17 +241,19 @@ describe('LCH-090 판매 중지·재개 core 트랜잭션 [PostgreSQL·실제 HT
     expect(await productionRow(p.productionId)).toMatchObject({ sale_review: 'SUSPENDED', suspension_approval_id: 'AP-STOP-4' });
   });
 
-  test('내부 토큰·회차·상태 경계: 토큰이 없으면 401, 없는 회차는 404, 중지가 아닌 공연의 재개는 409다', async () => {
+  test('내부 토큰·회차·상태 경계: 토큰이 없으면 401, 없는 회차는 404, 이미 승인된 공연의 재개는 200 UNCHANGED, 초안 공연의 재개는 409다', async () => {
     const p = await seeded('판매중지경계 공연');
     expect((await scope(p.openEventId, null)).statusCode).toBe(401);
     expect((await apply(p.openEventId, { kind: 'SUSPENDED', approvalId: 'AP-X', reasonCode: 'OTHER', reason: 'x' }, null)).statusCode).toBe(401);
     expect((await scope(randomUUID())).statusCode).toBe(404);
     expect((await apply(randomUUID(), { kind: 'SUSPENDED', approvalId: 'AP-X', reasonCode: 'OTHER', reason: 'x' })).statusCode).toBe(404);
-    expect((await apply(p.openEventId, { kind: 'RESUMED', approvalId: 'AP-X' })).statusCode).toBe(409);
-    expect(JSON.parse((await apply(p.openEventId, { kind: 'RESUMED', approvalId: 'AP-X' })).payload)).toMatchObject({ type: 'https://peaket.example/problems/sale-suspension-conflict' });
+    // 이미 승인된 공연의 재개는 다시 부른 재시도로 보고 아무것도 바꾸지 않는다
+    const again = await apply(p.openEventId, { kind: 'RESUMED', approvalId: 'AP-X' });
+    expect(again.statusCode).toBe(200);
+    expect(JSON.parse(again.payload)).toEqual({ status: 'UNCHANGED', productionId: p.productionId, eventIds: [p.openEventId, p.futureEventId], resumeEventIds: [] });
     expect((await apply(p.openEventId, { kind: 'SUSPENDED', approvalId: 'AP-X', reasonCode: 'BORED', reason: 'x' })).statusCode).toBe(400);
     expect((await apply(p.openEventId, { kind: 'SUSPENDED', approvalId: 'AP-X', reasonCode: 'OTHER' })).statusCode).toBe(400);
-    // 없는 공연(회차는 있지만 승인 이력 없음)은 409 not-approved다
+    // 승인 이력이 없는 초안 공연은 내릴 수도, 재개할 수도 없다
     const draft = randomUUID();
     await admin.db.insert(production).values({ id: draft, promoterId: TENANT, placeId: PLACE, title: '초안 공연', genre: '콘서트', saleReview: 'DRAFT' });
     const draftEvent = randomUUID();
@@ -259,5 +261,8 @@ describe('LCH-090 판매 중지·재개 core 트랜잭션 [PostgreSQL·실제 HT
     const n = await apply(draftEvent, { kind: 'SUSPENDED', approvalId: 'AP-X', reasonCode: 'OTHER', reason: 'x' });
     expect(n.statusCode).toBe(409);
     expect(JSON.parse(n.payload)).toMatchObject({ type: 'https://peaket.example/problems/sale-suspension-conflict' });
+    const nr = await apply(draftEvent, { kind: 'RESUMED', approvalId: 'AP-X' });
+    expect(nr.statusCode).toBe(409);
+    expect(JSON.parse(nr.payload)).toMatchObject({ type: 'https://peaket.example/problems/sale-suspension-conflict' });
   });
 });
