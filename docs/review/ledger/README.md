@@ -4,20 +4,20 @@
 
 ## 완성 판정
 
-- 항목 4051개: 시험 시나리오(세부 단위) 2010, 시나리오가 가리키지 않는 요구사항·정책 14, ASVS 추적 표의 행 2027
-- 빈칸 730, ID만 1018: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
+- 항목 4076개: 시험 시나리오(세부 단위) 2035, 시나리오가 가리키지 않는 요구사항·정책 14, ASVS 추적 표의 행 2027
+- 빈칸 722, ID만 1011: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 4(모두 사유가 있다): 완료로 세지 않고 따로 센다
-- 다시 볼 notes 8: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
+- 다시 볼 notes 9: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
 
 ## 등급별 상태
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 583 | 98 | 24 | 2 | 2 | 18 | 1 | 0 | 117 | 845 |
-| B | 1321 | 920 | 22 | 2 | 2 | 80 | 0 | 245 | 612 | 3204 |
+| B | 1361 | 913 | 22 | 2 | 2 | 80 | 0 | 245 | 604 | 3229 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 1904 | 1018 | 46 | 5 | 4 | 98 | 1 | 245 | 730 | 4051 |
+| 합계 | 1944 | 1011 | 46 | 5 | 4 | 98 | 1 | 245 | 722 | 4076 |
 
 ## 분야별 상태
 
@@ -25,16 +25,16 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | analytics | B | 0 | 118 | 0 | 0 | 0 | 0 | 0 | 29 | 41 | 188 |
 | bot-defense | B | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 3 | 152 |
-| catalog-review | B | 68 | 23 | 0 | 0 | 0 | 0 | 0 | 16 | 9 | 116 |
+| catalog-review | B | 69 | 22 | 0 | 0 | 0 | 0 | 0 | 16 | 9 | 116 |
 | control-tower | B | 63 | 103 | 0 | 0 | 0 | 10 | 0 | 24 | 126 | 326 |
 | delivery | B | 46 | 22 | 0 | 0 | 0 | 2 | 0 | 3 | 4 | 77 |
 | devops | B | 72 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 118 |
 | forensic-replay | B | 16 | 112 | 0 | 0 | 0 | 3 | 0 | 19 | 41 | 191 |
-| frontend | B | 87 | 47 | 8 | 2 | 0 | 3 | 0 | 22 | 34 | 203 |
+| frontend | B | 88 | 46 | 8 | 2 | 0 | 3 | 0 | 22 | 34 | 203 |
 | identity | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| identity | B | 293 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 64 | 417 |
+| identity | B | 325 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 58 | 442 |
 | notify | B | 10 | 119 | 0 | 0 | 0 | 0 | 0 | 21 | 37 | 187 |
-| offline-gate | B | 44 | 107 | 0 | 0 | 0 | 11 | 0 | 19 | 67 | 248 |
+| offline-gate | B | 49 | 104 | 0 | 0 | 0 | 11 | 0 | 19 | 65 | 248 |
 | payment | A | 165 | 24 | 6 | 0 | 2 | 10 | 0 | 0 | 0 | 207 |
 | payment | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
 | queue-admission | A | 115 | 46 | 3 | 0 | 0 | 2 | 0 | 0 | 30 | 196 |
@@ -44,7 +44,7 @@
 | requirements | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
 | search | B | 19 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 0 | 23 |
 | seat-hold | A | 132 | 13 | 15 | 2 | 0 | 6 | 1 | 0 | 0 | 169 |
-| seat-hold | B | 110 | 19 | 0 | 0 | 0 | 3 | 0 | 15 | 9 | 156 |
+| seat-hold | B | 111 | 18 | 0 | 0 | 0 | 3 | 0 | 15 | 9 | 156 |
 | security | B | 48 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 81 |
 | settlement | A | 76 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 104 |
 | settlement | B | 69 | 47 | 0 | 0 | 0 | 0 | 0 | 23 | 14 | 153 |
@@ -56,7 +56,7 @@
 | verification | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 |
 | verification | B | 40 | 3 | 9 | 0 | 0 | 0 | 0 | 0 | 51 | 103 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 1904 | 1018 | 46 | 5 | 4 | 98 | 1 | 245 | 730 | 4051 |
+| 합계 |  | 1944 | 1011 | 46 | 5 | 4 | 98 | 1 | 245 | 722 | 4076 |
 
 ## 다시 볼 notes
 
@@ -68,7 +68,8 @@
 | P-T39 ① | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts… |
 | P-T39 ② | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | P-T39 ④ | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
-| payment:v5.0.0-3.4.5 | 다른 단계 | apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
+| payment:v5.0.0-3.3.2 | 다른 단계 | apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs |
+| payment:v5.0.0-3.4.5 | 다른 단계 | apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | payment:v5.0.0-3.5.3 | 다른 단계 | apps/web/src/_pages/ticket-cancel/ui/live-wiring.test.mjs |
 
 ## 정본에 없는 ID·세부 번호를 단 시험 이름
@@ -97,8 +98,8 @@
 
 ## 표 읽기 경고
 
-- docs/features/identity.md:779: I-T51 시나리오 칸의 ①⑥이 판정 칸에 없어 세부로 세지 않는다
-- docs/features/identity.md:801: I-T73 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
+- docs/features/identity.md:786: I-T51 시나리오 칸의 ①⑥이 판정 칸에 없어 세부로 세지 않는다
+- docs/features/identity.md:808: I-T73 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/payment.md:951: P-T73 시나리오 칸의 ⑥이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/payment.md:952: P-T74 시나리오 칸의 ⑦이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/queue-admission.md:716: Q-T64 시나리오 칸의 ⑤이 판정 칸에 없어 세부로 세지 않는다

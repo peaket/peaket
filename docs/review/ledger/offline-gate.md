@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 44 | 107 | 0 | 0 | 0 | 11 | 0 | 19 | 67 | 248 |
-| 합계 | 44 | 107 | 0 | 0 | 0 | 11 | 0 | 19 | 67 | 248 |
+| B | 49 | 104 | 0 | 0 | 0 | 11 | 0 | 19 | 65 | 248 |
+| 합계 | 49 | 104 | 0 | 0 | 0 | 11 | 0 | 19 | 65 | 248 |
 
 ## docs/features/offline-gate.md
 
@@ -103,14 +103,14 @@
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/ops-svc/test/bot-review-http.test.ts 외 4곳 (영역:… |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/web/src/_pages/queue-verify/model/verify-flow.test.mjs, apps/web/src/_pages/queue-verify/model/view.test.mjs 외… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
-| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: apps/scanner) |
+| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, services/identity-svc/test/http.test.ts 외 2곳… |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-http-rules.test.ts 외 3곳 (영역:… |
 | v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/queue-svc/test/state-http.test.ts 외 1곳 (영역: apps/scanner) |
 | v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/web/server/csp-hash-server.test.mjs, apps/web/src/_app/security/page-headers.test.mjs 외 1곳 |
 | v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test-int/seat.int.test.ts 외 4곳 (영역: apps/scanner) |
-| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/config/headers/headers.test.mjs 외 1곳… |
+| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | ID만 | B | 다른 곳 시험: apps/web/src/_app/security/page-headers.test.mjs, deploy/gateways/test/gateways.test.mjs 외 3곳 (영역:… |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | ID만 | B | 다른 곳 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs 외… |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
@@ -149,9 +149,9 @@
 | v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | 다른 단계 | B | GAT-140 · SCR-033·034·035·052의 로그아웃(온라인이면 큐를 비운 뒤)이 아직 화면에 없다. 스캐너 화면을 실제 API에 잇는 단계에서 시험한다. |
 | v5.0.0-7.4.5 | — | L2 | 관리자가 사용자별·전체 활성 세션을 끝낼 수 있다. | ID만 | B | 다른 곳 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
 | v5.0.0-7.5.1 | — | L2 | 인증에 영향을 주는 민감 계정 정보를 바꾸기 전에 전체 재인증을 요구한다. | ID만 | B | 다른 곳 시험: services/identity-svc/test/passkey-cases.ts, services/ops-svc/test/admin-reauth.test.ts (영역: apps/scanner) |
-| v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | ID만 | B | 다른 곳 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 3곳… |
+| v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 5곳 |
 | v5.0.0-7.6.1 | — | L2 | 신뢰 당사자와 IdP 사이의 세션 수명·종료가 문서대로 동작하고, IdP 인증 간격이 최대 시간에 이를 때처럼 필요하면 재인증을 요구한다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-7.6.2 | — | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 빈칸 | B | 영역: apps/scanner |
+| v5.0.0-7.6.2 | — | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-summary.http.test.ts 외… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역: apps/scanner) |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: packages/platform/test/auth-guard.test.ts, packages/platform/test/bulkhead-auth.test.ts 외 8곳 |
@@ -182,7 +182,7 @@
 | v5.0.0-10.4.6 | — | L2 | 코드 흐름이면 PKCE를 요구하고 `plain`을 받지 않는다. | 해당 없음 | B | 해당 없음: 코드 흐름을 쓰지 않는다 |
 | v5.0.0-10.4.7 | — | L2 | 인증 없는 동적 클라이언트 등록을 지원하면 악성 클라이언트 위험을 줄인다. | 해당 없음 | B | 해당 없음: 동적 클라이언트 등록이 없다. 기기는 operator가 등록한다 |
 | v5.0.0-10.4.8 | — | L2 | 리프레시 토큰에 절대 만료가 있다. | 해당 없음 | B | 해당 없음: 리프레시 토큰이 없다 |
-| v5.0.0-10.4.9 | — | L2 | 권한 있는 사용자가 리프레시 토큰과 참조 액세스 토큰을 폐기할 수 있다. | 빈칸 | B | 영역: apps/scanner |
+| v5.0.0-10.4.9 | — | L2 | 권한 있는 사용자가 리프레시 토큰과 참조 액세스 토큰을 폐기할 수 있다. | 자동 시험 | B | 시험: services/identity-svc/test-int/scanner-sessions-self.int.test.ts, services/identity-svc/test/scanner-sessions-self.t… |
 | v5.0.0-10.4.10 | — | L2 | 기밀 클라이언트는 토큰 요청 같은 백채널 요청에서 인증한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-10.4.11 | — | L2 | 인가 서버는 클라이언트에 필요한 scope만 준다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | ID만 | B | 다른 곳 시험: services/ticket-svc/test-int/transfer.int.test.ts (영역: apps/scanner) |

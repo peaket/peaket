@@ -87,3 +87,10 @@
 - BAT-420-rest(R-702) 다시 보기 RN-02 낮음: ASVS 메모의 'purchase·payment가 같은 공용 함수로 본다'는 사실과 다르다(payment는 v0 이미지 빌드 때문에 같은 규칙의 사본, 같은 표로 시험). 문구를 고친다
 - BAT-420-rest(R-702) 검증 약함: P-T74 ① 경계 대조 시험 이름의 '받은 계좌는 본문 그대로'를 단언이 보지 않는다(호출 수만), R-T41 ⑥ '회차 시작은 P2의 값'을 core 상태 대신 P1 호출 0으로 갈음, T11(P-T72 ③ 재시도 실행기)은 구조 회귀 시험이라 어떤 결함으로도 실패하지 않는다
 - 2026-11-19 흔들림(전체 감독이 넘김): identity `test/trust-login-risk.test.ts` BOT-050 첫 시험이 CI에서 gRPC 첫 호출 516ms로 300ms 데드라인을 넘긴다. 시험마다 새 채널이라 연결 준비가 데드라인 안에 든다 — 데드라인은 두고 `beforeAll`에서 같은 주소로 `waitForReady` 클라이언트를 열어 두거나 한 번 미리 부른다. 다시 나오면 먼저 고친다. ops `event-cancellation-core-apply-main.test.ts`도 다섯 서비스를 한꺼번에 돌릴 때만 30초 시간 초과
+- F-05-7 RV-03 낮음: 조각을 지우는 `captureStaffFragment`가 `ssr: false`로 늦게 싣는 부품 안에 있어 실행부를 받는 동안 `#token=`·`#code=`가 주소창에 남는다. 로더 부품으로 옮긴다(`StaffInvitationsLive.tsx`·`StaffApproveLive.tsx`)
+- F-05-7 RV-04 낮음: 스캐너 세션 끝내기가 계정 잠금·상태 확인 없이 팬 세션 생존을 트랜잭션 밖에서 본다. 다른 기기 로그아웃과 같은 차례로 맞추거나 까닭을 적는다(`end-scanner-session.ts`)
+- F-05-7 RV-05 낮음: 스캐너 세션 목록 차례가 메모리 저장소만 정해지지 않았다. 승인 시각 최신 순으로 맞춘다(`memory-staff-assignment-store.ts`)
+- F-05-7 RV-06 낮음: 화면 상태 이름 '만료'·'본인확인 필요'(I-T91 ②)와 d5 §5.26 '만료·사용됨'·'본인확인 전'이 다르다. 한쪽으로 맞춘다
+- F-05-7 RV-07 낮음: ADR-0362 결정 2 받는 자 줄과 04-ia ④ 글자가 다르고, openapi `GET /v1/identity/scanner-sessions` 설명에 `expires_at > now` 조건이 없다(문서만)
+- F-05-7 RV-08 낮음: 스태프 홈·설정 화면 연결을 소스 글자 정규식으로 본다. 브라우저 확인 뒤 화면 그리기 시험으로 바꿀 후보
+- F-05-7 첫 JS: `/staff/*`·`/my/settings` 네 경로가 CI budgets 잡 경로 목록에 없다. 목록에 더할지 정한다

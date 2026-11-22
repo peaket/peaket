@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 293 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 64 | 417 |
-| 합계 | 303 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 64 | 427 |
+| B | 325 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 58 | 442 |
+| 합계 | 335 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 58 | 452 |
 
 ## docs/features/identity.md
 
@@ -69,6 +69,31 @@
 | I-T87 | ③ | 배정 만료 정비와 시간 필터(BUILD_ORDER BAT-450C… | ③ `hasStaffAssignment`(`hasAssigned`)는 `ASSIGNED`이면서 `valid_from <= now <= valid_until`인… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
 | I-T87 | ④ | 배정 만료 정비와 시간 필터(BUILD_ORDER BAT-450C… | ④ 내 배정 목록과 파트너 명단은 정비 전이라도 `valid_until`이 지난 `ASSIGNED`를 `ENDED`로 보이며, 역할 유효 끝이 지난… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
 | I-T88 | ① | `promoter_id` 없는 옛 배정 정본화(BUILD_ORDER… | ① 정비 일 `staff-promoter-missing`이 `promoter_id`가 없는 `INVITED`를 `EXPIRED`로 끝내며 초대 이메일·토큰… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
+| I-T89 | ① | 내 스캐너 세션 조회·끝내기 서버(BUILD_ORDER F-05-7 =… | ① 살아 있는 스캐너 세션이 없는 계정(스태프가 아닌 계정 포함)의 `GET /v1/identity/scanner-sessions`는 200 빈… | 자동 시험 | B | 시험: services/identity-svc/test-int/scanner-sessions-self.int.test.ts, services/identity-svc/test/scanner-sessions-self.t… |
+| I-T89 | ② | 내 스캐너 세션 조회·끝내기 서버(BUILD_ORDER F-05-7 =… | ② 끝난 세션(`terminated_at` 있음), 역할 유효 끝이 온 세션(`expires_at` 정각은 빠지고 1ms 전은 남는다), 다른 계정의 세션은… | 자동 시험 | B | 시험: services/identity-svc/test-int/scanner-sessions-self.int.test.ts, services/identity-svc/test/scanner-sessions-self.t… |
+| I-T89 | ③ | 내 스캐너 세션 조회·끝내기 서버(BUILD_ORDER F-05-7 =… | ③ `DELETE`에 재인증 토큰이 없거나 만료·재사용이거나, 다른 세션의 토큰이거나 받는 쪽 작업이 `SESSION_END`인 토큰이면 403… | 자동 시험 | B | 시험: services/identity-svc/test-int/scanner-sessions-self.int.test.ts, services/identity-svc/test/scanner-sessions-self.t… |
+| I-T89 | ④ | 내 스캐너 세션 조회·끝내기 서버(BUILD_ORDER F-05-7 =… | ④ 받는 쪽 작업 `SCANNER_SESSION_END`의 맞는 토큰이면 204이고 `terminated_at`이 지금 시각이며, 같은 트랜잭션에… | 자동 시험 | B | 시험: services/identity-svc/test-int/scanner-sessions-self.int.test.ts, services/identity-svc/test/scanner-sessions-self.t… |
+| I-T89 | ⑤ | 내 스캐너 세션 조회·끝내기 서버(BUILD_ORDER F-05-7 =… | ⑤ 다른 계정의 세션·이미 끝난 세션·없는 ID는 본문이 같은 404 `session-not-found`이고 재인증 토큰을 쓰지 않아, 바로 뒤 자기 세션에… | 자동 시험 | B | 시험: services/identity-svc/test-int/scanner-sessions-self.int.test.ts, services/identity-svc/test/scanner-sessions-self.t… |
+| I-T89 | ⑥ | 내 스캐너 세션 조회·끝내기 서버(BUILD_ORDER F-05-7 =… | ⑥ 기기 승인(`POST /v1/device-approvals`, APPROVE)이 만든 세션의 `device_name`은 기기 승인 요청의 기기… | 자동 시험 | B | 시험: services/identity-svc/test-int/scanner-sessions-self.int.test.ts, services/identity-svc/test/device-approval.test.ts |
+| I-T90 | ① | 계정 설정 SCR-017의 스태프 세션 줄(BUILD_ORDER… | ① 실제 흐름에서 스캐너 세션 목록이 한 줄이면 기기 목록 끝에 '현장 스캐너 {기기 이름}'(이름이 null이면 '현장 스캐너') 줄이 '스태프 세션'… | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs |
+| I-T90 | ② | 계정 설정 SCR-017의 스태프 세션 줄(BUILD_ORDER… | ② 스캐너 줄의 [로그아웃]으로 재인증을 시작하면 웹 `purpose` `scanner-session-end`로 떠나고, 탭 저장소… | 자동 시험 | B | 시험: apps/web/src/features/device-sessions/flow.test.mjs |
+| I-T90 | ③ | 계정 설정 SCR-017의 스태프 세션 줄(BUILD_ORDER… | ③ 돌아오면 재인증 토큰을 한 번 받아 `DELETE /v1/identity/scanner-sessions/{sessionId}`를 보낸다. 204면 토스트… | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs |
+| I-T90 | ④ | 계정 설정 SCR-017의 스태프 세션 줄(BUILD_ORDER… | ④ 스캐너 목록만 401이 아닌 이유로 실패하면 기기 목록은 그대로 그리고 스캐너 줄 자리에 '현장 스캐너 세션을 불러오지 못했습니다'와 [다시 불러오기]를… | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs |
+| I-T90 | ⑤ | 계정 설정 SCR-017의 스태프 세션 줄(BUILD_ORDER… | ⑤ 실제 identity-svc까지 잇는 연결 시험: 기기 승인으로 만든 세션이 화면 흐름 모듈의 목록 줄로 오고, 같은 모듈의 끝내기 뒤… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-screens-wiring.int.test.ts |
+| I-T91 | ① | 초대 수락·거절 화면 SCR-050(BUILD_ORDER F-05-7… | ① 조회 200이면 회차 공개 요약(`eventId`)의 판매자 상호·공연명·회차 시작과 조회의 역할·권한 유효 시간·가린 초대 이메일을 보이고, 두 동의… | 자동 시험 | B | 시험: apps/web/src/features/staff-invitation/flow.test.mjs |
+| I-T91 | ② | 초대 수락·거절 화면 SCR-050(BUILD_ORDER F-05-7… | ② 수락은 조회가 준 `consentVersion`과 두 동의를 보낸다. 200이면 '수락 완료'와 내 현장 배정(`/staff`) 링크, 403… | 자동 시험 | B | 시험: apps/web/src/features/staff-invitation/flow.test.mjs |
+| I-T91 | ③ | 초대 수락·거절 화면 SCR-050(BUILD_ORDER F-05-7… | ③ 회차 공개 요약이 404·410이거나 닿지 않으면 '파트너 이름을 읽지 못함'이고 [수락]이 꺼지며 [다시 불러오기]가 있다 | 자동 시험 | B | 시험: apps/web/src/_pages/staff-invitations/model/state.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs |
+| I-T91 | ④ | 초대 수락·거절 화면 SCR-050(BUILD_ORDER F-05-7… | ④ [수락하지 않기]는 확인 줄을 열고, [거절]이면 `POST /v1/staff-invitation-rejections`를 보내 204는 '거절함', 410은… | 자동 시험 | B | 시험: apps/web/src/features/staff-invitation/flow.test.mjs |
+| I-T91 | ⑤ | 초대 수락·거절 화면 SCR-050(BUILD_ORDER F-05-7… | ⑤ 서버: 검증 이메일이 없는 계정(네이버만 연결)의 수락은 403 `staff-invitation-email-unverified`, 검증 이메일이 다른 계정은… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/staff-invitation-http.test… |
+| I-T91 | ⑥ | 초대 수락·거절 화면 SCR-050(BUILD_ORDER F-05-7… | ⑥ 실제 identity-svc까지 잇는 연결 시험: 실제 DB에 둔 초대를 화면 흐름 모듈로 조회 → 수락하면 내 배정 목록에 `ASSIGNED`로 오고… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-screens-wiring.int.test.ts |
+| I-T92 | ① | 스캐너 승인 화면 SCR-051(BUILD_ORDER F-05-7 =… | ① 조회 200이면 기기 이름·확인 코드(낭독 이름은 한 글자씩)·배정마다 회차 공개 요약의 상호·공연명을 보인다. 배정이 둘 이상이면 고르기이고 승인은 고른… | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
+| I-T92 | ② | 스캐너 승인 화면 SCR-051(BUILD_ORDER F-05-7 =… | ② 조회 403의 세 종류(`staff-assignment-missing`·`other-partner-device`·`outside-staff-hours`)는… | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
+| I-T92 | ③ | 스캐너 승인 화면 SCR-051(BUILD_ORDER F-05-7 =… | ③ 승인 204는 '승인됨', 거부 204는 '거부함', 403 `proxy-approval-forbidden`은 '권한 없음 · 대리 승인'의 '대리 승인은… | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
+| I-T92 | ④ | 스캐너 승인 화면 SCR-051(BUILD_ORDER F-05-7 =… | ④ 실제 identity-svc까지 잇는 연결 시험: 기기 승인 저장소(Valkey)에 둔 승인 요청을 화면 흐름 모듈로 조회·승인하면 PostgreSQL에 그… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-screens-wiring.int.test.ts |
+| I-T93 | ① | 내 현장 배정 화면 SCR-061(BUILD_ORDER F-05-7 =… | ① 목록의 배정마다 회차 공개 요약으로 공연명·회차·상호를 채운다. 배지는 `ASSIGNED`이면서 지금이 `validFrom` 전이면 '곧 시작'… | 자동 시험 | B | 시험: apps/web/src/_pages/staff-home/model/state.test.mjs, apps/web/src/entities/staff-assignment/model.test.mjs |
+| I-T93 | ② | 내 현장 배정 화면 SCR-061(BUILD_ORDER F-05-7 =… | ② 곧 시작·진행 중과 `validUntil`이 지나지 않은 해제는 '현재 배정', 나머지는 '지난 배정'이다. 해제에는 '파트너가 배정을 해제했습니다'를… | 자동 시험 | B | 시험: apps/web/src/_pages/staff-home/model/state.test.mjs, apps/web/src/entities/staff-assignment/model.test.mjs |
+| I-T93 | ③ | 내 현장 배정 화면 SCR-061(BUILD_ORDER F-05-7 =… | ③ 빈 목록은 '배정된 현장 근무가 없습니다', 401(갱신도 401)은 `/login?next=/staff`, 그 밖 실패는 '현장 근무를 불러오지… | 자동 시험 | B | 시험: apps/web/src/_pages/staff-home/model/state.test.mjs |
+| I-T93 | ④ | 내 현장 배정 화면 SCR-061(BUILD_ORDER F-05-7 =… | ④ 실제 identity-svc까지 잇는 연결 시험: 수락한 배정과 파트너가 해제한 배정이 화면 흐름 모듈의 목록으로 오고 배지가 진행 중·해제다 | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-screens-wiring.int.test.ts |
 | I-T22 | — | 기기 승인 피싱 방지 검증 | 스캐너 단말기와 휴대폰의 확인 코드(8자)가 대조 화면에 함께 보인다. 등록되지 않았거나 폐기된 기기의 승인 코드 발급 요청과, 다른 파트너 기기의 승인은… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/identity-svc/test/device-approval.test.ts |
 | I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test/device-approval.test.ts |
 | I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test-int/device-approval.int.test.ts 외 2곳 |
@@ -106,7 +131,7 @@
 | I-T46 | ④ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ④는 거절이다. | 자동 시험 | B | 시험: deploy/gateways/test/admin-auth.test.mjs, tools/local/e2e/gateway-admin-auth.e2e.mjs |
 | I-T46 | ⑤ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ⑤는 백엔드에 리프레시 쿠키가 전달되지 않는다 | 자동 시험 | B | 시험: deploy/gateways/test/admin-auth.test.mjs, tools/local/e2e/gateway-admin-auth.e2e.mjs |
 | I-T46 | ⑥ | 관리 계정 토큰 갱신: 파트너·운영자 세션으로 ① 액세스 토큰 만료 뒤… | ⑥은 204와 새 쿠키이고 세션이 이어진다(§3 '응답을 잃은 뒤의 재시도'), | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-http… |
-| I-T47 | — | 초대·승인 링크의 URL 조각: 로그인하지 않은 휴대폰으로 초대… | 화면이 열리자마자 주소창에서 조각이 사라진다. 로그인 뒤 돌아온 주소·`next`·서버 접근 로그·`Referer`에 토큰과 확인 코드가 0건이고, 같은 탭에서… | 빈칸 | B | — |
+| I-T47 | — | 초대·승인 링크의 URL 조각: 로그인하지 않은 휴대폰으로 초대… | 화면이 열리자마자 주소창에서 조각이 사라진다. 로그인 뒤 돌아온 주소·`next`·서버 접근 로그·`Referer`에 토큰과 확인 코드가 0건이고, 같은 탭에서… | 자동 시험 | B | 시험: apps/web/src/shared/lib/staff-fragment.test.mjs |
 | I-T48 | ① | 새 파드의 종료 세션(추천 적용 2026-10-28… | ①은 새 파드가 준비 상태가 된 뒤 그 세션 요청을 401로 거부한다 | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts |
 | I-T48 | ② | 새 파드의 종료 세션(추천 적용 2026-10-28… | ②는 세 파드 모두 거부한다(이벤트가 파드 하나에만 가지 않는다) | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts |
 | I-T48 | ③ | 새 파드의 종료 세션(추천 적용 2026-10-28… | ③은 30초 뒤 준비 상태가 되고 SEV2 `control_sync_lagging{kind="sessions"}`가 뜨며, Kafka가 돌아오면 15분 창을… | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test/control-sync-reread.test.ts 외 1곳 |
@@ -171,10 +196,10 @@
 | I-T61 | ② | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ②는 그 세션만 끝난다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
 | I-T61 | ③ | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ③은 404, | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
 | I-T61 | ④ | 관리 계정 세션 강제 종료(추천 적용 2026-10-30… | ④는 403이다 | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts |
-| I-T62 | ① | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ①은 조회 응답에 파트너 이름이 없고, 화면이 `GET /v1/events/{eventId}`의 sellerName을 배정 파트너로 보인다(공연 상세의 판매자… | 빈칸 | B | — |
-| I-T62 | ② | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ②는 조회가 403 `other-partner-device`이고 화면은 이유만 보이며 파트너 이름이 없다. 그 코드로 승인을 보내도 403이다. | 빈칸 | B | — |
-| I-T62 | ③ | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ③은 회차 공개 요약이 404라 이름과 공연명 없이 기기 이름·확인 코드·유효 시간을 보이고, 승인은 된다. | 빈칸 | B | — |
-| I-T62 | ④ | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ④는 파트너 이름을 얻으려는 내부 호출이 0건이다 | 빈칸 | B | — |
+| I-T62 | ① | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ①은 조회 응답에 파트너 이름이 없고, 화면이 `GET /v1/events/{eventId}`의 sellerName을 배정 파트너로 보인다(공연 상세의 판매자… | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
+| I-T62 | ② | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ②는 조회가 403 `other-partner-device`이고 화면은 이유만 보이며 파트너 이름이 없다. 그 코드로 승인을 보내도 403이다. | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
+| I-T62 | ③ | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ③은 회차 공개 요약이 404라 이름과 공연명 없이 기기 이름·확인 코드·유효 시간을 보이고, 승인은 된다. | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
+| I-T62 | ④ | 스캐너 승인 화면의 파트너 이름(추천 적용 2026-10-30… | ④는 파트너 이름을 얻으려는 내부 호출이 0건이다 | 자동 시험 | B | 시험: services/identity-svc/test/device-approval.test.ts |
 | I-T63 | ① | 기기 가명 통일(추천 적용 2026-10-31, ADR-0171… | ①의 `device.device_ref`가 trust-svc 판정 기록의 `deviceRef`와 같고, 시험 키로 §9.1의 식대로 계산한 값과 같다. DB에… | ID만 | B | 시험: services/identity-svc/test-int/investigation.int.test.ts, services/identity-svc/test/investigation.test.ts |
 | I-T63 | ② | 기기 가명 통일(추천 적용 2026-10-31, ADR-0171… | ②은 그 행이 지워진다 | ID만 | B | 시험: services/identity-svc/test-int/investigation.int.test.ts, services/identity-svc/test/investigation.test.ts |
 | I-T63 | ③ | 기기 가명 통일(추천 적용 2026-10-31, ADR-0171… | ③은 그 행이 지워진다 | ID만 | B | 시험: services/identity-svc/test-int/investigation.int.test.ts, services/identity-svc/test/investigation.test.ts |
@@ -313,14 +338,14 @@
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/ops-svc/test/bot-review-http.test.ts 외 4곳 (영역:… |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: services/queue-svc/test/edge-first-visit-function.test.ts (영역: apps/console-host, apps/partner, apps/web… |
+| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: services/identity-svc/test/http.test.ts |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/server/csp-hash-server.test.mjs 외 2곳 |
 | v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
-| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
+| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
@@ -382,9 +407,9 @@
 | v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web |
 | v5.0.0-7.4.5 | — | L2 | 관리자가 사용자별·전체 활성 세션을 끝낼 수 있다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
 | v5.0.0-7.5.1 | — | L2 | 인증에 영향을 주는 민감 계정 정보를 바꾸기 전에 전체 재인증을 요구한다. | 자동 시험 | B | 시험: services/identity-svc/test/passkey-cases.ts |
-| v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 3곳 |
+| v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 5곳 |
 | v5.0.0-7.6.1 | — | L2 | 신뢰 당사자와 IdP 사이의 세션 수명·종료가 문서대로 동작하고, IdP 인증 간격이 최대 시간에 이를 때처럼 필요하면 재인증을 요구한다. | 빈칸 | B | 영역: apps/web |
-| v5.0.0-7.6.2 | — | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 빈칸 | B | 영역: apps/web |
+| v5.0.0-7.6.2 | — | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs |
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-summary.http.test.ts 외… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역:… |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-password-change.int.test.ts, services/identity-svc/test/admin-password-change.t… |
@@ -442,5 +467,5 @@
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/identity-svc/test/staff-assignment-maintenance.test.ts |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test.ts 외… |
-| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |
+| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs 외 2곳 |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test-int/kafka.int.test.ts 외 9곳 |
