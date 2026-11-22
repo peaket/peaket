@@ -208,10 +208,10 @@
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/ops-svc/test/command-dry-run.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | 자동 시험 | B | 시험: services/purchase-svc/test/auto-assign.test.ts, services/purchase-svc/test/hold-seats.test.ts 외 2곳 |
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/core-svc/test-int/catalog.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 40곳 |
-| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/core-svc/test/shop-order.http.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts 외 32곳 |
+| v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/core-svc/test/shop-order.http.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts 외 33곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 32곳 |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 54곳 |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 57곳 |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/review.http.test.ts 외 14곳 |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
@@ -284,7 +284,7 @@
 | v5.0.0-15.3.7 | — | L2 | HTTP 파라미터 오염 공격을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/read-seat-snapshot.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/search-removal.test.ts 외 1곳 |
 | v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
-| v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: services/core-svc, services/ops-svc… |
+| v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/realtime-gw/test-int/stream.int.test.ts (영역:… |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: services/core-svc, services/ops-svc… |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | 자동 시험 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
 | v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test-int/shop-refund-account.int.test.ts… |

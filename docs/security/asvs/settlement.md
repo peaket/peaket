@@ -12,7 +12,7 @@
 
 **구현 상태(2026-11-15, R-588)**: payment-svc settlement 모듈이 회차 정산서 계산·이의·지급 묶음(2인 승인)·KYC 게이트·정산 계좌(은행·끝 4자리)를 구현했고, 이번에 상품 정산서 원천(core-svc `merch_order`·`merch_order_item` 0016)과 주 단위 계산, 미수금 상세·상계(`partner_receivable`·`receivable_move` 0016), ops-svc 2인 지급 승인(`payout_approval` 0009)을 더했다. 토스 지급 웹훅 서명(상수 시간·4개 서명·5분 창)·JWE 설정 경계와 포트원 출금 대사·잔액 원장은 순수 규칙과 시험까지이고, 실제 계정·키가 없어 토스 실행은 503 `payout-gateway-unavailable`이다. KYC 사업자·대표자 확인 원천(토스 셀러 조회)은 계정 뒤다. 아래 표의 미실행 항목은 그대로다.
 
-**구현 계획(2026-11-23, F-07-5, ADR-0368)**: 정산서 상태 순서(V2.3.1)를 조건부 전이로 강제해 계산 때의 `HELD`·`CARRIED_OVER` 건너뛰기와 이의·자동 확정 겹침을 막고, 상태·감사·`trade.settlements` 사건을 한 트랜잭션에 쓴다(V2.3.3). 이의 기각은 `cs_lead`만, 수기 조정은 `cs_lead` 요청·요청자 아닌 commander 재인증 승인이고 payment-svc가 ops 승인 기록과 대조한 뒤에만 적용한다(V8.2.1·V8.3.1, ADR-0345와 같은 방식). 파트너 정산서·이의의 남의 정산서 ID는 404이고 인가 실패 보안 로그를 남긴다(V8.2.2·V16.3.2, J-T10). 시험은 J-T35·J-T36·J-T10이다.
+**구현 계획(2026-11-23, F-07-5, ADR-0368)**: 정산서 상태 순서(V2.3.1)를 조건부 전이로 강제해 계산 때의 `HELD`·`CARRIED_OVER` 건너뛰기와 이의·자동 확정 겹침을 막고, 상태·감사·`trade.settlements` 사건을 한 트랜잭션에 쓴다(V2.3.3). 이의 기각은 `cs_lead`만, 수기 조정은 `cs_lead` 요청·요청자 아닌 commander 재인증 승인이고 payment-svc가 ops 승인 기록과 대조한 뒤에만 적용한다(V8.2.1·V8.3.1, ADR-0345와 같은 방식). 파트너 정산서·이의의 남의 정산서 ID는 404이고 인가 실패 보안 로그를 남긴다(V8.2.2·V16.3.2, J-T10). 시험은 J-T35·J-T36·J-T10이다. 구현(2026-11-23, R-781): `services/payment-svc/src/modules/settlement/**`(조건부 전이·`domain/adjustment.ts`·`adapters/http-adjustment-approval-verifier.ts`), `services/ops-svc/src/modules/approvals/**`(`SETTLEMENT_ADJUSTMENT`)·`payouts/**`(기각).
 
 **작성 및 판독 가이드**
 

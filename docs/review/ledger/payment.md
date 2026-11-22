@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 164 | 24 | 6 | 0 | 2 | 11 | 0 | 0 | 0 | 207 |
+| A | 165 | 24 | 6 | 0 | 2 | 10 | 0 | 0 | 0 | 207 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 222 | 24 | 6 | 0 | 2 | 42 | 0 | 0 | 0 | 296 |
+| 합계 | 223 | 24 | 6 | 0 | 2 | 41 | 0 | 0 | 0 | 296 |
 
 ## docs/features/payment.md
 
@@ -26,7 +26,7 @@
 | P-T12 | — | 결제 중 세션 수명 유지 | 구매 세션과 입장 자리가 만료되지 않고 유지되며, 결제에 성공하면 바로 안전하게 비워진다. | 자동 시험 | A | 시험: services/purchase-svc/test-int/consumers.int.test.ts, services/purchase-svc/test-int/payment-result-e2e.int.test.ts… |
 | P-T13 | — | 주문 상태 이력 역추적(추천 적용 2026-10-28, ADR-0113) | 다시 구성한 전이가 실제 좌석 전이와 정확히 일치한다. 시험 데이터의 모든 주문에서 마지막 이력의 새 상태가 지금 상태와 같고, 빈 번호가 없으며… | 자동 시험 | A | 시험: services/purchase-svc/test/apply-payment-result.test.ts |
 | P-T14 | — | PG 시뮬레이터 전환 검증 | 실제 외부 PG 호출을 0건으로 유지하면서 대규모 결제 SLO를 정밀하게 잰다. | 다른 단계 | A | 미정 · PG 시뮬레이터 전환 |
-| P-T15 | — | 멱등 처리 무결성 | 티켓 발권이 정확히 1회만 실행되고(발권은 Saga가 gRPC로 부른다, architecture §3.2), 소비자가 같은 `eventKey`를 한 번만… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 15곳 |
+| P-T15 | — | 멱등 처리 무결성 | 티켓 발권이 정확히 1회만 실행되고(발권은 Saga가 gRPC로 부른다, architecture §3.2), 소비자가 같은 `eventKey`를 한 번만… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test/payment-grpc.test.ts 외 17곳 |
 | P-T16 | — | PG 어댑터 계약 테스트 | 세 어댑터 모두 같은 정규화 계약 결과를 돌려주고, 포트원 멱등키 따옴표 규격을 지킨다. 토스 어댑터의 첫 구현은 시뮬레이터 몫이다: 시뮬레이터 주소와… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-grpc.int.test.ts, services/payment-svc/test-int/payment-webhook.int.test.ts 외… |
 | P-T17 | — | 포트원 웹훅 서명 검증 | 서명이나 헤더에 결함이 있는 요청은 바로 거절된다. 중복 건은 1회 처리되고, 지원하지 않는 이벤트는 안전하게 무시된다. 재전송의 `webhook-id`가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-process.int.test.ts, services/payment-svc/test-int/payment-webhook.int.test.ts… |
 | P-T18 | — | 공제율 산정 정확도 검증 | 공제 없음(전액 환불), 10%, 20%, 30%, 90% 공제가 정확히 적용되고, 24시간 이내 전액 환급에서 비영업일이 정확히 빠진다. 끝수(추천 적용… | 다른 단계 | A | 미정 · 공제율 산정 정확도 |
@@ -58,11 +58,11 @@
 | P-T37 | ② | 판매 종료 전후 주문 | ② 지금 규칙대로 다시 시도 가능 | ID만 | A | 시험: services/purchase-svc/test-int/orders-e2e.int.test.ts, services/purchase-svc/test/create-order.test.ts 외 1곳 |
 | P-T37 | ③ | 판매 종료 전후 주문 | ③ 410 `sale-ended`, 주문·과금 0건 | 자동 시험 | A | 시험: services/purchase-svc/test-int/orders-e2e.int.test.ts, services/purchase-svc/test/create-order.test.ts |
 | P-T38 | — | 결제창에서 돌아온 첫 요청 | 복귀 화면의 첫 요청에는 팬 쿠키가 실리지 않고, 응답은 정적 셸이다(서버는 결제 값을 읽거나 로그에 남기지 않는다). 쿠키가 필요한 결제 접수는 페이지… | 미검증 | A | 실제 결제창 · 실제 결제창(토스 이동 방식, 포트원 리디렉션 방식)에서 돌아온 첫 요청은 결제사 계정이 있어야 본다. 브라우저 확인은 시뮬레이터로만 했다 |
-| P-T39 | ① | 승인 뒤 발권 재시도와 발권 기한 | ① 결제 취소 0건, 재시도로 발권, 화면은 '결제 완료, 티켓 발급 중'이고 60초 넘으면 알림(`ISSUE_DELAYED`)과 SEV2 | 다른 단계 | A | PRF-170·GAT-280 · 발권 재시도·기한·CS TICKET_NOT_ISSUED 건은 purchase-svc 실행기와 GAT-280 몫이다. ticket-svc는 IssueTickets 멱등·거절만… |
-| P-T39 | ② | 승인 뒤 발권 재시도와 발권 기한 | ② SEV1과 CS 처리함 `TICKET_NOT_ISSUED` 건, 재시도는 이어 간다 | 다른 단계 | A | PRF-170·GAT-280 · 발권 재시도·기한·CS TICKET_NOT_ISSUED 건은 purchase-svc 실행기와 GAT-280 몫이다. ticket-svc는 IssueTickets 멱등·거절만… |
-| P-T39 | ③ | 승인 뒤 발권 재시도와 발권 기한 | ③ 일괄 환불 작업이 발권을 멈추고 결제를 취소해 COMPENSATED, 좌석 반환 | 다른 단계 | A | PRF-170·GAT-280 · 발권 재시도·기한·CS TICKET_NOT_ISSUED 건은 purchase-svc 실행기와 GAT-280 몫이다. ticket-svc는 IssueTickets 멱등·거절만 제공한다. |
-| P-T39 | ④ | 승인 뒤 발권 재시도와 발권 기한 | ④ 자동 재시도를 멈추고 SEV2와 `TICKET_NOT_ISSUED` 건, 결제 취소 0건 | 다른 단계 | A | PRF-170·GAT-280 · 발권 재시도·기한·CS TICKET_NOT_ISSUED 건은 purchase-svc 실행기와 GAT-280 몫이다. ticket-svc는 IssueTickets 멱등·거절만… |
-| P-T39 | ⑤ | 승인 뒤 발권 재시도와 발권 기한 | ⑤ 불변식 SEV1(P3 시작 시각 뒤 60초 안에 발권도 큐 등록도 안 된 결제). 모든 경우에 이중 발권 0건 | 다른 단계 | A | PRF-170·GAT-280 · 발권 재시도·기한·CS TICKET_NOT_ISSUED 건은 purchase-svc 실행기와 GAT-280 몫이다. ticket-svc는 IssueTickets 멱등·거절만 제공한다. |
+| P-T39 | ① | 승인 뒤 발권 재시도와 발권 기한 | ① 결제 취소 0건, 재시도로 발권, 화면은 '결제 완료, 티켓 발급 중'이고 60초 넘으면 알림(`ISSUE_DELAYED`)과 SEV2 | 다른 단계 | A | PRF-170 · 발권 재시도·기한은 purchase-svc 실행기 몫이다(끝난 단계). (이름을 단 시험도 있다) |
+| P-T39 | ② | 승인 뒤 발권 재시도와 발권 기한 | ② SEV1과 CS 처리함 `TICKET_NOT_ISSUED` 건, 재시도는 이어 간다 | 다른 단계 | A | PRF-175 · CS 처리함 `TICKET_NOT_ISSUED` 건은 GAT-280의 CS 건 요청 계약 뒤에 연다(PRF-175). (이름을 단 시험도 있다) |
+| P-T39 | ③ | 승인 뒤 발권 재시도와 발권 기한 | ③ 일괄 환불 작업이 발권을 멈추고 결제를 취소해 COMPENSATED, 좌석 반환 | 자동 시험 | A | 시험: services/purchase-svc/test-int/compensation.int.test.ts, services/purchase-svc/test/compensation-domain.test.ts 외 5곳 |
+| P-T39 | ④ | 승인 뒤 발권 재시도와 발권 기한 | ④ 자동 재시도를 멈추고 SEV2와 `TICKET_NOT_ISSUED` 건, 결제 취소 0건 | 다른 단계 | A | PRF-175 · 자동 재시도를 멈춘 `TICKET_NOT_ISSUED` 건은 GAT-280의 CS 건 요청 계약 뒤에 연다(PRF-175). (이름을 단 시험도 있다) |
+| P-T39 | ⑤ | 승인 뒤 발권 재시도와 발권 기한 | ⑤ 불변식 SEV1(P3 시작 시각 뒤 60초 안에 발권도 큐 등록도 안 된 결제). 모든 경우에 이중 발권 0건 | 다른 단계 | A | PRF-170 · 승인 사건과 당기기를 함께 막는 불변식 SEV1은 PRF-170·PRF-171 몫이다(끝난 단계). |
 | P-T40 | ① | 결제사 지연과 읽기 시간 초과 | ① 끊지 않고 결과를 받아 확정, 다시 보낸 호출 0건, 1분 창 p99 2초 초과로 SEV2 | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
 | P-T40 | ② | 결제사 지연과 읽기 시간 초과 | ② 60초 [가정]에서 끊고 결과를 가정하지 않고 `UNKNOWN`으로 쓴 뒤 단독 조회로 확정한다(같은 멱등키로 다시 보내지 않는다, 명세 `timeout`… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |
 | P-T40 | ③ | 결제사 지연과 읽기 시간 초과 | ③ 상한을 넘는 승인 명령은 재시도 큐에서 승인 기한 안에 처리되고, 동시 승인 호출 수가 벌크헤드를 넘지 않으며 열린 승인 연결 수는 처음의 벌크헤드를 넘지… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts |

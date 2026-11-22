@@ -68,7 +68,7 @@
 | V-T30 | ④ | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ④ Loki 거절 0건 | 빈칸 | B | — |
 | V-T31 | ① | 신뢰 경계의 추적 문맥(추천 적용 2026-10-28, 기술 검토… | ① 서버 trace는 요청마다 새 trace-id이고, 보낸 trace-id·Baggage 값이 어느 span에도 부모·속성으로 남지 않는다. 게이트웨이 수집기… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs |
 | V-T31 | ② | 신뢰 경계의 추적 문맥(추천 적용 2026-10-28, 기술 검토… | ② 서버 trace는 새 trace-id이고 받은 값은 span 링크로만 남는다 … 의 단위 시험(`telemetry-untrusted.test.ts`, 앱… | 자동 시험 | B | 시험: apps/partner/instrumentation.test.mjs, apps/web/instrumentation.test.mjs 외 5곳 |
-| V-T31 | ③ | 신뢰 경계의 추적 문맥(추천 적용 2026-10-28, 기술 검토… | ③ 모든 요청에 `baggage`·`traceparent`·`tracestate`가 없다. 어댑터를 허용 목록 밖에서 기본 HTTP 클라이언트로 바꾼 PR은 이… | 자동 시험 | B | 시험: packages/config/eslint/service-security.test.mjs, packages/platform/test/telemetry.test.ts |
+| V-T31 | ③ | 신뢰 경계의 추적 문맥(추천 적용 2026-10-28, 기술 검토… | ③ 모든 요청에 `baggage`·`traceparent`·`tracestate`가 없다. 어댑터를 허용 목록 밖에서 기본 HTTP 클라이언트로 바꾼 PR은 이… | 자동 시험 | B | 시험: packages/config/eslint/service-security.test.mjs, packages/platform/test/telemetry.test.ts 외 1곳 |
 | V-T32 | ② | 복원 뒤 파기 다시 적용(추천 적용 2026-10-28, 기술 검토… | ② 직후에는 A의 개인정보가 다시 보인다(복원 시점이 파기 전이다). | 빈칸 | B | — |
 | V-T32 | ③ | 복원 뒤 파기 다시 적용(추천 적용 2026-10-28, 기술 검토… | ③이 끝나면 A의 개인정보 칸이 다시 파기되고 거래 기록의 분리 보관분만 남는다. … 이 끝나기 전에는 복원한 클러스터를 서비스에 붙이지 않으며, 다시 적용한… | 빈칸 | B | — |
 | V-T35 | ① | 티켓 연동 부가 상품(추천 적용 2026-10-28, 기술 검토… | ① 티켓이 있으면 소유권 확인 뒤 결제로 가고, 결제 뒤 주차권이 월렛의 그 티켓 아래에 보인다. 없으면 거절된다. | 자동 시험 | A | 시험: services/core-svc/test/ticket-addon.http.test.ts, services/payment-svc/test-int/merch-path-e2e.int.test.ts 외 2곳 |

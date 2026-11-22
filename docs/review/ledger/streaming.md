@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 4 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 22 | 27 |
-| 합계 | 4 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 22 | 27 |
+| B | 5 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 27 |
+| 합계 | 5 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 27 |
 
 ## docs/streaming.md
 
@@ -26,10 +26,10 @@
 | ST-T13 | — | 재평가 문턱을 넘긴 메시지를 처리한 직후, 후보를 발행하기 전에… | 다시 뜬 뒤 그 메시지를 다시 읽어 문턱 때의 후보 전체를 다시 낸다. trust-svc는 같은 후보를 한 번만 처리한다 | 빈칸 | B | — |
 | ST-T14 | ① | MSK IAM 토큰 함수(기술 검토 높음-26). ① 로컬: 흉내 낸… | ① : 맡은 역할의 세션 이름이 늘 `<작업자>-<환경>`이다. 역할을 못 맡으면 기본 자격으로 넘어가지 않고 연결이 실패하며 소비 밀림 경보가 뜬다. | 자동 시험 | B | 시험: packages/platform/test/msk-iam.test.ts |
 | ST-T14 | ② | MSK IAM 토큰 함수(기술 검토 높음-26). ① 로컬: 흉내 낸… | ② : 재인증 실패('Cannot change principals during re-authentication')와 연결 끊김이 0건이고 소비 밀림이 늘지… | ID만 | B | 시험: packages/platform/test/msk-iam.test.ts |
-| ST-T15 | — | 모르는 열거 기호(기술 검토 중간-087): 작업자가 빌드된 계약 판에… | 레코드를 거절하지 않는다. `ops-rt`는 `UNRECOGNIZED`로 싣고 `stream_unrecognized_symbol_total`이 늘며 5분… | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
+| ST-T15 | — | 모르는 열거 기호(기술 검토 중간-087): 작업자가 빌드된 계약 판에… | 레코드를 거절하지 않는다. `ops-rt`는 `UNRECOGNIZED`로 싣고 `stream_unrecognized_symbol_total`이 늘며 5분… | 자동 시험 | B | 시험: packages/platform/test-int/batch-worker.int.test.ts, packages/platform/test/avro-reader.test.ts 외 1곳 |
 | ST-T17 | — | 인기 회차 한 파티션(추천 적용 2026-10-28, 기술 검토… | 그 파티션을 맡은 `ops-rt`·`analytics-ingest` 파드의 소비 밀림이 5초 [가정] 안에 머물고 신선도 p95가 NFR-009 안이다. 파드… | 빈칸 | B | — |
-| ST-T16 | ① | 레지스트리 정지(기술 검토 중간-088): 컨테이너 레지스트리를 멈춘… | ① : 새 파드는 처음 보는 ID에서 그 파티션 소비를 멈추고 다시 시도한다. 거절은 0건이고, 되살린 뒤 빠짐 없이 이어 읽는다. | 빈칸 | B | — |
-| ST-T16 | ② | 레지스트리 정지(기술 검토 중간-088): 컨테이너 레지스트리를 멈춘… | ② : 생산자는 설정의 스키마 ID로 Outbox 바이트를 만들어 주문이 성공하고, 시작 확인 실패 경보(SEV3)만 뜬다 | 빈칸 | B | — |
+| ST-T16 | ① | 레지스트리 정지(기술 검토 중간-088): 컨테이너 레지스트리를 멈춘… | ① : 새 파드는 처음 보는 ID에서 그 파티션 소비를 멈추고 다시 시도한다. 거절은 0건이고, 되살린 뒤 빠짐 없이 이어 읽는다. | 자동 시험 | B | 시험: packages/platform/test-int/batch-worker.int.test.ts, packages/platform/test-int/schema-registry.int.test.ts 외 2곳 |
+| ST-T16 | ② | 레지스트리 정지(기술 검토 중간-088): 컨테이너 레지스트리를 멈춘… | ② : 생산자는 설정의 스키마 ID로 Outbox 바이트를 만들어 주문이 성공하고, 시작 확인 실패 경보(SEV3)만 뜬다 | ID만 | B | 시험: packages/platform/test-int/batch-worker.int.test.ts, packages/platform/test-int/schema-registry.int.test.ts 외 2곳 |
 | ST-T18 | — | 키 단위 동시 처리(추천 적용 2026-10-29, ADR-0142):… | 같은 주문의 사건은 넣은 순서대로 반영된다(순서가 뒤집힌 수 0). 커밋 위치는 늘 '그 앞의 사건이 모두 끝난 위치' 이하다. 재조정과 강제 종료 뒤에도 빠진… | 자동 시험 | B | 시험: services/queue-svc/test/consumers.test.ts |
 | ST-T20 | ① | 소비자 설정 기본값과 직접 넣은 값(로컬, 2026-10-30 실행):… | ①은 배정 방식 `roundrobin`, 둘째가 들어올 때 첫째가 6개를 모두 내놓음, 죽인 뒤 회복 28.9초. | 빈칸 | B | — |
 | ST-T20 | ② | 소비자 설정 기본값과 직접 넣은 값(로컬, 2026-10-30 실행):… | ②는 `cooperative-sticky`, 첫째가 3개만 내놓음, 회복 44.7초. 둘 다 그룹 종류 Classic. 통과 기준: … 에서 첫째가 옮길… | 빈칸 | B | — |
