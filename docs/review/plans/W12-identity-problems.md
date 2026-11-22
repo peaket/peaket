@@ -91,7 +91,41 @@
 
 ## 검증
 
-검증 담당 `w12idp-verify`(deepseek-v4.1-flash). (검증 담당이 채운다)
+검증 담당 `w12idp-verify`(deepseek-v4.1-flash), 2026-11-22 15:22~15:26 KST. 구현·시험·리뷰에 관여하지 않았다. 기준 커밋 `3b84752ed`.
+
+### 게이트
+
+| 검사 | 결과 |
+| --- | --- |
+| `pnpm --filter @peaket/platform test test/problem-types.test.ts` | **2/2 통과**(PRF192 포함) |
+| `pnpm --filter @peaket/identity-svc test test/partner-staff-invitations.test.ts test/staff-invitation-http.test.ts` | **14/14 통과** |
+| `pnpm --filter @peaket/contracts gen:check` | 생성물이 계약과 같다 |
+| `pnpm --filter @peaket/contracts test` | **48/48 통과** |
+| `pnpm --filter @peaket/api-client test` | **116/116 통과** |
+| `pnpm --filter @peaket/api-client gen:check` | 생성물이 계약과 같다 |
+| typecheck(identity·platform·contracts·api-client) | **8 tasks 통과** |
+| `pnpm lint` | 통과(출력 없음) |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0, 경고 4(기존 셋 + mermaid 건너뜀) |
+| `node tools/ci/records.mjs --check` | 기록 표가 맞다(경고는 기존 것) |
+| `node --test tools/ci/bat450b-contract.test.mjs` | 4/4 통과 |
+
+- identity typecheck는 `services/identity-svc/dist`가 없으면 `scripts/seed-demo.mjs`가 `../dist/...`를 찾지 못해 실패한다(이 묶음 변경과 무관). `pnpm --filter @peaket/identity-svc build` 뒤 같은 명령이 통과했다. CI는 build를 함께 돌린다.
+- `ledger --check`는 이 묶음 전 기준 트리에서도 실패 상태였다(정본에 있는 I-T87·I-T88 행이 장부에 없음). 생성기를 돌리면 다른 묶음 행이 섞여 이번에 돌리지 않았다(리뷰 RV-02).
+
+### 틀린 구현 표본
+
+| # | 넣은 틀린 구현 | 잡은 시험(결과) |
+| --- | --- | --- |
+| S1 | 404 제목을 옛 구체 문구로 되돌리고 `detail`을 뺀다 | I-T21 ⑤(실패), PRF192(실패) |
+| S2 | 메일 실패 type을 `provider-down`으로 되돌린다 | I-T21 ⑥(실패), PRF192(실패) |
+| S3 | 표준 제목은 두고 `detail`만 뺀다 | I-T21 ⑤(실패), PRF192(통과) |
+
+- 셋 다 잡혔다. 표본마다 관련 시험만 돌렸고, 되돌린 뒤 `git status --short`에 제품 파일 차이가 없었다.
+- S3은 PRF192가 `detail`을 보지 않아 통과하고, 강화한 I-T21 ⑤가 잡는다. 정본의 '구체 사유는 `detail`' 규칙이 시험으로 고정됐다.
+
+### 남은 위험
+
+- 리뷰 RV-01(openapi 404 설명에 `detail` 규칙 없음)·RV-02(장부 생성기 미실행)가 그대로 남는다. 둘 다 막지 않는다.
 
 ## 담당 표
 
