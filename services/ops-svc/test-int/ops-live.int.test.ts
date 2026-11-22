@@ -744,6 +744,44 @@ describe('F-03-1 리뷰 반영: 파드의 알림 표 읽기(실제 ops-svc·Post
     const back = await Sse.open(fullPort, '/v1/ops/live', { ...viewer, 'last-event-id': resumeFrom });
     const got = { live: await arrives(live, held.alertId), resume: await arrives(back, held.alertId) };
     expect(got, `늦게 커밋된 순번 ${held.seq}(커서 ${resumeFrom})`).toEqual({ live: true, resume: true });
+    // V-R9: 사건 id는 흐름 안에서 줄지 않는다. 늦은 행의 id는 행 자기 번호(뒤 행보다 작다)가 아니라 그 직전에 받은 사건 id다.
+    // id가 뒤로 가면 브라우저의 Last-Event-ID가 뒤로 가 다음 다시 붙기가 이미 받은 사건을 다시 보낸다(ADR-0100 결정 2 'id는 알림 표 순번, Last-Event-ID 뒤를 다시 보낸다', ADR-0360 결정 2)
+    for (const s of [live, back]) {
+      const ids = s.frames.map((f) => Number(f.id));
+      expect(ids, '사건 id가 줄지 않는다').toEqual([...ids].sort((x, y) => x - y));
+    }
+    const lateAt = live.frames.findIndex((f) => refOf(f) === held.alertId);
+    expect(lateAt, '늦은 행 앞에 뒤 행이 먼저 왔다').toBeGreaterThan(0);
+    expect(Number(live.frames[lateAt]!.id), '늦은 행의 id = 직전 사건 id').toBe(Number(live.frames[lateAt - 1]!.id));
+    expect(Number(live.frames[lateAt]!.id)).toBeGreaterThan(held.seq);
+    live.close();
+    back.close();
+  });
+
+  test('F-03-1 RV-02 ② V-R5 늦은 경보가 늘 여는 흐름에 이미 나간 뒤, 그 경보 전에 끊긴 연결이 Last-Event-ID(그때 정한 번호 이하)로 다시 붙으면 늦은 경보를 다시 받는다(ADR-0100 결정 2 빠지지 않게 다시 붙기, ADR-0360 결정 2)', async () => {
+    const viewer = identity.ops('viewer');
+    const live = await Sse.open(fullPort, '/v1/ops/live', viewer);
+    const gone = await Sse.open(fullPort, '/v1/ops/live', viewer);
+    await vi.waitFor(() => expect([live.openings.length, gone.openings.length]).toEqual([1, 1]));
+    const held = await holdAlert();
+    const [after] = await insertAlerts(1);
+    // 파드가 빈 번호를 2초 기다린 뒤 뒤 행을 보낸다. 끊길 연결은 뒤 행까지 받고 늦은 행 커밋 전에 끊긴다
+    await vi.waitFor(() => expect([live.frames.map(refOf), gone.frames.map(refOf)]).toEqual([expect.arrayContaining([after]), expect.arrayContaining([after])]), { timeout: 10_000, interval: 100 });
+    const resumeFrom = gone.lastId!;
+    expect(Number(resumeFrom)).toBeGreaterThanOrEqual(await seqOf(after!));
+    gone.close();
+    await held.commit();
+    // 늦은 행이 파드에서 이미 나갔다(늘 여는 흐름이 받았다). 이 뒤에 붙는 연결은 파드가 나눠 주는 늦은 행이 아니라 다시 붙기(rewind)로만 그 행을 받는다
+    await vi.waitFor(() => expect(live.frames.map(refOf)).toContain(held.alertId), { timeout: 10_000, interval: 100 });
+    const back = await Sse.open(fullPort, '/v1/ops/live', { ...viewer, 'last-event-id': resumeFrom });
+    expect(await arrives(back, held.alertId), `늦게 커밋된 순번 ${held.seq}, 다시 붙은 커서 ${resumeFrom}`).toBe(true);
+    expect(back.of('reset')).toEqual([]);
+    // 다시 받는 몫은 늦은 행부터 그때 정한 번호까지이고 차례대로다(늦은 행 → 뒤 행, id가 줄지 않음)
+    const refs = back.frames.map(refOf);
+    expect(refs).toContain(after);
+    expect(refs.indexOf(held.alertId)).toBeLessThan(refs.indexOf(after!));
+    const ids = back.frames.map((f) => Number(f.id));
+    expect(ids).toEqual([...ids].sort((x, y) => x - y));
     live.close();
     back.close();
   });

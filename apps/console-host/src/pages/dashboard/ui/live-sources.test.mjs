@@ -4,6 +4,7 @@
 //   원천이 없는 위젯 요소(WidgetFrame id) 또는 그 위 요소에 data-source="pending"이 있고, 원천이 있는 원격 둘의 자리에는 없다.
 //   퍼블리싱 화면(ctx.live 아님)에는 표지가 없다(고정 자료가 그 화면의 뜻이다).
 // 보드를 React 서버 그리기로 그려 본다(board.test.resolve.mjs가 .tsx를 esbuild로 읽는다).
+import { readFileSync } from 'node:fs';
 import { register } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +19,7 @@ const { createElement } = await import('react');
 const { renderToString } = await import('react-dom/server');
 const { MemoryRouter } = await import('react-router');
 const { MainD, valsD } = await import('./board-d.tsx');
+const { TAB_STATE } = await import('../states.ts');
 
 /** 원천이 없는 위젯 일곱의 WidgetFrame id(apps/widgets/*) */
 const PENDING_WIDGETS = { 'w-entry': '대기열 진입·입장 처리량', 'w-file': '대기 상태 파일', 'w-cdn': 'CDN', 'w-hold': '좌석 홀드 p99', 'w-pay': '결제 허용 실패', 'w-lfun': '퍼널', 'w-lord': '대기 순서' };
@@ -78,4 +80,80 @@ test('F-03-1 RV-04 원천이 있는 원격 둘의 자리와 퍼블리싱 화면�
     const byId = elementsById(html);
     assert.ok(byId.has('w-lrate') || byId.has('w-entry'), `퍼블리싱 ${state} 화면이 위젯을 그리지 않았다(시험이 빈 화면을 보고 있다)`);
   }
+});
+
+// ---------- 리뷰 반영 2(재리뷰 RV-04 남은 몫): 보드가 직접 그리는 칸까지 모든 .widget 칸 ----------
+// 정본: docs/frontend.md §5.7 '원천 연결 전 위젯'(위젯 칸에 data-source="pending"과 머리의 '원천 연결 전' 배지, 원천이 있는 원격 위젯 자리에는 달지 않는다),
+// ADR-0360 결정 9(원천이 있는 위젯 키는 queue-admission-rate·purchase-pg-status 둘).
+// 칸 id를 손으로 적지 않는다: 그린 HTML의 class="widget" 칸을 모두 모으고, 원천 있는 칸(원격 둘의 자리)만 뺀 나머지 모두에 표지를 요구한다.
+
+/** ADR-0360 결정 9의 원천 있는 위젯(원격 위젯 이름) */
+const SOURCED = ['queue-admission-rate', 'purchase-pg-status'];
+/** 원격 자리의 제목: 보드 원본의 <RemoteWidget name=… title=…>에서 읽는다(서버 그리기에서는 그 제목의 스켈레톤 칸이 된다) */
+const remoteTitles = (() => {
+  const src = readFileSync(new URL('./board-d.tsx', import.meta.url), 'utf8');
+  const out = new Map();
+  for (const m of src.matchAll(/<RemoteWidget\b[^>]*?\bname="([^"]+)"[^>]*?\btitle="([^"]+)"/g)) out.set(m[1], m[2]);
+  return out;
+})();
+/** 실제 값 화면이 그리는 상태: ?tab= 탭마다의 대표 상태와 #w-auto로 여는 '자동 조치 걸림'(Page.tsx fallback) */
+const LIVE_STATES = [...new Set([...Object.values(TAB_STATE), '자동 조치 걸림'])];
+
+/** class 목록에 widget이 있는 칸마다 자기·위 요소 속성과 안쪽 HTML을 모은다 */
+function widgetCells(html) {
+  const cells = [];
+  const stack = [];
+  const re = /<(\/?)([a-zA-Z][\w:-]*)((?:\s+[^\s"'>/=]+(?:="[^"]*")?)*)\s*(\/?)>/g;
+  const closeFrom = (i, at) => {
+    for (const e of stack.slice(i)) if (e.cell) e.cell.inner = html.slice(e.innerFrom, at);
+    stack.length = i;
+  };
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    const [, close, tag, rawAttrs, selfClose] = m;
+    if (close) {
+      const i = stack.map((s) => s.tag).lastIndexOf(tag.toLowerCase());
+      if (i >= 0) closeFrom(i, m.index);
+      continue;
+    }
+    const attrs = Object.fromEntries([...rawAttrs.matchAll(/([^\s"'>/=]+)(?:="([^"]*)")?/g)].map((a) => [a[1], a[2] ?? '']));
+    const el = { tag: tag.toLowerCase(), attrs, innerFrom: re.lastIndex };
+    if ((attrs.class ?? '').split(/\s+/).includes('widget')) {
+      el.cell = { attrs, chain: [...stack.map((s) => s.attrs), attrs], inner: '' };
+      cells.push(el.cell);
+    }
+    if (!selfClose && !VOID.has(el.tag)) stack.push(el);
+  }
+  closeFrom(0, html.length);
+  return cells;
+}
+const nameOf = (c) => c.attrs['aria-labelledby'] ?? c.attrs['aria-label'] ?? c.attrs.id ?? c.inner.replace(/<[^>]+>/g, ' ').trim().slice(0, 30);
+
+test("F-03-1 RV-04 ② 실제 값 화면의 모든 탭에서 원천 있는 원격 둘의 자리 밖 .widget 칸(보드가 직접 그리는 칸 포함)마다 data-source=\"pending\"과 '원천 연결 전' 배지가 있고, 원격 둘의 자리에는 없다", () => {
+  assert.deepEqual([...remoteTitles.keys()].sort(), [...SOURCED].sort(), '보드의 원격 자리가 ADR-0360 결정 9의 원천 있는 위젯 둘과 다르다');
+  const sourcedTitles = new Set(remoteTitles.values());
+  const missing = [];
+  const seenSourced = new Set();
+  let unsourced = 0;
+  for (const state of LIVE_STATES) {
+    const html = render(state, true);
+    const cells = widgetCells(html);
+    // 칸 찾기가 HTML의 widget 칸을 하나도 놓치지 않는다(시험이 빈 목록을 보고 통과하지 않게)
+    assert.equal(cells.length, html.match(/class="widget(?:\s[^"]*)?"/g)?.length ?? 0, `${state} 탭의 칸 찾기가 widget 칸을 놓쳤다`);
+    assert.ok(cells.length > 0, `${state} 탭이 위젯 칸을 그리지 않았다`);
+    for (const c of cells) {
+      const pendingInChain = c.chain.some((a) => a['data-source'] === 'pending');
+      if (sourcedTitles.has(c.attrs['aria-label'])) {
+        seenSourced.add(c.attrs['aria-label']);
+        assert.equal(pendingInChain, false, `${state} 탭의 원천 있는 자리 ${c.attrs['aria-label']}에 pending 표지가 있다`);
+        assert.doesNotMatch(c.inner, /원천 연결 전/, `${state} 탭의 원천 있는 자리 ${c.attrs['aria-label']}에 '원천 연결 전' 배지가 있다`);
+        continue;
+      }
+      unsourced += 1;
+      if (!pendingInChain || !c.inner.includes('원천 연결 전')) missing.push(`${state}:${nameOf(c)}${pendingInChain ? '(배지 없음)' : ''}`);
+    }
+  }
+  // 원격 둘의 자리를 실제로 봤다(제목이 바뀌어 원천 있는 칸이 '없는 칸'으로 섞이지 않게)
+  assert.deepEqual([...seenSourced].sort(), [...sourcedTitles].sort());
+  assert.ok(unsourced >= 7, `원천 없는 칸이 ${unsourced}개뿐이다(팀 위젯 일곱보다 적다)`);
+  assert.deepEqual(missing, [], `원천 연결 전 표지가 없는 칸 ${missing.length}개`);
 });

@@ -137,4 +137,33 @@ describe('F-03-1 리뷰 반영: 파드의 알림 표 읽기', () => {
     expect(c.got).toEqual([3, late, after]);
     c.off();
   });
+
+  test('F-03-1 RV-02 ② V-R5 늦은 행(번호 10)을 낼 때 정한 번호가 15면, 커서 10~15로 다시 붙는 연결은 9부터 다시 받아 늦은 행을 받고, 커서 9·16은 당겨지지 않는다(ADR-0100 결정 2 빠지지 않게 다시 붙기)', async () => {
+    const w = world();
+    for (let i = 1; i <= 9; i += 1) w.source.append();
+    const c = await w.connect();
+    expect(c.firstId).toBe(9);
+    const late = w.source.reserve(); // 10: 커밋이 늦는 트랜잭션
+    for (let i = 11; i <= 15; i += 1) w.source.append();
+    await w.hub.poll();
+    w.advance(GAP_WAIT_MS);
+    await w.hub.poll();
+    expect(c.got).toEqual([11, 12, 13, 14, 15]);
+    expect(w.hub.settled).toBe(15);
+    // 늦은 행이 나타나기 전에는 당길 것이 없다
+    expect(w.hub.rewind(15)).toBe(15);
+    w.advance(1_000);
+    w.source.commit(late);
+    await w.hub.poll();
+    expect(c.got).toEqual([11, 12, 13, 14, 15, late]);
+    // 끊긴 연결의 커서가 늦은 행 번호 이상·그때 정한 번호 이하면 그 행을 받았는지 모르므로 늦은 행 바로 앞부터 다시 보낸다
+    expect([10, 12, 15].map((cursor) => w.hub.rewind(cursor))).toEqual([9, 9, 9]);
+    // 늦은 행 앞의 커서는 보통 다시 보내기가 그 행을 싣고, 그때 정한 번호 뒤의 커서는 늦은 행이 나타난 뒤에 이어 받던 연결이다
+    expect(w.hub.rewind(9)).toBe(9);
+    expect(w.hub.rewind(16)).toBe(16);
+    // 다시 붙는 연결이 실제로 받는 행: 당긴 커서부터 지금 정한 번호까지(늦은 행 포함)
+    const replayed = await w.hub.replay(w.hub.rewind(15), w.hub.settled);
+    expect(replayed.map((d) => d.row.seq)).toEqual([10, 11, 12, 13, 14, 15]);
+    c.off();
+  });
 });
