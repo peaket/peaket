@@ -185,7 +185,7 @@ export { CancelTicketEventRefund } from './application/cancel-ticket-event-refun
 export { HttpRefundFailureNotice } from './adapters/http-refund-failure-notice.js';
 export { HttpRefundAccountNotice } from './adapters/http-refund-account-notice.js';
 export { HttpEventRefundAlert } from './adapters/http-event-refund-alert.js';
-export { OutboxEventRefundFanNotifier, TRADE_ORDERS_TOPIC, eventRefundNoticeKey } from './adapters/outbox-event-refund-fan-notifier.js';
+export { type EventRefundNoticeCodec, OutboxEventRefundFanNotifier, TRADE_ORDERS_TOPIC, eventRefundNoticeKey } from './adapters/outbox-event-refund-fan-notifier.js';
 export { EVENT_REFUND_TICK_MS, EventRefundLoop, type EventRefundLoopDeps, type EventRefundTick } from './application/event-refund-loop.js';
 export { EventRefundController } from './inbound/event-refund.controller.js';
 export { EventRefundGrpcController, eventRefundPackage, eventRefundServiceHandlers, type EventRefundGrpcUseCases } from './inbound/event-refund.grpc.js';

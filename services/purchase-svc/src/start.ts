@@ -29,7 +29,7 @@
 // 사건 값은 공용 Avro 인코더(@peaket/platform/avro, ADR-0357)로 만든다: 주문 사건(trade.orders Outbox), 홀드 시도(telemetry.purchase), 좌석·결제 화면 행동 신호(telemetry.behavior).
 // 내는 주제가 있으면 PEAKET_SCHEMA_IDS_FILE(ConfigMap schema-ids)을 시작할 때 읽고(없거나 틀리면 시작하지 않는다), 듣기 전에 레지스트리 시작 확인을 한다
 // (다름·404는 시작 실패, 닿지 못하면 설정의 ID로 계속하고 schema_startup_check_unavailable 1, 준비 상태에 넣지 않는다, ST-T16 ②).
-// 회차 환급 팬 알림(같은 trade.orders)은 계약 판 OrderEvent에 그 사건 종류·칸이 없어 JSON 대역 그대로다(F-04-2 구현 메모 '멈춘 항목').
+// 회차 환급 팬 알림도 같은 trade.orders 코덱으로 만든다(한 토픽 한 형식, ADR-0357 결정 9).
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
@@ -480,7 +480,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(opsClient ? { csOutbox: new DrizzleCsCaseOutbox(database) } : {}),
       csCaseOpenFailures: csCaseSignals,
       attempts: new DrizzleEventRefundAttempts(database),
-      fanNotifier: new OutboxEventRefundFanNotifier(),
+      fanNotifier: new OutboxEventRefundFanNotifier(orderCodec),
       // 회차 취소 요청 중 보류 취소의 환급 미룸(gRPC SetEventRefundHold)과 확정 때 남는 공제 차액 CS 건(BAT-420 몫 D, OPEN[45])
       holds: new DrizzleEventRefundHolds(database),
       gaps: new DrizzleDeductionGapCancellations(database),

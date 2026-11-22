@@ -34,7 +34,7 @@
 7. **`HoldAttempt` 칸 채우기**:
    - `retryNo`는 같은 구매 세션에서 그 시도 앞에 낸 홀드 시도의 수다(첫 시도 0, 멱등 재생은 세지 않는다). 지표 사전의 '재시도 순번'·'세션 첫 시도'(docs/features/analytics.md §5.2 F4, §6.3의 8번)가 이 값을 쓴다. purchase-svc는 응답을 보낸 뒤 구매 세션 상태 `s:session:{jti}`의 칸 `hn`을 '키가 있을 때만 1 올리는' Lua 한 번으로 올리고, 올린 값 − 1을 쓴다(docs/data.md §3). 응답 경로에 Redis 왕복을 더하지 않는다. 그 Lua가 실패하거나 키가 없으면 그 시도는 버리고 센다(결정 8).
    - `autoResult`는 자동 배정 결과 종류, `firstHeldInSession`은 지금 기록 그대로다. `tierId`가 없는 시도(좌석맵 판에서 첫 좌석을 찾기 전에 거절)는 필수 칸이 비어 결정 8로 버린다.
-   - 보내기는 purchase-svc의 텔레메트리 버퍼(`TelemetrySink`)로 텔레메트리 클러스터 `telemetry.purchase`에 낸다. 키는 회차 ID다.
+   - 보내기는 purchase-svc의 텔레메트리 버퍼(`TelemetrySink`)로 텔레메트리 클러스터 `telemetry.purchase`에 낸다. 키는 구매 세션 ID(`purchaseSessionId`)다(docs/streaming.md §7, docs/api/avro/README.md §4. 처음 판의 '회차 ID'는 정본 키 규칙과 달라 2026-11-23 F-04-2 구현 담당이 바로잡았다).
 8. **인코딩 실패**: ADR-0150 결정 5 그대로다. 텔레메트리는 그 기록을 버리고 `telemetry_dropped_total{record}`를 1 올리며, 경고 로그에 레코드와 칸 이름만 남긴다. Outbox 사건은 인코딩 오류가 그 업무 트랜잭션을 실패시킨다(주문이 생기지 않는다).
 9. **이번에 바꾸는 토픽**: 한 토픽의 값은 한 형식이다. 서비스 안에 JSON을 읽는 소비자가 없는 토픽만 이번에 Avro로 바꾼다: `trade.orders`(purchase-svc 주문 사건과 회차 환급 팬 알림 사건), `telemetry.purchase`(`HoldAttempt`), `telemetry.trust-verdicts`(`TrustVerdict`), `telemetry.behavior`(trust-svc·purchase-svc의 `BehaviorSignal`). 맥락의 마지막 줄 토픽들은 그 소비자를 같은 기능에서 Avro 읽기로 바꿀 때 생산자도 함께 바꾼다. 사람별 대기 기록·1초 집계(`telemetry.queue`)는 queue-svc에 아직 생산자가 없다.
 

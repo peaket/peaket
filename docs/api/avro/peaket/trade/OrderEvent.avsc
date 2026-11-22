@@ -40,7 +40,9 @@
           "EVENT_CANCELLATION_CONFIRMED",
           "COMPENSATION_PAID",
           "EXPIRED",
-          "ISSUE_DELAYED"
+          "ISSUE_DELAYED",
+          "EVENT_POSTPONED",
+          "REFUND_FAILED"
         ]
       }
     },
@@ -48,6 +50,78 @@
       "name": "amount",
       "doc": "주문 금액(원). 서버가 계산한 purchase_order.amount이고 사건 종류와 상관없이 같은 값이다. 환급액은 이 칸이 아니다(ADR-0150)",
       "type": "long"
+    },
+    {
+      "name": "refundAmount",
+      "doc": "회차 취소·연기로 돌려준 금액(원). REFUNDED에만 싣는다(2026-11-15 R-583, avsc는 2026-11-23 F-04-2)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "REFUNDED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fanNoticeReason",
+      "doc": "팬 통지 문안에 쓸 사유 요약. 판정자가 쓴 글이거나 실패 사유 코드다. EVENT_CANCELLATION_CONFIRMED·EVENT_POSTPONED·REFUND_FAILED에만 싣는다(2026-11-15 R-583, avsc는 2026-11-23 F-04-2)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "EVENT_CANCELLATION_CONFIRMED",
+            "EVENT_POSTPONED",
+            "REFUND_FAILED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "postponedTo",
+      "doc": "연기된 회차의 새 시작 시각. EVENT_POSTPONED에만 싣는다(2026-11-15 R-583, avsc는 2026-11-23 F-04-2)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "EVENT_POSTPONED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "refundWindowClosesAt",
+      "doc": "연기 회차의 환급 신청 창 닫힘. EVENT_POSTPONED에만 싣는다(2026-11-15 R-583, avsc는 2026-11-23 F-04-2)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "EVENT_POSTPONED"
+          ]
+        }
+      ]
     },
     {
       "name": "seatIds",

@@ -46,7 +46,7 @@ import {
   LoggerCompensationLog,
   PromCompensationSignals,
   StartCompensation,
-  type OrderEventCodec,
+  type AvroOrderEventCodec,
 } from './modules/booking/index.js';
 import {
   CancelTicket,
@@ -127,10 +127,10 @@ export interface PurchaseRelayOptions {
   /** 프로세스·반복·정비의 시계(기본 systemClock) */
   clock?: Clock;
   /**
-   * 주문 사건 값의 코덱(relay.ts는 공용 Avro 인코더의 avroOrderEventCodec, ADR-0357). 주문 만료 안전망·보상·환불 쓰기가 trade.orders Outbox에 넣는 값이다.
+   * 주문 사건 값의 코덱(relay.ts는 공용 Avro 인코더의 avroOrderEventCodec, ADR-0357). 주문 만료 안전망·보상·환불 쓰기와 회차 환급 팬 알림이 trade.orders Outbox에 넣는 값이다.
    * 주지 않으면 저장소 기본값(JSON 대역, 시험 조립)이다
    */
-  orderEventCodec?: OrderEventCodec;
+  orderEventCodec?: AvroOrderEventCodec;
   /** 릴레이 역할 DB(PEAKET_OUTBOX_DATABASE_URL, Outbox 읽기·sent_at 고치기만) */
   database: Database;
   /** 정비 역할 DB(PEAKET_MAINTENANCE_DATABASE_URL, 공용 정비 일과 주문 이력 검사) */
@@ -335,7 +335,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
             ),
           }),
           attempts: new DrizzleEventRefundAttempts(o.serviceDatabase),
-          fanNotifier: new OutboxEventRefundFanNotifier(),
+          fanNotifier: new OutboxEventRefundFanNotifier(o.orderEventCodec),
           ...(opsClient ? { notice: new HttpRefundFailureNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN), alert: new HttpEventRefundAlert(opsClient) } : {}),
           nowMs: () => clock.now(),
           deadlineMs: () => clock.now() + EVENT_REFUND_TICKET_DEADLINE_MS,
