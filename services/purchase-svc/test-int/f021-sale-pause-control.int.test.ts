@@ -5,7 +5,7 @@
 // 정본: docs/features/control-tower.md §14 C-T50, ADR-0365 결정 1(판 검사)·2(꼴)·6(칸 이름: sale_control paused_revision·paused_command_id·paused_changed_at,
 // 사본 paused·pausedRev·pausedCmd, 전체는 s:ctl:events 회차마다 allPaused·allRev·allCmd, 판매 중지 revision·rev와 서로 막지 않음)·7(시작 읽기·2초 다시 맞춤)·
 // 8(정지 동안 유휴로 끝내지 않음, 풀린 뒤 유휴 시한 < 풀린 시각 + 5분이면 그 값, 최대 체류는 그대로), docs/data.md s:session:{jti}·s:{event:E}:sessions·s:{event:E}:stream.
-// 홀드 423은 실제 HTTP 응답이다(계획 13절 '423이 실제 HTTP 응답으로 나옴'). 결제 시도·결제 접수의 423은 주문이 있어야 해 이 파일에서 보지 않는다(계획 '10. 실패 확인'의 빈칸).
+// 홀드 423은 실제 HTTP 응답이다(계획 13절 '423이 실제 HTTP 응답으로 나옴'). 결제 시도·결제 접수의 423은 주문이 있어야 해 이 파일에서 보지 않는다(계획 10.1의 빈칸).
 import { createPublicKey, diffieHellman, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

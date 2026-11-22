@@ -4,7 +4,7 @@
 // 자리 고르기(14절 2): ops-svc 통합 시험이 받는 쪽 원본을 상대 경로로 읽는다(의존 선언을 더하지 않는다, devops §4.4). 타입 검사가 받는 쪽 원본까지 따라가
 // 서로 묶이지 않게 시작 함수는 계산한 경로의 동적 가져오기로 읽고, 부르는 꼴만 이 파일에 적는다. 실행 전에 받는 쪽 의존 패키지 dist가 있어야 한다
 // (pnpm exec turbo run build --filter=@peaket/purchase-svc^... --filter=@peaket/queue-svc^... --filter=@peaket/admission-ctrl^...).
-// 명령 7(LOBBY_BANNER)은 ops 명령 params 꼴이 정본에 없어 이 파일에서 보내지 않는다(받는 쪽은 queue-svc f021-queue-notice-control이 본다, 계획 '10. 실패 확인'의 빈칸).
+// 명령 7(LOBBY_BANNER)은 ops 명령 params 꼴이 정본에 없어 이 파일에서 보내지 않는다(받는 쪽은 queue-svc f021-queue-notice-control이 본다, 계획 10.1의 빈칸).
 import 'reflect-metadata';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -21,7 +21,7 @@ import { GrpcControlSender } from '../src/adapters/grpc-control-sender.js';
 import { AppModule } from '../src/app.module.js';
 import { type Command, type CommandType, ControlDispatcher, DrizzleCommandStore } from '../src/modules/commands/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
-import { controlClient, freePort } from '../../queue-svc/test-int/control-client.js';
+import { controlClient, freePort, until } from '../../queue-svc/test-int/control-client.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { adminAccountsForCommands } from './reauth.js';
 
@@ -144,16 +144,16 @@ beforeAll(async () => {
   // admission-ctrl이 메모리 Lease로 리더가 될 때까지 기다린다(쓰지 않는 회차에 명령 2를 보내 본다)
   const probe = controlClient(addrs.admission[0]!);
   let pv = 1;
-  await expect
-    .poll(
+  await until(
       () =>
         probe.apply({ commandId: randomUUID(), scope: randomUUID(), kind: 'CONTROL_KIND_ADMISSION_PAUSE', version: pv++, desiredStateJson: '{"paused":false,"expiresAtMs":null}' }).then(
           () => 'leader',
           (e: { details?: string }) => String(e.details),
         ),
-      { timeout: 30_000, interval: 200 },
-    )
-    .toBe('leader');
+    (v) => v === 'leader',
+    'admission-ctrl 리더 되기(제어 포트)',
+    { timeoutMs: 30_000 },
+  );
   probe.close();
 
   store = new DrizzleCommandStore(opsDb);
