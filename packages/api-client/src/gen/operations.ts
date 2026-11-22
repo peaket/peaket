@@ -669,7 +669,7 @@ export const OPERATIONS = {
   getOpsFraudCaseReplayExport: {operationId: "getOpsFraudCaseReplayExport",method: "GET",path: "/v1/ops/fraud-cases/{caseId}/replay-export",host: "ops-api",kind: "read",cookie: true,query: ["fromMs","toMs"]},
   getOpsFraudCluster: {operationId: "getOpsFraudCluster",method: "GET",path: "/v1/ops/fraud-clusters/{clusterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsHomeLayout: {operationId: "getOpsHomeLayout",method: "GET",path: "/v1/ops/home-layout",host: "ops-api",kind: "read",cookie: true},
-  getOpsLive: {operationId: "getOpsLive",method: "GET",path: "/v1/ops/live",host: "ops-api",kind: "read",cookie: true,sse: true,query: ["eventId"]},
+  getOpsLive: {operationId: "getOpsLive",method: "GET",path: "/v1/ops/live",host: "ops-api",kind: "read",cookie: true,sse: true,query: ["eventId","screen"]},
   getOpsPayoutBatch: {operationId: "getOpsPayoutBatch",method: "GET",path: "/v1/ops/payout-batches/{batchId}",host: "ops-api",kind: "read",cookie: true},
   getOpsPromoter: {operationId: "getOpsPromoter",method: "GET",path: "/v1/ops/promoters/{promoterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsResearchExport: {operationId: "getOpsResearchExport",method: "GET",path: "/v1/ops/research-exports/{exportId}",host: "ops-api",kind: "read",cookie: true},

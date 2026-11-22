@@ -477,6 +477,10 @@ spec:
             claim: aud
           - header: X-User-Scope
             claim: scope
+          # 액세스 토큰 만료(epoch 초). ops-svc 관제 SSE 흐름 둘이 이 시각에 닫는다(ADR-0100 결정 2 '인증', ADR-0360 결정 4).
+          # 바깥 요청의 같은 머리는 earlyRequestHeaders의 x-user- 앞부분 지우기가 먼저 지운다
+          - header: X-User-Token-Exp
+            claim: exp
   authorization:
     defaultAction: Deny
     rules:

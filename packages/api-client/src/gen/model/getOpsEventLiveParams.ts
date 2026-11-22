@@ -12,7 +12,7 @@
 
 export type GetOpsEventLiveParams = {
 /**
- * 쉼표로 이은 위젯 키 목록
+ * 쉼표로 이은 위젯 키 목록(16개 이하). 키는 위젯 조회 /v1/ops/widgets/{widgetKey}의 키와 같다
  */
 widgets: string;
 };

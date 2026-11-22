@@ -6,8 +6,12 @@
  */
 import * as zod from 'zod';
 
-export const OpsApproval = zod.looseObject({
-
+export const OpsApproval = zod.object({
+  "commandId": zod.string(),
+  "type": zod.string().describe('명령 종류(CommandType)'),
+  "state": zod.enum(['PENDING_APPROVAL', 'REVERT_PENDING']),
+  "eventId": zod.string().optional().describe('회차(있을 때)'),
+  "approvalExpiresAt": zod.iso.datetime({"offset":true}).optional().describe('승인 기한')
 })
 
 export type OpsApproval = zod.input<typeof OpsApproval>;

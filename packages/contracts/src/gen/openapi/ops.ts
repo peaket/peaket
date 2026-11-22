@@ -5124,11 +5124,12 @@ export const GetOpsAuditAnchorVerificationResponse = zod.object({
 })
 
 /**
- * FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다). text/event-stream. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래된 번호면 reset을 보낸다(화면은 REST로 다시 읽는다). 15초 [가정]마다 주석 줄. 액세스 토큰 만료·세션 종료 때 서버가 닫는다. gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live
+ * FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다), ADR-0360. text/event-stream. 첫 덩이는 retry: 10000이다. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다(presence는 id가 없다). Last-Event-ID가 없으면 첫 덩이에 지금 순번을 id로만 둔다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래됐거나 지운 번호면 reset(reason too-old), 숫자가 아니거나 만든 적 없는 번호면 reset(reason invalid)을 보낸다(reset의 id는 지금 순번, 화면은 REST로 다시 읽는다). approval은 그 명령을 내가 승인할 수 있을 때만 온다(요청자·viewer·CS에는 가지 않는다). 15초 [가정]마다 주석 줄(: hb). 액세스 토큰 만료(gw-ops가 넣는 만료 시각, 없으면 연 뒤 15분)·세션 종료(종료 세션 목록) 때 서버가 닫고, 읽지 않아 쌓인 양이 1MiB [가정]를 넘어도 닫는다(브라우저가 다시 붙는다). gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live
  * @summary 관제 늘 여는 SSE 흐름(명령 상태·ack, 내 승인 대기, 경보, 자동 제어 상태, 걸린 자동 조치, 접속자)
  */
 export const GetOpsLiveQueryParams = zod.object({
-  "eventId": zod.string().optional().describe('접속자를 보일 회차')
+  "eventId": zod.string().optional().describe('접속자를 보일 회차'),
+  "screen": zod.string().optional().describe('보고 있는 화면(접속자의 screen, 소문자·숫자·-, 40자 이하). 없으면 console')
 })
 
 export const GetOpsLiveHeader = zod.object({
@@ -5138,7 +5139,7 @@ export const GetOpsLiveHeader = zod.object({
 export const GetOpsLiveResponse = zod.unknown()
 
 /**
- * FR-029, NFR-009, ADR-0100. text/event-stream. event widget(위젯 키마다 전체 값), id는 계산 시각(밀리초). 보이는 위젯 목록이 바뀌면 브라우저가 1초 [가정] 묶어 새 widgets로 다시 연다. 다시 붙으면 지금 값부터 보낸다. gw-ops 경로 시간 초과를 끈다. 계약은 asyncapi sse.ops-event-live
+ * FR-029, NFR-009, ADR-0100, ADR-0360. text/event-stream. 첫 덩이는 retry: 10000이다. event widget(OpsWidgetValue, 위젯 키마다 전체 값, value는 위젯 조회 응답과 같은 모양), id는 계산 시각(밀리초). 파드마다 (회차, 위젯 키)별로 1초 [가정]에 한 번 계산해 나눠 준다. 보이는 위젯 목록이 바뀌면 브라우저가 1초 [가정] 묶어 새 widgets로 다시 연다. 다시 붙으면 지금 값부터 보낸다. 하트비트(: hb)·닫힘(토큰 만료·세션 종료·쌓임 상한)은 늘 여는 흐름과 같다. gw-ops 경로 시간 초과를 끈다. 계약은 asyncapi sse.ops-event-live
  * @summary 관제 위젯 SSE 흐름(보이는 위젯의 값)
  */
 export const GetOpsEventLiveParams = zod.object({
@@ -5146,13 +5147,13 @@ export const GetOpsEventLiveParams = zod.object({
 })
 
 export const GetOpsEventLiveQueryParams = zod.object({
-  "widgets": zod.string().describe('쉼표로 이은 위젯 키 목록')
+  "widgets": zod.string().describe('쉼표로 이은 위젯 키 목록(16개 이하). 키는 위젯 조회 /v1/ops/widgets/{widgetKey}의 키와 같다')
 })
 
 export const GetOpsEventLiveResponse = zod.unknown()
 
 /**
- * FR-029, ADR-0100. 위젯 키마다 응답 모양이 다르고 위젯 키 열거와 모양은 wbs 0.2.3에서 적는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
+ * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사) 둘이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary 모양이며, 원천(Prometheus)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
  * @summary 관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)
  */
 export const GetOpsWidgetParams = zod.object({
@@ -5166,8 +5167,12 @@ export const GetOpsWidgetQueryParams = zod.object({
 })
 
 export const GetOpsWidgetResponse = zod.looseObject({
-
-})
+  "widgetKey": zod.string().describe('위젯 키(queue-admission-rate.summary·purchase-pg-status.summary)'),
+  "source": zod.enum(['prometheus']),
+  "at": zod.iso.datetime({"offset":true}).describe('값을 계산한 시각'),
+  "eventId": zod.string().nullable(),
+  "error": zod.enum(['source-unavailable']).optional().describe('원천을 읽지 못했을 때만')
+}).describe('관제 위젯 값(위젯 조회 응답이자 위젯 흐름 widget 사건의 value, ADR-0100 결정 1·4, ADR-0360 결정 9). 네 칸(widgetKey·source·at·eventId)은 모든 키에 있고, 나머지 칸은 위젯 키마다 다르다: queue-admission-rate.summary는 OpsWidgetQueueAdmissionRateSummary, purchase-pg-status.summary는 OpsWidgetPurchasePgStatusSummary, 원천을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable)이다. 숫자·상태만 싣고 화면 글자는 위젯이 만든다. series는 위젯 조회만 싣는다. 2026-11-23 응답을 type object로 두었던 계약을 깨지 않으려고 oneOf로 묶지 않고 키별 모양은 이름으로 가리킨다(ADR-0360 결정 10)')
 
 /**
  * FR-030, POL-021, SCR-030, ADR-0100, ADR-0143. 승인자 화면에는 요청자·사유·dry-run 결과를 빼거나 더하지 않고 그대로 보인다(docs/design/d2 §3.5). 명령 확인의 정본은 이 응답의 상태다(ADR-0100). viewer는 목록만 보므로 부르지 못한다(d5 메뉴 표의 '목록만'을 상세 금지로 읽었다 [가정]). Cache-Control: no-store

@@ -15,4 +15,8 @@ export type GetOpsLiveParams = {
  * 접속자를 보일 회차
  */
 eventId?: string;
+/**
+ * 보고 있는 화면(접속자의 screen, 소문자·숫자·-, 40자 이하). 없으면 console
+ */
+screen?: string;
 };

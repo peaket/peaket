@@ -6,8 +6,8 @@
  */
 import * as zod from 'zod';
 
-export const OpsReset = zod.looseObject({
-
+export const OpsReset = zod.object({
+  "reason": zod.enum(['too-old', 'invalid'])
 })
 
 export type OpsReset = zod.input<typeof OpsReset>;
