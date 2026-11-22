@@ -83,3 +83,18 @@ export async function freePort(): Promise<number> {
     });
   });
 }
+
+/**
+ * 조건이 참이 될 때까지 interval마다 다시 본다(beforeAll처럼 expect.poll을 못 쓰는 자리용). 시간 안에 안 되면 마지막 값과 함께 던진다
+ * @returns 참이 된 때의 값
+ */
+export async function until<T>(probe: () => Promise<T>, ok: (v: T) => boolean, what: string, o: { timeoutMs?: number; intervalMs?: number } = {}): Promise<T> {
+  const deadline = Date.now() + (o.timeoutMs ?? 30_000);
+  let last: T | undefined;
+  for (;;) {
+    last = await probe();
+    if (ok(last)) return last;
+    if (Date.now() > deadline) throw new Error(`${what}이(가) 시간 안에 되지 않았다(마지막 값 ${JSON.stringify(last)})`);
+    await new Promise((r) => setTimeout(r, o.intervalMs ?? 200));
+  }
+}
