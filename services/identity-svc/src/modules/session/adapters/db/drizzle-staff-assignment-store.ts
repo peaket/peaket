@@ -73,17 +73,18 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
 
   async findInvitedEmails(eventId: string, emails: readonly string[]): Promise<string[]> {
     if (emails.length === 0) return [];
+    const wanted = emails.map((e) => e.toLowerCase());
     const rows = await this.database.db
       .select({ email: staffAssignment.inviteEmail })
       .from(staffAssignment)
-      .where(and(eq(staffAssignment.eventId, eventId), eq(staffAssignment.status, 'INVITED'), inArray(sql`lower(${staffAssignment.inviteEmail})`, [...emails])));
+      .where(and(eq(staffAssignment.eventId, eventId), eq(staffAssignment.status, 'INVITED'), inArray(sql`lower(${staffAssignment.inviteEmail})`, wanted)));
     return rows.flatMap((r) => (r.email === null ? [] : [r.email.toLowerCase()]));
   }
 
   async createInvitations(rows: readonly NewStaffInvitationRow[]): Promise<CreateStaffInvitationsResult> {
     if (rows.length === 0) return { result: 'OK', created: [] };
     const eventId = rows[0]!.eventId;
-    const emails = rows.map((r) => r.email);
+    const emails = rows.map((r) => r.email.toLowerCase());
     try {
       return await this.database.transaction(async (tx) => {
         const existing = await tx
