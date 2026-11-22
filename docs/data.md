@@ -1331,7 +1331,7 @@ erDiagram
         timestamptz pg_balance_observed_at
         uuid pg_balance_observed_by "OPERATOR_CONSOLE일 때 입력한 operator"
         bigint pg_balance_ledger_krw "포트원만. 이체 원장으로 계산한 잔액. 입력값과 다르면 작은 값으로 판정(ADR-0108)"
-        text status "PREPARED|PENDING_APPROVAL|APPROVED|SUBMITTED|COMPLETED|PARTIAL_FAILED"
+        text status "PREPARED|PENDING_APPROVAL|APPROVED|SUBMITTED|COMPLETED|PARTIAL_FAILED. PREPARED는 정산 일꾼이 09시에 미리 만든 토스 묶음이다. 정산서를 묶지 않고 상계하지 않으며 합계·건수만 미리 셈한다. operator 확인 요청 때 같은 ID로 다시 판정해 묶고 PENDING_APPROVAL로 바꾼다(ADR-0369 결정 13)"
         int submit_attempts "토스 전송 시도 수(응답 없음·처리 중·잔액 모자람이면 같은 키로 다시 보낸다, payment 0028, ADR-0369 결정 7)"
         timestamptz next_submit_at "다음 전송 시각(1분에서 두 배씩, 30분 상한 [가정]). 일꾼이 이 값을 조건으로 잡아 두 파드가 같은 묶음을 함께 보내지 않는다"
         timestamptz submit_deadline_at "자동 전송 마감(지급일 전 영업일 22:00 KST [가정]). 넘기면 지급일을 미루고 PAYOUT_DELAYED"
@@ -3176,6 +3176,7 @@ erDiagram
 | 같은 미수금을 두 정산서가 동시에 상계, 같은 정산서의 지급 요청 중복 | `partner_receivable` 행 잠금(`FOR UPDATE`) 안에서 남은 금액을 확인하고 상계한다. 상계는 같은 트랜잭션에서 `receivable_movement`에 한 행을 덧붙이고 `remaining`을 '금액 − 이동 기록 합'으로 고친다(추천 적용 2026-10-28, 기술 검토 중간-043). 정산서당 지급 묶음은 하나이고 `ref_payout_id`에 유일 제약을 건다. 결제사 멱등키는 고정한다 | J-T5·J-T11·J-T24 |
 | 같은 토스 지급 건의 결과를 실행 응답·웹훅 뒤 단건 조회·재요청 일꾼이 겹쳐 반영함(추천 적용 2026-11-23, ADR-0369 결정 6·8) | 지급 건은 끝나지 않은 상태(`REQUESTED`·`IN_PROGRESS`)일 때만 바꾸는 조건부 갱신이고, 정산서는 출발 상태를 건 조건부 전이(ADR-0368 결정 2)라 겹친 반영의 둘째는 0행이며 사건을 쓰지 않는다. 새 순번은 정산서 행을 잠근 트랜잭션에서 그 정산서의 가장 큰 순번 + 1로 정하고, `payout`의 `(batch_id, statement_id, seq)` 유일과 `ref_payout_id` 유일이 마지막 가드다 | J-T15 ②, J-T38 ② |
 | 두 파드의 전송 일꾼이 같은 토스 지급 묶음을 함께 다시 보냄(추천 적용 2026-11-23, ADR-0369 결정 7) | 리더 파드만 보내고, 묶음 행의 `next_submit_at`을 읽은 값과 같을 때만 다음 시각으로 바꾸는 조건부 갱신으로 잡은 쪽만 보낸다. 겹쳐도 같은 멱등키라 결제사가 한 번만 받는다 | J-T5 |
+| 09시 `PREPARED` 토스 묶음을 일꾼이 두 번 만들거나, operator 확인 요청 둘이 같은 `PREPARED` 묶음을 함께 승인 대기로 바꿈(추천 적용 2026-11-23, ADR-0369 결정 13) | 만들기는 같은 결제사·상점·지급일의 `PREPARED`·`PENDING_APPROVAL`·`APPROVED`·`SUBMITTED` 묶음이 있으면 하지 않고, 마지막 가드로 `(pg, pg_store, payout_date)` 부분 유일 인덱스(그 네 상태, payment 0028)를 둔다. 요청 때 바꾸기는 묶음 행 `status = 'PREPARED'` 조건부 갱신과 정산서 묶기·상계를 한 트랜잭션에 쓰고, 0행이면 되돌린 뒤 409 `payout-batch-exists`다 | J-T38 ⑨ |
 | 같은 달·같은 상점의 결제사 잔액 대사가 두 번 돎(추천 적용 2026-11-23, ADR-0369 결정 11) | `pg_balance_reconciliation`의 `(pg, pg_store, period_month)`(MONTHLY)·`(batch_id)`(BATCH) 유일 인덱스. 둘째는 넣지 못해 CS 건을 만들지 않는다 | J-T25 |
 | 오프라인 단절 상황에서 복제 티켓의 중복 입장 시도 | 티켓별로 지정한 게이트 구역으로 통제한다(사전 예방). 변경분으로 입장 상태를 공유한다(온라인 스캐너는 두 번째 입장을 거부한다). 업로드된 뒤 서버 판정 표로 중복 입장에 이상 표시를 한다. 올라오지 않은 기록은 찾지 못한다(ADR-0051) | K10 오프라인 정합성 검증 (O-T2, O-T23) |
 | 다중 좌석 판매 확정(Hard Sale) 때 DB 트랜잭션 간 데드락 발생 | 여러 좌석의 PENDING 행을 좌석 고유 ID 오름차순으로 넣는다. 좌석 Redis 장애 때의 비상 우회 경로(정렬 잠금과 `SET LOCAL lock_timeout = '100ms'`, ADR-0083)는 2026-10-28에 없앴다. 장애 조치 동안은 그 회차의 구매 요청을 503으로 미룬다(추천 적용 2026-10-28, ADR-0121) | K3 판매 확정과 v0 행 잠금 홀드 스트레스 테스트(S-T10) |

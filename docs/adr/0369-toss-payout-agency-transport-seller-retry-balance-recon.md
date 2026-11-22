@@ -1,6 +1,6 @@
 # ADR-0369: 토스페이먼츠 지급대행은 상점별 셀러와 JWE 전송 어댑터로 잇고, 지급 결과는 단건 조회로 정산서 전이·지급 사건에 반영하며, 실패 세 갈래 재요청과 결제사 잔액 대사는 정산 일꾼이 한다(2026-11-23)
 
-- **상태**: 채택(2026-11-23, 추천 적용, BUILD_ORDER F-07-6 계획). BAT-630 리뷰 RV-04(셀러 등록 JWE·실지급 HTTP 없음)·RV-05(정산 웹훅 수신기 미조립)와 F-07-5 계획이 넘긴 G-16(KYC 보류가 결제사를 가리지 않음)·G-17 앞 몫(지급 사건·지표)을 닫는다.
+- **상태**: 채택(2026-11-23, 추천 적용, BUILD_ORDER F-07-6 계획). BAT-630 리뷰 RV-04(셀러 등록 JWE·실지급 HTTP 없음)·RV-05(정산 웹훅 수신기 미조립)와 F-07-5 계획이 넘긴 G-16(KYC 보류가 결제사를 가리지 않음)과 G-17의 지급 사건·지표·09시 지급 묶음 자동 만들기를 닫는다(09시 자동 만들기는 감독 결정 2026-11-23, 15시 미승인 만료는 F-06-3).
 - **관련**: [ADR-0047](0047-settlement-payout-via-pg-agency.md), [ADR-0050](0050-crypto-corrections-and-key-management.md), [ADR-0053](0053-crypto-hardening-pseudonyms-webhooks-stores-runbook-audit.md), [ADR-0062](0062-open-items-delegated-decisions.md), [ADR-0327](0327-sale-review-request-and-sale-open.md) 결정 9, [ADR-0368](0368-settlement-statement-notify-dispute-adjust-flow.md), docs/features/settlement.md §3·§5.1·§5.2·§5.5·§6·§8·§11·§12·§13, docs/planning/03-policies-glossary.md §2.12, docs/data.md `toss_seller`·`payout`·`payout_batch`·`payout_retry_audit`·`settlement_case_request`·`pg_balance_reconciliation`, docs/api/guidelines.md §8·§8.1, docs/security/secrets-and-keys.md
 - **관련 ID**: FR-062, J-T4, J-T5, J-T6, J-T7, J-T15, J-T16, J-T25, J-T34, J-T37, J-T38
 
@@ -42,7 +42,8 @@
 9. **셀러 KYC가 풀리면 보류를 푼다.** `seller.changed` 뒤 단건 조회가 `KYC_REQUIRED`면 CS 처리함 `SELLER_KYC_REQUIRED`(대상 = 토스 셀러 ID)와 지표를 남긴다. `APPROVED`면 그 파트너·상점의 `HELD`·`KYC` 토스 정산서를 T8로 `CONFIRMED`(행위자 `system`, 사유 `toss-seller-approved`)로 돌리고(PEAKET 판매자 확인이 끝나지 않았으면 그대로), 결정 8의 한도/KYC 실패 지급 건을 다시 보낸다. 이미 만든 예약지급(`REQUESTED`)을 결제사에서 취소하는 T10은 LCH-120(F-07-7)이 한다.
 10. **CS 건은 같은 트랜잭션에 적고 일꾼이 보낸다.** 지급 쪽 CS 건(`PAYOUT_ERROR`·`PAYOUT_FAILED`·`PAYOUT_DELAYED`·`SELLER_KYC_REQUIRED`·`PG_BALANCE_MISMATCH`)은 그 원인이 된 쓰기와 같은 트랜잭션에 새 표 `settlement_case_request`(사건 키, 종류, 대상, 보낸 시각)로 적고, 정산 일꾼이 ops-svc `POST /internal/v1/cs-cases`(ADR-0368 결정 5와 같은 경로)로 보낸다. 보내지 못하면 다음 30분 점검이 다시 보낸다. ops-svc는 이 다섯 종류를 받기 시작한다(같은 종류·대상의 열린 건은 하나).
 11. **결제사 잔액 대사는 토스 결제 상점마다 한다(settlement §5.5).** 있어야 할 잔액 = 대사가 끝난 승인 − 취소·환불 − 결제사 수수료 − 완료한 지급 − 지급대행 이용료(결정 2의 설정, [가정]) − PEAKET 몫 인출(0)이다. 수수료는 토스페이먼츠 정산 조회의 `fees`를 지난 대사 뒤 기간만 읽어 누적에 더한다. 결제사가 보여 주는 잔액은 잔액 조회의 지급 가능 금액과 정산 대기 금액의 합이다. 매월 마지막 영업일 22:00 KST [가정]와, 토스 지급 묶음을 만든 뒤 다음 30분 점검에서 돈다(묶음을 멈추지 않는다). 결과는 새 표 `pg_balance_reconciliation`에 남기고(월 대사는 상점·달마다 한 행), 차이가 0이 아니면 `PG_BALANCE_MISMATCH`(대상 = `TOSS:{상점}`), 절댓값이 1만 원 [가정]을 넘으면 그 행에 `SEV3`를 적고 `settlement_pg_balance_diff_krw{pg,store}`를 낸다. 끝수·정산 대기 시점으로 설명되는 차이는 CS 건의 결과 메모로 닫는다(ops-svc 기존 경로). 포트원 쪽(이체 원장 계산 잔액과 operator 입력값)은 LCH-120(F-07-7)이 한다.
-12. **지표 다섯과 미완료 점검.** `settlement_payout_failed_total{pg,reason}`, `settlement_webhook_signature_invalid_total`, `settlement_seller_kyc_required{pg}`, `settlement_pg_balance_diff_krw{pg,store}`, `settlement_payout_overdue_total{pg}`를 낸다. 지급일 다음 영업일 12:00 KST까지 끝나지 않은 토스 지급 건은 정산 일꾼이 단건 조회로 확인해 결정 6으로 반영하고, 그래도 끝나지 않았으면 `PAYOUT_DELAYED`(대상 = 지급 건 ID)와 `settlement_payout_overdue_total`을 남긴다(settlement §5.2). 지급 묶음 09시 자동 만들기·15시 미승인 만료(`settlement_batch_unapproved`)는 이 결정에 넣지 않는다. 만료와 자동 만들기는 ops-svc 지급 승인 요청이 '이미 만든 묶음'을 받도록 바뀌어야 해서, 승인 업무 만료 작업과 `payout_approval` 합치기가 있는 GAT-290(F-06-3)과 함께 한다.
+12. **지표 다섯과 미완료 점검.** `settlement_payout_failed_total{pg,reason}`, `settlement_webhook_signature_invalid_total`, `settlement_seller_kyc_required{pg}`, `settlement_pg_balance_diff_krw{pg,store}`, `settlement_payout_overdue_total{pg}`를 낸다. 지급일 다음 영업일 12:00 KST까지 끝나지 않은 토스 지급 건은 정산 일꾼이 단건 조회로 확인해 결정 6으로 반영하고, 그래도 끝나지 않았으면 `PAYOUT_DELAYED`(대상 = 지급 건 ID)와 `settlement_payout_overdue_total`을 남긴다(settlement §5.2). 15시 미승인 만료(`settlement_batch_unapproved`, 승인 업무 만료·지급일 미룸·파트너 알림)는 이 결정에 넣지 않는다. 승인 업무 만료 작업과 `payout_approval` 합치기가 있는 GAT-290(F-06-3)과 함께 한다(감독 결정 2026-11-23). 그 만료는 결정 13의 `PREPARED` 묶음도 함께 푼다.
+13. **토스 지급 묶음은 09시에 미리 만든다(settlement §5.1, 감독 결정 2026-11-23).** 정산 일꾼(리더)이 지급일 전 영업일 09:00 KST에, 다음 은행 영업일이 지급일인 토스 확정 정산서를 결제 상점마다 모아 `PREPARED` 묶음 하나를 만든다(행위자 `system`). 보류(T7)·상계 계산·잔액 판정은 operator 확인 요청 때와 같은 함수를 쓴다. 보류는 그때 저장하고(`PAYOUT_HELD`), 잔액이 모자라면 지금처럼 `HELD`·`BALANCE`다. 그러나 `PREPARED`는 정산서를 묶지 않고(`payout_batch_id` 비움) 미수금 상계를 쓰지 않는다. 합계·건수만 묶음 행(`total_amount`·`statement_count`)에 미리 셈해 두어 SCR-049에서 operator가 본다(상세는 그 지급일의 지금 확정 정산서를 보인다). operator가 같은 결제사·상점·지급일로 확인 요청(`POST /v1/ops/payout-batches`, 지금 경로 그대로)을 하면 payment-svc가 그 `PREPARED` 묶음의 ID를 그대로 쓰며, 그때의 확정 정산서로 보류·상계·잔액을 다시 판정해 묶고 `PENDING_APPROVAL`로 바꾼다(한 트랜잭션, 묶음 행 조건 `status = 'PREPARED'`). 09시 뒤에 확정된 정산서도 들어가고, 같은 미수금을 두 번 상계하지 않는다. 확정 정산서가 없는 상점은 묶음을 만들지 않는다. 같은 날 다시 돌아도 묶음은 상점·지급일마다 하나다. core·잔액 원천이 답하지 않으면 다음 30분 점검이 다시 하고, 세 번 [가정] 실패하면 CS 처리함 `PAYOUT_DELAYED`(대상 = `TOSS:{상점}:{지급일}`)다. 포트원 묶음은 자동으로 만들지 않는다. operator가 콘솔에서 본 지급대행 계좌 잔액을 적어야 만들 수 있기 때문이다(settlement §5.1·§5.3). ops-svc와 계약은 바꾸지 않는다(묶음 상태 `PREPARED`는 openapi·SCR-049에 이미 있다).
 
 ## 검토한 대안
 
@@ -54,21 +55,23 @@
 | 마감 뒤에도 새 지급일·새 키로 자동으로 다시 보낸다 | 기각. 처음 요청이 실제로 들어갔다면 두 번 지급될 수 있다. 응답을 받지 못한 요청은 사람이 상점관리자에서 확인한 뒤에만 새 키로 보낸다 |
 | 마감 뒤 같은 키로 지급일만 바꿔 보낸다 | 기각. 같은 키에 다른 본문을 보낼 때의 결제사 동작이 공개 문서에 없다 |
 | CS 건을 커밋 뒤에 바로 부르고 실패는 로그만 | 기각. 지급 실패·지연 건이 사라지면 사람이 모른다. 같은 트랜잭션에 적고 다시 보낸다 |
-| 지급 묶음 09시 자동 만들기를 이번에 한다 | 이번에는 하지 않는다. 포트원은 operator의 잔액 입력이 있어야 묶음을 만들 수 있고, 토스만 자동으로 만들면 ops 지급 승인 요청의 모양이 바뀐다(GAT-290) |
+| 09시 `PREPARED` 묶음에 정산서를 바로 묶고 상계도 쓴다 | 기각. 요청 때까지 판매 중지·보류·새 확정이 바뀔 수 있고, 다시 판정하면 상계를 두 번 쓰거나 되돌려야 한다. 미리 셈만 하고 묶기·상계는 요청 때 한 번 한다 |
+| 09시 자동 묶음을 바로 `PENDING_APPROVAL`로 만든다 | 기각. ops-svc 지급 승인 요청은 operator가 확인하고 요청하는 동작이라(POL-038) 묶음과 승인 업무가 한 번에 생긴다. 사람의 확인 없이 승인 대기를 만들지 않는다 |
+| 포트원 묶음도 09시에 만든다 | 기각. 포트원은 잔액 조회 API가 없어 operator 입력값이 묶음을 만드는 조건이다(settlement §5.1) |
 | 실제 토스 시험 서버를 부르는 잡을 켠다 | 이번에는 하지 않는다. 지급대행 보안 키가 계약 뒤에 나오고, 잡을 새로 켜는 일은 소유자 몫이다. 공개 안내 모양으로 만든 대역 서버로 계약 시험을 한다 |
 
 ## 결과와 트레이드오프
 
 - **좋은 점**: 계약·키가 생기면 설정만 넣어 실제 지급이 돈다. 지급 결과가 정산서 상태와 파트너 사건으로 이어지고, 실패가 갈래마다 자동 재요청이나 CS 건으로 끝난다. KYC 보류가 그 결제사·상점에만 걸린다. 결제사에 남은 돈이 장부와 맞는지 달마다 본다.
-- **남는 한계**: 결제사 원문 오류 코드 표·날짜 오류 코드·서명 머리 구분자·셀러 등록 본문 모양은 공개 안내를 읽은 [가정]이고 계약 때 원문으로 확인한다. 바뀐 지급일을 파트너에게 알리는 사건 칸과 받는 쪽은 GAT-270 몫이다. 09시 자동 묶음과 15시 만료가 남는다. 이미 만든 예약지급 취소와 포트원 잔액 대사는 F-07-7이다. 은행 영업일은 아직 주말만 뺀다(F-07-5 C-04).
+- **남는 한계**: 결제사 원문 오류 코드 표·날짜 오류 코드·서명 머리 구분자·셀러 등록 본문 모양은 공개 안내를 읽은 [가정]이고 계약 때 원문으로 확인한다. 바뀐 지급일을 파트너에게 알리는 사건 칸과 받는 쪽은 GAT-270 몫이다. 15시 미승인 만료가 남는다(F-06-3). 이미 만든 예약지급 취소와 포트원 잔액 대사는 F-07-7이다. 은행 영업일은 아직 주말만 뺀다(F-07-5 C-04).
 - **배포**: payment 0028(`toss_seller`, `payout`·`payout_batch` 칸, `payout_retry_audit`, `settlement_case_request`, `pg_balance_reconciliation`, `seller_kyc` 토스 칸 옮기기). 설정 이름이 바뀌므로 비밀 값을 넣을 때 새 이름을 쓴다(지금은 비어 있다).
 
 ## 되돌릴 조건
 
 - 결제사 원문 규격(서명 원문·머리 구분자·셀러 등록 본문·오류 코드)이 이 결정의 [가정]과 다르면 어댑터와 이 ADR을 고친다.
 - 셀러·잔액·KYC가 상점마다 따로가 아니라고 확인되면(settlement §14) 결정 3·4를 파트너 단위로 줄인다.
-- GAT-290이 지급 승인 요청을 공통 승인 업무로 바꾸면 결정 12의 자동 만들기·만료를 그 모양에 맞춰 더한다.
+- GAT-290이 지급 승인 요청을 공통 승인 업무로 바꾸면 결정 13의 요청 때 다시 묶기와 15시 만료를 그 모양에 맞춘다.
 
 ## 확인
 
-- J-T4·J-T5·J-T6·J-T7·J-T15·J-T16·J-T25·J-T34·J-T37·J-T38이 이 결정을 본다. `trace-check --ids "…"`와 `ledger --batch F-07-6 --require`로 확인한다.
+- J-T4·J-T5·J-T6·J-T7·J-T15·J-T16·J-T25·J-T34·J-T37·J-T38(⑨가 결정 13)이 이 결정을 본다. `trace-check --ids "…"`와 `ledger --batch F-07-6 --require`로 확인한다.
