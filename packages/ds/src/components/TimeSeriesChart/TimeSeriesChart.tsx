@@ -7,10 +7,15 @@
 // - 색은 키트 차트 색(13절)을 그 자리의 CSS 변수에서 읽는다: 선 --link, 보조 선 --success, 기준선 --text-muted 점선,
 //   SLO 기준선 --danger 점선(6 4), 면 --primary-subtle, 눈금 --border, 축 글자 --text-muted. 라이트·다크가 바뀌면 다시 그린다.
 // - Canvas에는 role="img"와 요약 aria-label을 붙이고, [표로 보기]로 같은 데이터를 표(.table.dense)로 바꿔 본다(d2 CMP-033).
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+// - 실시간 방식(realtime, 관제): x축 linear(밀리초)·parsing: false·normalized: true·animation: false·축 최소·최대·Decimation min-max로 그리고,
+//   값이 바뀌면 그래프를 새로 만들지 않고 chart.update('none')로 고친다. 한 장 6선·한 선 900점 [가정]까지만 그린다(ring-series.ts, ADR-0091 결정 4).
+//   글자 눈금 방식(labels·series.data, 파트너 분당 판매)은 그대로다.
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cx } from '../../lib/cx';
 import { formatNumber } from '../../lib/format';
 import { Icon } from '../../icons';
+import { REALTIME_UPDATE_MODE, realtimeChartOptions, realtimeTick } from './realtime';
+import { CHART_MAX_SERIES, SERIES_MAX_POINTS, type RealtimePoint } from './ring-series';
 
 export type ChartTone = 'primary' | 'success' | 'baseline' | 'warning' | 'danger';
 
@@ -18,6 +23,14 @@ export interface ChartSeries {
   id: string;
   label: string;
   data: readonly (number | null)[];
+  tone?: ChartTone;
+}
+
+/** 실시간 방식 한 선(점은 오래된 것부터, RingSeries.toArray() 꼴) */
+export interface RealtimeSeries {
+  id: string;
+  label: string;
+  points: readonly RealtimePoint[];
   tone?: ChartTone;
 }
 
@@ -48,6 +61,11 @@ export interface TimeSeriesChartProps {
   framed?: boolean;
   /** 처음부터 표로 보기 */
   defaultTable?: boolean;
+  /**
+   * 실시간 방식(관제): 주면 labels·series 대신 이 점으로 그린다. now는 창 끝 시각(밀리초), windowMs는 창 길이(기본 15분 [가정]).
+   * 앞 6선 [가정]·선마다 뒤 900점 [가정]만 그린다(들고 있는 양은 RingChartData가 지킨다)
+   */
+  realtime?: { series: readonly RealtimeSeries[]; now: number; windowMs?: number };
   className?: string;
   style?: CSSProperties;
 }
@@ -67,6 +85,7 @@ function loadChart(): Promise<ChartModule> {
       m.CategoryScale,
       m.Filler,
       m.Tooltip,
+      m.Decimation,
     );
     return m;
   });
@@ -106,6 +125,7 @@ export function TimeSeriesChart({
   headingLevel = 3,
   framed = true,
   defaultTable = false,
+  realtime,
   className,
   style,
 }: TimeSeriesChartProps) {
@@ -124,9 +144,70 @@ export function TimeSeriesChart({
     return () => mo.disconnect();
   }, [state, showTable]);
 
+  // 실시간 방식: 그릴 선·점을 상한으로 자른다
+  const rt = useMemo(
+    () => (realtime ? { ...realtime, series: realtime.series.slice(0, CHART_MAX_SERIES).map((x) => ({ ...x, points: x.points.slice(-SERIES_MAX_POINTS) })) } : undefined),
+    [realtime],
+  );
+  const rtRef = useRef(rt);
+  rtRef.current = rt;
+  const rtChart = useRef<{ data: { datasets: { data: unknown[] }[] }; options: { scales?: Record<string, { min?: number; max?: number }> }; update(mode?: string): void; destroy(): void } | null>(null);
+  const rtIds = rt ? rt.series.map((x) => `${x.id}:${x.tone ?? ''}`).join(',') : '';
+
+  // 실시간 방식: 선 모양이 바뀔 때만 그래프를 만든다
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || state !== 'ready' || showTable) return;
+    if (!rtIds || !canvas || state !== 'ready' || showTable) return;
+    let cancelled = false;
+    void loadChart().then(({ Chart }) => {
+      const cur = rtRef.current;
+      if (cancelled || !cur) return;
+      const css = getComputedStyle(canvas);
+      const read = (name: string) => css.getPropertyValue(name).trim();
+      const datasets = cur.series.map((x) => ({
+        label: x.label,
+        data: [...x.points],
+        borderColor: read(toneVar[x.tone ?? 'primary']),
+        backgroundColor: 'transparent',
+        borderWidth: x.tone === 'baseline' ? 1.5 : 2,
+        borderDash: x.tone === 'baseline' ? [3, 3] : [],
+        fill: false,
+        pointRadius: 0,
+        tension: 0,
+        spanGaps: false,
+      }));
+      rtChart.current = new Chart(canvas, {
+        type: 'line',
+        data: { datasets: datasets as never },
+        options: realtimeChartOptions({ now: cur.now, ...(cur.windowMs ? { windowMs: cur.windowMs } : {}), grid: read('--border'), ink: read('--text-muted') }) as never,
+      }) as unknown as typeof rtChart.current;
+    });
+    return () => {
+      cancelled = true;
+      rtChart.current?.destroy();
+      rtChart.current = null;
+    };
+  }, [rtIds, state, showTable, themeTick]);
+
+  // 실시간 방식: 값이 바뀌면 점과 축 범위만 고치고 update('none')
+  useEffect(() => {
+    const chart = rtChart.current;
+    if (!chart || !rt) return;
+    rt.series.forEach((x, i) => {
+      const ds = chart.data.datasets[i];
+      if (ds) ds.data = [...x.points];
+    });
+    const xs = chart.options.scales?.x;
+    if (xs) {
+      xs.min = rt.now - (rt.windowMs ?? 15 * 60_000);
+      xs.max = rt.now;
+    }
+    chart.update(REALTIME_UPDATE_MODE);
+  }, [rt]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (rtIds || !canvas || state !== 'ready' || showTable) return;
     let cancelled = false;
     let chart: { destroy: () => void } | null = null;
     void loadChart().then(({ Chart }) => {
@@ -185,12 +266,21 @@ export function TimeSeriesChart({
       cancelled = true;
       chart?.destroy();
     };
-  }, [state, showTable, labels, series, threshold, kind, themeTick]);
+  }, [state, showTable, labels, series, threshold, kind, themeTick, rtIds]);
+
+  // 표 보기·범례에 쓸 선과 칸(실시간 방식은 첫 선의 시각을 줄로 쓴다)
+  const tableSeries = rt ? rt.series.map((x) => ({ id: x.id, label: x.label, tone: x.tone, data: [] as (number | null)[] })) : series;
+  const tableLabels = rt ? (rt.series[0]?.points ?? []).map((p) => realtimeTick(p.x)) : labels;
+  const cellOf = (seriesIndex: number, row: number): number | null | undefined => {
+    if (!rt) return series[seriesIndex]?.data[row];
+    const x = rt.series[0]?.points[row]?.x;
+    return rt.series[seriesIndex]?.points.find((p) => p.x === x)?.y;
+  };
 
   const legend =
-    series.length > 1 || threshold ? (
+    tableSeries.length > 1 || threshold ? (
       <ul className="legend" aria-hidden="true">
-        {series.map((s) => (
+        {tableSeries.map((s) => (
           <li key={s.id} className="legend-item">
             <span className="swatch" style={{ background: `var(${toneVar[s.tone ?? 'primary']})` }} />
             {s.label}
@@ -243,7 +333,7 @@ export function TimeSeriesChart({
           <thead>
             <tr>
               <th scope="col">{labelHeader}</th>
-              {series.map((s) => (
+              {tableSeries.map((s) => (
                 <th key={s.id} scope="col" className="r">
                   {s.label}
                 </th>
@@ -256,13 +346,13 @@ export function TimeSeriesChart({
             </tr>
           </thead>
           <tbody>
-            {labels.map((l, i) => (
+            {tableLabels.map((l, i) => (
               <tr key={`${l}-${i}`}>
                 <th scope="row" style={{ background: 'transparent', fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
                   {l}
                 </th>
-                {series.map((s) => {
-                  const val = s.data[i];
+                {tableSeries.map((s, si) => {
+                  const val = cellOf(si, i);
                   return (
                     <td key={s.id} className="r">
                       {val === null || val === undefined ? '—' : `${formatNumber(val)}${unit}`}

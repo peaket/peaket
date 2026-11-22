@@ -114,6 +114,57 @@ export const PARTNER_KONVA_OUTSIDE = {
   },
 };
 
+/**
+ * 관제 원격 위젯 폴더(apps/widgets/<원격>/src)의 금지(docs/frontend.md §4.5 '금지', ASVS 3.2.3, ADR-0361 결정 7):
+ * 바깥 통로(fetch·WebSocket·EventSource·XMLHttpRequest)와 브라우저 저장소(localStorage·sessionStorage·indexedDB)를 직접 쓰지 않고(호스트가 넘긴 ConsoleServices만),
+ * 전역(window·globalThis·self·document)에 값을 두지 않으며, @peaket/* 가운데 계약 패키지(@peaket/console-contract)만 가져온다(공유 싱글턴은 호스트가
+ * 실제로 내놓는 것만 쓴다: react·react-dom·계약 패키지). ESLint 내장 규칙만 쓴다. 같은 규칙 이름의 앞 설정(목업 금지)을 통째로 덮으므로 그 목록을 함께 싣는다
+ */
+export const REMOTE_WIDGET_FILES = ['apps/widgets/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}'];
+const REMOTE_GLOBAL_OBJECT = String.raw`/^(?:window|globalThis|self|document|top|parent|frames)$/`;
+const REMOTE_CHANNEL = String.raw`/^(?:fetch|WebSocket|EventSource|XMLHttpRequest|localStorage|sessionStorage|indexedDB|BroadcastChannel|SharedWorker|Worker)$/`;
+const REMOTE_GLOBAL_MESSAGE = '원격 위젯은 전역(window·globalThis·document)에 값을 두지 않는다(docs/frontend.md §4.5, ASVS 3.2.3)';
+const REMOTE_CHANNEL_MESSAGE = '원격 위젯은 바깥 통로·브라우저 저장소를 직접 쓰지 않고 호스트가 넘긴 ConsoleServices만 쓴다(docs/frontend.md §4.5)';
+export const REMOTE_WIDGET_RULES = {
+  files: REMOTE_WIDGET_FILES,
+  ignores: ['**/*.test.*', '**/*.spec.*', '**/*.stories.*'],
+  languageOptions: { parser: tsParser, parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' } },
+  rules: {
+    'no-restricted-globals': [
+      'error',
+      ...['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest', 'localStorage', 'sessionStorage', 'indexedDB', 'BroadcastChannel', 'SharedWorker', 'Worker'].map((name) => ({ name, message: REMOTE_CHANNEL_MESSAGE })),
+    ],
+    'no-restricted-imports': [
+      'error',
+      {
+        paths: MOCK_IMPORTS.paths,
+        patterns: [
+          ...MOCK_IMPORTS.patterns,
+          { group: ['@peaket/*', '!@peaket/console-contract'], message: '원격 위젯은 @peaket/* 가운데 계약 패키지(@peaket/console-contract)만 가져온다(docs/frontend.md §4.5 공유 싱글턴, ADR-0361 결정 7)' },
+        ],
+      },
+    ],
+    'no-restricted-syntax': [
+      'error',
+      MOCK_SYNTAX,
+      // window.x = …·globalThis['x'] = …·window.x += …·delete window.x
+      { selector: `AssignmentExpression > MemberExpression.left[object.name=${REMOTE_GLOBAL_OBJECT}]`, message: REMOTE_GLOBAL_MESSAGE },
+      { selector: `UpdateExpression > MemberExpression.argument[object.name=${REMOTE_GLOBAL_OBJECT}]`, message: REMOTE_GLOBAL_MESSAGE },
+      { selector: `UnaryExpression[operator='delete'] > MemberExpression.argument[object.name=${REMOTE_GLOBAL_OBJECT}]`, message: REMOTE_GLOBAL_MESSAGE },
+      // Object.assign(window, …)·Object.defineProperty(globalThis, …)·Reflect.set(window, …)
+      {
+        selector: `CallExpression[callee.object.name=/^(?:Object|Reflect)$/][callee.property.name=/^(?:assign|defineProperty|defineProperties|set)$/][arguments.0.name=${REMOTE_GLOBAL_OBJECT}]`,
+        message: REMOTE_GLOBAL_MESSAGE,
+      },
+      // window.fetch(…)·globalThis.localStorage 같은 전역 객체를 거친 통로
+      { selector: `MemberExpression[object.name=${REMOTE_GLOBAL_OBJECT}][property.name=${REMOTE_CHANNEL}]`, message: REMOTE_CHANNEL_MESSAGE },
+      { selector: `MemberExpression[object.name=${REMOTE_GLOBAL_OBJECT}][property.value=${REMOTE_CHANNEL}]`, message: REMOTE_CHANNEL_MESSAGE },
+      // 동적 가져오기로도 다른 @peaket/* 패키지를 가져오지 않는다
+      { selector: `ImportExpression[source.value=/^@peaket./]:not([source.value=/^@peaket.console-contract$/])`, message: '원격 위젯은 @peaket/* 가운데 계약 패키지만 가져온다(ADR-0361 결정 7)' },
+    ],
+  },
+};
+
 // 계약 생성물(packages/contracts/src/gen)만 뺀다. 화면이 묶는 생성물(packages/ds/src/gen 토큰, BAS-040의 packages/api-client/src/gen orval 호출 함수)은
 // 브라우저 지원 린트를 받는다(구간 1 끝 정리)
 export default [
@@ -129,5 +180,6 @@ export default [
   API_CLIENT_HOME,
   ...PROTOTYPE_EVERYWHERE,
   PARTNER_KONVA_OUTSIDE,
+  REMOTE_WIDGET_RULES,
   NO_DYNAMIC_CODE,
 ];

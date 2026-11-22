@@ -14,6 +14,8 @@ export interface WidgetBaseProps {
   style?: CSSProperties;
   /** 참이면 원천이 아직 붙지 않은 자리다. 실제 값 화면이 고정 자료를 그릴 때 '원천 연결 전' 배지와 data-source="pending"을 단다(docs/frontend.md §5.7) */
   pending?: boolean;
+  /** 호스트가 접기를 맡으면 준다: 머리의 [접기]·접힌 줄 누르기가 바뀐 값을 알린다(실제 값 화면, WidgetProps.onCollapsedChange, ADR-0361 결정 8) */
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 export function Freshness({ value }: { value?: WidgetBaseProps['freshness'] }) {
@@ -74,7 +76,18 @@ export function WidgetFrame({ id, title, base, badges, actions, wrapHead, bodySt
   if (base.collapsed) {
     return (
       <details className="widget" data-source={source} style={{ alignSelf: 'start', ...base.style }}>
-        <summary className="widget-head">
+        <summary
+          className="widget-head"
+          onClick={
+            base.onCollapsedChange
+              ? (e) => {
+                  e.preventDefault();
+                  base.onCollapsedChange?.(false);
+                }
+              : undefined
+          }
+          aria-label={base.onCollapsedChange ? `${title} 펼치기` : undefined}
+        >
           <span>{title}</span>
           {base.pending ? <PendingBadge /> : null}
           <span className="fold-meta">
@@ -94,8 +107,14 @@ export function WidgetFrame({ id, title, base, badges, actions, wrapHead, bodySt
         {base.pending ? <PendingBadge /> : null}
         <Freshness value={base.freshness} />
         {badges}
-        <div className="actions" style={actions ? { gap: 12 } : undefined}>
+        <div className="actions" style={actions || base.onCollapsedChange ? { gap: 12 } : undefined}>
           {actions}
+          {base.onCollapsedChange ? (
+            <button className="btn btn-ghost btn-sm" type="button" aria-label={`${title} 접기`} onClick={() => base.onCollapsedChange?.(true)}>
+              <i className="ic ic-chevron-up" aria-hidden="true" />
+              접기
+            </button>
+          ) : null}
           <DetailLink href={base.detailHref} title={title} />
         </div>
       </div>

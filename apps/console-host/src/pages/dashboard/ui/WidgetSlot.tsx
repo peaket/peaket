@@ -1,5 +1,6 @@
 // 원격 위젯 자리(docs/frontend.md §4.5·§5.7). 위젯마다 오류 경계와 스켈레톤이 따로 있어 하나가 실패해도 나머지는 그린다(CMP-035).
 // 퍼블리싱에서는 ctx.slot으로 '위젯 로딩'·'위젯 오류'·'원격 위젯 적재 실패' 상태를 그린다. 카드 모양은 보드 SCR-029-d의 w-verify(받지 못함) 카드다.
+// 실제 값 화면의 원격 자리(RemoteWidget)는 같은 카드에 [다시 시도](그 칸만 다시 싣기)와 실패 까닭(data-remote-fail)을 단다(ADR-0361 결정 5).
 import { Component, type CSSProperties, type ReactNode } from 'react';
 import { GRAFANA } from '@/entities/alert';
 import type { DashCtx } from './ctx';
@@ -15,9 +16,19 @@ interface SlotProps {
   children: ReactNode;
 }
 
-export function FailCard({ title, style, remote }: { title: string; style?: CSSProperties; remote?: boolean }) {
+export interface FailCardProps {
+  title: string;
+  style?: CSSProperties;
+  remote?: boolean;
+  /** 원격 싣기 실패 까닭(remote_load_failed_total reason) */
+  reason?: string;
+  /** [다시 시도]: 그 칸만 다시 싣는다. 없으면 퍼블리싱 그림(동작 없음) */
+  onRetry?: () => void;
+}
+
+export function FailCard({ title, style, remote, reason, onRetry }: FailCardProps) {
   return (
-    <section className="widget is-error" role="region" aria-label={title} style={style}>
+    <section className="widget is-error" role="region" aria-label={title} style={style} data-remote-fail={reason}>
       <div className="widget-head wrap">
         <h2 className="t-sm fw-b">{title}</h2>
         <div className="actions" style={{ gap: 12 }}>
@@ -39,7 +50,7 @@ export function FailCard({ title, style, remote }: { title: string; style?: CSSP
               ? '위젯 파일을 받지 못했습니다(무결성·계약 판 확인 실패 뒤 한 번 더 받았습니다). 다른 위젯은 그대로 그립니다.'
               : '일시적인 오류입니다. 다른 위젯은 그대로 갱신됩니다. 마지막 수신 20:03:52 KST'}
           </p>
-          <button className="btn btn-outline btn-sm" type="button">
+          <button className="btn btn-outline btn-sm" type="button" onClick={onRetry}>
             <i className="ic ic-refresh" aria-hidden="true" />
             다시 시도
           </button>

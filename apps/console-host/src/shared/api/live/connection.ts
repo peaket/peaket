@@ -1,12 +1,13 @@
 // 탭 하나의 관제 실시간 연결(docs/frontend.md §4.4.4·§4.4.5, ADR-0100, ADR-0360). 탭마다 늘 여는 흐름 하나와 위젯 흐름 하나만 연다.
 // - 늘 여는 흐름 GET /v1/ops/live?eventId=&screen=: 사건을 호스트 저장소(alerts·presence·commands)에 넣고 live.on 구독자에게 나눠 준다.
 //   reset을 받으면 resync 번호를 올려 화면이 명령·경보·승인 대기를 REST로 다시 읽게 한다
-// - 위젯 흐름 GET /v1/ops/events/{eventId}/live?widgets=: WidgetStreams가 보이는 키를 모아 1초 묶어 다시 연다
+// - 위젯 흐름 GET /v1/ops/events/{eventId}/live?widgets=: WidgetStreams가 보이는 키를 모아 1초 묶어 다시 연다. 떠난 키는 10초 유예,
+//   브라우저 탭을 30초 넘게 숨기면 위젯 흐름만 닫고 다시 보이면 다시 열며 키마다 위젯 조회(최근 15분)로 채운다(ADR-0361 결정 9). 늘 여는 흐름은 숨겨도 그대로다
 // 닫힘 뒤 토큰 갱신(POST /v1/ops/auth/access-tokens)이 401이면 로그인 화면으로 간다.
 import type { HostAlert, HostOperator, HostView, Unsubscribe } from '@peaket/console-contract';
 import { ManagedStream, frameData, type RefreshResult, type SseFrame, type StreamFetch } from './live-stream';
 import { WidgetStreams } from './widget-stream';
-import { createConsoleServices } from './console-services';
+import { createSlotServices, type SlotServices } from './console-services';
 import { ensureConsoleApi } from '../index';
 import { hostActions, hostStore, type LiveHostState } from '@/shared/model/live-host';
 
@@ -55,6 +56,24 @@ async function resyncApprovals(): Promise<void> {
   } catch {
     // 다시 읽기 실패: 다음 approval·command 사건이 슬라이스를 고친다
   }
+}
+
+/** 다시 보일 때 위젯 조회로 채우는 창 15분 [가정](frontend §5.7 '다시 보일 때') */
+const REFILL_RANGE_MS = 15 * 60_000;
+
+/** 위젯 조회 REST(GET /v1/ops/widgets/{widgetKey}?eventId=&from=&to=) */
+async function queryWidget(key: string, vars: { eventId?: string | null; from?: string; to?: string }): Promise<unknown> {
+  if (!ensureConsoleApi()) throw new Error('관제 API 주소가 없다');
+  const { getOpsWidget } = await import('@peaket/api-client/endpoints/ops');
+  const eventId = vars.eventId ?? hostStore.getState().scope.eventId;
+  const r = await getOpsWidget(key, { ...(eventId ? { eventId } : {}), ...(vars.from ? { from: vars.from } : {}), ...(vars.to ? { to: vars.to } : {}) });
+  return r.data;
+}
+
+/** 숨긴 탭에서 돌아올 때 키마다 최근 15분 창을 한 번 받는다 */
+function refillWidget(key: string, eventId: string): Promise<unknown> {
+  const to = new Date();
+  return queryWidget(key, { eventId, from: new Date(to.getTime() - REFILL_RANGE_MS).toISOString(), to: to.toISOString() });
 }
 
 const listeners = new Map<LiveEvent, Set<(p: unknown) => void>>();
@@ -155,8 +174,25 @@ export function startLive(o: { origin: string; screen?: string; onUnauthorized?:
   if (o.onUnauthorized) goLogin = o.onUnauthorized;
   liveStream ??= newStream(liveUrl, onLiveFrame, true);
   liveStream.start();
-  widgets ??= new WidgetStreams({ origin, timers, createStream: (url, onFrame) => newStream(url, onFrame, false) });
+  widgets ??= new WidgetStreams({ origin, timers, createStream: (url, onFrame) => newStream(url, onFrame, false), refill: refillWidget });
   widgets.setEvent(hostStore.getState().scope.eventId);
+  watchVisibility();
+}
+
+let visibilityHooked = false;
+
+/** 브라우저 탭 숨김을 위젯 흐름에 알린다(늘 여는 흐름은 숨겨도 그대로다, frontend §4.4.4 '숨긴 탭') */
+function watchVisibility(): void {
+  if (visibilityHooked || typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+  visibilityHooked = true;
+  const report = () => setLiveHidden(document.visibilityState === 'hidden');
+  document.addEventListener('visibilitychange', report);
+  report();
+}
+
+/** 브라우저 탭을 숨겼는가(참이면 30초 뒤 위젯 흐름만 닫는다). 시험은 이 함수로 숨김을 만든다 */
+export function setLiveHidden(hidden: boolean): void {
+  widgets?.setHidden(hidden);
 }
 
 /** 탭의 연결을 닫는다(로그아웃·시험) */
@@ -191,17 +227,11 @@ function hostView(s: LiveHostState): HostView {
   return { scope: s.scope, control: s.control, autoActions: s.autoActions, alerts: s.alerts, presence: s.presence };
 }
 
-/** 위젯 자리 하나의 ConsoleServices */
-export function servicesFor(slot: string) {
-  return createConsoleServices({
+/** 위젯 자리 하나의 통로와 호스트 손잡이(화면 안·밖) */
+export function slotFor(slot: string): SlotServices {
+  return createSlotServices({
     slot,
-    async query(key, vars) {
-      if (!ensureConsoleApi()) throw new Error('관제 API 주소가 없다');
-      const { getOpsWidget } = await import('@peaket/api-client/endpoints/ops');
-      const eventId = vars.eventId ?? hostStore.getState().scope.eventId;
-      const r = await getOpsWidget(key, { ...(eventId ? { eventId } : {}), ...(vars.from ? { from: vars.from } : {}), ...(vars.to ? { to: vars.to } : {}) });
-      return r.data;
-    },
+    query: (key, vars) => queryWidget(key, vars),
     subscribe(key, next) {
       if (!widgets) return () => undefined;
       return widgets.subscribe(key, (m) => next(m.value, m.at));
@@ -214,10 +244,21 @@ export function servicesFor(slot: string) {
       use: (f) => f(hostView(hostStore.getState())),
     },
     permissions: ['ops:read'],
+    timers,
   });
+}
+
+/** 위젯 자리 하나의 ConsoleServices */
+export function servicesFor(slot: string) {
+  return slotFor(slot).services;
 }
 
 /** 시험·진단: 지금 연 위젯 키 */
 export function openWidgetKeys(): readonly string[] {
   return widgets?.openKeys ?? [];
+}
+
+/** 시험·진단: 지금 목록에 든 위젯 키(구독 중 + 유예 중) */
+export function wantedWidgetKeys(): readonly string[] {
+  return widgets?.wantedKeys ?? [];
 }

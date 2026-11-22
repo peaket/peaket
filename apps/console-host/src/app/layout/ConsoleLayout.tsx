@@ -13,6 +13,7 @@ import { useShellUi } from '@/shared/model/shell';
 import { renderRouterLink } from '@/shared/ui/RouterLink';
 import { opsApiAvailable } from '@/shared/api';
 import { startLive } from '@/shared/api/live';
+import { preloadScreen, scheduleDashboardPreload } from '@/shared/lib/preload';
 import { ShortcutsDialog } from './ShortcutsDialog';
 
 export function ConsoleLayout() {
@@ -44,6 +45,28 @@ export function ConsoleLayout() {
     if (previewState || !opsApiAvailable()) return;
     startLive({ origin: __OPS_API_ORIGIN__, onUnauthorized: () => navigate('/login') });
   }, [previewState, navigate]);
+
+  // 대시보드를 처음 그린 뒤 2초 [가정]에 명령 화면 덩어리(낮은 우선순위), 그다음 원격을 같은 무결성 적재기로 미리 싣는다(ADR-0091 결정 1).
+  // 경로 lazy가 다 풀려야 navigation이 idle이라 그때 대시보드가 그려져 있다
+  const onDashboard = location.pathname === '/dashboard' && navigation.state === 'idle';
+  useEffect(() => {
+    if (!onDashboard) return undefined;
+    return scheduleDashboardPreload({ live: !previewState && opsApiAvailable() });
+  }, [onDashboard, previewState]);
+  // 메뉴 항목에 포인터가 올라가거나 초점이 가면 그 화면 lazy를 미리 부른다(같은 출처 화면 주소만)
+  useEffect(() => {
+    const onIntent = (e: Event) => {
+      const a = (e.target as Element | null)?.closest?.('nav a[href]');
+      const href = a?.getAttribute('href');
+      if (href && href.startsWith('/')) preloadScreen(href);
+    };
+    document.addEventListener('pointerover', onIntent);
+    document.addEventListener('focusin', onIntent);
+    return () => {
+      document.removeEventListener('pointerover', onIntent);
+      document.removeEventListener('focusin', onIntent);
+    };
+  }, []);
 
   const host = useHost();
   const mainStyle = useShellUi((s) => s.mainStyle);

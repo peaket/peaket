@@ -51,15 +51,17 @@ export const RumSample = zod.object({
 
 }).optional().describe('INP·LCP·CLS의 원인 요소(선택자 수준, observability §11, docs/frontend.md §5.16)'),
   "counters": zod.array(zod.object({
-  "name": zod.enum(['search_results_shown_total', 'search_suggest_shown_total', 'search_suggest_selected_total', 'search_result_click_total', 'search_requery_total']),
+  "name": zod.enum(['search_results_shown_total', 'search_suggest_shown_total', 'search_suggest_selected_total', 'search_result_click_total', 'search_requery_total', 'remote_load_failed_total']),
   "labels": zod.object({
+  "remote": zod.enum(['queue', 'purchase']).optional().describe('원격 위젯 이름(remote_load_failed_total)'),
+  "reason": zod.enum(['list', 'contract', 'policy', 'integrity', 'network', 'timeout', 'container']).optional().describe('원격 싣기 실패 까닭(remote_load_failed_total, docs/frontend.md §5.16)'),
   "zero": zod.enum(['true', 'false']).optional(),
   "kind": zod.enum(['PRODUCTION', 'ARTIST', 'PLACE']).optional(),
   "position": zod.enum(['1', '2', '3', '4', '5', '6', '7', '8']).optional(),
   "position_bucket": zod.enum(['1-3', '4-10', '11-20']).optional()
 }).strict().optional(),
   "value": zod.int().min(1)
-}).strict()).max(rumSampleCountersMax).optional().describe('검색 품질 수(선택 칸, 추천 적용 2026-11-16, ADR-0271 결정 20, docs/features/search.md §11). 검색어는 싣지 않는다')
+}).strict()).max(rumSampleCountersMax).optional().describe('화면이 세는 수(선택 칸). 검색 품질 수(추천 적용 2026-11-16, ADR-0271 결정 20, docs/features/search.md §11, 검색어는 싣지 않는다)와 관제 원격 위젯 싣기 실패 수 remote_load_failed_total{remote, reason}(app console, 2026-11-23 F-03-2 OPS-350, ADR-0361 결정 5, docs/frontend.md §5.16)')
 }).describe('브라우저 지표 묶음 판 2(추천 적용 2026-10-21, ADR-0079 결정 15, docs/frontend.md §5.16). 사용자 식별값과 실제 주소·쿼리·조각은 싣지 않는다. 판 1의 page는 route로 바뀌었다')
 
 export type RumSample = zod.input<typeof RumSample>;

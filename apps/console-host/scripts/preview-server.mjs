@@ -1,6 +1,7 @@
 // 관제 콘솔 미리보기 서버(local·ci 전용, ADR-0360 결정 6·12). 운영 빌드(dist/, 원격 dist/remotes/ 포함)를 그대로 내고,
 // 운영 배포 응답 헤더 정책과 같은 헤더(staticAppHeaders('console'): 묶음 C CSP를 막는 모드, Trusted Types는 보고 모드)를 붙인다.
 // 화면 경로는 index.html로 돌린다(앱 안 라우터). PEAKET_OPS_PROXY_TARGET을 주면 /v1/ops/를 실제 ops-svc로 넘긴다(scripts/ops-proxy.mjs).
+// 캐시: 화면 HTML과 원격 목록(remotes.json)은 매번 확인(no-cache), 원격 진입 파일은 경로에 sha가 있어 해시 붙은 자산처럼 오래 캐시한다(ADR-0361 결정 3).
 // 실행: pnpm --filter @peaket/console-host build && PEAKET_OPS_API_ORIGIN=http://localhost:4173 PEAKET_OPS_PROXY_TARGET=http://127.0.0.1:3000 \
 //       pnpm --filter @peaket/console-host preview [포트, 기본 4173]
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -21,6 +22,9 @@ const TYPES = {
   '.woff2': 'font/woff2',
   '.map': 'application/json; charset=utf-8',
 };
+
+/** 매번 확인하는 파일(산출물 폴더 기준 경로). 나머지는 이름이나 경로에 해시·sha가 있다 */
+const NO_CACHE = new Set(['index.html', 'remotes.json']);
 
 /**
  * 미리보기 서버를 만든다(시험이 포트 0으로 띄울 수 있다)
@@ -62,7 +66,7 @@ export function createPreviewServer(o = {}) {
       file = path.join(dist, 'index.html');
     }
     const type = TYPES[path.extname(file)] ?? 'application/octet-stream';
-    const cache = file.endsWith('index.html') || file.endsWith('remoteEntry.js') ? 'no-cache' : 'public, max-age=31536000, immutable';
+    const cache = NO_CACHE.has(path.relative(dist, file).split(path.sep).join('/')) ? 'no-cache' : 'public, max-age=31536000, immutable';
     res.writeHead(200, { ...headers, 'content-type': type, 'cache-control': cache, 'x-content-type-options': 'nosniff' });
     if (req.method === 'HEAD') {
       res.end();

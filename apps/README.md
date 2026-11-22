@@ -81,10 +81,10 @@
 
 ## 관제 콘솔을 실제 ops-svc에 붙여 띄우기(OPS-340, ADR-0360)
 
-관제 콘솔은 Module Federation 호스트와 원격 둘(대기열 `widgets/queue`, 구매 `widgets/purchase`)이다. `pnpm --filter @peaket/console-host build`가 `dist/`(호스트)와 `dist/remotes/<이름>/`(원격)를 함께 만든다. `PEAKET_CONSOLE_BUILD=single`이면 원격 없이 한 앱(기준선, FE-T29)으로 빌드한다. 대시보드(`/dashboard?event=<회차 UUID>`)의 '입장 비율·빈자리'·'결제사'와 명령 화면(`/commands`)은 `?state=`가 없으면 실제 값 화면이다.
+관제 콘솔은 Module Federation 호스트와 원격 둘(대기열 `widgets/queue`, 구매 `widgets/purchase`)이다. `pnpm --filter @peaket/console-host build`가 `dist/`(호스트), `dist/remotes/<이름>/<sha>/remoteEntry.js`(원격마다 한 파일)와 원격 목록 `dist/remotes.json`(이름·sha·정식 주소·sha384 무결성 값·계약 판, `scripts/remotes-manifest.mjs`)을 함께 만든다. 호스트는 그 목록을 읽어 무결성 값이 맞는 원격만 실행한다(F-03-2 OPS-350, ADR-0361). 원격 하나만 다시 빌드하려면 `pnpm --filter @peaket/console-host exec webpack --mode production --config-name remote-<이름>` 뒤 `node apps/console-host/scripts/remotes-manifest.mjs`(목록 다시 쓰기, `--remote <이름> --check`는 한 파일·80KB·사본 검사와 목록 조각)다. 경로의 sha는 `PEAKET_REMOTE_SHA`·`GITHUB_SHA`·커밋(원격 폴더에 커밋 안 한 변경이 없을 때)·원천 내용 해시 차례로 고른다. 개발 서버는 `/remotes.json`을 메모리 원격으로 그 순간 계산한다. `PEAKET_CONSOLE_BUILD=single`이면 원격 없이 한 앱(기준선, FE-T29)으로 빌드한다. 대시보드(`/dashboard?event=<회차 UUID>`)의 '입장 비율·빈자리'·'결제사'와 명령 화면(`/commands`)은 `?state=`가 없으면 실제 값 화면이다.
 
 1. ops-svc를 띄운다(PostgreSQL·identity-svc 필요, `services/ops-svc/src/main.ts`). 위젯 값을 보려면 `PEAKET_PROMETHEUS_URL`(클러스터 안 Prometheus 주소)을 준다. 없으면 두 위젯은 '받지 못함'이다.
 2. 콘솔을 같은 출처로 붙인다(local·ci 전용 넘김, `apps/console-host/scripts/ops-proxy.mjs`). 바깥 요청의 신원 머리는 지우고, `PEAKET_OPS_DEV_IDENTITY=<관리 계정 UUID>:<세션 UUID>`를 주면 그 신원 머리를 싣는다(gw-ops의 JWT → 머리 바꾸기 대역, ops-svc가 identity에 역할을 묻는다).
    - 개발 서버: `PEAKET_ENV=local PEAKET_OPS_API_ORIGIN=http://localhost:3002 PEAKET_OPS_PROXY_TARGET=http://127.0.0.1:<ops-svc PORT> PEAKET_OPS_DEV_IDENTITY=… pnpm --filter @peaket/console-host dev`(헤더는 묶음 C·Trusted Types 보고 모드)
    - 미리보기 서버(운영 빌드, 묶음 C 막는 모드): `PEAKET_OPS_API_ORIGIN=http://localhost:4173 pnpm --filter @peaket/console-host build` 뒤 같은 환경값으로 `pnpm --filter @peaket/console-host preview`(http://localhost:4173)
-3. 흐름은 탭마다 늘 여는 흐름(`/v1/ops/live`) 하나와 위젯 흐름(`/v1/ops/events/{eventId}/live`) 하나다. 개발 도구 네트워크 탭에서 두 요청이 열려 있고 콘솔에 CSP·Trusted Types 보고가 없는지 본다.
+3. 흐름은 탭마다 늘 여는 흐름(`/v1/ops/live`) 하나와 위젯 흐름(`/v1/ops/events/{eventId}/live`) 하나다. 개발 도구 네트워크 탭에서 두 요청이 열려 있고 콘솔에 CSP·Trusted Types 보고가 없는지 본다. 브라우저 탭을 30초 넘게 숨기면 위젯 흐름만 닫히고, 다시 보이면 위젯 조회(최근 15분)를 한 번 받은 뒤 위젯 흐름을 다시 연다(OPS-360).

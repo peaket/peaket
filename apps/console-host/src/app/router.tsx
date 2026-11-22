@@ -1,6 +1,8 @@
 // 관제 경로 표(d5 §2 인벤토리, docs/frontend.md §2.5·§5.7). 화면마다 경로 lazy로 따로 싣는다(ADR-0091 결정 1).
 // 화면 구현은 src/pages/<화면 폴더>/index.ts의 Page(또는 이름 붙은 내보내기)다. 다음 담당은 이 표를 고치지 않고 그 폴더만 바꾼다.
+// 메뉴 위 미리 부르기와 대시보드 2초 뒤 명령 화면 미리 받기는 이 표의 lazy를 shared/lib/preload.ts에 꽂아 쓴다(ADR-0091 결정 1, ADR-0361 결정 6).
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router';
+import { registerScreenPreloads } from '@/shared/lib/preload';
 import { ConsoleLayout } from './layout/ConsoleLayout';
 import { RootError, ScreenError } from './RouteError';
 
@@ -45,6 +47,17 @@ const shellScreens: RouteObject[] = [
   // SCR-059 관제 변형: 없는 주소
   { path: '*', lazy: () => import(/* webpackChunkName: "scr-059" */ '@/pages/system').then((m) => ({ Component: m.NotFoundPage })) },
 ];
+
+// 경로(정해진 주소만, 매개변수·없는 주소 빼고) → 그 화면 lazy. 같은 덩어리 이름이라 미리 부르면 이동 때 그 덩어리를 다시 받지 않는다
+registerScreenPreloads(
+  Object.fromEntries(
+    shellScreens
+      .filter((r): r is RouteObject & { path: string; lazy: () => Promise<unknown> } => typeof r.path === 'string' && !r.path.includes(':') && r.path !== '*' && typeof r.lazy === 'function')
+      .map((r) => [`/${r.path}`, r.lazy]),
+  ),
+  // 명령 화면 덩어리를 낮은 우선순위로(webpack 매직 주석 webpackFetchPriority, 같은 덩어리 scr-030)
+  () => import(/* webpackChunkName: "scr-030", webpackFetchPriority: "low" */ '@/pages/commands'),
+);
 
 const routes: RouteObject[] = [
   { index: true, element: <Navigate to="/dashboard" replace /> },

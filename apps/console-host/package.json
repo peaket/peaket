@@ -2,10 +2,10 @@
   "name": "@peaket/console-host",
   "private": true,
   "version": "0.0.0",
-  "description": "관제 콘솔 호스트(webpack 5 + React Router 8 + Module Federation 원격 둘, docs/frontend.md §2.3, ADR-0360)",
+  "description": "관제 콘솔 호스트(webpack 5 + React Router 8 + Module Federation 원격 둘, docs/frontend.md §2.3·§4.5, ADR-0360·0361). build는 원격 목록 dist/remotes.json까지 만든다",
   "scripts": {
     "dev": "webpack serve --mode development",
-    "build": "webpack --mode production",
+    "build": "webpack --mode production && node scripts/remotes-manifest.mjs --check",
     "typecheck": "tsc --noEmit",
     "test": "node --test",
     "preview": "node scripts/preview-server.mjs"

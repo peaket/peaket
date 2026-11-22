@@ -1,7 +1,8 @@
 // SCR-029 중앙 관제 대시보드(/dashboard?event=&tab=, d5 §7.2). 보드 SCR-029-d(데스크톱 xl 4열)·lg(1280~1439 3열)·t(태블릿 2열)·m(휴대폰 접힌 목록)을 배치마다 옮겼다.
 // 데스크톱의 T=0·판매 중 탭 위젯 일부는 원격 위젯 패키지(@peaket/widget-queue·purchase)로 그리고, 경보 패널은 ds AlertPanel이다.
 // 위 상태 바(단계·자동 제어·자동 조치·SEV·시계·역할)는 보드의 머리 분기대로 상태마다 호스트 값을 덮어쓴다.
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+// 보드 그림 셋(board-d·t·m)은 배치에 맞는 것만 늦게 싣는다(화면 덩어리 80KB [가정] 안, FE-T25, ADR-0361 결정 10). 상태 값(vals-*)만 바로 가져온다.
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useLocation, useSearchParams } from 'react-router';
 import { previewHref } from '@peaket/ds/Preview';
 import { OPERATORS } from '@/entities/operator';
@@ -14,10 +15,25 @@ import { opsApiAvailable } from '@/shared/api';
 import { setLiveEvent } from '@/shared/api/live';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { DEFAULT, STATES, TAB_STATE, type State } from '../states';
-import { MainD, OverlaysD, valsD } from './board-d';
-import { MainM, OverlaysM, valsM } from './board-m';
-import { MainT, OverlaysT, valsT } from './board-t';
+import { valsD } from './vals-d';
+import { valsM } from './vals-m';
+import { valsT } from './vals-t';
 import type { DashCtx, TabKey } from './ctx';
+
+// 배치마다 따로 받는 보드 덩어리(같은 이름의 늦은 가져오기는 같은 덩어리다)
+const MainD = lazy(() => import(/* webpackChunkName: "scr-029-d" */ './board-d').then((m) => ({ default: m.MainD })));
+const OverlaysD = lazy(() => import(/* webpackChunkName: "scr-029-d" */ './board-d').then((m) => ({ default: m.OverlaysD })));
+const MainT = lazy(() => import(/* webpackChunkName: "scr-029-t" */ './board-t').then((m) => ({ default: m.MainT })));
+const OverlaysT = lazy(() => import(/* webpackChunkName: "scr-029-t" */ './board-t').then((m) => ({ default: m.OverlaysT })));
+const MainM = lazy(() => import(/* webpackChunkName: "scr-029-m" */ './board-m').then((m) => ({ default: m.MainM })));
+const OverlaysM = lazy(() => import(/* webpackChunkName: "scr-029-m" */ './board-m').then((m) => ({ default: m.OverlaysM })));
+
+/** 보드 덩어리를 받는 동안(받지 못하면 경로 오류 경계가 그 화면 자리만 바꾼다) */
+const boardFallback = (
+  <p className="t-xs muted" role="status" aria-live="polite">
+    대시보드를 불러오는 중입니다…
+  </p>
+);
 
 /** 보드에 없고 d5 상태 표에만 있는 상태는 판매 중 탭을 바탕으로 그린다 */
 const EXTRA_BASE: Partial<Record<State, State>> = {
@@ -122,7 +138,7 @@ export function Page() {
   const asViewer = <T extends { isViewer: boolean; notViewer: boolean }>(v: T): T => (roleViewer ? { ...v, isViewer: true, notViewer: false } : v);
 
   return (
-    <>
+    <Suspense fallback={boardFallback}>
       {layout === 'desktop' ? (
         <div style={{ display: 'contents', ['--dash-cols' as string]: isXl ? 4 : 3 } as CSSProperties}>
           <MainD v={asViewer(flagsD)} close={close} ctx={ctx} />
@@ -142,6 +158,6 @@ export function Page() {
         </>
       ) : null}
       <PreviewSwitcher states={STATES} current={state} />
-    </>
+    </Suspense>
   );
 }
