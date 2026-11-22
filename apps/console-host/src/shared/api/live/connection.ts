@@ -34,6 +34,29 @@ async function refreshToken(): Promise<RefreshResult> {
   }
 }
 
+/** reset 뒤 내 승인 대기를 명령 REST(GET /v1/ops/commands?state=PENDING_APPROVAL,REVERT_PENDING)로 다시 읽어 호스트 슬라이스를 바꾼다 */
+async function resyncApprovals(): Promise<void> {
+  if (!ensureConsoleApi()) return;
+  try {
+    const { listOpsCommands } = await import('@peaket/api-client/endpoints/ops');
+    const r = await listOpsCommands({ state: ['PENDING_APPROVAL', 'REVERT_PENDING'], limit: 100 });
+    const items = ((r.data as { items?: unknown[] }).items ?? []) as { commandId?: unknown; type?: unknown; state?: unknown; eventId?: unknown; approvalExpiresAt?: unknown; canApprove?: unknown }[];
+    hostActions.replacePending(
+      items
+        .filter((c) => c.canApprove === true && typeof c.commandId === 'string')
+        .map((c) => ({
+          commandId: c.commandId as string,
+          type: String(c.type ?? ''),
+          state: String(c.state ?? ''),
+          ...(typeof c.eventId === 'string' ? { eventId: c.eventId } : {}),
+          ...(typeof c.approvalExpiresAt === 'string' ? { approvalExpiresAt: c.approvalExpiresAt } : {}),
+        })),
+    );
+  } catch {
+    // 다시 읽기 실패: 다음 approval·command 사건이 슬라이스를 고친다
+  }
+}
+
 const listeners = new Map<LiveEvent, Set<(p: unknown) => void>>();
 let liveStream: ManagedStream | undefined;
 let widgets: WidgetStreams | undefined;
@@ -90,8 +113,10 @@ function onLiveFrame(f: SseFrame): void {
       emit('autoAction', data);
       break;
     case 'reset':
-      // 알림 표 밖의 번호로 다시 붙었다: 화면이 REST로 다시 읽는다
+      // 알림 표 밖의 번호로 다시 붙었다(ADR-0100 결정 2): 호스트는 승인 대기를 명령 REST로 다시 읽고, 화면은 resync 번호·reset 구독으로 자기 목록을 다시 읽는다.
+      // 경보는 계약에 목록 REST가 없어 다시 읽지 않는다(경보 패널 F-03-3이 목록 REST와 함께 더한다)
       hostActions.resync();
+      void resyncApprovals();
       emit('reset', data);
       break;
     default:

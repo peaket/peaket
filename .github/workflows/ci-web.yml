@@ -6,6 +6,7 @@
 # 소비자 웹 CSP(2026-11-04 HOT-290): budgets 잡이 같은 운영 빌드로 FE-T35·FE-T30·캐시 화면 응답 때 해시(ADR-0193)를 세 엔진에서 본다.
 # ds 부품(2026-11-04 BAS-180): Storybook 정적 빌드의 모든 이야기를 시각 회귀(FE-T40, visual 잡)와 axe·동작 검사(FE-T18, ds 잡)로 본다.
 # 재배치·초점 가림(2026-11-19 BAT-171 HOT-381): reflow 잡이 web·partner·console 운영 빌드를 세 엔진에서 본다(FE-T31·FE-T18 자동 몫·SCR-058·HOT-390).
+# 콘솔 보안 헤더(2026-11-23 F-03-1 OPS-340): console-csp 잡이 관제 운영 빌드(원격 둘 포함)·파트너 운영 빌드의 헤더와 Trusted Types 위반 0을 Chromium으로 본다.
 # 좌석 실시간(2026-11-20 BAT-182 HOT-357): seats 잡이 @peaket/seatmap·@peaket/web 단위·typecheck와 5만 석 화면 시나리오(S-T13·S-T21·S-T31 ⑥)를 Chromium에서 본다.
 name: ci-web
 
@@ -179,6 +180,43 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rich-text-reports
+          path: tools/web-checks/reports/
+          retention-days: 7
+
+  # 관제·파트너 콘솔 보안 헤더(F-03-1 OPS-340 T10~T12, ADR-0360 결정 6~8): 관제 운영 빌드(호스트 + Module Federation 원격 둘)를
+  # 미리보기 서버(staticAppHeaders('console'))로, 파트너 운영 빌드를 next start(proxy.ts 헤더)로 띄워 응답 헤더와 화면·원격 적재 때
+  # CSP·Trusted Types 위반 0, 정책 이름이 목록 안인지를 Chromium으로 본다(tools/web-checks/console-csp/)
+  console-csp:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile --filter "@peaket/console-host..." --filter "@peaket/partner..."
+      - run: pnpm --filter @peaket/console-host build
+      - run: node rich-text/build.mjs
+        working-directory: tools/web-checks
+      - run: pnpm install --frozen-lockfile
+        working-directory: tools/web-checks
+      - run: pnpm run console-csp
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: console-csp-reports
           path: tools/web-checks/reports/
           retention-days: 7
 

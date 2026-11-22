@@ -78,6 +78,10 @@ export const hostActions = {
   approval(p: PendingApproval): void {
     hostStore.setState((s) => ({ commands: { pending: [p, ...s.commands.pending.filter((x) => x.commandId !== p.commandId)] } }));
   },
+  /** reset 뒤 REST로 다시 읽은 승인 대기로 바꾼다 */
+  replacePending(list: readonly PendingApproval[]): void {
+    hostStore.setState({ commands: { pending: [...list] } });
+  },
   command(commandId: string, state: string): void {
     hostStore.setState((s) => ({ commands: { pending: settlePending(s.commands.pending, commandId, state) } }));
   },
