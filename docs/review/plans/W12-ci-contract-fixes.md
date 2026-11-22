@@ -125,6 +125,45 @@
 
 ## 검증
 
+검증 담당 `w12ccf-verify`(deepseek-v4.1-flash), 2026-11-22 19:28~19:40 KST. 계획·시험·구현·리뷰에 관여하지 않았다. 기준 커밋 `32b179127`(리뷰까지).
+
+### 게이트
+
+| 검사 | 결과 |
+| --- | --- |
+| `pnpm.cmd --filter @peaket/platform test test/problem-types.test.ts` | **2/2 통과**(PRF192 포함) |
+| `node --test tools/local/demo-images.test.mjs tools/local/demo-objects.test.mjs` | **30/30 통과**(14 + 16) |
+| `node tools/ci/gateway-routes.mjs --check` | 생성 파일 5개가 같다(끝 코드 0) |
+| `node --test tools/ci/gateway-routes.test.mjs` | **41/41 통과**(D-T42 ①② 포함) |
+| `pnpm.cmd --filter @peaket/contracts gen:check` | 생성물이 계약과 같다 |
+| `pnpm.cmd --filter @peaket/contracts test` | **48/48 통과** |
+| `pnpm.cmd --filter @peaket/api-client gen:check` | 생성물이 계약과 같다 |
+| `pnpm.cmd --filter @peaket/api-client test` | **116/116 통과** |
+| `pnpm.cmd --filter @peaket/ticket-svc test` | **33파일 235/235 통과**(양도·돌려주기 HTTP 포함) |
+| `pnpm.cmd typecheck` | **43 tasks 통과** |
+| `pnpm.cmd lint` | 통과(출력 없음) |
+| `python -I -X utf8 tools/doc-check/check_all.py` | **오류 0, 경고 4**(기존 api 셋 + mermaid 건너뜀) |
+| `node tools/ci/roles-check.mjs --base origin/develop --head HEAD` | 검증 커밋 뒤 HEAD에서 **통과**(plan → test → impl → review → verify, 담당 표·꼬리말 맞음) |
+| `node tools/ci/records.mjs --check` | 기록 표가 맞다(경고는 R-374·R-608·R-763·R-473 등 기존 것) |
+
+- 새 계약은 DB·Docker가 필요한 통합 시험을 바꾸지 않는다. ticket-svc 단위 235개가 양도·돌려주기 HTTP·서비스·도메인 시험을 모두 포함하고 그대로 통과한다.
+- `doc-check` 경고 셋은 이 묶음 전에도 있던 `priority-grant-not-found`(404↔410)·`priority-seat-only`(409↔410)·`seat-store-unavailable`(503↔504) 설명 불일치이고, mermaid는 도구가 없어 건너뛴 것이다. 이 묶음이 만든 경고는 없다.
+
+### 틀린 구현 표본
+
+| # | 넣은 틀린 구현 | 잡은 검사(결과) |
+| --- | --- | --- |
+| S1 | `docs/api/openapi.yaml`에서 `transfer-expired` 줄을 뺀다 | PRF192 **실패**(`AssertionError: expected [ 'ticket-svc transfer-expired' ] to deeply equal []`, 1 failed/1 passed). 줄을 되돌리니 2/2 |
+| S2 | `deploy/envs/local/demo/identity-svc.yaml`의 `PEAKET_STAFF_INVITATION_URL` 호스트를 `www.peaket.example.evil`로 바꾼다 | demo-images **DS-04 실패**(`출처 https://www.peaket.example.evil:18441가 demoOrigins에 없다`, 14 중 1 실패). 되돌리니 14/14 |
+
+- 넣은 수 2, 잡힌 수 2, 놓친 수 0. 표본마다 그 파일만 `git checkout --`로 되돌렸고 `git status --short`에 제품 파일 차이가 없었다.
+
+### 남은 위험
+
+- **계약 깨짐 검사(소유자 승인 대기)**: 오류 목록에 이름 여덟을 더한 변경이 `contract-check`(oasdiff)에서 깨짐으로 잡힐 수 있다. `docs/api/breaking/openapi-ignore.txt`는 이 묶음에서 건드리지 않았고, 승인 뒤 별도 묶음이 판단한다. 이 검사는 여기서 돌리지 않았다(Docker·oasdiff 필요).
+- **리뷰 RV-01(낮음)**: `transfer-pending`의 표준 제목이 취소 맥락('양도 요청을 철회한 뒤 취소할 수 있습니다')이라 새 양도 요청을 만들려는 팬에게 어색하다. CI·시험을 막지 않으며 후속 묶음에서 type을 나누거나 중립 제목으로 바꾼다.
+- **제목 문구 변경(의도한 깨짐, 낮음)**: ticket-svc 양도·돌려주기 오류 여섯의 `title`이 표준 제목으로 바뀌고, 둘은 사유가 `detail`로 내려간다. 화면은 type으로 문구를 고르므로(`apps/web` ticket-cancel 매핑 확인) 제목을 그대로 쓰는 소비자는 없다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -133,3 +172,4 @@
 | test | w12ccf-test | deepseek-v4.1-flash | 2026-11-22T19:16:00+09:00 | 2026-11-22T19:20:00+09:00 |
 | impl | w12ccf-impl | deepseek-v4.1-flash | 2026-11-22T19:17:00+09:00 | 2026-11-22T19:23:00+09:00 |
 | review | w12ccf-review | deepseek-v4.1-flash | 2026-11-22T19:23:00+09:00 | 2026-11-22T19:28:00+09:00 |
+| verify | w12ccf-verify | deepseek-v4.1-flash | 2026-11-22T19:28:00+09:00 | 2026-11-22T19:40:00+09:00 |
