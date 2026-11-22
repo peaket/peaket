@@ -871,6 +871,7 @@
 | R-778 | BAT-220 계획이 OPS-160을 옛 표 BAT-221로 나눴는데 전환 뒤 옛 표의 새 묶음은 시작하지 않아 OPS-160이 어느 실행 표에도 없었다. 레지스트리 장애 때 레코드를 거절·커밋해 데이터가 빠졌다 | packages/platform(stream-worker·batch-consumer·avro-reader·schema-registry-source·keyed-consumer), deploy/charts/peaket-service, docs/streaming.md, docs/BUILD_ORDER.md(BAT-220·F-04-1·전환 대조), docs/security/asvs/analytics.md, docs/review/plans/ADR-0354-feature-transition.md, docs/lanes/lane1.md·lane1-cleanup.md | OPS-160을 기능 표 F-04-1로 옮기고, 일시 실패를 형으로 판정해 파티션을 멈추게 고쳤다 | 수정 완료 |
 | R-780 | develop CI payment-svc 통합 아홉 실패(J-T28·PRF180) | services/payment-svc/test-int/compensation-transfer.int.test.ts, payment-grpc.int.test.ts | 지우는 목록·표 목록을 마이그레이션 0025·0026에 맞춤 | 고침 |
 | R-781 | LCH-100 정산서 통지·이의·확정·수기 조정이 없거나 상태도와 어긋남(계산 때 HELD·CARRIED_OVER 건너뛰기, 덮어쓰기, 전액 취소 이중 차감) | services/payment-svc/src/modules/settlement, services/ops-svc/src/modules/approvals·payouts, payment 0027 | 조건부 전이·Outbox 통지·CS 건·기각·2인 조정·자동 확정 일꾼, ADR-0368 | 고침 |
+| R-779 | OPS-300 제어 gRPC 앞 몫 | ops-svc·admission-ctrl·purchase-svc·queue-svc·ci-node·ADR-0365·ASVS 네 행 | F-02-1 역할 다섯 | 끝 |
 
 ## 4. 숫자 일치표
 
