@@ -1452,6 +1452,7 @@ erDiagram
     event ||--o{ scanner_change : "회차별 변경 일련번호"
     ticket ||--o{ gate_flag : "이상 표시"
     ticket ||--o{ booth_authorization : "부스 재발급 허용"
+    device_key ||--o| device_key_notice : "입장 키 알림(ADR-0363)"
     ticket ||--o{ ticket_addon : ""
     event ||--|| scanner_seq : "회차별 변경 일련번호 카운터(ADR-0086)"
     gate_flag ||--o{ gate_flag_scan : "이상 표시에 든 스캔(ADR-0086)"
@@ -1522,6 +1523,17 @@ erDiagram
         text reason "ISSUE|REISSUE|TRANSFER|BOOTH(ADR-0050)"
         timestamptz registered_at
         timestamptz revoked_at
+    }
+    device_key_notice {
+        uuid id PK "알림 행 ID(core-svc 알림의 중복 키에 들어간다). 추천 적용 2026-11-23, ADR-0363 결정 4, 마이그레이션 ticket 0012"
+        uuid device_key_id FK "새로 등록한 키(device_key.id)"
+        uuid ticket_id FK
+        uuid account_id "알림 받을 계정(그때의 보유자). 연락처는 두지 않는다"
+        text type "DEVICE_KEY_REISSUED|DEVICE_KEY_LATE_ISSUE(docs/features/notify.md §4.7)"
+        timestamptz created_at "키 등록과 같은 트랜잭션"
+        int attempts "보낸 횟수"
+        timestamptz next_attempt_at "다음 보낼 때(1분·5분·30분 [가정] 간격)"
+        timestamptz sent_at "core-svc가 2xx·422로 답한 때. 보낸 행은 7일 [가정] 뒤 정비 작업이 지운다"
     }
     scan_event {
         uuid id PK "클라이언트 생성, 멱등. 기본 키는 (event_id, id)(ADR-0083)"

@@ -259,6 +259,16 @@ stateDiagram-v2
 - **I-T34·POL-034**: 내부 입구 `POST /internal/v1/notify/identity-events`가 `LOGIN_METHOD_CHANGED`를 받아 이메일·웹 푸시 작업을 한 번 적고, `ACCOUNT_MERGED`를 받아 흡수 계정의 신청·구독을 대표 계정으로 옮긴다(겹치면 하나, 보낸 횟수는 큰 쪽). 대표 계정에 완료 통지를 적는다. 흡수 계정 이메일 통지는 사건에 주소가 없어 남은 한계다(§16).
 - **남은 것**: 운영 메일 대행 계약과 `PEAKET_VAPID_PRIVATE_KEY`·`PEAKET_VAPID_PUBLIC_KEY`(OPEN[10]), 문자·알림톡 대행, 대량 발송 조각 원장(§4.2), Kafka 소비자 배선(지금은 내부 입구), POL-034 흡수 계정 이메일.
 
+### 4.7 입장 키 알림(추천 적용 2026-11-23, ADR-0363 결정 4, BUILD_ORDER GAT-020)
+
+docs/design/d5 §9.1의 '입장 키 재발급·입장 시작 뒤 첫 등록' 줄(거래·안전, 등록 직후, 이메일, 재발급은 이전 기기에도)을 보내는 길이다.
+
+- **받는 곳**: core-svc 내부 입구 `POST /internal/v1/notify/ticket-events`(내부 토큰). 본문은 `{noticeId, type, accountId, ticketId, registeredAtMs}`이고 `type`은 `DEVICE_KEY_REISSUED`(키가 있던 티켓의 새 키)·`DEVICE_KEY_LATE_ISSUE`(입장 시작 뒤 첫 등록) 둘이다. 정의 밖 칸은 422다. 보내는 쪽은 ticket-svc의 `device_key_notice` 보내기 반복이다(docs/data.md, docs/features/offline-gate.md §10.1).
+- **중복 키**: `{type}:{ticketId}:{noticeId}:{accountId}:{채널}`(§4.3). 같은 `noticeId`가 다시 와도 작업은 하나이고 202다.
+- **채널**: 이메일 하나와 그 계정의 살아 있는 웹 푸시 구독마다 하나. 어느 기기가 '이전 기기'인지는 따로 가리지 않는다(구독은 계정에 묶이고 기기를 알리지 않는다). 밤 시간 규칙은 거래·안전 알림의 규칙이다(§7.2, 밤에도 보낸다).
+- **문안**: 제목 "티켓 입장 키를 새 휴대폰에 등록했습니다". 본문 `DEVICE_KEY_REISSUED`는 "티켓 한 장의 입장 키를 {등록 시각, KST}에 새 휴대폰으로 옮겼습니다. 이전 휴대폰의 QR은 더 쓸 수 없습니다. 직접 하신 일이 아니면 고객센터로 알려 주세요", `DEVICE_KEY_LATE_ISSUE`는 "입장이 시작된 뒤 티켓 한 장을 {등록 시각, KST}에 이 계정의 휴대폰에 등록했습니다. 직접 하신 일이 아니면 고객센터로 알려 주세요". 링크는 `/my/tickets/{ticketId}`(§3.5의 허용한 앞부분 `/my/`). 변수는 `type`·`registeredAt`·`ticketId` 셋이고 허용 목록 밖 변수는 작업을 만들지 않는다(N-T14). 공개키·keyId·이메일 주소는 싣지 않는다.
+- **실패**: 이 알림은 보안 통지라 대행사 결과를 모르면 같은 키로 한 번 더 본다(§4.1). 알림 실패는 키 등록을 되돌리지 않는다(N-T22와 같은 원칙). 시험은 docs/features/offline-gate.md O-T48이다.
+
 ## 5. 대기실 오픈 안내 대량 발송(추천 적용 2026-10-30)
 
 ### 5.1 무엇이 문제인가
