@@ -25,7 +25,7 @@
 | --- | --- | --- | --- | --- |
 | BAT-011 | feature/lane1-BAT-011 | 끝남(R-773, 2026-11-22): HOT-161·PRF-173 끝, PRF-175는 BAT-012로 분리 | PRF-175는 GAT-280 계약 뒤 BAT-012가 한다 | 1 |
 | BAT-215 | feature/lane1-BAT-215-r2, PR #64 | 끝남(R-776, 2026-11-23): OPS-010·020 끝, OPS-030은 F-01-1로, `LOG_SAMPLING` 내기(C-T75 ①④)는 F-02-1로 | `LOG_SAMPLING` 계약 깨짐은 소유자 승인 2026-11-23(breaking-approved) | 1 |
-| BAT-220 | feature/lane1-BAT-220 | 7커밋 앞섬 | OPS-150·160을 끝내고 합치기 | 1 |
+| BAT-220 | feature/lane1-BAT-220 | 끝남(R-778, 2026-11-23): OPS-150 끝, OPS-160은 기능 표 F-04-1로 | 리뷰 막는 지적 RV220-1·2 고침, 검증 27/22(놓친 다섯은 정리 목록) | 1 |
 | SEG-010·020·030 | - | 구간 1~3 마무리 시연, 옛 BAT-036·140·345 | 감독이 시연·소유자 확인 목록을 끝내고 단계 줄 체크 | 감독 |
 | SEG-040·050 | - | 구간 4·5 마무리, 마일스톤 | 마지막 기능이 끝난 뒤 감독이 시연 | 감독 |
 
@@ -33,7 +33,7 @@
 
 - **읽는 법**: 갈래는 자기 영역의 첫 미완 기능 하나를 맡는다. 기능은 2~5일 수직 조각이고, 기능 가지에 역할 커밋을 쌓은 뒤 기능이 끝날 때 `develop`에 한 번 합친다.
 - **갈래 배치**: 영역과 갈래의 배치는 갈래 파일(`docs/lanes/lane1.md`~`lane5.md`)의 '다음 할 일'이 정한다. 이 표에는 `갈래` 칸을 두지 않는다.
-- **ID**: `F-<영역>-<번호>`. 영역은 ADR-0354 결정 4의 열한 영역이다. 전환점에서 끝나는 `BAT-215`(OPS-010·020, OPS-030은 F-01-1), `BAT-220`(OPS-150·160), `BAT-011`(PRF-173)과 이미 끝난 `OPS-280·290`, `BAS-150`, `LCH-030`은 이 표에서 뺐다.
+- **ID**: `F-<영역>-<번호>`. 영역은 ADR-0354 결정 4의 열한 영역이다. 전환점에서 끝나는 `BAT-215`(OPS-010·020, OPS-030은 F-01-1), `BAT-220`(OPS-150, OPS-160은 F-04-1), `BAT-011`(PRF-173)과 이미 끝난 `OPS-280·290`, `BAS-150`, `LCH-030`은 이 표에서 뺐다.
 - **크기**: 대부분 2~5일이다. 2일 미만인 행은 측정 창(F-04-8·F-08-5), 막힌 작은 잔여(F-09-9), 이미 작은 기능(F-01-1·F-06-1·F-06-4·F-08-7·F-10-2)이라 그대로 둔다. `일부 구현 있음`인 기능의 `WBS 일`은 단계 전체 일수라, 남은 몫은 그보다 작을 수 있다.
 - **상태**: `대기`·`진행`·`완료`·`일부 완료`·`막힘`.
 - **장부 범위**: 처음에는 `-`다. 기능을 시작할 때 옛 묶음 행의 `장부 범위`에서 이 기능에 닿는 항목만 좁혀 적고, `node tools/ci/ledger.mjs --batch <기능 ID>`로 확인한다.
@@ -59,6 +59,7 @@
 | F-03-3 | 관제 콘솔 | B | OPS-370·OPS-380 | 3.75 | FE-T29, docs/features/control-tower.md, FE-T41, docs/security/asvs/frontend.md | MF 기준선 비교와 대시보드 4단계·Go/No-Go가 화면에 뜬다 판정: FE-T29, docs/features/control-tower.md, FE-T41, docs/security/asvs/frontend.md | F-03-2 | 대기 |  |
 | F-03-4 | 관제 콘솔 | B | OPS-390·OPS-400 | 4.50 | docs/features/control-tower.md, docs/security/asvs/control-tower.md, docs/security/asvs/auth.md | 명령·감사·리플레이 화면과 법정 조치 화면이 실제 API로 뜬다 판정: docs/features/control-tower.md, docs/security/asvs/control-tower.md, docs/security/asvs/auth.md | F-03-3 | 대기 |  |
 | F-03-5 | 관제 콘솔 | B | OPS-410·OPS-420 | 4.00 | docs/features/control-tower.md, docs/security/asvs/catalog-review.md | 공지·홈 구성 화면과 휴대폰·태블릿 배치가 동작한다 판정: docs/features/control-tower.md, docs/security/asvs/catalog-review.md | F-03-4 | 대기 |  |
+| F-04-1 | 분석·포렌식 | B | OPS-160 | 2.50 | ST-T1, ST-T2, ST-T3, ST-T4, ST-T7, ST-T10, C-T20, C-T36, C-T37, C-T44 ① | 관제 실시간 표(`ops-rt`)가 회차별 0.5초 조회·신선도·다시 채우기와 함께 뜨고 KPI 패널이 실제 값을 보인다 판정: ST-T1, ST-T2, ST-T3, ST-T4, ST-T7, ST-T10 … | BAT-220 | 대기 | 2026-11-23 더함: BAT-220 계획이 OPS-160을 옛 표 BAT-221로 나눴는데 전환 뒤 옛 표의 새 묶음은 시작하지 않는다. 장부 범위는 옛 BAT-221 행 그대로다. ops-svc 위젯 원천은 F-03-1의 `WidgetSource` 포트를 따른다(감독 알림 2026-11-23). 넘겨받은 것: RV220-3(실행기에 소비자·시계 주입), RV220-8(작업자 값 파일의 나감 정책·PDB) |
 | F-04-2 | 분석·포렌식 | B | OPS-190 | 2.25 | docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md | 분석 이벤트 계약과 telemetry 토픽이 발행 서비스에 붙는다 판정: docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md | - | 대기 |  |
 | F-04-3 | 분석·포렌식 | B | OPS-200·OPS-205 | 3.50 | docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md, A-T18, A-T22, ST-T22 | analytics-ingest가 가명 키·금지 칸 제거·오프셋 대조로 적재한다 판정: docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md, A-T18, A-T22 … | F-04-2 | 대기 |  |
 | F-04-4 | 분석·포렌식 | B | OPS-220 | 3.00 | docs/features/analytics.md, A-T18, A-T22, ST-T22, docs/security/asvs/analytics.md | dbt staging/silver/gold 사실 15·차원 11이 만들어진다 판정: docs/features/analytics.md, A-T18, A-T22, ST-T22, docs/security/asvs/analytics.md | F-04-3 | 대기 |  |
@@ -134,7 +135,7 @@
 
 ## 전환 대조(2026-11-22)
 
-- **결과**: 체크되지 않은 단계 154개를 모두 확인했다. `전환점` 8개(PRF-173, OPS-010·020, OPS-150·160, SEG-010·020·030), `완료(확인)` 4개(OPS-280·290, BAS-150, LCH-030), `마일스톤` 2개(SEG-040·050), 나머지는 기능 표의 88개 기능에 들어갔다(2026-11-23 OPS-030을 전환점에서 F-01-1로 옮김). `GAT-210·220`은 이미 `[x]`다.
+- **결과**: 체크되지 않은 단계 154개를 모두 확인했다. `전환점` 7개(PRF-173, OPS-010·020, OPS-150, SEG-010·020·030), `완료(확인)` 4개(OPS-280·290, BAS-150, LCH-030), `마일스톤` 2개(SEG-040·050), 나머지는 기능 표의 89개 기능에 들어갔다(2026-11-23 OPS-030을 F-01-1로, OPS-160을 F-04-1로 전환점에서 옮김). `GAT-210·220`은 이미 `[x]`다.
 - **전체 표**: `docs/review/plans/ADR-0354-feature-transition.md` §부록 A에 단계 154개와 상태·기능·근거를 한 줄씩 적었다.
 - **다시 세는 법**: 계획 파일 `## 부록 A`의 154행과 `grep '^- \[ \]' docs/BUILD_ORDER.md` 결과를 대조한다. 이 절에는 요약만 두고 전체 표는 부록 A에 둔다.
 
@@ -249,8 +250,8 @@
 | BAT-210 | 3 | 2 | B | BAS-070·BAS-110·BAS-230 | 4.5 | NFR-007 | 2026-11-12 시작 때 장부 범위를 NFR-007로 좁혔다(ADR-0267 웨이브): docs/architecture.md·verification.md 전체는 다른 단계 몫이 섞여 있다. 이 묶음은 남은 기능 설계서 4편의 운영 확인 표, NFR-007 셈 근거, RFC 3건 초안을 만든다. BAS-110의 포트원 웹훅 헤더는 이미 payment §5에 있고, 토스·포트원 한도는 계약 전 추정으로 둔다 |
 | BAT-215 | 1 | 3 | B | OPS-010·OPS-020 | 3.75 | AC-T7 ④, C-T75 ②, C-T75 ③, C-T75 ⑤, C-T76, delivery:v5.0.0-14.2.3, delivery:v5.0.0-15.3.2, delivery:v5.0.0-16.2.1, delivery:v5.0.0-16.2.2, delivery:v5.0.0-16.2.4, delivery:v5.0.0-16.2.5, delivery:v5.0.0-16.4.1 | 선행 HOT-420(갈래 1, 끝남). 2.11.2의 나머지 HOT-430~450은 선행으로 두지 않는다(OPEN[53] (가), 2026-11-21). 2026-11-22 계획 때 장부 범위를 좁혔다: delivery.md 전체(V3 응답 헤더·쿠키, V13 공급망·비밀, V15, V16.3.1·16.3.2·16.3.4·16.4.2·16.4.3·16.5)와 AC-T7 ①~③(BOT-110이 끝냄)은 이 단계들이 만들지 않는다. docs/observability.md는 장부 항목이 없어 뺐다. 같은 날 감독 결정으로 OPS-030과 그 진단 증거 행은 BAT-216으로 나눴다(docs/review/plans/BAT-215.md §2) 2026-11-23 BAT-215 끝(R-776): 온세일 로그 표본 신호(`SettingChanged` `LOG_SAMPLING`) 받기·적용, 지표 라벨 시작 검사, 바깥 호출 머리·로그 시각과 연관, 관리 계정 비밀번호 로그 0건. 끝낼 때 장부 범위에서 다른 단계 넷을 뺐다: C-T75 ①④(생산)는 F-02-1(OPS-300, 옛 BAT-365), delivery 16.1.1·16.2.3은 INF-020. 계약 깨짐은 소유자 승인 2026-11-23(breaking-approved) |
 | BAT-216 | 1 | 3 | B | OPS-030 | 1 | delivery:v5.0.0-14.1.1, delivery:v5.0.0-14.1.2, delivery:v5.0.0-14.2.1, delivery:v5.0.0-14.2.2, delivery:v5.0.0-14.2.4, delivery:v5.0.0-14.2.7, delivery:v5.0.0-16.3.3 | 2026-11-22 BAT-215 계획에서 나눔(감독 결정) |
-| BAT-220 | 1 | 3 | B | OPS-150 | 2.25 | ST-T15, ST-T16 ① | 2026-11-22 계획 때 장부 범위를 OPS-150(공용 소비 모듈)이 닫는 항목으로 좁히고 OPS-160은 BAT-221로 나눴다(감독 승인). 빠진 항목의 갈 곳은 docs/review/plans/BAT-220.md §2·§12 |
-| BAT-221 | 1 | 3 | B | OPS-160 | 2.5 | ST-T1, ST-T2, ST-T3, ST-T4, ST-T7, ST-T10, C-T20, C-T36, C-T37, C-T44 ① | 2026-11-22 BAT-220 계획에서 나눔(감독 승인) |
+| BAT-220 | 1 | 3 | B | OPS-150 | 2.25 | ST-T15, ST-T16 ① | 2026-11-22 계획 때 장부 범위를 OPS-150(공용 소비 모듈)이 닫는 항목으로 좁히고 OPS-160은 BAT-221로 나눴다(감독 승인). 빠진 항목의 갈 곳은 docs/review/plans/BAT-220.md §2·§12 2026-11-23 BAT-220 끝(R-778): 묶음 실행기 `runBatchWorker`(쓰기 뒤 커밋·파티션별 묶음·다시 시도와 파티션 멈춤·거절 위치·멈춘 동안 밀림 5초 [가정] 고침), Avro 읽기(`avsc` 5.7.9, 모르는 기호 `UNRECOGNIZED`), 레지스트리 직접 조회(ADR-0335), 공용 차트 `worker.enabled`. 리뷰 높음 1·중간 2 고침, 틀린 구현 27/22 |
+| BAT-221 | 1 | 3 | B | OPS-160 | 2.5 | ST-T1, ST-T2, ST-T3, ST-T4, ST-T7, ST-T10, C-T20, C-T36, C-T37, C-T44 ① | 2026-11-22 BAT-220 계획에서 나눔(감독 승인) 2026-11-23: 전환 뒤 옛 표의 새 묶음은 시작하지 않아(ADR-0354 결정 1) OPS-160은 기능 표 F-04-1로 옮겼다. 이 행은 기록이다 |
 | BAT-225 | 1 | 3 | B | OPS-190·OPS-200 | 4.25 | docs/features/analytics.md, A-T21, docs/streaming.md, docs/security/asvs/analytics.md, ST-T16 ② | ST-T16 ②(생산자가 설정의 스키마 ID로 Avro 바이트를 냄)는 2026-11-22 BAT-220 계획에서 옮김(감독 승인) |
 | BAT-230 | 1 | 3 | B | OPS-205·OPS-220 | 4.5 | docs/features/analytics.md, A-T18, A-T22, ST-T22, docs/security/asvs/analytics.md |  |
 | BAT-235 | 1 | 3 | B | OPS-230 | 3 | docs/features/analytics.md, A-T25 | 혼자: 이웃과 합치면 5일을 넘음(OPS-220과 6일, OPS-240과 5.25일) |
@@ -644,7 +645,7 @@
 - [x] OPS-010 wbs 4.1.1 ①: 지표 — Prometheus/Mimir(로컬은 Prometheus 하나), 별도 노드 풀, 쿼리 통계·노드 네트워크 통계 수집, Mimir 측정 항목(ADR-0120) (1.75일) **BAT-215 끝(2026-11-23, R-776)**: 서비스 쪽 몫(지표 라벨 시작 검사 C-T76, 바깥 호출 검사)만 했다. 수집기·Mimir·노드 풀·쿼리 통계 같은 배포 몫은 INF-020으로 넘겼다.
 - [x] OPS-020 wbs 4.1.1 ②③: 로그·이벤트(Loki, 정규 로그 줄 저장, 표본 비율·최소 보존, `k8sobjects`)와 추적·프로파일(OTel 테일 샘플링, 드문 경로 꼬리 표본, Tempo, Pyroscope). FND-090이 넘긴 것(OPEN[09] 추천 적용(소유자 결정 2026-11-02): `control.settings`의 `LOG_SAMPLING`): 온세일 구간에 정상 로그 줄 표본 비율을 100으로 바꾸는 연결(`service.logs.setSampleOneIn`). 함수는 있고 신호 출처만 정하면 된다(R-225) BOT-110이 넘긴 것: 관리 계정 비밀번호의 AC-T7('로그·트레이스에 비밀번호 SHA-1과 그 앞 5자가 0건', docs/security/auth-controls.md §4.3 10)의 유출 비밀번호 범위 조회는 고쳤다(2026-11-05): 플랫폼 바깥 호출 클라이언트로 불러 span은 경로 틀(`/range/{prefix}`) 하나이고 추적 머리를 싣지 않는다(identity-svc `test/outbound-trace.test.ts`). 고치기 전에도 플랫폼 span 처리기가 `url.full`을 출처로 줄이고 `url.path`·`url.query`를 비워 앞 5자는 span에 없었고, 남은 결함은 바깥 제공자에게 `traceparent`가 실린 것이었다. identity-svc 사람 확인 검증(`turnstile-human-check.ts`)도 같은 꼴(전역 `fetch`로 `traceparent`를 Cloudflare에 실음, 리디렉트를 따름)이라 같은 클라이언트로 고쳤다(2026-11-05, 같은 시험 파일). 이 단계에서는 다른 서비스의 바깥 호출도 전역 `fetch`를 바로 부르지 않는지 본다. 테일 샘플링을 지나 Tempo에 닿은 span과 요청 로그 줄에도 0건인지 본다(docs/api/guidelines.md §8, ADR-0053 '나가는 HTTP 호출의 트레이스·로그에는 경로 템플릿만'). (2일) **BAT-215 끝(2026-11-23, R-776)**: `LOG_SAMPLING` 받기·적용(C-T75 ②③⑤, ADR-0334)과 AC-T7 ④의 서비스 쪽 몫을 했다. 신호를 내는 쪽(ops-svc 온세일 구간 판단·Outbox, C-T75 ①④)은 F-02-1(OPS-300) 몫이고, Tempo·테일 샘플링 쪽 0건 확인은 INF-020 몫이다.
 - [ ] OPS-030 wbs 4.1.1 ④: 직접 운영 시간 기록과 시간 단가(ADR-0067), 진단 증거 저장소(14일 수명)와 증거 수집기(ADR-0070) (1일)
-- [ ] OPS-150 wbs 4.3.1 ①: 스트림 작업자 공용 소비 모듈 `@peaket/stream-worker`(쓰기 뒤 커밋, 파티션별 묶음·중복 토큰, 다시 시도·파티션 멈춤, 거절 기록, ST-T15·16), 작업자 네트워크 정책·보안 컨텍스트 (2.25일)
+- [x] OPS-150 wbs 4.3.1 ①: 스트림 작업자 공용 소비 모듈 `@peaket/stream-worker`(쓰기 뒤 커밋, 파티션별 묶음·중복 토큰, 다시 시도·파티션 멈춤, 거절 기록, ST-T15·16), 작업자 네트워크 정책·보안 컨텍스트 (2.25일) **BAT-220 끝(2026-11-23, R-778)**: 작업자별 값 파일·나감 정책·PDB(RV220-8)와 생산자 Avro 바이트(ST-T16 ②)는 F-04-1·F-04-2 몫.
 - [ ] OPS-160 wbs 4.3.1 ②: 관제 실시간 표 읽기 모델(`ops-rt`, `rt` 원시 표 다섯·매개변수 뷰, 회차별 0.5초 조회), `rt-pulse`·신선도, 다시 채우기 명령, 파트너 판매 현황 1분 조회, 비즈니스 KPI 패널·대시보드 (2.5일)
 - [ ] OPS-190 wbs 4.3.3: 분석 이벤트 계약 보강(eventKey, 주문·결제·좌석·티켓·정산 필드, telemetry 토픽 신설, 사람별 대기 기록)과 발행 서비스 반영, 대기 끝 기록·홀드 시도·좌석 사건의 조사 칸 발행과 계약 시험(ADR-0171) PRF-080이 넘긴 것: 대기가 끝날 때의 `QueueEntryRecord`(판매 종료 때 차례 전 대기의 `SALE_END` 포함)와 1초 집계 `QueueAggregate`(`telemetry.queue`, 파드마다 1초)를 queue-svc가 Kafka로 직접 낸다(Avro와 스키마 레지스트리 클라이언트 `@confluentinc/schemaregistry`, 버퍼가 차면 버리고 `telemetry_dropped_total`, docs/streaming.md). 2026-11-03에는 이 PC의 pnpm이 Windows 앱 제어 정책에 막혀 새 의존성을 설치할 수 없었다. 사람별 `enteredAt`·`firstEtaSec`·`entryMode`·`verifyRoute`를 어디에 두는지와 `eventKey` 식은 정본에 없다. 1초 집계가 생기면 RB-05의 K를 장애 직전 1초 발급 수로 바꿀지 본다(ADR-0181 되돌릴 조건). HOT-060이 넘긴 것(2026-11-09, ADR-0233): 대기 취소·로비 참가 취소의 `QueueEntryRecord`(빠진 사유 `LEFT`)를 `LeaveQueue`에서 낸다. 넘기는 pid는 전환 기간에 옛 pid다. (2.25일)
 - [ ] OPS-200 wbs 4.3.4 ①: 원천 적재 `analytics-ingest`(회차별 가명 키, 금지 필드 제거와 조사 칸 일곱 버리기(A-T21, ADR-0171), 쓰기 성공 뒤 커밋, 오프셋 대조) (2일)
