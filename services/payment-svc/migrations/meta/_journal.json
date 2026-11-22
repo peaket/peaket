@@ -197,6 +197,13 @@
       "when": 1795368730354,
       "tag": "0027_settlement_adjustment_dispute",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1795385952291,
+      "tag": "0028_receivable_movement_rename",
+      "breakpoints": true
     }
   ]
 }

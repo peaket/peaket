@@ -314,8 +314,9 @@ export const partnerReceivable = pgTable(
   ],
 );
 
-export const receivableMove = pgTable(
-  'receivable_move',
+/** 미수금 이동 기록(docs/data.md ERD receivable_movement). 0028이 옛 이름 receivable_move에서 바꿨다(FIX-invariant-m3) */
+export const receivableMovement = pgTable(
+  'receivable_movement',
   {
     /** 0026: 한 정산서에 상계·보증 충당이 함께 붙을 수 있어 (미수금, 정산서) 대신 이동 ID를 기본 키로 쓴다 */
     id: uuid('id').defaultRandom().primaryKey(),
@@ -330,9 +331,9 @@ export const receivableMove = pgTable(
     movedAt: at('moved_at').notNull(),
   },
   (t) => [
-    index('receivable_move_receivable_idx').on(t.receivableId, t.movedAt),
-    check('receivable_move_amount_check', sql`${t.amount} > 0`),
-    check('receivable_move_kind_check', sql`${t.kind} in ('OFFSET', 'GUARANTEE', 'COLLECTED', 'WRITE_OFF', 'REVERSAL')`),
+    index('receivable_movement_receivable_idx').on(t.receivableId, t.movedAt),
+    check('receivable_movement_amount_check', sql`${t.amount} > 0`),
+    check('receivable_movement_kind_check', sql`${t.kind} in ('OFFSET', 'GUARANTEE', 'COLLECTED', 'WRITE_OFF', 'REVERSAL')`),
   ],
 );
 

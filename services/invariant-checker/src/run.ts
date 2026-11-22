@@ -98,15 +98,15 @@ export async function runInvariantChecks(o: CheckOptions): Promise<CheckRun> {
     const noSource = sourceNames.filter((s) => missingSources.has(s));
     const noTable = def.requires.filter((t) => !loaded.has(t) && !noSource.includes(SOURCE_TABLES.find((x) => x.name === t)!.source));
     if (def.records && !o.records) {
-      results.push({ ...base, result: 'SKIPPED', reason: '시험 기록 없음' });
+      results.push({ ...base, result: 'SKIPPED', reason: '시험 기록 없음', skip: { kind: 'records', names: [] } });
       continue;
     }
     if (noSource.length) {
-      results.push({ ...base, result: 'SKIPPED', reason: `원본 없음: ${noSource.join(', ')}` });
+      results.push({ ...base, result: 'SKIPPED', reason: `원본 없음: ${noSource.join(', ')}`, skip: { kind: 'source', names: noSource } });
       continue;
     }
     if (noTable.length) {
-      results.push({ ...base, result: 'SKIPPED', reason: `원본에 표 없음: ${noTable.join(', ')}` });
+      results.push({ ...base, result: 'SKIPPED', reason: `원본에 표 없음: ${noTable.join(', ')}`, skip: { kind: 'table', names: [...noTable] } });
       continue;
     }
     const r = await check.query<{ subject: string; detail: string }>(sqlFile(def.file));

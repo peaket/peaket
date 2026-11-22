@@ -30,7 +30,6 @@ import {
   payoutAccount,
   payoutBatch,
   payoutBatchAudit,
-  receivableMove,
   sellerKyc,
   settlementStatement,
   settlementStatementAudit,
@@ -39,6 +38,8 @@ import {
   statementDispute,
   statementSource,
 } from './schema.js';
+// 표 이름 바꾸기 확장 단계라 옛 이름(뷰)으로 읽고 쓴다(receivable-move-compat.ts 머리 주석)
+import { receivableMoveCompat } from './receivable-move-compat.js';
 
 /** 조건이 맞지 않은 전이를 트랜잭션 밖으로 알리는 표시(롤백한 뒤 false로 바꾼다) */
 class TransitionRejected extends Error {
@@ -550,7 +551,7 @@ export class DrizzleSettlementStore implements SettlementStore {
           await tx.update(partnerReceivable).set({ remaining: u.remaining, status: u.status, updatedAt: u.updatedAt }).where(eq(partnerReceivable.id, u.receivableId));
         }
         if (input.receivableMoves.length > 0) {
-          await tx.insert(receivableMove).values(
+          await tx.insert(receivableMoveCompat).values(
             input.receivableMoves.map((m) => ({
               ...(m.moveId ? { id: m.moveId } : {}),
               receivableId: m.receivableId,
@@ -1062,7 +1063,7 @@ export class DrizzleSettlementStore implements SettlementStore {
   }
 
   async insertReceivableMove(record: ReceivableMoveRecord): Promise<void> {
-    await this.db.db.insert(receivableMove).values({
+    await this.db.db.insert(receivableMoveCompat).values({
       ...(record.moveId ? { id: record.moveId } : {}),
       receivableId: record.receivableId,
       statementId: record.statementId,
@@ -1073,12 +1074,12 @@ export class DrizzleSettlementStore implements SettlementStore {
   }
 
   async listReceivableMoves(statementId: string): Promise<ReceivableMoveRecord[]> {
-    const rows = await this.db.db.select().from(receivableMove).where(eq(receivableMove.statementId, statementId));
+    const rows = await this.db.db.select().from(receivableMoveCompat).where(eq(receivableMoveCompat.statementId, statementId));
     return rows.map((r) => ({ moveId: r.id, receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, kind: r.kind as ReceivableMoveRecord['kind'], movedAt: r.movedAt }));
   }
 
   async listReceivableMovesForReceivable(receivableId: string): Promise<ReceivableMoveRecord[]> {
-    const rows = await this.db.db.select().from(receivableMove).where(eq(receivableMove.receivableId, receivableId));
+    const rows = await this.db.db.select().from(receivableMoveCompat).where(eq(receivableMoveCompat.receivableId, receivableId));
     return rows.map((r) => ({ moveId: r.id, receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, kind: r.kind as ReceivableMoveRecord['kind'], movedAt: r.movedAt }));
   }
 
@@ -1123,7 +1124,7 @@ export class DrizzleSettlementStore implements SettlementStore {
         reason: input.collection.reason,
         createdAt: input.collection.createdAt,
       });
-      await tx.insert(receivableMove).values({
+      await tx.insert(receivableMoveCompat).values({
         ...(input.move.moveId ? { id: input.move.moveId } : {}),
         receivableId: input.move.receivableId,
         statementId: input.move.statementId,

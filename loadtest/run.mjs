@@ -34,7 +34,7 @@ import { ensureTool } from '../tools/local/tools.mjs';
 import { V1_DATABASES, V1_HOST_DIRS, V1_NGINX_TAG, v1Layout } from '../tools/local/v1-objects.mjs';
 import { V1_CONSENT_VERSION, V1_NAMESPACE, v1ClientKey } from '../tools/local/v1-stage.mjs';
 import { v1SeatMap } from './lib/v1.mjs';
-import { activeEventsProblem, entryTrials, pausedDelta, pauseReasons, readLeaseHolders, servingLogFromZset, skippedProblem, stagePgKey, v1LedgerJudge, v1PaymentDbUrl, v1RecordProblem, withEntryRecords } from './runner/v1.mjs';
+import { activeEventsProblem, entryTrials, pausedDelta, pauseReasons, readLeaseHolders, servingLogFromZset, skippedProblem, stagePgKey, V1_EXPECTED_SKIPPED, v1LedgerJudge, v1PaymentDbUrl, v1RecordProblem, withEntryRecords } from './runner/v1.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey, signV0Token } from '../tools/local/v0-token.mjs';
 import { pollStages } from './lib/model.mjs';
 import { seatCount } from './lib/seats.mjs';
@@ -1770,7 +1770,7 @@ export function v1StageNotes(a, o) {
     `v1 한 프로세스 합본(queue-svc·admission-ctrl·purchase-svc·payment-svc, OTel 서비스 이름 bundle 하나), Redis TLS ${o.redisTls ? '켬' : '끔'}`,
     '넣지 않은 서비스의 대역: trust-svc 위험 판정 늘 축소 운영, identity-svc 재확인 토큰 판정, ticket-svc 늘 발권, core-svc 대신 시드(회차 일정·좌석 판매·좌석맵 판)',
     '게이트웨이 없음: k6가 합본 Service와 대기 상태 파일 앞 nginx 캐시로 바로 보내고 신원 머리를 넣는다(입구 IP 한도 없음)',
-    ...(o.skipped ? [`불변식 SKIPPED: ${o.skipped.join('·') || '없음'}(기대 S3·P5·M1~M5, 티켓 원본·정산 표 없음, 결제 취소는 빈 검사 뷰)`] : []),
+    ...(o.skipped ? [`불변식 SKIPPED: ${o.skipped.join('·') || '없음'}(기대 ${V1_EXPECTED_SKIPPED.join('·')}, 티켓 원본 없음, 결제 취소는 빈 검사 뷰)`] : []),
     ...(a.scenario === 'payment' ? ['K7: 가상 사용자마다 반복 안에서 진입·입장 뒤 결제(phase:prep 요청은 본구간 판정에서 뺌, 동시 입장 목표 5,000명), 결제 확정 시간은 결제 접수 시작부터 끝 상태까지'] : []),
     ...(o.pause ? [`정지 판정 입력(kube_pod_status_ready) ${o.pause.inputs === 'present' ? '있음' : o.pause.inputs === 'absent' ? '없음: 로컬 무대에서는 K7 ②의 정지 전이를 판정하지 못한다(측정 조건)' : '확인 못 함'}, 새 결제 정지 503 ${o.pause.newPaymentPaused503}건(끝낸 파드 포함)`] : []),
     ...(a.scenario === 'queue'

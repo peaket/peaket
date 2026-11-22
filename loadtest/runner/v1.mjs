@@ -3,10 +3,11 @@ import { ERROR_TARGETS } from '../lib/targets.mjs';
 import { assertRunTag } from '../lib/users.mjs';
 
 /**
- * v1 합본 실행에서 SKIPPED여야 하는 불변식(docs/verification.md §3.10 'v1 합본 측정 규칙'): 티켓 원본이 없어 S3·P5, 정산 표가 아직 없어 M1~M5.
+ * v1 합본 실행에서 SKIPPED여야 하는 불변식(docs/verification.md §3.10 'v1 합본 측정 규칙'): 티켓 원본이 없어 S3·P5.
+ * v1 결제 DB는 payment-svc 마이그레이션을 모두 적용하므로 M1·M2·M4·M5(payment 0015·0016)와 M3(이동 기록 표 정본 이름, payment 0028)는 세어진다(FIX-invariant-m3).
  * 이 목록과 다르면(더 SKIPPED거나 덜 SKIPPED) 실행 도구가 실패로 끝낸다(조용히 검사를 잃지 않게, 코드 리뷰 H2)
  */
-export const V1_EXPECTED_SKIPPED = Object.freeze(['M1', 'M2', 'M3', 'M4', 'M5', 'P5', 'S3']);
+export const V1_EXPECTED_SKIPPED = Object.freeze(['P5', 'S3']);
 
 /**
  * invariants.csv(id,name,sources,violations,unknown,result,as_of)에서 SKIPPED 목록과, 기대 목록과 다르면 그 문제 글
