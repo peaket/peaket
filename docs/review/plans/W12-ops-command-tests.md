@@ -27,7 +27,7 @@
 | --- | --- | --- | --- |
 | 1 | `command-role-policy.test.ts` `COMMANDER_ONLY` | 6개(판매 중지·재개 포함) | 4개(`AUTOMATION_STOP`·`BOT_LEVEL`·`DEGRADED_MODE`·`KILL_SWITCH`). `SALE_STOP`·`SALE_RESUME`는 요청 역할 `operator`·`commander`, 승인 역할 `commander`임을 따로 단언한다 |
 | 2 | `command-role-policy.test.ts` operator 요청 시험 | commander 전용 유형의 operator 요청은 모두 403 | commander 전용 4개만 403. `SALE_STOP`·`SALE_RESUME`의 operator 요청은 `PENDING_APPROVAL`·`requestedRole: 'operator'`이고 감사 기록이 남는다 |
-| 3 | `command-role-policy.test.ts` 정책 이전 행 시험 | operator가 요청한 `SALE_STOP` 행을 commander가 승인·반려하면 403 | 레거시 행 유형을 `KILL_SWITCH`(operator가 요청할 수 없는 유형)로 바꿔 저장소 층의 역할 거절을 그대로 본다. 판매 중지·재개는 이제 정상 요청이므로 이 시험의 소재가 아니다 |
+| 3 | `command-role-policy.test.ts` 정책 이전 행 시험 | operator가 요청한 `SALE_STOP` 행을 commander가 승인·반려하면 403 | 레거시 행 유형을 `BOT_LEVEL`(operator가 요청할 수 없는 2인 명령)로 바꿔 저장소 층의 역할 거절을 그대로 본다. 판매 중지·재개는 이제 정상 요청이므로 이 시험의 소재가 아니다 |
 | 4 | `command-role-policy.test.ts` operator 승인 시험 | commander가 만든 `SALE_STOP`을 operator가 승인·반려하면 403, commander는 승인 가능 | 그대로 유지하고, operator가 요청한 `SALE_STOP`의 자기 승인(operator 역할) 403·요청자 본인이 commander 역할로 승인해도 403 `command-requester-cannot-approve`를 더한다. 다른 commander의 승인·반려도 함께 본다 |
 | 5 | `command-lifecycle-http.test.ts` 내부 사건 길 시험 | operator `SALE_STOP` 요청을 `{ accepted: false }`로 기대 | 목록에서 `SALE_STOP`을 빼고 `BOT_LEVEL`(commander 전용 요청)을 넣는다. `SALE_STOP` operator 요청은 `{ accepted: true, commandId }`·`PENDING_APPROVAL`·`requestedRole: 'operator'`로 단언한다. 이 명령은 승인 전이라 실행은 0건이다 |
 | 6 | `command-lifecycle-http.test.ts` 내부 사건 길 시험(이어서) | 없음 | 위 `SALE_STOP`을 operator 본인이 승인하면 403 `command-role-forbidden`, 다른 commander가 토큰 없이 승인하면 403 `reauth-required`, 토큰을 달면 200 `SUCCEEDED`다. `SALE_RESUME`도 operator 요청 → operator 반려 403 → commander 반려 200 `REJECTED`를 본다 |
@@ -79,13 +79,30 @@
 
 ## 리뷰
 
+리뷰 담당 `w12oct-review`(deepseek-v4.1-flash), 2026-11-22 18:47~18:55 KST. 받은 것은 `git diff cdcfc748f..72d2d8e01`(계획·시험)와 이 계획 파일이다. 제품 코드·계약·마이그레이션과 정본을 대조했고, 두 시험 파일을 다시 돌려 **30/30**을 확인했다. 코드는 고치지 않았다.
+
+결과: **막는 지적 0**, 낮음 2(남은 위험).
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 낮음(남은 위험) | `services/ops-svc/test/command-role-policy.test.ts:57~78` | `BOT_LEVEL` 승인 역할은 정본(control-tower §3 5행)이 '요청자 아닌 operator 이상'인데 제품은 commander만이다. 시험은 `DEGRADED_MODE`만 빼고 '승인 역할 ⊆ 요청 역할' 부분집합 검사로 이 어긋남을 통과시킨다(기존 주석대로 BAT-365 몫). 이 묶음이 만든 것이 아니다 | BAT-365에서 `BOT_LEVEL` approverRoles를 operator·commander로 넓히고 이 시험의 예외도 정리한다 |
+| RV-02 | 낮음(남은 위험) | `services/ops-svc/test/command-lifecycle-http.test.ts:630` | 반려(`rejections`)는 컨트롤러가 재인증을 보지 않아 commander가 토큰 없이 200으로 닫는다. 시험은 이 제품 동작을 그대로 단언한다. 정본 C-T5는 '접수·승인·재시도'에 재인증을 요구하고 반려는 적지 않아 지금은 어긋나지 않지만, 반려도 위험 명령을 닫는 조작이라 후속 정책에서 확인할 자리다 | 제품 정책이 반려에 재인증을 더하면 시험도 `withToken`을 요구하도록 함께 고친다 |
+
+### 확인한 것(지적 아님)
+
+- **정본**: POL-038 ⑩·ADR-0123 결정 2는 'operator 이상 요청 + 요청자 아닌 commander 승인'이고, 제품 `services/ops-svc/src/modules/commands/domain/command.ts:152~153`이 requesterRoles `operator`·`commander`, approverRoles `commander`로 같다. `approvalModeOf`가 둘 다 `TWO`라 접수·승인에 재인증이 붙는 것도 시험과 맞다.
+- **거절 경로 유지**: commander 전용 4유형(`KILL_SWITCH`·`BOT_LEVEL`·`DEGRADED_MODE`·`AUTOMATION_STOP`)의 operator 요청 403, viewer 403, operator 승인·반려 403, 요청자 본인 승인 403 `command-requester-cannot-approve`, 저장소 레거시 행(`BOT_LEVEL` operator 요청) 403, 재시도 403이 모두 남아 있다. 두 파일에 `skip`·`only`·`todo` 0건이다.
+- **판매 중지·재개 경로**: 단위 시험은 operator 요청 `PENDING_APPROVAL`, operator 승인 403(자기 요청 포함), 요청자 commander의 자기 승인 403, 다른 commander 승인 `APPROVED`, 다른 commander 반려 `REJECTED`를 본다. HTTP 시험은 토큰 없는 operator 접수 403 `reauth-required`, 토큰 있는 접수 201 `PENDING_APPROVAL`, operator 승인 403, commander 토큰 없는 승인 403 `reauth-required`, 토큰 있는 승인 200 `SUCCEEDED`, commander 반려 200 `REJECTED`를 본다.
+- **제품 무변경**: `git diff --name-only cdcfc748f..HEAD`가 계획 파일과 시험 두 파일뿐이다. `services/ops-svc/src/`·계약·마이그레이션 변경 0.
+- **실행**: 두 파일 **30/30**, `git diff --check` 공백 오류 0.
+
 ## 검증
 
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | w12oct-plan | deepseek-v4.1-flash | 2026-11-22T18:35+09:00 | 2026-11-22T18:45+09:00 |
-| test | w12oct-test | deepseek-v4.1-flash | 2026-11-22T18:45+09:00 | 2026-11-22T19:05+09:00 |
-| review | w12oct-review | deepseek-v4.1-flash | 2026-11-22T19:05+09:00 | 2026-11-22T19:20+09:00 |
-| verify | w12oct-verify | deepseek-v4.1-flash | 2026-11-22T19:20+09:00 | 2026-11-22T19:45+09:00 |
+| plan | w12oct-plan | deepseek-v4.1-flash | 2026-11-22T18:28+09:00 | 2026-11-22T18:42+09:00 |
+| test | w12oct-test | deepseek-v4.1-flash | 2026-11-22T18:30+09:00 | 2026-11-22T18:47+09:00 |
+| review | w12oct-review | deepseek-v4.1-flash | 2026-11-22T18:47+09:00 | 2026-11-22T18:55+09:00 |
+| verify | w12oct-verify | deepseek-v4.1-flash | 2026-11-22T18:55+09:00 | 2026-11-22T19:40+09:00 |
