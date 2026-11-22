@@ -17,6 +17,7 @@ const PROMOTER = '0190f3a1-7c2e-7a00-8000-0000000d0002';
 const ACCOUNT = '0190f3a1-7c2e-7a00-8000-0000000d0011';
 const OTHER = '0190f3a1-7c2e-7a00-8000-0000000d0012';
 const EDGE = '0190f3a1-7c2e-7a00-8000-0000000d0013';
+const FUTURE = '0190f3a1-7c2e-7a00-8000-0000000d0014';
 const E1 = '0190f3a1-7c2e-7a00-8000-0000000d0101';
 const E2 = '0190f3a1-7c2e-7a00-8000-0000000d0102';
 const E3 = '0190f3a1-7c2e-7a00-8000-0000000d0103';
@@ -105,6 +106,7 @@ beforeAll(async () => {
   await seedAccount(ACCOUNT, 'staff@example.com');
   await seedAccount(OTHER, 'other@example.com');
   await seedAccount(EDGE, 'edge@example.com');
+  await seedAccount(FUTURE, 'future@example.com');
 });
 
 afterAll(async () => {
@@ -147,14 +149,14 @@ describe('배정 만료·promoter 정본화 PostgreSQL [BAT-450C]', () => {
 
   test('I-T87 ③ hasAssigned는 지금 창 안의 ASSIGNED만 센다(미래·지난·취소 false, 시작·끝 정각 true)', async () => {
     await seed({ id: A4, status: 'ASSIGNED', eventId: E7, accountId: ACCOUNT, validFrom: new Date(NOW - 1), validUntil: new Date(NOW + 1) });
-    await seed({ id: A5, status: 'ASSIGNED', eventId: E8, accountId: OTHER, validFrom: new Date(NOW + 1), validUntil: new Date(NOW + HOUR) });
-    await seed({ id: A6, status: 'ASSIGNED', eventId: E9, accountId: OTHER, validFrom: new Date(NOW - 2 * HOUR), validUntil: new Date(NOW - 1) });
-    await seed({ id: L1, status: 'REVOKED', eventId: EA, accountId: OTHER, validFrom: new Date(NOW - 1), validUntil: new Date(NOW + 1) });
+    await seed({ id: A5, status: 'ASSIGNED', eventId: E8, accountId: FUTURE, validFrom: new Date(NOW + 1), validUntil: new Date(NOW + HOUR) });
+    await seed({ id: A6, status: 'ASSIGNED', eventId: E9, accountId: FUTURE, validFrom: new Date(NOW - 2 * HOUR), validUntil: new Date(NOW - 1) });
+    await seed({ id: L1, status: 'REVOKED', eventId: EA, accountId: FUTURE, validFrom: new Date(NOW - 1), validUntil: new Date(NOW + 1) });
     await seed({ id: L2, status: 'ASSIGNED', eventId: EB, accountId: EDGE, validFrom: new Date(NOW), validUntil: new Date(NOW) });
 
     await expect(store.hasAssigned(ACCOUNT, NOW)).resolves.toBe(true);
-    await expect(store.hasAssigned(OTHER, NOW)).resolves.toBe(false);
-    await expect(store.hasAssigned(OTHER, NOW + 1)).resolves.toBe(true);
+    await expect(store.hasAssigned(FUTURE, NOW)).resolves.toBe(false);
+    await expect(store.hasAssigned(FUTURE, NOW + 1)).resolves.toBe(true);
     await expect(store.hasAssigned(EDGE, NOW)).resolves.toBe(true);
   });
 
