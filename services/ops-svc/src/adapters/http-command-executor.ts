@@ -4,7 +4,7 @@
 // SCALE_CHANGE는 core-svc 관제 API(규모 올리기)를 부른다.
 // SALE_STOP·SALE_RESUME은 purchase-svc(원본 sale_control·좌석 사본)와 queue-svc(대기열 사본)를 차례로 부르고,
 // 제어 gRPC 주소가 있으면 ControlReceiver.ApplyControl(판 번호 ack)이 정본이다(ADR-0102·0123).
-import type { ExternalHttpClient } from '@peaket/platform';
+import { requestContext, type ExternalHttpClient } from '@peaket/platform';
 import type { Command, CommandExecutionActor, CommandExecutionResult } from '../modules/commands/domain/command.js';
 import type { CommandExecutor, ControlDeliverer } from '../modules/commands/domain/ports.js';
 import type { EventRefundStarter, RefundFault, RefundKind, RefundPg } from './grpc-event-refunds.js';
@@ -177,7 +177,11 @@ export class HttpCommandExecutor implements CommandExecutor {
     const useHttp = this.o.purchase !== undefined && this.o.queue !== undefined;
     if (!useGrpc && !useHttp) return { status: 'FAILED', error: 'target-not-wired' };
     const transport = useGrpc ? 'control-grpc' : 'purchase-svc+queue-svc';
-    const apply = (id: string) => (useFanout ? this.#applyControlFanout(command, action, id) : useGrpc ? this.#applyControlGrpc(command, action, id) : this.#applyControlHttp(command, action, id));
+    // 응답 안 기다림의 시한은 명령 하나에 하나다: 처음 보낸 때 + 10초(서비스·회차마다 새로 잡지 않는다)와 요청 남은 시간 가운데 짧은 것(RV-06, ASVS 15.1.3)
+    const startedAtMs = this.o.nowMs?.() ?? Date.now();
+    const remaining = requestContext()?.deadline.remainingMs();
+    const budget = { startedAtMs, ...(remaining !== undefined ? { untilMs: startedAtMs + remaining } : {}) };
+    const apply = (id: string) => (useFanout ? this.#applyControlFanout(command, action, id, budget) : useGrpc ? this.#applyControlGrpc(command, action, id) : this.#applyControlHttp(command, action, id));
 
     if (action === 'SUSPEND') {
       const scope = coreEnabled ? await this.#coreScope(eventId) : undefined;
@@ -225,7 +229,7 @@ export class HttpCommandExecutor implements CommandExecutor {
    * 회차 하나의 제어 gRPC 퍼뜨리기(F-02-1, ADR-0365 결정 1·4): 판은 원장이 DISPATCHED 때 매긴 판(없으면 명령 기록의 바뀐 시각)이고,
    * 받는 쪽 서비스마다 준비된 모든 파드가 판 이상을 답해야 다음 서비스로 간다. 중지는 purchase → queue, 재개는 queue → purchase다
    */
-  async #applyControlFanout(command: Command, action: 'SUSPEND' | 'RESUME', eventId: string): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
+  async #applyControlFanout(command: Command, action: 'SUSPEND' | 'RESUME', eventId: string, budget: { startedAtMs: number; untilMs?: number }): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
     const version = command.controlVersion ?? command.updatedAtMs;
     const desiredStateJson = JSON.stringify({ suspended: action === 'SUSPEND' });
     const services = action === 'SUSPEND' ? (['purchase-svc', 'queue-svc'] as const) : (['queue-svc', 'purchase-svc'] as const);
@@ -234,7 +238,7 @@ export class HttpCommandExecutor implements CommandExecutor {
         commandId: command.commandId,
         version,
         deliveries: [{ service, scope: eventId, kind: 'CONTROL_KIND_SALE_SUSPENSION', desiredStateJson }],
-        startedAtMs: this.o.nowMs?.() ?? Date.now(),
+        ...budget,
       });
       if (!r.ok) return { ok: false, error: r.error };
     }
