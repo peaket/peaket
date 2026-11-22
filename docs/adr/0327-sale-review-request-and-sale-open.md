@@ -2,6 +2,7 @@
 
 - **상태**: 채택(2026-11-20, 감독 결정. 갈래 5 BAT-616 담당이 LCH-080 잔여의 정본 빈칸으로 정했다. 판매 승인 자체의 규칙은 [ADR-0093](0093-production-entity-place-artist-units.md)·[ADR-0062](0062-open-items-delegated-decisions.md)·[ADR-0122](0122-event-sale-status-all-held-sold-out-reopen.md)·[ADR-0181](0181-queue-failover-pause-numbers-until-rb05.md)·[ADR-0186](0186-rb05-resume-after-replication-confirm.md)·[ADR-0200](0200-event-detail-public-contract.md)·[ADR-0260](0260-production-layout-copy-price-tiers-fan-seatmap-file.md)·[ADR-0320](0320-promoter-contract-terms-approval-and-freeze.md) 그대로이고, 이 ADR은 그 사이의 저장 모양·차례·경계를 정한다)
   - 보충(2026-11-22, 감독 결정 W12-core-rls, 보안 높음): 결정 13을 더했다. 0034가 판매자 표를 파트너 DB 역할에 행 보안 없이 열어, 다른 파트너의 판매자 행까지 읽고 고칠 수 있었다.
+  - 보충(2026-11-22, 갈래 5 BAT-617): 결정 14를 더했다. 판매 승인 화면을 열면서 승인 본문·상세 읽기 칸을 구현과 계약에 맞췄고, 메모리 저장소를 DB와 같게 맞췄다.
 - **관련**: [docs/data.md](../data.md) `production`·`promoter`·`event_sale`·`seat_rebuild`·`q:{event:E}:cfg`·`q:{event:E}:epoch`, [docs/features/settlement.md](../features/settlement.md) §3·§9·§10, [docs/features/seat-hold.md](../features/seat-hold.md) §4·§6·§12, [docs/features/control-tower.md](../features/control-tower.md) §4, [docs/api/openapi.yaml](../api/openapi.yaml) `/v1/partner/productions/{productionId}/sale-review`·`/v1/ops/sale-reviews*`, [docs/api/guidelines.md](../api/guidelines.md) §1·§3·§8.1, [docs/security/authz-matrix.md](../security/authz-matrix.md) §3.3·§4.1·§5.3, [docs/planning/03-policies-glossary.md](../planning/03-policies-glossary.md) §2.14·§2.15, [docs/review/plans/BAT-616.md](../review/plans/BAT-616.md), [docs/review/plans/W12-core-rls.md](../review/plans/W12-core-rls.md)
 - **관련 ID**: S-T41, LCH-080, FR-052, POL-037, AZ-T5, BUILD_ORDER BAT-616
 
@@ -59,6 +60,12 @@
     - `core_maintenance`·`core_search`는 이 표의 권한이 없어 정책을 두지 않는다. 정책이 없으면 행 보안이 0건으로 답한다. 권한을 줄 일이 생기면 그 마이그레이션이 정책도 더한다.
     - `FORCE ROW LEVEL SECURITY`는 걸지 않는다. 마이그레이션과 부트스트랩 시드는 표 소유자로 돌고, 앱 역할은 표 소유자가 아니다(ADR-0241 결정 1과 '다른 선택지'). AZ-T5가 소유자와 FORCE 여부를 본다.
     - 이 결정으로 ADR-0241 결정 4의 '판매자 연락처를 읽지 못한다'는 '다른 파트너의 판매자 행을 읽지 못한다'로 좁혀진다.
+
+14. **판매 승인 화면은 승인 본문을 `scales`·`placeId`(선택)·`accessibleSeatingCheck`(선택)로 좁힌다. 아티스트·다른 이름 연결은 LCH-080 잔여다(보충 2026-11-22, BAT-617).**
+    - `POST /v1/ops/sale-reviews/{productionId}/approvals` 본문에서 `artistIds`(필수)·`aliases`를 뺀다. 구현 `SaleApprovalBody`가 `.strict()`로 두 칸을 받지 않고 저장 코드도 없어, 계약을 지키는 생성 클라이언트 본문이 400이 되던 어긋남을 없앤다(RV-05).
+    - 화면은 상세가 준 `placeId`가 있으면 그 값을 싣고, 없으면(새 공연장 요청) 보내지 않아 서버가 지금 값을 그대로 둔다. 관제 상세는 `placeId`·`placeName`·`requestedPlace`·`accessibleSeatingCheck`를, 파트너 현황은 `title`을 더한다.
+    - 운영자가 기존 아티스트·공연장을 잇거나 새로 만드는 경로(`POST /v1/ops/artists`·`POST /v1/ops/places`)와 `production_artist`·`search_alias` 쓰기는 이 묶음에 넣지 않는다. 화면은 읽기 전용 안내만 두고 LCH-080 단계 줄은 체크하지 않는다.
+    - 메모리 저장소는 관제 상세의 취소 회차 포함과 목록 정렬 폴백(`created_at`)을 DB와 같게 맞춘다(RV-06).
 
 ## 결과
 

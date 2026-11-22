@@ -407,7 +407,7 @@ stateDiagram-v2
 - 목록 `GET /v1/ops/sale-reviews`는 상태(기본 SUBMITTED)를 주지 않으면 승인 대기만, `status`에 쉼표로 여럿을 주면 그 상태들을 제출·승인·등록 시각 오래된 순으로 준다. 상세 `GET /v1/ops/sale-reviews/{productionId}`는 판매자 정보·회차(오픈·시작·규모)·판매 정책 읽기 전용·제출 시각·재승인 여부·반려 사유를 준다. viewer·operator·commander·`cs_agent`·`cs_lead`가 읽고(CS·viewer는 읽기만), 승인·반려는 operator·commander만 한다. 세 응답은 `no-store`다. 목록은 계좌번호 전체·연락처·사업자번호를 싣지 않고, 상세와 파트너 현황은 그 공연의 판매자 정보(상호·대표자·주소·연락처·사업자번호)를 권한 있는 역할에게만 싣는다.
 - 승인은 공연 단위다(ADR-0093). 승인 커밋 뒤 core-svc가 비취소 회차마다 purchase 내부 판매 열기를 부르고, 성공한 회차만 `q:cfg`·`q:epoch`를 쓴 뒤 `event:{id}`·`production:{id}` CDN 태그를 무효화한다. 열기·사본·무효화가 실패해도 승인은 200으로 남고 정비 일 `sale-config-publish`가 다시 시도한다.
 - 반려는 사유 1~1,000자를 `production.rejection_reason`에 남기고 파트너 화면·관제 상세가 읽는다.
-- 판매 중지·재개(2인 승인)와 SCR-048의 그 단추는 LCH-090 몫이다(ADR-0123). 이 묶음은 자리 안내만 둔다. 지급대행 등록은 LCH-110 전이라 "연동 전"으로 보인다. 화면 연결은 BAT-617이다.
+- 판매 중지·재개(2인 승인)와 SCR-048의 그 단추는 LCH-090 몫이다(ADR-0123). 이 묶음은 자리 안내만 둔다. 지급대행 등록은 LCH-110 전이라 "연동 전"으로 보인다. 화면은 BAT-617이 이었다: 실제 경로는 목록·확인 패널·승인·반려를 `listOpsSaleReviews`·`getOpsSaleReview`·`createOpsSaleReviewApproval`·`createOpsSaleReviewRejection`으로 그리고, viewer·CS는 읽기만 한다. 승인 본문은 회차별 `scales`와 상세의 `placeId`(있을 때)만 싣고, 아티스트·다른 이름 연결은 LCH-080 잔여라 자리 안내만 둔다(ADR-0327 보충).
 
 **누가 여는가**
 
@@ -584,3 +584,4 @@ stateDiagram-v2
 | 감사 기록이 변조되지 않고 공개 앵커가 붙는다 | `command_event` 해시 체인, `audit_chain`의 mac, 공개 체크포인트, 검증 잡 결과 | mac 빈 행 0(1분 [가정] 안에 채움), 검증 실패 0 | 감사·앵커 패널 | mac 빈 행이 1분 [가정]을 넘으면 SEV2, 변조 탐지 SEV2(보안), 앵커 6시간 [가정] 지연 SEV3 | C-T27·C-T41·C-T49로 한 줄을 고치거나 지우고, KMS를 막은 채 명령을 내 체인이 따라잡는지 본다 |
 | 법정 기한과 취소 마감을 놓치지 않는다 | `ops_event`(법정 기한), `OpsAlert`, `fraud_case_event`, 취소 마감 12시간·2시간 [가정] | 법정 24시간·10시간 기한 준수, 취소 마감 전 결정 0건 | 법정 조치 패널, 부정 거래 조사 패널 | 22시간 미처리 SEV2, 취소 마감 12시간 전 SEV3·2시간 전 SEV2 | C-T16·C-T23·C-T68로 데모 시계를 넘겨 경보와 처리함 건을 확인한다 |
 | 접속기록 점검이 매일 돈다 | `admin_data_access`, `INV_CASE_VOLUME`·`INV_EXPORT_VOLUME`, 점검 목록 | 매일 점검, 미조치 0 | 접속기록 점검 패널 | 월말까지 정기 점검이 안 끝나면 SEV3, 반복 다운로드 등은 점검 목록 | C-T24로 파트너 계정이 같은 명단을 3회 내려받게 하고 다음 날 점검 목록을 확인한다 |
+| 판매 승인 목록·확인 패널이 실제 값을 보인다 | `sale_review_request_total{result}`(제안)·`sale_open_total{result}`, `GET /v1/ops/sale-reviews`·상세 응답, 감사 로그 | 목록 p95 500ms [가정], 승인 200 뒤 판매 열기 성공, 409·422·503 비율 | 판매 승인 목록·확인 패널 | 503·열기 실패가 몰리면 SEV3(정비 일 `sale-config-publish` 재시도) | SCR-021 요청→SCR-048 목록·승인→SCR-021 상태, 반려 사유, viewer·CS 읽기 전용, "지급대행 연동 전"을 확인한다(BAT-617) |
