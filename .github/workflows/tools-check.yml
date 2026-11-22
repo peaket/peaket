@@ -69,3 +69,5 @@ jobs:
       - run: node tools/ci/check-kafka-settings.mjs
       # 시험 파일의 Docker 호출마다 시간 제한(timeout 300_000ms 이하 정수)이 있는지 본다(ADR-0283 결정 4)
       - run: node tools/ci/check-docker-timeouts.mjs
+      # 설정이 기대는 최소 판(V-T39 ③, ADR-0356 결정 5): 판은 docs/devops.md §4.4 줄에서 읽는다. 잠금 파일의 @sentry SDK가 낮거나 서로 다르면 실패
+      - run: node tools/ci/min-versions.mjs
