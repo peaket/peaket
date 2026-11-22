@@ -74,9 +74,10 @@ const RULES = [
   // 서명기 세 엔진 검사(purchase 잡, HOT-360 ①, ADR-0221 결정 7)가 본다
   // 좌석 실시간(BAT-182, HOT-357, FE-T11·S-T13·S-T21·S-T31 ⑥): 좌석 화면·좌석맵 패키지·가짜 스트림·5만 석 좌석 시나리오는 web 잡(seats 포함)이 본다.
   // 아래 web 규칙이 이미 잡지만, 좌석 경로를 한 줄로 드러내 새 파일이 생겨도 빠뜨리지 않게 한다
+  // 관제 원격 위젯 계약 패키지와 공용 원격 빌드 워크플로(build-remote.yml)는 원격 빌드(remotes 잡, F-03-2 OPS-350)가 본다
   [/^(apps\/web\/src\/_pages\/seats\/|apps\/web\/scripts\/mock-api(\/|\.mjs$)|packages\/seatmap\/|tools\/web-checks\/seats\/)/, ['web']],
   [
-    /^(apps\/|packages\/(ds|config|seatmap)\/|packages\/platform\/(src\/(telemetry-app-server|telemetry-sdk|trace-boundary|client-family|pseudonym|config|deadline)\.ts|package\.json)$|packages\/api-client\/src\/purchase\/|services\/core-svc\/test-int\/fixtures\/seatmap-editor\/|docs\/api\/vectors\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|tools\/storybook\/|\.github\/workflows\/ci-web\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
+    /^(apps\/|packages\/(ds|config|seatmap|console-contract)\/|packages\/platform\/(src\/(telemetry-app-server|telemetry-sdk|trace-boundary|client-family|pseudonym|config|deadline)\.ts|package\.json)$|packages\/api-client\/src\/purchase\/|services\/core-svc\/test-int\/fixtures\/seatmap-editor\/|docs\/api\/vectors\/|docs\/design\/(tokens\.json|d2-design-system\.md)$|docs\/frontend\.md$|tools\/web-checks\/|tools\/storybook\/|\.github\/workflows\/(ci-web|build-remote)\.yml$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$|\.nvmrc$)/,
     ['web'],
   ],
   // 신뢰 정책 예외 검사(tools-check, check-trust-exceptions.mjs, ADR-0191)가 보는 작업 공간 파일과 그 예외 표가 바뀌어도 돌린다

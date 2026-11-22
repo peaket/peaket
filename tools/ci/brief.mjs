@@ -14,7 +14,7 @@
 //   파일(도구 시험 자료)은 뺀다(ledger.mjs와 같다). 파일 40개까지 적는다
 // CI 잡 표(JOBS·CI_AREAS)의 근거(2026-11-10): .github/workflows/ci.yml(범위 잡 changes와 범위마다 부르는 워크플로), tools/ci/changes.mjs의
 //   RULES(경로 → 범위)·WIDEN_JS(node 전체), ci-node.yml(node: typecheck·test·build·lint와 통합 시험 단계), ci-web.yml(tokens·visual·queue-room·
-//   purchase·rich-text·ds·seed-css·budgets·seatmap-pkg·reflow. 잡마다 빌드·검사하는 앱과 패키지), contract-check.yml(contracts), docs-check.yml(docs),
+//   purchase·rich-text·console-csp·remotes·ds·seed-css·budgets·seatmap-pkg·reflow·seats. 잡마다 빌드·검사하는 앱과 패키지), contract-check.yml(contracts), docs-check.yml(docs),
 //   tools-check.yml(tools), loadtest-check.yml(loadtest), spec-check.yml(spec), ci-kind.yml(kind), build-image.yml(build).
 //   영역 → 잡은 그 영역을 직접 빌드·검사하는 잡이다. web 범위가 켜지면 ci-web.yml의 잡 열이 모두 도는 것은 따로 알린다(reflow는 2026-11-19 BAT-171에서 더함).
 //   brief.test.mjs가 잡 이름과 통합 시험 패키지가 실제 워크플로에 있는지 본다
@@ -293,6 +293,7 @@ export const JOBS = {
   'web / budgets': { file: 'ci-web.yml', what: '운영 빌드의 경로별 첫 JS 예산·Lighthouse·대기실 FE-T1·CSP(FE-T35·FE-T30)·정적 자산, @peaket/config 정본 대조' },
   'web / seatmap-pkg': { file: 'ci-web.yml', what: '좌석맵 패키지 세 엔진' },
   'web / seats': { file: 'ci-web.yml', what: '좌석 실시간 단위·typecheck와 5만 석 화면 시나리오(FE-T11·S-T13·S-T21·S-T31 ⑥)' },
+  'web / remotes': { file: 'ci-web.yml', what: '관제 원격 위젯 공용 빌드(build-remote.yml: 원격 폴더 린트·한 파일 빌드·gzip 80KB·sha384·목록 조각, F-03-2 OPS-350)' },
   'web / reflow': { file: 'ci-web.yml', what: '재배치·초점 가림(FE-T31·FE-T18)·인앱 브라우저 안내(SCR-058)·월렛 워커(HOT-390) 세 엔진, web·partner·console 운영 빌드' },
   'security-scan / dependencies': { file: 'security-scan.yml', what: 'pnpm 내장 의존성 취약점·라이선스 검사와 조치 기한·예외 만료 판정(tools/ci/vuln-deadline.mjs, BAS-010 ①)' },
 };
@@ -316,11 +317,13 @@ export const CI_AREAS = [
   [/^apps\/web\/queue-room\//, () => 'apps/web/queue-room', ['web / queue-room', 'web / visual', 'web / budgets', 'node / node']],
   [/^apps\/web\//, top2, ['web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
   [/^apps\/partner\//, top2, ['web / rich-text', 'web / console-csp', 'web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
-  [/^apps\/console-host\//, top2, ['web / console-csp', 'web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
+  [/^apps\/console-host\//, top2, ['web / console-csp', 'web / remotes', 'web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
+  [/^apps\/widgets\//, top2, ['web / remotes', 'web / console-csp', 'node / node']],
   [/^apps\/(scanner|forensics)\//, top2, ['web / budgets', 'web / seed-css', 'node / node']],
   [/^apps\//, top2, ['node / node']],
   [/^packages\/ds\//, top2, ['web / tokens', 'web / visual', 'web / ds', 'node / node']],
   [/^packages\/seatmap\//, top2, ['web / seatmap-pkg', 'node / node']],
+  [/^packages\/console-contract\//, top2, ['web / remotes', 'web / console-csp', 'node / node']],
   [/^packages\/api-client\/src\/purchase\//, () => 'packages/api-client/src/purchase', ['web / purchase', 'contract-check / contracts', 'node / node']],
   [/^packages\/(api-client|contracts)\//, top2, ['contract-check / contracts', 'node / node']],
   [/^packages\/platform\//, top2, ['node / node', 'contract-check / contracts', 'kind / kind', 'image / build']],
@@ -381,7 +384,7 @@ export function ciJobs(paths, specAdrs = new Set()) {
     .map((r) => ({ area: r.area, code: r.code, files: r.files, docs: r.docs, jobs: r.jobs, extra: [...r.extra].join('; ') }));
   const notes = [];
   if (paths.some((p) => WEB_SCOPE.test(p.path))) {
-    notes.push('web 범위(tools/ci/changes.mjs의 web 규칙)에 드는 곳이 있어 그곳을 고치면 ci-web.yml의 잡 열둘(tokens·visual·queue-room·purchase·rich-text·console-csp·ds·seed-css·budgets·seatmap-pkg·reflow·seats)이 모두 돈다. 표의 web 잡은 그 영역을 직접 빌드·검사하는 잡이다');
+    notes.push('web 범위(tools/ci/changes.mjs의 web 규칙)에 드는 곳이 있어 그곳을 고치면 ci-web.yml의 잡 열셋(tokens·visual·queue-room·purchase·rich-text·console-csp·remotes·ds·seed-css·budgets·seatmap-pkg·reflow·seats)이 모두 돈다. 표의 web 잡은 그 영역을 직접 빌드·검사하는 잡이다');
   }
   if (paths.some((p) => WIDEN_JS.test(p.path))) notes.push('node / node는 넓게 쓰이는 것(packages/platform·contracts·config, docs/api)을 고치면 바뀐 패키지만이 아니라 전체를 돈다(changes.mjs의 WIDEN_JS)');
   const used = new Set(out.flatMap((r) => r.jobs));
