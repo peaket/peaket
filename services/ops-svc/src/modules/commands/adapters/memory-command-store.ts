@@ -48,6 +48,8 @@ interface MemRow {
   lastError?: string;
   executedAtMs?: number;
   result?: Record<string, unknown>;
+  controlVersion?: number;
+  controlSentAtMs?: number;
 }
 
 /** 시험이 읽는 사건 한 줄(command_event와 같은 칸) */
@@ -90,6 +92,8 @@ export class MemoryCommandStore extends CommandStoreBase {
   readonly #locks = new Map<string, Promise<void>>();
   /** 사후 검토 행(command_post_review와 같은 칸, ADR-0349 결정 7) */
   readonly #postReviews = new Map<string, PostReviewRow>();
+  /** 판 번호 원장 control_version('<범위>|<종류>' → 마지막 판, ADR-0365 결정 1) */
+  readonly #ledger = new Map<string, number>();
   /** 설정 사건 Outbox(ops DB outbox와 같은 메시지, ADR-0349 결정 5) */
   readonly #outbox: MemoryOutboxSetting[] = [];
 
@@ -167,7 +171,14 @@ export class MemoryCommandStore extends CommandStoreBase {
       ...(dryRun !== undefined ? { dryRun } : {}),
       ...(ackedAtMs !== undefined ? { ackedAtMs } : {}),
       ...(postReviewDueAtMs !== undefined ? { postReviewDueAtMs } : {}),
+      ...(r.controlVersion !== undefined ? { controlVersion: r.controlVersion } : {}),
+      ...(r.controlSentAtMs !== undefined ? { controlSentAtMs: r.controlSentAtMs } : {}),
     };
+  }
+
+  /** 시험이 읽는 원장 값(없으면 undefined) */
+  controlVersionOf(scope: string, kind: string): number | undefined {
+    return this.#ledger.get(`${scope}|${kind}`);
   }
 
   #idemKey(idem: CommandIdempotency): string {
@@ -260,6 +271,7 @@ export class MemoryCommandStore extends CommandStoreBase {
     const newApprovals: MemApproval[] = [];
     const audits: { recordType: string; payload: Record<string, unknown>; nowMs: number }[] = [];
     const newSettings: MemoryOutboxSetting[] = [];
+    const ledgerDraft = new Map<string, number>();
     const existingEvents = this.#events.get(commandId) ?? [];
     const allActors = () => [...this.#actors.values(), ...newActors];
     const store = this;
@@ -300,7 +312,7 @@ export class MemoryCommandStore extends CommandStoreBase {
       },
       async patch(p: CommandPatch) {
         if (p.state !== undefined) draft.state = p.state;
-        const optional = <K extends 'approvalExpiresAtMs' | 'expiresAtMs' | 'compareDueAtMs' | 'executedAtMs' | 'lastError' | 'result'>(k: K, v: MemRow[K] | null | undefined) => {
+        const optional = <K extends 'approvalExpiresAtMs' | 'expiresAtMs' | 'compareDueAtMs' | 'executedAtMs' | 'lastError' | 'result' | 'controlVersion' | 'controlSentAtMs'>(k: K, v: MemRow[K] | null | undefined) => {
           if (v === undefined) return;
           if (v === null) delete draft[k];
           else draft[k] = v;
@@ -311,6 +323,8 @@ export class MemoryCommandStore extends CommandStoreBase {
         optional('executedAtMs', p.executedAtMs);
         optional('lastError', p.lastError);
         optional('result', p.result);
+        optional('controlVersion', p.controlVersion);
+        optional('controlSentAtMs', p.controlSentAtMs);
         if (p.attempts !== undefined) draft.attempts = p.attempts;
         if (p.round !== undefined) draft.round = p.round;
         draft.updatedAtMs = p.nowMs;
@@ -326,6 +340,14 @@ export class MemoryCommandStore extends CommandStoreBase {
         newSettings.push({ setting: s, message: settingOutboxMessage(s) });
       },
       postReviews: this.#postReviewWriter(commandId, () => [...existingEvents, ...newEvents], (r) => (review = r)),
+      // 판 번호 원장(DB와 같은 규칙): max(범위들의 마지막 판 + 1, 지금 밀리초). 쓰기가 성공할 때만 반영한다
+      async assignControlVersion(q) {
+        const keys = [...new Set(q.scopes)].map((scope) => `${scope}|${q.kind}`);
+        const last = Math.max(0, ...keys.map((k) => ledgerDraft.get(k) ?? store.#ledger.get(k) ?? 0));
+        const version = Math.max(last + 1, q.nowMs);
+        for (const k of keys) ledgerDraft.set(k, version);
+        return version;
+      },
     };
     const result = await fn(writer);
     // 모두 성공했을 때만 반영한다(한 트랜잭션처럼)
@@ -335,6 +357,7 @@ export class MemoryCommandStore extends CommandStoreBase {
     this.#approvals.push(...newApprovals);
     this.#events.set(commandId, [...existingEvents, ...newEvents]);
     this.#outbox.push(...newSettings);
+    for (const [k, v] of ledgerDraft) this.#ledger.set(k, v);
     for (const a of audits) await this.audit.append({ recordType: a.recordType, recordId: commandId, payload: a.payload, nowMs: a.nowMs });
     return result;
   }

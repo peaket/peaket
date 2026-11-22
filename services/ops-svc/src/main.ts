@@ -10,7 +10,8 @@ import { readFileSync } from 'node:fs';
 import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, loadLogPseudonymizer, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
-import { GrpcControlSender } from './adapters/grpc-control-sender.js';
+import { GrpcControlTransport } from './adapters/grpc-control-sender.js';
+import { controlTargetsFromEnv } from './adapters/control-targets.js';
 import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { GrpcIdentityAdminAccounts } from './modules/admin-accounts/adapters/grpc-identity-admin-accounts.js';
@@ -21,7 +22,7 @@ import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleChe
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { AuditSignals, auditEnvName } from './modules/audit/index.js';
 import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
-import { AwsWafIpSets, GrpcPgAssignmentCheck, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
+import { AwsWafIpSets, ControlFanout, DrizzleControlDeliveries, GrpcPgAssignmentCheck, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
@@ -64,22 +65,18 @@ const internalToken = process.env.PEAKET_INTERNAL_TOKEN;
 const refunds = purchaseGrpcAddr ? new GrpcEventRefunds({ address: purchaseGrpcAddr }) : undefined;
 // queue-svc 클라이언트는 판매 중지·재개 집행(BAT-465 R-584)과 우선 구매 사본(GAT-135)이 함께 쓴다. 요청마다 자기 마감을 넘긴다.
 const queueClient = queueUrl ? createExternalHttpClient({ provider: 'queue-svc', baseUrl: queueUrl, timeoutCapMs: 5_000 }) : undefined;
-// 제어 gRPC 정본(ADR-0102). 두 주소가 다 있을 때만 판매 중지·재개를 그 길로 보낸다(없으면 HTTP 호환 경로).
-const purchaseControlAddr = process.env.PEAKET_PURCHASE_CONTROL_GRPC_ADDR;
-const queueControlAddr = process.env.PEAKET_QUEUE_CONTROL_GRPC_ADDR;
-const control =
-  purchaseControlAddr && queueControlAddr
-    ? {
-        purchase: new GrpcControlSender({ address: purchaseControlAddr, dependency: 'purchase-svc-control' }),
-        queue: new GrpcControlSender({ address: queueControlAddr, dependency: 'queue-svc-control' }),
-      }
-    : undefined;
+// 제어 gRPC 정본(ADR-0102, F-02-1 ADR-0365 결정 3·4): 받는 쪽마다 준비된 모든 파드를 대상 찾기로 풀어(local·ci 주소 목록, 운영 헤드리스 DNS) 원장 판으로 보낸다.
+// local·ci 밖에서 받는 쪽 주소 설정이 없으면 여기서 시작이 실패한다. 판매 중지·재개는 purchase·queue 설정이 다 있을 때만 이 길이다(없으면 HTTP 호환 경로).
+const controlTargets = controlTargetsFromEnv(process.env);
+const controlTransport = new GrpcControlTransport();
+const controlFanout = new ControlFanout({ targets: controlTargets.targets, transport: controlTransport, deliveries: new DrizzleControlDeliveries(database), clock: { now: () => Date.now() } });
+const saleControlWired = !controlTargets.missing.includes('purchase-svc') && !controlTargets.missing.includes('queue-svc');
 const executor = new HttpCommandExecutor({
   ...(purchaseUrl ? { purchase: createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseUrl, timeoutCapMs: 30_000 }) } : {}),
   ...(coreUrl ? { core: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 5_000 }) } : {}),
   ...(refunds ? { refunds } : {}),
   ...(queueClient ? { queue: queueClient } : {}),
-  ...(control ? { control } : {}),
+  ...(saleControlWired ? { controlDelivery: controlFanout } : {}),
   internalToken,
 });
 // 명령 12 온세일 윈도우(core-svc 판매 설정)·하위 결제사 판정(payment-svc gRPC CheckEventPgAssignment), BAT-360 ADR-0349 결정 2·3.
@@ -181,7 +178,7 @@ const service = await createService({
       accountRef: (accountId: string) => botReviewActorRef.ref(accountId),
     },
     onCommandEvent: (h) => (commandEvents = h),
-    commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}) },
+    commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}), control: { fanout: controlFanout, deliveries: new DrizzleControlDeliveries(database) } },
     auditSignals,
     calendar: caseCalendar,
     caseSignals,
@@ -210,6 +207,7 @@ if (!cancellationDeps.reader) service.logger.warn({}, 'PEAKET_PURCHASE_GRPC_ADDR
 if (!reauth) service.logger.warn({}, 'PEAKET_IDENTITY_JWKS_URL이 없어 회차 취소 요청·확정이 503 reauth-unavailable이다');
 for (const warning of reauthStartup.warnings) service.logger.warn({}, warning);
 if (coreEventStatusWarning) service.logger.warn({}, coreEventStatusWarning);
+if (controlTargets.missing.length > 0) service.logger.warn({ services: controlTargets.missing }, '제어 gRPC 받는 쪽 주소 설정(PEAKET_<서비스>_CONTROL_GRPC_ADDRS)이 없어 그 받는 쪽으로 가는 명령이 ack 시한에 FAILED다(local·ci만)');
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다
 const controlSync = startServiceControlSync(service, process.env);
 await service.listen();
@@ -271,8 +269,7 @@ process.once('SIGTERM', () => {
         service.logger.error({ err }, '회차 취소 환불·우선 구매 gRPC 클라이언트 닫기 실패');
       }
       try {
-        control?.purchase.close();
-        control?.queue.close();
+        controlTransport.close();
       } catch (err) {
         service.logger.error({ err }, '제어 gRPC 클라이언트 닫기 실패');
       }
