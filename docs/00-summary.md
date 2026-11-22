@@ -800,6 +800,8 @@ R-511: K7 결제 확정에 20초 드레인과 최소 3초 상태 조회를 넣�
 - R-762 GAT-210 배정 만료 정비·시간 필터·promoter_id 정본화와 ASVS 재판정을 끝내고 장부 I-T21·I-T87·I-T88을 자동 시험으로 채웠다.
 - R-763 BAT-620 LCH-090 판매 중지·재개를 core-svc 한 트랜잭션(검색 동기화·CDN·재개 회차 범위)과 ops-svc 집행까지 닫고, 요청 역할을 operator 이상 요청·commander 승인으로 정본에 맞췄다. LCH-090 단계 줄은 남은 수용 기준 때문에 체크하지 않았다.
 - R-765: identity-svc 파트너 초대의 오류 유형을 정본 목록에 맞춰 PRF192를 다시 통과시켰다(W12-identity-problems).
+- BAT-625는 payment-svc 지급 묶음 승인이 ops-svc 승인 기록을 대조하게 하고, 같은 승인 재사용·감사·판매 중지 회차의 SALE_SUSPENDED 보류를 닫았다.
+- R-766 BAT-625는 payment-svc 지급 묶음 승인이 ops-svc 승인 기록을 대조하게 하고, 같은 승인 재사용·감사·판매 중지 회차의 SALE_SUSPENDED 보류를 닫았다.
 
 ## 5. [충돌] 결정 결과
 
