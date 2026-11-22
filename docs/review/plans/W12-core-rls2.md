@@ -490,6 +490,9 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 
 ## 기록
 
-(기록 담당이 쓴다.)
+기록 담당(세션 `lane2-w12corerls2-record`)이 2026-11-22에 **R-753**으로 적었다. `records.mjs --next-r`가 `R-753`을 가리켰고(develop `0a093740f`의 마지막 기록 R-752 뒤), 이 가지에는 아직 develop의 R-745~R-752 행이 없어 표에는 R-753이 R-744 뒤에 들어간다. 합칠 때 develop 쪽 행과 차례를 맞춘다.
 
-- **다음 단계**: 구현 담당이 트리거 판정을 `USAGE`로 바꿔(슈퍼유저 제외는 그대로) PR #59 CI에서 AZ-T18 ⑧차가 통과하고 나머지 core-svc 통합이 그대로인지 본다 → 리뷰(보안).
+- **무엇을 했나**: core-svc 0042가 (1) 팬 경로 역할 `core_app`의 `webhook_endpoint` 표 단위 고치기를 세 칸·켜진 끝점을 `FAILING`으로 끄는 정책으로, (2) `core_partner`의 웹훅 고치기를 아홉 칸으로, (3) `core_partner`의 `merch_order`·`merch_order_item` 넣기·고치기를 거두고 읽기 정책만 남기고, (4) `core_partner`의 상품 고치기를 스무 칸으로 좁히고 트리거 `product_commission_from_contract`가 수수료율을 게시 때의 계약 값으로 정하게 했다. 트리거는 `pg_has_role(current_user, 'core_partner', 'USAGE')`(상속·`SET ROLE`)와 슈퍼유저 제외로 파트너 역할 권한을 물려받는 경로에만 돈다. 상품 저장소는 수수료율을 SET하지 않고 DB가 정한 값을 돌려받는다. 수수료율 칸 권한 축소는 13.2 후속이다.
+- **시험**: 새 `webhook-merch-grants.int`가 AZ-T18 ①~⑦·⑧가~카(18개)를 본다. 구현 전 트리에서 ①~⑤·⑦·⑧가~자와 `shop-notify` 두 단언이 실패했고(⑥은 있던 동작), 구현 뒤 CI에서 18/18·core-svc 502/503·payment-svc 591/593이 통과했다. ⑧차는 `MEMBER` 트리에서 단언 실패, `USAGE` 구현에서 통과해 판정 변경을 시험이 붙잡았다.
+- **리뷰·검증**: 보안 리뷰는 막는 지적 0. RV-01(이미 바뀐 옛 상품 수수료율·주문 항목 값은 0042가 대조하지 않는다)과 RV-02(시작 확인이 `MEMBER`라 `NOINHERIT` 로그인의 방어 깊이가 약하다)를 후속 후보로 남겼다. 검증은 정적 게이트·최종 CI를 통과했고, Docker 잠금(다른 갈래) 때문에 로컬 통합 시험·`trace-check`·틀린 구현 표본 24개는 다음 차례로 넘겼다.
+- **다음 단계**: (1) 잠금이 빈 뒤 `PEAKET_TEST_REPORT=test-report-int.json pnpm --filter @peaket/core-svc test:integration`으로 보고서를 만들고 `trace-check --ids "AZ-T18, v5.0.0-8.2.3, v5.0.0-8.4.1"`을 돌린다. (2) 표본 M1~M24를 돌려 '검증' 절을 채운다. (3) develop 위로 다시 쌓을 때 W12-core-idem의 0041과 journal `when` 차례, `authz-matrix` AZ-T17·AZ-T18 줄, `test-int/rls.int`(W12-core-rls) 충돌을 확인한다. (4) 발송 원장·발송기 전용 역할은 W12-core-notify, 수수료율 칸 권한 축소는 13.2.
