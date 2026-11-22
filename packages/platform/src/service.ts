@@ -15,6 +15,7 @@ import { CLOCK, type Clock, systemClock } from './clock.js';
 import { type PlatformConfig, PlatformConfigError, loadPlatformConfig } from './config.js';
 import { activeTrace } from './context.js';
 import { diagnoseConfigFromEnv, startDiagnose, type StartDiagnoseOptions } from './diagnose.js';
+import { type ErrorReporting, startErrorReporting } from './error-reporting.js';
 import { type EvidenceStore, s3EvidenceStore } from './evidence-store.js';
 import type { HotPathMetrics } from './hot-path.js';
 import { installHttpHooks, markServerSpan, requestSideFields } from './http-hooks.js';
@@ -141,6 +142,11 @@ export interface PlatformService {
    * (예: trust-svc 보안 로그 줄의 처리자 accountRef, docs/observability.md §7 '선택적 비즈니스 필드')
    */
   pseudonymizer: LogPseudonymizer;
+  /**
+   * 서버 오류 수집(ADR-0356 결정 4). PEAKET_SENTRY_DSN이 비면 꺼져 있다(enabled false). 공용 예외 필터의 이름 없는 5xx와 처리되지 않은 예외를 보낸다.
+   * 설정은 바꾸지 못한다(잠금). close가 남은 사건을 2초 [가정]까지 보내고 끈다
+   */
+  errorReporting: ErrorReporting;
   /** 정규 로그 줄 표본 비율 바꾸기(온세일 구간의 control.settings LOG_SAMPLING을 제어 토픽 소비가 적용한다, ADR-0334 결정 2) */
   logs: { setSampleOneIn(oneIn: number): void; readonly sampleOneIn: number };
   app: NestFastifyApplication;
@@ -213,6 +219,12 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     destination: o.logDestination,
   });
   if (warning) logger.warn(warning);
+  // 오류 수집은 앱을 만들기 전에 켠다(시작 중 처리되지 않은 예외도 보낸다). 시작 로그 한 줄에 켬·끔과 까닭만 남긴다(DSN은 남기지 않는다)
+  const errorReporting = startErrorReporting(env, { service: o.name, version: config.version, environment: config.env });
+  logger.info(
+    { kind: 'error-reporting', enabled: errorReporting.enabled, reason: errorReporting.reason },
+    errorReporting.enabled ? '오류 수집을 켰다' : `오류 수집을 끈다(${errorReporting.reason === 'no-dsn' ? 'PEAKET_SENTRY_DSN이 비었다' : 'PEAKET_SENTRY_DSN 형식이 틀렸다'})`,
+  );
   const diagnose = o.diagnose === false ? undefined : diagnoseSetup(o.name, config.env, env, o.diagnose ?? {}, logger);
   // 정규 로그 줄은 서비스 로거 수준과 관계없이 info부터 낸다(수준을 올려도 표본 집계가 깨지지 않게)
   const canonical = new CanonicalLog(logger.child({}, { level: 'info' }), {
@@ -227,7 +239,10 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
       const { status, body } = frameworkErrorProblem(error, config.debugErrors);
       const labels = { service: o.name, route: 'unmatched', method: request.method, status_class: statusClass(status) };
       metrics.requestDuration.observe(labels, 0);
-      if (status >= 500) metrics.errors.inc(labels);
+      if (status >= 500) {
+        metrics.errors.inc(labels);
+        errorReporting.capture(error, { traceId: String(body.traceId), route: 'unmatched' });
+      }
       // 라우터 앞에서 끝난 요청(잘못된 URL 등)도 정규 로그 줄 하나를 같은 traceId로 남긴다(ASVS v5.0.0-16.3.4).
       // 서버 span은 경로 틀 대신 unmatched로 두고 표본 속성을 단다. 라우팅 전에 끝나 지연은 0으로 본다(지표와 같다, 코드 리뷰 2026-11-01)
       const traceId = String(body.traceId);
@@ -262,7 +277,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   installHttpHooks(http, { metrics, clock, maxDeadlineMs: config.maxDeadlineMs, canonical, ...(o.hotPath ? { hotPath: o.hotPath } : {}) });
   // 경로 스키마 검사기와 본문 해석기는 경로를 붙이기(app.init) 전에 건다(결정 4·6). 칸막이 경로의 본문 전 신원 판정은 가드와 같은 인증 상태를 쓴다(W9-fix3 F5)
   installRequestChecks(http, auth);
-  app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors, ...(o.hotPath ? { hotPath: o.hotPath } : {}) }));
+  app.useGlobalFilters(new ProblemFilter({ debugErrors: config.debugErrors, errorReporting, ...(o.hotPath ? { hotPath: o.hotPath } : {}) }));
   await app.init();
 
   const management = Fastify({ logger: false });
@@ -302,6 +317,7 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     metrics,
     logger,
     pseudonymizer,
+    errorReporting,
     logs: {
       setSampleOneIn: (n: number) => canonical.setSampleOneIn(n),
       get sampleOneIn() {
@@ -341,6 +357,8 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
       releaseSigterm?.();
       await app.close();
       await management.close();
+      // 닫는 중에 난 오류까지 보낸 뒤 끈다(받는 곳이 멈춰 있어도 2초 [가정]에 끝난다)
+      await errorReporting.close();
     },
   };
 }

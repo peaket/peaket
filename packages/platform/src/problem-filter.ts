@@ -8,6 +8,7 @@ import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException } from '
 import { DrizzleQueryError } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { newTraceId } from './context.js';
+import type { ErrorReporting } from './error-reporting.js';
 import type { HotPathMetrics } from './hot-path.js';
 import { requestState } from './http-hooks.js';
 import { PROBLEM_CONTENT_TYPE, ProblemError } from './problem.js';
@@ -17,6 +18,8 @@ export interface ProblemFilterOptions {
   debugErrors: boolean;
   /** 핫패스 구간 진단(BAT-028). 없으면 계측하지 않는다 */
   hotPath?: HotPathMetrics;
+  /** 서버 오류 수집(ADR-0356 결정 4). 이름 없는 5xx(예상하지 못한 오류)만 보낸다. 없으면 보내지 않는다 */
+  errorReporting?: ErrorReporting;
 }
 
 const isErrorStatus = (code: unknown): code is number => typeof code === 'number' && Number.isInteger(code) && code >= 400 && code <= 599;
@@ -93,6 +96,10 @@ export class ProblemFilter implements ExceptionFilter {
     }
     // 정규 로그 줄의 err(5xx는 이름·메시지·스택, 4xx는 종류와 상태 문구만)
     if (state) state.error = errorInfoOf(exception, status);
+    // 오류 수집: 이름 없는 5xx만(4xx·정상 분기 거절·이름 붙은 Problem은 보내지 않는다, ADR-0356 결정 4). 사용자는 로그 가명 accountRef만
+    if (status >= 500 && !(exception instanceof ProblemError) && this.options.errorReporting?.enabled) {
+      this.options.errorReporting.capture(exception, { traceId, ...(state ? { route: state.ctx.route } : {}), ...(state?.ctx.log.refs.accountRef ? { accountRef: state.ctx.log.refs.accountRef } : {}) });
+    }
     if (this.options.debugErrors) body.debug = debugOf(exception);
     void reply.status(status).header('content-type', PROBLEM_CONTENT_TYPE).send(JSON.stringify(body));
     } finally {

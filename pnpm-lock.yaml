@@ -833,6 +833,9 @@ importers:
       '@prometheus-io/client':
         specifier: ^0.16.1
         version: 0.16.1
+      '@sentry/core':
+        specifier: 11.15.0
+        version: 11.15.0
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -3866,6 +3869,14 @@ packages:
     peerDependencies:
       react: '>=18.0.0'
       react-dom: '>=18.0.0'
+
+  '@sentry/conventions@0.33.0':
+    resolution: {integrity: sha512-5aa3g/VOnMoL8yHbfkYIWBYC3BLgMudgRNBTKNMrcMEj1mE9aKIt/CYCG7sasijhiSU4nTcSEzyM2voIVzLCng==}
+    engines: {node: '>=14'}
+
+  '@sentry/core@11.15.0':
+    resolution: {integrity: sha512-zsprEOu/voisojJFnDIhPd+GhycAli/aqjV752eQHiNOrAwAvigCadsSh2ND5e1AEycvSmZTxOOhCNjWzSZ4Ng==}
+    engines: {node: '>=20.19.0 <22.0.0 || >=22.12.0 <23.0.0 || >=23.2.0'}
 
   '@serwist/build@9.5.13':
     resolution: {integrity: sha512-3seu43B26paWNKixMJTJWXBJx8c07e+WZvPOUH5V/AByYfAoL4TKh9vMri8zukyj52shDyChs2Qjji5NObprMQ==}
@@ -9667,6 +9678,12 @@ snapshots:
       react-dom: 19.3.1(react@19.3.1)
     transitivePeerDependencies:
       - '@types/react'
+
+  '@sentry/conventions@0.33.0': {}
+
+  '@sentry/core@11.15.0':
+    dependencies:
+      '@sentry/conventions': 0.33.0
 
   '@serwist/build@9.5.13(browserslist@4.29.3)(typescript@7.0.2)':
     dependencies:

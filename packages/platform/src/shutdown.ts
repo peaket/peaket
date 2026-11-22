@@ -2,6 +2,8 @@
 // 앞 단계가 실패해도 다음 단계를 한다: 멈추기(gRPC 마감·돌던 일)를 모두 기다린 뒤(돌던 쓰기가 닫힌 풀을 만나지 않게) 멈추기가 넘긴 일을 받는 쪽을 멈추고(drain),
 // 서비스를 닫고(app.close()가 모듈 종료 훅을 부른다), 그 뒤에 연결을 닫는다. NestJS enableShutdownHooks()는 켜지 않는다(같은 신호에 앱이 먼저 닫힌다).
 // 준비 상태는 SIGTERM을 받는 즉시 서비스 뼈대(createService)가 내린다.
+// 오류 수집(ADR-0356 결정 4)의 남은 사건은 연결 닫기와 함께 보낸다(2초 [가정]까지, 차례를 늦추지 않는다). 서비스 close가 이미 보냈으면 할 일이 없다.
+import { ERROR_REPORTING_FLUSH_MS, flushErrorReporting } from './error-reporting.js';
 
 export interface ShutdownSteps {
   /** 새 호출을 받지 않고 돌던 일을 멈춘다(gRPC 서버 close가 여기 든다) */
@@ -44,7 +46,7 @@ async function inOrder(s: ShutdownSteps): Promise<void> {
   await run(() => s.stop());
   if (s.drain) await run(() => s.drain!());
   await run(() => [s.closeService()]);
-  await run(() => s.closeConnections());
+  await run(() => [...s.closeConnections(), flushErrorReporting(ERROR_REPORTING_FLUSH_MS)]);
 }
 
 /**
