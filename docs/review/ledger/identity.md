@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 273 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 398 |
-| 합계 | 283 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 408 |
+| B | 286 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 411 |
+| 합계 | 296 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 421 |
 
 ## docs/features/identity.md
 
@@ -49,7 +49,20 @@
 | I-T18 | — | 민감 설정 변경 재인증 통제 | 양도, 연락처 변경, 수단 해제를 시도할 때 5분 이내의 유효한 재인증 토큰이 없으면 403 Forbidden으로 막힌다. | 빈칸 | B | — |
 | I-T19 | — | 액세스 토큰 `aud` 권한 격리 | 일반 팬의 토큰으로 partner나 ops 관리자 API 엔드포인트를 부르면 게이트웨이에서 바로 401로 막힌다(관리 토큰 키로 서명되지 않은 토큰… | 자동 시험 | B | 시험: packages/platform/test/token-verify.test.ts |
 | I-T20 | — | JWT 서명 키 무중단 로테이션 | 새 `kid` 키쌍을 배포한 뒤에도 기존 키로 서명된 토큰이 만료 시점까지 정상 검증됨을 확인한다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, packages/platform/test/token-verify.test.ts 외 2곳 |
-| I-T21 | — | 현장 스태프 초대 및 수락 통제 | 현장 스태프 초대 링크는 24시간 동안 쓰는 일회용이다. 검증 이메일이 초대 이메일과 다른 계정, 본인확인을 마치지 않은 계정, 네이버만 연결한 계정의 수락… | 자동 시험 | B | 시험: services/identity-svc/test/staff-invitations.test.ts |
+| I-T21 | ① | 현장 스태프 초대 및 수락 통제 | ① 파트너가 여러 명(3명)을 초대하면 201·역할·유효 시간(입장 시작 3시간 전~공연 종료 2시간 뒤)이 맞고, 200명은 되며 201명은 400이다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T21 | ② | 현장 스태프 초대 및 수락 통제 | ② 요청 안 같은 이메일(대소문자)과 같은 회차에 이미 INVITED인 이메일은 422이고 행·메일이 0건이며, 수락 뒤 같은 이메일 재초대는 201이다 | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/partner-staff-invitations.t… |
+| I-T21 | ③ | 현장 스태프 초대 및 수락 통제 | ③ 토큰은 32바이트 CSPRNG의 base64url 43자이고 DB에는 SHA-256만, 만료는 24시간이다 | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/partner-staff-invitations.t… |
+| I-T21 | ④ | 현장 스태프 초대 및 수락 통제 | ④ 응답·헤더·로그에 토큰 원문이 0건이고 링크에는 `#token=` 조각으로만 있다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T21 | ⑤ | 현장 스태프 초대 및 수락 통제 | ⑤ 없는 회차·판매 승인 전 회차·다른 파트너 회차는 같은 404 본문이고 행을 만들지 않는다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T21 | ⑥ | 현장 스태프 초대 및 수락 통제 | ⑥ 메일 파일 대역은 수신자·조각 링크·24시간을 남기고, 메일 포트가 없거나 발송이 실패하면 503 provider-down이며 행을 만들지 않는다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts, services/identity-svc/test/staff-invite-mailer.test.ts |
+| I-T21 | ⑦ | 현장 스태프 초대 및 수락 통제 | ⑦ 명단은 이메일·계정 ID 0건, 수락한 계정의 닉네임만, 커서·limit·테넌트를 지킨다 | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/partner-staff-invitations.t… |
+| I-T21 | ⑧ | 현장 스태프 초대 및 수락 통제 | ⑧ 해제는 204·REVOKED·이메일/토큰 파기·스캐너 세션 종료·`control.sessions-terminated`(STAFF_REVOKED)이고 다음… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/partner-staff-invitations.t… |
+| I-T21 | ⑨ | 현장 스태프 초대 및 수락 통제 | ⑨ 재발송은 새 토큰·새 24시간으로 바꾸고 옛 토큰을 즉시 410으로 만들며, 이미 수락한 배정은 409다 | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/partner-staff-invitations.t… |
+| I-T21 | ⑩ | 현장 스태프 초대 및 수락 통제 | ⑩만료된 초대 토큰은 조회·수락이 410이고 만료된 INVITED의 재발송은 새 24시간을 준다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T21 | ⑪ | 현장 스태프 초대 및 수락 통제 | ⑪ 역할 밖·테넌트 없는 세션은 403, 본문 모양 오류는 400, 응답은 no-store다. 검증 이메일이 초대 이메일과 다른 계정, 본인확인을 마치지 않은… | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T86 | ① | 파트너 초대의 회차 소유 확인 계약(identity-svc →… | ① core-svc 내부 판매 설정 `GET /internal/v1/events/{eventId}/sale-config`가 identity에… | 자동 시험 | B | 시험: services/core-svc/test/internal-sale-config-identity-caller.test.ts |
+| I-T86 | ② | 파트너 초대의 회차 소유 확인 계약(identity-svc →… | ② identity 어댑터는 404를 없음으로, 401·403·5xx·시간 초과·모양 틀림을 던짐으로 바꾸고 내부 토큰 머리를 싣는다 | 자동 시험 | B | 시험: services/identity-svc/test/http-core-event-owners.test.ts |
+| I-T86 | ③ | 파트너 초대의 회차 소유 확인 계약(identity-svc →… | ③ 파트너 경로는 core 404를 404로, 나머지 실패를 503 `authz-unavailable`로 사상하고 초대 행을 만들지 않는다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
 | I-T22 | — | 기기 승인 피싱 방지 검증 | 스캐너 단말기와 휴대폰의 확인 코드(8자)가 대조 화면에 함께 보인다. 등록되지 않았거나 폐기된 기기의 승인 코드 발급 요청과, 다른 파트너 기기의 승인은… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/identity-svc/test/device-approval.test.ts |
 | I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test/device-approval.test.ts |
 | I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test-int/device-approval.int.test.ts 외 2곳 |
