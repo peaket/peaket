@@ -2007,6 +2007,7 @@ erDiagram
     verification_case }o--|| account : ""
     admin_account ||--o{ approval_request : "요청자·승인자"
     cs_case |o--o{ approval_request : "건에서 생성"
+    cs_case ||--o{ cs_case_request : "받은 건 요청(eventKey 한 번)"
     account ||--o{ booking_restriction : "예매 제한"
     event ||--o{ decision_record : "결정 기록(ADR-0052)"
     admin_account ||--o{ decision_record : "결정자"
@@ -2291,10 +2292,21 @@ erDiagram
         text target_ref "문의 건은 inquiry ID, 신고 건은 신고된 후기 ID, 소명 건은 appeal ID(core 논리 DB), 포트원 원장 불일치는 포트원 이체 ID·파트너 ID·지급 묶음 ID"
         timestamptz progress_due_at "분쟁 진행 경과 3영업일, 미보고 스캐너 파트너 확인 요청 1영업일"
         timestamptz result_due_at "분쟁 결과 10영업일, 환급 3영업일, 추가 검증 이의 결과 10영업일, 현장 건 3영업일, 배상 대기 10영업일(docs/design/d5 §7.6, 수치 [가정], ADR-0062). 문의 답변 3영업일, 게시물 신고 결과 3영업일, 권리 침해 삭제 요청과 불법 촬영물 사유 신고의 판단 1영업일(수치 [가정], ADR-0066)"
-        text status "OPEN|IN_PROGRESS|RESOLVED. CONTENT_REPORT·RIGHTS_REQUEST·PORTONE_LEDGER_MISMATCH는 열린 건에서 (kind, target_ref) 유일(ADR-0086, ADR-0108)"
+        text status "OPEN|IN_PROGRESS|RESOLVED. 열린 건에서 (kind, target_ref)는 종류와 관계없이 하나다(ADR-0086, ADR-0108. 2026-11-23 모든 종류로 넓혔다, ADR-0364 결정 4). 해결은 끝이다(다시 고치면 409)"
         timestamptz next_due_at "진행 경과 기한과 결과 기한 중 이른 것, STORED 생성 열. NOT NULL DEFAULT 'infinity'라 두 기한이 모두 없는 건도 목록에 든다(소유자 결정 2026-11-11, open-items 93번). 정렬은 처리함 목록 순서(ADR-0086)이고, 'infinity'인 건은 목록 끝에 온다(§5.1·§5.2 커서 정렬 칸 NOT NULL)"
         uuid assignee
-        bigint version "건 상태의 판 번호. 상태·결과가 바뀔 때마다 1 오른다. identity.proto SetAccountHold의 source_version, queue.proto ResolveVerificationAppeal의 case_version, trust.proto ApplyLabel의 source_version(CS 처리함 건일 때)이 이 값이다(추천 적용 2026-10-30)"
+        bigint version "건 상태의 판 번호. 상태·결과·배정이 바뀔 때마다 1 오른다(PATCH의 If-Match·ETag 값, ADR-0364 결정 5). identity.proto SetAccountHold의 source_version, queue.proto ResolveVerificationAppeal의 case_version, trust.proto ApplyLabel의 source_version(CS 처리함 건일 때)이 이 값이다(추천 적용 2026-10-30)"
+        text category "건 요청의 category(문의 유형, 신고 사유, 소명 대상 종류, DEDUCTION_GAP·ENTRY_AFTER_CANCEL 같은 세부, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)"
+        text result_note "해결 메모(1~2,000자, 평문). 해결할 때 필수. 감사 체인에는 본문을 남기지 않는다(추천 적용 2026-11-23, ADR-0364 결정 5)"
+        timestamptz resolved_at "해결한 시각"
+        timestamptz due_soon_alerted_for "기한 1영업일 전 경보(CS_CASE_DUE_SOON)를 연 기한 값. next_due_at과 같으면 다시 열지 않는다(ADR-0364 결정 3)"
+        timestamptz overdue_alerted_for "기한 넘김 경보(CS_CASE_OVERDUE)를 연 기한 값"
+    }
+    cs_case_request {
+        text event_key PK "건 요청(support.cases-requested·내부 HTTP)의 eventKey(계약은 UUID, 내부 HTTP의 옛 호출자는 글). 한 번만 적어 해결된 건의 사건이 다시 와도 새 건을 열지 않는다(추천 적용 2026-11-23, ADR-0364 결정 4)"
+        uuid case_id "그 요청이 열거나 찾은 cs_case(같은 논리 DB, 외래키)"
+        text kind "요청 종류"
+        timestamptz received_at
     }
     booking_restriction {
         uuid id PK
@@ -2625,7 +2637,7 @@ erDiagram
 - **허용 값 검사(공통 코드)**: 상태·종류 칸마다 `CHECK (… IN (…))`를 둔다. enum 타입은 있는 값을 뺄 수 없어(18 문서) 쓰지 않는다. 허용 값의 원본은 서비스 코드의 상수 목록 하나이고, openapi·Avro 열거형, Drizzle 타입, CHECK가 같은지 CI가 본다. 부분 유니크 인덱스는 정확한 문자열(`'PENDING'`, `'SOLD'`)에 기대므로 이 검사가 오버셀 방어선의 앞을 지킨다. 예외는 상품 유형 `product.type` 하나다. 이 칸은 참조 표 `product_type`을 가리키는 외래 키로 지킨다. 새 상품 유형을 CHECK 목록에 더하면 그것이 DDL이 되기 때문이다(추천 적용 2026-10-28, ADR-0101).
 - **금액 칸 자료형(추천 적용 2026-10-28, 기술 검토 높음-20)**: 금액은 모두 원 단위 정수다. 결제 한 건에 딸린 금액(주문·결제·결제 취소 금액, 주문 취소의 환급, 배상, 상품·좌석 가격)은 `int`(약 21억 4,748만 원까지)로 둔다. 여러 건을 모은 금액(정산서 항목, 수기 조정, 지급 묶음 합계, 지급 건, 미수금, 결제사 잔액)과 그런 금액을 담는 승인 업무 금액(`approval_request.amount`)은 `bigint`로 둔다. 큰 공연 하나의 정산서만으로도 `int`를 넘기 때문이다(25억 원 정산서, docs/features/settlement.md J-T4). openapi는 `bigint` 칸에 `format: int64`를 붙인다. 앱은 `bigint` 칸을 Drizzle `mode: 'number'`로 받는다. JavaScript 숫자는 2^53 − 1(약 9,007조)까지 정확하고, Drizzle 문서도 2^31을 넘고 2^53보다 작은 값에 이 방식을 권한다(2026-10-28 확인). 금액에는 값을 32비트로 자르는 비트 연산을 쓰지 않는다.
 - **종류별 필수 칸(상속관계)**: 한 표에 여러 종류를 담는 표는 종류마다 필수 칸을 검사한다. 예: `CHECK ((kind = 'TEMPLATE') = (template_code IS NOT NULL))`, `CHECK (kind <> 'LAYOUT' OR promoter_id IS NOT NULL)`(`venue`), `CHECK ((kind = 'EVENT') = (event_id IS NOT NULL))`(`settlement_statement`), `CHECK ((role IN ('partner_admin','partner_member')) = (promoter_id IS NOT NULL))`(`admin_account`).
-- **다형 참조의 중복 막기**: `cs_case`에 `UNIQUE (kind, target_ref) WHERE status <> 'RESOLVED' AND kind IN ('CONTENT_REPORT','RIGHTS_REQUEST','PORTONE_LEDGER_MISMATCH')`를 건다. ops-svc는 신고 이벤트를 `INSERT … ON CONFLICT DO NOTHING`으로 받아, 같은 후기의 신고가 건 둘로 생기지 않는다. 포트원 원장 불일치도 같은 방식이라 30분마다 대사해도 같은 이체·파트너의 건이 하나다(추천 적용 2026-10-28, ADR-0108). 다른 논리 DB를 가리키는 ID(`review.basis_order_id`, `content_report.case_id`, `inquiry.case_id`, `cs_case.target_ref`)는 하루 한 번 고아 행(가리키는 대상이 없는 행) 수를 세어 지표로 낸다.
+- **다형 참조의 중복 막기**: `cs_case`에 `UNIQUE (kind, target_ref) WHERE status <> 'RESOLVED'`를 건다(처음에는 `CONTENT_REPORT`·`RIGHTS_REQUEST`·`PORTONE_LEDGER_MISMATCH` 세 종류에만 걸었고, ops-svc 첫 마이그레이션이 모든 종류로 건 것을 2026-11-23에 정본으로 삼았다. 사건이 다시 오는 것은 `cs_case_request(event_key)`로 따로 막는다, 추천 적용 2026-11-23, ADR-0364 결정 4). ops-svc는 신고 이벤트를 `INSERT … ON CONFLICT DO NOTHING`으로 받아, 같은 후기의 신고가 건 둘로 생기지 않는다. 포트원 원장 불일치도 같은 방식이라 30분마다 대사해도 같은 이체·파트너의 건이 하나다(추천 적용 2026-10-28, ADR-0108). 다른 논리 DB를 가리키는 ID(`review.basis_order_id`, `content_report.case_id`, `inquiry.case_id`, `cs_case.target_ref`)는 하루 한 번 고아 행(가리키는 대상이 없는 행) 수를 세어 지표로 낸다.
 - **승인자는 자식 표**: 2인 승인의 '같은 사람 두 번 금지·요청자 본인 금지'(§5)를 DB가 지키도록, 승인을 JSON 배열 대신 자식 표(`approval_vote`·`command_approval`·`event_cancellation_approval`)에 두고 `UNIQUE (요청 ID, 승인자)`와 요청자(판정자)와 다른지 검사하는 CHECK를 건다. 운영 명령은 기록의 사람 칸이 가명 참조라, 이 검사를 대응 표 `command_actor`의 `UNIQUE (command_id, admin_account_id)`가 한다(추천 적용 2026-10-29, ADR-0149). 이상 표시에 든 스캔 기록도 자식 표 `gate_flag_scan`에 둔다.
 - **판본 이력**: 판매 승인한 공연의 승인 판본은 `production_revision`(회차 단위 `event_revision`에서 공연 단위로 바꿈, ADR-0093), 파트너 계약 조건(수수료율)은 `promoter_contract`(유효 기간이 겹치지 않게 기간 키 `UNIQUE (promoter_id, valid_during WITHOUT OVERLAPS)`, `btree_gist` 확장 필요), 판매자 정보 변경 요청은 `seller_profile_change`에 남긴다. 지금 값은 `production`·`event`·`promoter`에 있다.
 - **계정 병합 사슬**: 병합할 때 흡수 계정을 가리키던 계정도 새 대표 계정을 가리키게 고쳐, `merged_into_account_id`가 한 단계만 이어지게 한다.
