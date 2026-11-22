@@ -415,7 +415,8 @@ erDiagram
         timestamptz approved_at
         timestamptz expires_at "역할 유효 끝"
         timestamptz last_seen_at
-        timestamptz terminated_at "교대·해제·폐기·만료"
+        timestamptz terminated_at "교대·해제·폐기·만료·본인 끝내기"
+        text device_name "스캐너 이름(예 동문-03). 승인 때 기기 승인 요청의 기기 원장 이름을 복사한다. 0038 전 행은 null(2026-11-23 F-05-7, ADR-0362)"
     }
 ```
 
