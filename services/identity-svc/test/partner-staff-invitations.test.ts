@@ -88,6 +88,7 @@ beforeAll(async () => {
     coreEventOwners: owners,
     staffInviteMailer: mail,
     staffInvitationUrl: INVITE_URL,
+    partnerStaff: true,
   } as never;
   svc = await createService({
     name: 'identity-svc',

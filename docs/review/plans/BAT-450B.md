@@ -162,7 +162,8 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 
 - 새 동작(초대 만들기·명단·해제·재발송·core 대조·메일)은 구현 전 트리에서 **경로 없음(404/400)**과 **모듈 없음(import)**으로 실패했다. 값 단언으로 실패한 것은 HTTP 시험 12개이고, 어댑터·메일 대역은 파일이 없어 수집 단계에서 실패했다.
 - core 계약 시험은 기존 동작이라 통과한다. 이 시험이 identity가 읽는 칸을 실제로 잡는지는 `## 검증`의 틀린 구현 표본으로 본다.
-- Docker 통합 시험(중복 인덱스·실제 PostgreSQL)은 이번 실패 확인에서 돌리지 않았다. 구현 뒤 잠금을 잡고 `test-int/staff-invitations.int.test.ts`를 돌린다.
+- Docker 통합 시험(중복 인덱스·실제 PostgreSQL)은 이번 실패 확인에서 돌리지 않았다. `test-int/staff-invitations.int.test.ts`에 0036 부분 유일 인덱스, `createInvitations`·`findInvitedEmails`, `listByEvent`, `revokeAssignment`, `reissueInvitation` 시험을 더했다. 구현 전 트리에는 새 저장소 메서드와 0036이 없어 그 시험들은 `TypeError`(메서드 없음)와 인덱스 없음으로 실패한다. 구현 뒤 잠금을 잡고 돌린다.
+- 기존 시험의 시드 하나(A2, 같은 회차·같은 이메일 INVITED)는 0036 인덱스와 충돌해 이메일을 `lead@example.com`으로 바꾸고, 중복 배정 시험에서 A1 수락 뒤 같은 이메일로 맞추게 고쳤다. 인덱스가 INVITED끼리만 겹침을 막는 성질을 시험이 그대로 지킨다.
 
 ## 리뷰
 

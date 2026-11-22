@@ -21,6 +21,18 @@ const A2 = '0190f3a1-7c2e-7a00-8000-000000000012';
 const A3 = '0190f3a1-7c2e-7a00-8000-000000000013';
 const A4 = '0190f3a1-7c2e-7a00-8000-000000000014';
 const A5 = '0190f3a1-7c2e-7a00-8000-000000000015';
+const EVENT_NEW = '0190f3a1-7c2e-7a00-8000-000000000007';
+const EVENT_NEW_2 = '0190f3a1-7c2e-7a00-8000-000000000008';
+const EVENT_LIST = '0190f3a1-7c2e-7a00-8000-000000000009';
+const PROMOTER = '0190f3a1-7c2e-7a00-8000-00000000000e';
+const A6 = '0190f3a1-7c2e-7a00-8000-000000000016';
+const A7 = '0190f3a1-7c2e-7a00-8000-000000000017';
+const A8 = '0190f3a1-7c2e-7a00-8000-000000000018';
+const A9 = '0190f3a1-7c2e-7a00-8000-000000000019';
+const A10 = '0190f3a1-7c2e-7a00-8000-00000000001a';
+const A11 = '0190f3a1-7c2e-7a00-8000-00000000001d';
+const SS = '0190f3a1-7c2e-7a00-8000-00000000001b';
+const DEVICE = '0190f3a1-7c2e-7a00-8000-00000000001c';
 const TOKEN = 'db-invite-token-1';
 const TOKEN_2 = 'db-invite-token-2';
 const TOKEN_3 = 'db-invite-token-3';
@@ -74,7 +86,8 @@ beforeAll(async () => {
   await seedAccount(ACCOUNT, 'staff@example.com');
   await seedAccount(OTHER, 'other@example.com');
   await seedInvitation({ id: A1, token: TOKEN, eventId: EVENT, role: 'gate_staff', status: 'INVITED', email: 'staff@example.com' });
-  await seedInvitation({ id: A2, token: TOKEN_2, eventId: EVENT, role: 'gate_lead', status: 'INVITED', email: 'staff@example.com' });
+  // 같은 회차·같은 이메일 INVITED는 0036 부분 유일 인덱스가 막는다. 중복 배정 시험은 A1이 수락된 뒤 이메일을 맞춘다
+  await seedInvitation({ id: A2, token: TOKEN_2, eventId: EVENT, role: 'gate_lead', status: 'INVITED', email: 'lead@example.com' });
   await seedInvitation({ id: A3, token: TOKEN_3, eventId: EVENT_2, role: 'gate_staff', status: 'INVITED', email: 'staff@example.com', expiresAt: new Date(NOW - 1) });
 });
 
@@ -113,6 +126,8 @@ describe('staff 초대 PostgreSQL [GAT-210]', () => {
   });
 
   test('같은 회차 중복 배정은 409이고, 거절은 EXPIRED로 끝내며 다시 보내도 같다', async () => {
+    // A1이 수락돼 invite_email이 비었으므로 이제 A2의 이메일을 같은 값으로 맞출 수 있다(0036 인덱스는 INVITED끼리만 본다)
+    await database.pool.query("update staff_assignment set invite_email = 'staff@example.com' where id = $1", [A2]);
     await expect(invitations.accept(accept({ inviteToken: TOKEN_2 }))).rejects.toMatchObject({ code: 'ASSIGNMENT_EXISTS' });
     await invitations.reject(TOKEN_2);
     expect((await database.pool.query('select status, invite_email, invite_token_hash from staff_assignment where id = $1', [A2])).rows[0]).toMatchObject({ status: 'EXPIRED', invite_email: null, invite_token_hash: null });
@@ -129,5 +144,87 @@ describe('staff 초대 PostgreSQL [GAT-210]', () => {
     expect(first.items[0]).toMatchObject({ assignmentId: A4, status: 'ASSIGNED', activeScannerDeviceName: null });
     const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10 });
     expect(second.items.map((x) => x.assignmentId)).toEqual([A1, A5]);
+  });
+});
+
+describe('파트너 초대 만들기·명단·해제·재발송 PostgreSQL [BAT-450B]', () => {
+  test('I-T21 ② 0036 부분 유일 인덱스는 같은 회차·같은 이메일(대소문자 무시) INVITED를 막고, 수락 뒤에는 다시 허용한다', async () => {
+    await seedInvitation({ id: A6, token: 'db-new-1', eventId: EVENT_NEW, role: 'gate_staff', status: 'INVITED', email: 'Case@Example.com' });
+    await expect(
+      seedInvitation({ id: A7, token: 'db-new-2', eventId: EVENT_NEW, role: 'gate_lead', status: 'INVITED', email: 'case@example.com' }),
+    ).rejects.toMatchObject({ code: '23505', constraint: 'staff_assignment_event_invite_email_key' });
+    // 수락은 이메일·토큰을 지우므로 같은 이메일의 새 INVITED를 막지 않는다
+    await database.pool.query("update staff_assignment set status = 'ASSIGNED', account_id = $2, invite_email = null, invite_token_hash = null where id = $1", [A6, ACCOUNT]);
+    await seedInvitation({ id: A7, token: 'db-new-2', eventId: EVENT_NEW, role: 'gate_lead', status: 'INVITED', email: 'case@example.com' });
+    expect((await database.pool.query('select count(*)::int as n from staff_assignment where event_id = $1', [EVENT_NEW])).rows[0].n).toBe(2);
+  });
+
+  test('I-T21 ③ createInvitations는 여러 행을 넣고, findInvitedEmails는 소문자로 걸러 중복을 알린다', async () => {
+    const made = await store.createInvitations([
+      { assignmentId: A8, eventId: EVENT_NEW_2, promoterId: PROMOTER, role: 'gate_staff', email: 'a@example.com', tokenHash: hash('db-new-8'), expiresAtMs: NOW + HOUR, invitedBy: ADMIN, validFromMs: NOW - HOUR, validUntilMs: NOW + 3 * HOUR },
+      { assignmentId: A9, eventId: EVENT_NEW_2, promoterId: PROMOTER, role: 'gate_lead', email: 'B@Example.com', tokenHash: hash('db-new-9'), expiresAtMs: NOW + HOUR, invitedBy: ADMIN, validFromMs: NOW - HOUR, validUntilMs: NOW + 3 * HOUR },
+    ]);
+    expect(made.result).toBe('OK');
+    if (made.result !== 'OK') throw new Error('OK가 아니다');
+    expect(made.created.map((r) => [r.assignmentId, r.inviteEmail, r.promoterId, r.status])).toEqual([
+      [A8, 'a@example.com', PROMOTER, 'INVITED'],
+      [A9, 'b@example.com', PROMOTER, 'INVITED'],
+    ]);
+    expect(await store.findInvitedEmails(EVENT_NEW_2, ['A@EXAMPLE.COM'])).toEqual(['a@example.com']);
+    const dup = await store.createInvitations([
+      { assignmentId: A10, eventId: EVENT_NEW_2, promoterId: PROMOTER, role: 'gate_staff', email: 'a@example.com', tokenHash: hash('db-new-10'), expiresAtMs: NOW + HOUR, invitedBy: ADMIN, validFromMs: NOW - HOUR, validUntilMs: NOW + 3 * HOUR },
+    ]);
+    expect(dup).toEqual({ result: 'DUPLICATE_EMAIL', emails: ['a@example.com'] });
+    expect((await database.pool.query('select count(*)::int as n from staff_assignment where event_id = $1', [EVENT_NEW_2])).rows[0].n).toBe(2);
+  });
+
+  test('I-T21 ⑦ listByEvent는 이메일·계정 ID 없이 수락한 계정의 닉네임과 역할·상태·시간만 준다', async () => {
+    await database.pool.query("update account set nickname = '현장 리더' where id = $1", [ACCOUNT]);
+    await seedInvitation({ id: A10, token: 'db-new-10b', eventId: EVENT_LIST, role: 'gate_lead', status: 'ASSIGNED', accountId: ACCOUNT });
+    const page = await store.listByEvent({ eventId: EVENT_LIST, limit: 10 });
+    expect(page.items).toEqual([
+      {
+        assignmentId: A10,
+        eventId: EVENT_LIST,
+        nickname: '현장 리더',
+        role: 'gate_lead',
+        status: 'ASSIGNED',
+        inviteExpiresAt: new Date(NOW + HOUR).toISOString(),
+        validFrom: new Date(NOW - HOUR).toISOString(),
+        validUntil: new Date(NOW + 3 * HOUR).toISOString(),
+      },
+    ]);
+    expect(JSON.stringify(page)).not.toContain('staff@example.com');
+    expect(JSON.stringify(page)).not.toContain(ACCOUNT);
+  });
+
+  test('I-T21 ⑧ revokeAssignment는 REVOKED·이메일/토큰 파기·세션 종료·control 사건을 한 트랜잭션에 남기고 두 번째는 바꾸지 않는다', async () => {
+    await seedInvitation({ id: A11, token: 'db-revoke', eventId: EVENT_NEW_2, role: 'gate_staff', status: 'ASSIGNED', accountId: ACCOUNT, email: 'revoke@example.com' });
+    await database.pool.query(
+      `insert into scanner_session (id, staff_assignment_id, staff_account_id, scanner_device_id, role, proxy, approved_at, expires_at)
+       values ($1, $2, $3, $4, 'gate_staff', false, $5, $6)`,
+      [SS, A11, ACCOUNT, DEVICE, new Date(NOW), new Date(NOW + HOUR)],
+    );
+    const r = await store.revokeAssignment({ assignmentId: A11, nowMs: NOW + 1 });
+    expect(r).toEqual({ found: true, changed: true, sessions: 1 });
+    const row = (await database.pool.query('select status, invite_email, invite_token_hash from staff_assignment where id = $1', [A11])).rows[0];
+    expect(row).toMatchObject({ status: 'REVOKED', invite_email: null, invite_token_hash: null });
+    expect((await database.pool.query('select terminated_at from scanner_session where id = $1', [SS])).rows[0].terminated_at).toEqual(new Date(NOW + 1));
+    const outbox = await database.pool.query("select payload from outbox where topic = 'control.sessions-terminated' and msg_key = $1 order by id desc limit 1", [ACCOUNT]);
+    expect(JSON.parse(Buffer.from(outbox.rows[0].payload).toString('utf8'))).toMatchObject({ accountId: ACCOUNT, sessionId: SS, reason: 'STAFF_REVOKED', terminatedAt: new Date(NOW + 1).toISOString() });
+    expect(await store.revokeAssignment({ assignmentId: A11, nowMs: NOW + 2 })).toEqual({ found: true, changed: false, sessions: 0 });
+    expect(await store.revokeAssignment({ assignmentId: '0190f3a1-7c2e-7a00-8000-0000000000ff', nowMs: NOW + 2 })).toEqual({ found: false, changed: false, sessions: 0 });
+  });
+
+  test('I-T21 ⑨ reissueInvitation는 새 해시·만료로 바꾸고 옛 토큰을 찾지 못하게 하며, 수락된 배정은 ALREADY_ACCEPTED다', async () => {
+    await seedInvitation({ id: A9, token: 'db-old', eventId: EVENT_NEW_2, role: 'gate_lead', status: 'INVITED', email: 'b@example.com' });
+    const r = await store.reissueInvitation({ assignmentId: A9, tokenHash: hash('db-fresh'), expiresAtMs: NOW + 2 * HOUR });
+    expect(r.result).toBe('OK');
+    await expect(store.findInvitationByTokenHash(hash('db-old'))).resolves.toBeNull();
+    const found = await store.findInvitationByTokenHash(hash('db-fresh'));
+    expect(found).toMatchObject({ assignmentId: A9, inviteExpiresAtMs: NOW + 2 * HOUR });
+    await database.pool.query("update staff_assignment set status = 'ASSIGNED', account_id = $2 where id = $1", [A9, ACCOUNT]);
+    await expect(store.reissueInvitation({ assignmentId: A9, tokenHash: hash('db-fresh-2'), expiresAtMs: NOW + 3 * HOUR })).resolves.toEqual({ result: 'ALREADY_ACCEPTED' });
+    await expect(store.reissueInvitation({ assignmentId: '0190f3a1-7c2e-7a00-8000-0000000000ff', tokenHash: hash('x'), expiresAtMs: NOW })).resolves.toEqual({ result: 'NOT_FOUND' });
   });
 });
