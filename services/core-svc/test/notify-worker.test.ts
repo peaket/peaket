@@ -9,7 +9,6 @@ import {
   MemoryFanNotifyStore,
   MemoryRecipientDirectory,
   NotificationIntake,
-  notificationRetryDelayMs,
 } from '../src/modules/notify/index.js';
 import type { MailTransport, PushSendResult } from '../src/modules/notify/index.js';
 import { NOW_MS } from './support.js';
@@ -80,10 +79,10 @@ describe('N-T19 발송 원장·워커', () => {
     expect(await t.worker.processDue(new Date(NOW_MS))).toMatchObject({ retrying: 1 });
     const job = [...t.store.jobs.values()][0]!;
     expect(job).toMatchObject({ status: 'RETRYING', attempts: 1 });
-    expect(job.nextAttemptAt.getTime()).toBe(NOW_MS + notificationRetryDelayMs(1));
+    expect(job.nextAttemptAt.getTime()).toBe(NOW_MS + 60_000);
 
-    expect(await t.worker.processDue(new Date(NOW_MS + notificationRetryDelayMs(1) - 1))).toMatchObject({ attempted: 0 });
-    expect(await t.worker.processDue(new Date(NOW_MS + notificationRetryDelayMs(1)))).toMatchObject({ sent: 1 });
+    expect(await t.worker.processDue(new Date(NOW_MS + 60_000 - 1))).toMatchObject({ attempted: 0 });
+    expect(await t.worker.processDue(new Date(NOW_MS + 60_000))).toMatchObject({ sent: 1 });
     expect(t.mail.sent).toHaveLength(1);
     expect(t.store.deliveries).toHaveLength(1);
     expect(t.store.deliveries[0]!.status).toBe('SENT');
@@ -227,6 +226,6 @@ describe('N-T22 실패가 다른 상태를 되돌리지 않는다', () => {
     };
     expect(await t.worker.processDue(new Date(NOW_MS))).toMatchObject({ retrying: 1 });
     t.mail.send = original;
-    expect(await t.worker.processDue(new Date(NOW_MS + notificationRetryDelayMs(1)))).toMatchObject({ sent: 1 });
+    expect(await t.worker.processDue(new Date(NOW_MS + 60_000))).toMatchObject({ sent: 1 });
   });
 });
