@@ -123,17 +123,31 @@ describe('운영 시작 파일의 DB 연결 시작 확인(ADR-0241 결정 7)', (
       const missing = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: '' });
       const wrongRole = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: pg.urlFor('core_app_login', 'peaket-test') });
       const superuser = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: pg.url });
-      // (라) core_notify 로그인이면 시작 확인을 지나 뜬다(10초 안에 끝나지 않으면 떠 있는 것으로 본다)
+      // (라) 발송기 로그인이 같은 이름의 표를 소유하면(행 보안을 건너뛴다) 시작 확인이 멈춰야 한다(RV-01).
+      // 실제 표의 소유자를 바꾸지 않고 별도 스키마에 같은 이름의 표를 만들어 소유자 검사만 본다
+      await admin.pool.query('drop schema if exists notify_owner_probe cascade');
+      await admin.pool.query('create schema notify_owner_probe authorization core_notify_login');
+      await admin.pool.query('create table notify_owner_probe.webhook_delivery (id int)');
+      await admin.pool.query('alter table notify_owner_probe.webhook_delivery owner to core_notify_login');
+      let owner: { code: number | null; stillRunning: boolean; output: string };
+      try {
+        owner = await bootUntilExit(ok);
+      } finally {
+        await admin.pool.query('drop schema if exists notify_owner_probe cascade');
+      }
+      // (마) core_notify 로그인이면 시작 확인을 지나 뜬다(10초 안에 끝나지 않으면 떠 있는 것으로 본다)
       const valid = await bootUntilExit(ok, 10_000);
       expect({
         missing: { code: missing.code, stillRunning: missing.stillRunning, named: /PEAKET_NOTIFY_DATABASE_URL이 없다/.test(missing.output) },
         wrongRole: { code: wrongRole.code, stillRunning: wrongRole.stillRunning, named: /DB 사용자가 core_notify 역할이 아니다/.test(wrongRole.output) },
         superuser: { code: superuser.code, stillRunning: superuser.stillRunning, named: /슈퍼유저이거나 표 소유자라 행 보안이 걸리지 않는다\(core_notify로 접속해야 한다\)/.test(superuser.output) },
+        owner: { code: owner.code, stillRunning: owner.stillRunning, named: /슈퍼유저이거나 표 소유자라 행 보안이 걸리지 않는다\(core_notify로 접속해야 한다\)/.test(owner.output) },
         valid: { code: valid.code, stillRunning: valid.stillRunning },
       }).toEqual({
         missing: { code: 1, stillRunning: false, named: true },
         wrongRole: { code: 1, stillRunning: false, named: true },
         superuser: { code: 1, stillRunning: false, named: true },
+        owner: { code: 1, stillRunning: false, named: true },
         valid: { code: null, stillRunning: true },
       });
     } finally {
