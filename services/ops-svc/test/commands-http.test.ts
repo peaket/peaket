@@ -49,10 +49,14 @@ describe('/v1/ops/commands', () => {
     });
   });
 
-  test('B3H01_operator는_commander_전용_명령을_요청하거나_승인할_수_없다', async () => {
+  test('B3H01_operator는_킬스위치를_요청할_수_없고_판매_중지는_요청하되_승인할_수_없다', async () => {
     const operator = identity.ops('operator');
     const commander = identity.ops('commander');
-    expect((await post('/v1/ops/commands', withReauth(operator), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } })).statusCode).toBe(403);
+    // 판매 중지는 operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(POL-038 ⑩, ADR-0123 결정 2)
+    const opCreated = await post('/v1/ops/commands', withReauth(operator), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
+    expect(opCreated.statusCode).toBe(201);
+    const opCommandId = (JSON.parse(opCreated.payload) as { commandId: string }).commandId;
+    expect((await post(`/v1/ops/commands/${opCommandId}/approvals`, withReauth(operator), {})).statusCode).toBe(403);
     expect((await post('/v1/ops/commands', withReauth(operator), { type: 'KILL_SWITCH', reason: '긴급 정지', params: { scope: 'PLATFORM' } })).statusCode).toBe(403);
     const created = await post('/v1/ops/commands', withReauth(commander), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });
     expect(created.statusCode).toBe(201);
@@ -95,13 +99,18 @@ describe('/v1/ops/commands', () => {
     expect(JSON.parse((await get(`/v1/ops/commands/${commandId}`, identity.ops('operator'))).payload)).toMatchObject({ state: 'PENDING_APPROVAL', approvals: [] });
   });
 
-  test('R-T23 ① operator가 판매 중지를 요청하거나 자기 승인하면 403이고, commander 요청만 2인 대기로 간다', async () => {
+  test('R-T23 ① operator가 판매 중지를 요청한 뒤 자기 승인하면 403이고, 요청자 아닌 commander가 승인한다', async () => {
     const operator = identity.ops('operator');
     const body = { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId: randomUUID(), reasonCode: 'SELLER_IDENTITY' } };
-    expect((await post('/v1/ops/commands', withReauth(operator), body)).statusCode).toBe(403);
+    // 판매 중지는 operator 이상이 요청한다(POL-038 ⑩, ADR-0123 결정 2)
+    const opCreated = await post('/v1/ops/commands', withReauth(operator), body);
+    expect(opCreated.statusCode).toBe(201);
+    const opCommandId = (JSON.parse(opCreated.payload) as { commandId: string }).commandId;
+    expect(JSON.parse(opCreated.payload)).toMatchObject({ state: 'PENDING_APPROVAL' });
+    expect((await post(`/v1/ops/commands/${opCommandId}/approvals`, withReauth(operator), {})).statusCode).toBe(403);
 
     const requester = identity.ops('commander');
-    const created = await post('/v1/ops/commands', withReauth(requester), body);
+    const created = await post('/v1/ops/commands', withReauth(requester), { ...body, params: { eventId: randomUUID(), reasonCode: 'SELLER_IDENTITY' } });
     expect(created.statusCode).toBe(201);
     const { commandId } = JSON.parse(created.payload) as { commandId: string };
     expect(JSON.parse(created.payload)).toMatchObject({ state: 'PENDING_APPROVAL' });

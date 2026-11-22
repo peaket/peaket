@@ -78,10 +78,10 @@ describe('운영 명령 접수·승인', () => {
 
   test('B3H01_commander_전용_명령은_operator가_요청·승인할_수_없고_canApprove가_역할을_따른다', async () => {
     const f = fixture();
-    await expect(f.create.execute(input('SALE_STOP', { requestedRole: 'operator', params: { eventId: randomUUID() } }))).rejects.toMatchObject({ status: 403 });
     await expect(f.create.execute(input('KILL_SWITCH', { requestedRole: 'operator' }))).rejects.toMatchObject({ status: 403 });
-    expect(requesterRolesOf('SALE_STOP')).toEqual(['commander']);
-    expect(approverRolesOf('KILL_SWITCH')).toEqual(['commander']);
+    expect(requesterRolesOf('SALE_STOP')).toEqual(['operator', 'commander']);
+    expect(approverRolesOf('SALE_STOP')).toEqual(['commander']);
+    expect(requesterRolesOf('KILL_SWITCH')).toEqual(['commander']);
     expect(requesterRolesOf('EVENT_CANCEL')).toEqual(['operator', 'commander']);
     expect(approverRolesOf('EVENT_CANCEL')).toEqual(['operator', 'commander']);
 

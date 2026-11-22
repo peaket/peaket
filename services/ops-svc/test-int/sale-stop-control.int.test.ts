@@ -98,7 +98,7 @@ describe('BAT-465 판매 중지·재개 집행 실제 DB', () => {
     const commander = identity.ops('commander');
     const operator = identity.ops('operator');
     const eventId = randomUUID();
-    expect((await post('/v1/ops/commands', operator, { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId, reasonCode: 'SELLER_IDENTITY' } })).statusCode).toBe(403);
+    expect((await post('/v1/ops/commands', operator, { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId, reasonCode: 'SELLER_IDENTITY' } })).statusCode).toBe(201);
     const created = await post('/v1/ops/commands', requester, { type: 'SALE_STOP', reason: '판매자 신원 확인', params: { eventId, reasonCode: 'SELLER_IDENTITY' } });
     expect(created.statusCode).toBe(201);
     const command = JSON.parse(created.payload) as { commandId: string; state: string; approvalExpiresAt: string | null };
