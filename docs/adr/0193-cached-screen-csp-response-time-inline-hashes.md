@@ -1,6 +1,6 @@
 # ADR-0193: 캐시 화면 CSP는 응답 때 인라인 스크립트 해시로 막는다 — Next.js 해시 방식(SRI)이 App Router 인라인 스크립트를 덮지 못해서
 
-- **상태**: 채택(2026-11-04, 소유자 결정 "응답 때 해시(추천)"). ADR-0065 결정 4의 캐시 화면(묶음 A) 부분을 이 ADR로 다시 정한다. ADR-0065 결정 4가 정한 되돌릴 조건("덮지 못하면 `'unsafe-inline'`을 쓰지 않고 새 ADR로 다시 정한다")에 따른 것이다. 요청 화면(B·E·F)의 nonce와 `'strict-dynamic'`은 그대로다.
+- **상태**: 채택(2026-11-04, 소유자 결정 "응답 때 해시(추천)"). ADR-0065 결정 4의 캐시 화면(묶음 A) 부분을 이 ADR로 다시 정한다. ADR-0065 결정 4가 정한 되돌릴 조건("덮지 못하면 `'unsafe-inline'`을 쓰지 않고 새 ADR로 다시 정한다")에 따른 것이다. 요청 화면(B·E·F)의 nonce와 `'strict-dynamic'`은 그대로다. 결정 3의 "안쪽 서버에는 압축하지 말라고 보낸다"는 HTML이 될 수 있는 요청으로 좁혔다(2026-11-23, [ADR-0359](0359-front-server-compresses-static-assets-only.md)).
 - **관련**: ADR-0065(웹 프런트엔드 보안), ADR-0079 결정 14, ADR-0111(style 속성), ADR-0191·0192, [docs/frontend.md](../frontend.md) §2.5·§5.14.1·§5.18·§6.3, [docs/architecture.md](../architecture.md) §6.3, [docs/security/asvs/frontend.md](../security/asvs/frontend.md) 3.4.3, [docs/BUILD_ORDER.md](../BUILD_ORDER.md) HOT-290(wbs 2.10.1 ①)
 - **관련 ID**: FE-T30, FE-T35, ASVS v5.0.0-3.4.3, ASVS v5.0.0-3.4.6
 

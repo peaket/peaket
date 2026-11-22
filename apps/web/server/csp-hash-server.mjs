@@ -9,7 +9,8 @@
 // - 해시는 Next.js·React가 넣는 모양의 인라인 스크립트에만 낸다(isFrameworkScript). HTML에 끼워 넣은 스크립트는 모양을 흉내 내도
 //   해시를 받지 못해 막힌다(새 맥락 리뷰 2026-11-04: 모든 인라인 스크립트를 해시하면 주입된 스크립트도 허용 목록에 든다).
 //   React 스트리밍 도우미 정의는 설치된 Next.js 운영 실행 파일에서 글자 그대로 읽은 것(reactRuntimeScripts)과 같아야 한다.
-// - 해시는 압축 전 본문으로 내므로 위 서버(Next.js)에는 압축하지 말라고 보낸다(압축은 CDN이 한다).
+// - 해시는 압축 전 본문으로 내므로 HTML이 될 수 있는 요청은 위 서버(Next.js)에 압축하지 말라고 보낸다(압축은 CDN이 한다).
+//   HTML이 될 수 없는 `/_next/static/` 요청만 손님의 accept-encoding을 넘긴다(ADR-0359, upstreamAcceptEncoding).
 // - 노드 기본 모듈만 쓴다(운영 이미지에서 Next.js standalone 서버 앞에 그대로 둔다).
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -180,13 +181,43 @@ export function markedStatus(html, upstreamStatus) {
   return code !== undefined && MARKED_STATUS.has(code) ? code : undefined;
 }
 
+/** 빌드가 내는 정적 덩어리(CSS·JS·글꼴 등) 경로 앞머리. proxy.ts matcher 밖이라 틀 머리를 받지 않는다 */
+export const STATIC_ASSET_PREFIX = '/_next/static/';
+
+/**
+ * 손님의 압축 요청을 위 서버에 넘겨도 되는 요청인가(ADR-0359). GET·HEAD이고 경로(? 앞)가 대소문자까지 정확히
+ * STATIC_ASSET_PREFIX로 시작하며, 퍼센트 인코딩·역슬래시·빈 마디·점 마디가 없고 접두 뒤가 비지 않았을 때만 참이다.
+ * 성능용 판정이다. 틀려서 HTML이 압축되어 와도 해시 없는 막는 CSP 길로 가므로 보호는 풀리지 않는다(닫힘 실패).
+ * @param {string | undefined} method
+ * @param {string | undefined} url 요청 대상 글(req.url 그대로)
+ */
+export function isStaticAssetRequest(method, url) {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  if (typeof url !== 'string') return false;
+  const q = url.indexOf('?');
+  const path = q === -1 ? url : url.slice(0, q);
+  if (!path.startsWith(STATIC_ASSET_PREFIX)) return false;
+  const rest = path.slice(STATIC_ASSET_PREFIX.length);
+  if (rest === '' || rest.includes('%') || rest.includes('\\')) return false;
+  return rest.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+}
+
+/**
+ * 위 서버에 보낼 accept-encoding(ADR-0359): 정적 덩어리 요청이고 손님 값이 빈 글이 아닌 문자열이면 그 값을 고치지 않고, 그 밖은 'identity'
+ * @param {{ method?: string, url?: string, headers: Record<string, string | string[] | undefined> }} req
+ */
+export function upstreamAcceptEncoding(req) {
+  const v = req.headers['accept-encoding'];
+  return isStaticAssetRequest(req.method, req.url) && typeof v === 'string' && v !== '' ? v : 'identity';
+}
+
 /**
  * @param {{ upstream: string, runtime?: string[] }} o upstream: Next.js 서버 주소(예: http://127.0.0.1:3001). runtime: reactRuntimeScripts 결과
  */
 export function createCspHashServer({ upstream, runtime = [] }) {
   const base = new URL(upstream);
   return createServer((req, res) => {
-    const headers = { ...req.headers, 'accept-encoding': 'identity', 'x-forwarded-host': req.headers['x-forwarded-host'] ?? req.headers.host ?? '' };
+    const headers = { ...req.headers, 'accept-encoding': upstreamAcceptEncoding(req), 'x-forwarded-host': req.headers['x-forwarded-host'] ?? req.headers.host ?? '' };
     const up = httpRequest({ host: base.hostname, port: base.port, method: req.method, path: req.url, headers }, (ur) => {
       // 손님이 이미 떠났으면 받지 않는다(닫힌 응답에 잇다가 예외로 프로세스가 죽던 결함, HOT-290 확인 리뷰 뒤 재현 시험)
       if (res.destroyed || res.writableEnded) {
