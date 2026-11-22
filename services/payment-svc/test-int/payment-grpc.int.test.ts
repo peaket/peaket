@@ -170,7 +170,7 @@ describe('마이그레이션과 표 모양', () => {
   test('PRF180_PRF181_PRF182_PRF183_GAT080_마이그레이션(0000~0021)을 더 돌려도 오류가 없고 표가 그대로이며 적용 기록 수는 migrations 폴더의 SQL 파일 수와 같다', async () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
-    expect(before).toEqual(['compensation_transfer', 'event_pg_config', 'outbox', 'partner_receivable', 'payment', 'payment_cancel', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'pg_switch', 'receivable_move', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'settlement_statement_audit', 'statement_dispute', 'statement_source', 'webhook_receipt']);
+    expect(before).toEqual(['compensation_transfer', 'event_pg_config', 'guarantee_collection', 'outbox', 'partner_receivable', 'payment', 'payment_cancel', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'payout_batch_audit', 'pg_switch', 'receivable_move', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'settlement_statement_audit', 'settlement_webhook_receipt', 'statement_dispute', 'statement_source', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);

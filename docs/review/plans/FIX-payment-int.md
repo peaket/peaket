@@ -25,6 +25,7 @@
 | --- | --- | --- |
 | CI 실행 `45038336541`(`c27097d6c`, 2026-11-23 00:26 KST) `node / node` 잡의 `pnpm --filter @peaket/payment-svc test:integration` | **2파일 9시험 실패**(27파일 중 25 통과, 585 통과·2 건너뜀) | ⑴ `compensation-transfer.int.test.ts:93` `cannot truncate a table referenced in a foreign key constraint` 여덟, ⑵ `payment-grpc.int.test.ts:173` 표 목록 차이(`guarantee_collection`·`payout_batch_audit`·`settlement_webhook_receipt` 더 있음) 하나 |
 | 그 뒤 `develop` 실행(`45040437883`·`45045323160`·`45048066063` 초록, `45054926121`·`45055032034` 도는 중) | 문서만 바꾼 커밋이라 `node` 잡을 건너뜀 | 실패는 `develop`에 그대로 남아 있다 |
+| 시험 담당 로컬(계획 커밋 `32f1e9a40` 트리, 고치기 전, 2026-11-23 04:16) `pnpm --filter @peaket/payment-svc test:integration test-int/compensation-transfer.int.test.ts test-int/payment-grpc.int.test.ts` | **2파일 9시험 실패, 94 통과**(103개) | CI와 같다. ⑴ J-T28·R-T47 여덟이 `cannot truncate a table referenced in a foreign key constraint`, ⑵ PRF180 표 목록 차이가 정확히 `+ guarantee_collection`·`+ payout_batch_audit`·`+ settlement_webhook_receipt` 셋 |
 
 ## 고칠 곳
 
@@ -69,6 +70,22 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 - **세 표의 칸 대조**: PRF180 `COLUMNS`에 세 표를 더할지는 이 묶음에서 하지 않는다. 동작은 `test-int/settlement.int.test.ts`(BAT-625·BAT-630)가 본다.
 - **새 시험 ID·단계**: 만들지 않는다. BUILD_ORDER 단계·wbs 상태 변화도 없다. 기록에서 `lane3-cleanup.md`의 해당 줄을 닫는다.
 
+## 시험 결과
+
+시험 담당(lane5-fixint-test)이 '고칠 곳' 1~3대로 두 파일만 고쳤다. `compensation-transfer.int.test.ts`는 파일 위 상수 `RESET_SQL`(`truncate compensation_transfer, receivable_move, guarantee_collection, partner_receivable`, `cascade` 없음) 하나를 93·177줄 두 곳에서 쓴다. `payment-grpc.int.test.ts`의 PRF180 기대 목록에 세 표를 `relname` 차례 자리에 더해 29개다. 시험 이름과 다른 단언(행 수·상태·미수금 칸·적용 기록 수)은 그대로다.
+
+| 검사 | 결과 | 까닭 |
+| --- | --- | --- |
+| 두 파일(위 '실패 확인'과 같은 명령, 고친 뒤) | **2파일 103시험 통과**(실패 0) | 9개가 모두 초록. 다른 94개는 그대로 통과 |
+| `pnpm --filter @peaket/payment-svc test:integration` 1회째 | 27파일 중 9파일 15시험 실패, 574 통과·2 건너뜀 | 이 묶음과 무관한 환경 문제. ⑴ `merch-path-e2e`가 core-svc 원본이 읽는 `@peaket/search-normalize`의 `dist`가 이 작업 폴더에 없어 파일째 실패(`payment-svc^...` 빌드에 들지 않음), ⑵ 나머지 14개는 서킷·전파·조회 시간 한도(`DEADLINE_EXCEEDED`, 1400ms 안, Redis 마감 100ms)로, 같은 때 기계 CPU가 94~100%였다. 두 고친 파일은 이 실행에서도 통과 |
+| `pnpm exec turbo run build --filter=@peaket/search-normalize` 뒤 전체 2회째 | **26파일 통과, 1시험 실패**, 593 통과·2 건너뜀(596) | 남은 하나는 `purchase-path-e2e` P-T25의 준비 단계(`openSale`) `RedisDeadlineError: Redis 호출이 마감 100ms를 넘겼다`(CPU 100%). 1회째에는 통과한 시험이다 |
+| `purchase-path-e2e.int.test.ts`만 다시 | **17 통과·1 건너뜀**(실패 0) | 부하 없이 통과. 시간 한도·재시도는 고치지 않았다 |
+| `pnpm exec turbo run typecheck --filter=@peaket/payment-svc` | 7작업 성공 | 오류 0 |
+| `pnpm lint` | 끝 코드 0 | 오류 0 |
+
+- 시험 컨테이너는 실행마다 스스로 지워졌고(`docker ps -a`에 남은 것 없음) 잠금은 04:16~04:27 쥐고 놓았다.
+- 검증 담당에게: 전체 통합 시험은 기계가 한가할 때 돌린다. CI 기준선(`45038336541`)은 이 둘 밖 실패가 없었다.
+
 ## 리뷰
 
 ## 검증
@@ -78,3 +95,4 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane5-fixint-plan | claude-opus-5-5 | 2026-11-23T03:28:00+09:00 | 2026-11-23T03:42:00+09:00 |
+| test | lane5-fixint-test | claude-opus-5-5 | 2026-11-23T03:37:00+09:00 | 2026-11-23T04:30:00+09:00 |

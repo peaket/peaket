@@ -27,6 +27,9 @@ const ACCOUNT_DIGITS = '110987654321';
 const HOLDER = '김배상';
 /** 47,500원의 10% = 4,750원(원 미만 없음). 코드 상수와 다른 시험 값 */
 const AMOUNT = 4_750;
+/** 시험 사이에 비울 표. partner_receivable을 가리키는 외래키(receivable_move 0016, guarantee_collection 0026)의 표를 같은 truncate에 넣는다.
+ * cascade는 쓰지 않는다: 새 외래키가 생기면 조용히 다른 표까지 비우지 않고 이 시험이 실패해 드러낸다(FIX-payment-int) */
+const RESET_SQL = 'truncate compensation_transfer, receivable_move, guarantee_collection, partner_receivable';
 
 type Answer = { transferId: string; status: 'REQUESTED' | 'PAID' | 'FAILED' | 'UNAVAILABLE'; failureReason?: string };
 class FakePort implements CompensationTransferPort {
@@ -90,7 +93,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await database.pool.query('truncate compensation_transfer, receivable_move, partner_receivable');
+  await database.pool.query(RESET_SQL);
   port.requests.length = 0;
   port.delayMs = 0;
   port.answer = { transferId: 'tr_bat425_paid', status: 'PAID' };
@@ -174,7 +177,7 @@ describe('J-T28 ① PAID 미수금·source_ref 유일', () => {
       { transferId: 'tr_fail', status: 'FAILED' as const, failureReason: 'PG_REJECTED' },
       { transferId: '', status: 'UNAVAILABLE' as const },
     ]) {
-      await database.pool.query('truncate compensation_transfer, receivable_move, partner_receivable');
+      await database.pool.query(RESET_SQL);
       port.requests.length = 0;
       port.answer = answer;
       const r = await service.request(input());
