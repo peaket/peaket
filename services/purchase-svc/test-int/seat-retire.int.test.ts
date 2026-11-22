@@ -372,6 +372,21 @@ describe('회차 목록에서 빼기 retireEvent(판매 종료 + 1시간 뒤, �
     expect(await listed(pastToo)).toBe(true);
   });
 
+  test('S-T37 ⑨ 우선 구매 보류(s:{event:E}:prio)가 남아 있으면 EXPIRY_PENDING이고 목록에 그대로다(회차를 빼면 만료 반복이 그 보류를 끝내 풀지 못한다). prio를 비우면 RETIRED다', async () => {
+    const { clock, retirer } = retirerAt();
+    const eventId = newEventId();
+    await open(eventId);
+    const pk = seatKeys.prio(eventId);
+    await cmd(redis, pk, ['ZADD', pk, '1', '5', '2', '9']);
+
+    expect(await retirer.retireEvent({ eventId, saleEndMs: endedLongAgo(clock) })).toBe('EXPIRY_PENDING');
+    expect(await listed(eventId)).toBe(true);
+
+    await cmd(redis, pk, ['DEL', pk]);
+    expect(await retirer.retireEvent({ eventId, saleEndMs: endedLongAgo(clock) })).toBe('RETIRED');
+    expect(await listed(eventId)).toBe(false);
+  });
+
   test('코드 리뷰_만료 인덱스에 홀드가 남아 있으면(만료가 멈췄던 회차) EXPIRY_PENDING이고 목록에 그대로다(빼면 그 홀드가 끝내 만료되지 않는다)', async () => {
     const { clock, retirer } = retirerAt();
     const eventId = newEventId();

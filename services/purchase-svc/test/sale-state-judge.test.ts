@@ -27,6 +27,7 @@ import {
   type SaleStateJudgeDeps,
   type SaleStatus,
   SeatStoreUnavailable,
+  seatKeys,
   SWEEP_LEASE_TTL_MS,
   type SweepTimer,
 } from '../src/modules/inventory/index.js';
@@ -1424,6 +1425,30 @@ describe('리뷰 고침(코드 리뷰 2026-11-09, BUILD_ORDER PRF-144)', () => {
         },
       });
       await expect(new DrizzleSalePaying({ database: untouchable }).payingByTier('NOT-A-UUID', NOW)).rejects.toBeInstanceOf(RangeError);
+    });
+
+    test('S-T37 ⑧ RedisSaleCounts.read는 만료 인덱스·멈춘 홀드와 함께 prio 인덱스를 한 번에 읽는다(우선 구매 보류를 held에 세려면 같은 Lua에서 봐야 한다)', async () => {
+      const seen: string[][] = [];
+      const redis = {
+        evalScript: async (_script: unknown, keys: string[]) => {
+          seen.push(keys);
+          return ['OK', Buffer.from([1]), '6'];
+        },
+      };
+      await expect(new RedisSaleCounts(redis as never).read('ev-a')).resolves.toMatchObject({ kind: 'OK', held: 6 });
+      expect(seen).toEqual([[seatKeys.bitmap('ev-a'), seatKeys.expiry('ev-a'), seatKeys.epoch('ev-a'), seatKeys.paused('ev-a'), seatKeys.prio('ev-a')]]);
+    });
+
+    test('S-T37 ⑧ RedisSaleCounts.holdIndexes는 만료 인덱스·멈춘 홀드에 prio 인덱스를 이어 한 Lua로 읽는다(우선 구매 보류가 있는 등급을 매진으로 잘못 내지 않게)', async () => {
+      const seen: string[] = [];
+      const redis = {
+        evalScript: async (_script: unknown, keys: string[]) => {
+          seen.push(...keys);
+          return ['1', '2', '3'];
+        },
+      };
+      await expect(new RedisSaleCounts(redis as never).holdIndexes('ev-a', 0, 3)).resolves.toEqual({ indexes: [1, 2, 3], badMembers: 0 });
+      expect(seen).toEqual([seatKeys.expiry('ev-a'), seatKeys.paused('ev-a'), seatKeys.prio('ev-a')]);
     });
 
     test('ST25_ADR0122_ 리뷰 고침 L12: 만료 인덱스의 정수가 아닌 멤버는 던지지 않고 건너뛰어 그 수를 돌려준다 [ASVS v5.0.0-16.5.2]', async () => {

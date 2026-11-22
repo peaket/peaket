@@ -343,6 +343,21 @@ describe('RedisSaleCounts: 실제 읽기 Lua', () => {
     expect(SALE_COUNT_LUA.split('\n')[0]).toBe('#!lua flags=no-writes');
   });
 
+  test('S-T37 ⑧ 우선 구매 보류(s:{event:E}:prio)를 판매 상태의 held에 더하고, 등급 홀드 쪽 읽기도 만료 인덱스·멈춘 홀드 뒤에 prio를 이어 읽는다(만료 2·멈춘 1·우선 3이면 held 6, 순위 쪽은 셋을 이어 붙인다)', async () => {
+    const e = randomUUID();
+    await cmd(seatKeys.epoch(e), ['HSET', seatKeys.epoch(e), 'epoch', '7', 'node', 'n1']);
+    await cmd(seatKeys.expiry(e), ['ZADD', seatKeys.expiry(e), '10', '1', '20', '2']);
+    await cmd(seatKeys.paused(e), ['ZADD', seatKeys.paused(e), '10', '3']);
+    await cmd(seatKeys.prio(e), ['ZADD', seatKeys.prio(e), '10', '4', '20', '5', '30', '6']);
+    const r = await counts().read(e);
+    expect(r.kind).toBe('OK');
+    if (r.kind !== 'OK') return;
+    expect(r.held).toBe(6);
+    expect(await counts().holdIndexes(e, 0, 10)).toEqual({ indexes: [1, 2, 3, 4, 5, 6], badMembers: 0 });
+    expect(await counts().holdIndexes(e, 2, 2)).toEqual({ indexes: [3, 4], badMembers: 0 });
+    expect(await counts().holdIndexes(e, 5, 3)).toEqual({ indexes: [6], badMembers: 0 });
+  });
+
   test('ST25_ADR0122_비트맵 바이트를 Buffer로 깨지지 않게 돌려준다(0x80 이상의 바이트 포함)와 ZCARD를 한 번에 읽는다. 등급별 가용은 그 바이트에서 나온다 [ASVS v5.0.0-15.4.2]', async () => {
     const w = await world();
     const e = w.eventId;
