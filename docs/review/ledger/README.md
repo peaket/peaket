@@ -4,8 +4,8 @@
 
 ## 완성 판정
 
-- 항목 3931개: 시험 시나리오(세부 단위) 1889, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2027
-- 빈칸 775, ID만 1040: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
+- 항목 3965개: 시험 시나리오(세부 단위) 1923, 시나리오가 가리키지 않는 요구사항·정책 15, ASVS 추적 표의 행 2027
+- 빈칸 762, ID만 1033: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 5(모두 사유가 있다): 완료로 세지 않고 따로 센다
 - 다시 볼 notes 9: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
@@ -15,9 +15,9 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 506 | 110 | 24 | 2 | 2 | 19 | 1 | 0 | 129 | 793 |
-| B | 1224 | 930 | 22 | 2 | 3 | 65 | 0 | 245 | 645 | 3136 |
+| B | 1275 | 923 | 22 | 2 | 3 | 68 | 0 | 245 | 632 | 3170 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 1730 | 1040 | 46 | 5 | 5 | 84 | 1 | 245 | 775 | 3931 |
+| 합계 | 1781 | 1033 | 46 | 5 | 5 | 87 | 1 | 245 | 762 | 3965 |
 
 ## 분야별 상태
 
@@ -26,10 +26,10 @@
 | analytics | B | 0 | 117 | 0 | 0 | 0 | 0 | 0 | 29 | 42 | 188 |
 | bot-defense | B | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 3 | 152 |
 | catalog-review | B | 68 | 23 | 0 | 0 | 0 | 0 | 0 | 16 | 9 | 116 |
-| control-tower | B | 29 | 101 | 0 | 0 | 1 | 4 | 0 | 24 | 141 | 300 |
+| control-tower | B | 56 | 102 | 0 | 0 | 1 | 7 | 0 | 24 | 128 | 318 |
 | delivery | B | 44 | 26 | 0 | 0 | 0 | 0 | 0 | 3 | 4 | 77 |
 | devops | B | 72 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 118 |
-| forensic-replay | B | 13 | 114 | 0 | 0 | 0 | 3 | 0 | 19 | 42 | 191 |
+| forensic-replay | B | 16 | 111 | 0 | 0 | 0 | 3 | 0 | 19 | 42 | 191 |
 | frontend | B | 87 | 46 | 8 | 2 | 0 | 3 | 0 | 22 | 35 | 203 |
 | identity | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
 | identity | B | 267 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 71 | 398 |
@@ -45,18 +45,18 @@
 | search | B | 18 | 0 | 2 | 0 | 1 | 2 | 0 | 0 | 0 | 23 |
 | seat-hold | A | 130 | 13 | 15 | 2 | 0 | 6 | 1 | 0 | 0 | 167 |
 | seat-hold | B | 110 | 19 | 0 | 0 | 0 | 3 | 0 | 15 | 9 | 156 |
-| security | B | 32 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 65 |
+| security | B | 48 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 81 |
 | settlement | A | 25 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 59 |
-| settlement | B | 67 | 48 | 0 | 0 | 0 | 0 | 0 | 23 | 15 | 153 |
+| settlement | B | 69 | 46 | 0 | 0 | 0 | 0 | 0 | 23 | 15 | 153 |
 | streaming | B | 4 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 22 | 27 |
 | support | B | 0 | 74 | 0 | 0 | 0 | 0 | 0 | 22 | 5 | 101 |
 | transfer-refund | A | 63 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 155 |
-| transfer-refund | B | 73 | 29 | 0 | 0 | 0 | 0 | 0 | 20 | 7 | 129 |
+| transfer-refund | B | 76 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 7 | 129 |
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 |
 | verification | B | 40 | 3 | 9 | 0 | 0 | 0 | 0 | 0 | 51 | 103 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 1730 | 1040 | 46 | 5 | 5 | 84 | 1 | 245 | 775 | 3931 |
+| 합계 |  | 1781 | 1033 | 46 | 5 | 5 | 87 | 1 | 245 | 762 | 3965 |
 
 ## 다시 볼 notes
 
@@ -106,8 +106,15 @@
 - docs/features/seat-hold.md:595: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
 - docs/frontend.md:1654: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
 - docs/frontend.md:1659: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
-- docs/security/authz-matrix.md:362: AZ-T15 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
-- docs/verification.md:654: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
+- docs/security/authz-matrix.md:364: AZ-T15 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
+- docs/security/authz-matrix.md:368: AZ-T18 ①가 docs/security/authz-matrix.md:367에도 있어 뒤의 것은 뺀다
+- docs/security/authz-matrix.md:368: AZ-T18 ②가 docs/security/authz-matrix.md:367에도 있어 뒤의 것은 뺀다
+- docs/security/authz-matrix.md:368: AZ-T18 ③가 docs/security/authz-matrix.md:367에도 있어 뒤의 것은 뺀다
+- docs/security/authz-matrix.md:368: AZ-T18 ④가 docs/security/authz-matrix.md:367에도 있어 뒤의 것은 뺀다
+- docs/security/authz-matrix.md:368: AZ-T18 ⑤가 docs/security/authz-matrix.md:367에도 있어 뒤의 것은 뺀다
+- docs/security/authz-matrix.md:368: AZ-T18 ⑥가 docs/security/authz-matrix.md:367에도 있어 뒤의 것은 뺀다
+- docs/security/authz-matrix.md:368: AZ-T18 ⑦가 docs/security/authz-matrix.md:367에도 있어 뒤의 것은 뺀다
+- docs/verification.md:657: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 
 ## 이 도구의 한계
 

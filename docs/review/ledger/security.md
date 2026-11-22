@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 32 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 65 |
-| 합계 | 32 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 65 |
+| B | 48 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 81 |
+| 합계 | 48 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 81 |
 
 ## docs/security/auth-controls.md
 
@@ -42,7 +42,7 @@
 | AZ-T2 | — | 테넌트를 넘는 읽기: A의 관리자·실무자 토큰으로 B의… | ID 조회는 모두 404이고 없는 ID와 본문이 같다. 목록에 B의 행이 0건이다. 거절이 보안 이벤트로 남는다 | 빈칸 | B | — |
 | AZ-T3 | — | 테넌트를 넘는 쓰기: 같은 B의 ID로 고치기·지우기·회차 취소… | 모두 404이고 B의 데이터와 감사 기록에 변화가 0건이다 | 빈칸 | B | — |
 | AZ-T4 | — | 테넌트 값 꾸미기: A의 토큰에 본문·쿼리의 `promoterId`=B를… | 게이트웨이가 바깥 헤더를 지운다. 역할과 테넌트는 서비스가 요청마다 identity에서 받은 값만 쓴다(ADR-0172). 본문의 테넌트 칸은 400이다. 모든… | 빈칸 | B | — |
-| AZ-T5 | — | DB 깊이 방어: 시험용으로 테넌트 조건을 뺀 조회를 파트너 전용 DB… | 첫째는 A의 행만, 둘째는 0건이다. 팬·관제 사용자와 일괄 작업 사용자는 정책대로 본다. 앱 사용자가 표 소유자가 아니고 `BYPASSRLS`가 없다 | 자동 시험 | B | 시험: services/core-svc/test-int/rls.int.test.ts |
+| AZ-T5 | — | DB 깊이 방어: 시험용으로 테넌트 조건을 뺀 조회를 파트너 전용 DB… | 첫째는 A의 행만, 둘째는 0건이다. 팬·관제 사용자와 일괄 작업 사용자는 정책대로 본다. 앱 사용자가 표 소유자가 아니고 `BYPASSRLS`가 없다 | 자동 시험 | B | 시험: services/core-svc/test-int/rls.int.test.ts, services/core-svc/test-int/startup-db-role.int.test.ts |
 | AZ-T6 | — | 본인 데이터: 팬 A로 팬 B의 주문·티켓·양도 요청·문의·본인확인… | 비공개 자원은 404, 후기 고치기는 403이다. 대표 계정에는 흡수 계정 주문이 보인다 | 빈칸 | B | — |
 | AZ-T7 | — | 상태·시간: 판매 승인 전 공연을 다른 파트너와 팬이 조회한다. 입장… | 승인 전 공연은 404, 입장 시작 뒤는 409 `ENTRY_STARTED`, 본문의 시각은 무시되고 서버 시각으로 판정한다 | 빈칸 | B | — |
 | AZ-T8 | — | 칸: 역할마다 같은 자원을 읽어 §4.1 표와 맞춘다(CS의 팬 조회에… | 표에서 '보이지 않는다'인 칸이 응답에 0건이다. 사유 없는 원문 요청은 거절되고, 사유를 넣은 원문 열람은 접속기록에 남는다. 서버 칸은 400이다 | 빈칸 | B | — |
@@ -81,3 +81,19 @@
 | AZ-T17 | ⑥ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ⑥ 모두 404 `not-found`이고 바꾼 값이 응답에 없으며, 결제사 호출과 DB 쓰기가 0건이고 오류 로그… | 자동 시험 | B | 시험: services/core-svc/test-int/shop-replay.int.test.ts, services/core-svc/test/shop-replay-in-tx.test.ts |
 | AZ-T17 | ⑦ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ⑦ 파트너 기록의 테넌트 칸이 그 공연·회차의 판매자로 채워져 그 테넌트의 파트너 트랜잭션에서만 보이고, 팬·관제 기록의 테넌트 칸은 비어 있다 | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-migration.int.test.ts |
 | AZ-T17 | ⑧ | 공용 멱등 기록 표의 역할 나누기(2026-11-22 감독 결정… | ⑧ 행 보안이 켜져 있고 FORCE가 없으며, 소유자가 앱 역할이 아니고, 정책은 ADR-0337 결정 3의 열 개이며, 세 역할의 작업 목록을 합치면 작업… | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts |
+| AZ-T18 | ① | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ① 칸마다 거절(42501)이고 모든 끝점이 그대로다 | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T18 | ② | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ② 다시 켜기는 0행이고 오류가 없으며 끝점이 그대로다. 나머지는 거절(42501)이다 | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T18 | ③ | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ③ 발송기는 그 끝점의 주소로 지금 비밀·옛 비밀의 서명을 붙여 보내고, DEAD가 기준을 넘으면 그 끝점이 사유 `FAILING`·판 + 1로 꺼진다. 이미… | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T18 | ④ | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ④ A의 끝점만 보이고 바뀌며 B는 그대로다. 테넌트 없이는 0건이고 오류가 없다. 판매자·끝점 ID 칸은 거절(42501), 아홉 칸 고치기는 된다. B의… | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T18 | ⑤ | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ⑤ 모두 거절(42501)이고, 시도 전후 상품 정산 원천 응답이 같다 | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T18 | ⑥ | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ⑥ A는 A의 행만, B는 B의 행만, 테넌트 없이는 0건이고 오류가 없다 | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T18 | ⑦ | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ⑦ 세 표 모두 행 보안이 켜져 있고 FORCE가 없으며 소유자가 앱 역할이 아니다. 정책은 ADR-0338 결정 1~3의 이름·명령·역할·식과 같고, 팬 경로… | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T18 | ⑧ | 테넌트를 넘는 역할과 파트너 역할의 쓰기 칸(2026-11-22 감독… | ⑧ 게시한 상품의 수수료율은 그때의 계약 값이고 적은 값은 쓰이지 않으며, 초안은 비어 있다. 한 번 정한 값은 조건 없는 고치기와 계약 변경 뒤에도… | 자동 시험 | B | 시험: services/core-svc/test-int/webhook-merch-grants.int.test.ts |
+| AZ-T19 | ① | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ① 여덟 메서드가 모두 성공하고, 집은 행의 임대 시각·바뀐 행 값이 기대와 같다 | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts |
+| AZ-T19 | ② | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ② 모두 거절(42501)이다 | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts |
+| AZ-T19 | ③ | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ③ 비밀·주소·옛 비밀·구독·판매자·끝점 ID 고치기는 거절(42501)이고 끝점은 그대로다. 켜진 끝점의 `FAILING` 끄기는 1행이고 판이 1 늘며… | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts |
+| AZ-T19 | ④ | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ④ 없음·팬 경로 로그인·슈퍼유저는 종료 코드 1과 그 까닭을 남기고, `core_notify` 로그인은 30초 안에 뜬다 | 자동 시험 | B | 시험: services/core-svc/test-int/startup-db-role.int.test.ts |
+| AZ-T19 | ⑤ | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ⑤ 본문·식별 칸 고치기는 거절(42501), 끝난 행 되돌리기는 0행, 도는 행을 DEAD로 만드는 것은 1행이다 | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts |
+| AZ-T19 | ⑥ | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ⑥ 모두 거절(42501)이다 | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts |
+| AZ-T19 | ⑦ | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ⑦ `core_notify`는 로그인 불가·슈퍼유저 아님·`BYPASSRLS` 아님·표 소유자 아님·다른 역할 비구성원이고, 두 표는 행 보안이 켜져 있고… | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts |
+| AZ-T19 | ⑧ | 웹훅 발송기의 전용 DB 역할(2026-11-22 감독 결정… | ⑧ 수신기가 그 끝점 주소로 서명한 요청 1건을 받고 `webhook-signature`가 시험에서 만든 HMAC과 같으며, 원장 행이 SUCCEEDED·끝난… | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts |

@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 29 | 101 | 0 | 0 | 1 | 4 | 0 | 24 | 141 | 300 |
-| 합계 | 29 | 101 | 0 | 0 | 1 | 4 | 0 | 24 | 141 | 300 |
+| B | 56 | 102 | 0 | 0 | 1 | 7 | 0 | 24 | 128 | 318 |
+| 합계 | 56 | 102 | 0 | 0 | 1 | 7 | 0 | 24 | 128 | 318 |
 
 ## docs/features/control-tower.md
 
@@ -22,7 +22,9 @@
 | C-T7 | — | 파드 ack 시간 초과 예외 처리 | 대상 파드의 수신 확인이 시간 초과되면 FAILED 상태로 바뀌고, 수동 재시도([ 다시 시도 ])와 채운 런북 CLI 명령 한 줄 안내가 바로 나온다. | 빈칸 | B | — |
 | C-T8 | — | 제어 명령 긴급 원복(Revert) | 직전 정상 설정값을 복원했다는 ack를 정상으로 받고, 1차 명령과 롤백 명령이 감사 로그에 총 2건으로 무결하게 남는다. | 빈칸 | B | — |
 | C-T9 | — | 자동 제어와 수동 제어의 경합 | 운영자가 수동 명령으로 개입한 직후 15분간 AIMD 자동 조정이 멈추고, 만료 후 확인을 거쳐 자동 조정으로 돌아옴을 입증한다. 자동 조절 멈춤 중 지정 뒤… | 빈칸 | B | — |
-| C-T10 | — | 자동화 제어 긴급 정지 스위치 | commander 1인이 긴급 정지를 실행하면 입장 제어 자동화(AIMD 조정·에러 버짓 연동 감축·Degraded 후보 추천)가 바로 멈추고, 오토스케일링은… | 빈칸 | B | — |
+| C-T10 | ① | 자동화 제어 긴급 정지 스위치 | ① commander 1인이 긴급 정지를 실행하면 입장 제어 자동화(AIMD 조정·에러 버짓 연동 감축·Degraded 후보 추천)가 바로 멈추고… | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T10 | ② | 자동화 제어 긴급 정지 스위치 | ② 사후 검토 보고서 할 일(작성 48시간)이 생기고, 기한을 넘기면 SEV3가 나온다. 실행한 commander 자신의 검토 완료는 거부된다(1인 기간 제외). | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T10 | ③ | 자동화 제어 긴급 정지 스위치 | ③ 다시 켜려면 2인 승인이 필요하다. 세부 번호는 2026-11-22 BAT-360 계획이 나눴다(둘째가 사후 검토 몫) | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
 | C-T11 | — | 시스템 자동 조치 감사 기록 | 에러 버짓 50% 소진에 따른 목표치 자동 감축이 행위자 '시스템(SYSTEM)'으로 감사 로그에 온전히 기록되고, 같은 때 콘솔 SEV2 '예산 50% 감축… | 빈칸 | B | — |
 | C-T12 | — | Degraded Mode 전이 감사 기록 | 자동이든 수동이든 모든 Degraded Mode 활성화 이력이 감사 로그에 빠짐없이 기록된다. | 빈칸 | B | — |
 | C-T13 | — | ops-svc 장애 시 런북 구동 | ops-svc가 멈춘 상태에서 비상 Job으로 런북을 돌려 전파 p99 ≤ 10초를 달성한다. 두 사람의 서명이 필요한 묶음에 KMS 서명이 없거나 하나뿐이면… | 빈칸 | B | — |
@@ -56,11 +58,13 @@
 | C-T35 | — | 처리량 급감 표시 | 판매 중 회차에서 결제 시뮬레이터의 SDK 스크립트를 막아 결제 접수가 줄면, 서버 오류가 없어 SLO 경보는 울리지 않는다. 그 대신 6분 [가정] 안에 '이… | 빈칸 | B | — |
 | C-T36 | — | 실시간 표 신선도와 Degraded 전환 | 판매 중 회차에서 로컬 `ops-rt` 작업자의 삽입을 늦춰(ClickHouse 응답 지연 주입) 심장 박동 반영을 늦추면, 판매 중 탭 머리의 신선도가 5초를… | 빈칸 | B | — |
 | C-T37 | — | 거래 사건 끊김 표시 | 판매 중 회차에서 로컬 거래 토픽(`trade.*`) 생산을 60초 넘게 멈추면, 심장 박동 신선도는 정상인 채 판매 누적·잔여석 옆에 '거래 사건 끊김'이… | 빈칸 | B | — |
-| C-T38 | — | 감사 체크포인트와 공개 타임스탬프 | 로컬 kind에서 감사 기록 100건을 쓴 뒤 일 체크포인트를 실행하면 체크포인트(직전 해시·seq 범위·머클 루트), 서명, '대기' 증명이 감사 앵커 버킷과… | 빈칸 | B | — |
-| C-T39 | — | 검증 묶음으로 기록 하나 확인 | SCR-031에서 내보낸 검증 묶음은 검증 도구를 통과한다. 기록 정규화 값의 한 글자를 바꾸거나 다른 기록의 잎 솔트를 넣으면 포함 증명이 실패한다… | 빈칸 | B | — |
-| C-T40 | — | 체크포인트 사슬의 빈틈과 바꿔치기 | 공개 목록에서 체크포인트 하나를 빼거나 같은 번호의 다른 체크포인트(다른 루트)를 넣으면, 검증 도구가 번호 빈틈이나 직전 해시 불일치로 실패한다. 같은 번호에… | 빈칸 | B | — |
-| C-T41 | — | 공개 캘린더 장애 | 캘린더 주소를 모두 막아도 체크포인트·서명·내부 앵커는 남고, 다음 실행에서 다시 찍는다. 6시간 넘게 밀리면 SEV3이고, 거래·온세일 경로의 지표는 변하지… | 빈칸 | B | — |
-| C-T42 | — | 기록 파기 뒤 공개 루트 | 법정 보존 기간이 지난 감사 기록과 그 잎 솔트를 파기한 뒤에도 공개 체크포인트의 사슬·서명·공개 타임스탬프 검증은 통과한다. 공개 값만으로는 파기한 기록을… | 빈칸 | B | — |
+| C-T38 | ① | 감사 체크포인트와 공개 타임스탬프 | ① 체크포인트(직전 해시·seq 범위·머클 루트), 서명, '대기' 증명이 감사 앵커 버킷과 공개 게시 버킷(AWS 흉내 서버 moto)에 생긴다. | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, services/ops-svc/test/audit-anchor.test.ts |
+| C-T38 | ② | 감사 체크포인트와 공개 타임스탬프 | ② 실제 OpenTimestamps 캘린더로 찍은 증명은 몇 시간 뒤 `upgrade`로 '완료'가 된다. | 다른 단계 | B | 구간 5(인프라 구축, ADR-0332)·출시 전, BAT-365 넘김 · 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 확정 증명으로 바꾸는 일은 밖으로 나가는 연결과 확정 시간이 있어야… |
+| C-T38 | ③ | 감사 체크포인트와 공개 타임스탬프 | ③ 검증 도구가 사슬·서명·루트를 통과시킨다 | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, tools/audit-verify/audit-verify.test.mjs |
+| C-T39 | — | 검증 묶음으로 기록 하나 확인 | SCR-031에서 내보낸 검증 묶음은 검증 도구를 통과한다. 기록 정규화 값의 한 글자를 바꾸거나 다른 기록의 잎 솔트를 넣으면 포함 증명이 실패한다… | 자동 시험 | B | 시험: services/ops-svc/test/audit-bundle-http.test.ts, tools/audit-verify/audit-verify.test.mjs |
+| C-T40 | — | 체크포인트 사슬의 빈틈과 바꿔치기 | 공개 목록에서 체크포인트 하나를 빼거나 같은 번호의 다른 체크포인트(다른 루트)를 넣으면, 검증 도구가 번호 빈틈이나 직전 해시 불일치로 실패한다. 같은 번호에… | 자동 시험 | B | 시험: tools/audit-verify/audit-verify.test.mjs |
+| C-T41 | — | 공개 캘린더 장애 | 캘린더 주소를 모두 막아도 체크포인트·서명·내부 앵커는 남고, 다음 실행에서 다시 찍는다. 6시간 넘게 밀리면 SEV3이고, 거래·온세일 경로의 지표는 변하지… | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, services/ops-svc/test/audit-anchor.test.ts 외 1곳 |
+| C-T42 | — | 기록 파기 뒤 공개 루트 | 법정 보존 기간이 지난 감사 기록과 그 잎 솔트를 파기한 뒤에도 공개 체크포인트의 사슬·서명·공개 타임스탬프 검증은 통과한다. 공개 값만으로는 파기한 기록을… | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, tools/audit-verify/audit-verify.test.mjs |
 | C-T43 | — | 수요 예측과 규모 올리기 | 구독 수와 지난 회차를 넣은 시험 데이터에서 예상 진입 인원(중앙·상단)과 제안 등급이 식과 같다. 구독 수가 0.5~2배인 지난 회차가 10개 미만이면 기본… | 미검증 | B | BAT-620 · 수요 예측식·기본 비율·규모 올리기·T-30분·LARGE 간격·commander 예외는 core-svc 시험으로 확인했다. 화면의 '규모 올리기 검토'·SEV3 알림(24시간 뒤 SEV2)·감사… |
 | C-T44 | ① | 자동 조치의 끝내는 조건 | ① 실시간 표 신선도를 5초 넘게 3분 늦췄다 되돌리면 대체 표시가 5분 뒤 실시간 표로 돌아온다. … 의 걸림·풀림을 조치마다 보여 준다. 시간 조건이 있는… | 빈칸 | B | — |
 | C-T44 | ② | 자동 조치의 끝내는 조건 | ② 결제사 시뮬레이터를 승인 기한(10분)보다 길게 멈춰 재시도 큐가 다 빈 뒤 되살리면, 확인 호출이 3분 정상인 뒤 시험 재개(새 결제 시도의 5%)로… | 빈칸 | B | — |
@@ -69,9 +73,19 @@
 | C-T44 | ⑤ | 자동 조치의 끝내는 조건 | ⑤ 보류 표 `held_event`(처리하지 못한 사건을 Kafka 데드 레터 토픽 대신 그 서비스 DB에 옮겨 두는 표, ADR-0142)의 사건을… | 빈칸 | B | — |
 | C-T44 | ⑥ | 자동 조치의 끝내는 조건 | ⑥ CloudFront 설정 검사에서 대기열 파일 배포가 원본 그룹(500·502·503·504, 연결 시간 초과 2초·시도 1회)을 쓰고, 명령 6의 S3… | 빈칸 | B | — |
 | C-T44 | ⑦ | 자동 조치의 끝내는 조건 | ⑦ 관제 콘솔의 '걸린 자동 조치' 위젯과 상태 바 수가 | 빈칸 | B | — |
-| C-T45 | — | 운영 명령 주석과 서비스 지도 | 시험 환경에서 명령 2(입장 일시정지)를 요청·승인하고 10분 만료까지 두면 ops-svc 로그에 `ops_event` 줄이 단계마다 하나씩 표본 추출 없이… | 빈칸 | B | — |
-| C-T46 | — | 판매 일시정지 1인 실행과 2인 재개 | commander 1인이 재인증 뒤 명령 3을 내면 승인 대기 없이 전파되어 ack p99 3초 안에 ACKED가 되고, 사후 검토 보고서 할 일(작성… | 빈칸 | B | — |
-| C-T47 | — | 2인 승인 시연(데모) | 데모 환경에서 2인 명령을 요청한 뒤 데모 막대의 '요청자 본인으로 승인 시도'를 누르면 403이고, '데모 승인자로 승인'을 누르면 데모 도우미가 데모 승인자… | 빈칸 | B | — |
+| C-T45 | ① | 운영 명령 주석과 서비스 지도 | ① 시험 환경에서 명령 2(입장 일시정지)를 요청·승인하고 10분 만료까지 두면 ops-svc 로그에 `ops_event` 줄이 단계마다 하나씩 표본 추출 없이… | 자동 시험 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
+| C-T45 | ② | 운영 명령 주석과 서비스 지도 | ② 온세일 대시보드의 주석 조회는 같은 회차 그래프에 명령 번호와 단계를 표시한다. | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
+| C-T45 | ③ | 운영 명령 주석과 서비스 지도 | ③ 서비스 A → B 호출이 든 요청 기록을 넣으면 노드 그래프에 연결이 보인다. | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
+| C-T45 | ④ | 운영 명령 주석과 서비스 지도 | ④ 서비스 그래프 지표를 읽는 경보 규칙·자동 제어 입력이 없음은 규칙 검사로 확인한다 | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
+| C-T46 | ① | 판매 일시정지 1인 실행과 2인 재개 | ① commander 1인이 재인증 뒤 명령 3을 내면 승인 대기 없이 전파되어 ack p99 3초 안에 ACKED가 되고, | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T46 | ② | 판매 일시정지 1인 실행과 2인 재개 | ② 사후 검토 보고서 할 일(작성 48시간, 다른 commander 검토 7일)이 생긴다. | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T46 | ③ | 판매 일시정지 1인 실행과 2인 재개 | ③ 재인증이 없거나 operator가 내면 403이다. | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T46 | ④ | 판매 일시정지 1인 실행과 2인 재개 | ④ 판매 재개는 REVERT_PENDING이 되고, 요청자가 아닌 operator 이상이 재인증하고 승인해야 REVERTED가 된다. 10분 안에 승인이 없으면… | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T47 | ① | 2인 승인 시연(데모) | ① 데모 환경에서 2인 명령을 요청한 뒤 요청자 본인 계정으로 승인하면 403이고, 데모 승인자 계정이 재인증하고 승인하면 명령이 전파된다. 감사 로그에는 두… | 자동 시험 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
+| C-T47 | ② | 2인 승인 시연(데모) | ② 데모 막대의 '요청자 본인으로 승인 시도'를 누르면 같은 403이 보이고, '데모 승인자로 승인'을 누르면 데모 도우미가 데모 승인자 계정으로 재인증하고… | ID만 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
+| C-T47 | ③ | 2인 승인 시연(데모) | ③ 운영 묶음 검사(FE-T21)에서 데모 막대는 0건이다 | ID만 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
+| C-T47 | ④ | 2인 승인 시연(데모) | ④ 운영·스테이징 오버레이에 데모 도우미를 넣으면 정책 시험과 입장 정책이 거부한다 | ID만 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
+| C-T47 | ⑤ | 2인 승인 시연(데모) | ⑤ 데모 막대의 두 버튼 흐름은 Playwright 브라우저 맥락 둘(요청자·승인자)로 CI에서 돈다. 세부 번호는 2026-11-22 BAT-360 계획이… | ID만 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
 | C-T48 | — | 받는 쪽 과부하 중 제어 명령 | purchase-svc에 이벤트 루프 지연 p99 200ms [가정]가 나는 부하를 건 채 명령 3을 내면, 제어 gRPC(데드라인 1초 [가정], 같은 명령… | 빈칸 | B | — |
 | C-T49 | — | KMS 정지 중 명령 커밋 | KMS 호출을 막은 채 명령 2를 내면 접수 p95 500ms 안에 커밋·전파된다. mac이 빈 감사 행이 1분 [가정]을 넘으면 SEV2가 뜨고, KMS를… | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts, services/ops-svc/test/audit-mac.test.ts |
 | C-T50 | — | 킬스위치 중 확장·재시작 | 명령 3이 ACKED인 회차에서 purchase-svc를 둘에서 여섯으로 늘리고, 다른 시험에서는 파드 하나를 강제로 다시 시작한다. 새 파드의 홀드·결제… | 빈칸 | B | — |
@@ -107,10 +121,14 @@
 | C-T59 | ⑥ | 수사기관 제공 자료의 commander 승인(추천 적용… | ⑥은 422이고 대장에 행이 생기지 않는다 | 빈칸 | B | — |
 | C-T59 | ⑦ | 수사기관 제공 자료의 commander 승인(추천 적용… | ⑦은 RECEIVED로 돌아가고 행위자 SYSTEM의 만료 기록이 남는다. 승인·거부·만료는 모두 감사 로그와 `data_request_approval`에 남는다 | 빈칸 | B | — |
 | C-T60 | — | 접속기록 자기 점검(시연)(추천 적용 2026-10-30, §9… | 데모 환경은 200이고 종결 기록에 '자기 점검(시연)'이 남으며, SCR-032 이상 건 줄과 점검 보고 요약에 그 표시가 보인다. 운영 설정은… | 빈칸 | B | — |
-| C-T61 | ① | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ①만 빠지고 … 의 명령이 AUTO_EXPIRED(행위자 SYSTEM)가 된다. 작업이 5분 [가정] 넘게 성공하지 못하면 SEV2가 뜬다. 작업 역할이 그… | 빈칸 | B | — |
-| C-T61 | ② | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ②는 남는다. 충돌 때는 다시 읽어 한 번 더 바꾸고, 그사이 들어온 변경을 지우지 않는다. ops-svc를 다시 올리면 | 빈칸 | B | — |
-| C-T61 | ③ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ③는 남는다. 충돌 때는 다시 읽어 한 번 더 바꾸고, 그사이 들어온 변경을 지우지 않는다. ops-svc를 다시 올리면 | 빈칸 | B | — |
-| C-T61 | ④ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ④는 남는다. 충돌 때는 다시 읽어 한 번 더 바꾸고, 그사이 들어온 변경을 지우지 않는다. ops-svc를 다시 올리면 | 빈칸 | B | — |
+| C-T61 | ① | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ①만 빠지고 | 자동 시험 | B | 시험: services/ops-svc/test-int/waf-block-expirer.int.test.ts, services/ops-svc/test/waf-block-expiry.test.ts |
+| C-T61 | ② | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ②는 남는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/waf-block-expirer.int.test.ts, services/ops-svc/test/waf-block-expiry.test.ts |
+| C-T61 | ③ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ③는 남는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/waf-block-expirer.int.test.ts, services/ops-svc/test/waf-block-expiry.test.ts |
+| C-T61 | ④ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ④는 남는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/waf-block-expirer.int.test.ts, services/ops-svc/test/waf-block-expiry.test.ts |
+| C-T61 | ⑤ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ⑤ 충돌 때는 다시 읽어 한 번 더 바꾸고, 그사이 들어온 변경을 지우지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/waf-block-expiry.test.ts |
+| C-T61 | ⑥ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ⑥ ops-svc를 다시 올리면 빠진 대역의 명령이 AUTO_EXPIRED(행위자 SYSTEM)가 된다. | 자동 시험 | B | 시험: services/ops-svc/test-int/waf-block-expirer.int.test.ts, services/ops-svc/test/waf-block-expiry.test.ts |
+| C-T61 | ⑦ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ⑦ 작업이 5분 [가정] 넘게 성공하지 못하면 SEV2가 뜬다. | 다른 단계 | B | 구간 5(인프라 구축, ADR-0332), BAT-365 넘김 · 작업의 마지막 성공 시각(kube-state-metrics `kube_cronjob_status_last_successful_time`)으로 내는… |
+| C-T61 | ⑧ | 만료된 WAF 차단 거두기(추천 적용 2026-10-30, §5… | ⑧ 작업 역할이 그 IP 집합의 읽기·갱신만 할 수 있는지는 C-T58과 같은 정책 시험으로 보고 결과는 '설계 검사'로 적는다. 뒤의 네 번호는… | 다른 단계 | B | 구간 5(인프라 구축, ADR-0332), C-T58과 같은 정책 시험, BAT-365 넘김 · 작업 역할이 그 IP 집합의 읽기·갱신만 갖는지는 Terraform 정책 시험·IAM 정책 판정의 설계 검사이고… |
 | C-T62 | ① | 법정 조치 목록·상세 조회(추천 적용 2026-10-30, §9… | ①은 두 페이지 합이 150건이고 빠지거나 겹친 건이 0건이며, 기본 순서가 기한이 가까운 순이다 | 빈칸 | B | — |
 | C-T62 | ② | 법정 조치 목록·상세 조회(추천 적용 2026-10-30, §9… | ②는 400이다 | 빈칸 | B | — |
 | C-T62 | ③ | 법정 조치 목록·상세 조회(추천 적용 2026-10-30, §9… | ③은 통보·자료 요청이 403이고 보안 사고는 `view` SUMMARY만 온다 | 빈칸 | B | — |
@@ -155,7 +173,7 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-1.1.1 | — | L2 | 입력은 그 형식으로 인코딩된 데이터가 기대될 때만 정규 형식으로 한 번만 디코딩(이스케이프 해제 포함)하고, 검증·정화 같은 다음 처리보다 먼저 한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 (영역:… |
+| v5.0.0-1.1.1 | — | L2 | 입력은 그 형식으로 인코딩된 데이터가 기대될 때만 정규 형식으로 한 번만 디코딩(이스케이프 해제 포함)하고, 검증·정화 같은 다음 처리보다 먼저 한다. | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
 | v5.0.0-1.1.2 | — | L2 | 출력 인코딩·이스케이프는 그 값을 쓰는 해석기 바로 앞의 마지막 단계에서 하거나 해석기가 직접 한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mj… |
 | v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs… |
 | v5.0.0-1.2.2 | — | L1 | URL을 동적으로 만들 때 신뢰하지 않는 값을 문맥에 맞게 인코딩하고 안전한 프로토콜만 허용한다(`javascript:`·`data:` 금지). | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/preload.test.mjs, packages/api-client/test/policy.test.ts (영역: apps/console-host… |
@@ -168,7 +186,7 @@
 | v5.0.0-1.2.9 | — | L2 | 정규식의 특수 문자를 이스케이프해 메타 문자로 해석되지 않게 한다. | 해당 없음 | B | 해당 없음(사용자 값을 정규식에 넣지 않는다. 명령 4의 대역은 IP 주소 해석기로 읽는다) |
 | v5.0.0-1.3.1 | — | L1 | WYSIWYG 편집기 등에서 오는 신뢰하지 않는 HTML 입력은 모두 잘 알려진 안전한 HTML 정화 라이브러리나 프레임워크 기능으로 정화한다. | 해당 없음 | B | 해당 없음(HTML 입력을 받지 않는다. 사유·요약·보고서는 평문이다) |
 | v5.0.0-1.3.2 | — | L1 | `eval()` 같은 동적 코드 실행을 피하고, 불가피하면 사용자 입력을 실행 전에 정화한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs (영역: apps/console-host, services/ops-svc) |
-| v5.0.0-1.3.3 | — | L2 | 위험할 수 있는 문맥에 넘기는 데이터는 그 문맥에 안전한 문자만 허용하고 너무 긴 입력을 자르는 등 미리 정화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/review.test.ts, services/core-svc/test/search.http.test.ts 외 4곳 (영역: services/ops-svc) |
+| v5.0.0-1.3.3 | — | L2 | 위험할 수 있는 문맥에 넘기는 데이터는 그 문맥에 안전한 문자만 허용하고 너무 긴 입력을 자르는 등 미리 정화한다. | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
 | v5.0.0-1.3.4 | — | L2 | 사용자가 준 SVG는 애플리케이션에 안전한 태그·속성만 담도록 검증하거나 정화한다(`script`·`foreignObject` 제외). | 해당 없음 | B | 해당 없음(SVG를 받지 않는다. 요청서 원본은 PDF만 받는다, V5) |
 | v5.0.0-1.3.5 | — | L2 | 사용자가 넣은 Markdown·CSS·XSL·BBCode 같은 스크립트·표현식 템플릿 내용을 정화하거나 끈다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/seatmap-parse.test.ts 외 1곳 (영역:… |
 | v5.0.0-1.3.6 | — | L2 | 다른 서비스를 부르는 데 쓰기 전에 신뢰하지 않는 값을 프로토콜·도메인·경로·포트 허용 목록과 대조하고 위험할 수 있는 문자를 정화해 SSRF를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts |
@@ -183,11 +201,11 @@
 | v5.0.0-1.5.1 | — | L1 | XML 파서를 제한적으로 설정하고 외부 엔터티 해석 같은 위험 기능을 꺼 XXE를 막는다. | 해당 없음 | B | 해당 없음(XML을 처리하지 않는다. 요청서 PDF는 해석하지 않고 저장만 한다) |
 | v5.0.0-1.5.2 | — | L2 | 신뢰하지 않는 데이터의 역직렬화는 허용 객체 타입 목록 등으로 안전하게 처리하고, 안전하지 않다고 알려진 방식은 쓰지 않는다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, packages/validation/test/sale-policy.test.ts 외… |
 | v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test/sale-eligibility.http.test.ts 외 8곳 (영역:… |
-| v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 5곳… |
+| v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/ops-svc/test/pg-assign-command.test.ts |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | ID만 | B | 다른 곳 시험: services/core-svc/test/search.http.test.ts, services/realtime-gw/test/hub.test.ts (영역: apps/console-host… |
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/ops-svc/test/command-dry-run.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.2.2 | — | L1 | 입력 검증을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 검증에 의존하지 않는다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/save-answer.test.mjs… |
-| v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | ID만 | B | 다른 곳 시험: packages/validation/test/sale-policy.test.ts, services/core-svc/test-int/catalog.int.test.ts 외 40곳 (영역:… |
+| v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/ops-svc/test/pg-assign-command.test.ts, services/payment-svc/test-int/payment-checkout.int.test.ts 외 21곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/approval-request.int.test.ts, services/ops-svc/test-int/command-lifecycle.int.test.ts 외 1곳 |
@@ -234,24 +252,24 @@
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-summary.http.test.ts 외… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역:… |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 1곳 |
-| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/idempotency-rls.int.test.ts, services/core-svc/test-int/production-image.int.test.ts… |
+| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 4곳 |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts, services/ops-svc/test/approval-visibility.test.ts 외 1곳 |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 해당 없음 | B | 해당 없음(관제 콘솔은 플랫폼 운영자만 쓰고 파트너 테넌트가 들어오지 않는다. 파트너 실시간 판매 현황(§11)은 이 표 범위 밖이다) |
 | v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: apps/console-host, apps/widgets |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: apps/console-host, apps/widgets |
-| v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 1곳… |
+| v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-checkpoint-bytes.test.ts, tools/audit-verify/audit-verify.test.mjs |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
-| v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/payment-svc/test/portone-gateway.test.ts (영역:… |
+| v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-checkpoint-bytes.test.ts, tools/audit-verify/audit-verify.test.mjs |
 | v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | ID만 | B | 다른 곳 시험: services/payment-svc/test/virtual-account-deposit.test.ts (영역: apps/console-host, apps/widgets) |
 | v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | ID만 | B | 다른 곳 시험: packages/shuffle/test/drand-seal.test.ts, services/admission-ctrl/test/kms-seed-opener.test.ts 외 3곳 (영역:… |
 | v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
 | v5.0.0-11.4.2 | — | L2 | 비밀번호는 현재 권고 파라미터를 적용한 승인된 비밀번호 해시 함수로 저장한다. | 해당 없음 | B | 해당 없음(이 기능에는 비밀번호가 없다. 관리 계정 비밀번호는 auth.md 11.4.2가 판정한다) |
-| v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, packages/shuffle/test/shuffle.test.ts (영역:… |
+| v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | 자동 시험 | B | 시험: services/ops-svc/test/audit-checkpoint-bytes.test.ts, tools/audit-verify/audit-verify.test.mjs |
 | v5.0.0-11.4.4 | — | L2 | 비밀번호에서 비밀 키를 만들 때 키 스트레칭 파라미터가 있는 승인된 KDF를 쓰고, 그 파라미터는 무차별 대입으로 키가 뚫리지 않게 보안과 성능을 맞춰 정한다. | 해당 없음 | B | 해당 없음(비밀번호에서 키를 만들지 않는다) |
 | v5.0.0-11.5.1 | — | L2 | 추측되면 안 되는 모든 난수와 문자열은 CSPRNG로 만들고 128비트 이상의 엔트로피를 갖는다(UUID는 이 조건을 만족하지 않는다). | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
-| v5.0.0-11.6.1 | — | L2 | 키 생성·시드 생성과 디지털 서명 생성·검증에는 승인된 알고리즘과 운용 모드만 쓰고, 알려진 공격에 약한 키(페르마 인수분해에 약한 RSA 키 등)를 만들지… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test-int/kms-seed.int.test.ts 외 4곳… |
+| v5.0.0-11.6.1 | — | L2 | 키 생성·시드 생성과 디지털 서명 생성·검증에는 승인된 알고리즘과 운용 모드만 쓰고, 알려진 공격에 약한 키(페르마 인수분해에 약한 RSA 키 등)를 만들지… | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, services/ops-svc/test/audit-checkpoint-bytes.test.ts |
 | v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-server.test.ts (영역:… |
 | v5.0.0-12.1.2 | — | L2 | 권장 암호 스위트만 켜고 가장 강한 스위트를 우선하며, L3는 순방향 비밀성을 주는 스위트만 지원한다. | 빈칸 | B | 영역: apps/console-host, apps/widgets |
 | v5.0.0-12.1.3 | — | L2 | mTLS 클라이언트 인증서가 신뢰된 것인지 확인한 뒤에만 그 신원으로 인증·인가한다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
@@ -300,8 +318,8 @@
 | v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/console-host, apps/widgets) |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/console-host, apps/widgets) |
-| v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/console-host, apps/widgets) |
-| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | ID만 | B | 다른 곳 시험: loadtest/test/before090.test.mjs, loadtest/test/lib.test.mjs 외 85곳 (영역: apps/console-host, apps/widgets) |
+| v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | 자동 시험 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
+| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외… |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |

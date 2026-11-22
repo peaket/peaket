@@ -166,7 +166,7 @@
 | S-T41 | ⑨ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑨ 열기 실패 때 닫힘: 503/409이면 승인은 200·`q:cfg` 없음(대기열 404), 정비 일을 다시 돌리면 열고 사본을 쓴다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-open.int.test.ts, services/core-svc/test/sale-approval.test.ts 외 1곳 |
 | S-T41 | ⑩ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑩ CDN: 승인하면 회차마다 `event:{id}`·`production:{id}`를 무효화하고, 반려는 0건, 무효화 실패를 주입해도 승인 200 | 자동 시험 | A | 시험: services/core-svc/test/ops-sale-review.http.test.ts |
 | S-T41 | ⑪ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑪ BAT-051 회귀: 승인 공연의 `sale-config`를 읽어 홀드 규칙·1인 한도·판매 종료를 덮고, 사본 없으면 파일 설정·사본 오류면 503 | 자동 시험 | A | 시험: services/purchase-svc/test-int/seat-store.int.test.ts |
-| S-T41 | ⑫ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑫ 화면은 BAT-617. 승인된 공연의 회차마다 `salePolicy`·`eligGates`(PRESALE 창)·`eligLists`가 실리고 취소 회차는… | 자동 시험 | A | 시험: services/core-svc/test/event-sale-config.test.ts |
+| S-T41 | ⑫ | 판매 설정 사본·판매 승인 요청·승인 실행·판매 열기(판매 승인… | ⑫ 화면은 BAT-617. 승인된 공연의 회차마다 `salePolicy`·`eligGates`(PRESALE 창)·`eligLists`가 실리고 취소 회차는… | 자동 시험 | A | 시험: apps/console-host/src/pages/sale-review/model/sale-review.test.mjs, apps/console-host/src/pages/sale-review/ui/wirin… |
 | S-T42 | ① | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ①은 101이고 고른 하위 프로토콜이 `peaket.seats.v1`뿐이며 첫 프레임이 `BatchInterval` 100이다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | S-T42 | ② | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ②는 차례대로 404·403·403·400·400·400·400·400·400·400·401·401·401·401·401·401·401·503이고 업그레이드가… | 자동 시험 | A | 시험: packages/platform/test/admission-token.test.ts, services/realtime-gw/test-int/stream.int.test.ts 외 1곳 |
 | S-T42 | ③ | realtime-gw 묶음 전파의 첫 구현(추천 적용… | ③은 4403이다 | 자동 시험 | A | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
@@ -272,7 +272,7 @@
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | 자동 시험 | B | 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts |
 | v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test-int/sale-policy.int.test.ts 외 23곳 |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-holds.int.test.ts 외 23곳 |
-| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/cancel-refund-account-http.test.ts, services/purchase-svc/test/compensations-http.test.ts… |
+| v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/event-wizard/ui/wiring.test.mjs, services/purchase-svc/test/cancel-refund-account-http.test… |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/partner-bulkhead-auth.test.ts, services/purchase-svc/test/hold-seats.test.ts 외 1곳 |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | ID만 | B | 다른 곳 시험: packages/platform/test-int/tenant-rate-limit.int.test.ts, services/core-svc/test-int/export-audit.int.test.ts… |
 | v5.0.0-12.1.1 | — | L1 | TLS 1.2와 1.3처럼 권장되는 최신 버전만 켜고 가장 최신 버전을 우선한다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-server.test.ts (영역: apps/partner… |
