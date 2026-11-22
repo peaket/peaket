@@ -92,7 +92,7 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'peaket-editor-'));
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ seatmap: parser, publicFiles: new LocalFolderPublicFileStore(root) }) }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia({ seatmap: parser, publicFiles: new LocalFolderPublicFileStore(root) }) }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
     clock: fakeClock({ now: NOW_MS }),
     logDestination: logs.stream,

@@ -68,7 +68,7 @@ beforeAll(async () => {
   sync = new DrizzleSearchReadModel(admin);
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia() }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia() }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
     clock,
     logDestination: quiet(),
@@ -1552,7 +1552,7 @@ describe('V165-R15 사전 준비 전 0건 검색', () => {
     // 운영과 같은 조립: 검색 전용 연결만 세는 묶음으로 준다. 사전은 주기 일을 걸지 않아 아직 읽지 않았다
     const s = await createService({
       name: 'core-svc',
-      module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, searchDatabase: counted, media: testMedia() }),
+      module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, searchDatabase: counted, media: testMedia() }),
       env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
       clock,
       logDestination: quiet(),
@@ -1590,7 +1590,7 @@ describe('R-T41·SR-T8 ③ core 회차 상태 반영 [PostgreSQL·실제 HTTP]',
     process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
     esvc = await createService({
       name: 'core-svc',
-      module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ cdn }) }),
+      module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ cdn }) }),
       env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
       clock,
       logDestination: new Writable({
@@ -1776,7 +1776,7 @@ describe('SR-T8 ③ 검색 쪽 쓰기 실패와 회차 상태 [PostgreSQL·실�
     process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
     isvc = await createService({
       name: 'core-svc',
-      module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ cdn }) }),
+      module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ cdn }) }),
       env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
       clock,
       logDestination: new Writable({

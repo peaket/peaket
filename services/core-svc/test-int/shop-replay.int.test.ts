@@ -76,7 +76,7 @@ beforeAll(async () => {
   await admin.pool.query('insert into promoter (id, legal_name) values ($1, $2)', [SELLER, '(주)재생굿즈']);
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia(), shop: { stock, payments, held, reauth, logger, consentVersion: CONSENT } }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia(), shop: { stock, payments, held, reauth, logger, consentVersion: CONSENT } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),

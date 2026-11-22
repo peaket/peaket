@@ -49,7 +49,7 @@ beforeAll(async () => {
   process.env.PEAKET_INTERNAL_TOKEN = 'int-test-token';
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia() }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia() }),
     env: { PEAKET_ENV: 'ci' },
     clock: systemClock,
     logDestination: quiet(),

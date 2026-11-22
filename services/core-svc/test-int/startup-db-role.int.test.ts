@@ -15,6 +15,8 @@ import { ensureSearchLogin, loginFor } from './roles.js';
 
 let pg: PostgresContainer;
 let admin: Database;
+/** 0043 전 트리에서는 core_notify 역할이 없어 로그인을 만들지 못한다. 그때는 undefined로 두고 AZ-T19 ④가 실패를 드러낸다 */
+let notifyUrl: string | undefined;
 const logins: Database[] = [];
 
 beforeAll(async () => {
@@ -24,6 +26,12 @@ beforeAll(async () => {
   logins.push(await loginFor(admin, pg, 'core_app_login', 'core_app', 1));
   logins.push(await loginFor(admin, pg, 'core_partner_login', 'core_partner', 1));
   logins.push(await loginFor(admin, pg, 'core_ops_login', 'core_ops', 1));
+  try {
+    logins.push(await loginFor(admin, pg, 'core_notify_login', 'core_notify', 1));
+    notifyUrl = pg.urlFor('core_notify_login', 'peaket-test');
+  } catch {
+    notifyUrl = undefined;
+  }
   buildDist();
 }, 180_000);
 afterAll(async () => {
@@ -33,7 +41,7 @@ afterAll(async () => {
 });
 
 /** dist/main.js를 띄워 끝날 때까지 기다린다. 30초 안에 끝나지 않으면 죽이고 그 사실을 돌려준다(시작 확인을 지나 떠 버린 경우) */
-async function bootUntilExit(env: Record<string, string>): Promise<{ code: number | null; stillRunning: boolean; output: string }> {
+async function bootUntilExit(env: Record<string, string>, limitMs = 30_000): Promise<{ code: number | null; stillRunning: boolean; output: string }> {
   const base: Record<string, string> = {};
   for (const k of ['PATH', 'Path', 'SystemRoot', 'TEMP', 'TMP', 'HOME', 'USERPROFILE']) if (process.env[k]) base[k] = process.env[k]!;
   const child: ChildProcess = spawn(process.execPath, ['dist/main.js'], { cwd: SERVICE_DIR, env: { ...base, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -42,7 +50,7 @@ async function bootUntilExit(env: Record<string, string>): Promise<{ code: numbe
   child.stderr!.on('data', (d) => (output += String(d)));
   const exited = new Promise<number | null>((r) => child.once('exit', (c) => r(c)));
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const outcome = await Promise.race([exited.then((code) => ({ code, stillRunning: false })), new Promise<{ code: null; stillRunning: true }>((r) => (timer = setTimeout(() => r({ code: null, stillRunning: true }), 30_000)))]);
+  const outcome = await Promise.race([exited.then((code) => ({ code, stillRunning: false })), new Promise<{ code: null; stillRunning: true }>((r) => (timer = setTimeout(() => r({ code: null, stillRunning: true }), limitMs)))]);
   clearTimeout(timer);
   if (outcome.stillRunning) {
     child.kill();
@@ -63,6 +71,7 @@ describe('운영 시작 파일의 DB 연결 시작 확인(ADR-0241 결정 7)', (
         PEAKET_PARTNER_DATABASE_URL: pg.urlFor('core_partner_login', 'peaket-test'),
         PEAKET_OPS_DATABASE_URL: pg.urlFor('core_ops_login', 'peaket-test'),
         PEAKET_SEARCH_DATABASE_URL: await ensureSearchLogin(admin, pg),
+        ...(notifyUrl ? { PEAKET_NOTIFY_DATABASE_URL: notifyUrl } : {}),
         PEAKET_IDENTITY_GRPC_URL: '127.0.0.1:1',
         PEAKET_IMAGE_GRPC_URL: '127.0.0.1:1',
         PEAKET_SEATMAP_GRPC_URL: '127.0.0.1:1',
@@ -76,6 +85,7 @@ describe('운영 시작 파일의 DB 연결 시작 확인(ADR-0241 결정 7)', (
         ['PEAKET_PARTNER_DATABASE_URL', 'core_partner'],
         ['PEAKET_OPS_DATABASE_URL', 'core_ops'],
         ['PEAKET_SEARCH_DATABASE_URL', 'core_search'],
+        ['PEAKET_NOTIFY_DATABASE_URL', 'core_notify'],
       ] as const;
       const seen: Record<string, { code: number | null; stillRunning: boolean; refusedFor: string | null }> = {};
       for (const [name, role] of cases) {
@@ -84,6 +94,48 @@ describe('운영 시작 파일의 DB 연결 시작 확인(ADR-0241 결정 7)', (
         seen[name] = { code: r.code, stillRunning: r.stillRunning, refusedFor: m?.[1] ?? (r.output.slice(-300) || null) };
         expect(seen[name], `${name} ${role}`).toEqual({ code: 1, stillRunning: false, refusedFor: role });
       }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  test('AZ-T19 ④ 운영 시작 파일은 PEAKET_NOTIFY_DATABASE_URL이 없거나 core_notify가 아닌 로그인으로 시작하면 뜨지 않는다 [ASVS v5.0.0-8.4.1]', async () => {
+    expect(notifyUrl, '0043이 없어 core_notify 로그인을 만들지 못했다(발송기 전용 역할이 아직 없다)').toBeDefined();
+    const dir = await mkdtemp(join(tmpdir(), 'peaket-startup-notify-'));
+    try {
+      const ok: Record<string, string> = {
+        PEAKET_ENV: 'local',
+        PORT: String(await freePort()),
+        PEAKET_MANAGEMENT_PORT: String(await freePort()),
+        PEAKET_DATABASE_URL: pg.urlFor('core_app_login', 'peaket-test'),
+        PEAKET_PARTNER_DATABASE_URL: pg.urlFor('core_partner_login', 'peaket-test'),
+        PEAKET_OPS_DATABASE_URL: pg.urlFor('core_ops_login', 'peaket-test'),
+        PEAKET_SEARCH_DATABASE_URL: await ensureSearchLogin(admin, pg),
+        PEAKET_NOTIFY_DATABASE_URL: notifyUrl!,
+        PEAKET_IDENTITY_GRPC_URL: '127.0.0.1:1',
+        PEAKET_IMAGE_GRPC_URL: '127.0.0.1:1',
+        PEAKET_SEATMAP_GRPC_URL: '127.0.0.1:1',
+        PEAKET_IMAGE_BASE_URL: 'http://127.0.0.1:1',
+        PEAKET_IMAGE_STORE_DIR: dir,
+        PEAKET_PUBLIC_FILE_DIR: join(dir, 'public-files'),
+      };
+      // (가) 변수 없음, (나) 팬 경로 로그인, (다) 슈퍼유저. 셋 다 시작 확인에서 멈춰야 한다
+      const missing = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: '' });
+      const wrongRole = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: pg.urlFor('core_app_login', 'peaket-test') });
+      const superuser = await bootUntilExit({ ...ok, PEAKET_NOTIFY_DATABASE_URL: pg.url });
+      // (라) core_notify 로그인이면 시작 확인을 지나 뜬다(10초 안에 끝나지 않으면 떠 있는 것으로 본다)
+      const valid = await bootUntilExit(ok, 10_000);
+      expect({
+        missing: { code: missing.code, stillRunning: missing.stillRunning, named: /PEAKET_NOTIFY_DATABASE_URL이 없다/.test(missing.output) },
+        wrongRole: { code: wrongRole.code, stillRunning: wrongRole.stillRunning, named: /DB 사용자가 core_notify 역할이 아니다/.test(wrongRole.output) },
+        superuser: { code: superuser.code, stillRunning: superuser.stillRunning, named: /슈퍼유저이거나 표 소유자라 행 보안이 걸리지 않는다\(core_notify로 접속해야 한다\)/.test(superuser.output) },
+        valid: { code: valid.code, stillRunning: valid.stillRunning },
+      }).toEqual({
+        missing: { code: 1, stillRunning: false, named: true },
+        wrongRole: { code: 1, stillRunning: false, named: true },
+        superuser: { code: 1, stillRunning: false, named: true },
+        valid: { code: null, stillRunning: true },
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

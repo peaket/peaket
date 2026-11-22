@@ -132,7 +132,7 @@ beforeAll(async () => {
   ordering = new CreateMerchOrder({ store, stock, held, clock, consentVersion: CONSENT });
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia(), shop: { stock, payments, held } }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia(), shop: { stock, payments, held } }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),

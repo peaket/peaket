@@ -99,7 +99,7 @@ beforeAll(async () => {
   await admin.pool.query('insert into place (id, name, address, region, created_by) values ($1, $2, $3, $4, $5)', [PLACE, '피켓홀', '서울 어딘가 1', '서울', randomUUID()]);
   svc = await createService({
     name: 'core-svc-promoter-contract',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia(), opsApprovals }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia(), opsApprovals }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
     clock,
     logDestination: quiet(),

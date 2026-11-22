@@ -109,7 +109,7 @@ beforeAll(async () => {
   store = new RecordingStore(new LocalFolderPublicFileStore(root));
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ publicFiles: store, publishLimits: limits }) }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia({ publicFiles: store, publishLimits: limits }) }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
     clock: fakeClock({ now: NOW_MS }),
     logDestination: logs.stream,

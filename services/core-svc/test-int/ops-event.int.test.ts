@@ -53,7 +53,7 @@ beforeAll(async () => {
   await admin.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: randomUUID() });
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ demandSource: source }) }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, opsDatabase: opsDb, media: testMedia({ demandSource: source }) }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
     clock,
     logDestination: quiet(),

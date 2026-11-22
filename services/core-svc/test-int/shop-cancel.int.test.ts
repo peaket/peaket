@@ -124,6 +124,7 @@ beforeAll(async () => {
     name: 'core-svc',
     module: AppModule.register({
       database: appDb,
+      notifyDatabase: appDb,
       partnerDatabase: appDb,
       media: testMedia(),
       shop: { stock, payments, held, reauth, signals, logger, consentVersion: CONSENT },

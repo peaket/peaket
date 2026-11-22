@@ -41,6 +41,7 @@ beforeAll(async () => {
     name: 'core-svc',
     module: AppModule.register({
       database,
+      notifyDatabase: database,
       // 후기 경로는 파트너 연결을 쓰지 않는다
       partnerDatabase: admin,
       media: testMedia(),

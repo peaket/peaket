@@ -82,7 +82,7 @@ describe.runIf(process.env.PEAKET_LOCAL_STACK === '1')('로컬 파트너 스택'
       const identity = new FakeIdentity();
       svc = await createService({
         name: 'core-svc',
-        module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ seatmap: parser, publicFiles: new LocalFolderPublicFileStore(files), templates }) }),
+        module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia({ seatmap: parser, publicFiles: new LocalFolderPublicFileStore(files), templates }) }),
         env: { PEAKET_ENV: 'local', PEAKET_LOG_LEVEL: 'info' },
         clock: systemClock,
         adminAuthz: identity,

@@ -201,7 +201,7 @@ beforeAll(async () => {
   vi.stubEnv('PEAKET_INTERNAL_TOKEN', TOKEN);
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: app, partnerDatabase: partnerSvc, media: testMedia() }),
+    module: AppModule.register({ database: app, notifyDatabase: app, partnerDatabase: partnerSvc, media: testMedia() }),
     env: { PEAKET_ENV: 'ci' },
     clock: systemClock,
     logDestination: quiet(),
@@ -554,6 +554,15 @@ describe('웹훅 끝점·굿즈 주문·상품 수수료율의 앱 역할 쓰기
           with_check: "((status = 'DISABLED'::text) AND (disabled_reason = 'FAILING'::text))",
         },
         { tablename: 'webhook_endpoint', policyname: 'webhook_endpoint_app_read', cmd: 'SELECT', roles: ['core_app'], qual: 'true', with_check: null },
+        {
+          tablename: 'webhook_endpoint',
+          policyname: 'webhook_endpoint_notify_disable',
+          cmd: 'UPDATE',
+          roles: ['core_notify'],
+          qual: "(status = 'ACTIVE'::text)",
+          with_check: "((status = 'DISABLED'::text) AND (disabled_reason = 'FAILING'::text))",
+        },
+        { tablename: 'webhook_endpoint', policyname: 'webhook_endpoint_notify_read', cmd: 'SELECT', roles: ['core_notify'], qual: 'true', with_check: null },
         { tablename: 'webhook_endpoint', policyname: 'webhook_endpoint_partner_tenant', cmd: 'ALL', roles: ['core_partner'], qual: tenant, with_check: tenant },
       ],
       privileges: {

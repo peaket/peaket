@@ -189,10 +189,17 @@
 
 ## 실패 확인
 
-시험 커밋을 구현 커밋 위에 쌓지 않은 트리(0043 없음)에서 실제 PostgreSQL 18 컨테이너로 본다. Docker 차례는 `C:\Program Files\Git\bin\bash.exe /d/ticketpass-locks/lock.sh take docker lane3-W12-core-notify`로 잡고, 끝나면 같은 이름으로 놓는다.
+시험 커밋을 구현 커밋 위에 쌓지 않은 트리(0043 없음)에서 실제 PostgreSQL 18 컨테이너로 보았다. Docker 차례는 `C:\Program Files\Git\bin\bash.exe /d/ticketpass-locks/lock.sh take docker lane3-W12-core-notify`로 잡았다(2026-11-22 10:42, 잡은 뒤 유지).
 
-- **기대**: `notify-role.int.test.ts`는 `beforeAll`의 `loginFor(..., 'core_notify')`가 `role "core_notify" does not exist`(SQLSTATE 42704)로 멈춘다. `startup-db-role.int.test.ts`는 (가)~(다)가 시작 확인 없이 떠서 `stillRunning: true`이거나 다른 이유로 실패하고, (라)는 통과한다.
-- **적을 것**: 명령, 통과·실패 수, 실패마다 실제 값 한 줄, 잠금 시각. (시험 담당이 실행 뒤 이 절을 채운다.)
+```bash
+corepack pnpm exec turbo run build --filter=@peaket/core-svc^...   # platform dist가 낡아 dist/main.js 빌드가 먼저 실패했으므로 의존 패키지를 빌드했다
+PEAKET_TEST_CONTAINER_PREFIX=lane3-w12corenotify corepack pnpm --filter @peaket/core-svc test:integration test-int/notify-role.int.test.ts test-int/startup-db-role.int.test.ts
+```
+
+- `notify-role.int.test.ts`: 파일 실패(7개 모두 skip). `beforeAll`의 `loginFor(admin, pg, 'core_notify_login', 'core_notify', 2)`가 `CREATE USER ... GRANT core_notify TO core_notify_login`에서 `role "core_notify" does not exist`(SQLSTATE 42704)로 멈췄다. 역할이 없으니 저장소 시험은 실행 전에 실패한다.
+- `startup-db-role.int.test.ts`: AZ-T5가 실패했다. 새로 더한 `PEAKET_NOTIFY_DATABASE_URL` 경우만 슈퍼유저 주소로 바꿔도 시작 확인이 없어 프로세스가 30초 동안 떠 있었고(`code: null`, `stillRunning: true`), 기대는 `code: 1`·`refusedFor: core_notify`였다. AZ-T19 ④는 `expect(notifyUrl).toBeDefined()`에서 5ms 만에 실패했다(`role core_notify가 없어 로그인을 만들지 못했다`).
+- 합계: 2파일 9시험 가운데 2실패·7skip. 실패는 모두 '역할·연결·시작 확인이 아직 없다'는 같은 까닭이다.
+- 이 실패를 본 표본: ①~⑧ 전부가 구현 전 트리에서 실행되지 못한다. 구현이 역할·연결을 넣은 뒤에는 ①~⑧이 실제 단언으로 돈다.
 
 ## 9. 틀린 구현 표본(검증 담당)
 

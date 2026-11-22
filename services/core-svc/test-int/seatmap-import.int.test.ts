@@ -65,7 +65,7 @@ async function app(address: string): Promise<App> {
   const store = new MemoryImageObjectStore();
   const parser = new GrpcSeatmapParser(address);
   const publicFiles = new MemoryPublicFileStore();
-  const svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ store, seatmap: parser, publicFiles }) }), env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' }, logDestination: logs.stream, adminAuthz: identity });
+  const svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia({ store, seatmap: parser, publicFiles }) }), env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' }, logDestination: logs.stream, adminAuthz: identity });
   const a = { svc, logs, store, parser, publicFiles };
   apps.push(a);
   return a;

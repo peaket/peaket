@@ -177,7 +177,7 @@ beforeAll(async () => {
   processing = new GrpcImageProcessing(`127.0.0.1:${port}`);
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ imageOrigin: ORIGIN, processing, store: (store = new TestStore(dir)), cdn }) }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia({ imageOrigin: ORIGIN, processing, store: (store = new TestStore(dir)), cdn }) }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info', PORT: '0', PEAKET_MANAGEMENT_PORT: '0' },
     clock,
     logDestination: logs.stream,

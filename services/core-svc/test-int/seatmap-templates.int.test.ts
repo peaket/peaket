@@ -75,7 +75,7 @@ beforeAll(async () => {
   await seedSeatmapTemplates(admin, templates);
   svc = await createService({
     name: 'core-svc',
-    module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia({ templates, seatmap: parser, publicFiles: new MemoryPublicFileStore() }) }),
+    module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia({ templates, seatmap: parser, publicFiles: new MemoryPublicFileStore() }) }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: 'info' },
     logDestination: logs.stream,
     adminAuthz: identity,

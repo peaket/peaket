@@ -38,7 +38,7 @@ beforeAll(async () => {
   ]);
   await database.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: ACTOR });
   await database.db.insert(artist).values({ id: ARTIST, name: '피켓밴드', createdBy: ACTOR });
-  svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, partnerDatabase: partnerDb, media: testMedia() }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW_MS }), logDestination: quiet(), adminAuthz: identity });
+  svc = await createService({ name: 'core-svc', module: AppModule.register({ database: appDb, notifyDatabase: appDb, partnerDatabase: partnerDb, media: testMedia() }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW_MS }), logDestination: quiet(), adminAuthz: identity });
 });
 afterAll(async () => {
   await svc?.close();
