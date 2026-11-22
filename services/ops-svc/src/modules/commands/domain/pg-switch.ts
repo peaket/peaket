@@ -49,8 +49,10 @@ export function admissionPgOf(scope: string, toPg: PgName | undefined, routes: P
     const tps = pgTpsOf(routes.approvalLimits[toPg]);
     return tps !== undefined ? { pgKey: toPg, pgTps: tps } : undefined;
   }
-  const known = PG_FALLBACK_LIMIT_PGS.map((pg) => routes.approvalLimits[pg]).filter((v): v is number => v !== undefined && Number.isFinite(v) && v > 0);
-  const tps = known.length > 0 ? pgTpsOf(Math.min(...known)) : undefined;
+  // 대체 미지정 전체 범위는 TOSS·PORTONE 상한이 모두 있어야 최솟값을 정한다. 한쪽이라도 모르면 낮은 쪽을 알 수 없어 보내지 않는다(503, ADR-0366 결정 5, RV-02)
+  const limits = PG_FALLBACK_LIMIT_PGS.map((pg) => routes.approvalLimits[pg]);
+  const known = limits.filter((v): v is number => v !== undefined && Number.isFinite(v) && v > 0);
+  const tps = known.length === limits.length ? pgTpsOf(Math.min(...known)) : undefined;
   return tps !== undefined ? { pgKey: PG_FALLBACK_GROUP, pgTps: tps } : undefined;
 }
 
