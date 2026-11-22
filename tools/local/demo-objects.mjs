@@ -89,7 +89,7 @@ export const DEMO_DB_USERS = Object.freeze({
   opsPartner: 'ops_partner_login',
   purchase: 'purchase_app',
   payment: 'payment_app',
-  core: ['core_app_login', 'core_partner_login', 'core_ops_login', 'core_search_login'],
+  core: ['core_app_login', 'core_partner_login', 'core_ops_login', 'core_search_login', 'core_notify_login'],
 });
 
 /** 데모 네임스페이스 객체 */
@@ -123,6 +123,7 @@ export function demoDatabaseUrls(password) {
     corePartner: url(DEMO_DB_USERS.core[1], DEMO_DATABASES.core),
     coreOps: url(DEMO_DB_USERS.core[2], DEMO_DATABASES.core),
     coreSearch: url(DEMO_DB_USERS.core[3], DEMO_DATABASES.core),
+    coreNotify: url(DEMO_DB_USERS.core[4], DEMO_DATABASES.core),
   };
 }
 
@@ -343,6 +344,8 @@ export function demoSecrets(o) {
       PEAKET_PARTNER_DATABASE_URL: urls.corePartner,
       PEAKET_OPS_DATABASE_URL: urls.coreOps,
       PEAKET_SEARCH_DATABASE_URL: urls.coreSearch,
+      // 웹훅 발송기 전용 core_notify 연결(ADR-0350). 팬 경로 주소로 대신하지 않는다
+      PEAKET_NOTIFY_DATABASE_URL: urls.coreNotify,
       PEAKET_INTERNAL_TOKEN: k.internalToken,
       // 서비스 사이 gRPC 공유 토큰(identity AdminAuthzService가 요구한다)
       PEAKET_INTERNAL_GRPC_TOKEN: k.internalToken,
@@ -673,6 +676,6 @@ export function demoOpsRolesSql() {
 export function demoCoreRolesSql(password) {
   const p = String(password).replaceAll("'", "''");
   return DEMO_DB_USERS.core
-    .map((user, i) => `CREATE USER ${user} PASSWORD '${p}' NOBYPASSRLS NOSUPERUSER; GRANT ${['core_app', 'core_partner', 'core_ops', 'core_search'][i]} TO ${user};`)
+    .map((user, i) => `CREATE USER ${user} PASSWORD '${p}' NOBYPASSRLS NOSUPERUSER; GRANT ${['core_app', 'core_partner', 'core_ops', 'core_search', 'core_notify'][i]} TO ${user};`)
     .join('\n');
 }

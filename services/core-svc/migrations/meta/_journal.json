@@ -253,6 +253,13 @@
       "when": 1795292357949,
       "tag": "0042_webhook_merch_write_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795308000000,
+      "tag": "0043_core_notify_role",
+      "breakpoints": true
     }
   ]
 }

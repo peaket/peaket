@@ -1,6 +1,6 @@
 // notify 모듈 조립. 웹훅 관리·발송 원장·발송기(내부 입구)를 싣는다. 주기 실행은 main의 WebhookWorker가 맡는다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN } from '@peaket/platform';
+import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import { Webhooks } from './application/webhooks.js';
 import { WebhookDispatcher } from './application/dispatcher.js';
 import { WEBHOOK_STORE, WEBHOOK_TRANSPORT, type WebhookStore, type WebhookTransport } from './domain/ports.js';
@@ -20,7 +20,7 @@ export class NotifyModule {
   static register(
     o:
       | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> }
-      | { storage: 'database'; database: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> },
+      | { storage: 'database'; database: Database; /** 웹훅 발송기 전용 core_notify 연결(ADR-0350). 팬 경로 database와 섞지 않는다 */ notifyDatabase: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> },
   ): DynamicModule {
     const providers: Provider[] = [
       {
@@ -43,7 +43,8 @@ export class NotifyModule {
         providers: [
           ...providers,
           { provide: NOTIFY_PARTNER_DATABASE, useValue: o.partnerDatabase },
-          { provide: NOTIFY_APP_STORE, useFactory: (db: Database) => new DrizzleWebhookStore(db), inject: [DATABASE] },
+          // 발송기(내부 입구·주기 작업)는 core_notify 역할의 연결로만 두 표를 쓴다(ADR-0350 결정 2). 팬 경로 DATABASE를 주입하지 않는다
+          { provide: NOTIFY_APP_STORE, useFactory: () => new DrizzleWebhookStore(o.notifyDatabase) },
           { provide: WEBHOOK_STORE, useFactory: (db: Database) => new DrizzleWebhookStore(db), inject: [NOTIFY_PARTNER_DATABASE] },
           { provide: WEBHOOK_TRANSPORT, useValue: o.transport ?? new HttpsWebhookTransport() },
         ],

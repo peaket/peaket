@@ -16,6 +16,8 @@ export class AppModule {
     o:
       | {
           database: Database;
+          /** 웹훅 발송기 전용 core_notify 연결(ADR-0350 결정 2). 빠뜨린 조립은 컴파일되지 않는다 */
+          notifyDatabase: Database;
           partnerDatabase: Database;
           opsDatabase?: Database;
           /** 검색 전용 연결 묶음(ADR-0271 결정 5, 운영은 읽기 전용 복제본). 없으면 database */
@@ -72,7 +74,7 @@ export class AppModule {
             payments: o.shop?.payments ?? unavailableMerchPayments,
             held: o.shop?.held ?? unavailableHeldTickets,
           }),
-          NotifyModule.register({ storage: 'database', database: o.database, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
+          NotifyModule.register({ storage: 'database', database: o.database, notifyDatabase: o.notifyDatabase, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
           ExportModule.register({
             storage: 'database',
             database: o.database,

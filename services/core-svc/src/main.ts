@@ -65,6 +65,9 @@ if (!opsUrl) throw new Error('PEAKET_OPS_DATABASE_URL이 없다(비밀 관리에
 // 검색 전용 연결의 DB 사용자(core_search, 검색 표 넷 읽기만, ADR-0271 결정 18). 운영은 읽기 전용 복제본 주소다. 앱 주소로 대신하지 않는다
 const searchUrl = process.env.PEAKET_SEARCH_DATABASE_URL;
 if (!searchUrl) throw new Error('PEAKET_SEARCH_DATABASE_URL이 없다(검색 전용 core_search 사용자, 비밀 관리에서 넣는다)');
+// 웹훅 발송기 전용 연결의 DB 사용자(core_notify, ADR-0350). 팬 경로 주소로 조용히 되돌아가지 않는다
+const notifyUrl = process.env.PEAKET_NOTIFY_DATABASE_URL;
+if (!notifyUrl) throw new Error('PEAKET_NOTIFY_DATABASE_URL이 없다(웹훅 발송기 전용 core_notify 사용자, 비밀 관리에서 넣는다)');
 
 // 파트너 경로의 역할·테넌트는 요청마다 identity에 묻는다(ADR-0172). 주소가 없으면 시작하지 않는다(대역으로 통과시키지 않는다, ADR-0198 결정 6)
 const identityGrpc = process.env.PEAKET_IDENTITY_GRPC_URL;
@@ -174,12 +177,16 @@ const consumerDatabase = createDatabase({ url, applicationName: `${SERVICE}-cons
 const SEARCH_POOL_MAX = 10;
 const SEARCH_POOL_WAIT_MS = 100;
 const searchDatabase = createDatabase({ url: searchUrl, applicationName: `${SERVICE}-search`, max: SEARCH_POOL_MAX, connectionTimeoutMillis: SEARCH_POOL_WAIT_MS });
+// 웹훅 발송기 전용 풀(core_notify, ADR-0350 결정 2). 발송 주기 5초·한 번에 100행과 내부 입구가 함께 쓴다
+const NOTIFY_POOL_MAX = 4;
+const notifyDatabase = createDatabase({ url: notifyUrl, applicationName: `${SERVICE}-notify`, max: NOTIFY_POOL_MAX });
 // 소유자 주소를 넣거나 역할을 겸하면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
 await assertDatabaseRole(database, 'core_app');
 await assertDatabaseRole(partnerDatabase, 'core_partner');
 await assertDatabaseRole(opsDatabase, 'core_ops');
 await assertDatabaseRole(consumerDatabase, 'core_app');
 await assertDatabaseRole(searchDatabase, 'core_search');
+await assertDatabaseRole(notifyDatabase, 'core_notify');
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
 const service = await createService({
@@ -191,6 +198,7 @@ const service = await createService({
   requestTimeoutMs: REQUEST_TIMEOUT_MS,
   module: AppModule.register({
     database,
+    notifyDatabase,
     partnerDatabase,
     opsDatabase,
     searchDatabase,
@@ -242,11 +250,11 @@ await service.listen();
 // 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기 → 주기 일. 둘 다 준비 확인에 넣지 않는다: 그동안 /ready는 200이고 검색은 표에 있는 줄로, 자동완성은 빈 후보·no-store로 답한다(결정 14)
 await searchTimers.start();
 
-// 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다.
+// 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다. 저장소는 core_notify 연결이다(ADR-0350)
 const webhookWorker =
   process.env.PEAKET_WEBHOOK_WORKER === 'off'
     ? undefined
-    : new WebhookWorker(new WebhookDispatcher({ store: new DrizzleWebhookStore(database), transport: new HttpsWebhookTransport(), clock: systemClock }), systemClock);
+    : new WebhookWorker(new WebhookDispatcher({ store: new DrizzleWebhookStore(notifyDatabase), transport: new HttpsWebhookTransport(), clock: systemClock }), systemClock);
 webhookWorker?.start();
 
 // 탈퇴 사건 소비자(그룹 peaket.core-svc.<환경>)와 다시 정리 반복. DB는 소비자 전용 core_app 풀이다(후기 파기·다시 정리 예약과 보류 표 held_event, 리뷰 K2)
@@ -311,7 +319,7 @@ function shutdown(): Promise<void> {
         void queueRedis?.close();
         void shopRedis?.close();
         // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다(ADR-0333 결정 2)
-        return Promise.all([controlSync?.close(), database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close(), searchDatabase.close()]);
+        return Promise.all([controlSync?.close(), database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close(), searchDatabase.close(), notifyDatabase.close()]);
       });
   })();
   return closing;

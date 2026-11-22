@@ -2,9 +2,9 @@
 import type { Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 
-export type ServiceDbRole = 'core_app' | 'core_partner' | 'core_ops' | 'core_maintenance' | 'core_search';
+export type ServiceDbRole = 'core_app' | 'core_partner' | 'core_ops' | 'core_maintenance' | 'core_search' | 'core_notify';
 
-const ROLES: readonly ServiceDbRole[] = ['core_app', 'core_partner', 'core_ops', 'core_maintenance', 'core_search'];
+const ROLES: readonly ServiceDbRole[] = ['core_app', 'core_partner', 'core_ops', 'core_maintenance', 'core_search', 'core_notify'];
 
 interface RoleFacts {
   member: boolean;
