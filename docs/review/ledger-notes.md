@@ -322,3 +322,9 @@ BAT-360(OPS-280·OPS-290)을 2026-11-22에 끝냈다. 계획 5.1대로 셋은 **
 - **C-T38 ②**: 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 완료 증명으로 바꾸는 것, 실제 KMS·Object Lock·출시 주소는 구간 5(ADR-0332)·BAT-365 몫이다. 통합 시험은 가짜 캘린더·moto·local P-256 서명기로 본다.
 - **C-T61 ⑦**: 작업이 마지막으로 성공한 시각(kube-state-metrics `kube_cronjob_status_last_successful_time`)이 늦은 SEV2 경보·kind 클러스터·경보 규칙은 구간 5·BAT-365 몫이다.
 - **C-T61 ⑧**: 작업 역할이 IP 집합을 읽고 바꾸는 권한이 Terraform 정책 검사·IAM 정책 검사에 드는지, AWS 실물 검사는 구간 5·BAT-365 몫이다.
+
+## W12-merch-replay(2026-11-22)
+
+| 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
+| --- | --- | --- | --- | --- |
+| P-T77 |  | A | W12-merch-replay | 굿즈 결제 시도의 결과 참조를 시도 ID로 줄이고 재생 때 `PrepareCheckout`을 다시 불러 지금 설정의 결제창 값을 만든다(ADR-0352). 결제창 공개 키·돌아올 주소가 바뀌면 팬이 다른 상점으로 가는 돈·보안 경로라 A다. 정본 표는 `docs/features/payment.md` §11 P-T77이고 시험 이름으로 상태를 정한다. |
