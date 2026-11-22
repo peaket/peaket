@@ -1,6 +1,6 @@
 // 주문 단위 발권 막기의 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-011, HOT-161, P-T15·P-T39 ③).
 // 정본: docs/api/proto/peaket/ticket/v1/ticket.proto `BlockTicketIssuance`, docs/features/payment.md §3 '승인 뒤 발권',
-// specs/payment.qnt `compFence`, ADR-0354 결정 2, docs/data.md `ticket_issue_guard`(0010_ticket_issue_guard.sql).
+// specs/payment.qnt `compFence`, ADR-0354 결정 2, docs/data.md `ticket_issue_guard`(0011_ticket_issue_guard.sql).
 // 실제 PostgreSQL 18과 DrizzleTicketStore·grpc-js 서버로 본다: guard 행, VOIDED·key_revoked_at, already_entered, FAILED_PRECONDITION 매핑.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';

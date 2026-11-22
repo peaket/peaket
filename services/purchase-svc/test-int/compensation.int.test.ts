@@ -1,7 +1,7 @@
 // 보상 세 걸음의 실제 PostgreSQL 통합 시험(BUILD_ORDER BAT-011, PRF-173, P-T39 ③).
 // 정본: docs/features/payment.md §3 '승인 뒤 발권', specs/payment.qnt `compStart`·`compFence`·`compCancel`,
 // docs/adr/0354-prf-173-split-compensation-fence.md 결정 3·4, docs/features/transfer-refund.md §5 '발권 대기 주문',
-// docs/data.md `order_compensation`(0032_order_compensation.sql)·`ticket_issue_guard`(ticket 0010).
+// docs/data.md `order_compensation`(0032_order_compensation.sql)·`ticket_issue_guard`(ticket 0011).
 // 실제 PostgreSQL 18(purchase·ticket 두 DB), 실제 ticket-svc gRPC(BlockTicketIssuance), 실제 purchase 코드(보상 쓰임새·주문 전이·발권 큐)로 돈다.
 // 결제 취소만 payment-svc gRPC 대역이다: 부른 요청의 payment_id·cancellation_id와 답(UNKNOWN→CANCELLED)을 본다.
 import 'reflect-metadata';
