@@ -321,7 +321,7 @@ describe('스캐너 기기 증명(GAT-170, O-T37)', () => {
     expect(JSON.parse(revoked.payload)).toMatchObject({ type: 'https://peaket.example/problems/device-revoked' });
   });
 
-  test('O-T37 세션이 무효이면 401이고 허용 역할이 다르면 403이다', async () => {
+  test('I-T25 ③ O-T37 세션이 무효이면 401이고 gate_staff가 gate_lead 전용 처리기를 부르면 403이다', async () => {
     const b = await boot();
     const key = await keyOf();
     b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
