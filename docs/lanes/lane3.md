@@ -20,6 +20,7 @@
 - 정리 목록은 `docs/lanes/lane3-cleanup.md`로 옮겼다(2026-11-18, ADR-0283 결정 1). 새 지적은 그 파일에 같은 꼴로 적는다.
 
 ## 진행 로그
+- 2026-11-22 BAT-450A GAT-220(R-759, C2-06·C2-07·C2-09): 사용자 코드 색인 `SET NX`·5회 재시도·409, 첫 토큰 발급 때 `id:devauth`·`id:devcode` 삭제, `PEAKET_PUBLIC_ORIGIN` htu(forwarded 무시), 같은 기기 동시 승인 23505→409. 장부 I-T23·I-T24·I-T25·I-T37·I-T38·I-T39 자동 시험·`--require` 통과, trace 6, 틀린 구현 9/9. GAT-220 체크. 파트너 해제 경로는 BAT-450B, mTLS x5t는 GAT-170, SCR-051은 GAT-230. 계획·검증 docs/review/plans/BAT-450A.md. develop에 아직 합치지 않았다
 - 2026-11-10 BAT-202 BAS-011 외부 보안 검사 게이트(R-460, delivery 13.3.1·13.4.1·15.3.6·D-T12, ADR-0263): gitleaks(CI만, 미끼·허용 블록 검사)·CodeQL(프로토타입 오염 셋은 등급과 상관없이 막음)·Trivy 설정·이미지 비밀(미끼, 내장 허용 끔)·Scorecard(따로 된 워크플로, 게시 끔), 판정 도구 scan-gate(결과 수·받아들인 결과), ESLint sql.raw·원형 규칙. 리뷰 높음 2 고침
 - 2026-11-13 BAT-445 GAT-200·GAT-150(R-523, O-T27·O-T31): SCR-053 휴대폰 배치 시험과 태블릿 확인 목록, `peaket-scanner-queue` 스캔 큐(별도 DB·strict·put 완료 뒤 통과)·BarcodeDetector 디코더 경계와 단위 시험 11개. heavy gate: scanner 11·console-host 39, typecheck·production build·eslint·doc-check·ledger·trace-check 통과, 변이 15/15, 4관점 리뷰 높음 1·중간 4 고침, 브라우저 확인 생략(화면 변경 없음). 보고서 docs/review/measurements/BAT-445-wave.md. Dexie 미설치로 IndexedDB 직접, zxing-wasm 대체·전원 차단 실기는 남음
 - 2026-11-12 BAT-210 BAS-070·BAS-110·BAS-230(R-502, NFR-007, ADR-0267): 남은 기능 설계서 4편의 운영 확인 표, NFR-007 30만 RPS 셈 근거(100만 × 30% × 2회 ÷ 10초 × 5건 [가정])와 CloudFront 45만 행, RFC 3건 초안(docs/rfc/). heavy gate 통과: test-int 328+65, 변이 10/10, 리뷰 중간 4 고침, CI 등가 게이트 통과
