@@ -224,18 +224,26 @@ test('ST-T16 ① 레지스트리가 닫힌 채 새 실행기(캐시 빔)를 띄�
   expect(await w.metric('stream_rejected_total', { topic, reason: 'UNKNOWN_SCHEMA' })).toBeUndefined();
   expect([...(await kafka.groupOffsets(group, topic)).entries()]).toEqual([]);
   expect(state.requests).toEqual([]);
+  // RV220-1: 멈춘 파티션에도 소비 밀림을 고친다. 쌓인 6건이 밀림으로 보이고, 멈춘 채 4건을 더 내면 그만큼 는다(streaming §2.6 '그동안 소비 밀림이 는다',
+  // 경보 '계속 늘면 SEV3'). 고치는 주기는 [가정] 값이라 고정 대기 없이 한도 있는 조건 기다림으로 본다
+  const lagOf = (p: number) => w.metric('stream_consumer_lag_records', { topic, partition: String(p) });
+  await until(async () => (await lagOf(0)) === 6 && (await lagOf(1)) === 6, '멈춘 파티션의 밀림 6', 60_000);
+  for (const p of [0, 1]) await produce(topic, p, range(4, 6).map((s) => msg(5, V2, { seq: Number(s), amount: 10 + Number(s), state: 'PAID' })));
+  await until(async () => (await lagOf(0)) === 10 && (await lagOf(1)) === 10, '멈춘 동안 더 낸 4건만큼 는 밀림 10', 60_000);
+  expect(sink.attempts).toEqual([]);
 
   await srv.reopen();
-  await until(() => sink.records().length >= 12, '되살린 뒤 12건 싣기', 90_000);
+  await until(() => sink.records().length >= 20, '되살린 뒤 20건 싣기', 90_000);
   await until(async () => {
     const c = await kafka.groupOffsets(group, topic);
-    return c.get(0) === 6 && c.get(1) === 6;
+    return c.get(0) === 10 && c.get(1) === 10;
   }, '되살린 뒤 끝 + 1 커밋');
   await until(async () => (await w.metric('stream_paused_partitions')) === 0, '멈춘 파티션 0');
+  await until(async () => (await lagOf(0)) === 0 && (await lagOf(1)) === 0, '되살린 뒤 밀림 0');
   await w.run.stop();
   await srv.close();
-  expect(sink.offsets(0)).toEqual(range(6));
-  expect(sink.offsets(1)).toEqual(range(6));
+  expect(sink.offsets(0)).toEqual(range(10));
+  expect(sink.offsets(1)).toEqual(range(10));
   expect(sink.done.flatMap((d) => d.batch.rejected)).toEqual([]);
   expect(await w.metric('stream_rejected_total', { topic, reason: 'DESERIALIZE' })).toBeUndefined();
   // 같은 ID는 캐시해 두 파티션이 함께 쓴다. 요청마다 Basic 머리가 실리고, 자격은 어느 로그에도 없다
@@ -304,38 +312,47 @@ test('OPS-150 ④ 싱크가 실패하면 같은 묶음(같은 표시·같은 레
   const topic = 'bat220.retry';
   const group = 'bat220-retry';
   await kafka.createTopic(topic, 2);
-  const fails = new Map<string, number>([
-    ['bat220.retry:0:0:2', 5],
-    ['bat220.retry:0:3:5', 2],
-  ]);
+  // 첫 묶음은 다섯 번 넘게, 멈춘 동안의 밀림을 본 뒤까지 실패한다(RV220-1). 둘째 묶음은 두 번 실패한다
+  let firstFails = 0;
+  let lagSeen = false;
+  let secondFails = 2;
   const sink = new RecordingSink(async (b) => {
-    const left = fails.get(b.dedupToken) ?? 0;
-    if (left > 0) {
-      fails.set(b.dedupToken, left - 1);
+    if (b.dedupToken === 'bat220.retry:0:0:2' && (firstFails < 5 || !lagSeen)) {
+      firstFails += 1;
+      throw new Error('clickhouse 503');
+    }
+    if (b.dedupToken === 'bat220.retry:0:3:5' && secondFails > 0) {
+      secondFails -= 1;
       throw new Error('clickhouse 503');
     }
   });
   await produce(topic, 0, range(3).map((s) => valid(Number(s))));
   const w = startWorker({ topic, group, sink, maxRecords: 3, maxWaitMs: 60_000 });
   await w.run.started;
-  await until(() => sink.attempts.length >= 1, '첫 실패');
+  const lag0 = () => w.metric('stream_consumer_lag_records', { topic, partition: '0' });
+  // 첫 실패로 그 파티션이 멈춘 것을 본 뒤에 더 낸다(멈추기 전에 받아 버리면 밀림이 늘지 않는다)
+  await until(async () => (await w.metric('stream_paused_partitions')) === 1, '첫 실패로 멈춤');
+  await until(async () => (await lag0()) === 0, '멈추기 전 밀림 0');
   // 다시 시도하는 동안 같은 파티션과 다른 파티션에 더 넣는다
   await produce(topic, 0, range(3, 3).map((s) => valid(Number(s))));
   await produce(topic, 1, range(3).map((s) => valid(Number(s))));
   await until(() => sink.done.some((d) => d.batch.partition === 1), '다른 파티션 싣기');
-  // 그때 파티션 0은 아직 다시 시도 중이다(지연 합 0.2+0.4+0.8+1.6+3.2초)
+  // 그때 파티션 0은 아직 다시 시도 중이다(지연 합 0.2+0.4+0.8+1.6+3.2초 넘게)
   expect(sink.done.filter((d) => d.batch.partition === 0)).toEqual([]);
   expect(await w.metric('stream_paused_partitions')).toBe(1);
-  await until(() => sink.offsets(0).length === 6, '파티션 0 여섯 건', 60_000);
+  // RV220-1: 쓰기 다시 시도로 멈춘 동안 더 낸 3건만큼 밀림이 는다(고치는 주기는 [가정] 값이라 한도 있는 조건 기다림)
+  await until(async () => (await lag0()) === 3, '다시 시도로 멈춘 파티션 0의 밀림 3', 60_000).finally(() => (lagSeen = true));
+  await until(() => sink.offsets(0).length === 6, '파티션 0 여섯 건', 90_000);
   await until(async () => {
     const c = await kafka.groupOffsets(group, topic);
     return c.get(0) === 6 && c.get(1) === 3;
   }, '커밋');
   await until(async () => (await w.metric('stream_paused_partitions')) === 0, '멈춘 파티션 0');
+  await until(async () => (await lag0()) === 0, '다시 받은 뒤 밀림 0');
   await w.run.stop();
 
   const first = sink.attempts.filter((a) => a.batch.dedupToken === 'bat220.retry:0:0:2');
-  expect(first).toHaveLength(6);
+  expect(first.length).toBeGreaterThanOrEqual(6);
   for (const a of first) expect(a.batch.records.map((r) => r.offset)).toEqual(['0', '1', '2']);
   const gaps = first.slice(1).map((a, i) => a.at - first[i]!.at);
   // 실제 시간이라 아래쪽만 본다(늦게 깨어날 수는 있어도 일찍 깨어나지 않는다)
@@ -352,8 +369,8 @@ test('OPS-150 ④ 싱크가 실패하면 같은 묶음(같은 표시·같은 레
   const p0First = sink.done.find((d) => d.batch.dedupToken === 'bat220.retry:0:0:2')!;
   const p1 = sink.done.find((d) => d.batch.partition === 1)!;
   expect(p1.at).toBeLessThan(p0First.at);
-  expect(await w.metric('stream_insert_retries_total')).toBe(7);
-}, 120_000);
+  expect(await w.metric('stream_insert_retries_total')).toBe(first.length - 1 + 2);
+}, 240_000);
 
 test('OPS-150 ⑤ 파티션마다 쓰기 하나(순서 유지), 작업자 전체 한도(시험 값 2)에 닿으면 다른 파티션 쓰기가 시작하지 않고 하나 끝나면 다시 연다', async () => {
   const topic = 'bat220.inflight';
@@ -481,6 +498,14 @@ test('OPS-150 ⑦ 처리 중에 둘째 소비자를 붙여 재조정해도 빠�
     const state = { commits: [...(await kafka.groupOffsets(group, topic))], owners: [...(await kafka.groupOwners(group, topic))], a: [a.offsets(0), a.offsets(1)], b: [b.offsets(0), b.offsets(1)], warnA: A.warnings.map((x) => x.msg), warnB: B.warnings.map((x) => x.msg) };
     throw new Error(`${e.message}: ${JSON.stringify(state)}`);
   });
+  // RV220-4: A가 B에게 넘긴 파티션의 밀림 값은 A에서 지워지고(두 파드가 같은 파티션을 내지 않게) B가 낸다
+  const movedToB = [...(await kafka.groupOwners(group, topic))].filter(([, c]) => c === `${WORKER}-${ENV}-pod-b`).map(([p]) => String(p));
+  expect(movedToB.length).toBeGreaterThan(0);
+  await until(async () => {
+    for (const partition of movedToB) if ((await A.metric('stream_consumer_lag_records', { topic, partition })) !== undefined) return false;
+    return true;
+  }, 'A가 넘긴 파티션의 밀림 값 지움', 30_000);
+  for (const partition of movedToB) await until(async () => (await B.metric('stream_consumer_lag_records', { topic, partition })) === 0, 'B의 밀림 0', 30_000);
   await Promise.all([A.run.stop(), B.run.stop()]);
   for (const p of [0, 1]) {
     const got = new Set([...a.offsets(p), ...b.offsets(p)]);
@@ -524,3 +549,53 @@ test('OPS-150 ⑦ 종료 때 처리 중 묶음이 기다림 한도 안에 끝나
   await until(async () => (await kafka.groupOffsets('bat220-drain-late', t2)).get(0) === 5, '커밋 5');
   await w3.run.stop();
 }, 180_000);
+
+test('OPS-150 ⑦ 종료 중에 끝난 decode의 레코드는 버린 열린 묶음 뒤에 싣거나 커밋하지 않고, 다음 실행기가 버린 묶음부터 다시 받는다(RV220-2)', async () => {
+  const topic = 'bat220.stop-race';
+  const group = 'bat220-stop-race';
+  await kafka.createTopic(topic, 1);
+  await produce(topic, 0, range(6).map((s) => valid(Number(s))));
+  // 첫 묶음(0~2) 쓰기를 붙잡아 종료가 그 쓰기를 기다리게 하고, 그동안 3·4는 열린 묶음, 5는 읽는 중에 둔다
+  let openWrite!: () => void;
+  const writeGate = new Promise<void>((r) => (openWrite = r));
+  hung.push(openWrite);
+  let openDecode!: () => void;
+  const decodeGate = new Promise<void>((r) => (openDecode = r));
+  hung.push(openDecode);
+  let decoding5 = false;
+  const base = readerFor(shared.url);
+  const gated: AvroReader = {
+    async decode(t, bytes) {
+      const out = await base.decode(t, bytes);
+      if (out.kind === 'record' && (out.value as Val).seq === 5) {
+        decoding5 = true;
+        await decodeGate;
+      }
+      return out;
+    },
+  };
+  const sink = new RecordingSink(async (b) => {
+    if (b.firstOffset === '0') await writeGate;
+  });
+  const w = startWorker({ topic, group, sink, reader: gated, maxRecords: 3, maxWaitMs: 200, drainTimeoutMs: 5_000 });
+  await w.run.started;
+  await until(() => decoding5 && sink.attempts.length === 1, '첫 묶음 쓰기 중·5 읽는 중');
+  const stopping = w.run.stop();
+  // fixed-wait: stop()이 열린 묶음(3·4)을 버리는 데까지 가게 한다(바깥에서 볼 신호가 없고, 버리기는 첫 틱 안에 끝난다) BAT-220 RV220-2
+  await new Promise((r) => setTimeout(r, 50));
+  openDecode();
+  // fixed-wait: 종료 뒤에 끝난 5가 새 묶음으로 시간 한도(200ms)에 닫혀 쓰일 수 있을 만큼 둔다('쓰지 않음'을 보이는 시험) BAT-220 RV220-2
+  await new Promise((r) => setTimeout(r, 600));
+  openWrite();
+  await stopping;
+  expect(sink.done.map((d) => d.batch.records.map((r) => r.offset))).toEqual([['0', '1', '2']]);
+  expect((await kafka.groupOffsets(group, topic)).get(0)).toBe(3);
+
+  const next = new RecordingSink();
+  const w2 = startWorker({ topic, group, sink: next, maxRecords: 3, pod: 'pod-b' });
+  await w2.run.started;
+  await until(() => next.offsets(0).length >= 3, '다음 실행기가 3~5 싣기');
+  await until(async () => (await kafka.groupOffsets(group, topic)).get(0) === 6, '커밋 6');
+  await w2.run.stop();
+  expect(next.offsets(0)).toEqual(['3', '4', '5']);
+}, 120_000);
