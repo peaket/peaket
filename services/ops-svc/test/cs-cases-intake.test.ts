@@ -28,8 +28,11 @@ const fetchToOps = (): typeof fetch => async (input, init) => {
 const opsClient = () => createExternalHttpClient({ provider: 'ops-svc', baseUrl: 'http://ops-svc.internal', timeoutCapMs: 5_000, fetch: fetchToOps() });
 
 const lead = () => h.as('cs_lead');
+// 받는 종류 아홉을 모두 보는 역할은 operator·commander다. 실패 승인 건 category CONTRACT_TERMS_CHANGE는 CS 담당자에게 404이고 CS 목록에 없다
+// (F-06-2 리뷰 RV-04 반영 정본 73fa48514, R-T49 ⑧). R-T48 ①은 열린 건의 종류·category·기한을 보는 것이라 읽는 역할을 commander로 둔다
+const commander = () => h.as('commander');
 const detail = async (caseId: string) => {
-  const r = await h.get(lead(), caseId);
+  const r = await h.get(commander(), caseId);
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body;
 };
@@ -60,8 +63,8 @@ describe('R-T48 ① 받는 종류 아홉', () => {
     expect(new Set(ids).size).toBe(9);
     for (const s of sent) expect(await h.requests(s.req.kind, 'opened'), s.req.kind).toBe(1);
 
-    // 목록: 이른 기한 차례, 기한 없는 건(승인 업무 실행 실패)은 끝
-    const list = await h.list(lead(), 'limit=100');
+    // 목록: 이른 기한 차례, 기한 없는 건(승인 업무 실행 실패)은 끝(아홉 종류를 다 보는 commander 목록)
+    const list = await h.list(commander(), 'limit=100');
     const items = list.body.items as Array<Record<string, string>>;
     const nextDue = (i: Record<string, string>) => [i.progressDueAt, i.resultDueAt].filter(Boolean).sort()[0] ?? null;
     expect(items.map(nextDue)).toEqual([BD1, BD1, BD1, BD3, BD3, BD3, '2026-12-08T23:00:00.000Z', BD10, null]);
