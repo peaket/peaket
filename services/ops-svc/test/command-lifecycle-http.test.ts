@@ -278,7 +278,7 @@ describe('AZ-T10 2인 승인 분리', () => {
 });
 
 describe('C-T5 위험 명령 재인증', () => {
-  test('C-T5 재인증 토큰이 없거나 틀린(패스키 없음·다른 세션·다른 계정·5분 지남·다시 쓴 jti) 킬스위치는 403 reauth-required이고 명령·감사·실행이 0건이다', async () => {
+  test('C-T5 재인증 토큰이 없거나 틀린(패스키 없음·다른 세션·다른 계정·5분 지남·다시 쓴 jti) 접수는 403 reauth-required이고 명령·감사·실행이 0건이며, 판매 중지·재개도 접수에 재인증이 필요하다', async () => {
     const h = await harness();
     const commander = h.identity.ops('commander');
     const other = h.identity.ops('commander');
@@ -307,6 +307,18 @@ describe('C-T5 위험 명령 재인증', () => {
     expect([replay.statusCode, slug(replay)]).toEqual([403, expect.stringMatching(/reauth-required$/)]);
     expect((await h.store.list({ limit: 100 })).items.map((c) => c.commandId)).toEqual([idOf(ok)]);
     expect(h.calls.execute).toEqual([idOf(ok)]);
+    // 판매 중지·재개(2인 승인)도 접수에 재인증이 필요하다(POL-038 ⑩, ADR-0123 결정 2).
+    const seller = h.identity.ops('operator');
+    for (const type of ['SALE_STOP', 'SALE_RESUME'] as const) {
+      const saleBody = { type, reason: '판매 상태 변경', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } };
+      const before = (await h.store.list({ limit: 100 })).items.length;
+      const blocked = await h.post('/v1/ops/commands', seller, saleBody);
+      expect([blocked.statusCode, slug(blocked)], type).toEqual([403, expect.stringMatching(/reauth-required$/)]);
+      expect((await h.store.list({ limit: 100 })).items, type).toHaveLength(before);
+      const saleOk = await h.post('/v1/ops/commands', h.withToken(seller), saleBody);
+      expect([saleOk.statusCode, json(saleOk).state], type).toEqual([201, 'PENDING_APPROVAL']);
+      expect(json(saleOk), type).toMatchObject({ requestedBy: { adminAccountId: seller['x-user-id'], role: 'operator' } });
+    }
   });
 
   test('C-T5 [ASVS v5.0.0-2.2.1] 명령 4는 2인 조건(/15)일 때만 재인증을 요구하고, 1인 조건(/16)은 재인증 없이 접수해 바로 실행한다', async () => {
@@ -566,13 +578,13 @@ describe('행위자·상태 칸과 SYSTEM 자동 조치(ASVS 8.2.3)', () => {
 });
 
 describe('내부 사건 길의 서버 판정(ASVS 8.3.1)', () => {
-  test('[ASVS v5.0.0-8.3.1] 내부 사건 길도 서버가 역할·요청자 분리를 판정한다(commander 전용 유형의 operator 요청·viewer 요청은 받지 않고, 내부로 만든 2인 명령도 요청자 본인은 승인하지 못한다)', async () => {
+  test('[ASVS v5.0.0-8.3.1] 내부 사건 길도 서버가 역할·요청자 분리를 판정한다(commander 전용 유형의 operator 요청·viewer 요청은 받지 않고, 판매 중지는 operator 요청을 받아 요청자 아닌 commander가 재인증해 승인하며, 내부로 만든 2인 명령도 요청자 본인은 승인하지 못한다)', async () => {
     const h = await harness();
     const post = (body: Record<string, unknown>) => h.post('/internal/v1/ops/command-events', {}, body);
     const ask = (over: Record<string, unknown>) => ({ eventKey: `ev-${randomUUID()}`, kind: 'COMMAND_REQUESTED', reason: '내부 요청', requestedBy: randomUUID(), ...over });
     for (const body of [
       ask({ type: 'KILL_SWITCH', params: { scope: 'PLATFORM' }, requestedRole: 'operator' }),
-      ask({ type: 'SALE_STOP', params: { eventId: randomUUID() }, requestedRole: 'operator' }),
+      ask({ type: 'BOT_LEVEL', params: { level: 'AGGRESSIVE' }, requestedRole: 'operator' }),
       ask({ type: 'LOG_LEVEL', params: { level: 'DEBUG' }, requestedRole: 'viewer' }),
     ]) {
       expect(json(await post(body)), JSON.stringify(body)).toEqual({ accepted: false });
@@ -591,7 +603,33 @@ describe('내부 사건 길의 서버 판정(ASVS 8.3.1)', () => {
     expect([self.statusCode, slug(self)]).toEqual([403, expect.stringMatching(/command-requester-cannot-approve$/)]);
     expect(json(await post({ eventKey: `res-${randomUUID()}`, kind: 'COMMAND_RESULT', commandId: id, status: 'SUCCEEDED' }))).toEqual({ accepted: false });
     expect(await h.store.find(id)).toMatchObject({ state: 'PENDING_APPROVAL', approvals: [] });
-    expect(h.calls.execute).toEqual([]);
+
+    // 판매 중지·재개는 operator 이상이 요청한다(POL-038 ⑩, ADR-0123 결정 2): 내부 사건 길도 받는다.
+    const operator = randomUUID();
+    const operatorSession = randomUUID();
+    h.identity.answers.set(`${operator}/${operatorSession}`, { valid: true, role: 'operator' });
+    const asOperator = { 'x-user-id': operator, 'x-session-id': operatorSession, 'x-user-aud': 'ops', 'x-user-scope': '' };
+    const stopBody = ask({ type: 'SALE_STOP', params: { eventId: randomUUID() }, requestedBy: operator, requestedRole: 'operator' });
+    expect(json(await post(stopBody))).toEqual({ accepted: true, commandId: commandIdOfEventKey(stopBody.eventKey as string) });
+    const stopId = commandIdOfEventKey(stopBody.eventKey as string);
+    expect(await h.store.find(stopId)).toMatchObject({ state: 'PENDING_APPROVAL', requestedRole: 'operator', approvals: [] });
+    // operator는 승인 역할이 아니다(자기 요청 포함). commander는 재인증 뒤에만 승인한다.
+    const opSelf = await h.post(`/v1/ops/commands/${stopId}/approvals`, h.withToken(asOperator), {});
+    expect([opSelf.statusCode, slug(opSelf)]).toEqual([403, expect.stringMatching(/command-role-forbidden$/)]);
+    const commander = h.identity.ops('commander');
+    const noToken = await h.post(`/v1/ops/commands/${stopId}/approvals`, commander, {});
+    expect([noToken.statusCode, slug(noToken)]).toEqual([403, expect.stringMatching(/reauth-required$/)]);
+    const approved = await h.post(`/v1/ops/commands/${stopId}/approvals`, h.withToken(commander), {});
+    expect([approved.statusCode, json(approved).state]).toEqual([200, 'SUCCEEDED']);
+    // 반려: operator는 역할 밖 403, 요청자 아닌 commander는 사유를 남겨 REJECTED로 닫는다.
+    const resumeBody = ask({ type: 'SALE_RESUME', params: { eventId: randomUUID() }, requestedBy: operator, requestedRole: 'operator' });
+    expect(json(await post(resumeBody))).toEqual({ accepted: true, commandId: commandIdOfEventKey(resumeBody.eventKey as string) });
+    const resumeId = commandIdOfEventKey(resumeBody.eventKey as string);
+    const opReject = await h.post(`/v1/ops/commands/${resumeId}/rejections`, h.withToken(asOperator), { reason: 'operator 반려' });
+    expect([opReject.statusCode, slug(opReject)]).toEqual([403, expect.stringMatching(/command-role-forbidden$/)]);
+    const rejected = await h.post(`/v1/ops/commands/${resumeId}/rejections`, commander, { reason: '중복 요청' });
+    expect([rejected.statusCode, json(rejected).state]).toEqual([200, 'REJECTED']);
+    expect(h.calls.execute).toEqual([stopId]);
   });
 });
 
