@@ -301,7 +301,7 @@ node tools/ci/ledger.mjs --batch W12-merch-replay --require
 
 - build·typecheck 둘 다 0(코어·payment). `pnpm lint` 0. doc-check 오류 0(경고 4는 출발점과 같다: openapi 410/504 설명 3, mermaid 검사 건너뜀 1). 계약 생성물 `gen:check` 둘 다 0.
 - 코어 단위: 108파일 789/789. 대상 통합: 11파일 129/129(shop-replay 11, shop-order 23, shop-cancel 22, shop-expiry 12, shop-refund-account 10, shop-return 9, shop-unclaimed 10, shop-notify 14, shop-migration 8, idempotency-rls 8, idempotency-migration 2). payment 단위: 57파일 3,141/3,141. payment 대상 통합: 3파일 72/72(merch-path-e2e 5, payment-merch-grpc 38, payment-checkout 29).
-- `trace-check`: P-T77 통과 6(코어 통합 5·실제 연결 1, 두 보고서의 201개 시험을 봄). 단위 시험 5는 장부가 이름으로 세고, `trace-check` 보고서에는 통합만 실었다.
+- `trace-check`: P-T77 통과 6(코어 통합 5·실제 연결 1, 마지막 대조는 두 보고서의 134개 시험을 봄 — 코어 129, payment P-T77 5). 단위 시험 5는 장부가 이름으로 세고, `trace-check` 보고서에는 통합만 실었다. 전체 payment 3파일을 돌린 실행에서는 두 보고서가 201개였다.
 - `ledger --batch W12-merch-replay --require`: 항목 5(P-T77 ①~⑤), 자동 시험 5, 빈칸·ID만·미검증·다른 단계 0. 등급 A 5.
 - P-T77 판정 기준과 단언 대조: ①은 기록의 `result_ref`·공개 키·주소·`checkout` 글자, ②는 `PrepareCheckout` 호출 수·`attemptId`·`pinnedPg`·금액·`payMethod`·`pgStore`와 바뀐 공개 키·주소·구매자 키, ③은 404 본문·`checkout` 호출·쓰기·로그 한 줄, ④는 네 실패 갈래의 503·쓰기 0·기록 그대로·같은 키 재시도, ⑤는 결제사·금액·주문 ID 불일치의 503·`field` 로그·쓰기 0을 본다. 어긋난 곳은 없다.
 - **payment-svc typecheck의 출발점 결함 하나**: `merch-path-e2e.int.test.ts`의 core-svc 조립에 W12-core-notify가 필수로 만든 `notifyDatabase`가 빠져 payment-svc typecheck가 실패했다. 이 묶음이 그 시험 파일을 이미 고치므로 `notifyDatabase: coreApp`을 더했다(제품 코드·단언 변화 없음, 시험 커밋 `8e92eb579`).
