@@ -1,13 +1,13 @@
 // 받는 쪽: gRPC TicketService(docs/api/proto/peaket/ticket/v1/ticket.proto)의 최소 처리기(BUILD_ORDER HOT-160).
-// IssueTickets·CancelTickets·OperatorCancelTickets·EventCancelTickets·GetEntryRecords·CheckReviewEligibility·ListHeldTickets(ADR-0301 결정 1)·ListTickets를 채운다. 나머지 RPC는 grpc-js가 UNIMPLEMENTED로 답한다.
-// 오류: TicketInputError → INVALID_ARGUMENT, TicketConflictError → FAILED_PRECONDITION, 그 밖 → INTERNAL.
+// IssueTickets·BlockTicketIssuance·CancelTickets·OperatorCancelTickets·EventCancelTickets·GetEntryRecords·CheckReviewEligibility·ListHeldTickets(ADR-0301 결정 1)·ListTickets를 채운다. 나머지 RPC는 grpc-js가 UNIMPLEMENTED로 답한다.
+// 오류: TicketInputError → INVALID_ARGUMENT, TicketConflictError·TicketIssueBlockedError → FAILED_PRECONDITION, 그 밖 → INTERNAL.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { verifyInternalGrpcActor } from '@peaket/platform';
 import type { TicketService } from '../application/ticket-service.js';
 import { TransferError } from '../application/transfers.js';
-import { TicketConflictError, TicketInputError } from '../domain/ticket.js';
+import { TicketConflictError, TicketInputError, TicketIssueBlockedError } from '../domain/ticket.js';
 
 export interface TicketPackage {
   TicketService: grpc.ServiceClientConstructor;
@@ -56,8 +56,9 @@ export interface TicketGrpcErrorLog {
 const OPERATOR_CANCEL_CALLER = 'purchase-svc';
 
 /**
- * o.internalToken: 있으면 OperatorCancelTickets·EventCancelTickets·GetEntryRecords는 내부 토큰과 호출자 purchase-svc를 요구한다. 틀리면(토큰 없음·틀림·다른 호출자)
- * PERMISSION_DENIED이고 쓰임새를 부르지 않는다(리뷰 B6, BAT-420 리뷰 D4, ASVS v5.0.0-8.2.1). 다른 메서드의 부르는 쪽 검사는 바꾸지 않는다. 토큰이 없는 local·ci 조립은 지금처럼 받는다
+ * o.internalToken: 있으면 OperatorCancelTickets·EventCancelTickets·GetEntryRecords·BlockTicketIssuance는 내부 토큰과 호출자 purchase-svc를 요구한다.
+ * 틀리면(토큰 없음·틀림·다른 호출자) PERMISSION_DENIED이고 쓰임새를 부르지 않는다(리뷰 B6, BAT-420 리뷰 D4, BAT-011 ASVS v5.0.0-8.2.1).
+ * 다른 메서드의 부르는 쪽 검사는 바꾸지 않는다. 토큰이 없는 local·ci 조립은 지금처럼 받는다
  */
 export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: TicketGrpcErrorLog, o?: { readonly internalToken?: string }): grpc.UntypedServiceImplementation {
   /** 내부 토큰이 있으면 호출자 purchase-svc만 받는다. 거절했으면 cb로 PERMISSION_DENIED를 보내고 false */
@@ -95,6 +96,24 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
           });
         })
         .catch((err: unknown) => fail('IssueTickets', err, orderId, cb, onError));
+    },
+
+    // 주문 단위 발권 막기(BAT-011 HOT-161, PRF-173의 compFence). 주문 ID로 멱등하고, 이미 만든 티켓을 무효로 한다.
+    // 부르는 쪽은 purchase-svc만 받는다(내부 토큰·호출자 머리, ASVS v5.0.0-8.2.1)
+    BlockTicketIssuance: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (!purchaseOnly(call, cb)) return;
+      const req = call.request;
+      const orderId = text(req.order_id);
+      useCases.ticket
+        .blockIssue({
+          orderId,
+          ...(text(req.reason) !== '' ? { reason: text(req.reason) } : {}),
+          nowMs: useCases.nowMs?.() ?? Date.now(),
+        })
+        .then((r) => {
+          cb(null, { voided: r.voided, already_entered: r.alreadyEntered });
+        })
+        .catch((err: unknown) => fail('BlockTicketIssuance', err, orderId, cb, onError));
     },
 
     CancelTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
@@ -263,9 +282,16 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
 
 function fail(method: string, err: unknown, orderId: string | undefined, cb: grpc.sendUnaryData<Req>, onError: TicketGrpcErrorLog): void {
   const invalid = err instanceof TicketInputError || (err instanceof TransferError && err.code === 'INVALID_INPUT');
-  const code = invalid ? grpc.status.INVALID_ARGUMENT : err instanceof TicketConflictError ? grpc.status.FAILED_PRECONDITION : grpc.status.INTERNAL;
+  const code = invalid
+    ? grpc.status.INVALID_ARGUMENT
+    : err instanceof TicketConflictError || err instanceof TicketIssueBlockedError
+      ? grpc.status.FAILED_PRECONDITION
+      : grpc.status.INTERNAL;
   onError(method, err, orderId);
-  cb({ code, details: invalid || err instanceof TicketConflictError ? err.message : 'ticket 처리 실패' });
+  cb({
+    code,
+    details: invalid || err instanceof TicketConflictError ? err.message : err instanceof TicketIssueBlockedError ? '이 주문의 발권은 막혔습니다' : 'ticket 처리 실패',
+  });
 }
 
 // ---- 부정 예매 양도 잠금 TransferLockService(BUILD_ORDER GAT-055, ticket.proto, docs/features/transfer-refund.md §4.1) ----

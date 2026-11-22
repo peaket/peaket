@@ -35,6 +35,17 @@ import {
   PromOrderExpirySignals,
   PromOrderSignals,
   SeatMapSaleConfigs,
+  CancelCompensation,
+  CompensationLoop,
+  CompensationRunner,
+  DrizzleCompensation,
+  EventCompensationQueue,
+  FenceCompensation,
+  GrpcPaymentCompensator,
+  GrpcTicketFence,
+  LoggerCompensationLog,
+  PromCompensationSignals,
+  StartCompensation,
 } from './modules/booking/index.js';
 import {
   CancelTicket,
@@ -147,6 +158,8 @@ export interface PurchaseRelayOptions {
   refundRetryTickMs?: number;
   /** 회차 취소 일괄 환불 실행기 틱(기본 EVENT_REFUND_TICK_MS 10초, 시험이 줄인다. GAT-130) */
   eventRefundTickMs?: number;
+  /** 보상 세 걸음 실행기 틱(기본 COMPENSATION_LOOP_TICK_MS 1초, 시험이 줄인다. BAT-011) */
+  compensationTickMs?: number;
   /** 주문 만료 안전망 틱(기본 ORDER_EXPIRY_SWEEP_INTERVAL_MS 10분 [가정], 시험이 줄인다. BUILD_ORDER PRF-172) */
   orderExpirySweepTickMs?: number;
   /** 좌석 Stream 릴레이의 쉬기(시험이 줄인다. 기본 setTimeout) */
@@ -264,6 +277,15 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
         open: async (q: { cancellationId: string; requestId: string }) =>
           taskLogger.warn({ event: 'event_refund_deduction_gap', cancellationId: q.cancellationId, requestId: q.requestId }, '회차 취소 확정 때 남는 공제 차액(CS 처리함 주소 없음)'),
       };
+  // 보상 세 걸음(BAT-011, PRF-173, ADR-0354): 발권 대기(APPROVED) 주문을 회차 취소 실행기가 쓸어 담는다.
+  // 보상 저장소·큐는 API 파드와 같은 표(order_compensation)를 쓰고, 실행기는 릴레이 리더만 돈다(CompensationLoop).
+  const compensationSignals = new PromCompensationSignals();
+  const compensationJobs = new DrizzleCompensation({ database: o.serviceDatabase, store: new DrizzleOrderStore({ clock }), clock });
+  const compensationStart = new StartCompensation({ store: compensationJobs, clock, signals: compensationSignals });
+  const compensationQueue = new EventCompensationQueue({ jobs: compensationJobs, start: compensationStart });
+  // 발권 막기·결제 취소는 주소가 있을 때만 만든다(없으면 eventRefund도 만들지 않는다)
+  const compensationFence = ticketGrpcAddr ? new GrpcTicketFence({ address: ticketGrpcAddr, ...(ticketGrpcToken ? { internalToken: ticketGrpcToken } : {}) }) : undefined;
+  const compensationPayment = paymentCancelAddress ? new GrpcPaymentCompensator({ address: paymentCancelAddress }) : undefined;
   // 회차 취소 일괄 환불 실행기(BAT-425 GAT-130, BAT-420 GAT-110). ticket-svc·payment-svc 주소가 있을 때만 만든다.
   // API 파드의 Start가 첫 묶음만 처리하고, 나머지와 재시도·신청 창 닫기·확정 뒤 끝난 주문 쓸어 담기를 이 릴레이 리더가 이어 간다.
   // 회차 취소(CANCEL)는 전용 취소기(견적·좌석 되돌림 없음, 보류 취소 전환), 연기(POSTPONE) 신청 환급은 예매 취소 Saga로 간다(ADR-0280 결정 3).
@@ -313,6 +335,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           deadlineMs: () => clock.now() + EVENT_REFUND_TICKET_DEADLINE_MS,
           concurrency: 8,
           batchSize: 200,
+          // 발권 대기(APPROVED) 주문은 보상 세 걸음으로 끝낸다(BAT-011, PRF-173). 보상이 끝날 때까지 요청은 RUNNING이다
+          ...(compensationFence && compensationPayment ? { compensation: compensationQueue } : {}),
         })
       : undefined;
   const relay = await startOutboxRelayProcess({
@@ -349,7 +373,25 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       orderExpirySignals.register(ctx.registry);
       csCaseSignals.register(ctx.registry);
       refundSignals.register(ctx.registry);
+      compensationSignals.register(ctx.registry);
       if (pgCircuits) void pgCircuits.refresh();
+      // 보상 실행기는 프로세스 로거가 생긴 뒤(리더 반복 안)에 만든다. 발권 막기·결제 취소 클라이언트가 둘 다 있을 때만 돈다
+      const compensationLoop =
+        compensationFence && compensationPayment
+          ? new CompensationLoop({
+              runner: new CompensationRunner({
+                jobs: compensationJobs,
+                fence: new FenceCompensation({ store: compensationJobs, fence: compensationFence, clock: ctx.clock, log: new LoggerCompensationLog(ctx.logger), signals: compensationSignals }),
+                cancel: new CancelCompensation({ store: compensationJobs, payments: compensationPayment, clock: ctx.clock, log: new LoggerCompensationLog(ctx.logger), signals: compensationSignals }),
+                log: new LoggerCompensationLog(ctx.logger),
+                signals: compensationSignals,
+                clock: ctx.clock,
+              }),
+              leader: ctx.leader,
+              logger: ctx.logger,
+              ...(o.compensationTickMs !== undefined ? { tickMs: o.compensationTickMs } : {}),
+            })
+          : undefined;
       const store = new RedisSeatStore(o.redis, ctx.logger, ctx.clock);
       // 다시 만들기의 DB 쪽(임대·판 번호·읽기)이자 판매를 연 기록(seat_rebuild 행). 기록이 있는 회차만 다시 만든다(리뷰 고침 M3)
       const rebuildSource = new DrizzleSeatRebuildSource(o.serviceDatabase);
@@ -413,6 +455,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
               }),
             ]
           : []),
+        ...(compensationLoop ? [compensationLoop] : []),
         new SeatEpochWatch({
           store,
           leader: ctx.leader,
@@ -446,6 +489,8 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       clearInterval(refresh);
       paymentCancels?.close();
       refundTicketCancels?.close();
+      compensationFence?.close();
+      compensationPayment?.close();
       return relay.stop();
     },
   };

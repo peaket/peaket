@@ -187,7 +187,7 @@ export interface EventRefundServiceDeps {
   /** 보충 2: 차액 대상의 입장 시작 시각은 대상 표가 아니라 회차 판매 설정(entryOpensAtMs)에서 읽는다(대상 0이어도 찾는다). 없으면 차액을 찾지 않는다 */
   readonly configs?: CancellationConfigs;
   /** 보충 2: 설정에 입장 시작이 없어 차액을 찾지 않을 때의 경고 등. 없으면 남기지 않는다 */
-  readonly log?: { warn(o: object, msg: string): void };
+  readonly log?: { warn(o: object, msg: string): void; info?(o: object, msg: string): void };
   /**
    * 웨이브 끝 리뷰 K2: 항목 처리 전 주문 단위 잡기와 조건부 끝내기(transfer-refund §5 '일괄 환불 항목의 주인과 겹침 막기'). 운영 조립(start·relay)에는 꼭 넣는다.
    * 없으면(단위 시험·옛 조립) 한 프로세스 안에서만 겹침을 막고 끝내기는 store.updateItem(끝난 상태를 덮지 않음)이다
@@ -204,6 +204,11 @@ export interface EventRefundServiceDeps {
    * 다시 보기 2 N1·N2: kind에 REFUND_FAILED·EVENT_REFUND_FAILED, 틱의 다시 열기를 멈추면 cut(purchase_cs_case_reopen_cut_total{reason})
    */
   readonly csCaseOpenFailures?: CsCaseOpenSignals;
+  /**
+   * 회차 취소가 확정된 뒤 발권 대기(APPROVED) 주문을 보상 세 걸음 큐에 넣는다(BAT-011, PRF-173, ADR-0354 결정 3).
+   * 없으면 넣지 않는다(옛 조립·단위 시험). 큐는 그 회차에서 새로 만든 보상 행 수를 준다
+   */
+  readonly compensation?: { queue(eventId: string): Promise<number> };
 }
 
 // ---- 웨이브 끝 리뷰 K2·C2·S1: 일괄 환불 항목의 주인과 겹침 막기, CS 건 다시 열기 ----

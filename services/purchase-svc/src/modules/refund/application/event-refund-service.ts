@@ -240,6 +240,8 @@ export class EventRefundService {
     if (kind === 'CANCEL') {
       // 차액 건은 결제사 호출이 아니다. 다시 열기 포트(csOutbox)가 있으면 일괄 환불 실행기 틱이 행마다 열고, 없으면(옛 조립) 여기서 행마다 따로 연다
       if (!this.o.csOutbox) for (const row of gapRows) await this.#openGapNow(request.requestId, row, nowMs);
+      // 발권 대기(APPROVED) 주문의 보상 세 걸음을 큐에 넣는다(BAT-011, PRF-173). 보상이 끝날 때까지 요청은 RUNNING이다
+      await this.#queueCompensation(created);
       await this.#run(created, targets, this.o.firstBatch ?? 200);
     }
     return this.get(i.requestId);
@@ -466,6 +468,8 @@ export class EventRefundService {
         targets = await this.#targets(request.eventId);
         await this.#sweep(request, targets);
       }
+      // 발권 대기(APPROVED) 주문의 보상은 멈춘 요청에서도 큐에 넣는다(발권을 멈추고 결제를 취소해야 요청이 끝난다, BAT-011)
+      if (request.kind === 'CANCEL' && (request.status === 'RUNNING' || request.status === 'PAUSED')) await this.#queueCompensation(request);
       if (request.status === 'PAUSED') continue;
       const items = await this.o.store.dueItems(request.requestId, nowMs, this.o.batchSize ?? 200);
       if (items.length === 0 && !sweeping) continue;
@@ -474,6 +478,21 @@ export class EventRefundService {
       processed += items.length;
     }
     return { closedWindows, processed };
+  }
+
+  /**
+   * 회차 취소 확정 뒤 발권 대기(APPROVED) 주문을 보상 세 걸음 큐에 넣는다(BAT-011, PRF-173, ADR-0354 결정 3).
+   * 큐가 없으면(옛 조립) 아무것도 하지 않는다. 실패는 요청 상태를 바꾸지 않고 경고만 남긴다(다음 틱이 다시 넣는다)
+   */
+  async #queueCompensation(request: EventCancellationRequest): Promise<void> {
+    const queue = this.o.compensation;
+    if (!queue) return;
+    try {
+      const created = await queue.queue(request.eventId);
+      if (created > 0) this.o.log?.info?.({ event: 'event-compensation-queued', requestId: request.requestId, created }, '회차 취소 확정 뒤 발권 대기 주문을 보상 큐에 넣었다');
+    } catch (err) {
+      this.o.log?.warn({ event: 'event-compensation-queue-failed', requestId: request.requestId, eventId: request.eventId, err: err instanceof Error ? err.name : 'unknown' }, 'event-compensation-queue-failed: 보상 큐에 넣지 못했다(다음 틱에 다시 넣는다)');
+    }
   }
 
   /** 대상을 다시 골라 그 요청에 항목이 없는 표를 PENDING으로 더하고, 새 주문마다 확정 알림을 한 번 남긴다(같은 트랜잭션) */

@@ -789,6 +789,7 @@ erDiagram
     purchase_order ||--o| ticket_issue_job : "발권 재시도 큐(승인 뒤 발권 전까지, ADR-0106)"
     purchase_order ||--o| ticket_void_job : "티켓 무효 큐(입금 오류 되돌림 뒤)"
     purchase_order ||--o| order_saga_job : "주문 Saga 작업(결제 접수부터 결과 반영·실패 해제까지, PRF-165)"
+    purchase_order ||--o| order_compensation : "보상 세 걸음(회차 취소 확정 뒤 발권 대기 주문, BAT-011)"
     purchase_order ||--o{ order_cancellation : "티켓 단위 취소"
     event ||--o{ event_cancellation_request : "회차 취소 요청(ADR-0046)"
     event ||--|| event_sale : "회차 판매 상태(purchase, ADR-0122)"
@@ -941,6 +942,11 @@ erDiagram
         text last_error "마지막 gRPC 상태 코드"
         timestamptz created_at
     }
+    ticket_issue_guard {
+        uuid order_id PK "주문 단위 발권 막기(ticket-svc 0010, 추천 적용 2026-11-22, BUILD_ORDER BAT-011, HOT-161, ADR-0354 결정 2). IssueTickets와 BlockTicketIssuance가 이 행을 먼저 잠가 같은 주문의 발권과 막기를 한 차례로 가른다"
+        timestamptz blocked_at "값이 있으면 막힌 주문이라 뒤에 오는 IssueTickets가 FAILED_PRECONDITION이다. 비어 있으면 발권이 먼저 만든 잠금 자리다(두 갈래를 가르려 널을 허용한다)"
+        text reason "막은 사유(감사·로그용, EVENT_CANCELLED 등). 없을 수 있다"
+    }
     order_saga_job {
         uuid order_id PK "결제 접수 트랜잭션이 RESERVE로 넣는다(PRF-162). 승인·실패 반영이나 실패 해제가 끝나면 지운다(PRF-163·165). 승인 명령 접수 뒤와 UNKNOWN·입금 대기 반영 뒤에는 AWAIT로 남는다(PRF-171). 칸은 §4 여섯·일곱·열한 번째 마이그레이션"
         uuid event_id
@@ -951,6 +957,20 @@ erDiagram
         timestamptz created_at
         timestamptz confirm_sent_at "승인 명령을 처음 보내기 직전에 적은 시각. 있으면 purchase가 혼자 T11을 하지 않는다(PRF-165). 널 허용"
         timestamptz pull_next_at "결과 당기기의 다음 점검 시각. 고를 때 지금 + 5초 [가정]를 쓴다. 널 허용(추천 적용 2026-11-06, BUILD_ORDER PRF-171)"
+    }
+    order_compensation {
+        uuid order_id PK "회차 취소가 확정됐는데 발권이 아직 끝나지 않은(APPROVED) 주문 하나(추천 적용 2026-11-22, BUILD_ORDER BAT-011, PRF-173, ADR-0354 결정 3). 주문 상태에 COMPENSATING을 더하지 않고 이 표가 보상 중을 든다"
+        text status "STARTED|FENCED|COMPENSATED|FAILED. STARTED·FENCED가 보상 중(명세 COMPENSATING)이고, 결제 취소가 끝나 주문 T20을 쓰는 같은 트랜잭션에서 COMPENSATED가 된다. FAILED는 사람이 확인한다(SEV2)"
+        text reason "막는 사유(order_cancellation.reason과 같은 글). 회차 취소는 EVENT_CANCELLED이고 ticket-svc BlockTicketIssuance에 그대로 싣는다"
+        text payment_id "그 주문의 마지막 APPROVED 결제 원장 ID(ADR-0354 결정 4). start가 알고 있으면 그 값, 모르면 payment-svc GetPayment로 찾아 채운다"
+        timestamptz started_at "STARTED를 만든 시각"
+        timestamptz fenced_at "ticket-svc가 그 주문의 발권을 막고 이미 만든 티켓을 무효로 한 시각"
+        timestamptz canceled_at "보상 완료(결제 취소·주문 T20) 시각. status COMPENSATED일 때만 채운다"
+        int attempts "부른 횟수(발권 막기·결제 취소). 기본 0"
+        timestamptz next_attempt_at "다음 시도 시각(다시 보내는 실패). 다시 보내지 않으면 비운다"
+        timestamptz lease_until "실행기가 잡은 동안의 임대 끝(30초 [가정]). 널 허용"
+        text last_error "마지막 실패 코드(gRPC 상태 이름·CIRCUIT_OPEN·NO_PAYMENT 등). 사유·결제 참조·계좌는 싣지 않는다"
+        timestamptz updated_at "마지막 변경 시각"
     }
     order_cancellation {
         uuid id PK
@@ -2942,6 +2962,7 @@ erDiagram
 - 열 번째 마이그레이션(0009, 추천 적용 2026-11-05, BUILD_ORDER PRF-170): `ticket_issue_job`에 `lease_until`·`delayed_at`·`overdue_at`(모두 `timestamptz`, 널 허용)을 더한다. 발권 실행기의 잡기(임대)와 `ISSUE_DELAYED`·발권 기한 넘김 신호를 한 번만 내는 표시다(docs/features/payment.md §2 '발권 호출과 재시도 큐의 첫 구현'). 새 인덱스는 두지 않는다(§5.1).
 - 열한 번째 마이그레이션(0010, 추천 적용 2026-11-06, BUILD_ORDER PRF-171): `order_saga_job.step` CHECK에 `AWAIT`(승인 명령이 접수돼 결과를 기다림)를 더하고, `order_saga_job.pull_next_at timestamptz`(결과 당기기의 다음 점검 시각, 널 허용)를 더한다. 승인 명령이 접수된 작업 행을 지우지 않고 `AWAIT`로 남겨, 결과 당기기가 '접수했는데 결과가 아직 없는 주문'을 이 작은 표에서 찾는다(docs/features/payment.md §2 '결제 결과 당기기의 첫 구현'). 새 인덱스는 두지 않는다(§5.1).
 - 2026-11-13 ticket-svc 첫 마이그레이션(`services/ticket-svc/migrations/0000_ticket.sql`, BUILD_ORDER HOT-160, BAT-050): `ticket_issue (order_id, issue_generation)` 기본 키와 발권 내용 지문, `ticket`(상태 `ISSUED`·`ACTIVE`·`REFUNDED`·`VOIDED` CHECK, `(order_id, issue_generation, seat_id)` 유일, 월렛 색인 `(account_id, created_at, id)`, `transfer_pending`·`fraud_lock_case_id` 자리), `ticket_cancellation (cancellation_id, ticket_id)` 기본 키. 주문·좌석은 다른 논리 DB라 외래키를 걸지 않는다. `ticket_issue`의 기본 키가 같은 주문을 두 번 발권하지 않는 자리다.
+- 2026-11-22 보상 세 걸음과 발권 막기(BUILD_ORDER BAT-011, HOT-161·PRF-173, ADR-0354): purchase 0032(`services/purchase-svc/migrations/0032_order_compensation.sql`)가 `order_compensation`(위 ERD 칸 그대로, 상태 CHECK 넷, `attempts >= 0`, 사유 비지 않음, 주문에 외래 키, 부분 색인 `(next_attempt_at) WHERE status IN ('STARTED','FENCED')`)을 만든다. ticket 0010(`services/ticket-svc/migrations/0010_ticket_issue_guard.sql`)이 `ticket_issue_guard`(위 ERD 칸 그대로)를 만든다. 두 표 모두 끝난 행을 지우지 않고 주문·티켓 기록과 함께 보존한다.
 - 열두 번째 마이그레이션(0011, 추천 적용 2026-11-09, BUILD_ORDER PRF-172): `purchase_order_session_idx ON purchase_order (purchase_session_id)`를 더한다. 구매 세션이 끝날 때 그 세션의 열린 주문을 찾는 인덱스다(docs/features/payment.md §2 '결제하지 않은 주문 만료의 첫 구현'). 주문 표에 인덱스를 두지 않는 원칙의 예외이고, 까닭과 대가는 §5.1이다.
 - 탈퇴 참여자 마이그레이션(PRF-169, 추천 적용 2026-11-18, BAT-010 계획, ADR-0284): `purchase_order_account_idx ON purchase_order (account_id, id)`를 더한다. 0011과 같은 예외이고 까닭과 대가는 §5.1이다. 번호는 그때의 다음 번호다(지금 마지막은 0027). identity 쪽은 `account.closure_reason` CHECK에 `WITHDRAWAL`을 더하고 `closure_next_check_at`과 부분 인덱스 `account_withdrawal_retry_idx`를 더하는 마이그레이션(그때의 다음 번호, 지금 마지막은 0033)이다.
 - 열세 번째 마이그레이션(0012, 추천 적용 2026-11-09, BUILD_ORDER PRF-144): `event_sale`(회차마다 한 행. 판 번호 `version`은 1 이상, `status`·`previous_status`는 다섯 상태만 `CHECK`, 좌석 수 칸과 `reopen_count`는 0 이상)을 만들고 `seat_sale_pending_idx ON seat_sale (event_id, reserved_at) WHERE status = 'PENDING'`을 더한다(`reserved_at`까지 둔 것은 추천 적용 2026-11-09, BUILD_ORDER PRF-144, 코드 리뷰). 정본 칸에 `previous_status`·`sold_out_tiers`·`open_at`·`counted_at`을 더한 까닭은 같은 판을 다시 낼 때 그 판의 값이 필요하기 때문이다(docs/features/seat-hold.md §4 '판정의 첫 구현'). 인덱스의 까닭과 대가는 §5.1이다.
@@ -3129,6 +3150,8 @@ erDiagram
 | 매일 주문 상태·이력 검사(purchase, 추천 적용 2026-11-05, BUILD_ORDER PRF-160, ADR-0113) | 전날(한국 시각) `order_event.occurred_at` 범위의 주문 ID를 한 번에 모으기(`SELECT DISTINCT order_id … WHERE occurred_at >= $1 AND occurred_at < $2`), 그 ID를 1,000건 [가정]씩 이력 행 수·마지막 번호·마지막 도착 상태와 `purchase_order.status`·`event_seq` 견주기. 묶음마다 `ORDER BY order_id LIMIT`로 범위를 다시 훑으면 기본 키 색인을 처음부터 타 비용이 표 전체에 비례했다(2026-11-05 코드 리뷰 실측: 397만 행에서 16배) | 새로 `order_event USING brin (occurred_at)`. 나머지는 정본 기본 키 `order_event (order_id, seq)`·`purchase_order_pkey` | `Bitmap Heap Scan`(BRIN) → `HashAggregate`, 주문별 `Index Scan using order_event_pkey` | 한 번에 본 주문 수, 어긋난 주문 수(`order_history_mismatch`), 실행 시간 |
 | 다시 만들기의 주문 근거(purchase, 추천 적용 2026-11-05, BUILD_ORDER PRF-167) | 판매 주문: `purchase_order WHERE id = ANY($1)`(1,000개씩), 묶인 주문: `order_saga_job j JOIN purchase_order o ON o.id = j.order_id WHERE j.event_id = $1 AND j.step = 'RESERVE' AND o.status = 'ACCEPTED' AND o.pinned_at IS NOT NULL`, 원장 대조: `seat_hold WHERE event_id = $1 AND hold_id = ANY($2)` | 새 인덱스 없음(주문 기본 키, 작은 표 `order_saga_job`, `seat_hold` 파티션의 기본 키·활성 유일) | 주문 표는 `Index Scan using purchase_order_pkey`(Seq Scan 없음) | 실행 시간(전체 유실 뒤 회차마다 한 번), 한 번에 읽은 주문 수 |
 | 발권 재시도 큐(purchase, 추천 적용 2026-11-05, BUILD_ORDER PRF-170) | 잡기(1초 [가정]마다): `WHERE next_attempt_at <= now() AND (lease_until IS NULL OR lease_until < now()) AND NOT EXISTS (그 주문의 ticket_void_job 행) LIMIT 50 FOR UPDATE SKIP LOCKED`(`NOT EXISTS`는 `ticket_void_job` 기본 키로 본다, 추천 적용 2026-11-09, BUILD_ORDER HOT-152, 코드 리뷰). `ISSUE_DELAYED`(같은 틱): `WHERE created_at <= now() - interval '60 seconds' AND delayed_at IS NULL LIMIT 100`. 기한 넘김(같은 틱): `WHERE issue_due_at <= now() AND overdue_at IS NULL`. 게이지(10초 [가정]마다): 다시 보낼 행·멈춘 행 수와 가장 오래된 `created_at`을 한 질의로 | 새 인덱스 없음. 잡기는 정본 `ticket_issue_job (next_attempt_at)`을 탄다(멈춘 행은 `next_attempt_at`이 비어 범위 밖이다). 나머지 셋은 표를 훑는다. 큐에는 승인 뒤 발권 전인 진행 중 행만 있어 작은 표다. 평소에는 승인 커밋 뒤 곧바로 발권해 행이 1초 안팎만 남으므로 수백 행 아래다 [추정] | 잡기는 `LockRows → Limit → Index Scan`, 나머지는 `Seq Scan`(작은 표) | 한 번에 고른 행 수, 질의 시간. ticket-svc가 멈추면 행이 승인 수만큼 쌓인다(승인 초당 300건 [가정] × 5분이면 약 9만 행 [추정]). 그때 `ISSUE_DELAYED`·기한 넘김 질의의 훑기가 틱(1초)을 압박하면 부분 인덱스 `(created_at) WHERE delayed_at IS NULL`·`(issue_due_at) WHERE overdue_at IS NULL`을 더한다 |
+| 보상 세 걸음(purchase, 추천 적용 2026-11-22, BUILD_ORDER BAT-011, PRF-173) | 시작: `ticket_issue_job WHERE order_id = $1 FOR UPDATE` → `DELETE` → `purchase_order WHERE id = $1 FOR UPDATE`(APPROVED 확인) → `INSERT order_compensation … ON CONFLICT DO NOTHING`(잠금 차례는 큐 행 → 주문 행, 끝내기는 보상 행 → 주문 행). 후보: `ticket_issue_job j JOIN purchase_order o ON o.id = j.order_id WHERE j.event_id = $1 AND o.status = 'APPROVED' AND NOT EXISTS (order_compensation)`. 잡기(1초 [가정]마다): `WHERE status IN ('STARTED','FENCED') AND next_attempt_at <= $1 AND (lease_until IS NULL OR lease_until < $1) LIMIT 50 FOR UPDATE SKIP LOCKED`, 같은 트랜잭션에서 `lease_until = 지금 + 30초 [가정]`. 끝내기: 보상 행 잠금 → 주문 전이 T20 → 행 `COMPENSATED` | 새로 부분 인덱스 `order_compensation_next_attempt_idx (next_attempt_at) WHERE status IN ('STARTED','FENCED')`(마이그레이션 0032). 시작·후보·끝내기는 기본 키(작은 표). 회차의 후보 찾기는 `ticket_issue_job`을 훑는다(회차 취소 중에만 돌고 행이 적다) | 잡기는 `Limit → LockRows → Index Scan using order_compensation_next_attempt_idx`, 후보는 `Nested Loop`의 바깥 `Seq Scan`(작은 큐 표) | 잡은 행 수, `order_compensation_jobs{state}`(pending·failed), `purchase_compensation_total{result}`. 끝난 행은 지우지 않고 주문 기록과 함께 5년 보존하며, 표가 커지면 `(order_id)` 기본 키 조회만 남는다(정리 작업 없음) |
+| 발권 막기(ticket, 추천 적용 2026-11-22, BUILD_ORDER BAT-011, HOT-161) | `INSERT ticket_issue_guard … ON CONFLICT DO NOTHING` → `SELECT … WHERE order_id = $1 FOR UPDATE`(IssueTickets도 같은 차례) → 막힘이면 그 주문의 티켓 `WHERE order_id = $1 ORDER BY id FOR UPDATE` → 상태 `VOIDED`·`key_revoked_at`·버전 + 1. 입장 기록 수는 `scan_event`의 `direction = 'IN' AND result = 'PASS'`를 티켓마다 센다 | 기본 키 `ticket_issue_guard (order_id)`, 티켓은 `ticket_order_idx (order_id, issue_generation)`의 앞 칸과 `ticket` 기본 키(막기는 드물다) | `Index Scan`·`LockRows`(주문의 티켓 몇 장) | 막기 호출 수, 폐기한 티켓 수(`voided`), 이미 입장한 수(`already_entered`, 0보다 크면 SEV1). 끝난 guard 행은 주문·티켓 기록과 함께 보존한다 |
 | 결제 시도 시작(purchase, 추천 적용 2026-11-09, BUILD_ORDER PRF-191) | 트랜잭션 밖 `SELECT count(*) FROM payment_attempt WHERE order_id = $1`, 주문·항목 읽기(`purchase_order WHERE id = $1`), 재생의 `payment_attempt WHERE id = $1`. 트랜잭션 안 주문 T2 조건부 UPDATE, 같은 세기, `UPDATE payment_attempt SET status = 'SUPERSEDED' WHERE order_id = $1 AND status = 'READY'`, INSERT | 새 인덱스 없음. 시도는 주문마다 많아야 3행이라 `payment_attempt (order_id)` 일반 인덱스로 충분하다 | `Index Scan using payment_attempt_order_id_idx`, `Index Scan using purchase_order_pkey` | 주문당 시도 행 수가 3을 넘으면 코드 결함이다. 유일 위반(23505) 수 |
 | 결과 당기기 대상(purchase, 추천 적용 2026-11-06, BUILD_ORDER PRF-171) | 잡기(1초 [가정]마다): `order_saga_job WHERE step IN ('CONFIRM','AWAIT') AND confirm_sent_at IS NOT NULL AND confirm_sent_at <= now() - interval '5 seconds' AND (pull_next_at IS NULL OR pull_next_at <= now()) LIMIT 100 FOR UPDATE SKIP LOCKED`, 같은 트랜잭션에서 고른 행에 `pull_next_at = now() + interval '5 seconds'`. 반영 앞에 그 주문의 ACCEPTED 결제 시도를 읽는다 | 새 인덱스 없음. 작업 표에는 결제 접수부터 결과 반영까지 진행 중인 주문만 있어 작은 표다(주문 표에 색인을 더하지 않으려고 이 표에서 찾는다). 평소에는 결과 사건이 1초 안에 와 `AWAIT` 행이 곧 지워지므로 수백 행 아래다 [추정]. 다만 입금 대기·UNKNOWN 주문의 `AWAIT` 행은 며칠 남을 수 있어, `AWAIT`로 바꿀 때 Saga의 `next_attempt_at`을 무한대(`infinity`)로 두어 Saga 잡기의 `next_attempt_at` 차례 앞을 막지 않게 한다(2026-11-06 코드 리뷰). 결제 시도는 정본 `payment_attempt (order_id)`를 탄다 | 잡기는 `LockRows → Limit → Seq Scan`(작은 표, 쓸기 색인 `(next_attempt_at)`은 쓰지 않는다), 결제 시도는 `Index Scan` | 한 번에 고른 행 수, 질의 시간. 사건 길만 멈추면 당기기가 맞추는 동안의 행만 남는다(승인 초당 300건 [가정] × 수 초, 수천 행 [추정]). 당기기도 실패하면(사건 길과 payment-svc가 함께 멈춤) 결제 접수 수만큼 쌓인다(초당 300건 [가정] × 5분이면 약 9만 행 [추정]). 그때 훑기가 틱(1초)을 압박하면 부분 인덱스 `(confirm_sent_at) WHERE step IN ('CONFIRM','AWAIT')`를 더한다 |
 

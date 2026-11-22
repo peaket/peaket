@@ -17,6 +17,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                       "requestType": "VoidTicketsRequest",
                       "responseType": "VoidTicketsResponse"
                     },
+                    "BlockTicketIssuance": {
+                      "requestType": "BlockTicketIssuanceRequest",
+                      "responseType": "BlockTicketIssuanceResponse"
+                    },
                     "CancelTickets": {
                       "requestType": "CancelTicketsRequest",
                       "responseType": "CancelTicketsResponse"
@@ -93,6 +97,30 @@ export const ticketV1Ticket: Record<string, unknown> = {
                   }
                 },
                 "VoidTicketsResponse": {
+                  "fields": {
+                    "voided": {
+                      "type": "int32",
+                      "id": 1
+                    },
+                    "already_entered": {
+                      "type": "int32",
+                      "id": 2
+                    }
+                  }
+                },
+                "BlockTicketIssuanceRequest": {
+                  "fields": {
+                    "order_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "reason": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "BlockTicketIssuanceResponse": {
                   "fields": {
                     "voided": {
                       "type": "int32",

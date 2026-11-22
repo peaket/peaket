@@ -101,8 +101,10 @@ import { acceptBulkheadLimitFromEnv, setAcceptBulkheadLimit, setWriteBulkheadLim
 import {
   type BehaviorSignalPublisher,
   type BookingModuleDeps,
+  CancelCompensation,
   CONSENT_VERSION_ENV,
   type ContactRefs,
+  CompensationRunner,
   discardBehaviorSignals,
   DrizzleOrderAccepts,
   DrizzleOrderStarts,
@@ -114,6 +116,9 @@ import {
   DrizzleSaga,
   DrizzleSalePaying,
   DrizzleTicketIssue,
+  DrizzleCompensation,
+  EventCompensationQueue,
+  FenceCompensation,
   type IdentityRecheck,
   identityClientsFromEnv,
   InventoryOrderSeatPins,
@@ -122,6 +127,7 @@ import {
   InventorySeatSlots,
   InventoryOrderHoldExpiries,
   KafkaBehaviorSignals,
+  LoggerCompensationLog,
   LoggerPaymentPullLog,
   LoggerSagaLog,
   LoggerTicketIssueLog,
@@ -139,12 +145,14 @@ import {
   newPaymentPausesFromEnv,
   PAYMENT_PAUSE_BREAKER_OPTIONS,
   paymentConfirmsFromEnv,
+  paymentCompensatorFromEnv,
   paymentDepositReaderFromEnv,
   paymentPullDatabaseOptions,
   paymentStatusWaitTableDatabaseOptions,
   paymentResultReaderFromEnv,
   PaymentResultPuller,
   PaymentStatusWaitTable,
+  PromCompensationSignals,
   sagaDatabaseOptions,
   PromOrderExpirySignals,
   PromOrderSignals,
@@ -157,6 +165,8 @@ import {
   ProcessAccountWithdrawal,
   PromWithdrawalParticipantSignals,
   QuoteAccountWithdrawal,
+  StartCompensation,
+  ticketFenceFromEnv,
   type WithdrawalDepositCancellations,
   type WithdrawalTickets,
   withdrawalParticipantHandlers,
@@ -338,6 +348,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const fanReauthWarnings: string[] = [];
   let refundTickets: GrpcTicketCancellations | undefined;
   let refundPayments: GrpcPaymentCancellations | undefined;
+  /**
+   * 회차 취소 실행기가 쓰는 보상 큐(BAT-011). 보상 저장소는 booking 조립(아래)에서 생기므로 늦게 묶는다.
+   * 그 전이면(듣기 전) 0을 준다(회차 취소도 그 전에 시작되지 않는다)
+   */
+  const compensationQueueLate: { queue(eventId: string): Promise<number> } = { queue: async () => 0 };
   /** BAT-425 지표: 계좌 다시 받기·배상·서킷 멈춤. 서비스를 만든 뒤 레지스트리에 붙인다 */
   const refundSignals = new PromRefundAccountSignals();
   let compensationTransfers: GrpcCompensationTransfer | undefined;
@@ -477,6 +492,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
       nowMs: () => systemClock.now(),
       deadlineMs: () => systemClock.now() + EVENT_REFUND_TICKET_DEADLINE_MS,
       concurrency: 8,
+      // 발권 대기(APPROVED) 주문은 보상 세 걸음으로 끝낸다(BAT-011, PRF-173). 실제 큐는 booking 조립이 채운다
+      compensation: compensationQueueLate,
     });
     refund.eventRefund = eventRefundService;
   }
@@ -761,6 +778,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 티켓 무효 실행기(입금 오류 되돌림 뒤, BUILD_ORDER HOT-152): 발권 실행기와 같은 자리·같은 풀·같은 ticket-svc 주소를 쓴다
   let ticketVoidRunner: TicketVoidRunner | undefined;
   let ticketIssueDatabase: Database | undefined;
+  // 보상 세 걸음(BAT-011, PRF-173): 회차 취소 확정 뒤 발권 대기 주문의 발권을 막고 결제를 취소한다. 발권 실행기와 같은 자리·같은 풀을 쓴다
+  let compensationRunner: CompensationRunner | undefined;
+  let compensationQueue: EventCompensationQueue | undefined;
+  let compensationFenceClient: ReturnType<typeof ticketFenceFromEnv> | undefined;
+  let compensationPaymentClient: ReturnType<typeof paymentCompensatorFromEnv> | undefined;
+  let compensationPaymentBreaker: CircuitBreaker | undefined;
   if (booking && database && databaseUrl) {
     ticketBreaker = new CircuitBreaker({ service: SERVICE, dependency: TICKET_DEPENDENCY, registry: service.metrics.registry, logger: service.logger });
     ticketIssuer = ticketIssuerFromEnv(env, { profile: service.config.grpcLbProfile, breaker: ticketBreaker });
@@ -776,6 +799,34 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(paymentStatusWaiters ? { onOrderChanged: (orderId: string) => paymentStatusWaiters.notify(orderId) } : {}),
     });
     ticketVoidRunner = new TicketVoidRunner({ jobs: new DrizzleTicketVoid({ database: ticketDb, clock: systemClock }), voider: ticketIssuer.voider, log: new LoggerTicketVoidLog(service.logger), signals: new PromTicketVoidSignals().register(service.metrics.registry), clock: systemClock });
+    // 보상 세 걸음(BAT-011, PRF-173, ADR-0354): 발권 막기는 ticket-svc, 결제 취소는 payment-svc다.
+    // 저장소는 발권 실행기와 같은 실행기 전용 풀을 쓰고, 지표 purchase_compensation_total·order_compensation_jobs를 붙인다
+    const compensationSignalsOf = new PromCompensationSignals().register(service.metrics.registry);
+    const compensationLog = new LoggerCompensationLog(service.logger);
+    compensationFenceClient = ticketFenceFromEnv(env, {
+      profile: service.config.grpcLbProfile,
+      breaker: ticketBreaker,
+      ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}),
+    });
+    for (const w of compensationFenceClient.warnings) service.logger.warn({ dep: TICKET_DEPENDENCY }, w);
+    compensationPaymentBreaker = new CircuitBreaker({ service: SERVICE, dependency: 'payment-svc-compensation', registry: service.metrics.registry, logger: service.logger });
+    const compensationPayment = paymentCompensatorFromEnv(env, { profile: service.config.grpcLbProfile, breaker: compensationPaymentBreaker });
+    for (const w of compensationPayment.warnings) service.logger.warn({ dep: 'payment-svc' }, w);
+    compensationPaymentClient = compensationPayment;
+    const compensationStore = new DrizzleCompensation({ database: ticketDb, store: orderStore, clock: systemClock });
+    const compensationStart = new StartCompensation({ store: compensationStore, clock: systemClock, log: compensationLog, signals: compensationSignalsOf });
+    const compensationFence = new FenceCompensation({ store: compensationStore, fence: compensationFenceClient.fence, clock: systemClock, log: compensationLog, signals: compensationSignalsOf });
+    const compensationCancel = new CancelCompensation({ store: compensationStore, payments: compensationPayment.compensator, clock: systemClock, log: compensationLog, signals: compensationSignalsOf });
+    compensationQueue = new EventCompensationQueue({ jobs: compensationStore, start: compensationStart, log: compensationLog });
+    compensationQueueLate.queue = async (eventId) => (compensationQueue ? compensationQueue.queue(eventId) : 0);
+    compensationRunner = new CompensationRunner({
+      jobs: compensationStore,
+      fence: compensationFence,
+      cancel: compensationCancel,
+      log: compensationLog,
+      signals: compensationSignalsOf,
+      clock: systemClock,
+    });
   }
   // Kafka 소비자 둘(BUILD_ORDER PRF-164, docs/features/seat-hold.md §6 '릴레이 프로세스와 조립의 첫 구현'): purchase DB(와 Saga·발권 실행기·결제 결과 기다림 표)가 있을 때만
   // 설정을 읽는다(DB 없이 뜨는 동작은 그대로다). 브로커 주소가 없으면 local·ci만 경고 한 줄로 끄고, 그 밖의 환경은 여기서 던진다(시작 실패, 듣기 전).
@@ -1004,6 +1055,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   sagaRunner?.start();
   ticketRunner?.start();
   ticketVoidRunner?.start();
+  compensationRunner?.start();
   paymentPuller?.start();
   paymentStatusWaiters?.start();
   // 구매 세션 정리 반복(유휴·최대 체류, BUILD_ORDER PRF-138). 만료 반복과 같이 켜고 끈다
@@ -1038,7 +1090,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       // 제어 gRPC 서버는 새 제어를 받지 않고 돌던 호출을 기다린다(ADR-0102의 우아한 종료)
       (controlServer?.close() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, '제어 gRPC 서버 닫기 실패')),
     ])
-      .then(() => Promise.all([admissionLoader?.stop(), sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
+      .then(() => Promise.all([admissionLoader?.stop(), sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), compensationRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
       .then(() => service.close())
       .finally(closeTelemetry)
       .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
@@ -1069,8 +1121,15 @@ export async function start(o: StartOptions): Promise<StartedService> {
         try {
           ticketIssuer?.close();
           ticketBreaker?.shutdown();
+          compensationFenceClient?.close();
         } catch (err) {
           service.logger.error({ err: errorSummary(err) }, 'ticket-svc 클라이언트 닫기 실패');
+        }
+        try {
+          compensationPaymentClient?.close();
+          compensationPaymentBreaker?.shutdown();
+        } catch (err) {
+          service.logger.error({ err: errorSummary(err) }, 'payment-svc 보상 취소 클라이언트 닫기 실패');
         }
         try {
           paymentPull?.close();

@@ -3,6 +3,8 @@
 import { uuidv7, type Clock } from '@peaket/platform';
 import type { TicketStore } from '../domain/ports.js';
 import {
+  type BlockTicketIssuanceInput,
+  type BlockTicketIssuanceResult,
   type CancelTicketOutcome,
   type CancelTicketsInput,
   type EntryRecord,
@@ -19,6 +21,7 @@ import {
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   newTicketKey,
+  normalizeBlockIssueInput,
   normalizeCancelInput,
   normalizeEntryRecordsInput,
   normalizeEventCancelInput,
@@ -77,6 +80,15 @@ export class TicketService {
   /** 요청자=결제자=보유자, 양도 요청 없음, 입장 전/후를 저장소 행 잠금 안에서 본다. */
   async cancel(input: CancelTicketsInput): Promise<readonly CancelTicketOutcome[]> {
     return this.deps.store.cancel(normalizeCancelInput(input));
+  }
+
+  /**
+   * 주문 단위 발권 막기(BAT-011, ticket.proto BlockTicketIssuance). 입력을 정규화한 뒤 저장소가 guard 행·티켓 행 잠금 안에서
+   * 이미 만든 티켓을 VOIDED로 바꾸고 입장 기록 수를 센다. 주문 ID로 멱등하다. @throws TicketInputError 소문자 UUID가 아님
+   */
+  async blockIssue(input: BlockTicketIssuanceInput): Promise<BlockTicketIssuanceResult> {
+    const n = normalizeBlockIssueInput({ ...input, nowMs: input.nowMs ?? this.deps.clock.now() });
+    return this.deps.store.blockIssue(n);
   }
 
   /** 부정 예매 운영자 취소(BAT-415 몫 F): 입력 검사 뒤 저장소가 행 잠금 안에서 표마다 가른다. @throws TicketInputError */

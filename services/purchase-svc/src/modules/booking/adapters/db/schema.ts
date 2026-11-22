@@ -384,3 +384,42 @@ export const ticketVoidJob = pgTable(
   },
   (t) => [index('ticket_void_job_next_attempt_idx').on(t.nextAttemptAt)],
 );
+
+/**
+ * 보상 세 걸음의 상태 표(0032, BAT-011, PRF-173, ADR-0354 결정 3, data.md §2 order_compensation).
+ * 회차 취소 확정 뒤 발권 대기(APPROVED) 주문마다 한 행이고, STARTED·FENCED가 보상 중이다.
+ * 결제 취소가 끝나면 같은 트랜잭션에서 주문 T20(APPROVED → COMPENSATED)과 status COMPENSATED를 쓴다. status 값·차례는 도메인 COMPENSATION_STATUSES와 같다
+ */
+export const orderCompensation = pgTable(
+  'order_compensation',
+  {
+    orderId: uuid('order_id')
+      .primaryKey()
+      .references(() => purchaseOrder.id),
+    status: text('status').notNull(),
+    // 막는 사유(order_cancellation.reason과 같은 글, 회차 취소는 EVENT_CANCELLED). ticket-svc BlockTicketIssuance에 그대로 싣는다
+    reason: text('reason').notNull(),
+    // 그 주문의 마지막 APPROVED 결제 ID(payment-svc 결제 원장). 알게 되면 채운다
+    paymentId: text('payment_id'),
+    startedAt: at('started_at').notNull(),
+    fencedAt: at('fenced_at'),
+    /** 보상 완료(결제 취소·T20) 시각 */
+    canceledAt: at('canceled_at'),
+    attempts: integer('attempts').notNull().default(0),
+    // 다음 시도 시각. 다시 보내지 않으면(끝남) 비운다
+    nextAttemptAt: at('next_attempt_at'),
+    // 실행기가 잡은 동안의 임대 끝(30초 [가정])
+    leaseUntil: at('lease_until'),
+    lastError: text('last_error'),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    // 다시 보낼 행(STARTED·FENCED)만 담는 부분 색인(§5.1). 끝난 행은 색인에 없다
+    index('order_compensation_next_attempt_idx')
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} in ('STARTED', 'FENCED')`),
+    check('order_compensation_status_check', sql`${t.status} in ('STARTED', 'FENCED', 'COMPENSATED', 'FAILED')`),
+    check('order_compensation_attempts_check', sql`${t.attempts} >= 0`),
+    check('order_compensation_reason_check', sql`length(${t.reason}) > 0`),
+  ],
+);

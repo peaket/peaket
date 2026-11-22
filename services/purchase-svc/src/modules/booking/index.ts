@@ -31,7 +31,7 @@ export {
   type OrderExpiryView,
 } from './domain/order-expiry.js';
 export { DrizzleOrderWrites, ORDER_HOLD_KEY, type DrizzleOrderWritesOptions } from './adapters/db/drizzle-order-writes.js';
-export { orderCancellation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from './adapters/db/schema.js';
+export { orderCancellation, orderCompensation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from './adapters/db/schema.js';
 export {
   DrizzlePaymentResults,
   PaymentResultRollback,
@@ -161,6 +161,69 @@ export {
 } from './adapters/grpc-payment-confirm.js';
 export { ORDER_SAGA_ACTOR, OrderSagaRunner, type OrderSagaDeps, type SagaRunResult, type SagaTimer } from './application/order-saga.js';
 export { DrizzleTicketIssue, ticketIssueDatabaseOptions, type DrizzleTicketIssueOptions } from './adapters/db/drizzle-ticket-issue.js';
+export { DrizzleCompensation, type DrizzleCompensationOptions } from './adapters/db/drizzle-compensation.js';
+export {
+  CancelCompensation,
+  CompensationLoop,
+  COMPENSATION_LOOP_TICK_MS,
+  CompensationRunner,
+  EventCompensationQueue,
+  FenceCompensation,
+  StartCompensation,
+  type CancelCompensationDeps,
+  type CompensationLoopDeps,
+  type CompensationRunnerDeps,
+  type CompensationTickResult,
+  type CompensationTimer,
+  type FenceCompensationAnswer,
+  type FenceCompensationDeps,
+  type StartCompensationDeps,
+  type StartCompensationInput,
+} from './application/compensation.js';
+export {
+  COMPENSATION_CANCEL_DEADLINE_MS,
+  COMPENSATION_CANDIDATE_BATCH,
+  COMPENSATION_CLAIM_LIMIT,
+  COMPENSATION_FAILED_CODES,
+  COMPENSATION_FENCE_DEADLINE_MS,
+  COMPENSATION_GAUGE_INTERVAL_MS,
+  COMPENSATION_JITTER_RATIO,
+  COMPENSATION_LEASE_MS,
+  COMPENSATION_MAX_ATTEMPTS,
+  COMPENSATION_OPEN_STATUSES,
+  COMPENSATION_POLL_INTERVAL_MS,
+  COMPENSATION_REASON,
+  COMPENSATION_RETRY_BASE_MS,
+  COMPENSATION_RETRY_CODES,
+  COMPENSATION_RETRY_FACTOR,
+  COMPENSATION_RETRY_MAX_MS,
+  COMPENSATION_STATUSES,
+  compensationBackoffMs,
+  compensationCancellationId,
+  compensationFailureKind,
+  compensationGrpcCodeOf,
+  compensationPaymentIdOf,
+  compensationRetryDelayMs,
+  noopCompensationLog,
+  noopCompensationSignals,
+  type CompensationCompleteWriteResult,
+  type CompensationJobs,
+  type CompensationLog,
+  type CompensationPaymentAnswer,
+  type CompensationPaymentAttempt,
+  type CompensationSignals,
+  type CompensationStatus,
+  type OrderCompensation,
+  type PaymentCancelAnswerName,
+  type PaymentCompensator,
+  type StartCompensationWriteResult,
+  type TicketFencer,
+  TicketFenceCallError,
+} from './domain/compensation.js';
+export { GrpcTicketFence, stubTicketFence, ticketFenceFromEnv, type GrpcTicketFenceOptions } from './adapters/grpc-ticket-fence.js';
+export { GrpcPaymentCompensator, PAYMENT_COMPENSATION_DEPENDENCY, PAYMENT_COMPENSATION_GRPC_ADDR_ENV, paymentCompensatorFromEnv, stubPaymentCompensator, type GrpcPaymentCompensatorOptions } from './adapters/grpc-payment-cancel.js';
+export { PromCompensationSignals } from './adapters/prom-compensation-signals.js';
+export { LoggerCompensationLog } from './adapters/compensation-log.js';
 export { DrizzleTicketVoid, type DrizzleTicketVoidOptions } from './adapters/db/drizzle-ticket-void.js';
 export { PromTicketVoidSignals } from './adapters/prom-ticket-void-signals.js';
 export { TicketVoidRunner, type TicketVoidDeps } from './application/ticket-void.js';

@@ -2,6 +2,8 @@
 // 같은 주문·세대 발권의 경합을 한 맵으로 모으고, 취소는 티켓별로 한 번만 기록한다.
 import type { TicketStore, IssueStoreInput } from '../domain/ports.js';
 import {
+  type BlockTicketIssuanceInput,
+  type BlockTicketIssuanceResult,
   type CancelTicketOutcome,
   type CancelTicketsInput,
   type EntryRecord,
@@ -22,6 +24,7 @@ import {
   type TicketStatus,
   TicketConflictError,
   TicketInputError,
+  TicketIssueBlockedError,
   walletCursorOf,
   walletTicketOf,
 } from '../domain/ticket.js';
@@ -54,6 +57,11 @@ export class MemoryTicketStore implements TicketStore {
   readonly scans = new Map<string, { direction: 'IN' | 'OUT'; result: 'PASS' | 'REJECT'; atMs: number }[]>();
   /** (cancellation_id, ticket_id) → 회차 취소 결과(ticket_cancellation의 EVENT_CANCELED 대역). 끝낸 표만 남긴다 */
   readonly eventCancellations = new Map<string, EventCancelOutcome>();
+  /**
+   * 주문별 발권 막기 잠금 자리(ticket_issue_guard의 대역, BAT-011). blockedAtMs가 있으면 막힌 주문이고,
+   * 없으면 발권이 먼저 만든 잠금 자리다
+   */
+  readonly guards = new Map<string, { blockedAtMs?: number; reason?: string }>();
 
   /**
    * 잠금 뒤에 발권한 표도 잠그는 조회(부정 예매 양도 잠금, ADR-0171). MemoryTransferStore가 꽂는다.
@@ -62,6 +70,10 @@ export class MemoryTicketStore implements TicketStore {
   fraudLockLookup?: (eventId: string, payerAccountId: string, nowMs: number) => { readonly caseId: string; readonly version: number } | undefined;
 
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
+    // 발권 막기와 같은 주문 잠금(운영은 ticket_issue_guard 행). 막힌 주문이면 FAILED_PRECONDITION과 같은 오류다
+    const held = this.guards.get(input.orderId);
+    if (held?.blockedAtMs !== undefined) throw new TicketIssueBlockedError();
+    if (!held) this.guards.set(input.orderId, {});
     const key = issueKey(input.orderId, input.issueGeneration);
     const existing = this.issues.get(key);
     if (existing) {
@@ -118,6 +130,27 @@ export class MemoryTicketStore implements TicketStore {
     const result = started ? 'REFUND_AFTER_CLOSE' : 'REFUND_NOW';
     this.fanCancels.set(t.ticketId, { cancellationId: input.cancellationId, result, cancelledAtMs: input.nowMs, ...(input.reason !== undefined ? { reason: input.reason } : {}) });
     return result;
+  }
+
+  /**
+   * 주문 단위 발권 막기(BAT-011, ticket_issue_guard의 대역). 주문 ID로 멱등하고, 아직 VOIDED·REFUNDED가 아닌 티켓을 VOIDED로 바꾼다.
+   * alreadyEntered는 그 주문의 티켓 가운데 입장 기록(IN·PASS)이 있는 수다(표마다 하나)
+   */
+  async blockIssue(input: BlockTicketIssuanceInput): Promise<BlockTicketIssuanceResult> {
+    const held = this.guards.get(input.orderId);
+    if (!held) this.guards.set(input.orderId, { blockedAtMs: input.nowMs, ...(input.reason !== undefined ? { reason: input.reason } : {}) });
+    else if (held.blockedAtMs === undefined) {
+      held.blockedAtMs = input.nowMs;
+      if (input.reason !== undefined) held.reason = input.reason;
+    }
+    let voided = 0;
+    for (const t of [...this.tickets.values()].filter((x) => x.orderId === input.orderId).sort((a, b) => a.ticketId.localeCompare(b.ticketId))) {
+      if (t.status === 'VOIDED' || t.status === 'REFUNDED') continue;
+      this.#put({ ...t, status: 'VOIDED', keyRevokedAtMs: input.nowMs, version: t.version + 1 });
+      voided += 1;
+    }
+    const alreadyEntered = [...this.tickets.values()].filter((t) => t.orderId === input.orderId && this.entries.has(t.ticketId)).length;
+    return { voided, alreadyEntered };
   }
 
   /** 그 표를 끝낸 취소 기록이 팬 취소(사유 USER)일 때만 첫 칸(다시 보기 R1) */

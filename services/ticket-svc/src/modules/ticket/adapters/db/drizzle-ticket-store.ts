@@ -4,6 +4,7 @@ import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { IssueStoreInput, TicketStore } from '../../domain/ports.js';
 import {
+  type BlockTicketIssuanceResult,
   type CancelTicketOutcome,
   type CancelTicketsInput,
   type EntryRecord,
@@ -14,6 +15,7 @@ import {
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
+  type NormalizedBlockTicketIssuanceInput,
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   type OperatorCancelResult,
@@ -24,11 +26,12 @@ import {
   type TicketRecord,
   TicketConflictError,
   TicketInputError,
+  TicketIssueBlockedError,
   type TicketStatus,
   walletCursorOf,
   walletTicketOf,
 } from '../../domain/ticket.js';
-import { ticket, ticketCancellation, ticketIssue, ticketOperatorCancellation, fraudTransferLock } from './schema.js';
+import { ticket, ticketCancellation, ticketIssue, ticketIssueGuard, ticketOperatorCancellation, fraudTransferLock } from './schema.js';
 
 /** 발권·취소와 같은 트랜잭션에 스캐너 변경 기록을 넣는 포트(offline-gate §6.3) */
 export interface ScannerChangeWriter {
@@ -104,6 +107,15 @@ export class DrizzleTicketStore implements TicketStore {
 
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
     return this.o.database.transaction(async (tx) => {
+      // 발권 막기와 같은 주문 잠금(ticket_issue_guard 행). 행이 없으면 잠금 자리를 먼저 만든다(BAT-011, ADR-0355 결정 2)
+      await tx.insert(ticketIssueGuard).values({ orderId: input.orderId }).onConflictDoNothing({ target: ticketIssueGuard.orderId });
+      const [guard] = await tx
+        .select({ blockedAt: ticketIssueGuard.blockedAt })
+        .from(ticketIssueGuard)
+        .where(eq(ticketIssueGuard.orderId, input.orderId))
+        .limit(1)
+        .for('update');
+      if (guard?.blockedAt) throw new TicketIssueBlockedError();
       const inserted = await tx
         .insert(ticketIssue)
         .values({
@@ -152,6 +164,59 @@ export class DrizzleTicketStore implements TicketStore {
         }
       }
       return { tickets: candidates, replayed: false };
+    });
+  }
+
+  /**
+   * 주문 단위 발권 막기(BAT-011 HOT-161, ticket.proto BlockTicketIssuance, ADR-0355 결정 2, docs/data.md ticket_issue_guard).
+   * 한 트랜잭션에서 guard 행을 잠그고(발권과 같은 차례), 그 주문의 티켓 행을 ID 차례로 잠근 뒤 아직 VOIDED·REFUNDED가 아닌 것을 VOIDED로 바꾸고
+   * 키를 폐기한다(스캐너 변경분 TICKET_STATUS). 이미 입장 기록(IN·PASS)이 있는 티켓 수를 함께 돌려준다.
+   * 주문 ID로 멱등하다: 다시 부르면 새로 무효로 한 수가 0이고 alreadyEntered는 같다. 뒤에 오는 IssueTickets는 guard 행 때문에 FAILED_PRECONDITION이다
+   */
+  async blockIssue(input: NormalizedBlockTicketIssuanceInput): Promise<BlockTicketIssuanceResult> {
+    const now = new Date(input.nowMs);
+    return this.o.database.transaction(async (tx) => {
+      // ① guard 행을 만들거나 잠근다(issue와 같은 잠금). 새 행은 곧바로 막힌 표시를 단다
+      await tx
+        .insert(ticketIssueGuard)
+        .values({ orderId: input.orderId, blockedAt: now, reason: input.reason ?? null })
+        .onConflictDoNothing({ target: ticketIssueGuard.orderId });
+      const [guard] = await tx
+        .select({ blockedAt: ticketIssueGuard.blockedAt })
+        .from(ticketIssueGuard)
+        .where(eq(ticketIssueGuard.orderId, input.orderId))
+        .limit(1)
+        .for('update');
+      if (!guard) throw new Error('발권 막기 guard 행을 잠그지 못했다(코드 오류)');
+      // ② 앞선 발권이 만든 잠금 자리(blocked_at 빔)면 지금 막힌 것으로 바꾼다. 이미 막혔으면 처음 사유·시각을 그대로 둔다(멱등)
+      if (!guard.blockedAt) {
+        await tx.update(ticketIssueGuard).set({ blockedAt: now, reason: input.reason ?? null }).where(eq(ticketIssueGuard.orderId, input.orderId));
+      }
+      // ③ 그 주문의 티켓을 잠그고 끝나지 않은 것만 무효로 한다(행 잠금 차례는 티켓 ID 차례라 다른 취소·무효와 교착하지 않는다)
+      const rows = await tx.select().from(ticket).where(eq(ticket.orderId, input.orderId)).orderBy(asc(ticket.id)).for('update');
+      let voided = 0;
+      for (const row of rows) {
+        const status = statusOf(row.status);
+        if (status === 'VOIDED' || status === 'REFUNDED') continue;
+        const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, input.nowMs);
+        await tx
+          .update(ticket)
+          .set({ status: 'VOIDED', keyRevokedAt: now, version: row.version + 1 })
+          .where(eq(ticket.id, row.id));
+        if (this.o.changes) {
+          await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId: row.id, status: 'VOIDED', version: row.version + 1 });
+          if (revokedKeyId) await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId: row.id, keyId: Buffer.from(revokedKeyId).toString('base64url') });
+        }
+        voided += 1;
+      }
+      // ④ 입장 기록이 있는 티켓 수(다시 불러도 같다). scan_event의 색인 앞 칸(event_id)을 쓰도록 티켓과 event_id로 잇는다(RV-08)
+      const entered = await tx.execute(sql`
+        select count(distinct s.ticket_id)::int as n
+        from ticket t
+        join scan_event s on s.ticket_id = t.id and s.event_id = t.event_id
+        where t.order_id = ${input.orderId}::uuid and s.direction = 'IN' and s.result = 'PASS'`);
+      const alreadyEntered = Number((entered.rows[0] as { n: number | string } | undefined)?.n ?? 0);
+      return { voided, alreadyEntered };
     });
   }
 

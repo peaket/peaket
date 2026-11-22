@@ -225,6 +225,13 @@
       "when": 1795124914527,
       "tag": "0031_refund_account_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795340153126,
+      "tag": "0032_order_compensation",
+      "breakpoints": true
     }
   ]
 }

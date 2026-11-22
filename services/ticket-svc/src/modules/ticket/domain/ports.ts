@@ -1,6 +1,7 @@
 // 티켓 저장소 포트(BUILD_ORDER HOT-160). 메모리 구현은 단위 시험, Drizzle 구현은 운영 DB가 쓴다.
 import type { DeviceKeyReason } from './device-key.js';
 import type {
+  BlockTicketIssuanceResult,
   CancelTicketOutcome,
   CancelTicketsInput,
   EntryRecord,
@@ -11,6 +12,7 @@ import type {
   IssueTicketsResult,
   ListTicketsInput,
   ListTicketsResult,
+  NormalizedBlockTicketIssuanceInput,
   OperatorCancelInput,
   OperatorCancelOutcome,
   ReviewEligibilityTicket,
@@ -32,6 +34,13 @@ export interface TicketStore {
    * @param candidates 새로 만들 때 저장할 티켓(키 원문 포함)
    */
   issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult>;
+
+  /**
+   * 주문 단위 발권 막기(BlockTicketIssuance, BAT-011). 한 트랜잭션에서 guard 행을 잠그고, 그 주문의 티켓을 행 잠금으로 훑어
+   * 아직 VOIDED·REFUNDED가 아닌 것을 VOIDED로 바꾸고 키를 폐기한다(스캐너 변경분 TICKET_STATUS). 주문 ID로 멱등하다.
+   * 같은 주문의 issue도 먼저 guard 행을 잠그므로 둘은 한 차례로 갈린다
+   */
+  blockIssue(input: NormalizedBlockTicketIssuanceInput): Promise<BlockTicketIssuanceResult>;
 
   /** 티켓마다 행 잠금 안에서 조건을 보고 취소한다. cancellation_id·ticket_id 단위로 멱등하다. */
   cancel(input: CancelTicketsInput): Promise<readonly CancelTicketOutcome[]>;

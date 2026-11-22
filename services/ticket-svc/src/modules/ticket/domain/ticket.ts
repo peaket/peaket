@@ -56,6 +56,44 @@ export interface IssueTicketsResult {
   readonly replayed: boolean;
 }
 
+// ---- 주문 단위 발권 막기(ticket.proto BlockTicketIssuance, BAT-011 HOT-161·PRF-173, ADR-0354 결정 2) ----
+
+/** 발권을 막는 사유의 길이 상한 200자 [가정](ticket.proto BlockTicketIssuanceRequest.reason) */
+export const MAX_BLOCK_REASON_LENGTH = 200;
+
+export interface BlockTicketIssuanceInput {
+  /** 막을 주문(소문자 UUID) */
+  readonly orderId: string;
+  /** 막는 사유(감사·로그용). 비워도 된다 */
+  readonly reason?: string;
+  /** 무효로 하는 시각(주입한 시계, 유닉스 밀리초). 없으면 gRPC 처리기가 서버 시계를 넣는다 */
+  readonly nowMs?: number;
+}
+
+/** 검사를 지나 시각이 정해진 발권 막기 입력(저장소가 받는다) */
+export interface NormalizedBlockTicketIssuanceInput extends BlockTicketIssuanceInput {
+  readonly nowMs: number;
+}
+
+export interface BlockTicketIssuanceResult {
+  /** 이번 호출로 무효가 된 티켓 수. 다시 부르면 0이다 */
+  readonly voided: number;
+  /** 그 주문의 티켓 가운데 입장 기록(IN·PASS)이 있는 수. 다시 불러도 같은 값이다 */
+  readonly alreadyEntered: number;
+}
+
+/**
+ * 주문의 발권을 막는다. 소문자 UUID·사유 200자 이하만 받는다(대문자 UUID는 고쳐 받지 않고 거절한다).
+ * @throws TicketInputError orderId가 소문자 UUID가 아님, 사유가 너무 김, 시각이 올바르지 않음
+ */
+export function normalizeBlockIssueInput(i: BlockTicketIssuanceInput): NormalizedBlockTicketIssuanceInput {
+  const orderId = requireLowerUuid('orderId', i.orderId);
+  if (typeof i.nowMs !== 'number' || !Number.isFinite(i.nowMs) || i.nowMs < 0) throw new TicketInputError('nowMs가 올바르지 않다');
+  if (i.reason !== undefined && (typeof i.reason !== 'string' || i.reason.length > MAX_BLOCK_REASON_LENGTH)) throw new TicketInputError(`reason은 ${MAX_BLOCK_REASON_LENGTH}자 이하여야 한다`);
+  const reason = i.reason?.trim();
+  return { orderId, nowMs: i.nowMs, ...(reason ? { reason } : {}) };
+}
+
 export type CancelTicketResult = 'REFUND_NOW' | 'REFUND_AFTER_CLOSE' | 'NOT_PAYER_HOLDER' | 'TRANSFER_PENDING' | 'EVENT_STARTED' | 'ALREADY_CANCELLED';
 
 export interface CancelTicketsInput {
@@ -332,6 +370,17 @@ export class TicketConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'TicketConflictError';
+  }
+}
+
+/**
+ * 그 주문의 발권이 막혔다(BlockTicketIssuance가 남긴 guard 행). gRPC FAILED_PRECONDITION로 바꾼다.
+ * 글에는 내부 값(주문·티켓·사유)을 싣지 않는다
+ */
+export class TicketIssueBlockedError extends Error {
+  constructor(message = '이 주문의 발권은 막혔다') {
+    super(message);
+    this.name = 'TicketIssueBlockedError';
   }
 }
 

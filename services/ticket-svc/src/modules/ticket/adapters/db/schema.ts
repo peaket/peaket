@@ -21,6 +21,18 @@ export const ticketIssue = pgTable(
   (t) => [primaryKey({ columns: [t.orderId, t.issueGeneration] })],
 );
 
+/**
+ * 주문 단위 발권 막기(BAT-011, HOT-161·PRF-173, 0010, docs/data.md ticket_issue_guard).
+ * IssueTickets와 BlockTicketIssuance가 이 행을 먼저 잠가 같은 주문의 발권과 막기를 한 차례로 가른다.
+ * blocked_at이 비어 있으면 아직 막지 않은 잠금 자리이고(발권이 먼저 만든다), 값이 있으면 막힌 주문이다
+ */
+export const ticketIssueGuard = pgTable('ticket_issue_guard', {
+  orderId: uuid('order_id').primaryKey(),
+  blockedAt: at('blocked_at'),
+  /** 막은 사유(감사·로그용). 없을 수 있다 */
+  reason: text('reason'),
+});
+
 /** 티켓. docs/data.md `ticket`의 최소 칸만 둔다. 상태는 이 구현이 쓰는 네 값만 CHECK로 막는다. */
 export const ticket = pgTable(
   'ticket',
