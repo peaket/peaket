@@ -50,8 +50,9 @@
    | ticket-svc | core-svc | 판매 설정 사본(`PEAKET_CORE_HTTP_URL`) |
    | ticket-svc | ops-svc | 운영 경보 `/internal/v1/ops-alerts`(`PEAKET_OPS_HTTP_URL`) |
    | 팬 웹 앱 서버(web) | identity-svc | 팬 공개키 묶음 `/internal/jwks/fan.json`(`PEAKET_FAN_TOKEN_JWKS_URL`) |
+   | identity-svc | core-svc | 판매 설정 사본 `/internal/v1/events/{eventId}/sale-config`(파트너 현장 스태프 초대의 회차 소유 확인, 2026-11-22 BAT-450B, ADR-0353) |
 
-   보충(2026-11-22, W12-mesh): purchase-svc → payment-svc 줄을 더해 표는 15쌍이다. 근거는 docs/features/transfer-refund.md §5 '서킷 연결'과 docs/api/guidelines.md §8.1의 'purchase-svc 내부 서킷 상태 읽기' 줄이고(BAT-425 R-716), 원천에는 그때 이미 들어가 있었다. 시험의 정본 표만 따라오지 못했다(계획 docs/review/plans/W12-mesh.md).
+   보충(2026-11-22, W12-mesh): purchase-svc → payment-svc 줄을 더해 표는 15쌍이다. 보충(2026-11-22, BAT-450B): identity-svc → core-svc 줄을 더해 16쌍이다(ADR-0353, `deploy/platform/mesh/port-allow.yaml`의 core-svc REST callers에도 identity-svc를 더했다). 근거는 docs/features/transfer-refund.md §5 '서킷 연결'과 docs/api/guidelines.md §8.1의 'purchase-svc 내부 서킷 상태 읽기' 줄이고(BAT-425 R-716), 원천에는 그때 이미 들어가 있었다. 시험의 정본 표만 따라오지 못했다(계획 docs/review/plans/W12-mesh.md).
 
    trust-svc의 REST 포트는 gw-fan만 받는다(허니팟 기록 경로 하나, docs/architecture.md §5 '포트별 허용 표'). 이 경로의 라우트는 공개 경로를 설정으로 넣으므로 저장소의 라우트에 없다(docs/infra.md §4.1 '허니팟 경로의 첫 구현'). 그래서 원천에 예외 한 줄로 적는다.
 10. **메시 바탕 매니페스트(손으로 쓴다, `deploy/platform/mesh/`).**

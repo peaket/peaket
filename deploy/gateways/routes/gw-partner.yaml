@@ -146,6 +146,16 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/partner/team-accounts
+        # 현장 스태프 초대·명단·해제·재발송: BAT-450B가 core-svc에서 identity-svc로 옮겼다(ADR-0353, identity §6.1)
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/staff
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/staff-invitations
+        - path:
+            type: PathPrefix
+            value: /v1/partner/staff
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -265,12 +275,6 @@ spec:
             value: /v1/partner/events/{eventId}/settlement-exports
         - path:
             type: PathPrefix
-            value: /v1/partner/events/{eventId}/staff
-        - path:
-            type: PathPrefix
-            value: /v1/partner/events/{eventId}/staff-invitations
-        - path:
-            type: PathPrefix
             value: /v1/partner/artists
         - path:
             type: PathPrefix
@@ -305,9 +309,6 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/partner/seller-profile
-        - path:
-            type: PathPrefix
-            value: /v1/partner/staff
         - path:
             type: PathPrefix
             value: /v1/partner/todo-summary

@@ -1,6 +1,7 @@
 // 받는 층: purchase-svc가 회차 판매 설정 사본(event_sale_config)을 읽는 내부 HTTP 경로(BAT-051, HOT-252).
 // purchase-svc가 core DB에 직접 접속하지 않게 core-svc가 대신 읽는다. 클러스터 안에서만 닿는 경로이고(게이트웨이 HTTPRoute에 없다),
 // 서비스 사이 토큰(InternalTokenGuard)으로 한 번 더 좁힌다. 설정이 없으면 404 not-found, 응답은 항상 no-store다.
+// identity-svc도 BAT-450B(ADR-0353)부터 파트너 현장 스태프 초대의 회차 소유·유효 시간 확인에 sale-config를 읽는다(promoterId·startsAtMs·endsAtMs·entryOpensAtMs).
 // 끝난 온세일 회차 목록 GET /internal/v1/events/onsale-closed(BAT-360, ADR-0348 결정 9, 감독 결정 2026-11-22): ops-svc 게시 작업 audit-anchor만 부르고,
 // 판매 시작 + 60분이 [closedFrom, closedTo)에 든 회차의 ID와 마감 시각만 준다(개인정보 없음). 구간은 하루 이하, 500행 [가정]을 넘으면 400(구간을 좁혀 다시).
 import { type ExecutionContext, Controller, Get, Inject, Injectable, Optional, Param, Query, Res, UnauthorizedException, UseGuards } from '@nestjs/common';

@@ -3768,15 +3768,40 @@ export const useCreatePartnerSellerProfileChangeRequest = <TError = ErrorType<Pr
   status: 201
 }
 
+export type createPartnerEventStaffInvitationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerEventStaffInvitationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerEventStaffInvitationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerEventStaffInvitationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createPartnerEventStaffInvitationResponse422 = {
   data: ProblemResponse
   status: 422
 }
 
+export type createPartnerEventStaffInvitationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createPartnerEventStaffInvitationResponseSuccess = (createPartnerEventStaffInvitationResponse201) & {
   headers: Headers;
 };
-export type createPartnerEventStaffInvitationResponseError = (createPartnerEventStaffInvitationResponse422) & {
+export type createPartnerEventStaffInvitationResponseError = (createPartnerEventStaffInvitationResponse400 | createPartnerEventStaffInvitationResponse401 | createPartnerEventStaffInvitationResponse403 | createPartnerEventStaffInvitationResponse404 | createPartnerEventStaffInvitationResponse422 | createPartnerEventStaffInvitationResponse503) & {
   headers: Headers;
 };
 
@@ -3789,7 +3814,7 @@ export const getCreatePartnerEventStaffInvitationUrl = (eventId: string,) => {
 }
 
 /**
- * FR-046, POL-031, ADR-0051. 초대마다 32바이트 토큰을 만들고 해시만 저장한다. 링크는 토큰을 URL 조각(#token=)에 담는다
+ * FR-046, POL-031, ADR-0051, ADR-0353. 한 번에 1~200명을 초대한다. 초대마다 32바이트 토큰을 만들고 SHA-256만 저장하며, 링크는 토큰을 URL 조각(#token=)에만 담는다(응답·로그에 토큰 없음). 회차 소유는 core-svc 내부 판매 설정으로 확인하고(판매 승인 전·없는 회차·다른 파트너 회차는 같은 404), 테넌트는 세션 값만 쓴다. 같은 회차·같은 이메일의 INVITED는 422다(재발송은 /v1/partner/staff/{assignmentId}/invitation). 초대 메일 대행사가 없으면 503 provider-down이고 행을 만들지 않는다
  * @summary 현장 스태프 초대(이메일 여러 개, 최대 200명 [가정], 역할 gate_staff·gate_lead, 회차 단위)
  */
 export const createPartnerEventStaffInvitation = async (eventId: string,
@@ -3824,7 +3849,7 @@ return orvalFetch<createPartnerEventStaffInvitationResponseSuccess>(getCreatePar
 
 export const getCreatePartnerEventStaffInvitationMutationKey = () => ['createPartnerEventStaffInvitation'] as const;
 
-export const getCreatePartnerEventStaffInvitationMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreatePartnerEventStaffInvitationMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventStaffInvitation>>, TError,CreatePartnerEventStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventStaffInvitation>>, TError,CreatePartnerEventStaffInvitationMutationVariables, TContext> => {
 
@@ -3853,13 +3878,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerEventStaffInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerEventStaffInvitation>>>
     export type CreatePartnerEventStaffInvitationMutationBody = BodyType<CreatePartnerEventStaffInvitationBody> | undefined
-    export type CreatePartnerEventStaffInvitationMutationError = ErrorType<ProblemResponse>
+    export type CreatePartnerEventStaffInvitationMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
     export type CreatePartnerEventStaffInvitationMutationVariables = {eventId: string;data?: BodyType<CreatePartnerEventStaffInvitationBody>}
 
     /**
  * @summary 현장 스태프 초대(이메일 여러 개, 최대 200명 [가정], 역할 gate_staff·gate_lead, 회차 단위)
  */
-export const useCreatePartnerEventStaffInvitation = <TError = ErrorType<ProblemResponse>,
+export const useCreatePartnerEventStaffInvitation = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerEventStaffInvitation>>, TError,CreatePartnerEventStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerEventStaffInvitation>>,
@@ -3874,10 +3899,37 @@ export const useCreatePartnerEventStaffInvitation = <TError = ErrorType<ProblemR
   status: 200
 }
 
+export type listPartnerEventStaffResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listPartnerEventStaffResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listPartnerEventStaffResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listPartnerEventStaffResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type listPartnerEventStaffResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type listPartnerEventStaffResponseSuccess = (listPartnerEventStaffResponse200) & {
   headers: Headers;
 };
-;
+export type listPartnerEventStaffResponseError = (listPartnerEventStaffResponse400 | listPartnerEventStaffResponse401 | listPartnerEventStaffResponse403 | listPartnerEventStaffResponse404 | listPartnerEventStaffResponse503) & {
+  headers: Headers;
+};
 
 export const getListPartnerEventStaffUrl = (eventId: string,
     params?: ListPartnerEventStaffParams,) => {
@@ -3896,8 +3948,8 @@ export const getListPartnerEventStaffUrl = (eventId: string,
 }
 
 /**
- * FR-046, SCR-037. 이메일·계정 ID는 넣지 않는다
- * @summary 현장 스태프 명단(닉네임, 역할, 수락 여부·만료, 유효 시간, 스캔·예외 통과 건수)
+ * FR-046, SCR-037. 이메일·계정 ID는 넣지 않는다. 닉네임은 수락한 계정만 있고 초대 중에는 없다. 스캔·예외 통과 건수는 ticket 데이터라 이 경로가 싣지 않는다(BAT-450B). 회차 소유는 core-svc 내부 판매 설정으로 확인한다(ADR-0353)
+ * @summary 현장 스태프 명단(닉네임, 역할, 수락 여부·만료, 유효 시간)
  */
 export const listPartnerEventStaff = async (eventId: string,
     params?: ListPartnerEventStaffParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listPartnerEventStaffResponseSuccess> => {
@@ -3923,7 +3975,7 @@ export const getListPartnerEventStaffQueryKey = (eventId: string,
     }
 
 
-export const getListPartnerEventStaffQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<unknown>>(eventId: string,
+export const getListPartnerEventStaffQueryOptions = <TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>>(eventId: string,
     params?: ListPartnerEventStaffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventStaff>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
@@ -3943,10 +3995,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListPartnerEventStaffQueryResult = NonNullable<Awaited<ReturnType<typeof listPartnerEventStaff>>>
-export type ListPartnerEventStaffQueryError = ErrorType<unknown>
+export type ListPartnerEventStaffQueryError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
 
 
-export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<unknown>>(
+export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params: undefined |  ListPartnerEventStaffParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventStaff>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -3957,7 +4009,7 @@ export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listP
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<unknown>>(
+export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params?: ListPartnerEventStaffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventStaff>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -3968,16 +4020,16 @@ export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listP
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<unknown>>(
+export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params?: ListPartnerEventStaffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventStaff>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary 현장 스태프 명단(닉네임, 역할, 수락 여부·만료, 유효 시간, 스캔·예외 통과 건수)
+ * @summary 현장 스태프 명단(닉네임, 역할, 수락 여부·만료, 유효 시간)
  */
 
-export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<unknown>>(
+export function useListPartnerEventStaff<TData = Awaited<ReturnType<typeof listPartnerEventStaff>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>>(
  eventId: string,
     params?: ListPartnerEventStaffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPartnerEventStaff>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
@@ -4000,10 +4052,32 @@ export type deletePartnerStaffResponse204 = {
   status: 204
 }
 
+export type deletePartnerStaffResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deletePartnerStaffResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deletePartnerStaffResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type deletePartnerStaffResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type deletePartnerStaffResponseSuccess = (deletePartnerStaffResponse204) & {
   headers: Headers;
 };
-;
+export type deletePartnerStaffResponseError = (deletePartnerStaffResponse401 | deletePartnerStaffResponse403 | deletePartnerStaffResponse404 | deletePartnerStaffResponse503) & {
+  headers: Headers;
+};
 
 export const getDeletePartnerStaffUrl = (assignmentId: string,) => {
 
@@ -4014,7 +4088,7 @@ export const getDeletePartnerStaffUrl = (assignmentId: string,) => {
 }
 
 /**
- * FR-046, POL-031, ADR-0051
+ * FR-046, POL-031, ADR-0051. 배정을 REVOKED로 끝내고 초대 이메일·토큰을 파기하며 살아 있는 스캐너 세션을 종료한다(control.sessions-terminated). 배정의 회차 판매자를 다시 대조하고, 없는 배정과 다른 테넌트 배정은 같은 404다. 이미 끝난 배정은 204다(멱등)
  * @summary 현장 스태프 해제(그 스캐너의 다음 요청부터 거부, 다음 변경분에서 로그아웃)
  */
 export const deletePartnerStaff = async (assignmentId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deletePartnerStaffResponseSuccess> => {
@@ -4034,7 +4108,7 @@ export const deletePartnerStaff = async (assignmentId: string, options?: Paramet
 
 export const getDeletePartnerStaffMutationKey = () => ['deletePartnerStaff'] as const;
 
-export const getDeletePartnerStaffMutationOptions = <TError = ErrorType<unknown>,
+export const getDeletePartnerStaffMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerStaff>>, TError,DeletePartnerStaffMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deletePartnerStaff>>, TError,DeletePartnerStaffMutationVariables, TContext> => {
 
@@ -4063,13 +4137,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeletePartnerStaffMutationResult = NonNullable<Awaited<ReturnType<typeof deletePartnerStaff>>>
 
-    export type DeletePartnerStaffMutationError = ErrorType<unknown>
+    export type DeletePartnerStaffMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
     export type DeletePartnerStaffMutationVariables = {assignmentId: string}
 
     /**
  * @summary 현장 스태프 해제(그 스캐너의 다음 요청부터 거부, 다음 변경분에서 로그아웃)
  */
-export const useDeletePartnerStaff = <TError = ErrorType<unknown>,
+export const useDeletePartnerStaff = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerStaff>>, TError,DeletePartnerStaffMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deletePartnerStaff>>,
@@ -4084,15 +4158,35 @@ export const useDeletePartnerStaff = <TError = ErrorType<unknown>,
   status: 200
 }
 
+export type createPartnerStaffInvitationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerStaffInvitationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerStaffInvitationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type createPartnerStaffInvitationResponse409 = {
   data: ProblemResponse
   status: 409
 }
 
+export type createPartnerStaffInvitationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createPartnerStaffInvitationResponseSuccess = (createPartnerStaffInvitationResponse200) & {
   headers: Headers;
 };
-export type createPartnerStaffInvitationResponseError = (createPartnerStaffInvitationResponse409) & {
+export type createPartnerStaffInvitationResponseError = (createPartnerStaffInvitationResponse401 | createPartnerStaffInvitationResponse403 | createPartnerStaffInvitationResponse404 | createPartnerStaffInvitationResponse409 | createPartnerStaffInvitationResponse503) & {
   headers: Headers;
 };
 
@@ -4105,7 +4199,7 @@ export const getCreatePartnerStaffInvitationUrl = (assignmentId: string,) => {
 }
 
 /**
- * FR-046, ADR-0051. 배정의 초대를 새로 만든다(POST, 보낼 때마다 새 토큰). 배정 ID만으로 찾고 서버가 그 배정이 요청한 파트너 소속인지 확인한다(추천 적용 2026-10-21, ADR-0081)
+ * FR-046, ADR-0051, ADR-0353. INVITED 배정의 초대를 새로 만든다(보낼 때마다 새 32바이트 토큰·새 24시간). 옛 토큰은 즉시 410이 된다. 배정 ID만으로 찾고 서버가 그 배정의 회차 판매자를 다시 대조한다(다른 테넌트·없는 배정은 같은 404). 이미 수락했거나 끝난 배정은 409다
  * @summary 초대 재발송(새 토큰, 옛 토큰 무효)
  */
 export const createPartnerStaffInvitation = async (assignmentId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerStaffInvitationResponseSuccess> => {
@@ -4125,7 +4219,7 @@ export const createPartnerStaffInvitation = async (assignmentId: string, options
 
 export const getCreatePartnerStaffInvitationMutationKey = () => ['createPartnerStaffInvitation'] as const;
 
-export const getCreatePartnerStaffInvitationMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreatePartnerStaffInvitationMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerStaffInvitation>>, TError,CreatePartnerStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerStaffInvitation>>, TError,CreatePartnerStaffInvitationMutationVariables, TContext> => {
 
@@ -4154,13 +4248,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerStaffInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerStaffInvitation>>>
 
-    export type CreatePartnerStaffInvitationMutationError = ErrorType<ProblemResponse>
+    export type CreatePartnerStaffInvitationMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
     export type CreatePartnerStaffInvitationMutationVariables = {assignmentId: string}
 
     /**
  * @summary 초대 재발송(새 토큰, 옛 토큰 무효)
  */
-export const useCreatePartnerStaffInvitation = <TError = ErrorType<ProblemResponse>,
+export const useCreatePartnerStaffInvitation = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerStaffInvitation>>, TError,CreatePartnerStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerStaffInvitation>>,

@@ -253,6 +253,13 @@
       "when": 1795078800000,
       "tag": "0035_admin_session_termination",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795165200000,
+      "tag": "0036_staff_invitation_email_unique",
+      "breakpoints": true
     }
   ]
 }

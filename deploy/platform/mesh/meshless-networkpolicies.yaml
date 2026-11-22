@@ -86,6 +86,13 @@ spec:
               kubernetes.io/metadata.name: core
           podSelector:
             matchLabels:
+              app.kubernetes.io/name: identity-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core
+          podSelector:
+            matchLabels:
               app.kubernetes.io/name: ops-svc
               app.kubernetes.io/component: service
         - namespaceSelector:

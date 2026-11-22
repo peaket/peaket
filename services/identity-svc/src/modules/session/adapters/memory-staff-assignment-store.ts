@@ -1,8 +1,13 @@
 // 시험·로컬용 배정·스캐너 세션 저장소. 운영은 DrizzleStaffAssignmentStore를 쓴다.
 import {
   type AcceptInvitationResult,
+  type CreateStaffInvitationsResult,
+  type NewStaffInvitationRow,
+  type ReissueInvitationResult,
+  type RevokeAssignmentResult,
   type ScannerSessionRecord,
   StaffAccountInactive,
+  type StaffAssignmentPartnerView,
   type StaffAssignmentRecord,
   type StaffAssignmentSelfView,
   type StaffAssignmentStatus,
@@ -58,7 +63,7 @@ const parseCursor = (raw: string): { validFromMs: number; assignmentId: string }
 export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   readonly assignments = new Map<string, MemoryStaffAssignmentRow>();
   readonly sessions = new Map<string, ScannerSessionRecord>();
-  readonly accounts = new Map<string, { email?: string; verified: boolean; status?: 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' }>();
+  readonly accounts = new Map<string, { email?: string; verified: boolean; status?: 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED'; nickname?: string }>();
   /** 기기 폐기로 끝낸 세션의 control.sessions-terminated 값(시험 확인용) */
   readonly terminatedEvents: { accountId: string; sessionId: string; reason: string; terminatedAt: string }[] = [];
 
@@ -81,6 +86,97 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   async findInvitationByTokenHash(tokenHash: string): Promise<StaffAssignmentRecord | null> {
     for (const a of this.assignments.values()) if (a.inviteTokenHash === tokenHash) return recordOf(a);
     return null;
+  }
+
+  async findInvitedEmails(eventId: string, emails: readonly string[]): Promise<string[]> {
+    const want = new Set(emails.map((e) => e.toLowerCase()));
+    const out = new Set<string>();
+    for (const a of this.assignments.values()) {
+      if (a.eventId === eventId && a.status === 'INVITED' && a.inviteEmail !== undefined && want.has(a.inviteEmail.toLowerCase())) out.add(a.inviteEmail.toLowerCase());
+    }
+    return [...out];
+  }
+
+  async createInvitations(rows: readonly NewStaffInvitationRow[]): Promise<CreateStaffInvitationsResult> {
+    const eventId = rows[0]?.eventId;
+    if (eventId === undefined) return { result: 'OK', created: [] };
+    const duplicate = await this.findInvitedEmails(eventId, rows.map((r) => r.email));
+    if (duplicate.length > 0) return { result: 'DUPLICATE_EMAIL', emails: duplicate };
+    const created: StaffAssignmentRecord[] = [];
+    for (const r of rows) {
+      const row: MemoryStaffAssignmentRow = {
+        id: r.assignmentId,
+        accountId: null,
+        status: 'INVITED',
+        eventId: r.eventId,
+        role: r.role,
+        promoterId: r.promoterId,
+        inviteEmail: r.email,
+        inviteTokenHash: r.tokenHash,
+        inviteExpiresAtMs: r.expiresAtMs,
+        invitedBy: r.invitedBy,
+        validFromMs: r.validFromMs,
+        validUntilMs: r.validUntilMs,
+      };
+      this.assignments.set(row.id, row);
+      created.push(recordOf(row));
+    }
+    return { result: 'OK', created };
+  }
+
+  async findAssignmentById(assignmentId: string): Promise<StaffAssignmentRecord | null> {
+    const row = this.assignments.get(assignmentId);
+    return row ? recordOf(row) : null;
+  }
+
+  async listByEvent(i: { eventId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }> {
+    const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
+    const all = [...this.assignments.values()]
+      .filter((a) => a.eventId === i.eventId)
+      .sort((a, b) => (b.validFromMs ?? 0) - (a.validFromMs ?? 0) || b.id.localeCompare(a.id));
+    const filtered = cursor ? all.filter((a) => (a.validFromMs ?? 0) < cursor.validFromMs || ((a.validFromMs ?? 0) === cursor.validFromMs && a.id < cursor.assignmentId)) : all;
+    const page = filtered.slice(0, i.limit);
+    const last = page.at(-1);
+    return {
+      items: page.map((a) => {
+        const nickname = a.accountId === null ? undefined : this.accounts.get(a.accountId)?.nickname;
+        return {
+          assignmentId: a.id,
+          eventId: a.eventId ?? '',
+          ...(nickname !== undefined ? { nickname } : {}),
+          role: a.role ?? 'gate_staff',
+          status: a.status,
+          inviteExpiresAt: new Date(a.inviteExpiresAtMs ?? 0).toISOString(),
+          validFrom: new Date(a.validFromMs ?? 0).toISOString(),
+          validUntil: new Date(a.validUntilMs ?? 0).toISOString(),
+        };
+      }),
+      ...(filtered.length > i.limit && last ? { nextCursor: cursorOf(last.validFromMs ?? 0, last.id) } : {}),
+    };
+  }
+
+  async revokeAssignment(i: { assignmentId: string; nowMs: number }): Promise<RevokeAssignmentResult> {
+    const row = this.assignments.get(i.assignmentId);
+    if (!row) return { found: false, changed: false, sessions: 0 };
+    if (row.status !== 'INVITED' && row.status !== 'ASSIGNED') return { found: true, changed: false, sessions: 0 };
+    this.assignments.set(i.assignmentId, { ...row, status: 'REVOKED', inviteEmail: undefined, inviteTokenHash: undefined });
+    let sessions = 0;
+    for (const [id, s] of this.sessions) {
+      if (s.assignmentId !== i.assignmentId || s.terminatedAt !== null) continue;
+      this.sessions.set(id, { ...s, terminatedAt: i.nowMs });
+      if (row.accountId) this.terminatedEvents.push({ accountId: row.accountId, sessionId: id, reason: 'STAFF_REVOKED', terminatedAt: new Date(i.nowMs).toISOString() });
+      sessions++;
+    }
+    return { found: true, changed: true, sessions };
+  }
+
+  async reissueInvitation(i: { assignmentId: string; tokenHash: string; expiresAtMs: number }): Promise<ReissueInvitationResult> {
+    const row = this.assignments.get(i.assignmentId);
+    if (!row) return { result: 'NOT_FOUND' };
+    if (row.status !== 'INVITED' || row.inviteEmail === undefined) return { result: 'ALREADY_ACCEPTED' };
+    const next: MemoryStaffAssignmentRow = { ...row, inviteTokenHash: i.tokenHash, inviteExpiresAtMs: i.expiresAtMs };
+    this.assignments.set(i.assignmentId, next);
+    return { result: 'OK', assignment: recordOf(next) };
   }
 
   async accountEmailOf(accountId: string): Promise<{ email?: string; verified: boolean }> {

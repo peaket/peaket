@@ -93,6 +93,9 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 | 시간 창 | 입장 시작 3시간 전부터 공연 종료 2시간 뒤까지 | POL-031, I-T23 |
 | 배정 상태 | 서버가 요청마다 `scanner_session`·`scanner_device` 상태를 본다(캐시 5초 [가정]). 해제·만료 뒤의 요청은 거절한다 | ADR-0051 결정 4, I-T24 |
 | 책임자 작업 | 기기 배치·예외 통과·이상 표시 처리·부스 재발급 허용·확인 스캔은 `gate_lead` 토큰만 | POL-031, I-T25 |
+| 초대 만들기·명단·해제·재발송 | 배정의 회차 판매자(core-svc 판매 설정의 `promoterId`) = 요청 세션의 테넌트. 없는 회차·판매 승인 전·다른 파트너 회차는 같은 404다. `partner_admin`·`partner_member`가 할 수 있고, 테넌트는 경로·본문이 아니라 `GetAdminAuthz`가 준 세션 값만 쓴다 | FR-046, ADR-0353, AZ-T2·AZ-T3 |
+
+- 2026-11-22 BAT-450B: 초대 만들기·명단·해제·재발송은 identity-svc가 core-svc 읽기 전용 내부 HTTP `GET /internal/v1/events/{eventId}/sale-config`로 회차 판매자를 확인한다(ADR-0353). 해제는 배정을 REVOKED로 끝내고 스캐너 세션을 종료하므로 다음 스캐너 요청부터 401/`OUT_OF_SESSION`이다(I-T24와 같은 결과).
 
 ### 3.5 자원 상태
 

@@ -94,12 +94,104 @@ export type AcceptInvitationResult =
   | { result: 'EMAIL_MISMATCH' }
   | { result: 'ASSIGNMENT_EXISTS' };
 
+/** 초대 토큰 수명(24시간)과 한 번에 초대하는 최대 인원(200명 [가정], openapi) */
+export const STAFF_INVITE_TOKEN_TTL_MS = 24 * 60 * 60_000;
+export const STAFF_INVITE_MAX = 200;
+/** 초대 링크 앞부분(기본값 [가정]). 조각(#token=)은 부르는 쪽이 붙인다 */
+export const DEFAULT_STAFF_INVITATION_URL = 'https://peaket.example/staff/invitations';
+/** 역할 유효 시작은 입장 시작 3시간 전, 끝은 공연 종료 2시간 뒤 [가정](docs/data.md staff_assignment) */
+export const STAFF_VALID_BEFORE_MS = 3 * 60 * 60_000;
+export const STAFF_VALID_AFTER_MS = 2 * 60 * 60_000;
+
+/** core-svc 판매 설정에서 identity가 읽는 값(회차 소유 확인과 유효 시간, ADR-0353) */
+export interface CoreEventOwner {
+  promoterId: string;
+  startsAtMs: number;
+  endsAtMs: number;
+  /** 입장 시작 시각. 옛 사본에는 없다 */
+  entryOpensAtMs?: number;
+}
+
+/** core-svc 내부 판매 설정 읽기(ADR-0353). 없으면 초대 만들기·명단·해제·재발송이 503이다 */
+export interface CoreEventOwners {
+  find(eventId: string): Promise<CoreEventOwner | undefined>;
+}
+export const CORE_EVENT_OWNERS = Symbol('identity.CoreEventOwners');
+
+/** 현장 스태프 초대 메일 포트(운영 대행사는 GAT-250/BAT-455). local·ci는 파일 대역만 있다 */
+export interface StaffInviteMail {
+  to: string;
+  link: string;
+  expiresAt: number;
+  eventId: string;
+  role: StaffRole;
+  at: number;
+}
+export interface StaffInviteMailer {
+  send(m: StaffInviteMail): Promise<void>;
+}
+export const STAFF_INVITE_MAILER = Symbol('identity.StaffInviteMailer');
+
+/** 파트너가 만든 초대 한 행. 토큰 원문은 저장소에 넣지 않는다(SHA-256 hex만) */
+export interface NewStaffInvitationRow {
+  assignmentId: string;
+  eventId: string;
+  promoterId: string;
+  role: StaffRole;
+  email: string;
+  tokenHash: string;
+  expiresAtMs: number;
+  invitedBy: string;
+  validFromMs: number;
+  validUntilMs: number;
+}
+
+export type CreateStaffInvitationsResult =
+  | { result: 'OK'; created: StaffAssignmentRecord[] }
+  | { result: 'DUPLICATE_EMAIL'; emails: string[] };
+
+/** 파트너 명단 한 줄. 이메일·계정 ID는 넣지 않는다(openapi StaffAssignment) */
+export interface StaffAssignmentPartnerView {
+  assignmentId: string;
+  eventId: string;
+  nickname?: string;
+  role: StaffRole;
+  status: StaffAssignmentStatus;
+  inviteExpiresAt: string;
+  validFrom: string;
+  validUntil: string;
+}
+
+export type ReissueInvitationResult =
+  | { result: 'OK'; assignment: StaffAssignmentRecord }
+  | { result: 'NOT_FOUND' }
+  | { result: 'ALREADY_ACCEPTED' };
+
+/** 해제 결과. found=false면 없는 배정, changed=false면 이미 끝난 배정(멱등 204) */
+export interface RevokeAssignmentResult {
+  found: boolean;
+  changed: boolean;
+  sessions: number;
+}
+
 /** 배정·세션 저장소. 계정 요약의 hasStaffAssignment도 같은 저장소를 쓴다 */
 export interface StaffAssignmentStore {
   hasAssigned(accountId: string): Promise<boolean>;
   findScannerSession(scannerSessionId: string): Promise<ScannerSessionRecord | null>;
   /** 초대 토큰 SHA-256(hex)으로 배정 찾기 */
   findInvitationByTokenHash(tokenHash: string): Promise<StaffAssignmentRecord | null>;
+  /** 같은 회차에 이미 INVITED인 이메일(소문자)들. 보내기 전에 중복을 걸러 메일을 헛되이 보내지 않는다 */
+  findInvitedEmails(eventId: string, emails: readonly string[]): Promise<string[]>;
+  /** 초대 여러 행을 한 트랜잭션으로 만든다. 같은 회차·이메일 INVITED가 있으면 DUPLICATE_EMAIL */
+  createInvitations(rows: readonly NewStaffInvitationRow[]): Promise<CreateStaffInvitationsResult>;
+  /** 배정 ID로 찾기(파트너 명단·해제·재발송) */
+  findAssignmentById(assignmentId: string): Promise<StaffAssignmentRecord | null>;
+  /** 회차의 배정 목록(파트너 명단). 이메일·계정 ID 없이 닉네임·역할·상태·시간만 */
+  listByEvent(i: { eventId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }>;
+  /** 배정을 REVOKED로 끝내고 초대 이메일·토큰을 지우며 살아 있는 스캐너 세션을 종료한다(control.sessions-terminated) */
+  revokeAssignment(i: { assignmentId: string; nowMs: number }): Promise<RevokeAssignmentResult>;
+  /** INVITED 배정의 토큰 해시·만료·이메일을 새 값으로 바꾼다. 이미 수락·종료면 ALREADY_ACCEPTED */
+  reissueInvitation(i: { assignmentId: string; tokenHash: string; expiresAtMs: number }): Promise<ReissueInvitationResult>;
   /** 계정의 이메일과 검증 여부. 초대 수락의 이메일 일치 확인에 쓴다 */
   accountEmailOf(accountId: string): Promise<{ email?: string; verified: boolean }>;
   /** 계정 상태. 없으면 null. 스캐너 세션 확인이 ACTIVE가 아닌 계정을 거절한다 */

@@ -28,6 +28,10 @@ env:
   PEAKET_VERIFICATION_PROVIDER: test
   PEAKET_TEST_VERIFICATION_URL: http://mock-idv.core.svc.cluster.local:18920
   PEAKET_ADMIN_MAIL_DIR: /tmp/admin-mail
+  # 파트너 현장 스태프 초대(BAT-450B, ADR-0353): core 판매 설정 읽기와 local 메일 대역·링크 앞부분
+  PEAKET_CORE_HTTP_URL: http://core-svc.core.svc.cluster.local:8080
+  PEAKET_STAFF_MAIL_DIR: /tmp/staff-mail
+  PEAKET_STAFF_INVITATION_URL: https://www.peaket.example:18441/staff/invitations
 
 service:
   replicas: 1

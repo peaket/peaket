@@ -90,14 +90,14 @@ export const CreateStaffInvitationAcceptanceBody = zod.object({
 export const CreateStaffInvitationAcceptanceResponse = zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
-  "nickname": zod.string().optional(),
+  "nickname": zod.string().optional().describe('수락한 계정의 닉네임. 초대 중에는 없다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "status": zod.enum(['INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED']).optional(),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
-  "scanCount": zod.int().optional(),
-  "overrideCount": zod.int().optional()
+  "scanCount": zod.int().optional().describe('스캔 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다'),
+  "overrideCount": zod.int().optional().describe('예외 통과 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다')
 }).describe('파트너용 명단에는 이메일·계정 ID를 넣지 않는다')
 
 /**
@@ -114,14 +114,14 @@ export const CreateDeviceApprovalLookupResponse = zod.object({
   "assignments": zod.array(zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
-  "nickname": zod.string().optional(),
+  "nickname": zod.string().optional().describe('수락한 계정의 닉네임. 초대 중에는 없다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "status": zod.enum(['INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED']).optional(),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
-  "scanCount": zod.int().optional(),
-  "overrideCount": zod.int().optional()
+  "scanCount": zod.int().optional().describe('스캔 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다'),
+  "overrideCount": zod.int().optional().describe('예외 통과 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다')
 }).describe('파트너용 명단에는 이메일·계정 ID를 넣지 않는다')).optional().describe('지금 유효한 내 배정 가운데 이 기기의 배정 파트너 회차의 것만(POST /v1/device-approvals와 같은 조건). 하나도 없으면 이 응답 대신 403이다(staff-assignment-missing·other-partner-device·outside-staff-hours). 그래서 200이면 하나 이상 있다'),
   "canProxy": zod.boolean().optional().describe('책임자만 true')
 }).describe('스캐너 승인 화면(SCR-051)용. 배정 파트너의 이름(상호)은 싣지 않는다. identity-svc가 기기 원장에서 받는 것은 배정 파트너 ID뿐이고, 상호는 공개 정보라 새 내부 호출을 두지 않는다. 화면은 assignments[].eventId로 회차 공개 요약(GET /v1/events/{eventId})을 읽어 그 sellerName을 \'배정 파트너\'로, title·startsAt을 \'내 배정\' 이름으로 보인다(소유자 결정 2026-10-30, open-items 78번. 화면 규칙은 추천 적용 2026-10-30, docs/features/identity.md §6.1)')

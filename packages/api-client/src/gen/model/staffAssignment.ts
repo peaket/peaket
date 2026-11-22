@@ -18,12 +18,15 @@ import type { StaffAssignmentStatus } from './staffAssignmentStatus';
 export interface StaffAssignment {
   assignmentId?: string;
   eventId?: string;
+  /** 수락한 계정의 닉네임. 초대 중에는 없다 */
   nickname?: string;
   role?: StaffAssignmentRole;
   status?: StaffAssignmentStatus;
   inviteExpiresAt?: string;
   validFrom?: string;
   validUntil?: string;
+  /** 스캔 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다 */
   scanCount?: number;
+  /** 예외 통과 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다 */
   overrideCount?: number;
 }

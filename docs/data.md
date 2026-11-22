@@ -395,8 +395,8 @@ erDiagram
         uuid event_id "회차"
         uuid promoter_id "배정 파트너(promoter). 기기 승인 때 기기의 배정 파트너와 대조한다(I-T22, GAT-220). 파트너 초대 생성이 채운다"
         text role "gate_staff|gate_lead"
-        text invite_email "수락·만료 시 파기"
-        bytea invite_token_hash "32바이트 난수의 SHA-256(ADR-0051)"
+        text invite_email "수락·해제·만료 시 파기"
+        bytea invite_token_hash "32바이트 난수의 SHA-256, 재발송은 새 해시로 교체(ADR-0051·0353)"
         timestamptz invite_expires_at "24시간"
         uuid invited_by "파트너 관리 계정"
         timestamptz valid_from "입장 시작 3시간 전"
@@ -418,6 +418,8 @@ erDiagram
         timestamptz terminated_at "교대·해제·폐기·만료"
     }
 ```
+
+- **초대 중복 인덱스(2026-11-22 BAT-450B, ADR-0353)**: 같은 회차·같은 이메일(대소문자 무시)의 아직 수락하지 않은 초대는 하나만 둔다. 부분 유일 인덱스 `staff_assignment_event_invite_email_key (event_id, lower(invite_email)) WHERE status = 'INVITED' AND invite_email IS NOT NULL`(마이그레이션 0036)가 DB에서 막고, 서비스도 보내기 전에 422로 거른다. 수락하면 이메일·토큰을 지우므로 같은 이메일을 새로 초대할 수 있다.
 
 **② 공연·회차·좌석 배치와 판매자**
 

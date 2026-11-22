@@ -18,7 +18,7 @@ export const CreatePartnerEventStaffInvitationBody = zod.object({
   "invitations": zod.array(zod.object({
   "email": zod.email(),
   "role": zod.enum(['gate_staff', 'gate_lead'])
-}).strict()).max(createPartnerEventStaffInvitationBodyInvitationsMax)
+}).strict()).min(1).max(createPartnerEventStaffInvitationBodyInvitationsMax)
 }).strict()
 
 export type CreatePartnerEventStaffInvitationBody = zod.input<typeof CreatePartnerEventStaffInvitationBody>;

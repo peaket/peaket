@@ -14,14 +14,14 @@ import * as zod from 'zod';
 export const StaffAssignment = zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
-  "nickname": zod.string().optional(),
+  "nickname": zod.string().optional().describe('수락한 계정의 닉네임. 초대 중에는 없다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "status": zod.enum(['INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED']).optional(),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
-  "scanCount": zod.int().optional(),
-  "overrideCount": zod.int().optional()
+  "scanCount": zod.int().optional().describe('스캔 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다'),
+  "overrideCount": zod.int().optional().describe('예외 통과 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다')
 }).describe('파트너용 명단에는 이메일·계정 ID를 넣지 않는다')
 
 export type StaffAssignment = zod.input<typeof StaffAssignment>;

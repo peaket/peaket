@@ -1,7 +1,7 @@
 # ADR-0353: 파트너 현장 스태프 초대의 회차 판매자 대조는 core-svc 내부 HTTP로 한다(2026-11-22)
 
 - **상태**: 채택(2026-11-22, 추천 적용, BUILD_ORDER BAT-450B 계획). `docs/api/proto/README.md` §4의 '현장 스태프 배정의 파트너 대조(identity-svc → ?)' 미해결을 닫는다.
-- **관련**: [ADR-0285](0285-mesh-port-allow-source-generated-policies.md) 결정 9(REST 포트의 내부 HTTP 부르는 쪽), [ADR-0051](0051-offline-gate-admission-scanner-session.md), [ADR-0081](0081-partner-api-path-and-operation-conventions.md), [ADR-0172](0172-admin-role-tenant-request-time-decision.md), docs/features/identity.md §6.1, docs/security/authz-matrix.md §3.4·AZ-T2·AZ-T3, docs/api/proto/README.md §4, docs/api/guidelines.md §8.1
+- **관련**: [ADR-0285](0285-mesh-port-allow-source-generated-policies.md) 결정 9(REST 포트의 내부 HTTP 부르는 쪽), [ADR-0051](0051-gate-process-end-to-end.md), [ADR-0081](0081-rest-api-design-criteria-audit.md), [ADR-0172](0172-judge-roles-per-request-not-in-tokens.md), docs/features/identity.md §6.1, docs/security/authz-matrix.md §3.4·AZ-T2·AZ-T3, docs/api/proto/README.md §4, docs/api/guidelines.md §8.1
 - **관련 ID**: FR-046, POL-031, I-T21, I-T86
 
 ## 맥락

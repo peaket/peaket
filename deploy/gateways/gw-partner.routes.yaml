@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-partner.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 e87715e22aa7da9225dc6db5daaa2f750b4aeba04150f9f49518451ab0a09aff
+# openapi info.version 1.0.0-draft · 계약 sha256 65f89e95416c3d50d1d7f8f92dcec7816323c22bb5e2071161d63009595ddba9
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -482,6 +482,38 @@ spec:
             value: /v1/partner/auth/sessions/me
           method: OPTIONS
         - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff-invitations
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/staff-invitations
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+
+          method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+/invitation
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/partner/staff/[^/]+/invitation
+          method: OPTIONS
+        - path:
             type: Exact
             value: /v1/partner/team-accounts
           method: GET
@@ -722,22 +754,6 @@ spec:
             value: /v1/partner/events/[^/]+/settlement-exports
           method: OPTIONS
         - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/staff
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/staff
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/staff-invitations
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/staff-invitations
-          method: OPTIONS
-        - path:
             type: Exact
             value: /v1/partner/merch-delivery-exports
           method: POST
@@ -885,6 +901,22 @@ spec:
             type: RegularExpression
             value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+
           method: DELETE
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-policy
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-policy
+          method: PUT
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-policy
+          method: OPTIONS
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -925,22 +957,6 @@ spec:
     - matches:
         - path:
             type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-eligibility-lists/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-policy
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-policy
-          method: PUT
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-policy
-          method: OPTIONS
-        - path:
-            type: RegularExpression
             value: /v1/partner/productions/[^/]+/sale-review
           method: GET
         - path:
@@ -1034,22 +1050,6 @@ spec:
         - path:
             type: Exact
             value: /v1/partner/seller-profile/change-requests
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/partner/staff/[^/]+
-          method: DELETE
-        - path:
-            type: RegularExpression
-            value: /v1/partner/staff/[^/]+
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/partner/staff/[^/]+/invitation
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/partner/staff/[^/]+/invitation
           method: OPTIONS
         - path:
             type: Exact

@@ -268,6 +268,10 @@ export const staffAssignment = pgTable(
     index('staff_assignment_account_status_idx').on(t.accountId, t.status),
     index('staff_assignment_event_status_idx').on(t.eventId, t.status),
     index('staff_assignment_invite_token_idx').on(t.inviteTokenHash).where(sql`${t.inviteTokenHash} is not null`),
+    // 같은 회차·같은 이메일의 INVITED 중복을 막는다(2026-11-22 BAT-450B, ADR-0353)
+    uniqueIndex('staff_assignment_event_invite_email_key')
+      .on(t.eventId, sql`lower(${t.inviteEmail})`)
+      .where(sql`${t.status} = 'INVITED' and ${t.inviteEmail} is not null`),
     check('staff_assignment_role_check', sql`${t.role} in ('gate_staff', 'gate_lead')`),
     check('staff_assignment_status_check', sql`${t.status} in ('INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED')`),
     check('staff_assignment_window_check', sql`${t.validFrom} <= ${t.validUntil}`),

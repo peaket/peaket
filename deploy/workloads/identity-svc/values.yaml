@@ -22,6 +22,8 @@ service:
   command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
   env:
     PEAKET_GRPC_PORT: "50051"
+    # 파트너 현장 스태프 초대의 회차 소유 확인(BAT-450B, ADR-0353). 내부 HTTP 공유 토큰 PEAKET_INTERNAL_TOKEN은 Secret에서 넣는다
+    PEAKET_CORE_HTTP_URL: http://core-svc:8080
     # 도메인은 비밀이 아니다(쿠키가 붙을 상위 도메인). 값은 환경 값과 같다
     PEAKET_COOKIE_DOMAIN: peaket.example
   resources:

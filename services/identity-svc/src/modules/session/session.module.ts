@@ -43,11 +43,13 @@ import { CheckNickname } from './application/check-nickname.js';
 import { CancelSignup } from './application/cancel-signup.js';
 import { MemoryNicknameCheckLimits } from './adapters/memory-nickname-check-limits.js';
 import { NICKNAME_CHECK_LIMITS, type NicknameCheckLimits, STAFF_ASSIGNMENTS, type StaffAssignments } from './domain/ports.js';
-import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentStore } from './domain/staff.js';
+import { CORE_EVENT_OWNERS, type CoreEventOwners, DEFAULT_STAFF_INVITATION_URL, STAFF_ASSIGNMENT_STORE, STAFF_INVITE_MAILER, type StaffAssignmentStore, type StaffInviteMailer } from './domain/staff.js';
 import { CheckScannerSession } from './application/check-scanner-session.js';
 import { TerminateScannerSessions } from './application/terminate-scanner-sessions.js';
 import { StaffInvitations } from './application/staff-invitations.js';
 import { StaffInvitationController } from './inbound/staff-invitation.controller.js';
+import { NEW_STAFF_INVITE_TOKEN, PartnerStaffInvitations, STAFF_INVITATION_URL, newStaffInviteToken } from './application/partner-staff-invitations.js';
+import { PartnerStaffController } from './inbound/partner-staff.controller.js';
 import { DrizzleStaffAssignmentStore } from './adapters/db/drizzle-staff-assignment-store.js';
 import { MemoryStaffAssignmentStore } from './adapters/memory-staff-assignment-store.js';
 import { StartDeviceAuthorization, NEW_SCANNER_SESSION_ID, NEW_USER_CODE, defaultScannerSessionId } from './application/start-device-authorization.js';
@@ -100,6 +102,16 @@ export interface SessionModuleOptions {
   withdrawalParticipants?: WithdrawalParticipant[];
   /** 탈퇴 미룸 지표. 없으면 내지 않는다(시험) */
   withdrawalSignals?: WithdrawalSignals;
+  /** core-svc 회차 판매자·시각 조회(파트너 초대, ADR-0353). 없으면 초대 만들기·명단·해제·재발송이 503이다 */
+  coreEventOwners?: CoreEventOwners;
+  /** 현장 스태프 초대 메일 포트. 없으면 만들기·재발송이 503 provider-down이다 */
+  staffInviteMailer?: StaffInviteMailer;
+  /** 초대 링크 앞부분(조각은 서비스가 붙인다). 없으면 기본값 */
+  staffInvitationUrl?: string;
+  /** 시험에서 토큰을 고정한다. 없으면 32바이트 난수 base64url */
+  newStaffInviteToken?: () => string;
+  /** 파트너 콘솔 초대 경로를 싣는다. 관리 역할 판정(adminAuthz)이 있는 조립에서만 true다(파트너 로그인도 그때만 있다) */
+  partnerStaff?: boolean;
 }
 
 @Module({})
@@ -113,7 +125,19 @@ export class SessionModule {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
       global: true,
-      controllers: [TokenController, AccountController, ProvidersController, MergeProposalsController, SessionsController, AccountSummaryController, StaffInvitationController, ScannerAuthorizationController, DeviceApprovalController],
+      controllers: [
+        TokenController,
+        AccountController,
+        ProvidersController,
+        MergeProposalsController,
+        SessionsController,
+        AccountSummaryController,
+        StaffInvitationController,
+        // 파트너 초대는 관리 역할 판정(adminAuthz)이 있어야 뜬다. 없으면 플랫폼 시작 확인이 막으므로 조립에서 뺀다
+        ...(o.partnerStaff ? [PartnerStaffController] : []),
+        ScannerAuthorizationController,
+        DeviceApprovalController,
+      ],
       providers: [
         GetAccountSummary,
         CompleteSignup,
@@ -125,6 +149,11 @@ export class SessionModule {
         CheckScannerSession,
         TerminateScannerSessions,
         StaffInvitations,
+        PartnerStaffInvitations,
+        ...(o.coreEventOwners ? [{ provide: CORE_EVENT_OWNERS, useValue: o.coreEventOwners }] : []),
+        ...(o.staffInviteMailer ? [{ provide: STAFF_INVITE_MAILER, useValue: o.staffInviteMailer }] : []),
+        { provide: STAFF_INVITATION_URL, useValue: o.staffInvitationUrl ?? DEFAULT_STAFF_INVITATION_URL },
+        { provide: NEW_STAFF_INVITE_TOKEN, useValue: o.newStaffInviteToken ?? newStaffInviteToken },
         StartDeviceAuthorization,
         DeviceApprovals,
         PollScannerToken,

@@ -12,6 +12,9 @@
 import type { CreatePartnerEventStaffInvitationBodyInvitationsItem } from './createPartnerEventStaffInvitationBodyInvitationsItem';
 
 export type CreatePartnerEventStaffInvitationBody = {
-  /** @maxItems 200 */
+  /**
+     * @minItems 1
+     * @maxItems 200
+     */
   invitations: CreatePartnerEventStaffInvitationBodyInvitationsItem[];
 };

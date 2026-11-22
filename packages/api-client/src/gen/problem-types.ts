@@ -331,6 +331,8 @@ export type ProblemType =
   | 'staff-account-inactive'
   | 'staff-assignment-exists'
   | 'staff-assignment-missing'
+  | 'staff-invitation-already-accepted'
+  | 'staff-invitation-duplicate'
   | 'staff-invitation-email-mismatch'
   | 'subscription-limit'
   | 'too-many-requests'
@@ -686,6 +688,8 @@ export const PROBLEM_TYPES = {
   'staff-account-inactive': { status: 403, title: "배정할 수 없는 계정 상태입니다" },
   'staff-assignment-exists': { status: 409, title: "이미 이 회차에 배정된 계정입니다" },
   'staff-assignment-missing': { status: 403, title: "이 회차의 스태프 배정이 없습니다" },
+  'staff-invitation-already-accepted': { status: 409, title: "이미 수락했거나 끝난 배정입니다" },
+  'staff-invitation-duplicate': { status: 422, title: "같은 이메일을 두 번 초대할 수 없습니다" },
   'staff-invitation-email-mismatch': { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },
   'too-many-requests': { status: 429, title: "24시간 안에 이미 다시 받았습니다" },

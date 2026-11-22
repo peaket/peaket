@@ -179,3 +179,4 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 | --- | --- | --- | --- | --- |
 | plan | lane3-bat450b-plan | deepseek-v4.1-flash | 2026-11-22T13:05:00+09:00 | 2026-11-22T13:08:00+09:00 |
 | test | lane3-bat450b-test | deepseek-v4.1-flash | 2026-11-22T13:10:00+09:00 | 2026-11-22T13:16:00+09:00 |
+| impl | lane3-bat450b-impl | deepseek-v4.1-flash | 2026-11-22T13:16:00+09:00 | 2026-11-22T13:40:00+09:00 |

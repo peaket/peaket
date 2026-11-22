@@ -4,9 +4,14 @@ import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import {
   type AcceptInvitationResult,
+  type CreateStaffInvitationsResult,
+  type NewStaffInvitationRow,
+  type ReissueInvitationResult,
+  type RevokeAssignmentResult,
   ScannerSessionConflict,
   type ScannerSessionRecord,
   StaffAccountInactive,
+  type StaffAssignmentPartnerView,
   type StaffAssignmentRecord,
   type StaffAssignmentSelfView,
   type StaffAssignmentStatus,
@@ -64,6 +69,148 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
   async findInvitationByTokenHash(tokenHash: string): Promise<StaffAssignmentRecord | null> {
     const [row] = await this.database.db.select().from(staffAssignment).where(eq(staffAssignment.inviteTokenHash, Buffer.from(tokenHash, 'hex'))).limit(1);
     return row ? recordOf(row) : null;
+  }
+
+  async findInvitedEmails(eventId: string, emails: readonly string[]): Promise<string[]> {
+    if (emails.length === 0) return [];
+    const rows = await this.database.db
+      .select({ email: staffAssignment.inviteEmail })
+      .from(staffAssignment)
+      .where(and(eq(staffAssignment.eventId, eventId), eq(staffAssignment.status, 'INVITED'), inArray(sql`lower(${staffAssignment.inviteEmail})`, [...emails])));
+    return rows.flatMap((r) => (r.email === null ? [] : [r.email.toLowerCase()]));
+  }
+
+  async createInvitations(rows: readonly NewStaffInvitationRow[]): Promise<CreateStaffInvitationsResult> {
+    if (rows.length === 0) return { result: 'OK', created: [] };
+    const eventId = rows[0]!.eventId;
+    const emails = rows.map((r) => r.email);
+    try {
+      return await this.database.transaction(async (tx) => {
+        const existing = await tx
+          .select({ email: staffAssignment.inviteEmail })
+          .from(staffAssignment)
+          .where(and(eq(staffAssignment.eventId, eventId), eq(staffAssignment.status, 'INVITED'), inArray(sql`lower(${staffAssignment.inviteEmail})`, emails)))
+          .for('update');
+        if (existing.length > 0) return { result: 'DUPLICATE_EMAIL', emails: existing.flatMap((r) => (r.email === null ? [] : [r.email.toLowerCase()])) };
+        const inserted = await tx
+          .insert(staffAssignment)
+          .values(
+            rows.map((r) => ({
+              id: r.assignmentId,
+              accountId: null,
+              eventId: r.eventId,
+              promoterId: r.promoterId,
+              role: r.role,
+              inviteEmail: r.email,
+              inviteTokenHash: Buffer.from(r.tokenHash, 'hex'),
+              inviteExpiresAt: new Date(r.expiresAtMs),
+              invitedBy: r.invitedBy,
+              validFrom: new Date(r.validFromMs),
+              validUntil: new Date(r.validUntilMs),
+              status: 'INVITED',
+            })),
+          )
+          .returning();
+        return { result: 'OK', created: inserted.map(recordOf) };
+      });
+    } catch (e) {
+      // 부분 유일 인덱스(staff_assignment_event_invite_email_key)와 겹쳤다(경합). 422로 닫는다
+      const cause = (e as { cause?: { code?: string; constraint?: string } }).cause;
+      if (cause?.code === '23505' && cause.constraint === 'staff_assignment_event_invite_email_key') return { result: 'DUPLICATE_EMAIL', emails };
+      throw e;
+    }
+  }
+
+  async findAssignmentById(assignmentId: string): Promise<StaffAssignmentRecord | null> {
+    const [row] = await this.database.db.select().from(staffAssignment).where(eq(staffAssignment.id, assignmentId)).limit(1);
+    return row ? recordOf(row) : null;
+  }
+
+  async listByEvent(i: { eventId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }> {
+    const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
+    const where = cursor
+      ? and(
+          eq(staffAssignment.eventId, i.eventId),
+          or(
+            lt(staffAssignment.validFrom, new Date(cursor.validFromMs)),
+            and(eq(staffAssignment.validFrom, new Date(cursor.validFromMs)), lt(staffAssignment.id, cursor.assignmentId)),
+          ),
+        )
+      : eq(staffAssignment.eventId, i.eventId);
+    const rows = await this.database.db
+      .select({ assignment: staffAssignment, nickname: account.nickname })
+      .from(staffAssignment)
+      .leftJoin(account, eq(staffAssignment.accountId, account.id))
+      .where(where)
+      .orderBy(desc(staffAssignment.validFrom), desc(staffAssignment.id))
+      .limit(i.limit + 1);
+    const page = rows.slice(0, i.limit);
+    const last = page.at(-1)?.assignment;
+    return {
+      items: page.map(({ assignment, nickname }) => ({
+        assignmentId: assignment.id,
+        eventId: assignment.eventId,
+        ...(nickname !== null ? { nickname } : {}),
+        role: assignment.role as StaffRole,
+        status: assignment.status as StaffAssignmentStatus,
+        inviteExpiresAt: assignment.inviteExpiresAt.toISOString(),
+        validFrom: assignment.validFrom.toISOString(),
+        validUntil: assignment.validUntil.toISOString(),
+      })),
+      ...(rows.length > i.limit && last ? { nextCursor: cursorOf(last.validFrom.getTime(), last.id) } : {}),
+    };
+  }
+
+  async revokeAssignment(i: { assignmentId: string; nowMs: number }): Promise<RevokeAssignmentResult> {
+    return this.database.transaction(async (tx) => {
+      const [row] = await tx.select().from(staffAssignment).where(eq(staffAssignment.id, i.assignmentId)).limit(1).for('update');
+      if (!row) return { found: false, changed: false, sessions: 0 };
+      if (row.status !== 'INVITED' && row.status !== 'ASSIGNED') return { found: true, changed: false, sessions: 0 };
+      const at = new Date(i.nowMs);
+      await tx
+        .update(staffAssignment)
+        .set({ status: 'REVOKED', inviteEmail: null, inviteTokenHash: null })
+        .where(eq(staffAssignment.id, i.assignmentId));
+      const sessions = await tx
+        .select({ id: scannerSession.id })
+        .from(scannerSession)
+        .where(and(eq(scannerSession.staffAssignmentId, i.assignmentId), isNull(scannerSession.terminatedAt)))
+        .for('update');
+      if (sessions.length > 0) {
+        await tx
+          .update(scannerSession)
+          .set({ terminatedAt: at })
+          .where(inArray(scannerSession.id, sessions.map((s) => s.id)));
+        if (row.accountId !== null) {
+          await writeOutbox(
+            tx,
+            this.clock,
+            sessions
+              .map((s) => ({
+                topic: CONTROL_TOPICS.sessionsTerminated,
+                key: row.accountId!,
+                payload: Buffer.from(JSON.stringify({ accountId: row.accountId, sessionId: s.id, reason: 'STAFF_REVOKED', terminatedAt: at.toISOString() })),
+              }))
+              .sort((a, b) => (a.payload.toString() < b.payload.toString() ? -1 : 1)),
+          );
+        }
+      }
+      return { found: true, changed: true, sessions: sessions.length };
+    });
+  }
+
+  async reissueInvitation(i: { assignmentId: string; tokenHash: string; expiresAtMs: number }): Promise<ReissueInvitationResult> {
+    return this.database.transaction(async (tx) => {
+      const [row] = await tx.select().from(staffAssignment).where(eq(staffAssignment.id, i.assignmentId)).limit(1).for('update');
+      if (!row) return { result: 'NOT_FOUND' };
+      if (row.status !== 'INVITED' || row.inviteEmail === null) return { result: 'ALREADY_ACCEPTED' };
+      const [updated] = await tx
+        .update(staffAssignment)
+        .set({ inviteTokenHash: Buffer.from(i.tokenHash, 'hex'), inviteExpiresAt: new Date(i.expiresAtMs) })
+        .where(eq(staffAssignment.id, i.assignmentId))
+        .returning();
+      return updated ? { result: 'OK', assignment: recordOf(updated) } : { result: 'ALREADY_ACCEPTED' };
+    });
   }
 
   async accountEmailOf(accountId: string): Promise<{ email?: string; verified: boolean }> {

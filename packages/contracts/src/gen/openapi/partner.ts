@@ -1056,7 +1056,7 @@ export const CreatePartnerSellerProfileChangeRequestResponse = zod.object({
 })
 
 /**
- * FR-046, POL-031, ADR-0051. 초대마다 32바이트 토큰을 만들고 해시만 저장한다. 링크는 토큰을 URL 조각(#token=)에 담는다
+ * FR-046, POL-031, ADR-0051, ADR-0353. 한 번에 1~200명을 초대한다. 초대마다 32바이트 토큰을 만들고 SHA-256만 저장하며, 링크는 토큰을 URL 조각(#token=)에만 담는다(응답·로그에 토큰 없음). 회차 소유는 core-svc 내부 판매 설정으로 확인하고(판매 승인 전·없는 회차·다른 파트너 회차는 같은 404), 테넌트는 세션 값만 쓴다. 같은 회차·같은 이메일의 INVITED는 422다(재발송은 /v1/partner/staff/{assignmentId}/invitation). 초대 메일 대행사가 없으면 503 provider-down이고 행을 만들지 않는다
  * @summary 현장 스태프 초대(이메일 여러 개, 최대 200명 [가정], 역할 gate_staff·gate_lead, 회차 단위)
  */
 export const CreatePartnerEventStaffInvitationParams = zod.object({
@@ -1071,26 +1071,26 @@ export const CreatePartnerEventStaffInvitationBody = zod.object({
   "invitations": zod.array(zod.object({
   "email": zod.email(),
   "role": zod.enum(['gate_staff', 'gate_lead'])
-}).strict()).max(createPartnerEventStaffInvitationBodyInvitationsMax)
+}).strict()).min(1).max(createPartnerEventStaffInvitationBodyInvitationsMax)
 }).strict()
 
 export const CreatePartnerEventStaffInvitationResponseItem = zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
-  "nickname": zod.string().optional(),
+  "nickname": zod.string().optional().describe('수락한 계정의 닉네임. 초대 중에는 없다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "status": zod.enum(['INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED']).optional(),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
-  "scanCount": zod.int().optional(),
-  "overrideCount": zod.int().optional()
+  "scanCount": zod.int().optional().describe('스캔 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다'),
+  "overrideCount": zod.int().optional().describe('예외 통과 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다')
 }).describe('파트너용 명단에는 이메일·계정 ID를 넣지 않는다')
 export const CreatePartnerEventStaffInvitationResponse = zod.array(CreatePartnerEventStaffInvitationResponseItem)
 
 /**
- * FR-046, SCR-037. 이메일·계정 ID는 넣지 않는다
- * @summary 현장 스태프 명단(닉네임, 역할, 수락 여부·만료, 유효 시간, 스캔·예외 통과 건수)
+ * FR-046, SCR-037. 이메일·계정 ID는 넣지 않는다. 닉네임은 수락한 계정만 있고 초대 중에는 없다. 스캔·예외 통과 건수는 ticket 데이터라 이 경로가 싣지 않는다(BAT-450B). 회차 소유는 core-svc 내부 판매 설정으로 확인한다(ADR-0353)
+ * @summary 현장 스태프 명단(닉네임, 역할, 수락 여부·만료, 유효 시간)
  */
 export const ListPartnerEventStaffParams = zod.object({
   "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
@@ -1109,20 +1109,20 @@ export const ListPartnerEventStaffResponse = zod.object({
   "items": zod.array(zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
-  "nickname": zod.string().optional(),
+  "nickname": zod.string().optional().describe('수락한 계정의 닉네임. 초대 중에는 없다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "status": zod.enum(['INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED']).optional(),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
-  "scanCount": zod.int().optional(),
-  "overrideCount": zod.int().optional()
+  "scanCount": zod.int().optional().describe('스캔 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다'),
+  "overrideCount": zod.int().optional().describe('예외 통과 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다')
 }).describe('파트너용 명단에는 이메일·계정 ID를 넣지 않는다')).optional(),
   "nextCursor": zod.string().nullish()
 })
 
 /**
- * FR-046, POL-031, ADR-0051
+ * FR-046, POL-031, ADR-0051. 배정을 REVOKED로 끝내고 초대 이메일·토큰을 파기하며 살아 있는 스캐너 세션을 종료한다(control.sessions-terminated). 배정의 회차 판매자를 다시 대조하고, 없는 배정과 다른 테넌트 배정은 같은 404다. 이미 끝난 배정은 204다(멱등)
  * @summary 현장 스태프 해제(그 스캐너의 다음 요청부터 거부, 다음 변경분에서 로그아웃)
  */
 export const DeletePartnerStaffParams = zod.object({
@@ -1132,7 +1132,7 @@ export const DeletePartnerStaffParams = zod.object({
 export const DeletePartnerStaffResponse = zod.void()
 
 /**
- * FR-046, ADR-0051. 배정의 초대를 새로 만든다(POST, 보낼 때마다 새 토큰). 배정 ID만으로 찾고 서버가 그 배정이 요청한 파트너 소속인지 확인한다(추천 적용 2026-10-21, ADR-0081)
+ * FR-046, ADR-0051, ADR-0353. INVITED 배정의 초대를 새로 만든다(보낼 때마다 새 32바이트 토큰·새 24시간). 옛 토큰은 즉시 410이 된다. 배정 ID만으로 찾고 서버가 그 배정의 회차 판매자를 다시 대조한다(다른 테넌트·없는 배정은 같은 404). 이미 수락했거나 끝난 배정은 409다
  * @summary 초대 재발송(새 토큰, 옛 토큰 무효)
  */
 export const CreatePartnerStaffInvitationParams = zod.object({
@@ -1142,14 +1142,14 @@ export const CreatePartnerStaffInvitationParams = zod.object({
 export const CreatePartnerStaffInvitationResponse = zod.object({
   "assignmentId": zod.string().optional(),
   "eventId": zod.string().optional(),
-  "nickname": zod.string().optional(),
+  "nickname": zod.string().optional().describe('수락한 계정의 닉네임. 초대 중에는 없다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "status": zod.enum(['INVITED', 'ASSIGNED', 'REVOKED', 'ENDED', 'EXPIRED']).optional(),
   "inviteExpiresAt": zod.iso.datetime({"offset":true}).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
-  "scanCount": zod.int().optional(),
-  "overrideCount": zod.int().optional()
+  "scanCount": zod.int().optional().describe('스캔 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다'),
+  "overrideCount": zod.int().optional().describe('예외 통과 건수. ticket 데이터라 BAT-450B의 파트너 초대 경로는 싣지 않는다')
 }).describe('파트너용 명단에는 이메일·계정 ID를 넣지 않는다')
 
 /**

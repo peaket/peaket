@@ -44,6 +44,29 @@ export { identityPackage, identityServiceHandlers, sessionServiceHandlers } from
 export { CheckScannerSession } from './application/check-scanner-session.js';
 export { TerminateScannerSessions, ScannerSessionTerminationInputError } from './application/terminate-scanner-sessions.js';
 export { StaffInvitations, STAFF_CONSENT_VERSION, type StaffAssignmentView, type StaffInvitationView } from './application/staff-invitations.js';
+export {
+  PartnerStaffInvitationError,
+  PartnerStaffInvitations,
+  STAFF_INVITATION_URL,
+  newStaffInviteToken,
+  staffInviteTokenHash,
+  type PartnerStaffInvitationView,
+} from './application/partner-staff-invitations.js';
+export {
+  CORE_EVENT_OWNERS,
+  DEFAULT_STAFF_INVITATION_URL,
+  STAFF_INVITE_MAILER,
+  STAFF_INVITE_MAX,
+  STAFF_INVITE_TOKEN_TTL_MS,
+  STAFF_VALID_AFTER_MS,
+  STAFF_VALID_BEFORE_MS,
+  type CoreEventOwner,
+  type CoreEventOwners,
+  type StaffInviteMail,
+  type StaffInviteMailer,
+} from './domain/staff.js';
+export { CORE_EVENT_OWNER_TIMEOUT_MS, HttpCoreEventOwners, coreEventOwnerOf } from './adapters/http-core-event-owners.js';
+export { FileStaffInviteMailer, STAFF_MAIL_DIR_ENV, STAFF_MAIL_FILE, staffInvitationUrlFromEnv, staffInviteMailerFromEnv } from './adapters/file-staff-invite-mailer.js';
 export { StartDeviceAuthorization, DeviceAuthorizationError, type DeviceAuthorizationStart, SCANNER_APPROVAL_URL_ENV } from './application/start-device-authorization.js';
 export { DeviceApprovals, DeviceApprovalError, type DeviceApprovalView } from './application/device-approvals.js';
 export { PollScannerToken, ScannerTokenError, type ScannerTokenGrant } from './application/poll-scanner-token.js';

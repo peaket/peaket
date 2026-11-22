@@ -4,7 +4,7 @@
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다. identity 자신의 경로는 DB로도 끝난 세션을 막는다(identity §8)
 import 'reflect-metadata';
-import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, publicOriginFromEnv, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createExternalHttpClient, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, publicOriginFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
 import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, adminSessionHandlers, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, TerminateAdminSessions, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
@@ -44,11 +44,14 @@ import {
   TokenKeyRing,
   tokenIssuerFromEnv,
   GrpcScannerDeviceRegistry,
+  HttpCoreEventOwners,
   RedisDeviceAuthorizations,
   RedisDeviceApprovalLimits,
   RedisScannerDpopReplayStore,
   RetryPendingWithdrawals,
   WITHDRAWAL_RETRY_INTERVAL_MS,
+  staffInvitationUrlFromEnv,
+  staffInviteMailerFromEnv,
   withdrawalParticipantsFromEnv,
 } from './modules/session/index.js';
 import {
@@ -138,6 +141,13 @@ const database = createDatabase({ url, applicationName: SERVICE });
 const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
 // 없거나 비면 운영으로 본다(위 RP 검사·플랫폼 설정과 같다). 로컬에서 Redis 없이 띄우려면 PEAKET_ENV=local을 준다
 const env = process.env.PEAKET_ENV || 'prod';
+// 파트너 현장 스태프 초대(BAT-450B, ADR-0353): 회차 소유는 core-svc 읽기 전용 내부 HTTP로 본다.
+// local·ci 밖에서 주소가 없으면 시작하지 않는다(초대가 조용히 503이 되는 배포를 막는다). 초대 메일은 local·ci 파일 대역만 있다.
+const coreHttpUrl = process.env.PEAKET_CORE_HTTP_URL;
+if (!coreHttpUrl && env !== 'local' && env !== 'ci') throw new Error('PEAKET_CORE_HTTP_URL이 없다(파트너 초대의 회차 소유 확인, 운영 필수)');
+const coreEventOwners = coreHttpUrl ? new HttpCoreEventOwners(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 5_000 }), process.env.PEAKET_INTERNAL_TOKEN) : undefined;
+const staffInviteMailer = staffInviteMailerFromEnv(process.env);
+const staffInvitationUrl = staffInvitationUrlFromEnv(process.env);
 // C2-09: 잘못된 게이트웨이 공개 출처(경로·질의·조각)는 첫 요청이 아니라 시작 때 닫는다
 publicOriginFromEnv(process.env);
 const internalGrpcToken = internalGrpcTokenFromEnv(process.env);
@@ -167,7 +177,7 @@ const service = await createService({
   // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). identity의 Redis는 세션·캐시 클러스터다
   ...(cache ? { tenantRateLimit: { redis: cache } } : {}),
   ...(adminPepper ? { adminAuthz } : {}),
-  module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, withdrawalParticipants: withdrawal.participants, withdrawalSignals: signals, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
+  module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, withdrawalParticipants: withdrawal.participants, withdrawalSignals: signals, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}), ...(coreEventOwners ? { coreEventOwners } : {}), ...(staffInviteMailer ? { staffInviteMailer } : {}), staffInvitationUrl, partnerStaff: Boolean(adminPepper) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));
@@ -259,6 +269,8 @@ for (const w of merge.warnings) service.logger.warn(w);
 for (const w of withdrawal.warnings) service.logger.warn(w);
 if (!loginRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 세션의 로그인 판정이 늘 UNKNOWN이다');
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
+if (!coreEventOwners) service.logger.warn('PEAKET_CORE_HTTP_URL이 없어 파트너 초대의 회차 소유 확인이 503이다(local·ci만)');
+if (!staffInviteMailer) service.logger.warn('초대 메일 포트가 없어 파트너 초대 만들기·재발송이 503 provider-down이다(운영 대행은 GAT-250/BAT-455)');
 
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다.
 // Kafka 클라이언트(네이티브 모듈)는 여기서 싣는다
