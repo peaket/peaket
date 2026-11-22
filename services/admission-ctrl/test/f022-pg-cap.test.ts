@@ -141,6 +141,18 @@ describe('F022-RATIO 낮춘 채널 비율을 입장 상한에 잇기 (B17·B18, 
     expect(w.last().target).toBe(capOf(tps));
   });
 
+  test('F022-RATIO ⑨ 범위 위 비율(150)은 100으로 본다: 높여 들이지 않는다(동시 입장 상한 그대로)', async () => {
+    const w = world({ ctl: { pgKey: 'TOSS', pgTps: 50 }, ratio: () => tossAt('150') });
+    await w.run(4);
+    expect(w.last().target).toBe(capOf(50));
+  });
+
+  test('F022-RATIO ⑩ 범위 위 비율(101)은 100으로 본다: pgTps 200의 전진 속도는 200 그대로다(주기마다 40, 202로 올리면 몇 주기에 41이 섞인다)', async () => {
+    const w = world({ ctl: { pgKey: 'TOSS', pgTps: 200 }, ratio: () => tossAt('101') });
+    await w.run(12);
+    expect(w.ticks.slice(-8).map((t) => t.maxAdvance)).toEqual(Array.from({ length: 8 }, () => advanceOf(200)));
+  });
+
   test('F022-RATIO ③ 비율 줄이 없으면 100으로 본다', async () => {
     const w = world({ ctl: { pgKey: 'TOSS', pgTps: 50 }, ratio: () => [] });
     await w.run(4);
