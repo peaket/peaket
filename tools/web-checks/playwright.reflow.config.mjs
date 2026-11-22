@@ -28,6 +28,23 @@ const SERVERS = ['web', 'partner', 'console'].map((name) => {
   };
 });
 
+// 월렛 킬 스위치 서버(F-05-1 FE-T14·FE-T43, ADR-0363 결정 6): 같은 운영 빌드를 실행 값 PEAKET_WALLET_SW_MODE=kill로 한 번 더 띄운다(4181, 안쪽 5181).
+// reflow/wallet-sw.spec.mjs·web-push.spec.mjs가 PEAKET_WEB_KILL_PORT(기본 4181)로 연다
+const KILL_PORT = Number(process.env.PEAKET_WEB_KILL_PORT ?? 4181);
+{
+  const app = APPS.find((a) => a.name === 'web');
+  const { env } = serverCommand(app, 'prod');
+  SERVERS.push({
+    command: `node ../../${app.dir}/server/start.mjs --port ${KILL_PORT} --inner-port ${KILL_PORT + 1000}`,
+    env: { ...env, NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: SERVER_ACTIONS_KEY, PEAKET_WALLET_SW_MODE: 'kill' },
+    url: `http://127.0.0.1:${KILL_PORT}/`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
+}
+
 // 화면 매트릭스(docs/frontend.md §5.17 '화면 매트릭스와 FE-T31·FE-T18 자동 몫의 세부', BAT-170 웨이브 7):
 // 세 엔진 × 320×256·640×400, 그리고 세 엔진의 기본 폭 프로젝트. 로케일은 주소 접두(/en)로 돌고 Playwright locale은 바꾸지 않는다.
 // 프로젝트마다 시험 이름의 폭 표시(' 320: '·' 640: '·' 640 글자 간격: '·' 기본 폭: ')로 고른다.

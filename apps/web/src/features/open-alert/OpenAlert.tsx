@@ -4,7 +4,7 @@
 // - 처음 켤 때는 웹 푸시 권한 안내(CMP-068 ds NotifyPermissionSheet, 보드 SCR-001 '알림 권한 안내')를 먼저 보이고, 권한은 시트의 버튼을 누른 뒤에만 묻는다(NFR-019).
 //   [알림 켜기]는 화면이 넘긴 enablePush(features/web-push, ADR-0363 결정 7)를 그 처리기 안에서 불러 권한을 묻고 구독을 등록한다.
 //   켤 수 없으면(권한 거부·미지원·VAPID 공개키 없음·422) "이메일로 알려 드립니다"를 토스트로 보인다. 신청 자체는 onToggle을 넘긴 화면이 API로 한다(홈, HOT-300).
-//   시트가 열릴 때 preparePush로 모듈을 미리 받아, 누른 동작 안에서 권한을 묻는다(Safari, notify §3.5).
+//   모듈은 셸이 붙을 때 이미 받아 두므로 누른 동작 안에서 권한을 묻는다(Safari, notify §3.5).
 // - onToggle을 넘기면 누르는 즉시 바뀐 모양을 보이고(낙관적 갱신), 실패하면 되돌리고 토스트를 띄운다(d5 §5.1).
 // - 로그인 전에 누르면 로그인(SCR-004)으로, 오프라인이면 aria-disabled + 오프라인 띠(id)로 이유를 잇는다.
 // - 누르면 토스트 "오픈 알림을 신청했습니다"/"오픈 알림을 껐습니다".
@@ -28,15 +28,10 @@ const OpenAlertContext = createContext<OpenAlertContextValue>({
   requestEnable: (enable) => enable(),
 });
 
-/** 웹 푸시 켜기 결과(features/web-push WebPushEnableResult의 모양) */
-export type OpenAlertPushResult = { kind: 'subscribed' } | { kind: 'email-only' };
-
 export interface OpenAlertProviderProps {
   guest?: boolean;
-  /** [알림 켜기]: 권한을 묻고 웹 푸시를 구독·등록한다(화면이 features/web-push를 잇는다). 없으면 묻지 않는다 */
-  enablePush?: () => Promise<OpenAlertPushResult>;
-  /** 권한 안내 시트가 열릴 때(웹 푸시 모듈을 미리 받는다) */
-  preparePush?: () => void;
+  /** [알림 켜기]: 권한을 묻고 웹 푸시를 구독·등록한다(화면이 widgets/app-shell enableWebPush를 잇는다). 켤 수 없으면 받은 toast로 이메일 안내를 띄운다. 없으면 묻지 않는다 */
+  enablePush?: (toast: (message: string, icon?: string) => void) => Promise<unknown>;
   offlineReasonId?: string;
   loginHref?: string;
   /** 권한 안내 시트를 연 채로 그린다(상태 '알림 권한 안내') */
@@ -44,7 +39,7 @@ export interface OpenAlertProviderProps {
   children: ReactNode;
 }
 
-export function OpenAlertProvider({ guest = false, offlineReasonId, loginHref = '/login', defaultSheetOpen = false, enablePush, preparePush, children }: OpenAlertProviderProps) {
+export function OpenAlertProvider({ guest = false, offlineReasonId, loginHref = '/login', defaultSheetOpen = false, enablePush, children }: OpenAlertProviderProps) {
   const toast = useToast();
   const [asked, setAsked] = useState(false);
   const [open, setOpen] = useState(defaultSheetOpen);
@@ -56,10 +51,9 @@ export function OpenAlertProvider({ guest = false, offlineReasonId, loginHref = 
       else {
         setPending(() => enable);
         setOpen(true);
-        preparePush?.();
       }
     },
-    [asked, preparePush],
+    [asked],
   );
 
   const finish = () => {
@@ -88,13 +82,7 @@ export function OpenAlertProvider({ guest = false, offlineReasonId, loginHref = 
         }
         onAllow={() => {
           // 누른 처리기 안에서 권한을 묻는다. 신청(pending)은 결과와 상관없이 마친다(이메일은 늘 간다)
-          if (enablePush) {
-            void enablePush()
-              .then((r) => {
-                if (r.kind !== 'subscribed') toast('이메일로 알려 드립니다', 'ic-mail');
-              })
-              .catch(() => toast('이메일로 알려 드립니다', 'ic-mail'));
-          }
+          void enablePush?.(toast).catch(() => undefined);
           finish();
         }}
         onFallback={finish}

@@ -33,7 +33,7 @@ export function LogoutDialog({ open, onClose, onConfirm, error = null, busy = fa
             aria-disabled={busy ? true : undefined}
             onClick={() => (busy ? undefined : onConfirm({ clearEntryKeys: clearKeys }))}
           >
-            {busy ? "로그아웃 중…" : error ? "다시 시도" : "로그아웃"}
+            {error ? "다시 시도" : "로그아웃"}
           </button>
           <button className={webModalButtonClass("ghost")} type="button" onClick={onClose}>
             취소

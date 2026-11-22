@@ -221,8 +221,8 @@ export function WebShell({
   const hrefs: WebShellHrefs = { ...WEB_SHELL_DEFAULT_HREFS, ...hrefsProp, locales: { ...WEB_SHELL_DEFAULT_HREFS.locales, ...hrefsProp?.locales } };
   const [menuOpen, setMenuOpen] = useState(defaultOpen === "menu");
   const [logoutOpen, setLogoutOpen] = useState(defaultOpen === "logout");
-  const [logoutBusy, setLogoutBusy] = useState(false);
-  const [logoutError, setLogoutError] = useState<string | null>(null);
+  /** 로그아웃을 보내는 중(true)·실패 글(문자열)·없음(null) */
+  const [logoutState, setLogoutState] = useState<true | string | null>(null);
   // 휴대폰·태블릿 검색 모드 머리. 아이콘으로 열었으면 입력에 초점, [취소]로 닫으면 아이콘으로 초점을 돌려준다
   const [barOpen, setBarOpen] = useState(Boolean(search?.barOpen));
   const [barFocus, setBarFocus] = useState(false);
@@ -482,28 +482,22 @@ export function WebShell({
 
       <LogoutDialog
         open={logoutOpen}
-        busy={logoutBusy}
-        error={logoutError}
+        busy={logoutState === true}
+        error={logoutState === true ? null : logoutState}
         onClose={() => {
-          if (logoutBusy) return;
+          if (logoutState === true) return;
           setLogoutOpen(false);
-          setLogoutError(null);
+          setLogoutState(null);
         }}
         onConfirm={(opts) => {
-          const r = onLogout?.(opts);
-          if (!r || typeof (r as Promise<unknown>).then !== "function") {
-            setLogoutOpen(false);
-            return;
-          }
-          setLogoutBusy(true);
-          setLogoutError(null);
-          void (r as Promise<{ error?: string } | void>)
-            .then((out) => {
-              if (out && out.error) setLogoutError(out.error);
-              else setLogoutOpen(false);
-            })
-            .catch(() => setLogoutError("로그아웃하지 못했습니다. 다시 시도해 주세요"))
-            .finally(() => setLogoutBusy(false));
+          setLogoutState(true);
+          void Promise.resolve(onLogout?.(opts)).then(
+            (out) => {
+              setLogoutState(out?.error ?? null);
+              if (!out?.error) setLogoutOpen(false);
+            },
+            () => setLogoutState("로그아웃하지 못했습니다. 다시 시도해 주세요"),
+          );
         }}
       />
     </div>

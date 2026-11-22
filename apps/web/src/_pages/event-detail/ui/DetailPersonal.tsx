@@ -9,14 +9,10 @@
 // - 본인확인·예매 제한·선예매 같은 다른 개인 상태는 HOT-321·340·346이 얹는다. api-client는 늦게 가져온다(첫 화면 JS 예산, §5.8).
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { alertFailureText, OpenAlertProvider } from '@/features/open-alert';
+import { enableWebPush } from '@/widgets/app-shell';
 import { isRefreshUnavailableError, isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
 import { browserClock } from '@/shared/lib/clock';
-
-/** CMP-068 [알림 켜기]의 웹 푸시(ADR-0363 결정 7). 모듈은 시트가 열릴 때 미리 받고 누를 때 쓴다(첫 JS에 넣지 않는다) */
-const webPushModule = () => import('@/features/web-push');
-const prepareWebPush = () => void webPushModule().catch(() => undefined);
-const enableWebPush = () => webPushModule().then((m) => m.browserWebPush().enable());
 import { subscriptionFlags } from '../model/subscriptions';
 
 type Status = 'loading' | 'guest' | 'ready';
@@ -151,7 +147,7 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
 
   return (
     <PersonalContext.Provider value={{ status, alertKnown, alertOn, setAlert, cancelOn, setCancel, wishKnown, wished, setWish }}>
-      <OpenAlertProvider guest={status === 'guest'} loginHref={loginHref} enablePush={enableWebPush} preparePush={prepareWebPush}>
+      <OpenAlertProvider guest={status === 'guest'} loginHref={loginHref} enablePush={enableWebPush}>
         {children}
       </OpenAlertProvider>
     </PersonalContext.Provider>

@@ -26,9 +26,6 @@ import { GENRES, searchHref } from '@/shared/config/genres';
 import { ToastProvider } from '@/shared/ui/toast';
 import { useRecentSearches, useSuggestionSource } from './search-source';
 
-/** 이 문서에서 웹 푸시 다시 묶기를 이미 했는가 */
-let rebound = false;
-
 const SHELL_GENRES = [
   ...GENRES.map((g) => ({ label: g.label, href: searchHref.genre(g.key), icon: g.icon })),
   { label: '굿즈 스토어', href: '/shop', icon: 'goods' },
@@ -46,6 +43,15 @@ export interface AppShellSearch {
   /** 주소의 q를 입력에 채운다(검색 화면은 정적 셸이라 서버가 주소를 읽지 않는다, HOT-313) */
   queryFromUrl?: boolean;
 }
+
+/**
+ * 셸 세션 배선 모듈(늦게 싣는다). 셸과 알림 켜기가 같은 모듈 하나를 함께 받는다(첫 JS 예산). 셸이 붙자마자 받아 두므로
+ * [알림 켜기]를 누를 때는 이미 받아 있어 누른 동작 안에서 권한을 묻는다(notify §3.5)
+ */
+const sessionWiring = () => import('./model/session-wiring');
+
+/** CMP-068 [알림 켜기]의 웹 푸시(ADR-0363 결정 7). 켤 수 없으면 toast로 이메일 안내를 띄운다. 화면이 OpenAlertProvider·권한 시트에 넘긴다 */
+export const enableWebPush = (toast?: (message: string, icon?: string) => void) => sessionWiring().then((m) => m.enable(toast));
 
 export interface AppShellProps {
   /** default 일반 · focus 예매 흐름 · staff 현장 스태프 · minimal 로고만(잠깐 거쳐 가는 화면) */
@@ -98,47 +104,17 @@ export function AppShell({
     : user
       ? { name: user.name, avatarText: user.avatarText, verified: user.verified, hasStaffAssignment: user.hasStaffAssignment }
       : (live ?? null);
-  const logout = useCallback(async ({ clearEntryKeys }: { clearEntryKeys: boolean }): Promise<{ error?: string } | void> => {
-    try {
-      const [{ logoutCleanup }, { browserWebPush }] = await Promise.all([import('@/features/session-cleanup'), import('@/features/web-push')]);
-      const r = await logoutCleanup({ wallet: clearEntryKeys, server: true, pushUnbind: () => browserWebPush().unbind() });
-      if (r.server === 'ok') {
-        window.location.assign('/');
-        return;
-      }
-    } catch {
-      // 모듈을 받지 못했거나(연결 끊김) 정리 중 뜻밖 오류: 아래 다시 시도 안내
-    }
-    return { error: '로그아웃하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요' };
-  }, []);
-  // 다른 탭의 로그아웃(§5.14.4 4번): 이 탭의 저장물을 지우고 로그인 화면으로
-  useEffect(() => {
-    let stop: (() => void) | undefined;
-    let cancelled = false;
-    void import('@/features/session-cleanup')
-      .then((m) => {
-        if (!cancelled) stop = m.listenSessionLogout(() => window.location.assign('/login'));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      stop?.();
-    };
-  }, []);
-  // 로그인한 셸: 웹 푸시 구독을 지금 계정에 다시 묶는다(§4.2.4 '웹 푸시 다시 묶기'). 문서마다 한 번
+  // 세션 배선(로그아웃 정리·다른 탭 로그아웃·웹 푸시 다시 묶기)은 model/session-wiring.ts를 늦게 싣는다(첫 JS 예산, ADR-0363 결정 8)
+  // 모듈을 받지 못하면(연결 끊김) 셸 대화상자가 다시 시도를 안내한다
+  const logout = useCallback((opts: { clearEntryKeys: boolean }) => sessionWiring().then((m) => m.logout(opts)), []);
   const signedIn = Boolean(live);
   useEffect(() => {
-    if (!signedIn || rebound) return;
-    rebound = true;
-    void import('@/features/web-push')
-      .then((m) => m.browserWebPush().rebind())
-      .then((r) => {
-        // 실패하면 다음 화면 열림에 한 번 더 한다
-        if (r.kind === 'failed') rebound = false;
-      })
-      .catch(() => {
-        rebound = false;
-      });
+    // 붙기 전에 떠나도 받은 뒤 바로 멈춘다
+    const started = sessionWiring().then(
+      (m) => m.start(signedIn),
+      () => undefined,
+    );
+    return () => void started.then((stop) => stop?.());
   }, [signedIn]);
   return (
     <ToastProvider>
