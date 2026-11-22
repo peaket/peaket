@@ -14,7 +14,7 @@ import { startGrpcServer } from './grpc-server.js';
 import { startQueueControlServer } from './control/control-server.js';
 import { BOOKING_RESTRICTIONS, Es256AdmissionTokens, priorityGrantHandlers, bookingRestrictionHandlers, PromAdmissionSignals, PurchaseSessionHandler, PurchaseSessionSlots, SetPriorityGrant } from './modules/admission/index.js';
 import { AccountWithdrawnHandler, GrpcTrustRisk, kmsSealClient, MemoryDegradedLimits, PromRiskSignals, seedSealerFromEnv, HmacArrivalCookies, HmacFirstVisitCookies, HmacQueueTokens, PromArrivalSignals, PromEligibilitySignals, PromFirstVisitSignals, PromLeaveSignals, PromLobbySignals, PurgeWithdrawnKeys, RedisEventSchedules, RedisWithdrawnKeys, ShuffleCommits, ShuffleCommitWorker, TRUST_BREAKER, unavailableRisk } from './modules/entry/index.js';
-import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisSaleStates, SetSaleSuspensionCopy } from './modules/sale/index.js';
+import { ApplySaleChange, type EdgeFlagSync, edgeSyncPausedFromEnv, EventSaleChangedHandler, RedisQueueNotices, RedisSaleStates, SetQueueNotice, SetSaleSuspensionCopy } from './modules/sale/index.js';
 import { type CaseRequestPublisher, GetVerificationAppeal, GrpcReverification, KafkaCaseRequests, LocalCaseRequests, PromVerificationSignals, queuePackage, ResolveVerificationAppeal, verificationAppealHandlers } from './modules/verification/index.js';
 
 const SERVICE = 'queue-svc';
@@ -242,6 +242,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
           port: controlPort,
           deps: {
             setSuspension: service.app.get(SetSaleSuspensionCopy),
+            // 명령 3·7(F-02-1 OPS-300, ADR-0365 결정 6): q:{event:E}:notice·q:{event:PLATFORM}:notice
+            setNotice: new SetQueueNotice(new RedisQueueNotices(redis)),
             podName: (env.PEAKET_POD ?? env.HOSTNAME ?? 'local').slice(0, 64),
             nowMs: () => systemClock.now(),
             onError: (method, err) => service.logger.error({ err: errorSummary(err), method }, 'ControlReceiver 처리 실패'),
