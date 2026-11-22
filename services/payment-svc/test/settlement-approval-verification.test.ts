@@ -33,8 +33,10 @@ class FakeApprovals implements PayoutApprovalVerifier {
   readonly rows = new Map<string, VerifiedPayoutApproval>();
   calls = 0;
   fail = false;
+  rawError = false;
   async verify(approvalId: string): Promise<VerifiedPayoutApproval | undefined> {
     this.calls += 1;
+    if (this.rawError) throw new Error('verifier-crashed');
     if (this.fail) throw new SettlementProblem('dependency-unavailable', 503, '승인 기록을 확인할 수 없습니다');
     return this.rows.get(approvalId);
   }
@@ -79,6 +81,7 @@ beforeEach(async () => {
   approvals.rows.clear();
   approvals.calls = 0;
   approvals.fail = false;
+  approvals.rawError = false;
   suspensions.suspended.clear();
   suspensions.fail = false;
   log.approvedLogs.length = 0;
@@ -179,6 +182,14 @@ describe('J-T31 지급 묶음 승인 ID 대조', () => {
     await stillPending(batch.batchId);
     expect(store.payoutBatchAudits.filter((a) => a.event === 'REJECTED')).toHaveLength(1);
     expect(log.rejectedLogs).toHaveLength(1);
+  });
+
+  test('J-T31 ④(알 수 없는 오류) 확인기가 SettlementProblem이 아닌 오류를 던져도 503으로 닫고 상태를 바꾸지 않는다', async () => {
+    const batch = await makeBatch();
+    approvals.rawError = true;
+    await expect(settlements.approveBatch(batch.batchId, randomUUID())).rejects.toMatchObject({ status: 503, type: expect.stringContaining('dependency-unavailable') });
+    await stillPending(batch.batchId);
+    expect(store.payoutBatchAudits.filter((a) => a.event === 'REJECTED')).toHaveLength(1);
   });
 
   test('J-T31 ⑤ 같은 승인 ID 재요청은 처음 결과 그대로이고, 다른 배치 재사용은 409다', async () => {
