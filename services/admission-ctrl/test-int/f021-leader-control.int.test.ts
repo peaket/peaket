@@ -207,7 +207,7 @@ describe('Q-T30 리더 아닌 파드와 옛 리더의 제어 쓰기 (ApplyLeader
     const store = new RedisLeaderStore(redis);
     // 펜싱 표시는 리더 루프 그 자체다(FENCED를 본 세대로는 루프도 제어도 쓰지 않는다)
     const fence = new AdmissionLeader(store, { run: async () => ({ status: 'PUBLISHED' }) }, e.elector, fakeClock({ now: Date.now() }));
-    return { ...e, apply: new ApplyLeaderControl(store, e.elector, fence) };
+    return { ...e, leader: fence, apply: new ApplyLeaderControl(store, e.elector, fence) };
   };
   /** ApplyLeaderControl.run이 받는 요청(proto ApplyControlRequest의 칸, 판은 수) */
   const leaderReq = (scope: string, kind: ApplyLeaderControlInput['kind'], version: number, desiredStateJson: string): ApplyLeaderControlInput => ({ commandId: randomUUID(), scope, kind, version, desiredStateJson });
@@ -258,5 +258,28 @@ describe('Q-T30 리더 아닌 파드와 옛 리더의 제어 쓰기 (ApplyLeader
     await redis.command(['SET', leaderKey(e), String(gen + 1)], { key: leaderKey(e) });
     await expect(control.apply(pauseReq(e, 600, false))).rejects.toMatchObject({ code: status.UNAVAILABLE, details: expect.stringContaining('fenced') });
     expect(await hash(ctl(e))).toMatchObject({ admitPaused: '1', admitRev: '500' });
+  });
+
+  // 이 둘은 전체 범위 세대 키를 높은 세대로 올리므로 시작 파일 리더(낮은 세대)를 쓰는 ④ 뒤에 둔다.
+  // RV-02(리뷰 반영 재현, F-02-1 계획 15절): 새 리더가 서면(리더 루프가 그 세대로 한 바퀴 돈다) 옛 세대의 제어 쓰기는 회차 범위만이 아니라
+  // 전체 범위(q:{admission}:leader, 명령 3 전체·명령 11)와 진행 중이 아닌(오픈 전) 회차 키에서도 FENCED다(Q-T30 '옛 리더의 쓰기는 모두 FENCED', ADR-0365 결정 5, ADR-0056)
+  test('RV-02 ① 새 리더가 선 뒤 옛 리더의 전체 범위 명령 11·명령 3 쓰기는 FENCED이고 q:{admission}:ctl이 그대로다', async () => {
+    const old = applyWith(50);
+    expect(await old.apply.run(leaderReq('PLATFORM', 'CONTROL_KIND_AUTOMATION_STOP', 1_000_000, '{"stopped":true}'))).toMatchObject({ status: 'APPLIED' });
+    const before = await hash(platformCtl);
+    const fresh = applyWith(51);
+    await fresh.leader.tick();
+    expect(await old.apply.run(leaderReq('PLATFORM', 'CONTROL_KIND_AUTOMATION_STOP', 1_000_001, '{"stopped":false}'))).toEqual({ status: 'FENCED' });
+    expect(await old.apply.run(leaderReq('PLATFORM', 'CONTROL_KIND_SALE_PAUSE', 1_000_002, '{"paused":true}'))).toEqual({ status: 'FENCED' });
+    expect(await hash(platformCtl)).toEqual(before);
+  });
+
+  test('RV-02 ② 새 리더가 선 뒤 옛 리더의 오픈 전(진행 중 목록에 없는) 회차 제어 쓰기도 FENCED이고 아무것도 쓰지 않는다', async () => {
+    const fresh = applyWith(61);
+    await fresh.leader.tick();
+    const old = applyWith(60);
+    const e = randomUUID();
+    expect(await old.apply.run(pauseReq(e, 100, true))).toEqual({ status: 'FENCED' });
+    expect(await exists(ctl(e))).toBe(0);
   });
 });
