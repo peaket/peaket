@@ -111,9 +111,10 @@ test('FE-T48 ② 권한 거부·PushManager 없음·VAPID 공개키 빌드 값 �
     assert.equal(a.calls.length, 0, `${label}: 요청`);
     assert.equal(b.calls.subscribe.length, 0, `${label}: 구독`);
   }
-  // 화면(CMP-068 [알림 켜기])은 켜지 못하면 그 문구를 보인다
+  // 화면(CMP-068 [알림 켜기])이 켜지 못하면 그 문구를 띄우는 동작은 셸 배선(widgets/app-shell/model/session-wiring.ts enable)으로 옮겨 갔다(커밋 0ed6e470a).
+  // 그 동작과 화면이 배선을 부르는지는 widgets/app-shell/model/session-wiring.test.mjs 'FE-T48 ②'가 본다. 여기서는 [알림 켜기]가 받은 toast로 부르는지만 본다
   const ui = readFileSync(new URL('../open-alert/OpenAlert.tsx', import.meta.url), 'utf8');
-  assert.match(ui, /if \(r\.kind !== 'subscribed'\) toast\('이메일로 알려 드립니다'/);
+  assert.match(ui, /void enablePush\?\.\(toast\)/);
 });
 
 test("FE-T48 ③ 등록이 422 push-service-not-allowed면 이메일로 알려 드립니다(같은 문구)", async () => {

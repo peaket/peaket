@@ -183,11 +183,12 @@ test('FE-T47 ④ 서버 로그아웃이 503·연결 실패면 다시 시도를 �
     assertLogoutCleared(t, String(server));
     assert.equal(log.at(-1), 'fetch:POST /logout:cleared', String(server));
   }
-  // 셸 대화상자가 실패면 대화상자 안에서 다시 시도를 안내한다(홈으로 가지 않는다)
+  // 셸 대화상자가 실패면 대화상자 안에서 다시 시도를 안내한다(홈으로 가지 않는다). 셸은 늦게 싣는 배선 모듈(widgets/app-shell/model/session-wiring.ts)로
+  // 이 루틴을 부른다(첫 JS 예산, 커밋 0ed6e470a). 배선의 동작(차례·이동·다시 시도)은 widgets/app-shell/model/session-wiring.test.mjs가 본다.
+  // 여기서는 배선이 대화상자의 '이 기기의 입장 키도 지우기'를 3번에 넘기고 서버 로그아웃까지 하는지(부르는 쪽이 결과를 쓰는가)만 본다
   const { readFileSync } = await import('node:fs');
-  const shell = readFileSync(new URL('../../widgets/app-shell/AppShell.tsx', import.meta.url), 'utf8');
-  // 셸은 대화상자의 '이 기기의 입장 키도 지우기'를 3번에 넘기고 서버 로그아웃까지 한다(부르는 쪽이 결과를 쓰는가)
-  assert.match(shell, /logoutCleanup\(\{ wallet: clearEntryKeys, server: true, pushUnbind: /);
+  const wiring = readFileSync(new URL('../../widgets/app-shell/model/session-wiring.ts', import.meta.url), 'utf8');
+  assert.match(wiring, /logoutCleanup\(\{ wallet: clearEntryKeys, server: true, pushUnbind: /);
 });
 
 test('FE-T47 ⑤ 탈퇴 204·계정 흡수는 대화상자 없이 ①과 같이 지우고 서버 로그아웃은 보내지 않으며 흡수 표시는 남는다', async () => {
