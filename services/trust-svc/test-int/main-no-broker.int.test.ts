@@ -6,7 +6,8 @@ import { expect, test } from 'vitest';
 import { bootMain } from './main-boot.js';
 
 test('C-T75 ② 운영 값으로 띄운 trust-svc는 제어 설정 토픽 브로커 주소가 없으면 PlatformConfigError로 시작에 실패하고 관리 포트를 열지 않는다', async () => {
-  const boot = bootMain({});
+  // 제어 설정 동기화를 진짜로 둔다(다른 운영 값 시험은 bootMain이 이 도우미 하나만 바꾼다)
+  const boot = bootMain({}, { realControlSync: true });
   // 잘못 떠 버리면(이 시험이 실패하는 경우) 띄운 Valkey 컨테이너를 남기지 않는다. 실패한 시작은 bootMain이 이미 멈춘다
   void boot.then(
     (r) => r.valkey.stop(),
