@@ -6,7 +6,7 @@
 // 제어 gRPC 주소가 있으면 ControlReceiver.ApplyControl(판 번호 ack)이 정본이다(ADR-0102·0123).
 import type { ExternalHttpClient } from '@peaket/platform';
 import type { Command, CommandExecutionActor, CommandExecutionResult } from '../modules/commands/domain/command.js';
-import type { CommandExecutor } from '../modules/commands/domain/ports.js';
+import type { CommandExecutor, ControlDeliverer } from '../modules/commands/domain/ports.js';
 import type { EventRefundStarter, RefundFault, RefundKind, RefundPg } from './grpc-event-refunds.js';
 import type { ControlSender } from './grpc-control-sender.js';
 
@@ -22,8 +22,15 @@ export interface HttpCommandExecutorOptions {
   readonly refunds?: EventRefundStarter;
   readonly queue?: Pick<ExternalHttpClient, 'request'>;
   readonly internalToken?: string;
-  /** 제어 gRPC 정본(ADR-0102). 있으면 판매 중지·재개는 이 길로 보낸다 */
+  /** 제어 gRPC 정본(ADR-0102). 있으면 판매 중지·재개는 이 길로 보낸다(주소 하나씩의 옛 길) */
   readonly control?: { readonly purchase?: ControlSender; readonly queue?: ControlSender };
+  /**
+   * 제어 gRPC 퍼뜨리기(F-02-1, ADR-0365 결정 3·4). 있으면 판매 중지·재개를 원장 판으로 준비된 모든 파드에 보내고 ack를 기다린다(control보다 먼저).
+   * 차례(중지 purchase → queue, 재개 반대)는 그대로다(ADR-0123)
+   */
+  readonly controlDelivery?: ControlDeliverer;
+  /** 지금 시각(퍼뜨리기의 시작 시각). 없으면 Date.now */
+  readonly nowMs?: () => number;
   /**
    * core-svc 공연 판매 승인 상태까지 바꿀지(BAT-620). 기본 참(core가 있을 때).
    * 회차 취소 확정의 판매 멈춤 어댑터는 회차 하나만 멈추므로 `withoutCoreSaleReview()`로 끈다.
@@ -165,11 +172,12 @@ export class HttpCommandExecutor implements CommandExecutor {
     if (coreEnabled && action === 'SUSPEND' && reasonCode === undefined) return { status: 'FAILED', error: 'invalid-sale-suspension-params' };
     const approvalId = typeof command.params.suspensionRef === 'string' ? command.params.suspensionRef : command.commandId;
 
-    const useGrpc = this.o.control?.purchase !== undefined && this.o.control.queue !== undefined;
+    const useFanout = this.o.controlDelivery !== undefined;
+    const useGrpc = useFanout || (this.o.control?.purchase !== undefined && this.o.control.queue !== undefined);
     const useHttp = this.o.purchase !== undefined && this.o.queue !== undefined;
     if (!useGrpc && !useHttp) return { status: 'FAILED', error: 'target-not-wired' };
     const transport = useGrpc ? 'control-grpc' : 'purchase-svc+queue-svc';
-    const apply = (id: string) => (useGrpc ? this.#applyControlGrpc(command, action, id) : this.#applyControlHttp(command, action, id));
+    const apply = (id: string) => (useFanout ? this.#applyControlFanout(command, action, id) : useGrpc ? this.#applyControlGrpc(command, action, id) : this.#applyControlHttp(command, action, id));
 
     if (action === 'SUSPEND') {
       const scope = coreEnabled ? await this.#coreScope(eventId) : undefined;
@@ -213,9 +221,30 @@ export class HttpCommandExecutor implements CommandExecutor {
     return { status: 'SUCCEEDED', detail: { target: transport, eventId, suspended: false, ...(r.revision !== undefined ? { revision: r.revision } : {}) } };
   }
 
-  /** 회차 하나의 제어 gRPC 집행(판 번호 ack 확인). 중지는 purchase → queue, 재개는 queue → purchase다 */
+  /**
+   * 회차 하나의 제어 gRPC 퍼뜨리기(F-02-1, ADR-0365 결정 1·4): 판은 원장이 DISPATCHED 때 매긴 판(없으면 명령 기록의 바뀐 시각)이고,
+   * 받는 쪽 서비스마다 준비된 모든 파드가 판 이상을 답해야 다음 서비스로 간다. 중지는 purchase → queue, 재개는 queue → purchase다
+   */
+  async #applyControlFanout(command: Command, action: 'SUSPEND' | 'RESUME', eventId: string): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
+    const version = command.controlVersion ?? command.updatedAtMs;
+    const desiredStateJson = JSON.stringify({ suspended: action === 'SUSPEND' });
+    const services = action === 'SUSPEND' ? (['purchase-svc', 'queue-svc'] as const) : (['queue-svc', 'purchase-svc'] as const);
+    for (const service of services) {
+      const r = await this.o.controlDelivery!.deliver({
+        commandId: command.commandId,
+        version,
+        deliveries: [{ service, scope: eventId, kind: 'CONTROL_KIND_SALE_SUSPENSION', desiredStateJson }],
+        startedAtMs: this.o.nowMs?.() ?? Date.now(),
+      });
+      if (!r.ok) return { ok: false, error: r.error };
+    }
+    return { ok: true, revision: version };
+  }
+
+  /** 회차 하나의 제어 gRPC 집행(판 번호 ack 확인, 주소 하나씩의 옛 길). 중지는 purchase → queue, 재개는 queue → purchase다 */
   async #applyControlGrpc(command: Command, action: 'SUSPEND' | 'RESUME', eventId: string): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
-    const version = command.updatedAtMs;
+    // 원장 판이 있으면 그 판이다(F-02-1, ADR-0365 결정 1). 없으면 명령 기록의 바뀐 시각(R-584)
+    const version = command.controlVersion ?? command.updatedAtMs;
     const desiredStateJson = JSON.stringify({ suspended: action === 'SUSPEND' });
     const targets = [
       { name: 'purchase-svc', sender: this.o.control!.purchase! },

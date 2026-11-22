@@ -62,7 +62,7 @@ interface CommonWiring {
   /** 감사 체인 지표 묶음(시작 조립이 서비스 레지스트리에 붙인다). 없으면 모듈이 만든다 */
   readonly auditSignals?: AuditSignals;
   /** dry-run 센 값 원천·명령 4 보호 대역 목록(시험·BAT-365), 명령 12 온세일 윈도우·하위 결제사 판정 원천(BAT-360, 시작 조립이 core HTTP·payment gRPC로 채운다) */
-  readonly commandExtras?: Pick<CommandsModuleExtras, 'dryRunSources' | 'protectedRanges' | 'signals' | 'pgAssignment' | 'postReviews' | 'blockIpSets' | 'opsEvents'>;
+  readonly commandExtras?: Pick<CommandsModuleExtras, 'dryRunSources' | 'protectedRanges' | 'signals' | 'pgAssignment' | 'postReviews' | 'blockIpSets' | 'opsEvents' | 'control'>;
   /** 우선 구매 권리 발급·회수(GAT-135). 없으면 그 경로를 열지 않는다 */
   readonly priority?: PriorityModuleDeps;
   /** 시험에서 체크포인트 시각을 고정한다. 없으면 Date.now */

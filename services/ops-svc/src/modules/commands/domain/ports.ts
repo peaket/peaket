@@ -1,6 +1,6 @@
 // 운영 명령 포트(저장소·실행·dry-run 원천·신호). 도메인은 DB·HTTP를 모른다.
 // 상태를 바꾸는 쓰기는 모두 CommandWriter(잠근 명령 행 하나의 트랜잭션) 위에서 command-writes.ts의 함수가 한다.
-import type { Command, CommandExecutionActor, CommandExecutionResult, CommandIdempotency, CommandState, CommandType, NewCommand } from './command.js';
+import type { Command, CommandDeliveryView, CommandExecutionActor, CommandExecutionResult, CommandIdempotency, CommandState, CommandType, NewCommand } from './command.js';
 import type { PostReviewAlertKind, PostReviewRow, PostReviewWriter } from './post-review.js';
 
 export interface CommandListQuery {
@@ -65,6 +65,9 @@ export interface CommandPatch {
   readonly executedAtMs?: number | null;
   readonly result?: Record<string, unknown> | null;
   readonly round?: number;
+  /** 지금 보내는 제어 판 번호와 그 판을 보내기 시작한 시각(ADR-0365 결정 1·4) */
+  readonly controlVersion?: number | null;
+  readonly controlSentAtMs?: number | null;
   readonly nowMs: number;
 }
 
@@ -105,7 +108,55 @@ export interface CommandWriter {
   setting?(s: SettingChange): Promise<void>;
   /** 명령 3·11의 사후 검토 행(command_post_review)을 같은 트랜잭션에서 고친다(ADR-0349 결정 7). 두 저장소가 채운다 */
   readonly postReviews?: PostReviewWriter;
+  /**
+   * 판 번호 원장(control_version, ADR-0365 결정 1): 범위마다 그 종류의 행을 잠그고 새 판 = max(범위들의 마지막 판 + 1, 지금 밀리초)를 매겨 모두에 쓴다.
+   * 같은 트랜잭션이다. 없는 저장소는 원장이 없다(명령 기록의 바뀐 시각을 판으로 쓰던 옛 길)
+   */
+  assignControlVersion?(q: { readonly scopes: readonly string[]; readonly kind: string; readonly nowMs: number }): Promise<number>;
 }
+
+/** 받는 파드 하나의 ack(또는 아직 답하지 않은 대상) 한 줄(command_delivery, ADR-0365 결정 4) */
+export interface ControlDeliveryRow {
+  readonly commandId: string;
+  readonly version: number;
+  readonly service: string;
+  readonly scope: string;
+  /** 부른 주소(host:port) */
+  readonly target: string;
+  readonly podName?: string;
+  readonly appliedVersion?: number;
+  /** 판 이상을 답한 시각(아직이면 없다) */
+  readonly ackedAtMs?: number;
+  readonly nowMs: number;
+}
+
+/** 파드마다의 ack 기록(ops DB command_delivery). 기록 실패는 전송을 막지 않는다(부르는 쪽이 삼킨다) */
+export interface ControlDeliveries {
+  /** 그 (명령, 판, 서비스, 범위, 주소)의 줄을 쓰거나 고친다. 한 번 ack한 줄은 ack를 잃지 않는다 */
+  record(row: ControlDeliveryRow): Promise<void>;
+  /** 그 판의 전파 상태(줄이 없으면 undefined) */
+  summary(commandId: string, version: number): Promise<CommandDeliveryView | undefined>;
+}
+
+/** 받는 쪽 서비스마다 부를 주소(ADR-0365 결정 3). 운영은 헤드리스 DNS를 부를 때마다 다시 풀고, local·ci는 주소 목록이다. 실패하면 던진다 */
+export interface ControlTargets {
+  resolve(service: string): Promise<readonly string[]>;
+}
+
+/** 주소 하나에 ApplyControl 한 번(데드라인 1초 [가정]). 실패·시간 초과는 던진다 */
+export interface ControlTransport {
+  apply(service: string, address: string, req: { readonly commandId: string; readonly scope: string; readonly kind: string; readonly version: number; readonly desiredStateJson: string }): Promise<{ readonly appliedVersion: number; readonly podName: string }>;
+}
+
+/** 받는 쪽 넷에 같은 판을 퍼뜨리고 ack를 기다리는 길(application ControlDispatcher가 구현, 실행기가 판매 중지·재개에 쓴다) */
+export interface ControlDeliverer {
+  /**
+   * 모든 받는 쪽이 판 이상을 답할 때까지 1초 [가정]마다 같은 판으로 다시 보낸다. startedAtMs + 10초에 못 미치면 실패다(ADR-0365 결정 4).
+   * 던지지 않는다
+   */
+  deliver(q: { readonly commandId: string; readonly version: number; readonly deliveries: readonly import('./control-kinds.js').ControlDelivery[]; readonly startedAtMs: number }): Promise<ControlDeliverResult>;
+}
+export type ControlDeliverResult = { readonly ok: true; readonly ackedAtMs: number; readonly acked: number } | { readonly ok: false; readonly error: string };
 
 /** 명령 사건 한 줄과 그 행위자(대응이 남아 있으면 관리 계정 ID). 사후 검토 ★ 칸(실행 기록·재개 시각과 승인자)을 채운다 */
 export interface CommandTimelineEntry {

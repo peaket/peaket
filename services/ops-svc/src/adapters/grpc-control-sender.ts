@@ -96,3 +96,28 @@ export class GrpcControlSender implements ControlSender {
     this.#client.close();
   }
 }
+
+/**
+ * 주소마다 클라이언트 하나를 두는 제어 gRPC 길(F-02-1, ADR-0365 결정 3·4: ControlTransport). 주소는 대상 찾기 포트가 준 것만 부른다.
+ * 처음 부르는 주소에 클라이언트를 만들고 닫을 때 모두 닫는다
+ */
+export class GrpcControlTransport {
+  readonly #senders = new Map<string, ControlSender>();
+
+  constructor(private readonly make: (address: string, service: string) => ControlSender = (address, service) => new GrpcControlSender({ address, dependency: `${service}-control` })) {}
+
+  apply(service: string, address: string, req: ControlRequest): Promise<ControlAck> {
+    const key = `${service}|${address}`;
+    let sender = this.#senders.get(key);
+    if (!sender) {
+      sender = this.make(address, service);
+      this.#senders.set(key, sender);
+    }
+    return sender.apply(req);
+  }
+
+  close(): void {
+    for (const s of this.#senders.values()) s.close();
+    this.#senders.clear();
+  }
+}
