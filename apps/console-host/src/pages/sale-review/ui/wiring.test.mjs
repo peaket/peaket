@@ -41,6 +41,8 @@ test('S-T41 ⑫_[ASVS v5.0.0-8.2.2] viewer·CS는 승인·반려 단추가 없�
 test('S-T41 ⑫ 승인·반려·409 뒤 목록·상세를 새로 읽고, 반려 사유를 검증한다', () => {
   assert.match(page, /problem\.reload/);
   assert.match(page, /await load\(/);
+  // 성공 안내 뒤에 서버를 다시 읽는다(안내만 하고 목록·상세를 낡게 두지 않는다)
+  assert.match(page, /setNotice\(\{ tone: 'ok'[\s\S]{0,400}setReason\(''\);[\s\S]{0,40}await load\(\)/);
   assert.match(page, /validateRejection\(/);
   assert.match(page, /validateApproval\(/);
   assert.match(page, /approvalBody\(/);
