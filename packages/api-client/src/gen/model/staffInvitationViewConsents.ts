@@ -11,9 +11,9 @@
  */
 
 export type StaffInvitationViewConsents = {
-  /** 수집·이용 고지(목적, 항목, 보유 기간, 거부권과 불이익) */
+  /** 수집·이용 고지(목적, 항목, 보유 기간, 거부권과 불이익). 줄마다 `이름: 내용`이고 줄바꿈 문자(LF)로 나눈다. 줄의 이름과 내용은 docs/planning/04-ia-flows-screens.md §3 SCR-050 ③이다. 화면은 줄 그대로 글자로만 보인다(ADR-0362 결정 2) */
   collection?: string;
-  /** 파트너 제공 고지(받는 자, 목적, 항목, 보유 기간, 거부권과 불이익) */
+  /** 파트너 제공 고지(받는 자, 목적, 항목, 보유 기간, 거부권과 불이익). 줄마다 `이름: 내용`이고 줄바꿈 문자(LF)로 나눈다. 줄의 이름과 내용은 docs/planning/04-ia-flows-screens.md §3 SCR-050 ④이다. 화면은 줄 그대로 글자로만 보인다(ADR-0362 결정 2) */
   provision?: string;
   /** 두 고지 문안의 판. 수락 요청의 consentVersion으로 그대로 보낸다(추천 적용 2026-10-30, ADR-0089) */
   consentVersion?: string;

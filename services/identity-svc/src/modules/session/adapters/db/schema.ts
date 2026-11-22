@@ -299,6 +299,8 @@ export const scannerSession = pgTable(
     expiresAt: at('expires_at').notNull(),
     lastSeenAt: at('last_seen_at'),
     terminatedAt: at('terminated_at'),
+    // 승인 때 기기 승인 요청에서 복사한 기기 원장 이름(예 동문-03). 0038 전의 행은 NULL(ADR-0362 결정 6)
+    deviceName: text('device_name'),
   },
   (t) => [
     index('scanner_session_assignment_idx').on(t.staffAssignmentId),

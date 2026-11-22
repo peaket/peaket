@@ -21,10 +21,11 @@ import {
   PROVIDER_INFO,
   REMOTE_LOGGED_OUT_ID,
   RESTRICTION,
+  SCANNER_SESSION_ID,
   withdrawQuote,
   type WithdrawQuote,
 } from '../model/account';
-import { settingsView, type SettingsDone } from '../model/state';
+import { settingsView, type SettingsDone, type SettingsView } from '../model/state';
 import { CopyCodeButton, SettingsDevices, SettingsFlows, WithdrawStartButton } from './SettingsFlows';
 
 /** 휴대폰은 맨 섹션, 태블릿부터 카드(키트 .card와 같은 테두리·모서리) */
@@ -48,6 +49,16 @@ export async function SettingsPage({ searchParams }: PageProps) {
   const verified = ME.verified && v.verified;
   // 실제 탈퇴·로그인한 기기는 미리보기 상태가 '기본'일 때만(?state= 미리보기는 목업 흐름, 새 맥락 리뷰 중간 4, BOT-044)
   const live = isLiveWithdraw() && state === '기본';
+  const scannerName = DEVICE_SESSIONS.find((d) => d.id === SCANNER_SESSION_ID)?.name ?? '현장 스캐너';
+  // 스태프 세션 미리보기(d5 §5.17): 끝냄·이미 끝남은 줄을 빼고 토스트, 못 불러옴은 줄 자리에 실패 안내
+  const removedIds = [...(v.remoteLoggedOut ? [REMOTE_LOGGED_OUT_ID] : []), ...(v.scanner === 'shown' ? [] : [SCANNER_SESSION_ID])];
+  const toastOnMount = v.remoteLoggedOut
+    ? 'Safari · iPhone에서 로그아웃했습니다'
+    : v.scanner === 'ended'
+      ? `${scannerName}의 스태프 세션을 끝냈습니다`
+      : v.scanner === 'gone'
+        ? '이미 끝난 스캐너 세션입니다'
+        : undefined;
 
   return (
     // 탈퇴를 마치면 로그인 전 셸로 보인다(추천안). 접수(미룸)·결제 확정 대기는 계정이 남아 있다(보드 SCR-017-d '탈퇴 접수(미룸)')
@@ -57,9 +68,9 @@ export async function SettingsPage({ searchParams }: PageProps) {
         key={state}
         initial={initial}
         devices={DEVICE_SESSIONS}
-        removedIds={v.remoteLoggedOut ? [REMOTE_LOGGED_OUT_ID] : []}
+        removedIds={removedIds}
         devicesLoading={v.devicesLoading}
-        toastOnMount={v.remoteLoggedOut ? 'Safari · iPhone에서 로그아웃했습니다' : undefined}
+        toastOnMount={toastOnMount}
         provider={provider}
         quote={quote}
         fraudHoldUntil={FRAUD_HOLD_UNTIL}
@@ -67,7 +78,7 @@ export async function SettingsPage({ searchParams }: PageProps) {
         dark={dark}
       >
         <main className="page-main" id="main" tabIndex={-1}>
-          {v.done ? <DoneView done={v.done} quote={quote} /> : <AccountView restricted={v.restricted} verified={verified} providerLabel={provider.label} live={live} />}
+          {v.done ? <DoneView done={v.done} quote={quote} /> : <AccountView restricted={v.restricted} verified={verified} providerLabel={provider.label} live={live} scanner={v.scanner} />}
         </main>
       </SettingsFlows>
       <PreviewSwitcher path={SETTINGS_PATH} states={SCR017_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
@@ -79,7 +90,19 @@ function Gap() {
   return <div className="section-gap md:hidden" aria-hidden="true" />;
 }
 
-function AccountView({ restricted, verified, providerLabel, live }: { restricted: boolean; verified: boolean; providerLabel: string; live: boolean }) {
+function AccountView({
+  restricted,
+  verified,
+  providerLabel,
+  live,
+  scanner,
+}: {
+  restricted: boolean;
+  verified: boolean;
+  providerLabel: string;
+  live: boolean;
+  scanner: SettingsView['scanner'];
+}) {
   return (
     <div className="pb-10 md:px-6 md:pt-6 md:pb-12 lg:mx-auto lg:grid lg:w-full lg:max-w-[1040px] lg:grid-cols-12 lg:items-start lg:gap-x-6 lg:px-8 lg:pt-8 lg:pb-16">
       <SideMenu verified={verified} />
@@ -96,7 +119,7 @@ function AccountView({ restricted, verified, providerLabel, live }: { restricted
           <Gap />
           <VerifySection verified={verified} />
           <Gap />
-          <DevicesSection providerLabel={providerLabel} live={live} />
+          <DevicesSection providerLabel={providerLabel} live={live} scanner={scanner} />
           <Gap />
           <ProvidersSection />
           <Gap />
@@ -247,8 +270,8 @@ function VerifySection({ verified }: { verified: boolean }) {
   );
 }
 
-/** live: 실제 흐름(목록은 API). 현장 스캐너 세션은 이 API에 없어 그 안내 띠를 보이지 않는다(BUILD_ORDER GAT-230) */
-function DevicesSection({ providerLabel, live }: { providerLabel: string; live: boolean }) {
+/** live: 실제 흐름(목록은 API). 실제 흐름의 현장 스캐너 세션 줄·안내 띠·아래 줄은 SettingsDevices가 스캐너 세션 목록으로 그린다(d5 §5.17, ADR-0362 결정 7) */
+function DevicesSection({ providerLabel, live, scanner }: { providerLabel: string; live: boolean; scanner: SettingsView['scanner'] }) {
   return (
     <section className={cx('col gap-2 md:col-span-2', PAD, CARD)} aria-labelledby="h-dev">
       <div className="section-title">
@@ -257,15 +280,30 @@ function DevicesSection({ providerLabel, live }: { providerLabel: string; live: 
       </div>
       <SettingsDevices />
       {live ? null : (
-        <div className="banner banner-info" style={{ marginTop: 8 }}>
-          <i className="ic ic-info" aria-hidden="true" />
-          <div className="banner-body">휴대폰에서 로그아웃해도 스캐너 세션은 따로 끝내야 합니다</div>
-        </div>
+        <>
+          {scanner === 'failed' ? (
+            // 미리보기 '스태프 세션 못 불러옴': 기기 목록은 그대로, 스캐너 줄 자리에 실패 안내(d5 §5.17)
+            <div className="col" style={{ gap: 8, alignItems: 'flex-start', marginTop: 4 }}>
+              <p className="t-sm muted" role="status">
+                현장 스캐너 세션을 불러오지 못했습니다
+              </p>
+              <button className="btn btn-outline btn-sm" type="button">
+                다시 불러오기
+              </button>
+            </div>
+          ) : null}
+          {scanner === 'shown' ? (
+            <div className="banner banner-info" style={{ marginTop: 8 }}>
+              <i className="ic ic-info" aria-hidden="true" />
+              <div className="banner-body">휴대폰에서 로그아웃해도 스캐너 세션은 따로 끝내야 합니다</div>
+            </div>
+          ) : null}
+          <p className="t-xs muted row" style={{ gap: 6 }}>
+            <i className="ic ic-shield ic-14" aria-hidden="true" />
+            {`다른 기기 로그아웃·스캐너 세션 끝내기 전에 ${providerLabel}로 다시 로그인합니다`}
+          </p>
+        </>
       )}
-      <p className="t-xs muted row" style={{ gap: 6 }}>
-        <i className="ic ic-shield ic-14" aria-hidden="true" />
-        {live ? '다른 기기에서 로그아웃하기 전에 한 번 더 로그인해 확인합니다' : `다른 기기 로그아웃·스캐너 세션 끝내기 전에 ${providerLabel}로 다시 로그인합니다`}
-      </p>
     </section>
   );
 }

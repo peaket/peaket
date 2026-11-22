@@ -1,15 +1,17 @@
 // PostgreSQL 저장소(Drizzle): staff_assignment·scanner_session(identity §6.1, docs/data.md).
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox } from '@peaket/platform';
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import {
   type AcceptInvitationResult,
   type CreateStaffInvitationsResult,
+  type EndOwnScannerSessionResult,
   type NewStaffInvitationRow,
   type ReissueInvitationResult,
   type RevokeAssignmentResult,
   ScannerSessionConflict,
   type ScannerSessionRecord,
+  type ScannerSessionSelfRecord,
   StaffAccountInactive,
   type StaffAssignmentPartnerView,
   type StaffAssignmentRecord,
@@ -18,7 +20,7 @@ import {
   type StaffAssignmentStore,
   type StaffRole,
 } from '../../domain/staff.js';
-import { account, scannerSession, staffAssignment } from './schema.js';
+import { account, reauthTokenUse, scannerSession, staffAssignment } from './schema.js';
 
 type StaffAssignmentRow = typeof staffAssignment.$inferSelect;
 
@@ -279,6 +281,21 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     const rows = await this.database.db.select().from(staffAssignment).where(where).orderBy(desc(staffAssignment.validFrom), desc(staffAssignment.id)).limit(i.limit + 1);
     const page = rows.slice(0, i.limit);
     const last = page.at(-1);
+    // 그 쪽 배정들의 살아 있는(끝나지 않았고 expires_at > now) 스캐너 세션 기기 이름(ADR-0362 결정 6). 계정당 살아 있는 세션은 하나뿐이다
+    const live =
+      page.length === 0
+        ? []
+        : await this.database.db
+            .select({ assignmentId: scannerSession.staffAssignmentId, deviceName: scannerSession.deviceName })
+            .from(scannerSession)
+            .where(
+              and(
+                inArray(scannerSession.staffAssignmentId, page.map((r) => r.id)),
+                isNull(scannerSession.terminatedAt),
+                gt(scannerSession.expiresAt, new Date(i.nowMs)),
+              ),
+            );
+    const deviceNameOf = new Map(live.map((l) => [l.assignmentId, l.deviceName]));
     return {
       items: page.map((r) => ({
         assignmentId: r.id,
@@ -287,7 +304,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         status: statusAt(r.status, r.validUntil, i.nowMs) as 'ASSIGNED' | 'REVOKED' | 'ENDED',
         validFrom: r.validFrom.toISOString(),
         validUntil: r.validUntil.toISOString(),
-        activeScannerDeviceName: null,
+        activeScannerDeviceName: deviceNameOf.get(r.id) ?? null,
       })),
       ...(rows.length > i.limit && last ? { nextCursor: cursorOf(last.validFrom.getTime(), last.id) } : {}),
     };
@@ -399,6 +416,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     proxy: boolean;
     approvedAtMs: number;
     expiresAtMs: number;
+    deviceName?: string | null;
   }): Promise<void> {
     try {
       await this.database.transaction(async (tx) => {
@@ -434,6 +452,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
           proxy: i.proxy,
           approvedAt: new Date(i.approvedAtMs),
           expiresAt: new Date(i.expiresAtMs),
+          deviceName: i.deviceName ?? null,
         });
       });
     } catch (e) {
@@ -447,6 +466,72 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
       }
       throw e;
     }
+  }
+
+  async listLiveScannerSessions(i: { accountId: string; nowMs: number }): Promise<ScannerSessionSelfRecord[]> {
+    const rows = await this.database.db
+      .select({
+        id: scannerSession.id,
+        deviceName: scannerSession.deviceName,
+        eventId: staffAssignment.eventId,
+        role: scannerSession.role,
+        proxy: scannerSession.proxy,
+        approvedAt: scannerSession.approvedAt,
+        expiresAt: scannerSession.expiresAt,
+        lastSeenAt: scannerSession.lastSeenAt,
+      })
+      .from(scannerSession)
+      .innerJoin(staffAssignment, eq(scannerSession.staffAssignmentId, staffAssignment.id))
+      .where(and(eq(scannerSession.staffAccountId, i.accountId), isNull(scannerSession.terminatedAt), gt(scannerSession.expiresAt, new Date(i.nowMs))))
+      .orderBy(desc(scannerSession.approvedAt));
+    return rows.map((r) => ({
+      scannerSessionId: r.id,
+      deviceName: r.deviceName,
+      eventId: r.eventId,
+      role: r.role as StaffRole,
+      proxy: r.proxy,
+      approvedAtMs: r.approvedAt.getTime(),
+      expiresAtMs: r.expiresAt.getTime(),
+      lastSeenAtMs: r.lastSeenAt === null ? null : r.lastSeenAt.getTime(),
+    }));
+  }
+
+  async endOwnScannerSession(i: { accountId: string; scannerSessionId: string; nowMs: number; reauth: { jti: string; expiresAtMs: number } }): Promise<EndOwnScannerSessionResult> {
+    const at = new Date(i.nowMs);
+    return this.database.transaction(async (tx) => {
+      // 그 계정의 살아 있는 세션만 잠근다(남의 세션 행을 잠그지 않는다). 없으면 토큰을 쓰지 않고 NOT_FOUND
+      const [row] = await tx
+        .select({ id: scannerSession.id })
+        .from(scannerSession)
+        .where(
+          and(
+            eq(scannerSession.id, i.scannerSessionId),
+            eq(scannerSession.staffAccountId, i.accountId),
+            isNull(scannerSession.terminatedAt),
+            gt(scannerSession.expiresAt, at),
+          ),
+        )
+        .limit(1)
+        .for('update');
+      if (!row) return 'NOT_FOUND';
+      // 재인증 토큰 한 번 쓰기(다른 기기 로그아웃과 같은 reauth_token_use). 이미 썼으면 아무것도 쓰지 않고 끝낸다
+      const used = await tx
+        .insert(reauthTokenUse)
+        .values({ jti: i.reauth.jti, accountId: i.accountId, usedAt: at, expiresAt: new Date(i.reauth.expiresAtMs) })
+        .onConflictDoNothing({ target: reauthTokenUse.jti })
+        .returning({ jti: reauthTokenUse.jti });
+      if (used.length === 0) return 'REAUTH_USED';
+      await tx.update(scannerSession).set({ terminatedAt: at }).where(eq(scannerSession.id, row.id));
+      // 같은 트랜잭션의 마지막 쓰기로 세션 종료 사건을 적는다(사유 LOGOUT, 키 계정 ID, ADR-0362 결정 6)
+      await writeOutbox(tx, this.clock, [
+        {
+          topic: CONTROL_TOPICS.sessionsTerminated,
+          key: i.accountId,
+          payload: Buffer.from(JSON.stringify({ accountId: i.accountId, sessionId: row.id, reason: 'LOGOUT', terminatedAt: at.toISOString() })),
+        },
+      ]);
+      return 'ENDED';
+    });
   }
 
   async touchScannerSession(scannerSessionId: string, atMs: number): Promise<void> {

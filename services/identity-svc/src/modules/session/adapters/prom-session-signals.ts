@@ -15,6 +15,7 @@ export class PromSessionSignals implements SessionSignals, WithdrawalSignals {
   readonly #invRefMissing = new Counter({ name: 'inv_ref_missing_total', help: '라벨 키가 없어 계산하지 못한 조사용 가명(SEV3, docs/observability.md §5)', labelNames: ['service', 'label', 'reason'] as const, registers: [] });
   readonly #mergeInvariant = new Counter({ name: 'identity_merge_invariant_violation_total', help: '흡수 계정에 티켓·후기가 있어 막은 병합(불변식 위반, SEV3)', registers: [] });
   readonly #reverify = new Counter({ name: 'identity_reauth_reverify_required_total', help: '본인확인 재통과가 필요해 주지 않은 고위험 재인증', labelNames: ['provider'] as const, registers: [] });
+  readonly #scannerEnded = new Counter({ name: 'identity_scanner_session_ended_total', help: '스캐너 세션을 끝낸 수(self: 스태프 본인이 휴대폰에서 끝냄, ADR-0362)', labelNames: ['cause'] as const, registers: [] });
   readonly #othersEnded = new Counter({ name: 'identity_other_sessions_ended_total', help: '다른 기기의 세션을 끝낸 수(원격 로그아웃, 로그인 수단을 바꾼 뒤, ADR-0209)', labelNames: ['cause'] as const, registers: [] });
 
   readonly #signup = new Counter({ name: 'identity_signup_completed_total', help: '가입 마무리를 끝낸 수(ADR-0235)', labelNames: ['marketing'] as const, registers: [] });
@@ -38,7 +39,7 @@ export class PromSessionSignals implements SessionSignals, WithdrawalSignals {
 
   /** 서비스의 지표 모음(/metrics)에 단다 */
   register(registry: Registry): this {
-    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#loginVerdict, this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded, this.#withdrawalParticipant, this.#withdrawalOldest, this.#withdrawalTicketQuote];
+    const all: Array<Parameters<Registry['registerMetric']>[0]> = [this.#loginVerdict, this.#signup, this.#nickLimited, this.#created, this.#replayed, this.#deviceLimit, this.#reauth, this.#mismatch, this.#reverify, this.#refresh, this.#retry, this.#reuse, this.#mergeInvariant, this.#invRefMissing, this.#othersEnded, this.#scannerEnded, this.#withdrawalParticipant, this.#withdrawalOldest, this.#withdrawalTicketQuote];
     for (const m of all) registry.registerMetric(m);
     return this;
   }
@@ -97,6 +98,10 @@ export class PromSessionSignals implements SessionSignals, WithdrawalSignals {
 
   nicknameCheckLimited(): void {
     this.#nickLimited.inc();
+  }
+
+  scannerSessionEnded(cause: 'self', count: number): void {
+    this.#scannerEnded.inc({ cause }, count);
   }
 
   othersEnded(cause: 'remote_logout' | 'login_method_changed', count: number): void {

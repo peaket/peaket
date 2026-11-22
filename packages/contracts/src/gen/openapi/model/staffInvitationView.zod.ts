@@ -12,16 +12,17 @@
 import * as zod from 'zod';
 
 export const StaffInvitationView = zod.object({
-  "partnerName": zod.string().optional(),
-  "eventTitle": zod.string().optional(),
-  "eventStartsAt": zod.iso.datetime({"offset":true}).optional(),
+  "eventId": zod.string().describe('초대 회차 ID. 늘 싣는다. 화면이 이 ID로 회차 공개 요약(GET /v1/events/{eventId})을 읽어 판매자 상호·공연명·회차 시작을 보인다(추천 적용 2026-11-23, ADR-0362 결정 1)'),
+  "partnerName": zod.string().optional().describe('identity-svc는 채우지 않는다(회차·판매자 데이터를 갖지 않는다, ADR-0007). 화면은 eventId로 회차 공개 요약을 읽는다(ADR-0362 결정 1)'),
+  "eventTitle": zod.string().optional().describe('identity-svc는 채우지 않는다(ADR-0362 결정 1)'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('identity-svc는 채우지 않는다(ADR-0362 결정 1)'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
   "invitedEmailMasked": zod.string().optional(),
   "consents": zod.object({
-  "collection": zod.string().optional().describe('수집·이용 고지(목적, 항목, 보유 기간, 거부권과 불이익)'),
-  "provision": zod.string().optional().describe('파트너 제공 고지(받는 자, 목적, 항목, 보유 기간, 거부권과 불이익)'),
+  "collection": zod.string().optional().describe('수집·이용 고지(목적, 항목, 보유 기간, 거부권과 불이익). 줄마다 `이름: 내용`이고 줄바꿈 문자(LF)로 나눈다. 줄의 이름과 내용은 docs/planning/04-ia-flows-screens.md §3 SCR-050 ③이다. 화면은 줄 그대로 글자로만 보인다(ADR-0362 결정 2)'),
+  "provision": zod.string().optional().describe('파트너 제공 고지(받는 자, 목적, 항목, 보유 기간, 거부권과 불이익). 줄마다 `이름: 내용`이고 줄바꿈 문자(LF)로 나눈다. 줄의 이름과 내용은 docs/planning/04-ia-flows-screens.md §3 SCR-050 ④이다. 화면은 줄 그대로 글자로만 보인다(ADR-0362 결정 2)'),
   "consentVersion": zod.string().optional().describe('두 고지 문안의 판. 수락 요청의 consentVersion으로 그대로 보낸다(추천 적용 2026-10-30, ADR-0089)')
 }).optional()
 }).describe('초대 수락 화면(SCR-050)용')

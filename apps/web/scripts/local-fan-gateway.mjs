@@ -5,7 +5,8 @@
 //   바깥 요청의 신원 머리(x-user-*·x-session-id, 밑줄 이름 포함)는 늘 지운다. 틀린 토큰은 신원 없이 넘긴다(서비스가 401로 답한다)
 // - 소비자 웹 출처 하나에만 자격 증명 포함 CORS를 열고, 쓰기 요청은 Origin이 그 출처가 아니면 403
 // - 쿠키는 토큰 갱신 경로(/v1/identity/access-tokens)에만 넘기고, identity가 준 Set-Cookie는 그대로 돌려준다
-// - 기본은 /v1/identity/ 경로만 넘긴다. purchaseUrl을 주면 구매 경로(홀드·주문·결제·스냅샷·구매 세션)를 purchase-svc로 넘긴다(BUILD_ORDER HOT-358 리뷰 V2)
+// - 기본은 /v1/identity/ 경로와 현장 스태프 경로 여섯(초대 조회·수락·거절, 내 현장 배정, 기기 승인 조회·승인)을 identity로 넘긴다
+//   (gw-fan-identity 라우트의 같은 경로, BUILD_ORDER F-05-7, ADR-0362). gw-fan 라우트보다 넓히지 않는다(local-fan-gateway-parity.test.mjs). purchaseUrl을 주면 구매 경로(홀드·주문·결제·스냅샷·구매 세션)를 purchase-svc로 넘긴다(BUILD_ORDER HOT-358 리뷰 V2)
 //   fallbackUrl을 주면 나머지는 가짜 API로 넘기고, localAdmissionUrl을 주면 POST /v1/local-dev/admission을 그리로 넘긴다(local·ci 전용, 대기실을 거치지 않고 입장 토큰을 받는다)
 //   devIdentity를 주면 쿠키가 없는 요청에 그 신원 머리를 싣는다(local·ci 전용, identity-svc 없이 구매 경로를 볼 때)
 // - queueUrl을 주면 대기열 API 출처의 /v1/queues/ 경로(진입·입장 확정·추가 검증 등, 로컬에서는 앱 포트가 내는 대기 상태 파일도)를 같은 신원 머리·
@@ -23,6 +24,8 @@ import { GW_FAN_API_CORS } from './gateway-cors.mjs';
 const ACCESS_COOKIE = '__Secure-peaket_at';
 const REFRESH_PATH = '/v1/identity/access-tokens';
 const ROUTE = '/v1/identity/';
+/** identity-svc로 가는 현장 스태프 경로(deploy/gateways/routes/gw-fan.yaml gw-fan-identity의 PathPrefix 여섯: 그 경로이거나 그 아래) */
+const STAFF_ROUTE = /^\/v1\/(?:staff-invitation-lookups|staff-invitation-acceptances|staff-invitation-rejections|staff-assignments|device-approval-lookups|device-approvals)(?:\/|$)/;
 /** 대기열 API(openapi 호스트 queue). 로컬은 queue-svc 앱 포트가 대기 상태 파일(queue-files)도 낸다 */
 const QUEUE_ROUTE = /^\/v1\/queues\/[^/]+\//;
 const PURCHASE_ROUTE = /^\/v1\/(holds(\/|$)|orders(\/|$)|events\/[^/]+\/(holds|purchase-session|seatmap-snapshot)(\/|$))/;
@@ -117,7 +120,7 @@ export async function startLocalFanGateway(o) {
   const targetOf = (pathname) =>
     (pathname === LOCAL_ADMISSION || LOCAL_LAYOUT.test(pathname)) && o.localAdmissionUrl
       ? new URL(o.localAdmissionUrl)
-      : pathname.startsWith(ROUTE)
+      : pathname.startsWith(ROUTE) || STAFF_ROUTE.test(pathname)
         ? identity
         : o.purchaseUrl && PURCHASE_ROUTE.test(pathname)
           ? new URL(o.purchaseUrl)

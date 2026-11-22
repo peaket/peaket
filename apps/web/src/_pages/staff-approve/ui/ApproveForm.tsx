@@ -3,7 +3,7 @@
 // 대리 승인 칸을 켜면 버튼 글이 '동문-03에 대리 로그인 승인'으로 바뀌고 위에 경고가 뜬다(경고가 버튼보다 먼저 읽힌다, d3 SCR-051).
 // 배정을 아직 고르지 않았으면 승인 버튼은 이유 있는 비활성(aria-disabled + 위 안내 글)이다.
 // 휴대폰은 버튼을 세로로 쌓아 화면 아래(margin-top:auto)에 두고, md부터 한 줄에 반씩 나눈다(보드 SCR-051-t·d).
-// 퍼블리싱 단계라 승인·거부는 같은 경로의 '승인됨'·'거부함' 상태로 간다.
+// 실제 흐름은 onDecide를 받아 사람이 누를 때만 승인·거부를 보낸다(ASVS 7.6.2). 미리보기는 같은 경로의 '승인됨'·'거부함' 상태로 간다.
 import { useRouter } from 'next/navigation';
 import { useState, type KeyboardEvent } from 'react';
 import { Checkbox } from '@peaket/ds/Checkbox';
@@ -14,22 +14,31 @@ export interface ApproveFormProps {
   single?: { title: string; meta?: string };
   /** 내 유효 배정이 둘 이상: 고르기 후보 */
   options?: { id: string; label: string }[];
-  /** 대리 승인 칸을 보인다(현장 책임자에게만, 배정이 하나일 때) */
+  /** 실제 흐름: 하나인 배정의 ID(승인에 싣는다) */
+  singleId?: string;
+  /** 대리 승인 칸을 보인다(현장 책임자에게만. 미리보기는 배정이 하나일 때만 그린다) */
   canProxy: boolean;
   defaultProxy: boolean;
-  /** 대리 승인 경고의 '내 계정(하늘)' */
-  accountName: string;
-  approvedHref: string;
-  rejectedHref: string;
+  /** 대리 승인 경고의 '내 계정(하늘)'. 모르면 이름 없이 '내 계정' */
+  accountName: string | null;
+  /** 미리보기: 승인·거부 뒤 갈 주소 */
+  approvedHref?: string;
+  rejectedHref?: string;
+  /** 실제 흐름: 승인·거부를 보낸다(처리 중에는 busy) */
+  onDecide?: (d: { decision: 'APPROVE' | 'DENY'; assignmentId?: string; proxy: boolean }) => void;
+  busy?: boolean;
+  /** 실제 흐름에서 일시 장애로 실패했을 때의 그 자리 안내 */
+  notice?: string | null;
 }
 
-export function ApproveForm({ deviceName, single, options, canProxy, defaultProxy, accountName, approvedHref, rejectedHref }: ApproveFormProps) {
+export function ApproveForm({ deviceName, single, singleId, options, canProxy, defaultProxy, accountName, approvedHref, rejectedHref, onDecide, busy = false, notice = null }: ApproveFormProps) {
   const router = useRouter();
   const [proxy, setProxy] = useState(defaultProxy);
   const [picked, setPicked] = useState<string | null>(null);
   const multi = !single && !!options;
-  const canApprove = !multi || picked !== null;
+  const canApprove = (!multi || picked !== null) && !busy;
   const useProxy = canProxy && proxy;
+  const assignmentId = multi ? (picked ?? undefined) : singleId;
 
   return (
     <>
@@ -50,7 +59,7 @@ export function ApproveForm({ deviceName, single, options, canProxy, defaultProx
 
       {!single && options ? <AssignmentPicker options={options} value={picked} onChange={setPicked} /> : null}
 
-      {single && canProxy ? (
+      {canProxy ? (
         <Checkbox
           id="px"
           label="휴대폰 없는 스태프 대신 승인(일반 스태프 권한)"
@@ -65,11 +74,16 @@ export function ApproveForm({ deviceName, single, options, canProxy, defaultProx
           <div className="banner banner-warning mb-1 md:mb-0" role="status">
             <i className="ic ic-alert" aria-hidden="true" />
             <div className="banner-body fw-b">
-              대리 승인하면 이 스캐너는 내 계정({accountName})으로 로그인되지만 권한은 일반 스태프로 낮아집니다. 이 스캐너의 스캔 기록은 내 계정으로 남습니다
+              대리 승인하면 이 스캐너는 {accountName ? `내 계정(${accountName})` : '내 계정'}으로 로그인되지만 권한은 일반 스태프로 낮아집니다. 이 스캐너의 스캔 기록은 내 계정으로 남습니다
             </div>
           </div>
         ) : null}
-        {canApprove ? null : (
+        {notice ? (
+          <p className="t-sm tx-danger" role="alert">
+            {notice}
+          </p>
+        ) : null}
+        {canApprove || busy ? null : (
           <p className="hint" id="ap-why">
             내 배정을 고르면 승인할 수 있습니다.
           </p>
@@ -79,14 +93,26 @@ export function ApproveForm({ deviceName, single, options, canProxy, defaultProx
             className="btn btn-primary btn-lg btn-block md:flex-1"
             type="button"
             aria-disabled={canApprove ? undefined : true}
-            aria-describedby={canApprove ? undefined : 'ap-why'}
+            aria-busy={busy || undefined}
+            aria-describedby={canApprove || busy ? undefined : 'ap-why'}
             onClick={() => {
-              if (canApprove) router.push(approvedHref);
+              if (!canApprove) return;
+              if (onDecide) onDecide({ decision: 'APPROVE', assignmentId, proxy: useProxy });
+              else if (approvedHref) router.push(approvedHref);
             }}
           >
             {useProxy ? `${deviceName}에 대리 로그인 승인` : `${deviceName}에 로그인 승인`}
           </button>
-          <button className="btn btn-secondary btn-lg btn-block md:flex-1" type="button" onClick={() => router.push(rejectedHref)}>
+          <button
+            className="btn btn-secondary btn-lg btn-block md:flex-1"
+            type="button"
+            aria-disabled={busy || undefined}
+            onClick={() => {
+              if (busy) return;
+              if (onDecide) onDecide({ decision: 'DENY', proxy: false });
+              else if (rejectedHref) router.push(rejectedHref);
+            }}
+          >
             거부
           </button>
         </div>

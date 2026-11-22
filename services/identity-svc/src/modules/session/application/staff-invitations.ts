@@ -5,20 +5,33 @@ import { CLOCK, type Clock } from '@peaket/platform';
 import { createHash } from 'node:crypto';
 import { STAFF_ASSIGNMENT_STORE, STAFF_PHONE_VERIFICATION, type StaffAssignmentRecord, type StaffAssignmentSelfView, type StaffAssignmentStore, type StaffPhoneVerification, type StaffRole } from '../domain/staff.js';
 
-export const STAFF_CONSENT_VERSION = 'staff-2026-11-13';
-export const STAFF_COLLECTION_NOTICE =
-  '현장 스태프 배정을 위해 이메일·이름·역할·근무 회차를 수집·이용합니다. 보유 기간은 배정 종료 뒤 1년입니다. 동의를 거부하면 배정할 수 없습니다.';
-export const STAFF_PROVISION_NOTICE =
-  '배정 파트너에게 위 항목을 제공합니다. 목적은 현장 입장 운영이며 보유 기간은 배정 종료 뒤 1년입니다. 동의를 거부하면 배정할 수 없습니다.';
+// 두 동의 고지 문안과 그 판(ADR-0089, ADR-0362 결정 2). 줄마다 `이름: 내용`이고 줄바꿈으로 나눈다.
+// 줄의 이름과 내용의 정본은 docs/planning/04-ia-flows-screens.md §3 SCR-050 ③④다. 문안을 바꾸면 판도 올린다(옛 판의 수락은 422 consent-version-outdated).
+export const STAFF_CONSENT_VERSION = 'staff-2026-11-23';
+export const STAFF_COLLECTION_NOTICE = [
+  '목적: 현장 검표 배정과 스캔 기록',
+  '항목: 계정 ID·닉네임·역할·스캔 기록',
+  '보유: 회차 종료 뒤 1년',
+  '거부권과 불이익: 배정 불가',
+].join('\n');
+export const STAFF_PROVISION_NOTICE = [
+  '받는 자: 그 회차의 파트너',
+  '목적: 현장 인력 관리',
+  '항목: 닉네임·역할·수락 여부·스캔·예외 통과 건수',
+  '보유: 회차가 끝나고 1년까지(배정 원장과 같다)',
+  '거부권과 불이익: 배정 불가',
+].join('\n');
 
 export class StaffInvitationError extends Error {
-  constructor(readonly code: 'INVITATION_INVALID' | 'EMAIL_MISMATCH' | 'PHONE_UNVERIFIED' | 'PHONE_UNAVAILABLE' | 'ASSIGNMENT_EXISTS' | 'CONSENT_REQUIRED' | 'CONSENT_OUTDATED' | 'LIMIT') {
+  constructor(readonly code: 'INVITATION_INVALID' | 'EMAIL_MISMATCH' | 'EMAIL_UNVERIFIED' | 'PHONE_UNVERIFIED' | 'PHONE_UNAVAILABLE' | 'ASSIGNMENT_EXISTS' | 'CONSENT_REQUIRED' | 'CONSENT_OUTDATED' | 'LIMIT') {
     super(`스태프 초대 오류: ${code}`);
     this.name = 'StaffInvitationError';
   }
 }
 
 export interface StaffInvitationView {
+  /** 초대 회차. 화면이 회차 공개 요약으로 판매자 상호·공연명·회차 시작을 읽는다(ADR-0362 결정 1). partnerName·eventTitle·eventStartsAt은 채우지 않는다 */
+  eventId: string;
   role: StaffRole;
   validFrom: string;
   validUntil: string;
@@ -68,6 +81,7 @@ export class StaffInvitations {
     const a = await this.store.findInvitationByTokenHash(tokenHash(inviteToken));
     if (!a || a.status !== 'INVITED' || a.inviteExpiresAtMs <= this.clock.now() || a.validUntilMs < this.clock.now()) throw new StaffInvitationError('INVITATION_INVALID');
     return {
+      eventId: a.eventId,
       role: a.role,
       validFrom: new Date(a.validFromMs).toISOString(),
       validUntil: new Date(a.validUntilMs).toISOString(),
@@ -81,7 +95,8 @@ export class StaffInvitations {
     if (!invitation || invitation.status !== 'INVITED' || invitation.inviteExpiresAtMs <= this.clock.now() || invitation.validUntilMs < this.clock.now()) throw new StaffInvitationError('INVITATION_INVALID');
     if (!invitation.inviteEmail) throw new StaffInvitationError('EMAIL_MISMATCH');
     const me = await this.store.accountEmailOf(i.accountId);
-    if (!me.verified || !me.email) throw new StaffInvitationError('EMAIL_MISMATCH');
+    // 검증된 이메일이 없는 계정(네이버만 연결, 제공자가 검증 표시를 주지 않음)은 불일치와 따로 알린다(ADR-0362 결정 4)
+    if (!me.verified || !me.email) throw new StaffInvitationError('EMAIL_UNVERIFIED');
     // 이메일만 확인된 계정이 현장 배정을 받지 않게 휴대폰 본인확인을 함께 본다(C2-02).
     if (!this.phone) throw new StaffInvitationError('PHONE_UNAVAILABLE');
     let phone: 'VERIFIED' | 'UNVERIFIED' | 'UNAVAILABLE';

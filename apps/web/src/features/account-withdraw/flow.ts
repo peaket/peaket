@@ -272,9 +272,9 @@ export function afterWithdraw(r: WithdrawAnswer, o: { closed: boolean }): Withdr
 
 /**
  * 설정 화면이 이 양식으로 여는 재인증의 작업(웹 purpose 값, docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값', ADR-0293):
- * 탈퇴 account-withdraw, 다른 기기 로그아웃 session-end
+ * 탈퇴 account-withdraw, 다른 기기 로그아웃 session-end, 현장 스캐너 세션 끝내기 scanner-session-end(BUILD_ORDER F-05-7, ADR-0362 결정 7)
  */
-export type SettingsReauthPurpose = 'account-withdraw' | 'session-end';
+export type SettingsReauthPurpose = 'account-withdraw' | 'session-end' | 'scanner-session-end';
 
 /** 재인증 시작 양식(POST /reauth/{provider}, identity §7.1 ①). purpose는 부르는 쪽이 꼭 넘긴다(기본값 없음, 빈 값은 앱 서버가 400) */
 export function reauthForm(provider: Provider, purpose: SettingsReauthPurpose): { action: string; fields: Record<string, string> } {

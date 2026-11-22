@@ -2,6 +2,8 @@
 // 브라우저 기능(fetch·sessionStorage·양식 제출)은 밖에서 넣는다(browser.ts). 그래서 이 파일은 node 시험(flow.test.mjs)으로 본다.
 // ① GET /v1/identity/sessions로 기기마다 한 줄을 받는다 ② [로그아웃]은 토큰을 갱신하고 탭 저장소에 할 일을 남긴 뒤 재인증으로 떠난다
 // ③ 돌아오면 할 일이 있을 때만 재인증 토큰을 한 번 받아 DELETE /v1/identity/sessions/{sessionId}(X-Reauth-Token)를 보낸다(재인증 결과 받기는 탈퇴 흐름과 같다)
+// ④ 현장 스캐너 세션 줄(BUILD_ORDER F-05-7 = GAT-230, d5 §5.17 '스태프 세션', ADR-0362 결정 7, I-T90): GET /v1/identity/scanner-sessions로 많아야 한 줄을 받고,
+//    [로그아웃]은 같은 재인증 길(표시의 범위 scanner, 웹 purpose scanner-session-end)로 떠났다가 돌아와 DELETE /v1/identity/scanner-sessions/{sessionId}를 보낸다
 import type { DeviceSession } from '@peaket/ds/DeviceSessionList';
 import { fetchOnce } from '../../shared/lib/timed-fetch.ts';
 import { refreshOnce, type RefreshResult } from '../../shared/lib/token-refresh.ts';
@@ -30,6 +32,20 @@ export interface DeviceRow {
 }
 
 export type ListAnswer = { kind: 'ok'; items: DeviceRow[] } | { kind: 'login' } | { kind: 'error' };
+
+/** openapi ScannerSessionSelf(내 스캐너 세션, 휴대폰 쪽). 스태프 토큰·기기 키·기기 ID는 없다 */
+export interface ScannerRow {
+  sessionId: string;
+  /** 스캐너 이름(예 동문-03). 모르면 null(화면은 '현장 스캐너') */
+  deviceName: string | null;
+  eventId: string;
+  role: 'gate_staff' | 'gate_lead';
+  proxy: boolean;
+  approvedAt: string;
+  expiresAt: string;
+  lastSeenAt: string | null;
+}
+export type ScannerListAnswer = { kind: 'ok'; items: ScannerRow[] } | { kind: 'login' } | { kind: 'error' };
 /** done 204, gone 404 session-not-found(끝낼 것이 없음 포함), reauth 403 reauth-required */
 export type EndAnswer = { kind: 'done' } | { kind: 'gone' } | { kind: 'reauth' } | { kind: 'login' } | { kind: 'error' };
 
@@ -38,6 +54,10 @@ export interface DevicesApi {
   /** 액세스 토큰 갱신. 재인증 양식을 보내기 직전에 부른다(탈퇴 흐름과 같은 까닭) */
   refresh(): Promise<RefreshResult>;
   end(sessionId: string, reauthToken: string): Promise<EndAnswer>;
+  /** 내 스캐너 세션(많아야 한 줄) */
+  listScanner(): Promise<ScannerListAnswer>;
+  /** 스캐너 세션 끝내기. 답의 뜻은 end와 같다(done 204, gone 404 session-not-found, reauth 403 reauth-required) */
+  endScanner(sessionId: string, reauthToken: string): Promise<EndAnswer>;
 }
 
 const isRow = (v: unknown): v is DeviceRow => {
@@ -50,6 +70,21 @@ const isRow = (v: unknown): v is DeviceRow => {
     typeof r.current === 'boolean' &&
     Number.isInteger(r.otherSessions) &&
     (r.otherSessions as number) >= 0
+  );
+};
+
+const isScannerRow = (v: unknown): v is ScannerRow => {
+  const r = v as Partial<ScannerRow> | null;
+  return (
+    !!r &&
+    typeof r.sessionId === 'string' &&
+    (r.deviceName === null || typeof r.deviceName === 'string') &&
+    typeof r.eventId === 'string' &&
+    (r.role === 'gate_staff' || r.role === 'gate_lead') &&
+    (r.proxy === undefined || typeof r.proxy === 'boolean') &&
+    typeof r.approvedAt === 'string' &&
+    typeof r.expiresAt === 'string' &&
+    (r.lastSeenAt === undefined || r.lastSeenAt === null || typeof r.lastSeenAt === 'string')
   );
 };
 
@@ -105,15 +140,15 @@ export function createDevicesApi(o: { origin: string; fetch: FetchLike; lock?: <
       if (r === 'login') return { kind: 'login' };
       return r === 'unavailable' ? { kind: 'error' } : r;
     },
-    async end(sessionId, reauthToken) {
-      let r: EndAnswer | 'login' | 'unavailable';
+    end: (sessionId, reauthToken) => endAt('/v1/identity/sessions/', sessionId, reauthToken),
+    async listScanner() {
+      let r: ScannerListAnswer | 'login' | 'unavailable';
       try {
-        r = await call(`/v1/identity/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: { accept: 'application/json', 'x-reauth-token': reauthToken } }, async (res): Promise<EndAnswer> => {
-          if (res.status === 204) return { kind: 'done' };
-          const type = await problemType(res);
-          if (res.status === 404 && type === 'session-not-found') return { kind: 'gone' };
-          if (res.status === 403 && type === 'reauth-required') return { kind: 'reauth' };
-          return { kind: 'error' };
+        r = await call('/v1/identity/scanner-sessions', { method: 'GET', headers: { accept: 'application/json' } }, async (res): Promise<ScannerListAnswer> => {
+          if (res.status !== 200) return { kind: 'error' };
+          const b = (await res.json()) as { items?: unknown };
+          if (!Array.isArray(b.items) || !b.items.every(isScannerRow)) return { kind: 'error' };
+          return { kind: 'ok', items: b.items.map((x) => ({ ...x, proxy: x.proxy === true, lastSeenAt: x.lastSeenAt ?? null })) };
         });
       } catch {
         return { kind: 'error' };
@@ -121,7 +156,26 @@ export function createDevicesApi(o: { origin: string; fetch: FetchLike; lock?: <
       if (r === 'login') return { kind: 'login' };
       return r === 'unavailable' ? { kind: 'error' } : r;
     },
+    endScanner: (sessionId, reauthToken) => endAt('/v1/identity/scanner-sessions/', sessionId, reauthToken),
   };
+
+  /** 세션 끝내기 한 번(다른 기기 로그아웃·스캐너 세션 끝내기가 같은 답 모양을 쓴다) */
+  async function endAt(base: string, sessionId: string, reauthToken: string): Promise<EndAnswer> {
+    let r: EndAnswer | 'login' | 'unavailable';
+    try {
+      r = await call(`${base}${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: { accept: 'application/json', 'x-reauth-token': reauthToken } }, async (res): Promise<EndAnswer> => {
+        if (res.status === 204) return { kind: 'done' };
+        const type = await problemType(res);
+        if (res.status === 404 && type === 'session-not-found') return { kind: 'gone' };
+        if (res.status === 403 && type === 'reauth-required') return { kind: 'reauth' };
+        return { kind: 'error' };
+      });
+    } catch {
+      return { kind: 'error' };
+    }
+    if (r === 'login') return { kind: 'login' };
+    return r === 'unavailable' ? { kind: 'error' } : r;
+  }
 }
 
 const KST_MS = 9 * 3_600_000;
@@ -155,8 +209,32 @@ export function otherLoginsOf(rows: readonly DeviceRow[]): number {
   return rows.find((r) => r.current)?.otherSessions ?? 0;
 }
 
-/** 끄는 범위: 그 기기(다른 기기 줄), 이 기기의 다른 로그인(지금 이 기기 줄) */
-export type LogoutScope = 'device' | 'others';
+/** 끄는 범위: 그 기기(다른 기기 줄), 이 기기의 다른 로그인(지금 이 기기 줄), 현장 스캐너 세션(스태프 세션 줄, ADR-0362 결정 7) */
+export type LogoutScope = 'device' | 'others' | 'scanner';
+
+/** 스캐너 줄의 이름 '현장 스캐너 {기기 이름}'(이름을 모르면 '현장 스캐너', d5 §5.17 '스태프 세션') */
+export function scannerRowName(r: Pick<ScannerRow, 'deviceName'>): string {
+  return r.deviceName ? `현장 스캐너 ${r.deviceName}` : '현장 스캐너';
+}
+
+/** 스캐너 줄 → 화면 부품(CMP-052)의 기기: 아이콘 스캐너, 꼬리표 '스태프 세션'. 기기 목록 끝에 붙인다 */
+export function toScannerSessions(rows: readonly ScannerRow[]): DeviceSession[] {
+  return rows.map((r) => ({ id: r.sessionId, name: scannerRowName(r), icon: 'scan', tag: '스태프 세션' }));
+}
+
+/** 범위의 재인증 웹 purpose(docs/security/authz-matrix.md §6, ADR-0293·ADR-0362 결정 7): 스캐너 세션은 scanner-session-end, 그 밖은 session-end */
+export function reauthPurposeFor(scope: LogoutScope): 'scanner-session-end' | 'session-end' {
+  return scope === 'scanner' ? 'scanner-session-end' : 'session-end';
+}
+
+/** 기기 목록 아래 줄(d5 §5.17): 스캐너 세션이 있으면 두 일을 함께 말한다 */
+export function devicesFooterText(hasScanner: boolean): string {
+  return hasScanner ? '다른 기기 로그아웃·스캐너 세션 끝내기 전에 한 번 더 로그인해 확인합니다' : '다른 기기에서 로그아웃하기 전에 한 번 더 로그인해 확인합니다';
+}
+
+/** 스캐너 세션 줄 자리의 안내(d5 §5.17 '스태프 세션'·'스태프 세션 못 불러옴') */
+export const SCANNER_BANNER_TEXT = '휴대폰에서 로그아웃해도 스캐너 세션은 따로 끝내야 합니다';
+export const SCANNER_FAILED_TEXT = '현장 스캐너 세션을 불러오지 못했습니다';
 
 /**
  * 원격 로그아웃 결과의 토스트(d5 §5.17). 재인증 만료와 로그인 필요는 토스트가 아니라 재인증 창·로그인 화면이라 null.
@@ -164,6 +242,11 @@ export type LogoutScope = 'device' | 'others';
  */
 export function endResultText(r: EndAnswer, target: { name: string; scope: LogoutScope }): { text: string; icon: string } | null {
   const own = target.scope === 'others';
+  if (target.scope === 'scanner') {
+    // 스태프 세션 끝냄·이미 끝난 스태프 세션(d5 §5.17)
+    if (r.kind === 'done') return { text: `${target.name}의 스태프 세션을 끝냈습니다`, icon: 'ic-check' };
+    if (r.kind === 'gone') return { text: '이미 끝난 스캐너 세션입니다', icon: 'ic-info' };
+  }
   switch (r.kind) {
     case 'done':
       return own ? { text: '이 기기의 다른 로그인을 끝냈습니다', icon: 'ic-check' } : { text: `${target.name}에서 로그아웃했습니다`, icon: 'ic-check' };
@@ -195,7 +278,7 @@ export function takePending(storage: StorageLike, now: number): PendingLogout | 
   if (v === null) return null;
   try {
     const p = JSON.parse(v) as Partial<PendingLogout>;
-    if (typeof p.sessionId !== 'string' || typeof p.name !== 'string' || typeof p.at !== 'number' || (p.scope !== 'device' && p.scope !== 'others')) return null;
+    if (typeof p.sessionId !== 'string' || typeof p.name !== 'string' || typeof p.at !== 'number' || (p.scope !== 'device' && p.scope !== 'others' && p.scope !== 'scanner')) return null;
     if (!(p.at <= now && now - p.at <= PENDING_TTL_MS)) return null;
     return { sessionId: p.sessionId, name: p.name, scope: p.scope, at: p.at };
   } catch {

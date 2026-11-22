@@ -9,7 +9,16 @@ export {
   staffValidTimeText,
   staffValidCompactText,
   staffValidFromText,
+  staffAssignmentSelfOf,
+  staffPhaseAt,
+  isCurrentAssignment,
+  staffWhenText,
+  staffValidRangeText,
+  staffValidCompactRangeText,
+  staffValidTimeRangeText,
+  staffValidFromAtText,
   type StaffAssignment,
   type StaffAssignmentPhase,
+  type StaffAssignmentSelf,
   type StaffRole,
-} from './model';
+} from './model.ts';

@@ -2,6 +2,7 @@
 // '기기 목록 로딩'은 d5 §5.17 상태 표에서 더했다(스피너).
 // '탈퇴 확인 · 부정 예매 …' 둘은 d5 §5.17 탈퇴 단계 그림의 두 줄(탈퇴 409 fraudHold의 state)이다(ADR-0173 결정 7).
 // '본인확인 전'은 d5 §5.17 ①의 [ 지금 본인확인 ] 갈래다(2026-11-05, BOT-020이 넘긴 것).
+// '스태프 세션 …' 넷은 d5 §5.17 '스태프 세션' 행들이다(2026-11-23, BUILD_ORDER F-05-7, ADR-0362 결정 7).
 import type { Scr017State } from '@/shared/config/screens.account';
 
 /** 처음 열린 채로 그릴 겹침 창 */
@@ -22,6 +23,8 @@ export interface SettingsView {
   devicesLoading: boolean;
   /** 본인확인을 마친 계정으로 그린다. false면 ① 자리에 [지금 본인확인] */
   verified: boolean;
+  /** 현장 스캐너 세션 줄의 미리보기: 줄 있음(기본) · 끝냄(토스트, 줄 빠짐) · 이미 끝남(토스트, 줄 빠짐) · 못 불러옴(줄 자리에 실패 안내) */
+  scanner: 'shown' | 'ended' | 'gone' | 'failed';
   overlay: SettingsOverlay | null;
 }
 
@@ -42,6 +45,7 @@ export function settingsView(st: Scr017State): SettingsView {
     remoteLoggedOut: st === '원격 로그아웃 완료',
     devicesLoading: st === '기기 목록 로딩',
     verified: st !== '본인확인 전',
+    scanner: st === '스태프 세션 끝냄' ? 'ended' : st === '이미 끝난 스태프 세션' ? 'gone' : st === '스태프 세션 못 불러옴' ? 'failed' : 'shown',
     overlay,
   };
 }

@@ -336,6 +336,8 @@ export interface SessionSignals {
   mergeInvariantViolated(): void;
   /** 다른 기기의 세션을 끝냈다: 원격 로그아웃, 로그인 수단을 바꾼 뒤(identity_other_sessions_ended_total, ADR-0209 결정 6) */
   othersEnded(cause: 'remote_logout' | 'login_method_changed', count: number): void;
+  /** 스캐너 세션을 끝냈다: self는 스태프 본인이 휴대폰(SCR-017)에서 끝낸 것(identity_scanner_session_ended_total, ADR-0362, identity §10.1 '현장 스태프 휴대폰 화면') */
+  scannerSessionEnded?(cause: 'self', count: number): void;
   /** 로그인 판정 결과(identity_login_verdict_total, BOT-050). UNKNOWN은 받지 못했거나 기록하지 못한 것이다 */
   loginVerdict(verdict: LoginVerdict): void;
   /** 가입 마무리를 끝냈다(identity_signup_completed_total, ADR-0235) */

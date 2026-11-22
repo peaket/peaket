@@ -155,6 +155,8 @@ export class DeviceApprovals {
         proxy,
         approvedAtMs: now,
         expiresAtMs: chosen.validUntilMs,
+        // 승인 요청에 든 기기 원장 이름을 세션에 복사한다(휴대폰의 스캐너 세션 줄·내 배정, ADR-0362 결정 6)
+        deviceName: auth.deviceName,
       });
     } catch (e) {
       if (e instanceof StaffAccountInactive) throw new DeviceApprovalError('ACCOUNT_INACTIVE');

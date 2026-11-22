@@ -8,6 +8,8 @@
 // (docs/features/identity.md §8 '탈퇴 화면 연결', BUILD_ORDER BOT-036). 퍼블리싱 미리보기와 출처 없는 개발 서버는 목업 흐름이다.
 // 로그인한 기기도 실제 모드면 GET /v1/identity/sessions로 그리고, [로그아웃]은 재인증 뒤 DELETE /v1/identity/sessions/{sessionId}에 잇는다
 // (docs/features/identity.md §8 '로그인한 기기와 다른 세션 끝내기의 첫 구현', BUILD_ORDER BOT-044, ADR-0209). 재인증 결과 받기·양식 제출은 탈퇴 흐름의 것을 쓴다.
+// 현장 스캐너 세션 줄도 실제 모드면 GET /v1/identity/scanner-sessions로 그리고, [로그아웃]은 같은 재인증 길(범위 scanner, purpose scanner-session-end) 뒤
+// DELETE /v1/identity/scanner-sessions/{sessionId}에 잇는다(d5 §5.17 '스태프 세션', BUILD_ORDER F-05-7, ADR-0362 결정 7). 스캐너 목록이 실패해도 기기 목록은 그대로 그린다.
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -20,11 +22,22 @@ import { BANKS } from '@/entities/account';
 import { withdrawFraudHoldText } from '@/entities/appeal';
 import { formatWon } from '@/entities/production';
 import { afterWithdraw, browserWithdrawApi, type FraudHold, leaveForReauth, linkedProvidersQuietly, type Provider as WithdrawProvider, reauthFailureText, submitReauthForm, tabStore, untilText } from '@/features/account-withdraw';
-import { browserDevicesApi, type DeviceRow, endResultText, leaveForDeviceReauth, type LogoutScope, otherLoginsOf, type PendingLogout, toDeviceSessions } from '@/features/device-sessions';
+import {
+  browserDevicesApi,
+  type DeviceRow,
+  endResultText,
+  leaveForDeviceReauth,
+  type LogoutScope,
+  otherLoginsOf,
+  type PendingLogout,
+  reauthPurposeFor,
+  type ScannerListAnswer,
+  toDeviceSessions,
+} from '@/features/device-sessions';
 import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
 import { useToast } from '@/shared/ui/toast';
 import { PROVIDER_INFO, type LiveWithdrawQuote, type WithdrawQuote } from '../model/account';
-import { resumeDeviceLogout, returnOnMount } from '../model/devices';
+import { resumeDeviceLogout, returnOnMount, scannerSectionView, type ScannerSectionView } from '../model/devices';
 import type { SettingsOverlay } from '../model/state';
 
 type Overlay = Exclude<SettingsOverlay, { kind: 'logout' }>;
@@ -44,9 +57,23 @@ interface FlowsContextValue {
   reloadDevices: () => void;
   onDeviceLogout: (s: DeviceSession) => void;
   startWithdraw: () => void;
+  /** 실제 흐름의 현장 스캐너 세션 칸(줄·안내 띠·실패·아래 줄). 목업 흐름은 null(서버 셸의 목업 띠·아래 줄을 쓴다) */
+  scanner: ScannerSectionView | null;
+  reloadScanner: () => void;
 }
 
-const FlowsContext = createContext<FlowsContextValue>({ devices: [], otherLogins: 0, onEndOtherLogins: () => {}, devicesLoading: false, devicesFailed: false, reloadDevices: () => {}, onDeviceLogout: () => {}, startWithdraw: () => {} });
+const FlowsContext = createContext<FlowsContextValue>({
+  devices: [],
+  otherLogins: 0,
+  onEndOtherLogins: () => {},
+  devicesLoading: false,
+  devicesFailed: false,
+  reloadDevices: () => {},
+  onDeviceLogout: () => {},
+  startWithdraw: () => {},
+  scanner: null,
+  reloadScanner: () => {},
+});
 
 export interface SettingsFlowsProps {
   /** 처음 열린 채로 그릴 창(상태 미리보기) */
@@ -140,6 +167,17 @@ export function SettingsFlows({
     } else if (r.kind === 'login') toLogin();
     else setDevicesState('error');
   };
+  // 실제 현장 스캐너 세션(ADR-0362 결정 7): 목록 답(읽는 중 null)
+  const [scannerAnswer, setScannerAnswer] = useState<ScannerListAnswer | null>(null);
+  const loadScanner = async () => {
+    if (!devicesApi) return;
+    setScannerAnswer(null);
+    const r = await devicesApi.listScanner();
+    // 401(갱신도 401)은 기기 목록과 같은 로그인 화면 규칙이다(d5 §5.17, I-T90 ④)
+    if (r.kind === 'login') toLogin();
+    else setScannerAnswer(r);
+  };
+  const reloadLists = () => Promise.all([loadDevices(), loadScanner()]);
   const shown = live && liveProvider ? PROVIDER_INFO[liveProvider] : provider;
   function toLogin() {
     window.location.assign(loginHrefAfterRefresh('/my/settings'));
@@ -171,6 +209,7 @@ export function SettingsFlows({
         return r;
       },
       end: (sessionId, reauthToken) => devicesApi!.end(sessionId, reauthToken),
+      endScanner: (sessionId, reauthToken) => devicesApi!.endScanner(sessionId, reauthToken),
     });
     if (step.kind === 'login') {
       toLogin();
@@ -178,7 +217,8 @@ export function SettingsFlows({
     }
     if (step.kind === 'toast') toast(step.text, step.icon);
     else if (await pickProvider(sorryDevice)) failWith(step.text, devicePurpose(step.target));
-    await loadDevices();
+    // 두 목록을 다시 불러온다(d5 §5.17 '스태프 세션 끝냄'·'이미 끝난 스태프 세션', I-T90 ③)
+    await reloadLists();
   };
 
   /**
@@ -198,7 +238,7 @@ export function SettingsFlows({
     // 두 표시가 함께 있으면 나중에 남긴 쪽만 잇는다(둘 다 지운다, BOT-044)
     const back = returnOnMount(tabStore, Date.now(), { devices: api !== null && devicesApi !== null, withdraw: api !== null });
     if (back?.kind === 'device') void resumeDevice(back.pending);
-    else if (devicesApi) void loadDevices();
+    else if (devicesApi) void reloadLists();
     if (api && back?.kind === 'withdraw') {
       void (async () => {
         // 재인증 결과를 먼저 받는다(그 응답의 제공자를 쓰고, 목록은 실패해서 재인증 창을 다시 보일 때만 부른다)
@@ -253,7 +293,8 @@ export function SettingsFlows({
           provider: chosen ?? liveProvider,
           pickProvider: () => pickProvider(sorryDevice),
           target,
-          submit: (p) => submitReauthForm(p, 'session-end'),
+          // 스캐너 세션 줄은 받는 쪽 작업 SCANNER_SESSION_END의 웹 purpose로 떠난다(ADR-0362 결정 7, I-T90 ②)
+          submit: (p) => submitReauthForm(p, reauthPurposeFor(target.scope)),
           cancelled: () => ticket.cancelled,
         });
         if (r === 'left' || ticket.cancelled) return;
@@ -355,7 +396,9 @@ export function SettingsFlows({
     devicesFailed: devicesApi !== null && devicesState === 'error',
     reloadDevices: () => void loadDevices(),
     onDeviceLogout: (session) => {
-      setPurpose({ kind: 'device', session, scope: 'device' });
+      // 스태프 세션 줄이면 범위 scanner(돌아와 DELETE /v1/identity/scanner-sessions/{sessionId})
+      const isScanner = scannerAnswer?.kind === 'ok' && scannerAnswer.items.some((r) => r.sessionId === session.id);
+      setPurpose({ kind: 'device', session, scope: isScanner ? 'scanner' : 'device' });
       if (api && devicesApi) {
         setFailText(null);
         void pickProvider(sorryDevice).then((p) => p && setOverlay({ kind: 'reauth', failed: false }));
@@ -363,6 +406,8 @@ export function SettingsFlows({
       }
       setOverlay({ kind: 'reauth', failed: false });
     },
+    scanner: devicesApi ? scannerSectionView(scannerAnswer) : null,
+    reloadScanner: () => void loadScanner(),
     startWithdraw: () => {
       setPurpose({ kind: 'withdraw' });
       if (api) {
@@ -374,7 +419,8 @@ export function SettingsFlows({
     },
   };
 
-  const reauthWhat = purpose.kind === 'device' ? '다른 기기 로그아웃' : '회원 탈퇴';
+  const scannerPurpose = purpose.kind === 'device' && purpose.scope === 'scanner';
+  const reauthWhat = purpose.kind === 'device' ? (scannerPurpose ? '스캐너 세션 끝내기' : '다른 기기 로그아웃') : '회원 탈퇴';
 
   return (
     <FlowsContext.Provider value={ctx}>
@@ -403,12 +449,12 @@ export function SettingsFlows({
         ) : null}
         <p className="t-sm" id={`${ids}-ra`}>
           {reauthWhat}
-          {purpose.kind === 'device' ? '은 되돌리기 어려운' : '는 되돌릴 수 없는'} 작업이라 로그인한 분이 맞는지 한 번 더 확인합니다.{' '}
+          {purpose.kind === 'device' ? (scannerPurpose ? '는 되돌리기 어려운' : '은 되돌리기 어려운') : '는 되돌릴 수 없는'} 작업이라 로그인한 분이 맞는지 한 번 더 확인합니다.{' '}
           {live && liveProviders.length > 1 ? '이 계정에 연결된 로그인 수단 가운데 하나로 다시 로그인해 주세요.' : `지금 로그인한 ${shown.label} 계정으로 다시 로그인해 주세요.`}
         </p>
         <p className="t-sm muted">
           다시 로그인한 뒤 5분 안에 {reauthWhat}
-          {purpose.kind === 'device' ? '을' : '를'} 마쳐야 합니다.
+          {purpose.kind === 'device' && !scannerPurpose ? '을' : '를'} 마쳐야 합니다.
         </p>
         <div className="col" style={{ gap: 8 }}>
           {live && liveProviders.length > 1 ? (
@@ -472,22 +518,33 @@ export function SettingsFlows({
 
 /** ② 로그인한 기기 목록(CMP-052). 로그아웃 버튼은 재인증 창을 연다. 실제 흐름에서 목록을 못 불러오면 [다시 불러오기](d5 §5.17) */
 export function SettingsDevices() {
-  const { devices, otherLogins, onEndOtherLogins, devicesLoading, devicesFailed, reloadDevices, onDeviceLogout } = useContext(FlowsContext);
+  const { devices, otherLogins, onEndOtherLogins, devicesLoading, devicesFailed, reloadDevices, onDeviceLogout, scanner, reloadScanner } = useContext(FlowsContext);
+  // 실제 흐름: 스캐너 세션 칸(줄·띠·실패·아래 줄)은 기기 목록과 따로 그린다. 기기 목록이 실패해도 스캐너 칸은 남는다(d5 §5.17)
+  const scannerPart = scanner ? <ScannerPart view={scanner} onReload={reloadScanner} onLogout={onDeviceLogout} afterList={!devicesFailed && !devicesLoading} /> : null;
   if (devicesFailed) {
     return (
-      <div className="col" style={{ gap: 8, alignItems: 'flex-start' }}>
-        <p className="t-sm muted" role="status">
-          로그인한 기기를 불러오지 못했습니다
-        </p>
-        <button className="btn btn-outline btn-sm" type="button" onClick={reloadDevices}>
-          다시 불러오기
-        </button>
-      </div>
+      <>
+        <div className="col" style={{ gap: 8, alignItems: 'flex-start' }}>
+          <p className="t-sm muted" role="status">
+            로그인한 기기를 불러오지 못했습니다
+          </p>
+          <button className="btn btn-outline btn-sm" type="button" onClick={reloadDevices}>
+            다시 불러오기
+          </button>
+        </div>
+        {scannerPart}
+      </>
     );
   }
   return (
     <>
-      <DeviceSessionList label="로그인한 기기 목록" sessions={devices} loading={devicesLoading} onLogout={onDeviceLogout} />
+      <DeviceSessionList
+        label="로그인한 기기 목록"
+        // 스태프 세션 줄은 기기 목록 끝에 붙인다(d5 §5.17 '스태프 세션')
+        sessions={scanner && !devicesLoading ? [...devices, ...scanner.rows] : devices}
+        loading={devicesLoading}
+        onLogout={onDeviceLogout}
+      />
       {/* 같은 브라우저에서 다시 로그인해 앞 세션이 지금 이 기기 줄에 남았을 때만(otherSessions > 0, 새 맥락 리뷰 중간 1) */}
       {!devicesLoading && otherLogins > 0 ? (
         <div className="row between wrap" style={{ gap: 8, marginTop: 4 }}>
@@ -497,6 +554,44 @@ export function SettingsDevices() {
           </button>
         </div>
       ) : null}
+      {scannerPart}
+    </>
+  );
+}
+
+interface ScannerPartProps {
+  view: ScannerSectionView;
+  onReload: () => void;
+  onLogout: (s: DeviceSession) => void;
+  /** 기기 목록이 그려졌다(스태프 세션 줄을 그 목록 끝에 붙였다). 아니면 줄을 따로 그린다 */
+  afterList: boolean;
+}
+
+/** 실제 흐름의 스캐너 세션 칸: 실패 안내·[다시 불러오기], (기기 목록이 없을 때) 줄, 안내 띠, 아래 줄(d5 §5.17, I-T90 ①④) */
+function ScannerPart({ view, onReload, onLogout, afterList }: ScannerPartProps) {
+  return (
+    <>
+      {view.failed ? (
+        <div className="col" style={{ gap: 8, alignItems: 'flex-start', marginTop: 4 }}>
+          <p className="t-sm muted" role="status">
+            {view.failed}
+          </p>
+          <button className="btn btn-outline btn-sm" type="button" onClick={onReload}>
+            다시 불러오기
+          </button>
+        </div>
+      ) : null}
+      {!afterList && view.rows.length > 0 ? <DeviceSessionList label="현장 스캐너 세션" sessions={view.rows} onLogout={onLogout} /> : null}
+      {view.banner ? (
+        <div className="banner banner-info" style={{ marginTop: 8 }}>
+          <i className="ic ic-info" aria-hidden="true" />
+          <div className="banner-body">{view.banner}</div>
+        </div>
+      ) : null}
+      <p className="t-xs muted row" style={{ gap: 6 }}>
+        <i className="ic ic-shield ic-14" aria-hidden="true" />
+        {view.footer}
+      </p>
     </>
   );
 }

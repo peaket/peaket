@@ -27,6 +27,8 @@ export interface StaffHomeView {
   /** '스캐너에 로그인하는 방법' 안내(곧 시작·진행 중에만) */
   guide: boolean;
   empty: boolean;
+  /** 목록을 불러오지 못했다('현장 근무를 불러오지 못했습니다' + [다시 불러오기], d5 §5.35 '못 불러옴') */
+  failed: boolean;
 }
 
 const NOW_PHASE: Partial<Record<Scr061State, StaffAssignmentPhase>> = { 기본: 'active', '곧 시작': 'soon', 해제됨: 'revoked' };
@@ -39,6 +41,7 @@ export function staffHomeView(st: Scr061State): StaffHomeView {
     past: nowPhase !== null,
     guide: nowPhase === 'active' || nowPhase === 'soon',
     empty: st === '빈 화면',
+    failed: st === '못 불러옴',
   };
 }
 

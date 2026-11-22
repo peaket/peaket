@@ -347,6 +347,7 @@ export type ProblemType =
   | 'staff-invitation-already-accepted'
   | 'staff-invitation-duplicate'
   | 'staff-invitation-email-mismatch'
+  | 'staff-invitation-email-unverified'
   | 'staff-invite-mail-unavailable'
   | 'subscription-limit'
   | 'ticket-ended'
@@ -722,6 +723,7 @@ export const PROBLEM_TYPES = {
   'staff-invitation-already-accepted': { status: 409, title: "이미 수락했거나 끝난 배정입니다" },
   'staff-invitation-duplicate': { status: 422, title: "같은 이메일을 두 번 초대할 수 없습니다" },
   'staff-invitation-email-mismatch': { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" },
+  'staff-invitation-email-unverified': { status: 403, title: "계정에 검증된 이메일이 없습니다" },
   'staff-invite-mail-unavailable': { status: 503, title: "지금은 초대 메일을 보낼 수 없습니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },
   'ticket-ended': { status: 409, title: "이미 끝난 티켓입니다" },

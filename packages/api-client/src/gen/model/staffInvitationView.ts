@@ -16,8 +16,13 @@ import type { StaffInvitationViewRole } from './staffInvitationViewRole';
  * 초대 수락 화면(SCR-050)용
  */
 export interface StaffInvitationView {
+  /** 초대 회차 ID. 늘 싣는다. 화면이 이 ID로 회차 공개 요약(GET /v1/events/{eventId})을 읽어 판매자 상호·공연명·회차 시작을 보인다(추천 적용 2026-11-23, ADR-0362 결정 1) */
+  eventId: string;
+  /** identity-svc는 채우지 않는다(회차·판매자 데이터를 갖지 않는다, ADR-0007). 화면은 eventId로 회차 공개 요약을 읽는다(ADR-0362 결정 1) */
   partnerName?: string;
+  /** identity-svc는 채우지 않는다(ADR-0362 결정 1) */
   eventTitle?: string;
+  /** identity-svc는 채우지 않는다(ADR-0362 결정 1) */
   eventStartsAt?: string;
   role?: StaffInvitationViewRole;
   validFrom?: string;

@@ -2,10 +2,12 @@
 import {
   type AcceptInvitationResult,
   type CreateStaffInvitationsResult,
+  type EndOwnScannerSessionResult,
   type NewStaffInvitationRow,
   type ReissueInvitationResult,
   type RevokeAssignmentResult,
   type ScannerSessionRecord,
+  type ScannerSessionSelfRecord,
   StaffAccountInactive,
   type StaffAssignmentPartnerView,
   type StaffAssignmentRecord,
@@ -63,15 +65,24 @@ const cursorOf = (validFromMs: number, assignmentId: string): string => Buffer.f
   }
 };
 
+/** 메모리 스캐너 세션 한 줄: 확인용 값에 승인 시각과 기기 이름(0038)을 더한다 */
+export type MemoryScannerSession = ScannerSessionRecord & { approvedAtMs?: number; deviceName?: string | null };
+
 export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
   readonly assignments = new Map<string, MemoryStaffAssignmentRow>();
-  readonly sessions = new Map<string, ScannerSessionRecord>();
+  readonly sessions = new Map<string, MemoryScannerSession>();
+  /** useReauth를 넣지 않은 조립(시험)에서 이 저장소가 직접 기억하는 재인증 토큰 jti */
+  readonly reauthUses = new Set<string>();
   readonly accounts = new Map<string, { email?: string; verified: boolean; status?: 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED'; nickname?: string }>();
   /** 기기 폐기로 끝낸 세션의 control.sessions-terminated 값(시험 확인용) */
   readonly terminatedEvents: { accountId: string; sessionId: string; reason: string; terminatedAt: string }[] = [];
 
   /** local·memory 조립에서 세션 저장소의 계정 상태를 읽는다. 없으면 null(비ACTIVE)로 닫는다 */
-  constructor(private readonly accountStatus?: (accountId: string) => 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | undefined) {}
+  constructor(
+    private readonly accountStatus?: (accountId: string) => 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | undefined,
+    /** 재인증 토큰 한 번 쓰기(memory 조립은 세션 저장소의 reauth 기록을 같이 쓴다). 없으면 reauthUses에 기억한다 */
+    private readonly useReauth?: (r: { jti: string; accountId: string; usedAt: number; expiresAt: number }) => Promise<boolean>,
+  ) {}
 
   #statusOf(accountId: string): 'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null {
     return this.accounts.get(accountId)?.status ?? this.accountStatus?.(accountId) ?? null;
@@ -237,10 +248,18 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
         status: statusAt(a.status, a.validUntilMs, i.nowMs) as 'ASSIGNED' | 'REVOKED' | 'ENDED',
         validFrom: new Date(a.validFromMs ?? 0).toISOString(),
         validUntil: new Date(a.validUntilMs ?? 0).toISOString(),
-        activeScannerDeviceName: null,
+        activeScannerDeviceName: this.#liveDeviceNameOf(a.id, i.nowMs),
       })),
       ...(filtered.length > i.limit && last ? { nextCursor: cursorOf(last.validFromMs ?? 0, last.id) } : {}),
     };
+  }
+
+  /** 그 배정의 살아 있는(끝나지 않았고 expires_at > now) 스캐너 세션의 기기 이름 */
+  #liveDeviceNameOf(assignmentId: string, nowMs: number): string | null {
+    for (const s of this.sessions.values()) {
+      if (s.assignmentId === assignmentId && s.terminatedAt === null && s.expiresAt > nowMs) return s.deviceName ?? null;
+    }
+    return null;
   }
 
   async listAssignedByAccount(i: { accountId: string; nowMs: number }): Promise<StaffAssignmentRecord[]> {
@@ -297,6 +316,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     proxy: boolean;
     approvedAtMs: number;
     expiresAtMs: number;
+    deviceName?: string | null;
   }): Promise<void> {
     if (this.#statusOf(i.accountId) !== 'ACTIVE') throw new StaffAccountInactive();
     for (const [id, s] of this.sessions) {
@@ -319,7 +339,43 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
       validFrom: a.validFromMs ?? 0,
       validUntil: a.validUntilMs ?? 0,
       eventId: a.eventId ?? '',
+      approvedAtMs: i.approvedAtMs,
+      deviceName: i.deviceName ?? null,
     });
+  }
+
+  async listLiveScannerSessions(i: { accountId: string; nowMs: number }): Promise<ScannerSessionSelfRecord[]> {
+    return [...this.sessions.values()]
+      .filter((s) => s.accountId === i.accountId && s.terminatedAt === null && s.expiresAt > i.nowMs)
+      .map((s) => ({
+        scannerSessionId: s.scannerSessionId,
+        deviceName: s.deviceName ?? null,
+        eventId: s.eventId,
+        role: s.role,
+        proxy: s.proxy,
+        approvedAtMs: s.approvedAtMs ?? 0,
+        expiresAtMs: s.expiresAt,
+        lastSeenAtMs: s.lastSeenAtMs ?? null,
+      }));
+  }
+
+  async endOwnScannerSession(i: { accountId: string; scannerSessionId: string; nowMs: number; reauth: { jti: string; expiresAtMs: number } }): Promise<EndOwnScannerSessionResult> {
+    const s = this.sessions.get(i.scannerSessionId);
+    // 다른 계정·끝난 세션·역할 유효 끝이 온 세션·없는 ID는 같은 NOT_FOUND이고 토큰을 쓰지 않는다
+    if (!s || s.accountId !== i.accountId || s.terminatedAt !== null || s.expiresAt <= i.nowMs) return 'NOT_FOUND';
+    const fresh = this.useReauth
+      ? await this.useReauth({ jti: i.reauth.jti, accountId: i.accountId, usedAt: i.nowMs, expiresAt: i.reauth.expiresAtMs })
+      : this.#useLocalReauth(i.reauth.jti);
+    if (!fresh) return 'REAUTH_USED';
+    this.sessions.set(i.scannerSessionId, { ...s, terminatedAt: i.nowMs });
+    this.terminatedEvents.push({ accountId: i.accountId, sessionId: i.scannerSessionId, reason: 'LOGOUT', terminatedAt: new Date(i.nowMs).toISOString() });
+    return 'ENDED';
+  }
+
+  #useLocalReauth(jti: string): boolean {
+    if (this.reauthUses.has(jti)) return false;
+    this.reauthUses.add(jti);
+    return true;
   }
 
   async touchScannerSession(scannerSessionId: string, atMs: number): Promise<void> {

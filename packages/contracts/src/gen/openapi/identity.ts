@@ -59,16 +59,17 @@ export const CreateStaffInvitationLookupBody = zod.object({
 }).strict()
 
 export const CreateStaffInvitationLookupResponse = zod.object({
-  "partnerName": zod.string().optional(),
-  "eventTitle": zod.string().optional(),
-  "eventStartsAt": zod.iso.datetime({"offset":true}).optional(),
+  "eventId": zod.string().describe('초대 회차 ID. 늘 싣는다. 화면이 이 ID로 회차 공개 요약(GET /v1/events/{eventId})을 읽어 판매자 상호·공연명·회차 시작을 보인다(추천 적용 2026-11-23, ADR-0362 결정 1)'),
+  "partnerName": zod.string().optional().describe('identity-svc는 채우지 않는다(회차·판매자 데이터를 갖지 않는다, ADR-0007). 화면은 eventId로 회차 공개 요약을 읽는다(ADR-0362 결정 1)'),
+  "eventTitle": zod.string().optional().describe('identity-svc는 채우지 않는다(ADR-0362 결정 1)'),
+  "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('identity-svc는 채우지 않는다(ADR-0362 결정 1)'),
   "role": zod.enum(['gate_staff', 'gate_lead']).optional(),
   "validFrom": zod.iso.datetime({"offset":true}).optional(),
   "validUntil": zod.iso.datetime({"offset":true}).optional(),
   "invitedEmailMasked": zod.string().optional(),
   "consents": zod.object({
-  "collection": zod.string().optional().describe('수집·이용 고지(목적, 항목, 보유 기간, 거부권과 불이익)'),
-  "provision": zod.string().optional().describe('파트너 제공 고지(받는 자, 목적, 항목, 보유 기간, 거부권과 불이익)'),
+  "collection": zod.string().optional().describe('수집·이용 고지(목적, 항목, 보유 기간, 거부권과 불이익). 줄마다 `이름: 내용`이고 줄바꿈 문자(LF)로 나눈다. 줄의 이름과 내용은 docs/planning/04-ia-flows-screens.md §3 SCR-050 ③이다. 화면은 줄 그대로 글자로만 보인다(ADR-0362 결정 2)'),
+  "provision": zod.string().optional().describe('파트너 제공 고지(받는 자, 목적, 항목, 보유 기간, 거부권과 불이익). 줄마다 `이름: 내용`이고 줄바꿈 문자(LF)로 나눈다. 줄의 이름과 내용은 docs/planning/04-ia-flows-screens.md §3 SCR-050 ④이다. 화면은 줄 그대로 글자로만 보인다(ADR-0362 결정 2)'),
   "consentVersion": zod.string().optional().describe('두 고지 문안의 판. 수락 요청의 consentVersion으로 그대로 보낸다(추천 적용 2026-10-30, ADR-0089)')
 }).optional()
 }).describe('초대 수락 화면(SCR-050)용')
@@ -772,7 +773,7 @@ export const getIdentityScannerSessionsResponseItemsMax = 1;
 export const GetIdentityScannerSessionsResponse = zod.object({
   "items": zod.array(zod.object({
   "sessionId": zod.uuid().describe('끝내기(DELETE /v1/identity/scanner-sessions/{sessionId})에 쓴다'),
-  "deviceName": zod.string().nullable().describe('스캐너 이름(예 동문-03). scanner_session에 칸이 없어 승인 때 복사하거나 기기 원장에서 읽는다 [가정]. 모르면 null'),
+  "deviceName": zod.string().nullable().describe('스캐너 이름(예 동문-03). 기기 승인이 세션을 만들 때 기기 승인 요청의 기기 원장 이름을 scanner_session.device_name에 복사한 값이다. 그 칸이 생기기 전(마이그레이션 0038 전)의 세션은 null이다(추천 적용 2026-11-23, ADR-0362 결정 6)'),
   "eventId": zod.string().describe('배정 회차. 화면이 회차 공개 요약을 읽는다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).describe('대리 승인이면 gate_staff'),
   "proxy": zod.boolean().optional().describe('책임자 대리 승인'),
@@ -783,7 +784,7 @@ export const GetIdentityScannerSessionsResponse = zod.object({
 })
 
 /**
- * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1, docs/design/d5 §5.17, BUILD_ORDER GAT-230. 다른 기기 로그아웃(DELETE /v1/identity/sessions/{sessionId})과 같은 재인증이다(작업 묶음 FAN_SENSITIVE, 5분 한 번, 404는 토큰을 쓰지 않는다). scanner_session.terminated_at을 적으면 스캐너 경로 가드의 세션 확인이 다음 요청부터 거절한다. 오프라인 기기에 남은 스캔 기록은 기기 자격으로 올린다(offline-gate §6.5). 휴대폰 로그아웃과는 따로다. Cache-Control: no-store
+ * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1, docs/design/d5 §5.17, BUILD_ORDER GAT-230. 다른 기기 로그아웃(DELETE /v1/identity/sessions/{sessionId})과 같은 재인증이다(작업 묶음 FAN_SENSITIVE, 5분 한 번, 404는 토큰을 쓰지 않는다). scanner_session.terminated_at을 적으면 스캐너 경로 가드의 세션 확인이 다음 요청부터 거절한다. 오프라인 기기에 남은 스캔 기록은 기기 자격으로 올린다(offline-gate §6.5). 휴대폰 로그아웃과는 따로다. 끝내면 같은 트랜잭션에 control.sessions-terminated(사유 LOGOUT, 키 계정 ID, sessionId는 스캐너 세션 ID)를 남긴다(추천 적용 2026-11-23, ADR-0362 결정 6). Cache-Control: no-store
  * @summary 내 스캐너 세션 끝내기(재인증 토큰 필요)
  */
 export const DeleteIdentityScannerSessionParams = zod.object({

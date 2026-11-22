@@ -13,7 +13,7 @@ import * as zod from 'zod';
 
 export const ScannerSessionSelf = zod.object({
   "sessionId": zod.uuid().describe('끝내기(DELETE /v1/identity/scanner-sessions/{sessionId})에 쓴다'),
-  "deviceName": zod.string().nullable().describe('스캐너 이름(예 동문-03). scanner_session에 칸이 없어 승인 때 복사하거나 기기 원장에서 읽는다 [가정]. 모르면 null'),
+  "deviceName": zod.string().nullable().describe('스캐너 이름(예 동문-03). 기기 승인이 세션을 만들 때 기기 승인 요청의 기기 원장 이름을 scanner_session.device_name에 복사한 값이다. 그 칸이 생기기 전(마이그레이션 0038 전)의 세션은 null이다(추천 적용 2026-11-23, ADR-0362 결정 6)'),
   "eventId": zod.string().describe('배정 회차. 화면이 회차 공개 요약을 읽는다'),
   "role": zod.enum(['gate_staff', 'gate_lead']).describe('대리 승인이면 gate_staff'),
   "proxy": zod.boolean().optional().describe('책임자 대리 승인'),

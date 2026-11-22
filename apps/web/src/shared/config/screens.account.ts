@@ -46,6 +46,11 @@ export const SCR017_STATES = [
   '탈퇴 확인 · 부정 예매 소명 요청 받음',
   /** d5 §5.17 ①의 '또는 [ 지금 본인확인 ]'(보드와 목업 ME는 본인확인 완료라 그 갈래를 볼 상태가 없었다, 2026-11-05 BOT-020이 넘긴 것) */
   '본인확인 전',
+  /** d5 §5.17 '스태프 세션' 행들(추천 적용 2026-11-23, BUILD_ORDER F-05-7, ADR-0362 결정 7) */
+  '스태프 세션',
+  '스태프 세션 끝냄',
+  '이미 끝난 스태프 세션',
+  '스태프 세션 못 불러옴',
 ] as const;
 export type Scr017State = (typeof SCR017_STATES)[number];
 
@@ -119,6 +124,11 @@ export const SCR050_STATES = [
   '동의 누락',
   '수락 완료',
   '조회 중',
+  /** d5 §5.26에서 더함(추천 적용 2026-11-23, BUILD_ORDER F-05-7 = GAT-230·GAT-240, ADR-0362 결정 3·5·8) */
+  '로그인 필요',
+  '파트너 이름을 읽지 못함',
+  '거절 확인',
+  '거절함',
 ] as const;
 export type Scr050State = (typeof SCR050_STATES)[number];
 
@@ -138,6 +148,8 @@ export const SCR051_STATES = [
   '권한 없음 · 운영 시간 밖',
   '권한 없음 · 대리 승인',
   '파트너 이름을 읽지 못함',
+  /** d5 §5.27에서 더함(승인 409 device-approval-conflict, 추천 적용 2026-11-23, ADR-0362 결정 8) */
+  '다른 승인이 먼저 처리됨',
 ] as const;
 export type Scr051State = (typeof SCR051_STATES)[number];
 
@@ -159,7 +171,8 @@ export const SCR060_STATES = ['입력', '재인증 시트', '재인증 만료', 
 export type Scr060State = (typeof SCR060_STATES)[number];
 
 // ── SCR-061 내 현장 배정 ──
-export const SCR061_STATES = ['기본', '곧 시작', '해제됨', '빈 화면', '조회 중'] as const;
+/** '못 불러옴'은 d5 §5.35에서 더함(추천 적용 2026-11-23, BUILD_ORDER F-05-7 = GAT-240) */
+export const SCR061_STATES = ['기본', '곧 시작', '해제됨', '빈 화면', '조회 중', '못 불러옴'] as const;
 export type Scr061State = (typeof SCR061_STATES)[number];
 
 export const ACCOUNT_SCREENS: readonly WebScreen[] = [

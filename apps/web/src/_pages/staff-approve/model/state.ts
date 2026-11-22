@@ -1,8 +1,10 @@
 // SCR-051 스캐너 승인(휴대폰 쪽) 상태별로 무엇을 보일지(캔버스 보드 SCR-051-m·t·d의 renderVals를 옮겼다. 세 보드의 분기는 같다).
+// '다른 승인이 먼저 처리됨'은 d5 §5.27 상태 표에서 더했다(추천 적용 2026-11-23, ADR-0362 결정 8). 실제 흐름(StaffApproveLive)도 같은 상태 이름으로 부른다.
+// '불러오지 못함'은 d5에 없는 조회 실패(5xx·연결 끊김)다.
 import type { Scr051State } from '@/shared/config/screens.account';
 
-/** 본문 모양: 로그인 필요 · 조회 중 · 승인 대기(코드 대조) · 권한 없음 · 승인됨 · 거부함 · 코드 만료 · 시도 초과 */
-export type ApproveMode = 'login' | 'loading' | 'ready' | 'denied' | 'approved' | 'rejected' | 'expired' | 'limited';
+/** 본문 모양: 로그인 필요 · 조회 중 · 승인 대기(코드 대조) · 권한 없음 · 승인됨 · 거부함 · 코드 만료 · 시도 초과 · 다른 승인이 먼저 처리됨 · 불러오지 못함 */
+export type ApproveMode = 'login' | 'loading' | 'ready' | 'denied' | 'approved' | 'rejected' | 'expired' | 'limited' | 'conflict' | 'error';
 
 /** 권한 없음의 까닭(조회 403 세 가지 + 대리 승인 요청 403) */
 export type DenyReason = 'no-assignment' | 'other-partner' | 'off-hours' | 'proxy';
@@ -33,7 +35,7 @@ const DENY: Partial<Record<Scr051State, DenyReason>> = {
   '권한 없음 · 대리 승인': 'proxy',
 };
 
-const MODE: Record<Scr051State, ApproveMode> = {
+const MODE: Record<Scr051State | '불러오지 못함', ApproveMode> = {
   '승인 대기': 'ready',
   '로그인 필요': 'login',
   '조회 중': 'loading',
@@ -48,11 +50,13 @@ const MODE: Record<Scr051State, ApproveMode> = {
   '권한 없음 · 운영 시간 밖': 'denied',
   '권한 없음 · 대리 승인': 'denied',
   '파트너 이름을 읽지 못함': 'ready',
+  '다른 승인이 먼저 처리됨': 'conflict',
+  '불러오지 못함': 'error',
 };
 
-export function approveView(st: Scr051State): ApproveView {
+export function approveView(st: Scr051State | '불러오지 못함'): ApproveView {
   const mode = MODE[st];
-  const deny = DENY[st] ?? null;
+  const deny = (DENY as Partial<Record<string, DenyReason>>)[st] ?? null;
   return {
     mode,
     signedIn: mode !== 'login',

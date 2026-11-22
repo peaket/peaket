@@ -45,6 +45,9 @@ export const DEVICE_SESSIONS: readonly DeviceSession[] = [
   { id: 'ses-scanner-dm03', name: '현장 스캐너 동문-03', icon: 'scan', tag: '스태프 세션' },
 ];
 
+/** 현장 스캐너 세션 줄(스태프 세션 미리보기 상태가 빼거나 실패로 바꾼다, d5 §5.17 '스태프 세션') */
+export const SCANNER_SESSION_ID = 'ses-scanner-dm03';
+
 /** '원격 로그아웃 완료' 상태에서 이미 로그아웃한 기기 */
 export const REMOTE_LOGGED_OUT_ID = 'ses-safari-iphone';
 

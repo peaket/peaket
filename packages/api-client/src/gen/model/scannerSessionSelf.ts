@@ -18,7 +18,7 @@ export interface ScannerSessionSelf {
   /** 끝내기(DELETE /v1/identity/scanner-sessions/{sessionId})에 쓴다 */
   sessionId: string;
   /**
-     * 스캐너 이름(예 동문-03). scanner_session에 칸이 없어 승인 때 복사하거나 기기 원장에서 읽는다 [가정]. 모르면 null
+     * 스캐너 이름(예 동문-03). 기기 승인이 세션을 만들 때 기기 승인 요청의 기기 원장 이름을 scanner_session.device_name에 복사한 값이다. 그 칸이 생기기 전(마이그레이션 0038 전)의 세션은 null이다(추천 적용 2026-11-23, ADR-0362 결정 6)
      * @nullable
      */
   deviceName: string | null;

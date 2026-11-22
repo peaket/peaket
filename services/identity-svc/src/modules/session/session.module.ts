@@ -36,6 +36,9 @@ import { MergeProposalsController } from './inbound/merge.controller.js';
 import { SessionsController } from './inbound/sessions.controller.js';
 import { EndDeviceSession } from './application/end-device-session.js';
 import { ListSessions } from './application/list-sessions.js';
+import { ListScannerSessions } from './application/list-scanner-sessions.js';
+import { EndScannerSession } from './application/end-scanner-session.js';
+import { ScannerSessionsController } from './inbound/scanner-sessions.controller.js';
 import { COOKIE_DOMAIN, TokenController } from './inbound/token.controller.js';
 import { AccountSummaryController } from './inbound/account-summary.controller.js';
 import { GetAccountSummary } from './application/get-account-summary.js';
@@ -121,7 +124,13 @@ export class SessionModule {
   static register(o: SessionModuleOptions): DynamicModule {
     // memory 조립에서도 스태프 저장소가 세션 저장소의 계정 상태를 읽어 비ACTIVE 계정을 닫게 한다.
     const memorySessions = o.storage === 'memory' ? new MemorySessionStore() : undefined;
-    const memoryStaff = memorySessions ? new MemoryStaffAssignmentStore((accountId) => memorySessions.accountOf(accountId)?.status) : undefined;
+    // 스캐너 세션 끝내기의 재인증 토큰은 세션 저장소의 같은 기록(reauth_token_use에 해당)에 한 번 쓴다(ADR-0362 결정 6)
+    const memoryStaff = memorySessions
+      ? new MemoryStaffAssignmentStore(
+          (accountId) => memorySessions.accountOf(accountId)?.status,
+          (r) => memorySessions.transaction((tx) => tx.useReauth(r)),
+        )
+      : undefined;
     return {
       module: SessionModule,
       // 본인확인 컨텍스트가 계정 정리(ACCOUNT_CLOSURE)를 쓰므로 전역으로 내준다
@@ -132,6 +141,8 @@ export class SessionModule {
         ProvidersController,
         MergeProposalsController,
         SessionsController,
+        // 내 스캐너 세션 조회·끝내기(휴대폰 쪽 SCR-017, ADR-0362 결정 6)
+        ScannerSessionsController,
         AccountSummaryController,
         StaffInvitationController,
         // 파트너 초대는 관리 역할 판정(adminAuthz)이 있어야 뜬다. 없으면 플랫폼 시작 확인이 막으므로 조립에서 뺀다
@@ -188,6 +199,8 @@ export class SessionModule {
         ListProviders,
         ListSessions,
         EndDeviceSession,
+        ListScannerSessions,
+        EndScannerSession,
         AddProvider,
         UnlinkProvider,
         MergePlanner,

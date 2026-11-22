@@ -4519,7 +4519,7 @@ export const getDeleteIdentityScannerSessionUrl = (sessionId: string,) => {
 }
 
 /**
- * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1, docs/design/d5 §5.17, BUILD_ORDER GAT-230. 다른 기기 로그아웃(DELETE /v1/identity/sessions/{sessionId})과 같은 재인증이다(작업 묶음 FAN_SENSITIVE, 5분 한 번, 404는 토큰을 쓰지 않는다). scanner_session.terminated_at을 적으면 스캐너 경로 가드의 세션 확인이 다음 요청부터 거절한다. 오프라인 기기에 남은 스캔 기록은 기기 자격으로 올린다(offline-gate §6.5). 휴대폰 로그아웃과는 따로다. Cache-Control: no-store
+ * FR-046, POL-031, ADR-0051, SCR-017 ②, docs/features/identity.md §6.1, docs/design/d5 §5.17, BUILD_ORDER GAT-230. 다른 기기 로그아웃(DELETE /v1/identity/sessions/{sessionId})과 같은 재인증이다(작업 묶음 FAN_SENSITIVE, 5분 한 번, 404는 토큰을 쓰지 않는다). scanner_session.terminated_at을 적으면 스캐너 경로 가드의 세션 확인이 다음 요청부터 거절한다. 오프라인 기기에 남은 스캔 기록은 기기 자격으로 올린다(offline-gate §6.5). 휴대폰 로그아웃과는 따로다. 끝내면 같은 트랜잭션에 control.sessions-terminated(사유 LOGOUT, 키 계정 ID, sessionId는 스캐너 세션 ID)를 남긴다(추천 적용 2026-11-23, ADR-0362 결정 6). Cache-Control: no-store
  * @summary 내 스캐너 세션 끝내기(재인증 토큰 필요)
  */
 export const deleteIdentityScannerSession = async (sessionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deleteIdentityScannerSessionResponseSuccess> => {

@@ -21,6 +21,24 @@ export interface ScannerSessionRecord {
   eventId: string;
 }
 
+/**
+ * 내 스캐너 세션 한 줄(휴대폰 쪽, openapi ScannerSessionSelf, ADR-0362 결정 6). 스태프 토큰·기기 키·기기 ID는 싣지 않는다.
+ * deviceName은 승인 때 기기 승인 요청에서 복사한 이름이다(마이그레이션 0038 전의 행은 null). 시각은 밀리초
+ */
+export interface ScannerSessionSelfRecord {
+  scannerSessionId: string;
+  deviceName: string | null;
+  eventId: string;
+  role: StaffRole;
+  proxy: boolean;
+  approvedAtMs: number;
+  expiresAtMs: number;
+  lastSeenAtMs: number | null;
+}
+
+/** 내 스캐너 세션 끝내기의 결과. NOT_FOUND면 재인증 토큰을 쓰지 않았고, REAUTH_USED면 이미 쓴 토큰이라 아무것도 바꾸지 않았다 */
+export type EndOwnScannerSessionResult = 'ENDED' | 'NOT_FOUND' | 'REAUTH_USED';
+
 /** gRPC CheckScannerSessionResponse로 옮기는 답 */
 export interface ScannerSessionAnswer {
   valid: boolean;
@@ -77,7 +95,7 @@ export interface StaffAssignmentRecord {
   consentVersion?: string;
 }
 
-/** 내 배정 목록 한 줄(SCR-061). 기기 이름은 ticket-svc 데이터라 지금은 null이다. */
+/** 내 배정 목록 한 줄(SCR-061). activeScannerDeviceName은 그 배정의 살아 있는(끝나지 않았고 expires_at > now) 스캐너 세션의 device_name이다(ADR-0362 결정 6). 없거나 0038 전 세션이면 null */
 export interface StaffAssignmentSelfView {
   assignmentId: string;
   eventId: string;
@@ -220,7 +238,20 @@ export interface StaffAssignmentStore {
     proxy: boolean;
     approvedAtMs: number;
     expiresAtMs: number;
+    /** 기기 승인 요청에 든 기기 원장 이름(scanner_session.device_name, 마이그레이션 0038). 없으면 null로 둔다 */
+    deviceName?: string | null;
   }): Promise<void>;
+  /**
+   * 그 계정의 살아 있는 스캐너 세션(terminated_at 없음, expires_at > nowMs). 계정당 하나뿐이라 많아야 한 줄이다(ADR-0362 결정 6).
+   * 배정을 수락하기 전·다른 계정의 세션은 오지 않는다
+   */
+  listLiveScannerSessions(i: { accountId: string; nowMs: number }): Promise<ScannerSessionSelfRecord[]>;
+  /**
+   * 스태프 본인이 휴대폰에서 자기 스캐너 세션을 끝낸다(DELETE /v1/identity/scanner-sessions/{sessionId}, ADR-0362 결정 6, identity §6.1 ④).
+   * 한 트랜잭션에서: 그 계정의 살아 있는 세션이 아니면 NOT_FOUND(재인증 토큰을 쓰지 않는다), 재인증 토큰(jti)을 한 번 쓰고(reauth_token_use, 이미 썼으면 REAUTH_USED),
+   * terminated_at = nowMs를 적은 뒤 control.sessions-terminated(사유 LOGOUT, 키 계정 ID, sessionId는 스캐너 세션 ID)를 적는다
+   */
+  endOwnScannerSession(i: { accountId: string; scannerSessionId: string; nowMs: number; reauth: { jti: string; expiresAtMs: number } }): Promise<EndOwnScannerSessionResult>;
   /** 세션의 마지막 연락 시각. 끝난 세션이면 아무것도 하지 않는다 */
   touchScannerSession(scannerSessionId: string, atMs: number): Promise<void>;
   /** 승인 저장소가 승인을 거절했을 때 만든 세션을 되돌린다(끝난 시각을 남긴다) */

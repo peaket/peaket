@@ -1,17 +1,20 @@
 // SCR-061 내 현장 배정(d5 §5.35, d3 SCR-061 행, 캔버스 보드 SCR-061-m·t·d를 한 페이지 반응형으로 합쳤다).
 // 한 열: 현재 배정 카드(배지 진행 중·곧 시작·해제, 파트너·권한 유효 시간, 지금 로그인한 스캐너) → 지난 배정(종료) → 스캐너 로그인 방법 안내.
 // 휴대폰은 바탕 위에 바로 쌓고, md 768부터 옅은 바탕(surface-basement) 가운데 560 폭으로 바뀐다. 셸은 스태프 변형(하늘 = 현장 책임자).
-// 상태는 ?state=(보드 state 값), 다크는 ?theme=dark.
+// 실제 흐름(API 출처가 있고 ?state=가 없을 때)은 GET /v1/staff-assignments와 회차 공개 요약으로 클라이언트가 그린다(StaffHomeLive, BUILD_ORDER F-05-7 = GAT-240, ADR-0362).
+// 미리보기 상태는 ?state=(보드 state 값과 d5 상태 이름), 다크는 ?theme=dark.
 import Link from 'next/link';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { ME_HANEUL } from '@/entities/me';
 import { ProductionPoster } from '@/entities/production';
+import { isLiveStaff } from '@/features/staff-invitation/browser';
 import { ORIGINS } from '@/shared/config/origins';
 import { SCR061_STATES } from '@/shared/config/screens.account';
 import type { PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { currentAssignmentCard, pastAssignmentCards, staffHomeView, type AssignmentCard } from '../model/state';
+import { StaffHomeLiveLoader } from './StaffHomeLiveLoader';
 
 const PATH = '/staff';
 /** 닫기는 홈으로 간다(추천안) */
@@ -19,6 +22,8 @@ const CLOSE_HREF = '/';
 
 export async function StaffHomePage({ searchParams }: PageProps) {
   const sp = await searchParams;
+  // 실제 흐름: API 출처가 있고 미리보기 상태를 고르지 않았을 때(계획 F-05-7 §4)
+  if (isLiveStaff() && sp.state === undefined) return <StaffHomeLiveLoader />;
   const state = resolvePreviewState(sp, SCR061_STATES, '기본');
   const dark = resolvePreviewTheme(sp) === 'dark';
   const v = staffHomeView(state);
@@ -102,6 +107,18 @@ export async function StaffHomePage({ searchParams }: PageProps) {
                 </Link>
                 이 열립니다.
               </div>
+            </div>
+          ) : null}
+
+          {v.failed ? (
+            <div className="card state px-5 py-7 md:px-8 md:py-9" role="alert">
+              <span className="state-icon is-warning">
+                <i className="ic ic-alert" aria-hidden="true" />
+              </span>
+              <h2 className="t-lg">현장 근무를 불러오지 못했습니다</h2>
+              <button className="btn btn-secondary btn-lg btn-block md:w-auto md:min-w-[240px]" type="button">
+                다시 불러오기
+              </button>
             </div>
           ) : null}
 
