@@ -708,6 +708,10 @@ test('V-T40 집중: 토스형으로 접수한 뒤 전환을 켜도 승인 명령
 test('V-T40 집중: 발권이 끝내 안 되는 주문은 기한 넘김 → CS 확인 → 보상(발권 막기 → 결제사 취소)으로 끝나고, 늦게 온 발권 성공 답은 주문을 바꾸지 않는다(명세 ⑥)', async () => {
   const s = await make(ONE);
   await using(s, async () => {
+    const statusOf = async (table: 'purchase_order' | 'order_compensation'): Promise<string | undefined> => {
+      const column = table === 'purchase_order' ? 'id' : 'order_id';
+      return (await s.purchaseDb().pool.query<{ status: string }>(`select status from ${table} where ${column} = $1`, [s.orderIdOf(1)])).rows[0]?.status;
+    };
     await run(s, [
       ...upToSent(1),
       { a: 'pgProcess', o: 1, p: 1, c: 'APPROVED' },
@@ -718,16 +722,28 @@ test('V-T40 집중: 발권이 끝내 안 되는 주문은 기한 넘김 → CS �
       { a: 'overdue', o: 1 },
       { a: 'csConfirm', o: 1 },
       { a: 'issue', o: 1 },
-      { a: 'compStart', o: 1 },
-      { a: 'ticketSvc', o: 1, c: 'OK' },
-      { a: 'compFence', o: 1 },
-      { a: 'issueAck', o: 1 },
-      { a: 'compCancel', o: 1 },
     ]);
+    expect(s.obs.ord[1]).toMatchObject({ st: 'APPROVED', job: true });
+    // compStart: 운영 주문은 APPROVED로 두고 order_compensation만 STARTED다(ADR-0354 결정 3). 하네스는 그 표로 COMPENSATING을 관측한다
+    await run(s, [{ a: 'compStart', o: 1 }]);
+    expect(s.obs.ord[1]).toMatchObject({ st: 'COMPENSATING', job: false });
+    expect(await statusOf('purchase_order')).toBe('APPROVED');
+    expect(await statusOf('order_compensation')).toBe('STARTED');
+    // compFence: 발권을 막아도 결제 취소 전이라 주문은 APPROVED, 보상 행만 FENCED다
+    await run(s, [{ a: 'ticketSvc', o: 1, c: 'OK' }, { a: 'compFence', o: 1 }]);
+    expect(s.obs.ord[1]).toMatchObject({ st: 'COMPENSATING', job: false });
+    expect(await statusOf('purchase_order')).toBe('APPROVED');
+    expect(await statusOf('order_compensation')).toBe('FENCED');
+    // compCancel: 결제 취소가 끝난 뒤 T20으로 주문과 보상 행이 함께 COMPENSATED다
+    await run(s, [{ a: 'issueAck', o: 1 }, { a: 'compCancel', o: 1 }]);
     expect(s.obs.ord[1]!.st).toBe('COMPENSATED');
+    expect(await statusOf('purchase_order')).toBe('COMPENSATED');
+    expect(await statusOf('order_compensation')).toBe('COMPENSATED');
     expect(s.obs.tks[1]!.tk).toBe('REVOKED');
     expect(s.obs.pgs['1,1']).toBe('CANCELED');
     expect(s.obs.pay['1,1']).toBe('CANCELED');
+    // 드문 동작 도달 단언(맨 끝 시험)이 이 집중 시험의 셈을 본다
+    expect([s.counts.compStart, s.counts.compFence, s.counts.compCancel]).toEqual([1, 1, 1]);
   });
 }, 60_000);
 

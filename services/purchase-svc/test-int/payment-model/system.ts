@@ -594,10 +594,11 @@ export class PaymentSystem {
   async #observe(): Promise<void> {
     const s = initState(this.scope);
     const orderIds = [...this.#ids.values()].map((x) => x.orderId);
-    const [orders, attempts, jobs, pays] = await Promise.all([
+    const [orders, attempts, jobs, comps, pays] = await Promise.all([
       this.purchase.pool.query<{ id: string; status: string }>('select id::text, status from purchase_order where id = any($1::uuid[])', [orderIds]),
       this.purchase.pool.query<{ id: string; order_id: string; pg: string; status: string }>('select id::text, order_id::text, pg, status from payment_attempt where order_id = any($1::uuid[]) order by id', [orderIds]),
       this.purchase.pool.query<{ order_id: string; overdue_at: Date | null }>('select order_id::text, overdue_at from ticket_issue_job where order_id = any($1::uuid[])', [orderIds]),
+      this.purchase.pool.query<{ order_id: string; status: string }>('select order_id::text, status from order_compensation where order_id = any($1::uuid[])', [orderIds]),
       this.payment.pool.query<{ order_id: string; pg: string; status: string; sent: boolean }>(
         `select p.order_id::text, p.pg, p.status, exists (select 1 from payment_event e where e.payment_id = p.id and e.type = 'CONFIRM_SENT') as sent from payment p where p.order_id = any($1::uuid[])`,
         [orderIds],
@@ -605,7 +606,11 @@ export class PaymentSystem {
     ]);
     for (const [o, ids] of this.#ids) {
       const row = orders.rows.find((r) => r.id === ids.orderId)!;
-      const st = row.status === 'AUTHENTICATED' ? 'CREATED' : row.status === 'UNKNOWN' ? 'RESERVED' : row.status === 'COMPENSATED' && this.#compensating.has(o) ? 'COMPENSATING' : row.status;
+      // ADR-0354 결정 3: 보상 중은 공개 주문 상태가 아니다. 주문은 APPROVED로 두고 order_compensation이 STARTED·FENCED를 든다.
+      // 명세의 COMPENSATING은 그 표와 하네스 표시로 관측한다(COMPENSATED는 T20이 끝난 뒤 그대로 COMPENSATED다)
+      const compensation = comps.rows.find((r) => r.order_id === ids.orderId);
+      const compensating = row.status === 'APPROVED' && (this.#compensating.has(o) || compensation?.status === 'STARTED' || compensation?.status === 'FENCED');
+      const st = row.status === 'AUTHENTICATED' ? 'CREATED' : row.status === 'UNKNOWN' ? 'RESERVED' : compensating ? 'COMPENSATING' : row.status;
       const mine = attempts.rows.filter((r) => r.order_id === ids.orderId);
       const accepted = mine.find((r) => r.status === 'ACCEPTED');
       const job = jobs.rows.find((r) => r.order_id === ids.orderId);
