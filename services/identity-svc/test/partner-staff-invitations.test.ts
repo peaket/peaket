@@ -238,13 +238,21 @@ describe('파트너 현장 스태프 초대 서버 [GAT-210, BAT-450B]', () => {
     expect([...store.assignments.values()][0]!.inviteTokenHash).toBe(hashOf(token));
   });
 
-  test('I-T21 ⑤ 다른 파트너 회차·없는 회차는 같은 404 본문이고 행을 만들지 않는다', async () => {
+  test('I-T21 ⑤ 다른 파트너 회차·없는 회차는 표준 404 not-found(제목 찾을 수 없습니다)이고 구체 사유는 detail이며 행을 만들지 않는다', async () => {
     const other = await create([{ email: 'x@example.com', role: 'gate_staff' }], EVENT_2);
     const missing = await create([{ email: 'x@example.com', role: 'gate_staff' }], '0190f3a1-7c2e-7a00-8000-00000000b999');
     expect(other.statusCode).toBe(404);
     expect(missing.statusCode).toBe(404);
     // 본문이 같아 없는 회차와 다른 파트너 회차를 가릴 수 없다(AZ-T2·T3). instance(요청 주소)는 다를 수 있다
-    expect(json(other)).toMatchObject({ type: (json(missing) as Record<string, unknown>).type, status: 404, title: (json(missing) as Record<string, unknown>).title });
+    const a = json(other) as Record<string, unknown>;
+    const b = json(missing) as Record<string, unknown>;
+    expect(a).toMatchObject({
+      type: 'https://peaket.example/problems/not-found',
+      status: 404,
+      title: '찾을 수 없습니다',
+      detail: '없는 회차이거나 이 파트너의 회차가 아닙니다',
+    });
+    expect(b).toMatchObject({ type: a.type, status: a.status, title: a.title, detail: a.detail });
     expect(store.assignments.size).toBe(0);
     expect(mail.sent).toHaveLength(0);
     expect((await list(EVENT_2, '', 's-pa')).statusCode).toBe(404);
@@ -269,7 +277,7 @@ describe('파트너 현장 스태프 초대 서버 [GAT-210, BAT-450B]', () => {
     expect((await create([{ email: 'ok@example.com', role: 'gate_staff' }])).statusCode).toBe(201);
   });
 
-  test('I-T21 ⑥ 메일 대역은 수신자·조각 링크·24시간을 남기고, 메일이 없으면 503 provider-down이며 행을 만들지 않는다', async () => {
+  test('I-T21 ⑥ 메일 대역은 수신자·조각 링크·24시간을 남기고, 메일이 없으면 503 staff-invite-mail-unavailable이며 행을 만들지 않는다', async () => {
     const r = await create([{ email: 'mail@example.com', role: 'gate_lead' }]);
     expect(r.statusCode).toBe(201);
     expect(mail.sent[0]).toMatchObject({ to: 'mail@example.com', eventId: EVENT, role: 'gate_lead', expiresAt: NOW + 24 * HOUR, at: NOW });
@@ -279,7 +287,12 @@ describe('파트너 현장 스태프 초대 서버 [GAT-210, BAT-450B]', () => {
     store.assignments.clear();
     const failed = await create([{ email: 'fail@example.com', role: 'gate_staff' }]);
     expect(failed.statusCode).toBe(503);
-    expect(json(failed)).toMatchObject({ type: expect.stringContaining('provider-down') });
+    expect(json(failed)).toMatchObject({
+      type: 'https://peaket.example/problems/staff-invite-mail-unavailable',
+      status: 503,
+      title: '지금은 초대 메일을 보낼 수 없습니다',
+    });
+    expect(failed.headers['retry-after']).toBe('1');
     expect(store.assignments.size).toBe(0);
   });
 

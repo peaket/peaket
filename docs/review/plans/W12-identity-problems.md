@@ -60,7 +60,14 @@
 
 ## 실패 확인
 
-시험 담당 `w12idp-test`(deepseek-v4.1-flash). 기준 트리 `HEAD`(계획 커밋)에서 구현 없이 시험만 고쳐 돌린다. (시험 담당이 채운다)
+시험 담당 `w12idp-test`(deepseek-v4.1-flash), 2026-11-22 15:14 KST. 기준 트리 `b8b2fec2b`(계획 커밋)에서 구현 없이 시험만 고쳐 돌렸다.
+
+| 시험 | 결과 | 까닭 |
+| --- | --- | --- |
+| `pnpm --filter @peaket/identity-svc test test/partner-staff-invitations.test.ts` | 13개 중 **2 실패**(I-T21 ⑤·⑥), 11 통과 | ⑤는 404 `title`이 `찾을 수 없습니다`가 아니라 `없는 회차이거나 이 파트너의 회차가 아닙니다`이고 `detail`이 없다. ⑥은 503 `type`이 `staff-invite-mail-unavailable`이 아니라 `provider-down`이다 |
+| `pnpm --filter @peaket/platform test test/problem-types.test.ts` | 2개 중 **1 실패**(PRF192) | 두 제목 차이: `identity-svc not-found '없는 회차이거나…'`, `identity-svc provider-down '지금은 초대 메일을 보낼 수 없습니다'` |
+
+- 새 단언이 구현을 요구하는 방향으로 먼저 섰다. ⑤가 먼저 `title`에서 실패해 `detail`·본문 동일성 단언에는 닿지 않았고, ⑥도 `type`에서 실패해 `Retry-After` 단언에는 닿지 않았다.
 
 ## 리뷰
 
