@@ -1,7 +1,10 @@
 // CS 처리함 목록·상세·갱신 쓰임새(openapi listOpsCases·getOpsCase·updateOpsCase, F-06-2 GAT-280, ADR-0364 결정 5, R-T49).
-// 역할: CS 담당자(cs_agent·cs_lead)의 목록에는 지급·대사·KYC 건이 없고 상세·갱신은 없는 건과 같은 404다(open-items 72번).
-// operator·commander는 모두 보고 지급·대사·KYC 건만 갱신한다(그 밖 403 case-update-not-allowed). viewer는 경로 역할에 없어 403이다.
-// 배정: cs_agent(와 operator·commander)는 자기에게 맡거나 자기 배정을 풀 때만, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(아니면 422 case-assignee-invalid).
+// 역할: CS 담당자(cs_agent·cs_lead)의 목록에는 지급·대사·KYC 건과 운영 쪽 승인 업무 실행 실패 건(PAYOUT_BATCH·COMMANDER_ROLE_CHANGE·CONTRACT_TERMS_CHANGE)이 없고
+// 상세·갱신은 없는 건과 같은 404다(open-items 72번, 리뷰 RV-01·RV-04). operator·commander는 모두 보고 그 건만 갱신한다(관리 역할 변경·계약 변경 실패 건은 commander만,
+// 그 밖 403 case-update-not-allowed). viewer는 경로 역할에 없어 403이다.
+// 배정: cs_agent(와 operator·commander)는 아무도 맡지 않은 건을 자기에게 맡거나 자기 배정을 풀 때만이고, 맡은 사람이 있는 건을 바꾸는 것은 cs_lead다(어기면 403).
+// 풀기는 assignee: null이고 빈 글은 받는 층이 400 invalid-body로 막는다(리뷰 RV-02). cs_lead는 활성 CS 담당자 누구에게나 맡긴다(아니면 422 case-assignee-invalid).
+// 상태 차례 밖은 422 case-status-transition-invalid, 2,000자를 넘는 메모는 400 invalid-body다(R-T49 ⑨).
 // 상태: OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED. 해결은 끝이고(다시 고치면 409), 해결에는 결과 메모(1~2,000자)가 같은 요청에 있어야 한다.
 // 갱신은 If-Match 판(없으면 428, 다르면 412)이고 판이 1 오르며, 감사 체인에 행위자·이전·다음 상태·배정을 한 줄 남긴다(메모 본문은 남기지 않는다).
 import { ProblemError } from '@peaket/platform';
@@ -12,7 +15,10 @@ import {
   CS_CASE_KINDS,
   CS_CASE_STATUSES,
   RESULT_NOTE_MAX,
+  OPS_APPROVAL_FAILURE_CATEGORIES,
   SETTLEMENT_OPS_KINDS,
+  isCommanderOnlyCase,
+  isOpsSideCase,
   nextDueOf,
   type CsActor,
   type CsAssigneeDirectory,
@@ -76,9 +82,13 @@ const iso = (ms: number): string => new Date(ms).toISOString();
 
 const isCsRole = (role: string): boolean => CS_ROLES.has(role);
 /** 그 역할이 이 건을 볼 수 있는가(CS 담당자에게 지급·대사·KYC 건은 없다) */
-const canSee = (actor: CsActor, c: Pick<CsCase, 'kind'>): boolean => LIST_ROLES.has(actor.role) && !(isCsRole(actor.role) && SETTLEMENT_OPS_KINDS.has(c.kind));
+const canSee = (actor: CsActor, c: Pick<CsCase, 'kind' | 'category'>): boolean => LIST_ROLES.has(actor.role) && !(isCsRole(actor.role) && isOpsSideCase(c));
 /** 그 역할이 이 건을 고칠 수 있는가 */
-const canUpdate = (actor: CsActor, c: Pick<CsCase, 'kind'>): boolean => (isCsRole(actor.role) ? !SETTLEMENT_OPS_KINDS.has(c.kind) : OPS_ROLES.has(actor.role) && SETTLEMENT_OPS_KINDS.has(c.kind));
+const canUpdate = (actor: CsActor, c: Pick<CsCase, 'kind' | 'category'>): boolean => {
+  if (isCsRole(actor.role)) return !isOpsSideCase(c);
+  if (!OPS_ROLES.has(actor.role) || !isOpsSideCase(c)) return false;
+  return actor.role === 'commander' || !isCommanderOnlyCase(c);
+};
 
 /** If-Match 판 읽기(admin-accounts parseIfMatch와 같은 꼴: "7" 또는 W/"7") */
 function parseIfMatch(raw: string | undefined): number | null {
@@ -141,13 +151,13 @@ export class CsCases {
     const after = q.cursor ? decodeCursor(q.cursor) : undefined;
     const kind = q.kind as CsCaseKind | undefined;
     // CS 담당자가 지급·대사·KYC 종류로 걸러도 0건이다(오류가 아니다, openapi listOpsCases)
-    if (kind && !canSee(actor, { kind })) return { items: [], nextCursor: null };
+    if (kind && isCsRole(actor.role) && SETTLEMENT_OPS_KINDS.has(kind)) return { items: [], nextCursor: null };
     const nowMs = this.d.clock.now();
     const dueAtOrBeforeMs = within === undefined ? undefined : within === 0 ? nowMs : addBusinessDays(this.#calendar, nowMs, within);
     const rows = await this.d.store.list({
       statuses: q.status ? [q.status as CsCaseStatus] : OPEN_STATUSES,
       ...(kind ? { kinds: [kind] } : {}),
-      ...(isCsRole(actor.role) ? { excludeKinds: [...SETTLEMENT_OPS_KINDS] } : {}),
+      ...(isCsRole(actor.role) ? { excludeKinds: [...SETTLEMENT_OPS_KINDS], excludeCategories: { kind: 'APPROVAL_EXECUTION_FAILED' as const, categories: [...OPS_APPROVAL_FAILURE_CATEGORIES] } } : {}),
       ...(dueAtOrBeforeMs !== undefined ? { dueAtOrBeforeMs } : {}),
       ...(after ? { after } : {}),
       limit: limit + 1,
@@ -178,8 +188,8 @@ export class CsCases {
     if (c.status === 'RESOLVED') throw problem('case-already-resolved', 409, '이미 해결한 건입니다');
     if (body.assignee === undefined && body.status === undefined && body.resultNote === undefined) throw problem('invalid-body', 400, '고칠 칸이 없습니다');
     const status = body.status ?? c.status;
-    if (status !== c.status && !NEXT_STATUSES[c.status].includes(status)) throw problem('invalid-body', 422, '지금 상태에서 바꿀 수 없는 상태입니다');
-    if (body.resultNote !== undefined && codePoints(body.resultNote) > RESULT_NOTE_MAX) throw problem('invalid-body', 422, '결과 메모는 2,000자까지입니다');
+    if (status !== c.status && !NEXT_STATUSES[c.status].includes(status)) throw problem('case-status-transition-invalid', 422, '지금 상태에서 바꿀 수 없는 상태입니다');
+    if (body.resultNote !== undefined && codePoints(body.resultNote) > RESULT_NOTE_MAX) throw problem('invalid-body', 400, '결과 메모는 2,000자까지입니다');
     const note = body.resultNote !== undefined && body.resultNote.trim() !== '' ? body.resultNote : undefined;
     if (status === 'RESOLVED' && note === undefined) throw problem('case-result-note-required', 422, '결과 메모를 적어 주세요');
     const assignee = body.assignee === undefined ? c.assignee : await this.#assigneeOf(actor, c, body.assignee);
@@ -216,7 +226,9 @@ export class CsCases {
   }
 
   async #assigneeOf(actor: CsActor, c: CsCase, raw: string | null): Promise<string | null> {
-    const target = raw === null || raw === '' ? null : raw.toLowerCase();
+    // 빈 글은 받는 층이 400으로 막는다. 여기 오는 빈 글(다른 조립)도 풀기로 읽지 않는다
+    if (raw === '') throw problem('invalid-body', 400, '배정 풀기는 assignee: null로 보내 주세요');
+    const target = raw === null ? null : raw.toLowerCase();
     if (target === c.assignee) return target;
     if (target !== null && !UUID.test(target)) throw problem('case-assignee-invalid', 422, '맡길 수 없는 계정입니다');
     const self = actor.accountId.toLowerCase();
@@ -232,10 +244,11 @@ export class CsCases {
       if (!active) throw problem('case-assignee-invalid', 422, '맡길 수 없는 계정입니다');
       return target;
     }
-    // cs_agent·operator·commander: 자기에게 맡기거나 자기 배정을 풀 때만
-    if (target === self) return target;
-    if (target === null && c.assignee === self) return null;
-    throw notAllowed('자기에게 맡기거나 자기 배정을 풀 때만 고칠 수 있습니다');
+    // cs_agent·operator·commander: 아무도 맡지 않은 건을 자기에게 맡거나 자기 배정을 풀 때만. 맡은 사람이 있는 건을 바꾸는 것은 cs_lead다
+    const current = c.assignee?.toLowerCase() ?? null;
+    if (target === self && current === null) return target;
+    if (target === null && current === self) return null;
+    throw notAllowed(current !== null && current !== self ? '맡은 사람이 있는 건은 CS 책임자(cs_lead)가 바꿉니다' : '자기에게 맡기거나 자기 배정을 풀 때만 고칠 수 있습니다');
   }
 
   #audit(prev: CsCase, next: CsCase, actor: CsActor, nowMs: number): AuditRecord {

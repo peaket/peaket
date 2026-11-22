@@ -142,11 +142,27 @@ export const SETTLEMENT_OPS_KINDS: ReadonlySet<string> = new Set([
   'PG_BALANCE_MISMATCH',
 ]);
 
-/** 이 역할이 이 건을 고칠 수 있는가(서버 판정과 같은 규칙, 버튼을 그릴지만 정한다) */
+/** 승인 업무 실행 실패 건 가운데 운영 쪽 category(ADR-0364 결정 5, 리뷰 RV-04). 앞 하나는 operator·commander, 뒤 둘은 commander만 고친다 */
+export const OPS_APPROVAL_FAILURE_CATEGORIES: ReadonlySet<string> = new Set(['PAYOUT_BATCH', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE']);
+const COMMANDER_APPROVAL_FAILURE_CATEGORIES: ReadonlySet<string> = new Set(['COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE']);
+
+/**
+ * 이 역할이 이 종류의 건을 고칠 수 있는가(서버 판정과 같은 규칙, 버튼을 그릴지만 정한다).
+ * 승인 업무 실행 실패는 category로 나뉘어 CS 쪽·운영 쪽 모두 고칠 수 있는 종류라 true이고, 건마다 canActOnCategory로 좁힌다
+ */
 export function canActOn(role: string, kind: string): boolean {
-  if (role === 'cs_agent' || role === 'cs_lead') return !SETTLEMENT_OPS_KINDS.has(kind);
-  if (role === 'operator' || role === 'commander') return SETTLEMENT_OPS_KINDS.has(kind);
+  const both = kind === 'APPROVAL_EXECUTION_FAILED';
+  if (role === 'cs_agent' || role === 'cs_lead') return both || !SETTLEMENT_OPS_KINDS.has(kind);
+  if (role === 'operator' || role === 'commander') return both || SETTLEMENT_OPS_KINDS.has(kind);
   return false;
+}
+
+/** 승인 업무 실행 실패 건의 category별 좁힘(그 밖 종류는 true) */
+export function canActOnCategory(role: string, kind: string, category: string): boolean {
+  if (kind !== 'APPROVAL_EXECUTION_FAILED') return true;
+  if (!OPS_APPROVAL_FAILURE_CATEGORIES.has(category)) return role === 'cs_agent' || role === 'cs_lead';
+  if (COMMANDER_APPROVAL_FAILURE_CATEGORIES.has(category)) return role === 'commander';
+  return role === 'operator' || role === 'commander';
 }
 
 export function statusLabel(s: CaseStatus): string {

@@ -7758,6 +7758,11 @@ export type updateOpsCaseResponse200 = {
   status: 200
 }
 
+export type updateOpsCaseResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type updateOpsCaseResponse403 = {
   data: ProblemResponse
   status: 403
@@ -7791,7 +7796,7 @@ export type updateOpsCaseResponse428 = {
 export type updateOpsCaseResponseSuccess = (updateOpsCaseResponse200) & {
   headers: Headers;
 };
-export type updateOpsCaseResponseError = (updateOpsCaseResponse403 | updateOpsCaseResponse404 | updateOpsCaseResponse409 | updateOpsCaseResponse412 | updateOpsCaseResponse422 | updateOpsCaseResponse428) & {
+export type updateOpsCaseResponseError = (updateOpsCaseResponse400 | updateOpsCaseResponse403 | updateOpsCaseResponse404 | updateOpsCaseResponse409 | updateOpsCaseResponse412 | updateOpsCaseResponse422 | updateOpsCaseResponse428) & {
   headers: Headers;
 };
 

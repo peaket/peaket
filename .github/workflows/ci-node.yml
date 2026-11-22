@@ -143,6 +143,17 @@ jobs:
         env:
           PEAKET_TEST_REPORT: test-report-int.json
           PEAKET_START_FILES_PREBUILT: '1'
+      # ops-svc의 명령 접수·2인 승인·감사 체인·회차 취소·CS 처리함(마이그레이션·건 요청·기한 경보)을 실제 PostgreSQL 18로, 명령 사건·CS 건 요청 소비자를 실제 Kafka로 본다
+      # (GAT-110·GAT-280 등). test:integration이 있는 작업 공간은 모두 이 잡에서 돈다(F-06-2 리뷰 RV-05). 범위를 고른 실행(--affected)에서는 의존 패키지 dist가 없을 수 있어 먼저 빌드한다
+      - run: pnpm exec turbo run build --filter=@peaket/ops-svc^...
+      - run: pnpm --filter @peaket/ops-svc test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
+      # ticket-svc의 발권·스캐너 기기 원장을 실제 PostgreSQL 18로 본다(F-06-2 리뷰 RV-05, 위와 같은 까닭). 의존 패키지 dist를 먼저 빌드한다
+      - run: pnpm exec turbo run build --filter=@peaket/ticket-svc^...
+      - run: pnpm --filter @peaket/ticket-svc test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
       # 소비자 웹 공유 캐시 처리기를 실제 Valkey 클러스터로: 처리기 인스턴스 둘(다른 파드처럼)이 같은 클러스터를 나눠 쓰고 태그 무효화를 서로 보는지,
       # 쓴 키마다 TTL이 있는지, 멈춤·장애 조치·끊김에서 회복하는지(BUILD_ORDER HOT-390, docs/frontend.md §5.18, BAT-170 T14·W7L2-K1·K2).
       # 이 단계는 Valkey만 쓰는 *.int.test.mjs만 돈다. 운영 빌드가 필요한 *.build.test.mjs는 ci-web reflow 잡이, 둘 다 필요한 *.heavy.test.mjs는

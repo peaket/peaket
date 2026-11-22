@@ -12,8 +12,16 @@
 import type { UpdateOpsCaseBodyStatus } from './updateOpsCaseBodyStatus';
 
 export type UpdateOpsCaseBody = {
-  assignee?: string;
+  /**
+     * 맡길 관리 계정 ID. null은 배정 풀기다. 빈 글은 400 invalid-body(추천 적용 2026-11-23, ADR-0364 결정 5)
+     * @minLength 1
+     * @nullable
+     */
+  assignee?: string | null;
   status?: UpdateOpsCaseBodyStatus;
-  /** @maxLength 2000 */
+  /**
+     * 2,001자 이상은 400 invalid-body
+     * @maxLength 2000
+     */
   resultNote?: string;
 };

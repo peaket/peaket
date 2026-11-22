@@ -66,6 +66,25 @@ export const SETTLEMENT_OPS_KINDS: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>
   'PG_BALANCE_MISMATCH',
 ]);
 
+/**
+ * '승인 업무 실행 실패' 건 가운데 운영 쪽(operator·commander) 건의 category(승인 종류, ADR-0364 결정 5, 리뷰 RV-04).
+ * 지급 묶음은 지급 건과 같이 operator·commander가 고치고, 관리 역할 변경·계약 조건 변경은 그 승인을 다시 실행하는 commander만 고친다.
+ * 셋 다 CS 담당자에게는 없는 건과 같은 404다. 그 밖 승인 종류는 CS 건이다
+ */
+export const OPS_APPROVAL_FAILURE_CATEGORIES: ReadonlySet<string> = new Set(['PAYOUT_BATCH', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE']);
+/** 그 가운데 commander만 고치는 category */
+export const COMMANDER_APPROVAL_FAILURE_CATEGORIES: ReadonlySet<string> = new Set(['COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE']);
+
+/** operator·commander의 건인가(지급·대사·KYC 건과 운영 쪽 승인 업무 실행 실패 건). CS 담당자에게는 없는 건이다 */
+export function isOpsSideCase(c: Pick<CsCase, 'kind' | 'category'>): boolean {
+  return SETTLEMENT_OPS_KINDS.has(c.kind) || (c.kind === 'APPROVAL_EXECUTION_FAILED' && OPS_APPROVAL_FAILURE_CATEGORIES.has(c.category));
+}
+
+/** commander만 고치는 건인가 */
+export function isCommanderOnlyCase(c: Pick<CsCase, 'kind' | 'category'>): boolean {
+  return c.kind === 'APPROVAL_EXECUTION_FAILED' && COMMANDER_APPROVAL_FAILURE_CATEGORIES.has(c.category);
+}
+
 export const CS_CASE_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED'] as const;
 export type CsCaseStatus = (typeof CS_CASE_STATUSES)[number];
 
@@ -158,6 +177,8 @@ export interface CsCaseListQuery {
   readonly kinds?: readonly CsCaseKind[];
   /** 이 종류는 뺀다(CS 담당자의 지급·대사·KYC 건) */
   readonly excludeKinds?: readonly CsCaseKind[];
+  /** 이 종류의 이 category들은 뺀다(CS 담당자의 운영 쪽 승인 업무 실행 실패 건) */
+  readonly excludeCategories?: { readonly kind: CsCaseKind; readonly categories: readonly string[] };
   /** 이른 기한이 이 시각 이하인 건만(기한 없는 건은 빠진다) */
   readonly dueAtOrBeforeMs?: number;
   /** 이 (이른 기한, ID) 다음부터. nextDueMs null은 기한 없음('infinity') */

@@ -2825,14 +2825,15 @@ export const UpdateOpsCaseHeader = zod.object({
   "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
+
 export const updateOpsCaseBodyResultNoteMax = 2000;
 
 
 
 export const UpdateOpsCaseBody = zod.object({
-  "assignee": zod.string().optional(),
+  "assignee": zod.string().min(1).nullish().describe('맡길 관리 계정 ID. null은 배정 풀기다. 빈 글은 400 invalid-body(추천 적용 2026-11-23, ADR-0364 결정 5)'),
   "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
-  "resultNote": zod.string().max(updateOpsCaseBodyResultNoteMax).optional()
+  "resultNote": zod.string().max(updateOpsCaseBodyResultNoteMax).optional().describe('2,001자 이상은 400 invalid-body')
 }).strict()
 
 export const updateOpsCaseResponseResultNoteMax = 2000;

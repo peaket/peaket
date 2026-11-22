@@ -11,10 +11,13 @@ import { CsCases } from '../application/cs-cases.js';
 import { CS_CASE_STATUSES } from '../domain/cs-case.js';
 
 const CASE_ROLES = ['operator', 'commander', 'cs_agent', 'cs_lead'] as const;
-/** 갱신 본문(openapi updateOpsCase). 배정 풀기는 빈 글이나 null이다 */
+/**
+ * 갱신 본문(openapi updateOpsCase). 배정 풀기는 null이고 빈 글은 400 invalid-body다(리뷰 RV-02).
+ * 메모 글자 수(코드 포인트 2,000)는 CsCases가 서버 셈으로 다시 보고 넘으면 400 invalid-body다
+ */
 const UpdateBody = z
   .object({
-    assignee: z.string().max(64).nullable().optional(),
+    assignee: z.string().min(1).max(64).nullable().optional(),
     status: z.enum(CS_CASE_STATUSES).optional(),
     resultNote: z.string().max(4_000).optional(),
   })

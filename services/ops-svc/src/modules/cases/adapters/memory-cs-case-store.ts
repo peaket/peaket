@@ -49,6 +49,7 @@ export class MemoryCsCaseStore implements CsCaseStore {
       .filter((c) => q.statuses.includes(c.status))
       .filter((c) => !q.kinds || q.kinds.includes(c.kind))
       .filter((c) => !q.excludeKinds || !q.excludeKinds.includes(c.kind))
+      .filter((c) => !q.excludeCategories || !(c.kind === q.excludeCategories.kind && q.excludeCategories.categories.includes(c.category)))
       .filter((c) => {
         if (q.dueAtOrBeforeMs === undefined) return true;
         const due = nextDueOf(c);

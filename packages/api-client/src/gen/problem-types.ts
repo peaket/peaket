@@ -47,6 +47,7 @@ export type ProblemType =
   | 'case-assignee-invalid'
   | 'case-not-actioned'
   | 'case-result-note-required'
+  | 'case-status-transition-invalid'
   | 'case-update-not-allowed'
   | 'checkpoint-empty'
   | 'checkpoint-not-ready'
@@ -427,6 +428,7 @@ export const PROBLEM_TYPES = {
   'case-assignee-invalid': { status: 422, title: "맡길 수 없는 계정입니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
   'case-result-note-required': { status: 422, title: "결과 메모를 적어 주세요" },
+  'case-status-transition-invalid': { status: 422, title: "지금 상태에서 바꿀 수 없는 상태입니다" },
   'case-update-not-allowed': { status: 403, title: "이 건을 고칠 수 있는 역할이 아닙니다" },
   'checkpoint-empty': { status: 409, title: "묶을 감사 기록이 없습니다" },
   'checkpoint-not-ready': { status: 409, title: "아직 서명하지 않았거나 옛 체크포인트입니다" },

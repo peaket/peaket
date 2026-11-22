@@ -109,6 +109,9 @@ export class DrizzleCsCaseStore implements CsCaseStore {
     let where = sql`status in (${inList(q.statuses)})`;
     if (q.kinds) where = sql`${where} and kind in (${inList(q.kinds)})`;
     if (q.excludeKinds && q.excludeKinds.length > 0) where = sql`${where} and kind not in (${inList(q.excludeKinds)})`;
+    if (q.excludeCategories && q.excludeCategories.categories.length > 0) {
+      where = sql`${where} and not (kind = ${q.excludeCategories.kind} and category in (${inList(q.excludeCategories.categories)}))`;
+    }
     if (q.dueAtOrBeforeMs !== undefined) where = sql`${where} and next_due_at <= ${new Date(q.dueAtOrBeforeMs)}::timestamptz`;
     if (q.after) {
       const due = q.after.nextDueMs === null ? sql`'infinity'::timestamptz` : sql`${new Date(q.after.nextDueMs)}::timestamptz`;

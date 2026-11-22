@@ -9,6 +9,7 @@ import {
   FILTER_KINDS,
   RESULT_NOTE_MAX,
   canActOn,
+  canActOnCategory,
   caseViewOf,
   casePageOf,
   dueBadge,
@@ -141,7 +142,7 @@ export function ConnectedPage() {
   }, [caseId, loadDetail]);
 
   /** 갱신 하나. 성공하면 상세·목록을 서버 값으로 다시 그린다 */
-  const patch = async (c: CaseView, version: number, body: { assignee?: string; status?: 'IN_PROGRESS' | 'RESOLVED'; resultNote?: string }, done: string) => {
+  const patch = async (c: CaseView, version: number, body: { assignee?: string | null; status?: 'IN_PROGRESS' | 'RESOLVED'; resultNote?: string }, done: string) => {
     setBusy(true);
     setNotice(null);
     try {
@@ -386,14 +387,16 @@ interface CaseDetailProps {
   onNote(v: string): void;
   onAssignTo(v: string): void;
   onReload(): void;
-  onPatch(body: { assignee?: string; status?: 'IN_PROGRESS' | 'RESOLVED' }, done: string): void;
+  onPatch(body: { assignee?: string | null; status?: 'IN_PROGRESS' | 'RESOLVED' }, done: string): void;
   onResolve(): void;
 }
 
 function CaseDetail(p: CaseDetailProps) {
   const { c } = p;
   const badge = dueBadge(c.dueState);
-  const act = canActOn(p.role, c.kind) && c.status !== 'RESOLVED';
+  const act = canActOn(p.role, c.kind) && c.status !== 'RESOLVED' && canActOnCategory(p.role, c.kind, c.category);
+  // 맡은 사람이 있는 건을 바꾸는 것은 cs_lead다(cs_agent는 아무도 맡지 않은 건만 자기에게 맡고 자기 배정만 푼다, ADR-0364 결정 5)
+  const lead = p.role === 'cs_lead';
   const mine = c.assignee !== null && c.assignee.toLowerCase() === p.myId;
   return (
     <>
@@ -443,24 +446,29 @@ function CaseDetail(p: CaseDetailProps) {
         ) : null}
       </dl>
 
-      {!canActOn(p.role, c.kind) && c.status !== 'RESOLVED' ? (
+      {!act && c.status !== 'RESOLVED' ? (
         <p className="t-sm muted" role="note">
-          {p.role === 'operator' || p.role === 'commander' ? '이 건은 CS 담당자가 처리합니다. operator·commander는 지급·대사·KYC 건만 처리합니다.' : '이 건을 처리할 수 있는 역할이 아닙니다.'}
+          {p.role === 'operator' && canActOnCategory('commander', c.kind, c.category) && c.kind === 'APPROVAL_EXECUTION_FAILED'
+            ? '이 건은 그 승인 업무를 다시 실행하는 commander가 처리합니다.'
+            : p.role === 'operator' || p.role === 'commander'
+              ? '이 건은 CS 담당자가 처리합니다. operator·commander는 지급·대사·KYC 건과 운영 쪽 승인 업무 실행 실패 건만 처리합니다.'
+              : '이 건을 처리할 수 있는 역할이 아닙니다.'}
         </p>
       ) : null}
 
       {act ? (
         <>
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            {!mine ? (
+            {!mine && (c.assignee === null || lead) ? (
               <button className="btn btn-outline" type="button" disabled={p.busy || !p.myId} onClick={() => p.onPatch({ assignee: p.myId }, '나에게 배정했습니다')}>
                 나에게 배정
               </button>
-            ) : (
-              <button className="btn btn-outline" type="button" disabled={p.busy} onClick={() => p.onPatch({ assignee: '' }, '배정을 풀었습니다')}>
+            ) : null}
+            {mine || (lead && c.assignee !== null) ? (
+              <button className="btn btn-outline" type="button" disabled={p.busy} onClick={() => p.onPatch({ assignee: null }, '배정을 풀었습니다')}>
                 배정 풀기
               </button>
-            )}
+            ) : null}
             {c.status === 'OPEN' ? (
               <button className="btn btn-outline" type="button" disabled={p.busy} onClick={() => p.onPatch({ status: 'IN_PROGRESS' }, '진행 중으로 바꿨습니다')}>
                 진행 중
