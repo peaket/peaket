@@ -1,6 +1,6 @@
 # ADR-0363: 월렛 재발급·웹 푸시 구독·월렛 워커 위치와 로그아웃 정리를 실제 서버에 잇는다(2026-11-23)
 
-- **상태**: 채택(2026-11-23, 추천 적용, BUILD_ORDER 기능 F-05-1 계획 `docs/review/plans/F-05-1.md`). 방향을 바꾸는 결정은 없다. 정본(docs/features/offline-gate.md §2·§4·§9.1, docs/frontend.md §4.2.4·§5.4·§5.14.4, docs/features/notify.md §3.4·§3.5, docs/design/d5-screen-blueprint.md §5.13)에 이미 있는 규칙을 코드에 잇다가 비어 있거나 서로 어긋난 곳을 정한다. 키 증명(QR에 서버 서명을 붙이는 선택 기능)의 채택은 이 ADR이 정하지 않는다(결정 9).
+- **상태**: 채택(2026-11-23, 추천 적용, BUILD_ORDER 기능 F-05-1 계획 `docs/review/plans/F-05-1.md`). 방향을 바꾸는 결정은 없다. 결정 5는 감독 승인 2026-11-23. 정본(docs/features/offline-gate.md §2·§4·§9.1, docs/frontend.md §4.2.4·§5.4·§5.14.4, docs/features/notify.md §3.4·§3.5, docs/design/d5-screen-blueprint.md §5.13)에 이미 있는 규칙을 코드에 잇다가 비어 있거나 서로 어긋난 곳을 정한다. 키 증명(QR에 서버 서명을 붙이는 선택 기능)의 채택은 이 ADR이 정하지 않는다(결정 9).
 - **관련**: [ADR-0050](0050-crypto-corrections-and-key-management.md) 결정 2(재발급 한도), [ADR-0051](0051-gate-process-end-to-end.md) 결정 7·10·11, [ADR-0079](0079-frontend-radio-detailed-design.md) 결정 17·18·19, [ADR-0293](0293-fan-reauth-token-bound-to-receiving-operation.md)(재인증 토큰의 받는 쪽 작업), [ADR-0336](0336-wallet-device-key-server-registration-and-cache-version.md), docs/security/authz-matrix.md §6
 - **관련 ID**: FR-012, FR-040, FR-066, POL-018, POL-019, O-T6, O-T32, O-T47, O-T48, O-T49, O-T50, FE-T14, FE-T43, FE-T47, FE-T48
 
