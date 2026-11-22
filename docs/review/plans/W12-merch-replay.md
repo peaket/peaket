@@ -264,7 +264,20 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 리뷰
 
-리뷰 담당(보안 관점)이 채운다.
+리뷰 담당(보안 관점, 다른 세션 `lane5-w12merchreplay-review`)이 2026-11-22에 구현 커밋 `dccee2a4b`와 시험 커밋 `8b3d43800`을 ADR-0352 결정 1~8, ADR-0337 결정 6·'결과', guidelines §4 '예외 둘째', data.md, openapi `createShopOrderPayment`·`PaymentAttempt`, asvs/payment 8.2.2, 계획 §6과 견줬다.
+
+| # | 지적 | 판정 | 고침 |
+| --- | --- | --- | --- |
+| RV-01 | 주문·시도 행의 무결성(금액·`pg_store`·`pay_method`·항목 이름)은 이 묶음이 서명하지 않는다. 재생은 그 행을 사실로 믿으므로, `core_app`의 표 단위 고치기 권한으로 그 값을 바꾸는 공격자는 재생이 만드는 결제창의 금액·상점·수단을 바꿀 수 있다 | 막지 않음(남는 위험) | ADR-0352 '결과'의 남는 한계와 계획 §12에 적었다. W12-core-idem §14의 `merch_order`·`merch_order_item` 높음 후보 묶음이 맡는다 |
+| RV-02 | 옛 JSON 결과 참조를 24시간 읽는다. 참조 모양이 새 UUID와 옛 JSON 둘이라, 새 코드가 옛 모양을 잘못 읽으면 저장값이 나갈 수 있다 | 막지 않음(의도) | 안의 `attemptId`만 읽고 `pg`·`checkout`·금액은 버린다(`attemptIdOf`). P-T77 ②의 옛 JSON 줄이 바뀐 공개 키·주소가 나가지 않음을 본다 |
+| RV-03 | 포트원 결제창의 주문 ID 대조가 `paymentId`의 `pay-{orderId}`가 없거나 `pay-`가 아니어도 `customData.orderId`만 있으면 통과한다. 규격 밖 결제창을 주는 payment-svc 결함이면 팬이 쓸 수 없는 값을 받는다 | 막지 않음(정리) | 결제사가 바꾸는 값이 아니고, 결제사·금액 대조가 먼저 503으로 막는다. `paymentId`를 필수로 보는 보강은 정리 목록에 둔다(지금 고치지 않음) |
+| RV-04 | 새 UUID 참조를 이전 판 파드가 읽으면 404다(이전 판은 JSON만 읽는다) | 막지 않음(배포) | ADR-0352 '결과'와 계획 §12에 적었다. 카나리 배포를 권한다 |
+| RV-05 | 옛 payment-svc가 `pinned_pg`를 무시하면 재생이 지금 설정의 다른 결제사를 고를 수 있다 | 막음 아님(백스톱 있음) | `#checkReplay`가 `answer.pg !== attempt.pg`를 503으로 막는다. P-T77 ⑤가 시험 행의 결제사를 바꾼 경우와 대역이 다른 결제사를 준 경우를 본다 |
+| RV-06 | 재생 대조 로그에 계정 ID·결과 참조 원문·시도 ID·결제창 값이 실리면 새는 곳이 된다 | 확인 | `replayMismatch`는 `kind`·`severity`·`operation`·`orderId`만, `merch-checkout-replay-mismatch`는 `field`만 싣는다. P-T77 ③·⑤가 금지 값을 본다 |
+
+- **막는 지적은 없다.** 저장 최소화(결과 참조 = 시도 ID, `NewAttempt`에서 응답 글 자리 제거), 재생 대조(경로 주문·세션 계정·시도 행, 404·`PrepareCheckout` 0·쓰기 0), 재생 준비 실패 5xx·같은 키 재시도, 재생이 만든 결제사·금액·주문 불일치 503, 404 본문이 남의 주문과 같은지, `pinned_pg` 전송, 정본·생성물이 같은 말을 하는지를 확인했다.
+- **시험의 성질**: P-T77 ③(404 가드)은 구현 전 코드도 UUID·없는 시도·다른 주문 시도를 404로 막아 통과한다. 새 길의 회귀 가드이고, 저장값 재생을 잡는 것은 ②·④·⑤다. 이 점을 `## 실패 확인`에 적었다.
+- **남은 위험**: RV-01(주문·시도 행 무결성), RV-03(포트원 `paymentId` 규격 밖), RV-04(배포 창). RV-02는 24시간 뒤 사라지고, RV-05는 백스톱이 있다.
 
 ## 검증
 
