@@ -8,12 +8,14 @@
 import { test, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { renderCsp } from '../../../packages/config/headers/security-headers.mjs';
 import { HOST, MOCK_API } from '../seed-css/apps.mjs';
 import { WEB_BASE, WEB_BUILD_DIR, stubFanApi } from './pages.mjs';
 import { loadExternalScriptHosts } from '../lib/canon.mjs';
-import { integrityOfBytes, judgeScripts, parseSriManifest, scriptTagsFromHtml, scriptUrlOf } from '../test/sri.mjs';
+import { integrityOfBytes, judgeScripts, manifestKeyOf, parseSriManifest, scriptTagsFromHtml, scriptUrlOf } from '../test/sri.mjs';
 
 // 팬 API는 일시 장애(503)로 답한다(없는 주소로 요청을 내보내지 않는다, pages.mjs)
 test.beforeEach(({ page }) => stubFanApi(page));
@@ -383,4 +385,87 @@ test.describe('외부 스크립트 출처와 SRI(ASVS 3.6.1, docs/frontend.md §
       );
     });
   }
+});
+
+// BAT-177-r2 T8(리뷰 RV-02, ADR-0359): 진짜 Next.js(운영 빌드) 앞의 앞 서버가 정적 덩어리에만 손님 압축 요청을 넘긴다.
+// server/csp-hash-server.test.mjs T3·T4의 흉내 위 서버(compressingUpstream)가 기대는 Next.js 동작(gzip을 청하면 gzip·Vary: Accept-Encoding)을
+// 이 운영 빌드에서 짝지어 본다. Playwright 요청 문맥은 accept-encoding을 스스로 붙이고 본문을 풀어 주며 경로를 정규화하므로,
+// 머리·날 바이트·경로 원문을 보려고 node:http로 직접 보낸다.
+/** WEB_BASE에 경로 원문 그대로 GET을 보내고 상태·머리·풀지 않은 날 바이트를 돌려준다. 손님 머리는 넘긴 것만 보낸다 */
+function rawGet(path, headers = {}) {
+  const { hostname, port } = new URL(WEB_BASE);
+  return new Promise((resolve, reject) => {
+    const rq = httpRequest({ host: hostname, port, path, method: 'GET', headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, raw: Buffer.concat(chunks) }));
+      res.on('error', reject);
+    });
+    rq.on('error', reject);
+    rq.end();
+  });
+}
+
+/** 판정 칸의 Vary 머리에 Accept-Encoding이 있는가(대소문자·순서 무시) */
+const varyHasAcceptEncoding = (v) => String(v ?? '').split(',').some((x) => x.trim().toLowerCase() === 'accept-encoding');
+
+/** 캐시 화면 HTML 응답이 압축 없이 인라인 스크립트마다 해시를 단 막는 CSP로 나왔는지 본다(ADR-0193, T8 ②·③) */
+function expectHashedHtml(res, label) {
+  expect(res.status, label).toBe(200);
+  expect(res.headers['content-type'] ?? '', label).toMatch(/^text\/html\b/);
+  expect(res.headers['content-encoding'], `${label}: HTML은 압축하지 않는다`).toBeUndefined();
+  expect(res.headers['x-peaket-csp-template'], `${label}: 안쪽 머리가 밖으로 새면 안 된다`).toBeUndefined();
+  const csp = res.headers['content-security-policy'] ?? '';
+  expect(csp, label).toMatch(/^default-src 'self'; script-src 'self'/);
+  expect(csp, label).toContain("'sha256-");
+  const html = res.raw.toString('utf8');
+  const scripts = inlineScripts(html);
+  expect(scripts.length, `${label}: 인라인 스크립트가 있어야 해시를 볼 수 있다`).toBeGreaterThan(0);
+  for (const s of scripts) expect(csp, label).toContain(sha256(s));
+  return html;
+}
+
+test.describe('BAT-177-r2 T8 진짜 Next.js 앞의 정적 덩어리 압축과 HTML 해시(ADR-0359, 리뷰 RV-02)', () => {
+  test('BAT-177-r2 T8 ① 첫 화면이 싣는 /_next/static/ CSS·JS는 gzip을 청하면 gzip·Vary: Accept-Encoding이고, 풀면 빌드 파일·SRI 표와 바이트가 같다', async ({ browserName }) => {
+    test.skip(browserName !== 'chromium', 'HTTP 응답 검사는 엔진과 상관없다');
+    const html = (await rawGet('/my/tickets')).raw.toString('utf8');
+    const cssUrls = [...html.matchAll(/<link\b[^>]*\shref="(\/_next\/static\/[^"]+\.css(?:\?[^"]*)?)"/g)].map((m) => m[1]);
+    expect(cssUrls.length, '/my/tickets 첫 HTML이 싣는 정적 CSS').toBeGreaterThan(0);
+    for (const url of new Set(cssUrls)) {
+      const file = readFileSync(join(WEB_BUILD_DIR, new URL(url, WEB_BASE).pathname.slice('/_next/'.length)));
+      const gz = await rawGet(url, { 'accept-encoding': 'gzip' });
+      expect(gz.status, url).toBe(200);
+      expect(gz.headers['content-encoding'], url).toBe('gzip');
+      expect(varyHasAcceptEncoding(gz.headers.vary), `${url} vary: ${gz.headers.vary}`).toBe(true);
+      expect(gz.raw.length, `${url}: 압축 본문이 원문 ${file.length}B보다 작다`).toBeLessThan(file.length);
+      expect(gunzipSync(gz.raw).equals(file), `${url}: 풀면 빌드 파일과 바이트가 같다`).toBe(true);
+      // 압축을 청하지 않으면 원문 그대로다(앞 서버가 지어 넣지 않는다)
+      const plain = await rawGet(url);
+      expect(plain.headers['content-encoding'], url).toBeUndefined();
+      expect(plain.raw.equals(file), `${url}: 원문 바이트`).toBe(true);
+    }
+    // JS 덩어리 하나: gzip으로 받아 풀면 같은 빌드 SRI 표 값과 같다(ADR-0326)
+    const manifest = parseSriManifest(JSON.parse(readFileSync(SRI_MANIFEST_FILE, 'utf8')));
+    const js = scriptTagsFromHtml(html)
+      .map((t) => t.src)
+      .find((src) => src.startsWith('/_next/static/') && manifest.has(manifestKeyOf(src, WEB_BASE)));
+    expect(js, '/my/tickets 첫 HTML에 SRI 표에 든 /_next/static/ 스크립트가 있다').toBeDefined();
+    const gzJs = await rawGet(js, { 'accept-encoding': 'gzip, deflate, br' });
+    expect(gzJs.headers['content-encoding'], js).toBe('gzip');
+    expect(varyHasAcceptEncoding(gzJs.headers.vary), `${js} vary: ${gzJs.headers.vary}`).toBe(true);
+    expect(integrityOfBytes(gunzipSync(gzJs.raw)), js).toBe(manifest.get(manifestKeyOf(js, WEB_BASE)));
+  });
+
+  test("BAT-177-r2 T8 ② /my/tickets HTML은 손님이 gzip, br을 청해도 압축 없이 나가고 CSP에 인라인 스크립트마다 'sha256-' 해시가 있다", async ({ browserName }) => {
+    test.skip(browserName !== 'chromium', 'HTTP 응답 검사는 엔진과 상관없다');
+    expectHashedHtml(await rawGet('/my/tickets', { 'accept-encoding': 'gzip, br' }), '/my/tickets');
+  });
+
+  test('BAT-177-r2 T8 ③ 점 마디 경로(/_next/static/media/../../../my/tickets, 원문 그대로)는 Next.js가 화면 HTML로 풀어도 압축 없이 해시 CSP로 나간다', async ({ browserName }) => {
+    test.skip(browserName !== 'chromium', 'HTTP 응답 검사는 엔진과 상관없다');
+    const path = '/_next/static/media/../../../my/tickets';
+    const html = expectHashedHtml(await rawGet(path, { 'accept-encoding': 'gzip, br' }), path);
+    // 정말 /my/tickets 화면이 나왔다(판정이 이 경로를 거르지 않으면 압축된 HTML이 오는 자리다)
+    expect(html, path).toContain('wallet-qr-skeleton');
+  });
 });

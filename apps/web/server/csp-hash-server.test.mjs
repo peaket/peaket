@@ -529,3 +529,36 @@ test('BAT-177-r2 T4 HTML 경로는 그대로 해시를 받고, 정적 경로의 
     await p.close();
   }
 });
+
+test('BAT-177-r2 T4 ④ content-encoding이 압축이라고 하면 본문이 글로 읽혀도 해시하지 않는다: 정적·화면 경로 모두 해시 없는 막는 CSP(검증 X4)', async () => {
+  // 진짜 gzip 바이트는 해시가 우연히 0개라 '압축이면 해시하지 않는다' 갈래를 가린다. 그래서 인라인 스크립트가 글자 그대로 보이는
+  // 본문(압축하지 않은 HTML, 저장만 하는 gzip level 0)에 content-encoding: gzip을 붙여 보낸다
+  const bodies = [
+    ['압축 안 한 본문', Buffer.from(HTML)],
+    ['gzip level 0', gzipSync(HTML, { level: 0 })],
+  ];
+  const noHash = TEMPLATE.replace(` ${HASH_SENTINEL}`, '');
+  for (const [kind, body] of bodies) {
+    assert.ok(inlineScriptHashes(body.toString('latin1'), RUNTIME).length > 0, `${kind}: 본문을 글로 읽으면 해시가 나오는 대역이어야 한다`);
+    const p = await pair((req, res) => {
+      req.resume();
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip', [CSP_TEMPLATE_HEADER]: TEMPLATE, 'content-security-policy-report-only': 'x' });
+      res.end(body);
+    });
+    try {
+      for (const path of ['/_next/static/x.html', '/events/e-1']) {
+        const r = await p.get(path, { 'accept-encoding': 'gzip' });
+        const label = `${kind} ${path}`;
+        assert.equal(r.status, 200, label);
+        assert.equal(r.headers['content-security-policy'], noHash, label);
+        for (const h of [sha(FLIGHT0), sha(TURBO), sha(FLIGHT1)]) assert.ok(!r.headers['content-security-policy'].includes(h), `${label}: ${h}가 붙으면 안 된다`);
+        assert.equal(r.headers[CSP_TEMPLATE_HEADER], undefined, label);
+        assert.equal(r.headers['content-security-policy-report-only'], undefined, label);
+        assert.equal(r.headers['content-encoding'], 'gzip', label);
+        assert.deepEqual(r.raw, body, `${label}: 본문 바이트는 그대로 흐른다`);
+      }
+    } finally {
+      await p.close();
+    }
+  }
+});
