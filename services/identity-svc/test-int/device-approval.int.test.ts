@@ -355,6 +355,33 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
     expect(active.rows[0].n).toBe(1);
   });
 
+  test('RV-05 scanner_session 기본키 중복(23505)은 승인 경합 409로 숨기지 않는다', async () => {
+    const existingId = randomUUID();
+    await database.pool.query(
+      `insert into scanner_session (id, staff_assignment_id, staff_account_id, scanner_device_id, role, proxy, approved_at, expires_at)
+       values ($1, $2, $3, $4, 'gate_staff', false, $5, $6)`,
+      [existingId, ASSIGN, ACCOUNT, DEVICE, new Date(clock.now()), new Date(clock.now() + HOUR)],
+    );
+    let error: unknown;
+    try {
+      await store.createScannerSession({
+        scannerSessionId: existingId,
+        assignmentId: OTHER_ASSIGN,
+        deviceId: OTHER_DEVICE,
+        accountId: OTHER,
+        approvedBySession: FAN_SESSION2,
+        role: 'gate_staff',
+        proxy: false,
+        approvedAtMs: clock.now(),
+        expiresAtMs: clock.now() + HOUR,
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect((error as { name?: string }).name).not.toBe('ScannerSessionConflict');
+    expect((error as { cause?: { code?: string; constraint?: string } }).cause).toMatchObject({ code: '23505', constraint: 'scanner_session_pkey' });
+  });
+
   test('기기 폐기 세션 종료는 scanner_session을 끝내고 DEVICE_REVOKED Outbox를 남긴다', async () => {
     const device = randomUUID();
     const session = randomUUID();
