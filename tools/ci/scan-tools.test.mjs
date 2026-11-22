@@ -812,10 +812,17 @@ test('공용 차트의 CI 값 파일은 템플릿의 required 값을 모두 채�
     'diagnose.s3Endpoint는 local·ci만': !values.diagnose.s3Endpoint || ['local', 'ci'].includes(values.env.PEAKET_ENV),
     'AWS_ENDPOINT_URL*·AWS_CONFIG_FILE은 local·ci만': ['local', 'ci'].includes(values.env.PEAKET_ENV) || [values.env, values.service.env, values.outboxRelay.env].every((e) => Object.keys(e ?? {}).every((k) => !k.startsWith('AWS_ENDPOINT_URL') && k !== 'AWS_CONFIG_FILE')),
     'NODE_OPTIONS에 안전 옵션을 끄는 값이 없다': [values.env, values.service.env, values.outboxRelay.env].every((e) => !/(^|\s)--(no-disable-sigusr1|no-report-exclude-env|no-report-exclude-network|no-report-on-fatalerror|inspect)(=|-|\s|$)/.test(String(e?.NODE_OPTIONS ?? '').replaceAll('_', '-'))),
+    // peaket.workerChecks(BAT-220, docs/streaming.md §2.2·§2.3): 작업자 모드면 추가 포트·앱 포트 라벨·Lease가 없고 자동 확장·KEDA·카나리가 꺼져 있다
+    '작업자 모드는 끔이거나, 앱 포트에 기대는 값·Lease·자동 확장·카나리가 없다': !values.worker?.enabled || (
+      (values.service.extraPorts ?? []).length === 0
+      && !(np.appFromPodLabels && Object.keys(np.appFromPodLabels).length > 0)
+      && leaderLeases(values).length === 0
+      && !a.enabled && !values.service.keda?.enabled && !values.service.rollout?.enabled
+    ),
   };
   for (const [what, ok] of Object.entries(checks)) assert.equal(ok, true, what);
-  // 지금 차트의 fail 수(값 꼴·태그 환경·HPA 넷·이그레스 칸, 갈래 1 PRF-215가 더한 Lease 이름·볼륨·추가 포트 검사, BAT-075 진단 수집 다섯). 늘면 위 목록에 그 조건을 더한다
-  assert.equal(failCount, 35, `fail ${failCount}개`);
+  // 지금 차트의 fail 수(값 꼴·태그 환경·HPA 넷·이그레스 칸, 갈래 1 PRF-215가 더한 Lease 이름·볼륨·추가 포트 검사, BAT-075 진단 수집 다섯, BAT-220 작업자 모드 넷). 늘면 위 목록에 그 조건을 더한다
+  assert.equal(failCount, 39, `fail ${failCount}개`);
 });
 
 // ===================== ZAP 기준선(DAST, BAT-045 BOT-161, ADR-0323) =====================
