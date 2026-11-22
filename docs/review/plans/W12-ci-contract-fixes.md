@@ -105,6 +105,24 @@
 
 ## 리뷰
 
+리뷰 담당 `w12ccf-review`(deepseek-v4.1-flash), 2026-11-22 19:23 KST. 받은 것은 `git diff origin/develop..6c1976172`(계획·시험·구현)과 이 계획 파일이다. 코드·계약·생성물·정본을 대조했고, PRF192 2/2, demo-images·demo-objects 30/30, `gateway-routes --check` 0, `gateway-routes.test.mjs` 41/41, contracts `gen:check` 같음·48/48, api-client `gen:check` 같음·116/116을 다시 돌렸다. 코드는 고치지 않았다.
+
+결과: **막는 지적 0**, 낮음 1(남은 위험).
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 낮음(남은 위험) | `services/ticket-svc/src/modules/ticket/inbound/transfers.controller.ts:54`, `docs/api/openapi.yaml`의 `transfer-pending` | `transfer-pending`은 원래 취소 흐름(purchase-svc)의 '양도 요청을 철회한 뒤 취소할 수 있습니다'로 목록에 들어갔는데, ticket-svc는 양도 요청을 새로 만들 때 같은 type을 '이미 진행 중인 양도 요청이 있습니다' 뜻으로 쓴다. 한 type 한 제목(guidelines §2)을 지키려고 제목을 목록 쪽으로 맞추고 사유를 `detail`로 내렸으나, 새 양도 요청을 만들려는 팬에게는 제목 문구가 취소 맥락이라 어색하다. 시험·CI를 막지는 않는다 | 후속 묶음에서 새 type(예 `transfer-exists`)으로 나누거나 `transfer-pending`의 표준 제목을 양쪽에 맞는 중립 문구로 바꾼다(그때 purchase-svc 코드·화면 문구·계약을 함께 본다) |
+
+### 확인한 것(지적 아님)
+
+- **여덟 type**: `docs/api/openapi.yaml`의 새 여덟 줄이 `transfers.controller.ts`의 `ProblemError` 인자와 status·title 글자까지 같다. `entry-recorded`(409)·`transfer-closed`(409)·`reoffer-not-allowed`(409) 등 모두 서비스 코드가 내는 값 그대로이고, 같은 이름을 다른 서비스·platform이 다른 값으로 내는 곳은 grep 0건이다.
+- **드러난 제목 여섯**: `dependency-unavailable`·`entry-started`·`invalid-body`·`reauth-unavailable`·`transfer-locked`·`transfer-pending`의 ticket-svc 제목을 목록의 표준 제목으로 맞췄다. 같은 type을 쓰는 payment·purchase·queue·ops·platform은 이미 표준 제목이라 목록을 바꾸지 않은 판단이 맞다. `transfer-locked`·`transfer-pending`의 구체 사유는 `detail`에 남아 정보가 사라지지 않는다. ticket-svc 단위 235/235가 통과한다.
+- **출처 비교가 느슨해지지 않았는지**: DS-04는 ⑴ 포트 검사(`:18\d{3}(?:\/|$)`)를 값 전체에 그대로 두고 ⑵ `_URL`+`svc.cluster.local` 예외도 그대로 두며 ⑶ `new URL(value).origin`이 `demoOrigins()` 집합에 있는지 본다. 시험 안에 경로만 다른 같은 출처는 통과하고 `https://www.peaket.example.evil:18441/...`은 거절하는 단언을 넣어 비교의 뜻을 고정했다. 경로·쿼리가 달라도 같은 출처면 통과하는 것이 이 고침의 의도다.
+- **생성물**: `contracts gen`은 바뀐 것이 없고, `api-client`는 union·표에 여덟 이름씩(16줄)만, 게이트웨이 다섯 파일은 둘째 줄 계약 지문 하나씩만 바뀌었다. 경로·메서드·백엔드·정책은 한 줄도 바뀌지 않았다(`git diff`로 확인). 두 패키지 `gen:check`가 같고 손으로 고친 생성물은 없다.
+- **시험·구현 분리**: 시험 커밋 `c1e6ac6f1`은 `tools/local/demo-images.test.mjs`와 계획 파일만, 구현 커밋 `6c1976172`은 시험 파일을 건드리지 않았다. 구현 전 실패(PRF192 missing 여덟, DS-04 값 불일치)를 계획 '실패 확인'에 남겼다.
+- **정본**: `docs/api/guidelines.md` §2의 '한 이름 한 상태·제목'과 BAT-087 계획 §6 DS-04의 '포트 붙은 출처'에 맞다. 정본 문장을 새로 쓰거나 바꿀 필요가 없었다.
+- **계약 깨짐**: `docs/api/breaking/openapi-ignore.txt`를 건드리지 않았다(소유자 승인 대기). 이 묶음의 판정은 승인 뒤 별도 묶음 몫이다.
+
 ## 검증
 
 ## 담당 표
@@ -114,3 +132,4 @@
 | plan | w12ccf-plan | deepseek-v4.1-flash | 2026-11-22T19:10:00+09:00 | 2026-11-22T19:16:00+09:00 |
 | test | w12ccf-test | deepseek-v4.1-flash | 2026-11-22T19:16:00+09:00 | 2026-11-22T19:20:00+09:00 |
 | impl | w12ccf-impl | deepseek-v4.1-flash | 2026-11-22T19:17:00+09:00 | 2026-11-22T19:23:00+09:00 |
+| review | w12ccf-review | deepseek-v4.1-flash | 2026-11-22T19:23:00+09:00 | 2026-11-22T19:28:00+09:00 |
