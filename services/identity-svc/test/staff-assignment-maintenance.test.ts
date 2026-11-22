@@ -102,8 +102,8 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
   });
 
   test('I-T87 ② 역할 유효 끝이 지난 ASSIGNED는 ENDED로 끝내고 이메일·토큰을 파기한다(정각은 그대로·멱등)', async () => {
-    seed('a-edge', { status: 'ASSIGNED', accountId: ACCOUNT, validUntilMs: NOW, inviteEmail: undefined, inviteTokenHash: undefined });
-    seed('a-past', { status: 'ASSIGNED', accountId: OTHER, validUntilMs: NOW - 1, inviteEmail: 'p@example.com', inviteTokenHash: hash('tok-past') });
+    seed('a-edge', { status: 'ASSIGNED', accountId: EDGE, validUntilMs: NOW, inviteEmail: undefined, inviteTokenHash: undefined });
+    seed('a-past', { status: 'ASSIGNED', accountId: ACCOUNT, validUntilMs: NOW - 1, inviteEmail: 'p@example.com', inviteTokenHash: hash('tok-past') });
     seed('a-future', { status: 'ASSIGNED', accountId: OTHER, eventId: EVENT_2, validUntilMs: NOW + HOUR, inviteEmail: undefined, inviteTokenHash: undefined });
 
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 1 });
@@ -113,6 +113,7 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
     expect(store.assignments.get('a-past')?.inviteTokenHash).toBeUndefined();
     expect(store.assignments.get('a-future')).toMatchObject({ status: 'ASSIGNED' });
     await expect(store.hasAssigned(ACCOUNT, NOW)).resolves.toBe(false);
+    await expect(store.hasAssigned(EDGE, NOW)).resolves.toBe(true);
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 0 });
   });
 

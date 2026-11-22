@@ -132,8 +132,8 @@ describe('배정 만료·promoter 정본화 PostgreSQL [BAT-450C]', () => {
   });
 
   test('I-T87 ② 역할 유효 끝이 지난 ASSIGNED는 ENDED로 끝내고 이메일·토큰을 파기한다(정각은 그대로·멱등)', async () => {
-    await seed({ id: A1, status: 'ASSIGNED', eventId: E4, accountId: ACCOUNT, validUntil: new Date(NOW) });
-    await seed({ id: A2, status: 'ASSIGNED', eventId: E5, accountId: OTHER, token: 'int-assigned', email: 'p@example.com', validUntil: new Date(NOW - 1) });
+    await seed({ id: A1, status: 'ASSIGNED', eventId: E4, accountId: EDGE, validUntil: new Date(NOW) });
+    await seed({ id: A2, status: 'ASSIGNED', eventId: E5, accountId: ACCOUNT, token: 'int-assigned', email: 'p@example.com', validUntil: new Date(NOW - 1) });
     await seed({ id: A3, status: 'ASSIGNED', eventId: E6, accountId: OTHER, validUntil: new Date(NOW + HOUR) });
 
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 1 });
@@ -141,6 +141,7 @@ describe('배정 만료·promoter 정본화 PostgreSQL [BAT-450C]', () => {
     await expect(rowOf(A2)).resolves.toEqual({ status: 'ENDED', invite_email: null, invite_token_hash: null });
     await expect(rowOf(A3)).resolves.toMatchObject({ status: 'ASSIGNED' });
     await expect(store.hasAssigned(ACCOUNT, NOW)).resolves.toBe(false);
+    await expect(store.hasAssigned(EDGE, NOW)).resolves.toBe(true);
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 0 });
   });
 
