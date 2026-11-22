@@ -82,6 +82,7 @@ export type ProblemType =
   | 'duplicate-admission'
   | 'enrollment-code-expired'
   | 'enrollment-rate-limited'
+  | 'entry-recorded'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
   | 'event-cancellation-active'
@@ -195,6 +196,7 @@ export type ProblemType =
   | 'passkey-registration-invalid'
   | 'password-change-required'
   | 'password-rejected'
+  | 'payer-holds'
   | 'payment-already-accepted'
   | 'payment-attempt-mismatch'
   | 'payment-attempts-exceeded'
@@ -266,10 +268,12 @@ export type ProblemType =
   | 'reauth-required'
   | 'reauth-step-invalid'
   | 'reauth-unavailable'
+  | 'recipient-not-found'
   | 'refresh-token-invalid'
   | 'refund-account-required'
   | 'refund-rejected'
   | 'rejection-not-allowed'
+  | 'reoffer-not-allowed'
   | 'report-limited'
   | 'research-export-not-ready'
   | 'restriction-too-long'
@@ -345,9 +349,13 @@ export type ProblemType =
   | 'staff-invitation-email-mismatch'
   | 'staff-invite-mail-unavailable'
   | 'subscription-limit'
+  | 'ticket-ended'
   | 'too-many-requests'
+  | 'transfer-closed'
+  | 'transfer-expired'
   | 'transfer-locked'
   | 'transfer-not-allowed'
+  | 'transfer-not-offered'
   | 'transfer-pending'
   | 'trigger-deferred'
   | 'under-14'
@@ -449,6 +457,7 @@ export const PROBLEM_TYPES = {
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
   'enrollment-code-expired': { status: 410, title: "등록 코드가 만료되었거나 이미 사용되었습니다" },
   'enrollment-rate-limited': { status: 429, title: "등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요" },
+  'entry-recorded': { status: 409, title: "입장 기록이 있어 돌려줄 수 없습니다" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
   'event-cancellation-active': { status: 409, title: "이미 진행 중인 회차 취소 요청이 있습니다" },
@@ -562,6 +571,7 @@ export const PROBLEM_TYPES = {
   'passkey-registration-invalid': { status: 410, title: "처음부터 다시 등록해 주세요" },
   'password-change-required': { status: 403, title: "비밀번호를 먼저 바꿔 주세요" },
   'password-rejected': { status: 422, title: "쓸 수 없는 비밀번호입니다" },
+  'payer-holds': { status: 409, title: "이미 결제자가 보유한 티켓입니다" },
   'payment-already-accepted': { status: 409, title: "이 주문의 결제를 이미 접수했습니다" },
   'payment-attempt-mismatch': { status: 409, title: "결제 시도와 맞지 않습니다. 결제를 다시 시작해 주세요" },
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
@@ -633,10 +643,12 @@ export const PROBLEM_TYPES = {
   'reauth-required': { status: 403, title: "다시 인증해 주세요" },
   'reauth-step-invalid': { status: 410, title: "처음부터 다시 인증해 주세요" },
   'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
+  'recipient-not-found': { status: 404, title: "받을 수 있는 회원을 찾지 못했습니다" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },
   'refund-rejected': { status: 422, title: "결제사가 환급을 거절했습니다. 고객센터가 이어 봅니다" },
   'rejection-not-allowed': { status: 403, title: "판정 전 반려는 commander만 할 수 있습니다" },
+  'reoffer-not-allowed': { status: 409, title: "받은 티켓은 다시 양도할 수 없습니다. 결제자에게 돌려주세요" },
   'report-limited': { status: 429, title: "오늘은 더 신고할 수 없습니다" },
   'research-export-not-ready': { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" },
   'restriction-too-long': { status: 422, title: "이용 제한은 1년을 넘길 수 없습니다" },
@@ -712,9 +724,13 @@ export const PROBLEM_TYPES = {
   'staff-invitation-email-mismatch': { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" },
   'staff-invite-mail-unavailable': { status: 503, title: "지금은 초대 메일을 보낼 수 없습니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },
+  'ticket-ended': { status: 409, title: "이미 끝난 티켓입니다" },
   'too-many-requests': { status: 429, title: "24시간 안에 이미 다시 받았습니다" },
+  'transfer-closed': { status: 409, title: "양도 마감(공연 시작 2시간 전)이 지났습니다" },
+  'transfer-expired': { status: 409, title: "양도 요청 기한이 지났습니다" },
   'transfer-locked': { status: 409, title: "지금은 양도할 수 없는 티켓입니다" },
   'transfer-not-allowed': { status: 403, title: "양도로 보유자가 바뀐 티켓만 새 기기를 등록할 수 있습니다" },
+  'transfer-not-offered': { status: 409, title: "진행 중인 양도 요청이 아닙니다" },
   'transfer-pending': { status: 409, title: "양도 요청을 철회한 뒤 취소할 수 있습니다" },
   'trigger-deferred': { status: 409, title: "판정 보류 중인 지표입니다" },
   'under-14': { status: 403, title: "만 14세 미만은 피켓을 이용할 수 없습니다" },

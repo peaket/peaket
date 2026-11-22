@@ -41,17 +41,17 @@ function problem(e: unknown): never {
       case 'REAUTH_REQUIRED':
         throw new ProblemError({ type: 'reauth-required', status: 403, title: '다시 인증해 주세요' });
       case 'REAUTH_UNAVAILABLE':
-        throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증을 확인하지 못했습니다', retryAfterSeconds: 5 });
+        throw new ProblemError({ type: 'reauth-unavailable', status: 503, title: '재인증 검증기를 쓸 수 없습니다', retryAfterSeconds: 5 });
       case 'TRANSFER_LOCKED':
-        throw new ProblemError({ type: 'transfer-locked', status: 409, title: '부정 예매 조사가 끝날 때까지 이 표는 양도할 수 없습니다' });
+        throw new ProblemError({ type: 'transfer-locked', status: 409, title: '지금은 양도할 수 없는 티켓입니다', detail: '부정 예매 조사가 끝날 때까지 이 표는 양도할 수 없습니다' });
       case 'ENTRY_STARTED':
-        throw new ProblemError({ type: 'entry-started', status: 409, title: '입장이 시작되어 바꿀 수 없습니다' });
+        throw new ProblemError({ type: 'entry-started', status: 409, title: '입장이 시작되어 할 수 없습니다' });
       case 'TRANSFER_CLOSED':
         throw new ProblemError({ type: 'transfer-closed', status: 409, title: '양도 마감(공연 시작 2시간 전)이 지났습니다' });
       case 'REOFFER':
         throw new ProblemError({ type: 'reoffer-not-allowed', status: 409, title: '받은 티켓은 다시 양도할 수 없습니다. 결제자에게 돌려주세요' });
       case 'TRANSFER_PENDING':
-        throw new ProblemError({ type: 'transfer-pending', status: 409, title: '이미 진행 중인 양도 요청이 있습니다' });
+        throw new ProblemError({ type: 'transfer-pending', status: 409, title: '양도 요청을 철회한 뒤 취소할 수 있습니다', detail: '이미 진행 중인 양도 요청이 있습니다' });
       case 'ALREADY_ENDED':
         throw new ProblemError({ type: 'ticket-ended', status: 409, title: '이미 끝난 티켓입니다' });
       case 'EXPIRED':
@@ -63,9 +63,9 @@ function problem(e: unknown): never {
       case 'ENTRY_RECORDED':
         throw new ProblemError({ type: 'entry-recorded', status: 409, title: '입장 기록이 있어 돌려줄 수 없습니다' });
       case 'UNAVAILABLE':
-        throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '잠시 후 다시 시도해 주세요', retryAfterSeconds: 1 });
+        throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1 });
       case 'INVALID_INPUT':
-        throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청이 올바르지 않습니다' });
+        throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
     }
   }
   throw e;

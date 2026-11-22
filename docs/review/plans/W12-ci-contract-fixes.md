@@ -94,6 +94,15 @@
 - PRF192는 기존 시험이 이미 여덟을 잡고 있어 파일을 고치지 않았다. 구현 전 실패가 구현을 요구하는 방향으로 먼저 섰다.
 - `node --test tools/local/demo-objects.test.mjs`는 이 시험 커밋을 건드리지 않았고, 고치기 전에도 통과한다(회귀는 검증에서 다시 본다).
 
+## 구현 메모
+
+구현 담당 `w12ccf-impl`(deepseek-v4.1-flash), 2026-11-22 19:17~19:23 KST.
+
+- **계약**: `docs/api/openapi.yaml`의 `x-peaket-problem-types.types`에 여덟 줄을 §2의 1 표 자리에 더했다. status·title은 `transfers.controller.ts`의 `ProblemError` 인자와 글자까지 같다.
+- **구현 중 드러난 제목 어긋남 여섯**: `missing` 단언을 지나자 PRF192가 기존 목록 항목 여섯의 제목 불일치를 보고했다. `ticket-svc`의 같은 처리기가 공용 type에 이 서비스만의 제목을 싣고 있었다: `dependency-unavailable`(잠시 후 다시 시도해 주세요), `entry-started`(입장이 시작되어 바꿀 수 없습니다), `invalid-body`(요청이 올바르지 않습니다), `reauth-unavailable`(재인증을 확인하지 못했습니다), `transfer-locked`(부정 예매 조사가…), `transfer-pending`(이미 진행 중인…). 같은 type을 다른 서비스(payment·purchase·queue·ops·platform)는 목록의 표준 제목으로 내므로 목록을 바꾸면 그쪽이 깨진다. 그래서 `transfers.controller.ts`의 제목 여섯을 목록의 표준 제목으로 맞추고, 사유가 필요한 둘(`transfer-locked`·`transfer-pending`)은 구체 문장을 `detail`로 내렸다. 새 type은 만들지 않았다(guidelines §2).
+- **생성물**: `contracts gen`은 바뀐 것이 없다(생성물이 이 목록을 쓰지 않는다). `api-client gen`이 `problem-types.ts`의 union과 `PROBLEM_TYPES` 표에 여덟 이름씩(16줄)을 더했다. `gateway-routes --write`가 다섯 생성 파일의 둘째 줄 계약 지문만 바꿨다(경로·메서드·정책 불변).
+- **게이트(이 커밋에서 돈 것)**: platform PRF192 2/2, demo-images 14/14, `gateway-routes --check` 0, ticket-svc 단위 235/235, ticket-svc typecheck 0.
+
 ## 리뷰
 
 ## 검증
@@ -104,3 +113,4 @@
 | --- | --- | --- | --- | --- |
 | plan | w12ccf-plan | deepseek-v4.1-flash | 2026-11-22T19:10:00+09:00 | 2026-11-22T19:16:00+09:00 |
 | test | w12ccf-test | deepseek-v4.1-flash | 2026-11-22T19:16:00+09:00 | 2026-11-22T19:20:00+09:00 |
+| impl | w12ccf-impl | deepseek-v4.1-flash | 2026-11-22T19:17:00+09:00 | 2026-11-22T19:23:00+09:00 |
