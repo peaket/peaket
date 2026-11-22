@@ -88,6 +88,21 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 리뷰
 
+리뷰 담당(lane5-fixint-review)이 출발점 `e214bddc5`부터 `10933df92`까지의 차이(계획 파일과 시험 두 파일)를 마이그레이션 0000~0026 전부와 대조했다. **높음·중간 지적은 없다.** 이 묶음은 그대로 검증으로 넘긴다. 아래 RV-02는 이 묶음 밖에서 찾은 것이라 넘긴다.
+
+| ID | 등급 | 자리 | 지적 | 제안 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 낮음 | `payment-grpc.int.test.ts` 170줄 PRF180 시험 이름 '(0000~0021)' | 마이그레이션은 0026까지라 이름 속 범위가 낡았다. 계획이 장부 대조 때문에 일부러 두었고 단언은 폴더의 SQL 파일 수를 세므로 동작에는 영향이 없다 | 이 묶음에서는 그대로 둔다. 시험 이름을 바꿀 일이 생기면 장부 이름과 함께 고친다 |
+| RV-02 | 중간(묶음 밖, 넘김) | `services/invariant-checker/src/tables.ts` 35줄·`src/invariants.ts` 45줄(M3)·`test-int/postgres.ts` 80줄 | 불변식 검사기가 이동 기록 표를 `receivable_movement`로 찾는다. 실제 payment 마이그레이션(0016부터)은 `receivable_move`라서 실제 DB에 대면 M3('미수금 남은 금액 = 금액 − 이동 기록 합')는 표가 없다며 SKIPPED가 된다(`invariants.ts` 2줄 규칙). 검사기 시험은 손으로 만든 `receivable_movement` 표를 써서 이 차이를 못 본다. 계획 '원인' 절의 ERD 이름 차이(`data.md`)와 같은 뿌리다 | 계획 '넘기는 것'의 `data.md` 이름 정하기와 함께 묶어, 정한 이름으로 검사기 표 목록·M3 SQL·시험 스키마를 맞춘다. 이 묶음(시험만, payment-svc)에서는 고치지 않는다 |
+
+확인한 것:
+
+- **외래키 전부를 덮는가**: `migrations/*.sql` 전체에서 `REFERENCES`는 14개다. `partner_receivable`을 가리키는 것은 `receivable_move`(0016 26줄)·`guarantee_collection`(0026 27줄) 둘뿐이고, `compensation_transfer`·`receivable_move`·`guarantee_collection`을 가리키는 외래키는 없다(0024는 외래키를 만들지 않는다). 그래서 `RESET_SQL`의 네 표는 닫힌 묶음이고 `cascade` 없이 비울 수 있다. `receivable_move → settlement_statement`(0016 27줄)는 가리키는 쪽이 비워지는 것이라 문제없다.
+- **표 목록이 마이그레이션과 같은가**: `CREATE TABLE`은 0000~0026에 29개이고(`DROP TABLE`·`RENAME`은 없다) 기대 목록 29개와 이름이 하나하나 같다. `outbox`의 분할 조각은 `relname !~ '^outbox_p'`로 빠진다. 더한 세 자리는 `order by relname`(바이트 차례) 그대로다: `event_pg_config` < `guarantee_collection` < `outbox`, `payout_batch` < `payout_batch_audit` < `pg_switch`, `settlement_statement_audit` < `settlement_webhook_receipt` < `statement_dispute`.
+- **단언이 약해지지 않았나**: 차이는 truncate 글 두 곳을 상수 하나로 바꾼 것과 기대 배열에 세 이름을 더한 것뿐이다. `toEqual` 전체 비교·행 수·상태·미수금 단언과 시험 이름은 그대로다. `cascade`를 쓰지 않아 새 외래키가 생기면 다시 실패로 드러난다. J-T28 ② 고리 안 비우기(177줄)도 남아 있어 상태별 독립성이 유지된다.
+- **다른 test-int에 같은 꼴 결함이 있나**: `grep -rn "truncate" services/payment-svc/test-int` 23곳을 대조했다. `payment`을 비우는 곳은 모두 그것을 가리키는 `payment_event`·`payment_confirm_job`·`payment_cancel`(0000 51·52줄, 0021 20줄)을 함께 넣는다. `payment-reconciliation`은 `reconciliation_diff`·`reconciliation_run`을 함께 넣고 `cascade`까지 쓴다. `event_pg_config`·`pg_switch`·`payment_entry_*`·`payment_channel_limit`·`payment_pg_channel_observed`·`webhook_receipt`·`outbox`는 가리켜지지 않는다. 숨은 결함은 없다. 표를 직접 세는 다른 곳(`compensation-transfer` 203줄·`payment-cancel-refund-account` 220줄)은 표를 그때그때 읽어 오므로 새 표에 따라 깨지지 않고, `settlement.int.test.ts` 121·194줄은 이름을 정해 고른다.
+- **원인 판단(시험 결함, 제품 아님)**: 맞다. 0025는 `payout_batch_audit`, 0026은 `guarantee_collection`·`settlement_webhook_receipt`와 `guarantee_collection → partner_receivable` 외래키를 더했고, 시험 두 파일만 그 뒤를 따라가지 않았다. 제품 코드·마이그레이션·계약에는 차이가 없다(차이는 계획 파일과 `test-int` 두 파일뿐이라 '시험만' 묶음 조건에 맞다). '정정'의 Vitest `…(28)` 읽기 풀이도 표 29개 대 26개와 맞는다.
+
 ## 검증
 
 ## 담당 표
@@ -96,3 +111,4 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | --- | --- | --- | --- | --- |
 | plan | lane5-fixint-plan | claude-opus-5-5 | 2026-11-23T03:28:00+09:00 | 2026-11-23T03:42:00+09:00 |
 | test | lane5-fixint-test | claude-opus-5-5 | 2026-11-23T03:37:00+09:00 | 2026-11-23T04:30:00+09:00 |
+| review | lane5-fixint-review | claude-opus-5-5 | 2026-11-23T04:30:00+09:00 | 2026-11-23T04:40:00+09:00 |
