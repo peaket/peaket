@@ -73,6 +73,7 @@ docs/api/proto/
 | core-svc → payment-svc | `RegisterPayoutSeller` | 판매 승인 때 지급대행 판매자 등록 | — | docs/features/settlement.md | 있음 |
 | ops-svc → payment-svc | `ApprovePayoutBatch` | 지급 묶음 승인 뒤 지급 요청 시작 | `batch_id` | docs/features/settlement.md | 있음 |
 | ops-svc → payment-svc | `CheckEventPgAssignment` | 명령 12(결제사 지정)의 하위 결제사 사전 판정(미리보기·접수·실행 직전, 쓰지 않음, 데드라인 2초 [가정]). 지금 회차 지정과 결제사별 승인 상한도 준다(추천 적용 2026-11-22, BUILD_ORDER BAT-360) | 읽기라 없음 | docs/features/payment.md §2.2, ADR-0349 결정 3 | 없음(2026-11-22 계약에 처음 적음, ADR-0349) |
+| ops-svc → payment-svc | `ResolvePgSwitch` | 명령 6 대체 결제사 전환을 보내기 직전에 회차마다 전환 뒤 갈 결제사와 그 승인 상한을 묻는다(처음 DISPATCHED 전, 쓰지 않음, 데드라인 2초 [가정]. 실패하면 명령을 쓰지 않고 503 `pg-check-unavailable`, 추천 적용 2026-11-23, BUILD_ORDER F-02-2) | 읽기라 없음 | docs/features/payment.md §2.2, ADR-0366 결정 5 | 없음(2026-11-23 계약에 처음 적음, ADR-0366) |
 | purchase-svc → payment-svc | `RequestCompensationTransfer` | 주최 측 귀책 배상금 송금 요청(`CompensationTransferService`). 팬이 배상 계좌를 넣으면 purchase-svc가 부른다. 같은 서비스의 `GetCompensationTransfer`는 부르는 쪽이 없다(아무도 부르지 못함). ops-svc는 송금을 부르지 않는다(2026-11-22 W12-mesh로 이 표에 옮김) | `compensation_id` | ADR-0317 결정 1·3, docs/features/transfer-refund.md §5 '배상 계좌 입력' | 있음 |
 | purchase-svc → ticket-svc | `IssueTickets` | 발권(승인 뒤 실패하면 같은 주문 ID로 다시 보낸다, ADR-0106) | `order_id` | docs/features/payment.md §2·§3, docs/features/offline-gate.md §2 | 있음 |
 | purchase-svc → ticket-svc | `BlockTicketIssuance` | 보상 세 걸음의 발권 막기(주문 ID로 멱등, 이미 만든 티켓은 폐기, 막은 뒤의 `IssueTickets`는 `FAILED_PRECONDITION`) | `order_id` | docs/features/payment.md §3, ADR-0355 | 있음(2026-11-22) |
