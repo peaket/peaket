@@ -327,11 +327,12 @@ node tools/ci/ledger.mjs --batch W12-merch-replay --require
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | lane5-w12merchreplay-plan | deepseek-v4.1-flash | 2026-11-22T12:00+09:00 | 2026-11-22T12:40+09:00 |
-| test | lane5-w12merchreplay-test | deepseek-v4.1-flash | 2026-11-22T12:40+09:00 | 2026-11-22T13:30+09:00 |
-| impl | lane5-w12merchreplay-impl | deepseek-v4.1-flash | 2026-11-22T13:30+09:00 | 2026-11-22T14:20+09:00 |
-| review | lane5-w12merchreplay-review | deepseek-v4.1-flash | 2026-11-22T14:20+09:00 | 2026-11-22T14:40+09:00 |
-| verify | lane5-w12merchreplay-verify | deepseek-v4.1-flash | 2026-11-22T14:40+09:00 | 2026-11-22T15:20+09:00 |
+| plan | lane5-w12merchreplay-plan | deepseek-v4.1-flash | 2026-11-22T12:00+09:00 | 2026-11-22T12:30+09:00 |
+| test | lane5-w12merchreplay-test | deepseek-v4.1-flash | 2026-11-22T12:30+09:00 | 2026-11-22T12:40+09:00 |
+| impl | lane5-w12merchreplay-impl | deepseek-v4.1-flash | 2026-11-22T12:40+09:00 | 2026-11-22T12:50+09:00 |
+| review | lane5-w12merchreplay-review | deepseek-v4.1-flash | 2026-11-22T12:50+09:00 | 2026-11-22T13:00+09:00 |
+| test | lane5-w12merchreplay-test2 | deepseek-v4.1-flash | 2026-11-22T13:00+09:00 | 2026-11-22T13:05+09:00 |
+| verify | lane5-w12merchreplay-verify | deepseek-v4.1-flash | 2026-11-22T13:05+09:00 | 2026-11-22T13:20+09:00 |
 
 ## 감독에게
 
