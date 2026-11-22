@@ -1,6 +1,6 @@
 // 받는 층: payment-svc 정산·지급·미수금 내부 경로(ops-svc·core-svc 원천이 부른다).
 // 같은 PEAKET_INTERNAL_TOKEN을 쓰고, 공개 경로가 아니다.
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ContractRouteSchema, InternalTokenGuard, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { Settlements } from '../application/settlements.js';
@@ -33,7 +33,19 @@ const ReconfirmBody = z
   })
   .strict()
   .optional();
-const DisputeResolutionBody = z.object({ result: z.enum(['ADJUSTED', 'DISMISSED']), actor: z.string().min(1) }).strict();
+/** 기각 본문(ops-svc가 cs_lead 처리자와 함께 보낸다, ADR-0368 결정 6). 사유 원문은 payment에만 남는다 */
+const DismissalBody = z.object({ reason: z.string(), actorId: z.string() }).strict();
+/** 조정 행 등록 본문(ops-svc가 승인 업무 ID를 먼저 정해 보낸다, ADR-0368 결정 7). 코드·금액·메모 검사는 유스케이스가 한다 */
+const AdjustmentBody = z
+  .object({
+    approvalId: z.string(),
+    amount: z.number(),
+    reasonCode: z.string(),
+    disputeId: z.string().optional(),
+    evidenceNote: z.string().optional(),
+    requestedBy: z.string(),
+  })
+  .strict();
 const ReceivableBody = z.object({ promoterId: z.string().uuid(), pg: PgBody, cause: z.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']), amount: z.number().int().positive() });
 const GuaranteeBody = z
   .object({ actor: z.string().min(1), sessionId: z.string().min(1), reauthToken: z.string().min(1).optional(), idempotencyKey: z.string().min(1).max(128), reason: z.string().min(1).max(2_000) })
@@ -43,6 +55,9 @@ const StatementView = z
   .object({ statementId: z.string(), kind: z.enum(['EVENT', 'PRODUCT']), pg: z.enum(['TOSS', 'PORTONE']), pgStore: z.enum(['STANDARD', 'ESCROW']), status: z.string(), payoutAmount: z.number() })
   .passthrough();
 const ProductCalculationResponse = z.object({ created: z.number(), items: z.array(StatementView) });
+const AdjustmentView = z
+  .object({ adjustmentId: z.string(), statementId: z.string(), approvalId: z.string(), reasonCode: z.string(), disputeId: z.string().nullable(), amount: z.number(), status: z.enum(['PENDING', 'APPLIED', 'VOID']), requestedAt: z.string(), appliedAt: z.string().nullable() })
+  .passthrough();
 const StatementPage = z.object({ items: z.array(StatementView) });
 const BatchView = z
   .object({ batchId: z.string(), pg: z.enum(['TOSS', 'PORTONE']), pgStore: z.enum(['STANDARD', 'ESCROW']), payoutDate: z.string(), totalAmount: z.number(), statementCount: z.number(), status: z.string() })
@@ -60,6 +75,13 @@ const one = <T>(s: z.ZodType<T>, body: unknown, title: string): T => {
   if (!p.success) bad(title);
   return p.data as T;
 };
+/** 본문 모양이 틀리면 400(기각·조정 등록, guidelines §12의 '모양 틀림') */
+const shaped = <T>(s: z.ZodType<T>, body: unknown, title: string): T => {
+  const p = s.safeParse(body);
+  if (!p.success) throw new ProblemError({ type: 'invalid-body', status: 400, title });
+  return p.data as T;
+};
+type Reply = { header(name: string, value: string): unknown };
 
 @Controller('internal/v1/settlements')
 @Roles(['public'])
@@ -92,12 +114,48 @@ export class InternalSettlementController {
     return this.settlements.reconfirmStatement(statementId, b.data ?? {});
   }
 
-  @Post('statements/:statementId/disputes/:disputeId/resolution')
+  // 옛 이의 결과 경로(…/disputes/{disputeId}/resolution)는 없앴다. 이의 인정(ADJUSTED)은 수기 조정 적용으로만 된다(ADR-0368 결정 6)
+  @Post('statements/:statementId/dispute-dismissal')
   @HttpCode(200)
   @ContractRouteSchema({ responses: { 200: StatementView } })
-  async resolveDispute(@Param('statementId') statementId: string, @Param('disputeId') disputeId: string, @Body() body: unknown) {
-    const b = one(DisputeResolutionBody, body, '이의 결과 본문이 맞지 않습니다');
-    return this.settlements.resolveDispute(statementId, disputeId, b.result, b.actor);
+  async dismissDispute(@Param('statementId') statementId: string, @Body() body: unknown, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    const b = shaped(DismissalBody, body, '기각 본문이 맞지 않습니다');
+    return this.settlements.dismissDispute(statementId, b);
+  }
+
+  @Post('statements/:statementId/adjustments')
+  @HttpCode(201)
+  @ContractRouteSchema({ responses: { 201: AdjustmentView } })
+  async requestAdjustment(@Param('statementId') statementId: string, @Body() body: unknown, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    const b = shaped(AdjustmentBody, body, '조정 본문이 맞지 않습니다');
+    return (
+      await this.settlements.requestAdjustment(statementId, {
+        approvalId: b.approvalId,
+        amount: b.amount,
+        reasonCode: b.reasonCode,
+        requestedBy: b.requestedBy,
+        ...(b.disputeId !== undefined ? { disputeId: b.disputeId } : {}),
+        ...(b.evidenceNote !== undefined ? { evidenceNote: b.evidenceNote } : {}),
+      })
+    ).adjustment;
+  }
+
+  @Post('adjustments/:approvalId/application')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.object({ adjustment: AdjustmentView, statement: StatementView }) } })
+  async applyAdjustment(@Param('approvalId') approvalId: string, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    return this.settlements.applyAdjustment(approvalId);
+  }
+
+  @Post('adjustments/:approvalId/void')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: AdjustmentView } })
+  async voidAdjustment(@Param('approvalId') approvalId: string, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    return this.settlements.voidAdjustment(approvalId);
   }
 
   @Post('confirm-due')

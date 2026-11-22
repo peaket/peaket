@@ -8,6 +8,32 @@ export { HttpProductSettlementSource, UnavailableProductSettlementSource } from 
 export { HttpDueEventSettlementSource, UnavailableDueEventSettlementSource } from './adapters/http-due-event-source.js';
 export { HttpEventCommissionRateSource } from './adapters/http-commission-rate-source.js';
 export { HttpPayoutApprovalVerifier, UnavailablePayoutApprovalVerifier } from './adapters/http-payout-approval-verifier.js';
+export { HttpAdjustmentApprovalVerifier, UnavailableAdjustmentApprovalVerifier } from './adapters/http-adjustment-approval-verifier.js';
+export { HttpSettlementCaseNotice } from './adapters/http-cs-case-notice.js';
+export {
+  addBusinessDays as addKstBusinessDays,
+  isFirstBusinessDayOfKstWeek,
+  isKstBusinessDay,
+  kstDateKey,
+  kstWeekMonday,
+  parseHolidayCalendar,
+  previousKstWeek,
+} from './domain/business-calendar.js';
+export {
+  ADJUSTABLE_STATUSES,
+  ADJUSTMENT_PENDING_TTL_MS,
+  ADJUSTMENT_REASON_CODES,
+  DISPUTE_ADJUSTMENT_CODES,
+  NON_DISPUTE_ADJUSTMENT_CODES,
+  adjustmentView,
+  payoutWithAdjustment,
+  validateAdjustment,
+  type AdjustmentReasonCode,
+  type AdjustmentRecord,
+  type AdjustmentRequest,
+  type AdjustmentStatus,
+  type AdjustmentView,
+} from './domain/adjustment.js';
 export { HttpSaleSuspensionSource, UnavailableSaleSuspensionSource } from './adapters/http-sale-suspension-source.js';
 export { HttpPromoterContractSource, UnavailablePromoterContractSource } from './adapters/http-promoter-contract-source.js';
 export { HttpPgBalanceSource, UnavailablePgBalanceSource } from './adapters/http-pg-balance-source.js';
@@ -22,7 +48,15 @@ export {
   calculateEventStatement,
   calculateProductStatement,
   dateOnly,
+  DISPUTE_WINDOW_BUSINESS_DAYS,
+  hashUuid,
+  negativeStatementSourceRef,
   payoutBatchView,
+  receivableOpenedEvent,
+  RENOTIFY_WINDOW_BUSINESS_DAYS,
+  settlementEventKey,
+  statementEvent,
+  TRADE_SETTLEMENTS_TOPIC,
   SETTLEMENT_DUE_LEASE_NAME,
   SettlementProblem,
   subtractBusinessDays,
@@ -53,6 +87,9 @@ export {
   type ReceivableCause,
   type ReceivableRecord,
   type ReceivableStatus,
+  type SettlementEventType,
+  type SettlementEventValue,
+  type StatementAuditRecord,
   type StatementKind,
   type StatementRecord,
   type StatementSource,
@@ -60,6 +97,13 @@ export {
   type StatementView,
 } from './domain/settlement.js';
 export type {
+  AdjustmentApprovalVerifier,
+  AdjustmentInsertResult,
+  SettlementCaseNotice,
+  StatementNotification,
+  StatementTransition,
+  StatementUpdate,
+  VerifiedAdjustmentApproval,
   DueEvent,
   DueEventSettlementSource,
   PayoutApprovalVerifier,

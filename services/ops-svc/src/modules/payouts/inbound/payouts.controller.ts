@@ -17,6 +17,9 @@ const BatchParams = z.object({ batchId: z.string().min(1) });
 const PortoneBody = z.object({ bulkPayoutId: z.string().min(1) });
 const ReceivableParams = z.object({ receivableId: z.string().min(1) });
 const GuaranteeBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
+const StatementParams = z.object({ statementId: z.string().min(1).max(64) });
+/** openapi createOpsSettlementDisputeDismissal 본문. 길이(1~2,000자)는 유스케이스가 본다(400) */
+const DismissalBody = z.object({ reason: z.string() }).strict();
 const BatchDetailView = z.record(z.string(), z.unknown());
 
 const BatchView = z
@@ -107,6 +110,16 @@ export class PayoutsController {
   @ContractRouteSchema({ params: BatchParams, body: PortoneBody, responses: { 200: BatchView } })
   async portoneExecution(@ContractParams(BatchParams) params: z.output<typeof BatchParams>, @ContractBody(PortoneBody) body: z.output<typeof PortoneBody>, @CurrentPrincipal() me: Principal) {
     return this.approvals.recordPortoneExecution(params.batchId, body.bulkPayoutId, me.accountId);
+  }
+
+  /** 정산 이의 기각(cs_lead, CS 처리함 '정산 이의' 건에서, settlement §4.2·§9, ADR-0368 결정 6) */
+  @Post('settlements/:statementId/dispute-dismissal')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @Roles(['cs_lead'])
+  @ContractRouteSchema({ params: StatementParams, body: DismissalBody, responses: { 200: BatchDetailView } })
+  async dismissDispute(@ContractParams(StatementParams) params: z.output<typeof StatementParams>, @ContractBody(DismissalBody) body: z.output<typeof DismissalBody>, @CurrentPrincipal() me: Principal) {
+    return (await this.approvals.dismissStatementDispute(params.statementId, body.reason, actorOf(me))) as Record<string, unknown>;
   }
 
   @Get('settlements')

@@ -4,5 +4,5 @@ export { MemoryPayoutApprovalStore } from './adapters/memory-store.js';
 export { HttpPayoutPaymentClient, UnavailablePayoutPaymentClient } from './adapters/payment-http.js';
 export { JwksApprovalVerifier, UnavailableApprovalVerifier } from './adapters/jwks-approval-verifier.js';
 export { approvalDueAt, payoutApprovalFacts, payoutApprovalView, type PayoutApprovalFacts, type PayoutApprovalRecord, type PayoutApprovalStatus, type PayoutApprovalView, type PayoutBatchView } from './domain/payout-approval.js';
-export type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient, ReauthAct } from './domain/ports.js';
-export { ReauthUnavailable } from './domain/ports.js';
+export type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient, ReauthAct, SettlementAdjustmentRow, SettlementPaymentClient } from './domain/ports.js';
+export { isSettlementPaymentClient, ReauthUnavailable, SETTLEMENT_PAYMENT_CLIENT } from './domain/ports.js';

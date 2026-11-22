@@ -1,7 +1,10 @@
 // 정산서·지급 묶음·KYC 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039, ADR-0047·0062).
-// 결제 원장은 payment-svc의 payment 표만 읽고, 상품 주문 원천은 아직 없다(상품 정산서는 빈 목록).
+// 결제 원장은 payment-svc의 payment 표만 읽고, 상품 주문 원천은 core-svc shop 내부 HTTP다.
+// 정산서 상태는 조건부 전이로만 바꾼다(지금 상태가 출발 상태일 때만, 상태·감사·trade.settlements 사건을 한 트랜잭션에, ADR-0368 결정 2).
+// 계산 = 통지(결정 1), 이의(결정 5)·기각(결정 6)·수기 조정(결정 7·8·9)·확정 때의 0 이하 처리(결정 10)·모두 보류된 묶음의 보류 저장(결정 11)을 여기서 한다.
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type {
+  AdjustmentApprovalVerifier,
   DueEventSettlementSource,
   EventCommissionRateSource,
   PayoutApprovalVerifier,
@@ -13,25 +16,47 @@ import type {
   ReceivableUpdate,
   SaleSuspensionSource,
   SettlementApprovalLog,
+  SettlementCaseNotice,
   SettlementPaymentSource,
   SettlementStore,
   StatementFilter,
+  StatementTransition,
   StatementUpdate,
+  VerifiedAdjustmentApproval,
   VerifiedPayoutApproval,
 } from '../domain/ports.js';
 import { normalizeHolderName, splitTossPayoutAmount } from '../domain/payout-adapters.js';
+import { addBusinessDays as addKstBusinessDays, isFirstBusinessDayOfKstWeek, previousKstWeek } from '../domain/business-calendar.js';
+import {
+  ADJUSTMENT_PENDING_TTL_MS,
+  adjustmentView,
+  assertAdjustable,
+  isDisputeAdjustmentCode,
+  payoutWithAdjustment,
+  sameAdjustmentRequest,
+  validateAdjustment,
+  type AdjustmentRecord,
+  type AdjustmentRequest,
+  type AdjustmentView,
+} from '../domain/adjustment.js';
 import {
   accountLast4,
   addBusinessDays,
   calculateEventStatement,
   calculateProductStatement,
   dateOnly,
+  DISPUTE_WINDOW_BUSINESS_DAYS,
+  negativeStatementSourceRef,
   payoutBatchView,
+  receivableOpenedEvent,
+  RENOTIFY_WINDOW_BUSINESS_DAYS,
   SettlementProblem,
+  statementEvent,
   statementView,
   validateDispute,
   validatePayoutAccount,
   type DisputeRecord,
+  type HoldReason,
   type GuaranteeCollectionRecord,
   type GuaranteeKind,
   type KycNotice,
@@ -45,8 +70,12 @@ import {
   type PgStore,
   type ReceivableMoveRecord,
   type ReceivableRecord,
+  type SettlementEventValue,
+  type StatementAuditRecord,
   type StatementKind,
   type StatementRecord,
+  type StatementSource,
+  type StatementStatus,
   type StatementView,
   type TossSellerStatus,
 } from '../domain/settlement.js';
@@ -70,6 +99,12 @@ export interface SettlementDeps {
   readonly clock: Clock;
   readonly commissionRateBp?: number;
   readonly log?: SettlementApprovalLog;
+  /** ops-svc CS 처리함 '정산 이의' 건 열기. 없으면 열지 않고 이의 행의 case_requested_at이 빈 채로 남는다 */
+  readonly caseNotice?: SettlementCaseNotice;
+  /** ops-svc 조정 승인 기록 대조. 없으면 조정 적용은 503이다(승인 ID만 믿지 않는다, ADR-0368 결정 8) */
+  readonly adjustmentApprovals?: AdjustmentApprovalVerifier;
+  /** KST 공휴일(PEAKET_HOLIDAY_CALENDAR_FILE). 없으면 주말만 뺀다 [가정] */
+  readonly holidays?: ReadonlySet<string>;
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
@@ -108,6 +143,29 @@ const approvalFactsOf = (a: VerifiedPayoutApproval, b: PayoutBatchRecord): void 
   if (a.approvedAt === null || Number.isNaN(Date.parse(a.approvedAt))) throw approvalMismatch('payout-approval-quorum', '승인 시각이 없습니다');
 };
 
+/** 조건부 전이가 지금 상태와 맞지 않았다(다른 전이가 먼저 썼다, ADR-0368 결정 2) */
+const stateConflict = () => new SettlementProblem('settlement-state-conflict', 409, '정산서 상태가 다른 처리와 겹쳤습니다');
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DISMISSAL_REASON_MAX = 2_000;
+/** CS 건 다시 보내기·오래된 조정 닫기의 한 번 상한(50건·100건 [가정]) */
+const CASE_RETRY_LIMIT = 50;
+const STALE_ADJUSTMENT_LIMIT = 100;
+
+/** 조정 적용 때 ops 승인 기록과 조정 행 대조(ADR-0368 결정 8). 어긋나면 409이고 아무것도 바꾸지 않는다 */
+const adjustmentFactsOf = (f: VerifiedAdjustmentApproval, a: AdjustmentRecord): void => {
+  const mismatch = (type: string, title: string) => new SettlementProblem(type, 409, title);
+  if (f.kind !== 'SETTLEMENT_ADJUSTMENT' || f.approvalId !== a.approvalId) throw mismatch('settlement-adjustment-approval-kind-mismatch', '수기 조정 승인 업무가 아닙니다');
+  if (f.targetRef !== a.statementId) throw mismatch('settlement-adjustment-approval-target-mismatch', '다른 정산서의 승인 업무입니다');
+  if (f.amount !== a.amount) throw mismatch('settlement-adjustment-approval-amount-mismatch', '승인한 조정 금액과 조정 행이 다릅니다');
+  if (f.reasonCode !== a.reasonCode) throw mismatch('settlement-adjustment-approval-reason-mismatch', '승인한 사유 코드와 조정 행이 다릅니다');
+  if (f.requestedBy !== a.requestedBy) throw mismatch('settlement-adjustment-approval-requester-mismatch', '승인 업무의 요청자와 조정 행의 요청자가 다릅니다');
+  if (f.status !== 'APPROVED' && f.status !== 'EXECUTING') throw mismatch('settlement-adjustment-approval-not-approved', '승인되지 않은 조정입니다');
+  if (f.requiredApprovals !== 2) throw mismatch('settlement-adjustment-approval-quorum', '2인 승인이 아닙니다');
+  const approvers = f.approvals.filter((id) => typeof id === 'string' && id !== '');
+  if (approvers.length === 0 || approvers.includes(f.requestedBy)) throw mismatch('settlement-adjustment-approval-quorum', '요청자와 다른 승인자가 없습니다');
+  if (f.approvedAt === null || Number.isNaN(Date.parse(f.approvedAt))) throw mismatch('settlement-adjustment-approval-quorum', '승인 시각이 없습니다');
+};
+
 const batchCurrency = 'KRW';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GUARANTEE_DUE_DAYS = 30;
@@ -119,8 +177,97 @@ const TOSS_SELLER_STATUSES: readonly TossSellerStatus[] = ['PENDING', 'PARTIALLY
 export class Settlements {
   constructor(private readonly d: SettlementDeps) {}
 
-  async listEvent(promoterId: string, eventId: string): Promise<StatementView[]> {
-    return (await this.d.store.listEvent(promoterId, eventId)).map(statementView);
+  /**
+   * 파트너 회차 정산서 목록. 다른 파트너의 회차면 없는 회차와 같은 빈 목록이고(존재를 알리지 않는다),
+   * 인가 실패 보안 로그 settlement_authz_denied를 남긴다(J-T10, ASVS 8.2.2·16.3.2).
+   */
+  async listEvent(promoterId: string, eventId: string, accountId?: string): Promise<StatementView[]> {
+    const rows = await this.d.store.listEvent(promoterId, eventId);
+    if (rows.length === 0 && accountId !== undefined && (await this.d.store.hasEventStatementOfOther(promoterId, eventId))) {
+      this.d.log?.authzDenied?.({ partnerId: promoterId, accountId, statementId: null, eventId, action: 'list-event', at: this.#now() });
+    }
+    return rows.map(statementView);
+  }
+
+  #now(): Date {
+    return new Date(this.d.clock.now());
+  }
+
+  #holidays(): ReadonlySet<string> {
+    return this.d.holidays ?? new Set();
+  }
+
+  #audit(statementId: string, fromStatus: StatementStatus, toStatus: StatementStatus, reason: string, actor: string, at: Date): StatementAuditRecord {
+    return { auditId: uuidv7(this.d.clock), statementId, fromStatus, toStatus, reason, actor, createdAt: at };
+  }
+
+  /** 계산 = 통지(ADR-0368 결정 1). 넣었으면 NOTIFIED 레코드, 부분 유일에 걸렸으면 undefined */
+  async #insertNotified(record: StatementRecord, sources: readonly StatementSource[], now: Date): Promise<StatementRecord | undefined> {
+    const disputeDueAt = addKstBusinessDays(now, DISPUTE_WINDOW_BUSINESS_DAYS, this.#holidays());
+    const notified: StatementRecord = { ...record, status: 'NOTIFIED', holdReason: null, disputeDueAt, adjustmentAmount: record.adjustmentAmount ?? 0, updatedAt: now };
+    const audit = this.#audit(record.statementId, 'CALCULATED', 'NOTIFIED', 'calculated', 'system', now);
+    const event = statementEvent(notified, 'STATEMENT_NOTIFIED', now, audit.auditId);
+    return (await this.d.store.insertStatement(record, sources, { disputeDueAt, audit, event })) ? notified : undefined;
+  }
+
+  /**
+   * 확정 전이(T5 자동 확정, T8 보류 풀림)와 이어지는 T6(ADR-0368 결정 10). 지급액이 0 이하면 같은 트랜잭션에서 CARRIED_OVER로 끝내고,
+   * 0 아래면 그 결제사의 미수금 NEGATIVE_STATEMENT(근거 negative-statement:{정산서 ID})와 RECEIVABLE_OPENED를 함께 쓴다.
+   */
+  #confirmTransition(s: StatementRecord, now: Date, o: { from: readonly StatementStatus[]; reason: string; actor: string; expect?: StatementTransition['expect'] }): { transition: StatementTransition; next: StatementRecord } {
+    const confirmAudit = this.#audit(s.statementId, s.status, 'CONFIRMED', o.reason, o.actor, now);
+    const confirmed: StatementRecord = { ...s, status: 'CONFIRMED', holdReason: null, updatedAt: now };
+    const audits = [confirmAudit];
+    const events: SettlementEventValue[] = [statementEvent(confirmed, 'STATEMENT_CONFIRMED', now, confirmAudit.auditId)];
+    if (s.payoutAmount > 0) {
+      return { transition: { statementId: s.statementId, from: o.from, to: 'CONFIRMED', set: { holdReason: null }, ...(o.expect ? { expect: o.expect } : {}), updatedAt: now, audits, events }, next: confirmed };
+    }
+    const carryAudit = this.#audit(s.statementId, 'CONFIRMED', 'CARRIED_OVER', 'payout-not-positive', o.actor, now);
+    const carried: StatementRecord = { ...confirmed, status: 'CARRIED_OVER' };
+    audits.push(carryAudit);
+    events.push(statementEvent(carried, 'STATEMENT_CARRIED_OVER', now, carryAudit.auditId));
+    let receivable: ReceivableRecord | undefined;
+    if (s.payoutAmount < 0) {
+      const amount = -s.payoutAmount;
+      receivable = {
+        receivableId: uuidv7(this.d.clock),
+        promoterId: s.promoterId,
+        pg: s.pg,
+        cause: 'NEGATIVE_STATEMENT',
+        eventId: s.eventId,
+        sourceRef: negativeStatementSourceRef(s.statementId),
+        amount,
+        remaining: amount,
+        status: 'OPEN',
+        createdAt: now,
+        updatedAt: now,
+      };
+      events.push(receivableOpenedEvent(s, amount, now, carryAudit.auditId));
+    }
+    return {
+      transition: { statementId: s.statementId, from: o.from, to: 'CARRIED_OVER', set: { holdReason: null }, ...(o.expect ? { expect: o.expect } : {}), updatedAt: now, audits, events, ...(receivable ? { insertReceivable: receivable } : {}) },
+      next: carried,
+    };
+  }
+
+  /** 지급 묶음 때의 보류(T7). 출발 CONFIRMED·묶음에 붙지 않은 정산서만이고 감사를 함께 쓴다(PAYOUT_HELD 사건은 LCH-110) */
+  #holdUpdate(s: StatementRecord, reason: HoldReason, now: Date): StatementUpdate {
+    return {
+      statementId: s.statementId,
+      status: 'HELD',
+      holdReason: reason,
+      offsetAmount: s.offsetAmount,
+      payoutAmount: s.payoutAmount,
+      updatedAt: now,
+      from: ['CONFIRMED'],
+      audits: [this.#audit(s.statementId, s.status, 'HELD', `hold-${reason.toLowerCase()}`, 'system', now)],
+      events: [],
+    };
+  }
+
+  /** 묶음 없이 보류만 저장할 때(모두 보류·잔액 부족)의 조건부 전이 */
+  static #holdTransition(u: StatementUpdate): StatementTransition {
+    return { statementId: u.statementId, from: u.from ?? ['CONFIRMED'], to: 'HELD', set: { holdReason: u.holdReason }, expect: { unbatched: true }, updatedAt: u.updatedAt, audits: u.audits ?? [], events: u.events ?? [] };
   }
 
   async listProduct(promoterId: string, filter: StatementFilter): Promise<{ items: StatementView[]; nextCursor: string | null; awaitingSettlementAmount: number }> {
@@ -128,14 +275,23 @@ export class Settlements {
     return { items: page.items.map(statementView), nextCursor: page.nextCursor, awaitingSettlementAmount: 0 };
   }
 
-  async dispute(promoterId: string, accountId: string, statementId: string, body: { reasonCode: string; detail?: string | undefined }): Promise<void> {
+  /**
+   * 파트너 이의(T3, settlement §4.2 '이의 받기'). NOTIFIED이고 기한 전(기한 1밀리초 전까지)일 때만 받는다.
+   * 이의 행·DISPUTED·감사·STATEMENT_DISPUTED를 한 트랜잭션에 쓰고, 커밋 뒤 CS 처리함 건을 연다(실패해도 이의는 남는다).
+   * 남의 정산서 ID는 없는 ID와 같은 404이고 인가 실패 보안 로그를 남긴다(J-T10).
+   */
+  async dispute(promoterId: string, accountId: string, statementId: string, body: { reasonCode: string; detail?: string | undefined }): Promise<{ disputeId: string; statement: StatementView }> {
     return guard(async () => {
       validateDispute(body.reasonCode, body.detail);
       const s = await this.d.store.findStatement(promoterId, statementId);
-      if (!s) throw notFound();
-      const now = new Date(this.d.clock.now());
-      if (s.status !== 'NOTIFIED' && s.status !== 'HELD') throw new SettlementProblem('settlement-not-disputable', 409, '지금은 이의를 낼 수 없는 정산서입니다');
-      if (s.disputeDueAt && now.getTime() > s.disputeDueAt.getTime()) throw new SettlementProblem('settlement-dispute-window-closed', 409, '이의 기간이 끝났습니다');
+      if (!s) {
+        if (await this.d.store.findStatementById(statementId)) this.d.log?.authzDenied?.({ partnerId: promoterId, accountId, statementId, action: 'dispute', at: this.#now() });
+        throw notFound();
+      }
+      const now = this.#now();
+      if (s.status !== 'NOTIFIED') throw new SettlementProblem('settlement-not-disputable', 409, '지금은 이의를 낼 수 없는 정산서입니다');
+      // 기한 시각부터 닫힌다(기한 1밀리초 전 이의는 받는다). 자동 확정은 기한 시각부터 한다(같은 시각에 둘 다 되지 않는다)
+      if (s.disputeDueAt && now.getTime() >= s.disputeDueAt.getTime()) throw new SettlementProblem('settlement-dispute-window-closed', 409, '이의 기간이 끝났습니다');
       const dispute: DisputeRecord = {
         disputeId: uuidv7(this.d.clock),
         statementId,
@@ -146,8 +302,76 @@ export class Settlements {
         result: null,
         resolvedAt: null,
       };
-      await this.d.store.insertDispute(dispute);
-      await this.d.store.saveStatement({ ...s, status: 'DISPUTED', updatedAt: now });
+      const audit = this.#audit(statementId, 'NOTIFIED', 'DISPUTED', `dispute-${dispute.reasonCode.toLowerCase()}`, accountId, now);
+      const next: StatementRecord = { ...s, status: 'DISPUTED', updatedAt: now };
+      const ok = await this.d.store.transitionStatement({
+        statementId,
+        from: ['NOTIFIED'],
+        to: 'DISPUTED',
+        ...(s.disputeDueAt ? { expect: { disputeDueAfter: now } } : {}),
+        updatedAt: now,
+        audits: [audit],
+        events: [statementEvent(next, 'STATEMENT_DISPUTED', now, audit.auditId)],
+        insertDispute: dispute,
+      });
+      if (!ok) throw stateConflict();
+      await this.#openDisputeCase(dispute);
+      return { disputeId: dispute.disputeId, statement: statementView(next) };
+    });
+  }
+
+  /** CS 처리함 '정산 이의' 건을 연다. 열면 case_requested_at을 채우고, 못 열면 로그만 남긴다(정산 일꾼이 다시 보낸다) */
+  async #openDisputeCase(d: DisputeRecord): Promise<boolean> {
+    if (!this.d.caseNotice) return false;
+    try {
+      await this.d.caseNotice.openDispute({ disputeId: d.disputeId, statementId: d.statementId, createdAt: d.submittedAt });
+    } catch {
+      this.d.log?.caseNoticeFailed?.({ disputeId: d.disputeId, statementId: d.statementId, at: this.#now() });
+      return false;
+    }
+    await this.d.store.markDisputeCaseRequested(d.disputeId, this.#now());
+    return true;
+  }
+
+  /** 건을 열지 못한 열린 이의를 다시 보낸다(정산 일꾼 30분마다, ADR-0368 결정 5). 연 수를 돌려준다 */
+  async retryDisputeCases(limit = CASE_RETRY_LIMIT): Promise<{ opened: number; pending: number }> {
+    const pending = await this.d.store.listDisputesAwaitingCase(limit);
+    let opened = 0;
+    for (const d of pending) if (await this.#openDisputeCase(d)) opened += 1;
+    return { opened, pending: pending.length };
+  }
+
+  /**
+   * 이의 기각(T4, ADR-0368 결정 6). 열린 이의를 DISMISSED·사유·처리자·시각으로 닫고 정산서를 NOTIFIED(처리 시각 + 1영업일)로 돌리며
+   * STATEMENT_NOTIFIED(판본 그대로)를 다시 쓴다. DISPUTED가 아니면 409다. 이의 인정(ADJUSTED)은 수기 조정 적용으로만 한다.
+   */
+  async dismissDispute(statementId: string, input: { reason: string; actorId: string }): Promise<StatementView> {
+    return guard(async () => {
+      const reason = input.reason.trim();
+      if (reason.length < 1 || input.reason.length > DISMISSAL_REASON_MAX) throw new SettlementProblem('invalid-body', 400, '기각 사유는 1~2,000자입니다');
+      if (!UUID.test(input.actorId)) throw new SettlementProblem('invalid-body', 400, '처리자가 맞지 않습니다');
+      const s = await this.d.store.findStatementById(statementId);
+      if (!s) throw notFound();
+      if (s.status !== 'DISPUTED') throw new SettlementProblem('settlement-not-disputed', 409, '이의 중인 정산서가 아닙니다');
+      const open = (await this.d.store.listDisputes(statementId)).filter((d) => d.result === null);
+      const target = open[0];
+      if (!target) throw new SettlementProblem('settlement-dispute-not-open', 409, '열린 이의가 없습니다');
+      const now = this.#now();
+      const disputeDueAt = addKstBusinessDays(now, RENOTIFY_WINDOW_BUSINESS_DAYS, this.#holidays());
+      const audit = this.#audit(statementId, 'DISPUTED', 'NOTIFIED', 'dispute-dismissed', input.actorId, now);
+      const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, disputeDueAt, updatedAt: now };
+      const ok = await this.d.store.transitionStatement({
+        statementId,
+        from: ['DISPUTED'],
+        to: 'NOTIFIED',
+        set: { holdReason: null, disputeDueAt },
+        updatedAt: now,
+        audits: [audit],
+        events: [statementEvent(next, 'STATEMENT_NOTIFIED', now, audit.auditId)],
+        resolveDispute: { disputeId: target.disputeId, result: 'DISMISSED', resolvedBy: input.actorId, resolutionNote: reason, resolvedAt: now },
+      });
+      if (!ok) throw stateConflict();
+      return statementView(next);
     });
   }
 
@@ -174,13 +398,13 @@ export class Settlements {
         ...(input.eventEndsAt ? { eventEndsAt: input.eventEndsAt } : {}),
         statementId: uuidv7(this.d.clock),
       });
-      const inserted = await this.d.store.insertStatement(record, sources);
-      if (!inserted) {
+      const notified = await this.#insertNotified(record, sources, now);
+      if (!notified) {
         const raced = await this.d.store.findEventStatement(input.promoterId, input.eventId, input.pg, input.pgStore);
         if (!raced) throw new SettlementProblem('settlement-statement-conflict', 409, '같은 회차 정산서가 이미 있습니다');
         return statementView(raced);
       }
-      return statementView(record);
+      return statementView(notified);
     });
   }
 
@@ -213,12 +437,17 @@ export class Settlements {
           statementId: uuidv7(this.d.clock),
         });
         void key;
-        const inserted = await this.d.store.insertStatement(record, sources);
-        if (!inserted) continue;
-        out.push(statementView(record));
+        const notified = await this.#insertNotified(record, sources, now);
+        if (!notified) continue;
+        out.push(statementView(notified));
       }
       return { created: out.length, items: out };
     });
+  }
+
+  /** 그 시각(KST)이 주의 첫 영업일이면 계산할 지난주 월~일, 아니면 undefined(상품 정산서, settlement §4.5, ADR-0368 결정 12) */
+  productPeriodFor(at: Date): { periodStart: string; periodEnd: string } | undefined {
+    return isFirstBusinessDayOfKstWeek(at, this.#holidays()) ? previousKstWeek(at) : undefined;
   }
 
   /** 회차 종료 5영업일 뒤 스케줄러가 부른다. 결제가 있는 결제사만 계산하고, 이미 있으면 기존 정산서를 돌려준다. */
@@ -321,11 +550,11 @@ export class Settlements {
     return guard(async () => {
       const s = await this.d.store.findStatementById(statementId);
       if (!s) throw notFound();
-      const now = new Date(this.d.clock.now());
+      const now = this.#now();
       if (s.status === 'NOTIFIED' && (!s.disputeDueAt || now.getTime() >= s.disputeDueAt.getTime())) {
-        const next = { ...s, status: 'CONFIRMED' as const, updatedAt: now };
-        await this.d.store.saveStatement(next);
-        await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: 'dispute-window-ended', actor: 'system', createdAt: now });
+        // 기한 시각부터 확정한다. 이의와 겹치면 조건부 전이로 하나만 이긴다(J-T35 ⑥)
+        const { transition, next } = this.#confirmTransition(s, now, { from: ['NOTIFIED'], reason: 'dispute-window-ended', actor: 'system', ...(s.disputeDueAt ? { expect: { disputeDueAtOrBefore: now } } : {}) });
+        if (!(await this.d.store.transitionStatement(transition))) throw stateConflict();
         return statementView(next);
       }
       return statementView(s);
@@ -333,8 +562,8 @@ export class Settlements {
   }
 
   /**
-   * HELD를 정본이 허용한 사유·증빙으로 다시 CONFIRMED로 푼다(A2-05, A1V-03·04).
-   * DISPUTED는 이의 결과가 모두 입력된 뒤에만 NOTIFIED로 돌리고, 새 1영업일 이의 기간을 준다.
+   * HELD를 정본이 허용한 사유·증빙으로 다시 CONFIRMED로 푼다(T8, A2-05, A1V-03·04). 지급액이 0 이하면 같은 트랜잭션에서 CARRIED_OVER까지 간다(T6).
+   * DISPUTED는 다시 확정하지 않는다. 이의는 기각이나 이의 인정 조정 적용으로만 푼다(ADR-0368 결정 6).
    * PAID·SCHEDULED·SUPERSEDED는 이미 지급 흐름에 들어갔거나 끝났으므로 건드리지 않는다.
    */
   async reconfirmStatement(
@@ -345,16 +574,8 @@ export class Settlements {
       const s = await this.d.store.findStatementById(statementId);
       if (!s) throw notFound();
       if (s.status === 'CONFIRMED') return statementView(s);
-      if (s.status !== 'HELD' && s.status !== 'DISPUTED') throw new SettlementProblem('settlement-not-reconfirmable', 409, '보류·이의 상태의 정산서만 다시 확정할 수 있습니다');
-      const now = new Date(this.d.clock.now());
-      if (s.status === 'DISPUTED') {
-        const disputes = await this.d.store.listDisputes(statementId);
-        if (disputes.length === 0 || disputes.some((d) => d.result === null)) throw new SettlementProblem('settlement-dispute-open', 409, '이의 결과가 입력되지 않아 다시 확정할 수 없습니다');
-        const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, disputeDueAt: addBusinessDays(now, 1), updatedAt: now };
-        await this.d.store.saveStatement(next);
-        await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: o.reason ?? 'dispute-resolved', actor: o.actor ?? 'system', createdAt: now });
-        return statementView(next);
-      }
+      if (s.status !== 'HELD') throw new SettlementProblem('settlement-not-reconfirmable', 409, '보류 상태의 정산서만 다시 확정할 수 있습니다');
+      const now = this.#now();
       if (s.holdReason === 'KYC') {
         const kyc = await this.d.store.findKyc(s.promoterId);
         if (!(kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified)) throw new SettlementProblem('payout-kyc-required', 409, 'KYC 확인이 끝나지 않아 다시 확정할 수 없습니다');
@@ -376,39 +597,182 @@ export class Settlements {
       } else {
         throw new SettlementProblem('settlement-not-reconfirmable', 409, '보류 사유를 확인할 수 없어 다시 확정할 수 없습니다');
       }
-      const next: StatementRecord = { ...s, status: 'CONFIRMED', holdReason: null, updatedAt: now };
-      await this.d.store.saveStatement(next);
-      await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: o.reason ?? s.holdReason ?? 'reconfirm', actor: o.actor ?? 'system', createdAt: now });
+      const { transition, next } = this.#confirmTransition(s, now, { from: ['HELD'], reason: o.reason ?? s.holdReason ?? 'reconfirm', actor: o.actor ?? 'system' });
+      if (!(await this.d.store.transitionStatement(transition))) throw stateConflict();
       return statementView(next);
     });
   }
 
-  /** 이의 결과를 입력하고 DISPUTED를 NOTIFIED로 돌린다(정본 §4.2, A1V-03). */
+  /**
+   * @deprecated 옛 이의 결과 입력. 내부 경로(…/disputes/{disputeId}/resolution)는 없앴다(ADR-0368 결정 6).
+   * ADJUSTED는 수기 조정 적용으로만 되므로 늘 409이고, DISMISSED는 기각(dismissDispute)과 같은 조건부 전이를 쓴다.
+   */
   async resolveDispute(statementId: string, disputeId: string, result: 'ADJUSTED' | 'DISMISSED', actor: string): Promise<StatementView> {
     return guard(async () => {
+      if (result === 'ADJUSTED') throw new SettlementProblem('settlement-dispute-adjustment-required', 409, '이의 인정은 수기 조정을 적용할 때만 됩니다');
       const s = await this.d.store.findStatementById(statementId);
       if (!s) throw notFound();
       if (s.status !== 'DISPUTED') throw new SettlementProblem('settlement-not-disputed', 409, '이의 중인 정산서가 아닙니다');
       const dispute = (await this.d.store.listDisputes(statementId)).find((d) => d.disputeId === disputeId);
       if (!dispute) throw notFound();
       if (dispute.result !== null) throw new SettlementProblem('settlement-dispute-already-resolved', 409, '이미 결과가 입력된 이의입니다');
-      const now = new Date(this.d.clock.now());
-      await this.d.store.saveDispute({ ...dispute, result, resolvedAt: now });
-      const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, disputeDueAt: addBusinessDays(now, 1), updatedAt: now };
-      await this.d.store.saveStatement(next);
-      await this.d.store.insertStatementAudit({ auditId: uuidv7(this.d.clock), statementId, fromStatus: s.status, toStatus: next.status, reason: `dispute-${result.toLowerCase()}`, actor, createdAt: now });
+      const now = this.#now();
+      const disputeDueAt = addKstBusinessDays(now, RENOTIFY_WINDOW_BUSINESS_DAYS, this.#holidays());
+      const audit = this.#audit(statementId, 'DISPUTED', 'NOTIFIED', 'dispute-dismissed', actor, now);
+      const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, disputeDueAt, updatedAt: now };
+      const ok = await this.d.store.transitionStatement({
+        statementId,
+        from: ['DISPUTED'],
+        to: 'NOTIFIED',
+        set: { holdReason: null, disputeDueAt },
+        updatedAt: now,
+        audits: [audit],
+        events: [statementEvent(next, 'STATEMENT_NOTIFIED', now, audit.auditId)],
+        resolveDispute: { disputeId, result: 'DISMISSED', resolvedBy: UUID.test(actor) ? actor : null, resolutionNote: null, resolvedAt: now },
+      });
+      if (!ok) throw stateConflict();
       return statementView(next);
     });
   }
 
-  /** 이의 기간이 끝난 NOTIFIED 정산서를 자동 확정한다(M1-F3). 이의가 걸린 DISPUTED는 대상이 아니다. */
+  /**
+   * 이의 기간이 끝난 NOTIFIED 정산서를 자동 확정한다(T5, M1-F3). 정산 일꾼이 30분 [가정]마다 부른다.
+   * DISPUTED·HELD·기한 전 NOTIFIED는 대상이 아니다. 다른 전이가 먼저 쓴 정산서(409)는 건너뛴다.
+   */
   async confirmDueStatements(limit = 100): Promise<{ confirmed: number; items: StatementView[] }> {
     return guard(async () => {
-      const due = await this.d.store.listDueConfirmation(new Date(this.d.clock.now()), limit);
+      const due = await this.d.store.listDueConfirmation(this.#now(), limit);
       const items: StatementView[] = [];
-      for (const s of due) items.push(await this.confirmDue(s.statementId));
-      return { confirmed: items.filter((s) => s.status === 'CONFIRMED').length, items };
+      for (const s of due) {
+        try {
+          items.push(await this.confirmDue(s.statementId));
+        } catch (e) {
+          if (e instanceof ProblemError && e.status === 409) continue;
+          throw e;
+        }
+      }
+      return { confirmed: items.filter((s) => s.status === 'CONFIRMED' || s.status === 'CARRIED_OVER').length, items };
     });
+  }
+
+  // ---- 수기 조정(settlement §4.3, ADR-0368 결정 7·8·9) ----
+
+  /**
+   * 조정 행 등록(ops-svc가 승인 업무 ID를 먼저 정해 부른다). 검사는 이쪽이 한다. 같은 승인 ID 재요청은 처음 행이고(내용이 다르면 409),
+   * 그 정산서에 적용 전 조정이 있으면 409 settlement-adjustment-pending이다.
+   */
+  async requestAdjustment(statementId: string, req: AdjustmentRequest): Promise<{ adjustment: AdjustmentView; created: boolean }> {
+    return guard(async () => {
+      if (!UUID.test(req.approvalId)) throw new SettlementProblem('invalid-body', 400, '승인 업무 ID가 맞지 않습니다');
+      if (!UUID.test(req.requestedBy)) throw new SettlementProblem('invalid-body', 400, '요청자가 맞지 않습니다');
+      const existing = await this.d.store.findAdjustmentByApproval(req.approvalId);
+      if (existing) {
+        if (!sameAdjustmentRequest(existing, statementId, req)) throw new SettlementProblem('settlement-adjustment-approval-reused', 409, '이 승인 업무 ID는 다른 조정에 이미 썼습니다');
+        return { adjustment: adjustmentView(existing), created: false };
+      }
+      const s = await this.d.store.findStatementById(statementId);
+      if (!s) throw notFound();
+      const disputes = await this.d.store.listDisputes(statementId);
+      validateAdjustment(req, s, disputes);
+      const record: AdjustmentRecord = {
+        adjustmentId: uuidv7(this.d.clock),
+        statementId,
+        approvalId: req.approvalId,
+        reasonCode: req.reasonCode,
+        disputeId: req.disputeId ?? null,
+        amount: req.amount,
+        evidenceNote: req.evidenceNote?.trim() ? req.evidenceNote : null,
+        status: 'PENDING',
+        requestedBy: req.requestedBy,
+        requestedAt: this.#now(),
+        appliedAt: null,
+      };
+      const out = await this.d.store.insertAdjustment(record);
+      if (out === 'pending') throw new SettlementProblem('settlement-adjustment-pending', 409, '적용 전 조정이 이미 있습니다');
+      if (!out.created && !sameAdjustmentRequest(out.record, statementId, req)) throw new SettlementProblem('settlement-adjustment-approval-reused', 409, '이 승인 업무 ID는 다른 조정에 이미 썼습니다');
+      return { adjustment: adjustmentView(out.record), created: out.created };
+    });
+  }
+
+  /**
+   * 승인된 조정 적용(T4 이의 인정·T18 이의 없는 조정). 승인 ID를 믿지 않고 ops 승인 기록과 대조한 뒤(ADR-0368 결정 8),
+   * 한 트랜잭션에 조정 행 APPLIED·조정 합계·지급액(계산 칸 그대로)·이의 ADJUSTED(인정이면)·NOTIFIED(적용 시각 + 1영업일)·감사·STATEMENT_NOTIFIED를 쓴다.
+   * 같은 승인 ID를 다시 부르면 ops를 다시 부르지 않고 처음 결과를 준다.
+   */
+  async applyAdjustment(approvalId: string): Promise<{ adjustment: AdjustmentView; statement: StatementView }> {
+    return guard(async () => {
+      if (!UUID.test(approvalId)) throw notFound();
+      const a = await this.d.store.findAdjustmentByApproval(approvalId);
+      if (!a) throw notFound();
+      const s = await this.d.store.findStatementById(a.statementId);
+      if (!s) throw notFound();
+      if (a.status === 'APPLIED') return { adjustment: adjustmentView(a), statement: statementView(s) };
+      if (a.status === 'VOID') throw new SettlementProblem('settlement-adjustment-void', 409, '반려·만료된 조정입니다');
+      assertAdjustable(s.status);
+      const dispute = a.disputeId !== null ? (await this.d.store.listDisputes(s.statementId)).find((d) => d.disputeId === a.disputeId) : undefined;
+      if (a.disputeId !== null && (s.status !== 'DISPUTED' || !dispute || dispute.result !== null)) throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 409, '그 이의가 이미 닫혔거나 정산서가 이의 중이 아닙니다');
+      if (a.disputeId === null && s.status === 'DISPUTED') throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 409, '이의 중인 정산서에는 이의 없는 조정을 적용하지 않습니다');
+      if (!this.d.adjustmentApprovals) throw new SettlementProblem('dependency-unavailable', 503, '조정 승인 기록을 확인할 수 없습니다');
+      let facts: VerifiedAdjustmentApproval | undefined;
+      try {
+        facts = await this.d.adjustmentApprovals.verify(approvalId);
+      } catch (e) {
+        // 확인기가 SettlementProblem 밖의 오류를 던져도 돈 경로는 503으로 닫는다(지급 묶음 승인과 같다)
+        throw e instanceof SettlementProblem ? e : new SettlementProblem('dependency-unavailable', 503, '조정 승인 기록을 확인하지 못했습니다');
+      }
+      if (!facts) throw new SettlementProblem('settlement-adjustment-approval-missing', 409, 'ops-svc에서 승인 업무를 찾지 못했습니다');
+      adjustmentFactsOf(facts, a);
+      const now = this.#now();
+      const current = s.adjustmentAmount ?? 0;
+      const adjustmentAmount = current + a.amount;
+      const payoutAmount = payoutWithAdjustment(s, adjustmentAmount);
+      const disputeDueAt = addKstBusinessDays(now, RENOTIFY_WINDOW_BUSINESS_DAYS, this.#holidays());
+      const audit = this.#audit(s.statementId, s.status, 'NOTIFIED', `adjustment-applied-${a.reasonCode.toLowerCase()}`, facts.approvals[0] ?? 'system', now);
+      const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, adjustmentAmount, payoutAmount, disputeDueAt, updatedAt: now };
+      const ok = await this.d.store.transitionStatement({
+        statementId: s.statementId,
+        // 이의 인정은 DISPUTED에서만(T4), 이의 없는 조정은 NOTIFIED·CONFIRMED에서(T18). 지급 묶음 등 다른 전이가 먼저 썼으면 409
+        from: isDisputeAdjustmentCode(a.reasonCode) ? ['DISPUTED'] : ['NOTIFIED', 'CONFIRMED'],
+        to: 'NOTIFIED',
+        set: { holdReason: null, adjustmentAmount, payoutAmount, disputeDueAt },
+        expect: { adjustmentAmount: current, offsetAmount: s.offsetAmount, unbatched: true },
+        updatedAt: now,
+        audits: [audit],
+        events: [statementEvent(next, 'STATEMENT_NOTIFIED', now, audit.auditId)],
+        applyAdjustment: { approvalId, appliedAt: now },
+        ...(a.disputeId !== null ? { resolveDispute: { disputeId: a.disputeId, result: 'ADJUSTED' as const, resolvedBy: facts.approvals[0] !== undefined && UUID.test(facts.approvals[0]) ? facts.approvals[0] : null, resolutionNote: null, resolvedAt: now } } : {}),
+      });
+      if (!ok) {
+        // 다른 요청이 같은 승인 ID를 먼저 적용했으면 그 결과를 준다
+        const raced = await this.d.store.findAdjustmentByApproval(approvalId);
+        const latest = await this.d.store.findStatementById(s.statementId);
+        if (raced?.status === 'APPLIED' && latest) return { adjustment: adjustmentView(raced), statement: statementView(latest) };
+        throw stateConflict();
+      }
+      return { adjustment: adjustmentView({ ...a, status: 'APPLIED', appliedAt: now }), statement: statementView(next) };
+    });
+  }
+
+  /** 반려된 조정(ops 승인 업무 REJECTED)을 VOID로 닫는다. 이의는 열린 채 남는다. 이미 적용했으면 409 */
+  async voidAdjustment(approvalId: string): Promise<AdjustmentView> {
+    return guard(async () => {
+      if (!UUID.test(approvalId)) throw notFound();
+      const a = await this.d.store.findAdjustmentByApproval(approvalId);
+      if (!a) throw notFound();
+      if (a.status === 'VOID') return adjustmentView(a);
+      if (a.status === 'APPLIED') throw new SettlementProblem('settlement-adjustment-applied', 409, '이미 적용한 조정입니다');
+      if (!(await this.d.store.voidAdjustment(approvalId, this.#now()))) {
+        const latest = await this.d.store.findAdjustmentByApproval(approvalId);
+        if (latest?.status === 'VOID') return adjustmentView(latest);
+        throw new SettlementProblem('settlement-adjustment-applied', 409, '이미 적용한 조정입니다');
+      }
+      return adjustmentView({ ...a, status: 'VOID' });
+    });
+  }
+
+  /** 승인 업무가 생기지 않아 남은 PENDING 조정을 7일 [가정] 뒤 VOID로 닫는다(정산 일꾼) */
+  async voidStaleAdjustments(): Promise<number> {
+    return this.d.store.voidStalePendingAdjustments(new Date(this.d.clock.now() - ADJUSTMENT_PENDING_TTL_MS), STALE_ADJUSTMENT_LIMIT);
   }
 
   async recordKyc(
@@ -591,7 +955,7 @@ export class Settlements {
       for (const s of confirmed) {
         if (s.eventId !== null && suspended.has(s.eventId)) {
           heldSuspended += 1;
-          statementUpdates.push({ statementId: s.statementId, status: 'HELD', holdReason: 'SALE_SUSPENDED', offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: now });
+          statementUpdates.push(this.#holdUpdate(s, 'SALE_SUSPENDED', now));
           continue;
         }
         const kyc = await this.d.store.findKyc(s.promoterId);
@@ -599,21 +963,23 @@ export class Settlements {
           const account = await this.d.store.findPayoutAccount(s.promoterId);
           if (account && account.holdUntil.getTime() > now.getTime()) {
             heldAccount += 1;
-            statementUpdates.push({ statementId: s.statementId, status: 'HELD', holdReason: 'ACCOUNT_CHANGE', offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: now });
+            statementUpdates.push(this.#holdUpdate(s, 'ACCOUNT_CHANGE', now));
             continue;
           }
           if (account && !account.holderVerified) {
             heldMismatch += 1;
-            statementUpdates.push({ statementId: s.statementId, status: 'HELD', holdReason: 'ACCOUNT_MISMATCH', offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: now });
+            statementUpdates.push(this.#holdUpdate(s, 'ACCOUNT_MISMATCH', now));
             continue;
           }
           included.push(s);
         } else {
           heldKyc += 1;
-          statementUpdates.push({ statementId: s.statementId, status: 'HELD', holdReason: 'KYC', offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: now });
+          statementUpdates.push(this.#holdUpdate(s, 'KYC', now));
         }
       }
       if (included.length === 0) {
+        // 모두 보류됐어도 보류를 조건부로 저장한 뒤 409다(BAT-625 RV-04, ADR-0368 결정 11). 다른 전이가 먼저 썼으면 409 settlement-state-conflict
+        if (statementUpdates.length > 0 && !(await this.d.store.transitionStatements(statementUpdates.map((u) => Settlements.#holdTransition(u))))) throw stateConflict();
         if (heldSuspended > 0) throw new SettlementProblem('payout-sale-suspended', 409, '판매 중지된 공연의 정산서라 지급할 수 없습니다');
         if (heldKyc > 0) throw new SettlementProblem('payout-kyc-required', 409, 'KYC 확인이 끝나지 않아 지급할 수 없습니다');
         if (heldAccount > 0) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 지급할 수 없습니다');
@@ -643,7 +1009,17 @@ export class Settlements {
         }
         if (offset > 0) {
           const next: StatementRecord = { ...s, offsetAmount: s.offsetAmount + offset, payoutAmount: remaining, status: remaining > 0 ? s.status : 'CARRIED_OVER', updatedAt: now };
-          statementUpdates.push({ statementId: s.statementId, status: next.status, holdReason: next.holdReason, offsetAmount: next.offsetAmount, payoutAmount: next.payoutAmount, updatedAt: now });
+          const carried = next.status === 'CARRIED_OVER' ? this.#audit(s.statementId, s.status, 'CARRIED_OVER', 'offset-exhausted', 'system', now) : undefined;
+          statementUpdates.push({
+            statementId: s.statementId,
+            status: next.status,
+            holdReason: next.holdReason,
+            offsetAmount: next.offsetAmount,
+            payoutAmount: next.payoutAmount,
+            updatedAt: now,
+            from: ['CONFIRMED'],
+            ...(carried ? { audits: [carried], events: [statementEvent(next, 'STATEMENT_CARRIED_OVER', now, carried.auditId)] } : {}),
+          });
           if (remaining > 0) includedAfterOffset.push(next);
         } else {
           includedAfterOffset.push(s);
@@ -666,10 +1042,10 @@ export class Settlements {
       if (available !== undefined && available < totalAmount) {
         // 잔액이 모자라면 묶음을 만들지 않고 그 정산서를 HELD·BALANCE로 남긴다(settlement §6, J-T13).
         // 상계는 아직 적용하지 않는다. 미수금은 다음 묶음에서 다시 본다.
-        const nowForHold = new Date(this.d.clock.now());
-        await this.d.store.applyStatementUpdates(
-          included.map((s) => ({ statementId: s.statementId, status: 'HELD' as const, holdReason: 'BALANCE' as const, offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: nowForHold })),
-        );
+        const nowForHold = this.#now();
+        // 같은 요청에서 다른 사유로 빠진 정산서의 보류도 함께 저장한다(모두 보류된 묶음과 같은 규칙, ADR-0368 결정 11)
+        const holds = [...statementUpdates.filter((u) => u.status === 'HELD').map((u) => Settlements.#holdTransition(u)), ...included.map((s) => Settlements.#holdTransition(this.#holdUpdate(s, 'BALANCE', nowForHold)))];
+        if (!(await this.d.store.transitionStatements(holds))) throw stateConflict();
         throw new SettlementProblem('payout-balance-insufficient', 409, '결제사 잔액이 모자라 지급일을 미룹니다');
       }
       const batch: PayoutBatchRecord = {
@@ -858,8 +1234,20 @@ export class Settlements {
       const nextStatus = result.status === 'COMPLETED' ? 'COMPLETED' : 'SUBMITTED';
       const next = { ...b, status: nextStatus as PayoutBatchRecord['status'], updatedAt: now };
       await this.d.store.savePayoutBatch(next);
-      const statements = (await Promise.all(payouts.map((p) => this.d.store.findStatementById(p.statementId)))).filter((s): s is StatementRecord => s !== undefined);
-      for (const s of statements) await this.d.store.saveStatement({ ...s, status: nextStatus === 'COMPLETED' ? 'PAID' : 'SCHEDULED', updatedAt: now });
+      // 지급 사건(PAYOUT_*)과 지급 상태의 세부는 LCH-110 몫이다. 여기서는 출발 상태(SCHEDULED·CONFIRMED) 조건만 걸어 덮어쓰지 않는다.
+      // 결제사에 이미 보냈으므로 조건이 어긋나도 실행 결과를 뒤집지 않는다
+      const target: StatementStatus = nextStatus === 'COMPLETED' ? 'PAID' : 'SCHEDULED';
+      for (const s of boundStatements) {
+        if (s.status === target) continue;
+        await this.d.store.transitionStatement({
+          statementId: s.statementId,
+          from: ['SCHEDULED', 'CONFIRMED'],
+          to: target,
+          updatedAt: now,
+          audits: [this.#audit(s.statementId, s.status, target, `payout-${nextStatus.toLowerCase()}`, 'system', now)],
+          events: [],
+        });
+      }
       return payoutBatchView(next);
     });
   }

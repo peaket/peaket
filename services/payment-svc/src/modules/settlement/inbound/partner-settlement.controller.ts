@@ -38,7 +38,7 @@ export class PartnerSettlementController {
   @Roles(['partner_admin', 'partner_member'])
   async eventSettlements(@ContractParams(GetPartnerEventSettlementsParams) params: EventParams, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: Reply) {
     void reply.header('cache-control', 'no-store');
-    return this.settlements.listEvent(tenantOf(me), params.eventId.toLowerCase());
+    return this.settlements.listEvent(tenantOf(me), params.eventId.toLowerCase(), me.accountId);
   }
 
   @Get('product-settlements')

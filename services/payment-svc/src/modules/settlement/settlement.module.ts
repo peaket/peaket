@@ -2,8 +2,24 @@
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import { Settlements } from './application/settlements.js';
-import type { DueEventSettlementSource, EventCommissionRateSource, PayoutApprovalVerifier, PayoutGateway, PgBalanceSource, ProductSettlementSource, PromoterContractSource, ReauthVerifier, SaleSuspensionSource, SettlementApprovalLog, SettlementPaymentSource, SettlementStore } from './domain/ports.js';
+import type {
+  AdjustmentApprovalVerifier,
+  DueEventSettlementSource,
+  EventCommissionRateSource,
+  PayoutApprovalVerifier,
+  PayoutGateway,
+  PgBalanceSource,
+  ProductSettlementSource,
+  PromoterContractSource,
+  ReauthVerifier,
+  SaleSuspensionSource,
+  SettlementApprovalLog,
+  SettlementCaseNotice,
+  SettlementPaymentSource,
+  SettlementStore,
+} from './domain/ports.js';
 import {
+  ADJUSTMENT_APPROVAL_VERIFIER,
   PAYOUT_APPROVAL_VERIFIER,
   PAYOUT_GATEWAY,
   PG_BALANCE_SOURCE,
@@ -11,7 +27,9 @@ import {
   REAUTH_VERIFIER,
   SALE_SUSPENSION_SOURCE,
   SETTLEMENT_APPROVAL_LOG,
+  SETTLEMENT_CASE_NOTICE,
   SETTLEMENT_COMMISSION_SOURCE,
+  SETTLEMENT_HOLIDAYS,
   SETTLEMENT_EVENT_SOURCE,
   SETTLEMENT_PAYMENT_SOURCE,
   SETTLEMENT_PRODUCT_SOURCE,
@@ -34,6 +52,12 @@ export interface SettlementModuleDeps {
   readonly reauth: ReauthVerifier;
   readonly commissionRateBp?: number;
   readonly log?: SettlementApprovalLog;
+  /** ops-svc CS 처리함 '정산 이의' 건(ADR-0368 결정 5). 없으면 정산 일꾼이 다시 보낼 이의로 남는다 */
+  readonly caseNotice?: SettlementCaseNotice;
+  /** ops-svc 조정 승인 기록 대조(ADR-0368 결정 8). 없으면 조정 적용은 503 */
+  readonly adjustmentApprovals?: AdjustmentApprovalVerifier;
+  /** KST 공휴일(PEAKET_HOLIDAY_CALENDAR_FILE). 없으면 주말만 뺀다 */
+  readonly holidays?: ReadonlySet<string>;
 }
 
 @Module({})
@@ -52,6 +76,9 @@ export class SettlementModule {
       { provide: SETTLEMENT_APPROVAL_LOG, useValue: deps.log },
       { provide: PAYOUT_GATEWAY, useValue: deps.gateways },
       { provide: REAUTH_VERIFIER, useValue: deps.reauth },
+      { provide: SETTLEMENT_CASE_NOTICE, useValue: deps.caseNotice },
+      { provide: ADJUSTMENT_APPROVAL_VERIFIER, useValue: deps.adjustmentApprovals },
+      { provide: SETTLEMENT_HOLIDAYS, useValue: deps.holidays },
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
       {
         provide: Settlements,
@@ -69,6 +96,9 @@ export class SettlementModule {
           gateways: readonly PayoutGateway[],
           reauth: ReauthVerifier,
           clock: Clock,
+          caseNotice: SettlementCaseNotice | undefined,
+          adjustmentApprovals: AdjustmentApprovalVerifier | undefined,
+          holidays: ReadonlySet<string> | undefined,
         ) =>
           new Settlements({
             store,
@@ -85,6 +115,9 @@ export class SettlementModule {
             reauth,
             clock,
             ...(deps.commissionRateBp !== undefined ? { commissionRateBp: deps.commissionRateBp } : {}),
+            ...(caseNotice ? { caseNotice } : {}),
+            ...(adjustmentApprovals ? { adjustmentApprovals } : {}),
+            ...(holidays ? { holidays } : {}),
           }),
         inject: [
           SETTLEMENT_STORE,
@@ -100,6 +133,9 @@ export class SettlementModule {
           PAYOUT_GATEWAY,
           REAUTH_VERIFIER,
           CLOCK,
+          SETTLEMENT_CASE_NOTICE,
+          ADJUSTMENT_APPROVAL_VERIFIER,
+          SETTLEMENT_HOLIDAYS,
         ],
       },
     ];

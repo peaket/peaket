@@ -1,7 +1,7 @@
 // 승인 업무 저장소와 core 계약 적용 클라이언트의 포트(BAT-615 LCH-070, ADR-0320).
 import type { AuditRecord } from '../../audit/audit.js';
 import type { ApprovalReauthVerifier } from '../../payouts/index.js';
-import type { ContractApprovalRecord } from './approval.js';
+import type { ContractApprovalRecord, SettlementAdjustmentApprovalRecord } from './approval.js';
 
 export interface ApprovalVote {
   approvalId: string;
@@ -35,6 +35,17 @@ export interface ContractApprovalDeps {
   readonly clock: import('@peaket/platform').Clock;
 }
 
+/** 정산서 수기 조정 승인 업무 저장소(approval_request kind SETTLEMENT_ADJUSTMENT·approval_vote) */
+export interface SettlementAdjustmentApprovalStore {
+  /** 같은 승인 ID가 있으면 그 행(created=false). 감사는 같은 트랜잭션에 쓴다 */
+  insert(record: SettlementAdjustmentApprovalRecord, audit?: AuditRecord): Promise<{ record: SettlementAdjustmentApprovalRecord; created: boolean }>;
+  find(approvalId: string): Promise<SettlementAdjustmentApprovalRecord | undefined>;
+  /** 버전 조건부. 투표가 있으면 같은 트랜잭션에 넣는다(같은 승인자 한 번) */
+  save(record: SettlementAdjustmentApprovalRecord, audit?: AuditRecord, vote?: ApprovalVote): Promise<boolean>;
+  list(filter: { status?: readonly string[] | undefined; requesterId?: string | undefined; awaitingApprover?: string | undefined; limit: number }): Promise<SettlementAdjustmentApprovalRecord[]>;
+}
+
 export const APPROVAL_STORE = Symbol('APPROVAL_STORE');
+export const SETTLEMENT_ADJUSTMENT_APPROVAL_STORE = Symbol('SETTLEMENT_ADJUSTMENT_APPROVAL_STORE');
 export const CORE_CONTRACT_CLIENT = Symbol('CORE_CONTRACT_CLIENT');
 export const APPROVAL_REAUTH = Symbol('APPROVAL_REAUTH');

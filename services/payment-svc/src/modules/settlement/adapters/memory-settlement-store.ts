@@ -1,6 +1,26 @@
-// 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
-import type { GuaranteeCollectionAtomicInput, PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore, StatementUpdate } from '../domain/ports.js';
-import { SettlementProblem, type DisputeRecord, type GuaranteeCollectionRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchAuditRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
+// 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트·같은 의미(조건부 전이, 한 번에 쓰거나 하나도 쓰지 않음)를 쓴다.
+// trade.settlements Outbox 대신 outbox 배열에 사건 값을 남긴다(Drizzle은 같은 트랜잭션의 Outbox 표).
+import type { AdjustmentInsertResult, GuaranteeCollectionAtomicInput, PayoutBatchAtomicInput, StatementFilter, StatementNotification, StatementPage, SettlementStore, StatementTransition } from '../domain/ports.js';
+import type { AdjustmentRecord } from '../domain/adjustment.js';
+import {
+  SettlementProblem,
+  TRADE_SETTLEMENTS_TOPIC,
+  type DisputeRecord,
+  type GuaranteeCollectionRecord,
+  type KycRecord,
+  type PayoutAccountRecord,
+  type PayoutBatchAuditRecord,
+  type PayoutBatchRecord,
+  type PayoutRecord,
+  type Pg,
+  type PgStore,
+  type ReceivableMoveRecord,
+  type ReceivableRecord,
+  type SettlementEventValue,
+  type StatementAuditRecord,
+  type StatementRecord,
+  type StatementSource,
+} from '../domain/settlement.js';
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
 const decodeCursor = (cursor: string): { at: number; id: string } | undefined => {
@@ -27,8 +47,15 @@ export class MemorySettlementStore implements SettlementStore {
   readonly receivableMoves: ReceivableMoveRecord[] = [];
   readonly guaranteeCollections = new Map<string, GuaranteeCollectionRecord>();
   readonly webhookReceipts = new Set<string>();
+  readonly adjustments = new Map<string, AdjustmentRecord>();
+  /** trade.settlements에 쓴 사건(Outbox 대역). topic·key·value */
+  readonly outbox: { topic: string; key: string; value: SettlementEventValue }[] = [];
 
-  async insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean> {
+  #emit(events: readonly SettlementEventValue[]): void {
+    for (const e of events) this.outbox.push({ topic: TRADE_SETTLEMENTS_TOPIC, key: e.promoterId, value: e });
+  }
+
+  async insertStatement(record: StatementRecord, sources: readonly StatementSource[], notify?: StatementNotification): Promise<boolean> {
     const conflicts = [...this.statements.values()].some((s) => {
       if (s.statementId === record.statementId) return true;
       if (s.status === 'SUPERSEDED' || record.status === 'SUPERSEDED') return false;
@@ -37,8 +64,74 @@ export class MemorySettlementStore implements SettlementStore {
       return s.periodStart === record.periodStart && s.periodEnd === record.periodEnd;
     });
     if (conflicts) return false;
-    this.statements.set(record.statementId, { ...record, excludedPayments: [...record.excludedPayments] });
+    if (notify && record.status !== 'CALCULATED') throw new Error('계산한 정산서를 통지 상태로 바꾸지 못했다');
+    const stored: StatementRecord = notify
+      ? { ...record, status: 'NOTIFIED', disputeDueAt: notify.disputeDueAt, updatedAt: notify.audit.createdAt, adjustmentAmount: record.adjustmentAmount ?? 0, excludedPayments: [...record.excludedPayments] }
+      : { ...record, adjustmentAmount: record.adjustmentAmount ?? 0, excludedPayments: [...record.excludedPayments] };
+    this.statements.set(record.statementId, stored);
     this.sources.set(record.statementId, sources.map((s) => ({ ...s })));
+    if (notify) {
+      this.statementAudits.push(notify.audit);
+      this.#emit([notify.event]);
+    }
+    return true;
+  }
+
+  async transitionStatement(t: StatementTransition): Promise<boolean> {
+    return this.transitionStatements([t]);
+  }
+
+  async transitionStatements(ts: readonly StatementTransition[]): Promise<boolean> {
+    // 모두 맞는지 먼저 본 뒤 한꺼번에 쓴다(Drizzle 트랜잭션의 롤백과 같은 답). 같은 정산서가 두 번 오면 앞 전이 뒤의 상태로 본다
+    const statements = new Map<string, StatementRecord>();
+    const disputes = new Map<string, DisputeRecord>();
+    const adjustments = new Map<string, AdjustmentRecord>();
+    const receivables: ReceivableRecord[] = [];
+    const audits: StatementAuditRecord[] = [];
+    const events: SettlementEventValue[] = [];
+    for (const t of ts) {
+      const s = statements.get(t.statementId) ?? this.statements.get(t.statementId);
+      if (!s || !t.from.includes(s.status)) return false;
+      const e = t.expect;
+      if (e?.disputeDueAfter && !(s.disputeDueAt !== null && s.disputeDueAt.getTime() > e.disputeDueAfter.getTime())) return false;
+      if (e?.disputeDueAtOrBefore && !(s.disputeDueAt !== null && s.disputeDueAt.getTime() <= e.disputeDueAtOrBefore.getTime())) return false;
+      if (e?.adjustmentAmount !== undefined && (s.adjustmentAmount ?? 0) !== e.adjustmentAmount) return false;
+      if (e?.offsetAmount !== undefined && s.offsetAmount !== e.offsetAmount) return false;
+      if (e?.unbatched && s.payoutBatchId !== null) return false;
+      const next: StatementRecord = { ...s, status: t.to, updatedAt: t.updatedAt };
+      if (t.set?.holdReason !== undefined) next.holdReason = t.set.holdReason;
+      if (t.set?.disputeDueAt !== undefined) next.disputeDueAt = t.set.disputeDueAt;
+      if (t.set?.adjustmentAmount !== undefined) next.adjustmentAmount = t.set.adjustmentAmount;
+      if (t.set?.payoutAmount !== undefined) next.payoutAmount = t.set.payoutAmount;
+      if (t.set?.offsetAmount !== undefined) next.offsetAmount = t.set.offsetAmount;
+      statements.set(t.statementId, next);
+      if (t.insertDispute) disputes.set(t.insertDispute.disputeId, { ...t.insertDispute, result: null, resolvedAt: null });
+      if (t.resolveDispute) {
+        const r = t.resolveDispute;
+        const d = disputes.get(r.disputeId) ?? this.disputes.get(r.disputeId);
+        if (!d || d.statementId !== t.statementId || d.result !== null) return false;
+        disputes.set(r.disputeId, { ...d, result: r.result, resolvedAt: r.resolvedAt, resolvedBy: r.resolvedBy, resolutionNote: r.resolutionNote });
+      }
+      if (t.applyAdjustment) {
+        const a = adjustments.get(t.applyAdjustment.approvalId) ?? this.adjustments.get(t.applyAdjustment.approvalId);
+        if (!a || a.statementId !== t.statementId || a.status !== 'PENDING') return false;
+        adjustments.set(a.approvalId, { ...a, status: 'APPLIED', appliedAt: t.applyAdjustment.appliedAt });
+      }
+      let receivableOpened = true;
+      if (t.insertReceivable) {
+        const ref = t.insertReceivable.sourceRef;
+        receivableOpened = !(ref && ([...this.receivables.values()].some((r) => r.sourceRef === ref) || receivables.some((r) => r.sourceRef === ref)));
+        if (receivableOpened) receivables.push({ ...t.insertReceivable });
+      }
+      audits.push(...t.audits);
+      events.push(...t.events.filter((ev) => receivableOpened || ev.type !== 'RECEIVABLE_OPENED'));
+    }
+    for (const [id, s] of statements) this.statements.set(id, s);
+    for (const [id, d] of disputes) this.disputes.set(id, d);
+    for (const [id, a] of adjustments) this.adjustments.set(id, a);
+    for (const r of receivables) this.receivables.set(r.receivableId, r);
+    this.statementAudits.push(...audits);
+    this.#emit(events);
     return true;
   }
   async findStatement(promoterId: string, statementId: string) {
@@ -70,24 +163,45 @@ export class MemorySettlementStore implements SettlementStore {
   async saveStatement(record: StatementRecord) {
     this.statements.set(record.statementId, { ...record, excludedPayments: [...record.excludedPayments] });
   }
-  async applyStatementUpdates(updates: readonly StatementUpdate[]) {
-    for (const u of updates) {
-      const s = this.statements.get(u.statementId);
-      if (!s) throw new SettlementProblem('payout-batch-statement-conflict', 409, '정산서를 찾지 못했습니다');
-      this.statements.set(u.statementId, { ...s, status: u.status, holdReason: u.holdReason, offsetAmount: u.offsetAmount, payoutAmount: u.payoutAmount, updatedAt: u.updatedAt });
-    }
-  }
-  async insertStatementAudit(record: StatementAuditRecord) {
-    this.statementAudits.push(record);
-  }
-  async insertDispute(record: DisputeRecord) {
-    this.disputes.set(record.disputeId, record);
-  }
-  async saveDispute(record: DisputeRecord) {
-    this.disputes.set(record.disputeId, record);
+  async hasEventStatementOfOther(promoterId: string, eventId: string) {
+    return [...this.statements.values()].some((s) => s.kind === 'EVENT' && s.eventId === eventId && s.promoterId !== promoterId);
   }
   async listDisputes(statementId: string) {
-    return [...this.disputes.values()].filter((d) => d.statementId === statementId);
+    return [...this.disputes.values()].filter((d) => d.statementId === statementId).sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime());
+  }
+  async listDisputesAwaitingCase(limit: number) {
+    return [...this.disputes.values()]
+      .filter((d) => d.result === null && (d.caseRequestedAt ?? null) === null)
+      .sort((a, b) => a.submittedAt.getTime() - b.submittedAt.getTime() || a.disputeId.localeCompare(b.disputeId))
+      .slice(0, limit);
+  }
+  async markDisputeCaseRequested(disputeId: string, at: Date) {
+    const d = this.disputes.get(disputeId);
+    if (d && (d.caseRequestedAt ?? null) === null) this.disputes.set(disputeId, { ...d, caseRequestedAt: at });
+  }
+  async insertAdjustment(record: AdjustmentRecord): Promise<AdjustmentInsertResult> {
+    const existing = this.adjustments.get(record.approvalId);
+    if (existing) return { record: existing, created: false };
+    if ([...this.adjustments.values()].some((a) => a.statementId === record.statementId && a.status === 'PENDING')) return 'pending';
+    this.adjustments.set(record.approvalId, { ...record });
+    return { record, created: true };
+  }
+  async findAdjustmentByApproval(approvalId: string) {
+    return this.adjustments.get(approvalId);
+  }
+  async voidAdjustment(approvalId: string) {
+    const a = this.adjustments.get(approvalId);
+    if (!a || a.status !== 'PENDING') return false;
+    this.adjustments.set(approvalId, { ...a, status: 'VOID' });
+    return true;
+  }
+  async voidStalePendingAdjustments(before: Date, limit: number) {
+    const stale = [...this.adjustments.values()]
+      .filter((a) => a.status === 'PENDING' && a.requestedAt.getTime() < before.getTime())
+      .sort((a, b) => a.requestedAt.getTime() - b.requestedAt.getTime())
+      .slice(0, limit);
+    for (const a of stale) this.adjustments.set(a.approvalId, { ...a, status: 'VOID' });
+    return stale.length;
   }
   async insertPayoutBatch(record: PayoutBatchRecord) {
     this.batches.set(record.batchId, record);
@@ -108,7 +222,11 @@ export class MemorySettlementStore implements SettlementStore {
     const { batch: record } = input;
     const duplicate = [...this.batches.values()].some((b) => b.pg === record.pg && b.pgStore === record.pgStore && b.payoutDate === record.payoutDate && b.status !== 'COMPLETED' && b.status !== 'PARTIAL_FAILED');
     if (duplicate) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
-    for (const u of input.statementUpdates) if (!this.statements.has(u.statementId)) throw new SettlementProblem('payout-batch-statement-conflict', 409, '정산서를 찾지 못했습니다');
+    for (const u of input.statementUpdates) {
+      const s = this.statements.get(u.statementId);
+      // 보류·상계는 출발 상태(기본 CONFIRMED)이고 묶음에 붙지 않은 정산서만 바꾼다(Drizzle 조건부 갱신과 같다)
+      if (!s || !(u.from ?? ['CONFIRMED']).includes(s.status) || s.payoutBatchId !== null) throw new SettlementProblem('payout-batch-statement-conflict', 409, '정산서 상태가 다른 처리와 겹쳤습니다');
+    }
     for (const u of input.receivableUpdates) if (!this.receivables.has(u.receivableId)) throw new SettlementProblem('payout-batch-statement-conflict', 409, '미수금을 찾지 못했습니다');
     const bound: StatementRecord[] = [];
     for (const id of input.statementIds) {
@@ -119,6 +237,8 @@ export class MemorySettlementStore implements SettlementStore {
     for (const u of input.statementUpdates) {
       const s = this.statements.get(u.statementId)!;
       this.statements.set(u.statementId, { ...s, status: u.status, holdReason: u.holdReason, offsetAmount: u.offsetAmount, payoutAmount: u.payoutAmount, updatedAt: u.updatedAt });
+      if (u.audits) this.statementAudits.push(...u.audits);
+      if (u.events) this.#emit(u.events);
     }
     for (const u of input.receivableUpdates) {
       const r = this.receivables.get(u.receivableId)!;
@@ -167,7 +287,7 @@ export class MemorySettlementStore implements SettlementStore {
     this.batches.set(record.batchId, record);
   }
   async listConfirmed(pg: Pg, pgStore: PgStore, payoutDate: string) {
-    return [...this.statements.values()].filter((s) => s.status === 'CONFIRMED' && s.payoutBatchId === null && s.pg === pg && s.pgStore === pgStore && s.payoutDate === payoutDate);
+    return [...this.statements.values()].filter((s) => s.status === 'CONFIRMED' && s.payoutBatchId === null && s.payoutAmount > 0 && s.pg === pg && s.pgStore === pgStore && s.payoutDate === payoutDate);
   }
   async listStatementsByBatch(batchId: string) {
     return [...this.statements.values()].filter((s) => s.payoutBatchId === batchId).sort((a, b) => a.promoterId.localeCompare(b.promoterId) || a.statementId.localeCompare(b.statementId));

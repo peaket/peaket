@@ -8,6 +8,7 @@
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 연결과 함께 끈다.
 // 같은 설정 저장소의 PG_ASSIGNMENT(명령 12) 변경은 회차 지정 쓰임새로 쓰고, 명령 12 사전 판정 CheckEventPgAssignment를 업무 gRPC에 묶는다(BUILD_ORDER BAT-360, ADR-0349 결정 3·5).
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
 import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, reauthJtiStoreFromEnv, systemClock, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
@@ -94,6 +95,10 @@ import {
 } from './modules/payment/server.js';
 import {
   DenyAllAdminAuthz,
+  HttpAdjustmentApprovalVerifier,
+  HttpSettlementCaseNotice,
+  parseHolidayCalendar,
+  UnavailableAdjustmentApprovalVerifier,
   DrizzleSettlementPaymentSource,
   DrizzleSettlementStore,
   GrpcAdminAuthz,
@@ -158,6 +163,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   assertPlatformSubProviders(checkoutConfig.defaults, portoneChannels);
   // 결제사별 승인 상한(선택, 명령 12 사전 판정이 싣는다). 틀린 값은 듣기 전에 시작 실패다(ADR-0349 결정 4, BUILD_ORDER BAT-360)
   const approvalTps = loadPgApprovalTps(env);
+  // 정산 이의 기한·상품 정산서 주의 첫 영업일을 세는 KST 공휴일(purchase-svc와 같은 파일, ADR-0368 결정 4). 없으면 주말만 빼고, 형식이 틀리면 듣기 전에 시작 실패다
+  const settlementHolidays = env.PEAKET_HOLIDAY_CALENDAR_FILE ? parseHolidayCalendar(readFileSync(env.PEAKET_HOLIDAY_CALENDAR_FILE, 'utf8')) : new Set<string>();
   // 정지 판정자의 입력을 읽을 클러스터 Prometheus 주소. local·ci 밖에서 없으면 듣기 전에 시작 실패다(BUILD_ORDER PRF-202 코드 리뷰)
   const promUrl = loadEntryPausePrometheusUrl(env);
   // 결제 수단 연결값의 라벨 키 pay. 없으면 경고만 하고 칸을 비운다(결제는 막지 않는다, BUILD_ORDER HOT-145). 잘못된 설정은 듣기 전에 시작 실패다
@@ -221,6 +228,8 @@ let circuitsRef: PgCircuits | undefined;
   const lateApprovalLog: SettlementApprovalLog = {
     approved: (e) => approvalLog?.approved(e),
     rejected: (e) => approvalLog?.rejected(e),
+    authzDenied: (e) => approvalLog?.authzDenied?.(e),
+    caseNoticeFailed: (e) => approvalLog?.caseNoticeFailed?.(e),
   };
   let webhookLog: PaymentWebhookLog | undefined;
   const lateWebhookLog: PaymentWebhookLog = {
@@ -252,11 +261,16 @@ let circuitsRef: PgCircuits | undefined;
       webhook: { store: new DrizzleWebhookStore({ database: webhookDatabase }), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator(env) },
       circuits: () => circuitsRef,
       settlement: {
-        store: new DrizzleSettlementStore(batchDatabase),
+        // 정산서 전이는 상태·감사·trade.settlements Outbox를 한 트랜잭션에 쓴다(ADR-0368 결정 2). Outbox 릴레이가 그대로 보낸다
+        store: new DrizzleSettlementStore(batchDatabase, systemClock),
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
         products: env.PEAKET_CORE_HTTP_URL ? new HttpProductSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableProductSettlementSource(),
         ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN), eventCommission: new HttpEventCommissionRateSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
         approvals: env.PEAKET_OPS_HTTP_URL ? new HttpPayoutApprovalVerifier(env.PEAKET_OPS_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailablePayoutApprovalVerifier(),
+        // 수기 조정 적용은 ops 승인 기록과 대조하고(ADR-0368 결정 8), 이의는 ops CS 처리함 건을 연다(결정 5). ops 주소가 없으면 조정 적용은 503, 이의는 건 없이 남는다
+        adjustmentApprovals: env.PEAKET_OPS_HTTP_URL ? new HttpAdjustmentApprovalVerifier(env.PEAKET_OPS_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableAdjustmentApprovalVerifier(),
+        ...(env.PEAKET_OPS_HTTP_URL ? { caseNotice: new HttpSettlementCaseNotice(env.PEAKET_OPS_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
+        holidays: settlementHolidays,
         saleSuspensions: env.PEAKET_CORE_HTTP_URL ? new HttpSaleSuspensionSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableSaleSuspensionSource(),
         ...(env.PEAKET_CORE_HTTP_URL ? { promoterContracts: new HttpPromoterContractSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
         // 토스 잔액 API의 JWE 전송은 운영 계약·키가 있어야 한다. 지금은 어댑터가 없어 확인을 생략한다(settlement §14).
@@ -413,6 +427,7 @@ let circuitsRef: PgCircuits | undefined;
         log: {
           ticked: ({ through, calculated }) => service.logger.info({ kind: 'settlement-due-ticked', through, calculated }, '회차 정산 스케줄러가 돌았다'),
           failed: (err) => service.logger.error({ kind: 'settlement-due-failed', code: safeErrorCode(err) }, '회차 정산 스케줄러 실패'),
+          productSkipped: ({ periodStart, periodEnd }) => service.logger.warn({ kind: 'settlement-product-skipped', periodStart, periodEnd }, '상품 정산서 주 계산을 건너뛰었다(다음 점검에서 다시 본다)'),
         },
       })
     : undefined;

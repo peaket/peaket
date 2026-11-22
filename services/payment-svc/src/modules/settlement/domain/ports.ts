@@ -1,4 +1,5 @@
 // 정산·지급·KYC 저장 포트. 메모리(단위 시험)와 Drizzle(운영)이 같은 모양을 쓴다.
+import type { AdjustmentRecord } from './adjustment.js';
 import type {
   DisputeRecord,
   GuaranteeCollectionRecord,
@@ -15,10 +16,12 @@ import type {
   ReceivableMoveRecord,
   ReceivableRecord,
   ReceivableStatus,
+  SettlementEventValue,
   StatementAuditRecord,
   StatementKind,
   StatementRecord,
   StatementSource,
+  StatementStatus,
 } from './settlement.js';
 
 export interface StatementFilter {
@@ -41,7 +44,58 @@ export interface StatementUpdate {
   offsetAmount: number;
   payoutAmount: number;
   updatedAt: Date;
+  /** 출발 상태(기본 CONFIRMED). 묶음에 붙지 않은 정산서만 바꾼다. 지금 상태가 다르면 묶음 전체를 롤백하고 409다(ADR-0368 결정 2) */
+  from?: readonly StatementStatus[];
+  /** 같은 트랜잭션에 쓸 전이 감사·사건(상태가 바뀔 때) */
+  audits?: readonly StatementAuditRecord[];
+  events?: readonly SettlementEventValue[];
 }
+
+/**
+ * 정산서 상태 전이 한 건(ADR-0368 결정 2·3). 지금 상태가 from 안이고 expect가 맞을 때만 상태·바꿀 칸·감사·딸린 행·Outbox 사건을
+ * 한 트랜잭션에 쓴다. 맞지 않으면 아무것도 쓰지 않는다(저장소는 false를 돌려준다). 사건은 트랜잭션의 마지막 문장으로 Outbox에 쓴다.
+ */
+export interface StatementTransition {
+  statementId: string;
+  from: readonly StatementStatus[];
+  to: StatementStatus;
+  set?: {
+    holdReason?: StatementRecord['holdReason'];
+    disputeDueAt?: Date | null;
+    adjustmentAmount?: number;
+    payoutAmount?: number;
+    offsetAmount?: number;
+  };
+  /** 함께 걸 조건(낙관적 대조): 이의 기한 전·후, 조정 합계·상계가 읽은 값 그대로, 묶음에 붙지 않음 */
+  expect?: {
+    disputeDueAfter?: Date;
+    disputeDueAtOrBefore?: Date;
+    adjustmentAmount?: number;
+    offsetAmount?: number;
+    unbatched?: boolean;
+  };
+  updatedAt: Date;
+  audits: readonly StatementAuditRecord[];
+  events: readonly SettlementEventValue[];
+  /** 같은 트랜잭션에 넣을 이의 행(이의 받기) */
+  insertDispute?: DisputeRecord;
+  /** 열린 이의(result 없음) 하나를 닫는다. 이미 닫혔으면 전이 전체가 실패한다 */
+  resolveDispute?: { disputeId: string; result: 'ADJUSTED' | 'DISMISSED'; resolvedBy: string | null; resolutionNote: string | null; resolvedAt: Date };
+  /** PENDING 조정 행 하나를 APPLIED로 바꾼다. PENDING이 아니면 전이 전체가 실패한다 */
+  applyAdjustment?: { approvalId: string; appliedAt: Date };
+  /** 같은 트랜잭션에 넣을 미수금(근거 부분 유일에 걸리면 넣지 않고 그 미수금 사건도 쓰지 않는다) */
+  insertReceivable?: ReceivableRecord;
+}
+
+/** 계산 = 통지(ADR-0368 결정 1): CALCULATED로 넣은 행을 같은 트랜잭션에서 NOTIFIED로 바꾸고 감사·사건을 쓴다 */
+export interface StatementNotification {
+  disputeDueAt: Date;
+  audit: StatementAuditRecord;
+  event: SettlementEventValue;
+}
+
+/** 조정 행 저장 결과. 같은 승인 ID는 처음 행, 그 정산서에 적용 전 조정이 이미 있으면 'pending' */
+export type AdjustmentInsertResult = { record: AdjustmentRecord; created: boolean } | 'pending';
 
 export interface ReceivableUpdate {
   receivableId: string;
@@ -108,23 +162,71 @@ export interface SaleSuspensionSource {
 export interface SettlementApprovalLog {
   approved(o: { batchId: string; approvalId: string; requesterId: string; approverId: string; amount: number; pg: Pg; pgStore: PgStore; payoutDate: string; at: Date }): void;
   rejected(o: { batchId: string; approvalId: string; reason: string; at: Date }): void;
+  /** 파트너가 남의 정산서를 보거나 이의하려 했다(settlement_authz_denied, J-T10). 금액·계좌는 싣지 않는다 */
+  authzDenied?(o: { partnerId: string; accountId: string; statementId: string | null; eventId?: string; action: 'list-event' | 'dispute'; at: Date }): void;
+  /** CS 처리함 건을 열지 못했다(다음 점검이 다시 보낸다) */
+  caseNoticeFailed?(o: { disputeId: string; statementId: string; at: Date }): void;
+}
+
+/** ops-svc 승인 업무 SETTLEMENT_ADJUSTMENT 한 건에서 payment가 대조할 사실(ADR-0368 결정 8). 근거 메모·계좌는 싣지 않는다 */
+export interface VerifiedAdjustmentApproval {
+  approvalId: string;
+  kind: 'SETTLEMENT_ADJUSTMENT';
+  targetRef: string;
+  amount: number;
+  reasonCode: string;
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTING' | 'DONE' | 'FAILED' | 'WITHDRAWN' | 'EXPIRED';
+  requiredApprovals: number;
+  requestedBy: string;
+  approvals: readonly string[];
+  approvedAt: string | null;
+}
+
+/** ops-svc 조정 승인 기록 확인. 없으면 undefined, ops가 5xx·시간 초과·모양 위반이면 503 SettlementProblem */
+export interface AdjustmentApprovalVerifier {
+  verify(approvalId: string): Promise<VerifiedAdjustmentApproval | undefined>;
+}
+
+/** ops-svc CS 처리함 '정산 이의' 건 열기(ADR-0368 결정 5). 열지 못하면 던진다(이의는 그대로 남고 정산 일꾼이 다시 보낸다) */
+export interface SettlementCaseNotice {
+  openDispute(o: { disputeId: string; statementId: string; createdAt: Date }): Promise<void>;
 }
 
 export interface SettlementStore {
-  /** 부분 유일 인덱스에 걸려 넣지 못하면 false(원본 목록도 쓰지 않는다). */
-  insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean>;
+  /**
+   * 부분 유일 인덱스에 걸려 넣지 못하면 false(원본 목록·감사·사건도 쓰지 않는다).
+   * notify가 있으면 CALCULATED로 넣은 행을 같은 트랜잭션에서 NOTIFIED(이의 기한)로 바꾸고 감사·STATEMENT_NOTIFIED를 쓴다(계산 = 통지).
+   * notify 없이 부르는 것은 시험 자료 넣기뿐이다.
+   */
+  insertStatement(record: StatementRecord, sources: readonly StatementSource[], notify?: StatementNotification): Promise<boolean>;
+  /** 조건부 전이 한 건. 조건이 맞지 않으면 아무것도 쓰지 않고 false */
+  transitionStatement(t: StatementTransition): Promise<boolean>;
+  /** 여러 정산서의 조건부 전이를 한 트랜잭션에. 하나라도 맞지 않으면 모두 롤백하고 false */
+  transitionStatements(ts: readonly StatementTransition[]): Promise<boolean>;
   findStatement(promoterId: string, statementId: string): Promise<StatementRecord | undefined>;
   findStatementById(statementId: string): Promise<StatementRecord | undefined>;
   findEventStatement(promoterId: string, eventId: string, pg: Pg, pgStore: PgStore): Promise<StatementRecord | undefined>;
   listEvent(promoterId: string, eventId: string): Promise<StatementRecord[]>;
   listProduct(promoterId: string, filter: StatementFilter): Promise<StatementPage>;
+  /**
+   * 조건 없는 덮어쓰기. 응용 층은 정산서 상태를 이것으로 바꾸지 않는다(상태 전이는 transitionStatement, ADR-0368 결정 2).
+   * 시험 자료를 맞출 때만 쓴다.
+   */
   saveStatement(record: StatementRecord): Promise<void>;
-  /** 잔액 부족처럼 배치를 만들지 않고 여러 정산서를 HELD로 바꿀 때 한 트랜잭션에 쓴다. */
-  applyStatementUpdates(updates: readonly StatementUpdate[]): Promise<void>;
-  insertStatementAudit(record: StatementAuditRecord): Promise<void>;
-  insertDispute(record: DisputeRecord): Promise<void>;
-  saveDispute(record: DisputeRecord): Promise<void>;
+  /** 그 회차에 다른 파트너의 정산서가 있는가(테넌트 격리 로그, J-T10) */
+  hasEventStatementOfOther(promoterId: string, eventId: string): Promise<boolean>;
   listDisputes(statementId: string): Promise<DisputeRecord[]>;
+  /** CS 처리함 건을 아직 열지 못한 열린 이의(오래된 차례) */
+  listDisputesAwaitingCase(limit: number): Promise<DisputeRecord[]>;
+  markDisputeCaseRequested(disputeId: string, at: Date): Promise<void>;
+  // ---- 수기 조정(payment 0027, settlement §4.3) ----
+  /** 같은 승인 ID면 처음 행(created=false), 그 정산서에 적용 전 조정이 있으면 'pending' */
+  insertAdjustment(record: AdjustmentRecord): Promise<AdjustmentInsertResult>;
+  findAdjustmentByApproval(approvalId: string): Promise<AdjustmentRecord | undefined>;
+  /** PENDING만 VOID로 닫는다. 닫았으면 true */
+  voidAdjustment(approvalId: string, at: Date): Promise<boolean>;
+  /** requestedAt이 before보다 이른 PENDING 행을 VOID로 닫고 닫은 수를 돌려준다 */
+  voidStalePendingAdjustments(before: Date, limit: number): Promise<number>;
   insertPayoutBatch(record: PayoutBatchRecord): Promise<void>;
   /** 배치와 정산서 결속을 한 트랜잭션으로 쓴다. 결속할 수 없는 정산서가 섞이면 롤백하고 409다. */
   createPayoutBatchWithStatements(record: PayoutBatchRecord, statementIds: readonly string[]): Promise<void>;
@@ -242,6 +344,9 @@ export interface ReauthVerifier {
 }
 
 export const SETTLEMENT_STORE = Symbol.for('peaket.settlement.store');
+export const ADJUSTMENT_APPROVAL_VERIFIER = Symbol.for('peaket.settlement.adjustment-approval-verifier');
+export const SETTLEMENT_CASE_NOTICE = Symbol.for('peaket.settlement.case-notice');
+export const SETTLEMENT_HOLIDAYS = Symbol.for('peaket.settlement.holidays');
 export const SETTLEMENT_PAYMENT_SOURCE = Symbol.for('peaket.settlement.payment-source');
 export const SETTLEMENT_PRODUCT_SOURCE = Symbol.for('peaket.settlement.product-source');
 export const SETTLEMENT_EVENT_SOURCE = Symbol.for('peaket.settlement.event-source');

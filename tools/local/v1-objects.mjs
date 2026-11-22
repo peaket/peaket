@@ -20,8 +20,12 @@ export const V1_NGINX_IMAGE = 'nginxinc/nginx-unprivileged:1.29.3-alpine@sha256:
 export const V1_NGINX_TAG = V1_NGINX_IMAGE.split('@')[0];
 /** kind 노드 폴더(합본·릴레이 파드가 hostPath로 붙인다): 실행마다 쓰는 좌석맵 판, admission-ctrl 리더가 쓰는 묶음 결과 */
 export const V1_HOST_DIRS = Object.freeze({ seatmaps: '/var/local/peaket-v1/seatmaps', batchResults: '/var/local/peaket-v1/batch-results' });
-/** 무대의 Kafka 토픽(소비·생산 모두. 로컬 Kafka는 auto.create.topics.enable이 꺼져 있다, deploy/local/kafka.yaml) */
-export const V1_KAFKA_TOPICS = Object.freeze(['trade.seats', 'trade.payments', 'trade.orders', 'trade.purchase-sessions', 'identity.accounts-withdrawn', 'telemetry.behavior']);
+/**
+ * 무대의 Kafka 토픽(소비·생산 모두. 로컬 Kafka는 auto.create.topics.enable이 꺼져 있다, deploy/local/kafka.yaml).
+ * trade.settlements는 payment-svc Outbox가 정산서 통지·이의·확정 사건을 쓴다(F-07-5, ADR-0368). 릴레이는 Outbox를 차례대로 보내므로
+ * 토픽이 없으면 뒤의 trade.payments까지 멈춘다. 그래서 미리 만든다(파티션 3, trade.payments와 같다 [가정])
+ */
+export const V1_KAFKA_TOPICS = Object.freeze(['trade.seats', 'trade.payments', 'trade.settlements', 'trade.orders', 'trade.purchase-sessions', 'identity.accounts-withdrawn', 'telemetry.behavior']);
 /** v1 무대 전용 PostgreSQL(네임스페이스 v1)의 DB 둘 */
 export const V1_DATABASES = Object.freeze({ purchase: 'v1_purchase', payment: 'v1_payment' });
 /** deploy/local/postgres.yaml과 같은 PostgreSQL 18 다이제스트(통합 시험과 같은 판) */

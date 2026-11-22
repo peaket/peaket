@@ -3,8 +3,9 @@
 export { ApprovalsModule, type ApprovalsModuleDeps } from './approvals.module.js';
 export { ContractApprovals } from './application/contract-approvals.js';
 export { ApprovalRouter } from './application/approval-router.js';
-export { DrizzleContractApprovalStore } from './adapters/db/drizzle-store.js';
-export { MemoryContractApprovalStore } from './adapters/memory-store.js';
+export { SettlementAdjustmentApprovals, settlementAdjustmentApprovalId } from './application/settlement-adjustment-approvals.js';
+export { DrizzleContractApprovalStore, DrizzleSettlementAdjustmentApprovalStore } from './adapters/db/drizzle-store.js';
+export { MemoryContractApprovalStore, MemorySettlementAdjustmentApprovalStore } from './adapters/memory-store.js';
 export { MemoryCoreContract, UnavailableCoreContract } from '../../adapters/http-core-contract.js';
-export type { ContractApprovalRecord } from './domain/approval.js';
-export type { ContractApprovalStore, CoreContractClient } from './domain/ports.js';
+export type { ContractApprovalRecord, SettlementAdjustmentApprovalFacts, SettlementAdjustmentApprovalRecord, SettlementAdjustmentApprovalView } from './domain/approval.js';
+export type { ContractApprovalStore, CoreContractClient, SettlementAdjustmentApprovalStore } from './domain/ports.js';

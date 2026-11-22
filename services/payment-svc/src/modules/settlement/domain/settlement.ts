@@ -1,5 +1,7 @@
 // 정산서·지급 묶음·KYC 도메인(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·POL-039, ADR-0047·0062·0101).
 // 금액 식과 상태 전이는 docs/features/settlement.md §4·§5·§6, 표는 docs/data.md settlement_statement…payout.
+import { createHash } from 'node:crypto';
+
 export type Pg = 'TOSS' | 'PORTONE';
 export type PgStore = 'STANDARD' | 'ESCROW';
 export type StatementKind = 'EVENT' | 'PRODUCT';
@@ -115,6 +117,8 @@ export interface StatementRecord {
   payoutAccountLast4: string | null;
   /** 이 정산서를 지급하는 묶음. 승인 시점에 묶여 실행은 이 목록만 지급한다(CONS-02). */
   payoutBatchId: string | null;
+  /** 적용한 수기 조정의 합계(payment 0027, settlement §4.3). 없으면 0이다. 지급액 = 판매 대금 − 환급 − 수수료 − 부가세 − 상계 + 조정 합계 */
+  adjustmentAmount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -136,6 +140,12 @@ export interface DisputeRecord {
   submittedAt: Date;
   result: 'ADJUSTED' | 'DISMISSED' | null;
   resolvedAt: Date | null;
+  /** 기각·인정한 사람(관리 계정 ID, payment 0027) */
+  resolvedBy?: string | null;
+  /** 기각 사유(1~2,000자, payment 0027). 이의 인정은 조정 행이 근거다 */
+  resolutionNote?: string | null;
+  /** ops-svc CS 처리함 '정산 이의' 건을 연 시각(payment 0027). 비었으면 정산 일꾼이 다시 보낸다 */
+  caseRequestedAt?: Date | null;
 }
 
 /** 정산서 상태 전이 감사(A1V-12). 돈이 나가는 전이의 사유·행위자·이전 상태를 남긴다. */
@@ -361,9 +371,9 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
   const commissionVat = Math.floor(commissionAmount / 10);
   const offsetAmount = 0;
   const payoutAmount = Math.max(0, grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount);
-  const kycVerified = input.kyc?.status === 'VERIFIED' && input.kyc.businessVerified && input.kyc.representativeVerified;
-  const status: StatementStatus = payoutAmount <= 0 ? 'CARRIED_OVER' : kycVerified ? 'NOTIFIED' : 'HELD';
-  const holdReason: HoldReason | null = status === 'HELD' ? 'KYC' : null;
+  // 계산 때는 KYC·계좌로 보류하지 않고 지급액 0도 통지한다. 보류는 지급 묶음 때(T7), CARRIED_OVER는 확정 때(T6) 한다(ADR-0368 결정 1·10).
+  const status: StatementStatus = 'CALCULATED';
+  const holdReason: HoldReason | null = null;
   const sources: StatementSource[] = [];
   for (const p of included) {
     if (grossOf(p) > 0) sources.push({ statementId: input.statementId, sourceId: p.paymentId, kind: 'GROSS', paymentId: p.paymentId, amount: grossOf(p) });
@@ -390,7 +400,8 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
       excludedPayments,
       status,
       holdReason,
-      disputeDueAt: addBusinessDays(input.now, 2),
+      // 이의 기한은 통지(같은 트랜잭션) 때 KST 공휴일 달력으로 정한다(business-calendar.ts)
+      disputeDueAt: null,
       payoutDate: dateOnly(addBusinessDays(input.eventEndsAt ? new Date(input.eventEndsAt) : input.now, 5)),
       payoutBankCode: input.account?.bankCode ?? null,
       payoutAccountLast4: input.account?.accountLast4 ?? null,
@@ -457,8 +468,8 @@ export function calculateProductStatement(input: ProductCalculationInput): { rec
   const commissionVat = Math.floor(commissionAmount / 10);
   const offsetAmount = 0;
   const payoutAmount = Math.max(0, grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount);
-  const kycVerified = input.kyc?.status === 'VERIFIED' && input.kyc.businessVerified && input.kyc.representativeVerified;
-  const status: StatementStatus = payoutAmount <= 0 ? 'CARRIED_OVER' : kycVerified ? 'NOTIFIED' : 'HELD';
+  // 회차 정산서와 같이 계산 때는 보류하지 않는다(ADR-0368 결정 1)
+  const status: StatementStatus = 'CALCULATED';
   const first = input.items[0]!;
   const sources: StatementSource[] = input.items.map((i) => ({ statementId: input.statementId, sourceId: i.itemId, kind: 'GROSS' as const, paymentId: i.itemId, amount: i.grossAmount }));
   return {
@@ -481,8 +492,8 @@ export function calculateProductStatement(input: ProductCalculationInput): { rec
       supersedesId: null,
       excludedPayments: [],
       status,
-      holdReason: status === 'HELD' ? 'KYC' : null,
-      disputeDueAt: addBusinessDays(input.now, 2),
+      holdReason: null,
+      disputeDueAt: null,
       payoutDate: dateOnly(addBusinessDays(input.now, 4)),
       payoutBankCode: input.account?.bankCode ?? null,
       payoutAccountLast4: input.account?.accountLast4 ?? null,
@@ -493,3 +504,83 @@ export function calculateProductStatement(input: ProductCalculationInput): { rec
     sources,
   };
 }
+
+// ---- 통지·이의·확정 사건(trade.settlements, docs/api/asyncapi.yaml SettlementEvent, ADR-0368 결정 3) ----
+
+/** 이의 기간(통지 시각 + 2영업일)과 다시 알림 기간(1영업일). 사람이 일하는 기한이라 KST 공휴일 달력으로 센다(settlement §4.2) */
+export const DISPUTE_WINDOW_BUSINESS_DAYS = 2;
+export const RENOTIFY_WINDOW_BUSINESS_DAYS = 1;
+
+export const TRADE_SETTLEMENTS_TOPIC = 'trade.settlements';
+
+export type SettlementEventType = 'STATEMENT_NOTIFIED' | 'STATEMENT_DISPUTED' | 'STATEMENT_CONFIRMED' | 'STATEMENT_CARRIED_OVER' | 'RECEIVABLE_OPENED';
+
+/** asyncapi SettlementEvent의 칸(이 결정이 쓰는 종류만). 조건부 칸은 그 조건일 때만 싣는다 */
+export interface SettlementEventValue {
+  promoterId: string;
+  statementId: string;
+  kind: StatementKind;
+  eventId?: string | null;
+  pg: Pg;
+  pgStore?: PgStore;
+  periodStart?: string;
+  periodEnd?: string;
+  amount?: number;
+  salesAmount?: number;
+  refundAmount?: number;
+  feeAmount?: number;
+  revision?: number;
+  supersedesId?: string | null;
+  type: SettlementEventType;
+  occurredAt: string;
+  eventKey: string;
+}
+
+/** 내용에서 정한 UUID 꼴(sha256 앞 16바이트, 판 8·변형 RFC 4122). 같은 재료면 같은 값이라 다시 보내도 중복 제거된다 */
+export function hashUuid(material: string): string {
+  const b = createHash('sha256').update(material, 'utf8').digest().subarray(0, 16);
+  b[6] = (b[6]! & 0x0f) | 0x80;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = b.toString('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/** 사건 중복 제거 키: sha256('<정산서 ID>:<사건 종류>:<전이 감사 ID>') 앞 16바이트(ADR-0368, F-07-5 계획 I-01) */
+export const settlementEventKey = (statementId: string, type: SettlementEventType, auditId: string): string => hashUuid(`${statementId}:${type}:${auditId}`);
+
+/** 정산서 상태 사건 한 건. STATEMENT_NOTIFIED는 판매 대금·환급·중개수수료·판본·옛 판을 싣는다 */
+export function statementEvent(s: StatementRecord, type: Exclude<SettlementEventType, 'RECEIVABLE_OPENED'>, at: Date, auditId: string): SettlementEventValue {
+  return {
+    promoterId: s.promoterId,
+    statementId: s.statementId,
+    kind: s.kind,
+    ...(s.kind === 'EVENT' ? { eventId: s.eventId } : {}),
+    pg: s.pg,
+    ...(s.pg === 'TOSS' ? { pgStore: s.pgStore } : {}),
+    ...(s.kind === 'PRODUCT' && s.periodStart !== null && s.periodEnd !== null ? { periodStart: s.periodStart, periodEnd: s.periodEnd } : {}),
+    ...(type === 'STATEMENT_NOTIFIED' ? { salesAmount: s.grossAmount, refundAmount: s.refundAmount, feeAmount: s.commissionAmount, revision: s.revision, supersedesId: s.supersedesId } : {}),
+    type,
+    occurredAt: at.toISOString(),
+    eventKey: settlementEventKey(s.statementId, type, auditId),
+  };
+}
+
+/** 확정 때 지급액이 0 아래인 정산서의 미수금(NEGATIVE_STATEMENT) 사건 */
+export function receivableOpenedEvent(s: StatementRecord, amount: number, at: Date, auditId: string): SettlementEventValue {
+  return {
+    promoterId: s.promoterId,
+    statementId: s.statementId,
+    kind: s.kind,
+    ...(s.kind === 'EVENT' ? { eventId: s.eventId } : {}),
+    pg: s.pg,
+    ...(s.pg === 'TOSS' ? { pgStore: s.pgStore } : {}),
+    ...(s.kind === 'PRODUCT' && s.periodStart !== null && s.periodEnd !== null ? { periodStart: s.periodStart, periodEnd: s.periodEnd } : {}),
+    amount,
+    type: 'RECEIVABLE_OPENED',
+    occurredAt: at.toISOString(),
+    eventKey: settlementEventKey(s.statementId, 'RECEIVABLE_OPENED', auditId),
+  };
+}
+
+/** 확정 때의 0 이하 미수금 근거(부분 유일 partner_receivable_source_ref_uidx로 한 행) */
+export const negativeStatementSourceRef = (statementId: string): string => `negative-statement:${statementId}`;

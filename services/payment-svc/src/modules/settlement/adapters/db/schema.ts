@@ -37,6 +37,8 @@ export const settlementStatement = pgTable(
     payoutBankCode: text('payout_bank_code'),
     payoutAccountLast4: text('payout_account_last4'),
     payoutBatchId: uuid('payout_batch_id').references(() => payoutBatch.id),
+    // 적용한 수기 조정의 합계(0027, settlement §4.3). 지급액 = 판매 대금 − 환급 − 수수료 − 부가세 − 상계 + 조정 합계
+    adjustmentAmount: amount('adjustment_amount').notNull().default(0),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
   },
@@ -108,11 +110,53 @@ export const statementDispute = pgTable(
     submittedAt: at('submitted_at').notNull(),
     result: text('result'),
     resolvedAt: at('resolved_at'),
+    // 0027: 기각·인정한 관리 계정, 기각 사유(1~2,000자), CS 처리함 건을 연 시각(비면 정산 일꾼이 다시 보낸다, ADR-0368 결정 5·6)
+    resolvedBy: uuid('resolved_by'),
+    resolutionNote: text('resolution_note'),
+    caseRequestedAt: at('case_requested_at'),
   },
   (t) => [
     check('statement_dispute_reason_check', sql`${t.reasonCode} in ('GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER')`),
     check('statement_dispute_result_check', sql`${t.result} is null or ${t.result} in ('ADJUSTED', 'DISMISSED')`),
+    check('statement_dispute_resolution_note_check', sql`${t.resolutionNote} is null or char_length(${t.resolutionNote}) between 1 and 2000`),
     index('statement_dispute_statement_idx').on(t.statementId, t.submittedAt),
+    index('statement_dispute_case_pending_idx').on(t.submittedAt).where(sql`${t.caseRequestedAt} is null and ${t.result} is null`),
+  ],
+);
+
+/**
+ * 정산서 수기 조정 행(0027, settlement §4.3, ADR-0368 결정 7·8). 원래 계산 칸은 고치지 않고 이 행과 정산서의 조정 합계로 더한다.
+ * 승인 업무 하나에 행 하나(approval_id 유일), 한 정산서에 적용 전(PENDING) 조정은 하나(부분 유일)다.
+ */
+export const statementAdjustment = pgTable(
+  'statement_adjustment',
+  {
+    id: uuid('id').primaryKey(),
+    statementId: uuid('statement_id')
+      .notNull()
+      .references(() => settlementStatement.id),
+    approvalId: uuid('approval_id').notNull(),
+    reasonCode: text('reason_code').notNull(),
+    disputeId: uuid('dispute_id').references(() => statementDispute.id),
+    amount: amount('amount').notNull(),
+    evidenceNote: text('evidence_note'),
+    status: text('status').notNull(),
+    requestedBy: uuid('requested_by').notNull(),
+    requestedAt: at('requested_at').notNull(),
+    appliedAt: at('applied_at'),
+  },
+  (t) => [
+    check(
+      'statement_adjustment_reason_check',
+      sql`${t.reasonCode} in ('GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER', 'LEDGER_ERROR', 'CONTRACT_CORRECTION', 'AGREED_DEDUCTION')`,
+    ),
+    check('statement_adjustment_amount_check', sql`${t.amount} <> 0`),
+    check('statement_adjustment_status_check', sql`${t.status} in ('PENDING', 'APPLIED', 'VOID')`),
+    check('statement_adjustment_note_check', sql`${t.evidenceNote} is null or char_length(${t.evidenceNote}) <= 2000`),
+    check('statement_adjustment_applied_check', sql`(${t.status} = 'APPLIED') = (${t.appliedAt} is not null)`),
+    uniqueIndex('statement_adjustment_approval_uidx').on(t.approvalId),
+    uniqueIndex('statement_adjustment_pending_uidx').on(t.statementId).where(sql`${t.status} = 'PENDING'`),
+    index('statement_adjustment_statement_idx').on(t.statementId, t.requestedAt),
   ],
 );
 

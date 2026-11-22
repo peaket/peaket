@@ -3,8 +3,8 @@
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import { appendAuditIn, type AuditRecord } from '../../../audit/audit.js';
-import type { ApprovalVote, ContractApprovalStore } from '../../domain/ports.js';
-import type { ContractApprovalRecord, ContractApprovalStatus, ContractTermsSnapshot, GuaranteeKind } from '../../domain/approval.js';
+import type { ApprovalVote, ContractApprovalStore, SettlementAdjustmentApprovalStore } from '../../domain/ports.js';
+import type { ContractApprovalRecord, ContractApprovalStatus, ContractTermsSnapshot, GuaranteeKind, SettlementAdjustmentApprovalRecord, SettlementAdjustmentApprovalStatus } from '../../domain/approval.js';
 import { approvalRequest, approvalVote, promoterContractChange } from './schema.js';
 
 const pgCode = (e: unknown): string | undefined => {
@@ -195,5 +195,132 @@ export class DrizzleContractApprovalStore implements ContractApprovalStore {
       .orderBy(desc(approvalRequest.createdAt))
       .limit(filter.limit);
     return (rows as Row[]).map(record);
+  }
+}
+
+/**
+ * 정산서 수기 조정 승인 업무(F-07-5, ADR-0368 결정 7). 공통 승인 표 approval_request(kind SETTLEMENT_ADJUSTMENT)와 approval_vote만 쓴다.
+ * 상태는 버전 조건부로 바꾸고, 투표·감사를 같은 트랜잭션에 쓴다.
+ */
+export class DrizzleSettlementAdjustmentApprovalStore implements SettlementAdjustmentApprovalStore {
+  constructor(private readonly db: Database) {}
+
+  async insert(r: SettlementAdjustmentApprovalRecord, audit?: AuditRecord): Promise<{ record: SettlementAdjustmentApprovalRecord; created: boolean }> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(approvalRequest)
+          .values({
+            id: r.approvalId,
+            kind: 'SETTLEMENT_ADJUSTMENT',
+            targetRef: r.statementId,
+            amount: r.amount,
+            reasonCode: r.reasonCode,
+            reasonText: r.reasonText,
+            requestedBy: r.requestedBy,
+            requesterRole: r.requesterRole,
+            requiredApprovals: 2,
+            status: r.status,
+            approverId: r.approverId,
+            createdAt: r.createdAt,
+            updatedAt: r.updatedAt,
+            version: r.version,
+          })
+          .onConflictDoNothing()
+          .returning({ id: approvalRequest.id });
+        if (inserted.length === 0) return { record: (await this.find(r.approvalId)) ?? r, created: false };
+        if (audit) await appendAuditIn(tx, audit);
+        return { record: r, created: true };
+      });
+    } catch (e) {
+      if (pgCode(e) === '23505') {
+        const found = await this.find(r.approvalId);
+        if (found) return { record: found, created: false };
+      }
+      throw e;
+    }
+  }
+
+  async #votes(ids: readonly string[]): Promise<Map<string, { approvers: string[]; first: Date | null }>> {
+    const out = new Map<string, { approvers: string[]; first: Date | null }>();
+    if (ids.length === 0) return out;
+    const rows = await this.db.db
+      .select({ requestId: approvalVote.requestId, approverId: approvalVote.approverId, approvedAt: approvalVote.approvedAt })
+      .from(approvalVote)
+      .where(inArray(approvalVote.requestId, [...ids]))
+      .orderBy(approvalVote.approvedAt);
+    for (const v of rows) {
+      const cur = out.get(v.requestId) ?? { approvers: [], first: null };
+      cur.approvers.push(v.approverId);
+      cur.first ??= v.approvedAt;
+      out.set(v.requestId, cur);
+    }
+    return out;
+  }
+
+  #record(row: typeof approvalRequest.$inferSelect, votes: { approvers: string[]; first: Date | null } | undefined): SettlementAdjustmentApprovalRecord {
+    return {
+      approvalId: row.id,
+      statementId: row.targetRef,
+      amount: Number(row.amount ?? 0),
+      reasonCode: row.reasonCode ?? '',
+      reasonText: row.reasonText,
+      requestedBy: row.requestedBy,
+      requesterRole: row.requesterRole,
+      status: row.status as SettlementAdjustmentApprovalStatus,
+      closeReason: row.closeReason,
+      approverId: row.approverId,
+      approvals: votes?.approvers ?? [],
+      approvedAt: votes?.first ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      version: row.version,
+    };
+  }
+
+  async find(approvalId: string): Promise<SettlementAdjustmentApprovalRecord | undefined> {
+    if (!UUID.test(approvalId)) return undefined;
+    const rows = await this.db.db.select().from(approvalRequest).where(and(eq(approvalRequest.id, approvalId), eq(approvalRequest.kind, 'SETTLEMENT_ADJUSTMENT'))).limit(1);
+    const row = rows[0];
+    if (!row) return undefined;
+    return this.#record(row, (await this.#votes([row.id])).get(row.id));
+  }
+
+  async save(r: SettlementAdjustmentApprovalRecord, audit?: AuditRecord, vote?: ApprovalVote): Promise<boolean> {
+    if (!UUID.test(r.approvalId)) return false;
+    return this.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(approvalRequest)
+        .set({ status: r.status, closeReason: r.closeReason, approverId: r.approverId, updatedAt: r.updatedAt, version: r.version })
+        .where(and(eq(approvalRequest.id, r.approvalId), eq(approvalRequest.kind, 'SETTLEMENT_ADJUSTMENT'), eq(approvalRequest.version, r.version - 1)))
+        .returning({ id: approvalRequest.id });
+      if (updated.length === 0) return false;
+      if (vote) {
+        await tx
+          .insert(approvalVote)
+          .values({ requestId: vote.approvalId, approverId: vote.approverId, requesterId: vote.requesterId, approvedAt: vote.approvedAt, reason: vote.reason })
+          .onConflictDoNothing();
+      }
+      if (audit) await appendAuditIn(tx, audit);
+      return true;
+    });
+  }
+
+  async list(filter: { status?: readonly string[] | undefined; requesterId?: string | undefined; awaitingApprover?: string | undefined; limit: number }): Promise<SettlementAdjustmentApprovalRecord[]> {
+    const conditions = [eq(approvalRequest.kind, 'SETTLEMENT_ADJUSTMENT')];
+    if (filter.status && filter.status.length > 0) conditions.push(inArray(approvalRequest.status, [...filter.status]));
+    if (filter.requesterId) conditions.push(eq(approvalRequest.requestedBy, filter.requesterId));
+    if (filter.awaitingApprover) {
+      conditions.push(inArray(approvalRequest.status, ['PENDING_APPROVAL', 'FAILED']));
+      conditions.push(ne(approvalRequest.requestedBy, filter.awaitingApprover));
+    }
+    const rows = await this.db.db
+      .select()
+      .from(approvalRequest)
+      .where(and(...conditions))
+      .orderBy(desc(approvalRequest.createdAt))
+      .limit(filter.limit);
+    const votes = await this.#votes(rows.map((r) => r.id));
+    return rows.map((r) => this.#record(r, votes.get(r.id)));
   }
 }

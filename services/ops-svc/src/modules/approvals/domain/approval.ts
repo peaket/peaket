@@ -111,3 +111,107 @@ export function assertCanDecide(r: ContractApprovalRecord, actor: OpsActor, acti
 export function hasRequestedChange(r: Pick<ContractApprovalRecord, 'requestedCommissionRateBp' | 'requestedGuaranteeRateBp' | 'requestedGuaranteeKind'>): boolean {
   return r.requestedCommissionRateBp !== null || r.requestedGuaranteeRateBp !== null || r.requestedGuaranteeKind !== null;
 }
+
+// ---- 정산서 수기 조정 승인(F-07-5 LCH-100, ADR-0368 결정 7·8, POL-038 ⑦, settlement §4.3) ----
+// cs_lead가 요청하고 요청자가 아닌 commander가 act=APPROVAL 재인증 뒤 승인한다. 조정 행(금액·사유 코드·이의·근거 메모)은 payment-svc가 갖고,
+// ops는 공통 승인 표(approval_request·approval_vote)에 승인 업무만 둔다(마이그레이션 없음).
+
+export type SettlementAdjustmentApprovalStatus = 'PENDING_APPROVAL' | 'REJECTED' | 'EXECUTING' | 'DONE' | 'FAILED';
+
+/** 승인 업무에 보이는 근거 메모의 앞부분 길이(200자 [가정]). 원문은 payment 조정 행에만 있다 */
+export const ADJUSTMENT_REASON_TEXT_MAX = 200;
+
+export interface SettlementAdjustmentApprovalRecord {
+  approvalId: string;
+  statementId: string;
+  amount: number;
+  reasonCode: string;
+  reasonText: string;
+  requestedBy: string;
+  requesterRole: string;
+  status: SettlementAdjustmentApprovalStatus;
+  closeReason: string | null;
+  approverId: string | null;
+  /** 투표(approval_vote)한 승인자. 요청자는 들 수 없다(표 CHECK) */
+  approvals: string[];
+  /** 첫 투표 시각 */
+  approvedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  version: number;
+}
+
+export interface SettlementAdjustmentApprovalView {
+  approvalId: string;
+  kind: 'SETTLEMENT_ADJUSTMENT';
+  targetRef: string;
+  amount: number;
+  reasonCode: string;
+  reasonText: string;
+  requiredApprovals: 2;
+  approvals: string[];
+  status: SettlementAdjustmentApprovalStatus;
+  requestedBy: { adminAccountId: string; displayName: null; role: string };
+  requestedAt: string;
+  canApprove: boolean;
+  dueAt: null;
+  closeReason: string | null;
+  contractTerms: null;
+}
+
+export const settlementAdjustmentApprovalView = (r: SettlementAdjustmentApprovalRecord, actor: OpsActor): SettlementAdjustmentApprovalView => ({
+  approvalId: r.approvalId,
+  kind: 'SETTLEMENT_ADJUSTMENT',
+  targetRef: r.statementId,
+  amount: r.amount,
+  reasonCode: r.reasonCode,
+  reasonText: r.reasonText,
+  requiredApprovals: 2,
+  approvals: [...r.approvals],
+  status: r.status,
+  requestedBy: { adminAccountId: r.requestedBy, displayName: null, role: r.requesterRole },
+  requestedAt: r.createdAt.toISOString(),
+  canApprove: (r.status === 'PENDING_APPROVAL' || r.status === 'FAILED' || r.status === 'EXECUTING') && r.requestedBy !== actor.accountId && actor.role === 'commander',
+  dueAt: null,
+  closeReason: r.status === 'REJECTED' || r.status === 'FAILED' ? r.closeReason : null,
+  contractTerms: null,
+});
+
+/** payment-svc가 대조할 사실(ADR-0368 결정 8). 근거 메모·요청자 역할·계좌는 싣지 않는다 */
+export interface SettlementAdjustmentApprovalFacts {
+  approvalId: string;
+  kind: 'SETTLEMENT_ADJUSTMENT';
+  targetRef: string;
+  amount: number;
+  reasonCode: string;
+  status: SettlementAdjustmentApprovalStatus;
+  requiredApprovals: 2;
+  requestedBy: string;
+  approvals: string[];
+  approvedAt: string | null;
+}
+
+export const settlementAdjustmentApprovalFacts = (r: SettlementAdjustmentApprovalRecord): SettlementAdjustmentApprovalFacts => ({
+  approvalId: r.approvalId,
+  kind: 'SETTLEMENT_ADJUSTMENT',
+  targetRef: r.statementId,
+  amount: r.amount,
+  reasonCode: r.reasonCode,
+  status: r.status,
+  requiredApprovals: 2,
+  requestedBy: r.requestedBy,
+  approvals: [...r.approvals],
+  approvedAt: r.approvedAt?.toISOString() ?? null,
+});
+
+/** 조정 승인 상세·목록은 요청자와 commander만 본다(그 밖 404, 계약 승인과 같다) */
+export const canSeeSettlementAdjustmentApproval = (r: SettlementAdjustmentApprovalRecord, actor: OpsActor): boolean => r.requestedBy === actor.accountId || actor.role === 'commander';
+
+/** 판정 자격: 승인 대기·실패(재시도)·적용 중(재시도, 승인만)이고, 요청자가 아닌 commander */
+export function assertCanDecideAdjustment(r: SettlementAdjustmentApprovalRecord, actor: OpsActor, action: 'approve' | 'reject'): void {
+  if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED' && !(action === 'approve' && r.status === 'EXECUTING')) {
+    throw new ContractApprovalProblem('approval-not-pending', 409, '승인 대기 중인 조정이 아닙니다');
+  }
+  if (r.requestedBy === actor.accountId) throw new ContractApprovalProblem('approval-self-not-allowed', 403, `요청자는 ${action === 'approve' ? '승인' : '반려'}할 수 없습니다`);
+  if (actor.role !== 'commander') throw new ContractApprovalProblem('approval-role-required', 403, 'commander만 정산서 조정을 판정할 수 있습니다');
+}

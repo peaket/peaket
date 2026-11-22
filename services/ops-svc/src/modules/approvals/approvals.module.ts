@@ -1,17 +1,28 @@
 // 승인 업무 모듈 조립(BAT-615 LCH-070, ADR-0320, BAT-045 BOT-152). 지급 승인은 PayoutsModule의 것을 그대로 쓰고(global export),
-// 이 모듈은 계약 조건 변경 승인·commander 역할 변경 승인(admin-accounts 모듈)·라우터·HTTP 경로를 함께 조립한다.
+// 이 모듈은 계약 조건 변경 승인·commander 역할 변경 승인(admin-accounts 모듈)·정산서 수기 조정 승인(F-07-5)·라우터·HTTP 경로를 함께 조립한다.
+// 조정 승인의 payment-svc 클라이언트는 PayoutsModule이 전역으로 내보내는 SETTLEMENT_PAYMENT_CLIENT를 쓴다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import { MemoryAuditChain, type AuditChain, type AuditChainReader } from '../audit/index.js';
 import { AdminAccountsModule, DrizzleRoleChangeApprovalStore, MemoryRoleChangeApprovalStore, RoleChangeApprovals, UnavailableAdminIdentity, type AdminIdentity, type AdminReauth, type RoleChangeApprovalStore } from '../admin-accounts/index.js';
-import { PayoutApprovals, UnavailableApprovalVerifier, type ApprovalReauthVerifier } from '../payouts/index.js';
+import { PayoutApprovals, SETTLEMENT_PAYMENT_CLIENT, UnavailableApprovalVerifier, type ApprovalReauthVerifier, type SettlementPaymentClient } from '../payouts/index.js';
 import { ApprovalRouter } from './application/approval-router.js';
 import { ContractApprovals } from './application/contract-approvals.js';
-import { APPROVAL_REAUTH, APPROVAL_STORE, CORE_CONTRACT_CLIENT, type ContractApprovalStore, type CoreContractClient } from './domain/ports.js';
-import { DrizzleContractApprovalStore } from './adapters/db/drizzle-store.js';
-import { MemoryContractApprovalStore } from './adapters/memory-store.js';
+import { SettlementAdjustmentApprovals } from './application/settlement-adjustment-approvals.js';
+import {
+  APPROVAL_REAUTH,
+  APPROVAL_STORE,
+  CORE_CONTRACT_CLIENT,
+  SETTLEMENT_ADJUSTMENT_APPROVAL_STORE,
+  type ContractApprovalStore,
+  type CoreContractClient,
+  type SettlementAdjustmentApprovalStore,
+} from './domain/ports.js';
+import { DrizzleContractApprovalStore, DrizzleSettlementAdjustmentApprovalStore } from './adapters/db/drizzle-store.js';
+import { MemoryContractApprovalStore, MemorySettlementAdjustmentApprovalStore } from './adapters/memory-store.js';
 import { InternalApprovalsController } from './inbound/internal-approvals.controller.js';
 import { ApprovalsController } from './inbound/approvals.controller.js';
+import { SettlementAdjustmentsController } from './inbound/settlement-adjustments.controller.js';
 import { MemoryCoreContract, UnavailableCoreContract } from '../../adapters/http-core-contract.js';
 
 export interface ApprovalsModuleDeps {
@@ -24,6 +35,8 @@ export interface ApprovalsModuleDeps {
   readonly roleChangeStore?: RoleChangeApprovalStore;
   /** 감사 체인 읽기(권한 변경 내역). 없으면 빈 목록이다 */
   readonly reader?: AuditChainReader;
+  /** 시험에서 정산서 조정 승인 저장소를 넘긴다. 없으면 storage에 맞는 기본을 만든다 */
+  readonly settlementAdjustmentStore?: SettlementAdjustmentApprovalStore;
 }
 
 @Module({})
@@ -47,9 +60,18 @@ export class ApprovalsModule {
         inject: [APPROVAL_STORE, CORE_CONTRACT_CLIENT, APPROVAL_REAUTH, CLOCK],
       },
       {
+        provide: SettlementAdjustmentApprovals,
+        useFactory: (store: SettlementAdjustmentApprovalStore, payments: SettlementPaymentClient, reauth: ApprovalReauthVerifier, clock: Clock) => new SettlementAdjustmentApprovals({ store, payments, reauth, clock }),
+        inject: [SETTLEMENT_ADJUSTMENT_APPROVAL_STORE, SETTLEMENT_PAYMENT_CLIENT, APPROVAL_REAUTH, CLOCK],
+      },
+      {
         provide: ApprovalRouter,
-        useFactory: (payouts: PayoutApprovals, contracts: ContractApprovals, roleChanges: RoleChangeApprovals) => new ApprovalRouter(payouts, contracts, roleChanges),
-        inject: [PayoutApprovals, ContractApprovals, RoleChangeApprovals],
+        useFactory: (payouts: PayoutApprovals, contracts: ContractApprovals, roleChanges: RoleChangeApprovals, adjustments: SettlementAdjustmentApprovals) => new ApprovalRouter(payouts, contracts, roleChanges, adjustments),
+        inject: [PayoutApprovals, ContractApprovals, RoleChangeApprovals, SettlementAdjustmentApprovals],
+      },
+      {
+        provide: SETTLEMENT_ADJUSTMENT_APPROVAL_STORE,
+        useValue: deps.settlementAdjustmentStore ?? (o.storage === 'database' ? new DrizzleSettlementAdjustmentApprovalStore(o.database) : new MemorySettlementAdjustmentApprovalStore(audit)),
       },
     ];
     const reauthProvider: Provider = { provide: APPROVAL_REAUTH, useValue: deps.reauth ?? new UnavailableApprovalVerifier() };
@@ -57,14 +79,14 @@ export class ApprovalsModule {
       return {
         module: ApprovalsModule,
         imports: [adminModule],
-        controllers: [ApprovalsController, InternalApprovalsController],
+        controllers: [ApprovalsController, InternalApprovalsController, SettlementAdjustmentsController],
         providers: [...providers, reauthProvider, { provide: APPROVAL_STORE, useValue: o.store ?? new DrizzleContractApprovalStore(o.database) }, { provide: CORE_CONTRACT_CLIENT, useValue: o.core ?? new UnavailableCoreContract() }],
       };
     }
     return {
       module: ApprovalsModule,
       imports: [adminModule],
-      controllers: [ApprovalsController, InternalApprovalsController],
+      controllers: [ApprovalsController, InternalApprovalsController, SettlementAdjustmentsController],
       providers: [...providers, reauthProvider, { provide: APPROVAL_STORE, useValue: deps.store ?? new MemoryContractApprovalStore(audit) }, { provide: CORE_CONTRACT_CLIENT, useValue: deps.core ?? new MemoryCoreContract() }],
     };
   }

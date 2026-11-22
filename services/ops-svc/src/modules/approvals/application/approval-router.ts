@@ -4,6 +4,7 @@ import { ProblemError } from '@peaket/platform';
 import { PayoutApprovals, type OpsActor } from '../../payouts/index.js';
 import type { RoleChangeApprovals } from '../../admin-accounts/index.js';
 import { ContractApprovals } from './contract-approvals.js';
+import { SettlementAdjustmentApprovals } from './settlement-adjustment-approvals.js';
 
 type AnyView = Record<string, unknown> & { approvalId: string; requestedAt: string };
 
@@ -14,11 +15,22 @@ export class ApprovalRouter {
     private readonly payouts: PayoutApprovals,
     private readonly contracts: ContractApprovals,
     private readonly roleChanges: RoleChangeApprovals,
+    private readonly adjustments?: SettlementAdjustmentApprovals,
   ) {}
 
   async list(filter: { status?: readonly string[] | undefined; awaitingMyApproval?: boolean | undefined; requestedByMe?: boolean | undefined; limit: number }, actor: OpsActor): Promise<{ items: AnyView[]; nextCursor: null }> {
-    const [payoutPage, contractPage, rolePage] = await Promise.all([this.payouts.list(filter, actor), this.contracts.list(filter, actor), this.roleChanges.list(filter, actor)]);
-    const items = [...(payoutPage.items as unknown as AnyView[]), ...(contractPage.items as unknown as AnyView[]), ...(rolePage.items as unknown as AnyView[])].sort((a, b) =>
+    const [payoutPage, contractPage, rolePage, adjustmentPage] = await Promise.all([
+      this.payouts.list(filter, actor),
+      this.contracts.list(filter, actor),
+      this.roleChanges.list(filter, actor),
+      this.adjustments ? this.adjustments.list(filter, actor) : Promise.resolve({ items: [] }),
+    ]);
+    const items = [
+      ...(payoutPage.items as unknown as AnyView[]),
+      ...(contractPage.items as unknown as AnyView[]),
+      ...(rolePage.items as unknown as AnyView[]),
+      ...(adjustmentPage.items as unknown as AnyView[]),
+    ].sort((a, b) =>
       b.requestedAt > a.requestedAt ? 1 : b.requestedAt < a.requestedAt ? -1 : 0,
     );
     return { items: items.slice(0, filter.limit), nextCursor: null };
@@ -29,18 +41,22 @@ export class ApprovalRouter {
     if (contract) return contract as unknown as Record<string, unknown>;
     const role = await this.roleChanges.tryGet(approvalId, actor);
     if (role) return role as unknown as Record<string, unknown>;
+    // 조정 승인은 볼 수 없으면 없는 것과 같은 404다(지급 승인으로 새지 않는다)
+    if (this.adjustments && (await this.adjustments.exists(approvalId))) return (await this.adjustments.get(approvalId, actor)) as unknown as Record<string, unknown>;
     return (await this.payouts.get(approvalId, actor)) as unknown as Record<string, unknown>;
   }
 
   async approve(approvalId: string, actor: OpsActor, reauthToken: string | undefined, reason?: string): Promise<Record<string, unknown>> {
     if (await this.contracts.exists(approvalId)) return (await this.contracts.approve(approvalId, actor, reauthToken, reason)) as unknown as Record<string, unknown>;
     if (await this.roleChanges.exists(approvalId)) return (await this.roleChanges.approve(approvalId, actor, reauthToken)) as unknown as Record<string, unknown>;
+    if (this.adjustments && (await this.adjustments.exists(approvalId))) return (await this.adjustments.approve(approvalId, actor, reauthToken, reason)) as unknown as Record<string, unknown>;
     return (await this.payouts.approve(approvalId, actor, reauthToken)) as unknown as Record<string, unknown>;
   }
 
   async reject(approvalId: string, actor: OpsActor, reason: string): Promise<Record<string, unknown>> {
     if (await this.contracts.exists(approvalId)) return (await this.contracts.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
     if (await this.roleChanges.exists(approvalId)) return (await this.roleChanges.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
+    if (this.adjustments && (await this.adjustments.exists(approvalId))) return (await this.adjustments.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
     return (await this.payouts.reject(approvalId, actor, reason)) as unknown as Record<string, unknown>;
   }
 

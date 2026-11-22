@@ -31,6 +31,28 @@ export interface PayoutPaymentClient {
   listCircuits(): Promise<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }>;
 }
 
+/** payment-svc 내부 조정 행 한 줄(ops가 승인 업무와 대조할 값만) */
+export interface SettlementAdjustmentRow {
+  adjustmentId: string;
+  statementId: string;
+  approvalId: string;
+  reasonCode: string;
+  disputeId: string | null;
+  amount: number;
+  status: 'PENDING' | 'APPLIED' | 'VOID';
+}
+
+/**
+ * payment-svc 정산서 이의 기각·수기 조정 내부 HTTP(F-07-5, ADR-0368 결정 6·7·8). payment 4xx는 그 상태·종류 그대로,
+ * 5xx·시간 초과·연결 실패는 503으로 전한다.
+ */
+export interface SettlementPaymentClient {
+  dismissDispute(statementId: string, input: { reason: string; actorId: string }): Promise<unknown>;
+  registerAdjustment(statementId: string, input: { approvalId: string; amount: number; reasonCode: string; disputeId?: string | undefined; evidenceNote?: string | undefined; requestedBy: string }): Promise<SettlementAdjustmentRow>;
+  applyAdjustment(approvalId: string): Promise<unknown>;
+  voidAdjustment(approvalId: string): Promise<unknown>;
+}
+
 /** 위험 작업의 재인증 작업 묶음(identity reauth 토큰의 act, authz-matrix §6, ADR-0206·0322) */
 export type ReauthAct = 'APPROVAL' | 'OPS_COMMAND' | 'PERMISSION_CHANGE';
 export interface ApprovalReauthVerifier {
@@ -48,5 +70,10 @@ export const PAYOUT_APPROVAL_STORE = Symbol.for('peaket.ops.payout-approval-stor
 export const PAYOUT_PAYMENT_CLIENT = Symbol.for('peaket.ops.payout-payment-client');
 export const APPROVAL_REAUTH_VERIFIER = Symbol.for('peaket.ops.approval-reauth-verifier');
 export const PAYOUT_AUDIT_CHAIN = Symbol.for('peaket.ops.payout-audit-chain');
+export const SETTLEMENT_PAYMENT_CLIENT = Symbol.for('peaket.ops.settlement-payment-client');
+
+/** 지급 클라이언트가 정산 이의·조정 경로도 갖는가(HttpPayoutPaymentClient는 둘 다 갖는다) */
+export const isSettlementPaymentClient = (v: unknown): v is SettlementPaymentClient =>
+  typeof v === 'object' && v !== null && ['dismissDispute', 'registerAdjustment', 'applyAdjustment', 'voidAdjustment'].every((m) => typeof (v as Record<string, unknown>)[m] === 'function');
 
 export type PayoutAuditChain = Pick<AuditChain, 'append'>;

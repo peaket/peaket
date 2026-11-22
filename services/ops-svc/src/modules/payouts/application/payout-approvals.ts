@@ -1,7 +1,7 @@
 // 지급 묶음 2인 승인·실행 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
-import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient } from '../domain/ports.js';
+import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient, SettlementPaymentClient } from '../domain/ports.js';
 import {
   approvalDueAt,
   payoutApprovalFacts,
@@ -20,6 +20,8 @@ export interface PayoutApprovalDeps {
   readonly clock: Clock;
   /** 상태 저장과 같은 트랜잭션에 쓰지 못하는 감사(수기 포트원 실행)에 쓴다 */
   readonly audit?: AuditChain;
+  /** payment-svc 정산서 이의 기각(F-07-5). 없으면 503 */
+  readonly settlements?: SettlementPaymentClient;
 }
 
 const auditRecord = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
@@ -257,5 +259,21 @@ export class PayoutApprovals {
 
   dueAt(payoutDate: string): Date {
     return approvalDueAt(payoutDate);
+  }
+
+  /**
+   * 정산 이의 기각(settlement §4.2 '기각', ADR-0368 결정 6). cs_lead만, 사유 1~2,000자. payment-svc가 열린 이의를 DISMISSED로 닫고
+   * 정산서를 NOTIFIED(1영업일)로 돌린다. ops 감사에는 행위자·정산서·사유 길이만 남긴다(사유 원문은 payment에만).
+   */
+  async dismissStatementDispute(statementId: string, reason: string, actor: OpsActor): Promise<unknown> {
+    return guard(async () => {
+      if (actor.role !== 'cs_lead') throw new PayoutApprovalProblem('approval-role-required', 403, 'cs_lead만 정산 이의를 기각할 수 있습니다');
+      const text = reason.trim();
+      if (text.length < 1 || reason.length > 2_000) throw new PayoutApprovalProblem('invalid-body', 400, '기각 사유는 1~2,000자입니다');
+      if (!this.d.settlements) throw new PayoutApprovalProblem('settlement-dependency-unavailable', 503, '정산 서비스에 연결하지 못했습니다');
+      const out = await this.d.settlements.dismissDispute(statementId, { reason: text, actorId: actor.accountId });
+      await this.#audit('SETTLEMENT_DISPUTE_DISMISSED', statementId, actor.accountId, { statementId, reasonLength: text.length }, this.d.clock.now());
+      return out;
+    });
   }
 }

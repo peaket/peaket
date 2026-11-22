@@ -1,11 +1,14 @@
 // payment-svc 내부 정산·지급 HTTP 클라이언트. 5xx·연결 실패는 503으로 닫는다.
+// 정산서 이의 기각·수기 조정 경로(F-07-5, ADR-0368 결정 6·7·8)는 payment 4xx를 그 상태·종류 그대로, 5xx·시간 초과·연결 실패를 503으로 전한다.
 import { createExternalHttpClient, ProblemError, type ExternalHttpClient } from '@peaket/platform';
-import type { PayoutPaymentClient } from '../domain/ports.js';
+import type { PayoutPaymentClient, SettlementAdjustmentRow, SettlementPaymentClient } from '../domain/ports.js';
 import type { PayoutBatchDetailView, PayoutBatchView } from '../domain/payout-approval.js';
 
 const headers = (token?: string): Record<string, string> => ({ 'content-type': 'application/json', ...(token ? { 'x-peaket-internal-token': token } : {}) });
 
-export class HttpPayoutPaymentClient implements PayoutPaymentClient {
+const settlementUnavailable = () => new ProblemError({ type: 'settlement-dependency-unavailable', status: 503, title: '정산 서비스에 연결하지 못했습니다' });
+
+export class HttpPayoutPaymentClient implements PayoutPaymentClient, SettlementPaymentClient {
   readonly #client: Pick<ExternalHttpClient, 'request'>;
   constructor(
     baseUrl: string,
@@ -94,9 +97,57 @@ export class HttpPayoutPaymentClient implements PayoutPaymentClient {
     const res = await this.#client.request({ method: 'GET', path: '/internal/v1/circuits', headers: headers(this.token), timeoutCapMs: 5_000 });
     return this.#json<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }>(res, '결제사 서킷 상태를 읽지 못했습니다');
   }
+
+  /** 정산 경로 POST. 연결 실패·시간 초과는 503, payment 5xx도 503, 4xx는 그대로 */
+  async #settlementPost<T>(path: string, params: Record<string, string>, body: unknown, title: string): Promise<T> {
+    let res: Awaited<ReturnType<ExternalHttpClient['request']>>;
+    try {
+      res = await this.#client.request({ method: 'POST', path, params, headers: headers(this.token), body: JSON.stringify(body), timeoutCapMs: 10_000 });
+    } catch {
+      throw settlementUnavailable();
+    }
+    if (res.status >= 500) throw settlementUnavailable();
+    return this.#json<T>(res, title);
+  }
+
+  async dismissDispute(statementId: string, input: { reason: string; actorId: string }): Promise<unknown> {
+    return this.#settlementPost('/internal/v1/settlements/statements/{statementId}/dispute-dismissal', { statementId }, input, '이의를 기각하지 못했습니다');
+  }
+
+  async registerAdjustment(statementId: string, input: { approvalId: string; amount: number; reasonCode: string; disputeId?: string | undefined; evidenceNote?: string | undefined; requestedBy: string }): Promise<SettlementAdjustmentRow> {
+    const body = {
+      approvalId: input.approvalId,
+      amount: input.amount,
+      reasonCode: input.reasonCode,
+      requestedBy: input.requestedBy,
+      ...(input.disputeId !== undefined ? { disputeId: input.disputeId } : {}),
+      ...(input.evidenceNote !== undefined ? { evidenceNote: input.evidenceNote } : {}),
+    };
+    return this.#settlementPost('/internal/v1/settlements/statements/{statementId}/adjustments', { statementId }, body, '조정을 등록하지 못했습니다');
+  }
+
+  async applyAdjustment(approvalId: string): Promise<unknown> {
+    return this.#settlementPost('/internal/v1/settlements/adjustments/{approvalId}/application', { approvalId }, {}, '조정을 적용하지 못했습니다');
+  }
+
+  async voidAdjustment(approvalId: string): Promise<unknown> {
+    return this.#settlementPost('/internal/v1/settlements/adjustments/{approvalId}/void', { approvalId }, {}, '조정을 닫지 못했습니다');
+  }
 }
 
-export class UnavailablePayoutPaymentClient implements PayoutPaymentClient {
+export class UnavailablePayoutPaymentClient implements PayoutPaymentClient, SettlementPaymentClient {
+  async dismissDispute(): Promise<unknown> {
+    throw settlementUnavailable();
+  }
+  async registerAdjustment(): Promise<SettlementAdjustmentRow> {
+    throw settlementUnavailable();
+  }
+  async applyAdjustment(): Promise<unknown> {
+    throw settlementUnavailable();
+  }
+  async voidAdjustment(): Promise<unknown> {
+    throw settlementUnavailable();
+  }
   async createBatch(): Promise<PayoutBatchView> {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
