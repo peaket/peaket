@@ -127,12 +127,18 @@
 
 - 리뷰 RV-01(openapi 404 설명에 `detail` 규칙 없음)·RV-02(장부 생성기 미실행)가 그대로 남는다. 둘 다 막지 않는다.
 
+## 기록
+
+- R-765. `develop` `a4376818c`에서 PRF192가 실패한 identity-svc 파트너 초대 오류 두 개를 정본 목록에 맞췄다. 404 `not-found`는 표준 제목 `찾을 수 없습니다`에 구체 사유를 `detail`로 내리고, 초대 메일 실패는 새 `staff-invite-mail-unavailable`(503)로 뺐다. `provider-down`은 본인확인 장애 전용으로 남겼다. 시험 먼저 2실패→구현→리뷰 막는 지적 0→검증 3/3, PRF192 2/2·identity 14/14·contracts 48/48·api-client 116/116·gen:check 같음.
+- **의도한 깨짐**: 초대 메일 503 `type`이 `provider-down`→`staff-invite-mail-unavailable`, 파트너 초대 404 `title`이 구체 문구→표준 제목. 둘 다 운영 배포 전이고, 소비 화면은 status로만 갈라 영향이 없다(문구 키 표는 목록에서 자동 생성).
+- **남은 것**: 리뷰 RV-01(openapi 404 설명에 `detail` 규칙 없음)은 다음 계약 정리, RV-02(장부 생성기 미실행)는 다음 `ledger.mjs` 실행 몫이다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | w12idp-plan | deepseek-v4.1-flash | 2026-11-22T15:05:00+09:00 | 2026-11-22T15:15:00+09:00 |
-| test | w12idp-test | deepseek-v4.1-flash | 2026-11-22T15:16:00+09:00 | 2026-11-22T15:30:00+09:00 |
-| impl | w12idp-impl | deepseek-v4.1-flash | 2026-11-22T15:31:00+09:00 | 2026-11-22T15:45:00+09:00 |
-| review | w12idp-review | deepseek-v4.1-flash | 2026-11-22T15:46:00+09:00 | 2026-11-22T15:55:00+09:00 |
-| verify | w12idp-verify | deepseek-v4.1-flash | 2026-11-22T15:56:00+09:00 | 2026-11-22T16:10:00+09:00 |
+| plan | w12idp-plan | deepseek-v4.1-flash | 2026-11-22T15:08:00+09:00 | 2026-11-22T15:13:00+09:00 |
+| test | w12idp-test | deepseek-v4.1-flash | 2026-11-22T15:13:00+09:00 | 2026-11-22T15:15:00+09:00 |
+| impl | w12idp-impl | deepseek-v4.1-flash | 2026-11-22T15:15:00+09:00 | 2026-11-22T15:20:00+09:00 |
+| review | w12idp-review | deepseek-v4.1-flash | 2026-11-22T15:21:00+09:00 | 2026-11-22T15:23:00+09:00 |
+| verify | w12idp-verify | deepseek-v4.1-flash | 2026-11-22T15:22:00+09:00 | 2026-11-22T15:26:00+09:00 |
