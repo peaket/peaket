@@ -45,7 +45,7 @@ const detail = () => ({
   suspensionApprovalPending: false,
 });
 
-test('S-T41 ⑫_[ASVS v5.0.0-8.2.2] 목록·상세를 화면 값으로 바꾸고 역할을 가른다', () => {
+test('S-T41 ⑫ LCH-080_[ASVS v5.0.0-8.2.2] 목록·상세를 화면 값으로 바꾸고 역할을 가른다', () => {
   const page = mapSaleReviewList({
     items: [{ productionId: 'prd-1', title: '겨울 콘서트', promoterId: 'prom-1', promoterName: '(주)피켓공연', status: 'SUBMITTED', reapproval: true, submittedAt: '2026-11-20T01:00:00.000Z', firstOpenAt: null, eventCount: 2, suspensionApprovalPending: false }],
     nextCursor: 'next-1',
