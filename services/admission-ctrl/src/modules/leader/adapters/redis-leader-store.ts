@@ -6,7 +6,7 @@ import { ADMISSION_REDIS, WAIT_REDIS } from '../../batch/index.js';
 import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, RATIO_WINDOW_MAX_MS, RATIO_WINDOW_MIN_MS, RB05_CONFIRM_WAIT_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
 import { isManualFixed, MEMORY_FIELDS } from '../domain/aimd.js';
 import type { ArrivalCloseInput, ArrivalCloseResult, CloseInput, CloseResult, Control, EventPlan, LeaderControlResult, LeaderControlStoreWrite, LeaderStore, Rb05Confirm, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
-import { ARRIVAL_CLOSE_LUA, BUMP_LUA, CLOSE_LUA, CONTROL_WRITE_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
+import { ARRIVAL_CLOSE_LUA, BUMP_LUA, CLOSE_LUA, CONTROL_WRITE_LUA, PLATFORM_BUMP_LUA, PLATFORM_CHECK_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
 
 export const keys = {
   leader: (e: string) => `q:{event:${e}}:leader`,
@@ -49,6 +49,8 @@ const RB05 = redisScript(RB05_LUA);
 const RB05_MARK = redisScript(RB05_MARK_LUA);
 const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
 const CONTROL_WRITE = redisScript(CONTROL_WRITE_LUA);
+const PLATFORM_BUMP = redisScript(PLATFORM_BUMP_LUA);
+const PLATFORM_CHECK = redisScript(PLATFORM_CHECK_LUA);
 
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const int = (v: string | null | undefined): number | null => (v !== null && v !== undefined && /^\d{1,16}$/.test(v) ? Number(v) : null);
@@ -121,6 +123,16 @@ export class RedisLeaderStore implements LeaderStore {
     const k = keys.platformCtl();
     const [autoStopped, allPaused] = ((await this.redis.command(['HMGET', k, 'autoStopped', 'allPaused'], { key: k })) as unknown[]).map(str);
     return { autoStopped: autoStopped === '1', allPaused: allPaused === '1' };
+  }
+
+  async bumpPlatform(gen: number): Promise<'OK' | 'FENCED'> {
+    const r = (await this.redis.evalScript(PLATFORM_BUMP, [keys.platformLeader()], [String(gen)])) as unknown[];
+    return str(r[0]) === 'FENCED' ? 'FENCED' : 'OK';
+  }
+
+  async checkPlatform(gen: number): Promise<'OK' | 'FENCED'> {
+    const r = (await this.redis.evalScript(PLATFORM_CHECK, [keys.platformLeader()], [String(gen)])) as unknown[];
+    return str(r[0]) === 'FENCED' ? 'FENCED' : 'OK';
   }
 
   async applyControl(w: LeaderControlStoreWrite): Promise<LeaderControlResult> {

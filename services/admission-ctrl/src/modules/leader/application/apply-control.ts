@@ -3,6 +3,8 @@
 // - 리더는 쓰기 직전에 자기 리더 세대를 다시 보고, 리더 키와 세대를 견주는 Lua 하나로 쓴다. 세대가 낮으면 FENCED: 이 세대의 쓰기를 멈추고(대기 파드로
 //   돌아간다, 루프의 FENCED와 같다) 받는 층이 UNAVAILABLE fenced로 답한다. 이미 FENCED를 본 세대도 같다.
 // - 같은 Lua가 판이 그 종류의 판 칸보다 클 때만 쓰고 지금 판을 돌려준다(같거나 작은 판은 아무것도 바꾸지 않는다).
+// - 리뷰 반영 RV-02: 회차 범위 쓰기는 먼저 회차와 무관한 세대 키(q:{admission}:leader)와 견준다(올리지 않는다). 새 리더는 서자마자 그 키를 올리므로(리더 루프),
+//   옛 세대의 쓰기는 전체 범위·오픈 전 회차 범위 모두 FENCED다(Q-T30 '옛 리더의 쓰기는 모두 FENCED').
 import { keepUntilOf } from '../domain/plan.js';
 import { leaderControlOf, type LeaderControlKind } from '../domain/control.js';
 import type { Elector, LeaderStore } from '../domain/ports.js';
@@ -27,7 +29,7 @@ export interface LeaderFence {
 
 export class ApplyLeaderControl {
   constructor(
-    private readonly store: Pick<LeaderStore, 'applyControl' | 'schedule'>,
+    private readonly store: Pick<LeaderStore, 'applyControl' | 'schedule' | 'checkPlatform'>,
     private readonly elector: Elector,
     private readonly fence: LeaderFence,
   ) {}
@@ -46,6 +48,11 @@ export class ApplyLeaderControl {
     const gen = this.elector.generation();
     if (gen === undefined) return { status: 'NOT_LEADER' };
     if (this.fence.isFenced(gen)) return { status: 'FENCED' };
+    // 회차 범위는 회차와 무관한 세대 키를 먼저 견준다(RV-02, 견주기만): 새 리더가 그 키를 올렸으면, 아직 아무도 올리지 않은 회차 키(오픈 전)에도 옛 세대는 쓰지 못한다
+    if (write.eventId !== undefined && this.store.checkPlatform && (await this.store.checkPlatform(gen)) === 'FENCED') {
+      this.fence.markFenced(gen, input.scope);
+      return { status: 'FENCED' };
+    }
     const r = await this.store.applyControl({ ...write, gen, version: input.version, commandId: input.commandId, ...(plan ? { keepUntilMs: keepUntilOf(plan) } : {}) });
     if (r.kind === 'FENCED') {
       this.fence.markFenced(gen, input.scope);

@@ -103,6 +103,17 @@ if keep > 0 then extend(KEYS[2], keep) end
 return {'OK', ARGV[4], '1'}
 `;
 
+// 회차와 무관한 리더 세대 키의 세대 확인(RV-02): FENCE만 한다. 키에 수명을 걸지 않는다. KEYS: 1 q:{admission}:leader. ARGV: 1 세대
+export const PLATFORM_BUMP_LUA = `${FENCE}
+return {'OK'}
+`;
+// 회차와 무관한 리더 세대 키와 견주기만 한다(올리지 않는다, RV-02). 회차 범위 제어 쓰기가 쓰기 전에 부른다. KEYS: 1 q:{admission}:leader. ARGV: 1 세대
+export const PLATFORM_CHECK_LUA = `
+local lg = tonumber(redis.call('GET', KEYS[1]) or '0')
+if tonumber(ARGV[1]) < lg then return {'FENCED'} end
+return {'OK'}
+`;
+
 // 명세 acquire의 BUMP: 리더가 되면 진행 중인 회차마다 세대부터 올린다. KEYS: 1 leader. ARGV: 1 세대, 2 회차 키 수명
 export const BUMP_LUA = `${EXTEND}${FENCE}
 extend(KEYS[1], ARGV[2])

@@ -18,7 +18,7 @@ import { RetryCommand } from './application/retry-command.js';
 import { ExtendCommand, RevertCommand } from './application/revert-command.js';
 import { COMMAND_MAINTENANCE_INTERVAL_MS, type CommandType } from './domain/command.js';
 import type { DryRunSource } from './domain/dry-run.js';
-import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, OnsaleStartSource, PgAssignmentCheck } from './domain/ports.js';
+import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, LobbyBannerTemplates, OnsaleStartSource, PgAssignmentCheck } from './domain/ports.js';
 import type { ProtectedRangeList } from './domain/protected-ranges.js';
 import { LogCommandSecurityEvents, PromCommandSignals } from './adapters/command-signals.js';
 import { UnavailableDryRunSource } from './adapters/unavailable-dry-run-source.js';
@@ -61,6 +61,8 @@ export interface CommandsModuleExtras {
    * 되돌리기·연장·만료 되돌림은 새 판으로 보낸다. deliveries가 있으면 상세가 전파 상태(delivery)를 싣는다. 없으면 전처럼 실행기가 보낸다(target-not-wired)
    */
   readonly control?: { readonly fanout: ControlFanout; readonly deliveries?: ControlDeliveries; readonly clock?: { now(): number } };
+  /** 명령 7의 승인 템플릿 찾기(RV-01). 없으면 늘 '없음'이라 명령 7 만들기·미리보기가 422다(F-03-5가 저장소를 잇는다) */
+  readonly bannerTemplates?: LobbyBannerTemplates;
 }
 
 @Module({})
@@ -95,7 +97,7 @@ export class CommandsModule {
     const sender: CommandExecutor | undefined = dispatcher ? new ControlAwareExecutor(executor, dispatcher) : executor;
     const execution = new ExecuteCommand(store, sender, checkpoints, guard, { pgGate, ...(dispatcher ? { control: dispatcher } : {}) });
     const wired = sender || extras.pgAssignment ? execution : undefined;
-    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate });
+    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate, ...(extras.bannerTemplates ? { bannerTemplates: extras.bannerTemplates } : {}) });
     const postReviews = new PostReviews({ store, ...(extras.postReviews?.commanders ? { commanders: extras.postReviews.commanders } : {}), ...(extras.postReviews?.alerts ? { alerts: extras.postReviews.alerts } : {}) });
     const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}), ...(dispatcher ? { control: dispatcher } : {}) });
     const maintenance: CommandMaintenanceOptions = { enabled: extras.maintenance?.enabled ?? false, intervalMs: extras.maintenance?.intervalMs ?? COMMAND_MAINTENANCE_INTERVAL_MS };
