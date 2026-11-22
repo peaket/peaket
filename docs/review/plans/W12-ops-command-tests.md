@@ -123,12 +123,20 @@
 | S2 | `command.ts`의 `SALE_STOP`·`SALE_RESUME` approverRoles를 `ALL_ROLES`로 넓힌다(operator 승인 허용) | 두 파일 **3 실패 / 27 통과**: 승인 역할 표(`['operator','commander']`≠`['commander']`), operator 승인이 403이 아니라 통과, HTTP operator 승인 403 시험 |
 
 - 넣은 수 2, 잡힌 수 2, 놓친 수 0. 표본마다 제품 파일만 되돌렸고, 표본 때문에 남은 제품 파일 차이는 없다.
-- roles-check·records --check는 검증 커밋을 만든 뒤 HEAD에서 다시 확인해 이 절과 기록에 덧붙인다.
+- 검증 커밋 `d010b0084` 뒤 HEAD에서 `roles-check --base origin/develop --head HEAD` **통과**(plan 1·test 1·review 1·verify 1, impl 0)했고, `records.mjs --check`는 끝 코드 0(경고는 기존 것)이다.
 
 ### 남은 위험
 
 - 리뷰 RV-01(`BOT_LEVEL` 승인 역할의 BAT-365 잔여)과 RV-02(반려의 재인증 미요구)가 그대로 남는다. 둘 다 이 묶음이 만든 것이 아니고 막지 않는다.
 - 같은 PC에서 다른 갈래가 함께 돌아 vitest 워커 종료 시간 초과 경고가 섞일 수 있다. 이번 실행은 74파일 518/518로 끝났다.
+
+## 기록
+
+- R-770. `develop` `cdcfc748f`에서 ops-svc 역할 시험 두 파일이 4건 실패하던 것을 고쳤다. 원인은 BAT-620(R-763)이 POL-038 ⑩·ADR-0123 결정 2대로 판매 중지·재개를 operator 이상 요청·요청자 아닌 commander 승인으로 바꾼 뒤, 두 시험이 옛 정책(commander 전용 요청)을 그대로 기대한 것이다. 제품 코드는 BAT-620이 맞아 시험만 고쳤다(시험만 묶음, `Batch-Kind: test-only`).
+  - `command-role-policy`: commander 전용 요청 목록 6→4(`SALE_STOP`·`SALE_RESUME` 제외), 판매 중지·재개의 요청 역할·승인 역할, operator 승인·반려 403, 자기 승인 403, 다른 commander 승인·반려를 단언한다. 레거시 행 소재는 `BOT_LEVEL`로 바꿔 저장소 층의 역할 거절을 유지한다.
+  - `command-lifecycle-http`: 내부 사건 길에서 operator `SALE_STOP` 요청을 `PENDING_APPROVAL`로 받고, operator 승인 403·commander 재인증 없는 승인 403·재인증 승인 200 `SUCCEEDED`·commander 반려 200 `REJECTED`를 본다. C-T5에 판매 중지·재개의 접수 재인증(없으면 403, 있으면 201 `PENDING_APPROVAL`, 막힌 요청은 행 0)을 더한다.
+  - 게이트: 두 파일 30/30, ops 전체 74파일 518/518, ops typecheck 0, 뿌리 lint 0, doc-check 오류 0·경고 4, roles-check·records --check 통과, 틀린 구현 표본 2/2.
+  - 남은 위험: 리뷰 RV-01(`BOT_LEVEL` 승인 역할의 BAT-365 잔여), RV-02(반려의 재인증 미요구). BUILD_ORDER 단계·wbs 상태 변화는 없다.
 
 ## 담당 표
 
