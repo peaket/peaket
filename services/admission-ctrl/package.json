@@ -20,8 +20,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-kms": "3.1159.0",
+    "@grpc/grpc-js": "1.14.6",
+    "@grpc/proto-loader": "0.8.1",
     "@nestjs/common": "^12.3.2",
     "@noble/curves": "2.4.0",
+    "@peaket/contracts": "workspace:*",
     "@peaket/platform": "workspace:*",
     "@peaket/shuffle": "workspace:*",
     "reflect-metadata": "^0.2.2"
