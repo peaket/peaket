@@ -1,6 +1,6 @@
 // CS 처리함 자동 등록(F-06-2 GAT-280, R-T48 ①~③). 내부 HTTP(POST /internal/v1/cs-cases)를 실제 ops-svc 조립(메모리 저장소)에 보낸다.
 // 시험 담당 lane3-f062-test. 정본: docs/features/transfer-refund.md §11 R-T48·§7.1 '첫 구현'·§13 'CS 처리함 건' 행,
-// ADR-0364 결정 2·4(받는 종류 아홉, eventKey는 cs_case_request에 한 번, 같은 (종류, 대상)의 열린 건은 그 건), d5 §7.6 기한 칸, data.md cs_case·cs_case_request.
+// ADR-0364 결정 2·4(받는 종류 아홉, F-07-5 ADR-0368 결정 5의 정산 이의를 더해 열, eventKey는 cs_case_request에 한 번, 같은 (종류, 대상)의 열린 건은 그 건), d5 §7.6 기한 칸, data.md cs_case·cs_case_request.
 // 생산자 ↔ ops-svc(계획 §6): purchase-svc의 실제 알림 어댑터(http-compensation-case-notice.ts·http-refund-failure-notice.ts)가
 // 플랫폼 외부 HTTP 클라이언트로 보낸 본문을 그대로 ops-svc에 넣는다(의존 선언 밖 상대 경로 가져오기, CLAUDE.md '큰 그림' 끝 줄과 같은 꼴).
 import { createExternalHttpClient } from '@peaket/platform';
@@ -28,7 +28,7 @@ const fetchToOps = (): typeof fetch => async (input, init) => {
 const opsClient = () => createExternalHttpClient({ provider: 'ops-svc', baseUrl: 'http://ops-svc.internal', timeoutCapMs: 5_000, fetch: fetchToOps() });
 
 const lead = () => h.as('cs_lead');
-// 받는 종류 아홉을 모두 보는 역할은 operator·commander다. 실패 승인 건 category CONTRACT_TERMS_CHANGE는 CS 담당자에게 404이고 CS 목록에 없다
+// 받는 종류 열을 모두 보는 역할은 operator·commander다. 실패 승인 건 category CONTRACT_TERMS_CHANGE는 CS 담당자에게 404이고 CS 목록에 없다
 // (F-06-2 리뷰 RV-04 반영 정본 73fa48514, R-T49 ⑧). R-T48 ①은 열린 건의 종류·category·기한을 보는 것이라 읽는 역할을 commander로 둔다
 const commander = () => h.as('commander');
 const detail = async (caseId: string) => {
@@ -38,8 +38,8 @@ const detail = async (caseId: string) => {
 };
 const pick = (b: Record<string, unknown>) => ({ kind: b.kind, status: b.status, category: b.category, progressDueAt: b.progressDueAt ?? null, resultDueAt: b.resultDueAt ?? null });
 
-describe('R-T48 ① 받는 종류 아홉', () => {
-  test('R-T48 ① 아홉 종류를 하나씩 보내면 종류마다 OPEN 건 하나이고 category와 두 기한이 §7.1·d5 §7.6 기한이다(시작은 dueBaseAt, 없으면 createdAt)', async () => {
+describe('R-T48 ① 받는 종류 열', () => {
+  test('R-T48 ① 열 종류를 하나씩 보내면 종류마다 OPEN 건 하나이고 category와 두 기한이 §7.1·d5 §7.6 기한이다(시작은 dueBaseAt, 없으면 createdAt)', async () => {
     // 배상 대기는 '회차 취소 확정 뒤 10영업일'이라 확정 시각(토 08:00 KST)을 dueBaseAt에 싣고, 받은 시각(createdAt)은 그보다 사흘 뒤다
     const confirmedAt = '2026-11-20T23:00:00.000Z';
     const sent = [
@@ -51,6 +51,8 @@ describe('R-T48 ① 받는 종류 아홉', () => {
       { req: caseRequest('VERIFICATION_APPEAL', { category: 'EXPLANATION' }), want: { progressDueAt: null, resultDueAt: BD10 } },
       { req: caseRequest('DISPUTE', { category: 'INQUIRY_DISPUTE' }), want: { progressDueAt: BD3, resultDueAt: BD10 } },
       { req: caseRequest('SCANNER_UNREPORTED', { category: 'QUEUE_NOT_FLUSHED' }), want: { progressDueAt: BD1, resultDueAt: BD3 } },
+      // 정산 이의: d5 §7.6 '3·10영업일', transfer-refund §7.1 '진행 경과 3영업일, 결과 10영업일'(받기는 F-07-5 ADR-0368 결정 5)
+      { req: caseRequest('STATEMENT_DISPUTE', { category: 'SETTLEMENT' }), want: { progressDueAt: BD3, resultDueAt: BD10 } },
       { req: caseRequest('APPROVAL_EXECUTION_FAILED', { category: 'CONTRACT_TERMS_CHANGE' }), want: { progressDueAt: null, resultDueAt: null } },
     ];
     const ids: string[] = [];
@@ -60,14 +62,14 @@ describe('R-T48 ① 받는 종류 아홉', () => {
       ids.push(r.body.caseId!);
       expect(pick(await detail(r.body.caseId!))).toEqual({ kind: s.req.kind, status: 'OPEN', category: s.req.category, ...s.want });
     }
-    expect(new Set(ids).size).toBe(9);
+    expect(new Set(ids).size).toBe(10);
     for (const s of sent) expect(await h.requests(s.req.kind, 'opened'), s.req.kind).toBe(1);
 
-    // 목록: 이른 기한 차례, 기한 없는 건(승인 업무 실행 실패)은 끝(아홉 종류를 다 보는 commander 목록)
+    // 목록: 이른 기한 차례, 기한 없는 건(승인 업무 실행 실패)은 끝(열 종류를 다 보는 commander 목록)
     const list = await h.list(commander(), 'limit=100');
     const items = list.body.items as Array<Record<string, string>>;
     const nextDue = (i: Record<string, string>) => [i.progressDueAt, i.resultDueAt].filter(Boolean).sort()[0] ?? null;
-    expect(items.map(nextDue)).toEqual([BD1, BD1, BD1, BD3, BD3, BD3, '2026-12-08T23:00:00.000Z', BD10, null]);
+    expect(items.map(nextDue)).toEqual([BD1, BD1, BD1, BD3, BD3, BD3, BD3, '2026-12-08T23:00:00.000Z', BD10, null]);
     expect(items.at(-1)!.kind).toBe('APPROVAL_EXECUTION_FAILED');
     expect(new Set(items.slice(0, 3).map((i) => i.kind))).toEqual(new Set(['FLAGGED', 'JUDGEMENT_PENDING', 'SCANNER_UNREPORTED']));
     // 같은 기한끼리는 건 ID 차례다

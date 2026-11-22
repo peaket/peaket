@@ -2,7 +2,8 @@
 // 시험 담당 lane3-f062-test. 정본: docs/features/transfer-refund.md §11 R-T49(기대 결과 칸의 상태 코드·Problem 이름), ADR-0364 결정 5,
 // openapi listOpsCases·getOpsCase·updateOpsCase(허용 역할, CsCase 칸), docs/api/guidelines.md '동시 수정'(If-Match·ETag),
 // docs/security/asvs/transfer-refund.md 1.2.4·8.2.1·8.2.2·16.3.2 행과 'F-06-2 GAT-280 계획 메모'.
-// 지급 건(PAYOUT_FAILED)·정산 이의(STATEMENT_DISPUTE)는 이 기능이 받는 종류가 아니라 실제 조립의 저장소로 연다(그 생산자는 다른 기능).
+// 지급 건(PAYOUT_FAILED)은 받는 종류가 아니라 실제 조립의 저장소로 연다(그 생산자는 다른 기능). 정산 이의(STATEMENT_DISPUTE)는 F-07-5부터 받는 종류지만,
+// 기한 값을 시험이 정해 넣으려고 같은 저장소로 연다.
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { BD1, BD3, caseRequest, csHarness, type CsHarness, type OpsRole } from './cs-support.js';
 

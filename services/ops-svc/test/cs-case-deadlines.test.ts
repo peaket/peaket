@@ -31,6 +31,11 @@ describe('R-T48 ① 받는 종류마다 두 기한(§7.1·d5 §7.6 기한 칸)',
     expect(due('REFUND_ACCOUNT_PENDING')).toEqual({ progress: null, result: BD3 });
   });
 
+  test('R-T48 ① 정산 이의(STATEMENT_DISPUTE, F-07-5가 받는 종류로 더함)는 진행 경과 3영업일·결과 10영업일이다', () => {
+    // d5 §7.6 '정산 이의' 행 '3·10영업일', transfer-refund §7.1 '정산 이의' 행
+    expect(due('STATEMENT_DISPUTE', 'SETTLEMENT')).toEqual({ progress: BD3, result: BD10 });
+  });
+
   test('R-T48 ① 환급 실패 3영업일, 배상 대기 10영업일, 판정 대기 1영업일', () => {
     expect(due('REFUND_FAILED', 'REFUND')).toEqual({ progress: null, result: BD3 });
     expect(due('COMPENSATION_PENDING')).toEqual({ progress: null, result: BD10 });

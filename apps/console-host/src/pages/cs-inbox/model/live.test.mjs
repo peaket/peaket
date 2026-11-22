@@ -64,7 +64,7 @@ test('R-T51 ① 기한 글은 KST 시각이고(진행·결과 있는 것만) 둘
   assert.equal(dueText({ progressDueAt: null, resultDueAt: null }), '기한 없음');
 });
 
-test('R-T51 ① 받는 아홉 종류의 이름은 d5 §7.6 건 종류 표의 이름이고 모르는 종류는 따로 보인다', () => {
+test('R-T51 ① 받는 열 종류(ADR-0364 결정 4의 아홉과 ADR-0368 결정 5의 정산 이의)의 이름은 d5 §7.6 건 종류 표의 이름이고 모르는 종류는 따로 보인다', () => {
   const names = {
     REFUND_FAILED: '환급 실패',
     FLAGGED: '이상 표시',
@@ -75,6 +75,7 @@ test('R-T51 ① 받는 아홉 종류의 이름은 d5 §7.6 건 종류 표의 이
     DISPUTE: '분쟁 접수',
     SCANNER_UNREPORTED: '미보고 스캐너',
     APPROVAL_EXECUTION_FAILED: '승인 업무 실행 실패',
+    STATEMENT_DISPUTE: '정산 이의',
   };
   for (const [k, v] of Object.entries(names)) assert.equal(kindLabel(k), v, k);
   assert.notEqual(kindLabel('SOMETHING_NEW'), 'SOMETHING_NEW');

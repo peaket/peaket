@@ -133,7 +133,7 @@ export async function csHarness(o: { nowIso?: string } = {}): Promise<CsHarness>
   };
 }
 
-/** 받는 종류 아홉의 요청 본문(asyncapi CaseRequested 모양). 대상·eventKey는 부를 때마다 새로 만든다 */
+/** 받는 종류(ADR-0364 결정 4의 아홉과 ADR-0368 결정 5의 정산 이의)의 요청 본문(asyncapi CaseRequested 모양). 대상·eventKey는 부를 때마다 새로 만든다 */
 export function caseRequest(kind: CsCaseKind, o: { sourceId?: string; eventKey?: string; category?: string; createdAt?: string; dueBaseAt?: string } = {}) {
   return {
     eventKey: o.eventKey ?? crypto.randomUUID(),
