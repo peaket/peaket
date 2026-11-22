@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 63 | 19 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 155 |
+| A | 66 | 15 | 0 | 0 | 0 | 1 | 0 | 0 | 73 | 155 |
 | B | 76 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 7 | 129 |
-| 합계 | 139 | 45 | 0 | 0 | 0 | 0 | 0 | 20 | 80 | 284 |
+| 합계 | 142 | 41 | 0 | 0 | 0 | 1 | 0 | 20 | 80 | 284 |
 
 ## docs/features/transfer-refund.md
 
@@ -32,10 +32,10 @@
 | R-T22 | ④ | 일괄 환불 수동 일시정지·재개와 업무 거절(추천 적용… | ④ 작업 전체가 `AUTO_REJECT_RATE`로 멈추고 거절 건은 CS 처리함 '일괄 환불 실패'에 오른다 | 자동 시험 | A | 시험: services/purchase-svc/test/event-refund-gat130.test.ts |
 | R-T22 | ⑤ | 일괄 환불 수동 일시정지·재개와 업무 거절(추천 적용… | ⑤ 기준 3으로 바로 다시 멈춘다 | 자동 시험 | A | 시험: services/purchase-svc/test/event-refund-gat130.test.ts |
 | R-T22 | ⑥ | 일괄 환불 수동 일시정지·재개와 업무 거절(추천 적용… | ⑥ 1시간마다 다시 알린다. 모든 정지·재개가 사유와 함께 감사 로그에 남는다 | ID만 | A | 시험: services/purchase-svc/test-int/event-refund-grpc.int.test.ts, services/purchase-svc/test/event-refund-gat130.test.ts |
-| R-T23 | ① | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ① 403 | ID만 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
-| R-T23 | ② | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ② 같은 트랜잭션으로 비공개가 되고 검색·홈에서 빠지며 CDN 무효화를 부른다. 판매 중인 회차의 새 홀드·결제 접수는 423이고 serving이 멈추며, 대기… | ID만 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
-| R-T23 | ③ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ③ 판매 중지가 풀리지 않는다 | ID만 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
-| R-T23 | ④ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ④ 판매 중이던 회차는 다시 열리고, 오픈 시각이 지난 회차는 열리지 않으며 파트너에게 오픈 시각을 바꾸라고 알린다 | ID만 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
+| R-T23 | ① | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ① 403 | 자동 시험 | A | 시험: services/ops-svc/test/commands-http.test.ts |
+| R-T23 | ② | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ② 같은 트랜잭션으로 비공개가 되고 검색·홈에서 빠지며 CDN 무효화를 부른다. 판매 중인 회차의 새 홀드·결제 접수는 423이고 serving이 멈추며, 대기… | 다른 단계 | A | LCH-100·BAT-625(정산 보류) · 판매 중지가 같은 트랜잭션에서 비공개·검색·홈에서 빠지고 CDN을 부르는 것, 판매 중 회차의 새 홀드·결제가 423이고 serving이 멈추며 대기 상태 파일이… |
+| R-T23 | ③ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ③ 판매 중지가 풀리지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/sale-suspension-boundary.test.ts |
+| R-T23 | ④ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ④ 판매 중이던 회차는 다시 열리고, 오픈 시각이 지난 회차는 열리지 않으며 파트너에게 오픈 시각을 바꾸라고 알린다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-suspension.int.test.ts, services/ops-svc/test/sale-stop-executor.test.ts |
 | R-T23 | ⑤ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ⑤ 409 `sale-not-suspended` | 자동 시험 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
 | R-T23 | ⑥ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ⑥ 요청이 생기고 판정·판정자 외 1인 확정·일괄 환불이 docs/planning/03 §2.11대로 이어진다 | 자동 시험 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
 | R-T24 | — | 입장 시작 뒤 회차 취소(추천 적용 2026-10-28, 기술 검토… | 여섯 가지 모두 환급 대상이고, 입장 기록 마감을 기다리지 않고 일괄 환불이 시작된다. 보류 중이던 예매 취소는 공제 없이 전액으로 바뀌고, 양도 요청은 먼저… | 자동 시험 | A | 시험: services/purchase-svc/test-int/event-cancel-r-t24.int.test.ts, services/purchase-svc/test/event-ticket-canceller.tes… |
@@ -234,7 +234,7 @@
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test-int/payment-merch-grpc.int.tes… |
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-summary.http.test.ts 외 4곳 |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역:… |
-| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test-int/sale-policy.int.test.ts 외 29곳 |
+| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test-int/sale-policy.int.test.ts 외 5곳 |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외… |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 11곳 |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |

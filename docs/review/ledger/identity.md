@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 286 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 411 |
-| 합계 | 296 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 421 |
+| B | 293 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 417 |
+| 합계 | 303 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 427 |
 
 ## docs/features/identity.md
 
@@ -59,10 +59,16 @@
 | I-T21 | ⑧ | 현장 스태프 초대 및 수락 통제 | ⑧ 해제는 204·REVOKED·이메일/토큰 파기·스캐너 세션 종료·`control.sessions-terminated`(STAFF_REVOKED)이고 다음… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/partner-staff-invitations.t… |
 | I-T21 | ⑨ | 현장 스태프 초대 및 수락 통제 | ⑨ 재발송은 새 토큰·새 24시간으로 바꾸고 옛 토큰을 즉시 410으로 만들며, 이미 수락한 배정은 409다 | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-invitations.int.test.ts, services/identity-svc/test/partner-staff-invitations.t… |
 | I-T21 | ⑩ | 현장 스태프 초대 및 수락 통제 | ⑩만료된 초대 토큰은 조회·수락이 410이고 만료된 INVITED의 재발송은 새 24시간을 준다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
-| I-T21 | ⑪ | 현장 스태프 초대 및 수락 통제 | ⑪ 역할 밖·테넌트 없는 세션은 403, 본문 모양 오류는 400, 응답은 no-store다. 검증 이메일이 초대 이메일과 다른 계정, 본인확인을 마치지 않은… | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T21 | ⑪ | 현장 스태프 초대 및 수락 통제 | ⑪ 역할 밖·테넌트 없는 세션은 403, 본문 모양 오류는 400, 응답은 no-store다. | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T21 | ⑫ | 현장 스태프 초대 및 수락 통제 | ⑫ 검증 이메일이 초대 이메일과 다른 계정, 본인확인을 마치지 않은 계정, 네이버만 연결한 계정(검증 표시 없음)의 수락 시도는 403으로 거절되고 배정·동의가… | 자동 시험 | B | 시험: services/identity-svc/test/staff-invitations.test.ts |
 | I-T86 | ① | 파트너 초대의 회차 소유 확인 계약(identity-svc →… | ① core-svc 내부 판매 설정 `GET /internal/v1/events/{eventId}/sale-config`가 identity에… | 자동 시험 | B | 시험: services/core-svc/test/internal-sale-config-identity-caller.test.ts |
 | I-T86 | ② | 파트너 초대의 회차 소유 확인 계약(identity-svc →… | ② identity 어댑터는 404를 없음으로, 401·403·5xx·시간 초과·모양 틀림을 던짐으로 바꾸고 내부 토큰 머리를 싣는다 | 자동 시험 | B | 시험: services/identity-svc/test/http-core-event-owners.test.ts |
 | I-T86 | ③ | 파트너 초대의 회차 소유 확인 계약(identity-svc →… | ③ 파트너 경로는 core 404를 404로, 나머지 실패를 503 `authz-unavailable`로 사상하고 초대 행을 만들지 않는다 | 자동 시험 | B | 시험: services/identity-svc/test/partner-staff-invitations.test.ts |
+| I-T87 | ① | 배정 만료 정비와 시간 필터(BUILD_ORDER BAT-450C… | ① 24시간이 지난 `INVITED`는 정비 일 `staff-assignment-expired`가 `EXPIRED`로 끝내고 초대 이메일·토큰 해시를 파기한다… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
+| I-T87 | ② | 배정 만료 정비와 시간 필터(BUILD_ORDER BAT-450C… | ② `valid_until`이 지난 `ASSIGNED`는 `ENDED`로 끝내고 이메일·토큰을 파기한다. `valid_until` 정각은 그대로이고 1ms 뒤에… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
+| I-T87 | ③ | 배정 만료 정비와 시간 필터(BUILD_ORDER BAT-450C… | ③ `hasStaffAssignment`(`hasAssigned`)는 `ASSIGNED`이면서 `valid_from <= now <= valid_until`인… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
+| I-T87 | ④ | 배정 만료 정비와 시간 필터(BUILD_ORDER BAT-450C… | ④ 내 배정 목록과 파트너 명단은 정비 전이라도 `valid_until`이 지난 `ASSIGNED`를 `ENDED`로 보이며, 역할 유효 끝이 지난… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
+| I-T88 | ① | `promoter_id` 없는 옛 배정 정본화(BUILD_ORDER… | ① 정비 일 `staff-promoter-missing`이 `promoter_id`가 없는 `INVITED`를 `EXPIRED`로 끝내며 초대 이메일·토큰… | 자동 시험 | B | 시험: services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts… |
 | I-T22 | — | 기기 승인 피싱 방지 검증 | 스캐너 단말기와 휴대폰의 확인 코드(8자)가 대조 화면에 함께 보인다. 등록되지 않았거나 폐기된 기기의 승인 코드 발급 요청과, 다른 파트너 기기의 승인은… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/identity-svc/test/device-approval.test.ts |
 | I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test/device-approval.test.ts |
 | I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test-int/device-approval.int.test.ts 외 2곳 |
@@ -351,7 +357,7 @@
 | v5.0.0-6.5.2 | — | L2 | 엔트로피가 112비트 미만인 조회용 비밀값은 백엔드에 저장할 때 32비트 난수 솔트를 넣은 승인된 비밀번호 저장용 해시로 저장하고, 112비트 이상이면 일반… | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-6.5.3 | — | L2 | 조회용 비밀값, 대역 외 인증 코드, TOTP 시드는 CSPRNG로 만든다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-6.5.4 | — | L2 | 조회용 비밀값과 대역 외 인증 코드는 20비트 이상의 엔트로피를 갖는다. | 빈칸 | B | 영역: services/identity-svc |
-| v5.0.0-6.5.5 | — | L2 | 대역 외 인증 요청·코드·토큰과 TOTP에 수명을 정하고, 대역 외 요청은 최대 10분, TOTP는 최대 30초로 한다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-totp.test.ts |
+| v5.0.0-6.5.5 | — | L2 | 대역 외 인증 요청·코드·토큰과 TOTP에 수명을 정하고, 대역 외 요청은 최대 10분, TOTP는 최대 30초로 한다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-totp.test.ts, services/identity-svc/test/staff-assignment-maintenance.test.ts |
 | v5.0.0-6.6.1 | — | L2 | 전화·SMS로 일회용 코드를 보내는 인증은 미리 검증한 번호에만, 더 강한 수단과 함께, 보안 위험을 알리며 제공하고, L3에서는 제공하지 않는다. | 해당 없음 | B | 해당 없음: SMS 기반 인증을 전혀 쓰지 않으며 TOTP와 패스키만 지원한다 |
 | v5.0.0-6.6.2 | — | L2 | 대역 외 인증 요청·코드·토큰은 만들어진 원래 인증 요청에 묶이고 앞뒤 다른 요청에 쓸 수 없다. | 해당 없음 | B | 해당 없음: 팬·관리 계정 로그인은 대역 외 인증을 쓰지 않는다. 스캐너 기기 승인의 확인 코드는 offline-gate.md 6.6.2가 판정한다 |
 | v5.0.0-6.6.3 | — | L2 | 코드 기반 대역 외 인증은 레이트 리밋으로 무차별 대입을 막는다(64비트 이상 코드도 고려). | 해당 없음 | B | 해당 없음: 팬·관리 계정 로그인은 대역 외 인증을 쓰지 않는다. 스캐너 기기 승인의 확인 코드 시도 제한은 offline-gate.md 6.6.3이 판정한다(identity I-T37) |
@@ -433,7 +439,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.test.m… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/platform/test/telemetry.test.ts 외 4곳… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 18곳 (영역:… |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/identity-svc/test/staff-assignment-maintenance.test.ts |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs |

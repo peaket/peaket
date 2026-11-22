@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 18 | 0 | 2 | 0 | 1 | 2 | 0 | 0 | 0 | 23 |
-| 합계 | 18 | 0 | 2 | 0 | 1 | 2 | 0 | 0 | 0 | 23 |
+| B | 19 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 0 | 23 |
+| 합계 | 19 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 0 | 23 |
 
 ## docs/features/search.md
 
@@ -21,7 +21,7 @@
 | SR-T7 | — | DB 문자 분류 설정이 C·POSIX가 아니고, 조각 비교 확장을… | DB 문자 분류 설정이 C·POSIX가 아니고, 조각 비교 확장을 넣으면 `show_trgm`·`show_bigm('루멘')`이 비지 않는다 | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts |
 | SR-T8 | ① | ① 승인 전·반려·판매 중지·회차 전부 취소 공연은 없다. ② 승인… | ① 승인 전·반려·판매 중지·회차 전부 취소 공연은 없다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts |
 | SR-T8 | ② | ① 승인 전·반려·판매 중지·회차 전부 취소 공연은 없다. ② 승인… | ② 승인 취소(판매 중지, ADR-0123)를 적는 트랜잭션이 읽기 모델을 함께 고쳐 커밋과 함께 빠지고(되돌리면 남는다), 판매 재개하면 다시 나온다. … 의… | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts |
-| SR-T8 | ③ | ① 승인 전·반려·판매 중지·회차 전부 취소 공연은 없다. ② 승인… | ③ 판매 중지·회차 전부 취소 처리(BUILD_ORDER LCH-090·GAT-110)가 | 다른 단계 | B | LCH-090·GAT-110 · 판매 중지·재개(LCH-090, 묶음 BAT-620)와 회차 전부 취소(GAT-110, 묶음 BAT-420)를 처리하는 유스케이스가 아직 없다. 그 단계가 같은 트랜잭션에서… |
+| SR-T8 | ③ | ① 승인 전·반려·판매 중지·회차 전부 취소 공연은 없다. ② 승인… | ③ 판매 중지·회차 전부 취소 처리(BUILD_ORDER LCH-090·GAT-110)가 | 자동 시험 | B | 시험: services/core-svc/test-int/sale-suspension.int.test.ts, services/core-svc/test-int/search-read-model.int.test.ts |
 | SR-T9 | — | 같은 점수 공연 30개로 1·2쪽에 중복·누락이 없다. `limit`… | 같은 점수 공연 30개로 1·2쪽에 중복·누락이 없다. `limit` 20 밖과 `page × 20 > 1,000`은 400이다 | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/core-svc/test/search.test.ts |
 | SR-T10 | — | `isComposing`이 참이거나 `keyCode` 229인… | `isComposing`이 참이거나 `keyCode` 229인 Enter가 검색을 보내지 않는다 | 자동 시험 | B | 시험: tools/web-checks/ds/behavior.spec.mjs |
 | SR-T11 | ① | ① 순서·대소문자가 다른 같은 검색이 같은 요청 주소가 된다. ②… | ① 순서·대소문자가 다른 같은 검색이 같은 요청 주소가 된다. | 자동 시험 | B | 시험: apps/web/src/widgets/app-shell/model/autocomplete.test.mjs |

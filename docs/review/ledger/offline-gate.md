@@ -130,7 +130,7 @@
 | v5.0.0-6.5.2 | — | L2 | 엔트로피가 112비트 미만인 조회용 비밀값은 백엔드에 저장할 때 32비트 난수 솔트를 넣은 승인된 비밀번호 저장용 해시로 저장하고, 112비트 이상이면 일반… | 해당 없음 | B | 해당 없음: 조회용 비밀값(복구 코드)이 없다. 112비트 이상인 초대 토큰(256비트)은 SHA-256으로 저장하고, 확인 코드·부스 코드는 수명 10분 이하의 대역 외 코드라 6.5.4·6.5.5로 다룬다 |
 | v5.0.0-6.5.3 | — | L2 | 조회용 비밀값, 대역 외 인증 코드, TOTP 시드는 CSPRNG로 만든다. | 빈칸 | B | 영역: services/identity-svc, services/ticket-svc |
 | v5.0.0-6.5.4 | — | L2 | 조회용 비밀값과 대역 외 인증 코드는 20비트 이상의 엔트로피를 갖는다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-6.5.5 | — | L2 | 대역 외 인증 요청·코드·토큰과 TOTP에 수명을 정하고, 대역 외 요청은 최대 10분, TOTP는 최대 30초로 한다. | ID만 | B | 다른 곳 시험: services/identity-svc/test/admin-totp.test.ts (영역: apps/scanner) |
+| v5.0.0-6.5.5 | — | L2 | 대역 외 인증 요청·코드·토큰과 TOTP에 수명을 정하고, 대역 외 요청은 최대 10분, TOTP는 최대 30초로 한다. | ID만 | B | 다른 곳 시험: services/identity-svc/test/admin-totp.test.ts, services/identity-svc/test/staff-assignment-maintenance.test.ts… |
 | v5.0.0-6.6.1 | — | L2 | 전화·SMS로 일회용 코드를 보내는 인증은 미리 검증한 번호에만, 더 강한 수단과 함께, 보안 위험을 알리며 제공하고, L3에서는 제공하지 않는다. | 해당 없음 | B | 해당 없음: PEAKET은 전화·SMS OTP를 인증 수단으로 쓰지 않는다. 부스의 휴대폰 본인확인은 본인확인기관 서비스로 신원 대조에만 쓴다 |
 | v5.0.0-6.6.2 | — | L2 | 대역 외 인증 요청·코드·토큰은 만들어진 원래 인증 요청에 묶이고 앞뒤 다른 요청에 쓸 수 없다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-6.6.3 | — | L2 | 코드 기반 대역 외 인증은 레이트 리밋으로 무차별 대입을 막는다(64비트 이상 코드도 고려). | 빈칸 | B | 영역: apps/scanner |
@@ -226,7 +226,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/platform/test/telemetry.test.ts 외 4곳… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 18곳 (영역: apps/scanner) |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 19곳 (영역: apps/scanner) |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs (영역: apps/scanner) |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs (영역:… |

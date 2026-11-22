@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 56 | 102 | 0 | 0 | 1 | 7 | 0 | 24 | 128 | 318 |
-| 합계 | 56 | 102 | 0 | 0 | 1 | 7 | 0 | 24 | 128 | 318 |
+| B | 56 | 102 | 0 | 0 | 0 | 8 | 0 | 24 | 128 | 318 |
+| 합계 | 56 | 102 | 0 | 0 | 0 | 8 | 0 | 24 | 128 | 318 |
 
 ## docs/features/control-tower.md
 
@@ -65,7 +65,7 @@
 | C-T40 | — | 체크포인트 사슬의 빈틈과 바꿔치기 | 공개 목록에서 체크포인트 하나를 빼거나 같은 번호의 다른 체크포인트(다른 루트)를 넣으면, 검증 도구가 번호 빈틈이나 직전 해시 불일치로 실패한다. 같은 번호에… | 자동 시험 | B | 시험: tools/audit-verify/audit-verify.test.mjs |
 | C-T41 | — | 공개 캘린더 장애 | 캘린더 주소를 모두 막아도 체크포인트·서명·내부 앵커는 남고, 다음 실행에서 다시 찍는다. 6시간 넘게 밀리면 SEV3이고, 거래·온세일 경로의 지표는 변하지… | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, services/ops-svc/test/audit-anchor.test.ts 외 1곳 |
 | C-T42 | — | 기록 파기 뒤 공개 루트 | 법정 보존 기간이 지난 감사 기록과 그 잎 솔트를 파기한 뒤에도 공개 체크포인트의 사슬·서명·공개 타임스탬프 검증은 통과한다. 공개 값만으로는 파기한 기록을… | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, tools/audit-verify/audit-verify.test.mjs |
-| C-T43 | — | 수요 예측과 규모 올리기 | 구독 수와 지난 회차를 넣은 시험 데이터에서 예상 진입 인원(중앙·상단)과 제안 등급이 식과 같다. 구독 수가 0.5~2배인 지난 회차가 10개 미만이면 기본… | 미검증 | B | BAT-620 · 수요 예측식·기본 비율·규모 올리기·T-30분·LARGE 간격·commander 예외는 core-svc 시험으로 확인했다. 화면의 '규모 올리기 검토'·SEV3 알림(24시간 뒤 SEV2)·감사… |
+| C-T43 | — | 수요 예측과 규모 올리기 | 구독 수와 지난 회차를 넣은 시험 데이터에서 예상 진입 인원(중앙·상단)과 제안 등급이 식과 같다. 구독 수가 0.5~2배인 지난 회차가 10개 미만이면 기본… | 다른 단계 | B | LCH-100·운영 묶음(ops-svc 경보·감사·배포) · 수요 예측식·기본 비율·규모 올리기·T-30분·LARGE 간격·commander 예외는 core-svc 시험으로 확인했다. 남은 것은 화면의 '규모… |
 | C-T44 | ① | 자동 조치의 끝내는 조건 | ① 실시간 표 신선도를 5초 넘게 3분 늦췄다 되돌리면 대체 표시가 5분 뒤 실시간 표로 돌아온다. … 의 걸림·풀림을 조치마다 보여 준다. 시간 조건이 있는… | 빈칸 | B | — |
 | C-T44 | ② | 자동 조치의 끝내는 조건 | ② 결제사 시뮬레이터를 승인 기한(10분)보다 길게 멈춰 재시도 큐가 다 빈 뒤 되살리면, 확인 호출이 3분 정상인 뒤 시험 재개(새 결제 시도의 5%)로… | 빈칸 | B | — |
 | C-T44 | ③ | 자동 조치의 끝내는 조건 | ③ 429를 받은 채널 상한은 그 회차 끝까지 낮은 값을 유지한다. … 의 걸림·풀림을 조치마다 보여 준다. 시간 조건이 있는 자동 해제는 조건을 채운 시간만큼… | 빈칸 | B | — |
@@ -297,7 +297,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/platform/test/telemetry.test.ts 외 4곳… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 18곳 (영역:… |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 19곳 (영역:… |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs (영역: apps/console-host) |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs (영역:… |
