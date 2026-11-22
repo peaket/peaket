@@ -13,6 +13,7 @@ import { CompensationTransfers } from '../src/modules/compensation/application/c
 import type { CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest } from '../src/modules/compensation/domain/ports.js';
 import { Settlements } from '../src/modules/settlement/application/settlements.js';
 import { DrizzleSettlementStore } from '../src/modules/settlement/adapters/db/drizzle-settlement-store.js';
+import { noApprovals, noSaleSuspensions } from '../test/settlement-support.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 
 const NOW = Date.parse('2026-11-20T09:30:00.000Z');
@@ -74,6 +75,8 @@ beforeAll(async () => {
   settlements = new Settlements({
     store: new DrizzleSettlementStore(database),
     payments: { listEventPayments: async () => [] },
+    approvals: noApprovals,
+    saleSuspensions: noSaleSuspensions,
     gateways: [],
     reauth: { verify: async () => ({ jti: 'jti-test', accountId: 'acct', sessionId: 'sid', act: 'BOOKER_EXPORT', factors: [] }) },
     clock,

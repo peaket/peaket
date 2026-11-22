@@ -24,6 +24,7 @@ import {
   type SettlementDueTimer,
   type StatementStatus,
 } from '../src/modules/settlement/index.js';
+import { noApprovals, noSaleSuspensions } from './settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const quiet = () => new Writable({ write(_c, _e, cb) { cb(); } });
@@ -45,6 +46,8 @@ const settlementsFor = (store: MemorySettlementStore, payments = new MemorySettl
     store,
     payments,
     eventCommission: { rateBp: async () => 1000 },
+    approvals: noApprovals,
+    saleSuspensions: noSaleSuspensions,
     gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
     reauth: new MemoryReauthVerifier(),
     clock: fakeClock({ now: NOW.getTime() }),
@@ -136,6 +139,8 @@ describe('A1V-02 회차 종료 다음 영업일 계산과 종료일 +5영업일 
         },
       },
       eventCommission: { rateBp: async () => 1000 },
+      approvals: noApprovals,
+      saleSuspensions: noSaleSuspensions,
       gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
       reauth: new MemoryReauthVerifier(),
       clock: fakeClock({ now: NOW.getTime() }),
@@ -170,6 +175,8 @@ describe('A1V-02 회차 종료 다음 영업일 계산과 종료일 +5영업일 
         },
       },
       eventCommission: { rateBp: async () => 1000 },
+      approvals: noApprovals,
+      saleSuspensions: noSaleSuspensions,
       gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
       reauth: new MemoryReauthVerifier(),
       clock: fakeClock({ now: monday.getTime() }),
@@ -218,6 +225,8 @@ describe('A1V-03 이의 결과 없는 재확정과 새 이의 기간', () => {
         store,
         payments,
         eventCommission: { rateBp: async () => 1000 },
+        approvals: noApprovals,
+        saleSuspensions: noSaleSuspensions,
         gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
         reauth: new MemoryReauthVerifier(),
       }),

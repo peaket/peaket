@@ -13,6 +13,7 @@ import {
   Settlements,
   UnavailableTossPayoutGateway,
 } from '../src/modules/settlement/index.js';
+import { noApprovals, noSaleSuspensions } from '../test/settlement-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
@@ -51,6 +52,8 @@ beforeAll(async () => {
     store,
     payments: { listEventPayments: async () => [] },
     eventCommission: { rateBp: async () => 1000 },
+    approvals: noApprovals,
+    saleSuspensions: noSaleSuspensions,
     gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
     reauth: new MemoryReauthVerifier(),
     clock: fakeClock({ now: NOW.getTime() }),

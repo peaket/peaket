@@ -248,4 +248,36 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     expect(second.statusCode).toBe(409);
     expect(JSON.parse(second.payload)).toMatchObject({ type: expect.stringContaining('payout-batch-exists') });
   });
+
+  test('J-T31 ⑦ 내부 승인 조회는 결제사가 대조할 사실만 주고, 없는 ID는 404·no-store다', async () => {
+    const created = JSON.parse((await create()).payload);
+    const r = await svc.http.inject({ method: 'GET', url: `/internal/v1/payout-approvals/${created.approvalId}`, headers: noBody('commander') });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(r.payload)).toMatchObject({
+      approvalId: created.approvalId,
+      kind: 'PAYOUT_BATCH',
+      targetRef: created.batchId,
+      batchId: created.batchId,
+      pg: 'TOSS',
+      pgStore: 'STANDARD',
+      payoutDate: '2026-11-20',
+      currency: 'KRW',
+      amount: 24_920_000,
+      statementCount: 3,
+      status: 'PENDING_APPROVAL',
+      requiredApprovals: 2,
+      requestedBy: expect.any(String),
+      approvals: [],
+      approvedAt: null,
+    });
+    expect(JSON.parse(r.payload)).not.toHaveProperty('reasonText');
+    const missing = await svc.http.inject({ method: 'GET', url: `/internal/v1/payout-approvals/${randomUUID()}`, headers: noBody('commander') });
+    expect(missing.statusCode).toBe(404);
+
+    const ok = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${created.approvalId}/approvals`, headers: noBody('commander', 'approval-token') });
+    expect(ok.statusCode).toBe(200);
+    const after = JSON.parse((await svc.http.inject({ method: 'GET', url: `/internal/v1/payout-approvals/${created.approvalId}`, headers: noBody('commander') })).payload);
+    expect(after).toMatchObject({ status: 'DONE', approvals: [expect.any(String)], approvedAt: expect.any(String) });
+  });
 });

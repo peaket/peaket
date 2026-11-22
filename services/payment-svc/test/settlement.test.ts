@@ -17,6 +17,9 @@ import {
   UnavailableTossPayoutGateway,
   type PaymentFact,
 } from '../src/modules/settlement/index.js';
+import { payoutBatchView } from '../src/modules/settlement/index.js';
+import type { PayoutApprovalVerifier, SaleSuspensionSource, VerifiedPayoutApproval } from '../src/modules/settlement/domain/ports.js';
+import { noApprovals, noSaleSuspensions } from './settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const A = randomUUID();
@@ -126,10 +129,34 @@ describe('정산 HTTP·유스케이스', () => {
   const store = new MemorySettlementStore();
   const payments = new MemorySettlementPaymentSource();
   const identity = new FakeIdentity();
+  const approvalRows = new Map<string, VerifiedPayoutApproval>();
+  const approvals: PayoutApprovalVerifier = { verify: async (id) => approvalRows.get(id) };
+  const saleSuspensions: SaleSuspensionSource = { listSuspended: async () => new Set() };
+  const approveFor = (batch: ReturnType<typeof payoutBatchView>) => {
+    const approvalId = randomUUID();
+    approvalRows.set(approvalId, {
+      approvalId,
+      kind: 'PAYOUT_BATCH',
+      targetRef: batch.batchId,
+      batchId: batch.batchId,
+      pg: batch.pg,
+      pgStore: batch.pgStore,
+      payoutDate: batch.payoutDate,
+      currency: 'KRW',
+      amount: batch.totalAmount,
+      statementCount: batch.statementCount,
+      status: 'EXECUTING',
+      requiredApprovals: 2,
+      requestedBy: randomUUID(),
+      approvals: [randomUUID()],
+      approvedAt: NOW.toISOString(),
+    });
+    return approvalId;
+  };
   let svc: Awaited<ReturnType<typeof createService>>;
   let settlements: Settlements;
 
-  @Module({ imports: [SettlementModule.register({ store, payments, eventCommission: { rateBp: async () => 1000 }, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier() })] })
+  @Module({ imports: [SettlementModule.register({ store, payments, approvals, saleSuspensions, eventCommission: { rateBp: async () => 1000 }, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier() })] })
   class TestModule {}
 
   beforeEach(async () => {
@@ -141,6 +168,8 @@ describe('정산 HTTP·유스케이스', () => {
     store.payouts.clear();
     store.kycs.clear();
     store.accounts.clear();
+    store.payoutBatchAudits.length = 0;
+    approvalRows.clear();
     payments.rows.clear();
     svc = await createService({
       name: 'payment-svc',
@@ -218,7 +247,7 @@ describe('정산 HTTP·유스케이스', () => {
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: s.payoutDate!, portoneBalance: { amount: s.payoutAmount, observedAt: NOW.toISOString() }, actor: randomUUID() });
     expect(batch.status).toBe('PENDING_APPROVAL');
     await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-not-approved') });
-    const approved = await settlements.approveBatch(batch.batchId, randomUUID());
+    const approved = await settlements.approveBatch(batch.batchId, approveFor(batch));
     expect(approved.status).toBe('APPROVED');
     expect((await settlements.approveBatch(batch.batchId, approved.approvalId!)).status).toBe('APPROVED');
     await expect(settlements.approveBatch(batch.batchId, randomUUID())).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-not-approved') });
@@ -280,7 +309,7 @@ describe('정산 HTTP·유스케이스', () => {
     });
     await store.insertStatement({ ...extra.record, status: 'CONFIRMED', payoutDate: s.payoutDate }, extra.sources);
 
-    await settlements.approveBatch(batch.batchId, randomUUID());
+    await settlements.approveBatch(batch.batchId, approveFor(batch));
     expect((await settlements.executeBatch(batch.batchId)).status).toBe('SUBMITTED');
     const payouts = await store.listPayouts(batch.batchId);
     expect(payouts.map((p) => p.statementId)).toEqual([s.statementId]);
@@ -291,7 +320,7 @@ describe('정산 HTTP·유스케이스', () => {
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
     const batch = await settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() });
-    await settlements.approveBatch(batch.batchId, randomUUID());
+    await settlements.approveBatch(batch.batchId, approveFor(batch));
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, payoutAmount: s.payoutAmount + 1 });
     await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-amount-mismatch') });
     expect(await store.listPayouts(batch.batchId)).toHaveLength(0);
@@ -301,7 +330,7 @@ describe('정산 HTTP·유스케이스', () => {
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
     const batch = await settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() });
-    await settlements.approveBatch(batch.batchId, randomUUID());
+    await settlements.approveBatch(batch.batchId, approveFor(batch));
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, payoutAmount: Math.floor(s.payoutAmount * 1.25) });
     await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-amount-mismatch') });
   });
@@ -353,7 +382,7 @@ describe('정산 HTTP·유스케이스', () => {
     store2.kycs.set(A, kyc(A, 'VERIFIED'));
     const payments2 = new MemorySettlementPaymentSource();
     payments2.set(EVENT, 'TOSS', [fact({ amount: 10_000_000 })]);
-    const svc2 = new Settlements({ store: store2, payments: payments2, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
+    const svc2 = new Settlements({ store: store2, payments: payments2, approvals, saleSuspensions, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
     await expect(svc2.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' })).rejects.toMatchObject({ status: 503, type: expect.stringContaining('event-commission-rate-unavailable') });
     expect(store2.statements.size).toBe(0);
   });
@@ -386,6 +415,8 @@ describe('정산 HTTP·유스케이스', () => {
         },
       },
       eventCommission: { rateBp: async () => 1000 },
+      approvals: noApprovals,
+      saleSuspensions: noSaleSuspensions,
       gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
       reauth: new MemoryReauthVerifier(),
       clock: fakeClock({ now: NOW.getTime() }),
@@ -427,7 +458,7 @@ describe('상품 정산·미수금 상계', () => {
       return this.rows.filter((r) => r.basisDate >= from && r.basisDate <= to);
     },
   };
-  const svc = new Settlements({ store, payments, products, eventCommission: { rateBp: async () => 1000 }, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
+  const svc = new Settlements({ store, payments, products, eventCommission: { rateBp: async () => 1000 }, approvals: noApprovals, saleSuspensions: noSaleSuspensions, gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()], reauth: new MemoryReauthVerifier(), clock: fakeClock({ now: NOW.getTime() }) });
 
   const productItem = (o: Partial<import('../src/modules/settlement/index.js').ProductSettlementItem> = {}) => ({
     itemId: randomUUID(),

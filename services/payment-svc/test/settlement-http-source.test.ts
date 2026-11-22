@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { HttpProductSettlementSource, MemoryReauthVerifier, MemorySettlementStore, ManualPortonePayoutGateway, Settlements, UnavailableTossPayoutGateway } from '../src/modules/settlement/index.js';
+import { noApprovals, noSaleSuspensions } from './settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const A = randomUUID();
@@ -66,6 +67,8 @@ describe('A2-01 상품 정산 원천 HTTP', () => {
       payments: { listEventPayments: async () => [] },
       products: new HttpProductSettlementSource(baseUrl, 'internal-test-token'),
       eventCommission: { rateBp: async () => 1000 },
+      approvals: noApprovals,
+      saleSuspensions: noSaleSuspensions,
       gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
       reauth: new MemoryReauthVerifier(),
       clock: fakeClock({ now: NOW.getTime() }),

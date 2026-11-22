@@ -265,4 +265,19 @@ describe('LCH-090 판매 중지·재개 core 트랜잭션 [PostgreSQL·실제 HT
     expect(nr.statusCode).toBe(409);
     expect(JSON.parse(nr.payload)).toMatchObject({ type: 'https://peaket.example/problems/sale-suspension-conflict' });
   });
+
+  test('R-T23 ② 판매 중지된 회차만 한 번에 돌려주고 100개 상한·잘못된 ID·토큰 없음은 400·401이다', async () => {
+    const p1 = await seeded('판매중지묶음조회 공연 1');
+    const p2 = await seeded('판매중지묶음조회 공연 2');
+    expect((await apply(p1.openEventId, { kind: 'SUSPENDED', approvalId: 'AP-STOP-B625', reasonCode: 'SELLER_IDENTITY', reason: '판매자 신원 확인' })).statusCode).toBe(200);
+    const eventIds = [p1.openEventId, p2.openEventId, p1.futureEventId];
+    const r = await svc.http.inject({ method: 'GET', url: `/internal/v1/events/sale-suspensions?eventIds=${eventIds.join(',')}`, headers: headers() });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(r.payload)).toEqual({ suspendedEventIds: [p1.openEventId, p1.futureEventId] });
+    expect((await svc.http.inject({ method: 'GET', url: `/internal/v1/events/sale-suspensions?eventIds=${p1.openEventId}`, headers: headers(null) })).statusCode).toBe(401);
+    expect((await svc.http.inject({ method: 'GET', url: '/internal/v1/events/sale-suspensions?eventIds=not-a-uuid', headers: headers() })).statusCode).toBe(400);
+    const tooMany = Array.from({ length: 101 }, () => randomUUID()).join(',');
+    expect((await svc.http.inject({ method: 'GET', url: `/internal/v1/events/sale-suspensions?eventIds=${tooMany}`, headers: headers() })).statusCode).toBe(400);
+  });
 });

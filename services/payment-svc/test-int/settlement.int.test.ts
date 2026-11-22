@@ -11,10 +11,12 @@ import {
   DrizzleSettlementStore,
   ManualPortonePayoutGateway,
   MemoryReauthVerifier,
+  payoutBatchView,
   Settlements,
   UnavailableTossPayoutGateway,
   type ProductSettlementItem,
 } from '../src/modules/settlement/index.js';
+import type { PayoutApprovalVerifier, SaleSuspensionSource, VerifiedPayoutApproval } from '../src/modules/settlement/domain/ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
@@ -29,6 +31,30 @@ let clock: ReturnType<typeof fakeClock>;
 let store: DrizzleSettlementStore;
 let settlements: Settlements;
 const productRows: ProductSettlementItem[] = [];
+const approvalRows = new Map<string, VerifiedPayoutApproval>();
+const approvals: PayoutApprovalVerifier = { verify: async (id) => approvalRows.get(id) };
+const saleSuspensions: SaleSuspensionSource = { listSuspended: async () => new Set() };
+const approveFor = (batch: ReturnType<typeof payoutBatchView>) => {
+  const approvalId = randomUUID();
+  approvalRows.set(approvalId, {
+    approvalId,
+    kind: 'PAYOUT_BATCH',
+    targetRef: batch.batchId,
+    batchId: batch.batchId,
+    pg: batch.pg,
+    pgStore: batch.pgStore,
+    payoutDate: batch.payoutDate,
+    currency: 'KRW',
+    amount: batch.totalAmount,
+    statementCount: batch.statementCount,
+    status: 'EXECUTING',
+    requiredApprovals: 2,
+    requestedBy: randomUUID(),
+    approvals: [randomUUID()],
+    approvedAt: NOW.toISOString(),
+  });
+  return approvalId;
+};
 
 const statementRow = async (o: { promoterId: string; eventId: string; pg?: 'TOSS' | 'PORTONE'; pgStore?: 'STANDARD' | 'ESCROW'; payoutDate: string; payoutAmount: number; status?: string }) => {
   const id = randomUUID();
@@ -70,6 +96,8 @@ beforeAll(async () => {
     payments: new DrizzleSettlementPaymentSource(db),
     products: { listProductItems: async (from: string, to: string) => productRows.filter((r) => r.basisDate >= from && r.basisDate <= to) },
     eventCommission: { rateBp: async () => 1000 },
+    approvals,
+    saleSuspensions,
     gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
     reauth: new MemoryReauthVerifier(),
     clock,
@@ -137,7 +165,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: s.payoutDate!, portoneBalance: { amount: s.payoutAmount, observedAt: NOW.toISOString() }, actor: ACCOUNT });
     expect(batch.status).toBe('PENDING_APPROVAL');
-    expect((await settlements.approveBatch(batch.batchId, randomUUID())).status).toBe('APPROVED');
+    expect((await settlements.approveBatch(batch.batchId, approveFor(batch))).status).toBe('APPROVED');
     expect((await settlements.executeBatch(batch.batchId)).status).toBe('SUBMITTED');
     const payouts = await store.listPayouts(batch.batchId);
     expect(payouts).toHaveLength(1);
@@ -214,7 +242,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(await store.listConfirmed('PORTONE', 'STANDARD', '2026-11-24')).toHaveLength(0);
 
     const s2 = await statementRow({ promoterId: p2, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-24', payoutAmount: 200_000 });
-    await settlements.approveBatch(batch.batchId, randomUUID());
+    await settlements.approveBatch(batch.batchId, approveFor(batch));
     expect((await settlements.executeBatch(batch.batchId)).status).toBe('SUBMITTED');
     expect((await store.listPayouts(batch.batchId)).map((p) => p.statementId)).toEqual([s1]);
     const after = await db.pool.query('select status, payout_batch_id from settlement_statement where id = $1', [s2]);
@@ -226,7 +254,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     await settlements.recordKyc(promoterId, 'VERIFIED');
     const statementId = await statementRow({ promoterId, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-25', payoutAmount: 200_000 });
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-11-25', portoneBalance: { amount: 200_000, observedAt: NOW.toISOString() }, actor: ACCOUNT });
-    await settlements.approveBatch(batch.batchId, randomUUID());
+    await settlements.approveBatch(batch.batchId, approveFor(batch));
     await db.pool.query('update settlement_statement set payout_amount = 199000 where id = $1', [statementId]);
     await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-amount-mismatch') });
     expect(await store.listPayouts(batch.batchId)).toHaveLength(0);
@@ -384,5 +412,34 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(moves.rows).toEqual([{ receivable_id: r.receivableId, statement_id: s.statementId, amount: '445000' }]);
     const left = await db.pool.query('select remaining, status from partner_receivable where id = $1', [r.receivableId]);
     expect(left.rows[0]).toEqual({ remaining: '0', status: 'CLOSED' });
+  });
+
+  test('J-T31 승인 감사 행과 payout_batch.approval_id 부분 유일 인덱스가 재사용을 막는다', async () => {
+    const promoterId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    const statementId = await statementRow({ promoterId, eventId: randomUUID(), pg: 'TOSS', payoutDate: '2026-11-30', payoutAmount: 100_000 });
+    const batch = await settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-11-30', actor: ACCOUNT });
+    const approvalId = approveFor(batch);
+    await settlements.approveBatch(batch.batchId, approvalId);
+    const audit = await db.pool.query('select batch_id, approval_id, event, requester_id, approver_id, amount, currency from payout_batch_audit where batch_id = $1', [batch.batchId]);
+    expect(audit.rows).toEqual([
+      {
+        batch_id: batch.batchId,
+        approval_id: approvalId,
+        event: 'APPROVED',
+        requester_id: approvalRows.get(approvalId)!.requestedBy,
+        approver_id: approvalRows.get(approvalId)!.approvals[0],
+        amount: '100000',
+        currency: 'KRW',
+      },
+    ]);
+    expect(statementId).toBeTruthy();
+    await expect(
+      db.pool.query(
+        `insert into payout_batch (id, pg, pg_store, payout_date, total_amount, statement_count, approval_id, status, created_at, updated_at)
+         values ($1, 'TOSS', 'ESCROW', '2026-11-30', 0, 0, $2, 'PENDING_APPROVAL', $3, $3)`,
+        [randomUUID(), approvalId, NOW],
+      ),
+    ).rejects.toMatchObject({ code: '23505' });
   });
 });

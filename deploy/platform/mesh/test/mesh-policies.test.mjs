@@ -74,10 +74,12 @@ const METRICS_PORT = 9464;
 const CONTROL_CALLERS = ['ops-svc', 'ops-breakglass'];
 /** 관리 경로를 처리하는 여덟 서비스(docs/architecture.md:290, D-T36 ⑦) */
 const ADMIN_EIGHT = ['core-svc', 'identity-svc', 'ticket-svc', 'payment-svc', 'purchase-svc', 'queue-svc', 'trust-svc', 'ops-svc'];
-/** ADR-0285 결정 9: REST 포트의 내부 HTTP 부르는 쪽 15쌍(2026-11-22 보충 포함)과 ADR-0288 결정 8의 purchase-svc → queue-svc(입장 토큰 공개키 묶음, BAT-057) 한 쌍 [부르는 쪽, 받는 쪽] */
+/** ADR-0285 결정 9: REST 포트의 내부 HTTP 부르는 쪽 16쌍(2026-11-22 보충 포함)과 ADR-0288 결정 8의 purchase-svc → queue-svc(입장 토큰 공개키 묶음, BAT-057) 한 쌍, ADR-0353의 identity-svc → core-svc 한 쌍 [부르는 쪽, 받는 쪽] */
 const INTERNAL_HTTP = [
   ['core-svc', 'identity-svc'],
   ['core-svc', 'purchase-svc'],
+  // ADR-0353: identity-svc가 파트너 현장 스태프 초대의 회차 소유·유효 시간 확인에 core-svc 판매 설정 사본을 읽는다
+  ['identity-svc', 'core-svc'],
   ['ops-svc', 'core-svc'],
   ['ops-svc', 'identity-svc'],
   ['ops-svc', 'payment-svc'],
@@ -85,6 +87,8 @@ const INTERNAL_HTTP = [
   ['ops-svc', 'queue-svc'],
   ['payment-svc', 'core-svc'],
   ['payment-svc', 'identity-svc'],
+  // ADR-0345·BAT-625: payment-svc가 지급 묶음 승인 ID를 ops-svc 지급 승인 기록 GET /internal/v1/payout-approvals/{approvalId}과 대조한다(W12-mesh RV-01)
+  ['payment-svc', 'ops-svc'],
   ['purchase-svc', 'core-svc'],
   ['purchase-svc', 'ops-svc'],
   // ADR-0285 결정 9 보충(2026-11-22, W12-mesh): purchase-svc가 payment-svc 결제사 서킷 상태 GET /internal/v1/circuits를 읽는다(docs/features/transfer-refund.md §5 '서킷 연결', docs/api/guidelines.md §8.1)
@@ -1113,10 +1117,10 @@ test('MS-18 메시 없는 출처 칸의 꼴: 다른 네임스페이스의 부르
   assert.ok(peers > 50, `출처 칸이 너무 적다(${peers})`);
 });
 
-test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 15쌍(2026-11-22 보충 포함)과 ADR-0288 결정 8의 한 쌍(16쌍)마다 받는 쪽 REST 규칙에 부르는 쪽이 있고, 표에 없는 서비스 신원은 REST 규칙에 없다(게이트웨이 빼고)', () => {
+test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 16쌍(2026-11-22 보충 포함)과 ADR-0288 결정 8·ADR-0353의 두 쌍(18쌍)마다 받는 쪽 REST 규칙에 부르는 쪽이 있고, 표에 없는 서비스 신원은 REST 규칙에 없다(게이트웨이 빼고)', () => {
   const mesh = meshObjects();
   const meshless = meshlessObjects();
-  assert.equal(INTERNAL_HTTP.length, 16);
+  assert.equal(INTERNAL_HTTP.length, 18);
   for (const [from, to] of INTERNAL_HTTP) {
     assert.ok(allowedOn(meshNodeAllow(mesh, to), REST_PORT(to)).has(principalOf(from)), `policies.yaml ${to} REST에 ${from}가 없다`);
     assert.equal(meshlessAllows(meshless, to, REST_PORT(to), IDENTITY[from]), true, `meshless ${to} REST에 ${from}가 닿지 못한다`);
