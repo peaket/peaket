@@ -284,7 +284,49 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 검증
 
-검증 담당이 채운다. 게이트 명령·결과, 틀린 구현 표본 11개의 실패 시험, 놓친 표본, AZ-T19 ①~⑧ 판정 기준 대조 전수를 적는다.
+검증 담당(다른 세션 `lane3-w12corenotify-verify`)이 같은 트리에서 돌렸다. Docker 잠금은 2026-11-22 10:42에 잡아 표본까지 쓰고 11:18에 놓았다(peaket 컨테이너 0 확인).
+
+```bash
+corepack pnpm exec turbo run build --filter=@peaket/core-svc^...
+corepack pnpm --filter @peaket/core-svc typecheck
+corepack pnpm --filter @peaket/core-svc test
+PEAKET_TEST_REPORT=test-report-int.json corepack pnpm --filter @peaket/core-svc test:integration test-int/notify-role.int.test.ts test-int/startup-db-role.int.test.ts test-int/shop-notify.int.test.ts test-int/webhook-merch-grants.int.test.ts test-int/webhook-lease.int.test.ts test-int/webhook-lease-concurrent.int.test.ts
+corepack pnpm --filter @peaket/core-svc test test/internal-notify.test.ts   # 첫 전체 실행의 5초 시간 초과 재확인
+node --test tools/local/demo-objects.test.mjs
+corepack pnpm lint
+python -I -X utf8 tools/doc-check/check_all.py
+node tools/ci/trace-check.mjs --ids "AZ-T19" --report services/core-svc/test-report-int.json
+node tools/ci/ledger.mjs --batch W12-core-notify --require
+```
+
+- build·typecheck 0. `pnpm lint` 0. doc-check 오류 0(경고 4는 출발점과 같다: openapi 410/504 설명 3, mermaid 검사 건너뜀 1).
+- 단위: 783/783. 첫 전체 실행은 `test/internal-notify.test.ts` 한 건이 `Test timed out in 5000ms`였고, 같은 파일 단독 1/1과 두 번째 전체 783/783이 통과했다. 이 묶음이 바꾼 코드(메모리 갈래)는 없다.
+- 대상 통합 6파일 46/46: notify-role 8, startup-db-role 2, shop-notify 14, webhook-merch-grants 18, webhook-lease 1, webhook-lease-concurrent 3.
+- `trace-check`: AZ-T19 통과 9(46개 시험을 봄) — ⑧이 저장소 직접 시험과 NOTIFY_APP_STORE 배선 시험 둘이다.
+- `ledger --batch W12-core-notify --require`: 항목 8, 자동 시험 8, 빈칸·ID만·미검증·다른 단계 0. 등급은 원천 문서상 B 8(묶음 등급은 A)이다.
+- demo-objects 16/16(로컬 데모 `core_notify_login`·`PEAKET_NOTIFY_DATABASE_URL` 포함).
+- AZ-T19 ①~⑧ 대조: ① notify-role ①(여덟 메서드), ② notify-role ②(다른 표 5개의 읽기·넣기·지우기), ③ notify-role ③(칸 8개는 허용 끄기와 함께, B1의 PARTNER 끄기 거절, A1 FAILING 끄기 1행), ④ startup AZ-T19 ④(없음·팬 경로·슈퍼유저·소유자·정상), ⑤ notify-role ⑤(본문·식별 5칸, DEAD·SUCCEEDED 되돌리기 0행, 도는 행 DEAD 1행), ⑥ notify-role ⑥(넣기·지우기·TRUNCATE), ⑦ notify-role ⑦(역할 속성·정책 5개·칸 권한·소유자·FORCE), ⑧ notify-role ⑧ 둘(실제 발송기 서명·원장, NOTIFY_APP_STORE 배선). 판정 기준과 단언이 어긋난 곳은 없다.
+
+**틀린 구현 표본(11개, 모두 잡힘)**
+
+| # | 항목 | 틀린 구현 | 실패한 시험 |
+| --- | --- | --- | --- |
+| M1 | ③ | 0043: 끝점 UPDATE를 표 단위로 | ③(비밀·주소가 허용 끄기와 함께 바뀜), ⑦ |
+| M2 | ③ | 0043: 끄기 USING `true` | ③(A2 다시 켜기 1행), ⑦ |
+| M3 | ③ | 0043: WITH CHECK에서 사유 조건 제거 | ③(B1 PARTNER 끄기 1행), ⑦ |
+| M4 | ⑤ | 0043: 원장 UPDATE에 `payload` 추가 | ⑤(payload 고치기 1행), ⑦ |
+| M5 | ⑤ | 0043: 원장 UPDATE USING `true` | ⑤(D1·S1 되돌리기 1행), ⑦ |
+| M6 | ② | 0043: `GRANT SELECT ON ALL TABLES` 추가 | ②(product 읽기 1행) |
+| M7 | ④ | `main.ts`: `PEAKET_NOTIFY_DATABASE_URL ?? PEAKET_DATABASE_URL` | startup ④(없음 경우가 팬 경로로 떠서 '변수 없음' 오류가 아님) |
+| M8 | ④ | `main.ts`: `assertDatabaseRole(notifyDatabase,'core_notify')` 제거 | startup AZ-T5·④(다른 역할·슈퍼유저·소유자가 뜸) |
+| M9 | ⑧ | `app.module.ts`: `notifyDatabase: o.database`(팬 경로 풀) | notify-role ⑧ 배선(닿지 않는 notifyDatabase 대신 admin으로 읽혀 성공) |
+| M10 | ⑦ | 0043: 역할 생성에 `BYPASSRLS`를 주고 역할 속성 가드도 `rolsuper`만 보게 | ⑦(`rolbypassrls` 참, ⑤는 로그인 사용자가 속성을 물려받지 않아 통과) |
+| M11 | ⑥ | 0043: `GRANT DELETE ON webhook_delivery` 추가 | ⑥(지우기 0행), ⑦ |
+
+- 처음에 놓친 표본 셋을 시험 보강으로 잡았다(V-01). M3은 ③에 '켜진 B1을 사유 PARTNER로 끄기'가 없어, M9는 NOTIFY_APP_STORE 배선을 보는 시험이 없어, M7은 '변수 없음'을 빈 문자열로 만들어 `??` 변이를 지나쳐서 놓쳤다. ③은 허용 끄기와 함께 칸을 고치고 트랜잭션을 되돌리는 꼴로, ⑧은 닿지 않는 notifyDatabase를 주는 꼴로, ④는 키를 지운 환경으로 고쳤다.
+- M10의 첫 변이(`$$;` 뒤에 `ALTER ROLE`을 붙임)는 마이그레이션 실행기가 `42601`로 멈춰 ⑦에 닿지 않았다. 역할 생성 속성과 가드를 함께 바꾼 표본으로 다시 돌려 ⑦을 잡았다.
+- 표본마다 `git checkout -- <파일>`로 되돌렸고, 끝난 뒤 `git status --short`에 표본 변경이 없었다(추적 안 된 `.lock-try.log`만 남았다).
+- 남은 위험: RV-02(원장 INSERT 정책 `true`), `core_app`의 옛 권한(다음 배포), 운영 Secret 추가(배포 묶음). 계획 §12와 ADR-0350에 적었다.
 
 ## 담당 표
 
