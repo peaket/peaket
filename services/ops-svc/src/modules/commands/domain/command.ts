@@ -127,7 +127,8 @@ const COMMANDER_ONLY = ['commander'] as const;
 
 /**
  * 명령 유형별 역할(B3-H01, docs/features/control-tower.md §3·§4, POL-021·POL-038).
- * 멈춤·재개·킬스위치·자동화 정지는 commander만 요청·승인·재시도한다. 봇 강도도 commander가 요청하고 다른 commander가 승인한다.
+ * 킬스위치·자동화 정지·봇 강도는 commander만 요청·승인·재시도한다. 판매 중지·재개는 operator 이상이 요청하고
+ * 요청자가 아닌 commander가 승인한다(POL-038 ⑩, ADR-0123 결정 2).
  * Degraded Mode(명령 6)는 commander가 요청하고 요청자 아닌 operator 이상이 승인한다(control-tower §3 6행, ADR-0349 결정 6.
  * 명령 5의 같은 어긋남은 BAT-365). 회차 취소(EVENT_CANCEL)는 2인 승인을 유지하되 문서처럼 operator 이상이 승인한다.
  */
@@ -148,8 +149,8 @@ const COMMAND_ROLE_POLICY: Readonly<Record<CommandType, CommandRolePolicy>> = {
   EVENT_REFUND_PAUSE: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
   EVENT_REFUND_RESUME: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
   SCALE_CHANGE: { requesterRoles: ALL_ROLES, approverRoles: ALL_ROLES },
-  SALE_STOP: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
-  SALE_RESUME: { requesterRoles: COMMANDER_ONLY, approverRoles: COMMANDER_ONLY },
+  SALE_STOP: { requesterRoles: ALL_ROLES, approverRoles: COMMANDER_ONLY },
+  SALE_RESUME: { requesterRoles: ALL_ROLES, approverRoles: COMMANDER_ONLY },
 };
 
 /** 되돌리기 요청(명령 3·11)의 승인 역할: 요청자 아닌 operator 이상 1인(T15) */
