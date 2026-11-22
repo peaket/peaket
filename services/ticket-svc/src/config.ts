@@ -24,6 +24,12 @@ export interface TicketServiceConfig {
   readonly scannerMtlsSecret?: string;
   /** 게이트웨이 공개 출처(PEAKET_PUBLIC_ORIGIN). 있으면 DPoP htu를 이 값으로 만든다(C2-09) */
   readonly publicOrigin?: string;
+  /** 받는 사람 참조(recipientRef) HMAC 비밀. local·ci는 기본값, 그 밖은 필수다 */
+  readonly transferRefSecret: string;
+  /** 팬 재인증 토큰 공개키 묶음 주소. 없으면 local·ci는 닫힌 대역(늘 403), 그 밖은 시작하지 않는다 */
+  readonly identityFanJwksUrl?: string;
+  /** 팬 재인증 토큰 발급자. 주소가 있을 때 local·ci만 기본값을 쓴다 */
+  readonly identityIssuer?: string;
 }
 
 export function loadTicketServiceConfig(env: Record<string, string | undefined>): TicketServiceConfig {
@@ -36,6 +42,14 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
   // staging·prod에서 메모리 저장소로 떨어지면 파드마다 등록 코드·jti가 갈라져 재사용이 열린다. 시작을 막는다
   if (!test && !identityGrpcUrl) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(스캐너 세션·관제 역할 판정에 필요하다)');
   if (!test && !redisUrl) throw new Error('PEAKET_TICKET_REDIS_URL이 없다(등록 코드·DPoP jti를 공유해야 한다)');
+  // 받는 사람 참조 서명 비밀: 없으면 운영에서 모든 참조가 확인 실패한다. local·ci만 고정 시험 값을 쓴다
+  const transferRefSecret = env.PEAKET_TRANSFER_REF_SECRET;
+  if (!test && (transferRefSecret === undefined || transferRefSecret.trim() === '')) throw new Error('PEAKET_TRANSFER_REF_SECRET이 없다(양도 받는 사람 참조 서명에 필요하다)');
+  const identityFanJwksUrl = env.PEAKET_IDENTITY_FAN_JWKS_URL;
+  const hasJwks = identityFanJwksUrl !== undefined && identityFanJwksUrl.trim() !== '';
+  const identityIssuer = env.PEAKET_IDENTITY_ISSUER;
+  const hasIssuer = identityIssuer !== undefined && identityIssuer.trim() !== '';
+  if (!test && hasJwks && !hasIssuer) throw new Error('PEAKET_IDENTITY_FAN_JWKS_URL은 있는데 PEAKET_IDENTITY_ISSUER가 없다(기본값 발급자로 뜨면 양도가 늘 403일 수 있다)');
   return {
     databaseUrl,
     grpcHost: env.PEAKET_GRPC_HOST ?? '0.0.0.0',
@@ -48,8 +62,14 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
     ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}),
     ...(env.PEAKET_SCANNER_MTLS_SECRET ? { scannerMtlsSecret: env.PEAKET_SCANNER_MTLS_SECRET } : {}),
     ...(publicOrigin ? { publicOrigin } : {}),
+    transferRefSecret: test ? (transferRefSecret?.trim() || DEFAULT_LOCAL_TRANSFER_SECRET) : transferRefSecret!.trim(),
+    ...(hasJwks ? { identityFanJwksUrl: identityFanJwksUrl.trim() } : {}),
+    ...(hasIssuer ? { identityIssuer: identityIssuer.trim() } : {}),
   };
 }
+
+/** local·ci의 받는 사람 참조 서명 비밀 [가정]. 운영은 PEAKET_TRANSFER_REF_SECRET(Secrets Manager)이다 */
+const DEFAULT_LOCAL_TRANSFER_SECRET = 'peaket-local-transfer-ref-secret';
 
 function scannerMaxOfflineMsOf(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === '') return 24 * 60 * 60_000;

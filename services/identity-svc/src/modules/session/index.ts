@@ -93,3 +93,5 @@ export { contactRefHandlers, investigationRefHandlers } from './inbound/session.
 export { PromSessionSignals } from './adapters/prom-session-signals.js';
 export { GetRecipients } from './application/get-recipients.js';
 export { recipientQueryHandlers } from './inbound/recipient-query.grpc.js';
+export { memberCodeHandlers, RESOLVE_MEMBER_CODES_MAX, type MemberCodeResolver } from './inbound/member-code.grpc.js';
+export { DrizzleMemberCodeResolver } from './adapters/db/drizzle-member-codes.js';

@@ -45,6 +45,8 @@ export const ticket = pgTable(
     transferPending: boolean('transfer_pending').notNull().default(false),
     /** 부정 예매 양도 잠금 사건 ID 자리(후속). */
     fraudLockCaseId: uuid('fraud_lock_case_id'),
+    /** 그 사건이 이 표에 적은 판(ADR-0171, 0010). 같은 사건의 더 큰 판만 반영한다 */
+    fraudLockVersion: bigint('fraud_lock_version', { mode: 'number' }).notNull().default(0),
     version: integer('version').notNull().default(0),
     /** 취소가 입장 시작 전인지 판정하는 회차 시작 시각. 없으면 입장 전으로 본다. */
     eventStartsAt: at('event_starts_at'),
@@ -56,6 +58,50 @@ export const ticket = pgTable(
     index('ticket_order_idx').on(t.orderId, t.issueGeneration),
     check('ticket_status_check', sql`${t.status} IN ('ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED')`),
   ],
+);
+
+/** 양도 요청(0010, BUILD_ORDER GAT-050, docs/data.md `transfer_offer`). id = 요청의 Idempotency-Key */
+export const transferOffer = pgTable(
+  'transfer_offer',
+  {
+    id: uuid('id').primaryKey(),
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => ticket.id),
+    fromAccountId: uuid('from_account_id').notNull(),
+    toAccountId: uuid('to_account_id').notNull(),
+    status: text('status').notNull(),
+    withdrawReason: text('withdraw_reason'),
+    expiresAt: at('expires_at').notNull(),
+    decidedAt: at('decided_at'),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('transfer_offer_open_key').on(t.ticketId).where(sql`${t.status} = 'OFFERED'`),
+    index('transfer_offer_expires_idx').on(t.expiresAt).where(sql`${t.status} = 'OFFERED'`),
+    index('transfer_offer_recipient_idx').on(t.toAccountId, t.status),
+    index('transfer_offer_ticket_idx').on(t.ticketId, t.status),
+    check('transfer_offer_status_check', sql`${t.status} IN ('OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED')`),
+    check(
+      'transfer_offer_withdraw_reason_check',
+      sql`${t.withdrawReason} IS NULL OR ${t.withdrawReason} IN ('SENDER', 'ACCOUNT_DELETED', 'DEPOSIT_ERROR', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'FRAUD_LOCK')`,
+    ),
+  ],
+);
+
+/** 계정 단위 부정 예매 양도 잠금(0010, docs/data.md `fraud_transfer_lock`, ADR-0171·0173) */
+export const fraudTransferLock = pgTable(
+  'fraud_transfer_lock',
+  {
+    caseId: uuid('case_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    locked: boolean('locked').notNull(),
+    version: bigint('version', { mode: 'number' }).notNull(),
+    expiresAt: at('expires_at').notNull(),
+    changedAt: at('changed_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.caseId, t.eventId, t.accountId] })],
 );
 
 /** 입장용 기기 공개키(offline-gate §2·§3, ADR-0025·0051). 티켓당 유효 키 하나, 폐기 키는 목록에 남긴다. */

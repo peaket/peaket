@@ -21,6 +21,8 @@ import type {
 /** 발권 저장 입력: 앱이 만든 멱등 지문을 함께 넘긴다. */
 export interface IssueStoreInput extends IssueTicketsInput {
   readonly fingerprint: string;
+  /** 발권 시각(잠금 판정에 쓴다). 없으면 저장소가 지금 시각을 쓴다 */
+  readonly nowMs?: number;
 }
 
 export interface TicketStore {

@@ -35,6 +35,8 @@ export interface IdentityPackage {
   AdminDesignationService: grpc.ServiceClientConstructor;
   /** 추가 검증 제출의 본인확인 재통과 확인(queue-svc만, bot-defense §5.2 3단계, BOT-090) */
   ReverificationCheckService: grpc.ServiceClientConstructor;
+  /** 회원 코드 일괄 변환(core-svc 판매 자격 명단·ticket-svc 양도 받는 사람 찾기, GAT-050, ADR-0261 결정 6) */
+  MemberCodeService: grpc.ServiceClientConstructor;
   /** 스캐너 경로 가드의 세션 확인(ticket-svc만, offline-gate §6.1, GAT-170) */
   ScannerSessionCheckService: grpc.ServiceClientConstructor;
   /** 알림 받는 사람 묶음(core-svc 팬 알림 발송 워커만, notify §2.1 E6, BAT-455 N-T24) */

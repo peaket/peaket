@@ -6,12 +6,14 @@ import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { verifyInternalGrpcActor } from '@peaket/platform';
 import type { TicketService } from '../application/ticket-service.js';
+import { TransferError } from '../application/transfers.js';
 import { TicketConflictError, TicketInputError } from '../domain/ticket.js';
 
 export interface TicketPackage {
   TicketService: grpc.ServiceClientConstructor;
   ScannerDeviceLookupService: grpc.ServiceClientConstructor;
   ScannerDeviceService: grpc.ServiceClientConstructor;
+  TransferLockService: grpc.ServiceClientConstructor;
 }
 
 /** 이름은 proto 그대로, enum은 이름, int64는 숫자로 읽는다. */
@@ -260,7 +262,60 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
 }
 
 function fail(method: string, err: unknown, orderId: string | undefined, cb: grpc.sendUnaryData<Req>, onError: TicketGrpcErrorLog): void {
-  const code = err instanceof TicketInputError ? grpc.status.INVALID_ARGUMENT : err instanceof TicketConflictError ? grpc.status.FAILED_PRECONDITION : grpc.status.INTERNAL;
+  const invalid = err instanceof TicketInputError || (err instanceof TransferError && err.code === 'INVALID_INPUT');
+  const code = invalid ? grpc.status.INVALID_ARGUMENT : err instanceof TicketConflictError ? grpc.status.FAILED_PRECONDITION : grpc.status.INTERNAL;
   onError(method, err, orderId);
-  cb({ code, details: err instanceof TicketInputError || err instanceof TicketConflictError ? err.message : 'ticket 처리 실패' });
+  cb({ code, details: invalid || err instanceof TicketConflictError ? err.message : 'ticket 처리 실패' });
+}
+
+// ---- 부정 예매 양도 잠금 TransferLockService(BUILD_ORDER GAT-055, ticket.proto, docs/features/transfer-refund.md §4.1) ----
+
+/** TransferLockService의 잠금 판정 유스케이스(Transfers.setTransferLock). 시험은 가짜를 넣는다 */
+export interface TransferLockUseCases {
+  setTransferLock(input: {
+    readonly caseId: string;
+    readonly version: number;
+    readonly locked: boolean;
+    readonly eventId: string;
+    readonly accountIds: readonly string[];
+    readonly expiresAtMs?: number;
+    readonly nowMs: number;
+  }): Promise<readonly { readonly ticketId: string; readonly result: string; readonly withdrawnOfferId?: string; readonly holderAccountId?: string }[]>;
+}
+
+/** 부르는 쪽은 ops-svc뿐이다(§4.1, authz-matrix). 내부 토큰이 설정된 조립은 토큰과 호출자 머리 ops-svc를 요구한다 */
+const TRANSFER_LOCK_CALLER = 'ops-svc';
+
+export function transferLockHandlers(useCases: TransferLockUseCases, onError: TicketGrpcErrorLog, o?: { readonly internalToken?: string }): grpc.UntypedServiceImplementation {
+  return {
+    SetTransferLock: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: TRANSFER_LOCK_CALLER }).ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+        return;
+      }
+      const req = call.request;
+      const expiresAtMs = msOf(req.expires_at);
+      useCases
+        .setTransferLock({
+          caseId: text(req.case_id),
+          version: typeof req.version === 'number' ? req.version : 0,
+          locked: req.locked === true,
+          eventId: text(req.event_id),
+          accountIds: Array.isArray(req.account_ids) ? req.account_ids.map(text) : [],
+          ...(expiresAtMs === undefined ? {} : { expiresAtMs }),
+          nowMs: Date.now(),
+        })
+        .then((outcomes) => {
+          cb(null, {
+            outcomes: outcomes.map((x) => ({
+              ticket_id: x.ticketId,
+              result: `TRANSFER_LOCK_RESULT_${x.result}`,
+              withdrawn_offer_id: x.withdrawnOfferId ?? '',
+              holder_account_id: x.holderAccountId ?? '',
+            })),
+          });
+        })
+        .catch((err: unknown) => fail('SetTransferLock', err, undefined, cb, onError));
+    },
+  };
 }

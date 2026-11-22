@@ -55,6 +55,12 @@ export class MemoryTicketStore implements TicketStore {
   /** (cancellation_id, ticket_id) → 회차 취소 결과(ticket_cancellation의 EVENT_CANCELED 대역). 끝낸 표만 남긴다 */
   readonly eventCancellations = new Map<string, EventCancelOutcome>();
 
+  /**
+   * 잠금 뒤에 발권한 표도 잠그는 조회(부정 예매 양도 잠금, ADR-0171). MemoryTransferStore가 꽂는다.
+   * 없으면 잠금 없이 발권한다(양도 모듈을 쓰지 않는 단위 시험).
+   */
+  fraudLockLookup?: (eventId: string, payerAccountId: string, nowMs: number) => { readonly caseId: string; readonly version: number } | undefined;
+
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
     const key = issueKey(input.orderId, input.issueGeneration);
     const existing = this.issues.get(key);
@@ -62,7 +68,9 @@ export class MemoryTicketStore implements TicketStore {
       if (existing.fingerprint !== input.fingerprint) throw new TicketConflictError('같은 주문·발권 세대에 다른 내용으로 다시 발권할 수 없다');
       return { tickets: existing.tickets.map(withoutKey), replayed: true };
     }
-    const saved = candidates.map(copy);
+    // 잠금이 걸린 계정이 그 회차 표를 새로 사면 발권 때 잠근다(R-T31 ⑬)
+    const lock = this.fraudLockLookup?.(input.eventId, input.payerAccountId, input.nowMs ?? Date.now());
+    const saved = candidates.map((c) => copy(lock ? { ...c, fraudLockCaseId: lock.caseId, fraudLockVersion: lock.version } : c));
     this.issues.set(key, { fingerprint: input.fingerprint, tickets: saved });
     for (const t of saved) this.tickets.set(t.ticketId, t);
     return { tickets: saved, replayed: false };

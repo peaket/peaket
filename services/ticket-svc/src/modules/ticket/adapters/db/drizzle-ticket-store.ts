@@ -1,7 +1,7 @@
 // 운영 티켓 저장소(BUILD_ORDER HOT-160). 발권은 (order_id, issue_generation) PK의 INSERT 경합으로 한 번만 만들고,
 // 취소는 티켓 행 FOR UPDATE 안에서 조건을 보고 (cancellation_id, ticket_id) 취소표를 남긴다.
 import type { Database, DbTransaction } from '@peaket/platform';
-import { and, asc, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { IssueStoreInput, TicketStore } from '../../domain/ports.js';
 import {
   type CancelTicketOutcome,
@@ -28,7 +28,7 @@ import {
   walletCursorOf,
   walletTicketOf,
 } from '../../domain/ticket.js';
-import { ticket, ticketCancellation, ticketIssue, ticketOperatorCancellation } from './schema.js';
+import { ticket, ticketCancellation, ticketIssue, ticketOperatorCancellation, fraudTransferLock } from './schema.js';
 
 /** 발권·취소와 같은 트랜잭션에 스캐너 변경 기록을 넣는 포트(offline-gate §6.3) */
 export interface ScannerChangeWriter {
@@ -73,6 +73,7 @@ const recordOf = (r: Row): TicketRecord => ({
   ...(r.keyRevokedAt ? { keyRevokedAtMs: r.keyRevokedAt.getTime() } : {}),
   transferPending: r.transferPending,
   ...(r.fraudLockCaseId ? { fraudLockCaseId: r.fraudLockCaseId } : {}),
+  fraudLockVersion: Number(r.fraudLockVersion),
   version: r.version,
   issuedAtMs: r.createdAt.getTime(),
   ...(r.eventStartsAt ? { eventStartsAtMs: r.eventStartsAt.getTime() } : {}),
@@ -91,6 +92,8 @@ const valuesOf = (t: TicketRecord) => ({
   qrPayload: t.qrPayload,
   keyHash: t.keyHash,
   transferPending: t.transferPending,
+  fraudLockCaseId: t.fraudLockCaseId ?? null,
+  fraudLockVersion: t.fraudLockVersion ?? 0,
   version: t.version,
   eventStartsAt: t.eventStartsAtMs === undefined ? null : new Date(t.eventStartsAtMs),
   createdAt: new Date(t.issuedAtMs),
@@ -126,7 +129,23 @@ export class DrizzleTicketStore implements TicketStore {
           .orderBy(ticket.seatId);
         return { tickets: rows.map(recordOf), replayed: true };
       }
-      await tx.insert(ticket).values(candidates.map(valuesOf));
+      // 부정 예매 양도 잠금이 걸린 계정이 그 회차 표를 새로 사면 발권 때 잠근다(R-T31 ⑬, ADR-0171).
+      // 입장 시작은 잠금 행에 없으므로 여기서는 기한만 본다(화면·양도 판정은 activeTransferLock이 입장 시작까지 본다).
+      const nowMs = input.nowMs ?? Date.now();
+      const [lock] = await tx
+        .select({ caseId: fraudTransferLock.caseId, version: fraudTransferLock.version })
+        .from(fraudTransferLock)
+        .where(
+          and(
+            eq(fraudTransferLock.eventId, input.eventId),
+            eq(fraudTransferLock.accountId, input.payerAccountId),
+            eq(fraudTransferLock.locked, true),
+            gt(fraudTransferLock.expiresAt, new Date(nowMs)),
+          ),
+        )
+        .orderBy(desc(fraudTransferLock.version))
+        .limit(1);
+      await tx.insert(ticket).values(candidates.map((c) => ({ ...valuesOf(c), ...(lock ? { fraudLockCaseId: lock.caseId, fraudLockVersion: lock.version } : {}) })));
       if (this.o.changes) {
         for (const t of candidates) {
           await this.o.changes.append(tx, input.eventId, 'TICKET_STATUS', { v: 1, ticketId: t.ticketId, status: t.status, version: t.version });

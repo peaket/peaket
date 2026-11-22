@@ -43,6 +43,8 @@ export interface TicketRecord {
   readonly transferPending: boolean;
   /** 부정 예매 양도 잠금 사건 ID 자리(후속). */
   readonly fraudLockCaseId?: string;
+  /** 그 사건이 이 표에 적은 판(ADR-0171). 같은 사건의 더 큰 판만 반영한다 */
+  readonly fraudLockVersion?: number;
   readonly version: number;
   readonly issuedAtMs: number;
   readonly eventStartsAtMs?: number;

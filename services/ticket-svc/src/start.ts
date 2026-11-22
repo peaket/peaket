@@ -3,16 +3,20 @@
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { type AdminAuthzPort, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, type ScannerSessionCheck, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, reauthJtiStoreFromEnv, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { DrizzleDeviceKeyStore } from './modules/ticket/adapters/db/drizzle-device-key-store.js';
 import { DrizzleTicketStore } from './modules/ticket/adapters/db/drizzle-ticket-store.js';
+import { DrizzleTransferStore } from './modules/ticket/adapters/db/drizzle-transfer-store.js';
+import { GrpcMemberCodeDirectory } from './modules/ticket/adapters/identity-member-codes.js';
+import { JwksFanReauthGate } from './modules/ticket/adapters/jwks-fan-reauth-gate.js';
+import { Transfers, type TransferReauthGate } from './modules/ticket/application/transfers.js';
 import { DeviceKeys } from './modules/ticket/application/device-keys.js';
 import { TicketService } from './modules/ticket/application/ticket-service.js';
-import { ticketPackage, ticketServiceHandlers } from './modules/ticket/inbound/ticket.grpc.js';
+import { ticketPackage, ticketServiceHandlers, transferLockHandlers } from './modules/ticket/inbound/ticket.grpc.js';
 import { scannerDeviceHandlers } from './modules/scanner/inbound/scanner-device.grpc.js';
 import { scannerDeviceLookupHandlers } from './modules/scanner/inbound/scanner-device-lookup.grpc.js';
 import {
@@ -69,6 +73,26 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const scannerStore = new DrizzleScannerDeviceStore(database);
     const scannerCommands = new DrizzleScannerDeviceCommandStore(database);
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
+    // 양도·돌려주기(GAT-050·055): 행 잠금 저장소, 재인증 확인기, 회원 코드 찾기.
+    // 팬 공개키 묶음 주소가 없으면 local·ci만 닫힌 대역(늘 403)이고, 그 밖 환경은 설정이 시작을 막는다
+    const transferStore = new DrizzleTransferStore({ database, deviceKeys: deviceKeyStore });
+    const jti = reauthJtiStoreFromEnv(env, redis);
+    const reauth: TransferReauthGate = config.identityFanJwksUrl
+      ? new JwksFanReauthGate({ jwksUrl: config.identityFanJwksUrl, issuer: config.identityIssuer ?? 'https://identity.peaket.example', jti, clock: systemClock })
+      : { verify: async () => false };
+    const memberCodes = config.identityGrpcUrl ? new GrpcMemberCodeDirectory(config.identityGrpcUrl, lbProfile) : undefined;
+    const transfers = new Transfers({
+      store: transferStore,
+      reauth,
+      recipientRefSecret: config.transferRefSecret,
+      clock: systemClock,
+      directory: {
+        resolveMemberCode: async (code: string) => {
+          if (!memberCodes) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없어 회원 코드를 찾지 못한다');
+          return memberCodes.resolveMemberCode(code);
+        },
+      },
+    });
     const codes = redis ? new RedisEnrollmentCodeStore(redis) : new MemoryEnrollmentCodeStore(systemClock);
     const replay = redis ? new RedisDpopReplayStore(redis) : new MemoryDpopReplayStore(systemClock);
     const limiter = redis ? new RedisEnrollmentAttemptLimiter(redis) : new MemoryEnrollmentAttemptLimiter(() => systemClock.now());
@@ -116,7 +140,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           ...(opsAlertSink ? { opsAlert: opsAlertSink } : {}),
           maxOfflineMs: config.scannerMaxOfflineMs,
         },
-        ticket: { deviceKeys },
+        ticket: { deviceKeys, transfers },
       }),
       adminAuthz,
       scanner: {
@@ -202,6 +226,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
             service!.logger.error({ method, err }, 'ScannerDeviceService 처리 실패');
           }),
         },
+        {
+          // 부정 예매 양도 잠금(ops-svc만, GAT-055). 내부 토큰·호출자 검사는 처리기가 한다
+          definition: ticketPackage().TransferLockService.service,
+          handlers: transferLockHandlers({ setTransferLock: (i) => transfers.setTransferLock(i) }, (method, err) => {
+            service!.logger.error({ method, err }, 'TransferLockService 처리 실패');
+          }, { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) }),
+        },
       ],
       internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.ticket.v1.ScannerDeviceService'] },
     });
@@ -225,6 +256,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           await startedSync?.close();
           adminAuthz?.close?.();
           scannerSessions?.close?.();
+          memberCodes?.close();
           await redis?.close().catch(() => {});
           await database.close();
         }

@@ -55,6 +55,8 @@ import {
   staffInvitationUrlFromEnv,
   staffInviteMailerFromEnv,
   withdrawalParticipantsFromEnv,
+  DrizzleMemberCodeResolver,
+  memberCodeHandlers,
 } from './modules/session/index.js';
 import {
   assertKeyVersions,
@@ -139,6 +141,8 @@ const stopInvRefs = invRefStart.stop;
 const contactRefRps = process.env.PEAKET_CONTACT_REF_RPS ? Number(process.env.PEAKET_CONTACT_REF_RPS) : undefined;
 if (contactRefRps !== undefined && !(Number.isInteger(contactRefRps) && contactRefRps > 0)) throw new Error(`PEAKET_CONTACT_REF_RPS가 틀렸다: ${process.env.PEAKET_CONTACT_REF_RPS}`);
 const database = createDatabase({ url, applicationName: SERVICE });
+/** 회원 코드 일괄 변환(GAT-050, ADR-0261 결정 6). 같은 DB의 account.member_code 색인을 읽는다 */
+const memberCodes = new DrizzleMemberCodeResolver(database);
 // 세션·캐시 Redis: 가입 때 연결 제안(id:link, identity §2.1). 운영·데모는 반드시 둔다. 로컬·CI만 없으면 프로세스 메모리로 대신한다(파드가 여럿이면 제안을 잃는다)
 const cacheUrl = process.env.PEAKET_IDENTITY_REDIS_URL;
 // 없거나 비면 운영으로 본다(위 RP 검사·플랫폼 설정과 같다). 로컬에서 Redis 없이 띄우려면 PEAKET_ENV=local을 준다
@@ -345,6 +349,13 @@ const grpc = await startGrpcServer({
     {
       definition: identityPackage().RecipientQueryService.service,
       handlers: recipientQueryHandlers({ recipients: service.app.get(GetRecipients) }, (method, err) => service.logger.error({ err, method }, 'RecipientQueryService 처리 실패')),
+    },
+    // 회원 코드 일괄 변환(core-svc 판매 자격 명단·ticket-svc 양도 받는 사람 찾기, GAT-050, ADR-0261 결정 6)
+    {
+      definition: identityPackage().MemberCodeService.service,
+      handlers: memberCodeHandlers({ resolve: (codes) => memberCodes.resolve(codes) }, (method, err) =>
+        service.logger.error({ err, method }, 'MemberCodeService 처리 실패'),
+      ),
     },
   ],
   internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.identity.v1.AdminAuthzService'] },

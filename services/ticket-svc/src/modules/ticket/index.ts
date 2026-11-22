@@ -5,9 +5,16 @@ export { TicketService, type TicketServiceDeps } from './application/ticket-serv
 export { DeviceKeyError, DeviceKeys, type DeviceKeysDeps, type ReauthGate } from './application/device-keys.js';
 export { deviceKeyMaterialOf, keyIdBytesOf, keyIdTextOf, type DeviceKeyReason, type PublicKeyJwk } from './domain/device-key.js';
 export { MemoryTicketStore } from './adapters/memory-ticket-store.js';
+export { MemoryTransferStore } from './adapters/memory-transfer-store.js';
 export { MemoryDeviceKeyStore } from './adapters/memory-device-key-store.js';
 export { DrizzleTicketStore, type DrizzleTicketStoreOptions } from './adapters/db/drizzle-ticket-store.js';
+export { DrizzleTransferStore, type DrizzleTransferStoreOptions } from './adapters/db/drizzle-transfer-store.js';
 export { DrizzleDeviceKeyStore } from './adapters/db/drizzle-device-key-store.js';
+export { JwksFanReauthGate } from './adapters/jwks-fan-reauth-gate.js';
+export { GrpcMemberCodeDirectory } from './adapters/identity-member-codes.js';
+export { TransferError, Transfers, type TransferReauthGate, type TransferStore, type TransferAct, type TransferOp } from './application/transfers.js';
+export { TransfersController } from './inbound/transfers.controller.js';
+export { transferLockHandlers, type TransferLockUseCases } from './inbound/ticket.grpc.js';
 export { TicketDeviceKeysController } from './inbound/device-keys.controller.js';
 export { TicketModule, type TicketWiring } from './ticket.module.js';
 export { ticketPackage, ticketServiceHandlers, type TicketGrpcUseCases, type TicketPackage } from './inbound/ticket.grpc.js';

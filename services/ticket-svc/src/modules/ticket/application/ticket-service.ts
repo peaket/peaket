@@ -71,7 +71,7 @@ export class TicketService {
       };
     });
     // 저장소가 같은 주문·세대의 경합을 하나로 모은다. 지문은 저장소가 비교한다.
-    return this.deps.store.issue({ ...n, fingerprint }, candidates);
+    return this.deps.store.issue({ ...n, fingerprint, nowMs: now }, candidates);
   }
 
   /** 요청자=결제자=보유자, 양도 요청 없음, 입장 전/후를 저장소 행 잠금 안에서 본다. */
