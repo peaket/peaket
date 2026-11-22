@@ -847,6 +847,7 @@
 | R-753 | 0042가 웹훅 끝점·굿즈 주문·상품 수수료율의 앱 역할 쓰기를 칸·상태·트리거로 좁히고, 트리거 판정을 core_partner 권한을 물려받는 경로(USAGE)에만 둔다 | services/core-svc/migrations/0042_webhook_merch_write_grants.sql·journal, src/modules/shop/adapters/db/drizzle-product-store.ts·notify/adapters/db/drizzle-webhook-store.ts·shop/adapters/db/drizzle-merch-store.ts, test-int/webhook-merch-grants·shop-notify·shop-order·startup-db-role, docs/adr/0338, authz-matrix AZ-T18 | 시험 먼저(0042 없이 AZ-T18 15개·shop-notify 2개 단언 실패) → 구현 → 리뷰(막는 지적 0, RV-01·02) → 검증(정적·최종 CI core 502/503·payment 591/593, Docker 잠금으로 로컬 통합·trace-check·표본 24 보류) | 해결, 남은 검증 몫 |
 | R-754 | purchase-svc P-T36 ③ 진짜 gRPC 시험이 리더 마감 300ms에 첫 연결·늦은 첫 답이 겹치면 거짓 TRANSIENT로 흔들렸다(CI run 44945449240) | services/purchase-svc/test/payment-deposit.test.ts, 계획 W12-pt36 | 같은 리더로 WARM을 미리 묻는 warmUp 뒤에 단언할 호출을 한 번씩, R1·R2 재현·R3·R4 고정 | 해결(RVpt-3 남은 위험은 정리 목록) |
 | R-755 | purchase-svc 기존 실패 둘이 제품 결함이 아니라 시험 결함이었다(0014 CHECK 기대 6≠8, GAT-110 P3 Outbox 파티션 밖) | services/purchase-svc/test-int/purchase-migration.int.test.ts·event-refund.int.test.ts, 계획 W12-purchase-fixes | 0030·0031 CHECK 이름 추가, P3에 주입 시계·그 날 파티션 | 해결 |
+| R-756 | 날짜 고정 판매 열기 시험이 2026-11-29·12-02/03이 지나면 now < openAt·판매 종료 규칙·PEXPIREAT 만료 때문에 실패할 수 있었다 | services/purchase-svc/test-int/sale-open.int.test.ts, services/core-svc/test-int/sale-open.int.test.ts, services/core-svc/test/partner-production.http.test.ts, 계획 W12-datefix | 오픈·시작을 Date.now()+n일로, 만료 단언도 같은 값에서, HTTP는 UTC 11:00으로 정비 창 회피 | 해결. 리뷰·검증 막는 지적 없음 |
 
 ## 4. 숫자 일치표
 
