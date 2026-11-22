@@ -3,13 +3,13 @@
 - **무엇**: core-svc의 파트너 웹훅 발송기(사건을 파트너 주소로 서명해 보내는 주기 작업과 내부 입구)가 지금 팬 경로 DB 역할 `core_app`으로 붙는다. 그래서 팬 경로 쿼리 하나로 ① 아무 끝점·아무 본문의 발송 행을 넣으면 발송기가 그 파트너 비밀로 서명해 보낸다(사칭) ② 발송 원장의 상태를 고쳐 진짜 사건을 DEAD로 만들거나 끝난 행을 PENDING으로 되돌린다 ③ 모든 끝점의 주소·비밀을 읽고 켜진 끝점을 `FAILING`으로 끈다. 이 묶음은 발송기 전용 그룹 역할 `core_notify`(로그인 불가·`NOBYPASSRLS`)와 그 역할이 실제로 쓰는 표·명령·칸만 주고, 발송기를 `PEAKET_NOTIFY_DATABASE_URL` 연결로 옮긴다. 검증 기록이고 규범이 아니다. 정본은 `docs/`를 따르고 정본을 고친다.
 - **바탕**: 작업 폴더 `D:/ticketpass-lane3`, 가지 `feature/lane3-W12-core-notify`, 출발점 `origin/develop` `9b7ed40ff`(R-755). 설계 출발점은 W12-core-rls2 계획 §13.1(발송 원장 `webhook_delivery`와 발송기 전용 역할 `core_notify`), ADR-0338 '결과'의 남는 한계다.
 - **급·차례**: 시험 먼저. 계획 → 시험(구현 전 트리의 실패 확인) → 구현 → 리뷰(보안) → 리뷰 반영 → 검증(틀린 구현 표본) → 기록. 커밋 꼬리말에 단계마다 `Role`·`Agent-Session`·`Batch`를 달고, `Agent-Model: deepseek-v4.1-flash`를 함께 적는다.
-- **정본**: [ADR-0350](../../adr/0350-core-notify-sender-dedicated-db-role.md)(새), [ADR-0338](../../adr/0338-core-webhook-endpoint-merch-order-write-grants.md) 결정 1·2와 '결과', [ADR-0241](../../adr/0241-core-svc-partner-row-security.md) 결정 1·4·7, [devops.md](../../devops.md) §7.1, [authz-matrix](../../security/authz-matrix.md) §5.3·§7 **AZ-T19**(새 시험 ID), [data.md](../../data.md) `webhook_endpoint`·`webhook_delivery`, [asvs/notify](../../security/asvs/notify.md) 8.4.1·13.2.2, [notify.md](../../features/notify.md) §9·§13, [W12-core-rls2 계획](W12-core-rls2.md) §13.1.
+- **정본**: [ADR-0351](../../adr/0351-core-notify-sender-dedicated-db-role.md)(새), [ADR-0338](../../adr/0338-core-webhook-endpoint-merch-order-write-grants.md) 결정 1·2와 '결과', [ADR-0241](../../adr/0241-core-svc-partner-row-security.md) 결정 1·4·7, [devops.md](../../devops.md) §7.1, [authz-matrix](../../security/authz-matrix.md) §5.3·§7 **AZ-T19**(새 시험 ID), [data.md](../../data.md) `webhook_endpoint`·`webhook_delivery`, [asvs/notify](../../security/asvs/notify.md) 8.4.1·13.2.2, [notify.md](../../features/notify.md) §9·§13, [W12-core-rls2 계획](W12-core-rls2.md) §13.1.
 
 ## 결과 요약
 
 | 위험 | 지금(출발점) | 이 묶음 뒤 | 남는 것 |
 | --- | --- | --- | --- |
-| 발송 행 사칭 | `core_app`이 `webhook_delivery`에 아무 행이나 넣고, 발송기가 그 행을 파트너 비밀로 서명해 보낸다 | 발송기는 `core_notify`로만 원장에 넣는다. 팬 경로 코드는 `core_notify` 연결을 받지 못한다 | `core_app`의 원장 권한은 다음 배포까지 남는다(두 번 나눔, ADR-0350 결정 5). 그동안 팬 경로 쿼리 하나로 사칭 행을 넣는 길은 닫히지 않는다 |
+| 발송 행 사칭 | `core_app`이 `webhook_delivery`에 아무 행이나 넣고, 발송기가 그 행을 파트너 비밀로 서명해 보낸다 | 발송기는 `core_notify`로만 원장에 넣는다. 팬 경로 코드는 `core_notify` 연결을 받지 못한다 | `core_app`의 원장 권한은 다음 배포까지 남는다(두 번 나눔, ADR-0351 결정 5). 그동안 팬 경로 쿼리 하나로 사칭 행을 넣는 길은 닫히지 않는다 |
 | 원장 상태 조작 | `core_app`이 모든 원장 행의 상태를 고친다 | `core_notify`는 `PENDING`·`RETRYING` 행만 고치고, `payload`·`endpoint_id`·`webhook_id`·`event_type`·`created_at`은 고치지 못한다. 끝난 행을 되돌리지 못한다 | 팬 경로 역할의 권한은 다음 배포까지 남는다 |
 | 끝점 비밀 읽기·끄기 | `core_app`이 모든 끝점의 비밀을 읽고 켜진 끝점을 끈다 | 발송기 역할 `core_notify`가 그 일을 하고, 팬 경로 역할은 다음 배포에서 거둔다 | 팬 경로 역할의 읽기·끄기는 다음 배포까지 남는다 |
 | 잘못된 연결로 시작 | 발송기가 팬 경로 풀을 쓴다 | `PEAKET_NOTIFY_DATABASE_URL`이 없거나 `core_notify`가 아닌 로그인(슈퍼유저·다른 역할 겸함 포함)이면 서비스가 시작하지 않는다 | 없음 |
@@ -33,7 +33,7 @@
 | `lastSuccessAt` | `webhook_delivery` | SELECT max | `endpoint_id`·`status`·`finished_at` | — |
 
 - 팬 경로의 다른 코드는 두 표를 읽지도 쓰지도 않는다(`grep -rn "webhookDelivery\|webhook_delivery\|webhookEndpoint" services/core-svc/src`가 notify 모듈만 준다). 파트너 경로(`core_partner`)는 끝점 관리와 다시 보내기(`redeliver`, 원장 상태 되돌리기)를 그대로 쓴다. 이 묶음은 파트너 역할의 권한을 바꾸지 않는다.
-- **`core_app`에서 거둘 것**(다음 배포, ADR-0350 결정 5): 두 표의 읽기(기본 권한으로 받은 것), `webhook_endpoint` 고치기 세 칸, `webhook_delivery` 넣기·고치기, 정책 넷(`webhook_endpoint_app_read`·`webhook_endpoint_app_disable`·`webhook_delivery_app_read`·`webhook_delivery_app_all`).
+- **`core_app`에서 거둘 것**(다음 배포, ADR-0351 결정 5): 두 표의 읽기(기본 권한으로 받은 것), `webhook_endpoint` 고치기 세 칸, `webhook_delivery` 넣기·고치기, 정책 넷(`webhook_endpoint_app_read`·`webhook_endpoint_app_disable`·`webhook_delivery_app_read`·`webhook_delivery_app_all`).
 
 ### 1.2 새 역할이 받을 권한·정책
 
@@ -75,7 +75,7 @@
   1. 발송기가 `core_notify` 역할로만 두 표를 쓴다. 발송기가 쓰는 8개 메서드가 실제 PostgreSQL에서 그대로 돈다.
   2. `core_notify`는 다른 표를 읽거나 쓰지 못하고, `webhook_endpoint`의 비밀을 고치지 못하며, 끝난 원장 행을 되돌리지 못한다.
   3. `PEAKET_NOTIFY_DATABASE_URL`이 없거나 `core_notify`가 아닌 로그인으로 시작하면 프로세스가 시작하지 않는다.
-  4. 정본(ADR-0350, authz-matrix §5.3·§7, data.md, notify.md §13)과 배포 값이 코드와 같은 말을 한다.
+  4. 정본(ADR-0351, authz-matrix §5.3·§7, data.md, notify.md §13)과 배포 값이 코드와 같은 말을 한다.
 - **비목표**
   - `core_app` 권한 회수(다음 배포).
   - 파트너 역할(`core_partner`)의 웹훅 관리 권한 변경.
@@ -113,17 +113,17 @@
 
 | 이름 | 값·모양 | 정하는 곳 |
 | --- | --- | --- |
-| 환경 변수 | `PEAKET_NOTIFY_DATABASE_URL`(필수, 없으면 시작 실패) | 이 계획, ADR-0350 결정 2 |
-| DB 역할 | `core_notify`, `NOLOGIN NOSUPERUSER NOBYPASSRLS` | ADR-0350 결정 1 |
-| 연결 풀 | `core-svc-notify`, 최대 4 [가정] | ADR-0350 결정 2 |
-| 시작 확인 | `assertDatabaseRole(notifyDatabase, 'core_notify')` | ADR-0241 결정 7, ADR-0350 결정 4 |
-| `webhook_endpoint` 권한 | `SELECT`(표), `UPDATE ("status","disabled_reason","version")` | ADR-0350 결정 3 |
-| `webhook_endpoint` 정책 | `webhook_endpoint_notify_read`(SELECT, `true`), `webhook_endpoint_notify_disable`(UPDATE, USING `status='ACTIVE'`, WITH CHECK `status='DISABLED' AND disabled_reason='FAILING'`) | ADR-0350 결정 3 |
-| `webhook_delivery` 권한 | `SELECT, INSERT`(표), `UPDATE ("status","attempt_count","last_http_status","last_error","next_attempt_at","finished_at","lease_until")` | ADR-0350 결정 3 |
-| `webhook_delivery` 정책 | `webhook_delivery_notify_read`(SELECT, `true`), `webhook_delivery_notify_insert`(INSERT, `true`), `webhook_delivery_notify_update`(UPDATE, USING `status IN ('PENDING','RETRYING')`, WITH CHECK `status IN ('PENDING','RETRYING','SUCCEEDED','DEAD')`) | ADR-0350 결정 3 |
+| 환경 변수 | `PEAKET_NOTIFY_DATABASE_URL`(필수, 없으면 시작 실패) | 이 계획, ADR-0351 결정 2 |
+| DB 역할 | `core_notify`, `NOLOGIN NOSUPERUSER NOBYPASSRLS` | ADR-0351 결정 1 |
+| 연결 풀 | `core-svc-notify`, 최대 4 [가정] | ADR-0351 결정 2 |
+| 시작 확인 | `assertDatabaseRole(notifyDatabase, 'core_notify')` | ADR-0241 결정 7, ADR-0351 결정 4 |
+| `webhook_endpoint` 권한 | `SELECT`(표), `UPDATE ("status","disabled_reason","version")` | ADR-0351 결정 3 |
+| `webhook_endpoint` 정책 | `webhook_endpoint_notify_read`(SELECT, `true`), `webhook_endpoint_notify_disable`(UPDATE, USING `status='ACTIVE'`, WITH CHECK `status='DISABLED' AND disabled_reason='FAILING'`) | ADR-0351 결정 3 |
+| `webhook_delivery` 권한 | `SELECT, INSERT`(표), `UPDATE ("status","attempt_count","last_http_status","last_error","next_attempt_at","finished_at","lease_until")` | ADR-0351 결정 3 |
+| `webhook_delivery` 정책 | `webhook_delivery_notify_read`(SELECT, `true`), `webhook_delivery_notify_insert`(INSERT, `true`), `webhook_delivery_notify_update`(UPDATE, USING `status IN ('PENDING','RETRYING')`, WITH CHECK `status IN ('PENDING','RETRYING','SUCCEEDED','DEAD')`) | ADR-0351 결정 3 |
 | 마이그레이션 | `services/core-svc/migrations/0043_core_notify_role.sql`, 저널 idx 43 | data.md, 이 계획 |
 | 시험 ID | `AZ-T19` ①~⑧ | authz-matrix §7 |
-| 배포 값 | `tools/local/demo-objects.mjs`의 `core_notify_login`·`coreNotify`·`demo-core`의 `PEAKET_NOTIFY_DATABASE_URL` | ADR-0350 결정 2 |
+| 배포 값 | `tools/local/demo-objects.mjs`의 `core_notify_login`·`coreNotify`·`demo-core`의 `PEAKET_NOTIFY_DATABASE_URL` | ADR-0351 결정 2 |
 | 시작 확인 시험 | `services/core-svc/test-int/startup-db-role.int.test.ts`에 `PEAKET_NOTIFY_DATABASE_URL` 경우를 더한다 | 이 계획 §8 |
 
 ## 6. 보안 위협과 운영 확인
@@ -149,7 +149,7 @@
 
 | 담당 | 파일 | 할 일 |
 | --- | --- | --- |
-| 계획 | `docs/review/plans/W12-core-notify.md`(새), `docs/adr/0350-core-notify-sender-dedicated-db-role.md`(새), `docs/security/authz-matrix.md` §7 AZ-T19, `docs/BUILD_ORDER.md` 묶음 줄 | 결정·시험 ID·장부 범위 먼저 |
+| 계획 | `docs/review/plans/W12-core-notify.md`(새), `docs/adr/0351-core-notify-sender-dedicated-db-role.md`(새), `docs/security/authz-matrix.md` §7 AZ-T19, `docs/BUILD_ORDER.md` 묶음 줄 | 결정·시험 ID·장부 범위 먼저 |
 | 시험 | `services/core-svc/test-int/notify-role.int.test.ts`(새) | AZ-T19 ①~③·⑤~⑧ |
 | 시험 | `services/core-svc/test-int/startup-db-role.int.test.ts` | ④와 '환경 변수 없음' 경우 |
 | 시험 | `services/core-svc/test-int/roles.ts` | 역할 목록에 `core_notify` |
@@ -181,7 +181,7 @@
 | `AZ-T19 ④ 운영 시작 파일은 PEAKET_NOTIFY_DATABASE_URL이 없거나 core_notify가 아닌 로그인으로 시작하면 뜨지 않는다 [ASVS v5.0.0-8.4.1]` | `dist/main.js`를 띄운다. (가) `PEAKET_NOTIFY_DATABASE_URL` 없음 → 종료 코드 1, `PEAKET_NOTIFY_DATABASE_URL이 없다` (나) `core_app_login` 주소 → 종료 코드 1, `core_notify 역할이 아니다` (다) 슈퍼유저 주소 → 종료 코드 1, `core_notify로 접속해야 한다` (라) `core_notify_login` 주소 → 30초 안에 뜨고 죽이면 `stillRunning` | 실패(가~다는 그대로 뜨고, 라는 시작 확인이 없다) |
 | `AZ-T19 ⑤ core_notify는 끝난 발송 원장 행을 되돌리거나 본문·식별 칸을 고치지 못한다 [ASVS v5.0.0-8.4.1]` | `payload`·`endpoint_id`·`webhook_id`·`event_type`·`created_at` 고치기 → 42501. D1(`DEAD`)을 `PENDING`으로 → 0행. S1(`SUCCEEDED`)을 `RETRYING`으로 → 0행. P1(`PENDING`)을 `DEAD`·`finished_at`으로 → 1행 | 실패(역할 없음) |
 | `AZ-T19 ⑥ core_notify는 끝점을 넣거나 두 표의 행을 지우지 못한다 [ASVS v5.0.0-8.4.1]` | `webhook_endpoint` INSERT → 42501. 두 표 DELETE → 42501. `TRUNCATE webhook_delivery` → 42501 | 실패(역할 없음) |
-| `AZ-T19 ⑦ core_notify 역할·정책·칸 권한이 ADR-0350 결정 1·3과 같고 표 소유자가 아니며 FORCE가 없다 [ASVS v5.0.0-8.4.1]` | `pg_roles`: `rolcanlogin` 거짓·`rolsuper` 거짓·`rolbypassrls` 거짓. `pg_class`: 두 표 `relrowsecurity` 참·`relforcerowsecurity` 거짓, 소유자가 `core_notify`·로그인 사용자 아님. `pg_policies` 이름·명령·역할·`qual`·`with_check`가 1.2와 같다. `has_table_privilege`·`has_column_privilege`로 끝점 UPDATE는 표 거짓·세 칸 참·나머지 거짓, 원장 UPDATE는 표 거짓·일곱 칸 참·`payload` 등 거짓, 원장 INSERT·SELECT 참, 두 표 DELETE 거짓. `pg_has_role('core_notify','core_app','member')` 거짓 | 실패(역할 없음) |
+| `AZ-T19 ⑦ core_notify 역할·정책·칸 권한이 ADR-0351 결정 1·3과 같고 표 소유자가 아니며 FORCE가 없다 [ASVS v5.0.0-8.4.1]` | `pg_roles`: `rolcanlogin` 거짓·`rolsuper` 거짓·`rolbypassrls` 거짓. `pg_class`: 두 표 `relrowsecurity` 참·`relforcerowsecurity` 거짓, 소유자가 `core_notify`·로그인 사용자 아님. `pg_policies` 이름·명령·역할·`qual`·`with_check`가 1.2와 같다. `has_table_privilege`·`has_column_privilege`로 끝점 UPDATE는 표 거짓·세 칸 참·나머지 거짓, 원장 UPDATE는 표 거짓·일곱 칸 참·`payload` 등 거짓, 원장 INSERT·SELECT 참, 두 표 DELETE 거짓. `pg_has_role('core_notify','core_app','member')` 거짓 | 실패(역할 없음) |
 | `AZ-T19 ⑧ 실제 발송기를 core_notify 저장소로 돌리면 구독한 끝점에 서명해 보내고 성공을 원장에 남긴다 [ASVS v5.0.0-8.4.1]` | `WebhookDispatcher({ store: new DrizzleWebhookStore(notifyDb), transport: <200 받는 가짜>, clock })`로 `enqueue({promoterId:B, eventType:'order.confirmed', …})` → 수신기가 E에 1건, `webhook-signature`가 시험에서 만든 HMAC과 같다. `processDue(NOW)` → `{attempted:1, succeeded:1}`, `admin`으로 그 행이 `SUCCEEDED`·`finished_at=NOW` | 실패(역할 없음) |
 
 - **회귀(게이트에서 돈다)**: `test-int/startup-db-role.int`, `test-int/shop-notify.int`, `test-int/webhook-lease.int`, `test-int/webhook-lease-concurrent.int`, `test-int/webhook-merch-grants.int`(AZ-T18 ③은 이 묶음 뒤에도 `core_app`으로 돌아 통과해야 한다), `test/webhook-dispatcher.test.ts`, `test/migrations-journal.test.ts`, `node --test tools/local/demo-objects.test.mjs`.
@@ -241,7 +241,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | 잡 | 왜 |
 | --- | --- |
 | `ci.yml` → `ci-node.yml` / node | core-svc typecheck·단위·통합 시험 |
-| `docs-check` | ADR-0350·authz-matrix·data.md·notify.md·이 계획 |
+| `docs-check` | ADR-0351·authz-matrix·data.md·notify.md·이 계획 |
 | `lint-guard` | core-svc 어댑터 층 주석·배포 값 |
 | `tools-check` | `tools/local/demo-objects.test.mjs` |
 
@@ -270,14 +270,14 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 리뷰
 
-리뷰 담당(보안 관점, 다른 세션 `lane3-w12corenotify-review`)이 0043·`main.ts`·`NotifyModule`·`assertDatabaseRole`·배포 값·시험을 견줬다. 기준은 ADR-0350 결정 1~5, ADR-0241 결정 1·4·6·7, devops.md §7.1, plan §1.2·§4다.
+리뷰 담당(보안 관점, 다른 세션 `lane3-w12corenotify-review`)이 0043·`main.ts`·`NotifyModule`·`assertDatabaseRole`·배포 값·시험을 견줬다. 기준은 ADR-0351 결정 1~5, ADR-0241 결정 1·4·6·7, devops.md §7.1, plan §1.2·§4다.
 
 | # | 지적 | 판정 | 고침 |
 | --- | --- | --- | --- |
 | RV-01 | **막음**: `assertDatabaseRole`의 소유자 검사가 `production`·`event`만 본다. `core_notify` 로그인이 `webhook_endpoint`·`webhook_delivery`의 소유자이면 행 보안을 건너뛰는데도 시작 확인이 통과한다. 계획 §4 '발송기 주소가 슈퍼유저·표 소유자'의 기대와 어긋난다 | 막음(중간) | 소유자 검사 표 목록에 두 표를 더한다. 시험은 발송기 로그인이 소유한 같은 이름의 표를 별도 스키마에 만들어 `dist/main.js`가 소유자로 멈추는지 본다(시험 먼저) |
-| RV-02 | 원장 INSERT 정책이 `true`라 `core_notify` 권한을 가진 코드는 아무 끝점·아무 사건의 발송 행을 넣을 수 있다. 발송기 코드 자체가 그 일을 하므로 역할 안에서는 막지 못한다 | 막지 않음(남는 위험) | ADR-0350 '결과'와 계획 §12에 적었다. 팬 경로 역할이 이 연결을 받지 못하는 것이 이 묶음의 경계다 |
+| RV-02 | 원장 INSERT 정책이 `true`라 `core_notify` 권한을 가진 코드는 아무 끝점·아무 사건의 발송 행을 넣을 수 있다. 발송기 코드 자체가 그 일을 하므로 역할 안에서는 막지 못한다 | 막지 않음(남는 위험) | ADR-0351 '결과'와 계획 §12에 적었다. 팬 경로 역할이 이 연결을 받지 못하는 것이 이 묶음의 경계다 |
 | RV-03 | `NotifyModule`의 database 갈래가 `database` 인자를 계속 받지만 쓰지 않는다. 나중에 누가 그 인자를 `NOTIFY_APP_STORE`에 다시 잇는 실수를 부를 수 있다 | 막지 않음(정리) | RV-01 고침 커밋에서 `database` 인자를 없애 `notifyDatabase`만 남긴다 |
-| RV-04 | 운영 Secret에 `PEAKET_NOTIFY_DATABASE_URL`을 넣는 일은 이 저장소 밖(배포 묶음)이다. 새 코드는 그 값이 없으면 시작하지 않으므로 배포 순서가 틀리면 파드가 뜨지 않는다 | 막지 않음(배포 절차) | 계획 §감독에게 2와 ADR-0350 결정 2에 적었다. 로컬 데모 Secret은 이 묶음이 채웠다 |
+| RV-04 | 운영 Secret에 `PEAKET_NOTIFY_DATABASE_URL`을 넣는 일은 이 저장소 밖(배포 묶음)이다. 새 코드는 그 값이 없으면 시작하지 않으므로 배포 순서가 틀리면 파드가 뜨지 않는다 | 막지 않음(배포 절차) | 계획 §감독에게 2와 ADR-0351 결정 2에 적었다. 로컬 데모 Secret은 이 묶음이 채웠다 |
 | RV-05 | AZ-T19 ⑦이 `core_notify` 정책만 골라 보고, 같은 표에 남은 `core_app` 정책은 보지 않는다. 회수 전 상태를 시험하지 않는다는 계획 §8의 결정과 같다 | 막지 않음(의도) | 다음 배포의 회수 시험이 `core_app`의 42501과 정책 삭제를 본다 |
 
 - 그 밖에 확인한 것: 0043의 REVOKE→GRANT 차례(0042와 같다), 정책 식의 상태 조건, `webhook_delivery` UPDATE 칸 일곱과 `payload` 제외, 시작 확인 3종(없음·다른 역할·슈퍼유저)의 프로세스 시험, `AppModule.register`의 필수 인자, 데모 `core_notify_login`·Secret, 정본 문장(§5.3·§7·data.md·notify.md §13). 막는 지적은 RV-01 하나다.
@@ -326,7 +326,7 @@ node tools/ci/ledger.mjs --batch W12-core-notify --require
 - 처음에 놓친 표본 셋을 시험 보강으로 잡았다(V-01). M3은 ③에 '켜진 B1을 사유 PARTNER로 끄기'가 없어, M9는 NOTIFY_APP_STORE 배선을 보는 시험이 없어, M7은 '변수 없음'을 빈 문자열로 만들어 `??` 변이를 지나쳐서 놓쳤다. ③은 허용 끄기와 함께 칸을 고치고 트랜잭션을 되돌리는 꼴로, ⑧은 닿지 않는 notifyDatabase를 주는 꼴로, ④는 키를 지운 환경으로 고쳤다.
 - M10의 첫 변이(`$$;` 뒤에 `ALTER ROLE`을 붙임)는 마이그레이션 실행기가 `42601`로 멈춰 ⑦에 닿지 않았다. 역할 생성 속성과 가드를 함께 바꾼 표본으로 다시 돌려 ⑦을 잡았다.
 - 표본마다 `git checkout -- <파일>`로 되돌렸고, 끝난 뒤 `git status --short`에 표본 변경이 없었다(추적 안 된 `.lock-try.log`만 남았다).
-- 남은 위험: RV-02(원장 INSERT 정책 `true`), `core_app`의 옛 권한(다음 배포), 운영 Secret 추가(배포 묶음). 계획 §12와 ADR-0350에 적었다.
+- 남은 위험: RV-02(원장 INSERT 정책 `true`), `core_app`의 옛 권한(다음 배포), 운영 Secret 추가(배포 묶음). 계획 §12와 ADR-0351에 적었다.
 
 ## 담당 표
 
@@ -335,6 +335,7 @@ node tools/ci/ledger.mjs --batch W12-core-notify --require
 | plan | lane3-w12corenotify-plan | deepseek-v4.1-flash | 2026-11-22T10:30+09:00 | 2026-11-22T11:00+09:00 |
 | test | lane3-w12corenotify-test | deepseek-v4.1-flash | 2026-11-22T11:00+09:00 | 2026-11-22T11:40+09:00 |
 | impl | lane3-w12corenotify-impl | deepseek-v4.1-flash | 2026-11-22T11:40+09:00 | 2026-11-22T12:20+09:00 |
+| impl | lane3-w12corenotify-adrfix | deepseek-v4.1-flash | 2026-11-22T13:20+09:00 | 2026-11-22T13:40+09:00 |
 | review | lane3-w12corenotify-review | deepseek-v4.1-flash | 2026-11-22T12:20+09:00 | 2026-11-22T12:40+09:00 |
 | verify | lane3-w12corenotify-verify | deepseek-v4.1-flash | 2026-11-22T12:40+09:00 | 2026-11-22T13:20+09:00 |
 

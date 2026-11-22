@@ -1807,7 +1807,7 @@ erDiagram
         text previous_secret "비밀을 바꾼 뒤 24시간 함께 서명하는 옛 비밀(ADR-0053)"
         text_array event_types "구독한 이벤트 type(ADR-0062)"
         text status "ACTIVE|DISABLED"
-        text disabled_reason "PARTNER|FAILING. FAILING은 5일 [가정] 동안 성공 없이 DEAD 50건 [가정] 넘음(추천 적용 2026-10-30, docs/features/notify.md §9). 자동 전환은 발송기가 한다. 발송기는 전용 DB 역할 core_notify로 이 표를 읽고 켜진 끝점을 FAILING으로 끄는 세 칸(status·disabled_reason·version)만 고친다(ADR-0350 결정 3, ADR-0338 결정 1). 팬 경로 역할 core_app의 같은 권한은 다음 배포에서 거둔다(두 번 나눔, ADR-0350 결정 5)"
+        text disabled_reason "PARTNER|FAILING. FAILING은 5일 [가정] 동안 성공 없이 DEAD 50건 [가정] 넘음(추천 적용 2026-10-30, docs/features/notify.md §9). 자동 전환은 발송기가 한다. 발송기는 전용 DB 역할 core_notify로 이 표를 읽고 켜진 끝점을 FAILING으로 끄는 세 칸(status·disabled_reason·version)만 고친다(ADR-0351 결정 3, ADR-0338 결정 1). 팬 경로 역할 core_app의 같은 권한은 다음 배포에서 거둔다(두 번 나눔, ADR-0351 결정 5)"
         timestamptz secret_issued_at "현재 비밀을 발급한 시각. 1분 안 재발급은 409"
         timestamptz previous_secret_valid_until "옛 비밀 서명을 그만 붙이는 시각"
         int version "PATCH의 If-Match 판(guidelines §12)"
@@ -1817,14 +1817,14 @@ erDiagram
         uuid endpoint_id FK "webhook_endpoint.id"
         text webhook_id "webhook-id(사건 키, 재전송에도 같음). (endpoint_id, webhook_id) 유일"
         text event_type
-        text status "PENDING|RETRYING|SUCCEEDED|DEAD(DLQ). 발송기 역할 core_notify는 지금 도는 행(PENDING·RETRYING)만 결과로 바꾸고 끝난 행은 되돌리지 못한다(ADR-0350 결정 3)"
+        text status "PENDING|RETRYING|SUCCEEDED|DEAD(DLQ). 발송기 역할 core_notify는 지금 도는 행(PENDING·RETRYING)만 결과로 바꾸고 끝난 행은 되돌리지 못한다(ADR-0351 결정 3)"
         int attempt_count
         timestamptz next_attempt_at "발송기가 쓸 시각. 부분 인덱스는 발송기와 함께 후속"
         int last_http_status
         text last_error "응답이 없을 때의 분류(TIMEOUT·TLS·DNS_BLOCKED·REDIRECT 등). 응답 본문은 두지 않음(추천 적용 2026-10-30)"
         timestamptz created_at
         timestamptz finished_at "SUCCEEDED·DEAD가 된 시각. 30일 [가정] 뒤 지움"
-        jsonb payload "thin 본문. 발송기 역할은 넣을 때만 쓰고 고치지 못한다(ADR-0350 결정 3)"
+        jsonb payload "thin 본문. 발송기 역할은 넣을 때만 쓰고 고치지 못한다(ADR-0351 결정 3)"
     }
     notification_job {
         text dedup_key PK "notification_dedup과 같은 중복 키"

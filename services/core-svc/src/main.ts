@@ -65,7 +65,7 @@ if (!opsUrl) throw new Error('PEAKET_OPS_DATABASE_URL이 없다(비밀 관리에
 // 검색 전용 연결의 DB 사용자(core_search, 검색 표 넷 읽기만, ADR-0271 결정 18). 운영은 읽기 전용 복제본 주소다. 앱 주소로 대신하지 않는다
 const searchUrl = process.env.PEAKET_SEARCH_DATABASE_URL;
 if (!searchUrl) throw new Error('PEAKET_SEARCH_DATABASE_URL이 없다(검색 전용 core_search 사용자, 비밀 관리에서 넣는다)');
-// 웹훅 발송기 전용 연결의 DB 사용자(core_notify, ADR-0350). 팬 경로 주소로 조용히 되돌아가지 않는다
+// 웹훅 발송기 전용 연결의 DB 사용자(core_notify, ADR-0351). 팬 경로 주소로 조용히 되돌아가지 않는다
 const notifyUrl = process.env.PEAKET_NOTIFY_DATABASE_URL;
 if (!notifyUrl) throw new Error('PEAKET_NOTIFY_DATABASE_URL이 없다(웹훅 발송기 전용 core_notify 사용자, 비밀 관리에서 넣는다)');
 
@@ -177,7 +177,7 @@ const consumerDatabase = createDatabase({ url, applicationName: `${SERVICE}-cons
 const SEARCH_POOL_MAX = 10;
 const SEARCH_POOL_WAIT_MS = 100;
 const searchDatabase = createDatabase({ url: searchUrl, applicationName: `${SERVICE}-search`, max: SEARCH_POOL_MAX, connectionTimeoutMillis: SEARCH_POOL_WAIT_MS });
-// 웹훅 발송기 전용 풀(core_notify, ADR-0350 결정 2). 발송 주기 5초·한 번에 100행과 내부 입구가 함께 쓴다
+// 웹훅 발송기 전용 풀(core_notify, ADR-0351 결정 2). 발송 주기 5초·한 번에 100행과 내부 입구가 함께 쓴다
 const NOTIFY_POOL_MAX = 4;
 const notifyDatabase = createDatabase({ url: notifyUrl, applicationName: `${SERVICE}-notify`, max: NOTIFY_POOL_MAX });
 // 소유자 주소를 넣거나 역할을 겸하면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
@@ -250,7 +250,7 @@ await service.listen();
 // 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기 → 주기 일. 둘 다 준비 확인에 넣지 않는다: 그동안 /ready는 200이고 검색은 표에 있는 줄로, 자동완성은 빈 후보·no-store로 답한다(결정 14)
 await searchTimers.start();
 
-// 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다. 저장소는 core_notify 연결이다(ADR-0350)
+// 웹훅 발송기(BUILD_ORDER BAT-610 잔여). PEAKET_WEBHOOK_WORKER=off면 켜지 않는다. 저장소는 core_notify 연결이다(ADR-0351)
 const webhookWorker =
   process.env.PEAKET_WEBHOOK_WORKER === 'off'
     ? undefined

@@ -344,7 +344,7 @@ export function demoSecrets(o) {
       PEAKET_PARTNER_DATABASE_URL: urls.corePartner,
       PEAKET_OPS_DATABASE_URL: urls.coreOps,
       PEAKET_SEARCH_DATABASE_URL: urls.coreSearch,
-      // 웹훅 발송기 전용 core_notify 연결(ADR-0350). 팬 경로 주소로 대신하지 않는다
+      // 웹훅 발송기 전용 core_notify 연결(ADR-0351). 팬 경로 주소로 대신하지 않는다
       PEAKET_NOTIFY_DATABASE_URL: urls.coreNotify,
       PEAKET_INTERNAL_TOKEN: k.internalToken,
       // 서비스 사이 gRPC 공유 토큰(identity AdminAuthzService가 요구한다)

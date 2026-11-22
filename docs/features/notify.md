@@ -473,7 +473,7 @@ docs/architecture.md §8.4의 운영 확인 계측 표다. SLI는 실제로 재�
 - 서비스 워커는 알림을 누르면 같은 출처의 허용한 경로만 연다(§3.5).
 - 수신 거부 토큰의 힘은 신청 하나 지우기뿐이다(§7.4).
 - VAPID 개인키·Topic 키·발송 키·파트너 웹훅 비밀은 Secrets Manager에 두고 발송 워커의 서비스 계정만 읽는다. 수신 거부 토큰 키는 발송 워커(`core-notify-sender`, 이메일에 넣을 토큰을 만든다)와 수신 거부 경로 `POST /v1/subscription-opt-outs/{optOutToken}`를 받아 토큰을 확인하는 core-svc API가 읽는다(docs/security/secrets-and-keys.md '수신 거부 토큰 키' 행과 맞춤, 2026-10-30). VAPID 키를 바꾸면 모든 구독을 다시 받아야 하므로 노출 사고 때만 바꾼다(docs/security/secrets-and-keys.md). 바꾸면 화면이 다음에 열릴 때 새 키로 구독을 다시 만든다(§3.4).
-- 파트너 웹훅 발송기는 DB에서도 전용 역할을 쓴다(2026-11-22, W12-core-notify, ADR-0350). 내부 입구와 주기 작업은 `PEAKET_NOTIFY_DATABASE_URL`의 `core_notify` 역할로만 `webhook_endpoint`·`webhook_delivery`를 쓴다. 끝점은 읽고 켜진 것을 사유 `FAILING`으로 끄는 세 칸만 고치며, 원장은 넣고 집고 결과 칸만 고친다. 본문·끝점·사건 키·사건 종류·만든 시각은 고치지 못하고, 지우기·다른 표 권한은 없다. 팬 경로 역할 `core_app`의 같은 권한은 다음 배포에서 거둔다(두 번 나눔, docs/security/authz-matrix.md §5.3).
+- 파트너 웹훅 발송기는 DB에서도 전용 역할을 쓴다(2026-11-22, W12-core-notify, ADR-0351). 내부 입구와 주기 작업은 `PEAKET_NOTIFY_DATABASE_URL`의 `core_notify` 역할로만 `webhook_endpoint`·`webhook_delivery`를 쓴다. 끝점은 읽고 켜진 것을 사유 `FAILING`으로 끄는 세 칸만 고치며, 원장은 넣고 집고 결과 칸만 고친다. 본문·끝점·사건 키·사건 종류·만든 시각은 고치지 못하고, 지우기·다른 표 권한은 없다. 팬 경로 역할 `core_app`의 같은 권한은 다음 배포에서 거둔다(두 번 나눔, docs/security/authz-matrix.md §5.3).
 
 ## 14. 시험
 

@@ -20,7 +20,7 @@ export class NotifyModule {
   static register(
     o:
       | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> }
-      | { storage: 'database'; /** 웹훅 발송기 전용 core_notify 연결(ADR-0350). 팬 경로 DATABASE 풀과 섞지 않는다 */ notifyDatabase: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> },
+      | { storage: 'database'; /** 웹훅 발송기 전용 core_notify 연결(ADR-0351). 팬 경로 DATABASE 풀과 섞지 않는다 */ notifyDatabase: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> },
   ): DynamicModule {
     const providers: Provider[] = [
       {
@@ -43,7 +43,7 @@ export class NotifyModule {
         providers: [
           ...providers,
           { provide: NOTIFY_PARTNER_DATABASE, useValue: o.partnerDatabase },
-          // 발송기(내부 입구·주기 작업)는 core_notify 역할의 연결로만 두 표를 쓴다(ADR-0350 결정 2). 팬 경로 DATABASE를 주입하지 않는다
+          // 발송기(내부 입구·주기 작업)는 core_notify 역할의 연결로만 두 표를 쓴다(ADR-0351 결정 2). 팬 경로 DATABASE를 주입하지 않는다
           { provide: NOTIFY_APP_STORE, useFactory: () => new DrizzleWebhookStore(o.notifyDatabase) },
           { provide: WEBHOOK_STORE, useFactory: (db: Database) => new DrizzleWebhookStore(db), inject: [NOTIFY_PARTNER_DATABASE] },
           { provide: WEBHOOK_TRANSPORT, useValue: o.transport ?? new HttpsWebhookTransport() },

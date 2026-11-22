@@ -1,4 +1,4 @@
-# ADR-0350: core-svc 웹훅 발송기를 전용 DB 역할 core_notify로 옮긴다(2026-11-22)
+# ADR-0351: core-svc 웹훅 발송기를 전용 DB 역할 core_notify로 옮긴다(2026-11-22)
 
 - **상태**: 채택(2026-11-22, 감독 결정. W12-core-rls2 계획 §13.1이 넘긴 일을 갈래 3의 W12-core-notify가 계획하며 정했다. 방향 '발송기 전용 그룹 역할을 만들고, 발송기가 실제로 쓰는 표·명령·칸만 주며, 배포는 두 번에 나눈다'는 감독 지시이고 세부 권한·정책·연결 값은 이 묶음 계획 담당의 추천 적용이다)
 - **관련**: [ADR-0338](0338-core-webhook-endpoint-merch-order-write-grants.md) 결정 1·2와 '결과', [ADR-0241](0241-core-svc-partner-row-security.md) 결정 1·4·6·7, [ADR-0053](0053-crypto-hardening-pseudonyms-webhooks-stores-runbook-audit.md) 결정 4, [ADR-0109](0109-delivery-jobs-in-postgres-drop-bullmq-cache-redis-key-classes-noeviction.md), [docs/devops.md](../devops.md) §7.1, [docs/security/authz-matrix.md](../security/authz-matrix.md) §5.3·§7, [docs/features/notify.md](../features/notify.md) §9·§13, [docs/data.md](../data.md) `webhook_endpoint`·`webhook_delivery`, [docs/review/plans/W12-core-notify.md](../review/plans/W12-core-notify.md), W12-core-rls2 계획 §13.1

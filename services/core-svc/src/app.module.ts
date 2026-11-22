@@ -16,7 +16,7 @@ export class AppModule {
     o:
       | {
           database: Database;
-          /** 웹훅 발송기 전용 core_notify 연결(ADR-0350 결정 2). 빠뜨린 조립은 컴파일되지 않는다 */
+          /** 웹훅 발송기 전용 core_notify 연결(ADR-0351 결정 2). 빠뜨린 조립은 컴파일되지 않는다 */
           notifyDatabase: Database;
           partnerDatabase: Database;
           opsDatabase?: Database;
