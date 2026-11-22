@@ -133,10 +133,21 @@ test('DS-04 오버레이의 출처는 포트를 포함한다(PEAKET_WEB_ORIGIN·
       if (key.endsWith('_URL') && /svc\.cluster\.local/.test(value)) continue;
       seen += 1;
       assert.match(value, /:18\d{3}(?:\/|$)/, `${w.name}.yaml의 ${key} ${value}에 이 PC 포트가 없다`);
-      assert.ok(origins.has(value), `${w.name}.yaml의 ${key} ${value}가 demoOrigins에 없다`);
+      // 경로가 붙은 URL(예 /staff/invitations)은 값이 아니라 출처로 견준다. 다른 호스트의 출처는 여전히 실패한다
+      let origin;
+      try {
+        origin = new URL(value).origin;
+      } catch {
+        assert.fail(`${w.name}.yaml의 ${key} ${value}가 URL이 아니다`);
+      }
+      assert.ok(origins.has(origin), `${w.name}.yaml의 ${key} ${value}의 출처 ${origin}가 demoOrigins에 없다`);
     }
   }
   assert.ok(seen > 0, '오버레이에 포트 붙은 출처가 하나도 없다');
+  // 읽는 법부터 본다: 경로만 다른 같은 출처는 통과하고 다른 호스트는 거절한다(비교가 느슨해지지 않았는지)
+  const wwwOrigin = demoOrigins().www;
+  assert.equal(new URL(`${wwwOrigin}/staff/invitations`).origin, wwwOrigin, '경로 붙은 URL의 출처를 읽지 못했다');
+  assert.equal(origins.has(new URL('https://www.peaket.example.evil:18441/staff/invitations').origin), false, '다른 호스트의 출처를 거절하지 않는다');
   // 빌드 시점에 굽는 소비자 웹·파트너의 공개 출처도 포트를 포함한다
   for (const file of ['apps/web/Dockerfile', 'apps/partner/Dockerfile']) {
     const text = readFileSync(join(REPO, file), 'utf8');

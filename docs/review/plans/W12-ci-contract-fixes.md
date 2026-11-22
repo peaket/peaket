@@ -81,6 +81,19 @@
 
 ## 실패 확인
 
+시험 담당 `w12ccf-test`(deepseek-v4.1-flash), 2026-11-22 19:17 KST. 기준 트리 `5fdf09000`(계획 커밋)에서 구현 없이 돌렸다.
+
+| 검사 | 결과 | 까닭 |
+| --- | --- | --- |
+| `pnpm.cmd --filter @peaket/platform test test/problem-types.test.ts` | 2개 중 **1 실패**(PRF192), 1 통과 | `missing`이 `ticket-svc recipient-not-found`·`transfer-closed`·`reoffer-not-allowed`·`ticket-ended`·`transfer-expired`·`transfer-not-offered`·`payer-holds`·`entry-recorded` 여덟이다. 상태 코드·제목 대조에는 닿지 않았다 |
+| `node --test tools/local/demo-images.test.mjs` | 14개 중 **1 실패**(DS-04) | `identity-svc.yaml의 PEAKET_STAFF_INVITATION_URL https://www.peaket.example:18441/staff/invitations가 demoOrigins에 없다`. 값 전체를 글자까지 견주는 검사가 경로 붙은 URL을 거절했다 |
+| `node tools/ci/gateway-routes.mjs --check` | **통과**(끝 코드 0) | 지금 openapi와 생성 파일 지문이 같다. 오류 목록 여덟 줄을 더하면 지문이 바뀌므로 구현 때 `--write`가 필요하다(§2의 2) |
+| `node --test tools/ci/gateway-routes.test.mjs` | **41/41 통과** | 같은 까닭(아직 계약이 바뀌지 않았다). 구현 때 다시 돈다 |
+
+- **시험 쪽 고침 하나**: DS-04를 `new URL(value).origin` 비교로 바꾸고, 경로만 다른 같은 출처는 통과하고 다른 호스트(`https://www.peaket.example.evil:18441/...`)는 거절하는 읽는 법 단언을 더했다. 바꾼 뒤 이 파일은 **14/14 통과**한다. 고치기 전 실패는 위 표에 남긴다.
+- PRF192는 기존 시험이 이미 여덟을 잡고 있어 파일을 고치지 않았다. 구현 전 실패가 구현을 요구하는 방향으로 먼저 섰다.
+- `node --test tools/local/demo-objects.test.mjs`는 이 시험 커밋을 건드리지 않았고, 고치기 전에도 통과한다(회귀는 검증에서 다시 본다).
+
 ## 리뷰
 
 ## 검증
@@ -90,3 +103,4 @@
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | w12ccf-plan | deepseek-v4.1-flash | 2026-11-22T19:10:00+09:00 | 2026-11-22T19:16:00+09:00 |
+| test | w12ccf-test | deepseek-v4.1-flash | 2026-11-22T19:16:00+09:00 | 2026-11-22T19:20:00+09:00 |
