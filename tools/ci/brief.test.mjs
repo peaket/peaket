@@ -2,7 +2,7 @@
 // tools/ci/brief.mjs 시험(묶음 지시서, ADR-0256 결정 9). 실행: node --test tools/ci/brief.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -658,4 +658,42 @@ test('끝 코드 2: 없는 묶음, 단계 줄이 없는 단계, --batch 없음, 
   assert.equal(run(dir).status, 2);
   assert.equal(run(dir, '--batch').status, 2);
   assert.equal(run(dir, '--batch', 'BAT-010', '--nope').status, 2);
+});
+
+// F-06-2 리뷰 RV-05 재현(시험 담당 lane3-f062-test, 2026-11-23): 통합 시험 스크립트(test:integration)가 있는 작업 공간은 모두 ci-node.yml node 잡에서 돈다.
+// 위 시험은 INT_PACKAGES 손 목록과 워크플로를 견줘 둘이 함께 빠지면 지나간다. 여기서는 작업 공간(pnpm-workspace.yaml의 apps/*·apps/widgets/*·apps/web/queue-room·packages/*·services/*)의
+// package.json에서 읽는다(docs/architecture.md §8.6 7 '새 통합 시험은 CI 잡에서 실제로 돈다', TA-V15)
+/**
+ * CI 통합 잡에서 돌리지 않는 통합 시험 작업 공간(이름 → 까닭). 감독 결정(2026-11-23, F-06-2 RV-05)으로 이 하나만 둔다.
+ * 더하려면 까닭을 적고 감독이 정한다
+ */
+const INT_CI_EXCEPTIONS = new Map([
+  ['@peaket/v0-monolith', 'v1과 견줄 단순한 비교 기준이고 운영에 배포하지 않는다(CLAUDE.md \'큰 그림\' services/ 줄, 감독 결정 2026-11-23 F-06-2 RV-05)'],
+]);
+
+test('F-06-2 RV-05 ① test:integration 스크립트가 있는 모든 작업 공간이 ci-node.yml node 잡에서 pnpm --filter <이름> test:integration으로 돈다', () => {
+  const dirs = [];
+  for (const parent of ['apps', 'apps/widgets', 'packages', 'services']) {
+    const at = join(ROOT, parent);
+    if (!existsSync(at)) continue;
+    for (const d of readdirSync(at, { withFileTypes: true })) if (d.isDirectory()) dirs.push(join(parent, d.name));
+  }
+  dirs.push('apps/web/queue-room');
+  const withInt = dirs
+    .map((d) => join(ROOT, d, 'package.json'))
+    .filter((f) => existsSync(f))
+    .map((f) => JSON.parse(readFileSync(f, 'utf8')))
+    .filter((p) => typeof p.scripts?.['test:integration'] === 'string')
+    .map((p) => p.name)
+    .sort();
+  assert.ok(withInt.includes('@peaket/ops-svc'), 'ops-svc에 test:integration 스크립트가 없다(빈 결과)');
+  // 예외에 든 패키지는 실제로 있고 test:integration 스크립트가 있어야 한다(없어진 예외가 남지 않게)
+  for (const [name, why] of INT_CI_EXCEPTIONS) {
+    assert.ok(why.trim().length > 0, `${name}: 예외에 까닭이 없다`);
+    assert.ok(withInt.includes(name), `${name}: 예외에 있지만 test:integration 스크립트가 있는 작업 공간이 아니다`);
+  }
+  const yml = readFileSync(join(ROOT, '.github/workflows/ci-node.yml'), 'utf8').replaceAll('\r\n', '\n');
+  const node = yml.slice(yml.search(/^ {2}node:\s*$/m)).split(/\n(?= {2}[A-Za-z][\w-]*:\s*$)/)[0];
+  const ran = new Set([...node.matchAll(/^\s+- run: pnpm --filter (@peaket\/[\w-]+) test:integration\s*$/gm)].map((m) => m[1]));
+  assert.deepEqual(withInt.filter((n) => !ran.has(n) && !INT_CI_EXCEPTIONS.has(n)), [], 'ci-node.yml node 잡이 돌지 않는 통합 시험 작업 공간');
 });

@@ -105,3 +105,9 @@ test('R-T51 ② 미리보기 빌드의 ?state=만 보드이고 그 밖은 실제
     ['cs/inbox/:caseId', 'scr-045'],
   ]);
 });
+
+// F-06-2 리뷰 RV-02 반영(정본 73fa48514, 시험 담당 lane3-f062-test): 배정 풀기는 assignee: null이고 빈 글은 400 invalid-body다(R-T49 ⑦, openapi updateOpsCase assignee)
+test('R-T49 ⑦ 화면의 [배정 풀기]는 assignee: null을 보내고 assignee에 빈 글을 보내지 않는다', () => {
+  assert.match(connected, /p\.onPatch\(\{ assignee: null \}, '배정을 풀었습니다'\)/);
+  assert.doesNotMatch(connected, /assignee: ''/);
+});

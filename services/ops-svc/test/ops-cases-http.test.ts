@@ -142,21 +142,24 @@ describe('R-T49 ④ 해결 메모', () => {
     expect([again.status, typeOf(again.body)]).toEqual([409, 'case-already-resolved']);
   });
 
-  test('R-T49 ④ 결과 메모는 2,000자까지이고 2,001자는 받지 않는다', async () => {
+  // F-06-2 리뷰 RV-03 반영(시험 담당 lane3-f062-test): 2,001자는 openapi maxLength 위반이라 400 invalid-body다(R-T49 ⑨, ADR-0364 결정 5)
+  test('R-T49 ⑨ 결과 메모는 2,000자까지이고 2,001자는 400 invalid-body로 받지 않는다', async () => {
     const id = await openDispute();
     const agent = h.as('cs_agent');
-    expect((await h.patch(agent, id, { status: 'RESOLVED', resultNote: '가'.repeat(2001) }, '"1"')).status).toBeGreaterThanOrEqual(400);
+    const long = await h.patch(agent, id, { status: 'RESOLVED', resultNote: '가'.repeat(2001) }, '"1"');
+    expect([long.status, typeOf(long.body)]).toEqual([400, 'invalid-body']);
     expect((await h.get(agent, id)).body.status).toBe('OPEN');
     const ok = await h.patch(agent, id, { status: 'RESOLVED', resultNote: '가'.repeat(2000) }, '"1"');
     expect([ok.status, (ok.body.resultNote as string).length]).toEqual([200, 2000]);
   });
 
-  test('R-T49 ④ 상태 차례 밖(진행 중 → 열림)은 422이고 바뀌지 않는다', async () => {
+  // F-06-2 리뷰 RV-03 반영: 상태 차례 밖은 새 이름 case-status-transition-invalid(422)다(R-T49 ⑨, openapi updateOpsCase 422)
+  test('R-T49 ⑨ 상태 차례 밖(진행 중 → 열림)은 422 case-status-transition-invalid이고 바뀌지 않는다', async () => {
     const id = await openDispute();
     const agent = h.as('cs_agent');
     expect((await h.patch(agent, id, { status: 'IN_PROGRESS' }, '"1"')).status).toBe(200);
-    // 정본 빈칸: 이 422의 Problem 이름은 정본에 없다(openapi updateOpsCase 422 '상태 차례 밖'). 상태 코드만 본다
-    expect((await h.patch(agent, id, { status: 'OPEN' }, '"2"')).status).toBe(422);
+    const back = await h.patch(agent, id, { status: 'OPEN' }, '"2"');
+    expect([back.status, typeOf(back.body)]).toEqual([422, 'case-status-transition-invalid']);
     expect((await h.get(agent, id)).body).toMatchObject({ status: 'IN_PROGRESS', version: 2 });
   });
 });
@@ -174,12 +177,14 @@ describe('R-T49 ⑤ 역할 밖 갱신 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-16.3.2]',
     expect([op.status, op.body.status]).toEqual([200, 'IN_PROGRESS']);
   });
 
-  test('R-T49 ⑤ cs_lead가 지급 건을 고치면 거절되고 건이 바뀌지 않는다(정본 충돌: R-T49 ⑤는 403, openapi updateOpsCase 404 설명은 404)', async () => {
+  // F-06-2 리뷰 RV-01 반영(정본 73fa48514): GET이 404인 건을 PATCH도 없는 건과 같은 404로 답한다(R-T49 ⑤, ADR-0364 결정 5)
+  test('R-T49 ⑤ cs_lead·cs_agent가 지급 건을 고치면 없는 건과 같은 404이고 건이 바뀌지 않는다 [ASVS v5.0.0-8.2.2]', async () => {
     const payout = await h.seed('PAYOUT_FAILED', 'payout-batch-3');
     for (const role of ['cs_lead', 'cs_agent'] as const) {
       const r = await h.patch(h.as(role), payout, { status: 'IN_PROGRESS' }, '"1"');
-      // R-T49 ⑤ 기대 결과(403 case-update-not-allowed)와 openapi updateOpsCase '404: CS 담당자가 연 지급·대사·KYC 건'이 서로 다르다. 감독 결정 전에는 거절만 본다
-      expect([403, 404], role).toContain(r.status);
+      const missing = await h.patch(h.as(role), '0194f062-0000-7000-8000-0000000eeeee', { status: 'IN_PROGRESS' }, '"1"');
+      expect([role, r.status, typeOf(r.body), r.body.title]).toEqual([role, 404, typeOf(missing.body), missing.body.title]);
+      expect(missing.status).toBe(404);
     }
     expect((await h.get(h.as('operator'), payout)).body).toMatchObject({ status: 'OPEN', version: 1 });
   });
@@ -199,6 +204,92 @@ describe('R-T49 ⑤ 역할 밖 갱신 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-16.3.2]',
     ]);
     // 기록에 메모·팬 정보가 없다(결정만 남긴다)
     expect(JSON.stringify(denied)).not.toContain('payout-batch-4');
+  });
+});
+
+// F-06-2 리뷰 RV-02·RV-14 반영(정본 73fa48514): 풀기는 assignee: null, 빈 글은 400 invalid-body, 맡은 사람이 있는 건은 cs_lead만 바꾼다(R-T49 ⑦, ADR-0364 결정 5)
+describe('R-T49 ⑦ 배정 풀기와 남의 배정 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-16.3.2]', () => {
+  test('R-T49 ⑦ cs_agent가 자기 배정을 assignee: null로 풀면 200이고 assignee가 null이다', async () => {
+    const id = await openDispute();
+    const agent = h.as('cs_agent');
+    expect((await h.patch(agent, id, { assignee: agent['x-user-id'] }, '"1"')).status).toBe(200);
+    const off = await h.patch(agent, id, { assignee: null }, '"2"');
+    expect([off.status, off.body.assignee, off.etag]).toEqual([200, null, '"3"']);
+    expect((await h.get(agent, id)).body).toMatchObject({ assignee: null, version: 3 });
+  });
+
+  test('R-T49 ⑦ assignee에 빈 글을 보내면 400 invalid-body이고 배정이 그대로다', async () => {
+    const id = await openDispute();
+    const agent = h.as('cs_agent');
+    expect((await h.patch(agent, id, { assignee: agent['x-user-id'] }, '"1"')).status).toBe(200);
+    const blank = await h.patch(agent, id, { assignee: '' }, '"2"');
+    expect([blank.status, typeOf(blank.body)]).toEqual([400, 'invalid-body']);
+    expect((await h.get(agent, id)).body).toMatchObject({ assignee: agent['x-user-id'], version: 2 });
+  });
+
+  test('R-T49 ⑦ 남이 맡은 건을 cs_agent가 풀거나 자기에게 옮기면 403 case-update-not-allowed이고, cs_lead는 바꾼다 [ASVS v5.0.0-8.2.1]', async () => {
+    const id = await openDispute();
+    const owner = h.as('cs_agent');
+    const other = h.as('cs_agent');
+    expect((await h.patch(owner, id, { assignee: owner['x-user-id'] }, '"1"')).status).toBe(200);
+    const release = await h.patch(other, id, { assignee: null }, '"2"');
+    const take = await h.patch(other, id, { assignee: other['x-user-id'] }, '"2"');
+    expect([release.status, typeOf(release.body), take.status, typeOf(take.body)]).toEqual([403, 'case-update-not-allowed', 403, 'case-update-not-allowed']);
+    expect((await h.get(owner, id)).body).toMatchObject({ assignee: owner['x-user-id'], version: 2 });
+    const lead = await h.patch(h.as('cs_lead'), id, { assignee: null }, '"2"');
+    expect([lead.status, lead.body.assignee]).toEqual([200, null]);
+  });
+});
+
+// F-06-2 리뷰 RV-04 반영(정본 73fa48514): '승인 업무 실행 실패' 건은 category(승인 종류)로 나눈다(R-T49 ⑧, ADR-0364 결정 5, authz-matrix, open-items 72번)
+describe('R-T49 ⑧ 승인 업무 실행 실패 건의 category별 권한 [ASVS v5.0.0-8.2.1] [ASVS v5.0.0-8.2.2]', () => {
+  const failed = async (category: string) => {
+    const r = await h.intake(caseRequest('APPROVAL_EXECUTION_FAILED', { category }));
+    expect(r.body.accepted).toBe(true);
+    return r.body.caseId!;
+  };
+
+  test('R-T49 ⑧ PAYOUT_BATCH·COMMANDER_ROLE_CHANGE·CONTRACT_TERMS_CHANGE 건은 CS 담당자 목록에 0건이고 상세·갱신은 없는 건과 같은 404, 그 밖 승인 종류는 CS 건이다 [ASVS v5.0.0-8.2.2]', async () => {
+    const ops = { PAYOUT_BATCH: await failed('PAYOUT_BATCH'), COMMANDER_ROLE_CHANGE: await failed('COMMANDER_ROLE_CHANGE'), CONTRACT_TERMS_CHANGE: await failed('CONTRACT_TERMS_CHANGE') };
+    const cs = await failed('SYSTEM_FAULT_REFUND');
+    const missingId = '0194f062-0000-7000-8000-0000000ddddd';
+    for (const role of ['cs_agent', 'cs_lead'] as const) {
+      const ids = ((await h.list(h.as(role), 'kind=APPROVAL_EXECUTION_FAILED&limit=100')).body.items as Array<{ caseId: string }>).map((i) => i.caseId);
+      expect([role, ids]).toEqual([role, [cs]]);
+      const missingGet = await h.get(h.as(role), missingId);
+      const missingPatch = await h.patch(h.as(role), missingId, { status: 'IN_PROGRESS' }, '"1"');
+      for (const [category, id] of Object.entries(ops)) {
+        const g = await h.get(h.as(role), id);
+        const p = await h.patch(h.as(role), id, { status: 'IN_PROGRESS' }, '"1"');
+        expect([role, category, g.status, typeOf(g.body), g.body.title]).toEqual([role, category, 404, typeOf(missingGet.body), missingGet.body.title]);
+        expect([role, category, p.status, typeOf(p.body), p.body.title]).toEqual([role, category, 404, typeOf(missingPatch.body), missingPatch.body.title]);
+      }
+    }
+    for (const role of ['operator', 'commander'] as const) {
+      const ids = new Set(((await h.list(h.as(role), 'kind=APPROVAL_EXECUTION_FAILED&limit=100')).body.items as Array<{ caseId: string }>).map((i) => i.caseId));
+      expect([role, ids]).toEqual([role, new Set([...Object.values(ops), cs])]);
+      for (const id of Object.values(ops)) expect([role, (await h.get(h.as(role), id)).status]).toEqual([role, 200]);
+    }
+    // 그 밖 승인 종류는 CS 건이라 CS 담당자가 고치고 operator는 403이다
+    const op = await h.patch(h.as('operator'), cs, { status: 'IN_PROGRESS' }, '"1"');
+    expect([op.status, typeOf(op.body)]).toEqual([403, 'case-update-not-allowed']);
+    expect((await h.patch(h.as('cs_agent'), cs, { status: 'IN_PROGRESS' }, '"1"')).status).toBe(200);
+  });
+
+  test('R-T49 ⑧ PAYOUT_BATCH는 operator·commander가 고치고, 관리 역할 변경·계약 변경 실패 건은 commander만 고친다(operator 403 case-update-not-allowed) [ASVS v5.0.0-8.2.1]', async () => {
+    for (const role of ['operator', 'commander'] as const) {
+      const id = await failed('PAYOUT_BATCH');
+      const r = await h.patch(h.as(role), id, { status: 'IN_PROGRESS' }, '"1"');
+      expect([role, 'PAYOUT_BATCH', r.status, r.body.status]).toEqual([role, 'PAYOUT_BATCH', 200, 'IN_PROGRESS']);
+    }
+    for (const category of ['COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE']) {
+      const id = await failed(category);
+      const op = await h.patch(h.as('operator'), id, { status: 'IN_PROGRESS' }, '"1"');
+      expect([category, op.status, typeOf(op.body)]).toEqual([category, 403, 'case-update-not-allowed']);
+      expect((await h.get(h.as('commander'), id)).body).toMatchObject({ status: 'OPEN', version: 1 });
+      const cmd = await h.patch(h.as('commander'), id, { status: 'IN_PROGRESS' }, '"1"');
+      expect([category, cmd.status, cmd.body.status]).toEqual([category, 200, 'IN_PROGRESS']);
+    }
   });
 });
 
