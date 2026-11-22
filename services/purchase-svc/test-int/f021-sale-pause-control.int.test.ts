@@ -79,6 +79,8 @@ async function startPod(name: string, databaseUrl: string): Promise<Pod> {
     env: {
       PEAKET_ENV: 'ci',
       PEAKET_POD: name,
+      // purchase-svc의 파드 이름(ack의 pod_name)은 HOSTNAME(쿠버네티스 파드 이름) + 6자리 꼬리다(podIdFrom)
+      HOSTNAME: name,
       PEAKET_SEAT_REDIS_URL: valkey.url,
       PEAKET_DATABASE_URL: databaseUrl,
       PEAKET_ORDER_CONSENT_VERSION: 'f021-v1',
@@ -210,10 +212,9 @@ describe('C-T50 킬스위치 중 확장·재시작 (purchase-svc 시작 파일)'
     const cmd = randomUUID();
     const version = Date.now();
     const acks = await toAll(pauseReq(E.paused, version, true, cmd));
-    expect(acks.map((a) => ({ pod: a.podName, v: a.appliedVersion }))).toEqual([
-      { pod: 'purchase-f021-a', v: version },
-      { pod: 'purchase-f021-b', v: version },
-    ]);
+    expect(acks.map((a) => a.appliedVersion)).toEqual([version, version]);
+    expect(acks[0]!.podName).toMatch(/^purchase-f021-a-[0-9a-f]{6}$/);
+    expect(acks[1]!.podName).toMatch(/^purchase-f021-b-[0-9a-f]{6}$/);
     const row = await rowOf(E.paused);
     expect(row).toMatchObject({ paused: true, paused_revision: String(version), paused_command_id: cmd });
     expect(row?.paused_changed_at).toBeInstanceOf(Date);
@@ -262,6 +263,69 @@ describe('C-T50 킬스위치 중 확장·재시작 (purchase-svc 시작 파일)'
       await broken.svc.close().catch(() => undefined);
       await brokenAdmin.end().catch(() => undefined);
     }
+  }, 60_000);
+});
+
+// F021-IDLE은 전체 범위 정지·풀기(F021-SUSP ②)보다 먼저 돈다: 풀린 시각 + 5분 안의 세션은 유휴 시한이 늘어나(결정 8) 대조 회차가 끝나지 않는다
+describe('F021-IDLE 판매 일시정지 중 유휴 시계 (B16, ADR-0365 결정 8)', () => {
+  const sessionKey = (jti: string) => `s:session:{${jti}}`;
+  const indexKey = (e: string) => `s:{event:${e}}:sessions`;
+  const streamKey = (e: string) => `s:{event:${e}}:stream`;
+  const setField = (jti: string, field: string, value: number) => redis.command(['HSET', sessionKey(jti), field, String(value)], { key: sessionKey(jti) });
+  const dueNow = (e: string, jti: string, at: number) => redis.command(['ZADD', indexKey(e), 'XX', String(at), jti], { key: indexKey(e) });
+  const score = async (e: string, jti: string) => {
+    const v = await redis.command(['ZSCORE', indexKey(e), jti], { key: indexKey(e) });
+    return v === null || v === undefined ? undefined : Number(String(v));
+  };
+  /** 그 회차 Stream의 SESSION_ENDED 항목: 세션 ID → 끝난 까닭 */
+  async function endedIn(e: string): Promise<Map<string, string>> {
+    const raw = (await redis.command(['XRANGE', streamKey(e), '-', '+'], { key: streamKey(e) })) as unknown[];
+    const out = new Map<string, string>();
+    for (const entry of raw ?? []) {
+      const flat = Array.isArray(entry) ? (entry[1] as unknown[]) : Object.entries((entry as { message?: Record<string, unknown> }).message ?? {}).flat();
+      const f: Record<string, string> = {};
+      for (let i = 0; i + 1 < flat.length; i += 2) f[String(flat[i])] = String(flat[i + 1]);
+      if (f.type === 'SESSION_ENDED' && f.purchaseSessionId) out.set(f.purchaseSessionId, f.reason ?? '');
+    }
+    return out;
+  }
+
+  test('F021-IDLE ① 정지 동안 유휴 시한이 지난 세션을 끝내지 않고(최대 체류는 끝낸다), 풀린 뒤 처음 볼 때 유휴 시한을 풀린 시각 + 5분 [가정]으로 다시 쓴다', async () => {
+    const owner = pods[0]!;
+    const idle = await firstHold(owner, E.idle, 'A01');
+    const maxed = await firstHold(owner, E.idle, 'A02');
+    const ctrl = await firstHold(owner, E.idleCtrl, 'A01');
+    expect([idle.status, maxed.status, ctrl.status], '세 구매 세션을 열지 못했다').toEqual([201, 201, 201]);
+
+    const pauseCmd = randomUUID();
+    await toAll(pauseReq(E.idle, Date.now(), true, pauseCmd));
+    // fixed-wait: 파드 메모리의 정지 상태(결정 7·8)를 바깥에서 볼 면이 없어, 받지 않은 파드도 다시 맞춤 한 주기(2초 [가정])를 지나게 기다린다 F-02-1
+    await sleep(2_500);
+
+    const past = Date.now() - 1_000;
+    await setField(idle.jti, 'idle', past);
+    await setField(maxed.jti, 'max', past);
+    await setField(ctrl.jti, 'idle', past);
+    for (const [e, jti] of [[E.idle, idle.jti], [E.idle, maxed.jti], [E.idleCtrl, ctrl.jti]] as const) await dueNow(e, jti, past);
+
+    // 대조: 정지가 없는 회차의 유휴 세션은 끝난다(정리 반복이 돈다는 증거). 정지 회차의 최대 체류 세션도 끝난다
+    await expect.poll(async () => (await endedIn(E.idleCtrl)).get(ctrl.jti), { timeout: 6_000, interval: 200 }).toBe('IDLE');
+    await expect.poll(async () => (await endedIn(E.idle)).get(maxed.jti), { timeout: 6_000, interval: 200 }).toBe('MAX_STAY');
+    // 정지 회차의 유휴 세션은 끝내지 않고 다음 볼 시각만 미룬다
+    await expect.poll(async () => (await score(E.idle, idle.jti)) ?? -1, { timeout: 6_000, interval: 200 }).toBeGreaterThan(past);
+    expect((await endedIn(E.idle)).has(idle.jti), '정지 동안 유휴로 끝냈다').toBe(false);
+    expect(await exists(sessionKey(idle.jti))).toBe(1);
+
+    // 풀기
+    const r0 = Date.now();
+    await toAll(pauseReq(E.idle, Date.now() + 1, false));
+    const r1 = Date.now();
+    await dueNow(E.idle, idle.jti, Date.now());
+    await expect.poll(async () => Number((await hash(sessionKey(idle.jti))).idle ?? 0), { timeout: 8_000, interval: 200 }).toBeGreaterThanOrEqual(r0 + IDLE_MS);
+    const rewritten = Number((await hash(sessionKey(idle.jti))).idle);
+    // 풀린 시각은 보낸 때와 받은 파드가 아는 때 사이다(받지 않은 파드는 다시 맞춤 한 주기 안)
+    expect(rewritten).toBeLessThanOrEqual(r1 + 2_500 + IDLE_MS);
+    expect((await endedIn(E.idle)).has(idle.jti)).toBe(false);
   }, 60_000);
 });
 
@@ -348,66 +412,4 @@ describe('ASVS v5.0.0-1.4.2·15.3.5·2.1.1 purchase-svc 판·꼴 검사', () => 
       expect(await rowOf(e)).toBeUndefined();
     },
   );
-});
-
-describe('F021-IDLE 판매 일시정지 중 유휴 시계 (B16, ADR-0365 결정 8)', () => {
-  const sessionKey = (jti: string) => `s:session:{${jti}}`;
-  const indexKey = (e: string) => `s:{event:${e}}:sessions`;
-  const streamKey = (e: string) => `s:{event:${e}}:stream`;
-  const setField = (jti: string, field: string, value: number) => redis.command(['HSET', sessionKey(jti), field, String(value)], { key: sessionKey(jti) });
-  const dueNow = (e: string, jti: string, at: number) => redis.command(['ZADD', indexKey(e), 'XX', String(at), jti], { key: indexKey(e) });
-  const score = async (e: string, jti: string) => {
-    const v = await redis.command(['ZSCORE', indexKey(e), jti], { key: indexKey(e) });
-    return v === null || v === undefined ? undefined : Number(String(v));
-  };
-  /** 그 회차 Stream의 SESSION_ENDED 항목: 세션 ID → 끝난 까닭 */
-  async function endedIn(e: string): Promise<Map<string, string>> {
-    const raw = (await redis.command(['XRANGE', streamKey(e), '-', '+'], { key: streamKey(e) })) as unknown[];
-    const out = new Map<string, string>();
-    for (const entry of raw ?? []) {
-      const flat = Array.isArray(entry) ? (entry[1] as unknown[]) : Object.entries((entry as { message?: Record<string, unknown> }).message ?? {}).flat();
-      const f: Record<string, string> = {};
-      for (let i = 0; i + 1 < flat.length; i += 2) f[String(flat[i])] = String(flat[i + 1]);
-      if (f.type === 'SESSION_ENDED' && f.purchaseSessionId) out.set(f.purchaseSessionId, f.reason ?? '');
-    }
-    return out;
-  }
-
-  test('F021-IDLE ① 정지 동안 유휴 시한이 지난 세션을 끝내지 않고(최대 체류는 끝낸다), 풀린 뒤 처음 볼 때 유휴 시한을 풀린 시각 + 5분 [가정]으로 다시 쓴다', async () => {
-    const owner = pods[0]!;
-    const idle = await firstHold(owner, E.idle, 'A01');
-    const maxed = await firstHold(owner, E.idle, 'A02');
-    const ctrl = await firstHold(owner, E.idleCtrl, 'A01');
-    expect([idle.status, maxed.status, ctrl.status], '세 구매 세션을 열지 못했다').toEqual([201, 201, 201]);
-
-    const pauseCmd = randomUUID();
-    await toAll(pauseReq(E.idle, Date.now(), true, pauseCmd));
-    // fixed-wait: 파드 메모리의 정지 상태(결정 7·8)를 바깥에서 볼 면이 없어, 받지 않은 파드도 다시 맞춤 한 주기(2초 [가정])를 지나게 기다린다 F-02-1
-    await sleep(2_500);
-
-    const past = Date.now() - 1_000;
-    await setField(idle.jti, 'idle', past);
-    await setField(maxed.jti, 'max', past);
-    await setField(ctrl.jti, 'idle', past);
-    for (const [e, jti] of [[E.idle, idle.jti], [E.idle, maxed.jti], [E.idleCtrl, ctrl.jti]] as const) await dueNow(e, jti, past);
-
-    // 대조: 정지가 없는 회차의 유휴 세션은 끝난다(정리 반복이 돈다는 증거). 정지 회차의 최대 체류 세션도 끝난다
-    await expect.poll(async () => (await endedIn(E.idleCtrl)).get(ctrl.jti), { timeout: 6_000, interval: 200 }).toBe('IDLE');
-    await expect.poll(async () => (await endedIn(E.idle)).get(maxed.jti), { timeout: 6_000, interval: 200 }).toBe('MAX_STAY');
-    // 정지 회차의 유휴 세션은 끝내지 않고 다음 볼 시각만 미룬다
-    await expect.poll(async () => (await score(E.idle, idle.jti)) ?? -1, { timeout: 6_000, interval: 200 }).toBeGreaterThan(past);
-    expect((await endedIn(E.idle)).has(idle.jti), '정지 동안 유휴로 끝냈다').toBe(false);
-    expect(await exists(sessionKey(idle.jti))).toBe(1);
-
-    // 풀기
-    const r0 = Date.now();
-    await toAll(pauseReq(E.idle, Date.now() + 1, false));
-    const r1 = Date.now();
-    await dueNow(E.idle, idle.jti, Date.now());
-    await expect.poll(async () => Number((await hash(sessionKey(idle.jti))).idle ?? 0), { timeout: 8_000, interval: 200 }).toBeGreaterThanOrEqual(r0 + IDLE_MS);
-    const rewritten = Number((await hash(sessionKey(idle.jti))).idle);
-    // 풀린 시각은 보낸 때와 받은 파드가 아는 때 사이다(받지 않은 파드는 다시 맞춤 한 주기 안)
-    expect(rewritten).toBeLessThanOrEqual(r1 + 2_500 + IDLE_MS);
-    expect((await endedIn(E.idle)).has(idle.jti)).toBe(false);
-  }, 60_000);
 });

@@ -2,16 +2,17 @@
 // test/f021-control-dispatch.test.ts의 원장 규칙(F021-VER)을 진짜 저장소 DrizzleCommandStore에도 돌려 메모리 저장소와 짝을 맞추고(행동 짝),
 // 파드마다의 ack가 REST 상세의 CommandState.delivery(kind ACK, ackedCount, targetCount, unackedTargets)로 보이는지 본다.
 // 정본: ADR-0365 결정 1·4, openapi CommandState.delivery. 받는 쪽은 ControlSender 포트를 구현한 대역이다(실제 받는 쪽 연결은 f021-e2e-control.int.test.ts).
-// 쓰는 공개 면과 생성자 꼴의 가정은 test/f021-control-dispatch.test.ts 머리말과 같다.
+// 쓰는 공개 면은 test/f021-control-dispatch.test.ts 머리말과 같고, ack 기록은 DrizzleControlDeliveries(구현 메모 '시험 담당에게')다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, createService, type Clock, type Database, fakeClock } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
-import type { ControlAck, ControlRequest, ControlSender } from '../src/adapters/grpc-control-sender.js';
 import { AppModule } from '../src/app.module.js';
-import { type Command, type CommandType, ControlDispatcher, type ControlTargets, DrizzleCommandStore } from '../src/modules/commands/index.js';
+import { type Command, type CommandType, ControlDispatcher, ControlFanout, type ControlTargets, type ControlTransport, DrizzleCommandStore, DrizzleControlDeliveries } from '../src/modules/commands/index.js';
+
+type ControlRequest = Parameters<ControlTransport['apply']>[2];
 import { FakeIdentity, quiet } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { adminAccountsForCommands } from './reauth.js';
@@ -24,6 +25,7 @@ let container: PostgresContainer | undefined;
 let db: Database;
 let admin: pg.Client;
 let store: DrizzleCommandStore;
+let deliveries: DrizzleControlDeliveries;
 let svc: Awaited<ReturnType<typeof createService>>;
 
 beforeAll(async () => {
@@ -33,9 +35,12 @@ beforeAll(async () => {
   admin = new pg.Client({ connectionString: container.url });
   await admin.connect();
   store = new DrizzleCommandStore(db);
+  deliveries = new DrizzleControlDeliveries(db);
+  // 상세가 delivery를 싣도록 같은 ack 기록을 모듈에 넘긴다(보내기는 아래 시험마다 만든 ControlFanout이 한다)
+  const idleFanout = new ControlFanout({ targets: { resolve: async () => [] }, transport: { apply: async () => ({ appliedVersion: 0, podName: '' }) }, clock: { now: () => T } });
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: db, nowMs: T, adminAccounts: adminAccountsForCommands }),
+    module: AppModule.register({ database: db, nowMs: T, adminAccounts: adminAccountsForCommands, commandExtras: { control: { fanout: idleFanout, deliveries } } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: T }),
     logDestination: quiet(),
@@ -55,19 +60,23 @@ function world(o: { targets: Partial<Record<Service, readonly string[]>>; laggin
   let mono = 0;
   const clock: Clock = { now: () => wall, monotonicMs: () => mono };
   const sent: { address: string; req: ControlRequest }[] = [];
-  const targets: ControlTargets = { resolve: async (service: Service) => o.targets[service] ?? [] };
-  const senderFor = (service: Service, address: string): ControlSender => ({
-    apply: async (req: ControlRequest): Promise<ControlAck> => {
+  const targets: ControlTargets = { resolve: async (service: string) => o.targets[service as Service] ?? [] };
+  const transport: ControlTransport = {
+    apply: async (service: string, address: string, req: ControlRequest) => {
       sent.push({ address, req });
       return { appliedVersion: o.lagging?.includes(address) ? req.version - 1 : req.version, podName: `${service}-${address.replace(/[.:]/g, '-')}` };
     },
-    close: () => undefined,
-  });
+  };
   const sleep = async (ms: number) => {
     wall += ms;
     mono += ms;
   };
-  const dispatcher = new ControlDispatcher({ store, targets, senderFor, clock, sleep });
+  const d = new ControlDispatcher({ store, fanout: new ControlFanout({ targets, transport, deliveries, clock, sleep }), clock });
+  /** 보내기를 끝까지 기다리고 끝난 명령을 돌려준다 */
+  const dispatcher = {
+    dispatch: async (c: Command) => (await d.resume(c.commandId), (await store.find(c.commandId))!),
+    resume: async (commandId: string) => (await d.resume(commandId), (await store.find(commandId))!),
+  };
   const dispatched = async (type: CommandType, params: Record<string, unknown>, eventId?: string): Promise<Command> => {
     const c = await store.create({ commandId: randomUUID(), type, reason: '온세일 대응', params, requestedBy: REQUESTER, requestedRole: 'commander', nowMs: wall, approvalMode: 'ONE', ...(eventId ? { eventId } : {}) });
     return store.markDispatched(c.commandId, wall);
@@ -99,7 +108,7 @@ describe('F021-VER 원장 규칙의 진짜 저장소 짝 (B1·B2, PostgreSQL)', 
     const w = world({ targets: { 'admission-ctrl': ['10.9.0.1:50061'] }, start: T + 3_600_000 });
     const e = randomUUID();
     const c = await w.dispatched('ADMISSION_PAUSE', { eventId: e }, e);
-    w.setNow(T + 3_600_000 + 50_000);
+    w.setNow(T + 3_600_000 + 3_000);
     const resumed = await w.dispatcher.resume(c.commandId);
     expect(resumed?.state).toBe('ACKED');
     expect(versionsOf(w.sent, c.commandId)).toEqual([T + 3_600_000]);
