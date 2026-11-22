@@ -553,9 +553,11 @@ export class Settlements {
         if (!facts) throw new SettlementProblem('payout-approval-missing', 409, 'ops-svc에서 승인 업무를 찾지 못했습니다');
         approvalFactsOf(facts, b);
       } catch (e) {
-        const reason = e instanceof SettlementProblem ? e.type : e instanceof ProblemError ? e.type : 'payout-approval-verification-failed';
-        await this.#auditRejected(b, id, reason, facts, now);
-        throw e;
+        // 확인기가 SettlementProblem 밖의 오류(프로그램 결함·다른 구현)를 던져도 돈 경로는 503으로 닫는다.
+        // ops가 5xx·시간 초과일 때와 같은 결과이고, payout_batch 상태는 바꾸지 않는다.
+        const problem = e instanceof SettlementProblem ? e : new SettlementProblem('dependency-unavailable', 503, '승인 기록을 확인하지 못했습니다');
+        await this.#auditRejected(b, id, problem.type, facts, now);
+        throw problem;
       }
       if (!facts) throw new SettlementProblem('payout-approval-missing', 409, 'ops-svc에서 승인 업무를 찾지 못했습니다');
       const next: PayoutBatchRecord = { ...b, status: 'APPROVED', approvalId: id, updatedAt: now };
