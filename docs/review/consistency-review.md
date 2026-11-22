@@ -842,6 +842,7 @@
 | R-745 | purchase-svc V-T40 시험이 흔들렸다(끊긴 판이 계속 돌아 다음 판과 섞임, 집중 경합 단언이 정당한 순서를 막음. 45초에 걸린 시험 다음의 V-T40 결과를 믿을 수 없었음) | services/purchase-svc/test-int/payment-model.int.test.ts·payment-model 하네스, docs/verification.md §2.4·V-T40 행 | 재현 시험 R1~R3 먼저(고치기 전 실패) → 하네스 고침 → 리뷰 반영 → 검증 10/10 | 해결 |
 | R-747 | 검색 정답률 보고서 이름이 ASVS 요약 단계 찾기 꼴과 겹쳐 요약 표가 빠졌다 | services/core-svc/test/search-golden.test.ts, .gitignore, 계획 W12-golden-report | 이름을 search-golden-report.json으로·.gitignore 한 줄 | 고침, 낮음 셋은 정리 목록 |
 | R-750 | 검색 SR-T13 ① P12 시험이 후보 줄마다 이름 비교 값을 새로 만들어 붐비는 CI에서 5초 시간 한도로 흔들렸다 | services/core-svc/test/search-bat166-page.test.ts, 계획 W12-sr13 | 운영 조립과 같은 keysOf를 넘기고 끼어듦 단언 ③을 더함 | 고침, 리뷰 낮음 2·검증 M1b는 정리 목록 |
+| R-752 | core-svc 멱등 기록 표에 행 보안이 없어 세 역할이 모든 작업의 기록을 읽고 고칠 수 있었다 | services/core-svc/migrations/0041_idempotency_record_role_security.sql·journal, shop 재생 대조 6파일, test-int/idempotency-rls·idempotency-migration·shop-replay, test/shop-replay-in-tx, ADR-0337 | 역할·작업별 RLS 정책 10, 칸 권한, 재생 대조·404 | 해결. V8·V5 표본 재검사는 Docker 차례가 없어 다음 검증·CI에 남김 |
 
 ## 4. 숫자 일치표
 
