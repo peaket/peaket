@@ -14,7 +14,8 @@
 
 1. **대시보드 생성기를 넓힌다.** `tools/local/dashboards.mjs` 하나가 계속 원천이다(CLAUDE.md의 생성 파일 규칙 그대로).
    - 대상: docs/architecture.md §3.1 서비스 맵 표의 업무 서비스 전부와 지금의 두 개. 목록을 손으로 적지 않고 그 표를 읽는다. 표에 있는데 대시보드가 없거나, 표에 없는 대시보드가 남으면 `--check`가 실패한다.
-   - 폴더: 대시보드마다 주인 팀 폴더에 둔다. 팀은 `.github/CODEOWNERS`의 그 서비스 폴더 줄이 정한다(가상 팀 지도, docs/architecture.md §10). 파일은 `deploy/local/dashboards/<폴더>/<이름>.json`에 두고 Grafana 파일 공급자의 '폴더 구조를 폴더로' 설정으로 싣는다.
+   - 폴더: 대시보드마다 주인 팀 폴더에 둔다. 팀은 `.github/CODEOWNERS`에서 그 서비스 폴더에 맞는 가장 아래 줄이 정한다(가상 팀 지도, docs/architecture.md §10). 표 밖의 비교 기준 둘(`example-svc`·`v0-monolith`)은 `/services/` 기본 줄의 팀이다. `v0-monolith` 줄은 주인이 두 팀이라 폴더 하나로 정해지지 않기 때문이다. 파일은 `deploy/local/dashboards/<폴더 uid>/<이름>.json`에 둔다.
+   - 싣는 법(구현 때 정함, 2026-11-23 F-01-2 구현·리뷰 RV012-3): Grafana 파일 공급자를 폴더마다 하나씩 두고 조직(`orgId`)·폴더 제목·폴더 uid·경로를 적는다(`deploy/platform/observability/grafana/provisioning/dashboards.yaml`). 처음 적은 '폴더 구조를 폴더로'(`foldersFromFilesStructure`)는 디렉터리 이름이 곧 폴더 제목이라 '온세일 공용'·팀 이름(한글·공백)을 저장소 경로에 써야 하고, 조직마다 공급자가 따로 있어야 해서 버렸다. 폴더 목록이 `access.yaml`과 공급자 두 곳에 적히므로 아래 2의 정적 검사가 둘이 맞는지 본다.
    - 온세일 공용 대시보드 하나를 '온세일 공용' 폴더에 둔다. 첫 행은 서비스를 고르는 변수가 있는 네 신호이고, 주석 셋(배포, 장애 주입, 운영 사건 줄 `ops_event`)을 둔다(observability.md:125, ADR-0078 결정 3). 주석은 Loki(정형 로그 저장소) 데이터 소스 uid `loki`를 쓴다. 로컬에는 Loki가 없어 주석이 실제로 그려지는지는 구간 5(INF-040)에서 본다.
    - 화면에서 고친 것은 저장하지 않는다(공급자 `allowUiUpdates: false`, observability.md:601).
    - 데이터 소스 연결(exemplar → Tempo 등, :126)은 OPS-080(F-01-4)이 더한다.
@@ -35,7 +36,7 @@
    - 실제 Mimir(모놀리식)에 올려 보존과 골라 보내기가 먹는지는 INF-040이 본다(ADR-0120의 확인).
 
 4. **서버 오류 수집 SDK는 `packages/platform`이 켜고, 서비스는 설정을 바꾸지 못한다.**
-   - `createService`가 시작할 때 오류 수집을 켠다. 받는 곳 주소(DSN)는 환경 변수 `PEAKET_SENTRY_DSN`이고, 비어 있으면 끈다(네트워크 호출 없음, 시작 로그 한 줄). 조직이 없는 동안은 모든 환경이 비어 있다(ADR-0139 결정 3).
+   - `createService`가 시작할 때 오류 수집을 켠다. 받는 곳 주소(DSN)는 환경 변수 `PEAKET_SENTRY_DSN`이고, 비어 있으면 끈다(네트워크 호출 없음, 시작 로그 한 줄). 조직이 없는 동안은 모든 환경이 비어 있다(ADR-0139 결정 3). `local`·`ci` 밖에서는 `https://` 주소만 받는다(docs/api/guidelines.md §8 바깥 호출 표의 오류 수집 행). 꼴이 틀리거나 평문 주소이면 끄고 시작 로그를 경고(`reason` `invalid-dsn`, 주소는 남기지 않음)로 남긴다(추천 적용 2026-11-23, F-01-2 리뷰 RV012-1).
    - 수집 설정 잠금(observability.md:635의 끄는 값·거름·`beforeSend` 마스킹·`accountRef`만)은 한 함수 안에 고정하고, `createService` 옵션으로 덮어쓰지 못한다. `beforeSend`의 마스킹은 로그와 같은 가림 함수(`redactDeep`, observability.md §7)를 쓴다.
    - 보내는 것: 공용 예외 필터가 5xx로 끝낸 예상하지 못한 오류, 처리되지 않은 예외·거절. 4xx와 정상 분기 거절은 보내지 않는다. 사건에는 응답과 같은 `traceId`를 태그로 단다.
    - 성능 추적·프로파일·화면 녹화는 켜지 않는다. SDK가 자기 OpenTelemetry 설정이나 자동 계측을 띄우지 않게 한다(`@sentry/node`의 OpenTelemetry 설정 건너뛰기 옵션, 또는 OpenTelemetry를 싣지 않는 가벼운 Node 패키지가 10.57.0 이상에 있으면 그것. 구현 담당이 고르고 계획 파일 '구현 메모'에 적는다).

@@ -184,18 +184,22 @@ export async function flushErrorReporting(timeoutMs: number = ERROR_REPORTING_FL
   await Promise.all([...active].map((r) => r.flush(timeoutMs)));
 }
 
+/** 평문(http://) 받는 곳을 허락하는 환경: 로컬 가짜 수신기만(docs/api/guidelines.md §8 바깥 호출 표의 오류 수집 행은 HTTPS, 리뷰 RV012-1) */
+const PLAINTEXT_DSN_ENVS: readonly string[] = ['local', 'ci'];
+
 /**
- * DSN 꼴(<http|https>://<공개 키>@<호스트>[:포트]/<경로…>/<프로젝트 번호>)인지 본다.
+ * DSN 꼴(<https>://<공개 키>@<호스트>[:포트]/<경로…>/<프로젝트 번호>)인지 본다. http://는 local·ci에서만 받는다.
  * Sentry의 해석기는 틀린 값을 콘솔에 그대로 찍어(키가 로그에 남는다) 쓰지 않는다
  */
-function isDsn(value: string): boolean {
+function isDsn(value: string, environment: string): boolean {
   let u: URL;
   try {
     u = new URL(value);
   } catch {
     return false;
   }
-  return (u.protocol === 'http:' || u.protocol === 'https:') && /^\w+$/.test(u.username) && u.hostname.length > 0 && /\/\d+$/.test(u.pathname) && !u.search && !u.hash;
+  const scheme = u.protocol === 'https:' || (u.protocol === 'http:' && PLAINTEXT_DSN_ENVS.includes(environment));
+  return scheme && /^\w+$/.test(u.username) && u.hostname.length > 0 && /\/\d+$/.test(u.pathname) && !u.search && !u.hash;
 }
 
 const disabled = (reason: 'no-dsn' | 'invalid-dsn'): ErrorReporting => ({
@@ -207,13 +211,13 @@ const disabled = (reason: 'no-dsn' | 'invalid-dsn'): ErrorReporting => ({
 });
 
 /**
- * 오류 수집을 켠다. PEAKET_SENTRY_DSN이 비면 끈 수집기(네트워크 호출 없음)를 돌려준다. 형식이 틀린 DSN도 끈다(reason invalid-dsn).
+ * 오류 수집을 켠다. PEAKET_SENTRY_DSN이 비면 끈 수집기(네트워크 호출 없음)를 돌려준다. 형식이 틀린 DSN과 local·ci 밖의 http:// DSN도 끈다(reason invalid-dsn).
  * 잠금 설정은 인자로 받지 않는다
  */
 export function startErrorReporting(env: Record<string, string | undefined>, o: { service: string; version: string; environment: string }): ErrorReporting {
   const dsn = env[SENTRY_DSN_ENV]?.trim();
   if (!dsn) return disabled('no-dsn');
-  if (!isDsn(dsn)) return disabled('invalid-dsn');
+  if (!isDsn(dsn, o.environment)) return disabled('invalid-dsn');
 
   const client = new ServerRuntimeClient({
     ...LOCKED,

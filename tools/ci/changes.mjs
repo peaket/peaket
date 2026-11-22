@@ -84,6 +84,8 @@ const RULES = [
   // 게이트웨이 라우트 생성 대조(node tools/ci/gateway-routes.mjs --check, docs/infra.md §4.1 '생성 대조', BUILD_ORDER HOT-410)가 계약 원본을 읽는다.
   // gitops-check(docs/devops.md §3, BAS-150)가 생기기 전에는 tools-check가 그 명령을 돈다
   [/^docs\/api\/openapi\.yaml$/, ['tools']],
+  // 대시보드 생성 대조(node tools/local/dashboards.mjs --check, ADR-0356 결정 1, V-T47 ①)가 §3.1 서비스 맵 표를 읽는다. 표만 바꿔도 tools-check가 돈다(F-01-2 리뷰 RV012-2)
+  [/^docs\/architecture\.md$/, ['tools']],
   [/^\.github\//, ['ci']],
 ];
 // 넓게 쓰이는 것: 기대는 배포 단위 전부를 돌린다(§3.1 2번)

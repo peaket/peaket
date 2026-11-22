@@ -221,10 +221,13 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
   if (warning) logger.warn(warning);
   // 오류 수집은 앱을 만들기 전에 켠다(시작 중 처리되지 않은 예외도 보낸다). 시작 로그 한 줄에 켬·끔과 까닭만 남긴다(DSN은 남기지 않는다)
   const errorReporting = startErrorReporting(env, { service: o.name, version: config.version, environment: config.env });
-  logger.info(
-    { kind: 'error-reporting', enabled: errorReporting.enabled, reason: errorReporting.reason },
-    errorReporting.enabled ? '오류 수집을 켰다' : `오류 수집을 끈다(${errorReporting.reason === 'no-dsn' ? 'PEAKET_SENTRY_DSN이 비었다' : 'PEAKET_SENTRY_DSN 형식이 틀렸다'})`,
-  );
+  // 틀린 DSN(꼴, local·ci 밖의 http://)은 설정 실수라 경고로 남긴다. 비어 있는 것은 조직이 없는 동안의 정상 상태다
+  const reportingLine = { kind: 'error-reporting', enabled: errorReporting.enabled, reason: errorReporting.reason };
+  if (errorReporting.reason === 'invalid-dsn') {
+    logger.warn(reportingLine, `오류 수집을 끈다(PEAKET_SENTRY_DSN 꼴이 틀렸거나 ${config.env}에서 https가 아니다)`);
+  } else {
+    logger.info(reportingLine, errorReporting.enabled ? '오류 수집을 켰다' : '오류 수집을 끈다(PEAKET_SENTRY_DSN이 비었다)');
+  }
   const diagnose = o.diagnose === false ? undefined : diagnoseSetup(o.name, config.env, env, o.diagnose ?? {}, logger);
   // 정규 로그 줄은 서비스 로거 수준과 관계없이 info부터 낸다(수준을 올려도 표본 집계가 깨지지 않게)
   const canonical = new CanonicalLog(logger.child({}, { level: 'info' }), {
