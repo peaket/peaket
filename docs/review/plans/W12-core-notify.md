@@ -327,6 +327,7 @@ node tools/ci/ledger.mjs --batch W12-core-notify --require
 - M10의 첫 변이(`$$;` 뒤에 `ALTER ROLE`을 붙임)는 마이그레이션 실행기가 `42601`로 멈춰 ⑦에 닿지 않았다. 역할 생성 속성과 가드를 함께 바꾼 표본으로 다시 돌려 ⑦을 잡았다.
 - 표본마다 `git checkout -- <파일>`로 되돌렸고, 끝난 뒤 `git status --short`에 표본 변경이 없었다(추적 안 된 `.lock-try.log`만 남았다).
 - 남은 위험: RV-02(원장 INSERT 정책 `true`), `core_app`의 옛 권한(다음 배포), 운영 Secret 추가(배포 묶음). 계획 §12와 ADR-0351에 적었다.
+- **ADR 번호 0351 정정 뒤 재확인(verify2)**: 0350은 다른 세션의 미추적 초안 몫이라 ADR 파일 이름·계획·정본·SQL·소스·시험 주석의 참조를 0351로 바로잡았다(동작 변화 없음). 옛 번호 0350의 참조가 0이고, 대상 통합 6파일 46/46·trace AZ-T19 9를 다시 확인했다. roles-check(HEAD)·ledger `--batch W12-core-notify --require`·records `--check`·doc-check가 통과했다(Docker 잠금 잡고 놓음, peaket 컨테이너 0).
 
 ## 담당 표
 
@@ -338,6 +339,7 @@ node tools/ci/ledger.mjs --batch W12-core-notify --require
 | impl | lane3-w12corenotify-adrfix | deepseek-v4.1-flash | 2026-11-22T13:20+09:00 | 2026-11-22T13:40+09:00 |
 | review | lane3-w12corenotify-review | deepseek-v4.1-flash | 2026-11-22T12:20+09:00 | 2026-11-22T12:40+09:00 |
 | verify | lane3-w12corenotify-verify | deepseek-v4.1-flash | 2026-11-22T12:40+09:00 | 2026-11-22T13:20+09:00 |
+| verify | lane3-w12corenotify-verify2 | deepseek-v4.1-flash | 2026-11-22T13:40+09:00 | 2026-11-22T14:00+09:00 |
 
 ## 감독에게
 
