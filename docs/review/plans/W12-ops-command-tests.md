@@ -1,0 +1,91 @@
+# 작업 계획: W12-ops-command-tests — BAT-620 정책에 시험 기대를 맞춘다
+
+- **무엇**: `develop` `cdcfc748f`에서 `pnpm.cmd --filter @peaket/ops-svc test test/command-role-policy.test.ts test/command-lifecycle-http.test.ts`가 **4건 실패**한다. BAT-620(R-763)이 정본대로 판매 중지(`SALE_STOP`)·판매 재개(`SALE_RESUME`)를 **operator 이상 요청, 요청자 아닌 commander 승인**으로 바꿨는데, 두 시험 파일이 옛 정책(commander 전용 요청)을 그대로 기대한다. 제품 코드는 BAT-620이 맞다. 시험 기대만 새 정책에 맞춘다.
+- **바탕**: 작업 폴더 `D:/ticketpass-lane2-sr13`, 가지 `feature/lane3-W12-ops-command-tests`, 출발점 `origin/develop` `cdcfc748f`(R-768).
+- **등급·차례**: B, 시험만 묶음(`Batch-Kind: test-only`, `docs/architecture.md` §8.6 4): 계획 → 시험 → 리뷰 → 검증 → 기록. 구현 커밋이 없다. 제품 코드(`services/ops-svc/src/`)·계약은 고치지 않는다.
+- **정본**: `docs/planning/03-policies-glossary.md` POL-038 ⑩(승인한 공연의 판매 중지는 operator 이상이 사유 코드·사유를 적어 요청하고 요청자가 아닌 commander가 승인한다. 판매 재개도 같다), `docs/adr/0123-sale-review-suspended-takedown-resume-or-cancel.md` 결정 2(operator 이상 요청 + 요청자 아닌 commander 승인), `docs/features/control-tower.md` §3(명령 3과 판매 중지·재개의 역할 구분: 명령 3은 commander 1인, 판매 중지·재개는 2인 승인)·§4(T4·T6·T7), `docs/security/authz-matrix.md` §3. 제품 정책 표는 `services/ops-svc/src/modules/commands/domain/command.ts:152~153`(`SALE_STOP`·`SALE_RESUME`: requesterRoles `operator`·`commander`, approverRoles `commander`)이다.
+
+## 실패 확인
+
+시험 담당 `w12oct-test`(deepseek-v4.1-flash), 2026-11-22 18:29 KST. 기준 트리 `cdcfc748f`(출발점, 구현·시험 고침 없음)에서 돌렸다.
+
+| 검사 | 결과 | 까닭 |
+| --- | --- | --- |
+| `pnpm.cmd --filter @peaket/ops-svc test test/command-role-policy.test.ts test/command-lifecycle-http.test.ts` | 2파일 **4 실패 / 26 통과**(30건) | 아래 네 건. 두 파일 모두 새 정책과 옛 기대가 어긋난다 |
+| `command-role-policy.test.ts:66` | 실패 | `COMMANDER_ONLY`가 6개(`AUTOMATION_STOP`·`BOT_LEVEL`·`DEGRADED_MODE`·`KILL_SWITCH`·`SALE_RESUME`·`SALE_STOP`)를 기대하지만 제품은 4개다(`SALE_RESUME`·`SALE_STOP` 빠짐) |
+| `command-role-policy.test.ts:74` | 실패 | `SALE_RESUME`를 operator 역할로 요청하면 403 `command-role-forbidden`을 기대했지만, 지금은 201에 해당하는 `PENDING_APPROVAL` 명령이 만들어졌다 |
+| `command-role-policy.test.ts:98` | 실패 | 정책 이전 행(operator가 요청한 `SALE_STOP`)을 commander가 승인하면 403을 기대했지만, 지금은 `APPROVED`가 됐다 |
+| `command-lifecycle-http.test.ts:578` | 실패 | 내부 사건 길의 operator `SALE_STOP` 요청이 `{ accepted: false }`를 기대했지만, 지금은 `{ accepted: true, commandId }`다 |
+
+- 실패는 구현을 요구하는 방향이 아니라 **시험 기대가 낡은** 방향이다. 제품 코드의 정책 표·BAT-620 리뷰 RV-01이 정본과 같고, 두 시험만 BAT-620 이전 판을 그대로 쓴다.
+
+## 계획
+
+### 1. 바꿀 시험과 기대값
+
+| # | 파일·시험 | 지금 | 바꿀 기대 |
+| --- | --- | --- | --- |
+| 1 | `command-role-policy.test.ts` `COMMANDER_ONLY` | 6개(판매 중지·재개 포함) | 4개(`AUTOMATION_STOP`·`BOT_LEVEL`·`DEGRADED_MODE`·`KILL_SWITCH`). `SALE_STOP`·`SALE_RESUME`는 요청 역할 `operator`·`commander`, 승인 역할 `commander`임을 따로 단언한다 |
+| 2 | `command-role-policy.test.ts` operator 요청 시험 | commander 전용 유형의 operator 요청은 모두 403 | commander 전용 4개만 403. `SALE_STOP`·`SALE_RESUME`의 operator 요청은 `PENDING_APPROVAL`·`requestedRole: 'operator'`이고 감사 기록이 남는다 |
+| 3 | `command-role-policy.test.ts` 정책 이전 행 시험 | operator가 요청한 `SALE_STOP` 행을 commander가 승인·반려하면 403 | 레거시 행 유형을 `KILL_SWITCH`(operator가 요청할 수 없는 유형)로 바꿔 저장소 층의 역할 거절을 그대로 본다. 판매 중지·재개는 이제 정상 요청이므로 이 시험의 소재가 아니다 |
+| 4 | `command-role-policy.test.ts` operator 승인 시험 | commander가 만든 `SALE_STOP`을 operator가 승인·반려하면 403, commander는 승인 가능 | 그대로 유지하고, operator가 요청한 `SALE_STOP`의 자기 승인(operator 역할) 403·요청자 본인이 commander 역할로 승인해도 403 `command-requester-cannot-approve`를 더한다. 다른 commander의 승인·반려도 함께 본다 |
+| 5 | `command-lifecycle-http.test.ts` 내부 사건 길 시험 | operator `SALE_STOP` 요청을 `{ accepted: false }`로 기대 | 목록에서 `SALE_STOP`을 빼고 `BOT_LEVEL`(commander 전용 요청)을 넣는다. `SALE_STOP` operator 요청은 `{ accepted: true, commandId }`·`PENDING_APPROVAL`·`requestedRole: 'operator'`로 단언한다. 이 명령은 승인 전이라 실행은 0건이다 |
+| 6 | `command-lifecycle-http.test.ts` 내부 사건 길 시험(이어서) | 없음 | 위 `SALE_STOP`을 operator 본인이 승인하면 403 `command-role-forbidden`, 다른 commander가 토큰 없이 승인하면 403 `reauth-required`, 토큰을 달면 200 `SUCCEEDED`다. `SALE_RESUME`도 operator 요청 → operator 반려 403 → commander 반려 200 `REJECTED`를 본다 |
+| 7 | `command-lifecycle-http.test.ts` C-T5 재인증 시험 | 킬스위치만 접수 재인증을 본다 | 판매 중지·재개도 2인 명령이라 접수에 재인증이 필요함을 더한다. 토큰 없이 operator 요청은 403 `reauth-required`, 토큰을 달면 201 `PENDING_APPROVAL`이다 |
+
+- 시험 파일 수는 그대로 두고 기존 시험 안에 단언을 더한다(두 파일 30건 유지). 새 시험 파일·새 시험 묶음은 만들지 않는다.
+- 제품 동작을 시험에 맞추려고 바꾸지 않는다. `docs/features/control-tower.md` §3의 명령 3(commander 1인)과 판매 중지·재개(2인 승인) 구분은 그대로다.
+
+### 2. 지키는 것
+
+- **거절 경로**: commander 전용 4개 유형의 operator 요청 403, viewer 요청 403, operator의 승인·반려 403, 요청자 본인 승인 403 `command-requester-cannot-approve`, 재인증 없는 위험 명령 접수·승인 403 `reauth-required`.
+- **요청자≠승인자**: 판매 중지·재개는 요청자가 operator든 commander든 다른 commander만 승인한다. 같은 사람이 두 번 승인하는 경로(409)와 `command_actor` 회차별 유일 제약 시험은 다른 파일이 이미 본다.
+- **시험 이름·주석**: 바뀐 정책의 근거(POL-038 ⑩, ADR-0123 결정 2, `command.ts` 정책 표)을 시험 이름이나 첫 주석에 남긴다.
+- **제품 무변경**: `git diff --name-only`에 `services/ops-svc/src/`·계약·마이그레이션이 없어야 한다. 시험만 바꾼다.
+
+### 3. 손댈 파일
+
+- 시험: `services/ops-svc/test/command-role-policy.test.ts`, `services/ops-svc/test/command-lifecycle-http.test.ts`.
+- 계획·기록: 이 파일, `docs/review/consistency-review.md`·`docs/00-summary.md`(기록 R-770).
+- 제품 코드·계약·마이그레이션: 바꾸지 않는다.
+
+### 4. 게이트
+
+| 검사 | 기대 |
+| --- | --- |
+| `pnpm.cmd --filter @peaket/ops-svc test test/command-role-policy.test.ts test/command-lifecycle-http.test.ts` | 두 파일 **30/30** |
+| `pnpm.cmd --filter @peaket/ops-svc test` | 가능하면 전체 통과(같은 PC 다른 갈래의 흔들림은 따로 적는다) |
+| `pnpm.cmd --filter @peaket/ops-svc typecheck` | 오류 0 |
+| `pnpm.cmd lint` | 오류 0 |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0(경고는 기존 것) |
+| `node tools/ci/roles-check.mjs --base origin/develop --head HEAD` | 통과(plan → test → review → verify, 담당 표) |
+| `node tools/ci/records.mjs --check` | 통과(경고는 기존 것) |
+
+### 5. 틀린 구현 표본(검증 담당용)
+
+| # | 틀린 구현 | 잡을 시험 |
+| --- | --- | --- |
+| S1 | `command.ts`의 `SALE_STOP`·`SALE_RESUME` requesterRoles를 `COMMANDER_ONLY`로 되돌린다(BAT-620 이전) | `command-role-policy`의 operator 요청 시험·정책 표 시험, `command-lifecycle-http`의 내부 사건 길 판매 중지 요청 시험 |
+| S2 | `command.ts`의 `SALE_STOP`·`SALE_RESUME` approverRoles를 `ALL_ROLES`로 넓힌다(요청자 아닌 operator도 승인) | `command-role-policy`의 operator 승인 시험·정책 표 시험, `command-lifecycle-http`의 operator 승인 403 시험 |
+
+- 표본은 제품 파일을 잠깐 고쳤다가 `git checkout -- <파일>`로 되돌린다. 표본 때문에 생긴 제품 파일 차이가 남지 않게 한다.
+
+### 6. 범위 밖
+
+- BAT-620의 core-svc 판매 승인 상태·검색 동기화·CDN·집행 연결은 이미 구현·검증됐다(R-763, `docs/review/plans/BAT-620.md` §7~10). 이 묶음은 ops-svc 역할 시험 두 파일만 고친다.
+- 다른 ops-svc 시험(`commands.test.ts`·`commands-http.test.ts`·`admin-command-reauth.test.ts` 등)은 BAT-620에서 이미 새 정책으로 고쳐졌다. 이 묶음은 손대지 않는다.
+- 판매 중지·재개의 SCR-048 단추·정산 보류·재승인 때 중지 표시 해제는 BAT-620 리뷰 RV-02·RV-03의 남은 위험이다. 이 묶음 밖이다.
+- BUILD_ORDER 단계·wbs 상태 변화는 없다. 기록만 R-770으로 남긴다.
+
+## 리뷰
+
+## 검증
+
+## 담당 표
+
+| 역할 | 세션 ID | 모델 | 시작 | 끝 |
+| --- | --- | --- | --- | --- |
+| plan | w12oct-plan | deepseek-v4.1-flash | 2026-11-22T18:35+09:00 | 2026-11-22T18:45+09:00 |
+| test | w12oct-test | deepseek-v4.1-flash | 2026-11-22T18:45+09:00 | 2026-11-22T19:05+09:00 |
+| review | w12oct-review | deepseek-v4.1-flash | 2026-11-22T19:05+09:00 | 2026-11-22T19:20+09:00 |
+| verify | w12oct-verify | deepseek-v4.1-flash | 2026-11-22T19:20+09:00 | 2026-11-22T19:45+09:00 |
