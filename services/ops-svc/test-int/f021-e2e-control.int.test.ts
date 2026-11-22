@@ -17,9 +17,9 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
 import { controlTargetsFromEnv } from '../src/adapters/control-targets.js';
-import { GrpcControlSender } from '../src/adapters/grpc-control-sender.js';
+import { GrpcControlTransport } from '../src/adapters/grpc-control-sender.js';
 import { AppModule } from '../src/app.module.js';
-import { type Command, type CommandType, ControlDispatcher, DrizzleCommandStore } from '../src/modules/commands/index.js';
+import { type Command, type CommandType, ControlDispatcher, ControlFanout, DrizzleCommandStore, DrizzleControlDeliveries } from '../src/modules/commands/index.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { controlClient, freePort, until } from '../../queue-svc/test-int/control-client.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -157,22 +157,18 @@ beforeAll(async () => {
   probe.close();
 
   store = new DrizzleCommandStore(opsDb);
-  const targets = controlTargetsFromEnv({
+  const { targets } = controlTargetsFromEnv({
     PEAKET_ENV: 'ci',
     PEAKET_PURCHASE_CONTROL_GRPC_ADDRS: addrs.purchase.join(','),
     PEAKET_QUEUE_CONTROL_GRPC_ADDRS: addrs.queue.join(','),
     PEAKET_ADMISSION_CONTROL_GRPC_ADDRS: addrs.admission.join(','),
   });
-  dispatcher = new ControlDispatcher({
-    store,
-    targets,
-    senderFor: (service: string, address: string) => new GrpcControlSender({ address, dependency: `${service}-control` }),
-    clock: systemClock,
-    sleep: (ms: number) => new Promise((r) => setTimeout(r, ms)),
-  });
+  const deliveries = new DrizzleControlDeliveries(opsDb);
+  const fanout = new ControlFanout({ targets, transport: new GrpcControlTransport(), deliveries, clock: systemClock });
+  dispatcher = new ControlDispatcher({ store, fanout, clock: systemClock });
   ops = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: opsDb, adminAccounts: adminAccountsForCommands }),
+    module: AppModule.register({ database: opsDb, adminAccounts: adminAccountsForCommands, commandExtras: { control: { fanout, deliveries } } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: Date.now() }),
     logDestination: quiet(),
@@ -203,7 +199,9 @@ async function hash(key: string): Promise<Record<string, string>> {
 const send = async (type: CommandType, params: Record<string, unknown>, eventId?: string): Promise<{ before: number; final: Command }> => {
   const before = Date.now();
   const c = await store.create({ commandId: randomUUID(), type, reason: '온세일 대응(실제 연결 시험)', params, requestedBy: REQUESTER, requestedRole: 'commander', nowMs: Date.now(), approvalMode: 'ONE', ...(eventId ? { eventId } : {}) });
-  const final = await dispatcher.dispatch(await store.markDispatched(c.commandId, Date.now()));
+  await store.markDispatched(c.commandId, Date.now());
+  await dispatcher.resume(c.commandId);
+  const final = (await store.find(c.commandId))!;
   return { before, final };
 };
 const delivery = async (commandId: string) => {
