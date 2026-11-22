@@ -1,6 +1,6 @@
 // identity-svc 현장 스태프 초대 실제 PostgreSQL 통합 시험(BUILD_ORDER GAT-210, R-548).
 // 0031 staff_assignment 표에서 초대 조회·수락·거절 상태 전이, 이메일·동의·중복·만료, 내 배정 목록·커서를 본다.
-import { createDatabase, fakeClock, type Database } from '@peaket/platform';
+import { createDatabase, ensureOutboxPartitions, fakeClock, type Database } from '@peaket/platform';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -35,7 +35,9 @@ const A11 = '0190f3a1-7c2e-7a00-8000-00000000001d';
 const A12 = '0190f3a1-7c2e-7a00-8000-00000000001e';
 const A13 = '0190f3a1-7c2e-7a00-8000-00000000001f';
 const A14 = '0190f3a1-7c2e-7a00-8000-00000000002a';
+const A15 = '0190f3a1-7c2e-7a00-8000-00000000002b';
 const EVENT_DUP = '0190f3a1-7c2e-7a00-8000-00000000000a';
+const EVENT_REISSUE = '0190f3a1-7c2e-7a00-8000-00000000000b';
 const SS = '0190f3a1-7c2e-7a00-8000-00000000001b';
 const DEVICE = '0190f3a1-7c2e-7a00-8000-00000000001c';
 const TOKEN = 'db-invite-token-1';
@@ -86,6 +88,8 @@ beforeAll(async () => {
   await migrateIdentity(pg.url);
   database = createDatabase({ url: pg.url, applicationName: 'identity-staff-invitations-test', max: 8 });
   clock = fakeClock({ now: NOW });
+  // revokeAssignment가 control.sessions-terminated를 Outbox에 쓰므로 그날 파티션이 필요하다
+  await ensureOutboxPartitions(database, clock);
   store = new DrizzleStaffAssignmentStore(database, clock);
   invitations = new StaffInvitations(store, clock, { statusOf: async () => 'VERIFIED' });
   await seedAccount(ACCOUNT, 'staff@example.com');
@@ -173,7 +177,7 @@ describe('파트너 초대 만들기·명단·해제·재발송 PostgreSQL [BAT-
     if (made.result !== 'OK') throw new Error('OK가 아니다');
     expect(made.created.map((r) => [r.assignmentId, r.inviteEmail, r.promoterId, r.status])).toEqual([
       [A8, 'a@example.com', PROMOTER, 'INVITED'],
-      [A9, 'b@example.com', PROMOTER, 'INVITED'],
+      [A9, 'B@Example.com', PROMOTER, 'INVITED'],
     ]);
     expect(await store.findInvitedEmails(EVENT_NEW_2, ['A@EXAMPLE.COM'])).toEqual(['a@example.com']);
     const dup = await store.createInvitations([
@@ -222,14 +226,14 @@ describe('파트너 초대 만들기·명단·해제·재발송 PostgreSQL [BAT-
   });
 
   test('I-T21 ⑨ reissueInvitation는 새 해시·만료로 바꾸고 옛 토큰을 찾지 못하게 하며, 수락된 배정은 ALREADY_ACCEPTED다', async () => {
-    await seedInvitation({ id: A9, token: 'db-old', eventId: EVENT_NEW_2, role: 'gate_lead', status: 'INVITED', email: 'b@example.com' });
-    const r = await store.reissueInvitation({ assignmentId: A9, tokenHash: hash('db-fresh'), expiresAtMs: NOW + 2 * HOUR });
+    await seedInvitation({ id: A15, token: 'db-old', eventId: EVENT_REISSUE, role: 'gate_lead', status: 'INVITED', email: 'reissue@example.com' });
+    const r = await store.reissueInvitation({ assignmentId: A15, tokenHash: hash('db-fresh'), expiresAtMs: NOW + 2 * HOUR });
     expect(r.result).toBe('OK');
     await expect(store.findInvitationByTokenHash(hash('db-old'))).resolves.toBeNull();
     const found = await store.findInvitationByTokenHash(hash('db-fresh'));
-    expect(found).toMatchObject({ assignmentId: A9, inviteExpiresAtMs: NOW + 2 * HOUR });
-    await database.pool.query("update staff_assignment set status = 'ASSIGNED', account_id = $2 where id = $1", [A9, ACCOUNT]);
-    await expect(store.reissueInvitation({ assignmentId: A9, tokenHash: hash('db-fresh-2'), expiresAtMs: NOW + 3 * HOUR })).resolves.toEqual({ result: 'ALREADY_ACCEPTED' });
+    expect(found).toMatchObject({ assignmentId: A15, inviteExpiresAtMs: NOW + 2 * HOUR });
+    await database.pool.query("update staff_assignment set status = 'ASSIGNED', account_id = $2 where id = $1", [A15, ACCOUNT]);
+    await expect(store.reissueInvitation({ assignmentId: A15, tokenHash: hash('db-fresh-2'), expiresAtMs: NOW + 3 * HOUR })).resolves.toEqual({ result: 'ALREADY_ACCEPTED' });
     await expect(store.reissueInvitation({ assignmentId: '0190f3a1-7c2e-7a00-8000-0000000000ff', tokenHash: hash('x'), expiresAtMs: NOW })).resolves.toEqual({ result: 'NOT_FOUND' });
   });
 
