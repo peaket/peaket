@@ -1011,12 +1011,21 @@ importers:
       '@aws-sdk/client-kms':
         specifier: 3.1159.0
         version: 3.1159.0
+      '@grpc/grpc-js':
+        specifier: 1.14.6
+        version: 1.14.6
+      '@grpc/proto-loader':
+        specifier: 0.8.1
+        version: 0.8.1
       '@nestjs/common':
         specifier: ^12.3.2
         version: 12.3.2(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1)
       '@noble/curves':
         specifier: 2.4.0
         version: 2.4.0
+      '@peaket/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@peaket/platform':
         specifier: workspace:*
         version: link:../../packages/platform
