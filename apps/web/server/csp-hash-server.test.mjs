@@ -4,8 +4,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer, request } from 'node:http';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { CSP_TEMPLATE_HEADER, HASH_SENTINEL, MAX_HTML_BYTES, createCspHashServer, inlineScriptHashes, reactRuntimeScripts } from './csp-hash-server.mjs';
+// BAT-177-r2(ADR-0359)의 새 내보내기는 이름공간으로 읽는다: 내보내기가 없는 트리에서도 파일이 읽혀 T3·T4의 단언 실패가 보인다(계획 §6)
+import * as front from './csp-hash-server.mjs';
 
 const sha = (s) => `'sha256-${createHash('sha256').update(s).digest('base64')}'`;
 const TEMPLATE = `default-src 'self'; script-src 'self' ${HASH_SENTINEL}; style-src 'self'; object-src 'none'; report-to csp`;
@@ -22,7 +24,11 @@ async function pair(handler) {
       const rq = request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks);
+          // raw: 받은 날 바이트(압축된 본문을 풀지 않고 본다)
+          resolve({ status: res.statusCode, headers: res.headers, body: raw.toString('utf8'), raw });
+        });
         // 응답 도중 연결이 끊기면 끝(end)이 오지 않고 aborted·error가 온다
         res.on('aborted', () => reject(new Error('aborted')));
         res.on('error', reject);
@@ -350,5 +356,176 @@ test('상태 표시가 없거나, 허용 밖 값이거나, 위 서버가 200이 
     } finally {
       await p.close();
     }
+  }
+});
+
+// ---- BAT-177-r2(OPEN[52] (나), ADR-0359): 정적 덩어리(/_next/static/)만 손님의 압축 요청을 위 서버에 넘긴다 ----
+// 단언 값은 계획 docs/review/plans/BAT-177-r2.md §4·§5에서 가져온다. 시험용 CSS는 임의 글이다.
+
+test('BAT-177-r2 T1 정적 덩어리 경로 판정 표: GET·HEAD이고 ? 앞 경로가 대소문자까지 /_next/static/으로 시작하며 %·역슬래시·빈 마디·점 마디가 없을 때만 참', () => {
+  assert.equal(typeof front.isStaticAssetRequest, 'function', 'isStaticAssetRequest를 내보내야 한다');
+  assert.equal(front.STATIC_ASSET_PREFIX, '/_next/static/');
+  const yes = [
+    ['GET', '/_next/static/chunks/a1.css'],
+    ['GET', '/_next/static/chunks/1yvvqr7d-lx4r.css?dpl=050711fb'],
+    ['HEAD', '/_next/static/media/x.woff2'],
+    ['GET', '/_next/static/abc/_buildManifest.js'],
+    // 쿼리는 판정에 쓰지 않는다(쿼리 속 %·..는 경로가 아니다)
+    ['GET', '/_next/static/chunks/a.js?v=%2e%2e/../x'],
+  ];
+  const no = [
+    ['POST', '/_next/static/a.css'],
+    ['PUT', '/_next/static/a.css'],
+    ['get', '/_next/static/a.css'],
+    ['head', '/_next/static/a.css'],
+    [undefined, '/_next/static/a.css'],
+    ['GET', '/_next/static'],
+    ['GET', '/_next/static?x=/a.css'],
+    ['GET', '/_next/static/'],
+    ['GET', '/_next/static/?a.css'],
+    ['GET', '/_next/staticx/a.css'],
+    ['GET', '/_NEXT/static/a.css'],
+    ['GET', '/_next/Static/a.css'],
+    ['GET', '/_next/STATIC/a.css'],
+    ['GET', '//_next/static/a.css'],
+    ['GET', 'http://h/_next/static/a.css'],
+    ['GET', '/_next/static/../../events/e-1'],
+    ['GET', '/_next/static/a/../b.css'],
+    ['GET', '/_next/static/a/..'],
+    ['GET', '/_next/static/./a.css'],
+    ['GET', '/_next/static/a/.'],
+    ['GET', '/_next/static//a.css'],
+    ['GET', '/_next/static/a//b.css'],
+    ['GET', '/_next/static/a/'],
+    ['GET', '/_next/static/%2e%2e/events/e-1'],
+    ['GET', '/_next/static/a%2Fb.css'],
+    ['GET', '/_next/static/a%20b.css'],
+    ['GET', '/_next/static/a\\b.css'],
+    ['GET', '/_next/static/..\\..\\events'],
+    ['GET', '/x?/_next/static/a.css'],
+    ['GET', '/_next/image?url=/_next/static/a.png'],
+    ['GET', '/seed-color-mode.js'],
+    ['GET', '/'],
+    ['GET', '/my/tickets'],
+    ['GET', ''],
+    ['GET', undefined],
+  ];
+  for (const [m, u] of yes) assert.equal(front.isStaticAssetRequest(m, u), true, `${m} ${u}`);
+  for (const [m, u] of no) assert.equal(front.isStaticAssetRequest(m, u), false, `${m} ${u}`);
+});
+
+test('BAT-177-r2 T2 위로 넘기는 accept-encoding: 정적 요청의 빈 글 아닌 손님 값만 글자 그대로, 그 밖은 identity', () => {
+  assert.equal(typeof front.upstreamAcceptEncoding, 'function', 'upstreamAcceptEncoding을 내보내야 한다');
+  const css = '/_next/static/chunks/a1.css?dpl=1';
+  const cases = [
+    [{ method: 'GET', url: css, headers: { 'accept-encoding': 'gzip, deflate, br' } }, 'gzip, deflate, br'],
+    [{ method: 'HEAD', url: css, headers: { 'accept-encoding': 'br;q=1.0, gzip;q=0.8' } }, 'br;q=1.0, gzip;q=0.8'],
+    [{ method: 'GET', url: css, headers: {} }, 'identity'],
+    [{ method: 'GET', url: css, headers: { 'accept-encoding': '' } }, 'identity'],
+    [{ method: 'GET', url: css, headers: { 'accept-encoding': ['gzip', 'br'] } }, 'identity'],
+    [{ method: 'GET', url: '/my/tickets', headers: { 'accept-encoding': 'gzip' } }, 'identity'],
+    [{ method: 'GET', url: '/', headers: { 'accept-encoding': 'gzip, br' } }, 'identity'],
+    [{ method: 'POST', url: css, headers: { 'accept-encoding': 'gzip' } }, 'identity'],
+    [{ method: 'GET', url: '/_next/static/../../my/tickets', headers: { 'accept-encoding': 'gzip' } }, 'identity'],
+    [{ headers: { 'accept-encoding': 'gzip' } }, 'identity'],
+  ];
+  for (const [req, want] of cases) assert.equal(front.upstreamAcceptEncoding(req), want, JSON.stringify(req));
+});
+
+/**
+ * Next.js 기본 압축처럼 받은 accept-encoding에 gzip이 있으면 gzip으로 주는 위 서버 처리기.
+ * seen에 (메서드, 경로, 받은 accept-encoding)를, sent에 실제로 보낸 바이트를 남긴다.
+ */
+function compressingUpstream(seen, sent, respond) {
+  return (req, res) => {
+    req.resume();
+    const ae = req.headers['accept-encoding'];
+    seen.push({ method: req.method, url: req.url, ae });
+    const { body, headers } = respond(req);
+    const gz = typeof ae === 'string' && /\bgzip\b/.test(ae);
+    const out = gz ? gzipSync(body) : Buffer.from(body);
+    sent.push(out);
+    res.writeHead(200, { ...headers, ...(gz ? { 'content-encoding': 'gzip' } : {}), vary: 'Accept-Encoding', 'content-length': String(out.length) });
+    res.end(req.method === 'HEAD' ? undefined : out);
+  };
+}
+
+test('BAT-177-r2 T3 정적 CSS는 손님 압축 요청을 위로 넘기고 gzip 바이트를 그대로 흘린다(HTML이 될 수 있는 경로는 identity)', async () => {
+  const CSS = `.card-flat{display:grid;gap:8px}${'.w{color:#123456}'.repeat(200)}`;
+  const seen = [];
+  const sent = [];
+  const p = await pair(compressingUpstream(seen, sent, () => ({ body: CSS, headers: { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'public, max-age=31536000, immutable' } })));
+  try {
+    const gz = await p.get('/_next/static/chunks/a.css?dpl=1', { 'accept-encoding': 'gzip, br' });
+    assert.deepEqual(seen.at(-1), { method: 'GET', url: '/_next/static/chunks/a.css?dpl=1', ae: 'gzip, br' });
+    assert.equal(gz.status, 200);
+    assert.equal(gz.headers['content-encoding'], 'gzip');
+    assert.equal(gz.headers.vary, 'Accept-Encoding');
+    assert.equal(gz.headers['content-type'], 'text/css; charset=utf-8');
+    assert.equal(gz.headers['cache-control'], 'public, max-age=31536000, immutable');
+    // 앞 서버는 풀거나 다시 싸지 않는다: 위 서버가 보낸 바이트와 같고, 풀면 원문이다
+    assert.ok(gz.raw.length < Buffer.byteLength(CSS), `압축 본문 ${gz.raw.length}B는 원문 ${Buffer.byteLength(CSS)}B보다 작아야 한다`);
+    assert.deepEqual(gz.raw, sent.at(-1));
+    assert.equal(gz.headers['content-length'], String(gz.raw.length));
+    assert.equal(gunzipSync(gz.raw).toString('utf8'), CSS);
+
+    // HEAD도 넘긴다
+    const head = await p.get('/_next/static/media/x.woff2', { 'accept-encoding': 'gzip' }, 'HEAD');
+    assert.deepEqual(seen.at(-1), { method: 'HEAD', url: '/_next/static/media/x.woff2', ae: 'gzip' });
+    assert.equal(head.headers['content-encoding'], 'gzip');
+
+    // 손님이 압축을 청하지 않으면 지어 넣지 않는다
+    const plain = await p.get('/_next/static/chunks/a.css?dpl=1');
+    assert.deepEqual(seen.at(-1), { method: 'GET', url: '/_next/static/chunks/a.css?dpl=1', ae: 'identity' });
+    assert.equal(plain.headers['content-encoding'], undefined);
+    assert.equal(plain.body, CSS);
+
+    // HTML이 될 수 있는 경로(화면·public·이미지·접두만 닮은 것)는 손님이 gzip을 받아도 위 서버에 identity
+    for (const path of ['/my/tickets', '/', '/seed-color-mode.js', '/_next/image?url=/_next/static/a.png', '/_next/staticx/a.css']) {
+      const r = await p.get(path, { 'accept-encoding': 'gzip, br' });
+      assert.deepEqual(seen.at(-1), { method: 'GET', url: path, ae: 'identity' }, path);
+      assert.equal(r.headers['content-encoding'], undefined, path);
+    }
+    assert.equal(seen.length, 8);
+  } finally {
+    await p.close();
+  }
+});
+
+test('BAT-177-r2 T4 HTML 경로는 그대로 해시를 받고, 정적 경로의 HTML+틀은 해시 없는 막는 CSP다', async () => {
+  const seen = [];
+  const sent = [];
+  const p = await pair(
+    compressingUpstream(seen, sent, () => ({ body: HTML, headers: { 'content-type': 'text/html; charset=utf-8', [CSP_TEMPLATE_HEADER]: TEMPLATE, 'content-security-policy-report-only': 'x' } })),
+  );
+  const hashed = TEMPLATE.replace(HASH_SENTINEL, [sha(FLIGHT0), sha(TURBO), sha(FLIGHT1)].join(' '));
+  const noHash = TEMPLATE.replace(` ${HASH_SENTINEL}`, '');
+  try {
+    // ① 화면 경로: 손님이 gzip, br을 받아도 위 서버는 identity를 받고, 압축 전 본문으로 해시를 채운다(회귀)
+    const page = await p.get('/events/e-1', { 'accept-encoding': 'gzip, br' });
+    assert.deepEqual(seen.at(-1), { method: 'GET', url: '/events/e-1', ae: 'identity' });
+    assert.equal(page.headers['content-encoding'], undefined);
+    assert.equal(page.body, HTML);
+    assert.equal(page.headers['content-security-policy'], hashed);
+    assert.equal(page.headers[CSP_TEMPLATE_HEADER], undefined);
+
+    // ② 정적 경로인데 위 서버가 틀 머리를 단 HTML을 gzip으로 주면: 해시 없는 막는 CSP, 안쪽 머리·보고 모드는 지운다(닫힘 실패)
+    const odd = await p.get('/_next/static/x.html', { 'accept-encoding': 'gzip' });
+    assert.deepEqual(seen.at(-1), { method: 'GET', url: '/_next/static/x.html', ae: 'gzip' });
+    assert.equal(odd.headers['content-encoding'], 'gzip');
+    assert.equal(odd.headers['content-security-policy'], noHash);
+    assert.equal(odd.headers[CSP_TEMPLATE_HEADER], undefined);
+    assert.equal(odd.headers['content-security-policy-report-only'], undefined);
+    assert.deepEqual(odd.raw, sent.at(-1));
+    assert.equal(gunzipSync(odd.raw).toString('utf8'), HTML);
+
+    // ③ 같은 정적 경로라도 POST는 identity를 받고 해시를 채운다(회귀)
+    const post = await p.get('/_next/static/x.html', { 'accept-encoding': 'gzip', 'content-type': 'application/x-www-form-urlencoded' }, 'POST', 'a=1');
+    assert.deepEqual(seen.at(-1), { method: 'POST', url: '/_next/static/x.html', ae: 'identity' });
+    assert.equal(post.headers['content-encoding'], undefined);
+    assert.equal(post.headers['content-security-policy'], hashed);
+    assert.equal(seen.length, 3);
+  } finally {
+    await p.close();
   }
 });
