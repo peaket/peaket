@@ -38,7 +38,8 @@ describe('BAT-465 제어 gRPC ApplyControl (queue-svc)', () => {
 
   test('R584_모르는_종류와_모양이_틀린_요청은_거절한다', async () => {
     const f = fixture();
-    expect((await call(f.handlers, { command_id: randomUUID(), scope: randomUUID(), kind: 'CONTROL_KIND_SALE_PAUSE', version: 1, desired_state_json: '{}' })).e?.code).toBe(12);
+    // F-02-1(ADR-0365 결정 2): 명령 3(CONTROL_KIND_SALE_PAUSE)은 이제 받는다. 받지 않는 종류의 예는 명령 1로 바꾼다
+    expect((await call(f.handlers, { command_id: randomUUID(), scope: randomUUID(), kind: 'CONTROL_KIND_ADMISSION_TARGET', version: 1, desired_state_json: '{}' })).e?.code).toBe(12);
     expect((await call(f.handlers, { command_id: 'x', scope: randomUUID(), kind: 'CONTROL_KIND_SALE_SUSPENSION', version: 1, desired_state_json: '{"suspended":true}' })).e?.code).toBe(3);
     expect((await call(f.handlers, { command_id: randomUUID(), scope: randomUUID(), kind: 'CONTROL_KIND_SALE_SUSPENSION', version: 1, desired_state_json: '{"paused":true}' })).e?.code).toBe(3);
     expect(suspendedOf('{"suspended":false}')).toBe(false);
