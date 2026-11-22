@@ -534,4 +534,53 @@ describe('굿즈 결제 실제 연결(core-svc → payment-svc → 시뮬레이�
     expect(await snapshot()).toEqual(after);
     offsetMs = 0;
   }, 120_000);
+
+  test('P-T77 ② 실제 PrepareCheckout 재생은 같은 시도 ID·결제사로 결제창 값을 다시 만들고 멱등 기록에는 시도 ID만 남으며 그 값으로 결제 접수·승인이 된다 [ASVS v5.0.0-8.2.2]', async () => {
+    const productId = await createProduct({ name: '재생 실제 연결 굿즈' });
+    const slotId = await farSlot(productId);
+    const account = randomUUID();
+    const orderId = await pickupOrder(account, productId, slotId);
+    const key = randomUUID();
+    const keyed = () =>
+      core.http.inject({
+        method: 'POST',
+        url: `/v1/shop/orders/${orderId}/payments`,
+        headers: { ...fanHeaders(account), 'content-type': 'application/json', 'idempotency-key': key },
+        payload: '{}',
+      });
+    type View = { attemptId: string; pg: string; checkout: { clientKey: string; customerKey: string; orderId: string; amount: number; successUrl: string } };
+    const first = await keyed();
+    expect(first.statusCode, first.payload).toBe(201);
+    const firstView = json(first) as View;
+    expect(firstView.pg).toBe('SIMULATOR');
+    expect(firstView.checkout.successUrl).toBe(`${WEB}/shop/checkout/return?order=${orderId}&pg=SIMULATOR`);
+    const row = (
+      await coreAdmin.pool.query('select result_ref from idempotency_record where account_ref = $1 and operation = $2 and idempotency_key = $3', [account, 'START_MERCH_PAYMENT', key])
+    ).rows[0] as { result_ref: string };
+    expect(row.result_ref).toBe(firstView.attemptId);
+    for (const token of ['clientKey', 'customerKey', 'successUrl', 'failUrl', 'redirectUrl', 'totalAmount', '"checkout"']) {
+      expect(row.result_ref.includes(token), `기록에 ${token}`).toBe(false);
+    }
+
+    const again = await keyed();
+    expect(again.statusCode, again.payload).toBe(201);
+    const againView = json(again) as View;
+    expect({ attemptId: againView.attemptId, pg: againView.pg, orderId: againView.checkout.orderId, amount: againView.checkout.amount }).toEqual({
+      attemptId: firstView.attemptId,
+      pg: 'SIMULATOR',
+      orderId,
+      amount: 20_000,
+    });
+    // 실제 PrepareCheckout을 다시 불러 시뮬레이터가 구매자 키를 새로 만들었다(저장값을 돌려주지 않는다)
+    expect(againView.checkout.customerKey).not.toBe(firstView.checkout.customerKey);
+    expect(againView.checkout.successUrl).toBe(firstView.checkout.successUrl);
+    expect((await coreAdmin.pool.query('select count(*)::int as n from merch_payment_attempt where order_id = $1', [orderId])).rows[0].n).toBe(1);
+
+    // 재생이 다시 만든 값으로 결제사 인증 → 접수 → 승인까지 간다(같은 시도 ID가 쓰인다)
+    const paymentKey = await simAuth({ orderId: againView.checkout.orderId, amount: againView.checkout.amount, orderName: '시험 굿즈' });
+    await accept(account, orderId, { paymentKey, attemptId: againView.attemptId }, againView.checkout.amount);
+    await runConfirm(orderId, (s) => s === 'APPROVED');
+    await pullUntil(orderId, 'PAID');
+    expect((await adminPay.pool.query('select count(*)::int as n from payment where order_id = $1', [orderId])).rows[0].n).toBe(1);
+  }, 120_000);
 });

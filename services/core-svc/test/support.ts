@@ -1,6 +1,8 @@
 // 시험 공용: identity GetAdminAuthz 대역, 팬·파트너 신원 머리, 등록 본문(BUILD_ORDER HOT-171)
 import type { AdminAuthz, AdminAuthzPort } from '@peaket/platform';
 import { MemberCodeLookupFailed, MemoryCdnInvalidation, MemoryImageObjectStore, MemoryPublicFileStore, MemorySaleEligibilityCopy, type MediaWiring } from '../src/modules/catalog/index.js';
+import { MemoryMerchPayments, type ShopPg } from '../src/modules/shop/index.js';
+import type { CheckoutAnswer, CheckoutQuery } from '../src/modules/shop/domain/merch-ports.js';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 
@@ -61,6 +63,40 @@ export function productionBody(placeId: string, o: Record<string, unknown> = {})
 export const NOW_MS = Date.parse('2026-11-05T00:00:00.000Z');
 
 export const IMAGE_ORIGIN_TEST = 'https://img.peaket.test';
+
+/**
+ * 굿즈 결제창 대역(P-T77, W12-merch-replay). MemoryMerchPayments에 시험이 바꾸는 값을 더한다:
+ * 첫 응답과 재생 응답의 공개 키·돌아올 주소·구매자 키를 다르게 해, 저장값을 그대로 돌려주는 구현을 잡는다.
+ * replyPg·amountDelta·orderIdOverride는 재생이 만든 값이 시도·주문과 어긋나는 경우를 만든다.
+ */
+export class ProbeMerchPayments extends MemoryMerchPayments {
+  clientKey = 'test_ck_first';
+  origin = 'https://first.example';
+  /** 정하면 그 값을 구매자 키로 쓴다. 없으면 MemoryMerchPayments가 만드는 CSPRNG 값 */
+  customerKey: string | undefined;
+  replyPg: ShopPg = 'SIMULATOR';
+  amountDelta = 0;
+  orderIdOverride: string | undefined;
+
+  override async prepareCheckout(q: CheckoutQuery): Promise<CheckoutAnswer> {
+    const a = await super.prepareCheckout(q);
+    const c = a.checkout;
+    if (!('clientKey' in c)) return a;
+    return {
+      ...a,
+      pg: this.replyPg,
+      checkout: {
+        ...c,
+        clientKey: this.clientKey,
+        ...(this.customerKey === undefined ? {} : { customerKey: this.customerKey }),
+        orderId: this.orderIdOverride ?? c.orderId,
+        amount: c.amount + this.amountDelta,
+        successUrl: `${this.origin}/shop/checkout/return?order=${q.orderId}&pg=${this.replyPg}`,
+        failUrl: `${this.origin}/shop/checkout/fail?order=${q.orderId}&pg=${this.replyPg}`,
+      },
+    };
+  }
+}
 
 /** DB 모드 시험의 이미지·좌석맵 잇기 기본값(처리·해석 작업은 잇지 않아 늘 503이다) */
 export function testMedia(o: Partial<MediaWiring> = {}): MediaWiring {

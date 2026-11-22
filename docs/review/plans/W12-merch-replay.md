@@ -248,7 +248,19 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 실패 확인
 
-시험 담당이 구현 전 트리에서 채운다.
+시험 담당(세션 `lane5-w12merchreplay-test`)이 2026-11-22 12:30~12:40에 구현 전 트리(계획 커밋 `80206bfb4` 위)에서 보았다. Docker 잠금은 `C:\Program Files\Git\bin\bash.exe`로 `lock.sh take docker lane5-W12-merch-replay`를 잡고 실제 PostgreSQL 18 컨테이너로 돌렸다.
+
+- **단위 `services/core-svc/test/merch-payment-replay.test.ts`**: `Test Files 1 failed (1)`, `Tests 4 failed | 1 passed (5)`. ③은 지금 코드도 UUID·없는 시도·다른 주문 시도를 404로 막아 통과한다(새 길의 회귀 가드다). 나머지 넷은 기대대로 실패했다.
+  - ①: `idempotency_record.result_ref`가 `{"attemptId":…,"pg":"SIMULATOR","checkout":{…}}` JSON이다(기대: 시도 ID).
+  - ②: 재생 응답의 `clientKey`가 `test_ck_second`가 아니라 저장값 `test_ck_first`이고, `payments.calls.checkout`도 늘지 않는다(기대: +1).
+  - ④: `checkoutFailure`를 넣어도 재생이 201과 저장 JSON을 돌려준다(기대: 503).
+  - ⑤: `replyPg='TOSS'`·금액 +1,000원·다른 주문 ID를 넣어도 재생이 201과 저장 JSON을 돌려준다(기대: 503).
+- **통합 `test-int/shop-replay.int.test.ts -t "P-T77"`(실제 PostgreSQL)**: `Tests 4 failed | 1 passed | 6 skipped`. ③만 통과(위와 같은 까닭)하고 ①·②·④·⑤가 단위와 같은 자리에서 실패했다. ①은 `result_ref`가 응답 JSON, ②는 `clientKey`가 `test_ck_first` 그대로, ④는 503 대신 201, ⑤는 503 대신 201이다.
+- **기존 AZ-T17 ⑥ 결제 시도 재생 시험(고침)**: `test-int/shop-replay.int.test.ts -t "AZ-T17"`은 `Tests 1 failed | 5 passed | 5 skipped`다. 결제 시도 재생 줄이 `againView.checkout.customerKey`가 처음과 같다는 단언(`not.toBe`)에서 실패했다(지금 코드는 저장 JSON을 그대로 돌려준다).
+- **단위 `test/shop-replay-in-tx.test.ts`(고침)**: `Tests 1 failed | 5 passed (6)`. 결제 시도 줄이 `recordOf(K3)`가 `first.attemptId`가 아니라 응답 JSON이라는 단언에서 실패했다.
+- **실제 연결 `services/payment-svc/test-int/merch-path-e2e.int.test.ts -t "P-T77"`(실제 gRPC `PrepareCheckout`·pg-simulator)**: `Tests 1 failed | 4 skipped`. `idempotency_record.result_ref`가 시도 ID가 아니라 응답 JSON이라는 단언에서 실패했다.
+- **정적 검사(로컬)**: `pnpm exec turbo run build --filter=@peaket/core-svc^...`와 `--filter=@peaket/payment-svc^...` 통과, `pnpm --filter @peaket/core-svc typecheck` 통과(시험 포함). 새 시험은 결제창 준비가 아직 저장값을 쓰는 지금 코드와 타입에서도 컴파일된다.
+- **까닭**: 모두 계획 2의 목표와 같다. 결과 참조가 응답 JSON이고 재생이 `PrepareCheckout`을 부르지 않으며, `pinnedPg` 칸이 `CheckoutQuery`에 아직 없다.
 
 ## 리뷰
 

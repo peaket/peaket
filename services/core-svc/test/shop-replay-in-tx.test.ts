@@ -4,7 +4,7 @@
 // 바꾸지 않은 재생은 처음 응답과 같다. HTTP 통합 시험(test-int/shop-replay.int.test.ts)은 처음 보기(replayOf)에서 기록을 찾는 길만 탄다.
 // 여기서는 처음 보기 직후 같은 키의 다른 요청이 커밋한 차례를 메모리 저장소(포트의 짝 가짜)로 만들어, 유스케이스가 저장 함수(DB에서는 한 트랜잭션)에서 받는 재생을 본다.
 // 유스케이스·도메인은 진짜다. 결과 참조를 바꿔 두는 것은 통합 시험의 소유자 연결 고치기와 같은 자리다.
-// 결제 시도 시작은 이 길에서 결제창 준비가 저장 함수보다 먼저 돈다(리뷰 RV3, 정리 목록). 그래서 결제창 준비 호출 수는 단언하지 않고 시도·쓰기 0을 본다.
+// 결제 시도 시작은 이 길에서 결제창 준비가 저장 함수보다 먼저 돌고, 저장 함수가 재생을 돌려주면 재생이 한 번 더 부른다(W12-merch-replay). 그래서 결제창 준비 호출 수는 단언하지 않고 시도·쓰기 0을 본다.
 // 시험 값은 코드 상수와 다르게 고른다(가격 16,700원).
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fakeClock, type IdempotencyRequest } from '@peaket/platform';
@@ -228,7 +228,7 @@ function expectOneMismatch(what: string, operation: string, orderId: string | un
 }
 
 describe('AZ-T17 ⑥ 굿즈 작업의 트랜잭션 안 재생 대조', () => {
-  test('AZ-T17 ⑥ 결제 시도 시작의 트랜잭션 안 재생은 시도 ID·결제사·금액이 경로 주문과 맞지 않거나 JSON이 아니면 404 not-found·로그 한 줄이고 시도를 쓰지 않으며 바꾸지 않은 재생은 처음 응답과 바이트까지 같다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('AZ-T17 ⑥ 결제 시도 시작의 트랜잭션 안 재생은 시도 ID가 경로 주문과 맞지 않으면 404 not-found·로그 한 줄이고 시도를 쓰지 않으며 바꾸지 않은 재생은 같은 시도로 결제창 값을 다시 만든다 [ASVS v5.0.0-8.2.2]', async () => {
     const C = randomUUID();
     const body = pickupBody();
     const O1 = await order(C, body);
@@ -238,27 +238,34 @@ describe('AZ-T17 ⑥ 굿즈 작업의 트랜잭션 안 재생 대조', () => {
     const other = await h.pay.start(C, O2, {}, once(C, OP.start));
     const K3 = once(C, OP.start);
     const first = await h.pay.start(C, O1, {}, K3);
-    // 결과 참조는 처음 응답 그대로다(이 기록으로 메모리 저장소의 기록 키 꼴도 확인한다)
-    expect(recordOf(K3)).toBe(JSON.stringify(first));
+    // 결과 참조는 시도 ID 하나다(결제창 값을 저장하지 않는다, ADR-0352)
+    expect(recordOf(K3)).toBe(first.attemptId);
     const notFound = await foreign404(O1);
     const counts = () => ({ attempts: h.store.attempts.size, writes: h.store.writes, firstAttempt: h.store.attempts.get(first.attemptId)?.status });
     const before = counts();
     expect(before).toMatchObject({ attempts: 2, firstAttempt: 'READY' });
 
-    const again = await inTxValue(K3, JSON.stringify(first), () => h.pay.start(C, O1, {}, K3));
-    expect(JSON.stringify(again)).toBe(JSON.stringify(first));
+    const again = await inTxValue(K3, first.attemptId, () => h.pay.start(C, O1, {}, K3));
+    const firstCheckout = first.checkout as { orderId: string; amount: number };
+    const againCheckout = again.checkout as { orderId: string; amount: number };
+    expect({ attemptId: again.attemptId, pg: again.pg, orderId: againCheckout.orderId, amount: againCheckout.amount }).toEqual({
+      attemptId: first.attemptId,
+      pg: first.pg,
+      orderId: firstCheckout.orderId,
+      amount: firstCheckout.amount,
+    });
     expect(h.log.lines).toEqual([]);
     expect(counts()).toEqual(before);
 
     const tampered: [string, string][] = [
-      ['(가) 같은 팬 다른 주문의 시도', JSON.stringify({ ...first, attemptId: other.attemptId })],
-      ['(나) 다른 결제사', JSON.stringify({ ...first, pg: 'TOSS' })],
-      ['(다) 금액 + 1,000원', JSON.stringify({ ...first, checkout: { ...first.checkout, amount: PRICE + 1_000 } })],
-      ['(라) JSON이 아닌 글', 'x'],
+      ['(가) 같은 팬 다른 주문의 시도', other.attemptId],
+      ['(나) 옛 JSON의 다른 주문 시도', JSON.stringify({ ...first, attemptId: other.attemptId })],
+      ['(다) UUID가 아닌 글', 'x'],
+      ['(라) 옛 JSON의 시도 ID가 UUID가 아님', JSON.stringify({ ...first, attemptId: 'x' })],
     ];
     for (const [what, ref] of tampered) {
       expect(await inTxProblem(K3, ref, () => h.pay.start(C, O1, {}, K3)), what).toEqual(notFound);
-      expectOneMismatch(what, OP.start, O1, ref.startsWith('{') ? [C, ref, other.attemptId] : [C]);
+      expectOneMismatch(what, OP.start, O1, [C, ref, other.attemptId]);
       expect(counts(), what).toEqual(before);
     }
   });

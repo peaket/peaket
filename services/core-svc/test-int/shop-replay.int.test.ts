@@ -11,8 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
-import { MemoryHeldTickets, MemoryMerchPayments, MemoryMerchStock, type ShopLogger, type ShopReauthGate } from '../src/modules/shop/index.js';
-import { FakeIdentity, fan, quiet, testMedia } from '../test/support.js';
+import { CheckoutFailed, MemoryHeldTickets, MemoryMerchStock, type ShopLogger, type ShopReauthGate } from '../src/modules/shop/index.js';
+import { FakeIdentity, fan, ProbeMerchPayments, quiet, testMedia } from '../test/support.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 import { loginFor } from './roles.js';
 
@@ -54,7 +54,7 @@ const logger: ShopLogger = {
   },
 };
 
-const payments = new MemoryMerchPayments(() => clock.now());
+const payments = new ProbeMerchPayments(() => clock.now());
 const held = new MemoryHeldTickets();
 const stock = new MemoryMerchStock();
 const reauth = new PassReauth();
@@ -112,6 +112,13 @@ beforeEach(async () => {
   payments.calls.getPayment.length = 0;
   payments.calls.cancel.length = 0;
   payments.details.clear();
+  payments.checkoutFailure = undefined;
+  payments.clientKey = 'test_ck_first';
+  payments.origin = 'https://first.example';
+  payments.customerKey = undefined;
+  payments.replyPg = 'SIMULATOR';
+  payments.amountDelta = 0;
+  payments.orderIdOverride = undefined;
   held.rows.clear();
   reauth.calls.length = 0;
   logs.length = 0;
@@ -293,7 +300,7 @@ describe('AZ-T17 ⑥ 굿즈 작업의 멱등 재생 대조', () => {
     expectOneMismatch('부가 상품 주문', 'CREATE_TICKET_ADDON', undefined, [C, D, ODA]);
   });
 
-  test('AZ-T17 ⑥ 결제 시도 재생의 시도 ID·결제사·금액이 경로 주문과 맞지 않으면 404 not-found이고 결제사를 부르지 않으며 바꾸지 않은 재요청은 처음 응답과 같다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('AZ-T17 ⑥ 결제 시도 재생의 시도 ID가 경로 주문과 맞지 않으면 404 not-found이고 결제사를 부르지 않으며 바꾸지 않은 재요청은 같은 시도로 결제창 값을 다시 만든다 [ASVS v5.0.0-8.2.2]', async () => {
     const C = randomUUID();
     const product = await seedProduct({ fulfillments: ['PICKUP'] });
     const slot = await seedSlot(product);
@@ -301,30 +308,38 @@ describe('AZ-T17 ⑥ 굿즈 작업의 멱등 재생 대조', () => {
     // 같은 팬의 같은 금액 주문 둘(시도 ID 대조만이 둘을 가른다)
     const O1 = orderIdOf(await post(C, '/v1/shop/orders', body));
     const O2 = orderIdOf(await post(C, '/v1/shop/orders', body));
+    // 시도 행의 주문만 바꿀 때 쓸, 시도가 없는 주문
+    const O3 = orderIdOf(await post(C, '/v1/shop/orders', body));
     const K3 = randomUUID();
     const first = await post(C, `/v1/shop/orders/${O1}/payments`, {}, K3);
     expect(first.statusCode, first.payload).toBe(201);
-    type View = { attemptId: string; pg: string; checkout: { amount: number } & Record<string, unknown> } & Record<string, unknown>;
+    type View = { attemptId: string; pg: string; checkout: { amount: number; orderId: string; customerKey: string } & Record<string, unknown> } & Record<string, unknown>;
     const view1 = JSON.parse(first.payload) as View;
     const second = await post(C, `/v1/shop/orders/${O2}/payments`, {});
     expect(second.statusCode, second.payload).toBe(201);
     const view2 = JSON.parse(second.payload) as View;
-    // 결제창 금액이 주문 금액이다(대조가 보는 값)
+    // 결제창 금액이 주문 금액이다
     expect({ amount: view1.checkout.amount, pg: view1.pg, other: view2.attemptId !== view1.attemptId }).toEqual({ amount: PRICE, pg: 'SIMULATOR', other: true });
     const again = await post(C, `/v1/shop/orders/${O1}/payments`, {}, K3);
-    expect({ status: again.statusCode, payload: again.payload }).toEqual({ status: 201, payload: first.payload });
+    expect(again.statusCode, again.payload).toBe(201);
+    const againView = JSON.parse(again.payload) as View;
+    // 재생은 같은 시도 ID·결제사·주문·금액이고 결제창 값은 다시 만든다(구매자 키가 새 값)
+    expect({ attemptId: againView.attemptId, pg: againView.pg, orderId: againView.checkout.orderId, amount: againView.checkout.amount }).toEqual({
+      attemptId: view1.attemptId,
+      pg: view1.pg,
+      orderId: O1,
+      amount: PRICE,
+    });
+    expect(againView.checkout.customerKey).not.toBe(view1.checkout.customerKey);
     expect(mismatchLines()).toEqual([]);
     const notFound = await foreign404(O1);
     const checkouts = payments.calls.checkout.length;
-    expect(checkouts).toBe(2);
+    expect(checkouts).toBe(3);
 
-    const bumped = view1.checkout.amount + 1000;
-    const notJson = `결제창 값 아님 ${randomUUID()}`;
     const cases: [string, string, string][] = [
-      ['가 시도 ID를 같은 팬의 다른 주문 시도로', JSON.stringify({ ...view1, attemptId: view2.attemptId }), view2.attemptId],
-      ['나 결제사', JSON.stringify({ ...view1, pg: 'TOSS' }), 'TOSS'],
-      ['다 금액 + 1,000원', JSON.stringify({ ...view1, checkout: { ...view1.checkout, amount: bumped } }), String(bumped)],
-      ['라 JSON이 아닌 글', notJson, notJson],
+      ['가 시도 ID를 같은 팬의 다른 주문 시도로', view2.attemptId, view2.attemptId],
+      ['나 JSON이 아닌 글', `결제창 값 아님 ${randomUUID()}`, '"checkout"'],
+      ['다 JSON의 attemptId가 UUID가 아님', JSON.stringify({ attemptId: 'x' }), '"attemptId":"x"'],
     ];
     for (const [what, ref, changed] of cases) {
       await setRef(C, 'START_MERCH_PAYMENT', K3, ref);
@@ -335,63 +350,23 @@ describe('AZ-T17 ⑥ 굿즈 작업의 멱등 재생 대조', () => {
       expect(res.payload.includes(changed), what).toBe(false);
       expect(payments.calls.checkout.length, what).toBe(checkouts);
       expect(await writes(), what).toEqual(before);
-      expectOneMismatch(what, 'START_MERCH_PAYMENT', O1, [C, ref]);
+      expectOneMismatch(what, 'START_MERCH_PAYMENT', O1, [C, ref, view2.attemptId]);
     }
-  });
 
-  test('AZ-T17 ⑥ 리뷰 재현(RV1): 포트원 결제 시도 재생은 결제창 totalAmount를 주문 금액과 견주어 같으면 처음 응답 그대로이고 다르면 404 not-found이다 [ASVS v5.0.0-8.2.2]', async () => {
-    // 결정 6 표: 결제창 금액은 토스 amount, 포트원 totalAmount다. 모의 결제사 대역은 토스 꼴만 내므로 시도의 결제사를 소유자 연결로 PORTONE으로 바꾸고
-    // 결과 참조를 포트원 꼴 결제창 값(openapi PaymentAttempt.checkout PortoneCheckout)으로 둔다
-    const C = randomUUID();
-    const product = await seedProduct({ fulfillments: ['PICKUP'] });
-    const slot = await seedSlot(product);
-    const O1 = orderIdOf(await post(C, '/v1/shop/orders', { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot }));
-    const url = `/v1/shop/orders/${O1}/payments`;
-    const K = randomUUID();
-    const first = await post(C, url, {}, K);
-    expect(first.statusCode, first.payload).toBe(201);
-    const view = JSON.parse(first.payload) as { attemptId: string } & Record<string, unknown>;
-    const moved = await admin.pool.query(`update merch_payment_attempt set pg = 'PORTONE' where id = $1 and order_id = $2`, [view.attemptId, O1]);
+    // 시도 행의 주문만 다른 주문으로 바꾼 경우(결과 참조는 그대로)
+    const moved = await admin.pool.query('update merch_payment_attempt set order_id = $2 where id = $1 and order_id = $3', [view1.attemptId, O3, O1]);
     expect(moved.rowCount).toBe(1);
-    const portone = (totalAmount: number, extra: Record<string, unknown> = {}) => ({
-      ...view,
-      pg: 'PORTONE',
-      checkout: {
-        storeId: 'store-az-t17-rv1',
-        channelKey: 'channel-key-az-t17-rv1',
-        paymentId: `pay-${O1}`,
-        orderName: '재생 시험 굿즈',
-        totalAmount,
-        currency: 'KRW',
-        redirectUrl: `https://peaket.test/shop/checkout/return?order=${O1}`,
-        customData: { orderId: O1 },
-        ...extra,
-      },
-    });
-    const notFound = await foreign404(O1);
-    const checkouts = payments.calls.checkout.length;
-    expect(checkouts).toBe(1);
-
-    // totalAmount가 주문 금액이면 저장한 포트원 결제창 값 그대로 201
-    const same = portone(PRICE);
-    await setRef(C, 'START_MERCH_PAYMENT', K, JSON.stringify(same));
-    logs.length = 0;
-    const ok = await post(C, url, {}, K);
-    expect({ status: ok.statusCode, body: JSON.parse(ok.payload) as unknown }).toEqual({ status: 201, body: same });
-    expect(mismatchLines()).toEqual([]);
-
-    // totalAmount만 주문 금액 + 1,000원이고 amount 칸에 주문 금액을 끼워도 404(포트원은 amount를 보지 않는다)
-    const bumped = PRICE + 1000;
-    const ref = JSON.stringify(portone(bumped, { amount: PRICE }));
-    await setRef(C, 'START_MERCH_PAYMENT', K, ref);
-    const before = await writes();
-    logs.length = 0;
-    const res = await post(C, url, {}, K);
-    expect(problem(res)).toEqual(notFound);
-    expect(res.payload.includes(String(bumped))).toBe(false);
-    expect(payments.calls.checkout.length).toBe(checkouts);
-    expect(await writes()).toEqual(before);
-    expectOneMismatch('포트원 totalAmount + 1,000원', 'START_MERCH_PAYMENT', O1, [C, ref]);
+    try {
+      const before = await writes();
+      logs.length = 0;
+      const res = await post(C, `/v1/shop/orders/${O1}/payments`, {}, K3);
+      expect(problem(res)).toEqual(notFound);
+      expect(payments.calls.checkout.length).toBe(checkouts);
+      expect(await writes()).toEqual(before);
+      expectOneMismatch('라 시도 행의 주문 변조', 'START_MERCH_PAYMENT', O1, [C, view1.attemptId, view2.attemptId]);
+    } finally {
+      await admin.pool.query('update merch_payment_attempt set order_id = $2 where id = $1 and order_id = $3', [view1.attemptId, O1, O3]);
+    }
   });
 
   test('AZ-T17 ⑥ 결제 접수 재생 참조가 목록 밖 값이면 404 not-found이고 승인 명령이 없다 [ASVS v5.0.0-8.2.2]', async () => {
@@ -581,5 +556,232 @@ describe('AZ-T17 ⑥ 굿즈 작업의 멱등 재생 대조', () => {
     expect(await writes()).toEqual(before);
     expect(await itemStates(other.orderId)).toEqual(otherItems);
     expectOneMismatch('반품', 'RETURN_MERCH_ORDER', picked.orderId, [C, `return:${other.orderId}`]);
+  });
+});
+
+describe('P-T77 굿즈 결제 시도의 결제창 값을 저장하지 않는 재생', () => {
+  const OP = 'START_MERCH_PAYMENT';
+  const url = (orderId: string) => `/v1/shop/orders/${orderId}/payments`;
+  type View = { attemptId: string; pg: string; checkout: { clientKey: string; customerKey: string; orderId: string; amount: number; successUrl: string; failUrl: string } & Record<string, unknown> };
+
+  async function started(accountId: string, orderId: string, key: string): Promise<View> {
+    const res = await post(accountId, url(orderId), {}, key);
+    expect(res.statusCode, res.payload).toBe(201);
+    return JSON.parse(res.payload) as View;
+  }
+
+  test('P-T77 ① 처음 굿즈 결제 시도는 결제창 값을 돌려주고 멱등 기록에는 시도 ID만 남긴다 [ASVS v5.0.0-8.2.2]', async () => {
+    const C = randomUUID();
+    const product = await seedProduct({ fulfillments: ['PICKUP'] });
+    const slot = await seedSlot(product);
+    const O = orderIdOf(await post(C, '/v1/shop/orders', { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot }));
+    const K = randomUUID();
+    const view = await started(C, O, K);
+    expect({ attemptId: view.attemptId, pg: view.pg, orderId: view.checkout.orderId, amount: view.checkout.amount }).toEqual({ attemptId: view.attemptId, pg: 'SIMULATOR', orderId: O, amount: PRICE });
+    expect(view.checkout.clientKey).toBe('test_ck_first');
+    expect(view.checkout.successUrl).toBe(`https://first.example/shop/checkout/return?order=${O}&pg=SIMULATOR`);
+    expect(view.checkout.customerKey).toEqual(expect.any(String));
+
+    const row = (
+      await admin.pool.query('select account_ref, operation, idempotency_key::text as idem_key, result_ref, tenant_id::text as tenant from idempotency_record where account_ref = $1 and operation = $2 and idempotency_key = $3', [C, OP, K])
+    ).rows[0] as { result_ref: string };
+    expect(row.result_ref).toBe(view.attemptId);
+    const text = JSON.stringify(row);
+    for (const token of ['clientKey', 'customerKey', 'successUrl', 'failUrl', 'redirectUrl', 'totalAmount', '"checkout"', 'first.example']) {
+      expect(text.includes(token), `기록에 ${token}`).toBe(false);
+    }
+    const attempt = (await admin.pool.query('select id, order_id, pg from merch_payment_attempt where id = $1', [view.attemptId])).rows[0];
+    expect(attempt).toEqual({ id: view.attemptId, order_id: O, pg: 'SIMULATOR' });
+  });
+
+  test('P-T77 ② 같은 멱등키 재생은 PrepareCheckout을 같은 시도 ID·결제사로 다시 불러 지금 설정 값으로 결제창을 다시 만든다 [ASVS v5.0.0-8.2.2]', async () => {
+    const C = randomUUID();
+    const product = await seedProduct({ fulfillments: ['PICKUP'] });
+    const slot = await seedSlot(product);
+    const O = orderIdOf(await post(C, '/v1/shop/orders', { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot }));
+    const K = randomUUID();
+    const first = await started(C, O, K);
+    const before = { writes: await writes(), checkouts: payments.calls.checkout.length };
+
+    payments.clientKey = 'test_ck_second';
+    payments.origin = 'https://second.example';
+    payments.customerKey = 'buyer-second';
+    const again = await started(C, O, K);
+    expect({ attemptId: again.attemptId, pg: again.pg, orderId: again.checkout.orderId, amount: again.checkout.amount }).toEqual({
+      attemptId: first.attemptId,
+      pg: 'SIMULATOR',
+      orderId: O,
+      amount: PRICE,
+    });
+    expect({ clientKey: again.checkout.clientKey, customerKey: again.checkout.customerKey, successUrl: again.checkout.successUrl }).toEqual({
+      clientKey: 'test_ck_second',
+      customerKey: 'buyer-second',
+      successUrl: `https://second.example/shop/checkout/return?order=${O}&pg=SIMULATOR`,
+    });
+    expect(again.checkout.customerKey).not.toBe(first.checkout.customerKey);
+    expect(payments.calls.checkout.length).toBe(before.checkouts + 1);
+    expect(payments.calls.checkout.at(-1)).toMatchObject({ attemptId: first.attemptId, pinnedPg: 'SIMULATOR', amount: PRICE, orderName: '재생 시험 굿즈', pgStore: 'STANDARD' });
+    expect(await writes()).toEqual(before.writes);
+    expect((await admin.pool.query('select result_ref from idempotency_record where account_ref = $1 and operation = $2 and idempotency_key = $3', [C, OP, K])).rows[0].result_ref).toBe(first.attemptId);
+
+    // 옛 JSON 참조: 안의 시도 ID만 쓰고 저장된 공개 키·주소·구매자 키·결제사는 돌려주지 않는다
+    const legacy = { ...first, pg: 'TOSS', checkout: { ...first.checkout, clientKey: 'stored-key', customerKey: 'stored-buyer', successUrl: 'https://evil.example/shop/checkout/return' } };
+    await setRef(C, OP, K, JSON.stringify(legacy));
+    payments.clientKey = 'test_ck_third';
+    payments.origin = 'https://third.example';
+    payments.customerKey = 'buyer-third';
+    const fromLegacy = await started(C, O, K);
+    expect({ attemptId: fromLegacy.attemptId, pg: fromLegacy.pg }).toEqual({ attemptId: first.attemptId, pg: 'SIMULATOR' });
+    expect({ clientKey: fromLegacy.checkout.clientKey, customerKey: fromLegacy.checkout.customerKey, successUrl: fromLegacy.checkout.successUrl }).toEqual({
+      clientKey: 'test_ck_third',
+      customerKey: 'buyer-third',
+      successUrl: `https://third.example/shop/checkout/return?order=${O}&pg=SIMULATOR`,
+    });
+    expect(mismatchLines()).toEqual([]);
+  });
+
+  test('P-T77 ③ 재생의 시도 ID가 경로 주문·세션 계정의 것이 아니면 404 not-found이고 PrepareCheckout을 부르지 않는다 [ASVS v5.0.0-8.2.2]', async () => {
+    const C = randomUUID();
+    const D = randomUUID();
+    const product = await seedProduct({ fulfillments: ['PICKUP'] });
+    const slot = await seedSlot(product);
+    const body = { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot };
+    const O1 = orderIdOf(await post(C, '/v1/shop/orders', body));
+    const O2 = orderIdOf(await post(C, '/v1/shop/orders', body));
+    // 시도 행의 주문만 바꿀 때 쓸, 시도가 없는 주문(같은 주문의 (order_id, attempt_no) 유일과 부딪히지 않는다)
+    const O3 = orderIdOf(await post(C, '/v1/shop/orders', body));
+    const OD = orderIdOf(await post(D, '/v1/shop/orders', body));
+    const K1 = randomUUID();
+    const K2 = randomUUID();
+    const KD = randomUUID();
+    const first = await started(C, O1, K1);
+    const second = await started(C, O2, K2);
+    const other = await started(D, OD, KD);
+    const notFound = await foreign404(O1);
+    const checkouts = payments.calls.checkout.length;
+
+    const cases: [string, string, string[]][] = [
+      ['(가) 같은 팬 다른 주문의 시도', second.attemptId, [C, second.attemptId]],
+      ['(나) 다른 팬의 시도', other.attemptId, [C, D, other.attemptId]],
+      ['(다) 없는 시도 ID', randomUUID(), [C]],
+      ['(라) UUID도 JSON도 아닌 글', 'not-an-id', [C, 'not-an-id']],
+      ['(마) 옛 JSON의 다른 주문 시도', JSON.stringify({ ...first, attemptId: other.attemptId }), [C, D, other.attemptId]],
+    ];
+    for (const [what, ref, forbidden] of cases) {
+      await setRef(C, OP, K1, ref);
+      const before = await writes();
+      logs.length = 0;
+      const res = await post(C, url(O1), {}, K1);
+      expect(problem(res), what).toEqual(notFound);
+      expect(payments.calls.checkout.length, what).toBe(checkouts);
+      expect(await writes(), what).toEqual(before);
+      expectOneMismatch(what, OP, O1, forbidden);
+    }
+
+    // 시도 행의 주문만 다른 주문으로 바꾼 경우
+    const moved = await admin.pool.query('update merch_payment_attempt set order_id = $2 where id = $1 and order_id = $3', [first.attemptId, O3, O1]);
+    expect(moved.rowCount).toBe(1);
+    try {
+      await setRef(C, OP, K1, first.attemptId);
+      const before = await writes();
+      logs.length = 0;
+      const res = await post(C, url(O1), {}, K1);
+      expect(problem(res)).toEqual(notFound);
+      expect(payments.calls.checkout.length).toBe(checkouts);
+      expect(await writes()).toEqual(before);
+      expectOneMismatch('(바) 시도 행의 주문 변조', OP, O1, [C, first.attemptId]);
+    } finally {
+      await admin.pool.query('update merch_payment_attempt set order_id = $2 where id = $1 and order_id = $3', [first.attemptId, O1, O3]);
+    }
+
+    // 세션 계정이 경로 주문의 계정과 다른 경우(같은 시도 ID를 다른 계정의 키로 재생).
+    // 요청 지문이 실제 경로를 담으므로 D의 O1 경로 지문으로 기록을 직접 넣는다(플랫폼 422를 지나 재생 대조까지 간다)
+    const KX = randomUUID();
+    await admin.pool.query('insert into idempotency_record (account_ref, operation, idempotency_key, request_hash, result_ref, created_at) values ($1, $2, $3, $4, $5, $6)', [
+      D,
+      OP,
+      KX,
+      Buffer.from(requestFingerprint('POST', url(O1), Buffer.from('{}', 'utf8'))),
+      first.attemptId,
+      new Date(clock.now()),
+    ]);
+    const before = await writes();
+    logs.length = 0;
+    const res = await post(D, url(O1), {}, KX);
+    expect(problem(res), '(사) 다른 계정의 재생').toEqual(notFound);
+    expect(payments.calls.checkout.length).toBe(checkouts);
+    expect(await writes()).toEqual(before);
+    expectOneMismatch('(사) 다른 계정의 재생', OP, O1, [C, D, first.attemptId]);
+  });
+
+  test('P-T77 ④ 재생 중 PrepareCheckout이 실패하면 5xx이고 아무것도 바꾸지 않으며 같은 키로 다시 시도할 수 있다 [ASVS v5.0.0-8.2.2]', async () => {
+    const C = randomUUID();
+    const product = await seedProduct({ fulfillments: ['PICKUP'] });
+    const slot = await seedSlot(product);
+    const O = orderIdOf(await post(C, '/v1/shop/orders', { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot }));
+    const K = randomUUID();
+    const first = await started(C, O, K);
+    const cases: [ConstructorParameters<typeof CheckoutFailed>[0], number, string][] = [
+      ['unavailable', 503, 'pg-unavailable'],
+      ['invalid', 503, 'pg-unavailable'],
+      ['paused', 503, 'new-payment-paused'],
+      ['error', 503, 'dependency-unavailable'],
+    ];
+    for (const [reason, status, type] of cases) {
+      const before = await writes();
+      payments.checkoutFailure = new CheckoutFailed(reason);
+      const res = await post(C, url(O), {}, K);
+      const p = problem(res);
+      expect({ status: p.status, type: p.type }, reason).toEqual({ status, type });
+      expect(await writes(), reason).toEqual(before);
+      expect((await admin.pool.query('select result_ref from idempotency_record where account_ref = $1 and operation = $2 and idempotency_key = $3', [C, OP, K])).rows[0].result_ref, reason).toBe(first.attemptId);
+      payments.checkoutFailure = undefined;
+      const again = await started(C, O, K);
+      expect({ attemptId: again.attemptId, status: 201 }, `${reason} 다시`).toEqual({ attemptId: first.attemptId, status: 201 });
+    }
+  });
+
+  test('P-T77 ⑤ 재생이 만든 결제사·금액·주문 ID가 시도·주문과 다르면 결제창 값을 돌려주지 않고 503 dependency-unavailable이다 [ASVS v5.0.0-8.2.2]', async () => {
+    const C = randomUUID();
+    const product = await seedProduct({ fulfillments: ['PICKUP'] });
+    const slot = await seedSlot(product);
+    const body = { fulfillment: 'PICKUP', items: [{ productId: product, quantity: 1 }], pickupSlotId: slot };
+    const O1 = orderIdOf(await post(C, '/v1/shop/orders', body));
+    const O2 = orderIdOf(await post(C, '/v1/shop/orders', body));
+    const K = randomUUID();
+    const first = await started(C, O1, K);
+    const invalidLines = () => logs.filter((l) => l.o.kind === 'merch-checkout-replay-mismatch');
+    const expectInvalid = async (what: string, field: string, forbidden: string[]) => {
+      const before = await writes();
+      logs.length = 0;
+      const res = await post(C, url(O1), {}, K);
+      expect(problem(res), what).toEqual({ status: 503, type: 'dependency-unavailable', title: expect.any(String) });
+      expect(res.payload.includes('checkout'), what).toBe(false);
+      expect(await writes(), what).toEqual(before);
+      expect(invalidLines(), what).toHaveLength(1);
+      expect(invalidLines()[0]).toMatchObject({ level: 'error', o: { kind: 'merch-checkout-replay-mismatch', severity: 'SEV2', orderId: O1, field } });
+      const text = JSON.stringify(invalidLines()[0]);
+      for (const f of forbidden) expect(text.includes(f), `${what}: 로그에 ${f}`).toBe(false);
+    };
+
+    payments.replyPg = 'TOSS';
+    await expectInvalid('(가) 결제사가 시도와 다름', 'pg', [C, 'TOSS', 'SIMULATOR']);
+
+    payments.replyPg = 'SIMULATOR';
+    payments.amountDelta = 1_000;
+    await expectInvalid('(나) 결제창 금액이 주문과 다름', 'amount', [C, String(PRICE + 1_000)]);
+
+    payments.amountDelta = 0;
+    payments.orderIdOverride = O2;
+    await expectInvalid('(다) 결제창 주문 ID가 경로 주문과 다름', 'orderId', [C, O2]);
+
+    payments.orderIdOverride = undefined;
+    const moved = await admin.pool.query("update merch_payment_attempt set pg = 'TOSS' where id = $1 and order_id = $2", [first.attemptId, O1]);
+    expect(moved.rowCount).toBe(1);
+    try {
+      await expectInvalid('(라) 시도 행의 결제사 변조', 'pg', [C, 'TOSS', 'SIMULATOR']);
+    } finally {
+      await admin.pool.query("update merch_payment_attempt set pg = 'SIMULATOR' where id = $1 and order_id = $2", [first.attemptId, O1]);
+    }
   });
 });
