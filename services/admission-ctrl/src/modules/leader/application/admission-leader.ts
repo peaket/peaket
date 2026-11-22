@@ -101,6 +101,8 @@ export class AdmissionLeader {
   #inputsReading = false;
   #inputsAt = Number.NEGATIVE_INFINITY;
   #autoStopped = false;
+  /** 전체 범위 판매 일시정지(q:{admission}:ctl allPaused, ADR-0365 결정 6). 명령 11과 같은 주기로 읽는다 */
+  #allPaused = false;
   #autoStopAt = Number.NEGATIVE_INFINITY;
   #openGapAt = Number.NEGATIVE_INFINITY;
   #openGapLast = 0;
@@ -162,9 +164,9 @@ export class AdmissionLeader {
       this.#refreshInputs();
       const ids = await this.#activeEvents(now);
       this.#forgetEnded(ids);
-      const autoStopped = await this.#autoStop(now);
+      const { autoStopped, allPaused } = await this.#platformState(now);
       const opens: number[] = [];
-      const results = await Promise.all(ids.map((e) => this.#prepare(e, gen, now, autoStopped, opens)));
+      const results = await Promise.all(ids.map((e) => this.#prepare(e, gen, now, autoStopped, opens, allPaused)));
       const preps = results.filter((p): p is Prep => p !== null && !('failed' in p));
       const failed = results.filter((p): p is Failed => p !== null && 'failed' in p).map((p) => p.failed);
       this.#checkOpenGaps(opens, now);
@@ -179,7 +181,7 @@ export class AdmissionLeader {
   }
 
   /** 세대를 올리고, 리더 상태를 읽어 자동 제어로 이번 주기의 목표를 정한다(전진은 나누기 뒤) */
-  async #prepare(eventId: string, gen: number, now: number, autoStopped: boolean, opens: number[]): Promise<Prep | Failed | null> {
+  async #prepare(eventId: string, gen: number, now: number, autoStopped: boolean, opens: number[], allPaused = false): Promise<Prep | Failed | null> {
     try {
       const plan = await this.#plan(eventId);
       if (!plan || now < plan.opensAtMs - PRE_OPEN_MS || now >= saleEndOf(plan)) return null;
@@ -191,7 +193,9 @@ export class AdmissionLeader {
         this.#bumped.events.add(eventId);
       }
       if (now < plan.opensAtMs || this.#fencedGen === gen) return null;
-      const ctl = await this.store.control(eventId, now);
+      const read = await this.store.control(eventId, now);
+      // 전체 범위 판매 일시정지(명령 3 PLATFORM)는 회차 paused와 같다: 모든 회차의 serving 전진 0(ADR-0365 결정 6)
+      const ctl: Control = allPaused ? { ...read, paused: true } : read;
       const pg = pgOf(plan, ctl);
       const { upper, lower } = boundsOf(pg?.tps);
       const raw = ctl.memory ?? {};
@@ -322,19 +326,35 @@ export class AdmissionLeader {
       });
   }
 
-  /** 명령 11(자동화 정지)을 1초에 한 번 읽는다. 읽지 못하면 정지일 수 있으므로 모르는 동안 자동 판단을 멈춘다(지금 목표를 지킨다) */
-  async #autoStop(now: number): Promise<boolean> {
-    if (!this.inputs) return false;
+  /**
+   * 회차와 무관한 리더 상태(q:{admission}:ctl)를 1초에 한 번 읽는다: 명령 11(자동화 정지)과 전체 범위 판매 일시정지(allPaused, ADR-0365 결정 6, 정할 것 1).
+   * 읽지 못하면 정지일 수 있으므로 모르는 동안 자동 판단을 멈추고(지금 목표를 지킨다) 전진도 멈춘다. 자동 제어를 끈 파드(입력 없음)의 autoStopped는 늘 거짓이다
+   */
+  async #platformState(now: number): Promise<{ autoStopped: boolean; allPaused: boolean }> {
     const mono = this.clock.monotonicMs();
-    if (mono - this.#autoStopAt < AUTO_STOP_CACHE_MS) return this.#autoStopped;
-    this.#autoStopAt = mono;
-    try {
-      this.#autoStopped = (await this.store.platformControl()).autoStopped;
-    } catch (err) {
-      this.#autoStopped = true;
-      this.#logError('*autostop', now, err, '자동화 정지 상태를 읽지 못해 자동 판단을 멈춘다');
+    if (mono - this.#autoStopAt >= AUTO_STOP_CACHE_MS) {
+      this.#autoStopAt = mono;
+      try {
+        const p = await this.store.platformControl();
+        this.#autoStopped = p.autoStopped;
+        this.#allPaused = p.allPaused === true;
+      } catch (err) {
+        this.#autoStopped = true;
+        this.#allPaused = true;
+        this.#logError('*autostop', now, err, '자동화 정지·전체 판매 일시정지 상태를 읽지 못해 자동 판단과 전진을 멈춘다');
+      }
     }
-    return this.#autoStopped;
+    return { autoStopped: this.inputs ? this.#autoStopped : false, allPaused: this.#allPaused };
+  }
+
+  /** 지금 이 파드가 쓰기를 멈춘 세대인가(FENCED를 본 세대, 제어 받는 쪽이 본다) */
+  isFenced(gen: number): boolean {
+    return this.#fencedGen === gen;
+  }
+
+  /** 제어 쓰기가 FENCED를 받았다: 루프와 같이 이 세대의 쓰기를 멈춘다(대기 파드로 돌아간다, ADR-0365 결정 5) */
+  markFenced(gen: number, scope: string): void {
+    this.#fence(gen, scope);
   }
 
   /** 오픈 간격 규칙의 뒤쪽 그물: 진행 중인 회차끼리 가까우면 지표와 로그만 남긴다(ADR-0226 결정 11, POL-030). 막지 않는다 */

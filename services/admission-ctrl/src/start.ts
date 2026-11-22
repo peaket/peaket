@@ -6,7 +6,8 @@ import type { Writable } from 'node:stream';
 import { createHotRedis, createService, inClusterLeaseApi, LeaseElector, type LeaseApi, memoryLeaseApi, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { CommittedSeedSource, kmsSeedClient, LocalResultFiles, minReplicasOf, RedisBatchStore, RedisShuffleRecords, shuffleRuntimeFromEnv } from './modules/batch/index.js';
-import { AdmissionLeader, LEADER_STORE, LeaderMetrics, type LeaderStore, PrometheusControlInputs } from './modules/leader/index.js';
+import { AdmissionLeader, ApplyLeaderControl, LEADER_STORE, LeaderMetrics, type LeaderStore, PrometheusControlInputs } from './modules/leader/index.js';
+import { startAdmissionControlServer } from './control/control-server.js';
 import { ApplyRb35, commanderKeysFromProcess, RedisRb35Store, Rb35Worker, SignedMarkAuth } from './modules/rb35/index.js';
 
 const SERVICE = 'admission-ctrl';
@@ -77,6 +78,24 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const leader = service.app.get(AdmissionLeader);
   elector.start();
   leader.start();
+  // 제어 gRPC 받는 쪽(F-02-1 OPS-300, ADR-0365 결정 5): 제어 전용 포트가 있을 때만 연다. 리더만 쓰고(아니면 UNAVAILABLE not-leader), 세대 확인 Lua로 쓴다
+  const controlPort = Number(env.PEAKET_ADMISSION_CONTROL_GRPC_PORT ?? '');
+  const control =
+    Number.isInteger(controlPort) && controlPort > 0
+      ? await startAdmissionControlServer({
+          host: env.PEAKET_CONTROL_GRPC_HOST ?? '0.0.0.0',
+          port: controlPort,
+          profile: service.config.grpcLbProfile,
+          metrics: service.metrics,
+          deps: {
+            apply: new ApplyLeaderControl(service.app.get(LEADER_STORE) as LeaderStore, elector, leader),
+            podName: (env.PEAKET_POD ?? env.HOSTNAME ?? `${SERVICE}-local`).slice(0, 64),
+            nowMs: () => systemClock.now(),
+            onError: (method, err) => service.logger.error({ method, err: err instanceof Error ? { type: err.name, message: err.message } : String(err) }, 'ControlReceiver 처리 실패'),
+          },
+        })
+      : undefined;
+  if (control) service.logger.info({ port: control.port }, '제어 gRPC 포트를 열었다');
   // RB-35 일꾼(ADR-0239 결정 8): 리더만 전달된 묶음을 검증해 적용한다
   const rb35Worker = commanderKeys
     ? new Rb35Worker({
@@ -102,8 +121,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
     // 쓰기를 멈춘 뒤 Lease를 놓고(ADR-0056 결정 3), 서비스와 연결을 닫는다
     closing ??= (() => {
       rb35Worker?.stop();
-      return leader
-        .stop()
+      // 제어 포트를 먼저 닫아 새 제어 쓰기를 받지 않는다(처리 중인 호출은 마감까지 기다린다)
+      return (control?.close() ?? Promise.resolve())
+        .then(() => leader.stop())
         .then(() => elector.stop())
         .then(() => service.close())
         .then(() => controlSync?.close())
