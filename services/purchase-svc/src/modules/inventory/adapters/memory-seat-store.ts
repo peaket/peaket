@@ -965,6 +965,8 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     if ((ev?.stream.length ?? 0) > 0) return 'STREAM_PENDING';
     if ((ev?.expiry.size ?? 0) > 0) return 'EXPIRY_PENDING';
     if ((ev?.prio.size ?? 0) > 0) return 'EXPIRY_PENDING';
+    // 결제 중(pin)인 홀드는 Redis의 paused에 해당한다(메모리는 paused 집합 없이 hold의 pin으로 본다)
+    if (ev && [...ev.holds.values()].some((h) => h.pin === '1')) return 'EXPIRY_PENDING';
     return this.db.ctlEvents.delete(i.eventId) ? 'RETIRED' : 'NOT_LISTED';
   }
 
