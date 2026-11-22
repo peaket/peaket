@@ -298,8 +298,8 @@ export const JOBS = {
 
 /** ci-node.yml이 통합 시험(pnpm --filter @peaket/<이름> test:integration)을 따로 도는 패키지 */
 // bundle: 한 프로세스 합본의 시작 파일 시험, invariant-checker: 측정 판정이 쓰는 불변식 SQL(BUILD_ORDER PRF-215, ci-node.yml)
-// web: 소비자 웹 공유 캐시 처리기(Valkey, BUILD_ORDER HOT-390)
-export const INT_PACKAGES = ['platform', 'identity-svc', 'core-svc', 'payment-svc', 'queue-svc', 'trust-svc', 'admission-ctrl', 'purchase-svc', 'realtime-gw', 'bundle', 'invariant-checker', 'web'];
+// web: 소비자 웹 공유 캐시 처리기(Valkey, BUILD_ORDER HOT-390), ops-svc: 명령 원장·감사 체인·제어 gRPC 판 원장(PostgreSQL, F-02-1 OPS-300)
+export const INT_PACKAGES = ['platform', 'identity-svc', 'core-svc', 'payment-svc', 'queue-svc', 'trust-svc', 'admission-ctrl', 'purchase-svc', 'ops-svc', 'realtime-gw', 'bundle', 'invariant-checker', 'web'];
 
 /** 영역 이름: 경로의 앞 두 마디(둘째 마디가 파일이면 첫 마디. services/README.md → services) */
 const top2 = (p) => {
