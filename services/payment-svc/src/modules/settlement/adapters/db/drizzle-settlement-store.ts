@@ -2,8 +2,8 @@
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../../domain/ports.js';
-import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
-import { partnerReceivable, payout, payoutAccount, payoutBatch, receivableMove, sellerKyc, settlementStatement, settlementStatementAudit, statementDispute, statementSource } from './schema.js';
+import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchAuditRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
+import { partnerReceivable, payout, payoutAccount, payoutBatch, payoutBatchAudit, receivableMove, sellerKyc, settlementStatement, settlementStatementAudit, statementDispute, statementSource } from './schema.js';
 
 const receivableRecord = (r: typeof partnerReceivable.$inferSelect): ReceivableRecord => ({
   receivableId: r.id,
@@ -386,6 +386,50 @@ export class DrizzleSettlementStore implements SettlementStore {
       await tx.update(settlementStatement).set({ payoutBatchId: null, status: 'CONFIRMED' }).where(and(eq(settlementStatement.payoutBatchId, batchId), eq(settlementStatement.status, 'SCHEDULED')));
       await tx.delete(payoutBatch).where(eq(payoutBatch.id, batchId));
       return true;
+    });
+  }
+
+  async approvePayoutBatchAtomically(batch: PayoutBatchRecord, audit: PayoutBatchAuditRecord): Promise<boolean> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const updated = await tx
+          .update(payoutBatch)
+          .set({ status: batch.status, approvalId: batch.approvalId, updatedAt: batch.updatedAt })
+          .where(and(eq(payoutBatch.id, batch.batchId), eq(payoutBatch.status, 'PENDING_APPROVAL'), isNull(payoutBatch.approvalId)))
+          .returning({ id: payoutBatch.id });
+        if (updated.length === 0) return false;
+        await tx.insert(payoutBatchAudit).values({
+          id: audit.auditId,
+          batchId: audit.batchId,
+          approvalId: audit.approvalId,
+          event: audit.event,
+          reason: audit.reason,
+          requesterId: audit.requesterId,
+          approverId: audit.approverId,
+          amount: audit.amount,
+          currency: audit.currency,
+          createdAt: audit.createdAt,
+        });
+        return true;
+      });
+    } catch (e) {
+      if (uniqueViolation(e)) throw new SettlementProblem('payout-approval-reused', 409, '다른 지급 묶음이 이미 쓴 승인 업무입니다');
+      throw e;
+    }
+  }
+
+  async insertPayoutBatchAudit(audit: PayoutBatchAuditRecord): Promise<void> {
+    await this.db.db.insert(payoutBatchAudit).values({
+      id: audit.auditId,
+      batchId: audit.batchId,
+      approvalId: audit.approvalId,
+      event: audit.event,
+      reason: audit.reason,
+      requesterId: audit.requesterId,
+      approverId: audit.approverId,
+      amount: audit.amount,
+      currency: audit.currency,
+      createdAt: audit.createdAt,
     });
   }
 

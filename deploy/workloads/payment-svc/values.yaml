@@ -5,6 +5,8 @@ name: payment-svc
 # 테넌트 한도 Redis(BAT-173 리뷰 RV-01): PEAKET_TENANT_REDIS_URL은 세션·캐시 클러스터를 가리키고 재인증 jti Redis(PEAKET_REAUTH_REDIS_URL)와 별개다.
 # staging·prod·demo는 이 값이 없으면 시작하지 않는다. local·ci만 재인증 Redis로 닫힌 대역을 쓴다.
 secretEnvFrom: payment-svc-secrets
+# 지급 묶음 승인은 ops-svc 지급 승인 기록을 대조한다(BAT-625). 환경 값 PEAKET_OPS_HTTP_URL(예: http://ops-svc:8080)이
+# 없으면 approveBatch는 503 dependency-unavailable로 닫고 payout_batch 상태를 바꾸지 않는다(fail-closed).
 
 service:
   # 새 결제 진입 정지 판정자를 뽑는 Lease(ADR-0105 결정 8, BUILD_ORDER PRF-202). 입력을 읽을 클러스터 Prometheus 주소 PEAKET_PROMETHEUS_URL은 환경 값이다(local·ci 밖에서 없으면 시작이 실패한다, 코드 리뷰)

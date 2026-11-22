@@ -404,6 +404,13 @@ spec:
               kubernetes.io/metadata.name: purchase
           podSelector:
             matchLabels:
+              app.kubernetes.io/name: payment-svc
+              app.kubernetes.io/component: service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: purchase
+          podSelector:
+            matchLabels:
               app.kubernetes.io/name: purchase-svc
               app.kubernetes.io/component: service
         - namespaceSelector:

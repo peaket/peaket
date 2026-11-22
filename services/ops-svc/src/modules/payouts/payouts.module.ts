@@ -1,4 +1,4 @@
-// 지급 승인 업무 모듈 조립.
+// 지�??�인 ?�무 모듈 조립.
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import type { AuditChain } from '../audit/audit.js';
@@ -8,13 +8,14 @@ import { DrizzlePayoutApprovalStore } from './adapters/db/drizzle-store.js';
 import { MemoryPayoutApprovalStore } from './adapters/memory-store.js';
 import { UnavailableApprovalVerifier } from './adapters/jwks-approval-verifier.js';
 import { UnavailablePayoutPaymentClient } from './adapters/payment-http.js';
+import { InternalPayoutApprovalsController } from './inbound/internal-payout-approvals.controller.js';
 import { PayoutsController } from './inbound/payouts.controller.js';
 
 export interface PayoutsModuleDeps {
   readonly store?: PayoutApprovalStore;
   readonly payments: PayoutPaymentClient;
   readonly reauth?: ApprovalReauthVerifier;
-  /** 수기 포트원 실행 감사(OPSV-03). 상태 저장 감사는 저장소가 같은 트랜잭션에 쓴다 */
+  /** ?�기 ?�트???�행 감사(OPSV-03). ?�태 ?�??감사???�?�소가 같�? ?�랜??��???�다 */
   readonly audit?: AuditChain;
 }
 
@@ -39,7 +40,7 @@ export class PayoutsModule {
       return {
         module: PayoutsModule,
         global: true,
-        controllers: [PayoutsController],
+        controllers: [PayoutsController, InternalPayoutApprovalsController],
         providers: [
           ...providers,
           { provide: PAYOUT_APPROVAL_STORE, useValue: o.store ?? new DrizzlePayoutApprovalStore(o.database) },
@@ -52,7 +53,7 @@ export class PayoutsModule {
     return {
       module: PayoutsModule,
       global: true,
-      controllers: [PayoutsController],
+      controllers: [PayoutsController, InternalPayoutApprovalsController],
       providers: [
         ...providers,
         { provide: PAYOUT_APPROVAL_STORE, useValue: o.deps?.store ?? new MemoryPayoutApprovalStore(o.audit) },

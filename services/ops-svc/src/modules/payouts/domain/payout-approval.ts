@@ -63,6 +63,43 @@ export interface PayoutApprovalView {
   closeReason: string | null;
 }
 
+/** payment-svc가 승인 기록과 지급 묶음을 대조할 때 쓰는 내부 사실(BAT-625). 사유 글·계좌·내부 토큰은 싣지 않는다. */
+export interface PayoutApprovalFacts {
+  approvalId: string;
+  kind: 'PAYOUT_BATCH';
+  targetRef: string;
+  batchId: string;
+  pg: 'TOSS' | 'PORTONE';
+  pgStore: 'STANDARD' | 'ESCROW';
+  payoutDate: string;
+  currency: 'KRW';
+  amount: number;
+  statementCount: number;
+  status: PayoutApprovalStatus;
+  requiredApprovals: 2;
+  requestedBy: string;
+  approvals: string[];
+  approvedAt: string | null;
+}
+
+export const payoutApprovalFacts = (r: PayoutApprovalRecord): PayoutApprovalFacts => ({
+  approvalId: r.approvalId,
+  kind: 'PAYOUT_BATCH',
+  targetRef: r.batchId,
+  batchId: r.batchId,
+  pg: r.pg,
+  pgStore: r.pgStore,
+  payoutDate: r.payoutDate,
+  currency: 'KRW',
+  amount: r.amount,
+  statementCount: r.statementCount,
+  status: r.status,
+  requiredApprovals: 2,
+  requestedBy: r.requesterId,
+  approvals: r.approverId ? [r.approverId] : [],
+  approvedAt: r.approvedAt?.toISOString() ?? null,
+});
+
 export const payoutApprovalView = (r: PayoutApprovalRecord, actor: { accountId: string; role: string }): PayoutApprovalView => ({
   approvalId: r.approvalId,
   kind: 'PAYOUT_BATCH',

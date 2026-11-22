@@ -99,15 +99,21 @@ import {
   GrpcAdminAuthz,
   HttpDueEventSettlementSource,
   HttpEventCommissionRateSource,
+  HttpPayoutApprovalVerifier,
+  HttpSaleSuspensionSource,
   JwksReauthVerifier,
   ManualPortonePayoutGateway,
   SETTLEMENT_DUE_LEASE_NAME,
   SettlementDueWorker,
   Settlements,
+  settlementApprovalLog,
+  UnavailablePayoutApprovalVerifier,
   UnavailableProductSettlementSource,
   UnavailableReauthVerifier,
+  UnavailableSaleSuspensionSource,
   UnavailableTossPayoutGateway,
   HttpProductSettlementSource,
+  type SettlementApprovalLog,
 } from './modules/settlement/index.js';
 import { safeErrorCode } from './safe-error-code.js';
 import { shutdownInOrder } from './shutdown.js';
@@ -209,6 +215,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
 /** 서킷 등록부는 createService 뒤에 만들어 늦게 묶는다(내부 /internal/v1/circuits). */
 let circuitsRef: PgCircuits | undefined;
   const lateLog: PaymentCommandLog = { mismatch: (e) => log?.mismatch(e) };
+  let approvalLog: SettlementApprovalLog | undefined;
+  const lateApprovalLog: SettlementApprovalLog = {
+    approved: (e) => approvalLog?.approved(e),
+    rejected: (e) => approvalLog?.rejected(e),
+  };
   let webhookLog: PaymentWebhookLog | undefined;
   const lateWebhookLog: PaymentWebhookLog = {
     invalid: (e) => webhookLog?.invalid(e),
@@ -243,6 +254,9 @@ let circuitsRef: PgCircuits | undefined;
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
         products: env.PEAKET_CORE_HTTP_URL ? new HttpProductSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableProductSettlementSource(),
         ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN), eventCommission: new HttpEventCommissionRateSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
+        approvals: env.PEAKET_OPS_HTTP_URL ? new HttpPayoutApprovalVerifier(env.PEAKET_OPS_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailablePayoutApprovalVerifier(),
+        saleSuspensions: env.PEAKET_CORE_HTTP_URL ? new HttpSaleSuspensionSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableSaleSuspensionSource(),
+        log: lateApprovalLog,
         gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
         reauth: env.PEAKET_IDENTITY_JWKS_URL
           ? new JwksReauthVerifier({
@@ -258,6 +272,7 @@ let circuitsRef: PgCircuits | undefined;
     requestTimeoutMs: WEBHOOK_REQUEST_TIMEOUT_MS,
   });
   log = paymentCommandLog(service.logger);
+  approvalLog = settlementApprovalLog(service.logger);
   webhookLog = paymentWebhookLog(service.logger, systemClock);
   signals.register(service.metrics.registry);
   hotPath.register(service.metrics.registry);

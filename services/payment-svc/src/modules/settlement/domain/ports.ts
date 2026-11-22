@@ -4,6 +4,7 @@ import type {
   KycRecord,
   PaymentFact,
   PayoutAccountRecord,
+  PayoutBatchAuditRecord,
   PayoutBatchRecord,
   PayoutRecord,
   Pg,
@@ -55,6 +56,41 @@ export interface PayoutBatchAtomicInput {
   receivableMoves: readonly ReceivableMoveRecord[];
 }
 
+/** ops-svc payout_approval 한 건을 결제사가 대조할 값만 옮긴 모양. 계좌·사유 글은 싣지 않는다. */
+export interface VerifiedPayoutApproval {
+  approvalId: string;
+  kind: 'PAYOUT_BATCH';
+  targetRef: string;
+  batchId: string;
+  pg: Pg;
+  pgStore: PgStore;
+  payoutDate: string;
+  currency: 'KRW';
+  amount: number;
+  statementCount: number;
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTING' | 'DONE' | 'FAILED';
+  requiredApprovals: number;
+  requestedBy: string;
+  approvals: readonly string[];
+  approvedAt: string | null;
+}
+
+/** ops-svc 지급 승인 기록 확인. 없으면 undefined, ops가 5xx·시간 초과·모양 위반이면 503 SettlementProblem. */
+export interface PayoutApprovalVerifier {
+  verify(approvalId: string): Promise<VerifiedPayoutApproval | undefined>;
+}
+
+/** core-svc 판매 승인 상태 읽기. core가 5xx·시간 초과면 503 SettlementProblem. */
+export interface SaleSuspensionSource {
+  listSuspended(eventIds: readonly string[]): Promise<ReadonlySet<string>>;
+}
+
+/** 지급 승인 성공·거절의 구조화 로그. 계좌번호·내부 토큰·승인 사유 원문은 싣지 않는다. */
+export interface SettlementApprovalLog {
+  approved(o: { batchId: string; approvalId: string; requesterId: string; approverId: string; amount: number; pg: Pg; pgStore: PgStore; payoutDate: string; at: Date }): void;
+  rejected(o: { batchId: string; approvalId: string; reason: string; at: Date }): void;
+}
+
 export interface SettlementStore {
   /** 부분 유일 인덱스에 걸려 넣지 못하면 false(원본 목록도 쓰지 않는다). */
   insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean>;
@@ -75,6 +111,10 @@ export interface SettlementStore {
   createPayoutBatchAtomically(input: PayoutBatchAtomicInput): Promise<void>;
   /** 반려·취소한 배치를 풀어 정산서를 CONFIRMED로 되돌리고 같은 지급일의 새 배치를 가능하게 한다(CONS-V02). */
   releasePayoutBatch(batchId: string): Promise<boolean>;
+  /** 승인 상태 저장과 감사 행을 한 트랜잭션에 쓴다. 다른 요청이 먼저 승인했으면 false(버전 조건부). */
+  approvePayoutBatchAtomically(batch: PayoutBatchRecord, audit: PayoutBatchAuditRecord): Promise<boolean>;
+  /** 거절 감사. 배치 상태는 바꾸지 않는다. */
+  insertPayoutBatchAudit(audit: PayoutBatchAuditRecord): Promise<void>;
   findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined>;
   listPayoutBatches(filter: { pg?: Pg | undefined; pgStore?: PgStore | undefined; payoutDate?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchRecord[]>;
   savePayoutBatch(record: PayoutBatchRecord): Promise<void>;
@@ -167,5 +207,8 @@ export const SETTLEMENT_PAYMENT_SOURCE = Symbol.for('peaket.settlement.payment-s
 export const SETTLEMENT_PRODUCT_SOURCE = Symbol.for('peaket.settlement.product-source');
 export const SETTLEMENT_EVENT_SOURCE = Symbol.for('peaket.settlement.event-source');
 export const SETTLEMENT_COMMISSION_SOURCE = Symbol.for('peaket.settlement.commission-source');
+export const PAYOUT_APPROVAL_VERIFIER = Symbol.for('peaket.settlement.payout-approval-verifier');
+export const SALE_SUSPENSION_SOURCE = Symbol.for('peaket.settlement.sale-suspension-source');
+export const SETTLEMENT_APPROVAL_LOG = Symbol.for('peaket.settlement.approval-log');
 export const PAYOUT_GATEWAY = Symbol.for('peaket.settlement.payout-gateway');
 export const REAUTH_VERIFIER = Symbol.for('peaket.settlement.reauth-verifier');

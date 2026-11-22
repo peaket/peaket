@@ -7,6 +7,9 @@ export { JwksReauthVerifier, UnavailableReauthVerifier } from './adapters/jwks-r
 export { HttpProductSettlementSource, UnavailableProductSettlementSource } from './adapters/http-product-source.js';
 export { HttpDueEventSettlementSource, UnavailableDueEventSettlementSource } from './adapters/http-due-event-source.js';
 export { HttpEventCommissionRateSource } from './adapters/http-commission-rate-source.js';
+export { HttpPayoutApprovalVerifier, UnavailablePayoutApprovalVerifier } from './adapters/http-payout-approval-verifier.js';
+export { HttpSaleSuspensionSource, UnavailableSaleSuspensionSource } from './adapters/http-sale-suspension-source.js';
+export { settlementApprovalLog } from './adapters/settlement-approval-log.js';
 export { SettlementDueWorker, type SettlementDueLeadership, type SettlementDueLog, type SettlementDueTimer, type SettlementDueWorkerDeps } from './application/settlement-due-worker.js';
 export { DenyAllAdminAuthz, GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { SettlementModule, type SettlementModuleDeps } from './settlement.module.js';
@@ -31,6 +34,7 @@ export {
   type KycStatus,
   type PaymentFact,
   type PayoutAccountRecord,
+  type PayoutBatchAuditRecord,
   type PayoutBatchRecord,
   type PayoutBatchStatus,
   type PayoutRecord,
@@ -47,4 +51,21 @@ export {
   type StatementStatus,
   type StatementView,
 } from './domain/settlement.js';
-export type { DueEvent, DueEventSettlementSource, PayoutGateway, PayoutSubmitInput, PayoutSubmitResult, ProductSettlementSource, ReauthVerifier, SettlementPaymentSource, SettlementStore, StatementFilter, StatementPage, VerifiedReauth } from './domain/ports.js';
+export type {
+  DueEvent,
+  DueEventSettlementSource,
+  PayoutApprovalVerifier,
+  PayoutGateway,
+  PayoutSubmitInput,
+  PayoutSubmitResult,
+  ProductSettlementSource,
+  ReauthVerifier,
+  SaleSuspensionSource,
+  SettlementApprovalLog,
+  SettlementPaymentSource,
+  SettlementStore,
+  StatementFilter,
+  StatementPage,
+  VerifiedPayoutApproval,
+  VerifiedReauth,
+} from './domain/ports.js';

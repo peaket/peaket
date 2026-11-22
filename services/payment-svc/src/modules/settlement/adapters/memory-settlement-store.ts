@@ -1,6 +1,6 @@
 // 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
 import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../domain/ports.js';
-import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
+import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchAuditRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
 const decodeCursor = (cursor: string): { at: number; id: string } | undefined => {
@@ -19,6 +19,7 @@ export class MemorySettlementStore implements SettlementStore {
   readonly disputes = new Map<string, DisputeRecord>();
   readonly statementAudits: StatementAuditRecord[] = [];
   readonly batches = new Map<string, PayoutBatchRecord>();
+  readonly payoutBatchAudits: PayoutBatchAuditRecord[] = [];
   readonly payouts = new Map<string, PayoutRecord>();
   readonly kycs = new Map<string, KycRecord>();
   readonly accounts = new Map<string, PayoutAccountRecord>();
@@ -127,6 +128,19 @@ export class MemorySettlementStore implements SettlementStore {
     for (const s of this.statements.values()) if (s.payoutBatchId === batchId) this.statements.set(s.statementId, { ...s, payoutBatchId: null, status: 'CONFIRMED' });
     this.batches.delete(batchId);
     return true;
+  }
+  async approvePayoutBatchAtomically(batch: PayoutBatchRecord, audit: PayoutBatchAuditRecord): Promise<boolean> {
+    const current = this.batches.get(batch.batchId);
+    if (!current || current.status !== 'PENDING_APPROVAL' || current.approvalId !== null) return false;
+    if ([...this.batches.values()].some((b) => b.batchId !== batch.batchId && b.approvalId === batch.approvalId)) {
+      throw new SettlementProblem('payout-approval-reused', 409, '다른 지급 묶음이 이미 쓴 승인 업무입니다');
+    }
+    this.batches.set(batch.batchId, batch);
+    this.payoutBatchAudits.push(audit);
+    return true;
+  }
+  async insertPayoutBatchAudit(audit: PayoutBatchAuditRecord) {
+    this.payoutBatchAudits.push(audit);
   }
   async findPayoutBatch(batchId: string) {
     return this.batches.get(batchId);

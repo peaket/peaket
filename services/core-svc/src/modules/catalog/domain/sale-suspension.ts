@@ -133,4 +133,6 @@ export interface SaleSuspensionStore<Tx> {
   write(tx: Tx, productionId: string, write: SaleSuspensionWrite): Promise<void>;
   /** 잠그지 않고 집행 순서용 회차 목록만 읽는다. 없으면 undefined */
   scope(eventId: string): Promise<SaleSuspensionScope | undefined>;
+  /** 회차 ID 묶음 중 판매 중지된 공연의 회차. 지급 묶음 보류가 쓴다(BAT-625, settlement §6). */
+  listSuspended(eventIds: readonly string[]): Promise<readonly string[]>;
 }

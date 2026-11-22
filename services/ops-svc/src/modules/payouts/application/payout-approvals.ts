@@ -2,7 +2,16 @@
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient } from '../domain/ports.js';
-import { approvalDueAt, payoutApprovalView, PayoutApprovalProblem, type PayoutApprovalRecord, type PayoutApprovalView, type PayoutBatchView } from '../domain/payout-approval.js';
+import {
+  approvalDueAt,
+  payoutApprovalFacts,
+  payoutApprovalView,
+  PayoutApprovalProblem,
+  type PayoutApprovalFacts,
+  type PayoutApprovalRecord,
+  type PayoutApprovalView,
+  type PayoutBatchView,
+} from '../domain/payout-approval.js';
 
 export interface PayoutApprovalDeps {
   readonly store: PayoutApprovalStore;
@@ -106,6 +115,12 @@ export class PayoutApprovals {
     if (!r) throw notFound();
     if (r.requesterId !== actor.accountId && actor.role !== 'commander' && actor.role !== 'cs_lead') throw notFound();
     return payoutApprovalView(r, actor);
+  }
+
+  /** payment-svc가 부르는 내부 사실 조회(서비스 사이 토큰 가드 뒤). 없으면 undefined(404). */
+  async facts(approvalId: string): Promise<PayoutApprovalFacts | undefined> {
+    const r = await this.d.store.find(approvalId);
+    return r ? payoutApprovalFacts(r) : undefined;
   }
 
   /** 통합 승인함(지급 + commander 역할 변경)이 종류를 가릴 때 쓴다. 볼 수 없는 승인은 null(없는 것과 같은 404) */

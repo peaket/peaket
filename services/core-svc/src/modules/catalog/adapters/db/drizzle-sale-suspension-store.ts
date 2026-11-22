@@ -108,4 +108,20 @@ export class DrizzleSaleSuspensionStore implements SaleSuspensionStore<DbTransac
       return { productionId: row.production_id, saleReview: row.sale_review, eventIds: (events.rows as unknown as { event_id: string }[]).map((e) => e.event_id) };
     });
   }
+
+  async listSuspended(eventIds: readonly string[]): Promise<readonly string[]> {
+    const ids = [...new Set(eventIds.filter((id) => UUID.test(id)))];
+    if (ids.length === 0) return [];
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.execute(sql`
+        select e.id::text as event_id
+          from event e
+          join production p on p.id = e.production_id
+         where e.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+           and p.sale_review = 'SUSPENDED'`);
+      const suspended = new Set((rows.rows as unknown as { event_id: string }[]).map((r) => r.event_id));
+      // 부르는 쪽이 준 차례를 지켜 돌려준다(시험·로그 대조가 쉽다).
+      return ids.filter((id) => suspended.has(id));
+    });
+  }
 }

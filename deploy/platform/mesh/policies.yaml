@@ -531,6 +531,7 @@ spec:
             principals:
               - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-ops-72791c8c
               - cluster.local/ns/envoy-gateway-system/sa/envoy-envoy-gateway-system-gw-partner-9b6ecb24
+              - cluster.local/ns/purchase/sa/payment-svc
               - cluster.local/ns/purchase/sa/purchase-svc
               - cluster.local/ns/ticket/sa/ticket-svc
       to:

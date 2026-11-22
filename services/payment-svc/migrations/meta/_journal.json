@@ -176,6 +176,13 @@
       "when": 1795113426497,
       "tag": "0024_payment_cancel_attempt_compensation",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795329852652,
+      "tag": "0025_payout_batch_approval",
+      "breakpoints": true
     }
   ]
 }

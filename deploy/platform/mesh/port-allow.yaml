@@ -151,7 +151,8 @@ workloads:
     namespace: core
     podLabels: { app.kubernetes.io/name: ops-svc, app.kubernetes.io/component: service }
     ports:
-      rest: { port: 8080, callers: [purchase-svc, ticket-svc] }
+      # payment-svc는 지급 묶음 승인 ID를 ops-svc 지급 승인 기록과 대조한다(GET /internal/v1/payout-approvals/{approvalId}, BAT-625, ADR-0345)
+      rest: { port: 8080, callers: [payment-svc, purchase-svc, ticket-svc] }
       metrics: { port: 9464, callers: [prometheus] }
 
   # 파트너 앱 서버(라우트 gw-partner → web/partner:3001). 지표 포트를 열지 않는다(구현 메모 5)

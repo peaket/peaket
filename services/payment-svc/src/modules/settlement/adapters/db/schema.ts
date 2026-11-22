@@ -143,7 +143,32 @@ export const payoutBatch = pgTable(
     check('payout_batch_balance_source_check', sql`${t.pgBalanceSource} is null or ${t.pgBalanceSource} in ('PG_API', 'OPERATOR_CONSOLE')`),
     check('payout_batch_total_check', sql`${t.totalAmount} >= 0 and ${t.statementCount} >= 0`),
     uniqueIndex('payout_batch_key').on(t.pg, t.pgStore, t.payoutDate).where(sql`${t.status} not in ('COMPLETED', 'PARTIAL_FAILED')`),
+    uniqueIndex('payout_batch_approval_uq').on(t.approvalId).where(sql`${t.approvalId} is not null`),
     index('payout_batch_list_idx').on(t.payoutDate, t.pg, t.pgStore, t.status),
+  ],
+);
+
+/** 지급 묶음 승인 감사(0025). 성공은 배치 상태와 같은 트랜잭션, 거절은 상태를 바꾸지 않고 따로 쓴다. */
+export const payoutBatchAudit = pgTable(
+  'payout_batch_audit',
+  {
+    id: uuid('id').primaryKey(),
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => payoutBatch.id, { onDelete: 'cascade' }),
+    approvalId: text('approval_id').notNull(),
+    event: text('event').notNull(),
+    reason: text('reason').notNull(),
+    requesterId: text('requester_id'),
+    approverId: text('approver_id'),
+    amount: amount('amount'),
+    currency: text('currency').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    check('payout_batch_audit_event_check', sql`${t.event} in ('APPROVED', 'REJECTED')`),
+    check('payout_batch_audit_currency_check', sql`${t.currency} = 'KRW'`),
+    index('payout_batch_audit_batch_idx').on(t.batchId, t.createdAt),
   ],
 );
 

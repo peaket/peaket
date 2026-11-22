@@ -1,7 +1,22 @@
 // 정산서·지급 묶음·KYC 유스케이스(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039, ADR-0047·0062).
 // 결제 원장은 payment-svc의 payment 표만 읽고, 상품 주문 원천은 아직 없다(상품 정산서는 빈 목록).
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
-import type { DueEventSettlementSource, EventCommissionRateSource, PayoutGateway, ProductSettlementSource, ReauthVerifier, ReceivableUpdate, SettlementPaymentSource, SettlementStore, StatementFilter, StatementUpdate } from '../domain/ports.js';
+import type {
+  DueEventSettlementSource,
+  EventCommissionRateSource,
+  PayoutApprovalVerifier,
+  PayoutGateway,
+  ProductSettlementSource,
+  ReauthVerifier,
+  ReceivableUpdate,
+  SaleSuspensionSource,
+  SettlementApprovalLog,
+  SettlementPaymentSource,
+  SettlementStore,
+  StatementFilter,
+  StatementUpdate,
+  VerifiedPayoutApproval,
+} from '../domain/ports.js';
 import { normalizeHolderName } from '../domain/payout-adapters.js';
 import {
   accountLast4,
@@ -17,6 +32,7 @@ import {
   type DisputeRecord,
   type KycRecord,
   type KycStatus,
+  type PayoutBatchAuditRecord,
   type PayoutBatchRecord,
   type PayoutRecord,
   type Pg,
@@ -34,10 +50,15 @@ export interface SettlementDeps {
   readonly products?: ProductSettlementSource;
   readonly events?: DueEventSettlementSource;
   readonly eventCommission?: EventCommissionRateSource;
+  /** ops-svc 지급 승인 기록 대조(없거나 5xx면 503). 승인 경로는 이 의존성 없이 열리지 않는다 */
+  readonly approvals: PayoutApprovalVerifier;
+  /** core-svc 판매 중지 회차 확인(없거나 5xx면 503) */
+  readonly saleSuspensions: SaleSuspensionSource;
   readonly gateways: readonly PayoutGateway[];
   readonly reauth: ReauthVerifier;
   readonly clock: Clock;
   readonly commissionRateBp?: number;
+  readonly log?: SettlementApprovalLog;
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
@@ -56,6 +77,27 @@ const parseIfMatch = (value: string | undefined): number => {
   if (!m) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
   return Number(m[1]);
 };
+
+/** 지급 승인 기록과 배치가 어긋날 때의 409. 제목에 어긋난 칸을 적어 운영자가 바로 고치게 한다. */
+const approvalMismatch = (type: string, title: string) => new SettlementProblem(type, 409, title);
+const APPROVAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const approvalFactsOf = (a: VerifiedPayoutApproval, b: PayoutBatchRecord): void => {
+  if (a.kind !== 'PAYOUT_BATCH') throw approvalMismatch('payout-approval-kind-mismatch', '지급 묶음 승인 업무가 아닙니다');
+  if (a.batchId !== b.batchId || a.targetRef !== b.batchId) throw approvalMismatch('payout-approval-target-mismatch', '다른 지급 묶음의 승인 업무입니다');
+  if (a.pg !== b.pg || a.pgStore !== b.pgStore || a.payoutDate !== b.payoutDate) throw approvalMismatch('payout-approval-terms-mismatch', '승인한 결제사·상점·지급일과 다릅니다');
+  if (a.currency !== 'KRW') throw approvalMismatch('payout-approval-currency-mismatch', '승인한 통화가 KRW가 아닙니다');
+  if (a.amount !== b.totalAmount) throw approvalMismatch('payout-approval-amount-mismatch', '승인한 지급 금액과 묶음 합계가 다릅니다');
+  if (a.statementCount !== b.statementCount) throw approvalMismatch('payout-approval-count-mismatch', '승인한 정산서 건수와 묶음 건수가 다릅니다');
+  if (a.status !== 'EXECUTING' && a.status !== 'APPROVED') throw approvalMismatch('payout-approval-not-approved', '승인 대기·반려·이미 쓴 승인 업무입니다');
+  if (a.requiredApprovals !== 2) throw approvalMismatch('payout-approval-quorum', '2인 승인이 아닙니다');
+  const approvers = a.approvals.filter((id) => typeof id === 'string' && id !== '');
+  const distinct = new Set([a.requestedBy, ...approvers]);
+  if (approvers.length === 0 || approvers.includes(a.requestedBy) || distinct.size < 2) throw approvalMismatch('payout-approval-quorum', '요청자와 다른 승인자가 없습니다');
+  if (a.approvedAt === null || Number.isNaN(Date.parse(a.approvedAt))) throw approvalMismatch('payout-approval-quorum', '승인 시각이 없습니다');
+};
+
+const batchCurrency = 'KRW';
 
 export class Settlements {
   constructor(private readonly d: SettlementDeps) {}
@@ -310,6 +352,10 @@ export class Settlements {
         if (o.evidence?.balanceConfirmed !== true) throw new SettlementProblem('payout-balance-unconfirmed', 409, '잔액 확인 증빙이 없어 다시 확정할 수 없습니다');
       } else if (s.holdReason === 'SALE_SUSPENDED') {
         if (o.evidence?.saleResumed !== true) throw new SettlementProblem('settlement-sale-not-resumed', 409, '판매 재개 확인이 없어 다시 확정할 수 없습니다');
+        // 증빙 플래그만 믿지 않고 core의 지금 판매 승인 상태를 다시 본다. 답하지 않으면 보류를 유지한다.
+        if (s.eventId === null) throw new SettlementProblem('settlement-sale-not-resumed', 409, '회차를 알 수 없어 판매 재개를 확인할 수 없습니다');
+        const suspended = await this.d.saleSuspensions.listSuspended([s.eventId]);
+        if (suspended.has(s.eventId)) throw new SettlementProblem('settlement-sale-still-suspended', 409, '판매 중지가 아직 풀리지 않았습니다');
       } else {
         throw new SettlementProblem('settlement-not-reconfirmable', 409, '보류 사유를 확인할 수 없어 다시 확정할 수 없습니다');
       }
@@ -371,6 +417,9 @@ export class Settlements {
       const existing = await this.d.store.listPayoutBatches({ pg: input.pg, pgStore: input.pgStore, payoutDate: input.payoutDate, status: ['PENDING_APPROVAL', 'APPROVED', 'SUBMITTED'], limit: 1 });
       if (existing.length > 0) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
       const confirmed = await this.d.store.listConfirmed(input.pg, input.pgStore, input.payoutDate);
+      // 판매 중지된 공연의 회차 정산서는 결제사와 관계없이 이번 묶음에서 뺀다(ADR-0123, settlement §6).
+      // core가 답하지 않으면 묶음을 만들지 않는다(503). 상태를 바꾸기 전에 확인한다.
+      const suspended = await this.#suspendedEventIds(confirmed);
       const included: StatementRecord[] = [];
       const statementUpdates: StatementUpdate[] = [];
       const receivableUpdates: ReceivableUpdate[] = [];
@@ -378,7 +427,13 @@ export class Settlements {
       let heldKyc = 0;
       let heldAccount = 0;
       let heldMismatch = 0;
+      let heldSuspended = 0;
       for (const s of confirmed) {
+        if (s.eventId !== null && suspended.has(s.eventId)) {
+          heldSuspended += 1;
+          statementUpdates.push({ statementId: s.statementId, status: 'HELD', holdReason: 'SALE_SUSPENDED', offsetAmount: s.offsetAmount, payoutAmount: s.payoutAmount, updatedAt: now });
+          continue;
+        }
         const kyc = await this.d.store.findKyc(s.promoterId);
         if (kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified) {
           const account = await this.d.store.findPayoutAccount(s.promoterId);
@@ -399,6 +454,7 @@ export class Settlements {
         }
       }
       if (included.length === 0) {
+        if (heldSuspended > 0) throw new SettlementProblem('payout-sale-suspended', 409, '판매 중지된 공연의 정산서라 지급할 수 없습니다');
         if (heldKyc > 0) throw new SettlementProblem('payout-kyc-required', 409, 'KYC 확인이 끝나지 않아 지급할 수 없습니다');
         if (heldAccount > 0) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 지급할 수 없습니다');
         if (heldMismatch > 0) throw new SettlementProblem('payout-account-mismatch', 409, '예금주가 확인되지 않은 정산 계좌라 지급할 수 없습니다');
@@ -480,15 +536,93 @@ export class Settlements {
 
   async approveBatch(batchId: string, approvalId: string): Promise<ReturnType<typeof payoutBatchView>> {
     return guard(async () => {
+      if (typeof approvalId !== 'string' || approvalId.trim() === '') throw new SettlementProblem('invalid-query', 422, '승인 업무 ID가 필요합니다');
+      const id = approvalId.trim();
+      if (!APPROVAL_ID.test(id)) throw new SettlementProblem('invalid-query', 422, '승인 업무 ID가 올바르지 않습니다');
       const b = await this.d.store.findPayoutBatch(batchId);
       if (!b) throw notFound();
       // 실행 실패 뒤 같은 승인 업무로 다시 승인하면 승인은 한 번만 반영하고 실행만 다시 한다.
-      if (b.approvalId === approvalId && (b.status === 'APPROVED' || b.status === 'SUBMITTED' || b.status === 'COMPLETED')) return payoutBatchView(b);
+      // 같은 승인 ID의 멱등 재요청은 ops를 다시 부르지 않고 처음 결과를 그대로 돌려준다.
+      if (b.approvalId === id && (b.status === 'APPROVED' || b.status === 'SUBMITTED' || b.status === 'COMPLETED')) return payoutBatchView(b);
       if (b.status !== 'PENDING_APPROVAL') throw new SettlementProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
-      const next = { ...b, status: 'APPROVED' as const, approvalId, updatedAt: new Date(this.d.clock.now()) };
-      await this.d.store.savePayoutBatch(next);
+      if (b.approvalId !== null) throw new SettlementProblem('payout-approval-reused', 409, '이미 다른 승인으로 처리된 지급 묶음입니다');
+      const now = new Date(this.d.clock.now());
+      let facts: VerifiedPayoutApproval | undefined;
+      try {
+        facts = await this.d.approvals.verify(id);
+        if (!facts) throw new SettlementProblem('payout-approval-missing', 409, 'ops-svc에서 승인 업무를 찾지 못했습니다');
+        approvalFactsOf(facts, b);
+      } catch (e) {
+        const reason = e instanceof SettlementProblem ? e.type : e instanceof ProblemError ? e.type : 'payout-approval-verification-failed';
+        await this.#auditRejected(b, id, reason, facts, now);
+        throw e;
+      }
+      if (!facts) throw new SettlementProblem('payout-approval-missing', 409, 'ops-svc에서 승인 업무를 찾지 못했습니다');
+      const next: PayoutBatchRecord = { ...b, status: 'APPROVED', approvalId: id, updatedAt: now };
+      const audit: PayoutBatchAuditRecord = {
+        auditId: uuidv7(this.d.clock),
+        batchId: b.batchId,
+        approvalId: id,
+        event: 'APPROVED',
+        reason: 'verified',
+        requesterId: facts.requestedBy,
+        approverId: facts.approvals[0] ?? null,
+        amount: b.totalAmount,
+        currency: batchCurrency,
+        createdAt: now,
+      };
+      const saved = await this.d.store.approvePayoutBatchAtomically(next, audit);
+      if (!saved) {
+        await this.#auditRejected(b, id, 'payout-approval-conflict', facts, now);
+        throw new SettlementProblem('payout-approval-conflict', 409, '다른 사람이 먼저 승인했습니다');
+      }
+      this.d.log?.approved({
+        batchId: b.batchId,
+        approvalId: id,
+        requesterId: facts.requestedBy,
+        approverId: facts.approvals[0]!,
+        amount: b.totalAmount,
+        pg: b.pg,
+        pgStore: b.pgStore,
+        payoutDate: b.payoutDate,
+        at: now,
+      });
       return payoutBatchView(next);
     });
+  }
+
+  /** 거절 사유와 확인한 사실(있으면)을 감사 표·로그에 남긴다. 배치 상태는 바꾸지 않는다. */
+  async #auditRejected(b: PayoutBatchRecord, approvalId: string, reason: string, facts: VerifiedPayoutApproval | undefined, now: Date): Promise<void> {
+    const audit: PayoutBatchAuditRecord = {
+      auditId: uuidv7(this.d.clock),
+      batchId: b.batchId,
+      approvalId,
+      event: 'REJECTED',
+      reason,
+      requesterId: facts?.requestedBy ?? null,
+      approverId: facts?.approvals[0] ?? null,
+      amount: facts?.amount ?? null,
+      currency: batchCurrency,
+      createdAt: now,
+    };
+    try {
+      await this.d.store.insertPayoutBatchAudit(audit);
+    } catch {
+      // 감사 행을 쓰지 못해도 원래 거절(4xx/503)을 500으로 바꾸지 않는다. 로그로 남긴다.
+    }
+    this.d.log?.rejected({ batchId: b.batchId, approvalId, reason, at: now });
+  }
+
+  /** 정산서가 속한 회차 중 판매 중지된 것. 회차가 없는 상품 정산서는 확인 대상이 아니다. */
+  async #suspendedEventIds(statements: readonly StatementRecord[]): Promise<ReadonlySet<string>> {
+    const eventIds = [...new Set(statements.map((s) => s.eventId).filter((id): id is string => id !== null && id !== ''))];
+    if (eventIds.length === 0) return new Set();
+    return this.d.saleSuspensions.listSuspended(eventIds);
+  }
+
+  async #assertNoSaleSuspension(statements: readonly StatementRecord[]): Promise<void> {
+    const suspended = await this.#suspendedEventIds(statements);
+    if (suspended.size > 0) throw new SettlementProblem('payout-sale-suspended', 409, '판매 중지된 공연의 정산서가 있어 지급할 수 없습니다');
   }
 
   async executeBatch(batchId: string): Promise<ReturnType<typeof payoutBatchView>> {
@@ -496,11 +630,15 @@ export class Settlements {
       const b = await this.d.store.findPayoutBatch(batchId);
       if (!b) throw notFound();
       if (b.status !== 'APPROVED') throw new SettlementProblem('payout-batch-not-approved', 409, '승인된 지급 묶음이 아닙니다');
+      // 승인 기록을 거치지 않고 APPROVED가 된 묶음은 실행하지 않는다(승인 ID가 없으면 승인 근거가 없다).
+      if (!b.approvalId) throw new SettlementProblem('payout-batch-not-approved', 409, '승인 업무 ID가 없는 지급 묶음입니다');
+      const boundStatements = await this.d.store.listStatementsByBatch(batchId);
+      if (boundStatements.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
+      // 승인 뒤 판매가 중지됐을 수 있다. 결제사에 요청하기 직전에 다시 확인하고, 하나라도 중지면 멈춘다(ADR-0123).
+      await this.#assertNoSaleSuspension(boundStatements);
       const gateway = this.d.gateways.find((g) => g.pg === b.pg);
       if (!gateway) throw new SettlementProblem('payout-gateway-unavailable', 503, '지급대행을 아직 시작할 수 없습니다');
       const now = new Date(this.d.clock.now());
-      const boundStatements = await this.d.store.listStatementsByBatch(batchId);
-      if (boundStatements.length === 0) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
       const boundTotal = boundStatements.reduce((sum, s) => sum + s.payoutAmount, 0);
       if (boundTotal !== b.totalAmount) throw new SettlementProblem('payout-batch-amount-mismatch', 409, '승인한 지급 금액과 정산서 합계가 다릅니다');
       let payouts = await this.d.store.listPayouts(batchId);

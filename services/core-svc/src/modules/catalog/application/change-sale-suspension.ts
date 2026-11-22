@@ -47,6 +47,11 @@ export class ChangeSaleSuspension {
     return found;
   }
 
+  /** 회차 묶음 중 판매 중지된 것. payment-svc 지급 묶음 보류가 쓴다(BAT-625). */
+  async listSuspended(eventIds: readonly string[]): Promise<readonly string[]> {
+    return this.store.listSuspended(eventIds);
+  }
+
   /**
    * @throws SaleSuspensionNotFound 없는 회차(404)
    * @throws SaleSuspensionConflict 상태와 맞지 않음(409)

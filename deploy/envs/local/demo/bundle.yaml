@@ -13,6 +13,8 @@ env:
   # 회차 취소 환불 반복(relay.ts)을 합본의 자식 프로세스로 함께 띄운다. S9가 상태 COMPLETED를 보려면 이 반복이 돈다
   PEAKET_BUNDLE_PURCHASE_RELAY: '1'
   PEAKET_BUNDLE_ENV_DIR: /etc/peaket/bundle
+  # 결제사(payment-svc)가 지급 묶음 승인 ID를 ops-svc 지급 승인 기록과 대조한다(BAT-625). 없으면 승인은 503으로 닫힌다
+  PEAKET_OPS_HTTP_URL: http://ops-svc.core.svc.cluster.local:8080
   # single 모드면 payment·purchase·queue의 기본 gRPC가 모두 50051이라 한 파드 안에서 포트가 겹친다.
   # v1 무대처럼 split으로 나눠 프로세스를 나눈다(파드는 여전히 하나다, 감독 결정 2)
   PEAKET_BUNDLE_MODE: split

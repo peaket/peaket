@@ -2,7 +2,7 @@
 // 판매 설정 읽기·회차 상태 반영과 같은 내부 토큰 가드(없거나 틀리면 401)를 쓴다. 게이트웨이 HTTPRoute에 없고 클러스터 안에서만 닿는다.
 // GET …/sale-review-scope: 집행 순서용 비취소 회차 목록(중지는 판매를 먼저 막고 공개를 내린다).
 // POST …/sale-review-result: SUSPENDED·RESUMED. 200 {status, productionId, eventIds, resumeEventIds}, 404 not-found, 409 sale-suspension-conflict, 400 invalid-body. no-store.
-import { Controller, Get, HttpCode, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { ContractBody, ContractRouteSchema, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -29,14 +29,30 @@ const ScopeResponse = z
 const ResultResponse = z
   .object({ status: z.enum(['APPLIED', 'UNCHANGED']), productionId: z.uuid(), eventIds: z.array(z.uuid()), resumeEventIds: z.array(z.uuid()) })
   .strict();
+const SuspendedResponse = z.object({ suspendedEventIds: z.array(z.uuid()) }).strict();
+
+/** 지급 묶음 하나가 한 번에 물을 수 있는 회차 수 상한. payment-svc 어댑터도 100개씩 나눈다. */
+export const SALE_SUSPENSIONS_MAX = 100;
 
 const invalidBody = () => new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+const invalidQuery = () => new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
 const conflict = () => new ProblemError({ type: 'sale-suspension-conflict', status: 409, title: '판매 승인 상태와 맞지 않습니다' });
 
 @Controller('internal/v1/events')
 @UseGuards(InternalToken401Guard)
 export class InternalSaleSuspensionController {
   constructor(private readonly change: ChangeSaleSuspension) {}
+
+  @Get('sale-suspensions')
+  @ContractRouteSchema({ responses: { 200: SuspendedResponse } })
+  @Roles(['public'])
+  async suspended(@Query() q: Record<string, string | undefined>, @Res({ passthrough: true }) reply: FastifyReply): Promise<z.output<typeof SuspendedResponse>> {
+    void reply.header('cache-control', 'no-store');
+    const raw = typeof q.eventIds === 'string' ? q.eventIds : '';
+    const ids = [...new Set(raw.split(',').map((id) => id.trim()).filter((id) => id !== ''))];
+    if (ids.length === 0 || ids.length > SALE_SUSPENSIONS_MAX || ids.some((id) => !UUID.test(id))) throw invalidQuery();
+    return { suspendedEventIds: [...(await this.change.listSuspended(ids))] };
+  }
 
   @Get(':eventId/sale-review-scope')
   @ContractRouteSchema({ responses: { 200: ScopeResponse } })

@@ -176,6 +176,20 @@ export interface PayoutRecord {
   updatedAt: Date;
 }
 
+/** 지급 묶음 승인 감사(payment 0025). 돈이 움직이는 승인의 성공·거절을 배치와 같은 트랜잭션(성공)이나 따로 남긴다. */
+export interface PayoutBatchAuditRecord {
+  auditId: string;
+  batchId: string;
+  approvalId: string;
+  event: 'APPROVED' | 'REJECTED';
+  reason: string;
+  requesterId: string | null;
+  approverId: string | null;
+  amount: number | null;
+  currency: string;
+  createdAt: Date;
+}
+
 export interface StatementView {
   statementId: string;
   kind: StatementKind;
