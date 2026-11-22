@@ -48,7 +48,7 @@ export interface SaleLayout {
 export interface SaleSeatCounts {
   /** 판매 대상 좌석 가운데 비트가 꺼진 수(등급 가용의 합) */
   available: number;
-  /** 만료 인덱스의 수(우선 구매 보류·멈춘 홀드는 GAT-135·HOT-070이 더한다) */
+  /** 만료 인덱스·멈춘 홀드·우선 구매 보류의 수(우선 구매 보류는 GAT-135가 더한다) */
   held: number;
   /** 결제 중(승인 결과를 기다리는 PENDING, 등급 합) */
   paying: number;

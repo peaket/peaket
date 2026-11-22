@@ -60,8 +60,8 @@ export type ReleaseFailedResult = { kind: 'OK'; released: number } | { kind: 'NO
 /**
  * 회차 목록에서 빼기 결과.
  * - RETIRED: 뺐다 · TOO_EARLY: 판매 종료 + RETIRE_AFTER_SALE_END_MS 전 · STREAM_PENDING: Stream 길이나 확인받지 못한 항목이 0이 아님
- * - EXPIRY_PENDING: 만료 인덱스에 홀드가 남음(만료가 멈췄던 회차) · NOT_LISTED: 목록에 없었다
- * 뺀 뒤 Stream 길이·만료 인덱스를 다시 보고 0이 아니면 목록에 되돌린다(두 슬롯 사이에 항목이 들어온 경주, PRF-142 코드 리뷰)
+ * - EXPIRY_PENDING: 만료 인덱스·멈춘 홀드·우선 구매 보류에 홀드가 남음(만료가 멈췄던 회차, 우선 구매 보류는 GAT-135) · NOT_LISTED: 목록에 없었다
+ * 뺀 뒤 Stream 길이·만료 인덱스·우선 구매 보류를 다시 보고 0이 아니면 목록에 되돌린다(두 슬롯 사이에 항목이 들어온 경주, PRF-142 코드 리뷰·GAT-135)
  */
 export type RetireResult = 'RETIRED' | 'TOO_EARLY' | 'STREAM_PENDING' | 'EXPIRY_PENDING' | 'NOT_LISTED';
 

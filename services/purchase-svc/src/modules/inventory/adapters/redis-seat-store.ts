@@ -617,7 +617,7 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
    * 회차 목록에서 빼기(BUILD_ORDER PRF-142, ports.ts SeatEventRetire). 차례(앞이 걸리면 뒤는 부르지 않는다):
    * 1 주입 Clock의 지금 < 판매 종료 + RETIRE_AFTER_SALE_END_MS → TOO_EARLY(Redis를 부르지 않는다)
    * 2 회차 슬롯에서 XLEN stream > 0 → STREAM_PENDING, XPENDING stream stream-relay 요약의 수 > 0 → STREAM_PENDING(그룹·키가 없어 NOGROUP이면 0).
-   *   둘 다 읽기라 Stream 키를 만들지 않는다
+   *   둘 다 읽기라 Stream 키를 만들지 않는다. 만료 인덱스·멈춘 홀드·우선 구매 보류의 ZCARD가 하나라도 > 0이면 EXPIRY_PENDING(우선 구매 보류는 GAT-135)
    * 3 목록 슬롯에 SREM s:ctl:events 회차 따로 한 번: 1이면 RETIRED, 0이면 NOT_LISTED(목록에 없었다)
    * 일시 장애·메모리 부족은 SeatStoreUnavailable(다시 부르면 된다. SREM만 멱등이 아닌데 다시 부르면 NOT_LISTED다)
    */
@@ -626,13 +626,15 @@ export class RedisSeatStore implements SeatStore, SeatExpiries, SeatSnapshots, S
     if (this.#clock.now() < i.saleEndMs + RETIRE_AFTER_SALE_END_MS) return 'TOO_EARLY';
     const stream = seatKeys.stream(i.eventId);
     const expiry = seatKeys.expiry(i.eventId);
-    // 회차 슬롯에서 본다: Stream 길이, 확인받지 못한 항목, 만료 인덱스에 남은 홀드
+    // 회차 슬롯에서 본다: Stream 길이, 확인받지 못한 항목, 만료 인덱스·멈춘 홀드·우선 구매 보류에 남은 홀드
     const left = async (): Promise<RetireResult | undefined> => {
       if (count(await guard(this.redis.command(['XLEN', stream], { key: stream })), 'Stream 길이') > 0) return 'STREAM_PENDING';
       if ((await this.#pendingOf(stream)) > 0) return 'STREAM_PENDING';
       if (count(await guard(this.redis.command(['ZCARD', expiry], { key: expiry })), '만료 인덱스 길이') > 0) return 'EXPIRY_PENDING';
       const paused = seatKeys.paused(i.eventId);
       if (count(await guard(this.redis.command(['ZCARD', paused], { key: paused })), '멈춘 홀드 수') > 0) return 'EXPIRY_PENDING';
+      const prio = seatKeys.prio(i.eventId);
+      if (count(await guard(this.redis.command(['ZCARD', prio], { key: prio })), '우선 구매 보류 수') > 0) return 'EXPIRY_PENDING';
       return undefined;
     };
     const before = await left();

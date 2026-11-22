@@ -27,7 +27,7 @@ export class RedisSaleCounts implements SaleCountsReader {
 
   async read(eventId: string): Promise<SaleCountsRead> {
     assertEventId(eventId);
-    const keys = [seatKeys.bitmap(eventId), seatKeys.expiry(eventId), seatKeys.epoch(eventId), seatKeys.paused(eventId)];
+    const keys = [seatKeys.bitmap(eventId), seatKeys.expiry(eventId), seatKeys.epoch(eventId), seatKeys.paused(eventId), seatKeys.prio(eventId)];
     // 비트맵 바이트를 글자로 풀면 0x80 같은 바이트가 깨져 응답을 Buffer로 받는다(platform CallOptions.binary)
     const r = await guard(this.redis.evalScript(SALE_COUNT, keys, [], { binary: true }));
     if (!Array.isArray(r) || r.length < 1) throw new Error('판매 상태 셈 Lua가 모르는 값을 돌려줬다');
@@ -43,8 +43,8 @@ export class RedisSaleCounts implements SaleCountsReader {
     assertEventId(eventId);
     if (!Number.isInteger(start) || start < 0) throw new RangeError('시작 순위는 0 이상의 정수다');
     if (!Number.isInteger(count) || count < 1 || count > SALE_TIER_SCAN_PAGE) throw new RangeError(`읽을 수는 1~${SALE_TIER_SCAN_PAGE}의 정수다`);
-    // 만료 인덱스 다음에 멈춘 홀드를 잇는다(BUILD_ORDER HOT-070). Lua 한 번이라 옮기기와 겹쳐도 좌석이 빠지거나 겹치지 않는다
-    const r = await guard(this.redis.evalScript(HOLD_PAGE, [seatKeys.expiry(eventId), seatKeys.paused(eventId)], [String(start), String(count)]));
+    // 만료 인덱스 다음에 멈춘 홀드·우선 구매 보류를 잇는다(BUILD_ORDER HOT-070·GAT-135). Lua 한 번이라 옮기기와 겹쳐도 좌석이 빠지거나 겹치지 않는다
+    const r = await guard(this.redis.evalScript(HOLD_PAGE, [seatKeys.expiry(eventId), seatKeys.paused(eventId), seatKeys.prio(eventId)], [String(start), String(count)]));
     if (!Array.isArray(r)) throw new Error('홀드 쪽 Lua 답이 배열이 아니다');
     const indexes: number[] = [];
     let badMembers = 0;

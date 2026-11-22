@@ -955,7 +955,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
   }
 
   /**
-   * 회차 목록에서 빼기(BUILD_ORDER PRF-142): RedisSeatStore.retireEvent와 같은 차례(주입 Clock → Stream 길이 → 목록에서 빼기).
+   * 회차 목록에서 빼기(BUILD_ORDER PRF-142·GAT-135): RedisSeatStore.retireEvent와 같은 차례(주입 Clock → Stream 길이 → 만료 인덱스·우선 구매 보류 → 목록에서 빼기).
    * 메모리에는 소비자 그룹이 없어 확인받지 못한 항목은 늘 0이다(Stream 항목이 남았는지만 본다)
    */
   async retireEvent(i: { eventId: string; saleEndMs: number }): Promise<RetireResult> {
@@ -964,6 +964,7 @@ export class MemorySeatStore implements SeatStore, SeatExpiries, SeatSnapshots, 
     const ev = this.db.peek(i.eventId);
     if ((ev?.stream.length ?? 0) > 0) return 'STREAM_PENDING';
     if ((ev?.expiry.size ?? 0) > 0) return 'EXPIRY_PENDING';
+    if ((ev?.prio.size ?? 0) > 0) return 'EXPIRY_PENDING';
     return this.db.ctlEvents.delete(i.eventId) ? 'RETIRED' : 'NOT_LISTED';
   }
 

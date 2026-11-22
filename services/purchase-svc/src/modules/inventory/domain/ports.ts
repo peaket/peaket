@@ -389,7 +389,7 @@ export type SaleCountsRead =
       kind: 'OK';
       /** 좌석 비트맵 바이트(Redis 비트맵 그대로). 키가 없거나 짧으면 그만큼 짧다(모자란 곳은 0으로 본다, tierAvailability) */
       bitmap: Buffer;
-      /** 만료 인덱스 s:{event:E}:expiry의 수(ZCARD, 0 이상) */
+      /** 만료 인덱스·멈춘 홀드·우선 구매 보류의 수(ZCARD 합, 0 이상) */
       held: number;
     };
 
@@ -414,7 +414,7 @@ export interface SaleCountsReader {
    */
   read(eventId: string): Promise<SaleCountsRead>;
   /**
-   * 만료 인덱스를 순위로 읽어 좌석 색인을 돌려준다(ZRANGE s:{event:E}:expiry start start + count − 1, 한 번에 끝나는 작은 명령. 원자성이 필요 없다).
+   * 만료 인덱스·멈춘 홀드·우선 구매 보류를 이은 순위로 읽어 좌석 색인을 돌려준다(ZRANGE 셋을 잇는 읽기 Lua 한 번. 원자성이 필요 없다).
    * @param start 시작 순위(0 이상의 정수)
    * @param count 읽을 수(1 ~ SALE_TIER_SCAN_PAGE의 정수)
    * @returns 그 쪽의 색인과 건너뛴 멤버 수(앞 0 없는 0 이상의 10진 정수 글이 아닌 멤버는 던지지 않고 건너뛴다. 멤버 하나 때문에 회차 틱 전체가 실패하지 않게, 리뷰 고침 L12). 끝을 지나면 둘 다 빈 값이다
