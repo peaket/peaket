@@ -1433,7 +1433,7 @@ const FLOWS = {
     ctx.vars.productionId = productionId;
     // SCR-044는 파트너 공연 상세 API가 없어 '불러오는 중'에서 멈춘다(제품 빈칸). 화면 증거로만 연다
     await visit(ctx, { screen: 'SCR-044', path: `/events/${productionId}/cancellation`, account: 'stella-admin', origin: 'partner' }).catch((e) => ctx.log(`  화면 SCR-044: ${e.message}`));
-    await visit(ctx, { screen: 'SCR-045', path: '/cs/inbox', account: 'sujin', origin: 'console', expect: ['CS|문의'] });
+    await visit(ctx, { screen: 'SCR-045', path: '/cs/inbox', account: 'sujin', origin: 'console', expect: ['판정 대기'] });
 
     // ① 파트너 관리자 요청 → ② commander 판정(미리보기) → ③ 판정자 아닌 commander가 재인증 뒤 확정(2인)
     const requested = await api(ctx, 'stella-admin', {

@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { ProblemError, type Clock } from '@peaket/platform';
 import type { AuditChain } from '../../audit/index.js';
+import type { ApprovalFailureCases } from '../../cases/index.js';
 import { addBusinessDays, APPROVAL_DUE_BUSINESS_DAYS, roleChangeApprovalView, type RoleChangeApprovalView } from '../domain/role-change-approval.js';
 import { AdminAccountProblem, type AdminRole } from '../domain/admin-account.js';
 import type { RoleChangeApprovalRecord, RoleChangeApprovalStore, AdminIdentity, AdminReauth } from '../domain/ports.js';
@@ -14,6 +15,8 @@ export interface RoleChangeApprovalsDeps {
   readonly reauth: AdminReauth | undefined;
   readonly audit: AuditChain | undefined;
   readonly clock: Clock;
+  /** 실행 실패 때 CS '승인 업무 실행 실패' 건을 열고(기한은 이 승인의 기한) 다시 실행이 성공하면 닫는다(F-06-2 ADR-0364 결정 6) */
+  readonly failureCases?: ApprovalFailureCases;
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다', detail: '승인 업무를 찾을 수 없습니다' });
@@ -91,6 +94,7 @@ export class RoleChangeApprovals {
     } catch (e) {
       const failedAt = this.d.clock.now();
       await this.d.store.save({ ...r, status: 'FAILED', approverId: actor.accountId, closeReason: e instanceof Error ? e.message.slice(0, 200) : 'change-failed', updatedAtMs: failedAt }, r.updatedAtMs);
+      await this.#caseFailed(r, failedAt);
       // identity 문제는 ProblemError로 바꿔 승인 컨트롤러를 지나 412·409·503으로 나가게 한다(RV-03)
       if (e instanceof AdminAccountProblem) throw new ProblemError({ type: e.type, status: e.status, title: e.title, ...(e.retryAfterSeconds ? { retryAfterSeconds: e.retryAfterSeconds } : {}) });
       throw e;
@@ -121,6 +125,7 @@ export class RoleChangeApprovals {
       },
       nowMs: doneAt,
     });
+    await this.#caseSucceeded(r.approvalId, doneAt);
     if (!saved) {
       const latest = await this.d.store.find(r.approvalId);
       if (latest?.status === 'DONE' && latest.approverId === actor.accountId) return roleChangeApprovalView(latest, actor);
@@ -141,6 +146,24 @@ export class RoleChangeApprovals {
     const next: RoleChangeApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, closeReason: text, updatedAtMs: now };
     if (!(await this.d.store.save(next, r.updatedAtMs))) throw conflict('다른 사람이 먼저 처리했습니다');
     return roleChangeApprovalView(next, actor);
+  }
+
+  /** CS '승인 업무 실행 실패' 건 열기. 건을 못 열어도 승인 응답을 바꾸지 않는다 */
+  async #caseFailed(r: RoleChangeApprovalRecord, nowMs: number): Promise<void> {
+    try {
+      await this.d.failureCases?.failed({ approvalId: r.approvalId, kind: r.kind, dueAtMs: r.dueAtMs }, nowMs);
+    } catch {
+      // 건 열기 실패는 승인 결과와 무관하다
+    }
+  }
+
+  /** identity가 역할을 바꿨으면(다시 실행 성공) 그 건을 시스템이 닫는다 */
+  async #caseSucceeded(approvalId: string, nowMs: number): Promise<void> {
+    try {
+      await this.d.failureCases?.succeeded(approvalId, nowMs);
+    } catch {
+      // 닫기 실패는 승인 성공을 바꾸지 않는다
+    }
   }
 
   async #verify(token: string | undefined, actor: { sessionId: string }): Promise<{ accountId: string }> {

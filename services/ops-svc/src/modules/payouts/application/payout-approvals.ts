@@ -2,6 +2,7 @@
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient, SettlementPaymentClient } from '../domain/ports.js';
+import type { ApprovalFailureCases } from '../../cases/index.js';
 import {
   approvalDueAt,
   payoutApprovalFacts,
@@ -24,6 +25,8 @@ export interface PayoutApprovalDeps {
   readonly audit?: AuditChain;
   /** payment-svc 정산서 이의 기각(F-07-5). 없으면 503 */
   readonly settlements?: SettlementPaymentClient;
+  /** 실행 실패 때 CS '승인 업무 실행 실패' 건을 열고(기한은 이 승인의 기한) 다시 실행이 성공하면 닫는다(F-06-2 ADR-0364 결정 6) */
+  readonly failureCases?: ApprovalFailureCases;
 }
 
 const auditRecord = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
@@ -162,6 +165,7 @@ export class PayoutApprovals {
           done,
           auditRecord('PAYOUT_BATCH_DONE', done.approvalId, { ...payoutBase(done), status: done.status }, doneMs),
         );
+        await this.#caseSucceeded(done.approvalId, doneMs);
         return payoutApprovalView(done, actor);
       } catch (e) {
         // 지급대행이 이미 성공한 뒤의 감사 실패를 FAILED로 바꾸지 않는다(성공을 실패로 보고하지 않는다).
@@ -172,6 +176,7 @@ export class PayoutApprovals {
             failed,
             auditRecord('PAYOUT_BATCH_FAILED', failed.approvalId, { ...payoutBase(failed), status: failed.status, failure: failed.failure }, failedMs),
           );
+          await this.#caseFailed(failed, failedMs);
         }
         throw e;
       }
@@ -257,6 +262,24 @@ export class PayoutApprovals {
 
   listReceivables(filter: { limit: number }): Promise<unknown[]> {
     return this.d.payments.listReceivables(filter);
+  }
+
+  /** CS '승인 업무 실행 실패' 건 열기(기한은 이 지급 승인의 기한). 건을 못 열어도 승인 응답을 바꾸지 않는다 */
+  async #caseFailed(r: PayoutApprovalRecord, nowMs: number): Promise<void> {
+    try {
+      await this.d.failureCases?.failed({ approvalId: r.approvalId, kind: 'PAYOUT_BATCH', dueAtMs: approvalDueAt(r.payoutDate).getTime() }, nowMs);
+    } catch {
+      // 건 열기 실패는 승인 결과와 무관하다
+    }
+  }
+
+  /** 다시 실행이 성공하면 그 건을 시스템이 닫는다 */
+  async #caseSucceeded(approvalId: string, nowMs: number): Promise<void> {
+    try {
+      await this.d.failureCases?.succeeded(approvalId, nowMs);
+    } catch {
+      // 닫기 실패는 승인 성공을 바꾸지 않는다
+    }
   }
 
   dueAt(payoutDate: string): Date {

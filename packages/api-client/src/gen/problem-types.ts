@@ -43,7 +43,11 @@ export type ProblemType =
   | 'cancel-deadline-passed'
   | 'cancellation-conflict'
   | 'cancellation-not-account-pending'
+  | 'case-already-resolved'
+  | 'case-assignee-invalid'
   | 'case-not-actioned'
+  | 'case-result-note-required'
+  | 'case-update-not-allowed'
   | 'checkpoint-empty'
   | 'checkpoint-not-ready'
   | 'command-dispatch-failed'
@@ -419,7 +423,11 @@ export const PROBLEM_TYPES = {
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'cancellation-not-account-pending': { status: 409, title: "환급 계좌를 기다리는 취소가 아닙니다" },
+  'case-already-resolved': { status: 409, title: "이미 해결한 건입니다" },
+  'case-assignee-invalid': { status: 422, title: "맡길 수 없는 계정입니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
+  'case-result-note-required': { status: 422, title: "결과 메모를 적어 주세요" },
+  'case-update-not-allowed': { status: 403, title: "이 건을 고칠 수 있는 역할이 아닙니다" },
   'checkpoint-empty': { status: 409, title: "묶을 감사 기록이 없습니다" },
   'checkpoint-not-ready': { status: 409, title: "아직 서명하지 않았거나 옛 체크포인트입니다" },
   'command-dispatch-failed': { status: 502, title: "명령을 대상에 보내지 못했습니다. 다시 시도해 주세요" },

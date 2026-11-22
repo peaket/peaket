@@ -2685,19 +2685,27 @@ export const CreateOpsComplianceAccessFindingResolutionBody = zod.object({
 export const CreateOpsComplianceAccessFindingResolutionResponse = zod.unknown()
 
 /**
- * FR-057, POL-038. 결제자 이름·전화는 가려서 반환. 종류 필터에 문의(INQUIRY)·게시물 신고(CONTENT_REPORT)·권리 침해 삭제 요청(RIGHTS_REQUEST)이 있고, 신고 건은 신고 수·사유별 수만 싣고 신고자는 싣지 않는다(추천 적용 2026-10-19, ADR-0066). 정산 건 가운데 CS 담당자(cs_agent·cs_lead)에게 싣는 것은 정산 이의(STATEMENT_DISPUTE) 하나다. 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)은 operator·commander의 목록에만 나오고(viewer는 이 경로를 부르지 않는다, 소유자 결정 2026-10-30, open-items 82번 ①), CS 담당자가 kind로 걸러도 0건이다(소유자 결정 2026-10-30, open-items 72번, 건 종류의 나눔은 추천 적용 2026-10-30, docs/features/settlement.md §9, J-T27)
+ * FR-057, POL-038. 결제자 이름·전화는 가려서 반환. 종류 필터에 문의(INQUIRY)·게시물 신고(CONTENT_REPORT)·권리 침해 삭제 요청(RIGHTS_REQUEST)이 있고, 신고 건은 신고 수·사유별 수만 싣고 신고자는 싣지 않는다(추천 적용 2026-10-19, ADR-0066). 정산 건 가운데 CS 담당자(cs_agent·cs_lead)에게 싣는 것은 정산 이의(STATEMENT_DISPUTE) 하나다. 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)은 operator·commander의 목록에만 나오고(viewer는 이 경로를 부르지 않는다, 소유자 결정 2026-10-30, open-items 82번 ①), CS 담당자가 kind로 걸러도 0건이다(소유자 결정 2026-10-30, open-items 72번, 건 종류의 나눔은 추천 적용 2026-10-30, docs/features/settlement.md §9, J-T27). 정렬은 next_due_at·caseId 차례이고 기한 없는 건이 끝에 온다(시험 R-T49)
  * @summary CS 처리함 목록(종류·기한 필터)
  */
+export const listOpsCasesQueryDueWithinDaysMin = 0;
+export const listOpsCasesQueryDueWithinDaysMax = 30;
+
 export const listOpsCasesQueryLimitMax = 100;
 
 
 
 export const ListOpsCasesQueryParams = zod.object({
   "kind": zod.string().optional(),
-  "dueWithinDays": zod.int().optional(),
+  "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional().describe('OPEN·IN_PROGRESS·RESOLVED. 없으면 해결되지 않은 건(추천 적용 2026-11-23, ADR-0364)'),
+  "dueWithinDays": zod.int().min(listOpsCasesQueryDueWithinDaysMin).max(listOpsCasesQueryDueWithinDaysMax).optional().describe('n영업일 안에 이른 기한(next_due_at)이 드는 건만. 0은 이미 넘긴 건만(추천 적용 2026-11-23, ADR-0364)'),
   "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
   "limit": zod.int().min(1).max(listOpsCasesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
+
+export const listOpsCasesResponseItemsItemResultNoteMax = 2000;
+
+
 
 export const ListOpsCasesResponse = zod.object({
   "items": zod.array(zod.object({
@@ -2707,6 +2715,13 @@ export const ListOpsCasesResponse = zod.object({
   "progressDueAt": zod.iso.datetime({"offset":true}).optional(),
   "resultDueAt": zod.iso.datetime({"offset":true}).optional(),
   "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "category": zod.string().optional().describe('건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)'),
+  "assignee": zod.string().nullish().describe('담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)'),
+  "version": zod.int().optional().describe('판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다'),
+  "dueState": zod.enum(['ON_TRACK', 'DUE_SOON', 'OVERDUE', 'NONE']).optional().describe('서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "resultNote": zod.string().max(listOpsCasesResponseItemsItemResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
   "reportSummary": zod.object({
   "total": zod.int().optional(),
   "byCategory": zod.record(zod.string(), zod.int()).optional()
@@ -2723,6 +2738,8 @@ export const GetOpsCaseParams = zod.object({
   "caseId": zod.string()
 })
 
+export const getOpsCaseResponseOneResultNoteMax = 2000;
+
 export const getOpsCaseResponseTwoReportsItemDetailMax = 2000;
 
 export const getOpsCaseResponseTwoStatementDisputeDisputeDetailMax = 2000;
@@ -2736,6 +2753,13 @@ export const GetOpsCaseResponse = zod.object({
   "progressDueAt": zod.iso.datetime({"offset":true}).optional(),
   "resultDueAt": zod.iso.datetime({"offset":true}).optional(),
   "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "category": zod.string().optional().describe('건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)'),
+  "assignee": zod.string().nullish().describe('담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)'),
+  "version": zod.int().optional().describe('판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다'),
+  "dueState": zod.enum(['ON_TRACK', 'DUE_SOON', 'OVERDUE', 'NONE']).optional().describe('서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "resultNote": zod.string().max(getOpsCaseResponseOneResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
   "reportSummary": zod.object({
   "total": zod.int().optional(),
   "byCategory": zod.record(zod.string(), zod.int()).optional()
@@ -2790,7 +2814,7 @@ export const GetOpsCaseResponse = zod.object({
 })).describe('CS 처리함 건 상세(GET /v1/ops/cases/{caseId}, 추천 적용 2026-10-19, ADR-0066). 신고한 계정은 싣지 않는다')
 
 /**
- * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30)
+ * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30). 배정은 cs_agent가 자기에게 맡거나 자기 배정을 풀 때만, cs_lead는 활성 CS 담당자 누구에게나 한다. 상태는 OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED이고 RESOLVED에는 resultNote(1~2,000자)가 필요하다. 200 응답은 ETag(판 번호)를 싣고, 갱신마다 감사 체인에 행위자·이전·다음 상태·배정을 남긴다(메모 본문은 남기지 않는다, 추천 적용 2026-11-23, ADR-0364 결정 5, 시험 R-T49)
  * @summary CS 처리함 건 갱신(담당 배정, 상태, 결과 통지 기록)
  */
 export const UpdateOpsCaseParams = zod.object({
@@ -2811,6 +2835,10 @@ export const UpdateOpsCaseBody = zod.object({
   "resultNote": zod.string().max(updateOpsCaseBodyResultNoteMax).optional()
 }).strict()
 
+export const updateOpsCaseResponseResultNoteMax = 2000;
+
+
+
 export const UpdateOpsCaseResponse = zod.object({
   "caseId": zod.string().optional(),
   "kind": zod.enum(['UNKNOWN_PAYMENT', 'REFUND_FAILED', 'FLAGGED', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'ABUSE_FLAG', 'DISPUTE', 'JUDGEMENT_PENDING', 'STATEMENT_DISPUTE', 'SELLER_KYC_REQUIRED', 'PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'PORTONE_PAYOUT_EXECUTION', 'SCANNER_UNREPORTED', 'KOPIS_REPORT_FAILED', 'VERIFICATION_APPEAL', 'APPROVAL_EXECUTION_FAILED', 'RETURN_DELAYED', 'MINOR_CONTRACT_CANCEL', 'INQUIRY', 'CONTENT_REPORT', 'RIGHTS_REQUEST', 'PORTONE_LEDGER_MISMATCH', 'TICKET_NOT_ISSUED', 'PG_BALANCE_MISMATCH', 'APPEAL', 'FRAUD_OBJECTION_COMPENSATION']).optional().describe('APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명, POST /v1/appeals). core-svc support 모듈이 받아 건을 요청하고, 건은 그 대상(예매 제한, 양도 회수 승인 업무)에 이어진다. 결과 기한은 예매 제한 소명이 3영업일 [가정], 양도 회수 소명이 그 승인 업무의 기한(입장 시작 전)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1). PG_BALANCE_MISMATCH는 결제사 잔액 대사 차이(결제사·상점별 지급대행 잔액이 PEAKET 원장과 다름. 차이가 0이 아니면 건을 만들고 1만 원 [가정]을 넘으면 SEV3, 지급 묶음은 멈추지 않는다, settlement §5.5, 추천 적용 2026-10-28, 기술 검토 중간-043). TICKET_NOT_ISSUED는 결제 뒤 미발권(승인 뒤 발권 기한 30분 [가정]을 넘겼거나 다시 보내도 같은 오류로 자동 재시도를 멈춘 주문. 확인 4시간 [가정], 발권 다시 실행 또는 \'시스템 잘못이 확인된 환불\', 추천 적용 2026-10-28, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(PEAKET 지급과 이어지지 않거나 금액·받는 계좌가 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력). targetRef는 포트원 이체 ID·파트너 ID·지급 묶음 ID이고, 열린 건에서 (kind, targetRef)가 하나다(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). RETURN_DELAYED는 굿즈 반품 요청 뒤 7일 [가정] 동안 판매자 도착 확인이 없는 건(transfer-refund §7.1). MINOR_CONTRACT_CANCEL은 미성년자 계약 취소 요청(확인 결과 안내 3영업일, 승인 뒤 환급 3영업일, POL-038 ⑧). 추천 적용 2026-10-14, ADR-0062. INQUIRY는 고객 문의(답변 3영업일 [가정], 문의 유형 \'공연(판매자) 관련 분쟁\'은 DISPUTE, \'미성년자 계약 취소\'는 MINOR_CONTRACT_CANCEL로 온다), CONTENT_REPORT는 게시물 신고(같은 후기의 신고는 한 건, 결과 3영업일 [가정]), RIGHTS_REQUEST는 권리 침해 삭제 요청(정보통신망법 §44의2, 1영업일 [가정]). 추천 적용 2026-10-19, ADR-0066'),
@@ -2818,6 +2846,13 @@ export const UpdateOpsCaseResponse = zod.object({
   "progressDueAt": zod.iso.datetime({"offset":true}).optional(),
   "resultDueAt": zod.iso.datetime({"offset":true}).optional(),
   "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "category": zod.string().optional().describe('건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)'),
+  "assignee": zod.string().nullish().describe('담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)'),
+  "version": zod.int().optional().describe('판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다'),
+  "dueState": zod.enum(['ON_TRACK', 'DUE_SOON', 'OVERDUE', 'NONE']).optional().describe('서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "resultNote": zod.string().max(updateOpsCaseResponseResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
   "reportSummary": zod.object({
   "total": zod.int().optional(),
   "byCategory": zod.record(zod.string(), zod.int()).optional()
@@ -5882,6 +5917,10 @@ export const ListOpsFanCasesQueryParams = zod.object({
   "limit": zod.int().min(1).max(listOpsFanCasesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
 })
 
+export const listOpsFanCasesResponseItemsItemResultNoteMax = 2000;
+
+
+
 export const ListOpsFanCasesResponse = zod.object({
   "items": zod.array(zod.object({
   "caseId": zod.string().optional(),
@@ -5890,6 +5929,13 @@ export const ListOpsFanCasesResponse = zod.object({
   "progressDueAt": zod.iso.datetime({"offset":true}).optional(),
   "resultDueAt": zod.iso.datetime({"offset":true}).optional(),
   "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "category": zod.string().optional().describe('건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)'),
+  "assignee": zod.string().nullish().describe('담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)'),
+  "version": zod.int().optional().describe('판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다'),
+  "dueState": zod.enum(['ON_TRACK', 'DUE_SOON', 'OVERDUE', 'NONE']).optional().describe('서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "resultNote": zod.string().max(listOpsFanCasesResponseItemsItemResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
   "reportSummary": zod.object({
   "total": zod.int().optional(),
   "byCategory": zod.record(zod.string(), zod.int()).optional()

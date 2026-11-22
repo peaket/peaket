@@ -200,7 +200,8 @@ export interface PartnerEventCancellationStore {
     record: EventCancellationRecord,
     audit: AuditRecord,
     idem?: EventCancellationIdempotency,
-    cs?: { readonly nowMs: number },
+    /** resultDueMs: '판정 대기' 건의 기한(요청 + 1영업일, F-06-2 ADR-0364 결정 2) */
+    cs?: { readonly nowMs: number; readonly resultDueMs?: number },
   ): Promise<EventCancellationInsert | void>;
   latestForEventAsTenant(tenantId: string, eventId: string): Promise<EventCancellationRecord | undefined>;
   /** 그 테넌트에 보이는 그 회차의 진행 중 요청(미룸을 걸기 전 확인). 없는 대역은 넣기의 진행 중 확인만 쓴다 */

@@ -168,6 +168,8 @@ export class ContractApprovals {
       const failedMs = this.d.clock.now();
       const failed: ContractApprovalRecord = { ...base, status: 'FAILED', closeReason: e instanceof Error ? e.message.slice(0, 500) : 'contract-apply-failed', updatedAt: new Date(failedMs), version: base.version + 1 };
       await this.d.store.save(failed, auditOf('CONTRACT_CHANGE_FAILED', failed, { failure: failed.closeReason }, failedMs));
+      // 계약 조건 변경 승인에는 기한이 없어 건도 기한이 없다(ADR-0364 결정 6)
+      await this.#caseFailed(r.approvalId, failedMs);
       throw new ProblemError({ type: 'contract-apply-failed', status: 503, title: '계약 조건을 적용하지 못했습니다' });
     }
     const doneMs = this.d.clock.now();
@@ -178,8 +180,27 @@ export class ContractApprovals {
     if (!(await this.d.store.save(done, auditOf('CONTRACT_CHANGE_APPROVED', done, { approverId: actor.accountId, approvedAt: done.approvedAt?.toISOString() }, doneMs), vote))) {
       throw new ProblemError({ type: 'contract-approval-conflict', status: 409, title: '다른 사람이 먼저 처리했습니다' });
     }
+    await this.#caseSucceeded(done.approvalId, doneMs);
     return contractApprovalView(done, actor);
     });
+  }
+
+  /** CS '승인 업무 실행 실패' 건 열기. 건을 못 열어도 승인 응답(503)을 바꾸지 않는다 */
+  async #caseFailed(approvalId: string, nowMs: number): Promise<void> {
+    try {
+      await this.d.failureCases?.failed({ approvalId, kind: 'CONTRACT_TERMS_CHANGE', dueAtMs: null }, nowMs);
+    } catch {
+      // 건 열기 실패는 승인 결과와 무관하다(다음 실패·운영자 확인으로 다시 연다)
+    }
+  }
+
+  /** 다시 실행이 성공하면 그 건을 시스템이 닫는다 */
+  async #caseSucceeded(approvalId: string, nowMs: number): Promise<void> {
+    try {
+      await this.d.failureCases?.succeeded(approvalId, nowMs);
+    } catch {
+      // 닫기 실패는 승인 성공을 바꾸지 않는다(CS 담당자가 손으로 닫는다)
+    }
   }
 
   async reject(approvalId: string, actor: OpsActor, reason: string): Promise<ContractApprovalView> {

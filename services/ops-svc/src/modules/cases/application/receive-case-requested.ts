@@ -1,19 +1,58 @@
-// support.cases-requested를 CS 처리함 건으로 바꾸는 쓰임새(GAT-110 첫 몫, BAT-420).
-// 받는 종류는 넷이다: 환급 실패(REFUND_FAILED, 공제 차액·일괄 환불 실패 포함), 마감 뒤 환급의 입장 기록 대조가 연 이상 표시(FLAGGED, category ENTRY_AFTER_CANCEL),
-// 회차 취소 요청의 판정 대기(JUDGEMENT_PENDING), 가상계좌 계좌 대기의 환불 대기(REFUND_ACCOUNT_PENDING, BAT-420-rest 리뷰 반영 RV-01, transfer-refund §3.1 ⑥ '실패 기록'),
-// payment-svc가 이의를 받은 뒤 여는 정산 이의(STATEMENT_DISPUTE, 대상 = 정산서 ID, F-07-5 ADR-0368 결정 5, settlement §4.2).
-// 그 밖 종류는 그 건을 처리할 단계가 열 때까지 받지 않는다(accepted: false).
+// 건 요청(support.cases-requested·내부 HTTP)을 CS 처리함 건으로 바꾸는 쓰임새(GAT-110 첫 몫, F-06-2 GAT-280 ADR-0364 결정 2·4).
+// 받는 종류는 cs-case.ts ACCEPTED_KINDS다(F-06-2의 아홉과 F-07-5가 더한 정산 이의 STATEMENT_DISPUTE, 대상 = 정산서 ID, ADR-0368 결정 5). 그 밖 종류와 칸이 빠진 본문은 건을 만들지 않는다(accepted: false, 지표 결과 ignored).
+// 기한은 건을 열 때 dueBaseAt(없으면 createdAt)에서 영업일 달력으로 센다. 같은 eventKey는 해결된 건이어도 새 건을 열지 않고(duplicate),
+// 같은 (종류, 대상)의 열린 건이 있으면 그 건이다(existing). 내부 HTTP와 Kafka 소비자가 이 처리기 하나를 부른다.
 import { randomUUID } from 'node:crypto';
-import type { CaseRequested, CsCase, CsCaseKind, CsCaseStore } from '../domain/cs-case.js';
+import { weekendOnlyCalendar, type BusinessCalendar } from '../domain/business-calendar.js';
+import { deadlinesOf } from '../domain/case-deadlines.js';
+import { ACCEPTED_KINDS, type CaseRequested, type CsCase, type CsCaseSignals, type CsCaseStore } from '../domain/cs-case.js';
 
-const ACCEPTED: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING', 'STATEMENT_DISPUTE']);
+export type CaseRequestResult = 'opened' | 'existing' | 'duplicate' | 'ignored';
+
+export interface ReceiveCaseRequestedOptions {
+  readonly calendar?: BusinessCalendar;
+  readonly signals?: CsCaseSignals;
+}
 
 export class ReceiveCaseRequested {
-  constructor(private readonly store: CsCaseStore) {}
+  readonly #calendar: BusinessCalendar;
+  readonly #signals: CsCaseSignals | undefined;
 
-  async handle(payload: CaseRequested, nowMs: number): Promise<{ accepted: boolean; case?: CsCase }> {
-    if (!ACCEPTED.has(payload.kind)) return { accepted: false };
-    const opened = await this.store.open({ caseId: randomUUID(), kind: payload.kind, targetRef: payload.sourceId, nowMs });
-    return { accepted: true, case: opened };
+  constructor(
+    private readonly store: CsCaseStore,
+    o: ReceiveCaseRequestedOptions = {},
+  ) {
+    this.#calendar = o.calendar ?? weekendOnlyCalendar;
+    this.#signals = o.signals;
+  }
+
+  /** 받지 않은 요청을 지표에 센다(본문 모양이 틀려 handle까지 오지 못한 것) */
+  ignored(kind: string): void {
+    this.#signals?.request(kind, 'ignored');
+  }
+
+  /** inheritedDueMs: 승인 업무 실행 실패 건이 이어받는 원래 기한(ADR-0364 결정 6) */
+  async handle(payload: CaseRequested, nowMs: number, o: { inheritedDueMs?: number | null } = {}): Promise<{ accepted: boolean; result: CaseRequestResult; case?: CsCase }> {
+    if (!ACCEPTED_KINDS.has(payload.kind)) {
+      this.ignored(payload.kind);
+      return { accepted: false, result: 'ignored' };
+    }
+    const createdMs = Date.parse(payload.createdAt);
+    const baseRaw = payload.dueBaseAt !== undefined ? Date.parse(payload.dueBaseAt) : createdMs;
+    // 시각을 읽지 못하면 받은 시각으로 센다(본문 검사는 받는 층이 했다)
+    const baseMs = Number.isFinite(baseRaw) ? baseRaw : nowMs;
+    const due = deadlinesOf({ kind: payload.kind, category: payload.category, baseMs, inheritedDueMs: o.inheritedDueMs ?? null }, this.#calendar);
+    const r = await this.store.receive({
+      caseId: randomUUID(),
+      eventKey: payload.eventKey,
+      kind: payload.kind,
+      targetRef: payload.sourceId,
+      category: payload.category,
+      progressDueAtMs: due.progressDueMs,
+      resultDueAtMs: due.resultDueMs,
+      nowMs,
+    });
+    this.#signals?.request(payload.kind, r.result);
+    return { accepted: true, result: r.result, case: r.case };
   }
 }

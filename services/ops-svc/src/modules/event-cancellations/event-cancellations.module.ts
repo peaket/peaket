@@ -3,6 +3,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import type { AuditChain } from '../audit/audit.js';
+import type { BusinessCalendar } from '../cases/index.js';
 import { EventCancellations, type EventCancellationReauth } from './application/event-cancellations.js';
 import type {
   CoreApplyStore,
@@ -48,6 +49,8 @@ export interface EventCancellationsModuleDeps {
   readonly core?: CoreEventStatus;
   /** 지표 ops_event_cancellation_core_apply_failures_total */
   readonly coreApplyFailures?: { inc(): void };
+  /** 영업일 달력(판정 기한, F-06-2 ADR-0364 결정 2). 없으면 주말만 뺀다 */
+  readonly calendar?: BusinessCalendar;
 }
 
 const isCoreApplyStore = (s: unknown): s is CoreApplyStore =>
@@ -77,6 +80,7 @@ export class EventCancellationsModule {
               ...(deps.core ? { core: deps.core } : {}),
               ...(isCoreApplyStore(deps.store) ? { coreApplies: deps.store } : {}),
               ...(deps.coreApplyFailures ? { coreApplyFailures: deps.coreApplyFailures } : {}),
+              ...(deps.calendar ? { calendar: deps.calendar } : {}),
               log: { warn: (obj, msg) => logger.warn(obj, msg), error: (obj, msg) => logger.error(obj, msg) },
             }),
         },

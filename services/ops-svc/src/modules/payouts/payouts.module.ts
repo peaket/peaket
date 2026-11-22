@@ -2,6 +2,7 @@
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import type { AuditChain } from '../audit/audit.js';
+import type { ApprovalFailureCases } from '../cases/index.js';
 import { PayoutApprovals } from './application/payout-approvals.js';
 import {
   APPROVAL_REAUTH_VERIFIER,
@@ -29,6 +30,8 @@ export interface PayoutsModuleDeps {
   readonly settlementPayments?: SettlementPaymentClient;
   /** ?�기 ?�트???�행 감사(OPSV-03). ?�태 ?�??감사???�?�소가 같�? ?�랜??��???�다 */
   readonly audit?: AuditChain;
+  /** CS '승인 업무 실행 실패' 건(F-06-2 ADR-0364 결정 6) */
+  readonly failureCases?: ApprovalFailureCases;
 }
 
 @Global()
@@ -47,7 +50,15 @@ export class PayoutsModule {
       {
         provide: PayoutApprovals,
         useFactory: (store: PayoutApprovalStore, payments: PayoutPaymentClient, reauth: ApprovalReauthVerifier, clock: Clock, settlements: SettlementPaymentClient) =>
-          new PayoutApprovals({ store, payments, reauth, clock, settlements, ...((o.storage === 'database' ? o.audit : o.deps?.audit) ? { audit: o.storage === 'database' ? o.audit! : o.deps!.audit! } : {}) }),
+          new PayoutApprovals({
+            store,
+            payments,
+            reauth,
+            clock,
+            settlements,
+            ...((o.storage === 'database' ? o.audit : o.deps?.audit) ? { audit: o.storage === 'database' ? o.audit! : o.deps!.audit! } : {}),
+            ...((o.storage === 'database' ? o.failureCases : o.deps?.failureCases) ? { failureCases: o.storage === 'database' ? o.failureCases! : o.deps!.failureCases! } : {}),
+          }),
         inject: [PAYOUT_APPROVAL_STORE, PAYOUT_PAYMENT_CLIENT, APPROVAL_REAUTH_VERIFIER, CLOCK, SETTLEMENT_PAYMENT_CLIENT],
       },
     ];

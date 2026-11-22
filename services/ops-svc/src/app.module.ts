@@ -21,7 +21,7 @@ import {
 } from './modules/audit/index.js';
 import { CommandsModule, type CommandExecutor, type CommandsModuleExtras, type HandleCommandEvent } from './modules/commands/index.js';
 import { DrizzleCommandStore, IdentityActiveCommanders, MemoryCommandStore } from './modules/commands/index.js';
-import { CasesModule, DrizzleCsCaseStore, MemoryCsCaseStore } from './modules/cases/index.js';
+import { CasesModule, DrizzleCsCaseStore, IdentityCsAssigneeDirectory, MemoryCsCaseStore, csCaseKit, type BusinessCalendar, type CsCaseKit, type CsCaseSignals } from './modules/cases/index.js';
 import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore, type OpsAlertStore } from './modules/alerts/index.js';
 import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
@@ -56,7 +56,11 @@ interface CommonWiring {
    * 감사 체인 작업자·빈 행 경보·5분 앵커와 명령 정비 작업의 타이머(BAT-355, ADR-0340·0341). DB 조립은 기본으로 켠다.
    * false면 타이머를 켜지 않는다(감사 체인 키·앵커 설정 검사는 한다). 시험은 간격을 바꿔 넣을 수 있다
    */
-  readonly background?: false | { readonly audit?: Partial<Omit<AuditBackgroundOptions, 'enabled'>>; readonly maintenanceMs?: number };
+  readonly background?: false | { readonly audit?: Partial<Omit<AuditBackgroundOptions, 'enabled'>>; readonly maintenanceMs?: number; readonly csCaseDeadlineMs?: number };
+  /** CS 처리함 영업일 달력(F-06-2 ADR-0364 결정 1). 시작 조립이 공휴일 파일로 만든다. 없으면 주말만 뺀다 */
+  readonly calendar?: BusinessCalendar;
+  /** CS 처리함 건 지표(main.ts가 서비스 레지스트리에 붙인다) */
+  readonly caseSignals?: CsCaseSignals;
   /** 감사 체인 키·앵커 저장소·환경 값을 넘긴다(시험). 없으면 process.env로 고른다(local·ci·demo 밖에서 키 ID·넘길 리전·버킷이 없으면 시작하지 않는다) */
   readonly auditMac?: { readonly key?: AuditMacKey; readonly anchors?: MacAnchorStore; readonly env?: Record<string, string | undefined> };
   /** 감사 체인 지표 묶음(시작 조립이 서비스 레지스트리에 붙인다). 없으면 모듈이 만든다 */
@@ -147,7 +151,21 @@ function eventCancellationDeps(
     ...(e.holds ? { holds: e.holds } : {}),
     ...(e.core ? { core: e.core } : {}),
     ...(e.coreApplyFailures ? { coreApplyFailures: e.coreApplyFailures } : {}),
+    ...(o.calendar ? { calendar: o.calendar } : {}),
   };
+}
+
+/** CS 처리함 모듈 조립(F-06-2): cs_lead 배정 대상은 관리 계정 identity로 확인하고, 기한 알림은 배경 작업이 켜진 조립에서만 돈다 */
+function casesModule(o: CommonWiring, kit: CsCaseKit, background: { csCaseDeadlineMs?: number } | undefined) {
+  return CasesModule.register(kit, {
+    ...(o.adminAccounts ? { assignees: new IdentityCsAssigneeDirectory(o.adminAccounts.identity) } : {}),
+    background: { enabled: background !== undefined, ...(background?.csCaseDeadlineMs !== undefined ? { intervalMs: background.csCaseDeadlineMs } : {}) },
+  });
+}
+
+/** CS 처리함 부품 한 벌(건 요청 처리기·기한 알림·실패한 승인 업무의 건) */
+function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').CsCaseStore, alerts: OpsAlertStore): CsCaseKit {
+  return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}) });
 }
 
 @Module({})
@@ -161,8 +179,8 @@ export class AppModule {
       const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(o.database), chain, () => o.nowMs ?? Date.now());
       const store = new DrizzleCommandStore(o.database);
       const cancellations = new DrizzleEventCancellationStore(o.database);
-      const csCases = new DrizzleCsCaseStore(o.database);
       const alerts = new DrizzleOpsAlertStore(o.database);
+      const cases = caseKitOf(o, new DrizzleCsCaseStore(o.database), alerts);
       const background = o.background === false ? undefined : (o.background ?? {});
       return {
         module: AppModule,
@@ -187,11 +205,15 @@ export class AppModule {
             },
           }),
           LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
-          CasesModule.register(csCases),
+          casesModule(o, cases, background),
           AlertsModule.register(alerts),
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
-          PayoutsModule.register(o.payouts ? { storage: 'database', database: o.database, ...o.payouts, audit: chain } : { storage: 'memory', deps: { audit: chain } }),
+          PayoutsModule.register(
+            o.payouts
+              ? { storage: 'database', database: o.database, ...o.payouts, audit: chain, failureCases: cases.approvalFailures }
+              : { storage: 'memory', deps: { audit: chain, failureCases: cases.approvalFailures } },
+          ),
           ApprovalsModule.register({
             storage: 'database',
             database: o.database,
@@ -200,6 +222,7 @@ export class AppModule {
             ...(o.approvals ?? {}),
             ...(o.adminAccounts ? { admin: o.adminAccounts } : {}),
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
+            failureCases: cases.approvalFailures,
           }),
           BotReviewModule.register({ database: o.database, ...(o.botReview ?? {}) }),
           EventCancellationsModule.register(
@@ -208,7 +231,7 @@ export class AppModule {
               cancellations,
               {
                 suspension: new DrizzleSaleSuspensionLookup(o.database),
-                cases: new CsCaseEventCancellationCases(csCases),
+                cases: new CsCaseEventCancellationCases(cases.receive),
                 // 파트너 경로는 파트너 풀과 세션 테넌트로만 접속한다(행 보안, authz-matrix §5.3 'ops-svc 구현')
                 partnerStore: new DrizzlePartnerEventCancellationStore(o.partnerDatabase ?? o.database),
               },
@@ -222,8 +245,8 @@ export class AppModule {
     const checkpoints = new AuditCheckpointService(o.auditCheckpoints ?? new MemoryAuditCheckpointStore(), chain, () => o.nowMs ?? Date.now());
     const store = new MemoryCommandStore(chain);
     const cancellations = new MemoryEventCancellationStore(chain);
-    const csCases = new MemoryCsCaseStore();
     const memoryAlerts = new MemoryOpsAlertStore();
+    const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts);
     return {
       module: AppModule,
       imports: [
@@ -233,11 +256,11 @@ export class AppModule {
         }),
         AuditModule.register(checkpoints, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
-        CasesModule.register(csCases),
+        casesModule(o, cases, undefined),
         AlertsModule.register(memoryAlerts),
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
-        PayoutsModule.register({ storage: 'memory', deps: { ...(o.payouts ?? {}), audit: chain } }),
+        PayoutsModule.register({ storage: 'memory', deps: { ...(o.payouts ?? {}), audit: chain, failureCases: cases.approvalFailures } }),
         ApprovalsModule.register({
           storage: 'memory',
           audit: chain,
@@ -246,10 +269,11 @@ export class AppModule {
             ...(o.adminAccounts ? { admin: o.adminAccounts } : {}),
             reader: chain,
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
+            failureCases: cases.approvalFailures,
           },
         }),
         BotReviewModule.register({ ...(o.botReview ?? {}) }),
-        EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(csCases) }, chain)),
+        EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(cases.receive) }, chain)),
       ],
     };
   }

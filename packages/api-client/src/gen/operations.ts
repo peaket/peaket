@@ -722,7 +722,7 @@ export const OPERATIONS = {
   listOpsApprovalRequests: {operationId: "listOpsApprovalRequests",method: "GET",path: "/v1/ops/approval-requests",host: "ops-api",kind: "read",cookie: true,query: ["awaitingMyApproval","cursor","kind","limit","requestedByMe","status"]},
   listOpsArtists: {operationId: "listOpsArtists",method: "GET",path: "/v1/ops/artists",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","q"]},
   listOpsAuditCheckpoints: {operationId: "listOpsAuditCheckpoints",method: "GET",path: "/v1/ops/audit-checkpoints",host: "ops-api",kind: "read",cookie: true,query: ["limit"]},
-  listOpsCases: {operationId: "listOpsCases",method: "GET",path: "/v1/ops/cases",host: "ops-api",kind: "read",cookie: true,query: ["cursor","dueWithinDays","kind","limit"]},
+  listOpsCases: {operationId: "listOpsCases",method: "GET",path: "/v1/ops/cases",host: "ops-api",kind: "read",cookie: true,query: ["cursor","dueWithinDays","kind","limit","status"]},
   listOpsCommands: {operationId: "listOpsCommands",method: "GET",path: "/v1/ops/commands",host: "ops-api",kind: "read",cookie: true,query: ["cursor","eventId","limit","state","type","updatedAfter"]},
   listOpsComplianceAccessReviews: {operationId: "listOpsComplianceAccessReviews",method: "GET",path: "/v1/ops/compliance/access-reviews",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","period"]},
   listOpsComplianceDataRequests: {operationId: "listOpsComplianceDataRequests",method: "GET",path: "/v1/ops/compliance/data-requests",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","sort","status"]},

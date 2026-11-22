@@ -2,7 +2,9 @@
 // 보드는 cs_agent 다은의 화면이고, 정산 이의·소명은 cs_lead 준, 'operator 보기'는 operator 민호의 화면이다(보드 머리 분기).
 // 위 상태 바: 단계 T=0 · 자동 제어 일시정지 13:12 · 20:04:12 · 내 승인 대기(보드 값). 목록의 건을 누르면 그 건의 상태로 옮긴다.
 // 역할(d5 §3.3): viewer는 메뉴에 없음(주소로 열면 d5 상태 표의 안내, 'viewer 주소로 열기'), operator·commander는 조회와 지급·대사·KYC 정산 건 처리('operator 보기'), CS 두 역할은 처리.
+// 실제 경로(F-06-2 GAT-280): 미리보기 빌드에서 ?state=가 있을 때만 보드를 그리고, 그 밖은 ops-svc CS 처리함에 연결한 화면(ConnectedPage)이다.
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
+import { useSearchParams } from 'react-router';
 import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE } from '@/features/screen-access';
@@ -11,6 +13,7 @@ import { DEFAULT, STATES, type State } from '../states';
 import { MainD, OverlaysD, valsD } from './board-d';
 import { MainM, valsM } from './board-m';
 import { MainT, OverlaysT, valsT } from './board-t';
+import { ConnectedPage } from './ConnectedPage';
 import { ViewerNotice } from './ViewerNotice';
 
 const TITLE = 'CS 처리함';
@@ -25,6 +28,11 @@ const GAPS: BoardGaps<State> = {
 };
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const chosen = useChosenRole();
   const { state, boardStates, layout, close, go } = useBoardPage(TITLE, STATES, (chosen && ROLE_STATE[chosen]) || DEFAULT, GAPS);
   const vd = valsD(state);

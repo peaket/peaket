@@ -11,9 +11,19 @@
  */
 import type { CursorParameter } from './cursorParameter';
 import type { LimitParameter } from './limitParameter';
+import type { ListOpsCasesStatus } from './listOpsCasesStatus';
 
 export type ListOpsCasesParams = {
 kind?: string;
+/**
+ * OPEN·IN_PROGRESS·RESOLVED. 없으면 해결되지 않은 건(추천 적용 2026-11-23, ADR-0364)
+ */
+status?: ListOpsCasesStatus;
+/**
+ * n영업일 안에 이른 기한(next_due_at)이 드는 건만. 0은 이미 넘긴 건만(추천 적용 2026-11-23, ADR-0364)
+ * @minimum 0
+ * @maximum 30
+ */
 dueWithinDays?: number;
 /**
  * 불투명 커서(이전 응답의 nextCursor, guidelines §3)

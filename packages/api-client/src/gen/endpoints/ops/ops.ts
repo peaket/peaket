@@ -7510,10 +7510,22 @@ export const useCreateOpsComplianceAccessFindingResolution = <TError = ErrorType
   status: 200
 }
 
+export type listOpsCasesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsCasesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type listOpsCasesResponseSuccess = (listOpsCasesResponse200) & {
   headers: Headers;
 };
-;
+export type listOpsCasesResponseError = (listOpsCasesResponse400 | listOpsCasesResponse403) & {
+  headers: Headers;
+};
 
 export const getListOpsCasesUrl = (params?: ListOpsCasesParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -7531,7 +7543,7 @@ export const getListOpsCasesUrl = (params?: ListOpsCasesParams,) => {
 }
 
 /**
- * FR-057, POL-038. 결제자 이름·전화는 가려서 반환. 종류 필터에 문의(INQUIRY)·게시물 신고(CONTENT_REPORT)·권리 침해 삭제 요청(RIGHTS_REQUEST)이 있고, 신고 건은 신고 수·사유별 수만 싣고 신고자는 싣지 않는다(추천 적용 2026-10-19, ADR-0066). 정산 건 가운데 CS 담당자(cs_agent·cs_lead)에게 싣는 것은 정산 이의(STATEMENT_DISPUTE) 하나다. 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)은 operator·commander의 목록에만 나오고(viewer는 이 경로를 부르지 않는다, 소유자 결정 2026-10-30, open-items 82번 ①), CS 담당자가 kind로 걸러도 0건이다(소유자 결정 2026-10-30, open-items 72번, 건 종류의 나눔은 추천 적용 2026-10-30, docs/features/settlement.md §9, J-T27)
+ * FR-057, POL-038. 결제자 이름·전화는 가려서 반환. 종류 필터에 문의(INQUIRY)·게시물 신고(CONTENT_REPORT)·권리 침해 삭제 요청(RIGHTS_REQUEST)이 있고, 신고 건은 신고 수·사유별 수만 싣고 신고자는 싣지 않는다(추천 적용 2026-10-19, ADR-0066). 정산 건 가운데 CS 담당자(cs_agent·cs_lead)에게 싣는 것은 정산 이의(STATEMENT_DISPUTE) 하나다. 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)은 operator·commander의 목록에만 나오고(viewer는 이 경로를 부르지 않는다, 소유자 결정 2026-10-30, open-items 82번 ①), CS 담당자가 kind로 걸러도 0건이다(소유자 결정 2026-10-30, open-items 72번, 건 종류의 나눔은 추천 적용 2026-10-30, docs/features/settlement.md §9, J-T27). 정렬은 next_due_at·caseId 차례이고 기한 없는 건이 끝에 온다(시험 R-T49)
  * @summary CS 처리함 목록(종류·기한 필터)
  */
 export const listOpsCases = async (params?: ListOpsCasesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsCasesResponseSuccess> => {
@@ -7556,7 +7568,7 @@ export const getListOpsCasesQueryKey = (params?: ListOpsCasesParams,) => {
     }
 
 
-export const getListOpsCasesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<unknown>>(params?: ListOpsCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCases>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+export const getListOpsCasesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<ProblemResponse>>(params?: ListOpsCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCases>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -7575,10 +7587,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListOpsCasesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsCases>>>
-export type ListOpsCasesQueryError = ErrorType<unknown>
+export type ListOpsCasesQueryError = ErrorType<ProblemResponse>
 
 
-export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<unknown>>(
+export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<ProblemResponse>>(
  params: undefined |  ListOpsCasesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCases>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listOpsCases>>,
@@ -7588,7 +7600,7 @@ export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<unknown>>(
+export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<ProblemResponse>>(
  params?: ListOpsCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCases>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listOpsCases>>,
@@ -7598,7 +7610,7 @@ export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<unknown>>(
+export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<ProblemResponse>>(
  params?: ListOpsCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCases>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -7606,7 +7618,7 @@ export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>
  * @summary CS 처리함 목록(종류·기한 필터)
  */
 
-export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<unknown>>(
+export function useListOpsCases<TData = Awaited<ReturnType<typeof listOpsCases>>, TError = ErrorType<ProblemResponse>>(
  params?: ListOpsCasesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsCases>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -7751,6 +7763,11 @@ export type updateOpsCaseResponse403 = {
   status: 403
 }
 
+export type updateOpsCaseResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
 export type updateOpsCaseResponse409 = {
   data: ProblemResponse
   status: 409
@@ -7761,6 +7778,11 @@ export type updateOpsCaseResponse412 = {
   status: 412
 }
 
+export type updateOpsCaseResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
 export type updateOpsCaseResponse428 = {
   data: ProblemResponse
   status: 428
@@ -7769,7 +7791,7 @@ export type updateOpsCaseResponse428 = {
 export type updateOpsCaseResponseSuccess = (updateOpsCaseResponse200) & {
   headers: Headers;
 };
-export type updateOpsCaseResponseError = (updateOpsCaseResponse403 | updateOpsCaseResponse409 | updateOpsCaseResponse412 | updateOpsCaseResponse428) & {
+export type updateOpsCaseResponseError = (updateOpsCaseResponse403 | updateOpsCaseResponse404 | updateOpsCaseResponse409 | updateOpsCaseResponse412 | updateOpsCaseResponse422 | updateOpsCaseResponse428) & {
   headers: Headers;
 };
 
@@ -7782,7 +7804,7 @@ export const getUpdateOpsCaseUrl = (caseId: string,) => {
 }
 
 /**
- * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30)
+ * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30). 배정은 cs_agent가 자기에게 맡거나 자기 배정을 풀 때만, cs_lead는 활성 CS 담당자 누구에게나 한다. 상태는 OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED이고 RESOLVED에는 resultNote(1~2,000자)가 필요하다. 200 응답은 ETag(판 번호)를 싣고, 갱신마다 감사 체인에 행위자·이전·다음 상태·배정을 남긴다(메모 본문은 남기지 않는다, 추천 적용 2026-11-23, ADR-0364 결정 5, 시험 R-T49)
  * @summary CS 처리함 건 갱신(담당 배정, 상태, 결과 통지 기록)
  */
 export const updateOpsCase = async (caseId: string,

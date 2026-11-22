@@ -1,6 +1,7 @@
 // 승인 업무 저장소와 core 계약 적용 클라이언트의 포트(BAT-615 LCH-070, ADR-0320).
 import type { AuditRecord } from '../../audit/audit.js';
 import type { ApprovalReauthVerifier } from '../../payouts/index.js';
+import type { ApprovalFailureCases } from '../../cases/index.js';
 import type { ContractApprovalRecord, SettlementAdjustmentApprovalRecord } from './approval.js';
 
 export interface ApprovalVote {
@@ -33,6 +34,8 @@ export interface ContractApprovalDeps {
   readonly core: CoreContractClient;
   readonly reauth: ApprovalReauthVerifier;
   readonly clock: import('@peaket/platform').Clock;
+  /** 실행 실패 때 CS '승인 업무 실행 실패' 건을 열고 다시 실행이 성공하면 닫는다(F-06-2 ADR-0364 결정 6). 없으면 부르지 않는다 */
+  readonly failureCases?: ApprovalFailureCases;
 }
 
 /** 정산서 수기 조정 승인 업무 저장소(approval_request kind SETTLEMENT_ADJUSTMENT·approval_vote) */

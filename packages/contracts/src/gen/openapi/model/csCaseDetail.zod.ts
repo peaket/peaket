@@ -11,6 +11,8 @@
  */
 import * as zod from 'zod';
 
+export const csCaseDetailOneResultNoteMax = 2000;
+
 export const csCaseDetailTwoReportsItemDetailMax = 2000;
 
 export const csCaseDetailTwoStatementDisputeDisputeDetailMax = 2000;
@@ -23,6 +25,13 @@ export const CsCaseDetail = zod.object({
   "progressDueAt": zod.iso.datetime({"offset":true}).optional(),
   "resultDueAt": zod.iso.datetime({"offset":true}).optional(),
   "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "category": zod.string().optional().describe('건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)'),
+  "assignee": zod.string().nullish().describe('담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)'),
+  "version": zod.int().optional().describe('판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다'),
+  "dueState": zod.enum(['ON_TRACK', 'DUE_SOON', 'OVERDUE', 'NONE']).optional().describe('서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "resultNote": zod.string().max(csCaseDetailOneResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
   "reportSummary": zod.object({
   "total": zod.int().optional(),
   "byCategory": zod.record(zod.string(), zod.int()).optional()

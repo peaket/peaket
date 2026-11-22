@@ -3,7 +3,10 @@
 // 회차 취소 환불 gRPC(PEAKET_PURCHASE_GRPC_ADDR, BAT-425 GAT-130)와 판매 중지·재개 제어 gRPC(PEAKET_*_CONTROL_GRPC_ADDR, BAT-465 R-584)를 싣는다.
 // 명령 요청·결과 사건은 Kafka(ops.command-events)로도 받는다(HTTP /internal/v1/ops/command-events와 같은 처리기).
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다.
+// CS 처리함(F-06-2 GAT-280): 공휴일 파일(PEAKET_HOLIDAY_CALENDAR_FILE)로 영업일 달력을 만들고(staging·prod는 없거나 못 읽으면 시작하지 않는다),
+// 건 요청은 Kafka support.cases-requested로도 받는다(내부 HTTP와 같은 처리기). 기한 알림 1분 배경 작업은 CasesModule 수명주기가 켠다.
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
 import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, loadLogPseudonymizer, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
@@ -25,6 +28,7 @@ import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts
 import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
+import { PromCsCaseSignals, ReceiveCaseRequested, loadBusinessCalendar } from './modules/cases/index.js';
 
 const SERVICE = 'ops-svc';
 assertInternalGrpcToken(process.env);
@@ -34,6 +38,9 @@ if (!url) throw new Error('PEAKET_DATABASE_URL이 없다(비밀 관리에서 넣
 const identityUrl = process.env.PEAKET_IDENTITY_GRPC_URL;
 if (!identityUrl) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없다(identity AdminAuthzService host:port)');
 
+// CS 처리함 영업일 달력(ADR-0364 결정 1). 파일을 못 읽거나 staging·prod에 파일이 없으면 여기서 시작 실패다
+const caseCalendar = loadBusinessCalendar(process.env, (path) => readFileSync(path, 'utf8'));
+const caseSignals = new PromCsCaseSignals();
 const database = createDatabase({ url, applicationName: SERVICE });
 // 파트너 회차 취소 경로의 DB 풀(ops_partner 역할 사용자, 행 보안의 대상, 웨이브 끝 리뷰 S2·authz-matrix §5.3). 운영은 PEAKET_PARTNER_DATABASE_URL이 없으면 시작하지 않고,
 // local·ci는 관제 풀을 함께 쓴다(그때 행 보안은 시험하지 않는다)
@@ -176,12 +183,16 @@ const service = await createService({
     onCommandEvent: (h) => (commandEvents = h),
     commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}) },
     auditSignals,
+    calendar: caseCalendar,
+    caseSignals,
   }),
 });
 eventCancellationSignals.register(service.metrics.registry);
 botReviewSignals.register(service.metrics.registry);
 commandSignals.register(service.metrics.registry);
 auditSignals.register(service.metrics.registry);
+caseSignals.register(service.metrics.registry);
+if (!caseCalendar.fromFile) service.logger.warn({}, 'PEAKET_HOLIDAY_CALENDAR_FILE이 없어 CS 처리함 기한을 주말만 빼고 센다(local·ci만 허락한다)');
 if (botReviewSource.warning) service.logger.warn({}, botReviewSource.warning);
 if (!botReviewLabels) service.logger.warn({}, 'PEAKET_TRUST_GRPC_URL이 없어 표본 판정 HUMAN·BOT이 503 bot-review-label-unavailable이다(UNDECIDED는 기록된다)');
 if (!partnerRoleChecked) service.logger.warn({}, 'PEAKET_PARTNER_DATABASE_URL이 없어 파트너 회차 취소 경로가 관제 DB 풀을 함께 쓴다(local·ci만, 행 보안은 앱 대조만 남는다)');
@@ -228,9 +239,11 @@ try {
       ...(kafka.auth ? { auth: kafka.auth } : {}),
       database,
       handler: commandEvents,
+      // CS 처리함 건 요청(support.cases-requested): 내부 HTTP와 같은 처리기(ADR-0364 결정 4)
+      cases: service.app.get(ReceiveCaseRequested),
       logger: service.logger,
     });
-    consumers.started.catch((err: unknown) => service.logger.error({ err }, 'ops.command-events 소비자 시작 실패'));
+    consumers.started.catch((err: unknown) => service.logger.error({ err }, 'ops.command-events·support.cases-requested 소비자 시작 실패'));
   }
 } catch (err) {
   // 설정 오류는 시작 실패다(조용히 사건을 잃지 않는다)

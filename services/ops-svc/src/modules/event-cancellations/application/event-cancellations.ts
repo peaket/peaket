@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IdempotencyRequest } from '@peaket/platform';
 import type { AuditChain, AuditRecord } from '../../audit/audit.js';
+import { addBusinessDays, weekendOnlyCalendar, type BusinessCalendar } from '../../cases/index.js';
 import {
   EVENT_END_FALLBACK_MS,
   EVIDENCE_REF_MAX,
@@ -119,6 +120,8 @@ export interface EventCancellationExtra {
   readonly coreApplies?: CoreApplyStore;
   /** 지표 ops_event_cancellation_core_apply_failures_total(반영 실패마다 하나) */
   readonly coreApplyFailures?: { inc(): void };
+  /** 영업일 달력(판정 기한 judgementDueAt = 요청 + 1영업일, F-06-2 ADR-0364 결정 2). 없으면 주말만 뺀다 */
+  readonly calendar?: BusinessCalendar;
 }
 
 /** 다시 하기 한 바퀴의 결과 */
@@ -238,8 +241,8 @@ export class EventCancellations {
       evidenceRef: r.evidenceRef ?? null,
       faultOpinion: r.faultOpinion ?? null,
       newStartsAt: r.newStartsAt ? r.newStartsAt.toISOString() : null,
-      // 판정 기한(요청 + 1영업일)은 영업일 셈이 생기는 GAT-280 전까지 비운다
-      judgementDueAt: null,
+      // 판정 기한은 REQUESTED일 때 요청 + 1영업일(CS 처리함과 같은 달력, F-06-2 ADR-0364 결정 2, R-T50 ⑤). 판정 뒤에는 null이다
+      judgementDueAt: r.status === 'REQUESTED' ? new Date(this.#judgementDueMs(r.requestedAt.getTime())).toISOString() : null,
       fault: r.fault,
       judgementSummary: r.fanNoticeReason,
       rejectionReason: r.rejectionReason ?? null,
@@ -265,6 +268,11 @@ export class EventCancellations {
       ? { state: job.state, total: job.total, done: job.done, failed: job.failed, ...(job.accountPending !== undefined ? { accountPending: job.accountPending } : {}), perPg: job.perPg.map((p) => ({ pg: p.pg, state: p.state, ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}), done: p.done, failed: p.failed, unknown: p.unknown })) }
       : { state: r.refundJobState ?? r.status };
     return eventCancellationDetailView(r, progress, title);
+  }
+
+  /** 판정 기한: 요청 시각 + 1영업일(같은 KST 시각) */
+  #judgementDueMs(requestedAtMs: number): number {
+    return addBusinessDays(this.extra.calendar ?? weekendOnlyCalendar, requestedAtMs, 1);
   }
 
   /** 관제 상세가 보일 공연 제목(core 판매 설정 사본). 소속 확인을 조립하지 않았거나 읽기 실패면 undefined(제목 칸만 빈다) */
@@ -634,7 +642,8 @@ export class EventCancellations {
     }
     let result: EventCancellationInsert;
     try {
-      result = (await p.insertAsTenant(tenantId, record, requested, idem, { nowMs })) ?? { status: 'INSERTED' };
+      // CS '판정 대기' 건의 기한(요청 + 1영업일)을 앱 달력으로 세어 정의자 함수에 넘긴다(SQL에는 달력이 없다)
+      result = (await p.insertAsTenant(tenantId, record, requested, idem, { nowMs, resultDueMs: this.#judgementDueMs(record.requestedAt.getTime()) })) ?? { status: 'INSERTED' };
     } catch (err) {
       if (holding) await this.#releaseHold(record);
       throw err;

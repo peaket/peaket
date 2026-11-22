@@ -1,6 +1,8 @@
 # ops-svc 배포 단위 기본 값(platform 템플릿 기반, GAT-110 첫 몫). 환경 값은 deploy/envs/<환경>/ops-svc.yaml에 둔다.
 # 관제 전용 노드 풀·ops 전용 Aurora·gw-ops 경로는 ADR-0102다. 이 골격은 HTTP 명령 접수·2인 승인·감사 체인만 열고,
-# 제어 gRPC 전달·ack·SSE·CS 처리함 Kafka 소비자는 후속이다.
+# 제어 gRPC 전달·ack·SSE는 후속이다. CS 처리함 건 요청은 Kafka support.cases-requested로도 받는다(F-06-2 GAT-280).
+# CS 처리함 기한은 공휴일 달력 파일 PEAKET_HOLIDAY_CALENDAR_FILE(purchase-svc와 같은 파일, ADR-0364 결정 1)로 센다.
+# staging·prod는 그 파일이 없거나 읽지 못하면 시작하지 않으므로, 그 환경 값(deploy/envs/<환경>/ops-svc.yaml)이 파일을 붙이고 경로를 넣는다.
 name: ops-svc
 
 # 비밀(DB 주소, 내부 토큰, 재인증 Redis·테넌트 Redis 주소)은 env에 두지 않고 Secret(secretEnvFrom)으로 받는다.

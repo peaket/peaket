@@ -3,6 +3,7 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import type { AuditChain, AuditChainReader } from '../audit/index.js';
+import type { ApprovalFailureCases } from '../cases/index.js';
 import { AdminAccounts } from './application/admin-accounts.js';
 import { RoleChangeApprovals } from './application/role-change-approvals.js';
 import { DrizzleRoleChangeApprovalStore, MemoryRoleChangeApprovalStore } from './adapters/db/drizzle-role-change-approvals.js';
@@ -15,6 +16,8 @@ export interface AdminAccountsModuleDeps {
   readonly store: RoleChangeApprovalStore;
   readonly audit: AuditChain;
   readonly reader?: AuditChainReader;
+  /** CS '승인 업무 실행 실패' 건(F-06-2 ADR-0364 결정 6) */
+  readonly failureCases?: ApprovalFailureCases;
 }
 
 @Module({})
@@ -29,7 +32,7 @@ export class AdminAccountsModule {
         {
           provide: RoleChangeApprovals,
           useFactory: (clock: Clock) =>
-            new RoleChangeApprovals({ store: deps.store, identity: deps.identity, reauth: deps.reauth, audit: deps.audit, clock }),
+            new RoleChangeApprovals({ store: deps.store, identity: deps.identity, reauth: deps.reauth, audit: deps.audit, clock, ...(deps.failureCases ? { failureCases: deps.failureCases } : {}) }),
           inject: [CLOCK],
         },
         {

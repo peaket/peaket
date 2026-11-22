@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { CsCaseDueState } from './csCaseDueState';
 import type { CsCaseKind } from './csCaseKind';
 import type { CsCaseReportSummary } from './csCaseReportSummary';
 import type { CsCaseStatus } from './csCaseStatus';
@@ -25,6 +26,26 @@ export interface CsCase {
   progressDueAt?: string;
   resultDueAt?: string;
   status?: CsCaseStatus;
+  /** 건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364) */
+  category?: string;
+  /**
+     * 담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)
+     * @nullable
+     */
+  assignee?: string | null;
+  /** 판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다 */
+  version?: number;
+  /** 서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다) */
+  dueState?: CsCaseDueState;
+  createdAt?: string;
+  /** @nullable */
+  resolvedAt?: string | null;
+  /**
+     * 해결 메모(평문). 해결할 때 필수
+     * @maxLength 2000
+     * @nullable
+     */
+  resultNote?: string | null;
   /** CONTENT_REPORT·RIGHTS_REQUEST만. 신고 수와 사유별 수. 신고자는 싣지 않는다(ADR-0066) */
   reportSummary?: CsCaseReportSummary;
 }

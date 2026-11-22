@@ -24,6 +24,7 @@ import { InternalApprovalsController } from './inbound/internal-approvals.contro
 import { ApprovalsController } from './inbound/approvals.controller.js';
 import { SettlementAdjustmentsController } from './inbound/settlement-adjustments.controller.js';
 import { MemoryCoreContract, UnavailableCoreContract } from '../../adapters/http-core-contract.js';
+import type { ApprovalFailureCases } from '../cases/index.js';
 
 export interface ApprovalsModuleDeps {
   readonly store?: ContractApprovalStore;
@@ -37,6 +38,8 @@ export interface ApprovalsModuleDeps {
   readonly reader?: AuditChainReader;
   /** 시험에서 정산서 조정 승인 저장소를 넘긴다. 없으면 storage에 맞는 기본을 만든다 */
   readonly settlementAdjustmentStore?: SettlementAdjustmentApprovalStore;
+  /** CS '승인 업무 실행 실패' 건(F-06-2 ADR-0364 결정 6). 계약 조건 변경·관리 역할 변경 승인이 부른다 */
+  readonly failureCases?: ApprovalFailureCases;
 }
 
 @Module({})
@@ -51,12 +54,13 @@ export class ApprovalsModule {
       store: deps.roleChangeStore ?? (o.storage === 'memory' ? new MemoryRoleChangeApprovalStore() : new DrizzleRoleChangeApprovalStore(o.database)),
       audit,
       ...(deps.reader ? { reader: deps.reader } : {}),
+      ...(deps.failureCases ? { failureCases: deps.failureCases } : {}),
     });
     const providers: Provider[] = [
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
       {
         provide: ContractApprovals,
-        useFactory: (store: ContractApprovalStore, core: CoreContractClient, reauth: ApprovalReauthVerifier, clock: Clock) => new ContractApprovals({ store, core, reauth, clock }),
+        useFactory: (store: ContractApprovalStore, core: CoreContractClient, reauth: ApprovalReauthVerifier, clock: Clock) => new ContractApprovals({ store, core, reauth, clock, ...(deps.failureCases ? { failureCases: deps.failureCases } : {}) }),
         inject: [APPROVAL_STORE, CORE_CONTRACT_CLIENT, APPROVAL_REAUTH, CLOCK],
       },
       {

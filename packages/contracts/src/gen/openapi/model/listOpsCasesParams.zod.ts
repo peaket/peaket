@@ -11,12 +11,16 @@
  */
 import * as zod from 'zod';
 
+export const listOpsCasesParamsDueWithinDaysMin = 0;
+export const listOpsCasesParamsDueWithinDaysMax = 30;
+
 export const listOpsCasesParamsLimitMax = 100;
 
 
 export const ListOpsCasesParams = zod.object({
   "kind": zod.string().optional(),
-  "dueWithinDays": zod.int().optional(),
+  "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "dueWithinDays": zod.int().min(listOpsCasesParamsDueWithinDaysMin).max(listOpsCasesParamsDueWithinDaysMax).optional(),
   "cursor": zod.string().optional(),
   "limit": zod.int().min(1).max(listOpsCasesParamsLimitMax).optional()
 })

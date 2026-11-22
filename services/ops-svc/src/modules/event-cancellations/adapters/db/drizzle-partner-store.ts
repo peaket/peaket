@@ -30,7 +30,7 @@ export class DrizzlePartnerEventCancellationStore implements PartnerEventCancell
     record: EventCancellationRecord,
     audit: AuditRecord,
     idem?: EventCancellationIdempotency,
-    cs?: { readonly nowMs: number },
+    cs?: { readonly nowMs: number; readonly resultDueMs?: number },
   ): Promise<EventCancellationInsert> {
     try {
       return await this.database.transaction(
@@ -133,13 +133,17 @@ export class DrizzlePartnerEventCancellationStore implements PartnerEventCancell
     if (a.length !== b.length || !timingSafeEqual(a, b)) throw idempotencyKeyReused();
   }
 
-  async #insertIn(tx: DbTransaction, r: EventCancellationRecord, audit: AuditRecord, cs?: { readonly nowMs: number }): Promise<void> {
+  async #insertIn(tx: DbTransaction, r: EventCancellationRecord, audit: AuditRecord, cs?: { readonly nowMs: number; readonly resultDueMs?: number }): Promise<void> {
     const active = await tx.execute(sql`select request_id from event_cancellation_request where event_id = ${r.eventId}::uuid and ${ACTIVE_CONDITION} limit 1`);
     const existing = (active.rows[0] as { request_id: string } | undefined)?.request_id;
     if (existing !== undefined) throw new ActiveRequest(existing);
     await tx.execute(sql`insert into event_cancellation_request (${COLUMNS}) values ${insertValues(r)}`);
     await tx.execute(sql`
       select ops_append_audit(${audit.recordType}, ${audit.recordId}::uuid, ${canonicalAuditRecord(audit)}, ${randomBytes(32)}, ${new Date(audit.nowMs)}::timestamptz)`);
-    if (cs) await tx.execute(sql`select ops_open_cs_case(${randomUUID()}::uuid, ${r.requestId}::uuid, ${new Date(cs.nowMs)}::timestamptz)`);
+    // 넷째 인자는 판정 기한(ops 0030). 없으면 NULL(기한 없음)이다
+    if (cs) {
+      const due = cs.resultDueMs !== undefined ? sql`${new Date(cs.resultDueMs)}::timestamptz` : sql`null::timestamptz`;
+      await tx.execute(sql`select ops_open_cs_case(${randomUUID()}::uuid, ${r.requestId}::uuid, ${new Date(cs.nowMs)}::timestamptz, ${due})`);
+    }
   }
 }
