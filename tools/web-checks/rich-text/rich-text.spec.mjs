@@ -2,7 +2,8 @@
 // ① 묶음 B CSP·Trusted Types 보고 모드에서 편집기가 낸 위반 0 ② Word·웹 페이지 글(표·그림·스타일·스크립트)을 붙여넣고 임시저장한 구조 문서에
 // 허용 노드 다섯 밖 노드·속성 0 ③ 저장한 글이 편집기 화면과 같고, 새로고침하면 그대로 돌아온다 ④ 늦게 싣는 덩어리(gzip) 90KB 이하(ADR-0204)
 // ⑤ 키보드(굵게 단축키, 도구 막대 방향키)와 역할(textbox·toolbar). 잰 값은 reports/rich-text.json에 남는다.
-// Next.js가 늦게 싣는 덩어리를 <script src>로 넣는 Trusted Types 위반은 편집기와 상관없어 따로 센다(관제·파트너 콘솔 보안 헤더 OPS-340에 넘김).
+// Next.js가 늦게 싣는 덩어리를 <script src>로 넣는 Trusted Types 위반은 따로 센다(frameworkViolations). OPS-340(F-03-1, ADR-0360 결정 7)이 좁은 기본 정책으로 없앴으므로
+// 그 수도 0이어야 하고, 페이지가 만든 정책 이름은 파트너 보고 모드 목록(docs/frontend.md §5.14.1: peaket peaket-paste nextjs default) 안이다.
 import { test, expect } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
@@ -13,6 +14,8 @@ const OUT = 'reports/rich-text.json';
 const DRAFT_KEY = 'peaket.partner.wizard-draft.v1';
 /** Next.js가 늦게 싣는 덩어리를 <script src>로 넣는 것(편집기와 상관없는 프레임워크 몫, 따로 센다) */
 const isFramework = (v) => v.directive === 'require-trusted-types-for' && /^HTMLScriptElement src\|\/_next\/static\/chunks\//.test(v.sample);
+/** 파트너 Trusted Types 보고 모드 목록(docs/frontend.md §5.14.1 'Trusted Types' 붙인 곳, ADR-0360 결정 7) */
+const PARTNER_POLICIES = ['peaket', 'peaket-paste', 'nextjs', 'default'];
 
 /** Word에서 복사한 글을 흉내 낸 HTML(Office 꼬리표·스타일·표·그림·스크립트·이벤트 속성) */
 const WORD_HTML = `<html xmlns:o="urn:schemas-microsoft-com:office:office"><head><style>p.MsoNormal{color:red}</style></head><body>
@@ -62,7 +65,17 @@ function record(key, value) {
 async function open(page) {
   await page.addInitScript(() => {
     window.__csp = [];
+    window.__ttNames = [];
     document.addEventListener('securitypolicyviolation', (e) => window.__csp.push({ directive: e.effectiveDirective, disposition: e.disposition, sample: (e.sample || '').slice(0, 80) }));
+    // 페이지가 만드는 Trusted Types 정책 이름을 적는다(F-03-1 T10)
+    const tt = window.trustedTypes;
+    if (tt?.createPolicy) {
+      const create = tt.createPolicy.bind(tt);
+      tt.createPolicy = (name, rules) => {
+        window.__ttNames.push(name);
+        return create(name, rules);
+      };
+    }
   });
   // 받은 JS를 모두 재고, 처음 HTML이 가리킨 스크립트(<script src>·preload)와 견줘 늦게 받은 덩어리를 가린다(시각에 기대지 않는다)
   const scripts = [];
@@ -77,7 +90,8 @@ async function open(page) {
   const res = await page.goto('/events/new');
   const headers = res.headers();
   const html = await res.text();
-  const inHtml = new Set([...html.matchAll(/\/_next\/static\/[^"'\s)]+\.js/g)].map((m) => m[0]));
+  // 처음 HTML이 가리킨 같은 출처 스크립트 전부(/_next/static 덩어리와 루트 레이아웃의 좁은 기본 정책 파일 /trusted-types-default.js, F-03-1)
+  const inHtml = new Set([...html.matchAll(/(?<=["'(])\/[^"'\s)]+\.js(?=["'\s)?])/g)].map((m) => m[0]));
   await expect(page.getByTestId('editor')).toBeVisible();
   await page.waitForLoadState('networkidle');
   return { headers, scripts: scripts.map((s) => ({ ...s, phase: inHtml.has(s.path) ? 'initial' : 'lazy' })) };
@@ -105,7 +119,7 @@ async function savedDoc(page) {
   return page.evaluate((k) => JSON.parse(localStorage.getItem(k)).draft.description, DRAFT_KEY);
 }
 
-test('FE-T41 Lexical: 위저드의 묶음 B CSP·Trusted Types 보고 모드에서 Word 글을 붙여넣고 저장하면 허용 노드만 남고, 글이 같으며, 위반 0', async ({ page, browserName }) => {
+test('FE-T41 F-03-1 T10 Lexical: 위저드의 묶음 B CSP·Trusted Types 보고 모드에서 Word 글을 붙여넣고 저장하면 허용 노드만 남고, 글이 같으며, 편집기·Next.js 덩어리 위반 0이고 정책 이름이 목록 안', async ({ page, browserName }) => {
   const { headers, scripts } = await open(page);
   expect(headers['content-security-policy']).toMatch(/script-src 'nonce-[^']+' 'strict-dynamic'/);
   expect(headers['content-security-policy-report-only']).toContain("require-trusted-types-for 'script'");
@@ -167,6 +181,7 @@ test('FE-T41 Lexical: 위저드의 묶음 B CSP·Trusted Types 보고 모드에�
 
   // 위반은 새로고침 전에 읽어 둔다(새로고침하면 목록이 비워진다, 리뷰 재현)
   const beforeReloadViolations = await page.evaluate(() => window.__csp);
+  const beforeReloadNames = await page.evaluate(() => window.__ttNames);
   // 새로고침하면 저장한 글이 그대로 돌아온다
   const beforeReload = norm(await box.innerText());
   await page.reload();
@@ -184,6 +199,15 @@ test('FE-T41 Lexical: 위저드의 묶음 B CSP·Trusted Types 보고 모드에�
   // 늦게 받은 덩어리가 없으면(가르기가 틀렸으면) 예산 검사가 뜻이 없다
   expect(lazy.length, '늦게 받은 덩어리가 없다').toBeGreaterThan(0);
   expect(editorViolations).toEqual([]);
+  // F-03-1 T10: Next.js 덩어리 적재 위반도 0(좁은 기본 정책, ADR-0360 결정 7)
+  expect(violations.filter(isFramework), 'frameworkViolations').toEqual([]);
+  // 만든 정책 이름은 모두 파트너 목록 안이다. Trusted Types가 있는 엔진은 좁은 기본 정책을 만든다
+  const names = [...beforeReloadNames, ...(await page.evaluate(() => window.__ttNames))];
+  expect(names.filter((n) => !PARTNER_POLICIES.includes(n)), `목록 밖 정책 이름: ${JSON.stringify(names)}`).toEqual([]);
+  if (await page.evaluate(() => 'trustedTypes' in window)) {
+    expect(names).toContain('default');
+    expect(headers['content-security-policy-report-only']).toBe(`require-trusted-types-for 'script'; trusted-types ${PARTNER_POLICIES.join(' ')}; report-to csp`);
+  }
   expect(lazyKb, `늦게 싣는 덩어리 ${lazyKb}kB > ${BUDGET_KB}kB`).toBeLessThanOrEqual(BUDGET_KB);
 });
 
