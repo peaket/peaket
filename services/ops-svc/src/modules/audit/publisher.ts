@@ -6,9 +6,11 @@
 //     끝난 회차 목록을 읽지 못하면 그 실행의 회차 마감 체크포인트만 미룬다(일 체크포인트는 그대로).
 //  ③ 서명 전 행을 번호 차례로: 체인을 다시 모은 루트·JSON·직전 해시가 저장값과 같을 때만 서명한다. 다르면 서명·게시하지 않고 SEV2 로그 audit-checkpoint-mismatch를 남기고
 //     그 뒤 번호도 멈춘다(경보·AUDIT_CHAIN_MISMATCH 기록은 ops-svc 프로세스의 신호 바퀴가 같은 검증으로 낸다, checkpoint-signals.ts. 이 작업의 DB 역할은 체인·경보를 쓰지 못한다).
+//     찍기·게시 앞에도 행마다 같은 검증(체인·JSON)과 서명을 다시 본다. 서명은 지금 서명기 키나 이미 공개 키 목록에 실린 키로 확인되어야 하고,
+//     아니면 SEV2 로그 audit-checkpoint-signature-mismatch를 남기고 그 뒤를 멈춘다(API 역할이 서명 칸·키 표를 고쳐도 공개 사슬에 들지 못한다, 리뷰 RV-01).
 //  ④ 서명한 행에 공개 타임스탬프를 찍는다(캘린더 하나라도 받으면 PENDING, 모두 실패하면 행을 그대로 두고 다음 실행에서 다시).
 //  ⑤ 번호 차례로 게시한다: 두 자리(공개 게시 버킷·감사 앵커 버킷)에 같은 바이트를 쓰고, 둘 다 된 뒤에만 published_at을 적는다. 앞 번호가 게시되지 않았으면 멈춘다.
-//     같은 이름에 다른 바이트가 있으면 SEV2 로그 audit-public-file-conflict로 멈춘다.
+//     같은 이름에 다른 바이트가 있으면 SEV2 로그 audit-public-file-conflict로 멈춘다. 공개 키 목록에는 믿는 키(지금 서명기 키와 이미 실린 키)만 싣는다.
 //  ⑥ PENDING 증명을 1시간 [가정]마다 캘린더에서 다시 받아 비트코인 증명이 붙으면 <번호>.complete.ots를 두 자리에 쓰고 COMPLETE로 바꾼다(.ots는 덮지 않는다).
 // 게시 파일(transparency/v1/ 아래):
 //   checkpoints/<번호 10자리 0채움>.json   체크포인트 JSON 글(UTF-8, checkpoint_json 그대로)
@@ -267,6 +269,8 @@ export interface AuditAnchorRunResult {
   readonly completed: number;
   /** 루트·JSON·직전 해시가 저장값과 다른 체크포인트 번호(SEV2) */
   readonly mismatches: readonly number[];
+  /** 서명이 믿는 키(지금 서명기 키·이미 게시한 키)로 확인되지 않는 번호(SEV2, 리뷰 RV-01) */
+  readonly invalidSignatures: readonly number[];
   /** 같은 이름의 다른 바이트(SEV2) */
   readonly conflicts: readonly string[];
   /** 다시 할 실패(캘린더·KMS·버킷·core) */
@@ -274,6 +278,12 @@ export interface AuditAnchorRunResult {
 }
 
 const errName = (e: unknown): string => (e instanceof Error ? e.name : 'error');
+
+/** 찍기·게시 앞에 서명을 다시 볼 때 믿는 키. 지금 서명기의 키와 이미 공개 키 목록에 실린 키뿐이다 */
+interface PublishTrust {
+  readonly ids: ReadonlySet<string>;
+  readonly spki: ReadonlyMap<string, Buffer>;
+}
 
 /** 게시 작업 한 실행. 실행 사이에 상태는 DB 행에만 있다(겹쳐 돌지 않게 진입점이 잠근다) */
 export class AuditCheckpointPublisher {
@@ -288,6 +298,7 @@ export class AuditCheckpointPublisher {
   async run(nowMs: number): Promise<AuditAnchorRunResult> {
     const errors: string[] = [];
     const mismatches: number[] = [];
+    const invalidSignatures: number[] = [];
     const conflicts: string[] = [];
     let spki: Buffer | undefined;
     try {
@@ -302,10 +313,18 @@ export class AuditCheckpointPublisher {
     }
     const created = await this.#createDue(nowMs, errors);
     const signed = spki ? await this.#sign(spki, mismatches, errors) : 0;
-    const stamped = await this.#stamp(nowMs, errors);
-    const published = await this.#publish(nowMs, conflicts, errors);
+    // 찍기·게시 앞에 서명을 다시 보려면 믿는 키(서명기 키 + 이미 공개한 키)와 키 재료가 필요하다. 못 모으면 이번 실행은 찍기·게시를 미룬다
+    let trust: PublishTrust | undefined;
+    try {
+      trust = await this.#trust(spki);
+    } catch (e) {
+      errors.push(`signing-keys:${errName(e)}`);
+      this.#log('warn', { event: 'audit-checkpoint-keys-unavailable', err: errName(e) }, '서명 키 표를 읽지 못해 이번 실행은 찍기·게시를 하지 않는다');
+    }
+    const stamped = trust ? await this.#stamp(nowMs, trust, mismatches, invalidSignatures, errors) : 0;
+    const published = trust ? await this.#publish(nowMs, trust, conflicts, mismatches, invalidSignatures, errors) : 0;
     const completed = await this.#upgrade(nowMs, conflicts, errors);
-    return { created, signed, stamped, published, completed, mismatches, conflicts, errors };
+    return { created, signed, stamped, published, completed, mismatches, invalidSignatures, conflicts, errors };
   }
 
   async #createPublic(kind: 'DAILY' | 'EVENT_CLOSE', nowMs: number, extra: { reason: string; closedEvents?: readonly ClosedEvent[]; accessLogDayAnchor?: string }): Promise<AuditCheckpoint | undefined> {
@@ -405,6 +424,49 @@ export class AuditCheckpointPublisher {
     return prev !== undefined && prev.checkpointHash === c.prevCheckpointHash && prev.toSeq === c.fromSeq - 1;
   }
 
+  /**
+   * 찍기·게시 앞에 서명을 다시 볼 때 믿는 키를 모은다. 지금 서명기의 키와 이미 공개 키 목록(public-keys.json)에 실린 키뿐이다.
+   * 키 표(audit_signing_key)에 다른 이가 넣은 행이 있어도 그것으로 서명한 체크포인트는 믿지 않는다(리뷰 RV-01, ADR-0348 결정 4·11).
+   */
+  async #trust(nowSpki: Buffer | undefined): Promise<PublishTrust> {
+    const ids = new Set<string>([this.deps.signer.keyId]);
+    const spki = new Map<string, Buffer>();
+    for (const k of await this.deps.store.signingKeys()) spki.set(k.keyId, k.publicKeySpki);
+    if (nowSpki) spki.set(this.deps.signer.keyId, nowSpki);
+    for (const id of await this.#publishedKeyIds()) ids.add(id);
+    return { ids, spki };
+  }
+
+  /** 지금 게시된 public-keys.json의 키 ID(키를 돌린 뒤 옛 행을 믿는 근거). 없거나 못 읽으면 빈 목록 */
+  async #publishedKeyIds(): Promise<readonly string[]> {
+    for (const t of this.deps.targets) {
+      let body: Buffer | undefined;
+      try {
+        body = await t.get(PUBLIC_KEYS_FILE);
+      } catch (e) {
+        this.#log('warn', { event: 'audit-public-keys-read-failed', target: t.name, err: errName(e) }, '공개 키 목록을 읽지 못해 이미 실린 키를 믿지 않는다');
+        return [];
+      }
+      if (!body) continue;
+      try {
+        const parsed = JSON.parse(body.toString('utf8')) as { keys?: { keyId?: unknown }[] };
+        return (parsed.keys ?? []).flatMap((k) => (typeof k.keyId === 'string' ? [k.keyId] : []));
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+
+  /** 행의 서명이 믿는 키(작업이 넣은 키)로 확인되는가. 아니면 찍지도 게시하지도 않는다(RV-01 ②) */
+  async #signedByTrustedKey(c: AuditCheckpoint, trust: PublishTrust): Promise<boolean> {
+    if (!c.checkpointJson || !c.signature || !c.keyId) return false;
+    if (!trust.ids.has(c.keyId)) return false;
+    const key = trust.spki.get(c.keyId);
+    if (!key) return false;
+    return verifyCheckpointSignature(key, Buffer.from(c.checkpointJson, 'utf8'), c.signature);
+  }
+
   async #sign(spki: Buffer, mismatches: number[], errors: string[]): Promise<number> {
     let signed = 0;
     for (const c of await this.deps.store.unsignedPublic(AUDIT_ANCHOR_SCHEDULE.batch)) {
@@ -433,10 +495,21 @@ export class AuditCheckpointPublisher {
     return signed;
   }
 
-  async #stamp(nowMs: number, errors: string[]): Promise<number> {
+  async #stamp(nowMs: number, trust: PublishTrust, mismatches: number[], invalidSignatures: number[], errors: string[]): Promise<number> {
     if (this.deps.calendars.length === 0) return 0;
     let stamped = 0;
     for (const c of await this.deps.store.unstamped(AUDIT_ANCHOR_SCHEDULE.batch)) {
+      // 찍기 앞에 루트·JSON과 서명을 다시 본다(서명 뒤에 행이 바뀌었거나 남의 키로 채워졌으면 찍지 않는다, RV-01)
+      if (!(await this.#consistent(c))) {
+        mismatches.push(c.no!);
+        this.#log('error', { event: 'audit-checkpoint-mismatch', severity: 'SEV2', no: c.no, checkpointId: c.checkpointId }, '체인을 다시 모은 루트가 저장된 체크포인트와 달라 공개 타임스탬프를 찍지 않는다');
+        break;
+      }
+      if (!(await this.#signedByTrustedKey(c, trust))) {
+        invalidSignatures.push(c.no!);
+        this.#log('error', { event: 'audit-checkpoint-signature-mismatch', severity: 'SEV2', no: c.no, checkpointId: c.checkpointId, keyId: c.keyId ?? null }, '서명이 게시 작업의 키로 확인되지 않아 공개 타임스탬프를 찍지 않는다');
+        break;
+      }
       const r = await stampDigest(Buffer.from(c.checkpointHash!, 'hex'), this.deps.calendars);
       if (!r.proof) {
         errors.push(`ots:all-failed:${c.no}`);
@@ -470,8 +543,10 @@ export class AuditCheckpointPublisher {
     }
   }
 
-  async #writeKeys(nowMs: number): Promise<void> {
-    const keys = await this.deps.store.signingKeys();
+  /** 공개 키 목록: 믿는 키(지금 서명기 키 + 이미 실린 키)만 싣는다(키 표에 다른 이가 넣은 행을 내보내지 않는다, RV-01 ②) */
+  async #writeKeys(nowMs: number, trust: PublishTrust): Promise<void> {
+    const keys = (await this.deps.store.signingKeys()).filter((k) => trust.ids.has(k.keyId));
+    if (keys.length === 0) return;
     const body = {
       version: 1,
       keys: keys.map((k) => ({ keyId: k.keyId, alg: k.alg, publicKeyPem: spkiPem(k.publicKeySpki), firstUsedAt: new Date(k.firstUsedAtMs).toISOString() })),
@@ -491,17 +566,33 @@ export class AuditCheckpointPublisher {
     await this.#versioned(INDEX_FILE, Buffer.from(JSON.stringify(body), 'utf8'), nowMs);
   }
 
-  async #publish(nowMs: number, conflicts: string[], errors: string[]): Promise<number> {
+  async #publish(nowMs: number, trust: PublishTrust, conflicts: string[], mismatches: number[], invalidSignatures: number[], errors: string[]): Promise<number> {
     const rows = await this.deps.store.unpublished(AUDIT_ANCHOR_SCHEDULE.batch);
     if (rows.length === 0) return 0;
     let published = 0;
+    let keysWritten = false;
     try {
-      await this.#writeKeys(nowMs);
       for (const c of rows) {
+        // 게시 앞에 루트·JSON과 서명을 다시 본다(서명 뒤에 행이 바뀌었거나 남의 키로 채워졌으면 게시하지 않는다, RV-01)
+        if (!(await this.#consistent(c))) {
+          mismatches.push(c.no!);
+          this.#log('error', { event: 'audit-checkpoint-mismatch', severity: 'SEV2', no: c.no, checkpointId: c.checkpointId }, '체인을 다시 모은 루트가 저장된 체크포인트와 달라 게시하지 않는다');
+          break;
+        }
+        if (!(await this.#signedByTrustedKey(c, trust))) {
+          invalidSignatures.push(c.no!);
+          this.#log('error', { event: 'audit-checkpoint-signature-mismatch', severity: 'SEV2', no: c.no, checkpointId: c.checkpointId, keyId: c.keyId ?? null }, '서명이 게시 작업의 키로 확인되지 않아 게시하지 않는다');
+          break;
+        }
         // 앞 번호가 게시되지 않았으면 멈춘다(공개 사슬에 빈틈을 만들지 않는다)
         if (c.no! > 1) {
           const prev = await this.deps.store.findByNo(c.no! - 1);
           if (!prev || prev.publishedAtMs === undefined) break;
+        }
+        // 검증을 지난 첫 행 뒤에야 공개 키 목록을 쓴다(게시할 것이 없는데 키만 실리지 않게)
+        if (!keysWritten) {
+          await this.#writeKeys(nowMs, trust);
+          keysWritten = true;
         }
         const base = checkpointFileBase(c.no!);
         const files: [string, Buffer, string][] = [

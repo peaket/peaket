@@ -923,17 +923,24 @@ export const PUBLIC_CHECKPOINT_LOCK = sql`pg_advisory_xact_lock(hashtextextended
 
 const insertCheckpoint = async (tx: DbTransaction, input: NewAuditCheckpoint): Promise<AuditCheckpoint> => {
   const closed = input.closedEvents ? JSON.stringify(input.closedEvents.map((e) => ({ eventId: e.eventId, closedAt: new Date(e.closedAtMs).toISOString() }))) : null;
+  // 서명·게시 칸은 게시 작업만 쓴다(ADR-0348 결정 1·4, 리뷰 RV-01). API 역할(ops_app)에는 그 칸의 INSERT 권한이 없고,
+  // PostgreSQL은 값이 NULL이어도 문장에 이름을 대면 칸 권한을 보므로, 값이 있을 때만 문장에 넣는다(제품 경로는 늘 비운다).
+  const anchored = input.signature !== undefined || input.keyId !== undefined || input.anchorRef !== undefined || input.anchoredAtMs !== undefined;
+  const anchorColumns = anchored ? sql`, signature, key_id, anchor_ref, anchored_at` : sql``;
+  const anchorValues = anchored
+    ? sql`, ${input.signature ?? null}, ${input.keyId ?? null}, ${input.anchorRef ?? null}, ${
+        input.anchoredAtMs !== undefined ? sql`${new Date(input.anchoredAtMs)}::timestamptz` : sql`null`
+      }`
+    : sql``;
   const [row] = (await tx.execute(sql`
-    insert into audit_checkpoint (id, from_seq, to_seq, root_hash, prev_hash, reason, actor_ref, created_at, signature, key_id, anchor_ref, anchored_at,
-                                  no, leaf_count, kind, access_log_day_anchor, closed_events, checkpoint_json, checkpoint_hash)
+    insert into audit_checkpoint (id, from_seq, to_seq, root_hash, prev_hash, reason, actor_ref, created_at,
+                                  no, leaf_count, kind, access_log_day_anchor, closed_events, checkpoint_json, checkpoint_hash${anchorColumns})
     values (${input.checkpointId}::uuid, ${input.fromSeq}::bigint, ${input.toSeq}::bigint, decode(${input.rootHash}, 'hex'), decode(${input.prevCheckpointHash || ''}, 'hex'),
             ${input.reason}, ${input.actorRef}, ${new Date(input.nowMs)}::timestamptz,
-            ${input.signature ?? null}, ${input.keyId ?? null}, ${input.anchorRef ?? null},
-            ${input.anchoredAtMs !== undefined ? sql`${new Date(input.anchoredAtMs)}::timestamptz` : sql`null`},
             ${input.no ?? null}::bigint, ${input.leafCount ?? null}::int, ${input.kind ?? null},
             ${input.accessLogDayAnchor !== undefined ? sql`decode(${input.accessLogDayAnchor}, 'hex')` : sql`null`},
             ${closed}::jsonb, ${input.checkpointJson ?? null},
-            ${input.checkpointHash !== undefined ? sql`decode(${input.checkpointHash}, 'hex')` : sql`null`})
+            ${input.checkpointHash !== undefined ? sql`decode(${input.checkpointHash}, 'hex')` : sql`null`})${anchorValues}
     returning ${CHECKPOINT_COLUMNS}`)).rows as unknown as CheckpointRow[];
   if (!row) throw new Error('감사 체크포인트를 쓰지 못했다');
   return toCheckpoint(row);

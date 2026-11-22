@@ -7,7 +7,7 @@
 //   게시 PEAKET_AUDIT_PUBLIC_BUCKET·PEAKET_AUDIT_ANCHOR_BUCKET(local·ci는 PEAKET_AUDIT_PUBLIC_DIR·PEAKET_AUDIT_ANCHOR_DIR·메모리), 흉내 S3 PEAKET_AUDIT_ANCHOR_S3_ENDPOINT(local·ci만),
 //   캘린더 PEAKET_OTS_CALENDAR_URLS(local·ci는 비면 가짜), 끝난 회차 목록 PEAKET_CORE_HTTP_URL·PEAKET_INTERNAL_TOKEN.
 // local·ci 밖에서 KMS 키 ID·두 버킷·캘린더·core 주소 가운데 하나라도 없으면 시작하지 않는다(끝 코드 2).
-// 끝 코드: 0 실행 끝(다시 할 실패는 다음 실행이 잇는다), 1 SEV2 조건(루트 어긋남·같은 이름의 다른 공개 파일), 2 설정·시작 실패.
+// 끝 코드: 0 실행 끝(다시 할 실패는 다음 실행이 잇는다), 1 SEV2 조건(루트 어긋남·서명 불일치·같은 이름의 다른 공개 파일), 2 설정·시작 실패.
 import { createDatabase, createExternalHttpClient } from '@peaket/platform';
 import { HttpCoreOnsaleClosed } from '../adapters/http-core-onsale-closed.js';
 import {
@@ -78,7 +78,7 @@ async function main(): Promise<number> {
       log,
     });
     const run = await publisher.run(Date.now());
-    const bad = run.mismatches.length > 0 || run.conflicts.length > 0;
+    const bad = run.mismatches.length > 0 || run.invalidSignatures.length > 0 || run.conflicts.length > 0;
     log(
       bad ? 'error' : run.errors.length > 0 ? 'warn' : 'info',
       {
@@ -88,6 +88,7 @@ async function main(): Promise<number> {
         published: run.published,
         completed: run.completed,
         mismatches: run.mismatches,
+        invalidSignatures: run.invalidSignatures,
         conflicts: run.conflicts,
         errors: run.errors,
         keyId: signerR.signer.keyId,

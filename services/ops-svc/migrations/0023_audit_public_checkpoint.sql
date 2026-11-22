@@ -82,4 +82,18 @@ GRANT SELECT ON audit_chain, audit_chain_head TO ops_audit_anchor;
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE ON audit_checkpoint, audit_signing_key TO ops_audit_anchor;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON audit_signing_key TO ops_app;
+-- 리뷰 RV-01(2026-11-22, ADR-0348 결정 1·4·11, docs/data.md audit_checkpoint.signature '게시 작업만 채운다'):
+-- API 역할 ops_app은 공개 사슬의 서명 루트를 바꾸지 못한다. 0015의 표 전체 권한을 거두고 필요한 칸만 준다.
+-- ① 서명 키 표: 읽기만 한다(키를 넣거나 고치거나 지우는 것은 게시 작업 ops_audit_anchor 몫).
+REVOKE INSERT, UPDATE, DELETE ON audit_signing_key FROM ops_app;
+--> statement-breakpoint
+GRANT SELECT ON audit_signing_key TO ops_app;
+--> statement-breakpoint
+-- ② 공개 체크포인트 표: 만드는 문장에 필요한 칸만 넣을 수 있고, 서명·키 ID·공개 타임스탬프·게시 칸(signature·key_id·ots_state·ots_proof·
+--    ots_upgraded_at·published_at·anchor_ref·anchored_at)은 넣지도 고치지도 못한다. API는 체크포인트 행을 고치는 길이 없으므로 UPDATE도 주지 않는다.
+--    칸 권한은 표 권한보다 좁으므로 표 INSERT·UPDATE를 먼저 거둔다(표 권한이 있으면 칸 권한이 무시된다).
+REVOKE INSERT, UPDATE ON audit_checkpoint FROM ops_app;
+--> statement-breakpoint
+GRANT INSERT (id, from_seq, to_seq, root_hash, prev_hash, reason, actor_ref, created_at,
+               no, leaf_count, kind, access_log_day_anchor, closed_events, checkpoint_json, checkpoint_hash)
+  ON audit_checkpoint TO ops_app;
