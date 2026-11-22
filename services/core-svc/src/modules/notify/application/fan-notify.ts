@@ -118,6 +118,8 @@ export class PushSubscriptions {
     const expiresAt = typeof input.expirationTime === 'number' && Number.isFinite(input.expirationTime) ? new Date(input.expirationTime) : null;
     if (existing) {
       await this.d.store.savePushSubscription({ ...existing, accountId, endpointHash: hash, service: parts.service, p256dh: keys.p256dh, auth: keys.auth, expiresAt, boundAt: now });
+      // 다른 계정에서 다시 묶을 때도 그 계정의 10개 한도를 지킨다
+      await this.d.store.trimPushSubscriptions(accountId, PUSH_SUBSCRIPTION_LIMIT);
       return { created: false, subscriptionKey: hash, service: parts.service };
     }
     const row: PushSubscriptionRecord = {

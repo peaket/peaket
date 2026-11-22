@@ -40,6 +40,7 @@ export interface FanNotifyStore {
   findPushSubscriptionByEndpoint(endpoint: string): Promise<PushSubscriptionRecord | undefined>;
   insertPushSubscription(record: PushSubscriptionRecord, limit: number): Promise<string[]>;
   savePushSubscription(record: PushSubscriptionRecord): Promise<void>;
+  trimPushSubscriptions(accountId: string, limit: number): Promise<string[]>;
   deletePushSubscription(accountId: string, subscriptionKey: string): Promise<boolean>;
   deletePushSubscriptionById(id: string): Promise<void>;
   mergePushSubscriptions(primaryAccountId: string, absorbedAccountId: string, now: Date): Promise<{ moved: number; deduped: number }>;

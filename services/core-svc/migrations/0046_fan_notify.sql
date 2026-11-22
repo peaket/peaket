@@ -100,3 +100,10 @@ GRANT SELECT, INSERT, DELETE ON "notification_job" TO core_notify;
 GRANT UPDATE ("status", "attempts", "next_attempt_at", "lease_until") ON "notification_job" TO core_notify;
 --> statement-breakpoint
 GRANT SELECT, INSERT ON "notification_delivery" TO core_notify;
+
+--> statement-breakpoint
+-- 정비(core_maintenance): 지난 신청·중복 키 지우기와 발송 기록 파티션 정리(7일·90일, docs/data.md §2 ⑥).
+-- 발송 기록의 DETACH는 정비 연결이 한다(플랫폼 dropMonthlyPartitions, 기존 월 파티션 표와 같은 길).
+GRANT SELECT, DELETE ON "notification_subscription", "notification_dedup" TO core_maintenance;
+--> statement-breakpoint
+GRANT SELECT ("id", "ends_at") ON "event" TO core_maintenance;

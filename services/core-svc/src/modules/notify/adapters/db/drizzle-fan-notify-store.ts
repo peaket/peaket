@@ -145,6 +145,14 @@ export class DrizzleFanNotifyStore implements FanNotifyStore {
   async savePushSubscription(r: PushSubscriptionRecord) {
     await this.db.db.update(pushSubscription).set({ accountId: r.accountId, endpointHash: r.endpointHash, service: r.service, p256dh: r.p256dh, auth: r.auth, expiresAt: r.expiresAt, boundAt: r.boundAt }).where(eq(pushSubscription.id, r.id));
   }
+  async trimPushSubscriptions(accountId: string, limit: number) {
+    return this.db.transaction(async (tx) => {
+      const rows = await tx.select({ id: pushSubscription.id }).from(pushSubscription).where(eq(pushSubscription.accountId, accountId)).orderBy(asc(pushSubscription.boundAt));
+      const extra = rows.slice(0, Math.max(0, rows.length - limit)).map((x) => x.id);
+      if (extra.length > 0) await tx.delete(pushSubscription).where(inArray(pushSubscription.id, extra));
+      return extra;
+    });
+  }
   async deletePushSubscription(accountId: string, subscriptionKey: string) {
     const rows = await this.db.db.delete(pushSubscription).where(and(eq(pushSubscription.accountId, accountId), eq(pushSubscription.endpointHash, subscriptionKey))).returning({ id: pushSubscription.id });
     return rows.length > 0;

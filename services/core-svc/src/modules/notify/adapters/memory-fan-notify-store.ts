@@ -105,6 +105,12 @@ export class MemoryFanNotifyStore implements FanNotifyStore {
   async savePushSubscription(record: PushSubscriptionRecord) {
     this.push.set(record.id, { ...record });
   }
+  async trimPushSubscriptions(accountId: string, limit: number) {
+    const mine = await this.listPushSubscriptions(accountId);
+    const evicted = mine.slice(0, Math.max(0, mine.length - limit)).map((p) => p.id);
+    for (const id of evicted) this.push.delete(id);
+    return evicted;
+  }
   async deletePushSubscription(accountId: string, subscriptionKey: string) {
     for (const [id, p] of this.push) {
       if (p.accountId === accountId && p.endpointHash === subscriptionKey) {
