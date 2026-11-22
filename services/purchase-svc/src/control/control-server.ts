@@ -96,9 +96,10 @@ export async function applyControl(req: ControlRequest, deps: ControlDeps): Prom
   return { appliedVersion: result.revision, podName: deps.podName, appliedAtMs: nowMs };
 }
 
-function controlPackage(): { ControlReceiver: grpc.ServiceDefinition } {
+// loadPackageDefinition은 서비스마다 클라이언트 생성자를 준다. 서버에는 그 생성자의 서비스 정의(.service)를 넘긴다(F-02-1에서 고침: 생성자를 넘기면 제어 포트를 열 때 던졌다)
+function controlPackage(): { ControlReceiver: { service: grpc.ServiceDefinition } } {
   const def = protoLoader.fromJSON(controlV1Control as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
-  return (grpc.loadPackageDefinition(def) as unknown as { peaket: { control: { v1: { ControlReceiver: grpc.ServiceDefinition } } } }).peaket.control.v1;
+  return (grpc.loadPackageDefinition(def) as unknown as { peaket: { control: { v1: { ControlReceiver: { service: grpc.ServiceDefinition } } } } }).peaket.control.v1;
 }
 
 /** 제어 gRPC 서버를 연다. 업무 포트와 다른 제어 전용 포트다(<서비스>-control, ADR-0102) */
@@ -125,7 +126,7 @@ export async function startControlServer(o: { host: string; port: number; deps: 
       );
     },
   };
-  server.addService(controlPackage().ControlReceiver, handlers);
+  server.addService(controlPackage().ControlReceiver.service, handlers);
   const port = await new Promise<number>((res, rej) => server.bindAsync(`${o.host}:${o.port}`, grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))));
   return {
     port,
