@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 159 | 24 | 6 | 0 | 2 | 11 | 0 | 0 | 0 | 202 |
+| A | 164 | 24 | 6 | 0 | 2 | 11 | 0 | 0 | 0 | 207 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 217 | 24 | 6 | 0 | 2 | 42 | 0 | 0 | 0 | 291 |
+| 합계 | 222 | 24 | 6 | 0 | 2 | 42 | 0 | 0 | 0 | 296 |
 
 ## docs/features/payment.md
 
@@ -162,6 +162,11 @@
 | P-T76 | ③ | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ③ 앞 행이 `CANCEL_PENDING`이면 새 전송 0·답 `PENDING`/`UNKNOWN`이고 행은 그대로다. 앞 `REQUESTED` 둘이면 새 전송… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
 | P-T76 | ④ | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ④ 조회가 '반영'인데 다른 취소가 원장에 반영돼 잔액을 가를 수 없으면 새 전송 0·원장 그대로·답 `UNKNOWN`. 조회가 '반영 아님'인데 옛 행을 닫지… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-cancel-refund-account.int.test.ts… |
 | P-T76 | ⑤ | 지연 환급 계좌 다시 받기의 새 시도와 이중 환불 가드(추천 적용… | ⑤ 시도 번호 파싱(0·1·3 통과, 4 거절), 키 계산, `SUPERSEDED` 조건부 닫기, `BUSY`와 새 시도의 차례(새 시도는 10분 창을 기다리지… | 자동 시험 | A | 시험: services/payment-svc/test/cancel-confirmed-payment-attempt.test.ts |
+| P-T77 | ① | 굿즈 결제 시도의 결제창 값을 저장하지 않는 재생(추천 적용… | ① 처음 굿즈 결제 시도는 201과 결제창 값을 돌려주고 `idempotency_record.result_ref`는 시도 ID 하나이며… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-replay.int.test.ts, services/core-svc/test/merch-payment-replay.test.ts |
+| P-T77 | ② | 굿즈 결제 시도의 결제창 값을 저장하지 않는 재생(추천 적용… | ② 같은 멱등키 재생은 `PrepareCheckout`을 같은 시도 ID·고정 결제사·주문 금액·결제수단으로 다시 불러 지금 설정의 공개 키·구매자 키·돌아올… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-replay.int.test.ts, services/core-svc/test/merch-payment-replay.test.ts 외 1곳 |
+| P-T77 | ③ | 굿즈 결제 시도의 결제창 값을 저장하지 않는 재생(추천 적용… | ③ 재생의 시도 ID가 경로 주문·세션 계정의 것이 아니면(다른 주문의 시도·다른 팬의 시도·없는 ID·JSON 아님·시도 행의 주문 변조·다른 팬의 경로… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-replay.int.test.ts, services/core-svc/test/merch-payment-replay.test.ts |
+| P-T77 | ④ | 굿즈 결제 시도의 결제창 값을 저장하지 않는 재생(추천 적용… | ④ 재생 중 `PrepareCheckout`이 실패하면(`unavailable`·`invalid`·`paused`·`error`) 503이고 쓰기·기록 변화… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-replay.int.test.ts, services/core-svc/test/merch-payment-replay.test.ts |
+| P-T77 | ⑤ | 굿즈 결제 시도의 결제창 값을 저장하지 않는 재생(추천 적용… | ⑤ 재생이 만든 결제사·금액·주문 ID가 시도·주문과 다르면 결제창 값을 돌려주지 않고 503 dependency-unavailable이며, 시도 행 결제사를… | 자동 시험 | A | 시험: services/core-svc/test-int/shop-replay.int.test.ts, services/core-svc/test/merch-payment-replay.test.ts |
 | P-T75 | ① | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ① 종류 다섯(이상 표시·환급 실패·일괄 환불 실패·공제 차액·환불 대기)마다 ops-svc가 `accepted: true`로 답하고 CS 처리함에 건이 한 번… | 자동 시험 | A | 시험: services/ops-svc/test/cases-contract.test.ts, services/ops-svc/test/cases.test.ts 외 1곳 |
 | P-T75 | ② | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ② ops-svc가 2xx `accepted: false`로 답하면 purchase-svc는 연 시각을 쓰지 않고 실패 지표를 올리며 다음 틱에 다시 연다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
 | P-T75 | ③ | CS '환불 대기' 건이 실제로 생긴다(추천 적용… | ③ 그 판정은 CS 건 어댑터 모두 같다 | 자동 시험 | A | 시험: services/purchase-svc/test/cs-case-adapters-contract.test.ts |
