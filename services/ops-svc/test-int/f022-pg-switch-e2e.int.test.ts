@@ -310,16 +310,22 @@ describe('C-T53 Kafka를 막은 채 명령 6 대체 결제사 전환', () => {
     expect(await new RedisLeaderStore(redis).control(eventId, Date.now())).toMatchObject({ pgKey: 'TOSS', pgTps: Math.floor(TPS.TOSS) });
   });
 
-  test('C-T53 ④ Kafka를 막은 채 늘린 payment 파드는 pg_switch를 읽은 뒤 준비되고 대체 결제사로 보낸다', async () => {
+  test('C-T53 ④ Kafka를 막은 채 늘린 payment 파드(멈춘 브로커 주소를 설정)는 제어 동기화 Degraded(30초) 뒤 준비되고, pg_switch를 읽어 대체 결제사로 보낸다 (RV-01)', async () => {
     const { eventId } = switched[0]!;
+    expect(paused, 'Kafka가 멈춰 있어야 한다').toBe(true);
     const e = await paymentEnv('payment-e2e-3');
-    const late = await paymentStart({ env: e.env, logDestination: sinkInto(paymentLogs) });
+    // 이 파드만 멈춘 브로커에 붙인다(RV-01): 플랫폼 제어 동기화(settings·sessions 준비 작업)가 브로커를 기다리는 길과 pg_switch 읽기가 함께 돈다
+    const startedAt = Date.now();
+    const late = await paymentStart({ env: { ...e.env, PEAKET_KAFKA_BROKERS: kafka.brokers.join(',') }, logDestination: sinkInto(paymentLogs) });
     running.push(late);
-    await until(() => readyOf(e.managementPort), (s) => s === 200, '늘린 파드 준비', { timeoutMs: 60_000, intervalMs: 200 });
+    await until(() => readyOf(e.managementPort), (s) => s === 200, '늘린 파드 준비', { timeoutMs: 90_000, intervalMs: 500 });
+    const readyAfter = Date.now() - startedAt;
+    // 브로커가 멈췄으니 제어 동기화는 30초 [가정](플랫폼 degradeAfterMs, ADR-0103) 뒤 Degraded로 준비를 끝낸다. 그보다 이르면 브로커 길을 지나지 않은 것이다
+    expect(readyAfter, `준비까지 ${readyAfter}ms`).toBeGreaterThanOrEqual(30_000 - 1_000);
     expect(await prepareOn(`127.0.0.1:${late.ports!.grpcPort}`, eventId)).toMatchObject({ pg: 'PG_PROVIDER_TOSS', switched: true });
     addrs['payment-svc']!.push(`127.0.0.1:${e.controlPort}`);
     paymentGrpc.push(`127.0.0.1:${late.ports!.grpcPort}`);
-  }, 120_000);
+  }, 150_000);
 
   test('C-T53 ⑤ Kafka를 살리면 같은 판의 설정 사건이 나가고 pg_switch·리더 칸은 바뀌지 않는다 [ASVS v5.0.0-16.5.2]', async () => {
     const { eventId, id } = switched[0]!;
@@ -394,6 +400,10 @@ describe('P-T43 ② 해제의 감사 기록', () => {
     const paymentRow = (await payAdmin.query<Record<string, unknown>>("select * from payment_entry_pause where pg = 'PORTONE' and channel = 'ALL'")).rows[0];
     expect(paymentRow).toMatchObject({ stage: 'OPEN', actor: commander['x-user-id'] });
     expect(JSON.stringify(paymentRow)).not.toContain(reason);
+    // 로그가 실제로 잡혔는지 먼저 본다(RV-05): 그 해제의 released 줄(결제사 PORTONE, actor = 요청자 계정 ID)이 하나 이상이다
+    const released = paymentLogs.map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return undefined; } }).filter((o) => o?.kind === 'payment-entry-pause-released' && o.pg === 'PORTONE');
+    expect(released.length).toBeGreaterThanOrEqual(1);
+    expect(released.map((o) => o!.actor)).toContain(commander['x-user-id']);
     expect(paymentLogs.filter((l) => l.includes(reason))).toEqual([]);
   }, 120_000);
 });

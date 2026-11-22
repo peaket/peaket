@@ -195,6 +195,19 @@ describe('F022-RES 보내기 전 묻기와 받는 쪽별 바라는 상태 (B2~B4
     ]);
   });
 
+  test.each([
+    ['PORTONE 상한 없음', { TOSS: 37.9 }],
+    ['TOSS 상한 없음', { PORTONE: 23.9 }],
+  ] as const)('F022-RES ⑤ (RV-02) 전체 범위·toPg 없음에서 %s이면 최솟값을 셀 수 없어 승인이 503 pg-check-unavailable이고 아무것도 보내지 않는다', async (_name, limits) => {
+    const h = await harness();
+    h.resolver.answer = () => ({ routes: [], approvalLimits: limits });
+    const { id, commander, approve } = await approvedFallback(h, { scope: 'PLATFORM' });
+    expect(approve.statusCode, approve.payload).toBe(503);
+    expect(slug(approve)).toBe('pg-check-unavailable');
+    expect(sentFor(h, id)).toEqual([]);
+    expect(await stateOf(h, id, commander)).toBe('PENDING_APPROVAL');
+  });
+
   test('F022-RES ④ (B2) ResolvePgSwitch가 실패하면 승인은 503 pg-check-unavailable이고 아무 받는 쪽도 부르지 않으며 명령은 DISPATCHED가 되지 않는다', async () => {
     const h = await harness();
     h.resolver.answer = () => new Error('UNAVAILABLE');
