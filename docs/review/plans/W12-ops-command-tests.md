@@ -98,6 +98,38 @@
 
 ## 검증
 
+검증 담당 `w12oct-verify`(deepseek-v4.1-flash), 2026-11-22 18:48~19:10 KST. 구현·시험·리뷰에 관여하지 않았다. 기준 HEAD는 리뷰 커밋 `8f42acfad`이고, 제품 파일은 건드리지 않았다(표본은 잠깐 넣었다가 `git checkout --`로 되돌림).
+
+### 게이트
+
+| 검사 | 결과 |
+| --- | --- |
+| `pnpm.cmd --filter @peaket/ops-svc test test/command-role-policy.test.ts test/command-lifecycle-http.test.ts` | **30/30 통과**(2파일) |
+| `pnpm.cmd --filter @peaket/ops-svc test` | **74파일 518/518 통과**(73.37초) |
+| `pnpm.cmd --filter @peaket/ops-svc typecheck` | 오류 0 |
+| `pnpm.cmd lint` | 오류 0 |
+| `python -I -X utf8 tools/doc-check/check_all.py` | **오류 0, 경고 4**(기존 openapi 3·mermaid 건너뜀 1) |
+| `node tools/ci/records.mjs --check` | 기록 표가 맞다(경고는 R-374·R-608·R-763 등 기존 것) |
+| `node tools/ci/roles-check.mjs --base origin/develop --head HEAD` | 리뷰 HEAD에서는 verify 커밋·`## 검증`이 없어 실패(예상). 검증 커밋 뒤 다시 본다 |
+
+- `git status --short`에 제품 파일 차이가 없다. `git diff --name-only cdcfc748f..HEAD`는 계획·시험 두 파일뿐이다.
+- 표본을 넣고 되돌린 뒤 `git diff --stat`가 비어 있음을 확인했다.
+
+### 틀린 구현 표본
+
+| # | 넣은 틀린 구현 | 잡은 검사(결과) |
+| --- | --- | --- |
+| S1 | `command.ts`의 `SALE_STOP`·`SALE_RESUME` requesterRoles를 `COMMANDER_ONLY`로 되돌린다(BAT-620 이전) | 두 파일 **5 실패 / 25 통과**: 정책 표(6≠4), operator 요청이 `PENDING_APPROVAL`이 아니라 403, C-T5 판매 중지 접수 재인증, 내부 사건 길의 operator 판매 중지 요청(거절) 등 |
+| S2 | `command.ts`의 `SALE_STOP`·`SALE_RESUME` approverRoles를 `ALL_ROLES`로 넓힌다(operator 승인 허용) | 두 파일 **3 실패 / 27 통과**: 승인 역할 표(`['operator','commander']`≠`['commander']`), operator 승인이 403이 아니라 통과, HTTP operator 승인 403 시험 |
+
+- 넣은 수 2, 잡힌 수 2, 놓친 수 0. 표본마다 제품 파일만 되돌렸고, 표본 때문에 남은 제품 파일 차이는 없다.
+- roles-check·records --check는 검증 커밋을 만든 뒤 HEAD에서 다시 확인해 이 절과 기록에 덧붙인다.
+
+### 남은 위험
+
+- 리뷰 RV-01(`BOT_LEVEL` 승인 역할의 BAT-365 잔여)과 RV-02(반려의 재인증 미요구)가 그대로 남는다. 둘 다 이 묶음이 만든 것이 아니고 막지 않는다.
+- 같은 PC에서 다른 갈래가 함께 돌아 vitest 워커 종료 시간 초과 경고가 섞일 수 있다. 이번 실행은 74파일 518/518로 끝났다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -105,4 +137,4 @@
 | plan | w12oct-plan | deepseek-v4.1-flash | 2026-11-22T18:28+09:00 | 2026-11-22T18:42+09:00 |
 | test | w12oct-test | deepseek-v4.1-flash | 2026-11-22T18:30+09:00 | 2026-11-22T18:47+09:00 |
 | review | w12oct-review | deepseek-v4.1-flash | 2026-11-22T18:47+09:00 | 2026-11-22T18:55+09:00 |
-| verify | w12oct-verify | deepseek-v4.1-flash | 2026-11-22T18:55+09:00 | 2026-11-22T19:40+09:00 |
+| verify | w12oct-verify | deepseek-v4.1-flash | 2026-11-22T18:55+09:00 | 2026-11-22T19:15+09:00 |
