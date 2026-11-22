@@ -244,6 +244,15 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 - mTLS `cnf.x5t#S256` 발급은 GAT-170의 관리형 기기·사설 CA PoC 뒤 선택 작업이고, 이 단계의 토큰은 `cnf.jkt`다. 휴대폰 카메라 승인 화면(SCR-051)은 wbs 5.5.3(GAT-230) 몫이다. 둘 다 이 단계 문구 밖이다.
 - 남은 위험: RV-03(스캐너 앱이 409 `user-code-unavailable`를 자동 재시도하지 않고 일반 오류로 보인다), RV-06(운영 배포 값에 `PEAKET_PUBLIC_ORIGIN`이 빠지면 forwarded로 내려간다), RV-07(토큰 서명 전에 기기 코드를 지운다), RV-08(메모리·Redis 저장소의 같은 코드 재저장 차이), I-T25의 감사 기록은 `scan_event.staff_account_id`까지이고 별도 불변 감사는 BAT-450D다.
 
+### 검증 2 — rebase와 누락 통합 시험(2026-11-22, 같은 `lane3-bat450a-verify`)
+
+- **rebase**: `git fetch origin` 뒤 `origin/develop` `1d78527e1`(R-750~R-758·BAT-617 포함) 위로 11개 커밋을 다시 쌓았다. 커밋 SHA가 바뀌었고(계획 `bfb0e17e4`부터 기록 `86c9fde9e`까지), 가지는 `develop` 위에 바로 선다. 합치기·푸시는 하지 않았다.
+- **충돌**: `docs/review/ledger/*` 7개는 develop 쪽을 택했고(`git checkout --ours`), rebase 뒤 `node tools/ci/ledger.mjs`로 다시 생성했다. `00-summary`·`consistency-review`는 R-758과 R-759를 모두 남겼고, `BUILD_ORDER`·`lane3.md`도 양쪽 줄이 함께 있다. 남은 충돌 표시는 없다.
+- **ledger 재생성**: 새 기준에서 항목 3,965개, 빈칸 756, ID만 1,033, 미검증 5다. 재생성으로 `docs/review/ledger/README.md` 한 파일이 바뀌었고, identity 장부는 이 묶음의 여섯 항목이 이미 자동 시험으로 들어가 있었다. `ledger --batch BAT-450A --require`는 6항목 자동 시험·빈칸 0으로 통과한다.
+- **누락 통합 시험(못 돌림)**: Docker 잠금 `lane3-BAT-450A-verify2`를 60초 기다려 잡으려 했으나 `lane5-W12-merch-replay`가 12:29:10부터 잡고 있었다. 2분 뒤 한 번 더 60초 기다렸지만 여전히 잡혀 있었고, 남의 잠금은 지우지 않았다. 그래서 `identity-svc test:integration test-int/device-approval.int.test.ts`(RV-05 포함 15개)와 `ticket-svc test:integration test-int/scanner-shift.int.test.ts`를 이번에는 돌리지 못했다. 이 작업 폴더에서 확인한 것은 구현 직후의 identity 14/14( RV-05 시험을 더하기 전)이고, RV-05 시험은 합치는 쪽이 Docker 잠금을 잡고 돌려야 한다. 잠금을 잡은 뒤 `docker ps`에 peaket 컨테이너가 없음을 확인했다.
+- **rebase 뒤 게이트**: `roles-check --base origin/develop --head HEAD`는 이 verify2 커밋 전 11개 커밋으로 통과했고, `records.mjs --check`, `ledger --batch BAT-450A --require`도 통과했다. typecheck·lint·doc-check·gen:check는 rebase 전과 같은 코드라 다시 돌리지 않았다(바뀐 것은 장부 생성물과 이 절뿐이다).
+- 남은 위험은 위와 같고, 더해 **RV-05 시험과 ticket-svc test-int가 아직 실행되지 않았다.**
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
@@ -255,4 +264,4 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 | test | lane3-bat450a-rv02 | deepseek-v4.1-flash | 2026-11-22T12:25:00+09:00 | 2026-11-22T12:26:00+09:00 |
 | test | lane3-bat450a-rvtest | deepseek-v4.1-flash | 2026-11-22T12:27:00+09:00 | 2026-11-22T12:30:00+09:00 |
 | impl | lane3-bat450a-rvimpl | deepseek-v4.1-flash | 2026-11-22T12:30:00+09:00 | 2026-11-22T12:31:00+09:00 |
-| verify | lane3-bat450a-verify | deepseek-v4.1-flash | 2026-11-22T12:32:00+09:00 | 2026-11-22T12:40:00+09:00 |
+| verify | lane3-bat450a-verify | deepseek-v4.1-flash | 2026-11-22T12:32:00+09:00 | 2026-11-22T13:05:00+09:00 |
