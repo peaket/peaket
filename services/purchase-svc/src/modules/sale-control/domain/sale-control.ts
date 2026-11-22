@@ -13,7 +13,7 @@ export type SaleControlScope = 'EVENT' | 'PLATFORM';
 /** 원본 표의 한 행(회차 범위) */
 export interface SaleControl {
   readonly eventId: string;
-  /** 판매 일시정지(명령 3). 이번 몫은 읽기만 한다 */
+  /** 판매 일시정지(명령 3, F-02-1 OPS-300). 판 번호는 pausedRevision이다 */
   readonly paused: boolean;
   /** 판매 중지(판매 승인 업무). 재개로만 내려간다 */
   readonly suspended: boolean;
@@ -25,6 +25,48 @@ export interface SaleControl {
   readonly suspensionRef?: string;
   readonly reason?: string;
   readonly updatedAtMs: number;
+  /** 명령 3의 판 번호(paused_revision, 0이면 한 번도 받지 않음). 판매 중지의 revision과 따로 센다(ADR-0365 결정 6) */
+  readonly pausedRevision?: number;
+  /** 명령 3을 마지막으로 바꾼 운영 명령(paused_command_id) */
+  readonly pausedCommandId?: string;
+  /** 명령 3이 마지막으로 바뀐 시각(paused_changed_at). 정지가 풀린 시각으로 유휴 시계를 돌려준다(ADR-0365 결정 8) */
+  readonly pausedChangedAtMs?: number;
+}
+
+/** 전체 범위(PLATFORM) 행의 명령 3 값. 판매 중지는 회차 범위만이라 칸이 없다 */
+export interface PlatformSalePause {
+  readonly paused: boolean;
+  readonly pausedRevision: number;
+  readonly pausedCommandId?: string;
+  readonly pausedChangedAtMs?: number;
+}
+
+/** 명령 3 범위: 회차 ID 또는 전체(PLATFORM) */
+export type SalePauseScope = { readonly kind: 'EVENT'; readonly eventId: string } | { readonly kind: 'PLATFORM' };
+
+/** 명령 3 한 번의 쓰기(제어 gRPC SALE_PAUSE). version이 지금 paused_revision보다 클 때만 쓴다 */
+export interface SalePauseWrite {
+  readonly scope: SalePauseScope;
+  readonly paused: boolean;
+  readonly commandId: string;
+  /** 제어 gRPC 판 번호(1 이상 안전 정수, ops-svc 원장이 매김) */
+  readonly version: number;
+  readonly nowMs: number;
+}
+
+/** 명령 3 쓰기 결과. appliedVersion은 쓰고 난 뒤(또는 쓰지 않았으면 지금)의 paused_revision이다 */
+export interface SalePauseApplied {
+  readonly paused: boolean;
+  readonly appliedVersion: number;
+  readonly commandId?: string;
+  readonly changedAtMs?: number;
+  readonly changed: boolean;
+}
+
+/** 다시 맞춤이 읽는 원본 전체(회차 행들과 전체 행) */
+export interface SaleControlSnapshot {
+  readonly events: readonly SaleControl[];
+  readonly platform?: PlatformSalePause;
 }
 
 /** 한 번의 쓰기. 같은 명령이 같은 상태를 다시 쓰면 판 번호를 올리지 않는다(재시도 멱등) */

@@ -232,6 +232,13 @@
       "when": 1795340153126,
       "tag": "0032_order_compensation",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795368257199,
+      "tag": "0033_sale_control_pause_revision",
+      "breakpoints": true
     }
   ]
 }

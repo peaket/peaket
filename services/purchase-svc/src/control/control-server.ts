@@ -1,15 +1,22 @@
-// 제어 gRPC 받는 쪽(peaket.control.v1.ControlReceiver.ApplyControl)의 purchase-svc 구현(BAT-465 R-584, ADR-0102·0103·0123).
-// 이번 몫은 CONTROL_KIND_SALE_SUSPENSION(판매 승인 업무의 판매 중지·재개)만 받는다. 다른 종류는 UNIMPLEMENTED다.
-// 판 번호(request.version)가 지금 값보다 클 때만 쓰고, 같거나 작으면 아무것도 바꾸지 않고 지금 적용한 판 번호만 돌려준다(멱등).
+// 제어 gRPC 받는 쪽(peaket.control.v1.ControlReceiver.ApplyControl)의 purchase-svc 구현(BAT-465 R-584, F-02-1 OPS-300, ADR-0102·0103·0123·0365).
+// 받는 종류: CONTROL_KIND_SALE_SUSPENSION(판매 승인 업무의 판매 중지·재개, 회차 범위)과 CONTROL_KIND_SALE_PAUSE(명령 3 판매 일시정지, 회차·PLATFORM).
+// 다른 종류는 UNIMPLEMENTED다. 판 번호(request.version)는 1 이상 안전 정수만 받고(0 이하·밖은 INVALID_ARGUMENT, ASVS 1.4.2·15.3.5),
+// 바라는 상태는 종류마다 정한 꼴만 받는다(모르는 칸·틀린 꼴은 INVALID_ARGUMENT이고 아무것도 쓰지 않는다, ADR-0365 결정 2, ASVS 2.1.1).
+// 판이 지금 값보다 클 때만 쓰고, 같거나 작으면 아무것도 바꾸지 않고 지금 적용한 판 번호만 돌려준다(멱등).
 // 응답의 applied_version은 이 파드가 적용한 판 번호다. ops-svc는 준비된 파드가 요청한 판 이상을 답했는지 이것으로 센다.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { controlV1Control } from '@peaket/contracts/proto';
 import { grpcServerOptions } from '@peaket/platform';
-import type { SetSaleSuspension } from '../modules/sale-control/index.js';
+import type { SetSalePause, SetSaleSuspension } from '../modules/sale-control/index.js';
 
 export const CONTROL_KIND_SALE_SUSPENSION = 'CONTROL_KIND_SALE_SUSPENSION';
+export const CONTROL_KIND_SALE_PAUSE = 'CONTROL_KIND_SALE_PAUSE';
+/** 전체 범위 이름(ApplyControlRequest.scope) */
+export const CONTROL_SCOPE_PLATFORM = 'PLATFORM';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** 명령 3의 회차 범위는 소문자 UUID만(ops-svc 원장의 범위 글과 같게, 좌석 Redis 키가 글자 그대로라) */
+const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 
 export interface ControlAck {
@@ -29,31 +36,55 @@ export interface ControlRequest {
 
 export interface ControlDeps {
   readonly setSuspension: SetSaleSuspension;
+  /** 명령 3 받는 쪽. 없으면 SALE_PAUSE도 UNIMPLEMENTED다 */
+  readonly setPause?: SetSalePause;
   readonly podName: string;
   readonly nowMs?: () => number;
 }
 
-/** 판매 중지·재개의 바라는 상태({"suspended": true|false})를 읽는다. 모르는 모양이면 undefined */
-export function suspendedOf(json: string): boolean | undefined {
+const invalid = (message: string): Error => Object.assign(new Error(message), { code: grpc.status.INVALID_ARGUMENT });
+
+/**
+ * 바라는 상태 JSON이 칸 하나(name)짜리 참거짓 객체인가(ADR-0365 결정 2). 모르는 칸·배열·다른 꼴은 undefined
+ */
+export function boolStateOf(json: string, name: string): boolean | undefined {
+  let v: unknown;
   try {
-    const v: unknown = JSON.parse(json);
-    if (typeof v !== 'object' || v === null) return undefined;
-    const suspended = (v as { suspended?: unknown }).suspended;
-    return typeof suspended === 'boolean' ? suspended : undefined;
+    v = JSON.parse(json);
   } catch {
     return undefined;
   }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+  const keys = Object.keys(v);
+  if (keys.length !== 1 || keys[0] !== name) return undefined;
+  const b = (v as Record<string, unknown>)[name];
+  return typeof b === 'boolean' ? b : undefined;
 }
 
-/** ApplyControl 하나를 처리한다. 던지지 않고 grpc 오류로 답한다 */
+/** 판매 중지·재개의 바라는 상태({"suspended": true|false})를 읽는다. 모르는 모양이면 undefined */
+export const suspendedOf = (json: string): boolean | undefined => boolStateOf(json, 'suspended');
+
+/** 판 번호 검사: 1 이상 안전 정수(ADR-0365 결정 1) */
+export const validControlVersion = (v: number): boolean => Number.isSafeInteger(v) && v > 0;
+
+/** ApplyControl 하나를 처리한다. 거절은 grpc 상태 코드를 단 Error로 던진다 */
 export async function applyControl(req: ControlRequest, deps: ControlDeps): Promise<ControlAck> {
-  if (req.kind !== CONTROL_KIND_SALE_SUSPENSION) throw Object.assign(new Error('이 제어 종류는 아직 받지 않는다'), { code: grpc.status.UNIMPLEMENTED });
-  if (!UUID.test(req.scope)) throw Object.assign(new Error('scope는 회차 ID여야 한다'), { code: grpc.status.INVALID_ARGUMENT });
-  if (!UUID.test(req.commandId)) throw Object.assign(new Error('command_id는 UUID여야 한다'), { code: grpc.status.INVALID_ARGUMENT });
-  if (!Number.isSafeInteger(req.version) || req.version < 0) throw Object.assign(new Error('version은 0 이상의 정수여야 한다'), { code: grpc.status.INVALID_ARGUMENT });
-  const suspended = suspendedOf(req.desiredStateJson);
-  if (suspended === undefined) throw Object.assign(new Error('desired_state_json이 {"suspended": bool}이 아니다'), { code: grpc.status.INVALID_ARGUMENT });
+  const pause = req.kind === CONTROL_KIND_SALE_PAUSE && deps.setPause !== undefined;
+  if (req.kind !== CONTROL_KIND_SALE_SUSPENSION && !pause) throw Object.assign(new Error('이 제어 종류는 받지 않는다'), { code: grpc.status.UNIMPLEMENTED });
+  if (!UUID.test(req.commandId)) throw invalid('command_id는 UUID여야 한다');
+  if (!validControlVersion(req.version)) throw invalid('version은 1 이상의 안전 정수여야 한다');
   const nowMs = deps.nowMs?.() ?? Date.now();
+  if (pause) {
+    if (req.scope !== CONTROL_SCOPE_PLATFORM && !LOWER_UUID.test(req.scope)) throw invalid('scope는 PLATFORM이나 소문자 회차 ID여야 한다');
+    const paused = boolStateOf(req.desiredStateJson, 'paused');
+    if (paused === undefined) throw invalid('desired_state_json이 {"paused": bool}이 아니다');
+    const scope = req.scope === CONTROL_SCOPE_PLATFORM ? ({ kind: 'PLATFORM' } as const) : ({ kind: 'EVENT', eventId: req.scope } as const);
+    const r = await deps.setPause!.run({ scope, paused, commandId: req.commandId, version: req.version, nowMs });
+    return { appliedVersion: r.appliedVersion, podName: deps.podName, appliedAtMs: nowMs };
+  }
+  if (!UUID.test(req.scope)) throw invalid('scope는 회차 ID여야 한다');
+  const suspended = suspendedOf(req.desiredStateJson);
+  if (suspended === undefined) throw invalid('desired_state_json이 {"suspended": bool}이 아니다');
   const result = await deps.setSuspension.run({
     eventId: req.scope,
     action: suspended ? 'SUSPEND' : 'RESUME',

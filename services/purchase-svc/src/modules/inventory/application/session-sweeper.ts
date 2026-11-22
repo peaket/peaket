@@ -1,10 +1,13 @@
 // 구매 세션 정리 반복(BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리'). 1초 [가정]마다 회차 임대(s:{event:E}:sesweep)를 잡은 파드가
 // 정리 색인 s:{event:E}:sessions에서 점검 시각이 된 세션을 100개 [가정]까지 읽어 하나씩 점검 Lua(store.sweep)로 끝내거나 다음 점검 시각으로 다시 놓는다.
 // 시각은 주입 Clock, 반복은 주입 타이머다(시험은 tick()을 손으로 부른다).
+// 판매 일시정지 유휴 시계(F-02-1 OPS-300, ADR-0365 결정 8, 상태 기계 T11): 그 회차(또는 전체)가 일시정지인 동안 유휴로 끝내지 않고 다음 볼 시각만 미룬다.
+// 풀린 뒤 '풀린 시각 + 5분 [가정]'이 지나기 전에 보는 세션은 유휴 시한이 그보다 이르면 그 값으로 다시 쓴다. 최대 체류는 그대로 센다. 정지 여부는 파드 메모리(pauses)다.
 import type { Clock } from '@peaket/platform';
 import { SeatStoreUnavailable } from '../domain/hold.js';
 import { seatLuaErrorOf } from '../domain/lua-errors.js';
-import type { PurchaseSessionStore, SeatExpiries, SessionIndex, SweepLeases } from '../domain/ports.js';
+import type { PurchaseSessionStore, SaleIdleClock, SeatExpiries, SessionIndex, SweepIdleOptions, SweepLeases } from '../domain/ports.js';
+import { SESSION_IDLE_MS } from '../domain/purchase-session.js';
 import type { EndPurchaseSession } from './end-purchase-session.js';
 import { type SweepTimer, systemSweepTimer } from './expiry-sweeper.js';
 
@@ -20,6 +23,8 @@ export const SESSION_SWEEP_LEASE_TTL_MS = 3000;
 export const SESSION_SWEEP_BACKOFF_MS = 5000;
 /** 점검이 일시 장애가 아닌 오류로 실패한 멤버를 뒤로 미루는 시간 60초 [가정](망가진 멤버 하나가 같은 회차의 정리를 막지 않게) */
 export const SESSION_SWEEP_POISON_RETRY_MS = 60_000;
+/** 판매 일시정지가 풀린 뒤 돌려주는 유휴 시간: 풀린 시각 + 5분 [가정](유휴 시한과 같은 길이, ADR-0365 결정 8) */
+export const SESSION_IDLE_RESUME_GRACE_MS = SESSION_IDLE_MS;
 /** 한 틱에 동시에 돌리는 회차 수 4 [가정](만료 반복과 같다) */
 const SESSION_SWEEP_CONCURRENCY = 4;
 
@@ -58,6 +63,8 @@ export interface SessionSweeperDeps {
   logger?: { warn(obj: object, msg: string): void; error(obj: object, msg: string): void };
   /** 반복 타이머(기본 systemSweepTimer, 만료 반복과 같은 SweepTimer: every(ms, run) → { cancel() }) */
   timer?: SweepTimer;
+  /** 판매 일시정지 유휴 시계(ADR-0365 결정 8). 없으면 정지를 보지 않는다 */
+  pauses?: SaleIdleClock;
 }
 
 export class SessionSweeper {
@@ -153,7 +160,8 @@ export class SessionSweeper {
       for (let batch = 0; batch < SESSION_SWEEP_MAX_BATCHES; batch++) {
         if (stopped()) return done('STOPPED');
         const due = await index.due(eventId, clock.now(), SESSION_SWEEP_BATCH);
-        for (const jti of due) await this.#check(eventId, jti, report);
+        const idle = this.#idleOptions(eventId);
+        for (const jti of due) await this.#check(eventId, jti, report, idle);
         if (due.length < SESSION_SWEEP_BATCH) return done('DRAINED');
       }
       return done('BATCH_LIMIT');
@@ -164,12 +172,22 @@ export class SessionSweeper {
     }
   }
 
+  /** 그 회차의 유휴 시계 선택값: 정지 중이면 idlePaused, 풀린 시각 + 5분 전이면 idleFloorMs(ADR-0365 결정 8) */
+  #idleOptions(eventId: string): SweepIdleOptions | undefined {
+    const rule = this.deps.pauses?.idleRule(eventId);
+    if (!rule) return undefined;
+    if (rule.paused) return { idlePaused: true };
+    if (rule.releasedAtMs === undefined) return undefined;
+    const floor = rule.releasedAtMs + SESSION_IDLE_RESUME_GRACE_MS;
+    return this.deps.clock.now() < floor ? { idleFloorMs: floor } : undefined;
+  }
+
   /** 세션 하나를 점검한다. 던지는 것은 좌석 Redis 장애와 버그(회차 하나를 UNAVAILABLE·ERROR로 만든다)뿐이다 */
-  async #check(eventId: string, jti: string, report: SessionSweepEventReport): Promise<void> {
+  async #check(eventId: string, jti: string, report: SessionSweepEventReport, idle?: SweepIdleOptions): Promise<void> {
     const { store, index, ending } = this.deps;
     let r;
     try {
-      r = await store.sweep(jti);
+      r = idle ? await store.sweep(jti, idle) : await store.sweep(jti);
     } catch (err) {
       // 모양이 틀린 멤버(키 조각이 아님)는 영영 점검할 수 없어 색인에서 뺀다
       if (err instanceof RangeError) {
