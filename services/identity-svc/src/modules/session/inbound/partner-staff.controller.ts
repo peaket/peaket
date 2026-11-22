@@ -16,9 +16,9 @@ import { PartnerStaffInvitationError, PartnerStaffInvitations } from '../applica
 
 function reject(e: unknown): never {
   if (e instanceof PartnerStaffInvitationError) {
-    if (e.code === 'NOT_FOUND') throw new ProblemError({ type: 'not-found', status: 404, title: '없는 회차이거나 이 파트너의 회차가 아닙니다' });
+    if (e.code === 'NOT_FOUND') throw new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다', detail: '없는 회차이거나 이 파트너의 회차가 아닙니다' });
     if (e.code === 'DEPENDENCY_UNAVAILABLE') throw new ProblemError({ type: 'authz-unavailable', status: 503, title: '권한을 확인하지 못했습니다', retryAfterSeconds: 1 });
-    if (e.code === 'MAIL_UNAVAILABLE') throw new ProblemError({ type: 'provider-down', status: 503, title: '지금은 초대 메일을 보낼 수 없습니다', retryAfterSeconds: 1 });
+    if (e.code === 'MAIL_UNAVAILABLE') throw new ProblemError({ type: 'staff-invite-mail-unavailable', status: 503, title: '지금은 초대 메일을 보낼 수 없습니다', retryAfterSeconds: 1 });
     if (e.code === 'DUPLICATE_EMAIL') throw new ProblemError({ type: 'staff-invitation-duplicate', status: 422, title: '같은 이메일을 두 번 초대할 수 없습니다' });
     if (e.code === 'ALREADY_ACCEPTED') throw new ProblemError({ type: 'staff-invitation-already-accepted', status: 409, title: '이미 수락했거나 끝난 배정입니다' });
     if (e.code === 'LIMIT') throw new RequestValidationError('초대는 한 번에 1~200명, 목록 limit은 1~100이어야 합니다');

@@ -27,7 +27,7 @@
 - 서비스: `services/identity-svc/src/modules/session/inbound/partner-staff.controller.ts`(두 줄). `src/modules/session/session.module.ts`·`src/main.ts`의 주석·경고 문구도 새 이름으로 맞춘다.
 - 계약: `docs/api/openapi.yaml` `x-peaket-problem-types`에 `staff-invite-mail-unavailable` 한 줄(`staff-invitation-email-mismatch` 뒤, 알파벳 차례), 초대 만들기(5170행)·재발송(5176행) 설명과 503 응답 설명의 `provider-down`을 새 이름으로. 404 설명은 이름(`not-found`)만 적혀 있어 그대로 둔다.
 - 생성물: `pnpm --filter @peaket/contracts gen`·`pnpm --filter @peaket/api-client gen`. `packages/api-client/src/gen/problem-types.ts`에 새 이름이, 두 패키지의 파트너 경로 설명 주석에 새 문구가 들어간다. 생성물은 생성기로만 고친다.
-- 정본: `docs/features/identity.md` §6.1 GAT-210 문단의 `503 provider-down`을 새 이름으로. `docs/security/asvs/offline-gate.md`에는 초대 메일 실패의 오류 이름을 적은 문장이 없어(초대 메일 링크·쿠키 문장뿐) 고칠 행이 없다. 같은 이유로 새 ASVS 판정도 만들지 않는다. `docs/adr/0353-...md` 결정 7에는 이름이 바뀐 사실을 한 줄 덧붙인다(결정 내용은 그대로). `docs/review/ledger/identity.md` I-T21 ⑥ 설명도 새 이름으로 맞춘다.
+- 정본: `docs/features/identity.md` §6.1 GAT-210 문단의 `503 provider-down`을 새 이름으로. `docs/security/asvs/offline-gate.md`에는 초대 메일 실패의 오류 이름을 적은 문장이 없어(초대 메일 링크·쿠키 문장뿐) 고칠 행이 없다. 같은 이유로 새 ASVS 판정도 만들지 않는다. `docs/adr/0353-staff-invitation-event-owner-lookup-via-core-internal-http.md` 결정 7에는 이름이 바뀐 사실을 한 줄 덧붙인다(결정 내용은 그대로). `docs/review/ledger/identity.md`는 생성기 출력이라 손으로 고치지 않는다. 다음 `ledger.mjs` 실행이 정본 문장을 반영한다(지금도 BAT-450C의 I-T87·I-T88 행이 아직 반영되지 않은 상태다).
 - 시험: `services/identity-svc/test/partner-staff-invitations.test.ts`의 I-T21 ⑤·⑥.
 
 ### 4. 시험(시험 담당이 구현 전 트리에서 실패를 본다)

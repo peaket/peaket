@@ -3814,7 +3814,7 @@ export const getCreatePartnerEventStaffInvitationUrl = (eventId: string,) => {
 }
 
 /**
- * FR-046, POL-031, ADR-0051, ADR-0353. 한 번에 1~200명을 초대한다. 초대마다 32바이트 토큰을 만들고 SHA-256만 저장하며, 링크는 토큰을 URL 조각(#token=)에만 담는다(응답·로그에 토큰 없음). 회차 소유는 core-svc 내부 판매 설정으로 확인하고(판매 승인 전·없는 회차·다른 파트너 회차는 같은 404), 테넌트는 세션 값만 쓴다. 같은 회차·같은 이메일의 INVITED는 422다(재발송은 /v1/partner/staff/{assignmentId}/invitation). 초대 메일 대행사가 없으면 503 provider-down이고 행을 만들지 않는다
+ * FR-046, POL-031, ADR-0051, ADR-0353. 한 번에 1~200명을 초대한다. 초대마다 32바이트 토큰을 만들고 SHA-256만 저장하며, 링크는 토큰을 URL 조각(#token=)에만 담는다(응답·로그에 토큰 없음). 회차 소유는 core-svc 내부 판매 설정으로 확인하고(판매 승인 전·없는 회차·다른 파트너 회차는 같은 404), 테넌트는 세션 값만 쓴다. 같은 회차·같은 이메일의 INVITED는 422다(재발송은 /v1/partner/staff/{assignmentId}/invitation). 초대 메일 대행사가 없으면 503 staff-invite-mail-unavailable이고 행을 만들지 않는다
  * @summary 현장 스태프 초대(이메일 여러 개, 최대 200명 [가정], 역할 gate_staff·gate_lead, 회차 단위)
  */
 export const createPartnerEventStaffInvitation = async (eventId: string,

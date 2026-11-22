@@ -104,7 +104,7 @@ export interface SessionModuleOptions {
   withdrawalSignals?: WithdrawalSignals;
   /** core-svc 회차 판매자·시각 조회(파트너 초대, ADR-0353). 없으면 초대 만들기·명단·해제·재발송이 503이다 */
   coreEventOwners?: CoreEventOwners;
-  /** 현장 스태프 초대 메일 포트. 없으면 만들기·재발송이 503 provider-down이다 */
+  /** 현장 스태프 초대 메일 포트. 없으면 만들기·재발송이 503 staff-invite-mail-unavailable이다 */
   staffInviteMailer?: StaffInviteMailer;
   /** 초대 링크 앞부분(조각은 서비스가 붙인다). 없으면 기본값 */
   staffInvitationUrl?: string;

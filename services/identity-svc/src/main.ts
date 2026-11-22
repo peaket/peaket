@@ -270,7 +270,7 @@ for (const w of withdrawal.warnings) service.logger.warn(w);
 if (!loginRisk) service.logger.warn({ dep: 'trust-svc' }, 'PEAKET_TRUST_GRPC_URL이 없어 세션의 로그인 판정이 늘 UNKNOWN이다');
 if (!cache) service.logger.warn('PEAKET_IDENTITY_REDIS_URL이 없어 가입 때 연결 제안을 이 프로세스 메모리에 둔다(local·ci만)');
 if (!coreEventOwners) service.logger.warn('PEAKET_CORE_HTTP_URL이 없어 파트너 초대의 회차 소유 확인이 503이다(local·ci만)');
-if (!staffInviteMailer) service.logger.warn('초대 메일 포트가 없어 파트너 초대 만들기·재발송이 503 provider-down이다(운영 대행은 GAT-250/BAT-455)');
+if (!staffInviteMailer) service.logger.warn('초대 메일 포트가 없어 파트너 초대 만들기·재발송이 503 staff-invite-mail-unavailable이다(운영 대행은 GAT-250/BAT-455)');
 
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다.
 // Kafka 클라이언트(네이티브 모듈)는 여기서 싣는다

@@ -23,7 +23,7 @@
    - local·ci에서 주소(`PEAKET_CORE_HTTP_URL`)나 어댑터가 없을 때도 같은 503이다.
 5. **테넌트는 요청 본문이 아니라 세션에서만 온다.** `principal.tenantId`(ADR-0172, identity `GetAdminAuthz`가 채운다)와 core가 준 `promoterId`를 견준다. 본문·경로의 `promoterId`는 받지 않는다. 배정의 `promoter_id`는 core가 준 값으로 채운다(C2-10의 생성 경로).
 6. **판매 승인 전 회차는 이 묶음에서 초대할 수 없다.** `event_sale_config`가 없으면 404다. 승인 전 초대가 필요해지면 core에 회차 소유만 보는 별도 읽기를 더하는 새 ADR로 넓힌다.
-7. **메일 전달은 동기 발송이 아니라 포트 + local·ci 파일 대역까지다.** `StaffInviteMailer` 포트를 두고 `PEAKET_STAFF_MAIL_DIR`의 파일 대역만 만든다. 운영 대행사 어댑터는 GAT-250/BAT-455로 넘긴다. 메일 포트가 없으면 초대 만들기·재발송은 503 `provider-down`이고 행을 만들지 않는다(보내지 못한 초대를 만든 척하지 않는다).
+7. **메일 전달은 동기 발송이 아니라 포트 + local·ci 파일 대역까지다.** `StaffInviteMailer` 포트를 두고 `PEAKET_STAFF_MAIL_DIR`의 파일 대역만 만든다. 운영 대행사 어댑터는 GAT-250/BAT-455로 넘긴다. 메일 포트가 없으면 초대 만들기·재발송은 503 `provider-down`이고 행을 만들지 않는다(보내지 못한 초대를 만든 척하지 않는다). 오류 type 이름은 2026-11-22 W12-identity-problems에서 `staff-invite-mail-unavailable`로 바꿨다(뜻은 그대로, `provider-down`은 본인확인 장애 전용으로 남긴다).
 8. **초대 토큰은 32바이트 CSPRNG, SHA-256만 저장, 24시간, 1회용**이고 링크의 URL 조각(`#token=`)에만 둔다. API 응답·헤더·로그·감사에 원문을 싣지 않는다. 재발송은 해시를 새 토큰으로 바꿔 옛 토큰을 즉시 무효로 한다. 같은 회차·같은 이메일의 INVITED 중복은 애플리케이션 검사와 부분 유일 인덱스(마이그레이션 0036) 두 곳에서 막는다.
 
 ## 검토한 대안
