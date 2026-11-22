@@ -35,3 +35,40 @@ test('I-T91 ③ RV-01 화면의 수락 처리기는 canAcceptIn이 거짓이면 
   // 수락 요청은 그 가드 뒤에만 있다
   assert.ok(accept.indexOf('!canAcceptIn(load)') < accept.indexOf('api.accept('), '가드가 요청보다 앞이다');
 });
+
+// ---- M7(검증 1): 받는 쪽 동의 양식이 blocked로 [수락]을 실제로 끄는지 ----
+const FORM = readFileSync(new URL('../ui/InviteConsentForm.tsx', import.meta.url), 'utf8');
+
+/**
+ * 양식의 켜짐 판정 식(`const canAccept = …;`)을 꺼내 값을 넣어 계산한다(.tsx는 node로 그리지 못해 식만 돌린다).
+ * 식은 `이름`·`!이름`을 `&&`로 이은 꼴만 읽는다(그 밖의 꼴이면 실패해 시험을 다시 본다). eval 없이 낱말마다 값을 본다
+ */
+function formCanAccept(v) {
+  const m = FORM.match(/const canAccept = ([^;\n]+);/);
+  assert.ok(m, '양식에 canAccept 판정이 있다');
+  return m[1].split('&&').every((raw) => {
+    const term = raw.trim();
+    const t = /^(!?)([A-Za-z_$][\w$]*)$/.exec(term);
+    assert.ok(t && Object.hasOwn(v, t[2]), `읽을 수 있는 낱말이다: ${term}`);
+    return t[1] === '!' ? !v[t[2]] : Boolean(v[t[2]]);
+  });
+}
+
+test('I-T91 ③ M7 동의 양식은 받는 자를 읽지 못했으면(blocked) 두 칸을 모두 체크해도 [수락]을 끈다', () => {
+  assert.equal(formCanAccept({ collect: true, provide: true, blocked: true, busy: false }), false);
+  assert.equal(formCanAccept({ collect: true, provide: true, blocked: false, busy: false }), true);
+  // 두 칸 가운데 하나라도 빠지거나 보내는 중이면 꺼진다(I-T91 ①)
+  assert.equal(formCanAccept({ collect: true, provide: false, blocked: false, busy: false }), false);
+  assert.equal(formCanAccept({ collect: false, provide: true, blocked: false, busy: false }), false);
+  assert.equal(formCanAccept({ collect: true, provide: true, blocked: false, busy: true }), false);
+});
+
+test('I-T91 ③ M7 [수락] 버튼은 그 판정으로 꺼짐(aria-disabled)·이유 안내·누름 무시를 정하고, 막힌 까닭은 받는 자 안내다', () => {
+  const from = FORM.indexOf('<button', FORM.indexOf('className="col gap-2 md:flex-row'));
+  const button = FORM.slice(from, FORM.indexOf('초대 수락하기', from));
+  assert.ok(from > 0 && button.length > 0, '[초대 수락하기] 버튼이 있다');
+  assert.match(button, /aria-disabled=\{canAccept \? undefined : true\}/);
+  assert.match(button, /onClick=\{\(\) => \{\s*if \(!canAccept\) return;/);
+  // 막혔을 때의 이유 글은 받는 자를 확인하지 못했다는 안내다(두 동의 안내와 다르다)
+  assert.match(FORM, /\{blocked\s*\?\s*'초대한 파트너 정보를 불러와야 수락할 수 있습니다\./);
+});
