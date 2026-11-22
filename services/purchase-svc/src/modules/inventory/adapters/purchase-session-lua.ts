@@ -130,6 +130,13 @@ if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
 return redis.call('HSETNX', KEYS[1], 'bs', '1')
 `;
 
+// ── 홀드 시도 세기(COUNT_HOLD_ATTEMPT_LUA, ADR-0357 결정 7, docs/data.md §3 s:session:{jti}의 hn, F-04-2) ──
+// KEYS: 1 세션 상태 s:session:{jti}. 세션이 없으면 아무것도 만들지 않고 -1. 있으면 HINCRBY hn 1의 결과(올린 값)를 돌려준다.
+export const COUNT_HOLD_ATTEMPT_LUA = `#!lua
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+return redis.call('HINCRBY', KEYS[1], 'hn', 1)
+`;
+
 // ── 구매 세션 종료와 정리(BUILD_ORDER PRF-138, docs/features/seat-hold.md §2 '구매 세션 종료와 정리') ───────────────────────
 // 모두 첫 줄이 `#!lua`이고 allow-oom 표시가 없다. 시각은 Redis TIME을 한 번 읽은 값(밀리초)이다.
 //

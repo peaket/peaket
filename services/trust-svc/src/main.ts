@@ -4,13 +4,19 @@
 // 비공개 규칙 설정을 읽어야 준비 상태가 된다(docs/features/bot-defense.md §4.4). 기준값·가중치는 파일로만 받고 저장소에 두지 않는다(POL-006).
 import 'reflect-metadata';
 import { CircuitBreaker, controlSyncRequired, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { checkProducerSchemas, createAvroEncoder, readSchemaIdsFile, type AvroEncoder } from '@peaket/platform/avro';
+import { avroSchemas } from '@peaket/contracts/avro';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
   ApplyLabel,
   deviceRefsFromEnv,
   GetVerdictEvidence,
-  JsonTelemetryRecorder,
+  AvroTelemetryRecorder,
+  BEHAVIOR_SIGNAL_RECORD,
+  BEHAVIOR_TOPIC,
+  TRUST_VERDICT_RECORD,
+  TRUST_VERDICTS_TOPIC,
   kmsMacClient,
   LogBlockListChange,
   LogVerdictRecorder,
@@ -52,6 +58,17 @@ const devices = deviceRefsFromEnv(env, systemClock, (endpoint) => kmsMacClient({
 const asnFile = env.PEAKET_ASN_TABLE_FILE;
 // 판정 기록·행동 신호(텔레메트리 클러스터, ADR-0249 결정 4). 없거나 틀리면 경고하고 그 기능만 끈다(값 있음은 배포 검사가 막는다)
 const telemetryKafka = telemetryKafkaFromEnv(SERVICE, env);
+// 판정 기록·행동 신호의 값은 공용 Avro 인코더로 만든다(ADR-0357 결정 1·4·9). 텔레메트리 Kafka가 켜졌을 때만 설정 파일(PEAKET_SCHEMA_IDS_FILE)을 읽는다(없거나 주제가 없으면 시작하지 않는다)
+const avroEncoder: AvroEncoder | undefined = telemetryKafka.enabled
+  ? createAvroEncoder({
+      schemaIds: readSchemaIdsFile(env),
+      schemas: avroSchemas,
+      produces: [
+        { topic: TRUST_VERDICTS_TOPIC, record: TRUST_VERDICT_RECORD },
+        { topic: BEHAVIOR_TOPIC, record: BEHAVIOR_SIGNAL_RECORD },
+      ],
+    })
+  : undefined;
 
 const redis = await createHotRedis(clusterUrls.length > 0 ? { clusterUrls } : { url: redisUrl });
 const features = new RedisFeatureStore(redis);
@@ -62,7 +79,7 @@ const after = (work: () => Promise<void>): void => {
   pending.add(p);
 };
 // 앱 포트의 허니팟 처리기가 쓰므로 뼈대보다 먼저 만들고, 내보내는 쪽은 뼈대의 지표 레지스트리가 생긴 뒤 잇는다
-let telemetry: JsonTelemetryRecorder | undefined;
+let telemetry: AvroTelemetryRecorder | undefined;
 const honeypot = new RecordHoneypot({ features, recorder: { honeypot: (r) => telemetry?.honeypot(r) }, signals, clock: systemClock, after });
 const service = await createService({ name: SERVICE, module: AppModule.register({ honeypot }) });
 signals.register(service.metrics.registry);
@@ -71,7 +88,8 @@ const dropped = telemetryDroppedCounter(service.metrics.registry);
 let sink: TelemetrySink | undefined;
 let telemetrySender: KafkaTelemetrySender | undefined;
 const telemetryOff = (warning: string): void => {
-  telemetry = new JsonTelemetryRecorder({ offer: (record) => dropped(record, 1), dropped: (record) => dropped(record, 1) });
+  // 꺼져 있으면 인코더 없이 만들어 내지 않고 버린 수만 센다
+  telemetry = new AvroTelemetryRecorder({ offer: (record) => dropped(record, 1), dropped: (record) => dropped(record, 1) });
   service.logger.warn({ dep: 'telemetry-kafka' }, warning);
 };
 if (telemetryKafka.enabled) {
@@ -85,7 +103,7 @@ if (telemetryKafka.enabled) {
     telemetrySender = sender;
     const telemetrySink = new TelemetrySink({ send: sender, onDropped: dropped });
     sink = telemetrySink;
-    telemetry = new JsonTelemetryRecorder({ offer: (record, topic, m) => telemetrySink.offer(record, topic, m), dropped: (record) => dropped(record, 1) });
+    telemetry = new AvroTelemetryRecorder({ offer: (record, topic, m) => telemetrySink.offer(record, topic, m), dropped: (record) => dropped(record, 1) }, avroEncoder, service.logger);
   } catch {
     telemetryOff('Kafka 클라이언트를 싣지 못해 판정 기록·행동 신호를 Kafka로 보내지 않는다');
   }
@@ -161,6 +179,17 @@ const { startServiceControlSync } = await import('@peaket/platform/stream-worker
   return { startServiceControlSync: () => undefined };
 });
 const controlSync = startServiceControlSync(service, env, { sessions: false });
+
+// 생산자 시작 확인(ADR-0357 결정 5): 텔레메트리 Kafka가 켜졌을 때만, 듣기 전에 한 번. 다름·404·주소 없음(local·ci 밖)은 시작 실패, 닿지 못하면 경고와 게이지로 계속한다
+if (avroEncoder) {
+  await checkProducerSchemas({
+    env,
+    encoder: avroEncoder,
+    schemas: avroSchemas,
+    metrics: service.metrics.registry,
+    logger: { info: (x) => service.logger.info(x, '레지스트리 시작 확인을 건너뛴다(주소 없음, local·ci)'), warn: (x) => service.logger.warn(x, '레지스트리에 닿지 못해 설정의 스키마 ID로 계속한다') },
+  });
+}
 
 await service.listen();
 // 업무 gRPC 포트(PEAKET_GRPC_PORT, 기본 50051 [가정])와 부하 분산 프로필은 공용 설정이 읽는다(BUILD_ORDER BAS-080)

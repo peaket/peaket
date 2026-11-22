@@ -16,13 +16,13 @@ import type { FallbackReason, MisconfiguredReason, RecheckAnswer } from './reche
 import type { SagaFailTransition, SagaFailureReason, SagaStep } from './saga.js';
 import type { IssuedTicketRef, TicketIssueAttemptResult, TicketIssueFailureCode, TicketIssueRunStage } from './ticket-issue.js';
 
-/** 주문 사건을 Outbox 값 바이트로 바꾼다. Avro 인코더(BAS-030)가 오기 전까지 JSON 대역이다 */
 /** 호출 시간 한도(도메인은 플랫폼을 모른다. 플랫폼 Deadline이 이 모양을 만족한다) */
 export interface HoldMarkDeadline {
   remainingMs(): number;
   budgetFor(capMs: number): number;
 }
 
+/** 주문 사건을 Outbox 값 바이트로 바꾼다(운영은 공용 Avro 인코더, adapters/order-events.ts avroOrderEventCodec). 계약을 채우지 못하면 던진다 */
 export interface OrderEventCodec {
   encode(message: OrderEventMessage): Uint8Array;
 }

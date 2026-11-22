@@ -1,8 +1,12 @@
 // 좌석·결제 화면의 행동 신호를 asyncapi BehaviorSignal 모양으로 낸다(토픽 telemetry.behavior, 키 pid, docs/features/bot-defense.md §4.1, ADR-0249 결정 4·6).
-// Avro 인코더(BUILD_ORDER BAS-030) 전까지 값은 UTF-8 JSON 바이트다. purchase-svc는 요청 IP의 망 정보를 모르고 기기 가명을 계산하지 않아 netClass·asn·deviceRef를 싣지 않는다.
+// 값은 공용 Avro 인코더로 만든 Confluent 형식 바이트다(ADR-0357 결정 3·9, F-04-2). purchase-svc는 요청 IP의 망 정보를 모르고 기기 가명을 계산하지 않아 netClass·asn·deviceRef를 싣지 않는다.
+// 만들지 못한 기록은 버리고 telemetry_dropped_total{record="BehaviorSignal"}을 올리며, 경고 로그에는 레코드·칸 이름만 남긴다(ADR-0357 결정 8).
+import { AvroEncodeError, type AvroEncoder } from '@peaket/platform/avro';
 import type { BehaviorSignalRecord, BehaviorSignals } from '../domain/ports.js';
 
 export const BEHAVIOR_TOPIC = 'telemetry.behavior';
+/** 레코드 전체 이름(docs/api/avro/peaket/telemetry/BehaviorSignal.avsc) */
+export const BEHAVIOR_SIGNAL_RECORD = 'peaket.telemetry.BehaviorSignal';
 
 export interface TelemetryOut {
   offer(record: string, topic: string, message: { key: string | null; value: Buffer }): void;
@@ -23,8 +27,17 @@ function featuresOf(f: Record<string, unknown>): Record<string, number> {
   return out;
 }
 
-export class JsonBehaviorSignals implements BehaviorSignals {
-  constructor(private readonly out: TelemetryOut) {}
+export interface AvroBehaviorSignalsOptions {
+  /** 텔레메트리 버퍼(TelemetrySink.offer) */
+  offer: TelemetryOut['offer'];
+  encoder: AvroEncoder;
+  /** telemetry_dropped_total{record}을 올린다 */
+  dropped: (record: string, count: number) => void;
+  logger: { warn(obj: object, msg?: string): void };
+}
+
+export class AvroBehaviorSignals implements BehaviorSignals {
+  constructor(private readonly o: AvroBehaviorSignalsOptions) {}
 
   record(r: BehaviorSignalRecord): void {
     const value = {
@@ -37,6 +50,14 @@ export class JsonBehaviorSignals implements BehaviorSignals {
       ts: new Date(r.tsMs).toISOString(),
       eventKey: r.eventKey,
     };
-    this.out.offer('BehaviorSignal', BEHAVIOR_TOPIC, { key: r.pid, value: Buffer.from(JSON.stringify(value), 'utf8') });
+    let bytes: Buffer;
+    try {
+      bytes = this.o.encoder.encode(BEHAVIOR_TOPIC, BEHAVIOR_SIGNAL_RECORD, value);
+    } catch (err) {
+      this.o.dropped('BehaviorSignal', 1);
+      this.o.logger.warn({ kind: 'telemetry-encode-failed', record: 'BehaviorSignal', ...(err instanceof AvroEncodeError ? { fields: [...err.fields] } : {}) }, '좌석 행동 요약을 Avro로 만들지 못해 버린다');
+      return;
+    }
+    this.o.offer('BehaviorSignal', BEHAVIOR_TOPIC, { key: r.pid, value: bytes });
   }
 }

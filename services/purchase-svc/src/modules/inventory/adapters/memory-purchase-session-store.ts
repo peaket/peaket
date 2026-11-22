@@ -3,7 +3,7 @@
 import type { SessionHoldEntry } from '../domain/purchase-session.js';
 import type { Clock } from '@peaket/platform';
 import { assertEndedEntry, assertHoldRecord, assertIndexArgs, sessionCheckAt, type EndedSession, type SweepSessionResult, assertJti, assertOpenInput, assertSeq, assertStartedEntry, type OpenSessionInput, type OpenSessionResult, SESSION_IDLE_MS, SESSION_KEY_GRACE_MS, SESSION_STARTED_GRACE_MS, type SessionEndedEntry, type SessionStartedEntry, type StoredSession } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog, SweepIdleOptions } from '../domain/ports.js';
+import type { HoldAttemptCounts, PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog, SweepIdleOptions } from '../domain/ports.js';
 
 interface Marker {
   startedAtMs: number;
@@ -15,7 +15,7 @@ interface Marker {
 type StartedMark = boolean;
 
 /** PurchaseSessionStore의 메모리 구현 */
-export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
+export class MemoryPurchaseSessionStore implements PurchaseSessionStore, HoldAttemptCounts {
   readonly #markers = new Map<string, Marker>();
   readonly #sessions = new Map<string, StoredSession>();
   readonly #recorded = new Map<string, StartedMark>();
@@ -29,6 +29,8 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
   readonly #behaviorClaimed = new Set<string>();
   /** Paying 표시 pay가 쓰인 세션(BUILD_ORDER PRF-138) */
   readonly #paying = new Set<string>();
+  /** 홀드 시도 수 hn 칸(ADR-0357 결정 7). 세션 상태와 같이 사라진다 */
+  readonly #attempts = new Map<string, number>();
 
   constructor(private readonly clock: Clock) {}
 
@@ -107,6 +109,7 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
     this.#holds.delete(jti);
     this.#firstHeld.delete(jti);
     this.#paying.delete(jti);
+    this.#attempts.delete(jti);
   }
 
   /** 지금 시각에 사라졌어야 할 키를 지운다(Redis 키 수명과 같은 순간: 지금 ≥ 사라지는 시각) */
@@ -186,6 +189,15 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
     if (this.#behaviorClaimed.has(jti)) return false;
     this.#behaviorClaimed.add(jti);
     return true;
+  }
+
+  async countHoldAttempt(jti: string): Promise<number | null> {
+    assertJti(jti);
+    this.#expire(jti, this.clock.now());
+    if (!this.#sessions.has(jti)) return null;
+    const n = (this.#attempts.get(jti) ?? 0) + 1;
+    this.#attempts.set(jti, n);
+    return n - 1;
   }
 
   async recordHold(jti: string, holdId: string, seatIds: readonly string[], _o?: SeatCallOptions): Promise<boolean | null> {

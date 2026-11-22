@@ -6,7 +6,7 @@ export { RecordHoneypot } from './application/record-honeypot.js';
 export { TrustError } from './application/trust-error.js';
 export { deviceRefsFromEnv } from './adapters/device-refs.js';
 export { kmsMacClient } from './adapters/kms-mac-client.js';
-export { JsonTelemetryRecorder } from './adapters/json-telemetry-recorder.js';
+export { AvroTelemetryRecorder, BEHAVIOR_SIGNAL_RECORD, BEHAVIOR_TOPIC, TRUST_VERDICT_RECORD, TRUST_VERDICTS_TOPIC } from './adapters/avro-telemetry-recorder.js';
 export { LogBlockListChange, LogVerdictRecorder, PromTrustSignals } from './adapters/prom-trust-signals.js';
 export { RedisFeatureStore } from './adapters/redis-feature-store.js';
 export { RedisLabelStore } from './adapters/redis-label-store.js';

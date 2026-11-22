@@ -27,7 +27,7 @@ import {
   sessionStartedFields,
   type StoredSession,
 } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionHoldLists, SessionIndex, SessionStartedLog, SweepIdleOptions } from '../domain/ports.js';
+import type { HoldAttemptCounts, PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionHoldLists, SessionIndex, SessionStartedLog, SweepIdleOptions } from '../domain/ports.js';
 import {
   ADVANCE_SESSION_LUA,
   APPEND_SESSION_ENDED_LUA,
@@ -38,6 +38,7 @@ import {
   PAY_SESSION_LUA,
   RECORD_HOLD_LUA,
   CLAIM_SEAT_BEHAVIOR_LUA,
+  COUNT_HOLD_ATTEMPT_LUA,
   SWEEP_SESSION_LUA,
 } from './purchase-session-lua.js';
 import { guard, SEAT_REDIS, seatKeys } from './redis-seat-store.js';
@@ -58,6 +59,7 @@ const APPEND = redisScript(APPEND_SESSION_STARTED_LUA);
 const MARK = redisScript(MARK_SESSION_STARTED_LUA);
 const RECORD = redisScript(RECORD_HOLD_LUA);
 const CLAIM_BEHAVIOR = redisScript(CLAIM_SEAT_BEHAVIOR_LUA);
+const COUNT_ATTEMPT = redisScript(COUNT_HOLD_ATTEMPT_LUA);
 const END = redisScript(END_SESSION_LUA);
 const SWEEP = redisScript(SWEEP_SESSION_LUA);
 const PAY = redisScript(PAY_SESSION_LUA);
@@ -81,7 +83,7 @@ function msOf(v: unknown, what: string): number {
  * 그 밖(스크립트 오류·WRONGTYPE·모르는 결과 값)은 그대로 던진다
  */
 @Injectable()
-export class RedisPurchaseSessionStore implements PurchaseSessionStore, SessionHoldLists {
+export class RedisPurchaseSessionStore implements PurchaseSessionStore, SessionHoldLists, HoldAttemptCounts {
   constructor(@Inject(SEAT_REDIS) private readonly redis: HotRedis) {}
 
   async open(i: OpenSessionInput): Promise<OpenSessionResult> {
@@ -224,6 +226,16 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore, SessionH
     if (r === '1') return true;
     if (r === '0') return false;
     throw new Error(`행동 요약 표시 Lua가 모르는 값을 돌려줬다: ${r}`);
+  }
+
+  /** 홀드 시도 세기 Lua 한 번(KEYS = [세션 상태]). 응답을 보낸 뒤 텔레메트리 어댑터가 부른다(ADR-0357 결정 7) */
+  async countHoldAttempt(jti: string): Promise<number | null> {
+    assertJti(jti);
+    const r = str(await guard(this.redis.evalScript(COUNT_ATTEMPT, [sessionKeys.session(jti)], [])));
+    if (r === '-1') return null;
+    const n = Number(r);
+    if (!MS_TEXT.test(r) || !Number.isSafeInteger(n) || n < 1) throw new Error(`홀드 시도 세기 Lua가 모르는 값을 돌려줬다: ${r}`);
+    return n - 1;
   }
 
   async markStarted(jti: string): Promise<boolean> {

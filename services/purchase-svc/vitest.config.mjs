@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^@peaket\/platform\/stream-worker$/, replacement: src('../../packages/platform/src/stream-worker.ts') },
+      { find: /^@peaket\/platform\/avro$/, replacement: src('../../packages/platform/src/avro-entry.ts') },
       { find: /^@peaket\/platform$/, replacement: src('../../packages/platform/src/index.ts') },
     ],
   },

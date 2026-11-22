@@ -195,7 +195,7 @@ export class HoldSeats {
    * - 저장소가 일시 장애가 아닌 오류(스크립트 오류 같은 버그)를 던지면 ERROR 하나를 남기고 그 오류를 바꾸지 않고 던진다.
    * - HoldAttempt의 firstHeldInSession(BUILD_ORDER PRF-137): 새로 잡은 홀드(OK)마다 holds(SessionHolds)가 있으면 recordHold(구매 세션 ID, holdId, 정렬된 좌석 ID들)를 한 번 부르고
    *   결과(첫 홀드면 true, 아니면 false)를 HELD 시도 기록에 싣는다. 세션이 없어 null이거나, 던지거나(일시 장애든 버그든 로거 warn 한 줄), holds가 없으면 칸을 비운다.
-   *   멱등 재생(IDEM_REPLAY)과 거절은 기록하지 않는다. 기록 실패는 홀드를 막지 않는다(보조 기록이라서). Kafka·Avro 보내기는 BAS-030이다.
+   *   멱등 재생(IDEM_REPLAY)과 거절은 기록하지 않는다. 기록 실패는 홀드를 막지 않는다(보조 기록이라서). Kafka·Avro 보내기는 adapters/kafka-hold-attempts.ts다(F-04-2).
    *
    * 요청 마감(BUILD_ORDER PRF-135, guidelines §5). c.deadline이 있을 때만 본다:
    * - 좌석 Redis를 부르기 바로 전(5의 store.replay와 6의 store.hold 각각)에 c.deadline.remainingMs() < SEAT_CALL_MIN_REMAINING_MS(5)이면 부르지 않고
@@ -420,8 +420,15 @@ export class HoldSeats {
     if (!auto) throw new HoldError('SEATS_REQUIRED', '본문에 auto가 없다');
     let chosen: SeatRef[] = [];
     let assignResult: AutoAssignResult | undefined;
-    /** 자동 배정 시도 하나를 남긴다(mode AUTO, seatIds는 잡은 좌석 또는 실패 시 빈 목록) */
+    /** 수동 선택으로 넘긴 시도(409 manual-selection-required)면 참. 그 시도의 autoResult는 MANUAL_REQUIRED다 */
+    let manualRequired = false;
+    /**
+     * 자동 배정 시도 하나를 남긴다(mode AUTO, seatIds는 잡은 좌석 또는 실패 시 빈 목록).
+     * tierId·sectionId는 잡은 첫 좌석의 것이고, 잡지 못했으면 tierId는 희망 1순위 등급(firstTierId)이다(F-04-2 구현 메모).
+     * autoResult는 잡았으면 배정 결과 종류, 수동 선택으로 넘겼으면 MANUAL_REQUIRED, 그 밖의 거절은 없다(ADR-0357 결정 7)
+     */
     const record = (result: HoldAttemptResult, heldAtMs?: number, firstHeldInSession?: boolean): void => {
+      const autoResult = result === 'HELD' ? assignResult : manualRequired ? 'MANUAL_REQUIRED' : undefined;
       timeHotPathSync(this.hotPath, 'hold.attempts', () =>
         this.attempts.record({
           eventId: c.eventId,
@@ -430,8 +437,9 @@ export class HoldSeats {
           journeyId: session.journeyId,
           mode: 'AUTO',
           seatIds: chosen.map((s) => s.seatId),
-          ...(chosen[0] ? { tierId: chosen[0].tierId, sectionId: chosen[0].sectionId } : {}),
+          ...(chosen[0] ? { tierId: chosen[0].tierId, sectionId: chosen[0].sectionId } : { tierId: auto.firstTierId }),
           result,
+          ...(autoResult !== undefined ? { autoResult } : {}),
           ...(heldAtMs !== undefined ? { heldAtMs } : {}),
           ...(firstHeldInSession !== undefined ? { firstHeldInSession } : {}),
           occurredAtMs: this.clock.now(),
@@ -525,6 +533,7 @@ export class HoldSeats {
     if (list.groups.length === 0) {
       const replayed = await replay(config);
       if (replayed) return replayed;
+      manualRequired = true;
       throw refuse('MANUAL_SELECTION_REQUIRED', '희망 조건에 맞는 좌석이 없다');
     }
 
@@ -607,6 +616,7 @@ export class HoldSeats {
     // 7 모두 실패: 아무 좌석도 잡지 않았고, 수동 선택으로 넘긴다
     const replayed = await replay(config);
     if (replayed) return replayed;
+    manualRequired = true;
     throw refuse('MANUAL_SELECTION_REQUIRED', '희망 조건에 맞는 좌석이 없다');
   }
 

@@ -26,13 +26,18 @@
 // 오류 로그에는 플랫폼 errorSummary(이름·글, 쿼리 매개변수 값은 뺀다)만 싣는다.
 // purchase DB가 있으면 회차 판매 상태 판정(SaleStateJudge, PRF-144, ADR-0122)도 듣기 시작한 뒤 켜고 SIGTERM 때 끈다. 판정 전용 일반 풀(연결 2개 [가정], purchase-svc-sale-state)을 쓰고 지표 purchase_event_sale_*를 /metrics에 붙인다.
 // 좌석 Stream 릴레이·다시 만들기 반복·정비 일은 이 파일이 아니라 릴레이 프로세스(src/relay.ts, purchase-svc-outbox-relay 배포)가 돈다.
-// HoldAttempt 보내기(BAS-030)는 아직 없어 시도 기록은 버린다.
+// 사건 값은 공용 Avro 인코더(@peaket/platform/avro, ADR-0357)로 만든다: 주문 사건(trade.orders Outbox), 홀드 시도(telemetry.purchase), 좌석·결제 화면 행동 신호(telemetry.behavior).
+// 내는 주제가 있으면 PEAKET_SCHEMA_IDS_FILE(ConfigMap schema-ids)을 시작할 때 읽고(없거나 틀리면 시작하지 않는다), 듣기 전에 레지스트리 시작 확인을 한다
+// (다름·404는 시작 실패, 닿지 못하면 설정의 ID로 계속하고 schema_startup_check_unavailable 1, 준비 상태에 넣지 않는다, ST-T16 ②).
+// 회차 환급 팬 알림(같은 trade.orders)은 계약 판 OrderEvent에 그 사건 종류·칸이 없어 JSON 대역 그대로다(F-04-2 구현 메모 '멈춘 항목').
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
 import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, internalGrpcTokenFromEnv, kafkaTelemetrySend, type KafkaTelemetrySender, RedisReauthJtiStore, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer, startServiceControlSync } from '@peaket/platform/stream-worker';
+import { checkProducerSchemas, createAvroEncoder, readSchemaIdsFile, type AvroEncoder } from '@peaket/platform/avro';
+import { avroSchemas } from '@peaket/contracts/avro';
 import { AppModule } from './app.module.js';
 import {
   DrizzleCancelledTickets,
@@ -99,6 +104,11 @@ import { consumerDatabaseOptions, kafkaConsumersFromEnv, paymentConsumerDatabase
 import { hotConnectTimeoutMsFromEnv } from './db-pool.js';
 import { acceptBulkheadLimitFromEnv, setAcceptBulkheadLimit, setWriteBulkheadLimit, writeBulkheadLimitFromEnv } from './write-bulkhead.js';
 import {
+  avroOrderEventCodec,
+  BEHAVIOR_SIGNAL_RECORD,
+  ORDER_EVENT_RECORD,
+  TELEMETRY_BEHAVIOR_TOPIC,
+  TRADE_ORDERS_TOPIC,
   type BehaviorSignalPublisher,
   type BookingModuleDeps,
   CancelCompensation,
@@ -220,7 +230,11 @@ import {
   SeatStoreUnavailable,
   discardBehaviorSignals as discardSeatBehaviorSignals,
   discardHoldAttempts,
-  JsonBehaviorSignals,
+  AvroBehaviorSignals,
+  HOLD_ATTEMPT_RECORD,
+  type HoldAttempts,
+  KafkaHoldAttempts,
+  TELEMETRY_PURCHASE_TOPIC,
   SeatBehaviorReporter,
   type BehaviorSignals,
   admissionKeysFromEnv,
@@ -318,7 +332,17 @@ export async function start(o: StartOptions): Promise<StartedService> {
   });
   // 좌석 화면 행동 요약(BUILD_ORDER BOT-055, ADR-0249): 텔레메트리 클러스터로 낸다. 주소가 없거나 틀리면 경고하고 그 기능만 끈다(값 있음은 배포 검사가 막는다)
   const telemetryKafka = telemetryKafkaFromEnv(SERVICE, env);
+  // 공용 Avro 인코더(ADR-0357 결정 1·4·9): purchase DB가 있으면 주문 사건과 결제 화면 행동 신호, 텔레메트리 Kafka가 켜졌으면 홀드 시도와 좌석 화면 행동 신호를 낸다.
+  // 낼 주제가 하나라도 있으면 설정 파일이 있어야 하고 그 주제가 모두 파일에 있어야 한다(없으면 여기서 시작하지 않는다, D-T39 ③)
+  const produces: { topic: string; record: string }[] = [];
+  if (databaseUrl) produces.push({ topic: TRADE_ORDERS_TOPIC, record: ORDER_EVENT_RECORD }, { topic: TELEMETRY_BEHAVIOR_TOPIC, record: BEHAVIOR_SIGNAL_RECORD });
+  if (telemetryKafka.enabled) produces.push({ topic: TELEMETRY_PURCHASE_TOPIC, record: HOLD_ATTEMPT_RECORD }, { topic: TELEMETRY_BEHAVIOR_TOPIC, record: BEHAVIOR_SIGNAL_RECORD });
+  const avroEncoder: AvroEncoder | undefined = produces.length > 0 ? createAvroEncoder({ schemaIds: readSchemaIdsFile(env), schemas: avroSchemas, produces }) : undefined;
+  const orderCodec = databaseUrl && avroEncoder ? avroOrderEventCodec(avroEncoder) : undefined;
+  const orderStoreOptions = { clock: systemClock, ...(orderCodec ? { codec: orderCodec } : {}) };
   let behaviorSignals: BehaviorSignals = discardSeatBehaviorSignals;
+  // 홀드 시도 보내기는 서비스 지표·로거가 생긴 뒤 묶는다(그 전에는 홀드 요청이 오지 않는다)
+  let holdAttempts: HoldAttempts = discardHoldAttempts;
   const behaviorPending = new Set<Promise<void>>();
   const seatBehavior = new SeatBehaviorReporter({
     claims: sessionStore,
@@ -383,7 +407,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         warn: (o) => log?.warn(o, '팬 취소의 재인증 토큰을 확인하지 못했다'),
       }),
     });
-    const cancellationWrites = new DrizzleCancellationWrites(database, new DrizzleOrderStore({ clock: systemClock }));
+    const cancellationWrites = new DrizzleCancellationWrites(database, new DrizzleOrderStore(orderStoreOptions));
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
       writes: cancellationWrites,
@@ -568,7 +592,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const identityLate: { recheck?: IdentityRecheck; contactRefs?: ContactRefs } = {};
   // - 결제 접수(POST /v1/orders/{orderId}/payment-acceptance, PRF-162)는 주문 생성과 같은 주문 전이 함수(DrizzleOrderStore)를 쓰고, 회차 슬롯 읽기는 좌석 Redis(RedisSeatSlots)다
   // - 접수를 커밋한 직후 Saga 실행기를 한 번 깨운다(onAccepted → OrderSagaRunner.kick, PRF-165). 실행기는 서비스 로거로 만들므로 늦게 묶는다(그 전이면 부르지 않는다)
-  const orderStore = new DrizzleOrderStore({ clock: systemClock });
+  const orderStore = new DrizzleOrderStore(orderStoreOptions);
   let sagaRunner: OrderSagaRunner | undefined;
   // - 결제 결과 long polling(GET /v1/orders/{orderId}/payment-status, PRF-166): 읽기는 같은 핫패스 풀(쓰기 인스턴스), 기다림 표는 이 파드 하나다.
   //   Saga 실행기와 결제 결과 처리기(ApplyPaymentResult, trade.payments 소비자, PRF-164)의 onOrderChanged에 그 notify를 넘긴다(같은 파드가 주문을 바로 답할 상태로
@@ -639,7 +663,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     module: AppModule.register({
       redis,
       seatMap,
-      attempts: discardHoldAttempts,
+      attempts: { record: (a) => holdAttempts.record(a) },
       seatBehavior,
       sessions,
       podId,
@@ -799,7 +823,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const ticketDb = createDatabase(ticketIssueDatabaseOptions(databaseUrl));
     ticketIssueDatabase = ticketDb;
     ticketRunner = new TicketIssueRunner({
-      jobs: new DrizzleTicketIssue({ database: ticketDb, store: orderStore, clock: systemClock }),
+      jobs: new DrizzleTicketIssue({ database: ticketDb, store: orderStore, clock: systemClock, ...(orderCodec ? { codec: orderCodec } : {}) }),
       issuer: ticketIssuer.issuer,
       log: new LoggerTicketIssueLog(service.logger),
       signals: new PromTicketIssueSignals().register(service.metrics.registry),
@@ -874,11 +898,11 @@ export async function start(o: StartOptions): Promise<StartedService> {
       hotPath,
     });
     if (kafka.enabled) {
-      // 행동 신호 생산자(telemetry.behavior, PRF-191). 메시지 값은 JSON 대역이고, 연결 실패는 시작을 막지 않는다(보내기가 실패하면 telemetry_dropped_total만 오른다)
+      // 행동 신호 생산자(telemetry.behavior, PRF-191). 메시지 값은 공용 Avro 인코더로 만들고, 연결 실패는 시작을 막지 않는다(보내기가 실패하면 telemetry_dropped_total만 오른다)
       const producer = createKafkaProducer({ kind: 'default', brokers: kafka.brokers, clientId: `${SERVICE}-telemetry-${kafka.env}-${podId}`, auth: kafka.auth });
       behaviorProducer = producer;
       producer.connect().catch((err: unknown) => service.logger.warn({ dep: 'kafka', err: errorSummary(err) }, '행동 신호 생산자를 잇지 못했다(요약은 버려진다)'));
-      startLate.behavior = new KafkaBehaviorSignals(producer);
+      if (avroEncoder) startLate.behavior = new KafkaBehaviorSignals(producer, avroEncoder, service.logger);
       consumerOptions = {
         env: kafka.env,
         brokers: kafka.brokers,
@@ -944,7 +968,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let telemetrySink: TelemetrySink | undefined;
   let telemetrySender: KafkaTelemetrySender | undefined;
   const telemetryOff = (warning: string): void => {
-    behaviorSignals = new JsonBehaviorSignals({ offer: (record) => telemetryDropped(record, 1) });
+    // 꺼져 있으면 내지 않고 버린 수만 센다(지금까지와 같다)
+    behaviorSignals = { record: () => telemetryDropped('BehaviorSignal', 1) };
+    holdAttempts = { record: () => telemetryDropped('HoldAttempt', 1) };
     service.logger.warn({ dep: 'telemetry-kafka' }, warning);
   };
   if (telemetryKafka.enabled) {
@@ -958,7 +984,22 @@ export async function start(o: StartOptions): Promise<StartedService> {
       telemetrySender = sender;
       const sink = new TelemetrySink({ send: sender, onDropped: telemetryDropped });
       telemetrySink = sink;
-      behaviorSignals = new JsonBehaviorSignals({ offer: (record, topic, m) => sink.offer(record, topic, m) });
+      const encoder = avroEncoder!;
+      const offer = (record: string, topic: string, m: { key: string | null; value: Buffer }) => sink.offer(record, topic, m);
+      behaviorSignals = new AvroBehaviorSignals({ offer, encoder, dropped: telemetryDropped, logger: service.logger });
+      // 홀드 시도(ADR-0357 결정 7): 응답 뒤 시도 세기(hn)·인코딩·버퍼 넣기. 종료 때 남은 일을 기다린다
+      holdAttempts = new KafkaHoldAttempts({
+        encoder,
+        offer,
+        dropped: telemetryDropped,
+        logger: service.logger,
+        sessions: sessionStore,
+        clock: systemClock,
+        after: (work) => {
+          const p = work().finally(() => behaviorPending.delete(p));
+          behaviorPending.add(p);
+        },
+      });
     } catch {
       telemetryOff('Kafka 클라이언트를 싣지 못해 좌석 행동 요약을 Kafka로 보내지 않는다');
     }
@@ -976,6 +1017,16 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // purchase-svc 제어 상태 시작 작업(ADR-0365 결정 7, C-T50): sale_control을 읽어야 /ready가 200이고, 그 뒤 2초 [가정]마다 메모리와 좌석 Redis 사본을 원본대로 맞춘다
   const saleReconciler = saleControl && saleMemory ? new SaleControlReconciler({ store: saleControl.store, memory: saleMemory, ...(saleControl.copies ? { copies: saleControl.copies } : {}), logger: service.logger }) : undefined;
   saleReconciler?.start(service.readiness);
+  // 생산자 시작 확인(ADR-0357 결정 5, ST-T16 ②): 듣기 전에 한 번. 다름·404·주소 없음(local·ci 밖)은 던진다(시작 실패). 준비 상태에는 넣지 않는다
+  if (avroEncoder) {
+    await checkProducerSchemas({
+      env,
+      encoder: avroEncoder,
+      schemas: avroSchemas,
+      metrics: service.metrics.registry,
+      logger: { info: (x) => service.logger.info(x, '레지스트리 시작 확인을 건너뛴다(주소 없음, local·ci)'), warn: (x) => service.logger.warn(x, '레지스트리에 닿지 못해 설정의 스키마 ID로 계속한다') },
+    });
+  }
   await service.listen();
   // 회차 취소 일괄 환불 gRPC(refund.proto, BAT-425 GAT-130). PEAKET_GRPC_PORT가 있을 때만 연다.
   // 없으면 ops-svc는 내부 HTTP 호환 경로를 쓴다(같은 쓰임새·같은 멱등 키).

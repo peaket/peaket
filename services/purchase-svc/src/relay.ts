@@ -21,6 +21,9 @@ import {
 import { createKafkaProducer, kafkaOutboxPublisher } from '@peaket/platform/stream-worker';
 import { CoreSaleConfigs, FileSeatMapSource, KafkaTradeEventPublisher, LayoutSeatMap, SeatMapEventCatalog } from './modules/inventory/index.js';
 import { relayServiceDatabaseOptions, startPurchaseRelay } from './relay-app.js';
+import { checkProducerSchemas, createAvroEncoder, readSchemaIdsFile } from '@peaket/platform/avro';
+import { avroSchemas } from '@peaket/contracts/avro';
+import { avroOrderEventCodec, ORDER_EVENT_RECORD, TRADE_ORDERS_TOPIC } from './modules/booking/index.js';
 
 const SERVICE = 'purchase-svc';
 const config = loadOutboxRelayProcessConfig(SERVICE, process.env);
@@ -71,6 +74,10 @@ const seatMap = new LayoutSeatMap({ source, clock: systemClock, logger: log, ...
 const producer = createKafkaProducer({ kind: 'outbox-relay', brokers: config.kafkaBrokers, clientId: `${SERVICE}-${env}-${config.pod}`, auth: kafkaAuthFromEnv(`${SERVICE}-outbox-relay`) });
 await producer.connect();
 
+// 주문 만료 안전망·보상·환불 쓰기가 trade.orders Outbox에 넣는 값은 공용 Avro 인코더로 만든다(ADR-0357 결정 1·4). 설정 파일이 없거나 주제가 없으면 시작하지 않는다.
+// 시작 확인(결정 5)은 프로세스 레지스트리가 생긴 뒤 관리 포트를 열기 전에 한다(아래). 다름·404면 끝낸다
+const avroEncoder = createAvroEncoder({ schemaIds: readSchemaIdsFile(process.env), schemas: avroSchemas, produces: [{ topic: TRADE_ORDERS_TOPIC, record: ORDER_EVENT_RECORD }] });
+
 const relay = await startPurchaseRelay({
   database,
   maintenanceDatabase,
@@ -84,6 +91,7 @@ const relay = await startPurchaseRelay({
   holder: config.pod,
   // 회차 취소 환불 반복이 읽는 환경 값(결제 HTTP·티켓 gRPC·정비 URL 등). 빠지면 relay-app이 시작하지 않는다
   env: process.env,
+  orderEventCodec: avroOrderEventCodec(avroEncoder),
 });
 
 // 종료: 반복을 멈추고 Lease를 놓은 뒤 연결을 닫는다(종료 대기 30초 안, docs/devops.md §6.4).
@@ -108,6 +116,19 @@ const shutdown = async (why: string, code: number) => {
 };
 process.once('SIGTERM', () => void shutdown('SIGTERM', 0));
 process.once('SIGINT', () => void shutdown('SIGINT', 0));
+
+try {
+  await checkProducerSchemas({
+    env: process.env,
+    encoder: avroEncoder,
+    schemas: avroSchemas,
+    metrics: relay.registry,
+    logger: { info: (x) => log.info(x, '레지스트리 시작 확인을 건너뛴다(주소 없음, local·ci)'), warn: (x) => log.warn(x, '레지스트리에 닿지 못해 설정의 스키마 ID로 계속한다') },
+  });
+} catch (err) {
+  console.error(JSON.stringify({ kind: 'outbox-relay', msg: '생산자 스키마 시작 확인에 실패했다', err: String(err) }));
+  await shutdown('시작 확인 실패', 1);
+}
 
 try {
   await relay.listen();

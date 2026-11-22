@@ -99,7 +99,7 @@ export {
   PAYMENT_PAUSE_BREAKER_MIN_CALLS,
   PAYMENT_PAUSE_BREAKER_OPTIONS,
 } from './adapters/grpc-new-payment-pause.js';
-export { type BehaviorSignalProducer, discardBehaviorSignals, KafkaBehaviorSignals, TELEMETRY_BEHAVIOR_TOPIC } from './adapters/behavior-signals.js';
+export { BEHAVIOR_SIGNAL_RECORD, type BehaviorSignalProducer, discardBehaviorSignals, KafkaBehaviorSignals, TELEMETRY_BEHAVIOR_TOPIC } from './adapters/behavior-signals.js';
 export {
   START_PAYMENT_OPERATION,
   StartPayment,
@@ -399,7 +399,7 @@ export {
   type SagaStep,
   type SagaStepOutcome,
 } from './domain/saga.js';
-export { jsonOrderEventCodec, TRADE_ORDERS_TOPIC } from './adapters/order-events.js';
+export { avroOrderEventCodec, type AvroOrderEventCodec, jsonOrderEventCodec, ORDER_EVENT_RECORD, TRADE_ORDERS_TOPIC } from './adapters/order-events.js';
 export { LoggerOrderLog, LoggerPaymentPullLog, LoggerPaymentResultLog, LoggerSagaLog, LoggerTicketIssueLog, LoggerTicketVoidLog } from './adapters/order-log.js';
 export { PromOrderSignals } from './adapters/prom-order-signals.js';
 export { bookingRestrictionKey, MemoryBookingRestrictions, RedisBookingRestrictions } from './adapters/redis-booking-restrictions.js';

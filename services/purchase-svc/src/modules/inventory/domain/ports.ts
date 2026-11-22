@@ -758,7 +758,10 @@ export interface SessionStartedLog {
 /** HoldAttempt의 result(asyncapi HoldAttempt.result와 같은 값) */
 export type HoldAttemptResult = 'HELD' | 'CONFLICT' | 'LIMIT' | 'RECENTLY_RELEASED' | 'ERROR';
 
-/** 홀드 시도 하나(S-T35, ADR-0171). asyncapi HoldAttempt로 바꿔 보내는 것은 BAS-030이다 */
+/** HoldAttempt의 autoResult(asyncapi HoldAttempt.autoResult와 같은 값): 자동 배정 결과 종류, 좌석이 없어 수동 선택으로 넘겼으면 MANUAL_REQUIRED */
+export type HoldAttemptAutoResult = 'FIRST' | 'FIRST_SPLIT' | 'SECOND' | 'SECOND_SPLIT' | 'MANUAL_REQUIRED';
+
+/** 홀드 시도 하나(S-T35, ADR-0171). 운영은 adapters/kafka-hold-attempts.ts가 asyncapi HoldAttempt(Avro)로 telemetry.purchase에 낸다(ADR-0357 결정 7) */
 export interface HoldAttemptRecord {
   eventId: string;
   accountId: string;
@@ -769,11 +772,14 @@ export interface HoldAttemptRecord {
   mode: 'PICK' | 'AUTO';
   /** 시도한 좌석 ID(결과와 관계없이 요청 본문의 seatIds를 보낸 차례 그대로, 겹친 것도 그대로) */
   seatIds: string[];
-  /** 요청 seatIds 첫 좌석의 등급(여러 등급이 섞여도 첫 좌석의 것). 첫 좌석을 좌석맵 판에서 찾기 전에 거절했거나 판에 없으면 없다 */
+  /** PICK: 요청 seatIds 첫 좌석의 등급(여러 등급이 섞여도 첫 좌석의 것). 첫 좌석을 좌석맵 판에서 찾기 전에 거절했거나 판에 없으면 없다.
+   *  AUTO: 잡은 첫 좌석의 등급, 잡지 못했으면 희망 1순위 등급(firstTierId) */
   tierId?: string;
   /** 요청 seatIds 첫 좌석의 구역 ID(tierId와 같은 때에 없다) */
   sectionId?: string;
   result: HoldAttemptResult;
+  /** mode AUTO에서만: 잡았으면 배정 결과 종류, 후보가 없어 수동 선택으로 넘겼으면 MANUAL_REQUIRED. 그 밖의 거절은 없다(ADR-0357 결정 7) */
+  autoResult?: HoldAttemptAutoResult;
   /** HELD일 때만: 홀드 Lua가 돌려준 잡은 시각(epoch ms) */
   heldAtMs?: number;
   /** HELD일 때만, 구매 세션 상태에 홀드를 기록한 결과가 있을 때만: 이번 홀드가 이 구매 세션의 첫 홀드인가(PurchaseSessionStore.recordHold의 결과) */
@@ -802,6 +808,16 @@ export interface BehaviorSignals {
   record(r: BehaviorSignalRecord): void;
 }
 export const discardBehaviorSignals: BehaviorSignals = { record: () => undefined };
+
+/**
+ * 홀드 시도 세기(ADR-0357 결정 7, docs/data.md §3 s:session:{jti}의 hn). 구매 세션 상태 키가 있을 때만 칸 hn을 1 올리고(한 원자 연산, 키를 만들지 않는다)
+ * 올린 값 − 1(그 시도 앞에 낸 시도의 수, 첫 시도 0)을 돌려준다. 키가 없으면 null.
+ * @throws RangeError jti가 키 조각 모양이 아님
+ * @throws SeatStoreUnavailable 좌석 Redis 일시 장애·메모리 부족
+ */
+export interface HoldAttemptCounts {
+  countHoldAttempt(jti: string): Promise<number | null>;
+}
 
 export const HOLD_ATTEMPTS = Symbol('purchase.HoldAttempts');
 /** 홀드 시도 기록(텔레메트리라 버려질 수 있다). 부른 쪽을 막거나 던지지 않는다 */

@@ -46,6 +46,7 @@ import {
   LoggerCompensationLog,
   PromCompensationSignals,
   StartCompensation,
+  type OrderEventCodec,
 } from './modules/booking/index.js';
 import {
   CancelTicket,
@@ -125,6 +126,11 @@ export interface PurchaseRelayOptions {
   env?: Record<string, string | undefined>;
   /** 프로세스·반복·정비의 시계(기본 systemClock) */
   clock?: Clock;
+  /**
+   * 주문 사건 값의 코덱(relay.ts는 공용 Avro 인코더의 avroOrderEventCodec, ADR-0357). 주문 만료 안전망·보상·환불 쓰기가 trade.orders Outbox에 넣는 값이다.
+   * 주지 않으면 저장소 기본값(JSON 대역, 시험 조립)이다
+   */
+  orderEventCodec?: OrderEventCodec;
   /** 릴레이 역할 DB(PEAKET_OUTBOX_DATABASE_URL, Outbox 읽기·sent_at 고치기만) */
   database: Database;
   /** 정비 역할 DB(PEAKET_MAINTENANCE_DATABASE_URL, 공용 정비 일과 주문 이력 검사) */
@@ -223,7 +229,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   const ticketGrpcToken = ticketGrpcAddr ? internalGrpcTokenFromEnv(o.env ?? {}) : undefined;
   const refundTicketCancels = ticketGrpcAddr ? new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(ticketGrpcToken ? { internalToken: ticketGrpcToken } : {}) }) : undefined;
   const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
-  const refundWrites = new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock }));
+  const refundWrites = new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock, ...(o.orderEventCodec ? { codec: o.orderEventCodec } : {}) }));
   // 열지 못한 이상 표시·공제 차액 CS 건 다시 열기(웨이브 끝 리뷰 C2·S1). ops 주소가 있을 때만 꽂는다(로그 대역이 '연 것'으로 남지 않게, 주소가 생기면 그때 연다)
   const csOutbox = opsClient ? new DrizzleCsCaseOutbox(o.serviceDatabase) : undefined;
   // CS 건 열기 실패·다시 열기 멈춤 지표(purchase_cs_case_open_failures_total{kind}·purchase_cs_case_reopen_cut_total{reason}, 다시 보기 2 N1).
@@ -280,7 +286,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   // 보상 세 걸음(BAT-011, PRF-173, ADR-0354): 발권 대기(APPROVED) 주문을 회차 취소 실행기가 쓸어 담는다.
   // 보상 저장소·큐는 API 파드와 같은 표(order_compensation)를 쓰고, 실행기는 릴레이 리더만 돈다(CompensationLoop).
   const compensationSignals = new PromCompensationSignals();
-  const compensationJobs = new DrizzleCompensation({ database: o.serviceDatabase, store: new DrizzleOrderStore({ clock }), clock });
+  const compensationJobs = new DrizzleCompensation({ database: o.serviceDatabase, store: new DrizzleOrderStore({ clock, ...(o.orderEventCodec ? { codec: o.orderEventCodec } : {}) }), clock });
   const compensationStart = new StartCompensation({ store: compensationJobs, clock, signals: compensationSignals });
   const compensationQueue = new EventCompensationQueue({ jobs: compensationJobs, start: compensationStart });
   // 발권 막기·결제 취소는 주소가 있을 때만 만든다(없으면 eventRefund도 만들지 않는다)
@@ -396,7 +402,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       // 다시 만들기의 DB 쪽(임대·판 번호·읽기)이자 판매를 연 기록(seat_rebuild 행). 기록이 있는 회차만 다시 만든다(리뷰 고침 M3)
       const rebuildSource = new DrizzleSeatRebuildSource(o.serviceDatabase);
       // 주문 만료 안전망·하루 넘은 주문 정비 일(PRF-172, ADR-0107 결정 2): 서비스 역할 DB·좌석 Redis·좌석맵 판
-      const orderExpiryStore = new DrizzleOrderExpiry({ database: o.serviceDatabase, store: new DrizzleOrderStore({ clock: ctx.clock }), clock: ctx.clock });
+      const orderExpiryStore = new DrizzleOrderExpiry({ database: o.serviceDatabase, store: new DrizzleOrderStore({ clock: ctx.clock, ...(o.orderEventCodec ? { codec: o.orderEventCodec } : {}) }), clock: ctx.clock });
       const orderExpiry = new OrderExpiry({
         store: orderExpiryStore,
         inventory: new InventoryOrderExpiry({ sessions: new RedisPurchaseSessionStore(o.redis), holds: new RedisOrderHolds(o.redis, o.seatMap), clock: ctx.clock }),
