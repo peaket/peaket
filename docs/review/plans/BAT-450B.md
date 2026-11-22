@@ -167,7 +167,31 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+리뷰 담당 `lane3-bat450b-review`(deepseek-v4.1-flash), 2026-11-22 13:33~13:40 KST. 받은 것은 `git diff 3129756b4..2b3c6139d`(계획·시험·구현)와 이 계획 파일이다. 코드·시험·계약·정본·배포 원천을 대조했고, 시험·Docker는 돌리지 않았다. 코드는 고치지 않았다.
+
+결과: **높음 0, 중간 1(고침), 낮음 9(남은 위험)**. 토큰 비노출·테넌트 판정·권한·메일 닫힘의 방향은 맞다.
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `services/identity-svc/migrations/0036_staff_invitation_email_unique.sql` | 0036이 부분 유일 인덱스를 만들기 전에 옛 중복 INVITED를 정리하지 않는다. 초대 생성 경로가 없던 지금은 운영 데이터가 없어야 하지만, 시험·가져오기·수동 시드로 같은 회차·같은 이메일 INVITED가 둘 이상 있으면 배포 때 `CREATE UNIQUE INDEX`가 실패한다(기존 통합 시험 시드도 실제로 그런 행이 있었다) | 인덱스를 만들기 전에 같은 `(event_id, lower(invite_email))` INVITED 가운데 만료가 늦은 행 하나만 남기고 나머지를 `EXPIRED`로 바꾸며 이메일·토큰을 지운다. 통합 시험이 그 정리와 인덱스 생성을 함께 본다 |
+| RV-02 | 낮음(남은 위험) | `deploy/workloads/identity-svc/values.yaml`, `services/identity-svc/src/main.ts` | 운영 identity-svc의 Secret에 `PEAKET_INTERNAL_TOKEN`을 더하는 배포 작업이 이 묶음에 없다. 그 값이 없으면 core의 401 때문에 초대 네 작업이 503 `authz-unavailable`이다. 지금은 운영 메일 대행사도 없어 어차피 503 `provider-down`이라 드러나지 않지만, BAT-455/배포 묶음이 Secret을 더해야 운영 초대가 열린다 | ADR-0353과 값 파일 주석에 적었다. 배포 묶음이 `PEAKET_INTERNAL_TOKEN`을 identity Secret에 더한다 |
+| RV-03 | 낮음(남은 위험) | `services/identity-svc/src/modules/session/application/partner-staff-invitations.ts` create | 200명을 초대하면 메일을 순서대로 200번 보낸 뒤 응답한다. local 파일 대역은 빠르지만 실제 대행사가 붙으면 요청 시간이 길어져 시간 초과·부분 발송이 생길 수 있다 | BAT-455가 메일을 큐/발송 원장으로 옮기거나 한 요청의 발송 상한을 정한다 |
+| RV-04 | 낮음(남은 위험) | 같은 파일 create·reissue | 메일을 먼저 보내고 DB에 쓴다. 저장이 경합·장애로 실패하면 받은 링크가 410인 죽은 링크가 된다(보안 피해는 없다). 반대로 DB를 먼저 쓰면 보내지 못한 초대가 남는다 | 지금은 받는 사람에게 해가 없는 쪽(죽은 링크)을 골랐다. 발송 원장이 생기면 '보냄 확인 뒤 INVITED'로 바꾼다 |
+| RV-05 | 낮음(남은 위험) | `migrations/0031`, `0036` | `invite_token_hash`에 유일 인덱스가 없다(색인만 있다). 256비트 난수 충돌은 사실상 없지만, 충돌하면 한 토큰이 두 배정을 가리킬 수 있다 | 후속 마이그레이션에서 `UNIQUE (invite_token_hash) WHERE invite_token_hash IS NOT NULL`을 더한다 |
+| RV-06 | 낮음(남은 위험) | `staffInvitationUrlFromEnv`·`PartnerStaffInvitations` | 환경 값은 끝 `/`를 지우지만, 조립에서 직접 넣는 `staffInvitationUrl`은 그대로 쓴다. 끝 `/`가 있으면 링크가 `//#token=`이 된다 | 조립에서 `staffInvitationUrlFromEnv`만 쓰게 하고, 직접 넣는 시험 값은 끝 `/` 없이 둔다 |
+| RV-07 | 낮음(남은 위험) | 파트너 초대 만들기 | 파트너 테넌트당 600회/분 공용 한도만 있고 계정·회차별 초대 한도는 없다. 탈취된 파트너 계정이 200명 초대를 반복하면 메일 폭탄이 될 수 있다 | BAT-450C/D에서 파트너·계정별 시간당 한도와 발송량 지표를 정한다 |
+| RV-08 | 낮음(남은 위험) | `listByEvent` | 명단에 `scanCount`·`overrideCount`를 싣지 않는다(ticket 데이터). 계약은 선택 칸이라 문제는 없지만 SCR-037이 빈칸을 보일 수 있다 | GAT-360 화면이 빈칸을 '—'로 보이거나, ticket-svc 집계 경로를 후속으로 더한다 |
+| RV-09 | 낮음(남은 위험) | `docs/security/asvs/offline-gate.md` 16.3.1 | 초대 만들기·재발송·해제의 행위자·사유를 담은 불변 감사 기록이 아직 없다(배정 상태·세션 종료·control 사건까지) | BAT-450D |
+
+### 확인한 것(지적 아님)
+
+- **토큰**: 32바이트 `randomBytes` → base64url 43자, DB에는 SHA-256 hex만. 응답 뷰(`PartnerStaffInvitationView`)에 토큰 칸이 없고, 컨트롤러는 `no-store`만 붙인다. 링크는 `${url}#token=` 하나이고 메일 파일 대역에만 원문이 있다. 시험이 응답·헤더·로그에 원문 0건과 DB 해시 일치를 값으로 본다.
+- **테넌트**: `principal.tenantId`만 쓰고 `promoterId`를 본문·경로에서 받지 않는다. core가 404면 404, 던지면 503이며 행을 만들지 않는다. 해제·재발송은 배정의 `eventId`로 다시 core를 부른다.
+- **권한**: `@Roles(['partner_admin','partner_member'])` 네 작업. `partnerStaff` 조립은 `adminAuthz`가 있는 조립에서만 컨트롤러를 싣는다(파트너 로그인도 그때만 있다). 세션이 없거나 테넌트가 없으면 403이다.
+- **해제**: 배정 행을 잠그고 REVOKED·이메일/토큰 파기, 그 배정의 살아 있는 세션만 종료, `control.sessions-terminated`(`STAFF_REVOKED`)를 같은 트랜잭션에 쓴다. 이미 끝난 배정은 changed=false로 204다.
+- **재발송**: INVITED만, 새 해시·새 24시간, 옛 토큰은 `findInvitationByTokenHash`에서 사라져 410이다. ASSIGNED·종료는 409다.
+- **계약**: 네 작업의 400·401·403·404·409·422·503 응답과 문제 유형 둘, `minItems: 1`이 openapi·생성물에 있다. `gw-partner` 원천·생성 라우트가 초대 네 경로를 identity-svc로 보내고 core-svc에는 없다. core REST `callers`에 identity-svc가 있다.
+- **시험**: 단위·HTTP 20개, core 계약 2개, 정적 4개가 구현 뒤 통과한다. identity 전체 708개도 통과한다. 통합 시험은 구현 뒤 Docker에서 돌린다.
 
 ## 검증
 
@@ -179,4 +203,5 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 | --- | --- | --- | --- | --- |
 | plan | lane3-bat450b-plan | deepseek-v4.1-flash | 2026-11-22T13:05:00+09:00 | 2026-11-22T13:08:00+09:00 |
 | test | lane3-bat450b-test | deepseek-v4.1-flash | 2026-11-22T13:10:00+09:00 | 2026-11-22T13:16:00+09:00 |
-| impl | lane3-bat450b-impl | deepseek-v4.1-flash | 2026-11-22T13:16:00+09:00 | 2026-11-22T13:40:00+09:00 |
+| impl | lane3-bat450b-impl | deepseek-v4.1-flash | 2026-11-22T13:16:00+09:00 | 2026-11-22T13:32:00+09:00 |
+| review | lane3-bat450b-review | deepseek-v4.1-flash | 2026-11-22T13:33:00+09:00 | 2026-11-22T13:40:00+09:00 |
