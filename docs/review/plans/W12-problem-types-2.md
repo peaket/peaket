@@ -53,6 +53,17 @@
 
 ## 실패 확인
 
+시험 담당 `w12pt2-test`(deepseek-v4.1-flash), 2026-11-22 16:49 KST. 기준 트리 `17626ee26`(계획 커밋)에서 구현 없이 돌렸다.
+
+| 검사 | 결과 | 까닭 |
+| --- | --- | --- |
+| `pnpm.cmd --filter @peaket/platform test test/problem-types.test.ts` | 2개 중 **1 실패**(PRF192), 1 통과 | `missing`이 `[ 'core-svc sale-suspension-conflict' ]`다. 상태 코드·제목 대조에는 닿지 않았다 |
+| `node tools/ci/gateway-routes.mjs --check` | **5건 다름**, 끝 코드 1 | 저장소 지문 `65f89e95…`, 지금 openapi로 만든 지문 `8243ca89…`. 다섯 파일 모두 둘째 줄만 다르다 |
+| `node --test tools/ci/gateway-routes.test.mjs` | D-T42 ①② **1 실패** | 같은 까닭. 저장소 생성 파일이 지금 openapi와 원천으로 다시 만든 것과 다르다 |
+
+- core-svc 409 단언은 `services/core-svc/test-int/sale-suspension.int.test.ts` 263·266행이 `{ type: 'https://peaket.example/problems/sale-suspension-conflict' }`를 이미 단언한다. 이 이름은 계획이 더할 목록 줄과 같아 시험 파일을 고칠 필요가 없다. 이 시험은 openapi를 읽지 않으므로 구현 전에도 통과한다(구현 뒤 회귀 확인만 한다).
+- 실패가 구현을 요구하는 방향으로 먼저 섰다. 새 시험 파일은 만들지 않았다(계획 3).
+
 ## 리뷰
 
 ## 검증
