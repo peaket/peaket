@@ -1,17 +1,18 @@
 // 로컬 관측 최소 시험(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드', wbs 1.3.1, BUILD_ORDER BSL-070).
 // 템플릿 대시보드 생성기, Prometheus·Grafana 매니페스트, 공용 차트의 수집 주석, cluster.mjs의 관측 명령 인자를 본다.
+// 대시보드 대상·폴더·온세일 공용(V-T47 ①~③)은 dashboards.test.mjs, 조직·데이터 소스 배치의 정적 검사(V-T47 ④⑤)는 tools/ci/observability-config.test.mjs다.
 // 실제 클러스터에 올려 보는 것은 tools/local/e2e/observability.e2e.mjs다.
 // 실행: node --test "tools/local/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAllDocuments } from 'yaml';
-import { DASHBOARD_SERVICES, serviceDashboard } from './dashboards.mjs';
-import { grafanaAdminSecret, grafanaForwardArgs, prometheusForwardArgs } from './cluster.mjs';
+import { serviceDashboard } from './dashboards.mjs';
+import { dashboardsConfigMap, grafanaAdminSecret, grafanaForwardArgs, grafanaFullProvisioningExecArgs, grafanaProvisioningConfigMap, prometheusForwardArgs } from './cluster.mjs';
 import { ensureTool } from './tools.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -70,23 +71,27 @@ test('NFR-011 대시보드 uid는 Grafana 한도(40자) 안이고, 그보다 긴
 });
 
 test('NFR-011 커밋된 대시보드 파일은 생성기 결과와 같고, 다르면 --check가 실패한다', () => {
-  assert.ok(DASHBOARD_SERVICES.includes('v0-monolith') && DASHBOARD_SERVICES.includes('example-svc'));
+  // 비교 기준(v0-monolith)과 템플릿 예시(example-svc)는 §3.1 표 밖이지만 대시보드가 있다(ADR-0356 결정 1, '/services/' 기본 줄의 팀 폴더)
+  const dashDir = join(REPO, 'deploy', 'local', 'dashboards');
+  for (const svc of ['v0-monolith', 'example-svc']) assert.equal(JSON.parse(readFileSync(join(dashDir, 'platform', `${svc}.json`), 'utf8')).uid, `peaket-svc-${svc}`);
   const ok = spawnSync(process.execPath, [join(REPO, 'tools', 'local', 'dashboards.mjs'), '--check'], { encoding: 'utf8' });
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
   const dir = mkdtempSync(join(tmpdir(), 'dash-'));
-  cpSync(join(REPO, 'deploy', 'local', 'dashboards'), dir, { recursive: true });
-  const f = join(dir, 'v0-monolith.json');
+  cpSync(dashDir, dir, { recursive: true });
+  const f = join(dir, 'platform', 'v0-monolith.json');
   writeFileSync(f, readFileSync(f, 'utf8').replace('"지연"', '"지연(손으로 고침)"'));
   const bad = spawnSync(process.execPath, [join(REPO, 'tools', 'local', 'dashboards.mjs'), '--check', '--dir', dir], { encoding: 'utf8' });
   assert.equal(bad.status, 1, bad.stdout + bad.stderr);
   assert.match(bad.stdout + bad.stderr, /v0-monolith\.json/);
-  // 목록에 없는 서비스의 파일이 남아 있으면(지운 서비스) Grafana에 실리므로 --check가 실패한다
-  const dir2 = mkdtempSync(join(tmpdir(), 'dash-'));
-  cpSync(join(REPO, 'deploy', 'local', 'dashboards'), dir2, { recursive: true });
-  writeFileSync(join(dir2, 'gone-svc.json'), '{}');
-  const stray = spawnSync(process.execPath, [join(REPO, 'tools', 'local', 'dashboards.mjs'), '--check', '--dir', dir2], { encoding: 'utf8' });
-  assert.equal(stray.status, 1, stray.stdout + stray.stderr);
-  assert.match(stray.stdout + stray.stderr, /gone-svc\.json/);
+  // 대상에 없는 서비스의 파일이 남아 있으면(지운 서비스) Grafana에 실리므로 --check가 실패한다: 폴더 밖과 팀 폴더 안 둘 다
+  for (const rel of ['gone-svc.json', join('platform', 'gone-svc.json')]) {
+    const dir2 = mkdtempSync(join(tmpdir(), 'dash-'));
+    cpSync(dashDir, dir2, { recursive: true });
+    writeFileSync(join(dir2, rel), '{}');
+    const stray = spawnSync(process.execPath, [join(REPO, 'tools', 'local', 'dashboards.mjs'), '--check', '--dir', dir2], { encoding: 'utf8' });
+    assert.equal(stray.status, 1, stray.stdout + stray.stderr);
+    assert.match(stray.stdout + stray.stderr, /gone-svc\.json/);
+  }
 });
 
 const obs = parseAllDocuments(readFileSync(join(REPO, 'deploy', 'local', 'observability.yaml'), 'utf8')).map((d) => d.toJS()).filter(Boolean);
@@ -142,8 +147,63 @@ test('[ASVS v5.0.0-13.3.1] [ASVS v5.0.0-8.2.1] Grafana는 익명 보기만 열�
   assert.equal(a.kind, 'Secret');
   assert.notEqual(a.stringData.password, b.stringData.password);
   assert.ok(a.stringData.password.length >= 32);
-  const ds = parseAllDocuments(of('ConfigMap', 'grafana-provisioning').data['datasources.yaml'])[0].toJS();
-  assert.deepEqual(ds.datasources.map((x) => [x.uid, x.url]), [['prometheus', 'http://prometheus.observability.svc:9090']]);
+  // 저장소 매니페스트에 인라인 프로비저닝을 두지 않는다(원천은 deploy/platform/observability/grafana/provisioning/, ADR-0356 결정 2)
+  assert.equal(of('ConfigMap', 'grafana-provisioning'), undefined);
+});
+
+const PROVISIONING = join(REPO, 'deploy', 'platform', 'observability', 'grafana', 'provisioning');
+const yamlOf = (text) => parseAllDocuments(text)[0].toJS();
+
+test('OPS-040 로컬 Grafana 프로비저닝 ConfigMap은 원천 파일에서 만들고, 시작 몫은 기본 조직 것만 싣는다', () => {
+  const cm = grafanaProvisioningConfigMap(REPO);
+  assert.equal(cm.kind, 'ConfigMap');
+  assert.deepEqual([cm.metadata.name, cm.metadata.namespace], ['grafana-provisioning', 'observability']);
+  // 전체는 원천 파일의 바이트 그대로(사본을 두지 않는다). 운영에만 있는 데이터 소스(datasources-platform.yaml)는 싣지 않는다
+  assert.equal(cm.data['datasources.yaml'], readFileSync(join(PROVISIONING, 'datasources.yaml'), 'utf8'));
+  assert.equal(cm.data['dashboards.yaml'], readFileSync(join(PROVISIONING, 'dashboards.yaml'), 'utf8'));
+  assert.deepEqual(Object.keys(cm.data).sort(), ['dashboards.base.yaml', 'dashboards.yaml', 'datasources.base.yaml', 'datasources.yaml']);
+  // 시작 몫(base): 빈 Grafana에는 제한 조직이 없으므로 기본 조직(1) 것만. 로컬 Prometheus 주소는 클러스터 안 주소
+  const base = yamlOf(cm.data['datasources.base.yaml']).datasources;
+  assert.deepEqual(base.map((x) => [x.uid, x.orgId, x.url]), [['prometheus', 1, 'http://prometheus.observability.svc:9090']]);
+  // 전체에는 제한 조직(2)의 PostgreSQL 쿼리 문장이 있고, 비밀번호는 환경 변수를 가리키기만 한다
+  const full = yamlOf(cm.data['datasources.yaml']).datasources;
+  const pg = full.filter((x) => x.orgId !== 1);
+  assert.deepEqual(pg.map((x) => [x.orgId, x.type]), [[2, 'grafana-postgresql-datasource']]);
+  assert.match(pg[0].secureJsonData.password, /^\$__env\{[A-Z_]+\}$/);
+  const providers = yamlOf(cm.data['dashboards.base.yaml']).providers;
+  assert.ok(providers.length >= 1 && providers.every((p) => p.orgId === 1 && p.allowUiUpdates === false), JSON.stringify(providers));
+  // 전체로 바꾸는 명령은 파드 안에서 ConfigMap 원본을 프로비저닝 자리로 복사한다
+  const exec = grafanaFullProvisioningExecArgs();
+  assert.deepEqual(exec.slice(0, 7), ['-n', 'observability', 'exec', 'deploy/grafana', '-c', 'grafana', '--']);
+  assert.match(exec.at(-1), /cp \/etc\/peaket\/provisioning\/datasources\.yaml \/etc\/grafana\/provisioning\/datasources\//);
+});
+
+test('OPS-040 대시보드 ConfigMap 키는 <폴더>__<파일>이고 Grafana 파드의 펼치기가 같은 폴더로 되살린다', () => {
+  const dashDir = join(REPO, 'deploy', 'local', 'dashboards');
+  const files = readdirSync(dashDir, { withFileTypes: true }).filter((e) => e.isDirectory()).flatMap((e) => readdirSync(join(dashDir, e.name)).map((f) => `${e.name}/${f}`));
+  assert.ok(files.length >= 13, files.join(','));
+  const cm = dashboardsConfigMap(REPO);
+  assert.equal(cm.metadata.name, 'grafana-dashboards');
+  assert.deepEqual(Object.keys(cm.data).sort(), files.map((r) => r.replace('/', '__')).sort());
+  for (const rel of files) assert.equal(cm.data[rel.replace('/', '__')], readFileSync(join(dashDir, rel), 'utf8'));
+  // 폴더 밖 파일은 되살릴 수 없어 거절한다
+  const root = mkdtempSync(join(tmpdir(), 'dash-cm-'));
+  mkdirSync(join(root, 'deploy', 'local', 'dashboards', 'platform'), { recursive: true });
+  writeFileSync(join(root, 'deploy', 'local', 'dashboards', 'loose.json'), '{}');
+  assert.throws(() => dashboardsConfigMap(root), /loose\.json/);
+  // 파드: 초기화 컨테이너가 ConfigMap 키의 '__' 앞을 폴더로 펼치고, 공급자 경로(/var/lib/grafana/dashboards/<폴더>)에 마운트한다
+  const grafana = of('Deployment', 'grafana').spec.template.spec;
+  const unpack = grafana.initContainers.find((c) => c.name === 'unpack');
+  const script = unpack.command.at(-1);
+  assert.match(script, /d="\$\{b%%__\*\}"/);
+  assert.match(script, /cp "\$f" "\/work\/dashboards\/\$d\/\$\{b#\*__\}"/);
+  assert.match(script, /datasources\.base\.yaml/);
+  const mounts = Object.fromEntries(grafana.containers[0].volumeMounts.map((m) => [m.name, m.mountPath]));
+  assert.equal(mounts.dashboards, '/var/lib/grafana/dashboards');
+  const vols = Object.fromEntries(grafana.volumes.map((v) => [v.name, v]));
+  assert.equal(vols['dashboards-src'].configMap.name, 'grafana-dashboards');
+  assert.equal(vols['provisioning-src'].configMap.name, 'grafana-provisioning');
+  for (const p of yamlOf(readFileSync(join(PROVISIONING, 'dashboards.yaml'), 'utf8')).providers) assert.match(p.options.path, /^\/var\/lib\/grafana\/dashboards\/[a-z0-9-]+$/);
 });
 
 test('NFR-011 공용 차트는 서비스·릴레이 파드의 관리 포트 /metrics에 수집 주석을 단다', async () => {
