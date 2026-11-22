@@ -212,7 +212,7 @@ beforeAll(async () => {
   });
   core = await createService({
     name: 'core-svc',
-    module: CoreAppModule.register({ database: coreApp, partnerDatabase: corePartner, media: testMedia(), shop: { stock, payments, held, consentVersion: CONSENT } }),
+    module: CoreAppModule.register({ database: coreApp, notifyDatabase: coreApp, partnerDatabase: corePartner, media: testMedia(), shop: { stock, payments, held, consentVersion: CONSENT } }),
     env: { PEAKET_ENV: 'ci' },
     clock: coreClock,
     logDestination: quiet,
