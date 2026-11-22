@@ -263,7 +263,7 @@ spec:
       backendRefs:
         - group: ""
           kind: Service
-          name: core-svc
+          name: ops-svc
           namespace: core
           port: 8080
       timeouts:

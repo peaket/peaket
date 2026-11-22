@@ -11,9 +11,21 @@
  */
 import * as zod from 'zod';
 
-export const GetOpsWidget200 = zod.looseObject({
+export const OpsWidgetQueueAdmissionRateSummary = zod.object({
+  "widgetKey": zod.enum(['queue-admission-rate.summary']),
+  "source": zod.enum(['prometheus']),
+  "at": zod.iso.datetime({"offset":true}).describe('값을 계산한 시각'),
+  "eventId": zod.string().nullable(),
+  "ratio": zod.number().nullable().describe('입장 비율(불린 지 10~60초인 전진에서 입장 확정을 요청한 비율)'),
+  "target": zod.number().nullable().describe('지금 쓰는 동시 입장 목표'),
+  "slotsUsed": zod.number().nullable().describe('예매 단계 지금 인원(입장 자리 수). 빈자리는 target - slotsUsed'),
+  "inFlight": zod.number().nullable().describe('오는 중(불렀지만 아직 입장 확정 전)'),
+  "soonWaiting": zod.number().nullable().describe('곧 입장 대기 인원'),
+  "series": zod.array(zod.object({
+  "at": zod.iso.datetime({"offset":true}),
+  "ratio": zod.number()
+})).optional().describe('위젯 조회만. 창 안의 입장 비율 점(15초 [가정] 간격)')
+}).describe('queue-admission-rate.summary(대기열 팀, SCR-029 \'입장 비율·빈자리\'). 원천은 admission-ctrl 지표(docs/features/control-tower.md §13 위젯 원천 표). 값을 모르는 칸은 null')
 
-})
-
-export type GetOpsWidget200 = zod.input<typeof GetOpsWidget200>;
-export type GetOpsWidget200Output = zod.output<typeof GetOpsWidget200>;
+export type OpsWidgetQueueAdmissionRateSummary = zod.input<typeof OpsWidgetQueueAdmissionRateSummary>;
+export type OpsWidgetQueueAdmissionRateSummaryOutput = zod.output<typeof OpsWidgetQueueAdmissionRateSummary>;

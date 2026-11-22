@@ -7,11 +7,11 @@
 import * as zod from 'zod';
 
 export const OpsWidgetValue = zod.object({
-  "widgetKey": zod.string().optional(),
+  "widgetKey": zod.string().optional().describe('위젯 키(openapi /v1/ops/widgets/{widgetKey}의 키)'),
   "at": zod.iso.datetime({"offset":true}).optional().describe('값을 계산한 시각'),
   "value": zod.looseObject({
 
-}).optional()
+}).optional().describe('openapi components.schemas.OpsWidgetValue와 같은 모양(위젯 키마다 한 갈래, 원천 실패면 error source-unavailable). series는 싣지 않는다(ADR-0360)')
 }).describe('위젯 흐름의 widget 사건. 위젯 키마다 그 위젯의 전체 값이다. 값의 모양은 위젯 키마다 openapi의 위젯 조회 응답과 같다(wbs 0.2.3, ADR-0100)')
 
 export type OpsWidgetValue = zod.input<typeof OpsWidgetValue>;

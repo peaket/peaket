@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-ops.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 8ed18a5cdbfe4eb88d53156e01d09d1b9eda315b6b4b62582e8072ab54a55483
+# openapi info.version 1.0.0-draft · 계약 sha256 8507c3c35525b88b09c39729f1e72c8cbd1cc5e3978e3d0a0c40be2234c2aff8
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -758,7 +758,7 @@ spec:
       backendRefs:
         - group: ""
           kind: Service
-          name: core-svc
+          name: ops-svc
           namespace: core
           port: 8080
       timeouts:

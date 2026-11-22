@@ -138,7 +138,6 @@ import type {
   GetOpsEventBotReviewParams,
   GetOpsEventLiveParams,
   GetOpsLiveParams,
-  GetOpsWidget200,
   GetOpsWidgetParams,
   GuaranteeCollectionResult,
   HomeLayout,
@@ -204,6 +203,7 @@ import type {
   OpsReviewDetail,
   OpsSaleReviewDetail,
   OpsSaleReviewPage,
+  OpsWidgetValue,
   PartnerNotice,
   PartnerNoticeCreate,
   PartnerNoticePage,
@@ -14408,7 +14408,7 @@ export const getGetOpsLiveUrl = (params?: GetOpsLiveParams,) => {
 }
 
 /**
- * FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다). text/event-stream. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래된 번호면 reset을 보낸다(화면은 REST로 다시 읽는다). 15초 [가정]마다 주석 줄. 액세스 토큰 만료·세션 종료 때 서버가 닫는다. gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live
+ * FR-029·030, NFR-008, ADR-0100(GraphQL 구독과 Socket.IO를 대신한다), ADR-0360. text/event-stream. 첫 덩이는 retry: 10000이다. event는 command·approval·alert·control·autoAction·presence·reset이고 id는 ops DB 알림 표의 순번이다(presence는 id가 없다). Last-Event-ID가 없으면 첫 덩이에 지금 순번을 id로만 둔다. 다시 붙을 때 Last-Event-ID 뒤를 다시 보내고, 1시간 [가정]보다 오래됐거나 지운 번호면 reset(reason too-old), 숫자가 아니거나 만든 적 없는 번호면 reset(reason invalid)을 보낸다(reset의 id는 지금 순번, 화면은 REST로 다시 읽는다). approval은 그 명령을 내가 승인할 수 있을 때만 온다(요청자·viewer·CS에는 가지 않는다). 15초 [가정]마다 주석 줄(: hb). 액세스 토큰 만료(gw-ops가 넣는 만료 시각, 없으면 연 뒤 15분)·세션 종료(종료 세션 목록) 때 서버가 닫고, 읽지 않아 쌓인 양이 1MiB [가정]를 넘어도 닫는다(브라우저가 다시 붙는다). gw-ops 경로 시간 초과를 끈다(timeouts.request 0s). 계약은 asyncapi sse.ops-live
  * @summary 관제 늘 여는 SSE 흐름(명령 상태·ack, 내 승인 대기, 경보, 자동 제어 상태, 걸린 자동 조치, 접속자)
  */
 export const getOpsLive = async (params?: GetOpsLiveParams, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsLiveResponse> => {
@@ -14534,7 +14534,7 @@ export const getGetOpsEventLiveUrl = (eventId: string,
 }
 
 /**
- * FR-029, NFR-009, ADR-0100. text/event-stream. event widget(위젯 키마다 전체 값), id는 계산 시각(밀리초). 보이는 위젯 목록이 바뀌면 브라우저가 1초 [가정] 묶어 새 widgets로 다시 연다. 다시 붙으면 지금 값부터 보낸다. gw-ops 경로 시간 초과를 끈다. 계약은 asyncapi sse.ops-event-live
+ * FR-029, NFR-009, ADR-0100, ADR-0360. text/event-stream. 첫 덩이는 retry: 10000이다. event widget(OpsWidgetValue, 위젯 키마다 전체 값, value는 위젯 조회 응답과 같은 모양), id는 계산 시각(밀리초). 파드마다 (회차, 위젯 키)별로 1초 [가정]에 한 번 계산해 나눠 준다. 보이는 위젯 목록이 바뀌면 브라우저가 1초 [가정] 묶어 새 widgets로 다시 연다. 다시 붙으면 지금 값부터 보낸다. 하트비트(: hb)·닫힘(토큰 만료·세션 종료·쌓임 상한)은 늘 여는 흐름과 같다. gw-ops 경로 시간 초과를 끈다. 계약은 asyncapi sse.ops-event-live
  * @summary 관제 위젯 SSE 흐름(보이는 위젯의 값)
  */
 export const getOpsEventLive = async (eventId: string,
@@ -14634,8 +14634,13 @@ export function useGetOpsEventLive<TData = Awaited<ReturnType<typeof getOpsEvent
 
 
 export type getOpsWidgetResponse200 = {
-  data: GetOpsWidget200
+  data: OpsWidgetValue
   status: 200
+}
+
+export type getOpsWidgetResponse400 = {
+  data: ProblemResponse
+  status: 400
 }
 
 export type getOpsWidgetResponse404 = {
@@ -14646,7 +14651,7 @@ export type getOpsWidgetResponse404 = {
 export type getOpsWidgetResponseSuccess = (getOpsWidgetResponse200) & {
   headers: Headers;
 };
-export type getOpsWidgetResponseError = (getOpsWidgetResponse404) & {
+export type getOpsWidgetResponseError = (getOpsWidgetResponse400 | getOpsWidgetResponse404) & {
   headers: Headers;
 };
 
@@ -14667,7 +14672,7 @@ export const getGetOpsWidgetUrl = (widgetKey: string,
 }
 
 /**
- * FR-029, ADR-0100. 위젯 키마다 응답 모양이 다르고 위젯 키 열거와 모양은 wbs 0.2.3에서 적는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
+ * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사) 둘이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary 모양이며, 원천(Prometheus)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
  * @summary 관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)
  */
 export const getOpsWidget = async (widgetKey: string,

@@ -714,8 +714,16 @@ components:
           appliedVersion: { type: integer, description: "받는 쪽이 적용한 제어 상태의 판 번호. ACKED는 집행하는 모든 곳이 이 판 이상을 적용했다는 뜻이다(ADR-0103)" }
     OpsApproval:
       contentType: application/json
-      description: "SSE approval 사건(내 승인 대기). 이름과 뜻만 정했고 본문 모양은 wbs 0.2.3에서 정한다(docs/frontend.md §4.4.4)"
-      payload: { type: object }
+      description: "SSE approval 사건(내 승인 대기). 명령이 승인 대기(PENDING_APPROVAL·REVERT_PENDING)가 될 때 그 명령을 승인할 수 있는 운영자(operator·commander 가운데 요청자가 아닌 사람)에게만 간다(control-tower §4 '요청자 ≠ 승인자', ADR-0360 결정 3, docs/frontend.md §4.4.4)"
+      payload:
+        type: object
+        required: [commandId, type, state]
+        properties:
+          commandId: { type: string }
+          type: { type: string, description: 명령 종류(CommandType) }
+          state: { type: string, enum: [PENDING_APPROVAL, REVERT_PENDING] }
+          eventId: { type: string, description: 회차(있을 때) }
+          approvalExpiresAt: { type: string, format: date-time, description: 승인 기한 }
     OpsControl:
       contentType: application/json
       description: "SSE control 사건(자동 제어 다섯 값). 이름과 뜻만 정했고 본문 모양은 wbs 0.2.3에서 정한다(docs/frontend.md §4.4.4)"
@@ -726,8 +734,12 @@ components:
       payload: { type: object }
     OpsReset:
       contentType: application/json
-      description: "SSE reset 사건. 다시 붙을 때 Last-Event-ID가 알림 표에 남은 1시간 [가정]보다 오래되면 보낸다. 화면은 명령·경보·승인 대기를 REST로 다시 읽는다(docs/frontend.md §4.4.4)"
-      payload: { type: object }
+      description: "SSE reset 사건. 다시 붙을 때 Last-Event-ID가 알림 표에 남은 1시간 [가정]보다 오래됐거나 지운 번호면 too-old, 숫자가 아니거나 만든 적 없는 번호면 invalid다. id는 지금 순번이라 다음 다시 붙기는 그 뒤부터다. 화면은 명령·경보·승인 대기를 REST로 다시 읽는다(docs/frontend.md §4.4.4, ADR-0360)"
+      payload:
+        type: object
+        required: [reason]
+        properties:
+          reason: { type: string, enum: [too-old, invalid] }
     OpsPresence:
       contentType: application/json
       payload:
@@ -742,9 +754,9 @@ components:
         type: object
         description: "위젯 흐름의 widget 사건. 위젯 키마다 그 위젯의 전체 값이다. 값의 모양은 위젯 키마다 openapi의 위젯 조회 응답과 같다(wbs 0.2.3, ADR-0100)"
         properties:
-          widgetKey: { type: string }
+          widgetKey: { type: string, description: "위젯 키(openapi /v1/ops/widgets/{widgetKey}의 키)" }
           at: { type: string, format: date-time, description: 값을 계산한 시각 }
-          value: { type: object }
+          value: { type: object, description: "openapi components.schemas.OpsWidgetValue와 같은 모양(위젯 키마다 한 갈래, 원천 실패면 error source-unavailable). series는 싣지 않는다(ADR-0360)" }
     OpsAlert:
       contentType: application/json
       payload:

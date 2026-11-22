@@ -371,6 +371,7 @@ export type ProblemType =
   | 'trigger-deferred'
   | 'under-14'
   | 'unknown-promoter'
+  | 'unknown-widget-key'
   | 'unlock-code-invalid'
   | 'unlock-link-invalid'
   | 'unlock-link-resend-limit'
@@ -757,6 +758,7 @@ export const PROBLEM_TYPES = {
   'trigger-deferred': { status: 409, title: "판정 보류 중인 지표입니다" },
   'under-14': { status: 403, title: "만 14세 미만은 피켓을 이용할 수 없습니다" },
   'unknown-promoter': { status: 422, title: "등록되지 않은 파트너사입니다" },
+  'unknown-widget-key': { status: 422, title: "모르는 위젯 키입니다" },
   'unlock-code-invalid': { status: 422, title: "코드가 맞지 않습니다" },
   'unlock-link-invalid': { status: 410, title: "이 링크는 더 쓸 수 없습니다" },
   'unlock-link-resend-limit': { status: 429, title: "해제 링크는 1시간에 3번까지 다시 받을 수 있습니다" },

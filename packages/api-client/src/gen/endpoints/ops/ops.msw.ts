@@ -138,7 +138,6 @@ import type {
   EventReport,
   EventReportSummary,
   FraudCaseSummary,
-  GetOpsWidget200,
   GuaranteeCollectionResult,
   HomeLayout,
   HomeLayoutInput,
@@ -175,6 +174,7 @@ import type {
   OpsReviewDetail,
   OpsSaleReviewDetail,
   OpsSaleReviewPage,
+  OpsWidgetValue,
   PartnerNotice,
   PartnerNoticeCreate,
   PartnerNoticePage,
@@ -467,7 +467,7 @@ export const getGetOpsAuditAnchorResponseMock = (overrideResponse: Partial<Extra
 
 export const getGetOpsAuditAnchorVerificationResponseMock = (overrideResponse: Partial<Extract<AuditCheckpointVerification, object>> = {}): AuditCheckpointVerification => ({checkpointId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), valid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), rootValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), prevValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), signatureValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), anchorValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), fromSeq: faker.helpers.arrayElement([faker.number.int(), undefined]), toSeq: faker.helpers.arrayElement([faker.number.int(), undefined]), checkedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), no: faker.helpers.arrayElement([faker.number.int(), null]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['DAILY','EVENT_CLOSE','MANUAL','EXECUTION'] as const), null]), legacy: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), signed: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), checkpointHash: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), otsState: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','COMPLETE'] as const), null]), publishedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
 
-export const getGetOpsWidgetResponseMock = (): GetOpsWidget200 => ({})
+export const getGetOpsWidgetResponseMock = (overrideResponse: Partial<Extract<OpsWidgetValue, object>> = {}): OpsWidgetValue => ({widgetKey: faker.string.alpha({length: {min: 10, max: 20}}), source: faker.helpers.arrayElement(['prometheus'] as const), at: faker.date.past().toISOString().slice(0, 19) + 'Z', eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), error: faker.helpers.arrayElement([faker.helpers.arrayElement(['source-unavailable'] as const), undefined]), ...overrideResponse})
 
 export const getGetOpsCommandResponseMock = (overrideResponse: Partial<Extract<CommandState, object>> = {}): CommandState => ({commandId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), state: faker.helpers.arrayElement([faker.helpers.arrayElement(['DRAFTED','DRY_RUN','PENDING_APPROVAL','APPROVED','REJECTED','DISPATCHED','ACKED','SUCCEEDED','FAILED','REVERT_PENDING','REVERTED','AUTO_EXPIRED'] as const), undefined]), dryRun: faker.helpers.arrayElement([{version: faker.helpers.arrayElement([1] as const), approvalMode: faker.helpers.arrayElement(['NONE','ONE','TWO'] as const), reauthRequired: faker.datatype.boolean(), counted: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({key: faker.string.alpha({length: {min: 10, max: 20}}), value: faker.number.float({fractionDigits: 2}), source: faker.string.alpha({length: {min: 10, max: 20}}), measuredAt: faker.date.past().toISOString().slice(0, 19) + 'Z'})), predicted: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({key: faker.string.alpha({length: {min: 10, max: 20}}), value: faker.number.float({fractionDigits: 2}), formula: faker.string.alpha({length: {min: 10, max: 20}}), inputs: {
         [faker.string.alphanumeric(5)]: faker.number.float({fractionDigits: 2})
@@ -1952,7 +1952,7 @@ export const getGetOpsEventLiveMockHandler = (overrideResponse?: unknown | ((inf
   }, options)
 }
 
-export const getGetOpsWidgetMockHandler = (overrideResponse?: GetOpsWidget200 | ((info: Parameters<HttpResponseResolver<{ widgetKey: string }>>[0]) => Promise<GetOpsWidget200> | GetOpsWidget200), options?: RequestHandlerOptions) => {
+export const getGetOpsWidgetMockHandler = (overrideResponse?: OpsWidgetValue | ((info: Parameters<HttpResponseResolver<{ widgetKey: string }>>[0]) => Promise<OpsWidgetValue> | OpsWidgetValue), options?: RequestHandlerOptions) => {
   return http.get<{ widgetKey: string }>('*/v1/ops/widgets/:widgetKey', async (info: Parameters<HttpResponseResolver<{ widgetKey: string }>>[0]) => {
 
 

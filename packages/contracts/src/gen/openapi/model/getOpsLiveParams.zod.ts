@@ -12,7 +12,8 @@
 import * as zod from 'zod';
 
 export const GetOpsLiveParams = zod.object({
-  "eventId": zod.string().optional()
+  "eventId": zod.string().optional(),
+  "screen": zod.string().optional()
 })
 
 export type GetOpsLiveParams = zod.input<typeof GetOpsLiveParams>;
