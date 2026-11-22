@@ -96,6 +96,45 @@
 
 ## 검증
 
+검증 담당 `w12pt2-verify`(deepseek-v4.1-flash), 2026-11-22 16:56~17:15 KST. 구현·시험·리뷰에 관여하지 않았다. 기준 커밋 `6ed9df8e2`(리뷰까지).
+
+### 게이트
+
+| 검사 | 결과 |
+| --- | --- |
+| `pnpm.cmd --filter @peaket/platform test test/problem-types.test.ts` | **2/2 통과**(PRF192 포함) |
+| `node tools/ci/gateway-routes.mjs --check` | 생성 파일 5개가 같다(끝 코드 0) |
+| `node --test tools/ci/gateway-routes.test.mjs` | **41/41 통과**(D-T42 ①② 포함) |
+| `pnpm.cmd --filter @peaket/contracts gen:check` | 생성물이 계약과 같다 |
+| `pnpm.cmd --filter @peaket/contracts test` | **48/48 통과** |
+| `pnpm.cmd --filter @peaket/api-client gen:check` | 생성물이 계약과 같다 |
+| `pnpm.cmd --filter @peaket/api-client test` | **116/116 통과** |
+| `pnpm.cmd --filter @peaket/core-svc run test:integration sale-suspension` | **6/6 통과**(Docker 29.8.1, 잠금 `lane3-W12-problem-types-2` 16:59:41~17:00:30) |
+| core 알림 시험 3파일(`notify-identity-events`·`internal-notify`·`fan-notify-http`) | **11/11 통과** |
+| `pnpm.cmd --filter @peaket/core-svc test`(기본 5초) | 1차 820/821, 2차 819/821. 실패는 모두 5초 시간 초과다(1차 `internal-sale-config-token-boot` SEC-06R ①, 2차 `internal-notify` trade-events·`tenant-rate-limit-wiring` D-T50 ⑦). 세 파일을 따로 돌리면 4/4·11/11·3/3로 통과하고, `--testTimeout=30000`으로 전체를 돌리면 **115파일 821/821 통과**(끝 코드 0) |
+| typecheck(core·platform·contracts·api-client) | **10 tasks 통과** |
+| `pnpm.cmd lint` | 통과(출력 없음) |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0, 경고 4(기존 api 셋 + mermaid 건너뜀) |
+| `node tools/ci/records.mjs --check` | 기록 표가 맞다(경고는 기존 것) |
+
+- Docker 잠금은 WSL의 `bash`가 `D:/` 경로를 읽지 못해 Git Bash(`C:\Program Files\Git\bin\bash.exe`)로 `D:/ticketpass-locks/lock.sh`를 돌렸다. 끝나고 바로 놓았다.
+- core 단위 전체의 5초 시간 초과는 이 묶음이 바꾼 파일(알림 컨트롤러 두 줄)과 무관한 시험에서 났고, 따로 돌리면 모두 통과한다. 같은 PC에서 다른 작업이 함께 돌 때 생기는 기존 흔들림으로 본다(남은 위험).
+- `roles-check --base origin/develop --head HEAD`와 `records.mjs --check`는 이 검증 커밋을 만든 뒤 HEAD에서 다시 확인한다. 결과는 이 절에 덧붙인다.
+
+### 틀린 구현 표본
+
+| # | 넣은 틀린 구현 | 잡은 검사(결과) |
+| --- | --- | --- |
+| S1 | openapi 목록에서 `sale-suspension-conflict` 줄을 뺀다 | PRF192 **실패**(`missing: [ 'core-svc sale-suspension-conflict' ]`). 줄을 되돌리니 2/2 |
+| S2 | `deploy/gateways/gw-fan.routes.yaml`을 `origin/develop` 판(옛 지문)으로 되돌린다 | `gateway-routes --check` **끝 코드 1**(그 파일만 다름). 되돌리니 0 |
+
+- 넣은 수 2, 잡힌 수 2, 놓친 수 0. 표본마다 그 파일만 되돌렸고 `git status --short`에 제품 파일 차이가 없었다.
+
+### 남은 위험
+
+- 리뷰 RV-01(알림 모듈의 변수 제목이 아직 공용 type에 실림)·RV-02(내부 경로 409 설명 없음)·RV-03(알림 400 제목 문구 변경)이 그대로 남는다. 둘 다 막지 않는다.
+- core 단위 전체의 기본 5초 시간 초과 흔들림은 이 PC의 부하 탓으로 보이며, `--testTimeout=30000`에서 821/821로 통과했다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
