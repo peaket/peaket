@@ -25,7 +25,7 @@
 | AC-T7 | ① | 유출 목록: 시험 HIBP 서버로 ① 목록에 있는 비밀번호를 정한다 ②… | ①은 거절된다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-password.test.ts |
 | AC-T7 | ② | 유출 목록: 시험 HIBP 서버로 ① 목록에 있는 비밀번호를 정한다 ②… | ②는 503과 `Retry-After`이고 비밀번호가 저장되지 않는다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-password.test.ts |
 | AC-T7 | ③ | 유출 목록: 시험 HIBP 서버로 ① 목록에 있는 비밀번호를 정한다 ②… | ③은 로그인되고 다음 로그인에 다시 본다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-login.test.ts, services/identity-svc/test/outbound-trace.test.ts |
-| AC-T7 | ④ | 유출 목록: 시험 HIBP 서버로 ① 목록에 있는 비밀번호를 정한다 ②… | ④는 §3.5대로 비밀번호를 바꾸게 한다. 모든 요청에 `Add-Padding: true`가 있고, 로그·트레이스에 SHA-1과 그 앞 5자가 0건이다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-login.test.ts, services/identity-svc/test/admin-password-change.test.ts |
+| AC-T7 | ④ | 유출 목록: 시험 HIBP 서버로 ① 목록에 있는 비밀번호를 정한다 ②… | ④는 §3.5대로 비밀번호를 바꾸게 한다. 모든 요청에 `Add-Padding: true`가 있고, 로그·트레이스에 SHA-1과 그 앞 5자가 0건이다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-login.test.ts, services/identity-svc/test/admin-password-change.test.ts 외 1곳 |
 | AC-T8 | — | 웹 ACL 속도 규칙(운영 설계만): Terraform 정책 시험으로… | 규칙이 없거나 값이 §5와 다르면 실패한다. 결과는 '설계 검사'로 적는다(docs/architecture.md §8.2 4) | 빈칸 | B | — |
 | AC-T9 | — | 전체 실패율: 시험 환경에서 5분에 관리 계정 로그인 실패 120건을… | SEV3 보안 경보가 나고, 그 뒤 1시간 동안 모든 관리 계정 로그인에 사람 확인이 나온다. 1시간 뒤 풀린다 | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-login.int.test.ts, services/identity-svc/test/admin-login.test.ts |
 | AC-T10 | — | 설정 범위 검사: §5 값을 범위 밖으로 바꿔(잠금 기준 20, 누계… | 셋 모두 시작에 실패하고 어느 설정이 범위를 벗어났는지 로그에 남는다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-password.test.ts |
