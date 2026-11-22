@@ -1,4 +1,5 @@
 // 리더 컨텍스트의 포트: 대기열 Redis의 리더 쓰기(펜싱 Lua)와 Lease 세대(docs/features/queue-admission.md §5, ADR-0056·0182).
+import type { LeaderControlWrite } from './control.js';
 
 /** 회차 일정 사본(q:{event:E}:cfg)에서 리더가 쓰는 값 */
 export interface EventPlan {
@@ -122,8 +123,14 @@ export interface LeaderStore {
   activeEvents(nowMs: number): Promise<string[]>;
   schedule(eventId: string): Promise<EventPlan | null>;
   control(eventId: string, nowMs: number): Promise<Control>;
-  /** q:{admission}:ctl의 명령 11(자동화 정지) */
-  platformControl(): Promise<{ autoStopped: boolean }>;
+  /** q:{admission}:ctl의 명령 11(자동화 정지)과 전체 범위 명령 3(allPaused, ADR-0365 결정 6. 칸이 없으면 거짓) */
+  platformControl(): Promise<{ autoStopped: boolean; allPaused?: boolean }>;
+  /**
+   * 제어 gRPC 쓰기(F-02-1, ADR-0365 결정 5): 리더 키(q:{event:E}:leader, 전체는 q:{admission}:leader)와 세대를 견주는 Lua 하나다.
+   * 세대가 낮으면 FENCED이고 아무것도 쓰지 않는다. 판이 그 종류의 판 칸보다 클 때만 칸을 쓰고, 쓴 뒤(또는 지금)의 판을 돌려준다.
+   * 없는 저장소(시험 대역)는 제어를 받지 않는다
+   */
+  applyControl?(w: LeaderControlStoreWrite): Promise<LeaderControlResult>;
   /** 명세 acquire의 BUMP */
   bump(eventId: string, gen: number, keepUntilMs: number): Promise<'OK' | 'FENCED'>;
   /** 명세 plan·applyWrite의 ADVANCE(정리·빈자리·전진·기록을 Lua 하나로) */
@@ -178,3 +185,13 @@ export interface SeedRevealer {
   run(i: { eventId: string; group: 'lobby' | number; opensAtMs: number; expireAtMs: number }): Promise<{ status: string }>;
 }
 export const SEED_REVEALER = Symbol('admission.SeedRevealer');
+
+/** 저장소 제어 쓰기 한 번(세대·판·명령과 칸) */
+export interface LeaderControlStoreWrite extends LeaderControlWrite {
+  readonly gen: number;
+  readonly version: number;
+  readonly commandId: string;
+  /** 회차 키 수명(판매 종료 + 1일). 모르면 없다(수명을 늘리지 않는다) */
+  readonly keepUntilMs?: number;
+}
+export type LeaderControlResult = { readonly kind: 'FENCED' } | { readonly kind: 'OK'; readonly appliedVersion: number; readonly changed: boolean };
