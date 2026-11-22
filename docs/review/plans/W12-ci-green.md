@@ -112,6 +112,7 @@
 | --- | --- |
 | `node tools/ci/mesh-policies.mjs --check` | 생성 파일 2개가 원천·라우트·proto와 같다(끝 코드 0) |
 | `node --test tools/ci/mesh-policies.test.mjs` | **14/14 통과**(MG-10 포함) |
+| `node --test "deploy/platform/mesh/test/*.test.mjs"` | **24/24 통과**(MS-08·MS-09 포함) |
 | `pnpm --filter @peaket/core-svc typecheck` | 통과(끝 코드 0) |
 | `pnpm --filter @peaket/core-svc test:integration` — `search-bat166`·`sale-eligibility`·`seatmap-editor`·`seatmap-save`·`startup-db-role` | **5파일 100/100 통과** |
 | `pnpm lint` | 통과(출력 없음) |
@@ -129,9 +130,11 @@
 | S1 | `port-allow.yaml`에서 `BlockTicketIssuance` 줄을 뺀다 | `mesh-policies --check` **실패**: "proto 메서드 …를 부르는 쪽이 없다". 줄을 되돌리니 끝 코드 0 |
 | S2 | `seatmap-save` 시험의 `PEAKET_NOTIFY_DATABASE_URL`을 `core_app_login` 주소로 바꾼다 | 그 시험 **실패**: 운영 시작 파일이 `core_notify`가 아닌 로그인을 거부해 `/ready`가 뜨지 않았다(`DB 사용자가 core_notify 역할이 아니다`). 되돌리니 1/1 통과 |
 | S3 | `src/maintenance-tasks.ts`에서 `notification-dedup-purge` 한 줄을 지운다 | `sale-eligibility` 정비 일 목록 시험 **실패**: 기대한 `notification-dedup-purge`가 실제 목록에 없다. 되돌리고 다시 빌드하니 1/1 통과 |
+| S4 | 메시 시험의 정본 표에서 `BlockTicketIssuance` 한 줄을 뺀다 | MS-08·MS-09 **실패**(22 통과·2 실패): "정본 표에 … 부르는 쪽이 없다". 줄을 되돌리니 24/24 |
 
-- 넣은 수 3, 잡힌 수 3, 놓친 수 0. 표본마다 `git checkout --`로 되돌렸고 `git status --short`에 제품·시험 파일 차이가 없었다.
+- 넣은 수 4, 잡힌 수 4, 놓친 수 0. 표본마다 `git checkout --`로 되돌렸고 `git status --short`에 제품·시험 파일 차이가 없었다.
 - S2에서 시작 파일이 거부한 것은 의도한 방어다. 시험은 그 거부를 `PEAKET_PUBLIC_FILE_DIR` 검사가 아니라 `/ready` 기다림에서 잡았다.
+- **리뷰 뒤 CI가 잡은 RV-01**: 첫 푸시의 `tools-check`가 `deploy/platform/mesh/test/*.test.mjs`에서 MS-08·MS-09로 "정본 표에 BlockTicketIssuance의 부르는 쪽이 없다"고 실패했다. 원천·생성 정책에는 있었지만 시험의 정본 표에만 빠져 있었다. 표에 `BlockTicketIssuance: ['purchase-svc']`를 더한 커밋 `92cd988f2` 뒤 24/24를 확인했다.
 
 ### 남은 위험
 
@@ -143,7 +146,8 @@
 
 - R-774. `develop` `e3f37f6e8`의 CI 실행 `45025768535`에서 `tools-check`의 mesh 생성 대조와 `node`의 core-svc 시작 시험 네 파일이 실패하던 것을 고쳤다. ⑴ BAT-011이 더한 ticket-svc `BlockTicketIssuance`를 `deploy/platform/mesh/port-allow.yaml`의 `TicketService.methods`에 purchase-svc 호출자로 더하고 `mesh-policies --write`로 `policies.yaml`을 다시 만들었다. ⑵ W12-core-notify(ADR-0351) 뒤로 `main.ts`가 요구하는 `PEAKET_NOTIFY_DATABASE_URL`을 core-svc 시작 시험 네 파일이 주지 않아, `core_notify` 그룹 역할의 로그인을 만드는 `ensureNotifyLogin`을 `test-int/roles.ts`에 더하고 네 곳에 연결했다. ⑶ 같은 실패에 가려져 있던 `sale-eligibility`의 정비 일 목록 단언에 BAT-455의 알림 정비 넷을 더했다.
   - ⑵는 BAT-011이 만든 실패가 아니라 W12-core-notify가 합쳐진 뒤 `develop`의 비문서 커밋에서 먼저 나던 실패다(직전 실행 `45014387044`). 문서만 바꾼 커밋이 `node` 잡을 건너뛰어 초록불로 보였다.
-  - 게이트: `mesh-policies --check` 0, MG-10 14/14, core-svc typecheck 0, 영향 다섯 파일 100/100, lint 0, doc-check 오류 0·경고 4, roles-check 통과, 틀린 구현 표본 3/3.
+  - 첫 푸시의 `tools-check`가 메시 시험의 정본 표(`deploy/platform/mesh/test/mesh-policies.test.mjs`)에 `BlockTicketIssuance` 호출자가 빠진 것을 MS-08·MS-09로 잡았다(RV-01). 표에 `purchase-svc` 한 줄을 더해 24/24를 확인했다.
+  - 게이트: `mesh-policies --check` 0, MG-10 14/14, 메시 시험 24/24, core-svc typecheck 0, 영향 다섯 파일 100/100, lint 0, doc-check 오류 0·경고 4, roles-check 통과, 틀린 구현 표본 4/4.
   - 남은 위험: 푸시 뒤 `develop` CI 재실행 결과는 아직 모른다. `node` 잡의 다른 잠복 실패가 더 있으면 그 묶음 담당에게 넘긴다. W12-core-notify RV-02(`webhook_delivery` INSERT 정책 true·`core_app` 권한 회수)는 이 묶음 밖이다. BUILD_ORDER 단계·wbs 상태 변화는 없다.
 
 ## 담당 표
