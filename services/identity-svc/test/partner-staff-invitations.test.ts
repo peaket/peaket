@@ -386,6 +386,15 @@ describe('파트너 현장 스태프 초대 서버 [GAT-210, BAT-450B]', () => {
     expect(ok.statusCode).toBe(200);
   });
 
+  test('I-T21 ⑩ 역할 유효 끝이 지난 INVITED는 재발송도 409이고 메일을 보내지 않는다', async () => {
+    seedInvited('a-window', 'window@example.com', 'w'.repeat(43));
+    store.assignments.set('a-window', { ...store.assignments.get('a-window')!, validUntilMs: NOW - 1 });
+    const r = await reissue('a-window');
+    expect(r.statusCode).toBe(409);
+    expect(json(r)).toMatchObject({ type: expect.stringContaining('staff-invitation-already-accepted') });
+    expect(mail.sent).toHaveLength(0);
+  });
+
   test('I-T21 ⑪ partner_member도 되고 역할 밖·테넌트 없음은 403, 모양 오류는 400이며 응답은 no-store다', async () => {
     expect((await create([{ email: 'pm@example.com', role: 'gate_staff' }], EVENT, 's-pm')).statusCode).toBe(201);
     expect((await list(EVENT, '', 's-pm')).statusCode).toBe(200);

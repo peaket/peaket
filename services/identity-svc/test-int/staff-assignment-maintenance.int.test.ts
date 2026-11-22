@@ -32,6 +32,8 @@ const EB = '0190f3a1-7c2e-7a00-8000-0000000d010b';
 const EC = '0190f3a1-7c2e-7a00-8000-0000000d010c';
 const ED = '0190f3a1-7c2e-7a00-8000-0000000d010d';
 const EE = '0190f3a1-7c2e-7a00-8000-0000000d010e';
+const EF = '0190f3a1-7c2e-7a00-8000-0000000d010f';
+const EG = '0190f3a1-7c2e-7a00-8000-0000000d0110';
 const I1 = '0190f3a1-7c2e-7a00-8000-0000000d0201';
 const I2 = '0190f3a1-7c2e-7a00-8000-0000000d0202';
 const I3 = '0190f3a1-7c2e-7a00-8000-0000000d0203';
@@ -49,6 +51,8 @@ const L2 = '0190f3a1-7c2e-7a00-8000-0000000d0402';
 const L3 = '0190f3a1-7c2e-7a00-8000-0000000d0403';
 const L4 = '0190f3a1-7c2e-7a00-8000-0000000d0404';
 const L5 = '0190f3a1-7c2e-7a00-8000-0000000d0405';
+const L6 = '0190f3a1-7c2e-7a00-8000-0000000d0406';
+const L7 = '0190f3a1-7c2e-7a00-8000-0000000d0407';
 const hash = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
 let pg: PostgresContainer;
@@ -137,11 +141,16 @@ describe('배정 만료·promoter 정본화 PostgreSQL [BAT-450C]', () => {
     await seed({ id: A1, status: 'ASSIGNED', eventId: E4, accountId: EDGE, validUntil: new Date(NOW) });
     await seed({ id: A2, status: 'ASSIGNED', eventId: E5, accountId: ACCOUNT, token: 'int-assigned', email: 'p@example.com', validUntil: new Date(NOW - 1) });
     await seed({ id: A3, status: 'ASSIGNED', eventId: E6, accountId: OTHER, validUntil: new Date(NOW + HOUR) });
+    // 이미 끝난 행에 남은 초대 이메일·토큰도 정비가 지운다(RV-01)
+    await seed({ id: L6, status: 'REVOKED', eventId: EF, accountId: FUTURE, token: 'int-terminal-revoked', email: 'tr@example.com' });
+    await seed({ id: L7, status: 'ENDED', eventId: EG, accountId: FUTURE, token: 'int-terminal-ended', email: 'te@example.com' });
 
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 1 });
     await expect(rowOf(A1)).resolves.toMatchObject({ status: 'ASSIGNED' });
     await expect(rowOf(A2)).resolves.toEqual({ status: 'ENDED', invite_email: null, invite_token_hash: null });
     await expect(rowOf(A3)).resolves.toMatchObject({ status: 'ASSIGNED' });
+    await expect(rowOf(L6)).resolves.toEqual({ status: 'REVOKED', invite_email: null, invite_token_hash: null });
+    await expect(rowOf(L7)).resolves.toEqual({ status: 'ENDED', invite_email: null, invite_token_hash: null });
     await expect(store.hasAssigned(ACCOUNT, NOW)).resolves.toBe(false);
     await expect(store.hasAssigned(EDGE, NOW)).resolves.toBe(true);
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 0 });

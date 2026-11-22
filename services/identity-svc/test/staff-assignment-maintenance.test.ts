@@ -106,6 +106,9 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
     seed('a-edge', { status: 'ASSIGNED', accountId: EDGE, validUntilMs: NOW, inviteEmail: undefined, inviteTokenHash: undefined });
     seed('a-past', { status: 'ASSIGNED', accountId: ACCOUNT, validUntilMs: NOW - 1, inviteEmail: 'p@example.com', inviteTokenHash: hash('tok-past') });
     seed('a-future', { status: 'ASSIGNED', accountId: OTHER, eventId: EVENT_2, validUntilMs: NOW + HOUR, inviteEmail: undefined, inviteTokenHash: undefined });
+    // 이미 끝난 행에 남은 초대 이메일·토큰도 정비가 지운다(RV-01)
+    seed('terminal-revoked', { status: 'REVOKED', accountId: ACCOUNT, eventId: EVENT_3, inviteEmail: 'r@example.com', inviteTokenHash: hash('tok-r') });
+    seed('terminal-ended', { status: 'ENDED', accountId: OTHER, eventId: EVENT_3, inviteEmail: 'e@example.com', inviteTokenHash: hash('tok-e') });
 
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 1 });
     expect(store.assignments.get('a-edge')).toMatchObject({ status: 'ASSIGNED' });
@@ -113,6 +116,10 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
     expect(store.assignments.get('a-past')?.inviteEmail).toBeUndefined();
     expect(store.assignments.get('a-past')?.inviteTokenHash).toBeUndefined();
     expect(store.assignments.get('a-future')).toMatchObject({ status: 'ASSIGNED' });
+    expect(store.assignments.get('terminal-revoked')?.inviteEmail).toBeUndefined();
+    expect(store.assignments.get('terminal-revoked')?.inviteTokenHash).toBeUndefined();
+    expect(store.assignments.get('terminal-ended')?.inviteEmail).toBeUndefined();
+    expect(store.assignments.get('terminal-ended')?.inviteTokenHash).toBeUndefined();
     await expect(store.hasAssigned(ACCOUNT, NOW)).resolves.toBe(false);
     await expect(store.hasAssigned(EDGE, NOW)).resolves.toBe(true);
     await expect(store.expireDueAssignments(NOW)).resolves.toEqual({ invitations: 0, assignments: 0 });
