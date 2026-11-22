@@ -1,7 +1,7 @@
 # ADR-0345: 지급 묶음 승인 ID는 ops-svc 내부 HTTP로 대조한다(2026-11-22)
 
 - **상태**: 채택(2026-11-22, 추천 적용, BUILD_ORDER BAT-625 계획). W12-mesh 리뷰 RV-01(보안 높음)을 닫는다.
-- **관련**: [ADR-0285](0285-mesh-port-allow-source-generated-policies.md) 결정 9(REST 포트의 내부 HTTP 부르는 쪽), [ADR-0047](0047-settlement-payout-via-pg-agency.md), [ADR-0123](0123-sale-suspension-and-resumption.md), [ADR-0320](0320-promoter-contract-terms-and-commission-rate-freeze.md), POL-038, docs/features/settlement.md §5.1·§6·§13, docs/security/asvs/settlement.md V2·V8·V16
+- **관련**: [ADR-0285](0285-mesh-port-allow-source-generated-policies.md) 결정 9(REST 포트의 내부 HTTP 부르는 쪽), [ADR-0047](0047-settlement-payout-via-pg-agency.md), [ADR-0123](0123-sale-review-suspended-takedown-resume-or-cancel.md), [ADR-0320](0320-promoter-contract-terms-approval-and-freeze.md), POL-038, docs/features/settlement.md §5.1·§6·§13, docs/security/asvs/settlement.md V2·V8·V16
 - **관련 ID**: FR-062, J-T31, R-T23 ②
 
 ## 맥락

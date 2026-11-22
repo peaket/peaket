@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 66 | 15 | 0 | 0 | 0 | 1 | 0 | 0 | 73 | 155 |
+| A | 67 | 15 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 155 |
 | B | 76 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 7 | 129 |
-| 합계 | 142 | 41 | 0 | 0 | 0 | 1 | 0 | 20 | 80 | 284 |
+| 합계 | 143 | 41 | 0 | 0 | 0 | 0 | 0 | 20 | 80 | 284 |
 
 ## docs/features/transfer-refund.md
 
@@ -33,7 +33,7 @@
 | R-T22 | ⑤ | 일괄 환불 수동 일시정지·재개와 업무 거절(추천 적용… | ⑤ 기준 3으로 바로 다시 멈춘다 | 자동 시험 | A | 시험: services/purchase-svc/test/event-refund-gat130.test.ts |
 | R-T22 | ⑥ | 일괄 환불 수동 일시정지·재개와 업무 거절(추천 적용… | ⑥ 1시간마다 다시 알린다. 모든 정지·재개가 사유와 함께 감사 로그에 남는다 | ID만 | A | 시험: services/purchase-svc/test-int/event-refund-grpc.int.test.ts, services/purchase-svc/test/event-refund-gat130.test.ts |
 | R-T23 | ① | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ① 403 | 자동 시험 | A | 시험: services/ops-svc/test/commands-http.test.ts |
-| R-T23 | ② | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ② 같은 트랜잭션으로 비공개가 되고 검색·홈에서 빠지며 CDN 무효화를 부른다. 판매 중인 회차의 새 홀드·결제 접수는 423이고 serving이 멈추며, 대기… | 다른 단계 | A | LCH-100·BAT-625(정산 보류) · 판매 중지가 같은 트랜잭션에서 비공개·검색·홈에서 빠지고 CDN을 부르는 것, 판매 중 회차의 새 홀드·결제가 423이고 serving이 멈추며 대기 상태 파일이… |
+| R-T23 | ② | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ② 같은 트랜잭션으로 비공개가 되고 검색·홈에서 빠지며 CDN 무효화를 부른다. 판매 중인 회차의 새 홀드·결제 접수는 423이고 serving이 멈추며, 대기… | 자동 시험 | A | 시험: services/core-svc/test-int/sale-suspension.int.test.ts, services/payment-svc/test/settlement-sale-suspension.test.ts |
 | R-T23 | ③ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ③ 판매 중지가 풀리지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/sale-suspension-boundary.test.ts |
 | R-T23 | ④ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ④ 판매 중이던 회차는 다시 열리고, 오픈 시각이 지난 회차는 열리지 않으며 파트너에게 오픈 시각을 바꾸라고 알린다 | 자동 시험 | A | 시험: services/core-svc/test-int/sale-suspension.int.test.ts, services/ops-svc/test/sale-stop-executor.test.ts |
 | R-T23 | ⑤ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ⑤ 409 `sale-not-suspended` | 자동 시험 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |

@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 25 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 59 |
-| B | 69 | 46 | 0 | 0 | 0 | 0 | 0 | 23 | 15 | 153 |
-| 합계 | 94 | 54 | 0 | 0 | 0 | 0 | 0 | 23 | 41 | 212 |
+| A | 32 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 66 |
+| B | 68 | 47 | 0 | 0 | 0 | 0 | 0 | 23 | 15 | 153 |
+| 합계 | 100 | 55 | 0 | 0 | 0 | 0 | 0 | 23 | 41 | 219 |
 
 ## docs/features/settlement.md
 
@@ -71,6 +71,13 @@
 | J-T30 | ③ | 판매 승인·상품 게시 때 수수료율 고정(2026-11-20… | ③ 재승인에서 회차 하나를 더하면 기존 회차는 875, 더한 회차는 그때의 900이다. | 자동 시험 | A | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test/product-commission.test.ts |
 | J-T30 | ④ | 판매 승인·상품 게시 때 수수료율 고정(2026-11-20… | ④ database 조립의 `COMMISSION_RATE_SOURCE`가 계약 표를 읽는다. 첫 게시 875bp, 같은 상품을 고쳐도 875, 900bp 계약… | 자동 시험 | A | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test/product-commission.test.ts |
 | J-T30 | ⑤ | 판매 승인·상품 게시 때 수수료율 고정(2026-11-20… | ⑤ 마이그레이션 뒤 기존 파트너마다 계약 한 기간(1000bp·1000bp·`DEPOSIT`)과 `promoter.commission_rate_bp=1000`이… | 자동 시험 | A | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test/product-commission.test.ts |
+| J-T31 | ① | 지급 묶음 승인 ID 대조(2026-11-22, BAT-625… | ① `approveBatch`가 ops-svc 지급 승인 기록(`GET /internal/v1/payout-approvals/{approvalId}`)의 종류… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-approval-verification.test.ts |
+| J-T31 | ② | 지급 묶음 승인 ID 대조(2026-11-22, BAT-625… | ② 없는 승인 ID·다른 배치·금액·통화·건수·결제사·상점·지급일 불일치는 4xx이고 `payout_batch` 상태를 바꾸지 않는다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-approval-verification.test.ts |
+| J-T31 | ③ | 지급 묶음 승인 ID 대조(2026-11-22, BAT-625… | ③ 정족수 미달(승인자 없음·요청자=승인자·`requiredApprovals≠2`·승인 시각 없음)도 4xx다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-approval-verification.test.ts |
+| J-T31 | ④ | 지급 묶음 승인 ID 대조(2026-11-22, BAT-625… | ④ ops-svc가 5xx·시간 초과·연결 실패·응답 모양 위반이면 503이고 아무것도 바꾸지 않는다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-approval-verification.test.ts |
+| J-T31 | ⑤ | 지급 묶음 승인 ID 대조(2026-11-22, BAT-625… | ⑤ 같은 승인 ID 재요청은 처음 결과와 같고 ops를 다시 부르지 않으며, 같은 승인 ID를 다른 배치에 쓰거나 이미 다른 승인으로 처리된 배치에 새 승인… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-approval-verification.test.ts |
+| J-T31 | ⑥ | 지급 묶음 승인 ID 대조(2026-11-22, BAT-625… | ⑥ 성공·거절마다 `payout_batch_audit`에 배치·승인 ID·요청자·승인자·금액·통화·시각·사유를 남기고, 서비스 로그에… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-approval-verification.test.ts |
+| J-T31 | ⑦ | 지급 묶음 승인 ID 대조(2026-11-22, BAT-625… | ⑦ 내부 경로는 없는 승인에 404, 늘 `no-store`이고 사유 글·계좌·내부 토큰을 싣지 않는다. 연결: FR-062, POL-038, ASVS… | 자동 시험 | A | 시험: services/ops-svc/test/payout-approval.test.ts |
 
 ## docs/security/asvs/settlement.md
 
@@ -111,8 +118,8 @@
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/core-svc/test-int/catalog.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 27곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/core-svc/test/shop-order.http.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts 외 4곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-entry-pause-judg… |
-| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 6곳 |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 6곳 |
+| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 23곳 |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 24곳 |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/review.http.test.ts 외 14곳 |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
@@ -145,7 +152,7 @@
 | v5.0.0-4.4.4 | — | L2 | 전용 WebSocket 세션 토큰은 인증된 HTTPS 세션으로 처음 받거나 검증한다. | 해당 없음 | B | 해당 없음(WebSocket 미사용) |
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-summary.http.test.ts 외 2곳 |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역:… |
-| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 1곳 |
+| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 2곳 |
 | v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/idempotency-rls.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외… |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 7곳 |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/partner-bulkhead-auth.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
@@ -223,7 +230,7 @@
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: services/core-svc, services/ops-svc, services/payment-svc |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/limits-errors.test.mjs, packages/platform/test/problem.test.ts 외 2곳 (영역:… |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/payment-svc/test-int/payment-call-guard.int.test.ts 외 27곳 |
-| v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/payment-svc/test-int/payment-call-guard.int.test.t… |
+| v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 71곳… |
 | v5.0.0-2.3.5 | — | L3 | 고가치 업무 흐름에는 여러 사람의 승인을 요구한다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-11.2.4 | — | L3 | 모든 암호 연산을 상수 시간으로 하고 비교·계산·반환에서 조기 종료하지 않아 정보가 새지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test/internal-sale-config-token-boot.test.ts |
 | v5.0.0-13.1.4 | — | L3 | 보안에 핵심인 비밀과 그 교체 일정을 위협 모델에 따라 문서로 정한다. | ID만 | B | 다른 곳 시험: deploy/workloads/test/workloads.test.mjs, tools/ci/alert-rules.test.mjs 외 1곳 (영역: services/core-svc… |
