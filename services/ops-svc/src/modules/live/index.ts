@@ -1,17 +1,20 @@
 // 관제 SSE 모듈의 공개 면(ADR-0360). 다른 기능(갈래 1 OPS-160 실시간 표, F-02-1 자동 제어 control)은 이 파일로만 가져온다.
 export { OpsLiveFeed, approvalOf, type OpsLiveCheckpointSource, type OpsLiveCommandSource, type OpsLiveFeedDeps, type PushDelivery } from './application/ops-live-feed.js';
-export { PushHub, settleRows, type PushHubOptions, type PushListener } from './application/push-hub.js';
+export { PushHub, settleRows, type HubDelivery, type PushHubOptions, type PushListener } from './application/push-hub.js';
 export { PresenceHub, type PresenceOptions, type PresenceSnapshot } from './application/presence.js';
 export { WidgetFeed, unavailableValue, type WidgetFeedOptions, type WidgetListener } from './application/widget-feed.js';
 export {
   OPS_LIVE_EVENTS,
   OPS_LIVE_GAP_WAIT_MS,
   OPS_LIVE_HEARTBEAT_MS,
+  OPS_LIVE_LATE_WATCH_MAX,
+  OPS_LIVE_LATE_WATCH_MS,
   OPS_LIVE_PENDING_LIMIT_BYTES,
   OPS_LIVE_POLL_MS,
   OPS_LIVE_REPLAY_WINDOW_MS,
   OPS_LIVE_RETRY_MS,
   OPS_LIVE_SESSION_CHECK_MS,
+  OPS_LIVE_START_LOOKBACK,
   OPS_PRESENCE_GATHER_MS,
   OPS_PRESENCE_WINDOW_MS,
   OPS_PRESENCE_WRITE_MS,

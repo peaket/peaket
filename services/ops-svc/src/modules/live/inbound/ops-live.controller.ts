@@ -1,6 +1,6 @@
 // 관제 늘 여는 SSE 흐름 GET /v1/ops/live(openapi /v1/ops/live, asyncapi sse.ops-live, ADR-0100 결정 1·2·4, ADR-0360).
 // 파드의 알림 표 읽기(PushHub)가 0.5초 [가정]마다 새 행을 모든 연결에 나눠 주고, 연결마다 역할·요청자로 거른다.
-// - Last-Event-ID가 없으면 지금 정한 번호부터(첫 덩이에 id만 둔다). 있으면 그 뒤를 표에서 다시 보낸다
+// - Last-Event-ID가 없으면 지금 정한 번호부터(첫 덩이에 id만 둔다). 있으면 그 뒤를 표에서 다시 보낸다(늦게 커밋된 행을 놓쳤을 수 있으면 그 앞부터)
 // - 1시간 [가정] 밖·지운 번호면 reset(too-old), 숫자가 아니거나 만든 적 없는 번호면 reset(invalid). reset의 id는 지금 번호라 다시 reset되지 않는다
 // - eventId를 주면 그 회차의 접속자(presence)를 보내고 이 연결을 접속자 표에 15초 [가정]마다 적는다
 // gw-ops는 이 경로의 시간 초과를 끈다(timeouts.request 0s).
@@ -10,9 +10,9 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { OPS_LIVE_REPLAY_WINDOW_MS, lastEventIdOf, resumeVerdictOf, type OpsLiveEvent } from '../domain/live.js';
 import type { PushEventSource } from '../domain/ports.js';
-import { OpsLiveFeed, type PushDelivery } from '../application/ops-live-feed.js';
+import { OpsLiveFeed } from '../application/ops-live-feed.js';
 import { PresenceHub } from '../application/presence.js';
-import { PushHub } from '../application/push-hub.js';
+import { PushHub, type HubDelivery } from '../application/push-hub.js';
 import { PUSH_EVENT_SOURCE, TERMINATED_SESSIONS } from '../tokens.js';
 import { SseConnection, type TerminatedSessionsView } from './sse-connection.js';
 
@@ -53,37 +53,26 @@ export class OpsLiveController {
       ...(this.logger ? { logger: this.logger } : {}),
     });
 
-    let settled = 0;
-    try {
-      await this.hub.ready();
-      settled = this.hub.settled;
-    } catch {
-      // 알림 표를 못 읽으면 지금부터(0) 연다. 허브가 다음 주기에 다시 잡는다
-    }
-
-    // 다시 붙기 판정
-    let cursor = settled;
-    let reset: 'too-old' | 'invalid' | undefined = last.kind === 'reset' ? last.reason : undefined;
-    if (last.kind === 'since') {
-      try {
-        const [latest, oldest] = await Promise.all([this.source.latest(), this.source.oldestWithin(OPS_LIVE_REPLAY_WINDOW_MS)]);
-        const verdict = resumeVerdictOf(last.seq, latest, oldest);
-        if (verdict === 'ok') cursor = last.seq;
-        else reset = verdict;
-      } catch {
-        reset = 'too-old';
-      }
-    }
-
-    // 허브의 새 행은 다시 보내기가 끝날 때까지 모아 둔다(겹침은 보낸 번호로 지운다)
-    let lastSent = cursor;
+    // 허브의 새 행은 다시 보내기가 끝날 때까지 모아 둔다(겹침은 보낸 번호로 지운다). 구독을 지금 순번 잡기보다 먼저 걸어 그 사이 행이 빠지지 않는다.
+    // 늦은 행(late: 건너뛴 뒤 늦게 커밋된 행)은 보낸 번호 아래라도 한 번 보내고, 이 연결의 id가 뒤로 가지 않게 지금까지 보낸 번호를 id로 단다
+    let lastSent = 0;
     let replaying = true;
-    const held: PushDelivery[] = [];
-    const deliver = (batch: readonly PushDelivery[]): void => {
+    const held: HubDelivery[] = [];
+    const sentBelow = new Set<number>();
+    const deliver = (batch: readonly HubDelivery[], fromReplay = false): void => {
       for (const d of batch) {
-        if (d.row.seq <= lastSent) continue;
-        lastSent = d.row.seq;
-        const e = this.feed.eventFor(d, me);
+        let e: OpsLiveEvent | undefined;
+        if (d.late) {
+          if (sentBelow.has(d.row.seq)) continue;
+          sentBelow.add(d.row.seq);
+          const late = this.feed.eventFor(d, me);
+          e = late ? { ...late, id: lastSent } : undefined;
+        } else {
+          if (d.row.seq <= lastSent) continue;
+          lastSent = d.row.seq;
+          if (fromReplay) sentBelow.add(d.row.seq);
+          e = this.feed.eventFor(d, me);
+        }
         if (e) conn.send(e);
       }
     };
@@ -93,6 +82,29 @@ export class OpsLiveController {
     });
     conn.onClose(unsubscribe);
 
+    let settled = 0;
+    try {
+      await this.hub.ready();
+      settled = this.hub.settled;
+    } catch {
+      // 알림 표를 못 읽으면 지금부터(0) 연다. 허브가 다음 주기에 다시 잡는다
+    }
+
+    // 다시 붙기 판정. 이 파드가 늦게 낸 행을 받았는지 모르는 커서는 그 행 앞으로 당긴다(hub.rewind)
+    let cursor = settled;
+    let reset: 'too-old' | 'invalid' | undefined = last.kind === 'reset' ? last.reason : undefined;
+    if (last.kind === 'since') {
+      try {
+        const [latest, oldest] = await Promise.all([this.source.latest(), this.source.oldestWithin(OPS_LIVE_REPLAY_WINDOW_MS)]);
+        const verdict = resumeVerdictOf(last.seq, latest, oldest);
+        if (verdict === 'ok') cursor = this.hub.rewind(last.seq);
+        else reset = verdict;
+      } catch {
+        reset = 'too-old';
+      }
+    }
+    lastSent = cursor;
+
     conn.open(last.kind === 'since' && !reset ? undefined : settled);
     if (reset) {
       const e: OpsLiveEvent = { id: settled, event: 'reset', data: { reason: reset } };
@@ -100,7 +112,7 @@ export class OpsLiveController {
       lastSent = settled;
     } else if (cursor < settled) {
       try {
-        deliver(await this.hub.replay(cursor, settled));
+        deliver(await this.hub.replay(cursor, settled), true);
       } catch {
         // 다시 보내기를 못 하면 reset으로 화면이 REST를 다시 읽게 한다
         conn.send({ id: settled, event: 'reset', data: { reason: 'too-old' } });

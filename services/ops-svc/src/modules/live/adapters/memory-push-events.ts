@@ -64,6 +64,12 @@ export class MemoryPushEvents implements PushEventSource {
     return this.#rows.filter((r) => r.seq > seq).slice(0, limit);
   }
 
+  async afterOrAt(seq: number, seqs: readonly number[], limit: number): Promise<readonly PushEventRow[]> {
+    await this.scan();
+    const at = new Set(seqs);
+    return this.#rows.filter((r) => r.seq > seq || at.has(r.seq)).slice(0, limit);
+  }
+
   async latest(): Promise<number> {
     await this.scan();
     return this.#seq;
