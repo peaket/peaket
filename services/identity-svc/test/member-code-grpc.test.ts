@@ -20,21 +20,22 @@ describe('MemberCodeService.ResolveMemberCodes', () => {
     const handlers = memberCodeHandlers({
       resolve: async (codes) => {
         seen.push([...codes]);
-        return codes.filter((c) => c === 'PEAKET-0001').map((c) => ({ memberCode: c, accountId: A }));
+        return codes.filter((c) => c === 'ABC-1234').map((c) => ({ memberCode: c, accountId: A }));
       },
     });
-    const { err, res } = await call(handlers, ['PEAKET-0001', 'PEAKET-9999']);
+    const { err, res } = await call(handlers, ['ABC-1234', 'XYZ-9999']);
     expect(err).toBeNull();
-    expect(seen).toEqual([['PEAKET-0001', 'PEAKET-9999']]);
-    expect(res).toEqual({ resolved: [{ member_code: 'PEAKET-0001', account_id: A }] });
+    expect(seen).toEqual([['ABC-1234', 'XYZ-9999']]);
+    expect(res).toEqual({ resolved: [{ member_code: 'ABC-1234', account_id: A }] });
   });
 
   it('1만 개를 넘거나 빈 코드·모양이 틀린 코드는 INVALID_ARGUMENT다', async () => {
     const handlers = memberCodeHandlers({
       resolve: async (codes) => codes.map((c) => ({ memberCode: c, accountId: B })),
     });
-    expect((await call(handlers, Array.from({ length: 10_001 }, (_, i) => `PEAKET-${String(i).padStart(4, '0')}`))).err?.code).toBe(grpc.status.INVALID_ARGUMENT);
+    const many = Array.from({ length: 10_001 }, (_, i) => `AB${String.fromCharCode(65 + (i % 26))}-${String(i % 10_000).padStart(4, '0')}`);
+    expect((await call(handlers, many)).err?.code).toBe(grpc.status.INVALID_ARGUMENT);
     expect((await call(handlers, [''])).err?.code).toBe(grpc.status.INVALID_ARGUMENT);
-    expect((await call(handlers, ['peaket 0001!'])).err?.code).toBe(grpc.status.INVALID_ARGUMENT);
+    expect((await call(handlers, ['abc 1234!'])).err?.code).toBe(grpc.status.INVALID_ARGUMENT);
   });
 });
