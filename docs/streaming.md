@@ -156,6 +156,7 @@
 ### 2.7 지표와 로그
 
 - 지표는 서비스와 같은 OTel·Prometheus 경로로 내고, 클러스터의 Prometheus가 PodMonitor로 수집한다. 쓰는 지표는 `stream_consumer_lag_records{worker, topic, partition}`, `stream_insert_seconds{worker, table}`, `stream_insert_retries_total{worker}`, `stream_rejected_total{worker, topic, reason}`, `stream_unrecognized_symbol_total{worker, topic, record, field}`(모르는 열거 기호, §2.6), `stream_paused_partitions{worker}`, ops-svc의 `rt_query_seconds{view}`·`rt_freshness_seconds{path}`다(§14). `stream_rejected_total`의 `reason` 값은 `brz_rejected.error_class`(§6.3)와 같은 `DESERIALIZE`·`UNKNOWN_SCHEMA`·`MISSING_FIELD` 셋이다(추천 적용, 2026-11-22, BAT-220 계획).
+- 소비 밀림 고치기(추천 적용, 2026-11-23, BAT-220 리뷰 RV220-1·RV220-4): `stream_consumer_lag_records`는 받은 묶음마다 고치고, 그와 따로 맡은 파티션마다 5초 [가정]마다 브로커의 높은 물표(그 파티션에 쓰인 마지막 위치)를 물어 고친다. 다시 시도(쓰기 실패, 처음 보는 스키마 ID 조회 실패)로 멈춘 파티션에는 받은 묶음이 오지 않으므로, 멈춘 동안 쌓인 레코드는 이 주기로 밀림에 드러난다(§2.6 '그동안 소비 밀림이 는다', §9 경보). 묻기는 같은 `client.id`·인증의 관리 연결 하나로 하며 토픽 읽기 권한(§2.3) 안의 요청이다. 묻지 못하면 경고 한 줄 뒤 다음 주기에 다시 묻는다. 재조정으로 넘긴 파티션의 값은 지워, 옛 주인과 새 주인이 같은 파티션을 함께 내지 않는다.
 - 로그는 표준 출력으로 낸다. OTel 수집기(노드 에이전트 → 중앙 수집 단계인 게이트웨이, ADR-0076)가 이 로그를 Loki(로그 저장소)로 보낸다(observability §7). 레코드 내용(가명 처리 전 식별값, 행동 요약값)은 로그에 남기지 않는다.
 
 ## 3. 시간 기준과 심장 박동

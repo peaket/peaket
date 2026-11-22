@@ -426,6 +426,9 @@ export function runKeyedConsumer<T>(o: KeyedConsumerRunOptions<T>): KeyedConsume
 
 // ---- 스트림 작업자 묶음 실행기(docs/streaming.md §2.4·§2.6·§2.7, OPS-150) ----
 
+/** 배정된 파티션의 소비 밀림을 브로커 높은 물표로 고치는 주기 [가정](docs/streaming.md §2.7). 멈춘 파티션에는 받은 묶음이 오지 않아 이것으로만 는다 */
+const LAG_REFRESH_MS = 5_000;
+
 export interface BatchWorkerOptions<T> extends Omit<KafkaClientBase, 'clientId'> {
   /** client.id = `${worker}-${env}-${pod}`(docs/streaming.md §2.6) */
   worker: string;
@@ -481,6 +484,8 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
     ready: boolean;
     /** 넘기며 버렸다: 다시 보내지 않고 커밋하지 않는다 */
     dropped: boolean;
+    /** 넘기는 중(release 시작): 새 레코드를 묶음에 싣지 않고 새 묶음을 닫거나 쓰지 않는다 */
+    releasing: boolean;
     abort: AbortController;
     /** 받기로 한 가장 큰 오프셋(다시 배달된 레코드 거르기) */
     maxReceived: bigint | undefined;
@@ -552,6 +557,7 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
       writing: false,
       ready: false,
       dropped: false,
+      releasing: false,
       abort: new AbortController(),
       maxReceived: undefined,
       nextOffset: undefined,
@@ -662,6 +668,8 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
   const enqueue = (slot: Slot, b: ClosedBatch<T>) => {
     if (slot.timer) clearTimeout(slot.timer);
     slot.timer = undefined;
+    // 넘기는 중에 닫힌 묶음은 버린 열린 묶음 뒤의 레코드라 쓰거나 커밋하지 않는다(RV220-2)
+    if (slot.releasing || slot.dropped) return;
     slot.queue.push(b);
     // 쓰는 중인 묶음 뒤에 또 닫힌 묶음이 기다리면 그 파티션 가져오기를 멈춘다(파티션마다 쓰기 하나, 메모리가 끝없이 늘지 않게)
     if (slot.queue.length >= 2) slot.gate.hold('queued');
@@ -673,12 +681,12 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
   };
 
   const armTimer = (slot: Slot) => {
-    if (slot.timer) return;
+    if (slot.timer || slot.releasing || slot.dropped) return;
     const ms = slot.batch.msUntilDue();
     if (ms === undefined) return;
     slot.timer = setTimeout(() => {
       slot.timer = undefined;
-      if (slot.dropped) return;
+      if (slot.releasing || slot.dropped) return;
       const b = slot.batch.poll();
       if (b) enqueue(slot, b);
       else armTimer(slot);
@@ -724,10 +732,15 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
 
   /** 파티션을 내놓는다: 열린 묶음은 버리고, 닫힌 묶음은 한도 안에서 마쳐 커밋한다. 한도를 넘기면 마치지 못한 묶음은 커밋하지 않는다 */
   const release = async (slot: Slot, commit: boolean) => {
+    slot.releasing = true;
     slot.gate.close();
     if (slot.timer) clearTimeout(slot.timer);
+    slot.timer = undefined;
     if (slot.decodeTimer) clearTimeout(slot.decodeTimer);
+    slot.decodeTimer = undefined;
     slot.batch.discard();
+    // 넘긴 파티션의 밀림은 새 주인이 낸다(옛 주인이 마지막 값을 계속 내지 않게, RV220-4)
+    metrics?.consumerLag.remove({ worker: o.worker, topic: slot.topic, partition: String(slot.partition) });
     const drained = await drainSlot(slot);
     if (!drained) o.logger?.warn({ kind: 'stream-worker', worker: o.worker, topic: slot.topic, partition: slot.partition }, '처리 중 묶음 기다림이 한도를 넘어 그 묶음을 커밋하지 않고 넘긴다');
     slot.dropped = true;
@@ -737,6 +750,56 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
     if (commit) await commitSlot(slot);
     slots.delete(id(slot.topic, slot.partition));
   };
+
+  const setLag = (slot: Slot, highWatermark: string) => {
+    if (!metrics || slot.nextOffset === undefined || !/^\d+$/.test(highWatermark)) return;
+    const lag = BigInt(highWatermark) - slot.nextOffset;
+    metrics.consumerLag.set({ worker: o.worker, topic: slot.topic, partition: String(slot.partition) }, Number(lag > 0n ? lag : 0n));
+  };
+
+  // 멈춘 파티션(쓰기 다시 시도·레지스트리 장애)에는 받은 묶음이 오지 않으므로, 맡은 파티션마다 브로커 높은 물표를 주기마다 물어 밀림을 고친다
+  // (docs/streaming.md §2.6 '그동안 소비 밀림이 는다', §2.7 주기, RV220-1). 관리 연결은 같은 client.id·인증으로 처음 쓸 때 하나 만든다
+  let lagAdmin: KafkaAdmin | undefined;
+  let lagFailing = false;
+  let lagRun: Promise<void> | undefined;
+  const lagTimeoutMs = Math.min(LAG_REFRESH_MS, 5_000);
+  const refreshLag = async () => {
+    const topics = new Set([...slots.values()].map((s) => s.topic));
+    if (!metrics || topics.size === 0 || stopping.signal.aborted) return;
+    try {
+      if (!lagAdmin) {
+        const a = createKafkaAdmin({ brokers: o.brokers, clientId, auth: o.auth, warmupTimeoutMs: Math.max(200, lagTimeoutMs - 200) });
+        try {
+          await withTimeout(a.connect(), lagTimeoutMs, 'Kafka 관리 연결');
+        } catch (err) {
+          await a.disconnect().catch(() => {});
+          throw err;
+        }
+        lagAdmin = a;
+      }
+      const admin = lagAdmin;
+      for (const topic of topics) {
+        const rows = await withTimeout(admin.fetchTopicOffsets(topic, { timeout: lagTimeoutMs } as never), lagTimeoutMs + 1_000, '높은 물표 조회');
+        for (const r of rows) {
+          const slot = slots.get(id(topic, r.partition));
+          // 묻는 동안 넘긴 파티션은 고치지 않는다(지운 값을 되살리지 않게)
+          if (slot && !slot.releasing && !slot.dropped && !stopping.signal.aborted) setLag(slot, r.high);
+        }
+      }
+      lagFailing = false;
+    } catch (err) {
+      const a = lagAdmin;
+      lagAdmin = undefined;
+      await a?.disconnect().catch(() => {});
+      // 이어지는 실패는 처음 한 번만 남긴다(다음 주기에 다시 묻는다)
+      if (!lagFailing) o.logger?.warn({ kind: 'stream-worker', worker: o.worker, err: errorSummary(err) }, '소비 밀림을 고치려 높은 물표를 묻지 못했다(다음 주기에 다시)');
+      lagFailing = true;
+    }
+  };
+  const lagTimer = setInterval(() => {
+    lagRun ??= refreshLag().finally(() => (lagRun = undefined));
+  }, LAG_REFRESH_MS);
+  lagTimer.unref();
 
   consumer = createKafkaConsumer({
     brokers: o.brokers,
@@ -772,9 +835,12 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
       eachBatchAutoResolve: false,
       eachBatch: async ({ batch, resolveOffset, isStale }) => {
         const { topic, partition } = batch;
+        // 넘긴 뒤 늦게 온 묶음으로 내놓은 파티션의 자리를 다시 만들지 않는다
+        if (isStale() || stopping.signal.aborted) return;
         const slot = slotOf(topic, partition);
+        const gone = () => isStale() || slot.releasing || slot.dropped || stopping.signal.aborted;
         for (const message of batch.messages) {
-          if (isStale() || slot.dropped || stopping.signal.aborted) return;
+          if (gone()) return;
           const offset = BigInt(message.offset);
           if (slot.maxReceived !== undefined && offset <= slot.maxReceived) {
             resolveOffset(message.offset);
@@ -791,18 +857,25 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
             headers: headersOf(message.headers as Record<string, unknown> | undefined),
             timestamp: Number(message.timestamp),
           };
-          let out: DecodeOutcome;
+          let out: DecodeOutcome | undefined;
+          let failure: { err: unknown } | undefined;
           try {
             out = await o.decode(m);
           } catch (err) {
-            if (isTransientError(err)) {
-              o.logger?.warn({ kind: 'stream-worker', worker: o.worker, topic, partition, offset: message.offset, err: errorSummary(err) }, '스키마를 읽지 못해 그 파티션을 멈추고 다시 받는다');
+            failure = { err };
+          }
+          // 읽는 동안 넘기거나 멈췄으면 그 레코드를 받지 않는다(버린 열린 묶음 뒤에 싣거나 커밋하지 않아 다시 받는다, RV220-2)
+          if (gone()) return;
+          if (failure) {
+            if (isTransientError(failure.err)) {
+              o.logger?.warn({ kind: 'stream-worker', worker: o.worker, topic, partition, offset: message.offset, err: errorSummary(failure.err) }, '스키마를 읽지 못해 그 파티션을 멈추고 다시 받는다');
               blockDecode(slot, offset);
               return;
             }
             // 일시 실패가 아닌 읽기 예외는 그 레코드 탓으로 본다(위치만 남긴다)
             out = { kind: 'rejected', schemaId: null, reason: 'DESERIALIZE' };
           }
+          if (!out) return;
           slot.decodeRetries = 0;
           const kafkaTs = message.timestamp || '0';
           let item: BatchRecord<T> | RejectedPosition;
@@ -819,12 +892,8 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
           if (closed) enqueue(slot, closed);
           else armTimer(slot);
         }
-        // 소비 밀림 = 높은 물표 − 다음에 읽을 오프셋(받은 묶음마다 고친다)
-        const high = /^\d+$/.test(batch.highWatermark) ? BigInt(batch.highWatermark) : undefined;
-        if (metrics && high !== undefined && slot.nextOffset !== undefined) {
-          const lag = high - slot.nextOffset;
-          metrics.consumerLag.set({ worker: o.worker, topic, partition: String(partition) }, Number(lag > 0n ? lag : 0n));
-        }
+        // 소비 밀림 = 높은 물표 − 다음에 읽을 오프셋(받은 묶음마다 고치고, 멈춘 파티션은 refreshLag가 주기마다 고친다)
+        if (!gone()) setLag(slot, batch.highWatermark);
       },
     });
   })();
@@ -837,7 +906,11 @@ export function runBatchWorker<T>(o: BatchWorkerOptions<T>): BatchWorkerRun {
       const assigned = consumer.assignment();
       if (assigned.length > 0) consumer.pause(assigned.map((tp) => ({ topic: tp.topic, partitions: [tp.partition] })));
       stopping.abort();
+      clearInterval(lagTimer);
       await Promise.all([...slots.values()].map((s) => release(s, true)));
+      await lagRun;
+      await lagAdmin?.disconnect().catch(() => {});
+      lagAdmin = undefined;
       await consumer.disconnect();
     },
   };
