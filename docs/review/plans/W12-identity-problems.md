@@ -71,7 +71,23 @@
 
 ## 리뷰
 
-리뷰 담당 `w12idp-review`(deepseek-v4.1-flash). (리뷰 담당이 채운다)
+리뷰 담당 `w12idp-review`(deepseek-v4.1-flash), 2026-11-22 15:21~15:23 KST. 받은 것은 `git diff origin/develop..27b5057eb`(계획·시험·구현)와 이 계획 파일이다. 코드·계약·생성물·정본을 대조했고, identity I-T21(13개)·platform PRF192(2개)·`bat450b-contract`(4개)를 다시 돌렸다. 코드는 고치지 않았다.
+
+결과: **막는 지적 0**, 낮음 2(남은 위험).
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 낮음(남은 위험) | `docs/api/openapi.yaml` 5170·5176행의 404 응답 설명 | 설명이 `not-found:` 이름만 적고 표준 제목·`detail` 규칙을 적지 않아, 계약만 보고 구체 사유가 `detail`에 있다는 것을 알 수 없다. 코드·시험은 맞다 | 다음 계약 정리 때 404 설명에 "제목은 표준 `찾을 수 없습니다`, 구체 사유는 `detail`"을 더한다. 지금은 응답 설명을 고치면 생성물 주석이 함께 바뀌어 이 묶음 범위를 넘는다 |
+| RV-02 | 낮음(남은 위험) | `docs/review/ledger/identity.md` | 생성기 출력이라 손으로 고치지 않았다. 이 묶음 전에도 정본에 있는 I-T87·I-T88 행이 장부에 없었고, I-T21 ⑤·⑥ 문장도 옛 것이다. `ledger --check`는 기준 트리에서도 실패 상태였다 | 다음 `ledger.mjs` 실행이 정본 문장과 BAT-450C 행을 함께 반영한다. 이 묶음은 생성기를 돌리지 않았다(다른 묶음 행을 섞지 않으려고) |
+
+### 확인한 것(지적 아님)
+
+- **한 이름 한 상태·제목**: `not-found`는 404 `찾을 수 없습니다`, 새 `staff-invite-mail-unavailable`은 503 `지금은 초대 메일을 보낼 수 없습니다`로 서비스 코드·openapi 목록·api-client 생성 표가 글자까지 같다. PRF192가 두 줄을 더 이상 보고하지 않는다.
+- **`provider-down` 회귀 없음**: identity-svc `src`에서 남은 두 곳은 본인확인기관(`verification.controller.ts` 22행)과 초대 수락의 휴대폰 본인확인(`staff-invitation.controller.ts` 23행)뿐이다. 둘 다 제목이 표준 `지금은 본인확인을 할 수 없습니다`이고 `staff-invitation-http.test.ts`가 통과한다.
+- **사유 비노출**: 404의 `detail`은 고정 글자 `없는 회차이거나 이 파트너의 회차가 아닙니다`이고 요청 값·회차 ID를 끼우지 않는다. 없는 회차와 다른 파트너 회차의 type·status·title·detail이 같아 소유 여부를 가릴 수 없다(I-T21 ⑤).
+- **생성물**: `contracts gen:check`·`api-client gen:check`가 같다. 바뀐 것은 파트너 경로 설명 주석과 `problem-types.ts`의 union·표 두 줄뿐이고 손으로 고친 생성물은 없다.
+- **화면**: `apps/partner/src/shared/api/problem.ts`의 `isNotFound`는 status 404만 보고 문구도 이미 `찾을 수 없습니다.`다. 새 type에 기대는 화면 코드는 grep으로 0건이다. 오류 문구 키는 `PROBLEM_TYPES`에서 자동으로 만들어져(`problem-copy.ts`) 새 키가 빠질 자리가 없다.
+- **시험**: 리뷰가 다시 돌린 identity I-T21 13/13, platform PRF192 2/2, `bat450b-contract` 4/4가 통과했다.
 
 ## 검증
 
