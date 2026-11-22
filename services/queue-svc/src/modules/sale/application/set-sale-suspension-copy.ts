@@ -21,7 +21,7 @@ export class SetSaleSuspensionCopy {
   async run(input: SetSaleSuspensionCopyInput): Promise<SaleSuspensionCopyResult> {
     const suspended = input.action === 'SUSPEND';
     const revision = input.revision ?? 0;
-    await this.copies.write({ eventId: input.eventId, suspended, revision, commandId: input.commandId });
-    return { eventId: input.eventId, suspended, revision };
+    const applied = await this.copies.write({ eventId: input.eventId, suspended, revision, commandId: input.commandId });
+    return { eventId: input.eventId, suspended, revision: typeof applied === 'number' ? applied : revision };
   }
 }
