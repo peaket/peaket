@@ -83,7 +83,7 @@
 
 ## 리뷰
 
-리뷰 담당 `w12green-review`(deepseek-v4.1-flash), 2026-11-23 00:29 KST. 받은 것은 `git diff origin/develop..a94973be8`(계획·시험·구현)과 이 계획 파일이다. 코드·생성물·정본을 대조하고 `mesh-policies --check`, `mesh-policies.test.mjs` 14/14, core-svc typecheck, 네 통합 시험 파일 98/98, `startup-db-role` 2/2를 다시 돌렸다. 코드는 고치지 않았다.
+리뷰 담당 `w12green-review`(deepseek-v4.1-flash), 2026-11-23 00:17 KST. 받은 것은 `git diff origin/develop..a94973be8`(계획·시험·구현)과 이 계획 파일이다. 코드·생성물·정본을 대조하고 `mesh-policies --check`, `mesh-policies.test.mjs` 14/14, core-svc typecheck, 네 통합 시험 파일 98/98, `startup-db-role` 2/2를 다시 돌렸다. 코드는 고치지 않았다.
 
 결과: **막는 지적 0, 낮음 0**.
 
@@ -98,12 +98,49 @@
 
 ## 검증
 
+검증 담당 `w12green-verify`(deepseek-v4.1-flash), 2026-11-23 00:18~00:24 KST. 계획·시험·구현·리뷰에 관여하지 않았다. 기준 커밋 `b395db9b9`(리뷰까지).
+
+### 게이트
+
+| 검사 | 결과 |
+| --- | --- |
+| `node tools/ci/mesh-policies.mjs --check` | 생성 파일 2개가 원천·라우트·proto와 같다(끝 코드 0) |
+| `node --test tools/ci/mesh-policies.test.mjs` | **14/14 통과**(MG-10 포함) |
+| `pnpm --filter @peaket/core-svc typecheck` | 통과(끝 코드 0) |
+| `pnpm --filter @peaket/core-svc test:integration` — `search-bat166`·`sale-eligibility`·`seatmap-editor`·`seatmap-save`·`startup-db-role` | **5파일 100/100 통과** |
+| `pnpm lint` | 통과(출력 없음) |
+| `python -I -X utf8 tools/doc-check/check_all.py` | **오류 0, 경고 4**(기존 api 셋 + mermaid 건너뜀) |
+| `node tools/ci/roles-check.mjs --base origin/develop --head HEAD` | 검증 커밋 뒤 HEAD에서 통과(plan → test → impl → review → verify, 담당 표·꼬리말 맞음) |
+| `node tools/ci/records.mjs --check` | 기록 표가 맞다(기존 경고만) |
+
+- Docker가 필요한 통합 시험은 잠금(`w12green-verify`)을 잡고 돌린 뒤 놓았다.
+- 다섯 파일 밖의 core-svc 통합 시험은 이 묶음이 바꾸지 않아 돌리지 않았다. `node` 잡이 다시 도는 것은 푸시 뒤 CI에서 본다.
+
+### 틀린 구현 표본
+
+| # | 넣은 틀린 구현 | 잡은 검사(결과) |
+| --- | --- | --- |
+| S1 | `port-allow.yaml`에서 `BlockTicketIssuance` 줄을 뺀다 | `mesh-policies --check` **실패**: "proto 메서드 …를 부르는 쪽이 없다". 줄을 되돌리니 끝 코드 0 |
+| S2 | `seatmap-save` 시험의 `PEAKET_NOTIFY_DATABASE_URL`을 `core_app_login` 주소로 바꾼다 | 그 시험 **실패**: 운영 시작 파일이 `core_notify`가 아닌 로그인을 거부해 `/ready`가 뜨지 않았다(`DB 사용자가 core_notify 역할이 아니다`). 되돌리니 1/1 통과 |
+| S3 | `src/maintenance-tasks.ts`에서 `notification-dedup-purge` 한 줄을 지운다 | `sale-eligibility` 정비 일 목록 시험 **실패**: 기대한 `notification-dedup-purge`가 실제 목록에 없다. 되돌리고 다시 빌드하니 1/1 통과 |
+
+- 넣은 수 3, 잡힌 수 3, 놓친 수 0. 표본마다 `git checkout --`로 되돌렸고 `git status --short`에 제품·시험 파일 차이가 없었다.
+- S2에서 시작 파일이 거부한 것은 의도한 방어다. 시험은 그 거부를 `PEAKET_PUBLIC_FILE_DIR` 검사가 아니라 `/ready` 기다림에서 잡았다.
+
+### 남은 위험
+
+- **CI 재실행**: 이 묶음은 로컬 게이트를 통과했지만 `develop` 푸시 뒤 `tools-check`·`node` 잡이 실제로 초록불인지는 아직 모른다. 푸시 뒤 실행을 확인한다.
+- **다른 잠복 실패**: `node` 잡에는 이 묶음이 건드리지 않은 다른 서비스 시험도 있다. 발송기 연결 실패에 가려져 있던 실패가 더 있으면 그 묶음 담당에게 넘긴다.
+- **W12-core-notify RV-02**: `webhook_delivery` INSERT 정책 true와 `core_app` 권한 회수는 이 묶음 밖이다.
+
+## 기록
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | w12green-plan | deepseek-v4.1-flash | 2026-11-23T00:02:00+09:00 | 2026-11-23T00:10:00+09:00 |
-| test | w12green-test | deepseek-v4.1-flash | 2026-11-23T00:10:00+09:00 | 2026-11-23T00:25:00+09:00 |
-| impl | w12green-impl | deepseek-v4.1-flash | 2026-11-23T00:25:00+09:00 | 2026-11-23T00:40:00+09:00 |
-| review | w12green-review | deepseek-v4.1-flash | 2026-11-23T00:40:00+09:00 | 2026-11-23T01:00:00+09:00 |
-| verify | w12green-verify | deepseek-v4.1-flash | 2026-11-23T01:00:00+09:00 | 2026-11-23T01:30:00+09:00 |
+| plan | w12green-plan | deepseek-v4.1-flash | 2026-11-23T00:02:00+09:00 | 2026-11-23T00:08:00+09:00 |
+| test | w12green-test | deepseek-v4.1-flash | 2026-11-23T00:08:00+09:00 | 2026-11-23T00:13:00+09:00 |
+| impl | w12green-impl | deepseek-v4.1-flash | 2026-11-23T00:13:00+09:00 | 2026-11-23T00:14:00+09:00 |
+| review | w12green-review | deepseek-v4.1-flash | 2026-11-23T00:14:00+09:00 | 2026-11-23T00:18:00+09:00 |
+| verify | w12green-verify | deepseek-v4.1-flash | 2026-11-23T00:18:00+09:00 | 2026-11-23T00:24:00+09:00 |
