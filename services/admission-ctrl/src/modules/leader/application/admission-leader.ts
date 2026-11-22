@@ -101,6 +101,8 @@ export class AdmissionLeader {
   #inputsReading = false;
   #inputsAt = Number.NEGATIVE_INFINITY;
   #autoStopped = false;
+  /** 회차와 무관한 세대 키를 올린 세대(RV-02) */
+  #platformBumped: number | undefined;
   /** 전체 범위 판매 일시정지(q:{admission}:ctl allPaused, ADR-0365 결정 6). 명령 11과 같은 주기로 읽는다 */
   #allPaused = false;
   #autoStopAt = Number.NEGATIVE_INFINITY;
@@ -159,6 +161,11 @@ export class AdmissionLeader {
         this.#last.clear();
         this.#lastTargets.clear();
         this.#rateCredit.clear();
+      }
+      // 새 세대는 회차와 무관한 세대 키(q:{admission}:leader)부터 올린다(RV-02, ADR-0056 결정 3). 옛 리더의 전체 범위 제어 쓰기와 오픈 전 회차 쓰기가 FENCED가 된다
+      if (this.#platformBumped !== gen && this.store.bumpPlatform) {
+        if ((await this.store.bumpPlatform(gen)) === 'FENCED') return this.#fence(gen, 'PLATFORM');
+        this.#platformBumped = gen;
       }
       const now = this.clock.now();
       this.#refreshInputs();
