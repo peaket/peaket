@@ -848,6 +848,7 @@
 | R-754 | purchase-svc P-T36 ③ 진짜 gRPC 시험이 리더 마감 300ms에 첫 연결·늦은 첫 답이 겹치면 거짓 TRANSIENT로 흔들렸다(CI run 44945449240) | services/purchase-svc/test/payment-deposit.test.ts, 계획 W12-pt36 | 같은 리더로 WARM을 미리 묻는 warmUp 뒤에 단언할 호출을 한 번씩, R1·R2 재현·R3·R4 고정 | 해결(RVpt-3 남은 위험은 정리 목록) |
 | R-755 | purchase-svc 기존 실패 둘이 제품 결함이 아니라 시험 결함이었다(0014 CHECK 기대 6≠8, GAT-110 P3 Outbox 파티션 밖) | services/purchase-svc/test-int/purchase-migration.int.test.ts·event-refund.int.test.ts, 계획 W12-purchase-fixes | 0030·0031 CHECK 이름 추가, P3에 주입 시계·그 날 파티션 | 해결 |
 | R-756 | 날짜 고정 판매 열기 시험이 2026-11-29·12-02/03이 지나면 now < openAt·판매 종료 규칙·PEXPIREAT 만료 때문에 실패할 수 있었다 | services/purchase-svc/test-int/sale-open.int.test.ts, services/core-svc/test-int/sale-open.int.test.ts, services/core-svc/test/partner-production.http.test.ts, 계획 W12-datefix | 오픈·시작을 Date.now()+n일로, 만료 단언도 같은 값에서, HTTP는 UTC 11:00으로 정비 창 회피 | 해결. 리뷰·검증 막는 지적 없음 |
+| R-757 | 웹훅 발송기가 팬 경로 DB 역할 core_app으로 붙어 사칭 발송·원장 조작·끝점 비밀 읽기가 가능했다 | services/core-svc/migrations/0043_core_notify_role.sql, src/main.ts·app.module.ts·notify.module.ts, test-int/notify-role.int.test.ts·startup-db-role.int.test.ts, 계획 W12-core-notify·ADR-0351 | 그룹 역할 core_notify와 전용 연결·시작 확인으로 발송기를 옮기고, core_app 회수는 다음 배포로 넘겼다 | 해결(회수는 다음 배포) |
 
 ## 4. 숫자 일치표
 
