@@ -186,7 +186,40 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 리뷰
 
-(리뷰 담당)
+리뷰 담당 `lane5-fixm3-review`, 시험 커밋 `0bd263d3d` 위. `git diff f0c0206da..HEAD`를 정본 `docs/data.md` §4 '미수금 이동 기록 표 이름 맞추기', `docs/devops.md` §7.1~7.3, `docs/verification.md` §2.5·§3.10과 견주었다. 코드·시험은 고치지 않았다. 높음은 없다.
+
+### 지적
+
+| ID | 등급 | 자리 | 무엇 | 제안 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간 | 이 파일 '넘기는 것' 156·157줄, `docs/BUILD_ORDER.md` 99·100줄(F-07-6·F-07-7) | 감독은 단계 ②를 F-07-6, ③을 F-07-7에 넘긴다. 그런데 정본(`docs/data.md` §4 ②·③, `docs/devops.md` §7.1 원칙 3)은 ②를 '①이 든 출시의 다음 출시', ③을 '② 출시 7일 뒤 [가정]'로 정한다. 마지막 출시 태그는 `v0.2.0`(2026-11-04)이고 태그 푸시는 소유자 몫(`docs/architecture.md` §8.6 '맡기기')이다. 그래서 F-07-6이 0028과 같은 출시 태그 안에서 저장소를 새 이름으로 바꾸면, 이 계획 '판단 1'이 'ADR이 필요한 예외'라고 한 '한 출시에 ①②'가 조용히 일어난다. F-07-6은 '미수금 상계'를 맡아 이 저장소(`drizzle-settlement-store.ts`)를 고치므로, 구현 담당이 `receivableMoveCompat`을 `receivableMovement`로 바꾸고 싶어질 자리다 | 156·157줄의 가칭을 F-07-6·F-07-7로 바꾸고 시작 조건을 적는다: '0028이 든 출시 태그가 있을 때만 F-07-6이 ②를 한다. 없으면 F-07-6은 `receivableMoveCompat`을 그대로 쓰고 ②를 다음 묶음으로 미룬다(또는 ①②를 한 출시에 합치는 ADR을 먼저 낸다)'. ③도 '② 출시 7일 뒤'를 조건으로 적는다. 기록 담당은 같은 조건을 BUILD_ORDER F-07-6·F-07-7 비고나 `docs/lanes/lane5-cleanup.md`에 한 줄로 남긴다 |
+| RV-02 | 중간 | `docs/verification.md` 92줄 ③, `loadtest/run.mjs` 611~652줄(`runInvariants`) | 이 묶음이 정본에 쓴 ③ '측정 실행 도구는 **무대마다** 기대 SKIPPED 목록을 두고 다르면 그 실행을 무효로 한다'를 v0 실행 도구가 따르지 않는다. v0 경로는 끝 코드만 보고 표준 출력을 로그에 남길 뿐이고(이 계획 161줄도 그렇다고 적었다), §3.10에도 v1 목록만 있다. 정본과 코드가 이 커밋부터 어긋난다. 또 v0의 `v0_check`에는 정산 표가 없어, 이제 v0 실행마다 M1~M5 등이 '표 없음' 경고로 표준 오류에 나온다(execFileSync 기본 동작). 이것이 늘 나오는 경고가 되면 사람이 경고를 무시하는 버릇이 들기 쉽다 | 이 묶음에서 정본 문장을 코드에 맞춘다: '③ v1 합본 실행 도구는 기대 SKIPPED 목록을 두고 다르면 그 실행을 무효로 한다(§3.10). v0 실행 도구는 아직 목록을 대조하지 않는다(넘김)'. v0 목록(`v0_check`에 정산 표가 없어 M1~M5, 그 밖은 실측)을 두는 일은 '넘기는 것'의 v0 줄을 따로 할 일로 남긴다. 코드를 고치려면 시험 담당·구현 담당 몫이고 이 묶음 범위를 넘는다 |
+| RV-03 | 낮음 | 이 파일 35줄, `docs/BUILD_ORDER.md` 562줄(BAS-060) | 뷰 권한을 넘긴다는 말이 이 계획에만 있다. `security_invoker = true`이면 부르는 앱 역할에 뷰 `receivable_move` **와** 표 `receivable_movement` 둘 다의 권한이 필요하다. BAS-060이 스키마 전체 권한(`GRANT … ON ALL TABLES IN SCHEMA`, `ALTER DEFAULT PRIVILEGES … ON TABLES`)으로 주면 뷰도 들어가지만, core처럼 표마다 목록으로 주면 뷰가 빠져 N-1 앱의 쓰기가 42501로 막힌다. 로컬·CI·데모는 관리 역할이나 DB 소유자(`tools/local/demo-objects.mjs` 665줄)라 지금 시험으로는 보이지 않는다 | 기록 담당이 BAS-060 줄의 'X가 넘긴 것' 꼴로 한 줄을 더한다: 'FIX-invariant-m3가 넘긴 것: payment 앱 DML 역할에 0028의 뷰 `receivable_move` 권한(security_invoker라 표 권한도 함께), 표마다 목록으로 주면 뷰를 넣는다. 단계 ③이 뷰를 지우면 뺀다' |
+| RV-04 | 낮음 | 이 파일 '담당 표' | 담당 표에 impl 줄이 없다. 구현 커밋 `87562b14a`은 꼬리말(`Role: impl`, `Agent-Session: lane5-fixm3-impl`)은 있지만 이 파일을 고치지 않았다. F-07-5 계획에는 impl 줄이 있다 | 감독이나 구현 담당이 impl 줄(세션 ID·시작·끝)을 더한다. 리뷰 담당은 자기 줄만 쓴다 |
+| RV-05 | 낮음 | `services/payment-svc/test-int/settlement.int.test.ts` PRF180 M3 ⑨ | 저장소가 뷰로 넣는 길 셋은 모두 한 줄 넣기다. 지급 묶음 상계(`drizzle-settlement-store.ts` 554줄)는 미수금이 여럿이면 여러 줄 `VALUES`이고, 이동 ID가 없는 행은 drizzle이 `default`를 넣는다. 자동 갱신 뷰에서 여러 줄 `VALUES`의 `DEFAULT`는 PostgreSQL이 예전 판에서 결함을 고친 길이라 한 번은 실제로 보는 편이 낫다. 18에서는 동작할 것으로 보지만 시험이 확인하지 않는다 | 검증 담당이 한 번 돌려 보거나(미수금 둘을 상계하는 묶음, 또는 뷰에 `id`를 준 행과 안 준 행을 한 문장으로 넣기), 시험 담당이 ⑨에 미수금 하나를 더해 여러 줄 넣기로 만든다. 이 묶음을 막는 지적은 아니다 |
+| RV-06 | 낮음 | `services/invariant-checker/src/cli-main.ts` 212~220줄, `test-int/payment-migrated.int.test.ts` ⑤ | 명령 경계 시험은 끝 코드 0·1만 본다. '끝 코드 2(인자·연결·기록 오류) 뜻 그대로'는 코드를 읽어 확인했지만(옛 `main()`의 catch와 같은 분기) 명령 경계 시험이 없다 | `runCli`에 `--out` 없이, 또는 닿지 않는 DB 주소로 부르면 2이고 표준 오류가 `peaket-invariants:`로 시작하며 DB 주소를 싣지 않는다는 시험 하나를 더하면 S7 짝이 된다. 다음 검사기 묶음에서 해도 된다 |
+| RV-07 | 낮음 | `services/payment-svc/test-int/settlement.int.test.ts` 553~560줄(⑦의 `contype <> 'n'`), 이 파일 184줄 | PostgreSQL 18 NOT NULL 제약 여섯(`receivable_move_*_not_null`)이 옛 머리로 남는다. **감독 판단('그대로 두고 정리 목록')에 반대하지 않는다.** 근거: ① 앱 코드가 오류의 제약 이름으로 판정하는 곳이 없다(`services/payment-svc/src`에 `.constraint` 비교 없음) ② drizzle snapshot은 NOT NULL 이름을 적지 않아 생성기와 어긋나지 않는다(`db:generate` 바뀐 것 없음) ③ NOT NULL은 인덱스를 쓰지 않는 제약이라 표마다 이름이 겹치지만 않으면 되고, 뷰 `receivable_move`나 다른 표 이름과 부딪치지 않는다 ④ 뒤의 칸 맞추기(`statement_id` 널 허용)는 `ALTER COLUMN … DROP NOT NULL`로 칸을 가리켜 이름에 기대지 않는다. 남는 비용은 사람이 `\d`로 볼 때의 헷갈림과, 나중에 기준선 스키마를 새로 만들면 생길 이름 차이뿐이다 | 정리 목록(`docs/lanes/lane5-cleanup.md`)에 한 줄로 남기고, 단계 ③ 마이그레이션(뷰 지우기)에 `RENAME CONSTRAINT` 여섯을 함께 넣는다. 모든 무대가 PostgreSQL 18이라 그 문장이 다른 판에서 실패할 걱정은 없다. 그때 ⑦의 `contype <> 'n'` 조건과 주석을 지운다 |
+
+### 확인한 것
+
+- **0028 SQL(관점 1)**: 문장 여덟이 계획 'SQL 0028'과 글자까지 같다. `ALTER TABLE … RENAME`·`ALTER INDEX … RENAME`·`RENAME CONSTRAINT`는 시스템 목록만 바꾸고 표 다시 쓰기·제약 다시 검증이 없다. 기본 키는 인덱스 이름을 바꾸면 제약 이름도 따라 바뀌어 `receivable_movement_pkey`가 된다(⑦이 `pg_constraint`로 확인). `DROP`·`ADD CONSTRAINT`·`CREATE INDEX`·`CREATE TABLE`이 없다(⑥). 뷰는 표 하나의 칸 여섯만 고르는 단순 뷰라 자동 갱신이 되고(집계·조인·DISTINCT 없음), 넣지 않은 칸에는 밑 표 기본값(`gen_random_uuid()`·`'OFFSET'`)이 들어간다(⑧). `security_invoker=true`가 `reloptions`에 있다(⑦).
+- **단계 ① 앱이 옛 이름만 쓰는지(원칙 3)**: `drizzle-settlement-store.ts`의 다섯 자리(554·1066·1077·1082·1127줄)가 모두 `receivableMoveCompat`(`pgTable('receivable_move')`)이다. 새 `receivableMovement`를 가져다 쓰는 앱 코드는 없다(`schema.ts` 정의뿐). `services/payment-svc/src`에 날 SQL로 두 이름을 쓰는 곳, 뷰에서 못 하는 `TRUNCATE`·`LOCK TABLE`이 없다. purchase-svc·bundle·ops-svc·tools·loadtest에도 두 이름이 없다. compat 파일은 drizzle 표 정의 글로브(`./src/modules/*/adapters/db/schema.ts`) 밖이라 생성기가 보지 않는다(머리 주석에 까닭이 있다).
+- **앞 판(N-1) 앱**: 0028 전 코드는 같은 이름 `receivable_move`로 평범한 넣기·읽기만 하므로 뷰로 돈다. 날 SQL로 옛 이름을 읽는 기존 payment 통합 시험(`settlement.int.test.ts` 321·459·520·533줄, `settlement-a1v.int.test.ts` 83줄)이 그대로 통과한다(시험 담당 결과). 시험 쪽 `RESET_SQL`의 `truncate`만 표 이름으로 바꿨는데, 앱 코드에는 `truncate`가 없어 N-1 앱 호환과는 상관없다.
+- **권한(관점 2)**: payment 마이그레이션에는 GRANT·RLS가 하나도 없고 이 묶음도 더하지 않는다. 로컬·CI는 관리 역할, 데모는 `payment_app`이 DB 소유자라 뷰·표 모두 소유자 권한으로 닿는다. 운영 역할 나누기는 BAS-060 몫이다(RV-03).
+- **snapshot(관점 3)**: 0028 snapshot에서 `receivable_movement`를 `receivable_move`로 되돌려 0027과 견주었다. `id`·`prevId`와 `_meta.tables`의 이름 바꾸기 기록(`"public"."receivable_move" → "public"."receivable_movement"`, drizzle-kit이 이름 바꾸기 때 쓰는 꼴) 말고는 같다. 표 차례도 같고 `views`는 비었다. `prevId`가 0027 `id`다. 이 작업 폴더에서 `node scripts/db-generate.mjs`를 직접 돌렸다: `No schema changes, nothing to migrate`이고 새 파일이 생기지 않았다. journal `when`은 0027보다 크다.
+- **검사기(관점 4)**: `exitCode`·CSV·ndjson 형식이 그대로다. `runCli`의 분기는 옛 `main()`과 같다(FAIL 1, 아니면 0, `CliError`·`RecordFormatError`·그 밖의 예외 2, 오류 글에 DB 주소 없음). `cli.ts`는 `runCli` 결과로 `process.exit`만 한다. `report.ts`가 `invariants.ts`·`tables.ts`를 새로 가져오지만 둘은 `report.ts`를 가져오지 않아 순환이 없다. `reason` 글이 그대로라 CSV를 읽는 `skippedProblem`(loadtest)은 영향이 없다.
+- **loadtest(관점 4)**: v0 `runInvariants`(641줄)는 끝 코드와 CSV만 쓰고 표준 출력을 로그에 남길 뿐이라 요약 줄이 v0 실행을 깨지 않는다(표준 오류 경고는 RV-02). v1 기대 목록 `['P5','S3']`: 2026-11-11 v1 실행 기록의 SKIPPED가 M1~M5·P5·S3였고 payment 0015·0016이 2026-11-14·15에 들어왔으며, v1 마이그레이션 잡은 payment `scripts/migrate.mjs` 전부를 돌린다(`tools/local/v1-objects.mjs`). 그래서 계획 원인 ⑸의 설명과 맞는다. run.mjs의 notes 글이 상수를 따라가 e2e 단언(`불변식 SKIPPED: P5·S3\(기대 P5·S3,`)과 맞는다.
+- **시험(관점 5)**: 감독 요구 (가)는 PRF180 M3 ⑨가 채운다. 저장소의 지급 묶음 상계·보증 충당·이동 기록 넣기가 뷰를 거쳐 표에 쓰이고, 저장소 읽기 셋이 표의 행과 이동 ID까지 같다. 다만 저장소가 compat을 쓰는지 새 이름 표를 쓰는지는 시험으로 가를 수 없고(동작이 같다), 위에서 코드로 확인했다. (나)는 J-T24 ①②⑤가 채운다. `migratePayment`로 만든 DB에서 payment 표 아홉이 `relkind r`이고(목록을 못 박아 S4도 잡는다), M3가 SKIPPED 없이 PASS하며, 남은 금액을 0으로 두면 `amount=1000000 remaining=0 moved=500000` 1건 FAIL이다(되돌림을 더하면 합이 150만 원이 되어 S8을 잡는다). ⑤는 명령 경계에서 표준 출력 줄 수·끝 줄·표준 오류·끝 코드 0·0·1·CSV를 정확한 값으로 본다. 약한 단언은 찾지 못했다(빠진 것은 RV-05·RV-06).
+- **돌려 본 것**: invariant-checker 단위 25 통과, payment `test/settlement-migration.test.ts`·`test/payment-schema.test.ts` 85 통과, `node --test loadtest/test/v1.test.mjs` 49 통과, bundle·purchase-svc `tsc --noEmit` 0(payment-svc 원본을 가져다 쓰는 쪽, 시험 담당 결과에 없던 것). 통합 시험은 Docker 잠금을 잡지 않으려고 다시 돌리지 않았다(시험 담당 결과: 검사기 41, payment 614 통과).
+- **넘김(관점 7)**: ②·③의 내용(저장소 바꾸기·compat 지우기·시험 SQL 바꾸기, `DROP VIEW`)은 맞다. 시작 조건은 RV-01.
+
+### 이 묶음에서 고칠 것
+
+- RV-01: '넘기는 것' 156·157줄에 F-07-6·F-07-7과 시작 조건(0028이 든 출시 태그 뒤)을 적는다(계획 담당이나 감독). BUILD_ORDER·정리 목록 줄은 기록 담당.
+- RV-02: `docs/verification.md` §2.5 ③의 '무대마다'를 v1 실행 도구로 좁히고 v0는 넘김으로 적는다(문서만).
+- RV-03·RV-07: 기록 담당이 BAS-060 줄과 `lane5-cleanup.md`에 한 줄씩 남긴다.
+- RV-04: 담당 표 impl 줄.
+- RV-05·RV-06은 막지 않는다(검증 담당이 RV-05를 한 번 돌려 보면 충분하다).
 
 ## 검증
 
@@ -198,3 +231,4 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | --- | --- | --- | --- | --- |
 | plan | lane5-fixm3-plan | claude-opus-5-5 | 2026-11-23T06:40:00+09:00 | 2026-11-23T07:20:00+09:00 |
 | test | lane5-fixm3-test | claude-opus-5-5 | 2026-11-23T07:33:00+09:00 | 2026-11-23T08:22:00+09:00 |
+| review | lane5-fixm3-review | claude-opus-5-5 | 2026-11-23T08:23:00+09:00 | 2026-11-23T08:40:00+09:00 |
