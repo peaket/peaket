@@ -111,7 +111,7 @@ describe('ticket-svc 테넌트 한도 조립(D-T50 ⑦)', () => {
   });
 
   test('D-T50 ⑦ local·ci 밖에서 파트너 처리기가 있는데 가드가 없으면 시작하지 않는다', async () => {
-    const prod = { PEAKET_ENV: 'prod', PEAKET_LOG_PSEUDONYM_KEY: KEY };
+    const prod = { PEAKET_ENV: 'prod', PEAKET_LOG_PSEUDONYM_KEY: KEY, PEAKET_TRANSFER_REF_SECRET: 'secret' };
     await expect(boot({ env: prod })).rejects.toThrow(/tenantRateLimit/);
     for (const env of ['local', 'ci']) {
       const svc = await boot({ env: { PEAKET_ENV: env } });

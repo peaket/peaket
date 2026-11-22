@@ -9,9 +9,11 @@ describe('ticket-svc 설정 [GAT-170]', () => {
     expect(loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'ci' }).redisUrl).toBeUndefined();
     expect(() => loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'prod' })).toThrow(/PEAKET_IDENTITY_GRPC_URL/);
     expect(() => loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'prod', PEAKET_IDENTITY_GRPC_URL: 'identity-svc:50051' })).toThrow(/PEAKET_TICKET_REDIS_URL/);
-    expect(loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'prod', PEAKET_TICKET_REDIS_URL: 'redis://127.0.0.1:6379', PEAKET_IDENTITY_GRPC_URL: 'identity-svc:50051' })).toMatchObject({
+    expect(() => loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'prod', PEAKET_IDENTITY_GRPC_URL: 'identity-svc:50051', PEAKET_TICKET_REDIS_URL: 'redis://127.0.0.1:6379' })).toThrow(/PEAKET_TRANSFER_REF_SECRET/);
+    expect(loadTicketServiceConfig({ PEAKET_DATABASE_URL: DB, PEAKET_ENV: 'prod', PEAKET_TICKET_REDIS_URL: 'redis://127.0.0.1:6379', PEAKET_IDENTITY_GRPC_URL: 'identity-svc:50051', PEAKET_TRANSFER_REF_SECRET: 'secret' })).toMatchObject({
       identityGrpcUrl: 'identity-svc:50051',
       redisUrl: 'redis://127.0.0.1:6379',
+      transferRefSecret: 'secret',
     });
   });
 
