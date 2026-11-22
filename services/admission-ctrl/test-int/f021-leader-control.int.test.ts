@@ -5,7 +5,7 @@
 //        로컬·CI 시작은 메모리 Lease라 이 프로세스 하나가 리더다. 새 리더의 등장은 리더 세대 키(q:{event:E}:leader)를 더 큰 세대로 올려 흉내 낸다
 //        (새 리더의 BUMP와 같은 쓰기, test-int/leader-store.int.test.ts Q-T30과 같은 방법).
 //   (나) 리더 아닌 파드(세대 없음)와 낮은 세대의 파드: 모듈 공개 면의 ApplyLeaderControl을 진짜 저장소(RedisLeaderStore, 실제 Lua)와 Lease 세대 짝 가짜
-//        (Elector 포트)로 부른다. 계획 8절의 이름이다. 부르는 꼴(생성자·run)은 이 시험이 정한 가정이다(F-02-1 계획 '10. 실패 확인'의 가정 목록).
+//        (Elector 포트)로 부른다. 계획 8절의 이름이다. 부르는 꼴(생성자·run)은 이 시험이 정한 가정이다(F-02-1 계획 10.1 '시험이 기댄 공개 이름과 가정').
 // 판·꼴 검사: ASVS v5.0.0-1.4.2·15.3.5·2.1.1(F-02-1 계획 9절). 장부 밖 세부는 F021-LDR(B10·B11).
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { RedisLeaderStore } from '../src/modules/leader/adapters/redis-leader-store.js';
 import { ApplyLeaderControl, type Elector } from '../src/modules/leader/index.js';
 import { start, type StartedService } from '../src/start.js';
-import { type ApplyRequest, type ControlClient, controlClient, freePort, status } from '../../queue-svc/test-int/control-client.js';
+import { type ApplyRequest, type ControlClient, controlClient, freePort, status, until } from '../../queue-svc/test-int/control-client.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
 const POD = 'admission-f021-a';
@@ -54,16 +54,16 @@ beforeAll(async () => {
   // 메모리 Lease로 리더가 될 때까지(포트가 열리고 not-leader가 아닌 답이 올 때까지) 기다린다. 시험마다 쓰지 않는 회차를 쓴다
   const probe = randomUUID();
   let v = 1;
-  await expect
-    .poll(
+  await until(
       async () =>
         control.apply({ commandId: randomUUID(), scope: probe, kind: 'CONTROL_KIND_ADMISSION_PAUSE', version: v++, desiredStateJson: '{"paused":false,"expiresAtMs":null}' }).then(
           () => 'leader',
           (e: { code?: number; details?: string }) => `${e.code}:${e.details}`,
         ),
-      { timeout: 30_000, interval: 200 },
-    )
-    .toBe('leader');
+    (v) => v === 'leader',
+    'admission-ctrl 리더 되기(제어 포트)',
+    { timeoutMs: 30_000 },
+  );
 }, 180_000);
 
 afterAll(async () => {
