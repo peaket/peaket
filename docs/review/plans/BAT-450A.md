@@ -188,7 +188,61 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 
 ## 검증
 
-(검증 담당이 채운다)
+검증 담당 `lane3-bat450a-verify`(deepseek-v4.1-flash), 2026-11-22 12:30~12:40 KST. 구현·시험·리뷰에 관여하지 않았다. 기준 커밋은 리뷰 반영 `e586894b`이고, 틀린 구현은 이 작업 폴더에서 하나씩 넣고 관련 시험만 돌린 뒤 `git checkout -- <파일>`로 되돌렸다(제품 파일 차이 없음). Docker 잠금은 12:29부터 `lane5-W12-merch-replay`가 잡고 있어 60초를 기다렸지만 비지 않았고, 그 잠금을 지우지 않았다. 그래서 이번 검증에서 Docker 시험은 새로 돌리지 못했다(아래 'Docker').
+
+### 게이트(기준 커밋)
+
+| 검사 | 결과 |
+| --- | --- |
+| identity-svc 단위 | 56파일 **688 통과** |
+| ticket-svc 단위 | 28파일 **199 통과** |
+| platform 단위 | 59파일 **703 통과** |
+| scanner 단위 | **46 통과**(node --test) |
+| api-client 단위 | 8파일 **113 통과** |
+| identity test-int(구현 직후, RV-05 시험 추가 전) | **14 통과**(`test-int/device-approval.int.test.ts`) |
+| typecheck | identity·ticket·platform 통과 |
+| lint | 루트 `pnpm lint` 통과 |
+| doc-check | 오류 0, 경고 4(기존 3 + mermaid 검사 건너뜀) |
+| contracts `gen:check` | 생성물이 계약과 같다 |
+| `ledger --batch BAT-450A --require` | 범위 6항목, 자동 시험 6, 빈칸·ID만·미검증·다른 단계 0 → 통과 |
+| `ledger --scope "I-T23,I-T24,I-T25,I-T37,I-T38,I-T39"` | 자동 시험 6, 빈칸 0 |
+| `trace-check --ids ...` | identity 4파일 38개·ticket 1파일 15개 보고서에서 I-T23 2·I-T24 1·I-T25 2·I-T37 2·I-T38 2·I-T39 2 통과, 대조 통과 |
+| `roles-check --base origin/develop --head HEAD` | 이 검증 커밋 전 기준으로 담당 표의 review-fix 줄과 verify 커밋이 없어 실패(아래에서 채운다). 그 밖의 차례·꼬리말·시험 파일 위반은 없었다 |
+
+### 틀린 구현 표본
+
+각 판정 항목에 최소 하나씩, 새 동작(C2-06·C2-07·C2-09)에도 하나씩 넣었다. 9개 모두 **잡힘**.
+
+| 번호 | 넣은 틀린 구현 | 잡은 시험 |
+| --- | --- | --- |
+| M1 | 메모리 `save`에서 사용자 코드 색인 충돌 검사를 뺀다 | C2-06 ① (1 실패) |
+| M2 | 메모리 `notePoll`의 APPROVED 분기에서 `byHash`·`byUserCode` 삭제를 뺀다 | C2-07 ①·② (2 실패) |
+| M3 | platform `requestUrlOf`가 `publicOrigin`을 무시하고 forwarded를 쓴다 | C2-09 (1 실패) |
+| M4 | `inWindow`가 `validFromMs`를 보지 않는다 | I-T23 ① (1 실패) |
+| M5 | `CheckScannerSession`이 `assignmentStatus === 'ASSIGNED'`를 보지 않는다 | I-T24 ① (1 실패) |
+| M6 | `ScannerGate.scans`의 OVERRIDE 역할·대리 승인 검사를 없앤다 | I-T25 ① (1 실패) |
+| M7 | 메모리 승인 한도를 10분 5회에서 6회로 늘린다 | I-T37 ② (1 실패) |
+| M8 | 메모리 `createScannerSession`이 같은 기기의 이전 세션을 끝내지 않는다 | I-T38 ② (1 실패) |
+| M9 | 현장 스태프 토큰에서 `cnf.jkt`를 뺀다 | I-T39 ② (1 실패) |
+
+- I-T23·I-T24·I-T25·I-T37·I-T38·I-T39는 이름을 붙인 기존 시험과 새 시험이 섞여 있지만, 위 표본이 각 항목의 판정 기준을 실제로 잡는 것을 확인했다.
+- C2-06·C2-07은 구현 전 실제 Valkey 시험에서도 실패를 봤고, 구현 뒤 같은 시험이 통과했다(C2-06 ①·C2-07 ①·②).
+- 같은 기기 동시 승인은 구현 전 실제 PostgreSQL에서 `23505`가 그대로 올라와 실패했고, 구현 뒤 `APPROVAL_CONFLICT`로 통과했다.
+- RV-05(기본키 23505를 409로 숨기지 않음) 시험은 Docker 잠금이 풀리지 않아 **실행하지 못했다**. 코드 대조로는 `scanner_session_pkey`가 두 유일 인덱스 목록에 없어 그대로 던져지는 것을 확인했다. 합치는 쪽이 Docker 잠금을 잡고 `test-int/device-approval.int.test.ts`를 한 번 돌려야 한다.
+
+### Docker·브라우저
+
+- Docker 잠금 `lane3-BAT-450A`는 12:07:38~12:07:55(구현 전 실패 확인), 12:13:01~12:13:24(구현 뒤 14/14)에 잡고 놓았다. 그 뒤 12:29부터 `lane5-W12-merch-replay`가 잡고 있어 RV-05 시험과 ticket-svc test-int는 돌리지 못했다.
+- ticket-svc `test-int/scanner-shift.int.test.ts`는 시험 이름에 `I-T24 ②`를 붙인 것뿐이라 동작 변화가 없다. 그래도 합치기 전 Docker에서 한 번 돌리는 편이 좋다.
+- 화면 변경은 없다(스캐너 앱 코드를 고치지 않았다). 브라우저 확인은 해당 없음.
+
+### GAT-220 단계 줄 판정
+
+**체크한다.** wbs 5.5.2의 문구(기기 승인 로그인·8자 코드·시도 제한, `cnf.jkt` 토큰, 세션 1개·교대·대리 승인, 해제의 서버 확인, SCR-036)를 모두 시험으로 확인했고, 장부 6항목이 자동 시험이며 `--require`가 통과한다. `wbs 5.5.2`의 SCR-037 불일치도 이 묶음에서 고쳤다.
+
+- 파트너 콘솔에서 배정을 해제하는 **경로**(`DELETE /v1/partner/staff/{assignmentId}`)는 BAT-450B 몫이다. 이 단계의 "해제의 서버 확인"은 배정이 REVOKED가 된 뒤 `CheckScannerSession`이 무효를 돌려주고, 세션 밖 기록이 `OUT_OF_SESSION`으로 남고, `SESSION_TERMINATED`에서 스캐너가 로그아웃하는 것까지를 본다(I-T24 ①②③).
+- mTLS `cnf.x5t#S256` 발급은 GAT-170의 관리형 기기·사설 CA PoC 뒤 선택 작업이고, 이 단계의 토큰은 `cnf.jkt`다. 휴대폰 카메라 승인 화면(SCR-051)은 wbs 5.5.3(GAT-230) 몫이다. 둘 다 이 단계 문구 밖이다.
+- 남은 위험: RV-03(스캐너 앱이 409 `user-code-unavailable`를 자동 재시도하지 않고 일반 오류로 보인다), RV-06(운영 배포 값에 `PEAKET_PUBLIC_ORIGIN`이 빠지면 forwarded로 내려간다), RV-07(토큰 서명 전에 기기 코드를 지운다), RV-08(메모리·Redis 저장소의 같은 코드 재저장 차이), I-T25의 감사 기록은 `scan_event.staff_account_id`까지이고 별도 불변 감사는 BAT-450D다.
 
 ## 담당 표
 
@@ -198,3 +252,7 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 | test | lane3-bat450a-test | deepseek-v4.1-flash | 2026-11-22T12:05:00+09:00 | 2026-11-22T12:08:00+09:00 |
 | impl | lane3-bat450a-impl | deepseek-v4.1-flash | 2026-11-22T12:09:00+09:00 | 2026-11-22T12:20:00+09:00 |
 | review | lane3-bat450a-review | deepseek-v4.1-flash | 2026-11-22T12:21:00+09:00 | 2026-11-22T12:24:00+09:00 |
+| test | lane3-bat450a-rv02 | deepseek-v4.1-flash | 2026-11-22T12:25:00+09:00 | 2026-11-22T12:26:00+09:00 |
+| test | lane3-bat450a-rvtest | deepseek-v4.1-flash | 2026-11-22T12:27:00+09:00 | 2026-11-22T12:30:00+09:00 |
+| impl | lane3-bat450a-rvimpl | deepseek-v4.1-flash | 2026-11-22T12:30:00+09:00 | 2026-11-22T12:31:00+09:00 |
+| verify | lane3-bat450a-verify | deepseek-v4.1-flash | 2026-11-22T12:32:00+09:00 | 2026-11-22T12:40:00+09:00 |

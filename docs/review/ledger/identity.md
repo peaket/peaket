@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 267 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 71 | 398 |
-| 합계 | 277 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 71 | 408 |
+| B | 273 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 398 |
+| 합계 | 283 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 408 |
 
 ## docs/features/identity.md
 
@@ -51,9 +51,9 @@
 | I-T20 | — | JWT 서명 키 무중단 로테이션 | 새 `kid` 키쌍을 배포한 뒤에도 기존 키로 서명된 토큰이 만료 시점까지 정상 검증됨을 확인한다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, packages/platform/test/token-verify.test.ts 외 2곳 |
 | I-T21 | — | 현장 스태프 초대 및 수락 통제 | 현장 스태프 초대 링크는 24시간 동안 쓰는 일회용이다. 검증 이메일이 초대 이메일과 다른 계정, 본인확인을 마치지 않은 계정, 네이버만 연결한 계정의 수락… | 자동 시험 | B | 시험: services/identity-svc/test/staff-invitations.test.ts |
 | I-T22 | — | 기기 승인 피싱 방지 검증 | 스캐너 단말기와 휴대폰의 확인 코드(8자)가 대조 화면에 함께 보인다. 등록되지 않았거나 폐기된 기기의 승인 코드 발급 요청과, 다른 파트너 기기의 승인은… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/identity-svc/test/device-approval.test.ts |
-| I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 빈칸 | B | — |
-| I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 빈칸 | B | — |
-| I-T25 | — | 현장 책임자 권한 통제 | `gate_staff` 토큰과 대리 승인 토큰으로 예외 통과·기기 배치·부스 허용·확인 스캔을 시도하면 403이 돌아온다. 이 작업은 `gate_lead`… | 빈칸 | B | — |
+| I-T23 | — | 현장 스태프 세션 역할 유효시간 통제 | 입장 시작 3시간 전 이전이나 공연 종료 2시간 이후에는 로그인이 막힌다. 오프라인 스캐너도 유효시간이 지나는 즉시 스스로 종료된다. | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test/device-approval.test.ts |
+| I-T24 | — | 현장 스태프 권한 해제 즉시 반영 | 파트너 콘솔에서 현장 스태프 배정을 해제하면 그 스캐너의 다음 서버 요청부터 거부되고(해제 16분 뒤 요청도 거부), 다음 변경분을 받을 때 스캐너가 자동으로… | 자동 시험 | B | 시험: apps/scanner/test/live.test.ts, services/identity-svc/test-int/device-approval.int.test.ts 외 2곳 |
+| I-T25 | — | 현장 책임자 권한 통제 | `gate_staff` 토큰과 대리 승인 토큰으로 예외 통과·기기 배치·부스 허용·확인 스캔을 시도하면 403이 돌아온다. 이 작업은 `gate_lead`… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/ticket-svc/test/scanner-gate-regression.test.ts |
 | I-T26 | ① | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ① 환불 예상액·양도 가능 여부 안내: 탈퇴 요청이 409 `withdrawal-confirmation-required`와 `unusedTickets`(티켓… | 자동 시험 | A | 시험: services/identity-svc/test-int/withdrawal-participant.int.test.ts, services/identity-svc/test/withdrawal-http.test.t… |
 | I-T26 | ② | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ② 최종 확인 뒤 차례: `confirmCancelUnusedTickets: true`로 다시 보내면 표마다 사유… | 자동 시험 | A | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/account-withdraw/flow.test.mjs 외 5곳 |
 | I-T26 | ③ | 미사용 티켓 보유 회원의 탈퇴(추천 적용, 2026-11-19… | ③ 환급 실패·미룸 유지: 결제사 `CANCEL_PENDING`·`UNKNOWN`·`REJECTED`이거나 입장 기록 마감 뒤 환급이면 202이고 계정은… | 자동 시험 | A | 시험: services/identity-svc/test/withdrawal-retry.test.ts, services/purchase-svc/test-int/withdrawal-participant.int.test… |
@@ -67,9 +67,9 @@
 | I-T34 | — | 계정 변경 감사 이력 및 알림 | 연결·병합·해제가 일어나면 두 계정에 등록된 알림 채널로 통지가 1회 나간다. `account_merge` 감사 이력은 대표 계정이 탈퇴할 때까지 온전하게… | 자동 시험 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | I-T35 | — | 연계정보 키 교체 뒤 중복 계정 방어 | 연계정보 HMAC 키 새 버전을 만든 뒤, 옛 버전으로 본인확인한 사람이 새 계정에서 본인확인을 시도하면 옛 버전 값과 일치해 409(이미 다른 계정에서… | 빈칸 | B | — |
 | I-T36 | — | 토큰 서명 키 분리 | 팬 토큰 키로 서명한 `aud` ops 토큰과, 입장 토큰을 액세스 토큰 자리에 넣은 요청을 gw-ops·gw-fan에 보내면 둘 다 401로 거부된다(키… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, packages/platform/test/token-verify.test.ts 외 1곳 |
-| I-T37 | — | 확인 코드 무차별 대입 제한 | 한 계정으로 10분 안에 확인 코드 승인을 5번 틀리면 6번째 시도부터 거부되고, 계정은 잠기지 않는다. 한 기기가 1시간에 코드를 10번 발급받은 뒤 11번째… | 빈칸 | B | — |
-| I-T38 | — | 스캐너 세션 수 | 같은 계정으로 두 번째 기기를 승인하면 첫 기기 세션이 끝나고, 같은 기기에서 다른 스태프가 승인하면 이전 스태프 세션이 끝난다(교대). | 빈칸 | B | — |
-| I-T39 | — | 토큰과 기기 결속 | 기기 A의 스태프 토큰을 기기 B의 키로 만든 DPoP 증명과 함께 보낸 요청은 스캐너 경로에서 거부된다(`cnf.jkt` 불일치. mTLS 선택지는 기기 B의… | 빈칸 | B | — |
+| I-T37 | — | 확인 코드 무차별 대입 제한 | 한 계정으로 10분 안에 확인 코드 승인을 5번 틀리면 6번째 시도부터 거부되고, 계정은 잠기지 않는다. 한 기기가 1시간에 코드를 10번 발급받은 뒤 11번째… | 자동 시험 | B | 시험: services/identity-svc/test-int/device-approval.int.test.ts, services/identity-svc/test/device-approval.test.ts |
+| I-T38 | — | 스캐너 세션 수 | 같은 계정으로 두 번째 기기를 승인하면 첫 기기 세션이 끝나고, 같은 기기에서 다른 스태프가 승인하면 이전 스태프 세션이 끝난다(교대). | 자동 시험 | B | 시험: services/identity-svc/test-int/device-approval.int.test.ts, services/identity-svc/test/device-approval.test.ts |
+| I-T39 | — | 토큰과 기기 결속 | 기기 A의 스태프 토큰을 기기 B의 키로 만든 DPoP 증명과 함께 보낸 요청은 스캐너 경로에서 거부된다(`cnf.jkt` 불일치. mTLS 선택지는 기기 B의… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/identity-svc/test/device-approval.test.ts 외 1곳 |
 | I-T40 | — | 부스 본인확인 대조 | 대조 목적에 동의하지 않으면 본인확인이 시작되지 않는다. 결과 `ci_hmac`이 보유 계정과 다르면 409로 부스 코드가 나오지 않는다. 연계정보 원문은… | 빈칸 | B | — |
 | I-T41 | — | TOTP 시드 암호문 결속 | 한 관리 계정의 TOTP 시드 암호문을 다른 관리 계정 행으로 복사하면 암호화 컨텍스트가 맞지 않아 복호에 실패한다. 로그인은 거부되고 보안 이벤트가 남는다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-totp.int.test.ts, services/identity-svc/test/admin-totp.test.ts |
 | I-T42 | — | 만 14세 미만 본인확인 | 본인확인 결과가 만 14세 미만이면 연계정보가 저장되지 않고, 403 `under-14`가 나오며 계정 정리가 시작된다. 생년월일은 DB·로그에 0건이다. | 자동 시험 | B | 시험: services/identity-svc/test-int/verification-keys.int.test.ts, services/identity-svc/test/http.test.ts 외 1곳 |
