@@ -28,6 +28,7 @@ const P = 'https://peaket.example/problems/';
 
 beforeAll(async () => {
   repo.places.add(PLACE);
+  repo.placeNames.push({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', aliases: [] });
   repo.promoters.set(TENANT, sellerRow(TENANT, '(주)피켓공연'));
   svc = await createService({
     name: 'core-svc',
@@ -245,6 +246,34 @@ describe('관제 판매 승인 목록·상세·반려·CDN(S-T41 ④⑤⑩)', ()
     expect(missing.statusCode).toBe(404);
     expect(missing.headers['cache-control']).toBe('no-store');
     expect(problem(missing).type).toBe(`${P}not-found`);
+  });
+
+  test('S-T41 ⑤⑫ 상세는 등록 공연장·휠체어 확인·취소 회차를 주고, 승인은 scales만으로도 되며 artistIds·aliases는 400이다', async () => {
+    const p = production({ events: 2 });
+    const cancelled = randomUUID();
+    repo.events.set(cancelled, { id: cancelled, productionId: p.id, venueId: null, openAt: new Date(NOW_MS + 5 * 3_600_000), startsAt: new Date(NOW_MS + 5 * 86_400_000), status: 'CANCELLED' });
+    repo.productions.set(p.id, { ...repo.productions.get(p.id)!, accessibleSeatingCheck: true });
+
+    const d = await detail(ops('cs_lead'), p.id);
+    expect(d.statusCode).toBe(200);
+    const out = JSON.parse(d.payload) as { placeId: string | null; placeName: string | null; requestedPlace: boolean; accessibleSeatingCheck: boolean | null; events: { eventId: string; status: string }[] };
+    expect(out).toMatchObject({ placeId: PLACE, placeName: '피켓홀', requestedPlace: false, accessibleSeatingCheck: true });
+    expect(out.events.map((e) => e.eventId)).toContain(cancelled);
+    expect(out.events.find((e) => e.eventId === cancelled)?.status).toBe('CANCELLED');
+
+    // 새 공연장 요청이면 placeId는 null이고 요청한 이름을 보인다
+    const requested = production({ placeId: null });
+    repo.productions.set(requested.id, { ...repo.productions.get(requested.id)!, requestedPlace: { name: '새 공연장', address: '서울 새로 2' } });
+    const rd = JSON.parse((await detail(ops(), requested.id)).payload) as { placeId: string | null; placeName: string | null; requestedPlace: boolean };
+    expect(rd).toMatchObject({ placeId: null, placeName: '새 공연장', requestedPlace: true });
+
+    // 승인은 placeId 없이 scales만으로 되고, 계약 밖 artistIds·aliases는 닫힌 본문이 400으로 막는다
+    const noPlace = production({ events: 1 });
+    expect((await approval(ops(), noPlace.id, { scales: [{ eventId: noPlace.eventIds[0], scale: 'SMALL' }] })).statusCode).toBe(200);
+    const strict = production({ events: 1 });
+    expect((await approval(ops(), strict.id, { scales: [{ eventId: strict.eventIds[0], scale: 'SMALL' }], artistIds: [] })).statusCode).toBe(400);
+    expect((await approval(ops(), strict.id, { scales: [{ eventId: strict.eventIds[0], scale: 'SMALL' }], aliases: ['LUMEN'] })).statusCode).toBe(400);
+    expect(repo.productions.get(strict.id)?.saleReview).toBe('SUBMITTED');
   });
 
   test('S-T41 ⑩_ 승인은 회차마다 event 태그와 production 태그를 한 번 무효화하고, 반려는 부르지 않으며 CDN 실패에도 200이다', async () => {

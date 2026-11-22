@@ -17,15 +17,8 @@ export type CreateOpsSaleReviewApprovalBody = {
      * @minItems 1
      */
   scales: CreateOpsSaleReviewApprovalBodyScalesItem[];
-  /** 확인한 공연장 */
-  placeId: string;
-  /** 확인한 아티스트(보이는 순서, 없으면 빈 배열) */
-  artistIds: string[];
-  /**
-     * 공연의 다른 이름 최종 목록(파트너가 적은 것에서 고친다, POL-045)
-     * @maxItems 5
-     * @items.minLength 1
-     * @items.maxLength 100
-     */
-  aliases?: string[];
+  /** 확인한 공연장. 없으면 지금 값을 그대로 둔다. 새 공연장 요청 연결은 다음 단계다 */
+  placeId?: string;
+  /** 휠체어석 확인 결과를 승인과 함께 남긴다. 없으면 지금 값을 둔다 */
+  accessibleSeatingCheck?: boolean;
 };

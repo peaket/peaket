@@ -23,6 +23,23 @@ export interface OpsSaleReviewDetail {
   promoterId?: string;
   promoterName?: string;
   status?: OpsSaleReviewDetailStatus;
+  /**
+     * 등록된 공연장. 새 공연장 요청이면 null
+     * @nullable
+     */
+  placeId?: string | null;
+  /**
+     * 등록된 공연장 이름. 새 공연장 요청이면 요청한 이름
+     * @nullable
+     */
+  placeName?: string | null;
+  /** 등록하지 않은 새 공연장 요청인지(운영자 연결은 LCH-080 잔여) */
+  requestedPlace?: boolean;
+  /**
+     * 파트너가 휠체어석 확인을 했는지
+     * @nullable
+     */
+  accessibleSeatingCheck?: boolean | null;
   /** 승인 이력이 있는 공연의 변경 재승인인지 */
   reapproval?: boolean;
   /** @nullable */

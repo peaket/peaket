@@ -3820,17 +3820,13 @@ export const CreateOpsEventCancellationResumptionResponse = zod.object({
 }).describe('회차 취소 요청(ADR-0046 결정 4)')
 
 /**
- * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 확인 항목에 아티스트·공연장 연결이 있다: 운영자가 파트너가 고르거나 적은 값을 기존 아티스트·공연장에 잇거나, POST /v1/ops/artists·POST /v1/ops/places로 새로 만든 뒤 그 ID로 승인한다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
+ * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). BAT-617 화면은 등록된 공연장을 확인하고 회차별 규모를 정해 승인한다. 아티스트·다른 이름 연결과 새 아티스트·공연장 만들기는 LCH-080 잔여이며 이 본문에 넣지 않는다(2026-11-22 BAT-617). 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
  * @summary 판매 승인(operator). 판매 조건은 고치지 않음
  */
 export const CreateOpsSaleReviewApprovalParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
 
-
-export const createOpsSaleReviewApprovalBodyAliasesItemMax = 100;
-
-export const createOpsSaleReviewApprovalBodyAliasesMax = 5;
 
 
 
@@ -3839,9 +3835,8 @@ export const CreateOpsSaleReviewApprovalBody = zod.object({
   "eventId": zod.string(),
   "scale": zod.enum(['LARGE', 'MEDIUM', 'SMALL'])
 }).strict()).min(1).describe('그 공연의 회차마다 규모(architecture §9.5). 빠진 회차가 있으면 422. LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격 검사'),
-  "placeId": zod.string().describe('확인한 공연장'),
-  "artistIds": zod.array(zod.string()).describe('확인한 아티스트(보이는 순서, 없으면 빈 배열)'),
-  "aliases": zod.array(zod.string().min(1).max(createOpsSaleReviewApprovalBodyAliasesItemMax)).max(createOpsSaleReviewApprovalBodyAliasesMax).optional().describe('공연의 다른 이름 최종 목록(파트너가 적은 것에서 고친다, POL-045)')
+  "placeId": zod.string().optional().describe('확인한 공연장. 없으면 지금 값을 그대로 둔다. 새 공연장 요청 연결은 다음 단계다'),
+  "accessibleSeatingCheck": zod.boolean().optional().describe('휠체어석 확인 결과를 승인과 함께 남긴다. 없으면 지금 값을 둔다')
 }).strict()
 
 export const CreateOpsSaleReviewApprovalResponse = zod.unknown()
@@ -5195,6 +5190,10 @@ export const GetOpsSaleReviewResponse = zod.object({
   "promoterId": zod.string().optional(),
   "promoterName": zod.string().optional(),
   "status": zod.enum(['SUBMITTED', 'APPROVED', 'REJECTED', 'SUSPENDED']).optional(),
+  "placeId": zod.uuid().nullish().describe('등록된 공연장. 새 공연장 요청이면 null'),
+  "placeName": zod.string().nullish().describe('등록된 공연장 이름. 새 공연장 요청이면 요청한 이름'),
+  "requestedPlace": zod.boolean().optional().describe('등록하지 않은 새 공연장 요청인지(운영자 연결은 LCH-080 잔여)'),
+  "accessibleSeatingCheck": zod.boolean().nullish().describe('파트너가 휠체어석 확인을 했는지'),
   "reapproval": zod.boolean().optional().describe('승인 이력이 있는 공연의 변경 재승인인지'),
   "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
   "rejectionReason": zod.string().nullish().describe('마지막 반려 사유'),

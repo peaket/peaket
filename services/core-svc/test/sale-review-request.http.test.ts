@@ -125,7 +125,9 @@ describe('파트너 판매 승인 요청·변경 취소(S-T41 ①~③)', () => {
     const s = await status(admin, p.id);
     expect(s.statusCode).toBe(200);
     expect(s.headers['cache-control']).toBe('no-store');
-    expect(JSON.parse(s.payload)).toMatchObject({ saleReview: 'SUBMITTED', rejectionReason: null, hasApprovalHistory: false, seller: { legalName: '(주)피켓공연' } });
+    expect(JSON.parse(s.payload)).toMatchObject({ title: repo.productions.get(p.id)!.title, saleReview: 'SUBMITTED', rejectionReason: null, hasApprovalHistory: false, seller: { legalName: '(주)피켓공연' } });
+    // 요청이 휠체어석 확인을 참으로 남긴다(DB의 accessible_seating_check와 같게, RV-06)
+    expect(repo.productions.get(p.id)?.accessibleSeatingCheck).toBe(true);
     expect(JSON.parse(s.payload).submittedAt).toBe(new Date(NOW_MS).toISOString());
     expect(JSON.parse(s.payload).events).toHaveLength(2);
 

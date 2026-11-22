@@ -72,17 +72,30 @@ const rejection = (headers: Record<string, string>, productionId: string, body: 
   svc.http.inject({ method: 'POST', url: `/v1/ops/sale-reviews/${productionId}/rejections`, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 
 /** 실제 DB에 공연 하나와 비취소 회차 하나를 넣는다. 요청·목록·상세·반려가 모두 이 행을 쓴다 */
-async function makeProduction(o: { saleReview?: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'SUSPENDED'; approvedAt?: Date | null; submittedAt?: Date | null } = {}) {
+async function makeProduction(
+  o: {
+    saleReview?: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
+    approvedAt?: Date | null;
+    submittedAt?: Date | null;
+    createdAt?: Date;
+    cancelled?: boolean;
+    placeId?: string | null;
+    requestedPlace?: { name: string; address: string };
+  } = {},
+) {
   const productionId = randomUUID();
+  const title = `겨울 콘서트-${productionId.slice(0, 8)}`;
   await admin.db.insert(production).values({
     id: productionId,
     promoterId: TENANT,
-    placeId: PLACE,
-    title: `겨울 콘서트-${productionId.slice(0, 8)}`,
+    placeId: o.placeId === undefined ? PLACE : o.placeId,
+    ...(o.requestedPlace !== undefined ? { requestedPlace: o.requestedPlace } : {}),
+    title,
     genre: '콘서트',
     saleReview: o.saleReview ?? 'DRAFT',
     ...(o.approvedAt !== undefined ? { saleApprovedAt: o.approvedAt } : {}),
     ...(o.submittedAt !== undefined ? { saleSubmittedAt: o.submittedAt } : {}),
+    ...(o.createdAt !== undefined ? { createdAt: o.createdAt } : {}),
   });
   const eventId = randomUUID();
   const startsAt = new Date('2026-12-20T10:00:00.000Z');
@@ -96,7 +109,20 @@ async function makeProduction(o: { saleReview?: 'DRAFT' | 'SUBMITTED' | 'APPROVE
     perPersonLimit: 4,
     version: 1,
   });
-  return { productionId, eventId };
+  if (o.cancelled) {
+    await admin.db.insert(event).values({
+      id: randomUUID(),
+      productionId,
+      promoterId: TENANT,
+      openAt: new Date(startsAt.getTime() - 2 * 86_400_000),
+      startsAt: new Date(startsAt.getTime() + 86_400_000),
+      endsAt: new Date(startsAt.getTime() + 86_400_000 + 2 * 3_600_000),
+      perPersonLimit: 4,
+      version: 1,
+      status: 'CANCELLED',
+    });
+  }
+  return { productionId, eventId, title };
 }
 
 async function productionRow(productionId: string) {
@@ -155,6 +181,41 @@ describe('관제 판매 승인 실제 PostgreSQL 경로(S-T41 ①③④⑤)', ()
     expect(out.seller).toMatchObject({ legalName: SELLER.legalName, representative: SELLER.representative, phone: SELLER.phone, businessRegNo: SELLER.businessRegNo });
     expect(out.events.map((e) => e.eventId)).toEqual([p.eventId]);
     expect(out.rejectionReason).toBeNull();
+  });
+
+  test('S-T41 ⑤⑫ 상세는 등록 공연장·휠체어 확인·취소 회차를 주고, 새 공연장 요청은 요청 이름을 준다(RV-06)', async () => {
+    const p = await makeProduction({ cancelled: true });
+    const before = await request(partnerAdmin(), p.productionId);
+    expect(before.statusCode).toBe(202);
+    const d = await detail(opsViewer(), p.productionId);
+    expect(d.statusCode).toBe(200);
+    const out = JSON.parse(d.payload) as {
+      title: string;
+      placeId: string | null;
+      placeName: string | null;
+      requestedPlace: boolean;
+      accessibleSeatingCheck: boolean | null;
+      events: { eventId: string; status: string }[];
+    };
+    expect(out).toMatchObject({ title: p.title, placeId: PLACE, placeName: '피켓홀', requestedPlace: false, accessibleSeatingCheck: true });
+    expect(out.events.map((e) => e.status).sort()).toEqual(['CANCELLED', 'SCHEDULED']);
+
+    const partner = JSON.parse((await partnerStatus(partnerAdmin(), p.productionId)).payload) as { title: string };
+    expect(partner.title).toBe(p.title);
+
+    const requested = await makeProduction({ saleReview: 'SUBMITTED', submittedAt: new Date(NOW), placeId: null, requestedPlace: { name: '새 공연장', address: '서울 새로 2' } });
+    const rd = JSON.parse((await detail(opsViewer(), requested.productionId)).payload) as { placeId: string | null; placeName: string | null; requestedPlace: boolean };
+    expect(rd).toMatchObject({ placeId: null, placeName: '새 공연장', requestedPlace: true });
+  });
+
+  test('S-T41 ⑤ RV-06 제출·승인 시각이 없는 SUBMITTED 목록은 created_at 차례로 온다', async () => {
+    const older = await makeProduction({ saleReview: 'SUBMITTED', submittedAt: null, createdAt: new Date('2026-01-01T00:00:00.000Z') });
+    const newer = await makeProduction({ saleReview: 'SUBMITTED', submittedAt: null, createdAt: new Date('2026-01-02T00:00:00.000Z') });
+    const r = await list(opsViewer(), '?status=SUBMITTED&limit=100');
+    expect(r.statusCode).toBe(200);
+    const ids = (JSON.parse(r.payload).items as { productionId: string }[]).map((x) => x.productionId);
+    expect(ids.indexOf(older.productionId)).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf(newer.productionId)).toBeGreaterThan(ids.indexOf(older.productionId));
   });
 
   test('S-T41 ④_ core_ops 반려가 rejection_reason을 실제 DB에 남기고 상세·파트너 현황이 같은 사유를 읽는다', async () => {

@@ -12,19 +12,14 @@
 import * as zod from 'zod';
 
 
-export const createOpsSaleReviewApprovalBodyAliasesItemMax = 100;
-
-export const createOpsSaleReviewApprovalBodyAliasesMax = 5;
-
 
 export const CreateOpsSaleReviewApprovalBody = zod.object({
   "scales": zod.array(zod.object({
   "eventId": zod.string(),
   "scale": zod.enum(['LARGE', 'MEDIUM', 'SMALL'])
 }).strict()).min(1).describe('그 공연의 회차마다 규모(architecture §9.5). 빠진 회차가 있으면 422. LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격 검사'),
-  "placeId": zod.string().describe('확인한 공연장'),
-  "artistIds": zod.array(zod.string()).describe('확인한 아티스트(보이는 순서, 없으면 빈 배열)'),
-  "aliases": zod.array(zod.string().min(1).max(createOpsSaleReviewApprovalBodyAliasesItemMax)).max(createOpsSaleReviewApprovalBodyAliasesMax).optional().describe('공연의 다른 이름 최종 목록(파트너가 적은 것에서 고친다, POL-045)')
+  "placeId": zod.string().optional().describe('확인한 공연장. 없으면 지금 값을 그대로 둔다. 새 공연장 요청 연결은 다음 단계다'),
+  "accessibleSeatingCheck": zod.boolean().optional().describe('휠체어석 확인 결과를 승인과 함께 남긴다. 없으면 지금 값을 둔다')
 }).strict()
 
 export type CreateOpsSaleReviewApprovalBody = zod.input<typeof CreateOpsSaleReviewApprovalBody>;

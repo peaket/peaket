@@ -12,6 +12,7 @@
 import * as zod from 'zod';
 
 export const PartnerSaleReviewStatus = zod.object({
+  "title": zod.string().optional().describe('공연명(SCR-021 5단계 머리)'),
   "saleReview": zod.enum(['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'SUSPENDED']).optional(),
   "rejectionReason": zod.string().nullish(),
   "hasApprovalHistory": zod.boolean().optional(),

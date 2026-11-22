@@ -17,6 +17,8 @@ import type { SellerInfo } from './sellerInfo';
  * 파트너가 보는 판매 승인 현황(SCR-021 5단계, BAT-616). 계좌번호 전체는 없다
  */
 export interface PartnerSaleReviewStatus {
+  /** 공연명(SCR-021 5단계 머리) */
+  title?: string;
   saleReview?: PartnerSaleReviewStatusSaleReview;
   /** @nullable */
   rejectionReason?: string | null;
