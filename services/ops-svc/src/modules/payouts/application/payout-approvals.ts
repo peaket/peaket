@@ -7,6 +7,8 @@ import {
   payoutApprovalFacts,
   payoutApprovalView,
   PayoutApprovalProblem,
+  statementDisputeView,
+  type StatementDisputeView,
   type PayoutApprovalFacts,
   type PayoutApprovalRecord,
   type PayoutApprovalView,
@@ -265,7 +267,7 @@ export class PayoutApprovals {
    * 정산 이의 기각(settlement §4.2 '기각', ADR-0368 결정 6). cs_lead만, 사유 1~2,000자. payment-svc가 열린 이의를 DISMISSED로 닫고
    * 정산서를 NOTIFIED(1영업일)로 돌린다. ops 감사에는 행위자·정산서·사유 길이만 남긴다(사유 원문은 payment에만).
    */
-  async dismissStatementDispute(statementId: string, reason: string, actor: OpsActor): Promise<unknown> {
+  async dismissStatementDispute(statementId: string, reason: string, actor: OpsActor): Promise<StatementDisputeView> {
     return guard(async () => {
       if (actor.role !== 'cs_lead') throw new PayoutApprovalProblem('approval-role-required', 403, 'cs_lead만 정산 이의를 기각할 수 있습니다');
       const text = reason.trim();
@@ -273,7 +275,8 @@ export class PayoutApprovals {
       if (!this.d.settlements) throw new PayoutApprovalProblem('settlement-dependency-unavailable', 503, '정산 서비스에 연결하지 못했습니다');
       const out = await this.d.settlements.dismissDispute(statementId, { reason: text, actorId: actor.accountId });
       await this.#audit('SETTLEMENT_DISPUTE_DISMISSED', statementId, actor.accountId, { statementId, reasonLength: text.length }, this.d.clock.now());
-      return out;
+      // CS 역할에게는 정산서 이의 칸만 넘긴다(결제사·계좌·묶음·결제 ID 없음, 리뷰 RV-03)
+      return statementDisputeView(out);
     });
   }
 }

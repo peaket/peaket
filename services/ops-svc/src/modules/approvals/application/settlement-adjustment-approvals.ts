@@ -3,7 +3,9 @@
 //       그다음 공통 승인 표에 승인 업무를 만든다. payment가 거절하면(4xx) 승인 업무를 만들지 않는다. 같은 멱등 키는 같은 승인 업무다.
 // 승인: 요청자가 아닌 commander가 act=APPROVAL 재인증 뒤 승인하면 투표·EXECUTING·감사를 한 트랜잭션에 쓰고 payment 적용을 부른다.
 //       성공이면 DONE, 실패면 FAILED(같은 승인을 다시 부르면 다시 적용한다. payment는 ops 승인 기록과 대조해 적용하고, 재적용은 처음 결과다).
-// 반려: REJECTED 뒤 payment 조정 행을 VOID로 닫는다(실패해도 7일 [가정] 뒤 payment 일꾼이 닫는다).
+// 반려: 승인 대기면 REJECTED 뒤 payment 조정 행을 VOID로 닫는다(실패해도 7일 [가정] 뒤 payment 일꾼이 닫는다).
+//       실패·적용 중이면 적용이 커밋됐을 수 있어 payment void를 먼저 부르고, 이미 적용됐으면 DONE으로 맞춘 뒤 409, 답이 없으면 503이다(리뷰 RV-04).
+// 실패·적용 중의 재승인은 투표를 더 넣지 않고 적용만 다시 부른다(payment는 같은 승인 ID에 처음 결과를 준다).
 import { createHash } from 'node:crypto';
 import { ProblemError, type Clock } from '@peaket/platform';
 import type { AuditRecord } from '../../audit/audit.js';
@@ -150,10 +152,20 @@ export class SettlementAdjustmentApprovals {
       if (voteReason !== undefined && voteReason.length > 1_000) throw new ContractApprovalProblem('invalid-query', 422, '판단 이유는 1,000자까지입니다');
       const nowMs = this.d.clock.now();
       const now = new Date(nowMs);
-      // 투표·EXECUTING·감사를 한 트랜잭션에 쓴다. payment는 이 기록(EXECUTING·2인·승인 시각)과 대조해야만 적용한다(ADR-0368 결정 8)
-      const vote: ApprovalVote = { approvalId, approverId: actor.accountId, requesterId: r.requestedBy, approvedAt: now, reason: voteReason ? voteReason : null };
-      const executing: SettlementAdjustmentApprovalRecord = { ...r, status: 'EXECUTING', approverId: actor.accountId, updatedAt: now, version: r.version + 1 };
-      if (!(await this.d.store.save(executing, auditOf('SETTLEMENT_ADJUSTMENT_EXECUTING', executing, { approverId: actor.accountId }, nowMs), vote))) throw CONFLICT();
+      let executing: SettlementAdjustmentApprovalRecord;
+      if (r.status === 'PENDING_APPROVAL') {
+        // 투표·EXECUTING·감사를 한 트랜잭션에 쓴다. payment는 이 기록(EXECUTING·2인·승인 시각)과 대조해야만 적용한다(ADR-0368 결정 8)
+        const vote: ApprovalVote = { approvalId, approverId: actor.accountId, requesterId: r.requestedBy, approvedAt: now, reason: voteReason ? voteReason : null };
+        executing = { ...r, status: 'EXECUTING', approverId: actor.accountId, updatedAt: now, version: r.version + 1 };
+        if (!(await this.d.store.save(executing, auditOf('SETTLEMENT_ADJUSTMENT_EXECUTING', executing, { approverId: actor.accountId }, nowMs), vote))) throw CONFLICT();
+      } else if (r.status === 'FAILED') {
+        // 실패 뒤 재승인: 첫 투표가 이미 있다. 새 투표 없이 EXECUTING으로 돌린 뒤 적용만 다시 부른다(payment 대조가 EXECUTING을 본다)
+        executing = { ...r, status: 'EXECUTING', closeReason: null, updatedAt: now, version: r.version + 1 };
+        if (!(await this.d.store.save(executing, auditOf('SETTLEMENT_ADJUSTMENT_RETRIED', executing, { approverId: actor.accountId }, nowMs)))) return this.#settled(approvalId, actor);
+      } else {
+        // 적용 중에 겹친 요청: 상태를 바꾸지 않고 같은 적용을 다시 부른다(payment가 한 번만 적용한다)
+        executing = r;
+      }
       try {
         await this.d.payments.applyAdjustment(approvalId);
       } catch (e) {
@@ -165,10 +177,18 @@ export class SettlementAdjustmentApprovals {
       }
       const doneMs = this.d.clock.now();
       const done: SettlementAdjustmentApprovalRecord = { ...executing, status: 'DONE', closeReason: null, updatedAt: new Date(doneMs), version: executing.version + 1 };
-      // payment 적용은 이미 끝났다. DONE 저장이 실패해 EXECUTING이 남아도 같은 승인을 다시 부르면 payment가 처음 결과를 준다
-      if (!(await this.d.store.save(done, auditOf('SETTLEMENT_ADJUSTMENT_APPROVED', done, { approverId: actor.accountId }, doneMs)))) throw CONFLICT();
+      // payment 적용은 이미 끝났다. DONE 저장이 실패해 EXECUTING이 남아도 같은 승인을 다시 부르면 payment가 처음 결과를 준다.
+      // 겹친 다른 요청이 먼저 DONE으로 맞췄으면 그 결과를 준다
+      if (!(await this.d.store.save(done, auditOf('SETTLEMENT_ADJUSTMENT_APPROVED', done, { approverId: actor.accountId }, doneMs)))) return this.#settled(approvalId, actor);
       return settlementAdjustmentApprovalView((await this.d.store.find(approvalId)) ?? done, actor);
     });
+  }
+
+  /** 겹친 요청이 먼저 저장했을 때: 이미 DONE이면 그 결과, 아니면 409 */
+  async #settled(approvalId: string, actor: OpsActor): Promise<SettlementAdjustmentApprovalView> {
+    const latest = await this.d.store.find(approvalId);
+    if (latest?.status === 'DONE') return settlementAdjustmentApprovalView(latest, actor);
+    throw CONFLICT();
   }
 
   async reject(approvalId: string, actor: OpsActor, reason: string): Promise<SettlementAdjustmentApprovalView> {
@@ -178,13 +198,30 @@ export class SettlementAdjustmentApprovals {
       assertCanDecideAdjustment(r, actor, 'reject');
       const text = reason.trim();
       if (text.length < 1 || text.length > 2_000) throw new ContractApprovalProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
+      if (r.status !== 'PENDING_APPROVAL') {
+        // 실패·적용 중: 적용이 이미 커밋됐을 수 있다. payment void를 먼저 불러 돈과 승인 기록이 어긋나지 않게 한다(리뷰 RV-04)
+        try {
+          await this.d.payments.voidAdjustment(approvalId);
+        } catch (e) {
+          if (e instanceof ProblemError && e.status === 409 && e.slug === 'settlement-adjustment-applied') {
+            const nowMs = this.d.clock.now();
+            const done: SettlementAdjustmentApprovalRecord = { ...r, status: 'DONE', closeReason: null, updatedAt: new Date(nowMs), version: r.version + 1 };
+            await this.d.store.save(done, auditOf('SETTLEMENT_ADJUSTMENT_RECONCILED', done, { approverId: r.approverId, rejectedBy: actor.accountId }, nowMs));
+            throw new ProblemError({ type: 'settlement-adjustment-already-applied', status: 409, title: '조정이 이미 적용되어 반려할 수 없습니다' });
+          }
+          // payment가 답하지 않으면(503) 상태를 그대로 두고 그 오류를 준다
+          throw e;
+        }
+      }
       const nowMs = this.d.clock.now();
       const next: SettlementAdjustmentApprovalRecord = { ...r, status: 'REJECTED', approverId: actor.accountId, closeReason: text, updatedAt: new Date(nowMs), version: r.version + 1 };
       if (!(await this.d.store.save(next, auditOf('SETTLEMENT_ADJUSTMENT_REJECTED', next, { approverId: actor.accountId, reasonLength: text.length }, nowMs)))) throw CONFLICT();
-      try {
-        await this.d.payments.voidAdjustment(approvalId);
-      } catch {
-        // payment가 답하지 않아도 반려는 남는다. 승인 기록이 REJECTED라 payment는 적용하지 않고, 7일 [가정] 뒤 일꾼이 VOID로 닫는다
+      if (r.status === 'PENDING_APPROVAL') {
+        try {
+          await this.d.payments.voidAdjustment(approvalId);
+        } catch {
+          // payment가 답하지 않아도 반려는 남는다. 승인 기록이 REJECTED라 payment는 적용하지 않고, 7일 [가정] 뒤 일꾼이 VOID로 닫는다
+        }
       }
       return settlementAdjustmentApprovalView(next, actor);
     });

@@ -141,3 +141,45 @@ export function approvalDueAt(payoutDate: string): Date {
   const dd = String(base.getUTCDate()).padStart(2, '0');
   return new Date(`${yyyy}-${mm}-${dd}T15:00:00+09:00`);
 }
+
+/**
+ * CS 역할에게 보이는 정산서 칸(openapi CsCaseDetail.statementDispute와 같은 칸, settlement §4.2 '기각'·§9, F-07-5 리뷰 RV-03).
+ * 결제사(pg·결제 상점)·결제사 내부 ID·정산 계좌·묶음·대사 제외 결제는 싣지 않는다. payment 응답에 칸이 더 있어도 이 칸만 고른다.
+ */
+export interface StatementDisputeView {
+  statementId: string;
+  kind: string;
+  eventId: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  grossAmount: number;
+  refundAmount: number;
+  commissionAmount: number;
+  commissionVat: number;
+  offsetAmount: number;
+  payoutAmount: number;
+  status: string;
+  disputeDueAt: string | null;
+}
+
+export function statementDisputeView(raw: unknown): StatementDisputeView {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const str = (k: string): string => (typeof r[k] === 'string' ? (r[k] as string) : '');
+  const strOrNull = (k: string): string | null => (typeof r[k] === 'string' ? (r[k] as string) : null);
+  const num = (k: string): number => (typeof r[k] === 'number' ? (r[k] as number) : 0);
+  return {
+    statementId: str('statementId'),
+    kind: str('kind'),
+    eventId: strOrNull('eventId'),
+    periodStart: strOrNull('periodStart'),
+    periodEnd: strOrNull('periodEnd'),
+    grossAmount: num('grossAmount'),
+    refundAmount: num('refundAmount'),
+    commissionAmount: num('commissionAmount'),
+    commissionVat: num('commissionVat'),
+    offsetAmount: num('offsetAmount'),
+    payoutAmount: num('payoutAmount'),
+    status: str('status'),
+    disputeDueAt: strOrNull('disputeDueAt'),
+  };
+}

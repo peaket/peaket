@@ -207,9 +207,13 @@ export const settlementAdjustmentApprovalFacts = (r: SettlementAdjustmentApprova
 /** 조정 승인 상세·목록은 요청자와 commander만 본다(그 밖 404, 계약 승인과 같다) */
 export const canSeeSettlementAdjustmentApproval = (r: SettlementAdjustmentApprovalRecord, actor: OpsActor): boolean => r.requestedBy === actor.accountId || actor.role === 'commander';
 
-/** 판정 자격: 승인 대기·실패(재시도)·적용 중(재시도, 승인만)이고, 요청자가 아닌 commander */
+/**
+ * 판정 자격: 승인 대기·실패·적용 중이고, 요청자가 아닌 commander. 실패·적용 중은 적용이 payment에 이미 커밋됐을 수 있어
+ * 승인은 적용만 다시 부르고, 반려는 payment void를 먼저 부른다(settlement §4.3 '승인', 리뷰 RV-04)
+ */
 export function assertCanDecideAdjustment(r: SettlementAdjustmentApprovalRecord, actor: OpsActor, action: 'approve' | 'reject'): void {
-  if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED' && !(action === 'approve' && r.status === 'EXECUTING')) {
+  void action;
+  if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED' && r.status !== 'EXECUTING') {
     throw new ContractApprovalProblem('approval-not-pending', 409, '승인 대기 중인 조정이 아닙니다');
   }
   if (r.requestedBy === actor.accountId) throw new ContractApprovalProblem('approval-self-not-allowed', 403, `요청자는 ${action === 'approve' ? '승인' : '반려'}할 수 없습니다`);

@@ -1,6 +1,6 @@
 // 정산서 수기 조정의 규칙(docs/features/settlement.md §4.3 '수기 조정의 구현 규칙', ADR-0368 결정 7·8·9, POL-038 ⑦).
 // 조정 행은 payment가, 2인 승인은 ops-svc 공통 승인 표가 갖는다. 검사(사유 코드·이의 대조·상태)는 정산서를 가진 이쪽이 한다.
-import { SettlementProblem, type DisputeReasonCode, type DisputeRecord, type StatementRecord, type StatementStatus } from './settlement.js';
+import { payoutAmountOf, SettlementProblem, type DisputeReasonCode, type DisputeRecord, type StatementRecord, type StatementStatus } from './settlement.js';
 
 /** 이의를 받아들인 조정의 코드(그 이의와 같은 코드) */
 export const DISPUTE_ADJUSTMENT_CODES: readonly DisputeReasonCode[] = ['GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER'];
@@ -78,9 +78,9 @@ export function validateAdjustment(req: AdjustmentRequest, statement: StatementR
   if (statement.status === 'DISPUTED') throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 422, '이의 중인 정산서는 이의 인정 조정이나 기각으로 처리합니다');
 }
 
-/** 조정 합계를 반영한 지급액: 판매 대금 − 환급 − 중개수수료 − 수수료 부가세 − 상계 + 조정 합계(§4.3 '적용'). 0 아래일 수 있다 */
+/** 조정 합계를 반영한 지급액(§4.3 '적용'). 지급액 식 하나(payoutAmountOf)를 그대로 쓴다. 0 아래일 수 있다 */
 export const payoutWithAdjustment = (s: Pick<StatementRecord, 'grossAmount' | 'refundAmount' | 'commissionAmount' | 'commissionVat' | 'offsetAmount'>, adjustmentAmount: number): number =>
-  s.grossAmount - s.refundAmount - s.commissionAmount - s.commissionVat - s.offsetAmount + adjustmentAmount;
+  payoutAmountOf({ ...s, adjustmentAmount });
 
 export const adjustmentView = (a: AdjustmentRecord) => ({
   adjustmentId: a.adjustmentId,

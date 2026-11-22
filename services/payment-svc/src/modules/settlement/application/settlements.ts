@@ -32,7 +32,6 @@ import {
   adjustmentView,
   assertAdjustable,
   isDisputeAdjustmentCode,
-  payoutWithAdjustment,
   sameAdjustmentRequest,
   validateAdjustment,
   type AdjustmentRecord,
@@ -47,6 +46,7 @@ import {
   dateOnly,
   DISPUTE_WINDOW_BUSINESS_DAYS,
   negativeStatementSourceRef,
+  payoutAmountOf,
   payoutBatchView,
   receivableOpenedEvent,
   RENOTIFY_WINDOW_BUSINESS_DAYS,
@@ -329,15 +329,27 @@ export class Settlements {
       this.d.log?.caseNoticeFailed?.({ disputeId: d.disputeId, statementId: d.statementId, at: this.#now() });
       return false;
     }
-    await this.d.store.markDisputeCaseRequested(d.disputeId, this.#now());
+    // 이의는 이미 커밋됐다. 표시 쓰기가 실패해도 응답을 바꾸지 않고 다음 점검이 다시 보낸다(ops는 eventKey로 한 건으로 모은다, 리뷰 RV-05)
+    try {
+      await this.d.store.markDisputeCaseRequested(d.disputeId, this.#now());
+    } catch {
+      this.d.log?.caseNoticeFailed?.({ disputeId: d.disputeId, statementId: d.statementId, at: this.#now(), reason: 'mark-failed' });
+      return false;
+    }
     return true;
   }
 
-  /** 건을 열지 못한 열린 이의를 다시 보낸다(정산 일꾼 30분마다, ADR-0368 결정 5). 연 수를 돌려준다 */
+  /** 건을 열지 못한 열린 이의를 다시 보낸다(정산 일꾼 30분마다, ADR-0368 결정 5). 한 건 실패가 나머지를 멈추지 않는다. 연 수를 돌려준다 */
   async retryDisputeCases(limit = CASE_RETRY_LIMIT): Promise<{ opened: number; pending: number }> {
     const pending = await this.d.store.listDisputesAwaitingCase(limit);
     let opened = 0;
-    for (const d of pending) if (await this.#openDisputeCase(d)) opened += 1;
+    for (const d of pending) {
+      try {
+        if (await this.#openDisputeCase(d)) opened += 1;
+      } catch {
+        this.d.log?.caseNoticeFailed?.({ disputeId: d.disputeId, statementId: d.statementId, at: this.#now() });
+      }
+    }
     return { opened, pending: pending.length };
   }
 
@@ -711,7 +723,8 @@ export class Settlements {
       assertAdjustable(s.status);
       const dispute = a.disputeId !== null ? (await this.d.store.listDisputes(s.statementId)).find((d) => d.disputeId === a.disputeId) : undefined;
       if (a.disputeId !== null && (s.status !== 'DISPUTED' || !dispute || dispute.result !== null)) throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 409, '그 이의가 이미 닫혔거나 정산서가 이의 중이 아닙니다');
-      if (a.disputeId === null && s.status === 'DISPUTED') throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 409, '이의 중인 정산서에는 이의 없는 조정을 적용하지 않습니다');
+      // 이의 없는 조정은 이의 중(DISPUTED) 정산서에 적용하지 않는다(§4.3 '검사', J-T36 ②, 리뷰 RV-07). 아무것도 쓰지 않는다
+      if (a.disputeId === null && s.status === 'DISPUTED') throw new SettlementProblem('settlement-adjustment-not-allowed', 409, '이의 중인 정산서에는 이의 없는 조정을 적용하지 않습니다');
       if (!this.d.adjustmentApprovals) throw new SettlementProblem('dependency-unavailable', 503, '조정 승인 기록을 확인할 수 없습니다');
       let facts: VerifiedAdjustmentApproval | undefined;
       try {
@@ -725,7 +738,8 @@ export class Settlements {
       const now = this.#now();
       const current = s.adjustmentAmount ?? 0;
       const adjustmentAmount = current + a.amount;
-      const payoutAmount = payoutWithAdjustment(s, adjustmentAmount);
+      // 지급액 식 하나(RV-02): 계산 칸 그대로 + 바뀐 조정 합계
+      const payoutAmount = payoutAmountOf({ ...s, adjustmentAmount });
       const disputeDueAt = addKstBusinessDays(now, RENOTIFY_WINDOW_BUSINESS_DAYS, this.#holidays());
       const audit = this.#audit(s.statementId, s.status, 'NOTIFIED', `adjustment-applied-${a.reasonCode.toLowerCase()}`, facts.approvals[0] ?? 'system', now);
       const next: StatementRecord = { ...s, status: 'NOTIFIED', holdReason: null, adjustmentAmount, payoutAmount, disputeDueAt, updatedAt: now };
@@ -1008,7 +1022,10 @@ export class Settlements {
           remaining -= take;
         }
         if (offset > 0) {
-          const next: StatementRecord = { ...s, offsetAmount: s.offsetAmount + offset, payoutAmount: remaining, status: remaining > 0 ? s.status : 'CARRIED_OVER', updatedAt: now };
+          // 지급액 식 하나(RV-02): 상계를 더한 칸으로 다시 센다(상계는 지급액까지만이라 remaining과 같다)
+          const offsetAmount = s.offsetAmount + offset;
+          const payoutAfter = payoutAmountOf({ ...s, offsetAmount });
+          const next: StatementRecord = { ...s, offsetAmount, payoutAmount: payoutAfter, status: payoutAfter > 0 ? s.status : 'CARRIED_OVER', updatedAt: now };
           const carried = next.status === 'CARRIED_OVER' ? this.#audit(s.statementId, s.status, 'CARRIED_OVER', 'offset-exhausted', 'system', now) : undefined;
           statementUpdates.push({
             statementId: s.statementId,
@@ -1020,7 +1037,7 @@ export class Settlements {
             from: ['CONFIRMED'],
             ...(carried ? { audits: [carried], events: [statementEvent(next, 'STATEMENT_CARRIED_OVER', now, carried.auditId)] } : {}),
           });
-          if (remaining > 0) includedAfterOffset.push(next);
+          if (payoutAfter > 0) includedAfterOffset.push(next);
         } else {
           includedAfterOffset.push(s);
         }

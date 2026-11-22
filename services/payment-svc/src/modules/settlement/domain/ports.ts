@@ -165,7 +165,7 @@ export interface SettlementApprovalLog {
   /** 파트너가 남의 정산서를 보거나 이의하려 했다(settlement_authz_denied, J-T10). 금액·계좌는 싣지 않는다 */
   authzDenied?(o: { partnerId: string; accountId: string; statementId: string | null; eventId?: string; action: 'list-event' | 'dispute'; at: Date }): void;
   /** CS 처리함 건을 열지 못했다(다음 점검이 다시 보낸다) */
-  caseNoticeFailed?(o: { disputeId: string; statementId: string; at: Date }): void;
+  caseNoticeFailed?(o: { disputeId: string; statementId: string; at: Date; reason?: 'mark-failed' }): void;
 }
 
 /** ops-svc 승인 업무 SETTLEMENT_ADJUSTMENT 한 건에서 payment가 대조할 사실(ADR-0368 결정 8). 근거 메모·계좌는 싣지 않는다 */

@@ -20,6 +20,24 @@ const GuaranteeBody = z.object({ reason: z.string().min(1).max(2_000) }).strict(
 const StatementParams = z.object({ statementId: z.string().min(1).max(64) });
 /** openapi createOpsSettlementDisputeDismissal 본문. 길이(1~2,000자)는 유스케이스가 본다(400) */
 const DismissalBody = z.object({ reason: z.string() }).strict();
+/** 기각 응답: CS 처리함 건 상세 statementDispute와 같은 칸만(strict라 칸이 늘면 실패한다, 리뷰 RV-03) */
+const StatementDisputeResponse = z
+  .object({
+    statementId: z.string(),
+    kind: z.string(),
+    eventId: z.string().nullable(),
+    periodStart: z.string().nullable(),
+    periodEnd: z.string().nullable(),
+    grossAmount: z.number(),
+    refundAmount: z.number(),
+    commissionAmount: z.number(),
+    commissionVat: z.number(),
+    offsetAmount: z.number(),
+    payoutAmount: z.number(),
+    status: z.string(),
+    disputeDueAt: z.string().nullable(),
+  })
+  .strict();
 const BatchDetailView = z.record(z.string(), z.unknown());
 
 const BatchView = z
@@ -117,9 +135,9 @@ export class PayoutsController {
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   @Roles(['cs_lead'])
-  @ContractRouteSchema({ params: StatementParams, body: DismissalBody, responses: { 200: BatchDetailView } })
-  async dismissDispute(@ContractParams(StatementParams) params: z.output<typeof StatementParams>, @ContractBody(DismissalBody) body: z.output<typeof DismissalBody>, @CurrentPrincipal() me: Principal) {
-    return (await this.approvals.dismissStatementDispute(params.statementId, body.reason, actorOf(me))) as Record<string, unknown>;
+  @ContractRouteSchema({ params: StatementParams, body: DismissalBody, responses: { 200: StatementDisputeResponse } })
+  async dismissDispute(@ContractParams(StatementParams) params: z.output<typeof StatementParams>, @ContractBody(DismissalBody) body: z.output<typeof DismissalBody>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof StatementDisputeResponse>> {
+    return this.approvals.dismissStatementDispute(params.statementId, body.reason, actorOf(me));
   }
 
   @Get('settlements')

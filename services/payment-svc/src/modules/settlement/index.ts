@@ -51,6 +51,7 @@ export {
   DISPUTE_WINDOW_BUSINESS_DAYS,
   hashUuid,
   negativeStatementSourceRef,
+  payoutAmountOf,
   payoutBatchView,
   receivableOpenedEvent,
   RENOTIFY_WINDOW_BUSINESS_DAYS,

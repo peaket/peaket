@@ -11,6 +11,7 @@ interface Row {
   status: string;
   failure_category: string | null;
   excluded_reason: string | null;
+  approved_at: Date | null;
 }
 
 export class DrizzleSettlementPaymentSource implements SettlementPaymentSource {
@@ -18,7 +19,7 @@ export class DrizzleSettlementPaymentSource implements SettlementPaymentSource {
 
   async listEventPayments(eventId: string, pg: Pg, pgStore: PgStore): Promise<PaymentFact[]> {
     const r = await this.db.pool.query<Row>(
-      `select p.id as payment_id, p.amount, p.cancelled_amount, p.status, p.failure_category,
+      `select p.id as payment_id, p.amount, p.cancelled_amount, p.status, p.failure_category, p.approved_at,
               case when exists (
                 select 1 from reconciliation_diff d
                  where d.pg = p.pg and d.payment_ref = p.pg_payment_ref and d.state <> 'CLOSED'
@@ -37,6 +38,8 @@ export class DrizzleSettlementPaymentSource implements SettlementPaymentSource {
       status: row.status,
       failureCategory: row.failure_category,
       excludedReason: row.excluded_reason,
+      // 승인 시각이 없는 CANCELED는 승인된 적 없는 취소라 계산에서 뺀다(settlement §4.1, F-07-5 리뷰 RV-01)
+      approvedAt: row.approved_at === null ? null : new Date(row.approved_at),
     }));
   }
 }

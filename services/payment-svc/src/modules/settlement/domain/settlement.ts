@@ -63,7 +63,19 @@ export interface PaymentFact {
   failureCategory: string | null;
   /** 대사가 끝나지 않았으면 그 이유. 있으면 정산서 계산에서 빼고 excludedPayments에 남긴다(A1-H8). */
   excludedReason?: string | null;
+  /**
+   * 결제 원장의 승인 시각(payment.approved_at). 없는(null) CANCELED는 승인된 적 없이 대사가 닫은 취소라 판매 대금·환급·원본 목록 어디에도 넣지 않는다
+   * (settlement §4.1 '전액 취소된 결제', F-07-5 리뷰 RV-01, A1-H3의 원래 경우).
+   */
+  approvedAt?: Date | null;
 }
+
+/**
+ * 지급액 식 하나(settlement §4.1 지급액 칸·§4.3 '적용', F-07-5 리뷰 RV-02): 판매 대금 − 환급 − 중개수수료 − 수수료 부가세 − 상계 + 조정 합계.
+ * 계산·상품 계산·조정 적용·묶음 상계가 모두 이 함수를 쓴다. 0에서 자르지 않는다(0 아래는 감액 조정뿐이고 확정 때 CARRIED_OVER·NEGATIVE_STATEMENT가 된다).
+ */
+export const payoutAmountOf = (s: { grossAmount: number; refundAmount: number; commissionAmount: number; commissionVat: number; offsetAmount: number; adjustmentAmount?: number | undefined }): number =>
+  s.grossAmount - s.refundAmount - s.commissionAmount - s.commissionVat - s.offsetAmount + (s.adjustmentAmount ?? 0);
 
 export interface KycRecord {
   promoterId: string;
@@ -359,18 +371,20 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
   if (!Number.isInteger(input.commissionRateBp) || input.commissionRateBp < 0 || input.commissionRateBp > 10000) {
     throw new SettlementProblem('settlement-commission-rate-invalid', 422, '수수료율이 맞지 않습니다');
   }
-  const candidates = input.payments.filter((p) => p.status === 'APPROVED' || p.status === 'PARTIAL_CANCELED' || p.status === 'CANCELED');
+  // 승인된 결제만 센다. 승인 시각이 없는 CANCELED(승인된 적 없이 대사가 닫은 취소)는 후보에서 뺀다(RV-01)
+  const candidates = input.payments.filter((p) => p.status === 'APPROVED' || p.status === 'PARTIAL_CANCELED' || (p.status === 'CANCELED' && p.approvedAt != null));
   const excludedPayments = candidates.filter((p) => p.excludedReason).map((p) => `${p.paymentId}:${p.excludedReason}`);
   const included = candidates.filter((p) => !p.excludedReason);
-  // CANCELED는 전액 취소라 매출 0이고 환급은 원금 전액이다. cancelled_amount가 비어 있어도 원금을 환급으로 센다(A1-H3).
-  const grossOf = (p: PaymentFact): number => (p.status === 'CANCELED' ? 0 : p.amount);
-  const refundOf = (p: PaymentFact): number => (p.status === 'CANCELED' ? Math.max(p.cancelledAmount, p.amount) : p.cancelledAmount);
+  // 판매 대금은 승인된 결제의 원금이고 취소·환불은 빼지 않는다. 환급은 따로 센다: 승인 뒤 전액 취소(CANCELED)는 원금 전액,
+  // 그 밖은 취소 금액(원금을 넘지 않음). 같은 돈을 판매 대금과 환급에서 두 번 빼지 않는다(settlement §4.1, F-07-5 리뷰 RV-01)
+  const grossOf = (p: PaymentFact): number => p.amount;
+  const refundOf = (p: PaymentFact): number => (p.status === 'CANCELED' ? p.amount : Math.min(Math.max(0, p.cancelledAmount), p.amount));
   const grossAmount = included.reduce((s, p) => s + grossOf(p), 0);
   const refundAmount = included.reduce((s, p) => s + refundOf(p), 0);
   const commissionAmount = Math.floor((Math.max(0, grossAmount - refundAmount) * input.commissionRateBp) / 10_000);
   const commissionVat = Math.floor(commissionAmount / 10);
   const offsetAmount = 0;
-  const payoutAmount = Math.max(0, grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount);
+  const payoutAmount = payoutAmountOf({ grossAmount, refundAmount, commissionAmount, commissionVat, offsetAmount });
   // 계산 때는 KYC·계좌로 보류하지 않고 지급액 0도 통지한다. 보류는 지급 묶음 때(T7), CARRIED_OVER는 확정 때(T6) 한다(ADR-0368 결정 1·10).
   const status: StatementStatus = 'CALCULATED';
   const holdReason: HoldReason | null = null;
@@ -467,7 +481,7 @@ export function calculateProductStatement(input: ProductCalculationInput): { rec
   const commissionAmount = input.items.reduce((s, i) => s + Math.floor((Math.max(0, i.grossAmount - i.refundedAmount) * i.commissionRateBp) / 10_000), 0);
   const commissionVat = Math.floor(commissionAmount / 10);
   const offsetAmount = 0;
-  const payoutAmount = Math.max(0, grossAmount - refundAmount - commissionAmount - commissionVat - offsetAmount);
+  const payoutAmount = payoutAmountOf({ grossAmount, refundAmount, commissionAmount, commissionVat, offsetAmount });
   // 회차 정산서와 같이 계산 때는 보류하지 않는다(ADR-0368 결정 1)
   const status: StatementStatus = 'CALCULATED';
   const first = input.items[0]!;

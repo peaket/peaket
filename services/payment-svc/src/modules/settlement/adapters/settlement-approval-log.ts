@@ -50,7 +50,7 @@ export function settlementApprovalLog(logger: Pick<PlatformLogger, 'info' | 'war
     },
     caseNoticeFailed(o) {
       try {
-        logger.warn({ event: 'settlement_dispute_case_deferred', disputeId: o.disputeId, statementId: o.statementId, at: o.at.toISOString() }, 'CS 처리함 정산 이의 건을 열지 못해 다음 점검에서 다시 보낸다');
+        logger.warn({ event: 'settlement_dispute_case_deferred', disputeId: o.disputeId, statementId: o.statementId, ...(o.reason ? { reason: o.reason } : {}), at: o.at.toISOString() }, 'CS 처리함 정산 이의 건을 열지 못했거나 연 표시를 쓰지 못해 다음 점검에서 다시 보낸다');
       } catch {
         // 기록 실패는 이의 접수를 바꾸지 않는다
       }
