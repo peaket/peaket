@@ -95,6 +95,28 @@ describe('J-T36 조정 승인 업무(실제 DB)', () => {
     await expect(admin.query('insert into approval_vote (request_id, approver_id, requester_id, approved_at) values ($1, $2, $2, now())', [approvalId, lead['x-user-id']])).rejects.toThrow(/approval_vote_not_requester_check/);
   });
 
+  test('[ASVS v5.0.0-2.3.3] J-T36 ⑨ ① 적용 커밋 뒤 응답이 끊긴 FAILED를 반려하면 409이고 DB 승인 업무는 DONE이다(REJECTED가 남지 않는다)', async () => {
+    const { approvalId } = await request(randomUUID());
+    payments.loseNextApplyResponse = true;
+    expect((await approve(approvalId, headers('commander', { reauth: true }))).statusCode).toBe(503);
+    expect((await admin.query('select status from approval_request where id = $1', [approvalId])).rows).toEqual([{ status: 'FAILED' }]);
+    const reject = await svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${approvalId}/rejections`, headers: { ...headers('commander'), 'content-type': 'application/json' }, payload: JSON.stringify({ reason: '근거가 부족하다' }) });
+    expect(reject.statusCode, reject.payload).toBe(409);
+    expect((await admin.query('select status from approval_request where id = $1', [approvalId])).rows).toEqual([{ status: 'DONE' }]);
+    expect(payments.effects.get(approvalId)).toBe(1);
+  });
+
+  test('J-T36 ⑨ ② 응답이 끊긴 FAILED를 다른 commander가 다시 승인하면 DB 투표는 한 행이고 DONE이며 조정 합계는 한 번이다', async () => {
+    const { approvalId } = await request(randomUUID());
+    payments.loseNextApplyResponse = true;
+    expect((await approve(approvalId, headers('commander', { reauth: true }))).statusCode).toBe(503);
+    const retry = await approve(approvalId, headers('commander', { reauth: true }));
+    expect(retry.statusCode, retry.payload).toBe(200);
+    expect((await admin.query('select count(*)::int as n from approval_vote where request_id = $1', [approvalId])).rows).toEqual([{ n: 1 }]);
+    expect((await admin.query('select status from approval_request where id = $1', [approvalId])).rows).toEqual([{ status: 'DONE' }]);
+    expect(payments.effects.get(approvalId)).toBe(1);
+  });
+
   test('J-T36 ④ 두 commander가 같은 조정을 겹쳐 승인해도 payment 적용은 한 번이다', async () => {
     const { approvalId } = await request(randomUUID());
     const before = payments.applied.length;

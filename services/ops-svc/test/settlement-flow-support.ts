@@ -8,14 +8,54 @@ import { MemorySettlementAdjustmentApprovalStore } from '../src/modules/approval
 import { UnavailablePayoutPaymentClient, type ApprovalReauthVerifier, type SettlementAdjustmentRow, type SettlementPaymentClient } from '../src/modules/payouts/index.js';
 import { FakeIdentity, quiet } from './support.js';
 
-/** payment-svc 정산 내부 경로의 짝 가짜. 등록한 조정 행을 기억하고, 실패를 정해 줄 수 있다 */
+/**
+ * payment-svc가 기각 응답으로 주는 정산서 보기(payment `statementView`의 칸 전부). ops가 CS 역할에게 넘길 칸만 골라야 하므로
+ * 결제사·계좌·묶음 칸까지 실제와 같은 모양으로 둔다(리뷰 RV-03).
+ */
+export const paymentStatementView = (statementId: string) => ({
+  statementId,
+  kind: 'EVENT',
+  eventId: '0194c000-0000-7000-8000-0000000e0001',
+  pg: 'TOSS',
+  pgStore: 'STANDARD',
+  periodStart: null,
+  periodEnd: null,
+  grossAmount: 30_000_000,
+  refundAmount: 2_000_000,
+  commissionAmount: 2_800_000,
+  commissionVat: 280_000,
+  offsetAmount: 0,
+  payoutAmount: 24_920_000,
+  revision: 1,
+  supersedesId: null,
+  excludedPayments: ['0194c000-0000-7000-8000-0000000a0001:RECONCILIATION_MISMATCH'],
+  status: 'NOTIFIED',
+  holdReason: null,
+  disputeDueAt: '2026-11-20T06:00:00.000Z',
+  payoutDate: '2026-11-27',
+  payoutBankCode: '004',
+  payoutAccountLast4: '1234',
+  payoutBatchId: null,
+});
+
+type Row = 'PENDING' | 'APPLIED' | 'VOID';
+
+/**
+ * payment-svc 정산 내부 경로의 짝 가짜. 조정 행 상태(PENDING·APPLIED·VOID)를 payment와 같은 규칙으로 기억한다:
+ * 적용은 한 번만 효과가 있고(재적용은 처음 결과), 적용된 행의 void는 409 settlement-adjustment-applied다.
+ */
 export class FakeSettlementPayments implements SettlementPaymentClient {
   readonly dismissed: { statementId: string; reason: string; actorId: string }[] = [];
   readonly registered: { statementId: string; input: Parameters<SettlementPaymentClient['registerAdjustment']>[1] }[] = [];
   readonly applied: string[] = [];
   readonly voided: string[] = [];
-  /** 다음 호출에 던질 오류(한 번) */
-  failNext: { dismiss?: ProblemError; register?: ProblemError; apply?: ProblemError } = {};
+  readonly rows = new Map<string, Row>();
+  /** 실제로 조정 합계를 바꾼 횟수(승인 ID별) */
+  readonly effects = new Map<string, number>();
+  /** 다음 호출에 던질 오류(한 번). apply는 적용하지 않고 던진다 */
+  failNext: { dismiss?: ProblemError; register?: ProblemError; apply?: ProblemError; void?: ProblemError } = {};
+  /** 다음 적용은 커밋한 뒤 응답이 끊긴다(적용하고 503을 던진다, 리뷰 RV-04) */
+  loseNextApplyResponse = false;
   /** 적용 중에 부를 갈고리(payment가 ops 승인 기록을 읽는 자리) */
   onApply: ((approvalId: string) => Promise<void>) | undefined;
 
@@ -24,7 +64,7 @@ export class FakeSettlementPayments implements SettlementPaymentClient {
     this.failNext.dismiss = undefined;
     if (e) throw e;
     this.dismissed.push({ statementId, ...input });
-    return { statementId, status: 'NOTIFIED' };
+    return paymentStatementView(statementId);
   }
 
   async registerAdjustment(statementId: string, input: Parameters<SettlementPaymentClient['registerAdjustment']>[1]): Promise<SettlementAdjustmentRow> {
@@ -32,6 +72,7 @@ export class FakeSettlementPayments implements SettlementPaymentClient {
     this.failNext.register = undefined;
     if (e) throw e;
     this.registered.push({ statementId, input: { ...input } });
+    if (!this.rows.has(input.approvalId)) this.rows.set(input.approvalId, 'PENDING');
     return { adjustmentId: `adj-${input.approvalId}`, statementId, approvalId: input.approvalId, reasonCode: input.reasonCode, disputeId: input.disputeId ?? null, amount: input.amount, status: 'PENDING' };
   }
 
@@ -40,12 +81,27 @@ export class FakeSettlementPayments implements SettlementPaymentClient {
     const e = this.failNext.apply;
     this.failNext.apply = undefined;
     if (e) throw e;
+    const row = this.rows.get(approvalId) ?? 'PENDING';
+    if (row === 'VOID') throw new ProblemError({ type: 'settlement-adjustment-void', status: 409, title: '반려·만료된 조정입니다' });
+    if (row === 'PENDING') {
+      this.rows.set(approvalId, 'APPLIED');
+      this.effects.set(approvalId, (this.effects.get(approvalId) ?? 0) + 1);
+    }
     this.applied.push(approvalId);
+    if (this.loseNextApplyResponse) {
+      this.loseNextApplyResponse = false;
+      throw new ProblemError({ type: 'settlement-dependency-unavailable', status: 503, title: '정산 서비스에 연결하지 못했습니다' });
+    }
     return { adjustment: { approvalId, status: 'APPLIED' } };
   }
 
   async voidAdjustment(approvalId: string): Promise<unknown> {
+    const e = this.failNext.void;
+    this.failNext.void = undefined;
+    if (e) throw e;
     this.voided.push(approvalId);
+    if (this.rows.get(approvalId) === 'APPLIED') throw new ProblemError({ type: 'settlement-adjustment-applied', status: 409, title: '이미 적용한 조정입니다' });
+    this.rows.set(approvalId, 'VOID');
     return { approvalId, status: 'VOID' };
   }
 }

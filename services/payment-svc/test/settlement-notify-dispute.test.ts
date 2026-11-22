@@ -12,7 +12,7 @@ import {
   type StatementRecord,
   type StatementStatus,
 } from '../src/modules/settlement/index.js';
-import { CountingProducts, fact, productItem, settlementFlow, UUID_RE, type SettlementFlow } from './settlement-flow-support.js';
+import { CountingProducts, fact, FlakyMarkStore, productItem, settlementFlow, UUID_RE, type SettlementFlow } from './settlement-flow-support.js';
 
 const HOUR = 60 * 60 * 1_000;
 /** 2026-11-18(수) 10:00 KST */
@@ -98,7 +98,8 @@ describe('J-T35 ① 계산과 통지는 한 트랜잭션', () => {
     const zero = await f.settlements.calculateEvent({ promoterId: zeroPromoter, eventId: zeroEvent, pg: 'TOSS', pgStore: 'STANDARD' });
     expect(await f.store.findStatementById(zero.statementId)).toMatchObject({ status: 'NOTIFIED', payoutAmount: 0, holdReason: null });
     expect(eventsOf(f, zero.statementId).map((e) => e.value.type)).toEqual(['STATEMENT_NOTIFIED']);
-    expect(eventsOf(f, zero.statementId)[0]!.value).toMatchObject({ salesAmount: 0, refundAmount: 50_000, feeAmount: 0 });
+    // 승인 뒤 전액 취소는 판매 대금·환급 모두 원금이다(정본 §4.1 '전액 취소된 결제', 리뷰 RV-01)
+    expect(eventsOf(f, zero.statementId)[0]!.value).toMatchObject({ salesAmount: 50_000, refundAmount: 50_000, feeAmount: 0 });
   });
 
   test('J-T35 ① 포트원 정산서의 사건에는 pgStore 칸이 없다(asyncapi x-present-when: pg TOSS)', async () => {
@@ -288,6 +289,56 @@ describe('J-T35 ③ 이의를 받으면 CS 처리함 정산 이의 건', () => {
     ]);
     await expect(notice(() => answer(503, {})).openDispute({ disputeId, statementId, createdAt })).rejects.toMatchObject({ status: 503 });
     await expect(notice(() => answer(202, { accepted: false })).openDispute({ disputeId, statementId, createdAt })).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe('J-T35 ⑪ 커밋 뒤 CS 건 표시 쓰기 실패(리뷰 RV-05)', () => {
+  // 정본 §4.2 '이의 받기': 건을 연 뒤 case_requested_at을 쓰지 못해도 이의 응답은 202이고 다음 점검이 다시 보낸다.
+  test('J-T35 ⑪ 표시 쓰기가 한 번 실패해도 이의는 202·DISPUTED·이의 행 하나이고, 다음 점검이 다시 보내 표시가 채워지며 ops 건은 하나다', async () => {
+    const store = new FlakyMarkStore();
+    const f = await open({ now: NOTIFY_AT, store });
+    const s = await notified(f);
+    store.failNextMarks = 1;
+    f.at(NOTIFY_AT + HOUR);
+    const res = await f.dispute(s.promoterId, s.statementId, { reasonCode: 'COMMISSION' });
+    expect(res.statusCode, res.payload).toBe(202);
+    expect((await f.store.findStatementById(s.statementId))?.status).toBe('DISPUTED');
+    const disputes = await f.store.listDisputes(s.statementId);
+    expect(disputes).toHaveLength(1);
+    expect(disputes[0]!.caseRequestedAt ?? null).toBeNull();
+    // 다시 내면 이미 이의 중이라 409(첫 이의가 남았다)
+    expect((await f.dispute(s.promoterId, s.statementId, { reasonCode: 'COMMISSION' })).statusCode).toBe(409);
+
+    const worker = new SettlementDueWorker({ settlements: f.settlements, leader: { isLeader: () => true }, clock: f.clock, timer: new ManualTimer() });
+    f.at(NOTIFY_AT + HOUR + 30 * 60 * 1_000);
+    await worker.tick(false);
+    expect((await f.store.listDisputes(s.statementId))[0]!.caseRequestedAt?.getTime()).toBe(NOTIFY_AT + HOUR + 30 * 60 * 1_000);
+    // ops는 eventKey(이의 ID)로 같은 건을 한 번만 연다: 보낸 이의 ID는 하나뿐이다
+    expect(new Set(f.caseNotice.opened.map((o) => o.disputeId))).toEqual(new Set([disputes[0]!.disputeId]));
+    const sent = f.caseNotice.opened.length;
+    f.at(NOTIFY_AT + 2 * HOUR);
+    await worker.tick(false);
+    expect(f.caseNotice.opened).toHaveLength(sent);
+  });
+
+  test('J-T35 ⑪ 다시 보내기 중 가운데 이의의 표시 쓰기가 실패해도 같은 점검의 나머지 이의는 보내고 표시한다', async () => {
+    const store = new FlakyMarkStore();
+    const f = await open({ now: NOTIFY_AT, store });
+    f.caseNotice.failing = true;
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const s = await notified(f);
+      f.at(NOTIFY_AT + (i + 1) * 60_000);
+      expect((await f.dispute(s.promoterId, s.statementId, { reasonCode: 'GROSS_AMOUNT' })).statusCode).toBe(202);
+      ids.push((await f.store.listDisputes(s.statementId))[0]!.disputeId);
+    }
+    f.caseNotice.failing = false;
+    store.failMarkFor.add(ids[1]!);
+    f.at(NOTIFY_AT + HOUR);
+    await expect(f.settlements.retryDisputeCases()).resolves.toBeDefined();
+    expect(f.caseNotice.opened.map((o) => o.disputeId).sort()).toEqual([...ids].sort());
+    const marked = (id: string) => (store.disputes.get(id)?.caseRequestedAt ?? null) !== null;
+    expect(ids.map(marked)).toEqual([true, false, true]);
   });
 });
 
@@ -497,26 +548,29 @@ describe('J-T10 테넌트 격리', () => {
   });
 });
 
-describe('J-T1 계산 회귀(F-07-5가 통지를 더한 뒤에도 같다)', () => {
-  test('J-T1 FRAUD 취소의 환급도 환급에 모두 넣고 대사 미완 결제는 빼고 적는다', () => {
-    const reconciled = fact({ amount: 30_000_000, cancelledAmount: 0, status: 'APPROVED' });
-    const fraud = fact({ amount: 2_000_000, cancelledAmount: 2_000_000, status: 'CANCELED' });
+describe('J-T1 계산(리뷰 RV-01 재현)', () => {
+  // F-07-5 리뷰 RV-01(시험 담당 2026-11-23): 첫 시험은 승인 3,000만 + 전액 취소 200만을 '판매 대금 3,000만'으로 단언해 이중 차감을 굳혔다.
+  // 정본 §13 J-T1(리뷰 반영으로 더한 섞인 예)대로 승인 2,800만 + 승인 뒤 전액 취소 200만(부정 예매 취소 포함)이면 판매 대금 3,000만·환급 200만·지급 2,492만이다.
+  test('J-T1 승인 2,800만 + 승인 뒤 전액 취소 200만(FRAUD 포함)은 판매 대금 3,000만·환급 200만·수수료 280만·부가세 28만·지급 2,492만이고 원본 목록 합도 같다', () => {
+    const approved = [fact({ amount: 20_000_000, status: 'APPROVED' }), fact({ amount: 8_000_000, status: 'APPROVED' })];
+    // 부정 예매 운영자 취소(FRAUD) 1,200,000원과 일반 전액 취소 800,000원
+    const cancelled = [fact({ amount: 1_200_000, cancelledAmount: 1_200_000, status: 'CANCELED' }), fact({ amount: 800_000, cancelledAmount: 800_000, status: 'CANCELED' })];
+    const neverApproved = fact({ amount: 500_000, cancelledAmount: 0, status: 'CANCELED', approvedAt: null });
     const unreconciled = fact({ amount: 7_000_000, excludedReason: 'RECONCILIATION_MISMATCH' });
-    const { record } = calculateEventStatement({
-      promoterId: randomUUID(),
-      eventId: randomUUID(),
-      pg: 'TOSS',
-      pgStore: 'STANDARD',
-      commissionRateBp: 1000,
-      payments: [reconciled, fraud, unreconciled],
-      kyc: undefined,
-      account: undefined,
-      now: new Date(NOTIFY_AT),
-      statementId: randomUUID(),
-    });
-    // 정본 §4.1 J-T1: 3,000만 − 200만 → 수수료 280만·부가세 28만·지급 2,492만
+    const calc = (payments: ReturnType<typeof fact>[]) =>
+      calculateEventStatement({ promoterId: randomUUID(), eventId: randomUUID(), pg: 'TOSS', pgStore: 'STANDARD', commissionRateBp: 1000, payments, kyc: undefined, account: undefined, now: new Date(NOTIFY_AT), statementId: randomUUID() });
+    const { record, sources } = calc([...approved, ...cancelled, unreconciled]);
     expect(record).toMatchObject({ grossAmount: 30_000_000, refundAmount: 2_000_000, commissionAmount: 2_800_000, commissionVat: 280_000, payoutAmount: 24_920_000 });
+    expect(sources.filter((x) => x.kind === 'GROSS').reduce((n, x) => n + x.amount, 0)).toBe(30_000_000);
+    expect(sources.filter((x) => x.kind === 'REFUND').reduce((n, x) => n + x.amount, 0)).toBe(2_000_000);
     expect(record.excludedPayments).toEqual([`${unreconciled.paymentId}:RECONCILIATION_MISMATCH`]);
+    // 승인된 적 없이 대사가 취소로 닫은 결제를 더해도 값·원본 목록이 같다(판매 대금·환급·원본 목록 어디에도 없다)
+    const withNever = calc([...approved, ...cancelled, neverApproved, unreconciled]);
+    expect(withNever.record).toMatchObject({ grossAmount: 30_000_000, refundAmount: 2_000_000, commissionAmount: 2_800_000, commissionVat: 280_000, payoutAmount: 24_920_000 });
+    expect(withNever.sources.some((x) => x.paymentId === neverApproved.paymentId)).toBe(false);
+    // 같은 회차를 전액 취소 없이 승인 3,000만 + 부분 환불 200만으로 만든 정산서와 금액이 같다(J-T1 첫 예)
+    const partial = calc([fact({ amount: 30_000_000, cancelledAmount: 2_000_000, status: 'PARTIAL_CANCELED' })]);
+    expect(withNever.record).toMatchObject({ grossAmount: partial.record.grossAmount, refundAmount: partial.record.refundAmount, payoutAmount: partial.record.payoutAmount });
   });
 });
 

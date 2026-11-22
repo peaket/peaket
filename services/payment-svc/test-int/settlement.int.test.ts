@@ -76,11 +76,12 @@ const productStatementRow = async (promoterId: string, status = 'NOTIFIED') => {
   return id;
 };
 
-const paymentRow = async (o: { id: string; amount: number; cancelled: number; status: string; failure?: string | null; pg?: 'TOSS' | 'PORTONE'; pgStore?: 'STANDARD' | 'ESCROW'; eventId?: string }) => {
+/** 결제 원장 한 행. 승인 시각(approved_at)은 기본으로 채운다. null이면 승인된 적 없는 결제다(정본 §4.1 '전액 취소된 결제', F-07-5 리뷰 RV-01) */
+const paymentRow = async (o: { id: string; amount: number; cancelled: number; status: string; failure?: string | null; pg?: 'TOSS' | 'PORTONE'; pgStore?: 'STANDARD' | 'ESCROW'; eventId?: string; approvedAt?: Date | null }) => {
   await db.pool.query(
-    `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_store, pg_payment_ref, amount, cancelled_amount, status, failure_category, idempotency_key, authenticated_at, status_changed_at)
-     values ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)`,
-    [o.id, randomUUID(), o.eventId ?? EVENT, randomUUID(), o.pg ?? 'TOSS', o.pgStore ?? 'STANDARD', `ref-${o.id}`, o.amount, o.cancelled, o.status, o.failure ?? null, `idem-${o.id}`, NOW],
+    `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_store, pg_payment_ref, amount, cancelled_amount, status, failure_category, idempotency_key, authenticated_at, status_changed_at, approved_at)
+     values ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14)`,
+    [o.id, randomUUID(), o.eventId ?? EVENT, randomUUID(), o.pg ?? 'TOSS', o.pgStore ?? 'STANDARD', `ref-${o.id}`, o.amount, o.cancelled, o.status, o.failure ?? null, `idem-${o.id}`, NOW, o.approvedAt === undefined ? NOW : o.approvedAt],
   );
 };
 
@@ -125,19 +126,22 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     await expect(migratePayment(pgc.url)).resolves.toBeUndefined();
   });
 
-  test('실제 payment 원장으로 판매 대금·환급·수수료·부가세·지급액을 계산한다', async () => {
+  // F-07-5 리뷰 RV-01(시험 담당 2026-11-23): 승인 뒤 전액 취소(5,000,000원)도 판매 대금에 원금을 넣는다(정본 §4.1 '전액 취소된 결제').
+  // 옛 기대(판매 4,000만·지급 2,937만)는 그 결제를 판매 대금에서 빼고 환급에도 넣어 두 번 뺐다. 입금 되돌림(DEPOSIT_CANCELED)은 그대로 뺀다.
+  test('J-T1 실제 payment 원장으로 판매 대금·환급·수수료·부가세·지급액을 계산한다(승인 뒤 전액 취소는 판매 대금·환급 모두 원금)', async () => {
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
+    // 판매 3,000만 + 1,000만 + 500만 = 4,500만, 환급 200만 + 500만 = 700만 → 수수료 380만·부가세 38만·지급 3,382만
     expect(s).toMatchObject({
-      grossAmount: 40_000_000,
+      grossAmount: 45_000_000,
       refundAmount: 7_000_000,
-      commissionAmount: 3_300_000,
-      commissionVat: 330_000,
-      payoutAmount: 29_370_000,
+      commissionAmount: 3_800_000,
+      commissionVat: 380_000,
+      payoutAmount: 33_820_000,
       status: 'NOTIFIED',
     });
     const sources = await db.pool.query('select kind, count(*)::int as n from statement_source where statement_id = $1 group by kind order by kind', [s.statementId]);
     expect(sources.rows).toEqual([
-      { kind: 'GROSS', n: 2 },
+      { kind: 'GROSS', n: 3 },
       { kind: 'REFUND', n: 2 },
     ]);
     const again = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
@@ -349,14 +353,44 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(escrow.grossAmount).toBe(7_000_000);
   });
 
-  test('A1-H3 CANCELED 전액 취소 10,000원은 지급 0원이다', async () => {
+  // F-07-5 리뷰 RV-01: 승인 시각 있음·없음 두 행으로 나눈다(정본 §4.1 '전액 취소된 결제'). 0원도 계산 때는 통지한다(T6)
+  test('J-T1 A1-H3 승인 뒤 전액 취소 10,000원은 판매 대금·환급 모두 10,000원(지급 0)이다', async () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
     await paymentRow({ id: randomUUID(), amount: 10_000, cancelled: 0, status: 'CANCELED', eventId });
     const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
-    // F-07-5(정본 §4.2·03 §2.12 T6, ADR-0368 결정 1·10): 0원도 계산 때는 통지하고 CARRIED_OVER는 확정 때 한다
-    expect(s).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'NOTIFIED' });
+    expect(s).toMatchObject({ grossAmount: 10_000, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'NOTIFIED' });
+  });
+
+  test('J-T1 A1-H3 승인된 적 없이 대사가 취소로 닫은 결제(approved_at 없음)는 판매 대금·환급·원본 목록 어디에도 없다', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    const neverApproved = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    await paymentRow({ id: randomUUID(), amount: 2_000_000, cancelled: 0, status: 'APPROVED', eventId });
+    await paymentRow({ id: neverApproved, amount: 10_000, cancelled: 0, status: 'CANCELED', eventId, approvedAt: null });
+    const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    expect(s).toMatchObject({ grossAmount: 2_000_000, refundAmount: 0, commissionAmount: 200_000, commissionVat: 20_000, payoutAmount: 1_780_000 });
+    expect((await db.pool.query('select payment_id from statement_source where statement_id = $1 and payment_id = $2', [s.statementId, neverApproved])).rows).toEqual([]);
+  });
+
+  test('J-T1 승인 2,800만 + 승인 뒤 전액 취소 200만(FRAUD 포함)은 실제 원장에서도 판매 대금 3,000만·환급 200만·지급 2,492만이고 원본 목록 합도 같다', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    await paymentRow({ id: randomUUID(), amount: 20_000_000, cancelled: 0, status: 'APPROVED', eventId });
+    await paymentRow({ id: randomUUID(), amount: 8_000_000, cancelled: 0, status: 'APPROVED', eventId });
+    await paymentRow({ id: randomUUID(), amount: 1_200_000, cancelled: 1_200_000, status: 'CANCELED', eventId });
+    await paymentRow({ id: randomUUID(), amount: 800_000, cancelled: 800_000, status: 'CANCELED', eventId });
+    await paymentRow({ id: randomUUID(), amount: 500_000, cancelled: 0, status: 'CANCELED', eventId, approvedAt: null });
+    const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    expect(s).toMatchObject({ grossAmount: 30_000_000, refundAmount: 2_000_000, commissionAmount: 2_800_000, commissionVat: 280_000, payoutAmount: 24_920_000 });
+    const sums = await db.pool.query('select kind, sum(amount)::bigint::text as total from statement_source where statement_id = $1 group by kind order by kind', [s.statementId]);
+    expect(sums.rows).toEqual([
+      { kind: 'GROSS', total: '30000000' },
+      { kind: 'REFUND', total: '2000000' },
+    ]);
   });
 
   test('A1-H8 대사가 끝나지 않은 결제는 정산서에서 빠지고 이유가 excludedPayments에 남는다', async () => {

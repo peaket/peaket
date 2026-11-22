@@ -171,6 +171,90 @@ describe('J-T36 ④ 승인', () => {
   });
 });
 
+describe('J-T36 ⑨ 반려·재승인과 적용의 엇갈림(리뷰 RV-04)', () => {
+  // 정본 §4.3 '승인'(리뷰 반영으로 더함)·§13 J-T36 ⑨: 적용 응답을 받지 못한 FAILED를 반려할 때는 payment void를 먼저 부른다.
+  // 이미 적용됐으면(409 settlement-adjustment-applied) 반려하지 않고 DONE으로 맞춘 뒤 409, payment가 답하지 않으면 503이고 FAILED 그대로다.
+  // FAILED·EXECUTING을 다른 commander가 다시 승인하면 새 투표 없이 적용만 다시 부르고 조정 합계는 한 번만 바뀐다.
+  const pumpUntil = async (cond: () => boolean) => {
+    for (let i = 0; i < 1_000; i += 1) {
+      if (cond()) return;
+      await new Promise((r) => setImmediate(r));
+    }
+    throw new Error('기다린 상태가 오지 않았다');
+  };
+  const votesOf = (id: string) => f.store.votes.filter((v) => v.approvalId === id);
+
+  test('[ASVS v5.0.0-2.3.3] J-T36 ⑨ ① 적용 커밋 뒤 응답이 끊겨 FAILED인 승인을 반려하면 409이고 승인 업무는 DONE·조정 행은 APPLIED 그대로다', async () => {
+    const { approvalId } = await requested();
+    f.payments.loseNextApplyResponse = true;
+    expect((await approve(approvalId, f.headers('commander', { reauth: true, json: false }))).statusCode).toBe(503);
+    expect(f.store.rows.get(approvalId)).toMatchObject({ status: 'FAILED' });
+    expect(f.payments.rows.get(approvalId)).toBe('APPLIED');
+    const res = await reject(approvalId, f.headers('commander'), '근거가 부족하다');
+    expect(res.statusCode, res.payload).toBe(409);
+    expect(f.store.rows.get(approvalId)).toMatchObject({ status: 'DONE' });
+    expect(f.payments.rows.get(approvalId)).toBe('APPLIED');
+    expect(f.payments.effects.get(approvalId)).toBe(1);
+    expect(JSON.parse((await facts(approvalId)).payload)).toMatchObject({ status: 'DONE' });
+  });
+
+  test('J-T36 ⑨ ② 응답이 끊긴 FAILED를 다른 commander가 재인증 뒤 다시 승인하면 투표를 더 쓰지 않고 DONE이며 조정 합계는 한 번만 바뀐다', async () => {
+    const { approvalId } = await requested();
+    f.payments.loseNextApplyResponse = true;
+    expect((await approve(approvalId, f.headers('commander', { reauth: true, json: false }))).statusCode).toBe(503);
+    expect(votesOf(approvalId)).toHaveLength(1);
+    const retry = await approve(approvalId, f.headers('commander', { reauth: true, json: false }));
+    expect(retry.statusCode, retry.payload).toBe(200);
+    expect(f.store.rows.get(approvalId)).toMatchObject({ status: 'DONE' });
+    expect(votesOf(approvalId)).toHaveLength(1);
+    expect(f.payments.effects.get(approvalId)).toBe(1);
+  });
+
+  test('J-T36 ⑨ ② 적용 중(EXECUTING)에 다른 commander가 겹쳐 승인해도 새 투표 없이 같은 적용 길을 타고 조정 합계는 한 번이다', async () => {
+    const { approvalId } = await requested();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let calls = 0;
+    f.payments.onApply = async () => {
+      calls += 1;
+      if (calls === 1) await gate;
+    };
+    const first = approve(approvalId, f.headers('commander', { reauth: true, json: false }));
+    await pumpUntil(() => f.store.rows.get(approvalId)?.status === 'EXECUTING' && calls === 1);
+    const second = await approve(approvalId, f.headers('commander', { reauth: true, json: false }));
+    release();
+    await first;
+    expect(second.statusCode, second.payload).toBe(200);
+    expect(f.store.rows.get(approvalId)).toMatchObject({ status: 'DONE' });
+    expect(votesOf(approvalId)).toHaveLength(1);
+    expect(f.payments.effects.get(approvalId)).toBe(1);
+  });
+
+  test('J-T36 ⑨ ③ payment가 답하지 않으면 FAILED 승인의 반려는 503이고 승인 업무는 FAILED·조정 행은 PENDING 그대로다', async () => {
+    const { approvalId } = await requested();
+    f.payments.failNext.apply = new ProblemError({ type: 'settlement-dependency-unavailable', status: 503, title: '정산 서비스에 연결하지 못했습니다' });
+    expect((await approve(approvalId, f.headers('commander', { reauth: true, json: false }))).statusCode).toBe(503);
+    f.payments.failNext.void = new ProblemError({ type: 'settlement-dependency-unavailable', status: 503, title: '정산 서비스에 연결하지 못했습니다' });
+    const res = await reject(approvalId, f.headers('commander'), '근거가 부족하다');
+    expect(res.statusCode).toBe(503);
+    expect(f.store.rows.get(approvalId)).toMatchObject({ status: 'FAILED' });
+    expect(f.payments.rows.get(approvalId)).toBe('PENDING');
+  });
+
+  test('J-T36 ⑨ ④ 적용되지 않은 FAILED(대조 불일치 409)를 반려하면 REJECTED이고 조정 행은 VOID다', async () => {
+    const { approvalId } = await requested();
+    f.payments.failNext.apply = new ProblemError({ type: 'settlement-adjustment-approval-amount-mismatch', status: 409, title: '승인한 조정 금액과 조정 행이 다릅니다' });
+    expect((await approve(approvalId, f.headers('commander', { reauth: true, json: false }))).statusCode).toBe(409);
+    const res = await reject(approvalId, f.headers('commander'), '금액이 다르다');
+    expect(res.statusCode, res.payload).toBe(200);
+    expect(f.store.rows.get(approvalId)).toMatchObject({ status: 'REJECTED' });
+    expect(f.payments.rows.get(approvalId)).toBe('VOID');
+    expect(f.payments.effects.get(approvalId) ?? 0).toBe(0);
+  });
+});
+
 describe('J-T36(어댑터) payment 내부 조정 경로', () => {
   test('J-T36 ① 등록·적용·반려는 payment 내부 경로를 부르고 4xx는 그대로, 5xx·연결 실패는 503이다', async () => {
     const seen: { url: string; body: unknown }[] = [];

@@ -5,7 +5,7 @@ import { ProblemError } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { HttpPayoutPaymentClient } from '../src/modules/payouts/index.js';
-import { opsSettlementFlow, type OpsRole, type OpsSettlementFlow } from './settlement-flow-support.js';
+import { opsSettlementFlow, paymentStatementView, type OpsRole, type OpsSettlementFlow } from './settlement-flow-support.js';
 
 const NOW = Date.parse('2026-11-19T06:00:00.000Z');
 let f: OpsSettlementFlow;
@@ -32,7 +32,7 @@ describe('J-T35 ④ 기각 역할·사유', () => {
     const ok = await dismiss(statementId, lead, { reason: '  판매 대금은 원장과 같습니다  ' });
     expect(ok.statusCode, ok.payload).toBe(200);
     expect(ok.headers['cache-control']).toBe('no-store');
-    expect(JSON.parse(ok.payload)).toEqual({ statementId, status: 'NOTIFIED' });
+    expect(JSON.parse(ok.payload)).toMatchObject({ statementId, status: 'NOTIFIED' });
     expect(f.payments.dismissed).toEqual([{ statementId, reason: '판매 대금은 원장과 같습니다', actorId: lead['x-user-id'] }]);
     const audits = f.audit.entries.filter((e) => e.recordType === 'SETTLEMENT_DISPUTE_DISMISSED');
     expect(audits).toHaveLength(1);
@@ -60,6 +60,35 @@ describe('J-T35 ④ 기각 역할·사유', () => {
     f.payments.failNext.dismiss = new ProblemError({ type: 'settlement-dependency-unavailable', status: 503, title: '정산 서비스에 연결하지 못했습니다' });
     expect((await dismiss(statementId, f.headers('cs_lead'), { reason: '사유' })).statusCode).toBe(503);
     expect(f.audit.entries.filter((e) => e.recordType === 'SETTLEMENT_DISPUTE_DISMISSED')).toEqual([]);
+  });
+});
+
+describe('J-T35 ⑩ 기각 응답 칸(리뷰 RV-03)', () => {
+  // 정본 §4.2 '기각'·§13 J-T35 ⑩: 기각 응답은 CS 처리함 건 상세와 같은 칸(정산서 ID·종류·회차·기간·금액 항목·상태·이의 기한)만 싣는다.
+  // payment가 결제사·계좌·묶음·대사 제외 결제 칸까지 돌려줘도 ops가 CS 역할에게 넘기지 않는다(키가 없어야 하고, null이어도 안 된다).
+  test('[ASVS v5.0.0-8.2.1] J-T35 ⑩ cs_lead 기각 응답에는 정본 칸만 있고 pg·pgStore·payoutBankCode·payoutAccountLast4·payoutBatchId·excludedPayments 키가 없다', async () => {
+    const statementId = randomUUID();
+    const res = await dismiss(statementId, f.headers('cs_lead'), { reason: '원장과 같다' });
+    expect(res.statusCode, res.payload).toBe(200);
+    const body = JSON.parse(res.payload) as Record<string, unknown>;
+    for (const key of ['pg', 'pgStore', 'payoutBankCode', 'payoutAccountLast4', 'payoutBatchId', 'excludedPayments']) expect(Object.keys(body), key).not.toContain(key);
+    const full = paymentStatementView(statementId);
+    expect(body).toStrictEqual({
+      statementId,
+      kind: full.kind,
+      eventId: full.eventId,
+      periodStart: full.periodStart,
+      periodEnd: full.periodEnd,
+      grossAmount: full.grossAmount,
+      refundAmount: full.refundAmount,
+      commissionAmount: full.commissionAmount,
+      commissionVat: full.commissionVat,
+      offsetAmount: full.offsetAmount,
+      payoutAmount: full.payoutAmount,
+      status: full.status,
+      disputeDueAt: full.disputeDueAt,
+    });
+    expect(res.payload).not.toContain('1234');
   });
 });
 

@@ -42,7 +42,9 @@ class FakeIdentity implements AdminAuthzPort {
 
 const quiet = () => new Writable({ write(_c, _e, cb) { cb(); } });
 
-const fact = (o: Partial<PaymentFact> = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 10_000, cancelledAmount: 0, status: 'APPROVED', failureCategory: null, ...o });
+// F-07-5 리뷰 RV-01(정본 §4.1 '전액 취소된 결제'): 판매 대금은 승인 시각이 있는 결제만 센다. 결제 원장 사실에 승인 시각을 싣는다(펼침이라 칸이 생기기 전·후 모두 타입이 맞는다)
+const APPROVED = { approvedAt: new Date('2026-11-01T00:00:00.000Z') as Date | null };
+const fact = (o: Partial<PaymentFact> & { approvedAt?: Date | null } = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 10_000, cancelledAmount: 0, status: 'APPROVED', failureCategory: null, ...APPROVED, ...o });
 const kyc = (promoterId: string, status: 'PENDING' | 'VERIFIED' | 'REJECTED') => ({ promoterId, status, businessVerified: status === 'VERIFIED', representativeVerified: status === 'VERIFIED', verifiedAt: status === 'VERIFIED' ? NOW : null, source: 'MANUAL', updatedAt: NOW });
 
 describe('정산 금액 계산', () => {
@@ -68,21 +70,19 @@ describe('정산 금액 계산', () => {
     expect(sources.filter((x) => x.kind === 'REFUND').reduce((n, x) => n + x.amount, 0)).toBe(2_000_000);
   });
 
-  test('A1-H3 CANCELED 전액 취소는 매출 0·환급 원금 전액·지급 0이다', () => {
-    const { record } = calculateEventStatement({
-      promoterId: A,
-      eventId: EVENT,
-      pg: 'TOSS',
-      pgStore: 'STANDARD',
-      commissionRateBp: 1000,
-      payments: [fact({ amount: 10_000, cancelledAmount: 0, status: 'CANCELED' })],
-      kyc: kyc(A, 'VERIFIED'),
-      account: undefined,
-      now: NOW,
-      statementId: randomUUID(),
-    });
-    // 정본 §4.2·03 §2.12 T6(ADR-0368 결정 10): 0 이하의 CARRIED_OVER는 계산 때가 아니라 확정 때 한다
-    expect(record).toMatchObject({ grossAmount: 0, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'CALCULATED' });
+  // F-07-5 리뷰 RV-01(시험 담당 2026-11-23): 정본 §4.1 '전액 취소된 결제'로 기대값을 다시 쓴다. 옛 기대(매출 0·환급 원금)는 같은 돈을 두 번 뺐다.
+  // 승인된 뒤 전액 취소는 판매 대금·환급 모두 원금이고(지급 0), 승인된 적 없는 CANCELED(A1-H3 원래 경우)는 어디에도 넣지 않는다.
+  test('J-T1 A1-H3 승인 뒤 전액 취소 10,000원은 판매 대금·환급 모두 10,000원(지급 0)이고, 승인된 적 없는 CANCELED는 판매 대금·환급·원본 목록에 없다', () => {
+    const input = (payments: PaymentFact[]) => ({ promoterId: A, eventId: EVENT, pg: 'TOSS' as const, pgStore: 'STANDARD' as const, commissionRateBp: 1000, payments, kyc: kyc(A, 'VERIFIED'), account: undefined, now: NOW, statementId: randomUUID() });
+    const approvedThenCancelled = calculateEventStatement(input([fact({ amount: 10_000, cancelledAmount: 0, status: 'CANCELED' })]));
+    expect(approvedThenCancelled.record).toMatchObject({ grossAmount: 10_000, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'CALCULATED' });
+    expect(approvedThenCancelled.sources.map((x) => [x.kind, x.amount])).toEqual([
+      ['GROSS', 10_000],
+      ['REFUND', 10_000],
+    ]);
+    const neverApproved = calculateEventStatement(input([fact({ amount: 10_000, cancelledAmount: 0, status: 'CANCELED', approvedAt: null })]));
+    expect(neverApproved.record).toMatchObject({ grossAmount: 0, refundAmount: 0, commissionAmount: 0, commissionVat: 0, payoutAmount: 0 });
+    expect(neverApproved.sources).toEqual([]);
   });
 
   // F-07-5 시험 담당(2026-11-23): 정본 §4.2 '계산 때는 KYC·계좌로 보류하지 않고 지급액이 0 이하여도 통지한다'(ADR-0368 결정 1)로 바뀌어

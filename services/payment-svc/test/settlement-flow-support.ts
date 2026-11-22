@@ -29,7 +29,10 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 export const quiet = (): Writable => new Writable({ write: (_c, _e, cb) => cb() });
 
-export const fact = (o: Partial<PaymentFact> = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 10_000_000, cancelledAmount: 0, status: 'APPROVED', failureCategory: null, ...o });
+/** 결제 원장의 승인 시각(정본 §4.1 RV-01: 판매 대금은 승인된 결제만). 펼침으로 실어 칸이 생기기 전·후 모두 타입이 맞는다. null은 승인된 적 없는 결제 */
+export const APPROVED_AT = new Date('2026-11-01T00:00:00.000Z');
+export type FactInput = Partial<PaymentFact> & { approvedAt?: Date | null };
+export const fact = (o: FactInput = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 10_000_000, cancelledAmount: 0, status: 'APPROVED', failureCategory: null, ...{ approvedAt: APPROVED_AT as Date | null }, ...o });
 
 export class FakeIdentity implements AdminAuthzPort {
   readonly answers = new Map<string, AdminAuthz>();
@@ -114,12 +117,30 @@ export interface FlowOptions {
   events?: DueEventSettlementSource;
   saleSuspensions?: SaleSuspensionSource;
   commissionRateBp?: number;
+  /** 저장소를 바꿔 끼울 때(장애 주입용 MemorySettlementStore 하위 클래스) */
+  store?: MemorySettlementStore;
+}
+
+/** 커밋 뒤 'CS 건을 열었다' 표시 쓰기를 실패시키는 메모리 저장소(리뷰 RV-05 장애 주입). 나머지는 진짜 메모리 저장소다 */
+export class FlakyMarkStore extends MemorySettlementStore {
+  /** 다음 표시 쓰기 몇 번을 실패시킬지 */
+  failNextMarks = 0;
+  /** 이 이의의 표시 쓰기는 늘 실패 */
+  readonly failMarkFor = new Set<string>();
+  override async markDisputeCaseRequested(disputeId: string, at: Date): Promise<void> {
+    if (this.failMarkFor.has(disputeId)) throw new Error('표시 쓰기 실패(시험 주입)');
+    if (this.failNextMarks > 0) {
+      this.failNextMarks -= 1;
+      throw new Error('표시 쓰기 실패(시험 주입)');
+    }
+    return super.markDisputeCaseRequested(disputeId, at);
+  }
 }
 
 /** HTTP까지 띄운 정산 모듈 한 벌. 시험마다 새로 만들고 close()로 닫는다 */
 export async function settlementFlow(o: FlowOptions) {
   const clock = fakeClock({ now: o.now });
-  const store = new MemorySettlementStore();
+  const store = o.store ?? new MemorySettlementStore();
   const payments = new MemorySettlementPaymentSource();
   const caseNotice = new RecordingCaseNotice();
   const adjustmentApprovals = new FakeAdjustmentApprovals();

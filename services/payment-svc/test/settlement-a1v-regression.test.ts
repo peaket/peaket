@@ -30,7 +30,9 @@ import { noApprovals, noSaleSuspensions } from './settlement-support.js';
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const quiet = () => new Writable({ write(_c, _e, cb) { cb(); } });
 
-const fact = (o: Partial<PaymentFact> = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 10_000, cancelledAmount: 0, status: 'APPROVED', failureCategory: null, ...o });
+// F-07-5 리뷰 RV-01(정본 §4.1 '전액 취소된 결제'): 판매 대금은 승인 시각이 있는 결제만 센다. 결제 원장 사실에 승인 시각을 싣는다(펼침이라 칸이 생기기 전·후 모두 타입이 맞는다)
+const APPROVED = { approvedAt: new Date('2026-11-01T00:00:00.000Z') as Date | null };
+const fact = (o: Partial<PaymentFact> = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 10_000, cancelledAmount: 0, status: 'APPROVED', failureCategory: null, ...APPROVED, ...o });
 
 const kyc = (promoterId: string): KycRecord => ({
   promoterId,

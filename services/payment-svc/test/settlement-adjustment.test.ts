@@ -317,6 +317,70 @@ describe('J-T36 ⑤ 적용·반려', () => {
   });
 });
 
+describe('J-T36 ⑧ 지급액 식 하나(리뷰 RV-02)', () => {
+  // 정본 §4.1 지급액 칸·§4.3 '적용': 조정을 적용한 정산서의 지급액 = 계산 때 지급액 + 조정 합계, 지급을 늘리는 조정은 미수금을 만들지 않는다.
+  test('J-T36 ⑧ 승인 100만 + 승인 뒤 전액 취소 200만 정산서(계산 지급 89만)에 +30만을 적용하면 119만이고 확정 때 미수금이 없다', async () => {
+    const f = await open();
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await f.settlements.recordKyc(promoterId, 'VERIFIED');
+    f.payments.set(eventId, 'TOSS', [fact({ amount: 1_000_000, status: 'APPROVED' }), fact({ amount: 2_000_000, cancelledAmount: 2_000_000, status: 'CANCELED' })]);
+    const s = await f.settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    // 정본 §4.1: 판매 300만 − 환급 200만 → 수수료 10만·부가세 1만·지급 89만
+    expect(s).toMatchObject({ grossAmount: 3_000_000, refundAmount: 2_000_000, commissionAmount: 100_000, commissionVat: 10_000, payoutAmount: 890_000 });
+    const calculatedPayout = s.payoutAmount;
+    const { approvalId } = await registered(f, s.statementId, { amount: 300_000, reasonCode: 'LEDGER_ERROR', evidenceNote: '원장 오류 정정' });
+    f.at(APPLY_AT);
+    expect((await apply(f, approvalId)).statusCode).toBe(200);
+    const after = (await f.store.findStatementById(s.statementId))!;
+    expect(after.payoutAmount).toBe(calculatedPayout + 300_000);
+    expect(after).toMatchObject({ payoutAmount: 1_190_000, adjustmentAmount: 300_000, grossAmount: 3_000_000, refundAmount: 2_000_000, commissionAmount: 100_000, commissionVat: 10_000 });
+    f.at(Date.parse(APPLY_DUE));
+    await f.settlements.confirmDueStatements();
+    expect((await f.store.findStatementById(s.statementId))?.status).toBe('CONFIRMED');
+    expect(f.store.receivables.size).toBe(0);
+  });
+
+  test('J-T36 ⑧ 계산 지급액 500만 정산서에 +30만을 적용하면 530만(= 계산 지급액 + 조정 합)이다', async () => {
+    flow = await settlementFlow({ now: NOTIFY_AT, commissionRateBp: 0 });
+    const f = flow;
+    const s = await notified(f, 5_000_000, 0);
+    expect(s.payoutAmount).toBe(5_000_000);
+    const { approvalId } = await registered(f, s.statementId, { amount: 300_000, reasonCode: 'CONTRACT_CORRECTION', evidenceNote: '수수료율 정정' });
+    expect((await apply(f, approvalId)).statusCode).toBe(200);
+    expect(await f.store.findStatementById(s.statementId)).toMatchObject({ payoutAmount: 5_300_000, adjustmentAmount: 300_000, grossAmount: 5_000_000 });
+  });
+});
+
+describe('J-T36 ② 이의 중 정산서의 이의 없는 조정(리뷰 RV-07)', () => {
+  // 정본 §4.3 '검사'(리뷰 반영으로 더함): 이의 없는 세 코드는 DISPUTED에 쓰지 않는다. 요청은 422, 요청 뒤 이의가 들어와 DISPUTED면 적용은 409 settlement-adjustment-not-allowed
+  test('J-T36 ② DISPUTED 정산서에 LEDGER_ERROR·CONTRACT_CORRECTION·AGREED_DEDUCTION 요청은 각각 422이고 조정 행이 없다', async () => {
+    const f = await open();
+    const d = await disputed(f, 'GROSS_AMOUNT');
+    for (const reasonCode of ['LEDGER_ERROR', 'CONTRACT_CORRECTION', 'AGREED_DEDUCTION']) {
+      const res = await register(f, d.statementId, { amount: -10_000, reasonCode, evidenceNote: '근거 메모' });
+      expect({ reasonCode, code: res.statusCode }).toEqual({ reasonCode, code: 422 });
+      expect(JSON.parse(res.payload).type).toContain('settlement-adjustment-dispute-mismatch');
+    }
+    expect(f.store.adjustments.size).toBe(0);
+  });
+
+  test('J-T36 ② NOTIFIED에서 요청한 AGREED_DEDUCTION 뒤 이의가 들어오면 적용은 409 settlement-adjustment-not-allowed이고 조정 행·정산서가 그대로다', async () => {
+    const f = await open();
+    const s = await notified(f);
+    const { approvalId } = await registered(f, s.statementId, { amount: -100_000, reasonCode: 'AGREED_DEDUCTION', evidenceNote: '합의 차감' });
+    expect((await f.dispute(s.promoterId, s.statementId, { reasonCode: 'OFFSET' })).statusCode).toBe(202);
+    const before = await snapshot(f, s.statementId);
+    const res = await apply(f, approvalId);
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.payload).type).toContain('settlement-adjustment-not-allowed');
+    expect(await snapshot(f, s.statementId)).toEqual(before);
+    expect(before).toMatchObject({ status: 'DISPUTED', adjustmentAmount: 0 });
+    expect((await f.store.findAdjustmentByApproval(approvalId))?.status).toBe('PENDING');
+    expect((await f.store.listDisputes(s.statementId))[0]).toMatchObject({ result: null });
+  });
+});
+
 describe('J-T36 ⑦·J-T12 0 아래 정산서', () => {
   /** 판매 786,516원·수수료 10% → 수수료 78,651·부가세 7,865·지급 700,000원(J-T12의 70만 원) */
   const J_T12_GROSS = 786_516;

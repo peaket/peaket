@@ -52,7 +52,8 @@ class Cases implements SettlementCaseNotice {
   }
 }
 
-const fact = (o: Partial<PaymentFact> = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 30_000_000, cancelledAmount: 2_000_000, status: 'PARTIAL_CANCELED', failureCategory: null, ...o });
+// 리뷰 RV-01: 결제 원장 사실에 승인 시각을 싣는다(정본 §4.1, 펼침이라 칸이 생기기 전·후 모두 타입이 맞는다)
+const fact = (o: Partial<PaymentFact> & { approvedAt?: Date | null } = {}): PaymentFact => ({ paymentId: randomUUID(), amount: 30_000_000, cancelledAmount: 2_000_000, status: 'PARTIAL_CANCELED', failureCategory: null, ...{ approvedAt: new Date('2026-11-01T00:00:00.000Z') as Date | null }, ...o });
 
 /** 같은 DB를 보는 두 '파드'. 시계는 따로라 이의 파드(기한 전)와 확정 파드(기한 뒤)를 겹칠 수 있다 */
 function pods() {
@@ -422,6 +423,25 @@ describe('J-T36 수기 조정(실제 DB)', () => {
     const types = (await outboxOf(s.statementId)).map((e) => e.value.type);
     expect(types.filter((t) => t === 'STATEMENT_CARRIED_OVER')).toHaveLength(1);
     expect((await outboxOf(s.statementId)).filter((e) => e.value.type === 'RECEIVABLE_OPENED').map((e) => e.value.amount)).toEqual([300_000]);
+  });
+
+  test('J-T36 ⑧ 승인 100만 + 승인 뒤 전액 취소 200만 정산서(계산 지급 89만)에 +30만을 적용하면 DB 지급액 119만이고 확정 때 미수금이 없다(리뷰 RV-01·RV-02)', async () => {
+    const p = pods();
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await p.a.recordKyc(promoterId, 'VERIFIED');
+    p.payments.set(eventId, 'TOSS', [fact({ amount: 1_000_000, cancelledAmount: 0, status: 'APPROVED' }), fact({ amount: 2_000_000, cancelledAmount: 2_000_000, status: 'CANCELED' })]);
+    const s = await p.a.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    // 정본 §4.1: 판매 300만 − 환급 200만 → 수수료 10만·부가세 1만·지급 89만
+    expect(await statementRow(s.statementId)).toMatchObject({ gross_amount: '3000000', refund_amount: '2000000', commission_amount: '100000', commission_vat: '10000', payout_amount: '890000' });
+    const { approvalId } = await register(p, s.statementId, { amount: 300_000, reasonCode: 'LEDGER_ERROR', evidenceNote: '원장 오류 정정' });
+    at(p.c1, APPLY_AT);
+    await p.a.applyAdjustment(approvalId);
+    expect(await statementRow(s.statementId)).toMatchObject({ status: 'NOTIFIED', adjustment_amount: '300000', payout_amount: '1190000' });
+    at(p.c1, APPLY_DUE);
+    await p.a.confirmDue(s.statementId);
+    expect((await statementRow(s.statementId))!.status).toBe('CONFIRMED');
+    expect(await q('select id from partner_receivable where source_ref = $1', [`negative-statement:${s.statementId}`])).toEqual([]);
   });
 
   test('J-T36 ⑦ 조건부 전이를 지나 같은 근거의 미수금을 다시 넣어도 부분 유일 인덱스가 한 행으로 막는다(겹친 가드 하나씩)', async () => {
