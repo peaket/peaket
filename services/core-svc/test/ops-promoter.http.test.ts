@@ -411,3 +411,14 @@ describe('J-T29 ② commander 변경 요청', () => {
     expect(json(r).requestedBy).toMatchObject({ role: 'commander' });
   });
 });
+
+describe('J-T33 지금 계약 조건 내부 조회(BAT-630)', () => {
+  test('J-T33 payment-svc가 부르는 내부 경로가 보증 비율·종류를 주고 없는 파트너는 404다', async () => {
+    const { promoterId } = await created();
+    const r = await svc.http.inject({ method: 'GET', url: `/internal/v1/promoters/${promoterId}/contract` });
+    expect(r.statusCode).toBe(200);
+    expect(json(r)).toEqual({ commissionRateBp: 875, guaranteeRateBp: 700, guaranteeKind: 'PERFORMANCE_BOND' });
+    const missing = await svc.http.inject({ method: 'GET', url: `/internal/v1/promoters/${randomUUID()}/contract` });
+    expect(missing.statusCode).toBe(404);
+  });
+});

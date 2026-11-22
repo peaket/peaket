@@ -98,6 +98,7 @@ beforeAll(async () => {
     eventCommission: { rateBp: async () => 1000 },
     approvals,
     saleSuspensions,
+    promoterContracts: { current: async () => ({ commissionRateBp: 1000, guaranteeRateBp: 1000, guaranteeKind: 'DEPOSIT' as const }) },
     gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
     reauth: new MemoryReauthVerifier(),
     clock,
@@ -441,5 +442,48 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
         [randomUUID(), approvalId, NOW],
       ),
     ).rejects.toMatchObject({ code: '23505' });
+  });
+
+  test('J-T33 ④ 보증 충당은 미수금 이동·남은 금액·상태를 한 트랜잭션에 쓴다 [ASVS v5.0.0-2.3.3] [ASVS v5.0.0-2.3.4]', async () => {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await settlements.recordKyc(promoterId, 'VERIFIED');
+    const statementId = randomUUID();
+    await db.pool.query(
+      `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, payout_amount, status, payout_date, created_at, updated_at)
+       values ($1, $2, 'EVENT', $3, 'TOSS', 'STANDARD', 100000000, 0, 0, 0, 100000000, 'PAID', '2026-10-01', $4, $4)`,
+      [statementId, promoterId, eventId, NOW],
+    );
+    const receivableId = randomUUID();
+    await db.pool.query(
+      `insert into partner_receivable (id, promoter_id, pg, cause, event_id, amount, remaining, status, created_at, updated_at)
+       values ($1, $2, 'TOSS', 'REFUND_AFTER_PAYOUT', $3, 7000000, 7000000, 'OPEN', $4, $4)`,
+      [receivableId, promoterId, eventId, new Date(NOW.getTime() - 31 * 24 * 60 * 60 * 1000)],
+    );
+    const out = await settlements.collectGuarantee(receivableId, {
+      actor: 'commander-1',
+      sessionId: 'session-1',
+      reauthToken: 'test-reauth',
+      idempotencyKey: 'guarantee-it-1',
+      reason: '30일 지나 보증금에서 충당',
+    });
+    expect(out.collection.amount).toBe(7_000_000);
+    const guarantee = await db.pool.query('select guarantee_kind, amount, basis_amount, guarantee_rate_bp from guarantee_collection where id = $1', [out.collection.collectionId]);
+    expect(guarantee.rows[0]).toEqual({ guarantee_kind: 'DEPOSIT', amount: '7000000', basis_amount: '100000000', guarantee_rate_bp: 1000 });
+    const move = await db.pool.query('select kind, amount from receivable_move where receivable_id = $1', [receivableId]);
+    expect(move.rows).toEqual([{ kind: 'GUARANTEE', amount: '7000000' }]);
+    const left = await db.pool.query('select remaining, status from partner_receivable where id = $1', [receivableId]);
+    expect(left.rows[0]).toEqual({ remaining: '0', status: 'CLOSED' });
+    // 같은 멱등 키는 한 번만 움직인다.
+    const again = await settlements.collectGuarantee(receivableId, {
+      actor: 'commander-1',
+      sessionId: 'session-1',
+      reauthToken: 'test-reauth',
+      idempotencyKey: 'guarantee-it-1',
+      reason: '30일 지나 보증금에서 충당',
+    });
+    expect(again.collection.collectionId).toBe(out.collection.collectionId);
+    const moves = await db.pool.query('select count(*)::int as n from receivable_move where receivable_id = $1', [receivableId]);
+    expect(moves.rows[0].n).toBe(1);
   });
 });

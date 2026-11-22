@@ -1,4 +1,4 @@
-// 지급 묶음 2인 승인·실행 시험(BUILD_ORDER BAT-610 잔여, J-T3·J-T9, FR-062, POL-038).
+﻿// 지급 묶음 2인 승인·실행 시험(BUILD_ORDER BAT-610 잔여, J-T3·J-T9, FR-062, POL-038).
 import 'reflect-metadata';
 import { createService, fakeClock, ProblemError } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +32,12 @@ class FakePayments implements PayoutPaymentClient {
   }
   async listBatches() {
     return this.batches;
+  }
+  async getBatchDetail(batchId: string) {
+    return { batch: this.batches.find((b) => b.batchId === batchId)!, statements: [], payouts: [], holds: [], kycNotices: [] };
+  }
+  async collectGuarantee() {
+    return { collection: { amount: 0 }, receivable: { promoterId: 'promoter-1' } };
   }
   async listCircuits() {
     return { items: [{ pg: 'TOSS' as const, state: 'closed' as const }] };

@@ -1,4 +1,4 @@
-// ops-svc 지급 묶음 2인 승인 실제 PostgreSQL 18 통합 시험(BAT-610 잔여, R-614 OPSV-01·02·03).
+﻿// ops-svc 지급 묶음 2인 승인 실제 PostgreSQL 18 통합 시험(BAT-610 잔여, R-614 OPSV-01·02·03).
 // 상태 저장과 감사 append의 같은 트랜잭션(실패 주입 롤백), version 조건부 동시 승인 한 번만 성공, 수기 포트원 실행 감사를 본다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +32,12 @@ class FakePayments implements PayoutPaymentClient {
   async releaseBatch() { this.calls.push('release'); }
   async listBatches() {
     return this.batches;
+  }
+  async getBatchDetail(batchId: string) {
+    return { batch: this.batches.find((b) => b.batchId === batchId)!, statements: [], payouts: [], holds: [], kycNotices: [] };
+  }
+  async collectGuarantee() {
+    return { collection: { amount: 0 }, receivable: { promoterId: 'promoter-1' } };
   }
   async listCircuits() {
     return { items: [{ pg: 'TOSS' as const, state: 'closed' as const }] };

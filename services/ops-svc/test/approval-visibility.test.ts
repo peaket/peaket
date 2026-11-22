@@ -1,4 +1,4 @@
-// 승인 업무 목록·상세의 노출 범위(BAT-615 LCH-070, J-T29 ⑦·⑧, ADR-0320, ASVS 8.2.2).
+﻿// 승인 업무 목록·상세의 노출 범위(BAT-615 LCH-070, J-T29 ⑦·⑧, ADR-0320, ASVS 8.2.2).
 // 계약 조건 변경은 요청자와 commander만 보고(다른 operator·CS는 404), 지급 묶음 승인의 가시성은 그대로다.
 // viewer는 승인 업무 경로에 들어올 수 없고, CS 두 역할은 읽기만 한다.
 import 'reflect-metadata';
@@ -26,6 +26,12 @@ class FakePayments implements PayoutPaymentClient {
   }
   async listBatches() {
     return this.batches;
+  }
+  async getBatchDetail(batchId: string) {
+    return { batch: this.batches.find((b) => b.batchId === batchId)!, statements: [], payouts: [], holds: [], kycNotices: [] };
+  }
+  async collectGuarantee() {
+    return { collection: { amount: 0 }, receivable: { promoterId: 'promoter-1' } };
   }
   async listCircuits() {
     return { items: [{ pg: 'TOSS' as const, state: 'closed' as const }] };

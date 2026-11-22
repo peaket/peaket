@@ -1,4 +1,4 @@
-// 지급 승인 계약 회귀 시험(R-597·R-614): 영업일 기한, 저장소 version CAS, 전이별 감사, 재인증 계정 결속,
+﻿// 지급 승인 계약 회귀 시험(R-597·R-614): 영업일 기한, 저장소 version CAS, 전이별 감사, 재인증 계정 결속,
 // 수기 포트원 실행 감사. 돈이 나가는 경로라 상태·감사·승인자 결속을 한 곳에서 고정한다.
 import { randomUUID } from 'node:crypto';
 import { fakeClock, ProblemError } from '@peaket/platform';
@@ -44,6 +44,12 @@ class FakePayments implements PayoutPaymentClient {
   }
   async listBatches() {
     return this.batches;
+  }
+  async getBatchDetail(batchId: string) {
+    return { batch: this.batches.find((b) => b.batchId === batchId)!, statements: [], payouts: [], holds: [], kycNotices: [] };
+  }
+  async collectGuarantee() {
+    return { collection: { amount: 0 }, receivable: { promoterId: 'promoter-1' } };
   }
   async listCircuits() {
     return { items: [{ pg: 'TOSS' as const, state: 'closed' as const }] };

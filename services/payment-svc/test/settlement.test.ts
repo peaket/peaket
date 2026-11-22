@@ -244,6 +244,9 @@ describe('정산 HTTP·유스케이스', () => {
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'PORTONE', pgStore: 'STANDARD' });
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
     await expect(settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: s.payoutDate!, portoneBalance: { amount: 1, observedAt: NOW.toISOString() }, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-balance-insufficient') });
+    // 잔액 부족은 정산서를 HELD·BALANCE로 남긴다. 증빙으로 다시 확정한 뒤 다음 묶음을 만든다(BAT-630 J-T13).
+    expect((await store.findStatementById(s.statementId))?.status).toBe('HELD');
+    await settlements.reconfirmStatement(s.statementId, { evidence: { balanceConfirmed: true } });
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: s.payoutDate!, portoneBalance: { amount: s.payoutAmount, observedAt: NOW.toISOString() }, actor: randomUUID() });
     expect(batch.status).toBe('PENDING_APPROVAL');
     await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-not-approved') });

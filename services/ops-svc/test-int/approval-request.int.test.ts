@@ -1,4 +1,4 @@
-// 승인 업무 표·라우터·기존 지급 승인 회귀(실제 PostgreSQL 18, BAT-615 LCH-070, J-T29 ④⑥⑨).
+﻿// 승인 업무 표·라우터·기존 지급 승인 회귀(실제 PostgreSQL 18, BAT-615 LCH-070, J-T29 ④⑥⑨).
 // ops 0018의 approval_request·approval_vote·promoter_contract_change와 부분 유일 인덱스를 확인하고,
 // 계약 승인의 동시 요청·동시 승인·감사 롤백·core 실패 재시도를 실제 트랜잭션으로 본다.
 import 'reflect-metadata';
@@ -29,6 +29,12 @@ class FakePayments implements PayoutPaymentClient {
   }
   async listBatches() {
     return this.batches;
+  }
+  async getBatchDetail(batchId: string) {
+    return { batch: this.batches.find((b) => b.batchId === batchId)!, statements: [], payouts: [], holds: [], kycNotices: [] };
+  }
+  async collectGuarantee() {
+    return { collection: { amount: 0 }, receivable: { promoterId: 'promoter-1' } };
   }
   async listCircuits() {
     return { items: [{ pg: 'TOSS' as const, state: 'closed' as const }] };
