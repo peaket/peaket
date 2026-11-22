@@ -44,7 +44,15 @@
 
 ## 리뷰
 
-- (리뷰 담당이 채운다) 날짜만 상대화했는지, `openAt−1ms` 경계·판매 종료(시작 24시간 전)·`PEXPIREAT` 단언이 같은 값에서 계산되는지, core의 주입 시계 `NOW`를 의도적으로 남긴 까닭, 막는 지적이 없는지.
+- 리뷰 담당 `lane5-w12datefix-review`, 2026-11-22 10:45~10:58 KST. 본 것: `git diff e7f15543d..HEAD`(계획 `fa50400b`·시험 `5c90ef1d`), 바뀐 세 시험 파일, `services/purchase-svc/src/modules/inventory/application/open-sale.ts`(판매 종료 409)·`domain/sale-state.ts`(UPCOMING→ON_SALE 경계)·`adapters/db/drizzle-event-sale.ts`(Outbox), `services/core-svc/src/modules/catalog/adapters/queue-sale-config-store.ts`(`PEXPIREAT`)·`domain/production.ts`(판매 종료 = 시작−24시간)·`application/create-production.ts`(일정 검사). 시험은 돌리지 않았다(시험 담당·검증 담당 몫).
+- 바뀐 파일은 `docs/review/plans/W12-datefix.md`와 시험 세 파일뿐이고 제품 코드(`services/*/src/`) 변경은 없다(갈림점 기준 `git diff --name-only`).
+- (1) `openAt−1ms` 경계: purchase `world()`가 `clock = fakeClock({ now: openAt − 1 })`로 서고, ⑦ 첫 시험이 그 틱에서 상태·판이 바뀌지 않음을, `advance(1)` 뒤 틱이 ON_SALE(version 2)로 바꿈을 그대로 단언한다. 상대화는 `openAt` 값만 바꿨고 경계 계산(`openAt − 1`, `advance(1)`)은 손대지 않았다.
+- (2) 판매 종료(시작 24시간 전): purchase 기본 `startsAt = openAt + 3일`이라 `saleEndsAtMs = startsAt − 24시간 = openAt + 2일`이고, `openAt−1ms` 시계에서 `now < saleEndsAtMs`다. 지난 회차는 `saleEndsAtMs = openAt − 30분`이라 `now ≥ saleEndsAtMs`로 409 `sale-not-publishable`이 그대로 성립한다. core HTTP는 `startsAtIn(n)`이 오픈 25일 뒤라 `지금 < 오픈 < 시작−24시간 < 시작 < 종료`가 유지된다.
+- (3) `PEXPIREAT` 단언: core test-int가 `startsAtMs(2)`로 회차 시작을 잡고, `saleEndsAtMs`는 `startsAtMs(2) − DAY_MS`, TTL은 `startsAtMs(2) − DAY_MS + KEEP_AFTER_SALE_END_MS`로 같은 값에서 계산한다. 값이 서로 다른 출처(문자열·상수)로 갈라지지 않아 만료 단언이 회차 시작과 함께 움직인다.
+- (4) core의 주입 시계 `NOW = 2026-11-13`을 남긴 까닭: 이 파일은 승인·사본 쓰기를 고정 시계로 판정해 rev·phase·`#ended` 필터를 결정적으로 만들고, Valkey 만료(`PEXPIREAT`)만 실제 시계를 쓴다. 회차 시작을 `Date.now() + 7일` 뒤로 두면 `NOW`(2026-11-13)는 늘 그보다 앞서 `#ended`가 거짓으로 남고, 실제 시계 쪽 키 만료도 미래다. 그래서 `NOW`는 그대로 두는 것이 맞다.
+- (5) core HTTP의 상대 오픈은 UTC 11:00(20:00 KST) 고정이라 수요일 정비 창(03:00~06:30 KST)에 들지 않고, 시각을 11:00/10:00으로 고정해 실행 날짜가 바뀌어도 같은 요일·시각 규칙을 탄다. `production()`에 선택 인자 `startsAt`을 더한 것은 이 두 시험만 상대 시작을 쓰게 하려는 것이고 다른 호출부의 기본값은 그대로다.
+- 막는 지적 없음. 낮음 하나: '실패 확인'의 purchase 위험은 갈래 1 조사가 '확인 필요'로 남긴 것이라 단정하지 않고 위험 서술로 두었는데, 상대화로 그 위험 자체가 사라지므로 고칠 것은 아니다.
+
 
 ## 검증
 
