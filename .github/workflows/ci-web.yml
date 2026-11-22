@@ -7,6 +7,7 @@
 # ds 부품(2026-11-04 BAS-180): Storybook 정적 빌드의 모든 이야기를 시각 회귀(FE-T40, visual 잡)와 axe·동작 검사(FE-T18, ds 잡)로 본다.
 # 재배치·초점 가림(2026-11-19 BAT-171 HOT-381): reflow 잡이 web·partner·console 운영 빌드를 세 엔진에서 본다(FE-T31·FE-T18 자동 몫·SCR-058·HOT-390).
 # 콘솔 보안 헤더(2026-11-23 F-03-1 OPS-340): console-csp 잡이 관제 운영 빌드(원격 둘 포함)·파트너 운영 빌드의 헤더와 Trusted Types 위반 0을 Chromium으로 본다.
+# 원격 위젯(2026-11-23 F-03-2 OPS-350): remotes 잡이 원격 둘을 공용 원격 빌드(build-remote.yml: 원격 폴더 린트·한 파일 빌드·크기·sha384·목록 조각)로 만든다.
 # 좌석 실시간(2026-11-20 BAT-182 HOT-357): seats 잡이 @peaket/seatmap·@peaket/web 단위·typecheck와 5만 석 화면 시나리오(S-T13·S-T21·S-T31 ⑥)를 Chromium에서 본다.
 name: ci-web
 
@@ -219,6 +220,16 @@ jobs:
           name: console-csp-reports
           path: tools/web-checks/reports/
           retention-days: 7
+
+  # 관제 원격 위젯 공용 빌드(F-03-2 OPS-350, ADR-0361 결정 3·11): 원격마다 같은 절차(build-remote.yml)로 린트·한 파일 빌드·gzip 80KB [가정]·sha384·목록 조각
+  remotes:
+    strategy:
+      fail-fast: false
+      matrix:
+        remote: [queue, purchase]
+    uses: ./.github/workflows/build-remote.yml
+    with:
+      remote: ${{ matrix.remote }}
 
   # ds 부품 검사(BAS-180): Storybook의 모든 이야기 × 라이트·다크 axe(FE-T18, WCAG 2.2 AA까지)와, 이유 있는 비활성 버튼·대화상자·탭·입력의
   # 동작을 Chromium·WebKit·Firefox로 본다(tools/web-checks/ds/)

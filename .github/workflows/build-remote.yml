@@ -1,0 +1,59 @@
+# 관제 원격 위젯 공용 빌드(docs/devops.md §3.1 build-remote.yml 행, docs/frontend.md §4.5·§5.8 관제 줄, 2026-11-23 F-03-2 OPS-350, ADR-0361 결정 3·11).
+# 팀마다 같은 절차로 원격 하나를 만든다: 설치 → 원격 폴더 린트(뿌리 ESLint의 원격 위젯 규칙, ASVS 3.2.3) → 그 원격만 한 파일로 빌드
+# (webpack --config-name remote-<이름>) → 산출물 검사(한 파일·gzip 80KB [가정]·공유 싱글턴 사본 없음)와 sha384 → 목록 조각(remotes-<이름>.json)·산출물 올리기.
+# 원격 경로의 sha는 이 실행의 커밋(GITHUB_SHA 앞 12자)이다. 콘솔 버킷(S3)에 올리는 단계와 운영 remotes.json의 GitOps 원본 자리는 구간 5다
+# (클라우드 계정이 생기면 이 파일의 '올리기' 자리에 더한다, F-03-2 계획 '감독에게' 9). 지금은 ci-web.yml의 remotes 잡이 원격 둘로 부른다.
+name: build-remote
+
+on:
+  workflow_call:
+    inputs:
+      remote:
+        description: 원격 이름(apps/widgets/<이름>, 예 queue·purchase)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      # 원격 이름은 입력을 환경 값으로만 넘기고 꼴을 본다(셸 글자에 바로 넣지 않는다)
+      - env:
+          REMOTE: ${{ inputs.remote }}
+        run: |
+          case "$REMOTE" in ''|*[!a-z0-9-]*) echo "::error::원격 이름 꼴이 아니다: $REMOTE"; exit 1 ;; esac
+          test -d "apps/widgets/$REMOTE/src" || { echo "::error::원격 폴더가 없다: apps/widgets/$REMOTE"; exit 1; }
+      # 린트는 뿌리 ESLint 설정(뿌리 개발 의존)이 필요해 전체를 설치한다
+      - run: pnpm install --frozen-lockfile
+      - env:
+          REMOTE: ${{ inputs.remote }}
+        run: pnpm exec eslint "apps/widgets/$REMOTE"
+      - env:
+          REMOTE: ${{ inputs.remote }}
+        run: pnpm --filter @peaket/console-host exec webpack --mode production --config-name "remote-$REMOTE"
+      # 한 파일·크기·사본 검사와 sha384 목록 조각(apps/console-host/dist/remotes-<이름>.json)
+      - env:
+          REMOTE: ${{ inputs.remote }}
+        run: node apps/console-host/scripts/remotes-manifest.mjs --remote "$REMOTE" --check
+      # 올리기(구간 5): 콘솔 버킷에 dist/remotes/<이름>/<sha>/를 올리고 운영 remotes.json 원본에 조각을 합치는 단계를 여기에 더한다
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: remote-${{ inputs.remote }}
+          path: |
+            apps/console-host/dist/remotes/${{ inputs.remote }}/
+            apps/console-host/dist/remotes-${{ inputs.remote }}.json
+          retention-days: 7
