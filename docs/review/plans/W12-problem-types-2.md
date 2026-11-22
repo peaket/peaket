@@ -130,6 +130,11 @@
 
 - 넣은 수 2, 잡힌 수 2, 놓친 수 0. 표본마다 그 파일만 되돌렸고 `git status --short`에 제품 파일 차이가 없었다.
 
+### 역할 확인
+
+- `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`(검증 커밋 `0e69a6c91` 기준): **통과**. plan → test → impl → review → verify 차례, 커밋 꼬리말, 담당 표가 맞는다.
+- `node tools/ci/records.mjs --check`: 기록 표가 맞다(경고는 R-374·R-608·R-763·R-473 등 기존 것).
+
 ### 남은 위험
 
 - 리뷰 RV-01(알림 모듈의 변수 제목이 아직 공용 type에 실림)·RV-02(내부 경로 409 설명 없음)·RV-03(알림 400 제목 문구 변경)이 그대로 남는다. 둘 다 막지 않는다.
