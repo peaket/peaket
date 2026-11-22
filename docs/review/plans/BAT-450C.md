@@ -184,6 +184,7 @@ node tools/ci/records.mjs --check
 | RV-08 | 낮음 | 이 계획 파일 담당 표 | 계획 때 적은 시작·끝 시각은 예상값이다. 실제 역할 시각으로 기록 단계에서 고친다 | 기록 담당이 실제 시각으로 맞춘다 |
 
 - **RV-01·RV-02 고침 순서**: 리뷰 반영도 시험 먼저다. `Fix-By: test` 커밋이 종료 행 잔여 파기와 역할 유효 끝 지난 재발송 409를 시험에 더하고, `Fix-By: impl` 커밋이 저장소 두 곳과 재발송을 고친다.
+- **RV-01·RV-02 고침(2026-11-22, review-fix)**: `staff-assignment-expired`가 종료 상태(`REVOKED`·`ENDED`·`EXPIRED`)의 잔여 `invite_email`·`invite_token_hash`도 지운다(메모리·Drizzle 두 저장소, 건수에는 세지 않는다). 재발송은 `valid_until < now`면 409 `staff-invitation-already-accepted`이고 메일을 보내지 않는다. 고친 뒤 단위 28·통합 5가 통과했고, 전체 게이트는 검증 단계에서 다시 본다.
 
 ### 확인한 것(지적 아님)
 

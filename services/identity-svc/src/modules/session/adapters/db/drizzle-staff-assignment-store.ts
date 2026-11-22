@@ -1,7 +1,7 @@
 // PostgreSQL 저장소(Drizzle): staff_assignment·scanner_session(identity §6.1, docs/data.md).
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, writeOutbox } from '@peaket/platform';
-import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import {
   type AcceptInvitationResult,
   type CreateStaffInvitationsResult,
@@ -358,6 +358,16 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         .set({ status: 'ENDED', inviteEmail: null, inviteTokenHash: null })
         .where(and(eq(staffAssignment.status, 'ASSIGNED'), lt(staffAssignment.validUntil, at)))
         .returning({ id: staffAssignment.id });
+      // 이미 끝난 행에 옛 경로·시드가 남긴 초대 이메일·토큰도 지운다(RV-01, data-classification 88). 건수에는 세지 않는다.
+      await tx
+        .update(staffAssignment)
+        .set({ inviteEmail: null, inviteTokenHash: null })
+        .where(
+          and(
+            inArray(staffAssignment.status, ['REVOKED', 'ENDED', 'EXPIRED']),
+            or(isNotNull(staffAssignment.inviteEmail), isNotNull(staffAssignment.inviteTokenHash)),
+          ),
+        );
       return { invitations: invitations.length, assignments: assignments.length };
     });
   }

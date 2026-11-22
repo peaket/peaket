@@ -179,10 +179,11 @@ export class PartnerStaffInvitations {
     const assignment = await this.store.findAssignmentById(i.assignmentId);
     if (!assignment) throw new PartnerStaffInvitationError('NOT_FOUND');
     await this.#ownerOf(assignment.eventId, i.tenantId);
-    if (assignment.status !== 'INVITED' || !assignment.inviteEmail) throw new PartnerStaffInvitationError('ALREADY_ACCEPTED');
+    const now = this.clock.now();
+    // 역할 유효 끝이 지난 초대는 수락이 410이므로 재발송도 닫는다. 받는 사람에게 죽은 링크를 보내지 않는다(RV-02).
+    if (assignment.status !== 'INVITED' || !assignment.inviteEmail || assignment.validUntilMs < now) throw new PartnerStaffInvitationError('ALREADY_ACCEPTED');
     if (!this.mailer) throw new PartnerStaffInvitationError('MAIL_UNAVAILABLE');
 
-    const now = this.clock.now();
     const token = this.tokenOf();
     try {
       await this.mailer.send({

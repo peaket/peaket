@@ -262,6 +262,12 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
         assignments++;
       }
     }
+    // 이미 끝난 행에 옛 경로·시드가 남긴 초대 이메일·토큰도 지운다(RV-01). 건수에는 세지 않는다.
+    for (const [id, a] of this.assignments) {
+      if ((a.status === 'REVOKED' || a.status === 'ENDED' || a.status === 'EXPIRED') && (a.inviteEmail !== undefined || a.inviteTokenHash !== undefined)) {
+        this.assignments.set(id, { ...a, inviteEmail: undefined, inviteTokenHash: undefined });
+      }
+    }
     return { invitations, assignments };
   }
 
