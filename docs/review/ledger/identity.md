@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 293 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 417 |
-| 합계 | 303 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 65 | 427 |
+| B | 293 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 64 | 417 |
+| 합계 | 303 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 64 | 427 |
 
 ## docs/features/identity.md
 
@@ -409,7 +409,7 @@
 | v5.0.0-10.5.4 | — | L2 | 수신된 ID 토큰의 `aud` 클레임이 사전에 발급받은 시스템의 `client_id`와 일치함을 검증한다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-10.5.5 | — | L2 | OIDC 백채널 로그아웃 토큰의 디지털 서명과 유효성을 검증한다. | 해당 없음 | B | 해당 없음: 백채널 로그아웃 미사용 (소셜 세션과 내부 서비스 세션의 독립 운영 원칙) |
 | v5.0.0-10.2.3 | — | L3 | 서비스 운영에 반드시 요구되는 최소한의 인가 스코프만을 선별하여 요청한다. | 빈칸 | B | 영역: apps/web |
-| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
+| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | ID만 | B | 다른 곳 시험: services/ticket-svc/test-int/transfer.int.test.ts (영역: apps/console-host, apps/partner, apps/web… |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 3곳… |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/ops-svc/test/audit-mac.test.ts (영역:… |

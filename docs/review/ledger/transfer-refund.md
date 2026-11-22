@@ -4,16 +4,16 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 67 | 15 | 0 | 0 | 0 | 0 | 0 | 0 | 73 | 155 |
-| B | 76 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 7 | 129 |
-| 합계 | 143 | 41 | 0 | 0 | 0 | 0 | 0 | 20 | 80 | 284 |
+| A | 81 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 67 | 155 |
+| B | 77 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 6 | 129 |
+| 합계 | 158 | 33 | 0 | 0 | 0 | 0 | 0 | 20 | 73 | 284 |
 
 ## docs/features/transfer-refund.md
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| R-T1 | — | 양도 요청 뒤 48시간 경과 | 요청은 EXPIRED, 티켓은 보낸 사람에게, 받는 사람이 수락하면 409 | 빈칸 | A | — |
-| R-T2 | — | 받은 사람이 다른 회원에게 양도 시도 | 409, 보안 이벤트 기록 | 빈칸 | A | — |
+| R-T1 | — | 양도 요청 뒤 48시간 경과 | 요청은 EXPIRED, 티켓은 보낸 사람에게, 받는 사람이 수락하면 409 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-domain.test.ts 외 1곳 |
+| R-T2 | — | 받은 사람이 다른 회원에게 양도 시도 | 409, 보안 이벤트 기록 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-domain.test.ts 외 2곳 |
 | R-T3 | — | 양도 요청 중 결제자 취소 | 409, 안내 문구 | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-ticket.test.ts 외 1곳 |
 | R-T4 | — | 돌려받은 뒤 결제자 취소 | 공제율대로 결제자가 처음 결제한 수단으로 환급 | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-ticket.test.ts |
 | R-T5 | — | 수락·스캔·취소 동시 경합 1,000회 | 각 시도에서 정확히 하나만 성공 | 빈칸 | A | — |
@@ -49,13 +49,13 @@
 | R-T14 | — | 판매 승인 전 공연 URL 직접 접근 | 404 또는 비공개 안내가 나오고, 대기열에 들어갈 수 없다 | 빈칸 | A | — |
 | R-T15 | — | 결제 직전 화면 | 판매자 이름과 중개자 고지 문장이 보이고, 글씨 크기 규칙을 통과한다 | 빈칸 | A | — |
 | R-T16 | — | 공연예술통합전산망 시뮬레이터 하루 장애 | 다음 날 누락분을 포함해 보내고, 원장 해시가 일치한다 | 빈칸 | A | — |
-| R-T17 | — | 입장 시작 뒤 수락·돌려주기·회수 | 모두 409 `ENTRY_STARTED`이고, 키와 보유자에 변화가 없다 | 빈칸 | A | — |
+| R-T17 | — | 입장 시작 뒤 수락·돌려주기·회수 | 모두 409 `ENTRY_STARTED`이고, 키와 보유자에 변화가 없다 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-domain.test.ts 외 2곳 |
 | R-T18 | — | 재승인 대기 중 공개와 판매: 판매 중인 공연의 가격을 바꾼 뒤 공연… | 재승인을 기다리는 동안 공개·판매는 마지막 승인 가격으로 계속된다. 재승인하면 새 가격이 반영되고 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)가… | 빈칸 | A | — |
 | R-T19 | — | 판매 승인 때 결제사 지정 고정: 지정 없는 공연을 승인한 뒤 플랫폼… | 승인할 때 그 시점의 기본값이 그 공연의 회차마다 지정으로 저장되고(결제사 지정은 회차 칸, §2.1 확인 항목 4, 2026-11-01 정합 점검), 배포… | 빈칸 | A | — |
 | R-T20 | — | CS 처리함 기한과 재발송: 추가 검증 이의·미보고 스캐너·환불 대기… | 기한 배지(10영업일·3영업일·3영업일)와 1영업일 전 알림이 맞다. 환불 계좌 요청이 다음 영업일·그다음 영업일 10:00과 그 뒤 7일마다 나간다. 실패한… | 빈칸 | A | — |
-| R-T21 | ① | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ① 두 번째도 처음 결과를 돌려주고 상태는 한 번만 바뀐다 | 빈칸 | A | — |
-| R-T21 | ② | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ② 400 `idempotency-key-invalid`로 거절된다(키 필수, guidelines §4) | 빈칸 | A | — |
-| R-T21 | ③ | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ③ 링크의 첫 요청에는 팬 쿠키가 실리지 않고 응답은 정적 셸이다. 양도 요청 조회와 수락·거절은 화면 스크립트가 같은 사이트로 보내는 요청으로 간다 | 빈칸 | A | — |
+| R-T21 | ① | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ① 두 번째도 처음 결과를 돌려주고 상태는 한 번만 바뀐다 | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-domain.test.ts, services/ticket-svc/test/transfer-service.test.ts |
+| R-T21 | ② | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ② 400 `idempotency-key-invalid`로 거절된다(키 필수, guidelines §4) | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-service.test.ts, services/ticket-svc/test/transfers-http.test.ts |
+| R-T21 | ③ | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ③ 링크의 첫 요청에는 팬 쿠키가 실리지 않고 응답은 정적 셸이다. 양도 요청 조회와 수락·거절은 화면 스크립트가 같은 사이트로 보내는 요청으로 간다 | ID만 | A | 시험: services/ticket-svc/test/transfer-domain.test.ts, services/ticket-svc/test/transfer-service.test.ts 외 1곳 |
 | R-T26 | ① | 예외 환불의 증빙과 미성년자 계약 취소(추천 적용 2026-10-28… | ① CS 책임자 1인 승인으로 3영업일 안에 환급된다. | 빈칸 | A | — |
 | R-T26 | ② | 예외 환불의 증빙과 미성년자 계약 취소(추천 적용 2026-10-28… | ② 확인 사실과 확인자만 기록되고 파일은 저장되지 않는다. | 빈칸 | A | — |
 | R-T26 | ③ | 예외 환불의 증빙과 미성년자 계약 취소(추천 적용 2026-10-28… | ③ 휴대폰 본인확인 대조 뒤 CS 책임자 1인이 승인하면 공제 없이 전액이 환급되고 좌석이 취소표로 돌아간다. 생년월일은 DB·로그에 0건이다 | 빈칸 | A | — |
@@ -77,19 +77,19 @@
 | R-T30 | ③ | 소명이 들어오는 길(추천 적용 2026-10-30, §7.1 '소명이… | ③은 접수되지만 ops-svc가 '대상 아님'으로 닫고 팬에게 알린다. | 빈칸 | A | — |
 | R-T30 | ④ | 소명이 들어오는 길(추천 적용 2026-10-30, §7.1 '소명이… | ④는 그 승인 업무(SCR-046)에 '받은 분 소명 <제출됨>'으로 붙는다. | 빈칸 | A | — |
 | R-T30 | ⑤ | 소명이 들어오는 길(추천 적용 2026-10-30, §7.1 '소명이… | ⑤는 Outbox에 남았다가 ops-svc가 돌아오면 건이 한 번만 생긴다. ops-svc로 바로 가는 팬 요청은 0건이다 | 빈칸 | A | — |
-| R-T31 | ① | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ① 양도 요청이 WITHDRAWN(사유 `FRAUD_LOCK`)이 되고 티켓은 보낸 사람에게 남는다. 세 티켓의 `fraud_lock_case_id`가 사건… | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ② | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ② 양도 요청은 409 `transfer-locked`이고 키·보유자가 그대로다. 받은 사람의 돌려주기는 성공하고, 돌아온 표는 결제자에게… | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ③ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ③ 공제율대로 환급된다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ④ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ④ 한 번 보낸 것과 결과가 같고 옛 판은 무시된다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑤ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑤ 그 티켓은 바뀌지 않고 응답에 따로 나온다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑥ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑥ `PERMISSION_DENIED` | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑦ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑦ 매번 하나만 먼저 되고, 잠긴 뒤 넘어간 표가 0장이다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑧ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑧ 잠금이 풀리고 결제자에게 `FRAUD_TRANSFER_LOCK_RELEASED`가 한 번 간다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑨ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑨ ops-svc 호출 없이 `Ticket.transferLocked`가 거짓이 되고, 풀림 알림은 가지 않는다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑩ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑩ ops-svc 호출 없이 `Ticket.transferLocked`가 거짓이 되고, ops-svc가 다시 뜨면 사본의 잠금 상태를 풀림으로 보내 풀림 알림이… | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑪ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑪ `lockExpiresAt`이 처음 값 그대로다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑫ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑫ 반려·만료는 잠금이 풀리고, 철회는 잠금이 남는다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
-| R-T31 | ⑬ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑬ "이 회차 표는 부정 예매 조사가 끝날 때까지 양도가 잠깁니다"가 보이고, 결제 뒤 발권한 표도 잠긴다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts |
+| R-T31 | ① | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ① 양도 요청이 WITHDRAWN(사유 `FRAUD_LOCK`)이 되고 티켓은 보낸 사람에게 남는다. 세 티켓의 `fraud_lock_case_id`가 사건… | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-lock-grpc.test.ts 외 1곳 |
+| R-T31 | ② | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ② 양도 요청은 409 `transfer-locked`이고 키·보유자가 그대로다. 받은 사람의 돌려주기는 성공하고, 돌아온 표는 결제자에게… | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-domain.test.ts, services/ticket-svc/test/transfer-service.test.ts |
+| R-T31 | ③ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ③ 공제율대로 환급된다 | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-service.test.ts |
+| R-T31 | ④ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ④ 한 번 보낸 것과 결과가 같고 옛 판은 무시된다 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-service.test.ts |
+| R-T31 | ⑤ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑤ 그 티켓은 바뀌지 않고 응답에 따로 나온다 | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-service.test.ts |
+| R-T31 | ⑥ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑥ `PERMISSION_DENIED` | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-lock-grpc.test.ts |
+| R-T31 | ⑦ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑦ 매번 하나만 먼저 되고, 잠긴 뒤 넘어간 표가 0장이다 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts |
+| R-T31 | ⑧ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑧ 잠금이 풀리고 결제자에게 `FRAUD_TRANSFER_LOCK_RELEASED`가 한 번 간다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts, services/ticket-svc/test-int/transfer.int.test.ts 외 3곳 |
+| R-T31 | ⑨ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑨ ops-svc 호출 없이 `Ticket.transferLocked`가 거짓이 되고, 풀림 알림은 가지 않는다 | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-service.test.ts |
+| R-T31 | ⑩ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑩ ops-svc 호출 없이 `Ticket.transferLocked`가 거짓이 되고, ops-svc가 다시 뜨면 사본의 잠금 상태를 풀림으로 보내 풀림 알림이… | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts, services/ticket-svc/test-int/transfer.int.test.ts 외 3곳 |
+| R-T31 | ⑪ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑪ `lockExpiresAt`이 처음 값 그대로다 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts |
+| R-T31 | ⑫ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑫ 반려·만료는 잠금이 풀리고, 철회는 잠금이 남는다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts, services/ticket-svc/test-int/transfer.int.test.ts 외 3곳 |
+| R-T31 | ⑬ | 부정 예매 양도 잠금(추천 적용 2026-10-31, ADR-0171… | ⑬ "이 회차 표는 부정 예매 조사가 끝날 때까지 양도가 잠깁니다"가 보이고, 결제 뒤 발권한 표도 잠긴다 | ID만 | A | 시험: services/purchase-svc/test/cancel-ticket.test.ts, services/ticket-svc/test-int/transfer.int.test.ts 외 3곳 |
 | R-T32 | ① | 부정 예매 사건 소명(추천 적용 2026-10-31, ADR-0171… | ① `support.cases-requested`(kind `APPEAL`, category `FRAUD_CASE`) 한 건, 그 사건에 이어진 CS… | 빈칸 | A | — |
 | R-T32 | ② | 부정 예매 사건 소명(추천 적용 2026-10-31, ADR-0171… | ② '대상 아님'으로 닫고 알린다 | 빈칸 | A | — |
 | R-T32 | ③ | 부정 예매 사건 소명(추천 적용 2026-10-31, ADR-0171… | ③ '기한 경과'로 닫고 알린다 | 빈칸 | A | — |
@@ -211,7 +211,7 @@
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/core-svc/test/shop-order.http.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts 외 32곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 32곳 |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 52곳 |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 54곳 |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/review.http.test.ts 외 14곳 |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
@@ -239,14 +239,14 @@
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 11곳 |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/idempotency-migration.int.test.ts 외… |
-| v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 6곳 |
+| v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 7곳 |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
 | v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, deploy/workloads/test/workloads.test.mjs 외 6곳 (영역:… |
-| v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 5곳 |
-| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-command-reauth.test.ts, services/ops-svc/test/admin-reauth.test.ts 외 1곳 |
-| v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
+| v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 6곳 |
+| v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-command-reauth.test.ts, services/ops-svc/test/admin-reauth.test.ts 외 2곳 |
+| v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, services/ticket-svc/test/transfer-reauth.test.ts |
 | v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, packages/platform/test/token-verify.test.ts (영역: services/core-svc… |
-| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 빈칸 | B | 영역: services/ticket-svc |
+| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 자동 시험 | B | 시험: services/ticket-svc/test-int/transfer.int.test.ts |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: services/core-svc, services/ops-svc, services/payment-svc, services/purchase-svc, services/ticket-svc |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-checkpoint-bytes.test.ts, services/payment-svc/test/payment-method-ref.test.ts |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
