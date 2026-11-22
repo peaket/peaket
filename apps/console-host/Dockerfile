@@ -1,13 +1,15 @@
 # 관제 콘솔 호스트 이미지(BAT-087 G1). 빌드 맥락은 저장소 뿌리다:
 # docker build -f apps/console-host/Dockerfile -t peaket/console-host:demo .
 # - webpack 산출물(dist/)을 고정 nginx(루트 아님)로 서빙한다. API 주소는 빌드 때 굳는다
-# - widgets는 작업 공간 패키지로 이 앱에 묶인다(별 이미지 없음)
+# - 원격 위젯 둘(widgets/queue·purchase)은 같은 빌드가 dist/remotes/<이름>/에 Module Federation 원격으로 낸다(별 이미지 없음, ADR-0360)
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS build
 WORKDIR /repo
 RUN npm install --global pnpm@12.16.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/api-client/package.json packages/api-client/
 COPY packages/config/package.json packages/config/
+COPY packages/console-contract/package.json packages/console-contract/
+COPY packages/console-contract/package.json packages/console-contract/
 COPY packages/ds/package.json packages/ds/
 COPY packages/seatmap/package.json packages/seatmap/
 COPY apps/widgets/purchase/package.json apps/widgets/purchase/

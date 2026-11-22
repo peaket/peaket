@@ -1,5 +1,5 @@
 // SCR-030 연결 화면: ops-svc 운영 명령 API로 목록·상세·2인 승인/거부·재시도와 감사 체크포인트를 본다(BAT-465 GAT-300·GAT-310).
-// 갱신은 5초 폴링 대신 관제 SSE(/v1/ops/live)를 받는다(BAT-465 R-584). 끊기면 EventSource가 다시 붙고, 그때 목록을 다시 읽어 빠진 것을 채운다.
+// 갱신은 5초 폴링 대신 호스트가 연 관제 늘 여는 흐름(/v1/ops/live)의 command 사건을 받는다(BAT-465 R-584, ADR-0360). 다시 붙으면 Last-Event-ID로 빠진 사건을 받고, reset이면 목록을 다시 읽는다.
 // 디자인 보드(ui/Page.tsx의 BoardPage)는 ?state= 미리보기에 남기고, 실제 경로는 이 화면을 쓴다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChosenRole, usePreviewHost } from '@/features/preview-host';
@@ -17,12 +17,16 @@ import {
   type CommandStateValue,
   type RawCommand,
 } from '../model/commands';
-import { liveUrl, mergeCommand, parseLiveFrame } from '../model/live';
+import { mergeCommand } from '../model/live';
+import { onLive } from '@/shared/api/live';
+import { useLiveHost } from '@/shared/model/live-host';
 
 type Load = { kind: 'loading' } | { kind: 'ready'; items: CommandRow[]; nextCursor: string | null } | { kind: 'error'; message: string } | { kind: 'config' };
 type CheckpointRow = { checkpointId: string; fromSeq: number; toSeq: number; rootHash: string; prevCheckpointHash: string; reason: string; actorRef: string; createdAt: string };
 type Verification = { valid: boolean; rootValid: boolean; prevValid: boolean };
 
+/** 끝 상태: 이 상태가 되면 감사 탭이 체크포인트를 다시 읽는다(옛 audit 사건 대신, ADR-0360 결정 8) */
+const TERMINAL = new Set<string>(['SUCCEEDED', 'FAILED', 'REVERTED']);
 const STATES: readonly CommandStateValue[] = ['PENDING_APPROVAL', 'DISPATCHED', 'SUCCEEDED', 'FAILED', 'APPROVED', 'REJECTED', 'REVERT_PENDING', 'REVERTED', 'AUTO_EXPIRED', 'DRAFTED', 'DRY_RUN', 'ACKED'];
 const TYPES = ['EVENT_CANCEL', 'SCALE_CHANGE', 'SALE_STOP', 'SALE_RESUME', 'KILL_SWITCH', 'ADMISSION_PAUSE', 'ADMISSION_TARGET', 'BOT_LEVEL', 'DEGRADED_MODE', 'BLOCK_ASN_IP', 'LOBBY_BANNER', 'LOG_LEVEL', 'FEATURE_OFF', 'TAKEDOWN', 'AUTOMATION_STOP', 'PG_ASSIGN'] as const;
 
@@ -97,43 +101,33 @@ export function ConnectedPage() {
       setLive('closed');
       return () => clearTimeout(toastTimer.current);
     }
-    // 5초 폴링 대신 관제 SSE(BAT-465 R-584). EventSource가 끊기면 스스로 다시 붙고, 그때 목록을 다시 읽어 빠진 것을 채운다.
-    const es = new EventSource(liveUrl(__OPS_API_ORIGIN__), { withCredentials: true });
-    setLive('connecting');
-    const onOpen = (): void => {
-      setLive('open');
-      void refresh();
-      if (tabRef.current === 'audit') void loadCheckpoints();
-    };
-    const onCommand = (ev: Event): void => {
-      const m = ev as MessageEvent;
-      const frame = parseLiveFrame({ ...(m.lastEventId ? { lastEventId: m.lastEventId } : {}), type: m.type, data: m.data });
-      if (!frame) return;
-      const row = mapCommandList({ items: [frame.data as RawCommand] }).items[0];
+    // 호스트가 연 늘 여는 흐름(GET /v1/ops/live)을 함께 쓴다(탭마다 흐름 하나, ADR-0100 결정 1, ADR-0360 결정 8).
+    // command 사건으로 목록 한 줄을 바꾸고, 명령이 끝 상태가 되면 감사 탭은 체크포인트를 다시 읽는다. reset이면 REST로 다시 읽는다.
+    const offCommand = onLive('command', (data) => {
+      const row = mapCommandList({ items: [data as RawCommand] }).items[0];
       if (!row) return;
       setLoad((prev) => (prev.kind === 'ready' ? { ...prev, items: mergeCommand(prev.items, row) } : prev));
       setSelectedId((prev) => prev ?? row.commandId);
       if (selectedRef.current === row.commandId) void loadDetail(row.commandId).catch(() => undefined);
-    };
-    const onAudit = (): void => {
-      if (tabRef.current === 'audit') void loadCheckpoints();
-    };
-    const onReset = (): void => {
-      // 서버가 1시간 밖의 Last-Event-ID를 받았다: REST로 다시 읽는다(openapi 설명)
+      if (tabRef.current === 'audit' && TERMINAL.has(row.state)) void loadCheckpoints();
+    });
+    const offReset = onLive('reset', () => {
+      // 서버가 알림 표 밖의 Last-Event-ID를 받았다: REST로 다시 읽는다(openapi 설명)
       void refresh();
       if (tabRef.current === 'audit') void loadCheckpoints();
-    };
-    const onError = (): void => setLive('closed');
-    es.addEventListener('open', onOpen);
-    es.addEventListener('command', onCommand);
-    es.addEventListener('audit', onAudit);
-    es.addEventListener('reset', onReset);
-    es.addEventListener('error', onError);
+    });
     return () => {
-      es.close();
+      offCommand();
+      offReset();
       clearTimeout(toastTimer.current);
     };
   }, [refresh, loadCheckpoints, loadDetail]);
+
+  // 흐름 상태는 호스트 연결에서 읽는다
+  const connected = useLiveHost((s) => s.connected);
+  useEffect(() => {
+    if (opsApiAvailable()) setLive(connected ? 'open' : 'connecting');
+  }, [connected]);
 
   useEffect(() => {
     if (!selectedId) {

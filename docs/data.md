@@ -2380,7 +2380,7 @@ erDiagram
         text kind "command|approval|alert|autoAction(명령 상태, 승인 대기, 경보 수신, 자동 조치의 시작·끝)"
         uuid event_id "회차. 회차와 무관하면 NULL"
         text roles "받을 역할"
-        jsonb body "본문. 원래 기록과 같은 트랜잭션으로 쓴다"
+        jsonb body "본문. 원래 기록과 같은 트랜잭션으로 쓴다(ops_command·경보 표의 트리거, 마이그레이션 0028, ADR-0360 결정 1). presence는 이 표에 쓰지 않는다"
         timestamptz created_at "1시간 [가정] 지나면 정비 작업이 지운다"
     }
     ops_presence {

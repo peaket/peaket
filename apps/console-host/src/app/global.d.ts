@@ -4,4 +4,10 @@ declare const __PREVIEW__: boolean;
 declare const __OPS_API_ORIGIN__: string;
 declare const __SCANNER_ORIGIN__: string;
 
+// 빌드 종류: mf(Module Federation 호스트 + 원격 둘) | single(한 앱 기준선, PEAKET_CONSOLE_BUILD=single, ADR-0360)
+declare const __CONSOLE_BUILD__: 'mf' | 'single';
+// webpack Module Federation 실행 중 API(원격 컨테이너 잇기, src/app/remotes/load-remote.ts)
+declare function __webpack_init_sharing__(scope: string): Promise<void>;
+declare const __webpack_share_scopes__: { default: unknown };
+
 declare module '*.css';

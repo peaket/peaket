@@ -13,6 +13,7 @@ import { FunnelWidget, PaymentBudgetWidget, PgStatusWidget, SeatHoldWidget } fro
 import { GRAFANA } from '@/entities/alert';
 import * as F from '../model/fixtures';
 import { WidgetSlot } from './WidgetSlot';
+import { RemoteWidget } from './RemoteWidget';
 import { RecentReleased } from './RecentReleased';
 
 const prevent = (e: FormEvent) => e.preventDefault();
@@ -1311,9 +1312,13 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
             <WidgetSlot ctx={ctx} remote="purchase" title="퍼널(F3)" style={{ gridColumn: 'span 2' }}>
               <FunnelWidget data={F.FUNNEL} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} style={{ gridColumn: 'span 2' }} />
             </WidgetSlot>
-            <WidgetSlot ctx={ctx} remote="queue" title="입장 비율·빈자리">
-              <AdmissionRateWidget data={v.isBudget ? F.ADMISSION_BUDGET : F.ADMISSION} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
-            </WidgetSlot>
+            {ctx.live ? (
+              <RemoteWidget remote="queue" name="queue-admission-rate" title="입장 비율·빈자리" />
+            ) : (
+              <WidgetSlot ctx={ctx} remote="queue" title="입장 비율·빈자리">
+                <AdmissionRateWidget data={v.isBudget ? F.ADMISSION_BUDGET : F.ADMISSION} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
+              </WidgetSlot>
+            )}
             {v.notFold ? (
               <>
                 <section className="widget" role="region" aria-labelledby="w-lheat" style={{ gridColumn: "span 2" }}>
@@ -1458,9 +1463,13 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </details>
               </>
             ) : null}
-            <WidgetSlot ctx={ctx} remote="purchase" title="결제사" failOnError>
-              <PgStatusWidget data={v.isAuto ? F.PG_AUTO : F.PG} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
-            </WidgetSlot>
+            {ctx.live ? (
+              <RemoteWidget remote="purchase" name="purchase-pg-status" title="결제사" />
+            ) : (
+              <WidgetSlot ctx={ctx} remote="purchase" title="결제사" failOnError>
+                <PgStatusWidget data={v.isAuto ? F.PG_AUTO : F.PG} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
+              </WidgetSlot>
+            )}
             <section className="widget" role="region" aria-labelledby="w-lbud">
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="w-lbud">여정별 남은 허용 실패</h2>

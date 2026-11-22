@@ -11,6 +11,8 @@ import { useBodyTheme, useResolvedTheme, useUiPrefs } from '@/shared/lib/theme';
 import { useHost, useHostStore } from '@/features/preview-host';
 import { useShellUi } from '@/shared/model/shell';
 import { renderRouterLink } from '@/shared/ui/RouterLink';
+import { opsApiAvailable } from '@/shared/api';
+import { startLive } from '@/shared/api/live';
 import { ShortcutsDialog } from './ShortcutsDialog';
 
 export function ConsoleLayout() {
@@ -34,6 +36,14 @@ export function ConsoleLayout() {
   useEffect(() => {
     if (isDesignationChoice(designationParam)) setDesignation(designationParam);
   }, [designationParam, setDesignation]);
+
+  // 탭마다 늘 여는 흐름 하나와 위젯 흐름 하나(ADR-0100 결정 1, ADR-0360). ?state= 미리보기와 관제 API 주소가 없는 빌드에서는 열지 않는다.
+  // 한 번 열면 화면을 옮겨도 닫지 않는다(탭을 숨겨도 닫지 않는다, frontend §4.4.4). 토큰 갱신이 401이면 로그인 화면으로 간다
+  const previewState = __PREVIEW__ && params.get('state') !== null;
+  useEffect(() => {
+    if (previewState || !opsApiAvailable()) return;
+    startLive({ origin: __OPS_API_ORIGIN__, onUnauthorized: () => navigate('/login') });
+  }, [previewState, navigate]);
 
   const host = useHost();
   const mainStyle = useShellUi((s) => s.mainStyle);

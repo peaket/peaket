@@ -191,6 +191,9 @@ importers:
       '@peaket/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@peaket/console-contract':
+        specifier: workspace:*
+        version: link:../../packages/console-contract
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../packages/ds
@@ -589,6 +592,9 @@ importers:
 
   apps/widgets/purchase:
     dependencies:
+      '@peaket/console-contract':
+        specifier: workspace:*
+        version: link:../../../packages/console-contract
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../../packages/ds
@@ -611,6 +617,9 @@ importers:
 
   apps/widgets/queue:
     dependencies:
+      '@peaket/console-contract':
+        specifier: workspace:*
+        version: link:../../../packages/console-contract
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../../packages/ds

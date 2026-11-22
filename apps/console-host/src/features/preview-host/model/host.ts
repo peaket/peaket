@@ -1,12 +1,13 @@
 // 호스트 상태(docs/frontend.md §3.10). 슬라이스: session·scope·control·autoActions·alerts·commands·presence.
 // 퍼블리싱 단계라 값은 목업(entities)이다. 목업 entities에 기대므로 shared가 아니라 features 층에 둔다. 화면은 usePreviewHost()로 보드 상태에 맞는 값을 잠깐 덮어쓴다.
-// 데이터 연결 단계(wbs 4.x)에서 REST·SSE 늘 여는 흐름으로 채우고, preview 층은 걷어 낸다(ADR-0170).
+// 늘 여는 흐름이 열리면 접속자·승인 대기·경보 수는 실제 값(shared/model/live-host)으로 덮는다(OPS-340, ADR-0360). 나머지 칸은 데이터 연결 단계에서 채우고 preview 층은 걷어 낸다(ADR-0170).
 import { useLayoutEffect } from 'react';
 import { useSearchParams } from 'react-router';
 import { create } from 'zustand';
 import type { ConsoleRole, ControlStatus } from '@peaket/ds/ConsoleShell';
 import { designationsOf, isDesignationChoice, isRole, OPERATORS, type Designation, type DesignationChoice } from '@/entities/operator';
 import { CURRENT_RUN } from '@/entities/event-run';
+import { useLiveHost } from '@/shared/model/live-host';
 
 export interface HostState {
   /** 환경 배지(운영 환경 · 데모 환경) */
@@ -70,6 +71,16 @@ export function useHost(): HostState {
   const roleSession = OPERATORS[role];
   // 지정은 화면 덮어쓰기(보드의 사람)보다 주소에서 고른 값이 이긴다
   const chosen = designation ? { designations: designationsOf(designation) } : {};
+  // 늘 여는 흐름이 열려 있으면 접속자 수·내 승인 대기 수·걸린 경보 수를 실제 값으로 덮는다(화면 덮어쓰기가 이긴다, ADR-0360)
+  const connected = useLiveHost((s) => s.connected);
+  const livePresence = useLiveHost((s) => s.presence.length);
+  const livePending = useLiveHost((s) => s.commands.pending.length);
+  const sev1 = useLiveHost((s) => s.alerts.filter((a) => a.status === 'firing' && a.severity === 'SEV1').length);
+  const sev2 = useLiveHost((s) => s.alerts.filter((a) => a.status === 'firing' && a.severity === 'SEV2').length);
+  const sev3 = useLiveHost((s) => s.alerts.filter((a) => a.status === 'firing' && a.severity === 'SEV3').length);
+  const live = connected
+    ? { presence: { operators: livePresence }, myApprovals: livePending, alerts: { sev1, sev2, sev3 } }
+    : { presence: {}, myApprovals: undefined, alerts: {} };
   const session = { ...BASE.session, ...roleSession, designations: [] as readonly Designation[], ...p.session, ...chosen };
   return {
     env: { ...BASE.env, ...p.env },
@@ -77,9 +88,9 @@ export function useHost(): HostState {
     scope: { ...BASE.scope, ...p.scope },
     control: p.control === undefined ? BASE.control : p.control,
     autoActions: { ...BASE.autoActions, ...p.autoActions },
-    alerts: { ...BASE.alerts, ...p.alerts },
-    commands: { myApprovals: session.role === 'viewer' ? 0 : BASE.commands.myApprovals, ...p.commands },
-    presence: { ...BASE.presence, ...p.presence },
+    alerts: { ...BASE.alerts, ...live.alerts, ...p.alerts },
+    commands: { myApprovals: session.role === 'viewer' ? 0 : (live.myApprovals ?? BASE.commands.myApprovals), ...p.commands },
+    presence: { ...BASE.presence, ...live.presence, ...p.presence },
     clock: p.clock ?? BASE.clock,
   };
 }
