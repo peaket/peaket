@@ -385,3 +385,57 @@ describe('I-T38 스캐너 세션 수와 교대', () => {
     expect([...w.assignments.sessions.values()].filter((s) => s.terminatedAt === null)).toHaveLength(1);
   });
 });
+
+describe('I-T89 ⑥ 승인이 만든 스캐너 세션의 기기 이름(BUILD_ORDER F-05-7, ADR-0362 결정 6)', () => {
+  test('I-T89 ⑥ 승인한 세션의 device_name은 승인 요청의 기기 이름이고 내 배정의 activeScannerDeviceName이 같은 이름이다', async () => {
+    const w = world();
+    // 기기 원장 이름은 시험이 정한 값(코드의 목업 이름과 다르게)
+    w.registry.answer = { found: true, deviceId: DEVICE, status: 'ACTIVE', name: '서문-14', promoterId: P1 };
+    const s = await started(w);
+    await w.approvals.decide({ userCode: s.userCode, accountId: ACCOUNT, sessionId: 'fan-session', decision: 'APPROVE' });
+    expect(w.assignments.sessions.get('ss-1')).toMatchObject({ scannerSessionId: 'ss-1', deviceName: '서문-14', terminatedAt: null });
+    expect(await w.assignments.listLiveScannerSessions({ accountId: ACCOUNT, nowMs: NOW })).toEqual([
+      { scannerSessionId: 'ss-1', deviceName: '서문-14', eventId: EVENT, role: 'gate_staff', proxy: false, approvedAtMs: NOW, expiresAtMs: NOW + 2 * HOUR, lastSeenAtMs: null },
+    ]);
+    const mine = await w.assignments.listSelf({ accountId: ACCOUNT, limit: 10, nowMs: NOW });
+    expect(mine.items).toEqual([expect.objectContaining({ assignmentId: 'a-1', status: 'ASSIGNED', activeScannerDeviceName: '서문-14' })]);
+  });
+
+  test('I-T89 ⑥ 다른 기기로 교대하면 끝난 이전 세션은 살아 있는 목록에서 빠지고 배정의 기기 이름은 새 기기다', async () => {
+    const w = world();
+    w.registry.answer = { found: true, deviceId: DEVICE, status: 'ACTIVE', name: '서문-14', promoterId: P1 };
+    const first = await started(w);
+    await w.approvals.decide({ userCode: first.userCode, accountId: ACCOUNT, sessionId: 'fan-session-1', decision: 'APPROVE' });
+    w.registry.answer = { found: true, deviceId: '0190f3a1-7c2e-7a00-8000-00000000000a', status: 'ACTIVE', name: '북문-02', promoterId: P1 };
+    const second = await started(w);
+    await w.approvals.decide({ userCode: second.userCode, accountId: ACCOUNT, sessionId: 'fan-session-2', decision: 'APPROVE' });
+    const live = await w.assignments.listLiveScannerSessions({ accountId: ACCOUNT, nowMs: NOW });
+    expect(live.map((x) => [x.scannerSessionId, x.deviceName])).toEqual([['ss-2', '북문-02']]);
+    const mine = await w.assignments.listSelf({ accountId: ACCOUNT, limit: 10, nowMs: NOW });
+    expect(mine.items.map((x) => x.activeScannerDeviceName)).toEqual(['북문-02']);
+    // 세션이 끝나면(유효 끝 정각) 배정의 기기 이름도 없다
+    const ended = await w.assignments.listSelf({ accountId: ACCOUNT, limit: 10, nowMs: NOW + 2 * HOUR });
+    expect(ended.items.map((x) => x.activeScannerDeviceName)).toEqual([null]);
+  });
+
+  test('I-T89 ⑥ 기기 이름 없이 만든 옛 세션(0038 전)은 null이다', async () => {
+    const w = world();
+    await w.assignments.createScannerSession({ scannerSessionId: 'ss-old', assignmentId: 'a-1', deviceId: DEVICE, accountId: ACCOUNT, approvedBySession: 'fan-old', role: 'gate_staff', proxy: false, approvedAtMs: NOW, expiresAtMs: NOW + HOUR });
+    expect((await w.assignments.listLiveScannerSessions({ accountId: ACCOUNT, nowMs: NOW })).map((x) => x.deviceName)).toEqual([null]);
+    expect((await w.assignments.listSelf({ accountId: ACCOUNT, limit: 10, nowMs: NOW })).items.map((x) => x.activeScannerDeviceName)).toEqual([null]);
+  });
+});
+
+describe('I-T62 ④ 승인 조회는 파트너 이름을 얻으려는 내부 호출을 하지 않는다', () => {
+  test('I-T62 ④ 승인 조회는 파트너 이름을 얻으려는 내부 호출을 하지 않는다: 기기 원장 호출 0건이고 응답에 파트너 이름 칸이 없다', async () => {
+    const w = world();
+    const s = await started(w);
+    const callsAfterStart = w.registry.calls;
+    const view = await w.approvals.lookup({ userCode: s.userCode, accountId: ACCOUNT });
+    expect(w.registry.calls).toBe(callsAfterStart);
+    // 칸은 넷뿐이다(partnerName·sellerName·eventTitle 없음, open-items 78번)
+    expect(Object.keys(view).sort()).toEqual(['assignments', 'canProxy', 'deviceName', 'userCode']);
+    for (const a of view.assignments) expect(a).not.toHaveProperty('partnerName');
+    expect(JSON.stringify(view)).not.toMatch(/partnerName|sellerName|eventTitle/);
+  });
+});

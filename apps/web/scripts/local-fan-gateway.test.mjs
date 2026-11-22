@@ -257,3 +257,39 @@ test('[ASVS v5.0.0-3.5.1] 대기열 주소(queueUrl)를 주면 /v1/queues/ 경�
   // queueUrl이 없으면 대기열 경로를 넘기지 않는다(identity 경로만)
   assert.equal((await call('/v1/queues/e1/verification')).status, 404);
 });
+
+test('I-T91·I-T92 현장 스태프 경로 여섯(초대 조회·수락·거절, 내 현장 배정, 기기 승인 조회·승인)은 신원 머리와 함께 identity로 가고, 비슷한 다른 경로는 받지 않는다(BUILD_ORDER F-05-7, ADR-0362)', async () => {
+  // 경로 목록의 정본은 deploy/gateways/routes/gw-fan.yaml gw-fan-identity의 PathPrefix(local-fan-gateway-parity.test.mjs가 그 목록보다 넓지 않은지 본다)
+  const at = await token({ sid: 's-staff' }, { sub: 'acc-staff' });
+  const writes = ['/v1/staff-invitation-lookups', '/v1/staff-invitation-acceptances', '/v1/staff-invitation-rejections', '/v1/device-approval-lookups', '/v1/device-approvals'];
+  for (const path of writes) {
+    const r = await call(path, { method: 'POST', headers: { origin: WEB, cookie: `__Secure-peaket_at=${at}`, 'content-type': 'application/json' }, body: JSON.stringify({ probe: path }) });
+    assert.equal(r.status, 200, path);
+    await r.text();
+    assert.equal(last().url, path);
+    assert.equal(last().method, 'POST');
+    assert.equal(last().headers['x-user-id'], 'acc-staff');
+    assert.equal(last().headers['x-session-id'], 's-staff');
+    assert.equal(last().body, JSON.stringify({ probe: path }));
+    // 쿠키는 갱신 경로에만 넘긴다
+    assert.equal(last().headers.cookie, undefined);
+  }
+  const list = await call('/v1/staff-assignments?limit=50&cursor=c1', { headers: { cookie: `__Secure-peaket_at=${at}` } });
+  assert.equal(list.status, 200);
+  await list.text();
+  assert.equal(last().url, '/v1/staff-assignments?limit=50&cursor=c1');
+  assert.equal(last().headers['x-user-id'], 'acc-staff');
+  // 쓰기 요청의 Origin 대조는 스태프 경로에도 같다
+  const before = seen.length;
+  const foreign = await call('/v1/device-approvals', { method: 'POST', headers: { origin: 'https://evil.example', cookie: `__Secure-peaket_at=${at}`, 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(foreign.status, 403);
+  await foreign.text();
+  assert.equal(seen.length, before);
+  // 이름이 비슷한 다른 경로(파트너 초대 /v1/staff-invitations, 앞붙이만 같은 경로)는 넘기지 않는다
+  for (const path of ['/v1/staff-invitations', '/v1/staff-assignmentsX', '/v1/device-approvals-admin', '/v1/staff', '/v1/device-approval']) {
+    const r = await call(path, { headers: { cookie: `__Secure-peaket_at=${at}` } });
+    assert.equal(r.status, 404, path);
+    await r.text();
+  }
+  assert.equal(seen.length, before);
+});

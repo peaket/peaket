@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { afterWithdraw, createWithdrawApi, leaveForReauth, linkedProvidersQuietly, markPending, PENDING_KEY, PENDING_TTL_MS, reauthFailureText, reauthForm, takePending, takePendingAt, untilText } from './flow.ts';
+import { reauthPurposeFor } from '../device-sessions/flow.ts';
 
 const json = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const problem = (status, type, extra = {}) => json(status, { type: `https://peaket.example/problems/${type}`, status, ...extra });
@@ -277,9 +278,18 @@ function callBlock(src, name) {
 test('I-T85 ⑤-1 설정의 재인증 양식은 탈퇴면 purpose account-withdraw, 다른 기기 로그아웃이면 session-end다(같은 양식 함수를 써도)', () => {
   assert.deepEqual(reauthForm('kakao', 'account-withdraw'), { action: '/reauth/kakao', fields: { returnTo: '/my/settings', purpose: 'account-withdraw' } });
   assert.deepEqual(reauthForm('google', 'session-end'), { action: '/reauth/google', fields: { returnTo: '/my/settings', purpose: 'session-end' } });
-  // 화면 연결: 다른 기기 로그아웃의 떠나기(leaveForDeviceReauth)는 session-end, 탈퇴의 떠나기(leaveForReauth)는 account-withdraw를 싣는다
+  // 현장 스캐너 세션 끝내기는 scanner-session-end다(ADR-0362 결정 7, I-T90 ②)
+  assert.deepEqual(reauthForm('naver', 'scanner-session-end'), { action: '/reauth/naver', fields: { returnTo: '/my/settings', purpose: 'scanner-session-end' } });
+  // 동작: 기기 줄의 범위가 고르는 purpose로 양식을 만들면 기기·이 기기의 다른 로그인은 session-end, 스캐너는 scanner-session-end다(탈퇴 purpose로 새지 않는다)
+  assert.deepEqual(
+    ['device', 'others', 'scanner'].map((scope) => reauthForm('google', reauthPurposeFor(scope)).fields.purpose),
+    ['session-end', 'session-end', 'scanner-session-end'],
+  );
+  // 화면 연결(.tsx는 node로 그리지 못해 소스로 본다): 기기 줄의 떠나기(leaveForDeviceReauth)는 그 줄 범위의 purpose(위 동작)를, 탈퇴의 떠나기(leaveForReauth)는 account-withdraw를 싣는다
   const device = callBlock(SETTINGS_FLOWS, 'leaveForDeviceReauth');
-  assert.match(device, /submit:\s*\(p\)\s*=>\s*submitReauthForm\(p,\s*'session-end'\)/);
+  // 범위는 누른 줄이 스캐너 목록에 있을 때만 scanner다
+  assert.match(SETTINGS_FLOWS, /const isScanner = scannerAnswer\?\.kind === 'ok' && scannerAnswer\.items\.some\(\(r\) => r\.sessionId === session\.id\);\s*setPurpose\(\{ kind: 'device', session, scope: isScanner \? 'scanner' : 'device' \}\)/);
+  assert.match(device, /submit:\s*\(p\)\s*=>\s*submitReauthForm\(p,\s*reauthPurposeFor\(target\.scope\)\)/);
   assert.doesNotMatch(device, /account-withdraw/);
   const withdraw = callBlock(SETTINGS_FLOWS, 'leaveForReauth');
   assert.match(withdraw, /submit:\s*\(p\)\s*=>\s*submitReauthForm\(p,\s*'account-withdraw'\)/);

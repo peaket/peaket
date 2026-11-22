@@ -254,3 +254,31 @@ describe('파트너 초대 만들기·명단·해제·재발송 PostgreSQL [BAT-
     await expect(seedInvitation({ id: A14, token: 'db-dup-again', eventId: EVENT_DUP, role: 'gate_staff', status: 'INVITED', email: 'dup@example.com' })).rejects.toMatchObject({ code: '23505', constraint: 'staff_assignment_event_invite_email_key' });
   });
 });
+
+describe('I-T91 ⑤ 초대 조회·수락의 서버 몫 PostgreSQL(BUILD_ORDER F-05-7, ADR-0362 결정 1·2·4, 시험 담당)', () => {
+  const NAVER_ONLY = '0190f3a1-7c2e-7a00-8000-00000000f911';
+  const ELSEWHERE = '0190f3a1-7c2e-7a00-8000-00000000f912';
+  const MATCH = '0190f3a1-7c2e-7a00-8000-00000000f913';
+  const A91 = '0190f3a1-7c2e-7a00-8000-00000000f921';
+  const EVENT_91 = '0190f3a1-7c2e-7a00-8000-00000000f931';
+
+  test('I-T91 ⑤ 검증 이메일 없는 계정은 EMAIL_UNVERIFIED, 다른 이메일은 EMAIL_MISMATCH이고 배정은 INVITED로 남는다. 조회에는 eventId와 판 staff-2026-11-23이 있다', async () => {
+    await seedInvitation({ id: A91, token: 'db-i91', eventId: EVENT_91, role: 'gate_lead', status: 'INVITED', email: 'i91.staff@example.org' });
+    // 네이버만 연결한 계정: 이메일은 있어도 검증 표시가 없다(email_verified false)
+    await database.pool.query("insert into account (id, status, email, email_verified, created_at) values ($1, 'ACTIVE', $2, false, now())", [NAVER_ONLY, 'i91.staff@example.org']);
+    await database.pool.query("insert into account (id, status, email, email_verified, created_at) values ($1, 'ACTIVE', null, false, now())", [ELSEWHERE]);
+    await seedAccount(MATCH, 'i91.staff@example.org');
+    const look = await invitations.lookup('db-i91');
+    expect(look).toMatchObject({ eventId: EVENT_91, role: 'gate_lead', consents: { consentVersion: 'staff-2026-11-23' } });
+    const body = { inviteToken: 'db-i91', consentCollection: true, consentProvision: true, consentVersion: 'staff-2026-11-23' };
+    await expect(invitations.accept({ ...body, accountId: NAVER_ONLY })).rejects.toMatchObject({ code: 'EMAIL_UNVERIFIED' });
+    await expect(invitations.accept({ ...body, accountId: ELSEWHERE })).rejects.toMatchObject({ code: 'EMAIL_UNVERIFIED' });
+    await expect(invitations.accept({ ...body, accountId: OTHER })).rejects.toMatchObject({ code: 'EMAIL_MISMATCH' });
+    const row = (await database.pool.query('select status, account_id, invite_email, consent_version from staff_assignment where id = $1', [A91])).rows[0];
+    expect(row).toEqual({ status: 'INVITED', account_id: null, invite_email: 'i91.staff@example.org', consent_version: null });
+    // 옛 판은 CONSENT_OUTDATED, 새 판이면 같은 이메일이 검증된 계정이 수락한다
+    await expect(invitations.accept({ ...body, accountId: MATCH, consentVersion: 'staff-2026-11-13' })).rejects.toMatchObject({ code: 'CONSENT_OUTDATED' });
+    await expect(invitations.accept({ ...body, accountId: MATCH })).resolves.toMatchObject({ assignmentId: A91, status: 'ASSIGNED' });
+    expect((await database.pool.query('select consent_version from staff_assignment where id = $1', [A91])).rows[0].consent_version).toBe('staff-2026-11-23');
+  });
+});

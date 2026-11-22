@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { SCR017_STATES } from '../../../shared/config/screens.account.ts';
 import { settingsView } from './state.ts';
-import { returnOnMount, resumeDeviceLogout } from './devices.ts';
+import { returnOnMount, resumeDeviceLogout, scannerSectionView } from './devices.ts';
 import { markPending as markDevicePending } from '../../../features/device-sessions/flow.ts';
 import { markPending as markWithdrawPending } from '../../../features/account-withdraw/flow.ts';
 
@@ -139,6 +139,81 @@ test('I-T74_설정화면은돌아오기·원격로그아웃을위모델로잇고
   assert.match(FLOWS, /otherLoginsOf\(liveRows\)/);
   assert.match(FLOWS, /이 기기의 다른 로그인 끝내기/);
   assert.match(FLOWS, /로그인한 기기를 불러오지 못했습니다/);
-  // 실제 흐름에는 현장 스캐너 안내 띠가 없다(스캐너 세션은 이 API에 없다, BUILD_ORDER GAT-230)
-  assert.match(PAGE, /live \? null : \(\s*<div className="banner banner-info"/);
+  // 목업 띠·아래 줄은 미리보기에만 그리고, 실제 흐름의 띠·아래 줄은 스캐너 세션 목록으로 정한 보기 값(scannerSectionView)을 그린다
+  // (d5 §5.17 '스태프 세션', I-T90 ①: 실제 흐름도 스캐너 세션이 한 줄이면 띠를 보인다. BUILD_ORDER F-05-7 시험 담당이 정본에 맞춰 고침)
+  assert.match(PAGE, /live \? null : \(\s*<>/);
+  assert.match(FLOWS, /scanner: devicesApi \? scannerSectionView\(scannerAnswer\) : null/);
+  assert.match(FLOWS, /\{view\.banner \? \(\s*<div className="banner banner-info"[^>]*>\s*<i className="ic ic-info" aria-hidden="true" \/>\s*<div className="banner-body">\{view\.banner\}<\/div>/);
+  assert.match(FLOWS, /\{view\.footer\}/);
+});
+
+// ---- I-T90 ①③④: 현장 스캐너 세션 줄(BUILD_ORDER F-05-7 = GAT-230, d5 §5.17 '스태프 세션', ADR-0362 결정 7, 시험 담당) ----
+// 문구는 identity §12 I-T90의 글을 그대로 적었다(코드 상수를 가져오지 않는다).
+const SC = {
+  sessionId: '0190f3a1-7c2e-7a00-8000-00000000c917',
+  deviceName: '서문-14',
+  eventId: '0190f3a1-7c2e-7a00-8000-00000000e917',
+  role: 'gate_lead',
+  proxy: false,
+  approvedAt: '2026-12-04T05:00:00.000Z',
+  expiresAt: '2026-12-04T13:00:00.000Z',
+  lastSeenAt: null,
+};
+
+test('I-T90 ① 스캐너 세션이 한 줄이면 스태프 세션 줄·안내 띠·아래 줄이 보인다 [ASVS v5.0.0-7.5.2]', () => {
+  assert.deepEqual(scannerSectionView({ kind: 'ok', items: [SC] }), {
+    rows: [{ id: SC.sessionId, name: '현장 스캐너 서문-14', icon: 'scan', tag: '스태프 세션' }],
+    banner: '휴대폰에서 로그아웃해도 스캐너 세션은 따로 끝내야 합니다',
+    failed: null,
+    footer: '다른 기기 로그아웃·스캐너 세션 끝내기 전에 한 번 더 로그인해 확인합니다',
+  });
+  // 이름이 null이면 '현장 스캐너'
+  assert.equal(scannerSectionView({ kind: 'ok', items: [{ ...SC, deviceName: null }] }).rows[0].name, '현장 스캐너');
+  // 줄은 기기 목록 끝에 붙는다
+  assert.match(FLOWS, /sessions=\{scanner && !devicesLoading \? \[\.\.\.devices, \.\.\.scanner\.rows\] : devices\}/);
+});
+
+test('I-T90 ① 빈 목록이면 줄과 띠가 없고 아래 줄은 다른 기기 로그아웃만 말한다', () => {
+  const empty = { rows: [], banner: null, failed: null, footer: '다른 기기에서 로그아웃하기 전에 한 번 더 로그인해 확인합니다' };
+  assert.deepEqual(scannerSectionView({ kind: 'ok', items: [] }), empty);
+  // 읽는 중(답 없음)도 같다
+  assert.deepEqual(scannerSectionView(null), empty);
+});
+
+test('I-T90 ④ 스캐너 목록만 401이 아닌 이유로 실패하면 기기 목록은 그대로 그리고 스캐너 줄 자리에 실패 안내와 [다시 불러오기]를 보인다', () => {
+  assert.deepEqual(scannerSectionView({ kind: 'error' }), { rows: [], banner: null, failed: '현장 스캐너 세션을 불러오지 못했습니다', footer: '다른 기기에서 로그아웃하기 전에 한 번 더 로그인해 확인합니다' });
+  // 실패 안내 옆 [다시 불러오기]는 스캐너 목록만 다시 부른다. 401은 기기 목록과 같은 로그인 화면 규칙이다
+  assert.match(FLOWS, /\{view\.failed\}\s*<\/p>\s*<button className="btn btn-outline btn-sm" type="button" onClick=\{onReload\}>\s*다시 불러오기/);
+  assert.match(FLOWS, /reloadScanner: \(\) => void loadScanner\(\)/);
+  assert.match(FLOWS, /const r = await devicesApi\.listScanner\(\);\s*(\/\/[^\n]*\n\s*)?if \(r\.kind === 'login'\) toLogin\(\);/);
+});
+
+test('I-T90 ③ 돌아와 받은 재인증 토큰으로 스캐너 세션을 끝낸다: 204 끝냄·404 이미 끝남·403 재인증 창 만료 문구·그 밖은 잠시 뒤 다시이고, 기기 끝내기는 부르지 않는다 [ASVS v5.0.0-7.5.2]', async () => {
+  const pending = { sessionId: SC.sessionId, name: '현장 스캐너 서문-14', scope: 'scanner', at: 1000 };
+  const seen = [];
+  const run = (end) =>
+    resumeDeviceLogout({
+      pending,
+      pickup: async () => ({ kind: 'token', token: 'tok-sc' }),
+      end: async (id, tok) => (seen.push(['device', id, tok]), { kind: 'done' }),
+      endScanner: async (id, tok) => (seen.push(['scanner', id, tok]), end),
+    });
+  assert.deepEqual(await run({ kind: 'done' }), { kind: 'toast', text: '현장 스캐너 서문-14의 스태프 세션을 끝냈습니다', icon: 'ic-check' });
+  assert.deepEqual(seen, [['scanner', SC.sessionId, 'tok-sc']]);
+  assert.deepEqual(await run({ kind: 'gone' }), { kind: 'toast', text: '이미 끝난 스캐너 세션입니다', icon: 'ic-info' });
+  assert.deepEqual(await run({ kind: 'reauth' }), { kind: 'reauth-failed', text: '다시 로그인한 확인이 만료되었거나 이미 쓰였습니다. 다시 로그인해 주세요', target: pending });
+  assert.deepEqual(await run({ kind: 'error' }), { kind: 'toast', text: '지금은 로그아웃할 수 없습니다. 잠시 뒤 다시 시도해 주세요', icon: 'ic-alert-circle' });
+  assert.deepEqual(await run({ kind: 'login' }), { kind: 'login' });
+  assert.ok(seen.every(([k]) => k === 'scanner'), '범위 scanner는 DELETE /v1/identity/sessions로 가지 않는다');
+  // 화면은 끝낸 뒤(로그인 화면 밖이면) 두 목록을 다시 부른다
+  assert.match(FLOWS, /endScanner: \(sessionId, reauthToken\) => devicesApi!\.endScanner\(sessionId, reauthToken\)/);
+  assert.match(FLOWS, /const reloadLists = \(\) => Promise\.all\(\[loadDevices\(\), loadScanner\(\)\]\)/);
+});
+
+test('I-T90 ③ 표시는 결과와 상관없이 한 번 읽으면 지워져 새로고침 뒤 다시 보내지 않는다', () => {
+  const s = memoryStore();
+  markDevicePending(s, { sessionId: SC.sessionId, name: '현장 스캐너 서문-14', scope: 'scanner', at: 1000 });
+  assert.deepEqual(returnOnMount(s, 2000, { devices: true, withdraw: true }), { kind: 'device', pending: { sessionId: SC.sessionId, name: '현장 스캐너 서문-14', scope: 'scanner', at: 1000 } });
+  assert.equal(s.m.size, 0);
+  assert.equal(returnOnMount(s, 2001, { devices: true, withdraw: true }), null);
 });

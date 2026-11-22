@@ -2,7 +2,7 @@
 // 가짜 fetch·저장소로 본다.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chooseReturn, createDevicesApi, endResultText, leaveForDeviceReauth, markPending, otherLoginsOf, PENDING_KEY, PENDING_TTL_MS, takePending, toDeviceSessions } from './flow.ts';
+import { chooseReturn, createDevicesApi, endResultText, leaveForDeviceReauth, markPending, otherLoginsOf, PENDING_KEY, PENDING_TTL_MS, reauthPurposeFor, scannerRowName, takePending, toDeviceSessions, toScannerSessions } from './flow.ts';
 
 const json = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const problem = (status, type) => json(status, { type: `https://peaket.example/problems/${type}`, status });
@@ -220,4 +220,99 @@ test('I-T74_[로그아웃]의재인증으로떠나기는갱신뒤표시를남기
   assert.deepEqual(await run('rejected'), { out: 'login', pending: undefined, submitted: [] });
   assert.deepEqual(await run('unavailable'), { out: 'retry', pending: undefined, submitted: [] });
   assert.deepEqual(await run('ok', { cancelled: true }), { out: 'cancelled', pending: undefined, submitted: [] });
+});
+
+// ---- I-T90 ②③: 현장 스캐너 세션 줄(BUILD_ORDER F-05-7 = GAT-230, d5 §5.17 '스태프 세션', ADR-0362 결정 7, 시험 담당) ----
+// 응답 모양은 openapi ScannerSessionSelf, 탭 저장소 키·범위 값은 docs/frontend.md §3.12 `peaket.devices.reauth`(device·others·scanner)다.
+const SCANNER = {
+  sessionId: '0190f3a1-7c2e-7a00-8000-00000000c901',
+  deviceName: '서문-14',
+  eventId: '0190f3a1-7c2e-7a00-8000-00000000e901',
+  role: 'gate_lead',
+  proxy: false,
+  approvedAt: '2026-12-04T05:00:00.000Z',
+  expiresAt: '2026-12-04T13:00:00.000Z',
+  lastSeenAt: '2026-12-04T06:10:00.000Z',
+};
+
+test('I-T90 ② 스캐너 줄의 재인증 표시는 범위 scanner·ID·이름·시각만 남긴다 [ASVS v5.0.0-14.3.3]', async () => {
+  const s = memoryStore();
+  const submitted = [];
+  const out = await leaveForDeviceReauth({
+    api: { refresh: async () => 'ok' },
+    storage: s,
+    now: () => 7777,
+    provider: 'google',
+    pickProvider: async () => null,
+    target: { sessionId: SCANNER.sessionId, name: '현장 스캐너 서문-14', scope: 'scanner' },
+    // 화면은 이 자리에서 범위의 purpose로 양식을 보낸다(SettingsFlows, account-withdraw I-T85 ⑤-1)
+    submit: (p) => submitted.push([p, reauthPurposeFor('scanner')]),
+    cancelled: () => false,
+  });
+  assert.equal(out, 'left');
+  assert.deepEqual(submitted, [['google', 'scanner-session-end']]);
+  // 키는 docs/frontend.md §3.12의 이름, 값은 넷뿐(토큰 없음)
+  assert.equal(PENDING_KEY, 'peaket.devices.reauth');
+  assert.deepEqual(JSON.parse(s.m.get('peaket.devices.reauth')), { sessionId: SCANNER.sessionId, name: '현장 스캐너 서문-14', scope: 'scanner', at: 7777 });
+  // 한 번 읽으면 지워진다(새로고침 뒤 다시 보내지 않는다)
+  assert.deepEqual(takePending(s, 7777), { sessionId: SCANNER.sessionId, name: '현장 스캐너 서문-14', scope: 'scanner', at: 7777 });
+  assert.equal(s.m.size, 0);
+  assert.equal(takePending(s, 7777), null);
+});
+
+test('I-T90 ② 재인증 purpose는 스캐너 범위만 scanner-session-end이고 기기·이 기기의 다른 로그인은 session-end다', () => {
+  assert.equal(reauthPurposeFor('scanner'), 'scanner-session-end');
+  assert.equal(reauthPurposeFor('device'), 'session-end');
+  assert.equal(reauthPurposeFor('others'), 'session-end');
+});
+
+test('I-T90 ③ 스캐너 세션 목록은 GET /v1/identity/scanner-sessions를 쿠키와 no-store로 부르고 줄을 그대로 준다', async () => {
+  const ok = fakeFetch(() => json(200, { items: [SCANNER] }));
+  assert.deepEqual(await createDevicesApi({ origin: 'https://api.test', fetch: ok }).listScanner(), { kind: 'ok', items: [SCANNER] });
+  assert.equal(ok.calls[0].url, 'https://api.test/v1/identity/scanner-sessions');
+  assert.equal(ok.calls[0].method, 'GET');
+  assert.equal(ok.calls[0].credentials, 'include');
+  assert.equal(ok.calls[0].cache, 'no-store');
+  // lastSeenAt이 없으면 null, proxy가 없으면 false
+  const bare = { ...SCANNER, lastSeenAt: undefined, proxy: undefined };
+  const r = await createDevicesApi({ origin: '', fetch: fakeFetch(() => json(200, { items: [bare] })) }).listScanner();
+  assert.deepEqual(r, { kind: 'ok', items: [{ ...SCANNER, lastSeenAt: null, proxy: false }] });
+  // 모양이 틀리면·5xx·끊김은 error, 401 뒤 갱신도 401은 login
+  assert.deepEqual(await createDevicesApi({ origin: '', fetch: fakeFetch(() => json(200, { items: [{ ...SCANNER, role: 'admin' }] })) }).listScanner(), { kind: 'error' });
+  assert.deepEqual(await createDevicesApi({ origin: '', fetch: fakeFetch(() => json(503)) }).listScanner(), { kind: 'error' });
+  assert.deepEqual(await createDevicesApi({ origin: '', fetch: async () => { throw new TypeError('끊김'); } }).listScanner(), { kind: 'error' });
+  assert.deepEqual(await createDevicesApi({ origin: '', fetch: fakeFetch(() => json(401)) }).listScanner(), { kind: 'login' });
+});
+
+test('I-T90 ③ 스캐너 세션 끝내기는 DELETE /v1/identity/scanner-sessions/{id}에 X-Reauth-Token을 싣고 204·404·403·그 밖으로 가른다 [ASVS v5.0.0-7.5.2]', async () => {
+  const done = fakeFetch(() => new Response(null, { status: 204 }));
+  assert.deepEqual(await createDevicesApi({ origin: 'https://api.test', fetch: done }).endScanner(SCANNER.sessionId, 'tok-sc'), { kind: 'done' });
+  assert.equal(done.calls[0].url, `https://api.test/v1/identity/scanner-sessions/${SCANNER.sessionId}`);
+  assert.equal(done.calls[0].method, 'DELETE');
+  assert.equal(done.calls[0].headers['x-reauth-token'], 'tok-sc');
+  const api = (r) => createDevicesApi({ origin: '', fetch: fakeFetch(() => r) });
+  assert.deepEqual(await api(problem(404, 'session-not-found')).endScanner('x', 't'), { kind: 'gone' });
+  assert.deepEqual(await api(problem(403, 'reauth-required')).endScanner('x', 't'), { kind: 'reauth' });
+  assert.deepEqual(await api(json(500)).endScanner('x', 't'), { kind: 'error' });
+  // 범위 device·others의 끝내기는 지금처럼 /v1/identity/sessions/로 간다
+  const dev = fakeFetch(() => new Response(null, { status: 204 }));
+  await createDevicesApi({ origin: '', fetch: dev }).end(ROW.sessionId, 't');
+  assert.equal(dev.calls[0].url, `/v1/identity/sessions/${ROW.sessionId}`);
+});
+
+test('I-T90 ① 스캐너 줄은 현장 스캐너 {기기 이름}(이름이 없으면 현장 스캐너)이고 스태프 세션 꼬리표를 단다', () => {
+  assert.equal(scannerRowName({ deviceName: '서문-14' }), '현장 스캐너 서문-14');
+  assert.equal(scannerRowName({ deviceName: null }), '현장 스캐너');
+  assert.deepEqual(toScannerSessions([SCANNER, { ...SCANNER, sessionId: 'b', deviceName: null }]), [
+    { id: SCANNER.sessionId, name: '현장 스캐너 서문-14', icon: 'scan', tag: '스태프 세션' },
+    { id: 'b', name: '현장 스캐너', icon: 'scan', tag: '스태프 세션' },
+  ]);
+});
+
+test('I-T90 ③ 스캐너 끝내기 결과 토스트: 204 끝냄·404 이미 끝남·그 밖은 잠시 뒤 다시(d5 §5.17)', () => {
+  const t = { name: '현장 스캐너 서문-14', scope: 'scanner' };
+  assert.deepEqual(endResultText({ kind: 'done' }, t), { text: '현장 스캐너 서문-14의 스태프 세션을 끝냈습니다', icon: 'ic-check' });
+  assert.deepEqual(endResultText({ kind: 'gone' }, t), { text: '이미 끝난 스캐너 세션입니다', icon: 'ic-info' });
+  assert.equal(endResultText({ kind: 'error' }, t).text, '지금은 로그아웃할 수 없습니다. 잠시 뒤 다시 시도해 주세요');
+  assert.equal(endResultText({ kind: 'reauth' }, t), null);
 });

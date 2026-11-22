@@ -71,8 +71,9 @@ describe('StaffInvitations [GAT-210]', () => {
   });
 
   test('I-T21 수락은 검증 이메일 일치·두 동의·같은 동의 판을 요구하고, 성공하면 ASSIGNED가 된다', async () => {
+    // 제공자가 검증 표시를 주지 않은 이메일은 '검증 이메일 없음'이다(ADR-0362 결정 4, I-T91 ⑤)
     store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: false });
-    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_MISMATCH' });
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_UNVERIFIED' });
     store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: true });
     store.accounts.set(OTHER, { email: 'other@example.com', verified: true });
     await expect(invitations.accept(accept({ accountId: OTHER }))).rejects.toMatchObject({ code: 'EMAIL_MISMATCH' });
@@ -177,13 +178,50 @@ describe('StaffInvitations [GAT-210]', () => {
   });
 
   test('I-T21 ⑫ 네이버만 연결한 계정(검증 이메일 없음)은 수락이 403이고, 검증된 같은 이메일 계정은 수락된다', async () => {
-    // 네이버만 연결한 계정은 이메일 검증 표시가 없다(identity §2.1). 수락은 403 EMAIL_MISMATCH로 닫고 배정을 남기지 않는다.
+    // 네이버만 연결한 계정은 이메일 검증 표시가 없다(identity §2.1). 수락은 403 EMAIL_UNVERIFIED(staff-invitation-email-unverified)로 닫고
+    // 배정을 남기지 않는다(ADR-0362 결정 4, I-T91 ⑤). 이메일 칸 자체가 없는 계정도 같다.
     store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: false });
-    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_MISMATCH' });
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_UNVERIFIED' });
+    store.accounts.set(ACCOUNT, { verified: false });
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_UNVERIFIED' });
     expect(store.assignments.get('a-1')).toMatchObject({ status: 'INVITED', accountId: null });
     expect(store.assignments.get('a-1')?.inviteEmail).toBe('staff@example.com');
     // 구글·카카오로 같은 이메일이 검증된 계정은 수락한다
     store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: true });
     await expect(invitations.accept(accept())).resolves.toMatchObject({ assignmentId: 'a-1', status: 'ASSIGNED' });
+  });
+});
+
+describe('I-T91 ⑤ 초대 조회·수락의 서버 몫(BUILD_ORDER F-05-7, ADR-0362 결정 1·2·4)', () => {
+  test('I-T91 ⑤ 검증 이메일 없는 계정은 EMAIL_UNVERIFIED, 다른 이메일은 EMAIL_MISMATCH이고 두 경우 모두 배정은 INVITED로 남는다', async () => {
+    store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: false });
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_UNVERIFIED' });
+    expect(store.assignments.get('a-1')).toMatchObject({ status: 'INVITED', accountId: null, inviteEmail: 'staff@example.com', inviteTokenHash: hash(TOKEN) });
+    store.accounts.set(ACCOUNT, { email: 'someone-else@example.com', verified: true });
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_MISMATCH' });
+    expect(store.assignments.get('a-1')).toMatchObject({ status: 'INVITED', accountId: null, inviteEmail: 'staff@example.com', inviteTokenHash: hash(TOKEN) });
+    expect(store.assignments.get('a-1')?.consentVersion).toBeUndefined();
+  });
+
+  test('I-T91 ⑤ 조회 응답에 eventId가 있고 고지 원문은 04-ia §3 SCR-050 ③④의 항목 줄이며 판은 staff-2026-11-23이다', async () => {
+    const v = await invitations.lookup(TOKEN);
+    expect(v.eventId).toBe(EVENT);
+    // 판과 문안은 정본 글을 그대로 적는다(코드 상수를 기대값으로 쓰지 않는다)
+    expect(v.consents.consentVersion).toBe('staff-2026-11-23');
+    expect(v.consents.collection.split('\n')).toEqual(['목적: 현장 검표 배정과 스캔 기록', '항목: 계정 ID·닉네임·역할·스캔 기록', '보유: 회차 종료 뒤 1년', '거부권과 불이익: 배정 불가']);
+    expect(v.consents.provision.split('\n')).toEqual([
+      '받는 자: 그 회차의 파트너',
+      '목적: 현장 인력 관리',
+      '항목: 닉네임·역할·수락 여부·스캔·예외 통과 건수',
+      '보유: 회차가 끝나고 1년까지(배정 원장과 같다)',
+      '거부권과 불이익: 배정 불가',
+    ]);
+  });
+
+  test('I-T91 ⑤ 옛 판 staff-2026-11-13으로 보낸 수락은 CONSENT_OUTDATED이고 배정은 INVITED로 남으며, 새 판이면 수락된다', async () => {
+    await expect(invitations.accept(accept({ consentVersion: 'staff-2026-11-13' }))).rejects.toMatchObject({ code: 'CONSENT_OUTDATED' });
+    expect(store.assignments.get('a-1')).toMatchObject({ status: 'INVITED', accountId: null });
+    await expect(invitations.accept(accept({ consentVersion: 'staff-2026-11-23' }))).resolves.toMatchObject({ assignmentId: 'a-1', status: 'ASSIGNED' });
+    expect(store.assignments.get('a-1')).toMatchObject({ consentVersion: 'staff-2026-11-23' });
   });
 });
