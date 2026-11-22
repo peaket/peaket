@@ -4,6 +4,7 @@ import { Fragment, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { Overlay } from '@/shared/ui/Overlay';
 import type { DashCtx } from './ctx';
+import { markPendingCells } from './source-marks';
 import { AlertPanel } from '@peaket/ds/ConsoleShell';
 import { DECISION_ORDER } from '@/entities/alert';
 import { renderRouterLink } from '@/shared/ui/RouterLink';
@@ -101,7 +102,8 @@ type V = ReturnType<typeof valsD>;
 // <main class="cs-main" id="main" style="gap:12px">
 export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCtx }) {
   void v; void close; void ctx;
-  return (
+  // 실제 값 화면이면 보드가 직접 그린 칸(원천이 붙기 전)마다 '원천 연결 전' 표지를 단다(docs/frontend.md §5.7)
+  const board = (
     <>
     <div className="row between" style={{ gap: "12px 24px", alignItems: "flex-end", flexWrap: "wrap" }}>
       <div className="col" style={{ gap: "6px", minWidth: "0" }}>
@@ -2740,6 +2742,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
     ) : null}
     </>
   );
+  return ctx.live ? markPendingCells(board) : board;
 }
 
 export function OverlaysD({ v, close }: { v: V; close?: () => void }) {

@@ -46,6 +46,8 @@ export interface AlertPanelProps {
   allHref: string;
   style?: CSSProperties;
   renderLink?: RenderLink;
+  /** 참이면 원천이 아직 붙지 않은 칸이다(관제 실제 값 화면의 고정 자료). data-source="pending"과 머리의 '원천 연결 전' 배지를 단다(docs/frontend.md §5.7) */
+  pending?: boolean;
 }
 
 function Links({ links, renderLink }: { links?: ConsoleAlertLink[]; renderLink?: RenderLink }) {
@@ -134,11 +136,12 @@ export function AlertPanel(props: AlertPanelProps) {
   const { id, renderLink } = props;
   const sev1 = props.sev1 ?? [];
   return (
-    <section className="widget" role="region" aria-labelledby={id} style={props.style}>
+    <section className="widget" role="region" aria-labelledby={id} data-source={props.pending ? 'pending' : undefined} style={props.style}>
       <div className="widget-head">
         <h2 className="t-sm fw-b" id={id}>
           {props.title ?? '경보 패널'}
         </h2>
+        {props.pending ? <span className="badge badge-outline">원천 연결 전</span> : null}
         <div className="actions">
           {renderLinkOrAnchor(renderLink, {
             href: props.allHref,
