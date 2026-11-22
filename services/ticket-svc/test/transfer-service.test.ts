@@ -230,7 +230,7 @@ describe('기한 지난 요청의 표시 해제(RV-01)', () => {
     const t = await issue(tickets);
     const first = await transfers.createOffer({ ticketId: t.ticketId, accountId: PAYER, sessionId: 's1', reauthToken: 'r', recipientRef: ref(FRIEND), idempotencyKey: '0193f2c0-0000-7000-8000-0000000000f1' });
     clock.advance(49 * HOUR);
-    const second = await transfers.createOffer({ ticketId: t.ticketId, accountId: PAYER, sessionId: 's1', reauthToken: 'r', recipientRef: ref(FRIEND), idempotencyKey: '0193f2c0-0000-7000-8000-0000000000f2' });
+    const second = await transfers.createOffer({ ticketId: t.ticketId, accountId: PAYER, sessionId: 's1', reauthToken: 'r', recipientRef: ref(FRIEND, clock.now() + 10 * 60_000), idempotencyKey: '0193f2c0-0000-7000-8000-0000000000f2' });
     expect(second.status).toBe('OFFERED');
     expect(store.offers.get(first.offerId)?.status).toBe('EXPIRED');
     expect(tickets.tickets.get(t.ticketId)?.transferPending).toBe(true);

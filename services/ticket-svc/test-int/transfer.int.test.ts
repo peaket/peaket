@@ -174,6 +174,6 @@ describe('만료·같은 키 경합(RV-01·RV-04)', () => {
 describe('받는 사람 참조', () => {
   test('10분 참조는 계정을 가리키고 만료되면 받지 않는다', () => {
     const ref = signRecipientRef({ secret: 's', accountId: FRIEND, expiresAtMs: NOW + 600_000 });
-    expect(ref.split('.')).toHaveLength(2);
+    expect(ref.split('.')).toHaveLength(3);
   });
 });
