@@ -193,6 +193,22 @@ describe('부정 예매 양도 잠금(ticket-svc 몫)', () => {
     ).rejects.toMatchObject({ code: 'TRANSFER_LOCKED' });
   });
 
+  it('R-T31 ③ 잠긴 표도 결제자의 예매 취소는 진행된다(잠금은 양도만 막는다)', async () => {
+    const { tickets, store } = setup();
+    const t = await issue(tickets);
+    await store.setTransferLock({ caseId: '0193f2c0-0000-7000-8000-0000000000aa', version: 1, locked: true, eventId: EVENT, accountIds: [PAYER], expiresAtMs: NOW + 14 * 24 * HOUR, nowMs: NOW });
+    const out = await tickets.cancel({
+      orderId: `0193f2c0-0000-7000-8000-${t.ticketId.slice(-12)}`,
+      ticketIds: [t.ticketId],
+      requestedByAccountId: PAYER,
+      cancellationId: '0193f2c0-0000-7000-8000-0000000000f9',
+      nowMs: NOW,
+    });
+    expect(out[0]?.result).toBe('REFUND_NOW');
+    expect(tickets.tickets.get(t.ticketId)?.status).toBe('REFUNDED');
+    expect(tickets.tickets.get(t.ticketId)?.fraudLockCaseId).toBe('0193f2c0-0000-7000-8000-0000000000aa');
+  });
+
   it('R-T31 ④ 같은 판은 한 번만 반영하고 옛 판의 풀기는 무시한다', async () => {
     const { tickets, store } = setup();
     const t = await issue(tickets);
