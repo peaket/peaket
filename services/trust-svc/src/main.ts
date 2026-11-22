@@ -3,7 +3,7 @@
 // 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(TrustService.ScoreRisk, TrustLabelService.ApplyLabel, TrustEvidenceService.GetVerdictEvidence)는 이 파일이 연다.
 // 비공개 규칙 설정을 읽어야 준비 상태가 된다(docs/features/bot-defense.md §4.4). 기준값·가중치는 파일로만 받고 저장소에 두지 않는다(POL-006).
 import 'reflect-metadata';
-import { CircuitBreaker, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, controlSyncRequired, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { startGrpcServer } from './grpc-server.js';
 import {
@@ -153,8 +153,13 @@ await rulesLoop.first;
 
 // 제어 설정 토픽(로그 레벨·온세일 로그 표본, ADR-0334 결정 2): 듣기 전에 control.settings를 읽기 시작한다(다 읽어야 /ready 200).
 // 신원 처리기가 없어(공개 미끼 경로만) 종료 세션 토픽은 읽지 않는다(ADR-0333 결정 1, docs/features/identity.md §3 '서비스에 잇기').
-// 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다. 이 도우미가 Kafka 클라이언트(네이티브 모듈)를 싣는다. 서비스를 닫은 뒤 끈다
-const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
+// 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다. 이 도우미가 Kafka 클라이언트(네이티브 모듈)를 싣는다. 서비스를 닫은 뒤 끈다.
+// 모듈을 싣지 못하면 소비가 꼭 있어야 할 때(controlSyncRequired)만 시작을 멈추고, local·ci에 브로커가 없으면 경고만 남기고 뜬다(위 텔레메트리와 같은 꼴, ADR-0249 결정 4)
+const { startServiceControlSync } = await import('@peaket/platform/stream-worker').catch((err: unknown): Pick<typeof import('@peaket/platform/stream-worker'), 'startServiceControlSync'> => {
+  if (controlSyncRequired(env)) throw err;
+  service.logger.warn({ dep: 'kafka', kind: 'control-sync', err }, 'Kafka 클라이언트를 싣지 못해 제어 설정 토픽 소비를 켜지 않았다: 로그 레벨·로그 표본 설정을 이 서비스가 받지 않는다(local·ci, 브로커 없음)');
+  return { startServiceControlSync: () => undefined };
+});
 const controlSync = startServiceControlSync(service, env, { sessions: false });
 
 await service.listen();

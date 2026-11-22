@@ -43,6 +43,20 @@ export type GrpcLbProfile = (typeof GRPC_LB_PROFILES)[number];
 /** headless-round-robin을 받는 환경(운영 오버레이 검사 D-T28보다 앞의 막이) */
 export const HEADLESS_ROUND_ROBIN_ALLOWED: readonly PeaketEnv[] = ['local', 'ci'];
 
+/** 브로커 주소(PEAKET_KAFKA_BROKERS) 없이 제어 토픽 소비를 끄고 떠도 되는 환경(kafkaAuthFromEnv가 평문을 허락하는 환경과 같다, ADR-0333 결정 2·ADR-0334 결정 2) */
+export const CONTROL_SYNC_OPTIONAL_ENVS: readonly PeaketEnv[] = ['local', 'ci'];
+
+/**
+ * 제어 토픽 소비(`@peaket/platform/stream-worker`의 startServiceControlSync)가 꼭 있어야 하는지. 브로커 주소가 있거나
+ * local·ci가 아니면(PEAKET_ENV 없음 포함) true다. controlSyncConfigFromEnv도 이 판정을 쓴다.
+ * 서비스 시작 파일은 false일 때만 그 하위 내보내기(Kafka 네이티브 모듈)를 싣지 못해도 경고로 넘기고 뜬다(ADR-0249 결정 4와 같은 꼴)
+ */
+export function controlSyncRequired(env: Record<string, string | undefined>): boolean {
+  if (env.PEAKET_KAFKA_BROKERS?.trim()) return true;
+  const peaketEnv = env.PEAKET_ENV;
+  return peaketEnv === undefined || !(CONTROL_SYNC_OPTIONAL_ENVS as readonly string[]).includes(peaketEnv);
+}
+
 export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 export type LogLevelName = (typeof LOG_LEVELS)[number];
 

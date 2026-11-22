@@ -1,6 +1,6 @@
 // @peaket/platform: 서비스(NestJS·Fastify) 공용 시작 코드(docs/architecture.md §10, openspec 변경 add-service-template).
 export { CLOCK, fakeClock, systemClock, type Clock, type FakeClock } from './clock.js';
-export { DEBUG_ERRORS_ALLOWED, DEFAULT_GRPC_PORT, GRPC_PORT_ZERO_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PRODUCTION_PEAKET_ENVS, PlatformConfigError, isProductionLikeEnv, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
+export { CONTROL_SYNC_OPTIONAL_ENVS, DEBUG_ERRORS_ALLOWED, DEFAULT_GRPC_PORT, GRPC_PORT_ZERO_ALLOWED, HEADLESS_ROUND_ROBIN_ALLOWED, LOG_LEVELS, PEAKET_ENVS, PRODUCTION_PEAKET_ENVS, PlatformConfigError, controlSyncRequired, isProductionLikeEnv, loadPlatformConfig, type LogLevelName, type PeaketEnv, type PlatformConfig } from './config.js';
 export { currentDeadline, currentScannerDevice, requestContext, runInRequestContext, type RequestContext } from './context.js';
 export { ADMIN_AUTHZ_CACHE_MS, admitBeforeBody, COOKIE_CHALLENGE, CurrentPrincipal, INTERNAL_TOKEN, INTERNAL_TOKEN_REQUIRED, InternalTokenGuard, PASSWORD_CHANGE_SCOPE, ROLE_VALUES, ROUTE_ROLES_KEY, Roles, ScannerGuard, TERMINATED_SESSION_TTL_MS, currentPrincipal, type AdminAuthz, type AdminAuthzPort, type Audience, type Principal, type RoleValue, type RolesOptions } from './auth.js';
 export { constantTimeEqual } from './secret-compare.js';

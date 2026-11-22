@@ -11,7 +11,7 @@ import { hostname } from 'node:os';
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, propagation, trace, type Link } from '@opentelemetry/api';
 import type { Registry } from '@prometheus-io/client';
 import type { KafkaJS } from '@confluentinc/kafka-javascript';
-import { PlatformConfigError } from './config.js';
+import { PlatformConfigError, controlSyncRequired } from './config.js';
 import { startControlSync, type BroadcastRecord, type BroadcastSource, type ControlSync, type ControlSyncOptions } from './control.js';
 import { controlEventCodec } from './control-codec.js';
 import { kafkaAdminConfig, kafkaConsumerConfig, kafkaProducerConfig, type KafkaClientBase, type KafkaProducerKind } from './kafka-config.js';
@@ -522,8 +522,6 @@ export function kafkaBroadcastSource(o: KafkaBroadcastOptions): BroadcastSource 
 
 /** 브로커 주소 모양(loadOutboxRelayProcessConfig·서비스 소비자 설정과 같은 규칙) */
 const BROKER = /^[A-Za-z0-9.-]+:\d{1,5}$/;
-/** 브로커 주소 없이 떠도 되는 환경(kafkaAuthFromEnv가 평문을 허락하는 환경과 같다) */
-const CONTROL_SYNC_OPTIONAL_ENVS: readonly string[] = ['local', 'ci'];
 /** 파드 이름의 상한(소비자 그룹 `<서비스>-<파드>.<토픽>`와 클라이언트 ID에 들어간다) */
 const POD_NAME_MAX = 64;
 
@@ -541,7 +539,8 @@ export function controlSyncConfigFromEnv(service: string, env: Record<string, st
   const peaketEnv = env.PEAKET_ENV;
   const settingsOnly = o.sessions === false;
   if (!raw) {
-    if (peaketEnv !== undefined && CONTROL_SYNC_OPTIONAL_ENVS.includes(peaketEnv)) {
+    // 브로커 주소 없이 떠도 되는 환경인지는 controlSyncRequired 하나로 판정한다(서비스 시작 파일이 모듈 싣기 실패를 넘길지 고를 때도 쓴다)
+    if (!controlSyncRequired(env)) {
       const warning = settingsOnly
         ? `PEAKET_KAFKA_BROKERS가 없어 제어 설정 토픽 소비를 켜지 않았다: 로그 레벨·로그 표본 설정을 이 서비스가 받지 않는다(PEAKET_ENV=${peaketEnv}에서만 허락한다)`
         : `PEAKET_KAFKA_BROKERS가 없어 제어 토픽(설정·종료 세션) 소비를 켜지 않았다: 끝난 세션의 토큰을 이 서비스가 막지 않는다(PEAKET_ENV=${peaketEnv}에서만 허락한다)`;
