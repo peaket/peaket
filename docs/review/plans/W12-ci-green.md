@@ -48,6 +48,7 @@
 | 6 | `services/core-svc/test-int/sale-eligibility.int.test.ts` | `PEAKET_NOTIFY_DATABASE_URL` 환경 값, 정비 일 목록 단언에 알림 정비 넷 |
 | 7 | `services/core-svc/test-int/seatmap-editor.int.test.ts` | 같음 |
 | 8 | `services/core-svc/test-int/seatmap-save.int.test.ts` | 같음 |
+| 9 | `deploy/platform/mesh/test/mesh-policies.test.mjs` | 정본 표(`GRPC`)에 `BlockTicketIssuance: [purchase-svc]`(리뷰 뒤 CI가 잡은 RV-01) |
 
 - 정본 문서와 계약(`docs/api/proto`)은 고치지 않는다. 계약은 BAT-011이 이미 맞췄고, 이 묶음은 배포 정책 원천과 시험 환경만 따라잡는다.
 
@@ -56,6 +57,7 @@
 | 시험·검사 | 자리 | 단언 |
 | --- | --- | --- |
 | mesh 생성 대조(기존) | `tools/ci/mesh-policies.test.mjs`, `node tools/ci/mesh-policies.mjs --check` | 원천·라우트·proto로 다시 만든 생성 파일이 저장소와 같다. 구현 전에는 `BlockTicketIssuance` 한 줄이 모자라 실패하고, 원천을 고쳐 `--write`하면 통과한다 |
+| 메시 정본 표(기존) | `deploy/platform/mesh/test/mesh-policies.test.mjs` | proto의 모든 메서드에 부르는 쪽이 정본 표에 있고, 원천·생성 정책과 같다. 표에 `BlockTicketIssuance: [purchase-svc]`가 없으면 MS-08·MS-09가 실패한다 |
 | 시작 파일 환경(기존) | `services/core-svc/test-int/seatmap-save.int.test.ts`의 `PEAKET_PUBLIC_FILE_DIR이 없으면 뜨지 않고, …` | 발송기 연결을 준 뒤에는 `PEAKET_PUBLIC_FILE_DIR` 검사까지 닿아 그 값이 없을 때 그 이름을 출력한다. 고치기 전에는 `PEAKET_NOTIFY_DATABASE_URL`에서 멈춘다 |
 | 시작 파일 환경(기존) | `search-bat166`·`sale-eligibility`·`seatmap-editor`의 `시작 파일(main.ts) 조립` | 발송기 연결을 준 운영 시작 파일이 `/ready` 200까지 뜨고 원래 단언을 그대로 통과한다 |
 | 정비 일 목록(기존) | `sale-eligibility`의 `시작 파일(main.ts)과 relay 정비 일 조립` | `coreMaintenanceTasks`가 내는 이름·주기가 `CORE_MAINTENANCE_TASK_NAMES`와 같다. 알림 정비 넷을 더한 뒤 통과한다 |
@@ -85,7 +87,11 @@
 
 리뷰 담당 `w12green-review`(deepseek-v4.1-flash), 2026-11-23 00:17 KST. 받은 것은 `git diff origin/develop..a94973be8`(계획·시험·구현)과 이 계획 파일이다. 코드·생성물·정본을 대조하고 `mesh-policies --check`, `mesh-policies.test.mjs` 14/14, core-svc typecheck, 네 통합 시험 파일 98/98, `startup-db-role` 2/2를 다시 돌렸다. 코드는 고치지 않았다.
 
-결과: **막는 지적 0, 낮음 0**.
+결과: **막는 지적 0, 낮음 0**이었으나, 리뷰 뒤 CI가 메시 정본 표 누락 하나를 잡았다(RV-01, 고침).
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 막음(CI가 잡음) | `deploy/platform/mesh/test/mesh-policies.test.mjs`의 `GRPC` 표 | 원천 `port-allow.yaml`에는 `BlockTicketIssuance`를 더했지만 메시 시험의 정본 표에는 넣지 않아 MS-08·MS-09가 "정본 표에 peaket.ticket.v1.TicketService/BlockTicketIssuance의 부르는 쪽이 없다"로 실패했다. 리뷰가 이 표를 대조하지 못했다 | 표에 `BlockTicketIssuance: ['purchase-svc']`를 더한다. 원천·생성 정책과 같은 호출자다 |
 
 ### 확인한 것(지적 아님)
 

@@ -171,6 +171,7 @@ const GRPC = {
     'peaket.ticket.v1.TicketReclaimService': ['ops-svc'],
     'peaket.ticket.v1.TicketService': {
       IssueTickets: ['purchase-svc'],
+      BlockTicketIssuance: ['purchase-svc'],
       VoidTickets: ['purchase-svc'],
       CancelTickets: ['purchase-svc'],
       OperatorCancelTickets: ['purchase-svc'],
