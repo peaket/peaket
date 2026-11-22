@@ -162,7 +162,29 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+리뷰 담당 `lane3-bat450a-review`(deepseek-v4.1-flash), 2026-11-22 12:21 KST. 받은 것은 `git diff aa66c0d2..16ef6a41`(계획·시험·구현)과 이 계획 파일이다. 코드·시험·계약·정본을 대조했고, 시험·Docker는 돌리지 않았다. 코드는 고치지 않았다.
+
+결과: **높음 0, 중간 1(고침), 낮음 6(고침 1, 남은 위험 5)**. 보안 통제를 깨는 결함은 없고, C2-06·C2-07·C2-09와 동시 승인 경합의 고침 방향은 맞다.
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `docs/api/openapi.yaml` 5929·4703 | 컨트롤러가 409 `user-code-unavailable`·409 `device-approval-conflict`를 내는데 두 경로의 `responses`에 409가 없다. 문제 유형 목록에만 있어 소비자가 이 응답을 계약으로 알 수 없다 | 두 경로에 `'409'` Problem 응답과 설명을 더하고 생성물을 다시 만든다 |
+| RV-02 | 낮음 | `packages/platform/test/scanner-auth.test.ts` 324 | I-T25의 "gate_staff 토큰으로 gate_lead 전용 처리기를 부르면 403" 경로 시험이 ID 없이 있다. 이 묶음의 I-T25 ②는 OVERRIDE 한 작업만 본다 | 그 시험 이름에 `I-T25 ③`을 붙여 장부 범위의 근거를 넓힌다 |
+| RV-03 | 낮음 | `apps/scanner/src/api/device-login.ts` 60~65 | 409 `user-code-unavailable`를 일반 `http` 오류로 내보낸다. 화면은 서버 제목("확인 코드를 새로 받아 주세요")을 보이고 다시 시작은 사용자가 한다. 충돌 확률(20^8)과 서버 5회 재시도를 생각하면 급하지 않다 | 후속: `code_unavailable` 코드를 두고 `useDeviceLogin`이 곧바로 새 승인을 시작하게 한다 |
+| RV-04 | 낮음 | 이 파일 §6 I-T24, BUILD_ORDER 589 | I-T24의 "파트너 콘솔에서 배정 해제" 경로(`DELETE /v1/partner/staff/{assignmentId}`)는 BAT-450B 몫이다. 이 묶음은 배정이 REVOKED가 된 뒤의 서버 확인·세션 밖 기록·스캐너 종료를 본다 | GAT-220 단계 줄을 체크할 때 "해제 경로는 BAT-450B, 이 단계는 해제의 서버 확인"이라고 적는다. 체크하지 않는다면 그 이유로 적는다 |
+| RV-05 | 낮음 | `services/identity-svc/src/modules/session/adapters/db/drizzle-staff-assignment-store.ts` 234~238 | `23505`를 모두 `ScannerSessionConflict`로 바꾼다. 지금은 두 활성 세션 유일 인덱스가 원인이지만, 기본키 중복 같은 다른 23505도 409로 숨는다 | `cause.constraint`가 `scanner_session_device_active_key`·`scanner_session_account_active_key`일 때만 409로 바꾸고 나머지는 그대로 던진다 |
+| RV-06 | 낮음(남은 위험) | `packages/platform/src/request-url.ts`, `deploy/envs/local/demo/*` | `PEAKET_PUBLIC_ORIGIN`이 없으면 forwarded로 내려간다. 운영 배포 값에 이 값이 빠지면 C2-09의 방어가 꺼진다 | 운영 차트·환경 값에 값을 넣고, 비어 있으면 시작을 막는지는 BAT-450C/배포 묶음에서 정한다. 지금은 local 데모에만 넣었다 |
+| RV-07 | 낮음(남은 위험) | `redis-device-authorizations.ts` POLL | 승인 레코드를 토큰 서명 전에 지운다. 서명기가 실패하면 그 기기 코드로는 다시 받을 수 없다 | 서명 실패는 서버 오류이고 5분짜리 일회용 코드라 새 승인이 안전하다. 정본 §6.1과 이 파일 §3에 적었다. 서명 전에 지우지 않고 '소비 중' 상태를 두는 안은 후속 |
+| RV-08 | 낮음(남은 위험) | `memory-device-authorizations.ts` save | 메모리 저장소는 같은 기기 코드·같은 사용자 코드를 다시 저장하면 성공하지만 Redis는 `SET NX` 때문에 실패한다. 시작 경로는 항상 새 사용자 코드를 뽑아 차이가 드러나지 않는다 | 시험·로컬 전용 차이로 둔다. 운영은 Redis만 쓴다 |
+
+### 확인한 것(지적 아님)
+
+- C2-06: `SAVE`가 `SET NX`를 먼저 하고 실패하면 `HSET`을 하지 않는다. `StartDeviceAuthorization`은 기기 코드를 한 번 만들고 사용자 코드만 다섯 번까지 새로 뽑는다. 409 `user-code-unavailable`이 컨트롤러에 연결됐다.
+- C2-07: `POLL`의 `APPROVED` 분기가 레코드와 `id:devcode:{userCode}`를 함께 지운다. 지운 뒤 같은 기기 코드는 `EXPIRED`다. 동시 폴링은 Lua 하나가 먼저 지우므로 토큰이 하나만 나온다.
+- C2-09: 공개 출처가 있으면 `requestUrlOf`가 forwarded를 보지 않는다. identity 기기 승인·등록과 ticket `ScannerGuard`·기기 등록이 같은 공용 함수를 쓴다. `publicOriginFromEnv`는 경로·질의·조각·사용자 정보를 거절한다.
+- 동시 승인: `createScannerSession`의 23505를 `ScannerSessionConflict`로 바꾸고 `DeviceApprovals`가 `APPROVAL_CONFLICT`로 사상한다. 실제 PostgreSQL 강제 충돌 시험이 409 사상을 본다.
+- 시험이 약해지지 않았다: C2-06은 저장 반환·첫 레코드 보존·새 코드 재시도·409를, C2-07은 두 키 삭제·재폴링·동시 폴링을 값으로 본다. C2-09는 공개 출처가 forwarded를 이기는 경우와 지는 경우를 함께 본다.
+- I-T23·I-T24·I-T25·I-T37·I-T38·I-T39는 이름만 붙인 시험과 새 시험이 섞여 있다. 새 동작이 아닌 항목은 `## 검증`의 틀린 구현 표본으로 판정 능력을 본다.
 
 ## 검증
 
@@ -174,3 +196,5 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 | --- | --- | --- | --- | --- |
 | plan | lane3-bat450a-plan | deepseek-v4.1-flash | 2026-11-22T12:00:00+09:00 | 2026-11-22T12:04:00+09:00 |
 | test | lane3-bat450a-test | deepseek-v4.1-flash | 2026-11-22T12:05:00+09:00 | 2026-11-22T12:08:00+09:00 |
+| impl | lane3-bat450a-impl | deepseek-v4.1-flash | 2026-11-22T12:09:00+09:00 | 2026-11-22T12:20:00+09:00 |
+| review | lane3-bat450a-review | deepseek-v4.1-flash | 2026-11-22T12:21:00+09:00 | 2026-11-22T12:24:00+09:00 |
