@@ -75,6 +75,25 @@
 
 ## 리뷰
 
+리뷰 담당 `w12pt2-review`(deepseek-v4.1-flash), 2026-11-22 16:56 KST. 받은 것은 `git diff origin/develop..7819c5523`(계획·시험·구현)과 이 계획 파일이다. 코드·계약·생성물·정본을 대조했고 PRF192 2/2, `gateway-routes --check` 0, `gateway-routes.test.mjs` 41/41을 다시 돌렸다. 코드는 고치지 않았다.
+
+결과: **막는 지적 0**, 중간 1·낮음 2(남은 위험).
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간(남은 위험) | `services/core-svc/src/modules/notify/inbound/fan-notify.controller.ts:39`, `internal-notify-identity.controller.ts:47`, `application/dispatcher.ts:36`, `application/webhooks.ts:31`·`domain/webhook.ts:91~98` | 아직 `title: e.message`처럼 변수 제목을 공용 type에 싣는 자리가 남아 한 이름이 여러 제목을 낸다(예 `not-found`에 `회차를 찾을 수 없습니다`, `sale-ended`에 `판매가 끝났습니다`, `webhook-url-not-allowed`에 여섯 가지 사유). guidelines §2에 어긋나지만 PRF192는 제목이 글자 그대로인 객체만 읽어 보지 못한다. BAT-455에서 들어온 기존 어긋남이고 이 묶음이 만든 것이 아니다 | 후속 묶음에서 표준 제목 + `detail`로 모으고, PRF192가 변수 제목 자리도 보도록 넓힌다. 이번에 넓히면 알림 오류 문구·시험이 함께 흔들려 범위를 넘는다 |
+| RV-02 | 낮음(남은 위험) | `docs/api/openapi.yaml` `x-peaket-problem-types` | `sale-suspension-conflict`를 내는 `POST /internal/v1/events/{eventId}/sale-review-result`는 게이트웨이를 지나지 않아 openapi 경로에 없다. 그래서 목록 줄만 있고 응답 설명은 없다. `docs/features/settlement.md:381`이 409 이름과 뜻을 적고 있어 지금은 추적된다 | 내부 경로를 계약에 적는 묶음이 생기면 409 설명도 함께 적는다 |
+| RV-03 | 낮음(남은 위험) | `services/core-svc/src/modules/notify/inbound/fan-notify.controller.ts:56`, `internal-notify-identity.controller.ts:38` | 구현 중 드러난 두 제목을 표준으로 바꿔 알림 400 응답의 `title`이 달라진다. 화면·시험·문서에서 옛 제목을 찾는 곳은 grep 0건이고 `detail`에 같은 사유가 남아 뜻은 그대로다. 소비자가 title을 문구로 쓰면 문구가 바뀐다 | 기록에 '의도한 문구 변경'으로 남긴다. 소비 화면은 오류 문구 키를 type에서 고르므로 영향이 없다 |
+
+### 확인한 것(지적 아님)
+
+- **한 이름 한 상태·제목**: 새 `sale-suspension-conflict`는 서비스 코드·openapi 목록·api-client 생성 표가 모두 409 `판매 승인 상태와 맞지 않습니다`로 글자까지 같다. 목록에 중복이 없고(354개), 알파벳 차례(`sale-setting-locked` 뒤)에 들어갔다.
+- **생성물**: `contracts gen`은 바뀐 것이 없고(이 목록을 쓰지 않는다), `api-client`는 union과 표 두 줄만 바뀌었다. 두 패키지 `gen:check`가 같다. 손으로 고친 생성물은 없다.
+- **라우트 의미 불변**: 다섯 생성 파일의 차이는 둘째 줄 계약 지문 하나씩(`65f89e95…`→`4850cf22…`)뿐이다. 경로·메서드·백엔드·필터·정책은 한 줄도 바뀌지 않았다(`git diff`로 확인). `gateway-routes --check` 0, D-T42 41/41.
+- **정본**: `docs/features/settlement.md:381`의 `409 sale-suspension-conflict` 문장이 새 목록 이름과 같아 고치지 않았다. 다른 곳에 이 이름을 다르게 적은 문장은 grep 0건이다.
+- **숨은 두 제목**: `invalid-body`·`invalid-query`의 표준 제목(openapi 157·158행)과 글자까지 같고, 사유는 고정 글자 `detail`로 내려 요청 값이 새지 않는다. BAT-455 알림 시험 3파일 11/11이 통과한다.
+- **시험·구현 분리**: 시험 커밋은 계획만, 구현 커밋은 시험 파일을 건드리지 않았다. `git diff --check`에 공백 오류가 없다.
+
 ## 검증
 
 ## 담당 표
