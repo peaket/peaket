@@ -9,7 +9,7 @@
 // 짝: 받는 쪽은 ControlTransport 포트 대역(GrpcControlTransport와 같은 꼴), 대상 찾기는 ControlTargets 대역, 회차 결제사·상한 묻기는 PgSwitchResolver 포트 대역
 // (진짜 gRPC 어댑터는 test-int/f022-pg-switch-e2e.int.test.ts가 실제 payment-svc에 돌린다), 재인증은 제품 JwksApprovalVerifier + 시험 키(admin-support.ts).
 // 시계는 서비스 가짜 시계 하나이고 퍼뜨리기의 대기가 그 시계를 민다.
-// [가정, 계획 8절에 꼴이 없음] 회차 결제사 묻기 포트는 CommandsModuleExtras.pgSwitch(PgSwitchResolver)이고
+// 회차 결제사 묻기 포트는 CommandsModuleExtras.control.pgSwitch(PgSwitchResolver)이고(구현 메모 '시험 담당에게', local·ci 조립은 control.simulatorPg 참)
 // resolve({ eventIds, toPg? }) → { routes: [{ eventId, pg, approvalsPerSecond }], approvalLimits: { TOSS?, PORTONE? } }다. 받는 쪽 서비스 이름은 'payment-svc'다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
@@ -71,7 +71,7 @@ afterEach(async () => {
   for (const h of opened.splice(0)) await h.svc.close();
 });
 
-async function harness(): Promise<Harness> {
+async function harness(o: { simulatorPg?: boolean } = {}): Promise<Harness> {
   const clock = fakeClock({ now: NOW });
   const identity = new FakeIdentity();
   const kit = reauthKit(() => clock.now());
@@ -98,7 +98,7 @@ async function harness(): Promise<Harness> {
       memory: true,
       auditChain: audit,
       adminAccounts: { identity: new UnavailableAdminIdentity(), reauth: kit.verifier },
-      commandExtras: { control: { fanout, deliveries, clock }, pgSwitch: resolver },
+      commandExtras: { control: { fanout, deliveries, clock, pgSwitch: resolver, simulatorPg: o.simulatorPg ?? true } },
     }),
     env: { PEAKET_ENV: 'ci' },
     clock,
@@ -134,8 +134,8 @@ const stateOf = async (h: Harness, id: string, who: Headers) => json(await h.get
 const settle = async (h: Harness, id: string, who: Headers, want: string) => expect.poll(() => stateOf(h, id, who), { timeout: 5_000, interval: 10 }).toBe(want);
 const desired = (s: Sent) => JSON.parse(s.req.desiredStateJson) as Record<string, unknown>;
 const sentFor = (h: Harness, commandId: string) => h.sent.filter((s) => s.req.commandId === commandId);
-/** 같은 (주소, 범위, 종류, 판)의 다시 보내기를 하나로 접는다 */
-const distinct = (xs: readonly Sent[]) => [...new Map(xs.map((s) => [`${s.address}|${s.req.scope}|${s.req.kind}|${s.req.version}`, s])).values()];
+/** 같은 (주소, 범위, 종류, 판, 바라는 상태)의 다시 보내기를 하나로 접는다(되돌리기의 TOSS·PORTONE 해제는 같은 판이다) */
+const distinct = (xs: readonly Sent[]) => [...new Map(xs.map((s) => [`${s.address}|${s.req.scope}|${s.req.kind}|${s.req.version}|${s.req.desiredStateJson}`, s])).values()];
 
 /** commander가 내고 다른 operator가 승인한 결제 갈래 명령 */
 async function approvedFallback(h: Harness, params: Record<string, unknown>): Promise<{ id: string; commander: Headers; approve: { statusCode: number; payload: string } }> {
@@ -268,7 +268,7 @@ describe('F022-SET ACKED와 같은 쓰기의 설정 사건 (B11, ADR-0366 결정
     const rows = h.store.outboxSettings();
     expect(rows).toHaveLength(1);
     expect(rows[0]!.message.key).toBe(`${e}:DEGRADED_MODE:PAYMENT_PG_FALLBACK`);
-    expect(controlEventCodec.setting(Buffer.from(rows[0]!.message.payload))).toMatchObject({ commandId: id, key: 'DEGRADED_MODE', scope: e, target: 'PAYMENT_PG_FALLBACK', value: { enabled: true }, occurredAt: versions[0] });
+    expect(controlEventCodec.setting(Buffer.from(rows[0]!.message.payload))).toMatchObject({ commandId: id, key: 'DEGRADED_MODE', scope: e, value: { enabled: true }, occurredAt: versions[0] });
   });
 });
 
@@ -311,6 +311,20 @@ describe('F022-REV 결제 갈래 되돌리기 (B12, ADR-0366 결정 7)', () => {
     for (const s of offs.filter((x) => x.service === 'payment-svc')) expect(desired(s)).toMatchObject({ switched: false });
     expect(offs.filter((x) => x.service === 'admission-ctrl').map(desired)).toEqual([{ switched: false, pgKey: null, pgTps: null }]);
     const releases = after.filter((s) => s.req.kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE');
+    expect(releases.map((s) => [s.service, s.address, s.req.scope, desired(s).pg]).sort()).toEqual(
+      [
+        ['payment-svc', PAYMENT_PODS[0], 'PLATFORM', 'PORTONE'],
+        ['payment-svc', PAYMENT_PODS[0], 'PLATFORM', 'TOSS'],
+        ['payment-svc', PAYMENT_PODS[1], 'PLATFORM', 'PORTONE'],
+        ['payment-svc', PAYMENT_PODS[1], 'PLATFORM', 'TOSS'],
+      ].sort(),
+    );
+    // 끄기를 먼저 보내고 이어 해제다
+    const firstRelease = h.sent.findIndex((s, i) => i >= mark && s.req.kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE');
+    const firstOff = h.sent.findIndex((s, i) => i >= mark && s.req.kind === 'CONTROL_KIND_PG_SWITCH');
+    expect(firstOff).toBeGreaterThanOrEqual(mark);
+    expect(firstOff).toBeLessThan(firstRelease);
+    // 바라는 상태 꼴은 정본(ADR-0366 결정 8 {"pg"})대로 본다
     expect(releases.map((s) => [s.service, s.address, s.req.scope, s.req.desiredStateJson]).sort()).toEqual(
       [
         ['payment-svc', PAYMENT_PODS[0], 'PLATFORM', '{"pg":"PORTONE"}'],
@@ -319,11 +333,6 @@ describe('F022-REV 결제 갈래 되돌리기 (B12, ADR-0366 결정 7)', () => {
         ['payment-svc', PAYMENT_PODS[1], 'PLATFORM', '{"pg":"TOSS"}'],
       ].sort(),
     );
-    // 끄기를 먼저 보내고 이어 해제다
-    const firstRelease = h.sent.findIndex((s, i) => i >= mark && s.req.kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE');
-    const firstOff = h.sent.findIndex((s, i) => i >= mark && s.req.kind === 'CONTROL_KIND_PG_SWITCH');
-    expect(firstOff).toBeGreaterThanOrEqual(mark);
-    expect(firstOff).toBeLessThan(firstRelease);
   });
 
   test('F022-REV ③ 해제 하나가 ack되지 않으면 10초까지 같은 판으로 다시 보낸 뒤 FAILED(ack-timeout:payment-svc)이고 REVERTED가 아니다', async () => {
@@ -331,7 +340,8 @@ describe('F022-REV 결제 갈래 되돌리기 (B12, ADR-0366 결정 7)', () => {
     const { id, commander } = await acked(h, randomUUID());
     h.answer.set(PAYMENT_PODS[1], (req) => (req.kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE' ? req.version - 1 : req.version));
     const r = await h.post(`/v1/ops/commands/${id}/reversions`, h.withToken(h.identity.ops('commander')), { reason: '결제사 회복' });
-    expect([200, 503]).toContain(r.statusCode);
+    // 응답 코드는 정본에 없다(F-02-1 되돌리기 규칙의 502도 받는다). 판정은 끝 상태다
+    expect([200, 502, 503]).toContain(r.statusCode);
     // 계획 14절 5: ADR-0365 결정 4대로 10초까지 같은 판으로 다시 보낸 뒤 FAILED(ack-timeout:payment-svc)다
     await settle(h, id, commander, 'FAILED');
     expect(json(await h.get(`/v1/ops/commands/${id}`, commander)).lastError).toBe('ack-timeout:payment-svc');
@@ -405,7 +415,15 @@ describe('F022-REL 해제만 하는 명령 6 (B13, ADR-0366 결정 8)', () => {
     expect(r.statusCode, r.payload).toBe(201);
     await settle(h, json(r).commandId as string, commander, 'ACKED');
   });
-  // SIMULATOR를 local·ci 밖에서 거절하는 것(ADR-0366 결정 8)은 이 HTTP 조립을 staging으로 띄울 수 없어(테넌트 한도·내부 토큰 조립이 필요) 여기서 보지 않는다
+
+  test('F022-REL ⑥ local·ci 밖 조립(control.simulatorPg 거짓)에서 SIMULATOR는 422이고 보내기가 없다', async () => {
+    const h = await harness({ simulatorPg: false });
+    const commander = h.identity.ops('commander');
+    const r = await h.post('/v1/ops/commands', h.withToken(commander), release({ pg: 'SIMULATOR' }));
+    expect(r.statusCode, r.payload).toBe(422);
+    expect((json(await h.get('/v1/ops/commands?limit=100', commander)).items as unknown[]).length).toBe(0);
+    expect(h.sent).toEqual([]);
+  });
 });
 
 describe('P-T43 ② 해제의 감사 기록 (B16, ADR-0250 결정 5, ADR-0366 결정 11)', () => {

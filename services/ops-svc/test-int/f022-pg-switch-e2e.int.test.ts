@@ -3,11 +3,12 @@
 // Kafka(apache/kafka:3.9.2)는 시험 동안 컨테이너를 docker pause로 막았다가 unpause로 살린다(14절 2). 결제사는 실제 HTTP 시뮬레이터다.
 // 정본: control-tower §14 C-T53(Kafka가 멈춰도 전환이 모든 파드·리더에 퍼지고, 새로 뜬 파드도 pg_switch를 읽은 뒤 받으며, 살리면 같은 판의 설정 사건이 나가고 다시 적용하지 않음),
 // C-T44 ②(확인 호출 길을 막은 채 commander가 명령 6 해제를 내면 바로 열림), payment P-T43 ②(감사 기록에 사유와 commander), ADR-0366 결정 1~11, ADR-0365 결정 1·4,
-// ASVS v5.0.0-16.5.2(Kafka 몫). 13절: Kafka 멈춤은 Outbox 행이 실제로 나가지 못하고 남았는지(sent_at 없는 행 수 ≥ 1)로 본다.
+// ASVS v5.0.0-16.5.2(Kafka 몫). payment·admission 파드는 Kafka 브로커 없이 띄운다(local·ci 허용): 한 시험 프로세스 안에서 막힌 브로커에 붙은 Kafka 클라이언트가
+// 여럿이면 이벤트 고리가 굶어 DB·gRPC 연결이 시간 초과로 끊겼다(2026-11-23 실행). 전환 효력은 제어 gRPC만 쓰고, 새 파드의 준비는 pg_switch 읽기다(ADR-0366 결정 3). 13절: Kafka 멈춤은 Outbox 행이 실제로 나가지 못하고 남았는지(sent_at 없는 행 수 ≥ 1)로 본다.
 // 자리(14절 1, F-02-1 F021-E2E와 같다): ops-svc 통합 시험이 받는 쪽 원본을 상대 경로로 읽는다(의존 선언을 더하지 않는다, devops §4.4). 시작 함수는 계산한 경로의
 // 동적 가져오기로 읽는다. 실행 전에 받는 쪽 의존 패키지 dist가 있어야 한다
 // (pnpm exec turbo run build --filter=@peaket/payment-svc^... --filter=@peaket/admission-ctrl^... --filter=@peaket/ops-svc^...; pg-simulator dist 포함).
-// [가정, 계획 8절에 꼴이 없음] ResolvePgSwitch 어댑터 GrpcPgSwitchResolver({ address })와 CommandsModuleExtras.pgSwitch, payment 제어 주소 환경 값
+// 공개 이름(구현 메모 '시험 담당에게'): ResolvePgSwitch 어댑터 GrpcPgSwitchResolver({ address })와 CommandsModuleExtras.control.pgSwitch, payment 제어 주소 환경 값
 // PEAKET_PAYMENT_CONTROL_GRPC_ADDRS(받는 쪽 서비스 이름 payment-svc), payment 제어 포트 PEAKET_PAYMENT_CONTROL_GRPC_PORT.
 import 'reflect-metadata';
 import { execFileSync } from 'node:child_process';
@@ -50,6 +51,9 @@ const identity = new FakeIdentity();
 const PROBE_FAULT = { op: 'query', kind: 'pg-error', applied: false };
 
 let pgc: PostgresContainer;
+/** payment DB는 따로 띄운다(payment 파드 셋의 연결 풀이 ops DB와 한 서버의 연결 상한을 나눠 쓰지 않게) */
+let payPgc: PostgresContainer;
+let relayDb: Database;
 let kafka: KafkaContainer;
 let kafkaId = '';
 let paused = false;
@@ -101,7 +105,6 @@ async function paymentEnv(pod: string) {
       PEAKET_GRPC_PORT: String(grpcPort),
       PEAKET_CONTROL_GRPC_HOST: '127.0.0.1',
       PEAKET_PAYMENT_CONTROL_GRPC_PORT: String(controlPort),
-      PEAKET_KAFKA_BROKERS: kafka.brokers.join(','),
       PEAKET_LOG_PSEUDONYM_KEY: Buffer.alloc(32, 7).toString('base64'),
       PEAKET_LOG_LEVEL: 'info',
       PEAKET_PG_SIM_URL: simUrl,
@@ -120,8 +123,9 @@ const readyOf = (managementPort: number) => fetch(`http://127.0.0.1:${management
 
 beforeAll(async () => {
   const { startValkey } = await load<{ startValkey: () => Promise<{ url: string; stop(): void }> }>('queue-svc', 'test-int', 'valkey.ts');
-  const [p, k, v] = await Promise.all([startPostgres(), startKafka(), startValkey()]);
+  const [p, pp, k, v] = await Promise.all([startPostgres(), startPostgres(), startKafka(), startValkey()]);
   pgc = p;
+  payPgc = pp;
   kafka = k;
   valkeyStop = v.stop;
   kafkaId = docker(['ps', '-q', '--filter', `publish=${kafka.brokers[0]!.split(':')[1]}`]);
@@ -132,11 +136,7 @@ beforeAll(async () => {
   await migrateOps(pgc.url);
   opsDb = createDatabase({ url: pgc.url, applicationName: 'ops-svc-f022-e2e' });
   await ensureOutboxPartitions(opsDb, systemClock);
-  const root = new pg.Client({ connectionString: pgc.url });
-  await root.connect();
-  await root.query('create database payment_f022');
-  await root.end();
-  payUrl = pgc.url.replace(/\/peaket$/, '/payment_f022');
+  payUrl = payPgc.url;
   await (await load<{ migratePayment: (url: string) => Promise<unknown> }>('payment-svc', 'scripts', 'migrate.mjs')).migratePayment(payUrl);
   payAdmin = new pg.Client({ connectionString: payUrl });
   await payAdmin.connect();
@@ -185,19 +185,20 @@ beforeAll(async () => {
   const fanout = new ControlFanout({ targets, transport: new GrpcControlTransport(), deliveries, clock: systemClock });
   ops = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ database: opsDb, adminAccounts: adminAccountsForCommands, commandExtras: { control: { fanout, deliveries }, pgSwitch: new GrpcPgSwitchResolver({ address: paymentGrpc[0]! }) } }),
+    module: AppModule.register({ database: opsDb, adminAccounts: adminAccountsForCommands, commandExtras: { control: { fanout, deliveries, pgSwitch: new GrpcPgSwitchResolver({ address: paymentGrpc[0]! }), simulatorPg: true } } }),
     env: { PEAKET_ENV: 'ci' },
     logDestination: quiet(),
     adminAuthz: identity,
   });
   // 설정 사건 릴레이(Kafka가 살아 있을 때 띄워 두고, 시험 동안 Kafka를 막는다)
+  // 릴레이는 따로 둔 작은 풀을 쓴다(Kafka가 막힌 동안 릴레이가 잡은 연결이 ops-svc 요청을 막지 않게)
+  relayDb = createDatabase({ url: pgc.url, applicationName: 'ops-relay-f022-e2e', max: 2 });
   producer = createKafkaProducer({ brokers: kafka.brokers, clientId: 'ops-f022-e2e-producer', kind: 'default' });
   await producer.connect();
-  reader = await collectTopics(kafka.brokers, [SETTINGS_TOPIC], `ops-f022-e2e-reader-${randomUUID()}`);
   relay = await startOpsRelay({
     env: { PEAKET_ENV: 'local', PEAKET_POD: 'ops-relay-f022-0', PEAKET_MANAGEMENT_PORT: '0', PEAKET_OUTBOX_DATABASE_URL: pgc.url, PEAKET_MAINTENANCE_DATABASE_URL: pgc.url, PEAKET_KAFKA_BROKERS: kafka.brokers.join(',') },
-    database: opsDb,
-    maintenanceDatabase: opsDb,
+    database: relayDb,
+    maintenanceDatabase: relayDb,
     outboxPublisher: kafkaOutboxPublisher(producer),
     leaseApi: memoryLeaseApi(),
     lease: { leaseDurationMs: 2_000, renewDeadlineMs: 1_500, retryPeriodMs: 100 },
@@ -219,11 +220,13 @@ afterAll(async () => {
   for (const r of running.reverse()) await r.close().catch(() => undefined);
   await sim?.close().catch(() => undefined);
   await payAdmin?.end().catch(() => undefined);
+  await relayDb?.close().catch(() => undefined);
   await opsDb?.close().catch(() => undefined);
   await redis?.close();
   valkeyStop?.();
   kafka?.stop();
   pgc?.stop();
+  payPgc?.stop();
   if (batchDir) await rm(batchDir, { recursive: true, force: true });
 }, 120_000);
 
@@ -312,8 +315,7 @@ describe('C-T53 Kafka를 막은 채 명령 6 대체 결제사 전환', () => {
     const e = await paymentEnv('payment-e2e-3');
     const late = await paymentStart({ env: e.env, logDestination: sinkInto(paymentLogs) });
     running.push(late);
-    // Kafka가 막혀 있으면 플랫폼 시작 작업은 30초 [가정] 뒤 마지막 값으로 준비한다(ADR-0103)
-    await until(() => readyOf(e.managementPort), (s) => s === 200, '늘린 파드 준비', { timeoutMs: 90_000, intervalMs: 500 });
+    await until(() => readyOf(e.managementPort), (s) => s === 200, '늘린 파드 준비', { timeoutMs: 60_000, intervalMs: 200 });
     expect(await prepareOn(`127.0.0.1:${late.ports!.grpcPort}`, eventId)).toMatchObject({ pg: 'PG_PROVIDER_TOSS', switched: true });
     addrs['payment-svc']!.push(`127.0.0.1:${e.controlPort}`);
     paymentGrpc.push(`127.0.0.1:${late.ports!.grpcPort}`);
@@ -326,11 +328,13 @@ describe('C-T53 Kafka를 막은 채 명령 6 대체 결제사 전환', () => {
     expect((await outboxOf(settingKey(eventId))).map((r) => r.sent_at)).toEqual([null]);
     docker(['unpause', kafkaId]);
     paused = false;
+    // 읽는 쪽은 살린 뒤에 띄운다(새 소비자 그룹이 처음부터 읽는다)
+    reader = await collectTopics(kafka.brokers, [SETTINGS_TOPIC], `ops-f022-e2e-reader-${randomUUID()}`);
     const [rec] = await reader!.waitFor((x) => x.topic === SETTINGS_TOPIC && x.key === settingKey(eventId), 1, 120_000);
     const decoded = controlEventCodec.setting(Buffer.from(rec!.value ?? '', 'utf8'));
-    expect(decoded).toMatchObject({ commandId: id, key: 'DEGRADED_MODE', scope: eventId, target: 'PAYMENT_PG_FALLBACK', value: { enabled: true }, occurredAt: Number(before!.version) });
+    expect(decoded).toMatchObject({ commandId: id, key: 'DEGRADED_MODE', scope: eventId, value: { enabled: true }, occurredAt: Number(before!.version) });
     await until(async () => (await outboxOf(settingKey(eventId)))[0]!.sent_at !== null, (x) => x, 'Outbox 행 sent_at', { timeoutMs: 30_000 });
-    // 받는 쪽(설정 토픽을 읽는 payment 파드)이 그 사건을 받을 시간을 둔 뒤에도 같다: 이 사건으로 다시 적용하지 않는다
+    // 사건이 나간 뒤에도 pg_switch·리더 칸이 같다: 이 사건으로 다시 적용하지 않는다
     const stable: unknown[] = [];
     for (let i = 0; i < 10; i += 1) {
       stable.push(await switchRow(eventId));

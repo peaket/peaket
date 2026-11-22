@@ -146,6 +146,8 @@ const GRPC = {
       ApprovePayoutBatch: ['ops-svc'],
       // 명령 12 하위 결제사 사전 판정: ops-svc만 부른다(docs/api/proto/README.md §3 'ops-svc → payment-svc CheckEventPgAssignment', ADR-0349 결정 3)
       CheckEventPgAssignment: ['ops-svc'],
+      // 명령 6 대체 결제사 전환의 갈 곳 묻기: ops-svc만 부른다(docs/api/proto/README.md §3 'ops-svc → payment-svc ResolvePgSwitch', ADR-0366 결정 5)
+      ResolvePgSwitch: ['ops-svc'],
     },
   },
   'purchase-svc': {
