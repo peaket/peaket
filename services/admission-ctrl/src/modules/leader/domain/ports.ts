@@ -123,8 +123,11 @@ export interface LeaderStore {
   activeEvents(nowMs: number): Promise<string[]>;
   schedule(eventId: string): Promise<EventPlan | null>;
   control(eventId: string, nowMs: number): Promise<Control>;
-  /** q:{admission}:ctl의 명령 11(자동화 정지)과 전체 범위 명령 3(allPaused, ADR-0365 결정 6. 칸이 없으면 거짓) */
-  platformControl(): Promise<{ autoStopped: boolean; allPaused?: boolean }>;
+  /**
+   * q:{admission}:ctl의 명령 11(자동화 정지)과 전체 범위 명령 3(allPaused, ADR-0365 결정 6. 칸이 없으면 거짓),
+   * 전체 범위 명령 6 대체 결제사 전환의 결제사 묶음(pgKey·pgTps, 둘 다 맞을 때만, ADR-0366 결정 4)
+   */
+  platformControl(): Promise<{ autoStopped: boolean; allPaused?: boolean; pgKey?: string; pgTps?: number }>;
   /**
    * 제어 gRPC 쓰기(F-02-1, ADR-0365 결정 5): 리더 키(q:{event:E}:leader, 전체는 q:{admission}:leader)와 세대를 견주는 Lua 하나다.
    * 세대가 낮으면 FENCED이고 아무것도 쓰지 않는다. 판이 그 종류의 판 칸보다 클 때만 칸을 쓰고, 쓴 뒤(또는 지금)의 판을 돌려준다.
@@ -175,6 +178,11 @@ export interface ControlInputsReader {
 }
 export interface ControlSnapshot {
   forEvent(eventId: string): import('./aimd.js').EventInputs;
+  /**
+   * 결제사별 낮춘 채널 상한 비율(%, `min by (pg) (payment_pg_limit_ratio)`, ADR-0366 결정 10). 'failed'는 조회 실패(리더가 마지막 값을 쓴다).
+   * 없으면 비율을 읽지 않는 입력 리더다(100으로 본다)
+   */
+  readonly pgLimitRatios?: ReadonlyMap<string, number> | 'failed';
 }
 
 export const ELECTOR = Symbol('admission.Elector');

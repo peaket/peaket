@@ -49,7 +49,8 @@ enum ControlKind {
   // 켤 때 둘 다 있고 끌 때 둘 다 null이다(끄면 pgKey·pgTps 칸을 지우고 판·명령 칸 pgRev·pgCmd는 남긴다).
   CONTROL_KIND_PG_SWITCH = 8;
   // 명령 6 해제 가운데 결제사 장애로 payment-svc가 스스로 건 새 결제 진입 정지를 commander가 여는 것(payment-svc 준비된 모든 파드, ADR-0250 결정 1, ADR-0366 결정 8·9).
-  // 범위는 PLATFORM, 바라는 상태는 {"pg": "TOSS"|"PORTONE"|"SIMULATOR"}다(SIMULATOR는 local·ci만). 받은 파드는 정지 행의 since가 판 번호(밀리초)보다
+  // 범위는 PLATFORM, 바라는 상태는 {"pg": "TOSS"|"PORTONE"|"SIMULATOR", "actor": 요청자(되돌리기면 되돌린 사람)의 관리 계정 ID}다(SIMULATOR는 local·ci만).
+  // actor는 payment-svc가 해제의 행위자로 적는다(SYSTEM이 아니라 모든 파드가 서킷을 한 번 닫는다, ADR-0250 결정 5). 받은 파드는 정지 행의 since가 판 번호(밀리초)보다
   // 늦으면(명령 뒤에 새로 걸린 정지) 열지 않고, 처리한 판을 applied_version으로 답한다.
   CONTROL_KIND_ENTRY_PAUSE_RELEASE = 9;
 }

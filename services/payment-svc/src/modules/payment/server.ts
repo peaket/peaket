@@ -86,3 +86,11 @@ export { PG_ASSIGNMENT_RETRY_MAX_MS, PG_ASSIGNMENT_RETRY_MS, PG_ASSIGNMENT_SETTI
 export { pgAssignmentSettingLog } from './adapters/pg-assignment-setting-log.js';
 export { CachedPgChannelObservations, type CachedPgChannelObservationsOptions, PG_CHANNEL_OBSERVED_MAX_STALE_MS, PG_CHANNEL_OBSERVED_READ_BUDGET_MS, PG_CHANNEL_OBSERVED_TTL_MS, PortoneFallbackExclusions } from './application/pg-channel-observations.js';
 export { PgChannelObserver, type PgChannelObserverDeps, type PortoneObservedChannel } from './application/pg-channel-observer.js';
+// 명령 6 결제 갈래 받는 쪽과 ResolvePgSwitch(F-02-2 OPS-310, ADR-0366 결정 2·5·8·9)
+export * from './domain/pg-switch-control.js';
+export type { PgName } from './domain/payment-gateway.js';
+export { ApplyPgSwitch, type ApplyPgSwitchDeps, type ApplyPgSwitchInput, type ApplyPgSwitchResult } from './application/apply-pg-switch.js';
+export { ApplyEntryPauseRelease, type ApplyEntryPauseReleaseDeps, type ApplyEntryPauseReleaseResult, ENTRY_RELEASE_CONTROL_REASON, EntryReleaseConflict } from './application/apply-entry-pause-release.js';
+export { type PgSwitchRoute, ResolvePgSwitch, type ResolvePgSwitchAnswer, type ResolvePgSwitchDeps, type ResolvePgSwitchInput } from './application/resolve-pg-switch.js';
+export { DrizzlePgSwitchControl } from './adapters/db/drizzle-pg-switch-control.js';
+export { resolvePgSwitchInputOf, resolvePgSwitchResponseOf, withResolvePgSwitch } from './inbound/resolve-pg-switch.grpc.js';

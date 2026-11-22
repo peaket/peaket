@@ -15,6 +15,7 @@ import { createDatabase, createHotRedis, createService, HotPathMetrics, inCluste
 import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgApprovalTps, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
+import { paymentControlPlane } from './control/payment-control.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
 import { CompensationTransfers, DrizzleCompensationTransfers, FakeCompensationTransfer, compensationTransferHandlers, compensationTransferPackage } from './modules/compensation/index.js';
 import {
@@ -137,7 +138,7 @@ export interface StartedService {
   /** 종료 차례대로 닫는다. 여러 번 불러도 한 번만 닫고 같은 약속을 돌려준다 */
   close(): Promise<void>;
   /** 실제로 연 포트(PORT·PEAKET_MANAGEMENT_PORT·PEAKET_GRPC_PORT=0일 때 시험이 읽는다) */
-  ports: { appPort: number; managementPort: number; grpcPort: number };
+  ports: { appPort: number; managementPort: number; grpcPort: number; controlPort?: number };
 }
 
 export async function start(o: StartOptions): Promise<StartedService> {
@@ -327,6 +328,8 @@ let circuitsRef: PgCircuits | undefined;
   const cancelPayment = new CancelPayment(depositCancel, confirmedCancel, confirmJobs);
   const VIRTUAL_ACCOUNT_DISALLOWED_REASON = '가상계좌를 받지 않는 공연의 입금 대기';
   entryPauseReleaseWatcher = new EntryPauseReleaseWatcher({ closeCircuit: (pg) => guards.of(pg)?.closeCircuit() });
+  // 명령 6 결제 갈래 받는 쪽(F-02-2 OPS-310, ADR-0366): pg_switch를 한 번 읽어야 준비 상태이고, 제어 포트(PEAKET_PAYMENT_CONTROL_GRPC_PORT)와 ResolvePgSwitch를 잇는다
+  const paymentControl = paymentControlPlane({ env, readiness: service.readiness, logger: service.logger, metrics: service.metrics, profile: service.config.grpcLbProfile, database: batchDatabase, selection: pgSelection, pauses: entryPauses, guards, defaults: checkoutConfig.defaults, approvalTps, entryLog: entryPauseLog(service.logger), entrySignals: entryPauseSignals, clock: systemClock, podName: env.PEAKET_POD?.trim() || hostname() });
   const resolutionSignals = new PromPaymentResolutionSignals().register(service.metrics.registry);
   service.readiness.register('grpc');
   if (!simulator && !toss && !portone) service.logger.warn({ kind: 'payment-confirm-no-adapter' }, '결제사 어댑터 설정이 없어 어댑터 없이 켰다(승인 명령은 미뤄지고 no_adapter 지표가 드러낸다)');
@@ -359,10 +362,10 @@ let circuitsRef: PgCircuits | undefined;
     services: [
       {
         definition: paymentPackage().PaymentService.service,
-        handlers: paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment, prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), checkEventPgAssignment: new CheckEventPgAssignment({ selection: new DrizzlePgSelection({ database: batchDatabase }), ...(portoneChannels ? { portone: portoneChannels } : {}), approvalTps }) }, (method, err, orderId) =>
+        handlers: paymentControl.extend(paymentServiceHandlers({ accept: service.app.get(AcceptPaymentCommand), batchGet: service.app.get(BatchGetPaymentStates), getPayment: new GetPaymentDetail({ reader: store, signals: depositSignals, cipher: virtualAccountCipher, depositLog, depositSignals, clock: systemClock }), cancelPayment, prepareCheckout: new PrepareCheckout({ selection: pgSelection, pauses: entryPauses, trials: entryPauseStore, trialSignals: entryPauseSignals, gateways, channels, defaults: checkoutConfig.defaults, webOrigin: checkoutConfig.webOrigin, virtualAccountReady: virtualAccountCipher.ready, clock: systemClock, log: paymentCheckoutLog(service.logger), signals: checkoutSignals, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), getNewPaymentPause: new GetNewPaymentPause({ selection: pgSelectionBatch, pauses: entryPauses, channels, defaults: checkoutConfig.defaults, ...(fallbackExclusions ? { fallbackExclusions } : {}) }), checkEventPgAssignment: new CheckEventPgAssignment({ selection: new DrizzlePgSelection({ database: batchDatabase }), ...(portoneChannels ? { portone: portoneChannels } : {}), approvalTps }) }, (method, err, orderId) =>
           // 오류 객체를 싣지 않는다: 드라이버 오류의 글에 문장 값(결제 키·토큰)이 실릴 수 있다
           service.logger.error({ method, code: safeErrorCode(err), ...(orderId ? { orderId } : {}) }, 'PaymentService 처리 실패'),
-        ),
+        ), (method, err) => service.logger.error({ method, code: safeErrorCode(err) }, 'PaymentService 처리 실패')),
       },
       {
         definition: compensationTransferPackage().CompensationTransferService.service,
@@ -371,6 +374,7 @@ let circuitsRef: PgCircuits | undefined;
     ],
     internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.payment.v1.CompensationTransferService'] },
   });
+  const controlPort = await paymentControl.listen();
   service.readiness.complete('grpc');
   service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 
@@ -442,12 +446,12 @@ let circuitsRef: PgCircuits | undefined;
     // gRPC 포트를 닫아 새 호출을 받지 않으면서 두 실행기를 멈춘다(돌던 호출과 그 뒤 쓰기를 기다린다). 그 뒤에 표 맞추기와 관측기를 멈추고(마무리 중의 낮춤도 표에 쓴다, BUILD_ORDER PRF-203 코드 리뷰 F5),
     // 모두 끝나면 서비스와 DB 풀을 닫는다. 앞 단계가 실패해도 뒤 단계를 한다
     return shutdownInOrder({
-      stop: () => [grpc.close(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), (settlementDueWorker?.stop() ?? Promise.resolve()).then(() => settlementDueElector.stop())],
+      stop: () => [grpc.close(), paymentControl.stop(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), (settlementDueWorker?.stop() ?? Promise.resolve()).then(() => settlementDueElector.stop())],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve(), pgAssignmentSettings.stop()],
       closeService: () => service.close(),
       closeConnections: () => [controlSync?.close(), Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), tenantRedis?.close(), reauthRedis?.close()],
       onError: (err) => service.logger.error({ code: safeErrorCode(err) }, 'payment-svc 종료 실패'),
     });
   };
-  return { close: () => (closing ??= shutdown()), ports: { appPort: httpPorts.port, managementPort: httpPorts.managementPort, grpcPort: grpc.port } };
+  return { close: () => (closing ??= shutdown()), ports: { appPort: httpPorts.port, managementPort: httpPorts.managementPort, grpcPort: grpc.port, ...(controlPort !== undefined ? { controlPort } : {}) } };
 }

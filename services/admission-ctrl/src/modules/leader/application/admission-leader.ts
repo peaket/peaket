@@ -29,6 +29,7 @@ import {
   STOPPED_RECHECK_MS,
   TICK_MS,
 } from '../domain/plan.js';
+import { pgGroupOf, pgWithRatio, type PgFields } from '../domain/pg-ratio.js';
 import { CONTROL_INPUTS, type Control, type ControlInputsReader, type ControlSnapshot, ELECTOR, type Elector, type EventPlan, LEADER_STORE, type LeaderStore, PUBLISHER, type Publisher, SEED_REVEALER, type SeedRevealer } from '../domain/ports.js';
 import { drandRoundTimeMs, SEED_REVEAL_AFTER_MS } from '@peaket/shuffle';
 import { type ControlEvent, LEADER_METRICS, type LeaderMetrics } from './leader-metrics.js';
@@ -105,6 +106,10 @@ export class AdmissionLeader {
   #platformBumped: number | undefined;
   /** 전체 범위 판매 일시정지(q:{admission}:ctl allPaused, ADR-0365 결정 6). 명령 11과 같은 주기로 읽는다 */
   #allPaused = false;
+  /** 전체 범위 명령 6 대체 결제사 전환의 묶음(q:{admission}:ctl pgKey·pgTps, ADR-0366 결정 4). 읽기 실패면 마지막 값 */
+  #platformPg: PgFields | undefined;
+  /** 결제사별 낮춘 채널 상한 비율(ADR-0366 결정 10). 조회 실패면 마지막 값, 한 번도 못 읽었으면 비어 있다(100으로 본다) */
+  #pgRatios: ReadonlyMap<string, number> = new Map();
   #autoStopAt = Number.NEGATIVE_INFINITY;
   #openGapAt = Number.NEGATIVE_INFINITY;
   #openGapLast = 0;
@@ -203,7 +208,9 @@ export class AdmissionLeader {
       const read = await this.store.control(eventId, now);
       // 전체 범위 판매 일시정지(명령 3 PLATFORM)는 회차 paused와 같다: 모든 회차의 serving 전진 0(ADR-0365 결정 6)
       const ctl: Control = allPaused ? { ...read, paused: true } : read;
-      const pg = pgOf(plan, ctl);
+      // 결제사 묶음: 회차 ctl > 전체 ctl > cfg, 그리고 낮춘 채널 상한 비율(ADR-0366 결정 4·10). 전진 속도 상한과 동시 입장 상한이 함께 이 값으로 계산된다
+      const group = pgGroupOf(ctl, this.#platformPg, plan);
+      const pg = group ? pgWithRatio(group, this.#pgRatios) : undefined;
       const { upper, lower } = boundsOf(pg?.tps);
       const raw = ctl.memory ?? {};
       if (!this.inputs || !this.#snapshot) {
@@ -326,6 +333,8 @@ export class AdmissionLeader {
       .read()
       .then((s) => {
         if (epoch === this.#inputsEpoch) this.#snapshot = s;
+        // 비율은 세대와 무관한 클러스터 값이라 세대가 바뀌어도 둔다. 조회 실패는 마지막 값(낮춘 쪽으로 안전하게, ADR-0366 결정 10)
+        if (s.pgLimitRatios !== undefined && s.pgLimitRatios !== 'failed') this.#pgRatios = s.pgLimitRatios;
       })
       .catch((err: unknown) => this.#logError('*inputs', this.clock.now(), err, '제어 입력 읽기 실패(마지막 값으로 판단한다)'))
       .finally(() => {
@@ -345,6 +354,7 @@ export class AdmissionLeader {
         const p = await this.store.platformControl();
         this.#autoStopped = p.autoStopped;
         this.#allPaused = p.allPaused === true;
+        this.#platformPg = p.pgKey && p.pgTps ? { pgKey: p.pgKey, pgTps: p.pgTps } : undefined;
       } catch (err) {
         this.#autoStopped = true;
         this.#allPaused = true;
@@ -509,11 +519,4 @@ export class AdmissionLeader {
     this.#plans.set(eventId, { at: mono, plan });
     return plan;
   }
-}
-
-/** 결제사: 명령 6이 ctl에 쓴 값이 이기고, 없으면 일정 사본의 값이다. 둘 다 없으면 결제사 상한을 걸지 않는다(ADR-0226 결정 9) */
-function pgOf(plan: EventPlan, ctl: Control): Pg | undefined {
-  if (ctl.pgKey && ctl.pgTps) return { key: ctl.pgKey, tps: ctl.pgTps };
-  if (plan.pgKey && plan.pgTps) return { key: plan.pgKey, tps: plan.pgTps };
-  return undefined;
 }

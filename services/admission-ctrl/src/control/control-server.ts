@@ -1,5 +1,5 @@
 // 제어 gRPC 받는 쪽(peaket.control.v1.ControlReceiver.ApplyControl)의 admission-ctrl 구현(F-02-1 OPS-300, ADR-0102·0103·0365 결정 5, ADR-0056, Q-T30).
-// 받는 종류: ADMISSION_TARGET(명령 1)·ADMISSION_PAUSE(명령 2)·SALE_PAUSE(명령 3, 회차·PLATFORM)·AUTOMATION_STOP(명령 11, PLATFORM). 다른 종류는 UNIMPLEMENTED다.
+// 받는 종류: ADMISSION_TARGET(명령 1)·ADMISSION_PAUSE(명령 2)·SALE_PAUSE(명령 3, 회차·PLATFORM)·AUTOMATION_STOP(명령 11, PLATFORM)·PG_SWITCH(명령 6 대체 결제사 전환, 회차·PLATFORM, F-02-2). 다른 종류는 UNIMPLEMENTED다.
 // 판 번호는 1 이상 안전 정수만(ASVS 1.4.2·15.3.5), 바라는 상태는 종류마다 정한 꼴만 받는다(모르는 칸·틀린 꼴은 INVALID_ARGUMENT이고 쓰기 0, ASVS 2.1.1).
 // 리더가 아니면 UNAVAILABLE(not-leader), 세대가 낮아 FENCED면 UNAVAILABLE(fenced)이다. 둘 다 아무것도 쓰지 않는다.
 // 운영에서는 리더 전용 Service가 리더 파드만 내놓는다(배포 차트는 구간 5). 제어 전용 포트 PEAKET_ADMISSION_CONTROL_GRPC_PORT에서 받는다.

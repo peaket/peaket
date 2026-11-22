@@ -1,10 +1,14 @@
 // admission-ctrl 리더가 제어 gRPC로 받는 운영 명령의 바라는 상태와 칸(F-02-1 OPS-300, ADR-0365 결정 2·5·6, ADR-0226 결정 7, docs/data.md §3).
 // 명령 1 ADMISSION_TARGET·2 ADMISSION_PAUSE는 회차 범위 q:{event:E}:ctl, 명령 3 SALE_PAUSE는 회차 q:{event:E}:ctl 또는 전체 q:{admission}:ctl,
 // 명령 11 AUTOMATION_STOP은 전체 q:{admission}:ctl에 쓴다. 종류마다 판·명령 칸이 따로다(한 저장소의 다른 종류를 서로 막지 않게).
+// 명령 6 대체 결제사 전환 PG_SWITCH(F-02-2 OPS-310, ADR-0366 결정 4)는 회차 q:{event:E}:ctl 또는 전체 q:{admission}:ctl의 pgKey·pgTps(판 pgRev·명령 pgCmd)다.
 // 모르는 칸·틀린 꼴은 LeaderControlRejected(받는 층이 INVALID_ARGUMENT, 쓰기 0). 이 파일은 프레임워크를 모른다.
 
 /** 받는 제어 종류(proto ControlKind 이름) */
-export const LEADER_CONTROL_KINDS = ['CONTROL_KIND_ADMISSION_TARGET', 'CONTROL_KIND_ADMISSION_PAUSE', 'CONTROL_KIND_SALE_PAUSE', 'CONTROL_KIND_AUTOMATION_STOP'] as const;
+export const LEADER_CONTROL_KINDS = ['CONTROL_KIND_ADMISSION_TARGET', 'CONTROL_KIND_ADMISSION_PAUSE', 'CONTROL_KIND_SALE_PAUSE', 'CONTROL_KIND_AUTOMATION_STOP', 'CONTROL_KIND_PG_SWITCH'] as const;
+
+/** 결제사 묶음 이름의 꼴(일정 사본 cfg의 pgKey와 같은 규칙, ADR-0226 결정 9) */
+export const PG_GROUP_KEY = /^[A-Za-z0-9_-]{1,32}$/;
 export type LeaderControlKind = (typeof LEADER_CONTROL_KINDS)[number];
 
 /** 전체 범위 이름 */
@@ -61,6 +65,7 @@ function exactKeys(v: Record<string, unknown>, keys: readonly string[]): void {
  * - 2 ADMISSION_PAUSE(회차): {"paused": 참거짓, "expiresAtMs": 밀리초 | null} → admitPaused·admitPausedUntil(null이면 지움)
  * - 3 SALE_PAUSE(회차): {"paused": 참거짓} → paused(판 pausedRev). 전체면 q:{admission}:ctl의 allPaused(판 allPausedRev)
  * - 11 AUTOMATION_STOP(전체만): {"stopped": 참거짓} → autoStopped
+ * - 6 PG_SWITCH(회차·전체): {"switched": true, "pgKey": 묶음 이름, "pgTps": 1 이상 정수} → pgKey·pgTps. {"switched": false, "pgKey": null, "pgTps": null} → 두 칸 지움(판·명령 칸은 남긴다)
  * @throws LeaderControlRejected 범위·바라는 상태가 꼴에 맞지 않음
  */
 export function leaderControlOf(kind: LeaderControlKind, scope: string, desiredStateJson: string): LeaderControlWrite {
@@ -103,6 +108,19 @@ export function leaderControlOf(kind: LeaderControlKind, scope: string, desiredS
       exactKeys(v, ['stopped']);
       if (typeof v.stopped !== 'boolean') reject('stopped');
       return { kind, revField: 'autoStoppedRev', cmdField: 'autoStoppedCmd', set: { autoStopped: v.stopped ? '1' : '0' }, del: [] };
+    }
+    case 'CONTROL_KIND_PG_SWITCH': {
+      exactKeys(v, ['switched', 'pgKey', 'pgTps']);
+      if (typeof v.switched !== 'boolean') reject('switched');
+      const fields = { ...eventScope, kind, revField: 'pgRev', cmdField: 'pgCmd' } as const;
+      if (!v.switched) {
+        if (v.pgKey !== null) reject('pgKey');
+        if (v.pgTps !== null) reject('pgTps');
+        return { ...fields, set: {}, del: ['pgKey', 'pgTps'] };
+      }
+      if (typeof v.pgKey !== 'string' || !PG_GROUP_KEY.test(v.pgKey)) reject('pgKey');
+      if (!positiveInt(v.pgTps)) reject('pgTps');
+      return { ...fields, set: { pgKey: v.pgKey as string, pgTps: String(v.pgTps) }, del: [] };
     }
   }
 }

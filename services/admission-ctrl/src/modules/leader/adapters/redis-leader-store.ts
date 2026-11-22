@@ -119,10 +119,11 @@ export class RedisLeaderStore implements LeaderStore {
     return { ...(t !== null && isManualFixed(operator, manualEndedAt, nowMs) ? { target: t } : {}), paused: admit || salePaused === '1' || suspended === '1', operator, memory, ...pgOf(pgKey ?? null, pgTps ?? null) };
   }
 
-  async platformControl(): Promise<{ autoStopped: boolean; allPaused: boolean }> {
+  async platformControl(): Promise<{ autoStopped: boolean; allPaused: boolean; pgKey?: string; pgTps?: number }> {
     const k = keys.platformCtl();
-    const [autoStopped, allPaused] = ((await this.redis.command(['HMGET', k, 'autoStopped', 'allPaused'], { key: k })) as unknown[]).map(str);
-    return { autoStopped: autoStopped === '1', allPaused: allPaused === '1' };
+    const [autoStopped, allPaused, pgKey, pgTps] = ((await this.redis.command(['HMGET', k, 'autoStopped', 'allPaused', 'pgKey', 'pgTps'], { key: k })) as unknown[]).map(str);
+    // 전체 범위 명령 6 대체 결제사 전환의 묶음(ADR-0366 결정 4). 회차 ctl과 같은 규칙으로 둘 다 맞을 때만 싣는다
+    return { autoStopped: autoStopped === '1', allPaused: allPaused === '1', ...pgOf(pgKey ?? null, pgTps ?? null) };
   }
 
   async bumpPlatform(gen: number): Promise<'OK' | 'FENCED'> {

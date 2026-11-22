@@ -4,6 +4,7 @@
 import { createExternalHttpClient, type ExternalHttpClient } from '@peaket/platform';
 import { ALL_JOURNEYS, type EventInputs, type Reading } from '../domain/aimd.js';
 import type { ControlInputsReader, ControlSnapshot } from '../domain/ports.js';
+import { PG_RATIO_QUERY } from '../domain/pg-ratio.js';
 
 /** 값과 표본 시각의 쿼리. 표본 시각은 묶기 전에 timestamp()를 건다(묶은 뒤에 걸면 평가 시각이 된다) */
 const valueAndTime = (metric: string, by: string) => ({ value: `max${by}(${metric})`, time: `max${by}(timestamp(${metric}))` });
@@ -19,6 +20,8 @@ export const CONTROL_QUERIES = {
   budgetAlert: valueAndTime('peaket:slo:budget_alert10x:state', BY_JOURNEY),
   budgetBurn50: valueAndTime('peaket:slo:budget_burn50:state', BY_JOURNEY),
   pgCause: `max${BY_EVENT}(peaket:payment:pg_cause:state)`,
+  /** 결제사별 낮춘 채널 상한 비율(파드마다 나오므로 가장 낮은 값, ADR-0366 결정 10) */
+  pgLimitRatio: PG_RATIO_QUERY,
 } as const;
 
 /** 응답 크기 상한 2MiB [가정]: 회차 수 × 여정 일곱 × 2의 줄이면 수백 KB 안이다 */
@@ -75,7 +78,7 @@ export class PrometheusControlInputs implements ControlInputsReader {
   }
 
   async read(): Promise<ControlSnapshot> {
-    const [latency, errors, seatStore, alert, burn50, pgCause] = await Promise.all([this.#pair(CONTROL_QUERIES.latency), this.#pair(CONTROL_QUERIES.errors), this.#pair(CONTROL_QUERIES.seatStore), this.#pair(CONTROL_QUERIES.budgetAlert), this.#pair(CONTROL_QUERIES.budgetBurn50), this.#query(CONTROL_QUERIES.pgCause)]);
+    const [latency, errors, seatStore, alert, burn50, pgCause, pgRatio] = await Promise.all([this.#pair(CONTROL_QUERIES.latency), this.#pair(CONTROL_QUERIES.errors), this.#pair(CONTROL_QUERIES.seatStore), this.#pair(CONTROL_QUERIES.budgetAlert), this.#pair(CONTROL_QUERIES.budgetBurn50), this.#query(CONTROL_QUERIES.pgCause), this.#query(CONTROL_QUERIES.pgLimitRatio)]);
     const lat = single(latency);
     const err = single(errors);
     const seat = indexed(seatStore, (m) => m.event_id ?? '');
@@ -84,7 +87,11 @@ export class PrometheusControlInputs implements ControlInputsReader {
     if (pgCause !== 'failed') for (const s of pgCause) if (s.metric?.event_id && numberOf(s) >= 1) pg.add(s.metric.event_id);
     const seatMiss = missOf(seatStore);
     const budgetMiss = missOf(alert, burn50);
+    // 숫자가 아닌 값은 빼고(0으로 읽지 않는다), 범위 검사는 리더가 한다(25~100 밖은 100)
+    const ratios = new Map<string, number>();
+    if (pgRatio !== 'failed') for (const s of pgRatio) if (s.metric?.pg && Number.isFinite(numberOf(s))) ratios.set(s.metric.pg, numberOf(s));
     return {
+      pgLimitRatios: pgRatio === 'failed' ? 'failed' : ratios,
       forEvent(eventId: string): EventInputs {
         const b = new Map<string, Reading>();
         for (const j of ALL_JOURNEYS) for (const k of ['alert', 'burn50'] as const) b.set(`${j}:${k}`, budget.get(`${eventId}|${j}|${k}`) ?? budgetMiss);
