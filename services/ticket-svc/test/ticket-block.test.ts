@@ -25,8 +25,6 @@ interface Client {
 let server: Awaited<ReturnType<typeof startGrpcServer>>;
 let client: Client;
 let store: MemoryTicketStore;
-const errors: string[] = [];
-
 beforeAll(async () => {
   store = new MemoryTicketStore();
   const ticket = new TicketService({ store, clock: fakeClock({ now: NOW }) });
@@ -37,7 +35,7 @@ beforeAll(async () => {
       {
         definition: ticketPackage().TicketService.service,
         // 계약의 호출자 제한(ASVS 8.2.1)을 함께 본다: 내부 토큰이 설정된 환경에서는 purchase-svc만 부른다
-        handlers: ticketServiceHandlers({ ticket, nowMs: () => NOW }, (method, err) => errors.push(`${method}:${String(err)}`), { internalToken: TOKEN }),
+        handlers: ticketServiceHandlers({ ticket, nowMs: () => NOW }, () => undefined, { internalToken: TOKEN }),
       },
     ],
   });
@@ -81,7 +79,9 @@ describe('BlockTicketIssuance 단위 계약 [HOT-161] [P-T15] [P-T39 ③]', () =
     await block(orderId);
     await expect(issue(orderId)).rejects.toMatchObject({ code: grpc.status.FAILED_PRECONDITION });
     expect([...store.tickets.values()].filter((t) => t.orderId === orderId)).toEqual([]);
-    expect(errors.some((e) => e.startsWith('IssueTickets:'))).toBe(true);
+    // 다시 보내도 같은 거절이고 티켓 행은 여전히 0장이다
+    await expect(issue(orderId)).rejects.toMatchObject({ code: grpc.status.FAILED_PRECONDITION });
+    expect([...store.tickets.values()].filter((t) => t.orderId === orderId)).toEqual([]);
   });
 
   test('P-T39 ③_발권이_끝난_주문을_막으면_모든_티켓이_VOIDED가_되고_입장_기록_수를_센다', async () => {

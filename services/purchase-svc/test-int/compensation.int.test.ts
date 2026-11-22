@@ -315,7 +315,7 @@ test('P-T39 ③_회차_취소_요청은_보상이_끝날_때까지_RUNNING이고
   expect((await service.get(requestId)).status).toBe('COMPLETED');
 });
 
-test('P-T39 ③_회차_취소_확정이나_CS_확인이_없으면_보상을_시작하지_않는다', async () => {
+test('P-T39 ③_보상_사유가_없으면_보상을_시작하지_않는다', async () => {
   const f = await approvedOrder();
   const c = compensation();
   await expect(c.start.run({ orderId: f.orderId })).rejects.toBeDefined();
@@ -368,7 +368,7 @@ test('P-T39 ③_RV-02_임대를_잃은_실행기는_보상을_끝내지_못한�
   const c = compensation();
   // start → claimDue(임대 30초) → fenced. 그 뒤 옛 임대(stale)로 compensated를 부르면 T20을 쓰지 않아야 한다
   await c.store.start({ orderId: f.orderId, reason: 'EVENT_CANCELLED', nowMs: NOW });
-  const [claimed] = await c.store.claimDue(1, 30_000, NOW);
+  const claimed = (await c.store.claimDue(50, 30_000, NOW)).find((r) => r.orderId === f.orderId);
   expect(claimed?.orderId).toBe(f.orderId);
   expect(await c.store.fenced({ orderId: f.orderId, nowMs: NOW + 1, leaseUntilMs: claimed!.leaseUntilMs })).toBe(true);
   const out = await c.store.compensated({ orderId: f.orderId, nowMs: NOW + 2, leaseUntilMs: NOW - 1 });
