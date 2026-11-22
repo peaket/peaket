@@ -4,7 +4,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { identityV1Identity } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
-import type { MemberCodeDirectory } from '../application/transfers.js';
+import type { MemberCodeDirectory } from '../domain/transfer-ports.js';
 
 const DEADLINE_CAP_MS = 2_000;
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };

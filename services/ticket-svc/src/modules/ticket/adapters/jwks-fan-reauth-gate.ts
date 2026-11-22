@@ -3,7 +3,7 @@
 // 서명·typ·iss·aud·exp·sid·act·op를 확인한 뒤 sub = 요청 계정과 남은 수명(5분 30초 이하)을 보고, 통과한 뒤에만 jti를 한 번 잡는다.
 // 공개키 묶음·jti 저장소 장애는 ReauthUnavailable(503)이다(토큰 거절로 덮지 않는다).
 import { createExternalHttpClient, type Clock, type ReauthJtiStore, systemClock, TokenKeysUnavailable, TokenRejected, type TokenVerifierOptions, TokenVerifier } from '@peaket/platform';
-import { ReauthUnavailable, type TransferAct, type TransferOp, type TransferReauthGate } from '../application/transfers.js';
+import { ReauthUnavailable, type TransferAct, type TransferOp, type TransferReauthGate } from '../domain/transfer-ports.js';
 
 /** 공개키 묶음 읽기 한 번의 시간 상한 1,000ms [가정](§3.1 '공개키 묶음 읽기') */
 const JWKS_TIMEOUT_CAP_MS = 1_000;
@@ -17,7 +17,7 @@ const TOKEN_NOT_SUPPORTED_CODE = 'ERR_JOSE_NOT_SUPPORTED';
 const codeOf = (e: unknown): unknown => (typeof e === 'object' && e !== null ? (e as { code?: unknown }).code : undefined);
 const nameOf = (e: unknown): unknown => (typeof e === 'object' && e !== null ? (e as { name?: unknown }).name : undefined);
 
-export { ReauthUnavailable } from '../application/transfers.js';
+export { ReauthUnavailable } from '../domain/transfer-ports.js';
 
 export class JwksFanReauthGate implements TransferReauthGate {
   readonly #verifier: TokenVerifier;

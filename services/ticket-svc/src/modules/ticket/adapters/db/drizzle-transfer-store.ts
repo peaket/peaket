@@ -9,7 +9,7 @@ import type {
   SetTransferLockInput,
   TransferLockOutcome,
   TransferStore,
-} from '../../application/transfers.js';
+} from '../../domain/transfer-ports.js';
 import {
   acceptRejectionOf,
   createOfferRejectionOf,

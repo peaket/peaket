@@ -7,7 +7,7 @@ import type {
   SetTransferLockInput,
   TransferLockOutcome,
   TransferStore,
-} from '../application/transfers.js';
+} from '../domain/transfer-ports.js';
 import type { TicketRecord } from '../domain/ticket.js';
 import {
   acceptRejectionOf,

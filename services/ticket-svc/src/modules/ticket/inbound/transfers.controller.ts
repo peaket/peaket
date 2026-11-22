@@ -21,8 +21,15 @@ import { type TransferErrorCode, TransferError, Transfers } from '../application
 /** 재인증 토큰은 없어도 처리기까지 간다(없으면 403 reauth-required). 두 머리 모두 필수 모양만 본다 */
 const IdempotentHeaders = z.object({ 'Idempotency-Key': z.uuid() });
 const IdempotentReauthHeaders = z.object({ 'Idempotency-Key': z.uuid(), 'X-Reauth-Token': z.string().optional() });
-const ReauthHeaders = z.object({ 'X-Reauth-Token': z.string().optional() });
-const EmptyResponse = z.unknown();
+/** 양도 요청 한 건의 응답(openapi TransferOffer의 필수 칸만). 받는 사람에게 결제 금액·연락처를 싣지 않는다 */
+const OfferResponse = z.object({
+  offerId: z.string(),
+  ticketId: z.string(),
+  role: z.enum(['SENDER', 'RECIPIENT']),
+  status: z.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']),
+  expiresAt: z.iso.datetime({ offset: true }),
+});
+const ReturnResponse = z.object({ ticketId: z.string(), status: z.literal('RETURNED') });
 
 function problem(e: unknown): never {
   if (e instanceof TransferError) {
@@ -144,8 +151,8 @@ export class TransfersController {
   @HttpCode(200)
   @Roles(['fan'])
   @Idempotent({ operation: 'TRANSFER_ACCEPT' })
-  @ContractRouteSchema({ params: CreateTransferAcceptanceParams, headers: IdempotentHeaders, responses: { 200: EmptyResponse } })
-  async accept(@ContractParams(CreateTransferAcceptanceParams) params: z.output<typeof CreateTransferAcceptanceParams>, @CurrentPrincipal() me: Principal): Promise<unknown> {
+  @ContractRouteSchema({ params: CreateTransferAcceptanceParams, headers: IdempotentHeaders, responses: { 200: OfferResponse } })
+  async accept(@ContractParams(CreateTransferAcceptanceParams) params: z.output<typeof CreateTransferAcceptanceParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof OfferResponse>> {
     try {
       return await this.transfers.accept({ offerId: params.offerId, accountId: me.accountId });
     } catch (e) {
@@ -158,8 +165,8 @@ export class TransfersController {
   @HttpCode(200)
   @Roles(['fan'])
   @Idempotent({ operation: 'TRANSFER_REJECT' })
-  @ContractRouteSchema({ params: CreateTransferRejectionParams, headers: IdempotentHeaders, responses: { 200: EmptyResponse } })
-  async reject(@ContractParams(CreateTransferRejectionParams) params: z.output<typeof CreateTransferRejectionParams>, @CurrentPrincipal() me: Principal): Promise<unknown> {
+  @ContractRouteSchema({ params: CreateTransferRejectionParams, headers: IdempotentHeaders, responses: { 200: OfferResponse } })
+  async reject(@ContractParams(CreateTransferRejectionParams) params: z.output<typeof CreateTransferRejectionParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof OfferResponse>> {
     try {
       return await this.transfers.reject({ offerId: params.offerId, accountId: me.accountId });
     } catch (e) {
@@ -172,8 +179,8 @@ export class TransfersController {
   @HttpCode(200)
   @Roles(['fan'])
   @Idempotent({ operation: 'TRANSFER_WITHDRAW' })
-  @ContractRouteSchema({ params: CreateTransferWithdrawalParams, headers: IdempotentHeaders, responses: { 200: EmptyResponse } })
-  async withdraw(@ContractParams(CreateTransferWithdrawalParams) params: z.output<typeof CreateTransferWithdrawalParams>, @CurrentPrincipal() me: Principal): Promise<unknown> {
+  @ContractRouteSchema({ params: CreateTransferWithdrawalParams, headers: IdempotentHeaders, responses: { 200: OfferResponse } })
+  async withdraw(@ContractParams(CreateTransferWithdrawalParams) params: z.output<typeof CreateTransferWithdrawalParams>, @CurrentPrincipal() me: Principal): Promise<z.output<typeof OfferResponse>> {
     try {
       return await this.transfers.withdraw({ offerId: params.offerId, accountId: me.accountId });
     } catch (e) {
@@ -189,14 +196,14 @@ export class TransfersController {
   @ContractRouteSchema({
     params: CreateTicketReturnParams,
     headers: IdempotentReauthHeaders,
-    responses: { 200: EmptyResponse },
+    responses: { 200: ReturnResponse },
   })
   async returnToPayer(
     @ContractParams(CreateTicketReturnParams) params: z.output<typeof CreateTicketReturnParams>,
     @CurrentPrincipal() me: Principal,
     @IdempotencyRequest() idem: Idem,
     @Headers('x-reauth-token') reauthToken: string | undefined,
-  ): Promise<unknown> {
+  ): Promise<z.output<typeof ReturnResponse>> {
     try {
       return await this.transfers.returnToPayer({
         ticketId: params.ticketId,
