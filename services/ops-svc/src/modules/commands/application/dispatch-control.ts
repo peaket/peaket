@@ -5,6 +5,7 @@
 // - ControlDispatcher: 카탈로그 명령 1·2·3·7·11은 DISPATCHED를 커밋한 뒤 같은 프로세스의 배경 작업이 보낸다(응답은 DISPATCHED). 끝나면 같은 판일 때만
 //   ACKED·FAILED를 쓴다. 정비 바퀴는 DISPATCHED로 남은 명령을 같은 판으로 이어 보낸다. 되돌리기·연장·만료 되돌림은 원장의 새 판이다.
 // 주소는 설정(대상 찾기 포트)에서만 온다. 명령 값에서 읽지 않는다(ASVS 1.3.6). 로그는 명령 ID·판·서비스·결과만 싣는다(계정·가명 참조 없음).
+import { requestContext } from '@peaket/platform';
 import type { Command, CommandExecutionActor, CommandExecutionResult } from '../domain/command.js';
 import { CommandInputRejected } from '../domain/command-params.js';
 import { writeFailed, writeSucceeded } from '../domain/command-writes.js';
@@ -97,8 +98,9 @@ export class ControlFanout implements ControlDeliverer {
     }
   }
 
-  async deliver(q: { readonly commandId: string; readonly version: number; readonly deliveries: readonly ControlDelivery[]; readonly startedAtMs: number }): Promise<ControlDeliverResult> {
-    const deadline = q.startedAtMs + this.#timeoutMs;
+  async deliver(q: { readonly commandId: string; readonly version: number; readonly deliveries: readonly ControlDelivery[]; readonly startedAtMs: number; readonly untilMs?: number }): Promise<ControlDeliverResult> {
+    // 명령 하나에 시한 하나: 처음 보낸 때 + 10초와 부르는 쪽 시한 가운데 짧은 것(RV-06)
+    const deadline = Math.min(q.startedAtMs + this.#timeoutMs, q.untilMs ?? Number.POSITIVE_INFINITY);
     const acked = new Map<string, true>();
     const services = [...new Set(q.deliveries.map((d) => d.service))];
     let confirming = false;
@@ -131,6 +133,14 @@ export interface ControlDispatcherDeps {
   readonly fanout: ControlFanout;
   readonly clock: { now(): number };
   readonly logger?: ControlLog;
+}
+
+/**
+ * 응답 안에서 기다리는 부름의 시한(RV-06, ASVS 15.1.3): 지금 요청의 남은 시간이 끝나는 시각(clock.now 기준). 요청 밖(정비 바퀴)이면 없다
+ */
+export function requestUntilMs(nowMs: number): number | undefined {
+  const deadline = requestContext()?.deadline;
+  return deadline ? nowMs + deadline.remainingMs() : undefined;
 }
 
 /** 정비 바퀴가 한 번에 보는 DISPATCHED 명령 쪽 수 상한(쪽마다 100) */
@@ -240,7 +250,9 @@ export class ControlDispatcher {
       return v;
     });
     if (version === undefined) return { status: 'FAILED', error: 'control-ledger-not-wired' };
-    const r = await this.deps.fanout.deliver({ commandId: command.commandId, version, deliveries, startedAtMs: nowMs });
+    // 되돌리기·연장은 응답 안의 ack를 기다린다(openapi 200·502). 시한은 처음 보낸 때 + 10초와 요청 남은 시간 가운데 짧은 것(RV-06)
+    const untilMs = requestUntilMs(nowMs);
+    const r = await this.deps.fanout.deliver({ commandId: command.commandId, version, deliveries, startedAtMs: nowMs, ...(untilMs !== undefined ? { untilMs } : {}) });
     this.deps.logger?.info({ kind: 'control-dispatch', commandId: command.commandId, version, phase, result: r.ok ? 'ACKED' : r.error }, '제어 명령 되돌림·연장을 보냈다');
     return r.ok ? { status: 'ACKED', ackedAtMs: r.ackedAtMs } : { status: 'FAILED', error: r.error };
   }

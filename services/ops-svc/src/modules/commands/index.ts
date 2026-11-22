@@ -216,6 +216,9 @@ export {
   type ControlService,
 } from './domain/control-kinds.js';
 export type { CommandDeliveryView } from './domain/command.js';
-export type { ControlDeliverer, ControlDeliverResult, ControlDeliveries, ControlDeliveryRow, ControlTargets, ControlTransport } from './domain/ports.js';
+export type { ControlDeliverer, ControlDeliverResult, ControlDeliveries, ControlDeliveryRow, ControlTargets, ControlTransport, LobbyBannerTemplates } from './domain/ports.js';
+export { noApprovedLobbyBannerTemplates } from './domain/ports.js';
+export { LOBBY_BANNER_TEMPLATE_ID } from './domain/control-kinds.js';
+export { requestUntilMs } from './application/dispatch-control.js';
 export { MemoryControlDeliveries, deliveryViewOf, type DeliveryViewRow } from './adapters/memory-control-deliveries.js';
 export { DrizzleControlDeliveries } from './adapters/db/drizzle-control-deliveries.js';
