@@ -24,10 +24,20 @@ export interface HttpCommandExecutorOptions {
   readonly internalToken?: string;
   /** 제어 gRPC 정본(ADR-0102). 있으면 판매 중지·재개는 이 길로 보낸다 */
   readonly control?: { readonly purchase?: ControlSender; readonly queue?: ControlSender };
+  /**
+   * core-svc 공연 판매 승인 상태까지 바꿀지(BAT-620). 기본 참(core가 있을 때).
+   * 회차 취소 확정의 판매 멈춤 어댑터는 회차 하나만 멈추므로 `withoutCoreSaleReview()`로 끈다.
+   */
+  readonly coreSaleReview?: boolean;
 }
 
 export class HttpCommandExecutor implements CommandExecutor {
   constructor(private readonly o: HttpCommandExecutorOptions) {}
+
+  /** 회차 취소 확정의 판매 멈춤처럼 회차 하나만 멈추는 길: core 공연 상태는 건드리지 않는다 */
+  withoutCoreSaleReview(): HttpCommandExecutor {
+    return new HttpCommandExecutor({ ...this.o, coreSaleReview: false });
+  }
 
   async execute(command: Command, actor: CommandExecutionActor): Promise<CommandExecutionResult> {
     if (command.type === 'EVENT_CANCEL') return this.#eventCancel(command, actor);
@@ -138,9 +148,11 @@ export class HttpCommandExecutor implements CommandExecutor {
   }
 
   /**
-   * 판매 중지·재개 집행(ADR-0123). purchase-svc가 원본과 좌석 사본을 쓰고, queue-svc가 대기열 사본을 쓴다.
-   * 중지는 purchase → queue(먼저 막고 대기 상태를 바꾼다), 재개는 queue → purchase(대기 상태를 먼저 열고 판매를 연다).
-   * 한 곳이라도 실패하면 FAILED이고 재시도가 같은 명령 ID로 두 곳을 다시 부른다(양쪽 다 멱등).
+   * 판매 중지·재개 집행(ADR-0123). core-svc가 있으면 공연 판매 승인 상태(검색·홈)까지 함께 바꾼다(BAT-620).
+   * 중지는 회차 목록을 먼저 받아 모든 회차의 판매를 막은 뒤 core 공연 상태를 내리고, 재개는 core를 먼저 올린 뒤
+   * core가 준 '다시 열 회차'만 대기열 → 판매 차례로 연다(ADR-0123 결정 3·5). core가 없으면 purchase·queue만 부른다
+   * (회차 취소 확정의 판매 멈춤 어댑터는 `withoutCoreSaleReview()`로 core를 뺀다).
+   * 한 곳이라도 실패하면 FAILED이고 재시도가 같은 명령 ID로 다시 부른다(양쪽 다 멱등).
    */
   async #saleSuspension(command: Command): Promise<CommandExecutionResult> {
     const eventId = command.params.eventId;
@@ -148,42 +160,61 @@ export class HttpCommandExecutor implements CommandExecutor {
     const reasonCode = command.params.reasonCode;
     if (reasonCode !== undefined && (typeof reasonCode !== 'string' || !SUSPENSION_REASON_CODES.has(reasonCode))) return { status: 'FAILED', error: 'invalid-sale-suspension-params' };
     const action = command.type === 'SALE_STOP' ? 'SUSPEND' : 'RESUME';
-    if (this.o.control?.purchase && this.o.control.queue) return this.#saleSuspensionGrpc(command, action, eventId);
-    if (!this.o.purchase) return { status: 'FAILED', error: 'target-not-wired' };
-    if (!this.o.queue) return { status: 'FAILED', error: 'target-not-wired' };
-    const suspensionRef = typeof command.params.suspensionRef === 'string' ? command.params.suspensionRef : command.commandId;
-    const headers = { 'content-type': 'application/json', ...(this.o.internalToken ? { 'x-peaket-internal-token': this.o.internalToken } : {}) };
-    const body = JSON.stringify({ action, commandId: command.commandId, reason: command.reason, suspensionRef });
-    const path = `/internal/v1/event-sales/{eventId}/suspensions`;
+    const coreEnabled = this.o.core !== undefined && this.o.coreSaleReview !== false;
+    // core가 공연 상태를 내릴 때는 사유 코드가 꼭 있어야 한다(ADR-0123 결정 2). 없으면 아무것도 막기 전에 실패한다
+    if (coreEnabled && action === 'SUSPEND' && reasonCode === undefined) return { status: 'FAILED', error: 'invalid-sale-suspension-params' };
+    const approvalId = typeof command.params.suspensionRef === 'string' ? command.params.suspensionRef : command.commandId;
 
-    let revision: number | undefined;
-    const callPurchase = async (): Promise<CommandExecutionResult | undefined> => {
-      const res = await this.o.purchase!.request({ method: 'POST', path, params: { eventId }, headers, body, timeoutCapMs: 5_000 });
-      if (!res.ok) return { status: 'FAILED', error: `purchase-svc sale suspension ${res.status}` };
-      const parsed = await readSuspension(res);
-      if (parsed) revision = parsed.revision;
-      return undefined;
-    };
-    const callQueue = async (): Promise<CommandExecutionResult | undefined> => {
-      const res = await this.o.queue!.request({ method: 'POST', path, params: { eventId }, headers, body: JSON.stringify({ action, commandId: command.commandId, reason: command.reason, ...(revision !== undefined ? { revision } : {}) }), timeoutCapMs: 5_000 });
-      if (!res.ok) return { status: 'FAILED', error: `queue-svc sale suspension ${res.status}` };
-      return undefined;
-    };
+    const useGrpc = this.o.control?.purchase !== undefined && this.o.control.queue !== undefined;
+    const useHttp = this.o.purchase !== undefined && this.o.queue !== undefined;
+    if (!useGrpc && !useHttp) return { status: 'FAILED', error: 'target-not-wired' };
+    const transport = useGrpc ? 'control-grpc' : 'purchase-svc+queue-svc';
+    const apply = (id: string) => (useGrpc ? this.#applyControlGrpc(command, action, id) : this.#applyControlHttp(command, action, id));
 
-    const order = action === 'SUSPEND' ? [callPurchase, callQueue] : [callQueue, callPurchase];
-    for (const step of order) {
-      const failed = await step();
-      if (failed) return failed;
+    if (action === 'SUSPEND') {
+      const scope = coreEnabled ? await this.#coreScope(eventId) : undefined;
+      if (scope && 'error' in scope) return { status: 'FAILED', error: scope.error };
+      const eventIds = scope?.eventIds ?? [eventId];
+      let revision: number | undefined;
+      for (const id of eventIds) {
+        const r = await apply(id);
+        if (!r.ok) return { status: 'FAILED', error: r.error };
+        if (r.revision !== undefined) revision = r.revision;
+      }
+      if (!coreEnabled) {
+        return { status: 'SUCCEEDED', detail: { target: transport, eventId, suspended: true, ...(revision !== undefined ? { revision } : {}) } };
+      }
+      const res = await this.#coreResult(eventId, 'SUSPENDED', approvalId, command.reason, reasonCode);
+      if ('error' in res) return { status: 'FAILED', error: res.error };
+      // 확인과 커밋 사이에 더한 회차가 있으면 그 회차도 막는다(공개를 내리기 전에)
+      for (const id of res.eventIds) {
+        if (eventIds.includes(id)) continue;
+        const r = await apply(id);
+        if (!r.ok) return { status: 'FAILED', error: r.error };
+        if (r.revision !== undefined) revision = r.revision;
+      }
+      return { status: 'SUCCEEDED', detail: { target: `${transport}+core-svc`, eventIds: res.eventIds, suspended: true, ...(revision !== undefined ? { revision } : {}) } };
     }
-    return { status: 'SUCCEEDED', detail: { target: 'purchase-svc+queue-svc', eventId, suspended: action === 'SUSPEND', ...(revision !== undefined ? { revision } : {}) } };
+
+    if (coreEnabled) {
+      const res = await this.#coreResult(eventId, 'RESUMED', approvalId, command.reason);
+      if ('error' in res) return { status: 'FAILED', error: res.error };
+      let revision: number | undefined;
+      // 오픈 시각이 지난 회차는 core가 다시 열 목록에 넣지 않는다(ADR-0123 결정 5)
+      for (const id of res.resumeEventIds) {
+        const r = await apply(id);
+        if (!r.ok) return { status: 'FAILED', error: r.error };
+        if (r.revision !== undefined) revision = r.revision;
+      }
+      return { status: 'SUCCEEDED', detail: { target: `${transport}+core-svc`, eventIds: res.resumeEventIds, suspended: false, ...(revision !== undefined ? { revision } : {}) } };
+    }
+    const r = await apply(eventId);
+    if (!r.ok) return { status: 'FAILED', error: r.error };
+    return { status: 'SUCCEEDED', detail: { target: transport, eventId, suspended: false, ...(r.revision !== undefined ? { revision: r.revision } : {}) } };
   }
 
-  /**
-   * 제어 gRPC 정본(ADR-0102). 판 번호는 명령의 마지막 변경 시각(ms)을 쓴다: 같은 범위·종류에서 늘어나기만 하면 되고,
-   * 다시 실행해도 받는 쪽이 같은 판 이하를 거른다. 중지는 purchase → queue, 재개는 queue → purchase 차례다.
-   * ack의 applied_version이 요청한 판보다 작으면 아직 그 파드가 적용하지 않은 것이다(FAILED, 재시도 가능).
-   */
-  async #saleSuspensionGrpc(command: Command, action: 'SUSPEND' | 'RESUME', eventId: string): Promise<CommandExecutionResult> {
+  /** 회차 하나의 제어 gRPC 집행(판 번호 ack 확인). 중지는 purchase → queue, 재개는 queue → purchase다 */
+  async #applyControlGrpc(command: Command, action: 'SUSPEND' | 'RESUME', eventId: string): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
     const version = command.updatedAtMs;
     const desiredStateJson = JSON.stringify({ suspended: action === 'SUSPEND' });
     const targets = [
@@ -197,13 +228,72 @@ export class HttpCommandExecutor implements CommandExecutor {
       try {
         ack = await t.sender.apply({ commandId: command.commandId, scope: eventId, kind: 'CONTROL_KIND_SALE_SUSPENSION', version, desiredStateJson });
       } catch (err) {
-        return { status: 'FAILED', error: `control-unavailable:${t.name}:${err instanceof Error ? err.message : 'unknown'}` };
+        return { ok: false, error: `control-unavailable:${t.name}:${err instanceof Error ? err.message : 'unknown'}` };
       }
-      if (ack.appliedVersion < version) return { status: 'FAILED', error: `ack-pending:${t.name}:${ack.appliedVersion}` };
+      if (ack.appliedVersion < version) return { ok: false, error: `ack-pending:${t.name}:${ack.appliedVersion}` };
       applied = Math.max(applied, ack.appliedVersion);
     }
-    return { status: 'SUCCEEDED', detail: { target: 'control-grpc', eventId, suspended: action === 'SUSPEND', appliedVersion: applied } };
+    return { ok: true, revision: applied };
   }
+
+  /** 회차 하나의 내부 HTTP 집행(중지 purchase → queue, 재개 queue → purchase) */
+  async #applyControlHttp(command: Command, action: 'SUSPEND' | 'RESUME', eventId: string): Promise<{ ok: true; revision?: number } | { ok: false; error: string }> {
+    const suspensionRef = typeof command.params.suspensionRef === 'string' ? command.params.suspensionRef : command.commandId;
+    const headers = { 'content-type': 'application/json', ...(this.o.internalToken ? { 'x-peaket-internal-token': this.o.internalToken } : {}) };
+    const body = JSON.stringify({ action, commandId: command.commandId, reason: command.reason, suspensionRef });
+    const path = `/internal/v1/event-sales/{eventId}/suspensions`;
+    let revision: number | undefined;
+    const callPurchase = async (): Promise<{ ok: false; error: string } | undefined> => {
+      const res = await this.o.purchase!.request({ method: 'POST', path, params: { eventId }, headers, body, timeoutCapMs: 5_000 });
+      if (!res.ok) return { ok: false, error: `purchase-svc sale suspension ${res.status}` };
+      const parsed = await readSuspension(res);
+      if (parsed) revision = parsed.revision;
+      return undefined;
+    };
+    const callQueue = async (): Promise<{ ok: false; error: string } | undefined> => {
+      const res = await this.o.queue!.request({ method: 'POST', path, params: { eventId }, headers, body: JSON.stringify({ action, commandId: command.commandId, reason: command.reason, ...(revision !== undefined ? { revision } : {}) }), timeoutCapMs: 5_000 });
+      if (!res.ok) return { ok: false, error: `queue-svc sale suspension ${res.status}` };
+      return undefined;
+    };
+    const order = action === 'SUSPEND' ? [callPurchase, callQueue] : [callQueue, callPurchase];
+    for (const step of order) {
+      const failed = await step();
+      if (failed) return failed;
+    }
+    return { ok: true, ...(revision !== undefined ? { revision } : {}) };
+  }
+
+  async #coreScope(eventId: string): Promise<{ eventIds: string[] } | { error: string }> {
+    const res = await this.o.core!.request({
+      method: 'GET',
+      path: '/internal/v1/events/{eventId}/sale-review-scope',
+      params: { eventId },
+      headers: this.#coreHeaders(),
+      timeoutCapMs: 5_000,
+    });
+    if (!res.ok) return { error: `core-svc sale review scope ${res.status}` };
+    const body = await readCoreScope(res);
+    return body ?? { error: 'core-svc sale review scope invalid' };
+  }
+
+  async #coreResult(eventId: string, kind: 'SUSPENDED' | 'RESUMED', approvalId: string, reason: string, reasonCode?: string): Promise<{ eventIds: string[]; resumeEventIds: string[] } | { error: string }> {
+    const res = await this.o.core!.request({
+      method: 'POST',
+      path: '/internal/v1/events/{eventId}/sale-review-result',
+      params: { eventId },
+      headers: { ...this.#coreHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({ kind, approvalId, ...(kind === 'SUSPENDED' ? { reasonCode, reason } : {}) }),
+      timeoutCapMs: 5_000,
+    });
+    if (!res.ok) return { error: `core-svc sale review ${res.status}` };
+    const body = await readCoreResult(res);
+    return body ?? { error: 'core-svc sale review invalid' };
+  }
+
+  #coreHeaders(): Record<string, string> {
+    return this.o.internalToken ? { 'x-peaket-internal-token': this.o.internalToken } : {};
+  }
+
 }
 
 /** purchase-svc 답의 revision(모르는 모양이면 undefined). 답을 읽지 못해도 집행은 성공이다(판 번호는 결과 장식일 뿐이다) */
@@ -216,6 +306,34 @@ async function readSuspension(res: Response): Promise<{ revision: number } | und
   } catch {
     return undefined;
   }
+}
+
+/** core-svc 회차 목록 답(BAT-620). 모양이 틀리면 undefined(집행하지 않는다) */
+async function readCoreScope(res: Response): Promise<{ eventIds: string[] } | undefined> {
+  const v = await jsonObject(res);
+  const eventIds = stringArray(v?.eventIds);
+  return eventIds ? { eventIds } : undefined;
+}
+
+/** core-svc 판매 중지·재개 답(BAT-620). 모양이 틀리면 undefined(집행하지 않는다) */
+async function readCoreResult(res: Response): Promise<{ eventIds: string[]; resumeEventIds: string[] } | undefined> {
+  const v = await jsonObject(res);
+  const eventIds = stringArray(v?.eventIds);
+  const resumeEventIds = stringArray(v?.resumeEventIds);
+  return eventIds && resumeEventIds ? { eventIds, resumeEventIds } : undefined;
+}
+
+async function jsonObject(res: Response): Promise<Record<string, unknown> | undefined> {
+  try {
+    const v: unknown = await res.json();
+    return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string') ? v : undefined;
 }
 
 const grpcCodeOf = (err: unknown): string => {

@@ -113,6 +113,12 @@ export const production = pgTable(
     salePolicyVersion: integer('sale_policy_version').notNull().default(1),
     /** 판매 승인 때 운영자가 확인한 휠체어석 수·위치(FR-023, LCH-090). 승인 전에는 false */
     accessibleSeatingCheck: boolean('accessible_seating_check').notNull().default(false),
+    /** 판매 중지 시각·사유·승인 업무·당시 판매 중이던 회차(ADR-0123, BAT-620). SUSPENDED일 때만 있다 */
+    suspendedAt: at('suspended_at'),
+    suspensionReasonCode: text('suspension_reason_code'),
+    suspensionReason: text('suspension_reason'),
+    suspensionApprovalId: text('suspension_approval_id'),
+    suspensionOpenEventIds: jsonb('suspension_open_event_ids'),
     /** 새 공연장 요청 { name, address } */
     requestedPlace: jsonb('requested_place'),
     /** 새 아티스트 이름 요청 [{ name, sortOrder }] */
@@ -128,6 +134,11 @@ export const production = pgTable(
     // 승인 이력과 상태가 맞아야 한다(planning/03 §2.14): Draft는 승인 이력이 없고, Approved와 판매 중지(T9·T10은 승인 이력이 있을 때만)는 있다.
     // 승인 대기·반려는 둘 다 될 수 있다(첫 요청이거나 재승인). HOT-170의 첫 제약은 판매 중지를 빠뜨렸다(ADR-0198 결정 7)
     check('production_sale_approved_check', sql`(${t.saleReview} <> 'DRAFT' or ${t.saleApprovedAt} is null) and (${t.saleReview} not in ('APPROVED', 'SUSPENDED') or ${t.saleApprovedAt} is not null)`),
+    // 판매 중지 칸은 SUSPENDED일 때만 있고, 사유 코드는 ADR-0123 결정 2의 네 가지다(BAT-620)
+    check('production_suspension_state_check', sql`(${t.saleReview} = 'SUSPENDED') or (${t.suspendedAt} is null and ${t.suspensionReasonCode} is null and ${t.suspensionReason} is null and ${t.suspensionApprovalId} is null and ${t.suspensionOpenEventIds} is null)`),
+    check('production_suspension_reason_check', sql`${t.suspensionReasonCode} is null or ${t.suspensionReasonCode} in ('SELLER_IDENTITY', 'LEGAL_REQUEST', 'FRAUD_SUSPECTED', 'OTHER')`),
+    check('production_suspension_reason_len_check', sql`${t.suspensionReason} is null or char_length(${t.suspensionReason}) between 1 and 1000`),
+    check('production_suspension_open_ids_check', sql`${t.suspensionOpenEventIds} is null or jsonb_typeof(${t.suspensionOpenEventIds}) = 'array'`),
     // 공연장은 등록된 공연장과 새 공연장 요청 가운데 꼭 하나다. 승인 이력이 있으면 등록된 공연장이다(ADR-0198 결정 4)
     check('production_place_check', sql`(${t.placeId} is null) <> (${t.requestedPlace} is null)`),
     check('production_approved_place_check', sql`${t.saleApprovedAt} is null or ${t.placeId} is not null`),

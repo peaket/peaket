@@ -34,6 +34,7 @@ import { SaleEligibilityLists } from './application/sale-eligibility-lists.js';
 import { SalePolicies } from './application/sale-policy.js';
 import { SearchCatalog } from './application/search.js';
 import { ApproveSaleReview } from './application/approve-sale-review.js';
+import { ChangeSaleSuspension } from './application/change-sale-suspension.js';
 import { PublishSaleConfigs } from './application/publish-sale-configs.js';
 import { RejectSaleReview } from './application/reject-sale-review.js';
 import { OpsSaleReviewController } from './inbound/ops-sale-review.controller.js';
@@ -68,6 +69,9 @@ import { CATALOG_REPOSITORY } from './domain/ports.js';
 import { SEARCH_DICTIONARY, SEARCH_DICTIONARY_SOURCE, SEARCH_INDEX, SEARCH_READ_MODEL_SYNC, type SearchDictionarySource, SuggestionDictionary } from './domain/search.js';
 import type { TemplateCatalog } from './domain/seatmap-templates.js';
 import { OPS_SALE_STORE, SALE_STORE } from './domain/sale-ports.js';
+import { SALE_SUSPENSION_STORE } from './domain/sale-suspension.js';
+import { DrizzleSaleSuspensionStore } from './adapters/db/drizzle-sale-suspension-store.js';
+import { InternalSaleSuspensionController } from './inbound/internal-sale-suspension.controller.js';
 import { DrizzlePromoterStore } from './adapters/db/drizzle-promoter-store.js';
 import { MemoryPromoterStore } from './adapters/memory-promoter-store.js';
 import { MemoryOpsApprovals, UnavailableOpsApprovals } from './adapters/http-ops-approvals.js';
@@ -217,11 +221,13 @@ export class CatalogModule implements NestModule {
       return {
         module: CatalogModule,
         // core 회차 상태 반영(BUILD_ORDER GAT-110)은 core_ops 쓰기와 검색 동기화가 있어야 하므로 DB 조립에서만 연다
-        controllers: [...controllers, InternalEventStatusController],
+        controllers: [...controllers, InternalEventStatusController, InternalSaleSuspensionController],
         providers: [
           ...shared,
           ApplyEventCancellationStatus,
+          ChangeSaleSuspension,
           { provide: EVENT_STATUS_STORE, useFactory: (db: Database) => new DrizzleEventStatusStore(db), inject: [OPS_DATABASE] },
+          { provide: SALE_SUSPENSION_STORE, useFactory: (db: Database) => new DrizzleSaleSuspensionStore(db), inject: [OPS_DATABASE] },
           { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           { provide: PARTNER_DATABASE, useValue: o.partnerDatabase },
           { provide: CATALOG_REPOSITORY, useClass: DrizzleCatalogRepository },

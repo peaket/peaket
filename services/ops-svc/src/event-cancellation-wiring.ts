@@ -5,6 +5,7 @@ import { createExternalHttpClient } from '@peaket/platform';
 import { HttpCoreEventOwners } from './adapters/http-core-event-owners.js';
 import { HttpCoreEventStatus } from './adapters/http-core-event-status.js';
 import { HttpEventSaleStopper } from './adapters/event-sale-stopper.js';
+import { HttpCommandExecutor } from './adapters/http-command-executor.js';
 import type { CommandExecutor } from './modules/commands/domain/ports.js';
 import type { CoreEventStatus, EventOwnerLookup, EventRefundHolds, EventRefundReader, EventSaleStopper } from './modules/event-cancellations/domain/ports.js';
 
@@ -57,7 +58,7 @@ export function eventCancellationDepsFromEnv(i: EventCancellationDepsInput): Eve
   const httpSale = has(i.env.PEAKET_PURCHASE_HTTP_URL) && has(i.env.PEAKET_QUEUE_HTTP_URL);
   const grpcSale = has(i.env.PEAKET_PURCHASE_CONTROL_GRPC_ADDR) && has(i.env.PEAKET_QUEUE_CONTROL_GRPC_ADDR);
   return {
-    ...(httpSale || grpcSale ? { stopper: new HttpEventSaleStopper(i.executor) } : {}),
+    ...(httpSale || grpcSale ? { stopper: new HttpEventSaleStopper(i.executor instanceof HttpCommandExecutor ? i.executor.withoutCoreSaleReview() : i.executor) } : {}),
     ...(i.refunds ? { reader: i.refunds } : {}),
     ...(i.refunds && typeof i.refunds.hold === 'function' ? { holds: i.refunds as EventRefundHolds } : {}),
     ...(has(coreUrl)
