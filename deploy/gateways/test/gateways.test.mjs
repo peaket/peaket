@@ -834,6 +834,19 @@ test('HOT-400 identity §3 VF-04 다섯 게이트웨이의 earlyRequestHeaders�
   }
 });
 
+test('F-03-1 T4 FE-T28 ④ gw-ops는 액세스 토큰 exp를 X-User-Token-Exp로 넣고, 바깥 요청의 같은 머리는 x-user- 앞부분 지우기가 먼저 지운다(frontend §4.4.4 닫힘, ADR-0360 결정 5)', () => {
+  requireDefinitions();
+  const ps = providersOf('gw-ops');
+  assert.ok(ps.length > 0, 'gw-ops jwt 제공자가 없다');
+  for (const p of ps) {
+    const map = Object.fromEntries((p.claimToHeaders ?? []).map((c) => [c.claim, lc(c.header)]));
+    assert.equal(map.exp, 'x-user-token-exp', `gw-ops/${p.name}: exp`);
+  }
+  assert.ok(earlyRemoves('gw-ops', 'X-User-Token-Exp') || (early('gw-ops').removeOnMatch ?? []).some((m) => m.type === 'Prefix' && 'x-user-token-exp'.startsWith(lc(m.value))), 'gw-ops: 바깥 X-User-Token-Exp를 지우지 않는다');
+  // 다른 게이트웨이는 exp를 머리로 넣지 않는다(관제 흐름만 쓴다)
+  for (const gw of GATEWAYS.filter((g) => g !== 'gw-ops')) for (const p of providersOf(gw)) assert.ok(!(p.claimToHeaders ?? []).some((c) => c.claim === 'exp'), `${gw}/${p.name}: exp 머리`);
+});
+
 test('B-T18 ② VF-05 접근 로그 JSON 형식에 정본 칸(시각·메서드·경로·상태·지연·clientIp·app·ja4·asn·edgeBotLabels·sub·pid)이 모두 있다', () => {
   requireDefinitions();
   const formats = accessLogFormats();

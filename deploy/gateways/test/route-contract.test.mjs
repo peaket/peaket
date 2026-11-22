@@ -271,6 +271,22 @@ test('W7-WIR-02 /v1/ops/scanner-devices* 작업의 생성 라우트 백엔드는
   }
 });
 
+test('F-03-1 T17 FE-T28 관제 SSE 흐름 둘(getOpsLive·getOpsEventLive)과 위젯 조회(getOpsWidget)의 생성 라우트 백엔드는 ops-svc이고 흐름 둘은 timeouts.request 0s다(ADR-0100 결정 2 게이트웨이)', () => {
+  const byId = (id) => OPS.find((o) => o.op.operationId === id);
+  for (const [id, timeout] of [
+    ['getOpsLive', '0s'],
+    ['getOpsEventLive', '0s'],
+    ['getOpsWidget', undefined],
+  ]) {
+    const o = byId(id);
+    assert.ok(o, `openapi에 ${id}가 없다`);
+    const hit = opRoute(o);
+    assert.ok(hit, `${o.key}를 받는 라우트가 없다`);
+    assert.deepEqual((hit.rule.backendRefs ?? []).map((b) => `${b.namespace}/${b.name}:${b.port}`), ['core/ops-svc:8080'], `${o.key}(${hit.route.metadata?.name}): 백엔드`);
+    assert.equal(hit.rule.timeouts?.request, timeout, `${o.key}: timeouts.request`);
+  }
+});
+
 test('W7-WIR-03 GET /v1/tickets/{ticketId}/cancellation-quote·POST …/cancellation의 백엔드는 purchase-svc다', () => {
   for (const key of ['GET /v1/tickets/{ticketId}/cancellation-quote', 'POST /v1/tickets/{ticketId}/cancellation']) {
     const hit = opRoute(opByKey(key));

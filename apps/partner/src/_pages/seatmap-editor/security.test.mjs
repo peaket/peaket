@@ -97,10 +97,80 @@ test('에디터 코드에 eval·new Function·문자열 타이머가 없고 뿌�
   assert.deepEqual(hits, []);
 });
 
+/** 파트너 Trusted Types 보고 머리(docs/frontend.md §5.14.1 'Trusted Types' 붙인 곳: 실제로 만드는 이름 peaket peaket-paste nextjs default, ADR-0360 결정 7) */
+const PARTNER_TT_REPORT_ONLY = "require-trusted-types-for 'script'; trusted-types peaket peaket-paste nextjs default; report-to csp";
+
+/** Next.js가 proxy matcher를 그 주소에 거는가(Next.js 시험 도구, 서버 내부 저장소가 AsyncLocalStorage 전역을 찾는다) */
+async function proxyMatches(config, url) {
+  const { AsyncLocalStorage } = await import('node:async_hooks');
+  globalThis.AsyncLocalStorage ??= AsyncLocalStorage;
+  const { unstable_doesMiddlewareMatch } = await import('next/experimental/testing/server.js');
+  return unstable_doesMiddlewareMatch({ config, url });
+}
+
+test('F-03-1 T11 파트너 proxy는 위저드·에디터 밖 화면 경로까지 걸리고 정적 자산·/_next·보고 받는 곳·기본 정책 파일에는 걸리지 않는다(OPS-340, frontend §5.14.1 붙인 곳)', async () => {
+  const { config } = await import('../../../proxy.ts');
+  const pages = ['/', '/login', '/events', '/events/new', '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01/seatmap', '/settlements', '/sitemap', '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01/json'];
+  for (const url of pages) assert.equal(await proxyMatches(config, url), true, `${url}에 화면 보안 헤더가 걸리지 않는다`);
+  const assets = ['/_next/static/chunks/app-1a2b.js', '/_next/image', '/_t/csp', '/trusted-types-default.js', '/favicon.ico', '/robots.txt', '/fonts/a.woff2'];
+  for (const url of assets) assert.equal(await proxyMatches(config, url), false, `${url}에 화면 proxy가 걸린다`);
+});
+
+test('F-03-1 T10 FE-T41 좁은 기본 정책 파일은 무결성 값과 같고, 같은 출처 /_next/static/ 아래 .js 주소만 통과시키며 HTML·문자열 스크립트 규칙을 만들지 않는다(ADR-0360 결정 7)', async () => {
+  const { createHash } = await import('node:crypto');
+  const { runInNewContext } = await import('node:vm');
+  const { TRUSTED_TYPES_DEFAULT_SRC, TRUSTED_TYPES_DEFAULT_SRI } = await import('../../shared/config/security.ts');
+  assert.equal(TRUSTED_TYPES_DEFAULT_SRC, '/trusted-types-default.js');
+  const source = readFileSync(join(ROOT, 'apps/partner/public/trusted-types-default.js'));
+  assert.equal(TRUSTED_TYPES_DEFAULT_SRI, `sha384-${createHash('sha384').update(source).digest('base64')}`, '무결성 값이 파일과 다르다(파일을 고치면 다시 잰다)');
+  const made = [];
+  const trustedTypes = { defaultPolicy: null, createPolicy: (name, rules) => made.push({ name, rules }) };
+  runInNewContext(source.toString('utf8'), { window: { trustedTypes }, location: { origin: 'https://partner.peaket.example' }, URL });
+  assert.deepEqual(
+    made.map((p) => [p.name, Object.keys(p.rules).sort()]),
+    [['default', ['createScriptURL']]],
+  );
+  const pass = made[0].rules.createScriptURL;
+  for (const ok of ['/_next/static/chunks/a1.js', 'https://partner.peaket.example/_next/static/chunks/b.js']) assert.equal(pass(ok), ok, ok);
+  for (const bad of ['https://evil.example/_next/static/chunks/a.js', '/_next/static/chunks/a.css', '/static/a.js', '/_next/image?url=a.js', 'data:text/javascript,alert(1)', 'javascript:alert(1)', '/_next/static/../x.js?.js'])
+    assert.equal(pass(bad), null, bad);
+  // 이미 기본 정책이 있으면 만들지 않는다
+  const again = [];
+  runInNewContext(source.toString('utf8'), { window: { trustedTypes: { defaultPolicy: {}, createPolicy: (n) => again.push(n) } }, location: { origin: 'https://partner.peaket.example' }, URL });
+  assert.deepEqual(again, []);
+});
+
+test('F-03-1 T11 위저드 밖 화면도 묶음 B 파트너 CSP·PAGE_HEADERS.partner·Trusted Types 이름 목록 보고 머리를 단다', async () => {
+  const { NextRequest } = await import('next/server.js');
+  const { proxy } = await import('../../../proxy.ts');
+  const before = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    for (const path of ['/', '/settlements', '/events/new']) {
+      const res = proxy(new NextRequest(`http://localhost${path}`));
+      const csp = res.headers.get('content-security-policy');
+      assert.match(csp, /script-src 'nonce-[A-Za-z0-9+/=]{24}' 'strict-dynamic'/, path);
+      assert.match(csp, /object-src 'none'/, path);
+      assert.match(csp, /frame-ancestors 'none'/, path);
+      assert.match(csp, /report-to csp/, path);
+      assert.equal(res.headers.get('content-security-policy-report-only'), PARTNER_TT_REPORT_ONLY, path);
+      assert.equal(res.headers.get('referrer-policy'), 'no-referrer', path);
+      assert.equal(res.headers.get('cross-origin-opener-policy'), 'same-origin', path);
+      assert.ok(res.headers.get('permissions-policy'), `${path}: Permissions-Policy`);
+      assert.equal(res.headers.get('cache-control'), 'private, no-store', path);
+      // 루트 레이아웃이 기본 정책 스크립트에 붙일 nonce를 요청 머리로 넘긴다(응답 CSP의 nonce와 같다)
+      assert.equal(res.headers.get('x-middleware-request-x-nonce'), csp.match(/nonce-([^']+)/)[1], `${path}: 요청 nonce`);
+    }
+  } finally {
+    process.env.NODE_ENV = before;
+  }
+});
+
 test('에디터 경로 응답이 묶음 B 파트너 CSP(nonce, worker-src \'self\', object-src \'none\')와 Trusted Types 보고 머리를 단다 [ASVS v5.0.0-3.4.3]', async () => {
   const { NextRequest } = await import('next/server.js');
   const { config, proxy } = await import('../../../proxy.ts');
-  assert.deepEqual(config.matcher, ['/events/new', '/events/:id/seatmap']);
+  // F-03-1(OPS-340): matcher는 두 경로에서 모든 화면 경로로 넓어졌다(위 T11 시험)
+  assert.equal(await proxyMatches(config, '/events/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01/seatmap'), true);
   const before = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   try {
@@ -111,7 +181,7 @@ test('에디터 경로 응답이 묶음 B 파트너 CSP(nonce, worker-src \'self
     assert.match(csp, /object-src 'none'/);
     assert.match(csp, /base-uri 'none'/);
     assert.match(csp, /connect-src 'self' https:\/\/partner-api\.peaket\.example/);
-    assert.equal(res.headers.get('content-security-policy-report-only'), "require-trusted-types-for 'script'; report-to csp");
+    assert.equal(res.headers.get('content-security-policy-report-only'), PARTNER_TT_REPORT_ONLY);
     assert.equal(res.headers.get('cache-control'), 'private, no-store');
     assert.ok(res.headers.get('reporting-endpoints').includes('csp='));
     // 요청마다 nonce가 다르다
