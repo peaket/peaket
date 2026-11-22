@@ -243,6 +243,14 @@ export interface PgAssignmentCheck {
   check(q: { readonly eventId: string; readonly primaryPg: PgName; readonly fallbackPg?: PgName }): Promise<PgAssignmentVerdict>;
 }
 
+/**
+ * 명령 6 대체 결제사 전환의 갈 곳 묻기(ops-svc → payment-svc gRPC ResolvePgSwitch, 데드라인 2초 [가정], ADR-0366 결정 5).
+ * 회차마다 전환이 켜졌을 때 갈 결제사와 그 승인 상한, 설정에 있는 결제사의 승인 상한을 준다. 실패·시간 초과는 던진다(503 pg-check-unavailable)
+ */
+export interface PgSwitchResolver {
+  resolve(q: { readonly eventIds: readonly string[]; readonly toPg?: PgName }): Promise<import('./pg-switch.js').PgSwitchRoutes>;
+}
+
 /** 회차 판매 시작 읽기(core-svc 내부 판매 설정, ADR-0349 결정 2). 판매 승인 전(404)이면 undefined, 그 밖의 실패는 던진다 */
 export interface OnsaleStartSource {
   saleStartMs(eventId: string): Promise<number | undefined>;

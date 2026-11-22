@@ -22,7 +22,7 @@ import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleChe
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { AuditSignals, auditEnvName } from './modules/audit/index.js';
 import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
-import { AwsWafIpSets, ControlFanout, DrizzleControlDeliveries, GrpcPgAssignmentCheck, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
+import { AwsWafIpSets, ControlFanout, DrizzleControlDeliveries, GrpcPgAssignmentCheck, GrpcPgSwitchResolver, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
@@ -84,6 +84,8 @@ const executor = new HttpCommandExecutor({
 // 주소가 없으면 그 원천이 없는 닫힌 쪽이라 명령 12 미리보기·접수·실행이 503이다. 설정 사건은 같은 트랜잭션의 ops Outbox로 내고 릴레이(dist/relay.js)가 보낸다
 const paymentGrpcAddr = process.env.PEAKET_PAYMENT_GRPC_ADDR;
 const pgAssignmentCheck = paymentGrpcAddr ? new GrpcPgAssignmentCheck({ address: paymentGrpcAddr }) : undefined;
+// 명령 6 대체 결제사 전환의 갈 곳 묻기(payment-svc ResolvePgSwitch, F-02-2 ADR-0366 결정 5). 받는 쪽 주소는 PEAKET_PAYMENT_CONTROL_GRPC_ADDRS·_DNS(controlTargetsFromEnv)다
+const pgSwitchResolver = paymentGrpcAddr ? new GrpcPgSwitchResolver({ address: paymentGrpcAddr }) : undefined;
 const pgAssignment = {
   ...(coreUrl ? { onsale: new HttpCoreSaleStart(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 5_000 }), internalToken) } : {}),
   ...(pgAssignmentCheck ? { pgCheck: pgAssignmentCheck } : {}),
@@ -182,7 +184,7 @@ const service = await createService({
       accountRef: (accountId: string) => botReviewActorRef.ref(accountId),
     },
     onCommandEvent: (h) => (commandEvents = h),
-    commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}), control: { fanout: controlFanout, deliveries: new DrizzleControlDeliveries(database) } },
+    commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}), control: { fanout: controlFanout, deliveries: new DrizzleControlDeliveries(database), ...(pgSwitchResolver ? { pgSwitch: pgSwitchResolver } : {}), simulatorPg: ['local', 'ci'].includes(process.env.PEAKET_ENV ?? '') } },
     auditSignals,
     calendar: caseCalendar,
     caseSignals,
@@ -282,6 +284,7 @@ process.once('SIGTERM', () => {
       }
       scannerDevices?.close();
       pgAssignmentCheck?.close();
+      pgSwitchResolver?.close();
       botReviewLabels?.close();
       adminIdentity.close();
       adminAuthz.close();

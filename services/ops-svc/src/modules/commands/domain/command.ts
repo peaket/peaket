@@ -54,6 +54,17 @@ export const REVERT_NEEDS_APPROVAL: readonly CommandType[] = ['KILL_SWITCH', 'AU
  */
 export const REVERT_NEEDS_REAUTH: readonly CommandType[] = ['KILL_SWITCH', 'DEGRADED_MODE', 'AUTOMATION_STOP'];
 
+/**
+ * 명령 6의 해제 갈래 모드 이름(F-02-2 OPS-310, ADR-0366 결정 8): 결제사 장애로 payment-svc가 스스로 건 새 결제 진입 정지를 commander 1인이 재인증 뒤 바로 연다.
+ * 승인 대기가 없고(NONE) 되돌리지 않는다(409 command-not-revertible)
+ */
+export const PAYMENT_ENTRY_RELEASE = 'PAYMENT_ENTRY_RELEASE';
+/** 명령 6이 해제 갈래(mode PAYMENT_ENTRY_RELEASE)인가 */
+export const isEntryReleaseParams = (type: CommandType, params: unknown): boolean =>
+  type === 'DEGRADED_MODE' && typeof params === 'object' && params !== null && !Array.isArray(params) && (params as Record<string, unknown>).mode === PAYMENT_ENTRY_RELEASE;
+/** 되돌릴 수 있는 명령인가: 카탈로그 명령이고 명령 6 해제 갈래가 아니다(ADR-0366 결정 8) */
+export const isRevertibleCommand = (c: { readonly type: CommandType; readonly params?: unknown }): boolean => isCatalogCommand(c.type) && !isEntryReleaseParams(c.type, c.params);
+
 export const COMMAND_STATES = [
   'DRAFTED',
   'DRY_RUN',
@@ -184,6 +195,8 @@ export function blockApprovalOfParams(params: Record<string, unknown> | undefine
  */
 export function approvalModeOf(type: CommandType, params?: Record<string, unknown>, list: ProtectedRangeList = DEFAULT_PROTECTED_RANGES): ApprovalMode {
   if (type === 'KILL_SWITCH' || type === 'AUTOMATION_STOP') return 'NONE';
+  // 명령 6 해제 갈래는 commander 1인 즉시 실행이다(ADR-0366 결정 8)
+  if (isEntryReleaseParams(type, params)) return 'NONE';
   // 판매 중지·재개는 판 팬·파트너 매출·정산을 바로 묶으므로 요청자가 아닌 두 번째 사람이 승인한다(ADR-0123 결정 2).
   if (type === 'SALE_STOP' || type === 'SALE_RESUME') return 'TWO';
   if (type === 'BLOCK_ASN_IP') return blockApprovalOfParams(params, list).mode;
@@ -193,7 +206,7 @@ export function approvalModeOf(type: CommandType, params?: Record<string, unknow
 
 /** 위험 명령: 2인 승인 명령과 멈추는 쪽 명령 3·11(명령 4는 2인 조건일 때만, control-tower §3 '위험 명령 재인증의 첫 구현') */
 export function reauthRequiredFor(type: CommandType, params?: Record<string, unknown>, list: ProtectedRangeList = DEFAULT_PROTECTED_RANGES): boolean {
-  return approvalModeOf(type, params, list) === 'TWO' || type === 'KILL_SWITCH' || type === 'AUTOMATION_STOP';
+  return approvalModeOf(type, params, list) === 'TWO' || type === 'KILL_SWITCH' || type === 'AUTOMATION_STOP' || isEntryReleaseParams(type, params);
 }
 
 export function stateAfterCreate(mode: ApprovalMode): CommandState {

@@ -1,12 +1,15 @@
 // 제어 gRPC로 보내는 운영 명령의 종류·범위·받는 쪽·바라는 상태(F-02-1 OPS-300, ADR-0365 결정 2, docs/features/control-tower.md §3·§5).
-// 명령 1·2·3·7·11(카탈로그)과 판매 중지·재개(1회 실행)가 대상이다. 명령 6의 두 갈래는 F-02-2가 더한다.
+// 명령 1·2·3·7·11(카탈로그)과 판매 중지·재개(1회 실행)가 대상이다. 명령 6의 결제 갈래 둘(대체 결제사 전환 PAYMENT_PG_FALLBACK, 해제 PAYMENT_ENTRY_RELEASE)은
+// F-02-2(ADR-0366)가 더했다: 명령 6은 params.mode로 종류가 갈리고, 다른 모드는 제어 gRPC로 보내지 않는다(F-02-6).
 // 주소는 여기서 정하지 않는다(대상 찾기 포트 ControlTargets, 결정 3). 명령 값에서 주소를 읽지 않는다(ASVS 1.3.6).
 // 이 파일은 프레임워크를 모른다.
-import { SAFETY_LIMITS, type Command, type CommandType } from './command.js';
-import { CommandInputRejected } from './command-params.js';
+import { isEntryReleaseParams, SAFETY_LIMITS, type Command, type CommandType } from './command.js';
+import { CommandInputRejected, isPgFallbackParams } from './command-params.js';
+import { entryReleaseStates, pgSwitchDesiredStates, pgSwitchOffStates, type PgSwitchRoutes } from './pg-switch.js';
+import type { PgName } from './ports.js';
 
 /** 제어를 받는 서비스(대상 찾기 포트가 주소를 준다) */
-export const CONTROL_SERVICES = ['purchase-svc', 'queue-svc', 'admission-ctrl'] as const;
+export const CONTROL_SERVICES = ['purchase-svc', 'queue-svc', 'admission-ctrl', 'payment-svc'] as const;
 export type ControlService = (typeof CONTROL_SERVICES)[number];
 
 /** 전체 범위 이름(ApplyControlRequest.scope) */
@@ -19,7 +22,9 @@ export type ControlKindName =
   | 'CONTROL_KIND_SALE_PAUSE'
   | 'CONTROL_KIND_LOBBY_BANNER'
   | 'CONTROL_KIND_AUTOMATION_STOP'
-  | 'CONTROL_KIND_SALE_SUSPENSION';
+  | 'CONTROL_KIND_SALE_SUSPENSION'
+  | 'CONTROL_KIND_PG_SWITCH'
+  | 'CONTROL_KIND_ENTRY_PAUSE_RELEASE';
 
 /** 명령 1의 수동 고정 만료: 지정 시각 + 15분(ADR-0226 결정 7) */
 export const ADMISSION_TARGET_HOLD_MS = 15 * 60_000;
@@ -45,14 +50,23 @@ const KIND_OF: Partial<Record<CommandType, ControlKindName>> = {
   SALE_RESUME: 'CONTROL_KIND_SALE_SUSPENSION',
 };
 
-/** 명령 유형의 제어 종류(원장 종류). 제어 gRPC로 보내지 않는 유형은 undefined */
-export function controlKindOf(type: CommandType): ControlKindName | undefined {
+/**
+ * 명령 유형의 제어 종류(원장 종류). 제어 gRPC로 보내지 않는 유형은 undefined.
+ * 명령 6은 params로 갈린다: PAYMENT_PG_FALLBACK은 PG_SWITCH, PAYMENT_ENTRY_RELEASE는 ENTRY_PAUSE_RELEASE, 그 밖의 모드는 undefined(ADR-0366 결정 1·8)
+ */
+export function controlKindOf(type: CommandType, params?: unknown): ControlKindName | undefined {
+  if (type === 'DEGRADED_MODE') {
+    if (isPgFallbackParams(type, params)) return 'CONTROL_KIND_PG_SWITCH';
+    if (isEntryReleaseParams(type, params)) return 'CONTROL_KIND_ENTRY_PAUSE_RELEASE';
+    return undefined;
+  }
   return KIND_OF[type];
 }
 
-/** 배경 작업이 보내고 받는 쪽 ack로 ACKED가 되는 카탈로그 명령(1·2·3·7·11, ADR-0365 결정 4) */
+/** 배경 작업이 보내고 받는 쪽 ack로 ACKED가 되는 카탈로그 명령(1·2·3·7·11, ADR-0365 결정 4)과 명령 6의 결제 갈래 둘(ADR-0366) */
 export const DISPATCHED_CONTROL_TYPES: readonly CommandType[] = ['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'LOBBY_BANNER', 'AUTOMATION_STOP'];
-export const isDispatchedControl = (type: CommandType): boolean => DISPATCHED_CONTROL_TYPES.includes(type);
+export const isDispatchedControl = (type: CommandType, params?: unknown): boolean =>
+  DISPATCHED_CONTROL_TYPES.includes(type) || (type === 'DEGRADED_MODE' && controlKindOf(type, params) !== undefined);
 
 const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** 명령 7 문구 템플릿 ID(openapi NoticeTemplateCreate.templateId와 같은 꼴) */
@@ -83,6 +97,14 @@ export function controlScopesOf(c: Pick<Command, 'type' | 'params'>): string[] {
       return [p.eventId === undefined || p.eventId === null ? CONTROL_SCOPE_PLATFORM : eventOf(p.eventId)];
     case 'AUTOMATION_STOP':
       return [CONTROL_SCOPE_PLATFORM];
+    case 'DEGRADED_MODE': {
+      // 명령 6 결제 갈래: EVENT면 회차마다(소문자), PLATFORM이면 PLATFORM 하나. 해제는 PLATFORM(ADR-0366 결정 1·8)
+      if (isEntryReleaseParams(c.type, p)) return [CONTROL_SCOPE_PLATFORM];
+      if (!isPgFallbackParams(c.type, p)) return [];
+      if (p.scope === 'PLATFORM') return [CONTROL_SCOPE_PLATFORM];
+      if (p.scope !== 'EVENT' || !Array.isArray(p.eventIds) || p.eventIds.length === 0) return invalid('eventIds');
+      return [...new Set((p.eventIds as unknown[]).map(eventOf))].sort();
+    }
     default:
       return [];
   }
@@ -93,6 +115,10 @@ export interface ControlDeliveryTimes {
   readonly sentAtMs: number;
   /** 명령 2 연장의 새 만료(EXTEND만) */
   readonly expiresAtMs?: number;
+  /** 명령 6 대체 결제사 전환을 켤 때(APPLY) 회차마다 갈 결제사·승인 상한(ResolvePgSwitch, ADR-0366 결정 5) */
+  readonly pgRoutes?: PgSwitchRoutes;
+  /** 명령 6 해제의 행위자(요청자 관리 계정 ID, ADR-0366 결정 9) */
+  readonly actorAccountId?: string;
 }
 
 /**
@@ -102,11 +128,13 @@ export interface ControlDeliveryTimes {
  * - 3: purchase-svc·admission-ctrl·queue-svc 범위마다 {"paused": 참거짓}
  * - 7: 승인 템플릿 글을 싣는 길은 F-03-5(OPS-410)가 정한다. 그때까지 적용은 거절하고(템플릿 ID를 banner 글로 싣지 않는다, RV-01), 되돌림만 {"banner": null}이다
  * - 11: admission-ctrl 리더 PLATFORM {"stopped": 참거짓}
+ * - 6 대체 결제사 전환: APPLY는 times.pgRoutes로 범위마다 payment-svc·admission-ctrl(domain/pg-switch.ts), REVERT는 끄기만(해제 둘은 부르는 쪽이 새 판으로 따로 보낸다)
+ * - 6 해제: APPLY만 payment-svc PLATFORM {"pg", "actor": times.actorAccountId}. 되돌리지 않는다
  * @throws CommandInputRejected 명령 값이 꼴에 맞지 않음(배경 작업이 FAILED invalid-command로 남긴다)
  */
 export function controlDeliveriesOf(c: Pick<Command, 'type' | 'params'>, phase: ControlPhase, times: ControlDeliveryTimes): ControlDelivery[] {
-  const kind = controlKindOf(c.type);
-  if (!kind || !isDispatchedControl(c.type)) return invalid('not-control');
+  const kind = controlKindOf(c.type, c.params);
+  if (!kind || !isDispatchedControl(c.type, c.params)) return invalid('not-control');
   const scopes = controlScopesOf(c);
   const json = (v: Record<string, unknown>): string => JSON.stringify(v);
   const undo = phase === 'REVERT' || phase === 'EXPIRE';
@@ -133,6 +161,19 @@ export function controlDeliveriesOf(c: Pick<Command, 'type' | 'params'>, phase: 
     }
     case 'AUTOMATION_STOP':
       return [{ service: 'admission-ctrl', scope: CONTROL_SCOPE_PLATFORM, kind, desiredStateJson: json({ stopped: !undo }) }];
+    case 'DEGRADED_MODE': {
+      if (kind === 'CONTROL_KIND_ENTRY_PAUSE_RELEASE') {
+        if (phase !== 'APPLY') return invalid('not-revertible');
+        const actor = times.actorAccountId;
+        if (actor === undefined || actor === '') return invalid('actor');
+        return entryReleaseStates([c.params.pg as PgName], actor);
+      }
+      if (phase === 'REVERT') return pgSwitchOffStates(scopes);
+      if (phase !== 'APPLY') return invalid('not-control');
+      const toPg = typeof c.params.toPg === 'string' ? (c.params.toPg as PgName) : undefined;
+      if (!times.pgRoutes) return invalid('pgRoutes');
+      return pgSwitchDesiredStates(scopes, toPg, times.pgRoutes) ?? invalid('pgRoutes');
+    }
     default:
       return invalid('not-control');
   }

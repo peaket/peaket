@@ -4,13 +4,18 @@
 //   ack하지 않은 파드가 없으면 성공이다. 보내기 시작한 때부터 10초 정각이 되면 실패(ack-timeout:<서비스>)다. 파드마다의 ack는 command_delivery에 남긴다.
 // - ControlDispatcher: 카탈로그 명령 1·2·3·7·11은 DISPATCHED를 커밋한 뒤 같은 프로세스의 배경 작업이 보낸다(응답은 DISPATCHED). 끝나면 같은 판일 때만
 //   ACKED·FAILED를 쓴다. 정비 바퀴는 DISPATCHED로 남은 명령을 같은 판으로 이어 보낸다. 되돌리기·연장·만료 되돌림은 원장의 새 판이다.
+// 명령 6 결제 갈래(F-02-2 OPS-310, ADR-0366): 대체 결제사 전환은 처음 DISPATCHED 전에 물은 갈 곳(PgSwitchRoutes)으로 payment-svc 모든 파드·리더에 보내고,
+//   ACKED와 같은 트랜잭션에 표시용 설정 사건 DEGRADED_MODE(대상 PAYMENT_PG_FALLBACK, occurredAt = 판)를 범위마다 하나 쓴다(결정 6). 되돌리기는 새 판의 끄기 뒤
+//   해제 원장(PLATFORM, ENTRY_PAUSE_RELEASE)의 새 판으로 TOSS·PORTONE 해제를 보낸다(결정 7). 해제 갈래는 요청자 관리 계정 ID를 행위자로 싣는다(결정 9).
 // 주소는 설정(대상 찾기 포트)에서만 온다. 명령 값에서 읽지 않는다(ASVS 1.3.6). 로그는 명령 ID·판·서비스·결과만 싣는다(계정·가명 참조 없음).
-import { requestContext } from '@peaket/platform';
-import type { Command, CommandExecutionActor, CommandExecutionResult } from '../domain/command.js';
-import { CommandInputRejected } from '../domain/command-params.js';
+import { ProblemError, requestContext } from '@peaket/platform';
+import { SYSTEM_ACTOR_REF, type Command, type CommandExecutionActor, type CommandExecutionResult } from '../domain/command.js';
+import { CommandInputRejected, isPgFallbackParams, PAYMENT_PG_FALLBACK } from '../domain/command-params.js';
 import { writeFailed, writeSucceeded } from '../domain/command-writes.js';
-import { controlDeliveriesOf, controlKindOf, controlScopesOf, isDispatchedControl, type ControlDelivery, type ControlPhase } from '../domain/control-kinds.js';
-import type { CommandExecutor, CommandSendResult, CommandStore, ControlDeliverer, ControlDeliverResult, ControlDeliveries, ControlTargets, ControlTransport } from '../domain/ports.js';
+import { CONTROL_SCOPE_PLATFORM, controlDeliveriesOf, controlKindOf, controlScopesOf, isDispatchedControl, type ControlDelivery, type ControlPhase } from '../domain/control-kinds.js';
+import { ENTRY_PAUSE_RELEASE_KIND, entryReleaseStates, REVERT_RELEASE_PGS, type PgSwitchRoutes } from '../domain/pg-switch.js';
+import type { CommandExecutor, CommandSendResult, CommandStore, CommandWriter, ControlDeliverer, ControlDeliverResult, ControlDeliveries, ControlTargets, ControlTransport } from '../domain/ports.js';
+import type { PgSwitchPlanner } from './pg-switch-plan.js';
 
 /** 다시 보내는 간격 1초 [가정](ADR-0365 결정 4) */
 export const CONTROL_RETRY_MS = 1_000;
@@ -40,7 +45,8 @@ const realSleep = (ms: number): Promise<void> =>
     const t = setTimeout(r, ms);
     t.unref?.();
   });
-const keyOf = (d: ControlDelivery, address: string): string => `${d.service}|${d.scope}|${address}`;
+// 같은 서비스·범위에 종류·바라는 상태가 다른 받기가 여럿일 수 있다(되돌리기의 결제사별 해제, ADR-0366 결정 7)
+const keyOf = (d: ControlDelivery, address: string): string => `${d.service}|${d.scope}|${d.kind}|${d.desiredStateJson}|${address}`;
 const errName = (e: unknown): string => (e instanceof Error ? e.name : 'unknown');
 
 export class ControlFanout implements ControlDeliverer {
@@ -133,7 +139,15 @@ export interface ControlDispatcherDeps {
   readonly fanout: ControlFanout;
   readonly clock: { now(): number };
   readonly logger?: ControlLog;
+  /** 명령 6 대체 결제사 전환의 갈 곳 묻기(ADR-0366 결정 5). 이어 보내기에서 메모리의 갈 곳이 없을 때 다시 묻는다. 없으면 그 명령은 FAILED pg-check-unavailable이다 */
+  readonly pgSwitch?: PgSwitchPlanner;
 }
+
+/** 명령 6 대체 결제사 전환의 표시용 설정 사건 종류(asyncapi SettingChanged key, 값 DegradedModeValue, ADR-0366 결정 6) */
+export const DEGRADED_MODE_SETTING = 'DEGRADED_MODE';
+
+/** 해제 갈래의 행위자: 요청자 관리 계정 ID(대응이 지워졌으면 명령 ID. SYSTEM이 아니어야 서킷이 닫힌다, ADR-0366 결정 9) */
+const releaseActorOf = (c: Pick<Command, 'requestedBy' | 'commandId'>): string => (c.requestedBy !== '' ? c.requestedBy : c.commandId);
 
 /**
  * 응답 안에서 기다리는 부름의 시한(RV-06, ASVS 15.1.3): 지금 요청의 남은 시간이 끝나는 시각(clock.now 기준). 요청 밖(정비 바퀴)이면 없다
@@ -148,6 +162,8 @@ const RESUME_PAGES = 5;
 
 export class ControlDispatcher {
   readonly #inFlight = new Map<string, Promise<void>>();
+  /** 처음 DISPATCHED 전에 물은 명령 6 갈 곳(같은 판을 다시 보낼 때 같은 값). 보내기가 끝나면 지운다 */
+  readonly #pgRoutes = new Map<string, PgSwitchRoutes>();
 
   constructor(private readonly deps: ControlDispatcherDeps) {}
 
@@ -161,8 +177,9 @@ export class ControlDispatcher {
     while (this.#inFlight.size > 0) await Promise.allSettled([...this.#inFlight.values()]);
   }
 
-  /** DISPATCHED를 커밋한 명령을 배경에서 보낸다(같은 명령이 이미 돌면 아무것도 하지 않는다). 기다리지 않는다 */
-  dispatch(command: Pick<Command, 'commandId'>): void {
+  /** DISPATCHED를 커밋한 명령을 배경에서 보낸다(같은 명령이 이미 돌면 아무것도 하지 않는다). 기다리지 않는다. 명령 6 전환은 물은 갈 곳을 넘긴다 */
+  dispatch(command: Pick<Command, 'commandId'>, o: { readonly pgRoutes?: PgSwitchRoutes } = {}): void {
+    if (o.pgRoutes && !this.#inFlight.has(command.commandId)) this.#pgRoutes.set(command.commandId, o.pgRoutes);
     void this.resume(command.commandId);
   }
 
@@ -172,7 +189,10 @@ export class ControlDispatcher {
     if (running) return running;
     const p = this.#run(commandId)
       .catch((e: unknown) => this.deps.logger?.warn({ kind: 'control-dispatch', commandId, err: errName(e) }, '제어 명령 보내기가 오류로 멈췄다(정비 바퀴가 이어 보낸다)'))
-      .finally(() => this.#inFlight.delete(commandId));
+      .finally(() => {
+        this.#inFlight.delete(commandId);
+        this.#pgRoutes.delete(commandId);
+      });
     this.#inFlight.set(commandId, p);
     return p;
   }
@@ -187,7 +207,7 @@ export class ControlDispatcher {
     for (let page = 0; page < RESUME_PAGES; page += 1) {
       const p = await this.deps.store.list({ states: ['DISPATCHED'], limit: 100, ...(cursor !== undefined ? { cursor } : {}) });
       for (const c of p.items) {
-        if (!isDispatchedControl(c.type) || c.controlVersion === undefined || this.inFlight(c.commandId)) continue;
+        if (!isDispatchedControl(c.type, c.params) || c.controlVersion === undefined || this.inFlight(c.commandId)) continue;
         if (c.controlSentAtMs !== undefined && nowMs - c.controlSentAtMs < this.deps.fanout.ackTimeoutMs) continue;
         this.dispatch(c);
         n += 1;
@@ -200,12 +220,26 @@ export class ControlDispatcher {
 
   async #run(commandId: string): Promise<void> {
     const c = await this.deps.store.find(commandId);
-    if (!c || c.state !== 'DISPATCHED' || c.controlVersion === undefined || !isDispatchedControl(c.type)) return;
+    if (!c || c.state !== 'DISPATCHED' || c.controlVersion === undefined || !isDispatchedControl(c.type, c.params)) return;
     const version = c.controlVersion;
     const startedAtMs = c.controlSentAtMs ?? this.deps.clock.now();
+    let pgRoutes: PgSwitchRoutes | undefined;
+    if (isPgFallbackParams(c.type, c.params)) {
+      // 메모리의 갈 곳이 없으면(ops-svc가 다시 떠 이어 보내기) 다시 묻는다. 묻지 못하면 보내지 않고 FAILED다(다시 하기는 같은 판)
+      pgRoutes = this.#pgRoutes.get(commandId);
+      if (!pgRoutes) {
+        if (!this.deps.pgSwitch) return this.#finish(commandId, version, { ok: false, error: 'pg-check-unavailable' });
+        try {
+          pgRoutes = await this.deps.pgSwitch.routes(c);
+        } catch (e) {
+          if (!(e instanceof ProblemError)) throw e;
+          return this.#finish(commandId, version, { ok: false, error: e.slug });
+        }
+      }
+    }
     let deliveries: ControlDelivery[];
     try {
-      deliveries = controlDeliveriesOf(c, 'APPLY', { sentAtMs: startedAtMs });
+      deliveries = controlDeliveriesOf(c, 'APPLY', { sentAtMs: startedAtMs, ...(pgRoutes ? { pgRoutes } : {}), actorAccountId: releaseActorOf(c) });
     } catch (e) {
       if (!(e instanceof CommandInputRejected)) throw e;
       return this.#finish(commandId, version, { ok: false, error: 'invalid-command' });
@@ -219,20 +253,47 @@ export class ControlDispatcher {
     const nowMs = this.deps.clock.now();
     const done = await this.deps.store.mutate(commandId, async (w) => {
       if (w.current.state !== 'DISPATCHED' || w.current.controlVersion !== version) return false;
-      if (r.ok) await writeSucceeded(w, { result: { transport: 'control-grpc', controlVersion: version, acked: r.acked }, ackedAtMs: r.ackedAtMs, nowMs });
-      else await writeFailed(w, { reason: r.error, nowMs });
+      if (r.ok) {
+        await writeSucceeded(w, { result: { transport: 'control-grpc', controlVersion: version, acked: r.acked }, ackedAtMs: r.ackedAtMs, nowMs });
+        // 명령 6 전환: 표시용 설정 사건(Outbox 행은 트랜잭션의 마지막 쓰기, ADR-0366 결정 6)
+        await this.#pgFallbackSettings(w, version);
+      } else await writeFailed(w, { reason: r.error, nowMs });
       return true;
     });
     if (done) this.deps.logger?.info({ kind: 'control-dispatch', commandId, version, result: r.ok ? 'ACKED' : r.error }, '제어 명령 보내기가 끝났다');
   }
 
   /**
-   * 되돌리기·연장·만료 되돌림(ADR-0365 결정 1·4): 원장의 새 판을 매겨 명령 기록에 남긴 뒤 응답 안에서 보내고 ack를 기다린다(10초까지).
-   * 던지지 않는다
+   * 명령 6 전환의 ACKED와 같은 트랜잭션에 범위마다 DEGRADED_MODE 사건 하나(대상 PAYMENT_PG_FALLBACK, 값 {enabled: true}, occurredAt = 판 밀리초)를 쓴다.
+   * 받는 쪽은 이 사건으로 pg_switch·ctl을 쓰지 않는다(효력은 제어 gRPC, ADR-0366 결정 6). 설정 사건을 쓰지 못하는 저장소면 건너뛴다(효력은 이미 ack됐다)
    */
-  async sendNew(command: Command, phase: Exclude<ControlPhase, 'APPLY'>, o: { readonly expiresAtMs?: number } = {}): Promise<CommandSendResult> {
-    const kind = controlKindOf(command.type);
-    if (!kind || !isDispatchedControl(command.type)) return { status: 'FAILED', error: 'target-not-wired' };
+  async #pgFallbackSettings(w: CommandWriter, version: number): Promise<void> {
+    const c = w.current;
+    if (!isPgFallbackParams(c.type, c.params)) return;
+    if (!w.setting) {
+      this.deps.logger?.warn({ kind: 'control-dispatch', commandId: c.commandId, version }, '설정 사건을 쓰지 못하는 저장소라 명령 6 표시용 설정 사건을 건너뛴다');
+      return;
+    }
+    for (const scope of controlScopesOf(c)) {
+      await w.setting({ kind: DEGRADED_MODE_SETTING, scope, target: PAYMENT_PG_FALLBACK, value: { enabled: true }, commandId: c.commandId, actorRef: c.requesterRef ?? SYSTEM_ACTOR_REF, occurredAtMs: version });
+    }
+  }
+
+  /** 명령 6 전환 되돌리기의 해제 둘(TOSS·PORTONE, ADR-0366 결정 7): 해제 원장(PLATFORM, ENTRY_PAUSE_RELEASE)의 새 판으로 끄기와 같은 시한 안에 보낸다 */
+  #revertReleases(command: Command, version: number, actor: string, startedAtMs: number, untilMs: number | undefined): Promise<ControlDeliverResult> {
+    return this.deps.fanout.deliver({ commandId: command.commandId, version, deliveries: entryReleaseStates(REVERT_RELEASE_PGS, actor), startedAtMs, ...(untilMs !== undefined ? { untilMs } : {}) });
+  }
+
+  /**
+   * 되돌리기·연장·만료 되돌림(ADR-0365 결정 1·4): 원장의 새 판을 매겨 명령 기록에 남긴 뒤 응답 안에서 보내고 ack를 기다린다(10초까지).
+   * 명령 6 전환의 되돌리기는 끄기(새 판) 뒤 해제 둘(해제 원장의 새 판)을 같은 시한 안에 보내고 둘 다 ack해야 성공이다(ADR-0366 결정 7). 던지지 않는다
+   * @param o.actorAccountId 되돌린 사람의 관리 계정 ID(명령 6 해제의 행위자)
+   */
+  async sendNew(command: Command, phase: Exclude<ControlPhase, 'APPLY'>, o: { readonly expiresAtMs?: number; readonly actorAccountId?: string } = {}): Promise<CommandSendResult> {
+    const kind = controlKindOf(command.type, command.params);
+    if (!kind || !isDispatchedControl(command.type, command.params)) return { status: 'FAILED', error: 'target-not-wired' };
+    if (kind === ENTRY_PAUSE_RELEASE_KIND) return { status: 'FAILED', error: 'not-revertible' };
+    const pgRevert = phase === 'REVERT' && isPgFallbackParams(command.type, command.params);
     let scopes: string[];
     let deliveries: ControlDelivery[];
     const nowMs = this.deps.clock.now();
@@ -243,16 +304,23 @@ export class ControlDispatcher {
       if (e instanceof CommandInputRejected) return { status: 'FAILED', error: 'invalid-command' };
       throw e;
     }
-    const version = await this.deps.store.mutate(command.commandId, async (w) => {
+    const versions = await this.deps.store.mutate(command.commandId, async (w) => {
       if (!w.assignControlVersion) return undefined;
       const v = await w.assignControlVersion({ scopes, kind, nowMs });
+      // 해제는 다른 원장(PLATFORM, ENTRY_PAUSE_RELEASE)의 판이다. 같은 트랜잭션에서 매긴다(명령 기록의 판은 끄기 판)
+      const release = pgRevert ? await w.assignControlVersion({ scopes: [CONTROL_SCOPE_PLATFORM], kind: ENTRY_PAUSE_RELEASE_KIND, nowMs }) : undefined;
       await w.patch({ controlVersion: v, controlSentAtMs: nowMs, nowMs });
-      return v;
+      return { v, release };
     });
-    if (version === undefined) return { status: 'FAILED', error: 'control-ledger-not-wired' };
+    if (versions === undefined) return { status: 'FAILED', error: 'control-ledger-not-wired' };
+    const version = versions.v;
     // 되돌리기·연장은 응답 안의 ack를 기다린다(openapi 200·502). 시한은 처음 보낸 때 + 10초와 요청 남은 시간 가운데 짧은 것(RV-06)
     const untilMs = requestUntilMs(nowMs);
-    const r = await this.deps.fanout.deliver({ commandId: command.commandId, version, deliveries, startedAtMs: nowMs, ...(untilMs !== undefined ? { untilMs } : {}) });
+    let r = await this.deps.fanout.deliver({ commandId: command.commandId, version, deliveries, startedAtMs: nowMs, ...(untilMs !== undefined ? { untilMs } : {}) });
+    if (r.ok && versions.release !== undefined) {
+      const actor = o.actorAccountId !== undefined && o.actorAccountId !== '' ? o.actorAccountId : releaseActorOf(command);
+      r = await this.#revertReleases(command, versions.release, actor, nowMs, untilMs);
+    }
     this.deps.logger?.info({ kind: 'control-dispatch', commandId: command.commandId, version, phase, result: r.ok ? 'ACKED' : r.error }, '제어 명령 되돌림·연장을 보냈다');
     return r.ok ? { status: 'ACKED', ackedAtMs: r.ackedAtMs } : { status: 'FAILED', error: r.error };
   }
@@ -273,7 +341,7 @@ export class ControlAwareExecutor implements CommandExecutor {
   }
 
   revert(command: Command, actor: CommandExecutionActor): Promise<CommandSendResult> {
-    if (isDispatchedControl(command.type)) return this.dispatcher.sendNew(command, 'REVERT');
+    if (isDispatchedControl(command.type, command.params)) return this.dispatcher.sendNew(command, 'REVERT', { actorAccountId: actor.accountId });
     return this.inner?.revert ? this.inner.revert(command, actor) : Promise.resolve({ status: 'FAILED', error: 'target-not-wired' });
   }
 

@@ -4,7 +4,7 @@
 // 내는 자리는 한 곳이다: 명령 저장소를 감싼 OpsEventStore가 쓰기(insert·mutate·mutateDue)의 트랜잭션이 끝난(커밋된) 뒤에만 낸다.
 // 던져서 되돌아간 쓰기는 줄을 남기지 않는다. 단계는 REQUESTED(사람 접수)·AUTO_ACTION_STARTED(시스템 자동 조치)와 아래 사건 이름이다.
 import type { PlatformLogger } from '@peaket/platform';
-import { CATALOG_COMMAND_TYPES, SYSTEM_ROLE, approvalModeOf, type Command, type CommandIdempotency, type CommandType, type NewCommand } from '../domain/command.js';
+import { CATALOG_COMMAND_TYPES, PAYMENT_ENTRY_RELEASE, SYSTEM_ROLE, approvalModeOf, isEntryReleaseParams, type Command, type CommandIdempotency, type CommandType, type NewCommand } from '../domain/command.js';
 import type { CommandDueKind, CommandListQuery, CommandPage, CommandStore, CommandTimelineEntry, CommandWriter } from '../domain/ports.js';
 import type { PostReviewAlertKind, PostReviewRow } from '../domain/post-review.js';
 import { CommandStoreBase } from './command-store-base.js';
@@ -24,16 +24,16 @@ export interface OpsEventLine {
   readonly commandId: string;
 }
 
-/** 명령 번호와 유형(`3:KILL_SWITCH`). 카탈로그 명령 1~12 밖은 `-:<유형>` */
-export function opsEventNameOf(type: CommandType): string {
+/** 명령 번호와 유형(`3:KILL_SWITCH`). 카탈로그 명령 1~12 밖은 `-:<유형>`. 명령 6 해제 갈래는 `6:PAYMENT_ENTRY_RELEASE`다(ADR-0366 결정 11) */
+export function opsEventNameOf(type: CommandType, params?: unknown): string {
   const i = CATALOG_COMMAND_TYPES.indexOf(type);
-  return `${i >= 0 ? i + 1 : '-'}:${type}`;
+  return `${i >= 0 ? i + 1 : '-'}:${isEntryReleaseParams(type, params) ? PAYMENT_ENTRY_RELEASE : type}`;
 }
 
 const roleOf = (role: string): string => (role === SYSTEM_ROLE ? 'SYSTEM' : role);
 
-export function opsEventLineOf(c: Pick<Command, 'commandId' | 'type' | 'eventId'>, stage: OpsEventStage, actorRole: string): OpsEventLine {
-  return { opsEvent: opsEventNameOf(c.type), stage, eventId: c.eventId ?? null, actorRole: roleOf(actorRole), commandId: c.commandId };
+export function opsEventLineOf(c: Pick<Command, 'commandId' | 'type' | 'eventId'> & { readonly params?: unknown }, stage: OpsEventStage, actorRole: string): OpsEventLine {
+  return { opsEvent: opsEventNameOf(c.type, c.params), stage, eventId: c.eventId ?? null, actorRole: roleOf(actorRole), commandId: c.commandId };
 }
 
 /** 줄을 받는 쪽(기본은 서비스 로거, 없으면 표준 출력 JSON 한 줄) */

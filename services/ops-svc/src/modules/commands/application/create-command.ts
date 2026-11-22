@@ -67,6 +67,8 @@ export interface CreateCommandDeps {
   readonly pgGate?: PgAssignmentGate;
   /** 명령 7의 승인 템플릿 찾기(RV-01). 없으면 늘 '없음'(noApprovedLobbyBannerTemplates)이라 명령 7은 422다 */
   readonly bannerTemplates?: LobbyBannerTemplates;
+  /** 명령 6 해제 갈래에서 SIMULATOR를 받는가(local·ci만 참, ADR-0366 결정 8). 없으면 받지 않는다 */
+  readonly simulatorPg?: boolean;
 }
 
 /** 명령 7 템플릿이 승인되지 않았거나 꼴이 틀림(422 invalid-command, detail templateId, RV-01) */
@@ -77,6 +79,7 @@ export class CreateCommand {
   readonly #security: CommandSecurityEvents;
   readonly #pgGate: PgAssignmentGate;
   readonly #bannerTemplates: LobbyBannerTemplates;
+  readonly #simulatorPg: boolean;
 
   constructor(
     private readonly store: CommandStore,
@@ -89,6 +92,7 @@ export class CreateCommand {
     this.#security = deps.security ?? noCommandSecurityEvents;
     this.#pgGate = deps.pgGate ?? new PgAssignmentGate();
     this.#bannerTemplates = deps.bannerTemplates ?? noApprovedLobbyBannerTemplates;
+    this.#simulatorPg = deps.simulatorPg === true;
   }
 
   /**
@@ -103,7 +107,7 @@ export class CreateCommand {
     let params: Record<string, unknown>;
     try {
       reason = normalizeReason(input.reason);
-      params = checkCommandParams(input.type, input.params, input.nowMs);
+      params = checkCommandParams(input.type, input.params, input.nowMs, { simulatorPg: this.#simulatorPg });
     } catch (e) {
       if (e instanceof CommandInputRejected) throw problemOfRejection(e);
       throw e;

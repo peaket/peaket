@@ -18,7 +18,8 @@ import { RetryCommand } from './application/retry-command.js';
 import { ExtendCommand, RevertCommand } from './application/revert-command.js';
 import { COMMAND_MAINTENANCE_INTERVAL_MS, type CommandType } from './domain/command.js';
 import type { DryRunSource } from './domain/dry-run.js';
-import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, LobbyBannerTemplates, OnsaleStartSource, PgAssignmentCheck } from './domain/ports.js';
+import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, LobbyBannerTemplates, OnsaleStartSource, PgAssignmentCheck, PgSwitchResolver } from './domain/ports.js';
+import { PgSwitchPlanner } from './application/pg-switch-plan.js';
 import type { ProtectedRangeList } from './domain/protected-ranges.js';
 import { LogCommandSecurityEvents, PromCommandSignals } from './adapters/command-signals.js';
 import { UnavailableDryRunSource } from './adapters/unavailable-dry-run-source.js';
@@ -60,7 +61,15 @@ export interface CommandsModuleExtras {
    * 제어 gRPC 퍼뜨리기(F-02-1 OPS-300, ADR-0365 결정 3·4). 주면 명령 1·2·3·7·11은 배경 작업이 준비된 모든 파드에 보내 ack로 ACKED가 되고,
    * 되돌리기·연장·만료 되돌림은 새 판으로 보낸다. deliveries가 있으면 상세가 전파 상태(delivery)를 싣는다. 없으면 전처럼 실행기가 보낸다(target-not-wired)
    */
-  readonly control?: { readonly fanout: ControlFanout; readonly deliveries?: ControlDeliveries; readonly clock?: { now(): number } };
+  readonly control?: {
+    readonly fanout: ControlFanout;
+    readonly deliveries?: ControlDeliveries;
+    readonly clock?: { now(): number };
+    /** 명령 6 대체 결제사 전환의 갈 곳 묻기(payment-svc ResolvePgSwitch, F-02-2 ADR-0366 결정 5). 없으면 전환의 승인·실행이 503 pg-check-unavailable이다 */
+    readonly pgSwitch?: PgSwitchResolver;
+    /** 명령 6 해제 갈래에서 SIMULATOR를 받는가(local·ci만 참, ADR-0366 결정 8) */
+    readonly simulatorPg?: boolean;
+  };
   /** 명령 7의 승인 템플릿 찾기(RV-01). 없으면 늘 '없음'이라 명령 7 만들기·미리보기가 422다(F-03-5가 저장소를 잇는다) */
   readonly bannerTemplates?: LobbyBannerTemplates;
 }
@@ -93,11 +102,13 @@ export class CommandsModule {
     // 명령 12 판정은 미리보기·접수·실행 직전이 같은 객체를 쓴다(ADR-0349 결정 2·3)
     const pgGate = new PgAssignmentGate(extras.pgAssignment ?? {});
     // 제어 gRPC 배경 보내기(F-02-1). 되돌림·연장은 같은 보내기의 새 판이다(ControlAwareExecutor)
-    const dispatcher = extras.control ? new ControlDispatcher({ store, fanout: extras.control.fanout, clock: extras.control.clock ?? { now: () => Date.now() } }) : undefined;
+    // 명령 6 결제 갈래(F-02-2): 전환의 갈 곳 묻기는 승인 요청(접수 전)·실행·이어 보내기가 같은 객체를 쓴다(ADR-0366 결정 5)
+    const pgSwitch = new PgSwitchPlanner(extras.control?.pgSwitch ? { resolver: extras.control.pgSwitch } : {});
+    const dispatcher = extras.control ? new ControlDispatcher({ store, fanout: extras.control.fanout, clock: extras.control.clock ?? { now: () => Date.now() }, pgSwitch }) : undefined;
     const sender: CommandExecutor | undefined = dispatcher ? new ControlAwareExecutor(executor, dispatcher) : executor;
-    const execution = new ExecuteCommand(store, sender, checkpoints, guard, { pgGate, ...(dispatcher ? { control: dispatcher } : {}) });
+    const execution = new ExecuteCommand(store, sender, checkpoints, guard, { pgGate, pgSwitch, ...(dispatcher ? { control: dispatcher } : {}) });
     const wired = sender || extras.pgAssignment ? execution : undefined;
-    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate, ...(extras.bannerTemplates ? { bannerTemplates: extras.bannerTemplates } : {}) });
+    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate, ...(extras.bannerTemplates ? { bannerTemplates: extras.bannerTemplates } : {}), ...(extras.control?.simulatorPg ? { simulatorPg: true } : {}) });
     const postReviews = new PostReviews({ store, ...(extras.postReviews?.commanders ? { commanders: extras.postReviews.commanders } : {}), ...(extras.postReviews?.alerts ? { alerts: extras.postReviews.alerts } : {}) });
     const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}), ...(dispatcher ? { control: dispatcher } : {}) });
     const maintenance: CommandMaintenanceOptions = { enabled: extras.maintenance?.enabled ?? false, intervalMs: extras.maintenance?.intervalMs ?? COMMAND_MAINTENANCE_INTERVAL_MS };

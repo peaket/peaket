@@ -129,6 +129,14 @@ export { PG_ADMISSION_CAP_INPUTS, PG_CAP_KEYS, PG_TPS_KEYS, pgAdmissionCap, pred
 export type { OnsaleStartSource, PgAssignmentCheck, PgAssignmentVerdict, PgName, SettingChange } from './domain/ports.js';
 export { SETTING_EVENT_KEY_DOMAIN, SETTING_KINDS, SettingChangeRejected, publishSetting, settingEventKey, settingMessageKey, settingOutboxMessage } from './adapters/settings-outbox.js';
 export { GrpcPgAssignmentCheck, PG_CHECK_GRPC_TIMEOUT_MS, pgAssignmentVerdictOf, type GrpcPgAssignmentCheckOptions } from './adapters/grpc-pg-assignment-check.js';
+// 명령 6 결제 갈래 전송(F-02-2 OPS-310, ADR-0366 결정 1·4·5·7·8)
+export { GrpcPgSwitchResolver, PG_SWITCH_RESOLVE_TIMEOUT_MS, pgSwitchRoutesOf, type GrpcPgSwitchResolverOptions } from './adapters/grpc-pg-switch-resolver.js';
+export { PgSwitchPlanner, type PgSwitchPlannerDeps } from './application/pg-switch-plan.js';
+export { DEGRADED_MODE_SETTING } from './application/dispatch-control.js';
+export { admissionPgOf, ENTRY_PAUSE_RELEASE_KIND, entryReleaseStates, missingPgRoutes, PG_FALLBACK_GROUP, PG_FALLBACK_LIMIT_PGS, PG_SWITCH_KIND, pgSwitchDesiredStates, pgSwitchOffStates, pgTpsOf, REVERT_RELEASE_PGS, type PgSwitchRoute, type PgSwitchRoutes } from './domain/pg-switch.js';
+export { ENTRY_RELEASE_PGS, entryReleaseParamsOf, type EntryReleasePg, type EntryReleaseParams } from './domain/command-params.js';
+export { isEntryReleaseParams, isRevertibleCommand, PAYMENT_ENTRY_RELEASE } from './domain/command.js';
+export type { PgSwitchResolver } from './domain/ports.js';
 export { HttpCoreSaleStart } from './adapters/http-core-sale-start.js';
 export type { MemoryOutboxSetting } from './adapters/memory-command-store.js';
 export { CommandsController } from './inbound/commands.controller.js';

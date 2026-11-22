@@ -2,7 +2,7 @@
 // - local·ci: 환경 값 PEAKET_<서비스>_CONTROL_GRPC_ADDRS(쉼표로 나눈 host:port 목록). 지금의 PEAKET_<서비스>_CONTROL_GRPC_ADDR 하나도 받는다.
 // - 운영: PEAKET_<서비스>_CONTROL_GRPC_DNS(헤드리스 Service <서비스>-control의 이름:포트). 보낼 때마다 DNS A 기록을 다시 푼다(캐시하지 않는다,
 //   클러스터 DNS는 EndpointSlice의 준비된 주소만 준다). admission-ctrl은 리더 전용 Service의 이름 하나다.
-// - local·ci 밖에서 받는 쪽 셋 가운데 하나라도 주소 설정이 없으면 시작이 실패한다(던짐).
+// - local·ci 밖에서 받는 쪽 넷 가운데 하나라도 주소 설정이 없으면 시작이 실패한다(던짐). payment-svc(명령 6 결제 갈래, F-02-2 ADR-0366 결정 1)는 헤드리스 payment-svc-control이다.
 import { resolve4 } from 'node:dns/promises';
 import type { ControlTargets } from '../modules/commands/index.js';
 
@@ -11,6 +11,7 @@ export const CONTROL_TARGET_ENV: Readonly<Record<string, string>> = Object.freez
   'purchase-svc': 'PEAKET_PURCHASE_CONTROL_GRPC',
   'queue-svc': 'PEAKET_QUEUE_CONTROL_GRPC',
   'admission-ctrl': 'PEAKET_ADMISSION_CONTROL_GRPC',
+  'payment-svc': 'PEAKET_PAYMENT_CONTROL_GRPC',
 });
 
 /** 주소 설정 없이 뜰 수 있는 환경(제어 명령은 보내지 못해 ack 시한에 FAILED다) */

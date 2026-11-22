@@ -12,8 +12,9 @@ import {
   approvalModeOf,
   approverRolesOf,
   expiryAfterAckMs,
-  isCatalogCommand,
+  isRevertibleCommand,
   nextCommandState,
+  reauthRequiredFor,
   requesterRolesOf,
   successStateOf,
   type Command,
@@ -44,7 +45,7 @@ export function hasPrediction(dryRun: Record<string, unknown> | undefined): bool
 /** 빈 dry-run(원천을 넘기지 않은 직접 호출). 세지 않았으므로 센 값·예측이 없다 */
 export function emptyDryRun(input: Pick<NewCommand, 'type' | 'params'>): Record<string, unknown> {
   const mode = approvalModeOf(input.type, input.params);
-  return { version: 1, approvalMode: mode, reauthRequired: mode === 'TWO' || input.type === 'KILL_SWITCH' || input.type === 'AUTOMATION_STOP', counted: [], predicted: [], unavailable: [], limits: {} };
+  return { version: 1, approvalMode: mode, reauthRequired: reauthRequiredFor(input.type, input.params), counted: [], predicted: [], unavailable: [], limits: {} };
 }
 
 export interface CreationPlan {
@@ -179,7 +180,7 @@ export async function writeDecision(w: CommandWriter, q: { accountId: string; ro
  * 보내기 시작한 시각(ack 시한의 기준)은 DISPATCHED마다 지금이다. 원장이 없는 저장소·범위를 읽지 못한 명령은 판을 적지 않는다(보내는 쪽이 FAILED로 남긴다)
  */
 async function controlPatchOf(w: CommandWriter, c: Command, nowMs: number): Promise<{ controlVersion?: number; controlSentAtMs?: number }> {
-  const kind = controlKindOf(c.type);
+  const kind = controlKindOf(c.type, c.params);
   if (!kind || !w.assignControlVersion) return {};
   if (c.controlVersion !== undefined) return { controlSentAtMs: nowMs };
   let scopes: string[];
@@ -273,7 +274,8 @@ export type RevertStart =
 /** 되돌리기 요청(ADR-0340 결정 5). ACKED인 카탈로그 명령만. 그 유형을 낼 수 있는 역할이어야 한다 */
 export async function writeRevertRequest(w: CommandWriter, q: { accountId: string; role: string; reason: string; nowMs: number }): Promise<RevertStart> {
   const c = w.current;
-  if (!isCatalogCommand(c.type) || c.state !== 'ACKED') return { status: 'NOT_REVERTIBLE' };
+  // 명령 6 해제 갈래는 되돌리지 않는다(다시 멈추는 자동 조건이 되돌림 몫을 한다, ADR-0366 결정 8)
+  if (!isRevertibleCommand(c) || c.state !== 'ACKED') return { status: 'NOT_REVERTIBLE' };
   if (!requesterRolesOf(c.type).includes(q.role)) return { status: 'ROLE_FORBIDDEN' };
   if (REVERT_NEEDS_APPROVAL.includes(c.type)) {
     const to = nextCommandState(c.state, 'REVERT_PENDING', c.type);

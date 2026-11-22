@@ -3,7 +3,7 @@
 // 그 밖의 유형·명령 6의 다른 모드는 OPS-300이 oneOf로 닫을 때까지 객체만 본다.
 // 꼴이 틀리면 'INVALID'(422 invalid-command), 안전 한계 밖이면 'OUT_OF_RANGE'(422 command-out-of-range, 걸린 한계 이름)다. 저장 전에 거른다.
 import { BlockListInvalid, blockListsOf, type BlockParams } from './block-ranges.js';
-import { SAFETY_LIMITS, type CommandType } from './command.js';
+import { PAYMENT_ENTRY_RELEASE, SAFETY_LIMITS, type CommandType } from './command.js';
 
 /** 접수 검사 거절. 받는 층이 422로 바꾼다 */
 export class CommandInputRejected extends Error {
@@ -147,6 +147,27 @@ export function pgFallbackParamsOf(p: Record<string, unknown>): PgFallbackParams
 /** 명령 6이 결제 갈래(mode PAYMENT_PG_FALLBACK)인가. 다른 모드 갈래는 OPS-300·310이 닫을 때까지 열어 둔다 */
 export const isPgFallbackParams = (type: CommandType, params: unknown): boolean => type === 'DEGRADED_MODE' && isObject(params) && params.mode === PAYMENT_PG_FALLBACK;
 
+/** 명령 6 해제 갈래가 고르는 결제사(ADR-0366 결정 8). SIMULATOR는 local·ci만 받는다 */
+export const ENTRY_RELEASE_PGS = ['TOSS', 'PORTONE', 'SIMULATOR'] as const;
+export type EntryReleasePg = (typeof ENTRY_RELEASE_PGS)[number];
+
+/** 명령 6 해제 갈래 값 */
+export interface EntryReleaseParams {
+  readonly mode: typeof PAYMENT_ENTRY_RELEASE;
+  readonly pg: EntryReleasePg;
+}
+
+/**
+ * 명령 6 해제 갈래: {mode: PAYMENT_ENTRY_RELEASE, pg: TOSS|PORTONE|SIMULATOR}(ADR-0366 결정 8). 모르는 칸·다른 결제사, local·ci 밖의 SIMULATOR는 INVALID다
+ * @param o.simulatorPg SIMULATOR를 받는가(local·ci만 참)
+ */
+export function entryReleaseParamsOf(p: Record<string, unknown>, o: { readonly simulatorPg?: boolean } = {}): EntryReleaseParams {
+  onlyKeys(p, ['mode', 'pg']);
+  if (p.mode !== PAYMENT_ENTRY_RELEASE) invalid('mode');
+  if (!ENTRY_RELEASE_PGS.includes(p.pg as never) || (p.pg === 'SIMULATOR' && o.simulatorPg !== true)) invalid('pg');
+  return { mode: PAYMENT_ENTRY_RELEASE, pg: p.pg as EntryReleasePg };
+}
+
 /**
  * 명령 4: {cidrs?, asns?, expiresAt}(ADR-0339 결정 1·2). 꼴이 틀린 대역·호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 INVALID,
  * 항목 합계 100개 초과·만료 없음·지금 이하·지금 + 24시간 초과는 OUT_OF_RANGE다
@@ -173,7 +194,7 @@ export function blockParamsOf(p: Record<string, unknown>, nowMs: number): BlockP
  * 유형별 params를 검사한다. 명령 1·2·3·4·5·12와 명령 6 결제 갈래는 허용 목록으로 닫는다(명령 12·6 결제 갈래는 고른 값만 담은 새 객체를 돌려준다).
  * @throws CommandInputRejected 꼴(INVALID)·안전 한계(OUT_OF_RANGE)
  */
-export function checkCommandParams(type: CommandType, params: unknown, nowMs: number): Record<string, unknown> {
+export function checkCommandParams(type: CommandType, params: unknown, nowMs: number, o: { readonly simulatorPg?: boolean } = {}): Record<string, unknown> {
   if (!isObject(params)) return invalid('params');
   switch (type) {
     case 'ADMISSION_TARGET':
@@ -190,7 +211,8 @@ export function checkCommandParams(type: CommandType, params: unknown, nowMs: nu
     case 'PG_ASSIGN':
       return { ...pgAssignParamsOf(params) };
     case 'DEGRADED_MODE': {
-      // 결제 갈래만 닫는다(ADR-0349 결정 6). 다른 모드는 OPS-300·310이 닫을 때까지 객체만 본다
+      // 결제 갈래(ADR-0349 결정 6)와 해제 갈래(ADR-0366 결정 8)를 닫는다. 다른 모드는 F-02-6이 닫을 때까지 객체만 본다
+      if (params.mode === PAYMENT_ENTRY_RELEASE) return { ...entryReleaseParamsOf(params, o) };
       if (params.mode !== PAYMENT_PG_FALLBACK) return params;
       const f = pgFallbackParamsOf(params);
       return { mode: f.mode, scope: f.scope, ...(f.scope === 'EVENT' ? { eventIds: [...f.eventIds] } : {}), ...(f.toPg !== undefined ? { toPg: f.toPg } : {}) };

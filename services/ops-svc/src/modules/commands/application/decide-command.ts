@@ -1,5 +1,6 @@
 // 두 번째 승인·거부(T6·T7)와 명령 3·11 되돌리기 요청의 승인·거부(T15·T16). 요청자와 같은 계정은 승인하지 못한다(403),
 // 같은 사람 두 번은 command_actor 유일 제약이 409로 막는다. 승인 기한(10분)과 같거나 늦으면 명령을 닫고 409다(ADR-0340 결정 4).
+// 명령 6 대체 결제사 전환은 승인을 쓰기 전에 갈 곳을 묻는다(ExecuteCommand.preflight). 묻지 못하면 승인도 쓰지 않고 503 pg-check-unavailable이다(ADR-0366 결정 5).
 import { ProblemError } from '@peaket/platform';
 import type { Command, CommandExecutionActor } from '../domain/command.js';
 import { normalizeReason, CommandInputRejected } from '../domain/command-params.js';
@@ -36,12 +37,18 @@ export class DecideCommand {
    * REVERT_PENDING은 되돌림을 보내 REVERTED(보내지 못하면 ACKED와 502 command-dispatch-failed)다
    */
   async approve(q: { commandId: string; approverRef: string; approverRole: string; nowMs: number; actor?: CommandExecutionActor }): Promise<Command> {
+    // 승인으로 실행될 명령 6 전환은 승인을 쓰기 전에 갈 곳을 묻는다(실패하면 PENDING_APPROVAL 그대로, ADR-0366 결정 5)
+    let pgRoutes: Awaited<ReturnType<ExecuteCommand['preflight']>>;
+    if (this.execution) {
+      const pending = await this.store.find(q.commandId);
+      if (pending?.state === 'PENDING_APPROVAL') pgRoutes = await this.execution.preflight(pending);
+    }
     const d = await this.store.approve(q.commandId, q.approverRef, q.approverRole, q.nowMs);
     if (d.status !== 'APPLIED') return fail(d);
     const actor: CommandExecutionActor = q.actor ?? { accountId: q.approverRef, sessionId: '', role: q.approverRole };
     if (d.revert) return sendRevert(this.store, this.execution?.target, d.command, actor, { ...d.revert, fromPending: true }, q.nowMs);
     if (!this.execution) return d.command;
-    return this.execution.run(d.command, actor, q.nowMs);
+    return this.execution.run(d.command, actor, q.nowMs, pgRoutes ? { pgRoutes } : {});
   }
 
   async reject(q: { commandId: string; approverRef: string; approverRole: string; reason: string; nowMs: number }): Promise<Command> {
