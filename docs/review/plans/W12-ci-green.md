@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | `node tools/ci/mesh-policies.mjs --check` | **실패 1건** | `deploy/platform/mesh/port-allow.yaml`의 `ticket-svc.ports.grpc.services.peaket.ticket.v1.TicketService.methods`에 `BlockTicketIssuance`가 없어, 생성 파일 `policies.yaml`이 purchase-svc → ticket-svc 이 메서드 허용 줄을 만들지 못했다. BAT-011이 계약·호출 코드는 더했지만 이 원천을 빠뜨렸다 |
 | `node --test tools/ci/mesh-policies.test.mjs` | **실패**(같은 까닭) | 시험이 `--check`의 생성 대조를 그대로 부른다. 도구가 만든 파일을 손으로 고치지 않고 원천을 고쳐 `--write`로 다시 만들어야 한다 |
-| CI `node` 잡 `137218448527`의 core-svc 통합 시험 네 파일 | **4파일 3시험 실패** | 네 파일이 `dist/main.js`를 띄우는 환경에 `PEAKET_NOTIFY_DATABASE_URL`이 없다. `main.ts`가 `PEAKET_NOTIFY_DATABASE_URL이 없다(웹훅 발송기 전용 core_notify 사용자, 비밀 관리에서 넣는다)`로 끝나 `PEAKET_PUBLIC_FILE_DIR` 같은 뒤 환경 값 검사에 닿지도 못했다 |
+| CI `node` 잡의 core-svc 통합 시험 네 파일 | **4파일 3시험 실패** | 네 파일이 `dist/main.js`를 띄우는 환경에 `PEAKET_NOTIFY_DATABASE_URL`이 없다. `main.ts`가 `PEAKET_NOTIFY_DATABASE_URL이 없다(웹훅 발송기 전용 core_notify 사용자, 비밀 관리에서 넣는다)`로 끝나 `PEAKET_PUBLIC_FILE_DIR` 같은 뒤 환경 값 검사에 닿지도 못했다 |
 | 같은 실행의 직전 전체 실행 `45014387044`(`1e63a6404`, BAT-011 이전) | **같은 네 파일 실패** | W12-core-notify가 합쳐진 뒤 `develop`의 비문서 커밋에서 같은 실패가 먼저 났다. BAT-011이 만든 실패가 아니다. 문서만 바꾼 커밋은 `node` 잡을 건너뛰어 초록불로 보였다 |
 | `sale-eligibility`의 `시작 파일(main.ts)과 relay 정비 일 조립`(발송기 연결을 준 뒤 다시) | **1 실패** | 발송기 연결을 주자 시작은 지나갔지만, 정비 일 목록 단언이 BAT-455가 더한 알림 정비 넷(`notification-delivery-partitions`·`notification-delivery-purge`·`notification-subscription-expired`·`notification-dedup-purge`)을 모른 채 넷만 기대해 실패했다. 발송기 연결 실패에 가려져 있던 같은 묶음의 시험 결함이다 |
 
@@ -82,6 +82,19 @@
 - **CI 재실행**: 푸시 뒤 실행을 보고, 이 묶음 밖의 실패가 또 나오면 그 묶음 담당에게 넘긴다.
 
 ## 리뷰
+
+리뷰 담당 `w12green-review`(deepseek-v4.1-flash), 2026-11-23 00:29 KST. 받은 것은 `git diff origin/develop..a94973be8`(계획·시험·구현)과 이 계획 파일이다. 코드·생성물·정본을 대조하고 `mesh-policies --check`, `mesh-policies.test.mjs` 14/14, core-svc typecheck, 네 통합 시험 파일 98/98, `startup-db-role` 2/2를 다시 돌렸다. 코드는 고치지 않았다.
+
+결과: **막는 지적 0, 낮음 0**.
+
+### 확인한 것(지적 아님)
+
+- **mesh 원천과 생성물**: `port-allow.yaml`의 `BlockTicketIssuance: [purchase-svc]`가 알파벳 차례(`CancelTickets` 앞)에 있고, `policies.yaml`의 purchase-svc → `/peaket.ticket.v1.TicketService/BlockTicketIssuance` 허용 줄이 생성기 결과와 같다. `meshless-networkpolicies.yaml`은 바뀌지 않았고 `--check`가 통과한다.
+- **부르는 쪽**: 운영 코드에서 `BlockTicketIssuance`를 부르는 곳은 purchase-svc의 발권 막기 어댑터 하나다(ticket-svc 시험 대역 제외). 다른 서비스에 허용을 열지 않은 것이 맞다.
+- **발송기 연결**: `ensureNotifyLogin`은 0043이 만든 `core_notify` 그룹 역할에 `NOBYPASSRLS NOSUPERUSER` 로그인을 붙이고, `ensureSearchLogin`과 같은 꼴로 한 번만 만든다. 네 시험은 `PEAKET_SEARCH_DATABASE_URL` 옆에서 같은 `admin`·`pg`로 주소를 받는다. `main.ts`와 시작 확인 규칙은 바뀌지 않았다.
+- **정비 일 목록**: `sale-eligibility`의 새 기대값 여덟이 `CORE_MAINTENANCE_TASK_NAMES`와 `maintenance-tasks.ts`가 내는 차례·주기(`notification-delivery-partitions` daily, `notification-delivery-purge` window, `notification-subscription-expired` daily, `notification-dedup-purge` daily)와 같다. 알림 정비 넷은 `o.shop`·`o.opsDatabase`와 무관하게 항상 붙으므로 이 시험의 조립에서도 안정적이다.
+- **시험·구현 분리**: 시험 커밋 `930e0b79f`는 `test-int/`와 계획 파일만, 구현 커밋 `a94973be8`은 `deploy/platform/mesh/`만 바꿨다. 구현 커밋이 시험 파일을 건드리지 않았다.
+- **중복 도우미(고려함)**: `ensureNotifyLogin`이 `ensureSearchLogin`과 같은 일곱 줄 꼴을 되풀이한다. 두 역할의 마이그레이션·이름이 달라 지금은 각자 두는 편이 읽기 쉽고, 공통화는 세 번째 역할이 생길 때 한다.
 
 ## 검증
 
