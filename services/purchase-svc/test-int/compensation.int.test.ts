@@ -20,6 +20,7 @@ import {
   DrizzleCompensation,
   DrizzleOrderStore,
   DrizzleTicketIssue,
+  EventCompensationQueue,
   FenceCompensation,
   StartCompensation,
   TICKET_ISSUE_ACTOR,
@@ -105,9 +106,10 @@ interface Fixture {
 }
 
 /** 결제 승인(APPROVED) 주문 하나와 발권 재시도 큐 한 줄(승인 뒤 발권 전). 결제 원장은 payment-svc 몫이라 여기서 만들지 않는다 */
-async function approvedOrder(): Promise<Fixture> {
+async function approvedOrder(o: { readonly eventId?: string; readonly status?: 'APPROVED' | 'AWAITING_DEPOSIT' } = {}): Promise<Fixture> {
   const orderId = randomUUID();
-  const eventId = randomUUID();
+  const eventId = o.eventId ?? randomUUID();
+  const status = o.status ?? 'APPROVED';
   const accountId = randomUUID();
   const seatId = randomUUID();
   const paymentId = randomUUID();
@@ -118,10 +120,15 @@ async function approvedOrder(): Promise<Fixture> {
     await client.query('begin');
     await client.query(
       `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
-       values ($1, $2, $3, 'APPROVED', $4, 1, $5, 'v1', 'PICK', $6, $7, 'ps-compensation')`,
-      [orderId, accountId, eventId, PRICE, randomUUID(), new Date(NOW - 60_000), randomUUID()],
+       values ($1, $2, $3, $8, $4, 1, $5, 'v1', 'PICK', $6, $7, 'ps-compensation')`,
+      [orderId, accountId, eventId, PRICE, randomUUID(), new Date(NOW - 60_000), randomUUID(), status],
     );
-    await client.query("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, 'APPROVED', 'T9', 'test', $2)", [orderId, new Date(NOW - 60_000)]);
+    await client.query("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, $3, $4, 'test', $2)", [
+      orderId,
+      new Date(NOW - 60_000),
+      status,
+      status === 'APPROVED' ? 'T9' : 'T5',
+    ]);
     await client.query("insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price) values ($1, 1, $2, 'R', 'A', $3)", [orderId, seatId, PRICE]);
     await client.query("insert into payment_attempt (id, order_id, pg, status, created_at) values ($1, $2, 'TOSS', 'ACCEPTED', $3)", [paymentId, orderId, new Date(NOW - 60_000)]);
     await client.query(
@@ -354,6 +361,90 @@ test('P-T39 ③_compCancel의_첫_답이_UNKNOWN이면_같은_취소_ID로_다�
   expect(paymentCalls[0]!.cancellationId).toBe(paymentCalls[1]!.cancellationId);
   expect(await compensationRow(f.orderId)).toMatchObject({ status: 'COMPENSATED' });
   expect(await t20Rows(f.orderId)).toHaveLength(1);
+});
+
+test('P-T39 ③_RV-02_임대를_잃은_실행기는_보상을_끝내지_못한다', async () => {
+  const f = await approvedOrder();
+  const c = compensation();
+  // start → claimDue(임대 30초) → fenced. 그 뒤 옛 임대(stale)로 compensated를 부르면 T20을 쓰지 않아야 한다
+  await c.store.start({ orderId: f.orderId, reason: 'EVENT_CANCELLED', nowMs: NOW });
+  const [claimed] = await c.store.claimDue(1, 30_000, NOW);
+  expect(claimed?.orderId).toBe(f.orderId);
+  expect(await c.store.fenced({ orderId: f.orderId, nowMs: NOW + 1, leaseUntilMs: claimed!.leaseUntilMs })).toBe(true);
+  const out = await c.store.compensated({ orderId: f.orderId, nowMs: NOW + 2, leaseUntilMs: NOW - 1 });
+  expect(out).toEqual({ status: 'LEASE_LOST' });
+  expect(await compensationRow(f.orderId)).toMatchObject({ status: 'FENCED' });
+  expect(await orderRow(f.orderId)).toEqual({ status: 'APPROVED', event_seq: 1 });
+  expect(await t20Rows(f.orderId)).toEqual([]);
+});
+
+test('P-T39 ③_RV-03_회차_취소_실행기는_APPROVED_발권_대기_주문을_보상_큐에_넣고_중복_없이_RUNNING을_유지한다', async () => {
+  const eventId = randomUUID();
+  const f1 = await approvedOrder({ eventId });
+  const f2 = await approvedOrder({ eventId });
+  const queueStore = new DrizzleCompensation({ database: purchaseDb });
+  const queue = new EventCompensationQueue({ jobs: queueStore, start: new StartCompensation({ store: queueStore, clock, nowMs: () => NOW }) });
+  const mem = new MemoryEventRefundStore();
+  const service = new EventRefundService({
+    store: mem,
+    targets: { list: async () => [] } as unknown as EventRefundTargets,
+    canceller: { cancel: async () => { throw new Error('대상 표가 없어 결제사 취소를 부르지 않는다'); } } as unknown as EventRefundCanceller,
+    items: mem,
+    openOrders: new DrizzleEventOpenOrders(purchaseDb),
+    compensation: queue,
+    log: { warn: () => undefined, info: () => undefined },
+    nowMs: () => NOW,
+    deadlineMs: () => NOW + 30_000,
+  });
+  const requestId = randomUUID();
+  const request = await service.start({ requestId, eventId, fault: 'ORGANIZER', ruledBy: 'admin:test-ruler', confirmedBy: 'admin:test-confirmer', kind: 'CANCEL' });
+  expect(request.status).toBe('RUNNING');
+  expect(await compensationRow(f1.orderId)).toMatchObject({ status: 'STARTED' });
+  expect(await compensationRow(f2.orderId)).toMatchObject({ status: 'STARTED' });
+  expect(await jobRows(f1.orderId)).toEqual([]);
+  expect(await jobRows(f2.orderId)).toEqual([]);
+
+  // runDue가 다시 불러도 같은 주문을 두 번 넣지 않는다(candidates의 NOT EXISTS)
+  await service.runDue();
+  expect(await queue.queue(eventId)).toBe(0);
+  expect((await purchaseDb.pool.query('select count(*)::int as n from order_compensation where order_id = any($1::uuid[])', [[f1.orderId, f2.orderId]])).rows[0].n).toBe(2);
+
+  // PAUSED 요청도 실행기 틱이 큐에 넣는다. 그 뒤 확정 주문을 모두 보상해야 COMPLETED가 된다
+  const f3 = await approvedOrder({ eventId });
+  await service.pause({ requestId, reason: 'RV-03 확인' });
+  await service.runDue();
+  expect(await compensationRow(f3.orderId)).toMatchObject({ status: 'STARTED' });
+  expect(await queue.queue(eventId)).toBe(0);
+
+  const c = compensation();
+  paymentOutcome = 'CANCELLED';
+  paymentCalls.length = 0;
+  for (const f of [f1, f2, f3]) {
+    await c.fence.run({ orderId: f.orderId });
+    await c.cancel.run({ orderId: f.orderId });
+  }
+  await service.resume({ requestId });
+  await service.runDue();
+  expect((await service.get(requestId)).status).toBe('COMPLETED');
+
+  // 입금 대기(AWAITING_DEPOSIT) 주문은 candidates에 들지 않는다(보상은 승인 뒤 발권 대기만)
+  const depositEventId = randomUUID();
+  const deposit = await approvedOrder({ eventId: depositEventId, status: 'AWAITING_DEPOSIT' });
+  const depositRequestId = randomUUID();
+  const depositService = new EventRefundService({
+    store: new MemoryEventRefundStore(),
+    targets: { list: async () => [] } as unknown as EventRefundTargets,
+    canceller: { cancel: async () => { throw new Error('대상 표가 없어 결제사 취소를 부르지 않는다'); } } as unknown as EventRefundCanceller,
+    items: new MemoryEventRefundStore(),
+    openOrders: new DrizzleEventOpenOrders(purchaseDb),
+    compensation: queue,
+    nowMs: () => NOW,
+    deadlineMs: () => NOW + 30_000,
+  });
+  await depositService.start({ requestId: depositRequestId, eventId: depositEventId, fault: 'ORGANIZER', ruledBy: 'admin:test-ruler', confirmedBy: 'admin:test-confirmer', kind: 'CANCEL' });
+  expect(await compensationRow(deposit.orderId)).toBeUndefined();
+  expect(await jobRows(deposit.orderId)).toHaveLength(1);
+  expect(await queue.queue(depositEventId)).toBe(0);
 });
 
 /** 시험에서 정본 식(SHA-256('compensation:' + 주문 ID) → UUIDv8)을 직접 계산한다 */
