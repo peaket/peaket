@@ -438,7 +438,22 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 
 ## 리뷰
 
-(리뷰 담당이 보안 관점으로 쓴다.)
+리뷰 담당(세션 `lane2-w12corerls2-review`)이 2026-11-22에 보안 관점으로 구현 커밋 `6071fb124`(0042·상품 저장소·주석·ADR)와 시험 `webhook-merch-grants.int.test.ts`를 확인했다. **판정: 막는 지적 없음.** 새 지적 둘은 이 묶음에서 고치지 않는다(아래, 감독 판단·후속 후보).
+
+- **확인한 것**(계획 §9 목록):
+  1. **정책 식·칸 목록**: 0042의 `webhook_endpoint_app_disable`(USING `status = 'ACTIVE'`, WITH CHECK `status = 'DISABLED' AND disabled_reason = 'FAILING'`), 파트너 웹훅 아홉 칸, 팬 경로 웹훅 세 칸(`status`·`disabled_reason`·`version`), `merch_order`·`merch_order_item` 읽기 정책(테넌트 식·`nullif`), `product` 스무 칸(상품 ID·판매자 제외, 수수료율 포함)이 ADR-0338 결정 1~4와 코드가 실제로 SET하는 칸(`drizzle-webhook-store.ts` `saveEndpoint` 88~99행, `drizzle-product-store.ts` `save` 131~151행)에 하나씩 맞는다. 정책 이름·명령·역할·식은 ⑦이, 칸 목록은 ⑦·⑧자가 본다.
+  2. **REVOKE·GRANT 차례**: 표 단위 REVOKE가 같은 종류의 칸 권한도 거둔 뒤 칸 GRANT를 준다(0042 10행 주석·12~14·25~27·29·46~49행). 표 단위 고치기·넣기가 남지 않았고 옛 조건 없는 정책 셋(`webhook_endpoint_app_write`, `merch_order_partner_tenant`, `merch_order_item_partner_tenant`)이 지워졌다. `core_app`의 두 주문 표 권한·정책과 `webhook_endpoint` 읽기(0004 기본 권한·`webhook_endpoint_app_read`)는 건드리지 않았다.
+  3. **다른 역할 경로**: `core_ops`·`core_maintenance`·`core_search`는 네 표에 권한·정책이 없다(계획 4 표). `core_app`의 팬 굿즈 주문·정산 원천 권한과 `*_app_all`은 그대로고, 파트너 역할로 두 주문 표를 쓰는 코드는 없다(`grep`). 발송기 `disableEndpoint` 문장은 새 세 칸·새 정책 안이고, 읽기 정책을 켜진 끝점으로 좁히지 않아 WHERE가 칸을 읽는 UPDATE의 고친 행 읽기 검사가 통과한다(계획 3.2, 시험 ③). 상품 저장소 `save`는 수수료율을 SET하지 않고 DB가 정한 값을 `returning`으로 받는다(127~128·153·175행).
+  4. **트리거 판정**: `pg_has_role(current_user, 'core_partner', 'USAGE')`는 역할 자체(`SET ROLE`, ⑧카)와 상속(`INHERIT`, ⑧가~아)을 모두 세고, PostgreSQL 16부터 `CREATEROLE` 비슈퍼유저가 역할을 만들 때 저절로 받는 ADMIN-only 자격(INHERIT·SET 없음)은 세지 않는다(⑧차, `MEMBER`와 다름). 슈퍼유저 제외는 `pg_roles.rolsuper`로 하고, 앱 연결은 시작 확인 `assertDatabaseRole`이 슈퍼유저·BYPASSRLS·표 소유자·두 역할 겸임을 막는다(ADR-0241 결정 7, `startup-db-role.int`). 판정이 ADR-0338 결정 4의 글과 같다(감독 결정 넷째, `USAGE`).
+  5. **호출자 권한·`search_path`·계약 없는 게시**: 함수는 `SECURITY INVOKER`, `SET search_path = pg_catalog, pg_temp`, 표 이름 스키마 한정(`public.promoter_contract`)이고 파트너 트랜잭션에서는 0033 `promoter_contract_partner_read`로 자기 테넌트 계약만 읽는다. 게시인데 지금 계약이 없으면 `23514`로 멈추고(⑧바), 초안은 수수료율이 비며(⑧나), 게시 뒤 값은 고치기 전 값으로 고정된다(⑧라·마·아). 계약 변경(2인 승인)은 `admin`으로 기간을 닫고 새 기간을 여는 꼴이라 `upper_inf`가 한 행만 고른다.
+  6. **수수료율 칸을 남긴 까닭**: 이전 판 코드가 그 칸을 SET하므로 배포 창 호환(devops.md §7.1)을 위해 0042는 칸 권한을 남기고 트리거가 값을 정한다. 이 묶음 코드는 SET에서 빼고 DB 값을 돌려받는다(⑧자, `drizzle-product-store.ts` 127~128·153·175행). 권한 축소는 13.2 후속이고 그때 ⑧다·라·마의 기대값도 바뀐다(계획 13.2).
+  7. **FORCE·소유자·N-1**: FORCE 없음, 소유자는 앱 역할이 아님(⑦). 이전 판 발송기 끄기·파트너 웹훅 SET·상품 SET이 모두 새 권한 안이다(계획 3.3). `shop-notify`·`shop-order`·payment-svc 굿즈 e2e의 계약 시드는 구현 전 트리에서도 통과하고 구현 뒤 단언은 그대로다.
+  8. **시험이 겹친 가드를 하나씩 보는지**: ①은 허용된 끄기(`status = 'DISABLED', disabled_reason = 'FAILING'`)를 함께 SET해 칸 권한만, ②는 허용된 세 칸만 SET해 정책만, ④는 판매자 칸을 자기 테넌트 값으로 골라 WITH CHECK를 지나게 해 칸 권한만 본다. ⑤는 0행이 아니라 `42501`을, ⑦은 표·칸 권한과 정책 목록을, ⑧차·카는 판정 꼴을 본다. 쿼리 조건 없이 DB 가드만 보고, ③은 실제 발송기를 `core_app`으로 돌려 수신기가 받은 요청·서명을, ⑤는 정산 원천 HTTP 응답을 견준다.
+- **새 지적(이 묶음에서 고치지 않음)**:
+  - **RV-01(중간, 데이터)**: 0042는 앞으로의 쓰기만 막는다. 0014~0042 사이에 파트너 경로(상품 표 단위 고치기, 주문 표 단위 넣기·고치기)로 이미 바뀐 게시 상품 수수료율과 주문 항목 단가·수수료율은 0042가 계약 값·원장과 대조하지 않는다. 그 값이 남아 있으면 그 뒤 주문이 그 수수료율을 복사하고 정산에 그 값이 오른다. 트리거는 `OLD.commission_rate_bp IS NOT NULL`이면 그 값을 그대로 지키므로(처음 게시 때 고정, ADR-0320 결정 6) 나쁜 옛 값도 고정된다. 권한 좁히기 범위 밖이고, 계약 값으로의 일괄 정정은 이미 게시된 상품의 '처음 값'을 바꾸는 결정이라 감독 판단이 필요하다. **권고**: 배포 뒤 운영에서 판매자별 게시 상품 수수료율을 `promoter_contract`의 지금 값과 대조하고, 다른 값은 계약·정산 담당이 확인해 감사 기록이 남는 정정 마이그레이션(또는 정산 보정)으로 다룬다. 이 묶음의 시험은 새 값이 계약 값이 되는 경로를 본다(⑧가~카).
+  - **RV-02(낮음, 방어 깊이)**: 시작 확인 `assertDatabaseRole` 21행은 `pg_has_role(..., 'member')`로 역할을 보고 `INHERIT` 여부는 보지 않는다. `NOINHERIT` 파트너 로그인은 시작을 지나지만 파트너 권한을 상속하지 않아 첫 질의에서 실패하고 트리거도 `USAGE`가 아니라 돌지 않는다. 그 로그인에 표 권한을 직접 주면 트리거를 지나칠 수 있다. 지금 배포 값은 `GRANT core_partner` 기본값(INHERIT)이고 앱 로그인에 표 권한을 직접 주지 않으므로 이 묶음의 위험은 아니다. **권고**: 후속 정리에서 시작 확인을 `USAGE`(또는 `member`+`inherit_option`)로 좁히고 로그인 직접 권한을 금지하는 검사를 더한다(정리 목록 후보). 근거: `database-role.ts` 19~30행과 0042 62행의 판정이 서로 다른 자격을 본다.
+- **남는 위험(이 묶음이 닫지 않음, ADR-0338 '결과'·계획 13.1·14)**: 발송기가 `core_app`이라 모든 끝점의 주소·비밀을 읽고 켜진 끝점을 `FAILING`으로 끌 수 있다(가용성). `webhook_delivery`의 조건 없는 정책으로 꾸민 발송 행을 넣으면 발송기가 그 파트너 비밀로 서명해 보낸다(사칭). 둘은 새 묶음 W12-core-notify가 닫는다. 파트너의 주문 개인정보 읽기와 `attendee_export` 쓰기도 그대로다. 모두 계획·ADR에 적혀 있고 AZ-T18의 판정 항목 밖이다.
+- **판정**: AZ-T18 ①~⑧의 정본 단언과 시험 단언을 전수 대조했다(① 여덟 칸, ② 가~라, ③ 발송·서명·끄기·꺼진 끝점, ④ 읽기·조건 없는 고치기·테넌트 없음·판매자/ID·아홉 칸·B 넣기, ⑤ 항목 여덟·주문 다섯·넣기·지우기·정산 응답, ⑥ A/B/테넌트 없음, ⑦ 표·정책·권한, ⑧가~카). 막는 어긋남이 없다. 시험은 0042 없이 단언 실패하고 구현 뒤 통과한다(계획 '실패 확인'·'시험 결과').
 
 ## 검증
 
@@ -452,6 +467,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 | test | lane2-w12corerls2-test | claude-opus-5-5 | 2026-11-22T04:31+09:00 | 2026-11-22T06:37+09:00 |
 | impl | lane2-w12corerls2-impl | claude-opus-5-5 | 2026-11-22T05:14+09:00 | 2026-11-22T05:48+09:00 |
 | impl | lane2-w12corerls2-impl2 | claude-opus-5-5 | 2026-11-22T06:37+09:00 | 2026-11-22T06:41+09:00 |
+| review | lane2-w12corerls2-review | deepseek-v4.1-flash | 2026-11-22T09:31+09:00 | 2026-11-22T09:45+09:00 |
 
 ## 기록
 
