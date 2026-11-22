@@ -875,6 +875,7 @@
 | R-783 | CS 처리함에 영업일 기한·경보·자동 접수·배정이 없고 실패한 승인 업무가 건으로 열리지 않으며 SCR-045가 목업이었다 | docs/BUILD_ORDER.md, docs/review/plans/F-06-2.md, docs/adr/0364-cs-inbox-business-days-deadlines-and-assignment.md, docs/features/transfer-refund.md, docs/api/openapi.yaml, services/ops-svc, apps/console-host, .github/workflows/ci-node.yml | 계획→구현→시험(실패 확인 ops 41/61·console 2/2)→리뷰 RV-01·02·04·05 고침→검증 1·2(14개 중 12, 놓친 둘 시험 더함), ops 단위 621·통합 183·console 120, ledger --require 31 | 닫힘 |
 | R-784 | F-07-5가 들인 ops 오류 이름 셋이 오류 유형 목록에 없어 PRF-192 실패, platform 시험 캐시 입력에 서비스 원본 없음 | docs/api/openapi.yaml, packages/api-client/src/gen/problem-types.ts, packages/platform/turbo.json | 목록에 세 줄·생성물 재생성·test 입력 더함 | 고침 |
 | R-785 | payment 표 receivable_move가 정본 receivable_movement와 달라 검사기 M3가 실제 DB에서 건너뜀 | services/payment-svc/migrations/0028, src/modules/settlement/adapters/db, services/invariant-checker, loadtest/runner/v1.mjs | 이름 바꾸기 + 옛 이름 뷰(확장·축소 ①), 검사기 건너뜀 드러내기 | 고침 |
+| R-779 | OPS-300 제어 gRPC 앞 몫 | ops-svc·admission-ctrl·purchase-svc·queue-svc·ci-node·ADR-0365·ASVS 네 행 | F-02-1 역할 다섯 | 끝 |
 
 ## 4. 숫자 일치표
 
