@@ -203,6 +203,11 @@ export type createScannerDeviceAuthorizationResponse403 = {
   status: 403
 }
 
+export type createScannerDeviceAuthorizationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type createScannerDeviceAuthorizationResponse415 = {
   data: ProblemResponse
   status: 415
@@ -221,7 +226,7 @@ export type createScannerDeviceAuthorizationResponse503 = {
 export type createScannerDeviceAuthorizationResponseSuccess = (createScannerDeviceAuthorizationResponse200) & {
   headers: Headers;
 };
-export type createScannerDeviceAuthorizationResponseError = (createScannerDeviceAuthorizationResponse403 | createScannerDeviceAuthorizationResponse415 | createScannerDeviceAuthorizationResponse429 | createScannerDeviceAuthorizationResponse503) & {
+export type createScannerDeviceAuthorizationResponseError = (createScannerDeviceAuthorizationResponse403 | createScannerDeviceAuthorizationResponse409 | createScannerDeviceAuthorizationResponse415 | createScannerDeviceAuthorizationResponse429 | createScannerDeviceAuthorizationResponse503) & {
   headers: Headers;
 };
 

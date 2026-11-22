@@ -676,6 +676,11 @@ export type createDeviceApprovalResponse403 = {
   status: 403
 }
 
+export type createDeviceApprovalResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type createDeviceApprovalResponse429 = {
   data: TooManyRequestsResponse
   status: 429
@@ -684,7 +689,7 @@ export type createDeviceApprovalResponse429 = {
 export type createDeviceApprovalResponseSuccess = (createDeviceApprovalResponse204) & {
   headers: Headers;
 };
-export type createDeviceApprovalResponseError = (createDeviceApprovalResponse403 | createDeviceApprovalResponse429) & {
+export type createDeviceApprovalResponseError = (createDeviceApprovalResponse403 | createDeviceApprovalResponse409 | createDeviceApprovalResponse429) & {
   headers: Headers;
 };
 

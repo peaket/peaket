@@ -232,8 +232,14 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         });
       });
     } catch (e) {
-      // scanner_session_device_active_key·scanner_session_account_active_key 위반은 동시 승인 경합이다(C2-05).
-      if ((e as { cause?: { code?: string } }).cause?.code === '23505') throw new ScannerSessionConflict();
+      // 두 활성 세션 유일 인덱스 위반만 동시 승인 경합이다(C2-05). 다른 23505(기본키 등)는 서버 오류로 남긴다.
+      const cause = (e as { cause?: { code?: string; constraint?: string } }).cause;
+      if (
+        cause?.code === '23505' &&
+        (cause.constraint === 'scanner_session_device_active_key' || cause.constraint === 'scanner_session_account_active_key')
+      ) {
+        throw new ScannerSessionConflict();
+      }
       throw e;
     }
   }
