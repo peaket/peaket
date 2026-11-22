@@ -43,3 +43,18 @@ export { RedisSaleSuspensionCopies, SALE_SUSPENSION_COPY_TTL_MS } from './adapte
 export { SALE_SUSPENSION_ACTIONS, SALE_SUSPENSION_COPIES, type SaleSuspensionAction, type SaleSuspensionCopies, type SaleSuspensionCopyWrite } from './domain/sale-suspension.js';
 export { SaleSuspensionCopyController } from './inbound/sale-suspension-copy.controller.js';
 export { SaleSuspensionModule } from './sale-suspension.module.js';
+// 명령 3·7의 대기 화면 제어 상태(F-02-1 OPS-300, ADR-0365 결정 2·6)
+export { SetQueueNotice, QueueNoticeRejected, type SetQueueNoticeInput } from './application/set-queue-notice.js';
+export { RedisQueueNotices } from './adapters/redis-queue-notices.js';
+export { MemoryQueueNotices } from './adapters/memory-queue-notices.js';
+export {
+  LOBBY_BANNER_MAX,
+  QUEUE_NOTICE_FIELDS,
+  QUEUE_NOTICE_KINDS,
+  QUEUE_NOTICE_PLATFORM,
+  QUEUE_NOTICES,
+  noticeValueOf,
+  type QueueNoticeKind,
+  type QueueNotices,
+  type QueueNoticeWrite,
+} from './domain/queue-notice.js';
