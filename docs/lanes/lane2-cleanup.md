@@ -193,3 +193,6 @@
 - W12-golden-report R-747 RG-01 낮음: `docs/review/measurements/W7-lane2-review-correctness.md:22`(W7L2-C8) '고칠 방향' 칸에 옛 이름 `test-report-search-golden.json`이 남았다. W7L2-C8을 맡는 묶음이 새 이름 `search-golden-report.json`을 쓴다
 - W12-golden-report R-747 RG-02 낮음: 계획 5의 4 `pnpm exec eslint services/core-svc/test/search-golden.test.ts`는 그 파일을 다루는 뿌리 ESLint 설정이 없어 '무시함' 경고만 내고 아무것도 검사하지 않는다
 - W12-golden-report R-747 검증 남은 위험 낮음: 보고서 이름이 다시 `test-report*` 꼴로 돌아가도 ASVS 요약 단계가 `continue-on-error`라 잡이 빨개지지 않고 그 단계 끝 코드 2로만 드러난다(계획 2의 (나)·(다)를 버리며 받아들임)
+- W12-sr13 R-750 SR13-01 낮음: ③ 끼어듦 단언(`services/core-svc/test/search-bat166-page.test.ts:260`·`:268`·`:274`)이 '`keysOf`가 덩이마다 후보 줄마다 불린다'는 어댑터 안 호출 꼴에 기댄다. 한 요청 안에서 같은 이름의 `keysOf`를 한 번만 부르게 줄이면 답이 같아도 이름 바뀜이 A·B 둘이 되어 빨간불이 난다(거짓 실패 쪽). 260행 주석에 그 전제와 '자동완성 시험 `looked === n`(`:208`)과 함께 바뀐다'를 한 줄 더한다
+- W12-sr13 R-750 SR13-02 낮음: 216행 주석은 '중간 결과를 요청 밖에 두면 두 검색의 후보가 빠지거나 섞인다'고 적지만 P12는 섞이기만 하는 꼴(M1b)을 잡지 못한다(두 질의의 맞는 공연이 겹치지 않음). 같은 공연이 두 질의에 함께 맞는 데이터로 중복·남의 후보가 없음을 보는 단언을 더하거나 216행 주석을 '빠진다'로 좁힌다(services/core-svc/test/search-bat166-page.test.ts)
+- W12-sr13 R-750 검증 표본 밖 M1b: `#query`가 덩이 배열을 인스턴스 칸에 두고 후보를 읽기 전에 비우면 함께 온 두 검색의 후보가 섞인다. P12는 두 질의의 맞는 공연이 겹치지 않아 잡지 못한다. 같은 공연이 두 질의에 함께 맞는 데이터로 중복을 보는 단언을 더할지(services/core-svc/test/search-bat166-page.test.ts)
