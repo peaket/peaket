@@ -4,7 +4,7 @@
 // 실패·낮은 판은 1초 [가정]마다 같은 명령 ID·판으로 다시, 모두 ack하면 주소를 다시 풀어 새 파드도 부름, 명령 3은 세 받는 쪽 모두, 처음 보낸 때부터 10초면 FAILED
 // 'ack-timeout:<서비스>'), ADR-0073 결정 17(ack 10초), ADR-0103 결정 5.
 // 쓰는 공개 면(F-02-1 계획 8절): commands 모듈의 ControlDispatcher(dispatch·resume)·ControlTargets 포트·controlKindOf, src/adapters/control-targets.ts의
-// controlTargetsFromEnv. 생성자 인자 꼴은 이 시험이 정한 가정이다(계획 '10. 실패 확인'의 가정 목록).
+// controlTargetsFromEnv. 생성자 인자 꼴은 이 시험이 정한 가정이다(계획 10.1 '시험이 기댄 공개 이름과 가정').
 // 짝 가짜: 저장소는 MemoryCommandStore(포트 구현, 같은 원장 규칙을 test-int/f021-control-ledger.int.test.ts가 DrizzleCommandStore에 돌린다),
 // 받는 쪽은 기존 ControlSender 포트(GrpcControlSender와 같은 꼴)를 구현한 대역, 시계·대기는 주입(가짜 시계를 대기만큼 민다).
 // 시험 이름: F021-VER(B1·B2), F021-ACK(B6), ASVS v5.0.0-15.1.3(B7), ASVS v5.0.0-1.3.6(B5), ASVS v5.0.0-15.3.5(원장 판 정수).
