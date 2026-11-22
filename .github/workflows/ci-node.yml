@@ -146,7 +146,8 @@ jobs:
       # ops-svc의 명령 접수·2인 승인·감사 체인·회차 취소·CS 처리함(마이그레이션·건 요청·기한 경보)과 제어 gRPC 판 원장·ack 기록·이어 보내기(F-02-1 OPS-300)를 실제 PostgreSQL 18로, 명령 사건·CS 건 요청 소비자를 실제 Kafka로 본다
       # 관제 실시간 표 보드(0.5초 조회·신선도·파트너 1분 조회, F-04-1)는 실제 ClickHouse 24.12로 본다
       # (GAT-110·GAT-280 등). test:integration이 있는 작업 공간은 모두 이 잡에서 돈다(F-06-2 리뷰 RV-05). 범위를 고른 실행(--affected)에서는 의존 패키지 dist가 없을 수 있어 먼저 빌드한다
-      - run: pnpm exec turbo run build --filter=@peaket/ops-svc^...
+      # F-02-2 OPS-310: 명령 6 결제 갈래 실제 받는 쪽 시험은 payment-svc·admission-ctrl 원본을 상대 경로로 읽고(그 의존 dist가 든다) pg-simulator를 패키지로 띄운다
+      - run: pnpm exec turbo run build --filter=@peaket/ops-svc^... --filter=@peaket/payment-svc^... --filter=@peaket/admission-ctrl^... --filter=@peaket/pg-simulator
       - run: pnpm --filter @peaket/ops-svc test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
