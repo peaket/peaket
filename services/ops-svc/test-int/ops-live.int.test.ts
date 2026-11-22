@@ -38,6 +38,10 @@ const identity = new FakeIdentity();
 let container: PostgresContainer | undefined;
 let db: Database;
 let admin: pg.Client;
+/** 커밋을 늦추는 트랜잭션용 두 번째 연결(RV-01·RV-02) */
+let late: pg.Client | undefined;
+/** 진행 중 트랜잭션이 있을 때 새로 뜨는 파드(RV-01 ②) */
+let extra: Awaited<ReturnType<typeof createService>> | undefined;
 
 // ---------- 로그(닫힌 까닭) ----------
 class LogLines extends Writable {
@@ -293,20 +297,22 @@ beforeAll(async () => {
 }, 240_000);
 
 afterAll(async () => {
-  await full?.close();
-  await fast?.close();
-  await new Promise<void>((r) => (stub ? stub.close(() => r()) : r()));
-  await admin?.end();
-  await db?.close();
-  if (prometheusId) {
-    try {
-      docker(['rm', '-f', '-v', prometheusId]);
-    } catch {
-      // 이미 멈췄다
+  // 시험이 실패하거나 닫기가 던지고 멈춰도 컨테이너는 반드시 지운다(검증 때 실패한 실행마다 PostgreSQL·Prometheus가 남았다, F-03-1 검증 '남은 위험' 2)
+  const bounded = (p: Promise<unknown> | undefined) => Promise.race([Promise.resolve(p), new Promise((r) => setTimeout(r, 15_000).unref())]);
+  try {
+    await Promise.allSettled([bounded(full?.close()), bounded(fast?.close()), bounded(extra?.close())]);
+    await Promise.allSettled([bounded(new Promise<void>((r) => (stub ? stub.close(() => r()) : r()))), bounded(late?.end()), bounded(admin?.end()), bounded(db?.close())]);
+  } finally {
+    if (prometheusId) {
+      try {
+        docker(['rm', '-f', '-v', prometheusId]);
+      } catch {
+        // 이미 멈췄다
+      }
     }
+    container?.stop();
   }
-  container?.stop();
-});
+}, 120_000);
 
 // ---------- 도우미 ----------
 const postCommand = async (headers: Record<string, string>, body: unknown) => {
@@ -487,7 +493,7 @@ describe('F-03-1 관제 늘 여는 흐름(실제 ops-svc·PostgreSQL)', () => {
 });
 
 describe('F-03-1 알림 행은 원래 기록과 같은 트랜잭션(실제 PostgreSQL 트리거)', () => {
-  test('F-03-1 T9 명령 상태를 바꾼 트랜잭션을 되돌리면 알림 행이 없고, 커밋하면 정확한 행(kind·event_id·roles·본문)이 생긴다. 상태가 같으면 행이 없다', async () => {
+  test('F-03-1 T9 V-T9 명령 상태를 바꾼 트랜잭션을 되돌리면 알림 행이 없고, 커밋하면 정확한 행(kind·event_id·roles·본문)이 생긴다. 상태가 같으면(SET state = state 포함) 행이 없다', async () => {
     const id = randomUUID();
     const eventId = randomUUID();
     const insert = `insert into ops_command (id, type, state, reason, params, requested_by, requested_role, event_id, approval_expires_at, created_at, updated_at)
@@ -517,6 +523,10 @@ describe('F-03-1 알림 행은 원래 기록과 같은 트랜잭션(실제 Postg
     await admin.query(`update ops_command set state = 'APPROVED', updated_at = now() where id = $1`, [id]);
     const after = await pushRowsOf('commandId', id);
     expect(after.length).toBe(3);
+    // V-T9: state 칸을 SET해도 값이 같으면 쓰지 않는다(트리거가 UPDATE OF state로 불려도 IS NOT DISTINCT FROM으로 거른다)
+    await admin.query(`update ops_command set state = state, updated_at = now() where id = $1`, [id]);
+    await admin.query(`update ops_command set state = 'APPROVED' where id = $1`, [id]);
+    expect((await pushRowsOf('commandId', id)).length).toBe(3);
     expect(after[2]).toEqual({ kind: 'command', roles: 'viewer,operator,commander', event_id: eventId, body: { ...body, state: 'APPROVED' } });
 
     // 경보: 되돌리면 없고, 커밋하면 한 줄, 풀리면 한 줄 더
@@ -645,5 +655,96 @@ describe('F-03-1 접속자와 위젯(실제 ops-svc·PostgreSQL·Prometheus)', (
       s.close();
     }
     switchSource.target = PrometheusWidgetSource.fromUrl(prometheusUrl);
+  });
+});
+
+describe('F-03-1 리뷰 반영: 파드의 알림 표 읽기(실제 ops-svc·PostgreSQL)', () => {
+  /** 다른 연결에서 커밋하지 않고 경보 행 하나를 넣는다(트리거가 순번을 받는다). 돌려준 함수로 커밋한다 */
+  async function holdAlert(): Promise<{ alertId: string; seq: number; commit: () => Promise<void> }> {
+    if (!late) {
+      late = new pg.Client({ connectionString: container!.url });
+      await late.connect();
+    }
+    const alertId = randomUUID();
+    await late.query('begin');
+    await late.query(`insert into ops_alert (id, event_key, kind, severity, source, reason, created_at) values ($1, $2, 'slo', 'SEV3', 'it', '늦은 커밋', now())`, [alertId, randomUUID()]);
+    const seq = Number((await late.query<{ seq: string }>(`select seq from ops_push_event where body->>'alertId' = $1`, [alertId])).rows[0]!.seq);
+    return {
+      alertId,
+      seq,
+      commit: async () => {
+        await late!.query('commit');
+      },
+    };
+  }
+  const seqOf = async (alertId: string) => Number((await admin.query<{ seq: string }>(`select seq from ops_push_event where body->>'alertId' = $1`, [alertId])).rows[0]!.seq);
+  const arrives = async (s: Sse, ref: string, timeout = 8_000) =>
+    vi.waitFor(() => expect(s.frames.map(refOf)).toContain(ref), { timeout, interval: 100 }).then(
+      () => true,
+      () => false,
+    );
+
+  test('F-03-1 RV-01 ① 마지막 연결이 닫혀 읽기가 멈춘 뒤 Last-Event-ID 없이 연 연결은 첫 id가 지금 순번이고 멈춘 동안의 지난 경보를 받지 않는다(openapi /v1/ops/live, ADR-0360 결정 2)', async () => {
+    const viewer = identity.ops('viewer');
+    const closedBefore = fullLogs.closedCount('client');
+    const a = await Sse.open(fullPort, '/v1/ops/live', viewer);
+    await vi.waitFor(() => expect(a.openings.length).toBe(1));
+    a.close();
+    await vi.waitFor(() => expect(fullLogs.closedCount('client')).toBe(closedBefore + 1));
+    const [x, y] = await insertAlerts(2);
+    const ySeq = await seqOf(y!);
+    const b = await Sse.open(fullPort, '/v1/ops/live', viewer);
+    await vi.waitFor(() => expect(b.openings.length).toBe(1));
+    expect(Number(b.openings[0]!.id), '첫 덩이 id는 지금 순번').toBeGreaterThanOrEqual(ySeq);
+    const [z] = await insertAlerts(1);
+    await vi.waitFor(() => expect(b.frames.map(refOf)).toContain(z), { timeout: 10_000 });
+    expect(b.frames.map(refOf)).not.toContain(x);
+    expect(b.frames.map(refOf)).not.toContain(y);
+    expect(b.frames.map(refOf)).toEqual([z]);
+    b.close();
+  });
+
+  test('F-03-1 RV-01 ② 커밋 전 트랜잭션이 순번을 쥔 채 파드가 새로 뜨면, 그 행이 커밋된 뒤 Last-Event-ID 없이 연 연결이 받는다(시퀀스 값을 정한 번호로 잡지 않는다)', async () => {
+    const held = await holdAlert();
+    extra = await createService({
+      name: 'ops-svc',
+      module: AppModule.register({ database: db, adminAccounts: adminAccountsForCommands, background: false }),
+      env: { PEAKET_ENV: 'ci' },
+      logDestination: new LogLines(),
+      adminAuthz: identity,
+    });
+    await extra.http.listen({ host: '127.0.0.1', port: 0 });
+    const port = (extra.http.server.address() as AddressInfo).port;
+    const c = await Sse.open(port, '/v1/ops/live', identity.ops('viewer'));
+    await vi.waitFor(() => expect(c.openings.length).toBe(1));
+    expect(Number(c.openings[0]!.id), '첫 id가 커밋 전 순번을 넘지 않는다').toBeLessThan(held.seq);
+    await held.commit();
+    const [marker] = await insertAlerts(1);
+    await vi.waitFor(() => expect(c.frames.map(refOf)).toContain(marker), { timeout: 10_000 });
+    expect(c.frames.map(refOf)).toContain(held.alertId);
+    c.close();
+  });
+
+  test('F-03-1 RV-02 ADR-0100 결정 2 빠지지 않게 다시 붙기(ADR-0360 남는 한계에 늦은 커밋의 빠짐이 없어 정본은 빠지지 않음) 3초 늦게 커밋된 경보는 늘 여는 흐름에도 다시 붙기에도 온다', async () => {
+    const viewer = identity.ops('viewer');
+    const live = await Sse.open(fullPort, '/v1/ops/live', viewer);
+    const gone = await Sse.open(fullPort, '/v1/ops/live', viewer);
+    await vi.waitFor(() => expect([live.openings.length, gone.openings.length]).toEqual([1, 1]));
+    const held = await holdAlert();
+    const [after] = await insertAlerts(1);
+    // 파드는 빈 번호를 2초 기다린 뒤 뒤 번호를 보낸다(ADR-0360 결정 2)
+    // (RV-01이 남아 있으면 멈췄던 파드가 지난 행을 함께 보낼 수 있어, 이 시험은 늦은 행과 뒤 행만 본다)
+    await vi.waitFor(() => expect([live.frames.map(refOf), gone.frames.map(refOf)]).toEqual([expect.arrayContaining([after]), expect.arrayContaining([after])]), { timeout: 10_000, interval: 100 });
+    expect(live.frames.map(refOf)).not.toContain(held.alertId);
+    const resumeFrom = gone.lastId!;
+    expect(Number(resumeFrom)).toBeGreaterThan(held.seq);
+    gone.close();
+    // 2초를 넘겨 커밋한다(위 기다림이 이미 2초를 넘겼다)
+    await held.commit();
+    const back = await Sse.open(fullPort, '/v1/ops/live', { ...viewer, 'last-event-id': resumeFrom });
+    const got = { live: await arrives(live, held.alertId), resume: await arrives(back, held.alertId) };
+    expect(got, `늦게 커밋된 순번 ${held.seq}(커서 ${resumeFrom})`).toEqual({ live: true, resume: true });
+    live.close();
+    back.close();
   });
 });
