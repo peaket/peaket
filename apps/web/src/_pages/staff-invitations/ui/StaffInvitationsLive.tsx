@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { browserEventSummaryReader } from '@/entities/event-summary/browser';
 import { STAFF_ROLE_LABEL, staffValidRangeText, staffWhenText } from '@/entities/staff-assignment';
 import { tabStore } from '@/features/account-withdraw';
-import { afterAccept, afterReject, consentLinesOf, type InvitationLoad, loadInvitation, STAFF_RETRY_TEXT } from '@/features/staff-invitation';
+import { afterAccept, afterReject, canAcceptIn, consentLinesOf, type InvitationLoad, loadInvitation, STAFF_RETRY_TEXT } from '@/features/staff-invitation';
 import { browserStaffInvitationApi } from '@/features/staff-invitation/browser';
 import { captureStaffFragment, clearStaffFragment, keepStaffFragment, staffLoginHref, takeStaffFragment } from '@/shared/lib/staff-fragment';
 import { loginHrefAfterRefresh } from '@/shared/lib/token-refresh';
@@ -61,7 +61,8 @@ export function StaffInvitationsLive() {
   const accept = async () => {
     const token = tokenRef.current;
     const inv = load.invitation;
-    if (busy || !token || !inv || !load.summary) return;
+    // [수락]을 켜는 판정과 같은 함수로 막는다(요약을 못 읽었거나 동의 전이 아니면 요청을 보내지 않는다, I-T91 ③, 리뷰 RV-01)
+    if (busy || !token || !inv || !canAcceptIn(load)) return;
     setBusy(true);
     setNotice(null);
     const next = afterAccept(await api.accept({ inviteToken: token, consentVersion: inv.consents.consentVersion }));
@@ -130,7 +131,7 @@ export function StaffInvitationsLive() {
               defaultCollect={false}
               defaultProvide={false}
               provideError={v.consent.provideError}
-              blocked={!summary}
+              blocked={!canAcceptIn(load)}
               onAccept={() => void accept()}
               onReject={() => void reject()}
               busy={busy}
