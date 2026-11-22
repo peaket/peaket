@@ -183,6 +183,8 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 | RV-08 | 낮음(남은 위험) | `listByEvent` | 명단에 `scanCount`·`overrideCount`를 싣지 않는다(ticket 데이터). 계약은 선택 칸이라 문제는 없지만 SCR-037이 빈칸을 보일 수 있다 | GAT-360 화면이 빈칸을 '—'로 보이거나, ticket-svc 집계 경로를 후속으로 더한다 |
 | RV-09 | 낮음(남은 위험) | `docs/security/asvs/offline-gate.md` 16.3.1 | 초대 만들기·재발송·해제의 행위자·사유를 담은 불변 감사 기록이 아직 없다(배정 상태·세션 종료·control 사건까지) | BAT-450D |
 
+- **RV-01 고침(2026-11-22, review-fix)**: 0036이 인덱스 앞에서 같은 `(event_id, lower(invite_email))` INVITED 가운데 만료가 늦은 하나만 남기고 나머지를 `EXPIRED`·이메일/토큰 파기로 정리한다. 통합 시험 `I-T21 ②`가 그 정리와 인덱스 재생성을 함께 본다.
+
 ### 확인한 것(지적 아님)
 
 - **토큰**: 32바이트 `randomBytes` → base64url 43자, DB에는 SHA-256 hex만. 응답 뷰(`PartnerStaffInvitationView`)에 토큰 칸이 없고, 컨트롤러는 `no-store`만 붙인다. 링크는 `${url}#token=` 하나이고 메일 파일 대역에만 원문이 있다. 시험이 응답·헤더·로그에 원문 0건과 DB 해시 일치를 값으로 본다.
@@ -206,3 +208,4 @@ Docker 시험은 `services/identity-svc/test-int/staff-invitations.int.test.ts`�
 | impl | lane3-bat450b-impl | deepseek-v4.1-flash | 2026-11-22T13:16:00+09:00 | 2026-11-22T13:32:00+09:00 |
 | review | lane3-bat450b-review | deepseek-v4.1-flash | 2026-11-22T13:33:00+09:00 | 2026-11-22T13:40:00+09:00 |
 | test | lane3-bat450b-rv01-test | deepseek-v4.1-flash | 2026-11-22T13:41:00+09:00 | 2026-11-22T13:44:00+09:00 |
+| impl | lane3-bat450b-rv01-impl | deepseek-v4.1-flash | 2026-11-22T13:45:00+09:00 | 2026-11-22T13:48:00+09:00 |
