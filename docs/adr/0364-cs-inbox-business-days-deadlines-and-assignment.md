@@ -2,7 +2,7 @@
 
 - **상태**: 채택(2026-11-23, 추천 적용. 기능 F-06-2 계획 담당이 정본 빈칸을 구현 전에 정했다. 방향을 바꾸는 결정은 없고, 단계 사이 일의 나눔(결정 7)은 BUILD_ORDER 단계 줄과 정본 문장이 서로 달라 맞춘 것이다).
 - **관련**: [docs/features/transfer-refund.md](../features/transfer-refund.md) §7.1·§11·§12·§13, [docs/design/d5-screen-blueprint.md](../design/d5-screen-blueprint.md) §7.6, [docs/data.md](../data.md) `cs_case`, openapi `/v1/ops/cases`, asyncapi `support.cases-requested`, [ADR-0062](0062-open-items-delegated-decisions.md)·[ADR-0066](0066-screen-feedback-12-items.md)·[ADR-0073](0073-third-consistency-audit-delegated-decisions.md)·[ADR-0354](0354-feature-vertical-slices-after-cutover.md), 계획 [docs/review/plans/F-06-2.md](../review/plans/F-06-2.md)
-- **관련 ID**: GAT-280, R-T12, R-T20, R-T48~R-T51, P-T19 ②, PRF-175
+- **관련 ID**: GAT-280, R-T12, R-T20, R-T48~R-T51, P-T19 ②, PRF-175, B-T10, B-T28, Q-T48
 
 ## 맥락
 
@@ -21,6 +21,9 @@
 5. **역할과 배정**: 목록·상세는 openapi의 네 역할이다. CS 담당자(`cs_agent`·`cs_lead`)의 목록에는 지급·대사·KYC 건이 없고 상세는 404다(open-items 72번). operator·commander는 모두 보고 지급·대사·KYC 건만 갱신한다(그 밖은 403). 배정은 `cs_agent`가 자기에게 맡거나 자기 배정을 풀 때만, `cs_lead`는 아무 CS 담당자에게나 맡긴다(대상이 활성 `cs_agent`·`cs_lead`가 아니면 422). 상태는 열림 → 진행 중 → 해결, 열림 → 해결이고 해결은 끝이다(다시 고치면 409). 해결할 때는 결과 메모(1~2,000자)가 필요하다. 갱신은 `If-Match`(판 번호)를 받고 응답에 `ETag`를 싣는다(docs/api/guidelines.md '동시 수정'). 갱신마다 감사 체인에 행위자·이전·다음 상태·배정을 남기고 메모 본문은 남기지 않는다.
 6. **실패한 승인 업무의 재실행**: 승인 업무 실행이 실패해 `FAILED`가 되면(계약 조건 변경, 관리 역할 변경, 지급 묶음) ops-svc가 `APPROVAL_EXECUTION_FAILED` 건(대상 승인 ID, category 승인 종류)을 연다. 기한은 원래 승인 업무의 기한을 이어받고, 기한이 없는 승인이면 기한이 없다. 다시 실행은 지금처럼 승인자가 같은 승인 ID로 approve를 다시 부르는 것이고(실행 직전 재인증, ADR-0073), 성공하면 그 건을 시스템이 해결로 닫는다.
 7. **단계 사이 나눔**: 계좌 입력 요청의 첫 발송과 재발송(R-T20 ②)은 GAT-130에 합친 GAT-100(기능 F-07-8)이 한다. 링크가 여는 화면(SCR-060·043)과 계좌 대기 상태가 그쪽에 있고, 팬 알림 종류도 아직 없기 때문이다. 이상 표시(`FLAGGED`, `ENTRY_AFTER_CANCEL`) 건의 취소 무효·환급 처리(P-T19 ②)와 결제 모델 시험의 `csConfirm`(시스템 잘못 환불 승인)은 예외 환불과 같은 돈·티켓 상태 전이라 GAT-300(기능 F-06-3)이 한다. 팬 문의의 분쟁 접수 생산자는 GAT-330(F-06-5)이다. GAT-280은 그 건들이 처리함에 들어와 기한·알림·배정·해결로 움직이는 바탕을 끝낸다.
+8. **추가 검증 이의의 처리 행동(2026-11-23 감독 결정, 기능 F-06-7로 나눔)**: 이의 인정·기각은 GAT-280의 CS 행동이다(bot-defense §12 '결과 반영', B-T10). 처리함·기한(F-06-2)과 합치면 5일을 넘어 기능을 나눈다. 세부는 추천이고 F-06-7 계획이 구현 전에 정본에 적는다.
+   - **결정 경로**: `POST /v1/ops/cases/{caseId}/verification-appeal-decision`(새 경로, `cs_agent`·`cs_lead`, `If-Match`·`Idempotency-Key`, 본문 `outcome` ACCEPTED·REJECTED와 결과 메모). 결정·건 해결·보낼 호출 기록을 ops DB 한 트랜잭션에 쓰고 202로 답한다. 상세(`CsCaseDetail.verificationAppeal`)는 queue-svc `GetVerificationAppeal`의 글·사유 범주·대기 참여 상태와 trust-svc `GetVerdictEvidence`의 범주 값만 싣는다(pid·계정 ID·점수 원값·기기 가명 없음).
+   - **호출**: 인정은 queue-svc `ResolveVerificationAppeal`(ACCEPTED)과 trust-svc `ApplyLabel`(`LABEL_SOURCE_APPEAL_ACCEPTED`), 기각은 `ResolveVerificationAppeal`(REJECTED)만이다. 셋 다 건 ID·판 번호로 멱등하다(이미 있는 계약). 건이 열릴 때와 해결될 때 identity-svc `SetAccountHold`(`VERIFICATION_APPEAL`)를 OPEN·CLOSED로 보낸다. 실패한 호출은 ops-svc 배경 작업이 같은 건 ID·판으로 다시 보낸다(B-T10 ⑥). 보낼 호출 기록은 ops 마이그레이션 0031의 새 표다.
 
 ## 결과
 
