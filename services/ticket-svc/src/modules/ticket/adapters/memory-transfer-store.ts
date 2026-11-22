@@ -70,6 +70,8 @@ export class MemoryTransferStore implements TransferStore {
   async createOffer(offer: TransferOfferRecord, nowMs: number): Promise<CreateOfferOutcome> {
     const existing = this.offers.get(offer.offerId);
     if (existing) return { kind: 'REPLAYED', offer: existing };
+    // 기한 지난 요청을 먼저 만료시켜 표시를 푼다(RV-01). 만료 고리가 늦어도 새 요청·취소가 막히지 않는다
+    this.#expireTicketOffers(offer.ticketId, nowMs);
     const t = this.o.tickets.tickets.get(offer.ticketId);
     if (!t) return { kind: 'REJECTED', reason: 'NOT_HOLDER' };
     const lock = this.#activeLockRow(t.eventId, t.payerAccountId, nowMs);
@@ -229,8 +231,19 @@ export class MemoryTransferStore implements TransferStore {
     };
   }
 
-  #activeLockRow(eventId: string, payerAccountId: string, nowMs: number): LockRow | undefined {
-    const start = this.#eventStartsAt(eventId);
+  /** 그 티켓의 기한 지난 OFFERED를 EXPIRED로 바꾸고, 남은 요청이 없으면 표시를 끈다(RV-01) */
+  #expireTicketOffers(ticketId: string, nowMs: number): void {
+    for (const offer of this.offers.values()) {
+      if (offer.ticketId !== ticketId || offer.status !== 'OFFERED' || nowMs < offer.expiresAtMs) continue;
+      this.offers.set(offer.offerId, { ...offer, status: 'EXPIRED', decidedAtMs: nowMs });
+    }
+    const t = this.o.tickets.tickets.get(ticketId);
+    if (!t || (!t.transferPending && t.status !== 'TRANSFER_PENDING')) return;
+    const stillOpen = [...this.offers.values()].some((offer) => offer.ticketId === ticketId && offer.status === 'OFFERED');
+    if (!stillOpen) this.#release(t);
+  }
+
+  #activeLockRow(eventId: string, payerAccountId: string, nowMs: number): LockRow | undefined {    const start = this.#eventStartsAt(eventId);
     for (const row of this.locks.values()) {
       if (row.eventId !== eventId || row.accountId !== payerAccountId) continue;
       if (lockActiveAt({ locked: row.locked, expiresAtMs: row.expiresAtMs, nowMs, eventStartsAtMs: start })) return row;

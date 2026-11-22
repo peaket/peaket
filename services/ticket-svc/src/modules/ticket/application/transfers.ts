@@ -3,7 +3,6 @@
 import type { Clock } from '@peaket/platform';
 import {
   type CreateOfferRejection,
-  createOfferRejectionOf,
   offerExpiryMs,
   type ReturnRejection,
   signRecipientRef,
@@ -11,7 +10,6 @@ import {
   RECIPIENT_REF_TTL_MS,
   type TransferOfferRecord,
   type TransferStatus,
-  type TransferTicketSnapshot,
 } from '../domain/transfer.js';
 
 export type {
@@ -135,9 +133,7 @@ export class Transfers {
     if (toAccountId === undefined) throw new TransferError('INVALID_INPUT');
     const t = await this.d.store.ticket(ticketId);
     if (!t) throw new TransferError('NOT_FOUND');
-    const lock = await this.d.store.activeTransferLock(t.eventId, t.payerAccountId, nowMs);
-    const pre = createOfferRejectionOf(t, { callerAccountId: accountId, nowMs, lockActive: lock !== undefined });
-    if (pre !== undefined) throw new TransferError(errorOfCreate(pre));
+    // 기한 지난 요청·잠금·재양도·마감 판정은 저장소가 행 잠금 안에서 다시 본다(여기서 미리 보면 만료 정비 전 값을 보고 틀릴 수 있다)
     const offer: TransferOfferRecord = {
       offerId,
       ticketId,

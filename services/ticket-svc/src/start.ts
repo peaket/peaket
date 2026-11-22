@@ -62,6 +62,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
   let alert: ((message: string, fields: Record<string, unknown>) => void) | undefined;
   let freshnessTimer: ReturnType<typeof setInterval> | undefined;
+  let expireTimer: ReturnType<typeof setInterval> | undefined;
   let controlSync: { close(): Promise<void> } | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
@@ -153,6 +154,19 @@ export async function start(o: StartOptions): Promise<StartedService> {
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     });
     alert = (message, fields) => service!.logger.warn(fields, message);
+    // 양도 요청 만료 정비(RV-01): 1분 [가정]마다 기한 지난 OFFERED를 EXPIRED로 바꾸고 표시를 푼다.
+    // 새 요청을 만들 때도 저장소가 먼저 만료시키므로 이 고리가 늦어도 막히지 않는다. 파드가 여럿이면 행 잠금으로 겹쳐도 한 번만 바뀐다
+    const expire = (): void => {
+      void transfers
+        .expireOffers()
+        .then((n) => {
+          if (n > 0) service!.logger.info({ expired: n }, '기한 지난 양도 요청을 만료시켰다');
+        })
+        .catch((err: unknown) => service!.logger.warn({ err }, '양도 요청 만료 정비가 실패했다(다음 틱에 다시 한다)'));
+    };
+    expireTimer = setInterval(expire, 60_000);
+    expireTimer.unref?.();
+    expire();
     // O-T20: 입장 시간대에 2분 넘게 변경분을 받지 못한 스캐너를 ops-svc SEV2 경보로 넘긴다(기존 ops_alert 경로).
     if (config.opsHttpUrl) {
       const freshnessAlerts = new Counter({
@@ -247,6 +261,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const close = (): Promise<void> => {
       started.readiness.register('shutting-down');
       if (freshnessTimer) clearInterval(freshnessTimer);
+      if (expireTimer) clearInterval(expireTimer);
       return (closing ??= (async () => {
         try {
           await startedGrpc.close();
@@ -265,6 +280,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     return { close, ports };
   } catch (err) {
     if (freshnessTimer) clearInterval(freshnessTimer);
+    if (expireTimer) clearInterval(expireTimer);
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});
     await controlSync?.close();

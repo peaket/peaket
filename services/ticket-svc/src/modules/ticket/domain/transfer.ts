@@ -1,7 +1,7 @@
 // 양도·돌려주기의 순수 규칙(BUILD_ORDER GAT-050·GAT-055, docs/features/transfer-refund.md §3.1·§4·§4.1).
 // 저장소·HTTP와 떼어 시험한다. 시각은 모두 epoch ms이고, 입장 시작은 ticket-svc가 아는 event_starts_at을 쓴다
 // (core entry_start_at 연결은 GAT-180 앞이라 남는 한계다).
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash } from 'node:crypto';
 import type { TicketStatus } from './ticket.js';
 
 /** 양도 요청 기한(POL-017): 요청 + 48시간과 양도 마감 가운데 이른 때 */
@@ -148,31 +148,42 @@ export function returnRejectionOf(
 }
 
 // ---- 받는 사람 참조(recipientRef) ----
-// 서버가 10분짜리 HMAC 서명 참조를 만들고, 양도 요청은 그 참조만 받는다. 계정 ID가 그대로 드러나지 않게 한다.
+// 서버가 10분짜리 암호문 참조를 만들고, 양도 요청은 그 참조만 받는다. 계정 ID가 그대로 드러나지 않게 AES-256-GCM으로 감싼다(RV-03).
 
 interface RefPayload {
   readonly a: string;
   readonly e: number;
 }
 
-/** 계정 ID·만료 시각을 HMAC-SHA256으로 서명한 불투명 참조를 만든다 */
-export function signRecipientRef(o: { readonly secret: string; readonly accountId: string; readonly expiresAtMs: number }): string {
-  const payload = Buffer.from(JSON.stringify({ a: o.accountId, e: o.expiresAtMs } satisfies RefPayload), 'utf8').toString('base64url');
-  const mac = createHmac('sha256', o.secret).update(payload, 'utf8').digest('base64url');
-  return `${payload}.${mac}`;
+/** 비밀에서 32바이트 키를 만든다(서비스마다 다른 값, Secrets Manager) */
+function recipientRefKey(secret: string): Buffer {
+  return createHash('sha256').update(secret, 'utf8').digest();
 }
 
-/** 참조를 확인해 계정 ID를 돌려준다. 만료(지금 ≥ e)·서명 불일치·모양 오류는 undefined */
+/** 계정 ID·만료 시각을 AES-256-GCM으로 감싼 불투명 참조(iv‖암호문‖tag, base64url)를 만든다 */
+export function signRecipientRef(o: { readonly secret: string; readonly accountId: string; readonly expiresAtMs: number }): string {
+  const iv = Buffer.from(createHash('sha256').update(`${o.secret}:iv:${o.accountId}:${o.expiresAtMs}`, 'utf8').digest().subarray(0, 12));
+  const cipher = createCipheriv('aes-256-gcm', recipientRefKey(o.secret), iv);
+  const body = Buffer.concat([cipher.update(JSON.stringify({ a: o.accountId, e: o.expiresAtMs } satisfies RefPayload), 'utf8'), cipher.final()]);
+  return [iv.toString('base64url'), body.toString('base64url'), cipher.getAuthTag().toString('base64url')].join('.');
+}
+
+/** 참조를 풀어 계정 ID를 돌려준다. 만료(지금 ≥ e)·변조·모양 오류는 undefined */
 export function verifyRecipientRef(ref: string, o: { readonly secret: string; readonly nowMs: number }): string | undefined {
-  const dot = ref.lastIndexOf('.');
-  if (dot <= 0 || dot === ref.length - 1) return undefined;
-  const payload = ref.slice(0, dot);
-  const got = Buffer.from(ref.slice(dot + 1), 'base64url');
-  const want = createHmac('sha256', o.secret).update(payload, 'utf8').digest();
-  if (got.length !== want.length || !timingSafeEqual(got, want)) return undefined;
+  const parts = ref.split('.');
+  if (parts.length !== 3) return undefined;
+  const [ivText, bodyText, tagText] = parts as [string, string, string];
+  let plain: string;
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', recipientRefKey(o.secret), Buffer.from(ivText, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagText, 'base64url'));
+    plain = Buffer.concat([decipher.update(Buffer.from(bodyText, 'base64url')), decipher.final()]).toString('utf8');
+  } catch {
+    return undefined;
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    parsed = JSON.parse(plain);
   } catch {
     return undefined;
   }
