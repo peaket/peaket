@@ -86,6 +86,32 @@ describe('R-T50 ② 경계 네 시각 × 두 번 돌리기', () => {
   });
 });
 
+// F-06-2 검증 1 놓친 표본 3 반영(시험 담당 lane3-f062-test): 경보 원장의 같은 키 한 번 받기가 가려 주지 않게, 같은 기한의 경보는 건 표시(cs_case.due_soon_alerted_for·overdue_alerted_for)로
+// 한 번만 연다는 것을 따로 본다(ADR-0364 결정 3 '같은 기한은 한 번', data.md due_soon_alerted_for 'next_due_at과 같으면 다시 열지 않는다')
+describe('R-T50 ② 같은 기한의 경보는 건 표시로 한 번만 연다', () => {
+  test('R-T50 ② 첫 바퀴가 연 경보를 밖에서 풀어도 다음 바퀴는 같은 기한의 경보를 다시 열지 않고, 두 번째 바퀴의 연 수는 0이다', async () => {
+    const id = (await h.intake(caseRequest('REFUND_ACCOUNT_PENDING', { category: 'REFUND' }))).body.caseId!;
+    const at = ms(BD3); // 1영업일 전과 기한이 모두 지난 시각
+    h.clock.advance(at - h.clock.now());
+    expect(await tick.run(at)).toEqual({ dueSoon: 1, overdue: 1, resolved: 0 });
+    // 운영자가 경보 원장에서 두 경보를 손으로 풀었다(건은 열린 채)
+    for (const a of ofCase(id)) await alerts.resolve({ eventKey: a.eventKey, kind: a.kind, reason: '운영자가 확인함', nowMs: at });
+    expect(summary(id).map((a) => a.open)).toEqual([false, false]);
+    expect(await tick.run(at + 60_000)).toEqual({ dueSoon: 0, overdue: 0, resolved: 0 });
+    expect(summary(id).map((a) => [a.kind, a.open])).toEqual([
+      ['CS_CASE_DUE_SOON', false],
+      ['CS_CASE_OVERDUE', false],
+    ]);
+  });
+
+  test('R-T50 ② 1영업일 전 경보만 연 뒤 다음 바퀴(기한 전)의 연 수는 0이다', async () => {
+    await h.intake(caseRequest('REFUND_ACCOUNT_PENDING', { category: 'REFUND' }));
+    const soon = ms('2026-11-24T14:30:00.000Z');
+    expect(await tick.run(soon)).toEqual({ dueSoon: 1, overdue: 0, resolved: 0 });
+    expect(await tick.run(soon + 60_000)).toEqual({ dueSoon: 0, overdue: 0, resolved: 0 });
+  });
+});
+
 describe('R-T50 ③ 해결하면 경보가 풀린다', () => {
   test('R-T50 ③ 두 경보가 열린 건을 해결하면 둘 다 풀리고 그 뒤 새 경보 0이다', async () => {
     const agent = h.as('cs_agent');

@@ -6,7 +6,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, test, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
 const seen = vi.hoisted(() => ({
   register: undefined as undefined | { calendar?: { isBusinessDay(d: string): boolean } },
@@ -73,18 +73,28 @@ async function bootMain(env: Record<string, string>): Promise<void> {
   }
 }
 
+// F-06-2 검증 1 넘김 ②(시험 담당 lane3-f062-test): main.ts를 처음 읽을 때 모듈 그래프 변환이 한 번 크게 든다(단독 약 6초, 몰릴 때 30초 넘김).
+// 그 비용을 beforeAll에서 한 번 치르고(변환은 vi.resetModules 뒤에도 캐시에 남는다), 시험마다 main.ts를 한 번씩만 띄운다.
+// 시험 한도는 이 파일의 시험만 60초로 둔다: 시험마다 main.ts 전체(서비스 조립 import 수십 개)를 새로 평가하는 것이라 다른 단위 시험보다 무겁다
+const BOOT_TEST_TIMEOUT_MS = 60_000;
+beforeAll(async () => {
+  await bootMain({ PEAKET_ENV: 'ci' });
+}, 120_000);
+
 describe('R-T50 ④ main.ts 시작의 공휴일 달력', () => {
-  test('R-T50 ④ ci에서 공휴일 파일을 주면 그 달력이 AppModule.register에 넘어가고, 파일이 없으면 주말만 빼는 달력으로 시작한다', async () => {
+  test('R-T50 ④ ci에서 공휴일 파일을 주면 그 달력이 AppModule.register에 넘어간다', { timeout: BOOT_TEST_TIMEOUT_MS }, async () => {
     await bootMain({ PEAKET_ENV: 'ci', PEAKET_HOLIDAY_CALENDAR_FILE: goodFile });
     expect(seen.order).toEqual(['createService', 'listen']);
     expect(['2026-11-24', '2026-11-25', '2026-11-28'].map((d) => seen.register?.calendar?.isBusinessDay(d))).toEqual([true, false, false]);
+  });
 
+  test('R-T50 ④ local에서 파일이 없으면 주말만 빼는 달력으로 시작한다', { timeout: BOOT_TEST_TIMEOUT_MS }, async () => {
     await bootMain({ PEAKET_ENV: 'local' });
     expect(seen.order).toEqual(['createService', 'listen']);
     expect(['2026-11-25', '2026-11-28'].map((d) => seen.register?.calendar?.isBusinessDay(d))).toEqual([true, false]);
   });
 
-  test('R-T50 ④ staging·prod는 공휴일 파일이 없으면 서비스를 만들기 전에 시작을 멈춘다', async () => {
+  test('R-T50 ④ staging·prod는 공휴일 파일이 없으면 서비스를 만들기 전에 시작을 멈춘다', { timeout: BOOT_TEST_TIMEOUT_MS }, async () => {
     // 재인증 값(staging·prod 필수, reauth-wiring.ts)은 채워 달력 검사까지 가게 한다. 연결은 달력 뒤에 만든다
     const reauth = { PEAKET_IDENTITY_JWKS_URL: 'https://identity.internal/jwks.json', PEAKET_REAUTH_REDIS_URL: 'redis://127.0.0.1:1' };
     for (const env of ['staging', 'prod']) {
@@ -93,7 +103,7 @@ describe('R-T50 ④ main.ts 시작의 공휴일 달력', () => {
     }
   });
 
-  test('R-T50 ④ 읽지 못하는 파일·꼴이 틀린 파일은 local·ci라도 시작하지 않는다', async () => {
+  test('R-T50 ④ 읽지 못하는 파일·꼴이 틀린 파일은 local·ci라도 시작하지 않는다', { timeout: BOOT_TEST_TIMEOUT_MS }, async () => {
     for (const env of ['ci', 'local']) {
       await expect(bootMain({ PEAKET_ENV: env, PEAKET_HOLIDAY_CALENDAR_FILE: join(dir, 'missing.json') }), `${env} 없는 파일`).rejects.toThrow(/PEAKET_HOLIDAY_CALENDAR_FILE/);
       await expect(bootMain({ PEAKET_ENV: env, PEAKET_HOLIDAY_CALENDAR_FILE: brokenFile }), `${env} 깨진 파일`).rejects.toThrow();
