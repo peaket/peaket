@@ -39,6 +39,9 @@ const recordOf = (r: StaffAssignmentRow): StaffAssignmentRecord => ({
   ...(r.consentVersion !== null ? { consentVersion: r.consentVersion } : {}),
 });
 
+/** 읽을 때의 상태: 역할 유효 끝이 지난 ASSIGNED는 정비 전이라도 ENDED로 보인다(C2-11) */
+const statusAt = (status: string, validUntil: Date, nowMs: number): StaffAssignmentStatus => (status === 'ASSIGNED' && validUntil.getTime() < nowMs ? 'ENDED' : (status as StaffAssignmentStatus));
+
 const cursorOf = (validFromMs: number, assignmentId: string): string => Buffer.from(JSON.stringify([validFromMs, assignmentId]), 'utf8').toString('base64url');
 const parseCursor = (raw: string): { validFromMs: number; assignmentId: string } | undefined => {
   try {
@@ -57,11 +60,19 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  async hasAssigned(accountId: string): Promise<boolean> {
+  async hasAssigned(accountId: string, nowMs: number): Promise<boolean> {
+    const at = new Date(nowMs);
     const [row] = await this.database.db
       .select({ id: staffAssignment.id })
       .from(staffAssignment)
-      .where(and(eq(staffAssignment.accountId, accountId), eq(staffAssignment.status, 'ASSIGNED')))
+      .where(
+        and(
+          eq(staffAssignment.accountId, accountId),
+          eq(staffAssignment.status, 'ASSIGNED'),
+          lte(staffAssignment.validFrom, at),
+          gte(staffAssignment.validUntil, at),
+        ),
+      )
       .limit(1);
     return row !== undefined;
   }
@@ -127,7 +138,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
     return row ? recordOf(row) : null;
   }
 
-  async listByEvent(i: { eventId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }> {
+  async listByEvent(i: { eventId: string; cursor?: string; limit: number; nowMs: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }> {
     const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
     const where = cursor
       ? and(
@@ -153,7 +164,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         eventId: assignment.eventId,
         ...(nickname !== null ? { nickname } : {}),
         role: assignment.role as StaffRole,
-        status: assignment.status as StaffAssignmentStatus,
+        status: statusAt(assignment.status, assignment.validUntil, i.nowMs),
         inviteExpiresAt: assignment.inviteExpiresAt.toISOString(),
         validFrom: assignment.validFrom.toISOString(),
         validUntil: assignment.validUntil.toISOString(),
@@ -229,7 +240,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
   async acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult> {
     return this.database.transaction(async (tx) => {
       const [row] = await tx.select().from(staffAssignment).where(eq(staffAssignment.inviteTokenHash, Buffer.from(i.tokenHash, 'hex'))).limit(1).for('update');
-      if (!row || row.status !== 'INVITED' || row.inviteExpiresAt.getTime() <= i.nowMs) return { result: 'INVITATION_INVALID' };
+      if (!row || row.status !== 'INVITED' || row.inviteExpiresAt.getTime() <= i.nowMs || row.validUntil.getTime() < i.nowMs) return { result: 'INVITATION_INVALID' };
       if (row.inviteEmail === null || row.inviteEmail.toLowerCase() !== i.email.toLowerCase()) return { result: 'EMAIL_MISMATCH' };
       try {
         const [updated] = await tx
@@ -252,7 +263,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
       .where(and(eq(staffAssignment.inviteTokenHash, Buffer.from(i.tokenHash, 'hex')), eq(staffAssignment.status, 'INVITED')));
   }
 
-  async listSelf(i: { accountId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }> {
+  async listSelf(i: { accountId: string; cursor?: string; limit: number; nowMs: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }> {
     const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
     const statuses = ['ASSIGNED', 'ENDED', 'REVOKED'] as const;
     const where = cursor
@@ -273,7 +284,7 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
         assignmentId: r.id,
         eventId: r.eventId,
         role: r.role as StaffRole,
-        status: r.status as 'ASSIGNED' | 'REVOKED' | 'ENDED',
+        status: statusAt(r.status, r.validUntil, i.nowMs) as 'ASSIGNED' | 'REVOKED' | 'ENDED',
         validFrom: r.validFrom.toISOString(),
         validUntil: r.validUntil.toISOString(),
         activeScannerDeviceName: null,
@@ -330,6 +341,42 @@ export class DrizzleStaffAssignmentStore implements StaffAssignmentStore {
       .where(and(eq(staffAssignment.accountId, i.accountId), eq(staffAssignment.status, 'ASSIGNED')))
       .orderBy(desc(staffAssignment.validFrom));
     return rows.map(recordOf);
+  }
+
+  async expireDueAssignments(nowMs: number): Promise<{ invitations: number; assignments: number }> {
+    const at = new Date(nowMs);
+    return this.database.transaction(async (tx) => {
+      // 24시간이 지난 초대와 역할 유효 끝이 지난 초대는 끝내며 이메일·토큰을 파기한다(docs/data.md, C2-11)
+      const invitations = await tx
+        .update(staffAssignment)
+        .set({ status: 'EXPIRED', inviteEmail: null, inviteTokenHash: null })
+        .where(and(eq(staffAssignment.status, 'INVITED'), or(lte(staffAssignment.inviteExpiresAt, at), lt(staffAssignment.validUntil, at))))
+        .returning({ id: staffAssignment.id });
+      // 역할 유효 끝이 지난 배정은 ENDED로 끝낸다. 남은 이메일·토큰도 함께 지운다(옛 데이터 백스톱)
+      const assignments = await tx
+        .update(staffAssignment)
+        .set({ status: 'ENDED', inviteEmail: null, inviteTokenHash: null })
+        .where(and(eq(staffAssignment.status, 'ASSIGNED'), lt(staffAssignment.validUntil, at)))
+        .returning({ id: staffAssignment.id });
+      return { invitations: invitations.length, assignments: assignments.length };
+    });
+  }
+
+  async closeLegacyAssignments(): Promise<{ invitations: number; assignments: number }> {
+    return this.database.transaction(async (tx) => {
+      // identity는 회차 판매자를 갖지 않아(ADR-0007) promoter_id를 백필할 수 없다. 살아 있는 NULL 행은 끝낸다(C2-10)
+      const invitations = await tx
+        .update(staffAssignment)
+        .set({ status: 'EXPIRED', inviteEmail: null, inviteTokenHash: null })
+        .where(and(eq(staffAssignment.status, 'INVITED'), isNull(staffAssignment.promoterId)))
+        .returning({ id: staffAssignment.id });
+      const assignments = await tx
+        .update(staffAssignment)
+        .set({ status: 'ENDED', inviteEmail: null, inviteTokenHash: null })
+        .where(and(eq(staffAssignment.status, 'ASSIGNED'), isNull(staffAssignment.promoterId)))
+        .returning({ id: staffAssignment.id });
+      return { invitations: invitations.length, assignments: assignments.length };
+    });
   }
 
   async createScannerSession(i: {

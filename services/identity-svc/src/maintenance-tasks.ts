@@ -68,6 +68,10 @@ export function identityMaintenanceTasks(database: Database, clock: Clock, invRe
     { name: 'admin-reauth-expired', when: 'daily', run: () => new AdminAccountStoreForMaintenance(database, clock).purgeReauths(clock.now() - ADMIN_REAUTH_KEEP_MS) },
     // 닫힌 이의 제기·소명 계류 행은 30일 [가정] 뒤 지운다(docs/data.md account_hold, BOT-042)
     { name: 'account-hold-closed', when: 'daily', run: () => sessions.transaction((tx) => tx.purgeClosedHolds(clock.now() - ACCOUNT_HOLD_CLOSED_KEEP_MS)) },
+    // 24시간이 지난 초대와 역할 유효 끝이 지난 배정을 끝내고 이메일·토큰을 파기한다(identity §6.1, BAT-450C, C2-11)
+    { name: 'staff-assignment-expired', when: 'daily', run: () => staff.expireDueAssignments(clock.now()) },
+    // promoter_id가 없는 옛 배정은 identity가 회차 판매자를 갖지 않아 백필할 수 없다. 살아 있는 NULL 행을 끝낸다(C2-10, ADR-0007)
+    { name: 'staff-promoter-missing', when: 'daily', run: () => staff.closeLegacyAssignments() },
     // 라벨 키가 없어 가입 때 쓰지 못한 EMAIL 연락처 가명을 account.email로 채운다(identity §9.1 '조사용 값의 첫 구현', BOT-045)
     ...(invRefs
       ? [

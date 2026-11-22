@@ -260,6 +260,13 @@
       "when": 1795165200000,
       "tag": "0036_staff_invitation_email_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795251600000,
+      "tag": "0037_staff_assignment_expiry",
+      "breakpoints": true
     }
   ]
 }

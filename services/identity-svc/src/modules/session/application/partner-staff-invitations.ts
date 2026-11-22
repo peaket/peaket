@@ -165,7 +165,7 @@ export class PartnerStaffInvitations {
     const limit = i.limit ?? 20;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new PartnerStaffInvitationError('LIMIT');
     await this.#ownerOf(i.eventId, i.tenantId);
-    return this.store.listByEvent({ eventId: i.eventId, ...(i.cursor !== undefined && i.cursor !== '' ? { cursor: i.cursor } : {}), limit });
+    return this.store.listByEvent({ eventId: i.eventId, ...(i.cursor !== undefined && i.cursor !== '' ? { cursor: i.cursor } : {}), limit, nowMs: this.clock.now() });
   }
 
   async revoke(i: { assignmentId: string; tenantId: string }): Promise<void> {

@@ -334,9 +334,9 @@ export interface SessionSignals {
 }
 
 export const STAFF_ASSIGNMENTS = Symbol('identity.StaffAssignments');
-/** 지금 ASSIGNED인 현장 스태프 배정이 있는가(계정 요약, ADR-0235 결정 3). 배정 표를 만드는 단계(BUILD_ORDER GAT-210)가 채운다 */
+/** 지금(nowMs) 역할 창 안의 ASSIGNED 현장 스태프 배정이 있는가(계정 요약, ADR-0235 결정 3, data.md의 OnDuty 식) */
 export interface StaffAssignments {
-  hasAssigned(accountId: string): Promise<boolean>;
+  hasAssigned(accountId: string, nowMs: number): Promise<boolean>;
 }
 /** 배정 표가 생기기 전의 값: 늘 없음 */
 export const noStaffAssignments: StaffAssignments = { hasAssigned: async () => false };

@@ -49,8 +49,11 @@ const recordOf = (a: MemoryStaffAssignmentRow): StaffAssignmentRecord => ({
   ...(a.consentVersion !== undefined ? { consentVersion: a.consentVersion } : {}),
 });
 
-const cursorOf = (validFromMs: number, assignmentId: string): string => Buffer.from(JSON.stringify([validFromMs, assignmentId]), 'utf8').toString('base64url');
-const parseCursor = (raw: string): { validFromMs: number; assignmentId: string } | undefined => {
+/** 읽을 때의 상태: 역할 유효 끝이 지난 ASSIGNED는 정비 전이라도 ENDED로 보인다(C2-11) */
+const statusAt = (status: StaffAssignmentStatus, validUntilMs: number | undefined, nowMs: number): StaffAssignmentStatus =>
+  status === 'ASSIGNED' && (validUntilMs ?? 0) < nowMs ? 'ENDED' : status;
+
+const cursorOf = (validFromMs: number, assignmentId: string): string => Buffer.from(JSON.stringify([validFromMs, assignmentId]), 'utf8').toString('base64url');const parseCursor = (raw: string): { validFromMs: number; assignmentId: string } | undefined => {
   try {
     const v: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
     if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'number' || typeof v[1] !== 'string') return undefined;
@@ -74,8 +77,11 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     return this.accounts.get(accountId)?.status ?? this.accountStatus?.(accountId) ?? null;
   }
 
-  async hasAssigned(accountId: string): Promise<boolean> {
-    for (const a of this.assignments.values()) if (a.accountId === accountId && a.status === 'ASSIGNED') return true;
+  async hasAssigned(accountId: string, nowMs: number): Promise<boolean> {
+    for (const a of this.assignments.values()) {
+      if (a.accountId !== accountId || a.status !== 'ASSIGNED') continue;
+      if ((a.validFromMs ?? 0) <= nowMs && (a.validUntilMs ?? 0) >= nowMs) return true;
+    }
     return false;
   }
 
@@ -129,7 +135,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     return row ? recordOf(row) : null;
   }
 
-  async listByEvent(i: { eventId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }> {
+  async listByEvent(i: { eventId: string; cursor?: string; limit: number; nowMs: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }> {
     const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
     const all = [...this.assignments.values()]
       .filter((a) => a.eventId === i.eventId)
@@ -145,7 +151,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
           eventId: a.eventId ?? '',
           ...(nickname !== undefined ? { nickname } : {}),
           role: a.role ?? 'gate_staff',
-          status: a.status,
+          status: statusAt(a.status, a.validUntilMs, i.nowMs),
           inviteExpiresAt: new Date(a.inviteExpiresAtMs ?? 0).toISOString(),
           validFrom: new Date(a.validFromMs ?? 0).toISOString(),
           validUntil: new Date(a.validUntilMs ?? 0).toISOString(),
@@ -189,7 +195,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
 
   async acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult> {
     const row = [...this.assignments.values()].find((a) => a.inviteTokenHash === i.tokenHash);
-    if (!row || row.status !== 'INVITED' || (row.inviteExpiresAtMs ?? 0) <= i.nowMs) return { result: 'INVITATION_INVALID' };
+    if (!row || row.status !== 'INVITED' || (row.inviteExpiresAtMs ?? 0) <= i.nowMs || (row.validUntilMs ?? 0) < i.nowMs) return { result: 'INVITATION_INVALID' };
     if (row.inviteEmail === undefined || row.inviteEmail.toLowerCase() !== i.email.toLowerCase()) return { result: 'EMAIL_MISMATCH' };
     for (const a of this.assignments.values()) {
       if (a.id !== row.id && a.eventId === row.eventId && a.accountId === i.accountId && a.status === 'ASSIGNED') return { result: 'ASSIGNMENT_EXISTS' };
@@ -215,7 +221,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     }
   }
 
-  async listSelf(i: { accountId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }> {
+  async listSelf(i: { accountId: string; cursor?: string; limit: number; nowMs: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }> {
     const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
     const all = [...this.assignments.values()]
       .filter((a) => a.accountId === i.accountId && (a.status === 'ASSIGNED' || a.status === 'ENDED' || a.status === 'REVOKED'))
@@ -228,7 +234,7 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
         assignmentId: a.id,
         eventId: a.eventId ?? '',
         role: a.role ?? 'gate_staff',
-        status: a.status as 'ASSIGNED' | 'REVOKED' | 'ENDED',
+        status: statusAt(a.status, a.validUntilMs, i.nowMs) as 'ASSIGNED' | 'REVOKED' | 'ENDED',
         validFrom: new Date(a.validFromMs ?? 0).toISOString(),
         validUntil: new Date(a.validUntilMs ?? 0).toISOString(),
         activeScannerDeviceName: null,
@@ -242,6 +248,37 @@ export class MemoryStaffAssignmentStore implements StaffAssignmentStore {
     return [...this.assignments.values()]
       .filter((a) => a.accountId === i.accountId && a.status === 'ASSIGNED')
       .map(recordOf);
+  }
+
+  async expireDueAssignments(nowMs: number): Promise<{ invitations: number; assignments: number }> {
+    let invitations = 0;
+    let assignments = 0;
+    for (const [id, a] of this.assignments) {
+      if (a.status === 'INVITED' && ((a.inviteExpiresAtMs ?? 0) <= nowMs || (a.validUntilMs ?? 0) < nowMs)) {
+        this.assignments.set(id, { ...a, status: 'EXPIRED', inviteEmail: undefined, inviteTokenHash: undefined });
+        invitations++;
+      } else if (a.status === 'ASSIGNED' && (a.validUntilMs ?? 0) < nowMs) {
+        this.assignments.set(id, { ...a, status: 'ENDED', inviteEmail: undefined, inviteTokenHash: undefined });
+        assignments++;
+      }
+    }
+    return { invitations, assignments };
+  }
+
+  async closeLegacyAssignments(): Promise<{ invitations: number; assignments: number }> {
+    let invitations = 0;
+    let assignments = 0;
+    for (const [id, a] of this.assignments) {
+      if (a.promoterId !== undefined && a.promoterId !== '') continue;
+      if (a.status === 'INVITED') {
+        this.assignments.set(id, { ...a, status: 'EXPIRED', inviteEmail: undefined, inviteTokenHash: undefined });
+        invitations++;
+      } else if (a.status === 'ASSIGNED') {
+        this.assignments.set(id, { ...a, status: 'ENDED', inviteEmail: undefined, inviteTokenHash: undefined });
+        assignments++;
+      }
+    }
+    return { invitations, assignments };
   }
 
   async createScannerSession(i: {

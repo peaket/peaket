@@ -176,7 +176,8 @@ export interface RevokeAssignmentResult {
 
 /** 배정·세션 저장소. 계정 요약의 hasStaffAssignment도 같은 저장소를 쓴다 */
 export interface StaffAssignmentStore {
-  hasAssigned(accountId: string): Promise<boolean>;
+  /** 지금(nowMs) 역할 창 안의 ASSIGNED가 있는가(OnDuty, data.md). 미래·지난·취소 배정은 세지 않는다 */
+  hasAssigned(accountId: string, nowMs: number): Promise<boolean>;
   findScannerSession(scannerSessionId: string): Promise<ScannerSessionRecord | null>;
   /** 초대 토큰 SHA-256(hex)으로 배정 찾기 */
   findInvitationByTokenHash(tokenHash: string): Promise<StaffAssignmentRecord | null>;
@@ -186,8 +187,8 @@ export interface StaffAssignmentStore {
   createInvitations(rows: readonly NewStaffInvitationRow[]): Promise<CreateStaffInvitationsResult>;
   /** 배정 ID로 찾기(파트너 명단·해제·재발송) */
   findAssignmentById(assignmentId: string): Promise<StaffAssignmentRecord | null>;
-  /** 회차의 배정 목록(파트너 명단). 이메일·계정 ID 없이 닉네임·역할·상태·시간만 */
-  listByEvent(i: { eventId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }>;
+  /** 회차의 배정 목록(파트너 명단). 이메일·계정 ID 없이 닉네임·역할·상태·시간만. 지난 ASSIGNED는 nowMs 기준 ENDED로 보인다 */
+  listByEvent(i: { eventId: string; cursor?: string; limit: number; nowMs: number }): Promise<{ items: StaffAssignmentPartnerView[]; nextCursor?: string }>;
   /** 배정을 REVOKED로 끝내고 초대 이메일·토큰을 지우며 살아 있는 스캐너 세션을 종료한다(control.sessions-terminated) */
   revokeAssignment(i: { assignmentId: string; nowMs: number }): Promise<RevokeAssignmentResult>;
   /** INVITED 배정의 토큰 해시·만료·이메일을 새 값으로 바꾼다. 이미 수락·종료면 ALREADY_ACCEPTED */
@@ -196,14 +197,18 @@ export interface StaffAssignmentStore {
   accountEmailOf(accountId: string): Promise<{ email?: string; verified: boolean }>;
   /** 계정 상태. 없으면 null. 스캐너 세션 확인이 ACTIVE가 아닌 계정을 거절한다 */
   accountStatusOf(accountId: string): Promise<'ACTIVE' | 'WITHDRAWAL_PENDING' | 'MERGED' | 'DELETED' | null>;
-  /** 초대를 수락해 ASSIGNED로 바꾼다. 만료·사용됨·이메일 불일치·중복 배정을 구분한다 */
+  /** 초대를 수락해 ASSIGNED로 바꾼다. 만료·사용됨·역할 유효 끝 지남·이메일 불일치·중복 배정을 구분한다 */
   acceptInvitation(i: { tokenHash: string; accountId: string; email: string; consentVersion: string; nowMs: number }): Promise<AcceptInvitationResult>;
   /** 초대를 거절해 EXPIRED로 끝낸다. 같은 토큰을 다시 보내도 결과가 같다 */
   rejectInvitation(i: { tokenHash: string; nowMs: number }): Promise<void>;
-  /** 내 배정 목록(ASSIGNED·ENDED·REVOKED만). 유효 시작이 늦은 순 */
-  listSelf(i: { accountId: string; cursor?: string; limit: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }>;
+  /** 내 배정 목록(ASSIGNED·ENDED·REVOKED만). 유효 시작이 늦은 순. 지난 ASSIGNED는 nowMs 기준 ENDED로 보인다 */
+  listSelf(i: { accountId: string; cursor?: string; limit: number; nowMs: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }>;
   /** 계정의 ASSIGNED 배정(역할 유효 시간 밖도 포함). 기기 승인 화면·승인 판정이 시간 창을 따로 본다 */
   listAssignedByAccount(i: { accountId: string; nowMs: number }): Promise<StaffAssignmentRecord[]>;
+  /** 만료된 INVITED(24시간 또는 역할 유효 끝)와 지난 ASSIGNED를 끝내고 이메일·토큰을 파기한다(하루 한 번, 멱등) */
+  expireDueAssignments(nowMs: number): Promise<{ invitations: number; assignments: number }>;
+  /** promoter_id가 없는 옛 INVITED·ASSIGNED를 끝낸다(C2-10). identity는 회차 판매자를 갖지 않아 백필할 수 없다 */
+  closeLegacyAssignments(): Promise<{ invitations: number; assignments: number }>;
   /** 기기 승인으로 스캐너 세션을 만든다. 같은 기기·같은 계정의 이전 활성 세션을 먼저 끝낸다(교대) */
   createScannerSession(i: {
     scannerSessionId: string;

@@ -393,7 +393,7 @@ erDiagram
         uuid id PK
         uuid account_id "수락한 PEAKET 계정, UNIQUE(event_id, account_id)"
         uuid event_id "회차"
-        uuid promoter_id "배정 파트너(promoter). 기기 승인 때 기기의 배정 파트너와 대조한다(I-T22, GAT-220). 파트너 초대 생성이 채운다"
+        uuid promoter_id "배정 파트너(promoter). 기기 승인 때 기기의 배정 파트너와 대조한다(I-T22, GAT-220). 파트너 초대 생성이 core 판매 설정의 값으로 채운다. 0032 이전의 NULL 행은 백필하지 않고 정비 staff-promoter-missing이 끝낸다(BAT-450C, C2-10)"
         text role "gate_staff|gate_lead"
         text invite_email "수락·해제·만료 시 파기"
         bytea invite_token_hash "32바이트 난수의 SHA-256, 재발송은 새 해시로 교체(ADR-0051·0353)"
@@ -401,7 +401,7 @@ erDiagram
         uuid invited_by "파트너 관리 계정"
         timestamptz valid_from "입장 시작 3시간 전"
         timestamptz valid_until "공연 종료(event.ends_at) 2시간 뒤"
-        text status "INVITED|ASSIGNED|REVOKED|ENDED|EXPIRED. docs/planning/03 §2.7의 OnDuty는 저장하지 않고 ASSIGNED이면서 지금이 valid_from과 valid_until 사이인 것으로 계산한다(추천 적용 2026-10-20, ADR-0073)"
+        text status "INVITED|ASSIGNED|REVOKED|ENDED|EXPIRED. docs/planning/03 §2.7의 OnDuty는 저장하지 않고 ASSIGNED이면서 지금이 valid_from과 valid_until 사이인 것으로 계산한다(추천 적용 2026-10-20, ADR-0073). 24시간이나 역할 유효 끝이 지난 INVITED는 정비 staff-assignment-expired가 EXPIRED로, 지난 ASSIGNED는 ENDED로 끝낸다(BAT-450C, C2-11)"
         timestamptz accepted_at "초대 수락 시각. 수집·이용 동의와 파트너 제공 동의(SCR-050 ③·④)를 받은 일시다"
         text consent_version "두 동의에 보인 고지 문안의 판. 배정 원장과 같이 회차 종료 1년 뒤 파기(ADR-0089)"
     }
@@ -420,6 +420,7 @@ erDiagram
 ```
 
 - **초대 중복 인덱스(2026-11-22 BAT-450B, ADR-0353)**: 같은 회차·같은 이메일(대소문자 무시)의 아직 수락하지 않은 초대는 하나만 둔다. 부분 유일 인덱스 `staff_assignment_event_invite_email_key (event_id, lower(invite_email)) WHERE status = 'INVITED' AND invite_email IS NOT NULL`(마이그레이션 0036)가 DB에서 막고, 서비스도 보내기 전에 422로 거른다. 수락하면 이메일·토큰을 지우므로 같은 이메일을 새로 초대할 수 있다.
+- **배정 만료 정비와 `promoter_id` 정본화(2026-11-22 BAT-450C, C2-10·C2-11)**: 정비 일 `staff-assignment-expired`가 하루 한 번 `INVITED` 가운데 `invite_expires_at <= now`이거나 `valid_until < now`인 행을 `EXPIRED`로 끝내고 `invite_email`·`invite_token_hash`를 NULL로 만든다. `ASSIGNED` 가운데 `valid_until < now`인 행은 `ENDED`로 끝내며 남은 이메일·토큰도 지운다(옛 데이터 백스톱). 정비는 멱등이고 두 번째 실행은 0건이다. 부분 인덱스 `staff_assignment_invite_expiry_idx (invite_expires_at) WHERE status = 'INVITED'`와 `staff_assignment_assigned_valid_until_idx (valid_until) WHERE status = 'ASSIGNED'`(0037)를 쓴다. `promoter_id`는 백필하지 않는다. identity는 회차 판매자를 자기 DB에 갖지 않고(ADR-0007), 0032 이전 NULL 행의 판매자를 다시 계산할 길이 없다. 살아 있는 NULL 행은 기기 승인에서 원인 모를 `OTHER_PARTNER_DEVICE`만 만들므로 정비 `staff-promoter-missing`이 `INVITED`→`EXPIRED`(이메일·토큰 파기)·`ASSIGNED`→`ENDED`로 끝낸다. 새 초대는 core 판매 설정의 `promoterId`를 반드시 싣는다.
 
 **② 공연·회차·좌석 배치와 판매자**
 

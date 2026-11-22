@@ -66,7 +66,7 @@ export class StaffInvitations {
 
   async lookup(inviteToken: string): Promise<StaffInvitationView> {
     const a = await this.store.findInvitationByTokenHash(tokenHash(inviteToken));
-    if (!a || a.status !== 'INVITED' || a.inviteExpiresAtMs <= this.clock.now()) throw new StaffInvitationError('INVITATION_INVALID');
+    if (!a || a.status !== 'INVITED' || a.inviteExpiresAtMs <= this.clock.now() || a.validUntilMs < this.clock.now()) throw new StaffInvitationError('INVITATION_INVALID');
     return {
       role: a.role,
       validFrom: new Date(a.validFromMs).toISOString(),
@@ -78,7 +78,7 @@ export class StaffInvitations {
 
   async accept(i: { inviteToken: string; accountId: string; consentCollection?: boolean; consentProvision?: boolean; consentVersion?: string }): Promise<StaffAssignmentView> {
     const invitation = await this.store.findInvitationByTokenHash(tokenHash(i.inviteToken));
-    if (!invitation || invitation.status !== 'INVITED' || invitation.inviteExpiresAtMs <= this.clock.now()) throw new StaffInvitationError('INVITATION_INVALID');
+    if (!invitation || invitation.status !== 'INVITED' || invitation.inviteExpiresAtMs <= this.clock.now() || invitation.validUntilMs < this.clock.now()) throw new StaffInvitationError('INVITATION_INVALID');
     if (!invitation.inviteEmail) throw new StaffInvitationError('EMAIL_MISMATCH');
     const me = await this.store.accountEmailOf(i.accountId);
     if (!me.verified || !me.email) throw new StaffInvitationError('EMAIL_MISMATCH');
@@ -114,6 +114,6 @@ export class StaffInvitations {
   async listSelf(i: { accountId: string; cursor?: string; limit?: number }): Promise<{ items: StaffAssignmentSelfView[]; nextCursor?: string }> {
     const limit = i.limit === undefined ? 20 : i.limit;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new StaffInvitationError('LIMIT');
-    return this.store.listSelf({ accountId: i.accountId, ...(i.cursor !== undefined && i.cursor !== '' ? { cursor: i.cursor } : {}), limit });
+    return this.store.listSelf({ accountId: i.accountId, ...(i.cursor !== undefined && i.cursor !== '' ? { cursor: i.cursor } : {}), limit, nowMs: this.clock.now() });
   }
 }

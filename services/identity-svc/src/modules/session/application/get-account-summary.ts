@@ -41,7 +41,7 @@ export class GetAccountSummary {
 
   /** 세션 확인을 이미 한 쪽(가입 마무리)이 새 요약을 만든다 */
   async of(accountId: string): Promise<FanAccountSummaryView> {
-    const [state, claims, staff] = await Promise.all([this.store.signupStateOf(accountId), this.claims.of(accountId), this.staff.hasAssigned(accountId)]);
+    const [state, claims, staff] = await Promise.all([this.store.signupStateOf(accountId), this.claims.of(accountId), this.staff.hasAssigned(accountId, this.clock.now())]);
     return {
       nickname: state?.nickname ?? null,
       signupCompleted: state ? signupCompleted(state.ageVerified, state.consentKinds) : false,
